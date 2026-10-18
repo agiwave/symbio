@@ -70,14 +70,15 @@ impl SessionPlugin {
     ) {
         let err = error.into();
         crate::plugin_error!("session", "{}", &err);
-        self.persist_failure(
-            session_id,
-            collected,
-            &err,
-            cm::NodeStatus::Failed,
-            Vec::new(),
-        )
-        .await;
+        self.convergence
+            .persist_failure(
+                session_id,
+                collected,
+                &err,
+                cm::NodeStatus::Failed,
+                Vec::new(),
+            )
+            .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
         stop.fire(&[]).await;
         self.convergence.broadcast_error_with_idle(state, err).await;
@@ -106,14 +107,15 @@ impl SessionPlugin {
         abort_guard: &mut AbortGuard,
         error: String,
     ) {
-        self.persist_failure(
-            session_id,
-            collected,
-            &error,
-            cm::NodeStatus::Failed,
-            Vec::new(),
-        )
-        .await;
+        self.convergence
+            .persist_failure(
+                session_id,
+                collected,
+                &error,
+                cm::NodeStatus::Failed,
+                Vec::new(),
+            )
+            .await;
         self.convergence
             .broadcast_error_with_idle(state, error)
             .await;
@@ -158,7 +160,7 @@ impl SessionPlugin {
         // 正常结束路径会在收尾前把 `done` 置 true（见块末尾）。
         let mut guard = WorkingGuard {
             state: state.clone(),
-            plugin: self.clone(),
+            convergence: self.convergence.clone(),
             collected: transcript.clone(),
             session_id: session_id.clone(),
             stop: stop.clone(),
@@ -373,14 +375,15 @@ impl SessionPlugin {
                         // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
                         // 它们是事实，随 `persist_failure` 收尾入格——
                         // 用户中断后重建的历史里那半句话还在。
-                        self.persist_failure(
-                            &session_id,
-                            &transcript,
-                            "用户手动中止了本次回复",
-                            cm::NodeStatus::Aborted,
-                            partial,
-                        )
-                        .await;
+                        self.convergence
+                            .persist_failure(
+                                &session_id,
+                                &transcript,
+                                "用户手动中止了本次回复",
+                                cm::NodeStatus::Aborted,
+                                partial,
+                            )
+                            .await;
                         exit_state = SessionStateChange::aborted();
                     }
                     e => {
@@ -537,6 +540,7 @@ impl SessionPlugin {
         // 无论 chat_loop 是否已收口，这里都跑一次：正常收口路径（Turn 任务的
         // ABORTED 分支）已把节点定稿，本调用因此是幂等的空操作。
         let converged = self
+            .convergence
             .converge_inflight(state, &state.request_id_str(), "用户中止")
             .await;
 

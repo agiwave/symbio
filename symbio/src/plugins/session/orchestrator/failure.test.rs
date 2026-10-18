@@ -181,7 +181,10 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     )
     .await;
 
-    let converged = p.converge_inflight(&state, sid, "用户中止").await;
+    let converged = p
+        .convergence
+        .converge_inflight(&state, sid, "用户中止")
+        .await;
     assert_eq!(converged, 1, "在途侧 1 条（孤儿被丢弃；存储侧无在途节点）");
 
     let after = chat.get_messages().await.unwrap();
@@ -239,7 +242,9 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     )
     .await;
 
-    p.converge_inflight(&state, sid, "用户中止").await;
+    p.convergence
+        .converge_inflight(&state, sid, "用户中止")
+        .await;
 
     let chat = p.open_chat_session(sid).await.unwrap();
     let after = chat.get_messages().await.unwrap();
@@ -305,14 +310,15 @@ async fn persist_failure_merges_partial_output() {
     let reason = reason.with_style_tag(cm::CHAT_STYLE_TAG_REASONING);
     let orphan = node("orphan-p", Some("ghost-parent"), cm::NodeStatus::Completed);
 
-    p.persist_failure(
-        sid,
-        &transcript,
-        "用户手动中止了本次回复",
-        cm::NodeStatus::Aborted,
-        vec![full_half, reason, orphan],
-    )
-    .await;
+    p.convergence
+        .persist_failure(
+            sid,
+            &transcript,
+            "用户手动中止了本次回复",
+            cm::NodeStatus::Aborted,
+            vec![full_half, reason, orphan],
+        )
+        .await;
 
     let after = p
         .open_chat_session(sid)
@@ -354,9 +360,16 @@ async fn converge_inflight_is_idempotent() {
         VdfsChangeSubscriptions::default(),
     ));
     push_inflight(&state, node("turn", None, cm::NodeStatus::Streaming)).await;
-    assert_eq!(p.converge_inflight(&state, sid, "用户中止").await, 1);
     assert_eq!(
-        p.converge_inflight(&state, sid, "用户中止").await,
+        p.convergence
+            .converge_inflight(&state, sid, "用户中止")
+            .await,
+        1
+    );
+    assert_eq!(
+        p.convergence
+            .converge_inflight(&state, sid, "用户中止")
+            .await,
         0,
         "第二次必须是空操作：否则每次中止都会对同一批节点重复广播"
     );

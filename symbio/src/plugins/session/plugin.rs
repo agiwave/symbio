@@ -236,11 +236,12 @@ impl SessionPlugin {
         let active_mgr = Arc::new(super::active::ActiveSessionManager::new(
             change_subs.as_ref().clone(),
         ));
+        let config = Arc::new(RwLock::new(config));
         Self {
-            config: Arc::new(RwLock::new(config)),
+            config: config.clone(),
             config_file,
             parent,
-            convergence: Convergence::new(store, store_dir, active_mgr.clone()),
+            convergence: Convergence::new(store, store_dir, config, active_mgr.clone()),
             active_mgr,
             workdir_watches,
             change_subs,
@@ -441,12 +442,7 @@ impl SessionPlugin {
         &self,
         session_id: &str,
     ) -> Result<Arc<PersistentChatSession>, PluginError> {
-        let store = self.get_store().await?;
-        Ok(Arc::new(super::chat_session::PersistentChatSession::new(
-            session_id.to_string(),
-            self.config.clone(),
-            store,
-        )))
+        self.convergence.open_chat_session(session_id).await
     }
 
     // ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================

@@ -5,7 +5,8 @@
 //! - `subtree_of`：计算 `root` 的传递闭包子树，供上面的作用域判定使用。
 //!
 //! 可见性：`persist_failure` 被 `consume.rs` 的 `fail_before_loop` 与根文件的
-//! `WorkingGuard::drop` 调用，故标 `pub(super)`。
+//! `WorkingGuard::drop` 调用，故标 `pub(super)`。两者都住在 [`Convergence`]（收敛手柄）上
+//! 而不是 `SessionPlugin` 上——守卫活在后台任务里，它不该钉住整个插件。
 
 use super::*;
 
@@ -45,7 +46,7 @@ pub(super) fn abort_terminal_of(m: &cm::ChatNode) -> cm::NodeStatus {
     }
 }
 
-impl SessionPlugin {
+impl Convergence {
     /// 把"仍在进行中"的 AI 响应消息持久化为 `Failed` + 错误原因。
     ///
     /// ## 触发场景

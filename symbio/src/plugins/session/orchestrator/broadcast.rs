@@ -73,15 +73,15 @@ impl SessionStateChange {
     }
 }
 
-/// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那三样。
+/// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
 ///
 /// ## 为什么是手柄而不是插件（[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）
 ///
 /// 收敛这件事有两个写在**后台任务**里的调用方：执行期出口的告警
 /// （`TranscriptSink::warn`）与崩溃兜底（`WorkingGuard::drop`）。任务比插件活得久
-/// 是卸载路径上的常态——它们要的就是「取会话摘要（存储）+ 取运行态（名册）+ 写进
-/// 这一份会话状态并发一帧」，把整个插件背进来既多于所需，又把 provider 注册、
-/// 路由与订阅表一起钉住。
+/// 是卸载路径上的常态——它们要的就是「打开会话（存储 + 配置）+ 取会话摘要（存储）+
+/// 取运行态（名册）+ 写进这一份会话状态并发一帧」，把整个插件背进来既多于所需，
+/// 又把 provider 注册、路由与订阅表一起钉住。
 ///
 /// `store` 是**同一个** `OnceCell`（不是解析好的 store）：存储的懒初始化只有一条路，
 /// 由 [`super::super::store::resolve_store`] 承载，插件与手柄共用这一个格子。
@@ -89,6 +89,7 @@ impl SessionStateChange {
 pub(crate) struct Convergence {
     store: Arc<tokio::sync::OnceCell<Arc<super::super::store::SessionStore>>>,
     dir: std::path::PathBuf,
+    config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
     active: Arc<super::super::active::ActiveSessionManager>,
 }
 
@@ -96,15 +97,37 @@ impl Convergence {
     pub(crate) fn new(
         store: Arc<tokio::sync::OnceCell<Arc<super::super::store::SessionStore>>>,
         dir: std::path::PathBuf,
+        config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
         active: Arc<super::super::active::ActiveSessionManager>,
     ) -> Self {
-        Self { store, dir, active }
+        Self {
+            store,
+            dir,
+            config,
+            active,
+        }
     }
 
     pub(crate) async fn get_store(
         &self,
     ) -> Result<Arc<super::super::store::SessionStore>, PluginError> {
         super::super::store::resolve_store(&self.store, &self.dir).await
+    }
+
+    /// 打开会话引擎（存储 + 配置 + id）——`SessionPlugin::open_chat_session` 的实现就在这里，
+    /// 那里只是门面。
+    pub(crate) async fn open_chat_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<super::super::chat_session::PersistentChatSession>, PluginError> {
+        let store = self.get_store().await?;
+        Ok(Arc::new(
+            super::super::chat_session::PersistentChatSession::new(
+                session_id.to_string(),
+                self.config.clone(),
+                store,
+            ),
+        ))
     }
 
     /// 集中收敛"业务错误 + 状态收敛"：收敛为「失败」结局。

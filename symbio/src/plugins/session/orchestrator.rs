@@ -154,7 +154,7 @@ impl Drop for AbortGuard {
 ///   3. 广播 idle，使前端 UI 状态收敛。
 struct WorkingGuard {
     state: Arc<ActiveSessionState>,
-    plugin: Arc<SessionPlugin>,
+    convergence: Convergence,
     collected: Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
     /// 真实会话 id：`persist_failure` 需要它来定位并写入存储。
     /// 注意：绝不能传 `request_id` 的字符串——那是请求序号（如 "42"），
@@ -181,7 +181,7 @@ impl Drop for WorkingGuard {
         }
         // panic / 异常退出路径：尽力重置状态并持久化失败，避免前端永久卡死。
         let state = self.state.clone();
-        let plugin = self.plugin.clone();
+        let convergence = self.convergence.clone();
         let collected = self.collected.clone();
         let session_id = self.session_id.clone();
         let crash_msg = "会话处理异常中断（后台任务崩溃），请重试".to_string();
@@ -196,7 +196,7 @@ impl Drop for WorkingGuard {
                 state.reset_working().await;
                 // 把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因
                 // （切回会话时能看到上次失败的终态，目标 3）。
-                plugin
+                convergence
                     .persist_failure(
                         &session_id,
                         &collected,
@@ -212,8 +212,7 @@ impl Drop for WorkingGuard {
                 // 这也就是「崩溃后 UI 立即看到错误」的全部机制（没有第二条 Error 事件）。
                 // 与消费循环的失败支路同一个出口（`broadcast_error_with_idle`），
                 // 不在这里手写一份 `Finished { outcome: failed }`。
-                plugin
-                    .convergence
+                convergence
                     .broadcast_error_with_idle(&state, crash_msg)
                     .await;
             });
