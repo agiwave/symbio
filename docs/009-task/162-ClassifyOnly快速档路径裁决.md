@@ -5,7 +5,7 @@ title: 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用—
 status: todo
 created: 2026-10-17
 track: plan
-prio: next
+prio: later
 parent: T-156-架构机制化与旧代码清理批
 where: symbio/src/symbio_core/adapters/mod.rs · symbio/src/plugins/classify/ · symbio/src/plugins/session/v2_exec.rs
 exit: `ClassifyOnly` 令牌有生产调用路径（classify 走令牌闸门）**或**显式退役（成文 ADR 说明为什么快速档不做成令牌闸门、classify 插件为何是正确落点）；两种结论都必须让「快速档不得生成」这条约束有强制力，而不是靠 classify 插件「结构上不注册 Capability」这个巧合；cargo test + clippy + 门禁全绿
@@ -49,3 +49,36 @@ F3 冻结锚点里的两个机制（`pattern` 三模式、四档令牌）都**�
 - **不要两边都留一半**：既不接线也不退役 = 现状，正是本条要消除的。
 - 走 A 时注意：`CanClassify` / `CanGenerate` 今天是 `#[cfg(test)]`，升为生产项会**变宽 core**
   （CS-001 的 defaults/methods 格），须走 CS-002（`core-shape-allow` + 存在的 ADR）。
+
+## 勘察结论（2026-10-19，暂缓）
+
+**暂缓的理由**：本条与 [PL-014-单环一表收敛](../004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+的六个步骤**无依赖关系**（全仓 `grep T-162` 只命中父批与本看板），而两条出路的代价都落在
+**冻结锚点 F3** 上。改架构要先定语义，不是先改文档——故本条停在「事实已核清、语义待定」。
+
+核出的三条事实（下一轮从这里开始，不要重做）：
+
+1. **那个端口从来没被建过**。`PL-005 §3.3` 的注入表写着快速档「注入的依赖 = `Classifier`」，
+   而全仓 `grep Classifier` 在 `plugins/classify/` 之外**零命中**。`ClassifyOnly` 成孤儿，
+   不是它没用，是它要守的端口不存在。`classify/decide.rs` 直接调 `ModelProvider::execute_turn`
+   拿原始文本、自己 `parse_verdict`。
+2. **文档里混着两个不同的快速档**，`ClassifyOnly` 只对其中一个成立：
+
+   | | (i) 纯规则分类器 | (ii) 一次受限的模型调用 |
+   |---|---|---|
+   | 出处 | `verify/latency_gate.rs` 的 `Classifier`（`text.contains("？")`） | [PL-001 §10](../004-plan/001-核心架构.md "PL-001-核心架构") 的表：允许模型 = **是** |
+   | 要不要令牌 | 不需要（不碰模型，`RuleOnly` 够） | 需要（允许调模型、不许长输出） |
+   | 今天实现 | — | 就是这条 |
+
+   所以这不是「架构设计不合理」，是**两句话各指一个快速档，而实现只落地了其中一半**。
+3. **「不允许生成」这句措辞站不住**：若指「模型不产生 token」，那是 `max_tokens` 参数；
+   若指「输出空间受限」，那要由端口的**返回类型**强制。三件事被压成了一句话。
+
+**顺带核出一个比本条更大的缺口**（应单独成条，不塞进这里）：闸门只装在包装层 `LlmAdapter` 上，
+而底层 `ModelProvider` 是对所有插件开放的核心 trait——`classify/decide.rs`、`compose/wording.rs`、
+`session` 都直接持 `Arc<dyn ModelProvider>`。令牌闸门今天保证的是「经 `LlmAdapter` 的那条路受约束」，
+**不是**「所有调模型的路受档位约束」。
+
+**下一步（定语义再动代码）**：先裁决快速档是 (i) 还是 (ii)。若 (ii)，则补 `Classifier` 端口
+（收 `&ClassifyOnly`、形参无 `tools`、`max_tokens` 取档案表的小值）——不带工具由类型强制、
+不长输出由参数强制、只认四选一由解析强制，三件事各归其位，F3 不动。
