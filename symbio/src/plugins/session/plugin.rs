@@ -97,7 +97,7 @@ use super::store::SessionStore;
 /// | 通道 | 用在哪 | 落点 |
 /// |---|---|---|
 /// | [`Self::Sink`] | 执行期（chat_loop 主循环） | `ExecEventSink`（生产形态 `TranscriptSink` → `Transcript::apply`） |
-/// | [`Self::Transcript`] | 编排入口与压缩域 | [`SessionPlugin::transcript_apply`]（按会话 id 现场解析） |
+/// | [`Self::Transcript`] | 编排入口与压缩域 | [`super::active::ActiveSessionManager::transcript_apply`]（按会话 id 现场解析） |
 ///
 /// 两条通道的差别只在**怎么拿到转写**；帧的构造与逐条下发都在
 /// [`append_and_publish`] 里，不允许在调用点再写一份。
@@ -106,7 +106,7 @@ pub(crate) enum PublishTarget<'a> {
     Sink(&'a ExecEventSink),
     /// 插件出口：按会话 id 解析转写后逐条应用。
     Transcript {
-        plugin: &'a SessionPlugin,
+        mgr: &'a super::active::ActiveSessionManager,
         session_id: &'a str,
     },
 }
@@ -115,9 +115,8 @@ impl PublishTarget<'_> {
     async fn publish(&self, message: cm::ChatNode) {
         match self {
             Self::Sink(sink) => sink.emit(message).await,
-            Self::Transcript { plugin, session_id } => {
-                plugin
-                    .transcript_apply(session_id, crate::symbio_core::llm_message_frame(&message))
+            Self::Transcript { mgr, session_id } => {
+                mgr.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&message))
                     .await
             }
         }
@@ -289,10 +288,9 @@ impl SessionPlugin {
 
     // ==================== 转写发布（消息变更的唯一出口）====================
     //
-    // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的
-    // 终态收敛）都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在
-    // 同一个函数里完成。VDFS 转写列表的在途叠加读的是同一份内存图，
-    // 「存储一份 + 在途一份」两种表示从此同源。
+    // 三个发布函数（一条 / 一批 / 整表重写）现在住在**活跃会话名册**上——
+    // 按会话 id 解析到它的那份 `Transcript` 只需要那张表（见
+    // [`super::active::ActiveSessionManager::transcript_apply`]）。
     //
     // 运行中的轮次另有唯一的常规写入者：消费循环（`orchestrator::consume`）把
     // 通道上的消息喂给同一个 `Transcript`——上游有多少个发射点都无所谓，
@@ -300,45 +298,6 @@ impl SessionPlugin {
     //
     // 落库之后的**回包**（权威 `seq` 换入）另有唯一出口：模块级 `append_and_publish`，
     // 三条落库路径（主循环增量 / 用户发言 / 压缩节点）都经它逐条下发权威副本。
-
-    /// 向会话转写发布一条消息帧（唯一出口）。
-    pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatNode) {
-        let state = self.active_mgr.get_or_create(session_id).await;
-        state.transcript.lock().await.apply(message);
-    }
-
-    /// 向会话转写发布一批消息帧（同一把锁内顺序应用，保持发布顺序）。
-    pub(crate) async fn transcript_apply_all(&self, session_id: &str, messages: Vec<cm::ChatNode>) {
-        let state = self.active_mgr.get_or_create(session_id).await;
-        let mut tr = state.transcript.lock().await;
-        for message in messages {
-            tr.apply(message);
-        }
-    }
-
-    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条删除帧，
-    /// 新的首条快照作为一条**完整消息**下发（`content` = 整条替换）。
-    ///
-    /// 逐条删除帧是元数据（id + 状态，每条几十字节），条数受上下文窗口上界
-    /// 约束——比「清空 + 整份重读」便宜得多：保留的消息不再重传。协议里也没有
-    /// 「清空重读」这种形态（消费端要重读只有一条路：自己发现序号缺口）。
-    pub(crate) async fn emit_transcript_rewritten(
-        &self,
-        session_id: &str,
-        dropped: &[String],
-        head: &cm::ChatNode,
-    ) {
-        let mut frames: Vec<cm::ChatNode> = dropped
-            .iter()
-            .map(|mid| crate::symbio_core::llm_removed_frame(mid))
-            .collect();
-        // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(crate::symbio_core::llm_message_frame(head));
-        self.transcript_apply_all(session_id, frames).await;
-    }
-
-    // 落库回包的**下发半程**已与落库合并在模块级的 `append_and_publish`：
-    // 「落库 → 逐条下发权威副本」是一个动作，不该由每个落库调用点各写一遍。
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new("session", "会话")

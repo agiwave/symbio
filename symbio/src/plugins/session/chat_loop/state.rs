@@ -447,20 +447,23 @@ impl Drop for StopSignal {
 /// 全部流式帧，以免泄漏一个永不 finalize 的空 Turn 骨架）。但本发射器走
 /// `emit_message_patch` → VDFS 变更订阅，**不经过**那条被静音的 turn channel。
 ///
-/// ## 为什么持有插件而不是「一个回调」
+/// ## 为什么持有名册而不是整个插件
 ///
-/// 发变更需要两样东西：store（取会话摘要）与 `change_subs`（投递），两者都在插件上。
+/// 发射器只做两件事：写本会话的转写（`begin` / `finish` 直接经 `state`，
+/// `emit_rewrite` 按会话 id 解析）与给一条落库回包通道。两者都只需要
+/// **活跃会话名册**那张 `sessions` 表——插件在这里没有别的贡献，
+/// 于是这里拿的就是名册（[`crate::plugins::session::active::ActiveSessionManager`]）。
 pub struct CompressionEmitter {
-    plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+    active: Arc<crate::plugins::session::active::ActiveSessionManager>,
     pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
 impl CompressionEmitter {
     pub fn new(
-        plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+        active: Arc<crate::plugins::session::active::ActiveSessionManager>,
         state: Arc<crate::plugins::session::active::ActiveSessionState>,
     ) -> Self {
-        Self { plugin, state }
+        Self { active, state }
     }
 
     /// 插入「正在压缩」节点：进在途图 + 发布（经 Transcript 唯一入口）。
@@ -542,7 +545,7 @@ impl CompressionEmitter {
     /// **转写列表被重写**这件事——被压掉的消息逐条 Remove，新的首条（快照）
     /// Upsert。没有它，前端会一直显示压缩前的历史。
     pub async fn emit_rewrite(&self, session_id: &str, dropped: &[String], head: &ChatNode) {
-        self.plugin
+        self.active
             .emit_transcript_rewritten(session_id, dropped, head)
             .await;
     }
@@ -577,7 +580,7 @@ impl CompressionEmitter {
     /// 压缩节点跑到对话末尾去。
     pub(crate) fn target<'a>(&'a self, session_id: &'a str) -> PublishTarget<'a> {
         PublishTarget::Transcript {
-            plugin: &self.plugin,
+            mgr: &self.active,
             session_id,
         }
     }

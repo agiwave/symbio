@@ -332,6 +332,53 @@ impl ActiveSessionManager {
         sessions.insert(session_id.to_string(), state.clone());
         state
     }
+
+    // ==================== 转写发布（消息变更的唯一出口）====================
+    //
+    // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的
+    // 终态收敛）都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在
+    // 同一个函数里完成。VDFS 转写列表的在途叠加读的是同一份内存图，
+    // 「存储一份 + 在途一份」两种表示从此同源。
+    //
+    // 这三个函数住在**名册**上而不是插件上，是因为「按会话 id 解析到它的那份转写」
+    // 只需要这张 `sessions` 表——插件在这里没有别的贡献。于是需要发布能力的
+    // 一方（压缩发射器）拿的是名册，不是整个插件。
+
+    /// 向会话转写发布一条消息帧（唯一出口）。
+    pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatNode) {
+        let state = self.get_or_create(session_id).await;
+        state.transcript.lock().await.apply(message);
+    }
+
+    /// 向会话转写发布一批消息帧（同一把锁内顺序应用，保持发布顺序）。
+    pub(crate) async fn transcript_apply_all(&self, session_id: &str, messages: Vec<cm::ChatNode>) {
+        let state = self.get_or_create(session_id).await;
+        let mut tr = state.transcript.lock().await;
+        for message in messages {
+            tr.apply(message);
+        }
+    }
+
+    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条删除帧，
+    /// 新的首条快照作为一条**完整消息**下发（`content` = 整条替换）。
+    ///
+    /// 逐条删除帧是元数据（id + 状态，每条几十字节），条数受上下文窗口上界
+    /// 约束——比「清空 + 整份重读」便宜得多：保留的消息不再重传。协议里也没有
+    /// 「清空重读」这种形态（消费端要重读只有一条路：自己发现序号缺口）。
+    pub(crate) async fn emit_transcript_rewritten(
+        &self,
+        session_id: &str,
+        dropped: &[String],
+        head: &cm::ChatNode,
+    ) {
+        let mut frames: Vec<cm::ChatNode> = dropped
+            .iter()
+            .map(|mid| crate::symbio_core::llm_removed_frame(mid))
+            .collect();
+        // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
+        frames.push(crate::symbio_core::llm_message_frame(head));
+        self.transcript_apply_all(session_id, frames).await;
+    }
 }
 
 #[cfg(test)]

@@ -331,7 +331,9 @@ impl SessionPlugin {
             .await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
-        self.transcript_apply(session_id, updated.clone()).await;
+        self.active_mgr
+            .transcript_apply(session_id, updated.clone())
+            .await;
         Ok(updated)
     }
 
@@ -374,7 +376,9 @@ impl SessionPlugin {
                 .iter()
                 .map(|id| crate::symbio_core::llm_removed_frame(id))
                 .collect();
-            self.transcript_apply_all(session_id, frames).await;
+            self.active_mgr
+                .transcript_apply_all(session_id, frames)
+                .await;
         }
         Ok(deleted_ids)
     }

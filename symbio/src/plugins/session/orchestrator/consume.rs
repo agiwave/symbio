@@ -222,14 +222,17 @@ impl SessionPlugin {
         // 压缩期要能把「正在压缩」作为**会话阶段**下发：压缩发生在 Turn 创建之前，
         // 且出帧被刻意静音，整段窗口内没有任何消息节点可渲染（长上下文时可达数
         // 分钟，用户视角＝卡死），前端只能靠会话节点的 `attributes.phase` 给出等待
-        // 提示。发射器需要插件 + 会话状态：`notify_session_state` 要用 store（取会话
-        // 摘要）与 `change_subs`（投递），两者都在插件上。
+        // 提示。发射器只要活跃会话**名册** + 会话状态：按会话 id 解析到它那份转写，
+        // 需要的就是名册那张 `sessions` 表，插件在这里没有别的贡献。
         let phase = Some(std::sync::Arc::new(
-            super::super::chat_loop::CompressionEmitter::new(self.clone(), state.clone()),
+            super::super::chat_loop::CompressionEmitter::new(
+                self.active_mgr.clone(),
+                state.clone(),
+            ),
         ));
 
         // 轮边界补充整合的落点：抽干队列要读 `active_mgr` 与 `config`，两者都在插件上
-        // ——与 `phase` 同形注入，不新增第二种手法（见 `SupplementDrain` 的文档）。
+        // ——按构造注入，与 `phase` 用的是同一条通道（见 `SupplementDrain` 的文档）。
         let drain = Some(std::sync::Arc::new(
             super::super::chat_loop::SupplementDrain::new(self.clone(), state.clone()),
         ));

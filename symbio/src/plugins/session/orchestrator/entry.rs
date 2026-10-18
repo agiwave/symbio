@@ -347,7 +347,7 @@ impl SessionPlugin {
                     // 于是前端只持有**本地乐观副本**（本地游标发的号），永远拿不到
                     // 存储分配的权威 `seq`——两套序号空间并存正是「排序偶尔错位、
                     // 刷新才恢复」的根源。落库与回包合并在 `append_and_publish` 里，
-                    // 这里只声明「走插件出口、按本会话 id 解析转写」。
+                    // 这里只声明「走名册出口、按本会话 id 解析转写」。
                     // `Carrier::Runner`：用户发言的承载事实 `turn × opened`
                     // （`EVENT_USER_MESSAGE`）由**运行器**落——`v2_exec` 的注释写明了
                     // 这一点。此处再落一条 `message.added` 就是第二个 owner。本处只做
@@ -359,7 +359,7 @@ impl SessionPlugin {
                             vec![msg.clone()],
                             Carrier::Runner,
                             PublishTarget::Transcript {
-                                plugin: &this_spawn,
+                                mgr: &this_spawn.active_mgr,
                                 session_id: &sid_spawn,
                             },
                             // 用户发言的 `principal` 是 `user`（不看会话主体），
