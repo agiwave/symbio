@@ -66,7 +66,14 @@ export async function stopVerified(pid, startTimeUtcTicks, exePath, exitWaitMs =
   ].join('; ');
   const out = await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(code, 'utf16le').toString('base64')],
-  { cwd: process.cwd(), timeoutMs: exitWaitMs + 15000, capture: true });
+  // 外层预算 = **进程启动 + 这段脚本本身的耗时**，与判据无关：判据是脚本里的
+  // `WaitForExit(exitWaitMs)`（它才是"目标必须在 exitWaitMs 内退出"）。原先外层只给
+  // `exitWaitMs + 15s` 余量，而冷全量编译压满机器时，单是 `powershell.exe` 冷启动 +
+  // `Get-Process` + 对 candidate 算一次 SHA256 就可能吃掉十几秒 ⇒ 外层先超时，
+  // 报出来的是「Timeout: no process killed」——看上去像"没杀掉"，其实是"没来得及判"。
+  // 实测两次：并发 3 的实验、以及 rebase 后首次全量（backend 10m58s）。
+  // 余量放宽**不放松任何一条判据**：exitWaitMs 仍然原样传给 WaitForExit。
+  { cwd: process.cwd(), timeoutMs: exitWaitMs + 60000, capture: true });
   requireThat(out.includes('STOPPED'), `Stop failed: ${out.trim() || 'no output'}`);
 }
 
@@ -115,12 +122,101 @@ async function survival(child, seconds, check) {
 }
 
 // Include the launching host even when the short-lived background launcher has already exited.
+//
+// ## 为什么把「祖先链」与「目标身份」合成**一次** PowerShell 调用
+//
+// 两者问的是「同一时刻、同一台机器」的两个事实，分成两次调用只多付一次
+// `powershell.exe` 冷启动——本机实测**每次 1–2.5s**，而本脚本一次换壳要问好几轮。
+// 合并只动**取数方式**，不动判据：`assertIdentity` 的比较逻辑一字未改，
+// `stopVerified` 里「同一个 Process 对象上校验再 Kill」才是权威判据，仍独立执行。
+//
+// 祖先链顺带从「每层一次 `Get-CimInstance -Filter`」改成「一次全表 + 走链」：
+// 原实现 5 层就是 5 次 WMI 过滤查询（实测约 1s），而一次全表查询够回答整条链。
+//
+// `pid` 为空时只取祖先链（`background` 只要这个），此时不发 `Get-Process`——
+// 少一次进程查询，也避免在「还不知道要不要停」的阶段就把目标查活。
+async function probe(pid) {
+  const code = [
+    `$ErrorActionPreference='Stop'`,
+    `$parent=@{}; Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { $parent[[int]$_.ProcessId]=[int]$_.ParentProcessId }`,
+    `$n=${process.pid}; $seen=@{}; $chain=@()`,
+    `while($n -gt 0 -and -not $seen.ContainsKey($n)){ $seen[$n]=$true; $chain+=$n; $n=[int]$parent[$n] }`,
+    ...(pid ? [
+      `$p=Get-Process -Id ${pid} -ErrorAction Stop`,
+      `$identity=@{ pid=$p.Id; exe=$p.Path; startTimeUtcTicks=$p.StartTime.ToUniversalTime().Ticks.ToString() }`,
+    ] : [`$identity=$null`]),
+    `@{ protected=@($chain); identity=$identity } | ConvertTo-Json -Compress -Depth 4`,
+  ].join('; ');
+  const output = await run(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(code, 'utf16le').toString('base64')],
+  // 一次全表 WMI 查询 + 走链 + 一次 `Get-Process`。原先给 20s：空闲时约 1.5–3s，
+  // 但机器被 cargo 压满时实测能吃掉 20s 以上（`Get-CimInstance Win32_Process` 是
+  // 全表枚举，越忙越慢）⇒ 超时后抛的是 `run` 的「Command failed」，与「目标已经没了」
+  // 同形，会把"没读到"说成"不存在"。给它 60s。
+  { cwd: process.cwd(), timeoutMs: 60000, capture: true });
+  const parsed = JSON.parse(output.replace(/^\uFEFF/, '').trim());
+  // PowerShell 5.1 的 `ConvertTo-Json` 会把单元素数组压成标量 ⇒ 两种形态都接。
+  const chain = parsed.protected == null ? [] : [].concat(parsed.protected);
+  return {
+    protected: [...new Set([process.pid, process.ppid, ...chain.map(Number),
+      ...(process.env.SYMBIO_RESTART_PROTECTED_PIDS || '').split(',').map(Number)])].filter(n => n > 0),
+    identity: parsed.identity ?? null,
+  };
+}
+
+const STATUS_SLEEP = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * 把 `payload` 原子地落成 `file`（先写 `.tmp` 再 rename，读者永远看到完整 JSON）。
+ *
+ * 返回 `true` = 落盘成功；`false` = **没落成，但不抛**。
+ *
+ * ## 为什么"写不出去"必须返回 false 而不是抛
+ *
+ * 这是实测出来的，不是防御性编程。Windows 上 `rename` 会因并发读者 / 杀软扫描临时
+ * 文件而偶发 `EPERM`。实测（2026-10-19 门禁 docs 阶段）：回归测试每 100ms 读一次
+ * `status.json`，`phase('pre-switch')` 的 rename 抛 EPERM ⇒ 异常冒进 `restart()` 的
+ * catch，而 catch 里第一件事又是 `phase(...)`，**再抛一次** ⇒ 进程直接崩在 `verifying`。
+ * 后果最难堪：**目标进程还活着、候选没起、status.json 停在半路**，调用方永远等不到
+ * 结论——一次"报告通道写失败"被当成了"换壳失败"。
+ *
+ * 所以：短退避重试（读者 / 扫描通常只持有几毫秒），仍不行就降级为"这一帧没报出去"，
+ * 操作照走。进度不会因此丢证据：`stage/supervisor.log` 里有同一份流水，而
+ * `restart()` 的返回值是权威结果。
+ *
+ * 重试用 `Atomics.wait` 做**同步**睡眠：调用方（`phase`）是同步的，为一次 rename 把
+ * 整条换壳流程改成 async 得不偿失。
+ *
+ * 判据：`windows-restart.test.mjs`「writeStatusAtomic」——把目标占成目录让 rename
+ * **必然**失败，断言它返回 false 且不抛（"偶发 EPERM"没法在测试里复现，就让失败必然发生）。
+ */
+export function writeStatusAtomic(file, payload) {
+  const tmp = `${file}.tmp`;
+  let text;
+  try {
+    text = JSON.stringify(payload, null, 2);
+  } catch {
+    return false; // 循环引用等：连文本都产不出
+  }
+  try {
+    fs.writeFileSync(tmp, text);
+  } catch {
+    return false; // 临时文件都写不出（磁盘满 / 目录被删）⇒ 同上
+  }
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return true;
+    } catch {
+      if (attempt === 5) return false; // 见上：报告通道失败 ≠ 操作失败
+      Atomics.wait(STATUS_SLEEP, 0, 0, 15 * (attempt + 1));
+    }
+  }
+  return false;
+}
+
 async function protectedPids() {
-  const code = `$ErrorActionPreference='Stop'; $n=${process.pid}; $seen=@{}; while($n -gt 0 -and -not $seen.ContainsKey($n)){ $seen[$n]=$true; $n; $p=Get-CimInstance Win32_Process -Filter "ProcessId=$n"; if($null -eq $p){break}; $n=[int]$p.ParentProcessId }`;
-  const output = await run(powershell(), ['-NoProfile', '-NonInteractive', '-EncodedCommand',
-    Buffer.from(code, 'utf16le').toString('base64')], { cwd: process.cwd(), timeoutMs: 15000, capture: true });
-  return [...new Set([process.pid, process.ppid, ...output.trim().split(/\s+/).map(Number),
-    ...(process.env.SYMBIO_RESTART_PROTECTED_PIDS || '').split(',').map(Number)])].filter(n => n > 0);
+  return (await probe(null)).protected;
 }
 const baseConfig = c => Object.fromEntries(['target', 'cargoExe', 'buildCwd', 'manifest', 'bin', 'triple',
   'stageRoot', 'cancelFile', 'timeoutSeconds'].map(k => [k, c[k]]));
@@ -133,19 +229,23 @@ export async function restart(config, execute = false) {
     readyFile: c.readyFile, statusFile: c.statusFile, aliveSeconds,
     note: 'Survival only, NOT application readiness. Old exe is never overwritten.' }, null, 2));
   if (!execute) return { dryRun: true }; // no subprocesses/files in dry-run
-  const protectedIds = await protectedPids();
-  requireThat(!protectedIds.includes(c.target.pid), 'Refusing to stop supervisor/current host/ancestor');
+  // 一次探测同时给出「祖先链」与「目标身份」：前者判「是不是自己人」，后者是第一道
+  // 身份校验。权威校验仍是 `stopVerified`（同一 Process 对象上校验再 Kill）。
+  const pre = await probe(c.target.pid);
+  requireThat(!pre.protected.includes(c.target.pid), 'Refusing to stop supervisor/current host/ancestor');
   const lock = `${c.statusFile}.lock`;
   const lockFd = fs.openSync(lock, 'wx');
   fs.writeFileSync(lockFd, JSON.stringify({ supervisorPid: process.pid, targetPid: c.target.pid }));
   let stage, child, stopped = false;
   let status = { supervisorPid: process.pid, target: c.target, applicationReady: false, startedAt: new Date().toISOString(), events: [] };
+  // 落盘走 `writeStatusAtomic`（**失败不抛**，理由见它的文档注释）：报告通道坏了
+  // 不许等于操作失败。
+  const writeStatus = () => writeStatusAtomic(c.statusFile, status);
   const phase = (name, extra = {}) => {
     const at = new Date().toISOString();
     status = { ...status, ...extra, phase: name, updatedAt: at, stage,
       events: [...status.events, { phase: name, at }] };
-    fs.writeFileSync(`${c.statusFile}.tmp`, JSON.stringify(status, null, 2));
-    fs.renameSync(`${c.statusFile}.tmp`, c.statusFile);
+    writeStatus();
     if (stage) fs.appendFileSync(path.join(stage, 'supervisor.log'), `${at} ${name} ${JSON.stringify(extra)}\n`);
   };
   const deadline = Date.now() + c.timeoutSeconds * 1000;
@@ -155,7 +255,9 @@ export async function restart(config, execute = false) {
   try {
     stage = fs.mkdtempSync(path.join(c.stageRoot, 'symbio-restart-'));
     phase('verifying'); check();
-    assertIdentity(c.target, await processIdentity(c.target.pid));
+    // 与祖先链同一次读取到的身份（见 `probe`）：这是**第一道**校验，用来在花掉一次
+    // 构建之前就发现「目标已经换了个进程」。权威校验在 `stopVerified`。
+    assertIdentity(c.target, pre.identity ?? await processIdentity(c.target.pid));
     let ready;
     if (c.readyFile) {
       ready = JSON.parse(fs.readFileSync(c.readyFile, 'utf8').replace(/^\uFEFF/, ''));

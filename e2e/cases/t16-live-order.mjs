@@ -146,24 +146,28 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
 
     // ③ 按**前端口径**把实时帧重建成图：同 id 合并，`seq` / `timestamp` 有则覆盖
     //    （镜像 `tauri/src/stores/sessions.ts::applyTranscriptMessages`）
-    const live = new Map();
-    for (const m of rt.messages()) {
-      const d = m.data;
-      if (!d) continue;
-      if (d.status === 'removed') {
-        live.delete(m.mid);
-        continue;
+    //    抽成函数是因为下面 ⑤ 要**反复重建**着等一个最终性（见那里的说明）。
+    const buildLive = () => {
+      const map = new Map();
+      for (const m of rt.messages()) {
+        const d = m.data;
+        if (!d) continue;
+        if (d.status === 'removed') {
+          map.delete(m.mid);
+          continue;
+        }
+        const cur = map.get(m.mid) ?? { id: m.mid };
+        if (d.seq != null) cur.seq = d.seq;
+        if (d.timestamp != null) cur.timestamp = d.timestamp;
+        if (d.role != null) cur.role = d.role;
+        // [T-147d-iii] `role` 退出 wire 后，身份的实时载体是 `principal`——
+        // 合并通道必须一起带上，否则 `msgRoleOf(cur)` 在实时面永远折出默认值。
+        if (d.principal != null) cur.principal = d.principal;
+        if (d.type != null) cur.type = d.type;
+        map.set(m.mid, cur);
       }
-      const cur = live.get(m.mid) ?? { id: m.mid };
-      if (d.seq != null) cur.seq = d.seq;
-      if (d.timestamp != null) cur.timestamp = d.timestamp;
-      if (d.role != null) cur.role = d.role;
-      // [T-147d-iii] `role` 退出 wire 后，身份的实时载体是 `principal`——
-      // 合并通道必须一起带上，否则 `msgRoleOf(cur)` 在实时面永远折出默认值。
-      if (d.principal != null) cur.principal = d.principal;
-      if (d.type != null) cur.type = d.type;
-      live.set(m.mid, cur);
-    }
+      return map;
+    };
 
     // ④ 存储权威版本（经生产读出口读：`vdfs/read` = 前端加载历史那一出口）
     const stored = await readSessionMessages(cli, SID);
@@ -172,17 +176,43 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
 
     // ⑤ 核心断言：实时面见过的每个节点，顺序锚点必须**等于**存储分配的那个。
     //    不等 ⇒ 那条消息在前端只有本地号 / 在途号，与存储号并存两套序号空间。
-    const drift = [];
-    for (const s of stored) {
-      const l = live.get(s.id);
-      if (!l) {
-        drift.push(`${s.id}: 实时面从未见过（角色 ${msgRoleOf(s)}/${s.type}）`);
-        continue;
+    //
+    // ⚠️ 它是一条**最终性**判据，不是瞬时判据：`sendAndSettle` 等的是**会话**离开
+    // `working`，而消息级那几帧（骨架完成帧、正文落库回包）比会话状态帧**晚到**。
+    // 实测（2026-10-19，77 个 e2e 用例并发跑满机器）：第二轮的最后两帧还在路上，
+    // 于是 `drift` 报出「实时 seq=1125899906842626 ≠ 存储 seq=5」——看上去像两套号
+    // 并存，其实只是没等到；单跑必过、并发约一半红，是典型的假红形态。
+    //
+    // 处置：**有界地等**一个最终性，判据本身一字不改——等不到照样红，且用超时那一刻的
+    // `drift` 报出**具体是哪几条**（"waitFor timed out" 对排查没有信息量）。
+    const driftOf = (liveMap) => {
+      const out = [];
+      for (const s of stored) {
+        const l = liveMap.get(s.id);
+        if (!l) {
+          out.push(`${s.id}: 实时面从未见过（角色 ${msgRoleOf(s)}/${s.type}）`);
+          continue;
+        }
+        if (l.seq !== s.seq) {
+          out.push(`${s.id}: 实时 seq=${l.seq} ≠ 存储 seq=${s.seq}（角色 ${msgRoleOf(s)}/${s.type}）`);
+        }
       }
-      if (l.seq !== s.seq) {
-        drift.push(
-          `${s.id}: 实时 seq=${l.seq} ≠ 存储 seq=${s.seq}（角色 ${msgRoleOf(s)}/${s.type}）`,
+      return out;
+    };
+    let live = buildLive();
+    let drift = driftOf(live);
+    if (drift.length) {
+      try {
+        await waitFor(
+          () => {
+            live = buildLive();
+            drift = driftOf(live);
+            return drift.length === 0;
+          },
+          { what: '每条落库消息的权威 seq 回填（完成帧晚于会话状态帧）', timeoutMs: 15_000 },
         );
+      } catch {
+        /* 超时就把当前 drift 交给下面的 assert 报出来 */
       }
     }
     assert(

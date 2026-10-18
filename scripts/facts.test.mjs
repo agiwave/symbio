@@ -851,7 +851,7 @@ test('生成物里不得留下字面 refLink(——${} 没插值的静默形态'
   // 失效：链接审计看不见它（那不是 markdown 链接），`--check` 也看不见它（生成器确定性
   // 地产出同一份坏内容，永远「一致」）。**声称存在而代码里不存在的函数，比没有函数更坏**。
   //
-  // 口径：扫每份事实的**落盘产物**（`out` 字段）。生成先于静态审计（28-facts-write），
+  // 口径：扫每份事实的**落盘产物**（`out` 字段）。生成先于静态审计（06-facts-write），
   // 所以测试看到的产物就是审计将面对的终态。
   const ids = discover(path.join(REPO, 'scripts', 'facts'))
   const mods = await Promise.all(ids.map((id) => import(`./facts/${id}.mjs`)))
