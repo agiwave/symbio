@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
@@ -25,13 +26,16 @@ const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
 /**
  * 跑 `gate.mjs`：stdin 给 `'ignore'`（真交互 / 真等待会挂），并给**显式 timeout**——
  * 失败要快，不许把「白跑十分钟门禁」这个 bug 拖成一次十分钟的测试。
+ *
+ * `env` 用来给门禁加环境（现只有 `GATE_EXTRA_STAGES`，见下方 `withDemoStage`）。
  */
-function runGate(args = []) {
+function runGate(args = [], env = {}) {
   return spawnSync(process.execPath, [gateScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: 60_000,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, ...env },
   })
 }
 
@@ -139,13 +143,18 @@ test('★ 拒绝在**别的仓库**里跑：否则会静默门禁另一个仓库
 //   ② 日志保留：每轮一个目录，**上一轮的日志不许被这一轮冲掉**。
 //      曾经的病正是它：平铺 + `w` 覆盖 ⇒ 失败后再跑一次，证据就没了。
 //
-// 做法：往 `scripts/gate.d/` 里临时放一个**必然失败**的阶段，用 `--only` 跑它，
-// 断言输出与落盘；`finally` 里删掉。用真阶段而不是 mock——`report()` 的呈现逻辑
-// 只有端到端才走得到（`run` 的日志落盘、`record`、汇总全部参与）。
+// 做法：造一个**必然失败**的阶段，用 `--only` 跑它，断言输出与落盘。用真阶段而不是
+// mock——`report()` 的呈现逻辑只有端到端才走得到（`run` 的日志落盘、`record`、汇总全部参与）。
+//
+// ⚠️ 那个演示阶段**不住在 `scripts/gate.d/` 里**（2026-10-18 改）：它原先直接写进活目录，
+// 等于让测试改门禁自己的配置，代价实测了两次——① `gate-wiring-audit` 扫那个目录时会
+// 把演示阶段当成一个「排在 60-facts 之后的未登记阶段」判红（串行时不显形，一并发就随机红）；
+// ② 清理被拦（批量删除守卫 / 文件占用）就把一个坏阶段永久留在仓里，此后每轮门禁都红，
+// 而红的原因早就不在场。现在它落在 `os.tmpdir()` 下，由 `GATE_EXTRA_STAGES` 注入门禁
+// （见 `gate.mjs` 阶段发现处的注释）。判据一条没减：仍然是**真阶段、真进程、真日志**。
 
 /** 临时阶段的 id / 文件名（刻意用 `zz-` 前缀：排序在最后，且一眼能看出是注入的）。 */
 const DEMO_STAGE = 'zz-failure-detail-demo'
-const DEMO_STAGE_FILE = path.join(repoRoot, 'scripts', 'gate.d', `${DEMO_STAGE}.mjs`)
 
 /**
  * 造一个「一个命令失败、日志有正文」的阶段。
@@ -162,18 +171,83 @@ const demoStageSource = () => `export default {
       cmd: process.execPath,
       args: [
         '-e',
+        // ⚠️ 收尾用 \`process.exitCode = 1\` 而**不是** \`process.exit(1)\`：管道上的
+        // stdout 是异步写，\`process.exit()\` 会**丢掉还没刷出去的尾部**。实测（2026-10-19，
+        // 冷全量编译把机器压满时）：日志只写到「噪声行 47」，[ERROR] 那行没落盘，于是
+        // 判据 ① 假红。判据自己的输入不能因为"没来得及 flush"而消失。
         "for (let i = 0; i < 60; i++) console.log('噪声行 ' + i);" +
-          "console.log('[ERROR] 演示断言：期望 3 得到 4'); process.exit(1)",
+          "console.log('[ERROR] 演示断言：期望 3 得到 4'); process.exitCode = 1",
       ],
     },
   ],
 }
 `
 
-test('★ 失败项：日志末几行与相对路径直接印在汇总里（不必再跑一次门禁）', () => {
-  fs.writeFileSync(DEMO_STAGE_FILE, demoStageSource(), 'utf8')
+/**
+ * 在**临时目录**里放好阶段文件，返回给 `runGate` 的 env。
+ *
+ * `files` = `{ '<文件名>.mjs': 源码 }`。目录里的非 `.mjs` 文件不会被加载（门禁的
+ * 过滤条件与 `scripts/gate.d/` 完全一致），所以测试可以往同一个目录里放标记文件。
+ *
+ * 清理是 best-effort：`os.tmpdir()` 下的残留无害（系统会收），而 `rmSync` 本身在
+ * 某些环境会被拦（批量删除守卫）——让清理失败去判红一份功能测试，就是让判据去
+ * 测一件与被测对象无关的事。**真正要紧的是仓里不留东西**，而这一点由"不写进仓"
+ * 结构性保证，不靠 `finally`。
+ */
+function withStageDir(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-gate-stages-'))
+  for (const [name, source] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), source, 'utf8')
+  return {
+    dir,
+    env: { GATE_EXTRA_STAGES: dir },
+    dispose: () => { try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* 见上 */ } },
+  }
+}
+const withDemoStage = () => withStageDir({ [`${DEMO_STAGE}.mjs`]: demoStageSource() })
+
+test('★ `long: true` 的任务先起：并发池按声明序发任务，长杆排在后面就是白等', () => {
+  // 判据 = **执行顺序**，所以把并发度压到 1（`concurrency: 1`）：这样「取任务的下标
+  // 顺序」直接等于「执行顺序」，可确定地断言，不必靠计时（计时会飘，飘了就假红）。
+  // 声明序是 [短, 长]，期望执行序是 [长, 短] ⇒ 标记文件内容是 `BA`。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-gate-stages-'))
+  const marker = path.join(dir, 'order.log')
+  /** 一个把首字母追加进标记文件的任务；`extra` 用来挂 `long: true`。 */
+  const task = (tag, extra = '') => {
+    const code = `require('fs').appendFileSync(${JSON.stringify(marker)}, '${tag}')`
+    // `parallel: true` 是**必须**的：只有连续标记 `parallel` 的任务才会被交给并发池
+    // （`runConcurrent`），而 `long` 只影响并发池的取任务顺序——不标 `parallel` 就
+    // 走串行路径，那本来就已经是声明序，这条判据会变成在验一个空转。
+    return `    { label: '${tag}', cmd: process.execPath, args: ['-e', ${JSON.stringify(code)}], parallel: true${extra} },\n`
+  }
+  const stage =
+    `export default {\n` +
+    `  id: 'zz-lpt-demo',\n` +
+    `  title: '长杆先起演示（测试注入，勿留）',\n` +
+    `  parallel: true,\n` +
+    `  concurrency: 1,\n` +
+    `  tasks: [\n` +
+    task('A') +
+    task('B', ', long: true') +
+    `  ],\n` +
+    `}\n`
+  fs.writeFileSync(path.join(dir, 'zz-lpt-demo.mjs'), stage, 'utf8')
   try {
-    const r = runGate([`--only=${DEMO_STAGE}`])
+    const r = runGate(['--only=zz-lpt-demo'], { GATE_EXTRA_STAGES: dir })
+    assert.equal(r.status, 0, `两个任务都应通过：${stripAnsi(r.stdout + r.stderr)}`)
+    assert.equal(
+      fs.readFileSync(marker, 'utf8'),
+      'BA',
+      '标了 `long: true` 的必须先跑——否则它要等前面所有任务跑完才开工，而它往往比其余加起来还长',
+    )
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* 见 `withStageDir` */ }
+  }
+})
+
+test('★ 失败项：日志末几行与相对路径直接印在汇总里（不必再跑一次门禁）', () => {
+  const demo = withDemoStage()
+  try {
+    const r = runGate([`--only=${DEMO_STAGE}`], demo.env)
     const out = stripAnsi(r.stdout + r.stderr)
     assert.notEqual(r.status, 0, `必然失败的阶段不该退出 0：${out}`)
 
@@ -197,12 +271,12 @@ test('★ 失败项：日志末几行与相对路径直接印在汇总里（不�
     )
     assert.ok(detail.includes(`${m[1].replace(/\/$/, '')}/${logs[0]}`), `详情里应给出日志文件路径：${m[1]}/${logs[0]}`)
   } finally {
-    fs.rmSync(DEMO_STAGE_FILE, { force: true })
+    demo.dispose()
   }
 })
 
 test('★ 每轮一个日志目录：跑第二轮不许冲掉第一轮的失败证据', () => {
-  fs.writeFileSync(DEMO_STAGE_FILE, demoStageSource(), 'utf8')
+  const demo = withDemoStage()
   const logRoot = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
   /** 从门禁自己的输出里读本轮目录——**不列目录**。
    *  列目录会被并发跑的门禁进程干扰（门内测试会 spawn 门禁，同一秒里可能多出目录），
@@ -213,7 +287,7 @@ test('★ 每轮一个日志目录：跑第二轮不许冲掉第一轮的失败�
     return m[1].replace(/\/$/, '')
   }
   try {
-    const r1 = runGate([`--only=${DEMO_STAGE}`])
+    const r1 = runGate([`--only=${DEMO_STAGE}`], demo.env)
     assert.notEqual(r1.status, 0, '第一轮应当失败')
     const firstRel = runDirFrom(r1.stdout + r1.stderr)
     const firstDir = path.join(repoRoot, firstRel)
@@ -237,7 +311,26 @@ test('★ 每轮一个日志目录：跑第二轮不许冲掉第一轮的失败�
     assert.equal(ptr, path.basename(secondRel), '指针必须更新到最新一轮')
     assert.ok(fs.existsSync(path.join(logRoot, ptr)), '指针指向的目录必须存在')
   } finally {
-    fs.rmSync(DEMO_STAGE_FILE, { force: true })
+    demo.dispose()
+  }
+})
+
+test('★ 注入的阶段不进仓：演示阶段落在临时目录，`scripts/gate.d/` 里始终只有真阶段', () => {
+  // 这条钉的是「测试不许改门禁自己的活配置」——它曾是真实的坑：演示阶段写进
+  // `scripts/gate.d/`，于是 `gate-wiring-audit` 的 GW-005 会把它当成未登记阶段判红
+  // （并发下随机），清理失败还会把它永久留在仓里。判据分两半：
+  //   ① 注入**真的生效**（`--list` 里能看到它）——否则「干净」可能只是因为注入空转；
+  //   ② 活目录**一个文件都没多**。
+  const gateD = path.join(repoRoot, 'scripts', 'gate.d')
+  const before = fs.readdirSync(gateD).sort()
+  const demo = withDemoStage()
+  try {
+    const r = runGate(['--list'], demo.env)
+    assert.equal(r.status, 0, `--list 应退出 0：${stripAnsi(r.stdout + r.stderr)}`)
+    assert.match(stripAnsi(r.stdout), new RegExp(DEMO_STAGE), '注入的阶段必须真的被加载（否则这条判据在验一个空转）')
+    assert.deepEqual(fs.readdirSync(gateD).sort(), before, '注入不许往 scripts/gate.d/ 写任何东西')
+  } finally {
+    demo.dispose()
   }
 })
 
@@ -257,4 +350,45 @@ test('★ 懒建日志目录：`--help` 与被拒绝的调用不留空目录（�
   runGate(['--only=zz-not-a-stage']) // 拼错的 id ⇒ 退出 2，且必须发生在建目录之前
   runGate(['--only=']) // 空清单 ⇒ 同上
   assert.equal(snapshot(), before, '这些调用一个阶段都没跑，不该留下日志目录')
+})
+
+test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就把批切断（docs 会整段串行在 backend 之后）', async () => {
+  // 这条判据来自一次实测：`facts-write` 曾叫 `28-`，正夹在 `20-frontend-static`（并行）
+  // 与 `30-docs`（并行）之间，于是门禁实际跑成
+  //   [backend ∥ frontend-static] → facts-write → [docs ∥ baseline ∥ msrv]
+  // 而 `gate.mjs` 文件头声明的是一整批。后果不是报错，是**白等一个 docs 的墙钟**
+  // （本机实测 6m25s）——没有任何信号，只有把阶段墙钟打出来才看得见。
+  //
+  // 判据取「所有 `parallel: true` 的阶段必须连续」而不是「等于某个写死的名单」：
+  // 名单会随阶段增删漂移，而「连续」是批语义本身。真需要第二个批时这条会红，
+  // 那时该做的是**同时更新 `gate.mjs` 文件头声明的编排**，而不是把判据改宽。
+  const dir = path.join(repoRoot, 'scripts', 'gate.d')
+  const stages = []
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && !f.startsWith('_')).sort()) {
+    const mod = await import(pathToFileURL(path.join(dir, f)).href)
+    if (mod.default?.id) stages.push({ file: f, id: mod.default.id, parallel: Boolean(mod.default.parallel) })
+  }
+  const flags = stages.map((s) => s.parallel)
+  const first = flags.indexOf(true)
+  const last = flags.lastIndexOf(true)
+  assert.ok(first >= 0, `应有并发阶段：${stages.map((s) => s.file).join(', ')}`)
+  const intruders = stages.slice(first, last + 1).filter((s) => !s.parallel)
+  assert.deepEqual(
+    intruders.map((s) => s.file),
+    [],
+    `并发批被串行阶段切断：${intruders.map((s) => s.file).join(', ')}——它把批分成两半，` +
+      '两侧各自串行。要么把它移出这批（换文件名序），要么说明它为什么能并发（标 parallel）。',
+  )
+  // 具体锚点（上面那条是通用判据，这条钉住**当前编排的非显然部分**）：
+  // docs 声明 `parallel: true` 的**唯一理由**是「藏在 backend 的墙钟里」——
+  // 两者不在同一批，那 6m+ 就是纯加项。
+  const idx = (id) => stages.findIndex((s) => s.id === id)
+  assert.ok(idx('backend') >= 0 && idx('docs') >= 0, 'backend / docs 阶段必须存在')
+  assert.ok(
+    idx('backend') < idx('docs') && stages.slice(idx('backend'), idx('docs')).every((s) => s.parallel),
+    'backend 与 docs 之间不得夹串行阶段（否则 docs 的墙钟直接加到总耗时上）',
+  )
+  // 生成器必须先于静态审计（`30-docs` 的 D-007 / RF-003 要看已展开的最终形态）
+  assert.ok(idx('facts-write') < idx('docs'), 'facts-write 必须在 docs 之前')
+  assert.equal(stages[0].id, 'fmt', 'fmt 是屏障，必须第一个跑')
 })

@@ -94,7 +94,13 @@ export function makeRunId(now = new Date(), taken = () => false) {
 }
 
 /** 删掉最老的轮次目录，只留 `keep` 个。**只删目录、只删名字像 runId 的**——
- *  目录里可能躺着本轮正在写的东西，也可能有人放了别的东西，两者都不该被动。 */
+ *  目录里可能躺着本轮正在写的东西，也可能有人放了别的东西，两者都不该被动。
+ *
+ *  **失败不阻断**：清理是副产品，它的失败不该让一整轮门禁（10+ 分钟）在**建日志目录
+ *  这一步**崩掉——那正是最坏的时机（什么都没跑，却已经红了，而且红在一个和判据毫无
+ *  关系的地方）。实测形态：沙箱的批量删除守卫会对「一次删 >500 个文件」抛
+ *  `SAFE_DELETE_BULK_CONFIRM_REQUIRED`，而一轮 docs 就有 60+ 个日志文件、攒几轮
+ *  就过线。删不掉就留着（`KEEP_RUNS` 只是上限，不是不变量），下一轮再试。 */
 export function pruneOldRuns(logRoot, keep = KEEP_RUNS) {
   if (!fs.existsSync(logRoot)) return []
   const runs = fs
@@ -106,8 +112,12 @@ export function pruneOldRuns(logRoot, keep = KEEP_RUNS) {
     .reverse()
   const removed = []
   for (const name of runs.slice(keep)) {
-    fs.rmSync(path.join(logRoot, name), { recursive: true, force: true })
-    removed.push(name)
+    try {
+      fs.rmSync(path.join(logRoot, name), { recursive: true, force: true })
+      removed.push(name)
+    } catch {
+      /* 删不掉就留着：清理失败不该改变这一轮的结论 */
+    }
   }
   return removed
 }

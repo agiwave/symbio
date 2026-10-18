@@ -61,7 +61,11 @@ export function run(exe, args, { cwd, env = process.env, timeoutMs, out, err, ca
   });
 }
 
-export async function processIdentity(pid, timeoutMs = 10000) {
+// `timeoutMs` 只防挂死，不是判据：超时抛的是 `run` 的「Timeout: no process killed」，
+// 与「Command failed（进程不在了）」是**两条不同的话**，所以放宽它不会制造假绿。
+// 原值 10s：空闲时 `powershell.exe` 冷启动 + `Get-Process` 约 1–3s，但机器被 cargo
+// 压满时实测能吃掉十几秒 ⇒ 一次"没读到"被报成红。按最坏负载给 30s。
+export async function processIdentity(pid, timeoutMs = 30000) {
   requireThat(Number.isSafeInteger(pid) && pid > 0, 'Invalid PID');
   const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const code = `$ErrorActionPreference='Stop'; $p=Get-Process -Id ${pid}; @{ pid=$p.Id; exe=$p.Path; startTimeUtcTicks=$p.StartTime.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress`;

@@ -398,7 +398,18 @@ export function codeTextOf(src) {
   return out + src.slice(at)
 }
 
-export const VITEST_TIMEOUT_MS = 180_000
+/**
+ * `vitest run --coverage` 的墙钟预算。
+ *
+ * 它**不是判据**——判定在覆盖率阈值（`tauri/vitest.config.ts` 的 `thresholds`）与
+ * 用例通过数上，这里只防「跑飞了还不肯停」。
+ *
+ * 原值 180s。2026-10-19 冷全量（基座 rebase 了 25 个提交 ⇒ backend 全量重编 10m58s，
+ * 20 核压满）实测 coverage 跑了 **>180s** ⇒ 报「超时终止」，与真的卡死长得一样。
+ * `docs` 与 `backend` 同批之后，前端这三项与 cargo 争核是**常态**而不是意外，
+ * 所以预算按「最坏负载」给，不按「空闲时多快」给：空闲时 40–60s，最坏 ~4m。
+ */
+export const VITEST_TIMEOUT_MS = 300_000
 
 /** cargo 的进度噪音（刷屏且无信息量） */
 export const cargoNoiseRe =

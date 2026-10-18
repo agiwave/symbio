@@ -336,20 +336,43 @@ export const OUT_OF_GATE = [
 // 每次门禁都刷一遍只会训练人忽略它。要看结论就单独跑一次脚本。
 const REPORT_ONLY = ['schema-audit', 'core-surface-audit']
 
+/**
+ * 已知的**长杆**：标 `long: true` 让并发池先起它们（LPT，见 `gate.mjs::runConcurrent`）。
+ *
+ * 并发池按声明序发任务，而本阶段 61 项里有一项的时长超过其余 60 项之和：这两份
+ * 「换壳重启」测试用**真实进程**，一轮要起近百次 `powershell.exe`（冷启动
+ * 2.2–2.6s/次，与 cargo 争核时更慢）。实测 `windows-restart` 单独 87s–229s，
+ * 排在声明序第 38 位时，docs 阶段墙钟 = 等它被轮到的 ~50s + 它自己 —— 那 50s 是纯加项。
+ *
+ * ⚠️ 这是**时长提示**不是判据：写错了最多白排一次序（结果按声明序落，判定不变）。
+ * 加新的慢测试时顺手加进来；别指望框架自己知道谁慢。
+ */
+const LONG_TESTS = new Set(['windows-restart'])
+
 export default {
   id: 'docs',
   title: '静态审计',
   // 回归测试彼此独立（各自 spawn 一个 `node --test`），并发跑省掉 30+ 次串行启动。
   //
-  // 守卫本体（下面的 `--strict`）**刻意不并行**：它们的结论行（「N 条规则全部通过」）
-  // 是终端上的主要信息，而并发批会静音逐行输出（见 gate.mjs 的并发契约）——
-  // 用「少看 16 行结论」换几秒不划算。
+  // 守卫本体（下面的 `--strict`）**也进同一批**（2026-10-18）：它们同样彼此独立
+  // （只读扫仓，各自一个进程）。此前为了保住每条的**结论行**（「N 条规则全部通过」）
+  // 而把它们排除在并发之外，代价是整段串行——实测 20 个守卫 ≈ 32s 墙钟，而
+  // `windows-restart` 一个测试就要 200s+，于是 docs 阶段 = 200s（批）+ 32s（串行尾）。
+  // 现在结论行由框架的 `summary: true` 在批结束后补印（读各自日志的最后一行），
+  // **信息一条不少，串行尾消失**。判据 = `gate.test.mjs` 里「批内任务保留结论行」。
   //
   // 阶段级并发：本阶段**只读**（扫 `.rs` / docs / scripts，不写任何文件），与
   // backend（只写 `target/`）、baseline（只读 git）、msrv（独立 target 目录）互不
   // 干扰；fmt 已在 05 屏障阶段跑完，看到的源码是定格的。⚠️ verify 不能进这批：
   // 它的 gen-verify-facts 会重写 `verify/facts/mod.rs`，而本阶段的 doc-count-audit
   // 读同一个文件——并发就是「审计读到半截生成物」（见 55-verify.mjs）。
+  //
+  // ⚠️ 这份"只读"曾经不成立：`gate.test.mjs` 的两条失败详情判据会往 `scripts/gate.d/`
+  // 写一个演示阶段再删掉，于是 `gate-wiring-audit`（扫那个目录做 GW-005）在并发下
+  // 随机把演示阶段报成"排在 60-facts 之后的未登记阶段"。当时的处置是把它挪到批后
+  // 串行——**那是绕开症状**：真正的病是测试改门禁自己的活配置。现在演示阶段落在
+  // 临时目录、由 `GATE_EXTRA_STAGES` 注入（见 `gate.mjs` 阶段发现处），本阶段才真的
+  // 只读，全部任务得以在一批里跑完，没有串行尾。
   parallel: true,
   concurrency: 8,
   *tasks() {
@@ -360,6 +383,7 @@ export default {
         args: ['--test', path.join(scriptDir, '..', `${name}.test.mjs`)],
         cwd: repoRoot,
         parallel: true,
+        long: LONG_TESTS.has(name), // 长杆先起，见 `LONG_TESTS`
       }
     }
     for (const name of GUARDS) {
@@ -383,6 +407,9 @@ export default {
         args: [path.join(scriptDir, '..', `${name}.mjs`), '--strict'],
         cwd: repoRoot,
         echo: 'all',
+        parallel: true,
+        // 批内静音，但**结论行**要留（见本阶段头注释与 `gate.mjs::lastLogLine`）。
+        summary: true,
       }
     }
     for (const name of REPORT_ONLY) {
@@ -392,6 +419,7 @@ export default {
         args: [path.join(scriptDir, '..', `${name}.mjs`)],
         cwd: repoRoot,
         echo: 'none',
+        parallel: true,
       }
     }
   },

@@ -679,7 +679,12 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
     cwd: path.resolve(path.dirname(script), '..'),
     env: { ...process.env, NO_COLOR: '1' },
     encoding: 'utf8',
-    timeout: 30000,
+    // 这条预算**不是判据**（判据是下面那句 stdout 匹配），它只防「扫描挂死」。
+    // 原先 30s：本机空闲时扫全仓约 2–6s，但门禁里 `docs` 与 cargo 同批跑，冷全量
+    // 编译那一次（backend 10m58s、20 核压满）实测扫了 **>30s**，于是 `stdout` 为空、
+    // 报「读数漂了」——一次纯粹的负载假红，而它长得和真漂移一模一样。
+    // 预算短于它要等的工作，就是一条会自己制造假红的判据。
+    timeout: 120000,
   })
   assert.match(r.stdout, /S-014 通过：role 格直写存量 \d+ 处，与基线持平/)
 })

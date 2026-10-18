@@ -25,11 +25,18 @@
  *
  * 阶段级同构：阶段对象同样可以标 `parallel: true`——连续标了的**阶段**合成一批
  * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
- * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-09）：
+ * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-18）：
  *
  *   05-fmt（屏障，单独跑）
+ *     → 06-facts-write（生成器，串行；docs 读它的产物，故必须是批的前置）
  *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]
  *     → 55-verify → 56-frontend-build → 58-e2e → 60-facts（必须最后）
+ *
+ * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
+ * 批就在那里断开，两侧各自成批、先后串行。这不是理论风险——`facts-write` 曾叫 `28-`，
+ * 正夹在 `20-` 与 `30-` 之间，于是 docs 整段（6m25s）被串行在 backend（9m35s）之后，
+ * 而本文件当时写的编排是「一整批」。**加阶段时先看它落在哪两个阶段之间**，再看它
+ * 该不该标 `parallel`；两件事都不做，默认结果就是「悄悄地多串行一整段」。
  *
  * 三个「看着能并发、实际不能」的坑，判据各归其主文件：
  *   - verify 不进批：它的 `gen-verify-facts` 重写 `verify/facts/mod.rs`，而 docs 的
@@ -397,10 +404,31 @@ const ctx = {
   },
 }
 
+// 阶段来源 = `scripts/gate.d/`，外加 `GATE_EXTRA_STAGES` 指向的目录（**测试注入口**）。
+//
+// 为什么需要这个口：`gate.test.mjs` 有两条判据要跑一个**必然失败**的阶段，才能端到端
+// 验到「失败详情」与「每轮一个日志目录」。它原先直接把演示阶段写进 `scripts/gate.d/`
+// ——那等于让测试**改门禁自己的活配置**，两个后果都实测到了：
+//   ① 任何扫这个目录的判据（`gate-wiring-audit` 的 GW-005）会扫到它，红得毫无道理，
+//      而且**随机**——谁先跑谁看见，串行时不显形，一并发就显形；
+//   ② 清理失败（批量删除守卫 / 文件被占用）就把一个未登记的阶段**永久**留在仓里，
+//      此后每一轮门禁都红，而红的原因早就不在场了。
+// 注入口把「测试要一个坏阶段」与「仓里有哪些阶段」分开：临时目录里的阶段用完即弃，
+// `scripts/gate.d/` 始终只包含**真的**阶段。
+//
+// ⚠️ 它是**注入**不是**豁免**：合并进来的阶段照常参与文件名排序、`--only` 校验、
+// 并发分批，没有任何一条判据因为它的存在而放宽。不设它时行为与从前逐字一致。
 const gateDir = path.join(scriptDir, 'gate.d')
+const extraStageDir = process.env.GATE_EXTRA_STAGES
+const stagePaths = new Map()
+for (const dir of [gateDir, ...(extraStageDir ? [extraStageDir] : [])]) {
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && !f.startsWith('_'))) {
+    stagePaths.set(f, path.join(dir, f)) // 同名时后者（注入目录）覆盖前者
+  }
+}
 const stages = []
-for (const f of fs.readdirSync(gateDir).filter((f) => f.endsWith('.mjs') && !f.startsWith('_')).sort()) {
-  const mod = await import(pathToFileURL(path.join(gateDir, f)).href)
+for (const f of [...stagePaths.keys()].sort()) {
+  const mod = await import(pathToFileURL(stagePaths.get(f)).href)
   if (mod.default?.id) stages.push(mod.default)
 }
 
@@ -497,6 +525,33 @@ function stageHeader(index, title) {
 
 const materialize = (s) => Array.from(typeof s.tasks === 'function' ? s.tasks(ctx) : s.tasks)
 
+/**
+ * 把启用的阶段切成「串行段 / 并发批」。
+ *
+ * **调度与打印共用这一份**：两处各推一遍的话，打印出来的编排会和实际跑的悄悄分叉，
+ * 而分叉不会报错——`facts-write` 夹在批中间那次就是这样：本文件头写着「一整批」，
+ * 实际跑成两段，白等一个 docs 的墙钟（6m25s）且没有任何信号。
+ * 判据 = `gate.test.mjs`「阶段级并发必须连成一批」。
+ */
+function planLanes(list) {
+  const groups = []
+  for (let i = 0; i < list.length; ) {
+    if (list[i].s.parallel) {
+      const batch = []
+      while (i < list.length && list[i].s.parallel) batch.push(list[i++])
+      groups.push({ parallel: true, lanes: batch })
+    } else {
+      groups.push({ parallel: false, lanes: [list[i++]] })
+    }
+  }
+  return groups
+}
+/** 编排的一行渲染：并发批包在 `[...]` 里、组内用 `∥`，串行段用 `→` 连接。 */
+const renderPlan = (groups) =>
+  groups
+    .map((g) => (g.lanes.length > 1 ? `[${g.lanes.map((l) => l.s.id).join(' ∥ ')}]` : g.lanes[0].s.id))
+    .join(' → ')
+
 if (listOnly) {
   for (const [i, s] of stages.entries()) {
     const tasks = materialize(s)
@@ -505,6 +560,11 @@ if (listOnly) {
   }
   process.exit(0)
 }
+
+// 泳道计划在**打印之前**就算出来：下面那行编排与真正的调度共用同一个 `lanePlan`
+// （两处各推一遍必然分叉，而分叉不报错——见 `planLanes` 的注释）。
+const lanes = stages.map((s, idx) => ({ s, idx })).filter(({ s }) => enabled(s.id))
+const lanePlan = planLanes(lanes)
 
 console.log(bold('══ 门禁 ══'))
 console.log(dim(`  仓库根：${repoRoot}`))
@@ -517,7 +577,7 @@ console.log(
     }${profile ? ` · --profile=${profile}` : ''}`,
   ),
 )
-console.log(dim(`  阶段：${stages.filter((s) => enabled(s.id)).map((s) => s.id).join(' → ')}`))
+console.log(dim(`  阶段：${renderPlan(lanePlan)}`))
 // 到这里参数已全部校验通过、阶段即将开跑 ⇒ 这一轮**真的会发生**，此时建目录、
 // 写指针都名实相符（`--help` 与被拒绝的调用走不到这里，所以不会留空目录）。
 const relLog = (path.relative(repoRoot, ensureLogDir()) || '.').replace(/\\/g, '/')
@@ -532,24 +592,58 @@ console.log(dim(`  本轮日志：${relLog}/（每轮一个目录，留最近 ${
  *
  * 批内强制 `quiet`：多个子进程同时往 stdout 写会交错成乱码，详情改由各自日志
  * 承载（失败时汇总会直接列出文件名），控制台只保留一行结论。
+ *
+ * **`summary: true` 的任务补印结论行**（见 `lastLogLine`）：批内静音是为了不交错，
+ * 不是为了丢掉结论——「N 条规则全部通过」这类最后一行本来就在日志里，批结束后按
+ * 声明序补印即可。此前守卫本体因为要保住这一行而被排除在并发之外，整段串行 32s；
+ * 「结论行」与「并发」从来不是二选一。
+ *
+ * **`long: true` 的任务先起**（LPT：最长者先做）。并发池按声明序发任务，于是长杆
+ * 排在第 38 位就得等前几波短任务跑完才开工——而它的时长往往比其余全部任务加起来
+ * 还长，那几波等待是纯加项。实测（docs 阶段 61 项 / 8 泳道）：`windows-restart`
+ * 排在第 38 位时 docs 墙钟 4m30s，其中 209s 是它、前 50s 是"等它被轮到"；
+ * 先起之后这段等待消失。**只影响起跑顺序，不影响判定、不影响汇总顺序**（`out`
+ * 仍按声明序落）。它是个**时长提示**不是判据：写错了最多白排一次序。
  */
+function lastLogLine(file) {
+  if (!file) return null
+  try {
+    const lines = stripAnsi(fs.readFileSync(file, 'utf8'))
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    return lines.length ? lines[lines.length - 1] : null
+  } catch {
+    return null // 日志读不到不该改变判定，只是少一行提示
+  }
+}
+
 async function runConcurrent(stageId, tasks, limit) {
   const out = new Array(tasks.length)
+  // 起跑顺序：`long: true` 的先起（见上方 LPT 说明）。**只是取任务的下标顺序变了**，
+  // `out` 仍按原下标落 ⇒ 汇总表的顺序与判定完全不受影响。`sort` 在 V8 里是稳定的，
+  // 所以同为长杆 / 同为非长杆的相对次序仍是声明序。
+  const order = tasks.map((_, i) => i).sort((a, b) => Number(Boolean(tasks[b].long)) - Number(Boolean(tasks[a].long)))
   let cursor = 0
   const worker = async () => {
     for (;;) {
-      const idx = cursor++
-      if (idx >= tasks.length) return
+      if (cursor >= order.length) return
+      const idx = order[cursor++]
       out[idx] = await executeTask(stageId, tasks[idx], { quiet: true })
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
 
-  for (const r of out) {
+  for (const [i, r] of out.entries()) {
     record(stageId, r)
     const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
     const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
     console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
+    if (tasks[i].summary) {
+      const file = Array.isArray(r.logFile) ? r.logFile[0] : r.logFile
+      const line = lastLogLine(file)
+      if (line) console.log(dim(`      ${line}`))
+    }
   }
 }
 
@@ -601,17 +695,12 @@ const gateStarted = Date.now()
 // 泳道调度：连续标 `parallel` 的阶段合成一批并发，其余照旧串行。
 // `parallel` 语义见文件头「阶段级同构」一节；哪些阶段标了、为什么（以及为什么
 // 某些阶段**不能**标），判据在各阶段自己的文件头。
-const lanes = stages.map((s, idx) => ({ s, idx })).filter(({ s }) => enabled(s.id))
-for (let i = 0; i < lanes.length; ) {
-  const lane = lanes[i]
-  if (lane.s.parallel) {
-    const batch = []
-    while (i < lanes.length && lanes[i].s.parallel) batch.push(lanes[i++])
-    await runStageBatch(batch)
-  } else {
-    await runStage(lane.s, lane.idx)
-    i++
-  }
+// 泳道调度：连续标 `parallel` 的阶段合成一批并发，其余照旧串行。
+// `parallel` 语义见文件头「阶段级同构」一节；哪些阶段标了、为什么（以及为什么
+// 某些阶段**不能**标），判据在各阶段自己的文件头。计划在打印处已算出（`lanePlan`）。
+for (const group of lanePlan) {
+  if (group.lanes.length > 1) await runStageBatch(group.lanes)
+  else await runStage(group.lanes[0].s, group.lanes[0].idx)
 }
 
 /** 汇总并给退出码。**中断时也走这里**（见下方 SIGINT/SIGTERM）——已跑完的结果、
