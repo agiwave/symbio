@@ -32,7 +32,9 @@ impl AutonomousInitiator {
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
-        .with_payload(serde_json::json!({ "kind": "scheduled" }))
+        .with_payload(serde_json::json!({
+            "kind": crate::symbio_core::event::EVENT_TRIGGER_KIND_SCHEDULED
+        }))
     }
 
     /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。

@@ -56,7 +56,7 @@
 //!   路由到嵌套目录（无该元数据 = 顶层会话）；
 //! - **load / delete / session_dir**：先查顶层，未命中则扫描各会话目录的
 //!   `sessions/<id>/`（子会话可凭自身 id 直接寻址）；
-//! - **list_sessions**：只列顶层（子会话不出现在顶层清单）；
+//! - **list_sessions_window**：只列顶层（子会话不出现在顶层清单）；
 //!   子会话清单走 [`list_sub_sessions`](SessionStore::list_sub_sessions)；
 //! - **级联删除**：删除父会话 = `remove_dir_all(父目录)`，子会话随之删除。
 //!
@@ -251,15 +251,11 @@ impl SessionStore {
 
     // ==================== 清单 ====================
 
-    /// 列出所有**顶层**会话的摘要（按 `updated_at` 降序；子会话不在其中）。
+    /// 有界清单：最多 `limit` 条，从游标 `before`（某条会话 id）之后继续；
+    /// 两者都 `None` = 全量（按 `updated_at` 降序，只列**顶层**会话，子会话不在其中）。
     ///
     /// 返回值**不含消息**——类型上就带不走（见 `SessionSummary`）。这是清单
     /// 与消息量脱钩的关键：读一次清单的成本与「会话聊了多久」无关。
-    pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>, PluginError> {
-        self.list_sessions_window(None, None).await
-    }
-
-    /// 有界清单：最多 `limit` 条，从游标 `before`（某条会话 id）之后继续。
     ///
     /// `limit` 计量单位是**清单项**（一个会话 = 一项），与转写窗口的「根节点」
     /// 口径不同——这里没有父子结构，一项就是一项。`None` = 不截断。

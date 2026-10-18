@@ -1,19 +1,30 @@
-//! 心跳设置工具 —— session 插件内聚实现
+//! 心跳设置工具 —— 模型侧的 `heartbeat` 能力（set / get / cancel）
 //!
-//! 心跳机制的全部环节都在 session 插件内闭环：
-//! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，`heartbeat/mod.rs`）
-//! - 后台调度：`heartbeat/mod.rs` 的调度循环（随插件树构建启动，常驻运行）
-//! - 触发执行：调度循环把心跳提示词交给自主触发入口（`transcript/autonomous.rs`）进程内入队
+//! ## 它读写的是**别人的存储**，走的是地址面
 //!
-//! 本工具是这套机制的**设置入口**：模型在会话内调用它启用/调整/停用本会话
-//! 的心跳任务。实现上直接读写本插件的会话存储（get_or_create_session /
-//! save_session），不经任何跨模块路由——机制与设置工具同插件，零跨模块依赖。
+//! 切出本插件前它直接持有 `Weak<SessionPlugin>` 并调 `get_or_create_session` /
+//! `save_session`（宿主的私有项，[ADR-075](../../../../docs/010-adr/075.md "ADR-075") P3 那条
+//! 「被切的那片不再 `use super::` 宿主的私有项」要消掉的正是这个）。现在它对会话只说两句话：
+//! `stat(<会话>)` 读旧值、`write(<会话>)` 写 `{metadata:{heartbeat:{…}}}`——浅合并由会话侧
+//! 的写窗口做（`Session::merge_metadata_object` 是 metadata 写入的唯一实现），本文件不复制那份算术。
+//!
+//! ## 为什么是**两跳**而不是一跳
+//!
+//! `set` 是**部分更新**语义（未提供的参数沿用已有值），而写通道按**顶层键整块替换**
+//! `heartbeat`。先读后写就是把「部分更新」在调用方补齐——代价是多一次 `stat`，收益是
+//! 存储侧不需要知道 `heartbeat` 里有几格、哪格可以缺。
+//!
+//! ## 校验留在这里，不留在那里
+//!
+//! 间隔下限与非空提示词是**设置的判据**，不是存储的判据（会话写臂不认识 `heartbeat`
+//! 的内容）。写进存储的必须已经是合法的配置，否则调度侧要替它兜底，一份数据两个 owner。
 
-use super::super::heartbeat::HeartbeatConfig;
-use super::super::plugin::SessionPlugin;
+use super::plugin::HeartbeatPlugin;
+use super::setting::HeartbeatConfig;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    SESSION_ID,
+    vdfs_context, Capability, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, VdfsContent, VdfsContext, VdfsRequest,
+    VdfsResponse, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -25,25 +36,15 @@ const MIN_INTERVAL_SECS: u64 = 10;
 
 /// 心跳设置工具
 ///
-/// 由 `SessionPlugin` 的 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 按需创建并注册进 `CAPABILITY_VISITOR`；
-/// 弱引用宿主插件，避免 插件 ↔ 工具 的 Arc 循环。
+/// 由 [`HeartbeatPlugin`] 的 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 注册进
+/// 能力表；弱引用宿主插件，避免 插件 ↔ 工具 的 Arc 循环。
 pub struct HeartbeatTool {
-    plugin: Weak<SessionPlugin>,
+    plugin: Weak<HeartbeatPlugin>,
 }
 
 impl HeartbeatTool {
-    pub fn new(plugin: Weak<SessionPlugin>) -> Self {
+    pub fn new(plugin: Weak<HeartbeatPlugin>) -> Self {
         Self { plugin }
-    }
-
-    /// 配置的对外视图（与 metadata.heartbeat 存储结构一致）
-    fn config_view(hb: &HeartbeatConfig) -> Value {
-        json!({
-            "enabled": hb.enabled,
-            "interval_seconds": hb.interval_seconds,
-            "prompt": hb.prompt,
-            "include_history": hb.include_history,
-        })
     }
 }
 
@@ -97,6 +98,9 @@ impl Capability for HeartbeatTool {
             .plugin
             .upgrade()
             .ok_or_else(|| PluginError::InternalError("心跳工具的宿主插件已被释放".to_string()))?;
+        let provider = plugin.provider().ok_or_else(|| {
+            PluginError::InternalError("无法取得本作用域的 VDFS 视图".to_string())
+        })?;
 
         let session_id = ctx
             .get(SESSION_ID)
@@ -104,18 +108,18 @@ impl Capability for HeartbeatTool {
             .ok_or_else(|| {
                 PluginError::ValidationError("心跳设置需要会话上下文（session_id）".to_string())
             })?;
-
+        let vctx = vdfs_context(&ctx);
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
 
-        let mut session = plugin.get_or_create_session(&session_id).await?;
-        let mut hb = HeartbeatConfig::from_metadata(&session.metadata);
+        let mut hb =
+            HeartbeatConfig::from_metadata(&read_metadata(&provider, &vctx, &session_id).await?);
 
         let data = match action {
             // 查看当前配置（未设置过则返回默认值：未启用）
             "get" => json!({
                 "success": true,
                 "session_id": session_id,
-                "heartbeat": Self::config_view(&hb),
+                "heartbeat": hb.view(),
             }),
 
             // 启用 / 更新：未提供的参数沿用已有值（部分更新语义）
@@ -140,29 +144,26 @@ impl Capability for HeartbeatTool {
                     ));
                 }
                 hb.enabled = true;
-
-                Self::write_back(&mut session, &hb);
-                plugin.save_session(&session).await?;
+                save(&provider, &vctx, &session_id, &hb).await?;
 
                 json!({
                     "success": true,
                     "message": "心跳任务已启用（会话空闲达到间隔后自动触发）",
                     "session_id": session_id,
-                    "heartbeat": Self::config_view(&hb),
+                    "heartbeat": hb.view(),
                 })
             }
 
             // 停用：配置保留，便于再次 set 启用
             "cancel" => {
                 hb.enabled = false;
-                Self::write_back(&mut session, &hb);
-                plugin.save_session(&session).await?;
+                save(&provider, &vctx, &session_id, &hb).await?;
 
                 json!({
                     "success": true,
                     "message": "心跳任务已停用（配置保留，可再次 set 启用）",
                     "session_id": session_id,
-                    "heartbeat": Self::config_view(&hb),
+                    "heartbeat": hb.view(),
                 })
             }
 
@@ -177,22 +178,52 @@ impl Capability for HeartbeatTool {
     }
 }
 
-impl HeartbeatTool {
-    /// 把配置写回会话 metadata（整体替换 heartbeat 子对象）并刷新 updated_at。
-    ///
-    /// updated_at 即调度器的磁盘侧空闲基准：进程重启后内存活动表清空，
-    /// 调度器以 updated_at 追补判定，重启不丢心跳节奏。
-    fn write_back(session: &mut super::super::types::Session, hb: &HeartbeatConfig) {
-        let hb_json = serde_json::to_value(hb).unwrap_or_else(|_| json!({}));
-        if let Some(obj) = session.metadata.as_object_mut() {
-            obj.insert("heartbeat".to_string(), hb_json);
-        } else {
-            session.metadata = json!({ "heartbeat": hb_json });
-        }
-        session.updated_at = crate::symbio_core::clock_now_ms();
+/// 读会话的 metadata 整块（`stat` 的 `attributes.metadata`，与清单同一投影口径）。
+async fn read_metadata(
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    session_id: &str,
+) -> Result<Value, PluginError> {
+    match provider
+        .dispatch(
+            vctx,
+            &format!("{PLUGIN_ID_SESSION}/{session_id}"),
+            VdfsRequest::Stat,
+        )
+        .await?
+    {
+        VdfsResponse::Stat(node) => Ok(node
+            .attributes
+            .get("metadata")
+            .cloned()
+            .unwrap_or_else(|| json!({}))),
+        _ => Err(PluginError::InternalError(
+            "vdfs/stat 未返回节点".to_string(),
+        )),
     }
 }
 
+/// 写回整块 `heartbeat` 配置（浅合并按顶层键替换，与切片前的 `write_back` 逐字同义）。
+async fn save(
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    session_id: &str,
+    hb: &HeartbeatConfig,
+) -> Result<(), PluginError> {
+    let body = json!({ "metadata": { "heartbeat": hb.view() } });
+    provider
+        .dispatch(
+            vctx,
+            &format!("{PLUGIN_ID_SESSION}/{session_id}"),
+            VdfsRequest::Write {
+                content: VdfsContent::text(body.to_string()),
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
-#[path = "heartbeat_tool.test.rs"]
+#[path = "tool.test.rs"]
 mod tests;

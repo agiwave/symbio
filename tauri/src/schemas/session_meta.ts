@@ -71,7 +71,8 @@ export interface SessionMetadata {
  *
  * 存储于 `Session.metadata.heartbeat`，由会话页「心跳任务」选项表单写入
  * （会话选项栏，`widget = "form"` 的字段 key = `heartbeat`）。
- * 后端 `SessionPlugin` 的后台调度器会按 interval_seconds 检测空闲并触发。
+ * 后端 `heartbeat` 插件的调度器会按 interval_seconds 检测空闲并触发（它经地址面
+ * 读会话清单，不认识 `SessionPlugin` 的内部）。
  */
 export interface SessionHeartbeatConfig {
   /** 是否启用心跳任务（默认 false） */

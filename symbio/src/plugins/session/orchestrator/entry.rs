@@ -331,12 +331,9 @@ impl SessionPlugin {
                 })
                 .unwrap_or(false);
 
-            // 记录最近一次"有效活动"时间（心跳任务据此判断会话是否已空闲足够久）。
-            // ping（健康检查）不计入活动，避免误触发心跳计时器重置。
-            // resume 也计入活动（用户主动操作），避免心跳在用户审批期间误触发。
-            if !is_ping {
-                this_spawn.mark_activity(&sid_spawn).await;
-            }
+            // 心跳的空闲锚点不在这里维护：切出 `plugins/heartbeat` 后那格是**调度器自己的**
+            // 簿记（触发成功才写，见 `plugins/heartbeat/scheduler.rs`），而回合侧推进空闲
+            // 基线靠的是消息落盘刷新的 `updated_at`（[ADR-077](../../../../../docs/010-adr/077.md "ADR-077") 后果 #7）。
 
             // 仅 message 分支（非 ping）追加用户消息到存储
             //

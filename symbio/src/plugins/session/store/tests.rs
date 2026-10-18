@@ -28,7 +28,7 @@ async fn top_level_sessions_stay_flat() {
     save(&store, &session_with("v2_sess_aaa", None)).await;
 
     assert!(tmp.path().join("v2_sess_aaa").join("session.json").exists());
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "v2_sess_aaa");
 }
@@ -100,7 +100,7 @@ async fn sub_session_routes_into_parent_dir() {
         .exists());
 
     // 子会话不出现在顶层清单
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
 
     // 子会话清单：仅父目录内的嵌套会话
@@ -148,7 +148,11 @@ async fn deleting_parent_cascades_sub_sessions() {
     .await;
 
     store.delete_session("v2_sess_parent").await.unwrap();
-    assert!(store.list_sessions().await.unwrap().is_empty());
+    assert!(store
+        .list_sessions_window(None, None)
+        .await
+        .unwrap()
+        .is_empty());
     assert!(store
         .list_sub_sessions("v2_sess_parent")
         .await
@@ -164,7 +168,11 @@ async fn ephemeral_store_matches_the_persistent_contract() {
     // load 不存在的会话 → 新建空 Session（不报错、不留下任何东西）
     let fresh = store.load_session("mem_missing").await.unwrap();
     assert_eq!(fresh.id, "mem_missing");
-    assert!(store.list_sessions().await.unwrap().is_empty());
+    assert!(store
+        .list_sessions_window(None, None)
+        .await
+        .unwrap()
+        .is_empty());
 
     // save → load 往返；load 返回克隆，调用方在副本上改写不影响库内那份
     let mut s = session_with("mem_a", None);
@@ -177,14 +185,14 @@ async fn ephemeral_store_matches_the_persistent_contract() {
     s.updated_at = 2000;
     save(&store, &s).await;
     assert_eq!(
-        store.list_sessions().await.unwrap().len(),
+        store.list_sessions_window(None, None).await.unwrap().len(),
         1,
         "mem_a 的两次写不应变成两条"
     );
 
     // list 按 updated_at 降序（与落盘型同一份排序规则）
     save(&store, &session_with("mem_b", None)).await; // 1000
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].id, "mem_a", "2000 在前");
     assert_eq!(listed[1].id, "mem_b");
@@ -197,7 +205,7 @@ async fn ephemeral_store_matches_the_persistent_contract() {
         .unwrap()
         .messages
         .is_empty());
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "mem_b");
 
@@ -213,9 +221,9 @@ async fn each_ephemeral_store_gets_its_own_table() {
     let b = SessionStore::ephemeral();
     save(&a, &session_with("shared", None)).await;
 
-    assert_eq!(a.list_sessions().await.unwrap().len(), 1);
+    assert_eq!(a.list_sessions_window(None, None).await.unwrap().len(), 1);
     assert!(
-        b.list_sessions().await.unwrap().is_empty(),
+        b.list_sessions_window(None, None).await.unwrap().is_empty(),
         "临时会话的可见范围就是它自己的句柄生命周期"
     );
 }
@@ -420,7 +428,7 @@ async fn list_sessions_does_not_touch_messages() {
     )
     .unwrap();
 
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "v2_sess_ok");
     // 投影还在（保存时算好的），因此清单不受影响
@@ -436,7 +444,7 @@ async fn save_persists_the_list_projection() {
     s.metadata["workdir"] = json!("/tmp/proj/demo");
     save(&store, &s).await;
 
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
     let p = &listed[0];
     // 标题 = 第一条用户消息的首行（限长）
@@ -462,7 +470,7 @@ async fn legacy_inline_session_keeps_a_friendly_title() {
     )
     .unwrap();
 
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(
         listed[0].title, "老会话的标题",
@@ -494,14 +502,14 @@ async fn migrate_splits_legacy_and_is_idempotent() {
     assert!(dir.join(MESSAGES_FILE_NAME).is_file(), "消息应被拆出去");
 
     // 迁移后清单仍有友好名，且元数据里不再内联消息
-    let listed = store.list_sessions().await.unwrap();
+    let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed[0].title, "迁移前的话");
     let meta_text = std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap();
     assert!(!meta_text.contains("\"messages\""));
 
     // 幂等：再跑一次不报错、内容不变
     store.migrate_split_messages().await.unwrap();
-    let again = store.list_sessions().await.unwrap();
+    let again = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(again[0].title, "迁移前的话");
     assert_eq!(again[0].message_count, 1);
 }
@@ -532,7 +540,7 @@ async fn session_list_pages_before_cursor() {
 
     // 不传参数 = 全量（与 `list_sessions` 同义）
     assert_eq!(
-        ids(&store.list_sessions().await.unwrap()),
+        ids(&store.list_sessions_window(None, None).await.unwrap()),
         vec!["a", "b", "c"]
     );
 

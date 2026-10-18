@@ -3,9 +3,10 @@
 //! ## 角色
 //!
 //! session 插件是**选项宿主**：会话页输入区下方的选项栏与会话详情页的可修改项
-//! 是**同一批字段**（工作目录 / 执行风险 / 运行模式 / 心跳任务 + 各插件贡献的
-//! 智能体 / Model）。本模块声明其中**会话自有**的四项；其余由贡献方在自己的
-//! `traverse(available_options)` 分支注册（agent → 智能体、model → Model）。
+//! 是**同一批字段**（工作目录 / 执行风险 / 运行模式 + 各插件贡献的
+//! 智能体 / Model / 心跳任务）。本模块声明其中**会话自有**的三项；其余由贡献方在
+//! 自己的 `traverse(available_options)` 分支注册（agent → 智能体、model → Model、
+//! `heartbeat` → 心跳任务）。
 //!
 //! ## 三条通路（`docs/archive/session-options-unification.md` §3.2）
 //!
@@ -28,7 +29,8 @@
 //!
 //! 插件之间不可见，故 order 采用**号段约定**（各自定义本地常量）：
 //! `10` 工作目录 / `20` 智能体 / `30` Model / `40` 风险等级 / `50` 运行模式 /
-//! `60` 心跳任务；新增贡献方取空闲号段。
+//! `60` 心跳任务（`plugins/heartbeat`，本表只登记号段、不声明那个字段）；
+//! 新增贡献方取空闲号段。
 //!
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
 //! （见 `symbio_core::capability::option` 的 `capability_option_fields`）
@@ -41,17 +43,13 @@ use crate::symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;
 const ORDER_RISK: i32 = 40;
 const ORDER_MODE: i32 = 50;
-const ORDER_HEARTBEAT: i32 = 60;
-
-/// 心跳任务默认空闲间隔（秒），与前端历史默认值一致
-const DEFAULT_HEARTBEAT_INTERVAL: i64 = 300;
 
 impl SessionPlugin {
     /// 会话自有选项的**字段声明**（供 `node.schema` 下发）。
@@ -67,7 +65,6 @@ impl SessionPlugin {
             (ORDER_WORKDIR, workdir_field()),
             (ORDER_RISK, risk_field()),
             (ORDER_MODE, mode_field()),
-            (ORDER_HEARTBEAT, heartbeat_field()),
         ]
     }
 
@@ -101,7 +98,8 @@ impl SessionPlugin {
         let parent = self.get_parent();
         let visitor = collect_options(parent.as_ref(), &ctx).await;
         DetailDefinition {
-            // 「值来自外部（节点 metadata），提交只回纯字段值」——与心跳表单同一绑定
+            // 「值来自外部（节点 metadata），提交只回纯字段值」——与各贡献方的
+            // `form` 字段（如 `heartbeat`）同一绑定
             binding: "option".to_string(),
             title_fallback: Some("会话选项".to_string()),
             sections: vec![DetailSection {
@@ -249,122 +247,6 @@ fn mode_field() -> DetailField {
                 "无人值守：工具失败返回友好错误让模型自行继续",
             ),
         ],
-        ..Default::default()
-    }
-}
-
-/// 心跳任务的**缺省配置**（未启用 / 300 秒 / 空提示词 / 携带历史）。
-///
-/// 它是 [`heartbeat_field`] 的 `default`（`form` widget 的子对象缺省值）：
-/// 未配置过心跳的会话因此显示「未开启」而不是把字段名印在按钮上，子表单也据此预填。
-fn heartbeat_defaults() -> Value {
-    json!({
-        "enabled": false,
-        "interval_seconds": DEFAULT_HEARTBEAT_INTERVAL,
-        "prompt": "",
-        "include_history": true,
-    })
-}
-
-/// 心跳任务：结构化子对象字段（`widget = "form"`），子定义见 [`heartbeat_definition`]。
-///
-/// `options` 在这里当**值→标签表**用：紧凑渲染形态取子定义的 `title_from`
-/// （`enabled`）作代表值，再查这张表得到「已开启 / 未开启」（见
-/// [`DetailField::form`] 的说明）。`default` 是子对象的缺省配置。
-fn heartbeat_field() -> DetailField {
-    DetailField {
-        key: "heartbeat".to_string(),
-        label: "心跳任务".to_string(),
-        description: Some("会话空闲时自动触发一次对话（定时任务）".to_string()),
-        widget: "form".to_string(),
-        icon: Some("heartbeat".to_string()),
-        options: vec![option("true", "已开启", ""), option("false", "未开启", "")],
-        default: Some(heartbeat_defaults()),
-        form: Some(Box::new(heartbeat_definition())),
-        ..Default::default()
-    }
-}
-
-/// 心跳任务的**子定义**（结构化子对象的字段表）。
-///
-/// `enabled` 开关与三项**基础设置**（空闲间隔 / 任务提示词 / 携带历史）
-/// **恒可见**：基础设置不使用 `visible_when` 门控——未启用时用户同样能
-/// 看到并可预先填写，开关与参数一次保存即生效（`option` 绑定保存全部字段，
-/// 关闭开关也不会丢失已填参数）。
-///
-/// `title_from` 指向 `enabled`：紧凑渲染形态据此取「一句话摘要」的代表值。
-/// 纵向表单渲染器不受影响——它的 `title_from` 只认字符串/数字，布尔会被跳过、
-/// 回落到 `title_fallback`（「心跳任务」）。
-///
-/// 「立即执行一次」**已取消**（2026-09-18）：它原是一个独立命令选项（图标
-/// `play`，点了直接调 `session/heartbeat/trigger`），但它的作用与「在输入框里
-/// 直接发一条消息」完全重复——心跳的实质就是往会话发一轮提示词，用户想立刻
-/// 做一次，直接在输入框发即可。留着它等于给同一件事两个入口，且按钮那个还
-/// 绕开了对话本身。
-fn heartbeat_definition() -> DetailDefinition {
-    DetailDefinition {
-        // option 绑定：预填自节点 metadata、保存回 VDFS 写通道（与 VDFS 详情表单同一方言）
-        binding: "option".to_string(),
-        title_from: vec!["enabled".to_string()],
-        title_fallback: Some("心跳任务".to_string()),
-        sections: vec![DetailSection {
-            title: None,
-            collapsed: false,
-            fields: vec![
-                DetailField {
-                    key: "enabled".to_string(),
-                    label: "启用心跳任务".to_string(),
-                    description: Some(
-                        "开启后，会话空闲达到设定间隔会自动以「任务提示词」触发一次对话；\
-                         正在工作中的会话不会触发"
-                            .to_string(),
-                    ),
-                    widget: "toggle".to_string(),
-                    ..Default::default()
-                },
-                // 以下三项为「基础设置」：**恒可见**（不随启用开关显隐）——
-                // 关闭心跳时也允许预先填写，开启后一次保存即生效。
-                DetailField {
-                    key: "interval_seconds".to_string(),
-                    label: "空闲间隔（秒）".to_string(),
-                    description: Some("会话无活动多久后自动触发".to_string()),
-                    widget: "number".to_string(),
-                    default: Some(json!(DEFAULT_HEARTBEAT_INTERVAL)),
-                    min: Some(10.0),
-                    step: Some(10.0),
-                    ..Default::default()
-                },
-                DetailField {
-                    key: "prompt".to_string(),
-                    label: "任务提示词".to_string(),
-                    description: Some("每次心跳自动发送给 AI 的内容".to_string()),
-                    placeholder: Some(
-                        "例如：检查当前工作目录的待办，主动推进一项不依赖用户输入的小任务。"
-                            .to_string(),
-                    ),
-                    widget: "textarea".to_string(),
-                    rows: Some(4),
-                    full_width: true,
-                    ..Default::default()
-                },
-                DetailField {
-                    key: "include_history".to_string(),
-                    label: "携带历史会话信息".to_string(),
-                    description: Some(
-                        "关闭后，心跳触发时不带历史上下文（以全新上下文执行）".to_string(),
-                    ),
-                    widget: "toggle".to_string(),
-                    default: Some(json!(true)),
-                    ..Default::default()
-                },
-            ],
-        }],
-        actions: vec![DetailAction {
-            id: "save".to_string(),
-            label: "保存".to_string(),
-            style: "primary".to_string(),
-            ..Default::default()
-        }],
         ..Default::default()
     }
 }

@@ -643,37 +643,62 @@ impl SessionPlugin {
                         "收件箱条目是文本（ChatNode 字段子集或纯文本），不接受二进制内容",
                     ));
                 }
-                // 存在性校验：会话不在，就没有"它的收件箱"可写
-                self.session_of(id).await?;
+                // 存在性校验：会话不在，就没有"它的收件箱"可写。
+                // 返回的那份 `Session` 在**触发声明**那条路上要用（自主轮的运行参数
+                // 按会话自己的 metadata 推导，见下）——普通写入路径仍然只把它当校验。
+                let session = self.session_of(id).await?;
                 let raw = content.text.as_deref().unwrap_or("");
                 let message = parse_inbox_message(raw)?;
-                // 工作目录取自**请求上下文**（与 `chat/send` 入队时同一来源）：
-                // 它是 `start_turn` 回退链的**第一档**（ctx > 会话 metadata > 报错），
-                // 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建
-                // 会话那一刻的常态。
-                let workdir = vdfs_host_ctx(ctx)
-                    .ok()
-                    .and_then(|h| h.get(crate::symbio_core::WORKDIR));
-                // 来源主体（ADR-067）：同取**请求上下文**（线上入口 =
-                // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
-                // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，
-                // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。
-                let source_principal = vdfs_host_ctx(ctx)
-                    .ok()
-                    .and_then(|h| h.get(crate::symbio_core::SOURCE_PRINCIPAL))
-                    .filter(|s| !s.trim().is_empty());
-                let item = self
-                    .enqueue_inbox(
-                        id,
-                        iid.map(str::to_string),
-                        message,
-                        session_chat::Request {
-                            source_principal,
-                            ..Default::default()
-                        },
-                        workdir,
-                    )
-                    .await;
+                // 写体声明了 `meta.trigger` ⇒ 这条写入在说「这是一次自主触发」，
+                // 于是它**先落事实才准入队**：存储所有者的写窗口纪律住在
+                // `transcript/autonomous.rs`（[ADR-076](../../../../../docs/010-adr/076.md "ADR-076")），
+                // 识别与判据住在这条臂上。落格没成 ⇒ `Conflict` 且**队列没碰**——
+                // 收件箱是 FIFO，一条永远跑不起来的队首会把后面的用户消息一起堵死。
+                let idle_ms = trigger_declaration(&message)?;
+                let item = match idle_ms {
+                    Some(idle_ms) => self
+                        .request_autonomous_round(
+                            id,
+                            iid.map(str::to_string),
+                            &session.metadata,
+                            message,
+                            idle_ms,
+                        )
+                        .await
+                        .ok_or_else(|| {
+                            VdfsError::Conflict(format!(
+                                "自主触发未能落进事实源，本轮不开（重试归调度侧）：{path}"
+                            ))
+                        })?,
+                    None => {
+                        // 工作目录取自**请求上下文**（与 `chat/send` 入队时同一来源）：
+                        // 它是 `start_turn` 回退链的**第一档**（ctx > 会话 metadata > 报错），
+                        // 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建
+                        // 会话那一刻的常态。
+                        let workdir = vdfs_host_ctx(ctx)
+                            .ok()
+                            .and_then(|h| h.get(crate::symbio_core::WORKDIR));
+                        // 来源主体（ADR-067）：同取**请求上下文**（线上入口 =
+                        // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
+                        // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，
+                        // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。
+                        let source_principal = vdfs_host_ctx(ctx)
+                            .ok()
+                            .and_then(|h| h.get(crate::symbio_core::SOURCE_PRINCIPAL))
+                            .filter(|s| !s.trim().is_empty());
+                        self.enqueue_inbox(
+                            id,
+                            iid.map(str::to_string),
+                            message,
+                            session_chat::Request {
+                                source_principal,
+                                ..Default::default()
+                            },
+                            workdir,
+                        )
+                        .await
+                    }
+                };
                 // 回执的 `name` 是**条目自己的名字**（不是请求地址的末段）：写收件箱
                 // 目录自身时 id 由 provider 生成，调用方只能从回执得知它落成了什么
                 // （与新建会话回执返回生成的 id 同一手法）；写具名条目

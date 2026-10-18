@@ -41,7 +41,7 @@ created: 2026-07-20
 | [goal · 目标](001-goal/README.md "GO-000-目标汇总") | 编号前缀 `GO-` | 要达成什么——价值主张与可度量的验收判据 | 6 | draft 0 · active 6 · retired 0 | 3 条分解边 |
 | [scene · 场景](002-scene/README.md "SC-000-场景汇总") | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 18 | draft 5 · active 13 · retired 0 | — |
 | [plan · 计划](004-plan/README.md "PL-000-计划汇总") | 编号前缀 `PL-` | 要变成什么样——目标架构与实施方案 | 14 | draft 0 · active 14 · retired 0 | — |
-| [arch · 架构](005-arch/README.md "AR-000-架构汇总") | 编号前缀 `AR-` | 现在是什么样——系统结构 / 设计规范 / 模块机制 | 49 | draft 0 · active 49 · retired 0 | — |
+| [arch · 架构](005-arch/README.md "AR-000-架构汇总") | 编号前缀 `AR-` | 现在是什么样——系统结构 / 设计规范 / 模块机制 | 50 | draft 0 · active 50 · retired 0 | — |
 | [ref · 参考](006-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 8 | draft 0 · active 8 · retired 0 | — |
 | [guide · 指南](007-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
 | [spec · 规范](008-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 31 | draft 0 · active 31 · retired 0 | — |

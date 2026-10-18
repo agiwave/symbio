@@ -343,6 +343,22 @@ pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 落在 `conation × opened`。
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
+/// 「这是一次自主开轮」在**地址写入体**上的判别键（`ChatNode.meta` 的键名）。
+///
+/// ## 为什么一个写体的键名住在事件词汇表
+///
+/// 它不是事件名，而是**同一个事实的另一种写法**：写体 `meta.trigger` 声明的是
+/// 「这一轮由系统自己发起」，落进事实源就是 [`EVENT_SYSTEM_TRIGGERED`] 那一格。
+/// 两侧必须同源——`meta` 是自由 JSON，键名拼错编译器管不到，生产方（调度侧）与
+/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[ADR-077](../../../../docs/010-adr/077.md "ADR-077") 裁决二）。
+///
+/// 形状：`meta.trigger = { "kind": <EVENT_TRIGGER_KIND_*>, "idle_ms": N }`，
+/// **在写臂就地消费**，不要求它活到转写。
+pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
+/// 触发方式的取值：**定时触发**（心跳一族的调度器）。落在 [`EVENT_SYSTEM_TRIGGERED`]
+/// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
+pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";
+
 // ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）──
 //
 // 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集

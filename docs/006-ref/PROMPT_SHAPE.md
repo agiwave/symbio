@@ -5,7 +5,7 @@
 > 口径与「什么进基线、什么只作观测」见 [ADR-057](../010-adr/057.md)，
 > 提取实现在 `scripts/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-10-13 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-10-18 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 21 | 1121 | 18247 | 19580 |
-| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 21 | 1177 | 18247 | 19948 |
-| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 21 | 1371 | 18247 | 19934 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 21 | 1121 | 21073 | 22406 |
+| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 21 | 1177 | 21073 | 22734 |
+| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 21 | 1644 | 21073 | 23034 |
 
 ## 基线（判据本体）
 
@@ -77,6 +77,7 @@
         "count": 21,
         "names": [
           "agent_run",
+          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -84,7 +85,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "heartbeat",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -98,7 +98,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 18247
+        "schema_bytes": 21073
       }
     },
     {
@@ -166,6 +166,7 @@
         "count": 21,
         "names": [
           "agent_run",
+          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -173,7 +174,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "heartbeat",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -187,7 +187,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 18247
+        "schema_bytes": 21073
       }
     },
     {
@@ -243,7 +243,7 @@
           },
           {
             "tag": "长期记忆",
-            "chars": 69
+            "chars": 168
           },
           {
             "tag": "能力目录",
@@ -259,6 +259,7 @@
         "count": 21,
         "names": [
           "agent_run",
+          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -266,7 +267,6 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
-          "heartbeat",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -280,7 +280,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 18247
+        "schema_bytes": 21073
       }
     }
   ]

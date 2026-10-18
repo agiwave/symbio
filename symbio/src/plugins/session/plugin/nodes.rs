@@ -458,6 +458,42 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     Ok(message)
 }
 
+/// 收件箱写体里的**触发声明**（`meta.trigger`）：给出 ⇒ 这次写入在说「这不是一个人发的
+/// 消息，是一次自主触发」，返回该次触发已空闲的毫秒数。
+///
+/// ## 为什么识别在这里，而落格在那里
+///
+/// 声明的**词汇**是共享的（写方 [`crate::plugins::heartbeat`] 与读方本写臂分属两个插件，
+/// 故键名与 kind 住在 core 的 `event` 域）；声明的**后果**是存储所有者的写窗口纪律
+/// （先把事实源那四格落进，落成了才入队）。两者都在这条写臂上收口，见
+/// [ADR-076](../../../../../docs/010-adr/076.md "ADR-076") #4 与
+/// [ADR-077](../../../../../docs/010-adr/077.md "ADR-077") 后果段。
+///
+/// ## 不认识的 `kind` 报 `Invalid`，而不是当没看见
+///
+/// 「声明了触发但 kind 拼错」若静默降级成一条普通用户消息，那轮工作就**不再是自主的**
+/// ——事实源里少那四格，而没有任何一处会因此变红。`meta` 是自由 JSON，键名拼错编译器
+/// 管不到，所以判据只能写在这里。
+pub(crate) fn trigger_declaration(message: &cm::ChatNode) -> VdfsResult<Option<i64>> {
+    let Some(trigger) = message
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(crate::symbio_core::EVENT_TRIGGER_META_KEY))
+    else {
+        return Ok(None);
+    };
+    let kind = trigger.get("kind").and_then(Value::as_str).unwrap_or("");
+    if kind != crate::symbio_core::EVENT_TRIGGER_KIND_SCHEDULED {
+        return Err(VdfsError::invalid(format!(
+            "不认识的触发声明 kind：{kind:?}（今天只有 {:?}）",
+            crate::symbio_core::EVENT_TRIGGER_KIND_SCHEDULED
+        )));
+    }
+    Ok(Some(
+        trigger.get("idle_ms").and_then(Value::as_i64).unwrap_or(0),
+    ))
+}
+
 /// 收件箱条目 → VDFS 节点。
 ///
 /// 形状**就是消息节点的形状**（[`message_node`]）：条目本来就是一条用户消息，

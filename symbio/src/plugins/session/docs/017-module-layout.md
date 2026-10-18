@@ -52,11 +52,11 @@ created: 2026-09-16
 | 上下文治理 | `context.rs` + `context/{pipeline,view,window,prompt}.rs` | 「发给大模型之前」的全部处理：压缩策略与执行流水线（压缩内核 `compress_with_snapshot_core` 的唯一落点是 `context/pipeline.rs`）、请求视图四步剪裁、工具骨架化、压缩提示词协议 |
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
-| 转写 | `transcript.rs` + `transcript/{frames,deliver,inbox}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、状态帧与删除帧出口、收件箱入队与消费挑选 |
+| 转写 | `transcript.rs` + `transcript/{frames,deliver,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
-| 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard,heartbeat_tool}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档、心跳任务工具；域根 `tools.rs` 是对编排层的门面 |
+| 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档；域根 `tools.rs` 是对编排层的门面 |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
-| 心跳 | `heartbeat/mod.rs` | 空闲扫描与触发调度（15 秒节拍、错峰与每 tick 上限） |
+| 心跳 | **不住本插件**：`plugins/heartbeat` | 空闲扫描与触发调度（15 秒节拍、错峰、每 tick 上限）连同它的设置工具与选项行是一个**独立插件**（落点判据 [ADR-077](../../../../../docs/010-adr/077.md "ADR-077")）。本插件与它相接的只有两处：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
@@ -98,7 +98,7 @@ created: 2026-09-16
 | `transcript/inbox.test.rs` | `SessionConfig` | 真源在 `config.rs`（plugin 只是 re-export），测试直引真源即消 |
 
 `SessionPlugin` **类型本身**不入表：inherent impl 分布在领域层文件是全仓惯例
-（`commands.rs` / `heartbeat` / `options` 皆如此），见 `symbio/src/plugins/mod.rs`
+（`commands.rs` / `options` 皆如此），见 `symbio/src/plugins/mod.rs`
 的架构原则。
 
 ---
@@ -112,7 +112,7 @@ created: 2026-09-16
 X.rs + X.test.rs           实现文件与测试同级，宿主末尾：
                            #[cfg(test)] #[path = "X.test.rs"] mod tests;
 
-X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、heartbeat/）：
+X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、workdir/）：
                            测试放同级 tests.rs，宿主末尾 #[cfg(test)] mod tests;
 ```
 

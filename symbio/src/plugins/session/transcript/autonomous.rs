@@ -8,9 +8,10 @@
 //! 那是存储所有者的写窗口纪律，不是某个触发器的私事（归属裁决见
 //! [ADR-076](../../../../../docs/010-adr/076.md "ADR-076") 裁决一 #5/#6）。
 //!
-//! 于是「谁来发起」在这里不重要：今天只有会话内的心跳经 [`SessionPlugin::request_autonomous_round`]
-//! 开这一轮，ADR-076 的 2b 批之后收件箱写臂（`write(<会话地址>/inbox)`，写体带触发声明）
-//! 也落到同一个入口——任何触发器（巡检、外部调度、网关）声明同一件事，落的都是这同四格。
+//! 于是「谁来发起」在这里不重要：今天唯一的入口是收件箱写臂（`write(<会话地址>/inbox)`，
+//! 写体带 `meta.trigger` 触发声明，识别在 `plugin/nodes.rs::trigger_declaration`），
+//! 它经 [`SessionPlugin::request_autonomous_round`] 开这一轮。任何触发器（心跳、巡检、
+//! 外部调度、网关）声明同一件事，落的都是这同四格——**发起者的身份不是这段代码的输入**。
 //!
 //! ## 失败落在队列之外，不落队首
 //!
@@ -40,9 +41,15 @@ impl SessionPlugin {
     /// [ADR-066](../../../../../docs/010-adr/066.md "ADR-066") 决策 4）：
     /// 会话 metadata 是这两格唯一的 owner，与 `resolve_session_params` 的元数据回退同一口径
     /// （`orchestrator/entry.rs` 的 `req > metadata > 默认`）。
+    ///
+    /// `iid` 透传给 [`Self::enqueue_inbox`]：收件箱的两种地址形态（写目录自身 = 条目名
+    /// 由本插件生成；写具名条目 = 名字由调用方给）在这里**不因触发声明而改变语义**。
+    /// 落格失败时返回 `None` 而**不产生任何条目**，所以具名调用方也不会看到一个「名字占了
+    /// 但内容是空的」条目。
     pub(crate) async fn request_autonomous_round(
         &self,
         session_id: &str,
+        iid: Option<String>,
         metadata: &serde_json::Value,
         message: cm::ChatNode,
         idle_ms: i64,
@@ -78,7 +85,7 @@ impl SessionPlugin {
             ..Default::default()
         };
         Some(
-            self.enqueue_inbox(session_id, None, message, params, None)
+            self.enqueue_inbox(session_id, iid, message, params, None)
                 .await,
         )
     }

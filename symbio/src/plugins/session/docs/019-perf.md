@@ -245,7 +245,7 @@ vdfs/list { path: "<id>/message", limit: 30, before: "<id>/message/<mid>" }
 | `store/mod.rs` | 两个文件形状 + 读写 + 投影 + 兜底 + 迁移 |
 | `types.rs` | `SessionSummary`；`derive_session_summary` / `session_meta_tags` 移入 |
 | `plugin.rs` | `session_node` / `nodes_of_sessions` 改收 `&SessionSummary` |
-| `heartbeat/mod.rs` / 崩溃清理 | 仍走**全量** `list_sessions()`（它们确实要读消息） |
+| 全量 `list_sessions()` | 生产路径上唯一的清单读者是 VDFS 的**有界**窗口（`list_sessions_window`）；无界那份只剩存储层用例与迁移在读。**外来读者不读 store**：心跳调度读的是地址面 `vdfs/list(session)`，它住 `plugins/heartbeat`（[ADR-077](../../../../../docs/010-adr/077.md "ADR-077")） |
 
 **不动**：内存中 `Session.messages` 语义、VDFS 对外地址、前端协议。
 拆的是**磁盘布局**，不是契约。

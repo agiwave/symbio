@@ -7,7 +7,7 @@
 //!
 //! ## 为什么这是一条**投影**而不是插件里的一次全表扫
 //!
-//! 判定「这条长目标声明过没有」是**投影**，消费方（`plugins/session/heartbeat`）
+//! 判定「这条长目标声明过没有」是**投影**，消费方（`plugins/session/transcript/autonomous.rs`）
 //! 拿的是 `View`，不自己 `range(0).any(…)` 扫事实源——判定与它读的事实同一处
 //! （改口径只动一个文件）。可执行论证
 //! 见 [`verify/conation_minimal.rs`](../../../../docs/004-plan/verify/conation_minimal.rs) 的
@@ -64,9 +64,10 @@ pub struct ConationView {
 impl ConationView {
     /// 该目标是否**已声明**（存在一条已升格为任务的同目标欲）。
     ///
-    /// 生产消费方：`plugins/session/heartbeat` 的长目标去重判据——心跳按 `interval_seconds`
-    /// 周期性表达同一条欲，每次都开格会让就绪集无界增长，而 `readyset` 是模型唯一的调度
-    /// 候选来源。故「声明过就不再声明」（重新发起是 S03 返工机制的事，不由心跳每 tick 重开）。
+    /// 生产消费方：自主触发（`plugins/session/transcript/autonomous.rs`）的长目标去重判据——
+    /// 心跳按 `interval_seconds` 周期性表达同一条欲，每次都开格会让就绪集无界增长，而
+    /// `readyset` 是模型唯一的调度候选来源。故「声明过就不再声明」（重新发起是 S03 返工机制
+    /// 的事，不由心跳每 tick 重开）。
     pub fn is_declared(&self, goal: &str) -> bool {
         self.intents
             .iter()

@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（`options/mod.rs` + 同级 `tests.rs`，见 `CONTRIBUTING.md`）：
 //! `mod.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! 这里锁的是「会话自有 4 项」这份**声明**：字段 key（= 会话解析链读取的 metadata
+//! 这里锁的是「会话自有 3 项」这份**声明**：字段 key（= 会话解析链读取的 metadata
 //! 键）、号段顺序（= UI 顺序）、以及各字段的 widget 与锁定/缺省语义。
 
 use super::*;
@@ -36,7 +36,6 @@ fn session_option_fields_declare_the_option_bar_in_order() {
             (ORDER_WORKDIR, "workdir".to_string(), "path".to_string()),
             (ORDER_RISK, "risk_level".to_string(), "select".to_string()),
             (ORDER_MODE, "mode".to_string(), "select".to_string()),
-            (ORDER_HEARTBEAT, "heartbeat".to_string(), "form".to_string()),
         ],
         "号段顺序即展示顺序；改号段等于改 UI，必须是有意的"
     );
@@ -45,6 +44,9 @@ fn session_option_fields_declare_the_option_bar_in_order() {
 /// 字段 key 就是**契约**：会话解析链（orchestrator / tool_executor）按这几个键
 /// 从 `session.metadata` 回退取值。改 key = 静默失效（选项能选、能存，但没人读），
 /// 故在这里钉死。
+///
+/// `heartbeat` 不在这张表里：它随调度搬进了 `plugins/heartbeat`，那个键的**读方**是
+/// 心跳插件（设置工具与调度器）而不是会话解析链，因此本插件不再声明它。
 #[test]
 fn field_keys_are_the_metadata_keys_the_parsers_read() {
     let keys: BTreeSet<String> = plugin()
@@ -55,7 +57,7 @@ fn field_keys_are_the_metadata_keys_the_parsers_read() {
 
     assert_eq!(
         keys.iter().map(String::as_str).collect::<Vec<_>>(),
-        vec!["heartbeat", "mode", "risk_level", "workdir"]
+        vec!["mode", "risk_level", "workdir"]
     );
 }
 
@@ -89,95 +91,6 @@ fn workdir_locks_only_when_bound_and_has_history() {
     );
 }
 
-/// 心跳：字段自带子定义（`form` widget），且**基础设置恒可见**。
-#[test]
-fn heartbeat_field_carries_its_sub_definition_and_summary() {
-    let f = heartbeat_field();
-    assert_eq!(f.widget, "form");
-    let form = f.form.expect("心跳子定义存在");
-
-    let keys: Vec<&str> = form.sections[0]
-        .fields
-        .iter()
-        .map(|x| x.key.as_str())
-        .collect();
-    assert_eq!(
-        keys,
-        vec!["enabled", "interval_seconds", "prompt", "include_history"]
-    );
-    // 基础设置必须恒可见（不得带 visible_when）：否则未启用时表单只剩开关，
-    // 用户看不到任何可填参数（历史回归）。
-    for sub in &form.sections[0].fields {
-        assert!(
-            sub.visible_when.is_none(),
-            "字段 {} 不应带显隐门控",
-            sub.key
-        );
-    }
-
-    // 紧凑形态的一句话摘要：代表值取子定义的 title_from（enabled），
-    // 再按本字段 options 查「值→标签」⇒ 未启用 = 未开启
-    assert_eq!(form.title_from, vec!["enabled".to_string()]);
-    let labels: Vec<(&str, &str)> = f
-        .options
-        .iter()
-        .map(|o| (o.value.as_str(), o.label.as_str()))
-        .collect();
-    assert_eq!(labels, vec![("true", "已开启"), ("false", "未开启")]);
-
-    // 未配置过心跳时紧凑形态要显示「未开启」而不是字段名：这靠 `default`
-    // （子对象缺省值）给出 `enabled = false`，再按 `title_from` + `options` 查表。
-    let d = f.default.as_ref().expect("必须给子对象缺省值");
-    assert_eq!(d["enabled"], json!(false));
-    assert_eq!(d["interval_seconds"], json!(DEFAULT_HEARTBEAT_INTERVAL));
-    assert_eq!(d["prompt"], json!(""));
-    assert_eq!(d["include_history"], json!(true));
-}
-
-/// 子表单里 `interval_seconds` 的 `default` 与子对象缺省值**同源**（都是
-/// [`DEFAULT_HEARTBEAT_INTERVAL`]）：两处各写一个数字迟早会漂。
-#[test]
-fn heartbeat_interval_defaults_agree() {
-    let form = heartbeat_field().form.expect("心跳子定义存在");
-    let interval = form.sections[0]
-        .fields
-        .iter()
-        .find(|x| x.key == "interval_seconds")
-        .expect("interval_seconds 字段存在");
-    assert_eq!(
-        interval.default,
-        Some(json!(DEFAULT_HEARTBEAT_INTERVAL)),
-        "子表单字段缺省值必须与子对象缺省值一致"
-    );
-}
-
-/// 「立即心跳」按钮**已取消** —— 防回归。
-///
-/// 它原是一个独立命令选项（图标 `play`，点了直接调 `session/heartbeat/trigger`）。
-/// 取消的理由是**它的作用与「在输入框里直接发一条消息」完全重复**——心跳的实质
-/// 就是往会话发一轮提示词，想立刻做一次直接在输入框发即可。若哪天有人把它加回来，
-/// 同一件事就又有了两个入口，且按钮那个绕开了对话本身。
-///
-/// 注意这里锁的是**两件事**：触发按钮没了、**心跳配置仍在**（取消的只是那个
-/// 手动触发入口，不是心跳任务本身）。
-#[test]
-fn heartbeat_trigger_option_is_gone() {
-    let keys: Vec<String> = plugin()
-        .session_option_fields()
-        .into_iter()
-        .map(|(_, f)| f.key)
-        .collect();
-
-    assert!(
-        !keys.iter().any(|k| k.contains("trigger")),
-        "「立即心跳」按钮不得被加回来：它与「输入框里直接发一条消息」重复"
-    );
-    assert!(
-        keys.iter().any(|k| k == "heartbeat"),
-        "心跳任务**配置**必须保留——取消的只是手动触发入口"
-    );
-}
-
 /// 定义与会话无关：同一份声明算两次逐字节相同（`default` 表示后端缺省回落，
 /// 而不是「当前值」——这正是新形态能同时服务草稿态与已落盘会话的原因）。
 #[tokio::test]
@@ -202,7 +115,7 @@ async fn option_definition_without_container_degrades_to_empty() {
 
 /// 会话作为**贡献方**：命中 `available_options` 时把字段注册进收集器。
 ///
-/// 这是「会话自有 4 项」在生产路径上的唯一注册点——漏注册的表现是选项栏少了几项，
+/// 这是「会话自有 3 项」在生产路径上的唯一注册点——漏注册的表现是选项栏少了几项，
 /// 而不会有任何编译错误。
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
@@ -225,5 +138,5 @@ async fn session_contributes_option_fields_to_the_visitor() {
         .into_iter()
         .map(|f| f.key)
         .collect();
-    assert_eq!(keys, vec!["workdir", "risk_level", "mode", "heartbeat"]);
+    assert_eq!(keys, vec!["workdir", "risk_level", "mode"]);
 }

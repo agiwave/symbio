@@ -7,7 +7,6 @@ mod chat_session;
 mod commands;
 pub(crate) mod config;
 mod context;
-mod heartbeat;
 pub(crate) mod loop_registry;
 mod memory;
 mod message_build;

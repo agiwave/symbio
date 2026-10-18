@@ -52,9 +52,6 @@ pub struct SessionPlugin {
     pub(crate) active_mgr: Arc<super::active::ActiveSessionManager>,
     /// 存储单例（全局共享，初始化一次后跨 workdir / 跨会话复用）
     pub(crate) store: OnceCell<Arc<SessionStore>>,
-    /// 心跳任务运行时状态：会话 id -> 最近一次"有效活动"时间戳（毫秒）。
-    /// 调度器据此判断会话是否已空闲足够久。
-    pub(crate) heartbeat_state: Arc<RwLock<HashMap<String, i64>>>,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
@@ -234,7 +231,6 @@ impl SessionPlugin {
                 change_subs.as_ref().clone(),
             )),
             store: OnceCell::new(),
-            heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
             workdir_watches,
             change_subs,
             inbox_wake: tokio::sync::Notify::new(),
@@ -381,22 +377,25 @@ impl SessionPlugin {
         plugin
     }
 
-    /// 启动本插件的**两条常驻任务**（心跳调度器 + 收件箱消费者），句柄记进
+    /// 启动本插件的**常驻任务**（今天只有收件箱消费者一条），句柄记进
     /// [`Self::resident_tasks`]，因此 [`Plugin::stop`] 能等到它们真的退出。
     ///
-    /// 两处 spawn 都在本函数里交出句柄——任务体不需要持有自己，注册点因此只有一个。
-    /// 没有 runtime 时（部分单元测试里的裸构造）**两条都不起**：那种场景没有会话要跑，
+    /// spawn 都在本函数里交出句柄——任务体不需要持有自己，注册点因此只有一个。
+    /// 没有 runtime 时（部分单元测试里的裸构造）**一条也不起**：那种场景没有会话要跑，
     /// 构造方不因此失败，而「没启动过」在停机侧就是空表，无事可做。
+    ///
+    /// 心跳扫描循环**不在这里**：它随切片搬进了 `plugins/heartbeat`
+    /// （[ADR-077](../../../../docs/010-adr/077.md "ADR-077")），判据不变——每条常驻任务
+    /// 都由它的**所有者**在构造点记下句柄。
     pub(crate) fn start_resident_tasks(self: &Arc<Self>) {
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        // 「有 runtime 才起任务」与 session 之外的常驻任务同一条判据（裸构造的单测里
+        // `tokio::spawn` 会当场 panic，而那种场景没有会话要跑）。
+        if tokio::runtime::Handle::try_current().is_err() {
             return;
-        };
-        let scheduler = self.clone();
-        let heartbeat = handle.spawn(async move { scheduler.run_heartbeat_loop().await });
-        // 收件箱消费者与心跳同处构造点，因此**早于任何写入**——
+        }
+        // 消费者在构造点起，因此**早于任何写入**——
         // "谁来消费第一次写入"不依赖装配顺序。
         let inbox = self.clone().spawn_inbox_consumer();
-        self.resident_tasks.push(heartbeat);
         self.resident_tasks.push(inbox);
     }
 
@@ -469,11 +468,6 @@ impl SessionPlugin {
 
     pub(crate) async fn save_session(&self, session: &Session) -> Result<(), PluginError> {
         self.get_store().await?.save_session(session).await
-    }
-
-    /// 会话清单（**摘要**，不含消息）
-    pub(crate) async fn list_sessions(&self) -> Result<Vec<SessionSummary>, PluginError> {
-        self.get_store().await?.list_sessions().await
     }
 
     /// 有界会话清单：`limit` 条、游标 `before` 之后（VDFS 调用级参数袋传入）
@@ -648,7 +642,7 @@ impl Plugin for SessionPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         // 选项收集：会话作为选项宿主贡献「自有选项」（工作目录 / 风险等级 /
-        // 运行模式 / 心跳）。与其它插件同构——命中 available_options 时才注册，
+        // 运行模式）。与其它插件同构——命中 available_options 时才注册，
         // 经统一的 OPTION_VISITOR 收集器汇流。
         if ctx.get(crate::symbio_core::PATH).unwrap_or_default()
             == crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS
@@ -659,20 +653,9 @@ impl Plugin for SessionPlugin {
                 }
             }
         }
-        // 能力收集（available_tools）：session 贡献一个内聚工具——心跳设置。
-        // 心跳机制（配置存储 / 后台调度 / 触发执行）全部在本插件内闭环，
-        // 其设置工具同样内聚于此：直接读写本插件会话存储，零跨模块路由。
-        if ctx.get(crate::symbio_core::PATH).unwrap_or_default()
-            == crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS
-        {
-            if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-                visitor
-                    .put(CapabilityRow::tool(Arc::new(
-                        super::tools::HeartbeatTool::new(Arc::downgrade(&self)),
-                    )))
-                    .await;
-            }
-        }
+        // 能力收集（available_tools）：本插件**不再贡献工具**——`heartbeat` 那条随调度
+        // 搬进 `plugins/heartbeat`（[ADR-077](../../../../docs/010-adr/077.md "ADR-077")），
+        // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
         // VDFS 挂载点：与会话工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
         // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_ID_SESSION`），
         // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
@@ -984,7 +967,7 @@ pub(crate) use self::nodes::{
     inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
     message_path, message_text, messages_dir_node, ordered, overlay_live, parse_inbox_message,
     parse_session_path, session_content, session_node, subtree_nodes, transcript_window,
-    window_params, SessionRuntime, VdfsSessionPath,
+    trigger_declaration, window_params, SessionRuntime, VdfsSessionPath,
 };
 pub(crate) use self::words::{
     EXT_MESSAGE, EXT_SESSION, KIND_INBOX, KIND_MESSAGES, OUTCOME_ABORTED, OUTCOME_COMPLETED,

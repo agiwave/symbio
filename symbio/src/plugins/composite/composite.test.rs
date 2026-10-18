@@ -300,3 +300,209 @@ async fn top_level_container_falls_back_to_declared_root() {
         seen[0]
     );
 }
+
+// ==================== 运行期停用一片插件（ADR-077 守卫后半） ====================
+//
+// 「切出一个插件」的**兑现判据**不是目录搬对了，而是：停用它 ⇒ 少掉的正好是它这一
+// 个功能，其余一切照旧。这条判据跨插件，故两侧各钉一半——本插件自己那半
+// （`traverse` put 两行 + `stop` ⇒ 循环退出）在 `plugins/heartbeat/plugin.test.rs`；
+// 这里钉的是**容器侧**：经**工厂 id + 真实 `mount_all`** 装配，不 import 兄弟模块
+// （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
+
+use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::{
+    capability_mounts, capability_option_fields, vdfs_context, CapabilityRowKind, PluginStopReason,
+    Registry, VdfsContent, VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+};
+use std::path::{Path, PathBuf};
+
+/// 一次性插件根：判据的来源是磁盘（装配位写在 `PLUGIN.yml`），不能拿内存替身测
+fn guard_root(tag: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!(
+        "symbio-composite-guard-{tag}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).expect("临时插件根建得起来");
+    p
+}
+
+fn put_plugin_dir(root: &Path, name: &str, provider: &str) {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).expect("插件目录建得起来");
+    std::fs::write(
+        dir.join(PLUGIN_FILE),
+        format!(r#"{{"plugin_provider": "{provider}"}}"#),
+    )
+    .expect("装配位写得出去");
+}
+
+/// 广播一次收集，回收集器（端点决定贡献方注册哪一族）
+async fn collect_at(composite: &Arc<Composite>, endpoint: &str) -> Arc<dyn Registry> {
+    let ctx = host();
+    ctx.set(PATH, endpoint.to_string());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    if endpoint == TRAVERSE_AVAILABLE_TOOLS {
+        ctx.set(CAPABILITY_VISITOR, visitor.clone());
+    } else {
+        ctx.set(OPTION_VISITOR, visitor.clone());
+    }
+    composite
+        .clone()
+        .traverse(String::new(), ctx)
+        .await
+        .expect("容器的收集广播不该失败");
+    visitor
+}
+
+async fn tool_names(composite: &Arc<Composite>) -> Vec<String> {
+    let visitor = collect_at(composite, TRAVERSE_AVAILABLE_TOOLS).await;
+    let mut names: Vec<String> = visitor
+        .list(CapabilityRowKind::Tool)
+        .await
+        .into_iter()
+        .map(|row| row.name().to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+async fn mount_names(composite: &Arc<Composite>) -> Vec<String> {
+    let visitor = collect_at(composite, TRAVERSE_AVAILABLE_TOOLS).await;
+    let mut names: Vec<String> = capability_mounts(&*visitor)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    names.sort();
+    names
+}
+
+async fn option_keys(composite: &Arc<Composite>) -> Vec<String> {
+    let visitor = collect_at(composite, TRAVERSE_AVAILABLE_OPTIONS).await;
+    capability_option_fields(&*visitor)
+        .await
+        .into_iter()
+        .map(|f| f.key)
+        .collect()
+}
+
+/// 停用 `heartbeat` ⇒ 它的两行一起消失，会话那一侧一行不少
+#[tokio::test]
+async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
+    let root = guard_root("slice");
+    // 两个**真**插件目录，provider 写工厂 id（`submit_object_creator!` 注册的那个）
+    put_plugin_dir(&root, "heartbeat", "heartbeat");
+    put_plugin_dir(&root, "session", "session");
+
+    let registry = Arc::new(PluginRegistry::with_instances(
+        plugin_map(Vec::new()),
+        root.clone(),
+        Vec::new(),
+    ));
+    registry.mount_all();
+    assert_eq!(
+        registry.snapshot().len(),
+        2,
+        "两个工厂都真实构造出来了（守卫的前提是装配本身跑通）"
+    );
+    let composite = Arc::new(Composite::with_registry(Arc::clone(&registry)));
+
+    // —— 停用前：本插件那两行都在，会话的行也都在 ——
+    assert!(
+        tool_names(&composite)
+            .await
+            .contains(&"heartbeat".to_string()),
+        "工具族里有 heartbeat"
+    );
+    assert!(
+        option_keys(&composite)
+            .await
+            .contains(&"heartbeat".to_string()),
+        "选项族里有 heartbeat"
+    );
+
+    // —— 停用（前端那个开关背后的同一个动词）——
+    registry
+        .set_enabled("heartbeat", false)
+        .await
+        .expect("可停用插件（非界面底座）应当停用成功");
+
+    // —— 停用后：Tool 行与 Option 行的 heartbeat 都不在 ——
+    assert!(
+        !tool_names(&composite)
+            .await
+            .contains(&"heartbeat".to_string()),
+        "停用后工具族里不该再有 heartbeat（模型调不到它才是「停用」）"
+    );
+    let keys = option_keys(&composite).await;
+    assert!(
+        !keys.contains(&"heartbeat".to_string()),
+        "停用后选项栏里不该再有 heartbeat 那一格"
+    );
+    // —— 而其余行照旧：会话自有的三项、会话挂载点 ——
+    for expected in ["workdir", "risk_level", "mode"] {
+        assert!(
+            keys.contains(&expected.to_string()),
+            "停用一片插件不该动会话自己的选项：缺 {expected}"
+        );
+    }
+    assert!(
+        mount_names(&composite)
+            .await
+            .contains(&"session".to_string()),
+        "会话的 VDFS 挂载点仍在（少掉的只是心跳这一格）"
+    );
+
+    // —— 会话侧读写照常：经**容器视图**，与心跳插件用的是同一条通道 ——
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+    let vctx = vdfs_context(&host());
+    let mut create = VdfsContent::text("");
+    create.create = true;
+    provider
+        .dispatch(
+            &vctx,
+            "session/guard-1",
+            VdfsRequest::Write { content: create },
+        )
+        .await
+        .expect("新建会话照常");
+    match provider
+        .dispatch(
+            &vctx,
+            "session",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .expect("清单照常")
+    {
+        VdfsResponse::List(items) => assert!(
+            items.iter().any(|i| i.node.name == "guard-1"),
+            "新建的会话在清单里"
+        ),
+        _ => panic!("vdfs/list 未返回清单"),
+    }
+    provider
+        .dispatch(
+            &vctx,
+            "session/guard-1/inbox",
+            VdfsRequest::Write {
+                content: VdfsContent::text("停用心跳之后这条照发"),
+            },
+        )
+        .await
+        .expect("收件箱写臂照常（它不认识心跳在不在装配里）");
+
+    // 收尾：整树停机（会话的收件箱消费者是常驻任务）
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}

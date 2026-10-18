@@ -52,11 +52,12 @@ pub struct Args {
     /// 是正确的，但会挡住两类场景：① 终端不支持 TTY 时仍想用 REPL；
     /// ② 用脚本喂多轮输入来自动化验证会话。给一个显式开关即可两全。
     pub repl: bool,
-    /// 心跳守护模式：常驻宿主 session 插件的后台心跳调度器。
+    /// 心跳守护模式：常驻宿主插件树里的 `heartbeat` 调度插件。
     ///
-    /// 心跳机制完全在后端 session 插件内闭环（配置存 `Session.metadata.heartbeat`，
-    /// 调度循环随插件树构建启动）。CLI 只需保持进程存活，调度器就会按各会话的
-    /// 空闲节奏自动触发心跳对话；本进程同时渲染事件总线上的会话活动。
+    /// 心跳机制完全在后端闭环（配置存 `Session.metadata.heartbeat`，调度循环随插件树
+    /// 构建启动，判空闲与开轮各住 `plugins/heartbeat` 与 `plugins/session`）。CLI 只需
+    /// 保持进程存活，调度器就会按各会话的空闲节奏自动触发心跳对话；本进程同时渲染
+    /// 事件总线上的会话活动。
     pub heartbeat: bool,
 }
 

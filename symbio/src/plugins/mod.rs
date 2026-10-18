@@ -19,8 +19,8 @@
 //!   `orchestrator/` `chat_loop/`）是编排层，其余文件是领域层。编排层可引用
 //!   领域层；领域层不得反向 `use` 编排层的**函数 / 常量**。
 //! - **豁免只认两条**：① 插件 trait **类型本身**——`impl XxxPlugin` 允许分布
-//!   在插件根之外的模块（`session` 的 `commands.rs` / `heartbeat` / `options`、
-//!   `agent` 的 `host/vdfs.rs` 皆如此，本仓一贯）；② 各插件自己模块文档里
+//!   在插件根之外的模块（`session` 的 `commands.rs` / `options`、`agent` 的
+//!   `host/vdfs.rs` 皆如此，本仓一贯）；② 各插件自己模块文档里
 //!   **登记过的存量豁免**（如 `session/docs/017-module-layout.md` §1.3 的 8 处，
 //!   每条带归位方向，只减不增）。
 //! - ⚠️ 本条当前**没有判定审计**（2026-09-27 排查：除上述豁免外，领域层对
@@ -33,6 +33,7 @@ mod compose;
 mod composite;
 mod event_bus;
 mod gateway;
+mod heartbeat;
 mod home;
 mod hook;
 mod local;
