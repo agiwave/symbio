@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
+use super::profile;
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{
@@ -184,7 +185,8 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         if let Some(ref pid) = previous_response_id {
             req["previous_response_id"] = json!(pid);
         }
-        req["max_output_tokens"] = json!(cfg.max_tokens.unwrap_or(8192));
+        req["max_output_tokens"] =
+            json!(cfg.max_tokens.unwrap_or(profile::OPENAI_RESPONSES.default));
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()
@@ -214,8 +216,8 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         let request = json!({
             "model": cfg.model,
             "input": "ping",
-            // OpenAI 限制 max_output_tokens 最小为 16
-            "max_output_tokens": 16,
+            // 探测值见档案表：Responses 的 `max_output_tokens` 下限即 16
+            "max_output_tokens": profile::OPENAI_RESPONSES.probe,
         });
 
         let response = get_http_client()

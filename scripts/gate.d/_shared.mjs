@@ -71,12 +71,18 @@ export const BASELINE = {
   // 这两条钉的是 ADR-053 补记里那张结果表的**两个新分叉**，原实现里它们同属 `Discarded`、无法分别断言。非放宽。
   // baseline-allow rustTests: 批 T-157 新增 1 条判据（1749→1750）——`chat_loop/state.test.rs::the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch`，
   // 钉「会跑模型的主体派生 Reasoner」这个反证（ADR-079 裁决一的地基）。非放宽。
-  rustTests: 1750,
+  // baseline-allow rustTests: 批 T-161 新增 3 条判据（1750→1753）——`protocols/profile.test.rs` 的三条：
+  // `every_protocol_row_keeps_its_measured_budget`（四行两数各是今天的实测值，且探测值必须过 GLM 那条 `> 2` 的下限）、
+  // `the_chain_skips_nulls_and_follows_the_table_order`（MiMo 的 `reasoning_content: null` + `reasoning` 形态、顺序由表定）、
+  // `the_anthropic_keys_use_the_same_extractor`（Anthropic 三组键与类型名同样落表）。档案表本身是把散落魔法数搬成数据，
+  // 这三条钉的是「搬家后值不变、链序不变」——原先是三处字面量，没有可断言的单点。非放宽。
+  rustTests: 1753,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-157 的同一增量在 CI 口径下修一格（1433→1434），逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1434,
+  // baseline-allow ciRustTestsTotal: 批 T-161 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1437,
   cliRustTests: 11,
   tauriRustTests: 0,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

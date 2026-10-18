@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
+use super::profile;
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
@@ -150,7 +151,7 @@ impl ModelProtocol for GeminiProtocol {
             "systemInstruction": {"parts": [{"text": system}]},
             "generationConfig": {
                 "temperature": cfg.temperature,
-                "maxOutputTokens": cfg.max_tokens.unwrap_or(8192)
+                "maxOutputTokens": cfg.max_tokens.unwrap_or(profile::GEMINI_API.default)
             }
         });
         if !tools.is_empty() {
@@ -169,7 +170,7 @@ impl ModelProtocol for GeminiProtocol {
         let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({
             "contents": [{"parts": [{"text": "ping"}]}],
-            "generationConfig": {"maxOutputTokens": 16}
+            "generationConfig": {"maxOutputTokens": profile::GEMINI_API.probe}
         });
 
         let response = get_http_client()

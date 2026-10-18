@@ -11,6 +11,10 @@ use std::sync::Mutex;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
+use super::profile::{
+    self, first_str, ANTHROPIC_TEXT_DELTA_REASONING_KEYS, ANTHROPIC_THINKING_DELTA_TYPES,
+    ANTHROPIC_THINKING_KEYS,
+};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{
@@ -244,7 +248,14 @@ impl ModelProtocol for AnthropicProtocol {
             req["temperature"] = json!(1.0);
 
             // 确保 max_tokens 大于 budget
-            if cfg.max_tokens.unwrap_or(8192) <= budget {
+            // ⚠️ 这条赋值在两种输入下都不生效（`max_tokens` 为 `None` 时本判据恒假；
+            // 为 `Some(m)` 时被下方 `if let Some(m)` 覆盖回 `m`），故请求体里可能出现
+            // `budget_tokens > max_tokens`。改动它是语义变更，须单独裁决（T-161 勘察）。
+            if cfg
+                .max_tokens
+                .unwrap_or(profile::ANTHROPIC_MESSAGES.default)
+                <= budget
+            {
                 req["max_tokens"] = json!(budget + 1024);
             }
         }
@@ -252,7 +263,7 @@ impl ModelProtocol for AnthropicProtocol {
         if let Some(m) = cfg.max_tokens {
             req["max_tokens"] = json!(m);
         } else if req.get("max_tokens").is_none() {
-            req["max_tokens"] = json!(8192);
+            req["max_tokens"] = json!(profile::ANTHROPIC_MESSAGES.default);
         }
         if !tools.is_empty() {
             req["tools"] = json!(tools
@@ -272,8 +283,8 @@ impl ModelProtocol for AnthropicProtocol {
         let request = json!({
             "model": cfg.model,
             "messages": [{"role": "user", "content": "ping"}],
-            // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
-            "max_tokens": 16,
+            // 探测值见档案表：Anthropic 只要求 `max_tokens >= 1`，取够小又过得去
+            "max_tokens": profile::ANTHROPIC_MESSAGES.probe,
         });
 
         let response = get_http_client()
@@ -383,22 +394,17 @@ impl SseLineParser for AnthropicProtocol {
                                 if let Some(t) = delta["text"].as_str() {
                                     evs.push(ModelProtocolEvent::ContentDelta(t.into()));
                                 }
-                                // 兼容性检查：某些提供商可能在 text_delta 中包含 reasoning_content
+                                // 部分兼容网关把思考塞进 `text_delta` 而非另发带类型事件，
+                                // 字段名在档案表里（`ANTHROPIC_TEXT_DELTA_REASONING_KEYS`）
                                 if let Some(r) =
-                                    delta.get("reasoning_content").and_then(|v| v.as_str())
+                                    first_str(delta, ANTHROPIC_TEXT_DELTA_REASONING_KEYS)
                                 {
                                     evs.push(ModelProtocolEvent::ReasoningDelta(r.into()));
                                 }
                             }
-                            Some("thinking_delta")
-                            | Some("thought_delta")
-                            | Some("reasoning_delta") => {
-                                if let Some(r) = delta
-                                    .get("thinking")
-                                    .or_else(|| delta.get("thought"))
-                                    .or_else(|| delta.get("reasoning"))
-                                    .and_then(|v| v.as_str())
-                                {
+                            // 带类型的思考增量：类型名与正文字段名都是表里的数据
+                            Some(t) if ANTHROPIC_THINKING_DELTA_TYPES.contains(&t) => {
+                                if let Some(r) = first_str(delta, ANTHROPIC_THINKING_KEYS) {
                                     evs.push(ModelProtocolEvent::ReasoningDelta(r.into()));
                                 }
                             }
@@ -441,6 +447,18 @@ impl SseLineParser for AnthropicProtocol {
     }
 }
 
+/// `delta` 下所有可能承载思考正文的字段名——**由档案表拼出**。
+///
+/// 两处必须认同一份名单：`parse_line`（整行解析）与 `AnthropicPartial`（未结束行的
+/// 前缀提取）。任何一侧多认/少认一个字段，前缀截断就会重复或吃字——所以这里不是
+/// 「抄一份常量」，而是让那条不变量**由构造保证**：表加一个键，两条路径同时跟上。
+fn is_reasoning_field(path: &FieldPath<'_>) -> bool {
+    ANTHROPIC_THINKING_KEYS
+        .iter()
+        .chain(ANTHROPIC_TEXT_DELTA_REASONING_KEYS)
+        .any(|k| path.is(&["delta", *k]))
+}
+
 /// 未结束行的增量提取：只认 `content_block_delta` 事件里 `delta.*` 那几个字段。
 ///
 /// 判别方式与 `parse_line` 不同：那里靠 SSE 的 `event:` 行（存在 `self` 上），这里
@@ -450,6 +468,8 @@ impl SseLineParser for AnthropicProtocol {
 /// `thinking_delta`→`thinking`…），所以**按字段名归类**即可，不必读 `delta.type`。
 ///
 /// **路径必须与 `parse_line` 读的字段一一对应**，否则前缀截断会重复或吃字。
+///
+/// 那条不变量由 [`is_reasoning_field`] 从档案表拼出，不再在这里抄第二份名单。
 #[derive(Default)]
 struct AnthropicPartial {
     /// 顶层 `type` 的取值（`Observe` 攒出来的）
@@ -482,11 +502,7 @@ impl PartialJsonSink for AnthropicPartial {
         }
         self.kind = if path.is(&["delta", "text"]) {
             Some(AnthropicField::Content)
-        } else if path.is(&["delta", "reasoning_content"])
-            || path.is(&["delta", "thinking"])
-            || path.is(&["delta", "thought"])
-            || path.is(&["delta", "reasoning"])
-        {
+        } else if is_reasoning_field(path) {
             Some(AnthropicField::Reasoning)
         } else if path.is(&["delta", "partial_json"]) {
             // 下标未知就放弃本次增量（退回等换行），绝不用错下标产出事件

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::CapabilityMeta;
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
+use super::profile::{self, first_str, OPENAI_CHAT_REASONING_KEYS};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
@@ -19,20 +20,15 @@ pub struct OpenaiChatProtocol;
 
 /// 思考分片的字段兼容提取。
 ///
-/// ## 为什么有两个字段名
+/// ## 字段名与顺序不在本文件
 ///
-/// OpenAI 兼容生态里思考分片没有统一约定：DeepSeek 风格用
-/// `delta.reasoning_content`，而部分兼容端点用 `delta.reasoning`——
-/// AMD Radeon AI 开发者平台的 MiMo-V2.6-Flash 实测（2026-10-13）即属后者，
-/// 且首帧带 `reasoning_content: null`（字段存在但为空，不能当文本）。
-/// 此前只认 `reasoning_content`，该端点的思考内容被**静默丢弃**，
-/// Reason 节点从未出现（用户可感知的功能性缺失，非模型不思考）。
+/// 它们是**数据**，在 [`profile::OPENAI_CHAT_REASONING_KEYS`]：OpenAI 兼容生态里思考分片
+/// 没有统一约定（DeepSeek 风格 `delta.reasoning_content`、AMD Radeon AI 开发者平台的
+/// MiMo-V2.6-Flash 用 `delta.reasoning` 且首帧带 `reasoning_content: null`）。
+/// 这里只负责把命中的那一段变成 `String`——链式 `or_else` 若在此处再写一遍，
+/// 迟早与 Anthropic 那侧漂移成「一处认 `reasoning`、另一处不认」。
 fn reasoning_text_of(delta: &Value) -> Option<String> {
-    delta
-        .get("reasoning_content")
-        .and_then(|v| v.as_str())
-        .or_else(|| delta.get("reasoning").and_then(|v| v.as_str()))
-        .map(|s| s.to_string())
+    first_str(delta, OPENAI_CHAT_REASONING_KEYS).map(str::to_string)
 }
 
 /// 把消息数组**最前**的连续 `system` 段并进基础 `system`，返回（合并文本，吃掉几条）。
@@ -140,7 +136,7 @@ impl ModelProtocol for OpenaiChatProtocol {
             req["reasoning_effort"] = json!(reasoning.effort);
         }
 
-        req["max_tokens"] = json!(cfg.max_tokens.unwrap_or(8192));
+        req["max_tokens"] = json!(cfg.max_tokens.unwrap_or(profile::OPENAI_CHAT.default));
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()
@@ -165,8 +161,8 @@ impl ModelProtocol for OpenaiChatProtocol {
         let request = json!({
             "model": cfg.model,
             "messages": [{"role": "user", "content": "ping"}],
-            // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
-            "max_tokens": 256,
+            // 探测值见档案表：GLM 那条 `max_tokens > 2` 的下限把 256 钉在这里
+            "max_tokens": profile::OPENAI_CHAT.probe,
         });
 
         let response = get_http_client()

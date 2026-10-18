@@ -24,6 +24,7 @@ mod gemini_api;
 pub(crate) mod openai_chat;
 mod openai_responses;
 mod partial_json;
+mod profile;
 mod sse;
 
 pub(crate) use sse::utf8_chunk;
