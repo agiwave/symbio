@@ -39,6 +39,7 @@ lists: [gate-codes=owner]
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–030 | `RG-031` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–014 | `S-015` |
+| **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–005 | `SC-006` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 
 ## 2. 逐码归属
@@ -159,6 +160,11 @@ lists: [gate-codes=owner]
 | **S-012** | `scripts/grep-audit.mjs` |
 | **S-013** | `scripts/grep-audit.mjs` |
 | **S-014** | `scripts/grep-audit.mjs` |
+| **SC-001** | `scripts/plugin-special-case-audit.mjs` |
+| **SC-002** | `scripts/plugin-special-case-audit.mjs` |
+| **SC-003** | `scripts/plugin-special-case-audit.mjs` |
+| **SC-004** | `scripts/plugin-special-case-audit.mjs` |
+| **SC-005** | `scripts/plugin-special-case-audit.mjs` |
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/slo-exit-audit.mjs` |

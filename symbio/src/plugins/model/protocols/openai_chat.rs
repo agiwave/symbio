@@ -298,14 +298,22 @@ enum ChatField {
     ToolArgs(usize),
 }
 
+/// `choices[0].delta` 下承载思考正文的字段名——由档案表拼出。
+///
+/// 与 Anthropic 那侧同一个理由：整行解析与前缀提取必须认同一份名单，否则 core
+/// 按前缀截断时会重复或吃字。名单在 [`profile::OPENAI_CHAT_REASONING_KEYS`]，
+/// 这里只负责把它套到本协议的路径形状上。
+fn is_reasoning_field(path: &FieldPath<'_>) -> bool {
+    OPENAI_CHAT_REASONING_KEYS
+        .iter()
+        .any(|k| path.is(&["choices", "delta", *k]))
+}
+
 impl PartialJsonSink for ChatPartial {
     fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
         self.kind = if path.is(&["choices", "delta", "content"]) {
             Some(ChatField::Content)
-        } else if path.is(&["choices", "delta", "reasoning_content"])
-            || path.is(&["choices", "delta", "reasoning"])
-        {
-            // 两个字段名都收：见 reasoning_text_of 的字段兼容说明。
+        } else if is_reasoning_field(path) {
             Some(ChatField::Reasoning)
         } else if path.is(&["choices", "delta", "tool_calls", "function", "arguments"]) {
             // 属于第几个工具调用由「最内层数组下标」给出（`tool_calls[N]`）
