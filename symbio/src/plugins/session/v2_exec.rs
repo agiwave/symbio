@@ -1444,9 +1444,8 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                                 // 单线程 / 无 runtime（单测）：裸调（闭包内部是阻塞读）。
                                 _ => drain(),
                             };
-                            // 顺序：**先抽干、后汇报**（同一条纪律，见 `chat_loop.rs`
-                            // 步骤 2d）——抽干会把静默时钟归零，反过来就会出现
-                            // 「用户刚说完话，助手抢着报了一句进度」。
+                            // 顺序：**先抽干、后汇报**（同一条纪律）——抽干会把静默时钟
+                            // 归零，反过来就会出现「用户刚说完话，助手抢着报了一句进度」。
                             let injected = supplement_into_request(
                                 batch,
                                 anchor,

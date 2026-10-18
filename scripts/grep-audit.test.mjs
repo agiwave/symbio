@@ -307,7 +307,7 @@ test('S-011 passes when the drain sits between gate_turn and prepare_turn_inputs
 })
 
 test('S-011 fires when the drain moves before gate_turn', () => {
-  // 前移的真实后果：闸门 Exit / WaitForTools 时队列已被消费却没人用——
+  // 前移的真实后果：闸门 Exit 时队列已被消费却没人用——
   // 用户那句补充进了转写，模型从没见过它，**没有任何测试会变红**。
   const r = s011Audit({
     [S011_FILE]: `fn run() {

@@ -29,11 +29,11 @@ created: 2026-09-16
 
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
-| `gate_turn` | 启动条件（在途工具是否齐备）+ 退出条件（软上限 / abort） | 判定点唯一 |
+| `gate_turn` | 退出条件（软上限 / abort），见 §2.1 | 判定点唯一 |
 | `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + 压缩 + 请求视图 | 准备点唯一 |
 | `apply_compaction` | 水位响应（70% 阈值触发的语义压缩） | 响应点唯一 |
 | `finish_turn` | 软上限提示 + 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
-| `TurnState` | 跨轮可变状态（工具轮次 / 续写次数 / 落库锚点 / 在途集合 / 中止信号） | 状态容器唯一 |
+| `TurnState` | 跨轮可变状态（工具轮次 / 续写次数 / 落库锚点 / 静默时钟种子 / 中止信号） | 状态容器唯一 |
 
 ---
 
@@ -86,7 +86,7 @@ created: 2026-09-16
 | # | 步骤 | 内容 | 职责 |
 |---|---|---|---|
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
-| 2 | `gate_turn` | 启动条件 + 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
+| 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
 | 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
 | 4 | `v2_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
@@ -113,7 +113,8 @@ created: 2026-09-16
   内核 `compress_with_snapshot_core` 是唯一实现。
 - **提示词与工具**必须同机制、同时机收集：两者都经 `Registry`（收集口）注册、经 `traverse`
   汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
-- **启动条件**是显式判据（`TurnState::in_flight_tools`），不是「同步阻塞的隐式结果」。
+- **「不完整不唤醒」由运行器环体守住**：一个批次的结果全部接进 `exchange` 之后才发
+  下一次请求（§4.1），不在闸门里判在途工具。
 - **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `DispatchPort` 分发）；
   `close_turn` 只做「本轮结算 + 下一步判定」，不承担工具执行（见 §4.1）。
 
@@ -121,30 +122,31 @@ created: 2026-09-16
 
 ## 2. 收口点
 
-### 2.1 收口 ①：启动条件 + 退出条件 → `gate_turn`
+### 2.1 收口 ①：退出条件 → `gate_turn`
 
 ```rust
-/// 单轮是否允许发起 LLM 请求（启动条件）以及是否必须退出（退出条件）。
-/// 唯一调用点：主循环顶部。
+/// 本轮是否必须退出（退出条件）。唯一调用点：主循环顶部。
 enum Gate {
-    Proceed,                  // 条件齐备 → 进入准备与推理
-    WaitForTools,             // 工具结果未齐备（异步工具在途）→ 不唤醒
-    Exit(TurnExit),           // 软上限 / abort / 不可恢复
+    Proceed,                  // 放行 → 进入准备与推理
+    Exit(TurnExit),           // 软上限 / abort
 }
 
 fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
 ```
 
-**启动条件的唯一判据**：取**运行时在途集合** `TurnState::in_flight_tools`——
-非空 ⇒ 不唤醒；多个工具调用**全部**结束才唤醒主循环，不完整不唤醒。
+**形状原本是三态**（放行 / 等工具齐 / 退出）。「等工具齐」判的是 v1 外壳留在 `TurnState` 上的
+在途工具集合：非空 ⇒ 不唤醒。v2 里工具在 `execute_turn` **内部**一批批跑完（§4.1），没有任何
+代码路径往那个集合登记 id ⇒ 恒空 ⇒ 恒放行，于是这一态与它的簿记一起退场
+（裁决与被删符号名册见 [ADR-073](../../../../../docs/010-adr/073.md "ADR-073")）。
 
-**不是**「扫历史看每个 ToolCall 有没有结果子节点」：**「ToolCall 无结果」在本代码库是
-合法状态**（交互模式审批中断时本批剩余 ToolCall 有意留空，由请求视图层 `flatten_chat_messages`
-合成占位结果喂回模型），按历史判定会让 approve/reject 恢复后的续写被**永久挡住**。
+「不完整不唤醒」没有废弃，它换了承担者：**环体只在把本批结果接进 `exchange` 之后才发下一次
+请求**（`turn_runner.rs` 2e）。因此——
 
-> ⚠️ **必须配修复路径**：若某个工具永远等不到结果（进程被杀 / 工具任务 panic），
-> 在途集合会永久非空 → 主循环永久挂起。`tool_executor::record_protocol_failure`
-> 在写入时合成失败结果来维持「没有悬空 ToolCall」这条不变式。
+> ⚠️ **「历史中所有 ToolCall 都有结果子节点」从来不是判据**：**「ToolCall 无结果」在本代码库是
+> 合法状态**（交互模式审批中断时本批剩余 ToolCall 有意留空，由请求视图层 `flatten_chat_messages`
+> 合成占位结果喂回模型），按历史判定会让 approve/reject 恢复后的续写被**永久挡住**。
+> 真正会悬空的只有一种：id / name 非法的调用——`record_protocol_failure` 在写入时合成失败结果
+> 兜住它（§4.2），不需要主循环侧的等待。
 
 退出条件在 `gate_turn` 内判定两处，语义不同：
 
@@ -255,10 +257,10 @@ async fn finish_turn(
 ```rust
 struct TurnState {
     abort: ExecAbortSignal,              // 用户中止信号（推理与工具共享同一份）
-    tool_rounds: usize,              // 已完成的工具轮次（跨轮累加）
+    tool_rounds: usize,              // 已完成的工具轮次——v2 恒 0（见 §4.1）
     continuation_count: u32,         // 长度截断自动续写次数（跨轮累加）
     last_saved: usize,               // 增量落库锚点
-    in_flight_tools: HashSet<String>,// 已派发、尚未产出结果的工具调用 id（启动条件权威判据）
+    last_user_facing_at: i64,        // 对话线上最近一次动静（轮内时钟的种子）
 }
 ```
 
@@ -307,11 +309,9 @@ pub async fn run_chat_loop(
         // 步骤 1 · 加载本轮上下文（会话窗口 + 首轮追加用户消息 + 推进落库锚点）
         …
 
-        // 步骤 2 · 闸门（收口 ①：启动条件 + 退出条件，唯一判定点）
-        match gate_turn(&turn_req, &turn) {
-            Gate::Proceed      => {}
-            Gate::WaitForTools => return finish_turn(…, TurnExit::Completed).await,
-            Gate::Exit(exit)   => return finish_turn(…, exit).await,
+        // 步骤 2 · 闸门（收口 ①：退出条件，唯一判定点）
+        if let Gate::Exit(exit) = gate_turn(&turn_req, &turn) {
+            return finish_turn(…, exit).await;
         }
 
         // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
@@ -357,7 +357,7 @@ pub async fn run_chat_loop(
 
 ---
 
-## 4. 工具执行与启动条件
+## 4. 工具执行与批次边界
 
 ### 4.1 当前执行模型：运行器内部的串行工具循环
 
@@ -378,11 +378,14 @@ execute_turn
        └─ 返回 TurnOutcome（text / usage / finish / aborted / awaits_user）
 ```
 
-本批工具全部跑完才回到 `generate_turn`，因此 `chat_loop` 回到 `gate_turn` 时
-`TurnState::in_flight_tools` 恒为空。
+本批工具全部跑完才回到 `generate_turn`：**「不完整不唤醒」由这条环体守住**——
+结果没接进 `exchange` 就没有下一次请求，主循环侧因此不需要一份在途工具集合（§2.1）。
+`chat_loop` 回到闸门时本轮早已跑完整批，那里只剩「要不要停」可判。
 
-`in_flight_tools` 仍作为**启动条件的权威判据**存在（§2.1）：`WaitForTools` 分支在当前模型下
-恒不命中，语义上却已成立。
+`turn.tool_rounds` 在 v2 恒 0：递增点在运行器的批次边界上，那份真实轮数由 `RoundProgress`
+持有（`progress.rs`），不回流到 `TurnState`。它仍有三个读方（软上限 / fade 判定 / 抽干分支），
+所以字段留着——把恒 0 喂给它们是**语义失效**而不是崩溃，处置它属于
+[T-165](../../../../../docs/009-task/165-控制面收敛.md "T-165-控制面收敛") 的 5b-2。
 
 `close_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [PL-014 步骤 5](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 删除；

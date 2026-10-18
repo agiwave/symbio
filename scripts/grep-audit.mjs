@@ -424,7 +424,7 @@ console.log()
 //
 // `chat_loop.rs` 里读 `orchestrator.supplements` 的那一段（补充整合的轮边界抽干点）
 // **前移或后移都不会有任何测试变红**：
-//   · 前移到 `gate_turn` **之前** ⇒ 闸门 `Exit` / `WaitForTools` 时队列已被消费却
+//   · 前移到 `gate_turn` **之前** ⇒ 闸门 `Exit`（软上限 / 中止）时队列已被消费却
 //     没人用它——用户那句补充进了转写，但模型从没见过它，静默消失；
 //   · 后移到 `prepare_turn_inputs` **之后** ⇒ 合并消息不在本轮请求里，白折一轮；
 //   · 移进工具批次中间（`assistant(tool_calls)` 与 `tool` 结果之间）⇒ 部分协议直接
@@ -494,8 +494,7 @@ if (!s011Entry) {
     } else {
       err(
         `${rel}  S-011 抽干点位置错（gate_turn@${gateAt} → supplements@${drainAt} → ` +
-          `prepare_turn_inputs@${prepAt}）：必须在 gate_turn **之后**（否则闸门 Exit / ` +
-          `WaitForTools 时队列被消费却没人用，补充被静默吞掉）、prepare_turn_inputs ` +
+          `prepare_turn_inputs@${prepAt}）：必须在 gate_turn **之后**（否则闸门 \`Exit\` 时队列被消费却没人用，补充被静默吞掉）、prepare_turn_inputs ` +
           `**之前**（否则合并消息进不了本轮请求）`,
       )
     }
@@ -655,7 +654,7 @@ console.log()
 // 范围：`.rs` 源码根（同 S-012），测试文件同样参与；**不含** `chat_node.rs`
 // （字段定义、折叠与入口的本体在那里）。注释行不判（doc 示例会复述被禁形状）。
 // 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
-// 单测跑在临时 fixture 树里：那里没有 166 处存量债务，棘轮一比就报「基线该收紧」，
+// 单测跑在临时 fixture 树里：那里没有真实仓库这么多存量债务，棘轮一比就报「基线该收紧」，
 // 把每条无关用例一起拖红。`LEGACY_ROLE_WRITE_BASELINE` 把基线搬到 fixture 上；扫描根
 // 由下面那条「cwd 下有 `symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
 console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
@@ -664,7 +663,7 @@ const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-pl
 const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 // **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
 // `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `symbio/src/...` 的几层目录，
-// 存量也恒 0——与基线 166 的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
+// 存量也恒 0——与基线数字的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
 // 0 的 fixture 用例判红，守卫的测试自己成了噪音。判据用 `repoRoot`（脚本自身所在仓库）：
 // 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
 const S014_IS_REPO = path.resolve(S014_BASE) === path.resolve(repoRoot)

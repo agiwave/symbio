@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 6 · 🟡 doing 2 · ☑ done 151 · ❌ wont 3（共 162）
+**计数**：☐ todo 7 · 🟡 doing 2 · ☑ done 151 · ❌ wont 3（共 163）
 
 ## 待处理（按依赖顺序）
 
@@ -72,6 +72,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | next | plan | — |
 | `T-163-插件层特判审计守卫` | core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流 | next | 门禁与CI | — |
 | `T-164-v2_messages落格失败升级裁决` | v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢 | next | 登记卫生 | — |
+| `T-166-上下文淡化层级未接入v2请求` | 请求视图层的 L1/L2/L3 三层裁剪在 v2 不生效——运行器自己从 WAL 起基线，`build_request_view` 的产物只有置顶三段进请求 | next | 上下文治理 | PL-014-单环一表收敛、T-165-控制面收敛、ADR-072 |
 
 ## 进行中
 
@@ -411,6 +412,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-163-插件层特判审计守卫`](163-插件层特判审计守卫.md) core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流（todo）
   - [`T-164-v2_messages落格失败升级裁决`](164-v2_messages落格失败升级裁决.md) v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢（todo）
 - [`T-165-控制面收敛`](165-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（doing）
+- [`T-166-上下文淡化层级未接入v2请求`](166-上下文淡化层级未接入v2请求.md) 请求视图层的 L1/L2/L3 三层裁剪在 v2 不生效——运行器自己从 WAL 起基线，`build_request_view` 的产物只有置顶三段进请求（todo）
 
 <!-- registry:summary end -->
 

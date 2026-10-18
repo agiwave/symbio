@@ -9,15 +9,16 @@
 //!
 //! ## 触发点在**轮边界**，不在后台定时器
 //!
-//! 判定发生在 `run_chat_loop` 的轮次顶部（一轮工具刚跑完、准备发下一次请求），
-//! 与轮边界抽干点相邻。三条理由，缺一条都会让这个判定长到别处去：
+//! 判定挂在 `chat_loop::round_report_hook` 上、由 `v2_exec` 交进运行器：**一个工具
+//! 批次的结果接进 `exchange` 之后**回调一次，于是「又走完了一轮」恰好在那些轮边界
+//! 上成立。三条理由，缺一条都会让这个判定长到别处去：
 //!
 //! 1. **写入者唯一**：汇报节点要落在 `context.messages` 上才会被 `persist_messages`
 //!    带上并上线（ADR-020：转写只有一个写入者）。那个列表是主循环的**局部变量**，
 //!    后台任务够不着；从别处写进转写只会得到一个"回合结束就消失"的节点。
-//! 2. **判定所需的量就在这里**：`tool_rounds`（已完成几轮）是 [`TurnState`] 的字段，
-//!    而静默时长与已汇报次数也是**请求作用域**的量（随轮次复位）。放在会话级状态里
-//!    反而要额外回答"什么时候清零"。
+//! 2. **判定所需的量就在这里**：轮次、静默时长、已汇报次数都是**请求作用域**的量
+//!    （随轮次复位），由下面的 `RoundProgress` 自己持有。放在会话级状态里反而要
+//!    额外回答"什么时候清零"。
 //! 3. **不引入第二份会话状态**：后台定时器要读这些量就得把它们搬到跨任务共享的状态
 //!    上，那是给同一份事实造第二个来源——而它必然漂移。
 //!
@@ -34,13 +35,8 @@
 //! 因此它可以被穷举测试——这类"错了不会报错、只表现为用户被打扰或收不到消息"的
 //! 判定，必须靠单测钉住，不能靠 e2e 里那几条路径碰巧覆盖。
 
-use std::sync::Arc;
-
-use crate::symbio_core::{clock_now_ms, PluginInvokeRequest};
-use crate::symbio_core::{RunSnapshot, Verdict};
-
-use super::state::{ChatOrchestrator, SessionContext, TurnState};
-use super::{apply_verdict, VerdictEffect};
+use crate::symbio_core::clock_now_ms;
+use crate::symbio_core::RunSnapshot;
 
 /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮）。
 ///
@@ -98,22 +94,15 @@ impl ProgressPolicy {
     }
 }
 
-/// **轮内**的汇报状态（缺口 4）。
+/// **轮内**的汇报状态（缺口 4）——轮次与静默时钟的**唯一持有者**。
 ///
-/// ## 为什么它不是 [`TurnState`] 的字段
+/// 它不是 `TurnState` 的字段，因为工具循环在 v2 运行器里：`run_chat_loop` 一次请求
+/// 只经过一次，那里没有任何时刻能观察到「第 N 个工具轮结束」。计数因此挂在
+/// 轮边界回调**自己持有**的结构上——那个回调是 `Fn + 'static`，它捕获不了
+/// `run_chat_loop` 的栈局部。
 ///
-/// `TurnState::tool_rounds` / `progress_reports` / `last_user_facing_at` 三个字段
-/// 在会话轮上**恒为初值**——工具循环在 v2 运行器里，chat_loop 一轮只经过一次，
-/// 没有谁来递增它们。其中 `tool_rounds` 恒 0
-/// ——而 `report_if_due` 的头一句就是「`tool_rounds == 0` 不说」，于是汇报恒不发。
-///
-/// 把计数搬到轮边界回调**自己持有**的结构里，是因为那个回调是 Fn + 'static：它
-/// 捕获不了 `run_chat_loop` 的栈局部 `TurnState`。
-///
-/// ⚠️ 这是**同一轮内的两份数**（`TurnState` 那三格是死字段），不是两个真源：
-/// 死字段与活字段不冲突，因为活的那份只被汇报判定读，而 `TurnState` 那三格
-/// 没有任何读方会看出差别。真要让它们一致，唯一办法是把 `TurnState` 整体搬进
-/// `Arc<Mutex<_>>`——那是为三个死字段翻整个主循环的借，不值。
+/// 静默时钟的种子（请求开始 / 轮首说过话的那一刻）由 `TurnState::last_user_facing_at`
+/// 递进来（见 `round_report_hook`），此后归零归本结构自己管。
 pub(crate) struct RoundProgress {
     policy: ProgressPolicy,
     /// 本轮已完成几轮工具调用（轮边界回调每跑一次 +1）。
@@ -141,7 +130,7 @@ impl RoundProgress {
         self.rounds += 1;
         RunSnapshot {
             tool_rounds: self.rounds,
-            quiet_ms: crate::symbio_core::clock_now_ms() - self.last_spoke_at,
+            quiet_ms: clock_now_ms() - self.last_spoke_at,
         }
     }
 
@@ -165,76 +154,11 @@ impl RoundProgress {
 
     /// 说了：配额 +1、静默时钟归零。
     ///
-    /// 归零的理由与 `report_if_due` 同一条：不归零的话下一个轮边界会因为「距上次
-    /// 说话仍然超过阈值」而立刻再说一句——配额会被同一段静默连续吃掉。
+    /// 归零的理由：不归零的话下一个轮边界会因为「距上次说话仍然超过阈值」而立刻
+    /// 再说一句——配额会被同一段静默连续吃掉。
     pub(crate) fn spoke(&mut self) {
         self.reports += 1;
-        self.last_spoke_at = crate::symbio_core::clock_now_ms();
-    }
-}
-
-/// 轮边界的汇报判定与执行。返回 `true` = 真的汇报了一句。
-///
-/// 调用点见 `chat_loop.rs` 的步骤 2d（轮边界抽干点之后）——**顺序有意**：抽干会把
-/// 用户刚补充的那句话折进上下文，而那句话本身就是"对话线上的动静"，因此静默时长
-/// 会随之归零，本轮自然不汇报。反过来先汇报再抽干，就会出现"用户刚说完话，
-/// 助手抢着报了一句进度"。
-pub(crate) async fn report_if_due(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    context: &mut SessionContext,
-    turn: &mut TurnState,
-) -> bool {
-    // 轮首没有"进展"可报：那里的判定对象是用户那句话（归 `decide.rs`）。
-    // 判据在表里（`policy.report` 的 `tool_rounds > 0`），本处只问表。
-    let quiet_ms = clock_now_ms() - turn.last_user_facing_at;
-    let state = super::super::loop_registry::LoopState::round_boundary(
-        turn.tool_rounds,
-        quiet_ms,
-        turn.progress_reports,
-        orchestrator.progress.clone(),
-    );
-    if super::super::loop_registry::builtin()
-        .decide(&state)
-        .map(|h| h.capsule)
-        != Some(super::super::loop_registry::Capsule::REPORT)
-    {
-        return false;
-    }
-
-    let snapshot = RunSnapshot {
-        tool_rounds: turn.tool_rounds,
-        quiet_ms,
-    };
-
-    // 汇报是模板产线（零模型往返），无思考事实可带出——第二元恒 `None`。
-    match apply_verdict(orchestrator, ctx, context, Verdict::Report, &snapshot)
-        .await
-        .0
-    {
-        VerdictEffect::Spoke => {
-            turn.progress_reports += 1;
-            // 刚说了一句话 ⇒ 静默时钟归零。不归零的话，下一个轮边界会因为"距上次
-            // 说话仍然超过阈值"而立刻再说一句——配额会被同一段静默连续吃掉。
-            turn.last_user_facing_at = clock_now_ms();
-            crate::plugin_info!(
-                "session",
-                "[Progress] 已汇报第 {} 次（tool_rounds={}, quiet_ms={}）",
-                turn.progress_reports,
-                turn.tool_rounds,
-                quiet_ms
-            );
-            true
-        }
-        // 拿不到措辞（未挂载 `compose` / 措辞为空）⇒ 没汇报，也就**不消耗配额**：
-        // 下一个轮边界还会再试一次。方向与 `Answered` 的降级一致——**降级而不失效**。
-        _ => {
-            crate::plugin_debug!(
-                "session",
-                "[Progress] 该汇报但取不到措辞，本轮跳过（不消耗配额）"
-            );
-            false
-        }
+        self.last_spoke_at = clock_now_ms();
     }
 }
 

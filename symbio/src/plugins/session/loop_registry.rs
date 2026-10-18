@@ -161,7 +161,7 @@ impl LoopState {
         }
     }
 
-    /// 轮边界（步骤 2d / 轮边界回调）的状态：只填汇报用得到的量。
+    /// 轮边界（`chat_loop::round_report_hook`）的状态：只填汇报用得到的量。
     ///
     /// `has_utterance` 恒 `false`、`classify_enabled` 恒 `false`——轮边界不重判
     /// 用户那句话（判过了，见 `decide.rs`）。填假值而不是"留空"，是因为这两个
@@ -422,7 +422,7 @@ fn policy_classify(state: &LoopState) -> Option<Capsule> {
         .then_some(Capsule::DECIDE)
 }
 
-/// 轮边界汇报的判据（步骤 2d / 轮边界回调）。
+/// 轮边界汇报的判据（`chat_loop::round_report_hook` 每跑完一个工具批次问一次）。
 ///
 /// 前半段 `tool_rounds > 0` 是**独立**条件，不并进 `progress.due`：
 /// `ProgressPolicy::min_rounds` 可配 0，而"轮首汇报"是语义错误——那时还一轮工具

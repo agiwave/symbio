@@ -4,6 +4,8 @@
 //! - [`prepare_turn_inputs`]：提示词 + 工具 + 压缩 + 请求视图的唯一收集点
 //! - [`apply_compaction`]：上下文水位的唯一响应点（自动语义压缩）
 
+use std::collections::HashMap;
+
 use crate::symbio_core::CapabilityMeta;
 
 use super::super::loop_registry::{builtin, Capsule, LoopState};

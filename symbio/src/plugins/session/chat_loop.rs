@@ -7,12 +7,11 @@
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
 //! loop
 //!   步骤1 加载上下文
-//!   步骤2 gate_turn            ← 启动条件 + 退出条件（唯一判定点）
+//!   步骤2 gate_turn            ← 退出条件（唯一判定点）
 //!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
 //!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
-//!   步骤2d report_if_due       ← 轮边界汇报判定（触发权在编排层，措辞权在 compose）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
-//!   步骤4 execute_turn         ← LLM 调用
+//!   步骤4 execute_turn         ← LLM 调用 + 工具轮 + **轮边界汇报回调**（`on_round`）
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
 //!   步骤6 close_turn           ← 落库 + 流向判定（子树在此收敛）
 //!   步骤7 finalize_turn_root   ← 封根 Turn（组合节点终态跟随子树）
@@ -60,7 +59,6 @@ pub(crate) use self::io::{
     emit_streaming_start, finalize_turn_root, fire_stop_hook, fire_user_prompt_submit_hook,
     open_chat_session, persist_messages,
 };
-pub(crate) use self::progress::report_if_due;
 pub(crate) use self::state::{
     request_actor_spec, request_principal, request_scope, request_source_principal, Gate,
     SessionContext, TurnExit, TurnRequest, TurnState,
@@ -80,8 +78,8 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 ///
 /// 轮首 compose 说过话（`Escalate` 首响 / `Answered` 答话）就要把静默时钟归零，
 /// 而那件事改的是 `TurnState::last_user_facing_at`。本函数拿不到 `TurnState`，
-/// 所以只能在构造时**取一次快照**当起点——从那一刻起两边的语义就一致了
-/// （这条路径上 `TurnState` 那三格在轮内再也不会被改）。
+/// 所以只能在构造时**取一次快照**当起点——从那一刻起轮内的静默时钟就只由
+/// `RoundProgress`（`chat_loop/progress.rs`）一处推进，不再有两个来源。
 ///
 /// ## 会话视图：只给**轮首**那一份
 ///
@@ -226,7 +224,6 @@ use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };
-use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -385,27 +382,11 @@ pub async fn run_chat_loop(
 
         turn.last_saved = context.messages.len();
 
-        // ── 步骤 2：闸门（启动条件 + 退出条件，唯一判定点）───────────────────
+        // ── 步骤 2：闸门（退出条件，唯一判定点）───────────────────────────
         // 收口前，这里散落 4 处 `if abort_flag { ... return }`（其中两处相邻重复）
         // 与一处软上限判定，各自重写收尾三件套。
-        match gate_turn(&turn_req, &turn) {
-            Gate::Proceed => {}
-            Gate::WaitForTools => {
-                // 不完整不唤醒：本轮不发起 LLM 请求。级别 1（同步工具执行）下恒不
-                // 命中——工具在 close_turn 内全部跑完才回到这里。级别 2 会在此
-                // await 全部完成的通知后 continue；当前实现退出本轮，由下一次唤醒
-                // （用户消息 / 心跳）重新入闸。
-                plugin_warn!(
-                    "session",
-                    "[Gate] 在途工具未全部产出结果（{} 个），本轮不唤醒",
-                    turn.in_flight_tools.len()
-                );
-                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Completed)
-                    .await;
-            }
-            Gate::Exit(exit) => {
-                return finish_turn(orchestrator, &context, &sink, &turn, exit).await
-            }
+        if let Gate::Exit(exit) = gate_turn(&turn_req, &turn) {
+            return finish_turn(orchestrator, &context, &sink, &turn, exit).await;
         }
 
         // ── 步骤 2b：轮首判决（唯一判决点）───────────────────────────────────
@@ -451,7 +432,7 @@ pub async fn run_chat_loop(
         // 行为"——慢一点，但有答案。判据与兜底方向见 `chat_loop/compose.rs`。
         //
         // `Escalate` / `Report` 恒不收尾：前者本来就要干活（首响只是开场白），
-        // 后者只是"中途说一句"（它的触发点在步骤 2d，不在轮首）。
+        // 后者只是"中途说一句"（它的触发点在轮边界回调，不在轮首）。
         //
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
@@ -473,7 +454,7 @@ pub async fn run_chat_loop(
                 if let Some(verdict) = verdict {
                     // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是"这一轮怎么办"，
                     // 而 `RunSnapshot` 说的是"干到哪一步"——只有 `Report` 读它，
-                    // 而 `Report` 不在轮首产生（见步骤 2d）。
+                    // 而 `Report` 不在轮首产生（见轮边界汇报回调）。
                     let (effect, composed) = apply_verdict(
                         orchestrator,
                         &ctx,
@@ -588,7 +569,7 @@ pub async fn run_chat_loop(
                     // `Escalate` 的效应是 `Spoke`（不是 `Silent` / `Finish`）：本轮
                     // **继续**进工具循环，开场白只是干活前说的一句话。轮首这里唯一
                     // 能产出 `Spoke` 的判决就是 `Escalate`（`Report` 不在轮首产生，
-                    // 见上方注释与步骤 2d）。
+                    // 见上方注释与轮边界汇报回调）。
                     //
                     // 这句开场白是事实（T-052）：随收束格入格（WAL 为唯一事实源，
                     // ADR-049），不入格则重建折不出这条根级对话面节点 ⇒ t20 / t22 的
@@ -632,15 +613,15 @@ pub async fn run_chat_loop(
         //
         // ## 为什么必须在 `gate_turn` **之后**
         //
-        // 闸门可能 `Exit`（软上限 / 中止）或 `WaitForTools`。若在它之前抽干，一旦
+        // 闸门只会 `Exit`（软上限 / 中止）或在确定要发请求时放行。若在它之前抽干，一旦
         // 闸门退出，队列已被消费却没人用它——还得补一套"放回队首"的补偿逻辑。
-        // 放在 `Proceed` 之后，**只有确定要发请求才抽**。
+        // 放在闸门之后，**只有确定要发请求才抽**。
         //
         // ## 为什么结构上不会插进工具批次中间
         //
-        // `gate_turn` 只在 `turn.in_flight_tools` 为空时放行，而级别 1（同步工具执行）
-        // 下 `close_turn` 里的 `process_tool_calls_async` 是串行阻塞的——回到循环顶部时
-        // 本批结果**必然已齐**。因此本抽干点不可能落在 `assistant(tool_calls)` 与其
+        // 工具在 `v2_exec::execute_turn` 内部经 `DispatchPort` 一批批跑完，
+        // 每批的结果先接进运行器的 `exchange` 才发下一次请求（`turn_runner.rs` 2e）——
+        // 本抽干点在环体**之外**，不可能落在 `assistant(tool_calls)` 与其
         // `tool` 结果之间（那会让 OpenAI / Anthropic 直接 400）。
         //
         // ## 为什么只在非轮首、且只对有历史的轮次
@@ -678,28 +659,6 @@ pub async fn run_chat_loop(
                 }
             }
         }
-
-        // ── 步骤 2d：轮边界汇报判定（唯一判定点）────────────────────────────
-        //
-        // 「干到一半也要能说一句话」。判定与执行都在 `progress.rs`，这里只是调用点。
-        //
-        // ## 为什么在抽干**之后**
-        //
-        // 抽干会把用户刚补充的那句话折进上下文，并（见上）把静默时钟归零。顺序
-        // 反了就会出现"用户刚说完话，助手抢着报了一句进度"——判定用的正是那个时钟。
-        //
-        // ## 为什么在 `prepare_turn_inputs` 之前
-        //
-        // 汇报节点带 `exclude_from_context`（它是给用户看的，不是模型的对话内容），
-        // 因此不影响请求包的内容；但它必须在本轮落库锚点之下就位，才能被下一次
-        // 落库带上。放在这里与抽干点同一条纪律：**append 之后不动 `last_saved`**。
-        //
-        // ## 为什么判定失败什么都不做
-        //
-        // 拿不到措辞（未挂载 `compose` / 措辞为空）时**不消耗配额**，下一个轮边界再试
-        // ——与 `Answered` 的降级同一条方向：降级而不失效。卸载 `compose`（或
-        // `progress_enabled = false`）时这里恒不产出，行为与引入汇报之前逐字一致。
-        report_if_due(orchestrator, &ctx, &mut context, &mut turn).await;
 
         // 轮次起点。历史上这一行带 `tools={}` 一栏，但实参恒为字面量 `0`——此处
         // 尚未决定本轮用哪些工具，输出「tools=0」会被读成「没有工具」，属误导，
@@ -767,7 +726,6 @@ pub async fn run_chat_loop(
                 (Some(m.id.clone()), text)
             })
             .unwrap_or((None, String::new()));
-        let v2_started = std::time::Instant::now();
         // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该落一次，
         // 而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。落格与归档
         // 由 `execute_turn` 做（唯一持写者令牌之处），这里只负责把「压成了什么」递过去。
@@ -823,7 +781,6 @@ pub async fn run_chat_loop(
         .await
         {
             Ok(res) => {
-                turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
                 // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
                 // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
                 // 不并入就只看得见、不落库（重启即丢）。
@@ -899,33 +856,32 @@ pub(crate) enum TurnFlow {
     NextTurn,
 }
 
-/// 主循环顶部的**唯一闸门**：启动条件 + 退出条件。
+/// 主循环顶部的**唯一闸门**：退出条件。
 ///
 /// 收口前，循环顶部与推理前后散落 4 处 `if abort_flag { ... return }`（其中两处
 /// 相邻重复，中间只隔一行日志），软上限判定另占一处，每处各自重写收尾三件套。
 /// 现在：**退出条件只在本函数判定一次**，收尾动作只在 [`finish_turn`] 出现一次。
 ///
-/// ## 启动条件：本轮在途工具是否已全部产出结果
+/// ## 「启动条件」这一态为什么没了
 ///
-/// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。判据取自
-/// [`TurnState::in_flight_tools`]（运行时在途集合），**不是**"历史中所有
-/// ToolCall 都有结果子节点"——
+/// 形状上闸门原本三态：放行 / **等工具齐** / 退出。「等工具齐」判的是
+/// `TurnState::in_flight_tools`（本轮已派发、尚未产出结果的工具调用 id 集合），
+/// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。
 ///
-/// ⚠️ 后者在本代码库并不成立：「ToolCall 无结果」是**合法状态**。交互模式下工具批
-/// 被用户审批中断时，本批剩余 ToolCall 会被有意留空，由请求视图层
-/// `flatten_chat_messages`（`plugins/model/message_builder.rs`）合成占位 tool 结果
-/// 喂回模型。按历史判定会让 approve/reject 恢复后的续写被永久挡住。
+/// v2 现实下它恒放行：工具在 `v2_exec::execute_turn` **内部**跑完（`DispatchPort`
+/// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5]
+/// (../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+/// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
+/// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批
+/// 结果接进 `exchange` 之后才发下一次请求**（`turn_runner.rs` 2e），
+/// 结构上不可能带着半个批次出门。
 ///
-/// 级别 1（当前，同步工具执行）：`close_turn` 内的 `process_tool_calls_async` 会把
-/// 本批工具全部跑完才返回，回到闸门时在途集合恒为空 ⇒ 恒放行。
-/// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，完成回调
-/// 逐个移除；集合非空时本函数返回 [`Gate::WaitForTools`]。
+/// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
+/// 「ToolCall 无结果」是**合法状态**（交互模式下工具批被用户审批中断时，本批剩余
+/// ToolCall 会被有意留空，由请求视图层 `flatten_chat_messages`
+/// （`plugins/model/message_builder.rs`）合成占位 tool 结果喂回模型）。
+/// 按历史判定会让 approve/reject 恢复后的续写被永久挡住。
 fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
-    // ── 启动条件 ─────────────────────────────────────────────────────────
-    if !turn.in_flight_tools.is_empty() {
-        return Gate::WaitForTools;
-    }
-
     // ── 退出条件 ①：显式软上限 ────────────────────────────────────────────
     // 仅当调用方**主动**给出 max_tool_rounds 才生效（默认 None = 无限轮次）。
     // 达到上限时必须给出明确提示再退出，绝不静默返回。
