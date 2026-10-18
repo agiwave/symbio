@@ -174,11 +174,15 @@ impl PersistentChatSession {
     /// 所以它天然是可选项——忘了补，代码照样编译、测试照样绿。本函数把「落事实」
     /// 收进写入路径本身，**没有「补」这一步**，也就没有「忘了补」这个失败。
     ///
-    /// ## 失败口径：事实失败不冒泡
+    /// ## 失败口径：事实失败即本次变更失败（T-164）
     ///
-    /// 与 [`super::super::v2_messages`] 的既有口径同一条：b3 之前缓存仍是读侧真源，
-    /// 事实是它的影子——影子失败不该让本体失败（拿不到写者令牌 / 撞幂等键只记日志）。
-    /// b3 切主读之后这里升级为错误，那是 b3 批内的工序（ADR-053 迁移表的 b3 行）。
+    /// 旧口径是「附加事实失败不该把成功的动作说成失败」——那在 b3 之前成立：缓存是
+    /// 读侧真源、事实是影子。b3 把主读切到 WAL 之后**事实就是本体**，放过它等于
+    /// 「回执说改好了、重建后一看没改」，而且用户无感。
+    ///
+    /// 步骤 ① 在写缓存**之前**，所以这里返回错误时什么都已经没发生——报失败是如实。
+    /// 两处例外各自有理由：拿不到写者令牌 ⇒ 寄存（T-055，稍后由持令牌方补落）；
+    /// 无锚可指 ⇒ v1 遗留会话，读侧本就回落 `messages.json`（ADR-049），缓存仍是真源。
     ///
     /// ## 返回值
     ///
@@ -188,23 +192,49 @@ impl PersistentChatSession {
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
+            use super::super::v2_messages::AppendOutcome;
+            let mut failure: Option<String> = None;
             match &change {
                 MessageChange::Born {
                     nodes,
                     carrier: Carrier::Here,
-                } => super::super::v2_messages::added(&dir, nodes),
-                MessageChange::Edited(msgs) => {
-                    for m in msgs {
-                        super::super::v2_messages::edited(&dir, m);
+                } => {
+                    if let AppendOutcome::Failed(why) =
+                        super::super::v2_messages::added(&dir, nodes)
+                    {
+                        failure = Some(why);
                     }
                 }
-                MessageChange::Removed(ids) => super::super::v2_messages::removed(&dir, ids),
+                MessageChange::Edited(msgs) => {
+                    for m in msgs {
+                        // 第一条失败即停：后续的更没理由成功，而一次变更只报一个错。
+                        if let AppendOutcome::Failed(why) =
+                            super::super::v2_messages::edited(&dir, m)
+                        {
+                            failure = Some(why);
+                            break;
+                        }
+                    }
+                }
+                MessageChange::Removed(ids) => {
+                    if let AppendOutcome::Failed(why) =
+                        super::super::v2_messages::removed(&dir, ids)
+                    {
+                        failure = Some(why);
+                    }
+                }
                 // 承载事实由运行器落（用户发言 / 助手正文 / 工具结果）——此处再落
                 // 一条 `message.added` 就是第二个 owner。
                 MessageChange::Born {
                     carrier: Carrier::Runner,
                     ..
                 } => {}
+            }
+            if let Some(why) = failure {
+                crate::plugin_error!("session", "[message] 变更未能入格，本次变更未生效：{}", why);
+                return Err(PluginError::InternalError(format!(
+                    "消息变更未能入格，本次变更未生效：{why}"
+                )));
             }
         }
 
@@ -221,9 +251,25 @@ impl PersistentChatSession {
                 // 不落格的后果是**静默的**：WAL（唯一真源）里那些节点还在，只是
                 // `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒ **被裁节点
                 // 复活**——用户会看到早已淘汰的旧工具链重新出现在历史里。
+                //
+                // **这一步不能升级为错误**（T-164 的另一半）：它发生在写缓存**之后**
+                // （裁剪决策在 `append_messages` 的临界区内产生），此时追加已经成功；
+                // 报失败会让调用方重试，而重试等于把同一条用户消息再追加一遍。代价
+                // 因此取「出声 + 有界」：被裁节点在下次重建后复活（列表变长，不是
+                // 数据丢失），日志把这次失败指出来。
                 if !removed.is_empty() {
                     if let Some(dir) = self.store.session_dir(&self.session_id) {
-                        super::super::v2_messages::removed(&dir, &removed);
+                        use super::super::v2_messages::AppendOutcome;
+                        if let AppendOutcome::Failed(why) =
+                            super::super::v2_messages::removed(&dir, &removed)
+                        {
+                            crate::plugin_error!(
+                                "session",
+                                "[message] 写入期裁剪的删除事实未入格：{why}\
+                                 （被裁的 {} 条在下次重建后会复活）",
+                                removed.len()
+                            );
+                        }
                     }
                 }
                 Ok(persisted)

@@ -11,7 +11,7 @@
 //! 已由 `vdfs_provider.test.rs` 覆盖——同一段语义不在两处各钉一遍
 //! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
 
-use super::{drain_parked, edited, removed};
+use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use crate::symbio_core::{
     Entity, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
@@ -47,6 +47,14 @@ fn seeded_dir(tag: &str) -> (std::path::PathBuf, u64) {
     (dir, seq)
 }
 
+/// 断言一次变更**落了格**（不是寄存、不是豁免、更不是失败）。
+fn assert_landed(outcome: AppendOutcome, what: &str) {
+    assert!(
+        matches!(outcome, AppendOutcome::Landed),
+        "{what} 应当落格，实际：{outcome:?}"
+    );
+}
+
 fn read_facts(dir: &std::path::Path) -> Vec<crate::symbio_core::Event> {
     let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("重开事实源");
@@ -73,7 +81,7 @@ fn patched_user(id: &str, text: &str) -> ChatNode {
 #[test]
 fn an_edit_lands_one_fact_with_the_patched_message() {
     let (dir, user_seq) = seeded_dir("edit");
-    edited(&dir, &patched_user("u-1", "改过的问题"));
+    assert_landed(edited(&dir, &patched_user("u-1", "改过的问题")), "编辑");
 
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 1, "一次编辑落一条事实");
@@ -103,7 +111,10 @@ fn an_edit_lands_one_fact_with_the_patched_message() {
 #[test]
 fn a_removal_lands_one_fact_carrying_every_id() {
     let (dir, user_seq) = seeded_dir("remove");
-    removed(&dir, &["u-1".into(), "T1".into(), "T1-text".into()]);
+    assert_landed(
+        removed(&dir, &["u-1".into(), "T1".into(), "T1-text".into()]),
+        "截断",
+    );
 
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 1, "一次截断落一条事实（区间用 ids 表达）");
@@ -128,7 +139,10 @@ fn a_removal_lands_one_fact_carrying_every_id() {
 #[test]
 fn an_empty_removal_lands_nothing() {
     let (dir, _) = seeded_dir("empty-remove");
-    removed(&dir, &[]);
+    assert!(
+        matches!(removed(&dir, &[]), AppendOutcome::Nothing),
+        "空列表没有事实可落——既不是失败，也不该被当成落格"
+    );
     assert!(read_facts(&dir).is_empty());
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -143,8 +157,18 @@ fn a_missing_source_of_truth_lands_nothing_and_does_not_panic() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时会话目录");
 
-    edited(&dir, &patched_user("u-1", "改"));
-    removed(&dir, &["u-1".into()]);
+    // 无锚是**豁免**而不是失败：这类会话的读侧回落 `messages.json`（ADR-049）。
+    assert!(
+        matches!(
+            edited(&dir, &patched_user("u-1", "改")),
+            AppendOutcome::NoAnchor
+        ),
+        "v1 遗留会话没有溯源锚 ⇒ 豁免，而不是报错"
+    );
+    assert!(matches!(
+        removed(&dir, &["u-1".into()]),
+        AppendOutcome::NoAnchor
+    ));
 
     assert!(read_facts(&dir).is_empty(), "无事实源 ⇒ 无变更事实");
     std::fs::remove_dir_all(&dir).ok();
@@ -157,14 +181,14 @@ fn a_missing_source_of_truth_lands_nothing_and_does_not_panic() {
 #[test]
 fn repeated_edits_get_distinct_event_ids() {
     let (dir, _) = seeded_dir("twice");
-    edited(&dir, &patched_user("u-1", "第一版"));
-    edited(&dir, &patched_user("u-1", "第二版"));
+    assert_landed(edited(&dir, &patched_user("u-1", "第一版")), "第一次编辑");
+    assert_landed(edited(&dir, &patched_user("u-1", "第二版")), "第二次编辑");
 
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 2, "两次编辑 = 两条事实");
     assert_ne!(facts[0].event_id, facts[1].event_id, "幂等键不得撞");
     // 两种变更**共用**同一个计数 ⇒ 交错也不会撞。
-    removed(&dir, &["u-1".into()]);
+    assert_landed(removed(&dir, &["u-1".into()]), "截断");
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 3);
     let ids: std::collections::HashSet<&str> = facts.iter().map(|e| e.event_id.as_str()).collect();
@@ -220,7 +244,10 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     )
     .expect("写旧 WAL");
 
-    edited(&dir, &patched_user("u-1", "改过的问题"));
+    assert_landed(
+        edited(&dir, &patched_user("u-1", "改过的问题")),
+        "承载事件缺 seq 的编辑",
+    );
 
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 1, "承载事件缺 seq 不该把整条编辑事实丢掉");
@@ -253,7 +280,13 @@ fn an_edit_while_the_token_is_held_is_parked_not_dropped() {
     let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("持令牌打开");
 
-    edited(&dir, &patched_user("u-1", "跑着的时候改的"));
+    assert!(
+        matches!(
+            edited(&dir, &patched_user("u-1", "跑着的时候改的")),
+            AppendOutcome::Parked
+        ),
+        "令牌被占 ⇒ 寄存（不是失败、也不是静默丢弃）"
+    );
 
     // 此刻**还没落**（令牌不在编辑这条链上）。
     assert!(
@@ -285,7 +318,10 @@ fn draining_the_park_is_idempotent_across_windows() {
     let (dir, _) = seeded_dir("park-drain-once");
     let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("持令牌打开");
-    edited(&dir, &patched_user("u-1", "一次"));
+    assert!(matches!(
+        edited(&dir, &patched_user("u-1", "一次")),
+        AppendOutcome::Parked
+    ));
 
     // 连续两次补落窗口（生产上「一轮结束后又开一轮」）：第二次必须是空操作。
     drain_parked(&dir, &holder);
@@ -307,7 +343,7 @@ fn draining_the_park_is_idempotent_across_windows() {
 #[test]
 fn draining_an_empty_park_is_a_noop() {
     let (dir, _) = seeded_dir("park-empty");
-    edited(&dir, &patched_user("u-1", "直接落的"));
+    assert_landed(edited(&dir, &patched_user("u-1", "直接落的")), "就地落格");
     let before = read_facts(&dir).len();
     let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("打开事实源");
@@ -323,7 +359,10 @@ fn a_truncate_while_the_token_is_held_is_parked_not_dropped() {
     let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("持令牌打开");
 
-    removed(&dir, &["u-1".into(), "T1".into()]);
+    assert!(matches!(
+        removed(&dir, &["u-1".into(), "T1".into()]),
+        AppendOutcome::Parked
+    ));
     assert!(read_facts(&dir).is_empty(), "令牌被占 ⇒ 寄存");
 
     drain_parked(&dir, &holder);
@@ -357,7 +396,10 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
 
     // 令牌被占 ⇒ 编辑寄存（此刻锚还没算）。
     // `ghost` 无承载 ⇒ 若此刻算锚会是切片末尾 = 0。
-    edited(&dir, &patched_user("ghost", "改"));
+    assert!(matches!(
+        edited(&dir, &patched_user("ghost", "改")),
+        AppendOutcome::Parked
+    ));
     assert!(read_facts(&dir).is_empty());
 
     // 令牌持有方又落了本轮的开轮事件（切片长长了一条：末尾从 0 变 1）——这是生产上
@@ -407,9 +449,12 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
 #[test]
 fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-assistant");
-    edited(
-        &dir,
-        &patched_msg("u-1", "流式累积的一段", NodeRole::Assistant, None, 1_500),
+    assert_landed(
+        edited(
+            &dir,
+            &patched_msg("u-1", "流式累积的一段", NodeRole::Assistant, None, 1_500),
+        ),
+        "助手正文编辑",
     );
 
     let edit = read_facts(&dir)
@@ -429,9 +474,12 @@ fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
 #[test]
 fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-tool");
-    edited(
-        &dir,
-        &patched_msg("u-1", "找不到文件", NodeRole::Tool, None, 1_700),
+    assert_landed(
+        edited(
+            &dir,
+            &patched_msg("u-1", "找不到文件", NodeRole::Tool, None, 1_700),
+        ),
+        "工具结果编辑",
     );
 
     let edit = read_facts(&dir)
@@ -448,9 +496,12 @@ fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
 #[test]
 fn only_a_user_message_is_attributed_to_the_user() {
     let (dir, _) = seeded_dir("actor-user");
-    edited(
-        &dir,
-        &patched_msg("u-1", "改过的问题", NodeRole::User, None, 1_600),
+    assert_landed(
+        edited(
+            &dir,
+            &patched_msg("u-1", "改过的问题", NodeRole::User, None, 1_600),
+        ),
+        "用户消息编辑",
     );
 
     let edit = read_facts(&dir)
@@ -468,15 +519,18 @@ fn only_a_user_message_is_attributed_to_the_user() {
 #[test]
 fn an_explicit_principal_wins_over_the_role() {
     let (dir, _) = seeded_dir("actor-relayed");
-    edited(
-        &dir,
-        &patched_msg(
-            "u-1",
-            "别人说的话",
-            NodeRole::Assistant,
-            Some("session/sub-1".into()),
-            1_800,
+    assert_landed(
+        edited(
+            &dir,
+            &patched_msg(
+                "u-1",
+                "别人说的话",
+                NodeRole::Assistant,
+                Some("session/sub-1".into()),
+                1_800,
+            ),
         ),
+        "转播消息编辑",
     );
 
     let edit = read_facts(&dir)
@@ -516,9 +570,12 @@ fn patched_msg(
 #[test]
 fn the_messages_own_timestamp_wins() {
     let (dir, _) = seeded_dir("ts-given");
-    edited(
-        &dir,
-        &patched_msg("u-1", "带时刻", NodeRole::Assistant, None, 1_234_567),
+    assert_landed(
+        edited(
+            &dir,
+            &patched_msg("u-1", "带时刻", NodeRole::Assistant, None, 1_234_567),
+        ),
+        "带时刻的编辑",
     );
 
     let edit = read_facts(&dir)
@@ -541,7 +598,7 @@ fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
     let mut m = patched_msg("u-1", "没填时刻", NodeRole::Assistant, None, 0);
     m.timestamp = Some(0); // 上游把「没填」写成 0，一并兜住
     m.principal = None;
-    edited(&dir, &m);
+    assert_landed(edited(&dir, &m), "缺时刻的编辑");
 
     let edit = read_facts(&dir)
         .into_iter()
@@ -553,6 +610,38 @@ fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
         "退到的是真实时钟读数：{ts}",
         ts = edit.ts
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── T-164：真失败**冒泡**，豁免只留给「无锚」那一类 ─────────────────────────
+
+/// 事实源打不开 ⇒ `Failed`，**不是** `NoAnchor`。
+///
+/// 这两件事在旧实现里都归 `Discarded`、都只记一行日志；主读切到 WAL 之后它们的
+/// 代价相反：无锚的会话读侧回落缓存（编辑还在），打不开事实源的会话**这次编辑
+/// 在重建后消失**。`chat_session::apply` 据此把它变成可见错误。
+///
+/// 复现手法：把锁文件的路径用一个**目录**占住——`EventWalStore::open` 的第一步
+/// 就是打开它，跨平台都会失败（Windows 拒绝无 `FILE_FLAG_BACKUP_SEMANTICS` 的目录句柄，
+/// Linux 是 `EISDIR`），且不依赖「事实源文件损坏」这种要靠平台行为才能构造的形态。
+#[test]
+fn an_unopenable_fact_source_is_a_failure_not_an_exemption() {
+    let dir = std::env::temp_dir().join(format!("symbio-v2msg-{}-broken", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时会话目录");
+    std::fs::create_dir_all(dir.join(format!(
+        "{}.lock",
+        crate::plugins::session::paths::V2_WAL_FILE
+    )))
+    .expect("占住锁文件路径");
+
+    match edited(&dir, &patched_user("u-1", "改")) {
+        AppendOutcome::Failed(why) => {
+            assert!(why.contains("打不开"), "失败要带得出原因：{why}");
+        }
+        other => panic!("事实源打不开必须是真失败，实际：{other:?}"),
+    }
 
     std::fs::remove_dir_all(&dir).ok();
 }

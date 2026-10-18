@@ -58,9 +58,9 @@ board.columns: [rank, deps, evidence, reason]
 <!-- list:task-entries owner -->
 
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
-> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
+> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 6 · 🟡 doing 2 · ☑ done 153 · ❌ wont 3（共 164）
+**计数**：☐ todo 5 · 🟡 doing 2 · ☑ done 154 · ❌ wont 3（共 164）
 
 ## 待处理（按依赖顺序）
 
@@ -71,7 +71,6 @@ board.columns: [rank, deps, evidence, reason]
 | `T-161-模型供应商参数档案表化` | 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表 | next | plan | — |
 | `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | next | plan | — |
 | `T-163-插件层特判审计守卫` | core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流 | next | 门禁与CI | — |
-| `T-164-v2_messages落格失败升级裁决` | v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢 | next | 登记卫生 | — |
 
 ## 进行中
 
@@ -127,6 +126,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-150-骨架惰性重取` | `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取 | 会话与输入 |
 | `T-151-Typing占位节点` | Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed | frontend |
 | `T-152-协议顶层字段消费守卫` | `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者 | 门禁与CI |
+| `T-164-v2_messages落格失败升级裁决` | v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢 | 登记卫生 |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | e2e |
@@ -403,7 +403,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（done）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（done）
 - [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（done）
-- [`T-156-架构机制化与旧代码清理批`](156-架构机制化与旧代码清理批.md) 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀（doing） · 子项 todo 6 / done 2
+- [`T-156-架构机制化与旧代码清理批`](156-架构机制化与旧代码清理批.md) 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀（doing） · 子项 todo 5 / done 3
   - [`T-157-ActorSpec-pattern死字段接线`](157-ActorSpec-pattern死字段接线.md) ActorSpec.pattern 生产零读取——三模式是数据存在、行为未分叉，Decider 语义长在三处特判里（todo）
   - [`T-158-工具名硬编码归一为能力元数据`](158-工具名硬编码归一为能力元数据.md) 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明（done）
   - [`T-159-messages.json过时双写注释清理`](159-messages.json过时双写注释清理.md) messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理（done）
@@ -411,7 +411,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-161-模型供应商参数档案表化`](161-模型供应商参数档案表化.md) 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表（todo）
   - [`T-162-ClassifyOnly快速档路径裁决`](162-ClassifyOnly快速档路径裁决.md) 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界（todo）
   - [`T-163-插件层特判审计守卫`](163-插件层特判审计守卫.md) core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流（todo）
-  - [`T-164-v2_messages落格失败升级裁决`](164-v2_messages落格失败升级裁决.md) v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢（todo）
+  - [`T-164-v2_messages落格失败升级裁决`](164-v2_messages落格失败升级裁决.md) v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢（done）
 - [`T-165-控制面收敛`](165-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（done）
 - [`T-166-上下文淡化层级未接入v2请求`](166-上下文淡化层级未接入v2请求.md) 请求视图层的三层裁剪在 v2 不生效——核出「接线与投影判据互斥」，三层整族退役（ADR-078）（done）
 - [`T-167-会话插件切分`](167-会话插件切分.md) PL-014 步骤 6——session 切分：先让「卸载」真的成立，再逐片搬（第一批切心跳）（doing）

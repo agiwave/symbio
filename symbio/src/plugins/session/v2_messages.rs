@@ -3,27 +3,34 @@
 //! 「编辑一条消息」「截断一段消息」在轨 S 之前只重写 `messages.json`——事实源里
 //! 一个字都没有。后果是**正确性**的：主读路径已切到「从 WAL 重建」，被截断的
 //! 消息会**复活**、编辑过的内容会**回退**。本模块是这两件事**入格**的写方：
-//! `commands::patch_message` / `commands::truncate_messages` 在重写缓存之后各调一次。
+//! `commands::patch_message` / `commands::truncate_messages` 经唯一写入口
+//! `chat_session::apply` 的步骤 ① 各调一次——**先于**写缓存（ADR-054 决策 2 的
+//! 顺序反转），所以这里失败时缓存还没动过。
 //!
 //! ## 追加，不是改写
 //!
 //! 本模块对一次变更**只追加一条事实**、不动任何既有行为——重建时新事实排在旧
 //! 事实之后，末态由列表投影折出。
 //!
-//! ## 失败口径：`AppendError` 只记日志，不冒泡
+//! ## 失败口径：五个结果、四种处置，真失败**冒泡**（T-164 / ADR-053 的 b3 工序）
 //!
-//! 事实写入失败（拿不到写者令牌 / 撞幂等键）**不得**让一次编辑失败：缓存已经
-//! 写成功了，用户看到的就是「改好了」。这与 `v2_facts::record_learning` 同一条
-//! 口径（附加事实失败不该把成功的动作说成失败）。
+//! 旧口径是「事实失败只记日志、不冒泡」，理由是「附加事实失败不该把成功的动作
+//! 说成失败」——那在 b1/b2 成立：缓存是读侧真源、事实是影子。**b3 把主读切到
+//! WAL 之后事实就是本体**，影子成了唯一副本，放过它就等于「回执说改好了、
+//! 重建后一看没改」，而且用户无感。
 //!
-//! 三点边界要写清楚，否则「不冒泡」会被读成「什么都不会炸」：
+//! 本模块因此把结果分成五种（[`AppendOutcome`]），**处置由调用方定**：
 //!
-//! - **存储层的 IO 灾难仍会 panic**——那是 [`Store::append`] 自己的既有契约
-//!   （「不可静默」），不是本模块的口径；本模块只吞 [`AppendError`]。
-//! - **`NotTheWriter` 有寄存补落**（T-055，见下「写者令牌」一节）。
-//! - **其余 `AppendError` 归 `Discarded`，调用方静默忽略**——主读切到 WAL 之后，
-//!   该次编辑在重建后会**丢失且用户无感**。b3 批预告过「届时升级为错误」、随批
-//!   漏做；升级与否的裁决归 T-164，本模块暂维持日志口径（告警文案已与切源事实对齐）。
+//! - [`AppendOutcome::Landed`] / [`AppendOutcome::Nothing`]：落了 / 本来就没有事实可落；
+//! - [`AppendOutcome::Parked`]：拿不到写者令牌 ⇒ **寄存**，由持令牌方补落（T-055）；
+//! - [`AppendOutcome::NoAnchor`]：事实源里没有可用的溯源锚——v1 遗留会话 / 从未走过
+//!   v2 轮。这类会话的读侧本就回落 `messages.json`（ADR-049），缓存仍是真源 ⇒ **豁免**；
+//! - [`AppendOutcome::Failed`]：事实源打不开 / 追加被拒。**这是真失败**：主读已切 WAL，
+//!   这次变更在重建后会丢。`chat_session::apply` 在写缓存**之前**把它变成可见错误
+//!   ——报失败是如实，不是「把成功的动作说成失败」。
+//!
+//! 一条边界不变：存储层的 IO 灾难仍会 panic——那是 [`Store::append`] 自己的契约
+//! （「不可静默」），不是本模块的口径。
 //!
 //! ## 写者令牌：会话正跑着时编辑会落不了格（T-055 已解决）
 //!
@@ -166,11 +173,17 @@ pub fn drain_parked(session_dir: &Path, store: &EventWalStore) {
             &change.target,
             change.payload.clone(),
         ) {
-            AppendOutcome::Landed => {}
+            Ok(()) => {}
             // 又拿不到令牌（极端并发）⇒ 原样放回，等下一个窗口。
-            AppendOutcome::NotWriter => park(session_dir, change),
-            // 无锚 / 落格失败：寄存也救不了——按既有口径出声后丢（与就地落格同一处置）。
-            AppendOutcome::Discarded => {}
+            Err(TryAppendError::NotWriter) => park(session_dir, change),
+            // 无锚 / 真失败：寄存也救不了——补落没有第二次机会（调用方早已把
+            // 回执发给了用户），所以这里**出声**而不是静默。
+            Err(TryAppendError::NoAnchor) => {}
+            Err(TryAppendError::Failed(why)) => crate::plugin_error!(
+                "session",
+                "[message] 寄存的变更补落失败，该次变更已丢失（重建后不可见）：{}",
+                why
+            ),
         }
     }
 }
@@ -187,12 +200,12 @@ const NODE_ID_KEYS: &[&str] = &["id", "text_id", "reasoning_id", "tool_call_id",
 ///
 /// `msg` 是**补丁应用后**的整条消息（不是补丁本身）——重建与转写都按 id 整条替换，
 /// 拿到整条就不必再猜「这次改的是哪几个字段」（理由见 `EVENT_MESSAGE_EDITED`）。
-pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) {
+pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) -> AppendOutcome {
     let payload = match serde_json::to_value(msg) {
         Ok(v) => v,
+        // 序列化失败是**本模块自己的**失败（与事实源无关）：调用方同样不能当它没发生。
         Err(e) => {
-            crate::plugin_warn!("session", "[message] 编辑事实未入格：序列化失败：{e}");
-            return;
+            return AppendOutcome::Failed(format!("编辑事实未入格：序列化失败：{e}"));
         }
     };
     append(
@@ -202,7 +215,7 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) {
         "m-edit",
         &msg.id,
         serde_json::json!({ "message": payload }),
-    );
+    )
 }
 
 /// 一条消息**诞生** ⇒ 落一条 `message.added`（载荷 `{ messages: [...] }`）。
@@ -212,15 +225,14 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) {
 /// 否则同一条节点有两个 owner（ADR-049 理由 1）。
 ///
 /// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
-pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) {
+pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) -> AppendOutcome {
     if msgs.is_empty() {
-        return;
+        return AppendOutcome::Nothing;
     }
     let payload = match serde_json::to_value(msgs) {
         Ok(v) => v,
         Err(e) => {
-            crate::plugin_warn!("session", "[message] 诞生事实未入格：序列化失败：{e}");
-            return;
+            return AppendOutcome::Failed(format!("诞生事实未入格：序列化失败：{e}"));
         }
     };
     append(
@@ -231,7 +243,7 @@ pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) {
         // 溯源锚取**第一条**：与 [`removed`] 同形——一次诞生的一个动作，锚在它身上。
         msgs.first().map(|m| m.id.as_str()).unwrap_or_default(),
         serde_json::json!({ "messages": payload }),
-    );
+    )
 }
 
 /// 一段消息没了 ⇒ 落一条 `message.removed`（载荷 `{ ids: [...] }`）。
@@ -239,9 +251,9 @@ pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) {
 /// `ids` 是**被删节点 id 的完整列表**（与 `truncate_messages` 回执里那份同源）。
 /// 空列表不落格：「什么都没删」不该在事实源上留下痕迹——与
 /// `truncate_messages` 不发任何变更帧同一条判据。
-pub(crate) fn removed(session_dir: &Path, ids: &[String]) {
+pub(crate) fn removed(session_dir: &Path, ids: &[String]) -> AppendOutcome {
     if ids.is_empty() {
-        return;
+        return AppendOutcome::Nothing;
     }
     append(
         session_dir,
@@ -251,17 +263,38 @@ pub(crate) fn removed(session_dir: &Path, ids: &[String]) {
         // 溯源锚取**第一条被删的**：截断的语义是「从 X 起」——X 就是那个起点。
         ids.first().map(String::as_str).unwrap_or_default(),
         serde_json::json!({ "ids": ids }),
-    );
+    )
 }
 
-/// 一条变更事实落格的**结果**（[`try_append`] 的返回）。
-enum AppendOutcome {
+/// 一条变更事实落格的**结果**。
+///
+/// 五种而不是三种：旧形态把「无锚可指」与「真失败」压进同一个 `Discarded`，
+/// 于是「v1 遗留会话可以放过」和「主读已切 WAL、这次编辑会丢」用了同一条处置。
+/// 切源之后这两件事的代价相反，必须分开（T-164）。
+#[must_use]
+#[derive(Debug)]
+pub(crate) enum AppendOutcome {
     /// 落了格。
     Landed,
+    /// 本来就没有事实可落（空列表）——不是失败，也不该在事实源上留痕。
+    Nothing,
     /// 拿不到写者令牌 ⇒ **寄存**，等持令牌方补落（T-055）。
+    Parked,
+    /// 无锚可指：事实源里没有可用的溯源锚（v1 遗留会话 / 从未走过 v2 轮）。
+    /// 这类会话的读侧本就回落 `messages.json`（ADR-049），缓存仍是真源 ⇒ 豁免。
+    NoAnchor,
+    /// 真失败：事实源打不开 / 追加被拒。主读已切 WAL ⇒ 这次变更在重建后会丢。
+    Failed(String),
+}
+
+/// [`try_append`] / [`append_into`] 的失败形态——寄存与否由调用方决定。
+enum TryAppendError {
+    /// 拿不到写者令牌（可寄存后补落）。
     NotWriter,
-    /// 落不了且寄存也无益（事实源打不开 / 没有可用溯源锚）⇒ 出声后放弃。
-    Discarded,
+    /// 切片里没有可用的溯源锚（v1 遗留会话；寄存也救不了）。
+    NoAnchor,
+    /// 事实源打不开 / 追加被拒（真失败）。
+    Failed(String),
 }
 
 /// 把一条变更事实追加进会话的事实源；拿不到令牌时**寄存**（T-055 的入口）。
@@ -274,25 +307,29 @@ fn append(
     id_prefix: &'static str,
     target: &str,
     payload: Value,
-) {
+) -> AppendOutcome {
     match try_append(session_dir, kind, verb, id_prefix, target, payload.clone()) {
-        AppendOutcome::Landed => {}
+        Ok(()) => AppendOutcome::Landed,
         // **寄存，而不是出声丢弃**（T-055）：一轮正在跑时它持着写者令牌，此刻来的
         // 编辑拿不到 ⇒ 静默少一条事实。切源之后那就是「编辑偶发不生效」且无人报错。
         // 把变更寄存在进程内，由持令牌的一方（执行口 `drain_parked`）补落。
         //
         // 载荷**原样寄存**：锚与幂等键都在补落那一刻重算（见 `drain_parked`）。
-        AppendOutcome::NotWriter => park(
-            session_dir,
-            ParkedChange {
-                kind,
-                verb,
-                id_prefix,
-                target: target.to_string(),
-                payload,
-            },
-        ),
-        AppendOutcome::Discarded => {}
+        Err(TryAppendError::NotWriter) => {
+            park(
+                session_dir,
+                ParkedChange {
+                    kind,
+                    verb,
+                    id_prefix,
+                    target: target.to_string(),
+                    payload,
+                },
+            );
+            AppendOutcome::Parked
+        }
+        Err(TryAppendError::NoAnchor) => AppendOutcome::NoAnchor,
+        Err(TryAppendError::Failed(why)) => AppendOutcome::Failed(why),
     }
 }
 
@@ -364,17 +401,14 @@ fn try_append(
     id_prefix: &str,
     target: &str,
     payload: Value,
-) -> AppendOutcome {
+) -> Result<(), TryAppendError> {
     let wal = session_dir.join(V2_WAL_FILE);
     let store = match EventWalStore::open(&wal) {
         Ok(s) => s,
         Err(e) => {
-            crate::plugin_warn!(
-                "session",
-                "[message] 变更事实未入格（{}）：事实源打不开：{e}",
-                wal.display()
-            );
-            return AppendOutcome::Discarded;
+            let why = format!("事实源打不开（{}）：{e}", wal.display());
+            crate::plugin_warn!("session", "[message] 变更事实未入格：{}", why);
+            return Err(TryAppendError::Failed(why));
         }
     };
     append_into(&store, &wal, kind, verb, id_prefix, target, payload)
@@ -399,7 +433,7 @@ fn append_into(
     id_prefix: &str,
     target: &str,
     payload: Value,
-) -> AppendOutcome {
+) -> Result<(), TryAppendError> {
     // `history()` 而非 `range()`（S2.7-b2）：
     // - **溯源锚**：被编辑的消息若来自压缩前（其定义事件在归档段里），只读 live 会
     //   找不到载体 ⇒ 退回 `last()` 的弱锚（`provenance` 的兜底）；
@@ -420,7 +454,7 @@ fn append_into(
             "[message] 变更事实未入格（{}）：切片内没有可用的溯源锚（{kind} {target}）",
             wal.display()
         );
-        return AppendOutcome::Discarded;
+        return Err(TryAppendError::NoAnchor);
     };
     // 幂等键：本会话内 `message` 实体的第 n 条。**不是「一条消息一个号」**——
     // 同一条消息可以被编辑多次，每次都是一条新事实；两种变更共用同一个计数，
@@ -457,19 +491,18 @@ fn append_into(
     .with_ts(ts)
     .with_payload(payload);
     match store.append(event) {
-        Ok(_) => AppendOutcome::Landed,
+        Ok(_) => Ok(()),
         // **令牌被占**是自己的一类（寄存后能救回来），不能被归进"失败"里
         // ——那正是 T-055 要消灭的静默丢弃。
-        Err(AppendError::NotTheWriter) => AppendOutcome::NotWriter,
-        Err(e) => {
-            crate::plugin_warn!(
-                "session",
-                "[message] 变更事实未入格（{}）：{e:?}（缓存已写成功，但主读已切 WAL：\
-                 该编辑在下次重建后会丢失——升级裁决见 T-164）",
-                wal.display()
-            );
-            AppendOutcome::Discarded
-        }
+        Err(AppendError::NotTheWriter) => Err(TryAppendError::NotWriter),
+        // 真失败：主读已切 WAL，放过它 = 这次变更在重建后消失。
+        // 文案只陈述**发生了什么**，不再替调用方判断「缓存是否已写成功」——
+        // 就地落格发生在写缓存**之前**、补落发生在**之后**，同一句话对两条路径
+        // 不可能都成立（T-164 修掉的那句假话）。
+        Err(e) => Err(TryAppendError::Failed(format!(
+            "追加被拒（{e:?}）：{kind} {target}（{}）",
+            wal.display()
+        ))),
     }
 }
 

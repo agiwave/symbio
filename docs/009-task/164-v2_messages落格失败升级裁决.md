@@ -2,14 +2,14 @@
 kind: task
 id: T-164-v2_messages落格失败升级裁决
 title: v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢
-status: todo
+status: done
 created: 2026-10-17
 track: 登记卫生
 prio: next
 parent: T-156-架构机制化与旧代码清理批
 where: symbio/src/plugins/session/v2_messages.rs · symbio/src/plugins/session/commands.rs
 exit: 落格失败（非 NotTheWriter 的 AppendError）在 v2 会话里要么升级为可见错误（编辑回执报失败），要么保留日志口径但成文 ADR 说明为何可接受；当前「缓存已写成功，本次编辑仍然生效」的措辞必须与主读已切 WAL 的事实一致——切源后这句话是假的。cargo test + clippy + 门禁全绿
-signal: v2_messages.rs 头部注释（第 24-25 行）写「b3 之后这里会变成真源，那时失败就该升级为错误。这条不是待办，是 b3 批内的工序」——而 b3 已完成（ADR-053 迁移表 b3 行：`e4743c11` 主读收敛单源），代码却仍走 `AppendOutcome::Discarded => {}`（第 173、295 行静默忽略），且 `append_into` 的告警文案是「缓存已写成功，本次编辑仍然生效」（第 467 行）。主读切到「从 WAL 重建」（store/mod.rs:217-219）后，这条文案是假的：缓存里的编辑不会被重建读到，该次编辑在下次重建后丢失。注释与代码同时停留在 b3 之前的状态
+evidence: 取「升级为可见错误」这条出路（`AppendOutcome` 五态：`Landed` / `Nothing` / `Parked` / `NoAnchor` / `Failed`，处置由调用方定）。`chat_session::apply` 的步骤 ①（**写缓存之前**）把 `Failed` 转成 `PluginError::InternalError`，编辑回执经 `vdfs_provider` 的 `map_err` 变成失败响应；`NoAnchor` 仍是豁免（v1 遗留会话的读侧本就回落 `messages.json`）；写入期裁剪那半（发生在写缓存之后）保留出声口径并写明理由。判据：`v2_messages.test.rs::an_unopenable_fact_source_is_a_failure_not_an_exemption`（锁文件路径被目录占住 ⇒ `Failed`）+ `chat_session.test.rs::apply_reports_a_failed_fact_write_and_writes_nothing`（报错 ∧ 缓存里没有那个节点）；ADR-053 补记与 ADR-044 的边界。`cargo test -p symbio --lib` 1747→1749。
 ---
 
 ## 内容
@@ -54,3 +54,20 @@ signal: v2_messages.rs 头部注释（第 24-25 行）写「b3 之后这里会�
   **两条口径冲突，须先裁决再动**，不是注释层面能解决的。
 - 施工要点：先分清上表两条路径（无锚 vs 真失败），只对真失败那条做升级或成文豁免；
   保留日志口径时必须改掉第 467 行的假文案。
+
+- 2026-10-19 **施工：取「升级为可见错误」这条出路**。先按任务自己给的那张表把两条到达路径分开——
+  `NoAnchor`（v1 遗留会话 / 从未走过 v2 轮）保持豁免，`Failed`（事实源打不开 / 追加被拒）升级。
+  实现上把旧的 `AppendOutcome { Landed, NotWriter, Discarded }` 换成五态（多出 `Nothing` 与
+  `NoAnchor` / `Failed` 的区分），`Discarded` 这一格正是把两件代价相反的事压在一起的那一格。
+  处置权交给调用方：`v2_messages` 只报结果，`chat_session::apply` 决定怎么办——它把 `Failed`
+  变成 `PluginError::InternalError` 并在**写缓存之前**返回，于是「报失败」与「什么都没发生」
+  是同一次返回的两个面，不存在写了一半的中间态。
+  **口径冲突的裁决**：ADR-044 的「落格失败只记警告不冒泡」管的是轮末收束格（`chat.assistant.final`
+  等，写发生在用户已看见输出之后），与「用户对列表的动作」不是同一种写；ADR-053 补记把这条边界
+  与四态表一并成文，b3 那句漏做的升级至此兑现。
+  **一处不升级**：写入期裁剪的 `message.removed` 在写缓存之后（裁剪决策在 `append_messages` 的
+  临界区内产生），报错会让调用方重试、而重试等于把同一条用户消息再追加一遍；代价有界（被裁节点
+  在下次重建后复活，列表变长而非数据丢失），故保留出声并把这个理由写在代码旁。
+  同批修掉那句假话：`append_into` 的告警不再声称「缓存已写成功，本次编辑仍然生效」——就地落格
+  在写缓存**之前**、补落在**之后**，同一句话对两条路径不可能都成立；现在只陈述发生了什么，
+  由调用方决定怎么说。

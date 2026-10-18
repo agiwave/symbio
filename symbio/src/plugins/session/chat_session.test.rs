@@ -1086,6 +1086,45 @@ async fn apply_removed_lands_a_fact_and_drops_nodes() {
     assert_eq!(removed.len(), 1, "一次删除落**一条**事实（ids 表达区间）");
 }
 
+/// **T-164 的承重判据**：事实落不下去 ⇒ `apply` 报失败，且**什么都没发生**。
+///
+/// 旧口径是「事实失败只记日志」——那在缓存是读侧真源时成立（影子失败不该让本体
+/// 失败）。b3 把主读切到 WAL 之后事实就是本体：放过它等于「回执说改好了、重建后
+/// 一看没改」，而且用户无感。步骤 ① 在写缓存**之前**，所以报失败是如实。
+///
+/// 复现手法：把锁文件路径换成目录 ⇒ `EventWalStore::open` 打不开（跨平台都失败）。
+/// 断言两半：`apply` 返回错误（回执报失败）+ 缓存里没有那个节点（失败即未生效，
+/// 不是「写了一半」）。
+#[tokio::test]
+async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
+    let (session, dir, _tmp) = setup().await;
+    // 先种一条事实：没有锚的会话走的是 `NoAnchor` 豁免（v1 遗留），不是本条要验的路径。
+    seed_fact(&dir);
+    let lock = dir.join(format!("{V2_WAL_FILE}.lock"));
+    std::fs::remove_file(&lock).expect("移走锁文件");
+    std::fs::create_dir(&lock).expect("占住锁文件路径");
+
+    let err = session
+        .apply(super::MessageChange::Born {
+            nodes: vec![plain_msg("born-1")],
+            carrier: super::Carrier::Here,
+        })
+        .await
+        .expect_err("事实源打不开 ⇒ 这次变更必须报失败");
+    assert!(
+        err.to_string().contains("未生效"),
+        "错误要说清「本次变更未生效」：{err}"
+    );
+
+    // 恢复锁路径，读列表：失败的变更**一点都没写**。
+    std::fs::remove_dir(&lock).expect("交还锁文件路径");
+    let list = session.get_messages().await.expect("读列表失败");
+    assert!(
+        list.iter().all(|m| m.id != "born-1"),
+        "事实失败 ⇒ 缓存也不写（失败即未生效，不是写了一半）：{list:?}"
+    );
+}
+
 // ── 作用域的第一个生产构造点（[T-105]）──────────────────────────────────────
 //
 // `chat_loop::state::request_scope` 按会话元数据的**委派链**取值：子会话挂父主体，
