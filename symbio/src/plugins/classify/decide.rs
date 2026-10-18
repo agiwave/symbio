@@ -143,6 +143,7 @@ pub(crate) async fn decide(
     let root_id = llm_short_id();
 
     match provider
+        // internal-model-allow IM-001: 快速档判决是内部请求（tools 空 / 出口 silent / 固定 system prompt）——不走对话链路的闸门是已裁决的形态，归属由 T-168 裁 A/B
         .execute_turn(system_prompt, &messages, &[], &root_id, &env)
         .await
     {

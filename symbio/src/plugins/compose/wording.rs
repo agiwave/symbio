@@ -102,6 +102,7 @@ pub(crate) async fn generate(
     let root_id = llm_short_id();
 
     match provider
+        // internal-model-allow IM-001: 答话措辞同上——内部请求（tools 空 / 出口 silent / system prompt 就地构造），档位归属由 T-168 裁 A/B
         .execute_turn(&system_prompt, &messages, &[], &root_id, &env)
         .await
     {

@@ -142,6 +142,20 @@ export const GUARDS = [
   // ③ 注释没剥 ⇒ 注释里提一句 `agent_run` 就红。近邻形态（`unwrap_or("ask_user")`、
   // `.get("heartbeat")`、`match` 别名臂、`anthropic-version` 头名）都逐条断言不误报。
   'plugin-special-case-audit',
+  // `internal-model-audit`（IM-001…003）判**档位闸门的覆盖范围有没有被悄悄扩大**：
+  // 闸门只有一个挂点 `LlmAdapter::generate(&FullModel, …)`，而 `ModelProvider::execute_turn`
+  // 对所有插件开放——直调它就绕过闸门（[T-168](../../docs/009-task/168-模型档位闸门对内部请求无效.md "T-168-模型档位闸门对内部请求无效")）。
+  //
+  // 它治的病是**第四条内部请求悄悄溜进来**：绕过本身不是罪（内部请求 = 无工具 + silent
+  // 出口 + 固定 system prompt，本来就不该走对话链路闸门），罪在没人枚举调用点 ⇒ 闸门
+  // 覆盖范围无法复查。本守卫把「调用点清单」变成判据：每处必须在代码旁写一条非空理由。
+  //
+  // 与 SC 族同一立场，**不用数字基线**：逐处豁免（`// internal-model-allow IM-001: 理由`），
+  // 空理由单独报 IM-002（写了像登记、实际不算，不显式报出来人会以为登记过），
+  // 悬空报 IM-003（代码搬走而标记还在 ⇒ 判据对这一处永久失效）。
+  // 失效形态三种，回归测试各钉一头：扫描根读空、注释没剥、测试模块没排除。
+  // 存量四处逐处登记（provider_adapter 的闸门本体 + 三个已裁决的内部请求）。
+  'internal-model-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
