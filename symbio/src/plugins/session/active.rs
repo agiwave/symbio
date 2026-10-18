@@ -105,7 +105,7 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
-    /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断 / 工具轮次上限。
+    /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断。
     ///
     /// 它是**状态**不是事件：由出口的告警通道（`ExecEventSink::warn`）写入、随会话节点
     /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。

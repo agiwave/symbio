@@ -104,7 +104,7 @@ pub(crate) async fn request_scope(session: &PersistentChatSession) -> crate::sym
 ///
 /// 设计说明：
 /// - 仅包含消息列表，不包含 MODEL 请求配置
-/// - system_prompt、tools、轮次上限等配置应从 model_chat::Request 获取
+/// - system_prompt、tools 等请求配置从 model_chat::Request 获取
 /// - session 用于管理会话历史（滑动窗口/自动截断/持久化）
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatNode>,

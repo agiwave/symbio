@@ -13,7 +13,7 @@
 //! | 消费方 | 形态 | 门控 |
 //! |---|---|---|
 //! | 读出口 `session/stats` | `readyset` 列（与四列同款：事实源读什么算什么） | `may_read` |
-//! | 调度段 [`prompt_section`] | 请求视图**置顶**一段 `role=user` 的提示 | 有任务 ∧ 就绪集非空 ∧ `tool_rounds == 0` |
+//! | 调度段 [`prompt_section`] | 请求视图**置顶**一段 `role=user` 的提示 | 有任务 ∧ 就绪集非空 ∧ `request_round == 0` |
 //!
 //! 投影给的是**候选集**（`readyset` 是纯函数，同一份切片永远算出同一个集合），
 //! 选哪一个是调用方的策略——调度段把候选集交给本轮的执行者（模型），不替它决定
@@ -289,7 +289,7 @@ pub(crate) fn write(
 /// - 文件不存在 / 读不了 ⇒ `None`——请求里就少一段，不存在「空占位」；
 /// - 就绪集空 ⇒ `None`——依赖没闭合时给模型一个空的候选集只会诱导它瞎猜。
 ///
-/// 调用方（`chat_loop::inputs`）按 `tool_rounds == 0` 取一次、本轮各工具轮复用。
+/// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
 pub(crate) fn prompt_section(session_dir: &Path) -> Option<String> {
     let path = session_dir.join(super::paths::V2_WAL_FILE);
     // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。

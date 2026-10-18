@@ -38,7 +38,7 @@ pub(crate) struct SessionRuntime {
     pub outcome: Option<String>,
     /// 上一轮的错误短消息（仅 `outcome == failed` 时有意义）
     pub error: Option<String>,
-    /// 会话级告警（可恢复）：持久化失败 / 长度截断 / 工具轮次上限。
+    /// 会话级告警（可恢复）：持久化失败 / 长度截断。
     /// 与 `error` 的分界：告警不改变运行态，会话照常运行；新一轮开始即清除。
     pub warning: Option<String>,
 }

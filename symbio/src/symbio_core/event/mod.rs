@@ -77,9 +77,11 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// ## 它为什么是事实（缺口 4）
 ///
 /// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
-/// 不能只靠 chat_loop 的轮边界发——工具循环在 v2 运行器里，轮边界每个用户轮只经过
-/// 一次、且判定头一句就是 `tool_rounds == 0 ⇒ 不说`（那个计数只在工具循环里递增）
-/// ⇒ **恒不发**。
+/// 发点在**工具批次边界**（`v2_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
+/// 用户轮只经过一次请求，而工具循环在运行器的环体里，真实的工具轮数只在那里
+/// （载荷里的 `tool_rounds` 就是它；计数口径见 [ADR-074](../../../../docs/010-adr/074.md)）。
+/// 该不该说是 `ProgressPolicy::due` 的四条与关系：开关开着 ∧ 沉默够久 ∧
+/// `tool_rounds >= min_rounds` ∧ 未超本轮配额。
 ///
 /// 汇报不是轮次事实（一轮可以报零到多次），所以它与 `turn.supplemented` 同格
 /// （`turn × asserted`），不占 `chat.assistant.final` 那格 N3 的「每轮至多一条」。

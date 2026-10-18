@@ -50,7 +50,7 @@ impl ExecTranscriptWriter for TranscriptSink {
     }
 
     async fn warn(&self, warning: Option<String>) {
-        // 会话级告警（持久化失败 / 长度截断 / 工具轮次上限）：直通会话节点
+        // 会话级告警（持久化失败 / 长度截断）：直通会话节点
         // `attributes.warning`（VDFS watch 域，状态非事件），**不进转写**。
         self.plugin
             .emit_session_state(&self.state, SessionStateChange::Warning(warning))

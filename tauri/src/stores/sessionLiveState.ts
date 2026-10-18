@@ -24,7 +24,7 @@ export function useSessionLiveState() {
 
   // 会话级告警状态（"告警是状态，不是事件"原则的前端落地）：
   // 来源唯一——会话节点的 `attributes.warning`（后端 `MessageChange::Warn` 写入，
-  // 持久化失败 / 长度截断 / 工具轮次上限等**可恢复**提示；新一轮开始时后端清除）。
+  // 持久化失败 / 长度截断等**可恢复**提示；新一轮开始时后端清除）。
   // 与 `sessionErrors`（失败终态）互斥并存：告警不改变运行态，会话照常运行。
   const sessionWarnings = shallowRef<Record<string, string | null>>({})
 

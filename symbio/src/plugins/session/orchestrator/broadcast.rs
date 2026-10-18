@@ -41,7 +41,7 @@ pub enum SessionStateChange {
     },
     /// 会话级告警（可恢复）：只写 `attributes.warning`，**不改变运行态**。
     /// `Some(text)` 设置，`None` 清除。与 `Finished.error`（失败终态）的分界：
-    /// 告警期间会话照常运行（持久化失败 / 长度截断 / 工具轮次上限）。
+    /// 告警期间会话照常运行（持久化失败 / 长度截断）。
     Warning(Option<String>),
 }
 
