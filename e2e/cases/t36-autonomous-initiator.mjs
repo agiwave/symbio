@@ -16,7 +16,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么必须端到端（单测证不了的两件事）
 //
-// 单测（`heartbeat/tests.rs`）直接调 `record_autonomous_trigger`，把三种「不触发」
+// 单测（`transcript/autonomous.test.rs`）直接调 `record_autonomous_trigger`，把三种「不触发」
 // 与四个事实的形状钉死了，但它证不了：
 //
 // 1. **定时器真的接上了**：`run_heartbeat_loop` 是常驻后台循环（15s tick），

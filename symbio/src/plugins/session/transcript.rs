@@ -48,6 +48,8 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
+pub(crate) mod autonomous;
 mod frames;
 pub(crate) mod inbox;
 /// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。

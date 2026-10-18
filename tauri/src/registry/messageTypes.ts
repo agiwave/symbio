@@ -434,7 +434,7 @@ export function formatTokens(n: number): string {
   return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}k`
 }
 
-/** 系统心跳任务自动发送的消息（后端 `trigger_heartbeat` 打标） */
+/** 系统心跳任务自动发送的消息（后端 `heartbeat_message` 打标） */
 export function messageIsHeartbeat(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.heartbeat)
 }

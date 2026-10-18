@@ -3,7 +3,7 @@
 //! 心跳机制的全部环节都在 session 插件内闭环：
 //! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，`heartbeat/mod.rs`）
 //! - 后台调度：`heartbeat/mod.rs` 的调度循环（随插件树构建启动，常驻运行）
-//! - 触发执行：`trigger_heartbeat` 复用 chat/send 统一入口
+//! - 触发执行：调度循环把心跳提示词交给自主触发入口（`transcript/autonomous.rs`）进程内入队
 //!
 //! 本工具是这套机制的**设置入口**：模型在会话内调用它启用/调整/停用本会话
 //! 的心跳任务。实现上直接读写本插件的会话存储（get_or_create_session /
