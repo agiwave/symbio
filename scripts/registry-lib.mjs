@@ -437,6 +437,9 @@ export const SCAN_SKIP_DIRS = new Set([
   'tmp',
   // IDE 会话工作区（对话产物 / 规划草稿）：与 `.workbuddy` 同性质，不进本仓登记
   '.trae',
+  // 编辑器扩展的计数报告（VSCode Counter 每次运行新建一个日期目录）：机器产物、
+  // 不是阅读文档，`.gitignore` 的 `.VSCode*/` 已盖住，登记机制也不该看见它
+  '.VSCodeCounter',
   '.symbio',
   '.agents',
   'examples',
