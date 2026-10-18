@@ -13,7 +13,7 @@ use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::{
-    creator_create_object, plugin_dir_from_ctx, Plugin, PluginDir, PluginError,
+    creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest, PLUGIN_ID_MODEL,
 };
@@ -742,9 +742,9 @@ impl Plugin for ModelPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         // 模型能力纳入统一注册收集机制：与 local/web/mcp 插件注册工具同构。
         // 命中 TRAVERSE_AVAILABLE_TOOLS 时，按上下文解析出**唯一生效** Provider
-        // （ctx[PROVIDER_ID] > default_provider_id > 首个 enabled），构造运行期
-        // `ModelProvider` 注册进 CAPABILITY_VISITOR；其系统提示词同时注册在
-        // provider_id 键与 "default" 键（消费侧两键均兜底）。
+        // （ctx[PROVIDER_ID] > default_provider_id > 首个 enabled），逐行写进
+        // CAPABILITY_VISITOR 的**能力表**（生效位标在那一行上，见
+        // `capability/model.rs`）；系统提示词注册在本插件名下（`PLUGIN_ID_MODEL`）。
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         match sub_path.as_str() {
             // 选项收集（与能力收集同一广播机制的第二通道）：贡献「Model」选择项
@@ -819,9 +819,16 @@ impl Plugin for ModelPlugin {
                     "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
                 );
             }
-            tool_visitor
-                .register_model_providers(active_id.as_deref(), available)
-                .await;
+            // 入表：**一行一个已启用 provider**，当次生效者带**生效位**（AR-025 4b）。
+            // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
+            // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
+            // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。
+            for provider in available {
+                let is_active = active_id.as_deref() == Some(provider.provider_id());
+                tool_visitor
+                    .put(CapabilityRow::model(provider, is_active))
+                    .await;
+            }
 
             // 人格在**注册期**就已选定（上面按 `PROVIDER_ID` 解析出生效 provider），
             // 因此这里只注册一个条目。历史上曾同时注册 `provider_id` 与 `"default"`

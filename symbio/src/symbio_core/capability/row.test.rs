@@ -5,7 +5,9 @@
 //! 经审批闸那一层不被行Vocabulary截断）。
 
 use super::*;
-use crate::symbio_core::{CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest};
+use crate::symbio_core::{
+    CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest, TurnOutput,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -76,6 +78,43 @@ fn stub(name: &str) -> Arc<dyn Capability> {
     })
 }
 
+/// 最小模型服务桩：只提供 `provider_id`（行名就从它派生），执行永不到达。
+struct StubProvider(&'static str);
+
+#[async_trait]
+impl ModelProvider for StubProvider {
+    fn provider_id(&self) -> &str {
+        self.0
+    }
+
+    fn api_protocol(&self) -> &str {
+        "openai_chat"
+    }
+
+    fn rate_limit_ms(&self) -> u64 {
+        0
+    }
+
+    fn max_context_tokens(&self) -> u32 {
+        262_144
+    }
+
+    async fn effective_context_tokens(&self) -> u32 {
+        262_144
+    }
+
+    async fn execute_turn(
+        &self,
+        _system_prompt: &str,
+        _messages: &[crate::symbio_core::chat_node::ChatNode],
+        _tools: &[CapabilityMeta],
+        _root_id: &str,
+        _env: &ExecEnv,
+    ) -> Result<TurnOutput, PluginError> {
+        Err(PluginError::InternalError("stub".to_string()))
+    }
+}
+
 /// 行的名字 = 能力自述的 name（含挂载点前缀的全名），不是调用方另填的。
 #[test]
 fn a_tool_row_takes_its_name_from_the_capability_self_report() {
@@ -112,4 +151,41 @@ fn cap_of_a_tool_row_is_the_very_capability_that_was_put_in() {
         Arc::ptr_eq(row.cap().expect("工具行"), &tool),
         "行只持引用，不复制能力"
     );
+}
+
+/// 模型行的名字 = `provider_id()`（表键）；生效位是行的一部分，
+/// 族别从载荷派生——`cap()` 为空而 `provider()` 在，两个写入方（工具 / 模型）
+/// 在同一个名字空间里也不会互相冒充。
+#[test]
+fn a_model_row_takes_its_name_from_the_provider_id() {
+    let row = CapabilityRow::model(
+        Arc::new(StubProvider("openai")) as Arc<dyn ModelProvider>,
+        true,
+    );
+    assert_eq!(row.name(), "openai");
+    assert_eq!(row.kind(), CapabilityRowKind::Model);
+    assert_eq!(row.provider().expect("模型行").provider_id(), "openai");
+    assert!(row.cap().is_none(), "模型行不是可调用能力");
+    assert!(row.active(), "带位的行才占生效槽");
+}
+
+/// `demote()` 给的是**退位副本**：位清零、名字与 provider 不变（同一个实例），
+/// 原行不动——表里的行是 `Arc`，单槽移交靠换副本入表，不靠就地改位。
+#[test]
+fn demote_returns_a_copy_with_the_slot_cleared() {
+    let provider = Arc::new(StubProvider("openai")) as Arc<dyn ModelProvider>;
+    let row = CapabilityRow::model(provider.clone(), true);
+
+    let demoted = row.demote();
+    assert!(!demoted.active());
+    assert_eq!(demoted.name(), "openai");
+    assert!(
+        Arc::ptr_eq(demoted.provider().expect("模型行"), &provider),
+        "退位只清位，不换 provider 实例"
+    );
+    assert!(row.active(), "原行不受影响");
+    // 无槽的族：退位副本就是它自己（工具行没有位可清）
+    let tool_row = CapabilityRow::tool(stub("local/read"));
+    assert!(!tool_row.active());
+    assert_eq!(tool_row.demote().name(), "local/read");
 }

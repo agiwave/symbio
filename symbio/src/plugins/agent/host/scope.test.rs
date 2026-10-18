@@ -5,7 +5,8 @@
 use super::*;
 
 use crate::symbio_core::{
-    CapabilityRow, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VdfsResponse,
+    capability_model_active, capability_model_resolve, CapabilityRow, CapabilityRowKind,
+    ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VdfsResponse,
     VdfsResult,
 };
 use async_trait::async_trait;
@@ -179,34 +180,35 @@ async fn sub_agent_root_registration_is_discarded() {
     );
 }
 
-/// **单槽丢弃（模型）**：子 Agent 的 `register_model_providers` 不得改掉内层的
-/// 生效者，也不得往内层目录里塞自己的 provider。
+/// **模型族整体丢弃**：子 Agent 的 model 插件实例逐行 `put`，内层的生效者不得被改掉，
+/// 也不得往内层目录里塞自己的 provider。
 ///
 /// 两条一起断言，因为**目录也是可劫持面**：写侧被挡住但目录漏了的话，
 /// 插件按 id 就能取到子 Agent 塞进来的实例（`scope.rs` 的文档明写这一条）。
 #[tokio::test]
 async fn sub_agent_model_registration_is_discarded() {
     let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
-    inner
-        .register_model_providers(Some("sys"), vec![provider("sys")])
-        .await;
+    inner.put(CapabilityRow::model(provider("sys"), true)).await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
     scoped
-        .register_model_providers(Some("child"), vec![provider("child")])
+        .put(CapabilityRow::model(provider("child"), true))
         .await;
 
     assert_eq!(
-        inner
-            .get_model_provider()
+        capability_model_active(&*inner)
             .await
-            .expect("系统生效者应仍在槽位里")
+            .expect("系统生效者应仍在表里")
             .provider_id(),
         "sys",
         "子 Agent 不得改掉会话的生效模型"
     );
     assert!(
-        inner.get_model_provider_by_id("child").await.is_none(),
+        inner
+            .list(CapabilityRowKind::Model)
+            .await
+            .iter()
+            .all(|row| row.name() != "child"),
         "子 Agent 的 provider 不得进目录——否则插件按 id 就能取到它"
     );
 }
@@ -264,9 +266,7 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
 #[tokio::test]
 async fn read_side_forwards_to_inner_unchanged() {
     let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
-    inner
-        .register_model_providers(Some("sys"), vec![provider("sys")])
-        .await;
+    inner.put(CapabilityRow::model(provider("sys"), true)).await;
     inner
         .register_vdfs_root(Arc::new(LabeledRoot("系统根")))
         .await;
@@ -274,16 +274,14 @@ async fn read_side_forwards_to_inner_unchanged() {
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
 
     assert_eq!(
-        scoped
-            .get_model_provider()
+        capability_model_active(&scoped)
             .await
             .expect("生效者应透传")
             .provider_id(),
         "sys"
     );
     assert_eq!(
-        scoped
-            .get_model_provider_by_id("sys")
+        capability_model_resolve(&scoped, Some("sys"))
             .await
             .expect("目录按 id 透传（只读）")
             .provider_id(),

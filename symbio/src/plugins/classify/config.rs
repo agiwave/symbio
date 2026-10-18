@@ -48,7 +48,7 @@ pub struct ClassifyConfig {
     ///
     /// 缺席 / 空串 ⇒ 用会话选定的那一个（平凡值）。配置的 id 取不到时同样落回它
     /// ——**降级而不失效**：一个 typo 不该让判决整条产线消失（见
-    /// `CapabilityVisitor::resolve_model_provider`）。
+    /// `capability_model_resolve`）。
     #[serde(default)]
     pub model: Option<String>,
 

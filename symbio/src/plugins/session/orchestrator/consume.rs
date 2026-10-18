@@ -187,7 +187,7 @@ impl SessionPlugin {
         // provider_id 参数仅为错误文案保留：model 插件 traverse 已按
         // ctx[PROVIDER_ID] > default > 首个 enabled 完成解析并注册唯一生效 Provider，
         // session 侧直接取用，不重复回退链。
-        let provider = match manager.get_model_provider().await {
+        let provider = match crate::symbio_core::capability_model_active(&*manager).await {
             Some(p) => p,
             None => {
                 self.fail_before_loop(

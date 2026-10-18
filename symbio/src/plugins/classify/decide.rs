@@ -27,9 +27,9 @@ use std::sync::Arc;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::Verdict;
 use crate::symbio_core::{
-    llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
-    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR, REASON_CLARIFY,
-    REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
+    capability_model_resolve, llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv,
+    ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
+    REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
 };
 
 use super::config::ClassifyConfig;
@@ -124,7 +124,7 @@ pub(crate) async fn decide(
     // 取不到就落回当次生效的那个——降级而不失效。
     let visitor: Arc<dyn CapabilityVisitor> = ctx.get(CAPABILITY_VISITOR)?;
     let provider: Arc<dyn ModelProvider> =
-        visitor.resolve_model_provider(config.model_id()).await?;
+        capability_model_resolve(&*visitor, config.model_id()).await?;
 
     // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
     // 一切照常），这行日志是唯一的线索。

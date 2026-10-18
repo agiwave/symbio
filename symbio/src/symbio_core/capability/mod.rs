@@ -1,5 +1,6 @@
 mod configurable;
 mod error;
+mod model;
 mod option;
 mod row;
 mod tool_name;
@@ -15,13 +16,14 @@ pub use error::{
 pub use configurable::{
     capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
 };
+pub use model::{capability_model_active, capability_model_resolve};
 pub use option::OptionVisitor;
 pub use row::{CapabilityRow, CapabilityRowKind};
 pub use tool_name::{capability_resolve, capability_to_wire};
 
 use crate::symbio_core::{
-    ExecEnv, ModelProvider, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginPayload,
+    ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -255,7 +257,7 @@ pub trait Capability: Send + Sync + 'static {
 ///
 /// ## 这是唯一「拆信封」的地方
 ///
-/// 所有分发路径（`CapabilityVisitor::invoke` / `Plugin::route` 的工具分支 /
+/// 所有分发路径（按名执行的两步：`get` + 本函数 / `Plugin::route` 的工具分支 /
 /// 装饰器）都必须经这里，否则「工具怎么写」与「信封长什么样」会重新耦合——
 /// 而耦合的表现就是每个工具各写一份 `ctx.payload::<Value>().unwrap_or(...)`
 /// 与各读一次 `EVENT_SINK` / `ABORT_SIGNAL`。
@@ -318,12 +320,19 @@ pub mod failure_kind {
 /// 模型 / 提示词 / 挂载又各有一套同形的方法。收敛后全部通道共用同一张表——
 /// 写走 [`Self::put`]，按名读走 [`Self::get`]，按族读走 [`Self::list`]。
 ///
+/// ## 一族一行，族别从载荷派生（落位：Tool → Model → 提示词 / 挂载 / 选项）
+///
+/// 每迁一族只加一个 payload 变体（`capability/row.rs`），**三个方法一个都不变形**——
+/// 这正是十六方法糜烂的反面。族各自的专用词法（模型族的 `capability_model_*`）
+/// 是表之上的自由函数，不回头往 trait 上挂方法。
+///
 /// ## 为什么 `invoke` 不在表上
 ///
 /// 执行不是表的职责：表答「这一行是什么、怎么找到它」，
 /// [`Capability::execute`] 答「跑起来是什么」。按名执行是 `get(name)` +
 /// [`capability_invoke`](crate::symbio_core::capability_invoke) 两步——拆开之后，
-/// 这三个方法在 4b–4e（模型 / 提示词 / 挂载 / 选项各族）全部复用，一个都不再变形。
+/// 这三个方法在 4a–4e 各族（工具 / 模型 / 提示词 / 挂载 / 选项）全部复用：
+/// 4b 的模型族落位时一个方法都没有变形（只加了行的形态）。
 ///
 /// ## 顺序是表的一部分
 ///
@@ -333,11 +342,24 @@ pub mod failure_kind {
 /// 与表内注册序是两件事。
 #[async_trait]
 pub trait CapabilityVisitor: Send + Sync + 'static {
-    /// 入表一行（**工具族的唯一写入入口**）。
+    /// 入表一行（**全族的唯一写入入口**）。
     ///
     /// 实现必须把每条进表的能力裹上审批闸
     /// （`providers/collectors/approval.rs`）：闸门住在收口点，`meta` /
     /// `risk_for` 原样透传，故 `get` / `list` 都不受影响，执行那一步才判定（T-138）。
+    ///
+    /// ## 单槽族的**唯一生效**也在这里维持
+    ///
+    /// 带生效位的行（[`CapabilityRow::active`]：模型族的当次生效者）入表时，实现必须
+    /// 先把同族的旧生效行降位（[`CapabilityRow::demote`]）——单槽之所以是槽，就因为
+    /// 它只装一个。行是 `Arc`，降位不是就地改位而是换一个副本入表：读者永远看见一份
+    /// 完整的行，不会读到「两个生效者」的中间态。
+    ///
+    /// ## 表键是全表唯一的名字空间（族不参与键）
+    ///
+    /// 同名**跨族**也覆盖（后写者胜，与工具族的同名覆盖同一条 IndexMap 语义）。
+    /// 名字撞车不是正常覆盖而是记账错误，故实现应留下一条告警再覆盖——
+    /// 静默被顶掉的那一族不会以任何别的方式表现出来。
     async fn put(&self, row: CapabilityRow);
 
     /// 按名取一行（**取代了 `has_capability` 与 `invoke` 的查找**）。
@@ -352,75 +374,9 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// [`CapabilityRow::meta`] 现取（T-158 的三个声明位同样在 meta 上）。
     async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
 
-    /// 注册模型服务：**当次生效者** + 本次可见的**全部已启用者**。
-    ///
-    /// 语义：model 插件在 traverse 中按上下文（用户选中的模型 id > 默认 provider >
-    /// 首个启用）解析出**唯一生效**的 `active_id`，并把**全部已启用**的 provider
-    /// （配置 + 协议钩子的绑定实现）作为 `available` 一并交来。会话发起时经同一次
-    /// `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播，与工具、系统提示词一并收集。
-    ///
-    /// - `active_id`：会话引擎用的那个（[`Self::get_model_provider`] 读它）；
-    /// - `available`：按 `provider_id()` 索引的目录，[`Self::get_model_provider_by_id`]
-    ///   读它——**插件**用它选自己的模型（判决用便宜快的、措辞用更好的），
-    ///   会话引擎不看这个目录。
-    ///
-    /// ## 为什么合成一次注册（而不是"注册生效者" + "注册目录"两个方法）
-    ///
-    /// 两者必须一致——**生效者必然是目录里的一员**。拆成两次注册就允许了
-    /// 「生效者不在目录里」这个非法状态，而它没有错误信号：只表现为插件拿到了一个
-    /// 谁也查不到的实例。合成一次，非法状态在签名上就不存在。
-    ///
-    /// ## 为什么 `active_id` 是 `Option<&str>`
-    ///
-    /// 「一个可用的都没有」是**一等输入**，不是特例：此时 `available` 为空、
-    /// `active_id` 为 `None`，[`Self::get_model_provider`] 返回 `None`，调用方各走
-    /// 自己的降级路径（会话报"未找到可用的 Model Provider"、两个插件退回模板）。
-    ///
-    /// `active_id` 在 `available` 里查不到（该 provider 的协议工厂不可用）同样落
-    /// `None`——**不**替调用方挑一个别的：静默换模型比没有模型更难查。
-    async fn register_model_providers(
-        &self,
-        active_id: Option<&str>,
-        available: Vec<Arc<dyn ModelProvider>>,
-    );
-
-    /// 取当前生效的模型服务（trait object；协议适配细节内化于实现体）
-    ///
-    /// 会话引擎凭此实例即可直接发起 `execute_turn`（参数自含，无需回查
-    /// model 插件内部注册表，也无需感知任何协议抽象）。
-    async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>>;
-
-    /// 按 `provider_id` 取模型服务（与"当次生效者"无关）。
-    ///
-    /// **给插件选自己的模型用**：插件在自己的配置里声明一个 provider id，取到就用它、
-    /// 取不到就落回 [`Self::get_model_provider`]（降级而不失效——一个写错的 id 不该让
-    /// 判决或措辞整条产线消失）。会话引擎不用本方法：它要的是用户选定的那一个。
-    ///
-    /// 只认**已启用**的 provider（未启用的不在目录里，查不到），与 `resolve` 的
-    /// 「未找到就降级到 default」不同——这里是**严格查找**：插件问的是"有没有这一个"，
-    /// 替它挑一个别的就等于悄悄换了它的模型。
-    async fn get_model_provider_by_id(&self, provider_id: &str) -> Option<Arc<dyn ModelProvider>>;
-
-    /// 取一个模型服务：优先 `preferred`（**插件自己配的**那个），取不到落回当次生效者。
-    ///
-    /// 这是「插件选自己的模型」的默认形态。给出默认实现是为了让**降级方向只有一处
-    /// 定义**——判决与措辞各写一遍，就会有一天两处不一致。
-    ///
-    /// **降级而不失效**：一个写错的 provider id 不该让整条产线消失。判决退回
-    /// `Escalate`、措辞退回模板虽然都"还能工作"，但那是功能没了——比"用会话的模型"
-    /// 糟得多。代价是一个 typo 不会有错误信号，故调用方应把选中了哪个模型记进日志。
-    async fn resolve_model_provider(
-        &self,
-        preferred: Option<&str>,
-    ) -> Option<Arc<dyn ModelProvider>> {
-        match preferred {
-            Some(id) => match self.get_model_provider_by_id(id).await {
-                Some(p) => Some(p),
-                None => self.get_model_provider().await,
-            },
-            None => self.get_model_provider().await,
-        }
-    }
+    // 模型族（4 方法）已改走表：写入是 model 插件的逐行 `put`（生效位长在目录行上），
+    // 读取是 `capability_model_active` / `capability_model_resolve` 两个自由函数——
+    // 理由（「生效者必然是目录里的一员」如何从签名搬到结构）见 `capability/model.rs`。
 
     /// 注册系统提示词（按名称保序；同名覆盖）。
     ///

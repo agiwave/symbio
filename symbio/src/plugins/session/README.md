@@ -30,7 +30,7 @@ flowchart TD
 
     subgraph Session 会话编排层（唯一编排入口）
         BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_VISITOR 注册表]
-        AggTools --> Resolve[6. 获取生效 ModelProvider<br>get_model_provider 单次解析]
+        AggTools --> Resolve[6. 获取生效 ModelProvider<br>capability_model_active 单次解析]
         Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
         Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>内容淡化/工具淡化/骨架化/水位提醒]
         BuildView --> LLMCall[9. ModelProvider 推理调用<br>execute_turn 直连无状态 LLM 网关]

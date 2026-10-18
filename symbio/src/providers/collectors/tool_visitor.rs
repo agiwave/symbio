@@ -8,9 +8,7 @@
 //! 落在实现层——完整判据见 [`crate::providers::collectors`] 的模块文档。
 
 use super::approval::ApprovalGate;
-use crate::symbio_core::{
-    CapabilityRow, CapabilityRowKind, CapabilityVisitor, ModelProvider, VdfsProvider,
-};
+use crate::symbio_core::{CapabilityRow, CapabilityRowKind, CapabilityVisitor, VdfsProvider};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -18,20 +16,15 @@ use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
 ///
-/// 除工具外，同时承载四组注册（与工具同一 traverse 收集机制）：
-/// - `provider` / `model_catalog`：模型服务的**生效者**（单槽）与**已启用目录**
-///   （按 `provider_id` 索引）。生效者归会话引擎，目录归**插件**——插件在自己的
-///   配置里声明一个 provider id 就能选自己的模型（判决用便宜快的、措辞用更好的）。
-///   两者由 model 插件在**同一次** `register_model_providers` 里交来：生效者必然
-///   是目录里的一员，拆成两次注册就会允许"生效者不在目录里"这个没有错误信号的
-///   非法状态（见 `CapabilityVisitor::register_model_providers`）。
-/// - `rows`：**统一行表**（AR-025 §3）——本批装工具一族，按注册顺序保序。这条
+/// 除工具行外，同时承载三组单族注册（与工具同一 traverse 收集机制）：
+/// - `rows`：**统一行表**（AR-025 §3）——装**工具族与模型族**，按注册顺序保序。这条
 ///   顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，写成哈希表时
 ///   **每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
 ///   （`docs/006-ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），换序等于每轮把这段
 ///   前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
-///   模型 / 提示词 / 挂载 / 选项各族随 4b–4e 陆续入这张表（每族一个 payload 变体，
-///   trait 三方法不变），目前仍住下方各自的槽位。
+///   模型行（4b）一行一个已启用 provider，**当次生效者带生效位**——生效者是目录里的
+///   一员不再是纪律而是结构（见 `capability/model.rs`）。提示词 / 挂载 / 选项各族随
+///   4c–4e 陆续入这张表（每族一个 payload 变体， trait 三方法不变），目前仍住下方槽位。
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
 ///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
@@ -41,8 +34,6 @@ use tokio::sync::RwLock;
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
     rows: Arc<RwLock<IndexMap<String, Arc<CapabilityRow>>>>,
-    provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
-    model_catalog: Arc<RwLock<IndexMap<String, Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
     vdfs_providers: Arc<RwLock<IndexMap<String, Arc<dyn VdfsProvider>>>>,
     vdfs_root: Arc<RwLock<Option<Arc<dyn VdfsProvider>>>>,
@@ -52,8 +43,6 @@ impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
             rows: Arc::new(RwLock::new(IndexMap::new())),
-            provider: Arc::new(RwLock::new(None)),
-            model_catalog: Arc::new(RwLock::new(IndexMap::new())),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_providers: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_root: Arc::new(RwLock::new(None)),
@@ -79,9 +68,36 @@ impl CapabilityVisitor for DefaultToolVisitor {
             Some(cap) => CapabilityRow::tool(Arc::new(ApprovalGate::new(cap))),
             None => row,
         };
-        // 同目录名覆盖（保留先注册槽位，IndexMap 语义与机制化之前逐字一致）
         let name = row.name().to_string();
-        self.rows.write().await.insert(name, Arc::new(row));
+        let mut rows = self.rows.write().await;
+        // 跨族同名的覆盖是**记账错误**而不是正常覆盖（表键是全表唯一的名字空间，
+        // 见 `CapabilityVisitor::put`）：后写者胜——但静默被顶掉的那一族不会以任何
+        // 别的方式表现出来，所以这里留一条告警再覆盖。
+        if let Some(old) = rows.get(&name) {
+            if old.kind() != row.kind() {
+                crate::plugin_warn!(
+                    "core",
+                    "能力表键 `{name}` 跨族同名覆盖：{:?} 行被 {:?} 行顶掉（族不参与键，见 CapabilityVisitor::put）",
+                    old.kind(),
+                    row.kind()
+                );
+            }
+        }
+        // 单槽移交：带生效位的行入表时，同族旧生效行先降位（模型族的「唯一生效者」）。
+        // 行是 `Arc`，降位是换一个副本入表（`demote`），不是就地改位——
+        // 否则 `list` 与 `get` 的读者会读到「两个生效者」的中间态。
+        if row.active() {
+            let stale: Vec<(String, Arc<CapabilityRow>)> = rows
+                .values()
+                .filter(|r| r.kind() == row.kind() && r.active())
+                .map(|r| (r.name().to_string(), Arc::new(r.demote())))
+                .collect();
+            for (name, demoted) in stale {
+                rows.insert(name, demoted);
+            }
+        }
+        // 同名覆盖（保留先注册槽位，IndexMap 语义与机制化之前逐字一致）
+        rows.insert(name, Arc::new(row));
     }
 
     async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {
@@ -95,35 +111,6 @@ impl CapabilityVisitor for DefaultToolVisitor {
             .filter(|row| row.kind() == kind)
             .cloned()
             .collect()
-    }
-
-    async fn register_model_providers(
-        &self,
-        active_id: Option<&str>,
-        available: Vec<Arc<dyn ModelProvider>>,
-    ) {
-        let mut catalog: IndexMap<String, Arc<dyn ModelProvider>> = IndexMap::new();
-        for p in available {
-            catalog.insert(p.provider_id().to_string(), p);
-        }
-        // 生效者从目录里取——**不在目录里就是没有**（协议工厂不可用的那种），
-        // 不替调用方挑一个别的：静默换模型比没有模型更难查。
-        let active = active_id.and_then(|id| catalog.get(id).cloned());
-
-        let mut slot = self.provider.write().await;
-        *slot = active;
-        let mut cat = self.model_catalog.write().await;
-        *cat = catalog;
-    }
-
-    async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>> {
-        let slot = self.provider.read().await;
-        slot.clone()
-    }
-
-    async fn get_model_provider_by_id(&self, provider_id: &str) -> Option<Arc<dyn ModelProvider>> {
-        let cat = self.model_catalog.read().await;
-        cat.get(provider_id).cloned()
     }
 
     async fn register_system_prompt(&self, name: &str, prompt: String) {

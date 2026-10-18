@@ -1,10 +1,10 @@
 //! 能力表的**行词汇**——收集口 trait 收敛为 `put` / `get` / `list` 三方法后，
 //! 一张表装下全部收集通道（AR-025 §3 的目标形状）。
 //!
-//! ## 本批只落地 Tool 一行，其余五值是**词汇**
+//! ## 族是**一个一个**落位的（Tool → Model → Prompt → Mount → Option）
 //!
-//! [`CapabilityRowKind`] 有六个值，但 [`CapabilityRowPayload`] 本批只有
-//! `Tool` 一个变体——其余随 4b–4e 各批次落地，`Policy` 随步骤 6（表搬进 core）
+//! [`CapabilityRowKind`] 有六个值，但 [`CapabilityRowPayload`] 只随各族落地长变体：
+//! 4a 是 `Tool`，4b 加 `Model`，其余随 4c–4e；`Policy` 随步骤 6（表搬进 core）
 //! 与 `State` / `Step` 一并定义。提前把六值写齐的理由：`list(kind)` 的签名
 //! 由此在 4b–4e **不再变形**（加一个族 = 加一个 payload 变体，不是加三个方法）；
 //! 而不写齐则每一步都要改签名，正是十六方法糜烂的来路。
@@ -16,6 +16,17 @@
 //! 键与能力自述的 name）只可能在**改名装饰器**上分叉，而那种装饰器
 //! （`PrefixedCapability`）改的正是 `meta().name` 本身——现取永远同步。
 //!
+//! ## 生效位（`active`）：单槽族把「谁在槽里」也变成行的一部分
+//!
+//! 模型族的注册口原本是**一次批量**（生效者单槽 + 已启用目录），理由是
+//! 「生效者必然是目录里的一员——拆成两次注册就允许了它不在目录里这个非法状态」。
+//! 表只有 `put` / `get` / `list` 三个方法，于是那条不变量改由**结构**承载：生效不是
+//! 一个与目录并列的槽，而是**目录里某一行的位**——[`CapabilityRow::model`] 的
+//! `active` 参数。生效者不在目录里从此不可表达。
+//!
+//! 唯一生效由写入方维持：`put` 收到带生效位的行时，先把同族旧生效行降为普通行
+//! （[`CapabilityRow::demote`]），见 `DefaultToolVisitor::put` 的单槽移交。
+//!
 //! ## 谁住在这里
 //!
 //! 与 `CapabilityMeta` 同域同理：全部收集通道（工具 / 模型服务 / 提示词 /
@@ -23,7 +34,7 @@
 //! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 session 的
 //! `loop_registry`——三处各住各的，见 AR-025 §3。
 
-use crate::symbio_core::{Capability, CapabilityMeta};
+use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider};
 use std::sync::Arc;
 
 /// 行的族——`list(kind)` 的过滤键，也是「这张表装了什么」的清单。
@@ -48,12 +59,19 @@ pub enum CapabilityRowKind {
 
 /// 行的载荷——「这一行到底是什么」。
 ///
-/// 本批只有 [`CapabilityRowPayload::Tool`]；每个后续族在此加一个变体，
-/// **不在 trait 上加方法**——后者是十六方法形态的成因。
+/// 每个族在此加一个变体，**不在 trait 上加方法**——后者是十六方法形态的成因。
 #[derive(Clone)]
 pub enum CapabilityRowPayload {
     /// 工具：可调用对象（注册收口点已裹审批闸，见 `DefaultToolVisitor::put`）。
     Tool(Arc<dyn Capability>),
+    /// 模型服务：一个已启用的 provider。
+    ///
+    /// `active` 是**生效位**（单槽族的「谁在槽里」）：会话引擎取的是它，插件按 id
+    /// 取的是不带位的行——两者同表，故「生效者不在目录里」不可表达（见模块文档）。
+    Model {
+        provider: Arc<dyn ModelProvider>,
+        active: bool,
+    },
 }
 
 /// 表里的一行。
@@ -62,9 +80,10 @@ pub enum CapabilityRowPayload {
 /// 族别不单独存——[`Self::kind`] 从载荷派生，结构上不存在「两种答案」（若另存
 /// 一格，就得防它俩哪天不一致，而那正是不一致的定义）。
 ///
-/// 构造只走 [`CapabilityRow::tool`]：行的名字从能力自述派生，调用方没有机会
-/// 填错。读取侧三件套——[`Self::kind`] / [`Self::meta`] / [`Self::cap`] 覆盖
-/// 全部现行消费形态（列表喂模型、按名执行、声明位读取）。
+/// 构造只走 [`CapabilityRow::tool`] / [`CapabilityRow::model`]：行的名字从载荷自述
+/// 派生（能力的 `meta().name` / provider 的 `provider_id()`），调用方没有机会填错。
+/// 读取侧三件套——[`Self::kind`] / [`Self::meta`] / [`Self::cap`] 覆盖工具族的
+/// 全部现行消费形态（列表喂模型、按名执行、声明位读取），模型族走 [`Self::provider`]。
 #[derive(Clone)]
 pub struct CapabilityRow {
     name: String,
@@ -81,10 +100,23 @@ impl CapabilityRow {
         }
     }
 
+    /// 模型行：名字 = `provider.provider_id()`。
+    ///
+    /// `active` 只由**写出整批的那一方**填（`capability::model::register`）：它知道
+    /// 这一批里哪个是当次生效者。表把「唯一生效」接过去，见 [`Self::demote`]。
+    pub fn model(provider: Arc<dyn ModelProvider>, active: bool) -> Self {
+        let name = provider.provider_id().to_string();
+        Self {
+            name,
+            payload: CapabilityRowPayload::Model { provider, active },
+        }
+    }
+
     /// 这一行属于哪个族（与载荷同源，不存在两种答案）。
     pub fn kind(&self) -> CapabilityRowKind {
         match &self.payload {
             CapabilityRowPayload::Tool(_) => CapabilityRowKind::Tool,
+            CapabilityRowPayload::Model { .. } => CapabilityRowKind::Model,
         }
     }
 
@@ -102,6 +134,42 @@ impl CapabilityRow {
     pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
         match &self.payload {
             CapabilityRowPayload::Tool(cap) => Some(cap),
+            CapabilityRowPayload::Model { .. } => None,
+        }
+    }
+
+    /// 取模型服务；非模型族为 `None`。
+    pub fn provider(&self) -> Option<&Arc<dyn ModelProvider>> {
+        match &self.payload {
+            CapabilityRowPayload::Model { provider, .. } => Some(provider),
+            CapabilityRowPayload::Tool(_) => None,
+        }
+    }
+
+    /// 这一行是否占着**生效位**（单槽族的「谁在槽里」）。
+    ///
+    /// 无槽的族恒 `false`：本批只有模型族有位（挂载根的槽随 4d 落位）。
+    pub fn active(&self) -> bool {
+        match &self.payload {
+            CapabilityRowPayload::Model { active, .. } => *active,
+            CapabilityRowPayload::Tool(_) => false,
+        }
+    }
+
+    /// 同一行的**退位副本**（生效位清零；无位的族原样返回）。
+    ///
+    /// 单槽族的写入方在收下新生效行前用它降下旧行——表的行是 `Arc`，就地改位等于
+    /// 让读者看见两次变化；换一个副本入表，读出的一直是一份完整的行。
+    pub fn demote(&self) -> Self {
+        match &self.payload {
+            CapabilityRowPayload::Model { provider, .. } => Self {
+                name: self.name.clone(),
+                payload: CapabilityRowPayload::Model {
+                    provider: Arc::clone(provider),
+                    active: false,
+                },
+            },
+            CapabilityRowPayload::Tool(_) => self.clone(),
         }
     }
 }

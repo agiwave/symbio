@@ -20,7 +20,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 | 判据 | 表达 | 现有棘轮 |
 |---|---|---|
-| core 形状只降不升 | `pub trait` 20 · `fn` 成员 73 · 默认体 25 | `core-shape-audit.mjs`（CS-001） |
+| core 形状只降不升 | `pub trait` 20 · `fn` 成员 67 · 默认体 23（4b 后实测） | `core-shape-audit.mjs`（CS-001） |
 | 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 3 ⇒ **1 个 trait，3 个方法** | 本文档 §2 的账 |
 | session 不增 | 每步 `session` 非测试行数 ≤ 搬入前 | `find` + `wc -l` |
 | 行为不变 | 工具清单逐条比对 + schema 导出比对 + e2e 77 条 | 现有 e2e |
@@ -46,7 +46,8 @@ trait 改名（`CapabilityVisitor` → `Registry`）是最后一步的纯重命�
 
 > 基线修正：[T-165-控制面收敛](../009-task/165-控制面收敛.md "T-165-控制面收敛") 原记「14 方法」，
 > 实测 16（含 3 个默认体）。已随本文订正。**4a 之后 trait 余 14 方法**（Tool 3 + Model 4 +
-> Prompt 2 + Mount 5；默认体 3 → 2，`register_batch` 那个随 Tool 族一起退场）。
+> Prompt 2 + Mount 5；默认体 3 → 2，`register_batch` 那个随 Tool 族一起退场）；
+> **4b 之后余 10 方法**（put / get / list 3 + Prompt 2 + Mount 5，默认体 5）。
 
 收集器有**两个实现方**，这是迁移的真正成本所在：
 
@@ -171,6 +172,32 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 - **基线同步**：`core-shape-audit.mjs` 的 `SHAPE_BASELINE` 20/73/25 → **20/71/24**。
 - 守门人用例落在 `tool_visitor.test.rs`：**同一份工具清单两种口径逐条相等**
   （`list(Tool)` 的 meta 转储 vs 入表时给的元数据，含顺序），加顺序/覆盖/缺失三格。
+
+### 4b 落地形态（2026-10-18）
+
+- **生效位长在目录行上**：`CapabilityRowPayload` 加 `Model { provider, active }`
+  （`CapabilityRow::model(provider, active)`，行名 = `provider_id()`）。原来那条不变量
+  （「生效者必然是目录里的一员」）靠**一次批量注册**的签名维持；表只有 `put`，它于是
+  从签名搬进**结构**——生效位是目录行的一个位，「生效者不在目录里」不可表达。
+- **单槽移交归 `put`**：带生效位的行入表时，同族旧生效行降位。降位是**换一个 `Arc`
+  副本入表**（`CapabilityRow::demote`），不是就地改位——否则 `get` / `list` 的读者会
+  读到「两个生效者」的中间态。旧行**留在表里**（降为普通目录行）：`active` 只答
+  「谁在槽里」，「目录里有谁」是同一批行的另一问。
+- **读侧两个自由函数**（`capability/model.rs`，**不**回头往 trait 挂方法）：
+  `capability_model_active`（会话引擎取生效者）与 `capability_model_resolve`
+  （插件选自己的模型：严格查 id，取不到落回生效者——降级方向仍**只有一处定义**）。
+- **写侧没有新函数**：`plugins/model/plugin.rs` 逐行 `put`（它本来就知道哪个是当次
+  生效者），作用域丢弃改在 `SubAgentVisitor::put` 上**按族**判——写入口只有一个，
+  作用域规则也就只有一处（机制化之前那条「丢弃子 Agent 的模型服务注册」逐字保留）。
+- **同族重注册 = 表语义（同名覆盖），不再整体替换目录**：旧实现把批量注册实现成
+  「换掉整张目录」，并有一条单测钉着。生产上两者无差别——`collect_capabilities` **每次
+  会话现造一个 visitor**，注册只发生一次；但那是签名的变化，故单测随之改写并写明。
+  跨族同名（表键是全表唯一的名字空间）**留一条告警再覆盖**：静默被顶掉的那一族不会
+  以任何别的方式表现出来。
+- **core 三格**：方法 71 → **67**、默认体 24 → **23**、`pub trait` 20 不变；
+  `SHAPE_BASELINE` 同步至 **20/67/23**，`CapabilityVisitor` 余 **10** 方法（5 个默认体）。
+- **session 非测试行数不变**（唯一改动是 `consume.rs` 里一行调用的写法）：本步没有
+  任何 session 侧的新逻辑，只有调用点换名。
 
 每一步的守门人：**同一份工具清单以两种口径导出逐条相等**（走表的 `list(Tool)` 与
 `CapabilityMeta` 全量转储），加 e2e 77 条全过。任何一格漂移即停。

@@ -9,8 +9,8 @@
  * | 编号 | 格 | 判什么 | 它拦的是哪一种膨胀 |
  * |---|---|---|---|
  * | CS-001 | `traits` | `pub trait` 声明数（冻结 20） | **新增接缝**：每多一个抽象，就多一处「所有实现方都得知道」的地方 |
- * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 73） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
- * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 25） | **接口上长实现**：行为代码住进架构模块 |
+ * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 67） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
+ * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 23） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/010-adr/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
@@ -117,7 +117,7 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 20, methods: 71, defaults: 24 }
+  : { traits: 20, methods: 67, defaults: 23 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

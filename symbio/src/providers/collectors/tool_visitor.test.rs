@@ -7,7 +7,10 @@ use super::*;
 
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError};
+use crate::symbio_core::{
+    capability_model_active, capability_model_resolve, Capability, CapabilityMeta, ExecEnv,
+    ModelProvider, PluginError,
+};
 use async_trait::async_trait;
 
 /// 最小模型服务桩：实现纯 trait 契约，仅用于验证注册存储语义，不发起真实请求
@@ -55,43 +58,68 @@ fn provider(id: &str) -> Arc<dyn ModelProvider> {
     })
 }
 
-#[tokio::test]
-async fn model_slot_set_get_and_missing() {
-    let mgr = DefaultToolVisitor::new();
-    // 未注册 → 生效者与目录都是空
-    assert!(mgr.get_model_provider().await.is_none());
-    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
+// ==================== 模型族（AR-025 4b：一行一个 provider，生效位在行上） ====================
+//
+// 机制化之前这族是**单槽目录 + 批量注册**（`register_model_providers`）；4b 把它改成
+// 与工具族同一张表：写是逐行 `put`，读是 `capability_model_*` 两个自由函数。
+// 本文件钉住三件事：**生效位只有一个**（单槽）、**空集是一等输入**、**目录严格按 id**。
 
-    // 注册后可取回，身份字段一致
-    mgr.register_model_providers(Some("p1"), vec![provider("p1")])
-        .await;
-    let got = mgr.get_model_provider().await;
-    let got = got.expect("注册后应可取回");
-    assert_eq!(got.provider_id(), "p1");
+/// 模拟 model 插件的一次 traverse：逐行 put，当次生效者带生效位。
+async fn register(mgr: &DefaultToolVisitor, active_id: Option<&str>, available: &[&'static str]) {
+    for &id in available {
+        mgr.put(CapabilityRow::model(provider(id), active_id == Some(id)))
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn model_rows_carry_provider_and_active_flag() {
+    let mgr = DefaultToolVisitor::new();
+    // 未注册 → 没有生效者，也没有目录
+    assert!(capability_model_active(&mgr).await.is_none());
+
+    register(&mgr, Some("p1"), &["p1", "p2"]).await;
+
+    // 生效者 = 带位那一行
+    assert_eq!(
+        capability_model_active(&mgr).await.unwrap().provider_id(),
+        "p1"
+    );
+    // 目录按 `provider_id` 索引（行名就是 provider_id），且顺序 = 注册序
+    let ids: Vec<String> = mgr
+        .list(CapabilityRowKind::Model)
+        .await
+        .into_iter()
+        .map(|row| row.name().to_string())
+        .collect();
+    assert_eq!(ids, ["p1", "p2"]);
+    // 模型行**不**混进工具面（`tools` 数组只由 `list(Tool)` 拼）
+    assert!(mgr.list(CapabilityRowKind::Tool).await.is_empty());
 }
 
 /// **空集是一等输入**：一个可用的都没有时，两个取值口都给 `None`（不 panic、不补占位）
 #[tokio::test]
 async fn empty_registration_yields_no_provider() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_model_providers(None, vec![]).await;
-    assert!(mgr.get_model_provider().await.is_none());
-    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
+    register(&mgr, None, &[]).await;
+    assert!(capability_model_active(&mgr).await.is_none());
+    assert!(capability_model_resolve(&mgr, Some("p1")).await.is_none());
 }
 
-/// 生效者**从目录里取**：`active_id` 在目录里查不到 ⇒ `None`，**不**替调用方挑一个别的
+/// 生效者**必须是目录里的一员**：生效 id 不在目录里（未启用 / 协议工厂不可用）
+/// ⇒ 没有任何行带位 ⇒ 没有生效者，**不**替调用方挑一个别的
 ///
 /// 静默换模型比没有模型更难查——会话会用另一个模型跑完一整轮，而配置里那个坏条目
 /// 永远不会被注意到。
 #[tokio::test]
-async fn active_id_absent_from_catalog_yields_none() {
+async fn active_absent_from_catalog_yields_none() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_model_providers(Some("missing"), vec![provider("p1")])
-        .await;
-    assert!(mgr.get_model_provider().await.is_none());
+    // 生效者 "missing" 不在这一批里：目录有 p1，但没有一行带生效位
+    register(&mgr, Some("missing"), &["p1"]).await;
+    assert!(capability_model_active(&mgr).await.is_none());
     // 目录本身照常可用（一个配坏的条目不该把其余可用的模型一起带走）
     assert_eq!(
-        mgr.get_model_provider_by_id("p1")
+        capability_model_resolve(&mgr, Some("p1"))
             .await
             .unwrap()
             .provider_id(),
@@ -99,45 +127,86 @@ async fn active_id_absent_from_catalog_yields_none() {
     );
 }
 
-/// 目录按 `provider_id` 索引，且是**严格查找**：不在目录里就是 `None`，
-/// 不降级到生效者（插件问的是"有没有这一个"）
+/// 目录查找**严格**（插件问的是"有没有这一个"）：不在目录里就落回生效者，
+/// 而生效者不受查询影响
 #[tokio::test]
-async fn catalog_lookup_is_by_id_and_strict() {
+async fn model_lookup_is_by_id_then_falls_back() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_model_providers(Some("p1"), vec![provider("p1"), provider("p2")])
-        .await;
+    register(&mgr, Some("p1"), &["p1", "p2"]).await;
 
     assert_eq!(
-        mgr.get_model_provider_by_id("p2")
+        capability_model_resolve(&mgr, Some("p2"))
             .await
             .unwrap()
             .provider_id(),
         "p2"
     );
-    assert!(mgr.get_model_provider_by_id("nope").await.is_none());
-    // 生效者仍是 p1（目录不影响它）
-    assert_eq!(mgr.get_model_provider().await.unwrap().provider_id(), "p1");
+    // 写错的 id（含未注册的名字）：落回当次生效者，**降级而不失效**
+    assert_eq!(
+        capability_model_resolve(&mgr, Some("nope"))
+            .await
+            .unwrap()
+            .provider_id(),
+        "p1"
+    );
+    assert_eq!(
+        capability_model_resolve(&mgr, None)
+            .await
+            .unwrap()
+            .provider_id(),
+        "p1"
+    );
 }
 
-/// 重新注册**整体替换**目录（不是累积）：provider 被停用 / 删除后，
-/// 旧实例不该留在目录里被插件取到
+/// **单槽移交**：新生效行入表时，同族旧生效行降位——表里恒好只有一个生效位。
+///
+/// 旧行**不**从表里消失（降为普通目录行）：表的同名语义是覆盖，没有删除动作
+/// （工具族同样如此），且目录归插件按 id 取用。
 #[tokio::test]
-async fn reregistration_replaces_the_catalog() {
+async fn new_active_row_demotes_the_previous_one() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_model_providers(Some("p1"), vec![provider("p1"), provider("p2")])
-        .await;
-    mgr.register_model_providers(Some("p2"), vec![provider("p2")])
-        .await;
+    register(&mgr, Some("p1"), &["p1", "p2"]).await;
+    register(&mgr, Some("p2"), &["p2"]).await;
 
-    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
+    let actives: Vec<String> = mgr
+        .list(CapabilityRowKind::Model)
+        .await
+        .into_iter()
+        .filter(|row| row.active())
+        .map(|row| row.name().to_string())
+        .collect();
+    assert_eq!(actives, ["p2"], "生效位只有一个：旧生效行必须降位");
     assert_eq!(
-        mgr.get_model_provider_by_id("p2")
+        capability_model_active(&mgr).await.unwrap().provider_id(),
+        "p2"
+    );
+    // 降位那一行仍在表里（且已无位），插件按 id 照常取它
+    let p1 = mgr.get("p1").await.expect("p1 仍在目录里");
+    assert!(!p1.active());
+    assert_eq!(
+        capability_model_resolve(&mgr, Some("p1"))
             .await
             .unwrap()
             .provider_id(),
-        "p2"
+        "p1"
     );
-    assert_eq!(mgr.get_model_provider().await.unwrap().provider_id(), "p2");
+}
+
+/// 表键是**全表唯一的名字空间**（族不参与键）：跨族同名 = 后写者胜
+///
+/// 这条不是「正常覆盖」而是记账错误，故写入实现会告警；本用例钉住语义本身。
+#[tokio::test]
+async fn key_space_is_shared_across_kinds() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.put(CapabilityRow::tool(decl_tool("web/search"))).await;
+    register(&mgr, Some("web/search"), &["web/search"]).await;
+
+    assert_eq!(
+        mgr.get("web/search").await.unwrap().kind(),
+        CapabilityRowKind::Model,
+        "同名的后写者胜（拿回的是模型行）"
+    );
+    assert!(mgr.list(CapabilityRowKind::Tool).await.is_empty());
 }
 
 /// 同名覆盖只改内容、**不改槽位**（顺序 = 首次注册顺序）
