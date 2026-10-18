@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 关于 `Option` 与序列化（契约，2026-09-14 归一）：
 /// - 字段保持 `Option` 是**契约要求**：`None`（调用方未表态）与"零值"语义不同
-///   （如 `auto_compress: None` → chat_loop 取默认 `true`；`max_tool_rounds: None` → 无限轮次）。
+///   （如 `auto_compress: None` → chat_loop 取默认 `true`；`load_history: None` → 加载历史）。
 ///   因此**不得**改成带 serde default 的裸类型，否则缺省会翻转为零值语义。
 /// - 输出**不使用** `skip_serializing_if`：`None` 序列化为 `null`，使键集合恒定存在，
 ///   不随字段取值增删（历史上 `stream` 无该属性、其余字段有，导致同一协议在不同取值下
@@ -29,8 +29,6 @@ pub struct Request {
     /// 是否使用流式输出
     pub stream: Option<bool>,
 
-    /// 最大工具轮数
-    pub max_tool_rounds: Option<usize>,
     /// 工具上下文窗口（最近 N 轮工具调用保留明细）
     pub tool_context_window: Option<usize>,
     /// 是否开启自动语义压缩

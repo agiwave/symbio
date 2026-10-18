@@ -43,7 +43,7 @@
 //! ## 五行为什么能共用同一个 `LoopState`
 //!
 //! 因为每一行都要求自己那一格**特有的字段**为真，而构造器只填自己那几格：
-//! `policy.classify` 要 `tool_rounds == 0`，`policy.report` 要 `tool_rounds > 0`，
+//! `policy.classify` 要 `round == 0`，`policy.report` 要 `round > 0`，
 //! `policy.compress` 要 `auto_compress`，
 //! `policy.recall` 要 `has_session_dir`。两个决策点的状态因此不会互相误命中。
 //!
@@ -116,7 +116,7 @@ impl Capsule {
 ///
 /// | 字段 | 来源 |
 /// |---|---|
-/// | `tool_rounds` | 本轮已完成轮次（`TurnState` / 轮边界回调的计数器） |
+/// | `round` | 本轮已进行的轮次。**两个取值点**：轮首/准备格填 `TurnState::request_round`（本轮请求数），轮边界格填 `RoundProgress` 持有的运行器真实工具轮数——两行的判据都是「0 = 轮首」 |
 /// | `has_utterance` | 本轮是否有用户发言（`first_utterance.is_some()`） |
 /// | `classify_enabled` | 配置快照（`SessionConfig::classify_enabled`） |
 /// | `quiet_ms` | 时钟差（`clock_now_ms() - last_user_facing_at`） |
@@ -131,7 +131,7 @@ impl Capsule {
 /// 默认成真而误命中。代价是构造器随决策点增长——这是过渡形态，见模块文档。
 #[derive(Debug, Clone)]
 pub(crate) struct LoopState {
-    pub(crate) tool_rounds: usize,
+    pub(crate) round: usize,
     pub(crate) has_utterance: bool,
     pub(crate) classify_enabled: bool,
     pub(crate) quiet_ms: i64,
@@ -148,13 +148,9 @@ impl LoopState {
     ///
     /// `progress` 填 [`ProgressPolicy::disabled`]——轮首没有"进展"可报，这不是
     /// "恰好没触发"而是**语义上不存在**：此刻一轮工具都还没跑。
-    pub(crate) fn turn_head(
-        tool_rounds: usize,
-        has_utterance: bool,
-        classify_enabled: bool,
-    ) -> Self {
+    pub(crate) fn turn_head(round: usize, has_utterance: bool, classify_enabled: bool) -> Self {
         Self {
-            tool_rounds,
+            round,
             has_utterance,
             classify_enabled,
             ..Self::blank()
@@ -165,16 +161,16 @@ impl LoopState {
     ///
     /// `has_utterance` 恒 `false`、`classify_enabled` 恒 `false`——轮边界不重判
     /// 用户那句话（判过了，见 `decide.rs`）。填假值而不是"留空"，是因为这两个
-    /// 字段在 `tool_rounds > 0` 时本来就挡得住 `policy.classify`，假值只是让
+    /// 字段在 `round > 0` 时本来就挡得住 `policy.classify`，假值只是让
     /// "此处不适用"在数据上也可读。
     pub(crate) fn round_boundary(
-        tool_rounds: usize,
+        round: usize,
         quiet_ms: i64,
         reports: u32,
         progress: ProgressPolicy,
     ) -> Self {
         Self {
-            tool_rounds,
+            round,
             quiet_ms,
             reports,
             progress,
@@ -191,9 +187,9 @@ impl LoopState {
     }
 
     /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
-    pub(crate) fn turn_prepare(tool_rounds: usize, has_session_dir: bool) -> Self {
+    pub(crate) fn turn_prepare(round: usize, has_session_dir: bool) -> Self {
         Self {
-            tool_rounds,
+            round,
             has_session_dir,
             ..Self::blank()
         }
@@ -214,7 +210,7 @@ impl LoopState {
     /// 全零状态：只给上面几个构造器做基底，不对外。
     fn blank() -> Self {
         Self {
-            tool_rounds: 0,
+            round: 0,
             has_utterance: false,
             classify_enabled: false,
             quiet_ms: 0,
@@ -413,26 +409,25 @@ pub(crate) fn builtin() -> &'static Registry {
 ///
 /// 三个条件缺一不可，各自挡掉一类误判：
 ///
-/// - `tool_rounds == 0`：判决的对象是**用户这一轮说了什么**，只在轮首成立。
+/// - `round == 0`：判决的对象是**用户这一轮说了什么**，只在轮首成立。
 ///   工具轮次里循环回顶部时用户没再说话，再判一次就是拿同一句话重判。
 /// - `has_utterance`：`resume` / 心跳 / 无发言轮次没有可判的话。
 /// - `classify_enabled`：调用方关掉判决 ⇒ 与未挂载 `classify` 逐字一致（全进工具循环）。
 fn policy_classify(state: &LoopState) -> Option<Capsule> {
-    (state.tool_rounds == 0 && state.has_utterance && state.classify_enabled)
-        .then_some(Capsule::DECIDE)
+    (state.round == 0 && state.has_utterance && state.classify_enabled).then_some(Capsule::DECIDE)
 }
 
 /// 轮边界汇报的判据（`chat_loop::round_report_hook` 每跑完一个工具批次问一次）。
 ///
-/// 前半段 `tool_rounds > 0` 是**独立**条件，不并进 `progress.due`：
+/// 前半段 `round > 0` 是**独立**条件，不并进 `progress.due`：
 /// `ProgressPolicy::min_rounds` 可配 0，而"轮首汇报"是语义错误——那时还一轮工具
 /// 都没跑，没有"进展"这回事。实测过：把它交给 `due` 判，`min_rounds = 0` 的配置
 /// 会让每轮开头先说一句废话。
 fn policy_report(state: &LoopState) -> Option<Capsule> {
-    (state.tool_rounds > 0
+    (state.round > 0
         && state
             .progress
-            .due(state.quiet_ms, state.tool_rounds, state.reports))
+            .due(state.quiet_ms, state.round, state.reports))
     .then_some(Capsule::REPORT)
 }
 
@@ -447,11 +442,11 @@ fn policy_compress(state: &LoopState) -> Option<Capsule> {
 
 /// 轮首准备的判据（步骤 3 ③）。
 ///
-/// - `tool_rounds == 0`：同一轮内记忆不漂移、事实源只扫一遍，后续工具轮复用
+/// - `round == 0`：同一轮内记忆不漂移、事实源只扫一遍，后续工具轮复用
 ///   同一份视图（与 classify / history 同一条「每轮一次」口径）；
 /// - `has_session_dir`：临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
 fn policy_recall(state: &LoopState) -> Option<Capsule> {
-    (state.tool_rounds == 0 && state.has_session_dir).then_some(Capsule::RECALL)
+    (state.round == 0 && state.has_session_dir).then_some(Capsule::RECALL)
 }
 
 /// 反射档的判据（步骤 3 ④）。两关缺一不可：

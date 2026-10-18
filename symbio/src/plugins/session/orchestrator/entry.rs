@@ -457,8 +457,6 @@ impl SessionPlugin {
                 system_prompt: None,
                 single_message: None,
                 stream: Some(true),
-                // 0 = 不限制 → None（chat_loop 的无限轮次语义），>0 才是显式软上限
-                max_tool_rounds: session_cfg.model_chat_max_tool_rounds(),
                 tool_context_window: Some(session_cfg.tool_context_window),
                 auto_compress: Some(session_cfg.auto_compress),
                 provider_id: pid_clone.clone(),

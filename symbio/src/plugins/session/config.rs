@@ -95,16 +95,6 @@ pub struct SessionConfig {
     /// 上下文会话轮数限制（0 表示不限制，每一轮以一个 User 消息开始）
     #[serde(default = "default_context_messages")]
     pub context_messages: usize,
-    /// 最大工具调用迭代轮数（**0 = 不限制**，且 0 即默认值）
-    ///
-    /// 语义与 `model_chat::Request::max_tool_rounds` 对齐：session 编排层仅在
-    /// 本值 > 0 时才下发显式软上限，否则传 `None`（= 无限轮次）。
-    /// 用户明确要求不对智能体会话设置硬性轮次上限，故默认取 `0`（显式"不限制"，
-    /// 不再用 65535 这类魔法数表达同一意图）；达到软上限时 chat_loop 会先给出
-    /// 明确提示再正常退出（非静默熔断）。旧存档中已落盘的 65535 行为等价（实质
-    /// 无上限），不受本默认值变更影响。
-    #[serde(default = "default_max_tool_rounds")]
-    pub max_tool_rounds: usize,
     /// 内容节点淡化行数阈值（请求视图中超过此行数或 token 超预算时做头尾淡化；存储恒为完整原文）
     #[serde(default = "default_compress_line_threshold")]
     pub compress_line_threshold: usize,
@@ -115,12 +105,17 @@ pub struct SessionConfig {
     /// 保留完整结果的最近工具调用数量限制（滑动窗口）
     #[serde(default = "default_tool_context_window")]
     pub tool_context_window: usize,
-    /// 老旧工具结果淡化（fade）的激活阈值：单轮请求的工具迭代轮数**超过**此值后，
+    /// 老旧工具结果淡化（fade）的激活阈值：一次请求里迭代轮数**超过**此值后，
     /// 请求视图才把较早轮次的工具结果压成头尾摘要。
+    ///
+    /// ⚠️ 本阈值所在的三层淡化目前**还没接进 v2 的请求**（裁剪结果被丢弃），
+    /// 而它能拿到的计数只有「本轮请求数」——工具轮数的真实计数在运行器环体里。
+    /// 接入与判据真源一起裁决，见
+    /// [T-166](../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")。
     ///
     /// 与 `chat_loop` 里的旧常量 `FADE_ACTIVATE_ROUNDS` 同源（原为硬编码 40）；
     /// 统一进本结构后，fade 的全部参数都只有这一个真源。置 0 等价于"每一轮都启用
-    /// fade"（判定是 `tool_rounds > 阈值`），要彻底关闭请保持默认值或调大。
+    /// fade"（判定是 `round > 阈值`），要彻底关闭请保持默认值或调大。
     #[serde(default = "default_fade_activate_rounds")]
     pub fade_activate_rounds: usize,
     /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化
@@ -436,9 +431,6 @@ pub fn default_auto_compress() -> bool {
 pub fn default_context_messages() -> usize {
     6
 }
-pub fn default_max_tool_rounds() -> usize {
-    0 // 0 = 不限制（产品决策：不对智能体会话设硬性轮次上限）
-}
 pub fn default_compress_line_threshold() -> usize {
     200
 }
@@ -531,15 +523,6 @@ pub fn default_skill_fast_path() -> bool {
 }
 
 impl SessionConfig {
-    /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
-    ///
-    /// `SessionConfig::max_tool_rounds == 0` 表示**不限制** → 传 `None`（chat_loop 中
-    /// `None` = 无限轮次）；> 0 才是显式软上限。此前编排层三处无条件 `Some(...)`，
-    /// 使 `None` 语义在主路径不可达，且 0 会变成"0 轮即熔断"的错误行为。
-    pub fn model_chat_max_tool_rounds(&self) -> Option<usize> {
-        (self.max_tool_rounds > 0).then_some(self.max_tool_rounds)
-    }
-
     /// 生效的会话记忆**写入**上限（下界 1 字节，避免配成 0 后一切写入都失败却看不出原因）
     pub fn effective_memory_max_bytes(&self) -> usize {
         self.memory_max_bytes.max(1)
@@ -569,7 +552,6 @@ impl Default for SessionConfig {
             max_messages: default_max_messages(),
             auto_compress: default_auto_compress(),
             context_messages: default_context_messages(),
-            max_tool_rounds: default_max_tool_rounds(),
             compress_line_threshold: default_compress_line_threshold(),
             compress_keep_recent: default_compress_keep_recent(),
             tool_context_window: default_tool_context_window(),

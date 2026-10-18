@@ -146,3 +146,31 @@ fn speaking_resets_the_quiet_clock_and_spends_the_quota() {
     assert!(p.due(&due_again), "时钟重新计时后还能再说");
     assert_eq!(p.reports, 1, "配额计了一次");
 }
+
+/// 用户在轮内补了话 ⇒ 静默时钟归零，但**不**花助手的汇报配额。
+///
+/// 这条挂在一个数上（回调入参 `supplemented_at`，由批次边界的抽干结果带出来）：少了它，
+/// 「先抽干、后汇报」就只是一句注释——注释判不到用户开口，助手就会在人家刚说完话时
+/// 抢着报一句进度（这一条为什么做成入参而不是注释纪律，见
+/// [ADR-074](../../../../../docs/010-adr/074.md "ADR-074") 裁决二）。
+#[test]
+fn a_user_supplement_resets_the_clock_without_spending_the_quota() {
+    let mut p = progressed();
+    p.advance();
+    let snap = p.advance();
+    assert!(p.due(&snap), "先构造出「该说」的一刻");
+
+    p.stirred(clock_now_ms());
+
+    let next = p.advance();
+    assert!(
+        next.quiet_ms < 60_000,
+        "补充也是一次动静：时钟归零后不该还顶着 60 秒静默，实得 {}",
+        next.quiet_ms
+    );
+    assert_eq!(p.reports, 0, "用户说话不占助手的配额");
+
+    // 时钟只往前走：一个**更早**的时刻不能把静默时长重新拉长。
+    p.stirred(clock_now_ms() - 30_000);
+    assert!(p.advance().quiet_ms < 60_000, "归零不能被更早的时刻撤销");
+}

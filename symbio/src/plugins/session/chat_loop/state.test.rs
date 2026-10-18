@@ -185,7 +185,6 @@ fn request_defaults_come_from_session_config() {
     let r = TurnRequest::new(&model_chat::Request::default());
     assert_eq!(r.auto_compress, defaults.auto_compress);
     assert_eq!(r.tool_context_window, defaults.tool_context_window);
-    assert_eq!(r.max_tool_rounds, None, "默认 = 无上限");
     assert!(r.load_history, "该字段无配置对应项：缺省即加载历史");
     assert_eq!(r.system_prompt, None);
 }
@@ -194,13 +193,11 @@ fn request_defaults_come_from_session_config() {
 fn explicit_request_values_win_over_defaults() {
     let defaults = SessionConfig::default();
     let r = TurnRequest::new(&model_chat::Request {
-        max_tool_rounds: Some(7),
         auto_compress: Some(!defaults.auto_compress),
         tool_context_window: Some(defaults.tool_context_window + 1),
         system_prompt: Some("p".into()),
         ..Default::default()
     });
-    assert_eq!(r.max_tool_rounds, Some(7));
     assert_eq!(r.auto_compress, !defaults.auto_compress);
     assert_eq!(r.tool_context_window, defaults.tool_context_window + 1);
     assert_eq!(r.system_prompt.as_deref(), Some("p"));

@@ -193,7 +193,7 @@ crate::submit_object_creator!(PLUGIN_ID_CLASSIFY, ClassifyPlugin::build, dyn Plu
 ///
 /// 默认值一律从 [`ClassifyConfig::default()`] 读出，不写第二份字面量：schema 与 serde
 /// 各写一份默认值，就会出现"面板显示的值与实际行为不符"的漂移（`session` 那边为此
-/// 吃过一次 `max_tool_rounds` 的亏，见其 `config_definition` 的说明）。
+/// 吃过一次亏，见其 `config_definition` 的说明）。
 ///
 /// 两个可空字段没有"默认值"可写——它们的缺省就是**留空**，故给 `placeholder` 说明
 /// 留空意味着什么，而不是编一个看起来像默认值的字面量。

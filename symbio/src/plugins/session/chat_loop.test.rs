@@ -5,77 +5,36 @@
 //! `chat_loop/inputs.test.rs`；`turn.rs` / `compress.rs` / `io.rs` 暂无测试。
 //!
 //! `gate_turn` 是主循环顶部的**唯一判定点**（退出条件）。收口前这些判定散落在
-//! 主循环体里，只能靠端到端跑会话间接验证；收口成纯函数后可以在这里
-//! 直接钉住语义——尤其是两条退出条件同时成立时的**判定顺序**。
+//! 主循环体里，只能靠端到端跑会话间接验证；收口成纯函数后可以在这里直接钉住语义。
+//!
+//! 闸门现在只有一条退出条件（中止边界）：「等工具齐」随 v1 外壳的簿记坍缩
+//! （[ADR-073](../../../../docs/010-adr/073.md)），「工具轮软上限」随它恒 0 的计数一起退役（[ADR-074](../../../../docs/010-adr/074.md)）——
+//! 工具轮数在这一层不可见，本文件因此**不该**再出现任何按轮次的判定。
 
 use super::*;
 
-fn req(max_tool_rounds: Option<usize>) -> TurnRequest {
-    TurnRequest::new(&model_chat::Request {
-        max_tool_rounds,
-        ..Default::default()
-    })
-}
-
-fn state(tool_rounds: usize, aborted: bool) -> TurnState {
+fn state(request_round: usize, aborted: bool) -> TurnState {
     let abort = ExecAbortSignal::new();
     if aborted {
         abort.abort();
     }
     TurnState {
         abort,
-        tool_rounds,
+        request_round,
         ..Default::default()
     }
 }
 
 #[test]
 fn idle_state_proceeds() {
-    assert!(matches!(
-        gate_turn(&req(None), &state(0, false)),
-        Gate::Proceed
-    ));
-}
-
-// ── 退出条件 ①：显式软上限 ─────────────────────────────────────────────
-
-#[test]
-fn max_tool_rounds_reached_exits_with_reason() {
-    match gate_turn(&req(Some(3)), &state(3, false)) {
-        Gate::Exit(TurnExit::MaxToolRounds { max }) => assert_eq!(max, 3),
-        other => panic!("期望 MaxToolRounds {{ max: 3 }}，实得 {other:?}"),
-    }
+    assert!(matches!(gate_turn(&state(0, false)), Gate::Proceed));
 }
 
 #[test]
-fn below_max_tool_rounds_proceeds() {
-    assert!(matches!(
-        gate_turn(&req(Some(3)), &state(2, false)),
-        Gate::Proceed
-    ));
+fn request_count_is_not_an_exit_condition() {
+    // 续写轮（请求数 >0）照样放行：这一层没有轮次上限可判（真实轮数在运行器环体里）。
+    assert!(matches!(gate_turn(&state(9999, false)), Gate::Proceed));
 }
-
-#[test]
-fn none_means_unbounded_rounds() {
-    // 默认不设硬上限（智能体会话轮次越来越多）：None ⇒ 轮次再多也放行。
-    assert!(matches!(
-        gate_turn(&req(None), &state(9999, false)),
-        Gate::Proceed
-    ));
-}
-
-#[test]
-fn max_tool_rounds_zero_is_unbounded_not_instant_break() {
-    // `Some(0)` 与 `None` 同义（与 `SessionConfig::max_tool_rounds` 的
-    // "0 = 不限制" 契约一致），绝不能被解释成"0 轮即熔断"。
-    assert_eq!(req(Some(0)).max_tool_rounds, None);
-    assert!(matches!(
-        gate_turn(&req(Some(0)), &state(0, false)),
-        Gate::Proceed
-    ));
-}
-
-// ── 退出条件 ②：abort（循环顶部边界检查点）────────────────────────────
 
 #[test]
 fn abort_at_loop_boundary_exits_without_bubbling() {
@@ -83,17 +42,16 @@ fn abort_at_loop_boundary_exits_without_bubbling() {
     // `Err(Aborted)`）：上一轮 Turn 已定稿落库，冒泡 Err 会让消费循环的
     // `persist_failure` 把已成功的 Turn 误标为 `Aborted`。
     assert!(matches!(
-        gate_turn(&req(None), &state(1, true)),
+        gate_turn(&state(1, true)),
         Gate::Exit(TurnExit::AbortedAtBoundary)
     ));
 }
 
 #[test]
-fn max_rounds_is_judged_before_abort() {
-    // 两个退出条件同时成立时软上限优先——它带明确提示文案，
-    // 比"用户中止"更能解释为什么停在这里。
-    match gate_turn(&req(Some(2)), &state(2, true)) {
-        Gate::Exit(TurnExit::MaxToolRounds { max }) => assert_eq!(max, 2),
-        other => panic!("期望 MaxToolRounds {{ max: 2 }}，实得 {other:?}"),
-    }
+fn abort_wins_over_request_count() {
+    // 中止是唯一的退出条件：轮次再多也不构成另一条（这一层读不到工具轮数，见 ADR-074）。
+    assert!(matches!(
+        gate_turn(&state(2, true)),
+        Gate::Exit(TurnExit::AbortedAtBoundary)
+    ));
 }

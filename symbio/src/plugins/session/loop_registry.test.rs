@@ -182,7 +182,7 @@ fn classify_fires_at_turn_head() {
 
 #[test]
 fn classify_does_not_fire_after_tool_rounds() {
-    // 只差 `tool_rounds == 0`：工具轮次里循环回顶部时用户没再说话，
+    // 只差 `round == 0`：工具轮次里循环回顶部时用户没再说话，
     // 再判一次就是拿同一句话重判。
     let state = LoopState::turn_head(1, true, true);
     assert_eq!(builtin().decide(&state), None);
@@ -202,7 +202,7 @@ fn classify_does_not_fire_when_switch_is_off() {
     assert_eq!(builtin().decide(&state), None);
 }
 
-// ── policy.report：`tool_rounds > 0` 与四个旋钮 ───────────────────────────
+// ── policy.report：`round > 0` 与四个旋钮 ───────────────────────────
 
 #[test]
 fn report_fires_at_round_boundary() {
@@ -215,7 +215,7 @@ fn report_fires_at_round_boundary() {
 #[test]
 fn report_never_fires_at_turn_head_even_if_min_rounds_is_zero() {
     // 这是本批最容易被"顺手优化掉"的一条：`min_rounds = 0` 时 `ProgressPolicy::due`
-    // 会放行 `tool_rounds == 0`，而轮首汇报是语义错误——那时一轮工具都没跑。
+    // 会放行 `round == 0`，而轮首汇报是语义错误——那时一轮工具都没跑。
     // 判据必须独立成立，不能并进 `due`。
     let permissive = ProgressPolicy {
         min_rounds: 0,
@@ -315,7 +315,7 @@ fn recall_requires_first_round_and_a_session_dir() {
             .map(|h| h.capsule),
         Some(Capsule::RECALL)
     );
-    // 只差 `tool_rounds == 0`：同一轮内记忆不漂移，事实源只扫一遍。
+    // 只差 `round == 0`：同一轮内记忆不漂移，事实源只扫一遍。
     assert_eq!(builtin().decide(&LoopState::turn_prepare(1, true)), None);
     // 只差 `has_session_dir`：临时会话没有事实源，不读不写。
     assert_eq!(builtin().decide(&LoopState::turn_prepare(0, false)), None);

@@ -29,11 +29,11 @@ created: 2026-09-16
 
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
-| `gate_turn` | 退出条件（软上限 / abort），见 §2.1 | 判定点唯一 |
+| `gate_turn` | 退出条件（只剩中止边界），见 §2.1 | 判定点唯一 |
 | `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + 压缩 + 请求视图 | 准备点唯一 |
 | `apply_compaction` | 水位响应（70% 阈值触发的语义压缩） | 响应点唯一 |
-| `finish_turn` | 软上限提示 + 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
-| `TurnState` | 跨轮可变状态（工具轮次 / 续写次数 / 落库锚点 / 静默时钟种子 / 中止信号） | 状态容器唯一 |
+| `finish_turn` | 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
+| `TurnState` | 跨轮可变状态（请求轮次 / 续写次数 / 落库锚点 / 静默时钟种子 / 中止信号） | 状态容器唯一 |
 
 ---
 
@@ -107,7 +107,7 @@ created: 2026-09-16
 
 ### 1.3 职责边界（收口依据）
 
-- **收尾三件套**（软上限提示 / 增量落库 / Stop 钩子）只在 `finish_turn` 出现一次；
+- **收尾三件套**（增量落库 / Stop 钩子 / 返回语义）只在 `finish_turn` 出现一次；
   每个出口只负责构造 `TurnExit`。
 - **压缩判定与执行**同处 `apply_compaction`，顺序由函数内代码行序保证；
   内核 `compress_with_snapshot_core` 是唯一实现。
@@ -128,10 +128,10 @@ created: 2026-09-16
 /// 本轮是否必须退出（退出条件）。唯一调用点：主循环顶部。
 enum Gate {
     Proceed,                  // 放行 → 进入准备与推理
-    Exit(TurnExit),           // 软上限 / abort
+    Exit(TurnExit),           // 中止边界
 }
 
-fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
+fn gate_turn(turn: &TurnState) -> Gate
 ```
 
 **形状原本是三态**（放行 / 等工具齐 / 退出）。「等工具齐」判的是 v1 外壳留在 `TurnState` 上的
@@ -148,13 +148,16 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
 > 真正会悬空的只有一种：id / name 非法的调用——`record_protocol_failure` 在写入时合成失败结果
 > 兜住它（§4.2），不需要主循环侧的等待。
 
-退出条件在 `gate_turn` 内判定两处，语义不同：
+退出条件只剩**一处**：
 
-- **显式软上限**（`req.max_tool_rounds`，`None` = 不限制）→ `TurnExit::MaxToolRounds`，
-  先广播明确提示再退出，绝不静默；
 - **循环顶部的中止检查点** → `TurnExit::AbortedAtBoundary`（**不冒泡** `Err(Aborted)`：
   上一轮 Turn 已定稿落库，冒泡会让消费循环的 `persist_failure` 把已成功的 Turn
   误标为 `Aborted`）。推理前后（在途 Turn 尚未定稿）的中止才走 `TurnExit::Aborted`。
+
+> 闸门**不判工具轮数**：`max_tool_rounds` 那条软上限整条退役——它判的是一个恒 0 的计数（§4.1；
+> 裁决与逐符号名册见 [ADR-074](../../../../../docs/010-adr/074.md "ADR-074")）。**真要这道上限，
+> 位置在 §4.1 的 2e（结果接进 `exchange`）与 2f（轮内注入）之间**：那里有真实的 `tool_round`，
+> 而要新写的不只是判定，还有「到上限时这一批怎么收」的收束语义。
 
 ### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `prepare_turn_inputs`
 
@@ -230,7 +233,6 @@ async fn apply_compaction(
 enum TurnExit {
     Completed,                     // 正常收尾（无工具调用 / 待用户输入）
     AbortedAtBoundary,             // 循环顶部的中止检查点：不冒泡
-    MaxToolRounds { max: usize },  // 显式软上限
     Aborted,                       // 用户中止且在途 Turn 未定稿 → 冒泡 Err(Aborted)
     Failed(PluginError),
     ResumeDone,                    // resume 已完成，无需进入循环
@@ -257,10 +259,12 @@ async fn finish_turn(
 ```rust
 struct TurnState {
     abort: ExecAbortSignal,              // 用户中止信号（推理与工具共享同一份）
-    tool_rounds: usize,              // 已完成的工具轮次——v2 恒 0（见 §4.1）
-    continuation_count: u32,         // 长度截断自动续写次数（跨轮累加）
-    last_saved: usize,               // 增量落库锚点
-    last_user_facing_at: i64,        // 对话线上最近一次动静（轮内时钟的种子）
+    request_round: usize,                // 本轮已发出的 LLM 请求数——⚠️ **不是**工具轮数（见 §4.1）
+    continuation_count: u32,             // 长度截断自动续写次数（跨轮累加）
+    last_saved: usize,                   // 增量落库锚点
+    last_user_facing_at: i64,            // 对话线上最近一次动静（轮内时钟的种子）
+    // 其余 7 格是本轮的读侧产物：input_utterance / recall_view / skill_route / skill_hits /
+    // ready_section / opening_text / opening_dialog（`request_round == 0` 时各取一次）
 }
 ```
 
@@ -310,7 +314,7 @@ pub async fn run_chat_loop(
         …
 
         // 步骤 2 · 闸门（收口 ①：退出条件，唯一判定点）
-        if let Gate::Exit(exit) = gate_turn(&turn_req, &turn) {
+        if let Gate::Exit(exit) = gate_turn(&turn) {
             return finish_turn(…, exit).await;
         }
 
@@ -382,10 +386,11 @@ execute_turn
 结果没接进 `exchange` 就没有下一次请求，主循环侧因此不需要一份在途工具集合（§2.1）。
 `chat_loop` 回到闸门时本轮早已跑完整批，那里只剩「要不要停」可判。
 
-`turn.tool_rounds` 在 v2 恒 0：递增点在运行器的批次边界上，那份真实轮数由 `RoundProgress`
-持有（`progress.rs`），不回流到 `TurnState`。它仍有三个读方（软上限 / fade 判定 / 抽干分支），
-所以字段留着——把恒 0 喂给它们是**语义失效**而不是崩溃，处置它属于
-[T-165](../../../../../docs/009-task/165-控制面收敛.md "T-165-控制面收敛") 的 5b-2。
+**这里数的是请求，不是工具轮。** `TurnState` 上那一格叫 `request_round`（本轮已发出的 LLM 请求数，
+续写时才 +1）；工具轮数的真源在本节环体的 `tool_round`，轮边界汇报要用那份由 `RoundProgress::rounds`
+持有（`progress.rs`）。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
+恒假与没配长得一样，没有信号能区分（裁决见 [ADR-074](../../../../../docs/010-adr/074.md "ADR-074")；
+fade 判定归 [T-166](../../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")）。
 
 `close_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [PL-014 步骤 5](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 删除；

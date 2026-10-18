@@ -101,12 +101,19 @@ pub(crate) fn round_report_hook(
             last_spoke_at,
         ),
     ));
-    Arc::new(move |_anchor: Option<u64>| {
+    Arc::new(move |supplemented_at: Option<i64>| {
         let orchestrator = orchestrator.clone();
         let ctx = ctx.clone();
         let conversation = conversation.clone();
         let progress = progress.clone();
         Box::pin(async move {
+            // 用户刚补充过 ⇒ 静默时钟先归零，再判「距上次动静够久了吗」。
+            // 顺序反过来就会出现「用户刚说完话，助手抢着报了一句进度」。
+            if let Some(at) = supplemented_at {
+                if let Ok(mut p) = progress.lock() {
+                    p.stirred(at);
+                }
+            }
             // 轮首没有「进展」可报：那里刚问过模型，判定对象是用户那句话（归 decide.rs）。
             let snapshot = {
                 let Ok(mut p) = progress.lock() else {
@@ -367,7 +374,7 @@ pub async fn run_chat_loop(
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）
         // resume 时 single_message=None，不应触发 user_prompt_submit_hook
         //（否则会把工具结果当 user_text 传给 hook，产生错误副作用）。
-        if turn.tool_rounds == 0 {
+        if turn.request_round == 0 {
             let mut had_user_msg = false;
             if let Some(msg) = single_message.take() {
                 if !context.messages.iter().any(|m| m.id == msg.id) {
@@ -383,9 +390,9 @@ pub async fn run_chat_loop(
         turn.last_saved = context.messages.len();
 
         // ── 步骤 2：闸门（退出条件，唯一判定点）───────────────────────────
-        // 收口前，这里散落 4 处 `if abort_flag { ... return }`（其中两处相邻重复）
-        // 与一处软上限判定，各自重写收尾三件套。
-        if let Gate::Exit(exit) = gate_turn(&turn_req, &turn) {
+        // 收口前，这里散落 4 处 `if abort_flag { ... return }`（其中两处相邻重复），
+        // 各自重写收尾三件套。
+        if let Gate::Exit(exit) = gate_turn(&turn) {
             return finish_turn(orchestrator, &context, &sink, &turn, exit).await;
         }
 
@@ -399,19 +406,19 @@ pub async fn run_chat_loop(
         // ## 判据在哪
         //
         // 不在下面这个 `if` 里，在 [`super::loop_registry`] 的 `policy.classify` 行：
-        // 「`tool_rounds == 0` ∧ 有发言 ∧ 开关开着」三条写在一个纯函数里，可单测、
+        // 「`request_round == 0` ∧ 有发言 ∧ 开关开着」三条写在一个纯函数里，可单测、
         // 可增删。本处只问表「下一步是什么」，命中 `Capsule::DECIDE` 才走这段。
         // 加一条新策略 = 一个函数 + 一行注册，**本文件不改**（PL-014 §6 判据 1）。
         //
         // ## 为什么在 `gate_turn` 之后
         //
-        // 闸门管的是「本轮要不要发请求」（软上限 / 中止 / 在途工具）。判决是
+        // 闸门管的是「本轮要不要发请求」（中止边界）。判决是
         // 「发请求之前先问一句该不该派活」，顺序反了会为一次注定退出的轮次白付
-        // 一次判决。与轮边界抽干点同一条理由（见下）。
+        // 一次判决。
         //
         // ## 为什么只在轮首、且有用户发言时
         //
-        // - `tool_rounds == 0`：判决的对象是**用户这一轮说了什么**，只在轮首成立。
+        // - `request_round == 0`：判决的对象是**用户这一轮说了什么**，只在轮首成立。
         //   工具轮次里循环回顶部时用户没再说话，再判一次就是拿同一句话重判。
         // - `first_utterance.is_some()`：`resume` / 无发言轮次不进判决（取值点的
         //   说明见前步骤 ③）。
@@ -437,7 +444,7 @@ pub async fn run_chat_loop(
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
         let head_state = super::loop_registry::LoopState::turn_head(
-            turn.tool_rounds,
+            turn.request_round,
             first_utterance.is_some(),
             orchestrator.classify_enabled,
         );
@@ -605,68 +612,17 @@ pub async fn run_chat_loop(
             }
         }
 
-        // ── 轮边界补充整合（唯一抽干点②）───────────────────────────────────
-        //
-        // 用户在本轮运行中继续补充时，队列里积着若干条。这里把它们**整体**抽干、
-        // 合并成**一条**用户消息折进本轮上下文——于是"边处理边综合"成立，而不是
-        // 每条补充各占一轮（那正是改造前"一条一条处理"的形态）。
-        //
-        // ## 为什么必须在 `gate_turn` **之后**
-        //
-        // 闸门只会 `Exit`（软上限 / 中止）或在确定要发请求时放行。若在它之前抽干，一旦
-        // 闸门退出，队列已被消费却没人用它——还得补一套"放回队首"的补偿逻辑。
-        // 放在闸门之后，**只有确定要发请求才抽**。
-        //
-        // ## 为什么结构上不会插进工具批次中间
-        //
-        // 工具在 `v2_exec::execute_turn` 内部经 `DispatchPort` 一批批跑完，
-        // 每批的结果先接进运行器的 `exchange` 才发下一次请求（`turn_runner.rs` 2e）——
-        // 本抽干点在环体**之外**，不可能落在 `assistant(tool_calls)` 与其
-        // `tool` 结果之间（那会让 OpenAI / Anthropic 直接 400）。
-        //
-        // ## 为什么只在非轮首、且只对有历史的轮次
-        //
-        // - `tool_rounds > 0`：轮首的输入在**进入循环之前**就定了（用户消息由收件箱
-        //   消费者 `drain_inbox_once` 取批，再由 `start_turn` 落库并作为
-        //   `single_message` 带进来）。轮首再抽一次是多余的，且会与下面
-        //   `single_message` 的去重逻辑纠缠。
-        // - `load_history`：心跳等无上下文场景从**空**上下文开始，把用户补充折进
-        //   一个没有历史的轮次会让模型凭空收到一句话，语义不对——那些轮次留给
-        //   下一次正常输入去消费。
-        if turn.tool_rounds > 0 && turn_req.load_history {
-            if let Some(drain) = orchestrator.supplements.as_ref() {
-                if let Some(merged) = drain.drain().await {
-                    plugin_info!(
-                        "session",
-                        "[Turn] 轮边界折进 {} 条补充（第 {} 轮）",
-                        merged
-                            .meta
-                            .as_ref()
-                            .and_then(|m| m.get("supplement_count"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(1),
-                        turn.tool_rounds
-                    );
-                    context.messages.push(merged);
-                    // 用户刚说了一句话 ⇒ 静默时钟归零（"对话线上有动静了"）。
-                    // 用户补充的消息**是**面向用户的话语，把它排除在"动静"之外，
-                    // 会让助手在用户刚补充完之后抢着报一句进度。
-                    turn.last_user_facing_at = clock_now_ms();
-                    // 刻意**不**推进 `turn.last_saved`：`persist_messages` 落
-                    // `context.messages[last_saved..]`，锚点不动 ⇒ 这条合并消息由
-                    // 下一次落库（`close_turn` 或 `finish_turn`）自然带上。
-                    // 手动推进反而会在"落库前退出"的路径上把它丢掉。
-                }
-            }
-        }
-
-        // 轮次起点。历史上这一行带 `tools={}` 一栏，但实参恒为字面量 `0`——此处
-        // 尚未决定本轮用哪些工具，输出「tools=0」会被读成「没有工具」，属误导，
-        // 故移除；工具使用情况由后续 `[Tool]` 行报告。
+        // 补充的抽干点**不在这里**：v2 在每个批次边界抽，位置由运行器给出——
+        // `turn_runner.rs` 的 2f 紧接 2e（本批结果已接进 `exchange`），于是「只有确定
+        // 要发下一次请求才抽」与「绝不落在 `assistant(tool_calls)` 与其 `tool` 结果
+        // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
+        // v2 下永不成立；裁决见 [ADR-074](../../../../docs/010-adr/074.md)）。
+        // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干结果作为 `supplemented_at` 随
+        // [`super::round_hook::RoundHookFn`] 的入参带出来（见 `v2_exec.rs` 的注入闭包）。
         plugin_info!(
             "session",
-            "[Turn] 第 {} 轮开始 (msgs={})",
-            turn.tool_rounds,
+            "[Turn] 第 {} 次请求开始 (msgs={})",
+            turn.request_round + 1,
             context.messages.len()
         );
 
@@ -839,7 +795,8 @@ pub async fn run_chat_loop(
         finalize_turn_root(&sink, &context, &inputs.root_id).await;
 
         match flow {
-            TurnFlow::NextTurn => {}
+            // 续写：本轮还要再发一次请求，计数在这里加（**唯一**写方）。
+            TurnFlow::NextTurn => turn.request_round += 1,
             TurnFlow::Finish(exit) => {
                 return finish_turn(orchestrator, &context, &sink, &turn, exit).await
             }
@@ -859,7 +816,7 @@ pub(crate) enum TurnFlow {
 /// 主循环顶部的**唯一闸门**：退出条件。
 ///
 /// 收口前，循环顶部与推理前后散落 4 处 `if abort_flag { ... return }`（其中两处
-/// 相邻重复，中间只隔一行日志），软上限判定另占一处，每处各自重写收尾三件套。
+/// 相邻重复，中间只隔一行日志），每处各自重写收尾三件套。
 /// 现在：**退出条件只在本函数判定一次**，收尾动作只在 [`finish_turn`] 出现一次。
 ///
 /// ## 「启动条件」这一态为什么没了
@@ -869,29 +826,26 @@ pub(crate) enum TurnFlow {
 /// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。
 ///
 /// v2 现实下它恒放行：工具在 `v2_exec::execute_turn` **内部**跑完（`DispatchPort`
-/// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5]
-/// (../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+/// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
 /// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
 /// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批
 /// 结果接进 `exchange` 之后才发下一次请求**（`turn_runner.rs` 2e），
 /// 结构上不可能带着半个批次出门。
+///
+/// ## 工具轮软上限为什么也不在这里判
+///
+/// 闸门能读的只有本轮的请求数，而**工具轮数在运行器的环体里**（`turn_runner.rs` 的
+/// `tool_round`）。挂在这里判的是一个恒 0 的字段，v2 下永不命中——那条配置项与它的
+/// 退役裁决见 [ADR-074](../../../../docs/010-adr/074.md)；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
+/// 2f（轮内注入）之间。
 ///
 /// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
 /// 「ToolCall 无结果」是**合法状态**（交互模式下工具批被用户审批中断时，本批剩余
 /// ToolCall 会被有意留空，由请求视图层 `flatten_chat_messages`
 /// （`plugins/model/message_builder.rs`）合成占位 tool 结果喂回模型）。
 /// 按历史判定会让 approve/reject 恢复后的续写被永久挡住。
-fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
-    // ── 退出条件 ①：显式软上限 ────────────────────────────────────────────
-    // 仅当调用方**主动**给出 max_tool_rounds 才生效（默认 None = 无限轮次）。
-    // 达到上限时必须给出明确提示再退出，绝不静默返回。
-    if let Some(max) = req.max_tool_rounds {
-        if turn.tool_rounds >= max {
-            return Gate::Exit(TurnExit::MaxToolRounds { max });
-        }
-    }
-
-    // ── 退出条件 ②：用户中止（边界检查点）─────────────────────────────────
+fn gate_turn(turn: &TurnState) -> Gate {
+    // ── 退出条件：用户中止（边界检查点）─────────────────────────────────
     // 循环顶部的中止检查点**不冒泡** `Err(Aborted)`：上一轮 Turn 已定稿落库，
     // 冒泡会让消费循环的 `persist_failure` 把成功的 Turn 误回滚为 Failed。
     // 推理前后（在途 Turn 尚未定稿）的中止才走 [`TurnExit::Aborted`]。
@@ -902,7 +856,7 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
     Gate::Proceed
 }
 
-/// 主循环的**唯一收尾点**：软上限提示 → 增量落库 → Stop 钩子 → 返回语义。
+/// 主循环的**唯一收尾点**：增量落库 → Stop 钩子 → 返回语义。
 ///
 /// 收口前，12 个出口各自重写「Stop 钩子 + 落库 + 返回」三件套，新增出口必须记得
 /// 补齐（漏了只有 `StopSignal` 的 RAII 兜底能发现）。现在每个出口只负责判定
@@ -918,14 +872,6 @@ async fn finish_turn(
     turn: &TurnState,
     exit: TurnExit,
 ) -> Result<(), PluginError> {
-    // 软上限：先落一条会话级告警状态再退出，绝不静默（文案唯一出处）。
-    if let TurnExit::MaxToolRounds { max } = &exit {
-        sink.warn(Some(format!(
-            "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
-        )))
-        .await;
-    }
-
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
     persist_messages(context, turn.last_saved, sink).await;
 

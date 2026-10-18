@@ -24,15 +24,21 @@ use std::sync::Arc;
 
 use crate::symbio_core::chat_node::ChatNode;
 
-/// 轮边界回调：core 每跑完一轮工具问一次，返回「这一轮要不要说点什么」。
+/// 轮边界回调：core 每跑完**一批**工具问一次，返回「这一批要不要说点什么」。
 ///
 /// 形态与 [`crate::plugins::session::turn_runner::RoundInjector`] 同源（异步闭包 + `Fn + Send + Sync +
 /// 'static`）而返回值不同：那条是「往请求包里加什么」，这条是「说一句什么」。
 /// 刻意**不合成一条**：合起来就得靠「返回值有时有意义有时没有」来区分，那在
 /// 调用点读不出来。
+///
+/// 入参是**本批次边界抽到用户补充的时刻**（`None` = 没抽到）。判定方（`chat_loop`
+/// 那边）拿不到队列，也不该拿到——这个事实只有正在翻批次边界的一侧知道，于是
+/// 「先抽干、后汇报 ⇒ 静默时钟归零」是一条**数据**而不是一句注释纪律：注释纪律
+/// 失效时没有任何测试会变红，入参会（裁决背景见
+/// [ADR-074](../../../../docs/010-adr/074.md "ADR-074")）。
 pub(crate) type RoundHookFn = Arc<
     dyn Fn(
-            Option<u64>,
+            Option<i64>,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ReportDraft>> + Send>>
         + Send

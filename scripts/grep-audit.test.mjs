@@ -284,93 +284,105 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
   assert.equal(r3.status, 1)
 })
 
-// ── S-011：补充抽干点必须夹在 gate_turn 与 prepare_turn_inputs 之间 ──────
+// ── S-011：补充注入点的位置（两处行序断言）──────────────────────────────
 // 夹具与 S-010 共用（`s010Audit` 建的就是「cwd 下有 symbio/ 的仓库树」），
-// 落点由文件相对路径决定——S-011 只认 `symbio/src/plugins/session/chat_loop.rs`。
+// 落点由文件相对路径决定——S-011 认 `session/turn_runner.rs` 与 `session/v2_exec.rs` 两处。
 const s011Audit = s010Audit
-const S011_FILE = 'symbio/src/plugins/session/chat_loop.rs'
+const S011_RUNNER = 'symbio/src/plugins/session/turn_runner.rs'
+const S011_EXEC = 'symbio/src/plugins/session/v2_exec.rs'
 
-/** 位置正确的形态：gate_turn 调用 → 抽干 → prepare_turn_inputs 调用 */
-const S011_OK = `fn run() {
-    match gate_turn(&turn_req, &turn) {}
-    if let Some(d) = orchestrator.supplements.as_ref() {
-        d.drain().await;
-    }
-    let inputs = prepare_turn_inputs(&ctx);
+/** 位置正确的形态：2e 结果接进请求 → 2f 补充接进请求 */
+const S011_RUNNER_OK = `fn run() {
+    exchange.extend(tool_exchange_messages(&rt, &outcomes, tool_round));
+    tool_round += 1;
+    exchange.extend(inject(Some(user_seq)).await);
 }
 `
+/** 位置正确的形态：先抽干（拿得到 `supplemented_at`）→ 再判定要不要汇报 */
+const S011_EXEC_OK = `fn run() {
+    let injected = supplement_into_request(&store, &batch);
+    let supplemented_at = (!injected.is_empty()).then(clock_now_ms);
+    if let Some(draft) = report(supplemented_at).await {}
+}
+`
+const s011Ok = (runner = S011_RUNNER_OK, exec = S011_EXEC_OK) => ({
+  [S011_RUNNER]: runner,
+  [S011_EXEC]: exec,
+})
 
-test('S-011 passes when the drain sits between gate_turn and prepare_turn_inputs', () => {
-  const r = s011Audit({ [S011_FILE]: S011_OK })
+test('S-011 passes when both orderings hold', () => {
+  const r = s011Audit(s011Ok())
   assert.equal(r.status, 0)
-  assert.match(r.stdout, /S-011 通过：抽干点夹在 gate_turn\(2\) 与 prepare_turn_inputs\(6\) 之间/)
+  assert.match(r.stdout, /S-011 通过：.*turn_runner\.rs 2e 工具结果接进请求\(2\) 在 2f 轮内补充接进请求\(4\) 之前/)
+  assert.match(r.stdout, /S-011 通过：.*v2_exec\.rs `supplement_into_request` 抽干点\(2\) 在 `report` 汇报判定\(4\) 之前/)
 })
 
-test('S-011 fires when the drain moves before gate_turn', () => {
-  // 前移的真实后果：闸门 Exit 时队列已被消费却没人用——
-  // 用户那句补充进了转写，模型从没见过它，**没有任何测试会变红**。
-  const r = s011Audit({
-    [S011_FILE]: `fn run() {
-    orchestrator.supplements.as_ref();
-    match gate_turn(&turn_req, &turn) {}
-    prepare_turn_inputs(&ctx);
+test('S-011 fires when the supplement is injected before the tool results land', () => {
+  // 真实的后果不是「顺序不好看」：补充插进 `assistant(tool_calls)` 与它的 `tool` 结果
+  // 之间，部分协议直接 400——而**没有任何测试会因为搬家而变红**。
+  const r = s011Audit(
+    s011Ok(`fn run() {
+    exchange.extend(inject(Some(user_seq)).await);
+    exchange.extend(tool_exchange_messages(&rt, &outcomes, tool_round));
 }
-`,
-  })
+`),
+  )
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /S-011 抽干点位置错/)
+  assert.match(r.stdout, /S-011 位置错/)
 })
 
-test('S-011 fires when the drain moves after prepare_turn_inputs', () => {
-  // 后移的真实后果：合并消息不在本轮请求里，白折一轮（请求视图已经建好了）。
-  const r = s011Audit({
-    [S011_FILE]: `fn run() {
-    match gate_turn(&turn_req, &turn) {}
-    prepare_turn_inputs(&ctx);
-    orchestrator.supplements.as_ref();
+test('S-011 fires when the report is judged before the drain', () => {
+  // 反了 ⇒ `supplemented_at` 在判定那一刻还不知道，静默时钟没归零：
+  // 用户已经开口，插件照样按「没人说话」报一次进度。
+  const r = s011Audit(
+    s011Ok(S011_RUNNER_OK, `fn run() {
+    if let Some(draft) = report(supplemented_at).await {}
+    let injected = supplement_into_request(&store, &batch);
 }
-`,
-  })
+`),
+  )
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /S-011 抽干点位置错/)
+  assert.match(r.stdout, /S-011 位置错/)
 })
 
 test('S-011 errors when an anchor disappears (guard must not silently no-op)', () => {
-  // 锚点缺失 = 抽干点被删或被改名。守卫此时**必须响亮**：让它悄悄退化成空转，
+  // 锚点缺失 = 注入点被删或被改名。守卫此时**必须响亮**：让它悄悄退化成空转，
   // 它会以绿灯的形式提供虚假保证——比没有守卫更糟。故"锚点缺失"不接受豁免。
   const renamed = s011Audit({
-    [S011_FILE]: S011_OK.replace('orchestrator.supplements', 'orchestrator.supplement_drain'),
+    ...s011Ok(),
+    [S011_RUNNER]: S011_RUNNER_OK.replace('tool_exchange_messages', 'round_exchange_messages'),
   })
   assert.equal(renamed.status, 1)
   assert.match(renamed.stdout, /S-011 锚点缺失/)
 
-  const gateGone = s011Audit({
-    [S011_FILE]: `fn run() {
-    orchestrator.supplements.as_ref();
-    prepare_turn_inputs(&ctx);
+  const reportGone = s011Audit({
+    ...s011Ok(),
+    [S011_EXEC]: `fn run() {
+    let injected = supplement_into_request(&store, &batch);
 }
 `,
   })
-  assert.equal(gateGone.status, 1)
-  assert.match(gateGone.stdout, /gate_turn/)
+  assert.equal(reportGone.status, 1)
+  assert.match(reportGone.stdout, /`report` 汇报判定/)
 
   // 豁免通道对"锚点缺失"无效——无从判断的事不能靠签名放行
   const waivedButMissing = s011Audit({
-    [S011_FILE]: `fn run() {
-    orchestrator.supplement_drain.as_ref(); // grep-audit-allow S-011: 已确认
-    prepare_turn_inputs(&ctx);
+    ...s011Ok(),
+    [S011_EXEC]: `fn run() {
+    let injected = supplement_into_request(&store, &batch);
+    let drafted = report_now(supplemented_at); // grep-audit-allow S-011: 已确认
 }
 `,
   })
   assert.equal(waivedButMissing.status, 1)
 })
 
-test('S-011 counts only code lines (a commented-out drain is "missing", not "fine")', () => {
+test('S-011 counts only code lines (a commented-out inject is "missing", not "fine")', () => {
   const r = s011Audit({
-    [S011_FILE]: `fn run() {
-    match gate_turn(&turn_req, &turn) {}
-    // orchestrator.supplements.as_ref();  ← 注释掉抽干调用
-    prepare_turn_inputs(&ctx);
+    ...s011Ok(),
+    [S011_RUNNER]: `fn run() {
+    exchange.extend(tool_exchange_messages(&rt, &outcomes, tool_round));
+    // exchange.extend(inject(Some(user_seq)).await);  ← 注释掉注入调用
 }
 `,
   })
@@ -378,16 +390,16 @@ test('S-011 counts only code lines (a commented-out drain is "missing", not "fin
   assert.match(r.stdout, /S-011 锚点缺失/)
 })
 
-test('S-011 ignores the `fn gate_turn` definition (only the call site anchors)', () => {
-  // 真实文件里 `fn gate_turn(...)` 定义在**最后**，但规则不能依赖这个巧合：
-  // 定义在调用点之后时，若把定义当成锚点就会误判成"位置错"。
+test('S-011 ignores the `fn supplement_into_request` definition (only the call site anchors)', () => {
+  // 真实文件里函数定义在**调用点之后**，但规则不能依赖这个巧合：
+  // 若把定义当成锚点就会误判成"位置错"。
   const r = s011Audit({
-    [S011_FILE]: `fn run() {
-    match gate_turn(&req, &turn) {}
-    orchestrator.supplements.as_ref();
-    prepare_turn_inputs(&ctx);
+    ...s011Ok(),
+    [S011_EXEC]: `fn run() {
+    let injected = supplement_into_request(&store, &batch);
+    if let Some(draft) = report(supplemented_at).await {}
 }
-fn gate_turn(a: &A, b: &B) -> Gate { Gate::Proceed }
+fn supplement_into_request(store: &Store, batch: &Batch) -> Vec<Msg> { Vec::new() }
 `,
   })
   assert.equal(r.status, 0)
@@ -395,23 +407,33 @@ fn gate_turn(a: &A, b: &B) -> Gate { Gate::Proceed }
 
 test('S-011 waiver requires a reason', () => {
   const bad = `fn run() {
-    orchestrator.supplements.as_ref(); WAIVER
-    match gate_turn(&turn_req, &turn) {}
-    prepare_turn_inputs(&ctx);
+    if let Some(draft) = report(supplemented_at).await {} WAIVER
+    let injected = supplement_into_request(&store, &batch);
 }
 `
   const withReason = s011Audit({
-    [S011_FILE]: bad.replace('WAIVER', '// grep-audit-allow S-011: 抽干点由外层调度器统一处理'),
+    ...s011Ok(),
+    [S011_EXEC]: bad.replace('WAIVER', '// grep-audit-allow S-011: 判定口由外层统一持有'),
   })
   assert.equal(withReason.status, 0)
-  const emptyReason = s011Audit({ [S011_FILE]: bad.replace('WAIVER', '// grep-audit-allow S-011:   ') })
+  const emptyReason = s011Audit({
+    ...s011Ok(),
+    [S011_EXEC]: bad.replace('WAIVER', '// grep-audit-allow S-011:   '),
+  })
   assert.equal(emptyReason.status, 1)
 })
 
-test('S-011 is skipped (not failed) when chat_loop.rs is outside the scope', () => {
-  const r = audit('fn unrelated() {}\n')
-  assert.equal(r.status, 0)
-  assert.match(r.stdout, /S-011 跳过/)
+test('S-011 is skipped (not failed) when either file is outside the scope', () => {
+  const none = audit('fn unrelated() {}\n')
+  assert.equal(none.status, 0)
+  assert.match(none.stdout, /S-011 跳过：scope 内没有 plugins\/session\/turn_runner\.rs/)
+  assert.match(none.stdout, /S-011 跳过：scope 内没有 plugins\/session\/v2_exec\.rs/)
+
+  // 只布一个文件：另一个跳过，布下的那个照常判
+  const one = s011Audit({ [S011_RUNNER]: S011_RUNNER_OK })
+  assert.equal(one.status, 0)
+  assert.match(one.stdout, /S-011 通过：.*turn_runner\.rs/)
+  assert.match(one.stdout, /S-011 跳过：scope 内没有 plugins\/session\/v2_exec\.rs/)
 })
 
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────

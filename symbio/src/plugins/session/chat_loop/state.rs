@@ -148,8 +148,6 @@ pub(crate) struct SessionContext {
 /// 循环内再持一份只会变成永不读的死字段（错误文案要用的那一份在
 /// `orchestrator::consume::run_chat_loop_task` 的参数里）。
 pub(crate) struct TurnRequest {
-    /// 显式软上限（`None` = 不限制；`Some(0)` 与 `None` 同义）
-    pub(crate) max_tool_rounds: Option<usize>,
     pub(crate) auto_compress: bool,
     pub(crate) tool_context_window: usize,
     pub(crate) load_history: bool,
@@ -162,12 +160,6 @@ impl TurnRequest {
     pub(crate) fn new(req: &model_chat::Request) -> Self {
         let defaults = SessionConfig::default();
         Self {
-            // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越
-            // 多）。默认（request 未显式给出）=「无上限」；仅调用方**显式**设置时才作为
-            // 软上限。`Some(0)` 与 `None` 同义（不限制）——与
-            // `SessionConfig::max_tool_rounds` 的 "0 = 不限制" 契约一致，
-            // 避免 0 被解释成"0 轮即熔断"。
-            max_tool_rounds: req.max_tool_rounds.filter(|n| *n > 0),
             auto_compress: req.auto_compress.unwrap_or(defaults.auto_compress),
             tool_context_window: req
                 .tool_context_window
@@ -190,8 +182,17 @@ pub(crate) struct TurnState {
     /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
     /// 现在是 [`ExecAbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
     pub(crate) abort: ExecAbortSignal,
-    /// 已完成的工具轮次（跨轮累加；软上限判定与 fade 判定都读它）
-    pub(crate) tool_rounds: usize,
+    /// 本轮**已发出的 LLM 请求数**。唯一写方是主循环的 `TurnFlow::NextTurn` 分支
+    /// （长度截断后的自动续写），所以它一次请求加一格，绝大多数轮就是 0 或 1。
+    ///
+    /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_runner::run_with_tools` 的环体里
+    /// 一批批跑完，那里有唯一的真实计数（`tool_round`）；本层一次请求就是一个整体，
+    /// 看不到第几轮工具。于是这一层的判据只能是「这是不是本轮**第一次请求**」——
+    /// 轮首判决、长期记忆召回、`user_prompt_submit` 钩子、流式起始的轮次标注都是它。
+    /// 把请求数当工具轮数用会**静默失效**（判据恒假而默认值看起来像「没配」），
+    /// 那条病灶与它三个读方各自的去处见
+    /// [ADR-074](../../../../../docs/010-adr/074.md "ADR-074")。
+    pub(crate) request_round: usize,
     /// 长度截断自动续写次数（跨轮累加）
     pub(crate) continuation_count: u32,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
@@ -218,7 +219,7 @@ pub(crate) struct TurnState {
     pub(crate) input_utterance: Option<(String, String)>,
     /// 本轮的**长期记忆召回视图**（S5 步 12，`v2_memory::recall_view`）。
     ///
-    /// 只在本轮**第一个工具轮**取一次（与 classify / history 同一条 `tool_rounds == 0`
+    /// 只在本轮**第一次请求**取一次（与 classify / history 同一条 `request_round == 0`
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
     /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
     ///
@@ -254,7 +255,7 @@ pub(crate) struct TurnState {
     /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
     /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
     ///
-    /// 与 [`TurnState::recall_view`] 同一条取用口径（`tool_rounds == 0` 取一次、
+    /// 与 [`TurnState::recall_view`] 同一条取用口径（`request_round == 0` 取一次、
     /// 本轮各工具轮复用）：同一轮内任务集不该漂移，也省得每个工具轮都重开一次
     /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空）就是
     /// `None`，请求视图里就少一段，不存在"空占位"。
@@ -284,8 +285,6 @@ pub(crate) enum TurnExit {
     /// 循环顶部的中止检查点：上一轮 Turn 已定稿落库，**不冒泡** `Err(Aborted)`
     /// （否则消费循环的 `persist_failure` 会把已成功的 Turn 误标为 `Aborted`）。
     AbortedAtBoundary,
-    /// 显式软上限：先广播明确提示再退出，绝不静默。
-    MaxToolRounds { max: usize },
     /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
     /// `NodeStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
     /// 前端渲染错误条与重试入口。携带**半截产出**（正文 / 思考 / 工具节点）——
@@ -584,7 +583,7 @@ impl CompressionEmitter {
     }
 }
 
-/// 补充整合在**轮边界**的落点：抽干整队并合并成一条用户消息。
+/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充。
 ///
 /// ## 为什么需要它（与 [`CompressionEmitter`] 同一个理由）
 ///
@@ -595,22 +594,23 @@ impl CompressionEmitter {
 ///
 /// ## 它只做一件事
 ///
-/// 取批（[`SessionPlugin::take_inbox_batch`]）+ 合并（`merge_supplements`），
-/// **不写任何地址、不落库**：合并消息由主循环推进 `context.messages`，
-/// 落库仍走既有的锚点增量路径（见 `run_chat_loop` 的轮边界抽干点）。
+/// 取批（[`SessionPlugin::take_inbox_batch_sync`]）+ 合并（`merge_supplements`），
+/// **不写任何地址、不落格、不落库**：抽干发生在工具循环的**批次边界**，落格与
+/// 「进下一次请求」都在 `v2_exec.rs` 的 `supplement_into_request`（由 `turn_runner.rs`
+/// 的 2f 触发）。
 pub struct SupplementDrain {
     plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
     pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
-/// 抽干结果：**正文 + 原条数**。
+/// 抽干结果：**正文 + 原条数 + 溯源身份**。
 ///
-/// `InboxItem` 是 `transcript::inbox` 的私有类型，所以同步孪生不返回它——
+/// `InboxItem` 是 `transcript::inbox` 的私有类型，抽干口不返回它——
 /// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
 ///
-/// ⚠️ **不带原始 `ChatNode`**：落库那条路走的是另一个方法（[`SupplementDrain::drain`]，
-/// 返回 `ChatNode` 本身）。这里只服务工具循环里的 prompt 注入，而注入只要
-/// 正文——多带一个字段就是给下一个人留一个不必有的理由。
+/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方
+/// （`v2_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
+/// 多带一个字段就是给下一个人留一个不必有的理由。
 #[derive(Debug, Clone)]
 pub(crate) struct DrainedSupplement {
     /// 折进 prompt 的正文（多条已合并）。
@@ -640,30 +640,21 @@ impl SupplementDrain {
         Self { plugin, state }
     }
 
-    /// 抽干该会话队首的一批补充并合并成**一条**用户消息。
+    /// 抽干该会话队首的一批补充并合并成**一条**用户消息（缺口 3：v2 工具循环里的
+    /// 注入挂点）。
     ///
-    /// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
-    /// 不推进 `last_saved`、不落库。
-    ///
-    /// 开关与上界的判定在 [`SessionPlugin::take_inbox_batch`] 内（那里是唯一真源）：
-    /// `supplements_enabled = false` 时它退化为"取一条"，与本函数的合并叠加后
-    /// 恰好等于"一条消息 = 一轮"的今天行为。
-    pub async fn drain(&self) -> Option<ChatNode> {
-        let batch = self.plugin.take_inbox_batch(&self.state).await;
-        crate::plugins::session::transcript::supplements::merge_supplements(&batch)
-    }
-
-    /// [`Self::drain`] 的**同步**孪生（缺口 3：v2 工具循环里的注入挂点）。
-    ///
-    /// ## 为什么需要它
+    /// ## 为什么是同步闭包而不是 async trait
     ///
     /// core 的 [`TurnInjector`] 是同步闭包（`Fn() -> Vec<PromptMessage>`）——core 里
     /// 不该为了「等一个异步取件」而开出 async trait，那会把整个 `run_with_tools`
     /// 的接口面染成 async（它现在是同步调 LLM 适配器的）。
     ///
-    /// 于是取件这一步在插件侧桥成同步。**判定与取件逻辑不复制**：与
-    /// [`Self::drain`] 共用同一个真源（`take_inbox_batch` 的同步版），差别只在
-    /// 锁的等法。
+    /// 于是取件这一步在插件侧桥成同步。**判定与取件逻辑不复制**：真源是
+    /// `SessionPlugin::take_inbox_batch_sync`（`supplements_enabled = false` 时它退化
+    /// 为"取一条"，与本函数的合并叠加后恰好等于"一条消息 = 一轮"的今天行为）。
+    ///
+    /// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
+    /// 不推进 `last_saved`、不落库。
     ///
     /// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
     /// 单线程 runtime 的 async 上下文里直接调会 panic。`v2_exec` 的注入闭包里有

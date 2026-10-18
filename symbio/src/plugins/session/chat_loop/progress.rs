@@ -160,6 +160,14 @@ impl RoundProgress {
         self.reports += 1;
         self.last_spoke_at = clock_now_ms();
     }
+
+    /// 对话线上有了动静（用户在轮内补充）：静默时钟归零，**不占配额**。
+    ///
+    /// 与 [`Self::spoke`] 的差别就是这条：那是助手说了话，这只是用户说了话。
+    /// 取两者较大值——时钟只往前走。
+    pub(crate) fn stirred(&mut self, at: i64) {
+        self.last_spoke_at = self.last_spoke_at.max(at);
+    }
 }
 
 #[cfg(test)]

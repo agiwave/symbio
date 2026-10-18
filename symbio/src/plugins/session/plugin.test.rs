@@ -66,46 +66,11 @@ fn test_session_config_deserialize_ignores_legacy_keys() {
 
 // ==================== 配置契约一致性（复杂度审计 P0-1 / P1-①）====================
 
-/// `max_tool_rounds` 的契约翻译：0 → `None`（不限制），>0 → `Some(n)`（软上限）。
-/// 修复前编排层三处无条件 `Some(...)`，使 chat_loop 的 `None` = 无限语义在主路径不可达。
-#[test]
-fn max_tool_rounds_zero_maps_to_unlimited() {
-    let cfg = SessionConfig {
-        max_tool_rounds: 15,
-        ..Default::default()
-    };
-    assert_eq!(
-        cfg.model_chat_max_tool_rounds(),
-        Some(15),
-        "显式 >0 的值应作为软上限下发"
-    );
+// `max_tool_rounds`（工具轮软上限）整条链已退役：它在 v2 判的是一个恒 0 的计数，
+// 裁决与去处见 [ADR-074](../../../../docs/010-adr/074.md)。这里曾有的两条契约测试（0 → None 的翻译、默认值 =
+// 不限制）随被测对象一起删除，不是覆盖丢失。
 
-    let cfg = SessionConfig {
-        max_tool_rounds: 0,
-        ..Default::default()
-    };
-    assert_eq!(
-        cfg.model_chat_max_tool_rounds(),
-        None,
-        "0 必须翻译为 None（不限制），而非 Some(0)（0 轮即熔断）"
-    );
-}
-
-/// 默认配置的产品意图锁定：默认**不设硬性轮次上限**，以显式语义 `0`（不限制）
-/// 表达，而非魔法数 65535（旧默认，行为等价但语义含糊）。
-#[test]
-fn default_max_tool_rounds_is_effectively_unlimited() {
-    let cfg = SessionConfig::default();
-    assert_eq!(
-        cfg.max_tool_rounds, 0,
-        "默认轮次上限必须是 0 = 不限制（用户明确要求不设硬上限）"
-    );
-    assert_eq!(
-        cfg.model_chat_max_tool_rounds(),
-        None,
-        "默认配置翻译到 Request 层必须是 None（无限轮次）"
-    );
-}
+// ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 
 // ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 

@@ -154,10 +154,10 @@ pub(crate) async fn prepare_turn_inputs(
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
     let root_id: String = llm_short_id();
-    emit_streaming_start(sink, &root_id, Some(turn.tool_rounds)).await;
+    emit_streaming_start(sink, &root_id, Some(turn.request_round)).await;
 
     // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
-    // `tool_rounds == 0` 是「每轮一次」的既有判据（classify / history 同款）：
+    // `request_round == 0` 是「每轮一次」的既有判据（classify / history 同款）：
     // 同一轮内记忆不漂移，事实源也只扫一遍，后续工具轮复用同一份视图。
     // 临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
     //
@@ -168,7 +168,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
     // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
     let recall_state =
-        LoopState::turn_prepare(turn.tool_rounds, context.session.session_dir().is_some());
+        LoopState::turn_prepare(turn.request_round, context.session.session_dir().is_some());
     if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::RECALL) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
@@ -189,7 +189,7 @@ pub(crate) async fn prepare_turn_inputs(
         };
         // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
         // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
-        // 与召回 / 调度段同一条 `tool_rounds == 0` 口径（同一轮内判定不漂移）；
+        // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
         // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
         //
         // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
@@ -268,7 +268,12 @@ pub(crate) async fn prepare_turn_inputs(
         &context.messages,
         req.tool_context_window,
         &retention,
-        turn.tool_rounds > context.session.fade_activate_rounds(),
+        // ⚠️ 工具结果淡化的**激活判据**：配置项 `fade_activate_rounds` 说的是工具轮数，
+        // 而这一层能给的只有本轮**请求数**（真实轮数在运行器的环体里，两者的区分见
+        // [ADR-074](../../../../../docs/010-adr/074.md "ADR-074")）。这三层淡化整体还没接进 v2 的请求
+        // （裁剪结果被丢弃，见 [T-166](../../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")），
+        // 激活判据的真源随那一条一起裁决。
+        turn.request_round > context.session.fade_activate_rounds(),
         context.session.fade_keep_recent_turns(),
         context.session.compress_keep_recent(),
         context.session.line_threshold(),

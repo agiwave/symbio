@@ -74,8 +74,7 @@ session:
   # 1. 存储级策略
   max_messages: 100              # 单会话本地保存的最大对话轮数限制 (以 User 消息计数；0 = 不限制，默认 100)
   
-  # 2. 单轮迭代策略
-  max_tool_rounds: 0             # 单轮对话中工具迭代轮数软上限 (0 = 不限制，默认；仅当显式调低时作为软上限，达到后提示并退出，不静默熔断)
+  # 2. 单轮迭代边界：v2 **没有**这一项配置（工具轮数不设上限，理由见三.2）
   
   # 3. 微观内容截断策略
   compress_line_threshold: 200   # 单条内容节点（正文/思考）的行数阈值，超过该行数（或 token 超 2048）在请求视图中淡化（存储恒为完整原文）
@@ -87,7 +86,7 @@ session:
   
   # 5. 工具滑动窗口策略
   tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带语义摘要与取回指引的占位符（规模 + 条目名/首行 + 定位锚点 + `Re-run <tool>` 指引，见 `context/window.rs`）；声明 context_retention 保留策略的工具其最新调用豁免此窗口；0 = 关闭骨架化)
-  fade_activate_rounds: 40       # 单轮工具迭代超过该轮数后，激活"老旧工具结果淡化"（请求视图层）
+  fade_activate_rounds: 40       # ⚠️ 淡化激活阈值：判据读的是本轮**请求数**（续写才会 >0），且这一层的裁剪结果目前**没接进 v2 请求**——见 docs/009-task/166
   fade_keep_recent_turns: 12     # 工具淡化时保留完整结果最近轮数（窗口外的更旧结果做头尾摘要）
   prune_tool_history: true       # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档；内存临时会话自动跳过）
   
@@ -128,35 +127,26 @@ session:
 
 ---
 
-### 2. 单轮会话工具调用迭代上限策略 (`max_tool_rounds`)
+### 2. 单轮迭代边界（v2：不设工具轮数上限）
 
-> **目标**：为自主 Agent 的多步决策提供可选的"软安全网"，防止极端场景下大模型失误、死锁或命令失败导致的"天价账单死循环 (Runaway Loop)"。默认**不设上限**，把控制权交给模型自主决策。
+> **目标**：让自主 Agent 的多步决策由模型自己收束，主循环不设「跑了几轮就停」的旋钮。
 
-* **具体规则**：
-  * 在用户提交单次 Prompt 后，系统在后台开启一个自主决策（Loop）链。
-  * 大模型在一个循环中可以做 `推理 -> 工具调用 -> 工具结果返回 -> 再推理 -> 再工具调用` 的迭代。
-  * **默认无上限**：`max_tool_rounds` 默认 `0`（`0` 即显式『不限制』，不再用 65535 这类魔法数表达同一意图），经 `SessionConfig::model_chat_max_tool_rounds()` 翻译为请求层 `max_tool_rounds: None`，正常对话不会被打断。
-  * **显式软上限**：仅当调用方**主动**设置该参数（`Some(max)`）时，迭代达到上限后不再继续调用工具，而是向前端发送明确提示后正常持久化退出（非静默熔断）：
-
-    > 已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。
-
-  * 用户再次发送消息即开启新一轮请求，历史上下文照常加载，天然支持"超限续跑"。
-* **Rust 实现策略**：
-  * 在 `ChatOrchestrator::run_chat_loop` 的主编排环中，每轮开始检查软上限（仅显式设置时生效）：
-
-    ```rust
-    // 默认（request 未显式给出）=「无上限」；仅在调用方**显式**设置时才作为软上限并给出提示。
-    let configured_max_tool_rounds = req.max_tool_rounds;
-    // ... 主循环内：
-    if let Some(max) = configured_max_tool_rounds {
-        if tool_rounds >= max {
-            // 向前端发送明确提示后持久化退出（非静默熔断）
-            let error = format!("已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。");
-            // ... 发送 Error 事件 → persist_messages → fire_stop_hook → return Ok(())
-        }
-    }
-    ```
-  * Session 编排层（`orchestrator.rs`）通过 `session_cfg.model_chat_max_tool_rounds()` 下发：配置为 `0` 时传 `None`（无限轮次），`> 0` 时传 `Some(n)`（软上限）。此前无条件 `Some(...)` 的写法会让 `0` 变成"0 轮即熔断"的错误行为，已修正。
+* **现状规则**：
+  * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
+    v2 运行器的环体里跑完（`turn_runner.rs` 的 2e/2f），**主循环侧看不见第几轮工具**。
+  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
+    （`plugins/model/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
+    把剩余调用放到下一轮）、用户中止、provider 断流。
+  * 长度截断（`finish = Length`）后的自动续写有 `MAX_CONTINUE_ROUNDS = 3`
+    （`chat_loop/turn.rs`），它数的是**续写次数**，不是工具轮数。
+* **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
+  （`turn_runner.rs`，步骤序列与批次边界见
+  [AR-015-core-loop](docs/015-core-loop.md "AR-015-core-loop") §4.1），本轮请求侧只有一个
+  「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
+  上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
+  没有任何信号能区分。真要这道上限，位置在 2e（结果接进 `exchange`）与 2f（轮内注入）之间，
+  那里有真实的 `tool_round`；裁决与逐符号名册见
+  [ADR-074](../../../../docs/010-adr/074.md "ADR-074")。
 
 ---
 
@@ -274,10 +264,10 @@ session:
 
 * **具体规则**（唯一入口 `build_request_view`，严格按序执行；函数末位形参 `viewer` 是与这六步正交的**可见域**过滤——它在一切裁剪之前先筛消息，`None` = 不过滤）：
   * **第一步：超大内容节点淡化 (Content Fade)**。B1 保护窗口（最后一条消息 + 最近 `compress_keep_recent` 个内容节点）之外的超大正文/思考节点，按行数阈值 `compress_line_threshold` 或 2048 Token 预算做头尾摘要淡化（详见第 3 节）；每轮无条件执行，视图级不落库。
-  * **第二步：老旧工具结果淡化 (Tool Fade)**。单轮请求的工具迭代轮数超过 `fade_activate_rounds`（默认 **40** 轮，会话配置项）后激活；最近 `fade_keep_recent_turns`（默认 **12** 轮，会话配置项）之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。两个阈值经 `ChatSession` trait 由会话实现提供（持久会话读配置，临时会话读默认），`chat_loop` 不再持有硬编码常量。
+  * **第二步：老旧工具结果淡化 (Tool Fade)**。⚠️ 本轮**请求数**超过 `fade_activate_rounds`（默认 **40**，会话配置项）后激活——续写才会让请求数 >1，工具轮数的真源在 v2 运行器的环体里，这一层拿不到；而这一层的裁剪结果目前**还没接进 v2 的请求**（归属与接入见 [T-166](../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")）。判定式形状保留在这里，是为了接入那一刻不需要重新设计它。最近 `fade_keep_recent_turns`（默认 **12** 轮，会话配置项）之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。两个阈值经 `ChatSession` trait 由会话实现提供（持久会话读配置，临时会话读默认），`chat_loop` 不再持有硬编码常量。
   * **第三步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留语义摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：JSON 列表给规模 + 前若干条目名、文本给首个有内容行，单条摘要上限 64 Token，且摘要收尾不受预算截断；无法提取摘要时退回纯占位文案），占位符另附**取回指引**（`Re-run <tool> to get the full output.`——核对成本由此变成一次可预期的工具调用），**骨架化的 ToolCall 参数保留定位锚点回声**（`path`/`command`/`url`/`pattern` 等关键参数截断回显于占位符，约 10 Token/条——否则"读过某文件第 N 行"这类摘要因缺失文件路径而无法回溯），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
-  * **第四步：长期记忆召回段 (Recall Context)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次跨会话召回视图（`v2_memory::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`v2_memory::prompt_section`，抬头 `【长期记忆】`）作为第 8 个形参传入；非空时向视图**开头**插一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。同为请求级注入：不落库、每请求一次，e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
-  * **第五步：任务调度段 (Ready Set)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次本会话事实源的就绪任务集（`v2_tasks::prompt_section`，`off` 档与无目录的临时会话不读），把排版好的段落（抬头 `【任务调度】`，只列**依赖已全部完成**的候选）作为第 9 个形参传入；非空时向视图**开头**插一条 `meta.kind = "readyset"` 的 User 消息。**不与记忆段争 index 0**：本段先插、第四步的记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）——批⑦ 定下的「记忆置顶」不被本段改掉。它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事：选哪一个是执行者的策略（`projection::readyset` 模块头的边界）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。同为请求级注入：不落库、每请求一次，e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+  * **第四步：长期记忆召回段 (Recall Context)**。调用方（`chat_loop/inputs.rs`）在**本轮第一次请求**读一次跨会话召回视图（`v2_memory::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`v2_memory::prompt_section`，抬头 `【长期记忆】`）作为第 8 个形参传入；非空时向视图**开头**插一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。同为请求级注入：不落库、每请求一次，e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+  * **第五步：任务调度段 (Ready Set)**。调用方（`chat_loop/inputs.rs`）在**本轮第一次请求**读一次本会话事实源的就绪任务集（`v2_tasks::prompt_section`，`off` 档与无目录的临时会话不读），把排版好的段落（抬头 `【任务调度】`，只列**依赖已全部完成**的候选）作为第 9 个形参传入；非空时向视图**开头**插一条 `meta.kind = "readyset"` 的 User 消息。**不与记忆段争 index 0**：本段先插、第四步的记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）——批⑦ 定下的「记忆置顶」不被本段改掉。它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事：选哪一个是执行者的策略（`projection::readyset` 模块头的边界）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。同为请求级注入：不落库、每请求一次，e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
   * **第六步：委派者真源段 (Delegate Context)**。调用方（`chat_loop/delegate.rs`）把本轮的**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落，作为第 10 个形参传入；非空时插一条 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：本段在调度段**之前**插，后两段依次把 0 号位让出来——顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [ADR-047](../../../../docs/010-adr/047.md)）。同为请求级注入：不落库、每请求一次。
   * **水位治理不在本视图层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文而不是请求视图。视图里**没有**「提醒模型自己去压缩」这一段——模型不持有压缩工具（裁决见 [ADR-072](../../../../docs/010-adr/072.md)）。
 * **Rust 实现策略**：
@@ -344,7 +334,7 @@ session:
     }
     ```
 
-  * 调用点参数（`chat_loop/inputs.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window)`（`window == 0` = 关闭工具明细骨架化，与配置文档一致）；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = tool_rounds > fade_activate_rounds`、`fade_keep_recent_turns` 均取自会话配置（经 `ChatSession` trait，`chat_loop` 不再持有硬编码常量）；`recall_section` 由 `TurnState::recall_view`（只在 `tool_rounds == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同样只在 `tool_rounds == 0` 取一次）调 `v2_tasks::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定；`viewer` 取本会话主体（`context.principal`）。
+  * 调用点参数（`chat_loop/inputs.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window)`（`window == 0` = 关闭工具明细骨架化，与配置文档一致）；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = request_round > fade_activate_rounds`、`fade_keep_recent_turns` 均取自会话配置（经 `ChatSession` trait，`chat_loop` 不再持有硬编码常量）；`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同样只在 `request_round == 0` 取一次）调 `v2_tasks::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定；`viewer` 取本会话主体（`context.principal`）。
 
 ---
 
@@ -418,7 +408,7 @@ S5 的**事件记忆**是另一层：`v2_memory.rs` 把每轮用户发言编码�
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session/write.rs` |
-| **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 0 = 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（`turn_runner.rs` 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [ADR-074](../../../../docs/010-adr/074.md "ADR-074")） | `plugins/model/stream.rs` |
 | **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/context/view.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |

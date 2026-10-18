@@ -650,9 +650,8 @@ crate::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn Plugi
 ///
 /// 字段默认值一律从 [`SessionConfig::default()`] 读出，不写第二份字面量：
 /// 历史上定义寄居在 plugin_manager 插件里，schema 与 serde 各写一份默认值，出现过
-/// `max_tool_rounds` schema=15 而 serde=65535 的漂移（面板显示的默认值与
-/// 实际行为不符）。不变式由 `config_definition_defaults_come_from_session_config`
-/// 锁定。
+/// 「schema 显示 15 而 serde 实际 65535」的漂移（面板显示的默认值与实际行为不符）。
+/// 不变式由 `config_definition_defaults_come_from_session_config` 锁定。
 ///
 /// ## 数值字段刻意不声明 `min` / `max`
 ///
@@ -687,12 +686,6 @@ fn config_definition() -> DetailDefinition {
                         "上下文消息数量",
                         "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
                         json!(d.context_messages),
-                    ),
-                    unbounded_number(
-                        "max_tool_rounds",
-                        "工具轮次上限",
-                        "单轮最多工具迭代次数（0 = 不限制）。达到上限会先给出明确提示再正常退出，不是静默熔断",
-                        json!(d.max_tool_rounds),
                     ),
                     // ── Q1：worker 启动判据（三层按序短路，空值 / 0 = 该层关闭）───
                     DetailField {

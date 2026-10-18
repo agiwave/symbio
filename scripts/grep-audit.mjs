@@ -17,8 +17,8 @@
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
- *   - S-011:        补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间
- *                   （`session/chat_loop.rs`；位置错了不会有任何测试变红）
+ *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner.rs` 的结果/注入次序、
+ *                   `v2_exec.rs` 的抽干/汇报次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
@@ -420,47 +420,66 @@ for (const file of s010Files) {
 if (s010 === 0) ok('S-010 通过：根名字面量只在 vdfs 插件内')
 console.log()
 
-// ── S-011: 补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间 ──
+// ── S-011: 补充注入点必须在「工具结果已接进请求」之后、汇报判定之前 ──────
 //
-// `chat_loop.rs` 里读 `orchestrator.supplements` 的那一段（补充整合的轮边界抽干点）
-// **前移或后移都不会有任何测试变红**：
-//   · 前移到 `gate_turn` **之前** ⇒ 闸门 `Exit`（软上限 / 中止）时队列已被消费却
-//     没人用它——用户那句补充进了转写，但模型从没见过它，静默消失；
-//   · 后移到 `prepare_turn_inputs` **之后** ⇒ 合并消息不在本轮请求里，白折一轮；
-//   · 移进工具批次中间（`assistant(tool_calls)` 与 `tool` 结果之间）⇒ 部分协议直接
-//     400——这是三种里**唯一会响**的那种。
-// 正是 J3 的形态：**违反时不产生错误信号的约束，必须外置为断言**。
-// 文档侧的定义见 `docs/004-plan/007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
-//
-// 判据（只认 `plugins/session/chat_loop.rs` 一个文件，且**只认代码行**）：
-//   line(`gate_turn(` 调用) < line(`orchestrator.supplements`) < line(`prepare_turn_inputs(` 调用)
-// 三个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明抽干点被删了
+// 抽干点在 v2 搬了家（5b-2：改到运行器的批次边界，见 ADR-074），约束一条没少，
+// 而且**违反时依然没有测试会变红**——所以判据换成搬家后的**两处行序断言**：
+//   ① `turn_runner.rs`：2f 的 `inject` 必须排在 2e 的 `tool_exchange_messages` **之后**。
+//      反过来写 = 用户那句补充插进 `assistant(tool_calls)` 与它的 `tool` 结果之间——
+//      部分协议直接 400（三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，
+//      用户随后才插话）。
+//   ② `v2_exec.rs`：抽干（`supplement_into_request`）必须排在汇报判定（`report`）**之前**。
+//      这条钉的是「先抽干、后判定」——`supplemented_at` 靠抽干结果才拿得到，顺序反过来
+//      等于用户已经开口了、插件还在按「没人说话」报进度（静默时钟没归零）。
+// 两个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明注入点被删了
 // （那就该连本规则与文档一起改）或被改名了（那本规则必须同步）。**让守卫悄悄退化成
 // 空转，比没有守卫更糟**（它会以绿灯的形式提供虚假保证）。
 // 这也是为什么"锚点缺失"**不接受豁免**：豁免的前提是"我看过并确认没问题"，
 // 而锚点缺失时根本无从判断。
 //
-// 豁免：`// grep-audit-allow S-011: 理由`（写在抽干行上，理由不可为空）——
+// 豁免：`// grep-audit-allow S-011: 理由`（写在**后一个锚点**那一行，理由不可为空）——
 // 只在"位置确实不对但已确认可接受"时用。
-console.log('--- S-011: 补充抽干点位置检查 ---')
+// 文档侧的定义见 `docs/004-plan/007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
+console.log('--- S-011: 补充注入点位置检查 ---')
 
-const S011_GATE_RE = /gate_turn\s*\(/
-/** `fn gate_turn(...)` 是**定义**，不是调用点，必须排除 */
-const S011_GATE_DEF_RE = /\bfn\s+gate_turn\s*\(/
-const S011_DRAIN_RE = /orchestrator\.supplements\b/
-const S011_PREP_RE = /prepare_turn_inputs\s*\(/
 const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 
-const s011Entry = [...linesOf.entries()].find(([f]) =>
-  f.split(path.sep).join('/').endsWith('plugins/session/chat_loop.rs'),
-)
+const S011_PAIRS = [
+  {
+    file: 'plugins/session/turn_runner.rs',
+    before: {
+      re: /exchange\.extend\(\s*tool_exchange_messages\(/,
+      name: '2e 工具结果接进请求',
+    },
+    after: {
+      re: /exchange\.extend\(\s*inject\(/,
+      name: '2f 轮内补充接进请求',
+    },
+    why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
+  },
+  {
+    file: 'plugins/session/v2_exec.rs',
+    before: {
+      re: /supplement_into_request\(/,
+      ex: /\bfn\s+supplement_into_request\(/,
+      name: '`supplement_into_request` 抽干点',
+    },
+    after: { re: /\breport\(/, name: '`report` 汇报判定' },
+    why: '必须先抽干再判定：`supplemented_at`（抽到补充 ⇒ 静默时钟归零）只有抽干之后才知道，反过来等于用户已开口、插件仍按"没人说话"报进度',
+  },
+]
 
-if (!s011Entry) {
-  ok('S-011 跳过：scope 内没有 plugins/session/chat_loop.rs')
-} else {
-  const [s011File, s011Lines] = s011Entry
-  // 只认代码行：本文件恰好有一大段解释"为什么放在这里"的注释，注释里提到
-  // `gate_turn` 不等于调用它。**注释掉抽干调用**会被判成"锚点缺失"（响亮），
+for (const pair of S011_PAIRS) {
+  const entry = [...linesOf.entries()].find(([f]) =>
+    f.split(path.sep).join('/').endsWith(pair.file),
+  )
+  if (!entry) {
+    ok(`S-011 跳过：scope 内没有 ${pair.file}`)
+    continue
+  }
+  const [s011File, s011Lines] = entry
+  // 只认代码行：这两个文件里各有一大段解释"为什么放在这里"的注释，注释里提到锚点
+  // 不等于调用在这里。**注释掉注入调用**会被判成"锚点缺失"（响亮），
   // 这正是想要的——注释掉一个守卫点，不该得到绿灯。
   const firstLine = (re, exclude) => {
     for (let i = 0; i < s011Lines.length; i++) {
@@ -473,33 +492,32 @@ if (!s011Entry) {
     return null
   }
 
-  const gateAt = firstLine(S011_GATE_RE, S011_GATE_DEF_RE)
-  const drainAt = firstLine(S011_DRAIN_RE)
-  const prepAt = firstLine(S011_PREP_RE)
+  const beforeAt = firstLine(pair.before.re, pair.before.ex)
+  const afterAt = firstLine(pair.after.re, pair.after.ex)
   const rel = disp(s011File)
 
   const missing = []
-  if (gateAt == null) missing.push('`gate_turn` 调用')
-  if (drainAt == null) missing.push('`orchestrator.supplements` 抽干点')
-  if (prepAt == null) missing.push('`prepare_turn_inputs` 调用')
+  if (beforeAt == null) missing.push(pair.before.name)
+  if (afterAt == null) missing.push(pair.after.name)
 
   if (missing.length > 0) {
     err(
-      `${rel}  S-011 锚点缺失：${missing.join(' / ')}——抽干点被删除或改名了？` +
+      `${rel}  S-011 锚点缺失：${missing.join(' / ')}——注入点被删除或改名了？` +
         `守卫不得悄悄退化成空转：同步更新本规则与 PL-007-对话面插件拆分实施方案 §5 S0 的 C-D2b`,
     )
-  } else if (!(gateAt < drainAt && drainAt < prepAt)) {
-    if (WAIVER_S011_RE.test(s011Lines[drainAt - 1])) {
-      ok('S-011 通过（逐行豁免：位置已确认可接受）')
+  } else if (!(beforeAt < afterAt)) {
+    if (WAIVER_S011_RE.test(s011Lines[afterAt - 1])) {
+      ok(`${rel}  S-011 通过（逐行豁免：位置已确认可接受）`)
     } else {
       err(
-        `${rel}  S-011 抽干点位置错（gate_turn@${gateAt} → supplements@${drainAt} → ` +
-          `prepare_turn_inputs@${prepAt}）：必须在 gate_turn **之后**（否则闸门 \`Exit\` 时队列被消费却没人用，补充被静默吞掉）、prepare_turn_inputs ` +
-          `**之前**（否则合并消息进不了本轮请求）`,
+        `${rel}  S-011 位置错（${pair.before.name}@${beforeAt} → ${pair.after.name}@${afterAt}）：` +
+          pair.why,
       )
     }
   } else {
-    ok(`S-011 通过：抽干点夹在 gate_turn(${gateAt}) 与 prepare_turn_inputs(${prepAt}) 之间`)
+    ok(
+      `S-011 通过：${rel} ${pair.before.name}(${beforeAt}) 在 ${pair.after.name}(${afterAt}) 之前`,
+    )
   }
 }
 console.log()

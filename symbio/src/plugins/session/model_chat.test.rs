@@ -16,7 +16,6 @@ fn fully_populated() -> Request {
         system_prompt: Some("p".into()),
         single_message: Some(ChatNode::default()),
         stream: Some(false),
-        max_tool_rounds: Some(3),
         tool_context_window: Some(4),
         auto_compress: Some(false),
         provider_id: Some("pid".into()),
@@ -64,18 +63,18 @@ fn absent_fields_deserialize_as_none_not_zero() {
         "缺键必须是 None（chat_loop 据此取默认 true）"
     );
     assert_eq!(
-        r.max_tool_rounds, None,
-        "缺键必须是 None（0 会被解释成 0 轮熔断）"
+        r.tool_context_window, None,
+        "缺键必须是 None（0 会被解释成窗口为 0，而语义是未表态）"
     );
     assert_eq!(r.load_history, None, "缺键必须是 None（默认加载历史）");
 
     let r2: Request = serde_json::from_str(
-        r#"{"auto_compress":null,"max_tool_rounds":null,"load_history":null}"#,
+        r#"{"auto_compress":null,"tool_context_window":null,"load_history":null}"#,
     )
     .unwrap();
     // `null` 与缺键等价（Request 未派生 PartialEq，逐字段比对）
     assert_eq!(r2.auto_compress, r.auto_compress);
-    assert_eq!(r2.max_tool_rounds, r.max_tool_rounds);
+    assert_eq!(r2.tool_context_window, r.tool_context_window);
     assert_eq!(r2.load_history, r.load_history);
 }
 
