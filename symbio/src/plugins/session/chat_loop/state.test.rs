@@ -281,6 +281,34 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
     assert_eq!(verifier.budget_ms, LatencyTier::Fast.budget_ms());
 }
 
+/// **会跑模型的那个主体派生 `Reasoner`**——这是 [ADR-079] 的反证。
+///
+/// `pattern` 由授权谓词派生（持 `reply.*` ⇒ `Reasoner`），而**每一个会跑模型的轮次
+/// 主体都持 `reply.*`**。所以凡是要判「跑不跑模型」的地方，读到的永远是 `Reasoner`：
+/// 把它接成分派闸门，等于把技能快路（S11 §4 参数表的同名参数，落地形态是
+/// `SessionConfig::skill_fast_path`）永久关死。两者的区别见 [ADR-079]。
+///
+/// 机器判据不在这里（单测拦不住调用点的闸门），在 `e2e/cases/t41-skill-fast-path.mjs`：
+/// 把 pattern 接成分派点 ⇒ 快路永不命中 ⇒ 那条用例的「零模型调用」断言不成立。
+///
+/// [ADR-079]: ../../../../../docs/010-adr/079.md "ADR-079"
+#[test]
+fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
+    use crate::symbio_core::{LatencyTier, Pattern, Scope};
+    let spec = request_actor_spec(agent_ctx("main").as_ref(), LatencyTier::Deep, Scope::Root);
+    assert_eq!(spec.principal, "session/main");
+    assert_eq!(
+        spec.pattern,
+        Pattern::Reasoner,
+        "持 reply.* ⇒ Reasoner：这是**分类**，不是「这一轮走不走模型」的开关"
+    );
+    assert!(
+        spec.capabilities.iter().any(|c| c.starts_with("reply.")),
+        "分类的判据就是这条能力：{}",
+        spec.capabilities.join(",")
+    );
+}
+
 #[test]
 fn a_delegated_worker_spec_is_scoped_to_its_parent() {
     use crate::symbio_core::{LatencyTier, Scope};

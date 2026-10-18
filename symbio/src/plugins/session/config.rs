@@ -308,7 +308,12 @@ pub struct SessionConfig {
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
     /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")
-    /// 的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
+    /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
+    ///
+    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[ADR-079](../../../../docs/010-adr/079.md "ADR-079")）：
+    /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
+    /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
+    /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
     ///
     /// ## 它控制什么
     ///
@@ -322,8 +327,8 @@ pub struct SessionConfig {
     /// ## 与 [`skill_compile_enabled`] 为什么是两个开关
     ///
     /// S11 §4 的两行参数是独立的：`projection = skill_compile`（编不编）与
-    /// `actor.pattern`（命中后走不走快路）。合成一个会让「只编译、不加速」无法表达
-    /// ——而那正是**观察编译质量**时最需要的形态（编译是数据，加速是行为）。
+    /// `actor.pattern`（命中后走不走快路，即本开关）。合成一个会让「只编译、不加速」
+    /// 无法表达——而那正是**观察编译质量**时最需要的形态（编译是数据，加速是行为）。
     ///
     /// ## 命中判据取**恒等**，不是"同类"
     ///
@@ -474,7 +479,8 @@ pub fn default_skill_compile_enabled() -> bool {
 }
 
 pub fn default_skill_fast_path() -> bool {
-    // S11 §4 平凡值：`actor.pattern = reasoner`（永远走完整推理，退化成 S03）。
+    // S11 §4 平凡值：参数 `actor.pattern = reasoner`（永远走完整推理，退化成 S03）——
+    // 注意这是**参数表的取值**，不是 core 的 `ActorSpec.pattern`（ADR-079）。
     // 开它是**行为改变**（命中时以技能正文收束、不调模型），因此默认关：
     // 「不加速」是安全退路口，而"只编译不加速"本身是有意义的观察形态。
     false

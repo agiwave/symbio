@@ -215,8 +215,11 @@ impl PersistentChatSession {
         self.cfg_or_default().skill_compile_enabled
     }
 
-    /// 技能快路开关（步 22 的**执行半边**，S11 §4 的 `actor.pattern`；
+    /// 技能快路开关（步 22 的**执行半边**，S11 §4 参数表的 `actor.pattern`；
     /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
+    ///
+    /// 与 core 的 `ActorSpec.pattern` 同名不同物，理由见
+    /// [ADR-079](../../../../docs/010-adr/079.md "ADR-079")。
     pub(crate) fn skill_fast_path(&self) -> bool {
         self.cfg_or_default().skill_fast_path
     }

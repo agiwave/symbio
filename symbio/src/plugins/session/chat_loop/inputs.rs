@@ -202,7 +202,8 @@ pub(crate) async fn prepare_turn_inputs(
                 .unwrap_or_default(),
             None => Default::default(),
         };
-        // 快路开关（S11 §4 的 `actor.pattern`）：关着时可用集恒空——判定照常发生、
+        // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
+        // 两者同名不同物，见 ADR-079）：关着时可用集恒空——判定照常发生、
         // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
         // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。
         let fast_armed = context.session.skill_fast_path();

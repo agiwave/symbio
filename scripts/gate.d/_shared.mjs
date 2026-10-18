@@ -69,11 +69,14 @@ export const BASELINE = {
   // （事实源打不开 ⇒ `Failed`，不再与「无锚」的 `NoAnchor` 豁免混成一格）与
   // `chat_session.test.rs::apply_reports_a_failed_fact_write_and_writes_nothing`（`apply` 报错 ∧ 缓存里没有那个节点）。
   // 这两条钉的是 ADR-053 补记里那张结果表的**两个新分叉**，原实现里它们同属 `Discarded`、无法分别断言。非放宽。
-  rustTests: 1749,
+  // baseline-allow rustTests: 批 T-157 新增 1 条判据（1749→1750）——`chat_loop/state.test.rs::the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch`，
+  // 钉「会跑模型的主体派生 Reasoner」这个反证（ADR-079 裁决一的地基）。非放宽。
+  rustTests: 1750,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1433,
+  // baseline-allow ciRustTestsTotal: 批 T-157 的同一增量在 CI 口径下修一格（1433→1434），逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1434,
   cliRustTests: 11,
   tauriRustTests: 0,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链
