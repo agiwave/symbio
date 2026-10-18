@@ -206,10 +206,12 @@ async fn traverse_contributes_no_tools() {
 /// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use crate::providers::DefaultConfigurableVisitor;
-    use crate::symbio_core::{ConfigurableVisitor, CONFIGURABLE_VISITOR};
+    use crate::providers::DefaultToolVisitor;
+    use crate::symbio_core::{
+        capability_configurables, CapabilityVisitor, PluginInvokeRequestExt, CONFIGURABLE_VISITOR,
+    };
 
-    let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);
     req.set(PATH, String::new());
     req.set(CONFIGURABLE_VISITOR, visitor.clone());
@@ -220,7 +222,7 @@ async fn traverse_announces_its_own_config() {
         .await
         .expect("traverse 必须成功");
 
-    let items = visitor.list_configurables().await;
+    let items = capability_configurables(&*visitor).await;
     assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
     assert_eq!(items[0].node.name, PLUGIN_ID_CLASSIFY);
     assert_eq!(items[0].path, "classify/PLUGIN.yml");

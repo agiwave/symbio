@@ -1,13 +1,14 @@
 //! 能力表的**行词汇**——收集口 trait 收敛为 `put` / `get` / `list` 三方法后，
 //! 一张表装下全部收集通道（AR-025 §3 的目标形状）。
 //!
-//! ## 族是**一个一个**落位的（Tool ✓ → Model ✓ → Prompt ✓ → Mount → Option）
+//! ## 族是**一个一个**落位的（Tool ✓ → Model ✓ → Prompt ✓ → Mount ✓ → Option ✓ → Configurable ✓）
 //!
-//! [`CapabilityRowKind`] 有六个值，但 [`CapabilityRowPayload`] 只随各族落地长变体：
-//! 4a 是 `Tool`，4b 加 `Model`，其余随 4c–4e；`Policy` 随步骤 6（表搬进 core）
-//! 与 `State` / `Step` 一并定义。提前把六值写齐的理由：`list(kind)` 的签名
-//! 由此在 4b–4e **不再变形**（加一个族 = 加一个 payload 变体，不是加三个方法）；
-//! 而不写齐则每一步都要改签名，正是十六方法糜烂的来路。
+//! [`CapabilityRowKind`] 现有七个值（`Policy` 随步骤 6 与 `State` / `Step` 一并定义），
+//! [`CapabilityRowPayload`] 随各族落地长变体：4a `Tool`、4b `Model`、4c `Prompt`、
+//! 4d `Mount`、4e `Option` + `Configurable`（连同两个专服单族的 trait 退场）。
+//! 提前把值写齐的理由：`list(kind)` 的签名由此在 4b–4e **不再变形**（加一个族
+//! = 加一个 payload 变体，不是加三个方法）；而不写齐则每一步都要改签名，
+//! 正是十六方法糜烂的来路。
 //!
 //! ## 为什么 schema 不另存一份
 //!
@@ -34,7 +35,8 @@
 //! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 session 的
 //! `loop_registry`——三处各住各的，见 AR-025 §3。
 
-use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsProvider};
+use crate::symbio_core::schemas::detail::DetailField;
+use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsItem, VdfsProvider};
 use std::sync::Arc;
 
 /// 根行的**保留行名**（表键）。
@@ -63,6 +65,11 @@ pub enum CapabilityRowKind {
     Mount,
     /// 选项字段（会话输入区的可选项）。
     Option,
+    /// 可配置声明（设置页里的一份配置条目）。
+    ///
+    /// 4e 随 `Option` 一并入表：此前它住独立的 `ConfigurableVisitor`，两个 trait
+    /// 各 2 方法专服一个族——正是十六方法糜烂的同一条来路，收敛后并入本表。
+    Configurable,
 }
 
 /// 行的载荷——「这一行到底是什么」。
@@ -95,6 +102,17 @@ pub enum CapabilityRowPayload {
         provider: Arc<dyn VdfsProvider>,
         active: bool,
     },
+    /// 选项字段：会话配置表单的一个字段，行名 = `field.key`（覆盖键）。
+    ///
+    /// `order` **不下发**（见 `capability/option.rs`）：它是收集层的号段约定，
+    /// 读侧用它排序后即丢——长在行上而不是长在另一个槽位键里，正是因为排序答案
+    /// 同样是「这一行自身携带的事实」。
+    Option { field: Box<DetailField>, order: i32 },
+    /// 可配置声明：设置页里的一项，行名 = `item.node.name`（目录名，覆盖键）。
+    ///
+    /// 地址必须连条目一起交出来（跨挂载点、推不出来），故整项入行——
+    /// 理由见 `capability/configurable.rs` 模块文档。
+    Configurable(Box<VdfsItem>),
 }
 
 /// 表里的一行。
@@ -144,6 +162,29 @@ impl CapabilityRow {
         }
     }
 
+    /// 选项字段行：名字 = `field.key`（同键覆盖，保留先注册槽位）。
+    ///
+    /// `order` 不对外（读侧 `capability_option_fields` 排完序就丢）。
+    pub fn option(order: i32, field: DetailField) -> Self {
+        let name = field.key.clone();
+        Self {
+            name,
+            payload: CapabilityRowPayload::Option {
+                field: Box::new(field),
+                order,
+            },
+        }
+    }
+
+    /// 可配置声明行：名字 = `item.node.name`（目录名，同名覆盖）。
+    pub fn configurable(item: VdfsItem) -> Self {
+        let name = item.node.name.clone();
+        Self {
+            name,
+            payload: CapabilityRowPayload::Configurable(Box::new(item)),
+        }
+    }
+
     /// 挂载点行：名字 = **使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）。
     pub fn mount(name: &str, provider: Arc<dyn VdfsProvider>) -> Self {
         Self {
@@ -176,6 +217,8 @@ impl CapabilityRow {
             CapabilityRowPayload::Model { .. } => CapabilityRowKind::Model,
             CapabilityRowPayload::Prompt { .. } => CapabilityRowKind::Prompt,
             CapabilityRowPayload::Mount { .. } => CapabilityRowKind::Mount,
+            CapabilityRowPayload::Option { .. } => CapabilityRowKind::Option,
+            CapabilityRowPayload::Configurable(_) => CapabilityRowKind::Configurable,
         }
     }
 
@@ -213,6 +256,25 @@ impl CapabilityRow {
         }
     }
 
+    /// 取选项字段与它的排序号；非选项族为 `None`。
+    pub fn option_entry(&self) -> Option<(i32, &DetailField)> {
+        match &self.payload {
+            CapabilityRowPayload::Option {
+                field: box_field,
+                order,
+            } => Some((*order, box_field.as_ref())),
+            _ => None,
+        }
+    }
+
+    /// 取可配置声明；非可配置族为 `None`。
+    pub fn configurable_item(&self) -> Option<&VdfsItem> {
+        match &self.payload {
+            CapabilityRowPayload::Configurable(item) => Some(&**item),
+            _ => None,
+        }
+    }
+
     /// 取 VDFS 挂载点（或根）；非挂载族为 `None`。
     pub fn vdfs(&self) -> Option<&Arc<dyn VdfsProvider>> {
         match &self.payload {
@@ -229,7 +291,10 @@ impl CapabilityRow {
         match &self.payload {
             CapabilityRowPayload::Model { active, .. }
             | CapabilityRowPayload::Mount { active, .. } => *active,
-            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => false,
+            CapabilityRowPayload::Tool(_)
+            | CapabilityRowPayload::Prompt { .. }
+            | CapabilityRowPayload::Option { .. }
+            | CapabilityRowPayload::Configurable(_) => false,
         }
     }
 
@@ -253,7 +318,7 @@ impl CapabilityRow {
                     active: false,
                 },
             },
-            // 无位的族：退位副本就是它自己（没有位可清）
+            // 无位的族（含 4e 入表的选项 / 可配置两族）：退位副本就是它自己
             _ => self.clone(),
         }
     }

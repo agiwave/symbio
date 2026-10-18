@@ -310,11 +310,12 @@ pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING
 
 // ==================== 插件契约 ====================
 pub use capability::{
-    capability_announce_configurable, capability_entry_of, capability_invoke,
-    capability_model_active, capability_model_resolve, capability_mount, capability_mounts,
-    capability_prompts, capability_resolve, capability_to_wire, capability_vdfs_root, Capability,
-    CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, CapabilityRow, CapabilityRowKind,
-    CapabilityToolContextRetention, CapabilityVisitor, ConfigurableVisitor, OptionVisitor,
+    capability_announce_configurable, capability_configurables, capability_entry_of,
+    capability_invoke, capability_model_active, capability_model_resolve, capability_mount,
+    capability_mounts, capability_option_fields, capability_prompts, capability_resolve,
+    capability_to_wire, capability_vdfs_root, Capability, CapabilityCategory, CapabilityMeta,
+    CapabilityRiskLevel, CapabilityRow, CapabilityRowKind, CapabilityToolContextRetention,
+    CapabilityVisitor,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。

@@ -256,7 +256,7 @@ impl AgentPlugin {
         let agent_dirs = store.list();
 
         visitor
-            .register_option_field(ORDER, agent_field(&agent_dirs))
+            .put(CapabilityRow::option(ORDER, agent_field(&agent_dirs)))
             .await;
     }
 }

@@ -5,11 +5,11 @@
 //! 三者共用**同一套收集机制**（`traverse` 广播 + 上下文键 + 失败降级），
 //! 区别只在产物：
 //!
-//! | 通道 | 收集器 | 产物 |
+//! | 通道 | 写法 | 产物 |
 //! |---|---|---|
-//! | 能力 | [`crate::symbio_core::CapabilityVisitor`] | 可调用对象（工具 / 模型服务 / 提示词） |
-//! | 选项 | [`crate::symbio_core::OptionVisitor`] | 可展示的数据节点（会话输入区的可选项） |
-//! | 可配置 | [`ConfigurableVisitor`] | 「设置页里该怎么列这一份配置」的**条目** |
+//! | 能力 | `CapabilityVisitor::put`（工具 / 模型 / 提示词 / 挂载行） | 可调用对象与目录成员 |
+//! | 选项 | `put(CapabilityRow::option(order, 字段))` | 可展示的数据节点（会话输入区的可选项） |
+//! | 可配置 | `put(CapabilityRow::configurable(条目))`（4e，原 `ConfigurableVisitor` 退场） | 「设置页里该怎么列这一份配置」的**条目** |
 //!
 //! ## 为什么收集的是「一个条目」而不是「一个 provider」
 //!
@@ -50,22 +50,23 @@
 //! 声明自带目录名，不存在归属歧义，所以容器可以让所有子插件注册进同一个实例。
 
 use crate::symbio_core::VdfsItem;
+use crate::symbio_core::{
+    CapabilityRow, CapabilityRowKind, CapabilityVisitor, PluginInvokeRequest,
+    PluginInvokeRequestExt, CONFIGURABLE_VISITOR,
+};
 use crate::symbio_core::{PluginConfigFile, PLUGIN_FILE};
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CONFIGURABLE_VISITOR};
-use async_trait::async_trait;
 use std::sync::Arc;
 
-/// 可配置声明收集器 —— 各插件在 `traverse` 中把「设置页该怎么列我的配置」交出来。
+/// 列出已声明的设置页条目（按注册顺序）——读侧唯一入口。
 ///
-/// 语义与 [`crate::symbio_core::OptionVisitor`] 一致：按条目名去重、后者覆盖
-/// （保留先注册的槽位），列表按注册顺序。
-#[async_trait]
-pub trait ConfigurableVisitor: Send + Sync + 'static {
-    /// 声明一条（同条目名覆盖）
-    async fn register_configurable(&self, item: VdfsItem);
-
-    /// 列出已声明的条目（按注册顺序）
-    async fn list_configurables(&self) -> Vec<VdfsItem>;
+/// 同条目名覆盖（行名 = `item.node.name`）是表语义；取不到收集器返回空表。
+pub async fn capability_configurables(visitor: &dyn CapabilityVisitor) -> Vec<VdfsItem> {
+    visitor
+        .list(CapabilityRowKind::Configurable)
+        .await
+        .iter()
+        .filter_map(|row| row.configurable_item().cloned())
+        .collect()
 }
 
 /// 在 `traverse` 里声明「本插件有一份配置文档」——**插件侧的唯一入口**。
@@ -79,7 +80,8 @@ pub async fn capability_announce_configurable(
     config: &PluginConfigFile,
 ) {
     if let Some(v) = ctx.get(CONFIGURABLE_VISITOR) {
-        v.register_configurable(capability_entry_of(config)).await;
+        v.put(CapabilityRow::configurable(capability_entry_of(config)))
+            .await;
     }
 }
 

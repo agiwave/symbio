@@ -8,10 +8,11 @@ use super::*;
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{
-    capability_model_active, capability_model_resolve, capability_mount, capability_mounts,
-    capability_prompts, capability_vdfs_root, Capability, CapabilityMeta, ExecEnv, ModelProvider,
-    PluginError, VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse,
-    VdfsResult,
+    capability_configurables, capability_model_active, capability_model_resolve, capability_mount,
+    capability_mounts, capability_option_fields, capability_prompts, capability_vdfs_root,
+    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, DetailField, ExecEnv,
+    ModelProvider, PluginError, VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -416,4 +417,112 @@ async fn root_re_registration_is_a_single_slot_handover() {
         capability_mounts(&mgr).await.is_empty(),
         "退位的根不得留在挂载点清单里"
     );
+}
+
+// ==================== 选项 / 可配置两族（AR-025 4e：两个专服单族 trait 退场） ====================
+
+// （原 2 个默认收集器的 4 条守门人测试逐字迁入本文件：行词汇合一后，去重 / 覆盖 /
+// 排序都成了表与读协议的语义，被测对象从两个专用实现换成这个全表共用的唯一实现。）
+
+fn field(key: &str, widget: &str) -> DetailField {
+    DetailField {
+        key: key.to_string(),
+        label: key.to_string(),
+        widget: widget.to_string(),
+        ..Default::default()
+    }
+}
+
+/// 原 `option_fields_sort_by_order_and_drop_it`（`option_visitor.test.rs`）：
+/// `order` 只影响**读侧**排序，不出现在结果里（守门人：`capability_option_fields`）。
+#[tokio::test]
+async fn option_fields_sort_by_order_and_drop_it() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.put(CapabilityRow::option(60, field("heartbeat", "form")))
+        .await;
+    mgr.put(CapabilityRow::option(10, field("workdir", "path")))
+        .await;
+    mgr.put(CapabilityRow::option(40, field("risk_level", "select")))
+        .await;
+
+    let keys: Vec<String> = capability_option_fields(&mgr)
+        .await
+        .into_iter()
+        .map(|f| f.key)
+        .collect();
+    assert_eq!(keys, vec!["workdir", "risk_level", "heartbeat"]);
+}
+
+/// 原 `option_fields_dedupe_by_key_keeping_first_slot`：同 key 覆盖（后写者胜），
+/// 排序由读侧给；并钉一格新事实——选项行**不混进工具族**（两族同表互不可见）。
+#[tokio::test]
+async fn option_fields_dedupe_by_key_keeping_first_slot() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.put(CapabilityRow::option(20, field("agent_id", "select")))
+        .await;
+    mgr.put(CapabilityRow::option(10, field("workdir", "path")))
+        .await;
+    // 同 key 覆盖：字段换了，后写者胜（表语义：同名覆盖，槽位由 IndexMap 保留）
+    mgr.put(CapabilityRow::option(99, field("agent_id", "text")))
+        .await;
+
+    let list = capability_option_fields(&mgr).await;
+    let keys: Vec<&str> = list.iter().map(|f| f.key.as_str()).collect();
+    assert_eq!(keys, vec!["workdir", "agent_id"]);
+    assert_eq!(list[1].widget, "text", "后者覆盖前者");
+    assert!(
+        !mgr.list(CapabilityRowKind::Tool)
+            .await
+            .iter()
+            .any(|row| row.name() == "workdir"),
+        "选项行不混进工具族"
+    );
+}
+
+/// 原 `register_keeps_order_and_overwrites_same_name`（`configurable_visitor.test.rs`）：
+/// 按条目名（目录名）去重、后写者胜、列表保注册顺序。
+#[tokio::test]
+async fn configurable_declaration_keeps_order_and_overwrites_same_name() {
+    use crate::symbio_core::{capability_entry_of, DetailDefinition, PluginConfigFile, PluginDir};
+    fn config(dir_name: &str, title: &str) -> PluginConfigFile {
+        PluginConfigFile::new(
+            PluginDir::at(std::env::temp_dir(), dir_name),
+            title,
+            DetailDefinition::default(),
+        )
+    }
+
+    let mgr = DefaultToolVisitor::new();
+    mgr.put(CapabilityRow::configurable(capability_entry_of(&config(
+        "web",
+        "网络工具",
+    ))))
+    .await;
+    mgr.put(CapabilityRow::configurable(capability_entry_of(&config(
+        "session",
+        "会话设置",
+    ))))
+    .await;
+    mgr.put(CapabilityRow::configurable(capability_entry_of(&config(
+        "web",
+        "网络工具（改）",
+    ))))
+    .await;
+
+    let list = capability_configurables(&mgr).await;
+    assert_eq!(
+        list.iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["web", "session"]
+    );
+    assert_eq!(list[0].node.title, "网络工具（改）");
+}
+
+/// 原 `empty_visitor_lists_nothing` 迁行：空表列不出东西；并钉两族互不可见。
+#[tokio::test]
+async fn empty_table_lists_nothing_for_both_families() {
+    let mgr = DefaultToolVisitor::new();
+    assert!(capability_configurables(&mgr).await.is_empty());
+    assert!(capability_option_fields(&mgr).await.is_empty());
 }

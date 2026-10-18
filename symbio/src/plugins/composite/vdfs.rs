@@ -74,7 +74,7 @@ use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
 use crate::symbio_core::{descend_addr, vdfs_host_ctx};
 use crate::symbio_core::{
-    ConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta, CONFIGURABLE_VISITOR, PATH,
+    CapabilityVisitor, Plugin, PluginInvokeRequestExt, PluginMeta, CONFIGURABLE_VISITOR, PATH,
     PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
@@ -88,7 +88,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::providers::DefaultConfigurableVisitor;
+use crate::providers::DefaultToolVisitor;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {
@@ -146,10 +146,10 @@ impl CompositeVdfs {
 
         // 可配置声明通道：与 VDFS 无关，仍逐子插件广播一次 `traverse`，但只挂
         // `CONFIGURABLE_VISITOR`——配置声明自带目录名，不存在归属歧义。
-        let configs: Arc<dyn ConfigurableVisitor> = match host.get(CONFIGURABLE_VISITOR) {
+        let configs: Arc<dyn CapabilityVisitor> = match host.get(CONFIGURABLE_VISITOR) {
             Some(v) => v,
             None => {
-                let v: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+                let v: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
                 host.set(CONFIGURABLE_VISITOR, v.clone());
                 v
             }

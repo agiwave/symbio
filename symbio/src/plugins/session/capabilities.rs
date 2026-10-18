@@ -2,7 +2,7 @@
 //!
 //! 两个收集器是**同一件事的两半**（`collect_capabilities` 收工具、
 //! `collect_options` 收选项字段），同处本文件；「收集机制」的契约
-//! （`CapabilityVisitor` / `OptionVisitor` 与端点字面量）留在 `symbio_core`。
+//! （`CapabilityVisitor` 收集口三方法与端点字面量）留在 `symbio_core`。
 //!
 //! ## 背景
 //!
@@ -40,11 +40,11 @@
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
-use crate::providers::{DefaultOptionVisitor, DefaultToolVisitor};
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, CapabilityVisitor,
-    OptionVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS,
-    OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin,
+    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS, OPTION_VISITOR, PATH,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -133,12 +133,12 @@ pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMet
 // ==================== 选项收集机制（宿主侧） ====================
 //
 // 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
-// ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与 `TRAVERSE_AVAILABLE_OPTIONS`
+// ADR-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
 // 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
 // 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
 // 故两者同处本文件，不因历史路径而分居。
 //
-// 收集器**实现**（`DefaultOptionVisitor`）不在这里——它的写入者是全体插件，
+// 收集器**实现**（`DefaultToolVisitor`，全表共用）不在这里——它的写入者是全体插件，
 // 不隶属于任何宿主，故住 `crate::providers::collectors`（见该模块文档的判据）。
 
 /// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
@@ -156,8 +156,10 @@ pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMet
 pub async fn collect_options(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
-) -> Arc<dyn OptionVisitor> {
-    let visitor: Arc<dyn OptionVisitor> = Arc::new(DefaultOptionVisitor::new());
+) -> Arc<dyn CapabilityVisitor> {
+    // 4e：选项与能力同表——收集器就是全表共用的 `DefaultToolVisitor`，
+    // 选项行（`CapabilityRow::option`）与工具行同一 `put` / `list`，只是通道独立。
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
 
     let Some(parent) = parent else {
         return visitor;

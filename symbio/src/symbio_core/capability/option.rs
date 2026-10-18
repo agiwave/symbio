@@ -3,9 +3,12 @@
 //! ## 与能力收集机制的关系
 //!
 //! 会话能力（工具 / 模型服务 / 系统提示词）经 `CapabilityVisitor` +
-//! `Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS)` 收集。
-//! 本模块是同一机制的**平行第二通道**：选项（会话输入区下方的可选项）
-//! 经 [`OptionVisitor`] + `Plugin::traverse(TRAVERSE_AVAILABLE_OPTIONS)` 收集。
+//! `Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS)` 收集；选项本是**平行第二通道**
+//! （经 `OPTION_VISITOR` 键 + `Plugin::traverse(TRAVERSE_AVAILABLE_OPTIONS)` 广播），
+//! **写入落位到同一张表**（4e）：选项是 `CapabilityRow::option(order, 字段)` 一行，
+//! 读侧是本文件的 [`capability_option_fields`]——广播通道仍各走各的，变的只是
+//! 「行住哪张表」：两个专服单族的 trait（`OptionVisitor` 随 4e）退场，收集口只剩
+//! `put` / `get` / `list` 三个方法（AR-025）。
 //!
 //! ```text
 //! session ──collect_options(parent, ctx)──▶ parent.traverse(available_options)
@@ -14,30 +17,32 @@
 //!                                             └─ model   : Model 选择
 //! ```
 //!
-//! ## 本模块只有**契约**：收集器实现与收集管线都在 session
+//! ## 本模块只有**读协议**：收集器实现与收集管线都在别处
 //!
-//! 本域只提供一个符号，且它是**多消费方**的：
+//! 本域提供一个符号，且它是**多消费方**的：
 //!
 //! | 符号 | 消费方 | 为什么在这里 |
 //! |---|---|---|
-//! | [`OptionVisitor`] | session（实现默认收集器 + 读产物）· agent · model（各自在 `traverse` 里注册字段） | 它是上下文键 `OPTION_VISITOR` 的**值类型**；键在 core，值类型只能同在 core |
+//! | [`capability_option_fields`] | session（读产物拼表单） | 选项行住全插件共用的能力表，读法是跨插件协议 |
+//!
+//! 写侧是 `put(CapabilityRow::option(order, 字段))`（写入者 = agent / model / session
+//! 各自在 `traverse` 里注册字段），键 `OPTION_VISITOR` 的值类型是 `CapabilityVisitor`。
 //!
 //! 端点字面量
 //! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)
 //! **不在这里**：它属于 `Plugin::traverse` 的契约，与 `TRAVERSE_AVAILABLE_TOOLS` 同处
 //! `plugin::traverse`——同一份协议的两个端点该住在一起。本域只是那条通道的**产出方之一**。
 //!
-//! 而**收集器实现**（`DefaultOptionVisitor`）住 `providers/collectors/`——
+//! 而**收集器实现**落在全表共用的 `DefaultToolVisitor`（`providers/collectors/`）——
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
-//! 故不隶属于任何插件；契约（trait）在 core，无策略的内存实现在实现层。
+//! 故不隶属于任何插件。
 //! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
-//! 按「依赖方数量」判据（ADR-023）下沉到
-//! `plugins/session/capabilities.rs`——两者是同一件事的两半，同处一地。
+//! 按「依赖方数量」判据（ADR-023）下沉到 `plugins/session/capabilities.rs`。
 //!
 //! ```text
-//! 在 core：契约（trait + 端点字面量）        ← 两侧都认
-//! 在 providers：默认实现（内存收集器）        ← 写入者是全体插件，无宿主归属
-//! 在 session：收集管线（collect_options）    ← 只有宿主认
+//! 在 core：行词汇 + 读协议（本文件）        ← 写入者、读写者都认
+//! 在 providers：全表共用的内存收集器       ← 写入者是全体插件，无宿主归属
+//! 在 session：收集管线（collect_options）   ← 只有宿主认
 //! ```
 //!
 //! ## 产物是 `DetailField`，不是自成一体的节点类型
@@ -49,43 +54,39 @@
 //! 「会话选项 schema 化」下线，2026-09-23）。
 //! （`docs/archive/session-options-unification.md` §9 S4）。
 //!
-//! ## 为什么不复用 CapabilityVisitor
+//! ## 为什么不与工具同通道广播，但仍同表
 //!
-//! 两者收集的**产物语义**完全不同：能力是「可调用对象」（工具实例 /
-//! 协议适配器），选项是「可展示的数据节点」（显示信息 + 状态 + 类型）。
-//! 混装进同一 visitor 会让 `list_capability` 的消费方（LLM 工具协议）
-//! 被迫理解选项数据结构。故新定义 visitor trait，共享的是**收集机制**
-//! （traverse 广播 + 上下文键 + 失败降级），而不是数据结构。
+//! 广播通道（`TRAVERSE_AVAILABLE_OPTIONS`，候选来自运行期数据，每会话现算）与
+//! 工具广播分开，产物语义也不同（可展示的**数据节点**，不是可调用对象）；但两者
+//! 已经不需要两个 trait：表按载荷分族，`list(CapabilityRowKind::Option)` 只回选项行，
+//! 工具协议（`list(Tool)`）根本看不见它们——混装的代价在**载荷类型**上就挡住了，
+//! 不靠分 trait。这也是 AR-025 把两个专服单族 trait 收回同一张表的判据。
 //!
 //! ## 契约
 //!
 //! - 收集是**广播**：宿主对父插件调一次 `traverse`，所有插件在同一契约下
 //!   按 `ctx[PATH] == TRAVERSE_AVAILABLE_OPTIONS` 判定是否贡献；
-//! - 收集是**无状态**的：每次调用返回全新 visitor（产物是「有哪些字段 + 候选
-//!   有哪些」的**声明**，不含任何会话状态，故本可跨请求复用；不缓存只是因为
-//!   候选集来自运行期数据）；
+//! - 收集是**无状态**的：每次调用返回全新收集器（产物是「有哪些字段 + 候选
+//!   有哪些」的**声明**，不含任何会话状态）；
 //! - 单插件失败只记日志，不中断收集。
 
 use crate::symbio_core::schemas::detail::DetailField;
+use crate::symbio_core::{CapabilityRowKind, CapabilityVisitor};
 
-/// 选项收集器 —— 各插件在 `traverse` 中把选项注册进来。
+/// 列出已注册的选项字段：按 `order` 升序稳定排序（同号保持注册顺序），`order` 不下发。
 ///
-/// 语义与 [`crate::symbio_core::CapabilityVisitor`] 一致：按 id 去重、
-/// 后者覆盖（保留先注册的槽位），列表按 `order` 稳定排序。
-///
-/// 实现（默认收集器）在 `providers/collectors/option_visitor.rs`：本 trait 只有
-/// **一个**实现；收集**管线**（唯一消费方 = 会话宿主）在
-/// `plugins/session/capabilities.rs`，契约留在两侧都能看见的地方。
-#[async_trait::async_trait]
-pub trait OptionVisitor: Send + Sync + 'static {
-    /// 注册一个选项字段（同 `key` 覆盖）。
-    ///
-    /// `order` **不下发**：它只是跨插件排序用的号段约定（插件之间不可见，只能
-    /// 约定数字，见 `plugins/session/options/mod.rs` 模块文档），收集层用完即弃。
-    /// 前端收到的是一个**已排好序**的数组——数组序 = 展示序，比「各自按 order
-    /// 再排一次」是更强的保证。
-    async fn register_option_field(&self, order: i32, field: DetailField);
-
-    /// 列出已注册的选项字段（按 `order` 升序稳定排序，`order` 已剥离）
-    async fn list_option_fields(&self) -> Vec<DetailField>;
+/// - **同键覆盖**是表语义（行名 = `field.key`，后写者胜、保留先注册槽位）；
+/// - 排序是**读侧**的事：`order` 不进产物数组——前端收到的数组序 = 展示序，
+///   比「前端按 order 再排一次」是更强的保证。
+pub async fn capability_option_fields(visitor: &dyn CapabilityVisitor) -> Vec<DetailField> {
+    let mut rows = visitor.list(CapabilityRowKind::Option).await;
+    // 稳定排序：`sort_by_key` 是稳定的，order 相同者保持注册顺序（表序 = 广播序）
+    rows.sort_by_key(|row| {
+        row.option_entry()
+            .map(|(order, _)| order)
+            .unwrap_or(i32::MAX)
+    });
+    rows.iter()
+        .filter_map(|row| row.option_entry().map(|(_, field)| field.clone()))
+        .collect()
 }

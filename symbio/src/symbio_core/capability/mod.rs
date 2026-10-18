@@ -13,14 +13,14 @@ pub use error::{
 
 // 域内子模块私有，公开面在此显式重导出
 //
-// 注：三个 `Default*Visitor`（能力 / 选项 / 可配置声明收集器的内存实现）**不在本域**——
-// 它们是契约的默认实现，写入者是全体插件，故住 `crate::providers::collectors`。
+// 注：全表共用的内存收集器（`DefaultToolVisitor`）**不在本域**——
+// 它是契约的默认实现，写入者是全体插件，故住 `crate::providers::collectors`。
 pub use configurable::{
-    capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
+    capability_announce_configurable, capability_configurables, capability_entry_of,
 };
 pub use model::{capability_model_active, capability_model_resolve};
 pub use mount::{capability_mount, capability_mounts, capability_vdfs_root};
-pub use option::OptionVisitor;
+pub use option::capability_option_fields;
 pub use prompt::capability_prompts;
 pub use row::{CapabilityRow, CapabilityRowKind};
 pub use tool_name::{capability_resolve, capability_to_wire};

@@ -31,10 +31,11 @@
 //! `60` 心跳任务；新增贡献方取空闲号段。
 //!
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
-//! （见 `symbio_core::capability::option::OptionVisitor::register_option_field`）。
+//! （见 `symbio_core::capability::option` 的 `capability_option_fields`）
 
 use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;
+use crate::symbio_core::capability_option_fields;
 use crate::symbio_core::PluginInvokeRequest;
 use crate::symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
@@ -106,7 +107,7 @@ impl SessionPlugin {
             sections: vec![DetailSection {
                 title: None,
                 collapsed: false,
-                fields: visitor.list_option_fields().await,
+                fields: capability_option_fields(&*visitor).await,
             }],
             actions: session_detail_actions(),
             ..Default::default()

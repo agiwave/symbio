@@ -230,10 +230,12 @@ async fn traverse_contributes_no_tools() {
 /// `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use crate::providers::DefaultConfigurableVisitor;
-    use crate::symbio_core::{ConfigurableVisitor, CONFIGURABLE_VISITOR};
+    use crate::providers::DefaultToolVisitor;
+    use crate::symbio_core::{
+        capability_configurables, CapabilityVisitor, PluginInvokeRequestExt, CONFIGURABLE_VISITOR,
+    };
 
-    let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);
     req.set(PATH, String::new());
     req.set(CONFIGURABLE_VISITOR, visitor.clone());
@@ -244,7 +246,7 @@ async fn traverse_announces_its_own_config() {
         .await
         .expect("traverse 必须成功");
 
-    let items = visitor.list_configurables().await;
+    let items = capability_configurables(&*visitor).await;
     assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
     assert_eq!(items[0].node.name, PLUGIN_ID_COMPOSE);
     assert_eq!(items[0].path, "compose/PLUGIN.yml");

@@ -589,7 +589,7 @@ impl Plugin for SessionPlugin {
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) {
                 for (order, field) in self.session_option_fields() {
-                    visitor.register_option_field(order, field).await;
+                    visitor.put(CapabilityRow::option(order, field)).await;
                 }
             }
         }

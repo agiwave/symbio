@@ -361,7 +361,7 @@ impl PluginManagerPlugin {
         let Some(visitor) = host.get(CONFIGURABLE_VISITOR) else {
             return Vec::new();
         };
-        visitor.list_configurables().await
+        crate::symbio_core::capability_configurables(&*visitor).await
     }
 
     /// 某插件的配置声明（按条目名对号）

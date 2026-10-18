@@ -154,6 +154,13 @@ impl CapabilityVisitor for SubAgentVisitor {
                 .await;
             return;
         }
+        // 选项行与可配置声明行**原样透传**（4e）：这两族走独立的广播通道
+        // （OPTION_VISITOR / CONFIGURABLE_VISITOR），作用域投影此前就不接管它们——
+        // 入口统一到 `put` 之后，规则必须显式写在这里，否则静默丢行。
+        if row.option_entry().is_some() || row.configurable_item().is_some() {
+            self.inner.put(row).await;
+            return;
+        }
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
@@ -177,8 +184,8 @@ impl CapabilityVisitor for SubAgentVisitor {
         self.inner.get(name).await
     }
 
-    // 模型族（4b）与挂载族（4d）的读写都不再是 trait 上的方法：写侧在 `put` 上按族
-    // 丢弃 / 加前缀，读侧经下面的 `get` / `list` 原样透传内层——子 Agent 作用域内的
+    // 模型族（4b）、挂载族（4d）与选项 / 可配置两族（4e）的读写都不再是 trait 上的方法：
+    // 写侧在 `put` 上按族丢弃 / 加前缀 / 透传，读侧经下面的 `get` / `list` 原样透传内层——子 Agent 作用域内的
     // 插件照常按 id 取模型、按目录名取自己的挂载点，而生效者与 `<根>` 都归系统 Agent。
 }
 

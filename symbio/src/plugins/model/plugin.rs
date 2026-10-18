@@ -256,7 +256,10 @@ impl ModelPlugin {
         enabled.sort_by(|a, b| a.id.cmp(&b.id));
 
         visitor
-            .register_option_field(ORDER, provider_field(&enabled, effective.as_deref()))
+            .put(CapabilityRow::option(
+                ORDER,
+                provider_field(&enabled, effective.as_deref()),
+            ))
             .await;
     }
 }

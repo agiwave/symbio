@@ -98,9 +98,7 @@ mod embedding;
 mod memory;
 mod vdfs_service;
 
-pub(crate) use collectors::{
-    approval_gate, DefaultConfigurableVisitor, DefaultOptionVisitor, DefaultToolVisitor,
-};
+pub(crate) use collectors::{approval_gate, DefaultToolVisitor};
 // `MemoryInjection` / `memory_render_segment` **不出口**：注入产物的形状与排版函数
 // 只有 `MemoryFile` 自己在用（插件拿到的是 `segment()` 出来的 `String`），
 // 出口只列**真有跨模块消费者**的符号——否则「公开面」里会混入没人要的东西，

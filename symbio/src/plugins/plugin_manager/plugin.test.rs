@@ -605,18 +605,20 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 
 /// 造一份带可配置声明的请求 ctx（声明通常由容器在广播中收集，这里直接给）
 async fn ctx_with_configs() -> VdfsContext {
-    use crate::providers::DefaultConfigurableVisitor;
+    use crate::providers::DefaultToolVisitor;
     use crate::symbio_core::{
-        capability_entry_of, vdfs_context, ConfigurableVisitor, PluginConfigFile, PluginDir,
-        PluginSimpleRequest, CONFIGURABLE_VISITOR,
+        capability_entry_of, vdfs_context, CapabilityRow, CapabilityVisitor, PluginConfigFile,
+        PluginDir, PluginSimpleRequest, CONFIGURABLE_VISITOR,
     };
 
-    let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
     visitor
-        .register_configurable(capability_entry_of(&PluginConfigFile::new(
-            PluginDir::at(std::env::temp_dir(), "web"),
-            "网络工具",
-            DetailDefinition::form("配置", Vec::new()),
+        .put(CapabilityRow::configurable(capability_entry_of(
+            &PluginConfigFile::new(
+                PluginDir::at(std::env::temp_dir(), "web"),
+                "网络工具",
+                DetailDefinition::form("配置", Vec::new()),
+            ),
         )))
         .await;
 
