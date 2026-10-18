@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { dim, yellow, red, green } from '../color.mjs'
 import { BASELINE, ratchetOrBump } from './_shared.mjs'
+import { machine } from './_machine.mjs'
 // 逐例耗时的取数实现与门外复核（`scripts/e2e-concurrency.mjs`）共用一份：
 // 同一段逻辑曾在这里与那里各写一份，而日志目录一改就两边同时失明。
 import { latestE2ELogs } from './_logs.mjs'
@@ -172,9 +173,18 @@ export default {
         if (cases.length === 0) return { ok: false, note: '未发现任何用例（e2e/cases/）' }
 
         // 默认 6，理由见上方注释（理论最优 = 总工作量/最慢单例 ≈ 5.7，实测三轮稳定）。
-        // 核数少时往下收：核不够时并发再高只是把 CPU 竞争推高超时敏感度。
-        const cpuCap = Math.max(1, Math.min(6, os.availableParallelism?.() ?? os.cpus().length))
-        const limit = Math.max(1, Number(process.env.GATE_E2E_CONCURRENCY) || cpuCap)
+        // **核数少时往下收，核多时不往上加**：6 这个上限来自**用例结构**（最慢单例
+        // 决定下限工作量），不是机器能力——机器再强也不该超过它。所以这里取
+        // 机器档案的 `slots.e2e`（它已按逻辑核/内存/启动负载收过一轮，上限仍是 6），
+        // 而不是「核数」本身。原先直接拿核数算，在 4 核机器上给到 4 路还行，
+        // 在 2 核机器上给 2 路但没算内存与负载，遇到同时开着的 IDE/浏览器就会假红。
+        const m = await machine()
+        const limit = Math.max(1, Number(process.env.GATE_E2E_CONCURRENCY) || m.slots.e2e)
+        // 单个用例的兜底预算。实测最慢用例（`t2`）在本机要 120s ⇒ 静态 180s 只有
+        // 1.5 倍余量，是**余量不足**的那一档，必须随机器放大：慢 2 倍的机器上
+        // 120s 会变成 240s，而 180s 的兜底会先到——报出来的是「超时」，
+        // 看上去像用例坏了。用例内部自己的 `waitFor` 仍是真正的判据，这里只防挂死。
+        const caseTimeoutMs = Math.round(180_000 * Math.max(1, m.cpuScale))
         const results = new Array(cases.length)
         let cursor = 0
         const worker = async () => {
@@ -187,7 +197,7 @@ export default {
               cmd: process.execPath,
               args: [c.file],
               cwd: repoRoot,
-              timeoutMs: 180_000,
+              timeoutMs: caseTimeoutMs,
               echo: 'none',
               env: { E2E_CASE_SELF: '1', E2E_PORT_BASE: String(18080 + i * 100) },
             })

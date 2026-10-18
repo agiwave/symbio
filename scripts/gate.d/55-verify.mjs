@@ -61,7 +61,10 @@ export default {
   // 本阶段的 `gen-verify-facts` 会重写 `verify/facts/mod.rs`，而 docs 阶段的
   // doc-count-audit 读同一个文件——并发就是「审计读到半截生成物」。本阶段很快
   // （17 组 rustc 并发 8，十几秒），不值得为它冒假红的险。
-  concurrency: 8,
+  // 并发度由机器档案的 `slots.cpu` 决定（每个验证程序是一次**真正的 rustc 编译**，
+  // 吃满单核 ⇒ 按 CPU 口径给，不是按 IO 口径）。这里曾写死 8——那是当时那台
+  // 8 逻辑核机器的核数：4 核机器上它是超订，32 核机器上是浪费。
+  concurrencyKind: 'cpu',
   *tasks(ctx) {
     if (!fs.existsSync(verifyDir)) {
       yield {
@@ -213,6 +216,10 @@ export default {
         run: async () => {
           const exe = path.join(outDir, `${name}${exeSuffix}`)
 
+          // ⚠️ 这三个超时**刻意不自适应**（300s / 180s / 60s）：它们的实测值是
+          // 8s / 1–3s / <1s，余量 20–60 倍，慢 5 倍的机器也碰不到。给宽余量足够
+          // 宽时，再叠一层自校准只是增加机制、不增加可靠性。判据只钉在**余量不足**
+          // 的那几处（vitest / e2e 单例 / grep-audit 全仓扫描 / windows-restart）。
           const build = await ctx.run({
             label: `verify: ${name} · rustc`,
             cmd: 'rustc',

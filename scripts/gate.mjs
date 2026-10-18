@@ -89,11 +89,11 @@
  */
 
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
+import { machine, describe, budget, recordRun, measuredMs } from './gate.d/_machine.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -106,17 +106,25 @@ import {
 } from './gate.d/_logs.mjs'
 
 /**
- * 默认并发度（阶段可用 `concurrency` 覆盖）。
+ * 默认并发度（阶段可用 `concurrency` 覆盖）。**由机器档案决定，不是常量**。
  *
  * **只用于「互不干扰」的任务**：同一 `target/` 目录的 cargo 命令**必须串行**
  * （cargo 自己会争 `.cargo-lock`，并发跑只会排成 `Blocking waiting for file
  * lock`，白等一轮还扰乱日志）。因此并发是**按任务声明**（`parallel: true`）的，
  * 不是全局默认——没标的照旧一个一个跑。
  *
- * 上限取 `核数 - 1` 且不超过 8：审计类脚本是 IO 密集（扫文件），给满核会与
- * 主进程和其他任务抢调度；`-1` 留一个核给 spawn / 日志落盘。
+ * 这里的 `7` 只是「`machine()` 还没算出来之前」的占位值（`--list` 之类不跑任务
+ * 的路径用不到它）。真正的值在 banner 之前由 `applyMachine()` 覆盖成
+ * `slots.io`——任务级并发的绝大多数是审计脚本与回归测试，那是 IO 密集，
+ * 超订有益（见 `_machine.mjs::derive`）。CPU 密集的阶段自己声明 `concurrency`。
+ *
+ * ⚠️ **不要在这里写死一个数**。上一版写的是 `min(核数-1, 8)`，看上去像自适应，
+ * 其实上限 8 是「当时那台机器」的核数，换到 16/32 核机器上就是白丢一半并行度。
  */
-const CONCURRENCY = Math.max(2, Math.min((os.availableParallelism?.() ?? os.cpus().length) - 1, 8))
+let CONCURRENCY = 7
+
+/** 机器档案；在 banner 处 `await machine()` 后填充。 */
+let MACHINE = null
 
 // realpathSync.**native** 规范化盘符大小写：启动 cwd 可能以小写盘符传入（会话
 // 环境实测 `d:\...`；JS 版 realpathSync 与 libuv 一致地**保留**输入大小写，只有
@@ -427,9 +435,21 @@ for (const dir of [gateDir, ...(extraStageDir ? [extraStageDir] : [])]) {
   }
 }
 const stages = []
+// 来自注入目录的阶段 id：**它们不进校准文件**（见 `report()` 里 `recordRun` 的调用）。
+// 测试夹具不是「这台机器跑门禁的真实成本」，把它记进历史会污染两件事：
+// ① 超时预算（一个 300ms 的演示阶段会把同名任务的历史拉低）；
+// ② LPT 起跑顺序（演示阶段有实测后，人工 `long` 标注就被实测覆盖——实测本该优先，
+//    但那份「实测」测的是夹具，不是被测任务）。
+const injectedStageIds = new Set()
 for (const f of [...stagePaths.keys()].sort()) {
-  const mod = await import(pathToFileURL(stagePaths.get(f)).href)
-  if (mod.default?.id) stages.push(mod.default)
+  const file = stagePaths.get(f)
+  const mod = await import(pathToFileURL(file).href)
+  if (mod.default?.id) {
+    stages.push(mod.default)
+    if (extraStageDir && path.resolve(path.dirname(file)) === path.resolve(extraStageDir)) {
+      injectedStageIds.add(mod.default.id)
+    }
+  }
 }
 
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
@@ -578,6 +598,33 @@ console.log(
   ),
 )
 console.log(dim(`  阶段：${renderPlan(lanePlan)}`))
+
+// ── 机器能力档案：并发度与超时预算的唯一来源（`gate.d/_machine.mjs`） ──────
+//
+// **打印是机制的一部分，不是装饰**。自适应机制最大的风险不是算错，而是**没人
+// 知道它在算**：慢机器上看到 `并发 cpu 2`，才知道门禁确实降级了（而不是「还是
+// 那么慢，优化没用」）；快机器上看到 `并发 cpu 15`，才知道升级没白升。
+// 不打印的话，两种机器上的体验都是「一个黑盒，反正要等」。
+//
+// 放在这里（而不是文件头）是为了让 `--help` / `--list` / 被拒绝的调用**不付**
+// 那 170ms 的探测成本——它们走不到这一行。
+MACHINE = await machine()
+CONCURRENCY = MACHINE.slots.io
+console.log(dim(`  机器：${describe(MACHINE)}`))
+{
+  const rounds = Math.max(0, ...Object.values(MACHINE.calibration.tasks ?? {}).map((t) => t.ms?.length ?? 0))
+  if (MACHINE.discardedFingerprint) {
+    console.log(
+      dim(`  校准：机器指纹已变（上一份来自 ${MACHINE.discardedFingerprint}），历史作废、按本机重新起算`),
+    )
+  } else if (rounds > 0) {
+    console.log(dim(`  校准：沿用本机历史（最多 ${rounds} 轮）⇒ 超时预算取实测中位数 × 2.5，长任务按实测耗时排序`))
+  } else {
+    console.log(
+      dim(`  校准：本机首跑，暂无实测 ⇒ 超时预算按静态值 × ${MACHINE.cpuScale.toFixed(2)}（单核探针）`),
+    )
+  }
+}
 // 到这里参数已全部校验通过、阶段即将开跑 ⇒ 这一轮**真的会发生**，此时建目录、
 // 写指针都名实相符（`--help` 与被拒绝的调用走不到这里，所以不会留空目录）。
 const relLog = (path.relative(repoRoot, ensureLogDir()) || '.').replace(/\\/g, '/')
@@ -618,12 +665,39 @@ function lastLogLine(file) {
   }
 }
 
+/**
+ * 任务的「起跑权重」：越大越先起（LPT，最长者先做）。
+ *
+ * 两个来源，**实测优先**：
+ *
+ * 1. **本机上一轮的实测耗时**（`_machine.mjs::measuredMs`，中位数窗口 5 轮）。
+ *    这是最准的——「谁慢」本来就是一个只有跑过才知道的问题。
+ * 2. 没有实测时退回**人工标注** `long: true`。它只在**首跑**（或换机后的首跑）
+ *    有用，是冷启动的拐杖：新加一个慢测试时，标注能立刻让它在第一批就起，
+ *    而不必先慢一轮、下一轮才被排对。
+ *
+ * 为什么不是「只用实测」：换机器后历史被丢弃，那一刻没人知道谁慢，若不给人工
+ * 标注留位置，新机器上的**每一轮首跑**都会退化成「按声明序」，而声明序里长杆
+ * 往往排在中间——那正是这一轮要修掉的浪费。
+ *
+ * 为什么不是「只用标注」：标注会过时。慢测试被优化掉之后，标注还挂着，于是它
+ * 一直抢第一批的位子；反过来，某个测试变慢了而没人补标注，就永远排不上。
+ * 实测会自己跟上。
+ */
+function taskWeight(stageId, t) {
+  const measured = measuredMs(MACHINE, stageId, t.label)
+  if (measured != null) return measured
+  return t.long ? 1e9 : 0
+}
+
 async function runConcurrent(stageId, tasks, limit) {
   const out = new Array(tasks.length)
-  // 起跑顺序：`long: true` 的先起（见上方 LPT 说明）。**只是取任务的下标顺序变了**，
+  // 起跑顺序：按 `taskWeight` 降序（见上）。**只是取任务的下标顺序变了**，
   // `out` 仍按原下标落 ⇒ 汇总表的顺序与判定完全不受影响。`sort` 在 V8 里是稳定的，
-  // 所以同为长杆 / 同为非长杆的相对次序仍是声明序。
-  const order = tasks.map((_, i) => i).sort((a, b) => Number(Boolean(tasks[b].long)) - Number(Boolean(tasks[a].long)))
+  // 所以同权重任务的相对次序仍是声明序。
+  const order = tasks
+    .map((_, i) => i)
+    .sort((a, b) => taskWeight(stageId, tasks[b]) - taskWeight(stageId, tasks[a]))
   let cursor = 0
   const worker = async () => {
     for (;;) {
@@ -647,11 +721,33 @@ async function runConcurrent(stageId, tasks, limit) {
   }
 }
 
+/**
+ * 阶段声明的并发度 → 具体数字。
+ *
+ * 阶段模块是**同步 import** 的（加载时就要求 `concurrency` 是个数），而机器档案
+ * 是异步探测的（要等 120ms 的负载采样）。所以阶段不能直接写数字，只能声明
+ * **任务类型**，由这里在运行期解析：
+ *
+ * - `concurrency: <number>` —— 写死的数，仅用于「这个阶段的并发与机器无关」的
+ *   极少数情形（目前没有）。**不要用它来表达「我实测过 8 挺好」**——那正是这次
+ *   要清掉的东西：8 是某台机器的快照，不是性质。
+ * - `concurrencyKind: 'cpu'` —— 吃满每个核（rustc / cargo / vitest worker）。
+ * - `concurrencyKind: 'io'`  —— 大部分时间在等文件系统，超订有益（审计脚本）。
+ * - 都不写 —— 用默认值（`slots.io`，任务级并发绝大多数是审计与测试）。
+ */
+function resolveConcurrency(s) {
+  if (typeof s.concurrency === 'number') return s.concurrency
+  if (!MACHINE) return CONCURRENCY
+  if (s.concurrencyKind === 'cpu') return MACHINE.slots.cpu
+  if (s.concurrencyKind === 'io') return MACHINE.slots.io
+  return CONCURRENCY
+}
+
 async function runStage(s, index) {
   stageHeader(index + 1, s.title)
   const stageStart = Date.now()
   const tasks = materialize(s)
-  const limit = s.concurrency ?? CONCURRENCY
+  const limit = resolveConcurrency(s)
   let i = 0
   while (i < tasks.length) {
     // 连续标记 `parallel` 的任务合成一批并发跑；其余照旧串行——cargo 命令
@@ -671,15 +767,19 @@ async function runStage(s, index) {
 
 /**
  * 并发跑一批「相互无数据依赖」的阶段（连续标 `parallel: true` 的那些）。
- * 与任务级批同构：worker 从共享游标取泳道。并发度沿用 `CONCURRENCY`
- * （CI 的 4 核 runner 收到 3；本地 20 核足以让整批同时开跑）。
+ * 与任务级批同构：worker 从共享游标取泳道。
  *
- * 控制台输出是**行级交错**：所有输出都经主进程的单事件循环，每次
- * `console.log` 是一整行、不会撕裂，各任务行自带标签可以辨认归属；
- * 汇总不交错——`report` 按阶段顺序摊平（见 `stageBuffers`）。
+ * 并发度**不按核数线性给**：每个阶段内部自己有限流（docs 的 io 路数、backend 的
+ * 单路 cargo、msrv 的独立 target），阶段之间再乘一遍就是重复放大。实测本机
+ * （8 逻辑核）整批 5 个阶段同时开是有效的，所以 `mid`/`high` 不限制。
+ *
+ * **低配机器要限制**：`low` 档（≤4 核 或 ≤8GB）上 5 个阶段同时跑，等于把各阶段
+ * 已经降过一轮的并发再叠 5 层，swap 与调度开销会把「并发」吃回去。这类机器上
+ * 批内只放 2 条泳道，剩下的排队——总墙钟反而更短。
  */
 async function runStageBatch(batch) {
-  const limit = Math.min(batch.length, Math.max(2, CONCURRENCY))
+  const cap = MACHINE?.tier === 'low' ? 2 : Math.max(2, CONCURRENCY)
+  const limit = Math.min(batch.length, cap)
   let cursor = 0
   const worker = async () => {
     for (;;) {
@@ -715,6 +815,20 @@ function report(interrupted = false) {
   // 加起来没有意义；阶段墙钟才是可比的量。并发批里的阶段相互重叠，故合计可能
   // 大于总耗时——这一点写在表头，免得读者拿它去加。
   const stageRows = [...stageMs.entries()].sort((a, b) => b[1] - a[1])
+
+  // 把本轮实测并进 per-machine 校准文件：**下一轮的超时预算与起跑顺序靠它**。
+  // 中断路径也记——已经跑完的那些任务耗时是真实数据，没有理由因为按了 Ctrl+C 丢掉。
+  // 写失败不抛（见 `recordRun`）：记不下这次多快，不该改变这次的结论。
+  //
+  // **注入的阶段（`GATE_EXTRA_STAGES`）不记**：那是测试夹具，不是这台机器跑门禁的
+  // 真实成本。实测踩过——`gate.test.mjs` 的 LPT 判据第二轮起就红，因为演示阶段的
+  // 两个任务已经攒出了「实测耗时」，于是「人工标了 long 的先起」被实测覆盖了，
+  // 而那份实测测的是 `-e "appendFileSync"`，与真实长杆毫无关系。
+  if (MACHINE) {
+    const measured = injectedStageIds.size ? results.filter((r) => !injectedStageIds.has(r.stage)) : results
+    const wall = Object.fromEntries([...stageMs].filter(([id]) => !injectedStageIds.has(id)))
+    recordRun(MACHINE, measured, { stageWall: wall })
+  }
 
   // 运行清单落盘：终端的滚动缓冲会丢，文件不会。**中断路径也写**——正是那条
   // 路径最可能只剩这一个物证。逐项带日志文件名，供事后核对。

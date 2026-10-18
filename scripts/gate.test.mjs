@@ -19,6 +19,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
+import { derive, fingerprintOf, describe, budget, machine } from './gate.d/_machine.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
@@ -391,4 +392,87 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   // 生成器必须先于静态审计（`30-docs` 的 D-007 / RF-003 要看已展开的最终形态）
   assert.ok(idx('facts-write') < idx('docs'), 'facts-write 必须在 docs 之前')
   assert.equal(stages[0].id, 'fmt', 'fmt 是屏障，必须第一个跑')
+})
+
+// ── 机器能力档案（`gate.d/_machine.mjs`） ────────────────────────────────
+//
+// 这一组判据钉的是**「自适应」这件事本身不许退化**。它最危险的失效方式不是报错，
+// 而是**悄悄退回常量**：门禁照样全绿、照样能跑，只是换一台机器就不再快了——
+// 而没人会注意到，因为「慢」从来不触发任何红灯。上一版的 `concurrency: 8` /
+// `SCENARIO_CONCURRENCY = 2` / 一批按本机拍的 timeout 就是这么做出来的。
+
+test('★ 并发度随机器能力单调：核多不降、内存少要降、机器忙要降', () => {
+  const base = { memGB: 16, freeMemGB: 5, cpuMs: 43, busy: 0.1 }
+  const at = (n, extra = {}) => derive({ ...base, logicalCores: n, ...extra })
+
+  const seq = [2, 4, 8, 16].map((n) => at(n).io)
+  for (let i = 1; i < seq.length; i++) {
+    assert.ok(seq[i] >= seq[i - 1], `io 并发必须随核数单调不减：${seq.join(' → ')}`)
+  }
+  // 内存钳：8 核但只有 8GB，不能按 8 核给满
+  assert.ok(
+    at(8, { memGB: 8, freeMemGB: 3 }).cpu < at(8).cpu,
+    '8GB 机器的 cpu 并发必须低于 16GB 机器——否则 8 个 rustc 会 swap，比串行还慢',
+  )
+  // 负载钳：同一台机器已经被别的东西占满时，不能再开满
+  assert.ok(
+    at(8, { busy: 0.9 }).io < at(8, { busy: 0.1 }).io,
+    '启动时负载 90% 必须降并发——「同一台机器不同时段」也是「不同性能的电脑」',
+  )
+})
+
+test('★ 32 核机器上不许仍然只开 8 路', () => {
+  const big = derive({ logicalCores: 32, memGB: 64, freeMemGB: 50, cpuMs: 20, busy: 0.1 })
+  assert.ok(big.cpu > 8, `32 核机器 cpu 并发只有 ${big.cpu}——上限 8 是旧机器的核数，不是性质`)
+  assert.ok(big.io > 8, `32 核机器 io 并发只有 ${big.io}`)
+  // 但 e2e 的上限是**用例结构**决定的（最慢单例 ≈ 总工作量/5.7），不随核数涨
+  assert.equal(big.e2e, 6, 'e2e 并发不该超过 6——那是用例结构，不是机器能力')
+})
+
+test('★ 换机器必须换指纹（否则另一台机器的耗时会被当成本机的预算）', () => {
+  const fp = (o) => fingerprintOf({ platform: 'win32', arch: 'x64', cpuModel: 'X', ...o })
+  const a = fp({ logicalCores: 8, memGB: 16 })
+  const b = fp({ logicalCores: 16, memGB: 32 })
+  assert.notEqual(a, b, '核数不同必须指纹不同')
+  assert.notEqual(fp({ logicalCores: 8, memGB: 8 }), a, '内存不同必须指纹不同')
+  assert.notEqual(fp({ logicalCores: 8, memGB: 16, cpuModel: 'Y' }), a, '换 CPU 必须指纹不同')
+  // 同一个输入必须稳定（否则每轮都在丢历史，永远攒不到中位数）
+  assert.equal(fp({ logicalCores: 8, memGB: 16 }), a, '同一台机器两次必须同指纹')
+})
+
+test('★ 超时预算：只放大不缩小，且有上限（防止「越超时越宽松」的正反馈）', () => {
+  const withHistory = (ms) => ({ cpuScale: 1, calibration: { tasks: { k: { ms } } } })
+  assert.equal(budget(withHistory([10]), 'k', 1000), 1000, '实测很快时不许把预算缩到 25ms')
+  assert.equal(budget(withHistory([1000]), 'k', 1000), 2500, '实测 1s ⇒ 预算 2.5s')
+  assert.equal(budget(withHistory([100000]), 'k', 1000), 6000, '再慢也不许超过静态基准的 6 倍')
+  // 没有历史 ⇒ 按单核探针放大（只放大不缩小）
+  assert.equal(budget({ cpuScale: 3, calibration: { tasks: {} } }, 'k', 1000), 3000)
+  assert.equal(budget({ cpuScale: 0.5, calibration: { tasks: {} } }, 'k', 1000), 1000)
+})
+
+test('★ 机器档案必须能打印成人读的一行，且探测成本可忽略', async () => {
+  const m = await machine()
+  const line = describe(m)
+  assert.match(line, /逻辑核/, `档案要写明核数：${line}`)
+  assert.match(line, /并发 cpu \d+/, `档案要写明选定的并发：${line}`)
+  assert.match(line, /GB/, `档案要写明内存：${line}`)
+  // 探测是「为省时间而花的时间」，必须远小于它省下的时间（门禁一轮 4–5 分钟）。
+  assert.ok(m.probeMs < 2000, `探测花了 ${m.probeMs}ms——它自己正在变成新的性能问题`)
+})
+
+test('★ 阶段的并发度必须声明**类型**，不许写死数字', async () => {
+  // 「写死一个数」的失效方式最隐蔽：它在那台机器上是对的，换机器只是变慢，不报错。
+  // 所以判据不是「值是否合理」（无法静态判断），而是「有没有留下类型声明」。
+  for (const name of ['30-docs', '55-verify']) {
+    const mod = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'gate.d', `${name}.mjs`)).href)
+    assert.ok(
+      ['cpu', 'io'].includes(mod.default.concurrencyKind),
+      `${name} 没声明 concurrencyKind——并发度必须由机器档案解析，不能是常量`,
+    )
+    assert.equal(
+      mod.default.concurrency,
+      undefined,
+      `${name} 仍然写死了 concurrency: ${mod.default.concurrency}——那是某台机器的快照，不是性质`,
+    )
+  }
 })

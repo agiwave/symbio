@@ -52,6 +52,7 @@ import {
   maybeSandboxDeleteHint,
   acceptBaseline,
 } from './_shared.mjs'
+import { machine, budget } from './_machine.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -77,12 +78,16 @@ export default {
         // 自定义任务：沙箱拦截 coverage/ 清理时用 --coverage.clean=false 重跑一次；
         // 成功后做文件/用例基线棘轮与覆盖率阈值「形同虚设」提示。
         run: async () => {
+          // 预算按**上一轮实测**给（`budget` = 中位数 × 2.5，钳在 300s 的 1–6 倍）：
+          // 慢机器上 coverage 跑得比本机久得多，写死一个数就只能在「太短 ⇒ 假红」
+          // 与「太长 ⇒ 真卡死要等很久」之间选一个，而自校准不需要选。
+          const vitestBudget = budget(await machine(), 'frontend-static::vitest run --coverage', VITEST_TIMEOUT_MS)
           let r = await ctx.run({
             label: 'vitest run --coverage',
             cmd: process.execPath,
             args: [bin('vitest/vitest.mjs'), 'run', '--coverage'],
             cwd: frontendDir,
-            timeoutMs: VITEST_TIMEOUT_MS,
+            timeoutMs: vitestBudget,
           })
           if (!r.ok && blockedBySandboxDelete(r.output)) {
             console.log('      ↳ 沙箱拦了 coverage/ 的清理 ⇒ 以 --coverage.clean=false 重跑（不跳过本步）')
@@ -91,7 +96,7 @@ export default {
               cmd: process.execPath,
               args: [bin('vitest/vitest.mjs'), 'run', '--coverage', '--coverage.clean=false'],
               cwd: frontendDir,
-              timeoutMs: VITEST_TIMEOUT_MS,
+              timeoutMs: vitestBudget,
             })
           }
           if (!r.ok) {

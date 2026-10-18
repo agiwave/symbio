@@ -6,7 +6,7 @@
 // 彼此不共享可变状态——除了 `project/` 那份 cargo fixture，而**只有两个场景会写它**
 // （见下 `ownProject`）。可它们原先是一个一个 `await` 的，于是墙钟 = 全部之和。
 //
-// 实测代价（本机 Windows / 20 核，`node --test scripts/windows-restart.test.mjs`）：
+// 实测代价（本机 Windows / 8 逻辑核 i7-6700HQ / 16GB，`node --test scripts/windows-restart.test.mjs`）：
 //
 //   串行（原样）      358s —— 超过本文件 240s 的 timeout ⇒ **整份测试判红**
 //                             （前 7 个场景都过了，第 8 个被 `parentAlreadyFinished` 取消，
@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { run, processIdentity, assertIdentity, inspectPE } from './windows-restart-prepare.mjs';
 import { stopVerified } from './windows-restart.mjs';
+import { machine, budget } from './gate.d/_machine.mjs';
 
 const script = fileURLToPath(new URL('./windows-restart.mjs', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -40,11 +41,12 @@ const source = `fn main() {
   std::thread::sleep(std::time::Duration::from_secs(180));
 }`;
 
-// 轮询等待一个状态迁移。默认预算必须**不小于监督器自己的截止时间**（`timeoutSeconds`，
-// 本文件用 120）：比它短就变成「被测系统还在合法地干活，测试先宣布超时」——实测踩过，
-// 报出来的是 `waitFor timed out`，而那一刻监督器正走到 `pre-switch`。等待预算短于
-// 被等对象的截止时间，是一条**会自己制造假红**的判据。
-async function waitFor(fn, timeout = 120000) {
+// 轮询等待一个状态迁移。默认预算必须**严格大于**监督器自己的截止时间
+// （`timeoutSeconds`，本文件用 120）——不是「不小于」：相等时两边会在同一刻各自
+// 宣布超时，谁先谁后看调度，于是同一份代码时而报「监督器超时」时而报
+// 「waitFor timed out」。比它短就更糟：被测系统还在合法地干活，测试先宣布超时
+// （实测踩过，那一刻监督器正走到 `pre-switch`）。留 30s 余量。
+async function waitFor(fn, timeout = 150000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) { const result = fn(); if (result) return result; await sleep(100); }
   throw new Error('waitFor timed out');
@@ -94,11 +96,14 @@ test('writeStatusAtomic：rename 必然失败时返回 false 不抛；正常时�
   }
 })
 
-// 场景并发度 = 2。实测（本机 Windows / 20 核，`node --test scripts/windows-restart.test.mjs`）：
+// 场景并发度**不是常量，由机器档案决定**（`gate.d/_machine.mjs::slots.process`）。
+//
+// 下面这组实测是在**本机**（Windows / 8 逻辑核 i7-6700HQ / 16GB）上做的，
+// 它说明的是「这条曲线的形状」，不是「全世界的答案」：
 //
 //   串行（原样）                     358s  ⇒ 超过 240s 的 timeout，**整份测试判红**
 //   串行 + 本次削减                  272s
-//   并发 2 + 本次削减                206s   ← 现状（连跑多轮 12/12 通过）
+//   并发 2 + 本次削减                206s   ← 本机的拐点
 //   并发 3 + 本次削减                239s   3 个场景假红（`stopVerified` 的 PowerShell 在
 //                                          45s 内没起来 ⇒ 报「Timeout: no process killed」）
 //   并发 3（预算放宽后复测两轮）      192s 通过 / 212s **2 项假红**，同一形态：
@@ -108,20 +113,29 @@ test('writeStatusAtomic：rename 必然失败时返回 false 不抛；正常时�
 //                                          candidate.exe 的 SHA256**。预算放宽治不了这条：
 //                                          它测的就是"确认没杀掉"，本来就不该等这么久。
 //
-// 读法：**瓶颈是 Windows 进程创建，不是 CPU**——所以并发只吃到 2，再往上就是让
-// PowerShell 冷启动互相排队，反而更慢且不稳。3 那条不是「怕不稳」，是**实测假红**：
-// 判据（`stopVerified` 必须在预算内确认目标已退出）没有错，错的是同一时刻塞三个。
-// 上面那两行是同一台机器、同一份代码、**放宽预算之后**的复测——所以"预算再给宽点就好了"
-// 这个念头已经被否掉了，别再试。
-// `RESTART_TEST_CONCURRENCY=<n>` 可覆盖，供换机器后重测——别凭感觉调。
-const SCENARIO_CONCURRENCY = 2;
+// 读法：**瓶颈是 Windows 进程创建，不是 CPU**——再往上就是让 PowerShell 冷启动互相
+// 排队，反而更慢且不稳。所以「并发几」取决于**这台机器起进程有多快**，而那是
+// `slots.process` 用单核探针 + 核数估出来的（强机 3 / 中档 2 / 弱机 1）。
+//
+// ⚠️ **这个数曾经写死成 2**，理由是「本机实测拐点」。问题在于：拐点位置随机器变。
+// 8 核机器上 2 是对的；32 核的新机器上它是**白等**（每波只跑 2 个，而进程创建
+// 完全跟得上）；2 核老机器上它又太大（两个 PowerShell 冷启动互相拖，双双超时）。
+// 一个数字不可能同时正确三次。
+//
+// `RESTART_TEST_CONCURRENCY=<n>` 仍可覆盖：换机器后若想复核档案给的数，A/B 一次即可，
+// 但**默认值不再需要人记得改**。
+const MACHINE = await machine();
+const SCENARIO_CONCURRENCY = MACHINE.slots.process;
 
 test('Windows restart: independent real processes only', {
   skip: process.platform !== 'win32',
   // 父测试的 timeout 覆盖**全部**子场景。原值 240s 是按串行写的，于是它先把测试判红、
-  // 再让第 8 个场景被取消——一个**代价判据**冒充了功能判据。并发后实测墙钟见文件头，
-  // 这里留出 2 倍余量：它只该在「真的卡住」时触发。
-  timeout: 480000,
+  // 再让第 8 个场景被取消——一个**代价判据**冒充了功能判据。
+  //
+  // 现在按**上一轮实测**给（`budget` = 中位数 × 2.5，钳在静态基准的 1–6 倍）：
+  // 慢机器上它自动变宽（不至于一上来就假红），快机器上它自动收紧（真挂死能早点发现）。
+  // 首跑没有历史时退回静态基准 × 单核探针系数。
+  timeout: budget(MACHINE, 'docs::windows-restart 回归测试', 480000),
   concurrency: true,
 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio restart test '));
@@ -188,10 +202,15 @@ test('Windows restart: independent real processes only', {
     };
     const invoke = (cfg = c, flags = ['--execute']) => {
       fs.writeFileSync(config, JSON.stringify(cfg));
-      // 子进程预算必须**大于**监督器自己的截止时间（`timeoutSeconds: 120`）+ 余量：
+      // 子进程预算必须**大于**监督器自己的截止时间（`timeoutSeconds`）+ 余量：
       // 卡在两者之间时，杀掉监督器的会是我们，而失败会被归因成「超时」而不是它自己的
       // 结论——诊断信息正好丢在最需要它的地方。
-      return run(process.execPath, [script, '--config', config, ...flags], { cwd: dir, timeoutMs: 150000, capture: true });
+      //
+      // **由 `timeoutSeconds` 派生，不写死**：原先写 150000（= 120s + 30s），
+      // 于是有人把 `timeoutSeconds` 调到 180 时，外层预算就悄悄变成了「比内层短」，
+      // 而症状是「Timeout: no process killed」——看上去像功能坏了。
+      const invokeTimeoutMs = (cfg.timeoutSeconds ?? 120) * 1000 + 30000;
+      return run(process.execPath, [script, '--config', config, ...flags], { cwd: dir, timeoutMs: invokeTimeoutMs, capture: true });
     };
     const status = () => { try { return JSON.parse(fs.readFileSync(c.statusFile, 'utf8')); } catch { return null; } };
     const untouched = async () => {

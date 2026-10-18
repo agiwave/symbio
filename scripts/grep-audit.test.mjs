@@ -5,9 +5,23 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { machine, budget } from './gate.d/_machine.mjs'
 
 const script = fileURLToPath(new URL('./grep-audit.mjs', import.meta.url))
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
+
+// 全仓扫描的预算**由本机实测决定**（`_machine.mjs::budget`：上一轮耗时中位数 × 2.5）。
+//
+// 为什么不能写死：这条扫描的耗时几乎全部是「读遍全仓 .rs/.md/.mjs」，它随
+// **磁盘速度、文件数、以及同一时刻还有谁在读盘**变化——本机空闲 2–6s，与 cargo
+// 冷编译同批时 >30s，差一个数量级。写死一个数只能在「太短 ⇒ 假红」与
+// 「太长 ⇒ 真挂死要等很久」之间选一个。
+//
+// `budget` 的 key 与门禁里的任务名对应（`30-docs.mjs` 的 `${name} 回归测试`）。
+// 对不上时退回静态基准 120s（× 单核探针系数），**不会错，只是不自适应**——
+// 所以这里硬写这个字符串是可以接受的：它唯一的失效方式是改名，而改名会让
+// 预算退回保守值，不会造成假红。
+const SCAN_TIMEOUT_MS = budget(await machine(), 'docs::grep-audit 回归测试', 120000)
 function audit(source, { waiver = '', strict = false, scope = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-'))
   try {
@@ -681,10 +695,10 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
     encoding: 'utf8',
     // 这条预算**不是判据**（判据是下面那句 stdout 匹配），它只防「扫描挂死」。
     // 原先 30s：本机空闲时扫全仓约 2–6s，但门禁里 `docs` 与 cargo 同批跑，冷全量
-    // 编译那一次（backend 10m58s、20 核压满）实测扫了 **>30s**，于是 `stdout` 为空、
-    // 报「读数漂了」——一次纯粹的负载假红，而它长得和真漂移一模一样。
-    // 预算短于它要等的工作，就是一条会自己制造假红的判据。
-    timeout: 120000,
+    // 编译那一次（backend 10m58s、8 逻辑核全压满）实测扫了 **>30s**，于是 `stdout`
+    // 为空、报「读数漂了」——一次纯粹的负载假红，而它长得和真漂移一模一样。
+    // 预算短于它要等的工作，就是一条会自己制造假红的判据。见 `SCAN_TIMEOUT_MS`。
+    timeout: SCAN_TIMEOUT_MS,
   })
   assert.match(r.stdout, /S-014 通过：role 格直写存量 \d+ 处，与基线持平/)
 })

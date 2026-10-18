@@ -352,8 +352,41 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       const msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
       return msgs.some((m) => msgTypeOf(m) === 'compression' && m.meta?.compact_trigger === 'retry');
     }, { what: '重试的压缩节点落库', timeoutMs: 30_000 });
-    const msgs = await readSessionMessages(cli, 'e2e-t18');
-    assertTranscriptInvariants(msgs, 'T18 终态');
+    // ⚠️ 这是**终态**判据，不是瞬时判据：压缩会重写历史（被压掉的消息逐条 `removed`，
+    // 同时插入快照帧），落盘与实时面之间有一个中间窗口——那一刻读到的转写里，旧节点
+    // 与快照帧可能同时存在，于是 `seq` 出现重复。实测（2026-10-19 全量门禁）：
+    // 报「seq 未严格递增（23 → 23 @ 72a25359）」，而**单跑必过、四次里红一次**，
+    // 是典型的负载假红（`--only=e2e` 连跑三次全绿）。
+    //
+    // 处置：**有界地等**不变量成立，判据一字不改——等不到照样红，且报的是最后一次的
+    // 具体原因（"waitFor timed out" 对排查没有信息量）。与 `t16-live-order` 同一处置：
+    // 「压缩/落库还没收敛」和「两套序号空间并存」是两件事，不能让前者冒充后者。
+    let msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
+    let invariantError = null;
+    try {
+      assertTranscriptInvariants(msgs, 'T18 终态');
+    } catch (error) {
+      invariantError = error;
+      try {
+        await waitFor(
+          async () => {
+            msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
+            try {
+              assertTranscriptInvariants(msgs, 'T18 终态');
+              return true;
+            } catch (retryError) {
+              invariantError = retryError;
+              return false;
+            }
+          },
+          { what: 'T18 终态转写收敛（压缩重写历史后的 seq 严格递增）', timeoutMs: 15_000 },
+        );
+        invariantError = null;
+      } catch {
+        /* 超时：把最后一次的具体原因交给下面抛出去 */
+      }
+    }
+    if (invariantError) throw invariantError;
     // 重试只删除**被点击的那一个**失败节点（failId）；更早的两个失败节点原样
     // 留在存储里（它们各自都有交代，删除它们不是重试的职责）。
     const compNodes = msgs.filter((m) => msgTypeOf(m) === 'compression');

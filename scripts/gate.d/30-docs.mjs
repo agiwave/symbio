@@ -319,6 +319,13 @@ export const LIBS = [
   'rust-scan',
   'md-table',
   'gate.d/_shared',
+  // `gate.d/_machine`：**这台机器能开多大并发**的唯一来源（核数 / 内存 / 启动负载 /
+  // 单核探针 → slots；上一轮实测 → 超时预算与 LPT 起跑顺序）。
+  //
+  // 登记成 LIBS 而不是 GUARDS：它的判据在 `gate.test.mjs` 里（并发度单调、32 核不许
+  // 只开 8 路、换机换指纹、预算只放大不缩小、档案必须可打印），本体不是独立门禁步骤
+  // ——它**被**每一步用到，自己不判定任何东西。
+  'gate.d/_machine',
   // `gate.d/_logs`：门禁日志的**落点**（每轮一个目录 + 保留最近 N 轮）与**失败详情**
   // 的呈现（末 N 行 + 路径）。被 `gate.mjs` 与两个 e2e 读者共用，本体不是独立
   // 门禁步骤。它治的两个病都关于「看不到」：上一轮的失败证据被下一轮冲掉；
@@ -406,7 +413,14 @@ export default {
   // 临时目录、由 `GATE_EXTRA_STAGES` 注入（见 `gate.mjs` 阶段发现处），本阶段才真的
   // 只读，全部任务得以在一批里跑完，没有串行尾。
   parallel: true,
-  concurrency: 8,
+  // 并发度**不写数字**：本阶段的任务几乎全是「spawn 一个 node，扫一遍文件，打印
+  // 结论」，CPU 占用低、大头在 readdir/readFile ⇒ IO 密集，超订有益。具体给几路
+  // 由机器档案的 `slots.io` 决定（见 `_machine.mjs::derive`）：
+  // 2 核机器给 2 路、8 核给 8 路、16 核以上给 16 路。
+  //
+  // 这里曾经写死 `concurrency: 8`——那是「当时那台 8 逻辑核机器」的核数，
+  // 换到 4 核机器上就是 8 路抢 4 个核，换到 32 核机器上就是让 24 个核空转。
+  concurrencyKind: 'io',
   *tasks() {
     for (const name of [...GUARDS, ...TEST_ONLY]) {
       yield {
