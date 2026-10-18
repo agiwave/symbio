@@ -249,7 +249,7 @@ impl CircuitBreaker {
 /// |---|---|
 /// | 判据（阈值、低于即淘汰） | [`Self::should_eliminate`]（纯函数） |
 /// | 那一格事件（`verdict × asserted`） | [`Self::elimination_event`] / [`Self::restoration_event`] |
-/// | 什么时候判、对谁判 | 调用方（`plugins/session/v2_facts` 的轮末步） |
+/// | 什么时候判、对谁判 | 调用方（`plugins/session/derived_facts` 的轮末步） |
 ///
 /// ## 为什么 actor 是仲裁者而不是被淘汰主体
 ///

@@ -813,7 +813,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
                 "m-add-0",
                 crate::symbio_core::EVENT_MESSAGE_ADDED,
                 crate::symbio_core::Entity::Message,
-                // `turn = 0`：种子是裸数据，不属于任何一轮（与 v2_messages::append 同约定）。
+                // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 crate::symbio_core::Verb::Opened,
                 0,
                 crate::symbio_core::authz::PRINCIPAL_USER,

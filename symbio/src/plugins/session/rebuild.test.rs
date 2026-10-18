@@ -430,7 +430,7 @@ fn supplement_gets_a_stable_synthetic_id() {
     assert_eq!(a[0].text, "插一句");
 }
 
-/// 补充格的形状必须**逐字复刻落库那一份**（`v2_exec::supplement_into_request`）：
+/// 补充格的形状必须**逐字复刻落库那一份**（`turn_exec::supplement_into_request`）：
 /// 无 `msg_type`、无 `status`、带 `meta.supplement*` 三键。任一格不同，同一条补充
 /// 在实时面与重建面就是两个节点。
 #[test]
@@ -577,7 +577,7 @@ fn text_content_is_plain_text() {
 
 /// 一条 `message.edited`：载荷由**写侧同一条序列化路径**造出来
 /// （`serde_json::to_value(&msg)` 再包一层 `{"message": …}`，见
-/// `v2_messages::edited`）。手写 JSON 会让判据钉住我抄的那份，而不是写侧真的落的东西。
+/// `message_events::edited`）。手写 JSON 会让判据钉住我抄的那份，而不是写侧真的落的东西。
 fn edited_event(msg: crate::symbio_core::chat_node::ChatNode) -> Event {
     Event::pending(
         "m-edit-0",
@@ -901,7 +901,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
 
 // ── ⑦ 诞生格：`message.added`（S2.7-b3 前置，ADR-054）─────────────────
 
-/// 一条 `message.added`：载荷 = 完整 `ChatNode` 列表（写侧 `v2_messages::added`
+/// 一条 `message.added`：载荷 = 完整 `ChatNode` 列表（写侧 `message_events::added`
 /// 直给，同一条序列化路径——手写 JSON 会钉住我抄的那份）。
 fn added_event(msgs: Vec<crate::symbio_core::chat_node::ChatNode>) -> Event {
     Event::pending(

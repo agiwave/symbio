@@ -124,14 +124,14 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 1. **现网 `Capability::execute(args, &ExecEnv, ctx) -> Result<Value, PluginError>` 已经是
    `Run::Cap` 的完整形态**。19 个工具无一需要 `&Store`；让它们都拿到一个 store 句柄，
    是在为一个假设给所有人加参数。
-2. **「谁落格」现在有唯一答案**：调用方（`v2_exec` 收束时写）。改成执行体自己产 Fact，
+2. **「谁落格」现在有唯一答案**：调用方（`turn_exec` 收束时写）。改成执行体自己产 Fact，
    等于同时改 19 个实现的职责与网格的写方纪律——那是另一个批次，不是搬迁。
 3. **`Vec<Fact>` 需要 `ExecError` 与事实网格的类型打通**，那是 core 的形状变更，
    必须走 CS-002 并有 ADR。迁移批次里夹带它，会把 300 行熔断线直接顶穿。
 
 因此：**`Run` 本批只有 `Policy` 与 `Cap(Arc<dyn Capability>)` 两个变体**。`Exec` 签名在
 **第一个真正需要 Store 的能力族**出现时再引入，届时它的 `&Store` 是 per-session 的
-`EventWalStore`（与 `v2_exec` 今天持有的同一个），不会是全局 store。
+`EventWalStore`（与 `turn_exec` 今天持有的同一个），不会是全局 store。
 
 > PL-014 §4 的 `Exec` 段与 §5 步骤 4 已据此订正（随本设计的提交一起）。
 
@@ -310,9 +310,9 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 | 任务 | 与本文的关系 | 处置 |
 |---|---|---|
 | [T-158-工具名硬编码归一为能力元数据](../009-task/158-工具名硬编码归一为能力元数据.md) | 它往 `CapabilityMeta` 加元数据位（`provides_assign_work` 等），正是 `Row` 的载荷要透出的东西 | **已落地**（步 1 `f21342b1` / 步 2 `d5f70d23`）。4a 开工前它须已闭环——否则 `row.meta()` 读到的声明位要分两批接线 |
-| [T-162-ClassifyOnly快速档路径裁决](../009-task/162-ClassifyOnly快速档路径裁决.md) | 它的 `where` 含 `v2_exec.rs`，与 `policy.reflex` 的接线点相邻 | 冲突面仅邻行；`policy.classify` 按胶囊名派发，不受令牌接线影响 |
+| [T-162-ClassifyOnly快速档路径裁决](../009-task/162-ClassifyOnly快速档路径裁决.md) | 它的 `where` 含 `turn_exec.rs`，与 `policy.reflex` 的接线点相邻 | 冲突面仅邻行；`policy.classify` 按胶囊名派发，不受令牌接线影响 |
 | [T-163-插件层特判审计守卫](../009-task/163-插件层特判审计守卫.md) | 它给插件层补审计脚本——「按名硬编码」的守卫正对着本表的 `RowKind` | 4a 落地时**同时**请它加一条「按名硬编码工具」的守卫，否则回流无人拦 |
-| [T-160-v2文件前缀退役](../009-task/160-v2文件前缀退役.md) | `v2_exec` 等 8 个文件改名——`loop_registry` 的接线点在这些文件里 | 顺序无强约束；若 T-160 先动，`loop_registry` 的 `super::` 路径不变 |
+| [T-160-v2文件前缀退役](../009-task/160-v2文件前缀退役.md) | `turn_exec` 等 8 个文件改名——`loop_registry` 的接线点在这些文件里 | 顺序无强约束；若 T-160 先动，`loop_registry` 的 `super::` 路径不变 |
 
 ## §8 风险与不动清单
 

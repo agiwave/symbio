@@ -7,7 +7,7 @@
 //!
 //! 覆盖面（诚实划界）：**无工具轮与工具轮**。工具分发走工具执行层
 //! （`process_tool_calls_async`：超长结果存档、生命周期钩子、审批与恢复都在里面），
-//! 由 [`super::v2_tools::SessionDispatchPort`] 经 core 的 [`crate::symbio_core::DispatchPort`]
+//! 由 [`super::tool_dispatch::SessionDispatchPort`] 经 core 的 [`crate::symbio_core::DispatchPort`]
 //! 契约接入——**分发是插件侧的实现细节，不是第二条执行链**。
 //!
 //! ## 反射档（S11 快路）：第三条路，也是唯一不调模型的一条
@@ -35,12 +35,12 @@
 //! 而是本轮的派生副作用——运行器一处都不写，写方只有轮末这两个函数
 //! （溯源锚 = 这里原生写的 `u-{turn}` 格）：
 //!
-//! - [`super::v2_facts::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
+//! - [`super::derived_facts::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
 //!   步 22 技能观测与编译；
-//! - [`super::v2_facts::record_derived`]：承诺（`commitment_events`，S08 §3）/
-//!   任务表（`v2_tasks::write`，S7 步 16–18）/ 熔断（`CircuitBreaker::break_event`，
+//! - [`super::derived_facts::record_derived`]：承诺（`commitment_events`，S08 §3）/
+//!   任务表（`task_events::write`，S7 步 16–18）/ 熔断（`CircuitBreaker::break_event`，
 //!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
-//!   熔断理由），由 [`super::v2_tools::SessionDispatchPort`] 经 `take_derived` 交回。
+//!   熔断理由），由 [`super::tool_dispatch::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
@@ -176,7 +176,7 @@ enum UiFrame {
         kind: UiNodeKind,
     },
     /// 屏障：收到即回执。给「通道外的发射方」一个**同步点**——
-    /// 分发方（[`super::v2_tools::SessionDispatchPort`]）既走通道（定格正文）
+    /// 分发方（[`super::tool_dispatch::SessionDispatchPort`]）既走通道（定格正文）
     /// 又直接写出口（工具节点，`process_tool_calls_async` 只认 `ExecEventSink`），
     /// 两条路不排序就会让工具卡片跑到正文之前。
     Barrier(tokio::sync::oneshot::Sender<()>),
@@ -325,7 +325,7 @@ impl FrameQueue {
             // 睡下去，再没有第二次通知。
             //
             // 这个失效形态是**静默**的：不 panic、不超时、不占 CPU，只是永远不返回。
-            // 它在本函数上真实发生过一次（见 `v2_exec.test.rs` 里 `drained` 的注释）。
+            // 它在本函数上真实发生过一次（见 `turn_exec.test.rs` 里 `drained` 的注释）。
             // `tokio::sync::Notify` 的规范解法就是这个顺序：先拿到 future、`enable()`
             // 登记兴趣，然后才去检查条件。
             let notified = self.notify.notified();
@@ -346,7 +346,7 @@ impl FrameQueue {
 
     /// 当前排队帧数（判据与测试用）。
     /// ⚠️ `#[cfg(test)]`：这两个是**判据用的观察口**，只有
-    /// `v2_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
+    /// `turn_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
     /// 判死代码。标 cfg(test) 而不是加 `dead-code-allow` 豁免——豁免是给「生产里
     /// 确实需要、只是暂时没人调」的东西用的，而这里的需求本来就不在生产侧。
     #[cfg(test)]
@@ -356,7 +356,7 @@ impl FrameQueue {
 
     /// 软超容累计（恒应为 0）。
     /// ⚠️ `#[cfg(test)]`：这两个是**判据用的观察口**，只有
-    /// `v2_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
+    /// `turn_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
     /// 判死代码。标 cfg(test) 而不是加 `dead-code-allow` 豁免——豁免是给「生产里
     /// 确实需要、只是暂时没人调」的东西用的，而这里的需求本来就不在生产侧。
     #[cfg(test)]
@@ -368,7 +368,7 @@ impl FrameQueue {
 /// 流式 UI 桥（DeltaSink 侧）：同步回调里只做「分帧 + 投递」——真正的
 /// `emit`（异步）由执行任务里的接收端驱动（见模块文档）。
 ///
-/// `pub(crate)`：工具分发方（[`super::v2_tools::SessionDispatchPort`]）要经
+/// `pub(crate)`：工具分发方（[`super::tool_dispatch::SessionDispatchPort`]）要经
 /// [`UiBridge::finalize_node`] 定格本轮正文——它必须与增量帧走**同一条通道**，
 /// 否则定格帧会越过队列里未消化的增量先到，正文被追加到已定格的副本之后。
 pub(crate) struct UiBridge {
@@ -471,7 +471,7 @@ impl UiBridge {
             return; // 接收端已退出（生成结束）：没有待落帧可言。
         }
         // 屏障没走完 = **同步点失效**，不是「无所谓的失败」：定格帧还压在队列里，
-        // 而调用方（`v2_tools::dispatch` 的 ①）紧接着就把工具节点**直接**写出口——
+        // 而调用方（`tool_dispatch::dispatch` 的 ①）紧接着就把工具节点**直接**写出口——
         // 那正是本函数存在的理由（见那里的注释：工具卡片会跑到正文之前）。
         //
         // 接收端只在两种情况下丢掉 `done`：emitter 任务被 abort，或它 panic；两者都
@@ -591,7 +591,7 @@ impl DeltaSink for UiBridge {
 /// 抽干口：返回一批补充（正文 + 原条数），或 `None` = 没有。
 ///
 /// 由 `chat_loop` 从 `SupplementDrain` 适配而来（它要 config / change_subs / 会话状态，那个
-/// 类型不进 `V2Turn`）。测试直接给闭包，于是能造「只返回一次」这种形状。
+/// 类型不进 `ExecTurn`）。测试直接给闭包，于是能造「只返回一次」这种形状。
 pub(crate) type SupplementFn =
     Arc<dyn Fn() -> Option<super::chat_loop::state::DrainedSupplement> + Send + Sync>;
 
@@ -602,7 +602,7 @@ pub(crate) type SupplementFn =
 /// `round_hook.rs`。
 pub(crate) use super::round_hook::RoundHookFn;
 
-pub(crate) struct V2Turn<'a> {
+pub(crate) struct ExecTurn<'a> {
     /// 会话（v2 WAL 目录与会话配置的持有者）。
     pub session: &'a PersistentChatSession,
     /// 本轮生效的模型服务（core trait 的 trait object）。
@@ -639,10 +639,10 @@ pub(crate) struct V2Turn<'a> {
     /// `None` ⇒ 新开一轮。见 [`ResumedTool`] 与 core 的 `TurnResume`。
     pub resume: Option<ResumedTool>,
     /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
-    /// [`super::v2_facts::record_learning`] 落一条 `memory.recalled`。
+    /// [`super::derived_facts::record_learning`] 落一条 `memory.recalled`。
     ///
     /// 它**不是**轮次事实（轮次事实由运行器原生入格），而是派生事实——写方是
-    /// [`super::v2_facts::record_learning`]（见该函数文档）。
+    /// [`super::derived_facts::record_learning`]（见该函数文档）。
     /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
     /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
     ///
@@ -678,7 +678,7 @@ pub(crate) struct V2Turn<'a> {
     /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能）——
     /// 那时本轮照常走 `run_with_tools`。填充点唯一：
     /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
-    pub skill_hits: &'a [super::v2_skills::SkillLlmHit],
+    pub skill_hits: &'a [super::skill_events::SkillLlmHit],
     /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
     /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
     /// （见 [`TurnInput::prefix`](crate::plugins::session::turn_runner::TurnInput::prefix)）。
@@ -725,7 +725,7 @@ pub(crate) struct V2Turn<'a> {
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
-pub(crate) struct V2TurnResult {
+pub(crate) struct ExecTurnResult {
     /// 收口用产物（正文 / 节点 id）——`TurnOutput` 同形，收口步骤 5–7 只认这一份结构。
     pub output: TurnOutput,
     /// 本轮 v2 原生**额外产生**的消息（工具轮：助手中途正文 + ToolCall + 工具结果），
@@ -1050,7 +1050,7 @@ pub(crate) async fn execute_final_reply_turn(
     // **补落寄存的变更**（T-055）：答话轮同样持写者令牌，故它也是一个落格窗口。
     // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
     // 复用的是**上面这个持令牌的 `store`**，不是另开一个（令牌是文件锁，见 `drain_parked`）。
-    super::v2_messages::drain_parked(&dir, &store);
+    super::message_events::drain_parked(&dir, &store);
     let snapshot = store.range(Seq::new(0));
     // turn 号口径与 [`execute_turn`] 同源（WAL 内既有 `user.message` 计数）——两处各写
     // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
@@ -1115,8 +1115,8 @@ pub(crate) async fn execute_final_reply_turn(
     Ok(())
 }
 
-pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, PluginError> {
-    let V2Turn {
+pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, PluginError> {
+    let ExecTurn {
         session,
         provider,
         parent,
@@ -1157,13 +1157,13 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?,
     );
     // **补落寄存的变更**（T-055）：一轮正在跑时它持着写者令牌，此刻来的编辑 /
-    // 截断拿不到令牌 ⇒ `NotTheWriter` ⇒ 该变更被寄存在进程内（`v2_messages::PARKED`）。
+    // 截断拿不到令牌 ⇒ `NotTheWriter` ⇒ 该变更被寄存在进程内（`message_events::PARKED`）。
     // 本函数是**持令牌的那一刻**，寄存的变更在此补落。
     //
     // 位置在 `snapshot` 之前：本函数后面的所有判据（turn 号 / 续写锚 / 幂等键）
     // 都从 `store.range(...)` 折，补落改变了 live 段 ⇒ 必须在读切片之前落完，
     // 否则本轮会站在一份**缺了那次编辑**的状态上做判断。
-    super::v2_messages::drain_parked(&dir, &store);
+    super::message_events::drain_parked(&dir, &store);
     let snapshot = store.range(Seq::new(0));
 
     // turn 号与续写锚点：
@@ -1203,7 +1203,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     };
 
     // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
-    // 执行完随 `V2TurnResult` 回灌进 `context.messages`（落库动作就是
+    // 执行完随 `ExecTurnResult` 回灌进 `context.messages`（落库动作就是
     // `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
     // 重启即丢，而 t19 等的正是落库那条。
     let collected: Arc<std::sync::Mutex<Vec<ChatNode>>> =
@@ -1296,7 +1296,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // 先做**一次**匹配，再问表"这一格要不要走快路"。判据在
     // `loop_registry` 的 `policy.reflex`（`resume_allowed ∧ has_match`），
     // 本处只提供两个布尔并执行命中结果——`hit` 全程留在本地，表不接触它。
-    let matched = super::v2_skills::take_match(skill_hits, user_text);
+    let matched = super::skill_events::take_match(skill_hits, user_text);
     let reflex_state =
         super::loop_registry::LoopState::reflex(resume_anchor.is_none(), matched.is_some());
     let hit = match super::loop_registry::builtin()
@@ -1352,9 +1352,9 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
 
     let mut produced = Vec::new();
     // 工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）——只有工具轮（深度档）才有，
-    // 反射档与无工具轮保持默认空值。轮末随收束落格（写方 = `v2_facts::record_derived`，
+    // 反射档与无工具轮保持默认空值。轮末随收束落格（写方 = `derived_facts::record_derived`，
     // 见下方）。
-    let mut derived = super::v2_tools::DerivedFacts::default();
+    let mut derived = super::tool_dispatch::DerivedFacts::default();
     let outcome = match &hit {
         // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
         // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
@@ -1363,7 +1363,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         Some(h) => {
             crate::plugin_info!(
                 "session",
-                "[v2-exec] 技能快路命中（skill_id={}），本轮不调模型",
+                "[turn-exec] 技能快路命中（skill_id={}），本轮不调模型",
                 h.skill_id
             );
             let tok = TokenIssuer::issue_reflex();
@@ -1400,7 +1400,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
 inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report)| {
                     let store = store.clone();
                     let actor = actor.clone();
-                    // 折进的消息往收集器 push（末尾随 `V2TurnResult` 回灌进落库镜像）。
+                    // 折进的消息往收集器 push（末尾随 `ExecTurnResult` 回灌进落库镜像）。
                     let sink_msgs = collected.clone();
                     // 汇报「产生即上线」借本轮那条流式桥送帧（`UiBridge::on_tool_frame`）。
                     // 克隆而非搬走：`bridge` 之后还要交给运行器，而函数末尾的 `drop(bridge)`
@@ -1524,7 +1524,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
                 // 对话面开场白（T-056，`Escalate` 首响）：由 `chat_loop::apply_verdict`
-                // 产出、随 `V2Turn` 递进来，运行器据它落 `chat.assistant.opening` 格
+                // 产出、随 `ExecTurn` 递进来，运行器据它落 `chat.assistant.opening` 格
                 // （开场白后面照常进工具循环，故不占收束格）。
                 opening_text: opening_text.map(str::to_string),
                 opening_dialog,
@@ -1561,7 +1561,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
-            let dispatcher = super::v2_tools::SessionDispatchPort::new(
+            let dispatcher = super::tool_dispatch::SessionDispatchPort::new(
                 parent,
                 ctx,
                 sink.clone(),
@@ -1597,7 +1597,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     // chat_loop 的 `finalize_assistant_turn` 发出（用 `TurnOutput` 里的这两个 id），
     // 而**落库**则由 `TurnOutput::into_messages` 按同一批 id 建节点。
     //
-    // 工具轮的那几轮在 `v2_tools::dispatch` 里已经定格并取走了 ⇒ 这里拿到的是
+    // 工具轮的那几轮在 `tool_dispatch::dispatch` 里已经定格并取走了 ⇒ 这里拿到的是
     // **最后一轮**（无工具调用那一轮）的节点；没有推理就是 `None`（`on_reasoning`
     // 一次都没被调过），不是空节点。
     let (child_id, child_text) = bridge.current_node().unwrap_or_default();
@@ -1616,7 +1616,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     // **半截产出随出口带走**（`partial`）：末轮正文 / 思考此刻还只攒在桥上，丢了它们
     // 用户中断前看到的那半句话就消失。消费循环把 `partial` 收尾入格
     // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
-    // （`produced`）同走这条通道——中止出口不再回灌 `V2TurnResult`，不带上就没了。
+    // （`produced`）同走这条通道——中止出口不再回灌 `ExecTurnResult`，不带上就没了。
     if outcome.aborted {
         let mut partial = produced;
         if !child_text.is_empty() {
@@ -1658,13 +1658,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     if outcome.closure_denied {
         crate::plugin_warn!(
             "session",
-            "[v2-exec] 收束被授权拒绝，本轮派生事实不入格（turn={turn_no}）"
+            "[turn-exec] 收束被授权拒绝，本轮派生事实不入格（turn={turn_no}）"
         );
         // 被拒的兜底仍是**失败**（I3）：呈现走 Failed 出口，与未拒时同形。
         if outcome.fell_back {
             return Err(PluginError::InternalError(outcome.text));
         }
-        return Ok(V2TurnResult {
+        return Ok(ExecTurnResult {
             output: TurnOutput {
                 text: outcome.text,
                 reasoning: reasoning_text,
@@ -1708,7 +1708,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
             // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
             // 在 `ctx` 被移进分发口之前取好）。
-            if let Err(why) = super::v2_facts::record_derived(
+            if let Err(why) = super::derived_facts::record_derived(
                 &wal,
                 &store,
                 &all,
@@ -1721,14 +1721,17 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 &derived.tasks,
                 &derived.breaks,
             ) {
-                crate::plugin_warn!("session", "[v2-exec] 承诺入格失败（turn={turn_no}）：{why}");
+                crate::plugin_warn!(
+                    "session",
+                    "[turn-exec] 承诺入格失败（turn={turn_no}）：{why}"
+                );
             }
             // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
             // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
             // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
-            super::v2_facts::record_elimination(store.as_ref(), turn_no, user_seq);
+            super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
             // 记忆与学习：同一函数（`record_learning`）。
-            super::v2_facts::record_learning(
+            super::derived_facts::record_learning(
                 &wal,
                 // `store` 是 `Arc<WalStore>`（轮内注入闭包要 `'static`），而本函数
                 // 收 `&WalStore` ⇒ 要一次显式 deref。写 `store.as_ref()` 而不是
@@ -1752,7 +1755,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         // 那比不写更坏（`produced_by` 是 I2 的判据）。
         None => crate::plugin_warn!(
             "session",
-            "[v2-exec] 本轮用户格缺失，记忆与学习不入格（turn={turn_no}）"
+            "[turn-exec] 本轮用户格缺失，记忆与学习不入格（turn={turn_no}）"
         ),
     }
 
@@ -1776,7 +1779,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .unwrap_or_default();
     all_messages.extend(produced);
 
-    Ok(V2TurnResult {
+    Ok(ExecTurnResult {
         output: TurnOutput {
             text: outcome.text,
             reasoning: reasoning_text,
@@ -1857,19 +1860,19 @@ fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
 }
 
 #[cfg(test)]
-#[path = "v2_exec.test.rs"]
+#[path = "turn_exec.test.rs"]
 mod tests;
 
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/plugins/session/v2_exec.rs::current_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::current_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::finalize_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::finalize_reasoning_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::on_delta: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::on_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::send: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::close: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_exec.rs::pop: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::current_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::current_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::finalize_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::finalize_reasoning_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::on_delta: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::on_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::send: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::close: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/turn_exec.rs::pop: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

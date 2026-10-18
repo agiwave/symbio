@@ -77,7 +77,7 @@ pub struct Case {
 // ───────────────────────── 召回主体 ─────────────────────────
 
 /// 把评测池喂给**生产排序内核**：`query` 驱动内容匹配（生产读侧
-/// `v2_memory::recall_view` 的口径），seq 用池下标（全序 ⇒ 确定性）。
+/// `memory_events::recall_view` 的口径），seq 用池下标（全序 ⇒ 确定性）。
 fn production_recall(pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
     let entries: Vec<ScoreEntry> = pool
         .iter()

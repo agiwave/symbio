@@ -903,11 +903,11 @@ fn events_of(dir: &std::path::Path) -> Vec<Event> {
     store.range(Seq::new(0))
 }
 
-/// 往事实源里种一条事实，让 `v2_messages` 的溯源锚有处可站。
+/// 往事实源里种一条事实，让 `message_events` 的溯源锚有处可站。
 ///
 /// 空切片（会话还没有任何事实）时变更事实会被按口径丢弃（「不硬造一个号」）——
 /// 生产里压缩记录出现前必然已有轮次事实，测试里补的就是这颗种子。
-/// **作用域包住**：种子的写者令牌必须释放，否则 `v2_messages` 自己开 WAL 时
+/// **作用域包住**：种子的写者令牌必须释放，否则 `message_events` 自己开 WAL 时
 /// 拿到 `NotTheWriter` ⇒ 事实静默丢弃。
 fn seed_fact(dir: &std::path::Path) {
     let wal = dir.join(V2_WAL_FILE);

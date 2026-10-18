@@ -77,7 +77,7 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// ## 它为什么是事实（缺口 4）
 ///
 /// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
-/// 发点在**工具批次边界**（`v2_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
+/// 发点在**工具批次边界**（`turn_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
 /// 用户轮只经过一次请求，而工具循环在运行器的环体里，真实的工具轮数只在那里
 /// （载荷里的 `tool_rounds` 就是它；计数口径见 [ADR-074](../../../../docs/010-adr/074.md)）。
 /// 该不该说是 `ProgressPolicy::due` 的四条与关系：开关开着 ∧ 沉默够久 ∧
@@ -253,7 +253,7 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
 /// `vec` 是向量索引的载荷位：**索引未建时写 `[]`**——内容恒在 `content` 里，
-/// 索引落成时按 `content` 回填即可（写方 `plugins/session/v2_memory.rs`）。
+/// 索引落成时按 `content` 回填即可（写方 `plugins/session/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
@@ -272,7 +272,7 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 /// 而唯一的防线是「编译事件恰好不带 `fallback`」（`calibration.rs` 的注释写着
 /// 「编译事件不计」，读起来像判据，其实是巧合）。
 ///
-/// 给它一格之后，读侧按 `kind` 过滤，判别回到闭集。写侧不变（仍是轮末 `v2_facts`
+/// 给它一格之后，读侧按 `kind` 过滤，判别回到闭集。写侧不变（仍是轮末 `derived_facts`
 /// 收束族，**不开第二写通道**——I1）。
 pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
@@ -298,7 +298,7 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
 // 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`。
 //
-// 写方 = `plugins/session/v2_tasks`（会话任务清单 `todo_write` 的转写，
+// 写方 = `plugins/session/task_events`（会话任务清单 `todo_write` 的转写，
 // 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）。
 
 /// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。

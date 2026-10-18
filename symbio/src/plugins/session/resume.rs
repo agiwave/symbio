@@ -37,7 +37,7 @@ use super::chat_session::PersistentChatSession;
 use super::chat_session::{Carrier, MessageChange};
 use super::tools::{apply_not_executed, execute_tool_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
-use super::v2_exec::ResumedTool;
+use super::turn_exec::ResumedTool;
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };

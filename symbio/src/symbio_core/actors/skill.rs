@@ -14,7 +14,7 @@ impl SkillCompiler {
     ///
     /// 信封里的 `actor` / `turn` 是**占位**（本机主智能体 / `0`）：核心契约只管
     /// 「这条事件说什么」，记在谁头上、发生在哪一轮由部署的写方落格前归位
-    /// （`plugins/session/v2_skills.rs::compile`——`memory × *` 的 actor 是属主，
+    /// （`plugins/session/skill_events.rs::compile`——`memory × *` 的 actor 是属主，
     /// 召回投影按它过滤，占位不归位技能就进不了召回视图）。
     pub fn compile(&self, skill_id: &str, trigger: &str, response: &str, source_seq: u64) -> Event {
         Event::pending(
@@ -25,7 +25,7 @@ impl SkillCompiler {
             0,
             // 占位 actor 一律走常量，不写字面量：`session/xxx` 形态的裸串会被
             // plugin-entry-audit 的 E-005 当成路由地址查一遍（ADR-043：名字是数据、
-            // 单点定义）。写方落格前归位，见 `v2_skills::compile`。
+            // 单点定义）。写方落格前归位，见 `skill_events::compile`。
             crate::symbio_core::authz::PRINCIPAL_MAIN,
         )
         .with_produced_by(source_seq) // 溯源 100%：指向源轨迹

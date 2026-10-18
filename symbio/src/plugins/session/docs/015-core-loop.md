@@ -22,7 +22,7 @@ created: 2026-09-16
 
 主循环 = **前步骤**（请求解析 → 开会话 → `TurnState` → resume）+ **loop**（7 步）+
 **唯一收尾点 `finish_turn`**。循环只能由 `return finish_turn(...)` 离开，没有旁路出口。
-第 4 步把整轮交给 v2 运行器（`v2_exec::execute_turn`）——**工具循环在运行器内部**，
+第 4 步把整轮交给 v2 运行器（`turn_exec::execute_turn`）——**工具循环在运行器内部**，
 不在 `close_turn` 里（见 §4.1）。
 
 四个收口点 + 一个状态容器（§2）：
@@ -60,9 +60,9 @@ created: 2026-09-16
                / compress_with_snapshot_core       context/pipeline.rs
              + persist_messages / open_chat_session / emit_streaming_start
                / fire_*_hook                        chat_loop/io.rs
-④ 单轮执行层 v2_exec::execute_turn              v2_exec.rs
+④ 单轮执行层 turn_exec::execute_turn            turn_exec.rs
              + TurnRunner::run_with_tools          turn_runner.rs（工具循环在这里）
-             + SessionDispatchPort::dispatch       v2_tools.rs
+             + SessionDispatchPort::dispatch       tool_dispatch.rs
              + process_tool_calls_async            tools/tool_executor.rs
 ```
 
@@ -88,7 +88,7 @@ created: 2026-09-16
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
 | 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
 | 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
-| 4 | `v2_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
+| 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
 | 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
 | 7 | `finalize_turn_root` | 封根 Turn——子树收敛之后发出**即将落库的那条节点** | 收尾 |
@@ -328,9 +328,9 @@ pub async fn run_chat_loop(
         };
 
         // 步骤 4 · 推理 + 工具（整轮交给 v2 运行器；中止检查点在运行器内部）
-        //   V2Turn 收齐：会话 / provider / 父插件 / 目录 / 提示词 / 中止 / 根 id / 出口 /
+        //   ExecTurn 收齐：会话 / provider / 父插件 / 目录 / 提示词 / 中止 / 根 id / 出口 /
         //   用户文本与节点 id / 窗口 / 工具 / 恢复锚点 / 记忆与技能 / 前缀 / 压缩 / 注入。
-        let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn { … }).await {
+        let out = match super::turn_exec::execute_turn(super::turn_exec::ExecTurn { … }).await {
             Ok(res) => { context.messages.extend(res.messages); res.output }  // 工具轮产物并入镜像
             Err(PluginError::Aborted { partial }) =>
                 return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(partial)).await,

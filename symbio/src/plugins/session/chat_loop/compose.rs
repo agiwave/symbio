@@ -253,7 +253,7 @@ async fn compose_text_from(
 /// 2. **拿会话视图而不是整个 context**：`ComposeRequest` 里那一段就是
 ///    `context.messages` 的一个切片，拆开传同一个信息、不丢东西。
 ///
-/// 调用方（`chat_loop::round_report_hook`）拿到文本后交回 `v2_exec`——
+/// 调用方（`chat_loop::round_report_hook`）拿到文本后交回 `turn_exec`——
 /// 因为落格要 `EventWalStore`，而开着它的是那边。
 pub(crate) async fn report_text(
     orchestrator: &ChatOrchestrator,

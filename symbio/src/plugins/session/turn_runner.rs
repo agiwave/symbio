@@ -43,7 +43,7 @@ use std::borrow::Cow;
 // 一个函数调用：用户消息入格 → [`Reasoner`] 生成（实测耗时）→ final / fallback
 // 落格（I3：失败也必须有输出）。不变量靠构造成立：每轮独立 turn 号（N3）、
 // final 溯源指向本轮用户消息（N5）、实测 cost_ms 随事件入账（ADR-044）。
-// 会话轮与彩排共用本运行器：会话轮由 chat_loop 经 [`super::v2_exec`] 驱动，
+// 会话轮与彩排共用本运行器：会话轮由 chat_loop 经 [`super::turn_exec`] 驱动，
 // 彩排由真实端点校准使用。
 
 /// 一轮的**调度输入**（会话轮与彩排共用的入参包）。
@@ -92,7 +92,7 @@ pub struct TurnInput {
     /// ①：`"session/main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
     ///
     /// 身份是数据不是常量：同一个会话引擎跑在哪个 agent 上，由**调用方**说了算
-    /// （`plugins/session/v2_exec` 从会话元数据派生）。S08 §4 的平凡值是
+    /// （`plugins/session/turn_exec` 从会话元数据派生）。S08 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
     /// **请求级前缀**：排在基线 prompt **之前**的一段文本（通常是多行），
@@ -145,7 +145,7 @@ pub struct TurnInput {
     /// 但 core **不该**知道那是「收件箱补充」——那是插件侧的概念（收件箱、
     /// `merge_supplements`、`ChatNode` 合并都在 `plugins/session`）。于是这个口
     /// 收的是**已经折好的消息**（`PromptMessage` 本来就存在），落格也在插件侧做
-    /// （`v2_exec` 自己开着 `EventWalStore`）。
+    /// （`turn_exec` 自己开着 `EventWalStore`）。
     ///
     /// 回调返回**要加进下一次请求的消息**；返回空 vec 是绝大多数轮次的情形。
     ///

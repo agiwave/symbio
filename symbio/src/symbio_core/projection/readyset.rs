@@ -48,7 +48,7 @@ pub struct ReadySetView {
 ///
 /// 生产消费方两处（[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：读出口
 /// `session/stats` 的 `readyset` 列，与请求装配时交给执行者的**调度段**
-/// （`plugins/session/v2_tasks::prompt_section`）——本投影给候选集，选哪个是调用方的
+/// （`plugins/session/task_events::prompt_section`）——本投影给候选集，选哪个是调用方的
 /// 策略（见模块头的边界）。
 pub fn readyset() -> Projection<ReadySetView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {

@@ -15,7 +15,7 @@ import './_selfrun.mjs';
 // | 结果**真的回了模型** | mock-llm 的 `/_requests` 回读**第二次请求体** |
 // | 转写里 tool_call 与结果**成对** | 生产读出口 `vdfs/read` 会话叶子（与前端 `loadMessages` 同一出口） |
 //
-// 单测（`v2_exec.test.rs::tool_round_lands_artifact_and_feeds_next_request`）用假 provider
+// 单测（`turn_exec.test.rs::tool_round_lands_artifact_and_feeds_next_request`）用假 provider
 // 覆盖了同一形状，但它证不了"真实 provider + 真实 MCP 工具 + 真实落盘"这条链——
 // 单测里的 provider 是假件，工具分发走的是「没有父插件」的诚实失败路径。
 //

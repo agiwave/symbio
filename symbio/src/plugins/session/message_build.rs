@@ -237,7 +237,7 @@ pub fn llm_build_assistant_messages(
 ///
 /// `id` 由调用方给定：流式期已广播的节点 id **必须复用**（见 [`TurnStreamChildIds`]），
 /// 否则同一段正文在存储层与流式层是两个身份。工具轮的中途正文也走本函数——分发方
-/// 拿流式节点的 id 把这一轮**定格**成一条完整消息（见 `plugins/session/v2_tools.rs`）。
+/// 拿流式节点的 id 把这一轮**定格**成一条完整消息（见 `plugins/session/tool_dispatch.rs`）。
 pub fn llm_build_text_node(
     parent_id: &str,
     content: &str,
@@ -263,7 +263,7 @@ pub fn llm_build_text_node(
 /// `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
 ///
 /// 单点定义：落库视图（[`llm_build_assistant_messages`]）与工具分发方
-/// （`plugins/session/v2_tools.rs`）都经此构造——两处各写一份，工具卡片的形状
+/// （`plugins/session/tool_dispatch.rs`）都经此构造——两处各写一份，工具卡片的形状
 /// 迟早会分叉（前端读的是同一套字段）。
 pub fn llm_build_tool_call_nodes(
     parent_id: &str,

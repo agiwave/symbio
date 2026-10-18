@@ -65,7 +65,7 @@ fn seed_turn(store: &EventWalStore) -> u64 {
     anchor
 }
 
-/// 一条路由观测（生产写方是 `v2_facts::record_learning`，这里直写**同一形状**——
+/// 一条路由观测（生产写方是 `derived_facts::record_learning`，这里直写**同一形状**——
 /// `calibration` 认**自己的格子** `memory.calibrated`，并逐个校载荷字段）。
 fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anchor: u64) {
     store
@@ -87,7 +87,7 @@ fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anch
 
 /// 本会话当前的召回视图（技能就在里面——`tag` 由投影从载荷带出来）。
 ///
-/// viewer 取**属主**（与生产读方 `v2_memory::recall_view` 同一个 viewer）：
+/// viewer 取**属主**（与生产读方 `memory_events::recall_view` 同一个 viewer）：
 /// `memory × *` 的 actor 是属主、投影按 `actor == viewer` 过滤，两个 viewer
 /// 不一致时单测看得到的东西生产看不到（断链就是这么溜进来的）。
 fn view_of(store: &EventWalStore) -> crate::symbio_core::RecallView {
@@ -326,11 +326,11 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
     );
 
     // 截断同源：超长发言按同一个上限截断后，与写方存下的 trigger 对得上。
-    let max = super::super::v2_memory::ENCODE_MAX_CHARS;
+    let max = super::super::memory_events::ENCODE_MAX_CHARS;
     let long = "甲".repeat(max + 50);
     let hits = vec![SkillLlmHit {
         skill_id: "abc".into(),
-        trigger: super::super::v2_memory::truncate_chars(&long, max),
+        trigger: super::super::memory_events::truncate_chars(&long, max),
         content: "先列要点。".into(),
     }];
     assert!(
@@ -341,7 +341,7 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
 
 /// 链路前提（[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点") 的「写侧
 /// 前提」+ [plan/11 批 2 ③](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
-/// 的接线判据）：技能入格后，**生产读方** `v2_memory::recall_view` 必须把它召回，
+/// 的接线判据）：技能入格后，**生产读方** `memory_events::recall_view` 必须把它召回，
 /// 随后 `route` 必须真的判出观测。
 ///
 /// 反向即断链：`memory × *` 的 actor 是属主（`PRINCIPAL_USER`），写方归位前是 core
@@ -372,7 +372,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
         .expect("首次必须产出技能");
     }
 
-    let mut view = super::super::v2_memory::recall_view(&session, "", "session/main")
+    let mut view = super::super::memory_events::recall_view(&session, "", "session/main")
         .expect("技能是一条记忆 ⇒ 视图非空");
     assert!(
         view.entries.iter().any(|e| e.tag == SKILL_TAG),

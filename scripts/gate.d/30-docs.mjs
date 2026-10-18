@@ -99,7 +99,7 @@ export const GUARDS = [
   // （被截断的消息复活、编辑过的内容回退）。它治的病是**机制缺失**不是疏忽——10 个写入口里
   // 6 个没有事实，因为没有任何东西要求「改了列表就必须落事实」。类型强制（`MessageChange` +
   // `apply`）把「漏落事实」变成表达不出来的形态；守卫守的是类型管不住的那半——**有没有第二条路**：
-  // `append_messages` / `v2_messages::{added,edited,removed}` 出 `chat_session/write.rs`
+  // `append_messages` / `message_events::{added,edited,removed}` 出 `chat_session/write.rs`
   // ⇒ LWF-001；`replace_all` 出 `write.rs` 且 ±20 行内没有 `consolidated = Some(...)` 的
   // **真实赋值**（寄存锚，剥注释后匹配——注释里提一句不算寄存）⇒ LWF-002。
   // 判定是**结构性**的：v1 的「就地登记 + `pending` 棘轮」（及 LWF-003/004 两码）随 b3 前置

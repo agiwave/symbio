@@ -168,7 +168,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 8. **同一个 WAL 的写者令牌是独占的**（`wal.rs` 的 `<wal>.lock`，非阻塞 `try_lock`）。
    在测试里先 `EventWalStore::open(...)` 播种、再调被测函数（它自己也会 `open`），
    第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会
-   全线失败。播种要在**独立的块里做完并 drop**（参考 `v2_exec.test.rs` 的
+   全线失败。播种要在**独立的块里做完并 drop**（参考 `turn_exec.test.rs` 的
    `a_skill_hit_never_takes_over_a_resumed_turn`）。
 9. **REPL 的 stdin 是按行消费的**。一条带 `\n` 的发言写进去就是**两轮**（症状：轮次账
    比设计的多出几倍，而系统没坏）。负载类用例的发言文本必须单行；要多字节材料就让

@@ -9,10 +9,10 @@ import './_selfrun.mjs';
 //
 // | 格 | 单测钉在哪 | 这里钉什么 |
 // |---|---|---|
-// | 裁决落格（`verdict.asserted`） | `v2_facts.test.rs` / `actors/mod.test.rs` | 真实轮次真的把裁决写进了 WAL（actor = 仲裁者、载荷六字段） |
+// | 裁决落格（`verdict.asserted`） | `derived_facts.test.rs` / `actors/mod.test.rs` | 真实轮次真的把裁决写进了 WAL（actor = 仲裁者、载荷六字段） |
 // | 闸拒 `agent_run` | `tool_executor/elimination.test.rs` | 工具结果真的是 `Refused: …` 且回灌进了模型下一发请求 |
 // | 跨会话生效 | 同上（部署级扫描） | **另一个会话**的同一次 `agent_run` 同样被拒 |
-// | 幂等 | `v2_facts.test.rs` | 再违约也不落第二条裁决（审计面不缺） |
+// | 幂等 | `derived_facts.test.rs` | 再违约也不落第二条裁决（审计面不缺） |
 //
 // ## 场景（三个轮次）
 //

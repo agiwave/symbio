@@ -22,7 +22,7 @@ import './_selfrun.mjs';
 // 判据要成立，两个写者的写窗口必须真的重叠。若甲在乙启动前就跑完，乙会正常接手
 // （这是合法的顺序轮），用例就变成在断言「不重叠时不会冲突」——什么都没证。
 // 因此甲的场景用 `chunkDelayMs` 把一轮拉长到 ~10 秒：甲在 `execute_turn` 开头就
-// `open` 并持住写者令牌（[`v2_exec`](../../symbio/src/plugins/session/v2_exec.rs)
+// `open` 并持住写者令牌（[`turn_exec`](../../symbio/src/plugins/session/turn_exec.rs)
 // 的 store 是整轮的局部量），足够乙从冷启动走到自己的 `append`。
 //
 // 余量怎么定的：实测乙从 `spawn` 到失败退出约 3 秒（本用例整轮 11 秒、其中甲的
@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 // ## 为什么乙的断言是「失败」而不是「跳过」
 //
 // 批 0 的语义就是**单写者**：第二个写者不该静默地写出重复 seq，而该拿到
-// `AppendError::NotTheWriter`。这个错误经 `v2_exec` 映射成
+// `AppendError::NotTheWriter`。这个错误经 `turn_exec` 映射成
 // `PluginError::InternalError("v2 运行器落格失败：NotTheWriter")` ⇒ 乙这一轮失败、
 // 退出码非零。**失败即正确**：信号可达本身就是本批要证的事。
 import { spawn } from 'node:child_process';
@@ -117,7 +117,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 轮次走 `v2_exec`：store 在**轮首** open、持整轮。
+        // 轮次走 `turn_exec`：store 在**轮首** open、持整轮。
         session: { ...DIALOG_FACE_OFF },
       },
     });

@@ -27,10 +27,10 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     (dir, plugin)
 }
 
-/// 直落一条 `message.added` 事实（形状同 `v2_messages::added` 的产出）。
+/// 直落一条 `message.added` 事实（形状同 `message_events::added` 的产出）。
 ///
 /// 切主后（ADR-049）存储里的正文 = **事实投影**：夹具里「上一轮的世界」也必须
-/// 以事实在场。空切片上，生产收口路径要落的变更事实（`v2_messages::append`）
+/// 以事实在场。空切片上，生产收口路径要落的变更事实（`message_events::append`）
 /// 连溯源锚都解不出、会按口径被丢弃——测的就不再是收口本身。
 fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
     use crate::symbio_core::Store as _;
@@ -51,7 +51,7 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
     .expect("种子事实落格失败");
 }
 
-/// 直落一条用户发言格（生产中每轮首帧的事实，`v2_exec` 落的 `u-{turn}`）。
+/// 直落一条用户发言格（生产中每轮首帧的事实，`turn_exec` 落的 `u-{turn}`）。
 ///
 /// 它是「切片非空」的来处：没有它，后续变更事实连溯源锚都解不出。
 fn seed_user_message(dir: &std::path::Path) {
@@ -225,7 +225,7 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     let sid = "s-abort-turn";
     let store = p.get_store().await.expect("存储不可用");
     store.save_session(&Session::new(sid)).await.unwrap();
-    // 生产中每轮首帧是用户发言格（`v2_exec` 落的 `u-{turn}`）——切片非空是收口
+    // 生产中每轮首帧是用户发言格（`turn_exec` 落的 `u-{turn}`）——切片非空是收口
     // 要落的变更事实的溯源锚来处。
     seed_user_message(&store.session_dir(sid).expect("会话目录未建出"));
 

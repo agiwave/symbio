@@ -16,7 +16,7 @@ fn safe_id_replaces_path_separators_and_colon() {
 #[test]
 fn safe_id_keeps_normal_ids_untouched() {
     assert_eq!(safe_id("plain-id_123"), "plain-id_123");
-    assert_eq!(safe_id("v2_sess_1717_a1b2"), "v2_sess_1717_a1b2");
+    assert_eq!(safe_id("sess_1717_a1b2"), "sess_1717_a1b2");
     // 空 id 归一为占位段名（与资源条目同一规则）；空 / `_t_` 前缀的会话
     // 走不落盘的临时存储，因此这条映射只是防御性一致，不影响任何磁盘路径。
     assert_eq!(safe_id(""), "_empty_");

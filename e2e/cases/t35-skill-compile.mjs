@@ -8,7 +8,7 @@ import './_selfrun.mjs';
 //
 // [11 批 2 ③](../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 的接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
-// `SkillCompiler`：写方挂在 `v2_facts::record_learning`（`v2_exec` 轮末）上，
+// `SkillCompiler`：写方挂在 `derived_facts::record_learning`（`turn_exec` 轮末）上，
 // 读方挂在召回视图（注入段的原料）上。
 //
 // | 要证的事 | 唯一能看见它的地方 |
@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么必须端到端（单测证不了的两件事）
 //
-// 单测（`v2_skills.test.rs`）直接调 `compile` / 召回，把两端的出口判据钉死了，
+// 单测（`skill_events.test.rs`）直接调 `compile` / 召回，把两端的出口判据钉死了，
 // 但它证不了这条链路**真的接在真实轮次上**：
 //
 // 1. **`actor` 归位是生产链路的生死线**：`SkillCompiler::compile` 造的信封 `actor`
@@ -52,7 +52,7 @@ import {
 const SID_A = 'e2e-t35-a';
 const SID_B = 'e2e-t35-b';
 
-/** 注入段抬头（与 `v2_memory.rs::RECALL_SECTION_HEAD` 同一常量口径） */
+/** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径） */
 const HEAD = '【长期记忆】';
 
 /** 第 1 轮：成功收束 ⇒ 编译技能。触发串即用户发言（`trigger = user_text`）。 */
@@ -94,7 +94,7 @@ function recallMessage(req) {
  * ## 切法：空行
  *
  * 三段之间由 `request_view_prefix` 用**空行**分隔（`parts.join("\n\n")`），而
- * `v2_memory::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行
+ * `memory_events::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行
  * 就是本段的结束。比按「下一个抬头」切更稳：抬头是可改的展示文案，空行是分隔约定。
  */
 function recallSectionText(req) {
@@ -148,7 +148,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 技能编译挂在这条路上（`v2_facts::record_learning` 的步 22）。
+        // 技能编译挂在这条路上（`derived_facts::record_learning` 的步 22）。
         // `skill_compile_enabled` **显式打开**：它默认 off（S11 §4 平凡值
         // 「不编译，只检索」），本用例验的正是打开之后的行为，不能依赖默认值。
         session: { ...DIALOG_FACE_OFF, skill_compile_enabled: true },
@@ -226,7 +226,7 @@ export default defineCase(
 
         // ## 校准列里有几条技能？（判据是「TRIGGER 那条的账目」，不是「总共几条」）
         //
-        // `compile` 的去重判据是**同一 trigger 至多一条**（`v2_skills::compile` 的文
+        // `compile` 的去重判据是**同一 trigger 至多一条**（`skill_events::compile` 的文
         // 档），**不是**「一个会话至多一条」——每轮成功收束都按本轮用户发言编一条是
         // 设计（技能集按轨迹生长）。所以这里数「编了几条」是**测错的东西**：A 跑了
         // TRIGGER / R2 / R3 三轮成功轮，`memory.encoded{tag:"skill"}` 就有三条

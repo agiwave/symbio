@@ -23,7 +23,7 @@
  *    **寄存锚**（`consolidated = Some(...)` 的真实赋值，不是注释）：压缩现场不持
  *    写者令牌，取代事实只能寄存给下一个 `execute_turn` 落格。没有锚 ⇒ **LWF-002**
  *    ——一份被取代的前缀在事实源里没有下文，切主读后它原地复活。
- * 3. **事实落格函数**（`v2_messages::{added,edited,removed}`）只能在 `write.rs`
+ * 3. **事实落格函数**（`message_events::{added,edited,removed}`）只能在 `write.rs`
  *    被调用——它们是 `apply` 的实现细节。在外面出现 ⇒ **LWF-001**（第二个写入口）。
  *
  * 锚判定**剥掉注释**再匹配：注释里写「我会寄存」不算寄存——判据曾经被自己的
@@ -65,7 +65,7 @@ const FACT_OWNERS = ['added', 'edited', 'removed']
 
 const ENTRY_CALL_RE = new RegExp(`\\b(?:${[...NODE_PRIMITIVES, ...SNAPSHOT_PRIMITIVES].join('|')})\\s*\\(`)
 const FN_DEF_RE = new RegExp(`\\bfn\\s+(?:${[...NODE_PRIMITIVES, ...SNAPSHOT_PRIMITIVES].join('|')})\\b`)
-const FACT_OWNER_CALL_RE = new RegExp(`\\bv2_messages::(?:${FACT_OWNERS.join('|')})\\s*\\(`)
+const FACT_OWNER_CALL_RE = new RegExp(`\\bmessage_events::(?:${FACT_OWNERS.join('|')})\\s*\\(`)
 /** 寄存锚：取代事实的**真实寄存赋值**（注释里提一嘴不算）。 */
 const PARK_RE = /\bconsolidated\s*=\s*Some\s*\(/
 
@@ -135,7 +135,7 @@ function audit(root) {
       if (!inWriter) {
         violations.push(
           `LWF-001 ${rel}:${call.line}  事实落格函数在 \`write.rs\` 之外被调用（第二个写入口）：${call.text}\n` +
-            '        `v2_messages::{added,edited,removed}` 是 `apply` 的实现细节——从外面走 `MessageChange` + `apply`',
+            '        `message_events::{added,edited,removed}` 是 `apply` 的实现细节——从外面走 `MessageChange` + `apply`',
         )
       }
     }

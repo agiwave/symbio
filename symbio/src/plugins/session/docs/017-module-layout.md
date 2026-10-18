@@ -63,7 +63,7 @@ created: 2026-09-16
 | 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
-| 派生事实 | `v2_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `v2_exec`——[ADR-048](../../../../../docs/010-adr/048.md) |
+| 派生事实 | `derived_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `turn_exec`——[ADR-048](../../../../../docs/010-adr/048.md) |
 
 ### 1.3 支撑单件（一文件一职责）
 

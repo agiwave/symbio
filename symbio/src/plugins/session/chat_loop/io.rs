@@ -62,7 +62,7 @@ pub(crate) async fn persist_messages(
     }
 
     // `Carrier::Runner`：在途助手 / 工具节点的**承载事实由运行器落**（助手正文走
-    // `v2_exec` 的 `assistant.progressed`、工具结果走 `turn_runner` 的 `artifact.added`），
+    // `turn_exec` 的 `assistant.progressed`、工具结果走 `turn_runner` 的 `artifact.added`），
     // 此处再落一条 `message.added` 就是第二个 owner。本处只做「落库 + 回包」——
     // 两处都落就是两个 owner。
     match append_and_publish(

@@ -26,7 +26,7 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
 ///
 /// 取值点 = `metadata.source_principal`（网关 `build_ctx` 落 ctx；收件箱路径由
 /// `run_inbox_turn` 从条目寄存挂回）。**缺省 = 本机用户**——与接线前在
-/// `v2_facts` 调用点写死的常量逐字一致，本机路径（直呼 / 心跳）行为不变。
+/// `derived_facts` 调用点写死的常量逐字一致，本机路径（直呼 / 心跳）行为不变。
 ///
 /// 注意它与 [`request_principal`] 回答的是两个问题：后者是「以谁的身份跑轮」
 /// （会话主体，写事件的 `actor`），这里是「这条消息是谁发的」（跨体承诺的
@@ -129,7 +129,7 @@ pub(crate) struct SessionContext {
     /// 少了一条事件（于是切源之后压缩在重建面上等于没发生过）。
     ///
     /// 于是压缩把「压成了什么」寄存在这里，由下一个 `execute_turn` 落格并归档
-    /// （见 `v2_exec::consolidate_into_wal`）。寄存而不是就地落格，是**唯一**能同时
+    /// （见 `turn_exec::consolidate_into_wal`）。寄存而不是就地落格，是**唯一**能同时
     /// 满足「事实必须落格」与「落格必须持令牌」两条约束的形态。
     ///
     /// 幂等由落格那一侧保证（与 WAL 里最近一份快照逐 id 比对）：同一轮里
@@ -201,7 +201,7 @@ pub(crate) struct TurnState {
     ///
     /// 轮内的那份时钟归 `RoundProgress`（它在轮边界回调里自己持有并归零），本格只
     /// 负责把**请求开始时**的时刻递过去：`run_chat_loop` 构造 [`TurnState`] 时取一次
-    /// 当前时刻，轮首说了话就更新，`v2_exec` 装配 `on_round` 时读一次。
+    /// 当前时刻，轮首说了话就更新，`turn_exec` 装配 `on_round` 时读一次。
     pub(crate) last_user_facing_at: i64,
     /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
     ///
@@ -213,21 +213,21 @@ pub(crate) struct TurnState {
     /// `None` = 本请求没有用户新发言（`resume` 重跑等）——判决无从谈起，
     /// Q1 也不下结论（见 `delegate.rs`）。
     pub(crate) input_utterance: Option<(String, String)>,
-    /// 本轮的**长期记忆召回视图**（S5 步 12，`v2_memory::recall_view`）。
+    /// 本轮的**长期记忆召回视图**（S5 步 12，`memory_events::recall_view`）。
     ///
     /// 只在本轮**第一次请求**取一次（与 classify / history 同一条 `request_round == 0`
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
     /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
     ///
-    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_facts::record_learning`）而不是
+    /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
     /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
-    /// 每条 `(skill_id, fallback)`，即 `v2_skills::route` 对召回视图里一条技能的判决。
+    /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
     /// **读侧填**（`prepare_turn_inputs` 拿置信度闸判），**轮末收束入格**
-    /// （`v2_facts::record_learning` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
+    /// （`derived_facts::record_learning` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
     /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     ///
     /// 为什么不能在收束那一刻现算：回退的判决同时**改写了 `recall_view`
@@ -236,7 +236,7 @@ pub(crate) struct TurnState {
     /// 空表 = 本轮没召回技能 / 没判（与 `None` 的「取都没取」不同，但收束侧
     /// 一视同仁）。
     pub(crate) skill_route: Vec<(String, bool)>,
-    /// 本轮**可用**的技能集（S11 快路的候选，`v2_skills::route` 的出参之一）：
+    /// 本轮**可用**的技能集（S11 快路的候选，`skill_events::route` 的出参之一）：
     /// 过了置信度闸、且本轮发言可能命中的那些。
     ///
     /// 与 [`TurnState::skill_route`] **同一次判定**的两个出口（同一个 `match`）：
@@ -247,7 +247,7 @@ pub(crate) struct TurnState {
     /// `chat_loop::inputs` 的 `fast_armed`）：跳过的是 v2 运行器里的那一次模型调用。
     /// 开关关着时这里是空表，但**判定照常发生**——观测照常落格，那正是
     /// 「只编译、不加速」的观察形态；只是没人拿这一份去装配。
-    pub(crate) skill_hits: Vec<crate::plugins::session::v2_skills::SkillLlmHit>,
+    pub(crate) skill_hits: Vec<crate::plugins::session::skill_events::SkillLlmHit>,
     /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
     /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
     ///
@@ -260,7 +260,7 @@ pub(crate) struct TurnState {
     ///
     /// 由步骤 2b 的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`
     /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
-    /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 v2_exec）。
+    /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
     /// `None` = 本轮没有开场白（常态）。
     pub(crate) opening_text: Option<String>,
     /// 开场白**对话面节点**的身份与标记（仅 [`TurnState::opening_text`] 有值时消费）。
@@ -601,7 +601,7 @@ impl CompressionEmitter {
 ///
 /// 取批（[`super::super::transcript::inbox::take_inbox_batch_sync`]）+ 合并
 /// （`merge_supplements`），**不写任何地址、不落格、不落库**：抽干发生在工具循环的
-/// **批次边界**，落格与「进下一次请求」都在 `v2_exec.rs` 的 `supplement_into_request`
+/// **批次边界**，落格与「进下一次请求」都在 `turn_exec.rs` 的 `supplement_into_request`
 /// （由 `turn_runner.rs` 的 2f 触发）。
 pub struct SupplementDrain {
     config: Arc<tokio::sync::RwLock<crate::plugins::session::config::SessionConfig>>,
@@ -615,7 +615,7 @@ pub struct SupplementDrain {
 /// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
 ///
 /// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方
-/// （`v2_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
+/// （`turn_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
 /// 多带一个字段就是给下一个人留一个不必有的理由。
 #[derive(Debug, Clone)]
 pub(crate) struct DrainedSupplement {
@@ -668,7 +668,7 @@ impl SupplementDrain {
     /// 不推进 `last_saved`、不落库。
     ///
     /// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
-    /// 单线程 runtime 的 async 上下文里直接调会 panic。`v2_exec` 的注入闭包里有
+    /// 单线程 runtime 的 async 上下文里直接调会 panic。`turn_exec` 的注入闭包里有
     /// flavor 判定（多线程才 `block_in_place`，否则裸调）。
     pub fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
         let batch = crate::plugins::session::transcript::inbox::take_inbox_batch_sync(

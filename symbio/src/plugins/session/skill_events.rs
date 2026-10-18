@@ -74,7 +74,7 @@ fn skill_id_of(trigger: &str) -> String {
 /// - 只编译成功收束（调用方只在成功收束时给出正文）：兜底说明这条路自己没走通，
 ///   固化它等于把失败写成套路；
 /// - **同 trigger 至多编译一次**——否则每收束一次就多一条技能，技能集随对话长度
-///   无界增长（与 `v2_memory::encode` 的同文去重同一条纪律）；这条判据同时兼任
+///   无界增长（与 `memory_events::encode` 的同文去重同一条纪律）；这条判据同时兼任
 ///   幂等：重跑同一 attempt 时技能已在 `snapshot` 里，直接 `Ok(None)` 不再 append；
 /// - 溯源由 `SkillCompiler::compile` 自带（`produced_by = source_seq`，I2 断言的
 ///   「技能溯源 100%」）。
@@ -89,10 +89,14 @@ pub(crate) fn compile(
     response: &str,
     now: i64,
 ) -> Result<Option<u64>, String> {
-    let trigger =
-        super::v2_memory::truncate_chars(user_text.trim(), super::v2_memory::ENCODE_MAX_CHARS);
-    let content =
-        super::v2_memory::truncate_chars(response.trim(), super::v2_memory::ENCODE_MAX_CHARS);
+    let trigger = super::memory_events::truncate_chars(
+        user_text.trim(),
+        super::memory_events::ENCODE_MAX_CHARS,
+    );
+    let content = super::memory_events::truncate_chars(
+        response.trim(),
+        super::memory_events::ENCODE_MAX_CHARS,
+    );
     if trigger.is_empty() || content.is_empty() {
         return Ok(None);
     }
@@ -107,10 +111,10 @@ pub(crate) fn compile(
     let skill_id = skill_id_of(&trigger);
     let mut ev = SkillCompiler.compile(&skill_id, &trigger, &content, user_seq);
     // 信封里的 `actor` / `turn` 由 core 造的是占位（`"session/main"` / `0`）；**`memory × *`
-    // 格子的 actor 是属主、不是作者**——同域三条写方（`v2_memory::encode` /
+    // 格子的 actor 是属主、不是作者**——同域三条写方（`memory_events::encode` /
     // `consolidated` / `forgotten`）全落 `PRINCIPAL_USER`（巩固与遗忘更不是"用户做的"），
     // 属主 = `SESSION_OWNER`。而召回投影按 `actor == viewer` 过滤、生产读方
-    // （`v2_memory::recall_view`）的 viewer 就是属主：占位不归位 ⇒ 技能被挡在召回
+    // （`memory_events::recall_view`）的 viewer 就是属主：占位不归位 ⇒ 技能被挡在召回
     // 视图外 ⇒ `route` 恒快判返回、观测永不落格、校准账零使用——S9 步 22 的生产
     // 链路正断在这里（[plan/11 批 2 ③] 的 e2e 判据钉的就是这条）。
     // 轮号 / 时刻同理落格前归位：核心契约只管「这条事件说什么」，
@@ -175,8 +179,10 @@ pub(crate) struct SkillRouting {
 /// ——不是用户发言的原文。读方照着**同一对函数、同一个上限**归一化，两边才对得上；
 /// 各写一份截断逻辑迟早分叉成「长发言永远命不中」这种没有任何报错的失效。
 pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option<&'a SkillLlmHit> {
-    let utterance =
-        super::v2_memory::truncate_chars(user_text.trim(), super::v2_memory::ENCODE_MAX_CHARS);
+    let utterance = super::memory_events::truncate_chars(
+        user_text.trim(),
+        super::memory_events::ENCODE_MAX_CHARS,
+    );
     hits.iter().find(|h| h.trigger == utterance)
 }
 
@@ -256,5 +262,5 @@ pub(crate) fn route(session_dir: &Path, view: &mut RecallView) -> SkillRouting {
 }
 
 #[cfg(test)]
-#[path = "v2_skills.test.rs"]
+#[path = "skill_events.test.rs"]
 mod tests;

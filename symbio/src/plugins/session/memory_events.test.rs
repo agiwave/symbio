@@ -15,7 +15,7 @@ use super::{
 };
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use super::merge_kernel::split_sentences;
-use crate::plugins::session::v2_skills::SKILL_TAG;
+use crate::plugins::session::skill_events::SKILL_TAG;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
@@ -312,7 +312,7 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
 /// T-094 ① 的**生产用例**：`memory.encoded` 载荷带内容侧可见域——判据不落在
 /// `governance/mod.test.rs`（那边测的是枚举与字符串映射的机制），落在写方本身：
 /// 默认 `thread_private`（C10 缺省，存量行为逐字不变），`with_vis_scope` 显式
-/// 给宽（生产调用点 = 经验记忆的 `shared`，见 `v2_facts::record_learning`）。
+/// 给宽（生产调用点 = 经验记忆的 `shared`，见 `derived_facts::record_learning`）。
 /// 空 / 同文两条早退路径同样不写格——没有产地就没有假事实。
 #[test]
 fn encode_payload_carries_the_content_side_vis_scope() {

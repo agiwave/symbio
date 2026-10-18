@@ -25,12 +25,12 @@ async fn save(store: &SessionStore, s: &Session) {
 async fn top_level_sessions_stay_flat() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_aaa", None)).await;
+    save(&store, &session_with("sess_aaa", None)).await;
 
-    assert!(tmp.path().join("v2_sess_aaa").join("session.json").exists());
+    assert!(tmp.path().join("sess_aaa").join("session.json").exists());
     let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "v2_sess_aaa");
+    assert_eq!(listed[0].id, "sess_aaa");
 }
 
 /// `load_session_checked` 是存在性判据：命中给 `Some`、未命中给 `None`（而不是空
@@ -39,41 +39,37 @@ async fn top_level_sessions_stay_flat() {
 async fn load_session_checked_distinguishes_missing_from_empty() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_parent", None)).await;
-    save(
-        &store,
-        &session_with("v2_sess_child", Some("v2_sess_parent")),
-    )
-    .await;
+    save(&store, &session_with("sess_parent", None)).await;
+    save(&store, &session_with("sess_child", Some("sess_parent"))).await;
 
     // 命中：顶层与嵌套子会话都凭自身 id 直取
-    for id in ["v2_sess_parent", "v2_sess_child"] {
+    for id in ["sess_parent", "sess_child"] {
         let got = store.load_session_checked(id).await.unwrap();
         assert_eq!(got.map(|s| s.id), Some(id.to_string()), "{id} 应命中");
     }
 
     // 未命中：`None`——这正是 `load_session`（返回空会话）无法给出的区分
     assert!(store
-        .load_session_checked("v2_sess_none")
+        .load_session_checked("sess_none")
         .await
         .unwrap()
         .is_none());
     assert_eq!(
-        store.load_session("v2_sess_none").await.unwrap().id,
-        "v2_sess_none",
+        store.load_session("sess_none").await.unwrap().id,
+        "sess_none",
         "同一份存储上 load_session 仍按「未命中 = 空会话」回答"
     );
 
     // 不落盘型同契约
     let mem = SessionStore::ephemeral();
     assert!(mem
-        .load_session_checked("v2_sess_none")
+        .load_session_checked("sess_none")
         .await
         .unwrap()
         .is_none());
-    save(&mem, &session_with("v2_sess_mem", None)).await;
+    save(&mem, &session_with("sess_mem", None)).await;
     assert!(mem
-        .load_session_checked("v2_sess_mem")
+        .load_session_checked("sess_mem")
         .await
         .unwrap()
         .is_some());
@@ -83,19 +79,15 @@ async fn load_session_checked_distinguishes_missing_from_empty() {
 async fn sub_session_routes_into_parent_dir() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_parent", None)).await;
-    save(
-        &store,
-        &session_with("v2_sess_child", Some("v2_sess_parent")),
-    )
-    .await;
+    save(&store, &session_with("sess_parent", None)).await;
+    save(&store, &session_with("sess_child", Some("sess_parent"))).await;
 
     // 嵌套目录布局：<parent>/sessions/<child>/session.json
     assert!(tmp
         .path()
-        .join("v2_sess_parent")
+        .join("sess_parent")
         .join("sessions")
-        .join("v2_sess_child")
+        .join("sess_child")
         .join("session.json")
         .exists());
 
@@ -104,28 +96,28 @@ async fn sub_session_routes_into_parent_dir() {
     assert_eq!(listed.len(), 1);
 
     // 子会话清单：仅父目录内的嵌套会话
-    let subs = store.list_sub_sessions("v2_sess_parent").await.unwrap();
+    let subs = store.list_sub_sessions("sess_parent").await.unwrap();
     assert_eq!(subs.len(), 1);
-    assert_eq!(subs[0].id, "v2_sess_child");
+    assert_eq!(subs[0].id, "sess_child");
     assert!(store
-        .list_sub_sessions("v2_sess_noparent")
+        .list_sub_sessions("sess_noparent")
         .await
         .unwrap()
         .is_empty());
 
     // 子会话可凭自身 id 寻址（load / session_dir / 删除）
-    let loaded = store.load_session("v2_sess_child").await.unwrap();
-    assert_eq!(loaded.id, "v2_sess_child");
+    let loaded = store.load_session("sess_child").await.unwrap();
+    assert_eq!(loaded.id, "sess_child");
     assert_eq!(
-        store.session_dir("v2_sess_child").unwrap(),
+        store.session_dir("sess_child").unwrap(),
         tmp.path()
-            .join("v2_sess_parent")
+            .join("sess_parent")
             .join("sessions")
-            .join("v2_sess_child")
+            .join("sess_child")
     );
-    store.delete_session("v2_sess_child").await.unwrap();
+    store.delete_session("sess_child").await.unwrap();
     assert!(store
-        .list_sub_sessions("v2_sess_parent")
+        .list_sub_sessions("sess_parent")
         .await
         .unwrap()
         .is_empty());
@@ -135,26 +127,18 @@ async fn sub_session_routes_into_parent_dir() {
 async fn deleting_parent_cascades_sub_sessions() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_parent", None)).await;
-    save(
-        &store,
-        &session_with("v2_sess_child1", Some("v2_sess_parent")),
-    )
-    .await;
-    save(
-        &store,
-        &session_with("v2_sess_child2", Some("v2_sess_parent")),
-    )
-    .await;
+    save(&store, &session_with("sess_parent", None)).await;
+    save(&store, &session_with("sess_child1", Some("sess_parent"))).await;
+    save(&store, &session_with("sess_child2", Some("sess_parent"))).await;
 
-    store.delete_session("v2_sess_parent").await.unwrap();
+    store.delete_session("sess_parent").await.unwrap();
     assert!(store
         .list_sessions_window(None, None)
         .await
         .unwrap()
         .is_empty());
     assert!(store
-        .list_sub_sessions("v2_sess_parent")
+        .list_sub_sessions("sess_parent")
         .await
         .unwrap()
         .is_empty());
@@ -235,20 +219,20 @@ async fn each_ephemeral_store_gets_its_own_table() {
 async fn truncated_session_json_self_heals() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_heal", None)).await;
+    save(&store, &session_with("sess_heal", None)).await;
 
-    let path = file_for(tmp.path(), "v2_sess_heal");
+    let path = file_for(tmp.path(), "sess_heal");
     let good = std::fs::read_to_string(&path).unwrap();
     // 造一份「完整 JSON 之后又粘了半个对象」的坏文件（trailing characters 形态）
     std::fs::write(&path, format!("{good}{{\"id\":\"residue\"")).unwrap();
 
-    let healed = store.load_session("v2_sess_heal").await.unwrap();
-    assert_eq!(healed.id, "v2_sess_heal", "首个完整对象应被读出");
+    let healed = store.load_session("sess_heal").await.unwrap();
+    assert_eq!(healed.id, "sess_heal", "首个完整对象应被读出");
 
     // 彻底坏掉（首个对象都不完整）时才是解析失败，不能静默当成空会话
-    std::fs::write(&path, "{\"id\":\"v2_sess_heal\",\"messages\":[{").unwrap();
+    std::fs::write(&path, "{\"id\":\"sess_heal\",\"messages\":[{").unwrap();
     assert!(matches!(
-        store.load_session("v2_sess_heal").await.unwrap_err(),
+        store.load_session("sess_heal").await.unwrap_err(),
         PluginError::ParseError(_)
     ));
 }
@@ -258,10 +242,10 @@ async fn truncated_session_json_self_heals() {
 async fn save_leaves_no_temp_file_behind() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("v2_sess_atomic", None)).await;
-    save(&store, &session_with("v2_sess_atomic", None)).await;
+    save(&store, &session_with("sess_atomic", None)).await;
+    save(&store, &session_with("sess_atomic", None)).await;
 
-    let dir = dir_for(tmp.path(), "v2_sess_atomic");
+    let dir = dir_for(tmp.path(), "sess_atomic");
     assert!(dir.join(SESSION_FILE).is_file());
     let leftovers: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
@@ -324,9 +308,9 @@ fn session_with_messages(id: &str, updated_at: i64) -> Session {
 async fn save_writes_metadata_only() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with_messages("v2_sess_split", 1000)).await;
+    save(&store, &session_with_messages("sess_split", 1000)).await;
 
-    let dir = dir_for(tmp.path(), "v2_sess_split");
+    let dir = dir_for(tmp.path(), "sess_split");
     assert!(dir.join(SESSION_FILE).is_file());
     assert!(
         !dir.join(MESSAGES_FILE_NAME).exists(),
@@ -340,7 +324,7 @@ async fn save_writes_metadata_only() {
     );
 
     // 没有事实（WAL 不在）⇒ 读回空消息：store 层不再持久化正文，这是新契约
-    let loaded = store.load_session("v2_sess_split").await.unwrap();
+    let loaded = store.load_session("sess_split").await.unwrap();
     assert!(loaded.messages.is_empty());
 }
 
@@ -353,7 +337,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     let store = SessionStore::new(tmp.path().to_path_buf());
 
     // 事实入格走生产同一条 append 路（事件 → `<会话目录>/v2-events.wal`）
-    let dir = dir_for(tmp.path(), "v2_sess_truth");
+    let dir = dir_for(tmp.path(), "sess_truth");
     std::fs::create_dir_all(&dir).unwrap();
     {
         let wal = crate::symbio_core::EventWalStore::open(
@@ -364,14 +348,14 @@ async fn wal_is_the_source_messages_json_is_ignored() {
         wal.append(user_event("e1", "n1", "第一问")).unwrap();
         wal.append(user_event("e2", "n2", "第二问")).unwrap();
     }
-    save(&store, &session_with("v2_sess_truth", None)).await;
+    save(&store, &session_with("sess_truth", None)).await;
     assert!(
         !dir.join(MESSAGES_FILE_NAME).exists(),
         "save 不得写缓存文件"
     );
 
     // ① 缓存缺席 ⇒ 历史从 WAL 完整重建
-    let loaded = store.load_session("v2_sess_truth").await.unwrap();
+    let loaded = store.load_session("sess_truth").await.unwrap();
     assert_eq!(loaded.messages.len(), 2, "WAL 重建应给出两条消息");
     assert_eq!(loaded.messages[0].id, "n1");
     assert_eq!(loaded.messages[1].id, "n2");
@@ -382,7 +366,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
         r#"{"messages":[{"id":"evil","role":"user","content":"毒"}]}"#,
     )
     .unwrap();
-    let loaded = store.load_session("v2_sess_truth").await.unwrap();
+    let loaded = store.load_session("sess_truth").await.unwrap();
     assert_eq!(loaded.messages.len(), 2, "坏缓存不得改变历史");
     assert!(
         loaded.messages.iter().all(|m| m.id != "evil"),
@@ -397,11 +381,11 @@ async fn legacy_messages_json_reads_back_when_no_wal() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
 
-    let dir = dir_for(tmp.path(), "v2_sess_v1");
+    let dir = dir_for(tmp.path(), "sess_v1");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join(SESSION_FILE),
-        r#"{"id":"v2_sess_v1","created_at":1,"updated_at":2,"metadata":{}}"#,
+        r#"{"id":"sess_v1","created_at":1,"updated_at":2,"metadata":{}}"#,
     )
     .unwrap();
     std::fs::write(
@@ -410,7 +394,7 @@ async fn legacy_messages_json_reads_back_when_no_wal() {
     )
     .unwrap();
 
-    let loaded = store.load_session("v2_sess_v1").await.unwrap();
+    let loaded = store.load_session("sess_v1").await.unwrap();
     assert_eq!(loaded.messages.len(), 2, "v1 遗留会话的历史必须仍读得回来");
 }
 
@@ -419,18 +403,18 @@ async fn legacy_messages_json_reads_back_when_no_wal() {
 async fn list_sessions_does_not_touch_messages() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with_messages("v2_sess_ok", 1000)).await;
+    save(&store, &session_with_messages("sess_ok", 1000)).await;
 
     // 把消息文件写成垃圾：清单仍然列得出来
     std::fs::write(
-        dir_for(tmp.path(), "v2_sess_ok").join(MESSAGES_FILE_NAME),
+        dir_for(tmp.path(), "sess_ok").join(MESSAGES_FILE_NAME),
         "{ not json",
     )
     .unwrap();
 
     let listed = store.list_sessions_window(None, None).await.unwrap();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "v2_sess_ok");
+    assert_eq!(listed[0].id, "sess_ok");
     // 投影还在（保存时算好的），因此清单不受影响
     assert_eq!(listed[0].message_count, 2);
 }
@@ -440,7 +424,7 @@ async fn list_sessions_does_not_touch_messages() {
 async fn save_persists_the_list_projection() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    let mut s = session_with_messages("v2_sess_proj", 1000);
+    let mut s = session_with_messages("sess_proj", 1000);
     s.metadata["workdir"] = json!("/tmp/proj/demo");
     save(&store, &s).await;
 
@@ -462,11 +446,11 @@ async fn legacy_inline_session_keeps_a_friendly_title() {
     let store = SessionStore::new(tmp.path().to_path_buf());
 
     // 手写一个旧布局文件：消息内联，**没有** title / message_count / summary / meta_tags
-    let dir = dir_for(tmp.path(), "v2_sess_legacy");
+    let dir = dir_for(tmp.path(), "sess_legacy");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join(SESSION_FILE),
-        r#"{"id":"v2_sess_legacy","messages":[{"id":"m1","role":"user","content":"老会话的标题"},{"id":"m2","role":"assistant","content":"收到"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
+        r#"{"id":"sess_legacy","messages":[{"id":"m1","role":"user","content":"老会话的标题"},{"id":"m2","role":"assistant","content":"收到"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
     )
     .unwrap();
 
@@ -480,7 +464,7 @@ async fn legacy_inline_session_keeps_a_friendly_title() {
     assert_eq!(listed[0].message_count, 2);
 
     // 消息也读得回来（旧布局没有 messages.json）
-    let loaded = store.load_session("v2_sess_legacy").await.unwrap();
+    let loaded = store.load_session("sess_legacy").await.unwrap();
     assert_eq!(loaded.messages.len(), 2);
 }
 
@@ -490,11 +474,11 @@ async fn migrate_splits_legacy_and_is_idempotent() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
 
-    let dir = dir_for(tmp.path(), "v2_sess_mig");
+    let dir = dir_for(tmp.path(), "sess_mig");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join(SESSION_FILE),
-        r#"{"id":"v2_sess_mig","messages":[{"id":"m1","role":"user","content":"迁移前的话"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
+        r#"{"id":"sess_mig","messages":[{"id":"m1","role":"user","content":"迁移前的话"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
     )
     .unwrap();
 
@@ -616,8 +600,8 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
         let store = store.clone();
         tasks.push(tokio::spawn(async move {
             // 临界区必须包住整段「读 → 改 → 写」；只锁 save 防不住丢更新
-            let _guard = store.lock_writes("v2_sess_conc").await;
-            let mut s = store.load_session("v2_sess_conc").await.unwrap();
+            let _guard = store.lock_writes("sess_conc").await;
+            let mut s = store.load_session("sess_conc").await.unwrap();
             let n = s.metadata["counter"].as_u64().unwrap_or(0) + 1;
             s.metadata["counter"] = json!(n);
             store.save_session(&s).await.unwrap();
@@ -627,7 +611,7 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
         t.await.unwrap();
     }
 
-    let got = store.load_session("v2_sess_conc").await.unwrap();
+    let got = store.load_session("sess_conc").await.unwrap();
     assert_eq!(
         got.metadata["counter"],
         json!(20),

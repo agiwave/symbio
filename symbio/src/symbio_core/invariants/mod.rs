@@ -281,7 +281,7 @@ fn declared_budget_ms(events: &[Event]) -> Option<u64> {
 /// 留下任何事实」正是那次裁决拆掉的耦合。
 ///
 /// 与**等待用户**那一态的关系：等待轮（进展格 `chat.assistant.progress`）的收束格
-/// 刻意留给恢复幕，续写仍由 `v2_exec::last_open_turn` 按 final / fallback 找它
+/// 刻意留给恢复幕，续写仍由 `turn_exec::last_open_turn` 按 final / fallback 找它
 /// （那里**不**认产物——认了会让恢复幕找不到未收束轮）；本检查认产物只是
 /// 「不再报它静默中断」，两处口径的差异是刻意的，见该函数文档。
 ///

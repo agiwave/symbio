@@ -352,7 +352,7 @@ impl TurnLauncher {
                     // 刷新才恢复」的根源。落库与回包合并在 `append_and_publish` 里，
                     // 这里只声明「走名册出口、按本会话 id 解析转写」。
                     // `Carrier::Runner`：用户发言的承载事实 `turn × opened`
-                    // （`EVENT_USER_MESSAGE`）由**运行器**落——`v2_exec` 的注释写明了
+                    // （`EVENT_USER_MESSAGE`）由**运行器**落——`turn_exec` 的注释写明了
                     // 这一点。此处再落一条 `message.added` 就是第二个 owner。本处只做
                     // 「落库 + 回包」，把存储分配的权威 `seq` 换进实时面。
                     let appended = async {

@@ -286,10 +286,10 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
 
 // ── S-011：补充注入点的位置（两处行序断言）──────────────────────────────
 // 夹具与 S-010 共用（`s010Audit` 建的就是「cwd 下有 symbio/ 的仓库树」），
-// 落点由文件相对路径决定——S-011 认 `session/turn_runner.rs` 与 `session/v2_exec.rs` 两处。
+// 落点由文件相对路径决定——S-011 认 `session/turn_runner.rs` 与 `session/turn_exec.rs` 两处。
 const s011Audit = s010Audit
 const S011_RUNNER = 'symbio/src/plugins/session/turn_runner.rs'
-const S011_EXEC = 'symbio/src/plugins/session/v2_exec.rs'
+const S011_EXEC = 'symbio/src/plugins/session/turn_exec.rs'
 
 /** 位置正确的形态：2e 结果接进请求 → 2f 补充接进请求 */
 const S011_RUNNER_OK = `fn run() {
@@ -314,7 +314,7 @@ test('S-011 passes when both orderings hold', () => {
   const r = s011Audit(s011Ok())
   assert.equal(r.status, 0)
   assert.match(r.stdout, /S-011 通过：.*turn_runner\.rs 2e 工具结果接进请求\(2\) 在 2f 轮内补充接进请求\(4\) 之前/)
-  assert.match(r.stdout, /S-011 通过：.*v2_exec\.rs `supplement_into_request` 抽干点\(2\) 在 `report` 汇报判定\(4\) 之前/)
+  assert.match(r.stdout, /S-011 通过：.*turn_exec\.rs `supplement_into_request` 抽干点\(2\) 在 `report` 汇报判定\(4\) 之前/)
 })
 
 test('S-011 fires when the supplement is injected before the tool results land', () => {
@@ -427,13 +427,13 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
   const none = audit('fn unrelated() {}\n')
   assert.equal(none.status, 0)
   assert.match(none.stdout, /S-011 跳过：scope 内没有 plugins\/session\/turn_runner\.rs/)
-  assert.match(none.stdout, /S-011 跳过：scope 内没有 plugins\/session\/v2_exec\.rs/)
+  assert.match(none.stdout, /S-011 跳过：scope 内没有 plugins\/session\/turn_exec\.rs/)
 
   // 只布一个文件：另一个跳过，布下的那个照常判
   const one = s011Audit({ [S011_RUNNER]: S011_RUNNER_OK })
   assert.equal(one.status, 0)
   assert.match(one.stdout, /S-011 通过：.*turn_runner\.rs/)
-  assert.match(one.stdout, /S-011 跳过：scope 内没有 plugins\/session\/v2_exec\.rs/)
+  assert.match(one.stdout, /S-011 跳过：scope 内没有 plugins\/session\/turn_exec\.rs/)
 })
 
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────

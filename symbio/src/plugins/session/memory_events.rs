@@ -158,7 +158,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// ## `viewer` = 本轮主体（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")）
 ///
 /// **读侧预过滤**（`projection/recall.rs` 模块文档指派给读侧的那一半）：记忆事件
-/// 的载荷带着内容侧可见域（`v2_memory::encode` 的产地，T-094 ①），本读方按它
+/// 的载荷带着内容侧可见域（`memory_events::encode` 的产地，T-094 ①），本读方按它
 /// 逐条收放——
 ///
 /// - `thread_private`（判断记忆的写方取值）：只对**记录它的那个会话**的轮次可见
@@ -598,5 +598,5 @@ pub(crate) fn consolidate(
 }
 
 #[cfg(test)]
-#[path = "v2_memory.test.rs"]
+#[path = "memory_events.test.rs"]
 mod tests;

@@ -67,7 +67,7 @@
 //!
 //! `policy.reflex` 的判据是 `resume_allowed ∧ has_match`，命中后返回
 //! [`Capsule::REFLEX`]——**胶囊不携带命中的那条技能**。这不是漏了载荷：
-//! 技能对象留在调用方手里（`v2_exec` 的 `hit`），表只回答"这一格要不要走快路"。
+//! 技能对象留在调用方手里（`turn_exec` 的 `hit`），表只回答"这一格要不要走快路"。
 //!
 //! 两者不会漂移，因为 `has_match` 就是**同一个** `hit` 派生出来的布尔：判的是它、
 //! 用的也是它，中间没有第二次匹配。把技能对象塞进胶囊只会在表里多一份可变借用，
@@ -124,8 +124,8 @@ impl Capsule {
 /// | `progress` | 配置快照（`SessionConfig` 的四个旋钮） |
 /// | `auto_compress` | 请求快照（`TurnRequest::auto_compress`） |
 /// | `has_session_dir` | `session.session_dir().is_some()` |
-/// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `v2_exec`） |
-/// | `has_match` | `v2_skills::take_match` 的结论（同一次查询，判它用的就是它） |
+/// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `turn_exec`） |
+/// | `has_match` | `skill_events::take_match` 的结论（同一次查询，判它用的就是它） |
 ///
 /// 构造器按**决策点**分，每个只填自己那几格：一格不会因为另一格的字段恰好
 /// 默认成真而误命中。代价是构造器随决策点增长——这是过渡形态，见模块文档。
@@ -455,7 +455,7 @@ fn policy_recall(state: &LoopState) -> Option<Capsule> {
 ///   `resume.user_seq`），而反射档的落格形状就是新开一轮 ⇒ 走它会撞幂等键
 ///   （`AppendError::Duplicate` → Failed 出口）。语义上同样说不通：续写要跑的是
 ///   刚被用户批准的那次工具，不是拿技能顶掉它。
-/// - `has_match`：逐字命中一条已编译技能（判据是数据，见 `v2_skills::take_match`）。
+/// - `has_match`：逐字命中一条已编译技能（判据是数据，见 `skill_events::take_match`）。
 fn policy_reflex(state: &LoopState) -> Option<Capsule> {
     (state.resume_allowed && state.has_match).then_some(Capsule::REFLEX)
 }

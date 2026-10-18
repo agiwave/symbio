@@ -5,7 +5,7 @@
 //! `reflex_turn_tests`（反射档落格）。
 //!
 //! 另附 `run` / `run_streaming` 两个**测试专用**入口：生产一律走
-//! `TurnRunner::run_with_tools`（`v2_exec` 自己构造 `ActorSpec`），无工具轮的简单路径
+//! `TurnRunner::run_with_tools`（`turn_exec` 自己构造 `ActorSpec`），无工具轮的简单路径
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
 //! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
 
@@ -49,7 +49,7 @@ impl TurnRunner {
                 actor: ActorSpec::trivial("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
                 prefix: None,
-                // 恒走生成：定稿答话轮由 `v2_exec` 自己把答话交进来。
+                // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
                 final_reply: None,
                 turn_root_id: String::new(),
                 user_node_id: None,
@@ -1021,7 +1021,7 @@ mod tool_round_tests {
     /// 「循环里什么时候问一次」这个挂点（见 [`TurnInput::inject`]）。
     ///
     /// 把落格也做进 core 会让 core 知道「补充」是什么——而它不必知道。
-    /// 那一半的判据在 `v2_exec.test.rs`（`supplements_become_facts_visible_next_turn`）。
+    /// 那一半的判据在 `turn_exec.test.rs`（`supplements_become_facts_visible_next_turn`）。
     ///
     /// ## 反向自检
     ///
@@ -1371,7 +1371,7 @@ mod tool_round_tests {
                     ok: true,
                     needs_user_action: self.pending,
                     // 等待用户时的卡片载荷与原因码：假分发方建的是 `user_prompt` 节点，
-                    // 这里给一份最小可辨形状（真值由 `v2_tools` 从节点 `meta` 取）。
+                    // 这里给一份最小可辨形状（真值由 `tool_dispatch` 从节点 `meta` 取）。
                     prompt: if self.pending {
                         Some(serde_json::json!({ "question": "选哪个" }))
                     } else {
@@ -1953,7 +1953,7 @@ mod tool_round_tests {
     /// 这一格断掉，校准比就冻结在初值 1.0，未校准启发式的系统偏差（实测对 CJK
     /// 高估约 31%）永久无人修正，压缩预检把本可成功的摘要请求误判成「注定超限」
     /// ——e2e `t8` / `t11` / `t18` 红的正因。链路后半段（`TurnOutcome.usage` →
-    /// `TurnOutput.usage`）在 `v2_exec` 是两处同名字段直通，不另设旁路。
+    /// `TurnOutput.usage`）在 `turn_exec` 是两处同名字段直通，不另设旁路。
     #[tokio::test]
     async fn provider_usage_survives_the_run_to_the_outcome() {
         let store = EventStore::new();
@@ -1985,12 +1985,12 @@ mod tool_round_tests {
     ///
     /// 唯一消费方是 `chat_loop/turn.rs`：`settle_reasoning` 用 `finish.is_length()` 给
     /// 本轮正文节点打 `meta.finish_reason = "length"`（前端「继续」按钮 + 回溯），
-    /// `close_turn` 在同判据上触发 `MAX_CONTINUE_ROUNDS` 自动续写。此前 `v2_exec.rs`
+    /// `close_turn` 在同判据上触发 `MAX_CONTINUE_ROUNDS` 自动续写。此前 `turn_exec.rs`
     /// 用 `TurnOutput { ..Default::default() }` 重建时把 `finish` 静默填成 Stop，
     /// 两条判据在 v2 执行路径都读不到 Length ⇒ 被 `max_tokens` 掐断的半截正文既无标记
     /// 也不续写，界面上表现为「对话突然结束」。
     ///
-    /// **反向自检**：把 `TurnOutcome.finish` 或 `v2_exec` 的重建里那行 `finish: outcome.finish`
+    /// **反向自检**：把 `TurnOutcome.finish` 或 `turn_exec` 的重建里那行 `finish: outcome.finish`
     /// 拿掉，本用例必红。
     #[tokio::test]
     async fn truncated_answer_carries_length_reason_to_the_outcome() {

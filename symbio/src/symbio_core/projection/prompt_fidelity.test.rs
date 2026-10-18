@@ -338,7 +338,7 @@ fn mutation_events_are_folded_not_silently_skipped() {
     );
 }
 
-/// 变更格的载荷构造函数（与写侧 `v2_messages` 落下的形状逐字同源）。
+/// 变更格的载荷构造函数（与写侧 `message_events` 落下的形状逐字同源）。
 fn edited(node: &str, role: &str, text: &str) -> Event {
     Event::pending(
         format!("m-edit-{node}"),

@@ -18,7 +18,7 @@
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner.rs` 的结果/注入次序、
- *                   `v2_exec.rs` 的抽干/汇报次序；位置错了不会有任何测试变红）
+ *                   `turn_exec.rs` 的抽干/汇报次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
@@ -428,7 +428,7 @@ console.log()
 //      反过来写 = 用户那句补充插进 `assistant(tool_calls)` 与它的 `tool` 结果之间——
 //      部分协议直接 400（三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，
 //      用户随后才插话）。
-//   ② `v2_exec.rs`：抽干（`supplement_into_request`）必须排在汇报判定（`report`）**之前**。
+//   ② `turn_exec.rs`：抽干（`supplement_into_request`）必须排在汇报判定（`report`）**之前**。
 //      这条钉的是「先抽干、后判定」——`supplemented_at` 靠抽干结果才拿得到，顺序反过来
 //      等于用户已经开口了、插件还在按「没人说话」报进度（静默时钟没归零）。
 // 两个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明注入点被删了
@@ -458,7 +458,7 @@ const S011_PAIRS = [
     why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
   },
   {
-    file: 'plugins/session/v2_exec.rs',
+    file: 'plugins/session/turn_exec.rs',
     before: {
       re: /supplement_into_request\(/,
       ex: /\bfn\s+supplement_into_request\(/,

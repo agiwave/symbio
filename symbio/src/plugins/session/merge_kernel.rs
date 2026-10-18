@@ -7,7 +7,7 @@
 //! 临摹件会随生产漂移而静默失效：论证仍在绿，闸门已经换了算法。
 //!
 //! 三个函数都只依赖 `std`——这是能被 standalone `rustc` 编译的 verify 程序
-//! `#[path]` 包含的前提。本模块不知道 [`crate::plugins::session::v2_memory`]
+//! `#[path]` 包含的前提。本模块不知道 [`crate::plugins::session::memory_events`]
 //! 的存在，更不 import 事件 / 存储：**它只算数，入格永远是写方的事**
 //! （[plan/01 §9.3]：架构只提供位置，不提供算法）。
 

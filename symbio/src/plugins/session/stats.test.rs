@@ -1055,7 +1055,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let store = EventWalStore::open(&wal).unwrap();
     let t = 1_700_000_000_000i64;
     // 一轮对话（与 `seed` 同形的最小事实源）+ 一条 **shared** 的经验记忆
-    // （`v2_facts::record_learning` 步 11 的生产形态）。
+    // （`derived_facts::record_learning` 步 11 的生产形态）。
     let u0 = Event::pending(
         "u0",
         EVENT_USER_MESSAGE,
@@ -1175,7 +1175,7 @@ fn reputation_column_reports_own_and_by_principal() {
         .seq()
         .map(|s| s.value())
         .expect("已入格");
-    // 一次守约的代际立约（写方 `v2_facts::record_derived` 落的就是这三格）。
+    // 一次守约的代际立约（写方 `derived_facts::record_derived` 落的就是这三格）。
     for e in crate::symbio_core::commitment_events(
         "c-rep",
         crate::symbio_core::authz::PRINCIPAL_MAIN,
@@ -1300,7 +1300,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
 /// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
-/// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`v2_skills::route`
+/// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`
 /// 的产物）——本处按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、
 /// `produced_by` 指向本轮用户格），只把载荷换成校准认的那两把钥匙。
 #[test]

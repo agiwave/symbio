@@ -94,7 +94,7 @@ fn aborted_resume_panics_on_out_of_range_index() {
 // 删除复活）。本文件的判据只证「**事实进了事实源**」：缓存此刻仍是读侧真源，
 // 故读侧零行为变更；切源那一步的判据属另一个批次（b3 本体）。
 //
-// 反向自检：把 `process_retry_subtree` 里那段 `v2_messages::removed` 去掉 ⇒ 用例红。
+// 反向自检：把 `process_retry_subtree` 里那段 `message_events::removed` 去掉 ⇒ 用例红。
 
 use std::sync::{Arc, Mutex};
 
@@ -106,7 +106,7 @@ use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
 
-/// 帧收集口（`ExecEventSink::direct` 的出口，与 `v2_exec.test.rs` 同款）。
+/// 帧收集口（`ExecEventSink::direct` 的出口，与 `turn_exec.test.rs` 同款）。
 struct CollectingFrames(Mutex<Vec<ChatNode>>);
 
 #[async_trait::async_trait]
@@ -118,7 +118,7 @@ impl crate::symbio_core::ExecTranscriptWriter for CollectingFrames {
 
 /// 装配：持久会话 + 一份「失败轮」缓存（Turn + 一个子节点）+ 一条用户格事实。
 ///
-/// 用户格事实是**必须的**：`v2_messages` 落变更格前要解一个溯源锚，而切片为空时
+/// 用户格事实是**必须的**：`message_events` 落变更格前要解一个溯源锚，而切片为空时
 /// 它宁可不落（见该模块的注释）——种子事实保证切片非空，用例测的才是**落格**这件事。
 async fn setup_with_failed_turn() -> (
     Arc<PersistentChatSession>,
@@ -170,7 +170,7 @@ async fn setup_with_failed_turn() -> (
         store,
     ));
 
-    // 种子事实 + **释放写者令牌**（作用域包住）：`v2_messages` 落格时要自己开一次
+    // 种子事实 + **释放写者令牌**（作用域包住）：`message_events` 落格时要自己开一次
     // WAL 抢令牌，种子的那份若还活着，它会拿到 `NotTheWriter` ⇒ 事实静默丢弃。
     {
         let wal = dir.join(super::super::paths::V2_WAL_FILE);
@@ -189,7 +189,7 @@ async fn setup_with_failed_turn() -> (
         .expect("种子事实落格失败");
         // 失败子树也走出生事实：切主后列表 = 事实投影（ADR-049），重试要找的
         // `t-failed` 节点必须**在投影里**才轮得到「删掉一整棵」。直落形状与
-        // `v2_messages::added` 产出一致（同一载荷键）。
+        // `message_events::added` 产出一致（同一载荷键）。
         let failed = serde_json::to_value(vec![failed_turn.clone(), partial.clone()])
             .expect("序列化种子子树失败");
         s.append(
@@ -280,7 +280,7 @@ async fn retry_subtree_lands_a_removed_fact_for_the_whole_subtree() {
 /// **目标不是 Turn** ⇒ 报 `NotFound`，且**一条事实都不落**。
 ///
 /// 「什么都没删」不该在事实源上留下痕迹——与 `truncate_messages` 空列表不落格、
-/// `v2_messages::removed` 自判空列表同一条判据。
+/// `message_events::removed` 自判空列表同一条判据。
 #[tokio::test]
 async fn retry_subtree_on_a_missing_target_lands_nothing() {
     let (session, dir, _tmp) = setup_with_failed_turn().await;

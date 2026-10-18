@@ -33,7 +33,7 @@
 //!   [`symbio/src/plugins/session/merge_kernel.rs`](../../../symbio/src/plugins/session/merge_kernel.rs)）：
 //!   跑的是生产这条保真度算法本身——**字符域的保留率**，与概念链的向量域读数
 //!   互相印证（同一现象：逐代下降、阈值前停）。没有这一段，本程序论证的机制
-//!   与生产实现的闸门（`v2_memory::consolidate` → `accept`）之间就只剩一句
+//!   与生产实现的闸门（`memory_events::consolidate` → `accept`）之间就只剩一句
 //!   修辞——那正是 [T-067] 黑盒纪律点名要防的「测自己 mock 的想象行为」。
 //!
 //! 编译运行：rustc --edition 2021 consolidation_fidelity.rs -o cf && ./cf
@@ -41,7 +41,7 @@
 use std::collections::HashMap;
 
 // 生产内核（T-086 批①）：`#[path]` 指向仓库里的生产文件——**这一行就是「跑的是
-// 生产」的全部含义**（与 `recall_eval.rs` 同一条纪律）。它是 `v2_memory::consolidate`
+// 生产」的全部含义**（与 `recall_eval.rs` 同一条纪律）。它是 `memory_events::consolidate`
 // 调用的同一份源码：分句 / 合并 / 保真度。
 #[path = "../../../symbio/src/plugins/session/merge_kernel.rs"]
 mod merge_kernel;

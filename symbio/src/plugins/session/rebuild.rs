@@ -25,7 +25,7 @@
 //! |---|---|---|
 //! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`super::message_build`] 的 `llm_build_*` | 直接调用 |
 //! | 轮边界汇报 | [`super::round_hook::ReportDraft::to_message`]（`dialog_node`） | 直接调用 |
-//! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `v2_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
+//! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `turn_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
 //! （`rebuild.test.rs` 的形状复刻用例）。不在这里自作主张给用户消息补 `status`
@@ -41,7 +41,7 @@
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
 //! `message.added`（ADR-054）恰恰相反：它是
-//! **诞生格**，载荷里每条消息自带完整形状（写侧 `v2_messages::added` 直给），所以
+//! **诞生格**，载荷里每条消息自带完整形状（写侧 `message_events::added` 直给），所以
 //! **每条都产节点**、经 `nodes_of` 的 `added_nodes` 逐条收下。边界同样封闭：只准
 //! 「无其他承载方的节点」（压缩记录等界面文本）搭这格；带对话内容的节点必须由
 //! 自己的诞生事实承载。
@@ -201,7 +201,7 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
 ///
 /// 载荷不是合法 `ChatNode` ⇒ `None`（静默跳过）。与 `nodes_of` 对缺失字段的
 /// 处置同一条口径：**重建必须对任意历史事件容错**（旧版本写下的、手工改过的
-/// WAL 都不该让整次重建失败）。形状的唯一生产者是写侧 `v2_messages::edited`，
+/// WAL 都不该让整次重建失败）。形状的唯一生产者是写侧 `message_events::edited`，
 /// 它给出的形状由 `rebuild.test.rs` 的往返用例钉住。
 fn edited_node(e: &Event) -> Option<ChatNode> {
     let m: ChatNode = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
@@ -224,7 +224,7 @@ fn removed_ids(e: &Event) -> Vec<String> {
 
 /// `message.added` → 载荷里的节点列表（`{ messages: [...] }`）。
 ///
-/// 载荷是**写侧**给定的形状（`v2_messages::added`），一条坏条目不吃掉整批——
+/// 载荷是**写侧**给定的形状（`message_events::added`），一条坏条目不吃掉整批——
 /// 与 `nodes_of` 对其它格的容错同一条口径：**重建必须对任意历史事件容错**。
 /// 与 `message.edited` 不同，这里**照单全收**：诞生格的节点本就带着它自己的
 /// 位置语义（发射顺序），不存在「硬插到错误位置」的问题。
@@ -298,7 +298,7 @@ fn user_node(e: &Event) -> ChatNode {
 
 /// 轮边界折进的补充（`turn × asserted`，缺口 3）：载荷 `{ text, count, id, ids }`。
 ///
-/// 形状**逐字复刻落库那一份**（`v2_exec::supplement_into_request` 的 `ChatNode`）：
+/// 形状**逐字复刻落库那一份**（`turn_exec::supplement_into_request` 的 `ChatNode`）：
 /// 它**没有** `msg_type`、**没有** `status`，但**有** `meta.supplement*` 三键
 /// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
 /// 否则同一条补充在实时面与重建面是两个节点。
@@ -506,7 +506,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     }
 
     // 工具轮的**中途产出**（每轮正文 / 思考）：`rounds[]` 各带自己的节点 id。
-    // 它们与末轮产出同为 Turn 根的子节点（`v2_tools` 把中途正文定格在同一个根下）。
+    // 它们与末轮产出同为 Turn 根的子节点（`tool_dispatch` 把中途正文定格在同一个根下）。
     if let Some(rounds) = e.payload.get("rounds").and_then(|v| v.as_array()) {
         for (i, r) in rounds.iter().enumerate() {
             push_round_nodes(&mut nodes, &turn_id, i, r, &status, e.ts);
@@ -605,7 +605,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     call.status = Some(NodeStatus::Completed);
 
     // 「没跑」类结果的**成因机读码**（not_executed / aborted / overflow_dropped…）：
-    // 随载荷入格（`v2_tools` 从结果 meta 提取）就必须随重建出格——只在实时面可见、
+    // 随载荷入格（`tool_dispatch` 从结果 meta 提取）就必须随重建出格——只在实时面可见、
     // 重启后消失 = 成因排查靠猜。父节点的 meta 与执行器落格口径一致
     // （`emit_parent_finalized`：success + failure_kind）。pending 类
     // （needs_user_action）走下面的复刻分支，不在这里。

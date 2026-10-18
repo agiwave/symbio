@@ -41,7 +41,7 @@
 //! 且无人报错。修法（T-055）与 b2 的压缩寄存同手法——**变更寄存，由持令牌的一方落格**：
 //!
 //! - 拿不到令牌时，把这条变更推进 [`PARKED`]（按会话目录分桶的进程内寄存区）；
-//! - 持令牌的一方（`v2_exec::execute_turn` 的执行口）在下一次落格时调
+//! - 持令牌的一方（`turn_exec::execute_turn` 的执行口）在下一次落格时调
 //!   [`drain_parked`]，把寄存的变更补落进事实源。
 //!
 //! 「寄存」而不是「重试 / 阻塞等待」：编辑是**用户对列表的操作**，它的发起方
@@ -141,7 +141,7 @@ fn take_parked(session_dir: &Path) -> Vec<ParkedChange> {
 /// ## 调用时机
 ///
 /// 在 [`EventWalStore::open`] 成功**之后**、本轮的其它落格**之前**（见
-/// `v2_exec::execute_turn` 与 `execute_final_reply_turn` 的落格窗口），且必须在
+/// `turn_exec::execute_turn` 与 `execute_final_reply_turn` 的落格窗口），且必须在
 /// **读切片之前**——补落改变了 live 段，本轮后面的 turn 号 / 续写锚 / 幂等键都从
 /// 切片折，先落完才不会站在一份缺了那次编辑的状态上做判断。
 ///
@@ -528,5 +528,5 @@ fn provenance(snapshot: &[Event], node: &str) -> Option<u64> {
 }
 
 #[cfg(test)]
-#[path = "v2_messages.test.rs"]
+#[path = "message_events.test.rs"]
 mod tests;

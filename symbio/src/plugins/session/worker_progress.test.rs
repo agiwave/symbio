@@ -1,4 +1,4 @@
-//! `v2_worker_progress` 的判据（轨 S 第二步：Q3 进展读切 WAL）。
+//! `worker_progress` 的判据（轨 S 第二步：Q3 进展读切 WAL）。
 //!
 //! ## T-053 之后这里钉什么
 //!

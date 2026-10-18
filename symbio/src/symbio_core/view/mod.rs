@@ -127,7 +127,7 @@ pub struct RecallEntry {
 /// ## 为什么视图自带 `degraded`（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）
 ///
 /// 投影产出的 [`View`] 外壳已经带 `degraded`（F2：可降级是类型义务），但召回视图
-/// **会脱离外壳单独流动**——`v2_memory::recall_view` 取 `.value` 后把它存进
+/// **会脱离外壳单独流动**——`memory_events::recall_view` 取 `.value` 后把它存进
 /// `TurnState.recall_view`、再交给注入段（`prompt_section`）。外壳一丢，
 /// 「这次只显示了一部分」就没人说得出来（静默的形态从「空且不标」变成「有部分结果
 /// 且不标」）。故让视图**自描述**：投影把同一个 `degraded` 局部量同时写进外壳与本字段

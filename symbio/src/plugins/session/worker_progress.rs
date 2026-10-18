@@ -31,7 +31,7 @@ use crate::symbio_core::{transcript, turnstate, Budget, EventWalStore, Seq, Stor
 /// 从 WAL 算出 Q3 进展（**纯函数**：只吃一个会话目录，可穷举测试）。
 ///
 /// `None` = 这个会话还没有 WAL（没跑过任何一轮 v2）——调用方回落到旧读法，
-/// 与 `v2_tasks::prompt_section` 同一条纪律（无源 ⇒ 不产出，不造空壳）。
+/// 与 `task_events::prompt_section` 同一条纪律（无源 ⇒ 不产出，不造空壳）。
 pub fn progress_from_wal(
     session_dir: &Path,
     fallback_id: &str,
@@ -83,5 +83,5 @@ pub fn progress_from_wal(
 }
 
 #[cfg(test)]
-#[path = "v2_worker_progress.test.rs"]
+#[path = "worker_progress.test.rs"]
 mod tests;

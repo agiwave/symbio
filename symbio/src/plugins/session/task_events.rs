@@ -2,7 +2,7 @@
 //! **会话任务清单 → v2 事实源 → 两个消费方**（读出口 `session/stats` 的 `readyset`
 //! 列 + 交给执行者的调度段）。
 //!
-//! 与 `super::v2_memory` 同族：任务不是另开一份存储，任务就是
+//! 与 `super::memory_events` 同族：任务不是另开一份存储，任务就是
 //! `v2-events.wal` 里的 `task.*` 事件（ADR-044 同族纪律）。清单本身（
 //! `local/todo_write`）是**纯内存、会话作用域**的（见其模块头）；事实源是同一份
 //! 状态的持久化，两处各算一次就是两套真相——所以本模块只**转写观察到的声明**，
@@ -39,14 +39,14 @@
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
 //!   （I2）。事件号 `{id_prefix}-{n}`：`id_prefix` 由调用方给
-//!   （[`super::v2_facts::record_derived`] 给 `v2t-{anchor_id}`，一轮一个前缀）
+//!   （[`super::derived_facts::record_derived`] 给 `v2t-{anchor_id}`，一轮一个前缀）
 //!   + 本次序号，跨轮不撞幂等键。
-//! - **写方**：写方住收束处——`v2_exec` 轮末调
-//!   [`super::v2_facts::record_derived`]，后者调本模块（同一锚 `user_seq`）。
+//! - **写方**：写方住收束处——`turn_exec` 轮末调
+//!   [`super::derived_facts::record_derived`]，后者调本模块（同一锚 `user_seq`）。
 //!   别按「与记忆同一个写方」推断——记忆与学习住
-//!   [`super::v2_facts::record_learning`]，承诺 / 任务表 / 熔断住
-//!   [`super::v2_facts::record_derived`]；写侧授权闸判在运行器
-//!   （见 `v2_exec` 模块文档的「写侧授权闸」）。
+//!   [`super::derived_facts::record_learning`]，承诺 / 任务表 / 熔断住
+//!   [`super::derived_facts::record_derived`]；写侧授权闸判在运行器
+//!   （见 `turn_exec` 模块文档的「写侧授权闸」）。
 //!
 //! ## 诚实划界
 //!
@@ -246,7 +246,7 @@ fn step(entry: &mut Entry, list_id: &str, item: &TaskItem) -> Vec<Emitted> {
 }
 
 /// 把本轮的 `todo_write` 声明写进事实源（任务表写方，批⑨；由
-/// [`super::v2_facts::record_derived`] 轮末调用）。
+/// [`super::derived_facts::record_derived`] 轮末调用）。
 ///
 /// - `produced_by` = 本轮 `user.message` 的 seq（溯源锚，I2）；
 /// - `id_prefix` = `v2t-t{turn}`，事件号是 `{id_prefix}-{n}`；
@@ -285,7 +285,7 @@ pub(crate) fn write(
 
 /// 调度段（S7 步 17）：就绪任务集渲染成一段提示，请求视图**置顶**注入。
 ///
-/// 只读不写（与 `v2_memory::recall_view` 同款的只读视图），因此：
+/// 只读不写（与 `memory_events::recall_view` 同款的只读视图），因此：
 /// - 文件不存在 / 读不了 ⇒ `None`——请求里就少一段，不存在「空占位」；
 /// - 就绪集空 ⇒ `None`——依赖没闭合时给模型一个空的候选集只会诱导它瞎猜。
 ///
@@ -314,5 +314,5 @@ pub(crate) fn prompt_section(session_dir: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "v2_tasks.test.rs"]
+#[path = "task_events.test.rs"]
 mod tests;

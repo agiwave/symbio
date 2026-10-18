@@ -98,8 +98,8 @@ fn tool_free_req<'a>(
     provider: Arc<dyn ModelProvider>,
     sink: &'a crate::symbio_core::ExecEventSink,
     abort: crate::symbio_core::ExecAbortSignal,
-) -> V2Turn<'a> {
-    V2Turn {
+) -> ExecTurn<'a> {
+    ExecTurn {
         session,
         provider,
         parent: None,
@@ -192,7 +192,7 @@ async fn supplements_become_facts_visible_next_turn() {
         }) as super::SupplementFn
     };
 
-    execute_turn(V2Turn {
+    execute_turn(ExecTurn {
         session: &session,
         provider: Arc::new(provider),
         parent: None,
@@ -533,7 +533,7 @@ async fn setup_full_with(
 ) -> (PersistentChatSession, std::path::PathBuf, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
     let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
-    let session_id = "v2_exec_test".to_string();
+    let session_id = "turn_exec_test".to_string();
     // 先落盘一次空会话，使 session_dir 能解析到实际目录（v2 WAL 的安放处）。
     let seed = Session::new(&session_id);
     store.save_session(&seed).await.expect("种子会话落盘失败");
@@ -756,7 +756,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
-    let res = execute_turn(V2Turn {
+    let res = execute_turn(ExecTurn {
         session: &session,
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ 工具分发按「没有父插件」诚实失败——本用例验的是**链路**
@@ -976,7 +976,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         }) as super::RoundHookFn
     };
 
-    let res = execute_turn(V2Turn {
+    let res = execute_turn(ExecTurn {
         session: &session,
         provider: Arc::new(provider),
         parent: None,
@@ -1092,7 +1092,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 /// ## 这个用例挡的是什么
 ///
 /// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆与学习
-/// **不是轮次事实**——运行器一处都不写，写方是 `v2_facts::record_learning`。
+/// **不是轮次事实**——运行器一处都不写，写方是 `derived_facts::record_learning`。
 /// 写方若不被调用（或出参没交回），长期记忆（S06）与技能
 /// 自我改进（S11）就**静默全丢**。
 ///
@@ -1102,7 +1102,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 ///    永远读到「零使用」，置信度恒 1.0，回退一次都不会发生（S11 §5 静默失效第 2 行）；
 /// ③ 步 22 编译（`memory.encoded{tag:"skill"}`）——缺它下一轮无技能可用。
 ///
-/// **反向自检**：注掉 `v2_exec` 里的 `record_learning` 调用，本用例必须红。
+/// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_memory_and_learning_facts() {
     use crate::symbio_core::{
@@ -1114,7 +1114,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::Faithful);
 
-    // 技能路由判定由读侧给出（生产里是 `prepare_turn_inputs` 调 `v2_skills::route`）。
+    // 技能路由判定由读侧给出（生产里是 `prepare_turn_inputs` 调 `skill_events::route`）。
     let obs = [("sk-1".to_string(), false)];
     let mut req = tool_free_req(
         &session,
@@ -1181,7 +1181,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 /// ## 这个用例挡的是什么
 ///
 /// 承诺的数据来源在工具执行层（`Delegation`，`process_tool_calls_async` 的出参），
-/// 写方是 `v2_facts::record_derived`（`v2_exec` 轮末调）。若分发方不把出参交回
+/// 写方是 `derived_facts::record_derived`（`turn_exec` 轮末调）。若分发方不把出参交回
 /// （`SessionDispatchPort` 的三个出参收在本地 `Vec`、经 `take_derived` 交回，
 /// 不收不交就等于丢），承诺就**静默全丢**——代际立约整体失效。
 ///
@@ -1190,7 +1190,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 /// 落格。它同时钉住两件事——出参通道（`take_derived`）与写方（`record_derived`）——
 /// 以及锚点：立约溯源必须是本轮开口（I2）。
 ///
-/// **反向自检**：把 `v2_tools` 里三份出参改回 `&mut Vec::new()`，本用例必须红。
+/// **反向自检**：把 `tool_dispatch` 里三份出参改回 `&mut Vec::new()`，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_derived_commitment_facts() {
     use crate::symbio_core::{EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED};
@@ -1214,7 +1214,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         ..Default::default()
     };
 
-    let res = execute_turn(V2Turn {
+    let res = execute_turn(ExecTurn {
         session: &session,
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
@@ -1298,7 +1298,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 /// 时反射档会去新开一个 `u-{turn}` 格，而该轮的用户格**已经在网格里**（等待轮落的）
 /// ⇒ 撞幂等键（`AppendError::Duplicate` → Failed 出口），本轮既完不成收束、又变成一次
 /// 报错。语义上同样说不通：续写要跑的是刚被批准的那次工具，不是拿技能顶掉它。
-/// 该边界由 `v2_exec` 的 `resume_anchor.is_none()` 判定，故此处钉住：`resume` 为
+/// 该边界由 `turn_exec` 的 `resume_anchor.is_none()` 判定，故此处钉住：`resume` 为
 /// `Some` 时即便命中集非空，也照走完整推理（模型被调用）。
 #[tokio::test]
 async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
@@ -1308,7 +1308,7 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
     let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
 
     // `trigger` 与 `tool_free_req` 的 `user_text`（"你好"）逐字相同 ⇒ 命中。
-    let hits = [super::super::v2_skills::SkillLlmHit {
+    let hits = [super::super::skill_events::SkillLlmHit {
         skill_id: "sk-1".into(),
         trigger: "你好".into(),
         content: "先列要点；再合并同类项。".into(),
@@ -1393,7 +1393,7 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
             .expect("开轮格");
     }
 
-    let hits = [super::super::v2_skills::SkillLlmHit {
+    let hits = [super::super::skill_events::SkillLlmHit {
         skill_id: "sk-1".into(),
         trigger: "你好".into(),
         content: "先列要点；再合并同类项。".into(),
@@ -1431,7 +1431,7 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
 
 // ── `UiBridge::flush` 的同步点 ────────────────────────────────────────────
 //
-// `flush` 是 `v2_tools::dispatch` 里**定格正文**与**工具节点**之间的同步点：定格帧
+// `flush` 是 `tool_dispatch::dispatch` 里**定格正文**与**工具节点**之间的同步点：定格帧
 // 在桥的通道里排队，而工具节点直接写出口，不排空队列就倒序（工具卡片先于正文）。
 //
 // 第一条钉的是最容易被静默的那条出口——接收端**活着**但把屏障丢掉（emitter 被
@@ -1741,7 +1741,7 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
         .collect()
 }
 
-/// 会话 WAL 的路径（`v2_exec` 与测试同一口径）。
+/// 会话 WAL 的路径（`turn_exec` 与测试同一口径）。
 fn wal_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join(super::super::paths::V2_WAL_FILE)
 }

@@ -22,7 +22,7 @@ import './_selfrun.mjs';
 //
 // 早先版本直读 `v2-events.wal` 判开轮格 `payload.tier == 'reflex'`、收束格
 // `model == 'reflex'`、`cost_ms <= 80`、`produced_by`。这些是**存储白盒**，判据已
-// 归 Rust 单测（`turn_runner.test.rs` 的档位 / 溯源用例、`v2_exec.test.rs` 的快路）。
+// 归 Rust 单测（`turn_runner.test.rs` 的档位 / 溯源用例、`turn_exec.test.rs` 的快路）。
 // e2e 只保留「用户如何看到就如何读」：请求计数（LLM 请求包）、stdout（CLI）、
 // 转写（生产读出口 `vdfs/read`）、出口读数（`session/stats`）。
 import {
@@ -44,7 +44,7 @@ import {
   assertTranscriptInvariants,
 } from '../helpers.mjs';
 
-/** 注入段抬头（与 `v2_memory.rs::RECALL_SECTION_HEAD` 同一常量口径） */
+/** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径） */
 const HEAD = '【长期记忆】';
 
 /** 第 1 / 2 轮：同一句发言（第 2 轮即命中）。 */

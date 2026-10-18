@@ -192,7 +192,7 @@ impl PersistentChatSession {
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
-            use super::super::v2_messages::AppendOutcome;
+            use super::super::message_events::AppendOutcome;
             let mut failure: Option<String> = None;
             match &change {
                 MessageChange::Born {
@@ -200,7 +200,7 @@ impl PersistentChatSession {
                     carrier: Carrier::Here,
                 } => {
                     if let AppendOutcome::Failed(why) =
-                        super::super::v2_messages::added(&dir, nodes)
+                        super::super::message_events::added(&dir, nodes)
                     {
                         failure = Some(why);
                     }
@@ -209,7 +209,7 @@ impl PersistentChatSession {
                     for m in msgs {
                         // 第一条失败即停：后续的更没理由成功，而一次变更只报一个错。
                         if let AppendOutcome::Failed(why) =
-                            super::super::v2_messages::edited(&dir, m)
+                            super::super::message_events::edited(&dir, m)
                         {
                             failure = Some(why);
                             break;
@@ -218,7 +218,7 @@ impl PersistentChatSession {
                 }
                 MessageChange::Removed(ids) => {
                     if let AppendOutcome::Failed(why) =
-                        super::super::v2_messages::removed(&dir, ids)
+                        super::super::message_events::removed(&dir, ids)
                     {
                         failure = Some(why);
                     }
@@ -259,9 +259,9 @@ impl PersistentChatSession {
                 // 数据丢失），日志把这次失败指出来。
                 if !removed.is_empty() {
                     if let Some(dir) = self.store.session_dir(&self.session_id) {
-                        use super::super::v2_messages::AppendOutcome;
+                        use super::super::message_events::AppendOutcome;
                         if let AppendOutcome::Failed(why) =
-                            super::super::v2_messages::removed(&dir, &removed)
+                            super::super::message_events::removed(&dir, &removed)
                         {
                             crate::plugin_error!(
                                 "session",

@@ -1,6 +1,6 @@
 //! v2 派生事实写入——承诺 / 任务表 / 熔断 + 记忆与学习。
 //!
-//! `v2_exec` 在轮末调用本模块的两个写方，把本轮的**派生副作用**落进同一份持久事实源
+//! `turn_exec` 在轮末调用本模块的两个写方，把本轮的**派生副作用**落进同一份持久事实源
 //! （<会话目录>/`v2-events.wal`，`paths::V2_WAL_FILE` 单源）。
 //!
 //! ## 为什么这两半是独立于「轮次事实」的
@@ -13,7 +13,7 @@
 //!
 //! ## 锚点由调用方给，锚的**含义**不由调用方定
 //!
-//! `user_seq` 是本轮开口格的 seq，`anchor_id` 是事件号的词干。两条都由 `v2_exec`
+//! `user_seq` 是本轮开口格的 seq，`anchor_id` 是事件号的词干。两条都由 `turn_exec`
 //! 给（`t{turn}` 一族）。
 //!
 //! ## 失败口径（两种，不合并）
@@ -50,7 +50,7 @@ use crate::symbio_core::{
 /// ## 锚点由调用方给，锚的**含义**不由调用方定
 ///
 /// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格），`anchor_id` 是
-/// 事件号的**词干**（`t{turn}`，一轮一个号）。两条都由 `v2_exec` 给，但
+/// 事件号的**词干**（`t{turn}`，一轮一个号）。两条都由 `turn_exec` 给，但
 /// 「溯源锚必须是本轮的开口」这条不变（I2：承诺 / 任务 / 熔断溯源 100%）。
 ///
 /// ## 失败口径（两种，不合并）
@@ -100,8 +100,8 @@ pub(crate) fn record_derived(
 
     // ── 任务表（S7 步 16–18，04 §3.1 批⑨）────────────────────────────────
     // 与承诺**同锚**（`user_seq`）：任务是「这轮模型说该做什么」，出处是这一轮的
-    // 开口。写方住 `v2_tasks`，此处只负责把门推开——失败只记日志不冒泡。
-    if let Err(why) = super::v2_tasks::write(
+    // 开口。写方住 `task_events`，此处只负责把门推开——失败只记日志不冒泡。
+    if let Err(why) = super::task_events::write(
         store,
         snapshot,
         tasks,
@@ -226,13 +226,13 @@ pub(crate) fn record_elimination(store: &EventWalStore, turn: u64, user_seq: u64
 ///
 /// 轮次事实（`u-{turn}` 开口 / 收束格）记的是**这一轮说了什么、答应了什么**，
 /// 由 v2 运行器原生记账。但记忆与学习**不是轮次事实**，而是本轮的**派生副作用**：
-/// `v2_exec` 一处都不写（它只写轮次事实）。漏调本函数，「编码 / 检索锚 / 巩固 /
+/// `turn_exec` 一处都不写（它只写轮次事实）。漏调本函数，「编码 / 检索锚 / 巩固 /
 /// 技能观测 / 技能编译」会**静默全丢**——S06 的长期记忆与 S11 的自我改进随之失效。
 ///
 /// ## 锚点由调用方给，锚的**含义**不由调用方定
 ///
 /// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格），`anchor_id` 是
-/// 幂等键的**词干**（`t{turn}`，一轮一个号）。两条都由 `v2_exec` 给，但
+/// 幂等键的**词干**（`t{turn}`，一轮一个号）。两条都由 `turn_exec` 给，但
 /// 「溯源锚必须是本轮的开口」这条不变（I2：记忆溯源覆盖 100%）。
 ///
 /// ## 失败只记日志不冒泡
@@ -274,15 +274,15 @@ pub(crate) fn record_learning(
     // 经验（用户发言）= **人的认知**，可见域 `shared`——智能体读、本人写
     // （T-130 §3 的 grants 行语义，T-094 ①：内容侧产地）。单归属主部署下
     // 「这个人」= 本机用户，认知可供本部署的矩阵内主体借用（SC-010 判据 3）。
-    if let Err(why) = super::v2_memory::encode(
+    if let Err(why) = super::memory_events::encode(
         store,
         snapshot,
         turn,
         user_seq,
         now,
-        super::v2_memory::EncodeContent::new(
+        super::memory_events::EncodeContent::new(
             user_text,
-            super::v2_memory::MEMORY_TAG,
+            super::memory_events::MEMORY_TAG,
             format!("v2m-{anchor_id}"),
         )
         .with_vis_scope(crate::symbio_core::VisScope::Shared),
@@ -296,15 +296,15 @@ pub(crate) fn record_learning(
     // 判断 = 智能体自己的收束记录，可见域 `thread_private`（C10 缺省）——
     // 它是会话私有的工作记忆，不是可跨主体借用的认知（T-094 ①）。
     if let Some(response) = response {
-        if let Err(why) = super::v2_memory::encode(
+        if let Err(why) = super::memory_events::encode(
             store,
             snapshot,
             turn,
             user_seq,
             now,
-            super::v2_memory::EncodeContent::new(
+            super::memory_events::EncodeContent::new(
                 response,
-                super::v2_memory::JUDGMENT_TAG,
+                super::memory_events::JUDGMENT_TAG,
                 format!("v2j-{anchor_id}"),
             ),
         ) {
@@ -313,7 +313,9 @@ pub(crate) fn record_learning(
     }
     // ── 步 12 检索入格：本轮召回视图 → 一条 `memory.recalled` ─────────────
     if let Some(view) = recalled {
-        if let Err(why) = super::v2_memory::record_recalled(store, view, user_seq, principal, now) {
+        if let Err(why) =
+            super::memory_events::record_recalled(store, view, user_seq, principal, now)
+        {
             remember("步 12 检索入格", why);
         }
     }
@@ -322,7 +324,7 @@ pub(crate) fn record_learning(
     // doc-link-allow D-004: 「曾经记过什么」是记忆族的语义问句，非版本变更史
     // 「曾经记过什么」收成一族记忆。压缩归档把被取代的前缀移出 live 段后，
     // 只读 live 会让巩固**静默**丢掉压缩前的记忆（它们仍在归档段里）。
-    if let Err(why) = super::v2_memory::consolidate(store, &store.history(), turn, now) {
+    if let Err(why) = super::memory_events::consolidate(store, &store.history(), turn, now) {
         remember("步 13 巩固", why);
     }
 
@@ -358,9 +360,9 @@ pub(crate) fn record_learning(
     // 编译 → 校准 → 回退链路原地待命、不产生任何事实。
     if skill_compile {
         if let Some(response) = response {
-            if let Err(why) =
-                super::v2_skills::compile(store, snapshot, turn, user_seq, user_text, response, now)
-            {
+            if let Err(why) = super::skill_events::compile(
+                store, snapshot, turn, user_seq, user_text, response, now,
+            ) {
                 remember("步 22 技能编译", why);
             }
         }
@@ -368,5 +370,5 @@ pub(crate) fn record_learning(
 }
 
 #[cfg(test)]
-#[path = "v2_facts.test.rs"]
+#[path = "derived_facts.test.rs"]
 mod tests;

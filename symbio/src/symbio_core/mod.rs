@@ -115,13 +115,13 @@ pub use actors::{ActorSpec, Pattern};
 // 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
 // （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
 // `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
-// 技能进 `v2_skills`）。**必须整对**：闸门与自主层同批成对（否则"自主写入对话"，
+// 技能进 `skill_events`）。**必须整对**：闸门与自主层同批成对（否则"自主写入对话"，
 // 04 §3.1），编译与路由同批成对（否则回退永远不会发生——编译不入格就没有
 // `skill_id`、路由不落观测就没有 `fallback`，置信度恒 1.0，S11 §5 静默失效）。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
 // `EliminationDecider`（S13 淘汰回路的裁决侧，T-073）：判定在 core、轮末驱动与
-// 闸门接线都在 `plugins/session`（v2_facts 的轮末步 + 工具执行层的撤销闸），
+// 闸门接线都在 `plugins/session`（derived_facts 的轮末步 + 工具执行层的撤销闸），
 // 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
@@ -131,7 +131,7 @@ pub(crate) use actors::{
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
 // `invariants` 的 `acyclic_deps` / `rework_bounded`）走域内路径，core 外的写方只有
-// `plugins/session/v2_tasks` 按名字落格——**单消费方**，故与记忆事件名字表（下）、
+// `plugins/session/task_events` 按名字落格——**单消费方**，故与记忆事件名字表（下）、
 // `readyset` 出根（同批）同一形态：`pub(crate)` 出根（C-003 数 `pub use`），只在本
 // crate 内可见、不进对外公开面。收窄成「下沉到 `plugins/session`」会让写方复述字面量、
 // 制造第二处真相，违反 ADR-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
@@ -167,7 +167,7 @@ pub(crate) use actors::{commitment_events, recalled_event};
 pub(crate) use actors::render_messages;
 // 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
 // `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
-// （`v2_facts.test.rs` / `v2_exec.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
+// （`derived_facts.test.rs` / `turn_exec.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
 // 没有消费者。故只在 `cfg(test)` 出根：出根是给测试用的，不出根不是把它们藏着。
 #[cfg(test)]
 pub(crate) use event::{
@@ -178,7 +178,7 @@ pub(crate) use event::{
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
     EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
-// 淘汰裁决事件名（S13 §3，T-073）：生产写方是 `v2_facts` 的轮末淘汰步，读方是
+// 淘汰裁决事件名（S13 §3，T-073）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
 // **两个生产消费方**，故走非测试的 `pub(crate)` 出根（与记忆事件名表同一形态）。
 pub(crate) use event::EVENT_VERDICT_ASSERTED;
@@ -246,7 +246,7 @@ pub(crate) use store::AppendError;
 //
 // `GrantsOverlay`（S13 淘汰回路的机制半边，T-073）：授权表是装配期常量，淘汰是
 // 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
-// 两个插件侧消费方——`v2_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
+// 两个插件侧消费方——`derived_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
 // 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub(crate)` 出根。
 // 只出 `GrantsOverlay` 不出 `GrantsChange`：插件侧拿它经 `fold` 收
 // `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。

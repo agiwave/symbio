@@ -124,15 +124,15 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 下沉不了（core 不得反向依赖插件 / 类型行为无处安放），又必须占根出口（C-002
       // 禁插件深引 core 域目录）。
       ActorSpec:
-        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（v2_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
+        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（turn_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
       turnstate:
-        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。core 外唯一生产消费方 = plugins/session/v2_worker_progress（S2 的 in_flight 判据）。core 内没有第二个生产模块用它（同域内只有测试彩排），故显为单消费方',
+        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。core 外唯一生产消费方 = plugins/session/worker_progress（S2 的 in_flight 判据）。core 内没有第二个生产模块用它（同域内只有测试彩排），故显为单消费方',
       SloLatencyView:
         'P2 跨会话聚合的视图类型：merge 是类型行为（提成根函数即无主函数），C-002 禁插件深引 ⇒ 类型必须占根。core 内没有第二个生产消费模块（跨会话聚合实现在插件侧），故显为单消费方',
       FallbackRateView:
         '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
       mutations_latest_snapshot:
-        '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / v2_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
+        '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / turn_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
       SOURCE_PRINCIPAL:
         '线上协议键（AR-004 标准上下文键表）：入站 metadata 的「来源主体」，键名字面 `source_principal` 出现在网关线上协议与 e2e 请求包里，是**跨进程契约**——键名注册表就是 core keys 域（T-072 的 `commitment.*` 的 `to`）。core 外唯一生产消费方 = plugins/session（收件箱条目寄存 / 执行 ctx 挂回 / `request_source_principal` 读取），但不可下沉进该插件：下沉后线上键名脱离 AR-004 键表与 `define_string_key!` 注册行，网关 metadata 与消费方各写一份字面量必然漂移。属 README §4 四问的「成文契约」而非「单消费方该下沉」',
     }

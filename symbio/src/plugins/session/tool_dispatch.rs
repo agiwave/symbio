@@ -22,7 +22,7 @@
 //! ## 正文节点的定格
 //!
 //! 工具轮的中途正文（"我先查一下"）已经由 UI 桥逐片广播过。本模块在分发前把它
-//! **定格**（`Completed`）并切节点（[`super::v2_exec::UiBridge::finalize_node`]）——
+//! **定格**（`Completed`）并切节点（[`super::turn_exec::UiBridge::finalize_node`]）——
 //! 不定格它永远转「流式中」，不切节点多轮正文会粘成一条。
 
 use std::path::PathBuf;
@@ -42,12 +42,12 @@ use super::config::PresentationTree;
 use super::message_build::{detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes};
 use super::tools::process_tool_calls_async;
 use super::transcript::llm_emit_state;
-use super::v2_exec::UiBridge;
+use super::turn_exec::UiBridge;
 
 /// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
 ///
 /// 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
-/// 而写方（落格）在轮末——`v2_exec` 调 [`super::v2_facts::record_derived`] 写。
+/// 而写方（落格）在轮末——`turn_exec` 调 [`super::derived_facts::record_derived`] 写。
 /// 本结构是那份出参从分发点回到运行器的**唯一通道**：不收集它，这三样就静默全丢
 /// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
 ///
@@ -83,12 +83,12 @@ pub(crate) struct SessionDispatchPort {
     produced: Mutex<Vec<ChatNode>>,
     /// 本轮工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）。
     derived: Mutex<DerivedFacts>,
-    /// 本轮建树策略（`V2Turn` 的请求级快照，与流式发射同一个取值）。
+    /// 本轮建树策略（`ExecTurn` 的请求级快照，与流式发射同一个取值）。
     presentation_tree: PresentationTree,
 }
 
 impl SessionDispatchPort {
-    #[allow(clippy::too_many_arguments)] // 构造点唯一（v2_exec），字段即上下文
+    #[allow(clippy::too_many_arguments)] // 构造点唯一（turn_exec），字段即上下文
     pub(crate) fn new(
         parent: Option<Arc<dyn Plugin>>,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -187,8 +187,8 @@ impl DispatchPort for SessionDispatchPort {
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
         // 三份收束派生事实出参（承诺 / 任务表 / 熔断）：数据来源在工具执行层，
-        // 写方在轮末——由本分发方收下、`v2_exec` 轮末调
-        // `v2_facts::record_derived` 落格。不收这三份，
+        // 写方在轮末——由本分发方收下、`turn_exec` 轮末调
+        // `derived_facts::record_derived` 落格。不收这三份，
         // 代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
         let mut delegations: Vec<super::tools::Delegation> = Vec::new();
         let mut tasks: Vec<super::tools::TaskDeclaration> = Vec::new();
@@ -291,6 +291,6 @@ impl DispatchPort for SessionDispatchPort {
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/plugins/session/v2_tools.rs::take_produced: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_tools.rs::take_derived: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/v2_tools.rs::dispatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/tool_dispatch.rs::take_produced: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/tool_dispatch.rs::take_derived: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/tool_dispatch.rs::dispatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

@@ -795,7 +795,7 @@ pub(crate) async fn retry_compaction(
     // 失败路径上 `consolidated` 恒为 `None`（内核回滚时不设它），于是这一段对失败
     // 与「未触发」两种结局都是 no-op。
     if let Some(msgs) = context.consolidated.take() {
-        super::super::v2_exec::consolidate_outside_turn(
+        super::super::turn_exec::consolidate_outside_turn(
             &context.session,
             &msgs,
             &context.principal,

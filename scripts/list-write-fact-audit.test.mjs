@@ -9,7 +9,7 @@
  *   ④ `replace_all` 出了 write.rs 但 ±NEAR 行内有真实的 `consolidated = Some(...)` → 放行；
  *   ⑤ 寄存锚只在**注释**里 → LWF-002（锚必须是真代码）；
  *   ⑥ 寄存锚在窗口边界之外 → LWF-002；
- *   ⑦ `v2_messages::edited` 出了 write.rs → LWF-001（第二个写入口）；
+ *   ⑦ `message_events::edited` 出了 write.rs → LWF-001（第二个写入口）；
  *   ⑧ `.test.rs` 与注释里的提及不触发（不误报）。
  *
  * 用法：node --test scripts/list-write-fact-audit.test.mjs
@@ -126,9 +126,9 @@ test('寄存锚在窗口边界之外（>20 行）→ LWF-002 变红', () => {
   assert.match(r.stderr, /LWF-002/)
 })
 
-test('v2_messages::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
+test('message_events::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
   const r = audit({
-    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    v2_messages::edited(dir, m);\n}\n',
+    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    message_events::edited(dir, m);\n}\n',
   })
   assert.equal(r.status, 1, '事实落格函数不得有第二个调用方')
   assert.match(r.stderr, /LWF-001/)
@@ -143,7 +143,7 @@ test('.test.rs 与注释里的提及不触发（不误报）', () => {
       '',
     ].join('\n'),
     'plugins/session/docs.rs': [
-      '//! 文档里提到 `append_messages` 与 `v2_messages::edited` 不算调用。',
+      '//! 文档里提到 `append_messages` 与 `message_events::edited` 不算调用。',
       '/// 另一段：`replace_all` 的契约是只补缺号。',
       'pub fn unrelated() {}',
       '',

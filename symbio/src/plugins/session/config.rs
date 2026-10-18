@@ -294,9 +294,9 @@ pub struct SessionConfig {
     /// 轮末收束时，本轮的**成功轨迹**（`chat.assistant.final` 收束格）要不要被固化成一条
     /// `memory.encoded{tag:"skill"}`——S11 §4 的平凡值 `projection = recall` 说的
     /// 正是「不编译，只检索」：
-    /// - `true`：`v2_skills::compile` 在收束时写技能事件（同文去重，同一句 trigger
+    /// - `true`：`skill_events::compile` 在收束时写技能事件（同文去重，同一句 trigger
     ///   至多编译一次），本轮的用户发言与助手回答一起被固化下来；
-    /// - `false`：**零技能事件** ⇒ 读侧 `v2_skills::route` 逐条跳过，置信度闸与
+    /// - `false`：**零技能事件** ⇒ 读侧 `skill_events::route` 逐条跳过，置信度闸与
     ///   反自动化回退整条链路原地待命、不产生任何事实——与 [`conation_enabled`]
     ///   同一条「关掉后系统退化为纯响应式且仍完整运行」。
     ///
@@ -317,7 +317,7 @@ pub struct SessionConfig {
     ///
     /// ## 它控制什么
     ///
-    /// [`skill_compile_enabled`] 让技能**存在**、`v2_skills::route` 让低置信技能**不进
+    /// [`skill_compile_enabled`] 让技能**存在**、`skill_events::route` 让低置信技能**不进
     /// 提示词**；本开关决定命中时**要不要跳过模型**：
     /// - `true`：本轮发言**逐字命中**某条已编译技能（且该技能过置信度闸）⇒ 本轮以
     ///   **技能正文**收束，**一次模型调用都不发生**（S11 §2「命中技能后走 `budget_ms`
@@ -336,7 +336,7 @@ pub struct SessionConfig {
     /// **同一个**截断上限）。更宽的"同类"判定是算法问题（S11 §7：架构只提供
     /// `skill_compile` 这个位置），本开关不假装它已解决——因此命中率取决于
     /// **重复发言**，不取决于语义相似。这是诚实划界，不是缺陷：后续接入匹配算法时，
-    /// 改的是**数据**（`v2_skills::take_match` 一处），不是结构。
+    /// 改的是**数据**（`skill_events::take_match` 一处），不是结构。
     ///
     /// ## 跳过的是 v2 运行器里的那一次模型调用
     ///

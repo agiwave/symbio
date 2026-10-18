@@ -65,11 +65,11 @@ pub(crate) use self::state::{
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
-/// 轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `v2_exec`。
+/// 轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `turn_exec`。
 ///
 /// ## 为什么返回**草稿**而不是 `()`
 ///
-/// 落格要 `EventWalStore`，而开着它的是 `v2_exec`。交回一个 `()` 就等于让本函数
+/// 落格要 `EventWalStore`，而开着它的是 `turn_exec`。交回一个 `()` 就等于让本函数
 /// 「说完了就算记下了」，而这两件事不是同一件事（汇报的对话面节点落进
 /// `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。交回草稿
 /// 让「谁落格」这件事留在有 store 的那一侧。
@@ -84,7 +84,7 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// ## 会话视图：只给**轮首**那一份
 ///
 /// compose 的 `ComposeRequest` 带一段会话视图，而轮边界上
-/// `context.messages` 里**只有轮首那一批**（工具轮的消息由 `v2_exec` 在轮末才
+/// `context.messages` 里**只有轮首那一批**（工具轮的消息由 `turn_exec` 在轮末才
 /// 交回来）。所以本函数传的快照与那一刻 `context.messages` 的内容**逐字相同**，
 /// 不是近似。代价是它不含本轮工具节点——仓内的 `progress_text` 不读这一段
 /// （只用 `snapshot`），而要让仓外 compose 插件也拿到它就得再造一条把工具消息
@@ -94,7 +94,7 @@ pub(crate) fn round_report_hook(
     ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
     conversation: Vec<ChatNode>,
     last_spoke_at: i64,
-) -> super::v2_exec::RoundHookFn {
+) -> super::turn_exec::RoundHookFn {
     let progress = Arc::new(std::sync::Mutex::new(
         super::chat_loop::progress::RoundProgress::new(
             orchestrator.progress.clone(),
@@ -327,7 +327,7 @@ pub async fn run_chat_loop(
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
     // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
     // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。
-    let mut pending_resume: Option<super::v2_exec::ResumedTool> = None;
+    let mut pending_resume: Option<super::turn_exec::ResumedTool> = None;
     if let Some(tr) = req.resume.take() {
         match crate::plugins::session::resume::process_resume(
             orchestrator,
@@ -487,7 +487,7 @@ pub async fn run_chat_loop(
                         // `session/stats` 的轮次计数也不含它——而 `messages.json` 里有
                         // （`apply_verdict` 刚 push 的答话会随 `finish_turn` 落库）
                         // ⇒ **两条真源**。修法 = 把答话交给运行器落格（见
-                        // `v2_exec::execute_final_reply_turn` 的文档）。
+                        // `turn_exec::execute_final_reply_turn` 的文档）。
                         // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条
                         // assistant 消息）。取它而不是再算一遍：措辞归 `compose` 所有，
                         // 这里只搬运。
@@ -527,7 +527,7 @@ pub async fn run_chat_loop(
                                 }
                             })
                             .unwrap_or_default();
-                        if let Err(e) = super::v2_exec::execute_final_reply_turn(
+                        if let Err(e) = super::turn_exec::execute_final_reply_turn(
                             &context.session,
                             &ctx,
                             orchestrator.provider.clone(),
@@ -582,7 +582,7 @@ pub async fn run_chat_loop(
                     // ADR-049），不入格则重建折不出这条根级对话面节点 ⇒ t20 / t22 的
                     // 「恰有一条对话面节点」全部落空。落格在 `execute_turn`（唯一持
                     // 写者令牌处）——这里只把「说了什么 / 节点身份」递过去，与缺口 5
-                    // 的答话同一条分割（判定与措辞在 chat_loop，落格在 v2_exec）。
+                    // 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
                     if effect == VerdictEffect::Spoke {
                         let node =
                             context.messages.iter().rev().find(|m| {
@@ -618,7 +618,7 @@ pub async fn run_chat_loop(
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
         // v2 下永不成立；裁决见 [ADR-074](../../../../docs/010-adr/074.md)）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干结果作为 `supplemented_at` 随
-        // [`super::round_hook::RoundHookFn`] 的入参带出来（见 `v2_exec.rs` 的注入闭包）。
+        // [`super::round_hook::RoundHookFn`] 的入参带出来（见 `turn_exec.rs` 的注入闭包）。
         plugin_info!(
             "session",
             "[Turn] 第 {} 次请求开始 (msgs={})",
@@ -657,11 +657,11 @@ pub async fn run_chat_loop(
         //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
         //     一次 LLM 请求（与原意图一致）；
         //   - 用户格与中止收束格成对入格（N3/C4 的不变量在运行器内守住）。
-        // 出口形态不变：运行器回 `aborted`，`v2_exec` 上抛 `PluginError::Aborted`，
+        // 出口形态不变：运行器回 `aborted`，`turn_exec` 上抛 `PluginError::Aborted`，
         // 走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
-        // 轮次经 v2 运行器（[`super::v2_exec`]）执行——事实原生入格、prompt 从转写出、
+        // 轮次经 v2 运行器（[`super::turn_exec`]）执行——事实原生入格、prompt 从转写出、
         // 流式经 UiBridge 回同一出口、工具轮经 `DispatchPort` 契约分发（工具节点与
         // 结果仍写进同一份对话图）；收口（步骤 5-7）与之共享。
         //
@@ -686,7 +686,7 @@ pub async fn run_chat_loop(
         // 而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。落格与归档
         // 由 `execute_turn` 做（唯一持写者令牌之处），这里只负责把「压成了什么」递过去。
         let consolidation = context.consolidated.take();
-        let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
+        let out = match super::turn_exec::execute_turn(super::turn_exec::ExecTurn {
             session: &context.session,
             provider: orchestrator.provider.clone(),
             parent: orchestrator.parent.clone(),
@@ -703,7 +703,7 @@ pub async fn run_chat_loop(
             tools: &inputs.tools,
             resume: pending_resume.take(),
             // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
-            // （它们的写方是 `v2_facts::record_learning`，见其文档）。
+            // （它们的写方是 `derived_facts::record_learning`，见其文档）。
             recalled: turn.recall_view.as_ref(),
             skill_obs: &turn.skill_route,
             // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
@@ -717,18 +717,18 @@ pub async fn run_chat_loop(
             // 让「用户中途插话」**折进本轮**。
             supplements: orchestrator.supplements.as_ref().map(|s| {
                 let s = s.clone();
-                Arc::new(move || s.take_inbox_batch_sync()) as super::v2_exec::SupplementFn
+                Arc::new(move || s.take_inbox_batch_sync()) as super::turn_exec::SupplementFn
             }),
             supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
-            // 本函数手里），**落格**在 `v2_exec`（store 在那边）。
+            // 本函数手里），**落格**在 `turn_exec`（store 在那边）。
             on_round: Some(round_report_hook(
                 orchestrator_arc.clone(),
                 ctx.clone(),
                 context.messages.clone(),
                 turn.last_user_facing_at,
             )),
-            // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `v2_exec`
+            // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `turn_exec`
             // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
             opening_text: turn.opening_text.as_deref(),
             opening_dialog: turn.opening_dialog.take(),
@@ -825,7 +825,7 @@ pub(crate) enum TurnFlow {
 /// `TurnState::in_flight_tools`（本轮已派发、尚未产出结果的工具调用 id 集合），
 /// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。
 ///
-/// v2 现实下它恒放行：工具在 `v2_exec::execute_turn` **内部**跑完（`DispatchPort`
+/// v2 现实下它恒放行：工具在 `turn_exec::execute_turn` **内部**跑完（`DispatchPort`
 /// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
 /// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
 /// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批

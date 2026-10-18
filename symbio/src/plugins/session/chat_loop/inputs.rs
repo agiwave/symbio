@@ -11,7 +11,7 @@ use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
 ///
-/// **取值点与 `v2_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
+/// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
 /// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（T-085 批②）
 /// 的语义维由它驱动；取不到 ⇒ 空串 ⇒ 投影退化为纯 ts 降序（平凡值，J2）。
 fn last_user_text(context: &SessionContext) -> String {
@@ -159,7 +159,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 同一轮内记忆不漂移，事实源也只扫一遍，后续工具轮复用同一份视图。
     // 临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
     //
-    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `v2_exec`
+    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `turn_exec`
     // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
@@ -174,15 +174,17 @@ pub(crate) async fn prepare_turn_inputs(
         // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
         let recall_viewer = request_principal(ctx.as_ref());
         turn.recall_view = match context.session.session_dir() {
-            Some(dir) => {
-                crate::plugins::session::v2_memory::recall_view(&dir, &recall_query, &recall_viewer)
-            }
+            Some(dir) => crate::plugins::session::memory_events::recall_view(
+                &dir,
+                &recall_query,
+                &recall_viewer,
+            ),
             None => None,
         };
         // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
         // 召回同一条口径（同一轮内集合不漂移）。
         turn.ready_section = match context.session.session_dir() {
-            Some(dir) => crate::plugins::session::v2_tasks::prompt_section(&dir),
+            Some(dir) => crate::plugins::session::task_events::prompt_section(&dir),
             None => None,
         };
         // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
@@ -191,14 +193,14 @@ pub(crate) async fn prepare_turn_inputs(
         // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
         //
         // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
-        // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `v2_exec`
+        // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
         // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
         // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
         let routing = match context.session.session_dir() {
             Some(dir) => turn
                 .recall_view
                 .as_mut()
-                .map(|view| crate::plugins::session::v2_skills::route(&dir, view))
+                .map(|view| crate::plugins::session::skill_events::route(&dir, view))
                 .unwrap_or_default(),
             None => Default::default(),
         };
@@ -213,7 +215,7 @@ pub(crate) async fn prepare_turn_inputs(
     let recall_section = turn
         .recall_view
         .as_ref()
-        .and_then(crate::plugins::session::v2_memory::prompt_section);
+        .and_then(crate::plugins::session::memory_events::prompt_section);
 
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
     // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——

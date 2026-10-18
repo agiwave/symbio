@@ -1,9 +1,9 @@
 //! 代际立约出参（`agent_run` 的承诺记录）：工具执行层把「向上游承诺了什么、
-//! 履行了没有」交出来，由轮末收束的 `v2_facts::record_derived` 落成 `commitment.*` 格。
+//! 履行了没有」交出来，由轮末收束的 `derived_facts::record_derived` 落成 `commitment.*` 格。
 
 /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
-/// `v2_facts::record_derived` 落成 `commitment.*` 格。
+/// `derived_facts::record_derived` 落成 `commitment.*` 格。
 ///
 /// 只认**声明了 `records_delegation_promise` 的工具**（`agent_run` 即是；T-158 改了
 /// 判据的住址，没改这条语义）——它是**跨主体**的那一次调用：本会话向上游承诺
@@ -11,7 +11,7 @@
 /// 不是承诺。
 ///
 /// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
-/// 谁负责把承诺入格，谁负责开那扇门（轮末收束的 `v2_facts::record_derived`）。
+/// 谁负责把承诺入格，谁负责开那扇门（轮末收束的 `derived_facts::record_derived`）。
 #[derive(Debug, Clone)]
 pub struct Delegation {
     /// 承诺号 = 本次调用在**转写里的 ToolCall 节点 id**（`c-offer-<id>` 由此成格）：

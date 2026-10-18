@@ -7,9 +7,12 @@ mod chat_session;
 mod commands;
 pub(crate) mod config;
 mod context;
+pub(crate) mod derived_facts;
 pub(crate) mod loop_registry;
 mod memory;
+mod memory_events;
 mod message_build;
+pub(crate) mod message_events;
 mod model_chat;
 mod options;
 mod orchestrator;
@@ -17,18 +20,15 @@ pub(crate) mod paths;
 pub(crate) mod rebuild;
 mod resume;
 pub(crate) mod round_hook;
+mod skill_events;
 mod stats;
+mod task_events;
 mod tokenizer;
+pub(crate) mod tool_dispatch;
 mod transcript;
+pub(crate) mod turn_exec;
 pub(crate) mod turn_runner;
-pub(crate) mod v2_exec;
-pub(crate) mod v2_facts;
-mod v2_memory;
-pub(crate) mod v2_messages;
-mod v2_skills;
-mod v2_tasks;
-pub(crate) mod v2_tools;
-pub(crate) mod v2_worker_progress;
+pub(crate) mod worker_progress;
 // `plugin` / `types` 作为公共契约层（crate 内可见），让 `lib.rs` 能直接
 // `pub use plugins::session::xxx::X` 拿到公共类型（避免在 session 顶层做中间
 // reexport 引入 unused_imports 警告）。

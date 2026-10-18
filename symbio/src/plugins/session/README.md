@@ -221,8 +221,8 @@ session:
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[ADR-048a](../../../../docs/010-adr/048a.md "ADR-048a")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [ADR-078](../../../../docs/010-adr/078.md "ADR-078") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
 * **具体规则**（唯一入口 `build_request_sections`，三段各自独立、非空才插）：
-  * **长期记忆召回段 (Recall Context)**：调用方（`chat_loop/inputs.rs`）在**本轮第一次请求**读一次跨会话召回视图（`v2_memory::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`v2_memory::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
-  * **任务调度段 (Ready Set)**：同一时机读一次本会话事实源的就绪任务集（`v2_tasks::prompt_section`），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**不与记忆段争 index 0**：本段先插、记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+  * **长期记忆召回段 (Recall Context)**：调用方（`chat_loop/inputs.rs`）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+  * **任务调度段 (Ready Set)**：同一时机读一次本会话事实源的就绪任务集（`task_events::prompt_section`），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**不与记忆段争 index 0**：本段先插、记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
   * **委派者真源段 (Delegate Context)**：调用方（`chat_loop/delegate.rs::delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [ADR-047](../../../../docs/010-adr/047.md)）。
   * **三段的消费形态**：`chat_loop::request_view_prefix` 按 `meta.kind`（不按下标——缺一段时下标全部左移）取出三段，按**记忆 → 调度 → 委派**拼成一条 `system` 前缀消息交给运行器。拼成一条是因为运行器的 prompt 入口只收一段前缀；标 `system` 而不是 `user`，是为了让「本轮用户说了什么」在消息层上没有歧义。
   * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
@@ -244,7 +244,7 @@ session:
     }
     ```
 
-  * 调用点参数（`chat_loop/inputs.rs`）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `v2_tasks::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定。
+  * 调用点参数（`chat_loop/inputs.rs`）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定。
 
 ---
 
@@ -274,12 +274,12 @@ session:
 ### 与「事件记忆」的分工（两层，不是一个东西的两份）
 
 本节讲的是**文件记忆**（`MEMORY.md`，钉住的约定，可编辑、走系统提示词注册通道）。
-S5 的**事件记忆**是另一层：`v2_memory.rs` 把每轮用户发言编码成 `memory.encoded`
+S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编码成 `memory.encoded`
 事件写进**本会话的 `v2-events.wal`**，跨会话召回后**置顶注入请求视图**（第 6 节第五步），
 活记忆到 4 条过 `consolidate::accept` 才合并——不另开文件、不经系统提示词、
 不进 VDFS。分工：文件记忆 = 会话自己的约定（人可读写）；事件记忆 = 可检索、
 可巩固、可排除式遗忘的**情景经验**（机器记账）。三段各自的判定方与四条口径见
-[`v2_memory.rs`](v2_memory.rs) 模块文档。
+[`memory_events.rs`](memory_events.rs) 模块文档。
 
 ### 系统提示词：只有一个注册通道
 

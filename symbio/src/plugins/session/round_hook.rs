@@ -2,8 +2,8 @@
 //!
 //! ## 为什么是「草稿」而不是「已落的事实」
 //!
-//! 汇报要落事实网格，而**开着 `EventWalStore` 的是 `v2_exec`**——判定与措辞在
-//! `chat_loop`（它有编排器、有 compose），落格在 `v2_exec`。两边各管一半，所以
+//! 汇报要落事实网格，而**开着 `EventWalStore` 的是 `turn_exec`**——判定与措辞在
+//! `chat_loop`（它有编排器、有 compose），落格在 `turn_exec`。两边各管一半，所以
 //! 回调交回来的只能是**草稿**：文本 + 它据以生成的运行现状。
 //!
 //! 交出「已落的事实」会让落格方无从判断真假；交出「文本」又会让判定方以为
@@ -75,16 +75,16 @@ impl ReportDraft {
 /// 四种组合，而其中一种（两个都没有）本来就该退化成 `None`——那种情况下挂一个
 /// 永远返回空的闭包，白白让 core 每轮问一次。
 pub(crate) fn round_hook(
-    supplements: Option<crate::plugins::session::v2_exec::SupplementFn>,
+    supplements: Option<crate::plugins::session::turn_exec::SupplementFn>,
     on_round: Option<RoundHookFn>,
 ) -> Option<(
-    crate::plugins::session::v2_exec::SupplementFn,
+    crate::plugins::session::turn_exec::SupplementFn,
     Option<RoundHookFn>,
 )> {
     if supplements.is_none() && on_round.is_none() {
         return None;
     }
-    let drain: crate::plugins::session::v2_exec::SupplementFn =
+    let drain: crate::plugins::session::turn_exec::SupplementFn =
         supplements.unwrap_or_else(|| Arc::new(|| None));
     Some((drain, on_round))
 }

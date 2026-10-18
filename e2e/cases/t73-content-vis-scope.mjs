@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 //
 // | 格 | 单测钉在哪 | 只有 e2e 能看见什么 |
 // |---|---|---|
-// | 产地（`memory.encoded` 载荷 `vis_scope`） | `v2_memory.test.rs` | 真实轮次真的把 `vis_scope = shared` 写进了 WAL |
+// | 产地（`memory.encoded` 载荷 `vis_scope`） | `memory_events.test.rs` | 真实轮次真的把 `vis_scope = shared` 写进了 WAL |
 // | 读侧闸（`stats` 按内容可见域判） | `stats.test.rs` | 出口（gateway → 容器 → `session/stats`）上三种读方的收放 |
 // | 归属（owner 恒放行） | `stats.test.rs` | 属主读数与不声明 principal 逐字一致 |
 //
@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 // 只有「共享会话」一半的话，闸退化成「矩阵成员恒放行」也能全绿——那正是 T-094 之前
 // 恒传 `VisScope::default()`（thread_private）的镜像错误。负面对照会话 B 把这件事钉住：
 // 它**有过轮次**（WAL 在、属主读得到）但**没有共享内容**（发言臂收束被授权拒绝 ⇒
-// 派生事实不落格，`v2_exec` 的 `closure_denied` 早退）⇒ `session/main` 照旧空切片。
+// 派生事实不落格，`turn_exec` 的 `closure_denied` 早退）⇒ `session/main` 照旧空切片。
 // 同一读方、两个会话、两种答案——差异只来自内容的可见域，不来自读方的身份。
 //
 // ## 会话 B 怎么造

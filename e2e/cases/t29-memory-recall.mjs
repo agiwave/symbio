@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // T-085 批④起每轮还编一条**判断**记忆（智能体收束正文，tag=判断）——注入段从此
 // 一问一答成对出现，判据按标签分开数（见 `A_ANSWERS`）。
 //
-// 为什么必须端到端：单测（`v2_memory.test.rs` / `v2_facts.test.rs`）把三段各自的
+// 为什么必须端到端：单测（`memory_events.test.rs` / `derived_facts.test.rs`）把三段各自的
 // 出口判据钉死了，但它们证不了三件只有这条链路能看见的事：
 //
 // | 要证的事 | 唯一能看见它的地方 |
@@ -67,7 +67,7 @@ import { join } from 'node:path';
 const SID_A = 'e2e-t29-a';
 const SID_B = 'e2e-t29-b';
 
-/** 注入段抬头（与 `v2_memory.rs::RECALL_SECTION_HEAD` 同一常量口径） */
+/** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径） */
 const HEAD = '【长期记忆】';
 
 /** A 会话的四句互不相同的发言 + 一次重复 + B 会话的一句。 */
@@ -125,7 +125,7 @@ function recallMessage(req) {
  * ## 切法：空行
  *
  * 三段之间由 `request_view_prefix` 用**空行**分隔（`parts.join("\n\n")`），而
- * `v2_memory::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行就是本段
+ * `memory_events::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行就是本段
  * 结束。比按「下一个抬头」切更稳：抬头是可改的展示文案，空行是分隔约定。
  */
 function recallSectionText(req) {

@@ -292,7 +292,7 @@ pub(crate) async fn worker_progress(
             continue;
         }
         // 子会话目录 = 父会话目录下的 <safe_id(子 id)>（`paths::session_dir` 的
-        // 同一套寻址，与 stats / v2_exec 同一个取值点）。父会话本身没有目录
+        // 同一套寻址，与 stats / turn_exec 同一个取值点）。父会话本身没有目录
         // （临时会话）⇒ 回落旧读法：那种会话没有 WAL，进展只在落库消息里。
         let Some(parent_dir) = session.session_dir() else {
             out.push(progress_of(&summary, &child));
@@ -305,7 +305,7 @@ pub(crate) async fn worker_progress(
         // 那一份（`store::load_messages` 已 WAL 优先），再拿它跟 WAL 投影比是
         // 「真源跟真源比」——口径差异会变成稳定误报。对账对象已随单源消失。
         let Some(wal_read) =
-            super::super::v2_worker_progress::progress_from_wal(&dir, &summary.id, &summary.title)
+            super::super::worker_progress::progress_from_wal(&dir, &summary.id, &summary.title)
         else {
             out.push(progress_of(&summary, &child));
             continue;

@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // | 断言 | 判据来自 |
 // |---|---|
-// | A 的判断记忆（thread_private）不进 B 的召回段；A 的经验（shared）进 | `v2_memory.test.rs`（单测钉判定函数，这里钉生产链） |
+// | A 的判断记忆（thread_private）不进 B 的召回段；A 的经验（shared）进 | `memory_events.test.rs`（单测钉判定函数，这里钉生产链） |
 // | shared 的记忆对矩阵内主体可见（B = `agent:main`） | 同上 + `stats.test.rs`（同一份 `can_see` 判据） |
 // | shared 的记忆对矩阵外主体不可见（C = `agent:ghost`，未登记） | 同 t73 的读侧口径 |
 //
@@ -52,7 +52,7 @@ const R_C1 = 'ghost 第一轮的收束。';
 
 /** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
 const V2_WAL = 'v2-events.wal';
-/** 注入段抬头（与 `v2_memory.rs::RECALL_SECTION_HEAD` 同一常量口径）。 */
+/** 注入段抬头（与 `memory_events.rs::RECALL_SECTION_HEAD` 同一常量口径）。 */
 const HEAD = '【长期记忆】';
 
 const textOf = (m) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
