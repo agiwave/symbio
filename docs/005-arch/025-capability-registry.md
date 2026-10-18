@@ -20,7 +20,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 | 判据 | 表达 | 现有棘轮 |
 |---|---|---|
-| core 形状只降不升 | `pub trait` 20 · `fn` 成员 65 · 默认体 23（4c 后实测） | `core-shape-audit.mjs`（CS-001） |
+| core 形状只降不升 | `pub trait` 20 · `fn` 成员 60 · 默认体 18（4d 后实测） | `core-shape-audit.mjs`（CS-001） |
 | 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 3 ⇒ **1 个 trait，3 个方法** | 本文档 §2 的账 |
 | session 不增 | 每步 `session` 非测试行数 ≤ 搬入前 | `find` + `wc -l` |
 | 行为不变 | 工具清单逐条比对 + schema 导出比对 + e2e 77 条 | 现有 e2e |
@@ -48,7 +48,8 @@ trait 改名（`CapabilityVisitor` → `Registry`）是最后一步的纯重命�
 > 实测 16（含 3 个默认体）。已随本文订正。**4a 之后 trait 余 14 方法**（Tool 3 + Model 4 +
 > Prompt 2 + Mount 5；默认体 3 → 2，`register_batch` 那个随 Tool 族一起退场）；
 > **4b 之后余 10 方法**（put / get / list 3 + Prompt 2 + Mount 5，默认体 5）；
-> **4c 之后余 8 方法**（put / get / list 3 + Mount 5，默认体 5）。
+> **4c 之后余 8 方法**（put / get / list 3 + Mount 5，默认体 5）；
+> **4d 之后余 3 方法**（put / get / list，无默认体——Mount 族含两个默认体一并退场）。
 
 收集器有**两个实现方**，这是迁移的真正成本所在：
 
@@ -216,6 +217,37 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   `SHAPE_BASELINE` 同步至 **20/65/23**，`CapabilityVisitor` 余 **8** 方法。
 - **session 非测试行数不变**：三处涉及（`inputs.rs` 读点、`plugin.rs` 注册点、`entry.rs` 一行注释）
   都只换了一行写法；四个注册点里三个在别的插件（model / setting / memory）。
+
+### 4d 落地形态（2026-10-18）
+
+- **挂载点与根同表**：`CapabilityRowPayload::Mount { provider, active }`
+  （`CapabilityRow::mount(目录名, provider)` / `CapabilityRow::mount_root(provider)`）。
+  差别只在根**不可能由调用方命名**（它不是某个插件的目录）——故根行的行名由构造函数
+  自己填保留值 `"<root>"`，`active` 是**根位**。又一条「位长在行上」：与模型族同一条
+  `put` 单槽移交规则，不需要第二套机制。
+- **一族两形的两条不变量各被一处守住**：「根不可按名查」由保留行名 + 读侧按位过滤守
+  （`capability_mount` 查到活跃行返回 `None`）；「根不在挂载点清单里」由同一过滤反向守
+  （`capability_mounts` 只列非活跃行）。
+- **读侧三个自由函数**（`capability/mount.rs`，不回头往 trait 挂方法）：
+  `capability_vdfs_root`（访问层取服务者，无注册时 `None` 由调用方降级空根）、
+  `capability_mounts` / `capability_mount`（挂载清单：**预留的 LLM 可见资源裁剪入口**，
+  当前读侧只有单测——不是死代码，判据写在 `mount.rs` 模块文档）。
+- **作用域规则仍是第三处也归 `put`**：子 Agent 的挂载点走 `agent/<id>/` 前缀入表，
+  子树的根行**丢弃**（否则劫持整个 `<根>`，判据 = `scope.test.rs` 的单测 + e2e t39）。
+- **core 三格**：方法 65 → **60**、默认体 23 → **18**（`register_vdfs_root` /
+  `get_vdfs_root` 两个默认体随族退场），`pub trait` 20 不变；`SHAPE_BASELINE` 同步至
+  **20/60/18**，`CapabilityVisitor` 余 **3** 方法（put / get / list，无默认体）。
+- **守门人**：`tool_visitor.test.rs` 两格（三个读函数是同一张表的三个视图 / 根的单槽移交），
+  `scope.test.rs` 三格原样保留（根与模型族丢弃、多槽前缀、读侧透传）；
+  `capability_mounts` 从「零消费方」（C-003 判红）变为测试在用——预留清单的消费方
+  就是这格判据本身。
+- **跨族同名的告警真的响了（并被处置）**：提示词段名与挂载名（插件名）撞键三处
+  （memory / setting / model），`put` 的跨族覆盖告警当场判出——段是覆盖键（内部词汇），
+  挂载名是插件名（地址约定），故改的是段名：`memory` → `agent-memory`（与 `workspace-memory` /
+  `session-memory` 同构）、`setting` → `agent-setting`、model 的 persona 段 → `model-persona`。
+  这是「告警不该只是一条日志」的自证：它上岗第一轮就顶掉了三个真碰撞。
+- **session 非测试行数 32,503 → 32,505（+2）**：唯一涉表的注册调用一行被 rustfmt
+  折成三行，无新逻辑——量到就记账（§6 口径）。
 
 每一步的守门人：**同一份工具清单以两种口径导出逐条相等**（走表的 `list(Tool)` 与
 `CapabilityMeta` 全量转储），加 e2e 77 条全过。任何一格漂移即停。

@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::capability_mount;
 use crate::symbio_core::{
     capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
 };
@@ -43,7 +44,9 @@ async fn default_settings_inject_nothing_but_keep_the_mount() {
         capability_prompts(&*visitor).await.is_empty(),
         "缺省状态不该改变任何一轮的提示词"
     );
-    assert!(visitor.get_vdfs_provider(PLUGIN_ID_SETTING).await.is_some());
+    assert!(capability_mount(&*visitor, PLUGIN_ID_SETTING)
+        .await
+        .is_some());
 }
 
 /// 填了档案 ⇒ 注入一段【本智能体】

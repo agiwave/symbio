@@ -176,7 +176,7 @@ impl Plugin for WebPlugin {
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_ID_WEB, me).await;
+            visitor.put(CapabilityRow::mount(PLUGIN_ID_WEB, me)).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
         // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）

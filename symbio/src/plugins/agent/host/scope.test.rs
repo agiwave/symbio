@@ -5,9 +5,9 @@
 use super::*;
 
 use crate::symbio_core::{
-    capability_model_active, capability_model_resolve, capability_prompts, CapabilityRow,
-    CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
-    VdfsResponse, VdfsResult,
+    capability_model_active, capability_model_resolve, capability_mount, capability_prompts,
+    capability_vdfs_root, CapabilityRow, CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent,
+    VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -53,8 +53,8 @@ fn seg_keeps_id_readable() {
 //
 // ## 为什么这两条负向用例是硬要求
 //
-// 「丢弃」此前**只有模块文档在说**，全仓没有一条测试钉住它。把 `register_vdfs_root`
-// 的丢弃改成转发（一次看起来很自然的"简化"：既然其它注册都转发了，这两条为什么不转？）
+// 「丢弃」此前**只有模块文档在说**，全仓没有一条测试钉住它。把根行
+// （`CapabilityRow::mount_root`）的丢弃改成转发（一次看起来很自然的"简化"：既然其它注册都转发了，这两条为什么不转？）
 // 会让子 Agent 劫持整个会话的根与模型服务，而**没有任何用例会变红**——正是
 // [plan/11 §4](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 说的
 // 「破的时候没有信号」。下面两条就是那个信号。
@@ -63,7 +63,7 @@ fn seg_keeps_id_readable() {
 
 /// 可辨认的 VDFS provider 桩：`read` 回自己的标签。
 ///
-/// 让「`get_vdfs_root()` 拿到的到底是哪一份」成为**可判**的事实——两个都是
+/// 让「`capability_vdfs_root()` 拿到的到底是哪一份」成为**可判**的事实——两个都是
 /// `Arc<dyn VdfsProvider>`，不比内容就分不出谁被登记了。
 struct LabeledRoot(&'static str);
 
@@ -164,15 +164,19 @@ async fn label_of(root: &Arc<dyn VdfsProvider>) -> String {
 async fn sub_agent_root_registration_is_discarded() {
     let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
     inner
-        .register_vdfs_root(Arc::new(LabeledRoot("系统根")))
+        .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))
         .await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
     scoped
-        .register_vdfs_root(Arc::new(LabeledRoot("子 Agent 根")))
+        .put(CapabilityRow::mount_root(Arc::new(LabeledRoot(
+            "子 Agent 根",
+        ))))
         .await;
 
-    let root = inner.get_vdfs_root().await.expect("系统根应仍在槽位里");
+    let root = capability_vdfs_root(&*inner)
+        .await
+        .expect("系统根应仍在槽位里");
     assert_eq!(
         label_of(&root).await,
         "系统根",
@@ -231,7 +235,10 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
         ))
         .await;
     scoped
-        .register_vdfs_provider("work", Arc::new(LabeledRoot("子 Agent 工作区")))
+        .put(CapabilityRow::mount(
+            "work",
+            Arc::new(LabeledRoot("子 Agent 工作区")),
+        ))
         .await;
 
     // 工具：前缀进 function-calling 协议允许的字符集
@@ -251,27 +258,26 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
         "子 Agent 的提示词段应带作用域前缀进内层：{prompts:?}"
     );
     // VDFS 挂载点：同前缀，且**内容**是子 Agent 那一份（不是内层被覆盖）
-    let mount = inner
-        .get_vdfs_provider("agent/reviewer/work")
+    let mount = capability_mount(&*inner, "agent/reviewer/work")
         .await
         .expect("子 Agent 的挂载点应带前缀进内层");
     assert_eq!(label_of(&mount).await, "子 Agent 工作区");
     assert!(
-        inner.get_vdfs_provider("work").await.is_none(),
+        capability_mount(&*inner, "work").await.is_none(),
         "挂载点走前缀而非覆盖——系统侧的 work 不能被盖掉"
     );
 }
 
 /// **读侧转发**：作用域代理不改变「谁在看」——所有取值口原样透传内层。
 ///
-/// 若读侧也被作用域化（例如 `get_vdfs_root()` 返回子树的根），
+/// 若读侧也被作用域化（例如 `capability_vdfs_root()` 返回子树的根），
 /// 上一条的写侧丢弃就白做了：**劫持改从读侧发生**。
 #[tokio::test]
 async fn read_side_forwards_to_inner_unchanged() {
     let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
     inner.put(CapabilityRow::model(provider("sys"), true)).await;
     inner
-        .register_vdfs_root(Arc::new(LabeledRoot("系统根")))
+        .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))
         .await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
@@ -290,6 +296,6 @@ async fn read_side_forwards_to_inner_unchanged() {
             .provider_id(),
         "sys"
     );
-    let root = scoped.get_vdfs_root().await.expect("根应透传");
+    let root = capability_vdfs_root(&scoped).await.expect("根应透传");
     assert_eq!(label_of(&root).await, "系统根");
 }

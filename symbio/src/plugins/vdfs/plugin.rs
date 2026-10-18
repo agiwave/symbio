@@ -19,7 +19,8 @@
 //!
 //! 「拓扑归容器、命名归本插件」是一件事的两半：
 //!
-//! - **根之下有什么** = 容器的注册（`register_vdfs_root` / `register_vdfs_provider`）；
+//! - **根之下有什么** = 容器的注册（根行 `CapabilityRow::mount_root` /
+//!   挂载行 `CapabilityRow::mount`，均经 `CapabilityVisitor::put`）；
 //! - **根挂在哪个地址上** = 本插件的挂载规则（[`VDFS_ADDR_ROOT`]），经
 //!   [`crate::symbio_core::AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
 //!   容器转发请求时据此改写子上下文的当前父地址（`symbio_core::vdfs::address`）。

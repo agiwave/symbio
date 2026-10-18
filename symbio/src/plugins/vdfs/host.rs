@@ -13,7 +13,8 @@
 //! ## 本层不认识目录拓扑
 //!
 //! 虚拟层根归**组合容器**所有：容器把自己的组合视图注册为 VDFS 根
-//! （`CapabilityVisitor::register_vdfs_root`，见 `plugins/composite/vdfs.rs`）。
+//! （`CapabilityVisitor::put` 上的挂载族根行 `CapabilityRow::mount_root`，
+//! 见 `plugins/composite/vdfs.rs`）。
 //! 本层只取这个根、交给门面，把**规范化后的地址**原样递过去——
 //! 根之下有多少类别、叫什么，本层完全不知道、也不必知道。
 //! 于是「新增资源 = 新增一个注册」不需要改动本层任何一行。
@@ -24,7 +25,7 @@
 //! ## 根从哪来
 //!
 //! - **LLM 链路**：`ctx` 已携带 `CAPABILITY_VISITOR`（编排方 `attach_capabilities`
-//!   注入），容器在那次广播里把根注册了进去，直接 `get_vdfs_root()` 即可；
+//!   注入），容器在那次广播里把根注册了进去，直接 `capability_vdfs_root()` 即可；
 //! - **前端链路**：`ctx` 无能力管理器，从父插件广播一次
 //!   `traverse(TRAVERSE_AVAILABLE_TOOLS)`，容器在广播中把根注册进新收集器。
 //!
@@ -106,7 +107,9 @@ pub fn empty_root() -> DynVdfsProvider {
 ///
 /// 调用方需已确保 `visitor` 存在（LLM 链路里它是硬前提，缺失应显式报错）。
 pub async fn root_of(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
-    visitor.get_vdfs_root().await.unwrap_or_else(empty_root)
+    crate::symbio_core::capability_vdfs_root(&**visitor)
+        .await
+        .unwrap_or_else(empty_root)
 }
 
 /// 构造本次调用的统一文件系统（虚拟层 + 物理层）。

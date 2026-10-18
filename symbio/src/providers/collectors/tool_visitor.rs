@@ -8,7 +8,7 @@
 //! 落在实现层——完整判据见 [`crate::providers::collectors`] 的模块文档。
 
 use super::approval::ApprovalGate;
-use crate::symbio_core::{CapabilityRow, CapabilityRowKind, CapabilityVisitor, VdfsProvider};
+use crate::symbio_core::{CapabilityRow, CapabilityRowKind, CapabilityVisitor};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -16,34 +16,24 @@ use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
 ///
-/// 除行表外，同时承载两组单族注册（与工具同一 traverse 收集机制）：
-/// - `rows`：**统一行表**（AR-025 §3）——装**工具族 / 模型族 / 提示词族**，按注册
-///   顺序保序。这条顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，
+/// 全部注册通道共用**一张行表**（AR-025 §3）：
+/// - `rows`：装**工具族 / 模型族 / 提示词族 / 挂载族**（挂载点与根同族，按根位区分），
+///   按注册顺序保序。这条顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，
 ///   写成哈希表时**每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
 ///   （`docs/006-ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），换序等于每轮把这段
 ///   前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
 ///   模型行（4b）一行一个已启用 provider，**当次生效者带生效位**——生效者是目录里的
 ///   一员不再是纪律而是结构（见 `capability/model.rs`）；提示词行（4c）一行一段文字，
-///   表序即送达顺序（见 `capability/prompt.rs`）。挂载 / 选项各族随 4d–4e 陆续入这张表
-///   （每族一个 payload 变体，trait 三方法不变），目前仍住下方槽位。
-/// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
-///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
-///   `agent/<id>/` 作用域前缀，预留按作用域 / 白名单裁剪 LLM 可见资源）；
-///   前端 / 系统链路**不经过它**（走 `Plugin::get_vfs_provider`）。当前
-///   `vdfs_*` 工具取根走 `vdfs_root` 单槽，本清单暂无消费方——**预留，勿删**。
-/// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
+///   表序即送达顺序（见 `capability/prompt.rs`）；挂载行（4d）一行一个目录，
+///   **根是带根位的那一行**（见 `capability/mount.rs`）。选项族随 4e 入表。
 pub struct DefaultToolVisitor {
     rows: Arc<RwLock<IndexMap<String, Arc<CapabilityRow>>>>,
-    vdfs_providers: Arc<RwLock<IndexMap<String, Arc<dyn VdfsProvider>>>>,
-    vdfs_root: Arc<RwLock<Option<Arc<dyn VdfsProvider>>>>,
 }
 
 impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
             rows: Arc::new(RwLock::new(IndexMap::new())),
-            vdfs_providers: Arc::new(RwLock::new(IndexMap::new())),
-            vdfs_root: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -109,37 +99,6 @@ impl CapabilityVisitor for DefaultToolVisitor {
             .filter(|row| row.kind() == kind)
             .cloned()
             .collect()
-    }
-
-    async fn register_vdfs_provider(&self, name: &str, provider: Arc<dyn VdfsProvider>) {
-        let mut slot = self.vdfs_providers.write().await;
-        // 同目录名覆盖（保留先注册槽位，IndexMap 语义与工具注册一致）
-        slot.insert(name.to_string(), provider);
-    }
-
-    async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
-        let slot = self.vdfs_providers.read().await;
-        let out: Vec<(String, Arc<dyn VdfsProvider>)> = slot
-            .iter()
-            .map(|(name, p)| (name.clone(), p.clone()))
-            .collect();
-        // 注册顺序即稳定顺序（导航排序归容器：按 `PluginMeta::order` 在合成目录时排）
-        out
-    }
-
-    async fn get_vdfs_provider(&self, name: &str) -> Option<Arc<dyn VdfsProvider>> {
-        let slot = self.vdfs_providers.read().await;
-        slot.get(name).cloned()
-    }
-
-    async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>) {
-        let mut slot = self.vdfs_root.write().await;
-        *slot = Some(provider);
-    }
-
-    async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>> {
-        let slot = self.vdfs_root.read().await;
-        slot.clone()
     }
 }
 

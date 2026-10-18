@@ -52,11 +52,15 @@ use std::path::{Path, PathBuf};
 /// **互不干涉**，不共享同一个文件，也就没有理由共享同一个字面量。
 pub const MEMORY_FILE: &str = "AGENTS.md";
 
-/// 系统提示词条目在收集器里的注册名（同名覆盖的键）
+/// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
+///
+/// **不得与挂载名（插件名）同键**：4d 之后提示词行与挂载行在同一张表的同一个名字
+/// 空间里（跨族同名 = 后写者胜，落盘表现是挂载点被顶掉），本插件的挂载名是 `memory`，
+/// 段名于是叫 `agent-memory`——与另外两腿（`workspace-memory` / `session-memory`）同构。
 ///
 /// 子树里的注册会经 `agent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
 /// 因此与系统侧的**同名**条目不冲突（并集）。
-pub const SEGMENT_NAME: &str = "memory";
+pub const SEGMENT_NAME: &str = "agent-memory";
 
 /// 插件的展示标题（元数据 / 配置表单 / 挂载根共用）。
 ///

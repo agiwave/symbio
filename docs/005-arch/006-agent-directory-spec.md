@@ -402,6 +402,6 @@ Agent，不属于「一个 Agent 会什么」。
 
 ### A.4 并集的命名空间隔离
 
-`register_system_prompt(name, …)` 当前是同名覆盖、且 `composite` 遍历顺序不确定。
+`put(CapabilityRow::prompt(name, …))` 当前是同名覆盖、且 `composite` 遍历顺序不确定。
 实现并集前**必须**先引入来源标记（例如段名带 `agent/<id>/` 前缀），
 使两段都进上下文而非互相覆盖。

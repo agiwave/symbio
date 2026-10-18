@@ -6,7 +6,9 @@ use super::*;
 
 use super::super::physical::PhysicalFs;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{CapabilityVisitor, PluginError, PluginMeta, PluginSimpleRequest};
+use crate::symbio_core::{
+    CapabilityRow, CapabilityVisitor, PluginError, PluginMeta, PluginSimpleRequest,
+};
 use crate::symbio_core::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -646,7 +648,9 @@ async fn resolve_fs_degrades_to_empty_vfs() {
 async fn resolve_fs_prefers_visitor_slot() {
     let rec = Rec::new();
     let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
-    visitor.register_vdfs_root(root_with(&rec)).await;
+    visitor
+        .put(CapabilityRow::mount_root(root_with(&rec)))
+        .await;
 
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(CAPABILITY_VISITOR, visitor);
@@ -688,7 +692,7 @@ async fn resolve_fs_fetches_root_via_trait_method() {
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
         }
 
-        /// 系统链路：直接暴露自己的虚拟层根（与 LLM 链路经 `register_vdfs_root` 收集互不干扰）
+        /// 系统链路：直接暴露自己的虚拟层根（与 LLM 链路经根行 `mount_root` 收集互不干扰）
         fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
             Some(root_with(&Rec::new()))
         }

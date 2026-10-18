@@ -352,7 +352,7 @@ impl Plugin for AgentPlugin {
         {
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
-                .register_vdfs_provider(PLUGIN_ID_AGENT, vdfs_provider)
+                .put(CapabilityRow::mount(PLUGIN_ID_AGENT, vdfs_provider))
                 .await;
         }
 

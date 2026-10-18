@@ -23,7 +23,9 @@ use super::config::SettingConfig;
 ///
 /// 子树里的注册会经 `agent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
 /// 因此与系统侧的**同名**条目不冲突（并集）。
-pub const SEGMENT_NAME: &str = "setting";
+/// 段名 = 覆盖键；**不得与挂载名（插件名）同键**——4d 之后提示词行与挂载行同一张表，
+/// 本插件的挂载名是 `setting`，段名于是 `agent-setting`（同构见 `memory` 插件的段名）。
+pub const SEGMENT_NAME: &str = "agent-setting";
 
 /// 片段的标题（渲染为 `【本智能体】`）
 pub const SEGMENT_TITLE: &str = "本智能体";

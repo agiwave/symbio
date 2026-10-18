@@ -41,7 +41,7 @@
 //!
 //! ## 注册时机
 //!
-//! 与 `register_vdfs_provider` 完全相同：插件在自己的
+//! 与挂载点注册完全相同（同为 `put`：挂载族走 `CapabilityRow::mount`），插件在自己的
 //! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS)
 //! 分支里顺带声明，一次广播同时喂饱两条链路。插件侧只有一个入口
 //! [`capability_announce_configurable`]，条目形状在那里统一构造，各插件不必各写一遍。

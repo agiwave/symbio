@@ -31,7 +31,7 @@ fn vctx() -> VdfsContext {
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
-/// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_ID_SESSION, ..)`）
+/// （见 `traverse` 里的 `put(CapabilityRow::mount(PLUGIN_ID_SESSION, ..))`）
 #[tokio::test]
 async fn vdfs_self_description_has_no_mount() {
     let (_dir, p) = fixture();

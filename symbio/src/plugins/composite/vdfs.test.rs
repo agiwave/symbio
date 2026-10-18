@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
+use crate::symbio_core::{vdfs_context, CapabilityRow, VdfsItem, VDFS_KIND_DIR};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
@@ -65,7 +65,7 @@ impl Plugin for FakeChild {
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 visitor
-                    .register_vdfs_provider(self.dir, Arc::new(LeafProvider))
+                    .put(CapabilityRow::mount(self.dir, Arc::new(LeafProvider)))
                     .await;
             }
         }
@@ -107,7 +107,7 @@ impl Plugin for ProviderChild {
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 visitor
-                    .register_vdfs_provider(self.dir, self.provider.clone())
+                    .put(CapabilityRow::mount(self.dir, self.provider.clone()))
                     .await;
             }
         }
@@ -375,14 +375,14 @@ async fn hidden_children_from_any_provider_are_filtered() {
             if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
                 if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                     visitor
-                        .register_vdfs_provider("mixed", Arc::new(MixedProvider))
+                        .put(CapabilityRow::mount("mixed", Arc::new(MixedProvider)))
                         .await;
                 }
             }
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
         }
 
-        // 系统链路：直接暴露 provider（与 LLM 链路经 `register_vdfs_provider` 注册互不冲突）
+        // 系统链路：直接暴露 provider（与 LLM 链路经 `put` 挂载行注册互不冲突）
         fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
             Some(Arc::new(MixedProvider))
         }

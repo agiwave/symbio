@@ -51,7 +51,7 @@
 //! composite 只是一个**恰好包含若干子目录的 provider**——它可以被别的目录包含，
 //! 子插件本身也可以是另一个 composite（嵌套时它同样只是普通 provider）。当前它
 //! 充当整个 `<根>` 的服务者，**只是装配时的安排**（使用方把它登记进了
-//! `register_vdfs_root` 槽位），不是本模块的属性；本文件不出现任何「根级别」
+//! 挂载族的根位），不是本模块的属性；本文件不出现任何「根级别」
 //! 的概念与代码（`path == ""` 只是「本目录自身」，任何目录都可能是别的目录的子目录）。
 //!
 //! ## 为什么逐子插件单独广播
@@ -63,7 +63,8 @@
 //! ## 访问层
 //!
 //! 本视图是 `<根>` 的服务者，由两条通道暴露给访问层：
-//! - **LLM 链路**：容器在 `traverse` 里经 `CapabilityVisitor::register_vdfs_root` 登记；
+//! - **LLM 链路**：容器在 `traverse` 里经 `CapabilityVisitor::put` 的根行
+//!   （`CapabilityRow::mount_root`）登记；
 //! - **系统 / 前端链路**：容器经 `Plugin::get_vfs_provider` 直接返回（见
 //!   `composite.rs` 的 `impl Plugin`），访问层 `resolve_fs` 直接取。
 //!

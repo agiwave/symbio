@@ -562,7 +562,7 @@ impl Plugin for SkillPlugin {
             if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                 let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
                 tool_visitor
-                    .register_vdfs_provider(PLUGIN_ID_SKILL, vdfs_provider)
+                    .put(CapabilityRow::mount(PLUGIN_ID_SKILL, vdfs_provider))
                     .await;
             }
         }

@@ -21,7 +21,7 @@
 //!
 //! ## 单槽位 / 系统级注册不转发
 //!
-//! VDFS 根（`register_vdfs_root`）与整个**模型族**（模型行的生效位 + 目录）都是
+//! VDFS 根（`put` 的根行 `CapabilityRow::mount_root`）与整个**模型族**（模型行的生效位 + 目录）都是
 //! **单槽**或系统级事实。子 Agent 的插件树里也有容器（它会把自己登记成 VDFS 根）
 //! 与 model 插件实例，原样转发会让子 Agent **劫持**整个 `<根>` 与模型服务——
 //! 系统侧的全部挂载点瞬间消失。因此这两项**丢弃**（记 debug）。
@@ -33,7 +33,6 @@
 //! 同理，VDFS 挂载点走前缀而非覆盖：VDFS 是用户浏览 / 编辑面，子 Agent 的 `work`
 //! 若盖掉系统的 `work`，用户就改不到工作区记忆了——那是回归。
 
-use crate::symbio_core::VdfsProvider;
 use crate::symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, CapabilityVisitor, ExecEnv,
     PluginError, PluginInvokeRequest,
@@ -138,6 +137,23 @@ impl CapabilityVisitor for SubAgentVisitor {
                 .await;
             return;
         }
+        // 挂载族（4d）：挂载点走**目录名前缀**（`agent/<id>/<目录名>`），根**丢弃**
+        // （子 Agent 的容器会把自己登记成根——转发它等于劫持整个 `<根>`）。
+        if let Some(provider) = row.vdfs() {
+            if row.active() {
+                crate::plugin_debug!(
+                    "agent",
+                    "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
+                    self.agent_id
+                );
+                return;
+            }
+            let name = self.seg(row.name());
+            self.inner
+                .put(CapabilityRow::mount(&name, Arc::clone(provider)))
+                .await;
+            return;
+        }
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
@@ -161,36 +177,9 @@ impl CapabilityVisitor for SubAgentVisitor {
         self.inner.get(name).await
     }
 
-    // 模型族读写不再是 trait 上的方法（4b）：写侧在 `put` 上按族丢弃，读侧经下面的
-    // `get` / `list` 原样透传内层——子 Agent 作用域内的插件照常按 id 取自己的模型
-    // （目录是只读的，写侧已被挡住），而会话的生效者归系统 Agent。
-
-    async fn register_vdfs_provider(&self, name: &str, provider: Arc<dyn VdfsProvider>) {
-        self.inner
-            .register_vdfs_provider(&self.seg(name), provider)
-            .await
-    }
-
-    async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
-        self.inner.list_vdfs_providers().await
-    }
-
-    async fn get_vdfs_provider(&self, name: &str) -> Option<Arc<dyn VdfsProvider>> {
-        self.inner.get_vdfs_provider(name).await
-    }
-
-    /// 子 Agent 的容器会把自己登记成 VDFS 根——**丢弃**，否则劫持系统侧全部挂载点
-    async fn register_vdfs_root(&self, _provider: Arc<dyn VdfsProvider>) {
-        crate::plugin_debug!(
-            "agent",
-            "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
-            self.agent_id
-        );
-    }
-
-    async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>> {
-        self.inner.get_vdfs_root().await
-    }
+    // 模型族（4b）与挂载族（4d）的读写都不再是 trait 上的方法：写侧在 `put` 上按族
+    // 丢弃 / 加前缀，读侧经下面的 `get` / `list` 原样透传内层——子 Agent 作用域内的
+    // 插件照常按 id 取模型、按目录名取自己的挂载点，而生效者与 `<根>` 都归系统 Agent。
 }
 
 #[cfg(test)]

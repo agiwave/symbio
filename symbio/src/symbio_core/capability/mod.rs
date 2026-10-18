@@ -1,6 +1,7 @@
 mod configurable;
 mod error;
 mod model;
+mod mount;
 mod option;
 mod prompt;
 mod row;
@@ -18,6 +19,7 @@ pub use configurable::{
     capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
 };
 pub use model::{capability_model_active, capability_model_resolve};
+pub use mount::{capability_mount, capability_mounts, capability_vdfs_root};
 pub use option::OptionVisitor;
 pub use prompt::capability_prompts;
 pub use row::{CapabilityRow, CapabilityRowKind};
@@ -381,75 +383,10 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     // 这些自由函数。道理（写入语义与不变量如何从签名搬进结构与行词汇）各见
     // `capability/model.rs` 与 `capability/prompt.rs`。
 
-    // ==================== VDFS provider（统一文件系统） ====================
-
-    /// 注册一个 VDFS provider（**LLM 可控挂载机制**的注册面）。
-    ///
-    /// `name` 是**使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）——
-    /// 约定用插件名（`PLUGIN_*` 常量），因为插件名天然唯一。provider 自身**不知道**
-    /// 也不提供这个概念（见 `symbio_core::vdfs` 模块文档）。
-    ///
-    /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：插件在
-    /// `TRAVERSE_AVAILABLE_TOOLS` 分支里注册工具的同时顺带注册 provider，
-    /// 会话链路（LLM 工具调用）与前端链路因此拿到同一份集合（含同一批目录名）。
-    ///
-    /// ## 定位：这是「暴露给 LLM 的资源」的可控入口
-    ///
-    /// 前端 / 系统链路经 [`crate::symbio_core::Plugin::get_vfs_provider`] 直接
-    /// 查询（容器聚合），**不经过本通道**；本通道（含 [`Self::list_vdfs_providers`]
-    /// / [`Self::get_vdfs_provider`]）是 **LLM 侧按名可控的挂载清单**——子智能体的
-    /// 注册经 `SubAgentVisitor` 在这里加 `agent/<id>/` 前缀（作用域），将来给 LLM
-    /// 按作用域 / 白名单裁剪可见资源时，消费方接在这组接口上。
-    /// ⚠️ 当前 `vdfs_*` 工具取根走的是根单槽（[`Self::register_vdfs_root`]）；
-    /// 本组接口暂无消费方**不是死代码**，是预留的可控机制——不要删除。
-    ///
-    /// 默认 no-op —— 不提供资源的实现方无需关心。
-    async fn register_vdfs_provider(
-        &self,
-        _name: &str,
-        _provider: Arc<dyn crate::symbio_core::VdfsProvider>,
-    ) {
-    }
-
-    /// 列出已注册的 VDFS provider：`(目录名, 实现)`，按 `order` 升序稳定排序
-    /// （语义与 [`capability_prompts`](crate::symbio_core::capability_prompts) 的
-    /// `(name, prompt)` 一致）
-    async fn list_vdfs_providers(
-        &self,
-    ) -> Vec<(String, Arc<dyn crate::symbio_core::VdfsProvider>)> {
-        Vec::new()
-    }
-
-    /// 按目录名查询 VDFS provider
-    async fn get_vdfs_provider(
-        &self,
-        _name: &str,
-    ) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
-        None
-    }
-
-    /// 登记 `<根>` 的服务者（单槽，重复登记覆盖）。
-    ///
-    /// `<根>` 这棵子树由谁服务是**装配时的安排**：任何 provider 都可以被登记，
-    /// 当前由 `composite` 登记（它恰好聚合了各子插件的子目录，见
-    /// `plugins/composite/vdfs.rs`）。访问层（vdfs 插件）只取这个登记项再转发，
-    /// 因此**拓扑知识不在访问层**——它只认「服务者 + 前缀分流」。
-    ///
-    /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：容器在自己的
-    /// `traverse` 分支里注册根，会话链路与前端链路因此拿到同一个根。
-    ///
-    /// **单槽归系统 Agent**：子智能体子树里也有容器（它会把自己登记成根），
-    /// 其注册经 `plugins/agent/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树
-    /// 会劫持整个 `<根>`，系统侧全部挂载点瞬间消失。判据 = 该文件的单测 +
-    /// e2e `t39`（细节归 `scope.rs` 的模块文档，此处只指路）。
-    ///
-    /// 默认 no-op —— 不是容器的实现方无需关心。
-    async fn register_vdfs_root(&self, _provider: Arc<dyn crate::symbio_core::VdfsProvider>) {}
-
-    /// 取 VDFS 根 provider；无容器注册时为 `None`（等价于「系统里没有资源」）
-    async fn get_vdfs_root(&self) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
-        None
-    }
+    // 挂载族（5 方法，4d）也已改走表：挂载点与根都是行（根是带根位的保留行名行），
+    // 写入是行上的 `put`，读取是 `capability_vdfs_root` / `capability_mounts` /
+    // `capability_mount` 这些自由函数——理由（根为什么单槽、挂载清单是预留机制）
+    // 见 `capability/mount.rs`。
 }
 
 #[cfg(test)]

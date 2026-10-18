@@ -249,7 +249,7 @@ impl Plugin for LocalPlugin {
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_ID_LOCAL, me).await;
+            visitor.put(CapabilityRow::mount(PLUGIN_ID_LOCAL, me)).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;

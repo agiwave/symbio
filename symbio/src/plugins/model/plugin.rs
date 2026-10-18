@@ -763,7 +763,7 @@ impl Plugin for ModelPlugin {
             // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for ModelPlugin` 承载
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
-                .register_vdfs_provider(PLUGIN_ID_MODEL, vdfs_provider)
+                .put(CapabilityRow::mount(PLUGIN_ID_MODEL, vdfs_provider))
                 .await;
 
             let providers = self.providers.read().await;
@@ -836,7 +836,9 @@ impl Plugin for ModelPlugin {
             // （见 `capability/prompt.rs` 的模块文档）。
             if let Some(sp) = active.as_ref().and_then(|p| p.system_prompt.as_ref()) {
                 tool_visitor
-                    .put(CapabilityRow::prompt(PLUGIN_ID_MODEL, sp.clone()))
+                    // 段名是覆盖键，**不得与挂载名同键**（4d 后同一张表：跨族同名会顶掉
+                    // 本插件的挂载行 `model`）。
+                    .put(CapabilityRow::prompt("model-persona", sp.clone()))
                     .await;
             }
         }

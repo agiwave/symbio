@@ -90,7 +90,7 @@ function parseIds(txt) {
   return m;
 }
 
-/** 解析 `PluginMeta::new(X` / `register_vdfs_provider(X` 的第一个实参 */
+/** 解析 `PluginMeta::new(X` / `CapabilityRow::mount(X` 的第一个实参 */
 function resolveArg(raw, ids) {
   const t = raw.trim();
   if (t.startsWith('"')) return t.slice(1, t.lastIndexOf('"'));
@@ -149,7 +149,7 @@ function analyzePlugin(dirName, ids) {
       const mm = t.match(/PluginMeta::new\(([^,\n]+)/);
       if (mm) metaId = resolveArg(mm[1], ids);
     }
-    for (const mm of t.matchAll(/register_vdfs_provider\(\s*([^,\n]+)/g)) {
+    for (const mm of t.matchAll(/CapabilityRow::mount\(\s*([^,\n]+)/g)) {
       mounts.add(resolveArg(mm[1], ids));
     }
     if (t.includes("capability_announce_configurable(")) hasConfig = true;
@@ -400,7 +400,7 @@ function render() {
   L.push("> 读表须知：");
   L.push("> - **挂载点** = 该插件目录名（容器实例表的挂载名，`目录名 = 实例名`）；");
   L.push(">   插件经 `Plugin::get_vfs_provider` 把自己的视图交给容器（**系统 / 前端链路**，");
-  L.push(">   容器聚合）；**LLM 链路**另经 `CapabilityVisitor::register_vdfs_provider(目录名, provider)`");
+  L.push(">   容器聚合）；**LLM 链路**另经 `put(CapabilityRow::mount(目录名, provider))`");
   L.push(">   按名注册（可控挂载机制，预留按作用域裁剪），两条通道目录名同一份。");
   L.push(">   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。");
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");

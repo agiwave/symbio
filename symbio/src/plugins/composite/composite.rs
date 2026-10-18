@@ -34,7 +34,7 @@ use super::registry::PluginRegistry;
 use super::vdfs::CompositeVdfs;
 use crate::symbio_core::descend_addr;
 use crate::symbio_core::{
-    lock_read, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    lock_read, CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason, VdfsProvider,
     CAPABILITY_VISITOR, PATH, PLUGIN_ID_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
@@ -181,7 +181,7 @@ impl Plugin for Composite {
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
-                visitor.register_vdfs_root(root).await;
+                visitor.put(CapabilityRow::mount_root(root)).await;
             }
         }
 

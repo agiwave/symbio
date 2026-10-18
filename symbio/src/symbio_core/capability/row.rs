@@ -34,8 +34,16 @@
 //! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 session 的
 //! `loop_registry`——三处各住各的，见 AR-025 §3。
 
-use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider};
+use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsProvider};
 use std::sync::Arc;
+
+/// 根行的**保留行名**（表键）。
+///
+/// 根不是「一个挂载点」而是**服务者单槽**（谁服务 `<根>` 这棵子树），故它不可能从调用方
+/// 拿名字——行名由 [`CapabilityRow::mount_root`] 自己填，且谁都不必知道它：读侧按
+/// [`CapabilityRow::active`] 找（见 `capability/mount.rs`）。取一个不可能与插件名撞的值
+/// （挂载名约定是插件名，插件名不含尖括号），它就不是任何挂载点的键。
+const MOUNT_ROOT_ROW: &str = "<root>";
 
 /// 行的族——`list(kind)` 的过滤键，也是「这张表装了什么」的清单。
 ///
@@ -77,6 +85,16 @@ pub enum CapabilityRowPayload {
     /// 段名是**覆盖键**，不是分类——不要用命名前缀去表达「这是人格」「这是记忆」
     /// （`capability/prompt.rs` 的模块文档展开这条）。
     Prompt { text: String },
+    /// VDFS 挂载点：一个 provider。
+    ///
+    /// `active` 是**根位**（单槽）：置位的行是「服务 `<根>` 这棵子树的那一个」。
+    /// 挂载点与根同为「目录名 → provider」的映射，差别只在根**不可能由调用方命名**
+    /// （它不是某个插件的目录），故同族同载荷、以位相区分——又一条「生效位长在行上」
+    /// 的例子，见 [`CapabilityRow::mount_root`]。
+    Mount {
+        provider: Arc<dyn VdfsProvider>,
+        active: bool,
+    },
 }
 
 /// 表里的一行。
@@ -126,12 +144,38 @@ impl CapabilityRow {
         }
     }
 
+    /// 挂载点行：名字 = **使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）。
+    pub fn mount(name: &str, provider: Arc<dyn VdfsProvider>) -> Self {
+        Self {
+            name: name.to_string(),
+            payload: CapabilityRowPayload::Mount {
+                provider,
+                active: false,
+            },
+        }
+    }
+
+    /// 根行：**服务者单槽**（唯一带根位的那一行）。
+    ///
+    /// 根没有调用方给的名字（它不是某个插件的目录），行名由本构造函数填保留值；
+    /// 读侧一律按 [`Self::active`] 找，不按名找。
+    pub fn mount_root(provider: Arc<dyn VdfsProvider>) -> Self {
+        Self {
+            name: MOUNT_ROOT_ROW.to_string(),
+            payload: CapabilityRowPayload::Mount {
+                provider,
+                active: true,
+            },
+        }
+    }
+
     /// 这一行属于哪个族（与载荷同源，不存在两种答案）。
     pub fn kind(&self) -> CapabilityRowKind {
         match &self.payload {
             CapabilityRowPayload::Tool(_) => CapabilityRowKind::Tool,
             CapabilityRowPayload::Model { .. } => CapabilityRowKind::Model,
             CapabilityRowPayload::Prompt { .. } => CapabilityRowKind::Prompt,
+            CapabilityRowPayload::Mount { .. } => CapabilityRowKind::Mount,
         }
     }
 
@@ -149,7 +193,7 @@ impl CapabilityRow {
     pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
         match &self.payload {
             CapabilityRowPayload::Tool(cap) => Some(cap),
-            CapabilityRowPayload::Model { .. } | CapabilityRowPayload::Prompt { .. } => None,
+            _ => None,
         }
     }
 
@@ -157,7 +201,7 @@ impl CapabilityRow {
     pub fn provider(&self) -> Option<&Arc<dyn ModelProvider>> {
         match &self.payload {
             CapabilityRowPayload::Model { provider, .. } => Some(provider),
-            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => None,
+            _ => None,
         }
     }
 
@@ -165,16 +209,26 @@ impl CapabilityRow {
     pub fn prompt_text(&self) -> Option<&str> {
         match &self.payload {
             CapabilityRowPayload::Prompt { text } => Some(text),
-            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Model { .. } => None,
+            _ => None,
+        }
+    }
+
+    /// 取 VDFS 挂载点（或根）；非挂载族为 `None`。
+    pub fn vdfs(&self) -> Option<&Arc<dyn VdfsProvider>> {
+        match &self.payload {
+            CapabilityRowPayload::Mount { provider, .. } => Some(provider),
+            _ => None,
         }
     }
 
     /// 这一行是否占着**生效位**（单槽族的「谁在槽里」）。
     ///
-    /// 无槽的族恒 `false`：目前只有模型族有位（挂载根的槽随 4d 落位）。
+    /// 两族有位：模型族（谁在生效槽里）与挂载族（谁是 `<根>` 的服务者）。
+    /// 无槽的族恒 `false`。
     pub fn active(&self) -> bool {
         match &self.payload {
-            CapabilityRowPayload::Model { active, .. } => *active,
+            CapabilityRowPayload::Model { active, .. }
+            | CapabilityRowPayload::Mount { active, .. } => *active,
             CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => false,
         }
     }
@@ -192,7 +246,15 @@ impl CapabilityRow {
                     active: false,
                 },
             },
-            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => self.clone(),
+            CapabilityRowPayload::Mount { provider, .. } => Self {
+                name: self.name.clone(),
+                payload: CapabilityRowPayload::Mount {
+                    provider: Arc::clone(provider),
+                    active: false,
+                },
+            },
+            // 无位的族：退位副本就是它自己（没有位可清）
+            _ => self.clone(),
         }
     }
 }

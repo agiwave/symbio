@@ -582,7 +582,7 @@ impl Plugin for McpPlugin {
         // 直接注册插件自身为 VDFS 挂载点（不经实体层与适配器）
         let vdfs_provider: Arc<dyn crate::symbio_core::VdfsProvider> = self.clone();
         tool_visitor
-            .register_vdfs_provider(PLUGIN_ID_MCP, vdfs_provider)
+            .put(CapabilityRow::mount(PLUGIN_ID_MCP, vdfs_provider))
             .await;
 
         let cfg = self.config.read().await.clone();

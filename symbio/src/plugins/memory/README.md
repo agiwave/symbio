@@ -22,8 +22,8 @@ created: 2026-09-28
 
 | 交出什么 | 机制 |
 |---|---|
-| 系统提示词两段（【智能体记忆】+【工作区记忆】） | `CapabilityVisitor::register_system_prompt`（地址 + 上限 + 正文 + 截断提示） |
-| VDFS 挂载点 `<根>/memory` | `CapabilityVisitor::register_vdfs_provider` + `impl VdfsProvider`（两份记忆的读写面） |
+| 系统提示词两段（【智能体记忆】+【工作区记忆】） | `put(CapabilityRow::prompt(…))`（地址 + 上限 + 正文 + 截断提示） |
+| VDFS 挂载点 `<根>/memory` | `put(CapabilityRow::mount(插件名, …))` + `impl VdfsProvider`（两份记忆的读写面） |
 | 配置 `<根>/memory/PLUGIN.yml` | `capability_announce_configurable`（两个作用域各一组闸门 + 工作区注入开关） |
 
 注入与挂载缺一不可：只注入不给地址 = 只读记忆，永远长不大；只给地址不注入 =

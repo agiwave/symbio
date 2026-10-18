@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::capability_mount;
 use crate::symbio_core::{
     capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
 };
@@ -70,7 +71,9 @@ async fn system_instance_injects_the_host_memory() {
     assert!(segs[0].1.contains("【智能体记忆】"));
 
     // 挂载点同时交出：只注入不给地址 = 只读记忆，永远长不大
-    assert!(visitor.get_vdfs_provider(PLUGIN_ID_MEMORY).await.is_some());
+    assert!(capability_mount(&*visitor, PLUGIN_ID_MEMORY)
+        .await
+        .is_some());
 }
 
 /// 子树实例：`<agentdir>/memory` ⇒ 记忆落在 `<agentdir>/AGENTS.md`
@@ -110,7 +113,9 @@ async fn empty_memory_injects_nothing_but_keeps_the_mount() {
 
     assert!(capability_prompts(&*visitor).await.is_empty());
     assert!(
-        visitor.get_vdfs_provider(PLUGIN_ID_MEMORY).await.is_some(),
+        capability_mount(&*visitor, PLUGIN_ID_MEMORY)
+            .await
+            .is_some(),
         "挂载点的存在不依赖「有没有写过」"
     );
 }
@@ -253,7 +258,9 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
 
     assert!(capability_prompts(&*visitor).await.is_empty());
     assert!(
-        visitor.get_vdfs_provider(PLUGIN_ID_MEMORY).await.is_some(),
+        capability_mount(&*visitor, PLUGIN_ID_MEMORY)
+            .await
+            .is_some(),
         "关掉注入不等于关掉编辑面"
     );
 }

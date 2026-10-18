@@ -47,7 +47,7 @@ use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
 use crate::symbio_core::{
-    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
+    CapabilityRow, DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -579,7 +579,9 @@ impl Plugin for PluginManagerPlugin {
         // 会话链路（LLM 工具）与前端链路因此拿到同一份 (挂载名, 实现) 集合。
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let me: DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_ID_MANAGER, me).await;
+            visitor
+                .put(CapabilityRow::mount(PLUGIN_ID_MANAGER, me))
+                .await;
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

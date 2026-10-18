@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
+use crate::symbio_core::{CapabilityRow, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
 use crate::symbio_core::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
 use async_trait::async_trait;
 use std::sync::Mutex;
@@ -77,7 +77,7 @@ impl VdfsProvider for Rec {
 /// 收到的路径一律是树内相对路径（`""`、`<子目录>/…`）。
 async fn tool_with_root(root: Arc<Rec>) -> ToolVdfs {
     let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
-    visitor.register_vdfs_root(root).await;
+    visitor.put(CapabilityRow::mount_root(root)).await;
     ToolVdfs::new(visitor)
 }
 

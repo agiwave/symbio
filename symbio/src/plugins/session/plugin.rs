@@ -612,7 +612,9 @@ impl Plugin for SessionPlugin {
         // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let me: DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_ID_SESSION, me).await;
+            visitor
+                .put(CapabilityRow::mount(PLUGIN_ID_SESSION, me))
+                .await;
 
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
             // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责

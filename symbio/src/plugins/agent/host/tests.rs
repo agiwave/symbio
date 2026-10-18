@@ -158,10 +158,10 @@ async fn agent_import_traverse_and_export() {
 
     // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 memory 实例**注入 ──
     // 本插件不再兼管智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
-    // visitor 加 `agent/<id>/` 前缀，与系统侧的 `memory` 条目并集且不撞名。
+    // visitor 加 `agent/<id>/` 前缀，与系统侧的 `agent-memory` 条目并集且不撞名。
     let segments = capability_prompts(&*manager).await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
-    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/memory";
+    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/agent-memory";
     assert!(
         names.contains(&OWN_SEGMENT),
         "子智能体自身的 AGENTS.md 应由子树的 memory 实例带前缀注入: {names:?}"
@@ -300,10 +300,10 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     plugin.traverse(String::new(), ctx).await.unwrap();
 
     // 1) 子 Agent 的 AGENTS.md 由子树里的 `memory` 实例注入，段名带来源前缀
-    //    （`memory` 在系统树里也有一份，前缀正是两者并集且不撞名的原因）
+    //    （`agent-memory` 段在系统树里也有一份，前缀正是两者并集且不撞名的原因）
     let prompts = capability_prompts(&*manager).await;
     let names: Vec<String> = prompts.iter().map(|(n, _)| n.clone()).collect();
-    const OWN_SEGMENT: &str = "agent/reviewer/memory";
+    const OWN_SEGMENT: &str = "agent/reviewer/agent-memory";
     assert!(
         names.contains(&OWN_SEGMENT.to_string()),
         "子 Agent 的注册应带来源前缀，实际：{names:?}"
