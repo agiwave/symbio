@@ -149,7 +149,6 @@ pub(crate) struct SessionContext {
 /// `orchestrator::consume::run_chat_loop_task` 的参数里）。
 pub(crate) struct TurnRequest {
     pub(crate) auto_compress: bool,
-    pub(crate) tool_context_window: usize,
     pub(crate) load_history: bool,
     /// 请求显式给的系统提示词（`None` = 只有注册段；不吞掉注册段，见
     /// `chat_loop::inputs::resolve_system_prompt`）
@@ -161,9 +160,6 @@ impl TurnRequest {
         let defaults = SessionConfig::default();
         Self {
             auto_compress: req.auto_compress.unwrap_or(defaults.auto_compress),
-            tool_context_window: req
-                .tool_context_window
-                .unwrap_or(defaults.tool_context_window),
             // 请求级默认（该字段无配置对应项），语义为"缺省即加载历史"。
             load_history: req.load_history.unwrap_or(true),
             system_prompt: req.system_prompt.clone(),

@@ -41,8 +41,7 @@ impl Capability for ReadTool {
                 "required": ["path"]
             }),
             vec!["{\"path\":\"README.md\"}", "{\"path\":\"src/main.rs\",\"limit\":50}"],
-            None,
-      CapabilityRiskLevel::Low,
+            CapabilityRiskLevel::Low,
         )
     }
 

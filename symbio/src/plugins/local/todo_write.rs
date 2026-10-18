@@ -111,10 +111,9 @@ impl TodoWriteTool {
         let current = map.get(key).cloned().unwrap_or_default();
 
         // 回显策略：**只回确认，不回全量清单**。
-        // 全量清单对当轮推理是重复（输入参数里刚写过一遍），对后续轮次则由
-        // 上下文保留策略（context_retention: LastOnly）保证最新一次调用
-        // 完整保留、更早调用骨架化——清单的"唯一有效状态"由骨架化层负责，
-        // 工具结果本身无需再背一份副本。
+        // 全量清单对当轮推理是重复（输入参数里刚写过一遍）；更早的调用在请求体里
+        // 保持原样（ADR-078：请求体是事实的纯投影，不做骨架化改写），因此工具结果
+        // 本身无需再背一份副本——清单的"唯一有效状态"由本次调用的参数承担。
         let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let message = if summary.is_empty() {
             format!("已更新任务清单，共 {} 项。", current.len())
@@ -166,12 +165,8 @@ impl Capability for TodoWriteTool {
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),
             ]),
-            // 上下文保留策略（机制化声明）：任务清单每次全量写入，历史版本对后续
-            // 推理无参考价值 → 仅保留最近一次调用的完整参数/结果。
-            // 会话压缩层按 meta 通用执行，不对具体工具名特殊化。
-            context_retention: Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
             // 行为位自声明（T-158）：任务表写侧资格闸与任务声明记账的管辖对象。
-            // 执行器读这一位判，不认名字——与风险 / 保留策略同一条自声明纪律。
+            // 执行器读这一位判，不认名字——与风险同一条自声明纪律。
             owns_task_table: true,
             ..Default::default()
         }

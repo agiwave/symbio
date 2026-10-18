@@ -9,7 +9,7 @@ created: 2026-09-09
 # 工具失败回传与 Turn 终态机制
 
 > 历史实施记录见 `docs/archive/implementation-logs/`。
-> 本文与 `../README.md` 的六大压缩策略互补：那里讲"上下文怎么裁"，这里讲"失败怎么传播、终态怎么定"。
+> 本文与 `../README.md` 的五大压缩策略互补：那里讲"上下文怎么裁"，这里讲"失败怎么传播、终态怎么定"。
 
 ## 机制一：工具失败是信息性的，不中断循环
 
@@ -36,4 +36,4 @@ created: 2026-09-09
 
 ## 关联
 
-- 请求视图剪裁与压缩分层：`../README.md` 策略⑥ + `./014-context-compression-design.md`（L0-L6 总览）
+- 请求级注入段与压缩分层：`../README.md` 策略⑤ + `./014-context-compression-design.md`（L0 / L4–L6 总览）

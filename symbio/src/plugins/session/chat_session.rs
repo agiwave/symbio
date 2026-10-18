@@ -209,23 +209,6 @@ impl PersistentChatSession {
         &self.session_id
     }
 
-    pub(crate) fn line_threshold(&self) -> usize {
-        self.cfg_or_default().compress_line_threshold
-    }
-
-    /// 内容节点淡化保护窗口：请求视图中最近 N 条内容节点（Text/Reasoning）保留原文。
-    ///
-    /// 对话末端锚点——保持模型对"最近在做什么/刚想了什么"的连续记忆。
-    pub(crate) fn compress_keep_recent(&self) -> usize {
-        self.cfg_or_default().compress_keep_recent
-    }
-
-    /// 老旧工具结果淡化（fade）的激活阈值：单轮请求的工具迭代轮数**超过**此值后，
-    /// 请求视图才把较早轮次的工具结果压成头尾摘要。
-    pub(crate) fn fade_activate_rounds(&self) -> usize {
-        self.cfg_or_default().fade_activate_rounds
-    }
-
     /// 技能编译开关（步 22 · [roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")；
     /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
     pub(crate) fn skill_compile_enabled(&self) -> bool {
@@ -236,11 +219,6 @@ impl PersistentChatSession {
     /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
     pub(crate) fn skill_fast_path(&self) -> bool {
         self.cfg_or_default().skill_fast_path
-    }
-
-    /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化。
-    pub(crate) fn fade_keep_recent_turns(&self) -> usize {
-        self.cfg_or_default().fade_keep_recent_turns
     }
 }
 

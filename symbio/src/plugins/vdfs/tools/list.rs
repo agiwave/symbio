@@ -52,8 +52,7 @@ impl Capability for ListTool {
                 "required": ["path"]
             }),
             vec!["{\"path\":\"/\"}", "{\"path\":\".vdfsv2\"}", "{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}"],
-            None,
-        CapabilityRiskLevel::Low,
+            CapabilityRiskLevel::Low,
         )
     }
 

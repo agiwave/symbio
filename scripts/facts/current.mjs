@@ -578,7 +578,7 @@ function maskRoot(text) {
  * 语义的三处出处（提取实现见 `facts/_capability.mjs`）：
  * | 面 | 出处 |
  * |---|---|
- * | LLM 工具 | `CapabilityMeta.description`（模型与前端看到的原文）＋ `category` / `risk` / 保留策略 |
+ * | LLM 工具 | `CapabilityMeta.description`（模型与前端看到的原文）＋ `category` / `risk` |
  * | VDFS 操作 | `VDFS_*` 常量正上方的文档注释 |
  * | 路由 | 插件 `route()` 里那条 `match` 臂正上方的注释 |
  *
@@ -598,7 +598,7 @@ function capabilityMatrixSection(root, plugins) {
     "> 本节是**能力面的唯一 owner**：每条能力是什么、用户与模型因此看到什么，一句话只在这里出现一次。" +
       "语义全部**从代码提取**，人不在表里维护任何一句——" +
       "工具取 `CapabilityMeta.description`（模型与前端看到的原文）与同体的" +
-      "`category` / `risk` / 上下文保留策略，VDFS 操作取 `VDFS_*` 常量上方的文档注释，" +
+      "`category` / `risk`，VDFS 操作取 `VDFS_*` 常量上方的文档注释，" +
       "路由取插件 `route()` 里那条 `match` 臂上方的注释。" +
       "覆盖面（有哪些插件、哪些配置面）见 §1。",
   );
@@ -606,7 +606,7 @@ function capabilityMatrixSection(root, plugins) {
   L.push("> **读表须知**：");
   L.push(">");
   L.push("> - `—` = **代码里没有逐条声明**（不是「没有这一项」）。风险未声明取" +
-    "`CapabilityRiskLevel` 的默认档 `Medium`、保留策略未声明取 `All`——两条默认值都在 core，" +
+    "`CapabilityRiskLevel` 的默认档 `Medium`——默认值在 core，" +
     "这里不逐条复述，只说明空格的含义；");
   L.push("> - 描述尾部的 `…` = 该描述在运行期由 `format!` 拼装，表中给的是它的**静态开头一段**" +
     "（其余部分只有运行期才知道，如可用智能体清单），不是取全了；");
@@ -624,13 +624,13 @@ function capabilityMatrixSection(root, plugins) {
   L.push("");
   L.push(`共 ${tools.length} 个（短名）。工具对模型的**全名** = \`<挂载点>/<短名>\`（\`traverse\` 注册时拼装）。`);
   L.push("");
-  L.push("| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 | 上下文保留 |");
-  L.push("|---|---|---|---|---|---|");
+  L.push("| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 |");
+  L.push("|---|---|---|---|---|");
   for (const [name, v] of tools) {
     const plugin = owner.get(name);
     L.push(
       `| \`${name}\` | ${plugin ? `\`${plugin}\`` : UNKNOWN} | ${cell(maskRoot(v.description ?? UNKNOWN))} | ` +
-        `${v.category ?? UNKNOWN} | ${v.risk ?? UNKNOWN} | ${v.retention ?? UNKNOWN} |`,
+        `${v.category ?? UNKNOWN} | ${v.risk ?? UNKNOWN} |`,
     );
   }
   L.push("");

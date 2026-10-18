@@ -44,8 +44,7 @@ pub mod read;
 pub mod spec;
 
 use crate::symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel,
-    CapabilityToolContextRetention, PluginError,
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -99,7 +98,6 @@ pub fn tool(
     description: &str,
     parameters: serde_json::Value,
     examples: Vec<&str>,
-    retention: Option<CapabilityToolContextRetention>,
     risk: CapabilityRiskLevel,
 ) -> CapabilityMeta {
     CapabilityMeta {
@@ -108,7 +106,6 @@ pub fn tool(
         input_schema: parameters,
         category: Some(CapabilityCategory::Resource),
         examples: Some(examples.into_iter().map(str::to_string).collect()),
-        context_retention: retention,
         risk: Some(risk),
         // 行为位（T-158）：VDFS 工具不参与派活 / 立约 / 任务表三族闸门——
         // 显式声明「不」而不是省略字段：将来给这里加一位时要过肉眼。

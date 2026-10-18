@@ -1,295 +1,64 @@
-//! 请求视图层 —— 只影响**单次请求、不落库**的全部裁剪。
+//! 请求级注入段 —— 只影响**单次请求、不落库**的三段置顶文本。
 //!
-//! 唯一入口 [`build_request_view`]：内容节点淡化 → 轮次淡化 → 分层滑窗骨架化 →
-//! 三段请求级注入（记忆 / 调度 / 委派），按固定顺序执行。视图每轮从存储重建，各步天然幂等。
+//! 唯一入口 [`build_request_sections`]：长期记忆 / 就绪任务 / 委派者真源，按固定次序
+//! 插入。**对话体不在这里加工**：发给模型的历史是事实网格的纯投影（[ADR-048a](../../../../../docs/010-adr/048a.md)），
+//! 请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按
+//! [ADR-078](../../../../../docs/010-adr/078.md) 退役。
+//!
+//! 三段都是**追加的读视图**，不是对既有消息的改写——所以它们与「请求体 = 投影」不冲突：
+//! 它们以一条 `system` 前缀消息进入请求（见 `chat_loop::request_view_prefix`），
+//! 而 `prompt_fidelity` 把这一条当作**声明过的例外**（它不是事件，是本轮临时投影）。
 
 use super::*;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 
-/// 轮次淡化（请求视图级）：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）
-/// 做 head/tail 摘要，保留最近 `keep_recent_turns` 个 user turn 起的原文，以及**全部**
-/// assistant 文本 / 推理节点（绝不改动 assistant 消息，最大限度保护思维链）。
+/// 构建本次请求的**注入段**（请求级唯一入口）。
 ///
-/// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层保留全文，
-/// 因此**不写存档文件**、天然幂等（无重复存档问题）。被淡化的结果标记 `tool_result_faded`，
-/// 模型如需完整输出可重新运行对应工具。
-pub fn fade_aged_tool_results(messages: &mut [ChatNode], keep_recent_turns: usize) {
-    use super::super::tokenizer::{default_tokenizer, Tokenizer};
-
-    // 以 user 消息为边界，定位"最近 keep_recent_turns 个 user turn"的起始下标；
-    // 该下标之前的消息视为"历史"，对其中的工具结果做淡化。
-    let user_positions: Vec<usize> = messages
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.node_role() == Some(NodeRole::User))
-        .map(|(i, _)| i)
-        .collect();
-    let keep_from = if user_positions.len() > keep_recent_turns {
-        user_positions[user_positions.len() - keep_recent_turns]
-    } else {
-        0
-    };
-
-    const FADE_BUDGET: usize = 2048; // 老化工具结果压到约 2k token
-    let tok = default_tokenizer();
-    for m in messages.iter_mut().take(keep_from) {
-        if m.node_role() == Some(NodeRole::Tool) && m.is_text() {
-            if let Some(MessageContent::Text(t)) = &m.content {
-                if tok.count(t) > FADE_BUDGET {
-                    m.content = Some(MessageContent::Text(
-                        super::super::tools::summarize_tool_result(t, FADE_BUDGET),
-                    ));
-                    let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-                    meta["tool_result_faded"] = serde_json::json!(true);
-                    m.meta = Some(meta);
-                }
-            }
-        }
-    }
-}
-
-/// 内容节点淡化（请求视图级）：B1 保护窗口（最后一条消息 + 最近 `keep_recent`
-/// 个内容节点）之外的超大内容节点做 head/tail 摘要。
+/// 次序与位置是判据的一部分（段位置就是模型读到的上下文次序）：
 ///
-/// 内容节点 = User/Assistant 的正文与思考（`msg_type` 为 Text/Reasoning/None，
-/// 与旧 `is_content_node` 判定一致）；role=Tool 不在此列（L0 守卫与
-/// [`fade_aged_tool_results`] 的辖区），System（系统提示）永不淡化。
-/// **L2 快照消息（`meta.compacted`）同样豁免**：快照本身已是 token 最小化的
-/// 压缩产物，对其再切中段等于双重压缩，且切掉的恰是模型的唯一深历史记忆。
+/// 1. 长期记忆（S5 步 12）：`recall_section` 非空时插一条 `meta.kind = recall_context`。
+///    **置顶**而不是置尾：记忆是背景事实，置尾会把「最后一条 user 消息」从用户的问题
+///    换成记忆——mock 场景匹配与轮次窗口都会读错；也不进系统提示词——那里有
+///    「唯一真源 = 注册段」的纪律（`plugins/session/README.md`）。
+/// 2. 任务调度段（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+///    `ready_section` 非空时插一条 `meta.kind = readyset`。它给的是 `readyset` 投影的
+///    **候选集**，不是替模型决定做哪件事（`projection::readyset` 模块头的边界）。
+/// 3. 委派者真源段（ADR-047）：`delegate_section` 非空时插一条
+///    `meta.kind = delegate_context`，落 **index 2**。
 ///
-/// 触发条件（与旧存档压缩门控同构）：行数超 `line_threshold` **或** token 超
-/// [`MESSAGE_TOKEN_CAP`]。行数触发走按行 head/tail 切分（[`line_head_tail`]），
-/// token 触发走 [`super::super::tools::summarize_head_tail`]（与工具淡化同一机制本体，仅占位文案
-/// 不同：内容节点无法"重新运行"，指向会话存储中的完整原文）。
-///
-/// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层
-/// 保留完整原文，因此**不写存档文件**、天然幂等。被淡化的节点标记 `content_faded`。
-pub fn fade_aged_content_nodes(
-    messages: &mut [ChatNode],
-    keep_recent: usize,
-    line_threshold: usize,
-) {
-    use super::super::tokenizer::{default_tokenizer, Tokenizer};
-
-    // 内容节点判定：正文与思考（含 msg_type 缺省的历史消息）。
-    // L2 快照（meta.compacted）豁免：它已是压缩产物，再切 = 双重压缩。
-    fn is_content_node(m: &ChatNode) -> bool {
-        if m.meta
-            .as_ref()
-            .and_then(|meta| meta.get("compacted"))
-            .and_then(|v| v.as_bool())
-            == Some(true)
-        {
-            return false;
-        }
-        !matches!(m.node_role(), Some(NodeRole::Tool) | Some(NodeRole::System))
-            && (m.msg_type.is_none() || m.is_text() || m.is_reasoning())
-    }
-
-    // B1 保护窗口：最后一条消息恒保护 + 最近 keep_recent 个内容节点保持原样
-    // （思维连续性：近期推理/正文必须完整，否则模型"失忆"刚说的话）。
-    let len = messages.len();
-    let mut protected = vec![false; len];
-    if len > 0 {
-        protected[len - 1] = true;
-    }
-    let mut kept = 0usize;
-    for i in (0..len).rev() {
-        if kept >= keep_recent {
-            break;
-        }
-        if !protected[i] && is_content_node(&messages[i]) {
-            protected[i] = true;
-            kept += 1;
-        }
-    }
-
-    let tok = default_tokenizer();
-    for (i, m) in messages.iter_mut().enumerate() {
-        if protected[i] || !is_content_node(m) {
-            continue;
-        }
-        if let Some(MessageContent::Text(t)) = &m.content {
-            let over_tokens = tok.count(t) > MESSAGE_TOKEN_CAP;
-            let over_lines = t.lines().count() > line_threshold;
-            if !(over_tokens || over_lines) {
-                continue;
-            }
-            let faded = if over_tokens {
-                super::super::tools::summarize_head_tail(
-                    t,
-                    MESSAGE_TOKEN_CAP,
-                    "该早期内容已在请求视图中淡化以控制上下文长度，完整原文保留于会话存储。",
-                )
-            } else {
-                line_head_tail(t, line_threshold)
-            };
-            m.content = Some(MessageContent::Text(faded));
-            let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-            meta["content_faded"] = serde_json::json!(true);
-            m.meta = Some(meta);
-        }
-    }
-}
-
-/// 行数超限的按行 head/tail 切分（短行密集、token 未超预算的内容）：
-/// 保留头 `line_threshold/4` 行与尾同量行，中段以省略标记占位。
-/// 与 token 路径（[`super::super::tools::summarize_head_tail`]）同构：头少尾多（结论在尾部）。
-fn line_head_tail(text: &str, line_threshold: usize) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let total = lines.len();
-    let side = (line_threshold / 4).max(1);
-    // 行数不足以省略任何中段时不动原文（淡化必须有净收益）
-    if total <= side * 2 + 2 {
-        return text.to_string();
-    }
-    let omitted = total - side * 2;
-    let mut out = lines[..side].join("\n");
-    out.push_str(&format!("\n[... 已省略 {omitted} 行中段内容 ...]\n"));
-    out.push_str(&lines[total - side..].join("\n"));
-    out
-}
-
-/// 请求视图的**可见域判定**（`viewer = None` ⇒ 恒真，与接线前逐字一致）。
-///
-/// 一条规则一个判定方：这里的 `Some` 分支走 core 的 [`visible_to`]，不再自带
-/// 第二条规则。`principal = None` 单独判为可见——存量消息没有标身份，把它判成
-/// 不可见等于让历史整段从 prompt 里消失，那是拿接线覆盖旧行为。
-pub fn visible_for(m: &ChatNode, viewer: Option<&str>) -> bool {
-    let Some(viewer) = viewer else {
-        return true;
-    };
-    match m.principal.as_ref() {
-        None => true,
-        Some(p) => crate::symbio_core::visible_to(&p.id, viewer),
-    }
-}
-
-// 水位提醒（nudge）与 `context_compact` 工具已随 v1 外壳退役
-// （[ADR-072](../../../../../docs/010-adr/072.md)）：提醒的唯一理由是引导模型主动调用那个工具，工具不在 v2 清单里，提醒即指向空处。
-
-/// 构建本次 LLM 请求的视图（请求视图层唯一入口）。
-///
-/// 存储视图（`get_context_messages`）只负责过滤与轮次窗口；一切**只影响单次请求、
-/// 不落库**的裁剪都在这里按固定顺序执行：
-///
-/// 1. 内容节点淡化：B1 保护窗口外的超大正文/思考做 head/tail 摘要（存储保留
-///    全文，阈值取会话配置 line_threshold / token 上限 2048）；
-/// 2. 轮次淡化（fade）：`fade_active`（轮次超过激活阈值）时，对较早的工具结果做
-///    head/tail 摘要（无存档，存储保留全文）；
-/// 3. 工具级骨架化：`window > 0` 时按分层滑窗把过期调用的参数与结果替换为占位
-///    文案（`retention` 为工具自声明的保留策略，可为空——为空时仍执行全局窗口，
-///    ToolCall↔Tool 配对与 parent_id 传播完整保留，不会造成大模型逻辑断联）；
-/// 4. 长期记忆（S5 步 12）：`recall_section` 非空时在视图**开头**插一条记忆消息
-///    （`meta.kind = recall_context`，同样不落库）。**置顶**而不是置尾：记忆是背景
-///    事实，置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与
-///    轮次窗口都会读错；也不进系统提示词——那里有「唯一真源 = 注册段」的纪律
-///    （`plugins/session/README.md`）；
-/// 5. 任务调度段（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
-///    `ready_section` 非空时在视图**开头**插一条就绪任务消息
-///    （`meta.kind = readyset`，同样不落库）。同样不置尾、不进系统提示词，理由同上。
-///    **不与记忆段争 index 0**：记忆段的「置顶」是批⑦ 已定的决定——本段先插，
-///    记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 就绪 1；
-///    单独存在时各自在 0）。
-///    它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事——选哪一个是
-///    执行者的选择（`projection::readyset` 模块头的边界）。
-/// 6. 委派者真源段（ADR-047）：
-///    `delegate_section` 非空时插一条 `meta.kind = delegate_context`，落 **index 2**。
-///    插入次序是判据的一部分：本段在 `ready_section` **之前**插，于是记忆 0 /
-///    就绪 1 / 委派 2（记忆段最后插的那个 0 会把两者依次下推）；顺序反了会把
-///    三段的位置全部改掉，而段位置是模型读到的上下文次序的一部分——
-///    换一段就换一次上下文次序，同一会话的两次请求不再可比。
-///
-/// 以及第 0 步（在一切裁剪之前）：**可见域**（`viewer`，[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
-/// ③ 的请求侧入口）。`None` = 不过滤，与接线前逐字一致；`Some(会话主体)` = 别的
-/// 智能体的发言不进本主体的 prompt。**未标身份的消息照旧可见**（`principal = None`
-/// 是「还没接线」，不是「不让人看」——见 [`ChatNode::principal`]）。两条链各滤一次：
-/// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
-///
-/// 视图每轮从存储重建，七个步骤天然幂等，不存在重复存档 / 重复注入问题。
-/// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 11 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
-// config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
-#[allow(clippy::too_many_arguments)]
-pub fn build_request_view(
-    messages: &[ChatNode],
-    window: usize,
-    retention: &std::collections::HashMap<
-        String,
-        crate::symbio_core::CapabilityToolContextRetention,
-    >,
-    fade_active: bool,
-    fade_keep_turns: usize,
-    content_keep_recent: usize,
-    line_threshold: usize,
+/// 插入次序是「委派 → 就绪 → 记忆」，每段都插在 0，于是三段并存时读作
+/// 记忆 0 / 就绪 1 / 委派 2（单独存在时各自在 0）。顺序反了会把三段的位置全部改掉，
+/// 而段位置是模型读到的上下文次序的一部分——换一段就换一次上下文次序，
+/// 同一会话的两次请求不再可比。
+pub fn build_request_sections(
     recall_section: Option<&str>,
     ready_section: Option<&str>,
     delegate_section: Option<&str>,
-    viewer: Option<&str>,
 ) -> Vec<ChatNode> {
-    let mut view: Vec<ChatNode> = messages
-        .iter()
-        .filter(|m| visible_for(m, viewer))
-        .cloned()
-        .collect();
-    fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
-    if fade_active {
-        fade_aged_tool_results(&mut view, fade_keep_turns);
-    }
-    if window > 0 {
-        view = super::window::apply_layered_sliding_window(&view, window, retention);
-    }
-    // 6) 委派者真源段落 index 2（ADR-047）——**必须在第 5 条之前**插：本段先插 0，
+    let mut sections: Vec<ChatNode> = Vec::new();
+    let section = |kind: &str, text: &str| ChatNode {
+        id: uuid::Uuid::new_v4().to_string(),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Body),
+        content: Some(MessageContent::Text(text.to_string())),
+        status: Some(NodeStatus::Completed),
+        meta: Some(serde_json::json!({ "kind": kind })),
+        ..Default::default()
+    };
+    // 3) 委派者真源段落 index 2（ADR-047）——**必须最先插**：本段先插 0，
     //    ready 段再插 0 把本段挤到 1，最后记忆段插 0 把两者依次推到 1 / 2。
-    //    三段共用同一套形状（请求级、`meta.kind` 可观测、不落库），只差 kind 与位置。
-    if let Some(section) = delegate_section {
-        view.insert(
-            0,
-            ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Body),
-                content: Some(MessageContent::Text(section.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "delegate_context" })),
-                ..Default::default()
-            },
-        );
+    if let Some(text) = delegate_section {
+        sections.insert(0, section("delegate_context", text));
     }
-    // 5) 任务调度段置顶（S7 步 16–17，批⑨）——先插本段，第 4 条的记忆段随后再插
-    //    一次 0 把它挤到 index 1（见本函数文档第 5 条：记忆段的置顶不被本段改掉）。
-    //    与 recall 同一套形状：请求级、`meta.kind` 可观测、不落库。
-    if let Some(section) = ready_section {
-        view.insert(
-            0,
-            ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Body),
-                content: Some(MessageContent::Text(section.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "readyset" })),
-                ..Default::default()
-            },
-        );
+    // 2) 任务调度段置顶（S7 步 16–17，批⑨）——记忆段随后再插一次 0 把它挤到 1。
+    if let Some(text) = ready_section {
+        sections.insert(0, section("readyset", text));
     }
-    // 4) 长期记忆置顶（S5 步 12）——见本函数文档的第 4 条：位置与理由都在那里，
-    //    这里只落机制（请求级、`meta.kind` 可观测、不落库）。
-    if let Some(section) = recall_section {
-        view.insert(
-            0,
-            ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Body),
-                content: Some(MessageContent::Text(section.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "recall_context" })),
-                ..Default::default()
-            },
-        );
+    // 1) 长期记忆置顶（S5 步 12）——最后插 0，于是恒在 index 0。
+    if let Some(text) = recall_section {
+        sections.insert(0, section("recall_context", text));
     }
-    view
+    sections
 }
 
 #[cfg(test)]

@@ -203,33 +203,6 @@ pub fn guard_tool_result(
     }
 }
 
-/// 请求视图级摘要：与 [`guard_tool_result`] 相同的 head/tail 摘要，但**不写存档文件**。
-///
-/// 用于请求视图层的轮次淡化（fade）：存储层始终保留全文，淡化只作用于每次请求的
-/// 视图副本，无需持久化副本；模型如需完整输出可重新运行对应工具。
-pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
-    summarize_head_tail(
-        text,
-        budget_tokens,
-        "历史轮次结果已淡化以控制上下文长度，如需完整输出请重新运行该工具。",
-    )
-}
-
-/// 请求视图级 head/tail 摘要（**无存档**）：token 超预算时保留头尾、中段以
-/// `omit_note` 占位。工具结果淡化与内容节点淡化共用的机制本体。
-pub fn summarize_head_tail(text: &str, budget_tokens: usize, omit_note: &str) -> String {
-    let tok = default_tokenizer();
-    let n = tok.count(text);
-    if n <= budget_tokens {
-        return text.to_string();
-    }
-
-    let omit = n.saturating_sub(budget_tokens);
-    let placeholder = format!("{} {omit_note} ...]", omit_placeholder_prefix(omit));
-
-    assemble_head_tail_summary(text, budget_tokens, placeholder)
-}
-
 #[cfg(test)]
 #[path = "tool_result_guard.test.rs"]
 mod tests;

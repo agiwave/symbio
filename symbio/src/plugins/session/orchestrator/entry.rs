@@ -462,7 +462,6 @@ impl TurnLauncher {
                 system_prompt: None,
                 single_message: None,
                 stream: Some(true),
-                tool_context_window: Some(session_cfg.tool_context_window),
                 auto_compress: Some(session_cfg.auto_compress),
                 provider_id: pid_clone.clone(),
                 load_history: None,

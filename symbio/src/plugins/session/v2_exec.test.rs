@@ -212,7 +212,6 @@ async fn supplements_become_facts_visible_next_turn() {
             keywords: vec![],
             category: None,
             examples: None,
-            context_retention: None,
             ..Default::default()
         }],
         resume: None,
@@ -780,7 +779,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             keywords: vec![],
             category: None,
             examples: None,
-            context_retention: None,
             ..Default::default()
         }],
         resume: None,
@@ -998,7 +996,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
             keywords: vec![],
             category: None,
             examples: None,
-            context_retention: None,
             ..Default::default()
         }],
         resume: None,
@@ -1212,7 +1209,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         keywords: vec![],
         category: None,
         examples: None,
-        context_retention: None,
         provides_assign_work: true,
         records_delegation_promise: true,
         ..Default::default()

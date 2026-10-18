@@ -117,11 +117,3 @@ fn char_truncation_is_multibyte_safe() {
     assert_eq!(truncate_head_chars(cjk, 1), "你好");
     assert_eq!(truncate_tail_chars(cjk, 1), "世界");
 }
-
-/// 条件截断：未超限原样返回（无省略号），超限才截断并加省略号。
-#[test]
-fn conditional_truncation_only_when_over() {
-    assert_eq!(truncate_head_chars_if_over("hello", 10), "hello");
-    let t = truncate_head_chars_if_over(&"z".repeat(30), 10);
-    assert_eq!(t, format!("{}…", "z".repeat(20)));
-}

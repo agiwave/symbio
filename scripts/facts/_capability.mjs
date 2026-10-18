@@ -8,7 +8,7 @@
  *
  * | 面 | 语义出处 |
  * |---|---|
- * | LLM 工具 | `CapabilityMeta.description`（模型与前端看到的原文）+ `category` / `risk` / `context_retention`（决定它怎么被呈现、审批、压缩） |
+ * | LLM 工具 | `CapabilityMeta.description`（模型与前端看到的原文）+ `category` / `risk`（决定它怎么被呈现、审批） |
  * | VDFS 操作 | `VDFS_*` 常量正上方的 `///`（该操作的一句话定义） |
  * | 前端路由 | 插件 `route()` 里那条 `match` 臂正上方的 `///`（该地址的一句话职责） |
  *
@@ -154,11 +154,11 @@ const enumOf = (block, field, enumName) => {
 }
 
 /**
- * 一个插件的全部 LLM 工具语义：`Map<工具短名, {description, category, risk, retention}>`。
+ * 一个插件的全部 LLM 工具语义：`Map<工具短名, {description, category, risk}>`。
  *
  * 三种声明形态都吃，因为它们是**同一份事实在代码里的三种写法**：
  *  1. `CapabilityMeta { … }` 字面量（绝大多数工具）
- *  2. `ToolSpec { name, description, risk, retention }` 表项（vdfs 的七个同形工具）
+ *  2. `ToolSpec { name, description, risk }` 表项（vdfs 的七个同形工具）
  *  3. `tool("name", "desc", …)` 调用（vdfs 表装不下的两个：`vdfs_read` / `vdfs_list`）
  *
  * 判据是「**取到什么就记什么**」：某形态里没有的字段留空，不跨形态补——
@@ -184,12 +184,11 @@ export function toolFacts(root) {
       const text = stripComments(raw)
       const put = (name, fields) => {
         if (!name) return
-        const prev = out.get(name) ?? { description: null, category: null, risk: null, retention: null }
+        const prev = out.get(name) ?? { description: null, category: null, risk: null }
         out.set(name, {
           description: prev.description ?? fields.description ?? null,
           category: prev.category ?? fields.category ?? null,
           risk: prev.risk ?? fields.risk ?? null,
-          retention: prev.retention ?? fields.retention ?? null,
         })
       }
 
@@ -199,32 +198,24 @@ export function toolFacts(root) {
           const open = text.indexOf('{', idx)
           const block = matchBrace(text, open) >= 0 ? text.slice(open, matchBrace(text, open) + 1) : ''
           const name = readName(block, consts)
-          const retention =
-            lastVariant(enumOf(block, 'retention', 'CapabilityToolContextRetention')) ??
-            lastVariant(enumOf(block, 'context_retention', 'CapabilityToolContextRetention'))
           put(name, {
             description: readDescription(block),
             category: lastVariant(enumOf(block, 'category', 'CapabilityCategory')),
             risk: lastVariant(enumOf(block, 'risk', 'CapabilityRiskLevel')),
-            retention: retention === 'None' ? '无（默认 All）' : retention,
           })
           idx = text.indexOf(marker, idx + marker.length)
         }
       }
 
       // `tool("name", "description", …)`：表装不下的两个 vdfs 工具走这里。
-      // 后两个实参分别是保留策略与风险（`tools/mod.rs::tool` 的签名），
-      // 一并抽出来——否则同一族工具在表里一半有风险档、一半空着，
-      // 而空着会被读成「没风险」。
+      // 风险档是签名里最后那个实参（`tools/mod.rs::tool`），抽出来——否则同一族
+      // 工具在表里一半有风险档、一半空着，而空着会被读成「没风险」。
       for (const m of text.matchAll(/\btool\(\s*"([a-z][a-z0-9_]*)"\s*,\s*(?:\n\s*)?"((?:[^"\\]|\\.)*)"/g)) {
         const call = text.slice(m.index, matchBrace(text, m.index + m[0].length - 1) + 1)
         const risk = /CapabilityRiskLevel::([A-Za-z]+)/.exec(call)?.[1] ?? null
-        const retention =
-          /CapabilityToolContextRetention::([A-Za-z0-9_]+)/.exec(call)?.[1] ?? null
         put(m[1], {
           description: m[2].replace(/\\"/g, '"'),
           risk,
-          retention: retention === 'None' ? '无（默认 All）' : retention,
         })
       }
     }

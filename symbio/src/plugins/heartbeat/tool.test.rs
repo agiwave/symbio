@@ -19,11 +19,6 @@ fn meta_declares_the_three_actions() {
         .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
         .unwrap_or_default();
     assert_eq!(actions, vec!["set", "get", "cancel"]);
-    // 配置型写入：只保留最近一次（压缩层通用执行的声明位）
-    assert_eq!(
-        meta.context_retention,
-        Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly)
-    );
 }
 
 /// 回执就是 `HeartbeatConfig` 的四格：工具的每次回执回这一份，调度侧下一次读的

@@ -149,12 +149,12 @@ pub(crate) fn round_report_hook(
     })
 }
 
-/// 把请求视图层**置顶的三段**拼成一段请求级前缀（v2 运行器的 prompt 入口）。
+/// 把请求级注入段**三段**拼成一段前缀（v2 运行器的 prompt 入口）。
 ///
 /// ## 为什么需要它
 ///
-/// 长期记忆召回段 / 就绪任务集段 / 委派者真源段在请求视图里是**独立的消息**
-/// （`build_request_view` 的第 5/6/7 条，三段都置顶、`meta.kind` 可观测、不落库）。
+/// 长期记忆召回段 / 就绪任务集段 / 委派者真源段是**独立的消息**
+/// （`build_request_sections` 的产物，三段都置顶、`meta.kind` 可观测、不落库）。
 /// 而 v2 运行器的 prompt 是**一条** user 消息——`ProviderLlmAdapter::generate_turn`
 /// 只收 `TurnInput.text` 与渲染出的基线，那三段若不显式带进来就**静默**从模型眼前
 /// 消失：事实照样入格、`session/stats` 照样有数，只有模型看不见。
@@ -162,17 +162,17 @@ pub(crate) fn round_report_hook(
 /// ## 取法：按 `meta.kind` 取，不按位置
 ///
 /// 三段的 `kind` 是 `recall_context` / `readyset` / `delegate_context`，由
-/// `build_request_view` 单点写入。按 `kind` 取而不是按下标（0 / 1 / 2）——下标是
+/// `build_request_sections` 单点写入。按 `kind` 取而不是按下标（0 / 1 / 2）——下标是
 /// 「三段都在场时」的巧合，缺一段时下标全部左移（`view.rs` 的注释自己写了这个
 /// 插入次序的由来），按下标取会取错段或漏段。
 ///
 /// ## 顺序：按固定次序，不按它们在视图里的位置
 ///
-/// `build_request_view` 的插入次序（先插 0 再插 0）产出的是「记忆 0 / 委派者 1 /
-/// 就绪 2」，而本函数按 **记忆 → 就绪 → 委派者** 拼——即它们各自的**语义优先级**
-/// （背景 → 调度候选 → 身份目录）。两者在「三段齐全」时**不一致**，这是刻意的：
-/// 请求级前缀是一段文本，模型读到的是先后顺序；把「谁先谁后」绑在插队算法上，
-/// 下次有人调 `build_request_view` 的次序就会连带改掉模型看到的优先级。
+/// `build_request_sections` 产出的次序是「记忆 0 / 就绪 1 / 委派者 2」，而本函数按
+/// **记忆 → 就绪 → 委派者** 拼——即它们各自的**语义优先级**（背景 → 调度候选 →
+/// 身份目录）。两者今天恰好一致，但**不是同一条判据**：请求级前缀是一段文本，
+/// 模型读到的是先后顺序；把「谁先谁后」绑在插队算法上，下次有人调
+/// `build_request_sections` 的次序就会连带改掉模型看到的优先级。
 ///
 /// 三段都空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而三段皆空是常态）。
 fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
@@ -709,8 +709,8 @@ pub async fn run_chat_loop(
             // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
             // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
             skill_hits: &turn.skill_hits,
-            // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
-            prefix: request_view_prefix(&inputs.request_view),
+            // 请求级前缀 = 请求级注入段的三段（见 request_view_prefix）。
+            prefix: request_view_prefix(&inputs.request_sections),
             // 压缩的寄存位（S2.7-b2）：`None` = 本轮没压过（常态）。
             consolidation: consolidation.as_deref(),
             // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，

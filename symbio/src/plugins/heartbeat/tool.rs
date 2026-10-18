@@ -81,9 +81,6 @@ impl Capability for HeartbeatTool {
                 r#"{"action":"set","interval_seconds":1800,"prompt":"检查任务清单并继续推进待办事项"}"#.to_string(),
                 r#"{"action":"cancel"}"#.to_string(),
             ]),
-            // 配置型写入：每次全量回显生效配置，历史版本对后续推理无参考价值
-            // → 仅保留最近一次调用的完整参数/结果（机制化声明，压缩层通用执行）。
-            context_retention: Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
             ..Default::default()
         }
     }

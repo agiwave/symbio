@@ -591,41 +591,11 @@ fn config_definition() -> DetailDefinition {
                         "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
                         d.auto_compress,
                     ),
-                    unbounded_number(
-                        "compress_line_threshold",
-                        "淡化行数阈值",
-                        "请求视图中超过此行数的内容节点做头尾淡化（存储恒为完整原文）",
-                        json!(d.compress_line_threshold),
-                    ),
-                    unbounded_number(
-                        "compress_keep_recent",
-                        "淡化保护窗口",
-                        "请求视图中最近的 N 条内容节点豁免淡化（0 表示不保护）",
-                        json!(d.compress_keep_recent),
-                    ),
-                    unbounded_number(
-                        "tool_context_window",
-                        "工具结果保留窗口",
-                        "保留完整结果的最近工具调用数量，更早的按骨架化策略替换为占位文案",
-                        json!(d.tool_context_window),
-                    ),
-                    unbounded_number(
-                        "fade_activate_rounds",
-                        "工具结果淡化阈值",
-                        "单轮工具迭代轮数超过此值后，较早轮次的工具结果在请求视图中压成头尾摘要",
-                        json!(d.fade_activate_rounds),
-                    ),
-                    unbounded_number(
-                        "fade_keep_recent_turns",
-                        "淡化保留轮数",
-                        "最近 N 个用户轮次的工具结果保持原文，更早的才淡化",
-                        json!(d.fade_keep_recent_turns),
-                    ),
                     DetailField::toggle(
                         "prune_tool_history",
                         "落库期工具链裁剪",
                         "开启时在落库阶段物理删除上下文窗口之外的 Tool / ToolCall / Reasoning 节点\
-                         （存储不再保留完整原文）；关闭后存储严格保留全文，裁剪只发生在请求视图",
+                         （存储不再保留完整原文）；关闭后存储严格保留全文",
                         d.prune_tool_history,
                     ),
                 ],

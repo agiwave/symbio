@@ -10,7 +10,7 @@ created: 2026-09-16
 
 > 范围：`symbio/src/plugins/session/` 中「调用大语言模型 + 执行工具」的会话主循环。
 > 本文只回答一个问题：**主循环的结构是什么**。「压缩策略有哪些」见
-> [`../README.md`](../README.md "symbio/src/plugins/session/README")（六大压缩策略）；节点状态与流的词汇见
+> [`../README.md`](../README.md "symbio/src/plugins/session/README")（五大压缩策略）；节点状态与流的词汇见
 > [`./018-node-state-streaming.md`](018-node-state-streaming.md "AR-018-node-state-streaming")；模块拆分与符号落点见
 > [`./017-module-layout.md`](017-module-layout.md "AR-017-module-layout")；「为什么这样设计」见
 > [`000-架构决策汇总.md`](../../../../../docs/010-adr/README.md "ADR-000-架构决策汇总")。

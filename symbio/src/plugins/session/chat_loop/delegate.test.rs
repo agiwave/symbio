@@ -178,7 +178,6 @@ fn meta(name: &str, category: Option<CapabilityCategory>) -> CapabilityMeta {
         keywords: vec![],
         category,
         examples: None,
-        context_retention: None,
         ..Default::default()
     }
 }

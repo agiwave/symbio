@@ -95,39 +95,12 @@ pub struct SessionConfig {
     /// 上下文会话轮数限制（0 表示不限制，每一轮以一个 User 消息开始）
     #[serde(default = "default_context_messages")]
     pub context_messages: usize,
-    /// 内容节点淡化行数阈值（请求视图中超过此行数或 token 超预算时做头尾淡化；存储恒为完整原文）
-    #[serde(default = "default_compress_line_threshold")]
-    pub compress_line_threshold: usize,
-    /// 内容节点淡化的"最近 N 条内容节点"保护数（B1 保护窗口）：最近的 Text/Reasoning
-    /// 节点在请求视图中豁免淡化（末条消息恒受保护），0 表示不保护
-    #[serde(default = "default_compress_keep_recent")]
-    pub compress_keep_recent: usize,
-    /// 保留完整结果的最近工具调用数量限制（滑动窗口）
-    #[serde(default = "default_tool_context_window")]
-    pub tool_context_window: usize,
-    /// 老旧工具结果淡化（fade）的激活阈值：一次请求里迭代轮数**超过**此值后，
-    /// 请求视图才把较早轮次的工具结果压成头尾摘要。
-    ///
-    /// ⚠️ 本阈值所在的三层淡化目前**还没接进 v2 的请求**（裁剪结果被丢弃），
-    /// 而它能拿到的计数只有「本轮请求数」——工具轮数的真实计数在运行器环体里。
-    /// 接入与判据真源一起裁决，见
-    /// [T-166](../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")。
-    ///
-    /// 与 `chat_loop` 里的旧常量 `FADE_ACTIVATE_ROUNDS` 同源（原为硬编码 40）；
-    /// 统一进本结构后，fade 的全部参数都只有这一个真源。置 0 等价于"每一轮都启用
-    /// fade"（判定是 `round > 阈值`），要彻底关闭请保持默认值或调大。
-    #[serde(default = "default_fade_activate_rounds")]
-    pub fade_activate_rounds: usize,
-    /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化
-    ///（原硬编码常量 `FADE_KEEP_RECENT_TURNS` = 12）。
-    #[serde(default = "default_fade_keep_recent_turns")]
-    pub fade_keep_recent_turns: usize,
     /// 写入期工具链裁剪：是否在**落库时**物理删除 `context_messages` 轮之前的
     /// Tool / ToolCall / Reasoning 节点及其存档文件。
     ///
-    /// 这是「存储保持完整原文、压缩只发生在请求视图」架构原则的**唯一例外**，
-    /// 存在理由仅是控制工具密集型会话的磁盘与节点树体积（token 治理已由
-    /// `build_request_view` 的骨架化/淡化承担，本开关不影响发给模型的上下文大小）。
+    /// 这是「存储保留事实、压缩只换基」架构原则的**唯一例外**：存在理由仅是控制
+    /// 工具密集型会话的磁盘与节点树体积，本开关不影响发给模型的上下文大小
+    /// （请求体是事实网格的纯投影，见 [ADR-078](../../../../docs/010-adr/078.md "ADR-078")）。
     ///
     /// - `true`（默认）：保持历史行为，超出窗口的工具链在存储层被物理删除，
     ///   前端节点树同样看不到这些历史工具调用；
@@ -431,21 +404,6 @@ pub fn default_auto_compress() -> bool {
 pub fn default_context_messages() -> usize {
     6
 }
-pub fn default_compress_line_threshold() -> usize {
-    200
-}
-pub fn default_compress_keep_recent() -> usize {
-    3
-}
-pub fn default_tool_context_window() -> usize {
-    15
-}
-pub fn default_fade_activate_rounds() -> usize {
-    40
-}
-pub fn default_fade_keep_recent_turns() -> usize {
-    12
-}
 pub fn default_prune_tool_history() -> bool {
     true
 }
@@ -552,11 +510,6 @@ impl Default for SessionConfig {
             max_messages: default_max_messages(),
             auto_compress: default_auto_compress(),
             context_messages: default_context_messages(),
-            compress_line_threshold: default_compress_line_threshold(),
-            compress_keep_recent: default_compress_keep_recent(),
-            tool_context_window: default_tool_context_window(),
-            fade_activate_rounds: default_fade_activate_rounds(),
-            fade_keep_recent_turns: default_fade_keep_recent_turns(),
             prune_tool_history: default_prune_tool_history(),
             memory_max_bytes: default_memory_max_bytes(),
             memory_inject_max_bytes: default_memory_inject_max_bytes(),

@@ -29,8 +29,6 @@ pub struct Request {
     /// 是否使用流式输出
     pub stream: Option<bool>,
 
-    /// 工具上下文窗口（最近 N 轮工具调用保留明细）
-    pub tool_context_window: Option<usize>,
     /// 是否开启自动语义压缩
     pub auto_compress: Option<bool>,
 

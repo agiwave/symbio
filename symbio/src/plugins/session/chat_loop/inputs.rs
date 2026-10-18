@@ -4,8 +4,6 @@
 //! - [`prepare_turn_inputs`]：提示词 + 工具 + 压缩 + 请求视图的唯一收集点
 //! - [`apply_compaction`]：上下文水位的唯一响应点（自动语义压缩）
 
-use std::collections::HashMap;
-
 use crate::symbio_core::CapabilityMeta;
 
 use super::super::loop_registry::{builtin, Capsule, LoopState};
@@ -100,8 +98,8 @@ pub(crate) struct TurnInputs {
     pub(crate) system_prompt: String,
     /// 本轮到模型的完整工具清单
     pub(crate) tools: Vec<CapabilityMeta>,
-    /// 请求视图（`build_request_view` 唯一入口的产物，**不落库**）
-    pub(crate) request_view: Vec<ChatNode>,
+    /// 请求级注入段（`build_request_sections` 唯一入口的产物，**不落库**）
+    pub(crate) request_sections: Vec<ChatNode>,
 }
 
 /// 收口 ②：本轮 LLM 请求输入的**唯一准备点**。
@@ -216,20 +214,11 @@ pub(crate) async fn prepare_turn_inputs(
         .as_ref()
         .and_then(crate::plugins::session::v2_memory::prompt_section);
 
-    // ── ⑥ 请求视图（唯一入口 build_request_view）──────────────────────────
-    // 在存储视图之上叠加六项**不落库**的裁剪，全部只作用于本次 execute_turn 的
-    // 请求包，不回写 context.messages——存储保持完整历史，last_saved 锚点与
-    // persist_messages 切片不会错位。
-    // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
-    //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
-    // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
-    // 3) 工具级骨架化：从 Registry 的能力声明（context_retention）动态解析
-    //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
-    //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
-    // 4) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 4 条）；
-    // 5) 任务调度段：就绪任务集置顶注入（不落库；见 build_request_view 文档第 5 条）。
-    // 6) 委派者真源段：Q1 判定 + Q2 能力目录（不落库；见 build_request_view 文档第 6 条）。
-
+    // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
+    // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——
+    // 对话体是事实网格的纯投影（ADR-048a），请求视图级的淡化 / 骨架化已按
+    // [ADR-078](../../../../../docs/010-adr/078.md "ADR-078") 退役。
+    //
     // ── ⑥′ 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录 ─────────────────────
     //
     // **位置即约束**：能力目录必须在 ①② 把 `tools` 收集成形**之后**才动笔——收集是
@@ -253,44 +242,19 @@ pub(crate) async fn prepare_turn_inputs(
         &workers,
         &context.session.cfg_or_default(),
     );
-    let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
-        .iter()
-        .filter_map(|t| {
-            t.context_retention
-                .filter(|r| !matches!(r, crate::symbio_core::CapabilityToolContextRetention::All))
-                .map(|r| {
-                    let short = t.name.rsplit('/').next().unwrap_or(&t.name);
-                    (short.to_string(), r)
-                })
-        })
-        .collect();
-    let request_view = context::build_request_view(
-        &context.messages,
-        req.tool_context_window,
-        &retention,
-        // ⚠️ 工具结果淡化的**激活判据**：配置项 `fade_activate_rounds` 说的是工具轮数，
-        // 而这一层能给的只有本轮**请求数**（真实轮数在运行器的环体里，两者的区分见
-        // [ADR-074](../../../../../docs/010-adr/074.md "ADR-074")）。这三层淡化整体还没接进 v2 的请求
-        // （裁剪结果被丢弃，见 [T-166](../../../../../docs/009-task/166-上下文淡化层级未接入v2请求.md "T-166-上下文淡化层级未接入v2请求")），
-        // 激活判据的真源随那一条一起裁决。
-        turn.request_round > context.session.fade_activate_rounds(),
-        context.session.fade_keep_recent_turns(),
-        context.session.compress_keep_recent(),
-        context.session.line_threshold(),
+    let request_sections = context::build_request_sections(
         recall_section.as_deref(),
         // 调度段（S7 步 16–17，批⑨）：就绪任务集，非空时置顶一条 `meta.kind = readyset`。
         turn.ready_section.as_deref(),
         // 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录，落 index 2。
         delegate_section.as_deref(),
-        // 可见域入口（plan/11 批1 ③）：本会话主体之外的发言不进本次请求。
-        Some(context.principal.as_str()),
     );
 
     Ok(TurnInputs {
         root_id,
         system_prompt,
         tools,
-        request_view,
+        request_sections,
     })
 }
 

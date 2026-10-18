@@ -16,7 +16,7 @@ created: 2026-09-16
 
 | 文档 | 写什么 |
 |---|---|
-| [`../README.md`](../README.md "symbio/src/plugins/session/README") | **现行机制 + 配置面**：六大压缩策略、参数 Schema、策略对比矩阵。要查"当前行为是什么"看这里。 |
+| [`../README.md`](../README.md "symbio/src/plugins/session/README") | **现行机制 + 配置面**：五大压缩策略、参数 Schema、策略对比矩阵。要查"当前行为是什么"看这里。 |
 | 本目录 | **深度设计与专题**：核心循环怎么收口、模块怎么分工、历史审计结论、前端性能、VDFS 会话消息映射等。要查"为什么这样设计"看这里。 |
 
 ## 文档清单
@@ -42,7 +42,7 @@ created: 2026-09-16
 
 ## 建议阅读路径
 
-- **要改核心循环** → [`015-core-loop.md`](015-core-loop.md "AR-015-core-loop") → [`../README.md`](../README.md "symbio/src/plugins/session/README") 六大策略 → [`017-module-layout.md`](017-module-layout.md "AR-017-module-layout") 找文件落点
+- **要改核心循环** → [`015-core-loop.md`](015-core-loop.md "AR-015-core-loop") → [`../README.md`](../README.md "symbio/src/plugins/session/README") 五大策略 → [`017-module-layout.md`](017-module-layout.md "AR-017-module-layout") 找文件落点
 - **要改压缩** → [`014-context-compression-design.md`](014-context-compression-design.md "AR-014-context-compression-design")（分层与不变量）→ [`../README.md`](../README.md "symbio/src/plugins/session/README")（阈值与函数）
 - **要查历史为什么这么改** → 已归档的审计与迁移记录（见上表下方），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
 - **要动前端转写/会话列表** → [`019-perf.md`](019-perf.md "AR-019-perf") → [`022-vdfs-session-messages.md`](022-vdfs-session-messages.md "AR-022-vdfs-session-messages")

@@ -7,9 +7,8 @@
 //!   「未执行」结果的统一写法（`apply_not_executed`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
 //! - `tool_result_guard` —— 结果守卫：单条结果进存储前的体积上限（`guard_tool_result`
-//!   与归档滚动），以及**不写存档**的请求视图级摘要（`summarize_tool_result` /
-//!   `summarize_head_tail`）——上下文治理层的工具淡化与 token 超预算裁剪共用同一份
-//!   头尾摘要语义，因此它必须暴露给域外，而不是私藏在执行路径里。
+//!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
+//!   （[ADR-078](../../../../docs/010-adr/078.md "ADR-078")）。
 //!
 //! `heartbeat` 工具**不在这里**：它随调度一起切出为 `plugins/heartbeat`
 //! （[ADR-077](../../../../docs/010-adr/077.md "ADR-077")），而本域是分发与执行基础设施。
@@ -28,4 +27,3 @@ pub use self::tool_executor::{
     apply_not_executed, execute_tool_async, fire_hook, process_tool_calls_async, Delegation,
     TaskDeclaration, TaskItem, TaskStatus,
 };
-pub use self::tool_result_guard::{summarize_head_tail, summarize_tool_result};

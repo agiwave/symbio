@@ -65,36 +65,6 @@ pub enum CapabilityCategory {
     Other,
 }
 
-/// 工具上下文保留策略（会话机制化属性）
-///
-/// 工具在 `CapabilityMeta` 中声明"历史参数/结果在推理上下文中保留多少"，
-/// 会话压缩层按声明通用处理，不对任何具体工具名做特殊化。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityToolContextRetention {
-    /// 默认：完整保留，正常参与全局滑动窗口
-    #[default]
-    All,
-    /// 仅保留最近 N 次调用的完整参数/结果，更早的调用在上下文中骨架化
-    LastN(u32),
-    /// 仅保留最近一次调用的完整参数/结果，更早的调用在上下文中骨架化。
-    ///
-    /// 适用于"每次写入全量状态、旧状态对后续推理无参考价值"的工具
-    /// （如任务清单更新），可显著降低重复全量参数对上下文的占用。
-    LastOnly,
-}
-
-impl CapabilityToolContextRetention {
-    /// 每个工具应保留的完整调用次数（`All` → `u32::MAX` 表示不限制）
-    pub fn keep_count(self) -> u32 {
-        match self {
-            CapabilityToolContextRetention::All => u32::MAX,
-            CapabilityToolContextRetention::LastN(n) => n.max(1),
-            CapabilityToolContextRetention::LastOnly => 1,
-        }
-    }
-}
-
 /// 大语言模型工具定义
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CapabilityMeta {
@@ -117,13 +87,6 @@ pub struct CapabilityMeta {
     /// 使用示例列表
     #[serde(skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<String>>,
-    /// 工具上下文保留策略（`None` = 默认 `All`，完整参与滑动窗口）
-    ///
-    /// 机制说明：工具执行层把该策略 Stamp 到 ToolCall 消息 meta
-    /// （`ctx_retention`），会话压缩层读取 meta 通用执行，会话侧
-    /// 不感知任何具体工具名。
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub context_retention: Option<CapabilityToolContextRetention>,
     /// 工具风险等级（`None` = 默认 `Medium`，由 [`effective_risk`](Self::effective_risk) 兜底）
     ///
     /// 机制说明：工具在 `CapabilityMeta` 中**自声明**风险等级，审批闸门
@@ -166,21 +129,10 @@ impl CapabilityMeta {
         self
     }
 
-    /// 构造带上下文保留策略的元数据
-    pub fn with_context_retention(mut self, retention: CapabilityToolContextRetention) -> Self {
-        self.context_retention = Some(retention);
-        self
-    }
-
     /// 构造带风险等级的元数据
     pub fn with_risk(mut self, risk: CapabilityRiskLevel) -> Self {
         self.risk = Some(risk);
         self
-    }
-
-    /// 读取生效的上下文保留策略（未声明视为 `All`）
-    pub fn effective_context_retention(&self) -> CapabilityToolContextRetention {
-        self.context_retention.unwrap_or_default()
     }
 
     /// 读取生效的风险等级（未声明视为 `Medium`）

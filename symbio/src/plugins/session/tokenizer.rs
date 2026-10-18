@@ -279,28 +279,6 @@ pub(crate) fn truncate_tail_chars(text: &str, token_budget: usize) -> String {
     text.chars().skip(skip).collect()
 }
 
-/// 超限时截行首并追加省略号，未超限原样返回（不加省略号）。
-///
-/// 与 [`truncate_head_chars`] 的区别：自带"是否超限"判定，供以整段保留文本
-/// 为对象的兜底使用（L3 骨架摘要的单行/单段截断）。
-pub(crate) fn truncate_head_chars_if_over(text: &str, token_budget: usize) -> String {
-    let char_cap = token_budget.saturating_mul(CHARS_PER_TOKEN);
-    if text.chars().count() <= char_cap {
-        text.to_string()
-    } else {
-        format!("{}…", truncate_head_chars(text, token_budget))
-    }
-}
-
-/// 按 token 预算截断文本：未超限原样返回，超限截行首并追加省略号。
-///
-/// [`truncate_head_chars_if_over`] 的语义化别名——L3 骨架摘要等"单行/单段
-/// 摘要"场景以此命名更贴近意图。历史上 context_window 内联了同型实现
-/// （`token × 2 → 字符上限`），现收敛于此，杜绝口径漂移。
-pub(crate) fn truncate_tokens(text: &str, token_budget: usize) -> String {
-    truncate_head_chars_if_over(text, token_budget)
-}
-
 /// token 预算驱动的头尾切分（机制本体，原 L0 `tool_result_guard::split_head_tail`）。
 ///
 /// 优先按**行**贪心累加（结构化输出友好，不会切断 JSON/表格行）；单行超预算

@@ -29,8 +29,8 @@
 
 use super::{request_of, tool, ToolVdfs};
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, CapabilityToolContextRetention, ExecEnv,
-    PluginError, PluginInvokeRequest, VdfsItem,
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    VdfsItem,
 };
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -57,8 +57,6 @@ pub struct ToolSpec {
     pub schema: fn() -> Value,
     /// 调用示例（协议适配层会追加到描述之后）
     pub examples: &'static [&'static str],
-    /// 上下文保留策略（`Some(LastOnly)` = 历史里只留最近一次）
-    pub retention: Option<CapabilityToolContextRetention>,
     /// 风险等级：这张表里的工具同形但风险不同（`vdfs_read` 只读、`vdfs_write`
     /// 改状态），故风险是**逐工具的差异**之一，不靠默认值隐式决定。
     pub risk: CapabilityRiskLevel,
@@ -86,7 +84,6 @@ impl Capability for VdfsTool {
             self.spec.description,
             (self.spec.schema)(),
             self.spec.examples.to_vec(),
-            self.spec.retention,
             self.spec.risk,
         )
     }
@@ -122,7 +119,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
         examples: &["{\"path\":\"README.md\"}"],
-        retention: None,
         risk: CapabilityRiskLevel::Low,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -150,7 +146,6 @@ pub static SPECS: &[ToolSpec] = &[
             "{\"path\":\"tmp/old.txt\"}",
             "{\"path\":\"tmp\",\"recursive\":true}",
         ],
-        retention: Some(CapabilityToolContextRetention::LastOnly),
         risk: CapabilityRiskLevel::High,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -178,7 +173,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
         examples: &["{\"path\":\"docs/notes\"}"],
-        retention: Some(CapabilityToolContextRetention::LastOnly),
         risk: CapabilityRiskLevel::Medium,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -208,7 +202,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
         examples: &["{\"path\":\"notes.md\",\"text\":\"# 标题\\n\"}"],
-        retention: Some(CapabilityToolContextRetention::LastOnly),
         risk: CapabilityRiskLevel::Medium,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -245,7 +238,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
         examples: &["{\"path\":\"src/main.rs\",\"old_string\":\"fn old()\",\"new_string\":\"fn new()\"}"],
-        retention: Some(CapabilityToolContextRetention::LastOnly),
         risk: CapabilityRiskLevel::Medium,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -284,7 +276,6 @@ pub static SPECS: &[ToolSpec] = &[
             "{\"pattern\":\"**/*.rs\"}",
             "{\"pattern\":\"src/**/*.toml\"}",
         ],
-        retention: None,
         risk: CapabilityRiskLevel::Low,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -310,7 +301,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
         examples: &["{\"path\":\"/\"}", "{\"path\":\"src\",\"depth\":2}"],
-        retention: None,
         risk: CapabilityRiskLevel::Low,
         call: |p, args, ctx| {
             Box::pin(async move {

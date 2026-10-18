@@ -1,17 +1,22 @@
 //! 会话上下文治理域（`context`）
 //!
-//! 「发给大模型之前」的全部上下文处理：何时压、从哪切、怎么裁、压完怎么落。
+//! 「发给大模型之前」的全部上下文处理：何时压、从哪切、压完怎么落，以及请求级的
+//! 三段注入（记忆 / 调度 / 委派）。
 //!
 //! ## 模块分工
 //!
 //! | 文件 | 职责 |
 //! |---|---|
 //! | 本文件 | 触发与度量：阈值 / 切分点 / token 估算 / 收益护栏（「何时压、从哪切」） |
-//! | [`view`]     | 请求视图层：淡化 / 骨架化 / 请求级注入段（`build_request_view` 唯一入口） |
+//! | [`view`]     | 请求级注入段：长期记忆 / 就绪任务 / 委派者真源（`build_request_sections` 唯一入口） |
 //! | [`conversation_view`] | 对话线投影：user 消息 + assistant 文本节点（对话面唯一分界） |
 //! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议 |
-//! | [`window`]   | 分层滑窗骨架化（纯函数，无副作用） |
 //! | [`pipeline`] | 压缩执行流水线：阈值触发的自动压缩与用户重试共用的唯一内核 |
+//!
+//! **对话体不在这里加工**（[ADR-078](../../../../docs/010-adr/078.md)）：请求里的历史是
+//! 事实网格的纯投影（[ADR-048a](../../../../docs/010-adr/048a.md)），请求视图级的
+//! 内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已退役。本域对历史的唯一动作是
+//! **换基**（语义压缩写成 `session.consolidated` 一格事实），不是改写视图。
 //!
 //! 分层：门面与 `view` / `conversation_view` / `prompt` 是**纯策略**（无 I/O），
 //! `pipeline` 是**执行**（LLM 请求 / 落库 / 广播），是本域唯一的副作用出口。
@@ -25,7 +30,6 @@ mod conversation_view;
 mod pipeline;
 mod prompt;
 mod view;
-mod window;
 
 // 门面 = 域内唯一对外出口：调用方（`chat_loop` / `resume`）只经 `context::X` 取用，
 // 不感知域内文件划分；域内子模块则经 `use super::*` 取用门面（含下面的 re-export）。
@@ -35,15 +39,11 @@ pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, extract_snapshot,
     get_compression_prompt, render_snapshot_for_history, COMPRESSION_PROTOCOL_VERSION,
 };
-pub use self::view::build_request_view;
+pub use self::view::build_request_sections;
 
 const COMPRESSION_TOKEN_THRESHOLD: f64 = 0.7;
 const COMPRESSION_PRESERVE_THRESHOLD: f64 = 0.3;
 const MIN_COMPRESSION_FRACTION: f64 = 0.05;
-
-/// 单个内容节点的 token 预算：行数阈值之外的第二触发条件，也是 token 路径的
-/// 淡化预算。单行长 JSON/URL/base64（1 行但数万 token）必须触发，否则绕过防线。
-pub const MESSAGE_TOKEN_CAP: usize = 2048;
 
 /// 迟滞系数：快照后估算再增长不足 (post_tokens × 1.15) 时跳过被动压缩。
 pub const COMPACT_HYSTERESIS_FACTOR: f64 = 1.15;
