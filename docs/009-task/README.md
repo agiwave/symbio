@@ -60,12 +60,13 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 1 · 🟡 doing 2 · ☑ done 158 · ❌ wont 3（共 164）
+**计数**：☐ todo 2 · 🟡 doing 2 · ☑ done 158 · ❌ wont 3（共 165）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
+| `T-168-模型档位闸门对内部请求无效` | 三条「内部请求」直调 ModelProvider::execute_turn，绕过档位闸门——接线或显式声明 | next | 登记卫生 | — |
 | `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | later | plan | — |
 
 ## 进行中
@@ -415,6 +416,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-165-控制面收敛`](165-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（done）
 - [`T-166-上下文淡化层级未接入v2请求`](166-上下文淡化层级未接入v2请求.md) 请求视图层的三层裁剪在 v2 不生效——核出「接线与投影判据互斥」，三层整族退役（ADR-078）（done）
 - [`T-167-会话插件切分`](167-会话插件切分.md) PL-014 步骤 6——session 切分：先让「卸载」真的成立，再逐片搬（第一批切心跳）（doing）
+- [`T-168-模型档位闸门对内部请求无效`](168-模型档位闸门对内部请求无效.md) 三条「内部请求」直调 ModelProvider::execute_turn，绕过档位闸门——接线或显式声明（todo）
 
 <!-- registry:summary end -->
 

@@ -74,10 +74,14 @@ F3 冻结锚点里的两个机制（`pattern` 三模式、四档令牌）都**�
 3. **「不允许生成」这句措辞站不住**：若指「模型不产生 token」，那是 `max_tokens` 参数；
    若指「输出空间受限」，那要由端口的**返回类型**强制。三件事被压成了一句话。
 
-**顺带核出一个比本条更大的缺口**（应单独成条，不塞进这里）：闸门只装在包装层 `LlmAdapter` 上，
-而底层 `ModelProvider` 是对所有插件开放的核心 trait——`classify/decide.rs`、`compose/wording.rs`、
-`session` 都直接持 `Arc<dyn ModelProvider>`。令牌闸门今天保证的是「经 `LlmAdapter` 的那条路受约束」，
-**不是**「所有调模型的路受档位约束」。
+**顺带核出一个比本条更大的缺口**（已单独成条：[T-168-模型档位闸门对内部请求无效](168-模型档位闸门对内部请求无效.md "T-168-模型档位闸门对内部请求无效")，本行 2026-10-19 订正）：闸门只装在
+`LlmAdapter::generate(&FullModel, …)` 上，而 `ModelProvider::execute_turn` 是对所有插件开放的
+core trait——**直调它就绕过闸门**。生产代码里有三处这样绕过（`tools: &[]` + `silent()` 出口的
+内部请求）：`classify/decide.rs:146` · `compose/wording.rs:105` ·
+`session/context/pipeline.rs::run_compression_llm`（第 977 行的调用）。
+**session 的主链路不在此列**——`turn_exec.rs` 两处都先 `ProviderLlmAdapter::for_turn` 把
+provider 包成 adapter 再走；它持 `Arc<dyn ModelProvider>` 只为每轮包一次。
+（初版把 session 也算成绕过点，是「持 raw provider」与「直调 execute_turn」混为一谈，特此订正。）
 
 **下一步（定语义再动代码）**：先裁决快速档是 (i) 还是 (ii)。若 (ii)，则补 `Classifier` 端口
 （收 `&ClassifyOnly`、形参无 `tools`、`max_tokens` 取档案表的小值）——不带工具由类型强制、
