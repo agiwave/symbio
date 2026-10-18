@@ -9,7 +9,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 # 能力统一注册表——CapabilityVisitor 六族 → 一个 Registry（3 方法）
 
-状态：**设计文档，未施工**。它是 [PL-014 §5 步骤 4](../004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 的施工图，
+状态：**施工中**——[步骤 4](../009-task/165-控制面收敛.md "T-165-控制面收敛") 的施工图，4a–4e 已落地（各步「落地形态」见 §5），余 4f（trait 纯重命名）。
 回答开工前必须先答的三个问题，并把 PL-014 §4 里两处与现网契约不符的签名修正掉。
 
 范围：`symbio_core` 的收集口（`CapabilityVisitor` / `OptionVisitor` / `ConfigurableVisitor`）+
@@ -20,8 +20,8 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 | 判据 | 表达 | 现有棘轮 |
 |---|---|---|
-| core 形状只降不升 | `pub trait` 20 · `fn` 成员 60 · 默认体 18（4d 后实测） | `core-shape-audit.mjs`（CS-001） |
-| 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 3 ⇒ **1 个 trait，3 个方法** | 本文档 §2 的账 |
+| core 形状只降不升 | `pub trait` 18 · `fn` 成员 56 · 默认体 18（4e 后实测） | `core-shape-audit.mjs`（CS-001） |
+| 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 2 ⇒ **1 个 trait，3 个方法**（4e 达成） | 本文档 §2 的账 |
 | session 不增 | 每步 `session` 非测试行数 ≤ 搬入前 | `find` + `wc -l` |
 | 行为不变 | 工具清单逐条比对 + schema 导出比对 + e2e 77 条 | 现有 e2e |
 | 零新增机制键 | --- | `verify/mechanism_growth` |
@@ -42,14 +42,16 @@ trait 改名（`CapabilityVisitor` → `Registry`）是最后一步的纯重命�
 | Model | 4 | `register_model_providers` · `get_model_provider` · `get_model_provider_by_id` · `resolve_model_provider`(默认) | `Model` |
 | Prompt | 2 | `register_system_prompt` · `list_system_prompts` | `Prompt` |
 | Mount | 5 | `register_vdfs_provider` · `list_vdfs_providers` · `get_vdfs_provider` · `register_vdfs_root`(默认) · `get_vdfs_root`(默认) | `Mount` |
-| Option | 2 | `OptionVisitor::register_option_field` · `list_option_fields`（**另一个 trait**） | `Option` |
+| Option | 2 | `register_option_field` · `list_option_fields`（**另一个 trait**，随 4e 退场） | `Option` |
 
 > 基线修正：[T-165-控制面收敛](../009-task/165-控制面收敛.md "T-165-控制面收敛") 原记「14 方法」，
 > 实测 16（含 3 个默认体）。已随本文订正。**4a 之后 trait 余 14 方法**（Tool 3 + Model 4 +
 > Prompt 2 + Mount 5；默认体 3 → 2，`register_batch` 那个随 Tool 族一起退场）；
 > **4b 之后余 10 方法**（put / get / list 3 + Prompt 2 + Mount 5，默认体 5）；
 > **4c 之后余 8 方法**（put / get / list 3 + Mount 5，默认体 5）；
-> **4d 之后余 3 方法**（put / get / list，无默认体——Mount 族含两个默认体一并退场）。
+> **4d 之后余 3 方法**（put / get / list，无默认体——Mount 族含两个默认体一并退场）；
+> **4e 之后** `OptionVisitor` / `ConfigurableVisitor` 两个专服单族的 trait 退场
+> （`pub trait` 20 → **18**，两族各 2 方法共 4 个并入表的行词汇），收集口只剩一个 trait 三方法。
 
 收集器有**两个实现方**，这是迁移的真正成本所在：
 
@@ -147,7 +149,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 | 4b | Model 族 4 方法改走表 | 4 | 0 | 71 → 67 |
 | 4c | Prompt 族 2 方法改走表 | 2 | 0 | 67 → 65 |
 | 4d | Mount 族 5 方法改走表 | 5 | 0 | 65 → 60 |
-| 4e | `OptionVisitor` 与 `ConfigurableVisitor` 一并合入（各 2 方法）；`RowKind` +1 值（`Configurable`） | 2 trait + 4 方法 | 0 | trait 20 → **18**，方法 60 → 56 |
+| 4e | `OptionVisitor` 与 `ConfigurableVisitor` 一并合入（各 2 方法）；`RowKind` +1 值（`Configurable`，封闭集偏离的裁决见 [ADR-071](../010-adr/071.md)） | 2 trait + 4 方法 | 0 | trait 20 → **18**，方法 60 → 56 |
 | 4f | 纯重命名 `CapabilityVisitor` → `Registry` | 0 | 0 | 不变 |
 
 > **算术订正（4a 落地时）**：原表把三方法写成「加 0」，于是每步都少数 3。正确账是
@@ -248,6 +250,26 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   这是「告警不该只是一条日志」的自证：它上岗第一轮就顶掉了三个真碰撞。
 - **session 非测试行数 32,503 → 32,505（+2）**：唯一涉表的注册调用一行被 rustfmt
   折成三行，无新逻辑——量到就记账（§6 口径）。
+
+### 4e 落地形态（2026-10-18）
+
+- **选项行**：`CapabilityRowPayload::Option { field, order }`（`CapabilityRow::option(order, 字段)`，
+  行名 = `field.key`，同键覆盖保留先注册槽位）。`order` 长在行上但**不下发**——读侧
+  `capability_option_fields` 稳定排序后即丢，排序答案与字段是同一行的两个事实。
+- **可配置行**：`CapabilityRowPayload::Configurable(Box<VdfsItem>)`（行名 = 目录名，同名覆盖）。
+  插件侧唯一入口仍是 `capability_announce_configurable`——条目形状（地址跨挂载点、推不出来，
+  必须连条目一起交）在那里统一构造，行只是它的新住址。
+- **变的是「行住哪张表」，不变的是通道**：`OPTION_VISITOR` / `CONFIGURABLE_VISITOR` 两个广播
+  通道键保留（端点字面量、失败降级、独立实例语义全部原样），值类型改指统一收集口；
+  `DefaultOptionVisitor` 随旧 trait 删除，`collect_options` 返回全表共用的 `DefaultToolVisitor`。
+- **`RowKind` 六值 → 七值**（+`Configurable`）：PL-014 §5 步骤 4 的熔断线真触发了一次，
+  裁决入档 [ADR-071](../010-adr/071.md)——塞进 `Option`/`Mount` 都会把「同一事实的第二种答案」长回数据侧。
+- **core 三格**：trait 20 → **18**（两个专服单族的 trait 退场）、方法 60 → **56**、默认体 18 不变；
+  `SHAPE_BASELINE` 收窄至 **18/56/18**（基线数字随收尾批同步，见 [T-165 处理过程](../009-task/165-控制面收敛.md "T-165-控制面收敛")）。
+  同提交另修 `clippy::large-enum-variant`：`Option.field` 与 `Configurable` 载荷入 `Box`。
+- **守门人**：`tool_visitor.test.rs` 四格——选项按 order 排序并丢号 / 同键覆盖保首槽位 /
+  可配置保注册序且同名覆盖 / 空表两族皆空；`session` 非测试行数 32,505 → **32,508**
+  （+3：`collect_options` 签名换型带来的注释与 use 行重排，无新逻辑——量到就记账，§6 口径）。
 
 每一步的守门人：**同一份工具清单以两种口径导出逐条相等**（走表的 `list(Tool)` 与
 `CapabilityMeta` 全量转储），加 e2e 77 条全过。任何一格漂移即停。
