@@ -461,7 +461,6 @@ impl SessionPlugin {
                 max_tool_rounds: session_cfg.model_chat_max_tool_rounds(),
                 tool_context_window: Some(session_cfg.tool_context_window),
                 auto_compress: Some(session_cfg.auto_compress),
-                enable_compact_tool: Some(session_cfg.enable_compact_tool),
                 provider_id: pid_clone.clone(),
                 load_history: None,
                 resume: None,

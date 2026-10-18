@@ -123,8 +123,8 @@ pub(crate) struct SessionContext {
     ///
     /// `session.consolidated` 是**事实**，而事实只能由持写者令牌的一方落格
     /// （[`crate::symbio_core::EventWalStore`] 的单写者闸门）。压缩跑在
-    /// `prepare_turn_inputs`（步骤 3）与 `close_turn`（步骤 6），两处都**不持**令牌
-    /// ——令牌在 `execute_turn`（步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
+    /// `prepare_turn_inputs`（步骤 3），而它**不持**令牌——令牌在 `execute_turn`
+    /// （步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
     /// `NotTheWriter`，而那是**静默**的：压缩照常生效、界面照常变短，只有事实源里
     /// 少了一条事件（于是切源之后压缩在重建面上等于没发生过）。
     ///
@@ -151,7 +151,6 @@ pub(crate) struct TurnRequest {
     /// 显式软上限（`None` = 不限制；`Some(0)` 与 `None` 同义）
     pub(crate) max_tool_rounds: Option<usize>,
     pub(crate) auto_compress: bool,
-    pub(crate) enable_compact_tool: bool,
     pub(crate) tool_context_window: usize,
     pub(crate) load_history: bool,
     /// 请求显式给的系统提示词（`None` = 只有注册段；不吞掉注册段，见
@@ -170,9 +169,6 @@ impl TurnRequest {
             // 避免 0 被解释成"0 轮即熔断"。
             max_tool_rounds: req.max_tool_rounds.filter(|n| *n > 0),
             auto_compress: req.auto_compress.unwrap_or(defaults.auto_compress),
-            enable_compact_tool: req
-                .enable_compact_tool
-                .unwrap_or(defaults.enable_compact_tool),
             tool_context_window: req
                 .tool_context_window
                 .unwrap_or(defaults.tool_context_window),
@@ -198,8 +194,6 @@ pub(crate) struct TurnState {
     pub(crate) tool_rounds: usize,
     /// 长度截断自动续写次数（跨轮累加）
     pub(crate) continuation_count: u32,
-    /// 水位提醒一次性标记（主动压缩成功后重置，允许上下文回落后再次提醒）
-    pub(crate) nudged_this_request: bool,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
     pub(crate) last_saved: usize,
     /// 本轮已派发、尚未产出结果的工具调用 id —— **启动条件的权威判据**。
@@ -209,28 +203,6 @@ pub(crate) struct TurnState {
     /// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，
     /// 完成回调逐个移除；全部移除后唤醒主循环——**不完整不唤醒**。
     pub(crate) in_flight_tools: HashSet<String>,
-    /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）。
-    ///
-    /// 由工具执行层填（`process_tool_calls_async` 的出参），轮末收束入格
-    /// （`v2_facts::record_derived`）——两者之间必须有个**请求作用域**的地方存它：
-    /// 执行在 `close_turn`、入格在轮末（`v2_exec`），中间隔着一整段本轮收尾。与
-    /// `TurnState` 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
-    pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
-    /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S7 步 16）。
-    ///
-    /// 形态与 [`TurnState::delegations`] 完全对称：工具执行层填
-    /// （`process_tool_calls_async` 的出参），轮末收束入格（`v2_facts::record_derived`
-    /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
-    pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
-    /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，
-    /// S8 步 20，[roadmap/S09 §6](../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断") 验收 2）。
-    ///
-    /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
-    /// 的出参），轮末收束入格（`v2_facts::record_derived` → `CircuitBreaker::break_event`）。
-    /// 只有 `Break` 进这张表——`Refuse`（未授权）按验收 1 **不得产生事件**，
-    /// 两种拒绝在事件面上必须分得开；这也是为什么它不复用 `delegations` 或
-    /// `task_decls` 的出参：那是「做了什么」，这是「**不允许做**什么」。
-    pub(crate) gate_breaks: Vec<&'static str>,
     /// **对话线上最近一次动静**的时刻（毫秒）——中途汇报的静默时钟起点。
     ///
     /// 两个来源都算一次"动静"：用户发言（轮首输入 / 轮边界折进的补充）与助手写下
@@ -350,13 +322,6 @@ pub(crate) enum Gate {
     WaitForTools,
     /// 必须退出，携带原因。
     Exit(TurnExit),
-}
-
-/// 本轮推理产物（`TurnOutput` 被 `into_messages` 按值消费前取出的字段）。
-pub(crate) struct TurnResult {
-    pub(crate) root_id: String,
-    pub(crate) tools_done: Vec<TurnToolCallInfo>,
-    pub(crate) finish: ModelFinishReason,
 }
 
 /// Stop 钩子的幂等触发器。

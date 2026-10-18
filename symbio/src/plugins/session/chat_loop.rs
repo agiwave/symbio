@@ -14,7 +14,7 @@
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
-//!   步骤6 close_turn           ← 工具分发 + 落库 + 流向判定（子树在此收敛）
+//!   步骤6 close_turn           ← 落库 + 流向判定（子树在此收敛）
 //!   步骤7 finalize_turn_root   ← 封根 Turn（组合节点终态跟随子树）
 //! end loop
 //! 后步骤 无（循环只能由 return 离开，全部经 finish_turn 收尾）
@@ -26,10 +26,10 @@
 //! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/wording`，把措辞写进转写
 //! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `compose`）
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
-//! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
+//! - [`turn`]     单轮收尾：推理并入 → 落库 → 流向判定
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
 //!
-//! 压缩流水线（自动语义压缩与主动 `context_compact` 共用内核）归
+//! 压缩流水线（自动语义压缩与用户重试共用内核）归
 //! `super::context::pipeline`——上下文治理属**领域**，本文件只保留编排。
 //!
 //! 设计说明：
@@ -63,7 +63,7 @@ pub(crate) use self::io::{
 pub(crate) use self::progress::report_if_due;
 pub(crate) use self::state::{
     request_actor_spec, request_principal, request_scope, request_source_principal, Gate,
-    SessionContext, TurnExit, TurnRequest, TurnResult, TurnState,
+    SessionContext, TurnExit, TurnRequest, TurnState,
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
@@ -210,19 +210,17 @@ fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     Some(parts.join("\n\n"))
 }
 
-pub(crate) use super::context::{auto_compress_process, run_context_compact};
+pub(crate) use super::context::auto_compress_process;
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
 use crate::plugin_debug;
-use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
     clock_now_ms, llm_emit_message, llm_short_id, HookEvent, RunSnapshot, TurnOutput,
-    TurnToolCallInfo,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginError,
@@ -234,8 +232,8 @@ use std::sync::Arc;
 
 use super::config::SessionConfig;
 use super::context;
-use super::message_build::{detach_if_flat, llm_build_tool_message};
-use super::tools::{fire_hook, process_tool_calls_async};
+use super::message_build::detach_if_flat;
+use super::tools::fire_hook;
 use super::transcript::llm_emit_state;
 
 pub async fn run_chat_loop(
@@ -715,7 +713,7 @@ pub async fn run_chat_loop(
 
         // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
         // 系统提示词与工具在同一函数内、同一时刻收集（同一个 Registry），
-        // 并由此派生请求级开销与请求视图；自动压缩、水位提醒一并收口在该函数内。
+        // 并由此派生请求级开销与请求视图；压缩的水位响应（`apply_compaction`）也收口在该函数内。
         let inputs = match prepare_turn_inputs(
             orchestrator,
             &ctx,
@@ -871,20 +869,11 @@ pub async fn run_chat_loop(
         }
 
         // ── 步骤 5：推理收尾（定稿内容子节点 → 校准估算 → 并入上下文）────────
-        let result =
+        let finish =
             settle_reasoning(orchestrator, &mut context, &sink, &inputs.root_id, out).await;
 
         // ── 步骤 6：本轮结算 + 下一步判定（子树在此收敛）────────────────────
-        let flow = close_turn(
-            orchestrator,
-            ctx.clone(),
-            &sink,
-            &mut context,
-            &mut turn,
-            result,
-            &turn_req,
-        )
-        .await;
+        let flow = close_turn(&sink, &mut context, &mut turn, finish).await;
 
         // ── 步骤 7：封根 Turn（子树收敛之后，全流程唯一一处）──────────────────
         // Turn 是组合节点，终态必须跟随子树；`close_turn` 归来即子树收敛

@@ -32,7 +32,7 @@ flowchart TD
         BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_VISITOR 注册表]
         AggTools --> Resolve[6. 获取生效 ModelProvider<br>capability_model_active 单次解析]
         Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
-        Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>内容淡化/工具淡化/骨架化/水位提醒]
+        Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>内容淡化/工具淡化/骨架化/请求级注入段]
         BuildView --> LLMCall[9. ModelProvider 推理调用<br>execute_turn 直连无状态 LLM 网关]
         LLMCall --> ToolAction[10. 执行工具链]
         ToolAction --> LoopCheck{11. 迭代完成?}
@@ -91,10 +91,7 @@ session:
   fade_keep_recent_turns: 12     # 工具淡化时保留完整结果最近轮数（窗口外的更旧结果做头尾摘要）
   prune_tool_history: true       # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档；内存临时会话自动跳过）
   
-  # 6. 水位提醒与主动压缩
-  enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
-  
-  # 7. 会话记忆（<会话目录>/MEMORY.md，可编辑地址 <根>/session/<id>/MEMORY.md）
+  # 6. 会话记忆（<会话目录>/MEMORY.md，可编辑地址 <根>/session/<id>/MEMORY.md）
   memory_max_bytes: 16384        # 单次**写入**的字节上限，超出直接拒绝（不截断、不部分写入）
   memory_inject_max_bytes: 4096  # 每轮**注入**系统提示词的字节上限，超出部分截断并指路 vdfs_read 取全文
 ```
@@ -173,7 +170,7 @@ session:
 > |---|---|---|---|---|
 > | L0 工具结果守卫 | 机械截断 | **写入时** | ✅ 预算内文本 + 全文存档 + 取回协议 | 入口守卫：防超大文本进入存储与请求包 |
 > | 内容节点淡化（本节） | 机械截断 | 请求视图每轮 | ❌ | 参数/位置的纯函数，重算毫秒级；**落库零 token 收益**，却需存档/取回/配对清理整套机制 |
-> | 工具淡化 / 骨架化 / 水位提醒 | 机械变换 | 请求视图每轮 | ❌ | 依赖轮次位置，需随配置即时生效 |
+> | 工具淡化 / 骨架化 / 请求级注入段 | 机械变换 + 请求级注入 | 请求视图每轮 | ❌ | 依赖轮次位置，需随配置即时生效 |
 > | L2 语义快照 | LLM 摘要 | 水位触发 | ✅ | 不可逆、需智能、重放昂贵（需再调一次 LLM） |
 > | prune / FIFO 裁剪 | 物理删除 | 保存时 | ✅ | 生命周期管理，控制存储体积 |
 >
@@ -264,7 +261,7 @@ session:
 
 ---
 
-### 6. 请求视图层动态剪裁策略 (`build_request_view`：内容淡化 / 工具淡化 / 骨架化 / 水位提醒 / 长期记忆 / 任务调度)
+### 6. 请求视图层动态剪裁策略 (`build_request_view`：内容淡化 / 工具淡化 / 骨架化 / 长期记忆 / 任务调度 / 委派段)
 
 > **目标**：在不改动物理存储的前提下，为每一次大模型 API 请求动态组装"最利于推理"的消息视图。视图**每轮请求都从存储态历史重新重建**，六项剪裁全部**不落库、天然幂等**——存储保持完整历史，`last_saved` 持久化锚点与切片不会错位。
 
@@ -272,9 +269,10 @@ session:
   * **第一步：超大内容节点淡化 (Content Fade)**。B1 保护窗口（最后一条消息 + 最近 `compress_keep_recent` 个内容节点）之外的超大正文/思考节点，按行数阈值 `compress_line_threshold` 或 2048 Token 预算做头尾摘要淡化（详见第 3 节）；每轮无条件执行，视图级不落库。
   * **第二步：老旧工具结果淡化 (Tool Fade)**。单轮请求的工具迭代轮数超过 `fade_activate_rounds`（默认 **40** 轮，会话配置项）后激活；最近 `fade_keep_recent_turns`（默认 **12** 轮，会话配置项）之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。两个阈值经 `ChatSession` trait 由会话实现提供（持久会话读配置，临时会话读默认），`chat_loop` 不再持有硬编码常量。
   * **第三步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留语义摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：JSON 列表给规模 + 前若干条目名、文本给首个有内容行，单条摘要上限 64 Token，且摘要收尾不受预算截断；无法提取摘要时退回纯占位文案），占位符另附**取回指引**（`Re-run <tool> to get the full output.`——核对成本由此变成一次可预期的工具调用），**骨架化的 ToolCall 参数保留定位锚点回声**（`path`/`command`/`url`/`pattern` 等关键参数截断回显于占位符，约 10 Token/条——否则"读过某文件第 N 行"这类摘要因缺失文件路径而无法回溯），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
-  * **第四步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
-  * **第五步：长期记忆召回段 (Recall Context)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次跨会话召回视图（`v2_memory::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`v2_memory::prompt_section`，抬头 `【长期记忆】`）作为第 9 个形参传入；非空时向视图**开头**插一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。同为请求级注入：不落库、每请求一次，e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
-  * **第六步：任务调度段 (Ready Set)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次本会话事实源的就绪任务集（`v2_tasks::prompt_section`，`off` 档与无目录的临时会话不读），把排版好的段落（抬头 `【任务调度】`，只列**依赖已全部完成**的候选）作为第 10 个形参传入；非空时向视图**开头**插一条 `meta.kind = "readyset"` 的 User 消息。**不与记忆段争 index 0**：本段先插、第五步的记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）——批⑦ 定下的「记忆置顶」不被本段改掉。它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事：选哪一个是执行者的策略（`projection::readyset` 模块头的边界）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。同为请求级注入：不落库、每请求一次，e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+  * **第四步：长期记忆召回段 (Recall Context)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次跨会话召回视图（`v2_memory::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`v2_memory::prompt_section`，抬头 `【长期记忆】`）作为第 8 个形参传入；非空时向视图**开头**插一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。同为请求级注入：不落库、每请求一次，e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+  * **第五步：任务调度段 (Ready Set)**。调用方（`chat_loop/inputs.rs`）在**本轮第一个工具轮**读一次本会话事实源的就绪任务集（`v2_tasks::prompt_section`，`off` 档与无目录的临时会话不读），把排版好的段落（抬头 `【任务调度】`，只列**依赖已全部完成**的候选）作为第 9 个形参传入；非空时向视图**开头**插一条 `meta.kind = "readyset"` 的 User 消息。**不与记忆段争 index 0**：本段先插、第四步的记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）——批⑦ 定下的「记忆置顶」不被本段改掉。它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事：选哪一个是执行者的策略（`projection::readyset` 模块头的边界）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。同为请求级注入：不落库、每请求一次，e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+  * **第六步：委派者真源段 (Delegate Context)**。调用方（`chat_loop/delegate.rs`）把本轮的**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落，作为第 10 个形参传入；非空时插一条 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：本段在调度段**之前**插，后两段依次把 0 号位让出来——顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [ADR-047](../../../../docs/010-adr/047.md)）。同为请求级注入：不落库、每请求一次。
+  * **水位治理不在本视图层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文而不是请求视图。视图里**没有**「提醒模型自己去压缩」这一段——模型不持有压缩工具（裁决见 [ADR-072](../../../../docs/010-adr/072.md)）。
 * **Rust 实现策略**：
   * 唯一入口为 `plugins/session/context/view.rs` 的 `build_request_view`，由 `plugins/session/chat_loop/inputs.rs::prepare_turn_inputs`（主循环每轮请求构建前）调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context/window.rs`；归属：`context/window.rs` 与 `chat_session.rs` 均为 session 插件私有，core 不依赖它们）：
 
@@ -287,9 +285,9 @@ session:
         fade_keep_turns: usize,
         content_keep_recent: usize,
         line_threshold: usize,
-        inject_nudge: bool,
         recall_section: Option<&str>,
         ready_section: Option<&str>,
+        delegate_section: Option<&str>,
         viewer: Option<&str>,
     ) -> Vec<ChatNode> {
         // ⓪ 可见域（`viewer`）：先筛消息再裁剪——`None` = 不过滤
@@ -301,58 +299,45 @@ session:
         // ① 内容节点淡化：每轮无条件执行（B1 保护窗口之外的超大正文/思考）
         fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
         if fade_active {
-            // ② 老旧工具结果淡化：FADE_ACTIVATE_ROUNDS 门控
+            // ② 老旧工具结果淡化：fade_activate_rounds 门控
             fade_aged_tool_results(&mut view, fade_keep_turns);
         }
-        if window > 0 && !retention.is_empty() {
+        if window > 0 {
             // ③ 工具明细骨架化
-            view = super::window::apply_layered_sliding_window(
-                &view,
-                window,
-                retention,
-            );
+            view = super::window::apply_layered_sliding_window(&view, window, retention);
         }
-        if inject_nudge {
-            view.push(ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
-                content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "context_nudge" })),
-                ..Default::default()
-            });
+        // ⑥ 委派段：**先插本段**（随后 ⑤ 与 ④ 各插一次 0，本段最终落在 index 2）
+        if let Some(section) = delegate_section {
+            view.insert(0, request_injection("delegate_context", section));
         }
-        // ⑥ 任务调度段：**先插本段**（随后 ⑤ 再插一次 0，本段最终落在 index 1
-        //    ——两段并存时记忆 0 / 调度 1；位置与理由见第六步）
+        // ⑤ 任务调度段：**再插本段**（随后 ④ 的记忆段把本段挤到 index 1）
         if let Some(section) = ready_section {
-            view.insert(0, ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
-                content: Some(MessageContent::Text(section.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "readyset" })),
-                ..Default::default()
-            });
+            view.insert(0, request_injection("readyset", section));
         }
-        // ⑤ 长期记忆：**置顶**（位置与理由见上面第五步；与 nudge 同一形状）
+        // ④ 长期记忆：**最后插 0**，故它恒在 index 0（位置与理由见上面第四步；
+        //     三段共用同一套形状——请求级、`meta.kind` 可观测、不落库）
         if let Some(section) = recall_section {
-            view.insert(0, ChatNode {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
-                content: Some(MessageContent::Text(section.to_string())),
-                status: Some(NodeStatus::Completed),
-                meta: Some(serde_json::json!({ "kind": "recall_context" })),
-                ..Default::default()
-            });
+            view.insert(0, request_injection("recall_context", section));
         }
         view
     }
+
+    /// 注入段的形状（真实代码里三处是同一份 `ChatNode` 字面量，只差 `kind`；
+    /// 这里收成一个小函数只为了把六步的**次序**读清楚）。
+    fn request_injection(kind: &str, section: &str) -> ChatNode {
+        ChatNode {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Body),
+            content: Some(MessageContent::Text(section.to_string())),
+            status: Some(NodeStatus::Completed),
+            meta: Some(serde_json::json!({ "kind": kind })),
+            ..Default::default()
+        }
+    }
     ```
 
-  * 调用点参数（`chat_loop/inputs.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window)`（`window == 0` = 关闭工具明细骨架化，与配置文档一致）；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = tool_rounds > fade_activate_rounds`、`fade_keep_recent_turns` 均取自会话配置（经 `ChatSession` trait，`chat_loop` 不再持有硬编码常量）；`inject_nudge` 由 55% 水位检测（`should_emit_context_nudge`）与请求级门控共同决定；`recall_section` 由 `TurnState::recall_view`（只在 `tool_rounds == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同样只在 `tool_rounds == 0` 取一次）调 `v2_tasks::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`viewer` 取本会话主体（`context.principal`）。
+  * 调用点参数（`chat_loop/inputs.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window)`（`window == 0` = 关闭工具明细骨架化，与配置文档一致）；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = tool_rounds > fade_activate_rounds`、`fade_keep_recent_turns` 均取自会话配置（经 `ChatSession` trait，`chat_loop` 不再持有硬编码常量）；`recall_section` 由 `TurnState::recall_view`（只在 `tool_rounds == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同样只在 `tool_rounds == 0` 取一次）调 `v2_tasks::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定；`viewer` 取本会话主体（`context.principal`）。
 
 ---
 
@@ -430,9 +415,9 @@ S5 的**事件记忆**是另一层：`v2_memory.rs` 把每轮用户发言编码�
 | **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/context/view.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |
-| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge/recall | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒 → ⑤ 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ ⑥ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）；全部不落库幂等 | `plugins/session/context/view.rs`<br>`plugins/session/context/window.rs` |
+| **请求视图层动态剪裁** | `tool_context_window` + fade/recall/readyset/delegate | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ ⑤ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ ⑥ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；全部不落库幂等 | `plugins/session/context/view.rs`<br>`plugins/session/context/window.rs` |
 
-通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/水位提醒/记忆召回/任务调度，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。
+通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/记忆召回/任务调度/委派段，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。
 
 ---
 

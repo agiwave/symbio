@@ -2,7 +2,7 @@
 //!
 //! - [`resolve_system_prompt`]：系统提示词唯一真源
 //! - [`prepare_turn_inputs`]：提示词 + 工具 + 压缩 + 请求视图的唯一收集点
-//! - [`apply_compaction`]：上下文水位的唯一响应点（自动语义压缩 → 水位提醒）
+//! - [`apply_compaction`]：上下文水位的唯一响应点（自动语义压缩）
 
 use crate::symbio_core::CapabilityMeta;
 
@@ -96,7 +96,7 @@ pub(crate) struct TurnInputs {
     pub(crate) root_id: String,
     /// 系统提示词（`resolve_system_prompt` 为唯一真源）
     pub(crate) system_prompt: String,
-    /// 本轮到模型的完整工具清单（v2 路径下**不含** `context_compact`——见本步 ③ 前的说明）
+    /// 本轮到模型的完整工具清单
     pub(crate) tools: Vec<CapabilityMeta>,
     /// 请求视图（`build_request_view` 唯一入口的产物，**不落库**）
     pub(crate) request_view: Vec<ChatNode>,
@@ -122,9 +122,8 @@ pub(crate) struct TurnInputs {
 /// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 ADR-047 新增）
 ///
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
-/// 2. 派生请求级开销 `overhead_tokens`（口径：**不含**任何压缩工具——v2 路径不注入
-///    它，见步骤 ③ 前的说明；与历史口径一致 → 压缩阈值 / 水位提醒的判定行为不变）
-/// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩 + 水位提醒的唯一响应点）
+/// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，见 [`apply_compaction`]）
+/// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩的唯一响应点）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
@@ -144,18 +143,12 @@ pub(crate) async fn prepare_turn_inputs(
 
     let tools = super::super::capabilities::tool_metas(ctx).await;
 
-    // ── ② 请求级固定开销：一轮只算一次，供下方压缩（阈值与提醒）共用
+    // ── ② 请求级固定开销：一轮只算一次，供下方压缩共用
     //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
     let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
 
-    // 主动压缩工具**不注入**：轮次由 v2 运行器执行、工具经 `DispatchPort` 分发，
-    // 那条路没有压缩链路，模型真调了只会得到一个「未知工具」——与其把一个必然失败
-    // 的工具摆给模型，不如不摆。接上 v2 的压缩链路之后此处才恢复注入（连同工具
-    // 定义 `context_compact_tool_meta` 一起从 `git log` 取回）。
-
-    // ── ③ 压缩（收口 ③：自动语义压缩 + 水位提醒，唯一响应点）───────────────
-    let inject_nudge =
-        apply_compaction(orchestrator, ctx, context, turn, req, overhead_tokens).await?;
+    // ── ③ 压缩（收口 ③：自动语义压缩，唯一响应点）───────────────────────────
+    apply_compaction(orchestrator, ctx, context, turn, req, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
     let root_id: String = llm_short_id();
@@ -231,10 +224,9 @@ pub(crate) async fn prepare_turn_inputs(
     // 3) 工具级骨架化：从 Registry 的能力声明（context_retention）动态解析
     //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
     //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
-    // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）；
-    // 5) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 5 条）；
-    // 6) 任务调度段：就绪任务集置顶注入（不落库；见 build_request_view 文档第 6 条）。
-    // 7) 委派者真源段：Q1 判定 + Q2 能力目录（不落库；见 build_request_view 文档第 7 条）。
+    // 4) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 4 条）；
+    // 5) 任务调度段：就绪任务集置顶注入（不落库；见 build_request_view 文档第 5 条）。
+    // 6) 委派者真源段：Q1 判定 + Q2 能力目录（不落库；见 build_request_view 文档第 6 条）。
 
     // ── ⑥′ 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录 ─────────────────────
     //
@@ -278,7 +270,6 @@ pub(crate) async fn prepare_turn_inputs(
         context.session.fade_keep_recent_turns(),
         context.session.compress_keep_recent(),
         context.session.line_threshold(),
-        inject_nudge,
         recall_section.as_deref(),
         // 调度段（S7 步 16–17，批⑨）：就绪任务集，非空时置顶一条 `meta.kind = readyset`。
         turn.ready_section.as_deref(),
@@ -296,24 +287,17 @@ pub(crate) async fn prepare_turn_inputs(
     })
 }
 
-/// 收口 ③：上下文水位的**唯一响应点**——自动语义压缩与水位提醒只在这里判定与执行。
+/// 收口 ③：上下文水位的**唯一响应点**——自动语义压缩只在这里判定与执行。
 ///
 /// ## 顺序不可交换（收口前由主循环体的行序隐含保证，现在由本函数内部保证）
 ///
-/// 先按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），再按**压缩
-/// 之后**的真实水位判 55% 水位提醒。反过来会让"刚压完就提醒"自相矛盾；两个阈值
-/// 分处两地时，一次行序调整就能无声破坏该语义，故必须收在同一个函数内、顺序写死。
+/// 按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），压缩结果直接
+/// 决定后续请求视图的水位。55% 水位提醒（nudge）已随 `context_compact` 一并退役
+/// （[ADR-072](../../../../../docs/010-adr/072.md)）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
+/// 一条指向空处的指令。
 ///
-/// ## 与 `context_compact`（模型主动调用）的分工
-///
-/// 那条路径的**判定点**在 `close_turn` 的工具拦截处（`run_context_compact`），
-/// **不走本函数**；两条路径共用同一执行内核 `compress_with_snapshot_core`——
-/// "何时压"有两个入口，"怎么压"只有一个实现。
-///
-/// ⚠️ 当前 v2 路径**不把该工具注入工具清单**（见步骤 ③ 前的说明），因此那条拦截
-/// 只在模型自行说出这个工具名时才会命中；不要据本节认为模型看得到它。
-///
-/// 返回：是否需要在请求视图末尾注入一次性水位提醒。
+/// 将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估是否恢复提醒——
+/// 不再回 v1 的 `close_turn` 拦截形态。
 pub(crate) async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -321,8 +305,7 @@ pub(crate) async fn apply_compaction(
     turn: &mut TurnState,
     req: &TurnRequest,
     overhead_tokens: usize,
-) -> Result<bool, TurnExit> {
-    // ── ① 自动语义压缩（L1：70% 触发）────────────────────────────────────
+) -> Result<(), TurnExit> {
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     if builtin()
@@ -357,39 +340,7 @@ pub(crate) async fn apply_compaction(
             }
         }
     }
-
-    // ── ② 水位提醒（nudge：55% 触发）─────────────────────────────────────
-    // 估算用量 ≥ 55% 有效上限时，在请求视图末尾注入一条一次性系统提示
-    // （请求级、不落库，由 build_request_view 统一追加），引导模型在
-    // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
-    // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
-    // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
-    //
-    // ⚠️ 当前 v2 路径**不注入** `context_compact`（见步骤 ③ 前），所以本提醒所引导的
-    // 那个工具在模型眼里并不存在。出厂默认 `enable_compact_tool = false`，本段因此
-    // 不产出；把它打开之前必须先恢复注入，否则提醒是一条指向空处的指令。
-    // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
-    // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
-    // 判据在表里（`policy.nudge`）：「工具开着 ∧ 本轮没提醒过 ∧ 过了水位」三条
-    // 写在一个纯函数里。`over_watermark` 先算——它是纯函数，无副作用，算早了
-    // 只是多一次内存扫描（相对一次 LLM 请求可忽略）。
-    let effective_limit = orchestrator.context_limit as usize;
-    let over_watermark =
-        context::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens);
-    let nudge_state = LoopState::nudge(
-        req.enable_compact_tool,
-        turn.nudged_this_request,
-        over_watermark,
-    );
-    if builtin().decide(&nudge_state).map(|h| h.capsule) != Some(Capsule::NUDGE) {
-        return Ok(false);
-    }
-    turn.nudged_this_request = true;
-    plugin_info!(
-        "session",
-        "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
-    );
-    Ok(true)
+    Ok(())
 }
 
 #[cfg(test)]

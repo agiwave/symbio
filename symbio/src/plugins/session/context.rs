@@ -7,11 +7,11 @@
 //! | 文件 | 职责 |
 //! |---|---|
 //! | 本文件 | 触发与度量：阈值 / 切分点 / token 估算 / 收益护栏（「何时压、从哪切」） |
-//! | [`view`]     | 请求视图层：淡化 / 骨架化 / 水位提醒（`build_request_view` 唯一入口） |
+//! | [`view`]     | 请求视图层：淡化 / 骨架化 / 请求级注入段（`build_request_view` 唯一入口） |
 //! | [`conversation_view`] | 对话线投影：user 消息 + assistant 文本节点（对话面唯一分界） |
-//! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议、`context_compact` 工具元 |
+//! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议 |
 //! | [`window`]   | 分层滑窗骨架化（纯函数，无副作用） |
-//! | [`pipeline`] | 压缩执行流水线：被动 L2 与主动 `context_compact` 共用的唯一内核 |
+//! | [`pipeline`] | 压缩执行流水线：阈值触发的自动压缩与用户重试共用的唯一内核 |
 //!
 //! 分层：门面与 `view` / `conversation_view` / `prompt` 是**纯策略**（无 I/O），
 //! `pipeline` 是**执行**（LLM 请求 / 落库 / 广播），是本域唯一的副作用出口。
@@ -30,11 +30,10 @@ mod window;
 // 门面 = 域内唯一对外出口：调用方（`chat_loop` / `resume`）只经 `context::X` 取用，
 // 不感知域内文件划分；域内子模块则经 `use super::*` 取用门面（含下面的 re-export）。
 pub use self::conversation_view::{conversation_view, CONVERSATION_VIEW_LIMIT};
-pub(crate) use self::pipeline::{auto_compress_process, retry_compaction, run_context_compact};
+pub(crate) use self::pipeline::{auto_compress_process, retry_compaction};
 pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, extract_snapshot,
     get_compression_prompt, render_snapshot_for_history, COMPRESSION_PROTOCOL_VERSION,
-    CONTEXT_COMPACT_TOOL_NAME,
 };
 pub use self::view::build_request_view;
 
@@ -46,19 +45,15 @@ const MIN_COMPRESSION_FRACTION: f64 = 0.05;
 /// 淡化预算。单行长 JSON/URL/base64（1 行但数万 token）必须触发，否则绕过防线。
 pub const MESSAGE_TOKEN_CAP: usize = 2048;
 
-/// 主动压缩工具：水位提醒阈值（相对有效上限）。
-pub const CONTEXT_NUDGE_THRESHOLD: f64 = 0.55;
 /// 迟滞系数：快照后估算再增长不足 (post_tokens × 1.15) 时跳过被动压缩。
 pub const COMPACT_HYSTERESIS_FACTOR: f64 = 1.15;
-/// 主动压缩最小收益：待压缩历史低于该 token 数时不值得一次 LLM 调用。
+/// 自动压缩最小收益：待压缩历史低于该 token 数时不值得一次 LLM 调用。
 pub const MIN_COMPACT_TOKENS: usize = 4000;
 
 /// 压缩收益护栏：待压缩历史是否够大，值得花一次 LLM 摘要调用。
 ///
-/// **被动（L1 自动，70% 触发）与主动（`context_compact` 工具）两条路径共用同一门槛**
-/// ——原先两处各写一遍 `tokens < MIN_COMPACT_TOKENS`，门槛语义（含"为什么是 4000"）
-/// 因此有两个出处。被动路径天然满足该条件（能到 70% 的历史必然很大），真正的用途
-/// 是拦掉主动路径的无效触发。
+/// 门槛语义只有这一个出处（自动与用户重试共用——重试走
+/// `auto_compress_process(force)`，判定链同一条）。
 pub fn has_compaction_payoff(history_tokens: usize) -> bool {
     history_tokens >= MIN_COMPACT_TOKENS
 }
@@ -150,30 +145,6 @@ fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
     }
 
     last_split_point
-}
-
-/// 找到当前 Turn（root_id）的切分下标：当前用户指令（Turn 根之前最近的根级 User）。
-///
-/// 供 run_chat_loop 计算 run_context_compact 的切分点。切分点必须覆盖完整
-/// Turn 子树的起点，保留区 = [用户指令, Turn, 子节点...]，parent 链不断裂。
-/// 历史缺陷对照：
-/// - 旧版切在本 Turn 首个 ToolCall：用户指令与 Turn 根被压进快照，保留区只剩
-///   parent 悬空的 ToolCall 子树 → 孤儿剔除 → provider 400；
-/// - 更早版本全历史正向扫描会命中会话最早的 ToolCall，切分点落在会话开头，
-///   旧内容几乎全部留在保留区，压缩后水位不降 → 高频反复触发。
-///
-/// 回退：Turn 之前无根级 User 时切在 Turn 根下标（子树仍完整）；Turn 不存在
-/// 返回 0（run_context_compact 以 split==0 视为中止）。水位提醒 nudge 为请求级
-/// 注入不落库，向前回扫不会误命中（见 chat_loop nudge 注释）。
-pub fn find_turn_user_split_idx(messages: &[ChatNode], root_id: &str) -> usize {
-    let turn_idx = match messages.iter().position(|m| m.id == root_id) {
-        Some(i) => i,
-        None => return 0,
-    };
-    messages[..turn_idx]
-        .iter()
-        .rposition(|m| m.node_role() == Some(NodeRole::User) && m.parent_id.is_none())
-        .unwrap_or(turn_idx)
 }
 
 /// 估算单条消息的 token 数。
@@ -279,7 +250,7 @@ pub fn should_start_compression(
 
     // 迟滞：若最近一次快照后已增长不足 15%，说明上一轮压缩收益被挥霍，
     // 再次压缩大概率是"快照过小"导致的循环调用，跳过并依赖确定性层消化。
-    // 例外：force（主动压缩 / 用户指令）不受此限制。
+    // 例外：force（用户主动重试）不受此限制。
     // 口径对齐：post_tokens 记录的是内容水位（不含请求级 overhead），
     // 这里同样用扣除 overhead 后的内容侧读数比较；若直接用含 overhead 的
     // current，overhead 越大越容易"虚高"越过地板，迟滞保护失效。
@@ -304,20 +275,6 @@ pub fn should_start_compression(
     }
 
     true
-}
-
-/// 水位提醒判断：估算用量是否达到提醒阈值（55%）。
-/// 主动压缩工具（context_compact）配合此机制，让模型在安全时机自行压缩。
-pub fn should_emit_context_nudge(
-    messages: &[ChatNode],
-    context_limit: usize,
-    overhead_tokens: usize,
-) -> bool {
-    if messages.is_empty() {
-        return false;
-    }
-    let current = estimate_context_tokens(messages, overhead_tokens);
-    current >= (context_limit as f64 * CONTEXT_NUDGE_THRESHOLD) as usize
 }
 
 /// 准备压缩：将要压缩的历史提取出来，生成压缩请求
@@ -349,10 +306,10 @@ pub fn prepare_compression(
         return None;
     }
 
-    // 生成压缩请求：历史对话原样 + 末尾指令（唯一构造点，主动路径亦复用）。
+    // 生成压缩请求：历史对话原样 + 末尾指令（唯一构造点）。
     // 压缩模板由调用方经 system role 注入，避免格式指令在对话中出现两次
     // （system 一次 + user 一次）诱导模型模仿输出。
-    let compression_request = build_compression_request(&history_to_compress, None);
+    let compression_request = build_compression_request(&history_to_compress);
 
     Some((compression_request, history_to_compress, history_to_keep))
 }

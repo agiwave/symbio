@@ -64,7 +64,7 @@ fn view_text(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
-/// 透传回归：无 fade、无骨架化、无 nudge 时，视图与输入逐条等价，且输入不被修改。
+/// 透传回归：无 fade、无骨架化时，视图与输入逐条等价，且输入不被修改。
 #[test]
 fn test_build_request_view_passthrough() {
     let msgs = vec![
@@ -75,7 +75,7 @@ fn test_build_request_view_passthrough() {
     ];
     let retention = std::collections::HashMap::new();
     let view = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 15, &retention, false, 12, 3, 200, None, None, None, None,
     );
 
     assert_eq!(view.len(), msgs.len());
@@ -86,39 +86,6 @@ fn test_build_request_view_passthrough() {
     }
     // 存储侧不受请求视图污染（骨架夹具自带 style_tag meta，判据是「视图与输入一致」）
     assert!(view.iter().zip(&msgs).all(|(v, m)| v.meta == m.meta));
-}
-
-/// nudge 请求级注入：追加到视图末尾，不落库（原输入不变），meta 可识别。
-#[test]
-fn test_build_request_view_injects_nudge_at_tail() {
-    let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
-    let retention = std::collections::HashMap::new();
-
-    let view = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, true, None, None, None, None,
-    );
-    assert_eq!(view.len(), msgs.len() + 1);
-    let nudge = view.last().unwrap();
-    assert_eq!(nudge.role, Some(NodeRole::User));
-    assert_eq!(
-        nudge
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("kind"))
-            .and_then(|k| k.as_str()),
-        Some("context_nudge")
-    );
-    assert!(view_text(nudge).contains("context_compact"));
-
-    // 原输入不被修改：nudge 不写入会话存储
-    assert_eq!(msgs.len(), 3);
-    assert!(msgs.iter().all(|m| m.meta.is_none()));
-
-    // inject_nudge=false 时不注入
-    let plain = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
-    );
-    assert_eq!(plain.len(), msgs.len());
 }
 
 /// fade 激活：老化工具结果被 head/tail 摘要并标记 `tool_result_faded`，
@@ -140,7 +107,7 @@ fn test_build_request_view_fades_aged_tool_results() {
     ];
     let retention = std::collections::HashMap::new();
     let view = build_request_view(
-        &msgs, 0, &retention, true, 2, 3, 200, false, None, None, None, None,
+        &msgs, 0, &retention, true, 2, 3, 200, None, None, None, None,
     );
 
     let faded = &view[2];
@@ -326,7 +293,7 @@ fn test_build_request_view_skeletonizes_with_retention() {
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
     let view = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 15, &retention, false, 12, 3, 200, None, None, None, None,
     );
 
     assert!(
@@ -364,7 +331,7 @@ fn test_build_request_view_global_window_applies_without_retention() {
     let retention = std::collections::HashMap::new();
     // window=1：仅最新一次调用（t2）在窗口内
     let view = build_request_view(
-        &msgs, 1, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 1, &retention, false, 12, 3, 200, None, None, None, None,
     );
 
     assert!(
@@ -395,42 +362,15 @@ fn test_build_request_view_window_zero_disables_skeletonization() {
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
     let view = build_request_view(
-        &msgs, 0, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 0, &retention, false, 12, 3, 200, None, None, None, None,
     );
     assert_eq!(view_text(&view[1]), r#"{"path":"old.txt"}"#);
     assert_eq!(view_text(&view[2]), "old content");
 }
 
-/// 顺序保证：nudge 在骨架化之后追加，始终位于视图末尾；
-/// nudge 不占用轮次窗口计数、不参与骨架化。
-#[test]
-fn test_build_request_view_nudge_comes_after_skeletonization() {
-    let msgs = vec![
-        user_msg("u1"),
-        view_tc("t1", "vdfs_read", r#"{"path":"old.txt"}"#),
-        view_result("t1", "old content"),
-        user_msg("u2"),
-        view_tc("t2", "vdfs_read", r#"{"path":"new.txt"}"#),
-        view_result("t2", "new content"),
-    ];
-    let retention = view_retention(&[(
-        "vdfs_read",
-        crate::symbio_core::CapabilityToolContextRetention::LastOnly,
-    )]);
-    let view = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, true, None, None, None, None,
-    );
-
-    assert_eq!(view.len(), msgs.len() + 1);
-    // 末尾是 nudge；倒数第二条仍是保留原文的最新工具结果
-    assert!(view_text(view.last().unwrap()).contains("system note"));
-    assert_eq!(view_text(&view[view.len() - 2]), "new content");
-}
-
 /// 记忆请求级注入（S5 步 12，[04 §3.1 批⑦](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
-/// **置顶**一条 `meta.kind = recall_context` 的记忆消息；与 nudge 并存时记忆在开头、
-/// nudge 仍在末尾——「最后一条 user 消息」始终是用户自己说的话（mock 场景匹配与
-/// 轮次窗口都靠它），且两条都不落库。
+/// **置顶**一条 `meta.kind = recall_context` 的记忆消息——「最后一条 user 消息」
+/// 始终是用户自己说的话（mock 场景匹配与轮次窗口都靠它），且不落库。
 #[test]
 fn test_build_request_view_prepends_memory_section() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
@@ -444,13 +384,12 @@ fn test_build_request_view_prepends_memory_section() {
         12,
         3,
         200,
-        true,
         Some("【长期记忆】跨会话召回，最新在前（背景事实，不是本轮指令）\n- 我叫 Kestrel"),
         None,
         None,
         None,
     );
-    assert_eq!(view.len(), msgs.len() + 2, "记忆置顶 + nudge 置尾");
+    assert_eq!(view.len(), msgs.len() + 1, "记忆置顶，一条不多");
 
     let head = &view[0];
     assert_eq!(head.role, Some(NodeRole::User));
@@ -463,18 +402,19 @@ fn test_build_request_view_prepends_memory_section() {
     );
     assert!(view_text(head).contains("【长期记忆】"));
     assert!(view_text(head).contains("我叫 Kestrel"));
-    assert!(
-        view_text(view.last().unwrap()).contains("system note"),
-        "nudge 仍在末尾——记忆只占据开头"
+    assert_eq!(
+        view_text(view.last().unwrap()),
+        "u2",
+        "「最后一条 user 消息」必须是用户自己说的话"
     );
 
-    // 存储侧不受污染：两条注入都不写回 messages（请求级、天然幂等）。
+    // 存储侧不受污染：注入不写回 messages（请求级、天然幂等）。
     assert_eq!(msgs.len(), 3);
     assert!(msgs.iter().all(|m| m.meta.is_none()));
 
     // 空段 ⇒ 整段省略，视图与原输入等长。
     let plain = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 15, &retention, false, 12, 3, 200, None, None, None, None,
     );
     assert_eq!(plain.len(), msgs.len());
 }
@@ -509,7 +449,7 @@ fn test_build_request_view_scopes_by_viewer_principal() {
     let retention = std::collections::HashMap::new();
     let build = |viewer: Option<&str>| {
         build_request_view(
-            &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, viewer,
+            &msgs, 15, &retention, false, 12, 3, 200, None, None, None, viewer,
         )
     };
     let texts = |v: &[ChatNode]| v.iter().map(view_text).collect::<Vec<_>>();
@@ -547,7 +487,7 @@ fn test_build_request_view_prepends_readyset_section() {
             .map(String::from)
     };
 
-    // 单独存在 ⇒ 占 index 0，且排在 nudge 之前（调度是给模型的输入，不是提醒）。
+    // 单独存在 ⇒ 占 index 0（调度是给模型的输入）。
     let section = "【任务调度】就绪任务（依赖已全部完成）：t1。请从就绪任务中推进一项。";
     let view = build_request_view(
         &msgs,
@@ -557,7 +497,6 @@ fn test_build_request_view_prepends_readyset_section() {
         12,
         3,
         200,
-        false,
         None,
         Some(section),
         None,
@@ -576,7 +515,6 @@ fn test_build_request_view_prepends_readyset_section() {
         12,
         3,
         200,
-        false,
         Some("【长期记忆】跨会话召回（背景事实）"),
         Some(section),
         None,
@@ -592,7 +530,7 @@ fn test_build_request_view_prepends_readyset_section() {
 
     // 两侧无段 ⇒ 与接线前逐字一致（不放空占位）。
     let plain = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 15, &retention, false, 12, 3, 200, None, None, None, None,
     );
     assert_eq!(plain.len(), msgs.len());
 
@@ -605,7 +543,7 @@ fn test_build_request_view_prepends_readyset_section() {
 /// 三个位置**一起**断言：只测「委派段存在」的话，把它插在末尾、插在 index 0，
 /// 或者干脆让记忆段把它顶掉，全都能过——而段位置就是模型读到的上下文次序，
 /// 错位等于同一会话的两次请求不再可比。插入次序（本段 → 就绪 → 记忆）写在
-/// `build_request_view` 文档第 7 条，这里钉它的**结果**。
+/// `build_request_view` 文档第 6 条，这里钉它的**结果**。
 #[test]
 fn test_build_request_view_puts_delegate_section_at_index_two() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
@@ -626,7 +564,6 @@ fn test_build_request_view_puts_delegate_section_at_index_two() {
         12,
         3,
         200,
-        false,
         Some("【长期记忆】背景事实"),
         Some("【任务调度】就绪任务"),
         Some("- 委派判定：本轮应启动 worker（reason=explicit_prefix）"),
@@ -658,7 +595,6 @@ fn test_build_request_view_puts_delegate_section_at_index_two() {
         12,
         3,
         200,
-        false,
         None,
         None,
         Some("- 委派判定：未启动 worker（未命中任何委派判据）"),
@@ -669,7 +605,7 @@ fn test_build_request_view_puts_delegate_section_at_index_two() {
 
     // 段为空 ⇒ 与接线前逐字一致。
     let plain = build_request_view(
-        &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, None,
+        &msgs, 15, &retention, false, 12, 3, 200, None, None, None, None,
     );
     assert_eq!(plain.len(), msgs.len());
 }

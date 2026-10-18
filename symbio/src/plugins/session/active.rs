@@ -111,7 +111,7 @@ pub struct ActiveSessionStateInner {
     /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。
     /// 与 `last_error`（失败终态）不同：告警不改变运行态，会话照常运行。
     pub last_warning: Option<String>,
-    /// 连续自动压缩失败次数（仅自动路径计数；主动 `context_compact` 不计）。
+    /// 连续压缩失败次数（自动路径与用户重试走同一条流水线，计数共用）。
     ///
     /// 熔断依据：LLM 压缩是**整段历史的完整请求**，失败一次就是数分钟的注定浪费。
     /// 连续失败达到阈值即"开闸"跳过自动压缩——历史已回滚、本轮仍能正常回复，

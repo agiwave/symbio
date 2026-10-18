@@ -45,7 +45,6 @@ fn builtin_rows_are_listed_in_prio_order() {
             "policy.classify",
             "policy.report",
             "policy.compress",
-            "policy.nudge",
             "policy.recall",
             "policy.reflex",
         ],
@@ -63,8 +62,8 @@ fn builtin_rows_are_conflict_free_and_ordered() {
     let reg = Registry::with_builtin_rows();
     assert_eq!(
         reg.list().len(),
-        6,
-        "六行都得注册成功（撞名 / 撞 prio 会少一行）"
+        5,
+        "五行都得注册成功（撞名 / 撞 prio 会少一行）"
     );
     let prios: Vec<u32> = reg.list().iter().map(|r| r.prio).collect();
     // 严格升序 = 已排序且无重复，一条断言盖住两件事。
@@ -280,7 +279,7 @@ fn report_interval_threshold_is_inclusive() {
     );
 }
 
-// ── policy.compress / policy.nudge / policy.recall：逐条件钉 ──────────────
+// ── policy.compress / policy.recall：逐条件钉 ──────────────
 
 #[test]
 fn compress_follows_the_request_switch_only() {
@@ -292,29 +291,6 @@ fn compress_follows_the_request_switch_only() {
     );
     // 关掉自动压缩 ⇒ 不进产线。压不压得动是内核的事，本行只管进不进。
     assert_eq!(builtin().decide(&LoopState::compress(false)), None);
-}
-
-#[test]
-fn nudge_requires_all_three_conditions() {
-    // 三条都成立
-    assert_eq!(
-        builtin()
-            .decide(&LoopState::nudge(true, false, true))
-            .map(|h| h.capsule),
-        Some(Capsule::NUDGE)
-    );
-    // 逐个只差一条：工具关着 / 已提醒过 / 没过水位
-    for (tool, nudged, over) in [
-        (false, false, true),
-        (true, true, true),
-        (true, false, false),
-    ] {
-        assert_eq!(
-            builtin().decide(&LoopState::nudge(tool, nudged, over)),
-            None,
-            "tool={tool} nudged={nudged} over_watermark={over} 应当不提醒"
-        );
-    }
 }
 
 #[test]
@@ -351,18 +327,13 @@ fn recall_requires_first_round_and_a_session_dir() {
 fn each_grid_point_hits_only_its_own_row() {
     // 每个构造器只填自己那几格，因此任何一格都不会命中别人的行。
     // 这条一旦破了，`decide` 的"先命中者胜"就会把另一格的动作顶掉。
-    let cases: [(&str, LoopState, Capsule); 6] = [
+    let cases: [(&str, LoopState, Capsule); 5] = [
         ("policy.classify", head(), Capsule::DECIDE),
         ("policy.report", boundary(), Capsule::REPORT),
         (
             "policy.compress",
             LoopState::compress(true),
             Capsule::COMPRESS,
-        ),
-        (
-            "policy.nudge",
-            LoopState::nudge(true, false, true),
-            Capsule::NUDGE,
         ),
         (
             "policy.recall",

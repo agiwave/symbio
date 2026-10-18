@@ -729,12 +729,6 @@ fn config_definition() -> DetailDefinition {
                         "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
                         d.auto_compress,
                     ),
-                    DetailField::toggle(
-                        "enable_compact_tool",
-                        "工具压缩",
-                        "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底",
-                        d.enable_compact_tool,
-                    ),
                     unbounded_number(
                         "compress_line_threshold",
                         "淡化行数阈值",

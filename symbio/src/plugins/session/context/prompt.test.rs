@@ -183,7 +183,7 @@ fn compression_request_carries_history_as_conversation_not_json() {
     m2.parent_id = Some(m1.id.clone());
     let msgs = vec![m1, m2];
 
-    let req = build_compression_request(&msgs, None);
+    let req = build_compression_request(&msgs);
 
     assert_eq!(
         req.len(),

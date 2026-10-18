@@ -72,10 +72,7 @@ fn many_are_joined_in_order_with_blank_line() {
     assert_eq!(merged.role, Some(cm::NodeRole::User));
     assert_eq!(merged.msg_type, Some(cm::NodeKind::Body));
     assert_eq!(merged.status, Some(cm::NodeStatus::Completed));
-    assert_eq!(
-        merged.parent_id, None,
-        "顶层：find_turn_user_split_idx 只认根级 User"
-    );
+    assert_eq!(merged.parent_id, None, "顶层：折进的补充与用户直接发言同形");
 }
 
 /// 标记必须**同时**给出可追溯性（全部原始 id）与条数。

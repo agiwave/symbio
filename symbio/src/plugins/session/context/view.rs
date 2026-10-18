@@ -1,7 +1,7 @@
 //! 请求视图层 —— 只影响**单次请求、不落库**的全部裁剪。
 //!
 //! 唯一入口 [`build_request_view`]：内容节点淡化 → 轮次淡化 → 分层滑窗骨架化 →
-//! 水位提醒，按固定顺序执行。视图每轮从存储重建，四步天然幂等。
+//! 三段请求级注入（记忆 / 调度 / 委派），按固定顺序执行。视图每轮从存储重建，各步天然幂等。
 
 use super::*;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
@@ -165,12 +165,8 @@ pub fn visible_for(m: &ChatNode, viewer: Option<&str>) -> bool {
     }
 }
 
-/// 水位提醒文案（请求级注入，不落库）。模型不应直接回应此提示。
-const CONTEXT_NUDGE_TEXT: &str =
-    "[system note] Context usage is approaching the limit. If you are \
-     at a natural stage boundary, call the context_compact tool now to distill older history and \
-     continue seamlessly; otherwise keep working and it will be compacted automatically. Do not \
-     respond to this note directly.";
+// 水位提醒（nudge）与 `context_compact` 工具已随 v1 外壳退役
+// （[ADR-072](../../../../../docs/010-adr/072.md)）：提醒的唯一理由是引导模型主动调用那个工具，工具不在 v2 清单里，提醒即指向空处。
 
 /// 构建本次 LLM 请求的视图（请求视图层唯一入口）。
 ///
@@ -184,15 +180,12 @@ const CONTEXT_NUDGE_TEXT: &str =
 /// 3. 工具级骨架化：`window > 0` 时按分层滑窗把过期调用的参数与结果替换为占位
 ///    文案（`retention` 为工具自声明的保留策略，可为空——为空时仍执行全局窗口，
 ///    ToolCall↔Tool 配对与 parent_id 传播完整保留，不会造成大模型逻辑断联）；
-/// 4. 水位提醒（nudge）：`inject_nudge` 时在视图末尾追加一条一次性系统提示——
-///    请求级注入、不写会话存储，因此不占用轮次窗口的 User 计数，也不会在前端
-///    以用户消息的形式出现；
-/// 5. 长期记忆（S5 步 12）：`recall_section` 非空时在视图**开头**插一条记忆消息
+/// 4. 长期记忆（S5 步 12）：`recall_section` 非空时在视图**开头**插一条记忆消息
 ///    （`meta.kind = recall_context`，同样不落库）。**置顶**而不是置尾：记忆是背景
 ///    事实，置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与
 ///    轮次窗口都会读错；也不进系统提示词——那里有「唯一真源 = 注册段」的纪律
 ///    （`plugins/session/README.md`）；
-/// 6. 任务调度段（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+/// 5. 任务调度段（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
 ///    `ready_section` 非空时在视图**开头**插一条就绪任务消息
 ///    （`meta.kind = readyset`，同样不落库）。同样不置尾、不进系统提示词，理由同上。
 ///    **不与记忆段争 index 0**：记忆段的「置顶」是批⑦ 已定的决定——本段先插，
@@ -200,7 +193,7 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    单独存在时各自在 0）。
 ///    它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事——选哪一个是
 ///    执行者的选择（`projection::readyset` 模块头的边界）。
-/// 7. 委派者真源段（ADR-047）：
+/// 6. 委派者真源段（ADR-047）：
 ///    `delegate_section` 非空时插一条 `meta.kind = delegate_context`，落 **index 2**。
 ///    插入次序是判据的一部分：本段在 `ready_section` **之前**插，于是记忆 0 /
 ///    就绪 1 / 委派 2（记忆段最后插的那个 0 会把两者依次下推）；顺序反了会把
@@ -213,9 +206,9 @@ const CONTEXT_NUDGE_TEXT: &str =
 /// 是「还没接线」，不是「不让人看」——见 [`ChatNode::principal`]）。两条链各滤一次：
 /// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
 ///
-/// 视图每轮从存储重建，八个步骤天然幂等，不存在重复存档 / 重复注入问题。
+/// 视图每轮从存储重建，七个步骤天然幂等，不存在重复存档 / 重复注入问题。
 /// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 12 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
+// 11 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
@@ -229,7 +222,6 @@ pub fn build_request_view(
     fade_keep_turns: usize,
     content_keep_recent: usize,
     line_threshold: usize,
-    inject_nudge: bool,
     recall_section: Option<&str>,
     ready_section: Option<&str>,
     delegate_section: Option<&str>,
@@ -247,18 +239,7 @@ pub fn build_request_view(
     if window > 0 {
         view = super::window::apply_layered_sliding_window(&view, window, retention);
     }
-    if inject_nudge {
-        view.push(ChatNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Body),
-            content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
-            status: Some(NodeStatus::Completed),
-            meta: Some(serde_json::json!({ "kind": "context_nudge" })),
-            ..Default::default()
-        });
-    }
-    // 7) 委派者真源段落 index 2（ADR-047）——**必须在第 6 条之前**插：本段先插 0，
+    // 6) 委派者真源段落 index 2（ADR-047）——**必须在第 5 条之前**插：本段先插 0，
     //    ready 段再插 0 把本段挤到 1，最后记忆段插 0 把两者依次推到 1 / 2。
     //    三段共用同一套形状（请求级、`meta.kind` 可观测、不落库），只差 kind 与位置。
     if let Some(section) = delegate_section {
@@ -275,9 +256,9 @@ pub fn build_request_view(
             },
         );
     }
-    // 6) 任务调度段置顶（S7 步 16–17，批⑨）——先插本段，第 5 条的记忆段随后再插
-    //    一次 0 把它挤到 index 1（见本函数文档第 6 条：记忆段的置顶不被本段改掉）。
-    //    与 nudge / recall 同一套形状：请求级、`meta.kind` 可观测、不落库。
+    // 5) 任务调度段置顶（S7 步 16–17，批⑨）——先插本段，第 4 条的记忆段随后再插
+    //    一次 0 把它挤到 index 1（见本函数文档第 5 条：记忆段的置顶不被本段改掉）。
+    //    与 recall 同一套形状：请求级、`meta.kind` 可观测、不落库。
     if let Some(section) = ready_section {
         view.insert(
             0,
@@ -292,8 +273,8 @@ pub fn build_request_view(
             },
         );
     }
-    // 5) 长期记忆置顶（S5 步 12）——见本函数文档的第 5 条：位置与理由都在那里，
-    //    这里只落机制（与 nudge 同一套形状：请求级、`meta.kind` 可观测、不落库）。
+    // 4) 长期记忆置顶（S5 步 12）——见本函数文档的第 4 条：位置与理由都在那里，
+    //    这里只落机制（请求级、`meta.kind` 可观测、不落库）。
     if let Some(section) = recall_section {
         view.insert(
             0,

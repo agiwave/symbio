@@ -44,7 +44,7 @@
 //!
 //! 因为每一行都要求自己那一格**特有的字段**为真，而构造器只填自己那几格：
 //! `policy.classify` 要 `tool_rounds == 0`，`policy.report` 要 `tool_rounds > 0`，
-//! `policy.compress` 要 `auto_compress`，`policy.nudge` 要 `enable_compact_tool`，
+//! `policy.compress` 要 `auto_compress`，
 //! `policy.recall` 要 `has_session_dir`。两个决策点的状态因此不会互相误命中。
 //!
 //! 也因此 **`prio` 目前仍不参与裁决**——没有两行会在同一格同时命中。它仍然必须
@@ -98,9 +98,6 @@ impl Capsule {
     /// 自动语义压缩（L1，70% 触发）：就地改写上下文。
     pub(crate) const COMPRESS: Self = Self("compress");
 
-    /// 水位提醒（nudge，55% 触发）：请求视图末尾追加一条一次性提示。
-    pub(crate) const NUDGE: Self = Self("nudge");
-
     /// 轮首准备：长期记忆召回 + 技能路由 + 就绪任务段。
     ///
     /// 三件事一个胶囊，因为它们共用**同一个前提**（有落盘目录）与**同一个时机**
@@ -126,9 +123,6 @@ impl Capsule {
 /// | `reports` | 本轮已汇报次数（配额） |
 /// | `progress` | 配置快照（`SessionConfig` 的四个旋钮） |
 /// | `auto_compress` | 请求快照（`TurnRequest::auto_compress`） |
-/// | `enable_compact_tool` | 请求快照（`TurnRequest::enable_compact_tool`） |
-/// | `nudged` | 本轮是否已提醒过（`TurnState::nudged_this_request`） |
-/// | `over_watermark` | `context::should_emit_context_nudge` 的结论 |
 /// | `has_session_dir` | `session.session_dir().is_some()` |
 /// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `v2_exec`） |
 /// | `has_match` | `v2_skills::take_match` 的结论（同一次查询，判它用的就是它） |
@@ -144,9 +138,6 @@ pub(crate) struct LoopState {
     pub(crate) reports: u32,
     pub(crate) progress: ProgressPolicy,
     pub(crate) auto_compress: bool,
-    pub(crate) enable_compact_tool: bool,
-    pub(crate) nudged: bool,
-    pub(crate) over_watermark: bool,
     pub(crate) has_session_dir: bool,
     pub(crate) resume_allowed: bool,
     pub(crate) has_match: bool,
@@ -199,21 +190,6 @@ impl LoopState {
         }
     }
 
-    /// 水位提醒格（步骤 3 ②）：三个条件各占一格。
-    ///
-    /// `over_watermark` 是 `should_emit_context_nudge` 的结论而不是原始 token 数：
-    /// 那个函数要 `&[ChatNode]`，而 `LoopState` 只装值（PL-014 §3 硬规则 a 的
-    /// 「只携带引用」在此体现为"不携带消息列表"）。阈值语义归 `context`，
-    /// 本行只负责把三个条件与起来。
-    pub(crate) fn nudge(enable_compact_tool: bool, nudged: bool, over_watermark: bool) -> Self {
-        Self {
-            enable_compact_tool,
-            nudged,
-            over_watermark,
-            ..Self::blank()
-        }
-    }
-
     /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
     pub(crate) fn turn_prepare(tool_rounds: usize, has_session_dir: bool) -> Self {
         Self {
@@ -245,9 +221,6 @@ impl LoopState {
             reports: 0,
             progress: ProgressPolicy::disabled(),
             auto_compress: false,
-            enable_compact_tool: false,
-            nudged: false,
-            over_watermark: false,
             has_session_dir: false,
             resume_allowed: false,
             has_match: false,
@@ -397,11 +370,6 @@ impl Registry {
                 decide: policy_compress,
             },
             Row {
-                name: "policy.nudge",
-                prio: 40,
-                decide: policy_nudge,
-            },
-            Row {
                 name: "policy.recall",
                 prio: 50,
                 decide: policy_recall,
@@ -475,18 +443,6 @@ fn policy_report(state: &LoopState) -> Option<Capsule> {
 /// 一份在 `auto_compress_process` 里真正生效，一份在这里只是重复判断。
 fn policy_compress(state: &LoopState) -> Option<Capsule> {
     state.auto_compress.then_some(Capsule::COMPRESS)
-}
-
-/// 水位提醒的判据（步骤 3 ②）。三个条件缺一不可：
-///
-/// - `enable_compact_tool`：提醒只为引导 `context_compact` 调用，工具关着时
-///   它就是一条指向空处的指令；
-/// - `!nudged`：每次请求生命周期最多一次（主动压缩成功后由别处重置）；
-/// - `over_watermark`：用量过了 55% 有效上限。
-///
-/// 与 `auto_compress` **解耦**：关掉自动压缩、开着工具压缩时仍需提醒。
-fn policy_nudge(state: &LoopState) -> Option<Capsule> {
-    (state.enable_compact_tool && !state.nudged && state.over_watermark).then_some(Capsule::NUDGE)
 }
 
 /// 轮首准备的判据（步骤 3 ③）。

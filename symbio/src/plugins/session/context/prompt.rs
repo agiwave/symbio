@@ -1,7 +1,6 @@
 //! 压缩提示词与 `<state_snapshot>` 快照协议。
 //!
-//! 提示词文本 → 指纹 → 快照 meta，构成「提示词变更可从产物侧观测」的溯源链；
-//! `context_compact` 工具元也在本模块——它只是给模型看的入口说明。
+//! 提示词文本 → 指纹 → 快照 meta，构成「提示词变更可从产物侧观测」的溯源链。
 
 use super::*;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
@@ -99,9 +98,6 @@ pub fn extract_snapshot(text: &str) -> Option<String> {
     Some(format!("{OPEN}\n{inner}\n{CLOSE}"))
 }
 
-/// `context_compact` 工具名（chat_loop 拦截分发用）。
-pub const CONTEXT_COMPACT_TOOL_NAME: &str = "context_compact";
-
 /// 把模型输出的 XML 快照渲染为纯文本分节（用于落库，诉求3）。
 ///
 /// 快照会以 assistant 消息长期驻留上下文——若原样保留 `<state_snapshot>`/
@@ -137,11 +133,6 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
     format!("[快照时点：{snapshot_at}，其后消息未纳入本快照，【进行中】/【待确认问题】以最新消息为准]\n{rendered}")
 }
 
-/// 构建主动压缩请求（`context_compact` 工具执行体）。
-///
-/// 与被动压缩（`prepare_compression`）的差异：显式指定待压缩历史，
-/// 并把模型的 `hints`（必须保留的关键信息）追加进提示词——
-/// 让模型"亲手"决定快照里必须留下什么。
 /// 构造压缩 LLM 请求的消息序列：**待压缩历史原样 + 末尾一条压缩指令**。
 ///
 /// # 为什么不再把历史序列化成 JSON
@@ -158,34 +149,27 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
 ///
 /// 附带好处：快照校验失败时的纠正重试（`context.messages.push(retry_msg)`）天然
 /// 变成一段正常的多轮对话（历史 → 指令 → 纠正），而不是「JSON 之后追加一句话」。
-pub fn build_compression_request(history: &[ChatNode], hints: Option<&str>) -> Vec<ChatNode> {
+pub fn build_compression_request(history: &[ChatNode]) -> Vec<ChatNode> {
     let mut out = history.to_vec();
-    out.push(compression_instruction(hints));
+    out.push(compression_instruction());
     out
 }
 
 /// 压缩指令：历史以对话形态排在它**之前**，因此这里只需说"把上面这段蒸馏成快照"。
 ///
 /// 输出结构的全部约束在 system 提示词里，此处不重复——重复会诱导模型模仿格式。
-fn compression_instruction(hints: Option<&str>) -> ChatNode {
-    let hints_section = match hints {
-        Some(h) if !h.trim().is_empty() => {
-            format!(
-                "\n\n## Must-Preserve Hints (from the agent, MUST be kept in the snapshot):\n{h}"
-            )
-        }
-        _ => String::new(),
-    };
+fn compression_instruction() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::User),
         msg_type: Some(NodeKind::Body),
         // 措辞刻意**不提** `<state_snapshot>` 标签名：结构定义只在 system 侧出现
         // 一次。在对话里重复格式指令会诱导模型模仿模板而非按 system 输出。
-        content: Some(MessageContent::Text(format!(
+        content: Some(MessageContent::Text(
             "Distill the conversation above into the structured snapshot that your \
-             instructions define. Output the snapshot only.{hints_section}"
-        ))),
+             instructions define. Output the snapshot only."
+                .to_string(),
+        )),
         status: Some(NodeStatus::Completed),
         ..Default::default()
     }

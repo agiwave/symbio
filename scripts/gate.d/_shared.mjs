@@ -61,7 +61,8 @@ export const BASELINE = {
   // 向下（删测试）必须配 `// baseline-allow <key>: <理由>`（见 `35-baseline.mjs` 元守卫，防『悄悄下调基线』）。
   // 向上：门禁实测超过即自动把数字写回本文件，不在此堆各批次变更注释——变更原因看提交历史。
   // baseline-allow rustTests: 三次已归因的下修非侵蚀——批 P3 退役 `bridge` 转写路径（`v2_bridge.test.rs` 15 条缩到 `v2_facts.test.rs` 5 条 + 11 条迁与新增，逐条归属见上方注释）、批 T-051 删 `v2_mode_defaults_to_full_and_roundtrips` 1 条（被测对象 `V2Mode` 随 ADR-051 退役）、批 T-053 删 `v2_reconcile.test.rs` 9 条（被测对象 `v2_reconcile` 双源对账随单源切换退役，判据随之消失；`v2_worker_progress.test.rs` 由「两读法对照」改写为「直接钉 WAL 读法」，条数仍 5）。
-  rustTests: 1764,
+  // baseline-allow rustTests: 批 PL-014 5a 删 6 条（1764→1758）——被测对象整条退役：`context_compact` 工具、55% 水位提醒与其开关 `enable_compact_tool`（裁决与被否替代见 ADR-072）。逐条：`should_emit_context_nudge_threshold`、`build_request_view_injects_nudge_at_tail`、`build_request_view_nudge_comes_after_skeletonization`、`nudge_requires_all_three_conditions`（nudge 四条）、`turn_split_idx_starts_at_user_instruction`、`turn_split_idx_fallback_and_abort`（`find_turn_user_split_idx` 两条，切分点已并入 `auto_compress_process`）。覆盖没有丢：压缩仍只有一个入口，它的两种触发（阈值自动 / 失败节点重试 force）由 `context/pipeline.test.rs` 与 e2e `t11-compression-node` / `t18-compression-streaming` 守着。
+  rustTests: 1758,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   ciRustTestsTotal: 1462,
   cliRustTests: 11,

@@ -35,8 +35,6 @@ pub struct Request {
     pub tool_context_window: Option<usize>,
     /// 是否开启自动语义压缩
     pub auto_compress: Option<bool>,
-    /// 是否启用工具压缩（context_compact 暴露给模型 + 水位提醒；独立于 auto_compress）
-    pub enable_compact_tool: Option<bool>,
 
     /// 指定本次会话使用的 Model Provider ID（来自 `ModelProvidersConfig.providers`）
     /// 由 session 编排层解析（精确 id → is_default → 首个注册），为空时同样走回退链取默认 Provider

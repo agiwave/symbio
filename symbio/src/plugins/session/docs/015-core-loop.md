@@ -31,7 +31,7 @@ created: 2026-09-16
 |---|---|---|
 | `gate_turn` | 启动条件（在途工具是否齐备）+ 退出条件（软上限 / abort） | 判定点唯一 |
 | `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + 压缩 + 请求视图 | 准备点唯一 |
-| `apply_compaction` | 水位响应（自动压缩 70% → 水位提醒 55%，顺序写死） | 响应点唯一 |
+| `apply_compaction` | 水位响应（70% 阈值触发的语义压缩） | 响应点唯一 |
 | `finish_turn` | 软上限提示 + 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
 | `TurnState` | 跨轮可变状态（工具轮次 / 续写次数 / 落库锚点 / 在途集合 / 中止信号） | 状态容器唯一 |
 
@@ -56,7 +56,7 @@ created: 2026-09-16
              + gate_turn / finish_turn             chat_loop.rs
              + prepare_turn_inputs / apply_compaction   chat_loop/inputs.rs
              + settle_reasoning / close_turn       chat_loop/turn.rs
-             + auto_compress_process / run_context_compact
+             + auto_compress_process / retry_compaction
                / compress_with_snapshot_core       context/pipeline.rs
              + persist_messages / open_chat_session / emit_streaming_start
                / fire_*_hook                        chat_loop/io.rs
@@ -90,23 +90,20 @@ created: 2026-09-16
 | 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
 | 4 | `v2_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
-| 6 | `close_turn` | 截断续写 / 主动压缩拦截 / 工具分发 / 父节点状态落库 / 停等判定（收口 ④ 的判定分支） | 收尾 + 判定 |
+| 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
 | 7 | `finalize_turn_root` | 封根 Turn——子树收敛之后发出**即将落库的那条节点** | 收尾 |
 
 **`close_turn` 的分支**
 
-| 分支 | 动作 | 返回 |
+| 条件 | 动作 | 返回 |
 |---|---|---|
-| 无工具 | `finish == length` 且无工具调用 → `length` 自动续写（≤ `MAX_CONTINUE_ROUNDS`）；续写耗尽 / 工具参数截断 → 会话级告警 | `NextTurn` / `Finish(Completed)` |
-| 无工具 | `context_compact` 拦截分流（工具压缩的内核；v2 路径不注入该工具，见 `inputs.rs` 步骤 ③ 前） | — |
-| 有工具 | 父节点终态快照同步进内存镜像（整条替换，随 persist 落库） | — |
-| 有工具 | `needs_user_action` → 停等 | `Finish(Completed)` |
-| 有工具 | `tool_rounds += 1` | `NextTurn` |
+| `finish == length` 且续写未耗尽 | 截断文本已在上下文里，下一轮自然续写（≤ `MAX_CONTINUE_ROUNDS`）；增量落库 | `NextTurn` |
+| `finish == length` 且续写耗尽 | 会话级告警（提高单次输出预算 / 缩小任务范围），绝不静默结束 | `Finish(Completed)` |
+| 其余 | 增量落库 | `Finish(Completed)` |
 
-> **「有工具」两行在当前执行路径上不可达**：v2 运行器把工具跑在 `execute_turn` 内部，
-> 交回的 `TurnOutput.tool_calls` 恒空，`close_turn` 收到 `tools_done.is_empty()` 就走
-> 「无工具」分支。该分支保留给直接构造 `TurnResult` 的测试，不代表生产时序——
-> 工具的真实执行模型见 §4.1。
+> **这里没有工具执行，也没有压缩拦截**：工具跑在 `execute_turn` 内部（§4.1），
+> 回到 `close_turn` 时本轮工具早已产出结果；水位响应在 `apply_compaction`（第 3 步）。
+> `close_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
 
 ### 1.3 职责边界（收口依据）
 
@@ -184,7 +181,7 @@ async fn prepare_turn_inputs(
 
 - `retention` **不进** `TurnInputs`——它只是 `build_request_view` 的一个入参，
   由 `tools` 就地派生后立即消费，暴露到边界只多一份需要维护的中间态。
-- `overhead_tokens` 是函数内局部量：只被本步内的自动压缩阈值与水位提醒消费，
+- `overhead_tokens` 是函数内局部量：只被本步内的压缩阈值消费，
   **一轮只算一次**（`context::estimate_overhead_with_tools(system_prompt, &tools)`
   复用已收集的工具清单，不让 visitor 注册表被查三遍）。
 
@@ -195,9 +192,7 @@ visitor 注册表），因此「每轮动态可调」是净收益：人格与工
 ### 2.3 收口 ③：压缩 → `apply_compaction`
 
 ```rust
-/// 收口 ③：上下文水位的**唯一响应点**——判定与执行同处一地，顺序写死。
-///
-/// 返回：是否需要在请求视图末尾注入一次性水位提醒。
+/// 收口 ③：上下文水位的**唯一响应点**——判定与执行同处一地。
 async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -205,28 +200,26 @@ async fn apply_compaction(
     turn: &mut TurnState,
     req: &TurnRequest,
     overhead_tokens: usize,
-) -> Result<bool, TurnExit> {
-    // ① L1 自动语义压缩（70% 触发；就地改写 context.messages 并推进落库锚点）
-    // ② 水位提醒（55% 触发；判**压缩之后**的真实水位，不落库，交视图层追加）
+) -> Result<(), TurnExit> {
+    // ① 阈值触发的语义压缩（70%；就地改写 context.messages 并推进落库锚点）
     …
 }
 ```
 
-**判定与执行同处一地**：`Auto`（70%）与 `Nudge`（55%）顺序相依——先按 70% 压缩，
-再按压缩后的水位判 55% 提醒；主动压缩又由模型输出触发、决策点在 LLM 响应之后的
-`close_turn`。两者都不可能进入「请求前」的纯决策。
+**判定与执行同处一地**：水位判定与压缩执行都在「请求前」这一步，压缩之后水位即变，
+下一轮按新水位判。
 
 **收口后的分工**：
 
-- **水位响应**（auto + nudge）→ 唯一入口 `apply_compaction`；
+- **水位响应** → 唯一入口 `apply_compaction`；
 - **执行内核** → `compress_with_snapshot_core`（唯一实现）；
 - **收益护栏** → `context::has_compaction_payoff`（门槛语义只有这一个出处）；
-- **「何时压」仍有两个入口**（水位触发 / 模型主动）——这是产品语义决定的，不合并；
-  被合并的是「怎么压」（1 个实现）与「水位怎么响应」（1 个入口）。
+- **「何时压」是一个入口两种触发**：阈值自动（`threshold`）与用户点失败节点重试
+  （`retry`，`force`）。被合并的是「怎么压」（1 个实现）与「水位怎么响应」（1 个入口）；
+  模型主动调用的压缩工具不存在（裁决见 [ADR-072](../../../../../docs/010-adr/072.md)）。
 
-`auto_compress_process` 不带 `extra_hints` 参数（自动路径没有「用户」在环内提供
-保留提示，该参数在本路径恒为 `None`）；`force` 保留——它是 `should_start_compression`
-的公开契约且有单测背书。
+`force` 是 `should_start_compression` 的公开契约且有单测背书——它越过迟滞并绕过熔断，
+只由 `retry_compaction` 传入。
 
 ### 2.4 收口 ④：退出 → `TurnExit` + `finish_turn`
 
@@ -264,13 +257,13 @@ struct TurnState {
     abort: ExecAbortSignal,              // 用户中止信号（推理与工具共享同一份）
     tool_rounds: usize,              // 已完成的工具轮次（跨轮累加）
     continuation_count: u32,         // 长度截断自动续写次数（跨轮累加）
-    nudged_this_request: bool,       // 水位提醒一次性标记
     last_saved: usize,               // 增量落库锚点
     in_flight_tools: HashSet<String>,// 已派发、尚未产出结果的工具调用 id（启动条件权威判据）
 }
 ```
 
-`close_turn` 的参数表因此收成 `(orchestrator, ctx, sink, context, turn, result, req)`。
+`close_turn` 的入参因此是 `(sink, context, turn, finish)`——它不需要编排器与请求快照，
+只读本轮的 `ModelFinishReason`。
 
 ---
 
@@ -344,11 +337,10 @@ pub async fn run_chat_loop(
         }
 
         // 步骤 5 · 推理收尾（定格子节点 → 校准估算 → 并入上下文）
-        let result = settle_reasoning(orch, &mut context, &sink, &inputs.root_id, out).await;
+        let finish = settle_reasoning(orch, &mut context, &sink, &inputs.root_id, out).await;
 
         // 步骤 6 · 本轮结算 + 下一步判定（收口 ④）
-        let flow = close_turn(orch, ctx.clone(), &sink, &mut context,
-                              &mut turn, result, &turn_req).await;
+        let flow = close_turn(&sink, &mut context, &mut turn, finish).await;
 
         // 步骤 7 · 封根 Turn（子树收敛之后，全流程唯一一处）
         finalize_turn_root(&sink, &context, &inputs.root_id).await;
@@ -392,9 +384,9 @@ execute_turn
 `in_flight_tools` 仍作为**启动条件的权威判据**存在（§2.1）：`WaitForTools` 分支在当前模型下
 恒不命中，语义上却已成立。
 
-`close_turn` 里那段 `process_tool_calls_async` 是**不可达的保留路径**：v2 运行器把工具
-跑在上面那条循环里，交回的 `TurnOutput.tool_calls` 恒空。它由直接构造 `TurnResult`
-的测试覆盖，不代表生产时序——读代码时不要把它当成工具的真实执行点。
+`close_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
+（`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [PL-014 步骤 5](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 删除；
+`close_turn` 只读 `ModelFinishReason`，工具的真实执行点只有上面那条循环。
 
 ### 4.2 必须保留的语义
 
@@ -435,7 +427,7 @@ execute_turn
 - **`compress_with_snapshot_core` 单一实现**（被动与主动共用内核）；
 - **`StopSignal` 幂等 + RAII 兜底** 与 **`WorkingGuard` / `AbortGuard`** 的收敛保证（§6）；
 - **`finalize_assistant_turn` 的 reasoning-only 分支**、**Turn 子树完整性守卫**
-  （`find_turn_user_split_idx`，provider 400 的直接防线）、**`feedback_estimate` 两条
+  （`find_compress_split_point`，provider 400 的直接防线）、**`feedback_estimate` 两条
   不变式**、**`tool_executor` 的超时与失败信息性语义**；
 - **消费循环（`orchestrator/consume.rs`）的 `select!` 三臂与 `persist_failure` 只作用于
   `failing_turn` 子树**（终态落库唯一入口，不误回滚上一轮）。

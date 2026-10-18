@@ -109,62 +109,6 @@ fn test_split_point_ok_when_tool_call_paired() {
     assert!(split > 0, "配对完整时不应放弃压缩");
 }
 
-fn turn_root_msg(id: &str) -> ChatNode {
-    ChatNode {
-        id: id.to_string(),
-        parent_id: None,
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "run"})),
-        content: Some(MessageContent::Text("turn".to_string())),
-        ..Default::default()
-    }
-}
-
-/// 切分点回归：必须前移到当前用户指令（保留区 = 用户指令 + 完整 Turn 子树）。
-/// 旧实现切在本 Turn 首个 ToolCall，用户指令与 Turn 根被压进快照，保留区
-/// 只剩 parent 悬空的 ToolCall 子树 → provider 400。
-#[test]
-fn test_turn_split_idx_starts_at_user_instruction() {
-    let cur_call = ChatNode {
-        parent_id: Some("cur-root".to_string()),
-        ..tool_call_msg()
-    };
-    let old_call = ChatNode {
-        parent_id: Some("old-root".to_string()),
-        ..tool_call_msg()
-    };
-    let msgs = vec![
-        user_msg("旧问题"),
-        turn_root_msg("old-root"),
-        old_call,
-        tool_result_msg(),
-        user_msg("新问题"),
-        turn_root_msg("cur-root"),
-        cur_call,
-        tool_result_msg(),
-    ];
-    // 当前用户指令在下标 4：保留区从"新问题"起，含完整 Turn 子树
-    assert_eq!(find_turn_user_split_idx(&msgs, "cur-root"), 4);
-    // 旧 Turn：其用户指令即会话首条 ⇒ 0（run_context_compact 以 split==0 中止）
-    assert_eq!(find_turn_user_split_idx(&msgs, "old-root"), 0);
-    // Turn 不存在 ⇒ 0（中止）
-    assert_eq!(find_turn_user_split_idx(&msgs, "no-such-turn"), 0);
-}
-
-/// 回退与中止语义：Turn 前无根级 User ⇒ 切在 Turn 根（子树仍完整）；
-/// 压缩后快照(User)即历史 ⇒ 切点 0 → 中止，避免把快照自身当作待压缩历史。
-#[test]
-fn test_turn_split_idx_fallback_and_abort() {
-    let turn = turn_root_msg("cur-root");
-    let msgs = vec![assistant_msg("开场白"), turn.clone(), tool_call_msg()];
-    assert_eq!(find_turn_user_split_idx(&msgs, "cur-root"), 1);
-
-    let snapshot = user_msg("[CONTEXT SNAPSHOT]");
-    let msgs2 = vec![snapshot, turn];
-    assert_eq!(find_turn_user_split_idx(&msgs2, "cur-root"), 0);
-}
-
 /// 滞后口径回归：迟滞比较必须用扣除请求级 overhead 后的内容侧读数。
 /// 旧实现直接比较含 overhead 的 current：overhead 越大越容易虚高越过
 /// post_tokens×1.15 地板，迟滞保护失效 → 压缩高频触发。
@@ -255,12 +199,8 @@ fn test_compression_request_user_message_carries_data_only() {
         "压缩模板不得随请求消息下发"
     );
 
-    let req = build_compression_request(&msgs, Some("keep file paths"));
+    let req = build_compression_request(&msgs);
     let instruction = text_of(req.last().expect("末尾为压缩指令"));
-    assert!(
-        instruction.contains("keep file paths"),
-        "hints 必须随指令下发"
-    );
     assert!(!instruction.contains("<state_snapshot>"));
 }
 
@@ -269,27 +209,4 @@ fn test_prepare_compression_rejects_when_no_split() {
     // 单条 User 消息（巨型单轮场景）：无切分点 ⇒ prepare_compression 返回 None
     let msgs = vec![user_msg(&"x".repeat(100_000))];
     assert!(prepare_compression(&msgs).is_none());
-}
-
-// ── 水位提醒（chat_loop 直接调用，审计 §4.2 补测）──────────────────────────
-//
-// 本文件**不再**有"本地兜底压缩"的测试：`emergency_tail_compression` 已随
-// "压缩失败不得裁剪历史"一并删除（见本文件末节与 ADR-018）。
-
-/// 长度可预测的中文消息（CJK ≈ 1 token/字 + 8 框架开销）。
-fn cn_msg(text: &str) -> ChatNode {
-    user_msg(text)
-}
-
-#[test]
-fn test_should_emit_context_nudge_threshold() {
-    // 阈值 55%：limit=100 → 55 token 处触发
-    let below = vec![cn_msg(&"字".repeat(40))]; // 40 + 8 = 48
-    let above = vec![cn_msg(&"字".repeat(50))]; // 50 + 8 = 58
-    assert!(!should_emit_context_nudge(&below, 100, 0));
-    assert!(should_emit_context_nudge(&above, 100, 0));
-    // overhead 计入总水位（此前只被 should_start_compression 使用）
-    assert!(should_emit_context_nudge(&below, 100, 20));
-    // 空历史永不提醒
-    assert!(!should_emit_context_nudge(&[], 100, 1000));
 }

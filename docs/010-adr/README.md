@@ -53,7 +53,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：active 62 · superseded 7 · withdrawn 3（共 72）
+**计数**：active 63 · superseded 7 · withdrawn 3（共 73）
 
 ## 现行决策（active）
 
@@ -121,6 +121,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-069` | Principal 三字段——kind 与 id 分家，id 是可路由地址 | 平台基座 | 已落地 | — |
 | `ADR-070` | NodeKind 是唯一前端分派轴——style_tag 降级为后端注记，呈现靠 title/icon/actions 数据 | 会话与执行 | 部分实施 | — |
 | `ADR-071` | RowKind 封闭集 6 值 → 7 值（+Configurable）——4e 收集口收敛的裁决 | 平台基座 | 已落地 | — |
+| `ADR-072` | `context_compact` 工具与 55% 水位提醒一并退役；压缩只剩一个入口 | 会话与执行 | 已落地 | — |
 
 ## 已被取代（superseded）
 
@@ -180,7 +181,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-069` | Principal 三字段——kind 与 id 分家，id 是可路由地址 | active | 已落地 |
 | `ADR-071` | RowKind 封闭集 6 值 → 7 值（+Configurable）——4e 收集口收敛的裁决 | active | 已落地 |
 
-### 会话与执行（26）
+### 会话与执行（27）
 
 > 编排 / 上下文 / 转写节点与实时面 / 输入 / 响应性
 
@@ -212,6 +213,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-066` | 输入面退役的前置条件解除：地址写入不承载运行选项——三项运行参数已有会话 metadata 回退，协议面不必变宽 | active | 已落地 |
 | `ADR-068` | 审批闸门住在能力注册的收口点（`DefaultToolVisitor::register`），判据一份、入口两处 | active | 已落地 |
 | `ADR-070` | NodeKind 是唯一前端分派轴——style_tag 降级为后端注记，呈现靠 title/icon/actions 数据 | active | 部分实施 |
+| `ADR-072` | `context_compact` 工具与 55% 水位提醒一并退役；压缩只剩一个入口 | active | 已落地 |
 
 ### 资源与地址（7）
 

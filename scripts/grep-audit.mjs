@@ -674,7 +674,7 @@ const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
-  : 166
+  : 164
 {
   let s014 = 0
   const s014List = []

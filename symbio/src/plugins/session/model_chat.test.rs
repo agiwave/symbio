@@ -19,7 +19,6 @@ fn fully_populated() -> Request {
         max_tool_rounds: Some(3),
         tool_context_window: Some(4),
         auto_compress: Some(false),
-        enable_compact_tool: Some(true),
         provider_id: Some("pid".into()),
         load_history: Some(false),
         resume: Some(ResumeRequest {

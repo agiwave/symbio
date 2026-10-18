@@ -1,11 +1,11 @@
-//! 压缩执行流水线：自动语义压缩（L2）与主动 `context_compact` 工具共用的实现。
+//! 压缩执行流水线：自动语义压缩（L2）与其用户重试共用的实现。
 //!
 //! 本模块是 `context` 域唯一的**执行层**（LLM 请求 / 落库 / 广播）；域内其余兄弟
 //! 模块（门面 / `view` / `prompt`）均为无副作用的纯策略。
 //!
-//! 两条入口（[`auto_compress_process`] / [`run_context_compact`]）共用
-//! [`compress_with_snapshot_core`] 这一个执行内核——"何时压"有两个入口，
-//! "怎么压"只有一个实现。
+//! 自动压缩与用户重试（[`retry_compaction`]）都经 [`auto_compress_process`] 进入
+//! [`compress_with_snapshot_core`] 这一个执行内核——"何时压"有一个入口两种触发，
+//! "怎么压"只有一个实现。主动 `context_compact` 工具已随 v1 外壳退役（[ADR-072](../../../../../docs/010-adr/072.md)）。
 
 use super::*;
 
@@ -25,9 +25,6 @@ use crate::symbio_core::{llm_short_id, ExecAbortSignal, ExecEnv, ExecEventSink, 
 /// 自动路径恒为 `false`（自动压缩必须走阈值）；`true` 只由**用户主动重试**
 /// （`retry_compaction`）传入——此时同时**绕过熔断**：熔断约束的是"每轮自动白等
 /// 一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住。
-///
-/// 无 `extra_hints`：自动压缩没有"用户"在环内提供保留提示——`hints` 是
-/// `context_compact` 工具的入参，只在主动路径有意义（见 `compress_with_snapshot_core`）。
 pub(crate) async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
@@ -46,9 +43,8 @@ pub(crate) async fn auto_compress_process(
 
     // 自动压缩熔断：连续失败达到阈值后，跳过本次自动压缩——历史已回滚、本轮仍
     // 能正常回复，不必每轮再白等一次注定失败的 LLM 请求（实测会话 `09d74431` 的
-    // 反复失败就是这个形态）。手动 `context_compact` 与用户主动重试（`force`）
-    // 都不受影响，且任一次压缩成功都会清零计数（半开冷却期内放行一次重试，
-    // 让瞬时错误自愈）。
+    // 反复失败就是这个形态）。用户主动重试（`force`）不受影响，且任一次压缩成功
+    // 都会清零计数（半开冷却期内放行一次重试，让瞬时错误自愈）。
     if !force {
         if let Some(em) = &orchestrator.compression {
             if em.state.compression_should_skip().await {
@@ -81,8 +77,7 @@ pub(crate) async fn auto_compress_process(
         return Ok(None);
     }
 
-    // 压缩核心与主动 context_compact 工具共用（compress_with_snapshot_core）：
-    // 失败已在核心内就地回滚，这里只区分"成功/未压缩"两种结果。
+    // 压缩内核（唯一实现）：失败已在核心内就地回滚，这里只区分"成功/未压缩"两种结果。
     let original_count = context.messages.len();
     let post_tokens = compress_with_snapshot_core(
         orchestrator,
@@ -91,8 +86,6 @@ pub(crate) async fn auto_compress_process(
         abort,
         compression_request,
         history_to_keep,
-        // 自动路径无用户保留提示（hints 只在主动路径有来源）
-        None,
         "auto",
         if force { "retry" } else { "threshold" },
     )
@@ -119,11 +112,10 @@ pub(crate) async fn auto_compress_process(
     }
 }
 
-/// 快照压缩核心 —— 被动 L2 自动压缩（[`auto_compress_process`]）与主动
-/// `context_compact` 工具（[`run_context_compact`]）共用的唯一实现。
+/// 快照压缩核心 —— 自动压缩与用户重试共用的唯一实现。
 ///
-/// 单一实现约束：被动与主动两条入口**必须**共用本函数，各自只保留调用方特有的
-/// 切分点与呈现语义。两处各维护一份流水线（PreCompact 钩子 → transcript
+/// 单一实现约束：任何压缩入口**必须**共用本函数，各自只保留调用方特有的
+/// 切分点与呈现语义。多处各维护一份流水线（PreCompact 钩子 → transcript
 /// 转存 → LLM 压缩请求 → 快照校验/纠正重试 → meta 与快照消息构造 →
 /// 保留区拼接落库）会带来行为漂移风险。
 ///
@@ -132,20 +124,18 @@ pub(crate) async fn auto_compress_process(
 /// 2. 上下文临时替换为 `[compression_msg]`，以专用压缩提示词发起 LLM 请求；
 /// 3. 快照校验：提取 `<state_snapshot>` → 缺失则附纠正指令重试一次 →
 ///    仍失败 → 保留原历史，回滚并放弃本次压缩；
-/// 4. 构造快照消息（meta：compacted/post_tokens/transcript_path/compact_hints/
+/// 4. 构造快照消息（meta：compacted/post_tokens/transcript_path/
 ///    protocol_version/prompt_fingerprint）并与保留区拼接，replace_messages 落库。
 ///
 /// 失败语义：**任何失败都不向上冒泡**（回滚到调用前历史后返回 Err），由调用方
-/// 决定对外呈现（auto → `Ok(None)` 继续本轮 Turn；manual → 工具结果"压缩失败已回滚"）。
+/// 决定对外呈现（auto → `Ok(None)` 继续本轮 Turn）。
 ///
 /// **失败一律不改动历史**：四个出口（LLM 失败 / 快照校验失败 / 输入超限 / 用户中止）
 /// 全部把 `context.messages` 还原为调用前的 `original_messages`。历史是用户的资产，
 /// 不因为"这次压缩没做成"而被丢弃——见 [`CompressionFailure`] 关于 `InputOverLimit`
 /// 的说明（那里曾是唯一的例外，现已移除）。
 ///
-/// `keep_messages`：压缩后原样保留在快照之后的消息（auto = 未压缩尾段；
-/// manual = 当前用户指令 + 进行中 Turn 及之后，保证 Turn 子树 parent 链完整，
-/// 详见 [`run_context_compact`] 文档中的切分点约束）。
+/// `keep_messages`：压缩后原样保留在快照之后的消息（auto = 未压缩尾段）。
 /// 成功返回 `Some(post_tokens)`（压缩后内容水位：快照 + 保留区，不含请求级 overhead）。
 /// 压缩为什么没完成。
 ///
@@ -215,7 +205,6 @@ async fn compress_snapshot_inner(
     abort: &ExecAbortSignal,
     compression_request: Vec<ChatNode>,
     keep_messages: Vec<ChatNode>,
-    extra_hints: Option<&str>,
     log_tag: &str,
     // 与包装层 begin/finish 同一个 id：摘要增量因此落到**同一个**节点上
     node_id: &str,
@@ -396,11 +385,6 @@ async fn compress_snapshot_inner(
     if let Some(p) = &transcript_path {
         meta["transcript_path"] = serde_json::json!(p);
     }
-    if let Some(hints) = extra_hints {
-        if !hints.trim().is_empty() {
-            meta["compact_hints"] = serde_json::json!(hints);
-        }
-    }
 
     // 快照指纹 —— 记录压缩协议版本与提示词指纹，
     // 使"提示词强化是否生效"可从产物侧（快照 meta）验证。
@@ -511,7 +495,7 @@ async fn emit_transcript_rewrite(
 /// - `before_tokens` / `after_tokens` 是**内容水位**：与快照 `meta.post_tokens` 同源
 ///   （包含历史与保留区内容，**不含**请求级固定开销）。与 `context_limit` 相除得到的
 ///   比例因此是一个**下限**——真实占用还要加上 system prompt 与工具定义。宁可少报
-///   也不要多报：报多了会让用户以为"已经快满了"而做无谓的手动压缩。
+///   也不要多报：报多了会让用户以为"已经快满了"而做无谓的重试。
 /// - `after_tokens` 只在**成功**时写入。失败 / 未触发的路径没有可信的"压缩后水位"，
 ///   编一个 0 会在界面上显示成"水位已降到 0"——那是最坏的一种谎报。
 ///
@@ -555,10 +539,9 @@ async fn compress_with_snapshot_core(
     abort: &ExecAbortSignal,
     compression_request: Vec<ChatNode>,
     keep_messages: Vec<ChatNode>,
-    extra_hints: Option<&str>,
     log_tag: &str,
     // 触发来源（**面向用户的原因词**，进节点 `meta.compact_trigger`）：
-    // `threshold`（越线自动）/ `tool`（模型主动调 `context_compact`）/ `retry`（用户重试）。
+    // `threshold`（越线自动）/ `retry`（用户重试）。
     // 与 `log_tag`（日志标签）分开：前者是线上契约的一部分，改它会改变前端呈现。
     trigger: &'static str,
 ) -> Result<Option<usize>, CompressionFailure> {
@@ -577,7 +560,6 @@ async fn compress_with_snapshot_core(
         abort,
         compression_request,
         keep_messages,
-        extra_hints,
         log_tag,
         &node_id,
     )
@@ -662,67 +644,6 @@ async fn compress_with_snapshot_core(
 /// 取消息纯文本（快照校验用）
 fn summary_text(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
-}
-
-/// 主动压缩工具（context_compact）执行体。
-///
-/// 关键正确性约束：**进行中的 Turn 必须从其用户指令起整体保留**。
-/// 调用时本 Turn 的 ToolCall 消息已在上下文中（请求后 extend），但其工具结果
-/// 子节点尚未产生。切分点必须落在当前用户指令（Turn 根之前）：
-/// - 保留区 = [用户指令, Turn, 子节点...]，Turn 子树 parent 链完整；
-/// - 若切在 Turn 根与 ToolCall 之间：Turn 根入快照、子 ToolCall 留保留区 →
-///   parent 悬空 → 孤儿消息被 drop_orphan_messages 剔除 → 请求包里 Tool 结果
-///   失去父节点 → provider 400。
-///
-/// `split_user_idx`：主循环传入的切分下标（当前用户指令，见 find_turn_user_split_idx）。
-/// 返回 `(是否执行了压缩, 估算压缩前 tokens, 估算压缩后 tokens)`。
-pub(crate) async fn run_context_compact(
-    orchestrator: &ChatOrchestrator,
-    context: &mut SessionContext,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    abort: &ExecAbortSignal,
-    split_user_idx: usize,
-    hints: Option<&str>,
-) -> (bool, usize, usize) {
-    if split_user_idx == 0 {
-        return (false, 0, 0);
-    }
-
-    // 待压缩历史 = [.., split_user_idx)，当前用户指令起的任务上下文整体留在保留区
-    let history: Vec<ChatNode> = context.messages[..split_user_idx].to_vec();
-    let before_tokens: usize = history.iter().map(super::estimate_message_tokens).sum();
-    // 压缩收益护栏（门槛的唯一出处：`super::has_compaction_payoff`）
-    if !super::has_compaction_payoff(before_tokens) {
-        return (false, before_tokens, before_tokens);
-    }
-
-    let keep_messages: Vec<ChatNode> = context.messages[split_user_idx..].to_vec();
-    let compression_request = super::build_compression_request(&history, hints);
-
-    // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
-    // 快照校验/纠正重试 → meta 构造 → 保留区拼接落库）；失败已在核心内
-    // 就地回滚，这里只把它翻译为工具结果的 (compressed, before, after) 三元组。
-    let post_tokens = compress_with_snapshot_core(
-        orchestrator,
-        context,
-        ctx,
-        abort,
-        compression_request,
-        keep_messages,
-        hints,
-        "manual",
-        "tool",
-    )
-    .await;
-
-    match post_tokens {
-        Ok(Some(after)) => (true, before_tokens, after),
-        // 未执行（内容未达阈值）：工具结果如实反映无收益
-        Ok(None) => (false, before_tokens, before_tokens),
-        // 失败：历史已在核心内回滚；具体原因已写入压缩节点（meta.failure_kind +
-        // error），这里只如实反映工具无收益。失败不再冒泡为整轮失败。
-        Err(_) => (false, before_tokens, before_tokens),
-    }
 }
 
 /// 用户对**失败的压缩节点**发起重试（`ResumeAction::RetryCompaction` 的执行体）。

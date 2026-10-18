@@ -104,7 +104,7 @@ function extractToolNames(t, consts) {
   for (const mm of t.matchAll(/CapabilityMeta\s*\{[\s\S]{0,400}?\bname:\s*"([a-z][a-z0-9_]*)"/g)) {
     out.add(mm[1]);
   }
-  // `name: CONST_NAME.to_string()` —— 名字由常量给出（如 context_compact）
+  // `name: CONST_NAME.to_string()` —— 名字由常量给出（如 subagent 的 `NAME`）
   for (const mm of t.matchAll(
     /CapabilityMeta\s*\{[\s\S]{0,400}?\bname:\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\.to_string\(\)/g
   )) {
@@ -638,7 +638,6 @@ function capabilityMatrixSection(root, plugins) {
   for (const [plugin, note] of Object.entries(DYNAMIC_TOOLS)) {
     L.push(`> - \`${plugin}\`：${note}。`);
   }
-  L.push("> - `context_compact`：**不暴露**——v2 执行路径不把它注入工具清单（理由见 `chat_loop/inputs.rs` 步骤 ③ 前）；它既不在静态抽取里，也不在运行期集合里；");
   L.push("> - 运行时权威来源：`traverse(\"available_tools\")` 广播进 `Registry`（收集口）的那份集合。");
   L.push("");
 

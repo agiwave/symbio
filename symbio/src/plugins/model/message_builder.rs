@@ -29,7 +29,7 @@ const RETAINED_RECENT_REASONING: usize = 2;
 /// （否则连续两条 `assistant`）。把它做成 `NodeKind` 取值，等于把"某个消费
 /// 场景的判断"固化进 schema——下一个场景（审计导出 / 检索索引）还要再加一个类型。
 ///
-/// `meta` 是自由 JSON 且已有先例（`meta.kind = "context_nudge"`），加一个键是
+/// `meta` 是自由 JSON 且已有先例（`meta.kind = "recall_context"`），加一个键是
 /// **数据变化**，不是 schema 变化。
 ///
 /// ## 与对话线投影的分工（看着矛盾，其实各管一条线）

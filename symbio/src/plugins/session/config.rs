@@ -127,14 +127,6 @@ pub struct SessionConfig {
     ///（原硬编码常量 `FADE_KEEP_RECENT_TURNS` = 12）。
     #[serde(default = "default_fade_keep_recent_turns")]
     pub fade_keep_recent_turns: usize,
-    /// 是否启用工具压缩：允许水位提醒引导模型调用主动压缩工具（context_compact）。
-    /// 独立于自动压缩开关。
-    ///
-    /// ⚠️ v2 执行路径**当前不把该工具注入工具清单**（`chat_loop/inputs.rs` 步骤 ③
-    /// 前写明理由：那条路没有压缩链路）。因此本开关打开只会让水位提醒照常发出，
-    /// 而模型看不到被提醒去调的那个工具；恢复注入之前不要打开。
-    #[serde(default = "default_enable_compact_tool")]
-    pub enable_compact_tool: bool,
     /// 写入期工具链裁剪：是否在**落库时**物理删除 `context_messages` 轮之前的
     /// Tool / ToolCall / Reasoning 节点及其存档文件。
     ///
@@ -462,9 +454,6 @@ pub fn default_fade_activate_rounds() -> usize {
 pub fn default_fade_keep_recent_turns() -> usize {
     12
 }
-pub fn default_enable_compact_tool() -> bool {
-    false
-}
 pub fn default_prune_tool_history() -> bool {
     true
 }
@@ -586,7 +575,6 @@ impl Default for SessionConfig {
             tool_context_window: default_tool_context_window(),
             fade_activate_rounds: default_fade_activate_rounds(),
             fade_keep_recent_turns: default_fade_keep_recent_turns(),
-            enable_compact_tool: default_enable_compact_tool(),
             prune_tool_history: default_prune_tool_history(),
             memory_max_bytes: default_memory_max_bytes(),
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
