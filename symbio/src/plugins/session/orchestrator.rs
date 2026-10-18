@@ -13,11 +13,11 @@
 //! | [`consume`] | 消费循环：`fail_before_loop` / `run_chat_loop_task` / `handle_abort` |
 //! | [`entry`] | 一轮执行的装配：`start_turn` + `resolve_session_params` + 会话引擎句柄 / 自动命名 |
 //! | [`failure`] | 失败降级持久化：`persist_failure` + `subtree_of` |
-//! | [`runner`] | 「开跑一轮」端口 `TurnRunner`：一轮执行所需的宿主切片 |
+//! | [`runner`] | 「开跑一轮」端口 `TurnLauncher`：一轮执行所需的宿主切片 |
 //! | [`sink`] | 执行期事件出口（`TranscriptSink`）：直连转写唯一写入点 |
 //!
 //! `impl` 块按职责分块分散在子模块（Rust 允许多个 inherent impl，方法声明顺序无语义）：
-//! 请求装配与消费循环在 [`TurnRunner`] 上（[`entry`] / [`consume`]），失败收口与广播在
+//! 请求装配与消费循环在 [`TurnLauncher`] 上（[`entry`] / [`consume`]），失败收口与广播在
 //! [`Convergence`] 上（[`broadcast`] / [`failure`]），插件本体只剩**门面**（`get_store` 等
 //! 高扇入访问器）。
 
@@ -36,7 +36,7 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{chat_node as cm, session_chat};
 pub(crate) use broadcast::{Convergence, SessionStateChange};
-pub(crate) use runner::TurnRunner;
+pub(crate) use runner::TurnLauncher;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 

@@ -59,13 +59,13 @@ pub struct SessionPlugin {
     /// 恰恰需要这份存储比插件活得更久。
     pub(crate) convergence: Convergence,
     /// 「开跑一轮」端口：一个 Turn 从装配到收尾所读的宿主切片（字段与用途见
-    /// [`TurnRunner`] 的模块文档）。
+    /// [`TurnLauncher`] 的模块文档）。
     ///
     /// 插件在这里的贡献只是**把同一批 Arc 交出去**：provider 侧的 `dispatch` 只有 `&self`，
     /// 而一轮执行要 `tokio::spawn` 一个自带句柄的任务。那个句柄若是插件本身
     /// （`Arc<SessionPlugin>`），provider 注册、路由、订阅表、监听器与常驻任务册就一起
     /// 被一个 Turn 钉住（[ADR-075](../../../../docs/010-adr/075.md) 前置 P2 第五处）。
-    pub(crate) turn: TurnRunner,
+    pub(crate) turn: TurnLauncher,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
@@ -94,7 +94,7 @@ pub struct SessionPlugin {
     pub(crate) resident_tasks: resident::ResidentTasks,
 }
 
-use super::orchestrator::{Convergence, TurnRunner};
+use super::orchestrator::{Convergence, TurnLauncher};
 use super::store::SessionStore;
 
 // ==================== 落库回包（§3.4 的唯一落地点） ====================
@@ -245,8 +245,8 @@ impl SessionPlugin {
         let config = Arc::new(RwLock::new(config));
         let convergence = Convergence::new(store, store_dir, config.clone(), active_mgr.clone());
         // 「开跑一轮」端口：一轮执行真正读到的那几样宿主切片（字段与插件同源同 Arc，
-        // 不是第二份状态；为什么收成端口见 [`TurnRunner`] 的模块文档）。
-        let turn = TurnRunner::new(
+        // 不是第二份状态；为什么收成端口见 [`TurnLauncher`] 的模块文档）。
+        let turn = TurnLauncher::new(
             convergence.clone(),
             active_mgr.clone(),
             config.clone(),

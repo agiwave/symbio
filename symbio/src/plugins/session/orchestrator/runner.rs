@@ -23,6 +23,13 @@
 //!
 //! 字段全是 `Arc` / `Weak` / 值类型，因此 `Clone` 廉价；构造点唯一（[`super::super::plugin::SessionPlugin::new`]），
 //! 与插件共用同一批 Arc——**不是**第二份状态。
+//!
+//! ## 名字为什么不带 Runner
+//!
+//! [`super::super::turn_runner::TurnRunner`] 是**一轮的执行引擎**（流循环 + 落格纪律，AUC 见
+//! [ADR-050](../../../../../docs/010-adr/050.md "ADR-050")）；本结构负责的是**装配与派发**——
+//! 从宿主切片凑出这一轮要读的那几样，把引擎 `tokio::spawn` 出去，之后只剩轮边界的事。
+//! 两个名字都叫「跑一轮」会逼读者逐个文件确认自己在哪一层，故本端口取名 Launcher。
 
 use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
@@ -34,7 +41,7 @@ use tokio::sync::RwLock;
 
 /// 「开跑一轮」端口（构造与用途见模块文档）。
 #[derive(Clone)]
-pub(crate) struct TurnRunner {
+pub(crate) struct TurnLauncher {
     pub(super) convergence: Convergence,
     pub(super) active_mgr: Arc<super::super::active::ActiveSessionManager>,
     pub(super) config: Arc<RwLock<SessionConfig>>,
@@ -43,7 +50,7 @@ pub(crate) struct TurnRunner {
     pub(super) parent: Option<Weak<dyn Plugin>>,
 }
 
-impl TurnRunner {
+impl TurnLauncher {
     pub(crate) fn new(
         convergence: Convergence,
         active_mgr: Arc<super::super::active::ActiveSessionManager>,

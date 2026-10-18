@@ -51,7 +51,7 @@ async fn wait_state_superseded(state: &Arc<ActiveSessionState>, rid: u64) {
     }
 }
 
-impl TurnRunner {
+impl TurnLauncher {
     /// 进入 chat_loop **之前**就失败的统一收尾（provider 解析 / 能力访问器缺失等）。
     ///
     /// 与正常出口一样保证 Working → Stop 严格配对：这里**显式**补发一次 Stop，

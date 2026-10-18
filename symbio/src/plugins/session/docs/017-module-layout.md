@@ -41,7 +41,7 @@ created: 2026-09-16
 |---|---|
 | `mod.rs` | 模块声明与公共面收敛 |
 | `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发与**退役路由的防回潮断言**、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
-| `orchestrator.rs` + `orchestrator/{entry,consume,broadcast,failure,sink,rate_limit}.rs` | 会话编排：两个 one-off 入口与自动命名、Turn 消费循环、状态广播唯一出口、失败收口、执行期事件落地、发送限流（唯一消费方是 `consume`） |
+| `orchestrator.rs` + `orchestrator/{entry,consume,runner,broadcast,failure,sink,rate_limit}.rs` | 会话编排，两个**手柄**各带自己的 `impl` 块：`TurnLauncher`（`runner.rs`，「开跑一轮」端口——请求装配、Turn 消费循环与自动命名，[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）与 `Convergence`（`broadcast.rs` / `failure.rs`，状态广播唯一出口与失败收口）；另有执行期事件落地（`sink.rs`）与发送限流（`rate_limit.rs`，唯一消费方是 `consume`） |
 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,io}.rs` | 主循环骨架、状态与契约、输入准备与压缩响应、单轮尾结算、循环内的落库与广播出口 |
 | `loop_registry.rs` | **策略表**：每行 = 一个纯判据 `fn(&LoopState) -> Option<Capsule>` + 它派发的臂，按 `(prio, name)` 升序先命中者胜；环只问表「下一步是什么」，加策略 = 一个函数 + 一行注册（[PL-014](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") §4 机制 2 的第一步） |
 

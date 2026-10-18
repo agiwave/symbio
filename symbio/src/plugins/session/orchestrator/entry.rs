@@ -79,7 +79,7 @@ impl SessionSnapshot {
     }
 }
 
-impl TurnRunner {
+impl TurnLauncher {
     // ============ One-off 模式（统一事件总线场景）============
 
     /// 统一解析**元数据派生**的会话参数（mode / risk_level / provider_id）。
