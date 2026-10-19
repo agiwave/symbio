@@ -94,6 +94,13 @@ pub(crate) async fn persist_messages(
 /// 时回退内存会话：复用 [`PersistentChatSession::detached`]（默认配置 + 内存存储后端），
 /// 不再另写一份 `ChatSession` 实现（审计 B1）——原先的 `FallbackChatSession` 与
 /// `EphemeralChatSession` 是同一契约的额外两份实现，缺孤儿清理与轮次窗口，与持久版行为漂移。
+///
+/// **P4 豁免位**（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决一第 2 条）：
+/// 这里是驱动器侧唯一允许直接调存储域构造器的地方——它是「句柄交付失败 ⇒ 降级内存
+/// 会话、不阻断对话」契约的另一半天（交付点失败只记日志继续），只依赖声明构造与默认
+/// 配置，不碰 store。豁免的期限到 [plan/14 步 6 · T-167 批次 6b](../../../../../docs/009-task/167-会话插件切分.md "T-167-会话插件切分")：
+/// 切片那一刻它要么随驱动器找到新的合法形态，
+/// 要么被显式废除。
 pub(crate) async fn open_chat_session(
     ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> Arc<PersistentChatSession> {

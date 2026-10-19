@@ -546,6 +546,38 @@ impl Transcript {
     }
 }
 
+/// [`crate::symbio_core::ExecTranscriptWriter`] 的转写域落点：一个只做「锁转写 → apply」
+/// 的最小 writer（与 `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，
+/// 压缩增量用不上）。
+///
+/// 原先住在 `chat_loop/state.rs`（[`super::super::chat_loop::CompressionEmitter::transcript_writer`]
+/// 的私有桥）。桥的全部工作是「锁转写 → apply」，而 `Transcript` 是本域类型——把它的
+/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [ADR-081](../../../../docs/010-adr/081.md "ADR-081")
+/// 裁决一第 3 条禁的形状。桥整体迁进本域，对 core trait 的实现一行不削，只是换住址；
+/// 驱动器侧的 `transcript_writer` 退化为一次 [`compression_writer`] 调用。
+struct TranscriptWriterBridge {
+    transcript: Arc<tokio::sync::Mutex<Transcript>>,
+}
+
+#[async_trait::async_trait]
+impl crate::symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
+    async fn apply(&self, message: cm::ChatNode) {
+        self.transcript.lock().await.apply(message);
+    }
+}
+
+/// 从本会话转写构造压缩请求的**增量改道落点** writer（仅由 `context::pipeline` 的
+/// 过滤桥消费——摘要帧经白名单改写后从这里进转写）。
+///
+/// 归属 [`CompressionEmitter::transcript_writer`](super::super::chat_loop::CompressionEmitter::transcript_writer)：
+/// 复用转写而不是另开通道——增量落点是「在途图 + 位置号 + 发布」三件事的合成，另开
+/// 通道等于把这套收敛逻辑再实现一遍，且必然漂移。锁点留在本域，`Arc` 只作构造实参流走。
+pub(crate) fn compression_writer(
+    transcript: Arc<tokio::sync::Mutex<Transcript>>,
+) -> Arc<dyn crate::symbio_core::ExecTranscriptWriter> {
+    Arc::new(TranscriptWriterBridge { transcript })
+}
+
 #[cfg(test)]
 #[path = "transcript.test.rs"]
 mod tests;

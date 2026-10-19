@@ -11,9 +11,6 @@
 //! n 条补充吃掉 n 份保留预算，把更早的轮次提前挤出窗口——用户只是多说了两句话，
 //! 历史却悄悄少了两轮。合并成一条，n 条在计数上仍是一轮，与用户心智一致。
 //!
-//! > 注意另一处窗口**不**受影响：`context/window.rs::apply_layered_sliding_window`
-//! > 按 **ToolCall** 计数，与补充条数无关。两处口径不同，不要混。
-//!
 //! ## n = 1 时**不合并**
 //!
 //! 只有一条时原样返回该条目的消息——**与今天的行为逐字一致**（同一个 id、同一份
@@ -39,8 +36,10 @@
 //! 内容形态**保持无损**：全部条目都是纯文本时产出纯文本；只要有一条携带
 //! 非文本片段（如图片），就按顺序把所有片段拼成 `Parts`，不把图片丢掉。
 
-use super::super::active::InboxItem;
+use super::super::active::{ActiveSessionState, InboxItem};
 use crate::symbio_core::chat_node as cm;
+use crate::symbio_core::VdfsChangeSubscriptions;
+use std::sync::Arc;
 
 /// 合并标记的三个键名（唯一真源：写入方与消费方都从这里取）。
 ///
@@ -126,6 +125,89 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
         }
     }
     cm::MessageContent::Parts(parts)
+}
+
+/// 抽干结果：**正文 + 原条数 + 溯源身份**。
+///
+/// 原先定义在 `chat_loop/state.rs`——[ADR-081](../../../../../docs/010-adr/081.md "ADR-081")
+/// 裁决三把「取批 + 合并 + 成形」落成转写域的单一入口后，返回类型随入口归位转写域。
+///
+/// `InboxItem` 是 `transcript::inbox` 的私有类型，抽干口不返回它——
+/// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
+///
+/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方
+/// （`turn_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
+/// 多带一个字段就是给下一个人留一个不必有的理由。
+#[derive(Debug, Clone)]
+pub(crate) struct DrainedSupplement {
+    /// 折进 prompt 的正文（多条已合并）。
+    pub text: String,
+    /// **原条数**：合并了 n 条时是 n。
+    ///
+    /// 记下来是因为「模型收到一大段」与「用户连说了 5 句」对模型是不同的输入，
+    /// 而事实网格不该只保留前者。
+    pub count: u64,
+    /// 合并消息的 **id** = **第一条补充的 id**（[`merge_supplements`] 的既有约定）。
+    ///
+    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧（`useChatConnection.ts`），
+    /// 换 id 等于让同一句话在前端**出现两条**。t19 的 B 幕断言钉的就是「沿用 b2」。
+    pub id: String,
+    /// 批内**原始条目 id 列表**（顺序 = 入队顺序）。
+    ///
+    /// 落进 `meta.supplement_ids`：前端与事后审计都要能回答「这一条合并了几条、
+    /// 分别是哪几条」（t19 的 B 幕断言钉的就是这个列表）。
+    pub ids: Vec<String>,
+}
+
+/// 「取批 + 合并 + 成形」的**同步单一入口**（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三）。
+///
+/// 补充消息的**到达**归存储（队列与变更通知都在本域），驱动器只掌握**要的时机**
+/// （工具循环的批次边界）——于是这三步整体住在本域，`chat_loop::SupplementDrain`
+/// 不再在驱动器侧自拼两步、手写成形段，退化为「持着取批那三样、调一下」。
+///
+/// 判定与取件逻辑不复制：内部走 [`super::inbox::take_inbox_batch_sync`]
+/// （`supplements_enabled = false` 时它退化为"取一条"，与 [`merge_supplements`] 叠加后
+/// 恰好等于"一条消息 = 一轮"的今天行为）。
+///
+/// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
+/// 不推进 `last_saved`、不落库。
+///
+/// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
+/// 单线程 runtime 的 async 上下文里直接调会 panic。`turn_exec` 的注入闭包里有
+/// flavor 判定（多线程才 `block_in_place`，否则裸调）。
+pub(crate) fn take_supplement_batch_sync(
+    config: &tokio::sync::RwLock<super::super::config::SessionConfig>,
+    change_subs: &VdfsChangeSubscriptions,
+    state: &Arc<ActiveSessionState>,
+) -> Option<DrainedSupplement> {
+    let batch = super::inbox::take_inbox_batch_sync(config, change_subs, state);
+    let merged = merge_supplements(&batch)?;
+    let count = merged
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(META_SUPPLEMENT_COUNT))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    Some(DrainedSupplement {
+        text: merged
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default(),
+        count,
+        id: merged.id,
+        ids: merged
+            .meta
+            .as_ref()
+            .and_then(|m| m.get(META_SUPPLEMENT_IDS))
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
 }
 
 #[cfg(test)]

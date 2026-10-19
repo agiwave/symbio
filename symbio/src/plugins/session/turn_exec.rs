@@ -593,7 +593,7 @@ impl DeltaSink for UiBridge {
 /// 由 `chat_loop` 从 `SupplementDrain` 适配而来（它要 config / change_subs / 会话状态，那个
 /// 类型不进 `ExecTurn`）。测试直接给闭包，于是能造「只返回一次」这种形状。
 pub(crate) type SupplementFn =
-    Arc<dyn Fn() -> Option<super::chat_loop::state::DrainedSupplement> + Send + Sync>;
+    Arc<dyn Fn() -> Option<super::transcript::supplements::DrainedSupplement> + Send + Sync>;
 
 /// 轮边界回调（缺口 4）：工具循环每跑完一轮问一次「要不要说点什么」。
 ///
@@ -745,7 +745,7 @@ pub(crate) struct ExecTurnResult {
 /// 都**不消耗任何配额**、不留半截状态，与 `apply_verdict` 拿不到措辞时同一条方向。
 #[allow(clippy::too_many_arguments)] // 抽出来之后参数就是它的全部依赖，多一个都该重新想
 fn supplement_into_request(
-    batch: Option<super::chat_loop::state::DrainedSupplement>,
+    batch: Option<super::transcript::supplements::DrainedSupplement>,
     anchor: Option<u64>,
     store: &crate::symbio_core::EventWalStore,
     actor: &ActorSpec,

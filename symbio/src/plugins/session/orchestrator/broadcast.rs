@@ -130,6 +130,46 @@ impl Convergence {
         ))
     }
 
+    /// 按 session_id 构造会话引擎实例——**三臂的唯一工厂口**
+    /// （[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决一：`PersistentChatSession`
+    /// 的两个构造器在驱动器侧只许经此调用，豁免恰一处 = `chat_loop/io.rs` 的缺句柄回退）。
+    ///
+    /// - `_t_` 前缀 → 内存 ephemeral 会话；
+    /// - 非空 id → 持久会话（走 [`Self::open_chat_session`]，构造点只有一处）；
+    /// - None/空 → 内存 ephemeral 会话（固定 id `"ephemeral"`）。
+    ///
+    /// 两类会话共用同一引擎，差异只在存储后端（审计 B1）；ephemeral 会话的配置取
+    /// 当前值的**快照**（内存会话不随 `session/config` 变更而变）。
+    ///
+    /// 消费方**只有一处**：`TurnLauncher::start_turn` 向 chat_ctx 交付会话句柄
+    /// （`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。没有对外 `session/open`
+    /// 路由消费它（对外返回进程内句柄），已退役——进程内句柄不该有对外路由。
+    pub(crate) async fn open_session_handle(
+        &self,
+        session_id: Option<String>,
+    ) -> Result<Arc<super::super::chat_session::PersistentChatSession>, PluginError> {
+        use super::super::chat_session::PersistentChatSession;
+
+        let snapshot = {
+            let cfg = self.config.read().await;
+            cfg.clone()
+        };
+
+        match session_id {
+            Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
+                self.open_chat_session(&sid).await
+            }
+            // `_t_` 前缀与空/缺省 id：内存临时会话，配置取当前值快照。
+            // 固定 id "ephemeral"（审计 B2）：随机 id 会让压缩前的 transcript
+            // 转存落到永不复现的目录名下，成为无法关联的孤儿存档。
+            Some(sid) => Ok(Arc::new(PersistentChatSession::detached(sid, snapshot))),
+            None => Ok(Arc::new(PersistentChatSession::detached(
+                "ephemeral",
+                snapshot,
+            ))),
+        }
+    }
+
     /// 集中收敛"业务错误 + 状态收敛"：收敛为「失败」结局。
     ///
     /// **目的**：所有可恢复错误路径都必须保证运行态收敛到"不在跑"，

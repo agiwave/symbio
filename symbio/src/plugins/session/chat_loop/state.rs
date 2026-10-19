@@ -546,20 +546,24 @@ impl CompressionEmitter {
             .await;
     }
 
-    /// 压缩请求的**增量改道落点**：返回直连本会话转写唯一写入点的 writer（仅由
-    /// `context::pipeline` 的过滤桥消费——摘要帧经白名单改写后从这里进转写）。
+    /// 压缩请求的**增量改道落点**：返回直连本会话转写唯一写入点的 writer。
+    ///
+    /// 桥（`TranscriptWriterBridge`）与它的构造口 [`compression_writer`] 都在转写域——
+    /// 锁 `Transcript` 的字段不许住在驱动器里（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081")
+    /// 裁决一第 3 条）；这里只剩「把本会话的转写 `Arc` 交给构造口」的一次调用。
+    /// 仅由 `context::pipeline` 的过滤桥消费——摘要帧经白名单改写后从这里进转写。
     ///
     /// ## 为什么复用转写而不是另开一条通道
     ///
     /// 增量落点是「在途图 + 位置号 + 发布」三件事的合成：另开通道等于把这套收敛
     /// 逻辑再实现一遍，且必然漂移。压缩期本转写的唯一常规写入者（消费循环）正等
     /// 着压缩完成，不存在写竞争——这与 `begin` / `finish` 经同一入口写是同一个理由。
+    ///
+    /// [`compression_writer`]: super::super::transcript::compression_writer
     pub(crate) fn transcript_writer(
         &self,
     ) -> std::sync::Arc<dyn crate::symbio_core::ExecTranscriptWriter> {
-        std::sync::Arc::new(TranscriptWriterBridge {
-            transcript: self.state.transcript.clone(),
-        })
+        super::super::transcript::compression_writer(self.state.transcript.clone())
     }
 
     /// 落库回包用的**发布通道**（[`PublishTarget::Transcript`]：按会话 id 现场解析转写）。
@@ -587,7 +591,7 @@ impl CompressionEmitter {
 /// ## 为什么需要它
 ///
 /// `run_chat_loop` 是自由函数，拿不到插件实例；而"抽干"要读**取批那三样**（上界、
-/// 队列、通知表，见 [`super::super::transcript::inbox::take_inbox_batch_sync`]）。
+/// 队列、通知表，见 [`super::super::transcript::supplements::take_supplement_batch_sync`]）。
 /// 所以由调用方（`orchestrator::consume`）在构造 `ChatOrchestrator` 时把这个持有者
 /// 一并交进来。
 ///
@@ -599,43 +603,16 @@ impl CompressionEmitter {
 ///
 /// ## 它只做一件事
 ///
-/// 取批（[`super::super::transcript::inbox::take_inbox_batch_sync`]）+ 合并
-/// （`merge_supplements`），**不写任何地址、不落格、不落库**：抽干发生在工具循环的
-/// **批次边界**，落格与「进下一次请求」都在 `turn_exec.rs` 的 `supplement_into_request`
+/// 委托转写域的单一入口 [`super::super::transcript::supplements::take_supplement_batch_sync`]
+/// （取批 + 合并 + 成形三步整体住在本域，见
+/// [ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三），**不在驱动器侧
+/// 自拼步骤、不写任何地址、不落格、不落库**：抽干发生在工具循环的**批次边界**，
+/// 落格与「进下一次请求」都在 `turn_exec.rs` 的 `supplement_into_request`
 /// （由 `turn_runner.rs` 的 2f 触发）。
 pub struct SupplementDrain {
     config: Arc<tokio::sync::RwLock<crate::plugins::session::config::SessionConfig>>,
     change_subs: Arc<crate::symbio_core::VdfsChangeSubscriptions>,
     pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
-}
-
-/// 抽干结果：**正文 + 原条数 + 溯源身份**。
-///
-/// `InboxItem` 是 `transcript::inbox` 的私有类型，抽干口不返回它——
-/// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
-///
-/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方
-/// （`turn_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
-/// 多带一个字段就是给下一个人留一个不必有的理由。
-#[derive(Debug, Clone)]
-pub(crate) struct DrainedSupplement {
-    /// 折进 prompt 的正文（多条已合并）。
-    pub text: String,
-    /// **原条数**：合并了 n 条时是 n。
-    ///
-    /// 记下来是因为「模型收到一大段」与「用户连说了 5 句」对模型是不同的输入，
-    /// 而事实网格不该只保留前者。
-    pub count: u64,
-    /// 合并消息的 **id** = **第一条补充的 id**（`merge_supplements` 的既有约定）。
-    ///
-    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧（`useChatConnection.ts`），
-    /// 换 id 等于让同一句话在前端**出现两条**。t19 的 B 幕断言钉的就是「沿用 b2」。
-    pub id: String,
-    /// 批内**原始条目 id 列表**（顺序 = 入队顺序）。
-    ///
-    /// 落进 `meta.supplement_ids`：前端与事后审计都要能回答「这一条合并了几条、
-    /// 分别是哪几条」（t19 的 B 幕断言钉的就是这个列表）。
-    pub ids: Vec<String>,
 }
 
 impl SupplementDrain {
@@ -660,68 +637,22 @@ impl SupplementDrain {
     /// 不该为了「等一个异步取件」而开出 async trait，那会把整个 `run_with_tools`
     /// 的接口面染成 async（它现在是同步调 LLM 适配器的）。
     ///
-    /// 于是取件这一步在插件侧桥成同步。**判定与取件逻辑不复制**：真源是
-    /// [`super::super::transcript::inbox::take_inbox_batch_sync`]（`supplements_enabled = false`
-    /// 时它退化为"取一条"，与本函数的合并叠加后恰好等于"一条消息 = 一轮"的今天行为）。
+    /// 于是取件这一步在插件侧桥成同步。本体只是**一行委托**：
+    /// [`super::super::transcript::supplements::take_supplement_batch_sync`]
+    /// （[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三——「到达」归存储，
+    /// 驱动器只掌握要的时机）。返回 `None` = 队列为空，调用方据此**什么都不做**。
     ///
-    /// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
-    /// 不推进 `last_saved`、不落库。
-    ///
-    /// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
+    /// ⚠️ **调用方负责 `block_in_place`**：委托的入口内部用 `blocking_read`，若在
     /// 单线程 runtime 的 async 上下文里直接调会 panic。`turn_exec` 的注入闭包里有
     /// flavor 判定（多线程才 `block_in_place`，否则裸调）。
-    pub fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
-        let batch = crate::plugins::session::transcript::inbox::take_inbox_batch_sync(
+    pub fn take_inbox_batch_sync(
+        &self,
+    ) -> Option<super::super::transcript::supplements::DrainedSupplement> {
+        super::super::transcript::supplements::take_supplement_batch_sync(
             &self.config,
             &self.change_subs,
             &self.state,
-        );
-        let merged = crate::plugins::session::transcript::supplements::merge_supplements(&batch)?;
-        let count = merged
-            .meta
-            .as_ref()
-            .and_then(|m| {
-                m.get(crate::plugins::session::transcript::supplements::META_SUPPLEMENT_COUNT)
-            })
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1);
-        Some(DrainedSupplement {
-            text: merged
-                .content
-                .as_ref()
-                .map(|c| c.to_text())
-                .unwrap_or_default(),
-            count,
-            id: merged.id,
-            ids: merged
-                .meta
-                .as_ref()
-                .and_then(|m| {
-                    m.get(crate::plugins::session::transcript::supplements::META_SUPPLEMENT_IDS)
-                })
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        })
-    }
-}
-
-/// [`CompressionEmitter::transcript_writer`] 的落点：一个只做「锁转写 → apply」
-/// 的最小 writer（合成 [`crate::symbio_core::ExecTranscriptWriter`] 的桥，与
-/// `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，压缩增量
-/// 用不上）。
-struct TranscriptWriterBridge {
-    transcript: std::sync::Arc<tokio::sync::Mutex<super::super::transcript::Transcript>>,
-}
-
-#[async_trait::async_trait]
-impl crate::symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
-    async fn apply(&self, message: ChatNode) {
-        self.transcript.lock().await.apply(message);
+        )
     }
 }
 

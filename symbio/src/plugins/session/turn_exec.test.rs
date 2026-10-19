@@ -183,7 +183,7 @@ async fn supplements_become_facts_visible_next_turn() {
                 return None;
             }
             *once = true;
-            Some(super::super::chat_loop::state::DrainedSupplement {
+            Some(super::super::transcript::supplements::DrainedSupplement {
                 text: "顺便也看看 README".into(),
                 count: 2,
                 id: "sup-1".into(),

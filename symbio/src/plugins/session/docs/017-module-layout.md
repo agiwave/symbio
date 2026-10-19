@@ -41,8 +41,8 @@ created: 2026-09-16
 |---|---|
 | `mod.rs` | 模块声明与公共面收敛 |
 | `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发与**退役路由的防回潮断言**、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
-| `orchestrator.rs` + `orchestrator/{entry,consume,runner,broadcast,failure,sink,rate_limit}.rs` | 会话编排，两个**手柄**各带自己的 `impl` 块：`TurnLauncher`（`runner.rs`，「开跑一轮」端口——请求装配、Turn 消费循环与自动命名，[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）与 `Convergence`（`broadcast.rs` / `failure.rs`，状态广播唯一出口与失败收口）；另有执行期事件落地（`sink.rs`）与发送限流（`rate_limit.rs`，唯一消费方是 `consume`） |
-| `chat_loop.rs` + `chat_loop/{state,inputs,turn,io}.rs` | 主循环骨架、状态与契约、输入准备与压缩响应、单轮尾结算、循环内的落库与广播出口 |
+| `orchestrator.rs` + `orchestrator/{entry,consume,runner,broadcast,failure,sink,rate_limit}.rs` | 会话编排，两个**手柄**各带自己的 `impl` 块：`TurnLauncher`（`runner.rs`，「开跑一轮」端口——请求装配、Turn 消费循环与自动命名，[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）与 `Convergence`（`broadcast.rs` / `failure.rs`，状态广播唯一出口与失败收口；会话句柄的**三臂构造工厂** `open_chat_session` / `open_session_handle` 也收拢在此——持久 / `_t_` / 缺省三臂，构造只经这一个手柄，[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决一第 2 条）；另有执行期事件落地（`sink.rs`）与发送限流（`rate_limit.rs`，唯一消费方是 `consume`） |
+| `chat_loop.rs` + `chat_loop/{state,inputs,turn,io,delegate}.rs` | 主循环骨架、状态与契约、输入准备与压缩响应、单轮尾结算、循环内的落库与广播出口；委派段 `delegate.rs` 只留 Q1 判定 / Q2 能力目录与三段合成，Q3 进展的类型与读法已整体归 `worker_progress.rs`（ADR-081 裁决一第 4 条） |
 | `loop_registry.rs` | **策略表**：每行 = 一个纯判据 `fn(&LoopState) -> Option<Capsule>` + 它派发的臂，按 `(prio, name)` 升序先命中者胜；环只问表「下一步是什么」，加策略 = 一个函数 + 一行注册（[PL-014](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") §4 机制 2 的第一步） |
 
 ### 1.2 领域层
@@ -52,7 +52,7 @@ created: 2026-09-16
 | 上下文治理 | `context.rs` + `context/{pipeline,view,prompt}.rs` | 压缩策略与执行流水线（压缩内核 `compress_with_snapshot_core` 的唯一落点是 `context/pipeline.rs`）、请求级注入段（`view.rs` 只排三段、不改写历史，见 ADR-078）、压缩提示词协议 |
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
-| 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
+| 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息，且「取批 + 合并 + 成形」的整体同步单入口 `take_supplement_batch_sync` 也住在本域（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算；单入口归位见 [ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三）、core 执行期转写写柄的桥 `compression_writer`（`transcript.rs`——驱动器不再把 `Arc<Mutex<Transcript>>` 持作字段，经本域构造的写柄落格，裁决一第 3 条）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
 | 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档；域根 `tools.rs` 是对编排层的门面 |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
@@ -64,6 +64,7 @@ created: 2026-09-16
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
 | 派生事实 | `derived_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `turn_exec`——[ADR-048](../../../../../docs/010-adr/048.md) |
+| worker 进展 | `worker_progress.rs` | Q3（worker 进展）的**唯一归属**：`WorkerProgress` 类型、旧落库读法（`progress_of`）与 WAL 读法（`progress_from_wal`）、逐子会话编排的存储侧单入口 `for_session`——驱动器（`chat_loop/inputs.rs`）只调这一个入口，「枚举 + 加载 + 复核 + 读法」这条链不在驱动器侧自拼（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决一第 4 条） |
 
 ### 1.3 支撑单件（一文件一职责）
 
