@@ -19,10 +19,15 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
-import { derive, fingerprintOf, describe, budget, machine } from './gate.d/_machine.mjs'
+import { derive, fingerprintOf, describe, budget, machine, setBatchLanes } from './gate.d/_machine.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
+
+// 本文件里的预算判据断言的是**绝对值**（「1s 实测 ⇒ 2.5s」），而那些绝对值只在
+// 「独占机器」时成立。本文件自己也是门禁的子进程，会继承 `GATE_BATCH_LANES=5`——
+// 不钉住就会变成「判据没改、结果 ×5」，报出来的红指向判据而不是继承。
+setBatchLanes(1)
 
 /**
  * 跑 `gate.mjs`：stdin 给 `'ignore'`（真交互 / 真等待会挂），并给**显式 timeout**——
@@ -448,6 +453,27 @@ test('★ 超时预算：只放大不缩小，且有上限（防止「越超时�
   // 没有历史 ⇒ 按单核探针放大（只放大不缩小）
   assert.equal(budget({ cpuScale: 3, calibration: { tasks: {} } }, 'k', 1000), 3000)
   assert.equal(budget({ cpuScale: 0.5, calibration: { tasks: {} } }, 'k', 1000), 1000)
+})
+
+test('★ 批内争用必须进超时预算（否则「拉完 Rust 改动」那一轮必假红）', () => {
+  // 历史：独占机器时 40s。静态基准 100s（`baseMs` 就是仓里原来写死的那个数）。
+  const m = { cpuScale: 1, calibration: { tasks: { k: { ms: [40000] } } } }
+  setBatchLanes(1)
+  const solo = budget(m, 'k', 100000)
+  assert.equal(solo, 100000, `独占时 = 中位数 40s × 2.5：${solo}`)
+
+  // 批内 5 条泳道 ⇒ 每条只拿到约 1/5 的机器
+  setBatchLanes(5)
+  const shared = budget(m, 'k', 100000)
+  assert.ok(shared >= 499000, `5 条泳道分机器 ⇒ 预算应约 ×5（实际 ${shared}）`)
+
+  // 上限**不**乘泳道数：它是「多久算挂死」的硬边界（基准 × 6 = 600s）
+  const verySlow = { cpuScale: 1, calibration: { tasks: { k: { ms: [900000] } } } }
+  assert.equal(budget(verySlow, 'k', 100000), 600000, '上限 = 基准 × 6，不随批的形状漂移')
+
+  // 回到独占必须回到原值：批后的串行阶段（verify / vite build / e2e）不该继承批内系数
+  setBatchLanes(1)
+  assert.equal(budget(m, 'k', 100000), solo, '独占必须回到原值——系数只在批内生效')
 })
 
 test('★ 机器档案必须能打印成人读的一行，且探测成本可忽略', async () => {

@@ -6,9 +6,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { processIdentity, assertIdentity, inspectPE, run, validateConfig } from './windows-restart-prepare.mjs';
+import { machine, budget } from './gate.d/_machine.mjs';
 
 const script = fileURLToPath(new URL('./windows-restart-prepare.mjs', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// 真实 cargo 构建的预算：夹具每次都是**冷编译**（临时目录、无缓存），又跑在 docs
+// 阶段 8 路并发的批里。写死 90s 会在「同批还有 cargo 全量重编译」的那一轮必然假红
+// ——实测该轮整条测试 91s（单独跑 48s），3 条子测试因构建超时失败。
+// 用与门禁其它任务同一套 `budget()`：中位数 × 2.5 × 批内泳道数，只放大不缩小。
+const buildBudgetMs = budget(await machine(), 'docs::windows-restart-prepare::cargo build', 90_000);
 
 test('Windows prepare-only: real Cargo fixture and safety boundaries', { skip: process.platform !== 'win32' }, async t => {
   // The explicit target is THIS test process, never a discovered Symbio host.
@@ -28,12 +35,12 @@ test('Windows prepare-only: real Cargo fixture and safety boundaries', { skip: p
   const baseline = fs.readFileSync(target.exe);
   const config = { target, cargoExe: cargo, buildCwd: project, manifest: path.join(project, 'Cargo.toml'),
     bin: 'prepare-fixture', triple: 'x86_64-pc-windows-msvc', stageRoot: stages,
-    cancelFile: path.join(root, 'cancel.flag'), timeoutSeconds: 60 };
+    cancelFile: path.join(root, 'cancel.flag'), timeoutSeconds: Math.round(buildBudgetMs / 1000) };
   const configFile = path.join(root, 'config.json');
   const invoke = async (c, execute = true) => {
     fs.writeFileSync(configFile, JSON.stringify(c));
     return run(process.execPath, [script, '--config', configFile, ...(execute ? ['--execute'] : [])],
-      { cwd: root, timeoutMs: 90000, capture: true });
+      { cwd: root, timeoutMs: buildBudgetMs, capture: true });
   };
   const stageNames = () => fs.readdirSync(stages);
   const assertUntouched = async () => {

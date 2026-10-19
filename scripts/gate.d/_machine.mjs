@@ -118,6 +118,42 @@ const BUDGET_FACTOR = 2.5
 /** 预算相对静态基准的放大上限。防止「越超时 → 预算越大 → 更久才发现挂死」的正反馈。 */
 const BUDGET_MAX_GROWTH = 6
 
+/**
+ * 同一批里同时跑了几条泳道。由 `gate.mjs` 在启动一批前设置，`budget()` 用它把
+ * 「独占机器时的耗时」换算成「与别人分机器时的耗时」。
+ *
+ * 为什么预算必须知道这个数：批内 5 条泳道（backend 的 cargo、msrv 的 cargo、
+ * frontend-static 的 vitest/vue-tsc、docs 的 8 路审计、baseline）同时跑，每条
+ * 实际只拿到约 1/5 的机器，同一件事的墙钟就要长好几倍。而校准历史里的样本
+ * **几乎全部来自「这条泳道独占机器」的轮次**——中位数对「同时还有别人在抢」
+ * 一无所知，`中位数 × 2.5` 够不上。
+ *
+ * 实测（2026-10-19，拉完 4 个 Rust 改动后那一轮，backend 全量重编译）：
+ *   vue-tsc   18–32s → 183s（6–9×）
+ *   eslint    21–30s → 117s（4–5×）
+ *   vitest    41–78s → 300s 仍未完 ⇒ 判超时（它不是假红，也确实没挂死）
+ * 同一批里 docs 的 8 路 io 审计与 cargo 一起把磁盘压满——所以这里按**整批泳道数**
+ * 算，而不是只数「吃 CPU 的那几条」：把 `docs` 排除在外会低估一半的争用。
+ */
+let batchLanes = Math.max(1, Math.floor(Number(process.env.GATE_BATCH_LANES) || 1))
+
+/**
+ * 设置当前这批的泳道数（`gate.mjs` 在批开始前调用）。
+ *
+ * 同时写回环境变量：门禁的不少检查是**子进程**（`node --test` 的回归测试、
+ * vitest），它们在自己的进程里 import 本模块，看不到这里的模块变量。不传下去，
+ * 子进程里的 `budget()` 会一律按「独占」算——那正是要修的那个错误。
+ */
+export function setBatchLanes(n) {
+  batchLanes = Math.max(1, Math.floor(Number(n) || 1))
+  process.env.GATE_BATCH_LANES = String(batchLanes)
+}
+
+/** 当前批的泳道数（打印与判据用）。 */
+export function lanes() {
+  return batchLanes
+}
+
 // ── 探针 ────────────────────────────────────────────────────────────────
 
 /**
@@ -385,12 +421,19 @@ export async function machine() {
  *
  * 规则：
  *
- * 1. 有历史（≥1 轮通过）：`中位数 × 2.5`，钳在 `[baseMs, baseMs × 6]`。
+ * 1. 有历史（≥1 轮通过）：`中位数 × 2.5 × 批内泳道数`，钳在 `[baseMs, baseMs × 6]`。
  *    下限取 `baseMs` 而不是历史值，是因为**预算只该因机器变慢而变大，不该因
  *    机器变快而缩小**：缩小唯一的效果是把「偶发慢」变成「偶发红」。
- * 2. 无历史：`baseMs × max(1, cpuScale)`。慢机首跑不至于一上来就假红。
+ * 2. 无历史：`baseMs × max(1, cpuScale) × 泳道数`。慢机首跑不至于一上来就假红。
  * 3. 上限 `baseMs × 6`：防止「超时 → 记更大的数 → 更久才发现挂死」的正反馈。
- *    一轮门禁最坏多等几分钟可以接受，等半小时不行。
+ *    一轮门禁最坏多等几分钟可以接受，等半小时不行。**上限不乘泳道数**——它是
+ *    「多久算挂死」的硬边界，不该随批的形状漂移；否则 5 条泳道下最坏会等 30 倍
+ *    基准（`windows-restart` 那档是 4 小时），挂死反而更晚被发现。
+ *
+ * **为什么乘泳道数**（`setBatchLanes`）：历史样本是「独占机器」时测的，而同一批
+ * 里有 5 条泳道同时跑时，每条只拿到约 1/5 的机器 ⇒ 同一件事的墙钟要长好几倍。
+ * 不乘这一项，「拉完 Rust 改动、backend 全量重编译」的那一轮必然假红（实测见
+ * `setBatchLanes` 的注释）。独占时泳道数 = 1，预算与改动前完全等价。
  *
  * ⚠️ **预算不是判据**。它只决定「等多久算挂死」。改它不改变任何一条判定，
  * 只改变「挂死被发现得多晚」。这正是它允许自校准的原因——判据值不能自校准。
@@ -398,10 +441,11 @@ export async function machine() {
 export function budget(m, key, baseMs) {
   const hist = m.calibration.tasks?.[key]?.ms ?? []
   const measured = median(hist.slice(-HISTORY_WINDOW))
+  const lanes = batchLanes
   const floor = baseMs
   const ceil = baseMs * BUDGET_MAX_GROWTH
-  if (measured != null) return clamp(Math.round(measured * BUDGET_FACTOR), floor, ceil)
-  return clamp(Math.round(baseMs * Math.max(1, m.cpuScale)), floor, ceil)
+  if (measured != null) return clamp(Math.round(measured * BUDGET_FACTOR * lanes), floor, ceil)
+  return clamp(Math.round(baseMs * Math.max(1, m.cpuScale) * lanes), floor, ceil)
 }
 
 /**

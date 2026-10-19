@@ -93,7 +93,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
-import { machine, describe, budget, recordRun, measuredMs } from './gate.d/_machine.mjs'
+import { machine, describe, budget, recordRun, measuredMs, setBatchLanes } from './gate.d/_machine.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -780,6 +780,11 @@ async function runStage(s, index) {
 async function runStageBatch(batch) {
   const cap = MACHINE?.tier === 'low' ? 2 : Math.max(2, CONCURRENCY)
   const limit = Math.min(batch.length, cap)
+  // 批内争用进超时预算：本批有几条泳道，就按几条分机器来算预算
+  // （见 `_machine.setBatchLanes`）。为什么是**整批**而不是只数吃 CPU 的那几条：
+  // 实测那轮超时里，docs 的 8 路 io 审计与 cargo 一起把磁盘压满，把 `docs` 排除
+  // 在外会低估一半的争用。
+  setBatchLanes(batch.length)
   let cursor = 0
   const worker = async () => {
     for (;;) {
@@ -800,7 +805,12 @@ const gateStarted = Date.now()
 // 某些阶段**不能**标），判据在各阶段自己的文件头。计划在打印处已算出（`lanePlan`）。
 for (const group of lanePlan) {
   if (group.lanes.length > 1) await runStageBatch(group.lanes)
-  else await runStage(group.lanes[0].s, group.lanes[0].idx)
+  else {
+    // 单泳道 = 独占机器：预算回到「不乘任何争用系数」的原点。不重置的话，
+    // 批后那些串行阶段（verify / vite build / e2e）会继承批内的放大系数。
+    setBatchLanes(1)
+    await runStage(group.lanes[0].s, group.lanes[0].idx)
+  }
 }
 
 /** 汇总并给退出码。**中断时也走这里**（见下方 SIGINT/SIGTERM）——已跑完的结果、
