@@ -58,7 +58,7 @@ board.columns: [rank, deps, evidence, reason]
 <!-- list:task-entries owner -->
 
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
-> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
+> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
 **计数**：☐ todo 1 · 🟡 doing 1 · ☑ done 161 · ❌ wont 3（共 166）
 
