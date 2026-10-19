@@ -3,7 +3,9 @@
 //!
 //! ## 族是**一个一个**落位的（Tool ✓ → Model ✓ → Prompt ✓ → Mount ✓ → Option ✓ → Configurable ✓）
 //!
-//! [`CapabilityRowKind`] 现有七个值（`Policy` 随步骤 6 与 `State` / `Step` 一并定义），
+//! [`CapabilityRowKind`] 现有六个值，**且只装得住「在共享地址上被 ≥2 个消费方看见」的族**
+//! （[ADR-089](../../../../docs/010-adr/089.md)：`Policy` 变体已删除——策略的判据依赖 loop 私有的
+//! `LoopState`，它接不上这张表，不是「还没接上」），
 //! [`CapabilityRowPayload`] 随各族落地长变体：4a `Tool`、4b `Model`、4c `Prompt`、
 //! 4d `Mount`、4e `Option` + `Configurable`（连同两个专服单族的 trait 退场）。
 //! 提前把值写齐的理由：`list(kind)` 的签名由此在 4b–4e **不再变形**（加一个族
@@ -35,7 +37,7 @@
 //! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 session 的
 //! `loop_registry`——三处各住各的，见 AR-025 §3。
 
-use crate::symbio_core::schemas::detail::DetailField;
+use crate::symbio_core::DetailField;
 use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsItem, VdfsProvider};
 use std::sync::Arc;
 
@@ -52,9 +54,6 @@ const MOUNT_ROOT_ROW: &str = "<root>";
 /// 六个值的落位时序见本模块文档；本批只有 [`CapabilityRowKind::Tool`] 可达。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CapabilityRowKind {
-    /// 策略行：纯决策（`fn(&State) -> Option<Step>`），无副作用。
-    /// **本批不存在**——它是 session 的私有知识，随步骤 6 入表。
-    Policy,
     /// 能力行：LLM 可见工具（可调用对象）。
     Tool,
     /// 模型服务（生效者单槽 + 已启用目录）。

@@ -24,7 +24,7 @@ const CAPABILITY_FILES = [
   'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
   'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
   'symbio/src/plugins/session/stats.rs',
-  'symbio/src/symbio_core/schemas/session/rebuild.rs',
+  'symbio/src/symbio_core/projection/rebuild.rs',
   'symbio/src/plugins/session/transcript/inbox.rs',
   'symbio/src/plugins/session/transcript/autonomous.rs',
   'symbio/src/plugins/session/message_events.rs',
@@ -123,7 +123,7 @@ test('FB-002 正例：词只出现在注释里不算违规', () => {
 
 test('FB-002 反例：清单里的文件不见了 ⇒ 红（清单与结构漂移）', () => {
   const files = repo()
-  delete files['symbio/src/symbio_core/schemas/session/rebuild.rs']
+  delete files['symbio/src/symbio_core/projection/rebuild.rs']
   const r = audit(files)
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /FB-002/, out(r))

@@ -1165,7 +1165,7 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
         .decide(&reflex_state)
         .map(|h| h.capsule)
     {
-        Some(super::loop_registry::Capsule::REFLEX) => matched,
+        Some(super::loop_registry::Capsule::Reflex) => matched,
         _ => None,
     };
 

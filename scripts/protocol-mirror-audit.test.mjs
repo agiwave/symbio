@@ -33,9 +33,9 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
-const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_node.rs'
+const CHAT_RS = 'symbio/src/symbio_core/chat/chat_node.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
+const DETAIL_RS = 'symbio/src/symbio_core/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'

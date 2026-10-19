@@ -47,10 +47,14 @@
 //! `policy.compress` 要 `auto_compress`，
 //! `policy.recall` 要 `has_facts`。两个决策点的状态因此不会互相误命中。
 //!
-//! 也因此 **`prio` 目前仍不参与裁决**——没有两行会在同一格同时命中。它仍然必须
-//! 存在并被检查：真正同点竞争的只有 `policy.recall` 内部那三件事（记忆 / 技能 /
-//! 任务段），而它们在直线代码里就是一段 `if`，拆开需要「这一步做完了吗」这个
-//! 簿记量。现在就把 fail-fast 立起来，比那时再补便宜。
+//! **`prio` 真的参与裁决**：`put` 按 `(prio, name)` 插入到有序位置，`decide` 顺序
+//! 扫描取先命中者——所以「先」由 `prio` 决定，不由注册顺序或名字拼写决定。
+//! 但今天的内建表里**没有两行会在同一格同时命中**，于是这条规则事实上从未被
+//! 行使过：用例 `lower_prio_wins_regardless_of_insertion_order` 用两行同格竞争的
+//! 合成表把它钉住，否则「prio 生效」只是一句读代码得来的信念。
+//!
+//! 真正同点竞争的候选是 `policy.recall` 内部那三件事（记忆 / 技能 / 任务段）：
+//! 拆开需要「这一步做完了吗」这个簿记量，而它在直线代码里只能靠代码位置隐含。
 //!
 //! ## 本批的过渡形态（诚实划界）
 //!
@@ -66,7 +70,7 @@
 //! ## 反射档为什么只判「走不走」，不判「走哪条」
 //!
 //! `policy.reflex` 的判据是 `resume_allowed ∧ has_match`，命中后返回
-//! [`Capsule::REFLEX`]——**胶囊不携带命中的那条技能**。这不是漏了载荷：
+//! [`Capsule::Reflex`]——**胶囊不携带命中的那条技能**。这不是漏了载荷：
 //! 技能对象留在调用方手里（`turn_exec` 的 `hit`），表只回答"这一格要不要走快路"。
 //!
 //! 两者不会漂移，因为 `has_match` 就是**同一个** `hit` 派生出来的布尔：判的是它、
@@ -82,32 +86,54 @@ use super::chat_loop::ProgressPolicy;
 ///
 /// 名字是"臂"不是"插件"：环不认识插件，只认识"该跑哪段执行体"。步骤 4 之后
 /// 胶囊长出带类型的入参（`Capsule { cap, args }`），届时本类型是它唯一的构造口。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Capsule(pub(crate) &'static str);
+///
+/// ## 为什么是**闭集枚举**，不是 `&'static str`
+///
+/// 2026-10-19 之前它是 `struct Capsule(&'static str)`：臂名是自由字符串，
+/// 加一条新臂可以拼错、可以重名、可以在日志里出现一个环里根本没有的字符串——
+/// 而**没有任何东西会红**。闭集之后，拼错是编译错误；`name()` 是臂名的唯一来源
+/// （日志、冲突报错、测试断言都从这里取），表与环不可能各持一份字面量。
+///
+/// 代价是「加一条臂要改这个枚举」——**这正是想要的**：臂是环认识的**指令集**，
+/// 不是插件可自由扩展的注册项。表能自由扩的是「哪一行在什么时候认领」，不是
+/// 「环会做什么」。两者的分界就是本枚举。
 
-impl Capsule {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Capsule {
     /// 轮首判决：问 `classify` 这一轮该派活还是直接答，再交 `compose` 出话。
     ///
     /// 判决与措辞是同一条臂的两段（`decide` → `apply_verdict`），不拆成两个胶囊：
     /// 拆开会让"判决说了什么"变成环要在两格之间记住的量，而它此刻只是局部变量。
-    pub(crate) const DECIDE: Self = Self("decide");
-
+    Decide,
     /// 轮边界汇报：`compose` 的模板产线说一句"干到哪了"。
-    pub(crate) const REPORT: Self = Self("report");
-
+    Report,
     /// 自动语义压缩（L1，70% 触发）：就地改写上下文。
-    pub(crate) const COMPRESS: Self = Self("compress");
-
+    Compress,
     /// 轮首准备：长期记忆召回 + 技能路由 + 就绪任务段。
     ///
     /// 三件事一个胶囊，因为它们共用**同一个前提**（有落盘目录）与**同一个时机**
     /// （本轮第一次请求之前），且在直线代码里就是同一段 `if`。拆成三个胶囊需要
     /// 「这一步做完了吗」这个簿记量，而它只在 drive 循环里才自然存在——见
     /// 模块文档「本批的过渡形态」。
-    pub(crate) const RECALL: Self = Self("recall");
-
+    Recall,
     /// 反射档（快路）：命中已编译技能 ⇒ 以技能正文收束，一次模型调用都不发生。
-    pub(crate) const REFLEX: Self = Self("reflex");
+    Reflex,
+}
+
+impl Capsule {
+    /// 臂名——日志、冲突报错、测试断言**唯一**的取值点。
+    ///
+    /// 名字与枚举变体一一对应，改名时编译器会指出每一处 `match`；字符串只在
+    /// 这一屏出现一次，所以「日志里写着 `decide`、代码里却叫别的」不可能发生。
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Decide => "decide",
+            Self::Report => "report",
+            Self::Compress => "compress",
+            Self::Recall => "recall",
+            Self::Reflex => "reflex",
+        }
+    }
 }
 
 /// 策略行看到的**全部世界**（PL-014 §3 硬规则 a：只携带引用/值，不带句柄）。
@@ -414,7 +440,7 @@ pub(crate) fn builtin() -> &'static Registry {
 /// - `has_utterance`：`resume` / 心跳 / 无发言轮次没有可判的话。
 /// - `classify_enabled`：调用方关掉判决 ⇒ 与未挂载 `classify` 逐字一致（全进工具循环）。
 fn policy_classify(state: &LoopState) -> Option<Capsule> {
-    (state.round == 0 && state.has_utterance && state.classify_enabled).then_some(Capsule::DECIDE)
+    (state.round == 0 && state.has_utterance && state.classify_enabled).then_some(Capsule::Decide)
 }
 
 /// 轮边界汇报的判据（`chat_loop::round_report_hook` 每跑完一个工具批次问一次）。
@@ -428,7 +454,7 @@ fn policy_report(state: &LoopState) -> Option<Capsule> {
         && state
             .progress
             .due(state.quiet_ms, state.round, state.reports))
-    .then_some(Capsule::REPORT)
+    .then_some(Capsule::Report)
 }
 
 /// 自动语义压缩的判据（步骤 3 ①）。
@@ -437,7 +463,7 @@ fn policy_report(state: &LoopState) -> Option<Capsule> {
 /// 本行答的是"这一格要不要进压缩这条产线"。把水位也搬进来会变成两份阈值——
 /// 一份在 `auto_compress_process` 里真正生效，一份在这里只是重复判断。
 fn policy_compress(state: &LoopState) -> Option<Capsule> {
-    state.auto_compress.then_some(Capsule::COMPRESS)
+    state.auto_compress.then_some(Capsule::Compress)
 }
 
 /// 轮首准备的判据（步骤 3 ③）。
@@ -446,7 +472,7 @@ fn policy_compress(state: &LoopState) -> Option<Capsule> {
 ///   同一份视图（与 classify / history 同一条「每轮一次」口径）；
 /// - `has_facts`：临时会话没有事实源——没有事实源就没有记忆，不读不写。
 fn policy_recall(state: &LoopState) -> Option<Capsule> {
-    (state.round == 0 && state.has_facts).then_some(Capsule::RECALL)
+    (state.round == 0 && state.has_facts).then_some(Capsule::Recall)
 }
 
 /// 反射档的判据（步骤 3 ④）。两关缺一不可：
@@ -457,7 +483,7 @@ fn policy_recall(state: &LoopState) -> Option<Capsule> {
 ///   刚被用户批准的那次工具，不是拿技能顶掉它。
 /// - `has_match`：逐字命中一条已编译技能（判据是数据，见 `skill_events::take_match`）。
 fn policy_reflex(state: &LoopState) -> Option<Capsule> {
-    (state.resume_allowed && state.has_match).then_some(Capsule::REFLEX)
+    (state.resume_allowed && state.has_match).then_some(Capsule::Reflex)
 }
 
 #[cfg(test)]

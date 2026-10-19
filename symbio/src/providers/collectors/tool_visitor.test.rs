@@ -342,7 +342,6 @@ async fn tool_list_of_another_kind_is_empty() {
     let mgr = DefaultToolVisitor::new();
     mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
     assert!(mgr.list(CapabilityRowKind::Model).await.is_empty());
-    assert!(mgr.list(CapabilityRowKind::Policy).await.is_empty());
 }
 
 // ==================== 挂载族（AR-025 4d：挂载点与根同表，按根位区分） ====================

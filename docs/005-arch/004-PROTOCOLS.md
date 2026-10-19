@@ -234,8 +234,24 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 
 ## 数据契约 (Schemas)
 
-所有跨端数据结构集中定义在 [`symbio/src/symbio_core/schemas/`](../../symbio/src/symbio_core/schemas/)
-（该目录按业务域拆分，**文件清单以目录为准**，本文不抄一份会漂移的副本）。
+跨端数据结构**不再集中在一个目录**：每个结构住在「它描述什么」的那个域里
+（[ADR-087](../010-adr/087.md)）。原来的 `symbio_core/schemas/` 把三件不相关的
+事装进了同一个名字——会话线格式、对话面控制契约、宿主呈现方言——而它的存在又让
+这些类型绕过了 §1.2 的域前缀纪律（该目录曾是前缀规则的唯一豁免）。
+
+| 契约 | 住哪（`symbio_core::`） |
+|---|---|
+| 会话线格式（`ChatNode` 家族 / `Principal` / 两个入口请求） | [`chat/`](../../symbio/src/symbio_core/chat/)——叶子模块 `chat_node` / `principal` / `chat_request` / `session_chat` |
+| 对话面控制契约（`Verdict` / `DecideRequest` / `ComposeRequest` / `WordingReply` / `RunSnapshot`） | [`dialog/`](../../symbio/src/symbio_core/dialog/) |
+| 宿主呈现方言（`Detail*` / `Reading*`） | [`present/`](../../symbio/src/symbio_core/present/)——`detail` / `reading` |
+| 轮次面（`Turn*` / 动作载荷 / 压缩包） | [`turn/`](../../symbio/src/symbio_core/turn/)——`dispatch` / `node_build` / `facts` |
+| 插件扩展点（`HookEvent` / `HookOutput`）与路由回体（`SimpleResponse` / `SuccessResponse`） | [`plugin/`](../../symbio/src/symbio_core/plugin/)——`hook.rs` / `response.rs` |
+| 模型状态帧（`llm_emit_message` 等） | [`llm/`](../../symbio/src/symbio_core/llm/)——`frames.rs` |
+| 事件 → 状态的读侧重放（`rebuild`） | [`projection/`](../../symbio/src/symbio_core/projection/)——`rebuild.rs` |
+
+**文件清单以目录为准**，本文不抄一份会漂移的副本。命名与归属的机械判据是
+[`core-naming-audit`](../../scripts/core-naming-audit.mjs)，规则源是
+[内核 README §1.2 的域前缀对照表](../../symbio/src/symbio_core/README.md "symbio/src/symbio_core/README")。
 
 两条命名约定：
 

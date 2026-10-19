@@ -2,7 +2,9 @@
 
 mod dir;
 mod error;
+mod hook;
 mod ids;
+mod response;
 mod route;
 mod transport;
 mod traverse;
@@ -14,6 +16,9 @@ pub use dir::{
     PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
+pub(crate) use hook::fire_hook;
+pub use hook::{HookEvent, HookOutput};
+pub use response::{SimpleResponse, SuccessResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API
 pub(crate) use error::{lock_read, lock_write};
 pub use ids::{

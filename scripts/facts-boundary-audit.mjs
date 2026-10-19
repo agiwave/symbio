@@ -64,7 +64,7 @@ const CAPABILITY_FILES = [
   'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
   'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
   'symbio/src/plugins/session/stats.rs',
-  'symbio/src/symbio_core/schemas/session/rebuild.rs',
+  'symbio/src/symbio_core/projection/rebuild.rs',
   'symbio/src/plugins/session/transcript/inbox.rs',
   'symbio/src/plugins/session/transcript/autonomous.rs',
   'symbio/src/plugins/session/message_events.rs',

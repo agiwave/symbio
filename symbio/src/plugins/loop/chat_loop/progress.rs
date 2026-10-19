@@ -149,7 +149,7 @@ impl RoundProgress {
         super::super::loop_registry::builtin()
             .decide(&state)
             .map(|h| h.capsule)
-            == Some(super::super::loop_registry::Capsule::REPORT)
+            == Some(super::super::loop_registry::Capsule::Report)
     }
 
     /// 说了：配额 +1、静默时钟归零。

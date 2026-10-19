@@ -143,19 +143,19 @@ fn decide_takes_the_first_hit_only() {
     reg.put(Row {
         name: "policy.first",
         prio: 10,
-        decide: |_| Some(Capsule::DECIDE),
+        decide: |_| Some(Capsule::Decide),
     })
     .expect("注册");
     reg.put(Row {
         name: "policy.second",
         prio: 20,
         // 两行都认领同一格时，后者**不得**被问到（先命中者胜）。
-        decide: |_| Some(Capsule::REPORT),
+        decide: |_| Some(Capsule::Report),
     })
     .expect("注册");
     let hit = reg.decide(&head()).expect("首行命中");
     assert_eq!(hit.row, "policy.first");
-    assert_eq!(hit.capsule, Capsule::DECIDE);
+    assert_eq!(hit.capsule, Capsule::Decide);
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn decide_returns_none_when_no_row_claims_the_state() {
 fn classify_fires_at_turn_head() {
     assert_eq!(
         builtin().decide(&head()).map(|h| h.capsule),
-        Some(Capsule::DECIDE)
+        Some(Capsule::Decide)
     );
 }
 
@@ -208,7 +208,7 @@ fn classify_does_not_fire_when_switch_is_off() {
 fn report_fires_at_round_boundary() {
     assert_eq!(
         builtin().decide(&boundary()).map(|h| h.capsule),
-        Some(Capsule::REPORT)
+        Some(Capsule::Report)
     );
 }
 
@@ -275,7 +275,7 @@ fn report_interval_threshold_is_inclusive() {
     let state = LoopState::round_boundary(3, 60_000, 0, progress());
     assert_eq!(
         builtin().decide(&state).map(|h| h.capsule),
-        Some(Capsule::REPORT)
+        Some(Capsule::Report)
     );
 }
 
@@ -287,7 +287,7 @@ fn compress_follows_the_request_switch_only() {
         builtin()
             .decide(&LoopState::compress(true))
             .map(|h| h.capsule),
-        Some(Capsule::COMPRESS)
+        Some(Capsule::Compress)
     );
     // 关掉自动压缩 ⇒ 不进产线。压不压得动是内核的事，本行只管进不进。
     assert_eq!(builtin().decide(&LoopState::compress(false)), None);
@@ -299,7 +299,7 @@ fn reflex_requires_a_fresh_turn_and_a_match() {
         builtin()
             .decide(&LoopState::reflex(true, true))
             .map(|h| h.capsule),
-        Some(Capsule::REFLEX)
+        Some(Capsule::Reflex)
     );
     // 续写轮不走快路：它会撞幂等键（复用 `resume.user_seq` 却新开一轮）。
     assert_eq!(builtin().decide(&LoopState::reflex(false, true)), None);
@@ -313,7 +313,7 @@ fn recall_requires_first_round_and_a_session_dir() {
         builtin()
             .decide(&LoopState::turn_prepare(0, true))
             .map(|h| h.capsule),
-        Some(Capsule::RECALL)
+        Some(Capsule::Recall)
     );
     // 只差 `round == 0`：同一轮内记忆不漂移，事实源只扫一遍。
     assert_eq!(builtin().decide(&LoopState::turn_prepare(1, true)), None);
@@ -328,22 +328,22 @@ fn each_grid_point_hits_only_its_own_row() {
     // 每个构造器只填自己那几格，因此任何一格都不会命中别人的行。
     // 这条一旦破了，`decide` 的"先命中者胜"就会把另一格的动作顶掉。
     let cases: [(&str, LoopState, Capsule); 5] = [
-        ("policy.classify", head(), Capsule::DECIDE),
-        ("policy.report", boundary(), Capsule::REPORT),
+        ("policy.classify", head(), Capsule::Decide),
+        ("policy.report", boundary(), Capsule::Report),
         (
             "policy.compress",
             LoopState::compress(true),
-            Capsule::COMPRESS,
+            Capsule::Compress,
         ),
         (
             "policy.recall",
             LoopState::turn_prepare(0, true),
-            Capsule::RECALL,
+            Capsule::Recall,
         ),
         (
             "policy.reflex",
             LoopState::reflex(true, true),
-            Capsule::REFLEX,
+            Capsule::Reflex,
         ),
     ];
     for (row, state, capsule) in cases {
@@ -351,4 +351,80 @@ fn each_grid_point_hits_only_its_own_row() {
         assert_eq!(hit.row, row, "命中行不对：{hit:?}");
         assert_eq!(hit.capsule, capsule);
     }
+}
+
+// ── 裁决顺序：`prio` 说话，不是插入顺序 ─────────────────────────────────
+
+#[test]
+fn lower_prio_wins_regardless_of_insertion_order() {
+    // 两行**同一格都命中**（都返回 `Some`），只有 `prio` 能决定谁先。
+    // 先注册 prio 30、再注册 prio 10：如果实现按插入顺序扫描，胜者会是先注册
+    // 那一行；按 `prio` 排序则胜者是 10。这一条把两种实现分开。
+    //
+    // 内建表今天没有同格竞争，所以「prio 生效」只能靠这张合成表来证。
+    let mut reg = Registry::new();
+    reg.put(Row {
+        name: "policy.later",
+        prio: 30,
+        decide: |_| Some(Capsule::Report),
+    })
+    .expect("注册 later");
+    reg.put(Row {
+        name: "policy.earlier",
+        prio: 10,
+        decide: |_| Some(Capsule::Decide),
+    })
+    .expect("注册 earlier");
+
+    let hit = reg.decide(&head()).expect("两行都命中");
+    assert_eq!(
+        hit.row, "policy.earlier",
+        "prio 小的先命中（不是先注册的先）"
+    );
+    assert_eq!(hit.capsule, Capsule::Decide);
+    assert_eq!(
+        reg.list().iter().map(|r| r.name).collect::<Vec<_>>(),
+        vec!["policy.earlier", "policy.later"],
+        "list 必须按裁决顺序给出——它是「顺序是数据」的可观测面"
+    );
+}
+
+#[test]
+fn a_new_policy_reusing_an_existing_arm_is_pure_registration() {
+    // 「加一条策略 = 一个函数 + 一行注册，环不改」这句话的**可执行形态**：
+    // 新行复用一个已有臂（`Report`），表就能在原来不汇报的格上认领——环那 5 处
+    // 分派点一个字符都没动。
+    //
+    // 反过来，若新策略需要**新行为**（环不认识的动作），它必须加一个
+    // `Capsule` 变体，届时 `name()` 的 `match` 与每个分派点的 `match` 都会
+    // 编译错误——这正是想要的「必须显式处理」，不是遗漏。
+    let mut reg = Registry::new();
+    reg.put(Row {
+        name: "policy.turn_head_report",
+        prio: 5,
+        decide: |s| s.has_utterance.then_some(Capsule::Report),
+    })
+    .expect("注册");
+
+    let hit = reg.decide(&head()).expect("轮首也认领汇报");
+    assert_eq!(hit.row, "policy.turn_head_report");
+    assert_eq!(hit.capsule, Capsule::Report);
+}
+
+#[test]
+fn capsule_names_are_unique_and_stable() {
+    // 臂名是日志与冲突报错的取值点：重名会让「哪一行/哪条臂」指认不出。
+    let names = [
+        Capsule::Decide,
+        Capsule::Report,
+        Capsule::Compress,
+        Capsule::Recall,
+        Capsule::Reflex,
+    ]
+    .map(Capsule::name);
+    let mut sorted = names.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len(), "臂名重复：{names:?}");
+    assert_eq!(names[0], "decide", "臂名是跨进程日志词，改动要同步文档");
 }

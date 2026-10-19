@@ -34,7 +34,7 @@ use crate::symbio_core::{CapabilityMeta, ExecEnv, PluginError};
 use async_trait::async_trait;
 
 use super::turn::TurnOutput;
-use crate::symbio_core::schemas::session::chat_node::ChatNode;
+use crate::symbio_core::chat_node::ChatNode;
 
 /// 流结束原因（由各协议的 `finish_reason` / `stop_reason` / `finishReason` 归一化）
 ///

@@ -166,7 +166,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
     // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
     let recall_state = LoopState::turn_prepare(turn.request_round, context.session.is_persistent());
-    if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::RECALL) {
+    if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::Recall) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
         // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
@@ -291,7 +291,7 @@ pub(crate) async fn apply_compaction(
     if builtin()
         .decide(&LoopState::compress(req.auto_compress))
         .map(|h| h.capsule)
-        == Some(Capsule::COMPRESS)
+        == Some(Capsule::Compress)
     {
         match auto_compress_process(
             orchestrator,

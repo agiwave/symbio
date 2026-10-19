@@ -4,8 +4,8 @@
 
 use super::*;
 
-use crate::symbio_core::schemas::detail::{DetailField, DetailSection};
 use crate::symbio_core::PluginMeta;
+use crate::symbio_core::{DetailField, DetailSection};
 use serde_json::json;
 
 fn definition() -> DetailDefinition {

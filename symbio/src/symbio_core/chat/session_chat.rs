@@ -14,7 +14,7 @@ pub struct Request {
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
     /// 与 `mode` / `risk_level` 是**完全对称**的三条链：`req > session.metadata > 默认`
     /// （`plugins/session/orchestrator/entry.rs::resolve_session_params`）。
-    /// 这条回退是 [ADR-066](../../../../../docs/010-adr/066.md "ADR-066") 的前提——
+    /// 这条回退是 [ADR-066](../../../../docs/010-adr/066.md "ADR-066") 的前提——
     /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
@@ -31,8 +31,8 @@ pub struct Request {
     /// 随每次发送携带；为空时回退会话 metadata.risk_level（默认 medium）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<String>,
-    /// 入站请求的**来源主体**（[PL-001 §12.2](../../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
-    /// 跨体承诺的「向谁宣告」，[ADR-067](../../../../../docs/010-adr/067.md "ADR-067")）。
+    /// 入站请求的**来源主体**（[PL-001 §12.2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
+    /// 跨体承诺的「向谁宣告」，[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）。
     ///
     /// 完整主体名（如 `agent:main`）——**谁把这条消息交进来**。它不是「以谁的身份
     /// 跑轮」（那是 `agent_id` ⇒ 会话主体），而是「这条入站消息的出处」：轮末

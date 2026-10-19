@@ -126,7 +126,7 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// classify/decide — 判决这一轮该直接回答、还是派给工具循环
 ///
 /// 唯一调用方：`session` 的 `chat_loop/decide.rs`（轮首判决）。返回
-/// [`crate::symbio_core::schemas::dialog::Verdict`]——一个**闭集枚举**，不是文本。
+/// [`crate::symbio_core::Verdict`]——一个**闭集枚举**，不是文本。
 ///
 /// ## 为什么直到 S2 才加这个常量
 ///
@@ -140,7 +140,7 @@ pub const ROUTE_CLASSIFY_DECIDE: &str = "classify/decide";
 /// compose/wording — 按上游判决产出一段**面向用户**的文本
 ///
 /// 唯一调用方：`session` 的 `chat_loop/compose.rs`（判决的执行点）。入参是
-/// [`crate::symbio_core::schemas::dialog::ComposeRequest`]，出参是 `String`——
+/// [`crate::symbio_core::ComposeRequest`]，出参是 `String`——
 /// **措辞只被展示，不被执行**，因此它不需要是枚举（判决才需要，见 `dialog` 的模块文档）。
 ///
 /// ## 为什么直到 S3 才加这个常量

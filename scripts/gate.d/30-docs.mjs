@@ -29,6 +29,14 @@ export const GUARDS = [
   // ① **规则源读不出来**（表被改写/搬走）却仍亮绿灯——绿灯只说明没检查；
   // ② **前缀比对写宽了**（按字面 contains 而非按词）⇒ 误报一片，最后被人用豁免喂到失效。
   'core-naming-audit',
+  // `core-vocab-audit` 判 `symbio_core` 的**分域形状**（ADR-087 的两条承重判据）：
+  // ①`schemas/` 不许回来——它是被拆掉的杂物抽屉，回来即「又出现了没处放的东西」；
+  // ②域间依赖不许出现**新的**环（SCC 归一到「环族」，基线只许降）。
+  // 此前没有任何门禁判依赖方向：`core-naming-audit` 判名字、`core-export-audit` 判
+  // 出口宽度，而「机制依赖词汇」这条纪律只写在 README §1.3 里靠人记——实测已经
+  // 有 2 族环（`plugin ⇄ keys ⇄ vdfs ⇄ chat ⇄ …`、`adapters ⇄ projection`），
+  // 说明「靠人记」的结论是不可信的。
+  'core-vocab-audit',
   // `core-export-audit` 判 `symbio_core` 的**架构出口有效性**，两条来自架构要求：
   // 「子目录不许对外 `pub`，必须在根显式输出」（C-001）与「根输出的每个符号必须被
   // ≥2 个模块消费」（C-002 是深引检查的全量版，**取代了 plugin-entry-audit 的 E-010**：

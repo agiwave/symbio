@@ -10,7 +10,7 @@
 //!
 
 use super::model_provider::{ModelFinishReason, ModelUsage};
-use crate::symbio_core::schemas::session::chat_node::{ChatNode, NodeStatus};
+use crate::symbio_core::chat_node::{ChatNode, NodeStatus};
 use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
 

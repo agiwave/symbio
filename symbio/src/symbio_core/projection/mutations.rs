@@ -27,10 +27,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::symbio_core::chat_node::{ChatNode, MessageContent};
 use crate::symbio_core::event::{
     Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
 };
-use crate::symbio_core::schemas::session::chat_node::{ChatNode, MessageContent};
 
 /// 一条消息被编辑后**在对话里读作什么**。
 ///
@@ -101,8 +101,8 @@ fn parse_edited(e: &Event) -> Option<(String, EditedEntry)> {
 
 /// 角色 → 线格式词形（与 `NodeRole` 的 `serde(rename_all = "snake_case")` 逐字
 /// 相等；`transcript` 的条目角色与 `PromptMessage::role` 用的是同一批词）。
-fn role_word(r: &crate::symbio_core::schemas::session::chat_node::NodeRole) -> String {
-    use crate::symbio_core::schemas::session::chat_node::NodeRole as R;
+fn role_word(r: &crate::symbio_core::chat_node::NodeRole) -> String {
+    use crate::symbio_core::chat_node::NodeRole as R;
     match r {
         R::User => "user",
         R::Assistant => "assistant",

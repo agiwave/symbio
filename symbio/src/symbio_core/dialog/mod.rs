@@ -57,7 +57,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::session::chat_node::ChatNode;
+use crate::symbio_core::chat_node::ChatNode;
 
 /// `classify` 的入参：这一轮发生了什么
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,5 +209,5 @@ pub struct WordingReply {
 }
 
 #[cfg(test)]
-#[path = "dialog.test.rs"]
+#[path = "mod.test.rs"]
 mod tests;

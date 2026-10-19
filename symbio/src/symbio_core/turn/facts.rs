@@ -3,8 +3,8 @@
 //!
 //! ## 为什么住 core
 //!
-//! [ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组与 2 组的
-//! `ReportDraft` 半句：驱动器切成独立插件（[plan/14 步 6](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014")
+//! [ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组与 2 组的
+//! `ReportDraft` 半句：驱动器切成独立插件（[plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014")
 //! T-167 切片批）后，这些类型隔着 E-009 的插件墙两头都要用——
 //!
 //! | 类型 | 写侧（驱动器） | 落/读侧（留守） |
@@ -23,7 +23,7 @@ use crate::symbio_core::event::Event;
 use crate::symbio_core::node_build::dialog_node;
 use serde::{Deserialize, Serialize};
 
-/// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
+/// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
 /// `derived_facts::record_derived` 落成 `commitment.*` 格。
 ///
@@ -49,7 +49,7 @@ pub struct Delegation {
     pub why: String,
 }
 
-/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
 /// 一次**成功**的 `todo_write` 调用所声明的清单状态。
 ///
 /// 与 [`Delegation`] 同一个观察点（工具执行的唯一入口）。任务表的写方不在工具里：
@@ -166,7 +166,7 @@ pub struct DrainedSupplement {
     pub ids: Vec<String>,
 }
 
-/// 折进消息的元数据键（写侧、重建侧与读侧共用；[`super::rebuild`] 需要它们）。
+/// 折进消息的元数据键（写侧、重建侧与读侧共用；`projection::rebuild` 需要它们）。
 pub const META_SUPPLEMENT: &str = "supplement";
 pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";
 pub const META_SUPPLEMENT_COUNT: &str = "supplement_count";

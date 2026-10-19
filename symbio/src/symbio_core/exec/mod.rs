@@ -35,7 +35,7 @@
 //! - 中止只有一个置位入口 [`ExecAbortSignal::abort`]，读侧只有 [`ExecAbortSignal::is_aborted`]
 //!   与 [`ExecAbortSignal::cancelled`]——不再有第二条「标志位之外的中止来源」。
 
-use crate::symbio_core::schemas::session::chat_node::ChatNode;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 use crate::symbio_core::{ABORT_SIGNAL, EVENT_SINK};
 use async_trait::async_trait;

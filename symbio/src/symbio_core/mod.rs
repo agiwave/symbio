@@ -12,8 +12,10 @@ mod assembly;
 // 故 C-003 不数它）：表里写的是部署事实，不是契约。
 pub(crate) mod authz;
 mod capability;
+mod chat;
 mod clock;
 mod creator;
+mod dialog;
 mod embedding;
 mod event;
 mod event_bus;
@@ -24,10 +26,11 @@ mod keys;
 mod llm;
 mod logger;
 mod plugin;
+mod present;
 mod projection;
-mod schemas;
 mod store;
 mod text;
+mod turn;
 mod vdfs;
 mod view;
 
@@ -78,8 +81,8 @@ pub(crate) use projection::conation::ConationView;
 pub(crate) use projection::span::{span, SpanView};
 // 读数面板方言（P4）：后端下发描述、前端零业务知识渲染。同族——消费方在两个
 // 前端（Tauri + CLI），都必须经根路径拿类型，不能深引 `schemas` 域目录。
+pub use present::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 pub use projection::transcript::transcript;
-pub use schemas::reading::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 // 结构化 prompt 消息（ADR-048a）：core 的**最小结构化出口**——角色、正文、
 // `tool_call_id`、`tool_calls`。线格式（`ChatNode`）由 adapter 边界翻译，
 // core 内部不认识 provider 的图语义。
@@ -286,40 +289,51 @@ pub use vdfs::{
 // 地址机制（crate 内部装配用，不是公开契约）
 pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 
-// ==================== 跨插件契约（schemas，ADR-023） ====================
-// `schemas/` 目录同样不开模块门：schema 契约在根显式再导出——`chat_node` /
-// `session_chat` 保**叶子模块**形态（`as cm` 别名依赖它），其余按符号扁平导出。
-// 外部一律 `symbio_core::ChatNode` / `symbio_core::chat_node::…`。
-pub use schemas::common::{SimpleResponse, SuccessResponse};
-pub use schemas::detail::{
+// ==================== 跨插件契约（分域，ADR-087） ====================
+// 这里曾是 `schemas/` 一个目录：协议词与宿主方言混装，一个名字说不清「这是什么」。
+// 2026-10-19 按**它描述什么**拆成四个域（`chat` / `dialog` / `present` / `turn`
+// 与两处搬家：`plugin` 的 hook/响应壳、`projection` 的 rebuild）：
+//
+// | 域 | 一句话 | 形态 |
+// |---|---|---|
+// | `chat` | 一条消息、一个主体长什么样 | **叶子模块**（`chat_node` / `session_chat` / `principal` / `chat_request`） |
+// | `dialog` | 判决是枚举、措辞是文本 | 根平铺符号 |
+// | `present` | 后端下发描述、前端零业务知识渲染 | 根平铺符号 |
+// | `turn` | 一轮次怎么交付、怎么造节点、产出什么 | 交付包平铺；`facts`/`node_build` 走叶子模块 |
+//
+// 叶子模块不是「深引豁免」：它们是**主题命名空间**（§1.2 登记），调用点写
+// `symbio_core::node_build::dialog_node` 时仍看得见自己拿的是哪一族的构造器。
+pub use chat::{chat_node, principal, session_chat};
+pub use plugin::{HookEvent, HookOutput, SimpleResponse, SuccessResponse};
+pub use present::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
-pub use schemas::session::{chat_node, facts, node_build, principal, session_chat};
+pub use turn::{facts, node_build};
 // 6b-③ 跨墙词表（[ADR-086](../../../docs/010-adr/086.md "ADR-086") §7）：session 与
 // loop 两侧共同命名。全部 `pub(crate)` 出根——消费方仍在本 crate 内（C-003 只数
-// `pub use`），C-002 又禁止插件深引 `schemas` 域 ⇒ 根别名是唯一合法路径。
+// `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
 pub(crate) use capability::tool_metas;
+pub(crate) use chat::chat_request;
+pub use dialog::{
+    ComposeRequest, DecideRequest, RunSnapshot, Verdict, WordingReply, REASON_ACK, REASON_CLARIFY,
+    REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
+    REASON_THANKS, REASON_UNCLASSIFIED,
+};
+pub(crate) use llm::{llm_emit_state, llm_state_frame};
+pub(crate) use plugin::fire_hook;
+pub(crate) use projection::rebuild::rebuild;
 pub(crate) use projection::turns::count_user_messages;
-pub(crate) use schemas::hook::fire_hook;
-pub(crate) use schemas::session::chat_request;
-pub(crate) use schemas::session::dispatch::{
+pub(crate) use turn::dispatch::{
     run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
     CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
     RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, TurnReport, TurnSettings, TurnSpec,
     TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH, WORKER_FORCE_PREFIX, WORKER_KEYWORDS,
     WORKER_MIN_CHARS,
 };
-pub(crate) use schemas::session::facts::{
+pub(crate) use turn::facts::{
     DrainedSupplement, FleetSnapshot, WorkerProgress, META_SUPPLEMENT, META_SUPPLEMENT_COUNT,
     META_SUPPLEMENT_IDS,
-};
-pub(crate) use schemas::session::frames::{llm_emit_state, llm_state_frame};
-pub(crate) use schemas::session::rebuild::rebuild;
-pub use schemas::{
-    ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, WordingReply,
-    REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
-    REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
 
 // ==================== 事件总线 ====================

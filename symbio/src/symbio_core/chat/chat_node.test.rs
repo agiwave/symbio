@@ -1,4 +1,4 @@
-//! `symbio/src/symbio_core/schemas/session/chat_node.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `symbio/src/symbio_core/chat/chat_node.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::Principal;
+use super::principal::Principal;
 
 /// 消息角色
 ///
@@ -262,7 +262,7 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<NodeRole>,
 
-    /// **这条发言是谁说的**（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
+    /// **这条发言是谁说的**（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
     /// ② 的跨栈身份字段）：主体地址（`{kind, id, title?}`，[ADR-069 §决策 1]）。
     ///
     /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：

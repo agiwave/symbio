@@ -18,7 +18,7 @@
 //!
 //! ## 形状来源：不在这里定义
 //!
-//! 本模块在 [ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §7 上移到 core：
+//! 本模块在 [ADR-086](../../../../docs/010-adr/086.md "ADR-086") §7 上移到 core：
 //! session 的主读与 loop 的轮次窗口共用同一份折叠，不能各写一遍。
 //!
 //! **写入侧怎么构造，重建就怎么构造**——同一个节点只有一份形状定义。生产侧已经在
@@ -87,7 +87,7 @@ use crate::symbio_core::{
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
-// 节点形状与汇报格的单点定义都在 core 词汇表（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三）：
+// 节点形状与汇报格的单点定义都在 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
 use crate::symbio_core::facts::ReportDraft;
 use crate::symbio_core::node_build::{
@@ -316,7 +316,7 @@ fn user_node(e: &Event) -> ChatNode {
 /// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
 /// 实时面那份不同，但**内容与角色一致**（ADR-049 的「呈现细节可能不同」）。
 fn supplement_node(e: &Event) -> ChatNode {
-    use super::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
+    use crate::symbio_core::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
     let count = e.payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
     let ids = e
         .payload

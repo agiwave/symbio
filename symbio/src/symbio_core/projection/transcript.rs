@@ -36,9 +36,9 @@ use super::super::event::{
     EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
-use super::super::schemas::session::chat_node::{ChatNode, MessageContent, NodeRole};
 use super::super::view::{Budget, View};
 use super::Projection;
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 
 use std::collections::HashMap;
 

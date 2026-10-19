@@ -75,7 +75,7 @@ use super::state::{ChatOrchestrator, SessionContext};
 ///
 /// 对话面的理由码词表在 `schemas::dialog`，因为它的生产方（`classify`）与消费方
 /// （`compose`）分处两个插件。而汇报的理由码是**本侧自己产的**：判决 `Report` 由
-/// `session` 判出（见 `schemas/dialog.rs` 的变体表），措辞只是执行它——`compose`
+/// `session` 判出（见 `dialog/mod.rs` 的变体表），措辞只是执行它——`compose`
 /// 按判决分派，不看这个码。它没有第二个生产方，因此不进那份共享词表。
 const REASON_PROGRESS: &str = "progress";
 

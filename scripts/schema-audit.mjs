@@ -17,7 +17,7 @@
  * 用法：node scripts/schema-audit.mjs
  * 输出：控制台报告。零外部依赖，纯 Node 实现。
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,8 +49,18 @@ const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------
 const backendFiles = walk(join(ROOT, 'symbio/src'), ['.rs']);
+// ── 后端半边已退役（[ADR-087](../docs/010-adr/087.md "ADR-087")，2026-10-19）──────
+// `symbio_core/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
+// 本脚本赖以工作的三个前提同时消失：①有一个叫 schemas 的目录可枚举；②引用写成
+// `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
+// 「某个契约定义有没有外部消费方」的判据**已经有人管**：`core-export-audit` C-003
+// （零消费方 0 / 单消费方棘轮）按根出口逐符号判，且带只降基线。两条口径并存就是
+// 「一个事实两个 owner」，它们迟早给出不同答案。故后端半边退役，本脚本只保留
+// **前端镜像面**（`tauri/src/schemas` ⇄ 后端真源）的审计。
 const schemasRoot = join(ROOT, 'symbio/src/symbio_core/schemas');
-const backendSchemaFiles = backendFiles.filter((f) => f.startsWith(schemasRoot));
+const backendSchemaFiles = existsSync(schemasRoot)
+  ? backendFiles.filter((f) => f.startsWith(schemasRoot))
+  : [];
 
 // 模块路径：schemas/<a>/b.rs -> a::b ; schemas/<a>/mod.rs -> a ; schemas/common.rs -> common
 // 统一用 '::' 连接，与 import 路径（schemas::a::b）一致
@@ -196,6 +206,11 @@ for (const f of backendFiles) {
 
 // ---------- 后端报告 ----------
 console.log('==================== 后端 schemas 审计 ====================\n');
+if (!backendSchemaFiles.length) {
+  console.log('  ⚠ 后端半边**已退役**（ADR-087）：schemas 已拆成 chat / dialog / present / turn。');
+  console.log('    「契约定义有无外部消费方」由 core-export-audit C-003 承接（零/单消费方棘轮），');
+  console.log('    本脚本此后只审前端镜像面——不在这里维护第二份口径。\n');
+}
 
 // 同文件自引用计数：定义行之外的出现次数（>0 说明定义文件内部还在用它，非死项）
 const selfOcc = new Map(); // name -> count in defining file
@@ -262,7 +277,9 @@ for (const f of backendSchemaFiles) {
 }
 // schemas/mod.rs 的 pub use re-export 也算作「经由顶层模块出口」的消费途径：
 // 消费方 import 的是顶层名（crate::symbio_core::ChatNode），归属到被 re-export 的模块
-const modRs = readFileSync(join(schemasRoot, 'mod.rs'), 'utf8');
+const modRs = existsSync(join(schemasRoot, 'mod.rs'))
+  ? readFileSync(join(schemasRoot, 'mod.rs'), 'utf8')
+  : '';
 const reExportRe = /pub\s+use\s+([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)\s*\{/g;
 let rm;
 while ((rm = reExportRe.exec(modRs))) {

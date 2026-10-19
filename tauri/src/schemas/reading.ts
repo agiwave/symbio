@@ -7,7 +7,7 @@
  * 前端因此不出现任何会话/统计语义：这里只认分区、行、标签、值、口径提示与语气。
  * 换一个产者（成本、记忆、任何只读路由）前端零改动。
  *
- * 后端真源：`symbio/src/symbio_core/schemas/reading.rs`（schema-audit 对两侧对账）。
+ * 后端真源：`symbio/src/symbio_core/present/reading.rs`（schema-audit 对两侧对账）。
  */
 
 /** 一列读数的语气（产者判，前端只换样式）。 */

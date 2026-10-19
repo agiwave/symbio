@@ -405,7 +405,7 @@ pub async fn run_chat_loop(
         //
         // 不在下面这个 `if` 里，在 [`super::loop_registry`] 的 `policy.classify` 行：
         // 「`request_round == 0` ∧ 有发言 ∧ 开关开着」三条写在一个纯函数里，可单测、
-        // 可增删。本处只问表「下一步是什么」，命中 `Capsule::DECIDE` 才走这段。
+        // 可增删。本处只问表「下一步是什么」，命中 `Capsule::Decide` 才走这段。
         // 加一条新策略 = 一个函数 + 一行注册，**本文件不改**（PL-014 §6 判据 1）。
         //
         // ## 为什么在 `gate_turn` 之后
@@ -424,7 +424,7 @@ pub async fn run_chat_loop(
         // ## 判决与执行分成两步（`decide` → `compose`）
         //
         // 步骤 2b 只拿**枚举**（`classify` 不说人话），步骤 2c 才把枚举翻成文本
-        // （`compose` 不做判决）。分开的理由见 `schemas/dialog.rs` 的模块文档：
+        // （`compose` 不做判决）。分开的理由见 `dialog/mod.rs` 的模块文档：
         // 编排层要能**执行**判决，而措辞只被展示——把两者揉进一次调用，等于让
         // "这轮走哪条路"取决于一段文本长什么样。
         //
@@ -448,9 +448,16 @@ pub async fn run_chat_loop(
         );
         let head_hit = super::loop_registry::builtin().decide(&head_state);
         if let Some(hit) = head_hit {
-            plugin_debug!("session", "[Loop] 轮首命中策略行 {}", hit.row);
+            // 行名 + 臂名一起记：排查「某一步怎么没发生」时，要能区分「没有行认领」
+            // 与「行了但派的是另一条臂」——只记行名的话这两种情况长得一样。
+            plugin_debug!(
+                "session",
+                "[Loop] 轮首命中策略行 {} → {}",
+                hit.row,
+                hit.capsule.name()
+            );
         }
-        if head_hit.map(|h| h.capsule) == Some(super::loop_registry::Capsule::DECIDE) {
+        if head_hit.map(|h| h.capsule) == Some(super::loop_registry::Capsule::Decide) {
             if let Some(utterance) = first_utterance.as_deref() {
                 // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
                 // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式

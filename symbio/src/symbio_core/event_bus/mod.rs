@@ -78,7 +78,7 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 ///
 /// 两侧**分属不同 crate 且互相不可见**（cli 是独立 crate，只能经 `symbio` 的公开面
 /// = `symbio_core` 取用），core 是唯一共同可见处——这正是它不能下沉的原因，
-/// 与 `schemas::session::session_chat` 同构。
+/// 与 `symbio_core::session_chat` 同构。
 ///
 /// ## 为什么是空结构体（不是遗漏）
 ///

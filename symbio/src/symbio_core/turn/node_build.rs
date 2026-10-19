@@ -2,15 +2,15 @@
 //!
 //! ## 为什么住 core、为什么不在 `chat_node.rs`
 //!
-//! 这批函数曾在 [ADR-023](../../../../../docs/010-adr/023.md "ADR-023") 按「依赖方数量」
+//! 这批函数曾在 [ADR-023](../../../../docs/010-adr/023.md "ADR-023") 按「依赖方数量」
 //! 判据从 core 下沉到 `session/message_build`——那个判据今天仍然成立（消费方没有变多），
-//! 变的是**位置**：[plan/14 步 6 · T-167 批次 6b](../../../../../docs/010-adr/082.md "ADR-082")
+//! 变的是**位置**：[plan/14 步 6 · T-167 批次 6b](../../../../docs/010-adr/082.md "ADR-082")
 //! 把驱动器切成独立插件 `loop`（裁决一）后，写侧（驱动器）与
 //! 读侧投影（留守 `rebuild`）隔着 E-009 的插件墙共用同一份形状源，同一条判据在两个插件
 //! 之间不再有用 ⇒ 按 ADR-082 裁决三上移回 core。**同一条判据的第二个形态**：单插件时代
 //! 它确实只有 session 一个消费方。
 //!
-//! 落点是**本模块**而非 [`super::chat_node`]：`chat_node.rs` 是前端机制化显示节点的
+//! 落点是**本模块**而非 [`crate::symbio_core::chat_node`]：`chat_node.rs` 是前端机制化显示节点的
 //! **形状定义**（角色 / 形状五值 / style_tag 词表 / 线格式），不收留写侧机制；
 //! 构造与折叠是「按该形状产节点」的手艺，与形状源同目录紧邻、各住各的文件。
 //!
@@ -29,7 +29,7 @@ use crate::symbio_core::{
     clock_now_ms, llm_short_id, TurnToolCallInfo,
 };
 
-use super::principal::Principal;
+use crate::symbio_core::principal::Principal;
 
 // ==================== 节点构造族 ====================
 

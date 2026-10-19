@@ -82,9 +82,21 @@ created: 2026-09-26
    桶的读写函数，桶的键 `CAPABILITY_ERRORS` 住 `keys`）；插件 id 归 `plugin::ids`、路由
    地址归 `plugin::route`、遍历端点归 `plugin::traverse`、嵌入服务 id 归 `embedding::ids`
    ——它们都曾住在 `keys`。
-3. **依赖单向、只依赖更底层**：域之间只允许「上层 → 下层」，不得互相回指。当前域间图
-   在**代码层**是无环的（对照 `symbio_core/mod.rs` 的 `pub use` 与各域 `mod.rs` 的导入；
-   大量「环」是文档链接造成的假阳性——统计时先剥注释）。插件专属的实现代码不进本层
+3. **依赖单向、只依赖更底层**：域之间只允许「上层 → 下层」，不得互相回指。
+   **本条的现状要改成一句实话**：2026-10-19 用 [`core-vocab-audit`](../../../scripts/core-vocab-audit.mjs)
+   实测（剥注释、按根出口归属建图、Tarjan 求强连通分量），代码层**有 2 族环**，
+   不是无环：
+
+   | 环族 | 根因 | 为什么现在不拆 |
+   |---|---|---|
+   | `adapters ⇄ projection` | `fallback` 投影读适配层的档位统计，适配层又按它的时延档表产出 | 拆法是「档位词表下沉一层」，属 `adapters` 自己的改造 |
+   | `plugin ⇄ keys ⇄ vdfs ⇄ chat ⇄ present ⇄ capability ⇄ llm ⇄ exec ⇄ event_bus` | `keys` 的键**值类型**指向各域类型（键要装 `Arc<dyn Capability>`），而各域又用键取上下文；`plugin::dir` 的目录项带 `DetailDefinition` / `VdfsItem`，`PluginError::Aborted` 带半截 `ChatNode` | 「万能胶」型环：`keys` 是它们的公共汇点，拆它要先把上下文键改成类型擦除，收益与风险都不在本批 |
+
+   这条纪律此前写着「当前无环」——**那句是错的**，错在把「文档链接造成的假环」当成了
+   全部，而没有脚本真的建过图。现在 `core-vocab-audit` 的 V-002 按**环族**做基线棘轮：
+   新增一族即红，已有的两族登记在它的 `BASELINE` 里（只许降）。
+
+   插件专属的实现代码不进本层
    （如 `llm` 只留契约，HTTP 重试与 SSE 流循环留在 `plugins/model/`）。**宿主接缝的统一
    形态是「纯接口 + 一个桥文件」**：接口与域类型宿主无关，只有 `host.rs` 知道本宿主的
    信封类型（`vdfs/host.rs` 是范本），换宿主只重写那一个文件。
@@ -95,10 +107,11 @@ created: 2026-09-26
    无人使用的存量，按 [`dead-code-audit`](../../../scripts/dead-code-audit.mjs) R-002
    **逐项承认**（`// dead-code-allow R-002: <理由>`，理由必填、数量棘轮只许降）。
    **根 `mod.rs` 里域目录一律 `mod <域>;`（私有）**——
-   子目录不开模块门，谁出现在公共面上由根 `pub use` 逐条声明；`schemas/` 同样如此：
-   契约按符号（`Verdict` / `ChatNode`…）与两个叶子模块（`chat_node` / `session_chat`）
-   在根导出，不再有 `symbio_core::schemas::…` 的深引豁免。任何深路径
-   （`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
+   子目录不开模块门，谁出现在公共面上由根 `pub use` 逐条声明。协议词按符号
+   （`Verdict` / `DetailField`…）与**叶子模块**（`chat_node` / `node_build` / `facts`…）
+   在根导出；**任何深路径**（`symbio_core::plugin::dir::` / `symbio_core::chat::chat_node::`
+   之类）视为不规范，应改为根平铺。叶子模块只有一层，且名字是**主题**（见 §1.2 `chat` /
+   `turn` 两行）——它不是「域的内部件也能被引用」的豁免。
    **可执行判据**：[`core-export-audit.mjs`](../../../scripts/core-export-audit.mjs)——
    C-001（根出口唯一）/ C-002（无深引）/ C-003（根输出的符号必须被 ≥2 个模块消费，
    0 消费方基线已归零、单消费方存量走棘轮，豁免写 §4 四问的理由）。
@@ -116,24 +129,27 @@ created: 2026-09-26
 | 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
-| `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` · `DispatchPort` · `DispatchOutcome` | — | — | `CanClassify` · `CanGenerate` · `StubLlmAdapter` 是 `#[cfg(test)]` 项（只有测试构建里存在：编译期正例与零 LLM 桩，**没有生产接入位**，故不参与接线清偿）；其余全部是 [plan/PL-005 §3.3](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") 注入策略与 [plan/PL-001 §10](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/004-plan/verify/latency_gate.rs)），名字先于模块存在——判据同 `schemas`。`LlmTurn` / `DispatchPort` / `DispatchOutcome` 是 [plan/PL-008 §2](../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的两只端口（生成 / 工具分发），与前缀同域：**不能叫 `Tool*`**——那是 `capability` 域的子命名空间 |
-| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`） | — | — | [plan/PL-001 §4](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/PL-005 §4](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名。**`TurnRunner` / `TurnOutcome` / `TurnInput` / `TurnResume` / `RoundInjector` 已于 2026-10-09 下沉 `plugins/session`**（单生产消费方，见 §4 第 1 问与 [ADR-023](../../../docs/010-adr/023.md)） |
+| `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` · `DispatchPort` · `DispatchOutcome` | — | — | `CanClassify` · `CanGenerate` · `StubLlmAdapter` 是 `#[cfg(test)]` 项（只有测试构建里存在：编译期正例与零 LLM 桩，**没有生产接入位**，故不参与接线清偿）；其余全部是 [plan/PL-005 §3.3](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") 注入策略与 [plan/PL-001 §10](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/004-plan/verify/latency_gate.rs)），名字先于模块存在——判据同冻结契约词（§3）。`LlmTurn` / `DispatchPort` / `DispatchOutcome` 是 [plan/PL-008 §2](../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的两只端口（生成 / 工具分发），与前缀同域：**不能叫 `Tool*`**——那是 `capability` 域的子命名空间 |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`） | — | — | [plan/PL-001 §4](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约名（名字先于模块存在，判据同冻结契约词（§3））；`Decider` 是 [plan/PL-005 §4](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名。**`TurnRunner` / `TurnOutcome` / `TurnInput` / `TurnResume` / `RoundInjector` 已于 2026-10-09 下沉 `plugins/session`**（单生产消费方，见 §4 第 1 问与 [ADR-023](../../../docs/010-adr/023.md)） |
 | `capability` | `Capability` · `Registry`（收集口契约，put/get/list 三方法——AR-025 §5 4f 的纯重命名） · `CapabilityRow` · `CapabilityRowKind` · `CapabilityRowPayload`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件。`CapabilityRow*` 是收集口三方法（put/get/list）的**行词汇**（`row.rs`，AR-025 §3）：一张表装下全部收集通道，各族随 4b–4e 落位 |
+| `chat` | 叶子模块 `chat_node` · `principal` · `chat_request` · `session_chat`（四个**模块命名空间**，符号走模块路径，不出根） | — | — | [ADR-087](../../../docs/010-adr/087.md "ADR-087")：会话线格式域——一条消息、一个主体长什么样。子模块形态是 §1.2 登记的「主题命名空间」：节点家族四十余个名字全部平铺进根出口会把内核公开面撑宽一倍，而它们只在同一个语义面里出现。**本域不依赖任何其它域**（只依赖 serde），`llm` / `turn` / `projection` 都指向它 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
+| `dialog` | 契约词 `Verdict` · `DecideRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` | `REASON_` | — | [ADR-087](../../../docs/010-adr/087.md "ADR-087")：对话面控制契约（session ⇄ `classify` / `compose`）。一条判据：**判决是枚举、措辞是文本**——`Verdict` 要被编排层执行，`ComposeRequest` 的产出只被展示。五个类型名是 [plan/PL-001](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约词（改名 = 代码与契约漂移）；`REASON_*` 是判决的**理由码**闭集，与 `Verdict` 同进退 |
 | `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
-| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | `event_` | 契约词来自 [plan/PL-001 §2](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/010-adr/043.md)。常量 = 事件**名字表**（名字是数据，单点定义）。函数 = 载荷里的**节点身份**规则（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id` / `event_node_of`，[ADR-053](../../../docs/010-adr/053.md)）：写侧与三个读侧出口（`rebuild` / `transcript` / `prompt_fidelity`）必须给出**同一个**「这条事件承载哪个节点」的答案，各写一遍的后果是静默的（`message.edited` 定位不上要改的节点 = 「编辑没生效」而无人报错） |
+| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | `event_` | 契约词来自 [plan/PL-001 §2](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约文本，名字先于模块存在（判据同冻结契约词：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/010-adr/043.md)。常量 = 事件**名字表**（名字是数据，单点定义）。函数 = 载荷里的**节点身份**规则（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id` / `event_node_of`，[ADR-053](../../../docs/010-adr/053.md)）：写侧与三个读侧出口（`rebuild` / `transcript` / `prompt_fidelity`）必须给出**同一个**「这条事件承载哪个节点」的答案，各写一遍的后果是静默的（`message.edited` 定位不上要改的节点 = 「编辑没生效」而无人报错） |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
 | `exec` | `Exec` | — | — | 本域无常量 |
 | `governance` | 契约词 `PermissionMatrix` · `PrincipalPolicy` · `PairingViolation` · `VisScope`；**Capability（7 个封顶）刻意不进根平铺** | — | — | [plan/PL-001 §7](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的冻结契约名。governance 的 Capability（权限矩阵的键）与 `capability` 域的 `Capability`（LLM 工具描述符）是**两个概念**、计划文本同名——以路径限定消歧：两个 Capability 同时出现在调用点正是命名纪律要阻止的错位，故本域不把它登记为前缀 |
-| `invariants` | `Violation` | — | **裸名**（不变量名） | 函数名即不变量的可执行名（N1/N3/N5 的 C1/C2/C3 形态），谓词名比域名更有信息量——判据同 `schemas`：名字先于模块存在 |
+| `invariants` | `Violation` | — | **裸名**（不变量名） | 函数名即不变量的可执行名（N1/N3/N5 的 C1/C2/C3 形态），谓词名比域名更有信息量——判据同冻结契约词（§3）：名字先于模块存在 |
 | `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
-| `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
+| `llm` | 子命名空间 `Model*`；契约词 `TurnOutput` · `TurnToolCallInfo` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs`（+ `frames.rs` 的状态帧、`…`）。**`Turn*` 家族前缀属 `turn` 域**：`llm` 的两个 `Turn*` 是**具体契约名**（`TurnOutput` = 一轮模型输出），不是「turn 家族」的一员——它们先于 `turn` 域存在，且改写要跨 `plugins/model` / `plugins/loop` 两侧，收益为零 |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
-| `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
+| `plugin` | `Plugin` · 契约词 `HookEvent` · `HookOutput` · `SimpleResponse` · `SuccessResponse` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY`。`HookEvent` / `HookOutput`（`hook.rs`）是插件扩展点的事件词；`SimpleResponse` / `SuccessResponse`（`response.rs`）是路由回体的最小壳——两者都是**插件面**的东西，故由 `schemas` 并入本域 |
+| `present` | 子命名空间 `Detail*`（`DetailDefinition` / `DetailField` / `DetailSection` / `DetailAction` / `DetailOption` / `DetailCondition` / `DetailBadge` / `DetailPreset` / `DetailPresetSpec`）· `Reading*`（`ReadingPanel` / `ReadingRow` / `ReadingSection` / `ReadingTone`） | `DETAIL_` | — | [ADR-087](../../../docs/010-adr/087.md "ADR-087")：宿主呈现方言——**后端下发描述、前端零业务知识渲染**。两个子命名空间各对应一个文件：`detail`（可编辑详情页）/ `reading`（只读读数面板）。形状里不含任何业务语义（分区 / 字段 / 标签 / 值 / 口径），故换一个产者前端零改动。`capability` 的选项族行载荷是一份 `DetailField`——表单字段本来就是呈现物，依赖方向是 `capability → present`（向下） |
 | `projection` | `Projection`；契约词 `TurnState` · `CheckpointState` · `ConsolidateParams` · `Rejection` · `Reputation*`（`ReputationEntry` / `ReputationView`）· `Ready*`（`ReadySetView` / `ReadyTask`）· `Conation*`（`ConationView` / `ConationIntent`）· `Cost*`（`CostLedgerView` / `CostEntry`）· `Calibration*`（`CalibrationView` / `SkillStats`）· `Fallback*`（`FallbackRateView` / `TierStats`）· `Transcript*`（`TranscriptView` / `TranscriptEntry`）· `Slo*`（`SloLatencyView` / `TierLatency`）· `Prompt*`（`PromptMessage` / `PromptToolCall`——**结构化** prompt 出口：角色、正文、`tool_call_id`、`tool_calls`；线格式由 adapter 边界翻译，core 不认识 provider 的 `ChatNode`）· `PromptGap` / `PromptReport`（事实网格 → prompt 的**双向完整性**判据，[ADR-048](../../../docs/010-adr/048.md)；它**不是投影**而是投影的复核，所以归本域但不改「纯函数视图」的形态约定：入参事件切片 + 投影产出，出参缺口清单） | — | `consolidate_` · `reputation` · `plain_score` · `readyset` · `conation` · `cost_` · `calibration` · `fallback_` · `transcript` · `mutations_` · `slo_` · `checkpoint` · `verify_prompt_fidelity` | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。`TurnState` 是 [plan/PL-001 §8](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") `projection = turnstate` 的产出视图名。见 [ADR-043](../../../docs/010-adr/043.md) |
-| `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
 | `store` | `Store` / `MemoryStore` / `EventStore`；契约词 `AppendError` | — | — | `Store` trait 冻结（F1）：append / range / head，无 update/delete；`EventStore` 是装 `Event` 信封的便捷别名；`AppendError` 是 [plan/PL-001 §2](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 冻结签名的一部分。`range` 的口径是**完整史**（含被压缩快照取代的归档前缀）——本域只有这一条读法。持久化布局（文件格式 / 写者令牌 / 归档段）住使用方插件，不进根出口（[plan/14 §2.2](../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 2） |
+| `turn` | `Turn*`（`TurnSpec` / `TurnSettings` / `TurnDispatch` / `TurnReport` / `TurnStatus` / `TurnDispatchKey`）· 动作载荷 `AddNodesRequest` · `EditNodesRequest` · `RemoveNodesRequest` · `ReplaceAllRequest` · `ConsolidateRequest` · `Compression*` · `EditFrame` | `TURN_DISPATCH` · `LOOP_RUN_TURN` · `WORKER_` | — | [ADR-087](../../../docs/010-adr/087.md "ADR-087")：轮次面——一次轮次**怎么交付**（`dispatch`）、**怎么造节点**（`node_build`）、**产出什么记录**（`facts`）。它同时看见 `llm`（模型输出）与 `chat`（会话对象），是两者之上的装配面，依赖链 `chat ◄ llm ◄ turn ◄ projection` 无环。`node_build` / `facts` 以叶子模块形态出根（符号走模块路径）；交付包与动作载荷因被 `session` / `loop` 两侧逐字段构造而平铺 |
 | `text` | — | — | `text_` | 只有两个纯函数 |
 | `vdfs` | `Vdfs` | `VDFS_` | `vdfs_` | |
 | `view` | `View` / `Budget` / `Recall*`（`RecallView` / `RecallEntry`） | — | — | 投影产出的共享类型层（F2 后半句）：`View{value, degraded, used}`，`Budget` 是 I3 记账口径 |
@@ -175,8 +191,10 @@ created: 2026-09-26
 | `adapters` | v2 ⑤ 外部资源的**唯一接缝**：时延闸门 = 依赖注入策略——令牌按档位签发（ZST、私有构造），`LlmAdapter::generate` 只收 `FullModel` ⇒ 反射/快速档在类型上拿不到生成能力（[plan/PL-005 §3.3](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")） | `LatencyTier`（四层预算 80/300/60k/86.4M）· `TokenIssuer` · 令牌 `RuleOnly` / `ClassifyOnly` / `FullModel` · trait `CanClassify` / `CanGenerate`（`#[cfg(test)]`：档位契约的编译期正例，负例由签名承载）· `LlmAdapter`（`generate` / `generate_streaming`——流式只是帧的形态，收束语义不变）· `AdapterError` · `StubLlmAdapter`（`#[cfg(test)]` 零 LLM 桩：彩排与测试的确定性替身，`succeed_streaming` 分片 / `aborting` 中止）· `ProviderLlmAdapter`（真实实现：`execute_turn` 折进 `LlmAdapter`，帧桥择要转发正文增量）· `DeltaSink` / `SilentDeltas` | — |
 | `actors` | v2 ② 主体：只收类型化输入（事件切片 / `View`）、只产事件（[plan/PL-005 §3.1](../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") ② 行）；零 LLM 彩排的应答是彩排内的**定值**（链路形状一条不少），规则语义归 `classify` 规则表，`Reasoner` / `Translator` 归 S2 / S5 | `ActorSpec` · `Pattern`（三模式闭集：`Decider` / `Reasoner` / `Translator`）· `Scope`（root / child） | — |
 | `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityCategory` · `CapabilityToolContextRetention` · `capability_invoke` · 收集口契约（`Registry`——put/get/list 三方法一张表，行词汇 `CapabilityRow*`；**默认实现**住 `providers/collectors` 的 `DefaultToolVisitor`）· `capability_resolve` / `capability_to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `capability_report_error` / `capability_take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`）· 行词汇（`CapabilityRow` / `CapabilityRowKind`；`row.rs`——载荷枚举 `CapabilityRowPayload` 只在域内可见）· 模型族读写协议（`capability_model_active` / `capability_model_resolve`；`model.rs`）· 提示词族读协议（`capability_prompts`；写入是提示词行的 `put`，见 `prompt.rs`）· 挂载族读协议（`capability_vdfs_root` / `capability_mounts` / `capability_mount`；写入是挂载行 / 根行的 `put`，见 `mount.rs`） | `configurable` · `error` · `model` · `mount` · `option` · `prompt` · `row` · `tool_name` |
+| `chat` | 会话**线格式**：一条消息 / 一个主体长什么样，以及两个入口请求值。只说形状与解析，不含机制 | `chat_node`（`ChatNode` · `NodeRole` / `NodeKind` / `NodeStatus` · `MessageContent` · `ResumeRequest`）· `principal`（`Principal` / `PrincipalKind`）· `chat_request` / `session_chat`（两个 `Request`） | `chat_node` · `principal` · `chat_request` · `session_chat` |
 | `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
 | `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [ADR-036](../../../docs/010-adr/036.md)） | `creator_create_object` · `creator_has` · `creator_ids` | — |
+| `dialog` | 对话面**控制契约**（session ⇄ `classify` / `compose`）——判决是枚举、措辞是文本。生产方是 session，消费方是两个不同插件 ⇒ 满足 ADR-023 的 core 准入判据 | `Verdict`（闭集）· `DecideRequest` · `ComposeRequest` · `WordingReply` · `RunSnapshot` · `REASON_*`（理由码） | — |
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event` | v2 事件契约的**中性共享类型层**（④ store 与 ③ projection 都只 import 本域，见 [ADR-043](../../../docs/010-adr/043.md)） | `Seq`（私有构造：只有 `Store` 能分配）· `Event`（信封：幂等键 / 网格坐标 / 溯源 / 记账）· `EventEnvelope` · 语法网格闭集 `Entity`(11) × `Verb`(5)（F5）· 节点身份规则 `event_node_of`（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id`） | — |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
@@ -187,15 +205,18 @@ created: 2026-09-26
 | `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留**多消费方**共用的符号（唯一例外 `llm_message_frame` 见 ADR-023） | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput`（`tool_calls` 是**结果形态**，只装结果不装过程；累积过程住 `plugins/model/tool_accumulator.rs`，三个读方法 `is_reasoning_only` / `effective_text` / `into_messages` 住 `plugins/session/message_build.rs`）· `TurnToolCallInfo` · 帧 `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` · id 原语 `llm_short_id` | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |
 | `plugin` | 插件核心契约：trait、信封、错误、目录、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
-| `schemas` | 跨端协议 schema（前端逐字段镜像） | `ChatNode` · `HookEvent` · `SuccessResponse` · 详情表 schema | `common` · `detail` · `hook` · `session` |
+| `present` | **宿主呈现方言**：后端下发描述、前端零业务知识渲染。两个面同一族哲学——`detail` 服务可编辑详情页，`reading` 服务只读读数面板 | `DetailDefinition` 家族（字段 / 分区 / 动作 / 预设 / 条件 / 徽标）· `ReadingPanel` 家族（分区 / 行 / 口径 / 色调）· `DETAIL_*` | `detail` · `reading` |
 | `store` | 一切事实的**唯一写入口与读取面**（append-only：trait 上不存在 update/delete，F1）；`memory` 是平凡基线，持久化实现住使用方插件 | `Store`（trait）· `MemoryStore` · `EventStore`（便捷别名）· `AppendError` | — |
 | `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `text_truncate_bytes` · `text_floor_char_boundary` | — |
+| `turn` | **轮次面**：一次轮次怎么交付（`dispatch`）、怎么按形状造节点（`node_build`）、产出什么记录（`facts`）。同时看见 `llm` 与 `chat`，是两者之上的装配面 | `TurnSpec` / `TurnSettings` / `TurnDispatch` / `TurnReport` / `TurnStatus` · 动作词表 `run_ops` 与载荷（`AddNodesRequest` / `EditFrame` / `ConsolidateRequest` / `Compression*`）· 写侧构造 `llm_build_*` / `dialog_node` / `PresentationTree` · 产物记录 `Delegation` / `TaskDeclaration` / `ReportDraft` | `dispatch` · `node_build` · `facts` |
 | `vdfs` | 统一资源访问契约（规范见 [design/013-vdfs.md](../../../docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend")） | `VdfsProvider` · `VdfsNode` · `VdfsRequest` / `VdfsResponse` · `VdfsError` · `VdfsChangeSubscriptions` · `VDFS_*` 词表 | `address` · `host` |
 | `view` | 投影产出的**共享类型层**（与 `event` 同理：③ projection 与将来的 ② actors 都只 import 本域） | `View`（`value` / `degraded` / `used`——「可降级」是类型义务）· `Budget` | — |
 
-> `capability` / `embedding` / `llm` / `plugin` / `schemas` 的第四列是**协作者视角**的子路径，
+> `capability` / `chat` / `embedding` / `llm` / `plugin` / `present` / `turn` 的第四列是**协作者视角**的子路径，
 > 供直接定位；它们同样是「域的公开面」，只是按主题分了文件。**消费方不按这里深引**（第 4 条），
-> 例外只有 `schemas`。
+> 例外是**叶子模块**：`chat_node` · `chat_request` · `session_chat` · `principal` · `facts` · `node_build`。
+> 它们是**主题命名空间**（字段家族 / 记录家族 / 构造家族），不是深引捷径——路径只有一层，
+> 且名字必须自证主题（`node_build::dialog_node` 读得出「造节点的」，不是「某个域的内部件」）。
 
 **域不按代码量分。** `clock`（25 行）与 `text`（49 行）各自成域，不并成一个「工具域」：
 域名要**自证内容**，而一个能同时装下「纯函数」（`text`，输入决定输出）与「非确定性来源」
@@ -209,7 +230,6 @@ created: 2026-09-26
 
 | 域 | 规则 | 理由 |
 |---|---|---|
-| `schemas` | 类型与常量**即协议词**，不带 `Schemas` 前缀 | 协议词就是它的命名空间；逐字段与前端镜像，改名要跨栈同步 |
 | `keys` | 类型用 `…Key` **后缀**；实例用**裸名** | 见下 |
 
 **这里没有「符号级豁免」。** 新增符号若不符合 §1.2 的表，只有两条路：改名，或者在本表

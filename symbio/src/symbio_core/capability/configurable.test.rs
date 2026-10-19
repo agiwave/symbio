@@ -6,7 +6,7 @@
 
 use super::*;
 
-use crate::symbio_core::schemas::detail::DetailDefinition;
+use crate::symbio_core::DetailDefinition;
 use crate::symbio_core::PluginDir;
 
 fn config() -> PluginConfigFile {

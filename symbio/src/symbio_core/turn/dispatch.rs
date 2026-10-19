@@ -132,7 +132,7 @@ impl SymbioKey for TurnDispatchKey {
 }
 pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 
-/// loop→session 内部动作段的**地址词表**（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4）。
+/// loop→session 内部动作段的**地址词表**（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §4）。
 ///
 /// `_run` 是会话挂载点下的一级段：`session/<sid>/_run/<op>`。地址末段与
 /// `Action.action` 必须**字面相等**——两者只在这里命名一次，两侧都从这里取。
