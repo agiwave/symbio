@@ -441,7 +441,7 @@ pub async fn run_chat_loop(
         //
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
-        let head_state = super::loop_registry::Call::turn_head(
+        let head_state = super::loop_registry::LoopState::turn_head(
             turn.request_round,
             first_utterance.is_some(),
             orchestrator.classify_enabled,

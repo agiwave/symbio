@@ -34,109 +34,15 @@ fn progress() -> ProgressPolicy {
     }
 }
 
-/// 某一格「全部条件都满足」的问表调用 —— 哨兵用例的真实侧基准。
-fn call_of(site: Site) -> Call {
+/// 某一格「全部条件都满足」的问表状态 —— 逐条件用例与可达性用例的基准。
+fn call_of(site: Site) -> LoopState {
     match site {
-        Site::TurnHead => Call::turn_head(0, true, true),
-        Site::RoundBoundary => Call::round_boundary(3, 90_000, 0, progress()),
-        Site::Compress => Call::compress(true),
-        Site::TurnPrepare => Call::turn_prepare(0, true),
-        Site::Reflex => Call::reflex(true, true),
+        Site::TurnHead => LoopState::turn_head(0, true, true),
+        Site::RoundBoundary => LoopState::round_boundary(3, 90_000, 0, progress()),
+        Site::Compress => LoopState::compress(true),
+        Site::TurnPrepare => LoopState::turn_prepare(0, true),
+        Site::Reflex => LoopState::reflex(true, true),
     }
-}
-
-/// `LoopState` 的字段名册（**加字段请同步这里**）。
-///
-/// 与 `LoopState::blank` 的分工：`blank` 是生产侧的全零基底，本枚举的用途是
-/// 「按字段粒度把值推到极端」——只有拆到字段粒度，哨兵用例才能说「非本格字段
-/// 被改了，结果不变」。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Field {
-    Round,
-    HasUtterance,
-    ClassifyEnabled,
-    QuietMs,
-    Reports,
-    Progress,
-    AutoCompress,
-    HasFacts,
-    ResumeAllowed,
-    HasMatch,
-}
-
-impl Field {
-    const ALL: &'static [Field] = &[
-        Field::Round,
-        Field::HasUtterance,
-        Field::ClassifyEnabled,
-        Field::QuietMs,
-        Field::Reports,
-        Field::Progress,
-        Field::AutoCompress,
-        Field::HasFacts,
-        Field::ResumeAllowed,
-        Field::HasMatch,
-    ];
-}
-
-/// 每一格的构造器**填了**哪些字段 —— 与 `Call::xxx` 的赋值逐字对应。
-///
-/// 这张表与构造器可能漂：构造器多填一个字段、本表没跟，哨兵用例会把那个字段
-/// 推到极端值、于是"本格行读到它"被当成跨格读而报错——方向是**误报**（宁可
-/// 多问一句），不是漏报。反过来若本表多写了一个字段，哨兵不会把它推到极端，
-/// 跨格读就漏掉了；因此构造器改动时必须同屏改这里。
-fn site_fields(site: Site) -> &'static [Field] {
-    match site {
-        Site::TurnHead => &[Field::Round, Field::HasUtterance, Field::ClassifyEnabled],
-        Site::RoundBoundary => &[
-            Field::Round,
-            Field::QuietMs,
-            Field::Reports,
-            Field::Progress,
-        ],
-        Site::Compress => &[Field::AutoCompress],
-        Site::TurnPrepare => &[Field::Round, Field::HasFacts],
-        Site::Reflex => &[Field::ResumeAllowed, Field::HasMatch],
-    }
-}
-
-/// 把单个字段推到**极端值**（与 `blank` 的零值一定不同）。
-///
-/// 布尔用取反而非硬设 `true`：构造器可能本来就填了 `true`，取反才能保证
-/// 「值确实变了」——不变的话这条哨兵对该字段就是空的。
-fn set_sentinel(s: &mut LoopState, f: Field) {
-    match f {
-        Field::Round => s.round = usize::MAX,
-        Field::HasUtterance => s.has_utterance = !s.has_utterance,
-        Field::ClassifyEnabled => s.classify_enabled = !s.classify_enabled,
-        Field::QuietMs => s.quiet_ms = i64::MAX,
-        Field::Reports => s.reports = u32::MAX,
-        // 与 `ProgressPolicy::disabled()` 处处相反：禁用 → 启用，阈值 → 0，
-        // 配额 → 上限。任何一条判据读它都会得到不同结论。
-        Field::Progress => {
-            s.progress = ProgressPolicy {
-                enabled: true,
-                interval_ms: 0,
-                min_rounds: 0,
-                max_per_turn: u32::MAX,
-            }
-        }
-        Field::AutoCompress => s.auto_compress = !s.auto_compress,
-        Field::HasFacts => s.has_facts = !s.has_facts,
-        Field::ResumeAllowed => s.resume_allowed = !s.resume_allowed,
-        Field::HasMatch => s.has_match = !s.has_match,
-    }
-}
-
-/// 与 `call_of(site)` 同格，但**非本格字段全被推到极端值**。
-fn sentinel_call(site: Site) -> Call {
-    let mut call = call_of(site);
-    for f in Field::ALL {
-        if !site_fields(site).contains(f) {
-            set_sentinel(&mut call.state, *f);
-        }
-    }
-    call
 }
 
 // ── 表本身：顺序、冲突、先命中者胜 ────────────────────────────────────────
@@ -387,7 +293,9 @@ fn classify_does_not_fire_after_tool_rounds() {
     // 只差 `round == 0`：工具轮次里循环回顶部时用户没再说话，
     // 再判一次就是拿同一句话重判。
     assert_eq!(
-        builtin().decide(&Call::turn_head(1, true, true)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_head(1, true, true))
+            .capsule(),
         None
     );
 }
@@ -396,7 +304,9 @@ fn classify_does_not_fire_after_tool_rounds() {
 fn classify_does_not_fire_without_utterance() {
     // 只差 `has_utterance`：resume / 心跳 / 无发言轮次没有可判的话。
     assert_eq!(
-        builtin().decide(&Call::turn_head(0, false, true)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_head(0, false, true))
+            .capsule(),
         None
     );
 }
@@ -405,7 +315,9 @@ fn classify_does_not_fire_without_utterance() {
 fn classify_does_not_fire_when_switch_is_off() {
     // 只差 `classify_enabled`：关掉判决 ⇒ 与未挂载 `classify` 逐字一致。
     assert_eq!(
-        builtin().decide(&Call::turn_head(0, true, false)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_head(0, true, false))
+            .capsule(),
         None
     );
 }
@@ -429,7 +341,7 @@ fn report_never_fires_at_turn_head_even_if_min_rounds_is_zero() {
         min_rounds: 0,
         ..progress()
     };
-    let call = Call::round_boundary(0, 90_000, 0, permissive);
+    let call = LoopState::round_boundary(0, 90_000, 0, permissive);
     assert_eq!(builtin().decide(&call).capsule(), None);
 }
 
@@ -468,7 +380,7 @@ fn report_respects_the_four_knobs() {
         ),
     ];
     for (policy, quiet_ms, rounds, reports) in cases {
-        let call = Call::round_boundary(rounds, quiet_ms, reports, policy);
+        let call = LoopState::round_boundary(rounds, quiet_ms, reports, policy);
         assert_eq!(
             builtin().decide(&call).capsule(),
             None,
@@ -480,7 +392,7 @@ fn report_respects_the_four_knobs() {
 #[test]
 fn report_interval_threshold_is_inclusive() {
     // 阈值是"到了就该说"，不是"超过才说"：`quiet_ms == interval_ms` 必须汇报。
-    let call = Call::round_boundary(3, 60_000, 0, progress());
+    let call = LoopState::round_boundary(3, 60_000, 0, progress());
     assert_eq!(builtin().decide(&call).capsule(), Some(Capsule::Report));
 }
 
@@ -489,85 +401,90 @@ fn report_interval_threshold_is_inclusive() {
 #[test]
 fn compress_follows_the_request_switch_only() {
     assert_eq!(
-        builtin().decide(&Call::compress(true)).capsule(),
+        builtin().decide(&LoopState::compress(true)).capsule(),
         Some(Capsule::Compress)
     );
     // 关掉自动压缩 ⇒ 不进产线。压不压得动是内核的事，本行只管进不进。
-    assert_eq!(builtin().decide(&Call::compress(false)).capsule(), None);
+    assert_eq!(
+        builtin().decide(&LoopState::compress(false)).capsule(),
+        None
+    );
 }
 
 #[test]
 fn reflex_requires_a_fresh_turn_and_a_match() {
     assert_eq!(
-        builtin().decide(&Call::reflex(true, true)).capsule(),
+        builtin().decide(&LoopState::reflex(true, true)).capsule(),
         Some(Capsule::Reflex)
     );
     // 续写轮不走快路：它会撞幂等键（复用 `resume.user_seq` 却新开一轮）。
-    assert_eq!(builtin().decide(&Call::reflex(false, true)).capsule(), None);
+    assert_eq!(
+        builtin().decide(&LoopState::reflex(false, true)).capsule(),
+        None
+    );
     // 没命中技能就没什么可快。
-    assert_eq!(builtin().decide(&Call::reflex(true, false)).capsule(), None);
+    assert_eq!(
+        builtin().decide(&LoopState::reflex(true, false)).capsule(),
+        None
+    );
 }
 
 #[test]
 fn recall_requires_first_round_and_a_session_dir() {
     assert_eq!(
-        builtin().decide(&Call::turn_prepare(0, true)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_prepare(0, true))
+            .capsule(),
         Some(Capsule::Recall)
     );
     // 只差 `round == 0`：同一轮内记忆不漂移，事实源只扫一遍。
     assert_eq!(
-        builtin().decide(&Call::turn_prepare(1, true)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_prepare(1, true))
+            .capsule(),
         None
     );
     // 只差 `has_facts`：临时会话没有事实源，不读不写。
     assert_eq!(
-        builtin().decide(&Call::turn_prepare(0, false)).capsule(),
+        builtin()
+            .decide(&LoopState::turn_prepare(0, false))
+            .capsule(),
         None
     );
 }
 
-// ── 跨格不误读：行只读本格构造器填的字段 ────────────────────────────────
+// ── 行的可达性与格的对应 ────────────────────────────────────────────────
 
-/// 把非本格字段全推到极端值，本格结论必须不变。
+/// 每一行都必须从**它声明的格**可达。
 ///
-/// 这条判据此前**不存在**：5 个构造器共用一个 10 字段的 `LoopState`，其余字段用
-/// `..blank()` 填假值，而「某行只读本格字段」只能靠人读代码确认。`Site` 让
-/// `decide` 只扫本格之后，这个性质成了结构性质；本用例把它变成可执行的：
-/// 若某行读了别格的字段，哨兵值会让它命中/不命中，`Verdict` 就与真实侧不同。
+/// 这条替代了此前的哨兵用例。哨兵守的是「行不跨格读字段」——`LoopState` 改成
+/// 按格分形的枚举之后，那件事已经是编译错误（`TurnHead` 变体里没有 `quiet_ms`，
+/// 别的行写不出来）。但枚举化留下一个**新的**漂移面：`Row.site` 是手写字段，
+/// 它可能与判据实际接受的变体对不上（`site: TurnHead` 配一个只 match
+/// `RoundBoundary` 的函数）。那样的一行永远不命中——死代码，且没有任何错误信号。
+///
+/// `call_of(site)` 是该格全部条件都满足的状态，所以「本格有行」必须表现为
+/// `Hit`。`Unmanned` 说明这一格没挂行，`Declined` 说明挂了的行走不到——
+/// 两种都是配置错，报错文案按变体区分（`Verdict` 三值的用处就在这里）。
 #[test]
-fn no_row_reads_across_sites() {
+fn every_row_is_reachable_from_its_declared_site() {
     for site in Site::ALL {
-        let real = call_of(*site);
-        let sentinel = sentinel_call(*site);
-        assert_eq!(
-            builtin().decide(&real),
-            builtin().decide(&sentinel),
-            "{} 格的行读了非本格字段：把其余字段推到极端后结论变了（真实 {:?} / 哨兵 {:?}）",
-            site.name(),
-            builtin().decide(&real),
-            builtin().decide(&sentinel)
+        let verdict = builtin().decide(&call_of(*site));
+        assert!(
+            matches!(verdict, Verdict::Hit(_)),
+            "{} 格没有行认领「全条件满足」的状态：{verdict:?}——\
+             Unmanned = 本格没挂行；Declined = 挂了的行的 site 声明与判据接受的\
+             变体对不上（或判据被改成了恒假）",
+            site.name()
         );
     }
 }
 
-/// 哨兵确实扰动了 —— 否则上一条就是"两边都没变"的恒真断言。
+/// 构造器与格的对应关系：`call_of` 自己不能错。
 #[test]
-fn sentinel_call_actually_disturbs_every_field() {
+fn call_of_matches_its_site() {
     for site in Site::ALL {
-        let real = call_of(*site);
-        for f in Field::ALL {
-            if site_fields(*site).contains(f) {
-                continue;
-            }
-            let mut probe = real.clone();
-            set_sentinel(&mut probe.state, *f);
-            assert_ne!(
-                format!("{:?}", probe.state),
-                format!("{:?}", real.state),
-                "{} 格的 {f:?} 推了哨兵但 state 没变化——该字段的哨兵是空的",
-                site.name()
-            );
-        }
+        assert_eq!(call_of(*site).site(), *site, "构造器与格错位");
     }
 }
 
@@ -626,7 +543,12 @@ fn adding_a_second_row_to_a_site_is_pure_registration() {
         name: "policy.skill",
         site: Site::TurnPrepare,
         prio: 5,
-        decide: |s| (s.round == 0 && s.has_facts).then_some(Capsule::Recall),
+        decide: |s| {
+            let LoopState::TurnPrepare { round, has_facts } = s else {
+                return None;
+            };
+            (*round == 0 && *has_facts).then_some(Capsule::Recall)
+        },
     })
     .expect("同格加第二行只需格内新序");
 

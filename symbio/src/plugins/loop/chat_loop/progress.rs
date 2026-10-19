@@ -74,24 +74,6 @@ impl ProgressPolicy {
             && tool_rounds >= self.min_rounds
             && reports < self.max_per_turn
     }
-
-    /// 「此处不存在汇报」的策略快照（轮首用）。
-    ///
-    /// 与"配置里关掉了汇报"是**同一件事在数据上的两种来源**：`enabled = false`
-    /// 让 [`Self::due`] 恒假，因此 `policy.report` 在轮首自然不命中，不必让
-    /// 环在构造状态时特判"这一格不适用"。
-    ///
-    /// 其余三个旋钮填**不可能通过**的值而不是 0：`min_rounds = 0` 与
-    /// `max_per_turn = 0` 在合法配置里都是"更宽松"，留着它们会让本快照在
-    /// 将来某次误读 `enabled` 时静默变成"每次都该汇报"。
-    pub(crate) fn disabled() -> Self {
-        Self {
-            enabled: false,
-            interval_ms: i64::MAX,
-            min_rounds: usize::MAX,
-            max_per_turn: 0,
-        }
-    }
 }
 
 /// **轮内**的汇报状态（缺口 4）——轮次与静默时钟的**唯一持有者**。
@@ -140,7 +122,7 @@ impl RoundProgress {
     /// 自己持有的三格数（轮次 / 静默 / 已汇报次数）连同策略快照折成 `LoopState`
     /// 交给表。**同一份判据只有一个 owner**：改阈值语义改那一行，不改这里。
     pub(crate) fn due(&self, snapshot: &RunSnapshot) -> bool {
-        let state = super::super::loop_registry::Call::round_boundary(
+        let state = super::super::loop_registry::LoopState::round_boundary(
             snapshot.tool_rounds,
             snapshot.quiet_ms,
             self.reports,

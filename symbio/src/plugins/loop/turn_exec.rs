@@ -1160,7 +1160,7 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
     // 本处只提供两个布尔并执行命中结果——`hit` 全程留在本地，表不接触它。
     let matched = super::skill_events::take_match(skill_hits, user_text);
     let reflex_state =
-        super::loop_registry::Call::reflex(resume_anchor.is_none(), matched.is_some());
+        super::loop_registry::LoopState::reflex(resume_anchor.is_none(), matched.is_some());
     let hit = match super::loop_registry::builtin()
         .decide(&reflex_state)
         .capsule()
