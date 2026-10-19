@@ -36,8 +36,8 @@
 //!   与 [`ExecAbortSignal::cancelled`]——不再有第二条「标志位之外的中止来源」。
 
 use crate::symbio_core::chat_node::ChatNode;
+use crate::symbio_core::keys::SymbioKey;
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
-use crate::symbio_core::{ABORT_SIGNAL, EVENT_SINK};
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -225,7 +225,7 @@ impl std::fmt::Debug for ExecEventSink {
 /// 收口前，执行期输入散在**两处、三种形态**：
 /// - `ModelProvider::execute_turn` 写成**显式参数**（`sink` / `abort`）；
 /// - `Capability::execute` 塞进**请求信封**（`ctx`）——出口、中止、参数、会话上下文
-///   （`WORKDIR` / `MODE` / `RISK_LEVEL`…）与路由键（`PATH` / `PARENT` / `trace_id`）
+///   （`WORKDIR` / `MODE` / `RISK_LEVEL`…）与路由键（`PATH` / `PLUGIN_PARENT` / `trace_id`）
 ///   混在同一个键值袋里，于是每个工具都得自己记住「我该读哪些键」。
 ///
 /// 但两者其实是**同一件事**：一次带中止的流式执行——出方向写事件、入方向读中止、
@@ -361,6 +361,74 @@ impl std::fmt::Debug for ExecAbortSignal {
         write!(f, "ExecAbortSignal({})", self.is_aborted())
     }
 }
+
+// ─── 执行期通道键（与值同住，ADR-095 根因一） ───
+//
+// 这两个键是 [`ExecEventSink`]（出）与 [`ExecAbortSignal`]（入）在 `ctx` 上的唯一
+// 读写凭据。它们曾住 `symbio_core::keys`，与机制分家；搬来本域的判据是**键与值同住**：
+// 值的类型在本域，键就没有理由住别处。`keys` 域自此只留机制（[`SymbioKey`] trait）
+// 与值类型为通用词汇（`String` / `Value` / `Vec<String>`）的键。
+//
+// 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`，`turn` 域）本就住 turn 域。
+//
+// 键名（`event_sink` / `abort_signal`）不变——`ctx` 上的键面是**外部可见的协议**，
+// 搬迁只改 Rust 侧的归属域，不改任何一处的字符串字面量。
+
+/// 执行期**事件出口** Key —— 出方向的通道凭据。
+///
+/// ## 为什么走 `ctx` 而不是给 `Capability::execute` 加参数
+///
+/// `Capability::execute(ctx)` 的入参是**请求信封**（`PATH` / `trace_id` / `payload`
+/// / 会话上下文），不是执行期上下文。出口与中止信号是**执行期**的，与「这次调用
+/// 从哪条路径来」无关：同一个 `shell` 能力既可能被会话编排层调用（有出口），
+/// 也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx` 承载，缺席即静默，
+/// **不必为「有没有出口」造第二条调用路径**。
+///
+/// ## 为什么 `parse → None`
+///
+/// 与收集面三条通道键（[`crate::symbio_core::CAPABILITY_VISITOR`] /
+/// [`crate::symbio_core::OPTION_VISITOR`] /
+/// [`crate::symbio_core::CONFIGURABLE_VISITOR`]）同款：进程内专用，没有字符串形态。
+/// `parse` 返回 `None` 是**刻意的**——它声明「本键不参与任何跨进程/字符串化的往返」，
+/// 而不是「尚未实现」。
+pub struct ExecEventSinkKey;
+impl SymbioKey for ExecEventSinkKey {
+    type Value = ExecEventSink;
+    /// 进程内专用：闭包，无字符串 / JSON 形态
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "event_sink"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "event_sink".to_string()
+    }
+}
+pub const EVENT_SINK: ExecEventSinkKey = ExecEventSinkKey;
+
+/// 执行期**中止信号** Key —— 与 [`EVENT_SINK`] 成对。
+///
+/// 写入者是编排层（发起工具调用前）；读取者是工具实现体。缺席 ⇒ 得到一个
+/// **永不中止**的独立信号（[`ExecAbortSignal::new`]）：直接 `route()` 调用没有编排层，
+/// 也就没有中止来源，这是诚实表达而非兜底。
+pub struct ExecAbortSignalKey;
+impl SymbioKey for ExecAbortSignalKey {
+    type Value = ExecAbortSignal;
+    /// 进程内专用：`CancellationToken`，无字符串 / JSON 形态
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "abort_signal"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "abort_signal".to_string()
+    }
+}
+pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
 
 #[cfg(test)]
 mod tests;

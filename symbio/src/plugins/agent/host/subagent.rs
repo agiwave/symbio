@@ -214,7 +214,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             .and_then(|w| w.upgrade())
             .ok_or_else(|| {
                 PluginError::InternalError(
-                    "agent_run 无法获取路由入口（插件构造时未捕获 PARENT 引用）".to_string(),
+                    "agent_run 无法获取路由入口（插件构造时未捕获 PLUGIN_PARENT 引用）".to_string(),
                 )
             })?;
 

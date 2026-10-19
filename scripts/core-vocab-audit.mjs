@@ -195,12 +195,16 @@ const DEFAULT_BASELINE = [
   // 适配层又按它的时延档表产出。拆法存在（档位词表下沉一层），但那是 adapters
   // 自己的改造，不在 ADR-087 的范围内。
   'adapters|projection',
-  // 最大的一族：plugin（信封/错误/目录）⇄ keys（上下文键值）⇄ vdfs（资源契约）
-  // ⇄ chat/present（plugin::dir 的目录项带 DetailDefinition、VdfsItem；error 带
-  // ChatNode 半截消息）⇄ capability ⇄ llm ⇄ exec ⇄ event_bus。
+  // 2026-10-20 拆掉的八域族（ADR-095）：曾是
+  // plugin ⇄ keys ⇄ vdfs ⇄ chat/present ⇄ capability ⇄ llm ⇄ exec ⇄ event_bus。
   // 根因是 **`keys` 的键值类型指向各域的类型**（键必须能装 `Arc<dyn Capability>`），
-  // 而各域又用键取上下文——它是「万能胶」型的环，不是拆分错误。
-  'capability|chat|event_bus|exec|keys|llm|plugin|present|vdfs',
+  // 而各域又用键取上下文——「万能胶」型的环。三刀拆解：
+  //   ① 键与值同住：8 个值类型属某域的键随值迁出 keys（keys→capability/exec/plugin
+  //      三条出边消失，keys 成汇点）；
+  //   ② Aborted 载荷去 ChatNode 化（plugin→chat 消失）；
+  //   ③ vdfs_change_of 搬 event_bus（vdfs→plugin / vdfs→event_bus 消失）。
+  // 边数 44 → 40，环族 2 → 1。留此注释为「基线会长回来」立反例：keys 域今后只收
+  // 值类型为通用词汇的键，新增值类型属某域的键就是往这个坑里填土。
 ]
 
 /** 基线可由环境变量替换（回归测试用）：它与仓库数据解耦，守卫逻辑不含具体域名。 */

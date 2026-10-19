@@ -18,7 +18,8 @@
 //! 调用（子智能体的嵌套会话经收件箱地址写入复用同一管线，
 //! 不由 agent 直接驱动），因此定义在 session 插件内。
 
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS};
+use crate::symbio_core::keys::SymbioKey;
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -31,9 +32,36 @@ pub struct CapabilityError {
     pub message: String,
 }
 
-// 错误桶的**键**（`CapabilityErrorsKey` 与 `CAPABILITY_ERRORS`）住在 `symbio_core::keys`
-// ——所有 `SymbioKey` 实例的唯一定义处（见 `keys/mod.rs` 的域说明）。本模块只用它，
-// 不定义它：键面归键域，机制归本域。
+/// 能力收集期**错误桶** Key —— **键与值同住**（ADR-095 根因一）
+///
+/// 值类型带 [`CapabilityError`]（本域类型），故键住本域。键名（`capability_errors`）
+/// 是 `ctx` 上的外部协议面，不随搬迁而变。
+///
+/// ## 为什么 `parse → None` 且 `WIRE = false`
+///
+/// 与收集面三条通道键（[`crate::symbio_core::CAPABILITY_VISITOR`] /
+/// [`crate::symbio_core::OPTION_VISITOR`] /
+/// [`crate::symbio_core::CONFIGURABLE_VISITOR`]）同款，但这里**两条都要写**：
+/// 值是 `Arc<Mutex<Vec<..>>>`，`CapabilityError` 也没有 `Serialize`
+/// ⇒ 它连「进程外表达」都不成立，故 `WIRE = false`。
+/// （`CONFIG` 只需 `parse → None`：值本身可序列化，只是不做「从字符串恢复」
+/// 这件事——`WIRE` 与 `parse` 是**声明与结果**，不是同一条。）
+pub struct CapabilityErrorsKey;
+impl SymbioKey for CapabilityErrorsKey {
+    type Value = Arc<Mutex<Vec<CapabilityError>>>;
+    /// 进程内专用：`Arc<Mutex<..>>` 无字符串 / JSON 形态
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "capability_errors"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "capability_errors".to_string()
+    }
+}
+pub const CAPABILITY_ERRORS: CapabilityErrorsKey = CapabilityErrorsKey;
 
 /// 初始化错误桶（由能力收集管线调用；重复调用无副作用）
 pub fn capability_init_error_bucket(ctx: &Arc<dyn PluginInvokeRequest>) {

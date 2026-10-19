@@ -349,10 +349,12 @@ pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING
 // ==================== 插件契约 ====================
 pub use capability::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
-    capability_invoke, capability_model_active, capability_model_resolve, capability_mount,
-    capability_mounts, capability_option_fields, capability_prompts, capability_resolve,
+    capability_init_error_bucket, capability_invoke, capability_model_active,
+    capability_model_resolve, capability_mount, capability_mounts, capability_option_fields,
+    capability_prompts, capability_report_error, capability_resolve, capability_take_errors,
     capability_to_wire, capability_vdfs_root, Capability, CapabilityCategory, CapabilityMeta,
-    CapabilityRiskLevel, CapabilityRow, CapabilityRowKind, Registry,
+    CapabilityRiskLevel, CapabilityRow, CapabilityRowKind, Registry, CAPABILITY_ERRORS,
+    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
@@ -361,15 +363,16 @@ pub use plugin::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, Plugin, PluginChannel, PluginConfigFile,
     PluginConfigMount, PluginDir, PluginEntry, PluginError, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_FILE, PLUGIN_ID_AGENT,
-    PLUGIN_ID_CLASSIFY, PLUGIN_ID_COMPOSE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_EVENT_BUS,
-    PLUGIN_ID_GATEWAY, PLUGIN_ID_HEARTBEAT, PLUGIN_ID_HOME, PLUGIN_ID_HOOK, PLUGIN_ID_LOCAL,
-    PLUGIN_ID_LOOP, PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MEMORY, PLUGIN_ID_MODEL,
-    PLUGIN_ID_SESSION, PLUGIN_ID_SETTING, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS,
-    PLUGIN_ID_WEB, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
-    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PAYLOAD_KEY,
-    ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT,
-    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_DIR, PLUGIN_FILE,
+    PLUGIN_ID_AGENT, PLUGIN_ID_CLASSIFY, PLUGIN_ID_COMPOSE, PLUGIN_ID_COMPOSITE,
+    PLUGIN_ID_EVENT_BUS, PLUGIN_ID_GATEWAY, PLUGIN_ID_HEARTBEAT, PLUGIN_ID_HOME, PLUGIN_ID_HOOK,
+    PLUGIN_ID_LOCAL, PLUGIN_ID_LOOP, PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MEMORY,
+    PLUGIN_ID_MODEL, PLUGIN_ID_SESSION, PLUGIN_ID_SETTING, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM,
+    PLUGIN_ID_VDFS, PLUGIN_ID_WEB, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT,
+    PLUGIN_PAYLOAD_KEY, ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE,
+    ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 
@@ -382,11 +385,12 @@ pub use creator::{creator_create_object, creator_has, creator_ids};
 pub(crate) use creator::{ObjectConstructor, Submit};
 
 // ==================== 键面 ====================
+// 只剩机制（`SymbioKey` trait）与值类型为通用词汇（String / Value / Vec<String>）的键——
+// 值类型属某域的键已随值搬去该域（exec / plugin / capability，ADR-095 根因一）。
 pub use keys::{
-    SymbioKey, ABORT_SIGNAL, AGENT_ID, CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
-    CONTENT, EVENT_SINK, ID, MODE, NAME, OPTION_VISITOR, PARENT, PATH, PLUGIN_DIR, PROVIDER_ID,
-    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID,
-    TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
+    SymbioKey, AGENT_ID, CONTENT, ID, MODE, NAME, PATH, PROVIDER_ID, REQUIRED_PLUGINS,
+    RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID, TRACE_ID,
+    VDFS_PARENT_ADDR, WORKDIR,
 };
 
 // ==================== 装配策略 ====================
@@ -394,15 +398,12 @@ pub use keys::{
 pub use assembly::{ASSEMBLY_SUB_AGENT_PLUGINS, ASSEMBLY_UNDISABLABLE_PLUGINS};
 
 // ==================== 基础设施 / 工具函数 ====================
-// 注：`CAPABILITY_ERRORS`（错误桶键）不在这里——它是 `SymbioKey` 实例，
-// 随 `pub use keys::*` 一并平铺（键面只有一个定义处，见 `keys/mod.rs`）。
-pub use capability::{
-    capability_init_error_bucket, capability_report_error, capability_take_errors,
-};
 pub use clock::clock_now_ms;
 // 锁辅助函数**刻意不进 `pub use plugin::*`**（见 `plugin/error.rs::lock_read` 的说明）：
 // 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
-pub use exec::{ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter};
+pub use exec::{
+    ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
+};
 // 注：homedir（系统根注册表）**不在 core**——它归 `home` 插件独有。core 只提供
 // 纯路径工具 `plugin_expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
 // 日志门面：`logger_is_initialized` / `logger_level_enabled` / `LOG_LEVEL_{WARN,ERROR}` 只被

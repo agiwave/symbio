@@ -12,8 +12,8 @@ mod traverse;
 // 域内子模块私有，公开面在此显式重导出
 pub use dir::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
-    PluginEntry, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
-    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
+    PluginEntry, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED,
+    PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
 pub(crate) use hook::fire_hook;
@@ -211,7 +211,7 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
 
     /// 获取父插件引用 (Weak)
     fn parent(&self) -> Option<std::sync::Weak<dyn crate::symbio_core::Plugin>> {
-        self.get(crate::symbio_core::PARENT).flatten()
+        self.get(PLUGIN_PARENT).flatten()
     }
 
     /// 获取配置信息 (Value)
@@ -275,7 +275,7 @@ impl<T: PluginInvokeRequest + ?Sized> PluginInvokeRequestExt for T {}
 pub struct PluginSimpleRequest {
     /// 环境变量桶
     pub envs: Arc<RwLock<HashMap<String, String>>>,
-    /// 万能扩展桶 (用于进程内透传复杂 Rust 对象，如 Payload, Metadata, PARENT, CONFIG 等)
+    /// 万能扩展桶 (用于进程内透传复杂 Rust 对象，如 Payload, Metadata, PLUGIN_PARENT, CONFIG 等)
     pub extensions: Arc<RwLock<HashMap<String, Arc<dyn Any + Send + Sync>>>>,
 }
 
@@ -284,7 +284,7 @@ impl PluginSimpleRequest {
         let mut extensions = HashMap::new();
         if let Some(p) = parent {
             extensions.insert(
-                crate::symbio_core::PARENT.name().to_string(),
+                PLUGIN_PARENT.name().to_string(),
                 Arc::new(Some(p)) as Arc<dyn Any + Send + Sync>,
             );
         }
@@ -470,6 +470,28 @@ pub trait Plugin: Send + Sync + 'static {
         }
     }
 }
+
+/// 父插件弱引用 Key（`Option<Weak<dyn Plugin>>`）—— **键与值同住**（ADR-095 根因一）
+///
+/// 值类型是 [`Plugin`] 的弱引用，故住本域。键名（`parent`）是 `ctx` 上的外部
+/// 协议面，**不随改名而变**——Rust 侧改名 `PARENT` → `PLUGIN_PARENT` 只为对齐
+/// 本域常量的 `PLUGIN_` 前缀（N-002：一个前缀只属一个域）。
+pub struct PluginParentKey;
+impl SymbioKey for PluginParentKey {
+    type Value = Option<Weak<dyn Plugin>>;
+    /// 进程内专用：`Weak<dyn Plugin>` 是进程内引用，无字符串 / JSON 形态
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "parent"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "weak_parent".to_string()
+    }
+}
+pub const PLUGIN_PARENT: PluginParentKey = PluginParentKey;
 
 #[cfg(test)]
 mod tests;

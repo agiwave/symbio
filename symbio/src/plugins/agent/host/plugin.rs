@@ -73,7 +73,7 @@ pub struct AgentPlugin {
     /// 插件间路由入口（composite 容器的弱引用）。
     ///
     /// 在 `build(ctx)` 时捕获：composite 构造子插件时注入的 ctx 已携带
-    /// `PARENT` 弱引用（见 composite 的子上下文构造）。agent_run 工具执行期
+    /// `PLUGIN_PARENT` 弱引用（见 composite 的子上下文构造）。agent_run 工具执行期
     /// 凭它把兄弟插件的请求经容器路由出去（`agent_run` 自己起一轮走的是
     /// `get_vfs_provider()` 的地址写入，不经路由）——工具 ctx 经 chat
     /// loop 一路 fork，自身并不携带路由入口。

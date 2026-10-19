@@ -1,24 +1,35 @@
 //! SymbioKey —— 类型安全的**上下文键**
 //!
-//! ## 本域只放上下文键
+//! ## 键与值同住
 //!
 //! 一个键有两半：**类型**（`PathKey`，实现 [`SymbioKey`]）与**实例**（`PATH`，
-//! `ctx.get(&PATH)` 的凭据）。实例一律定义在本域——**放置也是命名规则的一部分**：
-//! 机制与它的键分家（如 `capability/error.rs` 只放错误桶的读写函数，桶的键
-//! `CAPABILITY_ERRORS` 住这里）。
+//! `ctx.get(&PATH)` 的凭据）。两半的放置规则是**同一条**：跟着值类型走——
+//! 值类型属某个域，键就住那个域。已按此迁出的三批：
+//!
+//! | 键 | 值类型 | 现住 |
+//! |---|---|---|
+//! | `EVENT_SINK` / `ABORT_SIGNAL` | `ExecEventSink` / `ExecAbortSignal` | `symbio_core::exec` |
+//! | `PLUGIN_DIR` · `PLUGIN_PARENT`（原 `PARENT`） | `PluginDir` · `Option<Weak<dyn Plugin>>` | `symbio_core::plugin` |
+//! | `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` · `CAPABILITY_ERRORS` | `Arc<dyn Registry>` · 带 `CapabilityError` 的桶 | `symbio_core::capability` |
+//!
+//! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
+//! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
+//! 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`）本就住 `turn` 域。
+//! 判据见 `symbio_core/README.md` §1.2 与 ADR-095。
 //!
 //! ## 命名：两种形态，互不重叠
 //!
 //! | 形态 | 写成 | 例 |
 //! |---|---|---|
-//! | 键**类型**（`SymbioKey` 的实现） | `…Key`（**后缀**） | `PathKey` · `CapabilityVisitorKey` |
-//! | 键**实例**（该类型的唯一实例） | **裸名** | `PATH` · `ID` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` |
+//! | 键**类型**（`SymbioKey` 的实现） | `…Key`（**后缀**） | `PathKey` · `ConfigKey` |
+//! | 键**实例**（该类型的唯一实例） | **裸名** | `PATH` · `ID` · `CONFIG` |
 //!
 //! 后缀与裸名不是「风格不统一」，而是**有判别力**的一条规则：类型名带 `Key` 后缀
 //! ⇒ 归属本域一眼可辨；实例名不加前缀 ⇒ `ctx.get(&PATH)` 不会读成「键的键」
 //! （`ctx.get(&KEY_PATH)` 才是那个坏形态）。
 //!
 //! 新增时照上表选形态：先定类型（`XxxKey`），再给实例（裸名，直接描述语义）。
+//! **但先问一句「值类型住哪」**——答案不是「没有域」，就把它连同键一起放过去。
 //!
 //! ## 不在本域的东西
 //!
@@ -28,8 +39,6 @@
 //! `symbio_core/README.md` §1.2。
 
 use serde_json::Value;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// 项目全局通用的 Key 特征
 /// 支持类型安全的值获取与设置
@@ -53,7 +62,7 @@ pub trait SymbioKey {
     ///
     /// 两者是**声明与结果**：`WIRE = false` ⇒ `parse` 必返 `None`（无字符串形态）。
     /// 反向不成立——`parse → None` 不必然是 `WIRE = false`（如 `CONFIG` /
-    /// `PLUGIN_DIR` 的值可以序列化，只是不做「从字符串恢复」这件事）。
+    /// `PLUGIN_DIR`（住 `plugin` 域）的值可以序列化，只是不做「从字符串恢复」这件事）。
     const WIRE: bool = true;
 
     /// 键的唯一名称（用于在 Map 中查找）
@@ -163,23 +172,9 @@ define_string_key!(
     "description"
 );
 
-// 父插件弱引用 Key (Option<Weak<dyn Plugin>>)
-pub struct ParentKey;
-impl SymbioKey for ParentKey {
-    type Value = Option<std::sync::Weak<dyn crate::symbio_core::Plugin>>;
-    /// 进程内专用：`Weak<dyn Plugin>` 是进程内引用，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "parent"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "weak_parent".to_string()
-    }
-}
-pub const PARENT: ParentKey = ParentKey;
+// 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
+// `symbio_core::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
+// `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_core::plugin`。判据同 ADR-095 根因一。
 
 // 初始配置 Key (Value)
 pub struct ConfigKey;
@@ -196,25 +191,6 @@ impl SymbioKey for ConfigKey {
     }
 }
 pub const CONFIG: ConfigKey = ConfigKey;
-
-// 插件自身目录 Key（`PluginDir`）
-//
-// 容器构造子插件时把它挂到子上下文上——插件据此知道「我的目录在哪」，
-// 从而自己读写 `PLUGIN.yml`（父插件不再代管任何配置）。
-pub struct PluginDirKey;
-impl SymbioKey for PluginDirKey {
-    type Value = crate::symbio_core::PluginDir;
-    fn name(&self) -> &'static str {
-        "plugin_dir"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, v: &Self::Value) -> String {
-        v.dir().to_string_lossy().to_string()
-    }
-}
-pub const PLUGIN_DIR: PluginDirKey = PluginDirKey;
 
 /// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
 ///
@@ -245,149 +221,8 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 // 注：插件**装配策略**常量（子树清单、不可停用清单）不在本域——它们不是上下文键，
 // 已迁到 `symbio_core::assembly`（见该模块文档的判据说明）。
 
-pub struct CapabilityVisitorKey;
-impl SymbioKey for CapabilityVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::Registry>;
-    /// 进程内专用：trait object，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "tool_visitor"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "capability_manager".to_string()
-    }
-}
-pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
-
-/// 选项收集器 Key —— 与 [`CAPABILITY_VISITOR`] 平行的第二条收集**通道**
-/// （能力 = 可调用对象；选项 = 可展示的数据节点，见 `symbio_core::capability::option`）。
-///
-/// 4e 之后值类型是统一的 [`Registry`]：选项是同一张表里的行，
-/// 通道（广播与收集器实例）仍是独立的一条——键没变，变的是行住哪张表。
-pub struct OptionVisitorKey;
-impl SymbioKey for OptionVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::Registry>;
-    /// 进程内专用：trait object，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "option_visitor"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "option_visitor".to_string()
-    }
-}
-pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
-
-/// 可配置声明收集器 Key —— 第三条收集**通道**
-/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」这一句话，
-/// 见 `symbio_core::capability::configurable`）。4e 之后值类型是统一的 [`Registry`]。
-pub struct ConfigurableVisitorKey;
-impl SymbioKey for ConfigurableVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::Registry>;
-    /// 进程内专用：trait object，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "configurable_visitor"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "configurable_visitor".to_string()
-    }
-}
-pub const CONFIGURABLE_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
-
-/// 执行期**事件出口** Key —— 第四条进程内通道
-/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」；
-/// 出口 = 「本次调用的可见事件往这里写」，见 `symbio_core::exec`）。
-///
-/// ## 为什么走 `ctx` 而不是给 `Capability::execute` 加参数
-///
-/// `Capability::execute(ctx)` 的入参是**请求信封**（`PATH` / `trace_id` / `payload`
-/// / 会话上下文），不是执行期上下文。出口与中止信号是**执行期**的，与「这次调用
-/// 从哪条路径来」无关：同一个 `shell` 能力既可能被会话编排层调用（有出口），
-/// 也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx` 承载，缺席即静默，
-/// **不必为「有没有出口」造第二条调用路径**。
-///
-/// ## 为什么 `parse → None`
-///
-/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIGURABLE_VISITOR`] 同款：
-/// 进程内专用，没有字符串形态。`parse` 返回 `None` 是**刻意的**——它声明
-/// 「本键不参与任何跨进程/字符串化的往返」，而不是「尚未实现」。
-pub struct ExecEventSinkKey;
-impl SymbioKey for ExecEventSinkKey {
-    type Value = crate::symbio_core::ExecEventSink;
-    /// 进程内专用：闭包，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "event_sink"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "event_sink".to_string()
-    }
-}
-pub const EVENT_SINK: ExecEventSinkKey = ExecEventSinkKey;
-
-/// 执行期**中止信号** Key —— 与 [`EVENT_SINK`] 成对。
-///
-/// 写入者是编排层（发起工具调用前）；读取者是工具实现体。缺席 ⇒ 得到一个
-/// **永不中止**的独立信号（`ExecAbortSignal::new()`）：直接 `route()` 调用没有编排层，
-/// 也就没有中止来源，这是诚实表达而非兜底。
-pub struct ExecAbortSignalKey;
-impl SymbioKey for ExecAbortSignalKey {
-    type Value = crate::symbio_core::ExecAbortSignal;
-    /// 进程内专用：`CancellationToken`，无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "abort_signal"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "abort_signal".to_string()
-    }
-}
-pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
-
-/// 能力收集期**错误桶** Key —— 第五条进程内收集通道
-/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」；
-/// 出口 = 「本次调用的可见事件往这里写」；**错误** = 「本次收集有致命错误」）。
-///
-/// 写侧是**任何参与 `traverse` 的插件**（当前为 agent 插件报子智能体装配硬错误），
-/// 读侧是 session 编排方（`plugins/session/capabilities.rs`）。两侧分属不同插件、
-/// 互相不可见，故键面定义在本域；机制的完整论述见 `capability/error.rs` 的模块文档。
-///
-/// ## 为什么 `parse → None` 且 `WIRE = false`
-///
-/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIGURABLE_VISITOR`] / [`EVENT_SINK`]
-/// 同款，但这里**两条都要写**：值是 `Arc<Mutex<Vec<..>>>`，`CapabilityError` 也没有
-/// `Serialize` ⇒ 它连「进程外表达」都不成立，故 `WIRE = false`。
-/// （`CONFIG` / `PLUGIN_DIR` 只需 `parse → None`：它们的值本身可序列化，
-/// 只是不做「从字符串恢复」这件事——`WIRE` 与 `parse` 是**声明与结果**，不是同一条。）
-pub struct CapabilityErrorsKey;
-impl SymbioKey for CapabilityErrorsKey {
-    type Value = Arc<Mutex<Vec<crate::symbio_core::capability::CapabilityError>>>;
-    /// 进程内专用：`Arc<Mutex<..>>` 无字符串 / JSON 形态
-    const WIRE: bool = false;
-    fn name(&self) -> &'static str {
-        "capability_errors"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "capability_errors".to_string()
-    }
-}
-pub const CAPABILITY_ERRORS: CapabilityErrorsKey = CapabilityErrorsKey;
+// 注：capability 域的四条通道键不在本域——三条收集通道
+// （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型
+// `Arc<dyn Registry>` 搬去 `symbio_core::capability::collect`；错误桶键
+// `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `symbio_core::capability::error`。
+// 判据同 ADR-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。

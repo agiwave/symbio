@@ -84,6 +84,7 @@
 //! 不向上推任何东西——「写完之后还要做什么」（重启监听 / 重建缓存）留在插件
 //! 自己的 `write` 里。
 
+use crate::symbio_core::keys::SymbioKey;
 use crate::symbio_core::vdfs_notify_change;
 use crate::symbio_core::DetailDefinition;
 use crate::symbio_core::{
@@ -210,7 +211,27 @@ pub const PLUGIN_KEY_REQUIRED: &str = "plugin_required";
 /// 投影键：是否允许停用（= 不在 [`crate::symbio_core::ASSEMBLY_UNDISABLABLE_PLUGINS`] 里）
 pub const PLUGIN_KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
-/// 从插件上下文读自己的目录（装配方经 [`PLUGIN_DIR`](crate::symbio_core::PLUGIN_DIR) 告知）
+/// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（ADR-095 根因一）
+///
+/// 容器构造子插件时把它挂到子上下文上——插件据此知道「我的目录在哪」，
+/// 从而自己读写 `PLUGIN.yml`（父插件不再代管任何配置）。键名（`plugin_dir`）
+/// 是 `ctx` 上的外部协议面，搬迁只改 Rust 侧归属域，不改字面量。
+pub struct PluginDirKey;
+impl SymbioKey for PluginDirKey {
+    type Value = PluginDir;
+    fn name(&self) -> &'static str {
+        "plugin_dir"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        v.dir().to_string_lossy().to_string()
+    }
+}
+pub const PLUGIN_DIR: PluginDirKey = PluginDirKey;
+
+/// 从插件上下文读自己的目录（装配方经 [`PLUGIN_DIR`] 告知）
 ///
 /// 插件构造时的**标准入口**：目录由父插件传下，插件不查任何全局落位。
 ///
@@ -222,7 +243,7 @@ pub fn plugin_dir_from_ctx(
     ctx: &dyn crate::symbio_core::PluginInvokeRequest,
     plugin: &str,
 ) -> PluginDir {
-    use crate::symbio_core::{PluginInvokeRequestExt, PLUGIN_DIR};
+    use crate::symbio_core::PluginInvokeRequestExt;
     match ctx.get(PLUGIN_DIR) {
         Some(dir) => dir,
         None => panic!(

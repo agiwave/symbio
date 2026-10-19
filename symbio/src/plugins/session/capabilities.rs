@@ -99,7 +99,7 @@ pub async fn collect_capabilities(
 }
 
 // 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）
-// 见 `crate::symbio_core::capability_error`：写侧是任意参与 traverse 的插件，
+// 见 `crate::symbio_core::CapabilityError`：写侧是任意参与 traverse 的插件，
 // 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
 /// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
