@@ -1,10 +1,15 @@
-//! `adapters` 单测 —— 四层预算表与令牌层级（[plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")、
+//! `adapters` 单测 —— 四层预算表与令牌闸门（[plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")、
 //! [plan/05 §3.3](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
 //!
-//! 编译期负例（`RuleOnly` 不满足 `CanClassify` / `ClassifyOnly` 不满足 `CanGenerate`）
-//! 无法在常规测试里表达——它们由**签名**承载：`generate` 只收 `&FullModel`，
-//! 给任何低档令牌都编译不过（参照 `docs/004-plan/verify/latency_gate.rs` 的
-//! `should_not_compile` feature）。这里守的是运行时可测的半场。
+//! 编译期负例（低档令牌传给 `generate`）无法在常规测试里表达——它由**签名**承载：
+//! `generate` 只收 `&FullModel`，给 `RuleOnly` 编译不过（参照
+//! `docs/004-plan/verify/latency_gate.rs` 的 `should_not_compile` feature）。
+//! 这里守的是运行时可测的半场：预算表与档位语义。
+//!
+//! [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 退役了快速档令牌
+//! （`ClassifyOnly` / `issue_fast` / `CanClassify` / `CanGenerate`）：那只原本守
+//! 「分类端口」的令牌，端口在生产里从未存在。档位语义仍在（`may_call_model` /
+//! `may_generate`），只是不再配令牌凭据。
 
 use super::*;
 
@@ -43,20 +48,18 @@ fn tier_capabilities_match_the_budget_table() {
     assert!(LatencyTier::Autonomic.may_generate());
 }
 
-/// 高档能做低档的事（trait 层级）：`FullModel` 同时满足 `CanClassify` 与
-/// `CanGenerate`，`ClassifyOnly` 只满足 `CanClassify`（负例由签名承载，见文件头）。
+/// 令牌是**零大小**的：凭据不该带载荷，带了就意味着「凭据里还能塞别的意思」。
+///
+/// 这条替掉了 ADR-096 退役的 `full_model_token_satisfies_classify_and_generate`
+/// （那只 trait 层级随快速档令牌一起收掉）。判的是同一件事的另一半：闸门的开销
+/// 为零、且加字段会让这条红——「顺手在令牌里塞个字段」是本仓最容易被放过的走形。
 #[test]
-fn full_model_token_satisfies_classify_and_generate() {
-    fn assert_can_classify<T: CanClassify>(_: &T) {}
-    fn assert_can_generate<T: CanGenerate>(_: &T) {}
-    let deep = TokenIssuer::issue_deep();
-    assert_can_classify(&deep);
-    assert_can_generate(&deep);
-    let fast = TokenIssuer::issue_fast();
-    assert_can_classify(&fast);
+fn tokens_are_zero_sized() {
+    assert_eq!(std::mem::size_of::<RuleOnly>(), 0);
+    assert_eq!(std::mem::size_of::<FullModel>(), 0);
+    assert_eq!(std::mem::size_of::<TokenIssuer>(), 0);
 }
 
-/// 一条 user 消息的请求包（结构化入参，ADR-048a）。
 fn one(text: &str) -> Vec<PromptMessage> {
     vec![PromptMessage {
         role: "user".into(),

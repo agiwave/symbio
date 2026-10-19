@@ -2,14 +2,14 @@
 kind: task
 id: T-162-ClassifyOnly快速档路径裁决
 title: 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界
-status: todo
+status: done
 created: 2026-10-17
 track: plan
 prio: later
 parent: T-156-架构机制化与旧代码清理批
 where: symbio/src/symbio_core/adapters/mod.rs · symbio/src/plugins/classify/ · symbio/src/plugins/session/v2_exec.rs
 exit: `ClassifyOnly` 令牌有生产调用路径（classify 走令牌闸门）**或**显式退役（成文 ADR 说明为什么快速档不做成令牌闸门、classify 插件为何是正确落点）；两种结论都必须让「快速档不得生成」这条约束有强制力，而不是靠 classify 插件「结构上不注册 Capability」这个巧合；cargo test + clippy + 门禁全绿
-signal: `ClassifyOnly` 与 `TokenIssuer::issue_fast()`（adapters/mod.rs:99-115,153-154）只在 adapters/mod.test.rs:47,55 出现，**生产代码零调用**；对照组 `issue_reflex`（RuleOnly）与 `issue_deep`（FullModel）在 v2_exec.rs:1360,1376 有真实调用。实际的分类由独立插件 classify 承担（chat_loop/decide.rs:55 经容器路由 classify/decide），未走令牌闸门——「快速档只允许分类不允许生成」这条约束（PL-001 §10）今天靠的是 classify 插件不注册任何 Capability 这个结构巧合，不是 ClassifyOnly 令牌。adapters 域 README 已诚实标注 CanClassify/CanGenerate 是 `#[cfg(test)]`、无生产接入位
+evidence: 走 **B（显式退役）**：[ADR-096](../010-adr/096.md "ADR-096") 裁「快速档 = (ii) 一次受限模型调用」并把令牌闸门这一半退役——`ClassifyOnly` / `TokenIssuer::issue_fast` / `CanClassify` / `CanGenerate` 从 `symbio_core` 契约面收掉（`RuleOnly` / `FullModel` / `issue_reflex` / `issue_deep` 不动），先例三条：端口 `Classifier` 全仓只在 `verify/latency_gate.rs` 当编译期桩、C-003 会把单消费方端口打回、`parse_verdict -> Option<Verdict>` 是同一件事的更硬承重墙。「不得生成」的强制力搬到返回类型 + `traverse_registers_no_tool_rows`（挂真的 `CAPABILITY_VISITOR` 注册表、断言工具行 = 0，同一份 ctx 上配置通道收到 1 行作对照，把「插件恰好不注册能力」的结构巧合变成可执行判据）。计划文本 PL-001 §4.1 / PL-005 §3.3 的 `Classifier` 一行不改（冻结锚点，差由 ADR-096 记录）
 ---
 
 ## 内容
@@ -93,3 +93,29 @@ provider 包成 adapter 再走；它持 `Arc<dyn ModelProvider>` 只为每轮包
 **下一步（定语义再动代码）**：先裁决快速档是 (i) 还是 (ii)。若 (ii)，则补 `Classifier` 端口
 （收 `&ClassifyOnly`、形参无 `tools`、`max_tokens` 取档案表的小值）——不带工具由类型强制、
 不长输出由参数强制、只认四选一由解析强制，三件事各归其位，F3 不动。
+
+## 裁决（2026-10-20）：走 B，成文 [ADR-096](../010-adr/096.md "ADR-096")
+
+**裁的是语义，不是「先把令牌删了省事」**：快速档 = **(ii) 一次受限的模型调用**（勘察结论第 2 条
+那张表里的右列，就是 `classify/decide.rs` 今天的形态）。裁 (i) 纯规则分类器等于删掉这次调用，
+而规则表只覆盖问候 / 致谢 / 确认 / 空输入，其余输入会退化到关键词匹配——[T-157](157-ActorSpec-pattern死字段接线.md "T-157-ActorSpec-pattern死字段接线")
+已核出 `text.contains("？")` 那只从未进过生产。
+
+令牌这一半退役，五条理由（第 4 条决定性）写进 ADR：端口从未存在 · ADR-080 已把 classify 划出
+档位闸门 · 返回类型比令牌硬且管同一件事 · **端口若补上会当场被 C-003 打回**（单消费方不许占根出口，
+下沉后令牌跟着下沉）· 可调的提示词与模型 id 与「端口拥有提示词」冲突。
+
+**退出条件逐条对账**：
+
+| 退出条件 | 落地 |
+|---|---|
+| 有生产调用路径 **或** 显式退役并有成文 ADR | ADR-096（退役那一支） |
+| 「快速档不得生成」有强制力，不靠「结构上不注册 Capability」这个巧合 | `traverse_registers_no_tool_rows`：数**注册表**（`Registry::list(Tool)` = 模型工具清单的真来源）而非 `traverse` 回包，并用同一份 ctx 的配置通道 1 行作「收集器确实接上了」的对照 |
+| cargo test + clippy + 门禁全绿 | 见下 |
+
+立项时的 `signal` 字段随 `status: done` 撤下（RG-007 的「闭档不带 signal」）——
+其中那三条核出的事实没有丢，仍在下方「勘察结论」里；行号引用本来就已漂移，删掉反而诚实。
+
+**一并核清的两件事**：① `LatencyTier::Fast` **不删**——它的 300ms 预算仍被 `actors/skill.rs` 用，
+档位是数据、令牌是凭据；② `verify/latency_gate.rs` 里那套自带的 `ClassifyOnly` **不改**——它证明的是
+「零大小令牌能当构造期闸门」这个**模式**，与生产用了几个令牌无关（ADR-096「否决的替代方案」第 3 条）。

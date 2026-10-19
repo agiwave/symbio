@@ -4,6 +4,7 @@
 //!
 //! ## 本文件覆盖的是「不依赖模型」的那一半
 //!
+//! 除 `traverse_registers_no_tool_rows` 那条（它要挂**真的**注册表来数工具行）之外，
 //! 测试上下文**不带 `CAPABILITY_VISITOR`**——这正是「没有可用的模型服务」的真实
 //! 形态。于是这里能钉住两条最重要的行为，且**不需要任何 mock**：
 //!
@@ -189,14 +190,49 @@ async fn unknown_subcommand_is_not_found() {
     assert!(matches!(r, Err(PluginError::NotFound(_))));
 }
 
-/// 本插件不注册 `Capability` —— 它在工具集里**结构上不可能**出现
+/// 本插件不注册 `Capability` —— 它在工具的**注册表**里恒为零行。
+///
+/// 判据刻意数注册表而不是数 `traverse` 的回包：模型能调用的工具来自
+/// `Registry::list(CapabilityRowKind::Tool)`（`tool_metas` 读的就是它），回包是 `[]`
+/// 只说明「没往回包里写东西」，注册表为零才说明「没进模型的工具清单」。
+/// 这条是 [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 给「快速档不得生成」
+/// 配的第三颗牙：原来靠「本插件恰好不注册能力」这个结构巧合，现在是可执行断言。
+///
+/// 对照项是同一份 ctx 上的 `CONFIGURABLE_VISITOR`：它必须恰好收到 1 行。有这一行，
+/// 上面的 0 才不是「收集器根本没接上」的同义反复。
 #[tokio::test]
-async fn traverse_contributes_no_tools() {
+async fn traverse_registers_no_tool_rows() {
+    use crate::providers::DefaultToolVisitor;
+    use crate::symbio_core::{
+        capability_configurables, CapabilityRowKind, PluginInvokeRequestExt, Registry,
+        CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+    };
+
+    let tools: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    let configurables: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(PATH, String::new());
+    req.set(CAPABILITY_VISITOR, tools.clone());
+    req.set(CONFIGURABLE_VISITOR, configurables.clone());
+    let req: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+
     let p = plugin(ClassifyConfig::default())
-        .traverse(String::new(), ctx("", None))
+        .traverse(String::new(), req)
         .await
         .expect("traverse 必须成功");
+    // 回包里也不许出现工具行（两处一起守：回包是广播面，注册表是模型面）
     assert_eq!(data_of(p), serde_json::json!([]));
+
+    assert_eq!(
+        tools.list(CapabilityRowKind::Tool).await.len(),
+        0,
+        "classify 不得向工具注册表写任何行——那正是模型工具清单的来源"
+    );
+    assert_eq!(
+        capability_configurables(&*configurables).await.len(),
+        1,
+        "对照：同一份 ctx 上配置通道必须收到 1 行，否则上面的 0 不可信"
+    );
 }
 
 /// 但它**声明了自己的配置文档**（另一条通道）：设置页据此列出并指路

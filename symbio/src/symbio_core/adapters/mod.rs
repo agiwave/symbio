@@ -88,15 +88,10 @@ impl LatencyTier {
     }
 }
 
-// ── 能力令牌：三档 ZST，私有构造 ⇒ 不可伪造 ─────────────────────────────
+// ── 能力令牌：两档 ZST，私有构造 ⇒ 不可伪造 ─────────────────────────────
 
 /// 反射档令牌：证明持码者处于「禁模型」档。
 pub struct RuleOnly {
-    _private: (),
-}
-
-/// 快速档令牌：允许**分类**（输出空间受限），不允许生成。
-pub struct ClassifyOnly {
     _private: (),
 }
 
@@ -110,48 +105,24 @@ impl RuleOnly {
         RuleOnly { _private: () }
     }
 }
-impl ClassifyOnly {
-    fn mint() -> Self {
-        ClassifyOnly { _private: () }
-    }
-}
 impl FullModel {
     fn mint() -> Self {
         FullModel { _private: () }
     }
 }
 
-// ── 令牌层级：trait 表达「高档能做低档的事」 ────────────────────────────
-//
-// 这两只 trait 与下面三条 impl 只服务**编译期正/负例**（`adapters/mod.test.rs`：
-// `FullModel` 满足 `CanClassify`、`RuleOnly` 不满足）——生产侧的同一道闸门
-// 由签名本身表达（`LlmAdapter::generate` 只收 `FullModel`），不需要运行时问它。
-// 故整组留在 `#[cfg(test)]`：进测试构建，不占生产面。
-
-/// 能做分类（快速档 / 深度档 / 自主档都满足）。
-#[cfg(test)]
-pub trait CanClassify {}
-/// 能完整生成（仅深度档 / 自主档）。
-#[cfg(test)]
-pub trait CanGenerate: CanClassify {}
-
-#[cfg(test)]
-impl CanClassify for ClassifyOnly {}
-#[cfg(test)]
-impl CanClassify for FullModel {}
-#[cfg(test)]
-impl CanGenerate for FullModel {}
-// 注意：`RuleOnly` **不**实现 `CanClassify`——这就是闸门在类型层的全部表达。
-
 /// 令牌签发中心：**唯一**能造令牌的地方，按档位签发（一个 match，零运行时开销）。
+///
+/// **只有两档有令牌**。快速档曾是三档之一（`ClassifyOnly` / `issue_fast`），
+/// [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 把它退役了：它守的端口
+/// （`Classifier`）在生产里从未存在，而「快速档不得生成」这条约束在 classify 插件上
+/// 由**返回类型**（`parse_verdict -> Option<Verdict>`，四变体闭集）与**工具集判据**
+/// （`traverse_contributes_no_tools`）承载——换的是承重墙，不是拆掉约束。
 pub struct TokenIssuer;
 
 impl TokenIssuer {
     pub fn issue_reflex() -> RuleOnly {
         RuleOnly::mint()
-    }
-    pub fn issue_fast() -> ClassifyOnly {
-        ClassifyOnly::mint()
     }
     pub fn issue_deep() -> FullModel {
         FullModel::mint()

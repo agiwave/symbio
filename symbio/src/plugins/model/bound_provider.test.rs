@@ -7,8 +7,10 @@
 //! （持 `FullModel` 令牌）→ 事件网格落 final → 不变量全绿。
 //!
 //! 闸门的编译期反向用例（无法在运行期测试，注释为证）：
-//! `TokenIssuer::issue_rule_only()` 拿到的令牌**不实现 `CanGenerate`**，
-//! 对它调用 `generate` 是编译错误——反射层调模型不是被检测到，是编译不过。
+//! `TokenIssuer::issue_reflex()` 拿到的 `RuleOnly` 传给 `generate` 是编译错误——
+//! 反射层调模型不是被检测到，是编译不过（`generate` 只收 `&FullModel`）。
+//! 快速档（`LatencyTier::Fast`）**没有令牌**：[ADR-096](../../../../docs/010-adr/096.md "ADR-096")
+//! 把它退役了，那条「只分类不生成」的约束由 classify 插件的返回类型与工具集判据承载。
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
