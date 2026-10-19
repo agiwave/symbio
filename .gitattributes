@@ -24,6 +24,10 @@
 *.mjs text eol=lf
 *.ts text eol=lf
 *.vue text eol=lf
+# 验证器的真实日志夹具（`docs/004-plan/verify/fixtures/*.tsv`）：按行按 tab 解析，
+# 行尾一旦换成 CRLF，diff 里就是整文件重写，而「哪条事件变了」恰好是这份夹具的
+# 全部信息量。与上面四类同理，只是被读的方式不同。
+*.tsv text eol=lf
 
 # git 钩子是**会被 sh 执行的脚本**，不是文本。Git for Windows 自带的 sh 能吃 CRLF，
 # 但没理由依赖它：钩子一旦因行尾没跑起来，失效形态是「什么都不拦」——与没有钩子
