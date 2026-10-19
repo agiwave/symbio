@@ -334,6 +334,24 @@ function run(o) {
     const dir = ensureLogDir()
     const logFile = path.join(dir, `${logFileName(label)}.log`)
     const sink = fs.createWriteStream(logFile, { flags: 'w' })
+    // resolve 必须等 `sink` 刷完盘（见 `settle`）。`WriteStream` 的 `write()` 只是入队，
+    // 而汇总的「失败详情」段是**再读那个文件**——满载时（冷编译抢盘）队尾还没落盘，
+    // 读到的就是缺了末几行的半份日志，于是 `gate.test.mjs` 的「失败处必须有正文」判据
+    // 在并发批次里随机假红。证据文件没写完就说「跑完了」，等于把最要紧的那份证据丢掉。
+    let settled = false
+    let pending = null
+    const settle = (result) => {
+      if (settled) return
+      settled = true
+      pending = result
+      sink.end(() => resolve(result))
+    }
+    // 日志文件本身写不进去（本机实测过：批量删除守卫 / 文件被占用）不能让整轮门禁吊死，
+    // 也不能让一个没人接的 `error` 事件把门禁炸掉——带结果返回，缺的那段证据由
+    // `failureDetail` 的「读不到」分支如实呈现。
+    sink.on('error', () => {
+      if (pending) resolve(pending)
+    })
 
     const child = spawn(cmd, args, { cwd, shell: false, env: { ...process.env, ...env } })
     let timer = null
@@ -367,8 +385,8 @@ function run(o) {
         console.log(red('启动失败'))
         console.log(red(`      ${err.message}`))
       }
-      sink.end(err.message)
-      resolve({
+      sink.write(err.message)
+      settle({
         ok: false,
         code: null,
         signal: null,
@@ -383,13 +401,12 @@ function run(o) {
       if (timer) clearTimeout(timer)
       const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
-      sink.end()
       if (!quiet) {
         if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
         else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
         else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
       }
-      resolve({ ok, code, signal, output, timedOut, logFile, ms })
+      settle({ ok, code, signal, output, timedOut, logFile, ms })
     })
   })
 }
