@@ -70,6 +70,7 @@
 //! 子会话 id 由系统生成，与顶层 id 同一格式约束。临时会话无目录概念，
 //! 因此不参与嵌套（`list_sub_sessions` 恒空、`session_dir` 恒 `None`）。
 
+use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::plugins::session::paths;
 use crate::symbio_core::{Event, PluginError, Seq, Store};
@@ -77,6 +78,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 mod wal;
@@ -116,6 +118,30 @@ pub struct SessionStore {
     /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
     /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
     facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
+    /// 每会话**一份运行态投影值**（见 [`runtime_facts`](Self::runtime_facts)）。
+    ///
+    /// 事实变化才重折：有写句柄时以 `head` 为戳（追加即变），只读时以 WAL 的
+    /// 长度 + mtime 为戳。运行态读取（`list` / `stat`）因此不必每次重放整条 WAL。
+    runtime_cache: std::sync::Mutex<HashMap<String, RuntimeFactsCache>>,
+}
+
+/// 运行态投影缓存项：值与它对应的**事实版本戳**。
+#[derive(Debug, Clone)]
+struct RuntimeFactsCache {
+    stamp: FactsStamp,
+    facts: RuntimeFacts,
+}
+
+/// 事实版本戳——两种驻留方式各一个判据，互不比较（变体不同即失效）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FactsStamp {
+    /// 本进程持有写句柄：`head`（下一个待分配序号）即版本。
+    Writer(u64),
+    /// 只读打开：文件长度 + mtime（追加必然改长度）。
+    File {
+        len: u64,
+        modified: Option<SystemTime>,
+    },
 }
 
 impl SessionStore {
@@ -128,6 +154,7 @@ impl SessionStore {
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
+            runtime_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -141,6 +168,7 @@ impl SessionStore {
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
             facts: std::sync::Mutex::new(HashMap::new()),
+            runtime_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -266,6 +294,7 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
+            self.runtime_cache().remove(session_id);
             return Ok(());
         };
 
@@ -278,6 +307,7 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
+            self.runtime_cache().remove(session_id);
             return Ok(());
         }
         // 顶层未命中：嵌套删除（子会话级联于父目录之外的单点删除）
@@ -289,6 +319,7 @@ impl SessionStore {
                 .lock()
                 .expect("会话事实源表锁中毒")
                 .remove(session_id);
+            self.runtime_cache().remove(session_id);
         }
         Ok(())
     }
@@ -462,6 +493,74 @@ impl SessionStore {
         }
         let store = EventWalStore::open_readonly(&wal).ok()?;
         Some(store.range(Seq::new(0)))
+    }
+
+    /// 该会话的**运行态事实投影**（上一轮结局）；临时会话 / 没有 WAL ⇒ `None`。
+    ///
+    /// [ADR-083 §5.2](../../../../../docs/010-adr/083.md "ADR-083")：结局在读侧是投影值，
+    /// 不是第二份状态。这里只交**值**，不交句柄、不交路径；投影函数是纯的
+    /// （`runtime::project`），缓存只是「事实没变就不重折」。
+    ///
+    /// 缓存失效判据按驻留方式分两种：
+    /// - 本进程有写句柄：`head`（下一个待分配序号）——任何追加都使它变化；
+    /// - 只读：WAL 长度 + mtime——别的进程追加必然改动文件。
+    ///
+    /// 归档不改变 `head` 也不改变完整史（归档段 + live 段仍拼成同一份事实），
+    /// 缓存因此不会因归档而失效，也不需要失效。
+    pub(in crate::plugins::session) fn runtime_facts(
+        &self,
+        session_id: &str,
+    ) -> Option<RuntimeFacts> {
+        let writer = self
+            .facts
+            .lock()
+            .expect("会话事实源表锁中毒")
+            .get(session_id)
+            .cloned();
+        let cached = self.runtime_cache().get(session_id).cloned();
+
+        if let Some(store) = writer {
+            let stamp = FactsStamp::Writer(store.head().value());
+            if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
+                return Some(hit.facts.clone());
+            }
+            let facts = runtime::project(&store.range(Seq::new(0)));
+            self.remember_runtime(session_id, stamp, &facts);
+            return Some(facts);
+        }
+
+        let dir = self.session_dir(session_id)?;
+        let wal = dir.join(paths::V2_WAL_FILE);
+        let md = std::fs::metadata(&wal).ok()?;
+        if !md.is_file() {
+            return None;
+        }
+        let stamp = FactsStamp::File {
+            len: md.len(),
+            modified: md.modified().ok(),
+        };
+        if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
+            return Some(hit.facts.clone());
+        }
+        let store = EventWalStore::open_readonly(&wal).ok()?;
+        let facts = runtime::project(&store.range(Seq::new(0)));
+        self.remember_runtime(session_id, stamp, &facts);
+        Some(facts)
+    }
+
+    /// 运行态投影缓存表的唯一取锁口（std 锁当无中毒用，同本文件其它表）。
+    fn runtime_cache(&self) -> std::sync::MutexGuard<'_, HashMap<String, RuntimeFactsCache>> {
+        self.runtime_cache.lock().expect("会话运行态投影缓存锁中毒")
+    }
+
+    fn remember_runtime(&self, session_id: &str, stamp: FactsStamp, facts: &RuntimeFacts) {
+        self.runtime_cache().insert(
+            session_id.to_string(),
+            RuntimeFactsCache {
+                stamp,
+                facts: facts.clone(),
+            },
+        );
     }
 
     /// 顶级会话事实源的召回视图（**新近优先**、名额与字节双预算）。
@@ -981,3 +1080,5 @@ mod tests;
 // panic-allow symbio/src/plugins/session/store/mod.rs::delete_session: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/store/mod.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/store/mod.rs::snapshot: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/mod.rs::runtime_facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/mod.rs::runtime_cache: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

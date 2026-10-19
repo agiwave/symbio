@@ -87,26 +87,6 @@ impl SessionRuntime {
         }
     }
 
-    /// 从活跃会话状态（`is_working` + 结局 + 错误 + 告警）投影运行态。
-    ///
-    /// **唯一入口**：把「运行中时结局一律作废」这条规则收在一处——否则
-    /// 「正在跑却带着上次错误」这种非法组合会在每个调用点各拼一次，而它的
-    /// 表现是静默的（前端同时显示"处理中"与"错误"）。
-    pub(crate) fn from_state(
-        working: bool,
-        outcome: Option<String>,
-        error: Option<String>,
-        warning: Option<String>,
-    ) -> Self {
-        if working {
-            return Self::working();
-        }
-        match outcome.as_deref() {
-            Some(o) => Self::finished(o, error, warning),
-            None => Self::idle(warning),
-        }
-    }
-
     /// 节点状态：运行中 > 上次失败 > 空闲。
     ///
     /// 顺序有意义——「正在跑」永远压过「上次失败了」：否则重试期间会同时

@@ -778,3 +778,173 @@ async fn snapshot_reads_the_same_full_history_as_the_writer() {
         "没有事实源 ⇒ None（读方不创建文件）"
     );
 }
+
+// ==================== 运行态事实投影（ADR-083 §5.2）====================
+//
+// `runtime_facts` 是读侧唯一入口：交**值**不交句柄，缓存只是「事实没变就不重折」。
+// 这一组钉住三件事：没有事实源 ⇒ None；有写句柄时随追加失效；重启后从只读 WAL 重放。
+
+fn lifecycle_event(
+    kind: &str,
+    verb: crate::symbio_core::Verb,
+    payload: serde_json::Value,
+) -> Event {
+    use crate::symbio_core::{Entity, Event};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // 事件 id 幂等（append 重复即 Duplicate）：同一个测试里可能两次开轮。
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    Event::pending(format!("e-{n}"), kind, Entity::Turn, verb, 1, "user").with_payload(payload)
+}
+
+fn open_turn() -> Event {
+    lifecycle_event(
+        crate::symbio_core::EVENT_USER_MESSAGE,
+        crate::symbio_core::Verb::Opened,
+        json!({ "text": "问", "id": "u-1" }),
+    )
+}
+
+fn close_completed() -> Event {
+    lifecycle_event(
+        crate::symbio_core::EVENT_ASSISTANT_FINAL,
+        crate::symbio_core::Verb::Closed,
+        json!({ "status": "completed", "text": "答", "id": "a-1" }),
+    )
+}
+
+fn close_failed(why: &str) -> Event {
+    lifecycle_event(
+        crate::symbio_core::EVENT_ASSISTANT_FINAL,
+        crate::symbio_core::Verb::Closed,
+        json!({ "status": "failed", "why": why, "text": "答", "id": "a-1" }),
+    )
+}
+
+fn projected(
+    store: &SessionStore,
+    id: &str,
+) -> Option<crate::plugins::session::runtime::RuntimeOutcome> {
+    store.runtime_facts(id).and_then(|f| f.outcome)
+}
+
+/// 临时会话与不存在的会话都没有事实源——`None` 是「没有」，不是失败。
+#[tokio::test]
+async fn runtime_facts_is_none_without_a_fact_source() {
+    let ephemeral = SessionStore::ephemeral();
+    save(&ephemeral, &session_with("sess_tmp", None)).await;
+    assert!(
+        ephemeral.runtime_facts("sess_tmp").is_none(),
+        "临时会话不落事实，没有可投影的结局"
+    );
+
+    let tmp = TempDir::new().unwrap();
+    let disk = SessionStore::new(tmp.path().to_path_buf());
+    assert!(
+        disk.runtime_facts("sess_absent").is_none(),
+        "没有会话目录 ⇒ 没有投影（读方不创建文件）"
+    );
+}
+
+/// 有写句柄：投影随每次追加失效重折（戳 = `head`），开轮即清空。
+#[tokio::test]
+async fn runtime_facts_tracks_the_writer_and_invalidates_on_append() {
+    use crate::plugins::session::runtime::RuntimeOutcome;
+    use crate::symbio_core::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_live", None)).await;
+    let writer = store.facts("sess_live").unwrap().expect("事实源");
+
+    assert_eq!(projected(&store, "sess_live"), None, "空 WAL ⇒ 无结局");
+
+    writer.append(open_turn()).unwrap();
+    assert_eq!(projected(&store, "sess_live"), None, "开轮清空");
+
+    writer.append(close_completed()).unwrap();
+    assert_eq!(
+        projected(&store, "sess_live"),
+        Some(RuntimeOutcome::Completed)
+    );
+
+    writer.append(open_turn()).unwrap();
+    assert_eq!(
+        projected(&store, "sess_live"),
+        None,
+        "追加后缓存必须失效——否则新一轮还带着上一轮的结局"
+    );
+}
+
+/// 重启形态：写句柄已不在，投影从只读 WAL 重放——上一轮的结局不随进程消失。
+#[tokio::test]
+async fn runtime_facts_replays_a_closed_wal_for_a_fresh_process() {
+    use crate::plugins::session::runtime::RuntimeOutcome;
+    use crate::symbio_core::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    {
+        let store = SessionStore::new(tmp.path().to_path_buf());
+        save(&store, &session_with("sess_replay", None)).await;
+        let writer = store.facts("sess_replay").unwrap().expect("事实源");
+        writer.append(open_turn()).unwrap();
+        writer.append(close_failed("模型挂了")).unwrap();
+    }
+
+    // 新实例 = 重启：没有写句柄，走只读文件戳
+    let restarted = SessionStore::new(tmp.path().to_path_buf());
+    assert_eq!(
+        projected(&restarted, "sess_replay"),
+        Some(RuntimeOutcome::Failed {
+            error: Some("模型挂了".to_string())
+        })
+    );
+}
+
+/// 只读戳（长度 + mtime）随别的写者追加而失效：不重开进程也能看到新结局。
+#[tokio::test]
+async fn runtime_facts_invalidates_the_read_only_stamp_when_the_wal_grows() {
+    use crate::plugins::session::runtime::RuntimeOutcome;
+    use crate::symbio_core::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_grow", None)).await;
+    let writer = store.facts("sess_grow").unwrap().expect("事实源");
+    writer.append(open_turn()).unwrap();
+
+    // 读侧一开始没有句柄（模拟另一个进程）：先得到「开轮、无结局」
+    let reader = SessionStore::new(tmp.path().to_path_buf());
+    assert_eq!(projected(&reader, "sess_grow"), None);
+
+    writer.append(close_completed()).unwrap();
+    assert_eq!(
+        projected(&reader, "sess_grow"),
+        Some(RuntimeOutcome::Completed),
+        "文件增长后只读戳必须失效"
+    );
+}
+
+/// 删除会话同时清掉投影缓存：目录没了，缓存值也不该再回答任何问题。
+#[tokio::test]
+async fn deleting_a_session_evicts_its_runtime_projection() {
+    use crate::plugins::session::runtime::RuntimeOutcome;
+    use crate::symbio_core::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_del", None)).await;
+    let writer = store.facts("sess_del").unwrap().expect("事实源");
+    writer.append(close_completed()).unwrap();
+    assert_eq!(
+        projected(&store, "sess_del"),
+        Some(RuntimeOutcome::Completed)
+    );
+
+    store.delete_session("sess_del").await.unwrap();
+    assert!(
+        !store.runtime_cache().contains_key("sess_del"),
+        "删除会话必须同时清掉运行态投影缓存"
+    );
+    assert!(projected(&store, "sess_del").is_none());
+}

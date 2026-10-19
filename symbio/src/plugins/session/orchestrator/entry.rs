@@ -261,12 +261,9 @@ impl TurnLauncher {
         // 6. set is_working + busy + rid
         let rid = REQUEST_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
         state.request_id.store(rid, Ordering::SeqCst);
-        {
-            let mut inner = state.inner.write().await;
-            inner.is_working = true;
-            inner.last_content.clear();
-            inner.last_tool_calls.clear();
-        }
+        // 置忙先于 spawn：并发排队的回绝读的就是这一格，而开轮事实在 spawn 之后
+        // 才追加（单写者方法见 `active.rs`）。
+        state.begin_turn().await;
 
         // ── agent_id 解析（可选）──
         // 优先级：请求显式指定 > 会话元数据绑定；两者皆缺 → 未选择智能体，

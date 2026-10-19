@@ -20,6 +20,7 @@ pub(crate) mod paths;
 pub(crate) mod rebuild;
 mod resume;
 pub(crate) mod round_hook;
+pub(crate) mod runtime;
 mod skill_events;
 mod stats;
 mod task_events;

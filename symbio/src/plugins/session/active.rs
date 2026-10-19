@@ -6,6 +6,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
 use tokio::sync::{Mutex, RwLock};
 
+use super::plugin::SessionRuntime;
+use super::runtime::RuntimeFacts;
+
 /// 全局请求 ID 生成器
 pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -206,21 +209,64 @@ impl ActiveSessionState {
         }
     }
 
-    /// **提前复位** `is_working`（不发变更、不动运行态的其余字段）——手写复位的唯一写点。
+    /// **提前复位** `is_working`（不发变更、不动运行态的其余字段）。
     ///
-    /// 与 `emit_session_state(Finished)`（`orchestrator::broadcast`）内部那次复位是
-    /// **两处、也仅有两处**写点：那次随节点视图一起下发（顺序是「先写状态 → 再发变更」），
-    /// 而本方法供「先复位、后收尾」的路径使用——收尾还要做几件事（清在途图 / 注销中止
-    /// 信号 / `persist_failure`），这几步期间必须已经不处于 `is_working`，否则并发进来的
-    /// `chat/send` 会被 `session_busy` 守卫静默拒绝（用户点重试无任何反应）。
+    /// 忙位的写入只经下文「四条写路径」：本方法供「先复位、后收尾」的路径使用——
+    /// 收尾还要做几件事（清在途图 / 注销中止信号 / `persist_failure`），这几步期间
+    /// 必须已经不处于 `is_working`，否则并发进来的 `chat/send` 会被 `session_busy`
+    /// 守卫静默拒绝（用户点重试无任何反应）。
     ///
     /// 幂等：已是 `false` 时不写。复位**不带**变更投递——那一步由收尾处的
-    /// `emit_session_state` 完成，两者合起来才是「运行态收敛」。
+    /// `emit_session_state`（经 `finish_turn`）完成，两者合起来才是「运行态收敛」。
     pub async fn reset_working(&self) {
         let mut inner = self.inner.write().await;
         if inner.is_working {
             inner.is_working = false;
         }
+    }
+
+    // ==================== 运行态的四条写路径（单写者）====================
+    //
+    // `is_working` / `last_outcome` / `last_error` / `last_warning` 的**唯一写点**。
+    // 它们不是第二份可独立演化的状态：结局是 turn 事实投影（`runtime::project`）的
+    // 写穿缓存，开轮 / 收轮 / 告警 / 中止各只经一个方法（[ADR-083 §5.2]）。
+    // 拆散成调用点各写各的字段，正是 P5 要消掉的双写面。
+
+    /// 开轮：置忙 + 上一轮结局 / 告警作废 + 清空上一轮的流式累积。
+    ///
+    /// 忙碌位必须在 `spawn` **之前**同步可见——并发排队（t15/t32/t34）的守卫
+    /// 读的就是它，而开轮事实是 spawn 之后才追加的。
+    pub(crate) async fn begin_turn(&self) {
+        let mut inner = self.inner.write().await;
+        inner.is_working = true;
+        inner.last_content.clear();
+        inner.last_tool_calls.clear();
+        inner.last_outcome = None;
+        inner.last_error = None;
+        inner.last_warning = None;
+    }
+
+    /// 收轮：结局与错误文案（`failed` 时才带）落进缓存。
+    ///
+    /// 正常 / 中止 / 失败三条出口写同一个值域；事实侧的同一结局由运行器 / 失败收口
+    /// 落格，重启后由投影补上。
+    pub(crate) async fn finish_turn(&self, outcome: &str, error: Option<String>) {
+        let mut inner = self.inner.write().await;
+        inner.is_working = false;
+        inner.last_outcome = Some(outcome.to_string());
+        inner.last_error = error;
+    }
+
+    /// 会话级告警（可恢复）：只写自己的格，不改变运行态。
+    pub(crate) async fn set_warning(&self, warning: Option<String>) {
+        self.inner.write().await.last_warning = warning;
+    }
+
+    /// 中止的强制收口：置空闲 **并**注销中止信号——同一临界区，两格一起可见。
+    pub(crate) async fn clear_working_and_abort_signal(&self) {
+        let mut inner = self.inner.write().await;
+        inner.is_working = false;
+        inner.abort_signal = None;
     }
 
     /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。
@@ -291,6 +337,38 @@ impl ActiveSessionState {
     }
 }
 
+/// 无进程内缓存时的运行态读法：**事实投影**作答。
+///
+/// `warning` 不是事实（宿主局部，见 [ADR-083 §5.2](../../../../docs/010-adr/083.md "ADR-083")），
+/// 由调用方原样带上。
+fn runtime_from_facts(facts: Option<&RuntimeFacts>, warning: Option<String>) -> SessionRuntime {
+    match facts.and_then(|f| f.outcome.clone()) {
+        Some(outcome) => {
+            let (outcome, error) = outcome.into_state();
+            SessionRuntime::finished(&outcome, error, warning)
+        }
+        None => SessionRuntime::idle(warning),
+    }
+}
+
+/// 合并规则：**工作态压过一切；有缓存结局以缓存为准；否则由投影作答**。
+///
+/// 缓存领先事实是正常路径（中止先写内存、收束格随后落盘），所以不能反过来让
+/// 旧事实覆盖新缓存；而没有缓存时（重启 / 从未在本进程收过轮）事实就是唯一来源。
+fn runtime_of_state(
+    inner: &ActiveSessionStateInner,
+    facts: Option<&RuntimeFacts>,
+) -> SessionRuntime {
+    if inner.is_working {
+        return SessionRuntime::working();
+    }
+    let warning = inner.last_warning.clone();
+    match &inner.last_outcome {
+        Some(outcome) => SessionRuntime::finished(outcome, inner.last_error.clone(), warning),
+        None => runtime_from_facts(facts, warning),
+    }
+}
+
 /// 活跃会话管理器
 pub struct ActiveSessionManager {
     pub sessions: Arc<RwLock<HashMap<String, Arc<ActiveSessionState>>>>,
@@ -333,19 +411,23 @@ impl ActiveSessionManager {
         state
     }
 
-    /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`](crate::plugins::session::plugin::SessionRuntime)）。
+    /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`]）。
     ///
-    /// 住在名册上是因为它读的就是这张 `sessions` 表。无活跃状态（进程内从未跑过该
-    /// 会话）⇒ 空闲。读的是同一份 `ActiveSessionStateInner`，因此 `list` / `stat` /
-    /// 变更发射三处口径必然一致——不存在"列表说空闲、变更说运行中"这种分叉。
+    /// 住在名册上是因为它读的就是这张 `sessions` 表。读法分两层：
+    /// - **有活跃状态**：读进程内缓存（`working` 压过一切；结局以缓存为准——
+    ///   它可能早于收束格落盘，见 `begin_turn` / `finish_turn`）；
+    /// - **无活跃状态**（重启 / 本进程从未跑过该会话）：由 `facts` 投影作答，
+    ///   于是上次终态在重建面仍可见（SC-005）。
+    ///
+    /// 三处读路径（`list` / `stat` / 变更发射）都经这里，口径因此只有一份。
     pub(crate) async fn runtime_of(
         &self,
         id: &str,
-    ) -> crate::plugins::session::plugin::SessionRuntime {
-        use crate::plugins::session::plugin::SessionRuntime;
+        facts: Option<&RuntimeFacts>,
+    ) -> SessionRuntime {
         let active = self.sessions.read().await;
         let Some(st) = active.get(id) else {
-            return SessionRuntime::idle(None);
+            return runtime_from_facts(facts, None);
         };
         // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
         // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会
@@ -354,12 +436,7 @@ impl ActiveSessionManager {
         let Ok(inner) = st.inner.try_read() else {
             return SessionRuntime::working();
         };
-        SessionRuntime::from_state(
-            inner.is_working,
-            inner.last_outcome.clone(),
-            inner.last_error.clone(),
-            inner.last_warning.clone(),
-        )
+        runtime_of_state(&inner, facts)
     }
 
     // ==================== 转写发布（消息变更的唯一出口）====================

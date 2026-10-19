@@ -523,11 +523,7 @@ impl TurnLauncher {
         // 「在途 Turn 还在不在」的唯一判据，与「已空闲」必须一起可见——拆成两次
         // 写就会有中间态（已空闲但仍登记着信号 / 已注销却仍显示在跑）。
         // 这里刻意不走 `reset_working`（那个方法只复位运行态、且是条件写）。
-        {
-            let mut inner = state.inner.write().await;
-            inner.is_working = false;
-            inner.abort_signal = None;
-        }
+        state.clear_working_and_abort_signal().await;
 
         // 节点收口——**中止路径自己的责任**，不能等 chat_loop。
         //

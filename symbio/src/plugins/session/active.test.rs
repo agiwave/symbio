@@ -1,16 +1,29 @@
-//! 自动压缩熔断状态机的单元测试。
+//! 会话运行态的两组纯逻辑测试。
 //!
-//! 这些是不依赖 LLM / 存储的纯状态机测试——熔断逻辑被刻意收在 `ActiveSessionState`
-//! 的三个方法里（`compression_should_skip` / `record_success` / `record_failure`），
-//! 这样它的行为可以孤立验证，而不必驱动一整条压缩流水线。
+//! - 自动压缩熔断状态机（`compression_should_skip` / `record_success` /
+//!   `record_failure`）：刻意收在三个方法里，不依赖 LLM / 存储；
+//! - 运行态合并规则（`begin_turn` / `finish_turn` / `set_warning` 与
+//!   `runtime_of_state`）：钉住 ADR-083 §5.2 的「工作态 > 进程内缓存 > 事实投影」。
 //!
 //! 回归动机：实测会话 `09d74431` 在运行过程中**反复**自动压缩失败，但旧代码既不记录
 //! 原因、也不停止重试——每轮用户消息都白等一次数分钟的注定失败请求。熔断要解决的
 //! 就是「反复失败不收敛」。其中「历史超限」（`input_over_limit`）是**永久失败**：
 //! 历史只增不减，半开重试注定复现，故单独用永久标志跳过（见 `record_failure`）。
 
-use super::ActiveSessionState;
+use super::{runtime_of_state, ActiveSessionManager, ActiveSessionState};
+use crate::plugins::session::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
+use crate::plugins::session::runtime::{RuntimeFacts, RuntimeOutcome};
 use crate::symbio_core::VdfsChangeSubscriptions;
+
+fn facts(outcome: Option<RuntimeOutcome>) -> RuntimeFacts {
+    RuntimeFacts { outcome }
+}
+
+fn failed(why: &str) -> RuntimeFacts {
+    facts(Some(RuntimeOutcome::Failed {
+        error: Some(why.to_string()),
+    }))
+}
 
 #[tokio::test]
 async fn skip_is_false_until_threshold_reached() {
@@ -92,4 +105,88 @@ async fn permanent_failure_is_cleared_by_success_only() {
         !st.inner.read().await.auto_compress_over_limit,
         "标志本体也应复位"
     );
+}
+
+// ==================== 运行态合并规则（ADR-083 §5.2）====================
+//
+// 合并规则只有一条：**工作态压过一切；有进程内结局以缓存为准；否则由事实投影作答**。
+// 缓存可以领先事实（中止先写内存、收束格随后落盘），所以不能让旧事实覆盖新缓存。
+
+/// 工作态压过已定稿的事实：还在跑的时候不得同时显示"处理中"与"上次失败"。
+#[tokio::test]
+async fn working_masks_both_memory_and_facts() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.begin_turn().await;
+    let facts = failed("上一轮的失败");
+    let rt = runtime_of_state(&*st.inner.read().await, Some(&facts));
+    assert!(rt.working);
+    assert_eq!(rt.outcome, None);
+    assert_eq!(rt.error, None);
+}
+
+/// 内存结局压过事实：中止在收束格落盘之前就写了缓存，读侧必须看到 `aborted`，
+/// 而不是事实里上一轮的 `failed`。
+#[tokio::test]
+async fn memory_outcome_beats_the_fact_projection() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.finish_turn(OUTCOME_ABORTED, None).await;
+    let facts = failed("上一轮的失败");
+    let rt = runtime_of_state(&*st.inner.read().await, Some(&facts));
+    assert!(!rt.working);
+    assert_eq!(rt.outcome.as_deref(), Some(OUTCOME_ABORTED));
+    assert_eq!(rt.error, None, "中止不带错误文案");
+}
+
+/// 本进程没有收过轮（重启 / 从未跑到终态）⇒ 事实就是唯一来源。
+#[tokio::test]
+async fn facts_answer_when_memory_has_no_outcome() {
+    let mgr = ActiveSessionManager::new(VdfsChangeSubscriptions::default());
+    let facts = failed("重启前的失败");
+    let rt = mgr.runtime_of("s", Some(&facts)).await;
+    assert!(!rt.working);
+    assert_eq!(rt.outcome.as_deref(), Some(OUTCOME_FAILED));
+    assert_eq!(rt.error.as_deref(), Some("重启前的失败"));
+}
+
+/// 事实也没有结局（空史 / 只开了轮）⇒ 空闲。
+#[tokio::test]
+async fn neither_memory_nor_facts_means_idle() {
+    let mgr = ActiveSessionManager::new(VdfsChangeSubscriptions::default());
+    assert!(mgr.runtime_of("s", None).await.outcome.is_none());
+    let empty = facts(None);
+    let rt = mgr.runtime_of("s", Some(&empty)).await;
+    assert!(!rt.working);
+    assert_eq!(rt.outcome, None);
+}
+
+/// 告警是宿主局部量：无论结局来自缓存还是事实，都原样带上。
+#[tokio::test]
+async fn warning_survives_the_merge() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.set_warning(Some("持久化失败".into())).await;
+    let from_memory = runtime_of_state(&*st.inner.read().await, None);
+    assert_eq!(from_memory.warning.as_deref(), Some("持久化失败"));
+
+    let from_facts = runtime_of_state(
+        &*st.inner.read().await,
+        Some(&facts(Some(RuntimeOutcome::Completed))),
+    );
+    assert_eq!(from_facts.warning.as_deref(), Some("持久化失败"));
+    assert_eq!(from_facts.outcome.as_deref(), Some(OUTCOME_COMPLETED));
+}
+
+/// 开轮清空上一轮的结局与告警：新一轮开始后它们一律作废。
+#[tokio::test]
+async fn begin_turn_clears_the_previous_round_and_warning() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.finish_turn(OUTCOME_FAILED, Some("上一轮失败".into()))
+        .await;
+    st.set_warning(Some("告警".into())).await;
+    st.begin_turn().await;
+
+    let rt = runtime_of_state(&*st.inner.read().await, Some(&failed("事实里的失败")));
+    assert!(rt.working);
+    assert_eq!(rt.outcome, None);
+    assert_eq!(rt.error, None);
+    assert_eq!(rt.warning, None);
 }

@@ -226,26 +226,15 @@ impl Convergence {
         state: &Arc<ActiveSessionState>,
         change: SessionStateChange,
     ) {
-        {
-            let mut inner = state.inner.write().await;
-            match &change {
-                SessionStateChange::Working => {
-                    inner.is_working = true;
-                    // 新一轮开始：上一轮的结局与告警一并作废，否则失败角标/告警条会残留
-                    inner.last_outcome = None;
-                    inner.last_error = None;
-                    inner.last_warning = None;
-                }
-                SessionStateChange::Finished { outcome, error } => {
-                    inner.is_working = false;
-                    inner.last_outcome = Some((*outcome).to_string());
-                    inner.last_error = error.clone();
-                }
-                // 告警只改自己的属性：is_working / 结局原样保留
-                SessionStateChange::Warning(w) => {
-                    inner.last_warning = w.clone();
-                }
+        // 四条运行态写路径各只有一个方法（单写者）——见 `active.rs` 的
+        // 「运行态的四条写路径」：写点散回调用方就会重新长出双写面。
+        match &change {
+            SessionStateChange::Working => state.begin_turn().await,
+            SessionStateChange::Finished { outcome, error } => {
+                state.finish_turn(outcome, error.clone()).await
             }
+            // 告警只改自己的属性：is_working / 结局原样保留
+            SessionStateChange::Warning(w) => state.set_warning(w.clone()).await,
         }
 
         // 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图（与 `stat`
@@ -254,7 +243,11 @@ impl Convergence {
         let node = match self.get_store().await {
             Ok(store) => match store.load_session_checked(&state.session_id).await {
                 Ok(Some(session)) => {
-                    let rt = self.active.runtime_of(&state.session_id).await;
+                    let facts = store.runtime_facts(&state.session_id);
+                    let rt = self
+                        .active
+                        .runtime_of(&state.session_id, facts.as_ref())
+                        .await;
                     Some(session_node(&SessionSummary::of(&session), &rt))
                 }
                 _ => None,

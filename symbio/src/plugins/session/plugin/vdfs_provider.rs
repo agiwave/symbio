@@ -163,10 +163,7 @@ impl SessionPlugin {
                 // 只有访问位按**目录视图**回答（只给 `l`）：stat 的结果被分发层
                 // 当作「当前目录节点」，其访问位决定是否给出新建入口；
                 // 会话内部不支持新建 / 建目录。
-                let mut n = session_node(
-                    &SessionSummary::of(&session),
-                    &self.active_mgr.runtime_of(id).await,
-                );
+                let mut n = session_node(&SessionSummary::of(&session), &self.runtime_of(id).await);
                 n.access = VdfsAccess::LIST;
                 Ok(VdfsResponse::Stat(n))
             }
@@ -817,7 +814,7 @@ impl SessionPlugin {
                 let session = self.sub_session_of(id, sub).await?;
                 Ok(VdfsResponse::Stat(session_node(
                     &SessionSummary::of(&session),
-                    &self.active_mgr.runtime_of(sub).await,
+                    &self.runtime_of(sub).await,
                 )))
             }
             VdfsRequest::Read => {
@@ -1031,33 +1028,35 @@ impl SessionPlugin {
     }
 
     /// 会话清单 → VDFS 节点（携带实时运行态）
+    ///
+    /// 逐项取名册的运行态（不再整段持名册读锁跨过存储读取）：每一项的合并规则
+    /// 由 `ActiveSessionManager::runtime_of` 单点承担。
     async fn nodes_of_sessions(
         &self,
         sessions: &[SessionSummary],
         schema: &Option<Value>,
     ) -> Vec<VdfsNode> {
-        let active = self.active_mgr.sessions.read().await;
-        sessions
-            .iter()
-            .map(|s| {
-                let rt = match active.get(&s.id) {
-                    Some(st) => match st.inner.try_read() {
-                        Ok(inner) => SessionRuntime::from_state(
-                            inner.is_working,
-                            inner.last_outcome.clone(),
-                            inner.last_error.clone(),
-                            inner.last_warning.clone(),
-                        ),
-                        Err(_) => SessionRuntime::working(),
-                    },
-                    None => SessionRuntime::idle(None),
-                };
-                let mut n = session_node(s, &rt);
-                // 选项定义：清单一次取全（前端零额外请求，见设计文档 §7）
-                n.schema = schema.clone();
-                n
-            })
-            .collect()
+        let mut out = Vec::with_capacity(sessions.len());
+        for s in sessions {
+            let rt = self.runtime_of(&s.id).await;
+            let mut n = session_node(s, &rt);
+            // 选项定义：清单一次取全（前端零额外请求，见设计文档 §7）
+            n.schema = schema.clone();
+            out.push(n);
+        }
+        out
+    }
+
+    /// 运行态的**唯一读取入口**：存储交事实投影，名册交进程内缓存并合并。
+    ///
+    /// 事实投影只是 `Option`（无 WAL 的 v1 会话 / 临时会话没有），名册的合并规则
+    /// 决定「缓存优先、无缓存读投影」（见 `ActiveSessionManager::runtime_of`）。
+    async fn runtime_of(&self, id: &str) -> SessionRuntime {
+        let facts = match self.get_store().await {
+            Ok(store) => store.runtime_facts(id),
+            Err(_) => None,
+        };
+        self.active_mgr.runtime_of(id, facts.as_ref()).await
     }
 
     /// 会话的选项定义（`node.schema` / `new_type.schema` 的取值）。
