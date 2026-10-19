@@ -2,13 +2,14 @@
 kind: task
 id: T-171-keys域环拆解
 title: keys 域环拆解——把「万能胶」从依赖图里拿掉
-status: todo
+status: done
 created: 2026-10-20
 track: plan
 prio: later
 deps: [T-165-控制面收敛]
 where: symbio/src/symbio_core/keys/ · symbio/src/symbio_core/plugin/error.rs · symbio/src/symbio_core/core-vocab 审计基线
 exit: `node scripts/core-vocab-audit.mjs` 的依赖环族从 **2 降到 1**（`capability⇄chat⇄event_bus⇄exec⇄keys⇄llm⇄plugin⇄present⇄vdfs` 这一族消失，`adapters⇄projection` 不动），且 V-002 基线同步下调、core 三格与根出口宽度不升；`keys` 域对上层域的引用数 = 0；每步一个提交、全量门禁与 e2e 全绿
+evidence: 四提交 22af2337（ADR-095）→ 8d36c982（根因二）→ 7f6d41eb（第三刀）→ 4bde0ba4（根因一）：边数 44→40、环族 2→1、根出口 286→286、keys 出边归零（成汇点）；cargo test 1824 passed、gate 118/119 全绿（e2e 77/77）、core-naming 5 条全过、core-export C-003 0/0、dead-code 零违例
 ---
 
 ## 内容
@@ -69,3 +70,38 @@ capability ⇄ chat ⇄ event_bus ⇄ exec ⇄ keys ⇄ llm ⇄ plugin ⇄ prese
 4. 环族消失后，把 `V-002` 基线从 2 改成 1，并把 `core/README.md` 里「依赖单向」
    那句从**声称**改为**可复核的读数指引**（指向审计脚本，不抄数字）。
 
+
+## 收口记录（2026-10-20）
+
+**原稿与实作的偏差**：施工序第 1 步写的是「键通道**值类型擦除**」。ADR-095 把它
+换了——判据是「拼错时谁会红」：擦除把编译期类型安全换成运行期 `downcast`，每个
+`ctx.get` 调用点把编译错换成静默的 `None`；而**键与值同住**不付这个代价，且拆的是
+同一条边。实作因此走「键随值迁」，`set`/`get` 签名一字未动。
+
+**三刀实况**（每刀一个提交，逐刀跑 `core-vocab-audit`）：
+
+| 刀 | 提交 | 消失的边 | 环族读数 |
+|---|---|---|---|
+| 根因二 | `8d36c982` | `plugin→chat` | 44→43 边，族不变（9 域） |
+| 第三刀 | `7f6d41eb` | `vdfs→plugin` · `vdfs→event_bus` | 43→41 边，族缩为 `keys⇄plugin`（**临时变红**，见下） |
+| 根因一 | `4bde0ba4` | `keys→capability` · `keys→exec` · `keys→plugin`；新增三条入边 | 41→40 边，族 2→**1** |
+
+**为什么第三刀单独提交时 V-002 会红**：环族按**成员集合**识别，vdfs 出边归零后它
+掉出 SCC，族从 9 域缩成 2 域（`keys⇄plugin`）——字符串变了即「新增一族」。这不是
+回退（族更小了），但审计没有「同域或更小」这一档。故该提交的门禁段如实记下临时红，
+根因一完成后基线同步下调。
+
+**为什么三刀不能逐一提交都绿**：枚举过各种顺序，每一个中间态都有一个新族——
+根因一领先时 `chat⇄plugin⇄present⇄vdfs` 仍在，根因二领先时八域族不变（所以它
+单独能绿）。这是「一次拆多边」的固有形态，不是施工错误。
+
+**根因一内部也合并成一个提交**：exec 刀后是 5 节点族
+（`capability⇄exec⇄keys⇄llm⇄plugin`），plugin 刀后是 4 节点族——都比原 2 节点族
+大。逐刀读数记录在该提交信息里（2 → 5 → 4 → 1）。
+
+**留下的判据**（都在代码里，不在本文件）：
+- `core-vocab-audit.mjs` 的 `DEFAULT_BASELINE` 注释写了已拆那一族的三刀刀法，
+  作为「环会长回来」的反例；
+- `symbio_core/README.md` §3 从「依赖单向」的**声称**改成**可复核读数指引**
+  （跑哪条命令、看哪一行、基线怎么棘轮）；
+- `keys/mod.rs` 模块文档列了一张「已迁出的三批键」表，新增键先问「值类型住哪」。
