@@ -80,7 +80,7 @@ struct Row {
 enum Run {
     /// 纯决策：策略行。签名收 `&State`——它结构上碰不到 ctx（见 §4 Q1）。
     Policy(fn(&State) -> Option<Step>),
-    /// 有副作用执行：能力行。**本批只有这一种**，见 §4 Q2。
+    /// 有副作用执行：能力行。见 §4 Q2。
     Cap(Arc<dyn Capability>),
 }
 ```
@@ -119,7 +119,7 @@ row.run.invoke(args, &env, ctx).await   // ctx 由调用方给，不由行携带
 ### Q2 工具结果 → `Vec<Fact>`：**修正 PL-014 §4 的 `Exec` 签名**
 
 PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecError>>`。
-**本批不按这个签名施工**，三条理由：
+**不按这个签名实现**，三条理由：
 
 1. **现网 `Capability::execute(args, &ExecEnv, ctx) -> Result<Value, PluginError>` 已经是
    `Run::Cap` 的完整形态**。19 个工具无一需要 `&Store`；让它们都拿到一个 store 句柄，
@@ -129,15 +129,15 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 3. **`Vec<Fact>` 需要 `ExecError` 与事实网格的类型打通**，那是 core 的形状变更，
    必须走 CS-002 并有 ADR。迁移批次里夹带它，会把 300 行熔断线直接顶穿。
 
-因此：**`Run` 本批只有 `Policy` 与 `Cap(Arc<dyn Capability>)` 两个变体**。`Exec` 签名在
+因此：**`Run` 只有 `Policy` 与 `Cap(Arc<dyn Capability>)` 两个变体**。`Exec` 签名在
 **第一个真正需要 Store 的能力族**出现时再引入，届时它的 `&Store` 是 per-session 的
 `EventWalStore`（与 `turn_exec` 今天持有的同一个），不会是全局 store。
 
-> PL-014 §4 的 `Exec` 段与 §5 步骤 4 已据此订正（随本设计的提交一起）。
+> PL-014 §4 的 `Exec` 段与 §5 步骤 4 与此处口径一致。
 
 ### Q3 `&Store` 是哪个 Store：**推迟，且推迟本身就是答案**
 
-本批所有签名零 `Store`。若将来某族需要，判据是：**只可能是 per-session WAL**，因为
+所有签名零 `Store`。若将来某族需要，判据是：**只可能是 per-session WAL**，因为
 跨会话的写入口子一旦打开，double-write 就会从"两处记账"变成"两个真源"。
 把它做成显式参数（而不是全局单例）也是同一条理由：参数拦得住调用方，全局拦不住。
 
@@ -152,15 +152,13 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 | 4e | `OptionVisitor` 与 `ConfigurableVisitor` 一并合入（各 2 方法）；`RowKind` +1 值（`Configurable`，封闭集偏离的裁决见 [ADR-071](../010-adr/071.md)） | 2 trait + 4 方法 | 0 | trait 20 → **18**，方法 60 → 56 |
 | 4f | 纯重命名 `CapabilityVisitor` → `Registry` | 0 | 0 | 不变 |
 
-> **算术订正（4a 落地时）**：原表把三方法写成「加 0」，于是每步都少数 3。正确账是
-> 「删 5、加 3」净 −2：`put` / `get` / `list` 是**就地变形**进 `CapabilityVisitor`
-> （trait 数不变，CS-001 不触），不是免费的。终点因此是 18 trait / 56 方法，不是
-> 19 / 52。
+> **方法数账**：「删 5、加 3」净 −2——`put` / `get` / `list` 是**就地变形**进
+> `CapabilityVisitor`（trait 数不变，CS-001 不触）。终点 18 trait / 56 方法。
 
-### 4a 落地形态（2026-10-18）
+### 4a 落地形态
 
 - **新文件 `symbio_core/capability/row.rs`**（行词汇）：`CapabilityRowKind`（6 值，
-  本批只 `Tool` 可达——其余是词汇，`list(kind)` 签名由此在 4b–4e 不再变形）、
+  只有 `Tool` 可达——其余是词汇，`list(kind)` 签名由此在 4b–4e 不再变形）、
   `CapabilityRowPayload::Tool(Arc<dyn Capability>)`、`CapabilityRow`（**两个字段**：
   名字 + 载荷；族别从载荷派生，结构上不存在两种答案）。
 - **meta 不另存一份**：`row.meta()` 每次从能力自述现取。两份表示只会在改名装饰器
@@ -169,15 +167,15 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   逐字保持。`put` 内裹审批闸（T-138 纪律原样）。
 - **顺序 = 注册序**：`list(kind)` 按族过滤后即表序（IndexMap），族内不按名重排
   （ADR-057）。策略行的 `(prio, name)` 先命中者胜在 session 的 `loop_registry`，两件事。
-- **session 的非测试行数 32,489 → 32,501（+12）**：这是调用协议拆分的一次性成本
-  （一个读助手 `capabilities::tool_metas` 落位，三个读点各变轻）。纪律的读法是
+- **session 的非测试行数 32,501**（表骨架落位的一次性成本：一个读助手
+  `capabilities::tool_metas` 落位，三个读点各变轻）。纪律的读法是
   「session 不得吸收 core 的职责」——本步方向相反（core 少 2 个方法、少 1 个默认体，
   Tool 族 5 → 3）。
 - **基线同步**：`core-shape-audit.mjs` 的 `SHAPE_BASELINE` 20/73/25 → **20/71/24**。
 - 守门人用例落在 `tool_visitor.test.rs`：**同一份工具清单两种口径逐条相等**
   （`list(Tool)` 的 meta 转储 vs 入表时给的元数据，含顺序），加顺序/覆盖/缺失三格。
 
-### 4b 落地形态（2026-10-18）
+### 4b 落地形态
 
 - **生效位长在目录行上**：`CapabilityRowPayload` 加 `Model { provider, active }`
   （`CapabilityRow::model(provider, active)`，行名 = `provider_id()`）。原来那条不变量
@@ -203,7 +201,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 - **session 非测试行数不变**（唯一改动是 `consume.rs` 里一行调用的写法）：本步没有
   任何 session 侧的新逻辑，只有调用点换名。
 
-### 4c 落地形态（2026-10-18）
+### 4c 落地形态
 
 - **提示词行 = 一段文字**：`CapabilityRowPayload::Prompt { text }`（`CapabilityRow::prompt(段名, 正文)`，
   行名 = 段名）。段名的两条语义原样搬进 `capability/prompt.rs` 的模块文档：**注册在这里的
@@ -220,7 +218,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 - **session 非测试行数不变**：三处涉及（`inputs.rs` 读点、`plugin.rs` 注册点、`entry.rs` 一行注释）
   都只换了一行写法；四个注册点里三个在别的插件（model / setting / memory）。
 
-### 4d 落地形态（2026-10-18）
+### 4d 落地形态
 
 - **挂载点与根同表**：`CapabilityRowPayload::Mount { provider, active }`
   （`CapabilityRow::mount(目录名, provider)` / `CapabilityRow::mount_root(provider)`）。
@@ -251,7 +249,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 - **session 非测试行数 32,503 → 32,505（+2）**：唯一涉表的注册调用一行被 rustfmt
   折成三行，无新逻辑——量到就记账（§6 口径）。
 
-### 4e 落地形态（2026-10-18）
+### 4e 落地形态
 
 - **选项行**：`CapabilityRowPayload::Option { field, order }`（`CapabilityRow::option(order, 字段)`，
   行名 = `field.key`，同键覆盖保留先注册槽位）。`order` 长在行上但**不下发**——读侧
@@ -271,7 +269,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   可配置保注册序且同名覆盖 / 空表两族皆空；`session` 非测试行数 32,505 → **32,508**
   （+3：`collect_options` 签名换型带来的注释与 use 行重排，无新逻辑——量到就记账，§6 口径）。
 
-### 4f 落地形态（2026-10-18）
+### 4f 落地形态
 
 - **纯重命名**：`CapabilityVisitor` → `Registry`（54 个 `.rs`、134 处，签名与语义零改动）——
   §1 预告的「最后一步的纯重命名，单独成提交」由此兑现；名字追上事实，收集口只剩

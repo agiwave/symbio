@@ -32,7 +32,7 @@ desc: 查数据——路由 / 错误码 / 配置等权威表
 | [`RE-001-CONFIGURATION`](001-CONFIGURATION.md) | Symbio 配置参考 |
 | [`RE-002-ERROR_CODES`](002-ERROR_CODES.md) | Symbio 错误码参考 |
 | [`RE-003-ROUTES`](003-ROUTES.md) | Symbio 路由参考 |
-| [`RE-004-slo-calibration`](004-slo-calibration.md) | SLO 校准 · 首测（2026-09-30） |
+| [`RE-004-slo-calibration`](004-slo-calibration.md) | SLO 校准（2026-09-30 实测） |
 | [`RE-005-e2e覆盖矩阵`](005-e2e覆盖矩阵.md) | e2e 覆盖矩阵 · 能力域 × 场景形态 |
 | [`RE-006-当前事实表`](006-当前事实表.md) | Symbio 当前事实表（自动生成） |
 | [`RE-007-清单归属总账`](007-清单归属总账.md) | Symbio 清单归属总账（自动生成） |

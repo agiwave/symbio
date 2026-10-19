@@ -42,10 +42,9 @@ created: 2026-09-06
 | 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |
 | 事件总线 | `EventBus` + `event_bus/subscribe` + `vdfs/watch` | 直接复用（AI 流的信源 = VDFS 变更，见 §5.3） |
 
-> **2026-09-15 复核**：上表原先列的是 `config/get` / `config/set` 协议、`SETTING_SECTIONS`
-> 分区表与 `load_path` / `save_path`——这三样已随「配置回到插件目录」整体退场。
-> 本设计的结论不变（**做成插件、复用既有机制、前端零改动**），依托点换成了 VDFS
-> 的配置文件 + 可配置收集通道，见 [design/013-vdfs.md](012-vdfs-frontend.md "AR-012-vdfs-frontend") §3.4 / §13.1。
+> 依托点**不是** `config/get` / `config/set` 协议、`SETTING_SECTIONS` 分区表或
+> `load_path` / `save_path`——这三样都不存在（配置已回到插件目录）。本设计的结论是
+> **做成插件、复用既有机制、前端零改动**，依托点是 VDFS 的配置文件 + 可配置收集通道，见 [design/013-vdfs.md](012-vdfs-frontend.md "AR-012-vdfs-frontend") §3.4 / §13.1。
 
 ---
 
@@ -140,8 +139,8 @@ WS /api/v1/ws?token=<token>
 
 - 往收件箱写消息（`vdfs/write <根>/session/<id>/inbox`）是 **fire-and-forget**：
   后台任务受理后**立即返回**，**不会**返回一个可以读流的 Session 通道。
-  （该写入面上曾有一条同义的 `session/chat/send` 路由，随输入面双轨退役，
-  见 [ADR-066](../010-adr/066.md)；`handle_chat_send_oneoff` 也已删除。）
+  （该写入面上不存在同义的 `session/chat/send` 路由与 `handle_chat_send_oneoff`，
+  见 [ADR-066](../010-adr/066.md)。）
 - AI 的增量**不在**那条写入连接上。会话实时面——消息转写**与会话运行态**——
   是 **VDFS 变更**（`kind = "vdfs"`），落在会话子树 `<根>/session/<id>` 上
   （`<根>` 是对外展示根，运行期取回，不写字面量——见 `docs/006-ref/003-ROUTES.md`）。
@@ -181,15 +180,11 @@ WS /api/v1/ws?token=<token>
 > 设计里必须显式包含「另开一条连接 + `vdfs/watch` 登记」这两步，否则实现的人会以为
 > 连上 WS 发个 `chat/send` 就能收到流——收不到。
 
-> **历史（本节改写过两次，方向相反）**：
-> ① 早期版本让第三方订阅 `kind = "vdfs"` 看流式（消息与运行态都寄生在资源变更频道上）；
-> ② 2026-09-21 起改走 `session/stream` 转写流，本节随之改写为「另开一条连接订阅
-> `session/stream`」；
-> ③ 2026-09-23（[ADR-025](../010-adr/025.md)）
-> 判定 ② 的两条理由**把「数据的属性」当成了「传输的属性」**——顺序是**节点属性**
-> （`ChatNode.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
-> **迁回** `vdfs/watch`，本节再次改写。② 那一版（「订阅 `session/stream`」）已随
-> `session/stream` 退役而作废。
+> **为什么实时面是 `vdfs/watch`，不是另立一条流式协议**：订阅写进代码很容易，
+> 但代价是把**数据的属性**当成**传输的属性**——顺序是**节点属性**（`ChatNode.seq`），
+> 「追加」不是新的事件取值而是 `updated` 上的 `delta` 字段（[ADR-025](../010-adr/025.md)）。
+> 一旦另立 `session/stream` 这类订阅面，同一份顺序语义就要在传输层再实现一次，
+> 而第二个信源（运行态）还得再立一条。实时面因此只有 `vdfs/watch` 一条。
 
 ### 5.4 运维端点
 

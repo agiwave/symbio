@@ -85,15 +85,15 @@ created: 2026-09-28
   1. `/` 重定向 `/vdfs` → `/vdfs/session`（同一个 `VdfsView` + 同一个 `VdfsWorkbench` 承接，
      只是绑定地址从 `<根>` 变成 `<根>/session`）；
   2. ~~恢复上次选中：把 `lastAddr` 与 appearance 同源落盘，冷启动直达上次会话~~
-     **已下线（2026-09-28）**——见下方「为什么不做」；
+     **不采用**——见下方「为什么不做」；
   3. rail 里 session 的**首位语义由后端目录顺序下发**，前端不硬编码（保住「新增资源零开发」）。
 - 落点：`router/index.ts`、`schemas/vdfsAddress.ts`
 - 架构：✅ 零冲突
 
-> #### 为什么不做「回到上次浏览的地址」（2026-09-28 结论）
+> #### 为什么不做「回到上次浏览的地址」
 >
-> 本项第 2 条曾落地为 `stores/nav.ts` + 守卫的一级「有位置记忆 ⇒ 回上次地址」，
-> 现已**整体删除**（`router/index.ts::coldStartPath` 的注释是权威说明）。两个理由：
+> 本项第 2 条的形态是 `stores/nav.ts` + 守卫的一级「有位置记忆 ⇒ 回上次地址」，
+> 该形态**不存在**（删除理由见 `router/index.ts::coldStartPath` 的注释）。不做的两个理由：
 >
 > 1. **判据拿不到真实的入口地址**：打包后的 webview 里 `location.pathname` 不是 `/`，
 >    守卫的 `to.path !== '/'` 每次提前 return，记忆从未被读过；
@@ -201,12 +201,13 @@ created: 2026-09-28
 ## 6. 待办：文档断链
 
 <!-- doc-link-allow D-006: 本节引用的三个文件名**均不存在**——前两个是已修缺陷的被引述内容，第三个是"将来要立"的占位，都不是入链 -->
-`tauri/docs/023-FRONTEND.md` 顶部引用了 `docs/005-arch/frontend-ui-ux-prd.md` 与 `docs/005-arch/frontend-ui-ux-design.md`，**两个文件均不存在**。
-**已修（2026-09-27）**：改为指向本文。视觉细则若将来要立，另建 `frontend-ui-ux-design.md` 并在本文登记。
+`tauri/docs/023-FRONTEND.md` 顶部指向**本文**。视觉细则若将来要立，另建
+`frontend-ui-ux-design.md` 并在本文登记——`frontend-ui-ux-prd.md` 与
+`frontend-ui-ux-design.md` 两个文件名都不存在。
 
 ---
 
-## 7. 已落地（2026-09-27，第一批）
+## 7. 已实现
 
 > 本节记**已实现的事实**，与前六节的**提案**分开——提案会变，事实由代码决定。
 > 逐条对应上文的编号；未列出的项仍属提案，**不要**当既成事实引用。
@@ -233,7 +234,7 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 
 ---
 
-## 8. 已落地（2026-09-27，第二批）
+## 8. 已实现
 
 | 内容 | 实现落点 |
 |---|---|
@@ -275,8 +276,8 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 ### 9.2 修法
 
 `registry/vdfsIcons.ts` 提供**唯一**的节点取图标函数 `iconForNode(node)`，
-`cardIconOf` 与 `useVdfs.navItems` 都改为调用它；此前的中间层
-`getVdfsIcon` / `getVdfsIconFor` / `dirIconOf` **全部删除**（留着就还会有人
+`cardIconOf` 与 `useVdfs.navItems` 都调用它；中间层
+`getVdfsIcon` / `getVdfsIconFor` / `dirIconOf` **不存在**（留着就还会有人
 从它们那里另走一条回退）。回退链**具体在前、笼统在后**：
 
 ```
@@ -320,7 +321,7 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 
 ---
 
-## 10. 已落地（2026-09-28，第三批：抵达与导航）
+## 10. 已实现：抵达与导航
 
 | 内容 | 实现落点 |
 |---|---|
@@ -330,7 +331,7 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 | 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |
 | 会话级 UI 状态保持：输入草稿与滚动位置按会话记忆（切走再切回不丢） | `stores/sessionUiState.ts` + `components/ModelChatPanel.vue` |
 
-**本批确立的判据**：
+**本节的判据**：
 
 1. **「某个类型的特有动作」属于后端**。会话详情是注册 editor（聊天工作区），但
    「有哪些动作」不是呈现细节——它与 agent / model / mcp 一样由 provider 声明
