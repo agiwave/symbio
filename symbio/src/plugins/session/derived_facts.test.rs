@@ -123,7 +123,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         why: String::new(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -209,7 +209,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         why: String::new(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -265,7 +265,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         why: "子会话中途失败".to_string(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -334,7 +334,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         7,
     );
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -376,7 +376,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         1,
     );
     record_derived(
-        &quiet,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -420,7 +420,7 @@ fn record_learning_wires_all_three_memory_steps() {
             i,
         );
         record_learning(
-            &wal,
+            "derived-test",
             &store,
             &snapshot,
             i,
@@ -485,7 +485,7 @@ fn record_learning_wires_all_three_memory_steps() {
         44,
     );
     record_learning(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         4,
@@ -545,7 +545,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         why: "子智能体没接手".to_string(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -610,7 +610,7 @@ fn a_kept_delegation_never_eliminates() {
         why: String::new(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -656,7 +656,7 @@ fn elimination_does_not_write_a_second_verdict() {
         why: "子智能体没接手".to_string(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,
@@ -705,7 +705,7 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         why: "上游没给数据".to_string(),
     }];
     record_derived(
-        &wal,
+        "derived-test",
         &store,
         &snapshot,
         0,

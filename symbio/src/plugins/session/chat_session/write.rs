@@ -191,7 +191,18 @@ impl PersistentChatSession {
     /// `Removed` 回空（被删的节点不在存储里，交回它们等于让前端对齐幻影）。
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
-        if let Some(dir) = self.store.session_dir(&self.session_id) {
+        // 事实源句柄由存储层按会话构造一次（ADR-084 §2）——本函数不再拼目录自己 open。
+        // 打不开是**真失败**（T-164）：与「没有事实源」（临时会话）必须是两种处置。
+        let facts = match self.store.facts(&self.session_id) {
+            Ok(facts) => facts,
+            Err(why) => {
+                crate::plugin_error!("session", "[message] 变更未能入格，本次变更未生效：{}", why);
+                return Err(PluginError::InternalError(format!(
+                    "消息变更未能入格，本次变更未生效：{why}"
+                )));
+            }
+        };
+        if let Some(store) = facts {
             use super::super::message_events::AppendOutcome;
             let mut failure: Option<String> = None;
             match &change {
@@ -200,7 +211,7 @@ impl PersistentChatSession {
                     carrier: Carrier::Here,
                 } => {
                     if let AppendOutcome::Failed(why) =
-                        super::super::message_events::added(&dir, nodes)
+                        super::super::message_events::added(&store, &self.session_id, nodes)
                     {
                         failure = Some(why);
                     }
@@ -209,7 +220,7 @@ impl PersistentChatSession {
                     for m in msgs {
                         // 第一条失败即停：后续的更没理由成功，而一次变更只报一个错。
                         if let AppendOutcome::Failed(why) =
-                            super::super::message_events::edited(&dir, m)
+                            super::super::message_events::edited(&store, &self.session_id, m)
                         {
                             failure = Some(why);
                             break;
@@ -218,7 +229,7 @@ impl PersistentChatSession {
                 }
                 MessageChange::Removed(ids) => {
                     if let AppendOutcome::Failed(why) =
-                        super::super::message_events::removed(&dir, ids)
+                        super::super::message_events::removed(&store, &self.session_id, ids)
                     {
                         failure = Some(why);
                     }
@@ -258,18 +269,31 @@ impl PersistentChatSession {
                 // 因此取「出声 + 有界」：被裁节点在下次重建后复活（列表变长，不是
                 // 数据丢失），日志把这次失败指出来。
                 if !removed.is_empty() {
-                    if let Some(dir) = self.store.session_dir(&self.session_id) {
-                        use super::super::message_events::AppendOutcome;
-                        if let AppendOutcome::Failed(why) =
-                            super::super::message_events::removed(&dir, &removed)
-                        {
-                            crate::plugin_error!(
-                                "session",
-                                "[message] 写入期裁剪的删除事实未入格：{why}\
-                                 （被裁的 {} 条在下次重建后会复活）",
-                                removed.len()
-                            );
+                    match self.store.facts(&self.session_id) {
+                        Ok(Some(store)) => {
+                            use super::super::message_events::AppendOutcome;
+                            if let AppendOutcome::Failed(why) =
+                                super::super::message_events::removed(
+                                    &store,
+                                    &self.session_id,
+                                    &removed,
+                                )
+                            {
+                                crate::plugin_error!(
+                                    "session",
+                                    "[message] 写入期裁剪的删除事实未入格：{why}\
+                                     （被裁的 {} 条在下次重建后会复活）",
+                                    removed.len()
+                                );
+                            }
                         }
+                        Ok(None) => {}
+                        Err(why) => crate::plugin_error!(
+                            "session",
+                            "[message] 写入期裁剪的删除事实未入格：{why}\
+                             （被裁的 {} 条在下次重建后会复活）",
+                            removed.len()
+                        ),
                     }
                 }
                 Ok(persisted)

@@ -69,7 +69,7 @@ use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 /// 闸门拦过**这件事本身。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_derived(
-    wal: &std::path::Path,
+    session_id: &str,
     store: &EventWalStore,
     snapshot: &[Event],
     turn: u64,
@@ -112,7 +112,7 @@ pub(crate) fn record_derived(
         principal,
         &format!("v2t-{anchor_id}"),
     ) {
-        crate::plugin_warn!("session", "[task] 清单入格失败（{}）：{why}", wal.display());
+        crate::plugin_warn!("session", "[task] 清单入格失败（会话 {session_id}）：{why}");
     }
 
     // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────
@@ -124,8 +124,7 @@ pub(crate) fn record_derived(
         {
             crate::plugin_warn!(
                 "session",
-                "[v2] 熔断事件入格失败（{}）：{e:?}",
-                wal.display()
+                "[v2] 熔断事件入格失败（会话 {session_id}）：{e:?}"
             );
         }
     }
@@ -250,7 +249,7 @@ pub(crate) fn record_elimination(store: &EventWalStore, turn: u64, user_seq: u64
 ///    **下一轮才可能被用的技能**。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_learning(
-    wal: &std::path::Path,
+    session_id: &str,
     store: &EventWalStore,
     snapshot: &[Event],
     turn: u64,
@@ -267,8 +266,7 @@ pub(crate) fn record_learning(
     let remember = |step: &str, why: String| {
         crate::plugin_warn!(
             "session",
-            "[memory] {step} 失败（{}）：{why}",
-            wal.display()
+            "[memory] {step} 失败（会话 {session_id}）：{why}"
         );
     };
 

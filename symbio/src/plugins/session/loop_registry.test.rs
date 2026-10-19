@@ -317,7 +317,7 @@ fn recall_requires_first_round_and_a_session_dir() {
     );
     // 只差 `round == 0`：同一轮内记忆不漂移，事实源只扫一遍。
     assert_eq!(builtin().decide(&LoopState::turn_prepare(1, true)), None);
-    // 只差 `has_session_dir`：临时会话没有事实源，不读不写。
+    // 只差 `has_facts`：临时会话没有事实源，不读不写。
     assert_eq!(builtin().decide(&LoopState::turn_prepare(0, false)), None);
 }
 

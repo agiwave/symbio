@@ -50,15 +50,12 @@
 //!   注册段」的纪律（`plugins/session/README.md`）；也不置尾——置尾会把「最后一条
 //!   user 消息」从用户的问题换成记忆，mock 场景匹配与轮次窗口都会读错。
 
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-
 // 巩固合并的纯计算内核：生产与 verify 共有同一份源码（T-086 批① 立这条纪律，
 // 住址随 [ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三归位 core 文本域）。
 // 本模块续一条原名短路径——调用点一行不动。
 use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
-use crate::plugins::session::store::EventWalStore;
+use crate::plugins::session::store::{EventWalStore, FleetSnapshot};
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, RecallView,
@@ -108,12 +105,6 @@ pub(crate) const CONSOLIDABLE_TAGS: [&str; 2] = [MEMORY_TAG, JUDGMENT_TAG];
 /// 注入段的字节上限——按**整条**追加，装不下就停（不切半行）。
 pub(crate) const RECALL_MAX_BYTES: usize = 4096;
 
-/// 跨会话扫描预算：最多看几个会话的事实源 / 单文件字节上限。
-/// 超限 ⇒ 不扫并 `plugin_warn` 记一笔——看不见的文件不假装看得见。
-pub(crate) const RECALL_MAX_FILES: usize = 16;
-pub(crate) const RECALL_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-pub(crate) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
-
 /// `recall` 投影的扫描配额（`Budget::ms` = 事件数，1 事件 = 1ms）：超配额 ⇒
 /// `degraded` 的部分结果（I3 在检索面上的形状），不装作扫完了。
 pub(crate) const RECALL_SCAN_QUOTA: u64 = 500;
@@ -132,9 +123,14 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 
 /// 步 12 的读方：**跨会话**召回 → [`RecallView`]（一条记忆都没有 ⇒ `None`）。
 ///
-/// 扫 `<会话存储根>/*​/v2-events.wal`（含本会话自己），按 mtime 新近优先、文件数与
-/// 字节双预算封顶，**先按内容侧可见域预过滤出可见切片**（见下），再整体交给
-/// `recall` 投影。合并后排序由投影的 `query` 决定：传本轮用户正文 ⇒ 内容重叠分降序
+/// `snapshots` 是存储层交回的**值**（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：
+/// 枚举平级会话、mtime 新近优先、文件数与字节双预算、判定哪份是调用方自己的
+/// 会话——全在
+/// [`SessionStore::recall_snapshots`](super::store::SessionStore::recall_snapshots)；
+/// 本函数只做「可见域预过滤 → 投影」。每份快照是**完整史**（含归档前缀，
+/// 存储层 `range(0)` 口径）⇒ 压缩前记下的记忆不会被静默丢掉。
+///
+/// 合并后排序由投影的 `query` 决定：传本轮用户正文 ⇒ 内容重叠分降序
 /// （T-085 批②：旧但相关的记忆不再输给新但无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
 ///
 /// ## 扫描范围 = 平级会话（刻意不含嵌套子会话，[T-118](../../../../docs/009-task/118-召回嵌套子会话遍历裁决批.md "T-118-召回嵌套子会话遍历裁决批") 裁决）
@@ -146,7 +142,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 ///    会话上下文）——子会话的 shared 记忆内容（被委派的 prompt）父会话本来就有
 ///    （是它发的），判断记忆 thread_private 本就不出会话（T-117）：深遍的边际
 ///    信息量 ≈ 0；
-/// 2. **召回是有预算的检索**（[`RECALL_MAX_FILES`] 名额 + 字节双上限）：分形委派
+/// 2. **召回是有预算的检索**（存储层的 16 个名额 + 字节双上限）：分形委派
 ///    树的 WAL 恒最新（mtime 序），深遍会让一棵树占满名额、把平级会话挤出
 ///    扫描窗——那才是真丢失；
 /// 3. 判据 `recall_view_scan_is_one_level_deliberately` 钉住这个范围（嵌套
@@ -162,7 +158,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 逐条收放——
 ///
 /// - `thread_private`（判断记忆的写方取值）：只对**记录它的那个会话**的轮次可见
-///   （`own` = 这份 WAL 就是调用方的会话目录）——判断是本部署私有的工作记忆，
+///   （`FleetSnapshot::own` = 快照就是调用方的会话）——判断是本部署私有的工作记忆，
 ///   跨会话可见正是 T-117 要消灭的泄漏；存量事件没这个字段 ⇒ 缺省也是它
 ///   （C10 缺省隔离，`VisScope::from_name` 同一口径，不把笔误读宽）；
 /// - `shared` / `public`：本会话恒可见（可见域只管**跨会话**收放，见
@@ -182,74 +178,20 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 返回的 [`RecallView`] **自带 `degraded`**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）：
 /// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息因此落在视图字段上——
 /// 消费方（`prompt_section`）不必回捞外壳也能说得出来。
-pub(crate) fn recall_view(session_dir: &Path, query: &str, viewer: &str) -> Option<RecallView> {
-    let root = session_dir.parent()?;
-
-    // ── 找文件：新近优先，超预算的当场弃权并留痕 ──────────────────────────
-    let mut files: Vec<(SystemTime, PathBuf, u64)> = Vec::new();
-    if let Ok(dir) = std::fs::read_dir(root) {
-        for entry in dir.flatten() {
-            let path = entry.path().join(super::paths::V2_WAL_FILE);
-            let Ok(md) = std::fs::metadata(&path) else {
-                continue;
-            };
-            if !md.is_file() || md.len() == 0 {
-                continue;
-            }
-            if md.len() > RECALL_MAX_FILE_BYTES {
-                crate::plugin_warn!(
-                    "session",
-                    "[memory] 召回跳过超大事实源（{} B > 上限 {} B）：{}",
-                    md.len(),
-                    RECALL_MAX_FILE_BYTES,
-                    path.display()
-                );
-                continue;
-            }
-            let mtime = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            files.push((mtime, path, md.len()));
-        }
-    }
-    if files.is_empty() {
-        return None;
-    }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
-
-    // ── 读文件：只读打开（读方不截尾，见 `wal.rs::open_readonly`）───────────
-    // 本会话的判定按**目录名**比（同一个根下的两层派生，绝对前缀可能不同形）：
-    // 这份 WAL 是不是调用方自己的会话目录——`thread_private` 的收放就靠它。
-    let own_name = session_dir.file_name().map(|n| n.to_os_string());
+pub(crate) fn recall_view(
+    snapshots: Vec<FleetSnapshot>,
+    query: &str,
+    viewer: &str,
+) -> Option<RecallView> {
+    // 预过滤在入列前逐条收放（见上 [`recall_view`] 文档）：非记忆事件照常进切片
+    // （投影只认记忆，多进无害），记忆事件按可见域判。
     let mut events: Vec<Event> = Vec::new();
-    let mut bytes = 0u64;
-    for (i, (_, path, len)) in files.into_iter().enumerate() {
-        if i >= RECALL_MAX_FILES {
-            break;
-        }
-        if bytes > 0 && bytes + len > RECALL_MAX_TOTAL_BYTES {
-            break;
-        }
-        let own = path
-            .parent()
-            .and_then(|d| d.file_name())
-            .zip(own_name.as_ref())
-            .is_some_and(|(n, own)| n == own);
-        match EventWalStore::open_readonly(&path) {
-            // 召回是**跨会话累计**口径（S2.7-b2）：`range(0)` 给完整史，被快照取代而
-            // 移入归档段的 `memory.*` 事实也在里面 ⇒ 压缩前记下的记忆不会被**静默**丢掉。
-            // 预过滤在入列前逐条收放（见上 [`recall_view`] 文档）：非记忆事件
-            // 照常进切片（投影只认记忆，多进无害），记忆事件按可见域判。
-            Ok(store) => events.extend(store.range(Seq::new(0)).into_iter().filter(|e| {
-                let is_memory = e.entity == Entity::Memory
-                    && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED);
-                !is_memory || memory_visible(e, own, viewer)
-            })),
-            Err(e) => crate::plugin_warn!(
-                "session",
-                "[memory] 召回读取失败（{}）：{e}",
-                path.display()
-            ),
-        }
-        bytes += len;
+    for snap in snapshots {
+        events.extend(snap.events.into_iter().filter(|e| {
+            let is_memory = e.entity == Entity::Memory
+                && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED);
+            !is_memory || memory_visible(e, snap.own, viewer)
+        }));
     }
 
     // 新近在前（`sort_by` 稳定 ⇒ 同毫秒时保持「新会话优先」的输入序）。

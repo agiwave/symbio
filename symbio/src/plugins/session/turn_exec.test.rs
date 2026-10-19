@@ -1840,12 +1840,14 @@ async fn consolidation_lands_a_snapshot_and_archives_the_prefix() {
 /// 这条钉的是幂等——同一轮里执行口可能被调多次（续写 / 答话），而压缩只发生一次。
 #[tokio::test]
 async fn the_same_consolidation_is_not_landed_twice() {
-    let (session, dir, _tmp) = setup_full().await;
+    let (session, _dir, _tmp) = setup_full().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     run_one_turn(&session, &sink).await;
 
-    let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
+    // 一写者（ADR-084 §2）：测试不再另开第二个 `open`——那会与引擎持有的令牌
+    // 互斥、拿到降级句柄，写入被拒成 `NotTheWriter`。存储层交回的才是同一把。
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
     let msgs = consolidated(&["snap-1"]);
     assert!(
         consolidate_into_wal(&store, &msgs, "session/main").is_some(),
@@ -1869,12 +1871,14 @@ async fn the_same_consolidation_is_not_landed_twice() {
 /// 完整史（两份都在，审计可回溯）与现行窗口（只剩最新的那一份）。
 #[tokio::test]
 async fn a_newer_consolidation_lands_again() {
-    let (session, dir, _tmp) = setup_full().await;
+    let (session, _dir, _tmp) = setup_full().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     run_one_turn(&session, &sink).await;
 
-    let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
+    // 一写者（ADR-084 §2）：测试不再另开第二个 `open`——那会与引擎持有的令牌
+    // 互斥、拿到降级句柄，写入被拒成 `NotTheWriter`。存储层交回的才是同一把。
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
     assert!(consolidate_into_wal(&store, &consolidated(&["a"]), "session/main").is_some());
     assert!(
         consolidate_into_wal(&store, &consolidated(&["b"]), "session/main").is_some(),
@@ -1907,7 +1911,9 @@ async fn consolidate_outside_turn_lands_and_archives() {
 
     consolidate_outside_turn(&session, &consolidated(&["snap-r"]), "session/main");
 
-    let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
+    // 一写者（ADR-084 §2）：测试不再另开第二个 `open`——那会与引擎持有的令牌
+    // 互斥、拿到降级句柄，写入被拒成 `NotTheWriter`。存储层交回的才是同一把。
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
     let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()
@@ -1934,12 +1940,14 @@ async fn consolidate_outside_turn_lands_and_archives() {
 /// 会拿到 `turn = 0`（与归档段里的旧轮重号），事实网格里两轮撞成一轮。
 #[tokio::test]
 async fn the_turn_number_continues_across_archival() {
-    let (session, dir, _tmp) = setup_full().await;
+    let (session, _dir, _tmp) = setup_full().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     run_one_turn(&session, &sink).await; // 第 1 轮：turn 0
-    let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
+                                         // 一写者（ADR-084 §2）：测试不再另开第二个 `open`——那会与引擎持有的令牌
+                                         // 互斥、拿到降级句柄，写入被拒成 `NotTheWriter`。存储层交回的才是同一把。
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
     assert!(
         consolidate_into_wal(&store, &consolidated(&["snap-1"]), "session/main").is_some(),
         "压掉第 1 轮"
@@ -1950,7 +1958,9 @@ async fn the_turn_number_continues_across_archival() {
 
     // 第二轮：现行窗口里一条 `user.message` 都没有（上一轮全被取代），靠水位才数得出 1。
     run_one_turn(&session, &sink).await;
-    let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
+    // 一写者（ADR-084 §2）：测试不再另开第二个 `open`——那会与引擎持有的令牌
+    // 互斥、拿到降级句柄，写入被拒成 `NotTheWriter`。存储层交回的才是同一把。
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
     let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter().filter(|e| e.kind == EVENT_USER_MESSAGE).count(),
@@ -1963,4 +1973,178 @@ async fn the_turn_number_continues_across_archival() {
         .map(|e| e.turn)
         .expect("第二轮的用户格应在现行窗口里");
     assert_eq!(turn, 1, "轮号接着水位走，不是从 0 重新数");
+}
+
+// ==================== T-169：归档之后的恢复锚（ADR-085） ====================
+//
+// 判据：一轮「已开未收束」被压缩归档移出 live 段之后，恢复请求仍拿到它的
+// `(turn, 用户格 seq)`——而不是 `InternalError`。轮内 / 轮外两条落格路各一条。
+
+/// 手工开一轮、**不落收束格**——「等待用户动作」在事实源里的形状。
+///
+/// 走会话缓存的唯一句柄（ADR-084 §2），不另开 `EventWalStore`。
+fn open_turn_without_closure(session: &PersistentChatSession, turn: u64, text: &str) -> u64 {
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
+    store
+        .append(
+            Event::pending(
+                format!("u-{turn}"),
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                turn,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": text, "tier": "deep" })),
+        )
+        .expect("开轮格")
+        .value()
+}
+
+/// 恢复请求交回的工具交换（节点身份留空 ⇒ 回落到按轮根合成；本组不验挂靠）。
+fn resumed_tool() -> ResumedTool {
+    ResumedTool {
+        name: "vdfs_read".into(),
+        args: serde_json::json!({ "path": "a.md" }),
+        text: "文件内容：hello".into(),
+        call_id: String::new(),
+        turn_id: String::new(),
+        result_id: String::new(),
+    }
+}
+
+/// 某轮的收束格（final / fallback）——与 `last_open_turn` 的收束口径一致。
+fn closure_of(all: &[Event], turn: u64) -> &Event {
+    all.iter()
+        .find(|e| {
+            e.turn == turn
+                && matches!(
+                    e.kind.as_str(),
+                    EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK
+                )
+        })
+        .expect("该轮应有收束格")
+}
+
+/// T-169 **轮外路**：`retry_compaction` 在循环之前落快照并归档，把等待轮的用户格
+/// 移出 live 段；随后进来的恢复请求仍要拿到它作锚。
+///
+/// 反向自检：把调用点改回 `last_open_turn(current_window(&snapshot))` ⇒ 本用例在
+/// `execute_turn` 处报「续写轮找不到未收束的轮次」。
+#[tokio::test]
+async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
+    let (session, _dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+
+    // 等待审批的第 0 轮：只有用户格。
+    let user_seq = open_turn_without_closure(&session, 0, "请批准这次写入");
+
+    // 轮外落格（`retry_compaction` 的落点）：快照 + archive_before。
+    consolidate_outside_turn(&session, &consolidated(&["snap-r"]), "session/main");
+
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
+    let all = store.range(Seq::new(0));
+    assert!(
+        !current_window(&all)
+            .iter()
+            .any(|e| e.kind == EVENT_USER_MESSAGE),
+        "前提：u-0 已被快照移出现行窗口（否则本用例测的不是归档后的形状）"
+    );
+    assert_eq!(
+        last_open_turn(&all),
+        Some((0, user_seq)),
+        "完整史里它仍是已开未收束——恢复锚的判据本身（ADR-085）"
+    );
+
+    let mut req = tool_free_req(
+        &session,
+        Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    req.resume = Some(resumed_tool());
+    execute_turn(req)
+        .await
+        .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
+
+    let all = store.range(Seq::new(0));
+    assert_eq!(
+        closure_of(&all, 0).produced_by,
+        Some(user_seq),
+        "收束记在等待中的那一轮、溯源仍是归档段里的用户格（I2）"
+    );
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.turn == 0 && e.kind == EVENT_USER_MESSAGE)
+            .count(),
+        1,
+        "续写不重开用户格"
+    );
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+}
+
+/// T-169 **轮内路**：等待轮之上跑过另一个执行轮，压缩寄存在它自己的执行口落格并
+/// 归档——随后到来的恢复请求仍拿到原轮的锚。
+///
+/// 反向自检同轮外路：调用点退回现行窗口 ⇒ 此处 `execute_turn` 报
+/// 「续写轮找不到未收束的轮次」。
+#[tokio::test]
+async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
+    let (session, _dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+
+    // 等待审批的第 0 轮：只有用户格。
+    let user_seq = open_turn_without_closure(&session, 0, "请批准这次写入");
+
+    // 第 1 轮带着「之前压过一次」的寄存位：它的执行口先落快照 + 归档，再开自己的
+    // 用户格——u-0 因此进了归档段。
+    let compacted = consolidated(&["snap-1"]);
+    let mut first = tool_free_req(
+        &session,
+        Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    first.consolidation = Some(compacted.as_slice());
+    execute_turn(first).await.expect("第 1 轮成功");
+
+    let store = session.facts().expect("事实源").expect("持久会话有事实源");
+    let all = store.range(Seq::new(0));
+    assert!(
+        all.iter()
+            .any(|e| e.turn == 1 && e.kind == EVENT_USER_MESSAGE),
+        "第 1 轮的轮号接着水位走（不是从 0 重号）"
+    );
+    assert!(
+        !current_window(&all)
+            .iter()
+            .any(|e| e.turn == 0 && e.kind == EVENT_USER_MESSAGE),
+        "前提：u-0 已被第 1 轮落下的快照归档"
+    );
+    assert_eq!(
+        last_open_turn(&all),
+        Some((0, user_seq)),
+        "第 1 轮已收束，完整史里唯一的未收束轮仍是第 0 轮"
+    );
+
+    let mut req = tool_free_req(
+        &session,
+        Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    req.resume = Some(resumed_tool());
+    execute_turn(req)
+        .await
+        .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
+
+    let all = store.range(Seq::new(0));
+    assert_eq!(
+        closure_of(&all, 0).produced_by,
+        Some(user_seq),
+        "收束记在等待中的那一轮、溯源仍是归档段里的用户格（I2）"
+    );
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }

@@ -58,10 +58,9 @@
 //!   返工不追溯推翻它（要追溯得有「撤销终态」这一格，append-only 没有）。
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use crate::symbio_core::{
-    Budget, Entity, Event, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
+    Budget, Entity, Event, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
 };
 
@@ -289,17 +288,16 @@ pub(crate) fn write(
 /// 调度段（S7 步 17）：就绪任务集渲染成一段提示，请求视图**置顶**注入。
 ///
 /// 只读不写（与 `memory_events::recall_view` 同款的只读视图），因此：
-/// - 文件不存在 / 读不了 ⇒ `None`——请求里就少一段，不存在「空占位」；
+/// - 没有事实源 / 读不到 ⇒ `None`——请求里就少一段，不存在「空占位」；
 /// - 就绪集空 ⇒ `None`——依赖没闭合时给模型一个空的候选集只会诱导它瞎猜。
 ///
+/// `snapshot` 是本会话事实的**值**（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：
+/// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
+///
 /// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
-pub(crate) fn prompt_section(session_dir: &Path) -> Option<String> {
-    let path = session_dir.join(super::paths::V2_WAL_FILE);
-    // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。
-    let store = EventWalStore::open_readonly(&path).ok()?;
-    let snapshot = store.range(Seq::new(0));
+pub(crate) fn prompt_section(snapshot: &[Event]) -> Option<String> {
     let ready = crate::symbio_core::readyset()
-        .apply(&snapshot, i64::MAX, Budget::generous())
+        .apply(snapshot, i64::MAX, Budget::generous())
         .value
         .ready;
     if ready.is_empty() {

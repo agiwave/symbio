@@ -140,13 +140,32 @@ impl SessionPlugin {
             }
         }
 
+        // 事实源句柄由存储层构造一次并按会话缓存（ADR-084 §2）——本函数不再拼路径开档。
+        let store = match self.get_store().await {
+            Ok(store) => store,
+            Err(e) => {
+                crate::plugin_error!(
+                    "session",
+                    "[Autonomous] 会话 {} 存储句柄不可用：{}",
+                    session_id,
+                    e
+                );
+                return false;
+            }
+        };
         // 溯源锚 = 上一格的 seq：触发是"从当时的状态出发"的，指过去的事件而不是
         // 指自己。`head == 0` 既包含"事实源不存在"也包含"空文件"——两种都没有上一格。
-        // 顺带挡掉目录不存在的情形：再往下就会 `append`（写方入口对缺父目录是 panic）。
-        let path = super::super::paths::session_dir(&self.storage_dir(), session_id)
-            .join(super::super::paths::V2_WAL_FILE);
-        let store = match EventWalStore::open(&path) {
-            Ok(store) => store,
+        // 会话目录不存在 ⇒ `Ok(None)`：同样没有事实源，不触发。
+        let store = match store.facts(session_id) {
+            Ok(Some(store)) => store,
+            Ok(None) => {
+                crate::plugin_info!(
+                    "session",
+                    "[Autonomous] 会话 {} 还没有事实源，本次不触发（无可指的溯源锚）",
+                    session_id
+                );
+                return false;
+            }
             Err(e) => {
                 crate::plugin_error!(
                     "session",

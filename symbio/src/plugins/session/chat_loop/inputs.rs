@@ -165,28 +165,31 @@ pub(crate) async fn prepare_turn_inputs(
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
     // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
-    let recall_state =
-        LoopState::turn_prepare(turn.request_round, context.session.session_dir().is_some());
+    let recall_state = LoopState::turn_prepare(
+        turn.request_round,
+        context.session.store_handle().is_persistent(),
+    );
     if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::RECALL) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
         // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
         // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
         let recall_viewer = request_principal(ctx.as_ref());
-        turn.recall_view = match context.session.session_dir() {
-            Some(dir) => crate::plugins::session::memory_events::recall_view(
-                &dir,
-                &recall_query,
-                &recall_viewer,
-            ),
-            None => None,
-        };
+        // 事实是**值**（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）：
+        // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
+        // 它们看到的是同一刻的事实，不各开各的文件。
+        let store = context.session.store_handle();
+        let facts = store
+            .snapshot(context.session.session_id())
+            .unwrap_or_default();
+        turn.recall_view = crate::plugins::session::memory_events::recall_view(
+            store.recall_snapshots(context.session.session_id()),
+            &recall_query,
+            &recall_viewer,
+        );
         // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
         // 召回同一条口径（同一轮内集合不漂移）。
-        turn.ready_section = match context.session.session_dir() {
-            Some(dir) => crate::plugins::session::task_events::prompt_section(&dir),
-            None => None,
-        };
+        turn.ready_section = crate::plugins::session::task_events::prompt_section(&facts);
         // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
         // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
         // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
@@ -196,14 +199,11 @@ pub(crate) async fn prepare_turn_inputs(
         // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
         // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
         // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
-        let routing = match context.session.session_dir() {
-            Some(dir) => turn
-                .recall_view
-                .as_mut()
-                .map(|view| crate::plugins::session::skill_events::route(&dir, view))
-                .unwrap_or_default(),
-            None => Default::default(),
-        };
+        let routing = turn
+            .recall_view
+            .as_mut()
+            .map(|view| crate::plugins::session::skill_events::route(&facts, view))
+            .unwrap_or_default();
         // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
         // 两者同名不同物，见 ADR-079）：关着时可用集恒空——判定照常发生、
         // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它

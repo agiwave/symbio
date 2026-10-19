@@ -32,6 +32,11 @@ fn test_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("symbio-test/session-tool-executor")
 }
 
+/// 会话存储句柄：根 = 插件目录（生产同形）。闸门判据由它交值，执行层不拼路径。
+fn store_at(dir: &std::path::Path) -> crate::plugins::session::store::SessionStore {
+    crate::plugins::session::store::SessionStore::new(dir.to_path_buf())
+}
+
 // ── T-158 注册面：闸门问声明，测试喂一份与生产同形的声明 ────────────────
 //
 // 机制化之前这些用例直接写工具名调 `note_*`；判据搬到 `CapabilityMeta` 的
@@ -193,6 +198,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         test_ctx(),
         &[],
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -246,6 +252,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         test_ctx(),
         &[],
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -278,6 +285,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
         test_ctx(),
         &[],
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -314,6 +322,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
         test_ctx(),
         &[],
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -379,6 +388,7 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
         test_ctx(),
         &tc_context(&["tc-a", "tc-b"]),
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -415,6 +425,7 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
         test_ctx(),
         &context,
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -444,6 +455,7 @@ async fn a_different_argument_is_not_a_repeat() {
         test_ctx(),
         &context,
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -564,6 +576,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         test_ctx(),
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -638,6 +651,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
         test_ctx(),
         &tc_context(&["tc-overflow"]),
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -715,6 +729,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         ctx,
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &store_at(&test_dir()),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
@@ -1181,6 +1196,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         gate_ctx(sid),
         std::slice::from_ref(&parent),
         &dir,
+        &store_at(&dir),
         &mut Vec::new(),
         &mut Vec::new(),
         &mut breaks,
@@ -1223,7 +1239,10 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建插件目录");
 
-    let inputs = BreakerInputs::of(&dir, &gate_ctx("gate-open"));
+    let inputs = BreakerInputs::of(
+        &store_at(&dir).snapshot("gate-open").unwrap_or_default(),
+        &gate_ctx("gate-open"),
+    );
     assert_eq!(inputs.spent_ms, 0, "没有事实源 ⇒ 零账，不是故障");
     assert!(inputs.authorized, "agent:main 持外部执行能力");
 
@@ -1255,15 +1274,15 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 台账读的是**会话目录**的 WAL，不是插件目录下的同名文件。
+/// 台账读的是**会话**的事实，不是插件目录下的同名文件。
 ///
-/// 这条钉的是一次真实事故：`session_cost_ms` 若取 `session_dir.join(V2_WAL_FILE)`
-/// 而形参 `session_dir` 是**插件目录**——于是读的是 `<插件目录>/v2-events.wal`
-/// （不存在）⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支永远走不到，且**没有任何东西会变红**
-/// （熔断格只在判 `Break` 时才落）。判据因此**两侧都钉**：错的路径读不出账，
-/// 对的路径读得出账。
+/// 这条钉的是一次真实事故：曾有实现取 `session_dir.join(V2_WAL_FILE)` 而形参是
+/// **插件目录**——于是读的是 `<插件目录>/v2-events.wal`（不存在）⇒ `spent_ms`
+/// 恒 0 ⇒ 闸门的预算分支永远走不到，且**没有任何东西会变红**（熔断格只在判
+/// `Break` 时才落）。ADR-084 §1-A 之后「读哪份事实」由存储层按会话 id 决定，
+/// 判据因此**两侧都钉**：插件目录的账读不出，会话事实源里的账读得出。
 #[tokio::test]
-async fn ledger_is_read_from_the_session_wal_not_the_plugin_dir() {
+async fn ledger_is_read_from_the_session_facts_not_the_plugin_dir() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-ledger-path");
     let _ = std::fs::remove_dir_all(&dir);
     let sid = "ledger-sess";
@@ -1287,10 +1306,12 @@ async fn ledger_is_read_from_the_session_wal_not_the_plugin_dir() {
             .expect("入格");
     };
 
+    let facts = |sid: &str| store_at(&dir).snapshot(sid).unwrap_or_default();
+
     // ① 错的路径（插件目录下的同名文件）：**不得**被读走。
     seed(&dir.join(crate::plugins::session::paths::V2_WAL_FILE));
     assert_eq!(
-        BreakerInputs::of(&dir, &gate_ctx(sid)).spent_ms,
+        BreakerInputs::of(&facts(sid), &gate_ctx(sid)).spent_ms,
         0,
         "插件目录下的 v2-events.wal 不是会话事实源（会话在它的子目录里）"
     );
@@ -1298,14 +1319,14 @@ async fn ledger_is_read_from_the_session_wal_not_the_plugin_dir() {
     // ② 对的路径（插件目录 / 会话 id）：读得出账。
     seed(&session_dir.join(crate::plugins::session::paths::V2_WAL_FILE));
     assert_eq!(
-        BreakerInputs::of(&dir, &gate_ctx(sid)).spent_ms,
+        BreakerInputs::of(&facts(sid), &gate_ctx(sid)).spent_ms,
         LatencyTier::Autonomic.budget_ms() + 1,
         "会话事实源里的账必须被读出来（否则预算分支永远走不到）"
     );
 
     // ③ 没有会话 id ⇒ 零账（没有会话就没有账，不是"读插件目录的账"）。
     assert_eq!(
-        BreakerInputs::of(&dir, &test_ctx()).spent_ms,
+        BreakerInputs::of(&facts(""), &test_ctx()).spent_ms,
         0,
         "无会话上下文 ⇒ 零账"
     );
@@ -1381,6 +1402,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         worker_ctx,
         std::slice::from_ref(&parent),
         &dir,
+        &store_at(&dir),
         &mut Vec::new(),
         &mut tasks,
         &mut Vec::new(),
@@ -1451,6 +1473,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         test_ctx(),
         std::slice::from_ref(&parent),
         &dir,
+        &store_at(&dir),
         &mut Vec::new(),
         &mut tasks,
         &mut Vec::new(),

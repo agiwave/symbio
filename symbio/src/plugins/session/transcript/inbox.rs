@@ -42,11 +42,10 @@
 use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
-use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use crate::symbio_core::{
     Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption, PreemptionDecider,
-    Seq, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -284,16 +283,15 @@ impl SessionPlugin {
     /// 判据里只有两族事件被 [`PreemptionDecider::decide`] 消费——`task.*` 与
     /// `chat.assistant.final`，两者都只在**轮末收束**时入格。这就是「一忙窗一判」
     /// 成立的前提：忙窗内本切片不会变，判过一次不等于漏判。
-    fn preemption_facts(&self, session_id: &str) -> Vec<Event> {
-        let path = super::super::paths::session_dir(&self.storage_dir(), session_id)
-            .join(super::super::paths::V2_WAL_FILE);
-        let Ok(store) = EventWalStore::open_readonly(&path) else {
+    async fn preemption_facts(&self, session_id: &str) -> Vec<Event> {
+        // 事实的值由存储层交回（ADR-084：读方拿切片，不拿路径 / 句柄）。
+        let Ok(store) = self.get_store().await else {
             return Vec::new();
         };
         // 判据消费 `task.*`（任务**状态**），口径是累计的（S2.7-b2）：`range(0)` 里
         // 含被快照取代而移入归档段的那些开格 ⇒ 「压缩前开、尚未收束」的任务不会在
         // 就绪集里**静默**消失（等于任务没了）。
-        store.range(Seq::new(0))
+        store.snapshot(session_id).unwrap_or_default()
     }
 
     /// 抢占事实的唯一写入口：开写档 → 取锚 → 按 `build(anchor)` 落格。
@@ -318,25 +316,34 @@ impl SessionPlugin {
     /// 都不同**：同一任务可以挂起多次（挂起 → 恢复 → 再挂起），拿开格 seq 当锚会让
     /// 第二次撞 `Duplicate` 而**静默丢掉**那次挂起——任务因此照常出现在就绪集里，
     /// 挂起等于没发生（J3）。
-    fn append_preemption(
+    async fn append_preemption(
         &self,
         session_id: &str,
         build: impl FnOnce(u64) -> Vec<Event>,
     ) -> Result<Option<u64>, String> {
-        let path = super::super::paths::session_dir(&self.storage_dir(), session_id)
-            .join(super::super::paths::V2_WAL_FILE);
-        if !path.exists() {
-            return Ok(None);
-        }
-        let store = EventWalStore::open(&path).map_err(|e| {
+        let session_store = self.get_store().await.map_err(|e| {
             crate::plugin_error!(
                 "session",
-                "[preempt] 事实源开档失败（会话 {}）：{}",
+                "[preempt] 存储句柄不可用（会话 {}）：{}",
                 session_id,
                 e
             );
-            format!("开档失败：{e}")
+            format!("存储句柄不可用：{e}")
         })?;
+        let store = match session_store.facts(session_id) {
+            Ok(Some(store)) => store,
+            // 没有事实源 ⇒ 没有任务可挂起、也没有要收的。
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                crate::plugin_error!(
+                    "session",
+                    "[preempt] 事实源开档失败（会话 {}）：{}",
+                    session_id,
+                    e
+                );
+                return Err(format!("开档失败：{e}"));
+            }
+        };
         let anchor = store.head().value();
         for event in build(anchor) {
             let id = event.event_id.clone();
@@ -372,7 +379,7 @@ impl SessionPlugin {
             }
         }
         let started_at = std::time::Instant::now();
-        let snapshot = self.preemption_facts(&state.session_id);
+        let snapshot = self.preemption_facts(&state.session_id).await;
         let elapsed_ms = started_at.elapsed().as_millis() as u64;
 
         let mut inner = state.inner.write().await;
@@ -417,13 +424,15 @@ impl SessionPlugin {
             state.inner.write().await.preempt = PreemptPending::None;
             return;
         }
-        let written = self.append_preemption(&state.session_id, |anchor| {
-            let decider = PreemptionDecider;
-            vec![
-                decider.held_event(&task_id, anchor, as_of_seq),
-                decider.control_event("interrupt-suspend", anchor),
-            ]
-        });
+        let written = self
+            .append_preemption(&state.session_id, |anchor| {
+                let decider = PreemptionDecider;
+                vec![
+                    decider.held_event(&task_id, anchor, as_of_seq),
+                    decider.control_event("interrupt-suspend", anchor),
+                ]
+            })
+            .await;
         let mut inner = state.inner.write().await;
         match written {
             // 落格了 → 等插话轮结束后收（`Resume` ⇒ `settle_preemption` 写恢复）。
@@ -461,9 +470,11 @@ impl SessionPlugin {
                 state.inner.write().await.preempt = PreemptPending::None;
             }
             PreemptPending::Resume { task_id } => {
-                let settled = self.append_preemption(&state.session_id, |anchor| {
-                    vec![PreemptionDecider.resume_event(&task_id, anchor)]
-                });
+                let settled = self
+                    .append_preemption(&state.session_id, |anchor| {
+                        vec![PreemptionDecider.resume_event(&task_id, anchor)]
+                    })
+                    .await;
                 if settled.is_err() {
                     // 开档失败（日志已记）⇒ 留着 `Resume` 下一趟再收：清掉就等于把
                     // 「只挂不收」钉成永久（J3）。

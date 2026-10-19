@@ -6,19 +6,30 @@
 //! WAL，两个源并排跑。T-053 退掉了那份对账：切源之后落库消息**就是** WAL 重建的那
 //! 一份（`store::load_messages` 已 WAL 优先），两个源不再独立，对照失去对象。
 //!
-//! 故本文件改为**直接钉 WAL 读法的取值**：`rounds` / `steps` / `in_flight` 三个数
+//! 故本文件改为**直接钉事实读法的取值**：`rounds` / `steps` / `in_flight` 三个数
 //! 各自对得上哪一格事件（见模块头的对应表）。旧读法（[`progress_of`]）的投影判据
 //! 用例自 `delegate.test.rs` 随实现同住本文件（[plan/14 步 6 · T-167 批次 6a](../../../../docs/009-task/167-会话插件切分.md "T-167-会话插件切分")，[ADR-081](../../../../docs/010-adr/081.md "ADR-081")
 //! 裁决一第 4 条：进展的类型与读法归本模块）。
 
-use super::{progress_from_wal, progress_of, STEPS_MAX, STEP_MAX_CHARS};
-use crate::plugins::session::store::EventWalStore;
+use super::{progress_from_facts, progress_of, STEPS_MAX, STEP_MAX_CHARS};
+use crate::plugins::session::store::{EventWalStore, SessionStore};
 use crate::plugins::session::types::{Session, SessionSummary};
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use crate::symbio_core::{
-    Entity, Event, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    Entity, Event, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE,
 };
+
+/// 会话事实的**值**（生产侧由 `SessionStore::snapshot` 交回）。
+fn facts_of(dir: &std::path::Path) -> Option<Vec<Event>> {
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    if !wal.is_file() {
+        return None;
+    }
+    let store = EventWalStore::open_readonly(&wal).ok()?;
+    Some(store.range(Seq::new(0)))
+}
 
 /// 造一个临时会话目录并往 WAL 里落几轮对话。
 ///
@@ -101,13 +112,13 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
     (dir, msgs)
 }
 
-// ── WAL 读法的取值 ────────────────────────────────────────────────────
+// ── 事实读法的取值 ────────────────────────────────────────────────────
 
 #[test]
 fn a_settled_conversation_reads_rounds_steps_and_not_in_flight() {
     let (dir, _msgs) = seed("settled", &[("问 A", Some("答 A")), ("问 B", Some("答 B"))]);
 
-    let wal_read = progress_from_wal(&dir, "w1", "worker").expect("有 WAL ⇒ 有读数");
+    let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
     assert_eq!(wal_read.rounds, 2, "rounds = user.message 条数");
     assert_eq!(
@@ -143,24 +154,31 @@ fn an_open_last_turn_reads_as_in_flight() {
         .expect("third open");
     drop(store);
 
-    let wal_read = progress_from_wal(&dir, "w1", "worker").expect("有 WAL");
+    let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
     assert!(wal_read.in_flight, "末轮已开未收束 ⇒ 判在途");
     assert_eq!(wal_read.rounds, 3, "第三轮的开轮格也计入 rounds");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── 无 WAL ⇒ 不产出 ───────────────────────────────────────────────────
+// ── 无事实源 ⇒ 存储层交 None，调用方回落旧读法 ──────────────────────
 
 #[test]
 fn no_wal_yields_no_reading_and_the_caller_falls_back() {
-    let dir = std::env::temp_dir().join(format!("symbio-wprog-nowal-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let root = std::env::temp_dir().join(format!("symbio-wprog-nowal-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("nowal");
     std::fs::create_dir_all(&dir).expect("临时目录");
 
+    // 生产入口 = 存储层：没有事实源 ⇒ `None`（调用方回落旧读法，不造空壳）。
+    let store = SessionStore::new(root);
     assert!(
-        progress_from_wal(&dir, "w1", "worker").is_none(),
-        "没有 WAL ⇒ None（调用方回落旧读法，不造空壳）"
+        store.snapshot("nowal").is_none(),
+        "没有 WAL ⇒ None（不打开、不创建任何文件）"
+    );
+    assert!(
+        !dir.join(super::super::paths::V2_WAL_FILE).exists(),
+        "读方不创建文件"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -180,7 +198,7 @@ fn steps_truncate_to_the_recent_window() {
         .collect();
     let (dir, _msgs) = seed("trunc", &refs);
 
-    let wal_read = progress_from_wal(&dir, "w1", "worker").expect("有 WAL");
+    let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
     assert_eq!(wal_read.steps.len(), 8, "只留最近 8 条");
     assert_eq!(wal_read.steps.first().map(String::as_str), Some("答 2"));
@@ -211,7 +229,7 @@ fn empty_placeholder_nodes_produce_no_steps() {
         .expect("empty placeholder");
     drop(store);
 
-    let wal_read = progress_from_wal(&dir, "w1", "worker").expect("有 WAL");
+    let wal_read = progress_from_facts(&facts_of(&dir).expect("有事实源"), "w1", "worker");
 
     assert_eq!(wal_read.steps, vec!["答 A"], "空占位不产出步骤");
     let _ = std::fs::remove_dir_all(&dir);

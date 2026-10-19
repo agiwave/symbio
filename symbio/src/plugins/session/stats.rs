@@ -13,9 +13,11 @@
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
 //!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
 //!   由 core 定（[04 §3.1 批④](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")——本处不复判）。
-//! - **真·只读**：WAL 经 [`EventWalStore::open_readonly`] 打开——不创建文件、
-//!   不截断撕裂尾行。截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
-//!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）。
+//! - **真·只读**：事实由存储层以**值**交回（`SessionStore::snapshot` / 部署级
+//!   扫描），本文件不拼路径、不开文件、不取令牌。存储层只读打开：不创建文件、
+//!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
+//!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
+//!   （[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。
 //! - **不命名 core 的视图类型**：core 的域模块是私有的（C-002：外部只写
 //!   `symbio_core::<符号>`），插件侧因此只出现**根导出的函数名**，类型随返回值
 //!   流动、在出口边界一次性序列化。这里没有 `SloLatencyView` 之类的名字，也
@@ -31,16 +33,14 @@
 //! 读数取 `now = i64::MAX`：WAL 是**落盘**事实源，文件里每一条都已发生，没有
 //! 「未来的事件」可滤——与 `projection/slo.test.rs` 的扫描口同一口径。
 
-use crate::plugins::session::store::EventWalStore;
-use std::path::Path;
 use std::sync::Arc;
 
 use serde::Serialize;
 
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    ReadingPanel, Seq, Store, VisScope, SESSION_ID,
+    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload, ReadingPanel, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -69,9 +69,6 @@ pub(crate) struct TierRow {
 pub(crate) struct SessionStats {
     /// 会话 id。
     pub session_id: String,
-    /// 事实源路径——**复算的证据链**：拿这条路径
-    /// `open_readonly → range → apply` 必须与本读数逐字相等。
-    pub wal: String,
     /// 事实源在不在。不在 = 这个会话还没跑过一轮，全零读数是**有据的零**，
     /// 不是错误（读方不该为了读而创建文件）。
     pub has_wal: bool,
@@ -224,37 +221,23 @@ fn content_scope_of(snapshot: &[crate::symbio_core::Event]) -> VisScope {
     widest
 }
 
-/// 实例级聚合列（P2）：把 `storage_root` 下**所有**会话的 WAL 合并成一份读数。
+/// 实例级聚合列（P2）：把存储层交回的**全部会话快照**合并成一份读数。
 ///
-/// ## 为什么在插件侧遍历、在 core 侧合并
+/// ## 为什么在存储层遍历、在 core 侧合并
 ///
-/// 「会话目录长什么样」是插件自己的布局知识（[`super::paths::session_dir`]），
+/// 「会话目录长什么样、哪些事实源打得开」是存储层的布局知识
+/// （`SessionStore::deep_snapshots`：全会话含嵌套子会话，单个坏源跳过并出声）；
 /// 而「多个视图怎么合成一个」是统计口径——后者必须单点，故进 core 的
-/// `SloLatencyView::merge` / `FallbackRateView::merge`。本函数只做遍历 + 开档 +
-/// 套投影 + 交出去合并。
+/// `SloLatencyView::merge` / `FallbackRateView::merge`。本函数只做
+/// 「套投影 + 交出去合并」，不碰路径、不开文件。
 ///
 /// ## 遍历的形状
 ///
-/// **全会话**（`paths::session_wals_deep`）：顶层目录各一份 WAL，外加嵌套子会话
-/// （`<根>/<safe(父)>/sessions/<safe(子)>/`，可继续嵌套）。子会话不是「别的实例」，
-/// 文档上一行说着「**所有**会话」——只扫一层会让那句话说假话，且分形委派
-/// （agent_run 派生的子会话再派生子会话）整棵子树都从实例读数里消失。
-/// 判据是**存在性**（有 `v2-events.wal` 就是事实源）：`tool_archives` /
-/// `transcripts` 等子树里没有它，天然被过滤，不需要维护排除名单。
-///
-/// 单个 WAL 打不开 ⇒ 跳过并出声（撕裂尾行正在被写方修复是正常状态），不因此让
-/// 整列失败：一列读数是**诊断**，为一个坏会话让整个实例的读数消失是本末倒置。
-fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
-    let wals = super::paths::session_wals_deep(storage_root);
-    fleet_from_wals(&wals)
-}
-
-/// fleet 列的**读取半程**：拿一份 WAL 路径清单，逐个开档（不可开者跳过并出声）、
-/// 套投影、交 core 合并。与枚举半程（[`fn@fleet_reading`]，存在性判据）拆开的原因：
-/// 存在性枚举会把「路径不是文件」的假 WAL 提前滤掉，跨平台构造不出「是文件却
-/// 读不开」的夹具（权限位在 Windows 管理员下不生效）——跳过韧性只能直接喂路径钉。
-fn fleet_from_wals(wals: &[std::path::PathBuf]) -> serde_json::Value {
-    let sessions = wals.len();
+/// **全会话**：存储层的深遍覆盖顶层各一份 WAL 与嵌套子会话（分形委派整棵子树）。
+/// 子会话不是「别的实例」，文档上一行说着「**所有**会话」——只扫一层会让那句话说假话。
+/// 打不开的快照已在存储层被跳过（出声一次）；本列只数交到手里的值。
+fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
+    let sessions = snapshots.len();
 
     let mut lat_parts = Vec::new();
     let mut fb_parts = Vec::new();
@@ -263,41 +246,32 @@ fn fleet_from_wals(wals: &[std::path::PathBuf]) -> serde_json::Value {
     let mut con_parts = Vec::new();
     let mut span_parts = Vec::new();
     let mut aut_parts = Vec::new();
-    for wal in wals {
-        let Ok(store) = EventWalStore::open_readonly(wal) else {
-            crate::plugin_warn!(
-                "session",
-                "[stats] 实例聚合跳过打不开的 WAL：{}",
-                wal.display()
-            );
-            continue;
-        };
+    for snapshot in snapshots {
         // SLO 四列是**累计口径**（S2.7-b2）：被快照取代而移入归档段的前缀也在
         // `range(0)` 里，实例聚合不会**静默**少算。
-        let snapshot = store.range(Seq::new(0));
         lat_parts.push(
             slo_report()
-                .apply(&snapshot, i64::MAX, Budget::generous())
+                .apply(snapshot, i64::MAX, Budget::generous())
                 .value,
         );
         fb_parts.push(
             fallback_rate()
-                .apply(&snapshot, i64::MAX, Budget::generous())
+                .apply(snapshot, i64::MAX, Budget::generous())
                 .value,
         );
         con_parts.push(
             crate::symbio_core::conation()
-                .apply(&snapshot, i64::MAX, Budget::generous())
+                .apply(snapshot, i64::MAX, Budget::generous())
                 .value,
         );
         span_parts.push(
             crate::symbio_core::span()
-                .apply(&snapshot, i64::MAX, Budget::generous())
+                .apply(snapshot, i64::MAX, Budget::generous())
                 .value,
         );
         aut_parts.push(
             crate::symbio_core::autonomy()
-                .apply(&snapshot, i64::MAX, Budget::generous())
+                .apply(snapshot, i64::MAX, Budget::generous())
                 .value,
         );
     }
@@ -313,10 +287,10 @@ fn fleet_from_wals(wals: &[std::path::PathBuf]) -> serde_json::Value {
     let autonomy = crate::symbio_core::AutonomyView::merge(&aut_parts);
 
     serde_json::json!({
-        // 实际读进来的 WAL 数（打不开的不计——见上面出声处）
+        // 交到手里的快照数（打不开的已在存储层跳过并出声）
         "wals": lat_parts.len(),
-        // 清单里的 WAL 路径数（含打不开的），与 `wals` 的差就是被跳过的；
-        // 枚举判据是「是文件」（存在性），「路径存在但是目录」连清单都进不了
+        // 与 `wals` 同值：键是出口形状的一部分（e2e 对账读它）；
+        // 「跳过了几个」由存储层的告警说明，不在这里自行枚举
         "sessions": sessions,
         "turns": turns,
         "fallbacks": fallbacks,
@@ -482,9 +456,10 @@ pub(crate) struct StatsRequest {
 
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单。
 ///
-/// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。转写列读的是**事实源**
-/// （WAL）里的格，不是会话存储那份消息副本——本函数只经 `open_readonly` 打开
-/// 一个文件，别的盘面一概不碰。
+/// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
+/// 交回（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：`snapshot` 是本会话
+/// 完整史（含归档前缀），`deep_facts` 是部署级快照的**惰性取数**——只有读方有权
+/// 看时才调用（`may_read` 由本函数**单点**判定，见下）。
 ///
 /// `viewer = Some(身份)` 时先按可见域取**可读切片**再出各列（**读什么由能看什么
 /// 决定**，不是先算完再裁结果）；`None` = 本机默认，与判定引入之前逐字一致。
@@ -494,18 +469,14 @@ pub(crate) struct StatsRequest {
 /// 「别人看我的声誉」退化成「别人的声誉」。
 pub(crate) fn read(
     session_id: &str,
-    wal: &Path,
+    snapshot: Option<Vec<Event>>,
+    deep_facts: impl FnOnce() -> Vec<Vec<Event>>,
     viewer: Option<&str>,
     session_principal: &str,
-    storage_root: &Path,
 ) -> Result<SessionStats, PluginError> {
-    let has_wal = wal.exists();
-    let store = EventWalStore::open_readonly(wal)
-        .map_err(|e| PluginError::InternalError(format!("v2 WAL 读取失败：{e}")))?;
-    // 本出口的四列 / 不变量 / 声誉全是**累计口径**（S2.7-b2）：`range(0)` 给完整史
-    // （归档段 + 未取代的那段），于是 ① C1「无跳号」看到的首号仍是 0（只读未取代那段
-    // 会把窗口首号读成违规——假红），② 四列与声誉不会漏算被归档的历史。
-    let snapshot = store.range(Seq::new(0));
+    let has_wal = snapshot.is_some();
+    // 完整史（归档段 + 未取代的那段）：`snapshot` 由存储层按 `range(0)` 口径交值。
+    let snapshot = snapshot.unwrap_or_default();
 
     // 读侧闸（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：**读什么由能看
     // 什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
@@ -673,7 +644,7 @@ pub(crate) fn read(
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（ axes 两族给有据的
     // 零 / 空，不给「缺列」——读方不必为每个键分诊它在不在）。
     let fleet = if may_read {
-        fleet_reading(storage_root)
+        fleet_reading(&deep_facts())
     } else {
         serde_json::json!({
             "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
@@ -688,7 +659,6 @@ pub(crate) fn read(
 
     let reading = SessionStats {
         session_id: session_id.to_string(),
-        wal: wal.display().to_string(),
         has_wal,
         tiers,
         cost,
@@ -711,7 +681,8 @@ pub(crate) fn read(
 }
 
 impl SessionPlugin {
-    /// 路由 `session/stats` 的处理：由会话 id 派生事实源路径，交给 [`read`]。
+    /// 路由 `session/stats` 的处理：向存储层取**值**（本会话快照 + 部署级提示的
+    /// 惰性取数），交给 [`read`]。
     ///
     /// 与 `chat/send` / `chat/abort` 并列在路由表里，但性质不同——那两条是
     /// **编排 / 控制**，本条是**读数**：既不是数据 CRUD（CRUD 全走 VDFS，见
@@ -726,8 +697,10 @@ impl SessionPlugin {
                 "session/stats 需要 metadata.session_id".into(),
             ));
         }
-        let wal =
-            super::paths::session_dir(&self.storage_dir(), &sid).join(super::paths::V2_WAL_FILE);
+        let store = self.get_store().await?;
+        // 本会话快照立即取（读侧闸要它算可见域）；部署级扫描推迟到闸判之后——
+        // `read` 只在 `may_read` 时调用 `deep_facts`（不给看就不扫）。
+        let snapshot = store.snapshot(&sid);
         // 载荷 = **读方身份声明**（可选）：不带 `principal` = 本机默认，与读侧闸
         // 引入之前逐字一致；带了却读不出身份（类型不对）⇒ 声明了却判不了 ⇒ 拒绝
         // 读数，不悄悄降级成「未声明」（fail-closed）。载荷整体缺席同理拒绝。
@@ -759,12 +732,10 @@ impl SessionPlugin {
         };
         let stats = read(
             &sid,
-            &wal,
+            snapshot,
+            || store.deep_snapshots(),
             viewer.as_deref(),
             &session_principal,
-            // 实例根（聚合列 P2 的扫描范围）：本插件自己的目录，即 `session_dir` 的
-            // 上一层。与 WAL 路径同源，不另立一个根。
-            self.storage_dir().as_path(),
         )?;
         Ok(PluginPayload::new(&stats))
     }

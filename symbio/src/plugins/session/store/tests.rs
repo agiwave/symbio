@@ -694,3 +694,87 @@ fn current_window_starts_at_the_latest_snapshot() {
         "空列表不是一份快照 ⇒ 基线仍是上一份，前缀不被它抹掉"
     );
 }
+
+// ── P6-④ / ADR-084：事实源唯一端口（facts / snapshot） ─────────────────────
+
+/// 同一会话的 `facts()` 返回**同一个**实例：进程内只有一个 `head`、一把写锁。
+///
+/// 两次各自 `open` 不会报错——第二把拿不到令牌会静默降级成只读实例，于是
+/// 「读到的切片是旧的、写永远 NotTheWriter」，且看起来一切正常。缓存必须命中。
+#[tokio::test]
+async fn facts_hands_out_one_shared_instance_per_session() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_facts", None)).await;
+
+    let first = store
+        .facts("sess_facts")
+        .unwrap()
+        .expect("持久会话有事实源");
+    let second = store.facts("sess_facts").unwrap().expect("缓存命中");
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "同一会话必须共享同一个事实源实例"
+    );
+
+    assert!(
+        store.facts("sess_absent").unwrap().is_none(),
+        "没有会话目录 ⇒ Ok(None)（临时 / 不存在，不是失败）"
+    );
+}
+
+/// 目录在、事实源**打不开** ⇒ `Err`，不是 `Ok(None)`。
+///
+/// T-164 的判据：把「没有事实源」（临时会话，豁免）与「事实源打不开」（真失败）
+/// 压成同一种 None，会让主读切 WAL 之后的编辑静默丢失。复现手法：用**目录**占住
+/// 锁文件路径——`EventWalStore::open` 第一步就是打开它，跨平台都会失败。
+#[tokio::test]
+async fn an_unopenable_fact_source_is_an_error_not_none() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_broken", None)).await;
+    std::fs::create_dir_all(
+        tmp.path()
+            .join("sess_broken")
+            .join(format!("{}.lock", paths::V2_WAL_FILE)),
+    )
+    .expect("占住锁文件路径");
+
+    match store.facts("sess_broken") {
+        Err(why) => assert!(why.contains("打不开"), "失败要带得出原因：{why}"),
+        Ok(_) => panic!("事实源打不开必须是 Err，而不是「没有事实源」"),
+    }
+}
+
+/// `snapshot()` 读完整史（含归档前缀），且与写句柄看到的切片一致。
+#[tokio::test]
+async fn snapshot_reads_the_same_full_history_as_the_writer() {
+    use crate::symbio_core::{Entity, Event, Verb, EVENT_USER_MESSAGE};
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_snap", None)).await;
+
+    let writer = store.facts("sess_snap").unwrap().expect("事实源");
+    writer
+        .append(
+            Event::pending(
+                "u-1",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_payload(json!({ "text": "问", "id": "u-1" })),
+        )
+        .unwrap();
+
+    let snapshot = store.snapshot("sess_snap").expect("有事实源 ⇒ 有切片");
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].event_id, "u-1");
+    assert!(
+        store.snapshot("sess_absent").is_none(),
+        "没有事实源 ⇒ None（读方不创建文件）"
+    );
+}

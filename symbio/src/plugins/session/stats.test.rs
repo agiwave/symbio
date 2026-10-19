@@ -7,7 +7,7 @@
 //! 3. **纯读**——没有事实源时是「有据的零」，且**不得**为了读而创建文件。
 //! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零（批⑥）。
 
-use super::{fleet_from_wals, read};
+use super::{fleet_reading, read};
 use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
@@ -17,17 +17,52 @@ use crate::symbio_core::{
 };
 use std::path::{Path, PathBuf};
 
-/// 读数（**测试专用窄口**）：`storage_root` 固定成 WAL 所在目录本身。
+/// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
+fn facts_of(wal: &Path) -> Option<Vec<Event>> {
+    if !wal.is_file() {
+        return None;
+    }
+    let store = EventWalStore::open_readonly(wal).ok()?;
+    Some(store.range(Seq::new(0)))
+}
+
+/// 部署级快照（测试侧按生产布局自己深遍；生产侧这段在存储层）。
+fn fleet_of(root: &Path) -> Vec<Vec<Event>> {
+    super::super::paths::session_wals_deep(root)
+        .into_iter()
+        .filter_map(|wal| EventWalStore::open_readonly(&wal).ok())
+        .map(|store| store.range(Seq::new(0)))
+        .collect()
+}
+
+/// 读数（**测试专用窄口**）：把路径翻成值后调 [`read`]。
+fn read_path(
+    session_id: &str,
+    wal: &Path,
+    viewer: Option<&str>,
+    principal: &str,
+    root: &Path,
+) -> Result<super::SessionStats, crate::symbio_core::PluginError> {
+    read(
+        session_id,
+        facts_of(wal),
+        || fleet_of(root),
+        viewer,
+        principal,
+    )
+}
+
+/// 单会话读数：`storage_root` 固定成 WAL 所在目录本身。
 ///
 /// 于是每个用例都只有一个会话 ⇒ 聚合列读到的就是「一个 WAL」的形状，可与
 /// per-session 各列对照。P2 的多会话判据另建目录、不走这个窄口。
 ///
-/// 为什么包一层而不是给 21 处调用都加第五个参数：测试要盯的是**各列口径**，
+/// 为什么包一层而不是给 21 处调用都加参数：测试要盯的是**各列口径**，
 /// 聚合列的扫描范围由它自己那条判据钉。两件事混在一个入口上，改聚合范围
 /// 就要动 21 处。
 fn read_at(wal: &Path, principal: &str) -> super::SessionStats {
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    read("s1", wal, None, principal, &root).expect("读数")
+    read_path("s1", wal, None, principal, &root).expect("读数")
 }
 
 /// 播种一个事实源：两轮（一轮成功 final、一轮兜底 fallback），共 4 格。
@@ -178,7 +213,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
 #[test]
 fn fleet_aggregates_every_session_in_the_instance() {
     let (root, wals) = seed_instance("agg", 3);
-    let got = read(
+    let got = read_path(
         "session-0",
         &wals[0],
         None,
@@ -218,7 +253,7 @@ fn fleet_scan_does_not_descend_into_session_subdirectories() {
     std::fs::create_dir_all(&nested).expect("子目录");
     std::fs::copy(&wals[0], nested.join(super::super::paths::V2_WAL_FILE)).expect("放假 WAL");
 
-    let got = read(
+    let got = read_path(
         "session-0",
         &wals[0],
         None,
@@ -236,8 +271,8 @@ fn fleet_scan_does_not_descend_into_session_subdirectories() {
 ///
 /// 撕裂尾行被写方修复是正常状态，`open_readonly` 对「读得出一部分」是会成功的
 /// （实测写坏内容仍开得出、只是 0 条事件）。枚举的判据是**存在性**（是文件）：
-/// 把 WAL 换成**目录**，连清单都进不了——「清单里有却开不开」的跳过韧性由
-/// 下一条直接喂路径的判据钉住（跨平台构造不出那种夹具，见 `fleet_from_wals` 文档）。
+/// 把 WAL 换成**目录**，连清单都进不了——跳过韧性由存储层的深遍负责
+/// （本用例只钉出口读到的值形状）。
 #[test]
 fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
     let (root, wals) = seed_instance("torn", 2);
@@ -245,7 +280,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
     let _ = std::fs::remove_file(&wals[1]);
     std::fs::create_dir_all(&wals[1]).expect("把 WAL 换成目录");
 
-    let got = read(
+    let got = read_path(
         "session-0",
         &wals[0],
         None,
@@ -261,23 +296,22 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
     assert_eq!(got.fleet["by_tier"]["latency"][0]["samples"], 1);
 }
 
-/// **反向（韧性）续**：路径在清单里却**开不开** ⇒ 跳过并出声，不拖垮整列。
+/// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
 ///
-/// `sessions` 与 `wals` 的差就是被跳过的——这一半语义在存在性枚举之后仍然成立
-/// （Unix 权限位、文件锁等「是文件却读不开」的场景），但跨平台造不出夹具，
-/// 故绕过枚举直接喂路径。
+/// 「哪些事实源打得开」由存储层判（`deep_snapshots` 跳过并出声）；本列只对
+/// 交到手里的值套投影——两半不要混在一个函数里（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。
 #[test]
-fn fleet_reading_skips_a_wal_path_that_cannot_be_opened() {
-    let (_root, wals) = seed_instance("skip", 2);
-    let _ = std::fs::remove_file(&wals[1]);
-    std::fs::create_dir_all(&wals[1]).expect("把第二个路径换成目录（对 open_readonly 必败）");
+fn fleet_aggregates_the_snapshots_it_is_given() {
+    let (root, _wals) = seed_instance("values", 2);
+    let facts = fleet_of(&root);
+    assert_eq!(facts.len(), 2, "存储层深遍交回两个会话的值");
 
-    let got = fleet_from_wals(&wals);
-    assert_eq!(got["wals"], 1, "开不开的跳过，不出数");
-    assert_eq!(got["sessions"], 2, "清单里有两个：差就是被跳过的那个");
+    let got = fleet_reading(&facts);
+    assert_eq!(got["wals"], 2);
+    assert_eq!(got["sessions"], 2, "与 wals 同值：都是交到手里的快照数");
     assert_eq!(
-        got["by_tier"]["latency"][0]["samples"], 1,
-        "好会话照常进聚合"
+        got["by_tier"]["latency"][0]["samples"], 2,
+        "两份快照各一格 final ⇒ 样本并集是 2"
     );
 }
 
@@ -287,7 +321,7 @@ fn fleet_reading_skips_a_wal_path_that_cannot_be_opened() {
 #[test]
 fn fleet_is_empty_when_the_reader_may_not_read() {
     let (root, wals) = seed_instance("gate", 2);
-    let got = read(
+    let got = read_path(
         "session-0",
         &wals[0],
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
@@ -424,7 +458,7 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
     );
 
     // 读侧闸：非属主 ⇒ 四列形态的空（不是零值条目）
-    let gated = read(
+    let gated = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
@@ -502,7 +536,7 @@ fn fleet_axes_aggregate_across_sessions() {
             )
             .unwrap();
     }
-    let got = read(
+    let got = read_path(
         "session-0",
         &wals[0],
         None,
@@ -724,7 +758,7 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
     let root = dir.clone();
 
-    let got = read(
+    let got = read_path(
         "s1",
         &wal,
         None,
@@ -754,11 +788,6 @@ fn stats_recompute_equals_direct_apply() {
 
     assert!(got.has_wal);
     assert_eq!(got.session_id, "s1");
-    assert_eq!(
-        got.wal,
-        wal.display().to_string(),
-        "证据链要给出可复算的路径"
-    );
 
     // 读方复算：同一份切片、同一个 as-of，四列各自直接 apply。
     let store = EventWalStore::open_readonly(&wal).unwrap();
@@ -972,7 +1001,7 @@ fn declaring_the_owner_reads_everything() {
     let wal = seed("gate-owner");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     let plain = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
-    let as_owner = read(
+    let as_owner = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_USER),
@@ -1000,7 +1029,7 @@ fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     for viewer in ["session/main", "session/ghost"] {
-        let got = read(
+        let got = read_path(
             "s1",
             &wal,
             Some(viewer),
@@ -1112,8 +1141,8 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     let session_principal = crate::symbio_core::authz::PRINCIPAL_MAIN;
 
     // ① 矩阵内主体（非属主）：读得到——共享内容让这份事实源不再纯私有。
-    let as_member =
-        read("s1", &wal, Some("session/main"), session_principal, &root).expect("矩阵内主体读数");
+    let as_member = read_path("s1", &wal, Some("session/main"), session_principal, &root)
+        .expect("矩阵内主体读数");
     assert!(as_member.has_wal);
     assert_eq!(
         as_member.checkpoint["event_count"], 3,
@@ -1122,8 +1151,8 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     assert_eq!(as_member.cost["total_ms"], 1200, "成本列同见");
 
     // ② 矩阵外主体：照旧空切片（fail-closed 不因共享内容松动）。
-    let as_outsider =
-        read("s1", &wal, Some("session/ghost"), session_principal, &root).expect("矩阵外主体读数");
+    let as_outsider = read_path("s1", &wal, Some("session/ghost"), session_principal, &root)
+        .expect("矩阵外主体读数");
     assert!(as_outsider.has_wal, "有源但不给你看");
     assert_eq!(
         as_outsider.checkpoint["event_count"], 0,
@@ -1132,8 +1161,8 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     assert_eq!(as_outsider.cost["total_ms"], 0);
 
     // ③ 属主本人：与不声明时逐字一致（闸不是为了把属主挡在外面）。
-    let plain = read("s1", &wal, None, session_principal, &root).expect("本机默认读数");
-    let as_owner = read(
+    let plain = read_path("s1", &wal, None, session_principal, &root).expect("本机默认读数");
+    let as_owner = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_USER),
@@ -1154,7 +1183,8 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     for e in events {
         store2.append(e).unwrap();
     }
-    let denied = read("s1", &wal, Some("session/main"), session_principal, &root).expect("读数");
+    let denied =
+        read_path("s1", &wal, Some("session/main"), session_principal, &root).expect("读数");
     assert!(
         denied.tiers.is_empty() && denied.checkpoint["event_count"] == 0,
         "内容全私有 ⇒ 矩阵内非属主回到空切片（翻面的是可见域，不是别的）"
@@ -1216,7 +1246,7 @@ fn reputation_column_reports_own_and_by_principal() {
     );
 
     // 无读权限 ⇒ **整列为空对象**，不是零值条目（零值 = 替一个你看不见的主体报数）。
-    let denied = read(
+    let denied = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
@@ -1260,7 +1290,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
             .expect("任务开格");
     }
 
-    let got = read(
+    let got = read_path(
         "s-rs",
         &wal,
         None,
@@ -1288,7 +1318,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert_eq!(got.readyset, direct, "就绪集列必须复算相等");
 
     // 反向：读侧闸关 ⇒ 空切片 ⇒ 连不变量列也空（有源但不给你看）。
-    let denied = read(
+    let denied = read_path(
         "s-rs",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
@@ -1360,7 +1390,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     assert_eq!(after.calibration["by_skill"]["sk-a"]["fallbacks"], 0);
 
     // 读侧闸：非属主 ⇒ 空切片 ⇒ `{ by_skill: {} }`（与就绪集列同族，不是声誉的空对象）。
-    let denied = read(
+    let denied = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
@@ -1419,7 +1449,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     );
 
     // 读侧闸：非属主 ⇒ 空切片 ⇒ `{ entries: [] }`（与就绪集 / 校准同族，不是声誉的空对象）。
-    let denied = read(
+    let denied = read_path(
         "s1",
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),

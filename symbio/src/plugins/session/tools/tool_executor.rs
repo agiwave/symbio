@@ -11,6 +11,7 @@
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
 use super::super::transcript::llm_emit_state;
+use crate::plugins::session::store::SessionStore;
 use crate::symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
@@ -836,11 +837,12 @@ pub async fn process_tool_calls_async(
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在
-    // 它下面的 `<会话 id>/tool_archives`，闸门的成本台账读它下面的
-    // `<会话 id>/v2-events.wal`（会话 id 取自请求上下文，派生统一走
-    // `paths::session_dir`）。不从请求上下文反推插件目录——请求上下文不带
-    // `PLUGIN_DIR`，子智能体下会指到父作用域。
+    // 它下面的 `<会话 id>/tool_archives`。不从请求上下文反推插件目录——请求上下文
+    // 不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
     session_dir: &std::path::Path,
+    // 会话存储句柄：两道闸门的判据以**值**交回（本会话完整史 / 部署级全量史），
+    // 本函数不拼路径、不开 WAL（ADR-084 §1-A）。
+    store: &SessionStore,
     // 代际立约出参（批⑧）：`agent_run` 的承诺记录，交回调用方随收束入格。
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
     // 再加一个只会逼着每个调用方都写 `let _ = `。
@@ -872,11 +874,14 @@ pub async fn process_tool_calls_async(
 
     // 熔断闸门的判据批首读一次（见 `BreakerInputs`）：授权表与成本台账都是只读的，
     // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
-    let breaker = BreakerInputs::of(session_dir, &ctx);
+    let session_id = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
+    let session_snapshot = store.snapshot(&session_id).unwrap_or_default();
+    let breaker = BreakerInputs::of(&session_snapshot, &ctx);
     // 淘汰闸门的判据同批首读一次（见 `EliminationInputs`，S13 §3）：部署级覆盖层
     // 扫全部会话 WAL——「本主体还被不被授予 assign.work」是关于主体的事实，
     // 不取决于裁决落在哪个会话（换个会话绕不开淘汰）。
-    let elimination = EliminationInputs::of(session_dir, &ctx);
+    let elimination_fleet = store.deep_snapshots();
+    let elimination = EliminationInputs::of(&elimination_fleet, &ctx);
     // 任务表写侧闸的判据同批首读一次（见 `TaskTableInputs`，S03 §3 / T-107）：
     // 只问本会话主体那一行——任务表是会话自己的工作跟踪，写它的资格随主体走。
     let task_table = TaskTableInputs::of(&ctx);

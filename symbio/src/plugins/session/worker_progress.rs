@@ -25,14 +25,11 @@
 //! 并排跑的对账段**：切源之后落库消息即 WAL 重建的那一份，两个源不再独立，对账没有
 //! 对象。
 
-use std::path::Path;
-
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::PluginError;
 
 // core 的域模块私有（C-002：外部只写 symbio_core::<符号>）⇒ 视图类型经根导出拿
-use crate::plugins::session::store::EventWalStore;
-use crate::symbio_core::{transcript, turnstate, Budget, Seq, Store};
+use crate::symbio_core::{transcript, turnstate, Budget, Event};
 
 use super::chat_session::PersistentChatSession;
 use super::types::{Session, SessionSummary};
@@ -158,48 +155,37 @@ pub(crate) async fn for_session(
         if child.parent_session_id() != Some(session.session_id()) {
             continue;
         }
-        // 子会话目录 = 父会话目录下的 <safe_id(子 id)>（`paths::session_dir` 的
-        // 同一套寻址，与 stats / turn_exec 同一个取值点）。父会话本身没有目录
-        // （临时会话）⇒ 回落旧读法：那种会话没有 WAL，进展只在落库消息里。
-        let Some(parent_dir) = session.session_dir() else {
-            out.push(progress_of(&summary, &child));
-            continue;
-        };
-        let dir = super::paths::session_dir(&parent_dir, &summary.id);
-        // 新读法（WAL）；**没有 WAL ⇒ 回落旧读法**（v1 遗留会话的事实从未入格）。
+        // 子会话的进展是**值**：存储层按 id 寻址并读完，本模块只投影
+        // （[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。没有事实源
+        // （v1 遗留 / 临时会话）⇒ 回落旧读法：那样的会话只在落库消息里有进展。
         //
         // T-053 退掉了这里的**双源并读对账**：切源之后落库消息就是 WAL 重建的
         // 那一份（`store::load_messages` 已 WAL 优先），再拿它跟 WAL 投影比是
         // 「真源跟真源比」——口径差异会变成稳定误报。对账对象已随单源消失。
-        let Some(wal_read) = progress_from_wal(&dir, &summary.id, &summary.title) else {
+        let Some(snapshot) = session.store_handle().snapshot(&summary.id) else {
             out.push(progress_of(&summary, &child));
             continue;
         };
-        out.push(wal_read);
+        out.push(progress_from_facts(&snapshot, &summary.id, &summary.title));
     }
     Ok(out)
 }
 
 // ── WAL 读法（轨 S 第二步，ADR-049：读侧逐点切到事实源）────────────────
 
-/// 从 WAL 算出 Q3 进展（**纯函数**：只吃一个会话目录，可穷举测试）。
+/// 从事实快照算出 Q3 进展（**纯函数**：只吃一份事件切片，可穷举测试）。
 ///
-/// `None` = 这个会话还没有 WAL（没跑过任何一轮 v2）——调用方回落到旧读法，
-/// 与 `task_events::prompt_section` 同一条纪律（无源 ⇒ 不产出，不造空壳）。
-pub fn progress_from_wal(
-    session_dir: &Path,
+/// 调用方用 [`SessionStore::snapshot`](super::store::SessionStore::snapshot) 取
+/// 「有没有事实源」：有为 `Some`、无则走旧读法——与 `task_events::prompt_section`
+/// 同一条纪律（无源 ⇒ 不产出，不造空壳）。
+pub fn progress_from_facts(
+    snapshot: &[Event],
     fallback_id: &str,
     fallback_title: &str,
-) -> Option<WorkerProgress> {
-    let path = session_dir.join(super::paths::V2_WAL_FILE);
-    if !path.exists() {
-        return None;
-    }
-    let store = EventWalStore::open_readonly(&path).ok()?;
-    let snapshot = store.range(Seq::new(0));
+) -> WorkerProgress {
     // 不标注类型：视图类型随返回值流动（core 的 projection 域模块私有，C-002）
     let entries = transcript()
-        .apply(&snapshot, i64::MAX, Budget::generous())
+        .apply(snapshot, i64::MAX, Budget::generous())
         .value;
 
     // rounds：`user.message` 条数。`transcript` 投影把开轮折成的补充（
@@ -229,20 +215,20 @@ pub fn progress_from_wal(
     // 见 `store::current_window`）。上面 `transcript()` 那一头自己从快照起折，不受影响。
     let state = turnstate()
         .apply(
-            super::store::current_window(&snapshot),
+            super::store::current_window(snapshot),
             i64::MAX,
             Budget::generous(),
         )
         .value;
     let in_flight = state.opened && !state.settled();
 
-    Some(WorkerProgress {
+    WorkerProgress {
         id: fallback_id.to_string(),
         title: fallback_title.to_string(),
         in_flight,
         rounds,
         steps,
-    })
+    }
 }
 
 #[cfg(test)]

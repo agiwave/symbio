@@ -2,10 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::plugins::session::store::EventWalStore;
-use crate::symbio_core::{
-    Budget, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
-};
+use crate::symbio_core::{Budget, Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。
 ///
@@ -42,7 +39,7 @@ impl BreakerInputs {
     ///
     /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
     /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
-    pub fn of(session_dir: &std::path::Path, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
+    pub fn of(snapshot: &[Event], ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let principal = crate::symbio_core::authz::principal_of(
             ctx.get(crate::symbio_core::AGENT_ID).as_deref(),
         );
@@ -52,11 +49,7 @@ impl BreakerInputs {
         );
         Self {
             authorized,
-            spent_ms: session_cost_ms(
-                session_dir,
-                ctx.get(crate::symbio_core::SESSION_ID).as_deref(),
-                &principal,
-            ),
+            spent_ms: session_cost_ms(snapshot, &principal),
             requested_ms: LatencyTier::Deep.budget_ms(),
             budget_ms: LatencyTier::Autonomic.budget_ms(),
         }
@@ -68,35 +61,18 @@ impl BreakerInputs {
 /// 与 `session/stats` 的成本列**同一切片同一投影**——两处各算一遍必然漂移成
 /// 「闸门说还有余量、出口说已耗尽」，而错的若是台账，熔断就形同虚设（ADR-044）。
 ///
-/// ## 路径必须走 `paths::session_dir`，不能只 join 文件名
+/// ## 从切片取账，不再自己开档
 ///
-/// `session_dir` 形参是**本插件自己的目录**（见 [`process_tool_calls_async`](super::process_tool_calls_async) 的形参
-/// 文档），而事实源在它下面 `<safe_id(session_id)>/v2-events.wal`。不得直接
-/// `session_dir.join(V2_WAL_FILE)` ⇒ 读的是 `<插件目录>/v2-events.wal`——那个文件
-/// **不存在**，`open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支
-/// 永远走不到，而**没有任何东西会变红**（熔断格只在判 `Break` 时才落，判不出来就
-/// 一条都没有）。接线了却永不生效，正是 [plan/11 批 2 ③] 的 e2e 判据要拦的那类静默失效。
-/// 会话 id 缺失（无会话上下文）⇒ 零账：没有会话就没有账，不是"读不到插件目录的账"。
-fn session_cost_ms(
-    session_dir: &std::path::Path,
-    session_id: Option<&str>,
-    principal: &str,
-) -> u64 {
-    let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) else {
-        return 0;
-    };
-    let path = super::super::super::paths::session_dir(session_dir, session_id)
-        .join(super::super::super::paths::V2_WAL_FILE);
-    // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。
-    let Ok(store) = EventWalStore::open_readonly(&path) else {
-        return 0;
-    };
+/// 切片由会话存储层交回（ADR-084 §1-A）：读方拿的是事实的值，不是路径。
+/// 历史教训：曾按 `<插件目录>/v2-events.wal` 直接 join（漏了会话 id 那层），
+/// `open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支永远走不到，
+/// 而**没有任何东西会变红**。把「读哪份事实」收进存储层后，这类错位在类型上消失。
+fn session_cost_ms(snapshot: &[Event], principal: &str) -> u64 {
     // 成本台账是**会话累计**口径（S2.7-b2）：被快照取代而移入归档段的花费也在
     // `range(0)` 里 ⇒ 不会**静默**少算压缩前的成本（闸门说「还有余量」而实际已耗尽，
     // ADR-044 的熔断随之形同虚设）。
-    let snapshot = store.range(Seq::new(0));
     crate::symbio_core::cost_ledger()
-        .apply(&snapshot, i64::MAX, Budget::generous())
+        .apply(snapshot, i64::MAX, Budget::generous())
         .value
         .of(principal)
         .spent_ms

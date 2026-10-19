@@ -10,8 +10,10 @@
 
 use super::*;
 use crate::plugins::session::plugin::SessionConfig;
+// 夹具自己开档写一轮事实：`use super::*` 带不过来（生产侧读走存储层句柄）。
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::session_chat;
-use crate::symbio_core::PluginSimpleRequest;
+use crate::symbio_core::{PluginSimpleRequest, Seq};
 
 fn plugin() -> Arc<SessionPlugin> {
     Arc::new(SessionPlugin::new(

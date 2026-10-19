@@ -970,16 +970,15 @@ pub(crate) fn consolidate_outside_turn(
     messages: &[ChatNode],
     principal: &str,
 ) {
-    let Some(dir) = session.session_dir() else {
-        return;
-    };
-    let wal = dir.join(super::paths::V2_WAL_FILE);
-    let store = match EventWalStore::open(&wal) {
-        Ok(s) => s,
-        Err(e) => {
+    let store = match session.facts() {
+        Ok(Some(store)) => store,
+        Ok(None) => return,
+        Err(why) => {
+            // T-164：打不开与「没有事实源」是两种处置——前者要出声（压缩已生效、
+            // 事实源缺这一格），后者（临时会话）本就无事可落。
             crate::plugin_warn!(
                 "session",
-                "[Session] 轮外压缩入格：WAL 打开失败（压缩已生效，事实源缺这一格）: {e}"
+                "[Session] 轮外压缩入格：事实源打不开（压缩已生效，事实源缺这一格）: {why}"
             );
             return;
         }
@@ -1043,16 +1042,13 @@ pub(crate) async fn execute_final_reply_turn(
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
     consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
-    let dir = session.session_dir().ok_or_else(|| {
+    // 事实源：与 [`execute_turn`] 同一条路径——会话存储层构造的唯一句柄（ADR-084 §2）。
+    let store = session.facts()?.ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
-    let wal = dir.join(super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal)
-        .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
     // **补落寄存的变更**（T-055）：答话轮同样持写者令牌，故它也是一个落格窗口。
     // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
-    // 复用的是**上面这个持令牌的 `store`**，不是另开一个（令牌是文件锁，见 `drain_parked`）。
-    super::message_events::drain_parked(&dir, &store);
+    super::message_events::drain_parked(&store, session.session_id());
     let snapshot = store.range(Seq::new(0));
     // turn 号口径与 [`execute_turn`] 同源（WAL 内既有 `user.message` 计数）——两处各写
     // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
@@ -1111,7 +1107,15 @@ pub(crate) async fn execute_final_reply_turn(
         abort: Some(abort),
     };
     TurnRunner
-        .run_with_tools(&store, &llm, &tok, input, Arc::new(SilentDeltas), &[], None)
+        .run_with_tools(
+            store.as_ref(),
+            &llm,
+            &tok,
+            input,
+            Arc::new(SilentDeltas),
+            &[],
+            None,
+        )
         .await
         .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
     Ok(())
@@ -1146,26 +1150,20 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
         opening_dialog,
         presentation_tree,
     } = req;
-    // 事实源：per-session v2 WAL（与运行器落格同一个文件——一份网格）。
-    let dir = session.session_dir().ok_or_else(|| {
+    // 事实源：本会话的**唯一句柄**（由会话存储层构造一次、按值分发）。
+    // 与运行器落格、收件箱补落、轮外压缩进的是同一份实例——进程内不存在
+    // 第二个各自 replay 的写者（ADR-084 §2）。
+    let store = session.facts()?.ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
-    let wal = dir.join(super::paths::V2_WAL_FILE);
-    // `Arc` 是给轮内注入闭包用的（`TurnInjector` 是 `'static` 闭包，而
-    // `WalStore` 不 `Clone`）。**只有它 clone**——`Arc` 共享同一份，注入的落格
-    // 与本函数末尾的落格进的是同一个文件，append-only 下不会打架。
-    let store = std::sync::Arc::new(
-        EventWalStore::open(&wal)
-            .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?,
-    );
-    // **补落寄存的变更**（T-055）：一轮正在跑时它持着写者令牌，此刻来的编辑 /
-    // 截断拿不到令牌 ⇒ `NotTheWriter` ⇒ 该变更被寄存在进程内（`message_events::PARKED`）。
-    // 本函数是**持令牌的那一刻**，寄存的变更在此补落。
+    // **补落寄存的变更**（T-055）：跨进程另一写者持令牌时，本进程的编辑 / 截断
+    // 会得到 `NotTheWriter` ⇒ 该变更被寄存在进程内。本函数是**持令牌的那一刻**，
+    // 寄存的变更在此补落。
     //
     // 位置在 `snapshot` 之前：本函数后面的所有判据（turn 号 / 续写锚 / 幂等键）
     // 都从 `store.range(...)` 折，补落改的就是那份切片 ⇒ 必须在读切片之前落完，
     // 否则本轮会站在一份**缺了那次编辑**的状态上做判断。
-    super::message_events::drain_parked(&dir, &store);
+    super::message_events::drain_parked(&store, session.session_id());
     let snapshot = store.range(Seq::new(0));
 
     // turn 号与续写锚点：
@@ -1176,15 +1174,15 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
     let (turn_no, resume_anchor) = match &resume {
         None => (count_user_messages(&snapshot), None),
         Some(r) => {
-            // 未收束的那一轮只在**现行窗口**里找（最近一份快照之后）：完整史里
-            // 一个被压缩取代掉的陈轮不该成为恢复锚点。轮号则读完整史——
-            // `count_user_messages` 自己从快照起折，两段相加，与口径无关。
-            let (turn, user_seq) = last_open_turn(super::store::current_window(&snapshot))
-                .ok_or_else(|| {
-                    PluginError::InternalError(
-                        "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
-                    )
-                })?;
+            // 未收束的那一轮在**完整史**里找（含归档前缀，ADR-085）：快照取代的是
+            // 消息列表，不是轮次生命周期——等待用户动作的轮在压缩落格后照样「已开
+            // 未收束」（C4 也读完整史）。按现行窗口找会把它漏成 `InternalError`
+            // （T-169：压缩恰好在它等审批期间落格）。轮号与锚点同读一份切片。
+            let (turn, user_seq) = last_open_turn(&snapshot).ok_or_else(|| {
+                PluginError::InternalError(
+                    "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
+                )
+            })?;
             (
                 turn,
                 Some(TurnResume {
@@ -1345,12 +1343,12 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
 
     // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
     //
-    // **必须在 `(turn_no, resume_anchor)` 之后**：落格 + 归档把被取代的轮次移进了归档段，
-    // 而 `last_open_turn`（续写轮靠它找未收束的那一轮）判的是**现行窗口**（最近一份快照
-    // 之后）。先算再压，否则本轮之前那一轮刚被新快照取代、掉出窗口，续写会报「找不到
-    // 未收束的轮次」。
+    // **必须在 `(turn_no, resume_anchor)` 之后**：两者的判据都要求「本轮自己的
+    // 用户格还没落」——轮号若把本轮数进去会从 `u-{n}` 跳到 `u-{n+1}`。归档移走
+    // 前缀**不影响**续写锚：`last_open_turn` 读完整史（ADR-085），等待轮被压进
+    // 归档段后仍是「已开未收束」。
     //
-    // 也必须**在运行器之前**：本轮自己的用户格是运行器落的，先归档才能让
+    // 也必须**在运行器之前**：本轮自己的用户格由运行器落，先归档才能让
     // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，
     // 现行窗口不再自洽）。
     if let Some(msgs) = consolidation {
@@ -1573,6 +1571,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 ctx,
                 sink.clone(),
                 session_dir.dir().to_path_buf(),
+                session.store_handle(),
                 abort.clone(),
                 root_id.to_string(),
                 bridge.clone(),
@@ -1720,7 +1719,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
             // 在 `ctx` 被移进分发口之前取好）。
             if let Err(why) = super::derived_facts::record_derived(
-                &wal,
+                session.session_id(),
                 &store,
                 &all,
                 turn_no,
@@ -1743,7 +1742,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
             // 记忆与学习：同一函数（`record_learning`）。
             super::derived_facts::record_learning(
-                &wal,
+                session.session_id(),
                 // `store` 是 `Arc<WalStore>`（轮内注入闭包要 `'static`），而本函数
                 // 收 `&WalStore` ⇒ 要一次显式 deref。写 `store.as_ref()` 而不是
                 // `&*store`：后者会被 clippy 判 `needless_borrow`（它建议 auto-deref，
@@ -1844,13 +1843,24 @@ fn consolidated_turns(e: &Event) -> u64 {
 
 /// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。
 ///
+/// ## 输入必须是完整史
+///
+/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[ADR-085](../../../../docs/010-adr/085.md "ADR-085")）：
+/// 压缩快照取代的是消息列表，不是轮次生命周期——等待用户动作的轮在被压缩落格归档后
+/// 仍是「已开未收束」（C4 同样读完整史）。按窗口找会把它漏成「找不到未收束的轮次」
+/// （T-169：压缩恰好在它等审批期间落格）。
+///
+/// ## 认什么收束与在哪个范围找，是两件事
+///
 /// 与 core 的 `invariants::unresolved_turns`（C4）**刻意不同口径**：这里只认
 /// final / fallback 收束格、**不认产物格**（C4 经 ADR-067 认）。原因：等待用户
 /// 动作的那一轮（进展格不是收束格，但往往已落过产物格）的收束格刻意留给恢复幕
 /// ——若这里也把「落过产物」当成已收束，恢复请求会报「找不到未收束的轮次」，
 /// 审批 / 问答恢复整条链路断掉。C4 只负责「不再报它静默中断」，恢复锚仍按
 /// final / fallback 找——两处口径的差异是 ADR-067 落地时的显式决策，不是漏改。
-/// 取**最后**一个：恢复请求总是续写最近一次停顿。
+/// 本函数与 C4 的**范围**（完整史）由 ADR-085 对齐；差异只在收束种类。
+/// 取**最后**一个：恢复请求总是续写最近一次停顿。被压缩掉的陈轮不会抢占锚点——
+/// 它若已被 final / fallback 收束就不在候选集里；仍开着的轮按开盘序排在它后面。
 fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
     let mut open: Vec<(u64, u64)> = Vec::new();
     for e in events {

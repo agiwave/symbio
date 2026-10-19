@@ -45,7 +45,7 @@
 //! 因为每一行都要求自己那一格**特有的字段**为真，而构造器只填自己那几格：
 //! `policy.classify` 要 `round == 0`，`policy.report` 要 `round > 0`，
 //! `policy.compress` 要 `auto_compress`，
-//! `policy.recall` 要 `has_session_dir`。两个决策点的状态因此不会互相误命中。
+//! `policy.recall` 要 `has_facts`。两个决策点的状态因此不会互相误命中。
 //!
 //! 也因此 **`prio` 目前仍不参与裁决**——没有两行会在同一格同时命中。它仍然必须
 //! 存在并被检查：真正同点竞争的只有 `policy.recall` 内部那三件事（记忆 / 技能 /
@@ -123,7 +123,7 @@ impl Capsule {
 /// | `reports` | 本轮已汇报次数（配额） |
 /// | `progress` | 配置快照（`SessionConfig` 的四个旋钮） |
 /// | `auto_compress` | 请求快照（`TurnRequest::auto_compress`） |
-/// | `has_session_dir` | `session.session_dir().is_some()` |
+/// | `has_facts` | 存储层的能力布尔（`SessionStore::is_persistent`，临时会话为假） |
 /// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `turn_exec`） |
 /// | `has_match` | `skill_events::take_match` 的结论（同一次查询，判它用的就是它） |
 ///
@@ -138,7 +138,7 @@ pub(crate) struct LoopState {
     pub(crate) reports: u32,
     pub(crate) progress: ProgressPolicy,
     pub(crate) auto_compress: bool,
-    pub(crate) has_session_dir: bool,
+    pub(crate) has_facts: bool,
     pub(crate) resume_allowed: bool,
     pub(crate) has_match: bool,
 }
@@ -187,10 +187,10 @@ impl LoopState {
     }
 
     /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
-    pub(crate) fn turn_prepare(round: usize, has_session_dir: bool) -> Self {
+    pub(crate) fn turn_prepare(round: usize, has_facts: bool) -> Self {
         Self {
             round,
-            has_session_dir,
+            has_facts,
             ..Self::blank()
         }
     }
@@ -217,7 +217,7 @@ impl LoopState {
             reports: 0,
             progress: ProgressPolicy::disabled(),
             auto_compress: false,
-            has_session_dir: false,
+            has_facts: false,
             resume_allowed: false,
             has_match: false,
         }
@@ -444,9 +444,9 @@ fn policy_compress(state: &LoopState) -> Option<Capsule> {
 ///
 /// - `round == 0`：同一轮内记忆不漂移、事实源只扫一遍，后续工具轮复用
 ///   同一份视图（与 classify / history 同一条「每轮一次」口径）；
-/// - `has_session_dir`：临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
+/// - `has_facts`：临时会话没有事实源——没有事实源就没有记忆，不读不写。
 fn policy_recall(state: &LoopState) -> Option<Capsule> {
-    (state.round == 0 && state.has_session_dir).then_some(Capsule::RECALL)
+    (state.round == 0 && state.has_facts).then_some(Capsule::RECALL)
 }
 
 /// 反射档的判据（步骤 3 ④）。两关缺一不可：

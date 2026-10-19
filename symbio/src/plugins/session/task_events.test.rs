@@ -154,7 +154,7 @@ fn readyset_lists_dependency_closed_tasks_only() {
     let ids: Vec<&str> = ready.iter().map(|t| t.task_id.as_str()).collect();
     assert_eq!(ids, vec!["t1", "t3"], "t2 依赖 t1（未终态）⇒ 不就绪");
 
-    let section = prompt_section(&dir).expect("有就绪任务 ⇒ 有调度段");
+    let section = prompt_section(&snapshot).expect("有就绪任务 ⇒ 有调度段");
     assert!(section.contains("t1") && section.contains("t3"));
     assert!(
         !section.contains("t2"),
@@ -368,8 +368,7 @@ fn exceeding_the_rework_bound_is_flagged() {
 /// 而不是发一个空占位给模型。
 #[test]
 fn prompt_section_is_absent_when_nothing_is_ready() {
-    let empty = tmp_dir("no-wal");
-    assert!(prompt_section(&empty).is_none(), "没有事实源 ⇒ 无段落");
+    assert!(prompt_section(&[]).is_none(), "没有事实源 ⇒ 无段落");
 
     // 只有已终态的任务 ⇒ 就绪集空 ⇒ 同样无段落。
     let done = tmp_dir("all-done");
@@ -378,8 +377,9 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
         0,
         &[decl(vec![item("t1", "甲", &[], TaskStatus::Completed)])],
     );
+    let store = EventWalStore::open_readonly(wal_of(&done)).expect("WAL");
     assert!(
-        prompt_section(&done).is_none(),
+        prompt_section(&store.range(Seq::new(0))).is_none(),
         "全终态 ⇒ 无候选 ⇒ 不给模型一段空调度"
     );
 }
@@ -431,7 +431,8 @@ fn a_ready_task_survives_the_prefix_being_archived() {
     );
     drop(store);
 
-    let section = prompt_section(&dir).expect("归档不缩小就绪集 ⇒ 仍有调度段");
+    let store = EventWalStore::open_readonly(wal_of(&dir)).expect("WAL");
+    let section = prompt_section(&store.range(Seq::new(0))).expect("归档不缩小就绪集 ⇒ 仍有调度段");
     assert!(
         section.contains("t1"),
         "压缩前开的那条任务必须在候选集里：{section}"

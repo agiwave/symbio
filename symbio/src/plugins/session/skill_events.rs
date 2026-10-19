@@ -31,16 +31,14 @@
 //!   不是结构：`route` 的返回形状与执行侧的装配都不用动。
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
-use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
-    calibration, Budget, Event, RecallView, Seq, SkillCompiler, SkillRoute, SkillRouter, Store,
+    calibration, Budget, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
     EVENT_MEMORY_ENCODED,
 };
 
-use super::paths::V2_WAL_FILE;
+use crate::plugins::session::store::EventWalStore;
 
 /// 技能的认知内容标签（`memory.encoded` 载荷里的 `tag`）。
 ///
@@ -194,27 +192,25 @@ pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option
 /// 同时返回判成快路的**可用集**（[`SkillRouting::hits`]），供执行侧装配反射档。
 ///
 /// 三条边界：
-/// - **快判**：本轮没召回任何技能 ⇒ 一行 I/O 都不发生（编译关掉时恒走这里，
-///   读侧因此不是每轮的固定开销）；
+/// - **快判**：本轮没召回任何技能 ⇒ 直接返回，连投影都不跑（编译关掉时恒走
+///   这里，读侧因此不是每轮的固定开销）；
 /// - **只认本会话编译的技能**：跨会话技能在本会话没有它的溯源轨迹与校准账，
 ///   判不了 ⇒ 原样留在视图里当背景事实，不假装判过；
 /// - **巩固产物判不了**（合并后的条目有新 seq、不再带 `skill_id`）⇒ 同样原样保留。
-pub(crate) fn route(session_dir: &Path, view: &mut RecallView) -> SkillRouting {
+///
+/// `snapshot` 是本会话事实的**值**（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：
+/// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
+pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
     if !view.entries.iter().any(|e| e.tag == SKILL_TAG) {
         return SkillRouting::default();
     }
-    let path = session_dir.join(V2_WAL_FILE);
-    // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。
-    let Ok(store) = EventWalStore::open_readonly(&path) else {
-        return SkillRouting::default();
-    };
-    let events = store.range(Seq::new(0));
+    let events = snapshot;
 
     // seq → (skill_id, trigger)：技能事件的 seq 是 `RecallEntry` 能带出来的唯一东西
     // （视图只有 content / tag / ts），而这两项只躺在事件载荷里。两样一起取：
     // 它们是**同一条事实**的两个字段，分两趟扫迟早有一趟忘了补。
     let mut skill_by_seq: BTreeMap<u64, (String, String)> = BTreeMap::new();
-    for e in &events {
+    for e in events {
         if e.kind != EVENT_MEMORY_ENCODED
             || e.payload.get("tag").and_then(|v| v.as_str()) != Some(SKILL_TAG)
         {
@@ -231,7 +227,7 @@ pub(crate) fn route(session_dir: &Path, view: &mut RecallView) -> SkillRouting {
     }
 
     let cal = calibration()
-        .apply(&events, i64::MAX, Budget::generous())
+        .apply(events, i64::MAX, Budget::generous())
         .value;
     let router = SkillRouter;
     let mut routing = SkillRouting::default();

@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::plugins::session::store::EventWalStore;
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store};
+use crate::symbio_core::{Event, PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）：
 /// 本会话主体是否已被收回 `assign.work`。
@@ -32,11 +31,11 @@ pub struct EliminationInputs {
 
 impl EliminationInputs {
     /// 批首读一次判据：主体派生 + 部署级覆盖层折叠 + 撤销判定。
-    pub fn of(session_dir: &std::path::Path, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
+    pub fn of(fleet: &[Vec<Event>], ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let principal = crate::symbio_core::authz::principal_of(
             ctx.get(crate::symbio_core::AGENT_ID).as_deref(),
         );
-        let delegation_revoked = revoked_overlay(session_dir)
+        let delegation_revoked = revoked_overlay(fleet)
             .is_revoked(&principal, crate::symbio_core::authz::CAP_ASSIGN_WORK);
         Self {
             principal,
@@ -60,20 +59,9 @@ impl EliminationInputs {
 /// 父会话的闸扫不到它 ⇒ 「换个**子会话**就能绕开淘汰」——与这道闸要消灭的
 /// 「换个会话」同形。遍历收窄到 `paths::session_wals_deep`（存在性判据：
 /// 有 WAL 文件就是事实源，`tool_archives` 等子树天然被过滤）。
-fn revoked_overlay(session_dir: &std::path::Path) -> crate::symbio_core::GrantsOverlay {
-    let mut events = Vec::new();
-    for wal in super::super::super::paths::session_wals_deep(session_dir) {
-        let Ok(store) = EventWalStore::open_readonly(&wal) else {
-            crate::plugin_warn!(
-                "session",
-                "[Tool] 淘汰闸跳过打不开的 WAL：{}",
-                wal.display()
-            );
-            continue;
-        };
-        // 完整史：累计口径（见结构文档——归档段里的裁决不许被静默漏掉）。
-        events.extend(store.range(Seq::new(0)));
-    }
+fn revoked_overlay(fleet: &[Vec<Event>]) -> crate::symbio_core::GrantsOverlay {
+    // 完整史：累计口径（见结构文档——归档段里的裁决不许被静默漏掉）。
+    let events: Vec<Event> = fleet.iter().flatten().cloned().collect();
     crate::symbio_core::GrantsOverlay::fold(
         crate::symbio_core::EliminationDecider::verdict_grants_changes(&events),
     )

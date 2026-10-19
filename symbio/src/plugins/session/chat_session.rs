@@ -200,9 +200,20 @@ impl PersistentChatSession {
         self.store.save_session(session).await
     }
 
-    /// 会话目录（v2 事实源的 WAL 安放处）；临时会话 ⇒ `None`。
-    pub(crate) fn session_dir(&self) -> Option<std::path::PathBuf> {
-        self.store.session_dir(&self.session_id)
+    /// 本会话的**事实源句柄**（ADR-084 §1-B）：会话内写方/读方拿它落格、取切片，
+    /// 不再自己拼目录 `open`。临时会话 ⇒ `Ok(None)`；事实源打不开 ⇒ `Err`（真失败）。
+    pub(in crate::plugins::session) fn facts(
+        &self,
+    ) -> Result<Option<Arc<super::store::EventWalStore>>, PluginError> {
+        self.store
+            .facts(&self.session_id)
+            .map_err(PluginError::InternalError)
+    }
+
+    /// 存储句柄（ADR-084 §2 的引擎侧端口）：只许 session 插件内的引擎面持有，
+    /// 能力面不得见到 `SessionStore` 类型。
+    pub(in crate::plugins::session) fn store_handle(&self) -> Arc<SessionStore> {
+        self.store.clone()
     }
 
     pub(crate) fn session_id(&self) -> &str {

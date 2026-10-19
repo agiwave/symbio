@@ -40,6 +40,7 @@ use crate::symbio_core::{
 };
 
 use super::config::PresentationTree;
+use super::store::SessionStore;
 use super::tools::process_tool_calls_async;
 use super::transcript::llm_emit_state;
 use super::turn_exec::UiBridge;
@@ -76,6 +77,8 @@ pub(crate) struct SessionDispatchPort {
     sink: ExecEventSink,
     /// 本插件目录（工具结果存档落在这里）。
     session_dir: PathBuf,
+    /// 会话存储句柄：闸门判据按值取自它（ADR-084 §2，能力面不见存储实现）。
+    store: Arc<SessionStore>,
     /// 本轮中止信号：批内逐工具检查，未执行的批尾必须定格。
     abort: ExecAbortSignal,
     /// 本轮 Turn 根节点 id（助手轮消息的父节点）。
@@ -97,6 +100,7 @@ impl SessionDispatchPort {
         ctx: Arc<dyn PluginInvokeRequest>,
         sink: ExecEventSink,
         session_dir: PathBuf,
+        store: Arc<SessionStore>,
         abort: ExecAbortSignal,
         root_id: String,
         bridge: Arc<UiBridge>,
@@ -107,6 +111,7 @@ impl SessionDispatchPort {
             ctx,
             sink,
             session_dir,
+            store,
             abort,
             root_id,
             bridge,
@@ -204,6 +209,7 @@ impl DispatchPort for SessionDispatchPort {
             self.ctx.clone(),
             &call_nodes,
             &self.session_dir,
+            &self.store,
             // 代际立约出参（批⑧）：`agent_run` 的承诺记录。
             &mut delegations,
             // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。

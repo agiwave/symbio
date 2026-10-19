@@ -4,8 +4,14 @@
 //! **按主体精确命中**（别人的淘汰不殃及本主体）。
 
 use super::EliminationInputs;
-use crate::plugins::session::store::EventWalStore;
+use crate::plugins::session::store::{EventWalStore, SessionStore};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, Store};
+
+/// 部署级全量史：由存储层深遍交回（生产同形：`store.deep_snapshots()`）。
+/// 直接喂根路径的写法已随 ADR-084 §1-A 退场——判据只吃值。
+fn fleet(root: &std::path::Path) -> Vec<Vec<crate::symbio_core::Event>> {
+    SessionStore::new(root.to_path_buf()).deep_snapshots()
+}
 
 /// 带 `AGENT_ID` 的请求上下文：闸门按它派生主体（同 `BreakerInputs` 的取值口径）。
 fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn PluginInvokeRequest> {
@@ -49,7 +55,7 @@ fn a_verdict_in_another_session_revokes_delegation_here() {
     std::fs::create_dir_all(crate::plugins::session::paths::session_dir(&root, "sess-b")).ok();
 
     let ctx = agent_ctx("main");
-    let inputs = EliminationInputs::of(&root, &ctx);
+    let inputs = EliminationInputs::of(&fleet(&root), &ctx);
     assert_eq!(inputs.principal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert!(
         inputs.delegation_revoked,
@@ -63,7 +69,7 @@ fn a_verdict_in_another_session_revokes_delegation_here() {
 #[test]
 fn no_verdict_means_no_revocation() {
     let root = tmp_root("empty");
-    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    let inputs = EliminationInputs::of(&fleet(&root), &agent_ctx("main"));
     assert!(!inputs.delegation_revoked);
     std::fs::remove_dir_all(&root).ok();
 }
@@ -81,7 +87,7 @@ fn restoration_flips_the_gate_back() {
         "sess-a",
         d.restoration_event("session/main", "申诉受理：上游延迟有凭证", 9),
     );
-    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    let inputs = EliminationInputs::of(&fleet(&root), &agent_ctx("main"));
     assert!(
         !inputs.delegation_revoked,
         "恢复之后重新可委派（last-wins 折叠）"
@@ -98,10 +104,10 @@ fn another_principals_verdict_does_not_bite() {
         "sess-a",
         crate::symbio_core::EliminationDecider.elimination_event("session/ghost", -1, 7),
     );
-    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    let inputs = EliminationInputs::of(&fleet(&root), &agent_ctx("main"));
     assert!(!inputs.delegation_revoked);
     // 而被淘汰的那一个自己来：拒。
-    let ghost = EliminationInputs::of(&root, &agent_ctx("ghost"));
+    let ghost = EliminationInputs::of(&fleet(&root), &agent_ctx("ghost"));
     assert!(ghost.delegation_revoked, "agent:ghost 自己被收回");
     std::fs::remove_dir_all(&root).ok();
 }
@@ -111,7 +117,7 @@ fn another_principals_verdict_does_not_bite() {
 fn a_missing_storage_root_is_an_empty_overlay() {
     let root = std::env::temp_dir().join(format!("symbio-elim-nope-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    let inputs = EliminationInputs::of(&fleet(&root), &agent_ctx("main"));
     assert!(!inputs.delegation_revoked);
 }
 
@@ -153,7 +159,7 @@ fn a_verdict_in_a_nested_sub_session_revokes_delegation_here() {
         ),
     );
 
-    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    let inputs = EliminationInputs::of(&fleet(&root), &agent_ctx("main"));
     assert!(
         inputs.delegation_revoked,
         "子会话 WAL 里的裁决必须在本会话生效（部署级 = 全会话，含嵌套）"

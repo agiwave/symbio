@@ -1,6 +1,6 @@
 //! 技能编译与路由验收（S9 步 22，[04 §3.1 批⑪](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
 //! **编译 → 观测 → 校准 → 回退**的每一环都要看得见，且每条口径各配一个反向用例
-//! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 一行 I/O 都不走）。
+//! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
 use super::{compile, route, take_match, SkillLlmHit, SKILL_TAG};
 use crate::plugins::session::store::EventWalStore;
@@ -224,7 +224,7 @@ fn a_new_skill_stays_in_the_prompt_and_is_observed_as_a_fast_path() {
     );
     assert_eq!(view.entries[0].tag, SKILL_TAG);
 
-    let routing = route(&dir, &mut view);
+    let routing = route(&store.range(Seq::new(0)), &mut view);
     assert_eq!(
         routing.obs,
         vec![(skill_id.clone(), false)],
@@ -268,7 +268,7 @@ fn a_fallen_back_skill_is_dropped_from_this_turn() {
     let mut view = view_of(&store);
     assert_eq!(view.entries.len(), 1, "技能本来在视图里");
 
-    let routing = route(&dir, &mut view);
+    let routing = route(&store.range(Seq::new(0)), &mut view);
     assert_eq!(routing.obs, vec![(skill_id, true)], "低置信 ⇒ 回退");
     assert!(
         view.entries.is_empty(),
@@ -339,7 +339,7 @@ fn an_earlier_fallback_still_demotes_the_skill_after_archival() {
     let store = EventWalStore::open_readonly(wal_of(&dir)).expect("WAL");
     let mut view = view_of(&store);
     assert_eq!(view.entries.len(), 1, "压缩前编译的技能仍召回得到");
-    let routing = route(&dir, &mut view);
+    let routing = route(&store.range(Seq::new(0)), &mut view);
     assert_eq!(
         routing.obs,
         vec![(skill_id, true)],
@@ -348,7 +348,7 @@ fn an_earlier_fallback_still_demotes_the_skill_after_archival() {
     assert!(view.entries.is_empty(), "判过回退 ⇒ 摘出本轮视图");
 }
 
-/// 反向（读侧的平凡值）：本轮没召回技能 ⇒ 直接返回，连不存在的目录都不去开
+/// 反向（读侧的平凡值）：本轮没召回技能 ⇒ 直接返回，不跑任何投影
 /// ——默认关掉编译时读侧恒走这一支，不成为每轮的固定开销。
 #[test]
 fn without_any_skill_the_reader_touches_nothing() {
@@ -358,12 +358,11 @@ fn without_any_skill_the_reader_touches_nothing() {
     let mut view = view_of(&store);
     assert!(view.entries.is_empty(), "没有技能可召回");
 
-    let routing = route(&dir, &mut view);
+    let routing = route(&store.range(Seq::new(0)), &mut view);
     assert!(routing.obs.is_empty() && routing.hits.is_empty());
     assert!(view.entries.is_empty());
-    // 目录里根本没有 WAL 的情形同样不炸（读方不创建文件）。
-    let missing = tmp_dir("missing-wal");
-    let routing = route(&missing, &mut view);
+    // 空快照同样不炸（读方不取事实、不创建文件）。
+    let routing = route(&[], &mut view);
     assert!(routing.obs.is_empty() && routing.hits.is_empty());
 }
 
@@ -419,7 +418,7 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
 /// （`agent:main`）时这条链**看起来**是通的，只有走生产读方才看得见。
 #[test]
 fn the_production_recall_view_sees_the_compiled_skill() {
-    // `recall_view` 扫 `<根>/*​/v2-events.wal`：根自己造，不借全局临时目录
+    // 事实源只由本用例独占：根自己造，不借全局临时目录
     //（否则会扫进并行跑的其它用例的会话）。
     let root = tempfile::tempdir().expect("临时根");
     let session = root.path().join("s-1");
@@ -441,8 +440,20 @@ fn the_production_recall_view_sees_the_compiled_skill() {
         .expect("首次必须产出技能");
     }
 
-    let mut view = super::super::memory_events::recall_view(&session, "", "session/main")
-        .expect("技能是一条记忆 ⇒ 视图非空");
+    // 存储层交值：本会话自己的快照（`own = true`）。
+    let facts = {
+        let store = EventWalStore::open_readonly(wal_of(&session)).expect("WAL");
+        store.range(Seq::new(0))
+    };
+    let mut view = super::super::memory_events::recall_view(
+        vec![crate::plugins::session::store::FleetSnapshot {
+            own: true,
+            events: facts.clone(),
+        }],
+        "",
+        "session/main",
+    )
+    .expect("技能是一条记忆 ⇒ 视图非空");
     assert!(
         view.entries.iter().any(|e| e.tag == SKILL_TAG),
         "生产读方必须召回技能：{:?}",
@@ -450,7 +461,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
     );
 
     // 路由半边真的判得动：生产视图 → 观测（零使用 ⇒ 快路、不摘条目）。
-    let routing = route(&session, &mut view);
+    let routing = route(&facts, &mut view);
     assert_eq!(
         routing.obs.len(),
         1,

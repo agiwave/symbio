@@ -40,7 +40,7 @@
 //! 这曾是一条**静默的数据缺陷**：主读切到 WAL 之后，它会让编辑「偶发不生效」
 //! 且无人报错。修法（T-055）与 b2 的压缩寄存同手法——**变更寄存，由持令牌的一方落格**：
 //!
-//! - 拿不到令牌时，把这条变更推进 [`PARKED`]（按会话目录分桶的进程内寄存区）；
+//! - 拿不到令牌时，把这条变更推进 [`PARKED`]（按会话 id 分桶的进程内寄存区）；
 //! - 持令牌的一方（`turn_exec::execute_turn` 的执行口）在下一次落格时调
 //!   [`drain_parked`]，把寄存的变更补落进事实源。
 //!
@@ -52,7 +52,6 @@
 
 use crate::plugins::session::store::EventWalStore;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use serde_json::Value;
@@ -62,8 +61,6 @@ use crate::symbio_core::{
     AppendError, Entity, Event, Seq, Store, Verb, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
     EVENT_MESSAGE_REMOVED,
 };
-
-use super::paths::V2_WAL_FILE;
 
 /// 一条**待寄存**的变更事实（拿不到写者令牌时暂存，由持令牌方补落）。
 ///
@@ -79,7 +76,7 @@ struct ParkedChange {
     payload: Value,
 }
 
-/// 进程内**寄存区**：会话目录 → 未落格的变更（FIFO）。
+/// 进程内**寄存区**：会话 id → 未落格的变更（FIFO）。
 ///
 /// ## 为什么是进程内静态而不是磁盘
 ///
@@ -88,7 +85,7 @@ struct ParkedChange {
 /// 锁自动释放、下一个进程才拿得到。此时寄存区在旧进程的内存里、随它一起消失，
 /// 这正是「进程内的东西不该假装持久」。真正需要跨崩溃保全的是**已落格**的事实，
 /// 而那正是 WAL 的职责。
-static PARKED: LazyLock<Mutex<HashMap<PathBuf, Vec<ParkedChange>>>> =
+static PARKED: LazyLock<Mutex<HashMap<String, Vec<ParkedChange>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// 寄存器上界（每会话）。超出即丢**最旧**的一条并告警——见 [`park`] 的理由。
@@ -100,12 +97,12 @@ static PARKED: LazyLock<Mutex<HashMap<PathBuf, Vec<ParkedChange>>>> =
 const PARK_CAP: usize = 256;
 
 /// 把一条变更寄存下来（拿不到令牌的路径）。
-fn park(session_dir: &Path, change: ParkedChange) {
+fn park(session_id: &str, change: ParkedChange) {
     let mut table = match PARKED.lock() {
         Ok(t) => t,
         Err(p) => p.into_inner(), // 锁中毒：寄存器是纯内存暂存，按无中毒处理（与 store 层同约定）
     };
-    let bucket = table.entry(session_dir.to_path_buf()).or_default();
+    let bucket = table.entry(session_id.to_string()).or_default();
     if bucket.len() >= PARK_CAP {
         // 丢最旧的：寄存区是**尽力而为**的暂存，不是事实源。堆满说明持令牌方
         // 长期没落格——那是比溢出更该被看见的缺陷，故告警而不是静默截断。
@@ -122,12 +119,12 @@ fn park(session_dir: &Path, change: ParkedChange) {
 }
 
 /// 取出并清空某会话的寄存变更（持令牌方在落格前调用）。
-fn take_parked(session_dir: &Path) -> Vec<ParkedChange> {
+fn take_parked(session_id: &str) -> Vec<ParkedChange> {
     let mut table = match PARKED.lock() {
         Ok(t) => t,
         Err(p) => p.into_inner(),
     };
-    table.remove(session_dir).unwrap_or_default()
+    table.remove(session_id).unwrap_or_default()
 }
 
 /// **把寄存的变更补落进事实源**——持写者令牌的一方（执行口）调用。
@@ -158,16 +155,15 @@ fn take_parked(session_dir: &Path) -> Vec<ParkedChange> {
 /// 补落发生在原编辑之后的某个执行口，此时切片已经长出了这一轮的事件——用编辑
 /// 那一刻的锚会把事实指到一个**过期状态**上（I2 要的是「这次变更站在哪份状态上」，
 /// 而那是**落格时刻**的状态）。
-pub fn drain_parked(session_dir: &Path, store: &EventWalStore) {
-    let parked = take_parked(session_dir);
+pub fn drain_parked(store: &EventWalStore, session_id: &str) {
+    let parked = take_parked(session_id);
     if parked.is_empty() {
         return;
     }
-    let wal = wal_path(session_dir);
     for change in parked {
         match append_into(
             store,
-            &wal,
+            session_id,
             change.kind,
             change.verb,
             change.id_prefix,
@@ -176,7 +172,7 @@ pub fn drain_parked(session_dir: &Path, store: &EventWalStore) {
         ) {
             Ok(()) => {}
             // 又拿不到令牌（极端并发）⇒ 原样放回，等下一个窗口。
-            Err(TryAppendError::NotWriter) => park(session_dir, change),
+            Err(TryAppendError::NotWriter) => park(session_id, change),
             // 无锚 / 真失败：寄存也救不了——补落没有第二次机会（调用方早已把
             // 回执发给了用户），所以这里**出声**而不是静默。
             Err(TryAppendError::NoAnchor) => {}
@@ -201,7 +197,7 @@ const NODE_ID_KEYS: &[&str] = &["id", "text_id", "reasoning_id", "tool_call_id",
 ///
 /// `msg` 是**补丁应用后**的整条消息（不是补丁本身）——重建与转写都按 id 整条替换，
 /// 拿到整条就不必再猜「这次改的是哪几个字段」（理由见 `EVENT_MESSAGE_EDITED`）。
-pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) -> AppendOutcome {
+pub(crate) fn edited(store: &EventWalStore, session_id: &str, msg: &ChatNode) -> AppendOutcome {
     let payload = match serde_json::to_value(msg) {
         Ok(v) => v,
         // 序列化失败是**本模块自己的**失败（与事实源无关）：调用方同样不能当它没发生。
@@ -210,7 +206,8 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) -> AppendOutcome {
         }
     };
     append(
-        session_dir,
+        store,
+        session_id,
         EVENT_MESSAGE_EDITED,
         Verb::Asserted,
         "m-edit",
@@ -226,7 +223,7 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) -> AppendOutcome {
 /// 否则同一条节点有两个 owner（ADR-049 理由 1）。
 ///
 /// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
-pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) -> AppendOutcome {
+pub(crate) fn added(store: &EventWalStore, session_id: &str, msgs: &[ChatNode]) -> AppendOutcome {
     if msgs.is_empty() {
         return AppendOutcome::Nothing;
     }
@@ -237,7 +234,8 @@ pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) -> AppendOutcome {
         }
     };
     append(
-        session_dir,
+        store,
+        session_id,
         EVENT_MESSAGE_ADDED,
         Verb::Opened,
         "m-add",
@@ -252,12 +250,13 @@ pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) -> AppendOutcome {
 /// `ids` 是**被删节点 id 的完整列表**（与 `truncate_messages` 回执里那份同源）。
 /// 空列表不落格：「什么都没删」不该在事实源上留下痕迹——与
 /// `truncate_messages` 不发任何变更帧同一条判据。
-pub(crate) fn removed(session_dir: &Path, ids: &[String]) -> AppendOutcome {
+pub(crate) fn removed(store: &EventWalStore, session_id: &str, ids: &[String]) -> AppendOutcome {
     if ids.is_empty() {
         return AppendOutcome::Nothing;
     }
     append(
-        session_dir,
+        store,
+        session_id,
         EVENT_MESSAGE_REMOVED,
         Verb::Closed,
         "m-del",
@@ -302,14 +301,23 @@ enum TryAppendError {
 ///
 /// `target` = 本次变更作用在哪个节点上（用于解溯源锚）；`id_prefix` 是幂等键前缀。
 fn append(
-    session_dir: &Path,
+    store: &EventWalStore,
+    session_id: &str,
     kind: &'static str,
     verb: Verb,
     id_prefix: &'static str,
     target: &str,
     payload: Value,
 ) -> AppendOutcome {
-    match try_append(session_dir, kind, verb, id_prefix, target, payload.clone()) {
+    match append_into(
+        store,
+        session_id,
+        kind,
+        verb,
+        id_prefix,
+        target,
+        payload.clone(),
+    ) {
         Ok(()) => AppendOutcome::Landed,
         // **寄存，而不是出声丢弃**（T-055）：一轮正在跑时它持着写者令牌，此刻来的
         // 编辑拿不到 ⇒ 静默少一条事实。切源之后那就是「编辑偶发不生效」且无人报错。
@@ -318,7 +326,7 @@ fn append(
         // 载荷**原样寄存**：锚与幂等键都在补落那一刻重算（见 `drain_parked`）。
         Err(TryAppendError::NotWriter) => {
             park(
-                session_dir,
+                session_id,
                 ParkedChange {
                     kind,
                     verb,
@@ -391,44 +399,14 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     (actor, ts)
 }
 
-/// [`append`] 的实现：打开事实源、解锚、落格——**不寄存**（寄存留给调用方决定）。
+/// 用**给定的**事实源实例落一条变更事实。
 ///
-/// 抽出来是为了让 [`drain_parked`] 能复用**同一份**落格逻辑（一种变更只有一个
-/// 落格实现，寄存与否只是它外面的分支）。
-fn try_append(
-    session_dir: &Path,
-    kind: &str,
-    verb: Verb,
-    id_prefix: &str,
-    target: &str,
-    payload: Value,
-) -> Result<(), TryAppendError> {
-    let wal = session_dir.join(V2_WAL_FILE);
-    let store = match EventWalStore::open(&wal) {
-        Ok(s) => s,
-        Err(e) => {
-            let why = format!("事实源打不开（{}）：{e}", wal.display());
-            crate::plugin_warn!("session", "[message] 变更事实未入格：{}", why);
-            return Err(TryAppendError::Failed(why));
-        }
-    };
-    append_into(&store, &wal, kind, verb, id_prefix, target, payload)
-}
-
-/// 事实源文件路径（仅用于告警文案——`WalStore` 不暴露 path）。
-fn wal_path(session_dir: &Path) -> PathBuf {
-    session_dir.join(V2_WAL_FILE)
-}
-
-/// 用**给定的**事实源实例落一条变更事实（不自己 `open`）。
-///
-/// 拆出来是为了让 [`drain_parked`] 复用持令牌的那个实例——写者令牌是文件锁，
-/// 自己 `open` 出来的实例根本不是写者（见 `drain_parked` 的文档）。
-///
-/// `wal` 只用于告警文案（`WalStore` 不暴露 path）；调用方从 `session_dir` 拼。
+/// [`append`]（就地落格）与 [`drain_parked`]（补落）共用这一份实现——一种变更
+/// 只有一个落格实现，寄存与否只是它外面的分支。`store` 由会话存储层按会话构造
+/// 一次（ADR-084 §2），本模块不再自己拼路径 `open`。
 fn append_into(
     store: &EventWalStore,
-    wal: &Path,
+    session_id: &str,
     kind: &str,
     verb: Verb,
     id_prefix: &str,
@@ -452,8 +430,7 @@ fn append_into(
         // 消息」本就无锚可指，与「令牌被占」是两回事，故仍按 Discarded 出声。
         crate::plugin_warn!(
             "session",
-            "[message] 变更事实未入格（{}）：切片内没有可用的溯源锚（{kind} {target}）",
-            wal.display()
+            "[message] 变更事实未入格（会话 {session_id}）：切片内没有可用的溯源锚（{kind} {target}）"
         );
         return Err(TryAppendError::NoAnchor);
     };
@@ -501,8 +478,7 @@ fn append_into(
         // 就地落格发生在写缓存**之前**、补落发生在**之后**，同一句话对两条路径
         // 不可能都成立（T-164 修掉的那句假话）。
         Err(e) => Err(TryAppendError::Failed(format!(
-            "追加被拒（{e:?}）：{kind} {target}（{}）",
-            wal.display()
+            "追加被拒（{e:?}）：{kind} {target}（会话 {session_id}）"
         ))),
     }
 }

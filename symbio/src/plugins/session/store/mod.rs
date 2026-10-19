@@ -72,7 +72,7 @@
 
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::plugins::session::paths;
-use crate::symbio_core::PluginError;
+use crate::symbio_core::{Event, PluginError, Seq, Store};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -110,6 +110,12 @@ pub struct SessionStore {
     mem: RwLock<BTreeMap<String, Session>>,
     /// 每会话一把写入锁（见 [`lock_writes`](Self::lock_writes)）
     write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// 每会话**一个**事实源句柄（见 [`facts`](Self::facts)）。
+    ///
+    /// 这是进程内唯一持有写者令牌的实例：同一会话的第二个 `WalStore::open`
+    /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
+    /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
+    facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
 }
 
 impl SessionStore {
@@ -121,6 +127,7 @@ impl SessionStore {
             base_dir: Some(base_dir),
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
+            facts: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -133,6 +140,7 @@ impl SessionStore {
             base_dir: None,
             mem: RwLock::new(BTreeMap::new()),
             write_locks: Mutex::new(HashMap::new()),
+            facts: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -147,7 +155,7 @@ impl SessionStore {
     /// 留一个空 `Arc` 的成本可忽略。
     pub async fn lock_writes(&self, session_id: &str) -> OwnedMutexGuard<()> {
         let lock = {
-            let mut map = self.write_locks.lock().await;
+            let mut map = self.write_locks.lock().await; // grep-audit-allow S-002: write_locks 是 tokio::sync::Mutex（异步锁，取锁即 await）；S-002 按文件命中 std::sync::Mutex（facts 表）后误扫本行
             map.entry(session_id.to_string())
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
@@ -158,6 +166,14 @@ impl SessionStore {
     /// 落盘根；`None` = 本实例不落盘
     fn disk(&self) -> Option<&Path> {
         self.base_dir.as_deref()
+    }
+
+    /// 本存储是否落在磁盘上（临时会话没有根目录）。
+    ///
+    /// 计划表的「有落盘目录」判据用这个**能力布尔**：调用方要知道的是
+    /// 「有没有事实可读」，不是目录形状（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）。
+    pub(in crate::plugins::session) fn is_persistent(&self) -> bool {
+        self.disk().is_some()
     }
 
     // ==================== 读 ====================
@@ -246,6 +262,10 @@ impl SessionStore {
     pub async fn delete_session(&self, session_id: &str) -> Result<(), PluginError> {
         let Some(base) = self.disk() else {
             self.mem.write().await.remove(session_id);
+            self.facts
+                .lock()
+                .expect("会话事实源表锁中毒")
+                .remove(session_id);
             return Ok(());
         };
 
@@ -254,6 +274,10 @@ impl SessionStore {
             tokio::fs::remove_dir_all(&dir)
                 .await
                 .map_err(|e| PluginError::InternalError(format!("删除会话目录失败: {e}")))?;
+            self.facts
+                .lock()
+                .expect("会话事实源表锁中毒")
+                .remove(session_id);
             return Ok(());
         }
         // 顶层未命中：嵌套删除（子会话级联于父目录之外的单点删除）
@@ -261,6 +285,10 @@ impl SessionStore {
             tokio::fs::remove_dir_all(&nested)
                 .await
                 .map_err(|e| PluginError::InternalError(format!("删除会话目录失败: {e}")))?;
+            self.facts
+                .lock()
+                .expect("会话事实源表锁中毒")
+                .remove(session_id);
         }
         Ok(())
     }
@@ -375,7 +403,177 @@ impl SessionStore {
         }
         find_nested_dir(base, session_id)
     }
+
+    // ==================== 事实源（唯一端口） ====================
+
+    /// 该会话的**唯一事实源句柄**（持久会话）；临时会话 / 目录不存在 ⇒ `None`。
+    ///
+    /// 进程内按会话构造一次并缓存：所有引擎写方共享同一实例，`head` 只有一份、
+    /// 内部写锁也只有一把。第二个 `WalStore::open` 不存在——这正是
+    /// [plan/14 §2.2 推论 3](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+    /// 的「一写者」。跨进程写者令牌仍由 `WalStore` 自己守（旁挂锁文件）。
+    ///
+    /// **只发给引擎写点**：能力面拿到的是事实的值（读）或待落的值（写），
+    /// 不是这个句柄（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084") §1）。
+    ///
+    /// `Ok(None)` = 没有事实源（临时会话 / 目录不存在）；`Err` = 目录在、事实源
+    /// **打不开**——后者是 T-164 的真失败，调用方不得当成「没有事实源」静默跳过。
+    pub(in crate::plugins::session) fn facts(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<EventWalStore>>, String> {
+        let mut cache = self.facts.lock().expect("会话事实源表锁中毒");
+        if let Some(store) = cache.get(session_id) {
+            return Ok(Some(store.clone()));
+        }
+        let Some(dir) = self.session_dir(session_id) else {
+            return Ok(None);
+        };
+        let wal = dir.join(paths::V2_WAL_FILE);
+        // 持锁 open：两个并发 `facts` 若各自 open，后插入者可能是不持令牌的
+        // 降级实例，把先前的写者顶掉（跨进程锁是进程级独占，不是句柄级）。
+        let store = Arc::new(
+            EventWalStore::open(&wal)
+                .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?,
+        );
+        cache.insert(session_id.to_string(), store.clone());
+        Ok(Some(store))
+    }
+
+    /// 该会话的**完整史快照**（含归档前缀）；没有事实源 ⇒ `None`。
+    ///
+    /// 这是读方的唯一形态：值是 `Vec<Event>`，不是路径、不是句柄。已有写句柄时
+    /// 走它（就是本进程刚落的那些格），否则只读打开一次——读方不创建文件、
+    /// 不取令牌、不截尾。
+    pub(in crate::plugins::session) fn snapshot(&self, session_id: &str) -> Option<Vec<Event>> {
+        if let Some(store) = self
+            .facts
+            .lock()
+            .expect("会话事实源表锁中毒")
+            .get(session_id)
+            .cloned()
+        {
+            return Some(store.range(Seq::new(0)));
+        }
+        let dir = self.session_dir(session_id)?;
+        let wal = dir.join(paths::V2_WAL_FILE);
+        if !wal.is_file() {
+            return None;
+        }
+        let store = EventWalStore::open_readonly(&wal).ok()?;
+        Some(store.range(Seq::new(0)))
+    }
+
+    /// 顶级会话事实源的召回视图（**新近优先**、名额与字节双预算）。
+    ///
+    /// 召回只扫平级会话（不含嵌套子会话）——范围裁决在
+    /// [`memory_events::recall_view`](crate::plugins::session::memory_events) 的文档里；
+    /// 本函数只负责「枚举 + 按预算开档 + 交值」，可见域过滤仍在读方。
+    ///
+    /// `own` = 这份事实源是否调用方自己的会话（按目录名比，同一个根下的两层
+    /// 派生可能不同形）——`thread_private` 的收放靠它。
+    pub(in crate::plugins::session) fn recall_snapshots(
+        &self,
+        self_id: &str,
+    ) -> Vec<FleetSnapshot> {
+        let Some(base) = self.disk() else {
+            return Vec::new();
+        };
+        let own_name = paths::safe_id(self_id);
+        let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = Vec::new();
+        if let Ok(dir) = std::fs::read_dir(base) {
+            for entry in dir.flatten() {
+                let dir = entry.path();
+                let wal = dir.join(paths::V2_WAL_FILE);
+                let Ok(md) = std::fs::metadata(&wal) else {
+                    continue;
+                };
+                if !md.is_file() || md.len() == 0 {
+                    continue;
+                }
+                if md.len() > RECALL_MAX_FILE_BYTES {
+                    crate::plugin_warn!(
+                        "session",
+                        "[memory] 召回跳过超大事实源（{} B > 上限 {} B）：{}",
+                        md.len(),
+                        RECALL_MAX_FILE_BYTES,
+                        wal.display()
+                    );
+                    continue;
+                }
+                let mtime = md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                files.push((mtime, wal, md.len()));
+            }
+        }
+        files.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let mut out = Vec::new();
+        let mut bytes = 0u64;
+        for (i, (_, wal, len)) in files.into_iter().enumerate() {
+            if i >= RECALL_MAX_FILES {
+                break;
+            }
+            if bytes > 0 && bytes + len > RECALL_MAX_TOTAL_BYTES {
+                break;
+            }
+            let own = wal
+                .parent()
+                .and_then(|d| d.file_name())
+                .is_some_and(|n| n.to_string_lossy() == own_name);
+            match EventWalStore::open_readonly(&wal) {
+                Ok(store) => out.push(FleetSnapshot {
+                    own,
+                    events: store.range(Seq::new(0)),
+                }),
+                Err(e) => crate::plugin_warn!(
+                    "session",
+                    "[memory] 召回读取失败（{}）：{e}",
+                    wal.display()
+                ),
+            }
+            bytes += len;
+        }
+        out
+    }
+
+    /// 部署级全量快照（含嵌套子会话，任意深度）。
+    ///
+    /// 统计聚合与淘汰覆盖层共用：两者都要求「所有会话」完整，单个事实源打不开
+    /// ⇒ 跳过并出声，不因一个坏会话让整列消失。
+    pub(in crate::plugins::session) fn deep_snapshots(&self) -> Vec<Vec<Event>> {
+        let Some(base) = self.disk() else {
+            return Vec::new();
+        };
+        paths::session_wals_deep(base)
+            .into_iter()
+            .filter_map(|wal| match EventWalStore::open_readonly(&wal) {
+                Ok(store) => Some(store.range(Seq::new(0))),
+                Err(e) => {
+                    crate::plugin_warn!(
+                        "session",
+                        "[facts] 部署级扫描跳过打不开的事实源（{}）：{e}",
+                        wal.display()
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
 }
+
+/// 一次部署级扫描交回的**值**：这份事实源是不是调用方自己的会话。
+pub(in crate::plugins::session) struct FleetSnapshot {
+    pub own: bool,
+    pub events: Vec<Event>,
+}
+
+/// 召回扫描预算：最多看几个会话的事实源 / 单文件字节上限 / 总字节上限。
+///
+/// 超限 ⇒ 不扫并 `plugin_warn` 记一笔——看不见的文件不假装看得见。
+/// 预算属于**读成本策略**，枚举属于存储布局，故两者都住在存储层。
+pub(in crate::plugins::session) const RECALL_MAX_FILES: usize = 16;
+pub(in crate::plugins::session) const RECALL_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+pub(in crate::plugins::session) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 
 // ==================== 落盘细节（自由函数） ====================
 //
@@ -570,9 +768,11 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
 /// [`Store::range`](crate::symbio_core::Store::range) 归一后给的是**完整史**（含被
 /// [`archive_before`](crate::plugins::session::store::WalStore::archive_before) 移出的前缀，
 /// [plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1），
-/// 而「**这一轮**还开着没收束」判的是现行历史：被快照取代的那段已不参与上下文，
-/// 拿它找未收束轮次会把陈锚当现行（压缩期间等审批的那一轮正是这种形状）。
+/// 本函数服务的是「**上下文 / 进度**该从哪读」这类问题。
 ///
+/// **它不判轮次生命周期**：「已开未收束」必须读完整史
+/// （[ADR-085](../../../../../docs/010-adr/085.md "ADR-085")）——压缩期间等待审批的那一轮
+/// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」（T-169）。
 /// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
 /// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）
 /// 已经内建在 `mutations_latest_snapshot` 的用法里，不需要本函数。
@@ -773,3 +973,11 @@ pub(crate) async fn resolve_store(
 
 #[cfg(test)]
 mod tests;
+
+// ── panic 面登记（PN-001…003）─────────────────────────────────────────
+// 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
+// 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
+// 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
+// panic-allow symbio/src/plugins/session/store/mod.rs::delete_session: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/mod.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/mod.rs::snapshot: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
