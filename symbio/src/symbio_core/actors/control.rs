@@ -40,8 +40,8 @@ impl PreemptionDecider {
     /// principal/pattern/capabilities 同源于授权表那一行（[T-081] 落地的
     /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
     ///
-    /// 此前判定者**只有行为没有行**：`decide` 被直驱、预算由调用方现算，规格从不构造
-    /// ——「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见
+    /// 判定者必须有**行**：若 `decide` 被直驱、预算由调用方现算、规格从不构造，就是
+    /// 「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见
     /// [`Self::decide`]（预算）与 `plugins::session::transcript::inbox` 的写侧闸
     /// （能力，[`ActorSpec::can_judge_intent`]）。
     ///

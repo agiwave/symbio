@@ -273,7 +273,7 @@ async fn each_ephemeral_store_gets_its_own_table() {
 
 /// 截断自愈：并发写交错留下的「短 JSON + 旧内容残留」必须还能读出首个完整会话
 ///
-/// 这是**用户历史**的容错路径，此前无测试钉住。
+/// 这是**用户历史**的容错路径。
 #[tokio::test]
 async fn truncated_session_json_self_heals() {
     let tmp = TempDir::new().unwrap();
@@ -597,8 +597,8 @@ async fn session_list_pages_before_cursor() {
 
 /// id 里的分隔符 / `..` 不得让会话目录逃出存储根
 ///
-/// 这条防护是把宿主层 `safe_segment` 接进会话侧（paths::safe_id）之后才有的——
-/// 此前会话侧只替换 `/ \ :`，`.` 与 `..` 可以原样成为目录名。
+/// 防护走宿主层 `safe_segment`（`paths::safe_id`）：只替换 `/ \ :` 不够，
+/// `.` 与 `..` 会原样成为目录名。
 #[tokio::test]
 async fn hostile_ids_cannot_escape_the_storage_root() {
     let tmp = TempDir::new().unwrap();

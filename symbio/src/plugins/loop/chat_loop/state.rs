@@ -269,9 +269,9 @@ pub(crate) enum Gate {
 
 /// ## 为什么没有 `new()`
 ///
-/// 字段全是 `pub`，构造点是**唯一**的（`orchestrator/consume.rs`）。此前有一个
-/// 八参的 `new()`——那是八个**位置参数**，读调用点要靠数数才知道谁是谁，而且
-/// 每加一个字段就要再挤一个（`clippy::too_many_arguments` 在第八个就报错）。
+/// 字段全是 `pub`，构造点是**唯一**的（`orchestrator/consume.rs`）。八参的
+/// `new()` 是八个**位置参数**，读调用点要靠数数才知道谁是谁，每加一个字段就要
+/// 再挤一个（`clippy::too_many_arguments` 在第八个就报错）。
 /// 结构体字面量把"谁是谁"写在字段名上，**字段增删由编译器在唯一构造点报错**，
 /// 比位置参数强。这里不再补 `new()`。
 pub struct ChatOrchestrator {

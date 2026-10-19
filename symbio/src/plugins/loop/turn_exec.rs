@@ -25,8 +25,8 @@
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由 `execute_turn` 以**数值**写入开轮格载荷的 `budget_ms`
-//! （T-082 批①）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
-//! 于是有了真读方（此前是"算了却看不见"）。缺该数值的历史事件回退读 `tier`
+//! （T-082）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
 //! ## 收束派生事实（本模块已覆盖）
@@ -1540,9 +1540,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 reasoning: reasoning_text,
                 response_text_child_id: child_id,
                 reasoning_child_id,
-                // 实测用量直通：校准反馈的唯一数据源（缺口 6）。此前这一格
-                // 恒为 `None`，校准比冻结在初值 1.0，压缩预检把本可成功的
-                // 摘要请求误判成「注定超限」。
+                // 实测用量直通：校准反馈的唯一数据源（缺口 6）。这一格若丢，
+                // 校准比冻结在初值 1.0，压缩预检会把本可成功的摘要请求误判成
+                // 「注定超限」。
                 usage: outcome.usage,
                 // 末轮原因直通（T-144）：`..Default::default()` 会把 finish 静默填成
                 // Stop，chat_loop 的长度戳与自动续写判据因此读不到真值。反射档 /
@@ -1655,8 +1655,8 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             reasoning_child_id,
             // 实测用量直通：校准反馈的唯一数据源（缺口 6），与上面被拒出口同一条。
             usage: outcome.usage,
-            // 末轮原因直通（T-144）：与上面被拒出口同一条纪律。此前 `..Default::default()`
-            // 把这一格静默填成 Stop，长度截断的自动续写在 v2 执行路径不可达。
+            // 末轮原因直通（T-144）：与上面被拒出口同一条纪律。`..Default::default()`
+            // 会把这一格静默填成 Stop，长度截断的自动续写因此不可达。
             finish: outcome.finish,
             ..Default::default()
         },

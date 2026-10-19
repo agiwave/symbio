@@ -106,9 +106,9 @@ pub use view::Budget;
 // 曾登记为 `plan/01 §4` 冻结契约名是**误记**——`plan/01` 全文没有 `TurnRunner` 一词。
 //
 // `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**（`pub use`，
-// 不是 `pub(crate)`）。下沉前它靠 `TurnInput.actor`（当时的根导出）**顺带**可达，故
-// `pub(crate)` 也够用；运行器搬走后这条顺带路径没了，而 F3 冻的是**字段集**、它只能住
-// core ⇒ 必须显式占根出口，否则 core 外（`plugins/session` 构造 / 读 `principal`）够不着它
+// 不是 `pub(crate)`）。F3 冻的是**字段集**，它只能住 core；而 core 外
+// （`plugins/session` 构造 / 读 `principal`）要够得着它、C-002 又禁插件深引域目录
+// ⇒ 必须显式占根出口
 // （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`plugins/session`），属 C-003
 // 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
 // `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
@@ -222,9 +222,9 @@ pub(crate) use adapters::StubLlmAdapter;
 pub(crate) use invariants::unresolved_turns;
 // 事实网格 → prompt 的双向完整性复核（ADR-048）：下沉后的运行器组装 prompt 时调它。
 pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
-// `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。此前只被 core 内
-// `actors` 用（故根注释曾写「留在模块路径」）；运行器下沉 `plugins/session` 后它跨出 core，
-// 而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以 `pub(crate)` 出根。
+// `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
+// `plugins/session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
+// `pub(crate)` 出根。
 pub(crate) use projection::transcript::PromptToolCall;
 pub(crate) use store::AppendError;
 

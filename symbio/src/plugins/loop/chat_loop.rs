@@ -643,10 +643,10 @@ pub async fn run_chat_loop(
             }
         };
 
-        // **不要在这里拦中止**（T-056 / ADR-052）：此前这一档在此处 `return
-        // TurnExit::Aborted(Vec::new())`——运行器于是从不落 `user.message`，中止
-        // 这一轮**一条事实都没有**（实测 e2e t7：`v2-events.wal` 不存在、投影里
-        // 看不到用户说过什么）。ADR-052 决策 1 要求「一轮的产出无论完成 / 失败 /
+        // **不要在这里拦中止**（T-056 / ADR-052）：在此处 `return
+        // TurnExit::Aborted(Vec::new())` 会让运行器从不落 `user.message`，中止
+        // 这一轮**一条事实都没有**（e2e t7 钉的是这件事：`v2-events.wal` 不存在、
+        // 投影里看不到用户说过什么）。ADR-052 决策 1 要求「一轮的产出无论完成 / 失败 /
         // 被中断 / 悬在等待用户，都入格」，决策 2 要求终止以**状态**入账。
         //
         // 检查点已**下沉**到 `turn_runner::run_with_tools` 的 1c 步：用户格已落、

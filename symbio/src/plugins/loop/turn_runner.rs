@@ -65,13 +65,13 @@ pub struct TurnInput {
     /// ## 为什么运行器要拿它
     ///
     /// 中止可以在**用户格落完之后、第一次 LLM 请求之前**到达（用户按下停止的
-    /// 那一刻恰好落在闸门与请求之间）。此前这一档由 `chat_loop` 在进运行器**之前**
-    /// 拦下（`TurnExit::Aborted`）——运行器于是从不落 `user.message` 格，WAL 全空，
-    /// 中止这一轮**一条事实都没有**（实测 e2e t7：`v2-events.wal` 不存在，
-    /// `恢复后重建的历史里看不到这轮说过什么`）。而 ADR-052 决策 1 要求
-    /// 「一轮的产出无论完成、失败、被中断还是悬在等待用户，都入格」。
+    /// 那一刻恰好落在闸门与请求之间）。若拦在进运行器**之前**（`TurnExit::Aborted`），
+    /// 运行器就从不落 `user.message` 格：WAL 全空，中止这一轮**一条事实都没有**
+    /// （e2e t7 钉的是这件事：`v2-events.wal` 不存在，恢复后重建的历史里看不到
+    /// 这轮说过什么）。而 ADR-052 决策 1 要求「一轮的产出无论完成、失败、被中断
+    /// 还是悬在等待用户，都入格」。
     ///
-    /// 修法 = 把检查点**下沉**到运行器：落完用户格后、发第一个请求前检查一次，
+    /// 形状 = 检查点在运行器内：落完用户格后、发第一个请求前检查一次，
     /// 已中止则直接走**中止收束格**（`chat.assistant.final` + `status: "aborted"` +
     /// `terminated`）——与 adapter 中途返回 `AdapterError::Aborted` 落的是同一格。
     ///
@@ -611,8 +611,8 @@ pub struct TurnOutcome {
     ///
     /// 唯一消费方是 [`super::chat_loop::settle_reasoning`]：`is_length()` 打长度戳，
     /// [`super::chat_loop::close_turn`] 在同判据上触发自动续写（`MAX_CONTINUE_ROUNDS`）。
-    /// 此前 v2 执行路径把这一格丢在 `TurnOutput { ..Default::default() }` 的重建里
-    /// （恒填 Stop），截断续写因此在 v2 不可达（缺口 T-144）。
+    /// 这一格**不得**经 `TurnOutput { ..Default::default() }` 重建：那会恒填 Stop，
+    /// 长度截断与自动续写因此不可达（T-144）。
     pub finish: crate::symbio_core::ModelFinishReason,
 }
 
@@ -799,7 +799,7 @@ impl TurnRunner {
                     // （`request_actor_spec` 由档位派生），但以**数值**入格——
                     // `invariants::declared_budget_ms` 优先读它。于是「这一轮的预算
                     // 声明」是一等数据（将来不同角色行不同预算，不必由档位反推），
-                    // `ActorSpec.budget_ms` 也由此有了真读方（此前"算了却看不见"）。
+                    // `ActorSpec.budget_ms` 由它获得真读方。
                     "budget_ms": actor.budget_ms,
                     // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
                     "id": user_node_id,
@@ -1089,11 +1089,11 @@ impl TurnRunner {
         // 1c. **闸门与首请求之间的中止**（ADR-052 决策 1）。
         //
         // 用户按下停止的那一刻可能恰好落在「用户格已落、第一个 LLM 请求还没发」这段
-        // 空隙里。此前这一段由 `chat_loop` 在**进运行器之前**拦下（`TurnExit::Aborted`），
-        // 于是运行器从不落 `user.message`，中止这一轮**一条事实都没有**——WAL 全空，
-        // 溯源锚解不出，投影里看不到用户说过什么（实测 e2e t7）。
+        // 空隙里。若拦在**进运行器之前**（`TurnExit::Aborted`），运行器就从不落
+        // `user.message`，中止这一轮**一条事实都没有**——WAL 全空，溯源锚解不出，
+        // 投影里看不到用户说过什么（e2e t7 钉的是这件事）。
         //
-        // 修法 = 检查点**下沉**到这里：用户格已落、请求未发，已中止则直接走**中止收束格**
+        // 形状 = 检查点在这里：用户格已落、请求未发，已中止则直接走**中止收束格**
         // （`chat.assistant.final` + `status: "aborted"` + `terminated`），与 adapter 中途
         // 返回 `AdapterError::Aborted` 落的是**同一格**——终止是事实的**状态**，不是新种类。
         // 半截产出此时为空（还没发请求），载荷照样带上（`produced_payload` 对空正文是合法的）。

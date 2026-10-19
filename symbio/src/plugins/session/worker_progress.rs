@@ -1,8 +1,9 @@
 //! **Q3（worker 进展）的唯一归属**：类型、两种读法与逐子会话编排都住在本模块。
 //!
-//! 此前投影类型与旧读法住在 `chat_loop::delegate`，而本模块的 WAL 读法又要回头拿
-//! `delegate::WorkerProgress`——一条 `worker_progress → chat_loop` 的反向依赖，
-//! 切谁都是环。[ADR-081](../../../../docs/010-adr/081.md "ADR-081") 裁决一把方向拧正：
+//! 依赖方向是**单向**的：`chat_loop` 读本模块，本模块不读 `chat_loop`。反过来
+//! （投影类型与读法住在 `chat_loop::delegate`、本模块的 WAL 读法回头拿
+//! `delegate::WorkerProgress`）就是一条 `worker_progress → chat_loop` 的反向依赖，
+//! 切谁都是环。[ADR-081](../../../../docs/010-adr/081.md "ADR-081") 裁决一：
 //! **进展是「读存储算出来的数」，归本域**；`chat_loop::delegate` 只留线格式
 //! （`worker_line`）与三段合成，驱动器（`chat_loop::inputs`）只调 [`for_session`]。
 //!

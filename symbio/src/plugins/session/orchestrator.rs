@@ -42,19 +42,15 @@ use std::time::Duration;
 
 /// 解析**必填**会话 id：头 → 请求体 → 报错。
 ///
-/// 统一此前散落在 send/resume/abort/heartbeat_trigger 各入口的重复特判。三档取值：
+/// 统一 send/resume/abort/heartbeat_trigger 各入口的重复特判。三档取值：
 /// - `ctx` 头里的 `SESSION_ID`（前端 WS 帧注入，优先级最高）；
 /// - `fallback`（请求体 `req.session_id`，RPC 直连调用方）；
 /// - 空串或历史哨兵 `"default"` 一律视为缺失 → `ValidationError`。
 ///
-/// **修复的行为**：abort / heartbeat_trigger 两个 one-off 入口此前不看请求体，
-/// 只靠 `unwrap_or("default")` 再自我判定为非法，使 `req.session_id` 永远不可达。
-/// `"default"` 作为非法值的理由并非"它是保留 id"，而是它曾是缺省占位符——
-/// 拿它当真实会话去 abort/触发会静默作用于不存在的会话，宁可显式报错。
-///
-/// 注：`heartbeat_trigger` 入口已于 2026-09-18 整体取消（见
-/// `docs/archive/legacy-route-migration.md` §5.1），此处保留它是因为这条注释记录的是
-/// **当时的修复范围**——把已删入口从历史里抹掉会让「为什么这个函数长这样」失去依据。
+/// **为什么 `"default"` 必须判非法**：只靠 `unwrap_or("default")` 再自我判定为非法，
+/// 会让 `req.session_id` 永远不可达。理由不是"它是保留 id"，而是它原是缺省占位符——
+/// 拿它当真实会话去 abort / 触发会静默作用于不存在的会话，宁可显式报错。
+/// 每个入口都必须走这一处解析，不许各自 `unwrap_or`。
 pub(crate) fn resolve_required_session_id(
     ctx: &Arc<dyn PluginInvokeRequest>,
     fallback: Option<&str>,

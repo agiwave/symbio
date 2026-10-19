@@ -99,10 +99,9 @@ fn expected_role(e: &Event) -> Option<&'static str> {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some("user"),
         // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user。
         //
-        // (P3c 补记) 这一行是补的——补充落进投影时忘了登记进这里，于是
-        // expected_role 返回 None、判据把它当成「不在投影范围内」直接跳过。
-        // 后果很隐蔽：**补充漏进请求包时判据不会红**。凡是落进投影的 kind 都必须
-        // 在这里登记——判据的覆盖范围要与投影的实现范围同时长。
+        // **凡是落进投影的 kind 都必须在这里登记**：漏登记的 kind 在这里返回 None，
+        // 判据把它当成「不在投影范围内」直接跳过——**补充漏进请求包时判据不会红**。
+        // 判据的覆盖范围必须与投影的实现范围同时长。
         (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => Some("user"),
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
             // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
