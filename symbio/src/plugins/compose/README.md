@@ -108,7 +108,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 ## 落点与标记（归 `session`，不归本插件）
 
 本插件只返回字符串；**写到哪、带什么标记**由调用方决定，见
-[`../session/chat_loop/compose.rs`](../session/chat_loop/compose.rs)：
+[`../loop/chat_loop/compose.rs`](../loop/chat_loop/compose.rs)：
 
 | 产物 | 落点 | `meta.surface` | `meta.exclude_from_context` | `meta.reason` |
 |---|---|---|---|---|

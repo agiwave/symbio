@@ -42,9 +42,8 @@
 
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt, Registry, CAPABILITY_ERRORS, OPTION_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    capability_init_error_bucket, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
+    CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -111,21 +110,8 @@ pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn 
     ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
 }
 
-/// **读侧**助手：按 ctx 取工具元数据清单（收集管线的另一半）。
-///
-/// 四个读点共用（LLM 工具面 / 请求级开销估算 / 闸门声明位 / 线上名解析）。
-/// 顺序 = 注册顺序（ADR-057），调用方不得重排；取不到收集器落空表。
-pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMeta> {
-    match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-        Some(visitor) => visitor
-            .list(CapabilityRowKind::Tool)
-            .await
-            .into_iter()
-            .map(|row| row.meta())
-            .collect(),
-        None => Vec::new(),
-    }
-}
+// 读侧助手 `tool_metas` 的实现住 core（[`crate::symbio_core::tool_metas`]）：loop
+// 切出后它也是驱动器的读点，跨插件共用同一条口径（ADR-086 §7）。
 
 // ==================== 选项收集机制（宿主侧） ====================
 //

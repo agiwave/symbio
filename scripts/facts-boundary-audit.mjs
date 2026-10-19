@@ -54,20 +54,21 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..')
 
-/** ADR-084 §4 的十二个能力文件（PL-014 迁移表「能力自取磁盘」一行）。 */
+/** ADR-084 §4 的十二个能力文件（PL-014 迁移表「能力自取磁盘」一行；
+ *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。 */
 const CAPABILITY_FILES = [
-  'symbio/src/plugins/session/skill_events.rs',
-  'symbio/src/plugins/session/task_events.rs',
-  'symbio/src/plugins/session/memory_events.rs',
+  'symbio/src/plugins/loop/skill_events.rs',
+  'symbio/src/plugins/loop/task_events.rs',
+  'symbio/src/plugins/loop/memory_events.rs',
   'symbio/src/plugins/session/worker_progress.rs',
-  'symbio/src/plugins/session/tools/tool_executor/breaker.rs',
-  'symbio/src/plugins/session/tools/tool_executor/elimination.rs',
+  'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
+  'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
   'symbio/src/plugins/session/stats.rs',
-  'symbio/src/plugins/session/rebuild.rs',
+  'symbio/src/symbio_core/schemas/session/rebuild.rs',
   'symbio/src/plugins/session/transcript/inbox.rs',
   'symbio/src/plugins/session/transcript/autonomous.rs',
   'symbio/src/plugins/session/message_events.rs',
-  'symbio/src/plugins/session/derived_facts.rs',
+  'symbio/src/plugins/loop/derived_facts.rs',
 ]
 
 const STORE_DIR = 'symbio/src/plugins/session/store/'

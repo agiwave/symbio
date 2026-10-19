@@ -41,13 +41,8 @@ use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::VdfsChangeSubscriptions;
 use std::sync::Arc;
 
-/// 合并标记的三个键名（唯一真源：写入方与消费方都从这里取）。
-///
-/// 放在常量里而不是各处写字面量：`meta` 是自由 JSON，编译器管不到键名拼写，
-/// 散写必然出现"写的键与读的键差一个字母"这种**编译期看不见**的分叉。
-pub const META_SUPPLEMENT: &str = "supplement";
-pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";
-pub const META_SUPPLEMENT_COUNT: &str = "supplement_count";
+/// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
+pub(crate) use crate::symbio_core::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
 
 /// 合并 n 条补充时正文之间的连接符。
 ///
@@ -127,37 +122,9 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
     cm::MessageContent::Parts(parts)
 }
 
-/// 抽干结果：**正文 + 原条数 + 溯源身份**。
-///
-/// 原先定义在 `chat_loop/state.rs`——[ADR-081](../../../../../docs/010-adr/081.md "ADR-081")
-/// 裁决三把「取批 + 合并 + 成形」落成转写域的单一入口后，返回类型随入口归位转写域。
-///
-/// `InboxItem` 是 `transcript::inbox` 的私有类型，抽干口不返回它——
-/// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
-///
-/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方
-/// （`turn_exec.rs` 的 `supplement_into_request`）按这里的 `id` / `ids` 构造——
-/// 多带一个字段就是给下一个人留一个不必有的理由。
-#[derive(Debug, Clone)]
-pub(crate) struct DrainedSupplement {
-    /// 折进 prompt 的正文（多条已合并）。
-    pub text: String,
-    /// **原条数**：合并了 n 条时是 n。
-    ///
-    /// 记下来是因为「模型收到一大段」与「用户连说了 5 句」对模型是不同的输入，
-    /// 而事实网格不该只保留前者。
-    pub count: u64,
-    /// 合并消息的 **id** = **第一条补充的 id**（[`merge_supplements`] 的既有约定）。
-    ///
-    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧（`useChatConnection.ts`），
-    /// 换 id 等于让同一句话在前端**出现两条**。t19 的 B 幕断言钉的就是「沿用 b2」。
-    pub id: String,
-    /// 批内**原始条目 id 列表**（顺序 = 入队顺序）。
-    ///
-    /// 落进 `meta.supplement_ids`：前端与事后审计都要能回答「这一条合并了几条、
-    /// 分别是哪几条」（t19 的 B 幕断言钉的就是这个列表）。
-    pub ids: Vec<String>,
-}
+/// 抽干结果（类型已随 ADR-086 §7 上移 core：loop 的补充注入与 session 的抽干口
+/// 都要命名它；这里只留 session 侧的短路径别名）。
+pub(crate) use crate::symbio_core::DrainedSupplement;
 
 /// 「取批 + 合并 + 成形」的**同步单一入口**（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三）。
 ///
@@ -208,6 +175,50 @@ pub(crate) fn take_supplement_batch_sync(
             })
             .unwrap_or_default(),
     })
+}
+
+/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §6）。
+///
+/// ## 为什么住 session 而不随驱动器迁走
+///
+/// 抽干要读**取批那三样**（上界、队列、通知表，见 [`take_supplement_batch_sync`]），
+/// 它们全是会话状态；驱动器经 `session/<sid>/_run/take-supplements` 动作使用它。
+///
+/// ## 它只做一件事
+///
+/// 委托本域的单一入口 [`take_supplement_batch_sync`]（取批 + 合并 + 成形三步整体
+/// 住在本域，见 [ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三），
+/// **不在驱动器侧自拼步骤、不写任何地址、不落格、不落库**：抽干发生在工具循环的
+/// **批次边界**，落格与「进下一次请求」都在 loop 的 `turn_exec.rs` 的
+/// `supplement_into_request`（由 `turn_runner.rs` 的 2f 触发）。
+pub(crate) struct SupplementDrain {
+    config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
+    change_subs: Arc<VdfsChangeSubscriptions>,
+    state: Arc<ActiveSessionState>,
+}
+
+impl SupplementDrain {
+    pub(crate) fn new(
+        config: Arc<tokio::sync::RwLock<super::super::config::SessionConfig>>,
+        change_subs: Arc<VdfsChangeSubscriptions>,
+        state: Arc<ActiveSessionState>,
+    ) -> Self {
+        Self {
+            config,
+            change_subs,
+            state,
+        }
+    }
+
+    /// 抽干该会话队首的一批补充并合并成**一条**用户消息（缺口 3：v2 工具循环里的
+    /// 注入挂点）。
+    ///
+    /// ⚠️ **调用方负责 `block_in_place`**：委托的入口内部用 `blocking_read`，若在
+    /// 单线程 runtime 的 async 上下文里直接调会 panic。动作面（`run_actions`）与
+    /// loop 的注入闭包都有 flavor 判定（多线程才 `block_in_place`，否则裸调）。
+    pub(crate) fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
+        take_supplement_batch_sync(&self.config, &self.change_subs, &self.state)
+    }
 }
 
 #[cfg(test)]

@@ -347,11 +347,11 @@ pub struct SessionConfig {
 // 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
 
 /// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub(crate) const FORCE_PREFIX: &str = "/work ";
+pub(crate) const FORCE_PREFIX: &str = crate::symbio_core::WORKER_FORCE_PREFIX;
 /// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub(crate) const KEYWORDS: &[&str] = &[];
+pub(crate) const KEYWORDS: &[&str] = crate::symbio_core::WORKER_KEYWORDS;
 /// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub(crate) const MIN_CHARS: usize = 0;
+pub(crate) const MIN_CHARS: usize = crate::symbio_core::WORKER_MIN_CHARS;
 
 pub fn default_worker_force_prefix() -> String {
     FORCE_PREFIX.to_string()

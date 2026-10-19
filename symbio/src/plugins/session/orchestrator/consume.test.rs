@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::plugins::session::config::SessionConfig;
-use crate::plugins::session::plugin::SessionPlugin;
+use crate::plugins::session::plugin::{SessionPlugin, OUTCOME_ABORTED};
 use crate::plugins::session::types::Session;
 use crate::symbio_core::PluginDir;
 use crate::symbio_core::VdfsChangeSubscriptions;

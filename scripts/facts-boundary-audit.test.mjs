@@ -17,18 +17,18 @@ const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
 
 /** 与守卫里的清单一致：夹具要让每个文件都存在，否则 FB-002 会先报清单漂移。 */
 const CAPABILITY_FILES = [
-  'symbio/src/plugins/session/skill_events.rs',
-  'symbio/src/plugins/session/task_events.rs',
-  'symbio/src/plugins/session/memory_events.rs',
+  'symbio/src/plugins/loop/skill_events.rs',
+  'symbio/src/plugins/loop/task_events.rs',
+  'symbio/src/plugins/loop/memory_events.rs',
   'symbio/src/plugins/session/worker_progress.rs',
-  'symbio/src/plugins/session/tools/tool_executor/breaker.rs',
-  'symbio/src/plugins/session/tools/tool_executor/elimination.rs',
+  'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
+  'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
   'symbio/src/plugins/session/stats.rs',
-  'symbio/src/plugins/session/rebuild.rs',
+  'symbio/src/symbio_core/schemas/session/rebuild.rs',
   'symbio/src/plugins/session/transcript/inbox.rs',
   'symbio/src/plugins/session/transcript/autonomous.rs',
   'symbio/src/plugins/session/message_events.rs',
-  'symbio/src/plugins/session/derived_facts.rs',
+  'symbio/src/plugins/loop/derived_facts.rs',
 ]
 
 /** 一棵最小仓库：十二个能力文件默认是空的，`extra` 覆盖 / 追加其它文件。 */
@@ -102,7 +102,7 @@ test('FB-001 正例：存储层与测试夹具可以直接开档', () => {
 test('FB-002 反例：能力文件拼路径 ⇒ 红', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/session/skill_events.rs':
+      'symbio/src/plugins/loop/skill_events.rs':
         'fn f() { let p = paths::session_dir(root, id).join(V2_WAL_FILE); }\n',
     }),
   )
@@ -114,8 +114,7 @@ test('FB-002 反例：能力文件拼路径 ⇒ 红', () => {
 test('FB-002 正例：词只出现在注释里不算违规', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/session/breaker.rs': '',
-      'symbio/src/plugins/session/tools/tool_executor/breaker.rs':
+      'symbio/src/plugins/loop/tools/tool_executor/breaker.rs':
         '//! 历史教训：`open_readonly` 失败曾让台账恒 0。\n/// 路径走 `paths::session_dir`/`V2_WAL_FILE` 的写法已退场。\nfn f() {}\n',
     }),
   )
@@ -124,7 +123,7 @@ test('FB-002 正例：词只出现在注释里不算违规', () => {
 
 test('FB-002 反例：清单里的文件不见了 ⇒ 红（清单与结构漂移）', () => {
   const files = repo()
-  delete files['symbio/src/plugins/session/rebuild.rs']
+  delete files['symbio/src/symbio_core/schemas/session/rebuild.rs']
   const r = audit(files)
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /FB-002/, out(r))

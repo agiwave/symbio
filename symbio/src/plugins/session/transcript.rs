@@ -50,7 +50,9 @@ use std::time::{Duration, Instant};
 
 /// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
 pub(crate) mod autonomous;
-mod frames;
+/// 压缩节点发射器与熔断计数（`compression-*` 动作的执行体，ADR-086 §6）：
+/// 持活跃名册与转写，随 session 留守。
+pub(crate) mod compression;
 pub(crate) mod inbox;
 /// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。
 pub(crate) mod supplements;
@@ -67,10 +69,10 @@ use self::deliver::{
     DELIVER_WINDOW_MS,
 };
 
-// 域内门面：状态帧 / 删除帧的构造与发射经 `transcript::X` 取用，调用方不感知
-// 域内文件划分（域内子模块经 `use super::*` 取用门面）。
-pub use self::frames::{llm_emit_removed, llm_emit_state, llm_state_frame};
-pub(crate) use self::publish::{append_and_publish, PublishTarget};
+// 域内门面：状态帧 / 删除帧的实现已随 ADR-086 §7 上移 core（loop 也要发），
+// 这里只留 session 侧调用点的短路径别名。
+pub(crate) use self::publish::append_and_publish;
+pub(crate) use crate::symbio_core::llm_state_frame;
 
 /// 在途消息**位置序号**的起点。
 ///

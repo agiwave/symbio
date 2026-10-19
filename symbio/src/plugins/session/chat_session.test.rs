@@ -1128,20 +1128,18 @@ async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
 
 // ── 作用域的第一个生产构造点（[T-105]）──────────────────────────────────────
 //
-// `chat_loop::state::request_scope` 按会话元数据的**委派链**取值：子会话挂父主体，
-// 顶层会话恒 `Root`。本段钉的是「取值链读得出真值」——语义（委派不放大权威）的
-// 判据在 `turn_runner.test.rs::scope_ceiling_tests`。
+// `PersistentChatSession::delegating_principal` 按会话元数据的**委派链**取值：子会话挂
+// 父主体，顶层会话恒 `None`（调用方据此落 `Scope::Root`）。本段钉的是「取值链读得出
+// 真值」——语义（委派不放大权威）的判据在 `turn_runner.test.rs::scope_ceiling_tests`。
 //
 // [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 
-/// 顶层会话 ⇒ `Root`；`agent_run` 登记形态的子会话 ⇒ `Child(父主体)`。
+/// 顶层会话 ⇒ `None`；`agent_run` 登记形态的子会话 ⇒ `Some(父主体)`。
 ///
 /// 父会话的主体取 `metadata.agent_id` + `principal_of`（与写事件的主体同一个派生点），
 /// 故本用例同时钉住「子会话的作用域不是凭空一个字符串」——它跟着父会话的身份走。
 #[tokio::test]
 async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
-    use crate::symbio_core::Scope;
-
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
     let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
 
@@ -1156,8 +1154,8 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
         store.clone(),
     );
     assert_eq!(
-        super::super::chat_loop::request_scope(&top).await,
-        Scope::Root,
+        top.delegating_principal().await,
+        None,
         "没有归属声明的会话 = 顶层会话 ⇒ 根作用域"
     );
 
@@ -1172,8 +1170,8 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
         store.clone(),
     );
     assert_eq!(
-        super::super::chat_loop::request_scope(&sub).await,
-        Scope::Child("session/peer-b".to_string()),
+        sub.delegating_principal().await.as_deref(),
+        Some("session/peer-b"),
         "子会话挂**父会话主体**（不是父会话 id，也不是子会话自己的主体）"
     );
 
@@ -1186,8 +1184,5 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
         Arc::new(RwLock::new(SessionConfig::default())),
         store.clone(),
     );
-    assert_eq!(
-        super::super::chat_loop::request_scope(&plain).await,
-        Scope::Root
-    );
+    assert_eq!(plain.delegating_principal().await, None);
 }

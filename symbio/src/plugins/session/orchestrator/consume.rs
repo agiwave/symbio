@@ -11,7 +11,7 @@
 //! | 结局 | 收尾 |
 //! |---|---|
 //! | 任务正常结束 | 清在途转写 → 复位 `is_working` → 广播 idle（`completed`） |
-//! | 任务返回 `Err(Aborted)` | 在途 Turn 落库 `Aborted` → 结局 `aborted` → 走统一收尾 |
+//! | 任务交回 `TurnReport`（`status = aborted`） | 在途 Turn 落库 `Aborted` → 结局 `aborted` → 走统一收尾 |
 //! | 任务返回 `Err(其他)` | `persist_failure(Failed)` + Error 广播 + idle，**就地 return** |
 //! | 任务 panic / 被取消 | 同上（panic 载荷只进日志，前端只回通用文案） |
 //! | 1800s 无进展（看门狗） | `persist_failure(Failed)` + Error 广播 + idle，**就地 return** |
@@ -30,12 +30,21 @@ use super::*;
 
 /// 一个 Turn 任务的等待结局。
 enum TurnOutcome {
-    /// 任务结束（含 panic / 被取消）。
-    Finished(Result<Result<(), PluginError>, tokio::task::JoinError>),
+    /// 任务结束（含 panic / 被取消）：成功时是驱动器交回的结局值。
+    Finished(Result<Result<crate::symbio_core::TurnReport, PluginError>, tokio::task::JoinError>),
     /// 看门狗：1800s 内既无结束也无状态变化，判定链路挂死。
     Watchdog,
     /// 会话状态被外部复位或请求已更换（新一轮接管），本任务让位。
     Superseded,
+}
+
+/// 地址面派发的错误映射：`NotFound`（容器里没有 loop 挂载点）保留原语义，
+/// 由调用方走 `fail_before_loop`；其余一律按内部失败。
+fn dispatch_error(e: crate::symbio_core::VdfsError) -> PluginError {
+    match e {
+        crate::symbio_core::VdfsError::NotFound(m) => PluginError::NotFound(m),
+        other => PluginError::InternalError(format!("驱动器派发失败：{other}")),
+    }
 }
 
 /// 等待会话状态被复位或请求被更换（非阻塞轮询）。
@@ -65,7 +74,7 @@ impl TurnLauncher {
         state: &Arc<ActiveSessionState>,
         session_id: &str,
         collected: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
-        stop: &super::super::chat_loop::StopSignal,
+        stop: &StopSignal,
         error: impl Into<String>,
     ) {
         let err = error.into();
@@ -80,7 +89,7 @@ impl TurnLauncher {
             )
             .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
-        stop.fire(&[]).await;
+        stop.fire_text(String::new()).await;
         self.convergence.broadcast_error_with_idle(state, err).await;
     }
 
@@ -151,10 +160,7 @@ impl TurnLauncher {
         let transcript = state.transcript.clone();
         transcript.lock().await.clear();
 
-        let stop = Arc::new(super::super::chat_loop::StopSignal::new(
-            Some(parent.clone()),
-            chat_ctx.fork(),
-        ));
+        let stop = Arc::new(StopSignal::new(Some(parent.clone()), chat_ctx.fork()));
 
         // 工作态守卫：保障 panic / 异常退出时 is_working 收敛 + 失败持久化 + Stop 兜底。
         // 正常结束路径会在收尾前把 `done` 置 true（见块末尾）。
@@ -223,105 +229,187 @@ impl TurnLauncher {
                 provider.max_context_tokens()
             );
         }
-        // 压缩期要能把「正在压缩」作为**会话阶段**下发：压缩发生在 Turn 创建之前，
-        // 且出帧被刻意静音，整段窗口内没有任何消息节点可渲染（长上下文时可达数
-        // 分钟，用户视角＝卡死），前端只能靠会话节点的 `attributes.phase` 给出等待
-        // 提示。发射器只要活跃会话**名册** + 会话状态：按会话 id 解析到它那份转写，
-        // 需要的就是名册那张 `sessions` 表，插件在这里没有别的贡献。
-        let phase = Some(std::sync::Arc::new(
-            super::super::chat_loop::CompressionEmitter::new(
-                self.active_mgr.clone(),
-                state.clone(),
-            ),
-        ));
-
-        // 轮边界补充整合的落点：取批要的是上界（`config`）、队列（会话状态）与通知表
-        // （`change_subs`）三样，按构造注入（见 `SupplementDrain` 的文档）。
-        let drain = Some(std::sync::Arc::new(
-            super::super::chat_loop::SupplementDrain::new(
-                self.config.clone(),
-                self.change_subs.clone(),
-                state.clone(),
-            ),
-        ));
-
-        // ── 本 Turn 的两个执行期原语 ────────────────────────────────────────
+        // ── 本轮交付包（[ADR-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
         //
-        // 出口：进程内直连转写唯一写入点。执行期的每一次节点变更直接落进
-        // `Transcript::apply`（内存图 → seq → 一行核心日志 → 发布），不再经过
-        // 「序列化成帧 → 反序列化回来」的往返。
+        // 出口：进程内直连转写唯一写入点（会话侧持有），随包交给驱动器；
+        // 驱动器的每一次节点变更仍直接落进这张转写（不经「序列化 → 反序列化」）。
         let sink = ExecEventSink::direct(Arc::new(TranscriptSink::new(
             self.convergence.clone(),
             state.clone(),
         )));
+        // 压缩增量改道用的转写写口：过滤桥在会话侧，驱动器只持 trait object。
+        let writer = super::super::transcript::compression::CompressionEmitter::new(state.clone())
+            .transcript_writer();
         // 中止：本 Turn 唯一的入方向原语。登记进会话状态后，`handle_abort` 直接
-        // 置位（无帧、无轮询）；守卫注销时一并置位——这正是收口前「消费循环
-        // drop 掉通道 ⇒ 执行方中止」那条隐式语义的显式化。
+        // 置位（无帧、无轮询）；守卫注销时一并置位。
         let abort = ExecAbortSignal::new();
         let mut abort_guard = AbortGuard::register(state.clone(), abort.clone()).await;
 
-        // 轮首判决的开关（`SessionConfig::classify_enabled`）。取**值快照**而不是把插件
-        // 交给编排器：配置在一次请求生命周期内不变，判决只需要一个布尔
-        // （见 `ChatOrchestrator::classify_enabled` 的说明）。锁不跨 await——先取值再放锁。
-        let classify_enabled = self.config.read().await.classify_enabled;
-        // 对话面措辞的开关（`SessionConfig::compose_enabled`），同一条取值纪律。
-        // 两级开关相互独立：判决决定"要不要干活"，措辞决定"说什么"。
-        let compose_enabled = self.config.read().await.compose_enabled;
-        // 对话面开场白的开关（`SessionConfig::opening_enabled`），同一条取值纪律。
-        // 它只闸住 `Escalate` 首响那一句（`apply_verdict`），真实答复（`Answered`）
-        // 仍由 `compose_enabled` 说话——两个开关管两句不同的话，互不牵连。
-        let opening_enabled = self.config.read().await.opening_enabled;
-        // 中途汇报的策略（`SessionConfig` 的四个旋钮），同一条取值纪律：一次锁、
-        // 一次映射。四个数合成一个结构体，因为它们是**同一个判定**的四个参数
-        // （见 `ProgressPolicy::due`）——平铺成四个字段会让"谁和谁是一组"只能靠命名猜。
-        let progress = {
-            let cfg = self.config.read().await;
-            super::super::chat_loop::ProgressPolicy {
-                enabled: cfg.progress_enabled,
-                // `u64` → `i64`：策略与时钟（`clock_now_ms`）比大小，同类型比较
-                // 不必每次转换。取值是毫秒级时长，远在 `i64` 范围内。
-                interval_ms: cfg.progress_interval_ms as i64,
-                min_rounds: cfg.progress_min_rounds,
-                max_per_turn: cfg.progress_max_per_turn,
+        // 本轮会话引擎：优先复用编排入口已交付的句柄（临时会话的唯一正确来源），
+        // 缺句柄才经 Convergence 重建（持久会话无实例状态，重建等价）。
+        let session = match chat_ctx.get(super::super::chat_session::SESSION_HANDLE) {
+            Some(handle) => {
+                let super::super::chat_session::ChatSessionHandle(session) = &*handle;
+                session.clone()
+            }
+            None => match self
+                .convergence
+                .open_session_handle(Some(session_id.clone()))
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    self.fail_before_loop(
+                        &state,
+                        &session_id,
+                        &transcript,
+                        &stop,
+                        format!("会话引擎句柄构造失败：{e}"),
+                    )
+                    .await;
+                    guard.done = true;
+                    return;
+                }
+            },
+        };
+
+        // 本轮纯值快照：配置标量一次取完（请求生命周期内不变）。
+        let cfg = self.config.read().await.clone();
+        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（T-105 的同一读法，
+        // 从驱动器搬到会话侧：这是元数据事实，驱动器不再回头读父会话）。
+        let scope = match session.delegating_principal().await {
+            Some(parent) => crate::symbio_core::Scope::Child(parent),
+            None => crate::symbio_core::Scope::Root,
+        };
+        let spec = crate::symbio_core::TurnSpec {
+            session_id: session_id.clone(),
+            tool_archive_dir: super::super::paths::session_subdir(
+                self.dir.dir(),
+                &session_id,
+                super::super::paths::TOOL_ARCHIVES_SUBDIR,
+            ),
+            transcript_archive_dir: super::super::paths::session_subdir(
+                self.dir.dir(),
+                &session_id,
+                super::super::paths::TRANSCRIPTS_SUBDIR,
+            ),
+            principal: crate::symbio_core::authz::request_principal(&*chat_ctx),
+            scope,
+            persistent: session.store_handle().is_persistent(),
+            context_window: session.context_window(),
+            settings: crate::symbio_core::TurnSettings {
+                auto_compress: cfg.auto_compress,
+                classify_enabled: cfg.classify_enabled,
+                compose_enabled: cfg.compose_enabled,
+                opening_enabled: cfg.opening_enabled,
+                progress_enabled: cfg.progress_enabled,
+                progress_interval_ms: cfg.progress_interval_ms,
+                progress_min_rounds: cfg.progress_min_rounds,
+                progress_max_per_turn: cfg.progress_max_per_turn,
+                presentation_tree: cfg.presentation_tree(),
+                skill_compile_enabled: cfg.skill_compile_enabled,
+                skill_fast_path: cfg.skill_fast_path,
+                worker_force_prefix: cfg.worker_force_prefix.clone(),
+                worker_keywords: cfg.worker_keywords.clone(),
+                worker_min_chars: cfg.worker_min_chars,
+            },
+        };
+        // 事实轨端口：临时会话 ⇒ `None`（驱动器沿用「无事实源 ⇒ 不落派生事实」）。
+        let facts: Option<Arc<dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>>> =
+            match session.facts() {
+                Ok(Some(store)) => Some(store),
+                Ok(None) => None,
+                Err(e) => {
+                    self.fail_before_loop(
+                        &state,
+                        &session_id,
+                        &transcript,
+                        &stop,
+                        format!("事实源打不开：{e}"),
+                    )
+                    .await;
+                    guard.done = true;
+                    return;
+                }
+            };
+
+        // `UserPromptSubmit` 归会话生命周期（[ADR-086] §6）：在派发之前触发，
+        // 与搬家前「首轮追加用户消息后立即触发」的时点一致。resume 没有
+        // `single_message` ⇒ 不触发（工具结果不是用户发言）。
+        let hook_prompt = chat_ctx
+            .payload::<chat_request::Request>()
+            .ok()
+            .and_then(|req| req.single_message)
+            .and_then(|m| m.content.as_ref().map(|c| c.to_text()));
+        if let Some(prompt) = hook_prompt {
+            let _ = crate::symbio_core::fire_hook(
+                &Some(parent.clone()),
+                crate::symbio_core::HookEvent::UserPromptSubmit { prompt },
+                chat_ctx.fork(),
+            )
+            .await;
+        }
+
+        let dispatch = Arc::new(crate::symbio_core::TurnDispatch {
+            spec,
+            facts,
+            sink,
+            writer,
+            abort,
+            provider,
+            parent: Some(parent.clone()),
+            context_limit,
+        });
+        // 令牌挂在**宿主的 fork** 上：线上不可伪造（WIRE=false），且只对本次派发可见。
+        let dispatch_ctx = chat_ctx.fork();
+        dispatch_ctx.set(crate::symbio_core::TURN_DISPATCH, dispatch.clone());
+
+        let provider_view = match parent.get_vfs_provider() {
+            Some(p) => p,
+            None => {
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &stop,
+                    "驱动器不可达（容器未提供 VDFS 面）",
+                )
+                .await;
+                guard.done = true;
+                return;
             }
         };
 
-        // 建树策略快照（`SessionConfig::presentation_tree`），同一条取值纪律：一次锁、
-        // 认不出的写法落到 `grouped`（见 `SessionConfig::presentation_tree` 读侧容错）。
-        // 请求级快照而非持有者：一次请求生命周期内组树档不变。
-        let presentation_tree = self.config.read().await.presentation_tree();
-
-        // 结构体字面量而不是 `new()`：字段全是 `pub`、构造点唯一，而字面量把"谁是谁"
-        // 写在字段名上（八参的位置参数要靠数数），且字段增删由编译器在这里报错。
-        // 理由见 `ChatOrchestrator` 的"为什么没有 `new()`"。
-        let orchestrator = Arc::new(super::super::chat_loop::ChatOrchestrator {
-            provider,
-            parent: Some(parent),
-            context_limit,
-            stop: stop.clone(),
-            compression: phase,
-            supplements: drain,
-            classify_enabled,
-            compose_enabled,
-            opening_enabled,
-            progress,
-            presentation_tree,
-            // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
-            // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
-            session_dir: self.dir.clone(),
-        });
-
-        let ctx_clone = chat_ctx.fork();
-        let task_orchestrator = orchestrator.clone();
-        let task_abort = abort.clone();
+        // 动作体就是整轮 future：loop 在动作里跑完，把结局序列化进动作响应。
+        let loop_path = format!("{}/{}", crate::symbio_core::PLUGIN_ID_LOOP, session_id);
         let handle = tokio::spawn(async move {
-            super::super::chat_loop::run_chat_loop(
-                task_orchestrator.clone(),
-                ctx_clone,
-                sink,
-                task_abort,
-            )
-            .await
+            let resp = provider_view
+                .dispatch(
+                    &crate::symbio_core::vdfs_context(&dispatch_ctx),
+                    &loop_path,
+                    crate::symbio_core::VdfsRequest::Action {
+                        action: crate::symbio_core::LOOP_RUN_TURN.to_string(),
+                        payload: Some(serde_json::json!({})),
+                    },
+                )
+                .await
+                .map_err(dispatch_error)?;
+            let crate::symbio_core::VdfsResponse::Action(result) = resp else {
+                return Err(PluginError::InternalError(format!(
+                    "驱动器动作返回了非动作响应：{loop_path}"
+                )));
+            };
+            if !result.ok {
+                return Err(PluginError::InternalError(format!(
+                    "驱动器动作失败：{}",
+                    result.message
+                )));
+            }
+            let data = result
+                .data
+                .ok_or_else(|| PluginError::InternalError("驱动器动作缺少结局载荷".to_string()))?;
+            serde_json::from_value::<crate::symbio_core::TurnReport>(data)
+                .map_err(|e| PluginError::InternalError(format!("驱动器结局载荷不合法：{e}")))
         });
 
         plugin_debug!(
@@ -346,31 +434,24 @@ impl TurnLauncher {
         let mut exit_state = SessionStateChange::completed();
 
         match outcome {
-            TurnOutcome::Finished(Ok(Ok(()))) => {
-                crate::plugin_info!(
-                    "session",
-                    "[Consume] Turn 任务正常结束（运行时长={}s）",
-                    started.elapsed().as_secs()
-                );
-            }
-            TurnOutcome::Finished(Ok(Err(e))) => {
-                crate::plugin_error!(
-                    "session",
-                    "[ChatLoop] run_chat_loop 异常退出: {e} (code={})",
-                    e.code()
-                );
-                // 分派依据为类型化错误码（PluginErrorCode::Aborted），不再对
-                // meta["code"] 做字符串字面量比较（session-mechanism-unification.md §4.2）。
-                match e {
-                    PluginError::Aborted { partial } => {
+            TurnOutcome::Finished(Ok(Ok(report))) => {
+                // Stop 钩子归会话生命周期（[ADR-086] §6）：驱动器把末条正文交回，
+                // 这里统一触发——「恰好一次」由生命周期保证，不是两侧各记一次。
+                stop.fire_text(report.last_message.unwrap_or_default())
+                    .await;
+                match report.status {
+                    crate::symbio_core::TurnStatus::Completed => {
+                        crate::plugin_info!(
+                            "session",
+                            "[Consume] Turn 任务正常结束（运行时长={}s）",
+                            started.elapsed().as_secs()
+                        );
+                    }
+                    crate::symbio_core::TurnStatus::Aborted => {
                         // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染
                         // 错误条与重试入口；但**不收敛为「失败」结局**——中止不是错误：
                         // 会话节点回 `active` + `outcome = aborted`（由 handle_abort 收口，
                         // 流式动画随之停止）。
-                        //
-                        // 这里与 `handle_abort` 的 `converge_inflight` 写同一个值，因此
-                        // 谁先谁后都不影响结果（此前两者分别是 `Failed` 与 `Completed`，
-                        // 重试入口的出现与否取决于 abort 信号落在哪个检查点）。
                         //
                         // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
                         // 它们是事实，随 `persist_failure` 收尾入格——
@@ -381,12 +462,12 @@ impl TurnLauncher {
                                 &transcript,
                                 "用户手动中止了本次回复",
                                 cm::NodeStatus::Aborted,
-                                partial,
+                                report.partial,
                             )
                             .await;
                         exit_state = SessionStateChange::aborted();
                     }
-                    e => {
+                    crate::symbio_core::TurnStatus::Failed => {
                         // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
                         // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。
@@ -396,12 +477,41 @@ impl TurnLauncher {
                             &transcript,
                             &mut guard,
                             &mut abort_guard,
-                            e.to_string(),
+                            report
+                                .error
+                                .unwrap_or_else(|| "驱动器报告失败但未给出原因".to_string()),
                         )
                         .await;
                         return;
                     }
                 }
+            }
+            TurnOutcome::Finished(Ok(Err(PluginError::NotFound(msg)))) => {
+                // 容器里没有 loop 挂载点 = 部署形状错误（[ADR-086] §5）：
+                // 走「进入驱动器之前就失败」的统一收尾。
+                self.fail_before_loop(&state, &session_id, &transcript, &stop, msg)
+                    .await;
+                guard.done = true;
+                abort_guard.disarm().await;
+                return;
+            }
+            TurnOutcome::Finished(Ok(Err(e))) => {
+                crate::plugin_error!(
+                    "session",
+                    "[ChatLoop] 驱动器派发异常退出: {e} (code={})",
+                    e.code()
+                );
+                stop.fire_text(String::new()).await;
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    e.to_string(),
+                )
+                .await;
+                return;
             }
             TurnOutcome::Finished(Err(join_err)) => {
                 // join error（含 panic）：面向前端只回通用文案（不泄漏内部细节），

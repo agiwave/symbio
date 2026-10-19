@@ -46,13 +46,6 @@ fn safe_id_is_the_same_rule_as_vdfs_entry_segments() {
 }
 
 #[test]
-fn retrieval_hint_mentions_unified_entry() {
-    assert!(!RETRIEVAL_HINT.is_empty());
-    assert!(RETRIEVAL_HINT.contains("vdfs_read"));
-    assert!(RETRIEVAL_HINT.contains("offset/limit"));
-}
-
-#[test]
 fn session_subdir_appends_under_safe_session_dir() {
     let dir = session_subdir(
         std::path::Path::new("/symbio-test/session"),

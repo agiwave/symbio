@@ -15,10 +15,10 @@
 //! | 字段 | 用途 |
 //! |---|---|
 //! | `convergence` | 取会话摘要 / 打开会话引擎 / 广播运行态与失败收口（存储、配置、名册都在它身上） |
-//! | `active_mgr` | 取或建活跃会话状态；转写发布走名册出口（`PublishTarget::Transcript`） |
+//! | `active_mgr` | 取或建活跃会话状态；转写发布走名册出口（`ActiveSessionManager::transcript_apply`） |
 //! | `config` | 轮首开关与策略快照（classify / compose / progress / 建树档） |
 //! | `change_subs` | 轮边界补充抽干的通知表，以及自动命名那一次的资源信号 |
-//! | `dir` | 本插件目录 = `ChatOrchestrator::session_dir`（作用域正确性的来源） |
+//! | `dir` | 本插件目录（作用域正确性的来源） |
 //! | `parent` | 能力收集要遍历的父插件（弱引用，与插件上那一格同源） |
 //!
 //! 字段全是 `Arc` / `Weak` / 值类型，因此 `Clone` 廉价；构造点唯一（[`super::super::plugin::SessionPlugin::new`]），

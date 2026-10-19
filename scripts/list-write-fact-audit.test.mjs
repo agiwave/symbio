@@ -126,6 +126,40 @@ test('寄存锚在窗口边界之外（>20 行）→ LWF-002 变红', () => {
   assert.match(r.stderr, /LWF-002/)
 })
 
+test('端口转发 `self.port.replace_all(...)` 不是原语调用（不误报）', () => {
+  const r = audit({
+    'plugins/loop/turn_session.rs': 'async fn replace_all(&self) {\n    self.port.replace_all(nodes, dropped, head).await\n}\n',
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('地址面中继带非空豁免理由 → 放行', () => {
+  const r = audit({
+    'plugins/session/run_actions.rs': [
+      'async fn relay(session: &S) {',
+      '    // list-write-fact-allow LWF-002: 中继无锚可持，寄存发生在 loop 压缩现场。',
+      '    session.replace_all(nodes).await;',
+      '}',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('豁免理由为空 → 仍报 LWF-002（空理由等于没有豁免）', () => {
+  const r = audit({
+    'plugins/session/run_actions.rs': [
+      'async fn relay(session: &S) {',
+      '    // list-write-fact-allow LWF-002:',
+      '    session.replace_all(nodes).await;',
+      '}',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1, '空理由的豁免必须红')
+  assert.match(r.stderr, /LWF-002/)
+})
+
 test('message_events::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
   const r = audit({
     'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    message_events::edited(dir, m);\n}\n',

@@ -37,6 +37,7 @@ mod heartbeat;
 mod home;
 mod hook;
 mod local;
+mod r#loop;
 mod mcp;
 mod memory;
 mod model;

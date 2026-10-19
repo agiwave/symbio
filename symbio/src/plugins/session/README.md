@@ -279,7 +279,7 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 活记忆到 4 条过 `consolidate::accept` 才合并——不另开文件、不经系统提示词、
 不进 VDFS。分工：文件记忆 = 会话自己的约定（人可读写）；事件记忆 = 可检索、
 可巩固、可排除式遗忘的**情景经验**（机器记账）。三段各自的判定方与四条口径见
-[`memory_events.rs`](memory_events.rs) 模块文档。
+[`memory_events.rs`](../loop/memory_events.rs) 模块文档。
 
 ### 系统提示词：只有一个注册通道
 
@@ -333,7 +333,7 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 
 工具可以返回任意 JSON（`shell` 给 `output`、`vdfs_read` 给 `VdfsContent`、`ask_user` 给 `content` + `prompt`、`todo_write` / `content_search` 同理），而模型只消费**一段文本**。这层「任意形状 → 文本」的压缩是**必要的**，不是失误；失误在于它曾**没有写下来**，加一个工具就得读源码才知道写哪个字段名。
 
-**唯一消费方**：[`tool_executor::extract_result`](./tools/tool_executor.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`tool_executor.test.rs`](./tools/tool_executor.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
+**唯一消费方**：[`tool_executor::extract_result`](../loop/tools/tool_executor.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`tool_executor.test.rs`](../loop/tools/tool_executor.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
 
 | 序号 | 判据 | 结果 |
 |---|---|---|

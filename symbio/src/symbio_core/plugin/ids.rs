@@ -54,6 +54,8 @@ pub const PLUGIN_ID_GATEWAY: &str = "gateway";
 pub const PLUGIN_ID_SESSION: &str = "session";
 /// Heartbeat 插件工厂（会话空闲心跳：调度循环 + 设置入口）
 pub const PLUGIN_ID_HEARTBEAT: &str = "heartbeat";
+/// Loop 插件工厂（驱动器：一轮的判决 / 工具循环 / 落库视图，经地址面被会话触发）
+pub const PLUGIN_ID_LOOP: &str = "loop";
 /// Classify 插件工厂（对话面：判决这一轮该直接答、还是派给工具循环）
 pub const PLUGIN_ID_CLASSIFY: &str = "classify";
 /// Compose 插件工厂（对话面：措辞——首响 / 答话 / 汇报）

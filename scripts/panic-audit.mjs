@@ -66,15 +66,50 @@ const FN_DEF = /\b(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Z
 
 /** 递归收集参与生产事实的 .rs（排除测试文件） */
 function collectRs(dir, out = []) {
+  const testMods = cfgTestModulesOf(dir)
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) {
       if (!SKIP_DIRS.has(e.name)) collectRs(p, out)
       continue
     }
-    if (e.name.endsWith('.rs') && !e.name.endsWith('.test.rs') && e.name !== 'tests.rs') out.push(p)
+    if (
+      e.name.endsWith('.rs') &&
+      !e.name.endsWith('.test.rs') &&
+      e.name !== 'tests.rs' &&
+      !testMods.has(e.name.slice(0, -'.rs'.length))
+    ) {
+      out.push(p)
+    }
   }
   return out
+}
+
+/**
+ * 父模块文件里声明在 `#[cfg(test)]` 下的 `mod X;` —— 这些 `X.rs` 只在测试构建里存在。
+ *
+ * `collectRs` 逐文件扫描时看不到父文件里的属性；若不认这层，`#[cfg(test)] mod helper;`
+ * 的 helper 就会被当成生产兼容面。判据与内联 `#[cfg(test)] mod`、逐项 `#[cfg(test)]`
+ * 相同，只是声明与文件分居两处。候选父文件：目录的 `mod.rs` / 同名 `.rs`，
+ * 以及 crate 根的 `lib.rs` / `main.rs`。
+ */
+function cfgTestModulesOf(dir) {
+  const candidates = [
+    path.join(dir, 'mod.rs'),
+    path.join(dir, 'lib.rs'),
+    path.join(dir, 'main.rs'),
+    path.join(path.dirname(dir), `${path.basename(dir)}.rs`),
+  ]
+  const names = new Set()
+  const decl =
+    /#\[cfg\(test\)\](?:\s*#\[[^\]]*\])*\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue
+    const raw = stripComments(fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n'))
+    const re = new RegExp(decl.source, 'g')
+    for (const m of raw.matchAll(re)) names.add(m[1])
+  }
+  return names
 }
 
 /**
@@ -118,11 +153,29 @@ function stripCfgTestItems(text) {
   return out.join('\n')
 }
 
+/**
+ * 整个文件只在测试构建里存在（文件级 `#![cfg(test)]`）——按「不判测试」的第一条约定跳过。
+ *
+ * `#[cfg(test)] mod helper;` 的声明在父文件里，本脚本逐文件扫描时看不见；文件自己带
+ * 内层 `#![cfg(test)]` 则是它自己的事实（与 `partial_json.rs` 里逐项 `#[cfg(test)]`
+ * 同一个判据，只是作用域升到整模块）。
+ */
+function isTestOnlySource(raw) {
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (t === '' || t.startsWith('//')) continue
+    if (t === '#![cfg(test)]') return true
+    if (!t.startsWith('#![')) return false
+  }
+  return false
+}
+
 /** 某个文件里的全部命中：Map(key → 命中处），key = `相对路径::函数名`。
  *  命中按**出现次数**计而不是按行——`a.unwrap(), b.expect("x")` 是一行两处，
  *  按行数会把健壮性面少报一半（棘轮随之偏松）。 */
 function sitesOf(rel, abs) {
   const raw = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+  if (isTestOnlySource(raw)) return new Map()
   // 登记要从**原始文本**里读（注释就是登记的地方），命中要从抹过的文本里数
   const clean = stripCfgTestItems(stripTestModules(stripComments(raw)))
   const lines = clean.split('\n')

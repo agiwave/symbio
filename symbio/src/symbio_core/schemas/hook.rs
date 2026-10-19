@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
+
+use crate::symbio_core::plugin::ROUTE_HOOK_FIRE;
+use crate::symbio_core::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PATH, SESSION_ID};
 
 /// Hook 事件枚举，用于在关键业务节点触发外部通知或拦截
 ///
@@ -118,6 +123,43 @@ impl HookEvent {
             HookEvent::PermissionRequest { .. } => "PermissionRequest",
             HookEvent::StopFailure { .. } => "StopFailure",
         }
+    }
+}
+
+/// 触发一次生命周期钩子，返回钩子插件的输出。
+///
+/// **返回 `HookOutput` 而非 `Result`，是刻意的**：钩子是**旁路观察者**——它的职责是
+/// 「被通知到」，不是「否决主流程」。路由失败（没有钩子插件、插件未挂载、插件自己
+/// 报错）在函数内部就吞成 `HookOutput::default()`，因此调用点的 `let _ = fire_hook(...)`
+/// **丢的不是错误**（没有错误可丢），只是不需要那份输出。
+///
+/// [ADR-086](../../../../docs/010-adr/086.md "ADR-086") §6 上移 core：session 在派发前
+/// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact` / `PreToolUse` / `PostToolUse`，
+/// 两个插件共用这一条路由助手（不是新机制）。
+pub async fn fire_hook(
+    parent: &Option<Arc<dyn Plugin>>,
+    event: HookEvent,
+    ctx: Arc<dyn PluginInvokeRequest>,
+) -> HookOutput {
+    let p = match parent {
+        Some(p) => p,
+        None => return HookOutput::default(),
+    };
+
+    let session_id = ctx.get(SESSION_ID).unwrap_or_default();
+
+    let hook_ctx = ctx.fork();
+    hook_ctx.set(PATH, ROUTE_HOOK_FIRE.to_string());
+    let _ = hook_ctx.set_payload(serde_json::json!({
+        "session_id": session_id,
+        "event": serde_json::to_value(&event).unwrap_or(serde_json::json!({})),
+    }));
+
+    match p.clone().route(hook_ctx).await {
+        Ok(resp) => resp
+            .get::<HookOutput>()
+            .unwrap_or_else(|_| HookOutput::default()),
+        Err(_) => HookOutput::default(),
     }
 }
 

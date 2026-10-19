@@ -419,20 +419,40 @@ test('hook 测试：POSIX 分支必须引用 $1，否则裸 cat 去读被置空�
 // 单跑全绿。根因是临时目录按 **pid** 命名却**从不清理**——Windows 复用 pid 时旧
 // `v2-events.wal` 还在，而事件 id 是写死的，首个 append 就撞 Duplicate。
 test('v2 测试的临时目录必须用前先删（pid 复用会把残留 WAL 撞成 Duplicate）', () => {
-  for (const n of ['derived_facts', 'memory_events', 'skill_events', 'task_events']) {
-    const p = `symbio/src/plugins/session/${n}.test.rs`
-    const src = fs.readFileSync(path.join(repoRoot, p), 'utf8')
-    const fn = src.match(/^fn tmp_\w+\([\s\S]*?^\}/m)
-    assert.ok(fn, `${p}：找不到 tmp_* 助手 —— 结构变了，跟着改这条钉`)
-    const body = fn[0]
-    assert.match(body, /std::process::id\(\)/, `${p}：目录名不再带 pid ⇒ 这条钉的前提变了`)
-    const wipe = body.indexOf('remove_dir_all')
-    const create = body.indexOf('create_dir_all')
-    assert.ok(wipe !== -1, `${p}：tmp 助手没有 remove_dir_all ⇒ 残留 WAL 会撞 Duplicate`)
-    assert.ok(
-      wipe < create,
-      `${p}：remove_dir_all 不在 create_dir_all 之前 ⇒ 先建后删等于没删`,
-    )
+  // 自动发现样本：开真 WAL、又按 pid 造临时目录的测试文件。文件会随迁移
+  // 换目录，写死清单只会把这条钉变成「搬家即红」；判据本身是每处 pid 目录
+  // 都要在首次 create_dir* 之前 remove_dir_all。
+  const files = []
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.test.rs')) files.push(p)
+    }
+  }
+  walk(path.join(repoRoot, 'symbio', 'src'))
+  const targets = files.filter((f) => {
+    const s = fs.readFileSync(f, 'utf8')
+    return s.includes('process::id()') && (s.includes('EventWalStore::open') || s.includes('V2_WAL_FILE'))
+  })
+  assert.ok(targets.length > 0, '没有发现开真 WAL 的 pid 临时目录样本 ⇒ 这条钉的前提变了')
+  for (const f of targets) {
+    const rel = path.relative(repoRoot, f).split(path.sep).join('/')
+    const lines = fs.readFileSync(f, 'utf8').split(/\r?\n/)
+    let sites = 0
+    lines.forEach((l, i) => {
+      if (!l.includes('process::id()')) return
+      sites++
+      const window = lines.slice(i, i + 6).join('\n')
+      const wipe = window.indexOf('remove_dir_all')
+      const create = window.search(/create_dir_all|create_dir\(/)
+      assert.ok(wipe !== -1, `${rel}:${i + 1}：临时目录没有 remove_dir_all ⇒ 残留 WAL 会撞 Duplicate`)
+      assert.ok(
+        create === -1 || wipe < create,
+        `${rel}:${i + 1}：remove_dir_all 不在 create_dir* 之前 ⇒ 先建后删等于没删`,
+      )
+    })
+    assert.ok(sites > 0, `${rel}：没有 process::id() 却进了样本`)
   }
 })
 

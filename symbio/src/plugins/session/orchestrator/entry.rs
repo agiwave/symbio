@@ -12,7 +12,7 @@
 //! `start_turn` 的调用方因此只剩收件箱消费者与恢复动作，二者都不经路由。
 
 use super::super::chat_session::Carrier;
-use super::super::transcript::{append_and_publish, PublishTarget};
+use super::super::transcript::append_and_publish;
 use super::super::types::Session;
 use super::*;
 
@@ -162,7 +162,7 @@ impl TurnLauncher {
     /// 双轨退役（[ADR-066] / T-077 步②）已删除——「接收消息」与「跑一轮」分开之后，
     /// 那条路由既无输入可收，也无响应可给（回包恒为 `accepted`）。
     ///
-    /// 两种输入互斥，区别只在构造 `model_chat::Request` 时：
+    /// 两种输入互斥，区别只在构造 `chat_request::Request` 时：
     /// - `req.message` 存在 → 追加用户消息，`single_message=Some(msg)`，从 root 会话流开始
     /// - `req.resume` 存在 → 不追加消息，`resume=Some(req)`，由 `run_chat_loop`
     ///   在 turn 循环前处理（删除旧消息 → 重新执行 → 创建新子节点）
@@ -361,10 +361,8 @@ impl TurnLauncher {
                             &session,
                             vec![msg.clone()],
                             Carrier::Runner,
-                            PublishTarget::Transcript {
-                                mgr: &runner_spawn.active_mgr,
-                                session_id: &sid_spawn,
-                            },
+                            &runner_spawn.active_mgr,
+                            &sid_spawn,
                             // 用户发言的 `principal` 是 `user`（不看会话主体），
                             // 但同一次落库里没有别的消息；主体仍按**这条会话解析出的**
                             // `agent_id` 给（编排里那次解析的同一份结果）。
@@ -454,9 +452,9 @@ impl TurnLauncher {
             // 因此下面各分支一律传 `system_prompt: None`（ping 分支除外：那是刻意的
             // 极简探活提示，不参与正常编排）。
 
-            // 构造 model_chat::Request：会话派生字段收敛为单一 base（历史上三个分支
+            // 构造 chat_request::Request：会话派生字段收敛为单一 base（历史上三个分支
             // 近重复构造 10 个字段，改一处漏两处），分支只覆盖真正不同的 4 个字段。
-            let req_base = model_chat::Request {
+            let req_base = chat_request::Request {
                 system_prompt: None,
                 single_message: None,
                 stream: Some(true),
@@ -466,7 +464,7 @@ impl TurnLauncher {
                 resume: None,
             };
             let chat_input = if let Some(tr) = resume_spawn {
-                json!(model_chat::Request {
+                json!(chat_request::Request {
                     system_prompt: None,
                     // resume 必须加载历史以定位目标消息
                     load_history: Some(true),
@@ -474,7 +472,7 @@ impl TurnLauncher {
                     ..req_base
                 })
             } else if is_ping {
-                json!(model_chat::Request {
+                json!(chat_request::Request {
                     system_prompt: Some("You are a helpful assistant.".to_string()),
                     single_message: user_msg_spawn,
                     load_history: include_history,
@@ -485,13 +483,13 @@ impl TurnLauncher {
                 // （`prompt` 不持久化，每轮发送重新生成，模型始终知道"现在几点、在哪个工作区"）。
                 let single = user_msg_spawn.map(|mut m| {
                     if m.node_role() == Some(cm::NodeRole::User) {
-                        m.prompt = Some(super::super::message_build::temporal_context(Some(
+                        m.prompt = Some(super::super::temporal::temporal_context(Some(
                             w_clone.as_str(),
                         )));
                     }
                     m
                 });
-                json!(model_chat::Request {
+                json!(chat_request::Request {
                     system_prompt: None,
                     single_message: single,
                     load_history: include_history,

@@ -35,8 +35,7 @@ mod view;
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{
-    event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
-    EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED,
+    event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED,
 };
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
@@ -297,6 +296,26 @@ pub use schemas::detail::{
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
 pub use schemas::session::{chat_node, facts, node_build, principal, session_chat};
+// 6b-③ 跨墙词表（[ADR-086](../../../docs/010-adr/086.md "ADR-086") §7）：session 与
+// loop 两侧共同命名。全部 `pub(crate)` 出根——消费方仍在本 crate 内（C-003 只数
+// `pub use`），C-002 又禁止插件深引 `schemas` 域 ⇒ 根别名是唯一合法路径。
+pub(crate) use capability::tool_metas;
+pub(crate) use projection::turns::count_user_messages;
+pub(crate) use schemas::hook::fire_hook;
+pub(crate) use schemas::session::chat_request;
+pub(crate) use schemas::session::dispatch::{
+    run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
+    CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
+    RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, TurnReport, TurnSettings, TurnSpec,
+    TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH, WORKER_FORCE_PREFIX, WORKER_KEYWORDS,
+    WORKER_MIN_CHARS,
+};
+pub(crate) use schemas::session::facts::{
+    DrainedSupplement, FleetSnapshot, WorkerProgress, META_SUPPLEMENT, META_SUPPLEMENT_COUNT,
+    META_SUPPLEMENT_IDS,
+};
+pub(crate) use schemas::session::frames::{llm_emit_state, llm_state_frame};
+pub(crate) use schemas::session::rebuild::rebuild;
 pub use schemas::{
     ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, WordingReply,
     REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
@@ -331,11 +350,11 @@ pub use plugin::{
     PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_FILE, PLUGIN_ID_AGENT,
     PLUGIN_ID_CLASSIFY, PLUGIN_ID_COMPOSE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_EVENT_BUS,
     PLUGIN_ID_GATEWAY, PLUGIN_ID_HEARTBEAT, PLUGIN_ID_HOME, PLUGIN_ID_HOOK, PLUGIN_ID_LOCAL,
-    PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MEMORY, PLUGIN_ID_MODEL, PLUGIN_ID_SESSION,
-    PLUGIN_ID_SETTING, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS, PLUGIN_ID_WEB,
-    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PAYLOAD_KEY, ROUTE_CLASSIFY_DECIDE,
-    ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE, ROUTE_VDFS_ROOT,
+    PLUGIN_ID_LOOP, PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MEMORY, PLUGIN_ID_MODEL,
+    PLUGIN_ID_SESSION, PLUGIN_ID_SETTING, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS,
+    PLUGIN_ID_WEB, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PAYLOAD_KEY,
+    ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT,
     ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录

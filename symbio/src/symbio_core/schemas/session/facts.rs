@@ -19,7 +19,9 @@
 //! 回调机制（`RoundHookFn`）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
 
 use crate::symbio_core::chat_node::ChatNode;
+use crate::symbio_core::event::Event;
 use crate::symbio_core::node_build::dialog_node;
+use serde::{Deserialize, Serialize};
 
 /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
@@ -109,6 +111,65 @@ pub struct ReportDraft {
     /// 说这句话时距上次「用户看得见的一句话」多久。
     pub quiet_ms: i64,
 }
+
+// ==================== 跨墙纯值记录（ADR-086 §7） ====================
+//
+// 驱动器切成独立插件后，这些记录在 session 与 loop 两侧都要命名。它们只承载
+// **值**（存储读出的快照、进展投影、抽干结果），不含任何存储实现或宿主状态。
+
+/// 一次部署级扫描交回的**值**：这份事实源是不是调用方自己的会话。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetSnapshot {
+    pub own: bool,
+    pub events: Vec<Event>,
+}
+
+/// Q3 · 单个 worker 的进展投影。
+///
+/// 三个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
+/// `rounds` / `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
+/// 前端还看得见父工具状态（B2 判据 1 的 OR 式），两端各自用可见信息判定同一语义。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WorkerProgress {
+    /// 子会话 id（`metadata.parent_session_id` 归属本会话）。
+    pub id: String,
+    /// 标题；存量文件缺投影字段时为空，装配时以 [`Self::id`] 兜底。
+    pub title: String,
+    /// 该 worker 是否仍在运行（末条消息**未见终态**即为真）。
+    pub in_flight: bool,
+    /// Turn 数 = 其 user 消息数 = **前端过程段 Turn 条数**——B2 判据 2「数值同源」
+    /// 的落点。**不能拿 `message_count` 顶**：那是总消息数，与 Turn 数不同量。
+    pub rounds: usize,
+    /// 非空内容节点产出的步骤；**无内容节点不产出步骤**（B2 判据 3）。
+    pub steps: Vec<String>,
+}
+
+/// 抽干结果：**正文 + 原条数 + 溯源身份**。
+///
+/// `InboxItem` 是 session 转写域的私有类型，抽干口不返回它——跨模块暴露内部类型
+/// 会让「谁都能构造一个假的抽干结果」成为可能。
+///
+/// ⚠️ **不带 `ChatNode`**：注入只要正文，落库镜像那条节点由接收方按这里的
+/// `id` / `ids` 构造——多带一个字段就是给下一个人留一个不必有的理由。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrainedSupplement {
+    /// 折进 prompt 的正文（多条已合并）。
+    pub text: String,
+    /// **原条数**：合并了 n 条时是 n。
+    pub count: u64,
+    /// 合并消息的 **id** = **第一条补充的 id**（`merge_supplements` 的既有约定）。
+    ///
+    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧，换 id 等于让同一句话在前端
+    /// **出现两条**。
+    pub id: String,
+    /// 批内**原始条目 id 列表**（顺序 = 入队顺序），落进 `meta.supplement_ids`。
+    pub ids: Vec<String>,
+}
+
+/// 折进消息的元数据键（写侧、重建侧与读侧共用；[`super::rebuild`] 需要它们）。
+pub const META_SUPPLEMENT: &str = "supplement";
+pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";
+pub const META_SUPPLEMENT_COUNT: &str = "supplement_count";
 
 impl ReportDraft {
     /// 落库镜像上的那一格（前端读它）：`dialog_node(text, "progress", true)`。

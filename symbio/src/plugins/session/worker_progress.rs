@@ -29,7 +29,7 @@ use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::PluginError;
 
 // core 的域模块私有（C-002：外部只写 symbio_core::<符号>）⇒ 视图类型经根导出拿
-use crate::symbio_core::{transcript, turnstate, Budget, Event};
+use crate::symbio_core::{transcript, turnstate, Budget, Event, WorkerProgress};
 
 use super::chat_session::PersistentChatSession;
 use super::types::{Session, SessionSummary};
@@ -41,26 +41,6 @@ use super::types::{Session, SessionSummary};
 const STEP_MAX_CHARS: usize = 60;
 /// 步骤条数上限（**取最近的**）。进展关心"到哪了"，不是"都干过什么"。
 pub(crate) const STEPS_MAX: usize = 8;
-
-/// Q3 · 单个 worker 的进展投影。
-///
-/// 三个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
-/// `rounds` / `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
-/// 前端还看得见父工具状态（B2 判据 1 的 OR 式），两端各自用可见信息判定同一语义。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct WorkerProgress {
-    /// 子会话 id（`metadata.parent_session_id` 归属本会话）。
-    pub(crate) id: String,
-    /// 标题；存量文件缺投影字段时为空，装配时以 [`Self::id`] 兜底。
-    pub(crate) title: String,
-    /// 该 worker 是否仍在运行（末条消息**未见终态**即为真）。
-    pub(crate) in_flight: bool,
-    /// Turn 数 = 其 user 消息数 = **前端过程段 Turn 条数**——B2 判据 2「数值同源」
-    /// 的落点。**不能拿 `message_count` 顶**：那是总消息数，与 Turn 数不同量。
-    pub(crate) rounds: usize,
-    /// 非空内容节点产出的步骤；**无内容节点不产出步骤**（B2 判据 3）。
-    pub(crate) steps: Vec<String>,
-}
 
 /// Q3 投影（旧读法）：由子会话清单 + 完整转写算进展。**纯函数**（形参只有两个 `&`，可穷举测试）。
 pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> WorkerProgress {

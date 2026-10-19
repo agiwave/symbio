@@ -123,6 +123,65 @@ async fn sub_session_routes_into_parent_dir() {
         .is_empty());
 }
 
+/// 召回只扫**平级**会话（[T-118](../../../../../docs/009-task/118-召回嵌套子会话遍历裁决批.md "T-118-召回嵌套子会话遍历裁决批")）：
+/// 嵌套子会话（`<根>/<父>/sessions/<子>/`）的事实源**不进**顶层召回快照。
+/// 这是召回读方（`recall_snapshots`）的范围裁决，不是漏扫——改范围先改裁决。
+#[test]
+fn recall_snapshots_scans_one_level_deliberately() {
+    use crate::symbio_core::Store as _;
+    use crate::symbio_core::{Entity, Event, Verb, EVENT_MEMORY_ENCODED};
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let seed = |dir: &std::path::Path, id: &str, text: &str| {
+        std::fs::create_dir_all(dir).unwrap();
+        let wal = EventWalStore::open(dir.join(paths::V2_WAL_FILE)).unwrap();
+        wal.append(
+            Event::pending(
+                id,
+                EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_ts(1000)
+            .with_payload(json!({
+                "content": text,
+                "tag": "经验",
+                "generation": 0u32,
+                "vec": [],
+                "vis_scope": "shared",
+            })),
+        )
+        .unwrap();
+    };
+    seed(&tmp.path().join("s-a"), "a1", "A 自己的记忆");
+    seed(&tmp.path().join("s-b"), "b1", "B 的共享经验");
+    seed(
+        &tmp.path().join("s-p").join("sessions").join("s-c"),
+        "c1",
+        "子会话在委派里记下的",
+    );
+
+    let snaps = store.recall_snapshots("s-a");
+    assert_eq!(snaps.len(), 2, "平级两份事实源（A / B）");
+    let contents: Vec<&str> = snaps
+        .iter()
+        .flat_map(|s| s.events.iter())
+        .filter_map(|e| e.payload.get("content").and_then(|v| v.as_str()))
+        .collect();
+    assert!(
+        contents.contains(&"B 的共享经验"),
+        "平级会话照常进扫描（实际: {contents:?}）"
+    );
+    assert!(
+        !contents.contains(&"子会话在委派里记下的"),
+        "嵌套子会话不进顶层召回（刻意范围，T-118；实际: {contents:?}）"
+    );
+    assert!(snaps.iter().any(|s| s.own), "调用方自己那份 own=true");
+}
+
 #[tokio::test]
 async fn deleting_parent_cascades_sub_sessions() {
     let tmp = TempDir::new().unwrap();

@@ -68,6 +68,10 @@ const FN_DEF_RE = new RegExp(`\\bfn\\s+(?:${[...NODE_PRIMITIVES, ...SNAPSHOT_PRI
 const FACT_OWNER_CALL_RE = new RegExp(`\\bmessage_events::(?:${FACT_OWNERS.join('|')})\\s*\\(`)
 /** 寄存锚：取代事实的**真实寄存赋值**（注释里提一嘴不算）。 */
 const PARK_RE = /\bconsolidated\s*=\s*Some\s*\(/
+/** 端口转发不是原语调用：`self.port.replace_all(...)` 只是把动作交给地址面执行。 */
+const PORT_CALL_RE = /\bport\s*\.\s*replace_all\s*\(/
+/** 行内豁免（本行或前一行；理由不可为空）——只给「地址面中继」这类无锚可持的层。 */
+const WAIVER_RE = /\/\/\s*list-write-fact-allow\s+LWF-002\s*:\s*(\S.*)$/
 
 /** 唯一写入口所在文件（相对扫描根的路径以此为尾）。 */
 const WRITER_SUFFIX = `chat_session${path.sep}write.rs`
@@ -98,11 +102,11 @@ function parseFile(text) {
   return { calls, factCalls }
 }
 
-function audit(root) {
+function audit(root, prefix = '') {
   const violations = []
 
   for (const file of walk(root)) {
-    const rel = path.relative(root, file).split(path.sep).join('/')
+    const rel = [prefix, path.relative(root, file).split(path.sep).join('/')].filter(Boolean).join('/')
     const text = fs.readFileSync(file, 'utf8')
     const lines = text.split('\n')
     const inWriter = file.endsWith(WRITER_SUFFIX)
@@ -118,6 +122,11 @@ function audit(root) {
         )
         continue
       }
+      // 端口转发（`self.port.replace_all`）不是原语本身：真正落库的动作在地址面
+      // 另一端执行，锚的义务属于**逻辑调用方**（压缩现场）。
+      if (PORT_CALL_RE.test(call.text)) continue
+      // 地址面中继无锚可持：它拿不到 `SessionContext`，寄存发生在调用方。
+      if (WAIVER_RE.test(call.text) || (call.line > 1 && WAIVER_RE.test(lines[call.line - 2]))) continue
       // 取代原语：找寄存锚（剥注释的窗口——注释里提「寄存」不算寄存）。
       const lo = Math.max(0, call.line - 1 - NEAR)
       const hi = Math.min(lines.length, call.line - 1 + NEAR)
@@ -145,12 +154,21 @@ function audit(root) {
 }
 
 const rootArg = process.argv.find((a) => a.startsWith('ROOT='))
-const root = rootArg ? path.resolve(rootArg.slice(5)) : path.join(repoRoot, 'symbio', 'src', 'plugins', 'session')
-if (!fs.existsSync(root)) {
-  console.error(red(`✗ ROOT 不存在：${root}`))
-  process.exit(1)
+// 写原语与中继在 session；取代原语的**逻辑调用点**（压缩现场）在 loop——
+// 两棵树一起扫，锚才真的有人看。`ROOT=` 供回归测试指向夹具树。
+const roots = rootArg
+  ? [{ dir: path.resolve(rootArg.slice(5)), prefix: '' }]
+  : ['session', 'loop'].map((p) => ({
+      dir: path.join(repoRoot, 'symbio', 'src', 'plugins', p),
+      prefix: p,
+    }))
+for (const { dir } of roots) {
+  if (!fs.existsSync(dir)) {
+    console.error(red(`✗ 扫描根不存在：${dir}`))
+    process.exit(1)
+  }
 }
-const { violations } = audit(root)
+const violations = roots.flatMap(({ dir, prefix }) => audit(dir, prefix).violations)
 if (violations.length > 0) {
   console.error(red(`✗ 列表写原语结构扫描：${violations.length} 处违规`))
   for (const v of violations) console.error('  ' + v)

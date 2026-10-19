@@ -141,6 +141,44 @@ test('不判**单独带 #[cfg(test)] 的项**（stripTestModules 抓不到的那
   assert.match(r.stdout, /0 个登记项/)
 })
 
+test('整文件 #[cfg(test)] 的测试辅助不判（test_support 这类）', () => {
+  const r = audit({
+    files: { [F]: '#![cfg(test)]\n\n//! 测试辅助\n\npub fn f(a: Option<u32>) -> u32 {\n    a.unwrap()\n}\n' },
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /0 个登记项/)
+})
+
+test('父模块里 #[cfg(test)] mod 声明的文件不判（声明与文件分居两处）', () => {
+  const r = audit({
+    files: {
+      'symbio/src/mod.rs': 'pub fn f() {}\n\n#[cfg(test)]\nmod helper;\n',
+      'symbio/src/helper.rs': unwrapFn,
+    },
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /0 个登记项/)
+})
+
+test('普通 mod 声明的文件照判（隔离不得误伤生产模块）', () => {
+  const r = audit({
+    files: {
+      'symbio/src/mod.rs': 'pub fn f() {}\n\nmod helper;\n',
+      'symbio/src/helper.rs': unwrapFn,
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /PN-001 symbio\/src\/helper\.rs::f/)
+})
+
+test('文件级 cfg(test) 之前的普通代码不整篇跳过', () => {
+  const r = audit({
+    files: { [F]: 'pub fn f(a: Option<u32>) -> u32 {\n    a.unwrap()\n}\n\n#![cfg(test)]\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /PN-001/)
+})
+
 test('不判注释里提到的形态（写「这里不能用 unwrap」不得自我命中）', () => {
   const r = audit({
     files: { [F]: '// 这里不能用 unwrap()，那会 panic!()\n/* 也不该 todo!() */\npub fn f() {}\n' },

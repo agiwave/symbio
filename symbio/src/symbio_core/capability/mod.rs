@@ -1,3 +1,4 @@
+mod collect;
 mod configurable;
 mod error;
 mod model;
@@ -7,6 +8,7 @@ mod prompt;
 mod row;
 mod tool_name;
 
+pub use collect::tool_metas;
 pub use error::{
     capability_init_error_bucket, capability_report_error, capability_take_errors, CapabilityError,
 };

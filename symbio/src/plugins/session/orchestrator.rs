@@ -23,22 +23,19 @@
 
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::capabilities::{attach_capabilities, collect_capabilities};
-use super::chat_loop::StopSignal;
-use super::model_chat;
-// 运行态的结局常量与变更类型：子模块经 `use super::*;` 取用（`consume` / `entry`
-// / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
-use super::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
+pub(crate) use super::convergence::{Convergence, SessionStateChange};
 use crate::plugin_debug;
+use crate::symbio_core::chat_request;
 use crate::symbio_core::{
     capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE,
     PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use crate::symbio_core::{chat_node as cm, session_chat};
-pub(crate) use broadcast::{Convergence, SessionStateChange};
 pub(crate) use runner::TurnLauncher;
 use serde_json::json;
 use std::sync::atomic::Ordering;
+pub(crate) use stop::StopSignal;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -225,13 +222,18 @@ impl Drop for WorkingGuard {
 }
 
 // 子模块：两个手柄的 `impl` 块按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。
-mod broadcast;
+/// 压缩快照入格（`consolidate` 动作的执行体，ADR-086 §4/§6）：事实源归档不在
+/// core `Store` 面内，因此写方必须留在持令牌的 session。
+pub(crate) mod consolidate;
 mod consume;
 mod entry;
 mod failure;
 mod rate_limit;
 mod runner;
 mod sink;
+/// Stop 钩子的幂等触发器：随会话生命周期留在 session（ADR-086 §6），
+/// 驱动器只交回 `TurnReport.last_message`。
+pub(crate) mod stop;
 
 #[cfg(test)]
 #[path = "orchestrator.test.rs"]

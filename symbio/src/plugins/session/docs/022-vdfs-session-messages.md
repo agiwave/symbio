@@ -165,13 +165,13 @@ read(<根>/session/<sid>/message/<mid>)
 **这条不变量的落地点是「落库」与「发帧」绑在同一个函数里**：`append_messages` 把落库后的权威副本
 交回调用方（它返回消息而非条数的唯一原因——号是临界区内补在私有副本上的，调用方
 手里那条没有号），而「落库 → 逐条下发权威副本」整段动作只有**一个实现**
-（`transcript/publish.rs::append_and_publish`）。三条落库路径不再各写各的回包，只声明**走哪条通道**：
+（`transcript/publish.rs::append_and_publish`）。三条落库路径不再各写各的回包，只声明**这条节点的诞生事实由谁落**（`Carrier`）：
 
-| 落库路径 | 通道 |
+| 落库路径 | 承载格（`Carrier`） |
 |---|---|
-| 助手侧增量落库（`chat_loop/io.rs::persist_messages`） | `PublishTarget::Sink`（帧直投 `ExecEventSink`） |
-| 用户发言（`orchestrator/entry.rs`） | `PublishTarget::Transcript`（按会话 id 解析转写） |
-| 压缩节点（`context/pipeline.rs`） | 同上（经 `CompressionEmitter::target`） |
+| 助手侧增量落库（`loop/chat_loop/io.rs::persist_messages`） | `Carrier::Runner`（助手正文归 `turn × closed/progressed`） |
+| 用户发言（`orchestrator/entry.rs`） | `Carrier::Runner`（用户发言归 `turn × opened`） |
+| 压缩节点（`loop/context/pipeline.rs`） | `Carrier::Here`（没有别的承载格 ⇒ 落 `message.added`） |
 
 落库**失败**时不下发：错误的呈现由调用方决定——三条路径的降级各不相同（主循环发
 `Warn` 继续、编排广播失败结局并中断、压缩只记日志），那是各自的领域判定。

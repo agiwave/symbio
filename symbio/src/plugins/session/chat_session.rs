@@ -163,8 +163,8 @@ impl PersistentChatSession {
     /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
     ///
     /// 任一环落空 ⇒ `None`：顶层会话的正常形态，或父会话已删 / 读失败。调用方
-    /// 按 `Scope::Root` 处置（[`super::chat_loop::state::request_scope`]）——与接线前
-    /// 逐字一致。**这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
+    /// （`orchestrator::consume`）按 `Scope::Root` 处置——与接线前逐字一致。
+    /// **这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
     /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_granted`）。
     ///
     /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
@@ -218,21 +218,6 @@ impl PersistentChatSession {
 
     pub(crate) fn session_id(&self) -> &str {
         &self.session_id
-    }
-
-    /// 技能编译开关（步 22 · [roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")；
-    /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
-    pub(crate) fn skill_compile_enabled(&self) -> bool {
-        self.cfg_or_default().skill_compile_enabled
-    }
-
-    /// 技能快路开关（步 22 的**执行半边**，S11 §4 参数表的 `actor.pattern`；
-    /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
-    ///
-    /// 与 core 的 `ActorSpec.pattern` 同名不同物，理由见
-    /// [ADR-079](../../../../docs/010-adr/079.md "ADR-079")。
-    pub(crate) fn skill_fast_path(&self) -> bool {
-        self.cfg_or_default().skill_fast_path
     }
 }
 

@@ -75,8 +75,8 @@ use super::registry::PluginRegistry;
 use crate::symbio_core::{descend_addr, vdfs_host_ctx};
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
-    Plugin, PluginInvokeRequestExt, PluginMeta, Registry, CONFIGURABLE_VISITOR, PATH,
-    PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
+    Plugin, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, Registry,
+    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
@@ -163,8 +163,14 @@ impl CompositeVdfs {
             if child.clone().get_vfs_provider().is_some() {
                 collected.push((name.clone(), child.clone()));
             }
-            // 配置声明：独立通道，照旧遍历（不改机制）
-            let sub = host.fork();
+            // 配置声明：独立通道，照旧遍历（不改机制）。
+            //
+            // ⚠️ 必须用**干净上下文**：宿主请求里可能挂着能力 / 选项收集器，
+            // 沿用 `host.fork()` 会让子插件把这次「只要配置声明」的广播当成
+            // 完整能力收集再跑一遍——一次 VDFS 派发就会重注册工具、重拼提示词。
+            // agent 子树尤其致命：它的父地址要靠容器在能力广播里续接，而配置
+            // 通道没有挂载点语义，重跑后拼出的是缺失 `agent/<id>` 的错误地址。
+            let sub = Arc::new(PluginSimpleRequest::child_of(&host, None));
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
             sub.set(CONFIGURABLE_VISITOR, configs.clone());
             broadcast_collect(child.clone(), sub, &format!("{name} 的配置声明")).await;

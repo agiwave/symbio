@@ -527,6 +527,11 @@ pub(crate) enum VdfsSessionPath<'a> {
     SubSession { id: &'a str, sub: &'a str },
     /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
+    /// `<id>/_run/<op>`：loop→session 的内部动作（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4）。
+    ///
+    /// **不是资源**：不出现在 `list` 里，只接受 `Action`；op 闭集与授权判据
+    /// 都住在 `plugin/run_actions.rs`。
+    Run { id: &'a str, op: &'a str },
 }
 
 /// 解析会话挂载点内的相对路径（首段 = 会话 id，次段 = 内部区段）。
@@ -583,6 +588,15 @@ pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> 
             id,
             rel: sub.unwrap_or(""),
         }),
+        // 内部动作段：只认 `<sid>/_run/<op>` 两级，没有更深层级；op 是否合法
+        // 由动作面判（不在地址解析里开花名册）。
+        crate::symbio_core::run_ops::SEG => match sub {
+            Some(op) if !op.is_empty() && !op.contains('/') => Ok(VdfsSessionPath::Run { id, op }),
+            _ => Err(VdfsError::not_found(format!(
+                "内部动作段需要 `<sid>/{}/<op>` 形式的动作名：{path}",
+                crate::symbio_core::run_ops::SEG
+            ))),
+        },
         _ => Err(not_found()),
     }
 }

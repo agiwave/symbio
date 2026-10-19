@@ -967,3 +967,72 @@ async fn container_leaves_item_addresses_untouched() {
         "拥有者显式给的地址不被改写"
     );
 }
+
+/// 子插件在配置声明通道里看到的两个关键词（能力收集器 / 配置收集器）
+struct ProbeChild {
+    seen: Arc<std::sync::Mutex<(bool, bool)>>,
+}
+
+#[async_trait]
+impl Plugin for ProbeChild {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("probe", "探针")
+    }
+
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
+        Err(PluginError::NotFound("probe".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
+        if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
+            *self.seen.lock().unwrap() = (
+                ctx.get(CAPABILITY_VISITOR).is_some(),
+                ctx.get(CONFIGURABLE_VISITOR).is_some(),
+            );
+        }
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+        Some(Arc::new(LeafProvider))
+    }
+}
+
+/// 配置声明通道是**隔离**的：宿主请求挂着能力收集器时，子插件不得在配置广播里
+/// 看到它——否则一次 VDFS 派发就会重跑完整能力收集（agent 子树会以缺失的父地址
+/// 拼出错误提示词地址，T57 回归）。
+#[tokio::test]
+async fn config_broadcast_carries_no_capability_visitor() {
+    let seen = Arc::new(std::sync::Mutex::new((false, false)));
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
+    map.insert(
+        "probe".to_string(),
+        Arc::new(ProbeChild { seen: seen.clone() }),
+    );
+    let vdfs = container_map(map);
+
+    let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let capabilities: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    host.set(CAPABILITY_VISITOR, capabilities);
+    let ctx = vdfs_context(&host);
+
+    let _ = vdfs
+        .dispatch(
+            &ctx,
+            "probe",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let (has_capability, has_configurable) = *seen.lock().unwrap();
+    assert!(!has_capability, "配置通道不得携带能力收集器");
+    assert!(has_configurable, "配置通道必须携带配置收集器");
+}

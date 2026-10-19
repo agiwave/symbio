@@ -73,7 +73,7 @@
 use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::plugins::session::paths;
-use crate::symbio_core::{Event, PluginError, Seq, Store};
+use crate::symbio_core::{Event, FleetSnapshot, PluginError, Seq, Store};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -87,8 +87,6 @@ mod wal;
 /// 锁文件 / 归档段都是「会话怎么落事实」的私有细节，别的插件要拿事实走 core 的
 /// `Store` 端口或会话的地址面，而不是自己开一个 WAL。
 pub(in crate::plugins::session) use wal::EventWalStore;
-#[cfg(test)]
-pub(in crate::plugins::session) use wal::WalStore;
 
 /// 父会话目录内存放子会话的固定子目录名——**唯一定义在 `paths`**（路径词汇
 /// 单点，部署级读侧的下探遍历按同一个名字走，见 `paths::session_wals_deep`）。
@@ -660,12 +658,6 @@ impl SessionStore {
     }
 }
 
-/// 一次部署级扫描交回的**值**：这份事实源是不是调用方自己的会话。
-pub(in crate::plugins::session) struct FleetSnapshot {
-    pub own: bool,
-    pub events: Vec<Event>,
-}
-
 /// 召回扫描预算：最多看几个会话的事实源 / 单文件字节上限 / 总字节上限。
 ///
 /// 超限 ⇒ 不扫并 `plugin_warn` 记一笔——看不见的文件不假装看得见。
@@ -859,7 +851,7 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
     use crate::symbio_core::Store as _;
     let snapshot = store.range(crate::symbio_core::Seq::new(0));
-    Some(super::rebuild::rebuild(&snapshot))
+    Some(crate::symbio_core::rebuild(&snapshot))
 }
 
 /// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。

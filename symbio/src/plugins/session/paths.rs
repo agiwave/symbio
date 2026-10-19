@@ -40,15 +40,6 @@ pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
 /// 下探一层——两处各写一个字面量，扫描范围就会与存储布局悄悄分叉。
 pub const SUB_SESSIONS_SUBDIR: &str = "sessions";
 
-/// 压缩占位符共用的统一取回指引（P1-2 协议）。
-///
-/// L0（工具结果守卫）、L3（transcript 转存）的占位符都必须附带同一格式的
-/// 取回说明，保证模型在任意层级遇到存档占位符时都能用同一入口
-///（`vdfs_read` + offset/limit 分段）取回全文。
-/// 请求视图层的淡化（内容节点/工具结果）不写存档，原文恒在会话存储中，
-/// 无需取回指引。
-pub const RETRIEVAL_HINT: &str = "（取回：vdfs_read 该路径，按 offset/limit 分段读取）";
-
 /// 将 session_id 转换为安全的目录名。
 ///
 /// session_id 会直接成为文件系统目录名，必须替换路径分隔符（`/`、`\`）

@@ -24,38 +24,7 @@
 use super::super::active::ActiveSessionManager;
 use super::super::chat_session::{Carrier, MessageChange, PersistentChatSession};
 use crate::symbio_core::chat_node as cm;
-use crate::symbio_core::{ExecEventSink, PluginError};
-
-/// 落库回包的**发布通道**：拿到转写的方式有两种，帧怎么发只有一种。
-///
-/// | 通道 | 用在哪 | 落点 |
-/// |---|---|---|
-/// | [`Self::Sink`] | 执行期（chat_loop 主循环） | `ExecEventSink`（生产形态 `TranscriptSink` → `Transcript::apply`） |
-/// | [`Self::Transcript`] | 编排入口与压缩域 | [`ActiveSessionManager::transcript_apply`]（按会话 id 现场解析） |
-///
-/// 两条通道的差别只在**怎么拿到转写**；帧的构造与逐条下发都在
-/// [`append_and_publish`] 里，不允许在调用点再写一份。
-pub(crate) enum PublishTarget<'a> {
-    /// 执行期出口：帧直投 sink。
-    Sink(&'a ExecEventSink),
-    /// 插件出口：按会话 id 解析转写后逐条应用。
-    Transcript {
-        mgr: &'a ActiveSessionManager,
-        session_id: &'a str,
-    },
-}
-
-impl PublishTarget<'_> {
-    async fn publish(&self, message: cm::ChatNode) {
-        match self {
-            Self::Sink(sink) => sink.emit(message).await,
-            Self::Transcript { mgr, session_id } => {
-                mgr.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&message))
-                    .await
-            }
-        }
-    }
-}
+use crate::symbio_core::PluginError;
 
 /// 落库 + **落库回包**的唯一实现（`session/docs/022-vdfs-session-messages.md` §3.4）。
 ///
@@ -95,9 +64,10 @@ pub(crate) async fn append_and_publish(
     session: &PersistentChatSession,
     messages: Vec<cm::ChatNode>,
     carrier: Carrier,
-    to: PublishTarget<'_>,
+    mgr: &ActiveSessionManager,
+    session_id: &str,
     session_principal: &str,
-) -> Result<(), PluginError> {
+) -> Result<Vec<cm::ChatNode>, PluginError> {
     // 事实落格收在 `apply` 里（[ADR-054] 决策 2 的顺序反转）：`carrier` 声明
     // 「这条节点的诞生事实由谁落」——运行器承载的（用户发言 / 助手正文 / 工具结果）
     // 不另落，没有承载格的（压缩记录）落 `message.added`。
@@ -110,10 +80,13 @@ pub(crate) async fn append_and_publish(
             carrier,
         })
         .await?;
-    for message in persisted {
-        to.publish(message).await;
+    for message in &persisted {
+        mgr.transcript_apply(session_id, crate::symbio_core::llm_message_frame(message))
+            .await;
     }
-    Ok(())
+    // 交回权威副本：loop 经地址面调用本条出口时，本地镜像要靠它换入存储分配的
+    // `seq` / `timestamp`（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4）。
+    Ok(persisted)
 }
 
 /// 落库前补身份的**唯一执行点**：写方知道这一轮是谁在说话，只补**没标过**的——

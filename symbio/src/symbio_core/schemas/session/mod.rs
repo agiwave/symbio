@@ -1,7 +1,11 @@
 pub mod chat_node;
+pub mod chat_request;
+pub mod dispatch;
 pub mod facts;
+pub mod frames;
 pub mod node_build;
 pub mod principal;
+pub mod rebuild;
 pub mod session_chat;
 
 // `chat_node` 用 `super::Principal` 引同目录的 `principal`——这里做一次短路径 re-export

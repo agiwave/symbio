@@ -63,6 +63,7 @@ pub mod reputation;
 pub mod slo;
 pub mod span;
 pub mod transcript;
+pub mod turns;
 pub mod turnstate;
 
 #[cfg(test)]
