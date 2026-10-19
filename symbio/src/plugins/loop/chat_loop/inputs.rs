@@ -251,13 +251,19 @@ pub(crate) async fn prepare_turn_inputs(
             min_chars: settings.worker_min_chars,
         },
     );
-    let request_sections = context::build_request_sections(
-        recall_section.as_deref(),
-        // 调度段（S7 步 16–17，批⑨）：就绪任务集，非空时置顶一条 `meta.kind = readyset`。
-        turn.ready_section.as_deref(),
-        // 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录，落 index 2。
-        delegate_section.as_deref(),
-    );
+    // 段的**次序**在这里声明（= 模型读到的上下文次序），段的**名字**由 `SectionKind`
+    // 唯一给出。加一段 = 这个数组加一行 + 枚举加一个变体，两处都由编译器逼着补全。
+    let request_sections = context::build_request_sections(&[
+        // 长期记忆：**第一项** ⇒ 落在 index 0（背景事实置顶，见函数文档）。
+        (context::SectionKind::Recall, recall_section.as_deref()),
+        // 调度段（S7 步 16–17，批⑨）：就绪任务集。
+        (
+            context::SectionKind::ReadySet,
+            turn.ready_section.as_deref(),
+        ),
+        // 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录。
+        (context::SectionKind::Delegate, delegate_section.as_deref()),
+    ]);
 
     Ok(TurnInputs {
         root_id,

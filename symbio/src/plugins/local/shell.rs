@@ -555,15 +555,13 @@ impl Capability for ShellTool {
                 "Empty workdir in context".to_string(),
             ));
         }
-        // per-session 风险等级阈值：与 agent_id/provider_id/mode 同级别，由 orchestrator 写入 ctx
+        // per-session 风险等级阈值：与 agent_id/provider_id/mode 同级别，由 orchestrator
+        // 写入 ctx。字面量→档位的映射问 [`CapabilityRiskLevel::from_name`]（唯一解析点，
+        // 审批闸门用同一个方法）——不在这里再写一份 `match`。
         let threshold = ctx
             .get(crate::symbio_core::RISK_LEVEL)
-            .map(|s| match s.as_str() {
-                "low" => CapabilityRiskLevel::Low,
-                "high" => CapabilityRiskLevel::High,
-                _ => CapabilityRiskLevel::Medium,
-            })
-            .unwrap_or(CapabilityRiskLevel::Medium);
+            .map(|s| CapabilityRiskLevel::from_name(&s))
+            .unwrap_or_default();
 
         // 执行期双原语 + 快照身份，全部由编排层经 ctx 注入；**缺席即降级**：
         // `ExecEventSink::Null`（不发增量）、永不中止的信号、`None` 快照身份。

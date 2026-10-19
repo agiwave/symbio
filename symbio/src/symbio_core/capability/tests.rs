@@ -85,3 +85,41 @@ fn risk_serde_shape() {
         .get("risk")
         .is_none());
 }
+
+/// `from_name` 与 serde 的线格式**同一套字面量**——两处不一致就会分叉。
+///
+/// 这个仓有两个方向的风险等级字符串：serde（`CapabilityMeta.risk` 进出 tools/list
+/// JSON）与 `ctx[RISK_LEVEL]`（会话阈值，人写在会话元数据里）。若 `from_name` 认的词
+/// 与 serde 产出的词不同，同一档位两边读出不同结果，而**两边都不会报错**。
+#[test]
+fn from_name_agrees_with_serde_wire_format() {
+    for level in [
+        CapabilityRiskLevel::Low,
+        CapabilityRiskLevel::Medium,
+        CapabilityRiskLevel::High,
+    ] {
+        let wire = serde_json::to_value(level).unwrap();
+        let name = wire.as_str().unwrap();
+        assert_eq!(
+            CapabilityRiskLevel::from_name(name),
+            level,
+            "serde 产出 {name:?}，from_name 却读成别的档位"
+        );
+    }
+}
+
+/// 未识别的值 ⇒ `Medium`（宁可多问一次），不 panic、不放宽。
+///
+/// `"critical"` 是刻意选的：它看起来像「比 high 更高」，而本档位没有这一档。
+/// 若哪天有人往会话元数据里写它，正确行为是**退回默认档**（要审批），而不是当成
+/// `Low` 放行、也不是崩在一次无关的会话启动上。
+#[test]
+fn from_name_falls_back_to_medium_on_unknown() {
+    for raw in ["", "medium", "critical", "HIGH", "low ", "0"] {
+        assert_eq!(
+            CapabilityRiskLevel::from_name(raw),
+            CapabilityRiskLevel::Medium,
+            "{raw:?} 应退回默认档"
+        );
+    }
+}

@@ -165,6 +165,26 @@ pub enum CapabilityRiskLevel {
     High,
 }
 
+impl CapabilityRiskLevel {
+    /// 从字面量解析 —— **本档位字符串的唯一解析点**。
+    ///
+    /// 未识别的值按 [`Self::default`] 兜底（`Medium`），与「未声明风险的工具」同一条
+    /// 判据：宁可多问一次，不因为写错一个词就静默放宽。
+    ///
+    /// 为什么要有这个方法：会话阈值（`ctx[RISK_LEVEL]`）此前在两处**各写一份**
+    /// 五字 `match`（审批闸门 `providers/collectors/approval.rs` 与 shell 的
+    /// 参数级风险判定）。加一档 `Critical` 要改两处，漏一处就静默降级成 `Medium`——
+    /// 那是**放宽安全约束**的静默失效，不是缺个功能。现在两处都问这里。
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "low" => Self::Low,
+            "high" => Self::High,
+            // 含 "medium" 与一切未识别的值。
+            _ => Self::Medium,
+        }
+    }
+}
+
 #[async_trait]
 pub trait Capability: Send + Sync + 'static {
     fn meta(&self) -> CapabilityMeta;

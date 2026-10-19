@@ -161,27 +161,29 @@ pub(crate) fn round_report_hook(
 ///
 /// ## 取法：按 `meta.kind` 取，不按位置
 ///
-/// 三段的 `kind` 是 `recall_context` / `readyset` / `delegate_context`，由
-/// `build_request_sections` 单点写入。按 `kind` 取而不是按下标（0 / 1 / 2）——下标是
-/// 「三段都在场时」的巧合，缺一段时下标全部左移（`view.rs` 的注释自己写了这个
-/// 插入次序的由来），按下标取会取错段或漏段。
+/// 各段的 `kind` 由 [`context::SectionKind::name`] 单点给出。按 `kind` 取而不是按下标
+/// （0 / 1 / 2）——下标是「各段都在场时」的巧合，缺一段时下标全部左移，按下标取会
+/// 取错段或漏段。
 ///
-/// ## 顺序：按固定次序，不按它们在视图里的位置
+/// ## 顺序：按本函数声明的优先级，不按它们在视图里的位置
 ///
-/// `build_request_sections` 产出的次序是「记忆 0 / 就绪 1 / 委派者 2」，而本函数按
-/// **记忆 → 就绪 → 委派者** 拼——即它们各自的**语义优先级**（背景 → 调度候选 →
-/// 身份目录）。两者今天恰好一致，但**不是同一条判据**：请求级前缀是一段文本，
-/// 模型读到的是先后顺序；把「谁先谁后」绑在插队算法上，下次有人调
-/// `build_request_sections` 的次序就会连带改掉模型看到的优先级。
+/// 请求级前缀是一段文本，模型读到的是先后顺序；这里是「背景 → 调度候选 → 身份目录」
+/// 的**语义优先级**。视图里的位置由装配调用点声明，两者今天恰好一致，但**不是同一条
+/// 判据**：把「谁先谁后」绑在装配次序上，下次调装配次序就会连带改掉模型看到的优先级。
 ///
-/// 三段都空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而三段皆空是常态）。
+/// 全部为空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而各段皆空是常态）。
 fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
-    const KINDS: [&str; 3] = ["recall_context", "readyset", "delegate_context"];
+    const ORDER: [context::SectionKind; 3] = [
+        context::SectionKind::Recall,
+        context::SectionKind::ReadySet,
+        context::SectionKind::Delegate,
+    ];
     // `Vec<String>` 而非 `Vec<&str>`：`to_text()` 按值产出一个 `String`，`trim()`
     // 借的是那个临时值——收 `&str` 会把返回值绑到函数参数上（E0515）。
     let mut parts: Vec<String> = Vec::new();
     let mut kinds: Vec<&str> = Vec::new();
-    for kind in KINDS {
+    for section_kind in ORDER {
+        let kind = section_kind.name();
         if let Some(text) = view
             .iter()
             .find(|m| {

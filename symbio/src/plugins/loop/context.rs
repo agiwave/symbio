@@ -39,7 +39,7 @@ pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, extract_snapshot,
     get_compression_prompt, render_snapshot_for_history, COMPRESSION_PROTOCOL_VERSION,
 };
-pub use self::view::build_request_sections;
+pub use self::view::{build_request_sections, SectionKind};
 
 const COMPRESSION_TOKEN_THRESHOLD: f64 = 0.7;
 const COMPRESSION_PRESERVE_THRESHOLD: f64 = 0.3;

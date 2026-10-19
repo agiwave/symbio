@@ -1572,13 +1572,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     {
         Some(user_seq) => {
             // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
-            // 承诺失败只记日志不冒泡——轮次已收束，派生事实失败不该把成功的一轮说成
-            // 失败（与记忆三段同一条口径）。
+            // 每族的失败在函数内各自记日志、互不打断——轮次已收束，派生事实失败不该
+            // 把成功的一轮说成失败（与记忆三段同一条口径）。本调用点因此不判返回值。
             //
             // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
             // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
             // 在 `ctx` 被移进分发口之前取好）。
-            if let Err(why) = super::derived_facts::record_derived(
+            super::derived_facts::record_derived(
                 session.session_id(),
                 store.as_ref(),
                 &all,
@@ -1590,12 +1590,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 &derived.delegations,
                 &derived.tasks,
                 &derived.breaks,
-            ) {
-                crate::plugin_warn!(
-                    "session",
-                    "[turn-exec] 承诺入格失败（turn={turn_no}）：{why}"
-                );
-            }
+            );
             // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
             // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
             // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。

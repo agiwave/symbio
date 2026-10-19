@@ -27,14 +27,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 从 `ctx[RISK_LEVEL]` 读 per-session 阈值；缺席 = `Medium`（新会话的安全默认）。
+///
+/// 字面量→档位的映射不在这里：[`CapabilityRiskLevel::from_name`] 是唯一解析点
+/// （参数级风险判定 `local::shell` 问同一个方法）。
 fn threshold_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskLevel {
     ctx.get(RISK_LEVEL)
-        .map(|s| match s.as_str() {
-            "low" => CapabilityRiskLevel::Low,
-            "high" => CapabilityRiskLevel::High,
-            _ => CapabilityRiskLevel::Medium,
-        })
-        .unwrap_or(CapabilityRiskLevel::Medium)
+        .map(|s| CapabilityRiskLevel::from_name(&s))
+        .unwrap_or_default()
 }
 
 /// 审批闸门的**唯一**判定：需要审批 ⇒ `Ok(Some(载荷))`；放行 ⇒ `Ok(None)`。

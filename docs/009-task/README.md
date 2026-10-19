@@ -60,13 +60,15 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 1 · 🟡 doing 1 · ☑ done 161 · ❌ wont 3（共 166）
+**计数**：☐ todo 3 · 🟡 doing 1 · ☑ done 161 · ❌ wont 3（共 168）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | later | plan | — |
+| `T-172-内部动作段注册化` | 内部动作段注册化——把 loop→session 的四处手写收成一张装配期冻结的表 | next | plan | T-165-控制面收敛 |
+| `T-171-keys域环拆解` | keys 域环拆解——把「万能胶」从依赖图里拿掉 | later | plan | T-165-控制面收敛 |
 
 ## 进行中
 
@@ -419,6 +421,8 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-167-会话插件切分`](167-会话插件切分.md) PL-014 步骤 6——session 切分：先让「卸载」真的成立，再逐片搬（第一批切心跳）（done） · 子项 done 1
   - [`T-169-压缩归档吞掉未收束轮的恢复锚`](169-压缩归档吞掉未收束轮的恢复锚.md) 未收束轮之上落压缩快照会把它自己的用户格归档掉——续写报「找不到未收束的轮次」（done）
 - [`T-168-模型档位闸门对内部请求无效`](168-模型档位闸门对内部请求无效.md) 三条「内部请求」直调 ModelProvider::execute_turn，绕过档位闸门——接线或显式声明（done）
+- [`T-171-keys域环拆解`](171-keys域环拆解.md) keys 域环拆解——把「万能胶」从依赖图里拿掉（todo）
+- [`T-172-内部动作段注册化`](172-内部动作段注册化.md) 内部动作段注册化——把 loop→session 的四处手写收成一张装配期冻结的表（todo）
 
 <!-- registry:summary end -->
 

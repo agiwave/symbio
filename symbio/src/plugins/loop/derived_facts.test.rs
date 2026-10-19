@@ -100,8 +100,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
 
     let snap = store.range(Seq::new(0));
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
@@ -184,8 +183,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
 
     let snap = store.range(Seq::new(0));
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
@@ -238,8 +236,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
 
     let snap = store.range(Seq::new(0));
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
@@ -305,8 +302,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &[],
         &[],
         &["budget-exhausted"],
-    )
-    .expect("派生事实入格");
+    );
 
     let snap = store.range(Seq::new(0));
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
@@ -346,8 +342,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &[],
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
     let snap = quiet.range(Seq::new(0));
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
     assert!(
@@ -508,8 +503,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
 
     // 轮末淘汰步（顺序即判据：排在承诺落格之后）。
     record_elimination(&store, 0, user_seq);
@@ -571,8 +565,7 @@ fn a_kept_delegation_never_eliminates() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
     record_elimination(&store, 0, user_seq);
 
     let snap = store.range(Seq::new(0));
@@ -616,8 +609,7 @@ fn elimination_does_not_write_a_second_verdict() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
     record_elimination(&store, 0, user_seq);
     // 第二轮再判一次（覆盖层里已经有那条撤销了）。
     record_elimination(&store, 1, user_seq);
@@ -664,13 +656,100 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         &delegations,
         &[],
         &[],
-    )
-    .expect("派生事实入格");
+    );
     record_elimination(&store, 0, user_seq);
 
     let snap = store.range(Seq::new(0));
     assert!(
         !snap.iter().any(|e| e.kind == EVENT_VERDICT_ASSERTED),
         "对等主体不持 assign.work ⇒ 淘汰机制不覆盖它（stage 字面边界）"
+    );
+}
+
+// ── 三族互不连累 ────────────────────────────────────────────────────────
+
+/// 承诺写不进去时，任务表与熔断**照样写**。
+///
+/// 三族共用同一个锚点（`user_seq`），但彼此没有数据依赖——一族写失败就让另外两族
+/// 的事实一起消失，是 `?` 的副作用，不是设计意图。此前的实现正是这样：承诺段用
+/// `map_err(..)?`，于是第一个 `append` 失败后函数直接返回，任务表与熔断事件都没写。
+///
+/// 反向守卫：把承诺段改回 `?`，本用例立刻变红（`kind == "task.*"` 与熔断格都找不到）。
+#[test]
+fn commitment_failure_does_not_block_task_or_breaker() {
+    use crate::symbio_core::facts::{Delegation, TaskDeclaration, TaskItem, TaskStatus};
+
+    /// 拒绝一切 `commitment.*` 事实、其余照常落库的写口。
+    struct CommitmentsRefuse(EventStore);
+
+    impl Store for CommitmentsRefuse {
+        type Event = Event;
+        fn append(&self, event: Event) -> Result<Seq, crate::symbio_core::AppendError> {
+            if event.kind.starts_with("commitment.") {
+                return Err(crate::symbio_core::AppendError::Duplicate);
+            }
+            self.0.append(event)
+        }
+        fn range(&self, from: Seq) -> Vec<Event> {
+            self.0.range(from)
+        }
+        fn head(&self) -> Seq {
+            self.0.head()
+        }
+    }
+
+    let store = EventStore::new();
+    let (snapshot, user_seq) = seed_turn(
+        &store,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
+    let refusing = CommitmentsRefuse(store);
+
+    record_derived(
+        "derived-test",
+        &refusing,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
+        "t0",
+        &[Delegation {
+            id: "call-1".to_string(),
+            promise: "让 reviewer 复查这段".to_string(),
+            ok: true,
+            why: String::new(),
+        }],
+        &[TaskDeclaration {
+            items: vec![TaskItem {
+                id: "t1".to_string(),
+                goal: "复查上下文收敛".to_string(),
+                depends_on: vec![],
+                status: TaskStatus::default(),
+            }],
+        }],
+        &["成本超预算"],
+    );
+
+    let snap = refusing.range(Seq::new(0));
+    // 断言一：承诺确实一条都没落（注入生效——否则本用例测的是"全成功"的平凡情形）。
+    assert!(
+        !snap.iter().any(|e| e.kind.starts_with("commitment.")),
+        "注入没生效：承诺事件不该写进去"
+    );
+    // 断言二：另两族照常落库。
+    assert!(
+        snap.iter().any(|e| e.kind.starts_with("task.")),
+        "承诺写失败后任务表被连累了——三族之间没有依赖，不该互相打断"
+    );
+    // 熔断格按 `Entity::Control` 认，不按 kind 字符串认：`EVENT_CONTROL_OPENED` 的
+    // 字面量不住公开面（`event` 模块是私有的），而本用例判的是「那一格写没写进去」，
+    // 不是它的 kind 拼写。
+    assert!(
+        snap.iter().any(|e| e.entity == Entity::Control),
+        "承诺写失败后熔断格被连累了"
     );
 }
