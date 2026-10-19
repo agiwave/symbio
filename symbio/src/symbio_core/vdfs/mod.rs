@@ -82,7 +82,7 @@ pub use words::{
 };
 // ---- 纯接口：域类型 ----
 pub use access::VdfsAccess;
-pub use change::{vdfs_change_of, VdfsChange, VdfsChangeSink};
+pub use change::{VdfsChange, VdfsChangeSink};
 pub use content::VdfsContent;
 pub use context::{VdfsContext, VdfsParams};
 pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};

@@ -7,7 +7,7 @@
 //! 任何插件都通过 `crate::symbio_core::event_bus::EventBus` 访问，而非直接引用
 //! `plugins::event_bus` 模块。
 
-use crate::symbio_core::PluginFrame;
+use crate::symbio_core::{PluginFrame, VdfsChange};
 use crate::{plugin_info, plugin_warn};
 use dashmap::DashMap;
 use serde::Deserialize;
@@ -216,6 +216,43 @@ pub fn event_bus_build_envelope(kind: &str, session_id: Option<&str>, data: Valu
 /// （`vdfsChangeInScope` 要求 `path` 是字符串）会自然忽略它，因此新增这条指令
 /// **不会**污染既有消费者的输入。
 pub const EVENT_BUS_RESYNC_MARKER_TYPE: &str = "resync";
+
+// ==================== VDFS 频道帧的解包（信封契约的唯一实现） ====================
+
+/// **VDFS 变更唯一的解包入口**——CLI 与 agent 转播桥都走这里。
+///
+/// 输入是本总线投递的一帧，信封形状由 [`event_bus_build_envelope`] 定义：
+///
+/// ```text
+/// { type: "bus_event", data: { kind, session_id, data: <VdfsChange> } }
+/// ```
+///
+/// 因此判定分两步：外层 `type == "bus_event"`（本模块的约定），内层
+/// `kind == EVENT_BUS_KIND_VDFS`（VDFS 频道）。任一不符 → `None`
+/// （帧不是给本频道消费的，属正常情况，不是错误）。
+///
+/// ## 为什么住本域而不住 `vdfs`
+///
+/// 它匹配的**外层信封**与**频道判别值**都是本域的契约（见
+/// [`event_bus_build_envelope`] / [`EVENT_BUS_KIND_VDFS`]）；只有载荷形状
+/// `VdfsChange` 是 vdfs 域的。住在 vdfs 域会让资源域认识总线（`vdfs → event_bus`
+/// 与 `vdfs → plugin` 两条边，构成依赖环族的一条路径）；搬来本域只多一条
+/// `event_bus → vdfs`（载荷类型），而 vdfs 拆边后是汇点，不成环（ADR-095）。
+/// 「拆信封 → 取 `data` → 反序列化」因此仍只有一份实现：消费端各手写一份
+/// 正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
+///
+/// 借用 `&Value` 反序列化，**不克隆载荷**——帧是热路径，每帧一份整树深拷贝很贵。
+pub fn event_bus_vdfs_change_of(frame: &crate::symbio_core::PluginFrame) -> Option<VdfsChange> {
+    use crate::symbio_core::PluginFrame;
+    let PluginFrame::Data(v) = frame else {
+        return None;
+    };
+    let bus = v.get("data")?;
+    if bus.get("kind").and_then(Value::as_str) != Some(EVENT_BUS_KIND_VDFS) {
+        return None;
+    }
+    VdfsChange::deserialize(bus.get("data")?).ok()
+}
 
 /// 构造 resync 标记帧（`kind` 与触发它的频道一致）。
 fn resync_marker(kind: &str) -> PluginFrame {

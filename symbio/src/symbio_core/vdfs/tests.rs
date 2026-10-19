@@ -6,46 +6,6 @@ use super::*;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-/// **信封契约**：`vdfs_change_of` 必须能解出 `event_bus` 产出的帧。
-///
-/// 信封在测试里**手搓**（不调 `event_bus::event_bus_build_envelope`）：它是跨模块契约，
-/// 测试要独立于产帧方来钉形状——产帧方改了形状而这里没跟着改，本用例必须红。
-/// 这正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
-#[test]
-fn vdfs_change_of_unwraps_the_bus_envelope() {
-    let frame = crate::symbio_core::PluginFrame::data(serde_json::json!({
-        "type": "bus_event",
-        "data": {
-            "kind": "vdfs",
-            "session_id": null,
-            "data": { "path": "a.md" }
-        }
-    }));
-    let change = vdfs_change_of(&frame).expect("应能解出 VdfsChange");
-    assert_eq!(change.path, "a.md");
-    assert!(change.data.is_none());
-}
-
-/// 非 `kind = "vdfs"` 的帧返回 `None`——不是错误，只是不归本域消费。
-#[test]
-fn vdfs_change_of_rejects_other_kinds() {
-    let frame = crate::symbio_core::PluginFrame::data(serde_json::json!({
-        "type": "bus_event",
-        "data": { "kind": "system", "session_id": null, "data": {} }
-    }));
-    assert!(vdfs_change_of(&frame).is_none());
-}
-
-/// 非 `Data` 帧（`Error`）返回 `None` 而**不 panic**。
-///
-/// `Error` 的载荷是 `Option<Value>` 且不是信封；「先解 `Data`，其余一律 `None`」
-/// 是这条路径的安全前提。
-#[test]
-fn vdfs_change_of_handles_non_data_frames() {
-    let err = crate::symbio_core::PluginFrame::Error("boom".to_string(), None);
-    assert!(vdfs_change_of(&err).is_none());
-}
-
 #[test]
 fn access_flags_roundtrip() {
     let a = VdfsAccess {

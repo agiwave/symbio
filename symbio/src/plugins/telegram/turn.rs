@@ -42,11 +42,11 @@ use crate::symbio_core::chat_node::{
     message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES,
 };
 use crate::symbio_core::{
-    event_bus_register_subscriber, event_bus_unregister_subscriber, vdfs_change_of, Plugin,
-    PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt, VdfsChange, VdfsContent, VdfsNode,
-    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, PATH, PLUGIN_ID_SESSION, ROUTE_VDFS_ROOT,
-    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
-    WORKDIR,
+    event_bus_register_subscriber, event_bus_unregister_subscriber, event_bus_vdfs_change_of,
+    Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt, VdfsChange, VdfsContent,
+    VdfsNode, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, PATH, PLUGIN_ID_SESSION,
+    ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, VDFS_STATUS_FAILED,
+    VDFS_STATUS_WORKING, WORKDIR,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -195,7 +195,7 @@ pub(super) async fn run_turn(
             Ok(Some(f)) => f,
         };
 
-        let Some(change) = vdfs_change_of(&frame) else {
+        let Some(change) = event_bus_vdfs_change_of(&frame) else {
             // 非 vdfs 频道的帧（系统事件）不归本面管；背压重同步单独认。
             if is_resync(&frame) {
                 if let Some(node) = stat_node(&router, ctx, session_id, &session_addr).await {
@@ -423,7 +423,7 @@ async fn unwatch(
 
 /// 帧是否是一条**背压重同步标记**。
 ///
-/// 它不是一条变更（刻意不带 `path`，`vdfs_change_of` 解不出），因此必须单独认；
+/// 它不是一条变更（刻意不带 `path`，`event_bus_vdfs_change_of` 解不出），因此必须单独认；
 /// 顺序也不可颠倒——它靠「解不出」与真变更区分（与 `cli` 的 `bus_frame_of` 同款）。
 fn is_resync(frame: &PluginFrame) -> bool {
     let PluginFrame::Data(v) = frame else {

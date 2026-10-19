@@ -151,3 +151,46 @@ async fn fan_out_shares_one_payload_allocation() {
     event_bus_unregister_subscriber(&id1);
     event_bus_unregister_subscriber(&id2);
 }
+
+// ── VDFS 频道帧的解包（随 `event_bus_vdfs_change_of` 从 `vdfs/change.rs` 搬来，
+// ADR-095 第三刀：信封的外层与频道判别值都是本域的契约，解包入口与它同住）──
+
+/// **信封契约**：`event_bus_vdfs_change_of` 必须能解出本总线产出的帧。
+///
+/// 信封在测试里**手搓**（不调 `event_bus_build_envelope`）：它是跨模块契约，
+/// 测试要独立于产帧方来钉形状——产帧方改了形状而这里没跟着改，本用例必须红。
+/// 这正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
+#[test]
+fn vdfs_change_of_unwraps_the_bus_envelope() {
+    let frame = PluginFrame::data(json!({
+        "type": "bus_event",
+        "data": {
+            "kind": "vdfs",
+            "session_id": null,
+            "data": { "path": "a.md" }
+        }
+    }));
+    let change = event_bus_vdfs_change_of(&frame).expect("应能解出 VdfsChange");
+    assert_eq!(change.path, "a.md");
+    assert!(change.data.is_none());
+}
+
+/// 非 `kind = "vdfs"` 的帧返回 `None`——不是错误，只是不归本频道消费。
+#[test]
+fn vdfs_change_of_rejects_other_kinds() {
+    let frame = PluginFrame::data(json!({
+        "type": "bus_event",
+        "data": { "kind": "system", "session_id": null, "data": {} }
+    }));
+    assert!(event_bus_vdfs_change_of(&frame).is_none());
+}
+
+/// 非 `Data` 帧（`Error`）返回 `None` 而**不 panic**。
+///
+/// `Error` 的载荷是 `Option<Value>` 且不是信封；「先解 `Data`，其余一律 `None`」
+/// 是这条路径的安全前提。
+#[test]
+fn vdfs_change_of_handles_non_data_frames() {
+    let err = PluginFrame::Error("boom".to_string(), None);
+    assert!(event_bus_vdfs_change_of(&err).is_none());
+}

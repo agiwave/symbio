@@ -96,40 +96,6 @@ impl VdfsChange {
     }
 }
 
-// ==================== 总线帧解包（信封契约的唯一实现） ====================
-
-/// **VDFS 变更唯一的解包入口**——CLI 与 agent 转播桥都走这里。
-///
-/// 输入是 `event_bus` 投递的一帧，信封形状由
-/// `event_bus::event_bus_build_envelope` 定义：
-///
-/// ```text
-/// { type: "bus_event", data: { kind, session_id, data: <VdfsChange> } }
-/// ```
-///
-/// 因此判定分两步：外层 `type == "bus_event"`（`event_bus` 的约定），内层
-/// `kind == EVENT_BUS_KIND_VDFS`（本域关心的事件类型）。任一不符 → `None`
-/// （帧不是给本域消费的，属正常情况，不是错误）。
-///
-/// ## 为什么它必须住在这里
-///
-/// 「拆信封 → 取 `data` → 反序列化」分散在消费端各手写一份。信封形状是跨模块
-/// 契约，副本数 ≥2 时其中一份漂移只是时间问题。
-/// 本函数与 [`VdfsChange`] 同模块：**形状改了，这里先响**。
-///
-/// 借用 `&Value` 反序列化，**不克隆载荷**——帧是热路径，每帧一份整树深拷贝很贵。
-pub fn vdfs_change_of(frame: &crate::symbio_core::PluginFrame) -> Option<VdfsChange> {
-    use crate::symbio_core::PluginFrame;
-    let PluginFrame::Data(v) = frame else {
-        return None;
-    };
-    let bus = v.get("data")?;
-    if bus.get("kind").and_then(Value::as_str) != Some(crate::symbio_core::EVENT_BUS_KIND_VDFS) {
-        return None;
-    }
-    VdfsChange::deserialize(bus.get("data")?).ok()
-}
-
 // ==================== 变更回调 ====================
 
 /// 变更投递器：宿主在 `watch` 期间注入，provider 检测到变化时调用。

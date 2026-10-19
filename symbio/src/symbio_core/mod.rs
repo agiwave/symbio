@@ -282,8 +282,8 @@ pub use vdfs::{
 };
 // 契约函数与宿主桥
 pub use vdfs::{
-    vdfs_change_of, vdfs_context, vdfs_derive_ext, vdfs_from_plugin_error, vdfs_has_parent_segment,
-    vdfs_host_ctx, vdfs_notify_change, vdfs_path_within, vdfs_unwatch_changes, vdfs_watch_changes,
+    vdfs_context, vdfs_derive_ext, vdfs_from_plugin_error, vdfs_has_parent_segment, vdfs_host_ctx,
+    vdfs_notify_change, vdfs_path_within, vdfs_unwatch_changes, vdfs_watch_changes,
     VdfsChangeSubscriptions,
 };
 // 地址机制（crate 内部装配用，不是公开契约）
@@ -339,8 +339,8 @@ pub(crate) use turn::facts::{
 // ==================== 事件总线 ====================
 pub use event_bus::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
-    EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
-    EVENT_BUS_RESYNC_MARKER_TYPE,
+    event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,
+    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
 
 // ==================== 服务抽象 ====================

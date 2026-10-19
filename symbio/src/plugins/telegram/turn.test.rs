@@ -227,7 +227,7 @@ fn bus_frame(kind: &str, payload: Value) -> PluginFrame {
 
 #[test]
 fn vdfs_resync_marker_is_recognised() {
-    // 它不是一条变更（刻意不带 `path`，`vdfs_change_of` 解不出），必须单独认——
+    // 它不是一条变更（刻意不带 `path`，`event_bus_vdfs_change_of` 解不出），必须单独认——
     // 认不出就会一直等到超时。
     let frame = bus_frame(
         EVENT_BUS_KIND_VDFS,

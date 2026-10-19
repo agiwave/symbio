@@ -46,9 +46,8 @@ use crate::symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
-use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
 use crate::symbio_core::{
-    vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
+    event_bus_register_subscriber, event_bus_unregister_subscriber, event_bus_vdfs_change_of,
 };
 use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
@@ -56,6 +55,7 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, MODE, PATH, PLUGIN_ID_SESSION, PROVIDER_ID, RISK_LEVEL,
     ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, TOOL_CALL_ID,
 };
+use crate::symbio_core::{VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -631,7 +631,7 @@ async fn register_subsession(
     Ok(())
 }
 
-// 实时面的**解包**不在这里：`vdfs_change_of` 走 `symbio_core` 的公共入口
+// 实时面的**解包**不在这里：`event_bus_vdfs_change_of` 走 `symbio_core` 的公共入口
 // （信封形状是跨模块契约，本文件曾是三份手写副本之一）。这里只留「解出来之后怎么用」。
 
 /// 一条变更是否落在**某条消息节点自身**的地址上（`<sid>/message/<mid>`）。
@@ -755,7 +755,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     // 订阅被摘除：已没有第二条通道可等，直接收尾。
                     break;
                 };
-                let Some(change) = vdfs_change_of(&frame) else { continue };
+                let Some(change) = event_bus_vdfs_change_of(&frame) else { continue };
 
                 // ① 会话运行态：本轮结束的唯一判据。`data` = 全量节点视图（与
                 // `stat` 同源构造，零回读）；无载荷 ⇒ 回读兜底。
