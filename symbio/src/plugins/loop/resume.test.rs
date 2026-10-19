@@ -204,3 +204,52 @@ async fn retry_subtree_on_a_missing_target_lands_nothing() {
         "拒绝路径不得发任何删除动作"
     );
 }
+
+// ── 恢复上下文的取值：不伪造默认工具名 ──────────────────────────────────
+
+/// 交互子节点带 `meta.prompt.tool_name` ⇒ 用它。
+#[test]
+fn extract_uses_prompt_tool_name_when_present() {
+    let mut parent = tc("tc1", NodeStatus::Completed);
+    parent.meta = Some(json!({ "tool_name": "write_file" }));
+    let child = ChatNode {
+        id: "child".into(),
+        parent_id: Some("tc1".into()),
+        msg_type: Some(NodeKind::Interaction),
+        meta: Some(json!({
+            "prompt": { "tool_name": "ask_user", "args": { "q": "继续吗" } }
+        })),
+        ..Default::default()
+    };
+    let messages = vec![parent, child];
+    let (name, args) = extract_tool_context(&messages, 0, 1);
+    assert_eq!(name, "ask_user", "prompt 里写着哪一个，就恢复哪一个");
+    assert_eq!(args["q"], "继续吗");
+}
+
+/// 交互子节点**没有** `prompt.tool_name` ⇒ 落到父节点，不伪造 `ask_user`。
+///
+/// 这是本组唯一有回归价值的一条：此前的实现 `unwrap_or("ask_user")` 把
+/// `local` 插件的工具名写进了 `loop`——而 `loop` 不拥有那份知识。真发生时的
+/// 表现是「用错的工具去恢复」（会真的执行一次 `ask_user`），比「取不到上下文」
+/// 难查得多。
+#[test]
+fn extract_falls_back_to_parent_instead_of_faking_a_tool_name() {
+    let mut parent = tc("tc1", NodeStatus::Streaming);
+    parent.meta = Some(json!({ "tool_name": "write_file", "args": { "path": "a.txt" } }));
+    let child = ChatNode {
+        id: "child".into(),
+        parent_id: Some("tc1".into()),
+        msg_type: Some(NodeKind::Interaction),
+        // 有 prompt，但没有 tool_name
+        meta: Some(json!({ "prompt": { "message": "批准执行吗" } })),
+        ..Default::default()
+    };
+    let messages = vec![parent, child];
+    let (name, args) = extract_tool_context(&messages, 0, 1);
+    assert_eq!(
+        name, "write_file",
+        "取不到 prompt.tool_name 时应回退到父 ToolCall，而不是默认成 ask_user"
+    );
+    assert_eq!(args["path"], "a.txt");
+}

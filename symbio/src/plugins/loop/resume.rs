@@ -215,7 +215,7 @@ async fn process_tool_resume_action(
     };
 
     // 4. 提取 tool_name / base_args
-    let (tool_name, base_args, _failure_kind) = extract_tool_context(&messages, tc_idx, child_idx);
+    let (tool_name, base_args) = extract_tool_context(&messages, tc_idx, child_idx);
     let old_child_id = messages[child_idx].id.clone();
 
     // 5. 根据 action 执行。
@@ -544,36 +544,30 @@ async fn reexecute_tool(
 
 /// 从 ToolCall 父节点和待恢复子节点中提取工具执行上下文。
 ///
-/// 返回 `(tool_name, base_args, failure_kind)`：
 /// - **user_prompt 子节点**（confirm/ask_user 场景）：优先从 `meta.prompt` 提取
 ///   tool_name 和 args
 /// - **Failed Text 子节点**（工具执行失败重试场景）：从 ToolCall 父节点的 `meta`
 ///   提取 tool_name/args，或从 `content`（args JSON 字符串）解析
-fn extract_tool_context(
-    messages: &[ChatNode],
-    tc_idx: usize,
-    child_idx: usize,
-) -> (String, Value, String) {
+///
+/// 只返回**恢复所需的两件事**。此前还返回一个 `failure_kind`，但唯一的调用方
+/// 当场丢弃它（`_failure_kind`）——「算了却没人看」的值按 §8 的取值准入不该留：
+/// 它让读者以为恢复路径会按失败类型分流，而实际分流点在别处。
+fn extract_tool_context(messages: &[ChatNode], tc_idx: usize, child_idx: usize) -> (String, Value) {
     let tc = &messages[tc_idx];
     let child = &messages[child_idx];
 
-    // 优先从子节点（user_prompt）的 meta.prompt 提取（confirm/ask_user 场景）
+    // 优先从子节点（user_prompt）的 meta.prompt 提取（confirm/ask_user 场景）。
+    //
+    // `tool_name` 缺失 ⇒ **不从这条路径取**，落到下面的父节点回退。不要给一个
+    // 默认工具名：此前默认 `"ask_user"` 是 `local` 插件的工具名，而 `loop` 并不
+    // 拥有那份知识——写错一个默认值，表现是「用错的工具去恢复」，比「取不到
+    // 上下文」更难查（前者会真的执行一次别的工具）。
     if child.is_interaction() {
         if let Some(prompt) = child.meta.as_ref().and_then(|m| m.get("prompt")) {
-            let tool_name = prompt
-                .get("tool_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("ask_user")
-                .to_string();
-            let args = prompt.get("args").cloned().unwrap_or(json!({}));
-            let failure_kind = child
-                .meta
-                .as_ref()
-                .and_then(|m| m.get("failure_kind"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            return (tool_name, args, failure_kind);
+            if let Some(tool_name) = prompt.get("tool_name").and_then(|v| v.as_str()) {
+                let args = prompt.get("args").cloned().unwrap_or(json!({}));
+                return (tool_name.to_string(), args);
+            }
         }
     }
 
@@ -591,14 +585,7 @@ fn extract_tool_context(
                 .and_then(|c| c.to_text().parse::<Value>().ok())
                 .unwrap_or(json!({}))
         });
-    let failure_kind = tc
-        .meta
-        .as_ref()
-        .and_then(|m| m.get("failure_kind"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("error")
-        .to_string();
-    (tool_name, args, failure_kind)
+    (tool_name, args)
 }
 
 #[cfg(test)]
