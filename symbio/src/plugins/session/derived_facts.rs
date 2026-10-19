@@ -34,7 +34,7 @@
 //! 刚写下的那些。
 
 use crate::symbio_core::{
-    Budget, Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED,
+    Budget, Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED,
 };
 // 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
@@ -143,7 +143,7 @@ pub(crate) fn record_derived(
 /// 承诺（违约 ⇒ 声誉降）由 [`record_derived`] **同轮**落格——淘汰必须看得见本轮
 /// 刚写下的那条违约，否则「委托失败 ⇒ 声誉 −1 ⇒ 收回派活权」要等到下一轮才发生，
 /// 而那一轮里主体已经又派出去一轮了（判据滞后一个轮次 = 静默失效）。
-/// 与巩固同一条纪律：读 `history()` 而不是调用方传进来的快照。
+/// 与巩固同一条纪律：口径是**完整史**（`range(0)`），且现读——不用调用方手里那份切片。
 ///
 /// ## 判据的三个条件（缺一不淘汰）
 ///
@@ -170,7 +170,7 @@ pub(crate) fn record_derived(
 /// 淘汰是附加事实：写不进去不该把成功的一轮说成失败（与记忆三段同一条口径）。
 pub(crate) fn record_elimination(store: &EventWalStore, turn: u64, user_seq: u64) {
     // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
-    let snapshot = store.history();
+    let snapshot = store.range(Seq::new(0));
     let view = crate::symbio_core::reputation()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
@@ -323,11 +323,12 @@ pub(crate) fn record_learning(
         }
     }
     // ── 步 13 巩固（用**刷新后**的快照）──────────────────────────────────
-    // 读 `history()` 而非 `range()`（S2.7-b2）：巩固是**累计口径**——它要把
+    // 巩固是**累计口径**（S2.7-b2）：它要把
     // doc-link-allow D-004: 「曾经记过什么」是记忆族的语义问句，非版本变更史
-    // 「曾经记过什么」收成一族记忆。压缩归档把被取代的前缀移出 live 段后，
-    // 只读 live 会让巩固**静默**丢掉压缩前的记忆（它们仍在归档段里）。
-    if let Err(why) = super::memory_events::consolidate(store, &store.history(), turn, now) {
+    // 「曾经记过什么」收成一族记忆。`range(0)` 给的是完整史，被快照取代而移入归档段
+    // 的那些记忆也在里面 ⇒ 压缩前的记忆不会被**静默**丢掉。
+    if let Err(why) = super::memory_events::consolidate(store, &store.range(Seq::new(0)), turn, now)
+    {
         remember("步 13 巩固", why);
     }
 

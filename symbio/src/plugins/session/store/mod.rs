@@ -549,6 +549,24 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     Some(super::rebuild::rebuild(&snapshot))
 }
 
+/// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。
+///
+/// [`Store::range`](crate::symbio_core::Store::range) 归一后给的是**完整史**（含被
+/// [`archive_before`](crate::symbio_core::WalStore::archive_before) 移出的前缀，
+/// [plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1），
+/// 而「**这一轮**还开着没收束」判的是现行历史：被快照取代的那段已不参与上下文，
+/// 拿它找未收束轮次会把陈锚当现行（压缩期间等审批的那一轮正是这种形状）。
+///
+/// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
+/// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）
+/// 已经内建在 `mutations_latest_snapshot` 的用法里，不需要本函数。
+pub(crate) fn current_window(events: &[crate::symbio_core::Event]) -> &[crate::symbio_core::Event] {
+    match crate::symbio_core::mutations_latest_snapshot(events) {
+        Some((i, _)) => &events[i..],
+        None => events,
+    }
+}
+
 /// 同步版读 `messages.json`
 fn read_messages_sync(dir: &Path) -> Option<Vec<ChatNode>> {
     let content = std::fs::read_to_string(dir.join(MESSAGES_FILE_NAME)).ok()?;

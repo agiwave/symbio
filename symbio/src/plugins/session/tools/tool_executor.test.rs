@@ -8,8 +8,8 @@ use crate::symbio_core::PluginSimpleRequest;
 // `TaskStatus` 是**测试自己**要的：它只出现在断言里，父模块的签名用不到它，
 // 因此 `use super::*` 带不过来（记录类型自 6b-① 起住 core 词汇表）。
 use crate::symbio_core::facts::TaskStatus;
-// `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块把它从顶层
-// 导入里删了——生产侧只读 `history()`）；`use super::*` 因此带不过来。
+// `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
+// 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use crate::symbio_core::Store;
 // `EventWalStore` / `LatencyTier` 同由：它们只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），

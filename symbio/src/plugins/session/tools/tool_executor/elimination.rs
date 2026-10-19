@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::{EventWalStore, PluginInvokeRequest, PluginInvokeRequestExt};
+use crate::symbio_core::{EventWalStore, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store};
 
 /// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）：
 /// 本会话主体是否已被收回 `assign.work`。
@@ -19,8 +19,8 @@ use crate::symbio_core::{EventWalStore, PluginInvokeRequest, PluginInvokeRequest
 ///
 /// 遍历形状与 `stats` 的实例聚合同一条先例（`fleet_reading`）：**全会话**含嵌套
 /// 子会话（`paths::session_wals_deep`，存在性判据）；打不开的跳过并出声；
-/// 读 `history()` 而非 live 段——裁决若被压缩归档进历史段，只读 live 会把它**静默
-/// 漏掉**，那等于替一个已被淘汰的主体恢复了派活权。
+/// 读**完整史**（`range(0)`）——裁决若已被压缩归档进历史段，只读没被取代的那段会把它
+/// **静默漏掉**，那等于替一个已被淘汰的主体恢复了派活权。
 pub struct EliminationInputs {
     /// 判据指向的主体（本会话选定的 agent；消息与日志里要点名）。
     pub principal: String,
@@ -70,8 +70,8 @@ fn revoked_overlay(session_dir: &std::path::Path) -> crate::symbio_core::GrantsO
             );
             continue;
         };
-        // `history()`：累计口径（见结构文档——归档段的裁决不许被静默漏掉）。
-        events.extend(store.history());
+        // 完整史：累计口径（见结构文档——归档段里的裁决不许被静默漏掉）。
+        events.extend(store.range(Seq::new(0)));
     }
     crate::symbio_core::GrantsOverlay::fold(
         crate::symbio_core::EliminationDecider::verdict_grants_changes(&events),

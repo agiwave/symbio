@@ -618,3 +618,79 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
         "每次自增都必须留下（无锁时会丢更新）"
     );
 }
+
+/// **现行窗口 = 从最近一份快照起**（含快照本身）；没有快照 ⇒ 整段都是现行。
+///
+/// 这条钉的是归一的前提（[plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）：
+/// 读口只给**完整史**这一种口径，而「这一轮还开着没收束」这类判据要窗口——窗口由
+/// 消费方按**事实**切（最近一份快照在哪），不是存储层再开一个读法。
+#[test]
+fn current_window_starts_at_the_latest_snapshot() {
+    use crate::symbio_core::{
+        chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
+        Entity, Event, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    };
+    let user = |id: &str, turn: u64| {
+        Event::pending(
+            id,
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            turn,
+            "session/main",
+        )
+    };
+    let snap = |id: &str| {
+        Event::pending(
+            id,
+            EVENT_SESSION_CONSOLIDATED,
+            Entity::Message,
+            Verb::Progressed,
+            0,
+            "session/main",
+        )
+        .with_payload(json!({
+            "messages": [ChatNode {
+                id: format!("{id}-body"),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text("[CONTEXT SNAPSHOT]".into())),
+                status: Some(NodeStatus::Completed),
+                ..Default::default()
+            }],
+            "turns": 1,
+        }))
+    };
+
+    let events = vec![
+        user("u0", 0),
+        snap("s1"),
+        user("u1", 1),
+        snap("s2"),
+        user("u2", 2),
+    ];
+    let window = current_window(&events);
+    assert_eq!(window[0].event_id, "s2", "窗口起点就是那份基线本身");
+    assert_eq!(window.len(), 2, "它 + 其后那一条（更早的一律不再参与）");
+
+    // 没压过 ⇒ 整段都是现行——窗口不是「裁掉前 N 条」那种默认裁剪。
+    let plain = vec![user("u0", 0), user("u1", 1)];
+    assert_eq!(current_window(&plain).len(), 2);
+
+    // 坏载荷的那份**不算**快照：跳过它继续往前找（与 `mutations_latest_snapshot`
+    // 「一条坏载荷不该吃掉此前有效那一份」同一条容错方向）。
+    let broken = Event::pending(
+        "s3",
+        EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "session/main",
+    )
+    .with_payload(json!({ "messages": [], "turns": 1 }));
+    let events = vec![user("u0", 0), snap("s1"), user("u1", 1), broken];
+    assert_eq!(
+        current_window(&events)[0].event_id,
+        "s1",
+        "空列表不是一份快照 ⇒ 基线仍是上一份，前缀不被它抹掉"
+    );
+}

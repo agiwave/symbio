@@ -233,12 +233,11 @@ pub(crate) fn recall_view(session_dir: &Path, query: &str, viewer: &str) -> Opti
             .zip(own_name.as_ref())
             .is_some_and(|(n, own)| n == own);
         match EventWalStore::open_readonly(&path) {
-            // `history()` 而非 `range()`（S2.7-b2）：召回是**跨会话累计**口径——
-            // 压缩归档把被取代的前缀移出 live 段后，只读 live 会**静默**丢掉
-            // 压缩前记下的记忆（那些 `memory.*` 事实仍在归档段里）。
+            // 召回是**跨会话累计**口径（S2.7-b2）：`range(0)` 给完整史，被快照取代而
+            // 移入归档段的 `memory.*` 事实也在里面 ⇒ 压缩前记下的记忆不会被**静默**丢掉。
             // 预过滤在入列前逐条收放（见上 [`recall_view`] 文档）：非记忆事件
             // 照常进切片（投影只认记忆，多进无害），记忆事件按可见域判。
-            Ok(store) => events.extend(store.history().into_iter().filter(|e| {
+            Ok(store) => events.extend(store.range(Seq::new(0)).into_iter().filter(|e| {
                 let is_memory = e.entity == Entity::Memory
                     && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED);
                 !is_memory || memory_visible(e, own, viewer)

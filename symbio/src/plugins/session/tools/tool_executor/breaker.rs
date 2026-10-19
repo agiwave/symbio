@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::symbio_core::{
-    Budget, EventWalStore, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt,
+    Budget, EventWalStore, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
 };
 
 /// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。
@@ -90,10 +90,10 @@ fn session_cost_ms(
     let Ok(store) = EventWalStore::open_readonly(&path) else {
         return 0;
     };
-    // `history()` 而非 `range()`（S2.7-b2）：成本台账是**会话累计**口径——
-    // 压缩归档把被取代的前缀移出 live 段后，只读 live 会**静默**少算压缩前的
-    // 花费 ⇒ 闸门说「还有余量」而实际已耗尽（ADR-044 的熔断随之形同虚设）。
-    let snapshot = store.history();
+    // 成本台账是**会话累计**口径（S2.7-b2）：被快照取代而移入归档段的花费也在
+    // `range(0)` 里 ⇒ 不会**静默**少算压缩前的成本（闸门说「还有余量」而实际已耗尽，
+    // ADR-044 的熔断随之形同虚设）。
+    let snapshot = store.range(Seq::new(0));
     crate::symbio_core::cost_ledger()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value

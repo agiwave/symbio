@@ -76,6 +76,14 @@ pub struct WalStore<E: EventEnvelope> {
     /// 读方才能随时进。锁随句柄关闭自动释放，故不需要显式解锁。
     writer: Option<File>,
     inner: RwLock<WalInner<E>>,
+    /// 归档段的并集（按段名首号升序），`None` = 本实例还没读过。
+    ///
+    /// [`range`](Store::range) 的口径含归档前缀，而归档段一旦 `rename` 就位就不再变
+    /// （只增不改；同名重写是同一份内容的幂等重复）⇒ 读一次就可以缓存，
+    /// 本实例 `archive_before` 之后失效重读。**跨实例的时效性与 live 段同一口径**：
+    /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
+    /// 别人的归档因此同样不出现在这里——这不是新增的近似，是同一个近似。
+    archived: RwLock<Option<Vec<E>>>,
 }
 
 struct WalInner<E: EventEnvelope> {
@@ -232,6 +240,7 @@ where
             path,
             writer,
             inner: RwLock::new(WalInner { events, ids, head }),
+            archived: RwLock::new(None),
         }
     }
 
@@ -354,37 +363,33 @@ where
         let kept = inner.events.split_off(split);
         inner.ids = kept.iter().map(|e| e.event_id().to_string()).collect();
         inner.events = kept;
+        // 归档段并集的缓存作废：本实例刚往归档目录里放了一段新的。
+        *self.archived.write().expect("WalStore 锁中毒") = None;
         Ok(Some(split))
     }
 
-    /// **完整事件史**：全部归档段（按号序）+ live 段。
+    /// **归档段的并集**（全部归档段按段名首号升序拼接，**不含 live**）。
     ///
-    /// ## 为什么读侧需要一个「含归档」的口
+    /// 这是 [`range`](Store::range) 的另一半：`range` 的口径是「从 `from` 起的全部
+    /// 事实，含被 [`archive_before`](Self::archive_before) 移出 live 的前缀」，而那段
+    /// 前缀不在内存里。归档段一旦 `rename` 就位就不再变（只增不改；同名重写是同一份
+    /// 内容的幂等重复），故**读一次缓存一次**，本实例归档之后失效重读——每次读都重扫
+    /// 目录不是「读法归一」的成本，而是把一次目录扫描搬进了热路径（每轮 prompt
+    /// 构建都要过一遍）。
     ///
-    /// [`archive_before`](Self::archive_before) 把被取代的前缀移出 live 段，于是
-    /// [`range`](Store::range) 看到的 live 段只是全局号空间的一个**窗口**——首号不是 0。
-    /// 对**消息 / 上下文**类读者（转写 / 重建 / 请求包）这正是要的：快照**取代**了
-    /// 那段历史，它们读 live 窗口 + 快照即可（`mutations_latest_snapshot` 会把
-    /// 快照之前的事件整段跳过）。
-    ///
-    /// 但对**累计口径**的读者（不变量 C1 的「无跳号」/ SLO 四列 / 声誉 / 成本台账 /
-    /// 记忆召回与巩固 / 任务状态）而言，被归档的事件**仍然发生过**——钱花过、声誉
-    /// 挣过、记忆记过。只读 live 窗口会让它们**静默**少算（例如 C1 把窗口首号读成
-    /// 「应为 0 却得 k」⇒ 每次压缩后读数口凭空多一条违规）。故这类读者走本方法。
-    ///
-    /// 两种读者读的是**同一份事实**的两个投影，不是两份真源：`history() ⊇ range()`，
-    /// 差集恰是被取代的前缀（在归档段里，逐条不重不漏）。
-    ///
-    /// ## 归档段的读法
+    /// ## 读法
     ///
     /// 段名 `<wal 文件名>.<first>-<last>`（见 [`archive_path`]）：`first` 既是段内
-    /// 首号、也是排序键。逐段 `replay` 后**按段名首号升序拼接**，再把 live 段接上
-    /// ——不重排、不排序。归档段的号恒**严格小于** live 的号（`archive_before` 只搬
-    /// `seq < cut` 的前缀），故拼接结果对正常事件就是 `seq` 升序；而对旧版本落下的
-    /// `seq: null` 事件，保持它与 live 的**物理相对位置**（`range` 的口径）——
-    /// 若按 `seq` 排序，`None` 会被挤到末尾，把「退化到切片末尾」这类兜底判据搞反。
-    /// 目录不存在 / 某段读不开 ⇒ 跳过（与 `range` 的「读不开就是没有」同一口径）。
-    pub fn history(&self) -> Vec<E> {
+    /// 首号、也是排序键。逐段 `replay` 后**按段名首号升序拼接**，live 段由 `range`
+    /// 接在后面——不重排、不排序。归档段的号恒**严格小于** live 的号（`archive_before`
+    /// 只搬 `seq < cut` 的前缀），故拼接结果对正常事件就是 `seq` 升序；而对旧版本落下的
+    /// `seq: null` 事件，保持它与 live 的**物理相对位置**——若按 `seq` 排序，`None` 会被
+    /// 挤到末尾，把「退化到切片末尾」这类兜底判据搞反。
+    /// 目录不存在 / 某段读不开 ⇒ 跳过（与「读不开就是没有」同一口径）。
+    fn archive_events(&self) -> Vec<E> {
+        if let Some(cached) = self.archived.read().expect("WalStore 锁中毒").as_ref() {
+            return cached.clone();
+        }
         let mut all: Vec<E> = Vec::new();
         // ── 归档段（按段名首号升序读）──────────────────────────────────────
         if let Some(dir) = self.path.parent().map(|p| p.join(WAL_ARCHIVE_SUBDIR)) {
@@ -414,15 +419,7 @@ where
                 }
             }
         }
-        // ── live 段（原序接上）────────────────────────────────────────────
-        all.extend(
-            self.inner
-                .read()
-                .expect("WalStore 锁中毒")
-                .events
-                .iter()
-                .cloned(),
-        );
+        *self.archived.write().expect("WalStore 锁中毒") = Some(all.clone());
         all
     }
 
@@ -483,16 +480,31 @@ where
     }
 
     fn range(&self, from: Seq) -> Vec<Self::Event> {
-        // **按号筛，不按下标切**：`archive_before` 之后 live 段的首号不是 0，
-        // 下标切法（`events[from.min(len)..]`）会把「从 seq k 起」读成「从 live 第 k
-        // 条起」⇒ 压缩过的会话上少读甚至读空，而且空集看起来像「没有这条事实」。
+        // **一个读口，两个来源**：归档段（被取代的前缀）+ live 段。号空间全局单调、
+        // 归档段恒在前 ⇒ 拼接即 `seq` 升序（缺号事件保持物理位置，见 `archive_events`）。
+        //
+        // **`from` 是号，不是下标**：`archive_before` 之后 live 段的首号不再是 0，
+        // 按下标切会把「从 seq k 起」读成「从 live 第 k 条起」⇒ 少读甚至读空，而空集
+        // 看起来像「没有这条事实」（P6-① 钉住的就是这一处）。
+        //
+        // 缺号的事件（旧版本落下的行）**没有号**，因而不属于任何 `[from, head)` 区间：
+        // 只在读全史（`from = 0`）时出现。它与 `archive_before` 的「缺号按最大处理
+        // ⇒ 不归档它」是同一取向的两半。
         let from = from.value();
-        let inner = self.inner.read().expect("WalStore 锁中毒");
-        inner
-            .events
-            .iter()
-            .filter(|e| e.seq().map(Seq::value).unwrap_or(u64::MAX) >= from)
-            .cloned()
+        let mut all = self.archive_events();
+        all.extend(
+            self.inner
+                .read()
+                .expect("WalStore 锁中毒")
+                .events
+                .iter()
+                .cloned(),
+        );
+        if from == 0 {
+            return all;
+        }
+        all.into_iter()
+            .filter(|e| e.seq().is_some_and(|s| s.value() >= from))
             .collect()
     }
 
@@ -517,4 +529,4 @@ mod tests;
 // panic-allow symbio/src/symbio_core/store/wal.rs::head: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/symbio_core/store/wal.rs::append: 存储层灾难不可静默：WAL 打不开 / 写不进时继续跑等于事实源与读侧悄悄分叉。序列化自有类型失败同理。
 // panic-allow symbio/src/symbio_core/store/wal.rs::archive_before: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/symbio_core/store/wal.rs::history: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/symbio_core/store/wal.rs::archive_events: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

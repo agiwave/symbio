@@ -276,12 +276,12 @@ impl SessionPlugin {
 /// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
 ///
 // doc-link-allow D-004: 「曾经声明过」是累计口径的表述，非版本变更史
-/// 读 `history()` 而非 `range()`（S2.7-b2）：「曾经声明过」是累计口径——
-/// 压缩归档把被取代的前缀移出 live 段后，只读 live 会把压缩前声明过的目标
-/// 读成「没声明过」⇒ 每 tick 重开一条目标（静默的重复开工）。
+/// 读**完整史**（`range(0)`，S2.7-b2）：「曾经声明过」是累计口径——被快照取代而移入
+/// 归档段的那次声明也在里面 ⇒ 压缩前声明过的目标不会被读成「没声明过」（每 tick 重开
+/// 一条目标，静默的重复开工）。
 fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
     conation()
-        .apply(&store.history(), i64::MAX, Budget::generous())
+        .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
         .value
         .is_declared(goal)
 }

@@ -45,7 +45,7 @@ use super::supplements;
 use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use crate::symbio_core::{
     Event, EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption,
-    PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    PreemptionDecider, Seq, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -289,10 +289,10 @@ impl SessionPlugin {
         let Ok(store) = EventWalStore::open_readonly(&path) else {
             return Vec::new();
         };
-        // `history()` 而非 `range()`（S2.7-b2）：判据消费 `task.*`（任务**状态**）——
-        // 压缩归档把被取代的前缀移出 live 段后，只读 live 会让「压缩前开、尚未收束」
-        // 的任务在就绪集里**静默**消失（等于任务没了）。
-        store.history()
+        // 判据消费 `task.*`（任务**状态**），口径是累计的（S2.7-b2）：`range(0)` 里
+        // 含被快照取代而移入归档段的那些开格 ⇒ 「压缩前开、尚未收束」的任务不会在
+        // 就绪集里**静默**消失（等于任务没了）。
+        store.range(Seq::new(0))
     }
 
     /// 抢占事实的唯一写入口：开写档 → 取锚 → 按 `build(anchor)` 落格。

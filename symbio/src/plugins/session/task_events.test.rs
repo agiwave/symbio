@@ -5,8 +5,9 @@
 use super::{prompt_section, write};
 use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use crate::symbio_core::{
-    check_all, readyset, Budget, EventWalStore, Seq, Store, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    check_all, readyset, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TASK_REWORK_CREATED,
 };
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,21 @@ fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {
 
 fn decl(items: Vec<TaskItem>) -> TaskDeclaration {
     TaskDeclaration { items }
+}
+
+/// 一份**合法**压缩快照里的节点（与 `turn_exec` 落格的形状同构）。
+///
+/// 快照要真能被 `mutations_latest_snapshot` 认出来，「现行窗口」那类判据才不是空的。
+fn snapshot_node(id: &str) -> crate::symbio_core::chat_node::ChatNode {
+    use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeStatus};
+    crate::symbio_core::chat_node::ChatNode {
+        id: id.to_string(),
+        // 不写 `role`：快照的判据是**身份列表**（id 序列），role 的权威在 `principal`。
+        msg_type: Some(NodeKind::Body),
+        content: Some(MessageContent::Text(format!("[CONTEXT SNAPSHOT]\n{id}"))),
+        status: Some(NodeStatus::Completed),
+        ..Default::default()
+    }
 }
 
 /// 一次「收束」级别的写入：开 WAL → 取现有切片 → 按当前轮号入格。
@@ -365,5 +381,59 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
     assert!(
         prompt_section(&done).is_none(),
         "全终态 ⇒ 无候选 ⇒ 不给模型一段空调度"
+    );
+}
+
+/// **归档不缩小就绪集**（P6-② 的愈合点，[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）：
+/// 任务开在压缩之前、那段已随快照移进归档段 ⇒ 调度段仍要念得出它。就绪集是**状态**
+/// 口径（「压缩前开的、还没做完」= 现在还没做完），不是「最近没被取代的那些事件」。
+///
+/// **反向自检**：把 `task_events::prompt_section` 的切片换成「从最新快照起自切窗口」
+/// （`super::store::current_window(...)`）⇒ 本用例红（`prompt_section` 返回 `None`——
+/// 那条任务在模型视野里静默消失，而事实源里它一直开着）。
+#[test]
+fn a_ready_task_survives_the_prefix_being_archived() {
+    let dir = tmp_dir("archived-readyset");
+    write_all(
+        &dir,
+        0,
+        &[decl(vec![item("t1", "甲", &[], TaskStatus::Pending)])],
+    );
+    // 压缩：落一条快照（取代此前的一切），并把被取代的前缀整段归档。
+    let store = EventWalStore::open(wal_of(&dir)).expect("打开 WAL");
+    let seq = store
+        .append(
+            Event::pending(
+                "v2sc-test-archived-readyset",
+                EVENT_SESSION_CONSOLIDATED,
+                Entity::Message,
+                Verb::Progressed,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_MAIN,
+            )
+            .with_payload(serde_json::json!({
+                // 载荷是**合法**的快照（一份真的 `ChatNode` 列表）：不合法的话
+                // `mutations_latest_snapshot` 不认它，「只切现行窗口」那种改法就不会
+                // 让本用例红——反向自检要成立，基线必须是真的。
+                "messages": [snapshot_node("snap-1")],
+                "turns": 1,
+            })),
+        )
+        .expect("快照入格");
+    assert_eq!(
+        super::super::store::current_window(&store.range(Seq::new(0))).len(),
+        1,
+        "前置：现行窗口只剩那份快照（任务格已被取代）"
+    );
+    assert!(
+        store.archive_before(seq).unwrap().is_some(),
+        "前置：确有前缀被归档"
+    );
+    drop(store);
+
+    let section = prompt_section(&dir).expect("归档不缩小就绪集 ⇒ 仍有调度段");
+    assert!(
+        section.contains("t1"),
+        "压缩前开的那条任务必须在候选集里：{section}"
     );
 }

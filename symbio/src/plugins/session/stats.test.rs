@@ -840,9 +840,9 @@ fn invariants_move_when_the_wal_changes() {
     let clean = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
-    // 切片口径 = `history()`（归档段 + live，S2.7-b2）：出口读什么，复算就比什么。
+    // 切片口径 = 完整史（归档段 + 未取代那段，S2.7-b2）：出口读什么，复算就比什么。
     let store = EventWalStore::open_readonly(&wal).unwrap();
-    let snap = store.history();
+    let snap = store.range(Seq::new(0));
     assert_eq!(
         clean.invariants,
         serde_json::to_value(check_all(&snap)).unwrap()
@@ -874,20 +874,23 @@ fn invariants_move_when_the_wal_changes() {
     );
 }
 
-/// **归档不缩小读数**（S2.7-b2）：压缩把被取代的前缀移出 live 段后，读数口必须读
-/// `history()`（归档段 + live）而不是 live 窗口。
+/// **归档不缩小读数**（S2.7-b2）：压缩把被取代的前缀移进归档段后，读数口拿到的
+/// 仍是完整史（归档段 + 未取代那段），而不是那一小段窗口。
 ///
-/// ## 只读 live 会错在两处（都是静默的）
+/// ## 只给窗口会错在两处（都是静默的）
 ///
-/// 1. **C1 假红**：live 窗口的首号不是 0（它是全局号空间的一个窗口），
+/// 1. **C1 假红**：未取代那段的**首号不是 0**（它是全局号空间的一个窗口），
 ///    `seq_monotonic` 会把「应为 0 却得 4」报成违规 ⇒ 每次压缩后读数口凭空多一条；
-/// 2. **四列缩水**：被归档的轮次仍然发生过（钱花过、兜底过），只读 live 会把
+/// 2. **四列缩水**：被归档的轮次仍然发生过（钱花过、兜底过），看不见它们会把
 ///    它们从分母 / 分子 / 样本里抹掉。
+///
+/// 按布局分叉的第二个读法（只给窗口）因此不是「多一个选择」，而是把布局知识
+/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
 ///
 /// ## 反向自检
 ///
-/// 把 `stats::read` 里的 `store.history()` 换回 `store.range(Seq::new(0))` ⇒ 本用例红
-/// （`invariants` 非空、`tiers` 从 2 轮掉到 0 轮）。
+/// 把 `stats::read` 里的 `store.range(Seq::new(0))` 换成「从最新快照起自切窗口」
+/// （`super::store::current_window(...)`）⇒ 本用例红（`invariants` 非空、`tiers` 从 2 轮掉到 0 轮）。
 #[test]
 fn archival_does_not_shrink_the_readout() {
     let wal = seed("archive");
@@ -896,7 +899,7 @@ fn archival_does_not_shrink_the_readout() {
     assert_eq!(before.tiers[0].turns, 2, "分母 = 两轮");
     assert_eq!(before.tiers[0].fallbacks, 1, "分子 = 一轮兜底");
 
-    // 压缩：落一条快照，再把被取代的前缀整段归档（live 段只剩快照一条）。
+    // 压缩：落一条快照，再把被取代的前缀整段归档（未取代那段只剩快照一条）。
     let store = EventWalStore::open(&wal).unwrap();
     let seq = store
         .append(
@@ -919,7 +922,7 @@ fn archival_does_not_shrink_the_readout() {
         Some(4),
         "前缀 4 条全进归档段"
     );
-    assert_eq!(store.len(), 1, "live 段只剩快照");
+    assert_eq!(store.len(), 1, "没被取代的那段只剩快照");
     drop(store);
 
     // 读数口仍看完整史：不变量不假红，四列与成本一分不缩。
@@ -1141,7 +1144,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
     // 反向对照：唯一那条共享记忆改成私有 ⇒ agent:main 回到空切片。
     // （同一次播种、同一份代码，只翻内容的可见域这一个变量。）
-    let mut events = store.history();
+    let mut events = store.range(Seq::new(0));
     let last = events.len() - 1;
     events[last].payload["vis_scope"] = serde_json::json!("thread_private");
     drop(store);

@@ -221,8 +221,17 @@ pub fn progress_from_wal(
 
     // in_flight：末轮已开未收束 = `turnstate::settled()` 为假。
     // 还没有开轮 ⇒ 不在途（与旧读法"空消息列表 ⇒ false"同值）。
+    //
+    // 读**现行窗口**（最近一份快照之后）而不是完整史：`turnstate` 是朴素扫描，
+    // 不知道「被快照取代」这回事——把归档里的陈轮算进来，一个早已退出上下文的
+    // 未收束轮会把 `in_flight` 从 false 翻成 true（`Store::range` 归一后的必动项，
+    // 见 `store::current_window`）。上面 `transcript()` 那一头自己从快照起折，不受影响。
     let state = turnstate()
-        .apply(&snapshot, i64::MAX, Budget::generous())
+        .apply(
+            super::store::current_window(&snapshot),
+            i64::MAX,
+            Budget::generous(),
+        )
         .value;
     let in_flight = state.opened && !state.settled();
 

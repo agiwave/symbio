@@ -26,7 +26,7 @@ use crate::symbio_core::{
 };
 
 use super::super::config::SessionConfig;
-use super::super::store::SessionStore;
+use super::super::store::{current_window, SessionStore};
 use super::super::types::Session;
 
 /// 测试请求上下文（工具轮才需要能力注册表；无工具轮一个空信封足够）。
@@ -1758,13 +1758,16 @@ async fn run_one_turn(session: &PersistentChatSession, sink: &crate::symbio_core
     .expect("无工具轮应成功");
 }
 
-/// 压缩入格 + 归档的**三段判据**：落格（快照在 live 段，格子对）/ 取代（live 段
-/// 以快照开头、被取代的前缀进了归档段）/ 完整史不丢（`history()` 仍含前缀）。
+/// 压缩入格 + 归档的**三段判据**：落格（完整史里有快照，格子对）/ 取代（现行窗口
+/// 以快照开头、被取代的前缀进了归档段）/ 完整史不丢（`range(0)` 仍含前缀）。
+///
+/// 「现行窗口」不是第二个读口：它是消费方从完整史里按「最近一份快照在哪」切出来
+/// 的那段（[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
 ///
 /// ## 反向自检
 ///
 /// 把 `execute_turn` 里的 `consolidate_into_wal` 调用去掉 ⇒ ① 红（没有快照事件）；
-/// 把 `consolidate_into_wal` 末尾的 `archive_before` 去掉 ⇒ ② 红（live 段仍以旧
+/// 把 `consolidate_into_wal` 末尾的 `archive_before` 去掉 ⇒ ② 红（现行窗口仍以旧
 /// 用户格开头、归档目录不存在）。
 #[tokio::test]
 async fn consolidation_lands_a_snapshot_and_archives_the_prefix() {
@@ -1789,10 +1792,11 @@ async fn consolidation_lands_a_snapshot_and_archives_the_prefix() {
     req.consolidation = Some(compacted.as_slice());
     execute_turn(req).await.expect("第二轮成功");
 
-    // ── ① 落格：live 段里恰一条快照，格子 = message × progressed，turn = 0 ──
+    // ── ① 落格：完整史里恰一条快照，格子 = message × progressed，turn = 0 ──
     let store = EventWalStore::open(&wal).expect("open wal");
-    let live = store.range(Seq::new(0));
-    let snaps: Vec<&Event> = live
+    let all = store.range(Seq::new(0));
+    let window = current_window(&all);
+    let snaps: Vec<&Event> = all
         .iter()
         .filter(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
         .collect();
@@ -1802,11 +1806,11 @@ async fn consolidation_lands_a_snapshot_and_archives_the_prefix() {
     assert_eq!(snaps[0].turn, 0, "压缩不属于任何一轮（跨轮边界）");
     assert_eq!(snaps[0].payload["messages"][0]["id"], "snap-1");
 
-    // ── ② 取代：live 段以快照开头，被取代的前缀进了归档段 ──
+    // ── ② 取代：现行窗口以快照开头，被取代的前缀进了归档段 ──
     assert_eq!(
-        live[0].kind,
+        window[0].kind,
         crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
-        "live 段以快照开头——被取代的前缀已移走"
+        "现行窗口以快照开头——被取代的前缀已移走"
     );
     let archive_dir = dir.join("transcripts").join("wal-archive");
     let mut segs: Vec<String> = std::fs::read_dir(&archive_dir)
@@ -1820,17 +1824,16 @@ async fn consolidation_lands_a_snapshot_and_archives_the_prefix() {
         "段名带首末号，末号 = 被取代前缀的末号（= 落格前的 head − 1）"
     );
 
-    // ── ③ 完整史不丢：`history()` ⊃ `range()`，差集恰是被取代的前缀 ──
-    let history = store.history();
+    // ── ③ 完整史不丢：`range(0)` = 归档段 + live，差集恰是被取代的前缀 ──
     assert_eq!(
-        history.len(),
+        all.len(),
         store.len() + before,
-        "归档段 {before} 条 + live 段——「零回退损失」的可执行形态"
+        "归档段 {before} 条 + 没被取代的那段——「零回退损失」的可执行形态"
     );
-    assert!(check_all(&history).is_empty(), "{:?}", check_all(&history));
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-/// 同一份快照**不落第二次**：判据是与 live 段里最近一份快照逐 id 比对。
+/// 同一份快照**不落第二次**：判据是与完整史里最近一份快照逐 id 比对。
 ///
 /// 这条钉的是幂等——同一轮里执行口可能被调多次（续写 / 答话），而压缩只发生一次。
 #[tokio::test]
@@ -1855,13 +1858,13 @@ async fn the_same_consolidation_is_not_landed_twice() {
         .iter()
         .filter(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
         .count();
-    assert_eq!(n, 1, "live 段里恰一条快照");
+    assert_eq!(n, 1, "完整史里恰一条快照");
 }
 
 /// **不同**的一份快照（id 序列变了）⇒ 再落一条：套娃压缩（压了又压）由此成立。
 ///
-/// 第二次落格会把**上一份快照**也归档（它落在被取代的前缀里）——所以判据要看
-/// `history()`：live 段只剩最新的那一份，完整史里两份都在。
+/// 第二次落格会把**上一份快照**也归档（它落在被取代的前缀里）——所以两条判据分头看
+/// 完整史（两份都在，审计可回溯）与现行窗口（只剩最新的那一份）。
 #[tokio::test]
 async fn a_newer_consolidation_lands_again() {
     let (session, dir, _tmp) = setup_full().await;
@@ -1875,21 +1878,20 @@ async fn a_newer_consolidation_lands_again() {
         consolidate_into_wal(&store, &consolidated(&["b"]), "session/main").is_some(),
         "id 序列不同 ⇒ 是新的一份，该落"
     );
-    let live = store.range(Seq::new(0));
+    let is_snap = |e: &Event| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED;
+    let all = store.range(Seq::new(0));
     assert_eq!(
-        live.iter()
-            .filter(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
-            .count(),
-        1,
-        "live 段只剩最新一份快照（上一份已被它取代、进了归档段）"
+        all.iter().filter(|e| is_snap(e)).count(),
+        2,
+        "完整史里两份快照都在（审计 / 回溯可查）"
     );
-    assert_eq!(live[0].payload["messages"][0]["id"], "b");
-    let n = store
-        .history()
-        .iter()
-        .filter(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
-        .count();
-    assert_eq!(n, 2, "完整史里两份快照都在（审计 / 回溯可查）");
+    let window = current_window(&all);
+    assert_eq!(
+        window.iter().filter(|e| is_snap(e)).count(),
+        1,
+        "现行窗口只剩最新一份快照（上一份已被它取代、进了归档段）"
+    );
+    assert_eq!(window[0].payload["messages"][0]["id"], "b");
 }
 
 /// **轮外**压缩（用户重试 `retry_compaction`）走自己的一条路：那里没有「下一个
@@ -1904,23 +1906,26 @@ async fn consolidate_outside_turn_lands_and_archives() {
     consolidate_outside_turn(&session, &consolidated(&["snap-r"]), "session/main");
 
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
-    let live = store.range(Seq::new(0));
+    let all = store.range(Seq::new(0));
     assert_eq!(
-        live.iter()
+        all.iter()
             .filter(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
             .count(),
         1,
         "轮外也落了一条快照"
     );
-    assert_eq!(live[0].kind, crate::symbio_core::EVENT_SESSION_CONSOLIDATED);
+    assert_eq!(
+        current_window(&all)[0].kind,
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED
+    );
     assert!(
         dir.join("transcripts").join("wal-archive").exists(),
         "轮外同样归档"
     );
 }
 
-/// **轮次水位**：归档把被取代的轮次移出 live 段，而轮号是数 live 段里的
-/// `user.message` 得来的 ⇒ 不补水位，压缩之后轮号会**从 1 重新数起**，而
+/// **轮次水位**：归档把被取代的轮次移进了归档段，而轮号数的是**现行窗口**里的
+/// `user.message` ⇒ 不补水位，压缩之后轮号会**从 1 重新数起**，而
 /// `u-{turn}` 是幂等键。
 ///
 /// 这条钉的就是「快照载荷必须带 `turns`」：去掉它，第二轮的 `user.message`
@@ -1937,18 +1942,23 @@ async fn the_turn_number_continues_across_archival() {
         consolidate_into_wal(&store, &consolidated(&["snap-1"]), "session/main").is_some(),
         "压掉第 1 轮"
     );
-    let turns = store.range(Seq::new(0))[0].payload["turns"].as_u64();
+    let turns = current_window(&store.range(Seq::new(0)))[0].payload["turns"].as_u64();
     assert_eq!(turns, Some(1), "快照带走水位：它取代了 1 轮");
     drop(store);
 
-    // 第二轮：live 段里一条 `user.message` 都没有（全被取代），靠水位才数得出 1。
+    // 第二轮：现行窗口里一条 `user.message` 都没有（上一轮全被取代），靠水位才数得出 1。
     run_one_turn(&session, &sink).await;
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
-    let turn = store
-        .range(Seq::new(0))
+    let all = store.range(Seq::new(0));
+    assert_eq!(
+        all.iter().filter(|e| e.kind == EVENT_USER_MESSAGE).count(),
+        2,
+        "完整史看得见被归档的那一轮（口径归一后 `range(0)` 含前缀）"
+    );
+    let turn = current_window(&all)
         .iter()
         .find(|e| e.kind == EVENT_USER_MESSAGE)
         .map(|e| e.turn)
-        .expect("第二轮的用户格应在 live 段里");
+        .expect("第二轮的用户格应在现行窗口里");
     assert_eq!(turn, 1, "轮号接着水位走，不是从 0 重新数");
 }

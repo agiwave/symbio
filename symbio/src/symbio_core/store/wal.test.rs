@@ -540,8 +540,13 @@ fn seeded(n: usize) -> (tempfile::TempDir, std::path::PathBuf, EventWalStore) {
 }
 
 fn live_seqs(store: &EventWalStore) -> Vec<u64> {
+    // **读实现内部**的 live 段：`range` 归一后给的是完整史（含归档前缀），
+    // 「哪一段在内存里」是实现自己的事，不再是公开读法（见 `Store::range` 文档）。
     store
-        .range(Seq::new(0))
+        .inner
+        .read()
+        .expect("WalStore 锁中毒")
+        .events
         .iter()
         .filter_map(|e| e.seq().map(Seq::value))
         .collect()
@@ -639,13 +644,18 @@ fn a_cut_at_the_first_event_archives_nothing() {
     );
 }
 
-/// 归档掉全部事件：live 变**空文件**（不是删除），号空间照旧。
+/// 归档掉全部事件：live 变**空文件**（不是删除），号空间照旧，读口照旧给完整史。
 #[test]
 fn archiving_past_the_last_event_empties_the_live_file_without_losing_the_numbers() {
     let (dir, path, store) = seeded(4);
     assert_eq!(store.archive_before(Seq::new(99)).unwrap(), Some(4));
     assert_eq!(store.len(), 0);
-    assert!(store.range(Seq::new(0)).is_empty());
+    assert_eq!(live_seqs(&store), Vec::<u64>::new(), "没被取代的那段空了");
+    assert_eq!(
+        store.range(Seq::new(0)).len(),
+        4,
+        "读口给的是完整史：**全归档不等于全丢**，那 4 条仍在归档段里，读者一条不少"
+    );
     assert_eq!(store.head().value(), 4, "号空间不动");
     assert_eq!(
         std::fs::read_to_string(segment(&dir, "v2-events.wal.0-3"))
@@ -688,22 +698,26 @@ fn reopening_after_archival_sees_only_the_live_tail() {
     );
 }
 
-// ── 完整事件史（`history`）：归档段 + live ──────────────────────────────────
+// ── 一个读口的口径：归档段 + live ─────────────────────────────────────────
 
-/// `history()` = 归档段 + live，按号升序；`range()` 只给 live 窗口。
+/// **一个读口**：`range(from)` 给的是完整史（归档段 + live，按号升序）。
 ///
-/// 这条钉的是**两个读口的分工**：累计口径的读者（不变量 C1 / SLO / 声誉 / 成本 /
-/// 记忆 / 任务状态）必须看得见被归档的前缀，否则压缩后**静默**少算。
+/// 累计口径的读者（不变量 C1 / SLO / 声誉 / 成本 / 记忆 / 任务状态）必须看得见被
+/// 归档的前缀，否则压缩后**静默**少算；消息 / 上下文类读者读的也是同一份完整史，
+/// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
+/// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
+/// 「这条会话压缩过没有」——那是布局泄漏进抽象
+/// （[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
 #[test]
-fn history_unions_archives_with_live_in_seq_order() {
+fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);
     store.archive_before(Seq::new(10)).unwrap();
 
-    // live 窗口只是尾部两条（`range` 的口径）。
+    // live 段只是尾部两条——那是实现的内部形态，不再是公开读法。
     assert_eq!(live_seqs(&store), vec![10, 11]);
 
     // 完整史是原样的 12 条（逐条不重不漏——ADR-053 迁移表 b2 行的「零回退损失」）。
-    let all = store.history();
+    let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()
             .filter_map(|e| e.seq().map(Seq::value))
@@ -719,7 +733,7 @@ fn history_unions_archives_with_live_in_seq_order() {
 ///
 /// 归档把被取代的前缀移出 live ⇒ live 首号不再是 0。按下标切会把「从 seq 11 起」
 /// 读成「从 live 的第 11 条起」= 空集，调用方要的那一条因此在压缩过的会话里
-/// **静默**消失（今天的实现在这里就是错的，只是唯一的 `from > 0` 调用点在
+/// **静默**消失（P6-① 修的就是这一处；唯一的 `from > 0` 调用点在
 /// `transcript/autonomous`，它取 `.next()`，压缩过才显形）。
 #[test]
 fn range_after_archival_selects_by_seq_not_by_position() {
@@ -735,11 +749,11 @@ fn range_after_archival_selects_by_seq_not_by_position() {
             .collect()
     };
     assert_eq!(seqs(11), vec![11], "从 seq 11 起 = 一条");
-    assert_eq!(seqs(10), vec![10, 11], "从 live 首号起 = 整个窗口");
+    assert_eq!(seqs(10), vec![10, 11], "从归档 cut 起 = 尾部两条");
     assert_eq!(
         seqs(9),
-        vec![10, 11],
-        "早于窗口首号 ⇒ 从首号给起，不许多也不算少"
+        vec![9, 10, 11],
+        "**归档段也认号**：从 seq 9 起包括已进归档的那一条"
     );
     assert_eq!(
         seqs(12),
@@ -748,27 +762,34 @@ fn range_after_archival_selects_by_seq_not_by_position() {
     );
 }
 
-/// 没压过 ⇒ `history()` 与 `range()` 逐条相同（本方法不引入第二份口径）。
+/// 没压过 ⇒ `range(0)` 与 live 段逐条相同（归一不引入第二份内容，只是并掉两个口）。
 #[test]
-fn history_without_archival_equals_range() {
+fn range_without_archival_is_the_live_segment() {
     let (_dir, _path, store) = seeded(5);
-    let by_history: Vec<String> = store.history().iter().map(|e| e.event_id.clone()).collect();
     let by_range: Vec<String> = store
         .range(Seq::new(0))
         .iter()
         .map(|e| e.event_id.clone())
         .collect();
-    assert_eq!(by_history, by_range);
+    let in_live: Vec<String> = store
+        .inner
+        .read()
+        .expect("WalStore 锁中毒")
+        .events
+        .iter()
+        .map(|e| e.event_id.clone())
+        .collect();
+    assert_eq!(by_range, in_live);
 }
 
 /// 两次归档 ⇒ 两个段 + live，仍还原完整史（段与段不重叠）。
 #[test]
-fn history_spans_two_disjoint_segments() {
+fn range_spans_two_disjoint_segments() {
     let (_dir, _path, store) = seeded(12);
     store.archive_before(Seq::new(4)).unwrap();
     store.archive_before(Seq::new(9)).unwrap();
 
-    let all = store.history();
+    let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()
             .filter_map(|e| e.seq().map(Seq::value))
@@ -778,14 +799,30 @@ fn history_spans_two_disjoint_segments() {
     );
 }
 
+/// 本实例归档之后，缓存必须失效——否则「归一后的 `range` 含前缀」会读到自己刚写进去
+/// 的那段的**旧**并集（少一段）。这条钉的是缓存与 `archive_before` 的联动。
+#[test]
+fn archiving_invalidates_the_archive_cache_of_this_instance() {
+    let (_dir, _path, store) = seeded(12);
+    assert_eq!(store.range(Seq::new(0)).len(), 12, "前置：没归档");
+    store.archive_before(Seq::new(4)).unwrap();
+    assert_eq!(
+        store.range(Seq::new(0)).len(),
+        12,
+        "归档后完整史仍 12 条（缓存已作废，新段被读进来）"
+    );
+    store.archive_before(Seq::new(9)).unwrap();
+    assert_eq!(store.range(Seq::new(0)).len(), 12, "第二次归档同样");
+}
+
 /// 只读实例（不持令牌）也能读完整史：归档段的读不依赖写者身份。
 #[test]
-fn history_is_readable_from_a_readonly_instance() {
+fn range_is_readable_from_a_readonly_instance() {
     let (_dir, path, store) = seeded(12);
     store.archive_before(Seq::new(10)).unwrap();
     drop(store);
 
     let ro = EventWalStore::open_readonly(&path).unwrap();
-    assert_eq!(ro.len(), 2, "live 只有尾部");
-    assert_eq!(ro.history().len(), 12, "完整史把归档段一并读回来");
+    assert_eq!(live_seqs(&ro), vec![10, 11], "live 只有尾部");
+    assert_eq!(ro.range(Seq::new(0)).len(), 12, "完整史把归档段一并读回来");
 }

@@ -6,7 +6,8 @@ use super::{compile, route, take_match, SkillLlmHit, SKILL_TAG};
 use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -277,6 +278,74 @@ fn a_fallen_back_skill_is_dropped_from_this_turn() {
         routing.hits.is_empty(),
         "回退的技能不进可用集（不能既判它不可信、又拿它去收束本轮）"
     );
+}
+
+/// **归档不缩小校准账**（P6-② 的愈合点，[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）：
+/// 被编译的技能与它的回退观测都落在被快照取代的那段前缀里 ⇒ 压缩之后这条技能**仍**
+/// 判不可信、仍被摘出本轮视图。判据问的是「这条技能被记过回退没有」，与那段历史
+/// 之后被压掉没有无关。
+///
+/// **反向自检**：把 `route` 里的 `store.range(Seq::new(0))` 换成「从最新快照起自切
+/// 窗口」⇒ 本用例红（观测看不见 ⇒ 判成快路，被摘过的技能重新进提示词——静默的复发）。
+#[test]
+fn an_earlier_fallback_still_demotes_the_skill_after_archival() {
+    let dir = tmp_dir("archived-fallback");
+    let skill_id = seed_skill(&dir, "帮我写测试");
+    {
+        let store = EventWalStore::open(wal_of(&dir)).expect("WAL");
+        let anchor = store
+            .range(Seq::new(0))
+            .iter()
+            .find(|e| e.kind == EVENT_USER_MESSAGE)
+            .and_then(|e| e.seq)
+            .expect("开轮格");
+        observe(&store, 0, &skill_id, true, anchor.value());
+    }
+    // 压缩：落一条快照，并把被取代的前缀（技能 + 观测）整段归档。
+    {
+        let store = EventWalStore::open(wal_of(&dir)).expect("WAL");
+        let seq = store
+            .append(
+                Event::pending(
+                    "v2sc-test-archived-fallback",
+                    EVENT_SESSION_CONSOLIDATED,
+                    Entity::Message,
+                    Verb::Progressed,
+                    0,
+                    PRINCIPAL_MAIN,
+                )
+                .with_payload(serde_json::json!({
+                    // 载荷是真的快照形状（一份合法 `ChatNode` 列表）：反向自检里
+                    // 「换成只切现行窗口」要切得出东西，基线不合法就等于没有反向自检。
+                    "messages": [crate::symbio_core::chat_node::ChatNode {
+                        id: "snap-1".to_string(),
+                        msg_type: Some(crate::symbio_core::chat_node::NodeKind::Body),
+                        content: Some(crate::symbio_core::chat_node::MessageContent::Text(
+                            "[CONTEXT SNAPSHOT]\nsnap-1".to_string(),
+                        )),
+                        status: Some(crate::symbio_core::chat_node::NodeStatus::Completed),
+                        ..Default::default()
+                    }],
+                    "turns": 1,
+                })),
+            )
+            .expect("快照入格");
+        assert!(
+            store.archive_before(seq).unwrap().is_some(),
+            "前置：确有前缀被归档"
+        );
+    }
+
+    let store = EventWalStore::open_readonly(wal_of(&dir)).expect("WAL");
+    let mut view = view_of(&store);
+    assert_eq!(view.entries.len(), 1, "压缩前编译的技能仍召回得到");
+    let routing = route(&dir, &mut view);
+    assert_eq!(
+        routing.obs,
+        vec![(skill_id, true)],
+        "归档段里那条回退观测照样作数"
+    );
+    assert!(view.entries.is_empty(), "判过回退 ⇒ 摘出本轮视图");
 }
 
 /// 反向（读侧的平凡值）：本轮没召回技能 ⇒ 直接返回，连不存在的目录都不去开

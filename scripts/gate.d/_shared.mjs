@@ -76,7 +76,7 @@ export const BASELINE = {
   // `the_chain_skips_nulls_and_follows_the_table_order`（MiMo 的 `reasoning_content: null` + `reasoning` 形态、顺序由表定）、
   // `the_anthropic_keys_use_the_same_extractor`（Anthropic 三组键与类型名同样落表）。档案表本身是把散落魔法数搬成数据，
   // 这三条钉的是「搬家后值不变、链序不变」——原先是三处字面量，没有可断言的单点。非放宽。
-  rustTests: 1754,
+  rustTests: 1758,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
@@ -96,12 +96,13 @@ export const BASELINE = {
   // T-117 增 t76（召回可见域）。
   e2eCases: 77,
   verifyAsserts: 206,
-  // 唯一一处**向上**的 panic 面（实测 71）：S2.7-b2 段归档新增 `WalStore::archive_before`
-  // 与 `WalStore::history`，两者各要拿一次同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」
-  // 约定（同 `len`/`range`/`head` 的 `expect("WalStore 锁中毒")`）。两处均已按 PN-001 登记，
-  // 理由同构：改成毒后恢复是行为变更，需单独 ADR。这不是放宽棘轮——两处都是既有约定的
-  // 复制，不是新引入的健壮性缺口。
-  panicSites: 71,
+  // 唯一一处**向上**的 panic 面（实测 73）：段归档（S2.7-b2）与它的读侧——
+  // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
+  // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定
+  // （同 `len`/`head` 的 `expect("WalStore 锁中毒")`）。每一处均已按 PN-001 登记，
+  // 理由同构：改成毒后恢复是行为变更，需单独 ADR。这不是放宽棘轮——新增的都是既有约定
+  // 的复制，不是新引入的健壮性缺口。
+  panicSites: 73,
 }
 
 

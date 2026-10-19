@@ -39,7 +39,7 @@ use serde::Serialize;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, ReadingPanel, VisScope, SESSION_ID,
+    PluginPayload, ReadingPanel, Seq, Store, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -271,9 +271,9 @@ fn fleet_from_wals(wals: &[std::path::PathBuf]) -> serde_json::Value {
             );
             continue;
         };
-        // `history()` 而非 `range()`：SLO 四列是**累计口径**，压缩归档把被取代的
-        // 前缀移出 live 段后，只读 live 会让实例聚合**静默**少算（见 `history` 文档）。
-        let snapshot = store.history();
+        // SLO 四列是**累计口径**（S2.7-b2）：被快照取代而移入归档段的前缀也在
+        // `range(0)` 里，实例聚合不会**静默**少算。
+        let snapshot = store.range(Seq::new(0));
         lat_parts.push(
             slo_report()
                 .apply(&snapshot, i64::MAX, Budget::generous())
@@ -501,11 +501,10 @@ pub(crate) fn read(
     let has_wal = wal.exists();
     let store = EventWalStore::open_readonly(wal)
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 读取失败：{e}")))?;
-    // `history()` 而非 `range()`（S2.7-b2）：本出口的四列 / 不变量 / 声誉全是
-    // **累计口径**——压缩归档把被取代的前缀移出 live 段后，只读 live 会同时
-    // ① 让 C1「无跳号」把窗口首号读成违规（假红）、② 让四列与声誉少算被归档的历史。
-    // 归档段是「完整事件史」的一半（见 `WalStore::history`）。
-    let snapshot = store.history();
+    // 本出口的四列 / 不变量 / 声誉全是**累计口径**（S2.7-b2）：`range(0)` 给完整史
+    // （归档段 + 未取代的那段），于是 ① C1「无跳号」看到的首号仍是 0（只读未取代那段
+    // 会把窗口首号读成违规——假红），② 四列与声誉不会漏算被归档的历史。
+    let snapshot = store.range(Seq::new(0));
 
     // 读侧闸（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：**读什么由能看
     // 什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。

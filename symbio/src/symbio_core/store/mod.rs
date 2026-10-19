@@ -48,10 +48,18 @@ pub trait Store: Send + Sync {
 
     /// 读取 `[from, head)` 的事件区间，返回不可变数据（快照，不持有内部锁）。
     ///
-    /// **`from` 是号，不是下标**：实现内部的窗口首号可以不是 0（归档把被取代的前缀
-    /// 移出当前窗口），按下标切会把「从 seq k 起」读成「从窗口第 k 条起」而少读。
-    /// 缺号的事件（旧版本写下的行）恒留在窗口尾部——与 `archive_before` 对缺号的
-    /// 处理（「按最大处理 ⇒ 不归档它」）同口径，两处不许各猜一次。
+    /// **`from` 是号，不是下标**：实现内部的窗口首号可以不是 0（持久化实现把被快照
+    /// 取代的前缀移出了当前窗口），按下标切会把「从 seq k 起」读成「从窗口第 k 条起」。
+    ///
+    /// **一个读口，一种口径**：`from` 起的全部事实**含被取代的前缀**，按号序。
+    /// 「被取代」是**折叠侧**的事——投影从最近一份快照起折，前缀自然不参与
+    /// （见 `mutations_latest_snapshot`）；它不是存储层的第二种读法。按布局分叉的
+    /// 两个口（只给窗口 / 含归档）会把「这条会话压缩过没有」的知识漏给调用方
+    /// （[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+    /// 推论 1）；要窗口就按 `Seq` 自己切。
+    ///
+    /// 缺号的事件（旧版本写下的行）不属于任何 `[from, head)` 区间，只在 `from = 0`
+    /// 时出现。
     fn range(&self, from: Seq) -> Vec<Self::Event>;
 
     /// 下一个待分配的 seq（= 已有事件数）。
@@ -122,12 +130,18 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
     }
 
     fn range(&self, from: Seq) -> Vec<Self::Event> {
-        let inner = self.inner.read().expect("MemoryStore 锁中毒");
+        // 与 `WalStore` 同一条契约（**`from` 是号不是下标**、缺号只在 `from = 0` 出现）。
+        // 内存实现里 `append` 恒赋号，两者今天恰好等价——但等价不是契约，
+        // 各写一遍就会各漂一次（`WalStore` 那次漂了三个批次没人红）。
         let from = from.value();
+        let inner = self.inner.read().expect("MemoryStore 锁中毒");
+        if from == 0 {
+            return inner.events.clone();
+        }
         inner
             .events
             .iter()
-            .filter(|e| e.seq().map(Seq::value).unwrap_or(u64::MAX) >= from)
+            .filter(|e| e.seq().is_some_and(|s| s.value() >= from))
             .cloned()
             .collect()
     }

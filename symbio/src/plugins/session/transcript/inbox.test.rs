@@ -12,9 +12,6 @@ use super::*;
 use crate::plugins::session::plugin::SessionConfig;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::PluginSimpleRequest;
-// `Seq` 是**测试自己**要的（父模块把它从顶层导入里删了——生产侧只读 `history()`，
-// 不再需要 `Seq`）；`use super::*` 因此带不过来。
-use crate::symbio_core::Seq;
 
 fn plugin() -> Arc<SessionPlugin> {
     Arc::new(SessionPlugin::new(
