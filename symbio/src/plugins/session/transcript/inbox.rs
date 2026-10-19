@@ -42,10 +42,11 @@
 use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use crate::symbio_core::{
-    Event, EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption,
-    PreemptionDecider, Seq, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption, PreemptionDecider,
+    Seq, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 

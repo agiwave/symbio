@@ -58,10 +58,11 @@ use std::time::SystemTime;
 // 本模块续一条原名短路径——调用点一行不动。
 use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
-    accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, EventWalStore,
-    RecallView, Rejection, Seq, Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
+    accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, RecallView,
+    Rejection, Seq, Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
     EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 

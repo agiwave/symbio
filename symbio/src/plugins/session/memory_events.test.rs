@@ -15,10 +15,11 @@ use super::{
 };
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use crate::plugins::session::skill_events::SKILL_TAG;
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::merge_kernel::split_sentences;
 use crate::symbio_core::{
-    check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
+    check_all, recall, Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb,
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 use std::path::PathBuf;

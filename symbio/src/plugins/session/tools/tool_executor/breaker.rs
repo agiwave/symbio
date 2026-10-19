@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{
-    Budget, EventWalStore, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
+    Budget, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
 };
 
 /// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。

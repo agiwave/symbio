@@ -340,7 +340,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     let dir = dir_for(tmp.path(), "sess_truth");
     std::fs::create_dir_all(&dir).unwrap();
     {
-        let wal = crate::symbio_core::EventWalStore::open(
+        let wal = crate::plugins::session::store::EventWalStore::open(
             dir.join(crate::plugins::session::paths::V2_WAL_FILE),
         )
         .unwrap();

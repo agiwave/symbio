@@ -8,6 +8,7 @@ use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::write::{assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls};
 use super::PersistentChatSession;
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -894,7 +895,7 @@ fn assign_seq_places_trailing_run_after_last_existing() {
 // ── `apply`：唯一写入口（S2.7-b3 前置，ADR-054 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
-use crate::symbio_core::{Event, EventWalStore, Seq, Store};
+use crate::symbio_core::{Event, Seq, Store};
 
 /// 只读读回事实源里的全部事件（与 `resume.test.rs::events_of` 同款）。
 fn events_of(dir: &std::path::Path) -> Vec<Event> {

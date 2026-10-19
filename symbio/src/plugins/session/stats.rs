@@ -31,6 +31,7 @@
 //! 读数取 `now = i64::MAX`：WAL 是**落盘**事实源，文件里每一条都已发生，没有
 //! 「未来的事件」可滤——与 `projection/slo.test.rs` 的扫描口同一口径。
 
+use crate::plugins::session::store::EventWalStore;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -38,8 +39,8 @@ use serde::Serialize;
 
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, ReadingPanel, Seq, Store, VisScope, SESSION_ID,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    ReadingPanel, Seq, Store, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;

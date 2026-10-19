@@ -13,6 +13,13 @@
 //! | 持久会话 | [`SessionStore::new`]（根 = `<本插件目录>`） | 磁盘 `<根>/<id>/{session.json, messages.json}` |
 //! | 临时会话 | [`SessionStore::ephemeral`] | 进程内，退出即丢 |
 //!
+//! ## 事件事实源（子模块 `wal`）
+//!
+//! 会话的**权威事件流**也住本模块：JSONL 追加、跨进程写者令牌、被压缩取代的前缀
+//! 归档。它实现 core 的 [`Store`](crate::symbio_core::Store) 端口，而类型本身
+//! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
+//! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")）。
+//!
 //! ## 与 VDFS 的关系
 //!
 //! **对外**，会话只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` / `子会话` /
@@ -71,6 +78,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
+
+mod wal;
+
+/// 持久化事实源（`Store` 端口的一种实现）。**可见性只到会话插件**：WAL 的布局 /
+/// 锁文件 / 归档段都是「会话怎么落事实」的私有细节，别的插件要拿事实走 core 的
+/// `Store` 端口或会话的地址面，而不是自己开一个 WAL。
+pub(in crate::plugins::session) use wal::EventWalStore;
+#[cfg(test)]
+pub(in crate::plugins::session) use wal::WalStore;
 
 /// 父会话目录内存放子会话的固定子目录名——**唯一定义在 `paths`**（路径词汇
 /// 单点，部署级读侧的下探遍历按同一个名字走，见 `paths::session_wals_deep`）。
@@ -541,7 +557,7 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     if !path.exists() {
         return None;
     }
-    let store = crate::symbio_core::EventWalStore::open_readonly(&path).ok()?;
+    let store = crate::plugins::session::store::EventWalStore::open_readonly(&path).ok()?;
     // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
     // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
     use crate::symbio_core::Store as _;
@@ -552,7 +568,7 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
 /// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。
 ///
 /// [`Store::range`](crate::symbio_core::Store::range) 归一后给的是**完整史**（含被
-/// [`archive_before`](crate::symbio_core::WalStore::archive_before) 移出的前缀，
+/// [`archive_before`](crate::plugins::session::store::WalStore::archive_before) 移出的前缀，
 /// [plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1），
 /// 而「**这一轮**还开着没收束」判的是现行历史：被快照取代的那段已不参与上下文，
 /// 拿它找未收束轮次会把陈锚当现行（压缩期间等审批的那一轮正是这种形状）。

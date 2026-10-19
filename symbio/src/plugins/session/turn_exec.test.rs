@@ -11,6 +11,7 @@
 //!    循环收尾入格。中止与失败的差别在**类型上**可见，不靠错误
 //!    文本猜。
 
+use crate::plugins::session::store::EventWalStore;
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -279,9 +280,10 @@ async fn supplements_become_facts_visible_next_turn() {
     );
 
     // ── ③ 下一轮可见：**重开 WAL** 再投影（不拿内存里的快照糊弄） ──────────
-    let reopened =
-        crate::symbio_core::EventWalStore::open(dir.join(super::super::paths::V2_WAL_FILE))
-            .expect("重开 WAL");
+    let reopened = crate::plugins::session::store::EventWalStore::open(
+        dir.join(super::super::paths::V2_WAL_FILE),
+    )
+    .expect("重开 WAL");
     let projected = crate::symbio_core::transcript()
         .apply(
             &reopened.range(crate::symbio_core::Seq::new(0)),

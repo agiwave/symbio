@@ -1,10 +1,17 @@
-//! `store = wal` —— 持久化事实源（v2 阶段 S4 第 9 步，[roadmap/S05 §2](../../../../docs/009-task/125-长会话与断点恢复.md "T-125-长会话与断点恢复")）。
+//! `store = wal` —— 会话的持久化事实源
 //!
-//! ## F1 冻结的第一次兑现
+//! ## 为什么实现在这里，而端口在 core
 //!
-//! [`Store`](super::Store) trait 在 S0 冻结（append / range / head）——本实现
-//! **零接口改动**换掉内存形态：调用方把 `EventStore` 换成 `WalStore`，其余代码
-//! 一行不动（[plan/05 §4](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")：实现替换不构成架构改动）。
+//! [`Store`](crate::symbio_core::Store) 是机制层的**端口**（append / range / head，F1
+//! 冻结），它只规定「一个事实源要守的五条语义」，不认识 JSONL、不认识 `.lock`、
+//! 不认识 `transcripts/wal-archive`。那些是**一种磁盘布局**的细节，而只有会话需要
+//! 这种布局 ⇒ 细节住在使用方。分层判据收成编译边界：core 不再导出本类型，
+//! 任何别的插件想拿 WAL 去自己开一个事实源，**写不出来**（[plan/14 §2.2
+//! 推论 2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")）。
+//!
+//! [`Store`](crate::symbio_core::Store) trait 冻结之后换实现**零接口改动**：调用方把
+//! `EventStore` 换成 `EventWalStore`，其余代码一行不动
+//! （[plan/05 §4](../../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")：实现替换不构成架构改动）。
 //!
 //! ## 形态
 //!
@@ -13,10 +20,10 @@
 //!
 //! ## 单写者：跨进程写者令牌
 //!
-//! 「每 thread 一个 FIFO，串行」（[`Store`](super::Store) 五条语义之首）在
-//! S4 之前只由**进程内** `RwLock` 保证：两个进程各持一份 `WalStore`，各自
+//! 「每 thread 一个 FIFO，串行」（[`Store`](crate::symbio_core::Store) 五条语义之首）由
+//! **进程内** `RwLock` 加**跨进程**写者令牌一起保证：两个进程各持一份 `WalStore`，各自
 //! `head` 从文件重放算出，`append` 只 append 不校验 ⇒ seq 重号 / 事件交错，
-//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
+//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
 //!
 //! 本实现把它升级为**跨进程**的写者令牌：`open` 对一个**旁挂锁文件**
 //! （`<wal>.lock`）取一次非阻塞独占锁（[`File::try_lock`](std::fs::File::try_lock)：
@@ -25,19 +32,19 @@
 //! | 入口 | 令牌 | `append` |
 //! |---|---|---|
 //! | [`open`](Self::open) 拿到锁 | 持 | 正常落盘 |
-//! | [`open`](Self::open) 拿不到锁 | 不持 | [`AppendError::NotTheWriter`](super::AppendError::NotTheWriter) |
+//! | [`open`](Self::open) 拿不到锁 | 不持 | [`AppendError::NotTheWriter`](crate::symbio_core::AppendError::NotTheWriter) |
 //! | [`open_readonly`](Self::open_readonly) | 从不取锁 | 同上（读方在类型上就不该写） |
 //!
 //! 拿不到令牌**不报错、降级成「非写者」**：读照常（`range` / `head` 不看令牌），
 //! 只有写被拒。这样「第二个写者」拿到的是一个可判别的信号，而不是一个静默的
-//! 重复 seq——[plan/11 §4](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
+//! 重复 seq——[plan/11 §4](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
 //! 要的正是这个反向用例。
 //!
 //! ### 锁为什么落在旁挂文件、而不是 WAL 文件自身
 //!
 //! 这是 Windows 逼出来的（实测，非偏好）：`LockFileEx` 是**强制锁**——它不只拦
 //! 别的写者，也拦**别的句柄的读**。把锁打在 WAL 上，会话进行中的读数口
-//! （[`session/stats`](../../plugins/session/stats.rs) 会在任意时刻 `open_readonly`
+//! （[`stats`](../stats.rs) 会在任意时刻 `open_readonly`
 //! 同一文件）会直接 `ERROR_LOCK_VIOLATION`。Unix 的 `flock` 是劝告锁、没有这个
 //! 问题，但两平台必须同一套语义，所以锁打在一个**只有写者会碰**的旁挂文件上：
 //! WAL 自身永不被锁，读方照旧自由读。
@@ -64,10 +71,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use super::{AppendError, Seq, Store};
-use crate::symbio_core::event::EventEnvelope;
+use crate::plugins::session::paths;
+use crate::symbio_core::EventEnvelope;
+use crate::symbio_core::{AppendError, Seq, Store};
 
-/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表取值）。
+/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表取值）。
 pub struct WalStore<E: EventEnvelope> {
     path: PathBuf,
     /// 写者令牌：`Some` = 本实例持有该事实源的跨进程独占锁，`None` = 非写者。
@@ -102,16 +110,17 @@ fn lock_path(wal: &Path) -> PathBuf {
     wal.with_file_name(name)
 }
 
-/// 归档段的存放子目录（相对 WAL 所在目录）。
+/// 归档段的存放目录（相对 WAL 所在目录）：`<会话目录>/transcripts/wal-archive`。
 ///
-/// 与 [`plugins::session::paths`](../../plugins/session/paths.rs) 的
-/// `TRANSCRIPTS_SUBDIR` **同字面量**，但**不 import** 它：`symbio_core` 不得依赖
-/// plugins（分层，core-naming-audit N-002）。这是有意保留的一处重复——改这里
-/// 必须同步改 `paths.rs`（那边有对应注释指向本常量）。
+/// `transcripts` 这一段取自 [`paths::TRANSCRIPTS_SUBDIR`]——那是会话布局的公共词汇，
+/// 只定义一次；`wal-archive` 这一段是本模块自己的布局，读侧（`range`）与写侧
+/// （`archive_before`）共用同一个拼法。
 ///
 /// 放在 `transcripts/` 之下而不是与会话文件同级：VDFS 会话树是**显式构造**的
 /// （不走 `read_dir`），故这个子目录不会漏进前端的文件列表。
-const WAL_ARCHIVE_SUBDIR: &str = "transcripts/wal-archive";
+fn archive_dir_of(wal_dir: &Path) -> PathBuf {
+    wal_dir.join(paths::TRANSCRIPTS_SUBDIR).join("wal-archive")
+}
 
 /// 归档段的路径：`<wal 所在目录>/transcripts/wal-archive/<wal 文件名>.<first>-<last>`。
 ///
@@ -121,10 +130,7 @@ const WAL_ARCHIVE_SUBDIR: &str = "transcripts/wal-archive";
 fn archive_path(wal: &Path, first: u64, last: u64) -> PathBuf {
     let mut name = wal.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".{first}-{last}"));
-    wal.parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(WAL_ARCHIVE_SUBDIR)
-        .join(name)
+    archive_dir_of(wal.parent().unwrap_or_else(|| Path::new("."))).join(name)
 }
 
 impl<E> WalStore<E>
@@ -134,7 +140,7 @@ where
     /// 打开（或创建）一个 WAL 文件，并**尝试取得写者令牌**。
     ///
     /// 拿不到令牌（另一个写者持有）⇒ 返回一个可读、但 `append` 恒
-    /// [`NotTheWriter`](super::AppendError::NotTheWriter) 的实例——降级不是失败，
+    /// [`NotTheWriter`](crate::symbio_core::AppendError::NotTheWriter) 的实例——降级不是失败，
     /// 是「这次你不是写者」这个事实本身。
     ///
     /// **恢复在这里发生**：持令牌者重放所有完整行，撕裂的尾行被丢弃并截断
@@ -392,7 +398,8 @@ where
         }
         let mut all: Vec<E> = Vec::new();
         // ── 归档段（按段名首号升序读）──────────────────────────────────────
-        if let Some(dir) = self.path.parent().map(|p| p.join(WAL_ARCHIVE_SUBDIR)) {
+        if let Some(parent) = self.path.parent() {
+            let dir = archive_dir_of(parent);
             let mut prefix = self.path.file_name().unwrap_or_default().to_os_string();
             prefix.push(".");
             let prefix = prefix.to_string_lossy().to_string();
@@ -424,12 +431,9 @@ where
     }
 
     /// 已入库事件数（== `head().value()`；测试与断言用）。
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.inner.read().expect("WalStore 锁中毒").events.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
@@ -514,7 +518,7 @@ where
 }
 
 /// 便捷别名：装 [`crate::symbio_core::event::Event`] 信封的持久化事实源。
-pub type EventWalStore = WalStore<crate::symbio_core::event::Event>;
+pub type EventWalStore = WalStore<crate::symbio_core::Event>;
 
 #[cfg(test)]
 #[path = "wal.test.rs"]
@@ -524,9 +528,8 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/symbio_core/store/wal.rs::len: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/symbio_core/store/wal.rs::range: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/symbio_core/store/wal.rs::head: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/symbio_core/store/wal.rs::append: 存储层灾难不可静默：WAL 打不开 / 写不进时继续跑等于事实源与读侧悄悄分叉。序列化自有类型失败同理。
-// panic-allow symbio/src/symbio_core/store/wal.rs::archive_before: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/symbio_core/store/wal.rs::archive_events: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/wal.rs::range: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/wal.rs::head: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/wal.rs::append: 存储层灾难不可静默：WAL 打不开 / 写不进时继续跑等于事实源与读侧悄悄分叉。序列化自有类型失败同理。
+// panic-allow symbio/src/plugins/session/store/wal.rs::archive_before: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/store/wal.rs::archive_events: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

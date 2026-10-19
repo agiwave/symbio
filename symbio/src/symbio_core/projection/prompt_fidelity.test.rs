@@ -12,10 +12,9 @@
 use super::super::transcript::{transcript, PromptMessage};
 use super::{verify, PromptGap as Gap};
 use crate::symbio_core::event::{
-    Entity, Event, Seq, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
+    Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED,
+    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
 };
-use crate::symbio_core::{EventWalStore, Store};
 
 /// 一条送进模型的消息。
 ///
@@ -232,52 +231,6 @@ fn a_single_turn_is_complete() {
     ];
     let rep = verify(&events, &entries, None);
     assert!(rep.is_complete(), "平凡值必须无假红：{}", rep.summary());
-}
-
-/// 生产路径：真落一格 `artifact.added` 再从**重开的 WAL** 复核。
-///
-/// 走 `EventWalStore` 而不是内存事件，是为了让「窗口裁剪 / 可见域过滤」在生产里经过的
-/// 同一段代码也被覆盖到——内存切片绕过那一层。
-#[test]
-fn an_artifact_round_is_complete_after_reopen() {
-    let dir = std::env::temp_dir().join(format!("symbio-fidelity-{}-artifact", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("临时目录");
-    let wal = dir.join("v2-events.wal");
-
-    let store = EventWalStore::open(&wal).expect("open");
-    let seq = store
-        .append(user_turn(0, "帮我回显"))
-        .expect("append user")
-        .value();
-    store
-        .append(artifact(0, "vdfs_read", "文件内容：hello").with_produced_by(seq))
-        .expect("append artifact");
-    store
-        .append(assistant_turn(0, "回显完成").with_produced_by(seq))
-        .expect("append final");
-    drop(store);
-
-    let reopened = EventWalStore::open(&wal).expect("reopen");
-    let events = reopened.range(Seq::new(0));
-
-    // 投影（生产的那一个）+ 手工按结构化形态摆出 prompt 消息（ADR-048a 的目标形态）
-    let view = transcript()
-        .apply(&events, i64::MAX, crate::symbio_core::Budget::generous())
-        .value;
-    let entries: Vec<PromptMessage> = view.to_messages();
-    assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
-    assert_eq!(entries[1].role, "tool");
-    assert_eq!(
-        entries[1].tool.as_deref(),
-        Some("vdfs_read"),
-        "工具名是事实"
-    );
-
-    let rep = verify(&events, &entries, None);
-    assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// 变更格（**第三类**）：既不产 entry、也不是「按设计不进请求包」。

@@ -33,7 +33,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 fn seed_user_message(dir: &std::path::Path) {
     use crate::symbio_core::Store as _;
     let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
-    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    let s = crate::plugins::session::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
         crate::symbio_core::Event::pending(
             "u-open",

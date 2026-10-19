@@ -83,11 +83,12 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
-    llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
+    llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event,
     ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
     ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -747,7 +748,7 @@ pub(crate) struct ExecTurnResult {
 fn supplement_into_request(
     batch: Option<super::transcript::supplements::DrainedSupplement>,
     anchor: Option<u64>,
-    store: &crate::symbio_core::EventWalStore,
+    store: &crate::plugins::session::store::EventWalStore,
     actor: &ActorSpec,
     turn_no: u64,
     sink_msgs: &Arc<std::sync::Mutex<Vec<ChatNode>>>,

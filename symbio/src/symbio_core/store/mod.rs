@@ -9,14 +9,17 @@
 //!
 //! | 语义 | 保证 | 强制方式 |
 //! |---|---|---|
-//! | 单写者 | 每 thread 一个 FIFO，串行 | 运行时（`MemoryStore` 进程内锁；[`wal::WalStore`] **跨进程写者令牌**）+ CI |
+//! | 单写者 | 每 thread 一个 FIFO，串行 | 运行时（实现自带进程内锁；持久化实现另有**跨进程写者令牌**）+ CI |
 //! | 单调 seq | thread 内严格递增、**无跳号** | [`crate::symbio_core::event::Seq`] 私有构造 + 本实现 |
 //! | append-only | 接口上**无** `update` / `delete` | 编译期（trait 就没有这些方法） |
 //! | 幂等 | `event_id` 重复 ⇒ `Duplicate` | 运行时 |
 //! | 原子 | 单事件要么完整在、要么不在 | 运行时 |
 //!
-//! **实现替换不构成架构改动**：内存 / WAL / 分片 / 分布式都是 `impl Store`，
-//! 调用方零改动（S4 长会话的 `wal` 实现从这里长出来，[plan/05 §4](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
+//! **实现替换不构成架构改动**：内存 / 持久文件 / 分片 / 分布式都是 `impl Store`，
+//! 调用方零改动（[plan/05 §4](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
+//!
+//! 具体实现住在需要它的插件里——持久化布局（文件格式 / 锁 / 归档段）不是机制层的
+//! 词汇。本模块只留端口与平凡值 `MemoryStore`。
 
 use std::collections::HashSet;
 use std::sync::RwLock;
@@ -32,7 +35,7 @@ pub enum AppendError {
     Conflict { expected: Seq, actual: Seq },
     /// 违反单写者约束：本实例**不持**该事实源的写者令牌。
     ///
-    /// 谁发这个令牌是各实现的事（[`wal::WalStore`] 用文件锁，**跨进程**）；trait 只
+    /// 谁发这个令牌是各实现的事（持久化实现用旁挂文件锁，**跨进程**）；trait 只
     /// 承诺「拿不到令牌的写入口会**返回**它，而不是静默写坏网格」。在
     /// [plan/11 批 0](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 之前，
     /// 这个形态全仓零构造——错误定义在那儿，却永远不可达。
@@ -122,7 +125,7 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
         event.assign_seq(seq);
         // 刻意**不**做时刻兜底：MemoryStore 是平凡基线（`store = memory`，S0），
         // 大量测试靠 `ts = 0`（时间起点）+ 小 `now` 做 as-of 断言——兜底会毁掉
-        // 这份确定性。时刻完整性由**权威事实源**（WalStore）负责。
+        // 这份确定性。时刻完整性由**权威事实源**（持久化实现）负责。
         inner.ids.insert(event.event_id().to_string());
         inner.events.push(event);
         inner.head += 1;
@@ -130,9 +133,9 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
     }
 
     fn range(&self, from: Seq) -> Vec<Self::Event> {
-        // 与 `WalStore` 同一条契约（**`from` 是号不是下标**、缺号只在 `from = 0` 出现）。
+        // 与持久化实现同一条契约（**`from` 是号不是下标**、缺号只在 `from = 0` 出现）。
         // 内存实现里 `append` 恒赋号，两者今天恰好等价——但等价不是契约，
-        // 各写一遍就会各漂一次（`WalStore` 那次漂了三个批次没人红）。
+        // 各写一遍就会各漂一次。
         let from = from.value();
         let inner = self.inner.read().expect("MemoryStore 锁中毒");
         if from == 0 {
@@ -153,8 +156,6 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
 
 /// 便捷别名：装 [`crate::symbio_core::event::Event`] 信封的事实源。
 pub type EventStore = MemoryStore<Event>;
-
-pub mod wal;
 
 #[cfg(test)]
 #[path = "mod.test.rs"]

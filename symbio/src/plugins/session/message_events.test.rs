@@ -12,10 +12,10 @@
 //! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed, AppendOutcome};
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use crate::symbio_core::{
-    Entity, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
-    EVENT_USER_MESSAGE,
+    Entity, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
 };
 
 /// 造一个临时会话目录 + 一条 `user.message`（承载节点 `u-1`，正是要被改的那条）。

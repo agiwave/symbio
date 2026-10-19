@@ -22,11 +22,12 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
-    conation, AutonomousInitiator, Budget, ConationCandidate, ConationPolicy, EventWalStore,
-    IntentGate, Seq, Store,
+    conation, AutonomousInitiator, Budget, ConationCandidate, ConationPolicy, IntentGate, Seq,
+    Store,
 };
 
 impl SessionPlugin {

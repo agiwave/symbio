@@ -18,8 +18,9 @@
 //!   的那条必须对巩固可见）——那一层端到端看不见。
 
 use super::{record_derived, record_elimination, record_learning};
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{
-    check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
+    check_all, recall, Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
     EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };

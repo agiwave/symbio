@@ -98,8 +98,9 @@ fn aborted_resume_panics_on_out_of_range_index() {
 
 use std::sync::{Arc, Mutex};
 
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{
-    authz::PRINCIPAL_USER, Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_USER_MESSAGE,
+    authz::PRINCIPAL_USER, Entity, Event, Seq, Store, Verb, EVENT_USER_MESSAGE,
 };
 
 use super::super::config::SessionConfig;

@@ -36,7 +36,7 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
     use crate::symbio_core::Store as _;
     let payload = serde_json::to_value(nodes).expect("序列化种子消息失败");
     let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
-    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    let s = crate::plugins::session::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
         crate::symbio_core::Event::pending(
             "m-add-0",
@@ -57,7 +57,7 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
 fn seed_user_message(dir: &std::path::Path) {
     use crate::symbio_core::Store as _;
     let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
-    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    let s = crate::plugins::session::store::EventWalStore::open(&wal).expect("打开事实源失败");
     s.append(
         crate::symbio_core::Event::pending(
             "u-open",

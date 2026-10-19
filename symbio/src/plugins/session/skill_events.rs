@@ -33,10 +33,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
-    calibration, Budget, Event, EventWalStore, RecallView, Seq, SkillCompiler, SkillRoute,
-    SkillRouter, Store, EVENT_MEMORY_ENCODED,
+    calibration, Budget, Event, RecallView, Seq, SkillCompiler, SkillRoute, SkillRouter, Store,
+    EVENT_MEMORY_ENCODED,
 };
 
 use super::paths::V2_WAL_FILE;

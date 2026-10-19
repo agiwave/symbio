@@ -14,12 +14,13 @@ use crate::symbio_core::Store;
 // `EventWalStore` / `LatencyTier` 同由：它们只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
+use crate::plugins::session::store::EventWalStore;
 use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::LatencyTier;
 use crate::symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
     Registry,
 };
-use crate::symbio_core::{EventWalStore, LatencyTier};
 
 fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))

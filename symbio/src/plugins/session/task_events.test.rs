@@ -3,11 +3,11 @@
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
 use super::{prompt_section, write};
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use crate::symbio_core::{
-    check_all, readyset, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-    EVENT_TASK_REWORK_CREATED,
+    check_all, readyset, Budget, Entity, Event, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
 };
 use std::path::{Path, PathBuf};
 

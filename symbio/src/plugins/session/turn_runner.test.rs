@@ -90,9 +90,10 @@ impl TurnRunner {
 
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
+    use crate::plugins::session::store::WalStore;
     use crate::symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, LatencyTier,
-        Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer, WalStore, EVENT_ASSISTANT_FALLBACK,
+        Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer, EVENT_ASSISTANT_FALLBACK,
         EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
 

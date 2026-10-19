@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::{EventWalStore, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store};
+use crate::plugins::session::store::EventWalStore;
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store};
 
 /// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）：
 /// 本会话主体是否已被收回 `assign.work`。

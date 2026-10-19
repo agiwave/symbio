@@ -31,7 +31,8 @@ use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::PluginError;
 
 // core 的域模块私有（C-002：外部只写 symbio_core::<符号>）⇒ 视图类型经根导出拿
-use crate::symbio_core::{transcript, turnstate, Budget, EventWalStore, Seq, Store};
+use crate::plugins::session::store::EventWalStore;
+use crate::symbio_core::{transcript, turnstate, Budget, Seq, Store};
 
 use super::chat_session::PersistentChatSession;
 use super::types::{Session, SessionSummary};

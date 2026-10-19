@@ -807,7 +807,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
             Err(e) => panic!("序列化种子消息失败：{e}"),
         };
         let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
-        let fs = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+        let fs = crate::plugins::session::store::EventWalStore::open(&wal).expect("打开事实源失败");
         fs.append(
             crate::symbio_core::Event::pending(
                 "m-add-0",

@@ -1,12 +1,15 @@
-//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../docs/009-task/125-长会话与断点恢复.md "T-125-长会话与断点恢复")
+//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../../docs/009-task/125-长会话与断点恢复.md "T-125-长会话与断点恢复")
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
-use crate::symbio_core::event::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
-use crate::symbio_core::invariants::{check_all, unresolved_turns};
-use crate::symbio_core::projection::checkpoint::{checkpoint, CheckpointState};
-use crate::symbio_core::projection::turnstate::{turnstate, TurnState};
-use crate::symbio_core::view::Budget;
+use crate::symbio_core::Budget;
+use crate::symbio_core::{check_all, unresolved_turns};
+use crate::symbio_core::{checkpoint, CheckpointState};
+use crate::symbio_core::{
+    transcript, verify_prompt_fidelity, Entity, Event, PromptMessage, Verb, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
+use crate::symbio_core::{turnstate, TurnState};
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
@@ -139,13 +142,13 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     }
     // 崩溃前的投影。
     let before_store = EventWalStore::open(&path).unwrap();
-    let before = before_store.range(crate::symbio_core::event::Seq::new(0));
+    let before = before_store.range(Seq::new(0));
     let before_turn = turnstate().apply(&before, 0, Budget::generous());
     let before_cp = checkpoint().apply(&before, 0, Budget::generous());
 
     // 「重启」：全新实例（同一文件）。
     let after = EventWalStore::open(&path).unwrap();
-    let snapshot = after.range(crate::symbio_core::event::Seq::new(0));
+    let snapshot = after.range(Seq::new(0));
     let after_turn: TurnState = turnstate().apply(&snapshot, 0, Budget::generous()).value;
     let after_cp: CheckpointState = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
 
@@ -171,8 +174,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
 /// 验收 3：`store = memory` 平凡值——重启即丢，但系统仍能完成 S01 闭环。
 #[test]
 fn memory_store_trivial_value_still_completes_the_loop() {
-    use crate::symbio_core::actors::{ActorSpec, Pattern};
-    use crate::symbio_core::store::{EventStore, Store as _};
+    use crate::symbio_core::{ActorSpec, EventStore, Pattern, Store as _};
 
     // 「重启」= 新进程 = 全新 MemoryStore（事件为空）。
     let store = EventStore::new();
@@ -198,7 +200,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
             "我可以帮你查资料、跑任务、写东西。",
         ))
         .unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let snapshot = store.range(Seq::new(0));
     assert!(check_all(&snapshot).is_empty());
     let v = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
@@ -296,7 +298,7 @@ fn checkpoint_state_round_trips_through_json() {
             "hi",
         ))
         .unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let snapshot = store.range(Seq::new(0));
     let cp: CheckpointState = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
     let value = serde_json::to_value(&cp).expect("CheckpointState 必可序列化");
     assert_eq!(value["event_count"], 1, "断点状态按事实计数");
@@ -365,7 +367,7 @@ fn open_readonly_on_a_missing_file_creates_nothing() {
     );
 }
 
-/// 批 0 反向用例（[plan/11 §3 批 0](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 判据）：
+/// 批 0 反向用例（[plan/11 §3 批 0](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 判据）：
 /// 两个写者交错 ⇒ 第二个拿不到写者令牌、`append` 返回 `NotTheWriter`，且**盘上零丢失**。
 ///
 /// 这是本批的核心：在此之前「单写者」只由进程内 `RwLock` 保证，第二个写者会静默地
@@ -555,7 +557,7 @@ fn live_seqs(store: &EventWalStore) -> Vec<u64> {
 /// 段名带首末号、落在 `WAL_ARCHIVE_SUBDIR` 下——「这段覆盖哪一号区间」在文件名上
 /// 直接可读。
 fn segment(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
-    dir.path().join(WAL_ARCHIVE_SUBDIR).join(name)
+    archive_dir_of(dir.path()).join(name)
 }
 
 /// 前缀进归档段、尾部留 live；`head` 是「下一个号」不因归档倒退。
@@ -639,7 +641,7 @@ fn a_cut_at_the_first_event_archives_nothing() {
     assert_eq!(store.archive_before(Seq::new(0)).unwrap(), None);
     assert_eq!(store.len(), 3, "一条都没动");
     assert!(
-        !dir.path().join(WAL_ARCHIVE_SUBDIR).exists(),
+        !archive_dir_of(dir.path()).exists(),
         "没归档就不该建目录（空目录是「发生过归档」的假证据）"
     );
 }
@@ -679,7 +681,7 @@ fn a_readonly_store_never_archives() {
     let ro = EventWalStore::open_readonly(&path).unwrap();
     assert_eq!(ro.archive_before(Seq::new(2)).unwrap(), None);
     assert_eq!(ro.len(), 4, "只读实例不动任何东西");
-    assert!(!dir.path().join(WAL_ARCHIVE_SUBDIR).exists());
+    assert!(!archive_dir_of(dir.path()).exists());
 }
 
 /// 归档后重开：只看得见 live 尾部，`head` 从 `max_seq + 1` 续上。
@@ -707,7 +709,7 @@ fn reopening_after_archival_sees_only_the_live_tail() {
 /// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
 /// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
 /// 「这条会话压缩过没有」——那是布局泄漏进抽象
-/// （[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
+/// （[plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
 #[test]
 fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);
@@ -825,4 +827,77 @@ fn range_is_readable_from_a_readonly_instance() {
     let ro = EventWalStore::open_readonly(&path).unwrap();
     assert_eq!(live_seqs(&ro), vec![10, 11], "live 只有尾部");
     assert_eq!(ro.range(Seq::new(0)).len(), 12, "完整史把归档段一并读回来");
+}
+
+/// 生产路径：真落一格 `artifact.added` 再从**重开的 WAL** 复核双向完整性。
+///
+/// 判据住在会话侧而不是 core：它必须开一个真的 WAL，而 WAL 是会话的落事实实现；
+/// core 只出让 `verify_prompt_fidelity` / `transcript` 这两个纯函数。
+/// 走 WAL 而不是内存事件，是为了让「窗口裁剪 / 可见域过滤」在生产里经过的
+/// 同一段代码也被覆盖到——内存切片绕过那一层。
+#[test]
+fn an_artifact_round_is_complete_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let wal = dir.path().join("v2-events.wal");
+
+    let user = Event::pending(
+        "u-0",
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "text": "帮我回显", "tier": "deep", "id": "u-0" }));
+    let artifact = Event::pending(
+        "a-0-0",
+        EVENT_ARTIFACT_ADDED,
+        Entity::Artifact,
+        Verb::Asserted,
+        0,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({ "tool": "vdfs_read", "text": "文件内容：hello" }));
+    let assistant = Event::pending(
+        "f-0",
+        EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        0,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({
+        "text": "回显完成",
+        "model": "deep",
+        "turn_id": "t-0",
+        "text_id": "f-0-text",
+    }));
+
+    let store = EventWalStore::open(&wal).expect("open");
+    let seq = store.append(user).expect("append user").value();
+    store
+        .append(artifact.with_produced_by(seq))
+        .expect("append artifact");
+    store
+        .append(assistant.with_produced_by(seq))
+        .expect("append final");
+    drop(store);
+
+    let reopened = EventWalStore::open(&wal).expect("reopen");
+    let events = reopened.range(Seq::new(0));
+
+    let view = transcript()
+        .apply(&events, i64::MAX, Budget::generous())
+        .value;
+    let entries: Vec<PromptMessage> = view.to_messages();
+    assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
+    assert_eq!(entries[1].role, "tool");
+    assert_eq!(
+        entries[1].tool.as_deref(),
+        Some("vdfs_read"),
+        "工具名是事实"
+    );
+
+    let rep = verify_prompt_fidelity(&events, &entries, None);
+    assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 }

@@ -45,7 +45,7 @@ pub use event::{
 };
 pub use invariants::check_all;
 pub use projection::calibration::calibration;
-pub use projection::checkpoint::checkpoint;
+pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::mutations::mutations_latest_snapshot;
@@ -91,7 +91,6 @@ pub use schemas::reading::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone
 // 测试替身 / 外部适配器都写不出来）。`PromptToolCall` 只被 `actors` 用，留在模块路径。
 pub use projection::transcript::PromptMessage;
 pub use projection::turnstate::{turnstate, TurnState};
-pub use store::wal::{EventWalStore, WalStore};
 pub use store::{EventStore, Store};
 pub use view::Budget;
 

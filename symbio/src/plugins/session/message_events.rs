@@ -50,6 +50,7 @@
 //! 落格」与「落格必须持令牌」两条约束的形态——与 `SessionContext::consolidated`
 //! 完全同一条纪律（见该字段文档）。
 
+use crate::plugins::session::store::EventWalStore;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -58,8 +59,8 @@ use serde_json::Value;
 
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{
-    AppendError, Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_ADDED,
-    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    AppendError, Entity, Event, Seq, Store, Verb, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED,
 };
 
 use super::paths::V2_WAL_FILE;

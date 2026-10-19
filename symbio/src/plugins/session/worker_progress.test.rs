@@ -12,12 +12,12 @@
 //! 裁决一第 4 条：进展的类型与读法归本模块）。
 
 use super::{progress_from_wal, progress_of, STEPS_MAX, STEP_MAX_CHARS};
+use crate::plugins::session::store::EventWalStore;
 use crate::plugins::session::types::{Session, SessionSummary};
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use crate::symbio_core::{
-    Entity, Event, EventWalStore, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    Entity, Event, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 /// 造一个临时会话目录并往 WAL 里落几轮对话。

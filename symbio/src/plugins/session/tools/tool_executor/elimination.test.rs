@@ -4,9 +4,8 @@
 //! **按主体精确命中**（别人的淘汰不殃及本主体）。
 
 use super::EliminationInputs;
-use crate::symbio_core::{
-    EventWalStore, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, Store,
-};
+use crate::plugins::session::store::EventWalStore;
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, Store};
 
 /// 带 `AGENT_ID` 的请求上下文：闸门按它派生主体（同 `BreakerInputs` 的取值口径）。
 fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn PluginInvokeRequest> {

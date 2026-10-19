@@ -117,7 +117,7 @@ pub(crate) struct SessionContext {
     /// ## 为什么不在压缩现场直接落格
     ///
     /// `session.consolidated` 是**事实**，而事实只能由持写者令牌的一方落格
-    /// （[`crate::symbio_core::EventWalStore`] 的单写者闸门）。压缩跑在
+    /// （[`crate::plugins::session::store::EventWalStore`] 的单写者闸门）。压缩跑在
     /// `prepare_turn_inputs`（步骤 3），而它**不持**令牌——令牌在 `execute_turn`
     /// （步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
     /// `NotTheWriter`，而那是**静默**的：压缩照常生效、界面照常变短，只有事实源里

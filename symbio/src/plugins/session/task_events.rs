@@ -61,12 +61,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::symbio_core::{
-    Budget, Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
+    Budget, Entity, Event, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
 };
 
 // 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 5 组）：
 // 声明的写方在工具执行层，本文件是读侧投影。
+use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 
 /// 一次要补进事实源的事件（算完再写：状态推进与写入分开，便于单测断言「该补几条」）。
