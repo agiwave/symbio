@@ -47,6 +47,11 @@ pub trait Store: Send + Sync {
     fn append(&self, event: Self::Event) -> Result<Seq, AppendError>;
 
     /// 读取 `[from, head)` 的事件区间，返回不可变数据（快照，不持有内部锁）。
+    ///
+    /// **`from` 是号，不是下标**：实现内部的窗口首号可以不是 0（归档把被取代的前缀
+    /// 移出当前窗口），按下标切会把「从 seq k 起」读成「从窗口第 k 条起」而少读。
+    /// 缺号的事件（旧版本写下的行）恒留在窗口尾部——与 `archive_before` 对缺号的
+    /// 处理（「按最大处理 ⇒ 不归档它」）同口径，两处不许各猜一次。
     fn range(&self, from: Seq) -> Vec<Self::Event>;
 
     /// 下一个待分配的 seq（= 已有事件数）。
@@ -118,8 +123,13 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
 
     fn range(&self, from: Seq) -> Vec<Self::Event> {
         let inner = self.inner.read().expect("MemoryStore 锁中毒");
-        let start = (from.value() as usize).min(inner.events.len());
-        inner.events[start..].to_vec()
+        let from = from.value();
+        inner
+            .events
+            .iter()
+            .filter(|e| e.seq().map(Seq::value).unwrap_or(u64::MAX) >= from)
+            .cloned()
+            .collect()
     }
 
     fn head(&self) -> Seq {

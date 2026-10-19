@@ -715,6 +715,39 @@ fn history_unions_archives_with_live_in_seq_order() {
     assert_eq!(all[11].event_id, "e11", "末条来自 live");
 }
 
+/// `range(from)` 的 `from` 是**号**，不是 live 段里的下标（trait 契约 `[from, head)`）。
+///
+/// 归档把被取代的前缀移出 live ⇒ live 首号不再是 0。按下标切会把「从 seq 11 起」
+/// 读成「从 live 的第 11 条起」= 空集，调用方要的那一条因此在压缩过的会话里
+/// **静默**消失（今天的实现在这里就是错的，只是唯一的 `from > 0` 调用点在
+/// `transcript/autonomous`，它取 `.next()`，压缩过才显形）。
+#[test]
+fn range_after_archival_selects_by_seq_not_by_position() {
+    let (_dir, _path, store) = seeded(12);
+    store.archive_before(Seq::new(10)).unwrap();
+    assert_eq!(live_seqs(&store), vec![10, 11], "前置：live 是尾部两条");
+
+    let seqs = |from: u64| -> Vec<u64> {
+        store
+            .range(Seq::new(from))
+            .iter()
+            .filter_map(|e| e.seq().map(Seq::value))
+            .collect()
+    };
+    assert_eq!(seqs(11), vec![11], "从 seq 11 起 = 一条");
+    assert_eq!(seqs(10), vec![10, 11], "从 live 首号起 = 整个窗口");
+    assert_eq!(
+        seqs(9),
+        vec![10, 11],
+        "早于窗口首号 ⇒ 从首号给起，不许多也不算少"
+    );
+    assert_eq!(
+        seqs(12),
+        Vec::<u64>::new(),
+        "`[from, head)` 右开：head 起为空"
+    );
+}
+
 /// 没压过 ⇒ `history()` 与 `range()` 逐条相同（本方法不引入第二份口径）。
 #[test]
 fn history_without_archival_equals_range() {

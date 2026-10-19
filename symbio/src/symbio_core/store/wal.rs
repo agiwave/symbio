@@ -483,9 +483,17 @@ where
     }
 
     fn range(&self, from: Seq) -> Vec<Self::Event> {
+        // **按号筛，不按下标切**：`archive_before` 之后 live 段的首号不是 0，
+        // 下标切法（`events[from.min(len)..]`）会把「从 seq k 起」读成「从 live 第 k
+        // 条起」⇒ 压缩过的会话上少读甚至读空，而且空集看起来像「没有这条事实」。
+        let from = from.value();
         let inner = self.inner.read().expect("WalStore 锁中毒");
-        let start = (from.value() as usize).min(inner.events.len());
-        inner.events[start..].to_vec()
+        inner
+            .events
+            .iter()
+            .filter(|e| e.seq().map(Seq::value).unwrap_or(u64::MAX) >= from)
+            .cloned()
+            .collect()
     }
 
     fn head(&self) -> Seq {
