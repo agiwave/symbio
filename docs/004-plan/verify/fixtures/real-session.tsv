@@ -1,0 +1,45 @@
+# 真实会话的事件信封（不含载荷）——invariants.rs 的回放数据
+#
+# 来源：.symbio/session/d39a1f83/v2-events.wal（2026-10-17 一次真实运行，37 条事件）
+# 为什么只留信封：I1/I2/I3 判的是 seq / turn / produced_by / cost_ms / status，
+# 载荷里有用户正文与工具输出，与本组判据无关——不搬进来是划界，不是裁剪事实。
+#
+# 列：seq  kind  turn  actor  produced_by(-=无)  cost_ms  status  fell_back  budget_ms(-=无)
+# 重新生成：见同目录 README.md（勿手改）
+0	user.message	0	user	-	0	-	0	60000
+1	artifact.added	0	session/main	0	0	-	0	-
+2	artifact.added	0	session/main	0	0	-	0	-
+3	artifact.added	0	session/main	0	0	-	0	-
+4	artifact.added	0	session/main	0	0	-	0	-
+5	artifact.added	0	session/main	0	0	-	0	-
+6	artifact.added	0	session/main	0	0	-	0	-
+7	artifact.added	0	session/main	0	0	-	0	-
+8	artifact.added	0	session/main	0	0	-	0	-
+9	artifact.added	0	session/main	0	0	-	0	-
+10	artifact.added	0	session/main	0	0	-	0	-
+11	artifact.added	0	session/main	0	0	-	0	-
+12	artifact.added	0	session/main	0	0	-	0	-
+13	artifact.added	0	session/main	0	0	-	0	-
+14	artifact.added	0	session/main	0	0	-	0	-
+15	artifact.added	0	session/main	0	0	-	0	-
+16	artifact.added	0	session/main	0	0	-	0	-
+17	artifact.added	0	session/main	0	0	-	0	-
+18	artifact.added	0	session/main	0	0	-	0	-
+19	artifact.added	0	session/main	0	0	-	0	-
+20	artifact.added	0	session/main	0	0	-	0	-
+21	artifact.added	0	session/main	0	0	-	0	-
+22	artifact.added	0	session/main	0	0	-	0	-
+23	artifact.added	0	session/main	0	0	-	0	-
+24	chat.assistant.final	0	session/main	0	893184	completed	0	-
+25	task.opened	0	session/main	0	0	-	0	-
+26	task.progress	0	session/main	0	0	-	0	-
+27	task.opened	0	session/main	0	0	-	0	-
+28	task.opened	0	session/main	0	0	-	0	-
+29	task.opened	0	session/main	0	0	-	0	-
+30	task.asserted	0	session/main	0	0	-	0	-
+31	task.progress	0	session/main	0	0	-	0	-
+32	task.asserted	0	session/main	0	0	-	0	-
+33	task.asserted	0	session/main	0	0	-	0	-
+34	task.progress	0	session/main	0	0	-	0	-
+35	memory.encoded	0	person/local	0	0	-	0	-
+36	memory.encoded	0	person/local	0	0	-	0	-

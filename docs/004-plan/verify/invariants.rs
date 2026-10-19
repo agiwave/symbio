@@ -1,24 +1,43 @@
-//! 三条不变量的可执行判据 + 反向用例
+//! 三条不变量的可执行判据 + 真实日志回放
 //!
 //! I1 单通道   —— 一切状态变更经唯一写入口；同一 turn 的 final 发言唯一
 //! I2 无溯源不声明 —— 断言类事件必须能追溯到产生它的事件
-//! I3 到点必答   —— 发言路径上的 Actor 必须在 budget 内返回，否则必须产出兜底事件
+//! I3 到点必答   —— 每一轮都必须有一条收束格（不许静默消失）
 //!
-//! 判据纪律：
-//!   每条断言都配一个**反向用例**：把检查关掉，违规必须变得检测不到。
-//!   检测不到 = 这条检查是必要的；关掉也一样 = 这条检查是摆设。
+//! ## 两种数据，两种结论
+//!
+//! 1. **自造日志**（`healthy_log` / `violated_log`）证明「检查器会响」；
+//! 2. **真实日志回放**（`fixtures/real-session.tsv`，一次真实运行的 37 条事件信封）
+//!    证明「跑起来的系统遵守不变量」。
+//!
+//! 第二种才是 GO-000 要的证据。自造数据能证明检查不是摆设，但**证不了**系统遵守——
+//! 那份数据是自己写的，写它的时候心里已经有答案了。
+//!
+//! ## I3 的边界（真实数据第一次回放就撞出来的）
+//!
+//! 真实日志里 `chat.assistant.final` 的 `cost_ms = 893184`，而同一条 `user.message`
+//! 携带的 `budget_ms = 60000`——差 14.9 倍。这**不是违规**，是口径错位：
+//! `turn_runner.rs` 写进收束格的是**整轮累计**（含全部工具往返），而 `budget_ms` 是
+//! **单次模型调用**的事前闸门。用 `cost_ms > budget_ms` 判「到点必答」，量的是两把尺。
+//!
+//! 于是 I3 在**信封上**只能判结构面：每轮有一条收束格。时间面（这次调用有没有超时、
+//! 超时了有没有走兜底）判不了——那需要「每次调用的耗时」，而日志里只有轮累计。
+//! 这条缺口留在这里，不拿一条恒空的检查假装补上。
+//!
+//! 判据纪律：每条断言都配一个**反向用例**：把检查关掉，违规必须变得检测不到。
 //!
 //! 编译运行：rustc --edition 2021 invariants.rs -o inv && ./inv
 
 #[derive(Debug, Clone)]
 struct Event {
     seq: u64,
-    kind: &'static str,
+    kind: String,
     turn: u64,
-    #[allow(dead_code)]
-    actor: &'static str,
     produced_by: Option<u64>, // I2：产生本事件的上游
-    cost_ms: u64,             // I3：本次产出耗时
+    cost_ms: u64,             // 轮累计耗时（不是单次调用，见文件头）
+    status: String,           // 收束格的状态（`completed` / `aborted` / `-`）
+    fell_back: bool,          // 走了兜底
+    budget_ms: Option<u64>,   // 该轮的单次调用预算（只有用户格带）
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -26,7 +45,7 @@ enum Violation {
     I1SeqNotMonotonic { seq: u64, prev: u64 },
     I1DoubleFinal { turn: u64 },
     I2NoProvenance { seq: u64 },
-    I3BudgetExceeded { seq: u64, cost_ms: u64, budget: u64 },
+    I3NoClosure { turn: u64 },
 }
 
 struct Check {
@@ -42,18 +61,24 @@ impl Check {
     }
 }
 
+const FINAL: &str = "chat.assistant.final";
+
 /// 需要溯源的事件种类（断言类）
 fn needs_provenance(kind: &str) -> bool {
     kind.starts_with("task.verified")
         || kind.starts_with("classify.")
         || kind.starts_with("artifact.")
         || kind.starts_with("commitment.")
+        // `task.asserted` 是断言类：谁断言的、基于什么是它成立的前提。
+        // 真实日志里这一格正是靠 `produced_by` 串起「巡检 → 结论」的。
+        || kind.starts_with("task.asserted")
 }
 
-fn check(log: &[Event], budget_ms: u64, c: &Check) -> Vec<Violation> {
+fn check(log: &[Event], c: &Check) -> Vec<Violation> {
     let mut out = Vec::new();
     let mut prev: Option<u64> = None;
     let mut final_of_turn: Vec<u64> = Vec::new();
+    let mut closed: Vec<u64> = Vec::new();
 
     for e in log {
         if c.enable_i1_seq {
@@ -65,85 +90,223 @@ fn check(log: &[Event], budget_ms: u64, c: &Check) -> Vec<Violation> {
         }
         prev = Some(e.seq);
 
-        if c.enable_i1_final && e.kind == "chat.assistant.final" {
-            if final_of_turn.contains(&e.turn) {
+        if e.kind == FINAL {
+            if c.enable_i1_final && final_of_turn.contains(&e.turn) {
                 out.push(Violation::I1DoubleFinal { turn: e.turn });
-            } else {
+            } else if !final_of_turn.contains(&e.turn) {
                 final_of_turn.push(e.turn);
+            }
+            if !closed.contains(&e.turn) {
+                closed.push(e.turn);
             }
         }
 
-        if c.enable_i2 && needs_provenance(e.kind) && e.produced_by.is_none() {
+        if c.enable_i2 && needs_provenance(&e.kind) && e.produced_by.is_none() {
             out.push(Violation::I2NoProvenance { seq: e.seq });
         }
+    }
 
-        if c.enable_i3 && e.cost_ms > budget_ms {
-            out.push(Violation::I3BudgetExceeded { seq: e.seq, cost_ms: e.cost_ms, budget: budget_ms });
+    // I3：出现过事件的每一轮都必须有收束格——「静默消失」正是这条要防的形态
+    if c.enable_i3 {
+        let mut turns: Vec<u64> = log.iter().map(|e| e.turn).collect();
+        turns.sort_unstable();
+        turns.dedup();
+        for t in turns {
+            if !closed.contains(&t) {
+                out.push(Violation::I3NoClosure { turn: t });
+            }
         }
+    }
+
+    out
+}
+
+/// 一个健康的日志：单通道、有溯源、每轮有收束格
+fn healthy_log() -> Vec<Event> {
+    vec![
+        ev(1, "user.message", 1, None, 0),
+        ev(2, "classify.verdict", 1, Some(1), 40),
+        ev(3, "task.created", 1, Some(2), 300),
+        ev(4, "artifact.added", 1, Some(3), 900),
+        ev(5, "task.verified", 1, Some(4), 200),
+        ev(6, FINAL, 1, Some(5), 150),
+    ]
+}
+
+fn ev(seq: u64, kind: &str, turn: u64, produced_by: Option<u64>, cost_ms: u64) -> Event {
+    Event {
+        seq,
+        kind: kind.to_string(),
+        turn,
+        produced_by,
+        cost_ms,
+        status: if kind == FINAL { "completed".to_string() } else { "-".to_string() },
+        fell_back: false,
+        budget_ms: None,
+    }
+}
+
+/// 注入四类违规：seq 回退、第二个 final、无溯源、某轮没有收束格
+fn violated_log() -> Vec<Event> {
+    let mut v = healthy_log();
+    v.push(ev(4, "task.progress", 1, Some(3), 10)); // seq 回退
+    v.push(ev(7, FINAL, 1, Some(4), 10)); // 双 final
+    v.push(ev(8, "task.verified", 1, None, 10)); // 无溯源
+    v.push(ev(9, "task.progress", 2, Some(8), 10)); // 第 2 轮没有收束格
+    v
+}
+
+/// 真实日志信封（`fixtures/README.md` 说明来历与只留信封的理由）。
+///
+/// 用 `include_str!` 而不是运行时读文件：验证器会被门禁从固定目录跑，
+/// 运行时的相对路径换个 cwd 就静默读到空——那会让「零违规」变成「零事件」的假绿。
+const REAL_LOG_TSV: &str = include_str!("fixtures/real-session.tsv");
+
+fn parse_envelopes(tsv: &str) -> Vec<Event> {
+    let mut out = Vec::new();
+    for line in tsv.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        assert!(f.len() >= 7, "真实日志的行必须是 7 列以上：{line:?}");
+        out.push(Event {
+            seq: f[0].parse().expect("seq 必须是数字"),
+            kind: f[1].to_string(),
+            turn: f[2].parse().expect("turn 必须是数字"),
+            produced_by: if f[4] == "-" { None } else { f[4].parse().ok() },
+            cost_ms: f[5].parse().expect("cost_ms 必须是数字"),
+            status: f[6].to_string(),
+            fell_back: f.get(7).is_some_and(|s| *s == "1"),
+            budget_ms: f.get(8).and_then(|s| s.parse().ok()),
+        });
     }
     out
 }
 
-/// 一个健康的日志：单通道、有溯源、都在预算内
-fn healthy_log() -> Vec<Event> {
-    vec![
-        Event { seq: 1, kind: "user.message", turn: 1, actor: "user", produced_by: None, cost_ms: 0 },
-        Event { seq: 2, kind: "classify.verdict", turn: 1, actor: "classify", produced_by: Some(1), cost_ms: 40 },
-        Event { seq: 3, kind: "task.created", turn: 1, actor: "planner", produced_by: Some(2), cost_ms: 300 },
-        Event { seq: 4, kind: "artifact.added", turn: 1, actor: "worker", produced_by: Some(3), cost_ms: 900 },
-        Event { seq: 5, kind: "task.verified", turn: 1, actor: "verifier", produced_by: Some(4), cost_ms: 200 },
-        Event { seq: 6, kind: "chat.assistant.final", turn: 1, actor: "chat", produced_by: Some(5), cost_ms: 150 },
-    ]
-}
-
-/// 注入三类违规：seq 回退、第二个 final、无溯源、超预算
-fn violated_log() -> Vec<Event> {
-    let mut v = healthy_log();
-    v.push(Event { seq: 4, kind: "task.progress", turn: 1, actor: "worker", produced_by: Some(3), cost_ms: 10 }); // seq 回退
-    v.push(Event { seq: 7, kind: "chat.assistant.final", turn: 1, actor: "worker", produced_by: Some(4), cost_ms: 10 }); // 双 final
-    v.push(Event { seq: 8, kind: "task.verified", turn: 1, actor: "worker", produced_by: None, cost_ms: 10 }); // 无溯源
-    v.push(Event { seq: 9, kind: "chat.assistant.final", turn: 2, actor: "chat", produced_by: Some(8), cost_ms: 5000 }); // 超预算
-    v
-}
-
 fn main() {
     println!("═══ 三条不变量的可执行判据 ═══");
-    let budget = 1500;
+    let all = Check::all();
 
-    let clean = check(&healthy_log(), budget, &Check::all());
+    // ══════════ 第一部分：自造日志（证明检查器会响）══════════
+    let clean = check(&healthy_log(), &all);
     println!("\n健康日志（{} 条事件）→ 违规 {} 条", healthy_log().len(), clean.len());
 
-    let dirty = check(&violated_log(), budget, &Check::all());
+    let dirty = check(&violated_log(), &all);
     println!("注入违规后 → 违规 {} 条：", dirty.len());
     for d in &dirty {
         println!("  {:?}", d);
     }
 
     println!("\n═══ 反向用例：关掉检查，违规必须消失 ═══");
-    let no_i1 = check(&violated_log(), budget, &Check { enable_i1_seq: false, enable_i1_final: false, ..Check::all() });
-    let no_i2 = check(&violated_log(), budget, &Check { enable_i2: false, ..Check::all() });
-    let no_i3 = check(&violated_log(), budget, &Check { enable_i3: false, ..Check::all() });
+    let no_i1 = check(&violated_log(), &Check { enable_i1_seq: false, enable_i1_final: false, ..Check::all() });
+    let no_i2 = check(&violated_log(), &Check { enable_i2: false, ..Check::all() });
+    let no_i3 = check(&violated_log(), &Check { enable_i3: false, ..Check::all() });
     println!("  关掉 I1 → 剩 {} 条（少了 {} 条）", no_i1.len(), dirty.len() - no_i1.len());
     println!("  关掉 I2 → 剩 {} 条（少了 {} 条）", no_i2.len(), dirty.len() - no_i2.len());
     println!("  关掉 I3 → 剩 {} 条（少了 {} 条）", no_i3.len(), dirty.len() - no_i3.len());
 
-    // ── 断言：正向 ──
     assert!(clean.is_empty(), "健康日志不应有违规");
     assert_eq!(dirty.len(), 4, "注入的 4 类违规应被全部捕获");
-
-    // ── 断言：反向用例（证明每条检查都是必要的，不是摆设）──
     assert!(
         !no_i1.iter().any(|v| matches!(v, Violation::I1SeqNotMonotonic { .. } | Violation::I1DoubleFinal { .. })),
-        "反向用例：关掉 I1 后 I1 类违规必须检测不到（证明 I1 检查在起作用）"
+        "反向用例：关掉 I1 后 I1 类违规必须检测不到"
     );
     assert!(
         !no_i2.iter().any(|v| matches!(v, Violation::I2NoProvenance { .. })),
         "反向用例：关掉 I2 后 I2 类违规必须检测不到"
     );
     assert!(
-        !no_i3.iter().any(|v| matches!(v, Violation::I3BudgetExceeded { .. })),
+        !no_i3.iter().any(|v| matches!(v, Violation::I3NoClosure { .. })),
         "反向用例：关掉 I3 后 I3 类违规必须检测不到"
     );
 
-    println!("\n✅ 全部断言通过（含 3 条反向用例）：三条不变量各自独立起作用。");
+    // ══════════ 第二部分：真实日志回放（证明系统遵守）══════════
+    println!("\n═══ 真实日志回放（fixtures/real-session.tsv）═══");
+    let real = parse_envelopes(REAL_LOG_TSV);
+    assert!(real.len() >= 30, "真实日志至少 30 条事件（读到 {} 条 ⇒ 夹具被截断或解析失败）", real.len());
+    let turns: usize = {
+        let mut t: Vec<u64> = real.iter().map(|e| e.turn).collect();
+        t.sort_unstable();
+        t.dedup();
+        t.len()
+    };
+    let real_v = check(&real, &all);
+    println!("  {} 条事件 · {} 轮 · 违规 {} 条", real.len(), turns, real_v.len());
+    for v in &real_v {
+        println!("  ✗ {:?}", v);
+    }
+    assert!(
+        real_v.is_empty(),
+        "真实日志上 I1/I2/I3 必须零违规（有违规 = 跑起来的系统破了不变量，或判据本身错了）：{real_v:?}"
+    );
+
+    // ── 把「已知的口径错位」钉成事实，而不是留给人去猜 ──
+    //
+    // 真实日志里收束格的轮累计耗时远超该轮的单次预算。这不是 I3 违规（见文件头），
+    // 但如果没人把它写死，后来的人两种误读都会发生：把它当违规去"修"，
+    // 或把它当正常而顺手用 cost_ms 去做时延判据。所以在这里断言它**存在**。
+    let overrun: Vec<&Event> = real
+        .iter()
+        .filter(|e| {
+            e.kind == FINAL
+                && real
+                    .iter()
+                    .find(|u| u.turn == e.turn && u.budget_ms.is_some())
+                    .and_then(|u| u.budget_ms)
+                    .is_some_and(|b| e.cost_ms > b)
+        })
+        .collect();
+    assert!(
+        !overrun.is_empty(),
+        "这条断言钉的是「轮累计 ≠ 单次预算」这个口径错位仍然存在；它消失了说明 \
+         cost_ms 或 budget_ms 的口径变了——先改文件头的边界说明，再删这条断言"
+    );
+    let worst = overrun.iter().map(|e| e.cost_ms).max().unwrap_or(0);
+    let budget = overrun
+        .first()
+        .and_then(|e| real.iter().find(|u| u.turn == e.turn && u.budget_ms.is_some()))
+        .and_then(|u| u.budget_ms)
+        .unwrap_or(0);
+    let fell_back = real.iter().filter(|e| e.fell_back).count();
+    let closed_status: Vec<&str> = real.iter().filter(|e| e.kind == FINAL).map(|e| e.status.as_str()).collect();
+    assert!(
+        closed_status.iter().all(|s| !s.is_empty() && *s != "-"),
+        "每条收束格都必须带状态（`completed` / `aborted` / …）——空状态等于「这条收束没说自己怎么回事」"
+    );
+    println!(
+        "  ⚠ 口径错位（已知）：收束格 cost_ms 最大 {worst}，该轮 budget_ms {budget}——\
+         轮累计 vs 单次闸门，I3 的时间面在信封上判不了"
+    );
+    println!("  兜底收束 {} 条 · 收束状态 {:?}", fell_back, closed_status);
+
+    // ── 反向用例：真实日志上同样能红（判据对真数据不是恒绿）──
+    println!("\n═══ 反向用例：真实日志上注入违规 ═══");
+    let mut bad_seq = real.clone();
+    bad_seq[10].seq = bad_seq[5].seq; // 序号撞车
+    let mut double_final = real.clone();
+    double_final.push(ev(999, FINAL, 0, Some(24), 1)); // 第 0 轮再收一次
+    let mut no_prov = real.clone();
+    let at = no_prov.iter().position(|e| e.kind == "artifact.added").unwrap();
+    no_prov[at].produced_by = None;
+    let no_closure: Vec<Event> = real.iter().filter(|e| e.kind != FINAL).cloned().collect();
+
+    let n1 = check(&bad_seq, &all);
+    let n2 = check(&double_final, &all);
+    let n3 = check(&no_prov, &all);
+    let n4 = check(&no_closure, &all);
+    println!(
+        "  seq 撞车 → {} 条 · 双收束 → {} 条 · 去溯源 → {} 条 · 无收束 → {} 条",
+        n1.len(),
+        n2.len(),
+        n3.len(),
+        n4.len()
+    );
+    assert!(n1.iter().any(|v| matches!(v, Violation::I1SeqNotMonotonic { .. })), "真实日志上 seq 撞车必须红");
+    assert!(n2.iter().any(|v| matches!(v, Violation::I1DoubleFinal { .. })), "真实日志上双收束必须红");
+    assert!(n3.iter().any(|v| matches!(v, Violation::I2NoProvenance { .. })), "真实日志上去溯源必须红");
+    assert!(n4.iter().any(|v| matches!(v, Violation::I3NoClosure { .. })), "真实日志上无收束必须红");
+
+    println!("\n✅ 全部断言通过：自造日志 + 真实日志（{} 条 / {} 轮）上三条不变量各自独立起作用。", real.len(), turns);
+    println!("   边界：I3 只判得了结构面（每轮有收束格）——时间面需要单次调用耗时，日志里只有轮累计。");
 }

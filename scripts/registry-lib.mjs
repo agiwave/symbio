@@ -452,6 +452,11 @@ export const SCAN_SKIP_FILES = new Map([
   ['docs/006-ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
   ['docs/006-ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
   ['AGENTS.md', '指令注入面（每会话直接进上下文，不是阅读文档）'],
+  [
+    'docs/004-plan/verify/fixtures/README.md',
+    '验证程序的夹具说明（数据来历 / 重新生成命令）——owner 是它旁边那份数据与读它的验证程序，' +
+      '不是登记表；同一节里各验证程序本身也不登记，它们由 `PL-003` 的验证器清单管',
+  ],
 ])
 
 // ==================== 汇总页（README.md） ====================

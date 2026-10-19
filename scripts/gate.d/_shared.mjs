@@ -95,7 +95,7 @@ export const BASELINE = {
   // baseline-allow e2eCases: 批 T-056 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // T-117 增 t76（召回可见域）。
   e2eCases: 77,
-  verifyAsserts: 215,
+  verifyAsserts: 224,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定
