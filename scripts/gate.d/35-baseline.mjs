@@ -269,11 +269,11 @@ function envLoosened(ratchet, defaults) {
 export default {
   id: 'baseline',
   title: '棘轮元守卫（每处基线只许往紧改）',
-  // 阶段级并发：本阶段**只读**（git log/show + 读落点文件），批次里没有另一个
-  // `.git` 写方——autoWork 的 `git add` 只发生在 fmt（05，已跑完）、verify（55，
-  // 不在批内）与 facts（60，最后），与本阶段并发的是 backend / frontend-static /
-  // docs / msrv 四个泳道（只写 `target/` 或 `.workbuddy-ai/msrv-target/`，或纯读
-  // ——frontend-static 对磁盘实际只读，见其文件头）。
+  // 阶段级并发：本阶段**只读**（git log/show + 读落点文件），批次里没有别的
+  // `.git` 写方——批内的写只有 `target/` 系（backend / msrv 各写自己的产物目录）与
+  // verify 的 `verify-target/`；重生成后的暂存只发生在 fmt（05，批前）、
+  // facts-write（06，批前）与 facts（60，最后）。⚠️ `git log`/`git show` 读对象库，
+  // 不读索引——即便有别的泳道在写工作区文件，本阶段的基准比对也不受影响。
   parallel: true,
   tasks(ctx) {
     return RATCHETS.map((ratchet) => ({

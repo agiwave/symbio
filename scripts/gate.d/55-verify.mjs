@@ -20,21 +20,25 @@
 // 输出落在 `.workbuddy-ai/verify-target/`（与 msrv 的 `msrv-target` 同策略：
 // 不污染 `target/`，`.workbuddy-ai/` 已在 paths-ignore 与 .gitignore 内）。
 //
-// **为什么文件名是 55- 而不是 70-**：门禁按文件名排序执行，`60-facts` 是
-// autoWork（重新生成并暂存 `docs/006-ref/006-当前事实表.md`），必须**最后**跑——它要把暂存状态
-// 定格成"本次改动的终态"。排在它后面会让暂存发生在 verify 之前，`git status`
-// 再也看不出 verify 那一跑有没有碰过东西。同理 msrv 是 50-。
+// **本阶段不产出事实文件**：`verify/facts/mod.rs` 的生成在 `06-facts-write`（与
+// `doc-count-audit` 同一条生成链的前置），所以这里只剩「编译 + 运行 + 反例档」，
+// 得以进并发批（原先它锁死在批后串行，理由就是那份生成与 docs 读同一文件的竞态）。
+// 也**不许**再引入生成链的那个执行原语——`gate-wiring-audit` GW-005 按源码字面串
+// 判定「重生成阶段」，引入一次就把本阶段踢回「必须排在阶段序列末尾」那一组。
+//
+// 文件名 `55-`：并发批只由**连续**标 `parallel` 的阶段组成（`gate.mjs` 的泳道调度），
+// 所以它必须紧跟在 `50-msrv` 之后、`56-frontend-build`（串行）之前。
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
-import { BASELINE, ratchetOrBump, autoWork } from './_shared.mjs'
+import { BASELINE, ratchetOrBump } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const verifyDir = path.join(repoRoot, 'docs', '004-plan', 'verify')
 const outDir = path.join(repoRoot, '.workbuddy-ai', 'verify-target')
-const genFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
+const genVerifyFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
 
 const exeSuffix = process.platform === 'win32' ? '.exe' : ''
 
@@ -54,16 +58,17 @@ export default {
   id: 'verify',
   title: '验证程序（docs/004-plan/verify · 含编译期反例 C29）',
   // 每个验证程序是**独立的 rustc 调用**（各自一个源文件、各自的输出 exe），
-  // 彼此无共享状态 ⇒ 并发跑。批的边界在 `facts 生成` 那一步：它必须**先**跑完
-  // （程序吃的就是它生成的数据），所以那一步不标 `parallel`，天然把批次切开。
+  // 彼此无共享状态 ⇒ 并发跑。批的边界在 `程序数棘轮` 那一步之后：预热与棘轮
+  // 串行在泳道头部（各自几毫秒到几秒），程序批次内部并发。
   //
-  // 阶段级**刻意不标 `parallel`**（不进 [backend/docs/baseline/msrv] 并发批）：
-  // 本阶段的 `gen-verify-facts` 会重写 `verify/facts/mod.rs`，而 docs 阶段的
-  // doc-count-audit 读同一个文件——并发就是「审计读到半截生成物」。本阶段很快
-  // （17 组 rustc 并发 8，十几秒），不值得为它冒假红的险。
+  // 阶段级 `parallel: true`（进 [backend ∥ frontend-static ∥ docs ∥ baseline ∥ msrv] 主批）：
+  // 它原先不能进批的唯一理由——`gen-verify-facts` 重写 `verify/facts/mod.rs` 与
+  // docs 的 doc-count-audit 竞态——已随生成前移到 `06-facts-write` 一起消掉；
+  // 本阶段现在只读源码与已生成的 mod.rs、只写 `verify-target/`，与批内各泳道无数据依赖。
   // 并发度由机器档案的 `slots.cpu` 决定（每个验证程序是一次**真正的 rustc 编译**，
   // 吃满单核 ⇒ 按 CPU 口径给，不是按 IO 口径）。这里曾写死 8——那是当时那台
   // 8 逻辑核机器的核数：4 核机器上它是超订，32 核机器上是浪费。
+  parallel: true,
   concurrencyKind: 'cpu',
   *tasks(ctx) {
     if (!fs.existsSync(verifyDir)) {
@@ -157,19 +162,20 @@ export default {
 
     fs.mkdirSync(outDir, { recursive: true })
 
-    // **先**把期望数据从文档抽出来，再跑程序：verify 吃的必须是当前计划。
-    // 顺序反了就会「文档改了、程序还在验旧的那份」——那正是本批要消灭的形态
-    // （plan/13 批 M1）。生成失败（表读不出来、名册与阶文件不配对）直接红。
+    // 期望数据（`verify/facts/mod.rs`）由 `06-facts-write` 生成——本地门禁跑到这里时
+    // 它已是本轮投影；但 CI 的 verify job 只跑本阶段（`--only=verify`），没有 06。
+    // 这一格 `--check` 补上那道漂移闸：没有它，「程序全绿」只证明「程序与仓库里
+    // 那份已提交的 mod.rs 自洽」，不证明 mod.rs 仍是文档的投影——文档改了、
+    // 忘了重跑生成器，正是这套「外置期望数据」要防的第一种失效（plan/13 批 M1）。
     yield {
-      label: 'verify: facts 生成（docs/plan → verify/facts/mod.rs）',
-      run: (c) =>
-        autoWork(c, {
-          label: 'gen-verify-facts',
-          cmd: process.execPath,
-          args: [genFacts],
-          cwd: repoRoot,
-        }),
+      label: 'verify: facts 漂移复核（gen-verify-facts --check）',
+      cmd: process.execPath,
+      args: [genVerifyFacts, '--check'],
+      cwd: repoRoot,
     }
+
+    // 程序吃的必须是**当前**计划；生成失败（表读不出来、名册与阶文件不配对）
+    // 在生成器自身就抛红，不会走到这里。
 
     // **工具链串行预热（必须早于并发批）** —— 本阶段是全仓唯一用**裸 `rustc` 并发跑**的
     // 地方（backend 走 `cargo`，且 `05-fmt` 的 `cargo fmt --all` 会先串行解析一次工具链，

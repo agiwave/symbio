@@ -524,6 +524,15 @@ export function measuredMs(m, stageId, label) {
   return Array.isArray(ms) && ms.length ? median(ms.slice(-HISTORY_WINDOW)) : null
 }
 
+/**
+ * 上一轮实测的**阶段墙钟**中位数（毫秒）；没有历史返回 `null`。
+ * 批内泳道起跑序（LPT）用——`cap < 批长` 的机器上，长阶段先占住泳道才不留排队。
+ */
+export function stageWallMs(m, stageId) {
+  const ms = m?.calibration?.stages?.[stageId]?.ms
+  return Array.isArray(ms) && ms.length ? median(ms.slice(-HISTORY_WINDOW)) : null
+}
+
 // ── 打印 ────────────────────────────────────────────────────────────────
 
 /**

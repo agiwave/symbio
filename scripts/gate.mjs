@@ -25,12 +25,12 @@
  *
  * 阶段级同构：阶段对象同样可以标 `parallel: true`——连续标了的**阶段**合成一批
  * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
- * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-18）：
+ * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-19）：
  *
  *   05-fmt（屏障，单独跑）
- *     → 06-facts-write（生成器，串行；docs 读它的产物，故必须是批的前置）
- *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]
- *     → 55-verify → 56-frontend-build → 58-e2e → 60-facts（必须最后）
+ *     → 06-facts-write（生成器链，串行；docs 读它的产物，故必须是批的前置）
+ *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]
+ *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
  * 批就在那里断开，两侧各自成批、先后串行。这不是理论风险——`facts-write` 曾叫 `28-`，
@@ -38,14 +38,14 @@
  * 而本文件当时写的编排是「一整批」。**加阶段时先看它落在哪两个阶段之间**，再看它
  * 该不该标 `parallel`；两件事都不做，默认结果就是「悄悄地多串行一整段」。
  *
- * 三个「看着能并发、实际不能」的坑，判据各归其主文件：
- *   - verify 不进批：它的 `gen-verify-facts` 重写 `verify/facts/mod.rs`，而 docs 的
- *     doc-count-audit 读同一个文件（55-verify.mjs）；
+ * 两个「看着能并发、实际不能」的坑，判据各归其主文件：
  *   - frontend-build 不与 backend 并发：vite build 重写 `tauri/dist`，而 backend 编译
  *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend-build.mjs）。
  *     前端另外三个任务**不碰 `dist`**，故拆到 `20-frontend-static.mjs` 进批——那是
  *     同一个阶段的另一半，拆开只是为了让不冲突的那一半不再串行；
  *   - e2e 不与任何重负载并发：用例对 CPU 竞争时序敏感（58-e2e.mjs）。
+ *   （verify 曾以「gen-verify-facts 与 doc-count-audit 竞态」为由留在批后串行；
+ *    生成并入 `06-facts-write` 后该竞态不存在，它已在批内——见 55-verify.mjs。）
  *
  * 并发批内**不往 stdout 刷逐行输出**（会交错成乱码），详情落各自日志文件，
  * 控制台只留一行结论。**但失败不放过**：汇总的「失败详情」段把每个失败项日志的
@@ -93,7 +93,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
-import { machine, describe, budget, recordRun, measuredMs, setBatchLanes } from './gate.d/_machine.mjs'
+import { machine, describe, budget, recordRun, measuredMs, stageWallMs, setBatchLanes } from './gate.d/_machine.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -788,26 +788,33 @@ async function runStage(s, index) {
  *
  * 并发度**不按核数线性给**：每个阶段内部自己有限流（docs 的 io 路数、backend 的
  * 单路 cargo、msrv 的独立 target），阶段之间再乘一遍就是重复放大。实测本机
- * （8 逻辑核）整批 5 个阶段同时开是有效的，所以 `mid`/`high` 不限制。
+ * （8 逻辑核）整批各条泳道同时开是有效的，所以 `mid`/`high` 不限制。
  *
- * **低配机器要限制**：`low` 档（≤4 核 或 ≤8GB）上 5 个阶段同时跑，等于把各阶段
- * 已经降过一轮的并发再叠 5 层，swap 与调度开销会把「并发」吃回去。这类机器上
- * 批内只放 2 条泳道，剩下的排队——总墙钟反而更短。
+ * **低配机器要限制**：`low` 档（≤4 核 或 ≤8GB）上整批同时跑，等于把各阶段
+ * 已经降过一轮的并发再叠数层，swap 与调度开销会把「并发」吃回去。这类机器上
+ * 批内只放 2 条泳道，剩下的排队——总墙钟反而更短（排队次序见 `runStageBatch`
+ * 里的泳道级 LPT）。
  */
 async function runStageBatch(batch) {
   const cap = MACHINE?.tier === 'low' ? 2 : Math.max(2, CONCURRENCY)
   const limit = Math.min(batch.length, cap)
-  // 批内争用进超时预算：本批有几条泳道，就按几条分机器来算预算
-  // （见 `_machine.setBatchLanes`）。为什么是**整批**而不是只数吃 CPU 的那几条：
-  // 实测那轮超时里，docs 的 8 路 io 审计与 cargo 一起把磁盘压满，把 `docs` 排除
-  // 在外会低估一半的争用。
-  setBatchLanes(batch.length)
+  // 批内**泳道级 LPT**（与任务级同构）：按上一轮实测阶段墙钟降序起跑，没有历史
+  // 时保持声明序。为什么必要：`cap < 批长` 的机器（low 档 6 条泳道只开 2 条）上，
+  // 起跑序就是「谁排队」——warm 轮里 backend 只要 25s，把 200s+ 的 docs 排到第二波
+  // 就是白等一个 backend。`record` 仍按阶段归组、批结束各自打印，起跑序不影响判定。
+  const order = [...batch].sort(
+    (a, b) => (stageWallMs(MACHINE, b.s.id) ?? -1) - (stageWallMs(MACHINE, a.s.id) ?? -1),
+  )
+  // 批内争用进超时预算：按**实际同时跑的泳道数**分机器来算（见 `_machine.setBatchLanes`）。
+  // 为什么是实际并发而不是批长：low 档 cap=2 时后 4 条泳道在排队，不在抢机器——
+  // 按批长放大是在为不存在的争用付预算（更晚才发现挂死）。独占时（批后串行段）为 1。
+  setBatchLanes(limit)
   let cursor = 0
   const worker = async () => {
     for (;;) {
       const i = cursor++
-      if (i >= batch.length) return
-      await runStage(batch[i].s, batch[i].idx)
+      if (i >= order.length) return
+      await runStage(order[i].s, order[i].idx)
     }
   }
   await Promise.all(Array.from({ length: limit }, worker))
@@ -824,7 +831,7 @@ for (const group of lanePlan) {
   if (group.lanes.length > 1) await runStageBatch(group.lanes)
   else {
     // 单泳道 = 独占机器：预算回到「不乘任何争用系数」的原点。不重置的话，
-    // 批后那些串行阶段（verify / vite build / e2e）会继承批内的放大系数。
+    // 批后那些串行阶段（vite build / e2e / facts）会继承批内放大系数。
     setBatchLanes(1)
     await runStage(group.lanes[0].s, group.lanes[0].idx)
   }

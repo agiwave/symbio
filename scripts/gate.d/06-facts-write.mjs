@@ -20,29 +20,32 @@
 //
 // ## 为什么它必须在 30-docs 之前（这是修出来的，不是设计出来的）
 //
-// 原先这三步都在 `60-facts`（最后），于是 `30-docs` 跑的时候：
+// 链上四步都在 `60-facts`（最后）时，`30-docs` 跑的时候：
 //   - `gen-doc-refs` 还没跑 ⇒ `[[编号]]` 记号是**未展开**的，`doc-link-audit`
 //     的 D-007（锚点存在性）与 RF-003（手工地址）看到的不是最终形态；
-//   - `registry-audit --write` 还没跑 ⇒ 汇总页是上一版的。
-// 症状是「门禁里 doc-link-audit 红，单独跑却是绿的」——两次看到的状态不同。
+//   - `registry-audit --write` 还没跑 ⇒ 汇总页是上一版的；
+//   - `gen-verify-facts` 更晚（在批后的 verify 里）⇒ `doc-count-audit`（DC-002）
+//     读的 `verify/facts/mod.rs` 永远是**上一轮**的投影，本轮改了 §8 表要下一轮
+//     才红——一拍滞后的判据不是判据。
 // 那不是偶发，是**次序错了**：生成是审计的前置，不是后置。
 //
 // ## 为什么生成可以提前，而 --check 必须留到最后
 //
 // 「facts 必须最后」那条规矩的原话是「前面任何自动修复都可能改代码」。逐个看：
 // `05-fmt`（cargo fmt）在它之前；`10-backend` / `20-frontend-static` 只写 `target/`；
-// `55-verify` 重写 `docs/004-plan/verify/facts/mod.rs`（verify 程序的事实，不是本链的）。
-// 没有一个阶段在本阶段之后改**源码**。所以生成提前是安全的。
+// `55-verify` 只写 `.workbuddy-ai/verify-target/`（它的 `gen-verify-facts` 已并入本链，
+// 见上）。没有一个阶段在本阶段之后改**源码**。所以生成提前是安全的。
 //
 // 而 `gen-facts --check`（重生成后复核）**留在 `60-facts`**：它问的是「这一整轮跑完，
 // 事实还和代码一致吗」，只有跑完全程才有意义——放在最后，它才是真正的漂移门禁。
 // 拆成「早生成、晚复核」之后，两件事各归其位。
 //
-// ## 链上三步的顺序不能换
+// ## 链上四步的顺序不能换
 //
-//   gen-facts          事实文件是代码的投影
+//   gen-facts          事实文件是代码的投影（`gen-verify-facts` 读 CURRENT §2，故须先跑）
 //     → registry-audit --write   汇总页是条目 front-matter 的投影（里面含 `[[…]]` 记号）
 //       → gen-doc-refs           引用地址由编号解析生成
+//         → gen-verify-facts     verify 程序的期望数据是 01 §8 / 02 / 阶梯表的投影
 //
 // 少了任一环，下一环就对着半成品工作。
 import path from 'node:path'
@@ -54,6 +57,7 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 const genFacts = path.join(scriptDir, '..', 'gen-facts.mjs')
 const regAudit = path.join(scriptDir, '..', 'registry-audit.mjs')
 const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
+const verifyFacts = path.join(scriptDir, '..', 'gen-verify-facts.mjs')
 
 export default {
   id: 'facts-write',
@@ -96,6 +100,20 @@ export default {
             label: 'gen-doc-refs',
             cmd: process.execPath,
             args: [docRefs],
+            cwd: repoRoot,
+          }),
+      },
+      {
+        // verify 程序的期望数据是 01 §8 / 02 坐标系 / 阶梯表的投影（输入含 CURRENT §2
+        // 与已展开的引用地址，故排在全链最后）。它原先在 `55-verify` 里生成——那既让
+        // `doc-count-audit` 读一拍前的产物，也把整个 verify 阶段锁死在批后串行。
+        // 生成前移后，`55-verify` 只剩只读程序 + 写 `verify-target/`，得以进并发批。
+        label: 'gen-verify-facts（docs/plan → verify/facts/mod.rs）',
+        run: (c) =>
+          autoWork(c, {
+            label: 'gen-verify-facts',
+            cmd: process.execPath,
+            args: [verifyFacts],
             cwd: repoRoot,
           }),
       },

@@ -397,6 +397,36 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   // 生成器必须先于静态审计（`30-docs` 的 D-007 / RF-003 要看已展开的最终形态）
   assert.ok(idx('facts-write') < idx('docs'), 'facts-write 必须在 docs 之前')
   assert.equal(stages[0].id, 'fmt', 'fmt 是屏障，必须第一个跑')
+  // verify 必须**在批内**：它的前置（`verify/facts/mod.rs` 的生成）已并入
+  // `06-facts-write`，本阶段只写 `verify-target/`——留在批后就是白付一段串行墙钟。
+  // 这条断言同时是那条前移的**回归钉**：谁把生成挪回 verify，批连续性判据里
+  // verify 会连同它自己的 `parallel` 一起红。
+  assert.ok(stages[idx('verify')]?.parallel, 'verify 必须标 parallel 并连进主批——它与 docs 的 mod.rs 竞态已随生成前移消掉')
+})
+
+test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mod.rs 生成在批前（06 链）', async () => {
+  // 两件「串行尾上的确定时长」各自的归位判据：
+  // ① release 构建跟在 e2e 用例前面 = 改 Rust 的那一轮把一整遍编译加在总墙钟上；
+  //    放进 backend 泳道尾部，它沿用同一条 `.cargo-lock` 的串行序、与其他泳道重叠。
+  // ② `gen-verify-facts` 若不在批前生成，`doc-count-audit` 读到的就是**上一轮**
+  //    的投影（一拍滞后），而 verify 也因此被锁在批后串行。
+  const dir = path.join(repoRoot, 'scripts', 'gate.d')
+  const be = await import(pathToFileURL(path.join(dir, '10-backend.mjs')).href)
+  const tasks = be.default.tasks({ ci: false })
+  assert.ok(
+    tasks.some((t) => String(t.label).includes('cli: release')),
+    'backend 泳道必须带 cli release 重建任务（`when` 判新鲜度，不启动 cargo 也要在列）',
+  )
+  const ciTasks = be.default.tasks({ ci: true })
+  assert.ok(
+    ciTasks.every((t) => !String(t.label).includes('cli: release') || (t.when && t.when({ ci: true }) === false)),
+    'CI 的 backend job 不该付 release 构建——e2e job 自备（`--only=e2e`）',
+  )
+  const fw = await import(pathToFileURL(path.join(dir, '06-facts-write.mjs')).href)
+  assert.ok(
+    fw.default.tasks({}).some((t) => String(t.label).includes('gen-verify-facts')),
+    'verify/facts/mod.rs 的生成必须在 06-facts-write 链里（先于并发批）',
+  )
 })
 
 // ── 机器能力档案（`gate.d/_machine.mjs`） ────────────────────────────────

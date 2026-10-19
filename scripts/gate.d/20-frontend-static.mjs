@@ -1,7 +1,7 @@
 // frontend-static 阶段：vue-tsc / vitest --coverage / eslint。
 //
 // 文件名 `20-` 与 `parallel: true`（2026-10-09）：本阶段进并发批
-// `[10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]`。
+// `[10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]`。
 //
 // ## 为什么它能进批，而同属前端的 `vite build` 不能
 //

@@ -413,10 +413,10 @@ export default {
   // **信息一条不少，串行尾消失**。判据 = `gate.test.mjs` 里「批内任务保留结论行」。
   //
   // 阶段级并发：本阶段**只读**（扫 `.rs` / docs / scripts，不写任何文件），与
-  // backend（只写 `target/`）、baseline（只读 git）、msrv（独立 target 目录）互不
-  // 干扰；fmt 已在 05 屏障阶段跑完，看到的源码是定格的。⚠️ verify 不能进这批：
-  // 它的 gen-verify-facts 会重写 `verify/facts/mod.rs`，而本阶段的 doc-count-audit
-  // 读同一个文件——并发就是「审计读到半截生成物」（见 55-verify.mjs）。
+  // backend（只写 `target/`）、baseline（只读 git）、msrv（独立 target 目录）、
+  // verify（只写 `verify-target/`）互不干扰；fmt 已在 05 屏障阶段跑完，看到的源码
+  // 是定格的；`verify/facts/mod.rs` 由 `06-facts-write` 在本批之前生成——doc-count-audit
+  // 读的是**本轮**投影（此前它在批后的 verify 里生成，dc 读到的永远是上一轮的）。
   //
   // ⚠️ 这份"只读"曾经不成立：`gate.test.mjs` 的两条失败详情判据会往 `scripts/gate.d/`
   // 写一个演示阶段再删掉，于是 `gate-wiring-audit`（扫那个目录做 GW-005）在并发下

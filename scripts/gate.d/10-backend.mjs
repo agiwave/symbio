@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { BASELINE, cargoTestRatchet } from './_shared.mjs'
+import { cliBinaryState } from '../cli-binary.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -189,6 +190,24 @@ export default {
       args: ['doc', '--no-deps', '--workspace'],
       cwd: backendDir,
       env: DOC_LINT_ENV,
+    })
+
+    // cli release 二进制在本泳道尾部重建（e2e 的被测件）。放在这里的理由：
+    // - `58-e2e` 的用例只等这份产物；原先构建在批后串行——改 Rust 的那一轮，
+    //   一整遍 release 编译直接加在总墙钟上。放进泳道尾部，它与其他泳道的
+    //   墙钟重叠，且沿用本泳道的 `.cargo-lock` 串行序（不新增跨泳道争用）。
+    // - `when` 只在**指纹不新鲜**时起跑：新鲜时是一条 ~10ms 的内容指纹比对，
+    //   不启动 cargo（判据同 `58-e2e`，两处共用 `cli-binary.mjs` 的构建戳）。
+    // - CI 跳过：e2e job（`--only=e2e`）自备构建；把 release 加进 backend job
+    //   只会让那条 job 白多一遍编译。`58-e2e` 仍保留同一任务，`--only=e2e` /
+    //   `--skip=backend` 的路线照旧自足。
+    tasks.push({
+      label: 'cli: release 二进制（指纹过期 ⇒ 批内重建）',
+      cmd: process.execPath,
+      args: [path.join(scriptDir, '..', 'cli-binary.mjs')],
+      cwd: repoRoot,
+      when: () => !ctx.ci && !cliBinaryState(repoRoot).fresh,
+      skipNote: '构建戳新鲜（无需重建）',
     })
 
     if (ctx.profile) {
