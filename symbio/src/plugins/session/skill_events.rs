@@ -89,11 +89,11 @@ pub(crate) fn compile(
     response: &str,
     now: i64,
 ) -> Result<Option<u64>, String> {
-    let trigger = super::memory_events::truncate_chars(
+    let trigger = crate::symbio_core::merge_kernel::truncate_chars(
         user_text.trim(),
         super::memory_events::ENCODE_MAX_CHARS,
     );
-    let content = super::memory_events::truncate_chars(
+    let content = crate::symbio_core::merge_kernel::truncate_chars(
         response.trim(),
         super::memory_events::ENCODE_MAX_CHARS,
     );
@@ -179,7 +179,7 @@ pub(crate) struct SkillRouting {
 /// ——不是用户发言的原文。读方照着**同一对函数、同一个上限**归一化，两边才对得上；
 /// 各写一份截断逻辑迟早分叉成「长发言永远命不中」这种没有任何报错的失效。
 pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option<&'a SkillLlmHit> {
-    let utterance = super::memory_events::truncate_chars(
+    let utterance = crate::symbio_core::merge_kernel::truncate_chars(
         user_text.trim(),
         super::memory_events::ENCODE_MAX_CHARS,
     );

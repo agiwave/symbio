@@ -706,7 +706,7 @@ pub(crate) async fn retry_compaction(
     let mut context = SessionContext {
         messages: session.get_context_messages(None).await.unwrap_or_default(),
         session: session.clone(),
-        principal: super::super::chat_loop::request_principal(ctx.as_ref()),
+        principal: crate::symbio_core::authz::request_principal(ctx.as_ref()),
         // 重试路径是**独立的**压缩会话（`retry_compaction`）：它的产出在这里就地落格
         // （见本函数末尾的 `consolidate_outside_turn`）——轮外没有「下一个 `execute_turn`」
         // 可以寄存，所以不走那条回流。

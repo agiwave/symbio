@@ -138,7 +138,7 @@ async fn process_retry_subtree(
     // turn_root==target 的脱父子节点：并入种子队列（ToolCall 升根后它的结果子节点
     // 仍按 parent_id 挂在它下面，push 进队列才连得下去）。
     for m in &messages {
-        if super::message_build::turn_root_of(m) == Some(req.target_id.as_str())
+        if crate::symbio_core::node_build::turn_root_of(m) == Some(req.target_id.as_str())
             && to_delete.insert(m.id.clone())
         {
             queue.push(m.id.clone());

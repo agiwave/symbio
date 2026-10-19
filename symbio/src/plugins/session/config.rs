@@ -22,44 +22,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 建树策略 —— 后端组树时新节点 `parent_id` 的挂法（[T-149]）。
-///
-/// 这是一个**纯后端旋钮**：前端只按 `parent_id` 插树，不知道本开关存在，切档
-/// 前端零代码改动（这是本任务判据的核心）。档间差异只在「本轮节点挂会话根，
-/// 还是挂本轮的 `Skeleton{run}` 根」这一件事上——工具结果始终挂在自己的
-/// `tool_call` 骨架下（那是「工具调用内部有自己的骨架」，与建树策略正交）。
-///
-/// `deep`（子智能体递归嵌套）随子会话转播桥在 149-ii 接线：子会话的节点早已由
-/// `relay_bridge` 无条件挂到发起它的父工具卡下，本档只是让读侧投影**保留**那棵嵌套树
-/// （与 `grouped` 同样不升根），语义差异全在前端如何展开。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresentationTree {
-    /// 本轮所有节点挂会话根（与用户发言互为兄弟）；只有工具调用内部保留自己的骨架。
-    Flat,
-    /// 每条用户消息开一个 `Skeleton{run}` 根，本轮其余节点挂它下（**出厂默认 = 今天行为**）。
-    Grouped,
-    /// 子会话递归挂到发起它的那张工具卡内（多智能体嵌套）。存储与 `grouped` 逐字相同，
-    /// 区别只在读侧投影：本档**不做**任何升根折叠，保留转播桥已建好的嵌套树。
-    Deep,
-}
-
-impl PresentationTree {
-    /// `PLUGIN.yml` / wire 里的字符串值。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Flat => "flat",
-            Self::Grouped => "grouped",
-            Self::Deep => "deep",
-        }
-    }
-
-    /// 建树策略候选（表单与说明同源，不写第二份字面量）。
-    pub(crate) const OPTIONS: [(&'static str, &'static str); 3] = [
-        ("grouped", "本轮归到响应骨架下（默认）"),
-        ("flat", "本轮全部铺平到会话根"),
-        ("deep", "子会话挂到发起它的工具卡内（递归嵌套）"),
-    ];
-}
+// 建树策略的形状与 flat 折叠住 core `node_build`（[ADR-082](../../../../docs/010-adr/082.md "ADR-082")
+// 裁决三，[plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") T-167 切片批）：写侧构造
+// 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
+// **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
+pub use crate::symbio_core::node_build::PresentationTree;
 
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///

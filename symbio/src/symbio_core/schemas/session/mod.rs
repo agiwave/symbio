@@ -1,4 +1,6 @@
 pub mod chat_node;
+pub mod facts;
+pub mod node_build;
 pub mod principal;
 pub mod session_chat;
 

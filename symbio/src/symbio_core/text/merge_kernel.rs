@@ -1,15 +1,25 @@
 //! 巩固合并的**纯计算内核**：截断 / 分句 / 合并 + 保真度。
 //!
-//! 与 [`super::super::symbio_core::projection::recall_score`] 同一条纪律：**生产与
-//! verify 共有同一份源码**。`docs/004-plan/verify/consolidation_fidelity.rs` 以
-//! `#[path]` 包含本文件——它论证「质量约束（min_fidelity）必须先于形态约束
-//! （max_gen）生效」时，跑的是生产这条保真度算法本身，不是另写一份临摹件。
+//! 与 [`crate::symbio_core::projection::recall_score`] 同一条纪律：**生产与 verify
+//! 共有同一份源码**。`docs/004-plan/verify/consolidation_fidelity.rs` 以 `#[path]`
+//! 包含本文件——它论证「质量约束（min_fidelity）必须先于形态约束（max_gen）生效」时，
+//! 跑的是生产这条保真度算法本身，不是另写一份临摹件。
 //! 临摹件会随生产漂移而静默失效：论证仍在绿，闸门已经换了算法。
 //!
 //! 三个函数都只依赖 `std`——这是能被 standalone `rustc` 编译的 verify 程序
-//! `#[path]` 包含的前提。本模块不知道 [`crate::plugins::session::memory_events`]
-//! 的存在，更不 import 事件 / 存储：**它只算数，入格永远是写方的事**
-//! （[plan/01 §9.3]：架构只提供位置，不提供算法）。
+//! `#[path]` 包含的前提。本模块不知道任何调用方的存在，更不 import 事件 / 存储：
+//! **它只算数，入格永远是写方的事**
+//! （[plan/01 §9.3](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：架构只提供位置，不提供算法）。
+//!
+//! ## 为什么住 core（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 2/3/6/7 组）
+//!
+//! 它原先由会话插件的 `memory_events.rs` 以 `#[path]` 就地声明，另一处调用方
+//! `skill_events.rs` 得回头够 `memory_events` 才拿得到——一份纯算法挂在某个写方
+//! 名下，第二个写方就只得制造一条模块间反向引用。会话按
+//! [plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014") 切成
+//! 驱动器/留守两片之后，这条边会升级为跨插件引用（E-009 直接判红）。故词汇随
+//! 「纯计算」归位 core 的文本工具域（与 [`crate::symbio_core::text`] 的字节安全
+//! 截断同族），两片都经根别名 [`crate::symbio_core::merge_kernel`] 取用。
 
 /// 按**字符数**截断（不切 UTF-8 字节——中文一字一字符，按字节切会把汉字切成
 /// 两半）。记忆是提炼，不是转写副本：超长正文按这个口径收短。

@@ -57,21 +57,17 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
-use crate::symbio_core::{
-    clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
-    ROUTE_COMPOSE_WORDING, SESSION_ID,
-};
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{ComposeRequest, RunSnapshot, Verdict, WordingReply};
+use crate::symbio_core::{
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_COMPOSE_WORDING,
+    SESSION_ID,
+};
+// 对话面节点的构造器已上移 core `node_build`（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三）
+use crate::symbio_core::node_build::dialog_node;
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::state::{ChatOrchestrator, SessionContext};
-
-/// `meta.surface` 的取值：本节点由**措辞**能力产出。
-///
-/// 它答的问题是"谁产出的"（供前端按来源轻量渲染），与"模型该不该看到"
-/// （`exclude_from_context`）是两件事。
-const SURFACE_REPLY: &str = "reply";
 
 /// 汇报节点的理由码（`meta.reason`）。
 ///
@@ -269,32 +265,6 @@ pub(crate) async fn report_text(
     compose_text_from(orchestrator, ctx, conversation, &Verdict::Report, snapshot)
         .await
         .map(|r| r.text)
-}
-
-/// 构造对话面文本节点（**纯函数**，可单测）。
-///
-/// `exclude_from_context`：`Answered` 的答话为 `false`（它进请求包——它就是这一轮的
-/// 答复），`Escalate` 的首响为 `true`（界面开场白，不进请求包）。判据见模块文档。
-pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatNode {
-    let mut meta = serde_json::json!({
-        "surface": SURFACE_REPLY,
-        "reason": reason,
-    });
-    if exclude_from_context {
-        meta["exclude_from_context"] = serde_json::json!(true);
-    }
-    ChatNode {
-        id: llm_short_id(),
-        // 根级：与用户消息互为兄弟（对话线），不是某个 Turn 的子节点
-        parent_id: None,
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Body),
-        content: Some(MessageContent::Text(text.to_string())),
-        status: Some(NodeStatus::Completed),
-        timestamp: Some(clock_now_ms()),
-        meta: Some(meta),
-        ..Default::default()
-    }
 }
 
 #[cfg(test)]

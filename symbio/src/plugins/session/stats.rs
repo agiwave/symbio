@@ -755,7 +755,7 @@ impl SessionPlugin {
                 .map(str::to_string)
         }) {
             Some(agent) => crate::symbio_core::authz::principal_of(Some(&agent)),
-            None => super::chat_loop::request_principal(ctx.as_ref()),
+            None => crate::symbio_core::authz::request_principal(ctx.as_ref()),
         };
         let stats = read(
             &sid,

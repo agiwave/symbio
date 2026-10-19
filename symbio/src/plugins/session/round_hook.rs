@@ -10,19 +10,25 @@
 //! 「说出来就等于记下了」——而这两件事不是同一件事（汇报节点
 //! 落进 `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。
 //!
-//! ## `into_message`：为什么汇报也要一条 `ChatNode`
+//! 汇报那条**草稿类型本身**（`ReportDraft` + `to_message`）不住这里：写侧在这里
+//! （轮边界回调的返回），读侧在留守的 `rebuild::reported_node`（回放同一格），
+//! 隔着驱动器/留守的切线两头都要用 —— 它因此住
+//! [`crate::symbio_core::facts`]（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 2 组）。
+//! 本文件留的是**回调机制**：`RoundHookFn` 的形态与「两个可选口打成一个」的门。
+//!
+//! ## `to_message`：为什么汇报也要一条 `ChatNode`
 //!
 //! 用户得看得见自己被汇报了，而前端读的是 `messages.json`。事实网格那一格是给
 //! 模型与 `session/stats` 用的；**呈现那一格还得照旧给**。两条路各写一份不是
 //! 「两份真源」——它们的内容由同一个 `ReportDraft` 生成，且都只写不改
 //! （append-only）。
 //!
-//! `exclude_from_context: true` 与 `chat_loop/compose.rs` 的 `dialog_node` 逐字同义：
+//! `exclude_from_context: true` 与 [`crate::symbio_core::node_build::dialog_node`] 逐字同义：
 //! 汇报是界面文本，不进模型的请求包（否则线上出现连续两条 assistant）。
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_node::ChatNode;
+pub(crate) use crate::symbio_core::facts::ReportDraft;
 
 /// 轮边界回调：core 每跑完**一批**工具问一次，返回「这一批要不要说点什么」。
 ///
@@ -44,29 +50,6 @@ pub(crate) type RoundHookFn = Arc<
         + Send
         + Sync,
 >;
-
-/// 一句汇报的草稿：文本 + 它据以生成的运行现状。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReportDraft {
-    /// 汇报正文（compose 的模板产线，零 LLM 往返）。
-    pub text: String,
-    /// 说这句话时已完成了几轮工具调用。
-    pub tool_rounds: usize,
-    /// 说这句话时距上次「用户看得见的一句话」多久。
-    pub quiet_ms: i64,
-}
-
-impl ReportDraft {
-    /// 落库镜像上的那一格（前端读它）：`dialog_node(text, "progress", true)`。
-    ///
-    /// 为什么**不复抄** `dialog_node` 的构造：上一版抄的漏了 `msg_type`
-    /// ——节点落库了却不成形状，e2e 才照得出来。构造只有一份，漂移才
-    /// 不可能；`SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在判定点
-    /// 那侧，由函数签名（`reason: &str`）承担跨模块契约。
-    pub(crate) fn to_message(&self) -> ChatNode {
-        super::chat_loop::dialog_node(&self.text, "progress", true)
-    }
-}
 
 /// 把两个可选口打成一个可选项。
 ///

@@ -12,15 +12,10 @@ use super::progress::ProgressPolicy;
 use super::*;
 use crate::symbio_core::chat_node::{CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING};
 
-/// 本请求所属会话的主体身份——**唯一**读 `ctx[AGENT_ID]` 并派生主体名的取值点。
-///
-/// 派生本身住 [`crate::symbio_core::authz::principal_of`]（部署事实的唯一 owner）；这里只负责
-/// 「从请求上下文取那个 id」。写事件的 `actor`、写消息的 `principal`、写侧闸判的
-/// 对象三者都走它——三处各推一次迟早漂移成「判的是 A、写的是 B」。
-pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeRequest) -> String {
-    use crate::symbio_core::PluginInvokeRequestExt;
-    crate::symbio_core::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
-}
+// 「本请求所属会话的主体身份」这个取值点已上移 core（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三 1 组）：
+// 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
+// 读写两侧隔着插件墙都要用。本文件与 `chat_loop` 经这条短路径拿它。
+use crate::symbio_core::authz::request_principal;
 
 /// 本请求的**来源主体**（[ADR-067]）：入站消息的出处，`commitment.*` 的 `to`。
 ///
@@ -761,7 +756,7 @@ pub struct ChatOrchestrator {
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
     /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
-    /// `message_build::detach_if_flat`）；前端只按 `parent_id` 插树、不看本字段。
+    /// [`crate::symbio_core::node_build::detach_if_flat`]）；前端只按 `parent_id` 插树、不看本字段。
     pub presentation_tree: super::super::config::PresentationTree,
     /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
     ///

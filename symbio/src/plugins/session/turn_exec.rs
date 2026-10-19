@@ -1238,7 +1238,7 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()
                     });
-                    super::message_build::detach_if_flat(
+                    crate::symbio_core::node_build::detach_if_flat(
                         &mut node,
                         &root_id_owned,
                         presentation_tree,
@@ -1265,7 +1265,7 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
                         status: Some(NodeStatus::Completed),
                         ..Default::default()
                     });
-                    super::message_build::detach_if_flat(
+                    crate::symbio_core::node_build::detach_if_flat(
                         &mut node,
                         &root_id_owned,
                         presentation_tree,
@@ -1620,9 +1620,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     if outcome.aborted {
         let mut partial = produced;
         if !child_text.is_empty() {
-            let mut n =
-                super::message_build::llm_build_text_node(root_id, &child_text, None, child_id);
-            super::message_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            let mut n = crate::symbio_core::node_build::llm_build_text_node(
+                root_id,
+                &child_text,
+                None,
+                child_id,
+            );
+            crate::symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
             partial.push(n);
         }
         if !reasoning_text.trim().is_empty() {
@@ -1637,7 +1641,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 ..Default::default()
             }
             .with_style_tag(CHAT_STYLE_TAG_REASONING);
-            super::message_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            crate::symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
             partial.push(n);
         }
         return Err(PluginError::Aborted { partial });

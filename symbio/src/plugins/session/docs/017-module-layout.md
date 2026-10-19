@@ -60,7 +60,7 @@ created: 2026-09-16
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
-| 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
+| 请求构造 | `message_build.rs` | 发给 LLM 的**助手轮装配**（`llm_build_assistant_messages` / `TurnStreamChildIds` / `TurnOutput` 的三个方法），及挂在用户消息 `prompt` 上的时间上下文。**节点怎么造**不在这里——构造与折叠族归位 core，见 §1.4 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
 | 派生事实 | `derived_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `turn_exec`——[ADR-048](../../../../../docs/010-adr/048.md) |
@@ -101,6 +101,25 @@ created: 2026-09-16
 `SessionPlugin` **类型本身**不入表：inherent impl 分布在领域层文件是全仓惯例
 （`commands.rs` / `options` 皆如此），见 `symbio/src/plugins/mod.rs`
 的架构原则。
+
+### 1.4 跨片共享词表（住 core，不住本插件）
+
+会话切成驱动器（`loop` 片）与留守两片时，隔着 E-009 插件墙**两头都要用**的
+**词汇**归位 core（九组反向引用逐条定归属、被否决的方案见
+[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三）。本插件不再持有
+这些定义，只经根别名取用：
+
+| core 落点 | 装什么 | 本插件的取用方 |
+|---|---|---|
+| `symbio_core::schemas::session::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守 `rebuild` · `chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `tool_dispatch` · `tools/tool_executor` · 驱动器 `chat_loop/{io,compose}` · `orchestrator/failure` · `resume` |
+| `symbio_core::schemas::session::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `rebuild` · `tool_dispatch` · `round_hook` |
+| `symbio_core::text::merge_kernel` | 巩固合并的**纯计算内核**（截断 / 分句 / 合并 + 保真度，只依赖 `std`，verify 程序以 `#[path]` 共有同一份源码） | `memory_events`（续一条原名短路径，调用点不动）· `skill_events` |
+| `symbio_core::authz::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline` · `stats` |
+
+判据与 `types::Session` 一族同一条：**词汇的归属随数据 owner，跨插件者上移**。
+**机制留在本插件**——`note_*` 的门与声明位（`records_delegation_promise` /
+`owns_task_table`）、`RoundHookFn` 的回调形态、`llm_build_assistant_messages` 的
+一轮装配，都不在词表里。
 
 ---
 

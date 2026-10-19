@@ -115,7 +115,7 @@ impl PersistentChatSession {
         // 成 grouped（哪怕落库/消息文件写的是 flat）。`flat` 档在这里把本轮响应骨架的
         // 直接子节点升根并打 `turn_root` 记号——与 live 流式帧、`session_content` 呈现
         // 同一个投影，三格锁步。`grouped` 档下 `flatten_whole_tree` 立即返回，零改动。
-        super::super::message_build::flatten_whole_tree(
+        crate::symbio_core::node_build::flatten_whole_tree(
             &mut messages,
             self.cfg_or_default().presentation_tree(),
         );

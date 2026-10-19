@@ -297,7 +297,7 @@ pub use schemas::detail::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
-pub use schemas::session::{chat_node, principal, session_chat};
+pub use schemas::session::{chat_node, facts, node_build, principal, session_chat};
 pub use schemas::{
     ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, WordingReply,
     REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
@@ -387,6 +387,11 @@ pub use logger::{
 // 定义自己的文件名常量（`memory::memory::MEMORY_FILE` 等），core 不设统一约定。
 pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{text_floor_char_boundary, text_truncate_bytes};
+// 巩固合并的纯计算内核：只依赖 `std`，被 `docs/004-plan/verify/` 的 standalone
+// 程序以 `#[path]` 包含同一份源码（T-086 批① 的纪律，住址随 ADR-082 裁决三上移）。
+// 开**模块命名空间**而不是逐个 `pub use`：函数名（`truncate_chars` / `split_sentences`
+// / `merge_with_fidelity`）不是对外契约，也不该进根公开面。
+pub(crate) use text::merge_kernel;
 
 // 重导出 inventory 供 submit_object_creator! 宏使用
 pub use inventory;

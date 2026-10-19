@@ -1,0 +1,122 @@
+//! 跨切片**事实记录词汇**：写侧在驱动器（`loop` 片）、落侧/读侧在留守存储层的
+//! 那批纯数据记录类型。
+//!
+//! ## 为什么住 core
+//!
+//! [ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组与 2 组的
+//! `ReportDraft` 半句：驱动器切成独立插件（[plan/14 步 6](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014")
+//! T-167 切片批）后，这些类型隔着 E-009 的插件墙两头都要用——
+//!
+//! | 类型 | 写侧（驱动器） | 落/读侧（留守） |
+//! |---|---|---|
+//! | [`Delegation`] | `tools/tool_executor`（`note_delegation` 的出参元素） | `derived_facts::record_derived` 落 `commitment.*` |
+//! | [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] | 同上（`note_tasks` 的出参元素） | `task_events` 投影 `task.*` |
+//! | [`ReportDraft`] | `round_hook`（轮边界汇报回调的返回） | `rebuild::reported_node` 回放汇报格 |
+//!
+//! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
+//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::symbio_core::node_build`]
+//! 的同一构造器）；记账判据（`note_*` 的门与 `records_delegation_promise` 声明位）与
+//! 回调机制（`RoundHookFn`）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
+
+use crate::symbio_core::chat_node::ChatNode;
+use crate::symbio_core::node_build::dialog_node;
+
+/// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
+/// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
+/// `derived_facts::record_derived` 落成 `commitment.*` 格。
+///
+/// 只认**声明了 `records_delegation_promise` 的工具**（`agent_run` 即是；T-158 改了
+/// 判据的住址，没改这条语义）——它是**跨主体**的那一次调用：本会话向上游承诺
+/// 「会有另一个智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，
+/// 不是承诺。
+///
+/// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
+/// 谁负责把承诺入格，谁负责开那扇门（轮末收束的 `derived_facts::record_derived`）。
+#[derive(Debug, Clone)]
+pub struct Delegation {
+    /// 承诺号 = 本次调用在**转写里的 ToolCall 节点 id**（`c-offer-<id>` 由此成格）：
+    /// 节点 id 由转写生成、跨轮不撞——模型给的 `tool_call` 编号只在一次响应内唯一，
+    /// 直接拿来当事件号会在下一轮撞幂等键（`record_derived` 落格时还会给事件号
+    /// 加 `v2t-{anchor_id}` 前缀、一轮一个，两层各自挡一种撞法）。
+    pub id: String,
+    /// 承诺内容 = 委托出去的那句话（`agent_run` 的 `prompt` 参数）。
+    pub promise: String,
+    /// 是否履行（`true` ⇒ `commitment.released`，`false` ⇒ `.broken` + `why`）。
+    pub ok: bool,
+    /// 违约原因（`ok = true` 时为空——违约必须带 why，守约不必）。
+    pub why: String,
+}
+
+/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+/// 一次**成功**的 `todo_write` 调用所声明的清单状态。
+///
+/// 与 [`Delegation`] 同一个观察点（工具执行的唯一入口）。任务表的写方不在工具里：
+/// `local/todo_write` 是插件，够不到会话的 v2 事实源，而分发点是模型工具调用的
+/// **唯一入口**。这里看得见什么，事实源才记得了什么；记的必须是**观察到的声明**，
+/// 不是复述。
+///
+/// 只记声明、不记清单的当前全量：`local/todo_write` 那份清单是纯内存的
+/// （见其模块头），事实源要的是同一份状态的持久化——若在此再算一遍全量，
+/// 两处各算一次就是两套真相。因此**声明里没提到的任务一律不动**
+/// （`merge = true` 的增量语义，以及 `merge = false` 时被整体替换移出清单的项：
+/// 后者在事实源里保持未终态——append-only 不替模型编一条「已验收」的假事实）。
+pub struct TaskDeclaration {
+    /// 本批声明的任务项，顺序与模型给的一致。
+    pub items: Vec<TaskItem>,
+}
+
+/// 一项任务的声明态（一次 `todo_write` 调用里的一项）。
+#[derive(Debug, Clone)]
+pub struct TaskItem {
+    /// 任务 id。**缺席时按 `task_{i+1}` 兜底**，与 `local/todo_write` 的默认同一条
+    /// 格式——两处各写一次是跨插件契约（E-009 禁止 session 直引 local，所以没有
+    /// 共享函数可用）：改名必须两处一起改，否则事实源的 id 会与工具清单对不上，
+    /// 调度段就会念出模型不认识的 id。
+    pub id: String,
+    /// 任务内容（入 `task.opened` 的 `goal`）。
+    pub goal: String,
+    /// 依赖的任务 id。任务图是**数据不是机制**（`T-123-多步任务与返工` §2），
+    /// 声明在清单里，成环 / 悬空由读侧 `acyclic_deps` 报。
+    pub depends_on: Vec<String>,
+    /// 声明状态。
+    pub status: TaskStatus,
+}
+
+/// 任务状态（与 `local/todo_write` 的 `status` 枚举同集）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskStatus {
+    /// 未开始。
+    #[default]
+    Pending,
+    /// 进行中。
+    InProgress,
+    /// 已完成（`task.asserted` 的触发态）。
+    Completed,
+}
+
+/// 一句汇报的草稿：文本 + 它据以生成的运行现状。
+///
+/// 写侧由轮边界汇报口（`round_hook`）产出，读侧由重建引擎（`rebuild`）从
+/// `turn × asserted` 事件载荷**重建同一格**——两头都经 [`Self::to_message`] 这一个
+/// 构造，复抄形状的代价是已知的：上一版落库侧抄漏 `msg_type`，节点落了库却
+/// 不成形状。两份真源不可能，因为内容由同一个草稿生成（见 `round_hook` 模块头）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportDraft {
+    /// 汇报正文（compose 的模板产线，零 LLM 往返）。
+    pub text: String,
+    /// 说这句话时已完成了几轮工具调用。
+    pub tool_rounds: usize,
+    /// 说这句话时距上次「用户看得见的一句话」多久。
+    pub quiet_ms: i64,
+}
+
+impl ReportDraft {
+    /// 落库镜像上的那一格（前端读它）：`dialog_node(text, "progress", true)`。
+    ///
+    /// 为什么**不复抄** `dialog_node` 的构造：构造只有一份，漂移才不可能；
+    /// `SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在各自判定点那侧，
+    /// 由函数签名（`reason: &str`）承担跨模块契约。
+    pub fn to_message(&self) -> ChatNode {
+        dialog_node(&self.text, "progress", true)
+    }
+}

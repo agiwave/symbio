@@ -10,8 +10,8 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use super::super::message_build::{llm_build_tool_message, tool_call_args_text};
 use super::super::transcript::llm_emit_state;
+use crate::symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
@@ -37,10 +37,11 @@ mod task_table;
 
 pub use self::breaker::BreakerInputs;
 pub use self::decls::ToolDecls;
-pub use self::delegation::{note_delegation, Delegation};
+pub use self::delegation::note_delegation;
 pub use self::elimination::EliminationInputs;
-pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
+pub use self::task_decl::note_tasks;
 pub use self::task_table::TaskTableInputs;
+use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 
 // 工具结果提取
 

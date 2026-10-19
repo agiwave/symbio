@@ -53,11 +53,10 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-#[path = "merge_kernel.rs"]
-mod merge_kernel;
-// 生产与 verify 共有的纯计算内核（T-086 批①：`consolidation_fidelity.rs` 以
-// `#[path]` 包含同一份源码）。三个名字在本模块内继续以原名使用——调用点一行不动。
-pub(crate) use merge_kernel::{merge_with_fidelity, truncate_chars};
+// 巩固合并的纯计算内核：生产与 verify 共有同一份源码（T-086 批① 立这条纪律，
+// 住址随 [ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三归位 core 文本域）。
+// 本模块续一条原名短路径——调用点一行不动。
+use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{

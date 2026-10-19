@@ -1000,7 +1000,7 @@ impl SessionPlugin {
         // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
         // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
         let mode = self.presentation_mode().await;
-        super::super::message_build::flatten_whole_tree(&mut messages, mode);
+        crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
         // 呈现派生（[T-155 B3]）：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
         // 历史/切回走这里）。存储与事件里的节点不含 title/icon，交付前按形状统一算出。
         Ok(messages

@@ -1385,7 +1385,7 @@ mod tool_round_tests {
                     // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
                     // （`result_id` 空串 = 无结果子节点）。
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: crate::plugins::session::message_build::tool_call_args_text(tc),
+                    args: crate::symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                 })
                 .collect()
@@ -2334,7 +2334,7 @@ mod tool_round_tests {
                     prompt: None,
                     failure_kind: String::new(),
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
-                    args: crate::plugins::session::message_build::tool_call_args_text(tc),
+                    args: crate::symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                 })
                 .collect()

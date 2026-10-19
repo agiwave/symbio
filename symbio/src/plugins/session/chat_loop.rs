@@ -52,7 +52,10 @@ pub use self::progress::ProgressPolicy;
 pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal, SupplementDrain};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
-pub(crate) use self::compose::{apply_verdict, dialog_node, VerdictEffect};
+pub(crate) use self::compose::{apply_verdict, VerdictEffect};
+// 对话面节点构造器已上移 core `node_build`（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三），
+// 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
+// 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
@@ -60,8 +63,8 @@ pub(crate) use self::io::{
     open_chat_session, persist_messages,
 };
 pub(crate) use self::state::{
-    request_actor_spec, request_principal, request_scope, request_source_principal, Gate,
-    SessionContext, TurnExit, TurnRequest, TurnState,
+    request_actor_spec, request_scope, request_source_principal, Gate, SessionContext, TurnExit,
+    TurnRequest, TurnState,
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
@@ -236,9 +239,10 @@ use std::sync::Arc;
 
 use super::config::SessionConfig;
 use super::context;
-use super::message_build::detach_if_flat;
 use super::tools::fire_hook;
 use super::transcript::llm_emit_state;
+use crate::symbio_core::authz::request_principal;
+use crate::symbio_core::node_build::detach_if_flat;
 
 pub async fn run_chat_loop(
     orchestrator: std::sync::Arc<ChatOrchestrator>,

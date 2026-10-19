@@ -23,8 +23,8 @@
 //!
 //! | 节点 | 形状的单点定义 | 重建怎么拿到 |
 //! |---|---|---|
-//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`super::message_build`] 的 `llm_build_*` | 直接调用 |
-//! | 轮边界汇报 | [`super::round_hook::ReportDraft::to_message`]（`dialog_node`） | 直接调用 |
+//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::symbio_core::node_build`] 的 `llm_build_*` | 直接调用 |
+//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::symbio_core::node_build::dialog_node`]、[`crate::symbio_core::facts::ReportDraft::to_message`] | 直接调用 |
 //! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `turn_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
@@ -84,7 +84,12 @@ use crate::symbio_core::{
     EVENT_USER_MESSAGE,
 };
 
-use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message};
+// 节点形状与汇报格的单点定义都在 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三）：
+// 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
+use crate::symbio_core::facts::ReportDraft;
+use crate::symbio_core::node_build::{
+    dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
+};
 
 /// 从事件序列重建会话消息节点树（**纯函数**：同输入 ⇒ 逐字同输出）。
 ///
@@ -332,7 +337,7 @@ fn supplement_node(e: &Event) -> ChatNode {
 
 /// 轮边界汇报（`turn × asserted`，缺口 4）：界面文本。
 ///
-/// 形状**复用写入侧的构造** [`ReportDraft::to_message`](super::round_hook::ReportDraft::to_message)
+/// 形状**复用写入侧的构造** [`ReportDraft::to_message`]
 /// ——它就是落库镜像上那一格的定义（`dialog_node(text, "progress", true)`）。
 /// 复抄一遍的代价是已知的：上一版落库侧抄漏 `msg_type`，节点落了库却不成形状；
 /// 重建这边再抄一遍，迟早各错各的。`meta.exclude_from_context` 因此随构造一并得到
@@ -342,7 +347,7 @@ fn supplement_node(e: &Event) -> ChatNode {
 /// `id` 由载荷给（缺则按事件 id 合成，同 [`supplement_node`]）；`timestamp` 覆写成
 /// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
 fn reported_node(e: &Event) -> ChatNode {
-    let draft = super::round_hook::ReportDraft {
+    let draft = ReportDraft {
         text: text_of(e, "text"),
         tool_rounds: e
             .payload
@@ -363,7 +368,7 @@ fn reported_node(e: &Event) -> ChatNode {
 
 /// 对话面开场白（`turn × asserted`，T-056）：`Escalate` 首响。
 ///
-/// 形状经 [`super::chat_loop::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
+/// 形状经 [`crate::symbio_core::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。
@@ -381,7 +386,7 @@ fn opening_node(e: &Event) -> ChatNode {
         .get("exclude_from_context")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let mut node = super::chat_loop::dialog_node(text_of(e, "text").as_str(), reason, exclude);
+    let mut node = dialog_node(text_of(e, "text").as_str(), reason, exclude);
     node.id = event_payload_node_id(e, "id");
     node.timestamp = Some(e.ts);
     node
@@ -395,7 +400,7 @@ fn opening_node(e: &Event) -> ChatNode {
 fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 定稿答话（`Answered` / `Escalate` 的对话面节点）：收束格带 `dialog` 载荷 ⇒
     // 它是一条**根级**节点，不是某个 Turn 的子节点（`parent_id = None`，与用户发言
-    // 互为兄弟）。形状经 `compose::dialog_node` **同一构造器**复刻——落库侧那一格
+    // 互为兄弟）。形状经 `node_build::dialog_node` **同一构造器**复刻——落库侧那一格
     // 就是它产的，重建再抄一遍迟早各错各的（同 `ReportDraft::to_message` 的纪律）。
     if let Some(dialog) = e.payload.get("dialog") {
         let id = dialog.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -408,7 +413,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let text = text_of(e, "text");
-        let mut node = super::chat_loop::dialog_node(text.as_str(), reason, exclude);
+        let mut node = dialog_node(text.as_str(), reason, exclude);
         // id 由载荷给（缺则按事件 id 稳定合成——旧事件容错，与 `user_node` 同口径）。
         node.id = if id.is_empty() {
             e.event_id.clone()

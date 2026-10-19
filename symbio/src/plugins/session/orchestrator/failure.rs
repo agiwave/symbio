@@ -472,7 +472,8 @@ fn subtree_of(messages: &[cm::ChatNode], root: &str) -> std::collections::HashSe
     // `flat` 档下本轮响应骨架的直接子节点升了根（`parent_id: None`），靠
     // `meta.turn_root` 记号认回（与 `resume::process_retry_subtree` 同一条并集）。
     for m in messages {
-        if super::super::message_build::turn_root_of(m) == Some(root) && ids.insert(m.id.clone()) {
+        if crate::symbio_core::node_build::turn_root_of(m) == Some(root) && ids.insert(m.id.clone())
+        {
             queue.push(m.id.clone());
         }
     }

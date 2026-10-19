@@ -36,6 +36,9 @@
 use crate::symbio_core::{
     Budget, Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED,
 };
+// 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组）：
+// 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
+use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 
 /// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
 ///
@@ -75,8 +78,8 @@ pub(crate) fn record_derived(
     principal: &str,
     to: &str,
     anchor_id: &str,
-    delegations: &[super::tools::Delegation],
-    tasks: &[super::tools::TaskDeclaration],
+    delegations: &[Delegation],
+    tasks: &[TaskDeclaration],
     breaks: &[&'static str],
 ) -> Result<(), String> {
     // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────

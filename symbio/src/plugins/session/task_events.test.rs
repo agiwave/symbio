@@ -3,7 +3,7 @@
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
 use super::{prompt_section, write};
-use crate::plugins::session::tools::{TaskDeclaration, TaskItem, TaskStatus};
+use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use crate::symbio_core::{
     check_all, readyset, Budget, EventWalStore, Seq, Store, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,

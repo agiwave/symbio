@@ -24,6 +24,5 @@ mod tool_executor;
 mod tool_result_guard;
 
 pub use self::tool_executor::{
-    apply_not_executed, execute_tool_async, fire_hook, process_tool_calls_async, Delegation,
-    TaskDeclaration, TaskItem, TaskStatus,
+    apply_not_executed, execute_tool_async, fire_hook, process_tool_calls_async,
 };

@@ -330,7 +330,7 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
     let long = "甲".repeat(max + 50);
     let hits = vec![SkillLlmHit {
         skill_id: "abc".into(),
-        trigger: super::super::memory_events::truncate_chars(&long, max),
+        trigger: crate::symbio_core::merge_kernel::truncate_chars(&long, max),
         content: "先列要点。".into(),
     }];
     assert!(

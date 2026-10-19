@@ -281,7 +281,7 @@ pub struct ToolCallFact {
     /// 工具名（LLM 可见名）。
     pub name: String,
     /// 定稿参数文本（JSON 文本 / 解析失败的残破原文，与
-    /// [`super::message_build::tool_call_args_text`] 同一取法）。
+    /// [`crate::symbio_core::node_build::tool_call_args_text`] 同一取法）。
     pub args: String,
     /// provider wire id（`tool_call_id` 字段——节点身份的一部分）。
     pub wire_id: String,
@@ -411,7 +411,7 @@ fn tool_fact_of(
             .or_else(|| tc.id.clone())
             .unwrap_or_default(),
         name: tc.name.clone().unwrap_or_default(),
-        args: super::message_build::tool_call_args_text(tc),
+        args: crate::symbio_core::node_build::tool_call_args_text(tc),
         wire_id: outcome
             .map(|o| o.wire_id.clone())
             .or_else(|| tc.wire_id.clone())
@@ -853,7 +853,7 @@ impl TurnRunner {
                         "exclude_from_context": dialog.exclude_from_context,
                     })),
                 )?;
-                let mut node = super::chat_loop::dialog_node(
+                let mut node = crate::symbio_core::node_build::dialog_node(
                     opening,
                     &dialog.reason,
                     dialog.exclude_from_context,
@@ -1053,7 +1053,7 @@ impl TurnRunner {
                         // 缺 `result_id` 会让结果节点换个身份（前端按 id 合并 ⇒ 多一条）。
                         "tool_call_id": r.call_id.clone().or_else(|| r.call.id.clone()),
                         "wire_id": r.call.wire_id,
-                        "args": super::message_build::tool_call_args_text(&r.call),
+                        "args": crate::symbio_core::node_build::tool_call_args_text(&r.call),
                         "result_id": r.result_id,
                         "success": true,
                         // 调用节点落回**原来那一轮**的 Turn 根：续写不新开轮，也不该长出
@@ -1070,7 +1070,7 @@ impl TurnRunner {
                         .or_else(|| r.call.id.clone())
                         .unwrap_or_default(),
                     name: r.call.name.clone().unwrap_or_default(),
-                    args: super::message_build::tool_call_args_text(&r.call),
+                    args: crate::symbio_core::node_build::tool_call_args_text(&r.call),
                     wire_id: r.call.wire_id.clone().unwrap_or_default(),
                     // 结果子节点身份 = 恢复方分配的那一个（随载荷入格，见上）。
                     result_id: r.result_id.clone(),

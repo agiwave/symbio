@@ -33,16 +33,19 @@ use async_trait::async_trait;
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
+use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest,
 };
 
 use super::config::PresentationTree;
-use super::message_build::{detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes};
 use super::tools::process_tool_calls_async;
 use super::transcript::llm_emit_state;
 use super::turn_exec::UiBridge;
+use crate::symbio_core::node_build::{
+    detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes,
+};
 
 /// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
 ///
@@ -56,9 +59,9 @@ use super::turn_exec::UiBridge;
 #[derive(Default)]
 pub(crate) struct DerivedFacts {
     /// 代际立约出参（批⑧）：`agent_run` 的承诺记录。
-    pub(crate) delegations: Vec<super::tools::Delegation>,
+    pub(crate) delegations: Vec<Delegation>,
     /// 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
-    pub(crate) tasks: Vec<super::tools::TaskDeclaration>,
+    pub(crate) tasks: Vec<TaskDeclaration>,
     /// 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
     pub(crate) breaks: Vec<&'static str>,
 }
@@ -190,8 +193,8 @@ impl DispatchPort for SessionDispatchPort {
         // 写方在轮末——由本分发方收下、`turn_exec` 轮末调
         // `derived_facts::record_derived` 落格。不收这三份，
         // 代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
-        let mut delegations: Vec<super::tools::Delegation> = Vec::new();
-        let mut tasks: Vec<super::tools::TaskDeclaration> = Vec::new();
+        let mut delegations: Vec<Delegation> = Vec::new();
+        let mut tasks: Vec<TaskDeclaration> = Vec::new();
         let mut breaks: Vec<&'static str> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_async(
             turn.tool_calls.clone(),

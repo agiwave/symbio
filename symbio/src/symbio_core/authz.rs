@@ -399,6 +399,22 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
     }
 }
 
+/// 一次**请求上下文**的主体身份——全 crate 唯一读 `ctx[AGENT_ID]` 并派生主体名的取值点。
+///
+/// 派生本身是 [`principal_of`]（部署事实的唯一 owner），这里只多一层「从请求上下文取
+/// 那个 id」。写事件的 `actor`、写消息的 `principal`、写侧闸判的对象三者都走它——
+/// 三处各推一次迟早漂移成「判的是 A、写的是 B」。
+///
+/// 为什么住 core 而不留会话插件（[ADR-082](../../../docs/010-adr/082.md "ADR-082") 裁决三 1 组）：
+/// 它是对 core 既有键（`AGENT_ID`）的**纯派生函数**，不属于任何一个切片；会话驱动器
+/// 切成独立插件后（[plan/14 步 6](../../../docs/004-plan/014-单环一表收敛.md "PL-014")），
+/// 读侧（`session/stats`）与写侧隔着 E-009 的插件墙两头都要用，留在任一侧都会变成
+/// 另一条反向引用。
+pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeRequest) -> String {
+    use crate::symbio_core::PluginInvokeRequestExt;
+    principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
+}
+
 /// **该主体当次判定**用的矩阵（行的形状不变：`(主体, 能力名, 可见域)`，
 /// 见本模块文档「本表会怎么长」）。
 ///

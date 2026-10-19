@@ -105,7 +105,7 @@ fn reopen_recovers_events_with_seq() {
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("commit-ok");
     let (store, snapshot, user_seq) = seed_turn(
@@ -191,7 +191,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
 fn the_commitment_counterparty_is_data_not_a_constant() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("commit-to-peer");
     let (store, snapshot, user_seq) = seed_turn(
@@ -247,7 +247,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
 /// 宣告仍是同一份事实源里的一格，不是新通道（S08 §2「通信 = 没有直连」）。
 #[test]
 fn breached_delegation_is_declared_to_the_counterparty() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("commit-breach");
     let (store, snapshot, user_seq) = seed_turn(
@@ -527,7 +527,7 @@ fn record_learning_wires_all_three_memory_steps() {
 /// 而不是被淘汰主体；③ 载荷带 score / threshold，审计方看得见当时值。
 #[test]
 fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("elim-broken");
     let (store, snapshot, user_seq) = seed_turn(
@@ -592,7 +592,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
 /// 反向：**守约**的委托 ⇒ 声誉 +1 ⇒ 不淘汰（阈值判据不是恒真）。
 #[test]
 fn a_kept_delegation_never_eliminates() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("elim-kept");
     let (store, snapshot, user_seq) = seed_turn(
@@ -638,7 +638,7 @@ fn a_kept_delegation_never_eliminates() {
 /// 正是要禁的静默失效，故判据必须在写之前就问覆盖层。
 #[test]
 fn elimination_does_not_write_a_second_verdict() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("elim-idem");
     let (store, snapshot, user_seq) = seed_turn(
@@ -687,7 +687,7 @@ fn elimination_does_not_write_a_second_verdict() {
 /// 对等主体（`agent:peer-b` 类）不在机制内（它没有「派活」这个权威动作可收回）。
 #[test]
 fn a_principal_without_assign_work_is_never_eliminated() {
-    use super::super::tools::Delegation;
+    use crate::symbio_core::facts::Delegation;
 
     let wal = tmp_wal("elim-peer");
     let (store, snapshot, user_seq) = seed_turn(
