@@ -1,7 +1,7 @@
 ---
 kind: ref
 id: RE-004-slo-calibration
-title: SLO 校准 · 首测（2026-09-30）
+title: SLO 校准（2026-09-30 实测）
 status: active
 created: 2026-09-30
 deps: [PL-003-演进与验证, PL-004-工程落地]
@@ -13,14 +13,14 @@ deps: [PL-003-演进与验证, PL-004-工程落地]
 > 以及 [PL-003 §7.3](../004-plan/003-演进与验证.md "PL-003-演进与验证") 里由本文闭合的两条：时延只有预算断言、成本只有参数。
 > 本文是**第一份实测记录**——后续每次校准追加一节，历史数字不删（可回看漂移）。
 
-## 1. 埋点设施（本轮落地）
+## 1. 埋点设施
 
 | 设施 | 位置 | 说明 |
 |---|---|---|
 | `LlmAdapter::generate_timed` | `symbio_core/adapters` | trait 默认方法：adapter 边界 `Instant` 计时，返回 `(文本, 实测毫秒)`。桩与真实适配器零改动共享 |
 | `Reasoner::reply_timed` | `symbio_core/actors` | 埋点版 reply；`reply` 委托它 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
-| ③ `cost_ledger` | `symbio_core/projection/cost` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（S8 落地，本轮接上真实来源） |
+| ③ `cost_ledger` | `symbio_core/projection/cost` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（S8 接上真实来源） |
 
 闭环：**adapter 边界实测 → final 事件 `cost_ms` → cost_ledger 累计 → CircuitBreaker 判据**——
 成本是同一份事实源算出来的，不是旁路统计（N1 同口径）。

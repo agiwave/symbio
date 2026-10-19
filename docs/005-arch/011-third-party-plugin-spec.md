@@ -318,7 +318,7 @@ async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginEr
 `ExternalPlugin::stop()` 发 `shutdown` 帧 → 等 `ok` → 关闭 stdin → 等进程退出
 → **超时则 kill**（宽限期如 5 秒）。`start()` 在 spawn 后发 `init` 帧并校验版本。
 
-**对内置插件**：`start`/`stop` 默认空实现，**行为与今天完全一致**——这是「加钩子
+**对内置插件**：`start`/`stop` 默认空实现，**行为不变**——这是「加钩子
 不改变现状」的保证。
 
 ---
@@ -445,9 +445,9 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 第三期  HTTP + 权限强制        第二期跑通后，传输与授权是正交扩展
 ```
 
-### 已落地进度
+### 落地形态
 
-评审第一组（机械改进）与 P3 **已同批完成**（它们不阻塞第三方插件，但先做完能显著
+评审第一组（机械改进）与 P3 已落地（它们不阻塞第三方插件，但做完能显著
 减少实现期噪音——尤其 P1：删除 `Native` 后，「载荷有几种形态」这个基础问题才有
 唯一答案）：
 
@@ -455,7 +455,7 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 |---|---|
 | **P1** 删除 `PluginPayload::Native` 死变体 | `transport.rs` 的枚举收成 3 态，gateway 两处「拒绝」分支消失 |
 | **P2** 收口载荷转换 | `gateway/server.rs::classify_payload` —— 唯一分类点，两入口共用 |
-| **A3** 消除跨插件引用 | `SEG_MESSAGES` / `message_of_node` 上移 `symbio_core::schemas::session::chat_node`；全仓跨插件 `use` 归零 |
+| **A3** 消除跨插件引用 | `SEG_MESSAGES` / `message_of_node` 上移 `symbio_core::chat::chat_node`；全仓跨插件 `use` 归零 |
 | **P6** `payload` 键收口 | `KEY_PAYLOAD` 取代 deprecated 的 `PayloadKey`/`PAYLOAD`，裸字符串 `"payload"` 消除 |
 | **P3** 线上可表达标记 | `SymbioKey::WIRE`（6 个进程内键标 `false`） |
 | **P5** gateway 术语统一 | 「native」→「进程内（in-process）」，与协议层一词两义消除 |

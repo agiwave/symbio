@@ -22,7 +22,7 @@ lists: [route-contracts=owner]
 
 | 地址 | 调用方 | 返回类型 | 备注 |
 |---|---|---|---|
-| `classify/decide` | `session`（编排层） | `Verdict` | 契约 `DecideRequest` / `Verdict` 见 `symbio_core::schemas::dialog`；不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环 |
+| `classify/decide` | `session`（编排层） | `Verdict` | 契约 `DecideRequest` / `Verdict` 见 `symbio_core::dialog`；不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环 |
 | `compose/wording` | `session`（编排层） | `String` | 空串 = 没有对话面文本（平凡值），调用方据此不写节点 |
 | `event_bus/ping` | 仓内无调用方 | pong + 当前订阅数 | 存活探测 |
 | `event_bus/subscribe` | 前端实时面 / CLI | 帧订阅连接 | 收 `kind = "vdfs"` 频道；CLI 侧须与 `vdfs/watch` 配对（曾漏后者） |
