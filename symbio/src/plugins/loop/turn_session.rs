@@ -6,7 +6,7 @@
 //! 搬家前驱动器直接持 `Arc<PersistentChatSession>`（会话引擎）。切插件之后
 //! 那份引擎留在 session 墙内，驱动器手里只有三样东西：纯值 [`TurnSpec`]、
 //! 本会话事实轨（`Option<Arc<dyn Store>>`）、动作面端口（[`SessionPort`]）。
-//! 本结构把这三样收成一个对象，**方法名与旧句柄对齐**——于是执行链上的调用点
+//! 本结构把这三样收成一个对象，**读法与旧句柄对齐**——于是执行链上的调用点
 //! 只需换类型、不必重写语义。
 //!
 //! ## 它不持有存储实现
@@ -15,20 +15,21 @@
 //! 不是 `EventWalStore`/`SessionStore`——loop 不命名会话存储实现（E-009 的
 //! 同一纪律）。「读完整史」在这条 trait 上就是 `range(Seq::new(0))`。
 //!
-//! ## 写方法一律委托端口
+//! ## 写方法一律走端口
 //!
 //! 转写写入的唯一落点是 session（转写唯一写入点 + 事实写者令牌都在墙内）。
-//! 本结构上的 `add_by_runner` / `edit_nodes` / `remove_nodes` / `replace_all`
-//! 都不自己落库，只把动作递过去——这正是「主动发起流程走统一端口/协议」的形态。
+//! 所有会话动作都经 [`SessionPort::call`] 递过去——这正是「主动发起流程走
+//! 统一端口/协议」的形态。动作集是**装配期冻结的闭集**（session 行表），
+//! 本结构不为每个动作设包装：两个泛化助手（`run_op` / `run_op_unit`）
+//! 加调用点的回型标注就是全部（[ADR-094](../../../../docs/010-adr/094.md "ADR-094")）。
 
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::symbio_core::chat_node::ChatNode;
-use crate::symbio_core::{
-    CompressionBeginReply, CompressionFinishRequest, DrainedSupplement, EditFrame, Event,
-    FleetSnapshot, PluginError, Scope, Seq, Store, TurnSettings, TurnSpec, WorkerProgress,
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+use crate::symbio_core::{Event, PluginError, Scope, Seq, Store, TurnSettings, TurnSpec};
 
 use super::session_port::SessionPort;
 
@@ -102,79 +103,37 @@ impl LoopSession {
             .unwrap_or_default()
     }
 
-    pub(crate) async fn get_messages(&self) -> Result<Vec<ChatNode>, PluginError> {
-        self.port.messages().await
-    }
-
-    /// 上下文候选（会话侧按轮数窗口与协议投影裁剪；窗口由 session 的配置决定）。
-    pub(crate) async fn get_context_messages(&self) -> Result<Vec<ChatNode>, PluginError> {
-        self.port.context_messages().await
-    }
-
-    pub(crate) async fn add_by_runner(
+    /// 发一个内部动作并取回体：`op` 取 [`run_ops`] 常量，回体类型 `T` 由调用点
+    /// 标注，载荷形状由 core 的请求结构体定（`run_op(run_ops::EDIT_NODES, EditNodesRequest { nodes, frame })`）。
+    ///
+    /// 这是本结构上**唯一**的动作出口——没有「一动作一方法」的宽面（ADR-094）：
+    /// 动作集是 session 行表那个装配期冻结的闭集，加一个交互不用在这里加方法。
+    pub(crate) async fn run_op<T: DeserializeOwned>(
         &self,
-        messages: Vec<ChatNode>,
-    ) -> Result<Vec<ChatNode>, PluginError> {
-        self.port.add_by_runner(messages).await
+        op: &str,
+        payload: impl Serialize,
+    ) -> Result<T, PluginError> {
+        let data = self.port.call(op, to_payload(op, payload)?).await?;
+        serde_json::from_value(data)
+            .map_err(|e| PluginError::InternalError(format!("会话动作回体不合法（{op}）：{e}")))
     }
 
-    pub(crate) async fn edit_nodes(
+    /// 发一个**无回体**的内部动作（session 侧只回执，`data: None`）。
+    pub(crate) async fn run_op_unit(
         &self,
-        nodes: Vec<ChatNode>,
-        frame: EditFrame,
-    ) -> Result<Vec<ChatNode>, PluginError> {
-        self.port.edit_nodes(nodes, frame).await
-    }
-
-    pub(crate) async fn remove_nodes(&self, ids: Vec<String>) -> Result<(), PluginError> {
-        self.port.remove_nodes(ids).await
-    }
-
-    pub(crate) async fn replace_all(
-        &self,
-        nodes: Vec<ChatNode>,
-        dropped: Vec<String>,
-        head: ChatNode,
+        op: &str,
+        payload: impl Serialize,
     ) -> Result<(), PluginError> {
-        self.port.replace_all(nodes, dropped, head).await
+        self.port
+            .call(op, to_payload(op, payload)?)
+            .await
+            .map(|_| ())
     }
+}
 
-    pub(crate) async fn drain_parked(&self) -> Result<(), PluginError> {
-        self.port.drain_parked().await
-    }
-
-    pub(crate) async fn consolidate(&self, messages: Vec<ChatNode>) -> Result<(), PluginError> {
-        self.port.consolidate(messages).await
-    }
-
-    pub(crate) async fn take_supplements(&self) -> Result<Option<DrainedSupplement>, PluginError> {
-        self.port.take_supplements().await
-    }
-
-    pub(crate) async fn worker_progress(&self) -> Result<Vec<WorkerProgress>, PluginError> {
-        self.port.worker_progress().await
-    }
-
-    pub(crate) async fn recall_snapshots(&self) -> Result<Vec<FleetSnapshot>, PluginError> {
-        self.port.recall_snapshots().await
-    }
-
-    pub(crate) async fn elimination_revoked(&self) -> Result<bool, PluginError> {
-        self.port.elimination_revoked().await
-    }
-
-    pub(crate) async fn compression_begin(
-        &self,
-        node_id: &str,
-        force: bool,
-    ) -> Result<CompressionBeginReply, PluginError> {
-        self.port.compression_begin(node_id, force).await
-    }
-
-    pub(crate) async fn compression_finish(
-        &self,
-        req: CompressionFinishRequest,
-    ) -> Result<ChatNode, PluginError> {
-        self.port.compression_finish(req).await
-    }
+/// 载荷序列化：失败只能是调用点传了不可序列化的值（如把 trait object 塞进请求体），
+/// 那是编程错误，按 `Internal` 出声。
+fn to_payload(op: &str, payload: impl Serialize) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(payload)
+        .map_err(|e| PluginError::InternalError(format!("动作载荷序列化失败（{op}）：{e}")))
 }

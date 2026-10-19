@@ -226,7 +226,8 @@ use crate::symbio_core::chat_request;
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
-    clock_now_ms, llm_emit_message, llm_short_id, RunSnapshot, TurnOutput, TurnReport, TurnStatus,
+    clock_now_ms, llm_emit_message, llm_short_id, run_ops, RunSnapshot, TurnOutput, TurnReport,
+    TurnStatus,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginError,
@@ -367,7 +368,7 @@ pub async fn run_chat_loop(
         context.messages = if turn_req.load_history {
             context
                 .session
-                .get_context_messages()
+                .run_op::<Vec<ChatNode>>(run_ops::CONTEXT_MESSAGES, ())
                 .await
                 .unwrap_or_default()
         } else {
@@ -726,10 +727,14 @@ pub async fn run_chat_loop(
                                 > + Send,
                         >,
                     > = Box::pin(async move {
-                        session.take_supplements().await.unwrap_or_else(|e| {
-                            plugin_warn!("session", "[Loop] 取出用户补充失败（本轮继续）: {e}");
-                            None
-                        })
+                        let supplements: Option<crate::symbio_core::DrainedSupplement> = session
+                            .run_op(run_ops::TAKE_SUPPLEMENTS, ())
+                            .await
+                            .unwrap_or_else(|e| {
+                                plugin_warn!("session", "[Loop] 取出用户补充失败（本轮继续）: {e}");
+                                None
+                            });
+                        supplements
                     });
                     fut
                 }) as super::turn_exec::SupplementFn

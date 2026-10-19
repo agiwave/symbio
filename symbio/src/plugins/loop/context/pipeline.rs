@@ -13,8 +13,9 @@ use super::super::chat_loop::{ChatOrchestrator, SessionContext};
 use crate::plugin_warn;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 use crate::symbio_core::{
-    fire_hook, llm_short_id, CompressionFinishRequest, CompressionOutcome, ExecAbortSignal,
-    ExecEnv, ExecEventSink, HookEvent, PluginError,
+    fire_hook, llm_short_id, run_ops, CompressionBeginRequest, CompressionFinishRequest,
+    CompressionOutcome, ConsolidateRequest, ExecAbortSignal, ExecEnv, ExecEventSink, HookEvent,
+    PluginError, RemoveNodesRequest, ReplaceAllRequest,
 };
 
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
@@ -416,7 +417,14 @@ async fn compress_snapshot_inner(
     // （被压掉的消息 + 新首条）由动作面自己完成——落库与发帧是一个出口。
     if let Err(e) = context
         .session
-        .replace_all(context.messages.clone(), dropped, head)
+        .run_op_unit(
+            run_ops::REPLACE_ALL,
+            ReplaceAllRequest {
+                nodes: context.messages.clone(),
+                dropped,
+                head,
+            },
+        )
         .await
     {
         plugin_warn!(
@@ -497,7 +505,17 @@ async fn compress_with_snapshot_core(
 
     // 会话阶段置位 + 熔断判定（都在 session：计数器与活跃名册归它）。
     // `skipped` = 冷却中：本次不做压缩，历史保持完整。`force` 绕过冷却。
-    match context.session.compression_begin(&node_id, force).await {
+    match context
+        .session
+        .run_op::<crate::symbio_core::CompressionBeginReply>(
+            run_ops::COMPRESSION_BEGIN,
+            CompressionBeginRequest {
+                node_id: node_id.clone(),
+                force,
+            },
+        )
+        .await
+    {
         Ok(reply) if reply.skipped => {
             plugin_warn!(
                 "session",
@@ -567,14 +585,17 @@ async fn compress_with_snapshot_core(
     // 失败只 warn——前端已收到终态。
     let node = match context
         .session
-        .compression_finish(CompressionFinishRequest {
-            node_id: node_id.clone(),
-            status,
-            text,
-            failure_kind: kind.map(str::to_string),
-            stats: Some(stats),
-            outcome,
-        })
+        .run_op::<crate::symbio_core::chat_node::ChatNode>(
+            run_ops::COMPRESSION_FINISH,
+            CompressionFinishRequest {
+                node_id: node_id.clone(),
+                status,
+                text,
+                failure_kind: kind.map(str::to_string),
+                stats: Some(stats),
+                outcome,
+            },
+        )
         .await
     {
         Ok(node) => Some(node),
@@ -642,7 +663,9 @@ pub(crate) async fn retry_compaction(
     session: &Arc<super::super::turn_session::LoopSession>,
     target_id: &str,
 ) -> Result<(), PluginError> {
-    let messages = session.get_messages().await?;
+    let messages = session
+        .run_op::<Vec<crate::symbio_core::chat_node::ChatNode>>(run_ops::MESSAGES, ())
+        .await?;
     // 只接受**压缩节点**：重试入口长在压缩失败节点上，目标错位说明前端与存储已经
     // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
     let found = messages
@@ -661,14 +684,24 @@ pub(crate) async fn retry_compaction(
     // **顺序反转**（[ADR-054] 决策 2）：经动作面落 `remove_nodes`。这条路径的
     // 全部意义就是「重试不留旧失败痕迹」——不落格的话，主读切到「从 WAL 重建」之后
     // 它会**复活**。删除帧由动作面自己广播（ADR-086 §4）。
-    session.remove_nodes(vec![target_id.to_string()]).await?;
+    session
+        .run_op_unit(
+            run_ops::REMOVE_NODES,
+            RemoveNodesRequest {
+                ids: vec![target_id.to_string()],
+            },
+        )
+        .await?;
 
     // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`
     // 会做三层清理（滤 Failed / 剔孤儿 / content 归一）并施加轮次窗口，
     // 用 `get_messages` 的原始列表会让切分点与首次失败时不同，重试的结论
     // 与首次失败对不上（"换个视图再试一次"不是重试）。
     let mut context = SessionContext {
-        messages: session.get_context_messages().await.unwrap_or_default(),
+        messages: session
+            .run_op::<Vec<crate::symbio_core::chat_node::ChatNode>>(run_ops::CONTEXT_MESSAGES, ())
+            .await
+            .unwrap_or_default(),
         session: session.clone(),
         // 重试路径是**独立的**压缩会话（`retry_compaction`）：它的产出在这里就地落格
         // （见本函数末尾的 `consolidate`）——轮外没有「下一个 `execute_turn`」
@@ -697,7 +730,17 @@ pub(crate) async fn retry_compaction(
             // 删掉了，若就这么返回，用户点"重试"的结果是"节点消失了，什么都没发生"。
             // 补一条 Completed 说明，让这次点击有交代。
             let node_id = llm_short_id();
-            if let Err(e) = context.session.compression_begin(&node_id, true).await {
+            if let Err(e) = context
+                .session
+                .run_op_unit(
+                    run_ops::COMPRESSION_BEGIN,
+                    CompressionBeginRequest {
+                        node_id: node_id.clone(),
+                        force: true,
+                    },
+                )
+                .await
+            {
                 plugin_warn!("session", "[Compress] 重试说明节点置位失败: {e}");
             }
             // 仍然带上触发来源与当前水位：「未触发」也是用户点出来的结果，
@@ -714,14 +757,17 @@ pub(crate) async fn retry_compaction(
             // 落库 + 回包都在动作面（§3.4）。
             if let Err(err) = context
                 .session
-                .compression_finish(CompressionFinishRequest {
-                    node_id,
-                    status: NodeStatus::Completed,
-                    text: "未触发压缩（当前历史无需压缩）".to_string(),
-                    failure_kind: None,
-                    stats: Some(stats),
-                    outcome: CompressionOutcome::None,
-                })
+                .run_op_unit(
+                    run_ops::COMPRESSION_FINISH,
+                    CompressionFinishRequest {
+                        node_id,
+                        status: NodeStatus::Completed,
+                        text: "未触发压缩（当前历史无需压缩）".to_string(),
+                        failure_kind: None,
+                        stats: Some(stats),
+                        outcome: CompressionOutcome::None,
+                    },
+                )
                 .await
             {
                 plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
@@ -739,7 +785,11 @@ pub(crate) async fn retry_compaction(
     // 失败路径上 `consolidated` 恒为 `None`（内核回滚时不设它），于是这一段对失败
     // 与「未触发」两种结局都是 no-op。落格动作在 session（持写者令牌的一侧）。
     if let Some(msgs) = context.consolidated.take() {
-        if let Err(e) = context.session.consolidate(msgs).await {
+        if let Err(e) = context
+            .session
+            .run_op_unit(run_ops::CONSOLIDATE, ConsolidateRequest { messages: msgs })
+            .await
+        {
             plugin_warn!("session", "[Compress] 压缩事实入格失败（压缩已生效）: {e}");
         }
     }

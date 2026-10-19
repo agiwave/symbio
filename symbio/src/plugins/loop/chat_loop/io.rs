@@ -60,7 +60,16 @@ pub(crate) async fn persist_messages(
     // 落**（助手正文走 `turn_exec` 的 `assistant.progressed`、工具结果走
     // `turn_runner` 的 `artifact.added`），此处再落一条 `message.added` 就是第二个
     // owner。本处只做「落库 + 回包」。
-    if let Err(e) = context.session.add_by_runner(new_messages.to_vec()).await {
+    if let Err(e) = context
+        .session
+        .run_op::<Vec<ChatNode>>(
+            crate::symbio_core::run_ops::ADD_BY_RUNNER,
+            crate::symbio_core::AddNodesRequest {
+                messages: new_messages.to_vec(),
+            },
+        )
+        .await
+    {
         // 持久化失败（可恢复）：不静默吃错误，也不中断对话（消息仍在内存中，
         // chat_loop 继续）。错误是**状态**不是事件——发 `Warn` 由消费循环写入
         // 会话节点 `attributes.warning`，前端按状态渲染；新一轮请求开始时清除。

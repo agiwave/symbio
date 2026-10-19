@@ -17,8 +17,8 @@ use super::*;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
-    check_all, CapabilityMeta, ExecTranscriptWriter, PluginSimpleRequest, Seq,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    check_all, run_ops, CapabilityMeta, ConsolidateRequest, ExecTranscriptWriter,
+    PluginSimpleRequest, Seq, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
 };
 use crate::symbio_core::{
     Capability, CapabilityRow, EventStore, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
@@ -1817,7 +1817,13 @@ async fn the_turn_number_continues_across_a_snapshot() {
 
     run_one_turn(&fx, &sink).await; // 第 1 轮：turn 0
     fx.port
-        .consolidate(consolidated(&["snap-1"]))
+        .call(
+            run_ops::CONSOLIDATE,
+            serde_json::to_value(ConsolidateRequest {
+                messages: consolidated(&["snap-1"]),
+            })
+            .expect("测试载荷"),
+        )
         .await
         .expect("轮外压缩动作");
     let turns = fx
@@ -1908,7 +1914,13 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
 
     // 轮外落格（`retry_compaction` 的落点）：快照取代它之前的一切。
     fx.port
-        .consolidate(consolidated(&["snap-r"]))
+        .call(
+            run_ops::CONSOLIDATE,
+            serde_json::to_value(ConsolidateRequest {
+                messages: consolidated(&["snap-r"]),
+            })
+            .expect("测试载荷"),
+        )
         .await
         .expect("轮外压缩动作");
 

@@ -179,7 +179,10 @@ pub(crate) async fn prepare_turn_inputs(
         turn.recall_view = super::super::memory_events::recall_view(
             context
                 .session
-                .recall_snapshots()
+                .run_op::<Vec<crate::symbio_core::FleetSnapshot>>(
+                    crate::symbio_core::run_ops::RECALL_SNAPSHOTS,
+                    (),
+                )
                 .await
                 .map_err(TurnExit::Failed)?,
             &recall_query,
@@ -235,7 +238,10 @@ pub(crate) async fn prepare_turn_inputs(
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
     let workers = context
         .session
-        .worker_progress()
+        .run_op::<Vec<crate::symbio_core::WorkerProgress>>(
+            crate::symbio_core::run_ops::WORKER_PROGRESS,
+            (),
+        )
         .await
         .map_err(TurnExit::Failed)?;
     // Q1 的三条判据按**本会话当前配置**取（`worker_*` 三字段），不再读判定模块的

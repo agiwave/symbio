@@ -277,6 +277,57 @@ async fn run_only_accepts_actions() {
     assert!(matches!(err, VdfsError::Invalid(_)), "得到 {err:?}");
 }
 
+// ==================== 行表（闭集的组织方式，ADR-094）====================
+
+/// 闭集 = 行表自身：**op 词表的每个常量在行表里恰好出现一次**。
+///
+/// 这条判据替代的正是旧形态里「core 的手写 `ALL` 与 `match` 臂人工对账」那件事。
+/// 两个方向都响：加常量不加行 ⇒ 红（授权会 `Forbidden`，而调用方以为它在闭集里）；
+/// 加行不改本判据 ⇒ 红（实现了一个词表没说的行为，两侧从此对不上）。
+/// 期望集在测试里逐一点名——钉「表与词表一致」正是测试的份内事。
+#[test]
+fn table_covers_every_run_op_constant() {
+    let expected = [
+        run_ops::MESSAGES,
+        run_ops::CONTEXT_MESSAGES,
+        run_ops::ADD_BY_RUNNER,
+        run_ops::ADD_HERE,
+        run_ops::EDIT_NODES,
+        run_ops::REMOVE_NODES,
+        run_ops::REPLACE_ALL,
+        run_ops::DRAIN_PARKED,
+        run_ops::CONSOLIDATE,
+        run_ops::TAKE_SUPPLEMENTS,
+        run_ops::WORKER_PROGRESS,
+        run_ops::RECALL_SNAPSHOTS,
+        run_ops::ELIMINATION_REVOKED,
+        run_ops::COMPRESSION_BEGIN,
+        run_ops::COMPRESSION_FINISH,
+    ];
+    let mut table: Vec<&str> = RUN_OPS.iter().map(|r| r.op).collect();
+    table.sort_unstable();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        table, expected,
+        "行表必须与 op 词表逐一对应：加常量要加行，加行要改本判据"
+    );
+}
+
+/// 行表无重号：一个 op 两行 = 两个处理函数抢同一个地址，行为取决于 `find`
+/// 的先后——那是静默的。装配期就能查，不必等运行期。
+#[test]
+fn table_has_no_duplicate_ops() {
+    let mut seen = std::collections::HashSet::new();
+    for row in RUN_OPS {
+        assert!(
+            seen.insert(row.op),
+            "行表里有重复的 op：{}（一个 op 只能有一个处理函数）",
+            row.op
+        );
+    }
+}
+
 /// 临时会话没有会话句柄 ⇒ Internal：**不许按 id 重建**（那会拿到另一份空存储）。
 #[tokio::test(flavor = "multi_thread")]
 async fn run_ephemeral_requires_session_handle() {

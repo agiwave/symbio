@@ -3,18 +3,20 @@
 //! 只在本插件内使用（`#[cfg(test)]`）：E-009 连测试一起判，测试路径里也不出现
 //! `crate::plugins::session`。假件模拟的是[端口](super::session_port::SessionPort)
 //! 的**契约**，不是会话存储实现——消息列表在内存里，事实轨由用例自己持一份
-//! [`EventStore`] 交进来。
+//! [`EventStore`]交进来。ADR-094 后端口收窄成一个 `call`，假件同款：按 op
+//! 分派是模拟服务端的份内事（生产侧的那次分派已经消失）。
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use serde_json::{json, Value};
 
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{
-    count_user_messages, CompressionBeginReply, CompressionFinishRequest, DrainedSupplement,
-    EditFrame, Entity, Event, EventStore, FleetSnapshot, PluginError, Scope, Seq, Store,
-    TurnSettings, TurnSpec, Verb, WorkerProgress, EVENT_SESSION_CONSOLIDATED, WORKER_FORCE_PREFIX,
-    WORKER_KEYWORDS, WORKER_MIN_CHARS,
+    count_user_messages, run_ops, AddNodesRequest, CompressionBeginReply, CompressionFinishRequest,
+    ConsolidateRequest, EditNodesRequest, Entity, Event, EventStore, PluginError,
+    RemoveNodesRequest, ReplaceAllRequest, Scope, Seq, Store, TurnSettings, TurnSpec, Verb,
+    EVENT_SESSION_CONSOLIDATED, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS,
 };
 
 use super::session_port::SessionPort;
@@ -49,116 +51,94 @@ impl FakeSessionPort {
 
 #[async_trait]
 impl SessionPort for FakeSessionPort {
-    async fn messages(&self) -> Result<Vec<ChatNode>, PluginError> {
-        Ok(self.messages.lock().unwrap().clone())
-    }
+    async fn call(&self, op: &str, payload: Value) -> Result<Value, PluginError> {
+        /// 假件侧载荷解析：失败 = 调用点拼错了形状（生产侧同口径）。
+        fn parse<T: serde::de::DeserializeOwned>(
+            op: &str,
+            payload: Value,
+        ) -> Result<T, PluginError> {
+            serde_json::from_value(payload)
+                .map_err(|e| PluginError::InternalError(format!("假件载荷不合法（{op}）：{e}")))
+        }
 
-    async fn context_messages(&self) -> Result<Vec<ChatNode>, PluginError> {
-        Ok(self.messages.lock().unwrap().clone())
-    }
-
-    async fn add_by_runner(&self, messages: Vec<ChatNode>) -> Result<Vec<ChatNode>, PluginError> {
-        self.messages.lock().unwrap().extend(messages.clone());
-        Ok(messages)
-    }
-
-    async fn edit_nodes(
-        &self,
-        nodes: Vec<ChatNode>,
-        _frame: EditFrame,
-    ) -> Result<Vec<ChatNode>, PluginError> {
-        let mut all = self.messages.lock().unwrap();
-        for node in &nodes {
-            if let Some(slot) = all.iter_mut().find(|m| m.id == node.id) {
-                *slot = node.clone();
+        match op {
+            run_ops::MESSAGES | run_ops::CONTEXT_MESSAGES => {
+                Ok(json!(self.messages.lock().unwrap().clone()))
             }
+            run_ops::ADD_BY_RUNNER | run_ops::ADD_HERE => {
+                let AddNodesRequest { messages } = parse(op, payload)?;
+                self.messages.lock().unwrap().extend(messages.clone());
+                Ok(json!(messages))
+            }
+            run_ops::EDIT_NODES => {
+                let EditNodesRequest { nodes, .. } = parse(op, payload)?;
+                let mut all = self.messages.lock().unwrap();
+                for node in &nodes {
+                    if let Some(slot) = all.iter_mut().find(|m| m.id == node.id) {
+                        *slot = node.clone();
+                    }
+                }
+                Ok(json!(nodes))
+            }
+            run_ops::REMOVE_NODES => {
+                let RemoveNodesRequest { ids } = parse(op, payload)?;
+                self.removed.lock().unwrap().push(ids.clone());
+                self.messages
+                    .lock()
+                    .unwrap()
+                    .retain(|m| !ids.contains(&m.id));
+                Ok(Value::Null)
+            }
+            run_ops::REPLACE_ALL => {
+                let ReplaceAllRequest { nodes, .. } = parse(op, payload)?;
+                *self.messages.lock().unwrap() = nodes;
+                Ok(Value::Null)
+            }
+            run_ops::DRAIN_PARKED => Ok(Value::Null),
+            run_ops::CONSOLIDATE => {
+                let ConsolidateRequest { messages } = parse(op, payload)?;
+                self.consolidated.lock().unwrap().push(messages.clone());
+                if let Some(facts) = &self.facts {
+                    let turns = count_user_messages(&facts.range(Seq::new(0)));
+                    facts
+                        .append(
+                            Event::pending(
+                                format!("v2sc-test-{turns}"),
+                                EVENT_SESSION_CONSOLIDATED,
+                                Entity::Message,
+                                Verb::Progressed,
+                                0,
+                                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                            )
+                            .with_payload(json!({
+                                "messages": messages,
+                                "turns": turns,
+                            })),
+                        )
+                        .expect("假件的快照格入格");
+                }
+                Ok(Value::Null)
+            }
+            run_ops::TAKE_SUPPLEMENTS => Ok(Value::Null),
+            run_ops::WORKER_PROGRESS => Ok(json!(Vec::<crate::symbio_core::WorkerProgress>::new())),
+            run_ops::RECALL_SNAPSHOTS => Ok(json!(Vec::<crate::symbio_core::FleetSnapshot>::new())),
+            run_ops::ELIMINATION_REVOKED => Ok(json!(false)),
+            run_ops::COMPRESSION_BEGIN => Ok(json!(CompressionBeginReply { skipped: false })),
+            run_ops::COMPRESSION_FINISH => {
+                let req: CompressionFinishRequest = parse(op, payload)?;
+                Ok(json!(self
+                    .messages
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|m| m.id == req.node_id)
+                    .cloned()
+                    .unwrap_or_default()))
+            }
+            other => Err(PluginError::InternalError(format!(
+                "假件未实现的内部动作：{other}"
+            ))),
         }
-        Ok(nodes)
-    }
-
-    async fn remove_nodes(&self, ids: Vec<String>) -> Result<(), PluginError> {
-        self.removed.lock().unwrap().push(ids.clone());
-        self.messages
-            .lock()
-            .unwrap()
-            .retain(|m| !ids.contains(&m.id));
-        Ok(())
-    }
-
-    async fn replace_all(
-        &self,
-        nodes: Vec<ChatNode>,
-        _dropped: Vec<String>,
-        _head: ChatNode,
-    ) -> Result<(), PluginError> {
-        *self.messages.lock().unwrap() = nodes;
-        Ok(())
-    }
-
-    async fn drain_parked(&self) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    async fn consolidate(&self, messages: Vec<ChatNode>) -> Result<(), PluginError> {
-        self.consolidated.lock().unwrap().push(messages.clone());
-        if let Some(facts) = &self.facts {
-            let turns = count_user_messages(&facts.range(Seq::new(0)));
-            facts
-                .append(
-                    Event::pending(
-                        format!("v2sc-test-{turns}"),
-                        EVENT_SESSION_CONSOLIDATED,
-                        Entity::Message,
-                        Verb::Progressed,
-                        0,
-                        crate::symbio_core::authz::PRINCIPAL_MAIN,
-                    )
-                    .with_payload(serde_json::json!({
-                        "messages": messages,
-                        "turns": turns,
-                    })),
-                )
-                .expect("假件的快照格入格");
-        }
-        Ok(())
-    }
-
-    async fn take_supplements(&self) -> Result<Option<DrainedSupplement>, PluginError> {
-        Ok(None)
-    }
-
-    async fn worker_progress(&self) -> Result<Vec<WorkerProgress>, PluginError> {
-        Ok(Vec::new())
-    }
-
-    async fn recall_snapshots(&self) -> Result<Vec<FleetSnapshot>, PluginError> {
-        Ok(Vec::new())
-    }
-
-    async fn elimination_revoked(&self) -> Result<bool, PluginError> {
-        Ok(false)
-    }
-
-    async fn compression_begin(
-        &self,
-        _node_id: &str,
-        _force: bool,
-    ) -> Result<CompressionBeginReply, PluginError> {
-        Ok(CompressionBeginReply { skipped: false })
-    }
-
-    async fn compression_finish(
-        &self,
-        req: CompressionFinishRequest,
-    ) -> Result<ChatNode, PluginError> {
-        Ok(self
-            .messages
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|m| m.id == req.node_id)
-            .cloned()
-            .unwrap_or_default())
     }
 }
 

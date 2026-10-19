@@ -132,7 +132,8 @@ impl SymbioKey for TurnDispatchKey {
 }
 pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 
-/// loop→session 内部动作段的**地址词表**（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §4）。
+/// loop→session 内部动作段的**地址词表**（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §4；
+/// 闭集的去处见 [ADR-094](../../../../docs/010-adr/094.md "ADR-094")）。
 ///
 /// `_run` 是会话挂载点下的一级段：`session/<sid>/_run/<op>`。地址末段与
 /// `Action.action` 必须**字面相等**——两者只在这里命名一次，两侧都从这里取。
@@ -140,6 +141,10 @@ pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 /// 为什么词表住 core：地址的拼方（loop）与解方（session）隔着插件墙（E-009），
 /// 而「有哪些 op」是两侧共同的契约，任一侧私有都会长出第二份字符串常量。
 /// 它不是资源段：不出现在 `list` 里（`internal_dirs` 不收它）。
+///
+/// **闭集不在这里**：「session 实现了哪些动作」是执行侧事实，与处理函数同住
+/// session 的行表（ADR-094）——授权判据第 3 条读那张表，「在表内」与「有臂」
+/// 是同一件事。清单与实现分居两地要靠人工对账，而漏一份是静默的授权缺口。
 pub mod run_ops {
     /// 内部动作段的段名。
     pub const SEG: &str = "_run";
@@ -159,25 +164,6 @@ pub mod run_ops {
     pub const ELIMINATION_REVOKED: &str = "elimination-revoked";
     pub const COMPRESSION_BEGIN: &str = "compression-begin";
     pub const COMPRESSION_FINISH: &str = "compression-finish";
-
-    /// 闭集：授权判据第 3 条（不在表内 ⇒ `Forbidden`）。
-    pub const ALL: &[&str] = &[
-        MESSAGES,
-        CONTEXT_MESSAGES,
-        ADD_BY_RUNNER,
-        ADD_HERE,
-        EDIT_NODES,
-        REMOVE_NODES,
-        REPLACE_ALL,
-        DRAIN_PARKED,
-        CONSOLIDATE,
-        TAKE_SUPPLEMENTS,
-        WORKER_PROGRESS,
-        RECALL_SNAPSHOTS,
-        ELIMINATION_REVOKED,
-        COMPRESSION_BEGIN,
-        COMPRESSION_FINISH,
-    ];
 }
 
 /// session → loop 的唯一动作名（[ADR-086] §5）：`loop/<sid>` 只接受它。

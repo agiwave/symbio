@@ -87,10 +87,11 @@ use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
-    count_user_messages, llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity,
-    Event, ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
-    ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    count_user_messages, llm_short_id, run_ops, ActorSpec, CapabilityMeta, ConsolidateRequest,
+    DeltaSink, DispatchPort, Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier,
+    ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer,
+    TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
@@ -902,7 +903,7 @@ pub(crate) async fn execute_final_reply_turn(
     })?;
     // **补落寄存的变更**（T-055）：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
-    if let Err(e) = session.drain_parked().await {
+    if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
     let snapshot = store.range(Seq::new(0));
@@ -917,7 +918,15 @@ pub(crate) async fn execute_final_reply_turn(
     let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
     // 压缩入格 + 归档：与 [`execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
     if let Some(msgs) = consolidation {
-        if let Err(e) = session.consolidate(msgs.to_vec()).await {
+        if let Err(e) = session
+            .run_op_unit(
+                run_ops::CONSOLIDATE,
+                ConsolidateRequest {
+                    messages: msgs.to_vec(),
+                },
+            )
+            .await
+        {
             crate::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
         }
     }
@@ -1019,7 +1028,7 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
     // 位置在 `snapshot` 之前：本函数后面的所有判据（turn 号 / 续写锚 / 幂等键）
     // 都从 `store.range(...)` 折，补落改的就是那份切片 ⇒ 必须在读切片之前落完，
     // 否则本轮会站在一份**缺了那次编辑**的状态上做判断。
-    if let Err(e) = session.drain_parked().await {
+    if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
     let snapshot = store.range(Seq::new(0));
@@ -1210,7 +1219,15 @@ pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, Pl
     // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，
     // 现行窗口不再自洽）。
     if let Some(msgs) = consolidation {
-        if let Err(e) = session.consolidate(msgs.to_vec()).await {
+        if let Err(e) = session
+            .run_op_unit(
+                run_ops::CONSOLIDATE,
+                ConsolidateRequest {
+                    messages: msgs.to_vec(),
+                },
+            )
+            .await
+        {
             crate::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
         }
     }
@@ -1418,13 +1435,16 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             // 淘汰闸的部署级判据由 session 折叠成**一个值**（`ADR-086 §4`：全量事件
             // 过墙是 P6「值注入」的反面）；取失败按「未收回」继续并出声——与
             // 「读不出的 WAL 跳过」的既有口径一致。
-            let elimination_revoked = session.elimination_revoked().await.unwrap_or_else(|e| {
-                crate::plugin_warn!(
-                    "session",
-                    "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
-                );
-                false
-            });
+            let elimination_revoked = session
+                .run_op::<bool>(run_ops::ELIMINATION_REVOKED, ())
+                .await
+                .unwrap_or_else(|e| {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Turn] 淘汰闸判据读取失败（按未收回处理，本轮继续）: {e}"
+                    );
+                    false
+                });
             let dispatcher = super::tool_dispatch::SessionDispatchPort::new(
                 parent,
                 ctx,

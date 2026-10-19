@@ -39,7 +39,10 @@ use super::turn_session::LoopSession;
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
-use crate::symbio_core::{llm_emit_state, llm_short_id, EditFrame};
+use crate::symbio_core::{
+    llm_emit_state, llm_short_id, run_ops, AddNodesRequest, EditFrame, EditNodesRequest,
+    RemoveNodesRequest,
+};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
@@ -107,7 +110,9 @@ async fn process_retry_subtree(
     req: &ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息
-    let messages = session.get_messages().await?;
+    let messages = session
+        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
+        .await?;
 
     // 2. 定位 Failed Turn（target_id 指向，is_run()：wire type=skeleton + style_tag=run）
     let turn_exists = messages.iter().any(|m| m.id == req.target_id && m.is_run());
@@ -155,7 +160,12 @@ async fn process_retry_subtree(
     //    主读路径切到「从 WAL 重建」之后这棵子树**整棵复活**——重建只看事实，而
     //    事实里从未有过「它们没了」这句话。删除帧由动作面自己广播（ADR-086 §4）。
     session
-        .remove_nodes(deleted_messages.iter().map(|m| m.id.clone()).collect())
+        .run_op_unit(
+            run_ops::REMOVE_NODES,
+            RemoveNodesRequest {
+                ids: deleted_messages.iter().map(|m| m.id.clone()).collect(),
+            },
+        )
         .await?;
 
     plugin_info!(
@@ -181,7 +191,9 @@ async fn process_tool_resume_action(
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息
-    let mut messages = session.get_messages().await?;
+    let mut messages = session
+        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
+        .await?;
 
     // 2. 定位 ToolCall 父节点
     let tc_idx = messages
@@ -333,7 +345,13 @@ async fn process_tool_resume_action(
         // 替换，不猜「这次改了哪几个字段」）。不落格的话，主读切到「从 WAL 重建」
         // 之后这条节点会退回**恢复前的**状态。状态帧由动作面自己广播。
         if let Err(e) = session
-            .edit_nodes(vec![parent_update.clone()], EditFrame::State)
+            .run_op::<Vec<ChatNode>>(
+                run_ops::EDIT_NODES,
+                EditNodesRequest {
+                    nodes: vec![parent_update.clone()],
+                    frame: EditFrame::State,
+                },
+            )
             .await
         {
             plugin_error!("session", "[Resume] 中止收口落库失败: {}", e);
@@ -433,11 +451,31 @@ async fn process_tool_resume_action(
     //
     // 三帧（删除 / 完整消息 / 完整消息）都由动作面自己广播：ADR-086 §4 的
     // 「写动作自己发帧」——落库与发帧是一个出口，不在调用点各写一份。
-    session.remove_nodes(vec![old_child_id.clone()]).await?;
     session
-        .edit_nodes(vec![updated_parent.clone()], EditFrame::Message)
+        .run_op_unit(
+            run_ops::REMOVE_NODES,
+            RemoveNodesRequest {
+                ids: vec![old_child_id.clone()],
+            },
+        )
         .await?;
-    session.add_by_runner(vec![new_child.clone()]).await?;
+    session
+        .run_op::<Vec<ChatNode>>(
+            run_ops::EDIT_NODES,
+            EditNodesRequest {
+                nodes: vec![updated_parent.clone()],
+                frame: EditFrame::Message,
+            },
+        )
+        .await?;
+    session
+        .run_op::<Vec<ChatNode>>(
+            run_ops::ADD_BY_RUNNER,
+            AddNodesRequest {
+                messages: vec![new_child.clone()],
+            },
+        )
+        .await?;
 
     // 11. 成功 → Continue（交回本次恢复产生的工具交换，供 v2 原生路径续写同一轮）；
     //     失败 → Done
