@@ -143,10 +143,8 @@ impl ModelProvider for BoundProvider {
                     "[LLM] 轮次中止 (耗时 {:?})",
                     turn_started.elapsed()
                 );
-                return Err(PluginError::Aborted {
-                    // 半截流的清除不在本层（见下）：这里没有可携带的半截产出。
-                    partial: Vec::new(),
-                });
+                // 半截流的清除不在本层（见下）：这里没有可携带的半截产出。
+                return Err(PluginError::Aborted);
             }
             PostResult::RetryWithoutContextId => {
                 plugin_warn!(
@@ -248,10 +246,8 @@ impl ModelProvider for BoundProvider {
                     );
                     super::http::sleep_with_abort(delay, abort).await;
                     if abort.is_aborted() {
-                        return Err(PluginError::Aborted {
-                            // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
-                            partial: Vec::new(),
-                        });
+                        // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
+                        return Err(PluginError::Aborted);
                     }
                     // 响应体已被上一批读掉（`bytes_stream` 消费），必须重新 POST。
                     // 重发请求不再递归重试：请求级语义（含它自己的 4 次重试）已覆盖。
@@ -279,10 +275,8 @@ impl ModelProvider for BoundProvider {
                                 "[LLM] 轮次中止 (耗时 {:?})",
                                 turn_started.elapsed()
                             );
-                            return Err(PluginError::Aborted {
-                                // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
-                                partial: Vec::new(),
-                            });
+                            // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
+                            return Err(PluginError::Aborted);
                         }
                         // 交给上层清 response_id 后重发整轮（与请求级首次尝试同口径）。
                         PostResult::RetryWithoutContextId => {

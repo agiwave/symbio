@@ -496,7 +496,7 @@ impl LlmAdapter for ProviderLlmAdapter {
             .await
             .map_err(|e| match e {
                 // 中止不压成失败：调用方据此**不落兜底格**（ADR-044 同源纪律）。
-                PluginError::Aborted { .. } => AdapterError::Aborted,
+                PluginError::Aborted => AdapterError::Aborted,
                 other => AdapterError::GenerationFailed(format!("{other}")),
             })?;
         Ok(LlmTurn {

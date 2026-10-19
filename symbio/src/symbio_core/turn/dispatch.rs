@@ -100,7 +100,8 @@ pub struct TurnReport {
     pub status: TurnStatus,
     /// `Failed` 的原因。
     pub error: Option<String>,
-    /// `Aborted` 时已产出的半截消息（今日 `PluginError::Aborted.partial`）。
+    /// `Aborted` 时已产出的半截消息（由 loop 私有的退出类型携带过来——
+    /// 它不住 `PluginError`：那是不跨墙的数据，ADR-095）。
     pub partial: Vec<ChatNode>,
     /// Stop 钩子的 `last_message`（今日 `fire_stop_hook` 的取值）。
     pub last_message: Option<String>,

@@ -230,8 +230,8 @@ use crate::symbio_core::{
     TurnStatus,
 };
 use crate::symbio_core::{
-    ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt,
+    ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginInvokeRequest,
+    PluginInvokeRequestExt,
 };
 use std::sync::Arc;
 
@@ -658,8 +658,8 @@ pub async fn run_chat_loop(
         //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
         //     一次 LLM 请求（与原意图一致）；
         //   - 用户格与中止收束格成对入格（N3/C4 的不变量在运行器内守住）。
-        // 出口形态不变：运行器回 `aborted`，`turn_exec` 上抛 `PluginError::Aborted`，
-        // 走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
+        // 出口形态不变：运行器回 `aborted`，`turn_exec` 上抛
+        // `TurnExecExit::Aborted`，走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         // 轮次经 v2 运行器（[`super::turn_exec`]）执行——事实原生入格、prompt 从转写出、
@@ -763,21 +763,21 @@ pub async fn run_chat_loop(
                 context.messages.extend(res.messages);
                 res.output
             }
-            Err(PluginError::Aborted { partial }) => {
+            Err(super::turn_exec::TurnExecExit::Aborted(partial)) => {
                 // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
                 // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
-                // （正文 / 思考 / 工具节点）随 `partial` 一路带到 `persist_failure`
+                // （正文 / 思考 / 工具节点）随出口一路带到 `persist_failure`
                 // 并入格——它们是事实，不因没说完就不记。
                 return finish_turn(&context, &sink, &turn, TurnExit::Aborted(partial)).await;
             }
-            Err(e) => {
+            Err(super::turn_exec::TurnExecExit::Failed(e)) => {
                 plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
         };
 
         if turn.abort.is_aborted() {
-            // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
+            // 与 `TurnExecExit::Aborted` 分支同理：请求结束后才置位的 abort 标志
             // 同样向上冒泡，由消费循环统一收尾（在途 Turn → `Aborted` + error +
             // 可重试，会话结局 `aborted`）。仅 send_request 之后的 abort 冒泡；
             // turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把成功的
@@ -849,7 +849,7 @@ pub(crate) enum TurnFlow {
 /// 按历史判定会让 approve/reject 恢复后的续写被永久挡住。
 fn gate_turn(turn: &TurnState) -> Gate {
     // ── 退出条件：用户中止（边界检查点）─────────────────────────────────
-    // 循环顶部的中止检查点**不冒泡** `Err(Aborted)`：上一轮 Turn 已定稿落库，
+    // 循环顶部的中止检查点**不冒泡**：上一轮 Turn 已定稿落库，
     // 冒泡会让消费循环的 `persist_failure` 把成功的 Turn 误回滚为 Failed。
     // 推理前后（在途 Turn 尚未定稿）的中止才走 [`TurnExit::Aborted`]。
     if turn.abort.is_aborted() {

@@ -10,6 +10,7 @@
 use super::progress::ProgressPolicy;
 use super::*;
 use crate::symbio_core::chat_node::CHAT_STYLE_TAG_REASONING;
+use crate::symbio_core::PluginError;
 
 // 「本请求所属会话的主体身份」这个取值点已上移 core（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三 1 组）：
 // 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
@@ -241,10 +242,10 @@ pub(crate) struct TurnState {
 pub(crate) enum TurnExit {
     /// 正常收尾：无工具调用 / 工具待用户输入。
     Completed,
-    /// 循环顶部的中止检查点：上一轮 Turn 已定稿落库，**不冒泡** `Err(Aborted)`
+    /// 循环顶部的中止检查点：上一轮 Turn 已定稿落库，**不冒泡**中止
     /// （否则消费循环的 `persist_failure` 会把已成功的 Turn 误标为 `Aborted`）。
     AbortedAtBoundary,
-    /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
+    /// 用户中止且**在途 Turn 尚未定稿**：冒泡中止，由消费循环落库为
     /// `NodeStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
     /// 前端渲染错误条与重试入口。携带**半截产出**（正文 / 思考 / 工具节点）——
     /// 它们是事实，随收尾入格（`persist_failure` 的 `partial`）。

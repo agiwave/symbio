@@ -23,13 +23,18 @@ pub enum PluginError {
     Timeout,
     #[error("操作被拒绝：{0}")]
     Forbidden(String),
+    /// 用户主动中止（非业务失败：不落错误事件、不冒泡给前端为 Error）。
+    ///
+    /// **不携带半截产出**——那批节点（正文 / 思考 / 工具节点）是 chat 域词汇，
+    /// 而本类型是跨插件共享的错误词汇（`model` 插件也构造 `Aborted`）。它从来
+    /// 就跨不过插件墙：`to_frame` 只写错误码与文案，模型侧的中止在 `adapters`
+    /// 边界转成 `AdapterError::Aborted`（载荷在那里被丢掉）。半截产出由 loop
+    /// 插件私有的退出类型携带（生产方与消费方都在 loop，两侧编译期可见），
+    /// 见 [ADR-095]。
+    ///
+    /// [ADR-095]: ../../../../docs/010-adr/095.md "ADR-095"
     #[error("操作中止")]
-    Aborted {
-        /// 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）——思考与正文是事实，
-        /// 不因没说完就不记：它们随错误一路带到落库镜像（`persist_failure` 的
-        /// `partial` 参数）并入格（WAL 是唯一事实源，[ADR-049]）。
-        partial: Vec<crate::symbio_core::chat_node::ChatNode>,
-    },
+    Aborted,
     #[error("上下文丢失，需要重试")]
     RetryWithoutContextId,
     #[error("流解析错误：{0}")]
@@ -125,7 +130,7 @@ impl PluginError {
             PluginError::ParseError(_) => PluginErrorCode::ParseError,
             PluginError::Timeout => PluginErrorCode::Timeout,
             PluginError::Forbidden(_) => PluginErrorCode::Forbidden,
-            PluginError::Aborted { .. } => PluginErrorCode::Aborted,
+            PluginError::Aborted => PluginErrorCode::Aborted,
             PluginError::RetryWithoutContextId => PluginErrorCode::RetryWithoutContextId,
             PluginError::StreamError(_) => PluginErrorCode::StreamError,
             PluginError::CompressionFailed => PluginErrorCode::CompressionFailed,
@@ -134,7 +139,7 @@ impl PluginError {
 
     /// 是否为"用户主动中止"语义（非业务失败：不落错误事件、不冒泡给前端为 Error）。
     pub fn is_abort(&self) -> bool {
-        matches!(self, PluginError::Aborted { .. })
+        matches!(self, PluginError::Aborted)
     }
 
     /// 将 PluginError 转换为通用的传输帧

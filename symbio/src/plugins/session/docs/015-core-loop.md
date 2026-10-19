@@ -245,7 +245,9 @@ async fn finish_turn(
   只在显式触发全部未发生时生效（panic / 消费循环超时 / provider 解析失败）。
 - `persist_messages` 在锚点已对齐时是 no-op（切片为空即返回），因此所有出口都可以
   无条件调用，不会重复落库。
-- `TurnExit::Aborted` → `Err(PluginError::Aborted)`，消费循环的 ABORTED 分支语义不变。
+- `TurnExecExit::Aborted(partial)` → `TurnExit::Aborted(partial)` → `TurnReport { status: Aborted,
+  partial }`，消费循环的 ABORTED 分支语义不变（半截产出由 loop 私有的退出类型携带，
+  不住 `PluginError`——ADR-095）。
 
 ### 2.5 `TurnState`：跨轮可变状态
 
@@ -325,9 +327,10 @@ pub async fn run_chat_loop(
         //   用户文本与节点 id / 窗口 / 工具 / 恢复锚点 / 记忆与技能 / 前缀 / 压缩 / 注入。
         let out = match super::turn_exec::execute_turn(super::turn_exec::ExecTurn { … }).await {
             Ok(res) => { context.messages.extend(res.messages); res.output }  // 工具轮产物并入镜像
-            Err(PluginError::Aborted { partial }) =>
+            Err(TurnExecExit::Aborted(partial)) =>
                 return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(partial)).await,
-            Err(e) => return finish_turn(orch, &context, &sink, &turn, TurnExit::Failed(e)).await,
+            Err(TurnExecExit::Failed(e)) =>
+                return finish_turn(orch, &context, &sink, &turn, TurnExit::Failed(e)).await,
         };
         if turn.abort.is_aborted() {
             return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(vec![])).await;

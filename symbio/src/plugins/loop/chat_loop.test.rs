@@ -38,8 +38,8 @@ fn request_count_is_not_an_exit_condition() {
 
 #[test]
 fn abort_at_loop_boundary_exits_without_bubbling() {
-    // 边界检查点用 `AbortedAtBoundary`（收尾为 Ok），不是 `Aborted`（收尾为
-    // `Err(Aborted)`）：上一轮 Turn 已定稿落库，冒泡 Err 会让消费循环的
+    // 边界检查点用 `AbortedAtBoundary`（收尾为 Ok），不是 `Aborted`（收尾时冒泡
+    // 中止出口）：上一轮 Turn 已定稿落库，冒泡会让消费循环的
     // `persist_failure` 把已成功的 Turn 误标为 `Aborted`。
     assert!(matches!(
         gate_turn(&state(1, true)),

@@ -394,11 +394,7 @@ impl ModelProvider for FaithfulProvider {
         };
         match self.behavior {
             Behavior::Fail => return Err(PluginError::InternalError("模型断了".into())),
-            Behavior::Abort => {
-                return Err(PluginError::Aborted {
-                    partial: Vec::new(),
-                })
-            }
+            Behavior::Abort => return Err(PluginError::Aborted),
             Behavior::AbortAfterPartial => {
                 // 真实链路的半截形态：推理快照帧 + 正文快照帧先行（首片即快照），
                 // 生成被中止在半句话上——帧进桥的累积，收束与出口按累积取半截。
@@ -427,9 +423,7 @@ impl ModelProvider for FaithfulProvider {
                         ..Default::default()
                     })
                     .await;
-                return Err(PluginError::Aborted {
-                    partial: Vec::new(),
-                });
+                return Err(PluginError::Aborted);
             }
             Behavior::Faithful => {}
             Behavior::ToolThenAnswer => {
@@ -638,7 +632,10 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     .expect("失败必须上抛（Failed 出口）");
 
     assert!(
-        matches!(err, PluginError::InternalError(ref m) if m.contains("模型断了")),
+        matches!(
+            err,
+            TurnExecExit::Failed(PluginError::InternalError(ref m)) if m.contains("模型断了")
+        ),
         "上抛的是生成失败本体：{err:?}"
     );
 
@@ -671,7 +668,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     .err()
     .expect("中止必须上抛（Aborted 出口，不是 Failed）");
 
-    let PluginError::Aborted { partial } = &err else {
+    let TurnExecExit::Aborted(partial) = &err else {
         panic!("上抛的是中止本体，不被压成失败：{err:?}");
     };
     assert!(partial.is_empty(), "本轮没有半截产出：{partial:?}");
@@ -690,8 +687,9 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
 }
 
 /// 事实完整性（T-052 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
-/// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走（`Aborted { partial }`，
-/// 由消费循环 `persist_failure` 收尾入格），（二）照原样入格
+/// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走
+/// （`TurnExecExit::Aborted(partial)`，由消费循环 `persist_failure` 收尾入格），
+/// （二）照原样入格
 /// （收束格载荷 `text` / `reasoning`）。用户随后追问那个名词时，前置上下文
 /// （那半句 + 半截思考）在重建的历史里都在。
 #[tokio::test]
@@ -711,7 +709,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     .expect("中止必须上抛（Aborted 出口）");
 
     // ① 随出口带走：正文节点 + 推理节点都进 `partial`（落库镜像的来源）。
-    let PluginError::Aborted { partial } = &err else {
+    let TurnExecExit::Aborted(partial) = &err else {
         panic!("上抛的是中止本体：{err:?}");
     };
     let texts: Vec<String> = partial

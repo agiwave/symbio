@@ -60,8 +60,8 @@
 //! 中止语义：生成被中止时运行器**照落收束格**（`f-{turn}`，kind 仍是
 //! `chat.assistant.final`——中止是事实的**状态**，不是另一种事实；载荷
 //! `status: "aborted"` + `terminated: { reason, at }`），本函数上抛
-//! `Aborted { partial }`——chat_loop 走独立出口，会话结局 `aborted`
-//! （**不是** `failed`），半截产出随 `partial` 入格。
+//! [`TurnExecExit::Aborted`]——chat_loop 走独立出口，会话结局 `aborted`
+//! （**不是** `failed`），半截产出随出口入格。
 //! 中止与失败在**类型上**分开（`AdapterError` / `TurnOutcome.aborted`），
 //! 不靠错误文本猜；两者出口因此可各自演化。
 //!
@@ -743,6 +743,39 @@ pub(crate) struct ExecTurnResult {
     pub messages: Vec<ChatNode>,
 }
 
+/// [`execute_turn`] 的退出类型。
+///
+/// 为什么不是裸 `PluginError`：中止出口要携带**半截产出**（`Vec<ChatNode>`），
+/// 而那批节点是 chat 域词汇。`PluginError` 是跨插件共享的错误词汇（`model`
+/// 插件也构造 `Aborted`）——它不搬这个箱子：`to_frame` 只写错误码与文案，
+/// 模型侧的中止在 `adapters` 边界转成 `AdapterError::Aborted`（载荷在那里
+/// 被丢掉），loop 侧由 `execute_turn` 见到 `outcome.aborted` 后**重新构造**
+/// 一份。半截产出的唯一生产方与唯一消费方都在 loop 内、是一次普通的进程内
+/// Rust 调用，型在两侧编译期可见；塞进共享词汇再拆箱（无论用不用 `Any`）
+/// 都是给一条不跨墙的数据付跨墙的税（[ADR-095]）。
+///
+/// [ADR-095]: ../../../../docs/010-adr/095.md "ADR-095"
+#[derive(Debug)]
+pub(crate) enum TurnExecExit {
+    /// 用户中止且半截产出已在手（正文 / 思考 / 工具节点）——它们是事实，
+    /// 不因没说完就不记（消费循环按 id 去重、整条覆盖、孤儿丢弃后入格）。
+    Aborted(Vec<ChatNode>),
+    /// 其余一切（模型失败 / 编排失败 / 内部错误）。
+    Failed(PluginError),
+}
+
+impl From<PluginError> for TurnExecExit {
+    fn from(e: PluginError) -> Self {
+        // `Aborted` 一律走中止出口，不压成失败（ADR-044 同源纪律）：走到这里的
+        // 中止没有半截产出可带（模型侧中止在 adapters 边界已转
+        // `AdapterError::Aborted`，由 `outcome.aborted` 那条路重新构造）。
+        match e {
+            PluginError::Aborted => TurnExecExit::Aborted(Vec::new()),
+            other => TurnExecExit::Failed(other),
+        }
+    }
+}
+
 /// 一轮的执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
 /// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。
 ///
@@ -987,7 +1020,7 @@ pub(crate) async fn execute_final_reply_turn(
     Ok(())
 }
 
-pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, PluginError> {
+pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let ExecTurn {
         session,
         provider,
@@ -1495,12 +1528,12 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .map_err(|e| PluginError::InternalError(format!("流式发射任务失败：{e}")))?;
 
     // 中止：收束格已由运行器落格（`f-{turn}`，载荷 `status: "aborted"` + `terminated`），
-    // 出口走 Aborted——由 chat_loop/消费循环落库为 `NodeStatus::Aborted`
+    // 出口走 `TurnExecExit::Aborted`——由 chat_loop/消费循环落库为 `NodeStatus::Aborted`
     // + 会话结局 `aborted`（**不是** `failed`）。
     // 记忆与学习也**不写**——中止的轮次没有定稿产出，没有可固化的东西。
     //
-    // **半截产出随出口带走**（`partial`）：末轮正文 / 思考此刻还只攒在桥上，丢了它们
-    // 用户中断前看到的那半句话就消失。消费循环把 `partial` 收尾入格
+    // **半截产出随出口带走**：末轮正文 / 思考此刻还只攒在桥上，丢了它们
+    // 用户中断前看到的那半句话就消失。消费循环把它收尾入格
     // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
     // （`produced`）同走这条通道——中止出口不再回灌 `ExecTurnResult`，不带上就没了。
     if outcome.aborted {
@@ -1530,7 +1563,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             crate::symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
             partial.push(n);
         }
-        return Err(PluginError::Aborted { partial });
+        return Err(TurnExecExit::Aborted(partial));
     }
 
     // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
@@ -1552,7 +1585,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         );
         // 被拒的兜底仍是**失败**（I3）：呈现走 Failed 出口，与未拒时同形。
         if outcome.fell_back {
-            return Err(PluginError::InternalError(outcome.text));
+            return Err(TurnExecExit::Failed(PluginError::InternalError(
+                outcome.text,
+            )));
         }
         return Ok(ExecTurnResult {
             output: TurnOutput {
@@ -1644,7 +1679,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
 
     // 兜底已入格（I3），失败呈现走 Failed 出口 + 重试。
     if outcome.fell_back {
-        return Err(PluginError::InternalError(outcome.text));
+        return Err(TurnExecExit::Failed(PluginError::InternalError(
+            outcome.text,
+        )));
     }
     // 等待用户（`outcome.awaits_user`）：本轮尚未了结（运行器只落了进展格
     // `status: "pending"`，收束格留给恢复幕），但**按正常收束返回**——待用户动作由
