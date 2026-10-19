@@ -441,13 +441,13 @@ pub async fn run_chat_loop(
         //
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
-        let head_state = super::loop_registry::LoopState::turn_head(
+        let head_state = super::loop_registry::Call::turn_head(
             turn.request_round,
             first_utterance.is_some(),
             orchestrator.classify_enabled,
         );
         let head_hit = super::loop_registry::builtin().decide(&head_state);
-        if let Some(hit) = head_hit {
+        if let Some(hit) = head_hit.hit() {
             // 行名 + 臂名一起记：排查「某一步怎么没发生」时，要能区分「没有行认领」
             // 与「行了但派的是另一条臂」——只记行名的话这两种情况长得一样。
             plugin_debug!(
@@ -457,7 +457,7 @@ pub async fn run_chat_loop(
                 hit.capsule.name()
             );
         }
-        if head_hit.map(|h| h.capsule) == Some(super::loop_registry::Capsule::Decide) {
+        if head_hit.capsule() == Some(super::loop_registry::Capsule::Decide) {
             if let Some(utterance) = first_utterance.as_deref() {
                 // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
                 // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式

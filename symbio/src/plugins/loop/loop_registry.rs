@@ -62,10 +62,13 @@
 //! 它按顺序走七步，不是「迭代 `decide` 至不动点」。表在直线代码上的正确用法就是
 //! 「每一步问一次」，代价是构造器随决策点增长。
 //!
-//! 真正的收敛是 PL-014 §4 的 `drive`：`loop { project → decide → execute }`，
-//! 届时 N 个构造器合并成一个 `project()`，`policy.recall` 也会拆成
-//! `policy.memory` / `policy.skill` 两行（区分它们的量「本轮已召回否」在 drive 里
-//! 自然存在，在直线代码里只能靠代码位置隐含）。那一步属步骤 5。
+//! **这一步由 [`Site`] 收窄了代价**：构造器返回 [`Call`]（格 + 状态），
+//! 「哪一格」进了表成为数据，于是加一行策略真的只是「1 个函数 + 1 行注册」，
+//! 同格加第二行也不再需要从全局编号里挤位。真正消掉构造器的是 PL-014 §4 的
+//! `drive`：`loop { project → decide → execute }`，届时 N 个构造器合并成一个
+//! `project()`，`policy.recall` 也会拆成 `policy.memory` / `policy.skill` 两行
+//! （区分它们的量「本轮已召回否」在 drive 里自然存在，在直线代码里只能靠代码
+//! 位置隐含）。那一步属步骤 5。
 //!
 //! ## 反射档为什么只判「走不走」，不判「走哪条」
 //!
@@ -136,6 +139,71 @@ impl Capsule {
     }
 }
 
+/// 决策点闭集 —— **这一问发生在环的哪一格**（PL-014 §3 硬规则 a 的「格」）。
+///
+/// ## 为什么要把它变成类型（而不是让 `prio` 暗示）
+///
+/// 此前「哪一行属于哪一格」只是调用点的隐含约定：`chat_loop` 用 `turn_head`
+/// 构造的状态、期待 `Decide`；`progress` 用 `round_boundary`、期待 `Report`。
+/// 表里读不到这层信息，于是三件事都没有答案：
+///
+/// 1. **`prio` 被迫全局唯一** —— 想在 `policy.recall` 那一格加第二行（PL-014 §5
+///    步骤 3 明确要拆的「记忆 / 技能」两行），得从全局编号里挤一个数，而
+///    「50 已被占」这个冲突与「同一格内谁先」根本不是一回事。
+/// 2. **每格扫全表** —— 5 格 × 5 行 = 25 次判定，其中 20 次是陪跑（本格的行
+///    之外，其余行的判据全是 `blank()` 的假值，恒不成立）。
+/// 3. **`None` 三义不分** —— 「本格没有行」「本格有行但都不认领」「这一格不属于
+///    任何一行」在返回值上长得一样。
+///
+/// 所以「格」进入 `Row` 成为数据：`prio` 降为**格内**唯一，`decide` 只扫本格，
+/// 返回 [`Verdict`] 区分三种情形。加一行策略 = 1 个函数 + 1 行注册（带 `site`），
+/// 驱动器零改动——PL-014 §6 判据 1 由此从「碰巧成立」变成「结构上成立」。
+///
+/// ## 加一格要改哪里
+///
+/// 与 [`Capsule`] 同理，闭集的价值就是「加值必须改枚举」：这里加一个变体，
+/// `name()` 的 `match` 会编译错误，`every_site_is_manned` 会红（提示去挂行）。
+/// 格是环的**决策点清单**，不是插件可自由扩展的注册项——与「臂是环的指令集」
+/// 同一条界线。
+///
+/// `Ord` 的唯一用途是让同格的行在表里相邻（`(site, prio, name)` 全序），
+/// **不表达执行顺序**：执行顺序由直线代码的调用点决定，见模块文档「过渡形态」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Site {
+    /// 轮首判决（步骤 2b）：问 classify 这一轮该派活还是直接答。
+    TurnHead,
+    /// 轮边界汇报（`chat_loop::round_report_hook`）。
+    RoundBoundary,
+    /// 自动压缩（步骤 3 ①）。
+    Compress,
+    /// 轮首准备（步骤 3 ③）：记忆 / 技能 / 任务段。
+    TurnPrepare,
+    /// 反射档（步骤 3 ④）。
+    Reflex,
+}
+
+impl Site {
+    /// 全部格——bootstrap 校验与测试遍历**唯一**的取值点。
+    pub(crate) const ALL: &'static [Site] = &[
+        Site::TurnHead,
+        Site::RoundBoundary,
+        Site::Compress,
+        Site::TurnPrepare,
+        Site::Reflex,
+    ];
+
+    /// 格名——日志、冲突报错、测试断言唯一的取值点（与 [`Capsule::name`] 同规矩）。
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::TurnHead => "turn_head",
+            Self::RoundBoundary => "round_boundary",
+            Self::Compress => "compress",
+            Self::TurnPrepare => "turn_prepare",
+            Self::Reflex => "reflex",
+        }
+    }
+}
+
 /// 策略行看到的**全部世界**（PL-014 §3 硬规则 a：只携带引用/值，不带句柄）。
 ///
 /// 每个字段都能回答"它是从哪来的"——没有一个是环的私有簿记：
@@ -153,8 +221,11 @@ impl Capsule {
 /// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `turn_exec`） |
 /// | `has_match` | `skill_events::take_match` 的结论（同一次查询，判它用的就是它） |
 ///
-/// 构造器按**决策点**分，每个只填自己那几格：一格不会因为另一格的字段恰好
-/// 默认成真而误命中。代价是构造器随决策点增长——这是过渡形态，见模块文档。
+/// 构造器按**决策点**分（在 [`Call`] 上），每个只填自己那几格。因为 `decide`
+/// 只问本格的行，别格的字段对本格的行**不可达**——「一格不会因为另一格的字段
+/// 恰好默认成真而误命中」不再靠核对字段清单，而是结构性质。
+///
+/// 代价是构造器随决策点增长——这是过渡形态，见模块文档。
 #[derive(Debug, Clone)]
 pub(crate) struct LoopState {
     pub(crate) round: usize,
@@ -169,26 +240,41 @@ pub(crate) struct LoopState {
     pub(crate) has_match: bool,
 }
 
-impl LoopState {
-    /// 轮首（步骤 2b）的状态：只填判决用得到的三个量。
+/// 一次「问表」：**格** + 该格看到的状态。
+///
+/// 两者绑在一起是有意的：调用点不可能把 A 格的状态喂给 B 格的判定（那正是
+/// 「特殊化逻辑」最典型的形态——同一个概念在 5 个调用点各写一遍，且写错了
+/// 没有东西会红）。构造器只在自己的 `impl` 里出现，`site` 由构造器给定，
+/// 调用点的自由度只剩「填什么值」。
+#[derive(Debug, Clone)]
+pub(crate) struct Call {
+    pub(crate) site: Site,
+    pub(crate) state: LoopState,
+}
+
+impl Call {
+    /// 轮首（步骤 2b）：只填判决用得到的三个量。
     ///
     /// `progress` 填 [`ProgressPolicy::disabled`]——轮首没有"进展"可报，这不是
     /// "恰好没触发"而是**语义上不存在**：此刻一轮工具都还没跑。
     pub(crate) fn turn_head(round: usize, has_utterance: bool, classify_enabled: bool) -> Self {
         Self {
-            round,
-            has_utterance,
-            classify_enabled,
-            ..Self::blank()
+            site: Site::TurnHead,
+            state: LoopState {
+                round,
+                has_utterance,
+                classify_enabled,
+                ..LoopState::blank()
+            },
         }
     }
 
-    /// 轮边界（`chat_loop::round_report_hook`）的状态：只填汇报用得到的量。
+    /// 轮边界（`chat_loop::round_report_hook`）：只填汇报用得到的量。
     ///
-    /// `has_utterance` 恒 `false`、`classify_enabled` 恒 `false`——轮边界不重判
-    /// 用户那句话（判过了，见 `decide.rs`）。填假值而不是"留空"，是因为这两个
-    /// 字段在 `round > 0` 时本来就挡得住 `policy.classify`，假值只是让
-    /// "此处不适用"在数据上也可读。
+    /// `has_utterance` / `classify_enabled` 留 `blank()`——轮边界不重判用户那句话
+    /// （判过了，见 `decide.rs`）。这两个字段**本格的行读不到**：`decide` 只问
+    /// 本格的行，所以此处的假值不会造成"恰好挡住"或"恰好放过"（该不变量由
+    /// `no_row_reads_across_sites` 哨兵用例钉住，不靠读代码确认）。
     pub(crate) fn round_boundary(
         round: usize,
         quiet_ms: i64,
@@ -196,28 +282,37 @@ impl LoopState {
         progress: ProgressPolicy,
     ) -> Self {
         Self {
-            round,
-            quiet_ms,
-            reports,
-            progress,
-            ..Self::blank()
+            site: Site::RoundBoundary,
+            state: LoopState {
+                round,
+                quiet_ms,
+                reports,
+                progress,
+                ..LoopState::blank()
+            },
         }
     }
 
     /// 自动压缩格（步骤 3 ①）：只填那个开关。
     pub(crate) fn compress(auto_compress: bool) -> Self {
         Self {
-            auto_compress,
-            ..Self::blank()
+            site: Site::Compress,
+            state: LoopState {
+                auto_compress,
+                ..LoopState::blank()
+            },
         }
     }
 
     /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
     pub(crate) fn turn_prepare(round: usize, has_facts: bool) -> Self {
         Self {
-            round,
-            has_facts,
-            ..Self::blank()
+            site: Site::TurnPrepare,
+            state: LoopState {
+                round,
+                has_facts,
+                ..LoopState::blank()
+            },
         }
     }
 
@@ -227,12 +322,17 @@ impl LoopState {
     /// 它，中间没有第二次匹配（S11 §2「一次判定、两个出口」）。
     pub(crate) fn reflex(resume_allowed: bool, has_match: bool) -> Self {
         Self {
-            resume_allowed,
-            has_match,
-            ..Self::blank()
+            site: Site::Reflex,
+            state: LoopState {
+                resume_allowed,
+                has_match,
+                ..LoopState::blank()
+            },
         }
     }
+}
 
+impl LoopState {
     /// 全零状态：只给上面几个构造器做基底，不对外。
     fn blank() -> Self {
         Self {
@@ -252,11 +352,17 @@ impl LoopState {
 
 /// 策略行：一个判据 + 它派发的臂。
 ///
-/// `decide` 返回 `None` = 本行不管这一格（交给后面的行）；`Some` = 本行认领。
+/// `decide` 返回 `None` = 本行不管这一问（交给同格后面的行）；`Some` = 本行认领。
 pub(crate) struct Row {
     /// 行的身份，进日志、进冲突报错。命名 `policy.<名字>`，与能力行区分。
     pub(crate) name: &'static str,
-    /// 裁决顺序：`(prio, name)` 升序，先命中者胜。
+    /// **这一行在哪一格生效**。`decide` 只问同格的行——见 [`Site`] 的三条理由。
+    pub(crate) site: Site,
+    /// 格内裁决顺序：`(prio, name)` 升序，先命中者胜。
+    ///
+    /// **不跨格比较**：不同格的行从不在同一次判定里相遇，因此两格用同一个
+    /// `prio` 不构成冲突，也不需要协调编号。这是「同格加第二行」从「挤全局
+    /// 编号」变成「在格内挑一个序」的全部改动。
     pub(crate) prio: u32,
     pub(crate) decide: fn(&LoopState) -> Option<Capsule>,
 }
@@ -266,11 +372,15 @@ pub(crate) struct Row {
 pub(crate) enum RowConflict {
     /// 同名行已存在——重名会让日志与 `get` 指认不出是哪一行。
     DuplicateName { name: &'static str },
-    /// 同一个 `prio` 已被占用。
+    /// 同一个格内 `prio` 已被占用。
     ///
     /// 不按"字母序兜底"：那会让"谁先"取决于名字拼写，改个名字就改了行为。
     /// 要么给一个不同的 `prio`，要么合并两行。
+    ///
+    /// 判据**只在格内**成立：两格共用一个 `prio` 是正常的，它们从不在同一次
+    /// 判定里相遇（见 [`Row::prio`]）。
     PrioConflict {
+        site: Site,
         prio: u32,
         kept: &'static str,
         incoming: &'static str,
@@ -282,12 +392,14 @@ impl std::fmt::Display for RowConflict {
         match self {
             Self::DuplicateName { name } => write!(f, "策略行重名：{name}"),
             Self::PrioConflict {
+                site,
                 prio,
                 kept,
                 incoming,
             } => write!(
                 f,
-                "策略行 prio 冲突：{prio} 已由 {kept} 占用，{incoming} 需要换一个 prio"
+                "策略行 prio 冲突：{} 格内 {prio} 已由 {kept} 占用，{incoming} 需要换一个 prio",
+                site.name()
             ),
         }
     }
@@ -303,10 +415,55 @@ pub(crate) struct Hit {
     pub(crate) capsule: Capsule,
 }
 
+/// 一次裁决的结果。
+///
+/// 三值而不是 `Option`，因为「没有答案」有两种完全不同的成因，混在一起会让
+/// 排查「某一步怎么没发生」时无从下手（PL-014 §3 规则 g：`None` 是缺口，
+/// 不是出口；迁移期它必须**可分辨**）：
+///
+/// - [`Verdict::Declined`]：本格有行，判据都不成立 —— **正常**，本步不做。
+/// - [`Verdict::Unmanned`]：本格一行都没有 —— **配置缺口**。内建表由
+///   `every_site_is_manned` 在 CI 拦下；动态注册（步骤 4 的用户行）不该出现，
+///   因为 `site` 是闭集，没人能"新开一格"。
+///
+/// 两者在调用点的行为一样（都不做事），但日志与测试能把它们分开——这正是
+/// 「规则缺口必须可见」在直线代码上的落法：不需要 drive 的 `Halt(NoRule)`，
+/// 只需要返回值不再把两件事压成一个 `None`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Verdict {
+    /// 命中一行。
+    Hit(Hit),
+    /// 本格有 `rows` 行，都不认领。
+    Declined { site: Site, rows: usize },
+    /// 本格没有行。
+    Unmanned { site: Site },
+}
+
+impl Verdict {
+    /// 命中时派发的臂；未命中一律 `None`（调用点只关心"要不要做这件事"）。
+    ///
+    /// 把「未命中」压回一个 `Option` 是**调用点的**选择，不是 Verdict 的语义：
+    /// 需要区分两种未命中的地方（bootstrap 校验、日志、测试）读变体本身。
+    pub(crate) fn capsule(self) -> Option<Capsule> {
+        match self {
+            Self::Hit(hit) => Some(hit.capsule),
+            Self::Declined { .. } | Self::Unmanned { .. } => None,
+        }
+    }
+
+    /// 命中行本身（要行名 + 臂名一起记日志的地方用它）。未命中 ⇒ `None`。
+    pub(crate) fn hit(self) -> Option<Hit> {
+        match self {
+            Self::Hit(hit) => Some(hit),
+            _ => None,
+        }
+    }
+}
+
 /// 表本体。
 ///
-/// `rows` **始终有序**（`put` 按 `(prio, name)` 插入到正确位置），因此 `decide`
-/// 只是顺序扫描、零分配——它是热路径上的函数（每个轮边界调一次）。
+/// `rows` **始终有序**（`put` 按 `(site, prio, name)` 插入到正确位置），因此
+/// `decide` 只需二分找出本格那一段、再顺序扫描——零分配，且不扫别格的行。
 #[derive(Default)]
 pub(crate) struct Registry {
     rows: Vec<Row>,
@@ -317,13 +474,22 @@ impl Registry {
         Self::default()
     }
 
-    /// 注册一行。重名或 `prio` 冲突 ⇒ `Err`（不插入）。
+    /// 注册一行。重名、或**同格内** `prio` 冲突 ⇒ `Err`（不插入）。
+    ///
+    /// 两处判据的范围不同，是有意的：
+    /// - 名字**全局**唯一（`get(name)` 要能唯一定位一行，日志要能唯一定位一行）；
+    /// - `prio` 只要求**格内**唯一（跨格的行从不在同一次判定里相遇）。
     pub(crate) fn put(&mut self, row: Row) -> Result<(), RowConflict> {
         if let Some(prev) = self.get(row.name) {
             return Err(RowConflict::DuplicateName { name: prev.name });
         }
-        if let Some(prev) = self.rows.iter().find(|r| r.prio == row.prio) {
+        if let Some(prev) = self
+            .rows
+            .iter()
+            .find(|r| r.site == row.site && r.prio == row.prio)
+        {
             return Err(RowConflict::PrioConflict {
+                site: row.site,
                 prio: row.prio,
                 kept: prev.name,
                 incoming: row.name,
@@ -331,7 +497,7 @@ impl Registry {
         }
         let at = self
             .rows
-            .partition_point(|r| (r.prio, r.name) < (row.prio, row.name));
+            .partition_point(|r| (r.site, r.prio, r.name) < (row.site, row.prio, row.name));
         self.rows.insert(at, row);
         Ok(())
     }
@@ -340,28 +506,58 @@ impl Registry {
         self.rows.iter().find(|r| r.name == name)
     }
 
-    /// 全部行，按裁决顺序（`(prio, name)` 升序）。
-    ///
-    /// 生产读者只有一个：bootstrap 时打一行日志（见 [`Registry::with_builtin_rows`]）——
-    /// 让「顺序是数据」在运行期可观测，而不是只能读源码。步骤 4 的清单导出
-    /// （工具清单逐条比对）会成为第二个读者。
-    pub(crate) fn list(&self) -> &[Row] {
-        &self.rows
+    /// 某一格的全部行，按裁决顺序（`(prio, name)` 升序）。
+    pub(crate) fn rows_of(&self, site: Site) -> &[Row] {
+        let start = self.rows.partition_point(|r| r.site < site);
+        let len = self.rows[start..].partition_point(|r| r.site == site);
+        &self.rows[start..start + len]
     }
 
-    /// 裁决：按序问每行「这一格归你吗」，先命中者胜；全不命中 ⇒ `None`（= 不动点）。
-    pub(crate) fn decide(&self, state: &LoopState) -> Option<Hit> {
-        self.rows.iter().find_map(|row| {
-            (row.decide)(state).map(|capsule| Hit {
+    /// 一行都没有的格。
+    ///
+    /// 内建表为空 ⇒ 那一格**永远不会做任何事**，而调用点看到的是「判据不成立」
+    /// （`Verdict::Declined` 与 `Verdict::Unmanned` 在调用点同为"不做事"）。
+    /// 这条检查把「配错」从「恰好不触发」里摘出来——CI 与启动期各一次。
+    pub(crate) fn unmanned_sites(&self) -> Vec<Site> {
+        Site::ALL
+            .iter()
+            .copied()
+            .filter(|s| self.rows_of(*s).is_empty())
+            .collect()
+    }
+
+    /// 裁决：在 `call.site` 那一格里按序问每行「这一问归你吗」，先命中者胜。
+    ///
+    /// **只扫本格**——既省掉陪跑（此前 5 格各扫 5 行），也让「行只读本格字段」
+    /// 成为结构性质：别格的字段在本格永远是 `blank()` 的假值，而本格的行不可能
+    /// 读到它们（判据见 `no_row_reads_across_sites`）。
+    pub(crate) fn decide(&self, call: &Call) -> Verdict {
+        let rows = self.rows_of(call.site);
+        if rows.is_empty() {
+            return Verdict::Unmanned { site: call.site };
+        }
+        match rows.iter().find_map(|row| {
+            (row.decide)(&call.state).map(|capsule| Hit {
                 row: row.name,
                 capsule,
             })
-        })
+        }) {
+            Some(hit) => Verdict::Hit(hit),
+            None => Verdict::Declined {
+                site: call.site,
+                rows: rows.len(),
+            },
+        }
     }
 
     /// 内建行（bootstrap）。装配期一次性构造，此后只读。
     ///
     /// 用户行（步骤 4 的"注册即事实"）覆盖内建行，不在此处。
+    ///
+    /// ## `prio` 从 10 起、步长 10
+    ///
+    /// 它只是**格内**序，跨格无意义；留步长是为了插行（把 `policy.recall` 拆成
+    /// `policy.memory` / `policy.skill` 时，在新行上填 10 / 20 即可，不必动别格）。
     ///
     /// ## 注册失败为什么不 `expect`
     ///
@@ -373,32 +569,40 @@ impl Registry {
     /// 早先的写法是 `.expect(...)`，被 `panic-audit`（PN-001）当场拦下：
     /// 两处 panic 面让全仓计数从 71 涨到 73。那条棘轮是对的——一个只可能因
     /// 改错常量而触发的崩溃，不值得占用两个 panic 面。
+    ///
+    /// 「某一格没有行」同样只可能是改错常量表，因此走同一条路：启动期告警
+    /// 一次 + 单测 `every_site_is_manned` 在 CI 红。
     fn with_builtin_rows() -> Self {
         let mut reg = Self::new();
         for row in [
             Row {
                 name: "policy.classify",
+                site: Site::TurnHead,
                 prio: 10,
                 decide: policy_classify,
             },
             Row {
                 name: "policy.report",
-                prio: 20,
+                site: Site::RoundBoundary,
+                prio: 10,
                 decide: policy_report,
             },
             Row {
                 name: "policy.compress",
-                prio: 30,
+                site: Site::Compress,
+                prio: 10,
                 decide: policy_compress,
             },
             Row {
                 name: "policy.recall",
-                prio: 50,
+                site: Site::TurnPrepare,
+                prio: 10,
                 decide: policy_recall,
             },
             Row {
                 name: "policy.reflex",
-                prio: 60,
+                site: Site::Reflex,
+                prio: 10,
                 decide: policy_reflex,
             },
         ] {
@@ -406,17 +610,33 @@ impl Registry {
                 crate::plugin_warn!("session", "[Loop] 内建策略行注册失败（CI 应已拦下）：{e}");
             }
         }
-        // 一行日志，只打一次（`LazyLock` 初始化）：让「顺序是数据」在运行期可观测。
-        // 排查"某一步怎么没发生"时，第一件事就是看表里有没有这一行、排第几。
+        // 一行日志，只打一次（`LazyLock` 初始化）：让「每格有谁、谁先」在运行期
+        // 可观测。排查"某一步怎么没发生"时，第一件事就是看那一格有没有行。
         crate::plugin_debug!(
             "session",
             "[Loop] 策略表就绪：{}",
-            reg.list()
+            Site::ALL
                 .iter()
-                .map(|r| format!("{}@{}", r.name, r.prio))
+                .map(|s| format!(
+                    "{}[{}]",
+                    s.name(),
+                    reg.rows_of(*s)
+                        .iter()
+                        .map(|r| format!("{}@{}", r.name, r.prio))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
                 .collect::<Vec<_>>()
                 .join(" → ")
         );
+        let unmanned = reg.unmanned_sites();
+        if !unmanned.is_empty() {
+            crate::plugin_warn!(
+                "session",
+                "[Loop] 以下决策点没有任何策略行（那一格永远不会做事）：{:?}",
+                unmanned.iter().map(|s| s.name()).collect::<Vec<_>>()
+            );
+        }
         reg
     }
 }

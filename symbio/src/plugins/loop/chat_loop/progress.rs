@@ -140,7 +140,7 @@ impl RoundProgress {
     /// 自己持有的三格数（轮次 / 静默 / 已汇报次数）连同策略快照折成 `LoopState`
     /// 交给表。**同一份判据只有一个 owner**：改阈值语义改那一行，不改这里。
     pub(crate) fn due(&self, snapshot: &RunSnapshot) -> bool {
-        let state = super::super::loop_registry::LoopState::round_boundary(
+        let state = super::super::loop_registry::Call::round_boundary(
             snapshot.tool_rounds,
             snapshot.quiet_ms,
             self.reports,
@@ -148,7 +148,7 @@ impl RoundProgress {
         );
         super::super::loop_registry::builtin()
             .decide(&state)
-            .map(|h| h.capsule)
+            .capsule()
             == Some(super::super::loop_registry::Capsule::Report)
     }
 

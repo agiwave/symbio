@@ -6,7 +6,7 @@
 
 use crate::symbio_core::CapabilityMeta;
 
-use super::super::loop_registry::{builtin, Capsule, LoopState};
+use super::super::loop_registry::{builtin, Call, Capsule};
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -165,8 +165,8 @@ pub(crate) async fn prepare_turn_inputs(
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
     // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
-    let recall_state = LoopState::turn_prepare(turn.request_round, context.session.is_persistent());
-    if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::Recall) {
+    let recall_state = Call::turn_prepare(turn.request_round, context.session.is_persistent());
+    if builtin().decide(&recall_state).capsule() == Some(Capsule::Recall) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
         // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
@@ -289,8 +289,8 @@ pub(crate) async fn apply_compaction(
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     if builtin()
-        .decide(&LoopState::compress(req.auto_compress))
-        .map(|h| h.capsule)
+        .decide(&Call::compress(req.auto_compress))
+        .capsule()
         == Some(Capsule::Compress)
     {
         match auto_compress_process(
