@@ -416,3 +416,130 @@ test('D-012 没有讲构建的文档 ⇒ 不适用（不陪跑，日志说明原
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /D-012 不适用/)
 })
+
+// ── D-014：§8 取值 ↔ 投影模块 三方对账 ──────────────────────────────────
+//
+// 这条判据守的是**两套名字**：§8 的取值（事件里能写的视图名）与 `projection/*.rs`
+// （实现文件）不是一一对应，映射此前只活在文件头注释里。三个方向各注入一次违规，
+// 都在真实数据形态上验证——只造一个「都对」的样本等于没验。
+
+/** 最小参数表：`projection` 行的取值域就是 ① 侧的对象 */
+const PARAMS = {
+  'docs/004-plan/001-核心架构.md': [
+    '# 架构',
+    '',
+    '| 参数键 | 取值域 | 平凡值 | 用于 |',
+    '|---|---|---|---|',
+    '| `projection` | `readyset` / `turnstate` / **`conation`** | 仅 `readyset` | 视图定义 |',
+    '',
+  ].join('\n'),
+}
+
+/** 三个实现文件 + 一个读侧函数文件（§2 的对象） */
+const PROJ_RS = {
+  'symbio/src/symbio_core/projection/readyset.rs': '//! readyset\n',
+  'symbio/src/symbio_core/projection/turnstate.rs': '//! turnstate\n',
+  'symbio/src/symbio_core/projection/conation.rs': '//! conation\n',
+  'symbio/src/symbio_core/projection/span.rs': '//! span 读数口\n',
+}
+
+/** 映射表：`v` 覆盖 §1 的行，`m` 覆盖 §2 的行 */
+const mapDoc = ({ v, m }) => ({
+  'docs/006-ref/009-投影映射.md': [
+    '# 投影映射',
+    '',
+    '## 1. 取值',
+    '',
+    '| §8 取值 | 承接方 | 形态 | 一句话 |',
+    '|---|---|---|:-:|',
+    ...v,
+    '',
+    '## 2. 无取值的模块',
+    '',
+    '| 模块 | 类别 | 职责 |',
+    '|---|---|---|',
+    ...m,
+    '',
+  ].join('\n'),
+})
+
+const OK = {
+  v: [
+    '| `readyset` | `projection/readyset.rs` | 模块 | 就绪判定 |',
+    '| `turnstate` | `projection/turnstate.rs` | 模块 | 轮态 |',
+    '| `conation` | `projection/conation.rs` | 模块 | 欲的读侧 |',
+  ],
+  m: ['| `projection/span.rs` | 读数口 | 时域跨度的复算口径，报数不建视图 |'],
+}
+const fixture = (map = OK) => ({ ...RS, ...PARAMS, ...PROJ_RS, 'README.md': '正常文档。\n', ...mapDoc(map) })
+
+test('D-014 三侧一致 ⇒ 通过（exit 0）', () => {
+  const r = audit(fixture())
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /投影取值 3 个（3 个有模块），4 个模块全归类/)
+})
+
+test('D-014 §8 加了取值、映射表没跟上 ⇒ 红（exit 1）', () => {
+  const files = fixture()
+  files['docs/004-plan/001-核心架构.md'] = files['docs/004-plan/001-核心架构.md']
+    .replace('`conation`', '`conation` / `display`')
+  const r = audit(files)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-014 .*§8 有取值 `display`/)
+})
+
+test('D-014 映射表留着 §8 已删的取值 ⇒ 红（表过期）', () => {
+  const r = audit(fixture({ ...OK, v: [...OK.v, '| `ghost` | — | 已裁决不做 | 已经不存在的取值 |'] }))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-014 .*映射表有取值 `ghost`/)
+})
+
+test('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => {
+  const r = audit(fixture({
+    ...OK,
+    v: OK.v.map((l) => l.replace('projection/readyset.rs', 'projection/ready_set.rs')),
+  }))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-014 .*承接方不在投影目录里：`projection\/ready_set\.rs`/)
+})
+
+test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', () => {
+  const files = fixture()
+  files['symbio/src/symbio_core/projection/legend.rs'] = '//! 未登记的新视图\n'
+  const r = audit(files)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-014 .*`projection\/legend\.rs` 没有归属/)
+})
+
+test('D-014 一个模块被两个取值认领 ⇒ 红（说明有一行是猜的）', () => {
+  const r = audit(fixture({
+    ...OK,
+    v: [OK.v[0], OK.v[1], OK.v[2].replace('projection/conation.rs', 'projection/readyset.rs')],
+  }))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-014 .*同时被 `readyset` 与 `conation` 认领/)
+})
+
+test('D-014 `—` 行合法：平凡值 / 写侧函数 / 已裁决不做都不是缺实现（exit 0）', () => {
+  const files = fixture({
+    ...OK,
+    v: [
+      '| `readyset` | `projection/readyset.rs` | 模块 | 就绪判定 |',
+      '| `turnstate` | `projection/turnstate.rs` | 模块 | 轮态 |',
+      '| `conation` | `projection/conation.rs` | 模块 | 欲的读侧 |',
+      '| `eval` | — | 平凡值 | 不启用任何投影，本身就是平凡值 |',
+    ],
+  })
+  // `eval` 必须同时在 §8 的取值域里——否则这一行是「表过期」，不是「已裁决的现状」
+  files['docs/004-plan/001-核心架构.md'] = files['docs/004-plan/001-核心架构.md']
+    .replace('`conation`', '`conation` / `eval`')
+  const r = audit(files)
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /投影取值 4 个（3 个有模块）/)
+})
+
+test('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪跑）', () => {
+  const r = audit({ ...RS, ...PARAMS, 'README.md': '正常文档。\n' })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /D-014 不适用/)
+})

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * doc-symbol-audit — 文档符号指认审计（D-005 / D-009 / D-011 / D-012，全仓级，跨插件）
+ * doc-symbol-audit — 文档符号指认审计（D-005 / D-009 / D-011 / D-012 / D-014，全仓级，跨插件）
  *
  * 守的是「现行文档指认的符号确实存在」。这类失效没人看得见：读者按图
  * 索骥找不到定义，而 doc-link-audit 只管链接、facts/current 只从代码生成
@@ -74,7 +74,7 @@
  */
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-005 D-009 D-011 D-012
+// @codes D-005 D-009 D-011 D-012 D-014
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative } from 'node:path'
@@ -162,7 +162,7 @@ const isFrontend = (n) => /\.(ts|vue|js)$/.test(n)
 const isTool = (n) => /\.mjs$/.test(n) && !/\.test\.mjs$/.test(n)
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
-console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009 / D-011 / D-012） ---')
+console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009 / D-011 / D-012 / D-014） ---')
 
 const mdFiles = existsSync(REPO_ROOT) ? collectMd(REPO_ROOT).sort() : []
 if (mdFiles.length === 0) {
@@ -284,6 +284,142 @@ function auditRosterAnchors () {
     return null
   }
   return { total, anchored }
+}
+
+// ── D-014：§8 取值 ↔ 投影模块 三方对账 ──────────────────────────────────
+/**
+ * D-014：`projection` 取值的**两套名字**必须对得上。
+ *
+ * 同一层存在两套名字：§8 的取值是**事件里能写的视图名**，`projection/*.rs` 是**实现文件**。
+ * 二者不是一一对应（`budget` → `cost.rs`、`replay` → `rebuild.rs`），对应关系此前只写在
+ * 各自文件头的散文注释里：读得到、机器读不到，所以没人能证明它没漂。
+ *
+ * 三方对账（任一侧单独改都会红）：
+ *   ① §8 的取值集合 ↔ [RE-009] §1 的左列（加取值不填表 ⇒ 红；表里留了已删取值 ⇒ 红）；
+ *   ② RE-009 §1 的承接方 ↔ 真实目录（填了不存在的文件 / 同一模块被两个取值占用 ⇒ 红）；
+ *   ③ 真实目录 ↔ RE-009 §1∪§2（新增模块没归类 ⇒ 红——这正是「悄悄多一个投影」的形态）。
+ *
+ * `—` 行合法：`eval`（平凡值）、`skill_compile`（写侧函数）、`snapshot`（会话侧）、
+ * `display`（已裁决不做）都是**已裁决的现状**，不是待办。本条判覆盖，不判「必须实现」——
+ * 要求每个取值都有文件，等于逼着为一个不需要视图的取值造一个空模块。
+ *
+ * 反向用例（回归测试注入）：加一个 §8 没写的取值 / 把一个承接方改成不存在的文件 /
+ * 往目录里塞一个未归类模块 ⇒ 各自变红。
+ */
+const PARAMS_MD = 'docs/004-plan/001-核心架构.md'
+const PROJ_DIR = 'symbio/src/symbio_core/projection'
+const MAP_MD = 'docs/006-ref/009-投影映射.md'
+
+/** 反引号 token 提取（表格单元格里可能套着 `**` 粗体） */
+const ticks = (s) => (s.match(/`([^`]+)`/g) || []).map((t) => t.slice(1, -1).trim())
+
+function auditProjectionMap () {
+  if (!existsSync(join(REPO_ROOT, MAP_MD)) || !existsSync(join(REPO_ROOT, PROJ_DIR)) ||
+      !existsSync(join(REPO_ROOT, PARAMS_MD))) {
+    console.log(dim('（D-014 不适用：映射表 / 投影目录 / 参数表不在扫描范围内）'))
+    return null
+  }
+
+  // ── ① §8 侧：`| \`projection\` |` 那一行的「取值域」格 ──
+  const paramLines = readFileSync(join(REPO_ROOT, PARAMS_MD), 'utf8').split(/\r?\n/)
+  const rowIdx = paramLines.findIndex((l) => /^\|\s*`projection`\s*\|/.test(l))
+  if (rowIdx < 0) {
+    report(PARAMS_MD, 1, 'D-014', '`projection` 那一行没读出来——参数表结构变了，还是键改名了？')
+    return null
+  }
+  const docValues = ticks(paramLines[rowIdx].split('|')[2] || '')
+  if (docValues.length < 2) {
+    report(PARAMS_MD, rowIdx + 1, 'D-014', `取值域只读出 ${docValues.length} 个取值——分隔符改了？`)
+    return null
+  }
+
+  // ── ② 表侧：RE-009 §1（取值 → 承接方）与 §2（无取值的模块）──
+  const mapLines = readFileSync(join(REPO_ROOT, MAP_MD), 'utf8').split(/\r?\n/)
+  const sec2 = mapLines.findIndex((l) => /^##\s*2\./.test(l))
+  const inSec1 = (i) => sec2 < 0 || i < sec2
+  const tableValues = [] // { value, target, form, line }
+  const tableModules = [] // { file, line }
+  mapLines.forEach((line, i) => {
+    if (!line.startsWith('|')) return
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim())
+    if (cells.length < 3) return
+    if (inSec1(i)) {
+      const v = ticks(cells[0])
+      if (v.length !== 1) return // 表头 / 分隔行 / 说明行
+      const t = ticks(cells[1])
+      tableValues.push({ value: v[0], target: t[0] || cells[1], form: cells[2], line: i + 1 })
+      if (t.length === 1) tableModules.push({ file: t[0], line: i + 1 })
+    } else {
+      const m = ticks(cells[0])
+      if (m.length !== 1 || !m[0].endsWith('.rs')) return
+      tableModules.push({ file: m[0], line: i + 1 })
+      if (cells[2].replace(/[—\-\s]/g, '').length < 6) {
+        report(MAP_MD, i + 1, 'D-014', `「${m[0]}」的归类理由太短（至少写清为什么不进 §8）`)
+      }
+    }
+  })
+  if (tableValues.length === 0) {
+    report(MAP_MD, 1, 'D-014', '映射表一行都没读出——表格结构变了？')
+    return null
+  }
+
+  // ① 取值集合双向相等
+  const docSet = new Set(docValues)
+  const tblSet = new Set(tableValues.map((r) => r.value))
+  for (const v of docSet) {
+    if (!tblSet.has(v)) {
+      report(MAP_MD, 1, 'D-014', `§8 有取值 \`${v}\`，映射表没有这一行——加了取值必须同时说清谁承接（写 \`—\` 也算说清）`)
+    }
+  }
+  for (const v of tblSet) {
+    if (!docSet.has(v)) {
+      report(MAP_MD, tableValues.find((r) => r.value === v).line, 'D-014',
+        `映射表有取值 \`${v}\`，§8 的 \`projection\` 行没有——表过期了，还是取值被删了没跟着删？`)
+    }
+  }
+  const dupVals = tableValues.map((r) => r.value).filter((v, i, a) => a.indexOf(v) !== i)
+  for (const v of new Set(dupVals)) {
+    report(MAP_MD, tableValues.find((r) => r.value === v).line, 'D-014', `取值 \`${v}\` 在映射表里出现多次`)
+  }
+
+  // ② 承接方 / 归类模块必须真实存在，且一个模块只能承接一个取值
+  const dirFiles = readdirSync(join(REPO_ROOT, PROJ_DIR))
+    .filter((f) => f.endsWith('.rs') && !f.endsWith('.test.rs'))
+    .map((f) => `projection/${f}`)
+  const dirSet = new Set(dirFiles)
+  const claimed = new Map()
+  for (const r of tableValues) {
+    if (!r.target.includes('.rs')) continue // `—` 等非文件形态
+    if (!dirSet.has(r.target)) {
+      report(MAP_MD, r.line, 'D-014', `取值 \`${r.value}\` 的承接方不在投影目录里：\`${r.target}\`——改名了还是写错了？`)
+      continue
+    }
+    if (claimed.has(r.target)) {
+      report(MAP_MD, r.line, 'D-014',
+        `\`${r.target}\` 同时被 \`${claimed.get(r.target)}\` 与 \`${r.value}\` 认领——一个模块只承接一个取值，多认领说明两行有一行是猜的`)
+    }
+    claimed.set(r.target, r.value)
+  }
+  for (const m of tableModules) {
+    if (!dirSet.has(m.file)) {
+      report(MAP_MD, m.line, 'D-014', `列出的模块不在投影目录里：\`${m.file}\``)
+    }
+    claimed.set(m.file, claimed.get(m.file) || '§2')
+  }
+
+  // ③ 目录侧：每个实现文件都得有归属
+  for (const f of dirFiles) {
+    if (!claimed.has(f)) {
+      report(MAP_MD, 1, 'D-014',
+        `投影目录里的 \`${f}\` 没有归属——它承接某个 §8 取值（写进 §1），还是只是读侧函数（写进 §2）？两处都没它 = 悄悄多了一个投影`)
+    }
+  }
+
+  return {
+    values: docValues.length,
+    mapped: tableValues.filter((r) => r.target.includes('.rs')).length,
+    modules: dirFiles.length,
+  }
 }
 
 let scanned = 0
@@ -425,6 +561,8 @@ for (const rel of mdFiles) {
 const roster = auditRosterAnchors()
 // ── D-012：CLI 产物指路路径 == 构建落点 ─────────────────────────────────
 const cliPaths = auditCliArtifactPaths()
+// ── D-014：§8 取值 ↔ 投影模块 三方对账 ─────────────────────────────────
+const projMap = auditProjectionMap()
 
 if (errors > 0) {
   console.log(red(`\ndoc-symbol-audit 未通过：${errors} 处失效指认（扫描 ${scanned} 条候选，${mdFiles.length} 篇 md）`))
@@ -436,4 +574,7 @@ const rosterLine = roster
 const cliLine = cliPaths
   ? dim(` · CLI 产物指路 ${cliPaths.artifactRefs} 处与构建落点一致`)
   : ''
-console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}${rosterLine}${cliLine}`))
+const projLine = projMap
+  ? dim(` · 投影取值 ${projMap.values} 个（${projMap.mapped} 个有模块），${projMap.modules} 个模块全归类`)
+  : ''
+console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}${rosterLine}${cliLine}${projLine}`))

@@ -26,7 +26,12 @@
 //!   D1 值域滑移      —— 某个参数键出现了**参数表里没有的取值**（新机制悄悄诞生）
 //!   D2 语义边界漂移  —— 取值没变，但**该取值在事件流里实际代表的东西**变了
 //!   D3 退化取值滥用  —— 平凡值被当成"正常档位"高频使用（等于该机制其实没启用）
-//!   D4 参数表—代码失配 —— 文档声明的机制数 ≠ 代码里实际出现的机制键集合
+//!   D4 参数表—赋值样本失配 —— 表里声明的机制键在样本里一次都没出现（或反之）
+//!
+//! **表侧是生成物**：键与值域读 `facts`（`01 §8` 的投影），本文件不抄第二份。
+//! **D4 的边界**：它比的是「表 ↔ 赋值样本」，不解析 Rust 源码。文档取值 ↔ 真实代码目录
+//! 的对账由 `scripts/doc-symbol-audit.mjs` 的 **D-014** 负责（那里有文件语料），
+//! 两处各判一件事——一个判据抄成两份，同一个输入就可能只翻红一处。
 //!
 //! 论证纪律：每个维度配**反向用例**（构造一个合规样本，再构造一个漂移样本，
 //!           断言检查器对前者放过、对后者报警——否则这个检查器是摆设）。
@@ -35,28 +40,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-// ═══════════════════════ 权威参数表（与 01 §8 同源）═══════════════════════
+// ═══════════════════════ 权威参数表（来自 01 §8 的生成物）═══════════════════════
+//
+// **不再手抄。** 这张表此前是本文件里的一份字面量，于是它自己漂了：`store` 多了已退役的
+// `distributed`、`projection` 少了 `conation`、`actor.capability` / `event.*` / `principal`
+// 四行整行缺失——一个专抓「表—码失配」的程序，手里那份表本身是过期的。表侧改成读
+// `facts`（`scripts/gen-verify-facts.mjs` 从 01 §8 抽，`gen-facts --check` 钉住新鲜度），
+// 这类漂移就没有发生的位置了。
+mod facts;
 
-/// 01 §8 声明的参数键 + 各自的值域。**这是审计的"契约"侧。**
-/// 注意：这张表必须与 01 §8 逐字对应；对不上，D4 会抓出来。
-pub fn authority_table() -> BTreeMap<&'static str, BTreeSet<&'static str>> {
-    let mut m: BTreeMap<&'static str, BTreeSet<&'static str>> = BTreeMap::new();
-    m.insert("store", ["memory", "wal", "sharded", "distributed"].into_iter().collect());
-    m.insert(
-        "projection",
-        [
-            "snapshot", "display", "readyset", "turnstate", "checkpoint", "eval", "recall",
-            "consolidate", "reputation", "calibration", "budget", "replay", "skill_compile",
-        ]
-        .into_iter()
-        .collect(),
-    );
-    m.insert("projection.param", ["consolidate:max_gen", "consolidate:min_fidelity"].into_iter().collect());
-    m.insert("actor.pattern", ["decider", "reasoner", "translator"].into_iter().collect());
-    m.insert("actor.budget_ms", ["80", "300", "60000", "86400000"].into_iter().collect());
-    m.insert("scope", ["root", "child"].into_iter().collect());
-    m.insert("vis_scope", ["thread_private", "shared", "public"].into_iter().collect());
-    m
+/// 参数表的键集合。判据是 §8 声明的键，不是本文件记得的键。
+pub fn authority_keys() -> BTreeSet<String> {
+    facts::PARAM_KEYS.iter().map(|k| (*k).to_string()).collect()
 }
 
 /// 参数的**平凡值**（J2）。被当成"正常档位"高频使用 → D3 报警。
@@ -139,8 +134,8 @@ impl Finding {
                  这是另一种静默失效。"
                 , key, value, ratio * 100.0, threshold * 100.0),
             Finding::TableCodeMismatch { only_in_code, only_in_table } => format!(
-                "[D4 表—码失配] 代码里独有的键：{:?}；表里独有的键：{:?}\n    \
-                 Because：参数表称『唯一一份』。若代码用了表外的键、或表里的键从未被用，\n    \
+                "[D4 表—赋值样本失配] 样本里独有的键：{:?}；表里独有的键：{:?}\n    \
+                 Because：参数表称『唯一一份』。若样本用了表外的键、或表里的键从未被用，\n    \
                  两者之一必然过期——而『唯一一份』这句话就不再成立。"
                 , only_in_code, only_in_table),
         }
@@ -148,23 +143,23 @@ impl Finding {
 }
 
 /// D1：值域滑移 + 新机制键
-pub fn check_d1_value_domain(table: &BTreeMap<&str, BTreeSet<&str>>, sc: &Scenario) -> Vec<Finding> {
+///
+/// 值域判据**不查表**，直接问 `facts::in_domain`——那是 §8 取值域语法的唯一镜像
+/// （通配段、开放值域、子键参数三条规则都住在那里）。本文件再判一次，就是两份口径。
+pub fn check_d1_value_domain(sc: &Scenario) -> Vec<Finding> {
     let mut out = vec![];
     for asg in &sc.assigns {
-        match table.get(asg.key.as_str()) {
-            None => out.push(Finding::NewMechanismKey {
+        if !facts::PARAM_KEYS.contains(&asg.key.as_str()) {
+            out.push(Finding::NewMechanismKey {
                 scenario: sc.name.clone(),
                 key: asg.key.clone(),
-            }),
-            Some(domain) => {
-                if !domain.contains(asg.value.as_str()) {
-                    out.push(Finding::ValueDomainSlip {
-                        scenario: sc.name.clone(),
-                        key: asg.key.clone(),
-                        value: asg.value.clone(),
-                    });
-                }
-            }
+            });
+        } else if !facts::in_domain(&asg.key, &asg.value) {
+            out.push(Finding::ValueDomainSlip {
+                scenario: sc.name.clone(),
+                key: asg.key.clone(),
+                value: asg.value.clone(),
+            });
         }
     }
     out
@@ -200,7 +195,7 @@ pub fn check_d2_semantic_drift(scenarios: &[Scenario]) -> Vec<Finding> {
 /// 因此 D3 **按参数分别配置阈值**：只对"架构上承诺会分化"的参数检查。
 /// `D3_ENFORCED` 里没有的键 = 该参数允许长期取平凡值。
 pub const D3_ENFORCED: &[(&str, f64)] = &[
-    // 投影：13 个视图，若 90% 场景都用平凡值 `eval`，说明"视图体系"名存实亡
+    // 投影：视图是一组取值，若九成场景都用平凡值 `eval`，"视图体系"名存实亡
     ("projection", 0.9),
     // 行为模式：若 90% 都是 `decider`，说明 reasoner / translator 没真正启用
     ("actor.pattern", 0.9),
@@ -239,19 +234,20 @@ pub fn check_d3_trivial_abuse(scenarios: &[Scenario], _unused: f64) -> Vec<Findi
     out
 }
 
-/// D4：参数表 — 代码 失配
-pub fn check_d4_table_code(
-    table: &BTreeMap<&str, BTreeSet<&str>>,
-    scenarios: &[Scenario],
-) -> Vec<Finding> {
+/// D4：参数表 — 赋值样本 失配
+///
+/// 两个方向都要看：赋值样本里用了表外的键（代码悄悄长了机制），或表里的键在样本里
+/// 一次都没出现（表发明了没人用的键）。样本是**赋值**而不是源码扫描——本程序不解析
+/// Rust 源码；文档取值 ↔ 真实代码目录的对账归 `scripts/doc-symbol-audit.mjs` 的
+/// **D-014**（那里有文件语料），两处各判一件事，不重复判同一件。
+pub fn check_d4_table_code(table: &BTreeSet<String>, scenarios: &[Scenario]) -> Vec<Finding> {
     let in_code: BTreeSet<String> = scenarios
         .iter()
         .flat_map(|s| s.assigns.iter().map(|a| a.key.clone()))
         .collect();
-    let in_table: BTreeSet<String> = table.keys().map(|k| (*k).to_string()).collect();
 
-    let only_in_code: Vec<String> = in_code.difference(&in_table).cloned().collect();
-    let only_in_table: Vec<String> = in_table.difference(&in_code).cloned().collect();
+    let only_in_code: Vec<String> = in_code.difference(table).cloned().collect();
+    let only_in_table: Vec<String> = table.difference(&in_code).cloned().collect();
     if only_in_code.is_empty() && only_in_table.is_empty() {
         vec![]
     } else {
@@ -275,9 +271,9 @@ fn print_findings(title: &str, findings: &[Finding]) {
 
 fn main() {
     println!("═══ 语义漂移审计 · 架构适应度函数 ═══");
-    println!("（四个维度：D1 值域滑移 / D2 语义边界漂移 / D3 平凡值滥用 / D4 表—码失配）");
+    println!("（四个维度：D1 值域滑移 / D2 语义边界漂移 / D3 平凡值滥用 / D4 表—赋值样本失配）");
 
-    let table = authority_table();
+    let table = authority_keys();
 
     // ══════════ 反向用例前置：先证明每个检查器"会响" ══════════
     // 纪律：一个从不报警的检查器是没有价值的。所以先喂它一个**已知漂移**的样本。
@@ -294,7 +290,7 @@ fn main() {
             a("projection", "semantic_dedup", "去重：合并相似记忆"),
         ],
     };
-    let f_d1 = check_d1_value_domain(&table, &slip);
+    let f_d1 = check_d1_value_domain(&slip);
     print_findings("D1 · 值域滑移（负样本）", &f_d1);
     assert!(
         f_d1.iter().any(|f| matches!(f, Finding::ValueDomainSlip { value, .. } if value == "semantic_dedup")),
@@ -306,7 +302,7 @@ fn main() {
         name: "漂移样本-新机制键".into(),
         assigns: vec![a("memory.compress_algo", "zstd", "压缩算法选择")],
     };
-    let f_d1b = check_d1_value_domain(&table, &new_key);
+    let f_d1b = check_d1_value_domain(&new_key);
     print_findings("D1 · 新机制键（负样本）", &f_d1b);
     assert!(matches!(f_d1b.first(), Some(Finding::NewMechanismKey { .. })),
             "D1 检查器必须抓出表外键 `memory.compress_algo`");
@@ -357,21 +353,25 @@ fn main() {
             assigns: vec![
                 a("actor.pattern", "reasoner", "行为模式"),
                 a("actor.budget_ms", if i % 2 == 0 { "60000" } else { "300" }, "时延档位"),
+                a("actor.capability", "judge.intent", "授权表"),
                 a("vis_scope", "thread_private", "可见域"),
                 a("projection", if i <= 5 { "eval" } else { "recall" }, "视图定义"),
                 a(
                     "projection.param",
-                    if i <= 8 { "consolidate:max_gen" } else { "consolidate:min_fidelity" },
+                    if i <= 8 { "consolidate:max_gen=3" } else { "consolidate:min_fidelity=0.8" },
                     "巩固参数",
                 ),
                 a("scope", "root", "作用域"),
                 a("store", "memory", "存储后端"),
+                a("event.entity", "message", "事件目录"),
+                a("event.verb", "opened", "事件目录"),
+                a("principal", "user:alice", "身份"),
             ],
         })
         .collect();
 
     // 语义标签一致性：同一个 (key,value) 在所有场景里标签相同（这正是"健康"的条件）
-    let f_d1h = healthy.iter().flat_map(|s| check_d1_value_domain(&table, s)).collect::<Vec<_>>();
+    let f_d1h = healthy.iter().flat_map(|s| check_d1_value_domain(s)).collect::<Vec<_>>();
     let f_d2h = check_d2_semantic_drift(&healthy);
     let f_d3h = check_d3_trivial_abuse(&healthy, 0.0);
     let f_d4h = check_d4_table_code(&table, &healthy);
@@ -379,7 +379,7 @@ fn main() {
     print_findings("D1 · 值域（正样本）", &f_d1h);
     print_findings("D2 · 语义（正样本）", &f_d2h);
     print_findings("D3 · 平凡值（正样本，按参数配置阈值）", &f_d3h);
-    print_findings("D4 · 表—码（正样本）", &f_d4h);
+    print_findings("D4 · 表—样本（正样本）", &f_d4h);
 
     assert!(f_d1h.is_empty(), "正样本不得有 D1 报警（否则检查器假阳性）");
     assert!(f_d2h.is_empty(), "正样本不得有 D2 报警（否则检查器假阳性）");
@@ -388,12 +388,12 @@ fn main() {
 
     // ══════════ D4 的负样本：表比代码多一个键（表过期了）══════════
 
-    println!("\n########## 第三步：D4 负样本（表—码失配）##########");
+    println!("\n########## 第三步：D4 负样本（表比样本多一个键）##########");
     // 构造一张"多了一个键"的表，模拟文档写了、代码没实现
     let mut stale_table = table.clone();
-    stale_table.insert("legacy_bus", ["kafka"].into_iter().collect());
+    stale_table.insert("legacy_bus".to_string());
     let f_d4b = check_d4_table_code(&stale_table, &healthy);
-    print_findings("D4 · 表—码失配（负样本）", &f_d4b);
+    print_findings("D4 · 表多键（负样本）", &f_d4b);
     assert!(
         f_d4b.iter().any(|f| matches!(f, Finding::TableCodeMismatch { only_in_table, .. }
                                     if only_in_table.contains(&"legacy_bus".to_string()))),
@@ -405,8 +405,8 @@ fn main() {
     println!("\n########## 第四步：CI 闸门契约 ##########");
     let all_bad: Vec<Finding> = {
         let mut v = vec![];
-        v.extend(check_d1_value_domain(&table, &slip));
-        v.extend(check_d1_value_domain(&table, &new_key));
+        v.extend(check_d1_value_domain(&slip));
+        v.extend(check_d1_value_domain(&new_key));
         v.extend(check_d2_semantic_drift(&d2_bad));
         v.extend(check_d3_trivial_abuse(&d3_bad, 0.0));
         v.extend(check_d4_table_code(&stale_table, &healthy));
