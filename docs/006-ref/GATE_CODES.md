@@ -26,7 +26,7 @@ lists: [gate-codes=owner]
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–013 | `D-014` |
 | **DC** | 文档计数对账（文档里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–004 | `DC-005` |
-| **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
+| **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–005 | `GW-006` |
@@ -81,6 +81,7 @@ lists: [gate-codes=owner]
 | **E-009** | `scripts/plugin-entry-audit.mjs` |
 | **E-011** | `scripts/plugin-entry-audit.mjs` |
 | **E-012** | `scripts/plugin-entry-audit.mjs` |
+| **E-013** | `scripts/plugin-entry-audit.mjs` |
 | **FB-001** | `scripts/facts-boundary-audit.mjs` |
 | **FB-002** | `scripts/facts-boundary-audit.mjs` |
 | **GC-001** | `scripts/gate-codes-audit.mjs` |

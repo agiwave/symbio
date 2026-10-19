@@ -8,7 +8,7 @@ created: 2026-07-20
 
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[ADR-086](../../../../docs/010-adr/086.md "ADR-086")）。一轮的执行本体（主循环、上下文压缩、工具链）住在独立插件 [`plugins/loop`](../loop/README.md "symbio/src/plugins/loop/README")：session 经 `loop/<sid>` 的 `run_turn` 动作把交付包交给它，loop 只经地址面 `session/<sid>/_run/<op>` 回读 / 写回会话状态。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -19,20 +19,19 @@ Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是
 
 ## 一、 系统架构数据流图 (Architecture & Data Flow)
 
-下列架构图展示了一个完整的“用户请求 -> Session (编排入口) -> 进程内会话循环 (视图组装/推理/工具) -> 磁盘持久化（会话目录）”的生命周期：
+下列架构图展示了一个完整的“用户请求 -> Session（存储与生命周期）-> Loop 驱动器（视图组装/推理/工具）-> 磁盘持久化（会话目录）”的生命周期：
 
 ```mermaid
 flowchart TD
-    User([1. 用户消息：chat/send 或写 <sid>/inbox]) --> SessionChat[Session 插件 - chat 路由]
-    SessionChat --> SaveUser[2. 入队收件箱 → 空间自己消费<br>空闲时取队首 → 保存/追加用户消息]
+    User([1. 用户消息：写 <sid>/inbox]) --> SaveUser[2. 入队收件箱 → 会话自己消费<br>空闲时取队首 → 保存/追加用户消息]
     SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
-    LoadHistory --> BuildPrompt[4. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
+    LoadHistory --> InvokeLoop[4. 派发 loop/&lt;sid&gt; run_turn<br>TurnDispatch：TurnSpec + facts + sink]
 
-    subgraph Session 会话编排层（唯一编排入口）
-        BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_VISITOR 注册表]
-        AggTools --> Resolve[6. 获取生效 ModelProvider<br>capability_model_active 单次解析]
-        Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
-        Spawn --> BuildView[8. 构建请求视图<br>build_request_sections<br>记忆/调度/委派三段注入]
+    subgraph Loop 驱动器插件（plugins/loop）
+        LoadHistory --> BuildPrompt[5. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
+        BuildPrompt --> AggTools[6. 工具汇集<br>Registry 收集口]
+        AggTools --> Resolve[7. 获取生效 ModelProvider<br>capability_model_active 单次解析]
+        Resolve --> BuildView[8. 构建请求视图<br>build_request_sections<br>记忆/调度/委派三段注入]
         BuildView --> LLMCall[9. ModelProvider 推理调用<br>execute_turn 直连无状态 LLM 网关]
         LLMCall --> ToolAction[10. 执行工具链]
         ToolAction --> LoopCheck{11. 迭代完成?}
@@ -40,7 +39,7 @@ flowchart TD
     end
 
     LoopCheck -- Yes --> EndTurn[12. 助理回答定格]
-    EndTurn --> SaveFinal[13. 将助理与工具结果回写 Session]
+    EndTurn --> SaveFinal[13. 转写写柄落格 + TurnReport 交回 session]
     SaveFinal --> Disk[(会话目录<br>&lt;homedir&gt;/session/&lt;id&gt;/<br>session.json + messages.json)]
 ```
 
@@ -126,14 +125,14 @@ session:
 
 * **现状规则**：
   * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
-    v2 运行器的环体里跑完（`turn_runner.rs` 的 2e/2f），**主循环侧看不见第几轮工具**。
+    v2 运行器的环体里跑完（[`../loop/turn_runner.rs`](../loop/turn_runner.rs) 的 2e/2f），**主循环侧看不见第几轮工具**。
   * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
     （`plugins/model/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
     把剩余调用放到下一轮）、用户中止、provider 断流。
   * 长度截断（`finish = Length`）后的自动续写有 `MAX_CONTINUE_ROUNDS = 3`
-    （`chat_loop/turn.rs`），它数的是**续写次数**，不是工具轮数。
+    （[`../loop/chat_loop/turn.rs`](../loop/chat_loop/turn.rs)），它数的是**续写次数**，不是工具轮数。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
-  （`turn_runner.rs`，步骤序列与批次边界见
+  （[`../loop/turn_runner.rs`](../loop/turn_runner.rs)，步骤序列与批次边界见
   [AR-015-core-loop](docs/015-core-loop.md "AR-015-core-loop") §4.1），本轮请求侧只有一个
   「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
   上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
@@ -221,13 +220,13 @@ session:
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[ADR-048a](../../../../docs/010-adr/048a.md "ADR-048a")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [ADR-078](../../../../docs/010-adr/078.md "ADR-078") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
 * **具体规则**（唯一入口 `build_request_sections`，三段各自独立、非空才插）：
-  * **长期记忆召回段 (Recall Context)**：调用方（`chat_loop/inputs.rs`）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+  * **长期记忆召回段 (Recall Context)**：调用方（[`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs)）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
   * **任务调度段 (Ready Set)**：同一时机读一次本会话事实源的就绪任务集（`task_events::prompt_section`），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**不与记忆段争 index 0**：本段先插、记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
-  * **委派者真源段 (Delegate Context)**：调用方（`chat_loop/delegate.rs::delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [ADR-047](../../../../docs/010-adr/047.md)）。
+  * **委派者真源段 (Delegate Context)**：调用方（[`../loop/chat_loop/delegate.rs`](../loop/chat_loop/delegate.rs) 的 `delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [ADR-047](../../../../docs/010-adr/047.md)）。
   * **三段的消费形态**：`chat_loop::request_view_prefix` 按 `meta.kind`（不按下标——缺一段时下标全部左移）取出三段，按**记忆 → 调度 → 委派**拼成一条 `system` 前缀消息交给运行器。拼成一条是因为运行器的 prompt 入口只收一段前缀；标 `system` 而不是 `user`，是为了让「本轮用户说了什么」在消息层上没有歧义。
   * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
 * **Rust 实现策略**：
-  * 唯一入口为 `plugins/session/context/view.rs` 的 `build_request_sections`，由 `plugins/session/chat_loop/inputs.rs::prepare_turn_inputs` 调用：
+  * 唯一入口为 [`../loop/context/view.rs`](../loop/context/view.rs) 的 `build_request_sections`，由 [`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
 
     ```rust
     pub fn build_request_sections(
@@ -244,7 +243,7 @@ session:
     }
     ```
 
-  * 调用点参数（`chat_loop/inputs.rs`）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 `chat_loop/delegate.rs::delegate_section_with` 就地判定。
+  * 调用点参数（[`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs)）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 [`../loop/chat_loop/delegate.rs`](../loop/chat_loop/delegate.rs) 的 `delegate_section_with` 就地判定。
 
 ---
 
@@ -318,10 +317,10 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session/write.rs` |
-| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（`turn_runner.rs` 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [ADR-074](../../../../docs/010-adr/074.md "ADR-074")） | `plugins/model/stream.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[`../loop/turn_runner.rs`](../loop/turn_runner.rs) 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [ADR-074](../../../../docs/010-adr/074.md "ADR-074")） | `plugins/model/stream.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |
-| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | `plugins/session/context/view.rs` |
+| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [`../loop/context/view.rs`](../loop/context/view.rs) |
 
 通过这套**五维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 语义压缩层（`auto_compress` 语义合并）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[ADR-048a](../../../../docs/010-adr/048a.md "ADR-048a")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
 

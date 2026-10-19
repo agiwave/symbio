@@ -14,14 +14,14 @@ created: 2026-07-20
 
 - **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_VISITOR` 注册**唯一生效的核心 `ModelProvider`**（trait object，由 `bound_provider::BoundProvider` 实现——持久化配置 `ModelProviderConfig` + 协议适配器绑定）。解析链：会话上下文选定的 provider_id > 默认 Provider > 首个启用的 Provider。
 - **协议适配**：协议契约 `ModelProtocol`（钩子收 `&ModelProviderConfig`）**插件私有**，不对外导出；内置 4 个实现——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，统一转换为内部 `model_chat::Request/Response` 事件流（文本、思考、工具调用）。`resolve_protocol_id` 别名表与 `MODEL_PROTOCOL_*` 注册常量同样内化于 `protocols/`。
-- **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 [`symbio/src/plugins/session/README.md`](../session/README.md "symbio/src/plugins/session/README") 六大策略）。
+- **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归会话引擎：持久化与生命周期在 [`session`](../session/README.md "symbio/src/plugins/session/README")，主循环在 [`loop`](../loop/README.md "symbio/src/plugins/loop/README")）。
 - **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）都在 `<根>/model` 上——条目读写走 `vdfs/read` / `vdfs/write`，字段定义随节点 `schema` 下发。
 
 ## 明确不做
 
-- 工具执行与审批流分发：工具注册由各工具插件 traverse 提供，执行由 session 的 tool_executor 编排
-- 通过 `session/append` 回写消息：session 自己持久化，model 对 session 零依赖
-- 会话循环 / 上下文裁剪 / 压缩：会话引擎整体位于 session
+- 工具执行与审批流分发：工具注册由各工具插件 traverse 提供，执行由 `plugins/loop` 的 tool_executor 编排
+- 通过落库接口回写消息：转写由 session 持久化，model 对 session 零依赖
+- 会话循环 / 上下文裁剪 / 压缩：主循环整体位于 `plugins/loop`，模型只收到「这一刻要什么」
 
 ## 路由
 
@@ -37,5 +37,5 @@ created: 2026-07-20
 
 ## 关联
 
-- 上游消费者：`session`（chat_loop 直连）
+- 上游消费者：`loop`（`chat_loop` 直连；session 经驱动器间接使用）
 - 协议适配层代码：`protocols/`

@@ -105,12 +105,31 @@ lists: [route-contracts=owner]
 
 ```
 1. vdfs/write(<根>/session/<id>/inbox, 纯文本)   → 入队（受理即返回）
-2. 空间空闲时自行消费该条并发起一整轮编排（spawn）
+2. 空间空闲时自行消费该条，派发 loop/<id> 的 Action("run_turn")（见下节）
 3. 下行：event_bus/subscribe + vdfs/watch(<根>/session) 收 vdfs 频道
    帧类型:
    - 会话节点 <…>/session/<id>：全量节点视图（status 离开 working = 本轮结束）
    - 消息节点 <…>/message/<mid>：delta 追加 / content 替换 / status = removed
 ```
+
+---
+
+## Loop 插件（单环驱动器）
+
+**无 `route()` 臂**（`route` 恒 `NotFound`）。唯一入口是 VDFS 动作面：
+
+| 地址 | 动作 | 调用方 | 返回 |
+|---|---|---|---|
+| `<根>/loop/<sid>`（容器内相对地址 `loop/<sid>`） | `run_turn` | `session` 的轮生命周期（`orchestrator/consume.rs`），**仅在进程内** | `VdfsActionResult`，`data` 为 `TurnReport` |
+
+授权三条（缺一即拒绝）：宿主 ctx 上有 `TURN_DISPATCH`（`WIRE=false` 的进程内键，线上不可伪造）；
+`dispatch.spec.session_id == <sid>`；动作名逐字等于 `run_turn`。动作体就是整轮 future，
+结局以 `TurnReport` 交回 session，不另开频道。
+
+> **停用 `loop` ⇒ 该地址 `NotFound`、不再开新轮**；在飞的轮持有交付包与端口的 `Arc`，
+> 存活期长于插件实例，会在有限时间内收敛（守卫用例见
+> [`composite.test.rs`](../../symbio/src/plugins/composite/composite.test.rs)）。
+> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[ADR-086](../010-adr/086.md "ADR-086") §8）。
 
 ---
 

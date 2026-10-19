@@ -1,20 +1,18 @@
 ---
 kind: arch
 id: AR-015-core-loop
-title: Session 核心循环（LLM × 工具）
+title: 会话核心循环（LLM × 工具）
 status: active
 created: 2026-09-16
 ---
 
-# Session 核心循环（LLM × 工具）
+# 会话核心循环（LLM × 工具）
 
-> 范围：`symbio/src/plugins/session/` 中「调用大语言模型 + 执行工具」的会话主循环。
-> 本文只回答一个问题：**主循环的结构是什么**。「压缩策略有哪些」见
-> [`../README.md`](../README.md "symbio/src/plugins/session/README")（五大压缩策略）；节点状态与流的词汇见
-> [`./018-node-state-streaming.md`](018-node-state-streaming.md "AR-018-node-state-streaming")；模块拆分与符号落点见
-> [`./017-module-layout.md`](017-module-layout.md "AR-017-module-layout")；「为什么这样设计」见
-> [`000-架构决策汇总.md`](../../../../../docs/010-adr/README.md "ADR-000-架构决策汇总")。
-> 代码位置一律按**符号名**检索——模块拆分后行号会漂移。
+> 范围：主循环本体住在 `symbio/src/plugins/loop/`（驱动器插件）；一轮的**装配与收尾**
+> 留在 `symbio/src/plugins/session/orchestrator/`（存储与生命周期）。
+> 本文只回答一个问题：**主循环的结构是什么**。「压缩策略有哪些」见 [`../README.md`](../README.md "symbio/src/plugins/session/README")（五大压缩策略）；节点状态与流见 [`./018-node-state-streaming.md`](018-node-state-streaming.md "AR-018-node-state-streaming")。
+> 模块拆分见 [`./017-module-layout.md`](017-module-layout.md "AR-017-module-layout")；驱动器形状见 [`../../loop/README.md`](../../loop/README.md "symbio/src/plugins/loop/README")；设计理由见 [`000-架构决策汇总.md`](../../../../../docs/010-adr/README.md "ADR-000-架构决策汇总")。
+> 代码位置一律按**符号名**检索——模块拆分后行号会漂移；下文路径未写插件前缀时，①/② 在 `plugins/session/`，③/④ 在 `plugins/loop/`。
 
 ---
 
@@ -42,33 +40,28 @@ created: 2026-09-16
 ### 1.1 四层结构
 
 ```text
-① 装配层   start_turn                           orchestrator/entry.rs
-             收件箱消费者取批后调进来（或恢复动作直接调）
-             解析 session_id / mode / risk / provider（一次会话读取供 workdir / agent_id 共用）
-             用户消息落库（Carrier::Runner）+ 自动命名 + chat_ctx 装配（含 SESSION_HANDLE）
+① 装配层   start_turn                           session: orchestrator/entry.rs
+             收件箱消费者取批后调进来（或恢复动作直接调）；解析 session_id / mode / risk / provider
+             用户消息落库（Carrier::Runner）+ 自动命名 + chat_ctx / TurnDispatch 装配
              collect_capabilities(traverse) → CAPABILITY_VISITOR（本层**不**拼提示词）
-             构造 model_chat::Request → run_chat_loop_task
-② 宿主层   run_chat_loop_task                   orchestrator/consume.rs
-             WorkingGuard / StopSignal / AbortGuard；provider 解析 + RATE_LIMITER
-             ExecEventSink::direct(TranscriptSink) + ExecAbortSignal::new() → spawn ③
-             select! 三臂：任务结束 / 1800s 看门狗 / 状态被接管（见 §6）
-③ 循环层   run_chat_loop                        chat_loop.rs
-             + gate_turn / finish_turn             chat_loop.rs
-             + prepare_turn_inputs / apply_compaction   chat_loop/inputs.rs
-             + settle_reasoning / close_turn       chat_loop/turn.rs
-             + auto_compress_process / retry_compaction
-               / compress_with_snapshot_core       context/pipeline.rs
-             + persist_messages / open_chat_session / emit_streaming_start
-               / fire_*_hook                        chat_loop/io.rs
+             派发 loop/<sid> run_turn，结局由 session: orchestrator/consume.rs 等处消费
+② 宿主层   run_turn（动作体）                     loop: provider.rs
+             取 TURN_DISPATCH（授权三条）→ LoopSession + ChatOrchestrator；sink / abort 随交付包传入 → await ③
+             结局序列化为 TurnReport 交回；session 侧 select! 看门狗 / 接管三臂在 ①
+③ 循环层   run_chat_loop + gate_turn / finish_turn        loop: chat_loop.rs
+             + prepare_turn_inputs / apply_compaction       chat_loop/inputs.rs
+             + settle_reasoning / close_turn                chat_loop/turn.rs
+             + auto_compress_process / retry_compaction / compress_with_snapshot_core   context/pipeline.rs
+             + 会话侧读写经动作面                            session_port.rs
 ④ 单轮执行层 turn_exec::execute_turn            turn_exec.rs
              + TurnRunner::run_with_tools          turn_runner.rs（工具循环在这里）
              + SessionDispatchPort::dispatch       tool_dispatch.rs
              + process_tool_calls_async            tools/tool_executor.rs
 ```
 
-**职责边界**：③ 不持有终态落库职责——终态唯一落库点在 ② 的消费循环。④ 只负责**这一轮**
-的事实与产物，不决定会话接下来跑不跑（那是 ③ 的 `TurnFlow`）。后步骤**不存在**：
-循环只能由 `return` 离开，所有出口都经 `finish_turn`。
+**职责边界**：③ 不持有终态落库职责——终态唯一落库点在 session 收尾（② 的消费循环与
+`transcript/publish.rs`）。④ 只负责**这一轮**的事实与产物，不决定会话接下来跑不跑（③ 的 `TurnFlow`）。
+后步骤**不存在**：循环只能由 `return` 离开，所有出口都经 `finish_turn`。
 
 ### 1.2 主循环七步
 

@@ -506,3 +506,363 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
         .expect("收尾不该失败");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ==================== 停用 loop：切片的卸载判据（ADR-082 裁决六 / ADR-086 §8） ====================
+//
+// 三条断言一条不少：
+// ① 写 loop 起始地址 ⇒ `NotFound`，不再开新轮（收件箱继续入队）；
+// ② 在飞的轮在短时限内收敛——spawned 任务持插件 Arc，存活期长于装配表；
+// ③ 存储侧 `list` / `stat` / 读转写 / 写收件箱全绿。
+//
+// 仍然经**工厂 id + 真实 `mount_all`** 装配：本文件不能 `use crate::plugins::session`
+// 或 `plugins::loop`（E-009 测试同样判），跨插件的形状由地址面与 core 词汇表达。
+
+use crate::symbio_core::chat_node as cm;
+use crate::symbio_core::node_build::PresentationTree;
+use crate::symbio_core::{
+    chat_request, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter,
+    ModelProvider, Scope, TurnDispatch, TurnOutput, TurnReport, TurnSettings, TurnSpec, TurnStatus,
+    VdfsError, LOOP_RUN_TURN, TURN_DISPATCH,
+};
+
+/// 可闸门假模型：进入即报到，等测试放行后返回一条自然结束的正文。
+struct GatedProvider {
+    entered: Arc<tokio::sync::Semaphore>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait::async_trait]
+impl ModelProvider for GatedProvider {
+    fn provider_id(&self) -> &str {
+        "guard-loop"
+    }
+    fn api_protocol(&self) -> &str {
+        "openai_chat"
+    }
+    fn rate_limit_ms(&self) -> u64 {
+        0
+    }
+    fn max_context_tokens(&self) -> u32 {
+        8192
+    }
+    async fn effective_context_tokens(&self) -> u32 {
+        8192
+    }
+    async fn execute_turn(
+        &self,
+        _system: &str,
+        _messages: &[cm::ChatNode],
+        _tools: &[CapabilityMeta],
+        _root_id: &str,
+        _env: &ExecEnv,
+    ) -> Result<TurnOutput, PluginError> {
+        self.entered.add_permits(1);
+        let _permit = self.release.acquire().await.expect("放行信号量不会被关闭");
+        Ok(TurnOutput {
+            text: "守卫生效".to_string(),
+            reasoning: String::new(),
+            response_id: None,
+            tool_calls: Vec::new(),
+            response_text_child_id: "n-guard-text".to_string(),
+            reasoning_child_id: "n-guard-reason".to_string(),
+            finish: Default::default(),
+            usage: None,
+        })
+    }
+}
+
+struct SilentWriter;
+
+#[async_trait::async_trait]
+impl ExecTranscriptWriter for SilentWriter {
+    async fn apply(&self, _message: cm::ChatNode) {}
+}
+
+fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
+    TurnSpec {
+        session_id: sid.to_string(),
+        tool_archive_dir: root.join("tool-archives"),
+        transcript_archive_dir: root.join("transcripts"),
+        principal: "session/guard".to_string(),
+        scope: Scope::Root,
+        persistent: true,
+        context_window: 20,
+        settings: TurnSettings {
+            auto_compress: false,
+            classify_enabled: false,
+            compose_enabled: false,
+            opening_enabled: false,
+            progress_enabled: false,
+            progress_interval_ms: 0,
+            progress_min_rounds: 0,
+            progress_max_per_turn: 0,
+            presentation_tree: PresentationTree::Grouped,
+            skill_compile_enabled: false,
+            skill_fast_path: false,
+            worker_force_prefix: String::new(),
+            worker_keywords: String::new(),
+            worker_min_chars: 0,
+        },
+    }
+}
+
+fn guard_dispatch(
+    sid: &str,
+    root: &Path,
+    provider: Arc<dyn ModelProvider>,
+    parent: Arc<dyn Plugin>,
+) -> Arc<TurnDispatch> {
+    Arc::new(TurnDispatch {
+        spec: guard_turn_spec(sid, root),
+        // 持久会话的判据是「有事实源」：驱动器不碰磁盘实现，只拿 core 的 Store 对象
+        // （生产由 session 注入 `SessionStore::facts` 的同一份 Arc；测试用内存基线）。
+        facts: Some(Arc::new(crate::symbio_core::EventStore::new())),
+        sink: ExecEventSink::silent(),
+        writer: Arc::new(SilentWriter),
+        abort: ExecAbortSignal::new(),
+        provider,
+        parent: Some(parent),
+        context_limit: 8192,
+    })
+}
+
+/// 装配 session + loop 两个**真**插件目录。
+fn mount_session_and_loop(tag: &str) -> (PathBuf, Arc<PluginRegistry>, Arc<Composite>) {
+    let root = guard_root(tag);
+    put_plugin_dir(&root, "session", "session");
+    put_plugin_dir(&root, "loop", "loop");
+    let registry = Arc::new(PluginRegistry::with_instances(
+        plugin_map(Vec::new()),
+        root.clone(),
+        Vec::new(),
+    ));
+    registry.mount_all();
+    assert_eq!(
+        registry.snapshot().len(),
+        2,
+        "session 与 loop 两个工厂都真实构造出来了（守卫的前提是装配本身跑通）"
+    );
+    let composite = Arc::new(Composite::with_registry(Arc::clone(&registry)));
+    (root, registry, composite)
+}
+
+/// 经**容器视图**建一个持久会话：与前端 / 收件箱消费者是同一条写通道。
+async fn create_guard_session(composite: &Arc<Composite>, sid: &str) {
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+    let mut create = VdfsContent::text("");
+    create.create = true;
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}"),
+            VdfsRequest::Write { content: create },
+        )
+        .await
+        .expect("新建会话照常");
+}
+
+/// ① + ③：停用 loop ⇒ 起始地址 `NotFound`、挂载行消失；存储侧四条通道全绿。
+#[tokio::test]
+async fn disabling_loop_removes_the_start_address_and_keeps_storage_side() {
+    let sid = "guard-loop-off";
+    let (root, registry, composite) = mount_session_and_loop("loop-off");
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+    create_guard_session(&composite, sid).await;
+
+    assert!(
+        mount_names(&composite).await.contains(&"loop".to_string()),
+        "停用前 loop 的挂载行在（它就是卸载判据的断言对象）"
+    );
+
+    registry
+        .set_enabled("loop", false)
+        .await
+        .expect("loop 不是界面底座，应当停用成功");
+
+    // ① 起始地址：容器不再有 loop 这一片 ⇒ NotFound，不再开新轮。
+    let err = provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("loop/{sid}"),
+            VdfsRequest::Action {
+                action: LOOP_RUN_TURN.to_string(),
+                payload: Some(serde_json::json!({})),
+            },
+        )
+        .await
+        .expect_err("停用后 loop 起始地址必须不可达");
+    assert!(
+        matches!(err, VdfsError::NotFound(_)),
+        "停用 loop ⇒ 起始地址 NotFound（运行期的卸载表达），实际 {err:?}"
+    );
+    assert!(
+        !mount_names(&composite).await.contains(&"loop".to_string()),
+        "停用后下一轮收集里不该再有 loop 的挂载行"
+    );
+
+    // ③ 存储侧四条通道照常：list / stat / 读转写 / 写收件箱。
+    match provider
+        .dispatch(
+            &vdfs_context(&host()),
+            "session",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .expect("会话清单照常")
+    {
+        VdfsResponse::List(items) => assert!(
+            items.iter().any(|i| i.node.name == sid),
+            "新建的会话仍在清单里"
+        ),
+        _ => panic!("vdfs/list 未返回清单"),
+    }
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}"),
+            VdfsRequest::Stat,
+        )
+        .await
+        .expect("会话 stat 照常");
+    match provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}/message"),
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .expect("读转写照常")
+    {
+        VdfsResponse::List(_) => {}
+        _ => panic!("vdfs/list（转写）未返回清单"),
+    }
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}/inbox"),
+            VdfsRequest::Write {
+                content: VdfsContent::text("loop 停用之后这条照发"),
+            },
+        )
+        .await
+        .expect("收件箱写臂照常（它不认识 loop 在不在装配里）");
+
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// ②：在飞的轮在注入的短时限内收敛——停用只摘装配表，不取消已派发的 future。
+#[tokio::test]
+async fn an_inflight_turn_converges_after_loop_is_disabled() {
+    let sid = "guard-loop-inflight";
+    let (root, registry, composite) = mount_session_and_loop("loop-inflight");
+    create_guard_session(&composite, sid).await;
+
+    let entered = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let parent: Arc<dyn Plugin> = composite.clone();
+    let dispatch = guard_dispatch(
+        sid,
+        &root,
+        Arc::new(GatedProvider {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        }),
+        parent,
+    );
+
+    // 宿主 ctx：本轮交付包 + 请求体（生产由编排入口设置，落到 fork 后的 chat_ctx）。
+    let host_ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    host_ctx.set(TURN_DISPATCH, dispatch);
+    host_ctx
+        .set_payload(chat_request::Request {
+            single_message: Some(cm::ChatNode {
+                id: "u-guard".to_string(),
+                content: Some(cm::MessageContent::Text("守卫生效".to_string())),
+                ..Default::default()
+            }),
+            load_history: Some(false),
+            ..Default::default()
+        })
+        .expect("请求体可挂");
+    let host_ctx: Arc<dyn PluginInvokeRequest> = host_ctx;
+    let vctx = vdfs_context(&host_ctx);
+
+    // spawned 任务持 provider 视图（与 session 侧 `tokio::spawn` 同款）。
+    let provider_view = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+    let path = format!("loop/{sid}");
+    let mut handle = tokio::spawn(async move {
+        provider_view
+            .dispatch(
+                &vctx,
+                &path,
+                VdfsRequest::Action {
+                    action: LOOP_RUN_TURN.to_string(),
+                    payload: Some(serde_json::json!({})),
+                },
+            )
+            .await
+    });
+
+    // 等这一轮真的在模型调用里（哨兵避免「还没开跑就停用」的空判据）。
+    // 两个分支都等：轮次若在模型调用前就结束，哨兵永远不会亮，只等它会把
+    // 「失败」误报成「挂起」。
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        tokio::select! {
+            permit = entered.acquire() => {
+                let _ = permit.expect("哨兵不会被关闭");
+            }
+            joined = &mut handle => {
+                panic!("轮次在模型调用前就结束了：{joined:?}");
+            }
+        }
+    })
+    .await
+    .expect("轮次未在 20s 内到达模型调用（链路挂起）");
+    registry
+        .set_enabled("loop", false)
+        .await
+        .expect("可停用插件应当停用成功");
+
+    // 放行模型：future 已离开装配表，但 spawned 任务持有的 Arc 让它跑完。
+    release.add_permits(1);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(10), handle)
+        .await
+        .expect("停用 loop 后，在飞的轮必须在短时限内收敛")
+        .expect("轮次任务不该 panic")
+        .expect("在飞的轮不该失败");
+
+    let VdfsResponse::Action(result) = response else {
+        panic!("驱动器动作返回了非动作响应");
+    };
+    assert!(result.ok, "轮次以 ok 结束：{}", result.message);
+    let report: TurnReport =
+        serde_json::from_value(result.data.expect("结局载荷在")).expect("结局载荷是 TurnReport");
+    assert_eq!(
+        report.status,
+        TurnStatus::Completed,
+        "在飞的轮照常完成，不受停用影响"
+    );
+
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}

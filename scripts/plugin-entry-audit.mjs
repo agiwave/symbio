@@ -32,6 +32,7 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`，**测试代码同样判**  | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定）。测试也在范围内：一条要跨插件比对数据的测试，本身就要求先把一个模块的隔离拆掉——那是这条规则要拦的形态，不是它的例外 |
+ * | E-013 | `plugins/loop/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super`），**测试同样判** | 驱动器片跨墙只准用 [ADR-083 §4](../docs/010-adr/083.md "ADR-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦 `crate::plugins::<兄弟>`，但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 ADR-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  *
@@ -80,7 +81,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
-// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012
+// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -702,6 +703,115 @@ for (const abs of codeFiles) {
   }
 }
 
+// ── E-013：`plugins/loop/**` 的 import 根 ⊆ 闭族 ─────────────────────────
+//
+// [ADR-083](../docs/010-adr/083.md) §4 把跨墙通货收成闭族（穷举即白名单，族外无
+// 通货），[ADR-086](../docs/010-adr/086.md) §9 把「import 根 ⊆ 闭族」列为切片判据。
+// E-009 只拦 `crate::plugins::<兄弟>`；它拦不住 `crate::providers`、`crate::<其它模块>`
+// 或一个新第三方 crate——这些同样会把 loop 钉回仓内实现面。
+//
+// 判据分两半：
+//   ① `crate::<根>` 只许 `symbio_core` 与 crate 根的日志/工厂宏（它们是跨插件共用的
+//      机制词汇，不是某个插件的私有项）；
+//   ② `use <外部根>::` 只许通用库。清单是**闭集**：新增一个根必须回到 ADR-083 §4
+//      回答「它代表哪条事实，或哪个方向的世界端口」——答不出即族外。
+//
+// 测试同样判（与 E-009 同口径）：测试里为了拿一个会话侧类型而放开 import，正是在
+// 拆「loop 可独立卸载」这条判据。唯一测试豁免是 `crate::providers::DefaultToolVisitor`
+// （`providers` 是「被多个插件模块公用」的实现层，测试拿它当工具清单的默认收集器，
+// 不携带会话状态）。生产文件用它是违规。
+const LOOP_DIR = path.join(PLUGINS_DIR, 'loop')
+const LOOP_ALLOWED_CRATE_ROOTS = new Set([
+  'symbio_core',
+  'plugin_debug',
+  'plugin_error',
+  'plugin_info',
+  'plugin_warn',
+  'submit_object_creator',
+])
+const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
+  'std',
+  'core',
+  'alloc',
+  'tokio',
+  'serde',
+  'serde_json',
+  'async_trait',
+  'futures',
+  'thiserror',
+  'tracing',
+  'log',
+  'bytes',
+  'uuid',
+  'chrono',
+  'regex',
+  'rand',
+  'parking_lot',
+  'anyhow',
+  'tempfile',
+  'url',
+])
+if (fs.existsSync(LOOP_DIR)) {
+  for (const abs of walk(LOOP_DIR, isRs)) {
+    const raw = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
+    const code = blankComments(raw.join('\n'))
+    const text = code.join('\n')
+    const lineAt = (idx) => text.slice(0, idx).split('\n').length - 1
+    const isTest = isTestFile(abs)
+    const seen = new Set()
+
+    const flag = (lineIdx, root, detail) => {
+      const key = `${lineIdx}:${root}`
+      if (seen.has(key)) return
+      seen.add(key)
+      if (exempted(raw, lineIdx, 'E-013')) return
+      report('E-013', 'error', rel(abs), lineIdx + 1, detail)
+    }
+
+    // ① `crate::<根>`（含 `crate::{a, b::c}` 花括号形）
+    for (const m of text.matchAll(/\bcrate\s*::\s*([A-Za-z_][A-Za-z0-9_]*)/g)) {
+      const root = m[1]
+      if (LOOP_ALLOWED_CRATE_ROOTS.has(root)) continue
+      if (isTest && root === 'providers') continue
+      flag(
+        lineAt(m.index),
+        root,
+        `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
+          `（ADR-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
+      )
+    }
+    for (const m of text.matchAll(/\bcrate\s*::\s*\{([\s\S]*?)\}/g)) {
+      const lineIdx = lineAt(m.index)
+      for (const item of m[1].split(',')) {
+        const root = item.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1]
+        if (!root || LOOP_ALLOWED_CRATE_ROOTS.has(root)) continue
+        if (isTest && root === 'providers') continue
+        flag(
+          lineIdx,
+          root,
+          `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
+            `（ADR-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
+        )
+      }
+    }
+
+    // ② `use <外部根>::`（`self` / `super` / `crate` 是模块内相对路径，不判）
+    for (const m of text.matchAll(
+      /(?:^|\n)\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([A-Za-z_][A-Za-z0-9_]*)/g,
+    )) {
+      const root = m[1]
+      if (root === 'self' || root === 'super' || root === 'crate') continue
+      if (LOOP_ALLOWED_EXTERNAL_ROOTS.has(root)) continue
+      flag(
+        lineAt(m.index + m[0].indexOf('use')),
+        root,
+        `\`use ${root}::…\` 不在驱动器闭族内 —— 族外新增须先按 ADR-083 §4 论证` +
+          `「它代表哪条事实，或哪个方向的世界端口」`,
+      )
+    }
+  }
+}
+
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
@@ -931,6 +1041,7 @@ const ruleNames = {
   'E-009': '不直接引用兄弟插件模块',
   'E-011': '配置挂载点不手写 dispatch',
   'E-012': '路由常量名↔值同构且值可分发',
+  'E-013': 'loop 驱动器的 import 根 ⊆ 闭族',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0
