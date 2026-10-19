@@ -22,6 +22,7 @@
  * | DC-002 | 机制表顶层键数 | `docs/004-plan/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
  * | DC-003 | §8 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
  * | DC-004 | 验证程序数 | `docs/004-plan/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
+ * | DC-005 | 事件网格的行 × 列 | 01 §6 的表 vs `symbio_core/event/mod.rs` 的 `Entity` / `Verb` 变体 | 行数 = 实体数、列数 = 动词数 |
  *
  * **DC-004 治的是哪一类漂移**：文档与门禁**读同一批文件**、却各数各的。
  * 一个新程序落进 `verify/` 之后，门禁当天就会跑它，而文档里「N 个验证程序」那句话
@@ -44,7 +45,7 @@
  */
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns DC 文档计数对账（文档里的少数几个数 vs 代码）
-// @codes DC-001 DC-002 DC-003 DC-004
+// @codes DC-001 DC-002 DC-003 DC-004 DC-005
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -122,6 +123,45 @@ function verifyProgramCount(root) {
   return n > 0 ? n : null
 }
 
+/** 事件语法网格的两侧：代码侧（枚举变体数）与文档侧（§6 表的行 × 列 × 已填格子）。
+ *
+ *  **为什么要判它**：网格是「新增事件 = 加一格」这句承诺的载体，而格子数此前没有任何
+ *  东西读它——格子从 4×5 长到 11×5 的过程里，这句话一次也没有被检验过。判据不是
+ *  「格子不许长」（加格子是本设计预期的演进），而是**加行必须在同一处声明**：
+ *  代码枚举多了变体而 §6 表没这行（或反之），就是「两处各记一份账」。
+ *
+ *  格子数同时是**可观测指标**：门禁每次通过都把 `实体 × 动词 = 格（已填）` 打出来，
+ *  「网格在膨胀」这件事因此可被趋势读出，而不是靠谁去数表。 */
+function eventGridParity(root) {
+  const enumsRel = path.join(root, 'symbio', 'src', 'symbio_core', 'event', 'mod.rs')
+  const planRel = path.join(root, 'docs', '004-plan', '001-核心架构.md')
+  if (!fs.existsSync(enumsRel) || !fs.existsSync(planRel)) return null
+  const src = fs.readFileSync(enumsRel, 'utf8')
+  const variants = (name) => {
+    const i = src.indexOf(`pub enum ${name} {`)
+    if (i < 0) return null
+    const body = src.slice(i, src.indexOf('\n}', i))
+    return body.split(/\r?\n/).filter((l) => /^ {4}[A-Z]\w*,$/.test(l)).length
+  }
+  const entities = variants('Entity')
+  const verbs = variants('Verb')
+  if (!entities || !verbs) return null
+
+  const plan = fs.readFileSync(planRel, 'utf8').split(/\r?\n/)
+  const head = plan.findIndex((l) => l.startsWith('| 实体 \\ 动词'))
+  if (head < 0) return null
+  const cols = plan[head].split('|').filter((c) => c.trim().length > 0).length - 1
+  let rows = 0
+  let filled = 0
+  for (let i = head + 2; i < plan.length && plan[i].startsWith('|'); i++) {
+    rows++
+    const cells = plan[i].split('|').slice(1, -1)
+    filled += cells.slice(1).filter((c) => c.trim() !== '—' && c.trim() !== '').length
+  }
+  if (!rows) return null
+  return { entities, verbs, rows, cols, filled }
+}
+
 /** 递归收集活跃文档（`docs/` + 仓根 `*.md`；跳过 archive 与垃圾目录） */
 function activeDocs(root) {
   const out = []
@@ -196,20 +236,26 @@ function findings(docs, rule, expected) {
   return out
 }
 
-console.log('--- doc-count-audit: 文档计数 vs 代码（DC-001…004） ---')
+console.log('--- doc-count-audit: 文档计数 vs 代码（DC-001…005） ---')
 
 const checkAll = checkAllCount(REPO_ROOT)
 const facts = factListCounts(REPO_ROOT)
 const verifyPrograms = verifyProgramCount(REPO_ROOT)
+const grid = eventGridParity(REPO_ROOT)
 if (checkAll == null || facts == null || verifyPrograms == null) {
   console.log(
     red(
       '[ERROR] DC-001 审计范围读不出：' +
-        `check_all=${checkAll} facts=${facts ? 'ok' : 'null'} verify=${verifyPrograms} ⇒ 来源读不出来，` +
-        '此时退化成「什么都没检查」是最坏的一种失败',
+        `check_all=${checkAll} facts=${facts ? 'ok' : 'null'} verify=${verifyPrograms}` +
+        ' ⇒ 来源读不出来，此时退化成「什么都没检查」是最坏的一种失败',
     ),
   )
   process.exit(2)
+}
+// 网格两侧的来源在**夹具根**里本就不存在（它们要真实的 core 源码与计划文档）。
+// 因此这里不 exit 2，而是**出声跳过**——静默跳过才是这类守卫最安静的死法。
+if (grid == null) {
+  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio','src','symbio_core','event','mod.rs')} 或 01 §6 表）`)
 }
 const docs = activeDocs(REPO_ROOT)
 if (docs.length === 0) {
@@ -242,9 +288,32 @@ if (errors) {
   console.log(`doc-count-audit 未通过：${errors} 处计数对不上（扫 ${docs.length} 份活跃文档 / ${RULES.length} 个计数）`)
   process.exit(1)
 }
+
+// ── DC-005：网格的行 × 列必须与代码枚举逐项相等（加行不许只加在一处）──
+if (grid) {
+  const gridErrors = []
+  if (grid.rows !== grid.entities) {
+    gridErrors.push(`01 §6 的实体行数 ${grid.rows} ≠ 代码 Entity 变体数 ${grid.entities}`)
+  }
+  if (grid.cols !== grid.verbs) {
+    gridErrors.push(`01 §6 的动词列数 ${grid.cols} ≠ 代码 Verb 变体数 ${grid.verbs}`)
+  }
+  if (gridErrors.length) {
+    for (const e of gridErrors) console.log(red(`[ERROR] DC-005 ${e} ⇒ 网格两处各记一份账`))
+    console.log(`doc-count-audit 未通过：DC-005 ${gridErrors.length} 处网格账不平`)
+    process.exit(1)
+  }
+}
+
 console.log(
   green(
     `doc-count-audit 通过：扫 ${docs.length} 份活跃文档，` +
-      `check_all ${checkAll} 条 / 顶层键 ${facts.mechanisms} 个 / 含子键 ${facts.paramKeys} 个 / 验证程序 ${verifyPrograms} 个，无手填漂移`,
+      `check_all ${checkAll} 条 / 顶层键 ${facts.mechanisms} 个 / 含子键 ${facts.paramKeys} 个 / 验证程序 ${verifyPrograms} 个`,
   ),
 )
+if (grid) {
+  console.log(
+    `  事件网格：实体 ${grid.entities} × 动词 ${grid.verbs} = ${grid.entities * grid.verbs} 格，已填 ${grid.filled} 格` +
+      `（空格 ${grid.entities * grid.verbs - grid.filled}）——新增事件 = 加一格，加行必须同时出现在 §6 与枚举里`,
+  )
+}
