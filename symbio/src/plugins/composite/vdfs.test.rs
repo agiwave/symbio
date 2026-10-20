@@ -4,6 +4,7 @@
 
 use super::*;
 
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{vdfs_context, CapabilityRow, VdfsItem, VDFS_KIND_DIR};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,

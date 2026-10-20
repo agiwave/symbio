@@ -40,7 +40,7 @@
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
-use crate::providers::DefaultToolVisitor;
+use crate::providers::new_registry;
 use crate::symbio_core::{
     capability_init_error_bucket, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
     CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
@@ -66,7 +66,7 @@ pub async fn collect_capabilities(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> Arc<dyn Registry> {
-    let manager: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    let manager: Arc<dyn Registry> = new_registry();
 
     let Some(parent) = parent else {
         return manager;
@@ -142,7 +142,8 @@ pub async fn collect_options(
 ) -> Arc<dyn Registry> {
     // 4e：选项与能力同表——收集器就是全表共用的 `DefaultToolVisitor`，
     // 选项行（`CapabilityRow::option`）与工具行同一 `put` / `list`，只是通道独立。
-    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+    // 实例按收集 pass 新建（状态不跨请求），构造点收在 `providers::new_registry`。
+    let visitor: Arc<dyn Registry> = new_registry();
 
     let Some(parent) = parent else {
         return visitor;

@@ -360,179 +360,39 @@ pub(crate) async fn run_batch(
             continue;
         }
 
-        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）──
+        // ── 闸门表（T-196）：外部执行 / 淘汰 / 任务表，先命中者胜 ────────────
         //
         // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
         // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
         // 钩子往返（还可能触发钩子自己的副作用）。
         //
-        // 三种结论的出口判据**不对称**，这是 S09 §6 的核心：
-        // - `Refuse`（未授权）→ 拒绝且**不产生任何事件**（验收 1）；
-        // - `Break`（预算耗尽 / 判定超时）→ 必须落一格 `task.controlled`（验收 2：
-        //   不允许静默继续）。本层写不了事实源——锚是本轮 `user.message`，它要到
-        //   收束才落格 ⇒ 经出参交回调用方随收束入格（与承诺 / 任务表同一条口径）；
-        // - `Allow` → 照旧开窗执行。
-        let decision = crate::symbio_core::CircuitBreaker.gate(
-            breaker.authorized,
-            breaker.spent_ms,
-            breaker.requested_ms,
-            breaker.budget_ms,
-            gate_started.elapsed().as_millis() as u64,
-            // 输入是会话事实源的整段重放 ⇒ 拿深度档的预算，不拿反射档（见 `gate` 文档）。
-            crate::symbio_core::LatencyTier::Deep.budget_ms(),
-        );
-        // `(标签, 拒绝理由, failure_kind, 是否熔断)`；`None` = 放行。
-        let gate_refusal: Option<(&'static str, String, &'static str, bool)> = match decision {
-            crate::symbio_core::GateDecision::Break { reason } => {
-                // 按理由去重：事件号是 `cb-{溯源锚}`，同一轮熔断两次会拿到同一个号，
-                // 第二条撞幂等键被丢——那条静默失效正是验收 2 要禁的。
-                if !breaks.contains(&reason) {
-                    breaks.push(reason);
-                }
-                Some((
-                    "熔断",
-                    format!("外部执行闸门熔断（{reason}），本轮工具调用未执行"),
-                    failure_kind::TOOL_UNAVAILABLE,
-                    true,
-                ))
-            }
-            crate::symbio_core::GateDecision::Refuse => Some((
-                "未授权",
-                "未持外部执行能力（produce.artifact），本次调用未执行".to_string(),
-                failure_kind::PERMISSION_DENIED,
-                false,
-            )),
-            crate::symbio_core::GateDecision::Allow => None,
+        // 四道闸的出口判据**不对称**（S09 §6），差异经 `RefusalTrace` 表达：
+        // `Refuse` 零事件、`Break` 入格、淘汰 / 钩子可审计拒绝、任务表不记承诺。
+        // 骨架与差异的唯一实现在 `dispatch::gates`（[`GATES`] 是闸门的登记表）。
+        let gate_ctx = GateContext {
+            gate_started,
+            breaker,
+            elimination,
+            task_table,
+            decls,
+            name: &name,
         };
-        if let Some((label, reason, kind, _is_break)) = gate_refusal {
-            plugin_warn!("session", "[Tool] {label}：{id} / {name}——{reason}");
-            let tool_msg = llm_build_tool_message(
-                &id,
-                &format!("Refused: {reason}"),
-                Some(false),
-                Some(result_msg_id.clone()),
-                Some(&name),
-            );
-            tool_messages.push(tool_msg);
-            // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
-            // 「运行中」（那条兜底 `finalize_assistant_turn` 已移除）。
-            if let Some(parent_update) = emit_parent_finalized(
+        if let Some(refusal) = first_refusal(&gate_ctx) {
+            refuse(
                 sink,
                 context_messages,
-                &id,
-                NodeStatus::Completed,
-                json!({ "success": false, "failure_kind": kind }),
-                None,
-            )
-            .await
-            {
-                parent_updates.push(parent_update);
-            }
-            // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
-            note_delegation(
-                delegations,
-                &decls,
                 &id,
                 &name,
                 &tc.arguments,
-                false,
-                &reason,
-            );
-            continue;
-        }
-
-        // ── 淘汰闸（S13 §3，T-073）──────────────────────────────────────────
-        //
-        // **只拦声明了 `provides_assign_work` 的工具**（今天 = `agent_run`，判据的
-        // 住址在工具自己的元数据上，T-158）：被收回的是 `assign.work`（派活）这一项
-        // 能力，别的工具与本主体的这项撤销无关。位置与外部执行闸同一条理由——紧贴
-        // 执行窗口之前、先于钩子：对一通马上要被拒的调用先跑一遍钩子，等于让拒绝
-        // 白白付一次钩子往返。
-        //
-        // 出口判据与熔断闸**不对称**（同一形态）：淘汰是**可审计的拒绝**——
-        // `verdict.asserted` 已经在事实源里（闸门只是它的读侧），本层不再产事件；
-        // 工具结果上的 `Refused: …` 与随收束入格的那条**违约承诺**（note_delegation
-        // ok=false）就是它的两面——「约了却没派成」诚实记账，声誉投影据此再降。
-        if decls.provides_assign_work(&name) && elimination.delegation_revoked {
-            let reason = format!(
-                "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
-                elimination.principal
-            );
-            plugin_warn!("session", "[Tool] 淘汰拒止：{id} / {name}——{reason}");
-            let tool_msg = llm_build_tool_message(
-                &id,
-                &format!("Refused: {reason}"),
-                Some(false),
-                Some(result_msg_id.clone()),
-                Some(&name),
-            );
-            tool_messages.push(tool_msg);
-            // 拒掉的调用同样必须收敛父节点（同外部执行闸）。
-            if let Some(parent_update) = emit_parent_finalized(
-                sink,
-                context_messages,
-                &id,
-                NodeStatus::Completed,
-                json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
-                None,
-            )
-            .await
-            {
-                parent_updates.push(parent_update);
-            }
-            // 没派 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
-            note_delegation(
+                &result_msg_id,
+                refusal,
+                &mut tool_messages,
+                &mut parent_updates,
                 delegations,
-                &decls,
-                &id,
-                &name,
-                &tc.arguments,
-                false,
-                &reason,
-            );
-            continue;
-        }
-
-        // ── 任务表写侧闸（S03 §3，T-107）──────────────────────────────────────
-        //
-        // **只拦声明了 `owns_task_table` 的工具**（今天 = `local/todo_write`，
-        // 判据的住址在工具自己的元数据上，T-158）：判的是「本主体有没有资格写
-        // 任务表」——立任务（`define.work`）或独立判定（`assert.verification`）
-        // 二居其一（C15 两者互不可写 ⇒ 没有任何主体能同时自己立自己验）。纯产出
-        // 主体（工人 / 对等体）与纯派活主体（市场）被拒：工人的交付物是产物格，
-        // 立与验归工作权威。
-        //
-        // 位置与外部执行闸 / 淘汰闸同一条理由——紧贴执行窗口之前、先于钩子。
-        // 出口判据是**可审计的拒绝**（`Refused: …` 回灌模型 + 父节点收敛 +
-        // `PERMISSION_DENIED`），且**不产事件、不记任务声明**：工具没跑，
-        // 「声明过什么」就无从说起（`note_tasks` 只在跑完后记成功调用）。
-        if decls.owns_task_table(&name) && !task_table.may_write {
-            let reason = format!(
-                "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
-                task_table.principal
-            );
-            plugin_warn!("session", "[Tool] 任务表写侧拒止：{id} / {name}——{reason}");
-            let tool_msg = llm_build_tool_message(
-                &id,
-                &format!("Refused: {reason}"),
-                Some(false),
-                Some(result_msg_id.clone()),
-                Some(&name),
-            );
-            tool_messages.push(tool_msg);
-            // 拒掉的调用同样必须收敛父节点（同外部执行闸 / 淘汰闸）。
-            if let Some(parent_update) = emit_parent_finalized(
-                sink,
-                context_messages,
-                &id,
-                NodeStatus::Completed,
-                json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
-                None,
+                decls,
+                breaks,
             )
-            .await
-            {
-                parent_updates.push(parent_update);
-            }
+            .await;
             continue;
         }
 
@@ -549,42 +409,21 @@ pub(crate) async fn run_batch(
             let block_msg = pre_output
                 .block_reason
                 .unwrap_or_else(|| "Blocked by pre hook".to_string());
-            plugin_warn!(
-                "session",
-                "[Tool] BLOCKED by PreToolUse hook: {}",
-                block_msg
-            );
-            let tool_msg = llm_build_tool_message(
-                &id,
-                &format!("Blocked: {block_msg}"),
-                Some(false),
-                Some(result_msg_id.clone()),
-                Some(&name),
-            );
-            tool_messages.push(tool_msg);
-            // 被钩子拦下 → 父节点同样必须收敛（此前只推了结果子节点，父节点
-            // 靠 `finalize_assistant_turn` 的 Completed 兜着；那条兜底已移除）。
-            if let Some(parent_update) = emit_parent_finalized(
+            refuse(
                 sink,
                 context_messages,
                 &id,
-                NodeStatus::Completed,
-                json!({ "success": false, "failure_kind": "blocked" }),
-                None,
-            )
-            .await
-            {
-                parent_updates.push(parent_update);
-            }
-            note_delegation(
-                delegations,
-                &decls,
-                &id,
                 &name,
                 &tc.arguments,
-                false,
-                &format!("被 PreToolUse 钩子拦下：{block_msg}"),
-            );
+                &result_msg_id,
+                Refusal::blocked(block_msg),
+                &mut tool_messages,
+                &mut parent_updates,
+                delegations,
+                decls,
+                breaks,
+            )
+            .await;
             continue;
         }
 

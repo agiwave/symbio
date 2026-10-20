@@ -313,6 +313,39 @@ async fn no_window_returns_everything_without_note() {
     assert!(!out.contains('['), "未截断不加读数（实际 {out:?}）");
 }
 
+// ==================== 结果形状契约（T-196 / 04 报告建议 3） ====================
+
+/// 结果形状契约：正文写在 `output` 字符串里（不是整包 JSON、不是别的键）。
+///
+/// 消费方 `extract_result`（loop 插件）第 2 条判据读 `output`；两侧互不可见，
+/// 这条断言是「约定可执行」的生产方一半。前面那些用例打的是 `search` 内部方法
+/// （只验正文形状），这条走 `Capability::execute`，钉的是**交付给编排层的信封形状**。
+#[tokio::test]
+async fn result_carries_the_llm_visible_text_in_output() {
+    use crate::symbio_core::{ExecEnv, PluginInvokeRequest, PluginSimpleRequest, WORKDIR};
+
+    let dir = fixture().await;
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(WORKDIR, dir.path().to_string_lossy().to_string());
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    let env = ExecEnv::from_request(&*ctx);
+
+    let data = tool()
+        .execute(
+            serde_json::json!({ "pattern": "MARK", "path": "." }),
+            &env,
+            ctx,
+        )
+        .await
+        .expect("搜索应成功");
+
+    let out = data["output"]
+        .as_str()
+        .expect("正文必须在 output 字符串里（extract_result 第 2 条判据）");
+    assert!(out.contains("a.rs:"), "正文应带命中行（实际: {out:?}）");
+    assert_eq!(data["truncated"], serde_json::json!(false));
+}
+
 // ==================== 无匹配的形状 ====================
 
 /// 无匹配 ⇒ 单行「未找到匹配。」（不是空串、不是错误）

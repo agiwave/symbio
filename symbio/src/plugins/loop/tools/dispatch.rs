@@ -44,6 +44,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(crate) use self::gates::GateReadings;
+// 闸门表与拒止骨架（T-196）：阶段②按 `first_refusal` 判、经 `refuse` 收口。
+pub(crate) use self::gates::{first_refusal, refuse, GateContext, Refusal};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。

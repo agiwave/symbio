@@ -54,6 +54,30 @@ async fn interactive_mode_returns_pending_intent_not_a_channel() {
     );
 }
 
+/// 结果形状契约（T-196 / 04 报告建议 3）：正文写在 `content` 字符串里。
+///
+/// 消费方 `extract_result`（loop 插件）第 1 条判据读 `content`，两侧互不可见——
+/// 这条断言是「约定可执行」的生产方一半。若哪天把正文改塞进 `prompt` 或只留整包
+/// JSON，模型看到的会退化成兜底序列化，而不是这张提问卡的面板文案。
+#[tokio::test]
+async fn result_carries_the_llm_visible_text_in_content() {
+    let tool = AskUserTool;
+    let ctx = ctx_with(ask_args(), "interactive");
+    let env = ExecEnv::from_request(&*ctx);
+    let data = tool
+        .execute(ask_args(), &env, ctx)
+        .await
+        .expect("交互模式应成功返回");
+
+    let content = data["content"]
+        .as_str()
+        .expect("正文必须在 content 字符串里（extract_result 第 1 条判据）");
+    assert!(
+        !content.is_empty(),
+        "正文不能是空串——空串同样命中第 1 条判据"
+    );
+}
+
 /// 自动模式：无人可回答，必须返回**可继续的错误**而不是等待。
 ///
 /// `tool_unavailable` 是信息性标记，`is_pending` 必须为 false——否则无人值守会话

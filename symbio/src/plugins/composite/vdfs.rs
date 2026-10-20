@@ -88,7 +88,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::providers::DefaultToolVisitor;
+use crate::providers::new_registry;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {
@@ -149,7 +149,7 @@ impl CompositeVdfs {
         let configs: Arc<dyn Registry> = match host.get(CONFIGURABLE_VISITOR) {
             Some(v) => v,
             None => {
-                let v: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
+                let v: Arc<dyn Registry> = new_registry();
                 host.set(CONFIGURABLE_VISITOR, v.clone());
                 v
             }

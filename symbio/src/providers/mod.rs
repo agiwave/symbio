@@ -31,7 +31,7 @@
 //! | `SingleFileVdfs` · `MemoryVdfs` | model | 1 |
 //! | `VdfsPack` | agent | 1 |
 //! | `vdfs_safe_segment` | session | 1 |
-//! | `Default*Visitor` ×3 | 各 1 个**安装者** + 2–3 个插件的**测试** | — |
+//! | `DefaultToolVisitor` · `new_registry` | session（工具 / 选项两个收集 pass）· composite | 2 |
 //! | `EMBEDDING_LOCAL` | local | 1 |
 //!
 //! **「数为 1」不等于「该下沉」** ——判据量的是**那件东西**，不是它所在的那一行：
@@ -43,10 +43,10 @@
 //! - `VdfsPack` 是 `VdfsUnpack` 的**反向**（导出 / 导入成对），后者有 3 个消费者。
 //! - `vdfs_safe_segment` 与 `vdfs_id_of` / `vdfs_auto_id` 是**同一条「条目 id 安全化」
 //!   口径**。让 session 自己写一份，同一个 id 就会在两个地方被安全化成两种样子。
-//! - 三个 `Default*Visitor` 的**写入者是全体插件**（每个插件都经 `ctx` 的
-//!   `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` 键注册），
-//!   安装它的宿主只是其中之一；另有 2–3 个插件的测试要用它当「能读回的收集器」。
-//!   完整论证见 `collectors/mod.rs`。
+//! - `DefaultToolVisitor`（及其构造点 `new_registry`）的**写入者是全体插件**
+//!   （每个插件都经 `ctx` 的 `CAPABILITY_VISITOR` / `OPTION_VISITOR` /
+//!   `CONFIGURABLE_VISITOR` 键注册），安装它的宿主只是其中之一；另有各插件的测试
+//!   要用它当「能读回的收集器」。完整论证见 `collectors/mod.rs`。
 //!
 //! ## 两种接线方式，各自说清理由
 //!
@@ -98,7 +98,11 @@ mod embedding;
 mod memory;
 mod vdfs_service;
 
-pub(crate) use collectors::{approval_gate, DefaultToolVisitor};
+pub(crate) use collectors::{approval_gate, new_registry};
+// `DefaultToolVisitor` 是**测试面**的句柄（各插件测试要拿具体类型做跨键装配 /
+// 直接 `put`），生产装配一律经 `new_registry()`——故只在测试构建里出口。
+#[cfg(test)]
+pub(crate) use collectors::DefaultToolVisitor;
 // `MemoryInjection` / `memory_render_segment` **不出口**：注入产物的形状与排版函数
 // 只有 `MemoryFile` 自己在用（插件拿到的是 `segment()` 出来的 `String`），
 // 出口只列**真有跨模块消费者**的符号——否则「公开面」里会混入没人要的东西，

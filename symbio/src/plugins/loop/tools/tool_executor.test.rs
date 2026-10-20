@@ -1302,6 +1302,103 @@ async fn the_ledger_comes_from_the_facts_value() {
     );
 }
 
+/// 淘汰闸是**可审计拒绝**：结果回灌 + 父节点收敛 + 违约承诺照记（S13 §3）。
+///
+/// 判据批首读一次（部署级撤销结论由 session 折成一个值），这里钉的是接线：
+/// 声明了 `provides_assign_work` 的 `agent_run` 在 `elimination_revoked=true` 时
+/// 不执行，且「约了却没派成」如实落进承诺出参（`note_delegation` ok=false）。
+#[tokio::test]
+async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
+    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-elimination");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    let ctx = {
+        let req = PluginSimpleRequest::new(None, None);
+        let visitor = Arc::new(DefaultToolVisitor::new());
+        visitor
+            .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
+                name: "agent_run".to_string(),
+                provides_assign_work: true,
+                records_delegation_promise: true,
+                ..Default::default()
+            })) as Arc<dyn Capability>))
+            .await;
+        req.set(
+            crate::symbio_core::CAPABILITY_VISITOR,
+            visitor as Arc<dyn Registry>,
+        );
+        Arc::new(req) as Arc<dyn PluginInvokeRequest>
+    };
+
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let parent = ChatNode {
+        id: "tc-elim".into(),
+        // 身份写 `principal`，不写存量 `role` 格（S-014 棘轮）。
+        principal: Some(crate::symbio_core::principal::Principal::tool_principal(
+            "agent_run",
+        )),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "agent_run"})),
+        status: Some(NodeStatus::Streaming),
+        ..Default::default()
+    };
+    let tcs = vec![TurnToolCallInfo {
+        id: Some("tc-elim".into()),
+        wire_id: None,
+        name: Some("agent_run".into()),
+        arguments: json!({ "prompt": "做件事" }),
+        parse_error: None,
+        overflow_notice: None,
+    }];
+    let mut delegations = Vec::new();
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        ctx,
+        std::slice::from_ref(&parent),
+        &dir,
+        &EventStore::new(),
+        true,
+        &mut delegations,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 1, "被闸拦下的调用也必须有结果子节点");
+    let text = msgs[0]
+        .content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default();
+    assert!(
+        text.contains("Refused:") && text.contains("assign.work"),
+        "结果要写明是淘汰闸拒的（实际: {text}）"
+    );
+    assert_eq!(updates.len(), 1, "父节点必须收到终态（否则永远转下去）");
+    assert_eq!(
+        updates[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some(failure_kind::PERMISSION_DENIED),
+    );
+    assert_eq!(delegations.len(), 1, "拒止同样要记一笔承诺");
+    assert!(!delegations[0].ok, "没派成 = 没履约");
+    assert!(
+        delegations[0].why.contains("assign.work 已被淘汰回路收回"),
+        "违约理由要写明成因（实际: {}）",
+        delegations[0].why
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ==================== 任务表写侧闸：纯产出主体不立任务（S03 §3，T-107） ====================
 //
 // 钉的是**闸门的接线**（判据本身在 `task_table.test.rs`）：`todo_write` 到达执行窗口

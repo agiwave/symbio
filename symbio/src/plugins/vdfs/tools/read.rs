@@ -104,3 +104,7 @@ impl Capability for ReadTool {
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "read.test.rs"]
+mod tests;
