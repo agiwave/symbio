@@ -116,22 +116,23 @@ impl RoundProgress {
         }
     }
 
-    /// 该不该说（纯判定）。
+    /// 该不该说——命中本格的行就返回**那一条命中**（行名 + 臂 + 档位），未命中
+    /// 返回 `None`。
     ///
     /// 判据在 [`super::super::loop_registry`] 的 `policy.report` 行——本方法只把
     /// 自己持有的三格数（轮次 / 静默 / 已汇报次数）连同策略快照折成 `LoopState`
     /// 交给表。**同一份判据只有一个 owner**：改阈值语义改那一行，不改这里。
-    pub(crate) fn due(&self, snapshot: &RunSnapshot) -> bool {
+    ///
+    /// 返回 `Hit` 而不是 `bool`：调用点要按臂**穷尽分派**（加一条臂不能被
+    /// catch-all 吞掉），也要记一条命中日志——两者都需要行本身，压成布尔就丢了。
+    pub(crate) fn due(&self, snapshot: &RunSnapshot) -> Option<super::super::loop_registry::Hit> {
         let state = super::super::loop_registry::LoopState::round_boundary(
             snapshot.tool_rounds,
             snapshot.quiet_ms,
             self.reports,
             self.policy.clone(),
         );
-        super::super::loop_registry::builtin()
-            .decide(&state)
-            .capsule()
-            == Some(super::super::loop_registry::Capsule::Report)
+        super::super::loop_registry::builtin().decide(&state).hit()
     }
 
     /// 说了：配额 +1、静默时钟归零。

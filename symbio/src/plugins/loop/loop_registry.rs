@@ -60,7 +60,7 @@
 //! 真正同点竞争的候选是 `policy.recall` 内部那三件事（记忆 / 技能 / 任务段）：
 //! 拆开需要「这一步做完了吗」这个簿记量，而它在直线代码里只能靠代码位置隐含。
 //!
-//! ## 本批的过渡形态（诚实划界）
+//! ## 直线代码期的行表形状（诚实划界）
 //!
 //! 现在每个决策点各有一个构造器、各调一次 `decide`，因为主循环还是**直线代码**：
 //! 它按顺序走七步，不是「迭代 `decide` 至不动点」。表在直线代码上的正确用法就是
@@ -68,11 +68,26 @@
 //!
 //! **这一步由 [`Site`] 收窄了代价**：格由 `LoopState` 的变体自证（`site()`），
 //! 进了表成为数据，于是加一行策略真的只是「1 个函数 + 1 行注册」，同格加第二行
-//! 也不再需要从全局编号里挤位。真正消掉构造器的是 PL-014 §4 的
-//! `drive`：`loop { project → decide → execute }`，届时 N 个构造器合并成一个
-//! `project()`，`policy.recall` 也会拆成 `policy.memory` / `policy.skill` 两行
-//! （区分它们的量「本轮已召回否」在 drive 里自然存在，在直线代码里只能靠代码
-//! 位置隐含）。那一步属步骤 5。
+//! 也不再需要从全局编号里挤位。
+//!
+//! 行形状补上 PL-014 §4 的 `effects`（[`Row::effects`]，档位 → 预算）与
+//! [`Capsule::owner`]（臂归属格）之后，五个调用点的形状统一为：
+//! **取 `Hit` → 记一条命中 → 按 `match hit.capsule` 穷尽分派本格的臂 → 落格**。
+//! 三个后果：
+//!
+//! - 档位由行携带，调用点只读（`turn_exec/assemble` 读 `hit.effects.tier`，
+//!   不再由「有没有命中」反推）；
+//! - 加一条臂时，五处 `match` 都必须显式表态（穷尽列举，不写就编译错误），
+//!   PL-015 §4.2 说的「臂永不派发且没人红」因此从**静默**变成**编译期**;
+//! - 同格加一行且复用本格已有的臂 ⇒ 主循环零改动（`adding_a_second_row_to_a_site_is_pure_registration`
+//!   钉住）；新臂才需要改枚举与五处分派组——臂是环的指令集，这个代价是想要的。
+//!
+//! 真正消掉构造器、把「格」也变成数据的是 PL-014 §4 的 `drive`：
+//! `loop { project → decide → execute }`，届时 N 个构造器合并成一个 `project()`，
+//! `policy.recall` 也会拆成 `policy.memory` / `policy.skill` 两行（区分它们的量
+//! 「本轮已召回否」在 drive 里自然存在，在直线代码里只能靠代码位置隐含）。
+//! 那一步属步骤 5，**本批不做**（[ADR-107](../../../../../docs/010-adr/107.md
+//! "ADR-107") 先要求一次性阶段的「已做」落为事实，段一已完成）。
 //!
 //! ## 反射档为什么只判「走不走」，不判「走哪条」
 //!
@@ -88,6 +103,7 @@
 use std::sync::LazyLock;
 
 use super::chat_loop::ProgressPolicy;
+use crate::symbio_core::LatencyTier;
 
 /// 一次派发要执行的那条**环上的臂**（PL-014 `Step::Act` 的载荷）。
 ///
@@ -156,6 +172,32 @@ impl Capsule {
             Self::Compress => "compress",
             Self::Recall => "recall",
             Self::Reflex => "reflex",
+        }
+    }
+
+    /// **这条臂由哪一格执行**——臂的归属是数据，不是五个调用点各记一份的约定。
+    ///
+    /// ## 它补的是哪条缝（PL-015 §4.2）
+    ///
+    /// 加一个 `Capsule` 变体、写好 `name()`、挂上行，却忘掉某个调用点的比较，
+    /// 结果是**编译通过、运行通过、这条臂永远不派发**——本方案里唯一一处静默失效。
+    /// 把归属写进枚举之后，这件事至少在三个地方逼人表态：
+    ///
+    /// 1. 本方法的 `match` 是穷尽的 ⇒ 加变体必须给它指定一个格；
+    /// 2. 五处分派点按 `match arm` **穷尽列举**变体（见各调用点）⇒ 加变体时
+    ///    每一处都必须决定「本格接不接它」，不写就编译错误；
+    /// 3. `every_capsule_is_owned_by_the_site_that_produces_it` 钉住「内建行
+    ///    产出的臂，其归属格正是挂行的那一格」——行挂错格不再是沉默。
+    ///
+    /// 它仍**不能**替代 drive：格与臂的对应关系之所以要显式记下来，正是因为
+    /// 环还是直线代码、每个调用点只知道自己在第几步（ADR-107）。
+    pub(crate) fn owner(self) -> Site {
+        match self {
+            Self::Decide => Site::TurnHead,
+            Self::Report => Site::RoundBoundary,
+            Self::Compress => Site::Compress,
+            Self::Recall => Site::TurnPrepare,
+            Self::Reflex => Site::Reflex,
         }
     }
 }
@@ -384,9 +426,51 @@ impl LoopState {
     }
 }
 
-/// 策略行：一个判据 + 它派发的臂。
+/// 行携带的**执行效果**（PL-014 §4 机制 2：「Policy 行的 `effects` 携带预算档」）。
+///
+/// ## 为什么是档位，不是毫秒
+///
+/// 毫秒是**派生值**（[`LatencyTier::budget_ms`]），存一份就会与档位漂移（J1：
+/// 能由别的东西算出来的不占字段）。真正约束执行的是档位：它决定这一行派发的
+/// 动作能不能拿到模型句柄——反射档在类型上只有 `RuleOnly`（PL-001 §4.1）。
+///
+/// ## 为什么现在只装一个字段
+///
+/// PL-014 的 `effects` 还列了 risk / approval / retention，那些是**能力行**的
+/// 执行效果，策略行今天没有生产者。这里只落有真读方的那个：`reflex` 格的档位
+/// 直接进 `ActorSpec`（`turn_exec/assemble`），不再由调用点用「有没有命中」
+/// 反推。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Effects {
+    /// 这一行动作允许的时延档（PL-001 §4.1 四档）。
+    pub(crate) tier: LatencyTier,
+}
+
+impl Effects {
+    /// 档位对应的时延预算（毫秒）——派生，不存。
+    pub(crate) fn budget_ms(self) -> u64 {
+        self.tier.budget_ms()
+    }
+}
+
+/// 策略行：一个判据 + 它派发的臂 + 执行效果。
 ///
 /// `decide` 返回 `None` = 本行不管这一问（交给同格后面的行）；`Some` = 本行认领。
+///
+/// ## 一行携带什么（PL-015 §2 五位的等价形状）
+///
+/// | 位 | 落点 | 为什么在这里 |
+/// |---|---|---|
+/// | **模式** | 输出臂的固有属性（`Capsule`） | 动作决定模式（`Decide` / `Compress` 可能调模型，其余是重述）；模式是臂的性质，不是行的重复字段 |
+/// | **档位** | [`Row::effects`]`.tier` | 同一格的两行可以选不同预算（例如模型重排 vs 纯查表） |
+/// | **预算** | [`Effects::budget_ms`] 派生 | J1：能由档位算出来的不存 |
+/// | **输入** | `&LoopState` | 按格分形（ADR-093）：行读不到别格的字段 |
+/// | **输出** | `Option<Capsule>` | 闭集臂名；加臂必须改枚举 |
+///
+/// 这五个位是 PL-015 §2 那张扩充账的行形状。行本身仍然只做一件事——**判据**；
+/// 执行体留在格所在的那一层（`chat_loop` / `turn_exec`），因为它的入参是那一层
+/// 的私有上下文，不是 `LoopState`。把执行体塞进行里需要一个人造的「万能上下文」，
+/// 那是 drive 的形状，不是本批（ADR-107）。
 pub(crate) struct Row {
     /// 行的身份，进日志、进冲突报错。命名 `policy.<名字>`，与能力行区分。
     pub(crate) name: &'static str,
@@ -398,6 +482,8 @@ pub(crate) struct Row {
     /// `prio` 不构成冲突，也不需要协调编号。这是「同格加第二行」从「挤全局
     /// 编号」变成「在格内挑一个序」的全部改动。
     pub(crate) prio: u32,
+    /// 这一行派发的动作允许花多少时延（见 [`Effects`]）。
+    pub(crate) effects: Effects,
     pub(crate) decide: fn(&LoopState) -> Option<Capsule>,
 }
 
@@ -447,6 +533,26 @@ impl std::fmt::Display for RowConflict {
 pub(crate) struct Hit {
     pub(crate) row: &'static str,
     pub(crate) capsule: Capsule,
+    /// 行的执行效果（档位 → 预算）。调用点读它来装配执行体，不再各自反推档位。
+    pub(crate) effects: Effects,
+}
+
+impl Hit {
+    /// 一次命中的**可观测面**：格 / 行 / 臂 / 档位 / 预算，五个调用点共用一条格式。
+    ///
+    /// 排查「某一步怎么没发生」时，第一件事是看那一格有没有行、行派的是哪条臂；
+    /// 档位与预算同行给出，才能区分「行没错、是预算档位配低了」这类故障。
+    pub(crate) fn trace(&self) {
+        crate::plugin_debug!(
+            "session",
+            "[Loop] {} 格命中 {} → {}（{} / {}ms）",
+            self.capsule.owner().name(),
+            self.row,
+            self.capsule.name(),
+            self.effects.tier.name(),
+            self.effects.budget_ms()
+        );
+    }
 }
 
 /// 一次裁决的结果。
@@ -478,6 +584,11 @@ impl Verdict {
     ///
     /// 把「未命中」压回一个 `Option` 是**调用点的**选择，不是 Verdict 的语义：
     /// 需要区分两种未命中的地方（bootstrap 校验、日志、测试）读变体本身。
+    ///
+    /// 生产侧不再用它——五个分派点都取 [`Verdict::hit`] 再 `match hit.capsule`
+    /// （穷尽列举，加臂时编译错误）。保留给测试：判「这一格此刻派了哪条臂」
+    /// 时，`Option<Capsule>` 的断言比 `matches!` 更直白。
+    #[cfg(test)]
     pub(crate) fn capsule(self) -> Option<Capsule> {
         match self {
             Self::Hit(hit) => Some(hit.capsule),
@@ -575,6 +686,7 @@ impl Registry {
             (row.decide)(state).map(|capsule| Hit {
                 row: row.name,
                 capsule,
+                effects: row.effects,
             })
         }) {
             Some(hit) => Verdict::Hit(hit),
@@ -614,30 +726,50 @@ impl Registry {
                 name: "policy.classify",
                 site: Site::TurnHead,
                 prio: 10,
+                // 判决可能落到模型（`VerdictSource::Model`），但不生成：快速档。
+                effects: Effects {
+                    tier: LatencyTier::Fast,
+                },
                 decide: policy_classify,
             },
             Row {
                 name: "policy.report",
                 site: Site::RoundBoundary,
                 prio: 10,
+                // 模板产线，零模型往返（缺口 4 的设计前提）。
+                effects: Effects {
+                    tier: LatencyTier::Reflex,
+                },
                 decide: policy_report,
             },
             Row {
                 name: "policy.compress",
                 site: Site::Compress,
                 prio: 10,
+                // 语义压缩调模型：深度档。
+                effects: Effects {
+                    tier: LatencyTier::Deep,
+                },
                 decide: policy_compress,
             },
             Row {
                 name: "policy.recall",
                 site: Site::TurnPrepare,
                 prio: 10,
+                // 事实投影的纯读 + 技能路由，不调模型。
+                effects: Effects {
+                    tier: LatencyTier::Reflex,
+                },
                 decide: policy_recall,
             },
             Row {
                 name: "policy.reflex",
                 site: Site::Reflex,
                 prio: 10,
+                // 快路就是「不调模型」：反射档是它的定义，不是建议。
+                effects: Effects {
+                    tier: LatencyTier::Reflex,
+                },
                 decide: policy_reflex,
             },
         ] {

@@ -156,16 +156,8 @@ pub(crate) async fn prepare_turn_inputs(
     emit_streaming_start(sink, &root_id, Some(turn.request_round)).await;
 
     // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
-    // `request_round == 0` 是「每轮一次」的既有判据（classify / history 同款）：
-    // 同一轮内记忆不漂移，事实源也只扫一遍，后续工具轮复用同一份视图。
-    // 临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
-    //
-    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `turn_exec`
-    // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
-    // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
-    // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
-    // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
-    // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
+    // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录 ∧ 未做过」。
+    // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机。
     // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格）。
     // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
     let recall_done = turn.stage_done(turn.request_round, Capsule::Recall);
@@ -174,55 +166,15 @@ pub(crate) async fn prepare_turn_inputs(
         context.session.is_persistent(),
         recall_done,
     );
-    if builtin().decide(&recall_state).capsule() == Some(Capsule::Recall) {
-        let recall_query = last_user_text(context);
-        // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
-        // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
-        // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
-        let recall_viewer = crate::symbio_core::authz::request_principal(ctx.as_ref());
-        // 事实是**值**（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）：
-        // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
-        // 它们看到的是同一刻的事实，不各开各的文件。
-        let facts = context.session.facts_snapshot();
-        turn.recall_view = super::super::memory_events::recall_view(
-            context
-                .session
-                .run_op::<Vec<crate::symbio_core::FleetSnapshot>>(
-                    crate::symbio_core::run_ops::RECALL_SNAPSHOTS,
-                    (),
-                )
-                .await
-                .map_err(TurnExit::Failed)?,
-            &recall_query,
-            &recall_viewer,
-        );
-        // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
-        // 召回同一条口径（同一轮内集合不漂移）。
-        turn.ready_section = super::super::task_events::prompt_section(&facts);
-        // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
-        // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
-        // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
-        // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
-        //
-        // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
-        // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
-        // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
-        // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
-        let routing = turn
-            .recall_view
-            .as_mut()
-            .map(|view| super::super::skill_events::route(&facts, view))
-            .unwrap_or_default();
-        // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
-        // 两者同名不同物，见 ADR-079）：关着时可用集恒空——判定照常发生、
-        // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
-        // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。
-        let fast_armed = context.session.skill_fast_path();
-        turn.skill_route = routing.obs;
-        turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
-        // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
-        // 落格交给运行器（写者令牌在 `turn_exec`）。
-        turn.mark_stage(StageFact::ran(Capsule::Recall, turn.request_round));
+    let recall_hit = builtin().decide(&recall_state).hit();
+    if let Some(hit) = recall_hit {
+        hit.trace();
+    }
+    // 臂的穷尽分派：本格只执行 `Recall`；其余四条属于别的格（`Capsule::owner`），
+    // 显式不接——加一条臂时这里编译错误，不落到 catch-all（PL-015 §4.2）。
+    match recall_hit.map(|h| h.capsule) {
+        Some(Capsule::Recall) => run_recall(ctx, context, turn).await?,
+        Some(Capsule::Decide | Capsule::Report | Capsule::Compress | Capsule::Reflex) | None => {}
     }
     let recall_section = turn
         .recall_view
@@ -290,6 +242,69 @@ pub(crate) async fn prepare_turn_inputs(
     })
 }
 
+/// 轮首准备格的执行体（`Capsule::Recall`）：长期记忆召回 + 技能路由 + 调度段。
+///
+/// 调用点只负责「取行 → 记命中 → 按臂分派」；执行体留在本层——它的入参是
+/// `TurnState` / `SessionContext` 这类私有上下文，不是 `LoopState`（ADR-107）。
+async fn run_recall(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    context: &SessionContext,
+    turn: &mut TurnState,
+) -> Result<(), TurnExit> {
+    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `turn_exec`
+    // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
+    // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
+    let recall_query = last_user_text(context);
+    // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
+    // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
+    // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
+    let recall_viewer = crate::symbio_core::authz::request_principal(ctx.as_ref());
+    // 事实是**值**（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）：
+    // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
+    // 它们看到的是同一刻的事实，不各开各的文件。
+    let facts = context.session.facts_snapshot();
+    turn.recall_view = super::super::memory_events::recall_view(
+        context
+            .session
+            .run_op::<Vec<crate::symbio_core::FleetSnapshot>>(
+                crate::symbio_core::run_ops::RECALL_SNAPSHOTS,
+                (),
+            )
+            .await
+            .map_err(TurnExit::Failed)?,
+        &recall_query,
+        &recall_viewer,
+    );
+    // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
+    // 召回同一条口径（同一轮内集合不漂移）。
+    turn.ready_section = super::super::task_events::prompt_section(&facts);
+    // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+    // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
+    // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
+    // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
+    //
+    // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
+    // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `turn_exec`
+    // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
+    // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
+    let routing = turn
+        .recall_view
+        .as_mut()
+        .map(|view| super::super::skill_events::route(&facts, view))
+        .unwrap_or_default();
+    // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
+    // 两者同名不同物，见 ADR-079）：关着时可用集恒空——判定照常发生、
+    // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
+    // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。
+    let fast_armed = context.session.skill_fast_path();
+    turn.skill_route = routing.obs;
+    turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
+    // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
+    // 落格交给运行器（写者令牌在 `turn_exec`）。
+    turn.mark_stage(StageFact::ran(Capsule::Recall, turn.request_round));
+    Ok(())
+}
+
 /// 收口 ③：上下文水位的**唯一响应点**——自动语义压缩只在这里判定与执行。
 ///
 /// ## 顺序不可交换（收口前由主循环体的行序隐含保证，现在由本函数内部保证）
@@ -314,42 +329,62 @@ pub(crate) async fn apply_compaction(
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
     // 下一轮照常再试；但同一轮内不重复进产线（ADR-107 判据 2）。
     let compress_done = turn.stage_done(turn.request_round, Capsule::Compress);
-    if builtin()
+    let compress_hit = builtin()
         .decide(&LoopState::compress(req.auto_compress, compress_done))
-        .capsule()
-        == Some(Capsule::Compress)
-    {
-        match auto_compress_process(
-            orchestrator,
-            context,
-            ctx,
-            &turn.abort,
-            overhead_tokens,
-            false,
-        )
-        .await
-        {
-            Ok(Some(history_count)) => {
-                plugin_info!(
-                    "session",
-                    "[Compress] 上下文已压缩：{} 条消息 → 1 条摘要",
-                    history_count
-                );
-                turn.last_saved = context.messages.len();
-            }
-            Ok(None) => {}
-            // 压缩失败**不失败整轮**：压缩是优化项，失败已就地回滚、历史完整，
-            // 本轮仍应正常回复用户。失败原因已写入压缩节点（meta.failure_kind +
-            // error），连续失败会触发熔断（跳过后续自动压缩）。
-            Err(e) => {
-                plugin_warn!("session", "[Compress] 自动压缩失败: {e}");
-            }
+        .hit();
+    if let Some(hit) = compress_hit {
+        hit.trace();
+    }
+    // 臂的穷尽分派：本格只执行 `Compress`；其余四条属于别的格（`Capsule::owner`），
+    // 显式不接——加一条臂时这里编译错误，不落到 catch-all（PL-015 §4.2）。
+    match compress_hit.map(|h| h.capsule) {
+        Some(Capsule::Compress) => {
+            run_compress(orchestrator, ctx, context, turn, overhead_tokens).await
         }
-        // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
-        // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
-        turn.mark_stage(StageFact::ran(Capsule::Compress, turn.request_round));
+        Some(Capsule::Decide | Capsule::Report | Capsule::Recall | Capsule::Reflex) | None => {}
     }
     Ok(())
+}
+
+/// 压缩格的执行体（`Capsule::Compress`）：进一次压缩产线并落「已做」。
+///
+/// 失败**不失败整轮**——压缩是优化项，理由见函数体内的注释。
+async fn run_compress(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    context: &mut SessionContext,
+    turn: &mut TurnState,
+    overhead_tokens: usize,
+) {
+    match auto_compress_process(
+        orchestrator,
+        context,
+        ctx,
+        &turn.abort,
+        overhead_tokens,
+        false,
+    )
+    .await
+    {
+        Ok(Some(history_count)) => {
+            plugin_info!(
+                "session",
+                "[Compress] 上下文已压缩：{} 条消息 → 1 条摘要",
+                history_count
+            );
+            turn.last_saved = context.messages.len();
+        }
+        Ok(None) => {}
+        // 压缩失败**不失败整轮**：压缩是优化项，失败已就地回滚、历史完整，
+        // 本轮仍应正常回复用户。失败原因已写入压缩节点（meta.failure_kind +
+        // error），连续失败会触发熔断（跳过后续自动压缩）。
+        Err(e) => {
+            plugin_warn!("session", "[Compress] 自动压缩失败: {e}");
+        }
+    }
+    // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
+    // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
+    turn.mark_stage(StageFact::ran(Capsule::Compress, turn.request_round));
 }
 
 #[cfg(test)]

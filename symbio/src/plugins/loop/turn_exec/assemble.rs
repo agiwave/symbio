@@ -238,15 +238,15 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     let matched = super::super::skill_events::take_match(skill_hits, user_text);
     let reflex_state =
         super::super::loop_registry::LoopState::reflex(resume_anchor.is_none(), matched.is_some());
-    let hit = match super::super::loop_registry::builtin()
+    let reflex_hit = super::super::loop_registry::builtin()
         .decide(&reflex_state)
-        .capsule()
-    {
-        Some(super::super::loop_registry::Capsule::Reflex) => matched,
-        _ => None,
-    };
+        .hit();
+    if let Some(hit) = reflex_hit {
+        hit.trace();
+    }
 
-    // 档位：命中 ⇒ 反射（`budget_ms = 80`、开轮格的 `tier = reflex`），未命中 ⇒ 深度。
+    // 档位由**命中的那条行**携带（`effects.tier`），不由本处按「有没有命中」
+    // 反推：判据与档位是同一条命中上的两个字段（PL-014 §4 机制 2）。
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
     // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
     //
@@ -254,10 +254,19 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它 ⇒ 该字段不再是
     // "算了却看不见"。`tier` 仍入格（兜底率按层统计的口径锚），且作为缺 `budget_ms`
     // 时的回退路径保留——两条路径读的是同一条事实的两种形态。
-    let tier = if hit.is_some() {
-        LatencyTier::Reflex
-    } else {
-        LatencyTier::Deep
+    //
+    // 其余四条臂属于别的格（`Capsule::owner`）：此处显式不接——穷尽列举是让
+    // 「加一条臂」变成编译错误，而不是靠 catch-all 静默放行（PL-015 §4.2）。
+    let (hit, tier) = match reflex_hit.map(|h| (h.capsule, h.effects.tier)) {
+        Some((super::super::loop_registry::Capsule::Reflex, tier)) => (matched, tier),
+        Some((
+            super::super::loop_registry::Capsule::Decide
+            | super::super::loop_registry::Capsule::Report
+            | super::super::loop_registry::Capsule::Compress
+            | super::super::loop_registry::Capsule::Recall,
+            _,
+        ))
+        | None => (None, LatencyTier::Deep),
     };
     // 身份进事件（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
     // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：

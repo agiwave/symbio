@@ -476,8 +476,12 @@ async fn overlong_file_produces_no_chunks() {
 // 返回空——与「真的没搜到」同形。判据：非法正则 ⇒ 按字面量重试并带说明；
 // 合法正则 ⇒ 没有说明；合法正则但无命中 ⇒ 也没有说明（这才是「没搜到」）。
 
+/// 每个用例一份独立目录：两个用例共用固定路径时，后起的 `remove_dir_all` +
+/// `create_dir_all` 会把前者正在检索的样例文件删掉（并行执行 ⇒ 偶发「搜不到」）。
 fn t199_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("symbio-test/t199-keyword");
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("symbio-test/t199-keyword-{n}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建临时目录");
     std::fs::write(

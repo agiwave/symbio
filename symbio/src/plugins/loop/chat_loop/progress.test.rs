@@ -16,6 +16,8 @@
 
 use super::*;
 
+use crate::symbio_core::LatencyTier;
+
 /// 四个条件都成立的策略；各用例只改其中一项。
 fn policy() -> ProgressPolicy {
     ProgressPolicy {
@@ -110,12 +112,15 @@ fn round_boundary_counts_up_and_gates_the_report() {
     // 第 1 个轮边界：轮数 1 < `min_rounds`（2）⇒ 不说。
     let first = p.advance();
     assert_eq!(first.tool_rounds, 1, "轮边界推进一格");
-    assert!(!p.due(&first), "轮数不到 min_rounds：进展还谈不上");
+    assert!(p.due(&first).is_none(), "轮数不到 min_rounds：进展还谈不上");
 
     // 第 2 个轮边界：轮数达标 ⇒ 说。
     let second = p.advance();
     assert_eq!(second.tool_rounds, 2);
-    assert!(p.due(&second), "轮数达标且静默够久：该说");
+    let hit = p.due(&second).expect("轮数达标且静默够久：该说");
+    assert_eq!(hit.row, "policy.report", "命中的是汇报行");
+    assert_eq!(hit.capsule.name(), "report");
+    assert_eq!(hit.effects.tier, LatencyTier::Reflex, "模板产线：反射档");
     assert!(
         second.quiet_ms >= 60_000,
         "静默时长从构造时的 last_spoke_at 起算"
@@ -127,7 +132,7 @@ fn speaking_resets_the_quiet_clock_and_spends_the_quota() {
     let mut p = progressed();
     p.advance();
     let snap = p.advance();
-    assert!(p.due(&snap));
+    assert!(p.due(&snap).is_some());
 
     p.spoke();
 
@@ -138,12 +143,12 @@ fn speaking_resets_the_quiet_clock_and_spends_the_quota() {
         "说了之后时钟归零：{} 不该还顶着 60 秒的静默",
         next.quiet_ms
     );
-    assert!(!p.due(&next), "归零后同一段静默不能连续吃配额");
+    assert!(p.due(&next).is_none(), "归零后同一段静默不能连续吃配额");
 
     // 配额：max_per_turn = 5，汇报一次后还剩 4 次额度。
     p.last_spoke_at = clock_now_ms() - 60_000;
     let due_again = p.advance();
-    assert!(p.due(&due_again), "时钟重新计时后还能再说");
+    assert!(p.due(&due_again).is_some(), "时钟重新计时后还能再说");
     assert_eq!(p.reports, 1, "配额计了一次");
 }
 
@@ -158,7 +163,7 @@ fn a_user_supplement_resets_the_clock_without_spending_the_quota() {
     let mut p = progressed();
     p.advance();
     let snap = p.advance();
-    assert!(p.due(&snap), "先构造出「该说」的一刻");
+    assert!(p.due(&snap).is_some(), "先构造出「该说」的一刻");
 
     p.stirred(clock_now_ms());
 

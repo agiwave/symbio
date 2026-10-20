@@ -24,6 +24,8 @@
 
 use super::*;
 
+use crate::symbio_core::LatencyTier;
+
 /// 四个旋钮都允许汇报的策略；各用例只改其中一项。
 fn progress() -> ProgressPolicy {
     ProgressPolicy {
@@ -101,6 +103,9 @@ fn put_inserts_by_prio_not_by_call_order() {
         name: "policy.late",
         site: Site::TurnHead,
         prio: 90,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     })
     .expect("首行注册");
@@ -108,6 +113,9 @@ fn put_inserts_by_prio_not_by_call_order() {
         name: "policy.early",
         site: Site::TurnHead,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     })
     .expect("次行注册");
@@ -122,6 +130,9 @@ fn duplicate_name_is_rejected() {
         name: "policy.dup",
         site: Site::TurnHead,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     };
     reg.put(row()).expect("首次注册");
@@ -143,6 +154,9 @@ fn prio_conflict_is_rejected_within_a_site() {
         name: "policy.b",
         site: Site::TurnPrepare,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     })
     .expect("首行注册");
@@ -153,6 +167,9 @@ fn prio_conflict_is_rejected_within_a_site() {
             name: "policy.a",
             site: Site::TurnPrepare,
             prio: 10,
+            effects: Effects {
+                tier: LatencyTier::Reflex,
+            },
             decide: |_| None,
         }),
         Err(RowConflict::PrioConflict {
@@ -187,6 +204,9 @@ fn same_prio_in_different_sites_is_not_a_conflict() {
         name: "policy.extra",
         site: Site::TurnPrepare,
         prio: 20,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     })
     .expect("同格加第二行只需一个格内新序（20），不必从全局编号里挤位");
@@ -199,6 +219,9 @@ fn decide_takes_the_first_hit_only() {
         name: "policy.first",
         site: Site::TurnHead,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| Some(Capsule::Decide),
     })
     .expect("注册");
@@ -206,6 +229,9 @@ fn decide_takes_the_first_hit_only() {
         name: "policy.second",
         site: Site::TurnHead,
         prio: 20,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         // 两行都认领同一格时，后者**不得**被问到（先命中者胜）。
         decide: |_| Some(Capsule::Report),
     })
@@ -230,6 +256,9 @@ fn declined_and_unmanned_are_distinguishable() {
         name: "policy.never",
         site: Site::TurnHead,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| None,
     })
     .expect("注册");
@@ -261,6 +290,9 @@ fn decide_only_scans_its_own_site() {
         name: "policy.bomb",
         site: Site::Reflex,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| Some(Capsule::Reflex),
     })
     .expect("注册");
@@ -544,6 +576,79 @@ fn every_capsule_has_a_producing_row() {
     );
 }
 
+/// 臂的归属格与「产出它的那一格」必须是同一个 —— `Capsule::owner` 的落点。
+///
+/// `every_capsule_has_a_producing_row` 只钉「有行产出」，不钉「产出行挂的格
+/// 与臂声明的归属格一致」。行挂错格时：调用点按 owner 分派，臂会在错误的格
+/// 被执行（或永远不执行）——两者都不崩、都不报。
+#[test]
+fn every_capsule_is_owned_by_the_site_that_produces_it() {
+    for site in Site::ALL {
+        let hit = builtin()
+            .decide(&call_of(*site))
+            .hit()
+            .unwrap_or_else(|| panic!("{} 格没有命中", site.name()));
+        assert_eq!(
+            hit.capsule.owner(),
+            *site,
+            "臂 {} 产出于 {} 格，却声明归属 {} 格",
+            hit.capsule.name(),
+            site.name(),
+            hit.capsule.owner().name()
+        );
+    }
+}
+
+/// `owner` 是**满射且单值**：五格恰被五臂各声明一次。
+///
+/// `owner` 的 `match` 已经是穷尽的（加臂必须给格），但「两条臂都声明同一格」
+/// 不会编译错误——它会让某一格执行另一格的臂（或另一格无臂可执行）。
+#[test]
+fn capsule_owner_is_total_and_injective() {
+    let owners: Vec<Site> = Capsule::ALL.iter().map(|c| c.owner()).collect();
+    for site in Site::ALL {
+        assert_eq!(
+            owners.iter().filter(|o| *o == site).count(),
+            1,
+            "{} 格应恰被一条臂声明归属：{owners:?}",
+            site.name()
+        );
+    }
+}
+
+/// 内建行的档位表：档位随**行**携带，不是调用点反推的。
+///
+/// 档位错了不会有错误信号：它只表现为「本该走反射的动作多付一次模型往返」
+/// 或「该调模型的动作拿不到 `FullModel` 令牌」。因此逐行钉住，改档位时
+/// 必须回来改这张表。
+#[test]
+fn builtin_rows_carry_their_declared_tier() {
+    let cases = [
+        // classify：可落到模型（`VerdictSource::Model`），但不生成。
+        (Site::TurnHead, LatencyTier::Fast),
+        // 汇报：模板产线，零模型往返。
+        (Site::RoundBoundary, LatencyTier::Reflex),
+        // 语义压缩调模型。
+        (Site::Compress, LatencyTier::Deep),
+        // 召回：事实投影的纯读 + 技能路由。
+        (Site::TurnPrepare, LatencyTier::Reflex),
+        // 快路就是「不调模型」。
+        (Site::Reflex, LatencyTier::Reflex),
+    ];
+    for (site, tier) in cases {
+        let hit = builtin()
+            .decide(&call_of(site))
+            .hit()
+            .unwrap_or_else(|| panic!("{} 格没有命中", site.name()));
+        assert_eq!(hit.effects.tier, tier, "{} 格的档位", site.name());
+        assert_eq!(
+            hit.effects.budget_ms(),
+            tier.budget_ms(),
+            "预算必须由档位派生（J1：不存第二份）"
+        );
+    }
+}
+
 // ── 裁决顺序：`prio` 说话，不是插入顺序 ─────────────────────────────────
 
 #[test]
@@ -558,6 +663,9 @@ fn lower_prio_wins_regardless_of_insertion_order() {
         name: "policy.later",
         site: Site::TurnHead,
         prio: 30,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| Some(Capsule::Report),
     })
     .expect("注册 later");
@@ -565,6 +673,9 @@ fn lower_prio_wins_regardless_of_insertion_order() {
         name: "policy.earlier",
         site: Site::TurnHead,
         prio: 10,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |_| Some(Capsule::Decide),
     })
     .expect("注册 earlier");
@@ -599,6 +710,9 @@ fn adding_a_second_row_to_a_site_is_pure_registration() {
         name: "policy.skill",
         site: Site::TurnPrepare,
         prio: 5,
+        effects: Effects {
+            tier: LatencyTier::Reflex,
+        },
         decide: |s| {
             let LoopState::TurnPrepare {
                 round, has_facts, ..
