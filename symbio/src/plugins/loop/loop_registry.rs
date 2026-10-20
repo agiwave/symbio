@@ -128,6 +128,23 @@ pub(crate) enum Capsule {
 }
 
 impl Capsule {
+    /// 全部臂——**测试**遍历的唯一取值点。
+    ///
+    /// 与 [`Site::ALL`] 不同，生产侧不需要这份全集（派发按变体匹配，不遍历），
+    /// 所以它只在 `cfg(test)` 下存在；它的价值全在
+    /// `every_capsule_has_a_producing_row` 那条对偶检查上。
+    ///
+    /// 加一个变体必须同时加进这里：该测试按它遍历，漏加时「这条臂没有任何行产出」
+    /// 不会被发现——臂是环的指令集，一条永不派发的指令等于一个假的能力。
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [Capsule] = &[
+        Capsule::Decide,
+        Capsule::Report,
+        Capsule::Compress,
+        Capsule::Recall,
+        Capsule::Reflex,
+    ];
+
     /// 臂名——日志、冲突报错、测试断言**唯一**的取值点。
     ///
     /// 名字与枚举变体一一对应，改名时编译器会指出每一处 `match`；字符串只在

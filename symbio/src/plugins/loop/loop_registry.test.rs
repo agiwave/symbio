@@ -488,6 +488,32 @@ fn call_of_matches_its_site() {
     }
 }
 
+/// 每条臂都必须有**生产者**（PL-015 §4.2；ADR-107 判据 1）。
+///
+/// `every_row_is_reachable_from_its_declared_site` 钉的是「格 → 行可达」，
+/// 本条钉它的对偶：「臂 → 行有产出」。加一个 `Capsule` 变体、写好 `name()`，
+/// 却没挂任何行时，编译与既有用例都不会红——那条臂永远不会被派发。
+/// `Capsule::ALL` 是遍历的唯一取值点（与 `Site::ALL` 同规矩）。
+#[test]
+fn every_capsule_has_a_producing_row() {
+    let produced: Vec<Capsule> = Site::ALL
+        .iter()
+        .filter_map(|site| builtin().decide(&call_of(*site)).capsule())
+        .collect();
+    for capsule in Capsule::ALL {
+        assert!(
+            produced.contains(capsule),
+            "臂 {} 没有任何内建行产出——它永远不会被派发",
+            capsule.name()
+        );
+    }
+    assert_eq!(
+        Capsule::ALL.len(),
+        produced.len(),
+        "内建行产出了 `ALL` 之外的臂，或两条行争同一臂"
+    );
+}
+
 // ── 裁决顺序：`prio` 说话，不是插入顺序 ─────────────────────────────────
 
 #[test]
@@ -571,19 +597,15 @@ fn adding_a_second_row_to_a_site_is_pure_registration() {
 #[test]
 fn capsule_names_are_unique_and_stable() {
     // 臂名是日志与冲突报错的取值点：重名会让「哪一行/哪条臂」指认不出。
-    let names = [
-        Capsule::Decide,
-        Capsule::Report,
-        Capsule::Compress,
-        Capsule::Recall,
-        Capsule::Reflex,
-    ]
-    .map(Capsule::name);
-    let mut sorted = names.to_vec();
+    // 遍历 `Capsule::ALL` 而不是在测试里另写一份变体清单——两份清单必然漂移，
+    // 而「哪条臂有行产出」由 `every_capsule_has_a_producing_row` 钉住。
+    let names: Vec<&'static str> = Capsule::ALL.iter().map(|c| c.name()).collect();
+    let mut sorted = names.clone();
     sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(sorted.len(), names.len(), "臂名重复：{names:?}");
     assert_eq!(names[0], "decide", "臂名是跨进程日志词，改动要同步文档");
+    assert_eq!(names.len(), 5, "臂的数目变了要同步 PL-014 与本文档");
 }
 
 #[test]
