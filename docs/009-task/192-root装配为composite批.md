@@ -2,12 +2,13 @@
 kind: task
 id: T-192-root装配为composite批
 title: root 直接装配为 composite 批——消灭第二套容器实现与自举环特判
-status: todo
+status: wont
 created: 2026-10-20
 track: plan
 prio: next
 deps: []
 parent: T-183-质量与机制清偿总批
+reason: '目标形状只来自审计报告（00 C3 · 01-1 · 02-1），没有落在任何方案或 ADR 的裁决里：PL-014 / PL-015 讲单环与驱动器，ADR-023 / ADR-033 只划邻接边界，均未裁决「谁来当根容器」。而它改的是装配层——二十条对外地址的归属、`home/reload` 的整树重建语义、`work/*` 与 T-198 的重叠都只被「对外字面值不变」一句带过。按 PL-006 §3 纪律 0，审计建议不是裁决；将来先补方案/ADR 再重开本条。'
 where: symbio/src/plugins/home/plugin.rs · symbio/src/plugins/composite/ · symbio/src/plugins/assembly/ · cli/src/ · tauri/src-tauri/ · scripts/（路由提取与守卫的特判）
 exit: '根装配走 composite 单一容器实现，home 的 4 条路由与工作区状态下沉为普通插件；第二套容器实现（实例表 / `parse_path` / traverse 聚合各一份）删除，且有「删后仍跑」的证据；「系统级插件不参与扫描」的自举环特判与 `SYSTEM_LEVEL_PROVIDERS` 收敛；home 的绝对形臂下沉为相对臂，match 臂注册处无例外；`home/reload` 的热重载语义在「root 即 composite」下有等价动作（整树重建 = 重新构造根）且有用例；E-002 与提取脚本的特判、守卫白名单各减一处；对外 20 条地址的字面值不变（前端与 CLI 只依赖根路由入口）；e2e 全绿'
 ---
@@ -46,3 +47,11 @@ traverse 聚合）各写一份，于是：
 - 2026-10-20 与 [T-198](198-插件身份单源化批.md "T-198-插件身份单源化批") 的关系：本批改容器，
   T-198 改身份（`PluginMeta` / `work/*`）；两者都动装配路径，建议本批先行——容器定了，
   身份挂在哪个容器上才确定。
+- 2026-10-20 **不做（wont）**：本批的目标形状（root 即 composite、home 路由下沉为普通插件）
+  只来自审计报告的建议，**没有**落在任何一份架构方案或 ADR 的裁决里——PL-014 / PL-015 讲的是
+  单环与驱动器，均未涉及根装配；ADR-023 / ADR-033 只划了邻接边界，没有裁决「谁来当根容器」。
+  而它要改的正是装配层：二十条对外地址的归属、`home/reload` 的整树重建语义、`work/*` 命名空间
+  与 [T-198](198-插件身份单源化批.md "T-198-插件身份单源化批") 的重叠，都在本批 exit 里被一句
+  「对外字面值不变」带过，方案本身尚未讨论清楚。按 [PL-006 §3 纪律 0](../004-plan/006-分步实施计划.md "PL-006-分步实施计划")，
+  没有方案裁决就不改架构；**审计建议不是裁决**。若将来确要做，先补一份把
+  「根容器形状 / `home/reload` 等价动作 / `work/*` 归属」写清的方案或 ADR，再重开本条。
