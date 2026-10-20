@@ -83,9 +83,6 @@ pub struct CapabilityMeta {
     /// 参数 Schema (JSON Schema)
     #[serde(rename = "parameters")]
     pub input_schema: Value,
-    /// 关键词列表（用于意图识别）
-    #[serde(default)]
-    pub keywords: Vec<String>,
     /// 能力分类（唯一分类字段，类型为枚举）
     ///
     /// - `Some(枚举)`：渲染层按 `ctx.get("lang")` 选本地化文案

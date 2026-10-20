@@ -112,12 +112,6 @@ pub fn tool(
         provides_assign_work: false,
         records_delegation_promise: false,
         owns_task_table: false,
-        keywords: vec![
-            "资源".to_string(),
-            "文件".to_string(),
-            "路径".to_string(),
-            "vdfs".to_string(),
-        ],
     }
 }
 

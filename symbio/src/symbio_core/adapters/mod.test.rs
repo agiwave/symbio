@@ -8,8 +8,9 @@
 //!
 //! [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 退役了快速档令牌
 //! （`ClassifyOnly` / `issue_fast` / `CanClassify` / `CanGenerate`）：那只原本守
-//! 「分类端口」的令牌，端口在生产里从未存在。档位语义仍在（`may_call_model` /
-//! `may_generate`），只是不再配令牌凭据。
+//! 「分类端口」的令牌，端口在生产里从未存在。档位语义由**预算值**承载
+//! （严格递增的四档）；`may_call_model` / `may_generate` 两个孤儿谓词无生产读方，
+//! 随后一并删除（[T-178](../../../../docs/009-task/178-过度机制清偿批.md "T-178")）。
 
 use super::*;
 
@@ -36,16 +37,6 @@ fn four_tier_budgets_are_strictly_increasing() {
     assert_eq!(LatencyTier::Fast.budget_ms(), 300);
     assert_eq!(LatencyTier::Deep.budget_ms(), 60_000);
     assert_eq!(LatencyTier::Autonomic.budget_ms(), 86_400_000);
-}
-
-/// 验收（01 §10）：反射层禁止模型；快速档只分类；生成仅深度/自主档。
-#[test]
-fn tier_capabilities_match_the_budget_table() {
-    assert!(!LatencyTier::Reflex.may_call_model(), "反射层禁模型");
-    assert!(LatencyTier::Fast.may_call_model());
-    assert!(!LatencyTier::Fast.may_generate(), "快速档只分类不生成");
-    assert!(LatencyTier::Deep.may_generate());
-    assert!(LatencyTier::Autonomic.may_generate());
 }
 
 /// 令牌是**零大小**的：凭据不该带载荷，带了就意味着「凭据里还能塞别的意思」。

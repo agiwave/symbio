@@ -193,7 +193,6 @@ fn meta(name: &str, category: Option<CapabilityCategory>) -> CapabilityMeta {
         name: name.to_string(),
         description: String::new(),
         input_schema: serde_json::json!({ "type": "object" }),
-        keywords: vec![],
         category,
         examples: None,
         ..Default::default()

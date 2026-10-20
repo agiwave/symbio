@@ -73,19 +73,6 @@ impl LatencyTier {
             _ => None,
         }
     }
-
-    /// 该档位是否允许**触碰模型**。
-    pub fn may_call_model(self) -> bool {
-        matches!(
-            self,
-            LatencyTier::Fast | LatencyTier::Deep | LatencyTier::Autonomic
-        )
-    }
-
-    /// 该档位是否允许**生成**（而非只分类）。
-    pub fn may_generate(self) -> bool {
-        matches!(self, LatencyTier::Deep | LatencyTier::Autonomic)
-    }
 }
 
 // ── 能力令牌：两档 ZST，私有构造 ⇒ 不可伪造 ─────────────────────────────

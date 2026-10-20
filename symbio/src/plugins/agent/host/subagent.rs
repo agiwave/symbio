@@ -154,7 +154,6 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 },
                 "required": ["prompt"]
             }),
-            keywords: Vec::new(),
             category: Some(crate::symbio_core::CapabilityCategory::Chat),
             examples: Some(vec![
                 "agent_id='<agent-id>', prompt='分析这个项目的架构'".to_string()

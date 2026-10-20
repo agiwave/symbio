@@ -216,7 +216,6 @@ async fn supplements_become_facts_visible_next_turn() {
             name: "vdfs_read".into(),
             description: "读文件".into(),
             input_schema: serde_json::json!({ "type": "object" }),
-            keywords: vec![],
             category: None,
             examples: None,
             ..Default::default()
@@ -776,7 +775,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             name: "vdfs_read".into(),
             description: "读文件".into(),
             input_schema: serde_json::json!({ "type": "object" }),
-            keywords: vec![],
             category: None,
             examples: None,
             ..Default::default()
@@ -991,7 +989,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
             name: "vdfs_read".into(),
             description: "读文件".into(),
             input_schema: serde_json::json!({ "type": "object" }),
-            keywords: vec![],
             category: None,
             examples: None,
             ..Default::default()
@@ -1202,7 +1199,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         name: "agent_run".into(),
         description: "派生一个子智能体".into(),
         input_schema: serde_json::json!({ "type": "object" }),
-        keywords: vec![],
         category: None,
         examples: None,
         provides_assign_work: true,
