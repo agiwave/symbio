@@ -2,7 +2,7 @@
 kind: task
 id: T-193-Agent权限声明执行方批
 title: Agent 权限声明执行方批——permissions 要么有闸，要么改名「声明即声明」
-status: todo
+status: done
 created: 2026-10-20
 track: plan
 prio: next
@@ -10,6 +10,7 @@ deps: []
 parent: T-183-质量与机制清偿总批
 where: symbio/src/plugins/agent/host/scope.rs · symbio/src/plugins/agent/host/plugin.rs · symbio/src/plugins/agent/host/manifest.rs · symbio/src/symbio_core/authz.rs · docs/010-adr/
 exit: '二选一落地并留痕：① 补执行方——`FsPerms.read` / `write` 过滤子树暴露的 `vdfs` 族能力，`NetworkPerms.domains` 过滤 web 族出网域名，`Limits.max_prompt_bytes` 在提示词拼接处截断并显式告知模型，`Limits.max_tools` 在工具注册处截断，四个执行点各有用例且写法为「默认拒绝、显式放行」；② 降级——字段改名为声明性质（如 `declared_permissions`）或在 manifest 模块文档与规范里明写「本字段当前无执行方」；任一条都要有 ADR 登记；「少一行 = 一条拒绝」的方向不破；全量门禁与 e2e 全绿'
+evidence: 提交 `20a5db18`。取 ②（降级）并留痕：[ADR-102](../010-adr/102.md "ADR-102") 裁决 Rust 字段 `permissions` → `declared_permissions`，线格式仍是 `permissions`（`permissions_stay_on_the_wire_while_the_rust_field_says_declared` 钉住双向）；规范 §5.3 与 §11-4 明写「当前无执行方」，§11-4 由「应当约束」改为如实陈述。不补执行方的理由（四个执行点单独接任一个都会产生新的假边界）与补齐四前提（作用域 provider / 出网单口 / 截断裁决 / 空表方向）落 ADR。RE-010 新增「声明·Agent 权限」③ 行，豁免期限指向 ADR-102。门禁：lib 全绿（manifest 新用例 5/5）、clippy 净、docs/facts 73/73、e2e 77/77。
 ---
 
 ## 内容
