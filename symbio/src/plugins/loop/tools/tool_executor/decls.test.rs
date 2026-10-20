@@ -86,7 +86,7 @@ fn factory_metas() -> Vec<CapabilityMeta> {
 #[tokio::test]
 async fn each_family_judges_only_its_own_tool() {
     let ctx = ctx_with(factory_metas()).await;
-    let decls = ToolDecls::of(&ctx).await;
+    let decls = ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await);
 
     assert!(decls.provides_assign_work("agent_run"));
     assert!(decls.records_delegation_promise("agent_run"));
@@ -111,7 +111,7 @@ async fn each_family_judges_only_its_own_tool() {
 #[tokio::test]
 async fn matching_keeps_the_pre_mechanization_shapes() {
     let ctx = ctx_with(factory_metas()).await;
-    let decls = ToolDecls::of(&ctx).await;
+    let decls = ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await);
 
     // 等值口径：空格不算名字的一部分，前缀名不是等值命中。
     assert!(decls.provides_assign_work(" agent_run "));
@@ -141,7 +141,7 @@ async fn declarations_travel_into_scoped_projection_names() {
         meta("agent_probe-agent_todo_write", false, false, true),
     ])
     .await;
-    let decls = ToolDecls::of(&ctx).await;
+    let decls = ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await);
 
     assert!(decls.provides_assign_work("agent_probe-agent_agent_run"));
     assert!(decls.records_delegation_promise("agent_probe-agent_agent_run"));
@@ -157,7 +157,7 @@ async fn declarations_travel_into_scoped_projection_names() {
 #[tokio::test]
 async fn without_a_visitor_nothing_is_in_any_gate() {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    let decls = ToolDecls::of(&ctx).await;
+    let decls = ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await);
 
     assert!(!decls.provides_assign_work("agent_run"));
     assert!(!decls.records_delegation_promise("agent_run"));

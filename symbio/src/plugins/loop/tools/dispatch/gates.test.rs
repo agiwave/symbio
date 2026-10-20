@@ -50,7 +50,7 @@ async fn decls_with(entries: &[(&str, bool, bool)]) -> ToolDecls {
         crate::symbio_core::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
-    ToolDecls::of(&ctx).await
+    ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await)
 }
 
 fn neutral_breaker() -> BreakerInputs {

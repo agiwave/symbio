@@ -83,7 +83,7 @@ async fn factory_decls() -> ToolDecls {
         crate::symbio_core::CAPABILITY_VISITOR,
         visitor as Arc<dyn Registry>,
     );
-    ToolDecls::of(&ctx).await
+    ToolDecls::of_metas(&crate::symbio_core::tool_metas(&ctx).await)
 }
 
 // ==================== extract_result：判定顺序即约定 ====================
@@ -1557,6 +1557,485 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         !text.contains("define.work / assert.verification"),
         "平凡值会话（agent:main 持 define.work）不得被任务表闸拒（实际: {text}）"
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ==================== T-190 批内并行：只读并行、其余串行、收口按序 ====================
+//
+// 这组用例钉四件事，各自都有一条能红的判据：
+// 1. 两个只读调用**真的同时在途**（用 2 方屏障；串行实现会死等 → 超时红）；
+// 2. `Medium` 调用与任何调用**不重叠**（峰值并发 = 1；写侧顺序不确定是并行最坏的代价）；
+// 3. 交互模式整批串行（审批 / 提问一次只处理一张卡）；
+// 4. 结果与事件**逐项按调用顺序**收口：完成次序被故意倒过来，结果次序仍不变。
+//
+// 另有中止传播：批次里一个信号中止 ⇒ 所有在途调用都收到同一信号并各自收敛
+// （同一 `ExecAbortSignal`，不是每条各造一个）。
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::symbio_core::CapabilityRiskLevel;
+
+/// 记录并发窗口的假工具：不进则退，峰值可读。
+struct ProbeTool {
+    meta: CapabilityMeta,
+    barrier: Option<Arc<tokio::sync::Barrier>>,
+    sleep_ms: u64,
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+}
+
+impl ProbeTool {
+    fn new(
+        name: &str,
+        risk: CapabilityRiskLevel,
+        active: &Arc<AtomicUsize>,
+        peak: &Arc<AtomicUsize>,
+    ) -> Self {
+        Self {
+            meta: CapabilityMeta {
+                name: name.to_string(),
+                risk: Some(risk),
+                ..Default::default()
+            },
+            barrier: None,
+            sleep_ms: 0,
+            active: active.clone(),
+            peak: peak.clone(),
+        }
+    }
+
+    fn with_barrier(mut self, barrier: Arc<tokio::sync::Barrier>) -> Self {
+        self.barrier = Some(barrier);
+        self
+    }
+
+    fn with_sleep(mut self, ms: u64) -> Self {
+        self.sleep_ms = ms;
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::symbio_core::Capability for ProbeTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.meta.clone()
+    }
+
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        if let Some(barrier) = &self.barrier {
+            // 只有两条**同时在途**才过得去：串行实现会一直等在这里。
+            barrier.wait().await;
+        }
+        if self.sleep_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
+        }
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(serde_json::json!({ "content": format!("done:{}", self.meta.name) }))
+    }
+}
+
+/// 无钩子的父插件：`fire_hook` 拿到 `Err` ⇒ 按缺省放行（生产上无钩子插件同形）。
+struct NopParent;
+
+#[async_trait::async_trait]
+impl Plugin for NopParent {
+    fn meta(&self) -> crate::symbio_core::PluginMeta {
+        crate::symbio_core::PluginMeta::new("nop", "Nop")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("nop".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("nop".into()))
+    }
+}
+
+async fn ctx_with_probes(tools: Vec<Arc<ProbeTool>>) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    for tool in tools {
+        visitor
+            .put(CapabilityRow::tool(tool as Arc<dyn Capability>))
+            .await;
+    }
+    req.set(
+        crate::symbio_core::CAPABILITY_VISITOR,
+        visitor as Arc<dyn Registry>,
+    );
+    Arc::new(req) as Arc<dyn PluginInvokeRequest>
+}
+
+/// 父 ToolCall 的权威副本（执行层从 `context_messages` 取它做终态快照）。
+fn tool_call_node(id: &str, name: &str) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        // 身份写 `principal`，不写存量 `role` 格（S-014 棘轮）。
+        principal: Some(crate::symbio_core::principal::Principal::tool_principal(
+            name,
+        )),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": name})),
+        status: Some(NodeStatus::Streaming),
+        ..Default::default()
+    }
+}
+
+fn probe_calls(pairs: &[(&str, &str)]) -> Vec<TurnToolCallInfo> {
+    pairs
+        .iter()
+        .map(|(id, name)| TurnToolCallInfo {
+            id: Some((*id).to_string()),
+            wire_id: None,
+            name: Some((*name).to_string()),
+            arguments: serde_json::json!({}),
+            parse_error: None,
+            overflow_notice: None,
+        })
+        .collect()
+}
+
+fn msg_text(node: &ChatNode) -> String {
+    node.content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default()
+}
+
+/// 记录广播帧的出口（`ExecEventSink::Direct`）：用来钉「每条调用的运行态先于其结果」。
+struct FrameLog(Arc<std::sync::Mutex<Vec<ChatNode>>>);
+
+#[async_trait::async_trait]
+impl crate::symbio_core::ExecTranscriptWriter for FrameLog {
+    async fn apply(&self, message: ChatNode) {
+        self.0.lock().unwrap().push(message);
+    }
+}
+
+/// 只读调用并行执行；完成次序被倒过来，**结果仍按调用顺序**收口；
+/// 每条调用的 `Streaming` 帧先于它自己的结果帧。
+#[tokio::test]
+async fn read_only_calls_run_concurrently_and_report_in_call_order() {
+    let dir = test_dir().join("t190-parallel");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    // a 先开跑但最后完成（60ms），b 后开跑先完成（20ms）：完成次序 = b, a。
+    let a = Arc::new(
+        ProbeTool::new("probe_a", CapabilityRiskLevel::Low, &active, &peak)
+            .with_barrier(barrier.clone())
+            .with_sleep(60),
+    );
+    let b = Arc::new(
+        ProbeTool::new("probe_b", CapabilityRiskLevel::Low, &active, &peak)
+            .with_barrier(barrier.clone())
+            .with_sleep(20),
+    );
+    let ctx = ctx_with_probes(vec![a, b]).await;
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let frames = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = ExecEventSink::direct(Arc::new(FrameLog(frames.clone())));
+    let abort = ExecAbortSignal::new();
+    let nodes = vec![
+        tool_call_node("tc-a", "probe_a"),
+        tool_call_node("tc-b", "probe_b"),
+    ];
+    let mut delegations = Vec::new();
+    let mut tasks = Vec::new();
+    let mut breaks = Vec::new();
+
+    let (msgs, updates) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        process_tool_calls_async(
+            probe_calls(&[("tc-a", "probe_a"), ("tc-b", "probe_b")]),
+            &parent,
+            &sink,
+            &abort,
+            ctx,
+            &nodes,
+            &dir,
+            &EventStore::new(),
+            false,
+            &mut delegations,
+            &mut tasks,
+            &mut breaks,
+        ),
+    )
+    .await
+    .expect("两个只读调用必须能同时在途：串行实现会一直卡在 2 方屏障上");
+
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        2,
+        "只读调用的执行窗口必须重叠（峰值并发 = 2）"
+    );
+    assert_eq!(msgs.len(), 2);
+    assert!(
+        msg_text(&msgs[0]).contains("done:probe_a"),
+        "结果批序 = 调用顺序（第一条必须是 a，实际: {}）",
+        msg_text(&msgs[0])
+    );
+    assert!(
+        msg_text(&msgs[1]).contains("done:probe_b"),
+        "结果批序 = 调用顺序（第二条必须是 b，实际: {}）",
+        msg_text(&msgs[1])
+    );
+
+    // ── 事件批序：每条调用的 Streaming 帧先于它自己的结果帧，结果帧按调用顺序 ──
+    let frames = frames.lock().unwrap().clone();
+    let result_idx = |tc: &str| {
+        frames
+            .iter()
+            .position(|f| f.role == Some(NodeRole::Tool) && f.parent_id.as_deref() == Some(tc))
+    };
+    let running_idx = |tc: &str| {
+        frames
+            .iter()
+            .position(|f| f.id == tc && f.status == Some(NodeStatus::Streaming))
+    };
+    for tc in ["tc-a", "tc-b"] {
+        let running = running_idx(tc).unwrap_or_else(|| panic!("{tc} 缺少运行态帧"));
+        let result = result_idx(tc).unwrap_or_else(|| panic!("{tc} 缺少结果帧"));
+        assert!(
+            running < result,
+            "{tc} 的运行态必须先于其结果（running={running}, result={result}）"
+        );
+    }
+    assert!(
+        result_idx("tc-a").unwrap() < result_idx("tc-b").unwrap(),
+        "结果帧顺序必须与调用顺序一致（完成次序相反也不许倒）"
+    );
+
+    // 父节点终态同样按调用顺序。
+    assert_eq!(updates.len(), 2);
+    assert_eq!(updates[0].id, "tc-a");
+    assert_eq!(updates[1].id, "tc-b");
+    assert_eq!(updates[0].status, Some(NodeStatus::Completed));
+    assert_eq!(updates[1].status, Some(NodeStatus::Completed));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 写侧调用（`Medium`）独占执行窗口：与只读调用一前一后都不得重叠。
+#[tokio::test]
+async fn side_effect_calls_never_overlap_with_another_call() {
+    let dir = test_dir().join("t190-serial");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    for (first_is_side_effect, label) in [(true, "写侧在前"), (false, "写侧在后")] {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let side = Arc::new(ProbeTool::new(
+            "probe_write",
+            CapabilityRiskLevel::Medium,
+            &active,
+            &peak,
+        ));
+        let read = Arc::new(
+            ProbeTool::new("probe_read", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
+        );
+        let (calls, nodes) = if first_is_side_effect {
+            (
+                probe_calls(&[("tc-w", "probe_write"), ("tc-r", "probe_read")]),
+                vec![
+                    tool_call_node("tc-w", "probe_write"),
+                    tool_call_node("tc-r", "probe_read"),
+                ],
+            )
+        } else {
+            (
+                probe_calls(&[("tc-r", "probe_read"), ("tc-w", "probe_write")]),
+                vec![
+                    tool_call_node("tc-r", "probe_read"),
+                    tool_call_node("tc-w", "probe_write"),
+                ],
+            )
+        };
+        let ctx = ctx_with_probes(vec![side, read]).await;
+        let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+        let sink = ExecEventSink::silent();
+        let abort = ExecAbortSignal::new();
+        let mut delegations = Vec::new();
+        let mut tasks = Vec::new();
+        let mut breaks = Vec::new();
+        let (msgs, _updates) = process_tool_calls_async(
+            calls,
+            &parent,
+            &sink,
+            &abort,
+            ctx,
+            &nodes,
+            &dir,
+            &EventStore::new(),
+            false,
+            &mut delegations,
+            &mut tasks,
+            &mut breaks,
+        )
+        .await;
+
+        assert_eq!(msgs.len(), 2, "{label}：两条都必须有结果");
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            1,
+            "{label}：`Medium` 调用不得与任何调用重叠（峰值并发必须 = 1）"
+        );
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 交互模式整批串行——即使每条都是只读档（审批 / 提问一次只处理一张卡）。
+#[tokio::test]
+async fn interactive_mode_keeps_the_batch_serial() {
+    let dir = test_dir().join("t190-interactive");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let a = Arc::new(
+        ProbeTool::new("probe_i1", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
+    );
+    let b = Arc::new(
+        ProbeTool::new("probe_i2", CapabilityRiskLevel::Low, &active, &peak).with_sleep(20),
+    );
+    let ctx = ctx_with_probes(vec![a, b]).await;
+    ctx.set(crate::symbio_core::MODE, "interactive".to_string());
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let nodes = vec![
+        tool_call_node("tc-i1", "probe_i1"),
+        tool_call_node("tc-i2", "probe_i2"),
+    ];
+    let mut delegations = Vec::new();
+    let mut tasks = Vec::new();
+    let mut breaks = Vec::new();
+
+    let (msgs, _updates) = process_tool_calls_async(
+        probe_calls(&[("tc-i1", "probe_i1"), ("tc-i2", "probe_i2")]),
+        &parent,
+        &sink,
+        &abort,
+        ctx,
+        &nodes,
+        &dir,
+        &EventStore::new(),
+        false,
+        &mut delegations,
+        &mut tasks,
+        &mut breaks,
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        1,
+        "交互模式必须整批串行（审批卡不能两张同时推到用户面前）"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 中止传播：一次中止 ⇒ 批内**所有在途**调用都收到同一信号并各自收敛。
+#[tokio::test]
+async fn abort_reaches_every_in_flight_call() {
+    let dir = test_dir().join("t190-abort");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
+
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    // 两条都长睡：若中止没有传到某一条，它会一直占到 10s 超时。
+    let a = Arc::new(
+        ProbeTool::new("probe_abort_a", CapabilityRiskLevel::Low, &active, &peak)
+            .with_sleep(10_000),
+    );
+    let b = Arc::new(
+        ProbeTool::new("probe_abort_b", CapabilityRiskLevel::Low, &active, &peak)
+            .with_sleep(10_000),
+    );
+    let ctx = ctx_with_probes(vec![a, b]).await;
+    let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let nodes = vec![
+        tool_call_node("tc-aa", "probe_abort_a"),
+        tool_call_node("tc-ab", "probe_abort_b"),
+    ];
+    let mut delegations = Vec::new();
+    let mut tasks = Vec::new();
+    let mut breaks = Vec::new();
+
+    // 等两条都真正开跑再中止——中止发生在启动之前测的是另一条路径。
+    let started = active.clone();
+    let stopper = abort.clone();
+    let trigger = tokio::spawn(async move {
+        for _ in 0..500 {
+            if started.load(Ordering::SeqCst) == 2 {
+                stopper.abort();
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    });
+
+    let (msgs, updates) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        process_tool_calls_async(
+            probe_calls(&[("tc-aa", "probe_abort_a"), ("tc-ab", "probe_abort_b")]),
+            &parent,
+            &sink,
+            &abort,
+            ctx,
+            &nodes,
+            &dir,
+            &EventStore::new(),
+            false,
+            &mut delegations,
+            &mut tasks,
+            &mut breaks,
+        ),
+    )
+    .await
+    .expect("中止后必须立即收口（在途调用收到同一信号）");
+    trigger.await.ok();
+
+    assert_eq!(msgs.len(), 2, "两条在途调用都必须留下结果");
+    for msg in &msgs {
+        assert!(
+            msg_text(msg).contains("被用户中止"),
+            "每条在途调用都要收敛为中止结果（实际: {}）",
+            msg_text(msg)
+        );
+        assert_eq!(msg.status, Some(NodeStatus::Completed));
+    }
+    assert_eq!(updates.len(), 2, "父节点终态一条都不能少");
+    for update in &updates {
+        assert_eq!(update.status, Some(NodeStatus::Completed));
+    }
 
     std::fs::remove_dir_all(&dir).ok();
 }

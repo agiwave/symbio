@@ -24,9 +24,8 @@
 //! 开淘汰」要的读法（按字面量等值判，前缀名一个都不命中）。
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use crate::symbio_core::{CapabilityMeta, PluginInvokeRequest};
+use crate::symbio_core::CapabilityMeta;
 
 /// 三类按名闸门的管辖集合（键 = 注册表里的 `meta.name`）。
 #[derive(Debug, Default)]
@@ -40,13 +39,12 @@ pub struct ToolDecls {
 }
 
 impl ToolDecls {
-    /// 批首读一次：没有 visitor（子智能体之外的路径都挂着 `CAPABILITY_VISITOR`，
-    /// 这是缺省即无声明）⇒ 三个集合皆空 ⇒ 三道闸都不命中——与「该声明的工具没
-    /// 声明」同一形态，由 e2e（T74 / 任务表闸场景）兜行为。
-    pub async fn of(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
+    /// 按值复用同一份元数据（T-190 的执行策略与本类型是两个消费者，批首只遍历
+    /// 一次收集管线；没有 visitor 时元数据为空 ⇒ 三个集合皆空 ⇒ 三道闸都不命中）。
+    pub(crate) fn of_metas(metas: &[CapabilityMeta]) -> Self {
         let mut decls = Self::default();
-        for meta in crate::symbio_core::tool_metas(ctx).await {
-            decls.absorb(&meta);
+        for meta in metas {
+            decls.absorb(meta);
         }
         decls
     }

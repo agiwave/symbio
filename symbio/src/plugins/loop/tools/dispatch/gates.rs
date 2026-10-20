@@ -40,6 +40,8 @@ pub(crate) struct GateReadings {
     pub(crate) task_table: TaskTableInputs,
     /// 工具自声明的行为位（T-158）。
     pub(crate) decls: ToolDecls,
+    /// 工具自声明的风险档（T-190）：批内执行策略的分流依据，与 `decls` 同一份元数据。
+    pub(crate) risks: ToolRisks,
     /// 本批留底 `(id, name, args)`——阶段③「哪些没被执行」的收口依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账（T-140 步 2）；阶段②逐条登记，故为可变读数。
@@ -102,7 +104,12 @@ pub(crate) async fn read_batch_gates(
     // 工具自声明的行为位同批首读一次（见 `ToolDecls`，T-158）：淘汰闸 / 承诺
     // 记账 / 任务表三族的管辖对象从能力注册表读，不按名字判。没有 visitor ⇒
     // 三个集合皆空 ⇒ 三道闸都不命中（缺声明与漏声明同形，e2e 兜行为）。
-    let decls = ToolDecls::of(&ctx).await;
+    //
+    // 同一份元数据还给出**风险档**（T-190 的执行策略）：登记表只读一次，两个
+    // 消费者按值复用——再遍历一遍收集管线等于把批首读数变成两处时延源。
+    let metas = crate::symbio_core::tool_metas(&ctx).await;
+    let decls = ToolDecls::of_metas(&metas);
+    let risks = ToolRisks::of_metas(&metas);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -132,6 +139,7 @@ pub(crate) async fn read_batch_gates(
         elimination,
         task_table,
         decls,
+        risks,
         batch_meta,
         seen_calls,
     }

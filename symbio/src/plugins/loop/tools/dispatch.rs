@@ -24,11 +24,12 @@
 
 pub(crate) mod batch;
 pub(crate) mod gates;
+pub(crate) mod parallel;
 pub(crate) mod unfinished;
 
 use super::tool_executor::{
     build_user_prompt_message, call_signature, execute_tool_async, note_delegation, note_tasks,
-    BreakerInputs, EliminationInputs, TaskTableInputs, ToolDecls,
+    BreakerInputs, EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
 };
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
@@ -46,6 +47,8 @@ use std::sync::Arc;
 pub(crate) use self::gates::GateReadings;
 // 闸门表与拒止骨架（T-196）：阶段②按 `first_refusal` 判、经 `refuse` 收口。
 pub(crate) use self::gates::{first_refusal, refuse, GateContext, Refusal};
+// 批内执行策略（T-190）：风险档 → 并行/串行，映射单点在 `parallel::policy_for_risk`。
+pub(crate) use self::parallel::{policy_for_mode, ExecPolicy, ToolRisks, MAX_IN_FLIGHT};
 
 // ── 共用收口原语（逐字来自拆分前的 tool_executor.rs）────────────────────────
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。
