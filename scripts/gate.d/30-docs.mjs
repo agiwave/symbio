@@ -297,6 +297,13 @@ export const TEST_ONLY = [
   // 于是 prepare 那份红了很久没人知道——接线由 GW-001 保证不会再丢。
   'windows-restart',
   'windows-restart-prepare',
+  // `mechanism-enforcement-audit`（ME-001…005）是「机制强制等级清单」的闭合判据：
+  // 它不重复判每条机制的等级对不对（那住 RE-010 正文与各守卫），只判清单本身
+  // **会不会静默失效**——机制键与 `MECHANISMS` 双向对账、执行方解析得出、③ 的
+  // 豁免一一对应且期限未闭环、豁免总数有上限。失效形态是这一族守卫的典型死法：
+  // 清单读空 / 表头读歪 / 判据码拼错，三种都会让「什么都没检查」显示成绿灯，
+  // 所以四头（干净绿 / 两向红 / 读不出红）都由回归测试钉住。
+  'mechanism-enforcement-audit',
 ]
 /**
  * 被 `import` 或被 `spawn` 调用、但**没有自己的门禁步骤**的 `.mjs`。

@@ -33,6 +33,7 @@ lists: [gate-codes=owner]
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
+| **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
@@ -113,6 +114,11 @@ lists: [gate-codes=owner]
 | **M-006** | `scripts/mechanism-audit.mjs` |
 | **M-007** | `scripts/mechanism-audit.mjs` |
 | **M-008** | `scripts/mechanism-audit.mjs` |
+| **ME-001** | `scripts/mechanism-enforcement-audit.mjs` |
+| **ME-002** | `scripts/mechanism-enforcement-audit.mjs` |
+| **ME-003** | `scripts/mechanism-enforcement-audit.mjs` |
+| **ME-004** | `scripts/mechanism-enforcement-audit.mjs` |
+| **ME-005** | `scripts/mechanism-enforcement-audit.mjs` |
 | **N-001** | `scripts/core-naming-audit.mjs` |
 | **N-002** | `scripts/core-naming-audit.mjs` |
 | **N-003** | `scripts/core-naming-audit.mjs` |

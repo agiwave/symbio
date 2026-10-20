@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 38 · 🟡 doing 1 · ☑ done 170 · ❌ wont 3（共 212）
+**计数**：☐ todo 38 · 🟡 doing 0 · ☑ done 171 · ❌ wont 3（共 212）
 
 ## 待处理（按依赖顺序）
 
@@ -107,9 +107,7 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-177-授权与声明面fail-closed批` | 授权与声明面 fail-closed 批——把两处 fail-open 默认翻成「少一行是一条拒绝」 | now | plan | — |
+（无）
 
 ## 已完成
 
@@ -145,6 +143,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-158-工具名硬编码归一为能力元数据` | 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明 | session |
 | `T-159-messages.json过时双写注释清理` | messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理 | 登记卫生 |
 | `T-170-横向扩展摩擦批` | 横向扩展摩擦批——把「同一条需要有两种取得方式」的三处收成单一出处 | plan |
+| `T-177-授权与声明面fail-closed批` | 授权与声明面 fail-closed 批——把两处 fail-open 默认翻成「少一行是一条拒绝」 | plan |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -472,7 +471,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-174-A2A对外互操作`](174-A2A对外互操作.md) A2A 对外互操作——先裁决「接不接」，再接一次真实往返（done）
 - [`T-175-五轴与行业等级表的换算`](175-五轴与行业等级表的换算.md) 五轴与行业等级表的换算——先找出处，再决定要不要造表（done）
 - [`T-176-验证器与生产的耦合率`](176-验证器与生产的耦合率.md) 验证器与生产的耦合率——把 invariants / termination 挂到真实实现上（done）
-- [`T-177-授权与声明面fail-closed批`](177-授权与声明面fail-closed批.md) 授权与声明面 fail-closed 批——把两处 fail-open 默认翻成「少一行是一条拒绝」（doing）
+- [`T-177-授权与声明面fail-closed批`](177-授权与声明面fail-closed批.md) 授权与声明面 fail-closed 批——把两处 fail-open 默认翻成「少一行是一条拒绝」（done）
 - [`T-178-过度机制清偿批`](178-过度机制清偿批.md) 过度机制清偿批——接线了却永不生效的四处收掉（todo）
 - [`T-179-三巨型函数阶段拆分批`](179-三巨型函数阶段拆分批.md) 三巨型函数阶段拆分批——顺序过程按阶段切，不按职责切（todo）
 - [`T-180-驱动器收敛批`](180-驱动器收敛批.md) 驱动器收敛批——投影收口、判据补全、不动点循环（PL-015 动作 A）（todo）
