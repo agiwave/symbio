@@ -54,7 +54,8 @@ fn dispatch_error(e: crate::symbio_core::VdfsError) -> PluginError {
 async fn wait_state_superseded(state: &Arc<ActiveSessionState>, rid: u64) {
     loop {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        if !state.inner.read().await.is_working || state.request_id.load(Ordering::SeqCst) != rid {
+        if !state.inner.read().await.is_working() || state.request_id.load(Ordering::SeqCst) != rid
+        {
             return;
         }
     }
@@ -680,7 +681,7 @@ impl TurnLauncher {
         let Some(state) = self.active_mgr.get(session_id).await else {
             return false;
         };
-        if !state.inner.read().await.is_working {
+        if !state.inner.read().await.is_working() {
             return false;
         }
         self.handle_abort(&state).await;

@@ -163,7 +163,7 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
     let state = p.active_mgr.get_or_create(sid).await;
 
     // 收束期写方（v2 运行器的轮末收束）跑在 `is_working` 复位之前 ⇒ 忙窗里让开。
-    state.inner.write().await.is_working = true;
+    state.inner.write().await.set_working_for_test(true);
     assert!(
         !p.record_autonomous_trigger(sid, 100, "看一眼").await,
         "收束期写方在跑 ⇒ 让开"
@@ -171,7 +171,7 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
     assert_eq!(read_wal(&p, sid).len(), 1, "忙时一格都不写");
 
     // 收件箱的空闲写方只在 `preempt != None` 时才落格 ⇒ 未结清时让开。
-    state.inner.write().await.is_working = false;
+    state.inner.write().await.set_working_for_test(false);
     state.inner.write().await.preempt = PreemptPending::Resume {
         task_id: "t1".to_string(),
     };

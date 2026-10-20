@@ -49,24 +49,35 @@ use crate::symbio_core::{
 };
 use std::sync::Arc;
 
-/// 忙等间隔：消费者发现会话在跑、或队列非空但本轮刚被拒时的轮询周期。
+/// 重试退避：**启动失败被放回队首**或**落格失败留着未结清项**时的重试间隔。
 ///
-/// ## 为什么是轮询而不是等待一个"本轮结束"信号
+/// 这两件事都是「立刻再做一次也不会更好」的错误（开档失败 / 启动链路失败），
+/// 它们需要的是一次**有界的重试**，不是忙等。此前它们与「等会话收轮」共用 50ms
+/// 轮询；现在前者是事件（`turn_done`），后者是时间（本常量）。
+const RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// 「还有活没干完」的两种等待方式——**事件**与**时间**，不混用。
 ///
-/// `is_working` 的置位/复位散落在多条收尾路径上（正常收尾、中止收尾、失败收敛、
-/// `WorkingGuard` 的 panic 兜底）。在其中**一处**加唤醒，漏掉任何一条都会让消费者
-/// 永久卡住——而卡住的表现是"消息永远不发"，静默且致命。
-///
-/// 轮询的代价是有界的：只在「队列非空 **且** 会话正在跑」这个窗口内发生，一轮几秒
-/// ⇒ 几十次空转；换来的是「无论哪条路径把回合收敛掉，下一条都会被取走」。队列
-/// **空**时不吃轮询——那时挂在 `inbox_wake` 上，入队即被唤醒。
-///
-/// 第二个吃轮询的窗口：**抢占判定待结算**（插话轮已开跑、等它结束后写恢复事件）。
-/// 没有这个窗口，插话轮收尾后没人来收，任务就永久停在 `held` 上、再也不进
-/// `readyset`——而 readyset 是模型唯一的调度候选来源，于是任务凭空消失且没有一条
-/// 消息说得出为什么（S07 §5 的静默失效）。代价同样是**有界的**：只在挂起未结清期间
-/// 存在，恢复落格即停止。
-const BUSY_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+/// 分开之后，消费者不再需要「每 50ms 醒来看看有没有变化」：会话收轮会叫醒它
+/// （[`WorkingState::apply`](super::super::working::WorkingState::apply) 返回「由忙
+/// 变闲」时 `turn_done` 通知一次），入队会叫醒它（`inbox_wake`），只有真正的重试
+/// 才落到时间上。
+#[derive(Default)]
+struct PendingWork {
+    /// 有排队条目、且会话**在跑**的会话：等它们各自收轮。
+    busy: Vec<Arc<ActiveSessionState>>,
+    /// 有活但**没有事件会来**的会话：等一次退避重试。
+    ///
+    /// 两种来源：队首有东西但会话已空闲（上一趟启动失败被放回），
+    /// 或队空却挂着未结清的 `Resume`（落格失败）。
+    retry: bool,
+}
+
+impl PendingWork {
+    fn is_empty(&self) -> bool {
+        self.busy.is_empty() && !self.retry
+    }
+}
 
 /// 抽干上界：一次取几条。
 ///
@@ -172,7 +183,7 @@ impl SessionPlugin {
             inbox_item_path(session_id, &id),
             inbox_item_node(&item),
         ));
-        self.inbox_wake.notify_waiters();
+        self.inbox_wake.notify_one();
         item
     }
 
@@ -231,7 +242,7 @@ impl SessionPlugin {
         tokio::spawn(async move {
             loop {
                 // 停机门（见 `SessionPlugin::stop_gate`）：唤醒在**本轮一开始**就挂好，
-                // 下面两次 `await` 期间它一直活着，因此 `stop` 落在任何一处都能把
+                // 下面的 `await` 期间它一直活着，因此 `stop` 落在任何一处都能把
                 // 本循环叫住；即使它落在两轮之间，下一轮读到的位也已经置上了。
                 let (wake, stopping) = self.stop_gate();
                 if stopping {
@@ -241,40 +252,82 @@ impl SessionPlugin {
                 if started {
                     continue;
                 }
-                // 没有可启动的：有活（排队被占着 / 挂起待收）就短轮询，否则等入队唤醒
-                if self.has_pending_work().await {
-                    tokio::select! {
-                        _ = tokio::time::sleep(BUSY_POLL) => {}
-                        _ = wake => break,
-                    }
-                } else {
+                let pending = self.pending_work().await;
+                if pending.is_empty() {
+                    // 没活：挂在入队唤醒上。用 `notify_one`（而非 `notify_waiters`）：
+                    // 前者会给「入队恰好发生在重新挂起之前」留一个许可，不丢唤醒。
                     tokio::select! {
                         _ = self.inbox_wake.notified() => {}
                         _ = wake => break,
                     }
+                    continue;
+                }
+                // 有活：等**事件**或**一次退避**，不再轮询。
+                //
+                // - 排队中的会话：等它收轮（`turn_done` 由工作态迁移点统一发出）；
+                // - 启动失败被放回 / 落格失败留着 `Resume`：等 `RETRY_BACKOFF`。
+                let mut waits: Vec<
+                    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+                > = Vec::with_capacity(pending.busy.len() + 2);
+                for state in pending.busy {
+                    let done = state.turn_done.clone();
+                    waits.push(Box::pin(async move {
+                        done.notified().await;
+                    }));
+                }
+                if pending.retry {
+                    waits.push(Box::pin(tokio::time::sleep(RETRY_BACKOFF)));
+                }
+                let inbound = self.clone();
+                waits.push(Box::pin(async move {
+                    inbound.inbox_wake.notified().await;
+                }));
+                tokio::select! {
+                    _ = futures::future::select_all(waits) => {}
+                    _ = wake => break,
                 }
             }
         })
     }
 
-    /// 还有活没干完吗（决定"空转"还是"等唤醒"）——两个来源，缺一个都会睡死：
+    /// 扫一遍会话表，判定**还在等什么**：事件（某个会话收轮）还是时间（退避重试）。
     ///
-    /// 1. 有会话排着队（都被占着，等这一轮收尾）；
-    /// 2. 有会话挂着**未结清的抢占判定**（`preempt != None`）。挂起在插话轮**之前**
-    ///    落格，恢复必须在它**之后**——中间隔着插话轮，而那段时间队列恰好是空的
+    /// 两个来源都会让消费者睡死，所以必须都认：
+    /// 1. 有会话排着队且**在跑**——等它收轮；
+    /// 2. 有会话挂着**未结清的抢占判定**（`preempt != None`）——挂起在插话轮**之前**
+    ///    落格，恢复必须在它**之后**；中间隔着插话轮，而那段时间队列恰好是空的
     ///    （消息已出队）。只看队列就会在这里睡过去，恢复事件永不落格 ⇒ 任务永久
     ///    停在 `held` 上（S07 §5 的静默失效）。
-    async fn has_pending_work(&self) -> bool {
+    ///
+    /// 另有两条**没有事件会来**的路径，只能等退避：队首有东西但会话已空闲（启动
+    /// 失败被放回）、或 `Resume` 落格失败（开档暂时不可用）。
+    async fn pending_work(&self) -> PendingWork {
         let sessions = self.active_mgr.sessions.read().await;
         let states: Vec<_> = sessions.values().cloned().collect();
         drop(sessions);
+
+        let mut pending = PendingWork::default();
         for state in states {
             let inner = state.inner.read().await;
-            if !inner.inbox.is_empty() || inner.preempt != PreemptPending::None {
-                return true;
+            let has_work = !inner.inbox.is_empty() || inner.preempt != PreemptPending::None;
+            if !has_work {
+                continue;
+            }
+            if inner.is_working() {
+                pending.busy.push(state.clone());
+            } else {
+                // 空闲却有活 ⇒ 上一趟没能推进（启动失败回填 / 落格失败留 `Resume`）。
+                // 没有事件会来，等一次退避。
+                pending.retry = true;
             }
         }
-        false
+        pending
+    }
+
+    /// 还有活没干完吗（判据只在单测里用：消费者自己读 [`PendingWork`]）。
+    #[cfg(test)]
+    async fn has_pending_work(&self) -> bool {
+        !self.pending_work().await.is_empty()
     }
 
     /// 事实源的只读切片（抢占判定的输入）。开**只读档**：读方不创建文件、不截尾，
@@ -300,7 +353,7 @@ impl SessionPlugin {
     ///
     /// - `Ok(Some(锚))` = 落格完成；
     /// - `Ok(None)` = **没有事实源**（路径不存在）⇒ 没有任务可挂起、也没有要收的，
-    ///   状态**该清就清**——否则消费者会为一个没人认领的挂起轮询到天荒地老；
+    ///   状态**该清就清**——否则消费者会为一个没人认领的挂起一直重试；
     /// - `Err` = 开档失败（日志已记）⇒ 状态**不清**，下一趟重试。开档失败是暂时的，
     ///   而清掉状态等于把「只挂不收」钉成永久——那正是 J3。
     ///
@@ -362,7 +415,7 @@ impl SessionPlugin {
     /// 三条边界，少一条这个函数就会变成噪声或变成第二个时延源：
     ///
     /// 1. **只在队列非空时判**——没有插话就没有"要保护的对象"，而判据是整条 WAL
-    ///    重放，不该在每 50ms 的空转里白做；
+    ///    重放，不该在每一趟空转里白做；
     /// 2. **一忙窗一判**——标记由空闲分支复位，理由见 [`Self::preemption_facts`]；
     /// 3. **只判定不落格**——此刻收束期写方随时可能落笔，并发 `open` 会重复 `head`。
     ///    结论进 `PreemptPending`，由空闲分支结算（[`Self::commit_preemption`] /
@@ -512,7 +565,7 @@ impl SessionPlugin {
         for state in states {
             // 忙则不抢占新轮：留在队里，等本轮收尾后的下一趟。
             // 但忙窗正是判定的时刻——判一次，结论背着跨过忙窗（见 `PreemptPending`）。
-            if state.inner.read().await.is_working {
+            if state.inner.read().await.is_working() {
                 self.judge_preemption(&state).await;
                 continue;
             }

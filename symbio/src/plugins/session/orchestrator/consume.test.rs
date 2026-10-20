@@ -93,7 +93,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
     {
         let mut inner = state.inner.write().await;
         inner.abort_signal = Some(signal.clone());
-        inner.is_working = true;
+        inner.set_working_for_test(true);
     }
     push_inflight(&state, turn_node("turn-live", cm::NodeStatus::Streaming)).await;
 
@@ -117,7 +117,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
             inner.abort_signal.is_none(),
             "登记必须注销：handle_abort 凭它判定 chat_loop 已收敛"
         );
-        assert!(!inner.is_working, "中止后必须收敛为空闲");
+        assert!(!inner.is_working(), "中止后必须收敛为空闲");
         assert_eq!(
             inner.last_outcome.as_deref(),
             Some(OUTCOME_ABORTED),

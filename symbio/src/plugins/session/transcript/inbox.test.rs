@@ -125,7 +125,7 @@ async fn busy_session_keeps_item_queued() {
 
     // 手工把会话置为"正在跑"（真实路径由 `emit_session_state(Working)` 写）
     let state = p.active_mgr.get_or_create("s1").await;
-    state.inner.write().await.is_working = true;
+    state.inner.write().await.set_working_for_test(true);
 
     let started = p.clone().drain_inbox_once().await;
     assert!(!started, "忙的时候一趟也不启动");
@@ -137,7 +137,7 @@ async fn busy_session_keeps_item_queued() {
 
     // 空闲下来后它才被取走（本用例无父插件 ⇒ 启动失败并**放回队首**，
     // 这正是"启动失败不丢条目"的承诺；真跑一轮由 e2e 覆盖）
-    state.inner.write().await.is_working = false;
+    state.inner.write().await.set_working_for_test(false);
     let _ = p.clone().drain_inbox_once().await;
     let items = p.inbox_items("s1").await;
     assert_eq!(items.len(), 1, "启动失败 ⇒ 原地放回，等下一趟");
@@ -446,7 +446,7 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
 
     // ① 忙窗：**只判不落格**。此刻收束期写方随时可能落笔，两个写方并存会各自
     //    replay 出重复的 `head`（同会话不许两个写方并存）。
-    state.inner.write().await.is_working = true;
+    state.inner.write().await.set_working_for_test(true);
     assert!(!p.clone().drain_inbox_once().await, "忙则一趟不启动");
     assert_eq!(p.inbox_items(sid).await.len(), 1, "忙则排队（ADR-026）不变");
     assert_eq!(
@@ -458,7 +458,7 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
     // ② 空闲：**先落挂起，再开轮**——顺序反了就是「插话轮开跑时任务还在就绪集里」。
     //    本用例无父插件 ⇒ 轮启动失败并放回队首（既有的「失败不丢条目」承诺），
     //    恰好让「落格先于开轮」这一步能被单独观察到。
-    state.inner.write().await.is_working = false;
+    state.inner.write().await.set_working_for_test(false);
     assert!(!p.clone().drain_inbox_once().await);
     assert_eq!(p.inbox_items(sid).await.len(), 1, "启动失败 ⇒ 放回队首");
     assert!(
@@ -525,9 +525,9 @@ async fn final_after_the_task_queues_instead_of_holding() {
     .await;
     let state = p.active_mgr.get_or_create(sid).await;
 
-    state.inner.write().await.is_working = true;
+    state.inner.write().await.set_working_for_test(true);
     assert!(!p.clone().drain_inbox_once().await);
-    state.inner.write().await.is_working = false;
+    state.inner.write().await.set_working_for_test(false);
     assert!(!p.clone().drain_inbox_once().await);
 
     assert!(
@@ -569,7 +569,7 @@ async fn unresolved_preemption_keeps_the_consumer_awake() {
     };
     assert!(
         p.has_pending_work().await,
-        "挂起未结清 ⇒ 必须继续轮询，直到恢复落格"
+        "挂起未结清 ⇒ 必须继续等（退避重试），直到恢复落格"
     );
 }
 
@@ -592,7 +592,59 @@ async fn settled_without_a_fact_source_clears_the_stash() {
     assert_eq!(
         state.inner.read().await.preempt,
         PreemptPending::None,
-        "没人认领的 `Resume` 必须清掉，否则消费者一直轮询"
+        "没人认领的 `Resume` 必须清掉，否则消费者一直空转"
     );
     assert!(!p.has_pending_work().await, "结清后才睡得着");
+}
+
+// ==================== T-191：等事件还是等时间 ====================
+//
+// 消费者不再 50ms 轮询，所以「还有活」必须被分成两种：**有事件会来**（等收轮）
+// 与**没有事件会来**（等一次退避重试）。分错两边的后果相反：
+// - 把「等收轮」错判成「等时间」⇒ 每 1s 空转一次；
+// - 把「只能重试」错判成「等事件」⇒ **永远睡死**（消息不发、挂起不收）。
+//
+// 这里逐条钉住四种形态的归属。
+
+#[tokio::test]
+async fn pending_work_separates_events_from_retries() {
+    let p = plugin();
+    let sid = "s-pending";
+    let state = p.active_mgr.get_or_create(sid).await;
+
+    // ① 没活：挂在入队唤醒上。
+    assert!(p.pending_work().await.is_empty(), "空会话表：无活可等");
+
+    // ② 空闲 + 有队：上一趟启动失败被放回，没有事件会来 ⇒ 等退避。
+    p.enqueue_inbox(
+        sid,
+        Some("i1".to_string()),
+        user_message("排队"),
+        session_chat::Request::default(),
+        None,
+    )
+    .await;
+    let pending = p.pending_work().await;
+    assert!(pending.busy.is_empty(), "空闲会话不会「收轮」");
+    assert!(pending.retry, "空闲却有队 ⇒ 必须靠退避重试，否则永远睡死");
+
+    // ③ 忙 + 有队：等它收轮（事件）。
+    state.inner.write().await.set_working_for_test(true);
+    let pending = p.pending_work().await;
+    assert_eq!(pending.busy.len(), 1, "忙窗里的队列要等 `turn_done`");
+    assert_eq!(pending.busy[0].session_id, sid);
+    assert!(!pending.retry, "有事件会来就不该再空转");
+
+    // ④ 队空 + 未结清的 `Resume`：插话轮已结束，只能等退避重试写恢复事件。
+    {
+        let mut inner = state.inner.write().await;
+        inner.inbox.clear();
+        inner.set_working_for_test(false);
+        inner.preempt = PreemptPending::Resume {
+            task_id: "x1".to_string(),
+        };
+    }
+    let pending = p.pending_work().await;
+    assert!(pending.busy.is_empty(), "队空时没有可等的收轮");
+    assert!(pending.retry, "未结清的恢复事件必须等重试");
 }

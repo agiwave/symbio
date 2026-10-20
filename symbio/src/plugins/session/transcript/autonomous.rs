@@ -129,7 +129,7 @@ impl SessionPlugin {
             let sessions = self.active_mgr.sessions.read().await;
             if let Some(state) = sessions.get(session_id) {
                 let inner = state.inner.read().await;
-                if inner.is_working || inner.preempt != PreemptPending::None {
+                if inner.is_working() || inner.preempt != PreemptPending::None {
                     crate::plugin_info!(
                         "session",
                         "[Autonomous] 会话 {} 有写方在写，本次触发不落格（下个 tick 重试）",

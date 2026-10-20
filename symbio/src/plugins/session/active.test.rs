@@ -190,3 +190,83 @@ async fn begin_turn_clears_the_previous_round_and_warning() {
     assert_eq!(rt.error, None);
     assert_eq!(rt.warning, None);
 }
+
+// ==================== T-191：收轮唤醒（取代 50ms 轮询）====================
+//
+// 收件箱消费者此前靠 50ms 轮询兜底，因为它无法知道「哪条收尾路径把工作态复位了」。
+// 现在工作态迁移是闭集：任何一次「由忙变闲」都在 `WorkingState::apply` 里被判定，
+// 并由 `turn_done` 通知一次。这三条用例钉的正是那个契约。
+
+/// 收轮必须叫醒等待方（收件箱消费者据此取下一条）。
+#[tokio::test]
+async fn finish_turn_wakes_the_waiter() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.begin_turn().await;
+
+    let waiter = st.turn_done.notified();
+    st.finish_turn(OUTCOME_COMPLETED, None).await;
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+        .await
+        .expect("收轮必须唤醒等待方——否则消费者只能靠轮询兜底");
+}
+
+/// 提前让位（中止 / 正常收尾的前置复位）同样是一次「由忙变闲」，必须叫醒。
+#[tokio::test]
+async fn early_reset_wakes_the_waiter() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.begin_turn().await;
+
+    let waiter = st.turn_done.notified();
+    st.reset_working().await;
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+        .await
+        .expect("提前让位必须唤醒等待方");
+}
+
+/// 一次收轮只唤醒一次：提前让位之后才到的「收尾完成」不得再留一个许可。
+///
+/// 伪唤醒本身不会算错，但它会让「一次收轮 = 一次唤醒」失去意义——而消费者的
+/// 正确性正是挂在这条等式上（多醒一次只是空转，少醒一次就是消息永远不发）。
+#[tokio::test]
+async fn a_single_handover_wakes_exactly_once() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+    st.begin_turn().await;
+    st.reset_working().await;
+
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        st.turn_done.notified(),
+    )
+    .await
+    .expect("第一次等待应立刻拿到提前让位的许可");
+
+    st.finish_turn(OUTCOME_ABORTED, None).await;
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            st.turn_done.notified()
+        )
+        .await
+        .is_err(),
+        "收尾完成时已经空闲：不得再制造第二次唤醒"
+    );
+}
+
+/// 空闲时的复位是空操作：不许伪造唤醒（否则消费者会被自己叫醒空转）。
+#[tokio::test]
+async fn idle_reset_never_fakes_a_wakeup() {
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
+
+    st.reset_working().await;
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            st.turn_done.notified()
+        )
+        .await
+        .is_err(),
+        "空闲时复位不得唤醒任何人"
+    );
+}

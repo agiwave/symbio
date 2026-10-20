@@ -211,7 +211,7 @@ impl TurnLauncher {
         // （FIFO，不抢占）。
         if resume.is_some() {
             let inner = state.inner.read().await;
-            if inner.is_working {
+            if inner.is_working() {
                 return Ok(PluginPayload::new(&json!({
                     "status": "session_busy",
                     "session_id": session_id
@@ -227,7 +227,7 @@ impl TurnLauncher {
         // 注销中止信号登记与 live_messages，与新任务的启动/收尾产生竞态
         // （前端状态错乱、abort 信号丢失、转写重复）。`handle_abort` 已具备完整
         // 收敛语义（置位中止信号 → 3s 兜底 → 节点收口），复用即可。
-        if state.inner.read().await.is_working {
+        if state.inner.read().await.is_working() {
             self.handle_abort(&state).await;
         }
 

@@ -47,7 +47,7 @@ async fn aborted_and_completed_outcomes_are_distinct() {
     {
         let inner = state.inner.read().await;
         assert_eq!(inner.last_outcome.as_deref(), Some(OUTCOME_ABORTED));
-        assert!(!inner.is_working, "中止后必须收敛为空闲");
+        assert!(!inner.is_working(), "中止后必须收敛为空闲");
     }
 
     p.convergence

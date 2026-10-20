@@ -4,10 +4,11 @@ use crate::symbio_core::{chat_node as cm, session_chat};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 use super::plugin::SessionRuntime;
 use super::runtime::RuntimeFacts;
+use super::working::{WorkingState, WorkingTransition};
 
 /// 全局请求 ID 生成器
 pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -81,7 +82,13 @@ pub enum PreemptPending {
 
 /// 会话内部状态 (封装为单个锁定对象以保证原子性)
 pub struct ActiveSessionStateInner {
-    pub is_working: bool,
+    /// 工作态（进程局部量，[`WorkingState`]）。
+    ///
+    /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上那三个迁移方法
+    /// （`begin_turn` / `reset_working` 与 `clear_working_and_abort_signal` /
+    /// `finish_turn`），它们都经 [`WorkingState::apply`] 并把「由忙变闲」交给
+    /// `turn_done` 唤醒。收件箱消费者因此不再轮询。
+    working: WorkingState,
     /// 在途 Turn 的中止信号（登记后 `handle_abort` 直接置位，无需投帧）。
     ///
     /// 收口前这里是 `Option<mpsc::Sender<PluginFrame>>`——中止只能靠「往执行期
@@ -138,11 +145,31 @@ pub struct ActiveSessionStateInner {
     pub inbox: VecDeque<InboxItem>,
     /// **一忙窗一判**的标记（见 [`PreemptPending`]）：`task.*` 与
     /// `chat.assistant.final` 都只在轮末收束时入格，
-    /// 忙窗内事实源不会长出新的判据，所以判过一次就够了——留个标记免得每 50ms
-    /// 重放一遍整条 WAL。空闲分支复位它，下一轮忙窗重新判。
+    /// 忙窗内事实源不会长出新的判据，所以判过一次就够了——留个标记免得每一趟醒来
+    /// 都重放一遍整条 WAL。空闲分支复位它，下一轮忙窗重新判。
     pub preempt_judged: bool,
     /// 抢占判定的待结算项（见 [`PreemptPending`]）。
     pub preempt: PreemptPending,
+}
+
+impl ActiveSessionStateInner {
+    /// 是否在途忙——`session_busy` 守卫、收件箱「忙则排队」、运行态投影共用的**唯一**读法。
+    pub(crate) fn is_working(&self) -> bool {
+        self.working.is_working()
+    }
+
+    /// 测试专用：直接摆位工作态。
+    ///
+    /// 生产侧故意没有这个口子——改变工作态只能经三个迁移方法，这样「变了但没人
+    /// 被叫醒」在结构上不可能发生。测试要造「忙窗」时没有历史轮可收，才用它。
+    #[cfg(test)]
+    pub(crate) fn set_working_for_test(&mut self, working: bool) {
+        self.working = if working {
+            WorkingState::Working
+        } else {
+            WorkingState::Idle
+        };
+    }
 }
 
 /// 会话状态锚点
@@ -166,6 +193,13 @@ pub struct ActiveSessionState {
     ///
     /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
     pub transcript: Arc<Mutex<super::transcript::Transcript>>,
+    /// 「本轮收尾」唤醒（[T-191](../../../../docs/009-task/191-运行态小状态机收口批.md "T-191-运行态小状态机收口批")）：
+    /// 工作态**由忙变闲**时通知一次。
+    ///
+    /// 收件箱消费者挂在它上面等「某个排队会话让出」，取代此前的 50ms 轮询。
+    /// 用 `notify_one` 而不是 `notify_waiters`：前者会给**尚未挂起**的等待者留一个
+    /// 许可，而「收轮恰好发生在消费者重新挂起之前」正是轮询当初要兜的那个窗口。
+    pub(crate) turn_done: Arc<Notify>,
 }
 
 impl Default for ActiveSessionState {
@@ -188,7 +222,7 @@ impl ActiveSessionState {
             request_id: AtomicU64::new(0),
             session_id: session_id.clone(),
             inner: RwLock::new(ActiveSessionStateInner {
-                is_working: false,
+                working: WorkingState::Idle,
                 abort_signal: None,
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
@@ -206,31 +240,47 @@ impl ActiveSessionState {
                 session_id,
                 Arc::new(changes),
             ))),
+            turn_done: Arc::new(Notify::new()),
         }
     }
 
     /// **提前复位** `is_working`（不发变更、不动运行态的其余字段）。
     ///
-    /// 忙位的写入只经下文「四条写路径」：本方法供「先复位、后收尾」的路径使用——
+    /// 忙位的写入只经下文「三条迁移方法」：本方法供「先复位、后收尾」的路径使用——
     /// 收尾还要做几件事（清在途图 / 注销中止信号 / `persist_failure`），这几步期间
     /// 必须已经不处于 `is_working`，否则并发进来的 `chat/send` 会被 `session_busy`
     /// 守卫静默拒绝（用户点重试无任何反应）。
     ///
-    /// 幂等：已是 `false` 时不写。复位**不带**变更投递——那一步由收尾处的
-    /// `emit_session_state`（经 `finish_turn`）完成，两者合起来才是「运行态收敛」。
+    /// 幂等：已是空闲时不写、也**不**唤醒等待方（见 [`WorkingTransition::EarlyExit`]）。
+    /// 复位**不带**变更投递——那一步由收尾处的 `emit_session_state`（经 `finish_turn`）
+    /// 完成，两者合起来才是「运行态收敛」。
     pub async fn reset_working(&self) {
-        let mut inner = self.inner.write().await;
-        if inner.is_working {
-            inner.is_working = false;
+        let became_idle = self
+            .inner
+            .write()
+            .await
+            .working
+            .apply(WorkingTransition::EarlyExit);
+        self.wake_if_idle(became_idle);
+    }
+
+    /// 工作态**由忙变闲**时叫醒收件箱消费者（一次迁移至多一次唤醒）。
+    fn wake_if_idle(&self, became_idle: bool) {
+        if became_idle {
+            self.turn_done.notify_one();
         }
     }
 
-    // ==================== 运行态的四条写路径（单写者）====================
+    // ==================== 运行态的写路径（单写者）====================
     //
     // `is_working` / `last_outcome` / `last_error` / `last_warning` 的**唯一写点**。
     // 它们不是第二份可独立演化的状态：结局是 turn 事实投影（`runtime::project`）的
     // 写穿缓存，开轮 / 收轮 / 告警 / 中止各只经一个方法（[ADR-083 §5.2]）。
     // 拆散成调用点各写各的字段，正是 P5 要消掉的双写面。
+    //
+    // 工作态的迁移是**闭集**：只有 `WorkingTransition` 的三个变体，且唯一迁移函数是
+    // `WorkingState::apply`。新增收尾路径若要改工作态，只能经这里——绕过它状态不会变，
+    // 而不是「变了但收件箱没人被叫醒」（那正是 50ms 轮询掩盖过的失效）。
 
     /// 开轮：置忙 + 上一轮结局 / 告警作废 + 清空上一轮的流式累积。
     ///
@@ -238,7 +288,7 @@ impl ActiveSessionState {
     /// 读的就是它，而开轮事实是 spawn 之后才追加的。
     pub(crate) async fn begin_turn(&self) {
         let mut inner = self.inner.write().await;
-        inner.is_working = true;
+        inner.working.apply(WorkingTransition::Begin);
         inner.last_content.clear();
         inner.last_tool_calls.clear();
         inner.last_outcome = None;
@@ -251,10 +301,14 @@ impl ActiveSessionState {
     /// 正常 / 中止 / 失败三条出口写同一个值域；事实侧的同一结局由运行器 / 失败收口
     /// 落格，重启后由投影补上。
     pub(crate) async fn finish_turn(&self, outcome: &str, error: Option<String>) {
-        let mut inner = self.inner.write().await;
-        inner.is_working = false;
-        inner.last_outcome = Some(outcome.to_string());
-        inner.last_error = error;
+        let became_idle = {
+            let mut inner = self.inner.write().await;
+            let became_idle = inner.working.apply(WorkingTransition::Finish);
+            inner.last_outcome = Some(outcome.to_string());
+            inner.last_error = error;
+            became_idle
+        };
+        self.wake_if_idle(became_idle);
     }
 
     /// 会话级告警（可恢复）：只写自己的格，不改变运行态。
@@ -264,9 +318,13 @@ impl ActiveSessionState {
 
     /// 中止的强制收口：置空闲 **并**注销中止信号——同一临界区，两格一起可见。
     pub(crate) async fn clear_working_and_abort_signal(&self) {
-        let mut inner = self.inner.write().await;
-        inner.is_working = false;
-        inner.abort_signal = None;
+        let became_idle = {
+            let mut inner = self.inner.write().await;
+            let became_idle = inner.working.apply(WorkingTransition::EarlyExit);
+            inner.abort_signal = None;
+            became_idle
+        };
+        self.wake_if_idle(became_idle);
     }
 
     /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。
@@ -359,7 +417,7 @@ fn runtime_of_state(
     inner: &ActiveSessionStateInner,
     facts: Option<&RuntimeFacts>,
 ) -> SessionRuntime {
-    if inner.is_working {
+    if inner.is_working() {
         return SessionRuntime::working();
     }
     let warning = inner.last_warning.clone();
