@@ -72,18 +72,26 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use crate::plugins::session::paths;
-use crate::symbio_core::EventEnvelope;
-use crate::symbio_core::{AppendError, Seq, Store};
+use crate::symbio_core::{
+    closes_turn, is_turn_final, is_turn_open, provenance_violation, AppendError, Event,
+    EventEnvelope as _, Seq, Store, StoreInvariant,
+};
 
 /// 持久化 Store（`store = wal`，[plan/01 §8](../../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表取值）。
-pub struct WalStore<E: EventEnvelope> {
+///
+/// **信封是具体的 `Event`**：写侧闸门要读 `entity` / `verb` / `turn` / `produced_by`
+/// 才能判 I1 / I2，而泛型参数上只有
+/// [`EventEnvelope`](crate::symbio_core::EventEnvelope) 的三件事可用。仓内唯一的
+/// 实例化是 `WalStore` 装 `Event`；把信封写实，闸门才能挂在唯一写入口**内部**——
+/// 闸门不是一个可选装饰。
+pub struct WalStore {
     path: PathBuf,
     /// 写者令牌：`Some` = 本实例持有该事实源的跨进程独占锁，`None` = 非写者。
     ///
     /// 句柄指向**旁挂锁文件**（见模块头），不是 WAL 本身——WAL 永不被锁，
     /// 读方才能随时进。锁随句柄关闭自动释放，故不需要显式解锁。
     writer: Option<File>,
-    inner: RwLock<WalInner<E>>,
+    inner: RwLock<WalInner>,
     /// 归档段的并集（按段名首号升序），`None` = 本实例还没读过。
     ///
     /// [`range`](Store::range) 的口径含归档前缀，而归档段一旦 `rename` 就位就不再变
@@ -91,13 +99,123 @@ pub struct WalStore<E: EventEnvelope> {
     /// 本实例 `archive_before` 之后失效重读。**跨实例的时效性与 live 段同一口径**：
     /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
     /// 别人的归档因此同样不出现在这里——这不是新增的近似，是同一个近似。
-    archived: RwLock<Option<Vec<E>>>,
+    archived: RwLock<Option<Vec<Event>>>,
 }
 
-struct WalInner<E: EventEnvelope> {
-    events: Vec<E>,
+struct WalInner {
+    events: Vec<Event>,
     ids: HashSet<String>,
     head: u64,
+    /// 已开轮的 `turn`（[`is_turn_open`] 口径）——I1 的「每轮至多一条开轮」索引。
+    ///
+    /// 存档段移走的是**旧轮**，而旧轮不会再被重开；归档因此**不清空**本索引
+    /// （清空会让一张老会话在压缩之后忘记自己开过哪些轮）。
+    opened: HashSet<u64>,
+    /// 已收束的 `turn`（[`closes_turn`] 口径）——I3 的「旧轮收没收」用这一份。
+    ///
+    /// 注意它**不是** I1 去重的索引：产物收束（`artifact.added`）也算「这一轮有话说过」，
+    /// 但同一轮随后仍应有且只有一条 `final`。
+    closed: HashSet<u64>,
+    /// 已出现 `final` 的 `turn`（[`is_turn_final`] 口径）——I1 的「每轮至多一条 final」索引。
+    finals: HashSet<u64>,
+    /// I3 的**显式降级**计数：新开轮越过了未收束的旧轮（崩溃残轮 / 真丢收束）。
+    ///
+    /// 不拒绝而是计数 + 出声，理由见 [`WalInner::gate`]；读侧 `check_all` 会把同一条
+    /// 缺口报成 `unresolved_turns` 违规，两处口径一致。
+    degraded_i3: u64,
+}
+
+impl WalInner {
+    /// 把一条事件记进两份索引（重放与入库共用）。
+    fn note(&mut self, event: &Event) {
+        if is_turn_open(event) {
+            self.opened.insert(event.turn);
+        }
+        if closes_turn(event) {
+            self.closed.insert(event.turn);
+        }
+        if is_turn_final(event) {
+            self.finals.insert(event.turn);
+        }
+    }
+
+    /// 把一段事件（重放结果 / 归档段）整段记进索引。幂等。
+    fn note_all<'a>(&mut self, events: impl IntoIterator<Item = &'a Event>) {
+        for e in events {
+            self.note(e);
+        }
+    }
+
+    /// 比 `turn` 更早、却还没收束的轮里最小的那个（I3 的判据）。
+    fn unresolved_before(&self, turn: u64) -> Option<u64> {
+        self.opened
+            .iter()
+            .filter(|t| **t < turn && !self.closed.contains(t))
+            .min()
+            .copied()
+    }
+
+    /// 写侧不变量闸门（[T-188](../../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批")）：
+    /// **唯一写入口内**的拒绝判定。
+    ///
+    /// 返回 `Err` = 这条事件不得入库；`Ok` = 允许（可能的「显式降级」已在内部出声）。
+    ///
+    /// ## 拒 / 降级的分界
+    ///
+    /// 分界不是「哪条更严重」，而是**拒绝会不会把会话钉死**：
+    ///
+    /// | 判据 | 处置 | 理由 |
+    /// |---|---|---|
+    /// | I2 声明缺 `produced_by` | **拒绝** | 没有上游的声明无法审计也无法撤销；生产者补上即可，重试是安全的 |
+    /// | I1 同轮第二条 `final` | **拒绝** | 这一轮已经有收束，第二条会让「每轮至多一条 final」失效 |
+    /// | I1 同轮第二条开轮（不同 id） | **拒绝** | 同 id 的重放更早就会被 `Duplicate` 拦下，能走到这里是两条不同事件抢同一轮 |
+    /// | I3 新轮越过未收束的旧轮 | **降级**（出声 + 计数） | 崩溃恢复**恰好长这样**：上一轮停在半路，重启后开下一轮。拒绝会让会话再也写不进任何事实 |
+    ///
+    /// I3 的降级不是「静默放过」：它在写入口当场 `plugin_warn!` 出声，读侧
+    /// [`check_all`](crate::symbio_core::check_all) 的 `unresolved_turns` 会把同一处
+    /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
+    fn gate(&mut self, event: &Event) -> Result<(), AppendError> {
+        if let Some(v) = provenance_violation(event) {
+            return Err(AppendError::Invariant {
+                invariant: StoreInvariant::I2,
+                event_id: v.event_id,
+                why: v.why,
+            });
+        }
+        if is_turn_final(event) && self.finals.contains(&event.turn) {
+            return Err(AppendError::Invariant {
+                invariant: StoreInvariant::I1,
+                event_id: event.event_id.clone(),
+                why: format!(
+                    "turn {} 已有收束格，又出现一条 final——每轮至多 1 条（I1 单通道）",
+                    event.turn
+                ),
+            });
+        }
+        if is_turn_open(event) {
+            if self.opened.contains(&event.turn) {
+                return Err(AppendError::Invariant {
+                    invariant: StoreInvariant::I1,
+                    event_id: event.event_id.clone(),
+                    why: format!(
+                        "turn {} 已有开轮事件，又出现一条（I1 单通道：每轮至多 1 条 user.message）",
+                        event.turn
+                    ),
+                });
+            }
+            if let Some(missing) = self.unresolved_before(event.turn) {
+                self.degraded_i3 += 1;
+                crate::plugin_warn!(
+                    "session",
+                    "[invariant-I3] 新开轮 turn {} 越过了未收束的 turn {}（本轮照常入格；\
+                     读侧 session/stats 的 unresolved_turns 会报同一条）",
+                    event.turn,
+                    missing
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 旁挂锁文件的路径：`<wal>.lock`（同目录、同名 + `.lock`）。
@@ -133,10 +251,7 @@ fn archive_path(wal: &Path, first: u64, last: u64) -> PathBuf {
     archive_dir_of(wal.parent().unwrap_or_else(|| Path::new("."))).join(name)
 }
 
-impl<E> WalStore<E>
-where
-    E: EventEnvelope + serde::Serialize + serde::de::DeserializeOwned,
-{
+impl WalStore {
     /// 打开（或创建）一个 WAL 文件，并**尝试取得写者令牌**。
     ///
     /// 拿不到令牌（另一个写者持有）⇒ 返回一个可读、但 `append` 恒
@@ -198,7 +313,7 @@ where
     /// 返回 `(事件, 最后一条完整记录的结束偏移)`；文件不存在 ⇒ 空。
     /// 不写文件：写不写由调用方决定（[`open`](Self::open) 截断 /
     /// [`open_readonly`](Self::open_readonly) 不动）。
-    fn replay(path: &Path) -> std::io::Result<(Vec<E>, u64)> {
+    fn replay(path: &Path) -> std::io::Result<(Vec<Event>, u64)> {
         let mut events = Vec::new();
         if !path.exists() {
             return Ok((events, 0));
@@ -209,7 +324,7 @@ where
         for line in BufReader::new(file).split(b'\n') {
             let bytes = line?;
             let total = bytes.len() as u64 + 1; // 含换行（末行可能无）
-            match serde_json::from_slice::<E>(&bytes) {
+            match serde_json::from_slice::<Event>(&bytes) {
                 Ok(event) => {
                     events.push(event);
                     offset += total;
@@ -225,8 +340,8 @@ where
     }
 
     /// 由已重放的事件构造内存形态（`ids` / `head` 都是它的派生量）。
-    fn build(path: PathBuf, events: Vec<E>, writer: Option<File>) -> Self {
-        let ids = events.iter().map(|e| e.event_id().to_string()).collect();
+    fn build(path: PathBuf, events: Vec<Event>, writer: Option<File>) -> Self {
+        let ids = events.iter().map(|e| e.event_id.clone()).collect();
         // **head 是「下一个号」，不是「已有几条」**。
         //
         // 两者只在「号从 0 起、无缺口」时相等——而那正是**归档之前**的形态。
@@ -242,10 +357,35 @@ where
             .max()
             .unwrap_or(0)
             .max(events.len() as u64);
+        // 闸门索引**从重放结果重建**：重启不是「闸门失忆」的理由——同一份 WAL
+        // 重开后，同轮第二条 final 仍要被拒（见 `gate_index_is_rebuilt_from_the_wal_on_reopen`）。
+        let opened = events
+            .iter()
+            .filter(|e| is_turn_open(e))
+            .map(|e| e.turn)
+            .collect();
+        let closed = events
+            .iter()
+            .filter(|e| closes_turn(e))
+            .map(|e| e.turn)
+            .collect();
+        let finals = events
+            .iter()
+            .filter(|e| is_turn_final(e))
+            .map(|e| e.turn)
+            .collect();
         WalStore {
             path,
             writer,
-            inner: RwLock::new(WalInner { events, ids, head }),
+            inner: RwLock::new(WalInner {
+                events,
+                ids,
+                head,
+                opened,
+                closed,
+                finals,
+                degraded_i3: 0,
+            }),
             archived: RwLock::new(None),
         }
     }
@@ -392,11 +532,11 @@ where
     /// `seq: null` 事件，保持它与 live 的**物理相对位置**——若按 `seq` 排序，`None` 会被
     /// 挤到末尾，把「退化到切片末尾」这类兜底判据搞反。
     /// 目录不存在 / 某段读不开 ⇒ 跳过（与「读不开就是没有」同一口径）。
-    fn archive_events(&self) -> Vec<E> {
+    fn archive_events(&self) -> Vec<Event> {
         if let Some(cached) = self.archived.read().expect("WalStore 锁中毒").as_ref() {
             return cached.clone();
         }
-        let mut all: Vec<E> = Vec::new();
+        let mut all: Vec<Event> = Vec::new();
         // ── 归档段（按段名首号升序读）──────────────────────────────────────
         if let Some(parent) = self.path.parent() {
             let dir = archive_dir_of(parent);
@@ -427,6 +567,9 @@ where
             }
         }
         *self.archived.write().expect("WalStore 锁中毒") = Some(all.clone());
+        // 归档段也是历史：索引必须认它（否则压缩之后「这个轮开过没有」会失忆）。
+        // 归档**只增不改**，吸收是幂等的；且本函数不持 `inner` 锁，不会自锁。
+        self.inner.write().expect("WalStore 锁中毒").note_all(&all);
         all
     }
 
@@ -435,13 +578,16 @@ where
     pub fn len(&self) -> usize {
         self.inner.read().expect("WalStore 锁中毒").events.len()
     }
+
+    /// I3 显式降级的次数（测试与断言用；生产侧由 `plugin_warn!` 与读侧 `check_all` 出声）。
+    #[cfg(test)]
+    pub fn degraded_i3(&self) -> u64 {
+        self.inner.read().expect("WalStore 锁中毒").degraded_i3
+    }
 }
 
-impl<E> Store for WalStore<E>
-where
-    E: EventEnvelope + serde::Serialize + serde::de::DeserializeOwned,
-{
-    type Event = E;
+impl Store for WalStore {
+    type Event = crate::symbio_core::Event;
 
     fn append(&self, mut event: Self::Event) -> Result<Seq, AppendError> {
         let mut inner = self.inner.write().expect("WalStore 锁中毒");
@@ -453,6 +599,11 @@ where
         if inner.ids.contains(event.event_id()) {
             return Err(AppendError::Duplicate);
         }
+        // **写侧不变量闸门**（I1 / I2 / I3）：挂在唯一写入口内，三条真实写路径
+        // （用户输入 / 工具结果 / 收尾落格）没有一条能绕过它。位置在幂等去重之后
+        // （同 id 重放仍按 `Duplicate` 回答，不被闸门改判）、赋号与落盘之前
+        // （被拒的事件不会消耗 seq，也不会在盘上留下半条）。
+        inner.gate(&event)?;
         // 先落盘、再提交内存：盘上是唯一权威（崩溃 ⇒ 已落的还在，没落的不算）。
         // 写盘失败 = 不可继续的存储层灾难，直接 panic（不吞错）——静默返回会让
         // 调用方误以为事件已提交，比崩溃更糟的静默失效。
@@ -478,6 +629,7 @@ where
             .and_then(|_| file.sync_data())
             .expect("WAL 写入失败（存储层灾难，不可静默）");
         inner.ids.insert(event.event_id().to_string());
+        inner.note(&event);
         inner.events.push(event);
         inner.head += 1;
         Ok(seq)
@@ -517,8 +669,8 @@ where
     }
 }
 
-/// 便捷别名：装 [`crate::symbio_core::event::Event`] 信封的持久化事实源。
-pub type EventWalStore = WalStore<crate::symbio_core::Event>;
+/// 便捷别名：持久化事实源（信封恒为 [`crate::symbio_core::event::Event`]）。
+pub type EventWalStore = WalStore;
 
 #[cfg(test)]
 #[path = "wal.test.rs"]

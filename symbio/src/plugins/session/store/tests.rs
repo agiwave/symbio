@@ -146,6 +146,8 @@ fn recall_snapshots_scans_one_level_deliberately() {
                 "user",
             )
             .with_ts(1000)
+            // 记忆事件是 I2 的声明类事件：没有上游就没有可撤销的溯源（T-188 写侧闸门）。
+            .with_produced_by(0)
             .with_payload(json!({
                 "content": text,
                 "tag": "经验",
@@ -337,14 +339,14 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
 
 /// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
 /// 判据、这边是存储判据，两处构造一致才能判到同一件事）
-fn user_event(eid: &str, node_id: &str, text: &str) -> crate::symbio_core::Event {
+fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> crate::symbio_core::Event {
     use crate::symbio_core::{Entity, Event, Verb, EVENT_USER_MESSAGE};
     Event::pending(
         eid,
         EVENT_USER_MESSAGE,
         Entity::Turn,
         Verb::Opened,
-        1,
+        turn,
         "user",
     )
     .with_ts(1_000)
@@ -404,8 +406,8 @@ async fn wal_is_the_source_messages_json_is_ignored() {
         )
         .unwrap();
         use crate::symbio_core::Store as _;
-        wal.append(user_event("e1", "n1", "第一问")).unwrap();
-        wal.append(user_event("e2", "n2", "第二问")).unwrap();
+        wal.append(user_event("e1", "n1", "第一问", 1)).unwrap();
+        wal.append(user_event("e2", "n2", "第二问", 2)).unwrap();
     }
     save(&store, &session_with("sess_truth", None)).await;
     assert!(
@@ -846,6 +848,7 @@ async fn snapshot_reads_the_same_full_history_as_the_writer() {
 fn lifecycle_event(
     kind: &str,
     verb: crate::symbio_core::Verb,
+    turn: u64,
     payload: serde_json::Value,
 ) -> Event {
     use crate::symbio_core::{Entity, Event};
@@ -853,29 +856,36 @@ fn lifecycle_event(
     // 事件 id 幂等（append 重复即 Duplicate）：同一个测试里可能两次开轮。
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    Event::pending(format!("e-{n}"), kind, Entity::Turn, verb, 1, "user").with_payload(payload)
+    // `produced_by` 不是装饰：收束格是 I2 的声明类事件，写侧闸门会拒收无溯源的答复
+    // （T-188）。测试夹具按真实生产者的形态造事件，而不是造一个闸门刚好放行的形状。
+    Event::pending(format!("e-{n}"), kind, Entity::Turn, verb, turn, "user")
+        .with_produced_by(0)
+        .with_payload(payload)
 }
 
-fn open_turn() -> Event {
+fn open_turn(turn: u64) -> Event {
     lifecycle_event(
         crate::symbio_core::EVENT_USER_MESSAGE,
         crate::symbio_core::Verb::Opened,
+        turn,
         json!({ "text": "问", "id": "u-1" }),
     )
 }
 
-fn close_completed() -> Event {
+fn close_completed(turn: u64) -> Event {
     lifecycle_event(
         crate::symbio_core::EVENT_ASSISTANT_FINAL,
         crate::symbio_core::Verb::Closed,
+        turn,
         json!({ "status": "completed", "text": "答", "id": "a-1" }),
     )
 }
 
-fn close_failed(why: &str) -> Event {
+fn close_failed(turn: u64, why: &str) -> Event {
     lifecycle_event(
         crate::symbio_core::EVENT_ASSISTANT_FINAL,
         crate::symbio_core::Verb::Closed,
+        turn,
         json!({ "status": "failed", "why": why, "text": "答", "id": "a-1" }),
     )
 }
@@ -918,16 +928,16 @@ async fn runtime_facts_tracks_the_writer_and_invalidates_on_append() {
 
     assert_eq!(projected(&store, "sess_live"), None, "空 WAL ⇒ 无结局");
 
-    writer.append(open_turn()).unwrap();
+    writer.append(open_turn(1)).unwrap();
     assert_eq!(projected(&store, "sess_live"), None, "开轮清空");
 
-    writer.append(close_completed()).unwrap();
+    writer.append(close_completed(1)).unwrap();
     assert_eq!(
         projected(&store, "sess_live"),
         Some(RuntimeOutcome::Completed)
     );
 
-    writer.append(open_turn()).unwrap();
+    writer.append(open_turn(2)).unwrap();
     assert_eq!(
         projected(&store, "sess_live"),
         None,
@@ -946,8 +956,8 @@ async fn runtime_facts_replays_a_closed_wal_for_a_fresh_process() {
         let store = SessionStore::new(tmp.path().to_path_buf());
         save(&store, &session_with("sess_replay", None)).await;
         let writer = store.facts("sess_replay").unwrap().expect("事实源");
-        writer.append(open_turn()).unwrap();
-        writer.append(close_failed("模型挂了")).unwrap();
+        writer.append(open_turn(1)).unwrap();
+        writer.append(close_failed(1, "模型挂了")).unwrap();
     }
 
     // 新实例 = 重启：没有写句柄，走只读文件戳
@@ -970,13 +980,13 @@ async fn runtime_facts_invalidates_the_read_only_stamp_when_the_wal_grows() {
     let store = SessionStore::new(tmp.path().to_path_buf());
     save(&store, &session_with("sess_grow", None)).await;
     let writer = store.facts("sess_grow").unwrap().expect("事实源");
-    writer.append(open_turn()).unwrap();
+    writer.append(open_turn(1)).unwrap();
 
     // 读侧一开始没有句柄（模拟另一个进程）：先得到「开轮、无结局」
     let reader = SessionStore::new(tmp.path().to_path_buf());
     assert_eq!(projected(&reader, "sess_grow"), None);
 
-    writer.append(close_completed()).unwrap();
+    writer.append(close_completed(1)).unwrap();
     assert_eq!(
         projected(&reader, "sess_grow"),
         Some(RuntimeOutcome::Completed),
@@ -994,7 +1004,7 @@ async fn deleting_a_session_evicts_its_runtime_projection() {
     let store = SessionStore::new(tmp.path().to_path_buf());
     save(&store, &session_with("sess_del", None)).await;
     let writer = store.facts("sess_del").unwrap().expect("事实源");
-    writer.append(close_completed()).unwrap();
+    writer.append(close_completed(1)).unwrap();
     assert_eq!(
         projected(&store, "sess_del"),
         Some(RuntimeOutcome::Completed)

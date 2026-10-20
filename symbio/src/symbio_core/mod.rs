@@ -45,7 +45,7 @@ pub use event::{
     EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
     EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
-pub use invariants::check_all;
+pub use invariants::{check_all, closes_turn, is_turn_final, is_turn_open, provenance_violation};
 pub use projection::calibration::calibration;
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::cost::cost_ledger;
@@ -226,7 +226,7 @@ pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `plugins/session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
 // `pub(crate)` 出根。
 pub(crate) use projection::transcript::PromptToolCall;
-pub(crate) use store::AppendError;
+pub(crate) use store::{AppendError, StoreInvariant};
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
 // 读写成对、fail-closed（plan/01 §7）。根出口只出**可见域**一个类型：

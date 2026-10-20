@@ -901,3 +901,262 @@ fn an_artifact_round_is_complete_after_reopen() {
     let rep = verify_prompt_fidelity(&events, &entries, None);
     assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 }
+
+// ==================== 写侧不变量闸门（T-188）====================
+//
+// 闸门挂在 `WalStore::append` 这个**唯一写入口**内：三条真实写路径（用户输入 /
+// 工具结果 / 收尾落格）都从这里过。这一组钉四件事：
+//
+// 1. I2 缺溯源的声明被拒，且被拒的事件**不消耗 seq、不落盘**；
+// 2. I1 同轮第二条 final 被拒；
+// 3. I1 同轮第二条开轮被拒（不同 id——同 id 会先被 `Duplicate` 拦下）；
+// 4. I3 新轮越过未收束的旧轮**不拒**（崩溃恢复就是这个形状），但计数 + 出声。
+
+/// 一条**没有** `produced_by` 的 final（I2 的反例）。
+fn final_without_provenance(turn: u64) -> Event {
+    Event::pending(
+        format!("f-{turn}"),
+        crate::symbio_core::EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        turn,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({ "text": "答", "status": "completed" }))
+}
+
+/// I2：声明类事件缺 `produced_by` ⇒ 拒绝，且拒绝发生在赋号 / 落盘之前。
+#[test]
+fn gate_rejects_a_declaration_without_provenance() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path).unwrap();
+
+    let err = store
+        .append(final_without_provenance(0))
+        .expect_err("无溯源的 final 必须被拒");
+    match err {
+        crate::symbio_core::AppendError::Invariant {
+            invariant,
+            event_id,
+            why,
+        } => {
+            assert_eq!(invariant, crate::symbio_core::StoreInvariant::I2);
+            assert_eq!(event_id, "f-0");
+            assert!(why.contains("produced_by"), "原因要说清缺什么：{why}");
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+    assert_eq!(store.head().value(), 0, "被拒的事件不消耗 seq");
+    assert_eq!(store.len(), 0, "被拒的事件不落盘");
+}
+
+/// I1：同一轮的第二条 final 被拒；**产物收束 + final 是合法组合**（不是重复）。
+#[test]
+fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path).unwrap();
+
+    store
+        .append(ev(
+            "u-0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "问",
+        ))
+        .unwrap();
+    // 产物收束（ADR-067）：它让「这一轮算收束」，但 final 还没落——必须还能落。
+    store
+        .append(
+            Event::pending(
+                "a-0-0",
+                EVENT_ARTIFACT_ADDED,
+                Entity::Artifact,
+                Verb::Asserted,
+                0,
+                "session/main",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "tool": "echo", "text": "out" })),
+        )
+        .expect("产物格不是 final，不能被当成重复收束");
+    store
+        .append(ev(
+            "f-0",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            0,
+            "答",
+        ))
+        .expect("产物之后仍应有且只有一条 final");
+
+    let err = store
+        .append(ev(
+            "f-0-again",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            0,
+            "答二",
+        ))
+        .expect_err("同轮第二条 final 必须被拒");
+    match err {
+        crate::symbio_core::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, crate::symbio_core::StoreInvariant::I1);
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+}
+
+/// I1：同一轮两条**不同 id** 的开轮事件被拒（同 id 的重放更早就会被 `Duplicate` 拦下）。
+#[test]
+fn gate_rejects_a_second_open_for_the_same_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path).unwrap();
+
+    store
+        .append(ev(
+            "u-0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "问",
+        ))
+        .unwrap();
+    let err = store
+        .append(ev(
+            "u-0-retry",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "又问",
+        ))
+        .expect_err("同轮第二条开轮必须被拒");
+    match err {
+        crate::symbio_core::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, crate::symbio_core::StoreInvariant::I1);
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+}
+
+/// I3：新轮越过未收束的旧轮 = **崩溃恢复的形状** ⇒ 照常入格，但计数（不静默）。
+#[test]
+fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path).unwrap();
+
+    store
+        .append(ev(
+            "u-0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "问",
+        ))
+        .unwrap();
+    // 上一轮停在半路（没有 final）：重启后开下一轮。拒绝会把这个会话钉死。
+    store
+        .append(ev(
+            "u-1",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            1,
+            "第二个问题",
+        ))
+        .expect("崩溃恢复形状必须还能写");
+    assert_eq!(store.degraded_i3(), 1, "越过未收束轮要计数，不能静默");
+    assert_eq!(store.len(), 2);
+
+    // 收束之后就不再有缺口：第三轮不该再计一次。**两条**都要收——0 是崩溃残轮，
+    // 1 是本轮；只收 1 的话，0 仍然是「被越过的旧轮」。
+    store
+        .append(ev(
+            "f-0",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            0,
+            "补上的收束",
+        ))
+        .unwrap();
+    store
+        .append(ev(
+            "f-1",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            1,
+            "答",
+        ))
+        .unwrap();
+    store
+        .append(ev(
+            "u-2",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            2,
+            "第三个问题",
+        ))
+        .unwrap();
+    assert_eq!(store.degraded_i3(), 1, "旧轮收束后不再算越界");
+}
+
+/// 闸门的索引**随重放重建**：重启后同轮第二条 final 仍然被拒。
+#[test]
+fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    {
+        let store = EventWalStore::open(&path).unwrap();
+        store
+            .append(ev(
+                "u-0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "问",
+            ))
+            .unwrap();
+        store
+            .append(ev(
+                "f-0",
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                0,
+                "答",
+            ))
+            .unwrap();
+    }
+
+    let reopened = EventWalStore::open(&path).unwrap();
+    let err = reopened
+        .append(ev(
+            "f-0-late",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            0,
+            "迟到的第二条",
+        ))
+        .expect_err("重放必须把「这一轮已有 final」带回来");
+    match err {
+        crate::symbio_core::AppendError::Invariant { invariant, .. } => {
+            assert_eq!(invariant, crate::symbio_core::StoreInvariant::I1);
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+}

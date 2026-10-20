@@ -26,6 +26,35 @@ use std::sync::RwLock;
 
 use super::event::{Event, EventEnvelope, Seq};
 
+/// 写侧闸门拒绝的是**哪一条**不变量（[T-188](../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批")）。
+///
+/// 具名而不是字符串：调用方要能按条分流（I1 写坏了网格 / I2 不可追溯 / I3 没到点必答），
+/// 日志与测试也要能钉住「拒的是哪一条」，而不是匹配一段人话。
+///
+/// **为什么住在 `store` 域**：它是**端口拒绝词汇**的一部分（[`AppendError`] 的载荷），
+/// 不是读侧体检的实现。放进 `invariants` 会让 `store` 依赖 `invariants`，
+/// 在 core 的域图里闭出一条新环（`store → invariants → projection → store`）——
+/// 读侧体检可以认识「哪一条不变量」，写侧端口只认「拒绝的理由有个名字」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreInvariant {
+    /// I1 单通道：每轮一条开轮、一条收束，且只经唯一写入口。
+    I1,
+    /// I2 无溯源不声明：声明类事件必须带 `produced_by`。
+    I2,
+    /// I3 到点必答：开过的轮必须收束，不得被下一轮越过。
+    I3,
+}
+
+impl std::fmt::Display for StoreInvariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            StoreInvariant::I1 => "I1 单通道",
+            StoreInvariant::I2 => "I2 无溯源不声明",
+            StoreInvariant::I3 => "I3 到点必答",
+        })
+    }
+}
+
 /// 唯一写入口的失败形态（[plan/01 §2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppendError {
@@ -40,6 +69,19 @@ pub enum AppendError {
     /// [plan/11 批 0](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 之前，
     /// 这个形态全仓零构造——错误定义在那儿，却永远不可达。
     NotTheWriter,
+    /// **写侧不变量闸门**拒绝（[T-188](../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批")）：
+    /// 这条事件会把事实网格写坏（同轮第二条 final / 声明缺溯源）。
+    ///
+    /// 与 [`Duplicate`](Self::Duplicate) 的分界：后者是**同一幂等键重放**（幂等语义，
+    /// 重复本身无害）；本形态拒绝的是一条**新的**事件——写进去就是一份坏事实。
+    Invariant {
+        /// 违反的是哪一条（具名，不是字符串）。
+        invariant: StoreInvariant,
+        /// 被拒事件的幂等键（与读侧 `Violation.event_id` 同一口径）。
+        event_id: String,
+        /// 人话原因（与读侧 `Violation.why` 同一套措辞来源）。
+        why: String,
+    },
 }
 
 /// 事实源（④）。**依赖清单**：只 import 事件契约，无任何出边（F1 的构造侧）。

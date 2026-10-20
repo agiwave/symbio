@@ -62,6 +62,59 @@ impl Violation {
     }
 }
 
+/// 这一条是**开轮**事件吗（`turn × opened` 的 `user.message`）？
+///
+/// 写侧闸门与读侧 [`open_unique_per_turn`] 共用本判据——「什么算开轮」只有一份。
+pub fn is_turn_open(e: &Event) -> bool {
+    e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message"
+}
+
+/// 这一条是**收束发言**吗（`turn × closed` 的 `chat.assistant.final`）？
+///
+/// 只认 `final`（不认 `fallback`）：[`final_unique_per_turn`] 的判据就是这一格，
+/// 写侧若把 fallback 也算进来，就成了比读侧更严的第二套规则。
+pub fn is_turn_final(e: &Event) -> bool {
+    e.entity == Entity::Turn
+        && e.verb == Verb::Closed
+        && e.kind == crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+}
+
+/// 这一条让某一轮**算收束**吗（[`unresolved_turns`] 的口径）？
+///
+/// 三种形态：发言收束（final / fallback）、产物收束（`artifact.added`，ADR-067）。
+/// 写侧判「新开轮是否越过了未收束的旧轮」必须与读侧同口径，否则会出现
+/// 「写侧说越界、读侧说没事」的两套绿。
+pub fn closes_turn(e: &Event) -> bool {
+    (e.entity == Entity::Turn
+        && e.verb == Verb::Closed
+        && matches!(
+            e.kind.as_str(),
+            crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+                | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
+        ))
+        || (e.entity == Entity::Artifact
+            && e.verb == Verb::Asserted
+            && e.kind == crate::symbio_core::event::EVENT_ARTIFACT_ADDED)
+}
+
+/// 单事件的 I2 判据：`Some` = 这条**声明**缺溯源，写侧应拒绝它。
+///
+/// 与 [`produced_by_coverage`] 同源（后者就是对本函数的逐条调用）——读侧与写侧
+/// 不许各写一份「什么算声明类事件」。
+pub fn provenance_violation(e: &Event) -> Option<Violation> {
+    if !needs_provenance(e) || e.produced_by.is_some() {
+        return None;
+    }
+    let why = if e.verb == Verb::Asserted {
+        "断言类事件必须带 produced_by（I2 无溯源不声明）"
+    } else if e.entity == Entity::Memory {
+        "记忆事件必须带 produced_by（I2：溯源覆盖 100%）"
+    } else {
+        "收束类事件（答复）必须带 produced_by（I2：用户收到的话必须可追溯）"
+    };
+    Some(Violation::at(e, why))
+}
+
 /// C1（I1）：`seq` 严格单调且**无跳号**。
 ///
 /// 已入库事件按存储顺序应得到 `0,1,2,…`——跳号意味着「有事件被静默丢弃或绕过
@@ -98,9 +151,7 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 哪些事件算数（final 的判据）是本模块的解析层；「每 turn 至多一条」
     // 的判定走 [kernel::unique_per_turn_core](kernel)——verify/invariants.rs
     // 包含的是同一份内核。
-    let finals = events.iter().filter(|e| {
-        e.entity == Entity::Turn && e.verb == Verb::Closed && e.kind == "chat.assistant.final"
-    });
+    let finals = events.iter().filter(|e| is_turn_final(e));
     kernel::unique_per_turn_core(finals.map(|e| (e.turn, e.event_id.as_str())))
         .into_iter()
         .map(|(dup, first, turn)| {
@@ -128,9 +179,7 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 与 [final_unique_per_turn](self::final_unique_per_turn) 同一内核：
     // 「哪些事件算数」在解析层，「每 turn 至多一条」在 [kernel](kernel)。
-    let opens = events
-        .iter()
-        .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message");
+    let opens = events.iter().filter(|e| is_turn_open(e));
     kernel::unique_per_turn_core(opens.map(|e| (e.turn, e.event_id.as_str())))
         .into_iter()
         .map(|(dup, first, turn)| {
@@ -159,20 +208,7 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
 pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
-    events
-        .iter()
-        .filter(|e| needs_provenance(e) && e.produced_by.is_none())
-        .map(|e| {
-            let why = if e.verb == Verb::Asserted {
-                "断言类事件必须带 produced_by（I2 无溯源不声明）"
-            } else if e.entity == Entity::Memory {
-                "记忆事件必须带 produced_by（I2：溯源覆盖 100%）"
-            } else {
-                "收束类事件（答复）必须带 produced_by（I2：用户收到的话必须可追溯）"
-            };
-            Violation::at(e, why)
-        })
-        .collect()
+    events.iter().filter_map(provenance_violation).collect()
 }
 
 /// I2 的覆盖判据（参照 [`docs/004-plan/verify/invariants.rs`](../../../../docs/004-plan/verify/invariants.rs)
@@ -305,27 +341,13 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
     let mut opened: Vec<(usize, u64, &Event)> = Vec::new();
     let mut last_open_pos: Option<usize> = None;
     for (i, e) in events.iter().enumerate() {
-        if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message" {
+        if is_turn_open(e) {
             opened.push((i, e.turn, e));
             last_open_pos = Some(i);
         }
-        if e.entity == Entity::Turn
-            && e.verb == Verb::Closed
-            && matches!(
-                e.kind.as_str(),
-                crate::symbio_core::event::EVENT_ASSISTANT_FINAL
-                    | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
-            )
-        {
-            opened.retain(|(_, turn, _)| *turn != e.turn);
-        }
-        // 产物收束（ADR-067）：这一轮落过工具结果 ⇒ 同样算收束。产物格带
-        // `produced_by` 指向本轮开口格（I2），它和 final / fallback 一样是「这一轮
-        // 有话说过」的完成形态。
-        if e.entity == Entity::Artifact
-            && e.verb == Verb::Asserted
-            && e.kind == crate::symbio_core::event::EVENT_ARTIFACT_ADDED
-        {
+        // 收束 = 发言收束（final / fallback）或产物收束（ADR-067，落过工具结果）。
+        // 判据与写侧闸门共用 [`closes_turn`]：两处各写一份必然漂移。
+        if closes_turn(e) {
             opened.retain(|(_, turn, _)| *turn != e.turn);
         }
     }

@@ -481,7 +481,10 @@ fn span_column_recomputes_and_moves_with_the_wal() {
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
     let store = EventWalStore::open(&wal).unwrap();
-    for (id, ts) in [("e0", 1_000i64), ("e1", 1_500), ("e2", 4_200)] {
+    for (n, (id, ts)) in [("e0", 1_000i64), ("e1", 1_500), ("e2", 4_200)]
+        .into_iter()
+        .enumerate()
+    {
         store
             .append(
                 Event::pending(
@@ -489,7 +492,9 @@ fn span_column_recomputes_and_moves_with_the_wal() {
                     EVENT_USER_MESSAGE,
                     Entity::Turn,
                     Verb::Opened,
-                    0,
+                    // 三条样例事件各占一轮：同一轮开两次会被写侧闸门拒掉（I1），
+                    // 而本测试要的是「三条事件的时间跨度」，不是三轮业务语义。
+                    n as u64,
                     "user",
                 )
                 .with_ts(ts)
@@ -586,6 +591,8 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
             crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
         )
         .with_ts(ts)
+        // 任务断言是 I2 的声明类事件（T-188）：没有上游就没有可撤销的溯源。
+        .with_produced_by(0)
         .with_payload(serde_json::json!({ "task_id": task }))
     };
     // t1 全程自主闭环；t2 被挂起过再闭环 ⇒ 不进分子

@@ -221,9 +221,12 @@ fn empty_placeholder_nodes_produce_no_steps() {
                 EVENT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
-                0,
+                // 另一个轮：同一轮的第二条 final 会被写侧闸门拒掉（I1），而本测试要
+                // 验的是「空正文不产出步骤」，不是「重复收束」。
+                1,
                 "session/main",
             )
+            .with_produced_by(0)
             .with_payload(serde_json::json!({ "text": "" })),
         )
         .expect("empty placeholder");
