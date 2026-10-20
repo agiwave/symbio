@@ -352,6 +352,8 @@ const S010_EXTS = new Set(['.rs', '.ts', '.vue', '.md'])
 // 漏掉它会让规则去审计「agent 自己写下的记忆」：实测一次会话把 `.vdfs` 字面量
 // 写进 `.symbio/session/<id>/MEMORY.md`（模型在正文里引用挂载路径），
 // 门禁于是因为**运行期数据**判红——源码一个字节没改。
+// `tmp` 同理：`.gitignore` 的临时区（报告草稿 / 迁移备份的落点），不在版本控制里，
+// 与登记机制的 `SCAN_SKIP_DIRS` 同一口径——分析稿里引用挂载路径不算源码树的违规。
 const S010_SKIP_DIRS = new Set([
   'node_modules',
   'target',
@@ -361,6 +363,7 @@ const S010_SKIP_DIRS = new Set([
   '.workbuddy-ai',
   '.symbio',
   '.venv',
+  'tmp',
 ])
 // 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根
 const S010_ROOT = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot

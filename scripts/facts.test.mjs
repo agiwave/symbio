@@ -54,11 +54,13 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gen-facts-'))
  * ## 范围收窄到哪里为止
  *
  * 跳过的只有**工具产物目录**（`node_modules` / `target` / `.git` / `archive` /
- * `.workbuddy-ai`），**一个文档目录都没跳**——收窄的方向是「把不是文档的东西排除」，
- * 不是「把判据够不着的地方缩小」。回归测试双向钉住这一点（见文件末尾那条）。
+ * `.workbuddy-ai` / `tmp`），**一个文档目录都没跳**——收窄的方向是「把不是文档的东西排除」，
+ * 不是「把判据够不着的地方缩小」。`tmp/` 是 `.gitignore` 的临时区（报告草稿 / 迁移备份的
+ * 落点，同登记机制的 `SCAN_SKIP_DIRS` 口径）——不在版本控制里，也就不是判据的对象。
+ * 回归测试双向钉住这一点（见文件末尾那条）。
  */
 export function proseDocs(root) {
-  const SKIP_DIRS = new Set(['.git', 'node_modules', 'target', 'archive', '.workbuddy-ai'])
+  const SKIP_DIRS = new Set(['.git', 'node_modules', 'target', 'archive', '.workbuddy-ai', 'tmp'])
   const out = []
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -565,7 +567,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
     const docs = []
     const walk = (d) => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target') continue
+        if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target' || e.name === 'tmp') continue
         const p = path.join(d, e.name)
         if (e.isDirectory()) walk(p)
         else if (e.name.endsWith('.md')) docs.push(p)
@@ -754,16 +756,19 @@ test('散文判据的扫描面：文档目录全进语料，工具产物目录�
   // 反向钉住 `proseDocs` 的范围。两个方向都要判，缺一个都不算钉住：
   //   · 只判「`.workbuddy-ai/` 不进」⇒ 把整个语料砍空也照样绿（判据退化成装饰）；
   //   · 只判「`docs/` 进」⇒ 门禁失败详情（引用被扫文档的原文）会把判据喂成永久红。
+  //   · `tmp/`（`.gitignore` 的临时区）与两者同口径：报告草稿不进语料、也不砍空。
   const root = tmp()
   fs.mkdirSync(path.join(root, 'docs', '006-ref'), { recursive: true })
   fs.mkdirSync(path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438'), { recursive: true })
   fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'tmp', 'analysis'), { recursive: true })
   fs.writeFileSync(path.join(root, 'docs', '006-ref', 'a.md'), '见 RE-006 §99 那一节\n')
   fs.writeFileSync(
     path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438', '_summary.md'),
     '失败详情里引用了「见 RE-006 §99 那一节」这句原文\n',
   )
   fs.writeFileSync(path.join(root, 'node_modules', 'x', 'readme.md'), '见 RE-006 §99\n')
+  fs.writeFileSync(path.join(root, 'tmp', 'analysis', 'draft.md'), '见 RE-006 §99 那一节\n')
   const rels = proseDocs(root).map((f) => f.rel).sort()
   assert.deepEqual(
     rels,
