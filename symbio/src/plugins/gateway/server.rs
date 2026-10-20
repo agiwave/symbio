@@ -69,9 +69,35 @@ enum RequestError {
 pub struct ServerHandle {
     cancel: CancellationToken,
     task: tokio::task::JoinHandle<()>,
+    /// 实际绑定地址（`inbound_port: 0` 时由操作系统分配）。
+    ///
+    /// 它不只是一个测试便利：配置写的是「想绑哪儿」，这里记的是「真的绑上了哪儿」
+    /// ——两者在端口冲突 / 端口 0 时不同，把后者当成前者的抄本就会在状态面上说谎。
+    addr: std::net::SocketAddr,
 }
 
-/// 停止入站服务
+impl ServerHandle {
+    /// 实际监听地址。
+    pub fn local_addr(&self) -> std::net::SocketAddr {
+        self.addr
+    }
+}
+
+/// 停止入站服务。
+///
+/// ## 停用语义（[ADR-075](../../../../docs/010-adr/075.md "ADR-075") 补注）
+///
+/// **停止接受新连接 + 关闭已建立的实时通道；已经进入分派的请求让它跑完**。
+/// 三个动作分别是：
+///
+/// 1. `cancel` → accept 循环退出（不再接新连接），已接受的连接任务各自在自己的
+///    读帧 / 读请求边界看到取消位后关闭；
+/// 2. `task.abort()` → accept 任务本身立即退出（它不持有任何业务事实）；
+/// 3. **不中断一次正在进行的 `route`**：网关只是转发层，一次工具轮的事实由会话侧
+///    收束；在转发中途掐断会把「停用一个通道」变成「一次未收束的轮」。
+///
+/// 连接任务由 `tokio::spawn` 独立持有，`abort` accept 任务不会波及它们——取消位
+/// 因此必须显式传进每个连接，不能靠句柄的 drop。
 pub fn stop(handle: ServerHandle) {
     handle.cancel.cancel();
     handle.task.abort();
@@ -97,6 +123,9 @@ pub async fn start(
     let listener = TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("监听失败 {addr}: {e}"))?;
+    let local = listener
+        .local_addr()
+        .map_err(|e| format!("读取监听地址失败 {addr}: {e}"))?;
 
     let cancel = CancellationToken::new();
     let token = cfg.inbound_token.clone();
@@ -113,7 +142,13 @@ pub async fn start(
                             Ok((stream, _)) => {
                                 let router = router.clone();
                                 let token = token.clone();
-                                tokio::spawn(handle_conn(stream, router, token, readonly));
+                                tokio::spawn(handle_conn(
+                                    stream,
+                                    router,
+                                    token,
+                                    readonly,
+                                    cancel.clone(),
+                                ));
                             }
                             Err(e) => warn!(error = %e, "[gateway] accept 失败"),
                         }
@@ -124,7 +159,11 @@ pub async fn start(
         }
     });
 
-    Ok(Some(ServerHandle { cancel, task }))
+    Ok(Some(ServerHandle {
+        cancel,
+        task,
+        addr: local,
+    }))
 }
 
 // ==================== HTTP 连接分发 ====================
@@ -210,6 +249,7 @@ async fn handle_conn(
     router: Arc<dyn Plugin>,
     token: String,
     readonly: bool,
+    cancel: CancellationToken,
 ) {
     let req = match read_request(&mut stream).await {
         Ok(r) => r,
@@ -228,6 +268,21 @@ async fn handle_conn(
             return;
         }
     };
+
+    // 停用中的竞态窗口：accept 已关闭，但取消前刚被接下的连接可能在这里。
+    // 回一条可归因的 503，而不是静默断开；已经进入分派的请求不受此判影响。
+    if cancel.is_cancelled() {
+        let _ = stream
+            .write_all(&http_response(
+                503,
+                "Service Unavailable",
+                "application/json",
+                br#"{"error":"gateway stopping"}"#,
+                &cors_headers(),
+            ))
+            .await;
+        return;
+    }
 
     // CORS 预检
     if req.method == "OPTIONS" {
@@ -261,7 +316,7 @@ async fn handle_conn(
             warn!("[gateway] WebSocket 握手失败");
             return;
         }
-        handle_ws(stream, router, readonly).await;
+        handle_ws(stream, router, readonly, cancel).await;
         return;
     }
 
@@ -580,16 +635,28 @@ async fn ws_handshake(stream: &mut TcpStream, req: &HttpRequest) -> Result<(), S
     Ok(())
 }
 
-async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
+async fn handle_ws(
+    stream: TcpStream,
+    router: Arc<dyn Plugin>,
+    readonly: bool,
+    cancel: CancellationToken,
+) {
     let (mut read_half, mut write_half) = stream.into_split();
 
-    // 第一帧：请求体 PluginMessageWire（与 route_v2 的请求体一致）
-    let text = match ws_read_text(&mut read_half).await {
-        Some(t) => t,
-        None => {
+    // 第一帧：请求体 PluginMessageWire（与 route_v2 的请求体一致）。
+    // 停用竞态与 HTTP 侧同判：连接已建立但还没有请求内容 ⇒ 直接关，不进入分派。
+    let text = tokio::select! {
+        _ = cancel.cancelled() => {
             ws_close(&mut write_half).await;
             return;
         }
+        t = ws_read_text(&mut read_half) => match t {
+            Some(t) => t,
+            None => {
+                ws_close(&mut write_half).await;
+                return;
+            }
+        },
     };
     let msg: PluginMessageWire = match serde_json::from_str(&text) {
         Ok(m) => m,
@@ -645,6 +712,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
                             None => break,
                         }
                     }
+                    _ = cancel.cancelled() => break,
                     r = ws_read_frame(&mut read_half) => {
                         match r {
                             Some((op, data)) => {

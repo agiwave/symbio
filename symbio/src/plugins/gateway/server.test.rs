@@ -286,3 +286,54 @@ async fn ws_frames_roundtrip_through_all_length_forms() {
         assert_eq!(data, payload);
     }
 }
+
+/// 停用 ⇒ 监听真的关了（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）。
+///
+/// 判据用**独立探针**（另一条 `TcpStream`）而不是问插件「你停了吗」：先证明服务
+/// 活着（健康检查回 200），再 `stop`，最后证明新连接**连不上**。`inbound_port: 0`
+/// 让内核分配端口，实际地址从 `local_addr()` 读——测试因此不抢端口、不依赖 9231。
+#[tokio::test]
+async fn stop_closes_the_listener_and_refuses_new_connections() {
+    let cfg = GatewayConfig {
+        inbound_enabled: true,
+        inbound_protocol: "http".into(),
+        inbound_bind: "127.0.0.1".into(),
+        inbound_port: 0,
+        ..Default::default()
+    };
+    let handle = start(&cfg, Arc::new(NopRouter))
+        .await
+        .expect("回环 + 端口 0 应能启动")
+        .expect("enabled + http 必须返回句柄");
+    let addr = handle.local_addr();
+
+    // 探针 1：服务在听且能答（先证明这不是「一开始就没起来」）
+    let mut live = TcpStream::connect(addr).await.expect("启动后应可连接");
+    live.write_all(b"GET /api/v1/health HTTP/1.1\r\nHost: probe\r\n\r\n")
+        .await
+        .expect("写入健康检查请求");
+    let mut buf = [0u8; 256];
+    let n = live.read(&mut buf).await.expect("读取健康检查响应");
+    assert!(
+        String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"),
+        "启动后健康检查应回 200"
+    );
+    drop(live);
+
+    stop(handle);
+
+    // 探针 2：停用后新连接必须连不上（accept 循环已退出、监听已释放）
+    let refused = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if TcpStream::connect(addr).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        refused.is_ok(),
+        "停用后监听仍然接受连接——accept 循环没有被收口"
+    );
+}

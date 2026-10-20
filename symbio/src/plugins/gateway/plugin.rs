@@ -6,8 +6,8 @@
 
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
-    PLUGIN_ID_GATEWAY,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
+    PATH, PLUGIN_ID_GATEWAY,
 };
 use crate::symbio_core::{
     CapabilityRow, DetailDefinition, DetailField, DetailOption, DynVdfsProvider,
@@ -197,6 +197,14 @@ impl Plugin for GatewayPlugin {
         Some(self)
     }
 
+    /// 停用即收口入站服务（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）：
+    /// 停止接受新连接、关闭实时通道；已进入分派的请求跑完（语义住在
+    /// `server::stop` 的文档里，不在调用点复述）。
+    async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
+        self.stop_server().await;
+        Ok(())
+    }
+
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -208,12 +216,21 @@ impl Plugin for GatewayPlugin {
             // 入站网关的运行状态：是否启用、协议、监听地址与端口、是否已在监听。
             "status" => {
                 let cfg = self.config.read().await;
-                let running = self.server.read().await.is_some();
+                // 配置说「想绑哪儿」，`inbound_addr` 说「真的绑上了哪儿」。端口 0 /
+                // 端口冲突时两者不同，状态面只报前者就是在说谎。
+                let addr = self
+                    .server
+                    .read()
+                    .await
+                    .as_ref()
+                    .map(|h| h.local_addr().to_string());
+                let running = addr.is_some();
                 Ok(PluginPayload::new(&serde_json::json!({
                     "inbound_enabled": cfg.inbound_enabled,
                     "inbound_protocol": cfg.inbound_protocol,
                     "inbound_bind": cfg.inbound_bind,
                     "inbound_port": cfg.inbound_port,
+                    "inbound_addr": addr,
                     "inbound_readonly": cfg.inbound_readonly,
                     "inbound_running": running,
                 })))

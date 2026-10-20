@@ -4,7 +4,8 @@ use super::typing::TypingGuard;
 use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_TELEGRAM,
+    PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
+    PLUGIN_ID_TELEGRAM,
 };
 use crate::symbio_core::{
     CapabilityRow, DetailDefinition, DetailField, DynVdfsProvider, SuccessResponse,
@@ -579,6 +580,14 @@ impl Plugin for TelegramPlugin {
         Some(self)
     }
 
+    /// 停用即收口长轮询（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）：
+    /// 复用 `stop_listener` 的取消令牌——路由臂与停用路径必须是**同一条**收口逻辑，
+    /// 否则「面板上停了」与「插件被停用」会走出两种状态。
+    async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
+        self.handle_stop_listener().await?;
+        Ok(())
+    }
+
     async fn traverse(
         self: Arc<Self>,
         _path: String,
@@ -689,5 +698,9 @@ impl crate::symbio_core::PluginConfigMount for TelegramPlugin {
         &self.config
     }
 }
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;
 
 crate::submit_object_creator!(PLUGIN_ID_TELEGRAM, TelegramPlugin::build, dyn Plugin);

@@ -37,10 +37,9 @@ pub fn is_safe_relative_path(path: &str) -> bool {
 /// 策略规则（可运行期热更的部分；动作计数独立在 `tracker`）。
 ///
 /// 字段与 local 插件的配置文档（`LocalConfig`）一一对应——配置文档是人类入口，
-/// 这里是运行期真源。默认值即「全放开」：这是内置插件自己工具的执行策略，不是
-/// 宿主对插件的授权（那个分层见 third-party-plugin-spec）——限制的价值在「用户
-/// 想收紧时有的收」，而非默认替用户做主。实测会话 `09d74431`：默认限流 100 次/
-/// 小时把 cmd 通道锁死近一小时、325 次调用被拒，全是自伤。
+/// 这里是运行期真源。**默认值即「全放开」是裁决，不是默认没做**：安全边界在审批闸
+/// （工具级风险 + 命令级 `risk_for`），这里管的是用户自己的执行偏好——分层与理由见
+/// [ADR-101](../../../../../docs/010-adr/101.md "ADR-101")。
 #[derive(Debug, Clone)]
 pub struct PolicyRules {
     pub autonomy: AutonomyLevel,

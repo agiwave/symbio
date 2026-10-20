@@ -12,7 +12,7 @@ use crate::symbio_core::SimpleResponse;
 use crate::symbio_core::{HookEvent, HookOutput};
 use crate::symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, PLUGIN_ID_HOOK,
+    PluginMeta, PluginPayload, PluginStopReason, PLUGIN_ID_HOOK,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -114,6 +114,13 @@ impl Plugin for HooksPlugin {
         Self::metadata()
     }
 
+    /// 停用即清空注册态（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）：
+    /// hook 注册只活在内存里，没有常驻任务——要收口的只有这张名单。
+    async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
+        self.registry.write().await.clear().await;
+        Ok(())
+    }
+
     async fn route(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -149,5 +156,9 @@ impl Plugin for HooksPlugin {
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;
 
 crate::submit_object_creator!(PLUGIN_ID_HOOK, HooksPlugin::build, dyn Plugin);
