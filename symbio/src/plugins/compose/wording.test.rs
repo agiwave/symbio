@@ -42,9 +42,9 @@ fn messages_follow_the_projection_verbatim() {
     let messages = build_messages(&context);
 
     assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0].role, Some(NodeRole::User));
-    assert_eq!(messages[1].role, Some(NodeRole::Assistant));
-    assert_eq!(text_of(&messages[2]), "第二个问题");
+    assert_eq!(messages[0].role, "user");
+    assert_eq!(messages[1].role, "assistant");
+    assert_eq!(messages[2].text, "第二个问题");
 }
 
 /// 空正文节点剔除：投影只保证"是文本节点"，不保证"有正文"。
@@ -61,7 +61,7 @@ fn blank_text_nodes_are_dropped() {
     let messages = build_messages(&context);
 
     assert_eq!(messages.len(), 1);
-    assert_eq!(text_of(&messages[0]), "有内容");
+    assert_eq!(messages[0].text, "有内容");
 }
 
 /// `non_empty` 去首尾空白后判空：只含空白的生成结果等于"什么都没说"，

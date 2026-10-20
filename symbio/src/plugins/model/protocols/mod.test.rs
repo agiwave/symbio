@@ -28,16 +28,33 @@ fn sse_data_rejects_non_data_lines() {
 
 #[test]
 fn protocol_aliases_resolve_to_registered_ids() {
-    assert_eq!(resolve_protocol_id("chat"), MODEL_PROTOCOL_OPENAI_CHAT);
+    assert_eq!(
+        resolve_protocol_id("chat"),
+        Some(MODEL_PROTOCOL_OPENAI_CHAT)
+    );
     assert_eq!(
         resolve_protocol_id("responses"),
-        MODEL_PROTOCOL_OPENAI_RESPONSES
+        Some(MODEL_PROTOCOL_OPENAI_RESPONSES)
     );
     assert_eq!(
         resolve_protocol_id("anthropic"),
-        MODEL_PROTOCOL_ANTHROPIC_MESSAGES
+        Some(MODEL_PROTOCOL_ANTHROPIC_MESSAGES)
     );
-    assert_eq!(resolve_protocol_id("gemini"), MODEL_PROTOCOL_GEMINI_API);
-    // 未识别值兜底 openai_chat
-    assert_eq!(resolve_protocol_id("bogus"), MODEL_PROTOCOL_OPENAI_CHAT);
+    assert_eq!(
+        resolve_protocol_id("gemini"),
+        Some(MODEL_PROTOCOL_GEMINI_API)
+    );
+}
+
+/// 未识别值**不兜底**：写错的配置必须在保存 / 收集期可见，而不是悄悄变成
+/// `openai_chat` 请求体（T-197 的兜底反转）。
+#[test]
+fn unknown_protocol_is_rejected_not_defaulted() {
+    for bad in ["bogus", "", "OpenAI", "anthropic-messages"] {
+        assert_eq!(
+            resolve_protocol_id(bad),
+            None,
+            "「{bad}」不该被解析成任何协议"
+        );
+    }
 }

@@ -13,9 +13,9 @@ use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::{
-    creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PluginSimpleRequest, PLUGIN_ID_MODEL,
+    capability_report_error, creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin,
+    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PluginSimpleRequest, PLUGIN_ID_MODEL,
 };
 use crate::symbio_core::{DetailField, DetailOption};
 use crate::{plugin_error, plugin_info, plugin_warn};
@@ -195,17 +195,33 @@ impl ModelPlugin {
     /// 直调 `ModelProtocol::ping`（最小代价请求探测 endpoint / key / model
     /// 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
     async fn validate_config(config: &ModelProviderConfig) -> Option<String> {
+        let Some(protocol_id) = resolve_protocol_id(&config.api_protocol) else {
+            // 保存前就报：写错的 api_protocol 不得落盘成一条「看起来能用」的配置。
+            return Some(unsupported_protocol_message(&config.api_protocol));
+        };
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
-        let protocol_id = resolve_protocol_id(&config.api_protocol);
-        let protocol =
+        let Some(protocol) =
             creator_create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
-                .expect("MODEL protocol creator not found");
+        else {
+            return Some(format!("协议实现未注册：{protocol_id}"));
+        };
 
         match protocol.ping(config).await {
             Ok(()) => None,
             Err(e) => Some(e.to_string()),
         }
     }
+}
+
+/// 未识别 `api_protocol` 的用户可读消息（配置校验与能力收集共用一句话）。
+///
+/// 把「支持哪些值」写在这里而不是让调用方各自拼：错误文案也是判据的一部分，
+/// 两处各写一份就会一边列全、一边漏项。
+fn unsupported_protocol_message(api_protocol: &str) -> String {
+    format!(
+        "未识别的 api_protocol \"{api_protocol}\"：支持 openai_chat / openai_responses / \
+         anthropic_messages / gemini_api（历史别名 chat / responses / anthropic / gemini）"
+    )
 }
 
 impl ModelPlugin {
@@ -788,7 +804,22 @@ impl Plugin for ModelPlugin {
             let mut available: Vec<Arc<dyn crate::symbio_core::ModelProvider>> = Vec::new();
             let mut active_in_catalog = false;
             for p in providers.providers.values().filter(|p| p.enabled) {
-                let protocol_id = resolve_protocol_id(&p.api_protocol);
+                let Some(protocol_id) = resolve_protocol_id(&p.api_protocol) else {
+                    // 写错的协议**不替换成 openai_chat**：那会让一条 anthropic 配置
+                    // 在本进程里发 OpenAI 请求体，故障推迟到运行期且指不到这里。
+                    // 非生效者按软故障跳过；生效者是会话启动的硬前提——报进能力错误桶，
+                    // 由编排方在收集结束后中止并展示原因（而不是只说「没有可用模型」）。
+                    let message = format!(
+                        "provider '{}'：{}；该条目不进目录（不会回退 openai_chat）",
+                        p.id,
+                        unsupported_protocol_message(&p.api_protocol)
+                    );
+                    plugin_warn!("model", "traverse: {message}");
+                    if active.as_ref().is_some_and(|a| a.id == p.id) {
+                        capability_report_error(&ctx, PLUGIN_ID_MODEL, message).await;
+                    }
+                    continue;
+                };
                 match creator_create_object::<dyn super::protocols::ModelProtocol>(
                     protocol_id,
                     ctx.clone(),
@@ -854,4 +885,3 @@ impl Plugin for ModelPlugin {
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/plugins/model/plugin.rs::validate_config: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。

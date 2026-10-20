@@ -7,6 +7,7 @@
 //! 「模型说了什么」到「判决是什么」的映射，以及「说不清时返回什么」。
 
 use super::*;
+use crate::symbio_core::chat_node::MessageContent;
 
 fn reason_of(v: &Verdict) -> &str {
     match v {
@@ -86,13 +87,21 @@ fn unparsable_text_yields_none_not_answered() {
     }
 }
 
+fn node(role: NodeRole, text: &str) -> ChatNode {
+    ChatNode {
+        role: Some(role),
+        content: Some(MessageContent::Text(text.to_string())),
+        ..Default::default()
+    }
+}
+
 /// 空对话线（仓外调用方直呼本路由）时，用这句话自身组一条 user 消息
 #[test]
 fn empty_context_falls_back_to_the_utterance_itself() {
     let msgs = build_messages("读一下 README", &[]);
     assert_eq!(msgs.len(), 1);
-    assert_eq!(msgs[0].role, Some(NodeRole::User));
-    assert_eq!(text_of(&msgs[0]), "读一下 README");
+    assert_eq!(msgs[0].role, "user");
+    assert_eq!(msgs[0].text, "读一下 README");
 }
 
 /// 投影里已含本轮这句话时**不重复追加**——否则同一句话在请求里出现两次，
@@ -100,24 +109,38 @@ fn empty_context_falls_back_to_the_utterance_itself() {
 #[test]
 fn tail_utterance_is_not_appended_twice() {
     let ctx = vec![
-        user_message("你好"),
-        ChatNode {
-            role: Some(NodeRole::Assistant),
-            content: Some(MessageContent::Text("你好，有什么可以帮你？".to_string())),
-            ..Default::default()
-        },
-        user_message("读一下 README"),
+        node(NodeRole::User, "你好"),
+        node(NodeRole::Assistant, "你好，有什么可以帮你？"),
+        node(NodeRole::User, "读一下 README"),
     ];
     let msgs = build_messages("读一下 README", &ctx);
     assert_eq!(msgs.len(), 3, "不得追加第四条");
-    assert_eq!(text_of(msgs.last().unwrap()), "读一下 README");
+    assert_eq!(msgs.last().unwrap().text, "读一下 README");
 }
 
 /// 空正文节点不进请求包（它们对分类没有信息量，只占上下文）
 #[test]
 fn blank_nodes_are_dropped() {
-    let ctx = vec![user_message("  "), user_message("读一下 README")];
+    let ctx = vec![
+        node(NodeRole::User, "  "),
+        node(NodeRole::User, "读一下 README"),
+    ];
     let msgs = build_messages("读一下 README", &ctx);
     assert_eq!(msgs.len(), 1);
-    assert_eq!(text_of(&msgs[0]), "读一下 README");
+    assert_eq!(msgs[0].text, "读一下 README");
+}
+
+/// 角色词与工具身份原样过端口：端口的消息形态是 `PromptMessage`，不是
+/// `ChatNode`——映射在这里丢掉字段，分类请求就会把「工具结果」伪装成用户发言。
+#[test]
+fn roles_and_tool_identity_survive_the_port_shape() {
+    let mut tool = node(NodeRole::Tool, "文件内容").with_tool_name(Some("vfs_read".to_string()));
+    tool.tool_call_id = Some("call_r1".to_string());
+    let ctx = vec![node(NodeRole::Assistant, "我先读一下"), tool];
+
+    let msgs = build_messages("继续", &ctx);
+    assert_eq!(msgs[0].role, "assistant");
+    assert_eq!(msgs[1].role, "tool");
+    assert_eq!(msgs[1].tool_call_id.as_deref(), Some("call_r1"));
+    assert_eq!(msgs[1].tool.as_deref(), Some("vfs_read"));
 }

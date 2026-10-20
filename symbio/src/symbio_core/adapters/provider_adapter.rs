@@ -12,6 +12,20 @@
 //! 那份测试要装配 `BoundProvider` / `openai_chat` 等插件内部件，而
 //! `plugins::model` 是私有模块（core 侧**在可见性上**就到不了它）——
 //! 依赖方向由编译器保证，不靠约定。
+//!
+//! ## 依赖方对照表（ADR-023 决策 3；T-197 复审）
+//!
+//! | 消费方 | 用什么 | 场景 |
+//! |---|---|---|
+//! | `plugins/loop/turn_exec` | `for_turn` + `generate_turn` | 对话轮（含工具通道） |
+//! | `plugins/classify/decide` | `for_turn` + `generate_turn` | 内部请求（空工具、`SilentDeltas`） |
+//! | `plugins/compose/wording` | `for_turn` + `generate_turn` | 内部请求（同上） |
+//! | core 自身测试 / 彩排 | 端口面 | 只依赖 core 契约 |
+//!
+//! **结论（不是迁移）：留 core。** 三个插件模块消费，且实现只依赖 core 契约；
+//! 迁到任一消费方会让另外两个跨插件深引（E-007 / E-009），迁到 `providers/`
+//! 会牵进 model 插件的私有件。它不是新接缝——`LlmAdapter` 才是接缝，本文件只是把
+//! `ModelProvider` 折进那个接缝的纯胶水。
 
 use std::sync::Arc;
 

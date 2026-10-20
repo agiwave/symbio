@@ -10,7 +10,7 @@
 //! - `ModelProtocolEvent`：协议适配器产出的**统一事件方言**——它是
 //!   [`sse::SseLineParser::parse_line`] 的返回类型，由 `super::stream` 的流循环消费
 //! - `MODEL_PROTOCOL_*` 注册常量（插件内部实现细节，不外泄）
-//! - `resolve_protocol_id`：`api_protocol` 别名 → 注册 id 的解析（含兜底）
+//! - `resolve_protocol_id`：`api_protocol` 别名 → 注册 id 的解析（未识别即 `None`，不兜底）
 //! - 各协议实现（openai_chat / openai_responses / anthropic_messages / gemini_api）
 //!   与 OpenAI 兼容网关的上下文探测（context_probe）
 //! - [`sse`]：`SseLineParser` / `SsePartialLineExtractor` 行解析契约
@@ -30,7 +30,6 @@ mod sse;
 pub(crate) use sse::utf8_chunk;
 pub use sse::{SseLineParser, SsePartialLineExtractor};
 
-use crate::plugin_warn;
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
 use async_trait::async_trait;
@@ -53,21 +52,20 @@ pub const MODEL_PROTOCOL_GEMINI_API: &str = "gemini_api";
 /// 解析用户配置的 `api_protocol` 别名为注册 id。
 ///
 /// 兼容历史别名：`responses`→`openai_responses`、`chat`→`openai_chat`、
-/// `anthropic`→`anthropic_messages`、`gemini`→`gemini_api`；
-/// 未识别值兜底 `openai_chat`（OpenAI 兼容生态最广）。
-pub fn resolve_protocol_id(api_protocol: &str) -> &'static str {
+/// `anthropic`→`anthropic_messages`、`gemini`→`gemini_api`。
+///
+/// **未识别值返回 `None`，不兜底**。兜底 `openai_chat` 会把「配了 anthropic 却发
+/// OpenAI 请求体」伪装成一次可用的配置：错误不在保存时报，而要等运行期的 4xx / 空流
+/// 才暴露，且症状指不到协议解析这一层。判据方向与
+/// [`CapabilityRiskLevel::from_name`](crate::symbio_core::CapabilityRiskLevel::from_name)
+/// 一致——**宁可报错，不静默放宽**。存量配置里的合法别名均已覆盖，反转只影响写错的值。
+pub fn resolve_protocol_id(api_protocol: &str) -> Option<&'static str> {
     match api_protocol {
-        "openai_responses" | "responses" => MODEL_PROTOCOL_OPENAI_RESPONSES,
-        "openai_chat" | "chat" => MODEL_PROTOCOL_OPENAI_CHAT,
-        "anthropic_messages" | "anthropic" => MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
-        "gemini_api" | "gemini" => MODEL_PROTOCOL_GEMINI_API,
-        other => {
-            plugin_warn!(
-                "model",
-                "未识别的 api_protocol \"{other}\"，回退 openai_chat"
-            );
-            MODEL_PROTOCOL_OPENAI_CHAT
-        }
+        "openai_responses" | "responses" => Some(MODEL_PROTOCOL_OPENAI_RESPONSES),
+        "openai_chat" | "chat" => Some(MODEL_PROTOCOL_OPENAI_CHAT),
+        "anthropic_messages" | "anthropic" => Some(MODEL_PROTOCOL_ANTHROPIC_MESSAGES),
+        "gemini_api" | "gemini" => Some(MODEL_PROTOCOL_GEMINI_API),
+        _ => None,
     }
 }
 

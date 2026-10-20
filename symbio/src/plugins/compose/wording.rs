@@ -6,11 +6,14 @@
 //! 这类问题）。那段文本只能从对话线**组织**出来——模板给不了。这与 `classify` 的
 //! 快速档判出 `from_context` 是同一条事实的两端：判决说"能答"，措辞就得真的答。
 //!
-//! ## 为什么出口是 `silent()`
+//! ## 为什么出口是 `SilentDeltas`
 //!
 //! 与 `classify` 的分类请求同一条理由：这是**内部请求**，它的流式帧绝不能以自有身份
-//! 进入对话流（否则每答一次就在前端留下一个空 Turn 骨架）。可见的那句话由 `session`
-//! 用生成结果**单独写一个节点**——`compose` 自己一个节点都不写（唯一写入者不变，ADR-020）。
+//! 进入对话流（否则每答一次就在前端留下一个空 Turn 骨架）。调用经
+//! [`ProviderLlmAdapter`] 的端口面，静默是入参形态而不是这里自搭的出口
+//! （全仓模型消费一条链，见 [ADR-106](../../../../docs/010-adr/106.md "ADR-106")）。
+//! 可见的那句话由 `session` 用生成结果**单独写一个节点**——`compose` 自己一个节点都不写
+//! （唯一写入者不变，ADR-020）。
 //!
 //! ## 为什么系统提示词要拼上注册段
 //!
@@ -29,9 +32,9 @@ use std::sync::Arc;
 use super::config::ComposeConfig;
 use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 use crate::symbio_core::{
-    capability_model_resolve, capability_prompts, llm_short_id, ExecAbortSignal, ExecEnv,
-    ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
-    CAPABILITY_VISITOR,
+    capability_model_resolve, capability_prompts, llm_short_id, ExecAbortSignal, LlmAdapter,
+    PluginInvokeRequest, PluginInvokeRequestExt, PromptMessage, ProviderLlmAdapter, Registry,
+    SilentDeltas, TokenIssuer, CAPABILITY_VISITOR,
 };
 use crate::symbio_core::{ComposeRequest, WordingReply};
 
@@ -71,10 +74,7 @@ pub(crate) async fn generate(
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
-    if !messages
-        .iter()
-        .any(|m| m.node_role() == Some(NodeRole::User))
-    {
+    if !messages.iter().any(|m| m.role == "user") {
         crate::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
         return None;
     }
@@ -83,8 +83,7 @@ pub(crate) async fn generate(
     // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
     // 取不到就落回当次生效的那个——降级而不失效。
     let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
-    let provider: Arc<dyn ModelProvider> =
-        capability_model_resolve(&*visitor, config.model_id()).await?;
+    let provider = capability_model_resolve(&*visitor, config.model_id()).await?;
 
     // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
     // 一切照常），这行日志是唯一的线索。
@@ -96,23 +95,34 @@ pub(crate) async fn generate(
     );
 
     let system_prompt = build_system_prompt(&visitor, config).await;
-    // 出口 = 静默（内部请求）；中止 = 调用方若给了就跟着走，没给就是一个永不中止的
-    // 独立信号（`route()` 直呼没有编排层，也就没有中止来源——见 `ExecAbortSignal::of`）。
-    let env = ExecEnv::new(ExecEventSink::silent(), ExecAbortSignal::of(&**ctx));
-    let root_id = llm_short_id();
+    // 中止 = 调用方若给了就跟着走，没给就是一个永不中止的独立信号（`route()` 直呼
+    // 没有编排层，也就没有中止来源——见 `ExecAbortSignal::of`）。
+    let llm = ProviderLlmAdapter::for_turn(provider, &system_prompt, ExecAbortSignal::of(&**ctx));
+    let tok = TokenIssuer::issue_deep();
 
-    match provider
-        // internal-model-allow IM-001: 答话措辞同上——内部请求（tools 空 / 出口 silent / system prompt 就地构造），档位归属由 T-168 裁 A/B
-        .execute_turn(&system_prompt, &messages, &[], &root_id, &env)
+    // 端口面给整轮产物（正文 / 思考 / 实测耗时同一次响应），内部请求的出口是
+    // `SilentDeltas`——不产生任何可见帧。
+    match llm
+        .generate_turn(&tok, &messages, &[], Arc::new(SilentDeltas))
         .await
     {
-        Ok(out) => {
-            let text = non_empty(&out.text)?;
+        Ok(turn) => {
+            // cost_ms 与对话轮同一条实测口径（adapter 边界）；内部请求不写事件，
+            // 因此它进日志而不是成本台账（台账的唯一输入仍是落格事件，ADR-044）。
+            crate::plugin_debug!(
+                "compose",
+                "[Compose] 答话往返完成（cost_ms={}）",
+                turn.cost_ms
+            );
+            let text = non_empty(&turn.text)?;
             // 思考事实与正文同源：有正文才可能有思考（正文空 = 整轮退模板）。
-            let reasoning = non_empty(&out.reasoning);
+            let reasoning = non_empty(&turn.reasoning);
+            // 静默请求没有「节点 id」可带（端口只回文本）：身份由这里铸一个，
+            // 供 `session` 复刻 Reason 节点。它是一次新事实的身份，不是模型协议字段。
+            let reasoning_id = reasoning.as_ref().map(|_| llm_short_id());
             Some(WordingReply {
                 text,
-                reasoning_id: reasoning.clone().map(|_| out.reasoning_child_id.clone()),
+                reasoning_id,
                 reasoning,
             })
         }
@@ -150,17 +160,41 @@ async fn build_system_prompt(visitor: &Arc<dyn Registry>, config: &ComposeConfig
 
 /// 组生成请求的消息列表。
 ///
-/// 直接用对话线投影：它就是一组 `role = user | assistant` 的文本节点，与模型的消息
+/// 直接用对话线投影：它就是一组 `role = user | assistant` 的文本节点，与端口的消息
 /// 形态同构——不需要在这里重拼一段「以下是历史」的散文（那会把同一份事实变成两种
 /// 形状，且给"谁说了什么"再错一次的机会）。
 ///
 /// 空节点剔除：投影只保证"是文本节点"，不保证"有正文"。
-fn build_messages(context: &[ChatNode]) -> Vec<ChatNode> {
+fn build_messages(context: &[ChatNode]) -> Vec<PromptMessage> {
     context
         .iter()
         .filter(|m| !text_of(m).trim().is_empty())
-        .cloned()
+        .map(prompt_message)
         .collect()
+}
+
+/// 对话线节点 → 端口的消息形态（与 `classify` 同一条映射；工具身份照带，
+/// `tool_calls` 留空——`ChatNode` 的调用声明是树上的子节点，单条消息装不下）。
+fn prompt_message(m: &ChatNode) -> PromptMessage {
+    PromptMessage {
+        role: role_word(m.node_role()).to_string(),
+        text: text_of(m),
+        tool_call_id: m.tool_call_id.clone(),
+        tool: m.tool_name().map(str::to_string),
+        tool_calls: None,
+    }
+}
+
+/// 角色 → 端口词形（与 `PromptMessage::role` 的取值同一批词）。
+fn role_word(role: Option<NodeRole>) -> &'static str {
+    match role {
+        Some(NodeRole::Assistant) => "assistant",
+        Some(NodeRole::Tool) => "tool",
+        Some(NodeRole::System) => "system",
+        // 未知角色不伪造成 assistant / tool：落 user 是本仓的兜底约定（投影只产出
+        // 三种角色 + 一条请求级 system，走到这里说明调用方给了非常规节点）。
+        _ => "user",
+    }
 }
 
 /// 只接受**有内容**的文本：空串（或纯空白）等于"这轮什么都没说"，

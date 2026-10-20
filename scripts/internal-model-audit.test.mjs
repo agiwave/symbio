@@ -184,11 +184,11 @@ test('⑧ 扫描根没有 .rs ⇒ 判据失效，exit 1', () => {
   }
 })
 
-test('⑨ 真仓库：四处存量全部登记，且正好四处', () => {
+test('⑨ 真仓库：两处存量全部登记，且正好两处', () => {
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /直调 execute_turn 的 4 处全部登记过理由/)
-  assert.match(r.stdout, /存量豁免 4 处/)
+  assert.match(r.stdout, /直调 execute_turn 的 2 处全部登记过理由/)
+  assert.match(r.stdout, /存量豁免 2 处/)
 })
 
 // ── IM-004 形状判据 ────────────────────────────────────────────────
