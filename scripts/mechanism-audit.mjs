@@ -21,6 +21,8 @@
  * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_node` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  * | M-008 | 控制面路由名只能取自 `constants/routes.gen.ts`           | 它是后端生成的，手写一份就是抄本 |
+ * | M-009 | `cli/src` 不得直读业务 `meta` 字段                      | CLI 的协议读法收口到 `protocol.rs` |
+ * | M-010 | 地址 / 协议词常量只能在 `cli/src/protocol.rs` **定义**   | 第二个前端不得有第二份段名    |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
  * 具体组件），否则「新增一种形态只登记一行」就无从谈起。
@@ -50,7 +52,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns M 机制表
-// @codes M-001 M-002 M-003 M-004 M-005 M-006 M-007 M-008
+// @codes M-001 M-002 M-003 M-004 M-005 M-006 M-007 M-008 M-009 M-010
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -175,6 +177,8 @@ const isTs = (p) => p.endsWith('.ts') && !p.endsWith('.d.ts')
 const isVueOrTs = (p) => isVue(p) || isTs(p)
 
 const SRC = path.join(repoRoot, 'tauri', 'src')
+const CLI_SRC = path.join(repoRoot, 'cli', 'src')
+const isRs = (p) => p.endsWith('.rs')
 
 /** M-008 的判定对象：那份清单**本身**就是词表，不在脚本里抄一份 */
 const ROUTES_GEN = path.join(SRC, 'constants', 'routes.gen.ts')
@@ -349,6 +353,44 @@ const RULES = {
     message:
       '控制面路由名只能取自 constants/routes.gen.ts（后端 route() 臂的生成物）—— 此处不得写死',
   },
+  /**
+   * M-009 `cli/src` 不得直读业务 `meta` 字段
+   *
+   * CLI 是**第二个前端**。同一个后端字段名若在两处各解释一次，改字段时只有一处
+   * 会跟着改，另一处静默错读——没有测试会红，只是某个视图少了一行。
+   * 协议读法（哪些 `meta` 键存在、某个形状是什么意思）因此收口到
+   * `cli/src/protocol.rs`，判定范围也只排除那一个文件。
+   *
+   * 判据是**读取**（`.meta.<field>`），不是整体透传：把 `meta` 原样序列化 /
+   * 赋值给快照不构成解释。变量别名（`let m = &node.meta; m.get(…)`）抓不到——
+   * 与 M-001 同一已知边界：它挡的是「顺手写回去」。
+   */
+  cliMetaField: {
+    rule: 'M-009',
+    severity: 'error',
+    test: (c) => c.match(/\.meta\s*\.\s*[A-Za-z_$]/),
+    message:
+      'CLI 不得直读后端 meta 字段 —— 协议读法收口到 cli/src/protocol.rs（后端改字段名只改那一处）',
+  },
+  /**
+   * M-010 地址 / 协议词常量的**定义权**只在 `cli/src/protocol.rs`
+   *
+   * 与 M-007 同型：使用常量是允许的（导入即可），**再定义**一份就是第二份真相。
+   * CLI 的段名是自持副本（session 插件的段名是 `pub(crate)`），正因为它是副本，
+   * 才必须只有一个定义点——散开后拼错的那一份表现为「帧收不到」，而两个前端
+   * 从此各有一种读法。
+   *
+   * 只匹配三个已登记的词：`*_SEG`（地址段名）与 `OUTCOME_*`（运行态结局词）。
+   * 不按「所有大写常量」判：`TURN_TIMEOUT` 这类数值常量不是地址知识，误报会
+   * 逼人写豁免注释，而靠豁免活着的守卫等于没有守卫。
+   */
+  cliSegmentDef: {
+    rule: 'M-010',
+    severity: 'error',
+    test: (c) => c.match(/\b(?:const|static)\s+(?:[A-Z][A-Z0-9_]*_SEG|OUTCOME_[A-Z0-9_]+)\s*:/),
+    message:
+      '地址 / 协议词常量的定义权在 cli/src/protocol.rs —— 此处不得再定义一份（导入使用是允许的）',
+  },
 }
 
 // ── 主流程 ───────────────────────────────────────────────────────────────
@@ -430,6 +472,23 @@ auditFiles(
   walk(SRC, isVueOrTs).filter((f) => f !== ROUTES_GEN),
   [RULES.routeLiteral],
 )
+
+// ── CLI 侧：第二个前端用同一套机制判据 ────────────────────────────────────
+// 范围只有 `cli/src`（实现文件 + 测试）。**测试文件也在范围内**：判据说的是
+// 「知识只有一个定义点」，测试若自带一份字面量，同样是第二份真相。
+console.log('--- M-009: cli/src 不得直读业务 meta 字段 ---')
+console.log('--- M-010: 地址 / 协议词常量只能在 cli/src/protocol.rs 定义 ---')
+if (fs.existsSync(CLI_SRC)) {
+  const cliFiles = walk(CLI_SRC, isRs).filter(
+    (f) => f !== path.join(CLI_SRC, 'protocol.rs'),
+  )
+  auditFiles('cli/src（不含 protocol.rs）', cliFiles, [
+    RULES.cliMetaField,
+    RULES.cliSegmentDef,
+  ])
+} else {
+  console.log(dim(`  scope: ${disp(CLI_SRC)} 不存在 —— 跳过（--root 指向的树没有 CLI）`))
+}
 
 // ── 汇总 ─────────────────────────────────────────────────────────────────
 console.log()

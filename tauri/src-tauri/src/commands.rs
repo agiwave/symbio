@@ -8,7 +8,42 @@ use symbio::symbio_core::{
     PLUGIN_PAYLOAD_KEY, TRACE_ID,
 };
 use tauri::Emitter;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+/// 把一条会话通道的帧泵到前端，并在 EOF 时收口订阅。
+///
+/// ## 为什么单独成一个函数
+///
+/// 泵里有两条**都必须发生**的 EOF 动作：取消订阅令牌（会话/总线插件的反注册任务
+/// 在等它）与通知前端 `…/eof`。它们此前只在 `route_v2` 的 `spawn` 块里，而那一块
+/// 需要 `AppHandle`，单元测试够不着——于是「前端没调 close 就消失」这条路径
+/// 长期只有人工实机验证。把泵抽成只依赖 `(rx, cancel, emit)` 的形状之后，
+/// 命令层可以用一个记录闭包直接钉住这两条动作。
+pub(crate) fn spawn_forward_pump<F>(
+    mut rx: mpsc::Receiver<PluginFrame>,
+    event_name: String,
+    cancel: CancellationToken,
+    emit: F,
+) -> tokio::task::JoinHandle<()>
+where
+    F: Fn(&str, Option<&PluginFrame>) + Send + 'static,
+{
+    tokio::spawn(async move {
+        while let Some(frame) = rx.recv().await {
+            emit(&event_name, Some(&frame));
+        }
+
+        // EOF：通道已关，订阅该收口了。取消是**幂等**的，与
+        // `remove_connection` 的取消重复无害；这里补一次是为了覆盖
+        // 「前端没调 close 就消失」的路径。
+        cancel.cancel();
+
+        // EOF 通知前端 (channel drop)
+        emit(&format!("{event_name}/eof"), None);
+    })
+}
 
 // 线路层消息容器（PluginMessageWire / PluginPayloadWire）统一定义于
 // `symbio_core::plugin::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
@@ -120,24 +155,25 @@ pub async fn route_v2(
             };
             let event_name = format!("route/{conn_id}");
 
-            // 启动转发泵
+            // 启动转发泵：帧 → 前端；EOF → 取消订阅令牌 + `…/eof`。
+            // 泵本身不认识 `AppHandle`（见 [`spawn_forward_pump`]），这里只把
+            // 「怎么发」作为闭包交进去。
             let conn_id_clone = conn_id.clone();
-            tokio::spawn(async move {
-                let mut rx = chan.rx;
-                while let Some(frame) = rx.recv().await {
-                    if let Err(e) = app.emit(&event_name, &frame) {
-                        warn!(conn_id = %conn_id_clone, error = %e, "Emit error to frontend");
+            spawn_forward_pump(
+                chan.rx,
+                event_name,
+                cancel.clone(),
+                move |event, frame| match frame {
+                    Some(frame) => {
+                        if let Err(e) = app.emit(event, frame) {
+                            warn!(conn_id = %conn_id_clone, error = %e, "Emit error to frontend");
+                        }
                     }
-                }
-
-                // EOF：通道已关，订阅该收口了。取消是**幂等**的，与
-                // `remove_connection` 的取消重复无害；这里补一次是为了覆盖
-                // 「前端没调 close 就消失」的路径。
-                cancel.cancel();
-
-                // EOF 通知前端 (channel drop)
-                let _ = app.emit(&format!("{event_name}/eof"), ());
-            });
+                    None => {
+                        let _ = app.emit(event, ());
+                    }
+                },
+            );
 
             Ok(PluginMessageWire {
                 metadata,
@@ -170,3 +206,7 @@ pub async fn route_v2_close(
     state.route_manager.remove_connection(&connection_id).await;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "commands.test.rs"]
+mod tests;

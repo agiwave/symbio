@@ -33,6 +33,8 @@ use std::io::{self, Write};
 use symbio::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use symbio::symbio_core::VDFS_STATUS_WORKING;
 
+use crate::protocol::{is_progress_surface, meta_of, waiting_card, WaitingCard, MODE_AUTO};
+
 /// 本终端认识的**呈现面**——由 [`ChatNode`] 谓词折出来，而不是直接读 `msg_type` 变体名。
 ///
 /// 为什么要这一层：`NodeKind` 正处于双形态共存档期（旧六值 ↔ 新形态 + `meta.style_tag`，
@@ -63,6 +65,8 @@ struct FrameFacts {
     progress: bool,
     failed: bool,
     error: Option<String>,
+    /// 本帧落下的节点是「等待用户动作」的交互卡（合并后的快照判定）
+    waiting: Option<WaitingCard>,
 }
 
 fn write_stdout(s: &str) {
@@ -76,19 +80,46 @@ fn write_stderr(s: &str) {
     let _ = writeln!(err, "{s}");
 }
 
-/// 节点是不是**对话面汇报节点**（开场白 / 进度播报）——它给用户看，不进模型对话内容。
+/// 「等待用户动作」要播报的那几行（纯函数，好让两种卡形各有判据）。
 ///
-/// 判据取 `meta.exclude_from_context` 而不是 `meta.surface`：答话节点同样带
-/// `surface = "reply"`（见 `chat_loop/compose.rs`），两者只有这个标记不同。
-fn is_progress_surface(meta: Option<&serde_json::Value>) -> bool {
-    meta.and_then(|v| v.get("exclude_from_context"))
-        .and_then(|v| v.as_bool())
-        == Some(true)
+/// 播报三件事：哪张卡、缺哪种答复、为什么不自动继续。`quiet` 压掉解释，但不压
+/// 终态——压掉它等于恢复「静默卡住」。
+fn waiting_lines(card: &WaitingCard, auto_mode: bool, quiet: bool) -> Vec<String> {
+    let missing = card.missing_answer();
+    if quiet {
+        return vec![format!(
+            "⏸ 等待用户动作：{}（需要「{missing}」；{}）",
+            card.title(),
+            if auto_mode {
+                "auto 模式无人作答，本轮未完成"
+            } else {
+                "CLI 无应答入口，本轮停在等用户"
+            }
+        )];
+    }
+
+    let mut detail = format!("  · {}：需要答复「{missing}」", card.label());
+    if let Some(tool) = &card.tool {
+        detail.push_str(&format!("，工具 {tool}"));
+        if let Some(risk) = &card.risk {
+            detail.push_str(&format!("（风险等级 {risk}）"));
+        }
+    }
+    let mut lines = vec![format!("⏸ 等待用户动作：{}", card.title()), detail];
+    if auto_mode {
+        lines.push("  · 当前是 auto 模式：没有回答入口，本轮不会自动继续。".to_string());
+        lines.push("  · 请在桌面端处理这张卡，或改用交互式前端重新发起。".to_string());
+    } else {
+        lines.push("  · CLI 没有回答入口：本轮停在这里，请在桌面端作答后继续。".to_string());
+    }
+    lines
 }
 
 pub struct Renderer {
     quiet: bool,
     verbose: bool,
+    /// 当前会话是不是无人值守的 `auto` 模式（决定等待卡的「为什么不能继续」）
+    auto_mode: bool,
     /// 本轮已合并的消息快照（id → 完整消息），用于算「还没打印过的那一段」
     msgs: HashMap<String, ChatNode>,
     /// 每个节点**已打印到 stdout** 的字符数（正文尾巴的依据，见 [`Self::on_message`]）
@@ -97,21 +128,36 @@ pub struct Renderer {
     tools_announced: HashSet<String>,
     /// 已播报过失败原因的消息 id
     failures_announced: HashSet<String>,
+    /// 已播报过「等待用户动作」的交互卡 id
+    waiting_announced: HashSet<String>,
+    /// 当前仍停在「等待用户动作」上的卡片 id
+    waiting_cards: HashSet<String>,
     /// 本轮是否已经输出过正文（用于收尾换行判断）
     pub wrote_text: bool,
 }
 
 impl Renderer {
-    pub fn new(quiet: bool, verbose: bool) -> Self {
+    pub fn new(quiet: bool, verbose: bool, mode: &str) -> Self {
         Self {
             quiet,
             verbose,
+            auto_mode: mode == MODE_AUTO,
             msgs: HashMap::new(),
             printed: HashMap::new(),
             tools_announced: HashSet::new(),
             failures_announced: HashSet::new(),
+            waiting_announced: HashSet::new(),
+            waiting_cards: HashSet::new(),
             wrote_text: false,
         }
+    }
+
+    /// 本轮结束时是否仍有卡片停在「等待用户动作」上。
+    ///
+    /// 看的是**当前**仍未收束的卡片，不是「出现过」这件事本身：桌面端若在同一轮里
+    /// 作答、会话接着跑完，`Completed` 帧会把卡片从集合里摘掉，本轮就是正常的。
+    pub fn saw_waiting_action(&self) -> bool {
+        !self.waiting_cards.is_empty()
     }
 
     /// 开始新一轮：丢弃上一轮的快照（快照只在单轮内做增量合并）。
@@ -120,6 +166,8 @@ impl Renderer {
         self.printed.clear();
         self.tools_announced.clear();
         self.failures_announced.clear();
+        self.waiting_announced.clear();
+        self.waiting_cards.clear();
         self.wrote_text = false;
     }
 
@@ -146,6 +194,7 @@ impl Renderer {
         // 删除帧：本 CLI 不做消息树持久渲染，丢快照即可。
         if message.status == Some(NodeStatus::Removed) {
             self.msgs.remove(&message.id);
+            self.waiting_cards.remove(&message.id);
             return;
         }
 
@@ -167,8 +216,8 @@ impl Renderer {
             if message.tool_call_id.is_some() {
                 merged.tool_call_id = message.tool_call_id.clone();
             }
-            if message.meta.is_some() {
-                merged.meta = message.meta.clone();
+            if let Some(meta) = meta_of(message) {
+                merged.meta = Some(meta.clone());
             }
             if message.seq.is_some() {
                 merged.seq = message.seq;
@@ -206,7 +255,7 @@ impl Renderer {
                 merged.content = Some(content.clone());
             }
             // 开场白 / 进度播报的判定见 [`is_progress_surface`]，回显去向见 [`Self::render`]。
-            let progress = is_progress_surface(merged.meta.as_ref());
+            let progress = is_progress_surface(meta_of(merged));
             let surface = if merged.msg_type.is_none() || merged.is_text() {
                 Surface::Text
             } else if merged.is_reasoning() {
@@ -226,6 +275,7 @@ impl Renderer {
                 progress,
                 failed: merged.status == Some(NodeStatus::Failed),
                 error: merged.error.clone(),
+                waiting: waiting_card(merged),
             }
         };
 
@@ -246,6 +296,14 @@ impl Renderer {
         } else {
             facts.delta.clone()
         };
+        if let Some(card) = &facts.waiting {
+            self.waiting_cards.insert(facts.id.clone());
+            if self.waiting_announced.insert(facts.id.clone()) {
+                self.announce_waiting(card);
+            }
+        } else {
+            self.waiting_cards.remove(&facts.id);
+        }
         if self.render(&facts) {
             *self.printed.entry(facts.id.clone()).or_insert(0) += facts.tail.chars().count();
         }
@@ -311,6 +369,24 @@ impl Renderer {
             }
             // 骨架（一整轮 / 一次工具调用）、交互卡、系统提示：无正文可渲染。
             _ => false,
+        }
+    }
+
+    /// 「等待用户动作」的明确播报。
+    ///
+    /// 为什么必须播报：这不是一次失败，会话会正常离开 `working`，于是 CLI 看起来
+    /// 「答完了」——可在 `auto` 模式下**没有任何人能回答那张卡**，本轮实际停在半路。
+    /// 静默的代价正是「用户以为在跑，其实在等一个看不见的回答」。
+    ///
+    /// CLI 不实现终端应答入口（那条按 [T-137] 收窄为「只播报」），所以两条模式
+    /// 都到此为止；区别只在「没人能答」与「请在桌面端答」。
+    fn announce_waiting(&mut self, card: &WaitingCard) {
+        if self.wrote_text {
+            write_stdout("\n");
+            self.wrote_text = false;
+        }
+        for line in waiting_lines(card, self.auto_mode, self.quiet) {
+            write_stderr(&line);
         }
     }
 

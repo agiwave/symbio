@@ -60,25 +60,7 @@ impl RouteConnectionManager {
                     _ = token.cancelled() => break,
                 }
 
-                let now = Instant::now();
-                let mut guard = connections.write().await;
-                let to_remove: Vec<String> = guard
-                    .iter()
-                    .filter(|(_, conn)| now.duration_since(conn.last_active) > timeout)
-                    .map(|(id, _)| id.clone())
-                    .collect();
-
-                for id in to_remove {
-                    warn!(
-                        conn_id = %id,
-                        timeout_secs = timeout.as_secs(),
-                        "Connection timed out, removing"
-                    );
-                    // Drop tx naturally causes EOF；取消令牌让订阅表同步收口
-                    if let Some(conn) = guard.remove(&id) {
-                        conn.cancel.cancel();
-                    }
-                }
+                sweep_expired(&connections, timeout).await;
             }
 
             debug!("Cleanup task stopped");
@@ -159,9 +141,43 @@ impl Default for RouteConnectionManager {
     }
 }
 
+/// 扫掉超过 `timeout` 未活动的连接（清理任务的**全部业务逻辑**都在这里）。
+///
+/// 抽成自由函数而不是 `self` 方法：清理任务持有的是 `connections` 的 `Arc` 克隆
+/// （spawn 需要 `'static`），不是 `&self`；测试同样直接指向那张表。若两处各写一遍
+/// 「哪些算超时、摘除后还要取消什么」，超时清理就会变成一份没人守的副本。
+async fn sweep_expired(
+    connections: &Arc<RwLock<HashMap<String, RouteConnection>>>,
+    timeout: Duration,
+) {
+    let now = Instant::now();
+    let mut guard = connections.write().await;
+    let to_remove: Vec<String> = guard
+        .iter()
+        .filter(|(_, conn)| now.duration_since(conn.last_active) > timeout)
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for id in to_remove {
+        warn!(
+            conn_id = %id,
+            timeout_secs = timeout.as_secs(),
+            "Connection timed out, removing"
+        );
+        // Drop tx naturally causes EOF；取消令牌让订阅表同步收口
+        if let Some(conn) = guard.remove(&id) {
+            conn.cancel.cancel();
+        }
+    }
+}
+
 impl Drop for RouteConnectionManager {
     fn drop(&mut self) {
         info!("Dropping manager, stopping cleanup task");
         self.cleanup_token.cancel();
     }
 }
+
+#[cfg(test)]
+#[path = "route_connection.test.rs"]
+mod tests;

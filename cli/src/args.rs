@@ -14,10 +14,10 @@ pub const DEFAULT_PROVIDER: &str = "usrouter-glm5-3-flash";
 
 /// CLI 默认会话运行模式。
 ///
-/// `auto`（无人值守）：CLI 没有交互卡片的渲染能力，遇到需审批的工具时
+/// `auto`（无人值守）：CLI 没有交互卡的应答入口，遇到需审批的工具时
 /// 应让后端返回友好错误继续，而不是挂起等待一个永远不会到来的点击。
-/// 人在环的审批流属于 Tauri 前端的职责。
-pub const DEFAULT_MODE: &str = "auto";
+/// 人在环的审批流属于 Tauri 前端的职责；CLI 只播报到达的等待卡片。
+pub const DEFAULT_MODE: &str = crate::protocol::MODE_AUTO;
 
 /// 解析结果。
 pub enum Command {
@@ -97,6 +97,8 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
 输出约定:
   标准输出 = 模型文本 + 交互提示符（可直接管道给下游程序）
   标准错误 = 进度、工具调用、错误、日志（可 2>/dev/null 静音）
+  等待用户动作（审批卡 / 提问卡）会在标准错误明确播报：CLI 没有应答入口。
+  auto 下本轮以未完成收尾；interactive 下停在等用户，请在桌面端处理该卡片。
 ";
 
 pub fn help_text() -> &'static str {

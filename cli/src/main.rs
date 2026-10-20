@@ -8,6 +8,7 @@
 
 mod args;
 mod client;
+mod protocol;
 mod render;
 
 use std::io::{IsTerminal, Write};
@@ -16,7 +17,8 @@ use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use args::Command;
-use client::{Frame, SymbioClient, SESSION_OUTCOME_ABORTED};
+use client::{Frame, SymbioClient};
+use protocol::{MODE_AUTO, OUTCOME_ABORTED};
 use render::Renderer;
 use symbio::symbio_core::{VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 
@@ -187,7 +189,7 @@ async fn run_heartbeat_daemon(client: &mut SymbioClient, args: &args::Args) -> E
                 eprintln!("✖ [{sid}] {err}");
             }
             _ if node.attributes.get("outcome").and_then(|v| v.as_str())
-                == Some(SESSION_OUTCOME_ABORTED) =>
+                == Some(OUTCOME_ABORTED) =>
             {
                 eprintln!("■ [{sid}] 本轮被中止");
             }
@@ -207,7 +209,7 @@ async fn run_once(
     inline: Option<String>,
     args: &args::Args,
 ) -> ExitCode {
-    let mut renderer = Renderer::new(args.quiet, args.verbose);
+    let mut renderer = Renderer::new(args.quiet, args.verbose, &args.mode);
 
     let message = match inline {
         Some(m) if !m.trim().is_empty() => m,
@@ -233,6 +235,13 @@ async fn run_once(
 
     match client.ask(message.trim(), &mut renderer).await {
         Ok(()) => {
+            // auto 是无人值守承诺：卡在等待用户动作上 ⇒ 本轮不可能完成，退出码如实报失败。
+            // interactive 下「停在等用户」是协议的正常收束形态（e2e T27/T78 按退出码 0
+            // 钉住）；播报已在渲染层给出，这里不改写结局。
+            if renderer.saw_waiting_action() && args.mode == MODE_AUTO {
+                eprintln!("本轮停在等待用户动作上，未完成。");
+                return ExitCode::FAILURE;
+            }
             if !renderer.wrote_text {
                 eprintln!("（模型没有产出文本内容，请检查 Provider 配置或用 --verbose 查看详情）");
                 return ExitCode::FAILURE;
@@ -248,7 +257,7 @@ async fn run_once(
 
 /// 交互式 REPL：多轮对话，内置少量会话级命令。
 async fn run_repl(client: &mut SymbioClient, args: &args::Args) -> ExitCode {
-    let mut renderer = Renderer::new(args.quiet, args.verbose);
+    let mut renderer = Renderer::new(args.quiet, args.verbose, &args.mode);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
 
     if !args.quiet {

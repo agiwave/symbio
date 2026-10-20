@@ -88,8 +88,8 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
   ciRustTestsTotal: 1436,
-  cliRustTests: 11,
-  tauriRustTests: 0,
+  cliRustTests: 21,
+  tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链
   // baseline-allow vitestFiles: 批 T-070（`76324817`，ADR-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `symbio/src/plugins/session/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
   // baseline-allow vitestTests: 同一批 T-070：上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。

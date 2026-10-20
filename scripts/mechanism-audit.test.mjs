@@ -21,14 +21,17 @@ const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
 /**
  * 在临时目录里搭一棵最小 `tauri/src` 树并跑审计。
  *
- * @param {Record<string, string>} files 相对 `tauri/src` 的路径 → 内容
+ * @param {Record<string, string>} files 相对 `tauri/src`（或以 `cli/` 开头时相对
+ *   `cli/src`）的路径 → 内容
  * @param {{strict?: boolean}} [opts]
  */
 function audit(files, { strict = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mechanism-audit-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, 'tauri', 'src', rel)
+      const abs = rel.startsWith('cli/')
+        ? path.join(root, 'cli', 'src', rel.slice('cli/'.length))
+        : path.join(root, 'tauri', 'src', rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
     }
@@ -52,7 +55,7 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /8 条规则全部通过/)
+  assert.match(r.stdout, /10 条规则全部通过/)
 })
 
 // ── M-001：组件不得解释后端 meta 字段 ────────────────────────────────────
@@ -296,6 +299,51 @@ test('M-008 不误报：注释里提到地址（判定看去注释后的代码�
     ...CLEAN,
     ...WITH_GEN,
     'services/Ok.ts': `// 走 home/reload 这条路由\nexport const p = callPlugin(ROUTE_HOME_RELOAD, {})\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// ── M-009 / M-010：CLI 的协议读法与地址常量 ─────────────────────────────
+test('M-009 命中：cli/src 里直接读 meta 字段', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/client.rs': `fn kind(node: &ChatNode) -> bool {\n    node.meta.is_some()\n}\n`,
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /\[ERROR\] M-009 .*cli\/src\/client\.rs:2/)
+})
+
+test('M-009 放行：protocol.rs 是协议读法的唯一点', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/protocol.rs': `fn kind(node: &ChatNode) -> bool {\n    node.meta.is_some()\n}\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('M-009 不误报：整体透传 meta（赋值 / 序列化）不算解释字段', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/client.rs': `fn merge(dst: &mut ChatNode, src: &ChatNode) {\n    let meta = &src.meta;\n    dst.meta = meta.clone();\n}\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('M-010 命中：cli/src 里再定义一份地址段常量（第二份真相）', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/client.rs': `const SESSION_SEG: &str = "session";\nconst OUTCOME_ABORTED: &str = "aborted";\n`,
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /\[ERROR\] M-010 .*cli\/src\/client\.rs:1/)
+  assert.match(r.stdout, /\[ERROR\] M-010 .*cli\/src\/client\.rs:2/)
+})
+
+test('M-010 放行：protocol.rs 定义 / 别处只导入使用', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/protocol.rs': `pub(crate) const SESSION_SEG: &str = "session";\n`,
+    'cli/client.rs': `use crate::protocol::SESSION_SEG;\nconst TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(900);\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })

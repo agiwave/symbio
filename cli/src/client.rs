@@ -75,25 +75,9 @@ fn gen_id(prefix: &str) -> String {
     format!("{prefix}{millis:x}{n:x}")
 }
 
-/// 会话域的**挂载段名**（ASCII）。机制层的 `PLUGIN_ID_SESSION` 不在 CLI 的可见面上，
-/// CLI 按地址契约自持一份——与 [`MESSAGES_SEG`] 同一理由、同一约定。
-///
-/// 三处用到它（订阅 `<根>/session`、识别会话节点 `<根>/session/<sid>`、
-/// 识别消息节点 `<根>/session/<sid>/message/<mid>`），因此**只在这里写一次**。
-const SESSION_SEG: &str = "session";
-
-/// 消息集合的**路径段**（ASCII）。机制层的 `SEG_MESSAGES` 是 session 插件的
-/// `pub(crate)` 内部词汇、不对外导出，CLI 按地址契约自持一份——拼错表现为
-/// 「消息帧收不到」，不会静默错乱。
-///
-/// 段名是 ASCII、展示名是中文（`title`），两者不是一回事：地址要能安全地进
-/// URL / 命令行 / 日志，中文只出现在 UI 上。
-const MESSAGES_SEG: &str = "message";
-
-/// 会话运行态中「本轮被中止」的 `outcome` 取值。机制层的 `OUTCOME_ABORTED` 是
-/// session 插件的内部词汇、不在 CLI 的可见面上，CLI 按地址契约自持一份——拼错
-/// 表现为「中止被当成正常收尾」，不会静默错乱（与 [`SESSION_SEG`] 同一理由）。
-pub(crate) const SESSION_OUTCOME_ABORTED: &str = "aborted";
+// 会话域的挂载段名（ASCII）、消息集合段、中止结局词与自动模式词都由
+// `crate::protocol` 单点定义：CLI 只持有一份地址/协议词表（M-010）。
+use crate::protocol::{MESSAGES_SEG, OUTCOME_ABORTED, SESSION_SEG};
 
 /// 留痕开关（`SYMBIO_ROUTE_LOG=1`）：出站 `route` 与**入站变更帧**都打到 stderr。
 ///
@@ -537,7 +521,7 @@ impl SymbioClient {
                     if let Some(node) = self.stat_node(&self.session_addr()).await {
                         if let Some(outcome) = Self::turn_end_of(&node) {
                             if node.attributes.get("outcome").and_then(Value::as_str)
-                                == Some(SESSION_OUTCOME_ABORTED)
+                                == Some(OUTCOME_ABORTED)
                             {
                                 r.on_abort();
                             }
@@ -577,7 +561,7 @@ impl SymbioClient {
                         // 由 `outcome` 区分）。此刻本轮全部消息帧**已在它之前落地**——
                         // 单一订阅 FIFO 给出的保证，不是调度巧合。
                         if node.attributes.get("outcome").and_then(Value::as_str)
-                            == Some(SESSION_OUTCOME_ABORTED)
+                            == Some(OUTCOME_ABORTED)
                         {
                             r.on_abort();
                         }
