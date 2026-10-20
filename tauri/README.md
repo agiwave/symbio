@@ -15,21 +15,19 @@ Symbio 桌面前端：Vue 3 + TypeScript + Tauri 2。
 ```
 tauri/
 ├── src/              # Vue3 应用（视图、组件、store、API 层）
-├── src-tauri/        # Tauri 宿主（Rust）：仅 3 个 command
+├── src-tauri/        # Tauri 宿主（Rust）：只有 `route_v2` 家族 command
 └── docs/             # 前端文档
     ├── 023-FRONTEND.md     # 前端架构与机制（代码结构、与后端通信）
     └── 024-INTERACTION.md  # 交互语义（用户看到什么、动作产生什么反馈）
 ```
 
-## Tauri 宿主命令（src-tauri）
+## 宿主命令（src-tauri）
 
-| Command | 说明 |
-|---------|------|
-| `route_v2` | 同步路由调用 → 后端插件树 |
-| `route_v2_send` | 向活动会话发送流式帧 |
-| `route_v2_close` | 关闭会话连接 |
+`src-tauri/` 只有 `route_v2` 家族的命令——宿主不含业务逻辑，请求一律直通插件树；
+`gateway` 插件的 HTTP 入口是同一件事的另一条通道。
 
-宿主不含业务逻辑：所有路由经 `route_v2` 直通插件树，与 gateway 的 `/api/route` 同构。
+本文不维护命令表：命令面由 [当前事实表](../docs/006-ref/006-当前事实表.md "RE-006-当前事实表") §5.2 从代码投影，
+逐条职责见 `docs/023-FRONTEND.md`，网关端点见 [路由契约](../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Gateway 插件。
 
 ## 文档
 

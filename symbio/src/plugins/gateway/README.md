@@ -12,10 +12,10 @@ created: 2026-09-09
 
 ## 路由
 
-端点清单见 `docs/006-ref/003-ROUTES.md` §Gateway 插件（**权威**，含鉴权与只读白名单）。
-三类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，
-此后双向 `PluginFrame`）、`GET /api/v1/health`。本插件自身接口**恒走进程内
-（in-process）**，前端不经 HTTP 访问（`gateway/status` 除外）。
+端点清单见 `docs/006-ref/003-ROUTES.md` §Gateway 插件（**权威**，含逐条路径、鉴权与只读白名单）。
+入站面按交付形态分三类——健康检查、一次性调用（对齐 `route_v2`）、WS 长连接（首帧即请求体，
+此后双向 `PluginFrame`）；**路径不在此复述**，避免第二份会漂移的端点表。本插件自身接口
+**恒走进程内**（in-process），前端不经 HTTP 访问（`gateway/status` 除外）。
 
 > 「进程内」= 不经 HTTP/WS 传输、由宿主直接调用。这与已删除的 `PluginPayload::Native`
 > 变体**无关**——那曾是协议层的一个死变体（见 `docs/005-arch/004-PROTOCOLS.md` §载荷协议）。

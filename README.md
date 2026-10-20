@@ -9,18 +9,19 @@ created: 2026-07-20
 
 # Symbio
 
-> **一个可组合、多协议的 AI Agent 平台**：一条 Rust 核心库 + 三种接入方式（桌面 / 命令行 / 网关），由**分形插件架构**统一编排对话、记忆、工具调用与外部集成。一条规则：每个能力都是一个**路径**。
+> **一个可组合、多协议的 AI Agent 平台**：一条 Rust 核心库，桌面与命令行两个前端、HTTP/WS 与 Telegram 两个入站通道，共用同一套**分形插件**装配与同一条**路径协议**。一条规则：每个能力都是一个**路径**。
 
 <!-- list:repo-layout owner -->
 
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |
-| **核心库** | `symbio/` | 分形插件路由 · 多协议 LLM 适配 · 工具调用循环 · 会话持久化 · Agent 资产与记忆 |
-| **桌面前端** | `tauri/` | Vue 3 + Pinia；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
-| **命令行前端** | `cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树 |
-| **入站网关** | `gateway` 插件 | 树内插件：把 HTTP / WS 入站请求转发给父级路由（与 Tauri 的 `route_v2` 同构） |
+| **核心库** | `symbio/` | `symbio_core` 契约 · 分形插件路由 · 多协议 LLM 适配 · 会话（持久化 / 生命周期 / 压缩） · Agent 资产与记忆 |
+| **桌面前端** | `tauri/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
+| **命令行前端** | `cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
+| **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（与 `route_v2` 同构）；Telegram 长轮询收发 |
 
-设计原则：**UI 只做配置与展示，业务逻辑全在核心库**；三种接入共用同一套插件装配与同一条路径协议（各自建树，不共享内存）。**用它做什么**：多轮 Agent 会话 · 本地开发助手（shell / 搜索 / VDFS / 技能 / MCP） · 无头自动化（CLI 管道 / 网关 webhook） · 多供应商 LLM。
+设计原则：**UI 只做配置与展示，业务逻辑全在核心库**；各前端各自建树、不共享内存，但共用同一套插件装配与路径协议。
+**用它做什么**：多轮 Agent 会话 · 本地开发助手（shell / 搜索 / VDFS / 技能 / MCP） · 无头自动化（CLI 管道 / 网关 webhook / Telegram） · 多供应商 LLM。
 
 ---
 
@@ -28,12 +29,11 @@ created: 2026-07-20
 
 - **分形插件** — 每个能力都是插件，每个插件都可含子插件；容器与叶子共享同一 `Plugin` trait。
 - **路径即路由** — 模型输出 `vdfs_read` 就能读文件、`http_request` 就能发请求，无代码生成。
-- **Session 是唯一指挥** — 会话编排（工具循环 / 裁剪 / 压缩）只有一个入口；Agent 只是可绑定的资产。
+- **会话 / 执行 / 模型三件分离** — `session` 持转写与事实源、只在**轮的边界**派发；`loop` 是单轮执行引擎（上下文装配 / 轮首判决 / 工具循环 / 收束）；`model` 是无状态 LLM 网关。Agent 只是可绑定的资产。
 - **VDFS** — 文件、模型、Agent、技能、MCP、设置……统统是有地址的资源，一个心智模型。
 - **Agent = 一个目录** — 技能 / MCP 复用宿主的子树，没有独立二进制。
 
-> 展开的架构说明见 [架构总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW")；运行时拓扑（谁挂在谁下面）见
-> [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")——本文不复述这两者。
+> 展开的架构说明见 [架构总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW")；运行时拓扑（谁挂在谁下面）见 [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")——本文不复述这两者。
 
 ---
 
@@ -54,29 +54,20 @@ cd tauri && npm install && npm run tauri dev
 ### 命令行
 
 ```bash
-node cli/scripts/build-cli.mjs              # 产物在仓库根：target/debug/symbio-cli.exe
-./target/debug/symbio-cli.exe -m "你好"     # 单条：系统目录默认 <当前目录>/.symbio
+node cli/scripts/build-cli.mjs              # 产物落在仓库根：target/debug/symbio-cli.exe
+./target/debug/symbio-cli.exe -m "你好"     # 单条；系统目录默认 <当前目录>/.symbio
 ./target/debug/symbio-cli.exe               # REPL；系统目录在别处时加 --homedir <路径>
 ```
 
-### 编译与测试核心库
+### 编译与门禁
 
 ```bash
-cd symbio && cargo build --lib && cargo test --lib
-cargo clippy --lib --tests -- -D warnings
+cd symbio && cargo build --lib   # 只编核心库
+node scripts/gate.mjs            # 提交前一条命令：Rust 编译 / 单测 / clippy / fmt · 前端类型检查与 vitest · 静态审计 · 事实表生成
+node e2e/run-tests.mjs           # 端到端：mock LLM / MCP / HTTP，不需要真 API Key
 ```
 
-> 完整教程见 [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START")。
-
----
-
-## 事实速览
-
-| 项目 | 现状 |
-| --- | --- |
-| 核心插件 | 16（权威清单见 [CURRENT.md](docs/006-ref/006-当前事实表.md "RE-006-当前事实表") §1；由代码生成，CI `--check` 防漂移） |
-| LLM 协议 | 4 种：OpenAI Chat / OpenAI Responses / Anthropic / Gemini |
-| 质量门禁 | Clippy 0 警告 · `cargo fmt` 0 diff · vue-tsc 0 错误 · vitest 通过 · 循环依赖 0（测试用例数随迭代增长，本文不锁死具体数字） |
+> 完整教程见 [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START")；门禁的阶段划分与参数见 [CONTRIBUTING.md](CONTRIBUTING.md "CONTRIBUTING")。
 
 ---
 
@@ -84,14 +75,16 @@ cargo clippy --lib --tests -- -D warnings
 
 ```
 symbio/
-├── symbio/          # Rust 核心库：symbio_core（契约）· plugins（16 插件）· providers（嵌入 / 存储）
+├── symbio/          # Rust 核心库：symbio_core（契约）· plugins（插件树）· providers（嵌入 / 存储）
 ├── tauri/           # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
-├── cli/             # 纯 Rust CLI 前端（与其余成员共用仓库根的 target/）
-├── docs/            # 系统级文档（架构 / 参考 / 指南 / 设计 / 归档）
-├── e2e/             # 端到端用例（mock-llm / mock-mcp + 网关 WS）
+├── cli/             # 纯 Rust CLI 前端（根 workspace 成员，共用仓库根的 target/）
+├── docs/            # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策，历史在 archive/）
+├── e2e/             # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）
 ├── examples/        # Agent 示例包
-└── scripts/         # 事实表生成、静态审计与门禁
+└── scripts/         # 事实表生成、判据审计与门禁
 ```
+
+> 插件 / 挂载点 / 路由 / 工具 / 协议 / 代码规模这些会变的数字只有一个来源：[当前事实表](docs/006-ref/006-当前事实表.md "RE-006-当前事实表")（从代码生成，CI `--check` 防漂移）。本文不复述。
 
 ---
 
@@ -99,15 +92,15 @@ symbio/
 
 | | |
 | --- | --- |
-| **入门** | [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
+| **入门** | [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") · [价值主张](docs/001-goal/000-价值主张.md "GO-000-价值主张") · [场景](docs/002-scene/README.md "SC-000-场景汇总") |
 | **架构** | [总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW") · [数据流](docs/005-arch/002-DATA_FLOW.md "AR-002-DATA_FLOW") · [协议](docs/005-arch/004-PROTOCOLS.md "AR-004-PROTOCOLS") · [决策记录](docs/010-adr/README.md "ADR-000-架构决策汇总") |
 | **参考** | [事实表](docs/006-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/006-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/006-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
-| **开发** | [插件开发](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/007-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
-| **设计** | [VDFS 规范](docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend") · [上下文压缩分层](symbio/src/plugins/session/docs/014-context-compression-design.md "AR-014-context-compression-design") · [Agent 目录规范 v2](docs/005-arch/006-agent-directory-spec.md "AR-006-agent-directory-spec") |
-| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/001-architecture.md "AR-001-architecture") · [构建](cli/docs/003-building.md "GU-003-building") · [用法](cli/docs/004-usage.md "GU-004-usage") |
-| **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md "CONTRIBUTING")）· [历史归档](docs/archive/) |
+| **开发** | [插件开发](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/007-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [文档中心与登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
+| **设计** | [VDFS](docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend") · [Agent 目录](docs/005-arch/006-agent-directory-spec.md "AR-006-agent-directory-spec") · [上下文压缩](symbio/src/plugins/session/docs/014-context-compression-design.md "AR-014-context-compression-design") · [目标架构 v2](docs/004-plan/012-高阶智能体平台v2.md "PL-012-高阶智能体平台v2") |
+| **CLI** | [cli/README](cli/README.md "cli/README") · [架构](cli/docs/001-architecture.md "AR-001-architecture") · [构建](cli/docs/003-building.md "GU-003-building") · [用法](cli/docs/004-usage.md "GU-004-usage") |
 
-> 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图 "docs/README")。
+> 每个插件与前端都维护自己的 `README.md`，全部模块的文档地图在[文档中心](docs/README.md "docs/README")。
+> 变更历史 = `git log`（本仓库不另维护变更日志，理由见[贡献指南](CONTRIBUTING.md "CONTRIBUTING")）。
 
 ---
 

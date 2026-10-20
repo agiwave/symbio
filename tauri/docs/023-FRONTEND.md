@@ -19,13 +19,13 @@ created: 2026-09-09
 
 ## 与后端通信
 
-前端不直接感知 14 个插件，只通过 Tauri command 与插件树对话：
+前端不直接感知插件树的具体形状，只通过 Tauri command 与插件树对话：
 
 ```
-Vue 组件 → API 层 (invoke) → route_v2 / route_v2_send / route_v2_close → 插件树
+Vue 组件 → API 层 (invoke) → route_v2 家族 → 插件树
 ```
 
-- `route_v2`：通用同步调用（PATH/PAYLOAD/SESSION_ID），等价 gateway 的 `POST /api/route`。
+- `route_v2`：通用同步调用（PATH/PAYLOAD/SESSION_ID），与 gateway 的 HTTP 入口等价（端点见 [003-ROUTES.md §Gateway 插件](../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES")）。
 - `route_v2_send`：向活动会话发送用户输入，接收流式帧。
 - `route_v2_close`：关闭会话连接。
 
