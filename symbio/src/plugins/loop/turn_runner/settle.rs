@@ -1,0 +1,147 @@
+//! 阶段⑤ 收束落格（T-179 · B3，PL-015 §5 动作 B3）。
+//!
+//! 失败（兜底格）与中止（收束格）的两条**唯一构造点**。两者都是发言收束，
+//! 因此同过写侧闸（[`closure_granted`]）：拒绝 ⇒ 不落格，该轮留在未收束态。
+//!
+//! 拆分契约：函数体逐字来自 `TurnRunner::append_fallback` / `::append_aborted`，
+//! 仅把 `Self::` 改为自由函数调用。
+
+use super::*;
+
+/// 兜底落格（I3）的唯一构造点：失败也是一句话。
+///
+/// 载荷 = **产出部分**（`produced`，失败前已产出的半截正文 / 思考 / 工具事实——
+/// 它们是事实，不因失败就不记）+ `why`（失败原因）+ `status: "failed"`。
+///
+/// `artifacts_landed` = 本轮已新落的产物格数（ADR-067 的产物收束判据）：兜底格
+/// 本身也是发言收束，发言闸拒它时，本轮**落过产物**就不算未收束。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn append_fallback<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    why: &str,
+    cost_ms: u64,
+    produced: serde_json::Value,
+    artifacts_landed: u64,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    if !closure_granted(actor, ClosureKind::Speech) {
+        // 兜底格也是**收束格**，同过写侧闸：拒绝 ⇒ 不落格。
+        // `fell_back` 仍为真——模型确实失败了（I3 的「到点必答」由调用方按失败呈现）。
+        crate::plugin_warn!(
+            "actors",
+            "[v2] 兜底收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+            actor.principal
+        );
+        return Ok(TurnOutcome {
+            turn,
+            text: why.to_string(),
+            cost_ms,
+            usage: None,
+            fell_back: true,
+            aborted: false,
+            awaits_user: false,
+            closure_denied: artifacts_landed == 0,
+            finish: crate::symbio_core::ModelFinishReason::Stop,
+        });
+    }
+    let mut payload = with_status(produced, "failed");
+    payload["why"] = serde_json::Value::String(why.to_string());
+    store.append(
+        Event::pending(
+            format!("fb-{turn}"),
+            EVENT_ASSISTANT_FALLBACK,
+            Entity::Turn,
+            Verb::Closed,
+            turn,
+            &actor.principal,
+        )
+        .with_produced_by(user_seq)
+        .with_cost_ms(cost_ms)
+        .with_payload(payload),
+    )?;
+    Ok(TurnOutcome {
+        turn,
+        text: why.to_string(),
+        cost_ms,
+        usage: None,
+        fell_back: true,
+        aborted: false,
+        awaits_user: false,
+        closure_denied: false,
+        finish: crate::symbio_core::ModelFinishReason::Stop,
+    })
+}
+
+/// 中止收束格的构造点（ADR-052 决策 1）：**闸门与首请求之间**到达的中止。
+///
+/// 与 adapter 中途返回 `AdapterError::Aborted` 落的是**同一格**
+/// （`chat.assistant.final` + `status: "aborted"` + `terminated`）——终止是事实的
+/// **状态**，不是新种类。
+pub(crate) async fn append_aborted<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    llm: &dyn LlmAdapter,
+    turn_root_id: &str,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    if !closure_granted(actor, ClosureKind::Speech) {
+        crate::plugin_warn!(
+            "actors",
+            "[v2] 中止收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+            actor.principal
+        );
+        return Ok(TurnOutcome {
+            turn,
+            text: String::new(),
+            cost_ms: 0,
+            usage: None,
+            fell_back: false,
+            aborted: true,
+            awaits_user: false,
+            closure_denied: true,
+            finish: crate::symbio_core::ModelFinishReason::Stop,
+        });
+    }
+    // 半截产出为空：请求还没发出，模型没产出任何正文 / 思考 / 工具事实。
+    let produced = produced_payload(
+        "",
+        llm.model_id(),
+        turn_root_id,
+        &StreamNodeFacts::default(),
+        &[],
+        &[],
+    );
+    store.append(
+        Event::pending(
+            format!("f-{turn}"),
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            turn,
+            &actor.principal,
+        )
+        .with_produced_by(user_seq)
+        .with_cost_ms(0)
+        .with_payload(with_terminated(with_status(produced, "aborted"))),
+    )?;
+    Ok(TurnOutcome {
+        turn,
+        text: String::new(),
+        cost_ms: 0,
+        usage: None,
+        fell_back: false,
+        aborted: true,
+        awaits_user: false,
+        closure_denied: false,
+        finish: crate::symbio_core::ModelFinishReason::Stop,
+    })
+}
