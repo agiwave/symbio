@@ -57,3 +57,40 @@ async fn test_local_embedding_truncates_overlong_input() {
         .unwrap_or_else(|| panic!("超长输入的嵌入推理失败"));
     assert_eq!(v.len(), 512);
 }
+
+// ==================== 初始化失败不是永久的（T-199） ====================
+//
+// 判据是退避门本身：窗口内「可解释地拒绝」、窗口过后「允许再试」、成功之后清空。
+// 旧实现把失败缓存进 `LazyLock<Result<..>>`，一次失败 = 本进程内永久降级，
+// 而初始化失败可能是瞬态（临时缺库 / 内存紧张）——修好了也用不上。
+
+#[test]
+fn retry_gate_backs_off_then_allows_another_attempt() {
+    let mut gate = RetryGate::default();
+    let now = Instant::now();
+    assert!(gate.blocked(now).is_none(), "还没失败过 ⇒ 允许首次尝试");
+
+    gate.record_failure(now, "boom".into());
+    let reason = gate
+        .blocked(now + Duration::from_secs(1))
+        .expect("退避窗口内必须报出原因");
+    assert!(
+        reason.contains("boom"),
+        "原因要带上原始错误（实际: {reason}）"
+    );
+    assert!(
+        reason.contains("29s 后重试"),
+        "要说明还有多久重试（实际: {reason}）"
+    );
+
+    assert!(
+        gate.blocked(now + INIT_RETRY_BACKOFF).is_none(),
+        "窗口过后必须允许重试——失败不是永久的"
+    );
+
+    gate.record_success();
+    assert!(
+        gate.blocked(now).is_none(),
+        "成功之后不得再把自己报成不可用"
+    );
+}

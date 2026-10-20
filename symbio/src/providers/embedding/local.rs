@@ -68,7 +68,8 @@ use async_trait::async_trait;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const MODEL_BYTES: &[u8] = include_bytes!("model.onnx");
 const TOKENIZER_BYTES: &[u8] = include_bytes!("tokenizer.json");
@@ -88,18 +89,103 @@ pub(crate) struct LocalEmbeddingService {
     loaded: Arc<Loaded>,
 }
 
-/// 全局单例：懒加载 + 一次性建会话（ONNX Runtime 的图优化在 `commit_from_memory`
-/// 里完成，实测 0.2 s 量级）
-static GLOBAL: LazyLock<Result<Arc<LocalEmbeddingService>, EmbeddingError>> =
-    LazyLock::new(LocalEmbeddingService::init);
+/// 全局单例状态：成功实例 + 失败退避。
+///
+/// **失败不缓存为永久**（T-199）：`LazyLock<Result<..>>` 会把一次失败钉死整个进程，
+/// 而 ONNX Runtime 的初始化失败可能是环境瞬态（临时缺库 / 内存紧张）——永久降级
+/// 会让「修好了也用不上」。改成「失败记下原因 + 退避窗口」，窗口过后下一次取用重试。
+static GLOBAL: OnceLock<Mutex<InitState>> = OnceLock::new();
+
+/// 初始化失败后的退避窗口：一次建会话是 0.2s 量级，坏环境下每次检索都重试一次
+/// 会把一条慢路径变成一把锤子。
+const INIT_RETRY_BACKOFF: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+struct InitState {
+    service: Option<Arc<LocalEmbeddingService>>,
+    gate: RetryGate,
+}
+
+/// 初始化失败的退避状态（纯数据；判据在 `local.test.rs`）。
+#[derive(Default)]
+struct RetryGate {
+    last_error: Option<String>,
+    next_retry_at: Option<Instant>,
+}
+
+impl RetryGate {
+    /// 仍在退避窗口内 ⇒ 返回「为什么还不可用」；`None` = 可以再试一次。
+    fn blocked(&self, now: Instant) -> Option<String> {
+        let at = self.next_retry_at?;
+        if now >= at {
+            return None;
+        }
+        // 向上取整到秒：不足 1s 显示「0s 后重试」会让人以为立刻可用。
+        let secs = ((at - now).as_millis().saturating_add(999) / 1000).max(1);
+        Some(format!(
+            "上次初始化失败（{}），{}s 后重试",
+            self.last_error.as_deref().unwrap_or("未知原因"),
+            secs
+        ))
+    }
+
+    fn record_failure(&mut self, now: Instant, error: String) {
+        self.last_error = Some(error);
+        self.next_retry_at = Some(now + INIT_RETRY_BACKOFF);
+    }
+
+    fn record_success(&mut self) {
+        self.last_error = None;
+        self.next_retry_at = None;
+    }
+}
+
+fn init_state() -> &'static Mutex<InitState> {
+    GLOBAL.get_or_init(|| Mutex::new(InitState::default()))
+}
+
+/// 语义检索当前为何不可用（可用 / 尚未尝试 ⇒ `None`）。
+///
+/// 这是给**工具返回体**用的：`codebase_search` 降级到关键词检索时要把原因说出去，
+/// 否则「语义检索不可用」与「语义检索没搜到」在用户眼里同形（T-199）。
+pub(crate) fn unavailable_reason() -> Option<String> {
+    let state = init_state()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if state.service.is_some() {
+        return None;
+    }
+    state
+        .gate
+        .last_error
+        .as_ref()
+        .map(|e| format!("{e}（已启用退避重试）"))
+}
 
 impl LocalEmbeddingService {
     fn get_instance() -> Result<Arc<dyn EmbeddingService>, EmbeddingError> {
-        match &*GLOBAL {
-            Ok(service) => Ok(service.clone() as Arc<dyn EmbeddingService>),
-            Err(e) => Err(EmbeddingError::Init(format!(
-                "Local embedding service failed to init: {e}"
-            ))),
+        let mut state = init_state()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(service) = &state.service {
+            return Ok(service.clone() as Arc<dyn EmbeddingService>);
+        }
+        let now = Instant::now();
+        if let Some(reason) = state.gate.blocked(now) {
+            return Err(EmbeddingError::Init(format!(
+                "Local embedding service failed to init: {reason}"
+            )));
+        }
+        match Self::init() {
+            Ok(service) => {
+                state.service = Some(service.clone());
+                state.gate.record_success();
+                Ok(service)
+            }
+            Err(e) => {
+                state.gate.record_failure(now, e.to_string());
+                Err(e)
+            }
         }
     }
 

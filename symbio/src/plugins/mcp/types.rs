@@ -305,20 +305,22 @@ pub fn filter_tools(
 /// 行业最佳实践：server 返回的 tools 中可能包含非规名称（不规范实现 / 内部工具），
 /// 应在 client 端过滤掉，避免污染 agent 工具路由。
 ///
-/// 返回 `(合法工具, 非法数量)`。调用方可以基于 `invalid_count` 决定是否 warn。
-pub fn filter_valid_tool_names(tools: Vec<McpTool>) -> (Vec<McpTool>, usize) {
+/// 返回 `(合法工具, 被丢弃的名字)`。**名字而不是计数**：调用方要用它写告警与断言——
+/// 只报「过滤了 2 个」等于让用户知道「某个 server 的工具少了」却永远查不出是哪个
+/// （T-199：失败与「没有」不能同形）。
+pub fn filter_valid_tool_names(tools: Vec<McpTool>) -> (Vec<McpTool>, Vec<String>) {
     let mut valid = Vec::with_capacity(tools.len());
-    let mut invalid_count = 0;
+    let mut invalid = Vec::new();
     for t in tools {
         match validate_tool_name(&t.name) {
             Ok(()) => valid.push(t),
             Err(e) => {
                 tracing::warn!("过滤非法 tool name: {e}");
-                invalid_count += 1;
+                invalid.push(t.name);
             }
         }
     }
-    (valid, invalid_count)
+    (valid, invalid)
 }
 
 #[cfg(test)]

@@ -8,3 +8,10 @@
 // ⭐ 子模块一律不带 `pub(crate)`，保持完全私有。
 // 业务模块必须通过 `dyn EmbeddingService` 工厂模式访问。
 mod local;
+
+/// 语义检索当前为何不可用（T-199）：`codebase_search` 的降级要说得出来。
+///
+/// 只暴露**原因**，不暴露实例——取实例的唯一入口仍是 `creator_create_object`。
+pub(crate) fn unavailable_reason() -> Option<String> {
+    local::unavailable_reason()
+}

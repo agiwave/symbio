@@ -111,7 +111,7 @@ fn validate_tool_name_rejects_invalid_chars() {
     assert!(validate_tool_name("with😀emoji").is_err());
 }
 
-/// TEST-MR27.5：filter_valid_tool_names 保留合法 / 计数非法
+/// TEST-MR27.5：filter_valid_tool_names 保留合法 / 交出被丢弃的名字
 #[test]
 fn filter_valid_tool_names_separates() {
     let tools = vec![
@@ -123,7 +123,11 @@ fn filter_valid_tool_names_separates() {
     ];
     let (valid, invalid) = filter_valid_tool_names(tools);
     assert_eq!(valid.len(), 3);
-    assert_eq!(invalid, 2);
+    assert_eq!(
+        invalid,
+        vec!["with space".to_string(), "中文".to_string()],
+        "被丢弃的名字必须原样交出——只报数量等于让用户永远查不出少了哪个工具"
+    );
     let names: Vec<&str> = valid.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, vec!["search", "read_file", "git-commit"]);
 }
@@ -131,11 +135,11 @@ fn filter_valid_tool_names_separates() {
 /// TEST-MR27.6：filter_valid_tool_names 全空 / 全合法
 #[test]
 fn filter_valid_tool_names_edge_cases() {
-    assert_eq!(filter_valid_tool_names(vec![]).0.len(), 0);
+    assert!(filter_valid_tool_names(vec![]).0.is_empty());
     let only_valid = vec![tool("a"), tool("b")];
     let (v, n) = filter_valid_tool_names(only_valid);
     assert_eq!(v.len(), 2);
-    assert_eq!(n, 0);
+    assert!(n.is_empty(), "全合法时不得出现被丢弃的名字");
 }
 
 // ============================================================================

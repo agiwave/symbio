@@ -469,3 +469,53 @@ async fn overlong_file_produces_no_chunks() {
     let chunks = embed_file(&dir.path().join("ok.json"), &embed.as_service()).await;
     assert!(!chunks.is_empty(), "上限内的文件应照常索引");
 }
+
+// ==================== 降级要说得出来（T-199） ====================
+//
+// `keyword_search` 是语义检索不可用时的降级路径。此前查询不是合法正则时直接
+// 返回空——与「真的没搜到」同形。判据：非法正则 ⇒ 按字面量重试并带说明；
+// 合法正则 ⇒ 没有说明；合法正则但无命中 ⇒ 也没有说明（这才是「没搜到」）。
+
+fn t199_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("symbio-test/t199-keyword");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建临时目录");
+    std::fs::write(
+        dir.join("sample.rs"),
+        "fn target() {\n    let x = (1 + 2);\n}\n",
+    )
+    .expect("写样例源码");
+    dir
+}
+
+#[tokio::test]
+async fn invalid_regex_falls_back_to_literal_with_a_notice() {
+    let dir = t199_dir();
+    let (hits, notice) = keyword_search(&dir, "(", 10).await;
+
+    let notice = notice.expect("查询非法必须带说明（不许与「没搜到」同形）");
+    assert!(
+        notice.contains("字面量"),
+        "说明要交代已按字面量匹配（实际: {notice}）"
+    );
+    assert!(!hits.is_empty(), "字面量 `(` 在样例里存在，回退后仍应搜到");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn valid_regex_and_empty_result_carry_no_notice() {
+    let dir = t199_dir();
+    let (hits, notice) = keyword_search(&dir, "target", 10).await;
+    assert!(!hits.is_empty());
+    assert!(notice.is_none(), "合法查询不得伪造降级说明");
+
+    let (empty, notice) = keyword_search(&dir, "no_such_symbol_anywhere", 10).await;
+    assert!(empty.is_empty());
+    assert!(
+        notice.is_none(),
+        "「真的没搜到」既不是非法查询也不是降级，不许带说明"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

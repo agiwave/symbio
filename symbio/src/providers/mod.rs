@@ -108,8 +108,10 @@ pub(crate) use collectors::DefaultToolVisitor;
 // 出口只列**真有跨模块消费者**的符号——否则「公开面」里会混入没人要的东西，
 // 也就无从判断这条实现到底被谁依赖。
 pub(crate) use memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
-// `embedding` **不在这里**：它没有直接出口，两个实现经 `submit_object_creator!`
-// 注册，业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_*, ctx)` 取。
+// `embedding` 的**实例**不在这里：两个实现经 `submit_object_creator!` 注册，
+// 业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_*, ctx)` 取。
+// 只出口「为什么不可用」（T-199）：工具降级时要把原因写进返回体，而原因不是实例。
+pub(crate) use embedding::unavailable_reason as embedding_unavailable_reason;
 pub(crate) use vdfs_service::{
     auto_id as vdfs_auto_id, id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs,
     MemoryVdfs, SingleFileVdfs, VdfsPack, VdfsUnpack,

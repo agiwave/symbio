@@ -244,11 +244,17 @@ impl McpManager {
             }
         };
         // BUG-MR27：过滤掉非法 tool name（避免污染 agent 工具路由）
-        let (valid, invalid_count) = super::types::filter_valid_tool_names(raw);
-        if invalid_count > 0 {
+        let (valid, invalid_names) = super::types::filter_valid_tool_names(raw);
+        if !invalid_names.is_empty() {
+            // 告警必须带**具体名字**（T-199）：只报数量时，用户知道「工具少了」却查不出
+            // 是哪个。名字截断到前 5 个（server 可能一次吐出上百个非法名，日志不能被它撑爆）。
+            let shown: Vec<&str> = invalid_names.iter().take(5).map(String::as_str).collect();
             warn!(
                 server = name,
-                invalid_count, "MCP server 返回了非法 tool name，已过滤"
+                invalid_count = invalid_names.len(),
+                invalid_names = ?shown,
+                omitted = invalid_names.len().saturating_sub(shown.len()),
+                "MCP server 返回了非法 tool name，已过滤"
             );
         }
         let filtered =

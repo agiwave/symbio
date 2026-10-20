@@ -237,10 +237,18 @@ impl CodebaseSearchTool {
 
         let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         let embed = creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
+        // 实例恒能拿到（初始化失败时工厂给的是 Noop），所以「可不可用」必须单独问一次：
+        // 否则「语义检索没搜到」与「语义检索根本没跑」在返回体里同形（T-199）。
+        let semantic_unavailable = if embed.is_none() {
+            Some("embedding 服务未注册".to_string())
+        } else {
+            crate::providers::embedding_unavailable_reason()
+        };
 
         let mut results: Vec<Value> = Vec::new();
         let mut mode = "keyword_fallback";
         let mut index_info = Value::Null;
+        let mut notice: Option<String> = None;
 
         if let Some(embed) = embed.as_ref() {
             if let Some((index, stats)) = get_index(&workspace_dir, rebuild, embed).await {
@@ -261,8 +269,22 @@ impl CodebaseSearchTool {
         }
 
         if results.is_empty() {
-            results = keyword_search(&workspace_dir, &query, limit).await;
+            let (keyword_results, keyword_notice) =
+                keyword_search(&workspace_dir, &query, limit).await;
+            results = keyword_results;
             mode = "keyword_fallback";
+            // 两条降级原因都要说：查询本身非法（正则编译失败 → 字面量回退）是**本次**
+            // 的降级，语义不可用是**环境**的降级。只报一条会让另一条继续隐身。
+            notice = match (keyword_notice, semantic_unavailable.as_ref()) {
+                (Some(keyword), Some(semantic)) => {
+                    Some(format!("{keyword}；语义检索不可用（{semantic}）"))
+                }
+                (Some(keyword), None) => Some(keyword),
+                (None, Some(semantic)) => {
+                    Some(format!("语义检索不可用（{semantic}），本次按关键词检索。"))
+                }
+                (None, None) => None,
+            };
         }
 
         if !path.is_empty() {
@@ -274,13 +296,19 @@ impl CodebaseSearchTool {
             });
         }
 
+        let message = match &notice {
+            Some(notice) => format!("以 {} 模式返回 {} 条结果。{}", mode, results.len(), notice),
+            None => format!("以 {} 模式返回 {} 条结果。", mode, results.len()),
+        };
         Ok(json!({
             "query": query,
             "mode": mode,
             "results": results,
             "count": results.len(),
             "index": index_info,
-            "message": format!("以 {} 模式返回 {} 条结果。", mode, results.len()),
+            // 降级原因（无降级 = null）：让「搜不到」与「没在搜」可分（T-199）。
+            "notice": notice,
+            "message": message,
         }))
     }
 }
@@ -759,10 +787,33 @@ async fn semantic_search(
 }
 
 /// 降级：用 ripgrep 库做正则关键词检索（跨平台，不依赖 `rg` 可执行文件）
-async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> Vec<Value> {
-    let matcher = match RegexMatcherBuilder::new().case_smart(false).build(query) {
-        Ok(m) => m,
-        Err(_) => return vec![],
+///
+/// 返回 `(片段, 降级说明)`。查询不是合法正则时**不静默返回空**（那与「真的没搜到」
+/// 同形，T-199）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
+/// 说明；字面量也编译不出来时才返回空 + 说明。
+async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> (Vec<Value>, Option<String>) {
+    let (matcher, notice) = match RegexMatcherBuilder::new().case_smart(false).build(query) {
+        Ok(matcher) => (matcher, None),
+        Err(e) => {
+            let reason = one_line(&e.to_string());
+            match RegexMatcherBuilder::new()
+                .case_smart(false)
+                .build(&regex::escape(query))
+            {
+                Ok(matcher) => (
+                    matcher,
+                    Some(format!("查询不是合法正则（{reason}），已按字面量匹配。")),
+                ),
+                Err(_) => {
+                    return (
+                        vec![],
+                        Some(format!(
+                            "查询不可用：正则编译失败（{reason}），字面量回退也失败。"
+                        )),
+                    )
+                }
+            }
+        }
     };
     let mut searcher = SearcherBuilder::new().line_number(true).build();
 
@@ -821,7 +872,13 @@ async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> Vec<Value>
             }
         }
     }
-    out
+    (out, notice)
+}
+
+/// 把错误压成一行：正则编译错误自带多行说明与 span 提示，直接塞进工具返回体会
+/// 把返回体撑成两倍长，而这里只需要「哪里不对」。
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[async_trait]

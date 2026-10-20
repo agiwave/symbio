@@ -126,6 +126,13 @@ impl HookEvent {
     }
 }
 
+/// 钩子**没跑起来**时注入 `context` 的固定标记（T-199）。
+///
+/// 钩子是旁路观察者，失败必须留在执行路径上（`should_proceed` 不变、调用点不中断），
+/// 但「钩子跑了」与「钩子没跑」不能同形：装配错了挂钩插件的会话，此前看到的是
+/// 一切正常——前置拦截静默失效。标记让这件事在返回值、日志与断言里都有名字。
+pub const HOOK_UNAVAILABLE_MARKER: &str = "[hook-unavailable]";
+
 /// 触发一次生命周期钩子，返回钩子插件的输出。
 ///
 /// **返回 `HookOutput` 而非 `Result`，是刻意的**：钩子是**旁路观察者**——它的职责是
@@ -156,10 +163,39 @@ pub async fn fire_hook(
     }));
 
     match p.clone().route(hook_ctx).await {
-        Ok(resp) => resp
-            .get::<HookOutput>()
-            .unwrap_or_else(|_| HookOutput::default()),
-        Err(_) => HookOutput::default(),
+        Ok(resp) => match resp.get::<HookOutput>() {
+            Ok(output) => output,
+            // 插件在、但返回的东西不是钩子输出（版本不匹配 / 外部脚本吐了别的帧）：
+            // 这与「没有钩子」同形，标记 + 告警把它分开（T-199）。
+            Err(e) => {
+                tracing::warn!(
+                    "钩子 {} 的输出无法解析：{e}（按未执行处理，不拦截）",
+                    event.event_name()
+                );
+                HookOutput {
+                    context: Some(format!(
+                        "{HOOK_UNAVAILABLE_MARKER} {} 的输出无法解析：{e}",
+                        event.event_name()
+                    )),
+                    ..Default::default()
+                }
+            }
+        },
+        // 插件缺失 / 路由失败：此前静默按「放行」处理，于是「钩子没跑」看起来像
+        // 「钩子跑了且放行」。标记 + 告警让降级可观测，判定链保持不变。
+        Err(e) => {
+            tracing::warn!(
+                "钩子 {} 执行失败：{e}（按未执行处理，不拦截）",
+                event.event_name()
+            );
+            HookOutput {
+                context: Some(format!(
+                    "{HOOK_UNAVAILABLE_MARKER} {} 执行失败：{e}",
+                    event.event_name()
+                )),
+                ..Default::default()
+            }
+        }
     }
 }
 
