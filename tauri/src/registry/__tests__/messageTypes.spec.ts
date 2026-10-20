@@ -356,8 +356,7 @@ describe('messagePreviewFollowsLiveEdge：收起态摘要取哪一端', () => {
 })
 
 describe('agentNameOf', () => {
-  it('优先级：meta.agent_name > meta.agent_id > 按子会话兜底', () => {
-    expect(agentNameOf({ meta: { agent_name: 'm' } }, false)).toBe('m')
+  it('优先级：meta.agent_id > 按子会话兜底', () => {
     expect(agentNameOf({ meta: { agent_id: 'id1' } }, false)).toBe('id1')
     expect(agentNameOf({}, false)).toBe('助手')
     expect(agentNameOf({}, true)).toBe('子智能体')

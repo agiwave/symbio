@@ -8,6 +8,8 @@
  *   但写进 `__tests__` ⇒ 必须**不**红（测试持有协议夹具是它的职责）。
  * - C 组（闭集词表）：枚举加变体 / 词表多词 / 丢 `rename_all` / 词表元素不是常量
  *   ⇒ 必须变红。
+ * - H 组（meta 键白名单）：未登记读点 / owner 字面消失 / 动态下标 ⇒ 必须变红；
+ *   注释与字符串里的字段名、非 ChatNode 文件 ⇒ 必须不红。
  * 另有一条跑真实仓库，防本守卫在真仓库上误报。
  *
  * ## 夹具为什么要铺满 C / D 两份清单的每一条
@@ -99,6 +101,9 @@ const CHAT_RS_SRC = [
   '}',
   '',
   rsStruct('ChatNode', 'id', 'parent_id'),
+  '',
+  // H 组：meta.tool_name 的 owner 侧字面（真实仓库住在 `symbio_core/chat/chat_node.rs`）
+  'pub const META_TOOL_NAME: &str = "tool_name";',
 ].join('\n')
 
 /** 前端：四张词表（常量 + 由常量数组派生的类型） */
@@ -346,6 +351,15 @@ const READING_TS_SRC = [
   tsArray('READING_TONES', "'normal'", "'warn'"),
 ].join('\n')
 
+/** H 组：一个提到 ChatNode、且读了一个已登记 meta 键的前端生产文件 */
+const META_READER_TS = 'tauri/src/registry/messageTypes.ts'
+const META_READER_TS_SRC = [
+  "import type { ChatNode } from '@/schemas/chat_node'",
+  'export function toolNameOf(node: Pick<ChatNode, "meta">): string | undefined {',
+  '  return (node.meta as Record<string, unknown> | undefined)?.tool_name as string | undefined',
+  '}',
+].join('\n')
+
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
   'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
@@ -364,6 +378,7 @@ const BASE = {
   [SESSION_META_TS]: SESSION_META_TS_SRC,
   [READING_RS]: READING_RS_SRC,
   [READING_TS]: READING_TS_SRC,
+  [META_READER_TS]: META_READER_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
 }
 
@@ -405,7 +420,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 22 对结构体字段 \+ E 组 1 条跨栈导航头/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 22 对结构体字段 \+ E 组 1 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
   )
 })
 
@@ -877,5 +892,65 @@ test('CLI 侧直接消费也算直接（Rust 读法）→ 不红', () => {
     'cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
+})
+
+// ==================== H 组：meta 键白名单 ====================
+
+test('未登记的 meta 读点 → 变红（新增键必须先登记）', () => {
+  const r = mirror({
+    [META_READER_TS]: META_READER_TS_SRC.replace('?.tool_name', '?.ghost'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /未登记的 meta 键：ghost/)
+})
+
+test('后端 owner 文件里删掉键字面 → 变红（改名 / 删除后前端会静默读 undefined）', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace('pub const META_TOOL_NAME: &str = "tool_name";', ''),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /owner 文件里已找不到这个字面/)
+  assert.match(r.stdout, /tool_name/)
+})
+
+test('动态 meta 键访问 → 变红（白名单只对可枚举的读点有效）', () => {
+  const r = mirror({
+    [META_READER_TS]: META_READER_TS_SRC.replace(
+      'return (node.meta as Record<string, unknown> | undefined)?.tool_name as string | undefined',
+      'const k = "tool_name"\n  return (node.meta as Record<string, unknown> | undefined)?.[k]',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /动态 meta 键访问/)
+})
+
+test('注释与字符串里的 meta 字段名不算读点 → 不红', () => {
+  const r = mirror({
+    [META_READER_TS]: `${META_READER_TS_SRC}\n// meta.ghost\nexport const s = 'meta.phantom'\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('前端自持的键（owner: null）不要求后端存在 → 不红', () => {
+  const r = mirror({
+    [META_READER_TS]: `${META_READER_TS_SRC}\nexport function workdirOf(node: Pick<ChatNode, 'meta'>) {\n  return node.meta?.workdir\n}\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('没有提到 ChatNode 的文件不进入 H 组扫描 → `import.meta.env` 不误报', () => {
+  const r = mirror({
+    'tauri/src/utils/logger.ts': 'export const env = import.meta.env\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('在 ChatNode 文件里一个 meta 读点都扫不到 → 变红（读空不是全绿）', () => {
+  const r = mirror({
+    [META_READER_TS]:
+      "import type { ChatNode } from '@/schemas/chat_node'\nexport const x: ChatNode = { id: 'x' }\n",
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /扫到 0 个 meta 读点/)
 })
 

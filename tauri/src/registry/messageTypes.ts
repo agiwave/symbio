@@ -102,17 +102,18 @@ export function toolNameOf(node: Pick<ChatNode, 'meta'>): string | undefined {
 /**
  * 消息节点的显示名（骨架容器用）。
  *
- * 优先级：`meta.agent_name` > `meta.agent_id` > 按是否子会话取兜底名。
+ * 优先级：`meta.agent_id` > 按是否子会话取兜底名。
  * `meta` 是后端 flatten 的场景字段，这里只做取值，不解释语义。
  * （曾经的 `node.name` 首选项已随顶层字段退役删除——后端从未把智能体名写进
- * name，那条只是一条空通道，[T-147d-ii]。）
+ * name，那条只是一条空通道，[T-147d-ii]。`meta.agent_name` 同样从未有生产者，
+ * 一并删除：读一个没人写的键只会让下一个人以为存在第二份名字来源。）
  */
 export function agentNameOf(
   node: Pick<ChatNode, 'meta'>,
   subSession: boolean,
 ): string {
   const meta = node.meta as Record<string, unknown> | undefined
-  const fromMeta = meta?.agent_name || meta?.agent_id
+  const fromMeta = meta?.agent_id
   return (
     (typeof fromMeta === 'string' ? fromMeta : '') ||
     (subSession ? '子智能体' : '助手')
@@ -373,17 +374,15 @@ export function messageCompactionStats(
   node: Pick<ChatNode, 'meta'>,
 ): MessageCompactionStats {
   const meta = (node.meta ?? {}) as Record<string, unknown>
-  const num = (k: string): number | undefined => {
-    const v = meta[k]
-    return typeof v === 'number' && Number.isFinite(v) ? v : undefined
-  }
+  const num = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) ? v : undefined
   const trigger = meta.compact_trigger
   return {
     trigger: typeof trigger === 'string' && trigger ? trigger : undefined,
-    limit: num('context_limit'),
-    beforeTokens: num('before_tokens'),
-    afterTokens: num('after_tokens'),
-    dropped: num('dropped'),
+    limit: num(meta.context_limit),
+    beforeTokens: num(meta.before_tokens),
+    afterTokens: num(meta.after_tokens),
+    dropped: num(meta.dropped),
   }
 }
 
@@ -440,16 +439,8 @@ export function messageIsHeartbeat(node: Pick<ChatNode, 'meta'>): boolean {
 }
 
 /**
- * 临时节点（`meta.ephemeral`）：不参与「会话里是否存在失败节点」这类会话级判定。
- *
- * 这类节点是渲染期的临时广播（不落存储），把它们的失败算成"会话失败"会让
- * 错误横幅在一个已经恢复的会话上继续挂着。
+ * 后端标记该失败**可恢复**（会话因它暂停，用户可就地重试）。只保证「存在即真」。
  */
-export function messageIsEphemeral(node: Pick<ChatNode, 'meta'>): boolean {
-  return Boolean((node.meta as Record<string, unknown> | undefined)?.ephemeral)
-}
-
-/** 后端标记该失败**可恢复**（会话因它暂停，用户可就地重试）。只保证「存在即真」。 */
 export function messageIsRecoverable(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.recoverable)
 }

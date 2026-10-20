@@ -112,7 +112,6 @@ import { CHAT_ROLE_USER } from '@/schemas/chat_node'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
 import {
   isFailedStatus,
-  messageIsEphemeral,
   messageRetryTargetOf,
   messageRoleOf,
   messageStatusOf,
@@ -246,8 +245,8 @@ const optionScope = computed<Record<string, unknown>>(() => ({
     const hasFailedNode = sessionsStore
       .getSessionMessages(props.sessionId)
       // 「失败节点」的判据与后端 meta 字段的读取都收在 registry/messageTypes：
-      // 本组件不解释 `status` 取值，也不碰 `meta.ephemeral` 这种后端字段名。
-      .some((m) => isFailedStatus(messageStatusOf(m)) && !messageIsEphemeral(m))
+      // 本组件不解释 `status` 取值，也不碰任何 meta 字段名。
+      .some((m) => isFailedStatus(messageStatusOf(m)))
     return hasFailedNode ? null : err
   })
 

@@ -432,7 +432,197 @@ const STRUCT_SETS = [
   },
 ]
 
+// ==================== H. meta 键白名单 ====================
+
+/**
+ * 前端从 `ChatNode.meta` 读的键 ↔ 它的后端 owner。
+ *
+ * **为什么要有这一组**：D 组守 `ChatNode` 的顶层字段，但 `meta` 是一个自由 JSON
+ * 键袋——后端改一个键名，前端读到的就是 `undefined`，编译不报、运行不报，
+ * 只表现为「少渲染一列」。本组把「前端读的每个 meta 键」变成必须登记的契约：
+ *
+ * - **读点 ⊆ 白名单**：白名单外出现 `meta.X` / `meta?.X` / `node.meta.X` ⇒ 红。
+ *   新增读点必须先登记，登记时写明后端 owner。
+ * - **后端拥有的键仍在 owner 文件里**：`owner` 非空时，该键字面必须仍在 owner
+ *   文件里出现 ⇒ 否则红（后端改名 / 删除后，前端那条读点会静默读 `undefined`）。
+ *   前端自持的键（`owner: null`）只做第一条。
+ *
+ * **已知边界**：第二条判的是「字面从 owner 文件里整词消失」，不是「语义上不再
+ * 产出」——`error` 这类通用词在 owner 文件里另有用途时，改名不会立刻红。真正的
+ * 根治是让键名只有一份（生成常量），那是协议面变更（[ADR-070]），归 T-208。
+ *
+ * **扫描范围**：只扫「提到了 `ChatNode`」的前端生产文件。`meta` 是同名重灾区
+ * （日志对象、VDFS 详情、`import.meta`），按类型用法过滤比按变量名过滤可靠。
+ * 注释与字符串在扫描前被掩成空格（保留行号），注释里提字段名不算读点。
+ */
+const META_KEYS = [
+  {
+    key: 'compacted',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '压缩后的历史记忆标记（渲染成记忆而非用户气泡）',
+  },
+  {
+    key: 'compact_trigger',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '这次压缩的触发来源',
+  },
+  {
+    key: 'context_limit',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '生效的上下文上限',
+  },
+  {
+    key: 'before_tokens',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '压缩前内容水位',
+  },
+  {
+    key: 'after_tokens',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '压缩后内容水位',
+  },
+  {
+    key: 'dropped',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '这次被压掉的条数',
+  },
+  {
+    key: 'post_tokens',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '压缩产物（记忆节点）的内容水位',
+  },
+  {
+    key: 'transcript_path',
+    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    what: '压缩前完整历史的转存路径（存在即已归档）',
+  },
+  {
+    key: 'error',
+    owner: 'symbio/src/plugins/loop/resume.rs',
+    what: '旧路径的失败原因（顶层 error 缺失时的兜底）',
+  },
+  {
+    key: 'failure_kind',
+    owner: 'symbio/src/plugins/loop/tools/tool_executor.rs',
+    what: '失败类别（决定可恢复动作）',
+  },
+  {
+    key: 'started_at',
+    owner: 'symbio/src/plugins/loop/resume.rs',
+    what: '工具开始执行的时刻（运行时长锚点）',
+  },
+  {
+    key: 'recoverable',
+    owner: 'symbio/src/symbio_core/chat/chat_node.rs',
+    what: '该失败可由用户就地重试',
+  },
+  {
+    key: 'tool_name',
+    owner: 'symbio/src/symbio_core/chat/chat_node.rs',
+    what: '工具名（顶层 name 退役后的唯一住处）',
+  },
+  {
+    key: 'prompt',
+    owner: 'symbio/src/plugins/loop/tools/tool_executor.rs',
+    what: '待用户响应的载荷（提问 / 工具确认）',
+  },
+  {
+    key: 'agent_id',
+    owner: 'symbio/src/plugins/agent/host/subagent.rs',
+    what: '子会话所属智能体',
+  },
+  {
+    key: 'heartbeat',
+    owner: 'symbio/src/plugins/heartbeat/scheduler.rs',
+    what: '系统心跳任务产生的消息',
+  },
+  {
+    key: 'parent_session_id',
+    owner: 'symbio/src/plugins/agent/host/subagent.rs',
+    what: '子会话锚点（恢复需路由回子会话）',
+  },
+  {
+    key: '__toolRequest',
+    owner: null,
+    what: '前端渲染期合成的「请求」子节点标记（不落存储）',
+  },
+  {
+    key: 'workdir',
+    owner: null,
+    what: '会话 metadata 的工作目录（前端写读；不是 ChatNode.meta）',
+  },
+]
+
+/**
+ * 把注释与字符串**掩成空格**（保留换行与偏移）。
+ *
+ * 不能用「直接删掉」：行号会漂，报错位置就失去意义；也不能不掩——注释里
+ * 提到 `meta.agent_name` 会让守卫对着一段说明文字报红。
+ */
+function maskCommentsAndStrings(src) {
+  const out = src.split('')
+  let i = 0
+  while (i < src.length) {
+    const c = src[i]
+    const n = src[i + 1]
+    if (c === '/' && n === '/') {
+      let j = src.indexOf('\n', i)
+      if (j < 0) j = src.length
+      for (let k = i; k < j; k++) out[k] = ' '
+      i = j
+      continue
+    }
+    if (c === '/' && n === '*') {
+      let j = src.indexOf('*/', i + 2)
+      j = j < 0 ? src.length : j + 2
+      for (let k = i; k < j; k++) if (out[k] !== '\n') out[k] = ' '
+      i = j
+      continue
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c
+      let j = i + 1
+      while (j < src.length) {
+        if (src[j] === '\\') {
+          j += 2
+          continue
+        }
+        if (src[j] === quote) {
+          j++
+          break
+        }
+        j++
+      }
+      for (let k = i; k < j; k++) if (out[k] !== '\n') out[k] = ' '
+      i = j
+      continue
+    }
+    i++
+  }
+  return out.join('')
+}
+
+/** 掩码后的文本里，`meta.<key>` / `meta?.<key>`（含 `as` 类型断言）的读点 */
+function metaReads(src) {
+  const masked = maskCommentsAndStrings(src)
+  const reads = []
+  const re = /\bmeta\b(?:\s+as\s+[^;\n]*?)?\s*(\?\.|\.)\s*([A-Za-z_$][\w$]*)/g
+  let m
+  while ((m = re.exec(masked))) reads.push({ key: m[2], index: m.index })
+  // 动态键：`meta[k]` / `meta?.[k]` 无法静态核对，直接判红——白名单的价值全在「可枚举」。
+  // 字符串先被掩成空格，故 `ChatNode['meta']` 这类**类型里的字面**不会误报；
+  // 类型断言后的动态下标要额外认一次 `)…[` 的形状。
+  for (const dyn of [
+    /\bmeta\b\s*(?:\?\.|\.)?\s*\[/g,
+    /\bmeta\b\s+as\s+[^;\n]*?\)\s*(?:\?\.|\.)?\s*\[/g,
+  ]) {
+    while ((m = dyn.exec(masked))) reads.push({ key: null, index: m.index })
+  }
+  return { masked, reads }
+}
+
 // ==================== 提取 ====================
+
 
 /** 后端：全部 `pub const NAME: &str = "v"`（含 `pub(crate)`） */
 function rustConsts(src) {
@@ -1072,6 +1262,80 @@ console.log('E. 跨栈导航头（Corresponding Frontend）')
   }
 }
 
+// ==================== H. meta 键白名单 ====================
+
+let metaKeyCount = 0
+{
+  console.log()
+  console.log('--- H. meta 键白名单（前端读点 ⊆ 白名单；后端键仍能在 owner 文件里找到）---')
+
+  // 只扫「提到了 ChatNode」的生产文件：`meta` 同名重灾区，按类型用法过滤比按变量名可靠。
+  const scope = frontendFiles.filter((f) => /\bChatNode\b/.test(fs.readFileSync(f, 'utf8')))
+  const byKey = new Map()
+  let dynamicCount = 0
+
+  for (const f of scope) {
+    const src = fs.readFileSync(f, 'utf8')
+    const { masked, reads } = metaReads(src)
+    for (const r of reads) {
+      const line = masked.slice(0, r.index).split('\n').length
+      if (r.key === null) {
+        dynamicCount++
+        errors++
+        console.log(`  ${red(BAD)} ${relOf(f)}:${line} —— 动态 meta 键访问无法静态核对`)
+        console.log(dim('      改成 `meta.<key>` 直接读，让键名进入白名单；动态键会让守卫读空。'))
+        continue
+      }
+      if (!byKey.has(r.key)) byKey.set(r.key, [])
+      byKey.get(r.key).push(`${relOf(f)}:${line}`)
+    }
+  }
+
+  if (scope.length === 0) {
+    errors++
+    console.log(`  ${red(BAD)} 没有任何前端文件提到 ChatNode —— 扫描范围失效`)
+  } else if (byKey.size === 0 && dynamicCount === 0) {
+    // 「读空即全绿」是本仓反复点名过的失效形态：一个读点都没有，说明扫法坏了。
+    errors++
+    console.log(`  ${red(BAD)} 在 ${scope.length} 个 ChatNode 文件里扫到 0 个 meta 读点 —— 扫描失效`)
+  }
+  metaKeyCount = byKey.size
+
+  for (const [key, wheres] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const entry = META_KEYS.find((e) => e.key === key)
+    if (!entry) {
+      errors += wheres.length
+      console.log(`  ${red(BAD)} 未登记的 meta 键：${key}（${wheres.length} 处）`)
+      for (const w of wheres) console.log(`      ${red(w)}`)
+      console.log(dim('      它不是协议键 → 从 meta 里删掉；是 → 登记到 META_KEYS 并写明后端 owner。'))
+      continue
+    }
+
+    if (entry.owner === null) {
+      console.log(
+        `  ${green(OK)} meta.${key} —— 前端自持（${wheres.length} 处）${dim(`：${entry.what}`)}`,
+      )
+      continue
+    }
+
+    const ownerSrc = readIfExists(entry.owner)
+    if (ownerSrc === null) {
+      errors++
+      console.log(`  ${red(BAD)} meta.${key} 的 owner 文件不存在：${entry.owner}`)
+      continue
+    }
+    if (!new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(ownerSrc)) {
+      errors++
+      console.log(`  ${red(BAD)} meta.${key} —— owner 文件里已找不到这个字面：${entry.owner}`)
+      console.log(dim(`      前端 ${wheres.length} 处读点会静默读到 undefined；后端改名了，或该键已删除。`))
+      continue
+    }
+    console.log(
+      `  ${green(OK)} meta.${key} —— ${wheres.length} 处读点，owner ${entry.owner}${dim(`：${entry.what}`)}`,
+    )
+  }
+}
+
 // ---------- 收尾 ----------
 console.log()
 console.log(`Errors: ${errors}`)
@@ -1085,7 +1349,8 @@ if (errors > 0) {
         '  C 组：后端闭集（枚举或常量组）的取值集合必须与前端词表相等。\n' +
         '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。\n' +
         '  E 组：Corresponding Frontend 头必须指向真实存在的文件（悬空就删掉那行）。\n' +
-        '  G 组：ChatNode 顶层字段若有消费者，必须有不经由 meta 的直接读法（只被 meta 代理 ⇒ 沉入 meta 或移出顶层）。',
+        '  G 组：ChatNode 顶层字段若有消费者，必须有不经由 meta 的直接读法（只被 meta 代理 ⇒ 沉入 meta 或移出顶层）。\n' +
+        '  H 组：前端读的每个 ChatNode.meta 键都必须登记；后端拥有的键必须仍能在 owner 文件里找到。',
     ),
   )
   process.exit(1)
@@ -1095,7 +1360,8 @@ console.log(
   green(
     `  A 组 ${mirrorCount} 条常量镜像 + B 组 ${ABSENT.length} 项缺席检查 + ` +
       `C 组 ${ENUM_SETS.length} 张闭集词表 + D 组 ${STRUCT_SETS.length} 对结构体字段 + ` +
-      `E 组 ${headerCount} 条跨栈导航头 + G 组 ChatNode 顶层字段消费守卫，全部一致` +
+      `E 组 ${headerCount} 条跨栈导航头 + G 组 ChatNode 顶层字段消费守卫 + ` +
+      `H 组 ${metaKeyCount} 个 meta 键读点（白名单 ${META_KEYS.length} 条），全部一致` +
       `（扫描 ${frontendFiles.length} 个前端文件）`,
   ),
 )
