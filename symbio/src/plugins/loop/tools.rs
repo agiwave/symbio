@@ -6,6 +6,9 @@
 //!   批量分发与结果广播（`process_tool_calls_async`）、
 //!   「未执行」结果的统一写法（`apply_not_executed`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
+//! - `dispatch` —— `process_tool_calls_async` 的**阶段拆分层**（T-179 / PL-015 §5 动作 B）：
+//!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
+//!   本层只是它的三段落点，不改门面。
 //! - `tool_result_guard` —— 结果守卫：单条结果进存储前的体积上限（`guard_tool_result`
 //!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
 //!   （[ADR-078](../../../../docs/010-adr/078.md "ADR-078")）。
@@ -23,6 +26,7 @@
 //! `tools::<子模块>::X`——子模块一律 `mod`（私有），跨域只看得见这里列出来的项；
 //! 需要新增跨域项时改的是这张门面，而不是放宽子模块可见性。
 
+mod dispatch;
 mod tool_executor;
 mod tool_result_guard;
 

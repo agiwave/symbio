@@ -11,6 +11,9 @@ use crate::symbio_core::facts::TaskStatus;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use crate::symbio_core::Store;
+// `failure_kind` 与 `Seq` 同样是**测试自己**要的：批首闸门读数与逐条执行的闸门段
+// 已按 T-179 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
+use crate::symbio_core::{failure_kind, Seq};
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
