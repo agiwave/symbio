@@ -109,6 +109,8 @@ const DETAIL_RS = 'symbio/src/symbio_core/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
+const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
+const READING_TS = 'tauri/src/schemas/reading.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
 const RUST_CONST_FILES = [VDFS_WORDS_RS, VDFS_PROTOCOL_RS]
@@ -275,6 +277,13 @@ const ENUM_SETS = [
     rust: { file: DETAIL_RS, constPrefix: 'DETAIL_PICK_' },
     ts: { file: FORM_TS, array: 'DETAIL_PICKS' },
   },
+  {
+    what: '读数面板语气（[T-202]）',
+    // 前端原先写成裸联合 `'normal' | 'warn'`：后端加一档时前端不会红。先有
+    // `READING_TONES` 数组再派生类型，本组才能逐词对上账。
+    rust: { file: READING_RS, enum: 'ReadingTone' },
+    ts: { file: READING_TS, array: 'READING_TONES' },
+  },
 ]
 
 // ==================== D. 结构体字段 ====================
@@ -405,6 +414,21 @@ const STRUCT_SETS = [
     what: '详情页定义',
     rust: { file: DETAIL_RS, struct: 'DetailDefinition' },
     ts: { file: FORM_TS, interface: 'DetailDefinition' },
+  },
+  {
+    what: '读数行（[T-202]：读数面板的跨栈契约）',
+    rust: { file: READING_RS, struct: 'ReadingRow' },
+    ts: { file: READING_TS, interface: 'ReadingRow' },
+  },
+  {
+    what: '读数分区（[T-202]）',
+    rust: { file: READING_RS, struct: 'ReadingSection' },
+    ts: { file: READING_TS, interface: 'ReadingSection' },
+  },
+  {
+    what: '读数面板（[T-202]）',
+    rust: { file: READING_RS, struct: 'ReadingPanel' },
+    ts: { file: READING_TS, interface: 'ReadingPanel' },
   },
 ]
 

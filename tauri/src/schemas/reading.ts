@@ -7,11 +7,22 @@
  * 前端因此不出现任何会话/统计语义：这里只认分区、行、标签、值、口径提示与语气。
  * 换一个产者（成本、记忆、任何只读路由）前端零改动。
  *
- * 后端真源：`symbio/src/symbio_core/present/reading.rs`（schema-audit 对两侧对账）。
+ * 后端真源：`symbio/src/symbio_core/present/reading.rs`。
+ * 跨栈镜像由 `scripts/protocol-mirror-audit.mjs` 的两张登记表看守：结构体在
+ * `STRUCT_SETS`（`ReadingRow` / `ReadingSection` / `ReadingPanel`），闭集词表在
+ * `ENUM_SETS`（`ReadingTone` ↔ `READING_TONES`）。字段或取值改名 ⇒ 该审计红。
  */
 
+/**
+ * 语气词表（跨栈镜像的**词表侧**）：后端 `ReadingTone` 的线上取值。
+ *
+ * 先有数组、再派生类型——守卫按数组逐词比对后端枚举；把类型写成裸联合而没有
+ * 数组，后端加一档时前端不会红（本批补守卫的原因）。
+ */
+export const READING_TONES = ['normal', 'warn'] as const
+
 /** 一列读数的语气（产者判，前端只换样式）。 */
-export type ReadingTone = 'normal' | 'warn'
+export type ReadingTone = (typeof READING_TONES)[number]
 
 /** 一行读数。 */
 export interface ReadingRow {

@@ -39,6 +39,8 @@ const DETAIL_RS = 'symbio/src/symbio_core/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
+const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
+const READING_TS = 'tauri/src/schemas/reading.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
 const rsStruct = (name, ...fields) =>
@@ -326,6 +328,24 @@ const SESSION_META_TS_SRC = [
   tsArray('SESSION_MODES', "'auto'", "'interactive'"),
 ].join('\n')
 
+/** 后端 present/reading.rs：[T-202] 读数方言的 3 个结构体 + 1 个闭集 */
+const READING_RS_SRC = [
+  rsStruct('ReadingRow', 'label', 'value', 'hint', 'tone'),
+  rsStruct('ReadingSection', 'title', 'rows'),
+  rsStruct('ReadingPanel', 'title', 'subtitle', 'sections'),
+  '',
+  rsEnum('ReadingTone', ['Normal', 'Warn'], 'lowercase'),
+].join('\n')
+
+/** 前端 schemas/reading.ts：[T-202] 的镜像侧（3 个接口 + 1 张词表） */
+const READING_TS_SRC = [
+  tsIface('ReadingRow', 'label', 'value', 'hint', 'tone'),
+  tsIface('ReadingSection', 'title', 'rows'),
+  tsIface('ReadingPanel', 'title', 'subtitle', 'sections'),
+  '',
+  tsArray('READING_TONES', "'normal'", "'warn'"),
+].join('\n')
+
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
   'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
@@ -342,6 +362,8 @@ const BASE = {
   [FORM_TS]: FORM_TS_SRC,
   [RISK_LEVEL_RS]: RISK_LEVEL_RS_SRC,
   [SESSION_META_TS]: SESSION_META_TS_SRC,
+  [READING_RS]: READING_RS_SRC,
+  [READING_TS]: READING_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
 }
 
@@ -383,7 +405,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 19 对结构体字段 \+ E 组 1 条跨栈导航头/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 22 对结构体字段 \+ E 组 1 条跨栈导航头/,
   )
 })
 
@@ -612,6 +634,22 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 // ==================== D 组：结构体字段 ====================
 
 const VDFS_NODE_RS = 'symbio/src/symbio_core/vdfs/node.rs'
+
+test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
+  const r = mirror({
+    [READING_RS]: READING_RS_SRC.replace('pub label: String,', 'pub caption: String,'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：label/)
+})
+
+test('读数语气词表多一档 → 变红（T-202 词表组真的在看）', () => {
+  const r = mirror({
+    [READING_TS]: READING_TS_SRC.replace("'normal'", "'normal', 'danger'"),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /前端词表多出：danger/)
+})
 
 test('后端结构体字段改名、前端没跟 → 变红', () => {
   const r = mirror({
