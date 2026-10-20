@@ -201,7 +201,7 @@ export function audit({ text, mechanisms, codes, resolveAnchor, entries }) {
   const block = allowBlock(text)
   const allows = []
   if (block === null) {
-    errors.push({ code: 'ME-001', where: '§6', message: '缺少 ```mechanism-allow 围栏（③ 的豁免住在那里）' })
+    errors.push({ code: 'ME-001', where: '§7', message: '缺少 ```mechanism-allow 围栏（③ 的豁免住在那里）' })
   } else {
     for (const line of block) {
       if (!line.trim()) continue
@@ -239,7 +239,7 @@ export function audit({ text, mechanisms, codes, resolveAnchor, entries }) {
     }
   }
   if (allows.length > MAX_EXEMPTIONS) {
-    errors.push({ code: 'ME-005', where: '§6', message: `豁免 ${allows.length} 条，超过上限 ${MAX_EXEMPTIONS}——「全部挂豁免」等于没有清单` })
+    errors.push({ code: 'ME-005', where: '§7', message: `豁免 ${allows.length} 条，超过上限 ${MAX_EXEMPTIONS}——「全部挂豁免」等于没有清单` })
   }
 
   return { errors, rows, allows }

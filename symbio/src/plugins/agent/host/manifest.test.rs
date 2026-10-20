@@ -63,3 +63,26 @@ fn load_reads_yaml_and_json() {
     .unwrap();
     assert_eq!(load(tmp.path()).unwrap().id, "a");
 }
+
+/// 权限清单是**声明性质**（[ADR-102](../../../../../docs/010-adr/102.md "ADR-102")）：
+/// Rust 侧叫 `declared_permissions`（名字说清它没有执行方），但 Agent 包的公开键
+/// 仍是 `permissions`——改名不得变成线格式破坏。
+#[test]
+fn permissions_stay_on_the_wire_while_the_rust_field_says_declared() {
+    let m: AgentManifest = serde_yaml_ng::from_str(
+        "permissions:\n  fs:\n    read: [\"data/**\"]\n  network:\n    domains: [\"example.com\"]\n",
+    )
+    .unwrap();
+    assert_eq!(m.declared_permissions.fs.read, vec!["data/**"]);
+    assert_eq!(m.declared_permissions.network.domains, vec!["example.com"]);
+
+    let back = serde_yaml_ng::to_string(&m).unwrap();
+    assert!(
+        back.contains("permissions:"),
+        "线格式键必须是 permissions，实得：{back}"
+    );
+    assert!(
+        !back.contains("declared_permissions"),
+        "Rust 字段名不得泄漏到 Agent 包的公开键里"
+    );
+}

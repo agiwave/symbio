@@ -42,9 +42,18 @@ pub struct AgentManifest {
     #[serde(skip_serializing_if = "Requires::is_empty")]
     pub requires: Requires,
 
-    /// 权限声明（声明式；执行机制不在规范范围内，§5.3）
-    #[serde(skip_serializing_if = "Permissions::is_empty")]
-    pub permissions: Permissions,
+    /// **声明性质**的权限清单（§5.3）：包作者与宿主之间的沟通面，**不是安全边界**。
+    ///
+    /// 运行期没有任何一处代码读它——四个字段（`fs` / `network` / `limits`）都没有
+    /// 执行方。字段名因此回到「它到底是什么」：`declared_permissions`。
+    /// 宿主侧真正的边界是授权表（[ADR-099](../../../../../docs/010-adr/099.md "ADR-099")）
+    /// 与审批闸（[ADR-068](../../../../../docs/010-adr/068.md "ADR-068")）；
+    /// 为什么不在这里补执行方、以及补的时候要满足什么，见
+    /// [ADR-102](../../../../../docs/010-adr/102.md "ADR-102")。
+    ///
+    /// **线格式不变**（`permissions`）：改名的是 Rust 侧语义，不是 Agent 包的公开键。
+    #[serde(rename = "permissions", skip_serializing_if = "Permissions::is_empty")]
+    pub declared_permissions: Permissions,
 }
 
 /// **版本匹配判定（接入门槛，§10）**
