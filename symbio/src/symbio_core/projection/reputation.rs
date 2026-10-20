@@ -5,15 +5,14 @@
 //!
 //! ## 边界（S08 §7 诚实划界）
 //!
-//! - 打分函数是**参数**不是架构：[`ReputationScore`] 给出平凡值（守约 − 违约），
-//!   换算法不改本投影的形状；
+//! - 打分是**平凡值**不是架构：[`plain_score`]（守约 − 违约）住在闭包里，换算法
+//!   改那一处，不加机制；
 //! - `commitment` 只记录「立了约、是否违约」，不保证「守约」；
 //! - as-of 语义与 `recall` 同口径：形参 `now` 即锚，未来的收束不影响当前声誉。
 
 use super::super::event::{
     Entity, Event, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED,
 };
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -57,9 +56,6 @@ impl ReputationView {
     }
 }
 
-/// 打分函数（平凡值：守约 − 违约；换算法 = 换这个闭包，不加机制）。
-pub type ReputationScore = fn(offered: u64, kept: u64, broken: u64) -> i64;
-
 /// 平凡打分：守约 − 违约。
 pub fn plain_score(_offered: u64, kept: u64, broken: u64) -> i64 {
     kept as i64 - broken as i64
@@ -71,12 +67,7 @@ pub fn plain_score(_offered: u64, kept: u64, broken: u64) -> i64 {
 /// - 配对：收束事件经载荷 `id` 找回立约方（`from` 是立约时的事实，收束时不重抄）；
 /// - 排序：`BTreeMap` 按主体字典序——同一份事件切片永远产出同一张表（N1）。
 pub fn reputation() -> Projection<ReputationView> {
-    reputation_with(plain_score)
-}
-
-/// 带自定义打分函数的声誉投影（算法是参数，架构只提供位置）。
-pub fn reputation_with(score: ReputationScore) -> Projection<ReputationView> {
-    Projection::new(move |events: &[Event], now, _budget: Budget| {
+    Projection::new(move |events: &[Event], now| {
         let mut offered_of: BTreeMap<String, u64> = BTreeMap::new();
         // commitment id → (from, ts)
         let mut open: BTreeMap<String, (String, i64)> = BTreeMap::new();
@@ -127,14 +118,10 @@ pub fn reputation_with(score: ReputationScore) -> Projection<ReputationView> {
                     offered,
                     kept,
                     broken,
-                    score: score(offered, kept, broken),
+                    score: plain_score(offered, kept, broken),
                 },
             );
         }
-        View {
-            value: ReputationView { by_principal },
-            degraded: false,
-            used: Budget::new(0, 0),
-        }
+        ReputationView { by_principal }
     })
 }

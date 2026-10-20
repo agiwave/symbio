@@ -11,6 +11,7 @@ use crate::symbio_core::event::{
     Entity, Event, Seq, Verb, EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_OPENED,
 };
 use crate::symbio_core::store::{EventStore, Store};
+use crate::symbio_core::view::Budget;
 
 /// 溯源锚：真实链路里欲是从一次触发出发的（`system.triggered`）。
 fn seed_trigger(store: &EventStore) -> u64 {

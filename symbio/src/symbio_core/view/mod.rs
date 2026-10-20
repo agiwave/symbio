@@ -33,29 +33,14 @@ impl Budget {
 /// 投影的产出：值 + 是否降级 + 实际消耗。
 ///
 /// **只能**是 `View`，不是 `Result`（构造即锁定，见 [`crate::symbio_core::projection::Projection`]）。
+/// 只由 [`Projection::apply`](crate::symbio_core::projection::Projection::apply) 构造
+/// （[ADR-105](../../../../docs/010-adr/105.md "ADR-105")：降级与预算在框架层统一执行，
+/// `ok` / `degraded` 构造器随闭包签名一并退役）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View<V> {
     pub value: V,
     pub degraded: bool,
     pub used: Budget,
-}
-
-impl<V> View<V> {
-    pub fn ok(value: V, used: Budget) -> Self {
-        View {
-            value,
-            degraded: false,
-            used,
-        }
-    }
-
-    pub fn degraded(value: V, used: Budget) -> Self {
-        View {
-            value,
-            degraded: true,
-            used,
-        }
-    }
 }
 
 // ── 召回视图（S5，[plan/01 §9](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）────────────────
@@ -130,8 +115,9 @@ pub struct RecallEntry {
 /// **会脱离外壳单独流动**——`memory_events::recall_view` 取 `.value` 后把它存进
 /// `TurnState.recall_view`、再交给注入段（`prompt_section`）。外壳一丢，
 /// 「这次只显示了一部分」就没人说得出来（静默的形态从「空且不标」变成「有部分结果
-/// 且不标」）。故让视图**自描述**：投影把同一个 `degraded` 局部量同时写进外壳与本字段
-/// （一处计算、两处承载，判据钉住两者一致），消费方不必回捞外壳。
+/// 且不标」）。故让视图**自描述**：取值点把外壳的 `degraded` **誊抄**进本字段
+/// （[ADR-105](../../../../docs/010-adr/105.md "ADR-105")：外壳是唯一的降级事实源，
+/// 闭包不自置，字段由唯一丢外壳的取值点落笔），消费方不必回捞外壳。
 ///
 /// `#[serde(default)]`：旧序列化形态（无此字段）仍读得出，缺省 `false`（不谎称降级）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

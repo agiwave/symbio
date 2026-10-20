@@ -12,7 +12,7 @@ use super::super::skill_events::SKILL_TAG;
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
     EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
-    MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SECTION_HEAD,
+    MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA, RECALL_SECTION_HEAD,
 };
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use crate::symbio_core::authz::PRINCIPAL_USER;
@@ -948,18 +948,24 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
 /// 把降级丢了，静默的形态从「空且不标」变成「有部分结果且不标」——两者都是同一个静默。
 #[test]
 fn prompt_section_says_degraded_instead_of_pretending_completeness() {
+    // 降级走**取值点** `recall_view`：投影闭包不再自置 degraded（ADR-105），视图
+    // 字段由取值点从外壳誊抄——本用例同时钉住这两层。配额为 RECALL_SCAN_QUOTA，
+    // 超窗需要种满配额 + 1 条。
     let store = EventStore::new();
-    for i in 0..5i64 {
+    for i in 0..(RECALL_SCAN_QUOTA as i64 + 1) {
         seed_encoded(&store, &format!("deg-{i}"), &format!("片段 {i}"), 100 + i);
     }
-    let snap = store.range(Seq::new(0));
-
-    // 降级视图：配额 1 ⇒ 扫到第二条即停（部分结果 + degraded）。
-    let degraded_view = recall(PRINCIPAL_USER, None, None)
-        .apply(&snap, i64::MAX, Budget::new(0, 1))
-        .value;
-    assert!(degraded_view.degraded, "判据前提：视图带降级标记");
-    assert!(!degraded_view.entries.is_empty(), "降级必须带部分结果");
+    let degraded_view =
+        recall_view(vec![snap(true, &store)], "", "session/main").expect("有记忆 ⇒ 有视图");
+    assert!(
+        degraded_view.degraded,
+        "外壳降级必须被取值点誊抄进视图字段（T-104：视图脱离外壳流动时自描述）"
+    );
+    assert_eq!(
+        degraded_view.entries.len(),
+        RECALL_SCAN_QUOTA as usize,
+        "窗口只交切片头部：部分结果（截尾不截头）"
+    );
 
     let section = prompt_section(&degraded_view).expect("有条目 ⇒ 有段");
     assert!(
@@ -972,9 +978,11 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
     );
 
     // 反向：充足预算 ⇒ 不加标注（不谎称降级）。
-    let full = recall(PRINCIPAL_USER, None, None)
-        .apply(&snap, i64::MAX, Budget::generous())
-        .value;
+    let small = EventStore::new();
+    for i in 0..5i64 {
+        seed_encoded(&small, &format!("full-{i}"), &format!("片段 {i}"), 100 + i);
+    }
+    let full = recall_view(vec![snap(true, &small)], "", "session/main").expect("有记忆");
     assert!(!full.degraded, "反转前提：本视图不降级");
     let full_section = prompt_section(&full).expect("有条目 ⇒ 有段");
     assert!(

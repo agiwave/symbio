@@ -26,7 +26,7 @@
 use super::super::event::{
     Entity, Event, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
 };
-use super::super::view::{Budget, RecallEntry, RecallView, View};
+use super::super::view::{RecallEntry, RecallView};
 use super::recall_score::{rank, ScoreEntry};
 use super::Projection;
 
@@ -42,19 +42,20 @@ use super::Projection;
 ///   `verify/recall_eval.rs` 同一份实现）：旧但相关的记忆不再输给新但无关的
 ///   （T-085 批②，T-126 §3「语义 / 时序 / 因果混合打分」的第一维）。
 /// - 排序：见 `query`——无查询时新近度优先（`ts` 降序，确定性——不打浮点分）；
-/// - 预算：`budget.ms` 为扫描配额（1 事件 = 1ms），超配额 ⇒ 降级 + 部分结果。
+/// - 预算：扫描配额（1 事件 = 1ms）由框架层 [`super::Projection::apply`] 统一执行
+///   （[ADR-105](../../../../docs/010-adr/105.md "ADR-105")）——超窗只交出切片头部，
+///   外壳 `degraded` 由框架置位。本闭包不再自带配额扫描；视图字段
+///   [`RecallView::degraded`](crate::symbio_core::view::RecallView)（视图脱离外壳
+///   流动时的自描述，T-104）由**取值点**从外壳誊抄——外壳是唯一的降级事实源。
 pub fn recall(
     viewer: impl Into<String>,
     tag: Option<String>,
     query: Option<String>,
 ) -> Projection<RecallView> {
     let viewer = viewer.into();
-    Projection::new(move |events: &[Event], now, budget: Budget| {
-        let quota = (budget.ms as usize).max(1);
+    Projection::new(move |events: &[Event], now| {
         let mut entries: Vec<RecallEntry> = Vec::new();
         let mut forgotten: Vec<u64> = Vec::new();
-        let mut scanned = 0usize;
-        let mut degraded = false;
         for e in events {
             // as-of：未来的事件（巩固 / 遗忘 / 编码）一概不见。
             if e.ts > now {
@@ -67,11 +68,6 @@ pub fn recall(
                 EVENT_MEMORY_ENCODED | EVENT_MEMORY_CONSOLIDATED => {
                     // 巩固产物（压缩后的新记忆）同样可召回——它也是一条记忆，
                     // 只是 generation > 0（01 §9.2）。
-                    scanned += 1;
-                    if scanned > quota {
-                        degraded = true;
-                        break; // 预算耗尽：带部分结果降级，不装作扫完了
-                    }
                     if e.actor != viewer {
                         continue; // thread_private：默认只见自己的
                     }
@@ -130,12 +126,11 @@ pub fn recall(
                 tag: s.tag,
             })
             .collect();
-        View {
-            // `degraded` 一处计算、两处承载：外壳（投影契约的 F2）与视图字段
-            // （视图脱离外壳流动时自描述，T-104）。判据钉住两者一致。
-            value: RecallView { entries, degraded },
-            degraded,
-            used: Budget::new(0, scanned as u64),
+        // 外壳 `degraded` 是框架的（[ADR-105]）；视图字段恒 `false`，由取值点
+        // 誊抄外壳——「空且不标降级」的形状保证挪到取值点（见模块文档）。
+        RecallView {
+            entries,
+            degraded: false,
         }
     })
 }

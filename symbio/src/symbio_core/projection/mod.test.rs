@@ -11,13 +11,10 @@ fn ev(id: &str, kind: &str, verb: Verb, turn: u64) -> Event {
     Event::pending(id, kind, Entity::Turn, verb, turn, "main").with_ts(1_000)
 }
 
-/// 骨架投影：统计某 turn 的已见事件数（S1 起的 `turnstate` 视图从这里长出来）。
-/// 预算口径：数一遍事件，把拿到的 ms 如实上报（`used` 由投影自己记账）。
+/// 骨架投影：统计**交给它的事件**里某 kind 的条数（S1 起的 `turnstate` 视图从
+/// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行（ADR-105）。
 fn seen_count_projection() -> Projection<usize> {
-    Projection::new(|events, _now, b| {
-        let n = events.iter().filter(|e| e.kind == "user.message").count();
-        View::ok(n, b)
-    })
+    Projection::new(|events, _now| events.iter().filter(|e| e.kind == "user.message").count())
 }
 
 // ── N1 / C6：同一事件序列，双跑逐字节相同 ──────────────────────────────
@@ -40,7 +37,10 @@ fn same_input_yields_byte_identical_view_on_repeat_runs() {
     );
     assert!(!v1.degraded);
     assert_eq!(v1.value, 5);
-    assert_eq!(v1.used, b);
+    assert_eq!(
+        v1.used.ms, 6,
+        "used.ms = 交给闭包的窗口长度（6 条事件全入窗）"
+    );
 }
 
 // ── 确定性对**输入**敏感（反向用例：改输入，结论必须变） ────────────────
@@ -65,26 +65,24 @@ fn view_changes_when_input_changes() {
 
 #[test]
 fn over_budget_projection_degrades_instead_of_erroring() {
-    let p: Projection<String> = Projection::new(|events, _now, budget| {
-        // 模拟「预算不够算完整视图」：预算 ms 少于事件数 ⇒ 降级但仍出值。
-        if (budget.ms as usize) < events.len() {
-            View::degraded(
-                format!("{} 条（截断）", events.len()),
-                Budget::new(0, budget.ms),
-            )
-        } else {
-            View::ok(events.len().to_string(), Budget::new(0, budget.ms))
-        }
-    });
+    // 预算语义在框架层（ADR-105）：`budget.ms` 为扫描配额，超窗只交**切片头部**，
+    // 截断 ⇒ 外壳 `degraded`。闭包对此一无所知——它只统计见到的事件。
+    let p: Projection<String> = Projection::new(|events, _now| format!("{} 条", events.len()));
     let events: Vec<Event> = (0..10)
         .map(|i| ev(&format!("e{i}"), "user.message", Verb::Opened, i))
         .collect();
     let tight = p.apply(&events, 0, Budget::new(0, 3));
-    assert!(tight.degraded, "超预算必须降级");
+    assert!(tight.degraded, "超窗必须降级");
+    assert_eq!(
+        tight.value, "3 条",
+        "窗口只交切片头部：闭包只见到配额内的事件（截尾不截头）"
+    );
+    assert_eq!(tight.used.ms, 3, "used.ms = 窗口实际长度");
     assert!(!tight.value.is_empty(), "降级也要给出可用的值，不能抛错");
 
     let ok = p.apply(&events, 0, Budget::new(0, 100));
     assert!(!ok.degraded);
+    assert_eq!(ok.value, "10 条", "窗 >= 全量 ⇒ 行为与无预算逐字一致");
 }
 
 // ── 纯净性的编译期形状：投影能跑在**快照**上（拿不到 Store 也能工作） ────

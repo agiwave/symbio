@@ -6,10 +6,9 @@
 //! `checkpoint` 都从这里长出。
 //!
 //! 纯净性由 [`Projection::new`](super::Projection::new) 的构造约束保证：
-//! 形参只有 `&[Event]` / `Timestamp` / `Budget`，拿不到 `Store`（F2 一级强制）。
+//! 形参只有 `&[Event]` / `Timestamp`，拿不到 `Store`（F2 一级强制）。
 
 use super::super::event::{Event, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL};
-use super::super::view::{Budget, View};
 use super::Projection;
 
 /// 当前 turn 的状态（[`turnstate`] 投影的产出）。
@@ -40,7 +39,7 @@ impl TurnState {
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`TurnState`]——由纯函数扫描保证。
 pub fn turnstate() -> Projection<TurnState> {
-    Projection::new(|events: &[Event], _now, _b: Budget| {
+    Projection::new(|events: &[Event], _now| {
         let mut state = TurnState {
             opened: false,
             final_text: None,
@@ -65,7 +64,7 @@ pub fn turnstate() -> Projection<TurnState> {
                 _ => {}
             }
         }
-        View::ok(state, Budget::new(0, 0))
+        state
     })
 }
 

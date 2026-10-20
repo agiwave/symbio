@@ -25,7 +25,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::event::Event;
-use super::super::view::{Budget, View};
 use super::Projection;
 
 /// 会话级时间跨度（无事件 ⇒ 全零——**有据的零**，不是错误）。
@@ -85,7 +84,7 @@ impl SpanView {
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`SpanView`]。
 pub fn span() -> Projection<SpanView> {
-    Projection::new(|events: &[Event], now, _b: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut first: Option<i64> = None;
         let mut last: Option<i64> = None;
         let mut n = 0u64;
@@ -98,14 +97,11 @@ pub fn span() -> Projection<SpanView> {
             first = Some(first.map_or(ts, |f| f.min(ts)));
             last = Some(last.map_or(ts, |l| l.max(ts)));
         }
-        View::ok(
-            SpanView {
-                events: n,
-                // last ≥ first 恒成立（同一次遍历里赋值），max(0) 只是不赌
-                span_ms: (last.unwrap_or(0) - first.unwrap_or(0)).max(0) as u64,
-            },
-            Budget::new(0, 0),
-        )
+        SpanView {
+            events: n,
+            // last ≥ first 恒成立（同一次遍历里赋值），max(0) 只是不赌
+            span_ms: (last.unwrap_or(0) - first.unwrap_or(0)).max(0) as u64,
+        }
     })
 }
 

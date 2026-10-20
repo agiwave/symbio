@@ -5,7 +5,7 @@
 //! 两半分开是因为它们是两种失效：**收错**（索引里没有那条）与**用错**（索引对了但
 //! 投影没查）——合成一个文件时，第二种会被第一种的症状盖住。
 
-use super::MessageMutations;
+use super::{mutations_latest_snapshot, MessageMutations};
 use crate::symbio_core::event::{Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 
 /// 一条 `message.edited`（载荷 = 补丁应用后的整条消息）。
@@ -128,7 +128,6 @@ fn only_mutation_cells_are_collected() {
 
 // ── 压缩快照（取代格，S2.7-b2）──────────────────────────────────────
 
-use super::mutations_latest_snapshot;
 use crate::symbio_core::EVENT_SESSION_CONSOLIDATED;
 
 /// 一条 `session.consolidated`：载荷 `messages` = 压缩后的整份列表。

@@ -53,6 +53,14 @@ export const GUARDS = [
   // （漏数默认体 / 把默认体内的 `fn` 当成成员）⇒ 形状变宽照样绿；② 基线写成大数
   // ⇒ 只进不出，机制退化成装饰。测试用 `CORE_SHAPE_BASELINE=0:0:0` 压到零证明它真的会红。
   'core-shape-audit',
+  // `projection-purity`（PP-001…003）判投影目录的**二级纯净性**与 L2：
+  // ① 产投影文件不得导入产投影兄弟（投影 A 不读投影 B——视图叠视图，外壳
+  //    degraded / 预算语义在层间静默丢失，PL-001 §13.2）；② 禁隐式全局依赖
+  //    （`SystemTime::now` / `rand::` / `static mut`——一级泛型约束拦不住的
+  //    「形参表合法、体内偷看全局」，PL-001 §1.4.1 的诚实划界）；③ 构造器必须
+  //    有投影外生产消费方（死抽象 = 没有消费方定的契约）。此前二级只有
+  //    `verify/projection_purity.rs` 的自证样本，生产目录本身无人扫。
+  'projection-purity',
   // `doc-symbol-audit`（D-005）判「**现行文档指认的 Rust 符号确实存在**」：
   // 反引号内 ≥2 段的 `module::symbol` / `Type::method` 形态，取末段查整词
   // 是否出现在 .rs 语料（359 文件 / 203 条指认）。这类失效读者看得见、守卫

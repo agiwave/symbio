@@ -14,7 +14,6 @@
 use super::super::event::{
     Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
 };
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -51,12 +50,11 @@ pub struct ReadySetView {
 /// （`plugins/session/task_events::prompt_section`）——本投影给候选集，选哪个是调用方的
 /// 策略（见模块头的边界）。
 pub fn readyset() -> Projection<ReadySetView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         // task_id → (opened 事件 seq, depends_on)
         let mut tasks: BTreeMap<&str, (u64, Vec<String>)> = BTreeMap::new();
         let mut terminal: BTreeMap<&str, ()> = BTreeMap::new();
         let mut held: BTreeMap<&str, ()> = BTreeMap::new();
-        let mut scanned = 0u64;
         for e in events {
             if e.ts > now || e.entity != Entity::Task {
                 continue;
@@ -66,7 +64,6 @@ pub fn readyset() -> Projection<ReadySetView> {
             };
             match e.kind.as_str() {
                 EVENT_TASK_OPENED => {
-                    scanned += 1;
                     let ds = e
                         .payload
                         .get("depends_on")
@@ -81,13 +78,11 @@ pub fn readyset() -> Projection<ReadySetView> {
                     tasks.insert(id, (e.seq.map(|s| s.value()).unwrap_or(u64::MAX), ds));
                 }
                 EVENT_TASK_ASSERTED => {
-                    scanned += 1;
                     terminal.insert(id, ());
                     held.remove(id);
                 }
                 EVENT_TASK_HELD => {
                     // 挂起：S07 §5 的强制点——挂起期间不得被二次调度。
-                    scanned += 1;
                     held.insert(id, ());
                 }
                 EVENT_TASK_PROGRESS => {
@@ -110,10 +105,6 @@ pub fn readyset() -> Projection<ReadySetView> {
                 depends_on: ds.clone(),
             })
             .collect();
-        View {
-            value: ReadySetView { ready },
-            degraded: false,
-            used: Budget::new(0, scanned),
-        }
+        ReadySetView { ready }
     })
 }

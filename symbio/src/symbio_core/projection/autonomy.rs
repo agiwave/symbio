@@ -32,7 +32,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::event::{Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
-use super::super::view::{Budget, View};
 use super::Projection;
 
 /// 自主程度视图（**可加**：跨会话合并 = 分子分母分别相加）。
@@ -73,7 +72,7 @@ impl AutonomyView {
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`AutonomyView`]。
 pub fn autonomy() -> Projection<AutonomyView> {
-    Projection::new(|events: &[Event], now, _b: Budget| {
+    Projection::new(|events: &[Event], now| {
         // 一个任务两种状态：曾挂起 / 已闭环。BTreeMap 只为读取顺序确定（值本身是
         // 计数，顺序不影响结果——但遍历顺序确定 ⇒ 同一输入逐字节同一输出）。
         let mut held: std::collections::BTreeMap<&str, ()> = std::collections::BTreeMap::new();
@@ -99,13 +98,10 @@ pub fn autonomy() -> Projection<AutonomyView> {
         let closed_n = closed.len() as u64;
         // 分子 = 闭环 ∧ 未挂起（曾 held 过的排除——干预过一次就算干预过）
         let unattended_n = closed.keys().filter(|id| !held.contains_key(*id)).count() as u64;
-        View::ok(
-            AutonomyView {
-                closed: closed_n,
-                unattended: unattended_n,
-            },
-            Budget::new(0, 0),
-        )
+        AutonomyView {
+            closed: closed_n,
+            unattended: unattended_n,
+        }
     })
 }
 

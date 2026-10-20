@@ -25,6 +25,7 @@
 use super::*;
 use crate::symbio_core::event::{Entity, Event, Seq, Verb, EVENT_MEMORY_ENCODED};
 use crate::symbio_core::store::{EventStore, Store};
+use crate::symbio_core::view::Budget;
 
 /// 记忆属主 = 视图主体（`recall` 只召回自己的，与 `tag` 是两个正交的闸）。
 const VIEWER: &str = "session/main";
@@ -290,37 +291,29 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
     }
     let snap = store.range(Seq::new(0));
 
-    // 配额 5：扫到第 6 条记忆事件即停 ⇒ 降级 + 部分结果。
+    // 配额 5：窗口只交**切片头部** 5 条 ⇒ 外壳降级 + 部分结果（ADR-105：预算
+    // 语义收敛到框架层 `apply`，投影闭包不再自带配额扫描）。
     let starved = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::new(0, 5));
     assert!(
         starved.degraded,
-        "预算耗尽必须标 degraded（S06 §6 验收 2：检索预算耗尽 → 标降级）"
+        "超窗必须标 degraded（S06 §6 验收 2：检索预算耗尽 → 标降级）"
     );
     assert!(
         !starved.value.entries.is_empty(),
         "降级必须带部分结果——不允许空且不标降级（I3：静默超时是失败形态）"
     );
-    assert!(
-        starved.value.entries.len() < snap.len(),
-        "部分结果：配额内的真子集"
-    );
-    // T-104：视图字段与投影外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
-    // 视图字段是消费方唯一能读到的降级信号；两者若漂移，出口说的与实际做的不符。
-    assert!(
-        starved.value.degraded,
-        "降级必须同时落进视图字段（T-104：视图脱离外壳流动时自描述）"
-    );
     assert_eq!(
-        starved.value.degraded, starved.degraded,
-        "视图字段与外壳字段同源同值（一处计算、两处承载）"
+        starved.value.entries.len(),
+        5,
+        "窗口只交配额内的切片头部（给定顺序即主张顺序，截尾不截头）"
     );
+
+    // T-104：视图字段与外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
+    // 视图字段是消费方唯一能读到的降级信号。誊抄义务在**取值点**
+    // （`memory_events::recall_view`，那是唯一丢外壳的地方），投影闭包不再自置。
 
     // 平凡值：充足预算 ⇒ 不降级、一条不漏。
     let generous = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::generous());
     assert!(!generous.degraded, "配额充足不标降级");
     assert_eq!(generous.value.entries.len(), snap.len(), "一条不漏");
-    assert!(
-        !generous.value.degraded,
-        "不降级时视图字段也为假——不谎称降级（serde default 的同一口径）"
-    );
 }

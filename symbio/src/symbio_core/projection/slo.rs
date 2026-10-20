@@ -14,7 +14,6 @@
 //! `percentile` 是纯查询——投影只报数，SLO 是承诺。
 
 use super::super::event::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL};
-use super::super::view::{Budget, View};
 use super::fallback::declared_tier;
 use super::Projection;
 
@@ -117,7 +116,7 @@ impl SloLatencyView {
 
 /// `slo_report` 投影：从事件切片统计各档位的实测时延样本（final 的 cost_ms）。
 pub fn slo_report() -> Projection<SloLatencyView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut by_tier: BTreeMap<String, Vec<u64>> = BTreeMap::new();
         for e in events {
             if e.ts > now {
@@ -137,11 +136,7 @@ pub fn slo_report() -> Projection<SloLatencyView> {
             view.by_tier
                 .insert(tier.clone(), TierLatency { tier, samples });
         }
-        View {
-            value: view,
-            degraded: false,
-            used: Budget::new(0, 0),
-        }
+        view
     })
 }
 

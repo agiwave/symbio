@@ -1,4 +1,11 @@
-//! 消息列表变更的**读侧索引**（ADR-053）。
+//! 消息列表的**读侧**（ADR-053）——变更索引、压缩快照、行翻译的唯一读法。
+//!
+//! 本模块**不含 `Projection::new`**（是可共享的读侧普通函数，与 [`rebuild`](super::rebuild)
+//! / [`turns`](super::turns) 同族）：投影 A 不得读投影 B 的输出（L2，PL-001 §13.2），
+//! 而「变更怎么折、快照怎么读」是多个投影（`transcript` / `rebuild` / `turns`）与
+//! 复核（`prompt_fidelity`）**共用**的读法。这条不变量由
+//! `scripts/projection-purity.mjs` 静态守——**产投影的文件不得导入产投影的兄弟模块**，
+//! 共享读法不产投影，因此谁都可以导它。
 //!
 //! ## 它为什么存在
 //!
@@ -27,10 +34,39 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::symbio_core::chat_node::{ChatNode, MessageContent};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::event::{
     Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
 };
+
+use serde::{Deserialize, Serialize};
+
+/// 转写条目：一句话及其角色（读侧**行类型**——`transcript` 折叠与
+/// `prompt_fidelity` 复核共用的「一条消息被读作什么」）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptEntry {
+    /// `"user"` / `"assistant"` / `"tool"`。
+    pub role: String,
+    pub text: String,
+    /// 工具结果行的**工具名**（`role == "tool"` 时才有；其余角色为 `None`）。
+    ///
+    /// 单独成字段而不是拼进 `text`：工具名是**事实**（载荷里就有），怎么呈现
+    /// （消息的 `tool` 字段）是消费方的事。`skip_serializing_if` 让
+    /// 非工具行的线格式保持 `{role, text}` 不变——新增角色不改旧角色的形状。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// **按设计不进请求包**（界面文本：轮边界汇报 / `Escalate` 首响一类）。
+    ///
+    /// 为什么投影**收**它而 `to_messages()` **滤**它：用户看得见它、落库要留住它，
+    /// 但它不是模型的对话内容——把它发进请求包会让线上出现连续两条 assistant
+    /// （模型会以为那是它自己刚说的）。
+    ///
+    /// 线上格式保持不变（`skip_serializing_if`）：这个标记是**读侧的判别位**，
+    /// 不是线格式的一部分——落库那份 `ChatNode` 上有它自己的 `meta` 字段
+    /// （`exclude_from_context`），那份才是前端与轮次窗口读的东西。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_context: bool,
+}
 
 /// 一条消息被编辑后**在对话里读作什么**。
 ///
@@ -94,20 +130,19 @@ fn parse_edited(e: &Event) -> Option<(String, EditedEntry)> {
     if m.id.is_empty() {
         return None;
     }
-    let role = m.node_role().as_ref().map(role_word);
+    let role = m.node_role().map(role_word);
     let text = m.content.as_ref().map(MessageContent::to_text);
     Some((m.id, EditedEntry { role, text }))
 }
 
 /// 角色 → 线格式词形（与 `NodeRole` 的 `serde(rename_all = "snake_case")` 逐字
 /// 相等；`transcript` 的条目角色与 `PromptMessage::role` 用的是同一批词）。
-fn role_word(r: &crate::symbio_core::chat_node::NodeRole) -> String {
-    use crate::symbio_core::chat_node::NodeRole as R;
+fn role_word(r: NodeRole) -> String {
     match r {
-        R::User => "user",
-        R::Assistant => "assistant",
-        R::Tool => "tool",
-        R::System => "system",
+        NodeRole::User => "user",
+        NodeRole::Assistant => "assistant",
+        NodeRole::Tool => "tool",
+        NodeRole::System => "system",
     }
     .to_string()
 }
@@ -168,6 +203,86 @@ fn snapshot_messages(e: &Event) -> Option<Vec<ChatNode>> {
     // 空列表不是一份快照：压缩恒产出「至少那条摘要消息」。空数组若被当成有效快照，
     // 后果是**整段历史被抹掉**——容错的方向必须是「少折」而不是「多抹」。
     (!msgs.is_empty()).then_some(msgs)
+}
+
+/// 压缩快照的载荷（压缩后的整份消息列表）→ 转写条目（含节点身份）。
+///
+/// ## 为什么必须有且只有这一处翻译
+///
+/// 快照载荷是**图语义**（[`ChatNode`]：`parent_id` / `type` / 工具调用的父子），
+/// 而转写是**扁平三角色**。两者之间必须翻译一次。若 `transcript` 与
+/// `prompt_fidelity` 各译一遍，两份迟早对同一条给出两种读法——而那种分叉是
+/// **静默**的（一份折了、一份没折，没有任何东西会红），正是本仓反复栽的那个坑。
+///
+/// ## 翻译规则（与事件投影**同源**）
+///
+/// | 载荷里的节点 | 条目 |
+/// |---|---|
+/// | `role=user`（快照摘要那条 / 折进的补充 / 普通发言） | `user` 行 |
+/// | `role=assistant, type=text` | `assistant` 行（`meta.exclude_from_context` ⇒ 不进请求包） |
+/// | `role=tool, type=text` | `tool` 行（工具名取**父 ToolCall 节点**的 `name`） |
+/// | 其余（`Turn` / `ToolCall` / `Reasoning` 组合或非对话节点） | **不产行** |
+///
+/// 跳过 `Turn` / `ToolCall` / `Reasoning` **不是丢事实**：事件投影里它们同样不产行
+/// ——收束格产的那条 `assistant` 行**就是**它的 Text 子节点，工具格产的那条 `tool`
+/// 行**就是**结果子节点。组合节点只是承载结构。
+pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntry)> {
+    // 工具名在**父 ToolCall 节点**上：结果子节点只记 `parent_id`（事件投影里工具名
+    // 来自 `artifact.added` 的载荷，两条路径取的是同一件事）。
+    let tool_names: HashMap<&str, &str> = msgs
+        .iter()
+        .filter(|m| m.is_tool_call())
+        .filter_map(|m| m.tool_name().map(|n| (m.id.as_str(), n)))
+        .collect();
+    msgs.iter()
+        .filter_map(|m| {
+            let role = m.node_role()?;
+            let text = m
+                .content
+                .as_ref()
+                .map(MessageContent::to_text)
+                .unwrap_or_default();
+            // 「文本型正文」= 显式 `Text` 或未标类型（历史数据）——谓词只看
+            // `msg_type`，None 兼容在此显式表达。
+            let textish = m.msg_type.is_none() || m.is_text();
+            let entry = match role {
+                NodeRole::User if textish => TranscriptEntry {
+                    role: "user".into(),
+                    text,
+                    tool: None,
+                    exclude_from_context: false,
+                },
+                NodeRole::Assistant if m.is_text() => TranscriptEntry {
+                    role: "assistant".into(),
+                    text,
+                    tool: None,
+                    exclude_from_context: meta_flag(m, "exclude_from_context"),
+                },
+                NodeRole::Tool if textish => TranscriptEntry {
+                    role: "tool".into(),
+                    text,
+                    tool: m
+                        .parent_id
+                        .as_deref()
+                        .and_then(|p| tool_names.get(p))
+                        .map(|s| (*s).to_string()),
+                    exclude_from_context: false,
+                },
+                _ => return None,
+            };
+            Some((m.id.clone(), entry))
+        })
+        .collect()
+}
+
+/// `meta` 里的布尔标记（缺失 / 非布尔一律 `false`——容错方向是「少标记」而不是
+/// 「多标记」：多标一个 `exclude_from_context` 会让界面文本**静默**漏出请求包）。
+fn meta_flag(m: &ChatNode, key: &str) -> bool {
+    m.meta
+        .as_ref()
+        .and_then(|v| v.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

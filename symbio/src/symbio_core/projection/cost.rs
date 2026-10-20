@@ -6,7 +6,6 @@
 //! 按主体累计。as-of 与其余投影同口径；纯函数 ⇒ 同一切片永远同一本账（N1）。
 
 use super::super::event::Event;
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -43,7 +42,7 @@ impl CostLedgerView {
 
 /// 成本台账投影：从事件切片累计各主体的 `cost_ms`。
 pub fn cost_ledger() -> Projection<CostLedgerView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut by_principal: BTreeMap<String, CostEntry> = BTreeMap::new();
         let mut total_ms = 0u64;
         for e in events {
@@ -61,13 +60,9 @@ pub fn cost_ledger() -> Projection<CostLedgerView> {
             entry.entries += 1;
             total_ms += e.cost_ms;
         }
-        View {
-            value: CostLedgerView {
-                by_principal,
-                total_ms,
-            },
-            degraded: false,
-            used: Budget::new(0, 0),
+        CostLedgerView {
+            by_principal,
+            total_ms,
         }
     })
 }

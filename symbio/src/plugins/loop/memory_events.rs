@@ -176,8 +176,8 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// Turn 类事件仍 `ts = 0`，但它们不进这个视图——投影只认 `entity == memory`）。
 ///
 /// 返回的 [`RecallView`] **自带 `degraded`**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）：
-/// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息因此落在视图字段上——
-/// 消费方（`prompt_section`）不必回捞外壳也能说得出来。
+/// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息由**这里誊抄**（外壳
+/// `degraded` ⇒ 视图字段）——消费方（`prompt_section`）不必回捞外壳也能说得出来。
 pub(crate) fn recall_view(
     snapshots: Vec<FleetSnapshot>,
     query: &str,
@@ -196,9 +196,14 @@ pub(crate) fn recall_view(
 
     // 新近在前（`sort_by` 稳定 ⇒ 同毫秒时保持「新会话优先」的输入序）。
     events.sort_by(|a, b| b.ts.cmp(&a.ts));
-    let view = recall(PRINCIPAL_USER, None, Some(query.to_string()))
-        .apply(&events, i64::MAX, Budget::new(0, RECALL_SCAN_QUOTA))
-        .value;
+    let shell = recall(PRINCIPAL_USER, None, Some(query.to_string())).apply(
+        &events,
+        i64::MAX,
+        Budget::new(0, RECALL_SCAN_QUOTA),
+    );
+    let mut view = shell.value;
+    // 降级在外壳上，视图脱离外壳后自描述（T-104）：取值点唯一誊抄处。
+    view.degraded = shell.degraded;
     if view.entries.is_empty() {
         None
     } else {

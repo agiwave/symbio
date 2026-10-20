@@ -13,7 +13,6 @@
 //!   输出（I3），fallback 落在哪档就是哪档的兜底。
 
 use super::super::event::{Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -114,7 +113,7 @@ pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>
 
 /// `fallback_rate` 投影：从事件切片统计各档位的兜底率。
 pub fn fallback_rate() -> Projection<FallbackRateView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut by_tier: BTreeMap<String, TierStats> = BTreeMap::new();
         for e in events {
             if e.ts > now {
@@ -159,10 +158,6 @@ pub fn fallback_rate() -> Projection<FallbackRateView> {
                 _ => {}
             }
         }
-        View {
-            value: FallbackRateView { by_tier },
-            degraded: false,
-            used: Budget::new(0, 0),
-        }
+        FallbackRateView { by_tier }
     })
 }

@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::super::event::Event;
-use super::super::view::{Budget, View};
 use super::Projection;
 
 /// 可序列化的断点状态（`projection = checkpoint` 的产出）。
@@ -35,7 +34,7 @@ pub struct CheckpointState {
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`CheckpointState`]。
 pub fn checkpoint() -> Projection<CheckpointState> {
-    Projection::new(|events: &[Event], _now, _b: Budget| {
+    Projection::new(|events: &[Event], _now| {
         let mut last_seq = None;
         let mut kind_counts: BTreeMap<String, usize> = BTreeMap::new();
         for e in events {
@@ -44,13 +43,10 @@ pub fn checkpoint() -> Projection<CheckpointState> {
             }
             *kind_counts.entry(e.kind.clone()).or_insert(0) += 1;
         }
-        View::ok(
-            CheckpointState {
-                last_seq,
-                event_count: events.len(),
-                kind_counts,
-            },
-            Budget::new(0, 0),
-        )
+        CheckpointState {
+            last_seq,
+            event_count: events.len(),
+            kind_counts,
+        }
     })
 }

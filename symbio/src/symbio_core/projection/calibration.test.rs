@@ -36,7 +36,7 @@ fn ev(id: i64, kind: &str, payload: serde_json::Value) -> Event {
 
 fn view_of(events: &[Event]) -> CalibrationView {
     calibration()
-        .apply(events, i64::MAX, Budget::new(0, 0))
+        .apply(events, i64::MAX, Budget::generous())
         .value
 }
 

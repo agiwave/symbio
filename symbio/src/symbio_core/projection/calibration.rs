@@ -11,7 +11,6 @@
 //! 都会被算进置信度，而当时唯一的防线是「编译事件恰好不带 `fallback`」。
 
 use super::super::event::Event;
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -58,7 +57,7 @@ impl CalibrationView {
 
 /// `calibration` 投影：从事件切片统计各技能的置信度。
 pub fn calibration() -> Projection<CalibrationView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut by_skill: BTreeMap<String, SkillStats> = BTreeMap::new();
         for e in events {
             if e.ts > now {
@@ -89,11 +88,7 @@ pub fn calibration() -> Projection<CalibrationView> {
                 st.fallbacks += 1;
             }
         }
-        View {
-            value: CalibrationView { by_skill },
-            degraded: false,
-            used: Budget::new(0, 0),
-        }
+        CalibrationView { by_skill }
     })
 }
 

@@ -33,7 +33,6 @@
 //!   「已声明」——所以本视图只表达「已表达 / 已升格」两态，不假装知道完成与否。
 
 use super::super::event::{Entity, Event, Timestamp, EVENT_CONATION_EXPRESSED, EVENT_TASK_OPENED};
-use super::super::view::{Budget, View};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -134,16 +133,16 @@ impl ConationView {
 
 /// `conation` 投影：从事件序列算出当前表达过的欲及其升格状态。
 ///
-/// 预算**不设配额**（同 [`readyset`](super::readyset)）：欲是**流**，截断它等于悄悄
-/// 丢掉「想要过什么」的事实；`used` 仍如实记扫描条数（I3 的记账口径）。
+/// 预算语义见框架层（[`super::Projection::apply`]，[ADR-105]）：生产调用方一律传
+/// [`Budget::generous`](crate::symbio_core::view::Budget::generous)，窗口恒为全量——
+/// 欲是**流**，调用方不收紧预算就是「不设配额」的现行兑现。
 pub fn conation() -> Projection<ConationView> {
-    Projection::new(|events: &[Event], now, _budget: Budget| {
+    Projection::new(|events: &[Event], now| {
         let mut intents: Vec<ConationIntent> = Vec::new();
         // 欲 seq → 在 `intents` 里的下标（升格事件可能先于/晚于欲事件到达，故两趟合并）。
         let mut index: BTreeMap<u64, usize> = BTreeMap::new();
         // 欲 seq → 派生任务 id（task.opened 的 produced_by 指回欲）。
         let mut promoted: BTreeMap<u64, String> = BTreeMap::new();
-        let mut scanned = 0u64;
         for e in events {
             if e.ts > now {
                 continue; // as-of：未来的欲与升格一概不见
@@ -151,7 +150,6 @@ pub fn conation() -> Projection<ConationView> {
             match e.entity {
                 Entity::Conation => {
                     if e.kind.as_str() == EVENT_CONATION_EXPRESSED {
-                        scanned += 1;
                         let seq = e.seq.map(|s| s.value()).unwrap_or(u64::MAX);
                         let goal = e
                             .payload
@@ -170,7 +168,6 @@ pub fn conation() -> Projection<ConationView> {
                 }
                 Entity::Task => {
                     if e.kind.as_str() == EVENT_TASK_OPENED {
-                        scanned += 1;
                         if let (Some(src), Some(tid)) = (
                             e.produced_by,
                             e.payload.get("task_id").and_then(|v| v.as_str()),
@@ -189,11 +186,7 @@ pub fn conation() -> Projection<ConationView> {
         }
         // 欲是流：按发生顺序（seq 升序）排，不打分、不按时间倒序。
         intents.sort_by_key(|i| i.seq);
-        View {
-            value: ConationView { intents },
-            degraded: false,
-            used: Budget::new(0, scanned),
-        }
+        ConationView { intents }
     })
 }
 

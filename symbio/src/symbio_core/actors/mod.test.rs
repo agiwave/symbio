@@ -562,8 +562,8 @@ fn consolidation_does_not_pollute_as_of_view() {
         Budget::generous(),
     );
     assert_eq!(
-        before, after,
-        "C12：as-of=T 的视图不受后台巩固污染（逐字节）"
+        before.value, after.value,
+        "C12：as-of=T 的视图不受后台巩固污染（视图逐字节；`used` 是扫描记账，事件多了消耗自然变，不参与此判据）"
     );
     // as-of 挪到巩固之后：新记忆可见、旧记忆已被排除式遗忘（Log 未删，投影不再包含）。
     let future = p.apply(
@@ -809,9 +809,18 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
     }
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
 
-    let degraded = recall("session/main", None, None)
-        .apply(&snapshot, 2_000, Budget::new(0, 1))
-        .value;
+    // 降级视图 = **取值点誊抄外壳之后**的形态（ADR-105：外壳是唯一的降级事实源，
+    // 誊抄判据在 `recall.test.rs` / `memory_events.test.rs`）。本测试钉的是**下游**：
+    // 视图带着 `degraded` 流动时，`memory.recalled` 不得把它丢掉。
+    let degraded = crate::symbio_core::view::RecallView {
+        entries: vec![crate::symbio_core::view::RecallEntry {
+            seq: 0,
+            ts: 100,
+            content: "片段 0".into(),
+            tag: "experience".into(),
+        }],
+        degraded: true,
+    };
     let event = RecallTranslator.recalled_event(&degraded, 0, "session/main");
     assert_eq!(
         event.payload.get("degraded").and_then(|v| v.as_bool()),

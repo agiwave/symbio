@@ -76,13 +76,18 @@ export const BASELINE = {
   // `the_chain_skips_nulls_and_follows_the_table_order`（MiMo 的 `reasoning_content: null` + `reasoning` 形态、顺序由表定）、
   // `the_anthropic_keys_use_the_same_extractor`（Anthropic 三组键与类型名同样落表）。档案表本身是把散落魔法数搬成数据，
   // 这三条钉的是「搬家后值不变、链序不变」——原先是三处字面量，没有可断言的单点。非放宽。
-  rustTests: 1834,
+  // baseline-allow rustTests: 批 T-178（02be8fc5）净删 1 条判据（1834→1833）——该批删掉
+  // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table`：`LatentCapability`
+  // 表的读方随 ClassifyOnly 退役而消失，删的是持续维护税，不是判据。基线随之下调，非放宽。
+  rustTests: 1833,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-157 的同一增量在 CI 口径下修一格（1433→1434），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-161 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1437,
+  // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
+  // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1436,
   cliRustTests: 11,
   tauriRustTests: 0,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

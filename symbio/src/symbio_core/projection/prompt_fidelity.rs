@@ -45,7 +45,7 @@
 //! 少了这一条分支，每次压缩之后判据都会把「快照 + 被保留的近轮」整批报成
 //! `NoSourceInGrid`——一个**恒红**的守卫，与没有守卫等价（本模块开头那条纪律）。
 //!
-//! 认领仍走**同一份**翻译（[`super::transcript::snapshot_entries`]）与**同一份**
+//! 认领仍走**同一份**翻译（[`super::mutations::snapshot_entries`]）与**同一份**
 //! 折叠索引：两个出口不可能对同一条给出两种读法。
 //!
 //! ## 为什么它便宜到每轮都跑
@@ -79,7 +79,7 @@ pub enum PromptGap {
     /// 角色与网格里那条事件的坐标不符（投影把 user 说成 assistant 之类）。
     ///
     /// `expected` 是 `String` 而不是 `&'static str`：**快照条目**的期望角色来自
-    /// [`super::transcript::snapshot_entries`] 的产出（运行时值），不是事件 kind
+    /// [`super::mutations::snapshot_entries`] 的产出（运行时值），不是事件 kind
     /// 编译期定下的那几种。收成 `String` 让两类来源共用同一条报告——若为快照另立
     /// 一个变体，两类缺口的措辞与判定迟早各自演化。
     RoleMismatch {
@@ -336,7 +336,7 @@ pub fn verify(
     // 那是恒假警报（prompt 一个字都不缺），但每次压缩之后每轮都叫一次，真缺口就淹在
     // 里面——本仓的判据一旦恒红就等于没有判据。
     let carried: std::collections::HashSet<String> = match snapshot.as_ref() {
-        Some((_, msgs)) => super::transcript::snapshot_entries(msgs)
+        Some((_, msgs)) => super::mutations::snapshot_entries(msgs)
             .into_iter()
             .map(|(node, _)| node)
             .collect(),
@@ -369,7 +369,7 @@ pub fn verify(
             rep.consolidations += 1;
             if let Some((si, msgs)) = snapshot.as_ref() {
                 if *si == idx {
-                    for (node, entry) in super::transcript::snapshot_entries(msgs) {
+                    for (node, entry) in super::mutations::snapshot_entries(msgs) {
                         // 与投影同一份折叠索引：被删的跳过（它本就不该在 prompt 里），
                         // 被编辑过的按新读法认领。
                         if mutations.is_removed(&node) {

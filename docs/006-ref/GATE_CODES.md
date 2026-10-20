@@ -37,6 +37,7 @@ lists: [gate-codes=owner]
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
+| **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–003 | `PP-004` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
@@ -129,6 +130,9 @@ lists: [gate-codes=owner]
 | **PN-001** | `scripts/panic-audit.mjs` |
 | **PN-002** | `scripts/panic-audit.mjs` |
 | **PN-003** | `scripts/panic-audit.mjs` |
+| **PP-001** | `scripts/projection-purity.mjs` |
+| **PP-002** | `scripts/projection-purity.mjs` |
+| **PP-003** | `scripts/projection-purity.mjs` |
 | **PS-001** | `scripts/prompt-shape-audit.mjs` |
 | **PS-002** | `scripts/prompt-shape-audit.mjs` |
 | **PS-003** | `scripts/prompt-shape-audit.mjs` |
