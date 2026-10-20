@@ -150,6 +150,17 @@ export const GUARDS = [
   // ③ 注释没剥 ⇒ 注释里提一句 `agent_run` 就红。近邻形态（`unwrap_or("ask_user")`、
   // `.get("heartbeat")`、`match` 别名臂、`anthropic-version` 头名）都逐条断言不误报。
   'plugin-special-case-audit',
+  // `tool-decls-audit`（TD-001…002）判**工具自声明行为位的声明面封闭性**：工具用
+  // `CapabilityMeta` 的三个行为位自声明归哪几族闸门管，判定读的是**位**不认名字——
+  // 于是「该声明的工具漏了声明」与「这工具压根不在管辖面」在代码上长得一样，三道闸
+  // 对它**静默不命中**。本守卫把「LLM 可见工具名单」（`facts/_capability.mjs::toolFacts`，
+  // 与 §2.1 同一份提取）与「声明面基线」两份账逐名对账：TD-001 工具在册而基线无行、
+  // TD-002 基线有行而工具不在册，任一方向都是红。
+  //
+  // 判的是**声明面本身的封闭性**，不判哪一位声明得对不对（那语义判据机械化不了——
+  // 逐处的语义证据由 `plugin-special-case-audit` 那一族的复核承担）。失效形态同样是
+  // 「读不出 ⇒ 一条都不命中却照样绿」，故空集合直接 exit 2。
+  'tool-decls-audit',
   // `internal-model-audit`（IM-001…004）判**档位闸门的覆盖范围有没有被悄悄扩大**：
   // 闸门只有一个挂点 `LlmAdapter::generate(&FullModel, …)`，而 `ModelProvider::execute_turn`
   // 对所有插件开放——直调它就绕过闸门（[T-168](../../docs/009-task/168-模型档位闸门对内部请求无效.md "T-168-模型档位闸门对内部请求无效")）。

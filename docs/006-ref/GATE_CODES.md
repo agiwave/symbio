@@ -43,6 +43,7 @@ lists: [gate-codes=owner]
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–014 | `S-015` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–005 | `SC-006` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
+| **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **V** | core 分域 | `scripts/core-vocab-audit.mjs` | V-001–002 | `V-003` |
 
 ## 2. 逐码归属
@@ -180,5 +181,7 @@ lists: [gate-codes=owner]
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/slo-exit-audit.mjs` |
+| **TD-001** | `scripts/tool-decls-audit.mjs` |
+| **TD-002** | `scripts/tool-decls-audit.mjs` |
 | **V-001** | `scripts/core-vocab-audit.mjs` |
 | **V-002** | `scripts/core-vocab-audit.mjs` |
