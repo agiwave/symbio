@@ -42,11 +42,12 @@ impl PrincipalKind {
         }
     }
 
-    /// 是否智能体一族——`visible_to` 与 `matrix_for` 的运行时判据（[ADR-069 §决策 3]）。
+    /// 是否智能体一族——`visible_to` 的运行时判据（[ADR-069 §决策 3]）。
     ///
     /// 注意与 [`crate::symbio_core::view::is_agent_id`] 的分工：那条**从 id 反推 kind**（用于
     /// 只有字符串的授权表判据），本条**从结构体字段直接读**。[T-147] 之后协议携带 `Principal`
-    /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的派生分支。
+    /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的
+    /// 可见域判据（`view::visible_to`）。
     pub fn is_agent(&self) -> bool {
         matches!(self, PrincipalKind::Agent)
     }

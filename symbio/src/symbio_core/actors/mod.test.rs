@@ -41,10 +41,10 @@ fn trivial_spec_is_the_s01_baseline() {
 /// （不读规格），那条会绿，本判据即失效。
 #[test]
 fn spec_closure_judgments_read_the_specs_own_capability_set() {
-    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_MAIN, PRINCIPAL_PEER};
+    use crate::symbio_core::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER};
 
     let session = ActorSpec {
-        capabilities: matrix_for(PRINCIPAL_MAIN).grant_names_of(PRINCIPAL_MAIN),
+        capabilities: production_matrix().grant_names_of(PRINCIPAL_MAIN),
         ..ActorSpec::trivial(PRINCIPAL_MAIN)
     };
     assert!(
@@ -61,7 +61,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
     );
 
     let peer = ActorSpec {
-        capabilities: matrix_for(PRINCIPAL_PEER).grant_names_of(PRINCIPAL_PEER),
+        capabilities: production_matrix().grant_names_of(PRINCIPAL_PEER),
         ..ActorSpec::trivial(PRINCIPAL_PEER)
     };
     assert!(
@@ -101,17 +101,19 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
 ///
 /// 挡的是「映射分叉」：`Capability::reply_capability` 若被复制成两份（core 一份、
 /// 插件一份），改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
-/// 登记行（会话 / 对等 / 抢占判定者）与派生分支（未登记 `session/<id>`）。
+/// 登记行（会话 / 对等 / 抢占判定者）与未登记的 `session/<id>`（表里没有行 ⇒ 全拒）。
 #[test]
 fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
-    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX};
+    use crate::symbio_core::authz::{
+        production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX,
+    };
     for p in [
         PRINCIPAL_MAIN,
         PRINCIPAL_PEER,
         PRINCIPAL_REFLEX,
         "session/unregistered",
     ] {
-        let matrix = matrix_for(p);
+        let matrix = production_matrix();
         let spec = ActorSpec {
             capabilities: matrix.grant_names_of(p),
             ..ActorSpec::trivial(p)
@@ -1681,14 +1683,14 @@ fn suspended_task_leaves_readyset_and_restores() {
 
 /// S07 §5：抢占判定者只持 JudgeIntent——无 reply.* 写权（判定者不得直接发言）。
 ///
-/// 判据走**生产表**（`matrix_for`），不是自造矩阵：自造一份 `PrincipalPolicy::paired`
-/// 只证明「我拒我」——表里少一行 `session/reflex`，它照样绿，而生产里 `matrix_for` 的
-/// 派生分支早把主智能体整套（含 `reply.*`）给了判定者（T-132 §3.1 批评的正是这个形态）。
+/// 判据走**生产表**（`production_matrix`），不是自造矩阵：自造一份 `PrincipalPolicy::paired`
+/// 只证明「我拒我」——表里少一行 `session/reflex`，它照样绿。表是权威（ADR-099）：
+/// `session/reflex` 那一行就是判定者的全部能力来源。
 #[test]
 fn preemption_decider_cannot_speak() {
-    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_REFLEX};
+    use crate::symbio_core::authz::{production_matrix, PRINCIPAL_REFLEX};
 
-    let matrix = matrix_for(PRINCIPAL_REFLEX);
+    let matrix = production_matrix();
     assert!(matrix.can_write(PRINCIPAL_REFLEX, Capability::JudgeIntent));
     assert!(
         !matrix.can_write(PRINCIPAL_REFLEX, Capability::ReplyFirst),
@@ -1699,12 +1701,12 @@ fn preemption_decider_cannot_speak() {
         "无追加写权"
     );
 
-    // 反向判据：**未登记**的同前缀主体仍派生主智能体整套——两边的差别正是那一行。
-    // 若哪天有人把这一行删掉（或改宽），上面两条断言与这条对照一起变红。
-    let unregistered = matrix_for("session/unregistered");
+    // 反向判据：**未登记**的同前缀主体同样拿不到 `reply.*`——判定者的窄是**登记**带来的，
+    // 而默认是拒（ADR-099）。若哪天有人把这一行删掉（或改宽），上面两条断言与这条对照一起变红。
+    let unregistered = production_matrix();
     assert!(
-        unregistered.can_write("session/unregistered", Capability::ReplyFirst),
-        "未登记主体派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4）——判定者的窄是**登记**带来的"
+        !unregistered.can_write("session/unregistered", Capability::ReplyFirst),
+        "未登记主体在表里没有行 ⇒ fail-closed（ADR-099）"
     );
 }
 
@@ -1726,7 +1728,7 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
     assert_eq!(
         spec.capabilities,
         vec!["judge.intent".to_string()],
-        "能力取授权表**窄行**（T-081），不是主智能体派生整套"
+        "能力取授权表**窄行**（T-081）"
     );
     assert_eq!(
         spec.budget_ms,
@@ -1926,7 +1928,7 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 
 /// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///
-/// 判据查的是**生产授权表**（[`authz::matrix_for`](crate::symbio_core::authz::matrix_for)），
+/// 判据查的是**生产授权表**（[`authz::production_matrix`](crate::symbio_core::authz::production_matrix)），
 /// 不是自造矩阵——自造矩阵只证明「一个我自己写的策略拒绝了我自己」，生产表改了它照样绿。
 /// 三条断言缺一不可：
 /// ① 自主发起者**不持** `reply.*`（验收 2 的结论）；
@@ -1939,9 +1941,9 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 /// ——core 这边只钉**表里的结论**，不假装自己跑过那条闸。
 #[test]
 fn autonomous_actor_cannot_write_to_dialog() {
-    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN};
+    use crate::symbio_core::authz::{production_matrix, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN};
 
-    let initiator = matrix_for(PRINCIPAL_AUTONOMOUS);
+    let initiator = production_matrix();
     assert!(
         !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::ReplyFirst),
         "自主层无 reply.first 写权（自主写入对话 = 0）"
@@ -1954,7 +1956,7 @@ fn autonomous_actor_cannot_write_to_dialog() {
         initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::DefineWork),
         "自主层必须能定义工作（否则上一条只是『空矩阵』的平凡真）"
     );
-    let main = matrix_for(PRINCIPAL_MAIN);
+    let main = production_matrix();
     assert!(
         main.can_write(PRINCIPAL_MAIN, Capability::ReplyFirst),
         "对照：主智能体持 reply.first——拒绝是针对主体的，不是矩阵一律拒绝"

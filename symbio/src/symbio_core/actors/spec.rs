@@ -27,7 +27,7 @@ impl Pattern {
     /// （no-direct-call-audit 的 NDC-001 同一条纪律——插件层只见谓词结果，不见
     /// 主体类型名），而方法挂在 [`Pattern`] 这个既有根名下，不再多占一个根出口。
     pub(crate) fn for_principal(principal: &str) -> Pattern {
-        let matrix = crate::symbio_core::authz::matrix_for(principal);
+        let matrix = crate::symbio_core::authz::production_matrix();
         if matrix.can_reply(principal, true) {
             Pattern::Reasoner
         } else if matrix.can_produce_artifact(principal) {
@@ -81,8 +81,7 @@ impl ActorSpec {
     pub fn trivial(principal: impl Into<String>) -> Self {
         let principal = principal.into();
         ActorSpec {
-            capabilities: crate::symbio_core::authz::matrix_for(&principal)
-                .grant_names_of(&principal),
+            capabilities: crate::symbio_core::authz::production_matrix().grant_names_of(&principal),
             pattern: Pattern::Decider,
             budget_ms: 60_000,
             scope: Scope::Root,

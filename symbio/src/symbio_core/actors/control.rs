@@ -25,10 +25,10 @@ pub enum Preemption {
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
 /// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（S07 §5，由
 /// grants 表保证：`authz::ROWS` 里 [`PRINCIPAL_REFLEX`] 那一行，判据见
-/// `authz.test.rs::the_reflex_row_is_narrower_than_derivation`）。
+/// `authz.test.rs::the_reflex_row_is_narrower_than_main`）。
 ///
 /// 能力那一半**不在这里硬写**：`capabilities = [judge.intent]` 的权威是授权表，
-/// [`Self::spec`] 从表行取（`matrix_for` ⇒ `grant_names_of`）。两处各写一份能力清单
+/// [`Self::spec`] 从表行取（`production_matrix` ⇒ `grant_names_of`）。两处各写一份能力清单
 /// 必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
 pub struct PreemptionDecider;
 
@@ -50,8 +50,7 @@ impl PreemptionDecider {
         let principal = PRINCIPAL_REFLEX.to_string();
         ActorSpec {
             pattern: Pattern::for_principal(&principal),
-            capabilities: crate::symbio_core::authz::matrix_for(&principal)
-                .grant_names_of(&principal),
+            capabilities: crate::symbio_core::authz::production_matrix().grant_names_of(&principal),
             budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,
             principal,
@@ -294,8 +293,7 @@ impl EliminationDecider {
         let principal = PRINCIPAL_ARBITER.to_string();
         ActorSpec {
             pattern: Pattern::for_principal(&principal),
-            capabilities: crate::symbio_core::authz::matrix_for(&principal)
-                .grant_names_of(&principal),
+            capabilities: crate::symbio_core::authz::production_matrix().grant_names_of(&principal),
             budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,
             principal,

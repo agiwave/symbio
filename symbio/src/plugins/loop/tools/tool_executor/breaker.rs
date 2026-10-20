@@ -43,7 +43,7 @@ impl BreakerInputs {
         let principal = crate::symbio_core::authz::principal_of(
             ctx.get(crate::symbio_core::AGENT_ID).as_deref(),
         );
-        let authorized = crate::symbio_core::authz::matrix_for(&principal).can_write_name(
+        let authorized = crate::symbio_core::authz::production_matrix().can_write_name(
             &principal,
             crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION,
         );

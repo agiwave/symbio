@@ -2945,10 +2945,9 @@ mod scope_ceiling_tests {
 
     /// 真实的越权形态：**窄父主体派生出宽子主体**。
     ///
-    /// 对等主体只持 `produce.artifact`（`authz::ROWS` 第四行）。它派生出的子会话若
-    /// 未选智能体，主体派生是 `agent:main`（`matrix_for` 的平凡值分支给**未登记**
-    /// `agent:<id>` 主智能体整套）——子会话因此比父主体宽。上限那道闸把它收回来：
-    /// 发言收束被拒，产物收束照常（父主体也持）。
+    /// 对等主体只持 `produce.artifact`（`authz::ROWS` 第四行）。它派生出的子会话
+    /// 主体是 `session/main`（主智能体那一行，持 `reply.*`）——子会话因此比父主体宽。
+    /// 上限那道闸把它收回来：发言收束被拒，产物收束照常（父主体也持）。
     #[test]
     fn a_narrow_parent_cannot_spawn_a_wider_child() {
         let mut spec = ActorSpec::trivial("session/main");

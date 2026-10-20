@@ -192,10 +192,10 @@ pub(crate) use projection::readyset::readyset;
 pub(crate) use projection::recall::recall;
 pub(crate) use projection::reputation::reputation;
 pub(crate) use view::RecallView;
-// 可见域判据与智能体身份前缀：三处共用**同一条**判定——写视图的 `window_by_turn`
-// （core）、写消息过滤的 `context/view`（插件）、做主体派生的授权表（`authz`，本根开给全 crate）。
-// 两个判定方 = 两套可见域与两种身份形状，迟早漂移成「判的是 A、写的是 B」。
-pub(crate) use view::{is_agent_id, principal_namespace, visible_to};
+// 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
+// （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
+// 形状，迟早漂移成「判的是 A、写的是 B」。
+pub(crate) use view::{principal_namespace, visible_to};
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。

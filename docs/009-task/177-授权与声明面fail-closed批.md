@@ -7,8 +7,8 @@ created: 2026-10-20
 track: plan
 prio: now
 deps: []
-where: symbio/src/symbio_core/authz.rs · symbio/src/symbio_core/governance/mod.rs · symbio/src/plugins/loop/tools/tool_executor/decls.rs · docs/010-adr/099.md
-exit: '`matrix_for` 对未登记的 `session/<id>` 不再派生主智能体能力集（未登记 = 拒，窄行成为唯一入口）；`GrantsOverlay::is_revoked` 认不出的能力名告警并按已收回判；工具自声明行为位漏声明有基线判据钉住（工具在册而基线无行 ⇒ 红）；ADR-099 单文档登记这次语义收窄的理由与被推翻的旧口径出处；`authz.test.rs` 派生用例改写且保留「少一行是一条拒绝」反向用例；全量门禁与 e2e 全绿'
+where: symbio/src/symbio_core/authz.rs · symbio/src/symbio_core/governance/mod.rs · symbio/src/plugins/loop/chat_loop/state.rs · symbio/src/plugins/loop/derived_facts.rs · symbio/src/plugins/loop/tools/tool_executor/decls.rs · docs/010-adr/099.md · docs/010-adr/100.md
+exit: '`matrix_for`/派生分支删除后，未登记的 `session/<id>` 不再派生主智能体能力集（未登记 = 拒，窄行成为唯一入口）；删派生后的可用性真空由装配点绑定登记补上（[ADR-100](../010-adr/100.md "ADR-100")：根会话继承会话面缺省行、委派子会话继承父行，可见域不登记，静态行不被改写）；`GrantsOverlay::is_revoked` 认不出的能力名告警并按已收回判；工具自声明行为位漏声明有基线判据钉住（工具在册而基线无行 ⇒ 红）；ADR-099 单文档登记这次语义收窄的理由与被推翻的旧口径出处；`authz.test.rs` 派生用例改写且保留「少一行是一条拒绝」反向用例、并补绑定即登记五条边界用例；全量门禁与 e2e 全绿'
 ---
 
 ## 内容
@@ -33,5 +33,16 @@ exit: '`matrix_for` 对未登记的 `session/<id>` 不再派生主智能体能�
 
 ## 处理过程
 
-- 2026-10-20 立批（当日开工）。三处各自独立成提交：① 授权默认翻向 + ADR；
-  ② 撤销判据同向；③ 行为位基线判据。三处都不新增机制键、不新增 trait。
+- 2026-10-20 立批（当日开工）。原计划三处各自独立成提交：① 授权默认翻向 + ADR；
+  ② 撤销判据同向；③ 行为位基线判据。落地时 ① 引出的可用性真空由 ④（[ADR-100](../010-adr/100.md "ADR-100")
+  绑定即登记）在**同一文件同一子系统**里复位——① 与 ④ 互为因果（删派生是因、
+  绑定登记是果），拆成两个提交会产生「不构建的中间态」，故 **①②④ 合为一批原子提交**，
+  ③ 独立一批。三处都不新增机制键、不新增 trait。
+- 2026-10-20 补 ④ **删派生后的可用性复位**（当日裁决，用户口径：「选最符合最终方案、
+  机制最简、扩展最强，历史盘踞不作约束」）：派生分支删除后，以 `--agent <id>` 选定的
+  根会话与委派子会话缺行 ⇒ 收束落不了格、记忆不编码、工具闸拒（t30 / t39 / t57 / t76
+  同一根因）。裁决**不回滚派生**，改立 [ADR-100](../010-adr/100.md "ADR-100") 绑定即登记：
+  能力随会话装配点绑定来（根继承会话面缺省行、子继承父行）、**可见域不登记**、
+  静态行不被改写、淘汰面只认部署表、委派上限两侧都在册。登记与去派生**同向**
+  （少一次登记动作 = 一条拒绝），不是矛盾。登记生命周期收窄（创建即登记）归
+  [T-182](182-创建即登记迁移步.md "T-182")。

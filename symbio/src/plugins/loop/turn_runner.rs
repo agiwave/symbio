@@ -600,8 +600,9 @@ pub struct TurnOutcome {
     /// 说过——典型是只持 `produce.artifact` 的对等主体：发言闸拒它，但它产出的
     /// 工具结果是事实，派生事实照写。
     ///
-    /// 平凡值 `false`：生产里主体恒为 `agent:main` 或经 `matrix_for` 派生的
-    /// `agent:<id>`，都持 `reply.*` ⇒ 闸是 fail-closed 的**结构**，不是会翻面的开关。
+    /// 平凡值 `false`：生产里主体恒为登记过的行（主智能体一族），持 `reply.*` ⇒ 闸是
+    /// fail-closed 的**结构**，不是会翻面的开关。未登记主体没有行（[ADR-099]）⇒
+    /// 闸拒、此位为真——那是超权形态被收回来的信号，不是缺省值。
     pub closure_denied: bool,
     /// 本轮**最后一次**模型响应的结束原因（provider 归一化，见 [`ModelFinishReason`]）。
     ///
@@ -1824,8 +1825,8 @@ enum ClosureKind {
 /// [T-128 §3.2](../../../../docs/009-task/128-多主体与对等承诺.md "T-128-多主体与对等承诺")
 /// 与 `chat_loop::state::request_scope`。
 ///
-/// 平凡值下（顶层会话 = `root`，以及任何 `agent:main` 派生的子会话）两道都是
-/// 恒真——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
+/// 平凡值下（顶层会话 = `root`，以及主智能体派生的子会话）两道都是恒真——
+/// 闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
 ///
 /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
@@ -1846,7 +1847,7 @@ fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> bool {
     let crate::symbio_core::Scope::Child(parent) = &actor.scope else {
         return true;
     };
-    let matrix = crate::symbio_core::authz::matrix_for(parent);
+    let matrix = crate::symbio_core::authz::production_matrix();
     match kind {
         ClosureKind::Speech => matrix.can_reply(parent, true),
         ClosureKind::Artifact => matrix.can_produce_artifact(parent),

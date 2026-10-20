@@ -48,7 +48,7 @@ impl TaskTableInputs {
     /// 同一套拼写（表授予 A、闸门判 B 的漂移面由此收窄到一处）。
     pub fn of(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let principal = authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
-        let matrix = authz::matrix_for(&principal);
+        let matrix = authz::production_matrix();
         let may_write = matrix.can_write_name(&principal, authz::CAP_DEFINE_WORK)
             || matrix.can_write_name(&principal, authz::CAP_ASSERT_VERIFICATION);
         Self {

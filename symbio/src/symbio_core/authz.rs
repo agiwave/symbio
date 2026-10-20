@@ -45,18 +45,19 @@
 //!
 //! 自主发起者那一行已按 [S12 §3](../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")
 //! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
-//! 说明一件事——**「同角色」是平凡值而不是规则**：派生只服务**未登记**的主体，
-//! 一旦某个主体被显式登记，那一行就是它的权威能力集。
+//! 说明一件事——**窄行是唯一入口**（[ADR-099](../../../docs/010-adr/099.md "ADR-099")）：
+//! 未登记的主体在表里没有行 ⇒ 每个谓词为假，登记过的一行就是它的权威能力集，
+//! 谁都不派生谁。
 //!
 //! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [S07 §5](../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")
-//! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，`matrix_for`
-//! 的派生分支会把主智能体整套（含 `reply.*`）给它——断言于是被静默推翻。
+//! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，判据是
+//! 「没有行 = 拒」——断言与表同一方向。
 
-use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
-use crate::symbio_core::governance::PermissionMatrix;
-use crate::symbio_core::{is_agent_id, principal_namespace, VisScope};
+use crate::symbio_core::governance::{Capability, PermissionMatrix};
+use crate::symbio_core::{principal_namespace, VisScope};
 
 /// 本机主智能体的身份——**表里那一行的名字**与收束事件的 `actor`
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
@@ -71,8 +72,7 @@ pub(crate) const PRINCIPAL_MAIN: &str = "session/main";
 /// [ADR-069] 把它从裸字面量 `user` 归一为可路由地址 `person/local`——
 /// `person` 是概念 namespace（无插件归属时用概念名）。语义不变：`user.message`
 /// **不入能力表**（能力按「智能体的权威动作种类」划分，人的发言不是动作种类），
-/// 本表**不为它立行**——`matrix_for` 走「非 agent 命名空间直接用生产表」的分支，
-/// 表里没有 ⇒ `can_reply` fail-closed。
+/// 本表**不为它立行**——表里没有它的行 ⇒ `can_reply` fail-closed（[ADR-099](../../../docs/010-adr/099.md "ADR-099")）。
 pub(crate) const PRINCIPAL_USER: &str = "person/local";
 
 /// **vdfs 写工具**的身份（[ADR-069 §决策 2]）——工具响应叶子的 `principal`；
@@ -113,9 +113,8 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 ///
 /// 与 [`PRINCIPAL_AUTONOMOUS`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，
 /// 两边迟早漂移到「判的是 A、写的是 B」而没有任何东西会变红。它与自主行同属「少给」一侧：
-/// 判定者只产控制事件、**不得直接发言**（S07 §5）——没有这一行，`matrix_for` 会把主智能体
-/// 整套能力（含 `reply.*`）派生给它，「判定者不得发言」在生产里被静默推翻，
-/// 而文档与验收断言都还写着它成立。
+/// 判定者只产控制事件、**不得直接发言**（S07 §5）——这一行就是它的全部能力来源，
+/// 「不得发言」与断言同方向（ADR-099：表是权威，未登记 = 拒）。
 pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 
 /// **对等主体**的身份（[roadmap/S08 §3](../../../docs/009-task/128-多主体与对等承诺.md "T-128-多主体与对等承诺")）
@@ -125,11 +124,10 @@ pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 /// 它的权威动作是**产生产物**（`produce.artifact`），协作经 `commitment.*` 事件而非
 /// `chat.*`——故这一行**只有一项能力**，比主智能体窄得多。
 ///
-/// **为什么必须登记**：未登记的 `session/<id>` 走 [`matrix_for`] 的派生分支，拿到主智能体
-/// **整套**（含 `reply.*`）。S08 §4 的平凡值「身份分层 ≠ 权限分层」是给**子智能体**的
-/// （它要能写自己的收束格，否则什么都写不了）；对等体拿整套则是**静默超权**——
-/// 与 S12 为自主主体、S07 为判定者修掉的静默面同形。故 S08 §3.1 的纪律是：
-/// **对等主体出现必须自带窄行同批落地，不许靠派生**（同 PL-009「闸不能晚于发起者」）。
+/// **为什么必须登记**：未登记的 `session/<id>` 在表里没有行 ⇒ 每个谓词为假
+/// （[ADR-099](../../../docs/010-adr/099.md "ADR-099")）；登记过的行就是它的权威能力集。
+/// S08 §3.1 的纪律是：**对等主体出现必须自带窄行同批落地**（同 PL-009「闸不能晚于
+/// 发起者」）——窄行不是补丁，是它唯一的入口。
 pub(crate) const PRINCIPAL_PEER: &str = "session/peer-b";
 
 /// **市场**的身份（[roadmap/S13 §3](../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）——
@@ -286,10 +284,9 @@ pub(crate) const CAP_ASSERT_VERIFICATION: &str = "assert.verification";
 /// **以主控身份发言**（产物收束 ≠ 发言），规划行怕的是**自验**（C15：不持验证能力），
 /// 验证行怕的是**既产出又认证**（C15：不持产出能力）。
 ///
-/// 少了这些行会怎样（几批修掉的正是这个）：未登记的 `session/<id>` 走 [`matrix_for`]
-/// 的派生分支，拿到主智能体的**整套**能力集（含 `reply.*`）——于是「自主行为不得冒充
-/// 用户对话」「判定者不得发言」「对等体只产生产物」「市场只派活」在生产里被静默推翻，
-/// 而文档与验收断言都还写着它们成立。
+/// 少了这些行会怎样（[ADR-099](../../../docs/010-adr/099.md "ADR-099") 起）：**该主体什么
+/// 都做不了**——未登记主体在表里没有行，每个谓词为假（fail-closed）。「忘配窄行」的
+/// 后果是一条**会被看见的拒绝**，不是一次静默超权。
 const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
         PRINCIPAL_MAIN,
@@ -316,7 +313,7 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     ),
     // 组织形态三角色（S13 §3，T-073）：市场派活（公共域）/ 仲裁盖章（公共域）/ 守门判意图（私有）。
     // 三行都是**单能力独持**——与自主 / 判定 / 对等三行同一条纪律：角色出现必须自带窄行，
-    // 不许靠派生拿主智能体整套。arbiter 持 `assert.verification` 不碰 C15（不持
+    // 窄行是唯一入口（ADR-099）。arbiter 持 `assert.verification` 不碰 C15（不持
     // `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
     (PRINCIPAL_MARKET, &["assign.work"], VisScope::Public),
     (
@@ -331,8 +328,8 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     ),
     // S02/S03 三角色行（T-107，行与执行路径同批）：工人产生产物（树侧委派收束）、
     // 规划者立任务、验证者独立判定。三行都是**单能力独持**——与自主 / 判定 / 对等 /
-    // 市场 / 仲裁 / 守门六行同一条纪律：角色出现必须自带窄行，不许靠派生拿主智能体
-    // 整套。planner 持 `define.work` 不碰 C15（不持 `assert.verification`）；verifier
+    // 市场 / 仲裁 / 守门六行同一条纪律：角色出现必须自带窄行，窄行是唯一入口
+    // （ADR-099）。planner 持 `define.work` 不碰 C15（不持 `assert.verification`）；verifier
     // 持 `assert.verification` 亦不碰 C15（不持 `define.work` / `produce.artifact`，
     // 构造期双持检查见 `governance`）——「产出者不得自我认证」两边都成立。
     (
@@ -355,8 +352,8 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     // `session/worker` / `session/peer-b` 同款独持（窄的方向相同而角色不同：worker 是
     // 树侧委派落点、peer 是图侧协作方、tool 是**能力**发言方）。今天写侧闸按会话
     // 主体判，这三行是**声明性登记**，为 T-147 之后 `plugin::attributed` 按 kind=Tool
-    // 补 principal 铺好底。缺这一行不会红——表里没它 ⇒ `matrix_for` 走「非 agent 命名
-    // 空间 ⇒ 直接用生产表」的分支 ⇒ `can_produce_artifact(vdfs/write)` fail-closed；
+    // 补 principal 铺好底。缺这一行不会红——表里没它 ⇒ `production_matrix` 没有它的行
+    // ⇒ `can_produce_artifact(vdfs/write)` fail-closed（ADR-099）；
     // 今天的写入点都按 session principal 判，不撞这条。
     (
         PRINCIPAL_TOOL_VDFS_WRITE,
@@ -375,15 +372,88 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     ),
 ];
 
-static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
+static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
+
+/// **运行期绑定登记**（[ADR-100](../../../docs/010-adr/100.md "ADR-100")：绑定即登记）：
+/// 主体 ⇒ 它那一行当次有效的能力集。
+///
+/// 与 [`ROWS`] 的分工：表是**部署事实**（常量、构造期定稿），这里是**运行期身份事实**
+/// ——哪个 agent 身份真的绑进了在跑的会话。查询侧合流（[`EffectiveMatrix`]），
+/// 可见域**不**登记（[`EffectiveMatrix::can_see`] 只认部署表）：能力可以随绑定来，
+/// 「看见别人的 shared」只能来自部署登记。
+static BOUND: OnceLock<RwLock<HashMap<String, Vec<Capability>>>> = OnceLock::new();
+
+fn bound_rows() -> &'static RwLock<HashMap<String, Vec<Capability>>> {
+    BOUND.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// **绑定即登记**（[ADR-100]）：会话装配点把本轮主体登记进运行期绑定面。
+///
+/// - `principal`：本轮主体（[`request_principal`] 的产出）；
+/// - `from`：**关系上限的来源**——根会话 = [`PRINCIPAL_MAIN`]（会话面缺省行），
+///   委派子会话 = 父主体（`Scope::Child(parent)`，委派不放大权威）。
+///
+/// 三条边界：
+///
+/// 1. **静态行不被改写**（表是权威）：`principal` 已在 [`ROWS`] 里 ⇒ 空操作，
+///    绑定不会把窄行（`session/worker` 等）悄悄放大成会话面；
+/// 2. **`from` 无行时先给 `from` 登记会话面缺省**——委派上限的两侧都要在册
+///    （`turn_runner::within_delegation_ceiling` 判父行），否则子会话因父主体查不到行
+///    而收束不了；
+/// 3. **登记失败 = 不登记**（fail-closed 的方向）：锁中毒只告警跳过，
+///    未登记的主体照旧每个谓词为假。
+///
+/// 幂等：同一主体重复绑定（每轮装配点都会调）不重复写、不重复告警。
+pub(crate) fn bind_inheriting(principal: &str, from: &str) {
+    if principal == from {
+        return;
+    }
+    let matrix = production_matrix();
+    if matrix.is_deployed(principal) {
+        return;
+    }
+    let mut source = matrix.grants_of(from);
+    if source.is_empty() {
+        insert_binding(from, matrix.grants_of(PRINCIPAL_MAIN));
+        source = matrix.grants_of(from);
+    }
+    insert_binding(principal, source);
+}
+
+/// 登记一行绑定（幂等：与既有登记相同则不动）。锁失败只告警——**登记失败 = 不登记**，
+/// 未登记的主体照旧 fail-closed，方向与 [ADR-099](../../../docs/010-adr/099.md "ADR-099") 一致。
+fn insert_binding(principal: &str, grants: Vec<Capability>) {
+    if grants.is_empty() {
+        return;
+    }
+    let mut map = match bound_rows().write() {
+        Ok(map) => map,
+        Err(why) => {
+            crate::plugin_warn!(
+                "authz",
+                "[governance] 绑定登记写入失败，主体 {principal} 不登记（fail-closed）：{why}"
+            );
+            return;
+        }
+    };
+    if map.get(principal).is_some_and(|g| g == &grants) {
+        return;
+    }
+    crate::plugin_info!(
+        "authz",
+        "[governance] 绑定即登记：{principal} ⇒ {} 项能力（能力随绑定来，可见域不登记）",
+        grants.len()
+    );
+    map.insert(principal.to_string(), grants);
+}
 
 /// 本机会话的**主体派生**（部署事实 → [`PRINCIPAL_MAIN`] 同族的取值点）：
 /// 会话选定了哪个 agent，这轮所有断言就是哪个主体；未选 ⇒ 主智能体。
 ///
-/// 判据取自 core 的可见域约定 [`is_agent_id`](crate::symbio_core::view::is_agent_id)
-/// 与 [`principal_namespace`]（[ADR-069 §决策 3](../../../docs/010-adr/069.md "ADR-069")）——
-/// 「什么地址算智能体一族」只定义一次，可见域判据与身份派生共用登记表，
-/// 两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
+/// 判据取自 core 的命名空间登记表 [`principal_namespace`]
+/// （[ADR-069 §决策 3](../../../docs/010-adr/069.md "ADR-069")）——
+/// 「什么地址算哪一族」只定义一次，可见域判据（`view::is_agent_id`）与身份派生
+/// 共用登记表，两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
 ///
 /// 平凡值（S08 §4）：今天所有会话未选智能体 ⇒ 恒为 `session/main`，与
 /// [`PRINCIPAL_MAIN`] **逐字一致**（收束事件的 `actor` 取的正是它）。
@@ -415,51 +485,25 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
     principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
 }
 
-/// **该主体当次判定**用的矩阵（行的形状不变：`(主体, 能力名, 可见域)`，
-/// 见本模块文档「本表会怎么长」）。
+/// 本机授权矩阵——**该主体当次判定的唯一取表口**（行的形状不变：`(主体, 能力名, 可见域)`，
+/// 见本模块文档「本表会怎么长」）。懒构造一次；构造失败 ⇒ 空矩阵 = 谁都不许，并告警。
 ///
-/// 两条分支，先表后派生：
+/// 判定口径两条，合成才是「现在准不准」（[ADR-099](../../../docs/010-adr/099.md "ADR-099") +
+/// [ADR-100](../../../docs/010-adr/100.md "ADR-100")）：
 ///
-/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体、市场 / 仲裁 / 守门、工人 / 规划者 / 验证者、以及工具与系统三行）与
-///    **非 agent 命名空间**的主体（`person/*` / `vdfs/*` / `web/*` / `system/*` 及一切
-///    未登记名）都直接用[生产表](Self::production_matrix)：登记过的拿自己那一行
-///    ——**表是权威，派生不得覆盖它**（覆盖就成「表授予 A、闸门判 B」）；未登记的
-///    `person/local` 在表里没有行 ⇒ `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，
-///    不是一条漏判。
-/// 2. **未登记的 `session/<id>`**（子智能体 / 对等体）派生：要能写自己的收束格，就必须
-///    有自己那一行。行的**内容** = **主智能体**那一行的能力集——**身份分层 ≠ 权限分层**，
-///    本机所有智能体同角色（S08 §4 平凡值）；按主体展开 grants 做能力分级是 S13 的工序。
-///
-/// 取的是主智能体那一行、**不是「第一行」**：表加了一行就把派生口径换掉，等于给行序
-/// 赋予了语义，而没有任何东西会为此变红。
-pub(crate) fn matrix_for(principal: &str) -> Cow<'static, PermissionMatrix> {
-    let live = production_matrix();
-    if live.sees_of(principal).is_some() || !is_agent_id(principal) {
-        return Cow::Borrowed(live);
-    }
-    let (main_caps, main_scope) = ROWS
-        .iter()
-        .find(|(p, _, _)| *p == PRINCIPAL_MAIN)
-        .map(|(_, caps, scope)| (*caps, *scope))
-        .unwrap_or((&[], VisScope::ThreadPrivate));
-    Cow::Owned(
-        PermissionMatrix::from_names(&[(principal, main_caps, main_scope)]).unwrap_or_else(|why| {
-            crate::plugin_warn!(
-                "authz",
-                "[governance] 主体 `{principal}` 的行构造失败，按 fail-closed 降级为空矩阵：{why}"
-            );
-            PermissionMatrix::from_names(&[]).expect("空授权表无主体可校验，不可能违反成对性")
-        }),
-    )
-}
-
-/// 本机授权矩阵（懒构造一次；构造失败 ⇒ 空矩阵 = 谁都不许，并告警）。
+/// - **能力面**（`grants_*` / `can_write*` / `can_reply` / `can_produce_artifact`）=
+///   部署表 **∪** [绑定登记](bind_inheriting)——登记过的主体拿自己那一行，绑定过的
+///   主体拿它登记的那一行，都没有 ⇒ 每个谓词为假 ⇒ **fail-closed**：少一行是一条
+///   **拒绝**，不是一次静默超权；
+/// - **可见域面**（`sees_of` / `can_see`）只认**部署表**：「谁能看见谁的 shared」是
+///   部署登记的事实，不随会话绑定而来——否则任何绑定 agent 都会变成矩阵成员、
+///   读到他人 shared（t76 的反判据）。
 ///
 /// 写侧收束、读侧可见域与外部执行闸门的授权判据都取这一份，保证「表只有一张」——
 /// 各判各的就会漂移成「闸放行、表说没有」。
-pub(crate) fn production_matrix() -> &'static PermissionMatrix {
+pub(crate) fn production_matrix() -> &'static EffectiveMatrix {
     MATRIX.get_or_init(|| {
-        PermissionMatrix::from_names(ROWS).unwrap_or_else(|why| {
+        let deployed = PermissionMatrix::from_names(ROWS).unwrap_or_else(|why| {
             crate::plugin_warn!(
                 "authz",
                 "[governance] 授权表构造失败，按 fail-closed 降级为空矩阵（{}）：{}",
@@ -467,8 +511,125 @@ pub(crate) fn production_matrix() -> &'static PermissionMatrix {
                 why
             );
             PermissionMatrix::from_names(&[]).expect("空授权表无主体可校验，不可能违反成对性")
-        })
+        });
+        EffectiveMatrix { deployed }
     })
+}
+
+/// 取表口的查询面（[`production_matrix`] 的返回类型）：部署表 + 运行期绑定登记的合流。
+///
+/// 住本模块而不是 `governance`：合流口径是**部署事实怎么看待运行期身份**
+/// （绑定只加能力、不加可见域），那是这张表的裁决，不是判定机制的裁决；
+/// `governance` 的 [`PermissionMatrix`] 因此保持「常量表 + fail-closed 谓词」原样。
+///
+/// 调用点不点名本类型（类型推导取方法）——收窄/扩面都在这里一处发生。
+pub(crate) struct EffectiveMatrix {
+    deployed: PermissionMatrix,
+}
+
+impl EffectiveMatrix {
+    /// 绑定登记半边（[`BOUND`]）：没有登记 ⇒ 空集（合流退化为部署谓词）。
+    fn bound_grants(&self, principal: &str) -> Vec<Capability> {
+        if let Ok(map) = bound_rows().read() {
+            if let Some(bound) = map.get(principal) {
+                return bound.clone();
+            }
+        }
+        Vec::new()
+    }
+
+    /// 合流判定的一半：绑定登记里有没有这一项。
+    fn bound_holds(&self, principal: &str, cap: Capability) -> bool {
+        self.bound_grants(principal).contains(&cap)
+    }
+
+    /// 合流后的有效能力集：部署行 **∪** 绑定登记（去重，顺序 = 表序在前）。
+    fn effective_grants(&self, principal: &str) -> Vec<Capability> {
+        let mut grants = self.deployed.grants_of(principal).to_vec();
+        for cap in self.bound_grants(principal) {
+            if !grants.contains(&cap) {
+                grants.push(cap);
+            }
+        }
+        grants
+    }
+
+    /// 这个主体是**部署事实**吗（表里有行）——淘汰面的判据（只对部署主体落裁决）。
+    pub(crate) fn is_deployed(&self, principal: &str) -> bool {
+        !self.deployed.grants_of(principal).is_empty()
+    }
+
+    /// 写侧：主体持有的全部能力（空 = 部署表与绑定登记都没有它的行）。
+    pub(crate) fn grants_of(&self, principal: &str) -> Vec<Capability> {
+        self.effective_grants(principal)
+    }
+
+    /// 写侧：主体持有的能力**名**（授权表的书写形态，与
+    /// [`PermissionMatrix::grant_names_of`] 同一套拼写；合流 = 部署行名 ∪ 绑定登记名）。
+    pub(crate) fn grant_names_of(&self, principal: &str) -> Vec<String> {
+        let mut names = self.deployed.grant_names_of(principal);
+        for cap in self.bound_grants(principal) {
+            let name = cap.name().to_string();
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// 写侧判定：主体是否可以权威地做 `cap`（合流面，fail-closed）。
+    ///
+    /// 判据的读方只有测试（逐能力钉行形状）；现网调用点按能力名或收束臂问
+    /// （[`Self::can_write_name`] / [`Self::can_reply`] / [`Self::can_produce_artifact`]）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn can_write(&self, principal: &str, cap: Capability) -> bool {
+        self.deployed.can_write(principal, cap) || self.bound_holds(principal, cap)
+    }
+
+    /// 写侧判定（按能力名，合流面）。名字认不出 ⇒ `false`（fail-closed，与
+    /// [`PermissionMatrix::can_write_name`] 同方向）。
+    pub(crate) fn can_write_name(&self, principal: &str, name: &str) -> bool {
+        self.deployed.can_write_name(principal, name)
+            || self
+                .bound_grants(principal)
+                .iter()
+                .any(|c| c.name() == name)
+    }
+
+    /// 写侧判定（**部署事实面**）：只认 [`ROWS`]，不认绑定登记——淘汰回路的判据
+    /// （`derived_facts`：未登记的运行期主体不是部署事实，不进淘汰面）。
+    pub(crate) fn deployed_can_write_name(&self, principal: &str, name: &str) -> bool {
+        self.deployed.can_write_name(principal, name)
+    }
+
+    /// 写侧判定（收束闸）：主体能否**收束一轮发言**——轮次位置 → 能力的映射仍只住
+    /// [`Capability::reply_capability`]，调用点不复述；合流 = 部署谓词 ∪ 绑定登记。
+    pub(crate) fn can_reply(&self, principal: &str, first: bool) -> bool {
+        self.deployed.can_reply(principal, first)
+            || self.bound_holds(principal, Capability::reply_capability(first))
+    }
+
+    /// 写侧判定（产物闸）：主体能否**产生产物**（[ADR-067](../../../docs/010-adr/067.md "ADR-067")
+    /// 的第二条收束路）。
+    pub(crate) fn can_produce_artifact(&self, principal: &str) -> bool {
+        self.deployed.can_produce_artifact(principal)
+            || self.bound_holds(principal, Capability::ProduceArtifact)
+    }
+
+    /// 读侧：主体的可见域（**只认部署表**——绑定登记不带可见域，见 [`Self`] 文档）。
+    ///
+    /// 判据的读方只有测试（成对性：行必须显式给可见域）；生产读侧一律走
+    /// [`Self::can_see`] 的三元判定，不读裸可见域。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn sees_of(&self, principal: &str) -> Option<VisScope> {
+        self.deployed.sees_of(principal)
+    }
+
+    /// 读侧判定（**只认部署表**）：`shared` 只给部署登记的主体——绑定 agent 不因
+    /// 绑定成为矩阵成员（t76 的反判据）。
+    pub(crate) fn can_see(&self, viewer: &str, owner: &str, scope: VisScope) -> bool {
+        self.deployed.can_see(viewer, owner, scope)
+    }
 }
 
 #[cfg(test)]
@@ -479,5 +640,4 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/symbio_core/authz.rs::matrix_for: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。
 // panic-allow symbio/src/symbio_core/authz.rs::production_matrix: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。

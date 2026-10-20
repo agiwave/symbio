@@ -432,8 +432,9 @@ impl PermissionMatrix {
 ///
 /// 能力用**名**（授权表的书写形态）不用枚举：变更的生产方在 `actors`（裁决侧），
 /// 消费方在插件侧（闸门）——`Capability` 刻意不进根平铺（见模块头「同名辨析」），
-/// 两边都只够得着名字。名字的对错由**构造期**兜住（[`PermissionMatrix::from_names`]
-/// 认不出即拒绝），故这里照单全收不会变成第二处判定。
+/// 两边都只够得着名字。名字的对错在**判定点**按 [`Capability`] 闭集收口
+/// （[`GrantsOverlay::is_revoked`]）：带认不出能力名的**收回**项不静默落空——
+/// 它按该主体整体已收回判（一次笔误的收回不得悄悄消失）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantsChange {
     /// 收回：`verdict.asserted`（`change = "revoke"`）折叠出的那一格。
@@ -488,6 +489,8 @@ impl GrantsChange {
 ///
 /// 同一 `(principal, capability)` 的多次变更，**最后一次**生效——恢复之后再收回
 /// 就又是收回，反之亦然。判据从流水尾部往前找，找到的第一条就是当前状态。
+/// 认得出能力名的变更才进这条折叠；认不出名字的收回按主体整体生效
+/// （[`Self::is_revoked`]），同名 `Restore` 也不解除。
 ///
 /// ## 审计面在事件流里，不在本类型上
 ///
@@ -509,12 +512,41 @@ impl GrantsOverlay {
         }
     }
 
-    /// 该主体的该能力**现在是否被收回**（last-wins）。
+    /// 该主体的该能力**现在是否被收回**。
     ///
-    /// fail-closed 的反面：认不出的能力名 ⇒ 未收回——不把载荷的拼写错误读成
-    /// 一次静默撤销（那等于把笔误变成一次越权拒绝），「现在准不准」由调用方的
-    /// 表谓词与本判定合成。
+    /// 判据分三段，前两段是闭集 fail-closed（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
+    ///
+    /// - **查询名认不出**（不在 [`Capability`] 7 项闭集内）⇒ 告警并按**已收回**判——
+    ///   「现在准不准」无从查起时宁红不漏，笔误的查询名不得变成一次静默放行；
+    /// - **该主体的流水里有认不出能力名的收回项** ⇒ 对该主体的**任何**能力查询都按
+    ///   已收回判：一次笔误的收回不得静默落空。这不是「某一格被收回」而是「这次
+    ///   收回落不到任何一格」，故按主体整体生效，同名 `Restore` 也不解除
+    ///   （代价：一次载荷损坏会让该主体暂时什么都做不了，但不会让一次本该生效的
+    ///   收回消失）；
+    /// - 其余按 **last-wins**：同一 `(principal, capability)` 从流水尾部往前找，
+    ///   第一条命中就是当前状态。
+    ///
+    /// 与 [`PermissionMatrix`] 的表谓词合成才是「现在准不准」：表答「登记过什么」，
+    /// 本判定答「其中什么现在被收回了」。
     pub fn is_revoked(&self, principal: &str, capability: &str) -> bool {
+        if Capability::from_name(capability).is_none() {
+            crate::plugin_warn!(
+                "governance",
+                "能力名 `{capability}` 不在 7 项闭集内（主体 {principal}），按已收回判"
+            );
+            return true;
+        }
+        if self.changes.iter().any(|c| {
+            c.is_revoke()
+                && c.principal() == principal
+                && Capability::from_name(c.capability()).is_none()
+        }) {
+            crate::plugin_warn!(
+                "governance",
+                "主体 {principal} 的变更流水里有能力名认不出的收回项，任何能力查询按已收回判"
+            );
+            return true;
+        }
         self.changes
             .iter()
             .rev()

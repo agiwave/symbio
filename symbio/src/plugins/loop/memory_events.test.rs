@@ -857,7 +857,7 @@ fn a_shared_memory_is_recalled_across_sessions_by_matrix_members() {
 }
 
 /// **矩阵外主体看不见 shared**（负判据，与 stats 读闸同一分支）：
-/// 未登记主体（派生整套能力 ≠ 矩阵成员——`sees_of` 只认登记行）⇒ 视图里没有；
+/// 未登记主体（表里没有行 ≠ 矩阵成员——`sees_of` 只认登记行）⇒ 视图里没有；
 /// 属主（`user` = `SESSION_OWNER`）恒放行——两条是同一次判定的两个分支
 /// （`memory_visible`），不是两个判定点。
 #[test]

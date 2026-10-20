@@ -9,18 +9,22 @@
 //! 3. **抢占判定者那一行比主智能体窄**（只持 `judge.intent`、不持 `reply.*`，
 //!    S07 §5「判定者不得直接发言」）；
 //! 4. **对等主体那一行比主智能体窄**（只持 `produce.artifact`，S08 §3——第一个
-//!    对等/图侧主体，窄于「派生整套」）；
-//! 5. `matrix_for` 的两条分支：**登记过的主体走表**（表是权威，派生不覆盖它），
-//!    未登记的 `agent:<id>` 才派生主智能体那一行；
+//!    对等/图侧主体，窄于主智能体那一行）；
+//! 5. 取表口只有一条口径（[ADR-099]）：**表是权威**，登记过的主体拿自己那一行，
+//!    未登记的主体在表里没有行 ⇒ 每个谓词为假（fail-closed）；
 //! 6. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
 //!    ——fail-closed 不因降级而松开；
 //! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（S02/S03 三角色，T-107 行与路径
-//!    同批）：各自单能力独持，`matrix_for` 拿登记行，C15 两面（规划者不认证、
-//!    验证者不产出）在表这一层可见。
+//!    同批）：各自单能力独持，`production_matrix` 拿登记行，C15 两面（规划者不认证、
+//!    验证者不产出）在表这一层可见；
+//! 8. **绑定即登记**（[ADR-100]）：未部署的主体经 `bind_inheriting` 拿到来源行——
+//!    能力随绑定来、**可见域不登记**、静态行不被改写、淘汰面只认部署表、
+//!    委派上限两侧都在册。
 
 use super::*;
 use crate::symbio_core::governance::Capability;
+use crate::symbio_core::view::is_agent_id;
 
 /// 表的形状：主智能体持 6 项、缺 `assert.verification`，可见域 `thread_private`。
 #[test]
@@ -40,9 +44,8 @@ fn main_agent_row_is_the_documented_shape() {
 
 /// 自主发起者那一行（S12 §3）：**比主智能体窄**——只持 `define.work`，不持任何 `reply.*`。
 ///
-/// 这一行是本表里第一条「少给」的记录：若缺了它，`matrix_for` 对一切
-/// `agent:*` 都派生主智能体的整套能力集（含 `reply.*`）——于是「自主行为不得冒充
-/// 用户对话」在生产里被静默推翻，文档与验收断言却都还写着它成立。
+/// 这一行是本表里第一条「少给」的记录：它是这一主体的**全部能力来源**——
+/// 「自主行为不得冒充用户对话」与断言同方向（ADR-099：未登记 = 拒，窄行是唯一入口）。
 #[test]
 fn the_autonomous_row_is_narrower_than_main() {
     let matrix = production_matrix();
@@ -66,12 +69,11 @@ fn the_autonomous_row_is_narrower_than_main() {
 
 /// 抢占判定者那一行（S07 §5）：**比主智能体窄**——只持 `judge.intent`，不持任何 `reply.*`。
 ///
-/// 与自主行同形的静默面：`agent:reflex` 缺表时，
-/// `matrix_for` 对一切未登记 `agent:*` 都派生主智能体的整套能力（含 `reply.*`）——
-/// 于是「判定者不得发言」在生产里被静默推翻。判据落在**生产表**上（`matrix_for`），
-/// 不再是自造矩阵：自造矩阵只证明「我拒我」，表里少一行它照样绿。
+/// 判据落在**生产表**上（`production_matrix`），不再是自造矩阵：自造矩阵只证明
+/// 「我拒我」，表里少一行它照样绿。ADR-099 之后方向与断言同向：表是权威，
+/// 这一行就是判定者的全部能力来源。
 #[test]
-fn the_reflex_row_is_narrower_than_derivation() {
+fn the_reflex_row_is_narrower_than_main() {
     let matrix = production_matrix();
     let caps = matrix.grants_of(PRINCIPAL_REFLEX);
     assert_eq!(caps.len(), 1, "只持 judge.intent：{caps:?}");
@@ -89,27 +91,23 @@ fn the_reflex_row_is_narrower_than_derivation() {
         "可见域显式给出（成对性），不是 None"
     );
 
-    // 反向判据：**登记过的主体走表**，派生不得覆盖它——`matrix_for` 拿到的必须是
-    // 上面那一行（窄），而不是派生出来的主智能体整套。去掉 ROWS 里那一行，这条断言
-    // 立刻变红（派生分支会把 `reply.first` 塞回来）。
-    let derived = matrix_for(PRINCIPAL_REFLEX);
+    // 反向判据：`production_matrix` 拿到的必须是上面那一行（窄）。去掉 ROWS 里
+    // 那一行，这条断言立刻变红（表里没有行 ⇒ 什么也拿不到，不是换一套能力）。
     assert_eq!(
-        derived.grants_of(PRINCIPAL_REFLEX).len(),
+        matrix.grants_of(PRINCIPAL_REFLEX).len(),
         1,
-        "派生不得把主智能体的 reply.* 塞回判定者这一行"
+        "判定者这一行只有 judge.intent，不许多出 reply.*"
     );
-    assert!(!derived.can_reply(PRINCIPAL_REFLEX, true));
+    assert!(!matrix.can_reply(PRINCIPAL_REFLEX, true));
 }
 
 /// 对等主体那一行（S08 §3）：**第一个对等（图侧）主体的窄行**——只持 `produce.artifact`，
-/// 严格窄于主智能体，也严格窄于 `matrix_for` 的派生整套。
+/// 严格窄于主智能体。
 ///
-/// S08 §4 的平凡值「身份分层 ≠ 权限分层」是给**子智能体**的（它要能写自己的收束格，
-/// 否则什么都写不了）；对等体拿主智能体整套（含 `reply.*`）则是**静默超权**——
-/// 与自主行 / 判定行同形的静默面。S08 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**，
-/// 不许靠派生。
+/// S08 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**——窄行是它唯一的入口
+/// （ADR-099：表是权威，未登记 = 拒）。
 #[test]
-fn the_peer_row_is_narrower_than_the_derived_set() {
+fn the_peer_row_is_narrower_than_main() {
     let matrix = production_matrix();
     let caps = matrix.grants_of(PRINCIPAL_PEER);
     assert_eq!(caps.len(), 1, "只持 produce.artifact：{caps:?}");
@@ -127,36 +125,30 @@ fn the_peer_row_is_narrower_than_the_derived_set() {
         "可见域显式给出（成对性），不是 None"
     );
 
-    // 「严格窄于派生整套」：主智能体持 6 项、对等行 1 项；且 `matrix_for` 必须拿**登记行**
-    // 而非派生出来的整套——去掉 ROWS 那一行，派生分支会把 `reply.*` 与其余能力一起塞回来。
+    // 「严格窄于主智能体那一行」：主智能体持 6 项、对等行 1 项。去掉 ROWS 那一行，
+    // 断言变红（表里没有行 ⇒ 什么也拿不到）。
     let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
     assert!(
         caps.len() < main_len,
         "对等行必须严格窄于主智能体那一行（{main_len} 项）"
     );
-    let derived = matrix_for(PRINCIPAL_PEER);
-    assert_eq!(
-        derived.grants_of(PRINCIPAL_PEER).len(),
-        1,
-        "派生不得把主智能体整套塞回对等行"
-    );
-    assert!(!derived.can_reply(PRINCIPAL_PEER, true));
+    assert!(!matrix.can_reply(PRINCIPAL_PEER, true));
     assert!(
-        derived.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
+        matrix.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
         "登记行是权威：对等体仍持它那一项能力"
     );
 }
 
 /// 组织形态三角色（S13 §3，T-073）：市场 / 仲裁 / 守门三行**各自单能力独持**，
-/// 且都严格窄于 `matrix_for` 的派生整套。
+/// 且都严格窄于主智能体那一行。
 ///
-/// 与自主 / 判定 / 对等三行同一条纪律：主体出现必须自带窄行同批落地，不许靠派生
-/// ——未登记的 `agent:market` 会拿主智能体整套（含 `reply.*`），「市场不得冒充
-/// 主控发言」「仲裁者不自证」「守门者先判后发声」于是在生产里被静默推翻。
+/// 与自主 / 判定 / 对等三行同一条纪律：主体出现必须自带窄行同批落地——窄行是唯一
+/// 入口（ADR-099），「市场不得冒充主控发言」「仲裁者不自证」「守门者先判后发声」
+/// 与断言同方向。
 /// 另钉 exit ① 的表半边：arbiter 持 `assert.verification` **不碰** C15（不持
 /// `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
 #[test]
-fn the_three_society_rows_are_narrower_than_derivation() {
+fn the_three_society_rows_are_narrower_than_main() {
     let matrix = production_matrix();
     let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
 
@@ -205,7 +197,7 @@ fn the_three_society_rows_are_narrower_than_derivation() {
         "守门判定是判定者自己的工作记录，不是公共域公告"
     );
 
-    // 三行都严格窄于主智能体那一行，且 `matrix_for` 拿的是**登记行**不是派生整套。
+    // 三行都严格窄于主智能体那一行，`production_matrix` 拿的是**登记行**。
     for (p, cap) in [
         (PRINCIPAL_MARKET, Capability::AssignWork),
         (PRINCIPAL_ARBITER, Capability::AssertVerification),
@@ -215,34 +207,32 @@ fn the_three_society_rows_are_narrower_than_derivation() {
             matrix.grants_of(p).len() < main_len,
             "{p} 必须严格窄于主智能体那一行（{main_len} 项）"
         );
-        let derived = matrix_for(p);
         assert_eq!(
-            derived.grants_of(p).len(),
+            matrix.grants_of(p).len(),
             1,
-            "派生不得把主智能体整套塞回 {p}"
+            "{p} 这一行只有它那一项能力，不许多出主智能体的其余能力"
         );
         assert!(
-            derived.can_write(p, cap),
+            matrix.can_write(p, cap),
             "登记行是权威：{p} 仍持它那一项能力"
         );
-        assert!(!derived.can_reply(p, true));
+        assert!(!matrix.can_reply(p, true));
     }
 }
 
 /// S02/S03 三角色行（T-107，行与执行路径同批）：工人 / 规划者 / 验证者三行
-/// **各自单能力独持**，严格窄于主智能体，也严格窄于 `matrix_for` 的派生整套。
+/// **各自单能力独持**，严格窄于主智能体那一行。
 ///
 /// 与自主 / 判定 / 对等 / 市场 / 仲裁 / 守门六行同一条纪律：主体出现必须自带窄行
-/// 同批落地——未登记的 `agent:worker` 会走派生拿主智能体整套（含 `reply.*`），
-/// 「工人不以主控身份发言」「规划者不自我认证」「产出者不得既产出又认证」于是在
-/// 生产里被静默推翻，而文档与验收断言都还写着它们成立。
+/// 同批落地——窄行是唯一入口（ADR-099），「工人不以主控身份发言」「规划者不自我
+/// 认证」「产出者不得既产出又认证」与断言同方向。
 ///
 /// 另钉两条 C15 的结构面：planner 持 `define.work` 而不持 `assert.verification`
 /// （不自我认证），verifier 持 `assert.verification` 而不持 `define.work` /
 /// `produce.artifact` （不既产出又认证）——「二者互不可写」在**表**这一层可见，
 /// 构造期的双持拒绝在 `governance` 那一侧。
 #[test]
-fn the_three_role_rows_are_narrower_than_derivation() {
+fn the_three_role_rows_are_narrower_than_main() {
     let matrix = production_matrix();
     let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
 
@@ -295,7 +285,7 @@ fn the_three_role_rows_are_narrower_than_derivation() {
         "验证判定是判定者自己的工作记录（与守门行同一条理由），不是公共域公告"
     );
 
-    // 三行都严格窄于主智能体那一行，且 `matrix_for` 拿的是**登记行**不是派生整套。
+    // 三行都严格窄于主智能体那一行，`production_matrix` 拿的是**登记行**。
     for (p, cap) in [
         (PRINCIPAL_WORKER, Capability::ProduceArtifact),
         (PRINCIPAL_PLANNER, Capability::DefineWork),
@@ -305,17 +295,16 @@ fn the_three_role_rows_are_narrower_than_derivation() {
             matrix.grants_of(p).len() < main_len,
             "{p} 必须严格窄于主智能体那一行（{main_len} 项）"
         );
-        let derived = matrix_for(p);
         assert_eq!(
-            derived.grants_of(p).len(),
+            matrix.grants_of(p).len(),
             1,
-            "派生不得把主智能体整套塞回 {p}"
+            "{p} 这一行只有它那一项能力，不许多出主智能体的其余能力"
         );
         assert!(
-            derived.can_write(p, cap),
+            matrix.can_write(p, cap),
             "登记行是权威：{p} 仍持它那一项能力"
         );
-        assert!(!derived.can_reply(p, true));
+        assert!(!matrix.can_reply(p, true));
     }
 }
 
@@ -357,33 +346,35 @@ fn the_closure_gate_is_dispatched_by_kind() {
     assert!(!matrix.can_produce_artifact("session/ghost"));
 }
 
-/// `matrix_for` 两条分支：**登记过的主体走表**（表是权威，派生不覆盖它）；
-/// 未登记的 `agent:<id>` 才派生主智能体那一行。
+/// 取表口只有一条口径（[ADR-099](../../../docs/010-adr/099.md "ADR-099")）：
+/// **登记过的主体走表，未登记的主体什么也拿不到**——少一行是一条拒绝，不是一条漏判。
 #[test]
-fn matrix_for_prefers_the_registered_row_over_derivation() {
+fn an_unregistered_subject_gets_no_row_at_all() {
     // 登记过：拿自己那一行——窄行不被主智能体那套覆盖（覆盖就成「表授予 A、闸门判 B」）。
-    let autonomous = matrix_for(PRINCIPAL_AUTONOMOUS);
+    let autonomous = production_matrix();
     assert_eq!(
         autonomous.grants_of(PRINCIPAL_AUTONOMOUS).len(),
         1,
-        "派生不得把主智能体的 reply.* 塞回这一行"
+        "窄行就是这一行的全部能力集"
     );
     assert!(!autonomous.can_reply(PRINCIPAL_AUTONOMOUS, true));
 
-    // 未登记的子智能体：派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4 平凡值）。
-    let sub = matrix_for("session/sub");
-    assert_eq!(
-        sub.grants_of("session/sub").len(),
-        production_matrix().grants_of(PRINCIPAL_MAIN).len(),
-        "未登记主体派生主智能体的整套能力"
-    );
+    // 未登记的子智能体：表里没有它的行 ⇒ 每个谓词为假（fail-closed）。
+    // 反向判据：哪天有人把派生加回来，这条断言立刻变红。
+    let sub = "session/sub";
     assert!(
-        sub.can_reply("session/sub", true),
-        "子智能体要能写自己的收束格，否则它什么都写不了"
+        production_matrix().grants_of(sub).is_empty(),
+        "未登记主体在表里没有行（ADR-099：未登记 = 拒）"
+    );
+    assert!(!production_matrix().can_reply(sub, true), "写不了收束格");
+    assert!(
+        !production_matrix().can_produce_artifact(sub),
+        "也产不了产物"
     );
 
-    // 非 `agent:*` 的主体走表：表里没有它 ⇒ fail-closed。
-    assert!(!matrix_for(PRINCIPAL_USER).can_reply(PRINCIPAL_USER, true));
+    // 要写收束格的子智能体必须自己登记一行——窄行是唯一入口。
+    // 非 agent 命名空间同款：表里没有它 ⇒ fail-closed。
+    assert!(!production_matrix().can_reply(PRINCIPAL_USER, true));
 }
 
 /// 写侧闸：收束的两种位置都放行；矩阵外主体两种位置都拒。
@@ -499,7 +490,7 @@ fn tool_principals_have_declared_rows() {
 
 /// **人不入能力表**（[ADR-069 §后果] 与 [authz.rs 模块文档]「两张表里的人」）——
 /// `PRINCIPAL_USER` 归一为 `person/local` 之后仍**不立行**；判据：
-/// `matrix_for(PRINCIPAL_USER).can_reply(PRINCIPAL_USER, true)` 依旧为假。
+/// `production_matrix().can_reply(PRINCIPAL_USER, true)` 依旧为假。
 #[test]
 fn person_local_is_not_in_the_capability_table() {
     assert!(
@@ -512,4 +503,132 @@ fn person_local_is_not_in_the_capability_table() {
     );
     // 归一后 user 也不是 agent 命名空间成员（visible_to 会放行，但 can_reply 仍拒）。
     assert!(!is_agent_id(PRINCIPAL_USER));
+}
+
+// ── 绑定即登记（[ADR-100]）──────────────────────────────────────────────
+//
+// 运行期绑定面（`BOUND`）是**进程级**登记：下面五条用例只碰自己独有的主体名
+// （`session/t-bind-*`），不碰别处引用的 `session/main` / `ghost` / `worker` / `sub`
+// ——Rust 单测在同一进程里并行跑，共享这一张表；用独有名是这里的纪律。
+
+/// 绑定即登记：未部署的主体经 [`bind_inheriting`] 拿到来源行，收束闸随之放行。
+///
+/// 这条钉的是 [ADR-100] 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
+/// **不再靠 `matrix_for` 静默派生主行**，而是随会话装配点的绑定拿到一行——
+/// 拿得到与拿不到都由可见的登记动作决定（少一行 = 一条拒绝）。
+#[test]
+fn a_bound_subject_takes_the_source_row() {
+    let subject = "session/t-bind-root";
+    // 绑定前：既未部署、也未绑定 ⇒ 每个谓词为假（与 [ADR-099] 同向）。
+    assert!(
+        production_matrix().grants_of(subject).is_empty(),
+        "未绑定主体在合流面没有行"
+    );
+    assert!(!production_matrix().can_reply(subject, true));
+    // 根会话绑定 = 继承会话面缺省行（主智能体行）。
+    bind_inheriting(subject, PRINCIPAL_MAIN);
+    assert_eq!(
+        production_matrix().grant_names_of(subject).len(),
+        6,
+        "拿到会话面行六项能力"
+    );
+    assert!(
+        production_matrix().can_reply(subject, true)
+            && production_matrix().can_reply(subject, false),
+        "首响与追加都放行：绑定来的 reply.* 就是收束闸的判据"
+    );
+    assert!(production_matrix().can_produce_artifact(subject));
+    assert!(
+        !production_matrix().is_deployed(subject),
+        "绑定 ≠ 部署事实（淘汰面与可见域面都不认它）"
+    );
+}
+
+/// **静态行不被改写**：主体已在 [`ROWS`] 里时绑定是空操作——窄行不被悄悄放大成会话面。
+///
+/// 反判据：去掉 `bind_inheriting` 里那句 `is_deployed ⇒ return`，工人那一行会被
+/// 本用例的绑定调用就地改成六项，`can_reply(worker)` 立刻变真。
+#[test]
+fn binding_never_widens_a_deployed_row() {
+    let before = production_matrix().grants_of(PRINCIPAL_WORKER).len();
+    bind_inheriting(PRINCIPAL_WORKER, PRINCIPAL_MAIN);
+    assert_eq!(
+        production_matrix().grants_of(PRINCIPAL_WORKER).len(),
+        before,
+        "工人那一行（单能力独持）不因绑定调用变宽"
+    );
+    assert!(
+        !production_matrix().can_reply(PRINCIPAL_WORKER, true),
+        "工人仍无发言权（步 3 的行形状是静态事实，运行期绑定改不动它）"
+    );
+}
+
+/// **绑定不带可见域**：绑定主体不是矩阵成员，读不到他人 `shared`（t76 的反判据）。
+///
+/// 能力与可见域必须分家——把可见域也随绑定登记，任何 `agent:<id>` 都会变成
+/// 矩阵成员、读到他人 shared，t76「ghost 读不到他人 shared」当场破。
+#[test]
+fn binding_grants_no_visibility_scope() {
+    let subject = "session/t-bind-vis";
+    bind_inheriting(subject, PRINCIPAL_MAIN);
+    assert!(
+        production_matrix().can_reply(subject, true),
+        "能力随绑定来了……"
+    );
+    assert!(
+        !production_matrix().can_see(subject, PRINCIPAL_MAIN, VisScope::Shared),
+        "……但可见域不随绑定来：读不到他人 shared"
+    );
+    assert_eq!(
+        production_matrix().sees_of(subject),
+        None,
+        "绑定主体的可见域仍为空（只认部署表）"
+    );
+}
+
+/// **淘汰面只认部署表**：绑定登记不构成「部署授予过 `assign.work`」。
+///
+/// 判据取两口之差：合流面（`can_write_name`）看得见绑定来的能力，部署面
+/// （`deployed_can_write_name`）看不见——`derived_facts::record_elimination` 走后者，
+/// 运行期绑定的主体不会因此被回头淘汰（它本就不是部署事实）。
+#[test]
+fn the_elimination_face_ignores_bindings() {
+    let subject = "session/t-bind-elim";
+    bind_inheriting(subject, PRINCIPAL_MAIN);
+    assert!(
+        production_matrix().can_write_name(subject, CAP_ASSIGN_WORK),
+        "合流面：绑定来的 assign.work 能力可见"
+    );
+    assert!(
+        !production_matrix().deployed_can_write_name(subject, CAP_ASSIGN_WORK),
+        "部署面：绑定主体不算部署事实，不进淘汰面"
+    );
+}
+
+/// **委派两侧都在册**：`from` 无行时先给 `from` 登记会话面缺省，再让子主体继承。
+///
+/// `turn_runner::within_delegation_ceiling` 判**父主体**的行，父侧缺行会让子会话
+/// 因「父也不持该能力」而收束不了——所以委派上限两侧都要在册，缺一侧整条链断。
+#[test]
+fn delegated_binding_registers_both_sides() {
+    let parent = "session/t-bind-parent";
+    let child = "session/t-bind-child";
+    bind_inheriting(child, parent);
+    assert!(
+        !production_matrix().grants_of(parent).is_empty(),
+        "父侧也在册（否则委派上限判不到父行）"
+    );
+    assert!(
+        !production_matrix().grants_of(child).is_empty(),
+        "子侧继承父行（委派不放大权威：子 ≤ 父）"
+    );
+    assert_eq!(
+        production_matrix().grants_of(child).len(),
+        production_matrix().grants_of(parent).len(),
+        "子拿到的是父那一行的能力集"
+    );
+    assert!(
+        production_matrix().can_reply(child, true),
+        "子会话收束闸放行（父行继承下来）"
+    );
 }

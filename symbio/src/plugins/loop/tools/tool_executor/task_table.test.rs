@@ -2,7 +2,7 @@
 //!
 //! 五条判据：**立任务者放行**（`define.work` 三持有者逐一）、**独立判定者放行**
 //! （`assert.verification` 两持有者）、**纯产出 / 纯派活主体拒**（工人 / 对等体 / 市场）、
-//! **未登记子智能体派生放行**、以及平凡值主体照常放行。
+//! **未绑定登记的子智能体闸拒**、以及平凡值主体照常放行。
 //! 「谁是任务表写入」不在这里判——它在工具自己的 `owns_task_table` 声明上
 //! （T-158），见 `decls.test.rs` 的匹配口径用例。
 
@@ -84,17 +84,19 @@ fn producer_only_and_dispatch_only_principals_are_refused() {
     }
 }
 
-/// 未登记的 `agent:<id>`（子智能体）按 S08 §4 平凡值派生主智能体整套 ⇒ 照常放行。
+/// 未绑定登记的主体在合流面没有行 ⇒ 闸拒（[ADR-099] 未登记 = 拒 +
+/// [ADR-100] 绑定登记前没有行）。
 ///
-/// 这是**子树委派侧**的口径（t42 的 `reviewer` 子会话就在这条路上）：子智能体要能
-/// 写自己的收束格与任务表，否则什么都干不了。收窄它的正确位置是上游——登记窄行
-/// （T-107 的三角色）或委派上限（T-105），不是这里。
+/// 子智能体要写任务表就得**先经会话装配点绑定登记**（根会话继承会话面缺省行、
+/// 委派子会话继承父行，见 `authz::bind_inheriting`）——本用例走的是 `TaskTableInputs::of`
+/// 直读合流面、**不经过装配点绑定**的那一支：没有登记动作就没有行，闸诚实拒止。
+/// 与收束闸同一口径：「忘配/忘绑」的后果是一条会被看见的拒绝，不是一次静默超权。
 #[test]
-fn an_unregistered_subagent_keeps_the_derived_set() {
+fn an_unbound_subagent_is_refused_the_task_table() {
     let inputs = TaskTableInputs::of(&agent_ctx("reviewer"));
     assert_eq!(inputs.principal, "session/reviewer");
     assert!(
-        inputs.may_write,
-        "未登记子智能体派生主智能体整套（含 define.work）⇒ 照常放行"
+        !inputs.may_write,
+        "未绑定登记的主体在合流面没有行 ⇒ 不放行（ADR-099 / ADR-100）"
     );
 }

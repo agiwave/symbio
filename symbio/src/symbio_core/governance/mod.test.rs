@@ -351,23 +351,78 @@ fn grants_overlay_supports_the_revoke_restore_revoke_loop() {
     );
 }
 
-/// 覆盖层的 fail-closed 方向：认不出的能力名 ⇒ 未收回。
+/// 覆盖层的 fail-closed（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
+/// **查询侧**的能力名不在 `Capability` 闭集内 ⇒ 告警并按**已收回**判。
 ///
-/// 与 `from_name` 相反的方向感——能力名笔误在这里**不**变成一次静默撤销
-/// （那等于把载荷的拼写错误变成一次越权拒绝），而是「这条撤销不存在」，
-/// 由调用方的表谓词继续把关。两个 fail-closed 各自守自己那一侧。
+/// 方向与其余 fail-closed 面同侧：查询名认不出时「现在准不准」无从查起，
+/// 宁红不漏——笔误的查询名不许变成一次静默放行。
 #[test]
-fn overlay_never_guesses_a_capability_name() {
-    let overlay = GrantsOverlay::fold([GrantsChange::Revoke {
+fn overlay_revokes_on_an_unrecognizable_query_name() {
+    // 空覆盖层（表是权威、覆盖层只答减法）：认得出的查询名照旧答「未收回」，
+    // 认不出的查询名按已收回判。
+    let overlay = GrantsOverlay::fold([]);
+    assert!(!overlay.is_revoked("session/main", "reply.first"));
+    assert!(
+        overlay.is_revoked("session/main", "reply.fisrt"),
+        "认不出的查询名必须按已收回判（fail-closed）"
+    );
+    // 流水里只有恢复也一样：认不出的查询名无格可查，仍按已收回判。
+    let overlay = GrantsOverlay::fold([GrantsChange::Restore {
+        principal: "session/main".to_string(),
+        capability: "assign.work".to_string(),
+    }]);
+    assert!(overlay.is_revoked("session/main", "assign.wrok"));
+    assert!(!overlay.is_revoked("session/main", "assign.work"));
+}
+
+/// 变更流水里的**收回**项带认不出的能力名 ⇒ 该主体对**任何**能力查询都按已收回判
+/// （[ADR-099](../../../../docs/010-adr/099.md "ADR-099")：一次笔误的收回不得静默落空）。
+///
+/// 读法（ADR 字面「变更流水里带认不出能力名的收回项对该主体的任何能力查询都按
+/// 已收回判」）：认不出名字的收回不是「某一格被收回」，而是「这次收回落不到任何
+/// 一格」，故按**主体整体**生效——之后同名的 `Restore` 也**不解除**。这是宁红不漏：
+/// 极端情况下一次载荷损坏会让该主体暂时什么都做不了，但不会让一次本该生效的收回
+/// 静默消失（代价划界见该 ADR「代价」节）。
+#[test]
+fn a_typoed_revoke_revokes_the_whole_principal() {
+    let typoed_revoke = || GrantsChange::Revoke {
         principal: "session/main".to_string(),
         capability: "assign.wrok".to_string(),
-    }]);
+    };
+
+    // 该主体的任何能力查询——认得出的名字也一样——都按已收回判。
+    let overlay = GrantsOverlay::fold([typoed_revoke()]);
     assert!(
-        !overlay.is_revoked("session/main", "assign.work"),
-        "拼错的撤销不命中正确的能力名"
+        overlay.is_revoked("session/main", "assign.work"),
+        "笔误的收回对该主体整体生效，不是只对那一格"
     );
     assert!(
-        overlay.is_revoked("session/main", "assign.wrok"),
-        "但它自己那一格照旧生效（审计面不能丢）"
+        overlay.is_revoked("session/main", "reply.first"),
+        "任何能力查询都按已收回判"
     );
+    // 只波及那一个主体：别人的查询照旧按流水答。
+    assert!(!overlay.is_revoked("session/market", "assign.work"));
+
+    // 同名 `Restore` 也不能解除（读法见文档注释）。
+    let overlay = GrantsOverlay::fold([
+        typoed_revoke(),
+        GrantsChange::Restore {
+            principal: "session/main".to_string(),
+            capability: "assign.wrok".to_string(),
+        },
+    ]);
+    assert!(
+        overlay.is_revoked("session/main", "assign.work"),
+        "同名恢复不解除整体收回"
+    );
+
+    // 认得出名字的 `Restore` 同样解除不了——整体生效不按名字折叠。
+    let overlay = GrantsOverlay::fold([
+        typoed_revoke(),
+        GrantsChange::Restore {
+            principal: "session/main".to_string(),
+            capability: "assign.work".to_string(),
+        },
+    ]);
+    assert!(overlay.is_revoked("session/main", "assign.work"));
 }

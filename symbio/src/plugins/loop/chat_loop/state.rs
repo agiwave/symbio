@@ -45,7 +45,7 @@ pub(crate) fn request_source_principal(
 /// | 字段 | 取法 |
 /// |---|---|
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
-/// | `capabilities` | **授权表行**（`matrix_for` ⇒ `grant_names_of`）——单一真源。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
+/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 开轮时把它以**数值**写入载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退 `tier` 映射） |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[T-105]） |
@@ -59,7 +59,17 @@ pub(crate) fn request_actor_spec(
 ) -> crate::symbio_core::ActorSpec {
     use crate::symbio_core::ActorSpec;
     let principal = request_principal(ctx);
-    let matrix = crate::symbio_core::authz::matrix_for(&principal);
+    // 绑定即登记（[ADR-100]）：本轮主体在**装配点**登记能力行——根会话继承会话面
+    // 缺省行（主智能体行），委派子会话继承父行（委派不放大权威）。登记先于取数，
+    // 规格身上的能力集才是「现在准不准」的合流面；未绑定的主体照旧 fail-closed。
+    crate::symbio_core::authz::bind_inheriting(
+        &principal,
+        match &scope {
+            crate::symbio_core::Scope::Child(parent) => parent.as_str(),
+            crate::symbio_core::Scope::Root => crate::symbio_core::authz::PRINCIPAL_MAIN,
+        },
+    );
+    let matrix = crate::symbio_core::authz::production_matrix();
     ActorSpec {
         principal: principal.clone(),
         // 模式判据住在定义域内（[`crate::symbio_core::Pattern::for_principal`]）——

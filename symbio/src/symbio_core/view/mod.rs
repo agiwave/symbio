@@ -85,7 +85,7 @@ pub fn principal_namespace(id: &str) -> Option<&str> {
 ///
 /// 判据：`namespace` 落在 [`AGENT_NAMESPACES`] 登记表里 ⇒ 智能体；否则 ⇒ 不是。
 /// **未识别的 namespace** 也返回 `false`——不是 agent，`visible_to` 第 3 条就会放行；
-/// 但授权表 `matrix_for` 会照旧 fail-closed（未知主体 = 无 grants）。
+/// 但授权表 `production_matrix` 会照旧 fail-closed（未知主体 = 无 grants）。
 pub fn is_agent_id(id: &str) -> bool {
     principal_namespace(id).is_some_and(|ns| AGENT_NAMESPACES.contains(&ns))
 }

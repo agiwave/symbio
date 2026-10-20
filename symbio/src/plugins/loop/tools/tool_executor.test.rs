@@ -1108,25 +1108,24 @@ fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
 
 /// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
 ///
-/// 本机部署里 `agent:*` 一律继承 `agent:main` 的 grants（含 `produce.artifact`），
-/// 所以 `Refuse` 只可能来自**不属于这一族**的主体——判据为 false 就是 false，
-/// 没有任何「认不出 ⇒ 放行」的旁路。另一侧的判据（预算）见下方端到端用例。
+/// `agent:*` 身份会话在**会话装配点经绑定登记**拿到会话面缺省行（含
+/// `produce.artifact`，[ADR-100]）——本用例直读合流面（不经装配点），取的是
+/// 部署表那一行的判据；`Refuse` 只可能来自**不属于这一族**的主体——判据为 false
+/// 就是 false，没有任何「认不出 ⇒ 放行」的旁路。另一侧的判据（预算）见下方端到端用例。
 #[test]
 fn external_execution_capability_is_read_from_the_matrix() {
     assert!(
-        crate::symbio_core::authz::matrix_for(crate::symbio_core::authz::PRINCIPAL_MAIN)
-            .can_write_name(
-                crate::symbio_core::authz::PRINCIPAL_MAIN,
-                crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
-            ),
+        crate::symbio_core::authz::production_matrix().can_write_name(
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
+            crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
+        ),
         "agent:main 持外部执行能力（本机部署事实）"
     );
     assert!(
-        !crate::symbio_core::authz::matrix_for(crate::symbio_core::authz::PRINCIPAL_USER)
-            .can_write_name(
-                crate::symbio_core::authz::PRINCIPAL_USER,
-                crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
-            ),
+        !crate::symbio_core::authz::production_matrix().can_write_name(
+            crate::symbio_core::authz::PRINCIPAL_USER,
+            crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
+        ),
         "非 agent 主体不持外部执行能力 ⇒ 判据 false ⇒ Refuse（fail-closed）"
     );
 }
@@ -1313,7 +1312,7 @@ async fn the_ledger_comes_from_the_facts_value() {
 ///
 /// 今天没有任何生产路径让工人调任务表——此用例防的是**未来**：角色行落地后，
 /// 一个绑 `worker` 的子会话调 `todo_write` 被诚实拒止，而不是静默以主智能体
-/// （派生整套）的资格写下去。C15 的精神：产出者不自我认证。
+/// 的资格写下去。C15 的精神：产出者不自我认证。
 #[tokio::test]
 async fn a_producer_only_principal_is_refused_the_task_table() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-task-table");

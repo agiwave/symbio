@@ -107,8 +107,9 @@ export default defineCase(
       },
     });
     // ghost 智能体目录：`--agent` 绑定的目录准入（与 t73 的 reflex 同一硬约束）。
-    // 目录只是准入；授权表没有 `agent:ghost` 的登记行 ⇒ 矩阵外主体
-    // （`sees_of` 为空 ⇒ `can_see` 对 shared 必拒），能力集走派生整套 ⇒ 轮照常跑。
+    // 目录只是准入；授权表没有 `agent:ghost` 的登记行 ⇒ 矩阵外主体。绑定登记
+    // （ADR-100）只把**能力**随会话装配点绑来（ghost 轮照常跑），**可见域不登记**：
+    // `sees_of` 仍为空 ⇒ `can_see` 对 shared 必拒 —— 这条正是本用例的反判据。
     makeAgentDir(hd.homedir, {
       id: 'ghost',
       name: '未登记智能体',

@@ -39,7 +39,7 @@ fn kind_words_match_serde_names() {
     }
 }
 
-/// `is_agent()` 只在 `Agent` 一族为真——这是 `visible_to` 与 `matrix_for` 的运行时判据。
+/// `is_agent()` 只在 `Agent` 一族为真——这是 `visible_to` 与 `production_matrix` 的运行时判据。
 #[test]
 fn is_agent_covers_only_agent_kind() {
     assert!(PrincipalKind::Agent.is_agent());

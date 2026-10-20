@@ -195,9 +195,10 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     }
     let matrix = crate::symbio_core::authz::production_matrix();
     for (principal, entry) in &view.by_principal {
-        // 条件 2：持 assign.work 的**登记**主体（生产表是权威；派生的 `agent:<id>`
-        // 不在表里 ⇒ 不淘汰——它们不是部署事实，边界同函数文档）。
-        if !matrix.can_write_name(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
+        // 条件 2：持 assign.work 的**部署**主体（淘汰面只认部署表：绑定登记
+        // （[ADR-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
+        // 未部署的 `agent:<id>` 不在表里 ⇒ 不淘汰，边界同函数文档）。
+        if !matrix.deployed_can_write_name(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
             continue;
         }
         if !decider.should_eliminate(entry) {
