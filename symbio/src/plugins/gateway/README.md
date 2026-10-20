@@ -28,6 +28,10 @@ created: 2026-09-09
   从前这段分类在两个入口各写一遍，漏改一处就出现「HTTP 能调、WS 不能调」这类不对称。
 - **协议转换**：HTTP body → `PluginInvokeRequest`（PATH/payload/SESSION_ID），响应 → `PluginInvokeResponse<PluginPayload>`。
 - **流式**：WS 场景下把 `Session(PluginChannel)` 帧逐条推送（不用 SSE——会话需双向通道）。
+- **入站边界**：令牌只走 `Authorization`（浏览器 WS 走子协议 `bearer.<token>`，握手只回选
+  `symbio.v1`），不接受查询串令牌；`inbound_max_connections` 经 `Semaphore` 在 `accept`
+  之前取配额（背压交给内核队列）；`POST /api/v1/invoke` 的 `Idempotency-Key` 在分派前登记，
+  重复即 409、失败释放。语义与理由见 `docs/005-arch/008-http-api-transport.md` §5.1.1 / §5.2 / §6。
 - **鉴权与错误**：错误码遵循 `docs/006-ref/002-ERROR_CODES.md`。
 
 ## 关联

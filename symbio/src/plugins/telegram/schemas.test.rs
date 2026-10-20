@@ -32,6 +32,7 @@ fn defaults_apply_when_fields_are_absent() {
     assert!(c.streaming_enabled, "两个开关缺省为 true");
     assert!(c.poll_enabled);
     assert!(c.chat_id.is_none());
+    assert_eq!(c.update_offset, 0, "未确认过任何更新时游标为 0");
 }
 
 #[test]
@@ -57,6 +58,7 @@ fn config_roundtrips_through_json() {
         streaming_enabled: false,
         poll_enabled: true,
         allowed_users: vec![7],
+        update_offset: 100101,
     };
     let back: TelegramConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
     assert_eq!(back.bot_token, "tok");
@@ -64,6 +66,7 @@ fn config_roundtrips_through_json() {
     assert_eq!(back.api_base, "http://127.0.0.1:18090");
     assert!(!back.streaming_enabled);
     assert_eq!(back.allowed_users, vec![7]);
+    assert_eq!(back.update_offset, 100101, "游标必须随配置一起往返");
 }
 
 /// `api_base` 缺省即官方端点——**对现有部署零行为变化**是加这一位的前提（T-114）。

@@ -364,7 +364,7 @@ const CLI_BUILTIN_GATEWAY_PORT = 9231; // gateway 默认端口（gateway/config.
  * 进程内插件树连同 gateway 一起消失——「发送」与「中止」两个入口要同时活着，
  * 只有常驻进程能做到（与 Tauri 前端同构）。
  */
-export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode = 'auto', provider = null, gatewayPort = CLI_BUILTIN_GATEWAY_PORT }) {
+export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode = 'auto', provider = null, gatewayPort = CLI_BUILTIN_GATEWAY_PORT, headers: baseHeaders = {} }) {
   const argv = [
     '--homedir', homedir, '--workdir', workdir,
     '--mode', mode, '--session', session, '--repl', '--quiet',
@@ -427,11 +427,16 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
         throw new Error(`${e.message}\n--- CLI stderr 尾部 ---\n${out.stderr.slice(-1200) || '（空）'}`);
       }
     },
-    /** gateway HTTP 边界调用：`{metadata:{path,...}, payload}` —— 与 route_v2 同线格式 */
-    async invoke(path, payload, metadata = {}) {
+    /**
+     * gateway HTTP 边界调用：`{metadata:{path,...}, payload}` —— 与 route_v2 同线格式。
+     *
+     * `headers` 追加到基础请求头（鉴权、`Idempotency-Key` 等）；合并顺序让调用点
+     * 只写自己关心的那一项，不必复述 `content-type`。
+     */
+    async invoke(path, payload, metadata = {}, headers = {}) {
       const r = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/invoke`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...baseHeaders, ...headers },
         body: JSON.stringify({ metadata: { path, ...metadata }, payload }),
       });
       const body = await r.json().catch(() => null);

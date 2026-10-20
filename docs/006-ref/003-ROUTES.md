@@ -232,13 +232,15 @@ mcp_servers:
 
 HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树。三类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，此后双向 `PluginFrame`）、`GET /api/v1/health`。
 
+令牌只走 `Authorization: Bearer`；浏览器 WS 经 `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（握手只回选 `symbio.v1`）。查询串令牌不被接受。`POST /api/v1/invoke` 可带 `Idempotency-Key`：分派前登记，TTL 内重复回 409，失败释放（语义见 [AR-008](../005-arch/008-http-api-transport.md "AR-008-http-api-transport") §5.1.1）。
+
 ### 作为插件的路由
 
 挂载于 `worker`（Composite）之下，外部入站请求最终由 gateway 转发给父级 composite：自身唯一静态路由 `gateway/status`（契约见上表）。
 
 > 配置就是 `<根>/gateway/PLUGIN.yml`（扁平键 `inbound_*`）；写入走 `vdfs/write` →`PluginConfigFile::apply` 落盘后，本插件在自己的 `write` 里做副作用（**内部 stop + start 重建监听**）。`gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。
 >
-> 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单（`vdfs/list|tree|stat|read|search`、`home/get_homedir`、`work/get_workspace`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [RE-001-CONFIGURATION](001-CONFIGURATION.md)。
+> 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单（`vdfs/root|list|tree|stat|read|search`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [RE-001-CONFIGURATION](001-CONFIGURATION.md)。
 
 ---
 

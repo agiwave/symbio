@@ -23,6 +23,12 @@ pub struct TelegramConfig {
     pub poll_enabled: bool,
     #[serde(default, deserialize_with = "user_ids")]
     pub allowed_users: Vec<i64>,
+    /// `getUpdates` 的游标：已确认到的 `update_id + 1`。
+    ///
+    /// 它是**跨重启的运行态事实**，owner 与其它配置相同（`PLUGIN.yml`）：放进
+    /// 第二个文件就会有两个真相。表单里可见、可改（改小 = 主动重放历史更新）。
+    #[serde(default)]
+    pub update_offset: i64,
 }
 
 fn default_true() -> bool {
@@ -67,6 +73,7 @@ impl Default for TelegramConfig {
             streaming_enabled: true,
             poll_enabled: true,
             allowed_users: Vec::new(),
+            update_offset: 0,
         }
     }
 }

@@ -97,8 +97,10 @@ home 级路径（`home/*`、`work/*`）由 `Composite`
 
 ## 5. 接口设计
 
-统一前缀 `/api/v1`。设了 `inbound_token` 时 HTTP 走 `Authorization: Bearer <token>`、
-WS 走 `?token=<token>`；令牌为空表示不校验（仅允许回环绑定，见 §6）。
+统一前缀 `/api/v1`。设了 `inbound_token` 时 HTTP 与 WS 都走
+`Authorization: Bearer <token>`（WS 浏览器客户端走 `Sec-WebSocket-Protocol: bearer.<token>`，
+见 §5.2）；令牌为空表示不校验（仅允许回环绑定，见 §6）。**令牌不进查询串**——
+查询串会进访问日志、代理记录与 `Referer`。
 
 ### 5.1 一次性调用（HTTP）
 
@@ -114,10 +116,33 @@ POST /api/v1/invoke
 → 后端返回 `Session` 通道时：服务端消费到 EOF（30s 超时兜底）后回**最后一帧**（语义对齐前端 `callPlugin` 的一次性调用）
 → 后端返回 `Native` 时：`400 {"error":"该路径返回进程内原生对象，不支持跨传输调用"}`（**不静默返回 null**）
 
+#### 5.1.1 重放防护：`Idempotency-Key`
+
+`POST /api/v1/invoke` 可带请求头 `Idempotency-Key`（1–200 字节，可见 ASCII）。缺省时行为
+与不带本头逐字相同——**这是能力，不是强制**。
+
+**语义裁决：拒绝重放，不缓存旧结果**（锁式，不是缓存式）。三条理由：
+
+1. **两种传输必须同一条规则**：WS 是双向长连接，没有「重放同一条连接」这回事；本入口的
+   HTTP 响应还可能是流式会话折叠后的末帧。缓存式会在 HTTP 上成立、在 WS 上不成立，
+   同一份「幂等」于是要写两遍、且必然漂移。
+2. **缓存式会把客户端 bug 变成静默的错误答案**：同一把键换了请求体时，返回旧结果看起来
+   像成功。拒绝式让「键用错了」当场可见（`409`）。
+3. **与 `store` 的幂等语义同形**：只认「同一身份已存在就拒绝」，不返回旧结果。
+
+时限与边界：
+
+- 首次带键 ⇒ **先登记再分派**（并发重放在登记处就被挡住，不靠执行完再比）；
+- 分派**失败**（含请求体非法）⇒ **释放键**——失败请求的重试是合法的；
+- 分派成功 ⇒ 键保留 **10 分钟**（上限 4096 个，超出先清到期、再逐出最旧）；
+- 键表是**进程内**的：重启后不存在。跨重启的 exactly-once 不由本传输承诺——那需要持久化
+  键表，等于新增存储面，不在本设计内。
+
 ### 5.2 WebSocket（主通道）
 
 ```
-WS /api/v1/ws?token=<token>
+WS /api/v1/ws
+Authorization: Bearer <token>
 ```
 
 **一条 WS = 一个会话**，帧载荷与前端完全同构，不引入第二套帧协议：
@@ -129,6 +154,19 @@ WS /api/v1/ws?token=<token>
 
 并发请求由客户端开多条连接承担，因此不需要 `connection_id` / 请求 id 一类的复用机制。
 这也是"只搬运行李，不改行李内容"的落点：任何能走 `route_v2` 的路径都能原样走 WS。
+
+**令牌的两种携带方式**（WS 握手不能自定义任意头，但**能**带 `Authorization` 与子协议）：
+
+| 客户端 | 怎么带 | 说明 |
+|---|---|---|
+| 非浏览器（CLI / SDK / curl / wscat） | `Authorization: Bearer <token>` | 与 HTTP 同一规则 |
+| 浏览器 `WebSocket`（不能设自定义头） | `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` | 服务端选 `symbio.v1` 回包，`bearer.*` 只用于鉴权、**不被选为子协议** |
+
+- **查询串令牌不再接受**（`?token=`）：它会进访问日志、代理记录与 `Referer`。
+- 子协议鉴权时，客户端必须至少再提供一个非 `bearer.` 的子协议（文档示例给 `symbio.v1`）；
+  没有可回选的子协议时，服务端不回 `Sec-WebSocket-Protocol` 头，浏览器会判握手失败——
+  这是有意的：**令牌不能靠「被选中」回显**。
+- 两者都给时以 `Authorization` 为准；都不给且已配置令牌 ⇒ `401`。
 
 服务端内部：首帧 → `build_ctx`（`metadata` 逐键注入上下文）→ `parent.route(ctx)` →
 按 `PluginPayload` 四态分派（见 §4.1）。
@@ -208,8 +246,13 @@ GET /api/v1/health  → { "ok": true }
 - **绑定地址**：默认 `127.0.0.1`。绑定非回环地址却未设 `inbound_token` →
   `server::start` 直接返回错误（安全护栏），设置页可见。
 - **token**：`inbound_token` 由用户在设置页填写（`password` 控件）并随配置文件落盘
-  （`<根>/gateway/PLUGIN.yml`）；
-  HTTP 走 `Authorization: Bearer <token>`，WS 走 `?token=`；置空即不校验（仅回环允许）。
+  （`<根>/gateway/PLUGIN.yml`）；HTTP 与 WS 都走 `Authorization: Bearer <token>`
+  （浏览器 WS 走 `Sec-WebSocket-Protocol: bearer.<token>`，见 §5.2）；**不接受查询串令牌**；
+  置空即不校验（仅回环允许）。
+- **连接上限**（`inbound_max_connections`，缺省 64）：同时存活的连接数上限，HTTP 一次调用
+  占一个、WS 一条连接从握手活到关闭。到顶时新连接留在内核 accept 队列里等（**背压优先于
+  报错**：拒绝本身也需要一条连接），已有连接不受影响。配置变更经写配置后的重启监听生效。
+- **重放防护**：`/api/v1/invoke` 的 `Idempotency-Key`（语义与边界见 §5.1.1）。
 - CORS：响应头固定 `Access-Control-Allow-Origin: *`（`OPTIONS` 预检直接放行），
   跨域隔离依赖 token 与绑定地址，不靠 Origin 白名单。
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
@@ -247,13 +290,16 @@ GET /api/v1/health  → { "ok": true }
 # 2) 健康检查
 curl -H "Authorization: Bearer $T" http://127.0.0.1:9231/api/v1/health
 
-# 3) 连 WebSocket：订阅总线，再对会话地址登记 watch（两步缺一不可，见 §5.3）
-wscat -c "ws://127.0.0.1:9231/api/v1/ws?token=$T"
+# 3) 连 WebSocket：令牌走 Authorization 头（浏览器改走子协议，见 §5.2），
+#    订阅总线，再对会话地址登记 watch（两步缺一不可，见 §5.3）
+wscat -c "ws://127.0.0.1:9231/api/v1/ws" -H "Authorization: Bearer $T"
 > {"metadata":{"path":"event_bus/subscribe"},"payload":{}}
 > {"metadata":{"path":"vdfs/watch"},"payload":{"path":"<根>/session/s_xxx"}}
 
-# 4) 另开一条连接发消息（fire-and-forget；收件箱地址面，`session_id` 由地址末段给）
-curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
+# 4) 另开一条连接发消息（fire-and-forget；收件箱地址面，`session_id` 由地址末段给）。
+#    需要重试语义时带 Idempotency-Key：同一把键的第二次投递回 409（见 §5.1.1）。
+curl -H "Authorization: Bearer $T" -H "Idempotency-Key: $(uuidgen)" \
+     -X POST http://127.0.0.1:9231/api/v1/invoke \
      -d '{"metadata":{"path":"vdfs/write","session_id":"s_xxx"},"payload":{"path":"<根>/session/s_xxx/inbox","text":"你好"}}'
 # → {"type":"Data","data":{...}}（受理即回；正文走第 3 步那条连接的变更帧）
 
@@ -273,3 +319,6 @@ curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
 | 第三方以为连上 WS 就有 AI 流 | 中 | §5.3 显式设计 + SDK 内置"连接即自动订阅"默认行为 |
 | `chat/send` 无 `is_working` 守卫，多客户端并发互踩 | 低 | 文档声明需自行串行；预留方向：会话租约 |
 | 路由无注册表 → 文档漂移 | 低 | 预留方向：manifest 机制（§7） |
+| **请求重放 / 网络层重试导致同一次写入被处理两次** | **高** | `Idempotency-Key`（§5.1.1，拒绝重放）；边界：键表在进程内，跨重启不保证——需要时先补持久化裁决 |
+| **并发连接洪峰打穿进程（无上限）** | **高** | `inbound_max_connections` + `Semaphore` 背压（§6）；上限是运行时参数，不是新增机制键 |
+| **令牌进日志（查询串 / 代理记录 / Referer）** | **高** | 令牌只走 `Authorization` 头或 WS 子协议（§5.2），查询串令牌不再接受；日志不含头 |

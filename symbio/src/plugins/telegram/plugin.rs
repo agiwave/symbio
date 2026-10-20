@@ -13,7 +13,7 @@ use crate::symbio_core::{
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -53,6 +53,16 @@ fn config_definition() -> DetailDefinition {
                 "轮询更新，把用户消息交给会话处理",
                 d.poll_enabled,
             ),
+            // 游标是运行态事实，但它必须与 chat_id 存在同一个 owner 里（`PLUGIN.yml`），
+            // 否则重启后要么重复处理、要么两处真相打架。表单里可改：改小 = 主动重放。
+            DetailField::number(
+                "update_offset",
+                "更新游标",
+                "已确认到的 update_id + 1；轮询自动推进，通常无需修改",
+                0.0,
+                9_007_199_254_740_991.0,
+                serde_json::json!(d.update_offset),
+            ),
             DetailField {
                 key: "allowed_users".into(),
                 label: "允许的用户 ID".into(),
@@ -65,6 +75,66 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
+/// 确认一批更新：推进游标、首次自动绑定 `chat_id`，**有变化才落盘**。
+///
+/// 手动 `get_updates` 与后台轮询共用这一份——若各写一遍，迟早有一处漏掉落盘，
+/// 而漏掉的表现是「重启后重复处理历史更新」，只在重启时才显形。
+///
+/// 落盘是整份配置（与设置页保存同一个 owner，`PluginConfigFile` 原子写），
+/// 因此两者并发时最后写入者赢；游标本身是单调的，退化只会发生在「设置页里
+/// 打开了很久的旧表单被保存」，与手改游标的语义一致。
+async fn acknowledge_updates(
+    config: &RwLock<TelegramConfig>,
+    config_file: &PluginConfigFile,
+    updates: &[Value],
+) {
+    let mut changed = false;
+    {
+        let mut cfg = config.write().await;
+        for update in updates {
+            if let Some(uid) = update.get("update_id").and_then(Value::as_i64) {
+                let next = uid + 1;
+                if next > cfg.update_offset {
+                    cfg.update_offset = next;
+                    changed = true;
+                }
+            }
+            if cfg.chat_id.is_none() {
+                if let Some(id) = update
+                    .get("message")
+                    .and_then(|m| m.get("chat"))
+                    .and_then(|c| c.get("id"))
+                    .and_then(Value::as_i64)
+                {
+                    cfg.chat_id = Some(id.to_string());
+                    changed = true;
+                }
+            }
+        }
+    }
+    if !changed {
+        return;
+    }
+    save_config(config, config_file).await;
+}
+
+/// 把配置槽写成 `PLUGIN.yml`（运行态字段的落盘入口）。
+///
+/// 日志而不是返回错误：调用点是后台轮询与路由臂，前者没有人能接收 `Err`；
+/// 丢弃时**必须留痕**——重启后重复处理历史更新正是「静默落盘失败」的后果。
+async fn save_config(config: &RwLock<TelegramConfig>, config_file: &PluginConfigFile) {
+    let value = match serde_json::to_value(&*config.read().await) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[telegram] 配置序列化失败，状态未能落盘: {e}");
+            return;
+        }
+    };
+    if let Err(e) = config_file.dir().save(&value) {
+        tracing::warn!("[telegram] 配置落盘失败（游标/chat_id 重启后可能丢失）: {e}");
+    }
+}
+
 /// Telegram 插件
 #[derive(Clone)]
 pub struct TelegramPlugin {
@@ -72,8 +142,6 @@ pub struct TelegramPlugin {
     /// 配置文件的呈现与校验（`<根>/telegram/PLUGIN.yml`）
     config_file: PluginConfigFile,
     client: reqwest::Client,
-    /// 更新偏移量
-    update_offset: Arc<AtomicI64>,
     /// 监听器取消令牌
     listener_token: Arc<RwLock<Option<CancellationToken>>>,
     /// 监听器运行状态
@@ -106,7 +174,6 @@ impl TelegramPlugin {
             config: Arc::new(RwLock::new(config)),
             config_file: PluginConfigFile::new(dir, "Telegram 设置", config_definition()),
             client: reqwest::Client::new(),
-            update_offset: Arc::new(AtomicI64::new(0)),
             listener_token: Arc::new(RwLock::new(None)),
             listener_running: Arc::new(AtomicBool::new(false)),
             latest_version: Arc::new(RwLock::new(HashMap::new())),
@@ -230,7 +297,7 @@ impl TelegramPlugin {
             .api_url()
             .ok_or_else(|| PluginError::ValidationError("未配置 bot_token".to_string()))?;
 
-        let offset = self.update_offset.load(Ordering::SeqCst);
+        let offset = self.config.read().await.update_offset;
 
         let resp = self
             .client
@@ -250,28 +317,9 @@ impl TelegramPlugin {
                 .await
                 .map_err(|e| PluginError::InternalError(format!("解析响应失败: {e}")))?;
 
-            // 处理更新
+            // 游标推进与首次自动绑定 chat_id 都在这里确认并落盘（与后台轮询同一条路径）。
             if let Some(result) = updates.get("result").and_then(|v| v.as_array()) {
-                for update in result {
-                    // 更新 offset
-                    if let Some(uid) = update.get("update_id").and_then(|v| v.as_i64()) {
-                        self.update_offset.store(uid + 1, Ordering::SeqCst);
-                    }
-
-                    // 自动保存 chat_id
-                    if let Some(chat_id) = update
-                        .get("message")
-                        .and_then(|m| m.get("chat"))
-                        .and_then(|c| c.get("id"))
-                        .and_then(|id| id.as_i64())
-                    {
-                        if self.get_chat_id().is_none() {
-                            if let Ok(mut config) = self.config.try_write() {
-                                config.chat_id = Some(chat_id.to_string());
-                            }
-                        }
-                    }
-                }
+                acknowledge_updates(&self.config, &self.config_file, result).await;
             }
 
             Ok(json!({
@@ -317,8 +365,8 @@ impl TelegramPlugin {
         self.listener_running.store(true, Ordering::SeqCst);
 
         let config = Arc::clone(&self.config);
+        let config_file = self.config_file.clone();
         let client = self.client.clone();
-        let update_offset = Arc::clone(&self.update_offset);
         let latest_version = Arc::clone(&self.latest_version);
         let base_ctx = ctx.fork();
 
@@ -339,7 +387,7 @@ impl TelegramPlugin {
                         }
 
                         // 获取更新
-                        let offset = update_offset.load(Ordering::SeqCst);
+                        let offset = config.read().await.update_offset;
                         let resp = client
                             .post(format!("{api_url}/getUpdates"))
                             .json(&serde_json::json!({
@@ -354,6 +402,8 @@ impl TelegramPlugin {
                             if resp.status().is_success() {
                                 if let Ok(data) = resp.json::<Value>().await {
                                     if let Some(results) = data.get("result").and_then(|v| v.as_array()) {
+                                        // 先整批确认（游标 + 自动绑定，一次落盘），再逐条处理。
+                                        acknowledge_updates(&config, &config_file, results).await;
                                         for update in results {
                                             // 处理每条消息。`client` / `api_url` 按值传：
                                             // 每条更新各起一个后台任务（见 `process_update`）。
@@ -362,7 +412,6 @@ impl TelegramPlugin {
                                                 api_url.clone(),
                                                 update,
                                                 &config,
-                                                &update_offset,
                                                 &latest_version,
                                                 base_ctx.clone(),
                                             ).await {
@@ -401,24 +450,14 @@ impl TelegramPlugin {
 
     /// 状态
     async fn handle_status(&self) -> PluginInvokeResponse<Value> {
-        let config = self.config.try_read();
-        let (has_token, has_chat, streaming, poll) = match config {
-            Ok(c) => (
-                !c.bot_token.is_empty(),
-                c.chat_id.is_some(),
-                c.streaming_enabled,
-                c.poll_enabled,
-            ),
-            Err(_) => (false, false, true, true),
-        };
-
+        let config = self.config.read().await;
         Ok(serde_json::to_value(telegram_status::Response {
-            configured: has_token,
-            has_chat_id: has_chat,
-            streaming_enabled: streaming,
-            poll_enabled: poll,
+            configured: !config.bot_token.is_empty(),
+            has_chat_id: config.chat_id.is_some(),
+            streaming_enabled: config.streaming_enabled,
+            poll_enabled: config.poll_enabled,
             listener_running: self.listener_running.load(Ordering::SeqCst),
-            update_offset: self.update_offset.load(Ordering::SeqCst),
+            update_offset: config.update_offset,
         })
         .unwrap_or_default())
     }
@@ -433,7 +472,6 @@ impl TelegramPlugin {
         api_url: String,
         update: &Value,
         config: &Arc<RwLock<TelegramConfig>>,
-        update_offset: &Arc<AtomicI64>,
         latest_version: &Arc<RwLock<HashMap<String, u64>>>,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<(), String> {
@@ -451,11 +489,6 @@ impl TelegramPlugin {
             .and_then(|id| id.as_i64())
             .ok_or("无 user_id")?;
         let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
-
-        // 更新 offset
-        if let Some(uid) = update.get("update_id").and_then(|v| v.as_i64()) {
-            update_offset.store(uid + 1, Ordering::SeqCst);
-        }
 
         // 检查用户权限
         {
@@ -657,9 +690,9 @@ impl TelegramPlugin {
         let new_cfg: TelegramConfig = ctx.payload()?;
 
         if let Some(id) = new_cfg.chat_id {
-            if let Ok(mut config) = self.config.try_write() {
-                config.chat_id = Some(id);
-            }
+            self.config.write().await.chat_id = Some(id);
+            // 绑定是**跨重启事实**：与游标同一条落盘路径（`PLUGIN.yml`）。
+            save_config(&self.config, &self.config_file).await;
         }
         Ok(serde_json::to_value(SuccessResponse::default())?)
     }

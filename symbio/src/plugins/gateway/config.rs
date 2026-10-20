@@ -26,6 +26,12 @@ pub struct GatewayConfig {
     pub inbound_token: String,
     /// 只读模式：仅放行查询类路径
     pub inbound_readonly: bool,
+    /// 同时存活的连接上限（HTTP 一次调用占一个、WS 一条连接活到关闭）。
+    ///
+    /// 到顶后新连接留在内核 accept 队列里等——**背压优先于报错**：拒绝本身也要
+    /// 一条连接，而连接洪峰正是本上限要挡的东西。`0` 按 `1` 处理（上限为零等于
+    /// 服务不可用，那不该由配置的「默认值恰好为零」意外产生）。
+    pub inbound_max_connections: usize,
 }
 
 impl Default for GatewayConfig {
@@ -37,6 +43,7 @@ impl Default for GatewayConfig {
             inbound_port: 9231,
             inbound_token: String::new(),
             inbound_readonly: false,
+            inbound_max_connections: 64,
         }
     }
 }

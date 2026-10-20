@@ -77,6 +77,14 @@ fn config_definition() -> DetailDefinition {
                 "仅放行查询类路径，禁止写操作与命令执行",
                 d.inbound_readonly,
             ),
+            DetailField::number(
+                "inbound_max_connections",
+                "并发连接上限",
+                "同时存活的连接数；到顶后新连接排队等待，不报错",
+                1.0,
+                1024.0,
+                serde_json::json!(d.inbound_max_connections),
+            ),
         ],
     )
 }

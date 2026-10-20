@@ -55,11 +55,15 @@ vdfs/write <会话>/inbox      → 用户消息入队
 
 ## 配置
 
-`bot_token` / `chat_id` / `api_base` / `streaming_enabled` / `poll_enabled` / `allowed_users`
-是**可寻址的配置文件**：`<根>/telegram/PLUGIN.yml`（`ext = form`，字段定义随节点
+`bot_token` / `chat_id` / `api_base` / `streaming_enabled` / `poll_enabled` / `allowed_users` /
+`update_offset` 是**可寻址的配置文件**：`<根>/telegram/PLUGIN.yml`（`ext = form`，字段定义随节点
 `schema` 下发）。读写走 `vdfs/read` / `vdfs/write`，落盘就是本插件写自己目录里的
 那个文件（`PluginConfigFile::apply`）——不再有 `config/get` / `config/set` 路由，
 也不再经父插件转发。
+
+`update_offset`（已确认到的 `update_id + 1`）与首次自动捕获的 `chat_id` 是**运行态事实**，
+但 owner 仍是这个文件：轮询确认一批更新后整份写回，重启后不重复处理历史更新、
+也不丢绑定。设置页保存的是整份配置，因此游标在表单里可见可改（改小 = 主动重放）。
 
 ```yaml
 # <根>/telegram/PLUGIN.yml（顶层扁平键）
@@ -69,4 +73,5 @@ api_base: "https://api.telegram.org"  # 可选；缺省即官方端点（自建 
 streaming_enabled: true
 poll_enabled: true
 allowed_users: [123456789]
+update_offset: 0
 ```

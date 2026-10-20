@@ -148,20 +148,113 @@ impl Plugin for NopRouter {
     }
 }
 
-/// 只取指定键；无 `=` 的裸参数不参与匹配，也不得误取成整串。
+// ---- WS 令牌与子协议 ----
+
+/// 浏览器只能经子协议携带令牌；非浏览器用 `Authorization`。两者都在时以头为准。
 #[test]
-fn query_param_reads_only_the_named_key() {
+fn ws_token_reads_authorization_then_subprotocol() {
+    let auth = req_with(&[("authorization", "Bearer s3cret")]);
+    assert_eq!(ws_token(&auth).as_deref(), Some("s3cret"));
+
+    let sub = req_with(&[("sec-websocket-protocol", "symbio.v1, bearer.s3cret")]);
+    assert_eq!(ws_token(&sub).as_deref(), Some("s3cret"));
+
+    // 头优先：子协议里的坏令牌不应盖掉一个正确的头
+    let both = req_with(&[
+        ("authorization", "Bearer good"),
+        ("sec-websocket-protocol", "bearer.bad"),
+    ]);
+    assert_eq!(ws_token(&both).as_deref(), Some("good"));
+
+    assert_eq!(ws_token(&req_with(&[])), None);
     assert_eq!(
-        query_param("/api/v1/ws?token=abc&x=1", "token").as_deref(),
-        Some("abc")
+        ws_token(&req_with(&[("sec-websocket-protocol", "symbio.v1")])),
+        None,
+        "只报协议名时不应当成令牌"
     );
-    assert_eq!(query_param("/api/v1/ws?token=abc", "missing"), None);
-    assert_eq!(query_param("/api/v1/ws", "token"), None);
-    assert_eq!(query_param("/p?flag&token=xy", "flag"), None);
-    assert_eq!(
-        query_param("/p?flag&token=xy", "token").as_deref(),
-        Some("xy")
+}
+
+/// 握手只能回选 `symbio.v1`：回显 `bearer.*` 等于把令牌写进响应头。
+#[test]
+fn ws_select_subprotocol_never_echoes_bearer() {
+    let offered = req_with(&[("sec-websocket-protocol", "symbio.v1, bearer.s3cret")]);
+    assert_eq!(ws_select_subprotocol(&offered), Some("symbio.v1"));
+
+    let bearer_only = req_with(&[("sec-websocket-protocol", "bearer.s3cret")]);
+    assert_eq!(ws_select_subprotocol(&bearer_only), None);
+
+    assert_eq!(ws_select_subprotocol(&req_with(&[])), None);
+}
+
+// ---- 幂等表 ----
+
+/// 同键未释放 ⇒ 第二次拒绝；释放后（分派失败）⇒ 可重试。
+#[test]
+fn idempotency_rejects_duplicates_until_released() {
+    let table = Idempotency::new();
+    let ticket = table.reserve("k-1").expect("首次登记应成功");
+    assert!(table.reserve("k-1").is_none(), "同键未释放时应拒绝");
+    assert!(table.reserve("k-2").is_some(), "不同键互不影响");
+
+    ticket.release();
+    assert!(
+        table.reserve("k-1").is_some(),
+        "释放后同键应可重试（失败没有副作用）"
     );
+}
+
+/// 过期项在登记时被清掉：TTL 之后同一个键是新的请求，不是重放。
+#[test]
+fn idempotency_forgets_entries_past_ttl() {
+    let table = Idempotency::new();
+    {
+        let mut seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
+        seen.insert("stale".to_string(), Instant::now() - IDEMPOTENCY_TTL);
+    }
+    assert!(table.reserve("stale").is_some(), "过期键不应再算重放");
+}
+
+/// 满表时淘汰最旧的一条而不是拒绝新键——否则任何人用一次性键就能永久占满。
+#[test]
+fn idempotency_evicts_oldest_when_full() {
+    let table = Idempotency::new();
+    {
+        let mut seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        for i in 0..IDEMPOTENCY_CAPACITY - 1 {
+            seen.insert(format!("old-{i}"), now - Duration::from_secs(100));
+        }
+        seen.insert("oldest".to_string(), now - Duration::from_secs(200));
+    }
+    assert!(table.reserve("fresh").is_some(), "满表也必须接纳新键");
+    let seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(seen.len(), IDEMPOTENCY_CAPACITY, "淘汰后容量仍应守住上限");
+    assert!(!seen.contains_key("oldest"), "淘汰的应是最旧的一条");
+}
+
+/// 键的取值面向代理与日志：空白、控制字符、超长与空串一律不认。
+#[test]
+fn idempotency_key_shape_is_bounded() {
+    assert!(valid_idempotency_key(
+        "550e8400-e29b-41d4-a716-446655440000"
+    ));
+    assert!(!valid_idempotency_key(""));
+    assert!(!valid_idempotency_key("has space"));
+    assert!(!valid_idempotency_key("line\nbreak"));
+    assert!(!valid_idempotency_key(
+        &"a".repeat(MAX_IDEMPOTENCY_KEY_BYTES + 1)
+    ));
+}
+
+// ---- 连接上限 ----
+
+/// `0` 不能把服务变成「不可用」，越界也不能让 `Semaphore::new` panic。
+#[test]
+fn connection_cap_treats_zero_as_one_and_clamps() {
+    assert_eq!(connection_cap(0), 1);
+    assert_eq!(connection_cap(1), 1);
+    assert_eq!(connection_cap(64), 64);
+    assert_eq!(connection_cap(usize::MAX), MAX_CONNECTION_CAP);
 }
 
 // ---- HTTP 响应 ----

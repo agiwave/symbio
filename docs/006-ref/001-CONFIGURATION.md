@@ -183,6 +183,7 @@ api_base: "https://api.telegram.org"
 streaming_enabled: true
 poll_enabled: true
 allowed_users: [123456789]
+update_offset: 0
 ```
 
 | 键 | 类型 | 默认值 | 说明 |
@@ -193,6 +194,11 @@ allowed_users: [123456789]
 | `streaming_enabled` | Bool | `true` | 是否流式回包 |
 | `poll_enabled` | Bool | `true` | 是否轮询接收更新 |
 | `allowed_users` | List[Int] | `[]` | 允许使用的 Telegram 用户 ID（空 = 不限制） |
+| `update_offset` | Int | `0` | `getUpdates` 游标（已确认到的 `update_id + 1`）；轮询自动推进并落盘，重启后不重复处理历史更新。改小 = 主动重放 |
+
+> `chat_id` 的自动捕获（首条用户消息的 chat）与 `update_offset` 同属**运行态事实**，
+> 但 owner 只有这一个文件：两处落盘就会有两处真相。设置页保存整份配置，因此游标
+> 也在表单里可见可改。
 
 > `allowed_users` 的落盘形态是**数字数组**，而配置文件的 `list` 控件提交的是
 > **每行一项的字符串数组**——两者都是「用户 ID 列表」，转换在插件边界完成
@@ -209,6 +215,7 @@ inbound_bind: 127.0.0.1
 inbound_port: 9231
 inbound_token: ""
 inbound_readonly: false
+inbound_max_connections: 64
 ```
 
 扁平键配置，**整体读写于插件自己的文件**（前端「设置」页点开 `<根>/gateway/PLUGIN.yml`
@@ -222,10 +229,11 @@ inbound_readonly: false
 | `inbound_port` | `9231` | 监听端口 |
 | `inbound_token` | 空 | Bearer 令牌；**为空仅允许回环地址**，非回环监听必须设置 |
 | `inbound_readonly` | `false` | 只读模式：仅放行查询类路径（白名单见 `gateway/config.rs::is_readonly_allowed`） |
+| `inbound_max_connections` | `64` | 同时存活的连接上限（HTTP 一次调用占一个、WS 一条连接活到关闭）；到顶后新连接在内核队列等待（背压），不报错 |
 
 > 出站配置（前端连向何处）不在这里——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
 >
-> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`home/get_homedir`、`work/get_workspace`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
+> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。`home/get_homedir` / `work/get_workspace` 曾是死条目（gateway 的 router 是 worker composite，不向上转发、经入站走不到），已删——撤销条件见 `gateway/config.rs` 的注释。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >
 > **配置文件本身不在白名单内**：`vdfs/read` 只要地址落在任一插件的 `PLUGIN.yml` 上就一律拒绝（`reads_config_document`）——配置可能含凭据（网关访问令牌、搜索服务 API Key），放行等于只读模式下就能把它们读走。网关自身的 `gateway/*` 接口也恒走 native（前端不经 HTTP 访问本插件）。
 

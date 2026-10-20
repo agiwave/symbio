@@ -23,6 +23,17 @@
 //!
 //! 之所以用 WS 而非 SSE：前端 `connectPlugin`（会话/流式）需要双向通道，WS 天然映射
 //! Tauri 的 invoke + event 模型，且首帧即 `PluginMessageWire`，与 `route_v2` 完全对称。
+//!
+//! ## 边界加固
+//!
+//! - **令牌不走 URL**：HTTP 用 `Authorization: Bearer`；WS 除该头外，浏览器还可经
+//!   `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（浏览器 WS 构造器不能
+//!   自定义头）。续订只回选 `symbio.v1`，**不回显 `bearer.*`**——回显等于把令牌写进
+//!   响应头，代理与日志都会记下。语义与理由见 AR-008 §5.2。
+//! - **连接上限**：`inbound_max_connections` 个配额，到顶后不再 `accept`（背压交给
+//!   内核队列），而不是先收下再排队。
+//! - **重放防护**：`POST /api/v1/invoke` 的 `Idempotency-Key` 在 TTL 内重复即 409，
+//!   不缓存首次结果（拒绝重放，见 AR-008 §5.1.1）。
 
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
@@ -33,10 +44,11 @@ use base64::Engine;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -56,6 +68,20 @@ const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// 帧长由客户端给出，`vec![0u8; len]` 会照着这个数**立即分配**——
 /// len = 2^60 足以当场 OOM。
 const MAX_WS_FRAME_BYTES: usize = 8 * 1024 * 1024;
+
+/// 幂等键保留时长：同一键在这段时间内重复到达即视为重放。
+const IDEMPOTENCY_TTL: Duration = Duration::from_secs(600);
+
+/// 幂等表容量上限：TTL 内键无界增长本身就是一条内存 DoS。
+const IDEMPOTENCY_CAPACITY: usize = 4096;
+
+/// 幂等键长度上限（超过它的键没有正当用途；1–200 是常见代理的保守值）。
+const MAX_IDEMPOTENCY_KEY_BYTES: usize = 200;
+
+/// 连接上限的合法范围（与设置页 number 控件一致）。
+///
+/// 手改配置文件写个越界数字时钳到边界，而不是让 `Semaphore::new` 在启动期 panic。
+const MAX_CONNECTION_CAP: usize = 1024;
 
 /// 请求解析失败的原因
 enum RequestError {
@@ -130,26 +156,38 @@ pub async fn start(
     let cancel = CancellationToken::new();
     let token = cfg.inbound_token.clone();
     let readonly = cfg.inbound_readonly;
+    let permits = Arc::new(Semaphore::new(connection_cap(cfg.inbound_max_connections)));
+    let idempotency = Idempotency::new();
 
     let task = tokio::spawn({
         let cancel = cancel.clone();
         async move {
             loop {
+                // 先拿配额再 `accept`：到顶时新连接留在内核 accept 队列里等（背压），
+                // 而不是先接受再在应用里排队——后者只是把等待搬进本进程的内存。
+                let permit = tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    permit = permits.clone().acquire_owned() => match permit {
+                        Ok(p) => p,
+                        Err(_) => break,
+                    },
+                };
                 tokio::select! {
                     _ = cancel.cancelled() => break,
                     accepted = listener.accept() => {
                         match accepted {
                             Ok((stream, _)) => {
-                                let router = router.clone();
-                                let token = token.clone();
                                 tokio::spawn(handle_conn(
                                     stream,
-                                    router,
-                                    token,
+                                    router.clone(),
+                                    token.clone(),
                                     readonly,
+                                    idempotency.clone(),
                                     cancel.clone(),
+                                    permit,
                                 ));
                             }
+                            // 配额随本轮 arm 结束归还；连接没建立，不占额度。
                             Err(e) => warn!(error = %e, "[gateway] accept 失败"),
                         }
                     }
@@ -181,7 +219,7 @@ fn cors_headers() -> [(&'static str, &'static str); 3] {
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
         (
             "Access-Control-Allow-Headers",
-            "Content-Type, Authorization",
+            "Content-Type, Authorization, Idempotency-Key",
         ),
     ]
 }
@@ -236,12 +274,119 @@ fn check_auth(token: &str, req: &HttpRequest) -> bool {
         .unwrap_or(false)
 }
 
-fn query_param(path: &str, key: &str) -> Option<String> {
-    let q = path.split_once('?').map(|(_, q)| q).unwrap_or("");
-    q.split('&')
-        .filter_map(|kv| kv.split_once('='))
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| v.to_string())
+/// 连接上限：`0` 按 `1` 处理（等于关掉服务，不该由默认值的意外产生），上限钳到
+/// [`MAX_CONNECTION_CAP`]（避免手改配置把 `Semaphore::new` 推进 panic）。
+fn connection_cap(configured: usize) -> usize {
+    configured.clamp(1, MAX_CONNECTION_CAP)
+}
+
+// ==================== 重放防护（`Idempotency-Key`） ====================
+
+/// 幂等表：**拒绝重复，不缓存旧结果**。
+///
+/// 同一个键在 [`IDEMPOTENCY_TTL`] 内第二次到达即 409；客户端应把「第一次是否成功」
+/// 当作未知结果去读状态，而不是重放一次写操作。首次在**分派前**登记，分派失败则
+/// 释放（失败没有产生副作用，可以带同一个键重试）。
+///
+/// 它是**进程内**的边界：重启即清空。跨进程去重需要持久化，而网关的定位是
+/// 「本机的另一个入口」，不是集群网关（AR-008 §5.1.1）。
+struct Idempotency {
+    seen: Mutex<HashMap<String, Instant>>,
+}
+
+struct IdempotencyTicket {
+    table: Arc<Idempotency>,
+    key: String,
+}
+
+impl Idempotency {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            seen: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// 登记一个键；未过 TTL 的重复键返回 `None`。
+    fn reserve(self: &Arc<Self>, key: &str) -> Option<IdempotencyTicket> {
+        // 锁中毒只可能来自别处的 panic：表上没有跨键不变量，取回内部值继续即可。
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        seen.retain(|_, at| now.duration_since(*at) < IDEMPOTENCY_TTL);
+        if seen.contains_key(key) {
+            return None;
+        }
+        if seen.len() >= IDEMPOTENCY_CAPACITY {
+            // 键由客户端自选、没有归属约束：若在满表时拒绝新键，任何人用 4096 个
+            // 一次性键就能把合法客户端永久挡在 409 上。淘汰最旧的一条，让表始终
+            // 只表达「最近 TTL 内的重放」。
+            if let Some(oldest) = seen
+                .iter()
+                .min_by_key(|(_, at)| **at)
+                .map(|(k, _)| k.clone())
+            {
+                seen.remove(&oldest);
+            }
+        }
+        seen.insert(key.to_string(), now);
+        Some(IdempotencyTicket {
+            table: self.clone(),
+            key: key.to_string(),
+        })
+    }
+}
+
+impl IdempotencyTicket {
+    /// 分派失败：撤销登记，让同一个键可以重试。
+    fn release(&self) {
+        let mut seen = self.table.seen.lock().unwrap_or_else(|e| e.into_inner());
+        seen.remove(&self.key);
+    }
+}
+
+/// `Idempotency-Key` 的取值是否可用：1–200 个可见 ASCII。
+///
+/// 空白与控制字符一律不认——它们只会让「同一个键」在不同客户端/代理下
+/// 被规范化成不同字符串，从而让去重失效。
+fn valid_idempotency_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= MAX_IDEMPOTENCY_KEY_BYTES
+        && key.bytes().all(|b| (0x21..=0x7E).contains(&b))
+}
+
+/// 从 WS 升级请求里取令牌。
+///
+/// 浏览器 `WebSocket` 构造器不能自定义头，只能经子协议携带；非浏览器客户端
+/// （CLI / 其他实例 / wscat）用 `Authorization`。两者都提供时以 `Authorization`
+/// 为准——它是显式凭据，子协议里的只是浏览器退路。
+fn ws_token(req: &HttpRequest) -> Option<String> {
+    if let Some(auth) = req.headers.get("authorization") {
+        let auth = auth.trim();
+        if let Some(t) = auth
+            .strip_prefix("Bearer ")
+            .or_else(|| auth.strip_prefix("bearer "))
+        {
+            return Some(t.trim().to_string());
+        }
+    }
+    req.headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| {
+            v.split(',')
+                .map(str::trim)
+                .find_map(|p| p.strip_prefix("bearer."))
+        })
+        .map(|t| t.trim().to_string())
+}
+
+/// 握手回选的子协议：只回 `symbio.v1`，**永不回显 `bearer.*`**。
+fn ws_select_subprotocol(req: &HttpRequest) -> Option<&'static str> {
+    const SUBPROTOCOL: &str = "symbio.v1";
+    req.headers
+        .get("sec-websocket-protocol")?
+        .split(',')
+        .map(str::trim)
+        .any(|p| p == SUBPROTOCOL)
+        .then_some(SUBPROTOCOL)
 }
 
 async fn handle_conn(
@@ -249,7 +394,10 @@ async fn handle_conn(
     router: Arc<dyn Plugin>,
     token: String,
     readonly: bool,
+    idempotency: Arc<Idempotency>,
     cancel: CancellationToken,
+    // 连接存活即占一个配额；持有到本函数返回（`_` 前缀只表示不读它）。
+    _permit: OwnedSemaphorePermit,
 ) {
     let req = match read_request(&mut stream).await {
         Ok(r) => r,
@@ -292,7 +440,7 @@ async fn handle_conn(
         return;
     }
 
-    // WebSocket 升级（令牌经查询参数传递，因 WS 握手无法自定义头）
+    // WebSocket 升级（令牌走 Authorization 或子协议 `bearer.<token>`，不走 URL）
     if req
         .headers
         .get("upgrade")
@@ -300,7 +448,7 @@ async fn handle_conn(
         .as_deref()
         == Some("websocket")
     {
-        if !token.is_empty() && query_param(&req.path, "token").as_deref() != Some(token.as_str()) {
+        if !token.is_empty() && ws_token(&req).as_deref() != Some(token.as_str()) {
             let _ = stream
                 .write_all(&http_response(
                     401,
@@ -348,9 +496,43 @@ async fn handle_conn(
                 .await;
             return;
         }
+        // 幂等键在**分派前**登记：先登记再执行，两个并发同键请求里至多一个会跑。
+        let ticket = match req.headers.get("idempotency-key").map(|k| k.trim()) {
+            Some(key) if !valid_idempotency_key(key) => {
+                let _ = stream
+                    .write_all(&http_response(
+                        400,
+                        "Bad Request",
+                        "application/json",
+                        br#"{"error":"invalid Idempotency-Key"}"#,
+                        &cors_headers(),
+                    ))
+                    .await;
+                return;
+            }
+            Some(key) => match idempotency.reserve(key) {
+                Some(t) => Some(t),
+                None => {
+                    let _ = stream
+                        .write_all(&http_response(
+                            409,
+                            "Conflict",
+                            "application/json",
+                            br#"{"error":"duplicate Idempotency-Key"}"#,
+                            &cors_headers(),
+                        ))
+                        .await;
+                    return;
+                }
+            },
+            None => None,
+        };
         let msg: PluginMessageWire = match serde_json::from_slice(&req.body) {
             Ok(m) => m,
             Err(e) => {
+                if let Some(t) = &ticket {
+                    t.release();
+                }
                 let b = format!("{{\"error\":\"invalid request: {e}\"}}").into_bytes();
                 let _ = stream
                     .write_all(&http_response(
@@ -378,6 +560,10 @@ async fn handle_conn(
                     .await;
             }
             Err(e) => {
+                // 失败没有产生副作用：撤销登记，客户端可带同一个键重试。
+                if let Some(t) = &ticket {
+                    t.release();
+                }
                 let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
                 let _ = stream
                     .write_all(&http_response(
@@ -625,8 +811,11 @@ async fn ws_handshake(stream: &mut TcpStream, req: &HttpRequest) -> Result<(), S
         .ok_or("缺少 Sec-WebSocket-Key")?;
     let concat = format!("{key}{WS_GUID}");
     let accept = base64::engine::general_purpose::STANDARD.encode(sha1(concat.as_bytes()));
+    let subprotocol = ws_select_subprotocol(req)
+        .map(|p| format!("Sec-WebSocket-Protocol: {p}\r\n"))
+        .unwrap_or_default();
     let resp = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n{subprotocol}\r\n"
     );
     stream
         .write_all(resp.as_bytes())

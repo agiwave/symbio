@@ -24,6 +24,12 @@ import './_selfrun.mjs';
 // 监听器是**永不自行停止**的后台任务：只断「轮询起来了」会让一条 1s 一次的
 // getUpdates 挂在用例收尾上（进程泄漏）。所以判据把「停」一并钉住：
 // `stop_listener` 后 `listener_running` 翻回 `false`、靶子计数在 2.5s 窗口内不再增长。
+//
+// ## ④ 为什么要真的重启一次进程
+//
+// 游标与 `chat_id` 曾经纯内存：重启 = 从头再拉一遍历史更新 / 绑定丢失。它们现在
+// 落在 `PLUGIN.yml`（T-194），而「落盘了」只有**从同一目录重建插件树**才证明得了——
+// 单进程内读到的是同一个 `RwLock`，那份读数与磁盘无关。故末尾停掉 CLI 再起一个。
 import {
   MockHttp,
   makeHomedir,
@@ -64,6 +70,7 @@ export default defineCase(
       session: 't70',
       gatewayPort: GATEWAY_PORT,
     });
+    let cli2 = null;
     try {
       await cli.waitGatewayReady(20_000, 't70');
 
@@ -126,8 +133,33 @@ export default defineCase(
         stopped,
         'stop_listener 后靶子不应再收到任何请求（后台轮询必须真的停了）',
       );
+
+      // ── ④ 重启后游标与绑定仍在：两者都落在 `PLUGIN.yml`，不是进程内存 ──
+      const bound = await cli.invoke('telegram/set_chat_id', { chat_id: CHAT_ID });
+      assertEq(bound.status, 200, `set_chat_id 应 200（实得 ${bound.status}）`);
+
+      cli.stop();
+      cli2 = startLongLivedCli({
+        homedir: hd.homedir,
+        workdir: hd.workdir,
+        session: 't70',
+        gatewayPort: GATEWAY_PORT,
+      });
+      await cli2.waitGatewayReady(20_000, 't70-restart');
+      const stRestart = await cli2.invoke('telegram/status', {});
+      assertEq(
+        stRestart.body?.data?.update_offset,
+        100101,
+        '重启后游标应从 PLUGIN.yml 恢复（否则会重复处理历史更新）',
+      );
+      assertEq(
+        stRestart.body?.data?.has_chat_id,
+        true,
+        '重启后自动/显式绑定的 chat_id 应仍在',
+      );
     } finally {
       cli.stop();
+      cli2?.stop();
       mock.stop();
       cleanupHomedir(hd);
     }
