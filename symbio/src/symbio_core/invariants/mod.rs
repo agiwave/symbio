@@ -37,6 +37,11 @@
 
 use super::event::{Entity, Event, Verb};
 
+// 判据内核（std-only）：算法层住 `kernel.rs`，本模块只做「事件切片 ⇒ 内核输入」
+// 的解析。verify/ 下的两个程序 `#[path]` 包含的就是那个文件——判定与生产共用
+// 一份代码，判据见 kernel.rs 文档与 [T-176](../../../../docs/009-task/176-验证器与生产的耦合率.md "T-176-验证器与生产的耦合率")。
+mod kernel;
+
 /// 一处违规：事件（按 seq 定位）+ 人话。
 ///
 /// `Serialize` 是**读出口**要的：`session/stats` 在出口边界一次性序列化
@@ -62,23 +67,27 @@ impl Violation {
 /// 已入库事件按存储顺序应得到 `0,1,2,…`——跳号意味着「有事件被静默丢弃或绕过
 /// 唯一写入口」。`pending`（未入库）事件跳过不查（它们还没有 seq）。
 pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
-    let mut bad = Vec::new();
-    let mut expect = 0u64;
-    for e in events {
-        // pending（未入库）没有 seq，跳过——它们还不是事实。
-        if let Some(s) = e.seq {
-            if s.value() != expect {
-                bad.push(Violation::at(
-                    e,
-                    format!("seq {} 处应为 {expect}（严格单调且无跳号）", s.value()),
-                ));
-                expect = s.value() + 1;
-            } else {
-                expect += 1;
-            }
-        }
-    }
-    bad
+    // 解析层：收出已入库事件的 seq 序列（pending 还不是事实，跳过），
+    // 判定走 [kernel::seq_monotonic_core](kernel)——verify/invariants.rs
+    // 包含的是同一份内核。
+    let seqs: Vec<u64> = events
+        .iter()
+        .filter_map(|e| e.seq.map(|s| s.value()))
+        .collect();
+    kernel::seq_monotonic_core(&seqs)
+        .into_iter()
+        .map(|(i, actual, expect)| {
+            let e = events
+                .iter()
+                .filter(|e| e.seq.is_some())
+                .nth(i)
+                .expect("内核下标必落在已提交事件范围内");
+            Violation::at(
+                e,
+                format!("seq {actual} 处应为 {expect}（严格单调且无跳号）"),
+            )
+        })
+        .collect()
 }
 
 /// C2 / N3（I1）：每 `turn` 至多 1 条 final。
@@ -86,27 +95,25 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
 /// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
 pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
-    let mut seen: Vec<(u64, &str)> = Vec::new();
-    let mut bad = Vec::new();
-    for e in events {
-        let is_final =
-            e.entity == Entity::Turn && e.verb == Verb::Closed && e.kind == "chat.assistant.final";
-        if !is_final {
-            continue;
-        }
-        if let Some((_, first_id)) = seen.iter().find(|(turn, _)| *turn == e.turn) {
-            bad.push(Violation::at(
+    // 哪些事件算数（final 的判据）是本模块的解析层；「每 turn 至多一条」
+    // 的判定走 [kernel::unique_per_turn_core](kernel)——verify/invariants.rs
+    // 包含的是同一份内核。
+    let finals = events.iter().filter(|e| {
+        e.entity == Entity::Turn && e.verb == Verb::Closed && e.kind == "chat.assistant.final"
+    });
+    kernel::unique_per_turn_core(finals.map(|e| (e.turn, e.event_id.as_str())))
+        .into_iter()
+        .map(|(dup, first, turn)| {
+            let e = events
+                .iter()
+                .find(|e| e.event_id == dup)
+                .expect("重复项的 id 必来自本切片");
+            Violation::at(
                 e,
-                format!(
-                    "turn {} 已有 final（{}），又出现一条——每 turn 至多 1 条 final",
-                    e.turn, first_id
-                ),
-            ));
-        } else {
-            seen.push((e.turn, e.event_id.as_str()));
-        }
-    }
-    bad
+                format!("turn {turn} 已有 final（{first}），又出现一条——每 turn 至多 1 条 final"),
+            )
+        })
+        .collect()
 }
 
 /// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
@@ -119,27 +126,26 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 /// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
 /// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
-    let mut seen: Vec<(u64, &str)> = Vec::new();
-    let mut bad = Vec::new();
-    for e in events {
-        let is_open =
-            e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message";
-        if !is_open {
-            continue;
-        }
-        if let Some((_, first_id)) = seen.iter().find(|(turn, _)| *turn == e.turn) {
-            bad.push(Violation::at(
+    // 与 [final_unique_per_turn](self::final_unique_per_turn) 同一内核：
+    // 「哪些事件算数」在解析层，「每 turn 至多一条」在 [kernel](kernel)。
+    let opens = events
+        .iter()
+        .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message");
+    kernel::unique_per_turn_core(opens.map(|e| (e.turn, e.event_id.as_str())))
+        .into_iter()
+        .map(|(dup, first, turn)| {
+            let e = events
+                .iter()
+                .find(|e| e.event_id == dup)
+                .expect("重复项的 id 必来自本切片");
+            Violation::at(
                 e,
                 format!(
-                    "turn {} 已有开轮事件（{}），又出现一条——每 turn 至多 1 条 user.message",
-                    e.turn, first_id
+                    "turn {turn} 已有开轮事件（{first}），又出现一条——每 turn 至多 1 条 user.message"
                 ),
-            ));
-        } else {
-            seen.push((e.turn, e.event_id.as_str()));
-        }
-    }
-    bad
+            )
+        })
+        .collect()
 }
 
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
@@ -379,9 +385,9 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 /// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 的
 /// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
-    use std::collections::{BTreeMap, BTreeSet};
-    let mut deps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    let mut opened_at: BTreeMap<&str, &Event> = BTreeMap::new();
+    // 解析层：从任务开轮格收出 (task_id, depends_on)；判定（悬空 + Kahn 环）
+    // 走 [kernel::dep_graph_core](kernel)——verify/termination.rs 包含的是同一份内核。
+    let mut pairs: Vec<(String, Vec<String>)> = Vec::new();
     for e in events {
         if e.entity != Entity::Task || e.verb != Verb::Opened {
             continue;
@@ -389,63 +395,51 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
         let Some(id) = e.payload.get("task_id").and_then(|v| v.as_str()) else {
             continue;
         };
-        let ds: BTreeSet<&str> = e
+        let ds: Vec<String> = e
             .payload
             .get("depends_on")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
-        opened_at.insert(id, e);
-        deps.insert(id, ds);
+        // 重复 task_id 后写覆盖先写（任务可重开，新开格是权威）——内核同语义。
+        if let Some(slot) = pairs.iter_mut().find(|(k, _)| k == id) {
+            slot.1 = ds;
+        } else {
+            pairs.push((id.to_string(), ds));
+        }
     }
-    let ids: BTreeSet<&str> = deps.keys().copied().collect();
+    let borrowed: Vec<(&str, Vec<&str>)> = pairs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
+        .collect();
+    let (dangling, on_cycle) = kernel::dep_graph_core(&borrowed);
     let mut bad = Vec::new();
-    // 悬空依赖：依赖不存在的任务。
-    for (id, ds) in &deps {
-        for d in ds {
-            if !ids.contains(d) {
-                if let Some(e) = opened_at.get(id) {
-                    bad.push(Violation::at(
-                        e,
-                        format!("任务 {id} 悬空依赖 {d}（依赖不存在）"),
-                    ));
-                }
-            }
+    for (id, d) in dangling {
+        if let Some(e) = events.iter().find(|e| {
+            e.entity == Entity::Task
+                && e.verb == Verb::Opened
+                && e.payload.get("task_id").and_then(|v| v.as_str()) == Some(id)
+        }) {
+            bad.push(Violation::at(
+                e,
+                format!("任务 {id} 悬空依赖 {d}（依赖不存在）"),
+            ));
         }
     }
-    // Kahn：能剥完 = 无环；剥不完 = 剩下的都在环上。
-    let mut indeg: BTreeMap<&str, usize> = deps
-        .iter()
-        .map(|(k, v)| (*k, v.iter().filter(|d| ids.contains(**d)).count()))
-        .collect();
-    let mut ready: Vec<&str> = indeg
-        .iter()
-        .filter(|(_, v)| **v == 0)
-        .map(|(k, _)| *k)
-        .collect();
-    let mut done = 0usize;
-    while let Some(id) = ready.pop() {
-        done += 1;
-        for (t, ds) in &deps {
-            if ds.contains(&id) {
-                let e = indeg.get_mut(t).expect("图节点必在");
-                *e -= 1;
-                if *e == 0 {
-                    ready.push(t);
-                }
-            }
-        }
-    }
-    if done < deps.len() {
-        for (id, deg) in &indeg {
-            if *deg > 0 {
-                if let Some(e) = opened_at.get(id) {
-                    bad.push(Violation::at(
-                        e,
-                        format!("任务 {id} 处在依赖环上（C14：依赖图必须无环）"),
-                    ));
-                }
-            }
+    for id in on_cycle {
+        if let Some(e) = events.iter().find(|e| {
+            e.entity == Entity::Task
+                && e.verb == Verb::Opened
+                && e.payload.get("task_id").and_then(|v| v.as_str()) == Some(id)
+        }) {
+            bad.push(Violation::at(
+                e,
+                format!("任务 {id} 处在依赖环上（C14：依赖图必须无环）"),
+            ));
         }
     }
     bad
@@ -458,28 +452,34 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 /// （[docs/004-plan/verify/termination.rs](../../../../docs/004-plan/verify/termination.rs) 前提 2）。
 /// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
-    use std::collections::BTreeMap;
-    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-    let mut bad = Vec::new();
-    for e in events {
-        if e.entity != Entity::Task
-            || e.kind != crate::symbio_core::event::EVENT_TASK_REWORK_CREATED
-        {
-            continue;
-        }
-        let Some(replaces) = e.payload.get("replaces").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let c = counts.entry(replaces.to_string()).or_insert(0);
-        *c += 1;
-        if *c > max_rework {
-            bad.push(Violation::at(
+    // 解析层：收出按时间序的 replaces 序列；计数判定走 [kernel::rework_core](kernel)
+    // ——verify/termination.rs 的前提 2 用例包含的是同一份内核。
+    let replaces: Vec<&str> = events
+        .iter()
+        .filter(|e| {
+            e.entity == Entity::Task
+                && e.kind == crate::symbio_core::event::EVENT_TASK_REWORK_CREATED
+        })
+        .filter_map(|e| e.payload.get("replaces").and_then(|v| v.as_str()))
+        .collect();
+    kernel::rework_core(&replaces, max_rework)
+        .into_iter()
+        .map(|(target, round, bound)| {
+            let e = events
+                .iter()
+                .find(|e| {
+                    e.entity == Entity::Task
+                        && e.kind == crate::symbio_core::event::EVENT_TASK_REWORK_CREATED
+                        && e.payload.get("replaces").and_then(|v| v.as_str())
+                            == Some(target.as_str())
+                })
+                .expect("越界轮必来自本切片");
+            Violation::at(
                 e,
-                format!("任务 {replaces} 返工第 {c} 轮，超过上界 {max_rework}（终止性前提 2）"),
-            ));
-        }
-    }
-    bad
+                format!("任务 {target} 返工第 {round} 轮，超过上界 {bound}（终止性前提 2）"),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -490,4 +490,8 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow symbio/src/symbio_core/invariants/mod.rs::acyclic_deps: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。
+// panic-allow symbio/src/symbio_core/invariants/kernel.rs::dep_graph_core: 穷尽性不变量：indeg 与 graph 同构造（同一批键），走到 expect 说明本文件的判据漏了一个分支，属代码缺陷。
+// panic-allow symbio/src/symbio_core/invariants/mod.rs::seq_monotonic: 解析层不变量：内核返回的下标必落在「有 seq 的事件」范围内（内核只对这条序列工作），走到 expect 说明解析与内核的输入约定破了，属代码缺陷。
+// panic-allow symbio/src/symbio_core/invariants/mod.rs::final_unique_per_turn: 同上：内核返回的重复项 id 必来自本切片（刚 map 出去的输入），走到 expect 说明约定破了。
+// panic-allow symbio/src/symbio_core/invariants/mod.rs::open_unique_per_turn: 同上：重复项 id 必来自本切片。
+// panic-allow symbio/src/symbio_core/invariants/mod.rs::rework_bounded: 同上：越界轮必来自本切片（内核只对刚收集的 replaces 计数）。

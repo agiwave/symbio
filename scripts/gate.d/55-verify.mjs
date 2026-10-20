@@ -28,6 +28,28 @@
 //
 // 文件名 `55-`：并发批只由**连续**标 `parallel` 的阶段组成（`gate.mjs` 的泳道调度），
 // 所以它必须紧跟在 `50-msrv` 之后、`56-frontend-build`（串行）之前。
+//
+// ## 谁耦合了生产（实读表，T-176 起维护）
+//
+// 「程序数 16」里有两类证据，可信度不同，读者必须能分清：
+//
+// - **与生产源码耦合**（`#[path]` 包含生产文件）：判据与实现共处一处，
+//   改生产、程序必须跟着红或绿——这才是「跑起来的系统遵守判据」的形状：
+//
+//   | 程序 | 包含的生产文件 | 判什么 |
+//   |---|---|---|
+//   | `consolidation_fidelity` | `symbio_core/text/merge_kernel.rs` | 巩固合并的保真度下界 |
+//   | `recall_eval` | `symbio_core/projection/recall_score.rs` | 检索排序的 recall@k / 依赖度 |
+//   | `invariants` | `symbio_core/invariants/kernel.rs`（T-176） | I1 的 seq 单调无跳号 / 每 turn 一条 final |
+//   | `termination` | `symbio_core/invariants/kernel.rs`（T-176） | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
+//
+// - **只与文档/自造数据耦合**（其余 12 个）：证明「判据在自造样本上自洽」，
+//   不证明「生产实现遵守判据」。其中有几个的被测对象本来就是文档
+//   （`capability_frame` 判名册与轴级的对应）——挂生产只会造出假耦合率，
+//   目标是「把伪装成验生产的换成真验生产」，不是把数字刷到 16/16。
+//
+//   耦合率当前 **4/16**。下一个值得挂的：`invariants` 的 I2/I3 判据
+//   （`produced_by_coverage` / `unresolved_turns`——同一内核文件里还有余量）。
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'

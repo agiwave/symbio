@@ -4,6 +4,15 @@
 //! I2 无溯源不声明 —— 断言类事件必须能追溯到产生它的事件
 //! I3 到点必答   —— 每一轮都必须有一条收束格（不许静默消失）
 //!
+//! ## 判定走生产内核（T-176）
+//!
+//! I1 的两个判定（seq 单调无跳号 / 每 turn 一条 final）**不是本文件实现的**——
+//! 生产侧 [`symbio_core::invariants`](../../../symbio/src/symbio_core/invariants/mod.rs)
+//! 把算法层抽成了 std-only 内核（`invariants/kernel.rs`），本程序 `#[path]` 包含
+//! **同一个文件**：改内核任何一处（比如把「无跳号」放宽），下面的反向用例必须
+//! 同时红。此前本文件自己实现了一遍 seq 检查——生产改判据、这里仍全绿的
+//! 「验的东西与跑的不是同一个」，正是那条要堵的失效。
+//!
 //! ## 两种数据，两种结论
 //!
 //! 1. **自造日志**（`healthy_log` / `violated_log`）证明「检查器会响」；
@@ -28,6 +37,16 @@
 //!
 //! 编译运行：rustc --edition 2021 invariants.rs -o inv && ./inv
 
+// `#[path]` 指向仓库里的**生产文件**（与 recall_eval 挂 recall_score、
+// consolidation_fidelity 挂 merge_kernel 同一形态）——这一行就是「判定与生产
+// 共处一处」的全部含义。kernel 是 std-only（理由见它的文件头）；本程序只用它
+// 四个内核里的两个，`allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
+#[allow(dead_code)]
+#[path = "../../../symbio/src/symbio_core/invariants/kernel.rs"]
+mod kernel;
+
+use kernel::{seq_monotonic_core, unique_per_turn_core};
+
 #[derive(Debug, Clone)]
 struct Event {
     seq: u64,
@@ -42,7 +61,8 @@ struct Event {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Violation {
-    I1SeqNotMonotonic { seq: u64, prev: u64 },
+    /// seq 处**应为** `expect`（内核语义：已入库事件 seq 恰为 0..n-1，严格单调且无跳号）。
+    I1SeqNotMonotonic { seq: u64, expect: u64 },
     I1DoubleFinal { turn: u64 },
     I2NoProvenance { seq: u64 },
     I3NoClosure { turn: u64 },
@@ -76,29 +96,37 @@ fn needs_provenance(kind: &str) -> bool {
 
 fn check(log: &[Event], c: &Check) -> Vec<Violation> {
     let mut out = Vec::new();
-    let mut prev: Option<u64> = None;
-    let mut final_of_turn: Vec<u64> = Vec::new();
     let mut closed: Vec<u64> = Vec::new();
 
-    for e in log {
-        if c.enable_i1_seq {
-            if let Some(p) = prev {
-                if e.seq <= p {
-                    out.push(Violation::I1SeqNotMonotonic { seq: e.seq, prev: p });
-                }
-            }
+    // ── I1-seq：判定走生产内核 ──
+    // 内核语义 = 生产语义：已入库事件 seq 恰为 0..n-1（严格单调且**无跳号**——
+    // 比「非降序」严一档：跳号意味着有事件被静默丢弃或绕过唯一写入口）。
+    // 自造日志因此也从 0 起（`healthy_log`），与 `WalStore::append` 的分配一致。
+    if c.enable_i1_seq {
+        let seqs: Vec<u64> = log.iter().map(|e| e.seq).collect();
+        for (_, actual, expect) in seq_monotonic_core(&seqs) {
+            out.push(Violation::I1SeqNotMonotonic { seq: actual, expect });
         }
-        prev = Some(e.seq);
+    }
 
-        if e.kind == FINAL {
-            if c.enable_i1_final && final_of_turn.contains(&e.turn) {
-                out.push(Violation::I1DoubleFinal { turn: e.turn });
-            } else if !final_of_turn.contains(&e.turn) {
-                final_of_turn.push(e.turn);
-            }
-            if !closed.contains(&e.turn) {
-                closed.push(e.turn);
-            }
+    // ── I1-final：判定走生产内核 ──
+    // 哪些事件算数（FINAL 判据）是本文件的解析层；「每 turn 至多一条」在内核。
+    // 本文件的事件没有 event_id 列（信封只留七列），以 seq 的字符串形态当标识。
+    if c.enable_i1_final {
+        let final_events: Vec<&Event> = log.iter().filter(|e| e.kind == FINAL).collect();
+        let ids: Vec<String> = final_events.iter().map(|e| e.seq.to_string()).collect();
+        let finals = final_events
+            .iter()
+            .map(|e| e.turn)
+            .zip(ids.iter().map(String::as_str));
+        for (_, _, turn) in unique_per_turn_core(finals) {
+            out.push(Violation::I1DoubleFinal { turn });
+        }
+    }
+
+    for e in log {
+        if e.kind == FINAL && !closed.contains(&e.turn) {
+            closed.push(e.turn);
         }
 
         if c.enable_i2 && needs_provenance(&e.kind) && e.produced_by.is_none() {
@@ -122,14 +150,19 @@ fn check(log: &[Event], c: &Check) -> Vec<Violation> {
 }
 
 /// 一个健康的日志：单通道、有溯源、每轮有收束格
+/// 一个健康的日志：单通道、有溯源、每轮有收束格。
+///
+/// seq 从 0 起严格连续——这是**生产语义**（`WalStore::append` 分配 0..n-1），
+/// 也是生产内核判的形状（严格单调且无跳号）。旧版自造日志从 1 起、只判非降序，
+/// 那是「仿判据」时代的残留；挂上生产内核后自造日志也按生产的形状造。
 fn healthy_log() -> Vec<Event> {
     vec![
-        ev(1, "user.message", 1, None, 0),
-        ev(2, "classify.verdict", 1, Some(1), 40),
-        ev(3, "task.created", 1, Some(2), 300),
-        ev(4, "artifact.added", 1, Some(3), 900),
-        ev(5, "task.verified", 1, Some(4), 200),
-        ev(6, FINAL, 1, Some(5), 150),
+        ev(0, "user.message", 1, None, 0),
+        ev(1, "classify.verdict", 1, Some(1), 40),
+        ev(2, "task.created", 1, Some(2), 300),
+        ev(3, "artifact.added", 1, Some(3), 900),
+        ev(4, "task.verified", 1, Some(4), 200),
+        ev(5, FINAL, 1, Some(5), 150),
     ]
 }
 
@@ -146,13 +179,16 @@ fn ev(seq: u64, kind: &str, turn: u64, produced_by: Option<u64>, cost_ms: u64) -
     }
 }
 
-/// 注入四类违规：seq 回退、第二个 final、无溯源、某轮没有收束格
+/// 注入四类违规：seq 撞号、第二个 final、无溯源、某轮没有收束格。
+///
+/// 「seq 回退」的形状按内核语义造：追加的序列 6,7,8 本身连续，第 1 条 seq=3
+/// 是**重号**——内核报「seq 3 处应为 6」。
 fn violated_log() -> Vec<Event> {
     let mut v = healthy_log();
-    v.push(ev(4, "task.progress", 1, Some(3), 10)); // seq 回退
-    v.push(ev(7, FINAL, 1, Some(4), 10)); // 双 final
-    v.push(ev(8, "task.verified", 1, None, 10)); // 无溯源
-    v.push(ev(9, "task.progress", 2, Some(8), 10)); // 第 2 轮没有收束格
+    v.push(ev(3, "task.progress", 1, Some(3), 10)); // seq 撞号（3 已存在）
+    v.push(ev(6, FINAL, 1, Some(4), 10)); // 双 final
+    v.push(ev(7, "task.verified", 1, None, 10)); // 无溯源
+    v.push(ev(8, "task.progress", 2, Some(7), 10)); // 第 2 轮没有收束格
     v
 }
 
@@ -207,7 +243,10 @@ fn main() {
     println!("  关掉 I3 → 剩 {} 条（少了 {} 条）", no_i3.len(), dirty.len() - no_i3.len());
 
     assert!(clean.is_empty(), "健康日志不应有违规");
-    assert_eq!(dirty.len(), 4, "注入的 4 类违规应被全部捕获");
+    // 注入 4 类违规捕到 **5** 条：seq 重号在内核语义下报两条——重号位「处应为 6」
+    // 与其后一位「处应为 4」。这不是过杀：生产语义里 seq 撞车之后**全部错位**，
+    // 只报第一条反而会把「后面还有多少条对不上」藏起来。
+    assert_eq!(dirty.len(), 5, "注入的 4 类违规应被全部捕获（seq 重号算两条）");
     assert!(
         !no_i1.iter().any(|v| matches!(v, Violation::I1SeqNotMonotonic { .. } | Violation::I1DoubleFinal { .. })),
         "反向用例：关掉 I1 后 I1 类违规必须检测不到"
