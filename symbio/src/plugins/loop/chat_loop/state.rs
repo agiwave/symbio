@@ -59,16 +59,16 @@ pub(crate) fn request_actor_spec(
 ) -> crate::symbio_core::ActorSpec {
     use crate::symbio_core::ActorSpec;
     let principal = request_principal(ctx);
-    // 绑定即登记（[ADR-100]）：本轮主体在**装配点**登记能力行——根会话继承会话面
-    // 缺省行（主智能体行），委派子会话继承父行（委派不放大权威）。登记先于取数，
+    // 绑定即登记（[ADR-100]）：本轮主体在**装配点**登记能力行。根与子会话的判据
+    // 不同——根没有父行，未部署时继承会话面缺省行，已部署时原样用自己的行；
+    // 委派子会话取「父行 ∩ 自己的声明行」（委派不放大权威）。登记先于取数，
     // 规格身上的能力集才是「现在准不准」的合流面；未绑定的主体照旧 fail-closed。
-    crate::symbio_core::authz::bind_inheriting(
-        &principal,
-        match &scope {
-            crate::symbio_core::Scope::Child(parent) => parent.as_str(),
-            crate::symbio_core::Scope::Root => crate::symbio_core::authz::PRINCIPAL_MAIN,
-        },
-    );
+    match &scope {
+        crate::symbio_core::Scope::Child(parent) => {
+            crate::symbio_core::authz::bind_inheriting(&principal, parent)
+        }
+        crate::symbio_core::Scope::Root => crate::symbio_core::authz::bind_root(&principal),
+    }
     let matrix = crate::symbio_core::authz::production_matrix();
     ActorSpec {
         principal: principal.clone(),

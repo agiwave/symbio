@@ -18,9 +18,10 @@
 //! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（S02/S03 三角色，T-107 行与路径
 //!    同批）：各自单能力独持，`production_matrix` 拿登记行，C15 两面（规划者不认证、
 //!    验证者不产出）在表这一层可见；
-//! 8. **绑定即登记**（[ADR-100]）：未部署的主体经 `bind_inheriting` 拿到来源行——
-//!    能力随绑定来、**可见域不登记**、静态行不被改写、淘汰面只认部署表、
-//!    委派上限两侧都在册。
+//! 8. **绑定即登记**（[ADR-100]）：未部署的主体经绑定拿到来源行——能力随绑定来、
+//!    **可见域不登记**、静态行不被放大、淘汰面只认部署表、委派上限两侧都在册；
+//! 9. **委派取交集**（[T-195]）：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
+//!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行。
 
 use super::*;
 use crate::symbio_core::governance::Capability;
@@ -524,7 +525,7 @@ fn a_bound_subject_takes_the_source_row() {
     );
     assert!(!production_matrix().can_reply(subject));
     // 根会话绑定 = 继承会话面缺省行（主智能体行）。
-    bind_inheriting(subject, PRINCIPAL_MAIN);
+    bind_root(subject);
     assert_eq!(
         production_matrix().grant_names_of(subject).len(),
         5,
@@ -541,10 +542,11 @@ fn a_bound_subject_takes_the_source_row() {
     );
 }
 
-/// **静态行不被改写**：主体已在 [`ROWS`] 里时绑定是空操作——窄行不被悄悄放大成会话面。
+/// **静态行不被放大**：主体已在 [`ROWS`] 里时，委派绑定取父行 ∩ 声明行——窄行不会
+/// 被悄悄放大成会话面。
 ///
-/// 反判据：去掉 `bind_inheriting` 里那句 `is_deployed ⇒ return`，工人那一行会被
-/// 本用例的绑定调用就地改成六项，`can_reply(worker)` 立刻变真。
+/// 反判据：把交集换成「整行取自父」（旧的继承语义），工人会拿到主行五项，
+/// `can_reply(worker)` 立刻变真。
 #[test]
 fn binding_never_widens_a_deployed_row() {
     let before = production_matrix().grants_of(PRINCIPAL_WORKER).len();
@@ -567,7 +569,7 @@ fn binding_never_widens_a_deployed_row() {
 #[test]
 fn binding_grants_no_visibility_scope() {
     let subject = "session/t-bind-vis";
-    bind_inheriting(subject, PRINCIPAL_MAIN);
+    bind_root(subject);
     assert!(production_matrix().can_reply(subject), "能力随绑定来了……");
     assert!(
         !production_matrix().can_see(subject, PRINCIPAL_MAIN, VisScope::Shared),
@@ -588,7 +590,7 @@ fn binding_grants_no_visibility_scope() {
 #[test]
 fn the_elimination_face_ignores_bindings() {
     let subject = "session/t-bind-elim";
-    bind_inheriting(subject, PRINCIPAL_MAIN);
+    bind_root(subject);
     assert!(
         production_matrix().can_write_name(subject, CAP_ASSIGN_WORK),
         "合流面：绑定来的 assign.work 能力可见"
@@ -624,5 +626,118 @@ fn delegated_binding_registers_both_sides() {
     assert!(
         production_matrix().can_reply(child),
         "子会话收束闸放行（父行继承下来）"
+    );
+}
+
+// ── 委派取交集（T-195）────────────────────────────────────────────────
+//
+// 这两条用**自造小表**（`EffectiveMatrix { deployed }`）：生产表里唯一的多能力行是
+// `session/main`，拿它当「子」会污染同一进程里所有用例。小表证明的是判据本身；
+// 生产接线（`request_actor_spec` 的根 / 子分派）由上层用例覆盖。
+
+/// **父窄子宽 ⇒ 子取交集**：子主体的部署行是显式声明，父行是上限。
+///
+/// 反判据：改回「子拿自己那一行」（旧实现的 `is_deployed ⇒ return`），
+/// `assign.work` 会留在子身上——父没有的能力被子继承了。
+#[test]
+fn a_delegated_child_gets_the_intersection_of_parent_and_declaration() {
+    let deployed = PermissionMatrix::from_names(&[
+        (
+            "session/t-deploy-wide",
+            &["reply", "assign.work"],
+            VisScope::ThreadPrivate,
+        ),
+        (
+            "session/t-deploy-narrow",
+            &["reply"],
+            VisScope::ThreadPrivate,
+        ),
+    ])
+    .expect("自造小表合法");
+    let matrix = EffectiveMatrix { deployed };
+
+    bind_inheriting_in(&matrix, "session/t-deploy-wide", "session/t-deploy-narrow");
+    assert_eq!(
+        matrix.grants_of("session/t-deploy-wide"),
+        vec![Capability::Reply],
+        "子能力 = 父能力 ∩ 显式声明（委派不放大权威）"
+    );
+    assert!(
+        !matrix.can_write("session/t-deploy-wide", Capability::AssignWork),
+        "父不持 assign.work ⇒ 子也不持"
+    );
+    assert!(
+        matrix.can_reply("session/t-deploy-wide"),
+        "交集保留了双方都持有的 reply"
+    );
+
+    // 子未部署（没有显式声明）：整行来自父——交集退化为父行，不是空集。
+    bind_inheriting_in(&matrix, "session/t-un-deployed", "session/t-deploy-narrow");
+    assert_eq!(
+        matrix.grants_of("session/t-un-deployed"),
+        vec![Capability::Reply],
+        "没有声明行时继承父行"
+    );
+}
+
+/// **空交集是一条拒绝，不是退回部署行**：子声明与父行没有共同能力时，登记空行；
+/// 合流面以空行为有效行——部署行不会「补回来」。
+///
+/// 反判据：若 `insert_binding` 把空行当作「不登记」跳过，`effective_grants` 会回退
+/// 部署行，子立刻拿回父没有的 `assign.work`——委派放大权威。
+#[test]
+fn an_empty_intersection_registers_a_denying_row() {
+    let deployed = PermissionMatrix::from_names(&[
+        (
+            "session/t-intersect-child",
+            &["assign.work"],
+            VisScope::ThreadPrivate,
+        ),
+        (
+            "session/t-intersect-parent",
+            &["reply"],
+            VisScope::ThreadPrivate,
+        ),
+    ])
+    .expect("自造小表合法");
+    let matrix = EffectiveMatrix { deployed };
+
+    bind_inheriting_in(
+        &matrix,
+        "session/t-intersect-child",
+        "session/t-intersect-parent",
+    );
+    assert!(
+        matrix.grants_of("session/t-intersect-child").is_empty(),
+        "父行与子声明无交集 ⇒ 子没有能力"
+    );
+    assert!(
+        !matrix.can_write("session/t-intersect-child", Capability::AssignWork),
+        "部署行不能因为交集为空而被退回"
+    );
+    assert!(
+        matrix
+            .grant_names_of("session/t-intersect-child")
+            .is_empty(),
+        "规格读到的能力集同样为空"
+    );
+}
+
+/// **根不是委派**：已部署的根主体原样用自己的行，不拿会话面缺省去夹它。
+///
+/// 反判据：对 `Scope::Root` 也走交集 ⇒ verifier / arbiter 的
+/// `assert.verification`（主智能体刻意不持，C15）会被夹成空行。
+#[test]
+fn a_deployed_root_keeps_its_own_row() {
+    bind_root(PRINCIPAL_VERIFIER);
+    assert_eq!(
+        production_matrix().grant_names_of(PRINCIPAL_VERIFIER),
+        vec![CAP_ASSERT_VERIFICATION.to_string()],
+        "根主体不被会话面缺省夹窄"
+    );
+    bind_root(PRINCIPAL_ARBITER);
+    assert!(
+        production_matrix().can_write(PRINCIPAL_ARBITER, Capability::AssertVerification),
+        "仲裁者同样保留自己的行"
     );
 }

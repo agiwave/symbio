@@ -374,11 +374,13 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
 static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
 
 /// **运行期绑定登记**（[ADR-100](../../../docs/010-adr/100.md "ADR-100")：绑定即登记）：
-/// 主体 ⇒ 它那一行当次有效的能力集。
+/// 主体 ⇒ 它那一行**当次有效**的能力集。
 ///
 /// 与 [`ROWS`] 的分工：表是**部署事实**（常量、构造期定稿），这里是**运行期身份事实**
-/// ——哪个 agent 身份真的绑进了在跑的会话。查询侧合流（[`EffectiveMatrix`]），
-/// 可见域**不**登记（[`EffectiveMatrix::can_see`] 只认部署表）：能力可以随绑定来，
+/// ——哪个 agent 身份真的绑进了在跑的会话。查询侧合流（[`EffectiveMatrix`]）：
+/// **登记过的绑定行就是有效行**，未登记才回退部署行；委派子会话登记的是
+/// 父行 ∩ 自己的声明行（[`bind_inheriting`]）。可见域**不**登记
+/// （[`EffectiveMatrix::can_see`] 只认部署表）：能力可以随绑定来，
 /// 「看见别人的 shared」只能来自部署登记。
 static BOUND: OnceLock<RwLock<HashMap<String, Vec<Capability>>>> = OnceLock::new();
 
@@ -386,16 +388,39 @@ fn bound_rows() -> &'static RwLock<HashMap<String, Vec<Capability>>> {
     BOUND.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// **绑定即登记**（[ADR-100]）：会话装配点把本轮主体登记进运行期绑定面。
+/// **根会话绑定**（[ADR-100]）：`Scope::Root` 没有父主体，只有一条来源——
+/// 会话面缺省行（[`PRINCIPAL_MAIN`]）。
+///
+/// 已部署的主体（[`ROWS`] 里有自己的行）**原样用自己的行**：根不是委派，没有父行
+/// 可作为上限。拿会话面去「夹」它会把主智能体刻意不持的能力从窄行身上削掉——
+/// 例如 `session/verifier` / `session/arbiter` 的 `assert.verification`
+/// （C15：主智能体不自验），父窄子宽的交集在这里不适用。
+///
+/// 未部署的主体（`--agent <id>` 选定的会话身份）才登记缺省行——这是 ADR-100
+/// 「能力随绑定来」的入口。
+pub(crate) fn bind_root(principal: &str) {
+    if principal == PRINCIPAL_MAIN {
+        return;
+    }
+    let matrix = production_matrix();
+    if matrix.is_deployed(principal) {
+        return;
+    }
+    insert_binding(principal, matrix.grants_of(PRINCIPAL_MAIN));
+}
+
+/// **委派绑定**（[ADR-100]）：`Scope::Child(parent)` 按
+/// **父能力 ∩ 子主体的显式声明**登记——委派不放大权威。
 ///
 /// - `principal`：本轮主体（[`request_principal`] 的产出）；
-/// - `from`：**关系上限的来源**——根会话 = [`PRINCIPAL_MAIN`]（会话面缺省行），
-///   委派子会话 = 父主体（`Scope::Child(parent)`，委派不放大权威）。
+/// - `from`：父主体（`Scope::Child(parent)` 的 `parent`）。
 ///
 /// 三条边界：
 ///
-/// 1. **静态行不被改写**（表是权威）：`principal` 已在 [`ROWS`] 里 ⇒ 空操作，
-///    绑定不会把窄行（`session/worker` 等）悄悄放大成会话面；
+/// 1. **交集不是并集**：子主体已在 [`ROWS`] 里 ⇒ 它的部署行是**显式声明**，
+///    有效行 = 父行 ∩ 声明行；未部署 ⇒ 没有声明，整个有效行来自父。父窄子宽时
+///    子只保留父也持有的能力，父宽子窄时子仍只有自己声明的那些——两个方向都不
+///    放大权威；
 /// 2. **`from` 无行时先给 `from` 登记会话面缺省**——委派上限的两侧都要在册
 ///    （`turn_runner::within_delegation_ceiling` 判父行），否则子会话因父主体查不到行
 ///    而收束不了；
@@ -404,27 +429,51 @@ fn bound_rows() -> &'static RwLock<HashMap<String, Vec<Capability>>> {
 ///
 /// 幂等：同一主体重复绑定（每轮装配点都会调）不重复写、不重复告警。
 pub(crate) fn bind_inheriting(principal: &str, from: &str) {
+    bind_inheriting_in(production_matrix(), principal, from);
+}
+
+/// [`bind_inheriting`] 的**取表口显式化**：判定用哪张表由调用方给，登记仍写进程级
+/// [`BOUND`]。生产只有一个调用点（[`production_matrix`]）；显式参数让交集语义能在
+/// **自造小表**上验证，而不必改动生产表或共享的绑定面。
+fn bind_inheriting_in(matrix: &EffectiveMatrix, principal: &str, from: &str) {
     if principal == from {
         return;
     }
-    let matrix = production_matrix();
-    if matrix.is_deployed(principal) {
-        return;
-    }
-    let mut source = matrix.grants_of(from);
-    if source.is_empty() {
+    if !matrix.has_row(from) {
         insert_binding(from, matrix.grants_of(PRINCIPAL_MAIN));
-        source = matrix.grants_of(from);
     }
-    insert_binding(principal, source);
+    let parent = matrix.grants_of(from);
+    let row = inherited_grants(matrix, principal, &parent);
+    insert_binding(principal, row);
+}
+
+/// 委派交集的**唯一判据**：父行 ∩ 子主体的部署行；子未部署 ⇒ 父行原样继承。
+///
+/// 空交集是合法结果（双方都在册、只是没有共同能力）——它登记为**空行**，
+/// 不是「没登记」：后者会退回部署行，正好把「父不持 ⇒ 子也不持」翻成一次超权。
+fn inherited_grants(
+    matrix: &EffectiveMatrix,
+    principal: &str,
+    parent: &[Capability],
+) -> Vec<Capability> {
+    let declared = matrix.deployed.grants_of(principal);
+    if declared.is_empty() {
+        return parent.to_vec();
+    }
+    parent
+        .iter()
+        .copied()
+        .filter(|cap| declared.contains(cap))
+        .collect()
 }
 
 /// 登记一行绑定（幂等：与既有登记相同则不动）。锁失败只告警——**登记失败 = 不登记**，
 /// 未登记的主体照旧 fail-closed，方向与 [ADR-099](../../../docs/010-adr/099.md "ADR-099") 一致。
+///
+/// **空行也是登记**：委派交集为空时，登记 `[]` 表达「这个主体什么都不许」。
+/// 若把空行当作「不登记」跳过，查询面会退回部署行——父不持、子却照旧持有，
+/// 正好是「委派不放大权威」的反面。
 fn insert_binding(principal: &str, grants: Vec<Capability>) {
-    if grants.is_empty() {
-        return;
-    }
     let mut map = match bound_rows().write() {
         Ok(map) => map,
         Err(why) => {
@@ -491,9 +540,10 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
 /// [ADR-100](../../../docs/010-adr/100.md "ADR-100")）：
 ///
 /// - **能力面**（`grants_*` / `can_write*` / `can_reply` / `can_produce_artifact`）=
-///   部署表 **∪** [绑定登记](bind_inheriting)——登记过的主体拿自己那一行，绑定过的
-///   主体拿它登记的那一行，都没有 ⇒ 每个谓词为假 ⇒ **fail-closed**：少一行是一条
-///   **拒绝**，不是一次静默超权；
+///   部署表，[绑定登记](bind_inheriting)存在时以**绑定行为有效行**（未登记才回退
+///   部署行）——根会话未部署时登记会话面缺省，委派子会话登记父行 ∩ 自己的声明行，
+///   两者都没有 ⇒ 每个谓词为假 ⇒ **fail-closed**：少一行是一条**拒绝**，不是一次
+///   静默超权；
 /// - **可见域面**（`sees_of` / `can_see`）只认**部署表**：「谁能看见谁的 shared」是
 ///   部署登记的事实，不随会话绑定而来——否则任何绑定 agent 都会变成矩阵成员、
 ///   读到他人 shared（t76 的反判据）。
@@ -518,7 +568,7 @@ pub(crate) fn production_matrix() -> &'static EffectiveMatrix {
 /// 取表口的查询面（[`production_matrix`] 的返回类型）：部署表 + 运行期绑定登记的合流。
 ///
 /// 住本模块而不是 `governance`：合流口径是**部署事实怎么看待运行期身份**
-/// （绑定只加能力、不加可见域），那是这张表的裁决，不是判定机制的裁决；
+/// （绑定行替换部署行、但不带可见域），那是这张表的裁决，不是判定机制的裁决；
 /// `governance` 的 [`PermissionMatrix`] 因此保持「常量表 + fail-closed 谓词」原样。
 ///
 /// 调用点不点名本类型（类型推导取方法）——收窄/扩面都在这里一处发生。
@@ -527,30 +577,28 @@ pub(crate) struct EffectiveMatrix {
 }
 
 impl EffectiveMatrix {
-    /// 绑定登记半边（[`BOUND`]）：没有登记 ⇒ 空集（合流退化为部署谓词）。
-    fn bound_grants(&self, principal: &str) -> Vec<Capability> {
+    /// 绑定登记半边（[`BOUND`]）：`Some(行)` = 该主体登记过（**空行也算登记**）；
+    /// `None` = 未登记。两者在合流面的后果不同：前者以登记行为准，后者回退部署行。
+    fn bound_row(&self, principal: &str) -> Option<Vec<Capability>> {
         if let Ok(map) = bound_rows().read() {
             if let Some(bound) = map.get(principal) {
-                return bound.clone();
+                return Some(bound.clone());
             }
         }
-        Vec::new()
+        None
     }
 
-    /// 合流判定的一半：绑定登记里有没有这一项。
-    fn bound_holds(&self, principal: &str, cap: Capability) -> bool {
-        self.bound_grants(principal).contains(&cap)
-    }
-
-    /// 合流后的有效能力集：部署行 **∪** 绑定登记（去重，顺序 = 表序在前）。
+    /// 合流后的有效能力集：**登记过的绑定行就是有效行**（含空行——空 = 什么都不许）；
+    /// 未登记才读部署表。
+    ///
+    /// 为什么不是「部署行 ∪ 绑定行」：委派子会话的绑定行是**父行 ∩ 自己的声明行**
+    /// （[`bind_inheriting`]），再与部署行取并集会把刚夹掉的能力加回来——
+    /// 「委派不放大权威」当场失效。
     fn effective_grants(&self, principal: &str) -> Vec<Capability> {
-        let mut grants = self.deployed.grants_of(principal).to_vec();
-        for cap in self.bound_grants(principal) {
-            if !grants.contains(&cap) {
-                grants.push(cap);
-            }
+        match self.bound_row(principal) {
+            Some(row) => row,
+            None => self.deployed.grants_of(principal).to_vec(),
         }
-        grants
     }
 
     /// 这个主体是**部署事实**吗（表里有行）——淘汰面的判据（只对部署主体落裁决）。
@@ -558,22 +606,27 @@ impl EffectiveMatrix {
         !self.deployed.grants_of(principal).is_empty()
     }
 
-    /// 写侧：主体持有的全部能力（空 = 部署表与绑定登记都没有它的行）。
+    /// 这个主体在合流面**有没有行**——部署行与绑定行都算；空绑定也是一行。
+    ///
+    /// 与 [`Self::is_deployed`] 的区别：后者问「是不是部署事实」（淘汰面 / 可见域），
+    /// 这里问「父侧登记是否已存在」（委派上限两侧都在册）。用错哪一个都会让空交集
+    /// 被当成「没有行」而重新登记成会话面缺省。
+    fn has_row(&self, principal: &str) -> bool {
+        self.is_deployed(principal) || self.bound_row(principal).is_some()
+    }
+
+    /// 写侧：主体持有的全部能力（空 = 部署表与绑定登记都没有它的行，或交集为空）。
     pub(crate) fn grants_of(&self, principal: &str) -> Vec<Capability> {
         self.effective_grants(principal)
     }
 
     /// 写侧：主体持有的能力**名**（授权表的书写形态，与
-    /// [`PermissionMatrix::grant_names_of`] 同一套拼写；合流 = 部署行名 ∪ 绑定登记名）。
+    /// [`PermissionMatrix::grant_names_of`] 同一套拼写；取自同一条有效行）。
     pub(crate) fn grant_names_of(&self, principal: &str) -> Vec<String> {
-        let mut names = self.deployed.grant_names_of(principal);
-        for cap in self.bound_grants(principal) {
-            let name = cap.name().to_string();
-            if !names.contains(&name) {
-                names.push(name);
-            }
+        match self.bound_row(principal) {
+            Some(row) => row.iter().map(|cap| cap.name().to_string()).collect(),
+            None => self.deployed.grant_names_of(principal),
         }
-        names
     }
 
     /// 写侧判定：主体是否可以权威地做 `cap`（合流面，fail-closed）。
@@ -582,17 +635,19 @@ impl EffectiveMatrix {
     /// 升格 = `define.work`）。其余调用点按能力名或收束臂问
     /// （[`Self::can_write_name`] / [`Self::can_reply`] / [`Self::can_produce_artifact`]）。
     pub(crate) fn can_write(&self, principal: &str, cap: Capability) -> bool {
-        self.deployed.can_write(principal, cap) || self.bound_holds(principal, cap)
+        match self.bound_row(principal) {
+            Some(row) => row.contains(&cap),
+            None => self.deployed.can_write(principal, cap),
+        }
     }
 
     /// 写侧判定（按能力名，合流面）。名字认不出 ⇒ `false`（fail-closed，与
     /// [`PermissionMatrix::can_write_name`] 同方向）。
     pub(crate) fn can_write_name(&self, principal: &str, name: &str) -> bool {
-        self.deployed.can_write_name(principal, name)
-            || self
-                .bound_grants(principal)
-                .iter()
-                .any(|c| c.name() == name)
+        match self.bound_row(principal) {
+            Some(row) => row.iter().any(|cap| cap.name() == name),
+            None => self.deployed.can_write_name(principal, name),
+        }
     }
 
     /// 写侧判定（**部署事实面**）：只认 [`ROWS`]，不认绑定登记——淘汰回路的判据
@@ -602,16 +657,21 @@ impl EffectiveMatrix {
     }
 
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——轮次位置 → 能力的映射仍只住
-    /// [`Capability::Reply`]，调用点不复述；合流 = 部署谓词 ∪ 绑定登记。
+    /// [`Capability::Reply`]，调用点不复述；判据取有效行（含委派交集）。
     pub(crate) fn can_reply(&self, principal: &str) -> bool {
-        self.deployed.can_reply(principal) || self.bound_holds(principal, Capability::Reply)
+        match self.bound_row(principal) {
+            Some(row) => row.contains(&Capability::Reply),
+            None => self.deployed.can_reply(principal),
+        }
     }
 
     /// 写侧判定（产物闸）：主体能否**产生产物**（[ADR-067](../../../docs/010-adr/067.md "ADR-067")
-    /// 的第二条收束路）。
+    /// 的第二条收束路）；判据取有效行（含委派交集）。
     pub(crate) fn can_produce_artifact(&self, principal: &str) -> bool {
-        self.deployed.can_produce_artifact(principal)
-            || self.bound_holds(principal, Capability::ProduceArtifact)
+        match self.bound_row(principal) {
+            Some(row) => row.contains(&Capability::ProduceArtifact),
+            None => self.deployed.can_produce_artifact(principal),
+        }
     }
 
     /// 读侧：主体的可见域（**只认部署表**——绑定登记不带可见域，见 [`Self`] 文档）。

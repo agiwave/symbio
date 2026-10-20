@@ -79,7 +79,7 @@ export const BASELINE = {
   // baseline-allow rustTests: 批 T-178（02be8fc5）净删 1 条判据（1834→1833）——该批删掉
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table`：`LatentCapability`
   // 表的读方随 ClassifyOnly 退役而消失，删的是持续维护税，不是判据。基线随之下调，非放宽。
-  rustTests: 1833,
+  rustTests: 1836,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
