@@ -2,13 +2,14 @@
 kind: task
 id: T-177-授权与声明面fail-closed批
 title: 授权与声明面 fail-closed 批——把两处 fail-open 默认翻成「少一行是一条拒绝」
-status: doing
+status: done
 created: 2026-10-20
 track: plan
 prio: now
 deps: []
 where: symbio/src/symbio_core/authz.rs · symbio/src/symbio_core/governance/mod.rs · symbio/src/plugins/loop/chat_loop/state.rs · symbio/src/plugins/loop/derived_facts.rs · symbio/src/plugins/loop/tools/tool_executor/decls.rs · docs/010-adr/099.md · docs/010-adr/100.md
 exit: '`matrix_for`/派生分支删除后，未登记的 `session/<id>` 不再派生主智能体能力集（未登记 = 拒，窄行成为唯一入口）；删派生后的可用性真空由装配点绑定登记补上（[ADR-100](../010-adr/100.md "ADR-100")：根会话继承会话面缺省行、委派子会话继承父行，可见域不登记，静态行不被改写）；`GrantsOverlay::is_revoked` 认不出的能力名告警并按已收回判；工具自声明行为位漏声明有基线判据钉住（工具在册而基线无行 ⇒ 红）；ADR-099 单文档登记这次语义收窄的理由与被推翻的旧口径出处；`authz.test.rs` 派生用例改写且保留「少一行是一条拒绝」反向用例、并补绑定即登记五条边界用例；全量门禁与 e2e 全绿'
+evidence: 提交 `9cf491ad`（①②④ 授权默认翻向 + 绑定即登记复位 + ADR-099 / ADR-100）、`017f5b97`（③ TD-001 / TD-002 声明面基线）。① `matrix_for` 派生分支删除，`EffectiveMatrix` 成为唯一取表口（部署表 ∪ 绑定登记），`an_unregistered_subject_gets_no_row_at_all` 钉「未登记 = 每个谓词为假」；② `GrantsOverlay::is_revoked` 对认不出的能力名按已收回判，`overlay_revokes_on_an_unrecognizable_query_name` 与 `a_typoed_revoke_revokes_the_whole_principal` 两条反向用例；④ ADR-100 五条边界各有用例（`a_bound_subject_takes_the_source_row` / `binding_never_widens_a_deployed_row` / `binding_grants_no_visibility_scope` / `the_elimination_face_ignores_bindings` / `delegated_binding_registers_both_sides`）；③ 工具声明面基线与工具名册双向对账，`tool-decls-audit.test.mjs` 四头（干净绿 / 两向红 / 读不出红），已挂 `30-docs` 的 GUARDS。实测：`cargo test -p symbio --lib symbio_core::authz` 19/19、`symbio_core::governance` 15/15；`node scripts/gate.mjs --only=docs,facts` 72/72 绿
 ---
 
 ## 内容
