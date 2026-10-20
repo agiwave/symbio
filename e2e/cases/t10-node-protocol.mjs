@@ -113,6 +113,14 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     //
     // 静默窗口同时解决「瞬时空闲」：两轮之间的空隙里 `unsettled` 也可能为空，
     // 要求「连续无新帧」才不会在那里提前收网。
+    //
+    // ⚠️ 但静默窗口自己还有个**天然成立的空隙**：用户帧与助手首帧之间的启动间隙。
+    // 间隙里同样「无未终态 + 连续无新帧」——门禁并发把间隙拉过 `QUIET_MS` 时，
+    // 用例在助手侧**零帧**就收网，「实时面应有 reasoning 节点」于是落空
+    // （单跑 3/3 绿、并发偶发红）。所以收网另加一条**水位线**（`pastWatermark`）：
+    // 见过 assistant 首帧或 turn 节点之前不许走静默收敛分支，没过就继续等帧——
+    // 判据是「见过」（帧已在收集器里），**不加 sleep** 抹平间隙
+    // （`scripts/gate.d/58-e2e.mjs` 头注同一课：时序靠条件不靠睡觉）。
     const QUIET_MS = 600;
     /** 已出现过、但最后一帧状态不是终态的节点 id */
     function unsettledIds() {
@@ -125,6 +133,19 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       }
       return [...entered].filter((id) => !TERMINAL.has(last.get(id)));
     }
+    /**
+     * 收网**水位线**：见过 assistant 首帧或 turn 节点才算「助手侧已经开跑」。
+     *
+     * 判据取「带身份帧（`type` 非空）且折叠角色为 assistant」或「折叠类型为 turn」：
+     * 用户帧折叠角色是 `user`（principal person），天然不过线；纯增量 / 内容帧
+     * 不带 `type`，不是首帧。
+     */
+    function pastWatermark() {
+      return rt.messages().some(({ data }) => {
+        if (data?.type == null) return false;
+        return msgTypeOf(data) === 'turn' || msgRoleOf(data) === 'assistant';
+      });
+    }
     let lastLen = -1;
     let quietSince = Date.now();
     await waitFor(
@@ -133,9 +154,13 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
           lastLen = rt.messages().length;
           quietSince = Date.now();
         }
-        return unsettledIds().length === 0 && Date.now() - quietSince >= QUIET_MS;
+        return (
+          pastWatermark() &&
+          unsettledIds().length === 0 &&
+          Date.now() - quietSince >= QUIET_MS
+        );
       },
-      { what: '实时面静默收敛（无未终态节点 + 连续无新帧）', timeoutMs: 30_000 },
+      { what: '实时面静默收敛（过水位线后：无未终态节点 + 连续无新帧）', timeoutMs: 30_000 },
     );
 
     const ops = rt.messages();
