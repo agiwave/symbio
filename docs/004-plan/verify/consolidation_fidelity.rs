@@ -347,35 +347,58 @@ fn main() {
                "英文句点后无空白 ⇒ 不当界（域名 / 版本号同理）");
 
     // 装得下 ⇒ 1.0；同一件事两份都写 ⇒ 仍 1.0（去重省位置，不省信息）。
-    let (merged, f) = merge_kernel::merge_with_fidelity(
-        &["起床先喝水。", "周三不排会。"], 100);
+    let two = ["起床先喝水。", "周三不排会。"];
+    let (merged, f) = merge_kernel::merge_with_fidelity(&two, &two, 100);
     assert_eq!(f, 1.0, "两源都装得下 ⇒ 保真度 1.0");
     assert_eq!(merged, "起床先喝水。\n周三不排会。", "按句合并，换行分隔");
-    let (_, f_dup) = merge_kernel::merge_with_fidelity(
-        &["同一句话。", "同一句话。"], 100);
+    let dup = ["同一句话。", "同一句话。"];
+    let (_, f_dup) = merge_kernel::merge_with_fidelity(&dup, &dup, 100);
     assert_eq!(f_dup, 1.0, "同文两份 ⇒ 句子都算保留（去重省的是位置不是信息）");
 
     // 装不下 ⇒ < 1.0，且保留靠前（与 recall 新近在前的口径一致）、丢的是尾部。
-    let (merged2, f2) = merge_kernel::merge_with_fidelity(
-        &["第一句。第二句。第三句。第四句。"], 12);
+    let one = ["第一句。第二句。第三句。第四句。"];
+    let (merged2, f2) = merge_kernel::merge_with_fidelity(&one, &one, 12);
     assert!(f2 < 1.0, "装不下必有失真：{f2}");
     assert_eq!(merged2, "第一句。\n第二句。", "保留靠前的句子，尾部被丢");
 
     // 空源 ⇒ 1.0（没有信息可丢，不是「丢光了」）。
-    let (empty_merged, f_empty) = merge_kernel::merge_with_fidelity(&[""], 100);
+    let empty = [""];
+    let (empty_merged, f_empty) = merge_kernel::merge_with_fidelity(&empty, &empty, 100);
     assert_eq!(f_empty, 1.0, "空源 ⇒ 1.0");
     assert_eq!(empty_merged, "", "空源合成为空串");
 
-    // 压缩幂等 + 阈值敏感性（概念链同现象的生产读数）。
-    // 注意生产 fidelity 的坐标：它是**当次 sources 的留存率**——第二代 sources
-    // 少了丙。 ⇒ total 从 12 缩到 10，0.333 会「涨」回 0.4。那不是第二代更保真，
-    // 是换了坐标系：跨代累积由 accept **逐代过门**把关（任一代不过就停），不靠
-    // 单次数字跨代可比。概念链的跨代读数因此只在上半段，本段只钉当次口径。
-    let (g1, f1) = merge_kernel::merge_with_fidelity(&["甲。乙。丙。", "丁。戊。", "己。"], 6);
-    let (g2, _) = merge_kernel::merge_with_fidelity(&[&g1, "丁。戊。", "己。"], 6);
-    assert_eq!(g2, g1, "同一上限下压缩幂等（产物再压不缩水）");
-    let (_, f_tight) = merge_kernel::merge_with_fidelity(&["甲。乙。丙。", "丁。戊。", "己。"], 3);
-    assert!(f_tight < f1, "上限收紧 ⇒ 当次留存率必须下降（阈值真的在算）：{f1} → {f_tight}");
+    // ── 跨代判据（T-200）：basis 恒为最初源，连续三代后产物与源可分 ──
+    // 每源 15 句 × 4 字符；上限 130 只能装下 26 句（第一代就丢掉尾部）。
+    // 之后每代再并一条新的短记忆，上限装不下它 ⇒ 当次读数仍很高而累积读数在跌。
+    let text = |prefix: char, n: usize| -> String {
+        (0..n).map(|i| format!("{prefix}{i:02}。")).collect()
+    };
+    let (a, b) = (text('甲', 15), text('乙', 15));
+    let (c, d) = (text('丙', 1), text('丁', 1));
+    let (g1, f1) = merge_kernel::merge_with_fidelity(&[&a, &b], &[&a, &b], 130);
+    let (g2, f2x) = merge_kernel::merge_with_fidelity(&[&g1, &c], &[&a, &b, &c], 130);
+    let (g3, f3) = merge_kernel::merge_with_fidelity(&[&g2, &d], &[&a, &b, &c, &d], 130);
+    println!("  跨代保真度：gen1 {f1:.3} → gen2 {f2x:.3} → gen3 {f3:.3}");
+    assert!(f3 < f2x && f2x < f1, "与最初源比 ⇒ 累积保真度必须逐代下降");
+    assert!(f3 >= 0.7, "下界之上仍允许巩固（三代都过了门）");
+    assert!(
+        g3.contains("甲00。") && !g3.contains("乙14。") && !g3.contains("丙00。"),
+        "第三代产物只保留最初源的前缀，与最初源可分"
+    );
+    // 同一产物换坐标：只与当次两条源比，累积漂移会被读没。
+    let (_, local3) = merge_kernel::merge_with_fidelity(&[&g2, &d], &[&g2, &d], 130);
+    assert!(
+        local3 > f3 + 0.1,
+        "当次口径与最初源口径必须可区分：local={local3:.3} origin={f3:.3}"
+    );
+
+    // 压缩幂等 + 阈值敏感性（同坐标下的生产读数）。
+    let three = ["甲。乙。丙。", "丁。戊。", "己。"];
+    let (loose, f_loose) = merge_kernel::merge_with_fidelity(&three, &three, 6);
+    let (again, _) = merge_kernel::merge_with_fidelity(&[&loose, "丁。戊。", "己。"], &three, 6);
+    assert_eq!(again, loose, "同一上限下压缩幂等（产物再压不缩水）");
+    let (_, f_tight) = merge_kernel::merge_with_fidelity(&three, &three, 3);
+    assert!(f_tight < f_loose, "上限收紧 ⇒ 当次留存率必须下降（阈值真的在算）");
 
     // 截断按字符数（中文一字一字符），不切 UTF-8 字节。
     let long = "问".repeat(500);
@@ -383,7 +406,7 @@ fn main() {
     assert_eq!(cut.chars().count(), 10, "按字符截断（不切汉字字节）");
     assert_eq!(merge_kernel::truncate_chars("短", 10), "短", "短于上限原样返回");
 
-    println!("  生产保真度读数：足量 {f:.1} · 截断 {f2:.4} · 收紧 {f1:.4} → {f_tight:.4}");
+    println!("  生产保真度读数：足量 {f:.1} · 截断 {f2:.4} · 收紧 {f_tight:.4} → {f_loose:.4} · 跨代 gen3 {f3:.4}");
 
     println!("\n✅ 全部断言通过（含 3 条反向用例 + 1 条平凡值用例 + 生产内核段）");
     println!("   结论：`max_gen` 只保证\"不无限跑\"；`min_fidelity` 保证\"跑到还有用为止\"。");

@@ -707,6 +707,107 @@ fn consolidate_reads_generation_from_the_source_payload() {
     );
 }
 
+/// T-200 跨代判据：连续巩固三代后，产物与**最初源**已经可分（保真度下跌），
+/// 而「只与当次两条源比」会把同一产物读成 ~0.94——两个坐标系的差就是累积漂移。
+#[test]
+fn fidelity_is_measured_against_the_original_sources_across_generations() {
+    let store = EventStore::new();
+    let make = |prefix: char, n: usize| -> String {
+        (0..n).map(|i| format!("{prefix}{i:02}。")).collect()
+    };
+    // 甲 / 乙 各 50 句（每句 4 字符）：第一代就装不下全部（留存 320/400 = 0.8），
+    // 但仍在 0.7 之上——这就是后续几代累积的漂移本金。
+    let (a, b) = (make('甲', 50), make('乙', 50));
+    let (c, d) = (make('丙', 5), make('丁', 5));
+    let (e, f, g, h) = (make('戊', 5), make('己', 5), make('庚', 5), make('辛', 5));
+
+    for (id, text, ts) in [
+        ("a", &a, 1000),
+        ("b", &b, 1100),
+        ("c", &c, 1200),
+        ("d", &d, 1300),
+    ] {
+        seed_encoded(&store, id, text, ts);
+    }
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        consolidate(&store, &snap, 1, 2000).expect("第一代").len(),
+        1,
+        "甲 + 乙 ⇒ 第一代产物"
+    );
+
+    for (id, text, ts) in [("e", &e, 3000), ("f", &f, 3100)] {
+        seed_encoded(&store, id, text, ts);
+    }
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        consolidate(&store, &snap, 2, 4000).expect("丙 + 丁").len(),
+        1
+    );
+
+    // 此时最旧两条是 M1(2000) 与 戊(3000)：产物再次参与合并 ⇒ 第二代。
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        consolidate(&store, &snap, 3, 5000).expect("M1 + 戊").len(),
+        1
+    );
+
+    seed_encoded(&store, "g", &g, 6000);
+    seed_encoded(&store, "h", &h, 6100);
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        consolidate(&store, &snap, 4, 7000).expect("己 + M2").len(),
+        1
+    );
+
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        consolidate(&store, &snap, 5, 8000).expect("M3 + 庚").len(),
+        1
+    );
+
+    let snap = store.range(Seq::new(0));
+    let third = snap
+        .iter()
+        .find(|e| {
+            e.kind == EVENT_MEMORY_CONSOLIDATED
+                && e.payload.get("generation").and_then(|v| v.as_u64()) == Some(3)
+        })
+        .expect("写出第三代产物");
+    let content = payload_str(third, "content").expect("产物有正文");
+    let fidelity = third
+        .payload
+        .get("fidelity")
+        .and_then(|v| v.as_f64())
+        .expect("产物带保真度");
+
+    // 与最初一代的并集比：甲 50 + 乙 50 + 戊 5 + 庚 5 句，只有前 80 句留存。
+    let basis = [a.as_str(), b.as_str(), e.as_str(), g.as_str()];
+    let sources = [content, g.as_str()];
+    let (_, expected) = merge_with_fidelity(&sources, &basis, MERGE_MAX_CHARS);
+    assert!(
+        (fidelity - expected).abs() < 1e-9,
+        "生产必须按最初源的并集算（{fidelity} vs {expected}）"
+    );
+    let (_, local) = merge_with_fidelity(&sources, &sources, MERGE_MAX_CHARS);
+    assert!(
+        local > fidelity + 0.2,
+        "只与当次两条源比会把累积漂移读没：local={local} origin={fidelity}"
+    );
+
+    // 可分性：第三代产物仍带最初源的前缀，但第一代就丢掉的句子与后被挤掉的
+    // 源（戊 / 庚）都不在其中——它确实已经不是最初那批源了。
+    assert!(content.contains("甲00。") && content.contains("乙00。"));
+    assert!(
+        !content.contains("乙49。"),
+        "第一代丢掉的句子不会在第三代复活"
+    );
+    assert!(
+        !content.contains("戊00。") && !content.contains("庚00。"),
+        "被上限挤掉的源与最初源可分"
+    );
+}
+
 // ==================== 步 12 · 召回（读方 + 注入段） ====================
 
 /// 步 12 读方：跨会话合并、新近度降序、被遗忘的不算；一条记忆都没有 ⇒ `None`。
@@ -1079,15 +1180,16 @@ fn merge_keeps_numbers_intact_and_counts_loss_as_fidelity() {
     );
 
     // 两份同文 ⇒ 去重后仍是完整信息 ⇒ 保真度 1.0（去重省的是位置，不是信息）。
-    let (merged, fidelity) = merge_with_fidelity(&["甲。乙。", "甲。乙。"], MERGE_MAX_CHARS);
+    let dup: [&str; 2] = ["甲。乙。", "甲。乙。"];
+    let (merged, fidelity) = merge_with_fidelity(&dup, &dup, MERGE_MAX_CHARS);
     assert_eq!(merged, "甲。\n乙。");
     assert_eq!(fidelity, 1.0);
 
     // 装不下 ⇒ 丢掉的那一半算失真（0.7 下界拦的就是它）。
     let long_a = "甲".repeat(MERGE_MAX_CHARS);
     let long_b = "乙".repeat(MERGE_MAX_CHARS);
-    let (merged, fidelity) =
-        merge_with_fidelity(&[long_a.as_str(), long_b.as_str()], MERGE_MAX_CHARS);
+    let long: [&str; 2] = [long_a.as_str(), long_b.as_str()];
+    let (merged, fidelity) = merge_with_fidelity(&long, &long, MERGE_MAX_CHARS);
     assert!(
         merged.chars().count() <= MERGE_MAX_CHARS,
         "合并产物不超上限（按整句装，不切半行）"

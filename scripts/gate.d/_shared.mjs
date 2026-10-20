@@ -79,7 +79,7 @@ export const BASELINE = {
   // baseline-allow rustTests: 批 T-178（02be8fc5）净删 1 条判据（1834→1833）——该批删掉
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table`：`LatentCapability`
   // 表的读方随 ClassifyOnly 退役而消失，删的是持续维护税，不是判据。基线随之下调，非放宽。
-  rustTests: 1909,
+  rustTests: 1910,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
@@ -107,7 +107,7 @@ export const BASELINE = {
   // T-176 挂生产内核：`invariants.rs` 的 seq 重号在「严格单调且无跳号」语义下
   // 报两条（重号位 + 其后错位），`termination.rs` 加了内核判定的边界自证
   // （恰在上界合法 / 越界一轮判否）。235 → 237。
-  verifyAsserts: 238,
+  verifyAsserts: 242,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

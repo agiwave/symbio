@@ -84,9 +84,9 @@ pub(crate) const JUDGMENT_TAG: &str = "判断";
 /// 单条记忆正文的字符上限（截断点）。
 pub(crate) const ENCODE_MAX_CHARS: usize = 400;
 
-/// 合并产物正文的字符上限。保真度按「源句保留率」算，装不下被丢的句子即失真
-/// ⇒ 两条都很长的记忆合并不过 `accept` 的 0.7 下界，**源记忆原样保留**
-/// （拒收路径在生产上可达，不是只活在测试里的死分支）。
+/// 合并产物正文的字符上限。保真度按「**最初源**的句子留存率」算（跨代累积），
+/// 装不下被丢的句子即失真 ⇒ 两条都很长的记忆合并不过 `accept` 的 0.7 下界，
+/// **源记忆原样保留**（拒收路径在生产上可达，不是只活在测试里的死分支）。
 pub(crate) const MERGE_MAX_CHARS: usize = 400;
 
 /// 触发一次巩固所需的**活**记忆条数（同标签）。取 4：每合并一次净减 1 条，
@@ -417,6 +417,58 @@ pub(crate) fn record_recalled(
 /// 返回 `(标签, seq)` 列表（条数不够 / 被拒收 ⇒ 不入列——拒收不是错误，
 /// 源记忆原样留在视图里，下一轮再试）。
 ///
+/// 沿 `sources` 溯源链收集**最初一代**的正文——保真度的比较基准。
+///
+/// 产物可以再次被巩固：只和当次两条源比会掩盖逐代累积的漂移（每代都「合格」，
+/// 产物却早已偏离最初的信息）。[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
+/// 的口径是「与源比，不与上一代比」，而 `sources` 载荷（I2 规定的产物溯源）就是
+/// 取回最初一代的路径：没有 `sources` 的事件即最初一代。
+///
+/// 取不到快照条目（历史归档外的边角）时退回该条自身的正文——那是唯一可知的来源，
+/// 不假装拿到了更早的一代。
+fn origin_texts(snapshot: &[Event], sources: &[(u64, &str)]) -> Vec<String> {
+    fn walk(
+        snapshot: &[Event],
+        seq: u64,
+        seen: &mut std::collections::HashSet<u64>,
+        out: &mut Vec<String>,
+    ) {
+        if !seen.insert(seq) {
+            return;
+        }
+        let Some(event) = snapshot
+            .iter()
+            .find(|e| e.seq.map(|s| s.value()) == Some(seq))
+        else {
+            return;
+        };
+        if let Some(sources) = event.payload.get("sources").and_then(|v| v.as_array()) {
+            for s in sources.iter().filter_map(|v| v.as_u64()) {
+                walk(snapshot, s, seen, out);
+            }
+            return;
+        }
+        if let Some(content) = event.payload.get("content").and_then(|v| v.as_str()) {
+            out.push(content.to_string());
+        }
+    }
+
+    let mut out = Vec::new();
+    for &(seq, fallback) in sources {
+        let before = out.len();
+        walk(
+            snapshot,
+            seq,
+            &mut std::collections::HashSet::new(),
+            &mut out,
+        );
+        if out.len() == before {
+            out.push(fallback.to_string());
+        }
+    }
+    out
+}
+
 /// 写入顺序是设计过的：**先写合并产物、后写两条 `memory.forgotten`**——后者失败
 /// ⇒ 视图里多一条重复（无害），前者失败 ⇒ 源记忆还在。反过来会丢记忆。
 pub(crate) fn consolidate(
@@ -467,8 +519,19 @@ pub(crate) fn consolidate(
         let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;
         let vis_scope = scope_of(source_seqs[0]);
 
+        // 保真度与**最初一代**比（跨代累积），不是与当次两条源比——后者每代都
+        // 合格却可能早已偏离最初的信息。溯源链从 `sources` 载荷取回。
+        let basis = origin_texts(
+            snapshot,
+            &[
+                (source_seqs[0], oldest[0].content.as_str()),
+                (source_seqs[1], oldest[1].content.as_str()),
+            ],
+        );
+        let basis: Vec<&str> = basis.iter().map(String::as_str).collect();
         let (content, fidelity) = merge_with_fidelity(
             &[oldest[0].content.as_str(), oldest[1].content.as_str()],
+            &basis,
             MERGE_MAX_CHARS,
         );
 

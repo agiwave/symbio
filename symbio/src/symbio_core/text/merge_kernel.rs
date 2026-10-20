@@ -11,6 +11,11 @@
 //! **它只算数，入格永远是写方的事**
 //! （[plan/01 §9.3](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：架构只提供位置，不提供算法）。
 //!
+//! **保真度的比较基准由调用方显式选定**（[`merge_with_fidelity`] 的 `basis`）：
+//! 当次留存率与跨代累积留存率是两个坐标系，不能靠函数默认值替调用方决定。
+//! 生产巩固传各源**最初一代**的并集（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
+//! 「与源比，不与上一代比」），逐代与上一代比会把累积漂移读没。
+//!
 //! ## 为什么住 core（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 2/3/6/7 组）
 //!
 //! 它原先由会话插件的 `memory_events.rs` 以 `#[path]` 就地声明，另一处调用方
@@ -58,12 +63,21 @@ pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     out
 }
 
-/// 合并两条来源：去重后的句子序列装进 `max_chars`，并算保真度。
+/// 合并两条来源，并把合并结果对**比较基准**的留存率作为保真度。
 ///
-/// 保真度 = 各来源中**确实保留在合并结果里**的句字数 / 各来源总字数。
+/// - `sources`：本次要合并的正文（当次的输入）；
+/// - `basis`：保真度的比较基准。传 `sources` = 当次留存率；传各源**最初一代**
+///   的正文 = 跨代累积留存率（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
+///   「与源比，不与上一代比」）。坐标系由调用方显式选定，不再藏在函数默认里。
+///
+/// 保真度 = `basis` 中**确实保留在合并结果里**的句字数 / `basis` 总字数。
 /// 同一件事两份都写了 ⇒ 两份的句子都算保留（去重省的是位置，不是信息）；
 /// 装不下被丢掉的才算失真——那正是 `accept` 的 0.7 下界要拦的东西。
-pub(crate) fn merge_with_fidelity(sources: &[&str], max_chars: usize) -> (String, f64) {
+pub(crate) fn merge_with_fidelity(
+    sources: &[&str],
+    basis: &[&str],
+    max_chars: usize,
+) -> (String, f64) {
     let mut units: Vec<String> = Vec::new();
     for s in sources {
         for unit in split_sentences(s) {
@@ -85,7 +99,7 @@ pub(crate) fn merge_with_fidelity(sources: &[&str], max_chars: usize) -> (String
     }
 
     let (mut retained, mut total) = (0usize, 0usize);
-    for s in sources {
+    for s in basis {
         for unit in split_sentences(s) {
             total += unit.chars().count();
             if kept.contains(&unit) {
