@@ -2,8 +2,9 @@
 //! **编译 → 观测 → 校准 → 回退**的每一环都要看得见，且每条口径各配一个反向用例
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
-use super::{compile, route, take_match, SkillLlmHit, SKILL_TAG};
+use super::{compile, route, take_match, SkillLlmHit};
 use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+use crate::symbio_core::SKILL_TAG;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FINAL,
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,

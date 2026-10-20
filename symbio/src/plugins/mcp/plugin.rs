@@ -264,7 +264,7 @@ fn validate_manifest(manifest: &serde_json::Value) -> Result<serde_json::Value, 
         _ => {
             if server.url.as_deref().unwrap_or("").trim().is_empty() {
                 return Err(PluginError::ValidationError(
-                    "http / sse 类型必须填写 url".to_string(),
+                    "http 类型必须填写 url".to_string(),
                 ));
             }
         }
@@ -275,7 +275,7 @@ fn validate_manifest(manifest: &serde_json::Value) -> Result<serde_json::Value, 
 
 /// `write { create }` 的最小清单。
 ///
-/// 校验要求 stdio 有 `command`、http/sse 有 `url`；这里给一份 stdio 骨架，
+/// 校验要求 stdio 有 `command`、http 有 `url`；这里给一份 stdio 骨架，
 /// 用户随后在详情里补命令参数，或改用其它传输类型。
 fn new_manifest(id: &str) -> serde_json::Value {
     serde_json::json!({

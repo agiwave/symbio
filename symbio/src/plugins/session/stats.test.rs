@@ -12,8 +12,8 @@ use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE, SKILL_TAG,
 };
 use std::path::{Path, PathBuf};
 
@@ -49,6 +49,7 @@ fn read_path(
         || fleet_of(root),
         viewer,
         principal,
+        false,
     )
 }
 
@@ -657,8 +658,8 @@ fn panel_matches_the_columns_it_describes() {
     let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     let panel = &got.panel;
 
-    // 分区固定三段：时延兜底 / 事实源 / 不变量
-    assert_eq!(panel.sections.len(), 3, "分区固定：{:?}", panel.sections);
+    // 分区固定四段：时延兜底 / 事实源 / 不变量 / 技能
+    assert_eq!(panel.sections.len(), 4, "分区固定：{:?}", panel.sections);
     assert_eq!(panel.subtitle.as_deref(), Some("s1"), "副标题带会话 id");
 
     // ① 时延段：一行对应一个档位，值与列逐字对上
@@ -724,6 +725,31 @@ fn panel_matches_the_columns_it_describes() {
         "兜底率 50% > 5% ⇒ 那一行需留意（面板不许把问题显示成没事）"
     );
     assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
+
+    // ④ 技能段：开关与已编译数都从那两列搬来（同源），不另算
+    let skills = &panel.sections[3];
+    let skill_row = skills.rows.first().expect("有技能行");
+    assert_eq!(
+        skill_row.value,
+        if got.skill_compile_enabled {
+            "开"
+        } else {
+            "关"
+        },
+        "开关行 = 列里的开关"
+    );
+    if got.skill_compile_enabled {
+        assert!(
+            skill_row
+                .hint
+                .as_deref()
+                .unwrap_or("")
+                .contains(&got.compiled_skills.to_string()),
+            "已编译数要对上：{:?} vs {}",
+            skill_row.hint,
+            got.compiled_skills
+        );
+    }
 }
 
 /// 反向：**有违规 ⇒ 那一行变「需留意」**，否则面板把问题显示成没事。
@@ -1406,6 +1432,69 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     )
     .expect("读数");
     assert_eq!(denied.calibration, serde_json::json!({ "by_skill": {} }));
+    assert!(denied.has_wal, "has_wal 独立于可见域");
+}
+
+/// 技能编译两列：`skill_compile_enabled`（部署开关）与 `compiled_skills`（本会话
+/// `memory.encoded{tag:"skill"}` 的条数）。
+///
+/// 判据是**两种零必须分得开**：关着 ⇒ `false`（配置选择）；开着但没编译 ⇒ `true` +
+/// `0`（运行结果）。计数不新增投影，只数事实源里已有的格子；读侧闸对它同样生效
+/// （无权 ⇒ 空切片 ⇒ 0），开关是部署事实、不随闸变化。
+#[test]
+fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
+    let wal = seed("skills");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    let read_with = |enabled: bool, viewer: Option<&str>| {
+        read(
+            "s1",
+            facts_of(&wal),
+            || fleet_of(&root),
+            viewer,
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
+            enabled,
+        )
+        .expect("读数")
+    };
+
+    // 关着：事实源里也没有技能格 ⇒ 两列各自如实
+    let off = read_with(false, None);
+    assert!(!off.skill_compile_enabled);
+    assert_eq!(off.compiled_skills, 0);
+
+    // 开着但本会话还没编译过 ⇒ 与上一行并读才分得清（两行计数相同、开关不同）
+    let on_empty = read_with(true, None);
+    assert!(on_empty.skill_compile_enabled);
+    assert_eq!(on_empty.compiled_skills, 0);
+
+    // 落两条技能 + 一条普通记忆：按 tag 认，不是按整格数
+    {
+        let store = EventWalStore::open(&wal).expect("WAL");
+        for (id, tag) in [("sk-1", SKILL_TAG), ("sk-2", SKILL_TAG), ("mem-1", "fact")] {
+            store
+                .append(
+                    Event::pending(
+                        id,
+                        EVENT_MEMORY_ENCODED,
+                        Entity::Memory,
+                        Verb::Opened,
+                        0,
+                        "user",
+                    )
+                    .with_produced_by(0)
+                    .with_payload(serde_json::json!({ "tag": tag, "trigger": id, "content": id })),
+                )
+                .expect("记忆入格");
+        }
+    }
+
+    let on = read_with(true, None);
+    assert_eq!(on.compiled_skills, 2, "只有 tag=skill 的两条算技能");
+
+    // 读侧闸：矩阵外主体 ⇒ 空切片 ⇒ 计数 0；开关是部署事实，照旧如实报告。
+    let denied = read_with(true, Some(crate::symbio_core::authz::PRINCIPAL_MAIN));
+    assert_eq!(denied.compiled_skills, 0);
+    assert!(denied.skill_compile_enabled);
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 

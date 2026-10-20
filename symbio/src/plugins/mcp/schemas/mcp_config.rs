@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// MCP 传输类型
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// 只有两条**真实存在**的路径：本地子进程与 HTTP。旧配置里的 `sse` 仍能读入，
+/// 但会按 HTTP 解释并在日志里提示迁移——变体不再承诺一条没有实现的传输。
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransportType {
     /// 本地进程通信（spawn 子进程 + stdin/stdout JSON-RPC）
@@ -10,16 +13,41 @@ pub enum McpTransportType {
     Stdio,
     /// HTTP REST API
     Http,
-    /// Server-Sent Events
-    Sse,
+}
+
+impl<'de> Deserialize<'de> for McpTransportType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// 线上词表：`sse` 只作为**读入**别名保留，写回时归一成 `http`。
+        #[derive(Deserialize)]
+        #[serde(rename_all = "lowercase")]
+        enum Wire {
+            Stdio,
+            Http,
+            Sse,
+        }
+
+        match Wire::deserialize(deserializer)? {
+            Wire::Stdio => Ok(Self::Stdio),
+            Wire::Http => Ok(Self::Http),
+            Wire::Sse => {
+                tracing::warn!(
+                    "MCP 配置的传输类型 `sse` 已退役（实现与 http 相同）——按 `http` 解释；保存后写回 `http`"
+                );
+                Ok(Self::Http)
+            }
+        }
+    }
 }
 
 /// MCP 服务器配置（持久化层权威定义）
 ///
 /// 字段设计：
-/// - `transport_type`：决定使用 stdio / http / sse 哪条 transport 路径
+/// - `transport_type`：决定使用 stdio / http 哪条 transport 路径（旧值 `sse` 读入时归一为 http）
 /// - `command` + `args` + `env`：stdio transport 必需
-/// - `url`：http / sse transport 必需
+/// - `url`：http transport 必需
 /// - `include_tools` / `exclude_tools`：工具过滤
 /// - `enabled`：运行时是否启用（仅作为"激活"标记，不影响持久化存储）
 ///
@@ -27,11 +55,11 @@ pub enum McpTransportType {
 /// 前端只做配置的增删改查；后端在 agent 真正需要某个工具时按需加载 transport。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    /// 传输类型（stdio / http / sse）
+    /// 传输类型（stdio / http；旧值 `sse` 读入时按 http）
     #[serde(rename = "type", default)]
     pub transport_type: McpTransportType,
 
-    /// stdio transport 命令（stdio 必需，http/sse 不使用）
+    /// stdio transport 命令（stdio 必需，http 不使用）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
 
@@ -43,11 +71,11 @@ pub struct McpServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
 
-    /// HTTP / SSE transport URL
+    /// HTTP transport URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 
-    /// BUG-MR28：HTTP / SSE transport 自定义请求头（如 `Authorization: Bearer ...`）
+    /// BUG-MR28：HTTP transport 自定义请求头（如 `Authorization: Bearer ...`）
     ///
     /// key = header 名称，value = header 值。stdio transport 忽略此字段。
     /// 注意：保留 `Mcp-Session-Id`、`Content-Type`、`Accept` 三个标准头由客户端管理，

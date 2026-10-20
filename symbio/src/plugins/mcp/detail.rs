@@ -2,7 +2,7 @@
 //!
 //! 设计基准 = `McpServerConfig`（server.json）的字段全集：
 //! - 传输类型 select 联动字段显隐（stdio → command/args/env；
-//!   http/sse → url/headers/timeout，经 `visible_when` 条件显隐）
+//!   http → url/headers/timeout，经 `visible_when` 条件显隐）
 //! - list / map 结构化控件（args 每行一项、env·headers 每行 KEY=VALUE，
 //!   序列化约定见 DetailForm 渲染器，两侧一致）
 //! - 工具白/黑名单折叠分区、启用开关
@@ -53,7 +53,7 @@ fn when_stdio() -> DetailCondition {
     cond("type", Some(serde_json::json!("stdio")), None)
 }
 
-/// HTTP/SSE 专属字段显隐条件（type != "stdio"，两者共用 url/headers/timeout）
+/// HTTP 专属字段显隐条件（type != "stdio"：url/headers/timeout 只在远程传输下出现）
 fn when_remote() -> DetailCondition {
     cond("type", None, Some(serde_json::json!("stdio")))
 }
@@ -88,15 +88,11 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                     },
                     DetailField {
                         required: true,
-                        options: vec![
-                            opt("stdio", "本地进程 (stdio)"),
-                            opt("http", "HTTP"),
-                            opt("sse", "SSE"),
-                        ],
+                        options: vec![opt("stdio", "本地进程 (stdio)"), opt("http", "HTTP")],
                         ..field(
                             "type",
                             "传输类型",
-                            "stdio 走本地子进程，http/sse 走远程端点",
+                            "stdio 走本地子进程，http 走远程端点",
                             "select",
                         )
                     },
@@ -125,7 +121,7 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                         required: true,
                         visible_when: Some(when_remote()),
                         placeholder: Some("https://example.com/mcp".into()),
-                        ..field("url", "端点 URL", "HTTP / SSE transport 的服务端点", "text")
+                        ..field("url", "端点 URL", "HTTP transport 的服务端点", "text")
                     },
                     DetailField {
                         visible_when: Some(when_remote()),

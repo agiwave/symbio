@@ -35,15 +35,8 @@ use std::collections::BTreeMap;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     calibration, Budget, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
-    EVENT_MEMORY_ENCODED,
+    EVENT_MEMORY_ENCODED, SKILL_TAG,
 };
-
-/// 技能的认知内容标签（`memory.encoded` 载荷里的 `tag`）。
-///
-/// 与 core 里 `SkillCompiler::compile` 写死的那一个字面量是同一份数据（ADR-043：
-/// 名字是数据、单点定义）——改这里之前先改 core，否则两边对不上、技能会被
-/// 当成普通记忆一路召回却不进路由。
-pub(crate) const SKILL_TAG: &str = "skill";
 
 /// 置信度阈值：低于它 ⇒ 不得走技能路径（S11 §5 反自动化回退）。
 ///

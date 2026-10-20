@@ -128,7 +128,7 @@ pub use actors::{ActorSpec, Pattern};
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
     GateDecision, IntentGate, Preemption, PreemptionDecider, Scope, SkillCompiler, SkillRoute,
-    SkillRouter,
+    SkillRouter, SKILL_TAG,
 };
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、

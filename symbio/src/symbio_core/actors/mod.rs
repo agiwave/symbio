@@ -44,7 +44,7 @@ pub use self::control::{
 };
 pub use self::reasoner::render_messages;
 pub use self::recall::recalled_event;
-pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter};
+pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter, SKILL_TAG};
 pub use self::spec::{ActorSpec, Pattern, Scope};
 
 // 仅测试面：这些符号在非测试构建里没有跨域消费者（用点就在各自的子模块内），

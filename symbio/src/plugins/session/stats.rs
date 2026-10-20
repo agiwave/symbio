@@ -40,7 +40,7 @@ use serde::Serialize;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, ReadingPanel, VisScope, SESSION_ID,
+    PluginPayload, ReadingPanel, VisScope, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
 };
 
 use super::plugin::SessionPlugin;
@@ -171,6 +171,21 @@ pub(crate) struct SessionStats {
     /// 另一种说法。两者由同一个源算出，且判据 `panel_matches_the_columns_it_describes`
     /// 钉住「不脱节」——否则就是两份真相。
     pub panel: crate::symbio_core::ReadingPanel,
+    /// 技能编译开关（部署配置 `skill_compile_enabled`，**不是**本会话的事实）。
+    ///
+    /// 与 [`Self::compiled_skills`] 并读才分辨得出两种「零技能」：`false` = 关着
+    /// （本轮轨迹不会被编译成技能）；`true` + `0` = 开着但本会话还没成功收束过
+    /// 可编译的轨迹。只有一列时两种零长同一个样子，而处置完全不同（一个是配置
+    /// 选择，一个是运行结果）。
+    ///
+    /// 读侧闸不影响本列：开关是部署事实，不是这份事实源里的内容。
+    pub skill_compile_enabled: bool,
+    /// 本会话**已编译技能数**：事实源里 `memory.encoded{tag:"skill"}` 的条数。
+    ///
+    /// 技能是事实、不是特殊类型（S11），故这里只数列里已有的格子，**不新增投影**。
+    /// 归四列那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
+    /// `0`，与「开着但没编译过」由 [`Self::skill_compile_enabled`] 分辨。
+    pub compiled_skills: usize,
     /// **实例级聚合**（P2：跨会话的 SLO 真数）。
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
@@ -434,10 +449,30 @@ fn panel_of(stats: &SessionStats) -> ReadingPanel {
         }],
     };
 
+    // 技能：开关与已编译数并排——两种「零技能」靠这一行分辨（关着 = 配置选择，
+    // 开着但 0 条 = 本会话还没产出可编译的轨迹）。
+    let skills = ReadingSection {
+        title: Some("技能".into()),
+        rows: vec![ReadingRow {
+            label: "编译开关".into(),
+            value: if stats.skill_compile_enabled {
+                "开".into()
+            } else {
+                "关".into()
+            },
+            hint: Some(if stats.skill_compile_enabled {
+                format!("本会话已编译 {} 条技能", stats.compiled_skills)
+            } else {
+                "关着 ⇒ 本轮轨迹不会编译成技能（与「开着但没编译过」不同）".into()
+            }),
+            tone: ReadingTone::Normal,
+        }],
+    };
+
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: vec![perf, continuity, invariants],
+        sections: vec![perf, continuity, invariants, skills],
     }
 }
 
@@ -467,12 +502,16 @@ pub(crate) struct StatsRequest {
 /// `session_principal` 是**本会话主体**（声誉列的 `own` 取谁），与读方身份是两回事：
 /// 读方是「谁在看」，会话主体是「这份承诺是谁立的」——把两者合成一个参数会让
 /// 「别人看我的声誉」退化成「别人的声誉」。
+///
+/// `skill_compile_enabled` 是部署开关（本函数不读配置，由调用方交值）：它与
+/// 「已编译技能数」并读才能分辨「关着」与「开着但没编译」两种零。
 pub(crate) fn read(
     session_id: &str,
     snapshot: Option<Vec<Event>>,
     deep_facts: impl FnOnce() -> Vec<Vec<Event>>,
     viewer: Option<&str>,
     session_principal: &str,
+    skill_compile_enabled: bool,
 ) -> Result<SessionStats, PluginError> {
     let has_wal = snapshot.is_some();
     // 完整史（归档段 + 未取代的那段）：`snapshot` 由存储层按 `range(0)` 口径交值。
@@ -643,6 +682,17 @@ pub(crate) fn read(
     // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（ axes 两族给有据的
     // 零 / 空，不给「缺列」——读方不必为每个键分诊它在不在）。
+    // 技能编译列：技能就是 `memory.encoded{tag:"skill"}` 这条事实（S11），故只数
+    // 切片里的格子，不另造投影。切片已按 `may_read` 取过 ⇒ 无权读的人得 0，
+    // 与「开着但没编译过」由部署开关 `skill_compile_enabled` 分辨。
+    let compiled_skills = snapshot
+        .iter()
+        .filter(|e| {
+            e.kind == EVENT_MEMORY_ENCODED
+                && e.payload.get("tag").and_then(|v| v.as_str()) == Some(SKILL_TAG)
+        })
+        .count();
+
     let fleet = if may_read {
         fleet_reading(&deep_facts())
     } else {
@@ -672,6 +722,8 @@ pub(crate) fn read(
         span,
         autonomy,
         fleet,
+        skill_compile_enabled,
+        compiled_skills,
         panel: ReadingPanel::default(),
     };
     Ok(SessionStats {
@@ -730,12 +782,16 @@ impl SessionPlugin {
             Some(agent) => crate::symbio_core::authz::principal_of(Some(&agent)),
             None => crate::symbio_core::authz::request_principal(ctx.as_ref()),
         };
+        // 技能编译开关是部署配置（不在这份事实源里）：与已编译数并读，才分得清
+        // 「关着」与「开着但没编译过」两种零。
+        let skill_compile_enabled = self.config.read().await.skill_compile_enabled;
         let stats = read(
             &sid,
             snapshot,
             || store.deep_snapshots(),
             viewer.as_deref(),
             &session_principal,
+            skill_compile_enabled,
         )?;
         Ok(PluginPayload::new(&stats))
     }

@@ -221,9 +221,7 @@ impl McpManager {
         // 2. 缓存 miss，调用 transport
         let result = match config.transport_type {
             McpTransportType::Stdio => self.discover_tools_stdio(config).await,
-            McpTransportType::Http | McpTransportType::Sse => {
-                self.discover_tools_http(name, config).await
-            }
+            McpTransportType::Http => self.discover_tools_http(name, config).await,
         };
 
         let raw = match result {
@@ -328,9 +326,7 @@ impl McpManager {
         let start = std::time::Instant::now();
         let result = match config.transport_type {
             McpTransportType::Stdio => self.test_connection_stdio(config).await,
-            McpTransportType::Http | McpTransportType::Sse => {
-                self.test_connection_http(name, config).await
-            }
+            McpTransportType::Http => self.test_connection_http(name, config).await,
         };
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match &result {
@@ -380,7 +376,7 @@ impl McpManager {
                 let _guard = lock.lock().await;
                 self.call_tool_stdio(config, tool_name, arguments).await
             }
-            McpTransportType::Http | McpTransportType::Sse => {
+            McpTransportType::Http => {
                 self.call_tool_http(name, config, tool_name, arguments)
                     .await
             }

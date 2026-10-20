@@ -165,11 +165,11 @@ default_provider_id: openai_main
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `type` | String | ✅ | `stdio` / `http` / `sse`（默认 `stdio`） |
+| `type` | String | ✅ | `stdio` / `http`（默认 `stdio`；存量 `sse` 按 `http` 读取并可在保存后写回） |
 | `command` | String | stdio 时 | 可执行文件 |
 | `args` | List[String] | ❌ | 命令行参数 |
 | `env` | Map[String,String] | ❌ | stdio 环境变量 |
-| `url` | String | http / sse 时 | 端点 |
+| `url` | String | http 时 | 端点 |
 | `enabled` | Bool | ❌ | 运行时是否启用（激活标记） |
 
 ### Telegram 插件

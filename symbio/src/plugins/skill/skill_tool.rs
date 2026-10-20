@@ -1,9 +1,8 @@
-use super::skill_response::SkillResponse;
+use super::skill_response::assemble_response;
 use crate::plugins::skill::types::Skill;
 use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::sync::Arc;
 
 pub struct SkillExecuteTool {
@@ -37,51 +36,14 @@ impl SkillExecuteTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 name 参数".to_string()))?;
 
-        let mut skill = self
+        let skill = self
             .skills
             .iter()
             .find(|s| s.name == name)
-            .ok_or_else(|| PluginError::NotFound(format!("Skill not found: {}", name)))?
-            .clone();
+            .ok_or_else(|| PluginError::NotFound(format!("Skill not found: {}", name)))?;
 
-        if let Some(hint) = &skill.argument_hint {
-            if args.get("args").is_none() {
-                return Err(PluginError::ValidationError(format!(
-                    "技能 '{}' 需要参数，但未提供。请提供以下参数：\n{}",
-                    skill.name, hint
-                )));
-            }
-        }
-
-        let skill_args: Value = args
-            .get("args")
-            .and_then(|v| v.as_str())
-            .map(serde_json::from_str)
-            .transpose()?
-            .unwrap_or_default();
-
-        let body_with_args = skill.substitute_variables(&skill.body, &skill_args);
-        skill.body = body_with_args;
-
-        let base_dir = Path::new(&skill.file_path)
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_string_lossy()
-            .to_string();
-
-        let instructions = format!(
-            "Base directory for this skill: {base_dir}\nImportant: ALWAYS resolve absolute paths from this base directory when working with scripts or referenced files in this skill.\n\n{}",
-            skill.body
-        );
-
-        Ok(serde_json::to_value(&SkillResponse {
-            name: skill.name,
-            body: instructions,
-            allowed_tools: skill.allowed_tools,
-            model: skill.model,
-            base_dir,
-            args: Some(skill_args),
-        })?)
+        let response = assemble_response(skill, args.get("args").and_then(Value::as_str))?;
+        Ok(serde_json::to_value(&response)?)
     }
 }
 

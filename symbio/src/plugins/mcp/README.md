@@ -14,8 +14,7 @@ Model Context Protocol 工具扩展插件。
 
 ### 传输类型
 - **stdio**: 本地进程通信
-- **HTTP**: REST API
-- **SSE**: Server-Sent Events
+- **HTTP**: REST API（响应侧的 `text/event-stream` 由 HTTP 传输直接解析，不是独立传输类型）
 
 ### 配置与路由
 

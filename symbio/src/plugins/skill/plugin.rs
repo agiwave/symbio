@@ -1,4 +1,4 @@
-use super::skill_response::SkillResponse;
+use super::skill_response::assemble_response;
 use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudget};
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
@@ -453,84 +453,28 @@ impl Plugin for SkillPlugin {
                 let skills = self
                     .list_skills(ctx.get(crate::symbio_core::WORKDIR))
                     .await?;
-                let mut skill =
-                    skills
-                        .into_iter()
-                        .find(|s| s.name == req.name)
-                        .ok_or_else(|| {
-                            PluginError::NotFound(format!("Skill not found: {}", req.name))
-                        })?;
+                let skill = skills
+                    .into_iter()
+                    .find(|s| s.name == req.name)
+                    .ok_or_else(|| {
+                        PluginError::NotFound(format!("Skill not found: {}", req.name))
+                    })?;
 
-                // 检查参数：如果技能需要参数但未提供，返回错误提示
-                if let Some(hint) = &skill.argument_hint {
-                    if req.args.is_none() {
-                        return Err(PluginError::ValidationError(format!(
-                            "技能 '{}' 需要参数，但未提供。请提供以下参数：\n{}",
-                            skill.name, hint
-                        )));
-                    }
-                }
-
-                // 解析参数
-                let args: serde_json::Value = req
-                    .args
-                    .map(|s| serde_json::from_str(&s))
-                    .transpose()?
-                    .unwrap_or_default();
-
-                // 参数替换
-                let body_with_args = skill.substitute_variables(&skill.body, &args);
-                skill.body = body_with_args;
-
-                // 返回技能描述（符合行业标准的行为）
-                let base_dir = Path::new(&skill.file_path)
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .to_string_lossy()
-                    .to_string();
-
-                let instructions = format!(
-                    "Base directory for this skill: {base_dir}\nImportant: ALWAYS resolve absolute paths from this base directory when working with scripts or referenced files in this skill.\n\n{}",
-                    skill.body
-                );
-
-                Ok(PluginPayload::new(&SkillResponse {
-                    name: skill.name,
-                    body: instructions,
-                    allowed_tools: skill.allowed_tools,
-                    model: skill.model,
-                    base_dir,
-                    args: Some(args),
-                }))
+                // 组装（参数提示检查 / 变量替换 / 基目录前缀）与 `read_skill` 同一处：
+                // 两条路径对同一个技能给出同一种答复，不再有「工具侧检查、兜底臂放过」。
+                Ok(PluginPayload::new(&assemble_response(
+                    &skill,
+                    req.args.as_deref(),
+                )?))
             }
             _ => {
                 let skills = self
                     .list_skills(ctx.get(crate::symbio_core::WORKDIR))
                     .await?;
-                if let Some(mut skill) = skills.into_iter().find(|s| s.name == path) {
-                    let args: serde_json::Value = serde_json::Value::Object(serde_json::Map::new());
-                    let body_with_args = skill.substitute_variables(&skill.body, &args);
-                    skill.body = body_with_args;
-
-                    let base_dir = Path::new(&skill.file_path)
-                        .parent()
-                        .unwrap_or_else(|| Path::new("."))
-                        .to_string_lossy()
-                        .to_string();
-
-                    let instructions = format!(
-                        "Base directory for this skill: {base_dir}\nImportant: ALWAYS resolve absolute paths from this base directory when working with scripts or referenced files in this skill.\n\n{}",
-                        skill.body
-                    );
-
-                    return Ok(PluginPayload::new(&SkillResponse {
-                        name: skill.name,
-                        body: instructions,
-                        allowed_tools: skill.allowed_tools,
-                        model: skill.model,
-                        base_dir,
-                        args: None,
-                    }));
+                if let Some(skill) = skills.into_iter().find(|s| s.name == path) {
+                    // 名称路由没有 args 入口 ⇒ 声明了 `argument_hint` 的技能在这里
+                    // 与 `skill/execute` 一样返回校验错误，而不是把未替换的模板直接交出去。
+                    return Ok(PluginPayload::new(&assemble_response(&skill, None)?));
                 }
                 Err(PluginError::NotFound(format!("路径不存在: {path}")))
             }

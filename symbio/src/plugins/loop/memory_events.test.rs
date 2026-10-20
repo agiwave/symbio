@@ -8,12 +8,12 @@
 //! - 步 13 巩固：**过 `accept` 才入格**——代数上界与保真度下界两个拒收分支都在
 //!   生产可达；过了就写合并产物 + 排除式遗忘两条源记忆（Log 不删）。
 
-use super::super::skill_events::SKILL_TAG;
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
     EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
     MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA, RECALL_SECTION_HEAD,
 };
+use crate::symbio_core::SKILL_TAG;
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::merge_kernel::split_sentences;

@@ -2,6 +2,14 @@
 
 use crate::symbio_core::Event;
 
+/// 技能的认知内容标签（`memory.encoded` 载荷里的 `tag`）。
+///
+/// 名字是数据、单点定义（ADR-043）：写方（[`SkillCompiler::compile`]）、读侧路由
+/// （`plugins/loop/skill_events.rs`）与读数口（`plugins/session/stats.rs`）都 `use`
+/// 这一处。两处各写一个字面量时，改一边不改另一边 ⇒ 技能被当成普通记忆召回却不进
+/// 路由，全程没有任何报错。
+pub const SKILL_TAG: &str = "skill";
+
 /// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）。
 ///
 /// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
@@ -31,7 +39,7 @@ impl SkillCompiler {
         .with_produced_by(source_seq) // 溯源 100%：指向源轨迹
         .with_payload(serde_json::json!({
             "content": response,
-            "tag": "skill",
+            "tag": SKILL_TAG,
             "skill_id": skill_id,
             "trigger": trigger,
         }))
