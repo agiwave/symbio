@@ -20,6 +20,7 @@ mod resume;
 mod round_hook;
 mod session_port;
 mod skill_events;
+mod stage_events;
 mod task_events;
 mod tokenizer;
 mod tool_dispatch;

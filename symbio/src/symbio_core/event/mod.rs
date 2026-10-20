@@ -72,6 +72,36 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// 与「用户连说了 5 句」对模型是不同的输入，而网格不该只保留前者。
 pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 
+/// **一次性阶段已执行**（载荷 `{ stage, round, reason?, source? }`）。落在 `turn × asserted`。
+///
+/// ## 它解决的是什么（ADR-107 判据 2）
+///
+/// `policy.classify` / `policy.recall` / `policy.compress` 的判据在一轮内**恒真**
+/// （`round == 0` 直到收轮才变），只有「这一步做完了没有」能让它转假。而这层簿记
+/// 若存在内存里，drive 的第二次迭代会再执行一遍同一步；若存在 `TurnState` 里，
+/// 它就与事实源分叉（PL-014 §2 禁止的第二份状态）。本格是第三选项：**「已做」
+/// 落为事实**，下一问问表时从它投影 `done`。
+///
+/// `stage` 取环的胶囊臂名（`decide` / `recall` / `compress`），与日志里那条命名
+/// 同源；`round` 是 `TurnState::request_round`——压缩与召回的「本轮一次」就是按它计
+/// 的口径，跨请求轮重新可做。事件 id 是 `st-{turn}-{round}-{stage}`：
+/// `(turn, round, stage)` 就是这一格的**同一性**，续写幕重放同一轮时撞幂等键 ⇒
+/// 按已做处理（见 `stage_events`）。
+///
+/// ## 为什么不是 `verdict.asserted`
+///
+/// `verdict.asserted` 归淘汰 / 授权覆盖层（载荷 `{ subject, capability, change, … }`），
+/// 语义是「主体对能力的断言」。判决事实是**这一轮走了哪条路、为什么**，两者只是
+/// 名字里都有 verdict。
+///
+/// ## 判决事实为什么能与「已做」同格
+///
+/// 两者都是「这一轮这一段发生了什么」，只是载荷不同：`classify` 多带
+/// `reason` + `source`（`rule` / `model` / `fallback` / `absent`），其余阶段只带
+/// 身份。分成两格会让「一次阶段执行」落两条事件、两个幂等键——而它们描述的是
+/// 同一件事。
+pub const EVENT_TURN_STAGE: &str = "turn.stage";
+
 /// **轮边界汇报**（载荷 `{ text, tool_rounds, quiet_ms }`）。落在 `turn × asserted`。
 ///
 /// ## 它为什么是事实（缺口 4）

@@ -56,6 +56,7 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         recalled,
         skill_obs,
         prefix,
+        stages,
         opening_text,
         opening_dialog,
         presentation_tree,
@@ -97,6 +98,9 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                     user_text,
                     &h.content,
                     bridge.clone(),
+                    // 反射档不经过 `prepare_turn`，阶段事实由本入口自己落
+                    // （用户格之后，见 `run_reflex`）。
+                    &stages,
                 )
                 .await
         }
@@ -112,6 +116,9 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 resume: resume_anchor,
                 actor: actor.clone(),
                 prefix,
+                // 一次性阶段的「已做」与判决事实（ADR-107 判据 2）：运行器在
+                // 用户格之后落格（I2 的溯源锚那时才有）。
+                stages,
                 // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
                 //
                 // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。

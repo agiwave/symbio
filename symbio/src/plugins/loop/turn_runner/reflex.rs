@@ -39,9 +39,9 @@ impl TurnRunner {
     ///
     /// ## 为什么参数多到要 `allow`
     ///
-    /// 七个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 主体 / 用户发言 / 产物 /
-    /// 出口），与 [`Self::run_with_tools`] 同款理由：打包成一个结构体只是把"七个端口"
-    /// 改名叫"一个结构体 + 七个字段"，调用方仍要逐个填。
+    /// 八个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 主体 / 用户发言 / 产物 /
+    /// 出口 / 阶段事实），与 [`Self::run_with_tools`] 同款理由：打包成一个结构体只是把
+    /// "八个端口"改名叫"一个结构体 + 八个字段"，调用方仍要逐个填。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_reflex<S>(
         &self,
@@ -52,6 +52,7 @@ impl TurnRunner {
         utterance: &str,
         text: &str,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+        stages: &[super::super::stage_events::StageFact],
     ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
@@ -76,6 +77,9 @@ impl TurnRunner {
                 })),
             )
             .map(|seq| seq.value())?;
+        // 一次性阶段（判决 / 召回 / 压缩）：反射档不经过 `prepare_turn`，但同样在
+        // 用户格之后落（I2 的溯源锚）；此处的 `done` 同样让本轮后续不再问这些格。
+        super::super::stage_events::land(store, turn, user_seq, &actor.principal, stages)?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
         if !closure_granted(actor, ClosureKind::Speech) {

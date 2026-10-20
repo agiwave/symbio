@@ -254,8 +254,14 @@ impl Site {
 /// | `progress` | `RoundBoundary` | 配置快照（`SessionConfig` 的四个旋钮） |
 /// | `auto_compress` | `Compress` | 请求快照（`TurnRequest::auto_compress`） |
 /// | `has_facts` | `TurnPrepare` | 存储层的能力布尔（`SessionStore::is_persistent`，临时会话为假） |
+/// | `done` | `TurnHead` / `Compress` / `TurnPrepare` | 一次性阶段本次执行是否已做（`stage_events` 的 `turn.stage` 折叠） |
 /// | `resume_allowed` | `Reflex` | 续写锚点为空（续写轮不走快路，见 `turn_exec`） |
 /// | `has_match` | `Reflex` | `skill_events::take_match` 的结论（同一次查询，判它用的就是它） |
+///
+/// `done` 只出现在**一次性**的三格里：它们的判据在一轮内恒真（`round == 0` 直到
+/// 收轮才变、`auto_compress` 是开关不是水位），「这一步做完了没有」是唯一能让
+/// 它们转假的量（ADR-107 判据 2）。`RoundBoundary` / `Reflex` 每轮重新判定，
+/// 没有「已做」这回事——它们不持有该字段，所以也读不到。
 ///
 /// `round` 出现在三个变体里是**同一个语义**（「这是第几次请求 / 第几个工具轮」），
 /// 不是三份状态：它在三个决策点各有自己的取值点，而这三处本来就要各自回答
@@ -269,6 +275,8 @@ pub(crate) enum LoopState {
         round: usize,
         has_utterance: bool,
         classify_enabled: bool,
+        /// 本轮判决是否已执行过（`turn.stage` 的 `decide` 格）。
+        done: bool,
     },
     /// 轮边界汇报。
     RoundBoundary {
@@ -278,9 +286,18 @@ pub(crate) enum LoopState {
         progress: ProgressPolicy,
     },
     /// 自动压缩（步骤 3 ①）。
-    Compress { auto_compress: bool },
+    Compress {
+        auto_compress: bool,
+        /// 本请求轮是否已进过压缩产线（`turn.stage` 的 `compress` 格）。
+        done: bool,
+    },
     /// 轮首准备（步骤 3 ③）。
-    TurnPrepare { round: usize, has_facts: bool },
+    TurnPrepare {
+        round: usize,
+        has_facts: bool,
+        /// 本轮是否已召回（`turn.stage` 的 `recall` 格）。
+        done: bool,
+    },
     /// 反射档（步骤 3 ④）。
     Reflex {
         resume_allowed: bool,
@@ -289,12 +306,18 @@ pub(crate) enum LoopState {
 }
 
 impl LoopState {
-    /// 轮首（步骤 2b）：判决只读这三个量。
-    pub(crate) fn turn_head(round: usize, has_utterance: bool, classify_enabled: bool) -> Self {
+    /// 轮首（步骤 2b）：判决只读这四个量。
+    pub(crate) fn turn_head(
+        round: usize,
+        has_utterance: bool,
+        classify_enabled: bool,
+        done: bool,
+    ) -> Self {
         Self::TurnHead {
             round,
             has_utterance,
             classify_enabled,
+            done,
         }
     }
 
@@ -318,14 +341,21 @@ impl LoopState {
         }
     }
 
-    /// 自动压缩格（步骤 3 ①）：只填那个开关。
-    pub(crate) fn compress(auto_compress: bool) -> Self {
-        Self::Compress { auto_compress }
+    /// 自动压缩格（步骤 3 ①）：开关 + 本请求轮是否已进过产线。
+    pub(crate) fn compress(auto_compress: bool, done: bool) -> Self {
+        Self::Compress {
+            auto_compress,
+            done,
+        }
     }
 
     /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
-    pub(crate) fn turn_prepare(round: usize, has_facts: bool) -> Self {
-        Self::TurnPrepare { round, has_facts }
+    pub(crate) fn turn_prepare(round: usize, has_facts: bool, done: bool) -> Self {
+        Self::TurnPrepare {
+            round,
+            has_facts,
+            done,
+        }
     }
 
     /// 反射档格（步骤 3 ④）：两个条件都是布尔，都是同一次查询的结果。
@@ -664,8 +694,11 @@ pub(crate) fn builtin() -> &'static Registry {
 ///   工具轮次里循环回顶部时用户没再说话，再判一次就是拿同一句话重判。
 /// - `has_utterance`：`resume` / 心跳 / 无发言轮次没有可判的话。
 /// - `classify_enabled`：调用方关掉判决 ⇒ 与未挂载 `classify` 逐字一致（全进工具循环）。
+/// - `!done`：本轮的判决**已经执行过**（`turn.stage` 的 `decide` 格）⇒ 不再认领。
+///   前三条在一轮内恒真，没有这一条，外环 `drive` 的第二次迭代会把同一句话再判
+///   一遍（ADR-107 §3 的第一条实例）。
 ///
-/// 三个字段只有 `TurnHead` 变体有——判据写在别的变体上不了编译。`let ... else`
+/// 四个字段只有 `TurnHead` 变体有——判据写在别的变体上不了编译。`let ... else`
 /// 的 `else` 是**兜底不是路径**：`decide` 已按 `state.site()` 过滤，走到 else
 /// 意味着这一行的 `site` 与判据接受的变体对不上（改错常量表）。此处不 panic
 /// ——只可能因改错常量而触发的问题不值得占一个 panic 面（见 `with_builtin_rows`
@@ -675,11 +708,12 @@ fn policy_classify(state: &LoopState) -> Option<Capsule> {
         round,
         has_utterance,
         classify_enabled,
+        done,
     } = state
     else {
         return None;
     };
-    (*round == 0 && *has_utterance && *classify_enabled).then_some(Capsule::Decide)
+    (*round == 0 && *has_utterance && *classify_enabled && !*done).then_some(Capsule::Decide)
 }
 
 /// 轮边界汇报的判据（`chat_loop::round_report_hook` 每跑完一个工具批次问一次）。
@@ -703,26 +737,43 @@ fn policy_report(state: &LoopState) -> Option<Capsule> {
 
 /// 自动语义压缩的判据（步骤 3 ①）。
 ///
-/// 只有开关这一条：**压不压得动**（水位、熔断、失败回滚）是压缩内核自己的事，
-/// 本行答的是"这一格要不要进压缩这条产线"。把水位也搬进来会变成两份阈值——
-/// 一份在 `auto_compress_process` 里真正生效，一份在这里只是重复判断。
+/// 开关 + 本请求轮是否已进过产线：**压不压得动**（水位、熔断、失败回滚）是压缩
+/// 内核自己的事，本行答的是"这一格要不要进压缩这条产线"。把水位也搬进来会变成
+/// 两份阈值——一份在 `auto_compress_process` 里真正生效，一份在这里只是重复判断。
+///
+/// `!done` 的口径是**本请求轮**（`TurnState::request_round`）：内核每轮重新取水位，
+/// 未过水位时返回 `Ok(None)`——那不是失败，下一轮照常再试。若把「已做」扩到整轮，
+/// 后段的压缩就永远不会发生（ADR-107 §3 的第三条实例是 drive 反复空转，直线代码
+/// 的失效形态则是「压不上了」）。
 fn policy_compress(state: &LoopState) -> Option<Capsule> {
-    let LoopState::Compress { auto_compress } = state else {
+    let LoopState::Compress {
+        auto_compress,
+        done,
+    } = state
+    else {
         return None;
     };
-    auto_compress.then_some(Capsule::Compress)
+    (*auto_compress && !*done).then_some(Capsule::Compress)
 }
 
 /// 轮首准备的判据（步骤 3 ③）。
 ///
 /// - `round == 0`：同一轮内记忆不漂移、事实源只扫一遍，后续工具轮复用
 ///   同一份视图（与 classify / history 同一条「每轮一次」口径）；
-/// - `has_facts`：临时会话没有事实源——没有事实源就没有记忆，不读不写。
+/// - `has_facts`：临时会话没有事实源——没有事实源就没有记忆，不读不写；
+/// - `!done`：本轮已召回（`turn.stage` 的 `recall` 格）⇒ 不再认领。续写幕是
+///   **新的执行**、`done` 从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当
+///   重取），撞幂等键由 `stage_events::land` 按「已做过」吸收。
 fn policy_recall(state: &LoopState) -> Option<Capsule> {
-    let LoopState::TurnPrepare { round, has_facts } = state else {
+    let LoopState::TurnPrepare {
+        round,
+        has_facts,
+        done,
+    } = state
+    else {
         return None;
     };
-    (*round == 0 && *has_facts).then_some(Capsule::Recall)
+    (*round == 0 && *has_facts && !*done).then_some(Capsule::Recall)
 }
 
 /// 反射档的判据（步骤 3 ④）。两关缺一不可：

@@ -37,10 +37,10 @@ fn progress() -> ProgressPolicy {
 /// 某一格「全部条件都满足」的问表状态 —— 逐条件用例与可达性用例的基准。
 fn call_of(site: Site) -> LoopState {
     match site {
-        Site::TurnHead => LoopState::turn_head(0, true, true),
+        Site::TurnHead => LoopState::turn_head(0, true, true, false),
         Site::RoundBoundary => LoopState::round_boundary(3, 90_000, 0, progress()),
-        Site::Compress => LoopState::compress(true),
-        Site::TurnPrepare => LoopState::turn_prepare(0, true),
+        Site::Compress => LoopState::compress(true, false),
+        Site::TurnPrepare => LoopState::turn_prepare(0, true, false),
         Site::Reflex => LoopState::reflex(true, true),
     }
 }
@@ -294,7 +294,7 @@ fn classify_does_not_fire_after_tool_rounds() {
     // 再判一次就是拿同一句话重判。
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_head(1, true, true))
+            .decide(&LoopState::turn_head(1, true, true, false))
             .capsule(),
         None
     );
@@ -305,7 +305,7 @@ fn classify_does_not_fire_without_utterance() {
     // 只差 `has_utterance`：resume / 心跳 / 无发言轮次没有可判的话。
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_head(0, false, true))
+            .decide(&LoopState::turn_head(0, false, true, false))
             .capsule(),
         None
     );
@@ -316,7 +316,20 @@ fn classify_does_not_fire_when_switch_is_off() {
     // 只差 `classify_enabled`：关掉判决 ⇒ 与未挂载 `classify` 逐字一致。
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_head(0, true, false))
+            .decide(&LoopState::turn_head(0, true, false, false))
+            .capsule(),
+        None
+    );
+}
+
+#[test]
+fn classify_does_not_fire_once_it_has_run() {
+    // 只差 `done`：前三条在一轮内**恒真**（`request_round` 只在收轮后 +1），
+    // 没有这一条，任何以「再问一次表」为形状的驱动都会拿同一句话重判——
+    // ADR-107 判据 2 的第一条实例。
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::turn_head(0, true, true, true))
             .capsule(),
         None
     );
@@ -399,14 +412,24 @@ fn report_interval_threshold_is_inclusive() {
 // ── policy.compress / policy.recall / policy.reflex：逐条件钉 ──────────
 
 #[test]
-fn compress_follows_the_request_switch_only() {
+fn compress_requires_the_switch_and_an_unused_round() {
     assert_eq!(
-        builtin().decide(&LoopState::compress(true)).capsule(),
+        builtin()
+            .decide(&LoopState::compress(true, false))
+            .capsule(),
         Some(Capsule::Compress)
     );
     // 关掉自动压缩 ⇒ 不进产线。压不压得动是内核的事，本行只管进不进。
     assert_eq!(
-        builtin().decide(&LoopState::compress(false)).capsule(),
+        builtin()
+            .decide(&LoopState::compress(false, false))
+            .capsule(),
+        None
+    );
+    // 只差 `done`：本请求轮已进过产线 ⇒ 不再进。口径是**请求轮**而不是整轮——
+    // 内核每轮重新取水位，扩到整轮会让后段压缩永远不发生。
+    assert_eq!(
+        builtin().decide(&LoopState::compress(true, true)).capsule(),
         None
     );
 }
@@ -433,21 +456,28 @@ fn reflex_requires_a_fresh_turn_and_a_match() {
 fn recall_requires_first_round_and_a_session_dir() {
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_prepare(0, true))
+            .decide(&LoopState::turn_prepare(0, true, false))
             .capsule(),
         Some(Capsule::Recall)
     );
     // 只差 `round == 0`：同一轮内记忆不漂移，事实源只扫一遍。
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_prepare(1, true))
+            .decide(&LoopState::turn_prepare(1, true, false))
             .capsule(),
         None
     );
     // 只差 `has_facts`：临时会话没有事实源，不读不写。
     assert_eq!(
         builtin()
-            .decide(&LoopState::turn_prepare(0, false))
+            .decide(&LoopState::turn_prepare(0, false, false))
+            .capsule(),
+        None
+    );
+    // 只差 `done`：本轮已召回过 ⇒ 不再认领（同一轮内视图不漂移的判据由此可执行）。
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::turn_prepare(0, true, true))
             .capsule(),
         None
     );
@@ -570,7 +600,10 @@ fn adding_a_second_row_to_a_site_is_pure_registration() {
         site: Site::TurnPrepare,
         prio: 5,
         decide: |s| {
-            let LoopState::TurnPrepare { round, has_facts } = s else {
+            let LoopState::TurnPrepare {
+                round, has_facts, ..
+            } = s
+            else {
                 return None;
             };
             (*round == 0 && *has_facts).then_some(Capsule::Recall)

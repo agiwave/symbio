@@ -38,7 +38,8 @@ mod view;
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{
-    event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED,
+    event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_STAGE,
+    EVENT_TURN_SUPPLEMENTED,
 };
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,

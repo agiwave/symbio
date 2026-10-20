@@ -448,6 +448,9 @@ pub async fn run_chat_loop(
             turn.request_round,
             first_utterance.is_some(),
             orchestrator.classify_enabled,
+            // 本次执行里已经判过就不再来一遍（ADR-107 判据 2）：前三条在这一轮内
+            // 恒真，没有这一条，任何以「再问一次表」为形状的驱动都会重判同一句话。
+            turn.stage_done(turn.request_round, super::loop_registry::Capsule::Decide),
         );
         let head_hit = super::loop_registry::builtin().decide(&head_state);
         if let Some(hit) = head_hit.hit() {
@@ -466,6 +469,13 @@ pub async fn run_chat_loop(
                 // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式
                 // 会让不可变借用活到整个 `if let` 体（Rust 2021 的临时值规则）。
                 let verdict = decide_turn(orchestrator, &ctx, &context, utterance).await;
+                // 判决事实 + 「已做」同一格：`reason` / `source` 是这次走了哪条路的
+                // 唯一事实面记录，`done` 是下一问问表时不再重判的依据。落格在
+                // `turn_exec`（写者令牌在那边），这里只产草稿。
+                turn.mark_stage(super::stage_events::StageFact::classify(
+                    turn.request_round,
+                    verdict.as_ref(),
+                ));
                 if let Some(verdict) = verdict {
                     // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是"这一轮怎么办"，
                     // 而 `RunSnapshot` 说的是"干到哪一步"——只有 `Report` 读它，
@@ -559,6 +569,9 @@ pub async fn run_chat_loop(
                             // 答话轮同样要落「本轮之前那次压缩」这一格——它不进
                             // `execute_turn`，不带上就漏了（见该函数的入参文档）。
                             context.consolidated.take().as_deref(),
+                            // 判过的阶段（此刻是 classify）随答话轮一起落格：这一轮
+                            // 不进 `execute_turn`，不递过去判决事实就丢了。
+                            std::mem::take(&mut turn.stages_pending),
                         )
                         .await
                         {
@@ -713,6 +726,8 @@ pub async fn run_chat_loop(
             prefix: request_view_prefix(&inputs.request_sections),
             // 压缩的寄存位（S2.7-b2）：`None` = 本轮没压过（常态）。
             consolidation: consolidation.as_deref(),
+            // 本轮已执行的一次性阶段（判决 / 召回 / 压缩）：落格在运行器（用户格之后）。
+            stages: std::mem::take(&mut turn.stages_pending),
             // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
             // 让「用户中途插话」**折进本轮**。抽干住在 session（队列与配置都在那边），
             // 驱动器经端口取——异步，因为动作面是异步的。

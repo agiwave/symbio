@@ -7,6 +7,7 @@
 use crate::symbio_core::CapabilityMeta;
 
 use super::super::loop_registry::{builtin, Capsule, LoopState};
+use super::super::stage_events::StageFact;
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -165,7 +166,14 @@ pub(crate) async fn prepare_turn_inputs(
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
     // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
-    let recall_state = LoopState::turn_prepare(turn.request_round, context.session.is_persistent());
+    // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格）。
+    // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
+    let recall_done = turn.stage_done(turn.request_round, Capsule::Recall);
+    let recall_state = LoopState::turn_prepare(
+        turn.request_round,
+        context.session.is_persistent(),
+        recall_done,
+    );
     if builtin().decide(&recall_state).capsule() == Some(Capsule::Recall) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
@@ -212,6 +220,9 @@ pub(crate) async fn prepare_turn_inputs(
         let fast_armed = context.session.skill_fast_path();
         turn.skill_route = routing.obs;
         turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
+        // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
+        // 落格交给运行器（写者令牌在 `turn_exec`）。
+        turn.mark_stage(StageFact::ran(Capsule::Recall, turn.request_round));
     }
     let recall_section = turn
         .recall_view
@@ -300,8 +311,11 @@ pub(crate) async fn apply_compaction(
 ) -> Result<(), TurnExit> {
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
+    // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
+    // 下一轮照常再试；但同一轮内不重复进产线（ADR-107 判据 2）。
+    let compress_done = turn.stage_done(turn.request_round, Capsule::Compress);
     if builtin()
-        .decide(&LoopState::compress(req.auto_compress))
+        .decide(&LoopState::compress(req.auto_compress, compress_done))
         .capsule()
         == Some(Capsule::Compress)
     {
@@ -331,6 +345,9 @@ pub(crate) async fn apply_compaction(
                 plugin_warn!("session", "[Compress] 自动压缩失败: {e}");
             }
         }
+        // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
+        // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
+        turn.mark_stage(StageFact::ran(Capsule::Compress, turn.request_round));
     }
     Ok(())
 }

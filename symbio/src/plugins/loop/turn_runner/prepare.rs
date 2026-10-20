@@ -63,6 +63,7 @@ where
         user_meta,
         nodes,
         abort,
+        stages,
     } = input;
     // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
     let viewer = Some(actor.principal.as_str());
@@ -104,6 +105,13 @@ where
         }
         Some(r) => r.user_seq,
     };
+    // 1′. 一次性阶段的「已做」与判决事实（ADR-107 判据 2）：`classify` / `recall` /
+    // `compress` 在本轮执行过 ⇒ 各落一格 `turn.stage`。放在用户格之后：断言类
+    // 事件必须带溯源锚点（I2），而那只有落完用户格才有。
+    //
+    // 续写幕复用同一 turn 号、`request_round` 从 0 重来，召回 / 压缩会重跑——重跑
+    // 时撞幂等键 ⇒ `land` 按「已做过」吸收（不重复落、也不失败）。
+    super::super::stage_events::land(store, turn, user_seq, &actor.principal, &stages)?;
     // 1a. 对话面开场白（T-056）：`Escalate` 首响——本轮随后**照进工具循环**，
     // 所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
     //

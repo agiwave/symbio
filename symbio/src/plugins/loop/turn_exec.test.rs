@@ -119,6 +119,7 @@ fn tool_free_req<'a>(
         // 请求级前缀：测试不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
+        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         user_meta: None,
@@ -226,6 +227,7 @@ async fn supplements_become_facts_visible_next_turn() {
         skill_hits: &[],
         prefix: None,
         consolidation: None,
+        stages: Vec::new(),
         supplements: Some(supplements),
         supplemental_no: Default::default(),
         user_meta: None,
@@ -786,6 +788,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
+        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         user_meta: None,
@@ -999,6 +1002,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         skill_hits: &[],
         prefix: None,
         consolidation: None,
+        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         user_meta: None,
@@ -1228,6 +1232,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
+        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         user_meta: None,
