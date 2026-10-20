@@ -4,7 +4,6 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::capability_mount;
 use crate::symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use tempfile::TempDir;
 
@@ -29,22 +28,20 @@ fn plugin(tmp: &TempDir, config: SettingConfig) -> Arc<SettingPlugin> {
     ))
 }
 
-/// 缺省（什么都没填）⇒ 不注入，但挂载点照旧交出
+/// 缺省（什么都没填）⇒ 不注入，但视图照旧交出（容器据此派生挂载行）
 #[tokio::test]
 async fn default_settings_inject_nothing_but_keep_the_mount() {
     let tmp = TempDir::new().unwrap();
     let p = plugin(&tmp, SettingConfig::default());
     let (ctx, visitor) = ctx("@vfs/setting");
 
-    p.traverse(String::new(), ctx).await.unwrap();
+    p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(
         capability_prompts(&*visitor).await.is_empty(),
         "缺省状态不该改变任何一轮的提示词"
     );
-    assert!(capability_mount(&*visitor, PLUGIN_ID_SETTING)
-        .await
-        .is_some());
+    assert!(p.get_vfs_provider().is_some());
 }
 
 /// 填了档案 ⇒ 注入一段【本智能体】
@@ -83,14 +80,7 @@ async fn mount_serves_the_config_document() {
     );
 
     let nodes = p
-        .dispatch(
-            &vctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()

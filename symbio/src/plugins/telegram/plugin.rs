@@ -7,9 +7,7 @@ use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
     PLUGIN_ID_TELEGRAM,
 };
-use crate::symbio_core::{
-    CapabilityRow, DetailDefinition, DetailField, DynVdfsProvider, SuccessResponse,
-};
+use crate::symbio_core::{DetailDefinition, DetailField, SuccessResponse};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -634,13 +632,6 @@ impl Plugin for TelegramPlugin {
             )));
         }
 
-        // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
-        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            let me: DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_TELEGRAM, me))
-                .await;
-        }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
 

@@ -129,9 +129,6 @@ pub struct VdfsWriteRequest {
     /// 允许创建缺失的中间目录 / 节点
     #[serde(default)]
     pub create: bool,
-    /// 乐观并发：期望的当前版本
-    #[serde(default)]
-    pub etag: Option<String>,
 }
 
 impl VdfsWriteRequest {
@@ -141,19 +138,16 @@ impl VdfsWriteRequest {
             (Some(t), _) => VdfsContent {
                 size: t.len() as u64,
                 text: Some(t.clone()),
-                etag: self.etag.clone(),
                 create: self.create,
                 ..Default::default()
             },
             (None, Some(b)) => VdfsContent {
                 b64: Some(b.clone()),
                 binary: true,
-                etag: self.etag.clone(),
                 create: self.create,
                 ..Default::default()
             },
             (None, None) => VdfsContent {
-                etag: self.etag.clone(),
                 create: self.create,
                 ..Default::default()
             },

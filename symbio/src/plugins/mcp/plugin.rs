@@ -390,7 +390,6 @@ impl VdfsProvider for McpPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: generated,
                     created,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -578,12 +577,6 @@ impl Plugin for McpPlugin {
         let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()));
         };
-
-        // 直接注册插件自身为 VDFS 挂载点（不经实体层与适配器）
-        let vdfs_provider: Arc<dyn crate::symbio_core::VdfsProvider> = self.clone();
-        tool_visitor
-            .put(CapabilityRow::mount(PLUGIN_ID_MCP, vdfs_provider))
-            .await;
 
         let cfg = self.config.read().await.clone();
 

@@ -8,7 +8,7 @@
 //!
 //! | | 写 | 读 |
 //! |---|---|---|
-//! | 挂载点 | `put(CapabilityRow::mount(目录名, provider))` | [`capability_mounts`] / [`capability_mount`] |
+//! | 挂载点 | 容器按 [`Plugin::get_vfs_provider`](crate::symbio_core::Plugin::get_vfs_provider) 派生后 `put(CapabilityRow::mount(实例名, provider))` | [`capability_mounts`] / [`capability_mount`] |
 //! | 根 | `put(CapabilityRow::mount_root(provider))` | [`capability_vdfs_root`] |
 //!
 //! 根行带**根位**（[`CapabilityRow::active`]），单槽移交因此与模型族的生效位同一条规则
@@ -29,7 +29,9 @@
 //! **不要因为「没人用」删掉它们**——删掉的是将来那条裁剪路径的落点。
 //!
 //! 与工具 / 模型 / 提示词**共用同一次 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播**：
-//! 插件在注册自己挂载点的同时顺带注册工具，会话链路与前端链路因此拿到同一份集合。
+//! 容器在这一次广播里为每个交得出 VDFS 视图（`Plugin::get_vfs_provider` 返回 `Some`）
+//! 的子插件**派生**挂载行——挂载名取实例表挂载名，插件自己不再注册；
+//! 根行同样由容器（装配点）写入。写口因此仍只有 `Registry::put` 一处。
 
 use super::{CapabilityRowKind, Registry};
 use crate::symbio_core::VdfsProvider;

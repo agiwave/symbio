@@ -680,7 +680,6 @@ impl VdfsProvider for ModelPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: generated,
                     created,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -778,13 +777,6 @@ impl Plugin for ModelPlugin {
         }
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // VDFS 挂载点：本插件自身就是 provider（`<根>/model`）——
-            // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for ModelPlugin` 承载
-            let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
-            tool_visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_MODEL, vdfs_provider))
-                .await;
-
             let providers = self.providers.read().await;
             // 解析唯一生效 Provider：请求显式指定 > 默认 > 首个启用
             let requested = ctx

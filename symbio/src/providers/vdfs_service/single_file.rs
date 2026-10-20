@@ -229,7 +229,6 @@ impl VdfsProvider for SingleFileVdfs {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created,
-                    etag: None,
                 }))
             }
 

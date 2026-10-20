@@ -474,7 +474,6 @@ impl CompositeVdfs {
         Ok(VdfsResponse::Write(VdfsWriteResponse {
             name: Some(name),
             created: true,
-            etag: None,
         }))
     }
 }
@@ -544,14 +543,7 @@ impl VdfsProvider for CompositeVdfs {
             VdfsRequest::List { .. } => {
                 let mut items = p
                     .clone()
-                    .vdfs_dispatch(
-                        &sub,
-                        &rel,
-                        VdfsRequest::List {
-                            limit: None,
-                            before: None,
-                        },
-                    )
+                    .vdfs_dispatch(&sub, &rel, VdfsRequest::List {})
                     .await?
                     .into_list()
                     .ok_or_else(mismatch)?;

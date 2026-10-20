@@ -11,7 +11,6 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::capability_mount;
 use crate::symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use std::path::Path;
 use tempfile::TempDir;
@@ -55,7 +54,7 @@ async fn system_instance_injects_the_host_memory() {
     std::fs::write(tmp.path().join(memory::MEMORY_FILE), "只改必要之处。").unwrap();
 
     let (ctx, visitor) = ctx(None, "@vfs/memory");
-    p.traverse(String::new(), ctx).await.unwrap();
+    p.clone().traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
     assert_eq!(
@@ -68,10 +67,8 @@ async fn system_instance_injects_the_host_memory() {
     assert!(segs[0].1.contains("@vfs/memory/AGENTS.md"), "{}", segs[0].1);
     assert!(segs[0].1.contains("【智能体记忆】"));
 
-    // 挂载点同时交出：只注入不给地址 = 只读记忆，永远长不大
-    assert!(capability_mount(&*visitor, PLUGIN_ID_MEMORY)
-        .await
-        .is_some());
+    // 视图仍然交出：容器据此派生挂载行（只注入不给地址 = 只读记忆，永远长不大）
+    assert!(p.clone().get_vfs_provider().is_some());
 }
 
 /// 子树实例：`<agentdir>/memory` ⇒ 记忆落在 `<agentdir>/AGENTS.md`
@@ -107,13 +104,11 @@ async fn empty_memory_injects_nothing_but_keeps_the_mount() {
     let p = plugin_in(tmp.path());
 
     let (ctx, visitor) = ctx(None, "@vfs/memory");
-    p.traverse(String::new(), ctx).await.unwrap();
+    p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(capability_prompts(&*visitor).await.is_empty());
     assert!(
-        capability_mount(&*visitor, PLUGIN_ID_MEMORY)
-            .await
-            .is_some(),
+        p.get_vfs_provider().is_some(),
         "挂载点的存在不依赖「有没有写过」"
     );
 }
@@ -252,15 +247,10 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
     ));
 
     let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
-    p.traverse(String::new(), ctx).await.unwrap();
+    p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(capability_prompts(&*visitor).await.is_empty());
-    assert!(
-        capability_mount(&*visitor, PLUGIN_ID_MEMORY)
-            .await
-            .is_some(),
-        "关掉注入不等于关掉编辑面"
-    );
+    assert!(p.get_vfs_provider().is_some(), "关掉注入不等于关掉编辑面");
 }
 
 // ==================== 无自有路由 ====================

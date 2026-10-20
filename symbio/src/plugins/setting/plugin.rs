@@ -129,13 +129,7 @@ impl Plugin for SettingPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            // ① VDFS 挂载点：配置文档本体（用户在设置页 / 该地址上编辑）
-            let me: crate::symbio_core::DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_SETTING, me))
-                .await;
-
-            // ② 系统提示词：本智能体的自述与偏好
+            // 系统提示词：本智能体的自述与偏好
             self.contribute_prompt(&visitor).await;
         }
 

@@ -149,8 +149,11 @@ function analyzePlugin(dirName, ids) {
       const mm = t.match(/PluginMeta::new\(([^,\n]+)/);
       if (mm) metaId = resolveArg(mm[1], ids);
     }
-    for (const mm of t.matchAll(/CapabilityRow::mount\(\s*([^,\n]+)/g)) {
-      mounts.add(resolveArg(mm[1], ids));
+    // 挂载点 = 「插件交得出 VDFS 视图」这一件事：`get_vfs_provider` 返回 `Some`。
+    // 运行时容器用同一判据派生挂载行（见 `composite.rs::traverse`），目录名 = 实例名；
+    // 插件自己不再注册挂载行。`composite` 除外：它是 `<根>` 的服务者，不是子目录。
+    if (dirName !== "composite" && /fn get_vfs_provider[\s\S]{0,200}?Some\(/.test(t)) {
+      mounts.add(dirName);
     }
     if (t.includes("capability_announce_configurable(")) hasConfig = true;
     for (const n of extractToolNames(t, consts)) tools.add(n);
@@ -399,9 +402,10 @@ function render() {
   L.push("");
   L.push("> 读表须知：");
   L.push("> - **挂载点** = 该插件目录名（容器实例表的挂载名，`目录名 = 实例名`）；");
-  L.push(">   插件经 `Plugin::get_vfs_provider` 把自己的视图交给容器（**系统 / 前端链路**，");
-  L.push(">   容器聚合）；**LLM 链路**另经 `put(CapabilityRow::mount(目录名, provider))`");
-  L.push(">   按名注册（可控挂载机制，预留按作用域裁剪），两条通道目录名同一份。");
+  L.push(">   判据只有一条：`Plugin::get_vfs_provider` 返回 `Some`（系统 / 前端链路直接查询，");
+  L.push(">   容器聚合）。**LLM 链路**由容器在收集广播里按同一判据派生挂载行");
+  L.push(">   （`put(CapabilityRow::mount(实例名, provider))`），插件不自行注册——两条通道因此");
+  L.push(">   不可能各说各话。");
   L.push(">   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。");
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");

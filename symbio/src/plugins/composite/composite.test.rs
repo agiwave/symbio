@@ -301,6 +301,78 @@ async fn top_level_container_falls_back_to_declared_root() {
     );
 }
 
+// ==================== 挂载行由容器派生（T-201） ====================
+//
+// 「谁能提供 VDFS 资源」只有一个答案：`Plugin::get_vfs_provider`。容器在收集广播里
+// 按同一个判据为子插件派生挂载行——插件自己不再 `put`，漏接一处不再可能静默。
+
+/// 只有视图、`traverse` 什么都不注册的插件：挂载行仍须出现
+struct SilentView;
+
+#[async_trait::async_trait]
+impl crate::symbio_core::VdfsProvider for SilentView {
+    async fn dispatch(
+        &self,
+        _ctx: &crate::symbio_core::VdfsContext,
+        _path: &str,
+        _req: crate::symbio_core::VdfsRequest,
+    ) -> crate::symbio_core::VdfsResult<crate::symbio_core::VdfsResponse> {
+        Ok(crate::symbio_core::VdfsResponse::List(Vec::new()))
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for SilentView {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("silent", "silent")
+    }
+
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+        Some(Arc::new(SilentView))
+    }
+}
+
+/// 挂载行的来源是 `get_vfs_provider`，不是插件自己在 `traverse` 里注册
+#[tokio::test]
+async fn mount_rows_are_derived_from_providers() {
+    let composite = composite_of(vec![
+        ("silent", Arc::new(SilentView) as Arc<dyn Plugin>),
+        ("plain", Probe::new() as Arc<dyn Plugin>),
+    ]);
+    let mounts = mount_names(&composite).await;
+    assert_eq!(
+        mounts,
+        vec!["silent".to_string()],
+        "有视图 ⇔ 有挂载行；没视图的插件不占一格"
+    );
+
+    let visitor = collect_at(&composite, TRAVERSE_AVAILABLE_TOOLS).await;
+    let rows = capability_mounts(&*visitor).await;
+    let Some((_, provider)) = rows.iter().find(|(name, _)| name == "silent") else {
+        panic!("silent 的挂载行应在表里");
+    };
+    assert!(
+        provider
+            .clone()
+            .dispatch(&vdfs_context(&host()), "", VdfsRequest::List {})
+            .await
+            .is_ok(),
+        "挂载行指向的正是子插件交出的那个 provider"
+    );
+}
+
 // ==================== 运行期停用一片插件（ADR-077 守卫后半） ====================
 //
 // 「切出一个插件」的**兑现判据**不是目录搬对了，而是：停用它 ⇒ 少掉的正好是它这一
@@ -472,14 +544,7 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
         .await
         .expect("新建会话照常");
     match provider
-        .dispatch(
-            &vctx,
-            "session",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx, "session", VdfsRequest::List {})
         .await
         .expect("清单照常")
     {
@@ -708,14 +773,7 @@ async fn disabling_loop_removes_the_start_address_and_keeps_storage_side() {
 
     // ③ 存储侧四条通道照常：list / stat / 读转写 / 写收件箱。
     match provider
-        .dispatch(
-            &vdfs_context(&host()),
-            "session",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vdfs_context(&host()), "session", VdfsRequest::List {})
         .await
         .expect("会话清单照常")
     {
@@ -737,10 +795,7 @@ async fn disabling_loop_removes_the_start_address_and_keeps_storage_side() {
         .dispatch(
             &vdfs_context(&host()),
             &format!("session/{sid}/message"),
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
+            VdfsRequest::List {},
         )
         .await
         .expect("读转写照常")

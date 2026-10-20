@@ -57,7 +57,6 @@ impl VdfsProvider for Rec {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: true,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -164,6 +163,25 @@ async fn workdir_reaches_the_physical_layer() {
 
 // 两条 `move` 用例（跨半被拒 / 同半转发）已随移动整条下线删除。
 // `ToolVdfs` 不再有 `move_item`，跨半也不再可能（载荷里没有第二个地址）。
+
+/// 审计只看**绝对地址**：相对地址恒在工作目录内；虚拟地址不是磁盘路径
+#[test]
+fn audit_flags_only_absolute_changes_outside_workdir() {
+    let wd = std::env::temp_dir();
+    let inside = wd.join("symbio-audit").join("a.txt");
+    let outside = wd.parent().unwrap().join("symbio-outside-a.txt");
+
+    assert!(!outside_workdir(&wd.to_string_lossy(), "README.md"));
+    assert!(!outside_workdir(&wd.to_string_lossy(), ".vdfsv2/session"));
+    assert!(!outside_workdir(
+        &wd.to_string_lossy(),
+        &inside.to_string_lossy()
+    ));
+    assert!(outside_workdir(
+        &wd.to_string_lossy(),
+        &outside.to_string_lossy()
+    ));
+}
 
 /// `..` 穿越在分流阶段就失败，两条链路共享同一条守卫
 #[tokio::test]

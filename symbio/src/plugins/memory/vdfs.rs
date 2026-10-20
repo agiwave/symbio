@@ -151,7 +151,6 @@ impl VdfsProvider for MemoryPlugin {
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: !existed,
-                        etag: None,
                     }))
                 }
                 WORKSPACE_FILE => {
@@ -166,7 +165,6 @@ impl VdfsProvider for MemoryPlugin {
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: !existed,
-                        etag: None,
                     }))
                 }
                 PLUGIN_FILE => Ok(VdfsResponse::Write(

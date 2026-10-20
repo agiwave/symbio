@@ -27,9 +27,6 @@ pub struct VdfsContent {
     pub size: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,
-    /// 内容版本（乐观并发令牌；provider 可选实现）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub etag: Option<String>,
     /// **写意图**：允许创建缺失的节点（`vdfs/write` 的 `create` 位）。
     ///
     /// provider 据此区分「新建」与「覆盖」——规范 §5.3 的「新建」正是
@@ -72,11 +69,6 @@ impl VdfsContent {
 
     pub fn with_mime(mut self, mime: impl Into<String>) -> Self {
         self.mime = Some(mime.into());
-        self
-    }
-
-    pub fn with_etag(mut self, etag: impl Into<String>) -> Self {
-        self.etag = Some(etag.into());
         self
     }
 

@@ -113,18 +113,11 @@ async fn store_roundtrip_through_the_dir_impl() {
     );
     assert_eq!(s.read_text("demo").await.unwrap(), md);
     assert!(
-        s.dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None
-            }
-        )
-        .await
-        .unwrap()
-        .into_list()
-        .unwrap()[0]
+        s.dispatch(&ctx, "", VdfsRequest::List {})
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap()[0]
             .node
             .is_dir(),
         "条目内部可下钻"

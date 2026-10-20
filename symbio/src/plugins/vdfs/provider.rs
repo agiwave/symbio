@@ -27,10 +27,61 @@ use super::protocol::{VdfsEditResponse, VdfsSearchResult};
 use crate::symbio_core::vdfs_context;
 use crate::symbio_core::{
     DynVdfsProvider, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsRequest,
-    VdfsResult, VdfsWriteResponse,
+    VdfsResult, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
-use crate::symbio_core::{PluginInvokeRequest, Registry};
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, Registry};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// 把路径归一成可做前缀比较的键（大小写、分隔符、Windows `\\?\` 前缀）。
+fn audit_path_key(p: &Path) -> String {
+    let mut s = p.to_string_lossy().replace('\\', "/");
+    if let Some(rest) = s.strip_prefix("//?/").map(str::to_string) {
+        s = rest;
+    }
+    if cfg!(windows) {
+        s.make_ascii_lowercase();
+    }
+    s
+}
+
+/// 目标是否落在工作目录之外（只有**绝对地址**才可能；相对地址恒在工作目录内）。
+fn outside_workdir(workdir: &str, addr: &str) -> bool {
+    let target = PathBuf::from(addr);
+    target.is_absolute()
+        && !PathBuf::from(audit_path_key(&target))
+            .starts_with(PathBuf::from(audit_path_key(Path::new(workdir))))
+}
+
+/// 工作区外**变更**的审计点（T-201）：记，不拦。
+///
+/// `workspace_only` 的缺省仍是放开——改成「只允许工作区」会改变地址规则里
+/// 文档承诺的绝对路径语义，而当前配置面没有白名单根的入口；在拿到真实使用分布
+/// 之前，用审计让这类动作可追溯，而不是替用户做决定（与 ADR-101 同一取舍）。
+/// 只记**变更**（写 / 编辑 / 删除 / 建目录），不记读取：审计要回答「改了什么」，
+/// 不是全量访问日志。
+fn audit_outside_workdir(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    vctx: &VdfsContext,
+    op: &str,
+    addr: &str,
+) {
+    let Some(workdir) = vctx.param_str(VDFS_PARAM_WORKDIR) else {
+        return;
+    };
+    let Ok(addr) = super::fs::normalize_addr(addr) else {
+        return;
+    };
+    if outside_workdir(workdir, &addr) {
+        let session = ctx
+            .get(crate::symbio_core::SESSION_ID)
+            .unwrap_or_else(|| "-".to_string());
+        crate::plugin_warn!(
+            "vdfs",
+            "LLM 工作区外变更：session={session} op={op} path={addr} workdir={workdir}"
+        );
+    }
+}
 
 /// VDFS 工具链路的封装 provider。
 ///
@@ -60,17 +111,10 @@ impl ToolVdfs {
         path: &str,
     ) -> VdfsResult<Vec<VdfsItem>> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.dispatch(
-            &vctx,
-            path,
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await?
-        .into_list()
-        .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
+        fs.dispatch(&vctx, path, VdfsRequest::List {})
+            .await?
+            .into_list()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 读取节点元数据
@@ -107,6 +151,7 @@ impl ToolVdfs {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let (fs, vctx) = self.fs(ctx).await;
+        audit_outside_workdir(ctx, &vctx, "write", path);
         fs.dispatch(
             &vctx,
             path,
@@ -127,6 +172,7 @@ impl ToolVdfs {
         recursive: bool,
     ) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
+        audit_outside_workdir(ctx, &vctx, "delete", path);
         fs.dispatch(&vctx, path, VdfsRequest::Delete { recursive })
             .await?
             .into_unit()
@@ -136,6 +182,7 @@ impl ToolVdfs {
     /// 新建目录
     pub async fn mkdir(&self, ctx: &Arc<dyn PluginInvokeRequest>, path: &str) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
+        audit_outside_workdir(ctx, &vctx, "mkdir", path);
         fs.dispatch(&vctx, path, VdfsRequest::Mkdir)
             .await?
             .into_unit()
@@ -152,6 +199,7 @@ impl ToolVdfs {
         new_string: &str,
     ) -> VdfsResult<VdfsEditResponse> {
         let (fs, vctx) = self.fs(ctx).await;
+        audit_outside_workdir(ctx, &vctx, "edit", path);
         super::host::edit_via(&fs, &vctx, path, old_string, new_string).await
     }
 

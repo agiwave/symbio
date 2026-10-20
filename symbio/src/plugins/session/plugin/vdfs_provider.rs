@@ -270,7 +270,6 @@ impl SessionPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: !existed,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -392,7 +391,6 @@ impl SessionPlugin {
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: false,
-                        etag: None,
                     }))
                 }
                 // 转写列表本身：**仍只读**。往里放一条 = 发言 = 动作，不是写入。
@@ -705,7 +703,6 @@ impl SessionPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: anonymous.then(|| item.id.clone()),
                     created: true,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => match iid {
@@ -901,7 +898,6 @@ impl SessionPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: false,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {

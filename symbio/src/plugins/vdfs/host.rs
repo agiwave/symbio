@@ -353,14 +353,7 @@ async fn list_at(
     };
 
     let mut items = root
-        .dispatch(
-            &vctx,
-            &addr,
-            VdfsRequest::List {
-                limit,
-                before: before.clone(),
-            },
-        )
+        .dispatch(&vctx, &addr, VdfsRequest::List {})
         .await?
         .into_list()
         .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
@@ -487,7 +480,6 @@ async fn mkdir(
     Ok(PluginPayload::new(&VdfsWriteResponse {
         name: None,
         created: true,
-        etag: None,
     }))
 }
 
@@ -669,17 +661,7 @@ pub(crate) async fn search_via(
     queue.push_back(base.to_string());
 
     while let Some(dir) = queue.pop_front() {
-        let children = match provider
-            .dispatch(
-                vctx,
-                &dir,
-                VdfsRequest::List {
-                    limit: None,
-                    before: None,
-                },
-            )
-            .await
-        {
+        let children = match provider.dispatch(vctx, &dir, VdfsRequest::List {}).await {
             Ok(resp) => resp
                 .into_list()
                 .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,
@@ -789,17 +771,7 @@ async fn tree(
     queue.push_back((addr.clone(), 0));
 
     while let Some((dir, depth)) = queue.pop_front() {
-        let mut children = match root
-            .dispatch(
-                vctx,
-                &dir,
-                VdfsRequest::List {
-                    limit: None,
-                    before: None,
-                },
-            )
-            .await
-        {
+        let mut children = match root.dispatch(vctx, &dir, VdfsRequest::List {}).await {
             Ok(resp) => resp
                 .into_list()
                 .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,

@@ -28,7 +28,8 @@ created: 2026-09-09
     （非广播、不驱动 `traverse`）聚合出「包含子目录列表的 provider」（`CompositeVfs`），
     目录名 = 实例表挂载名。
   - **LLM 链路**：在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中登记挂载根行
-    （`CapabilityRow::mount_root`，带根位的单槽行），供 `vdfs_*` 工具取根。
+    （`CapabilityRow::mount_root`，带根位的单槽行），并为每个交得出视图的子插件
+    派生挂载行（`CapabilityRow::mount(实例名, provider)`），供 `vdfs_*` 工具取根。
   它没有任何「根级别」概念（见 `docs/005-arch/013-vdfs.md` §2.5 / §6.4）。
 - **分发与守卫**：`dispatch` 对**所有操作**做同一件事——现场 `children_of(ctx)` 取
   子目录清单、剥掉 `path` 首段定位子 provider、把剩余路径与请求**整体**递下去（与

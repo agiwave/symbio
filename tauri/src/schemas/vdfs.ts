@@ -272,7 +272,6 @@ export interface VdfsContent {
   binary: boolean
   size: number
   mime?: string
-  etag?: string
 }
 
 /** 节点动作结果 */
@@ -414,7 +413,6 @@ export interface VdfsWriteResponse {
   /** 匿名写时 provider 生成的名字（具名写为 undefined） */
   name?: string
   created: boolean
-  etag?: string
 }
 
 /** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。

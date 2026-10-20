@@ -90,17 +90,7 @@ async fn list_puts_dirs_first_then_sorts_by_name() {
     std::fs::write(base.join("beta.txt"), "b").unwrap();
     std::fs::write(base.join("alpha.txt"), "a").unwrap();
 
-    let VdfsResponse::List(items) = fs
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await
-        .unwrap()
+    let VdfsResponse::List(items) = fs.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap()
     else {
         panic!("应为 List 响应");
     };
@@ -153,14 +143,7 @@ async fn delete_dir_requires_recursive() {
 async fn missing_workdir_param_is_internal_error() {
     let fs = PhysicalFs::new();
     let err = fs
-        .dispatch(
-            &VdfsContext::empty(),
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&VdfsContext::empty(), "", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(

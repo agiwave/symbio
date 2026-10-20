@@ -205,7 +205,6 @@ impl VdfsProvider for MemoryVdfs {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created,
-                    etag: None,
                 }))
             }
 

@@ -12,7 +12,6 @@ use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::plugins::session::test_dir;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::capability_mount;
 use crate::symbio_core::{
     capability_prompts, Registry, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR,
@@ -211,16 +210,14 @@ async fn no_session_context_injects_no_memory() {
     ));
     let (ctx, visitor) = collect_ctx(None);
 
-    p.traverse(String::new(), ctx).await.unwrap();
+    p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(
         memory_segment(&visitor).await.is_none(),
         "没有会话 id 时不得凭空造一份记忆出来"
     );
-    // 但挂载点照旧交出：挂载点的存在不依赖某次请求的作用域
-    assert!(capability_mount(&*visitor, PLUGIN_ID_SESSION)
-        .await
-        .is_some());
+    // 但视图照旧交出（容器据此派生挂载行）：挂载点的存在不依赖某次请求的作用域
+    assert!(p.get_vfs_provider().is_some());
 }
 
 /// 空串 / 纯空白的会话 id 与「没有会话」同解（闸门在 `store` 一处收口）

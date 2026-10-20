@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{vdfs_context, CapabilityRow, VdfsItem, VDFS_KIND_DIR};
+use crate::symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
@@ -61,15 +61,8 @@ impl Plugin for FakeChild {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn PluginInvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse {
-        if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-            if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                visitor
-                    .put(CapabilityRow::mount(self.dir, Arc::new(LeafProvider)))
-                    .await;
-            }
-        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 
@@ -103,15 +96,8 @@ impl Plugin for ProviderChild {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn PluginInvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse {
-        if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-            if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                visitor
-                    .put(CapabilityRow::mount(self.dir, self.provider.clone()))
-                    .await;
-            }
-        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 
@@ -215,17 +201,7 @@ async fn self_listing_shows_child_dirs_by_registered_name() {
     ]);
     let ctx = host_ctx();
 
-    let root = vdfs
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await
-        .unwrap();
+    let root = vdfs.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap();
     let VdfsResponse::List(root) = root else {
         panic!("应为 List 响应");
     };
@@ -274,17 +250,7 @@ async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
     let ctx = host_ctx();
 
     // 列表里只有未隐藏的那个
-    let VdfsResponse::List(root) = vdfs
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await
-        .unwrap()
+    let VdfsResponse::List(root) = vdfs.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap()
     else {
         panic!("应为 List 响应");
     };
@@ -309,14 +275,7 @@ async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
 
     // 子树内容也照常可读
     let VdfsResponse::List(items) = vdfs
-        .dispatch(
-            &ctx,
-            "masked",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "masked", VdfsRequest::List {})
         .await
         .unwrap()
     else {
@@ -371,19 +330,12 @@ async fn hidden_children_from_any_provider_are_filtered() {
         async fn traverse(
             self: Arc<Self>,
             _path: String,
-            ctx: Arc<dyn PluginInvokeRequest>,
+            _ctx: Arc<dyn PluginInvokeRequest>,
         ) -> PluginInvokeResponse {
-            if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-                if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                    visitor
-                        .put(CapabilityRow::mount("mixed", Arc::new(MixedProvider)))
-                        .await;
-                }
-            }
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
         }
 
-        // 系统链路：直接暴露 provider（与 LLM 链路经 `put` 挂载行注册互不冲突）
+        // 唯一的发现判据：系统链路直接查询，LLM 链路由容器派生挂载行
         fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
             Some(Arc::new(MixedProvider))
         }
@@ -393,14 +345,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
     map.insert("mixed".to_string(), Arc::new(MixedChild));
     let vdfs = container_map(map);
     let VdfsResponse::List(items) = vdfs
-        .dispatch(
-            &host_ctx(),
-            "mixed",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&host_ctx(), "mixed", VdfsRequest::List {})
         .await
         .unwrap()
     else {
@@ -477,17 +422,7 @@ async fn distinct_mount_names_each_get_a_dir() {
     assert_eq!(dirs[1].0, "plugin_a");
     assert_eq!(dirs[1].1.meta().name, "甲");
 
-    let VdfsResponse::List(root) = vdfs
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await
-        .unwrap()
+    let VdfsResponse::List(root) = vdfs.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap()
     else {
         panic!("应为 List 响应");
     };
@@ -507,14 +442,7 @@ async fn delegates_relative_path_and_leaves_address_to_the_host() {
     let ctx = host_ctx();
 
     let VdfsResponse::List(items) = vdfs
-        .dispatch(
-            &ctx,
-            "alpha",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "alpha", VdfsRequest::List {})
         .await
         .unwrap()
     else {
@@ -543,17 +471,7 @@ async fn delegates_relative_path_and_leaves_address_to_the_host() {
 async fn empty_container_is_an_empty_vfs() {
     let vdfs = container(Vec::new());
     let ctx = host_ctx();
-    let VdfsResponse::List(items) = vdfs
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
-        .await
-        .unwrap()
+    let VdfsResponse::List(items) = vdfs.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap()
     else {
         panic!("应为 List 响应");
     };
@@ -694,7 +612,6 @@ async fn dir_root_write_is_forwarded_verbatim() {
             Ok(VdfsResponse::Write(VdfsWriteResponse {
                 name: Some("generated-1".to_string()),
                 created: true,
-                etag: None,
             }))
         }
     }
@@ -776,14 +693,7 @@ async fn rejects_unknown_dir() {
     let ctx = host_ctx();
 
     let err = vdfs
-        .dispatch(
-            &ctx,
-            "nope",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "nope", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(matches!(err, VdfsError::NotFound(_)));
@@ -799,14 +709,7 @@ async fn missing_host_ctx_is_an_internal_error() {
     let vdfs = container(Vec::new());
     // Ok 侧不可 `Debug`，故不能用 unwrap_err
     let err = match vdfs
-        .dispatch(
-            &VdfsContext::empty(),
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&VdfsContext::empty(), "", VdfsRequest::List {})
         .await
     {
         Ok(_) => panic!("缺宿主句柄时应报错"),
@@ -941,10 +844,7 @@ impl VdfsProvider for BlankPather {
 #[tokio::test]
 async fn container_leaves_item_addresses_untouched() {
     let ctx = host_ctx();
-    let list = VdfsRequest::List {
-        limit: None,
-        before: None,
-    };
+    let list = VdfsRequest::List {};
 
     // ① 未填 → 容器也不填（留给访问层按请求地址回填）
     let vdfs = container_of("outer", Arc::new(BlankPather));
@@ -1022,14 +922,7 @@ async fn config_broadcast_carries_no_capability_visitor() {
     let ctx = vdfs_context(&host);
 
     let _ = vdfs
-        .dispatch(
-            &ctx,
-            "probe",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "probe", VdfsRequest::List {})
         .await
         .unwrap();
 

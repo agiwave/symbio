@@ -353,7 +353,6 @@ impl VdfsProvider for SkillPlugin {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: generated,
                     created,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -554,16 +553,6 @@ impl Plugin for SkillPlugin {
                     let skill_tool = Arc::new(SkillExecuteTool::new(skills));
                     tool_visitor.put(CapabilityRow::tool(skill_tool)).await;
                 }
-            }
-
-            // VDFS 挂载点：本插件自身就是 provider（`<根>/skill`）——
-            // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for SkillPlugin` 承载。
-            // 无条件注册——技能清单为空也是合法的挂载点。
-            if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-                let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
-                tool_visitor
-                    .put(CapabilityRow::mount(PLUGIN_ID_SKILL, vdfs_provider))
-                    .await;
             }
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

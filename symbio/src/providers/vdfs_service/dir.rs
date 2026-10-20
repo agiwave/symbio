@@ -384,7 +384,6 @@ impl VdfsProvider for DirVdfs {
                     return Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created,
-                        etag: None,
                     }));
                 }
                 let (id, rel) = entry::split_rel(path)
@@ -396,7 +395,6 @@ impl VdfsProvider for DirVdfs {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created,
-                    etag: None,
                 }))
             }
 

@@ -47,14 +47,14 @@ use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
 use crate::symbio_core::{
-    CapabilityRow, DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, ASSEMBLY_UNDISABLABLE_PLUGINS,
-    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, PLUGIN_FILE, PLUGIN_ID_MANAGER,
-    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
+    CONFIGURABLE_VISITOR, PLUGIN_FILE, PLUGIN_ID_MANAGER, PLUGIN_KEY_CAN_DISABLE,
+    PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
+    PLUGIN_KEY_VERSION,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
@@ -571,18 +571,8 @@ impl Plugin for PluginManagerPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn PluginInvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        // 与工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
-        // 挂载名由**使用方**（此处即本插件）选定：约定用插件名（`PLUGIN_ID_MANAGER`），
-        // 插件名在宿主内唯一，天然就是合格的挂载名。provider 自身不含此概念。
-        // 会话链路（LLM 工具）与前端链路因此拿到同一份 (挂载名, 实现) 集合。
-        if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            let me: DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_MANAGER, me))
-                .await;
-        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

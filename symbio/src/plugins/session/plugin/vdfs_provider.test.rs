@@ -30,8 +30,8 @@ fn vctx() -> VdfsContext {
     VdfsContext::empty()
 }
 
-/// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
-/// （见 `traverse` 里的 `put(CapabilityRow::mount(PLUGIN_ID_SESSION, ..))`）
+/// provider 自描述：**不含挂载名**——挂载名由容器按实例表派生
+/// （见 `composite.rs::traverse` 的 `put(CapabilityRow::mount(实例名, ..))`）
 #[tokio::test]
 async fn vdfs_self_description_has_no_mount() {
     let (_dir, p) = fixture();
@@ -1211,10 +1211,7 @@ async fn expand_skeleton_returns_the_subtree_on_demand() {
 
 // ==================== dispatch 请求形态（测试辅助） ====================
 
-const LIST: VdfsRequest = VdfsRequest::List {
-    limit: None,
-    before: None,
-};
+const LIST: VdfsRequest = VdfsRequest::List {};
 const STAT: VdfsRequest = VdfsRequest::Stat;
 const READ: VdfsRequest = VdfsRequest::Read;
 const DEL: VdfsRequest = VdfsRequest::Delete { recursive: false };

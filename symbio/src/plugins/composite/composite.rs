@@ -174,15 +174,19 @@ impl Plugin for Composite {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        // 能力收集是唯一一次「容器知道每个子插件是谁、又能问它要视图」的时机：
+        // 根行与各子插件的挂载行都在这里派生，插件自己不再 `put` 挂载行——
+        // 「谁能提供资源」的事实只由 `Plugin::get_vfs_provider` 回答一次。
+        let collecting = ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS);
+        let visitor = collecting.then(|| ctx.get(CAPABILITY_VISITOR)).flatten();
+
         // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位（LLM 链路用）。
         // 这不是「容器是根」——composite 只是恰好包含若干子目录的 provider，
         // 能否出现在那里取决于装配，不是本模块的属性。系统链路取同一个根走的是
         // `Plugin::get_vfs_provider`（见下），与 `Registry` 无关。
-        if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-            if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-                let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
-                visitor.put(CapabilityRow::mount_root(root)).await;
-            }
+        if let Some(visitor) = visitor.clone() {
+            let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
+            visitor.put(CapabilityRow::mount_root(root)).await;
         }
 
         for (name, plugin) in self.registry.snapshot() {
@@ -198,7 +202,17 @@ impl Plugin for Composite {
             );
             // 收集是广播：不参与的插件回答 `NotFound`，那不是失败。判据与理由在
             // `broadcast_collect` 里，两处收集共用同一份，避免各写一半。
-            broadcast_collect(plugin, req_ctx, &name).await;
+            broadcast_collect(plugin.clone(), req_ctx, &name).await;
+
+            // 挂载行 = 子插件「交得出视图」这件事的**派生**：与系统链路的
+            // `children_of` 用同一个判据（`get_vfs_provider().is_some()`），
+            // 目录名 = 实例表挂载名。先广播再问，是因为个别插件
+            // （如 `mcp`）在收集期才完成加载。
+            if let Some(visitor) = visitor.as_ref() {
+                if let Some(provider) = plugin.get_vfs_provider() {
+                    visitor.put(CapabilityRow::mount(&name, provider)).await;
+                }
+            }
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

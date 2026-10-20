@@ -48,7 +48,6 @@ impl VdfsProvider for V {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: true,
-                    etag: None,
                 }))
             }
             _ => Err(VdfsError::NotImplemented),
@@ -182,14 +181,7 @@ async fn virtual_address_is_translated_both_ways() {
     let ctx = VdfsContext::empty();
 
     let items = f
-        .dispatch(
-            &ctx,
-            ".vdfsv2",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, ".vdfsv2", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -221,14 +213,7 @@ async fn deep_virtual_address_keeps_dir_prefix() {
 async fn bare_address_goes_to_physical_untouched() {
     let (f, _v, p) = fs();
     let items = f
-        .dispatch(
-            &VdfsContext::empty(),
-            "src",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&VdfsContext::empty(), "src", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -238,16 +223,9 @@ async fn bare_address_goes_to_physical_untouched() {
 
     // 空地址 = 工作目录根，不是虚拟根
     let (f2, v2, p2) = fs();
-    f2.dispatch(
-        &VdfsContext::empty(),
-        "",
-        VdfsRequest::List {
-            limit: None,
-            before: None,
-        },
-    )
-    .await
-    .unwrap();
+    f2.dispatch(&VdfsContext::empty(), "", VdfsRequest::List {})
+        .await
+        .unwrap();
     assert_eq!(p2.seen(), vec![""]);
     assert!(v2.seen().is_empty());
 }

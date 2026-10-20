@@ -220,14 +220,7 @@ impl UnifiedFs {
         match req {
             VdfsRequest::List { .. } => {
                 let mut items = root
-                    .dispatch(
-                        ctx,
-                        rel,
-                        VdfsRequest::List {
-                            limit: None,
-                            before: None,
-                        },
-                    )
+                    .dispatch(ctx, rel, VdfsRequest::List {})
                     .await?
                     .into_list()
                     .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;

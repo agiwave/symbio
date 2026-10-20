@@ -46,6 +46,7 @@
 
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
+use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -55,7 +56,6 @@ use crate::symbio_core::{
     VDFS_PARENT_ADDR, WORKDIR,
 };
 use crate::symbio_core::{DetailField, DetailOption};
-use crate::symbio_core::{VdfsAccess, VdfsProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -345,16 +345,10 @@ impl Plugin for AgentPlugin {
         };
 
         // ── VDFS 挂载点（`<根>/agent`）──
-        // 本插件自身就是 provider：agent 目录由 AgentDirStore 自管目录（本插件自己的
-        // 目录，与 workdir 无关），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
-        // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
-        // 智能体自身的记忆 / 设置不在这里——它们各有自己的插件与挂载点。
-        {
-            let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
-            tool_visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_AGENT, vdfs_provider))
-                .await;
-        }
+        // 挂载行由容器从 `get_vfs_provider` 派生（本插件在下方 override 返回自身）；
+        // 本插件的 VDFS 视图 = agent 目录（`impl VdfsProvider for AgentPlugin`，
+        // 见 `super::vdfs`），与 workdir 无关。智能体自身的记忆 / 设置不在这里——
+        // 它们各有自己的插件与挂载点。
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());

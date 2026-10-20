@@ -12,14 +12,7 @@ async fn ops_mirror_the_disk_shapes() {
     let ctx = VdfsContext::empty();
 
     assert!(m
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None
-            }
-        )
+        .dispatch(&ctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .is_list());

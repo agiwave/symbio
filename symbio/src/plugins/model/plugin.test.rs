@@ -110,14 +110,7 @@ async fn list_comes_from_the_memory_mirror() {
     let plugin = ModelPlugin::default();
     let ctx = VdfsContext::empty();
     assert!(plugin
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None
-            }
-        )
+        .dispatch(&ctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -130,14 +123,7 @@ async fn list_comes_from_the_memory_mirror() {
     // 坏条目降级：列不出来，而不是列一个空壳
     plugin.entries.set("broken", "}}}");
     let nodes = plugin
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -147,14 +133,7 @@ async fn list_comes_from_the_memory_mirror() {
     assert_eq!(nodes[0].node.title, "我的 OpenAI");
     assert!(
         plugin
-            .dispatch(
-                &ctx,
-                "openai-1",
-                VdfsRequest::List {
-                    limit: None,
-                    before: None
-                }
-            )
+            .dispatch(&ctx, "openai-1", VdfsRequest::List {})
             .await
             .is_err(),
         "叶子资源无子项"

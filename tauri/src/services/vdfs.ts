@@ -143,7 +143,7 @@ export function readVdfs(reason: ReadbackReason, path: string): Promise<VdfsCont
 export async function writeVdfs(
   path: string,
   text: string,
-  opts?: { create?: boolean; etag?: string; ctx?: PluginOptions }
+  opts?: { create?: boolean; ctx?: PluginOptions }
 ): Promise<VdfsWriteResponse> {
   return callPlugin<VdfsWriteResponse>(
     VDFS_WRITE,
@@ -151,7 +151,6 @@ export async function writeVdfs(
       path,
       text,
       create: opts?.create,
-      etag: opts?.etag,
     },
     undefined,
     opts?.ctx

@@ -721,7 +721,6 @@ impl PluginConfigFile {
             // 具名写：写的就是本插件那份配置文档，名字是调用方给的
             name: None,
             created: false,
-            etag: None,
         })
     }
 

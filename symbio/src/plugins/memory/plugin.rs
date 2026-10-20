@@ -295,13 +295,7 @@ impl Plugin for MemoryPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            // ① VDFS 挂载点：两份记忆文件本体（模型与用户共用的编辑面）
-            let me: crate::symbio_core::DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_MEMORY, me))
-                .await;
-
-            // ② 系统提示词：两段注入（各自含地址与容量口径）
+            // 系统提示词：两段注入（各自含地址与容量口径）
             self.contribute_prompt(&ctx, &visitor).await;
             self.contribute_workspace_prompt(&ctx, &visitor).await;
         }

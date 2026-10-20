@@ -2,13 +2,14 @@
 kind: task
 id: T-201-VDFS单源与物理层收紧批
 title: VDFS 单源与物理层收紧批——死字段删除、发现链路单接、默认收紧
-status: todo
+status: done
 created: 2026-10-20
 track: plan
 prio: next
 deps: []
 parent: T-183-质量与机制清偿总批
 where: symbio/src/plugins/vdfs/ · symbio/src/plugins/session/plugin/vdfs_provider.rs · symbio/src/plugins/composite/vdfs.rs · docs/006-ref/001-CONFIGURATION.md
+evidence: '四条落地：① `VdfsRequest::List` 删去 `limit` / `before`（参数袋保留），前端 `vdfs.ts` 同步；② 发现链路选单接——`Composite::traverse` 从 `Plugin::get_vfs_provider` 派生挂载行，13 个插件的自注册删除，新增 `mount_rows_are_derived_from_providers`，事实表挂载清单改由同一判据提取；③ 物理层选审计次选——`ToolVdfs` 的写 / 编辑 / 删除 / 建目录对工作目录外的绝对地址记 `plugin_warn!`（`audit_outside_workdir`），新增 `audit_flags_only_absolute_changes_outside_workdir`，不翻 `workspace_only` 缺省（配置面无白名单入口，ADR-101 同一取舍）；④ `etag` 选删字段——core 类型、响应字面量、tauri schema / service 与文档描述全部移除。验证：cargo test -p symbio --lib plugins::vdfs = 63 passed；全量门禁 124/124；e2e 78/78。'
 exit: '有界列表的窗口字段（`limit` / `before`）从请求枚举删除，参数袋保留，有界列表收敛为单通道；发现链路二选一落地——容器从子插件派生挂载行把双接变单接，或加审计断言「凡能交出资源提供者的插件必有挂载行」，不得留「双接静默」形态；`workspace_only` 缺省改为开启（白名单根可配）或至少给 LLM 链路的写 / 删操作加审计日志，现有合法调用点先梳理；`etag` 二选一（物理层用 mtime + size 实现最小乐观并发并在冲突时报冲突错，或从内容与写响应里删字段）；全量门禁与 e2e 全绿'
 ---
 
@@ -47,3 +48,23 @@ exit: '有界列表的窗口字段（`limit` / `before`）从请求枚举删除�
   理由记在转化台账 §7-3。
 - 2026-10-20 顺序建议：先 1（删死字段，纯减法，零风险），再 4（`etag` 二选一），
   再 2（发现链路，动装配时序），最后 3（权限收紧，要梳理调用点）——风险从低到高。
+
+## 结果
+
+四条全部落地，均为**删字段 / 单接 / 加审计**，机制键与 trait 数 0 变化：
+
+| 项 | 落地 | 证据 |
+|---|---|---|
+| 有界列表窗口参数 | `VdfsRequest::List` 删去 `limit` / `before`，参数袋保留 | `symbio_core/vdfs/request.rs`；前端 `vdfs.ts` 同步；窗口字段无读取方 |
+| 发现链路 | 选**首选**：`Composite::traverse` 从子插件 `Plugin::get_vfs_provider` 派生挂载行，13 个插件的自注册全部删除 | `composite/composite.rs`；`mount_rows_are_derived_from_providers`；事实表挂载清单改由同一判据提取 |
+| 物理层权限 | 选**次选**：LLM 链路的写 / 编辑 / 删除 / 建目录加工作区外审计（`plugin_warn!`，记但不拦） | `vdfs/provider.rs` 的 `audit_outside_workdir`；`audit_flags_only_absolute_changes_outside_workdir` |
+| `etag` | 选**删字段**：类型、响应字面量、前端 schema / service、文档描述全部移除 | `VdfsContent` / `VdfsWriteResponse`；`tauri/src/schemas/vdfs.ts` |
+
+**权限项为何不翻缺省**：`workspace_only=true` 会改变地址规则里已承诺的绝对路径语义，
+而当前配置面没有「白名单根」的入口；在拿到真实使用分布之前收紧，等于替用户做决定
+（与 ADR-101 对本地策略的取舍一致）。因此本批按 exit 的次选执行：**变更动作可追溯**，
+读数不进审计（审计要回答「改了什么」，不是全量访问日志）。缺省收紧留待有配置入口与
+使用分布之后单独裁决。
+
+**审计口径**：仅绝对地址可能落在工作目录之外（相对地址恒在工作目录内，`..` 在分流阶段
+即被拒），因此审计判定只看绝对地址的前缀，不重复物理层的路径守卫。

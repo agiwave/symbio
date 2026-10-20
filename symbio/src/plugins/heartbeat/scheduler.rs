@@ -270,14 +270,7 @@ async fn list_sessions(
     vctx: &VdfsContext,
 ) -> VdfsResult<Vec<crate::symbio_core::VdfsItem>> {
     match provider
-        .dispatch(
-            vctx,
-            PLUGIN_ID_SESSION,
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(vctx, PLUGIN_ID_SESSION, VdfsRequest::List {})
         .await?
     {
         VdfsResponse::List(items) => Ok(items),

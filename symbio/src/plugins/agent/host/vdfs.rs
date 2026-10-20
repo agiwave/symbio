@@ -345,17 +345,10 @@ impl AgentPlugin {
                 // `<根>/<agent-id>`——那是个目录，前端点开会话即「读取会话转写失败」）。
                 // 变更帧不受影响：那条路每层容器都会续接（见 `mount_path`）。
                 let (p, sub, _mount_rel) = self.sub_vfs(ctx, &id).await?;
-                p.dispatch(
-                    &sub,
-                    "",
-                    VdfsRequest::List {
-                        limit: None,
-                        before: None,
-                    },
-                )
-                .await?
-                .into_list()
-                .ok_or_else(mismatch)
+                p.dispatch(&sub, "", VdfsRequest::List {})
+                    .await?
+                    .into_list()
+                    .ok_or_else(mismatch)
             }
             RelPath::File { id, rel } => {
                 let id = id_of(id);
@@ -363,17 +356,10 @@ impl AgentPlugin {
                 // 条目地址的处理与上面 `RelPath::Agent` 臂**同一条**（原样透出，
                 // 本层不填）——理由与那次真实事故都写在那里，改一处必须改两处。
                 let (p, sub, _mount_rel) = self.sub_vfs(ctx, &id).await?;
-                p.dispatch(
-                    &sub,
-                    rel,
-                    VdfsRequest::List {
-                        limit: None,
-                        before: None,
-                    },
-                )
-                .await?
-                .into_list()
-                .ok_or_else(mismatch)
+                p.dispatch(&sub, rel, VdfsRequest::List {})
+                    .await?
+                    .into_list()
+                    .ok_or_else(mismatch)
             }
         }
     }

@@ -63,6 +63,8 @@ created: 2026-09-16
   Windows `canonicalize` 的 `\\?\` 前缀在比较前剥掉（`normalize_for_comparison`）。
 - **物理层策略与形状**：`FsPolicy` = `forbidden_paths` 黑名单 + 可选的
   `workspace_only` / `allowed_roots`（缺省关闭 = 全盘可读、仅黑名单兜底）；
+  LLM 链路对**工作目录之外的绝对地址**做写 / 编辑 / 删除 / 建目录时记一条告警
+  （`provider.rs::audit_outside_workdir`，记而不拦；相对地址恒在工作目录内，不记读）；
   读上限 10MB、列目录上限 2000 项、非 UTF-8 名称跳过；`list` 目录在前、各自按名
   升序，文件 `rw` / 目录 `wlt`；图片扩展名映射为 `binary = true` + MIME，`read`
   返回 base64（多模态）。

@@ -11,7 +11,7 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload, PLUGIN_ID_WEB,
 };
-use crate::symbio_core::{DetailDefinition, DetailField, DynVdfsProvider};
+use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -174,9 +174,6 @@ impl Plugin for WebPlugin {
             for tool in self.tool_impls.iter() {
                 visitor.put(CapabilityRow::tool(tool.clone())).await;
             }
-            // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
-            let me: DynVdfsProvider = self.clone();
-            visitor.put(CapabilityRow::mount(PLUGIN_ID_WEB, me)).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
         // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）

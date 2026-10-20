@@ -24,14 +24,7 @@ async fn writes_then_reads_the_main_file_only() {
     std::fs::create_dir_all(s.entry_dir("p1").join("secret")).unwrap();
     std::fs::write(s.entry_dir("p1").join("secret/note.txt"), b"x").unwrap();
     let err = s
-        .dispatch(
-            &VdfsContext::empty(),
-            "p1",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&VdfsContext::empty(), "p1", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(
@@ -87,14 +80,7 @@ async fn default_provider_ops_work_without_any_differential() {
     assert_eq!(node.access, VdfsAccess::READ_WRITE);
 
     let listed = s
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()

@@ -49,14 +49,7 @@ async fn entry_is_a_drillable_directory() {
         Some("echo hi")
     );
     let items = s
-        .dispatch(
-            &ctx,
-            "demo",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "demo", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -66,14 +59,7 @@ async fn entry_is_a_drillable_directory() {
 
     // 根清单把条目呈现为**目录**（可下钻），不是叶子文件
     let root = s
-        .dispatch(
-            &ctx,
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&ctx, "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()

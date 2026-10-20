@@ -99,7 +99,6 @@ impl VdfsProvider for Rec {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: path == "new.txt",
-                    etag: Some("v1".into()),
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -212,17 +211,7 @@ impl VdfsProvider for TestRoot {
         match req {
             // 与生产容器同构：**不填条目地址**（它不知道自己挂在哪），
             // 地址由访问层按请求地址回填（`host::fill_paths`）
-            VdfsRequest::List { .. } => {
-                p.dispatch(
-                    ctx,
-                    &rel,
-                    VdfsRequest::List {
-                        limit: None,
-                        before: None,
-                    },
-                )
-                .await
-            }
+            VdfsRequest::List { .. } => p.dispatch(ctx, &rel, VdfsRequest::List {}).await,
             VdfsRequest::Stat => {
                 if rel.is_empty() {
                     return Ok(VdfsResponse::Stat(VdfsNode::dir(
@@ -427,7 +416,6 @@ async fn write_requires_content_and_maps_validation_fields() {
         .get::<VdfsWriteResponse>()
         .unwrap();
     assert!(w.name.is_none(), "具名写没有名字可交回");
-    assert_eq!(w.etag.as_deref(), Some("v1"));
 
     // 字段级校验错误：载荷序列化为 JSON 置于错误文案位，可解析还原
     let ctx = ctx_with(json!({ "path": ".vdfsv2/mem/a.txt", "text": "bad" }));

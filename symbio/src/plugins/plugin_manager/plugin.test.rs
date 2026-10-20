@@ -92,7 +92,6 @@ impl VdfsProvider for FakeRegistry {
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: Some(self.install_name.clone()),
                     created: true,
-                    etag: None,
                 }))
             }
             VdfsRequest::Delete { .. } => {
@@ -143,18 +142,11 @@ fn vctx() -> VdfsContext {
 }
 
 async fn list(p: &PluginManagerPlugin, ctx: &VdfsContext) -> Vec<VdfsItem> {
-    p.dispatch(
-        ctx,
-        "",
-        VdfsRequest::List {
-            limit: None,
-            before: None,
-        },
-    )
-    .await
-    .unwrap()
-    .into_list()
-    .unwrap()
+    p.dispatch(ctx, "", VdfsRequest::List {})
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()
 }
 
 async fn stat(p: &PluginManagerPlugin, ctx: &VdfsContext, path: &str) -> VdfsNode {
@@ -541,14 +533,7 @@ async fn sections_are_leaves_without_read_or_write() {
     ));
     // 分区不接受新建，也不可列
     assert!(p
-        .dispatch(
-            &vctx(),
-            "appearance",
-            VdfsRequest::List {
-                limit: None,
-                before: None
-            }
-        )
+        .dispatch(&vctx(), "appearance", VdfsRequest::List {})
         .await
         .is_err());
 }
@@ -583,14 +568,7 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
     let p = plugin_without_registry();
 
     let err = p
-        .dispatch(
-            &vctx(),
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx(), "", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(

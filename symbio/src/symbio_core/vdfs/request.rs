@@ -26,8 +26,6 @@ pub struct VdfsWriteResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub created: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub etag: Option<String>,
 }
 
 // ==================== 动作结果 ====================
@@ -109,13 +107,13 @@ pub struct VdfsActionResult {
 // `vdfs_move` 工具一并下线，需要时再加，加在外层而不是这里。
 #[derive(Clone)]
 pub enum VdfsRequest {
-    /// 列出 `path` 目录的直接子节点（`l` 位）；`limit` / `before` 是**可选**的
-    /// 有界窗口，provider 不认就当没传（全量）——见 [`VDFS_PARAM_LIMIT`](super::VDFS_PARAM_LIMIT) /
-    /// [`VDFS_PARAM_BEFORE`](super::VDFS_PARAM_BEFORE)
-    List {
-        limit: Option<u32>,
-        before: Option<String>,
-    },
+    /// 列出 `path` 目录的直接子节点（`l` 位）。
+    ///
+    /// 有界窗口**不在请求里**：`limit` / `before` 是**调用级参数袋**的键
+    /// （[`VDFS_PARAM_LIMIT`](super::VDFS_PARAM_LIMIT) /
+    /// [`VDFS_PARAM_BEFORE`](super::VDFS_PARAM_BEFORE)），由访问层翻译给认识它们的
+    /// provider——请求只回答「列哪个目录」，窗口是调用方的上下文，不是操作负载。
+    List {},
     /// 读取 `path` 节点的元数据
     Stat,
     /// 读取 `path` 节点的内容（`r` 位）

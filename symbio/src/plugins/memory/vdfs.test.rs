@@ -54,14 +54,7 @@ async fn root_lists_both_memory_files() {
 
     // 没选工作区：只有智能体记忆
     let nodes = p
-        .dispatch(
-            &vctx(None),
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx(None), "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -75,10 +68,7 @@ async fn root_lists_both_memory_files() {
         .dispatch(
             &vctx(Some(ws.path().to_string_lossy().as_ref())),
             "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
+            VdfsRequest::List {},
         )
         .await
         .unwrap()
@@ -121,14 +111,7 @@ async fn no_subdirectories_under_the_root() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let err = p
-        .dispatch(
-            &vctx(None),
-            "sub",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx(None), "sub", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(format!("{err:?}").contains("没有子目录"), "{err:?}");

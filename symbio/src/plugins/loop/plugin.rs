@@ -24,9 +24,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::symbio_core::{
-    CapabilityRow, DynVdfsProvider, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, VdfsContext,
-    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, PLUGIN_ID_LOOP,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    PLUGIN_ID_LOOP,
 };
 
 /// 单环驱动器。
@@ -85,13 +85,8 @@ impl Plugin for LoopPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn PluginInvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        // 挂载点是**回程地址**：session 经容器找本插件的 provider 派发 `run_turn`。
-        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            let me: DynVdfsProvider = self.clone();
-            visitor.put(CapabilityRow::mount(PLUGIN_ID_LOOP, me)).await;
-        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

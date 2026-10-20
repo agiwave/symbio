@@ -140,7 +140,6 @@ impl SessionPlugin {
             return Ok(VdfsResponse::Write(VdfsWriteResponse {
                 name: anonymous.then_some(id),
                 created: true,
-                etag: None,
             }));
         }
 
@@ -185,7 +184,6 @@ impl SessionPlugin {
         Ok(VdfsResponse::Write(VdfsWriteResponse {
             name: None,
             created: false,
-            etag: None,
         }))
     }
 

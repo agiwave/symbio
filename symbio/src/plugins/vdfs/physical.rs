@@ -453,7 +453,6 @@ impl PhysicalFs {
             // 具名写：名字是调用方给的（磁盘层没有「匿名新建」这一形态）
             name: None,
             created,
-            etag: Some(bytes.len().to_string()),
         })
     }
 

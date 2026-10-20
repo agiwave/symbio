@@ -40,14 +40,7 @@ fn tdir() -> PluginDir {
 async fn config_document_is_the_only_child_of_the_root() {
     let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
     let items = plugin
-        .dispatch(
-            &vctx(),
-            "",
-            VdfsRequest::List {
-                limit: None,
-                before: None,
-            },
-        )
+        .dispatch(&vctx(), "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()

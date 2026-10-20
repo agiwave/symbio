@@ -30,8 +30,8 @@ use crate::symbio_core::{
     PluginStopReason, PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
-    DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
-    VdfsChange, VdfsChangeSubscriptions,
+    DetailDefinition, DetailField, DetailOption, DetailSection, VdfsAccess, VdfsChange,
+    VdfsChangeSubscriptions,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -476,15 +476,8 @@ impl Plugin for SessionPlugin {
         // 能力收集（available_tools）：本插件**不再贡献工具**——`heartbeat` 那条随调度
         // 搬进 `plugins/heartbeat`（[ADR-077](../../../../docs/010-adr/077.md "ADR-077")），
         // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
-        // VDFS 挂载点：与会话工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
-        // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_ID_SESSION`），
-        // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
+        // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            let me: DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_SESSION, me))
-                .await;
-
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
             // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责
             // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `MEMORY.md` 归本

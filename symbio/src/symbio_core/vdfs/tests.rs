@@ -311,10 +311,7 @@ fn context_downcast_and_require() {
 fn request_variant_set_is_the_operation_surface() {
     let sink: VdfsChangeSink = Arc::new(|_| {});
     let reqs = [
-        VdfsRequest::List {
-            limit: None,
-            before: None,
-        },
+        VdfsRequest::List {},
         VdfsRequest::Stat,
         VdfsRequest::Read,
         VdfsRequest::Write {
@@ -358,10 +355,7 @@ async fn unsupported_ops_report_not_implemented() {
     let ctx = VdfsContext::empty();
     let sink: VdfsChangeSink = Arc::new(|_| {});
     let reqs = [
-        VdfsRequest::List {
-            limit: None,
-            before: None,
-        },
+        VdfsRequest::List {},
         VdfsRequest::Stat,
         VdfsRequest::Read,
         VdfsRequest::Write {

@@ -9,9 +9,7 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
     PATH, PLUGIN_ID_GATEWAY,
 };
-use crate::symbio_core::{
-    CapabilityRow, DetailDefinition, DetailField, DetailOption, DynVdfsProvider,
-};
+use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -252,13 +250,6 @@ impl Plugin for GatewayPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // 本插件在 VDFS 上的全部内容 = 一个配置文档
-            let me: DynVdfsProvider = self.clone();
-            visitor
-                .put(CapabilityRow::mount(PLUGIN_ID_GATEWAY, me))
-                .await;
-        }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

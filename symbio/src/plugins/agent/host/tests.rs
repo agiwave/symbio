@@ -774,10 +774,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
 
 use crate::symbio_core::VdfsRequest;
 
-const LIST: VdfsRequest = VdfsRequest::List {
-    limit: None,
-    before: None,
-};
+const LIST: VdfsRequest = VdfsRequest::List {};
 const STAT: VdfsRequest = VdfsRequest::Stat;
 const READ: VdfsRequest = VdfsRequest::Read;
 const DEL: VdfsRequest = VdfsRequest::Delete { recursive: false };
