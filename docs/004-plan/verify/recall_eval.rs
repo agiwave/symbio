@@ -48,6 +48,35 @@
 //! pass^k 一个信息也不增加。真实变动的是输入外观：池的物理顺序、池里更多的
 //! 更旧无关条目、同一条记忆被重复入池（见 `variants`）。
 //!
+//! ## 第四个数字：换述召回率与「依赖度」（T-173）
+//!
+//! 前三个数说「同一批池外观下命中稳不稳」。第四个数问另一件事：
+//! **同一句话换个说法，还找得回吗？**
+//!
+//! 做法是把查询换成 [`PARAPHRASES_TSV`] 里的同义换述（33 条用例各 ≥2 种说法，
+//! 冻结在 `fixtures/`），池完全不动，再跑一遍 recall@k。两个数的差
+//! `dependency = 原述 − 换述` 就是**依赖度**：越大，这套排序越靠字面。
+//! 它是 [PL-002 §3.1.1](../../002-能力坐标系.md "PL-002-能力坐标系") 那张表里
+//! 「抽象层级」一格的离线效标——此前那一格写的是「本轴目前只能人工判」。
+//!
+//! ## 换述为什么不并进 `pass^k`
+//!
+//! 它是同一件事的**第三类输入外观**（池形状 V1–V3 之外的查询措辞），但方向
+//! 相反：`pass^k` 要求「全部外观都命中」，而换述的**未命中本身就是读数**。
+//! 把换述塞进 `variants()` 只有两种结局——要么把换述写得都会命中（读数恒为 1，
+//! 白测），要么 `pass_all >= 0.90` 那条断言逼人删换述。所以它单独出一个数，
+//! 不冒充稳定性。
+//!
+//! ## 这条读数**不**覆盖什么（写在这里，也写进 PL-002 那一格）
+//!
+//! 1. 它测的是**排序器对措辞的敏感度**，不是「系统会归纳」。读数低只说明
+//!    「这套排序不靠字面」，不说明任何东西理解了同义。
+//! 2. 换述是人写的 ⇒ 它只是效标的**下界**：换述越接近原述差值越小越好看。
+//!    因此换述表带指纹锁（改一个字节就红），重叠均值也一并打印。
+//! 3. 有一部分用例**结构上**与措辞无关（时间兜底那类：期望的就是最新那条，
+//!    任何查询都命中）。它们只能进分母，不能进依赖度的叙述——程序把这一点
+//!    算成两个数并逐条验证（见 `main` 的第 9、10 条判据）。
+//!
 //! 论证纪律：每条断言配反向用例（改输入，结论必须变）。
 //!
 //! 编译运行：rustc --edition 2021 recall_eval.rs -o re && ./re
@@ -516,6 +545,112 @@ fn pass_at_k(
     ((cs.len() - failed.len()) as f64 / cs.len() as f64, failed)
 }
 
+// ───────────────────── 换述集（同义改写的查询）─────────────────────
+
+/// 换述集：`fixtures/paraphrases.tsv`，33 条用例各 ≥2 种说法（T-173）。
+///
+/// 这份表是**冻结数据**：改它要同步改 [`PARAPHRASES_FINGERPRINT`]，并在
+/// `fixtures/README.md` 写为什么改（那才是下一次改它的人会看的地方）。
+const PARAPHRASES_TSV: &str = include_str!("fixtures/paraphrases.tsv");
+
+/// 换述集的指纹（FNV-1a 64，按 `\r\n → \n` 归一后算字节）。
+///
+/// **为什么是这个算法**：本程序是裸 `rustc` 编译的单文件，没有 Cargo 依赖可用；
+/// 这条锁只需要「改一个字节就变」，密码学强度不是目的。目的是让「把换述改得
+/// 更容易命中」在门禁里变成一道**显式的红**，而不是几行措辞 diff。
+const PARAPHRASES_FINGERPRINT: u64 = 0x5fe9_a03f_3f96_1ae5;
+
+/// FNV-1a 64：常量乘积、逐字节异或，八行就够，不引依赖。
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// 逐行读换述表：`用例名<TAB>换述`，`#` 与空行忽略。
+///
+/// 坏行**直接 panic** 而不是跳过：静默跳过等于「少了一条换述但读数照出」，
+/// 而「每案 ≥2 条」正是这份夹具的全部意义（少一条，样本量悄悄变小）。
+fn paraphrase_rows() -> Vec<(&'static str, &'static str)> {
+    let mut out = Vec::new();
+    for (i, line) in PARAPHRASES_TSV.lines().enumerate() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (name, para) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("换述表第 {} 行不是 `用例名<TAB>换述`：{line}", i + 1));
+        assert!(
+            !para.trim().is_empty(),
+            "换述表第 {} 行的换述是空的（空查询会退化成纯 ts 序，读数就没有意义）",
+            i + 1
+        );
+        out.push((name, para));
+    }
+    out
+}
+
+/// 把换述挂到用例上：返回与 `cs` 等长的「该用例的换述列表」。
+///
+/// 用例名是两边的**唯一**关联键，所以两个方向都要判：表里的名字必须在
+/// `cases()` 里存在（孤儿 = 写错名字，那条换述被静默丢掉），`cases()` 里
+/// 每条必须有 ≥2 条换述（漏写 = 新加用例时忘了配题）。
+fn paraphrase_index(cs: &[Case]) -> Vec<Vec<&'static str>> {
+    let mut out = vec![Vec::new(); cs.len()];
+    for (name, para) in paraphrase_rows() {
+        let i = cs.iter().position(|c| c.name == name).unwrap_or_else(|| {
+            panic!("换述表里的用例名不在 cases() 里：`{name}`——名字写错即静默丢一条换述")
+        });
+        out[i].push(para);
+    }
+    for (c, ps) in cs.iter().zip(&out) {
+        assert!(
+            ps.len() >= 2,
+            "用例 `{}` 只有 {} 条换述（要求 ≥2）：一条换述只能代表「一种说法」，\
+             测不出「换个说法」这件事的稳定性",
+            c.name,
+            ps.len()
+        );
+    }
+    out
+}
+
+/// 一条用例的换述命中率（命中条数 / 换述条数）。
+///
+/// 分母是该用例自己的换述条数而不是全局常数：换述条数将来可能不等长，
+/// 用全局常数会在那一刻把某些用例的权重算错，而错法不显眼。
+fn paraphrase_hit_rate(c: &Case, ps: &[&str]) -> f64 {
+    let hits = ps
+        .iter()
+        .filter(|&&q| hit_at_k(&production_recall(&c.memories, q, c.k), c) > 0.0)
+        .count();
+    hits as f64 / ps.len() as f64
+}
+
+fn mean(xs: &[f64]) -> f64 {
+    xs.iter().sum::<f64>() / xs.len() as f64
+}
+
+/// 两串词集的 Jaccard 重叠——「换述与原述的字面有多近」的读数。
+///
+/// 它是纪律②（避开原述二元组）的唯一可见证据：换述越像原述，这个数越高，
+/// 而依赖度就越低——**低得不一定是排序好，可能是题出得太像**。
+fn jaccard(a: &[String], b: &[String]) -> f64 {
+    let sa: std::collections::BTreeSet<&String> = a.iter().collect();
+    let sb: std::collections::BTreeSet<&String> = b.iter().collect();
+    let inter = sa.intersection(&sb).count() as f64;
+    let union = sa.union(&sb).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
 fn main() {
     let cs = cases();
     println!("召回评测集：{} 条用例\n", cs.len());
@@ -539,6 +674,71 @@ fn main() {
     for (name, misses) in &pass_failed {
         let tags: Vec<String> = misses.iter().map(|i| format!("V{i}")).collect();
         println!("      ✗ 未通过变体：{name} @ {}", tags.join(","));
+    }
+
+    // ── 第四个数字：换述召回率与依赖度（T-173）──────────────────────────
+    //
+    // 池不动，只把查询换成同义换述。`para` = 换述命中率；`dep = prod − para`
+    // 是**依赖度**（越大越靠字面），它才是「抽象层级」那一格要的效标。
+    let ps = paraphrase_index(&cs);
+    let per_case: Vec<f64> = cs
+        .iter()
+        .zip(&ps)
+        .map(|(c, p)| paraphrase_hit_rate(c, p))
+        .collect();
+    let para = mean(&per_case);
+    let dep = prod - para;
+
+    // 「措辞能左右结果」的用例：**时间序兜底会漏**的那些。
+    // 分类用可执行判据，不加人工标签——trivial（无查询 ⇒ 纯 ts 降序）漏掉的
+    // 用例才可能因换个说法改变结果；trivial 也命中的用例（期望的就是最新那条）
+    // 任何查询都按时间兜底命中，换述读数在上面**结构上恒为 1**。
+    let content_decided: Vec<usize> = (0..cs.len())
+        .filter(|&i| {
+            let c = &cs[i];
+            hit_at_k(&trivial_recall(&c.memories, c.query, c.k), c) == 0.0
+        })
+        .collect();
+    let para_c = mean(
+        &content_decided
+            .iter()
+            .map(|&i| per_case[i])
+            .collect::<Vec<_>>(),
+    );
+    let prod_c = mean(
+        &content_decided
+            .iter()
+            .map(|&i| {
+                let c = &cs[i];
+                hit_at_k(&production_recall(&c.memories, c.query, c.k), c)
+            })
+            .collect::<Vec<_>>(),
+    );
+    let dep_c = prod_c - para_c;
+
+    println!("\n换述读数（同一批用例、同一个池，只把查询换成另一种说法）：");
+    println!(
+        "  {:<14} {:.3}  ← 换述召回率（{} 条换述 / {} 案）",
+        "paraphrase",
+        para,
+        paraphrase_rows().len(),
+        cs.len()
+    );
+    println!(
+        "  {:<14} {:.3}  ← 依赖度 = 原述 − 换述（越大越依赖字面）",
+        "dependency", dep
+    );
+    println!(
+        "  {:<14} {:.3}  ← 同一差值，只算措辞能左右结果的 {} 案（另 {} 案时间兜底恒命中）",
+        "  └ 子集",
+        dep_c,
+        content_decided.len(),
+        cs.len() - content_decided.len()
+    );
+    for (c, r) in cs.iter().zip(&per_case) {
+        if *r < 1.0 {
+            println!("      · 换述未全中：{}（{:.2}）", c.name, r);
+        }
     }
 
     // ── 判据 ────────────────────────────────────────────────────────────
@@ -670,9 +870,129 @@ fn main() {
         "空查询 ⇒ ts 降序（seq 无同 ts 冲突时即输入序的逆）"
     );
 
+    // 7. **换述集是冻结数据**：改一个字节就红。
+    //
+    //    锁的不是「不许改」，而是「改要有痕迹」：换述写得越接近原述，依赖度越小、
+    //    读数越好看，而那种改法在 diff 里只是几行措辞。指纹把这类改动变成一道
+    //    显式的红，逼改动者在这里写理由。
+    assert_eq!(
+        fnv1a64(&PARAPHRASES_TSV.replace("\r\n", "\n")),
+        PARAPHRASES_FINGERPRINT,
+        "换述表被改过：同步改 PARAPHRASES_FINGERPRINT，并在 fixtures/README.md 的\
+         「改动记录」里写为什么——换述是人写的，改它就能改读数"
+    );
+
+    // 7b. **每条换述必须真的换了措辞**（纪律①②的可执行那一半；另一半「不许看
+    //     正文」只能靠人守，故写进 fixtures 头注释与 README）。
+    let mut overlap_sum = 0.0;
+    let mut overlap_n = 0usize;
+    for (c, ps) in cs.iter().zip(&ps) {
+        let q = recall_score::terms(c.query);
+        for p in ps {
+            assert_ne!(*p, c.query, "换述与原述逐字相同（用例 `{}`）：那不是换述", c.name);
+            let t = recall_score::terms(p);
+            assert_ne!(
+                t, q,
+                "换述 `{p}` 与原述的分词结果一模一样（用例 `{}`）：换了标点不算换说法",
+                c.name
+            );
+            assert!(
+                t.iter().any(|w| !q.contains(w)),
+                "换述 `{p}` 的每个词都来自原述（用例 `{}`）：这不测「依赖字面」，只测「同义词也认得」",
+                c.name
+            );
+            overlap_sum += jaccard(&t, &q);
+            overlap_n += 1;
+        }
+    }
+    let overlap_mean = overlap_sum / overlap_n as f64;
+
+    // 8. **依赖度的定义域**：换述召回率不可能高于原述（原述 1.000 时这是恒等式，
+    //    原述掉下来时它是真判据）。这一条防的是「某一侧算错方向」——比如把
+    //    `dep` 写成 `para - prod`，那样读数看起来更"好看"，含义却反了。
+    assert!(
+        dep >= -1e-9,
+        "依赖度 = 原述 − 换述，不可能为负：prod={prod} para={para}"
+    );
+
+    // 9. **每一条换述都是承重的**（这条读数的「能红」判据）。
+    //
+    //    把**任意一条**换述换成与原述无关的问句，依赖度必须精确上抬 1/(n·m)
+    //    （m = 该用例的换述条数）；若该条本来就没命中，读数必须**不动**。
+    //    两种都断言——只断言「变大」的话，一条永远不命中的换述（等价于无关问句）
+    //    也能让集合看起来是满的，而它对读数一个字节的贡献都没有。
+    //
+    //    ⚠️ 只在「措辞能左右结果」的用例上做：时间兜底那一类换成什么问句都命中，
+    //    灵敏度在那里恒为 0——那是第 10 条要单独证明的事，不是这里的漏测。
+    const POISON: &str = "zzz 星际尘埃的谱线宽度";
+    let mut checked = 0usize;
+    for &i in &content_decided {
+        let hits: Vec<bool> = ps[i]
+            .iter()
+            .map(|q| hit_at_k(&production_recall(&cs[i].memories, q, cs[i].k), &cs[i]) > 0.0)
+            .collect();
+        for j in 0..ps[i].len() {
+            let mut alt = ps.clone();
+            alt[i][j] = POISON;
+            let rates: Vec<f64> = cs
+                .iter()
+                .zip(&alt)
+                .map(|(c, p)| paraphrase_hit_rate(c, p))
+                .collect();
+            let got = prod - mean(&rates);
+            let want = if hits[j] {
+                one_step / ps[i].len() as f64
+            } else {
+                0.0
+            };
+            assert!(
+                (got - dep - want).abs() < 1e-9,
+                "用例 `{}` 的第 {} 条换述换成无关问句后，依赖度应上升 {want:.4}，实升 {:.4}\
+                 ——读数没跟着动，说明这条换述不承重",
+                cs[i].name,
+                j,
+                got - dep
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 32,
+        "灵敏度必须在足够多的换述上验过（现在只验了 {checked} 条）：\
+         验得太少时「每条都承重」随时可以退化成「恰好没验到坏的那条」"
+    );
+
+    // 10. **边界是算出来的，不是写出来的**：时间兜底那一类用例上，把换述换成
+    //     无关问句，读数**一分不动**。这条同时说明两件事——它们只能进分母，
+    //     不能进依赖度的叙述；以及第 9 条的灵敏度不是「任何用例都灵敏」。
+    let blind: Vec<usize> = (0..cs.len()).filter(|i| !content_decided.contains(i)).collect();
+    assert!(
+        !blind.is_empty(),
+        "用例集里应当存在时间兜底类用例（没有的话第 10 条与第 9 条是同一条，边界就没被证明）"
+    );
+    for &i in &blind {
+        let mut alt = ps.clone();
+        alt[i][0] = POISON;
+        let rates: Vec<f64> = cs
+            .iter()
+            .zip(&alt)
+            .map(|(c, p)| paraphrase_hit_rate(c, p))
+            .collect();
+        assert!(
+            ((prod - mean(&rates)) - dep).abs() < 1e-9,
+            "用例 `{}` 属时间兜底类（期望的就是最新那条），任何查询都命中 ⇒ \
+             换述读数在上面恒为 1，换掉不该影响依赖度",
+            cs[i].name
+        );
+    }
+
     println!("\n通过：生产排序内核 recall@k = {prod:.3} > 平凡值 {triv:.3}，");
     println!("      且 expect 下标可被反向证伪（改错后 production 掉到 {rev:.3}）；");
     println!("      pass^4 = {pass_all:.3}（同一批用例换池外观后仍全过）。");
+    println!("      换述 {para:.3}（依赖度 {dep:.3}；{checked} 条换述逐条验过承重），");
+    println!(
+        "      换述与原述的二元组重叠均值 {overlap_mean:.3}（越高说明题出得越像原述）。"
+    );
     println!("\n规则三：n={n} 条全过 ⇒ 95% 置信下失败率上界 3/n ≤ {bound:.3}，");
     println!("        即成功率 ≥ {:.3}（>0.90 需要 n≥29，>0.95 需要 n≥59）。", 1.0 - bound);
 }

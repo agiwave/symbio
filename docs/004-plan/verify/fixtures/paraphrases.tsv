@@ -1,0 +1,95 @@
+# 换述集 —— 同一请求的另一种说法（T-173 · [PL-002 §3.1.1](../../002-能力坐标系.md)「抽象层级」格）
+#
+# 谁读它：[`recall_eval.rs`](../recall_eval.rs) 的换述召回读数。同一批用例、同一个池，
+# 只把查询换成另一种说法再跑一遍 recall@k——两次命中率之差就是**依赖度**
+# （越大越依赖字面）。
+#
+# 格式：`用例名<TAB>换述`，一行一条换述；用例名必须逐字等于 `recall_eval.rs` 里
+# `Case::name`（名字是两边的唯一关联键，写错就是静默丢一条，所以程序会 panic）。
+# `#` 开头与空行忽略。**不许加第三列**：多一列就多一个没人读的字段。
+#
+# ═══ 写换述的两条纪律（违反则读数变成一个好看的 A）═══
+#
+# ① **写换述的人不许看记忆正文**。查询是「用户想找什么」，正文是「答案」。照着正文
+#    里的词写查询，等于把答案抄进题目，测出来的是抄写能力。
+# ② **尽量避开原查询的二元组**。`recall_score` 的算法就是**二元组重叠**——换述若与
+#    原查询共享大量二元组，「依赖字面」这件事根本测不出来，测到的只是「换了同义词
+#    还认得」。程序会把「与原述的二元组重叠均值」打出来，就是给这条纪律一个读数。
+#
+# ═══ 冻结 ═══
+#
+# 这份表一次写完即**冻结**（与 `recall_eval.rs` 的 `cases()` 同一条纪律：用例是数据，
+# 改数据要留理由）。改它必须做两件事，缺一条程序就红：
+#   1. 同步改 `recall_eval.rs` 里的 `PARAPHRASES_FINGERPRINT`（FNV-1a 64，程序会校验）；
+#   2. 在本目录 README 的「改动记录」里写为什么改——**理由写在那个文件里，不写在提交信息里**
+#      （提交信息会随历史沉底，README 是下一次改它的人真正会看的地方）。
+#
+# 为什么需要这层锁：换述是人写的，写得越接近原述差值越小越好看。没有锁的话，
+# 「把换述改得更容易命中」在 diff 里只是几行的措辞变化，在读数上却是「依赖度下降」。
+# ════════════════════════════════════════════════════════════════════════════════
+stale-but-relevant loses to fresh-but-irrelevant under time order	上线后数据库连接数被占满了怎么处理
+stale-but-relevant loses to fresh-but-irrelevant under time order	服务发布时连接池不够用怎么办
+partial word overlap ranks the richer match first	怎么查内存泄漏的位置
+partial word overlap ranks the richer match first	内存一直不释放该从哪里入手
+an unrelated query falls back to recency, never to silence	量子纠错码有哪些方案
+an unrelated query falls back to recency, never to silence	量子比特出错怎么纠正
+crashloopbackoff-diagnosis	k8s 容器反复重启该从哪查
+crashloopbackoff-diagnosis	pod 启动后就退出该如何定位
+cache-breakdown-lock	缓存击穿导致数据库扛不住
+cache-breakdown-lock	热点数据失效的瞬间打垮数据库怎么办
+nginx-502-locate	网关报 502 该按什么顺序排查
+nginx-502-locate	反向代理返回 502 怎么找原因
+python-memory-growth	跑久了内存越来越高
+python-memory-growth	Python 进程内存持续增长怎么查
+git-rebase-conflict	变基冲突老是要解决很多次
+git-rebase-conflict	rebase 总是撞同样的冲突怎么办
+sql-slow-scan	查询很慢而且没用到索引
+sql-slow-scan	慢 SQL 的执行计划里没走索引
+first-paint-three-seconds	页面第一次打开要等三秒多
+first-paint-three-seconds	首屏渲染太慢怎么优化
+docker-cache-miss	镜像构建每次都要从头来
+docker-cache-miss	docker build 的缓存命中不了
+tls-cert-expiry	证书到期了没人管
+tls-cert-expiry	https 证书过期没人跟进
+mq-backlog	队列里的消息堆着消费不动
+mq-backlog	消息堆积消费速度跟不上
+flaky-unit-test	单测有时过有时不过
+flaky-unit-test	测试偶尔失败找不到原因
+duplicate-alerts	同一条告警刷了很多遍
+duplicate-alerts	告警重复轰炸怎么收敛
+p99-jitter	长尾延迟很高但中位数没事
+p99-jitter	接口尾部耗时忽高忽低
+backup-restore-drill	灾备演练没通过怎么补
+backup-restore-drill	恢复演练失败了
+timezone-cron	定时任务在错误的时区执行
+timezone-cron	cron 因为时区问题跑偏
+batch-import-timeout	大批量导入老是超时
+batch-import-timeout	导入数据请求超时怎么改
+mobile-upload-fail	手机上选图上传不成功
+mobile-upload-fail	手机端传图片传不上去
+config-hot-reload	改了配置不生效要重启
+config-hot-reload	配置热加载没有反应
+websocket-reconnect	长连接老是掉线
+websocket-reconnect	websocket 老是断开重连
+inode-exhausted	磁盘还有空间却写不进去
+inode-exhausted	inode 用完了怎么办
+review-same-rework	评审反复提同一类意见
+review-same-rework	code review 老是卡在同一个问题
+requirement-churn	需求老变导致重复劳动
+requirement-churn	需求改来改去做无用功
+env-mismatch	本地跑得好线上出问题
+env-mismatch	开发和生产的配置对不上
+loadtest-vs-prod	压测很好线上却不行
+loadtest-vs-prod	性能测试和实际跑起来不一样
+dashboard-empty	监控图表全是空的
+dashboard-empty	看板不显示指标
+silence-after-alert-mute	静默期内的问题被忘了
+silence-after-alert-mute	告警被压掉之后没人管
+unrelated-astronomy	星系旋转速度的实测数据
+unrelated-astronomy	观测到的星系转速说明了什么
+unrelated-cooking	面发不起来怎么办
+unrelated-cooking	发面总失败
+unrelated-music	换和弦总是卡
+unrelated-music	吉他按和弦切换不连贯
+unrelated-gardening	多肉叶子软了
+unrelated-gardening	肉肉叶片焉了怎么办
