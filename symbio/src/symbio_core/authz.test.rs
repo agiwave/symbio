@@ -525,7 +525,7 @@ fn a_bound_subject_takes_the_source_row() {
     );
     assert!(!production_matrix().can_reply(subject));
     // 根会话绑定 = 继承会话面缺省行（主智能体行）。
-    bind_root(subject);
+    bind_root("t-bind-root-sess", subject);
     assert_eq!(
         production_matrix().grant_names_of(subject).len(),
         5,
@@ -550,7 +550,7 @@ fn a_bound_subject_takes_the_source_row() {
 #[test]
 fn binding_never_widens_a_deployed_row() {
     let before = production_matrix().grants_of(PRINCIPAL_WORKER).len();
-    bind_inheriting(PRINCIPAL_WORKER, PRINCIPAL_MAIN);
+    bind_inheriting("t-bind-widen-sess", PRINCIPAL_WORKER, PRINCIPAL_MAIN);
     assert_eq!(
         production_matrix().grants_of(PRINCIPAL_WORKER).len(),
         before,
@@ -569,7 +569,7 @@ fn binding_never_widens_a_deployed_row() {
 #[test]
 fn binding_grants_no_visibility_scope() {
     let subject = "session/t-bind-vis";
-    bind_root(subject);
+    bind_root("t-bind-vis-sess", subject);
     assert!(production_matrix().can_reply(subject), "能力随绑定来了……");
     assert!(
         !production_matrix().can_see(subject, PRINCIPAL_MAIN, VisScope::Shared),
@@ -590,7 +590,7 @@ fn binding_grants_no_visibility_scope() {
 #[test]
 fn the_elimination_face_ignores_bindings() {
     let subject = "session/t-bind-elim";
-    bind_root(subject);
+    bind_root("t-bind-elim-sess", subject);
     assert!(
         production_matrix().can_write_name(subject, CAP_ASSIGN_WORK),
         "合流面：绑定来的 assign.work 能力可见"
@@ -609,7 +609,7 @@ fn the_elimination_face_ignores_bindings() {
 fn delegated_binding_registers_both_sides() {
     let parent = "session/t-bind-parent";
     let child = "session/t-bind-child";
-    bind_inheriting(child, parent);
+    bind_inheriting("t-bind-child-sess", child, parent);
     assert!(
         !production_matrix().grants_of(parent).is_empty(),
         "父侧也在册（否则委派上限判不到父行）"
@@ -627,6 +627,74 @@ fn delegated_binding_registers_both_sides() {
         production_matrix().can_reply(child),
         "子会话收束闸放行（父行继承下来）"
     );
+}
+
+// ── 创建即登记与同寿回收（[T-182]）─────────────────────────────────────
+//
+// 下面的用例钉的是**生命周期**而不是判定口径：登记以会话为持有人，会话结束
+// （`unbind_session`，生产由 `delete_session_internal` 调用）时整册消失。
+// 判定面（交集 / 替换 / 空行）仍由上面的 ADR-100 边界用例钉住。
+
+/// **创建即登记 + 同寿回收**：登记行的寿命就是会话的寿命——会话结束，行随之消失；
+/// 进程级绑定面不再为「出现过的每个 agent 身份」留一行。
+#[test]
+fn a_binding_is_reclaimed_when_its_session_ends() {
+    let subject = "session/t-bind-life";
+    let session = "t-bind-life-sess";
+    bind_root(session, subject);
+    assert!(
+        production_matrix().can_reply(subject),
+        "会话创建即声明主体行"
+    );
+    unbind_session(session);
+    assert!(
+        production_matrix().grants_of(subject).is_empty(),
+        "会话结束 ⇒ 登记随之消失（同寿）"
+    );
+}
+
+/// **同一主体的两条会话登记互不覆盖寿命**：最近一次登记为准；较新的会话结束时，
+/// 较老的那条登记重新生效，而不是连它一起消失。
+#[test]
+fn bindings_of_two_live_sessions_outlive_each_other() {
+    let subject = "session/t-bind-shared";
+    let reader = "t-bind-shared-reader";
+    let worker_holder = "t-bind-shared-worker";
+
+    bind_root(reader, subject); // 会话面缺省行（5 项）
+    assert!(production_matrix().can_reply(subject));
+
+    bind_inheriting(worker_holder, subject, PRINCIPAL_WORKER); // 父 worker ⇒ 只剩产物能力
+    assert!(
+        !production_matrix().can_reply(subject),
+        "同一主体多会话登记时取最近一次"
+    );
+
+    unbind_session(worker_holder);
+    assert!(
+        production_matrix().can_reply(subject),
+        "较新的登记回收后，较老的一条重新生效"
+    );
+    unbind_session(reader);
+    assert!(production_matrix().grants_of(subject).is_empty());
+}
+
+/// **同一会话改写身份 ⇒ 旧行不留**：绑定的生命周期单位是会话，不是主体；
+/// 会话从 A 改到 B 后，A 的行不能挂到会话结束。
+#[test]
+fn rebinding_a_session_replaces_its_previous_identity_row() {
+    let session = "t-bind-switch-sess";
+    let first = "session/t-bind-switch-a";
+    let second = "session/t-bind-switch-b";
+    bind_root(session, first);
+    bind_root(session, second);
+    assert!(
+        production_matrix().grants_of(first).is_empty(),
+        "会话改写身份后，旧主体的行被撤掉"
+    );
+    assert!(production_matrix().can_reply(second), "新身份拿到会话面行");
+    unbind_session(session);
+    assert!(production_matrix().grants_of(second).is_empty());
 }
 
 // ── 委派取交集（T-195）────────────────────────────────────────────────
@@ -656,7 +724,12 @@ fn a_delegated_child_gets_the_intersection_of_parent_and_declaration() {
     .expect("自造小表合法");
     let matrix = EffectiveMatrix { deployed };
 
-    bind_inheriting_in(&matrix, "session/t-deploy-wide", "session/t-deploy-narrow");
+    bind_inheriting_in(
+        &matrix,
+        "t-intersect-wide-sess",
+        "session/t-deploy-wide",
+        "session/t-deploy-narrow",
+    );
     assert_eq!(
         matrix.grants_of("session/t-deploy-wide"),
         vec![Capability::Reply],
@@ -672,7 +745,12 @@ fn a_delegated_child_gets_the_intersection_of_parent_and_declaration() {
     );
 
     // 子未部署（没有显式声明）：整行来自父——交集退化为父行，不是空集。
-    bind_inheriting_in(&matrix, "session/t-un-deployed", "session/t-deploy-narrow");
+    bind_inheriting_in(
+        &matrix,
+        "t-intersect-undep-sess",
+        "session/t-un-deployed",
+        "session/t-deploy-narrow",
+    );
     assert_eq!(
         matrix.grants_of("session/t-un-deployed"),
         vec![Capability::Reply],
@@ -704,6 +782,7 @@ fn an_empty_intersection_registers_a_denying_row() {
 
     bind_inheriting_in(
         &matrix,
+        "t-intersect-empty-sess",
         "session/t-intersect-child",
         "session/t-intersect-parent",
     );
@@ -729,13 +808,13 @@ fn an_empty_intersection_registers_a_denying_row() {
 /// `assert.verification`（主智能体刻意不持，C15）会被夹成空行。
 #[test]
 fn a_deployed_root_keeps_its_own_row() {
-    bind_root(PRINCIPAL_VERIFIER);
+    bind_root("t-bind-verifier-sess", PRINCIPAL_VERIFIER);
     assert_eq!(
         production_matrix().grant_names_of(PRINCIPAL_VERIFIER),
         vec![CAP_ASSERT_VERIFICATION.to_string()],
         "根主体不被会话面缺省夹窄"
     );
-    bind_root(PRINCIPAL_ARBITER);
+    bind_root("t-bind-arbiter-sess", PRINCIPAL_ARBITER);
     assert!(
         production_matrix().can_write(PRINCIPAL_ARBITER, Capability::AssertVerification),
         "仲裁者同样保留自己的行"

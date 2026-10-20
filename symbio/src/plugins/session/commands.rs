@@ -133,6 +133,9 @@ impl SessionPlugin {
             self.save_session(&session)
                 .await
                 .map_err(vdfs_from_plugin_error)?;
+            // 创建即登记（[T-182]）：会话诞生的那一刻声明主体行，运行期装配点
+            // 只在身份被显式改写时做幂等兜底。
+            self.bind_session_identity(&session).await;
             self.notify_change(&id);
             return Ok(VdfsResponse::Write(VdfsWriteResponse {
                 name: anonymous.then_some(id),
@@ -159,11 +162,23 @@ impl SessionPlugin {
             None => self.session_of(&id).await?,
         };
         // 浅合并 —— `Session::merge_metadata_object` 是 metadata 写入的**唯一**实现。
+        // 身份键（`agent_id` / `parent_session_id`）若被改写，登记行随后换到新主体；
+        // 其余键（title / workdir / mode…）不碰绑定面。
+        let identity_touched = match value.get("metadata") {
+            Some(Value::Object(meta)) => {
+                meta.contains_key("agent_id") || meta.contains_key("parent_session_id")
+            }
+            Some(_) => true,
+            None => false,
+        };
         session.merge_metadata_object(&value);
         session.updated_at = clock_now_ms();
         self.save_session(&session)
             .await
             .map_err(vdfs_from_plugin_error)?;
+        if identity_touched {
+            self.bind_session_identity(&session).await;
+        }
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
         // 不带节点视图，见 `symbio_core::vdfs_notify_change`。
         self.notify_change(&id);
@@ -383,6 +398,57 @@ impl SessionPlugin {
         Ok(deleted_ids)
     }
 
+    // ==================== 创建即登记（[T-182]） ====================
+
+    /// **绑定会话身份**：会话创建时登记，身份被 metadata 改写时换行。
+    ///
+    /// 根会话声明会话面缺省行；委派子会话声明「父行 ∩ 自己的声明」——父主体的
+    /// 取值与运行期 `delegating_principal` 共用同一份实现（
+    /// [`super::chat_session::delegating_principal_in`]），两处不会分叉成
+    /// 「登记挂 A、运行期判 B」。
+    ///
+    /// 登记以**会话 id** 为持有人：同一会话换主体只替换这一条（旧行先撤），
+    /// 删除会话时整册回收（[`Self::delete_session_internal`]）。
+    async fn bind_session_identity(&self, session: &Session) {
+        let principal = crate::symbio_core::authz::principal_of(
+            session.metadata.get("agent_id").and_then(Value::as_str),
+        );
+        let Ok(store) = self.get_store().await else {
+            return;
+        };
+        match super::chat_session::delegating_principal_in(&store, session).await {
+            Some(parent) => {
+                crate::symbio_core::authz::bind_inheriting(&session.id, &principal, &parent)
+            }
+            None => crate::symbio_core::authz::bind_root(&session.id, &principal),
+        }
+    }
+
+    /// 会话的**全部后代 id**——删除父会话时整棵子树一并消失，登记面按同一棵树回收。
+    ///
+    /// 子会话按 `metadata.parent_session_id` 存在父目录的 `sessions/` 下，可能多层；
+    /// 枚举失败只跳过该层（回收尽力而为，不影响删除本身）。
+    async fn descendant_session_ids(&self, session_id: &str) -> Vec<String> {
+        let Ok(store) = self.get_store().await else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        let mut stack = vec![session_id.to_string()];
+        while let Some(id) = stack.pop() {
+            let Ok(children) = store.list_sub_sessions(&id).await else {
+                continue;
+            };
+            for child in children {
+                if ids.contains(&child.id) {
+                    continue;
+                }
+                stack.push(child.id.clone());
+                ids.push(child.id);
+            }
+        }
+        ids
+    }
+
     // ==================== 会话本体的删除（会话本体与子会话两条 Delete 分支共用） ====================
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
@@ -410,8 +476,17 @@ impl SessionPlugin {
         // 清理活跃条目
         self.active_mgr.sessions.write().await.remove(session_id);
 
+        // 子会话随父目录一起删除：登记面也按会话回收（[T-182]），所以在删除**前**
+        // 先把后代 id 记下来——删完之后磁盘上不再有可枚举的来源。
+        let descendants = self.descendant_session_ids(session_id).await;
+
         let store = self.get_store().await?;
         store.delete_session(session_id).await?;
+        // 登记行随会话同寿：删除成功后才回收（删除失败时会话仍在，行也该仍在）。
+        crate::symbio_core::authz::unbind_session(session_id);
+        for id in descendants {
+            crate::symbio_core::authz::unbind_session(&id);
+        }
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
         // 前端据此把该会话从清单移除。session/clear 与 VDFS 删除两条删除路径共用此处。

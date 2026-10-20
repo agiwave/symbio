@@ -374,18 +374,53 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
 static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
 
 /// **运行期绑定登记**（[ADR-100](../../../docs/010-adr/100.md "ADR-100")：绑定即登记）：
-/// 主体 ⇒ 它那一行**当次有效**的能力集。
+/// 主体 ⇒ 各**会话**为它声明的能力行。
 ///
 /// 与 [`ROWS`] 的分工：表是**部署事实**（常量、构造期定稿），这里是**运行期身份事实**
-/// ——哪个 agent 身份真的绑进了在跑的会话。查询侧合流（[`EffectiveMatrix`]）：
+/// ——哪个 agent 身份真的被哪个会话绑着。查询侧合流（[`EffectiveMatrix`]）：
 /// **登记过的绑定行就是有效行**，未登记才回退部署行；委派子会话登记的是
 /// 父行 ∩ 自己的声明行（[`bind_inheriting`]）。可见域**不**登记
 /// （[`EffectiveMatrix::can_see`] 只认部署表）：能力可以随绑定来，
 /// 「看见别人的 shared」只能来自部署登记。
-static BOUND: OnceLock<RwLock<HashMap<String, Vec<Capability>>>> = OnceLock::new();
+///
+/// **登记与会话同寿**（[T-182](../../../docs/009-task/182-创建即登记迁移步.md "T-182")）：
+/// 每条登记都带**登记者**（会话 id），会话删除时随 [`unbind_session`] 整册回收。
+/// 同一会话重复登记只替换自己那一条（幂等）；同一主体被多个存活会话登记时取
+/// **最近一次**——收束闸与委派上限的读法不变，变的是行不再比会话活得久。
+type BoundRows = HashMap<String, Vec<Binding>>;
 
-fn bound_rows() -> &'static RwLock<HashMap<String, Vec<Capability>>> {
+/// 一条绑定：**登记者**（会话 id）与它声明的能力行。
+struct Binding {
+    holder: String,
+    grants: Vec<Capability>,
+}
+
+static BOUND: OnceLock<RwLock<BoundRows>> = OnceLock::new();
+
+fn bound_rows() -> &'static RwLock<BoundRows> {
     BOUND.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 取绑定面写锁；锁中毒只告警——**登记失败 = 不登记**，方向与 ADR-099 一致。
+fn write_bound() -> Option<std::sync::RwLockWriteGuard<'static, BoundRows>> {
+    match bound_rows().write() {
+        Ok(map) => Some(map),
+        Err(why) => {
+            crate::plugin_warn!(
+                "authz",
+                "[governance] 绑定登记写入失败（fail-closed）：{why}"
+            );
+            None
+        }
+    }
+}
+
+/// 清掉某个会话登记过的**全部**行（身份改写时先撤旧行，回收时整册删除）。
+fn clear_session_rows(map: &mut BoundRows, holder: &str) {
+    map.retain(|_, entries| {
+        entries.retain(|binding| binding.holder != holder);
+        !entries.is_empty()
+    });
 }
 
 /// **根会话绑定**（[ADR-100]）：`Scope::Root` 没有父主体，只有一条来源——
@@ -398,21 +433,33 @@ fn bound_rows() -> &'static RwLock<HashMap<String, Vec<Capability>>> {
 ///
 /// 未部署的主体（`--agent <id>` 选定的会话身份）才登记缺省行——这是 ADR-100
 /// 「能力随绑定来」的入口。
-pub(crate) fn bind_root(principal: &str) {
-    if principal == PRINCIPAL_MAIN {
+///
+/// `session_id` 是**登记者**：登记行随这个会话的创建而来、随它的删除而去
+/// （[`unbind_session`]）。同一会话改写身份时旧行先被撤掉——否则旧身份会挂着
+/// 一条谁也不认领的登记，直到会话结束。
+pub(crate) fn bind_root(session_id: &str, principal: &str) {
+    if session_id.is_empty() {
         return;
     }
     let matrix = production_matrix();
-    if matrix.is_deployed(principal) {
-        return;
+    // 已部署主体用自己的行；主智能体本身也无需登记。
+    let grants = if principal == PRINCIPAL_MAIN || matrix.is_deployed(principal) {
+        None
+    } else {
+        Some(matrix.grants_of(PRINCIPAL_MAIN))
+    };
+    let Some(mut map) = write_bound() else { return };
+    clear_session_rows(&mut map, session_id);
+    if let Some(grants) = grants {
+        insert_binding(&mut map, session_id, principal, grants);
     }
-    insert_binding(principal, matrix.grants_of(PRINCIPAL_MAIN));
 }
 
 /// **委派绑定**（[ADR-100]）：`Scope::Child(parent)` 按
 /// **父能力 ∩ 子主体的显式声明**登记——委派不放大权威。
 ///
-/// - `principal`：本轮主体（[`request_principal`] 的产出）；
+/// - `session_id`：登记者（会话 id）——行随会话创建而来、随删除而去；
+/// - `principal`：会话主体（[`request_principal`] 的产出）；
 /// - `from`：父主体（`Scope::Child(parent)` 的 `parent`）。
 ///
 /// 三条边界：
@@ -427,24 +474,64 @@ pub(crate) fn bind_root(principal: &str) {
 /// 3. **登记失败 = 不登记**（fail-closed 的方向）：锁中毒只告警跳过，
 ///    未登记的主体照旧每个谓词为假。
 ///
-/// 幂等：同一主体重复绑定（每轮装配点都会调）不重复写、不重复告警。
-pub(crate) fn bind_inheriting(principal: &str, from: &str) {
-    bind_inheriting_in(production_matrix(), principal, from);
+/// 幂等：同一会话重复绑定不重复写、不重复告警；先撤本会话旧行，再登记新行。
+pub(crate) fn bind_inheriting(session_id: &str, principal: &str, from: &str) {
+    bind_inheriting_in(production_matrix(), session_id, principal, from);
 }
 
-/// [`bind_inheriting`] 的**取表口显式化**：判定用哪张表由调用方给，登记仍写进程级
+/// [`bind_inheriting`] 的**取表口显式化**：判定用哪张表由调用方给，登记仍写
 /// [`BOUND`]。生产只有一个调用点（[`production_matrix`]）；显式参数让交集语义能在
 /// **自造小表**上验证，而不必改动生产表或共享的绑定面。
-fn bind_inheriting_in(matrix: &EffectiveMatrix, principal: &str, from: &str) {
+///
+/// 取数一律在写锁**之前**完成：`grants_of` / `bound_row_excluding` 自己会读
+/// [`BOUND`]，持写锁再调用就是自锁。
+fn bind_inheriting_in(matrix: &EffectiveMatrix, session_id: &str, principal: &str, from: &str) {
+    if session_id.is_empty() {
+        return;
+    }
+    // 父侧“有没有行”要看**除本会话之外**的登记：本会话上一轮的辅助行先被排除，
+    // 否则「先撤旧行再登记」会把父行误判成已存在而漏登记。
+    let parent_present =
+        matrix.is_deployed(from) || matrix.bound_row_excluding(from, session_id).is_some();
+    let parent = if parent_present {
+        matrix.effective_grants_excluding(from, session_id)
+    } else {
+        matrix.grants_of(PRINCIPAL_MAIN)
+    };
+    let row = inherited_grants(matrix, principal, &parent);
+    let Some(mut map) = write_bound() else { return };
+    clear_session_rows(&mut map, session_id);
     if principal == from {
         return;
     }
-    if !matrix.has_row(from) {
-        insert_binding(from, matrix.grants_of(PRINCIPAL_MAIN));
+    if !parent_present {
+        insert_binding(&mut map, session_id, from, parent);
     }
-    let parent = matrix.grants_of(from);
-    let row = inherited_grants(matrix, principal, &parent);
-    insert_binding(principal, row);
+    insert_binding(&mut map, session_id, principal, row);
+}
+
+/// **会话结束 ⇒ 登记行回收**（[T-182]）：一次删掉该会话登记过的全部行。
+///
+/// 与 [`bind_root`] / [`bind_inheriting`] 的登记者是同一个键——会话 id 因此是
+/// 绑定面的**生命周期单位**，进程级只增不减只属于「会话还活着」的那些行。
+pub(crate) fn unbind_session(session_id: &str) {
+    if session_id.is_empty() {
+        return;
+    }
+    let Some(mut map) = write_bound() else { return };
+    let mut removed = 0usize;
+    map.retain(|_, entries| {
+        let before = entries.len();
+        entries.retain(|binding| binding.holder != session_id);
+        removed += before - entries.len();
+        !entries.is_empty()
+    });
+    if removed > 0 {
+        crate::plugin_info!(
+            "authz",
+            "[governance] 会话 {session_id} 结束，回收 {removed} 行绑定登记"
+        );
+    }
 }
 
 /// 委派交集的**唯一判据**：父行 ∩ 子主体的部署行；子未部署 ⇒ 父行原样继承。
@@ -467,32 +554,33 @@ fn inherited_grants(
         .collect()
 }
 
-/// 登记一行绑定（幂等：与既有登记相同则不动）。锁失败只告警——**登记失败 = 不登记**，
-/// 未登记的主体照旧 fail-closed，方向与 [ADR-099](../../../docs/010-adr/099.md "ADR-099") 一致。
+/// 登记一行绑定（幂等：同一会话同一行则不动；同会话换行则替换并移到队尾）。
 ///
 /// **空行也是登记**：委派交集为空时，登记 `[]` 表达「这个主体什么都不许」。
 /// 若把空行当作「不登记」跳过，查询面会退回部署行——父不持、子却照旧持有，
 /// 正好是「委派不放大权威」的反面。
-fn insert_binding(principal: &str, grants: Vec<Capability>) {
-    let mut map = match bound_rows().write() {
-        Ok(map) => map,
-        Err(why) => {
-            crate::plugin_warn!(
-                "authz",
-                "[governance] 绑定登记写入失败，主体 {principal} 不登记（fail-closed）：{why}"
-            );
-            return;
+fn insert_binding(map: &mut BoundRows, holder: &str, principal: &str, grants: Vec<Capability>) {
+    let entries = map.entry(principal.to_string()).or_default();
+    match entries.iter().position(|binding| binding.holder == holder) {
+        Some(i) if entries[i].grants == grants => return,
+        Some(i) => {
+            let mut binding = entries.remove(i);
+            binding.grants = grants;
+            entries.push(binding);
         }
-    };
-    if map.get(principal).is_some_and(|g| g == &grants) {
-        return;
+        None => entries.push(Binding {
+            holder: holder.to_string(),
+            grants,
+        }),
     }
+    let granted = entries
+        .last()
+        .map(|binding| binding.grants.len())
+        .unwrap_or(0);
     crate::plugin_info!(
         "authz",
-        "[governance] 绑定即登记：{principal} ⇒ {} 项能力（能力随绑定来，可见域不登记）",
-        grants.len()
+        "[governance] 绑定即登记：{principal} ⇒ {granted} 项能力（登记者 {holder}；能力随绑定来，可见域不登记）"
     );
-    map.insert(principal.to_string(), grants);
 }
 
 /// 本机会话的**主体派生**（部署事实 → [`PRINCIPAL_MAIN`] 同族的取值点）：
@@ -579,13 +667,25 @@ pub(crate) struct EffectiveMatrix {
 impl EffectiveMatrix {
     /// 绑定登记半边（[`BOUND`]）：`Some(行)` = 该主体登记过（**空行也算登记**）；
     /// `None` = 未登记。两者在合流面的后果不同：前者以登记行为准，后者回退部署行。
+    ///
+    /// 同一主体被多个存活会话登记时取**最近一次**（队尾）——这是「身份是主体、
+    /// 绑定是会话事实」的唯一冲突口径。
     fn bound_row(&self, principal: &str) -> Option<Vec<Capability>> {
-        if let Ok(map) = bound_rows().read() {
-            if let Some(bound) = map.get(principal) {
-                return Some(bound.clone());
-            }
-        }
-        None
+        let map = bound_rows().read().ok()?;
+        map.get(principal)
+            .and_then(|entries| entries.last())
+            .map(|binding| binding.grants.clone())
+    }
+
+    /// 同 [`Self::bound_row`]，但**排除某个会话**的登记——委派登记先撤本会话旧行，
+    /// 再据此判断父侧是否真的另有行（否则辅助行会被误判成外部登记而漏写）。
+    fn bound_row_excluding(&self, principal: &str, holder: &str) -> Option<Vec<Capability>> {
+        let map = bound_rows().read().ok()?;
+        map.get(principal)?
+            .iter()
+            .rev()
+            .find(|binding| binding.holder != holder)
+            .map(|binding| binding.grants.clone())
     }
 
     /// 合流后的有效能力集：**登记过的绑定行就是有效行**（含空行——空 = 什么都不许）；
@@ -601,18 +701,18 @@ impl EffectiveMatrix {
         }
     }
 
+    /// 同 [`Self::effective_grants`]，但排除某个会话的登记（[`bind_inheriting`] 的
+    /// 父行取值用）。
+    fn effective_grants_excluding(&self, principal: &str, holder: &str) -> Vec<Capability> {
+        match self.bound_row_excluding(principal, holder) {
+            Some(row) => row,
+            None => self.deployed.grants_of(principal).to_vec(),
+        }
+    }
+
     /// 这个主体是**部署事实**吗（表里有行）——淘汰面的判据（只对部署主体落裁决）。
     pub(crate) fn is_deployed(&self, principal: &str) -> bool {
         !self.deployed.grants_of(principal).is_empty()
-    }
-
-    /// 这个主体在合流面**有没有行**——部署行与绑定行都算；空绑定也是一行。
-    ///
-    /// 与 [`Self::is_deployed`] 的区别：后者问「是不是部署事实」（淘汰面 / 可见域），
-    /// 这里问「父侧登记是否已存在」（委派上限两侧都在册）。用错哪一个都会让空交集
-    /// 被当成「没有行」而重新登记成会话面缺省。
-    fn has_row(&self, principal: &str) -> bool {
-        self.is_deployed(principal) || self.bound_row(principal).is_some()
     }
 
     /// 写侧：主体持有的全部能力（空 = 部署表与绑定登记都没有它的行，或交集为空）。

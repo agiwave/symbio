@@ -144,19 +144,6 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
-    /// 本会话的**父会话 id**（`metadata.parent_session_id`；顶层会话 ⇒ `None`）。
-    ///
-    /// 归属声明的读侧入口（写入方 = `agent` 插件的 `agent_run`）：子会话凭它被
-    /// 归档进父会节目录，本方法把同一份声明交给作用域判定（见
-    /// [`Self::delegating_principal`]）。
-    pub(crate) async fn parent_session_id(&self) -> Option<String> {
-        self.load_session()
-            .await
-            .ok()?
-            .parent_session_id()
-            .map(str::to_string)
-    }
-
     /// 本会话所属**父会话的主体**——委派链上的父主体（[T-105]）。
     ///
     /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
@@ -169,10 +156,8 @@ impl PersistentChatSession {
     ///
     /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
     pub(crate) async fn delegating_principal(&self) -> Option<String> {
-        let parent_id = self.parent_session_id().await?;
-        let parent = self.store.load_session(&parent_id).await.ok()?;
-        let agent = parent.metadata.get("agent_id").and_then(|v| v.as_str());
-        Some(crate::symbio_core::authz::principal_of(agent))
+        let session = self.load_session().await.ok()?;
+        delegating_principal_in(&self.store, &session).await
     }
 
     /// 子会话清单（Q3 worker 进展的读侧入口）：委托 store 枚举
@@ -219,6 +204,22 @@ impl PersistentChatSession {
     pub(crate) fn session_id(&self) -> &str {
         &self.session_id
     }
+}
+
+/// 委派链上的**父主体**——三段取值（子 `metadata.parent_session_id` → 父
+/// `metadata.agent_id` → [`crate::symbio_core::authz::principal_of`]）的**唯一实现**。
+///
+/// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
+/// （`commands::session_upsert`）也要用同一份判据登记主体行（[T-182]），两处
+/// 各写一遍迟早分叉成「登记挂 A、运行期判 B」。
+pub(super) async fn delegating_principal_in(
+    store: &SessionStore,
+    session: &super::types::Session,
+) -> Option<String> {
+    let parent_id = session.parent_session_id()?;
+    let parent = store.load_session(parent_id).await.ok()?;
+    let agent = parent.metadata.get("agent_id").and_then(|v| v.as_str());
+    Some(crate::symbio_core::authz::principal_of(agent))
 }
 
 #[cfg(test)]

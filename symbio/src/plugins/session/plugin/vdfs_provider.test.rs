@@ -398,6 +398,130 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
     );
 }
 
+/// **创建即登记**（[T-182]）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
+/// 缺省行；删除会话时登记随之回收（同寿）。
+///
+/// 判据落在**生产路径**上（VDFS `write` 的 create 分支 → `session_upsert`），
+/// 而不是直接调用 `authz::bind_*`：后者只能证明绑定面本身会写会删，证明不了
+/// 「会话创建真的登记了」。
+#[tokio::test]
+async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims_it() {
+    let (_dir, p) = fixture();
+    let sid = "t182-root-created";
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-agent"}}"#).with_create(),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let principal = crate::symbio_core::authz::principal_of(Some("t182-agent"));
+    assert!(
+        crate::symbio_core::authz::production_matrix().can_reply(&principal),
+        "创建即登记：未部署身份拿到会话面缺省行"
+    );
+
+    p.delete_session_internal(sid).await.unwrap();
+    assert!(
+        crate::symbio_core::authz::production_matrix()
+            .grants_of(&principal)
+            .is_empty(),
+        "会话删除 ⇒ 登记行随之回收"
+    );
+}
+
+/// **身份改写换行**（[T-182]）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
+/// 换掉时，旧主体的登记随即撤回、新主体即时有行——不等下一轮装配点兜底。
+#[tokio::test]
+async fn rewriting_the_agent_identity_replaces_the_session_binding() {
+    let (_dir, p) = fixture();
+    let sid = "t182-rewrite";
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-rewrite-old"}}"#)
+                .with_create(),
+        },
+    )
+    .await
+    .unwrap();
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-rewrite-new"}}"#),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let old = crate::symbio_core::authz::principal_of(Some("t182-rewrite-old"));
+    let new = crate::symbio_core::authz::principal_of(Some("t182-rewrite-new"));
+    let matrix = crate::symbio_core::authz::production_matrix();
+    assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
+    assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
+    p.delete_session_internal(sid).await.unwrap();
+}
+
+/// **委派子会话在创建时登记父行继承**，且随父会话删除一并回收。
+///
+/// 父 = 已部署的 worker（无发言权、只持产物），子 = 未部署身份 ⇒ 子行 = 父行；
+/// 父删除会连子目录一起删掉，登记面必须按同一棵子树回收。
+#[tokio::test]
+async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_parent() {
+    let (_dir, p) = fixture();
+    let parent = "t182-parent";
+    let child = "t182-child";
+    p.dispatch(
+        &vctx(),
+        parent,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"worker"}}"#).with_create(),
+        },
+    )
+    .await
+    .unwrap();
+    p.dispatch(
+        &vctx(),
+        child,
+        VdfsRequest::Write {
+            content: VdfsContent::text(
+                r#"{"metadata":{"agent_id":"t182-child-agent","parent_session_id":"t182-parent"}}"#,
+            )
+            .with_create(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let child_principal = crate::symbio_core::authz::principal_of(Some("t182-child-agent"));
+    let matrix = crate::symbio_core::authz::production_matrix();
+    assert!(
+        !matrix.can_reply(&child_principal),
+        "委派取交集：worker 无发言权 ⇒ 子也无"
+    );
+    assert!(
+        matrix.can_produce_artifact(&child_principal),
+        "父的产物能力保留在子行里"
+    );
+
+    p.delete_session_internal(parent).await.unwrap();
+    assert!(
+        crate::symbio_core::authz::production_matrix()
+            .grants_of(&child_principal)
+            .is_empty(),
+        "父会话删除（子会话一并删除）⇒ 子登记随子树回收"
+    );
+}
+
 /// 覆盖分支：metadata 浅合并 + 显式 `title` 写进 `metadata.title`。
 ///
 /// 合并语义只有这一处（`session/update` 路由已退役，`vdfs/write` 是唯一写入路径），

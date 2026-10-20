@@ -67,6 +67,12 @@ fn load_history_false_is_honored() {
 fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn crate::symbio_core::PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::AGENT_ID, agent_id.to_string());
+    // 绑定登记以会话为持有人（[T-182]）：没有会话 id 就没有登记，未部署主体
+    // 会 fail-closed——这组用例要钉的是「规格从登记行取」，所以给一个每例独有的 id。
+    req.set(
+        crate::symbio_core::SESSION_ID,
+        format!("t-state-{agent_id}"),
+    );
     std::sync::Arc::new(req)
 }
 
