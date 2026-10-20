@@ -68,7 +68,7 @@ pub const DOMAINS: &[Domain] = &[
     },
     Domain {
         key: "actor.capability",
-        forms: &["judge.intent", "reply.first", "reply.append", "define.work", "produce.artifact", "assert.verification", "assign.work"],
+        forms: &["judge.intent", "reply", "define.work", "produce.artifact", "assert.verification", "assign.work"],
         open: false,
     },
     Domain {
@@ -916,7 +916,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("event.entity", "turn"),
             ("event.verb", "closed"),
             ("actor.pattern", "reasoner"),
-            ("actor.capability", "reply.first"),
+            ("actor.capability", "reply"),
             ("actor.budget_ms", "300"),
             ("projection", "snapshot"),
         ],
@@ -931,7 +931,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("actor.capability", "produce.artifact"),
             ("projection", "display"),
         ],
-        fallback: ("actor.capability", "reply.append"),
+        fallback: ("actor.capability", "reply"),
     },
     StageDoc {
         id: "S03",
@@ -1009,7 +1009,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("actor.pattern", "decider"),
             ("projection", "budget"),
         ],
-        fallback: ("actor.capability", "reply.append"),
+        fallback: ("actor.capability", "reply"),
     },
     StageDoc {
         id: "S10",

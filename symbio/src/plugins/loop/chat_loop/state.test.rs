@@ -126,8 +126,8 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
 
 /// **会跑模型的那个主体派生 `Reasoner`**——这是 [ADR-079] 的反证。
 ///
-/// `pattern` 由授权谓词派生（持 `reply.*` ⇒ `Reasoner`），而**每一个会跑模型的轮次
-/// 主体都持 `reply.*`**。所以凡是要判「跑不跑模型」的地方，读到的永远是 `Reasoner`：
+/// `pattern` 由授权谓词派生（持 `reply` ⇒ `Reasoner`），而**每一个会跑模型的轮次
+/// 主体都持 `reply`**。所以凡是要判「跑不跑模型」的地方，读到的永远是 `Reasoner`：
 /// 把它接成分派闸门，等于把技能快路（S11 §4 参数表的同名参数，落地形态是
 /// `SessionConfig::skill_fast_path`）永久关死。两者的区别见 [ADR-079]。
 ///
@@ -146,7 +146,7 @@ fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
         "持 reply.* ⇒ Reasoner：这是**分类**，不是「这一轮走不走模型」的开关"
     );
     assert!(
-        spec.capabilities.iter().any(|c| c.starts_with("reply.")),
+        spec.capabilities.iter().any(|c| *c == "reply"),
         "分类的判据就是这条能力：{}",
         spec.capabilities.join(",")
     );

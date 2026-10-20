@@ -34,7 +34,7 @@ fn trivial_spec_is_the_s01_baseline() {
 
 // ── T-082 批①：收束闸判读**规格自己身上**的能力集 ─────────────────────
 
-/// 三种主体形态一次钉住：会话主体（`reply.*` ⇒ 发言放 / 产物拒）、对等主体
+/// 三种主体形态一次钉住：会话主体（`reply` ⇒ 发言放 / 产物拒）、对等主体
 /// （`produce.artifact` ⇒ 发言拒 / 产物放）、空表（平凡值 ⇒ 两臂皆拒）。
 ///
 /// 这条的**反向用例**在末尾：清空能力集后产物臂必须拒——判定若悄悄绕回授权表
@@ -47,14 +47,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
         capabilities: production_matrix().grant_names_of(PRINCIPAL_MAIN),
         ..ActorSpec::trivial(PRINCIPAL_MAIN)
     };
-    assert!(
-        session.can_land_speech(true),
-        "持 reply.first ⇒ 首条收束放行"
-    );
-    assert!(
-        session.can_land_speech(false),
-        "持 reply.append ⇒ 追加收束放行"
-    );
+    assert!(session.can_land_speech(), "持 reply ⇒ 发言收束放行");
     assert!(
         session.can_land_artifact(),
         "主智能体行含 produce.artifact ⇒ 产物臂同样放行（两臂都持）"
@@ -65,7 +58,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
         ..ActorSpec::trivial(PRINCIPAL_PEER)
     };
     assert!(
-        !peer.can_land_speech(true) && !peer.can_land_speech(false),
+        !peer.can_land_speech(),
         "对等主体无发言权（ADR-067：两条收束路各问自己那一项）"
     );
     assert!(peer.can_land_artifact(), "对等主体的权威动作 = 产生产物");
@@ -86,21 +79,21 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
     // （而 S01 §4 要求「平凡值下系统完整运行」）。
     let baseline = ActorSpec::trivial("session/main");
     assert!(
-        baseline.can_land_speech(true) && baseline.can_land_artifact(),
+        baseline.can_land_speech() && baseline.can_land_artifact(),
         "平凡值权限取实：session/main 两臂都放"
     );
     // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
     let autonomous = ActorSpec::trivial("session/autonomous");
     assert!(
-        !autonomous.can_land_speech(true),
+        !autonomous.can_land_speech(),
         "自主主体无发言权（平凡值不豁免窄行：自主行为不得冒充用户对话）"
     );
 }
 
 /// 规格判定与表谓词**必须一致**：同一主体的两个入口，一份口径。
 ///
-/// 挡的是「映射分叉」：`Capability::reply_capability` 若被复制成两份（core 一份、
-/// 插件一份），改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
+/// 挡的是「口径分叉」：能力名（`Capability::Reply` 等）若在插件侧再抄一份表，
+/// 改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
 /// 登记行（会话 / 对等 / 抢占判定者）与未登记的 `session/<id>`（表里没有行 ⇒ 全拒）。
 #[test]
 fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
@@ -119,13 +112,13 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
             ..ActorSpec::trivial(p)
         };
         assert_eq!(
-            spec.can_land_speech(true),
-            matrix.can_reply(p, true),
+            spec.can_land_speech(),
+            matrix.can_reply(p),
             "{p}: 首条收束两入口必须一致"
         );
         assert_eq!(
-            spec.can_land_speech(false),
-            matrix.can_reply(p, false),
+            spec.can_land_speech(),
+            matrix.can_reply(p),
             "{p}: 追加收束两入口必须一致"
         );
         assert_eq!(
@@ -1693,19 +1686,19 @@ fn preemption_decider_cannot_speak() {
     let matrix = production_matrix();
     assert!(matrix.can_write(PRINCIPAL_REFLEX, Capability::JudgeIntent));
     assert!(
-        !matrix.can_write(PRINCIPAL_REFLEX, Capability::ReplyFirst),
+        !matrix.can_write(PRINCIPAL_REFLEX, Capability::Reply),
         "无首响写权"
     );
     assert!(
-        !matrix.can_write(PRINCIPAL_REFLEX, Capability::ReplyAppend),
+        !matrix.can_write(PRINCIPAL_REFLEX, Capability::Reply),
         "无追加写权"
     );
 
-    // 反向判据：**未登记**的同前缀主体同样拿不到 `reply.*`——判定者的窄是**登记**带来的，
+    // 反向判据：**未登记**的同前缀主体同样拿不到 `reply`——判定者的窄是**登记**带来的，
     // 而默认是拒（ADR-099）。若哪天有人把这一行删掉（或改宽），上面两条断言与这条对照一起变红。
     let unregistered = production_matrix();
     assert!(
-        !unregistered.can_write("session/unregistered", Capability::ReplyFirst),
+        !unregistered.can_write("session/unregistered", Capability::Reply),
         "未登记主体在表里没有行 ⇒ fail-closed（ADR-099）"
     );
 }
@@ -1759,7 +1752,7 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
 fn unauthorized_external_write_is_refused_without_event() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
         "session/talker",
-        vec![Capability::ReplyAppend],
+        vec![Capability::Reply],
         VisScope::ThreadPrivate,
     )])
     .unwrap();
@@ -1931,9 +1924,9 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 /// 判据查的是**生产授权表**（[`authz::production_matrix`](crate::symbio_core::authz::production_matrix)），
 /// 不是自造矩阵——自造矩阵只证明「一个我自己写的策略拒绝了我自己」，生产表改了它照样绿。
 /// 三条断言缺一不可：
-/// ① 自主发起者**不持** `reply.*`（验收 2 的结论）；
+/// ① 自主发起者**不持** `reply`（验收 2 的结论）；
 /// ② 它**持** `define.work`（否则 ① 可能只是「矩阵整个是空的」的平凡真）；
-/// ③ 主智能体**持** `reply.first`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
+/// ③ 主智能体**持** `reply`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
 ///
 /// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session` 运行器的
 /// `turn_runner::closure_granted`，其判据用例见
@@ -1945,11 +1938,11 @@ fn autonomous_actor_cannot_write_to_dialog() {
 
     let initiator = production_matrix();
     assert!(
-        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::ReplyFirst),
-        "自主层无 reply.first 写权（自主写入对话 = 0）"
+        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::Reply),
+        "自主层无 reply 写权（自主写入对话 = 0）"
     );
     assert!(
-        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::ReplyAppend),
+        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::Reply),
         "续写同样不持——自主行为不得冒充用户对话"
     );
     assert!(
@@ -1958,8 +1951,8 @@ fn autonomous_actor_cannot_write_to_dialog() {
     );
     let main = production_matrix();
     assert!(
-        main.can_write(PRINCIPAL_MAIN, Capability::ReplyFirst),
-        "对照：主智能体持 reply.first——拒绝是针对主体的，不是矩阵一律拒绝"
+        main.can_write(PRINCIPAL_MAIN, Capability::Reply),
+        "对照：主智能体持 reply——拒绝是针对主体的，不是矩阵一律拒绝"
     );
 }
 

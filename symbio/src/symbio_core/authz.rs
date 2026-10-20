@@ -292,8 +292,7 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
         PRINCIPAL_MAIN,
         &[
             "judge.intent",
-            "reply.first",
-            "reply.append",
+            "reply",
             "define.work",
             CAP_EXTERNAL_EXECUTION,
             "assign.work",
@@ -603,10 +602,9 @@ impl EffectiveMatrix {
     }
 
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——轮次位置 → 能力的映射仍只住
-    /// [`Capability::reply_capability`]，调用点不复述；合流 = 部署谓词 ∪ 绑定登记。
-    pub(crate) fn can_reply(&self, principal: &str, first: bool) -> bool {
-        self.deployed.can_reply(principal, first)
-            || self.bound_holds(principal, Capability::reply_capability(first))
+    /// [`Capability::Reply`]，调用点不复述；合流 = 部署谓词 ∪ 绑定登记。
+    pub(crate) fn can_reply(&self, principal: &str) -> bool {
+        self.deployed.can_reply(principal) || self.bound_holds(principal, Capability::Reply)
     }
 
     /// 写侧判定（产物闸）：主体能否**产生产物**（[ADR-067](../../../docs/010-adr/067.md "ADR-067")

@@ -32,7 +32,7 @@
 //!
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
-//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_granted`，`ClosureKind::Speech`） | [`can_reply`]（首条 → `ReplyFirst`，后续 → `ReplyAppend`） |
+//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_granted`，`ClosureKind::Speech`） | [`can_reply`]（`reply`） |
 //! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_granted`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
@@ -53,7 +53,7 @@
 //! 只依赖类型定义 + ④ store 的**读面**（事件切片），只读写事件——不持有
 //! ①②③⑤ 的任何句柄。
 
-/// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**7 个封顶**）。
+/// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**6 个封顶**）。
 ///
 /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
 /// 新动作种类才走 ADR（03 §3）。
@@ -61,10 +61,9 @@
 pub enum Capability {
     /// 判决意图（快速档分类）。
     JudgeIntent,
-    /// 首响（一个 turn 的第一句话）。
-    ReplyFirst,
-    /// 追加发言（对既有对话通道的后续写入）。
-    ReplyAppend,
+    /// 发言（一轮的收束格）。首响与追加在同一条通道上，**不按轮次位置分能力**：
+    /// 生产里每次收束都是「本轮尚无收束格」，追加臂从未被派发（T-178）。
+    Reply,
     /// 定义工作（任务分解、派活）。
     DefineWork,
     /// 产生产物。
@@ -76,27 +75,13 @@ pub enum Capability {
 }
 
 impl Capability {
-    /// **轮次位置 → 收束能力**的唯一映射（首条 → `ReplyFirst`，后续 → `ReplyAppend`）。
-    ///
-    /// 两处读者共用它、各自不抄清单：授权表谓词 [`PermissionMatrix::can_reply`]
-    /// 与规格谓词 [`crate::symbio_core::ActorSpec::can_land_speech`]（T-082 批①：
-    /// 写侧闸判改问规格身上那份能力集）。映射若分两份，改一处即静默错位。
-    pub(crate) fn reply_capability(first: bool) -> Capability {
-        if first {
-            Capability::ReplyFirst
-        } else {
-            Capability::ReplyAppend
-        }
-    }
-
     /// 能力名（授权表的书写形态）→ 枚举。**认不出的名 = `None`**，由
     /// [`PermissionMatrix::from_names`] 拒绝构造——不把拼写错误静默读成
     /// 「没有这个能力」，那等于把授权表的笔误变成一条悄悄生效的拒绝。
     fn from_name(name: &str) -> Option<Capability> {
         Some(match name {
             "judge.intent" => Capability::JudgeIntent,
-            "reply.first" => Capability::ReplyFirst,
-            "reply.append" => Capability::ReplyAppend,
+            "reply" => Capability::Reply,
             "define.work" => Capability::DefineWork,
             "produce.artifact" => Capability::ProduceArtifact,
             "assert.verification" => Capability::AssertVerification,
@@ -112,8 +97,7 @@ impl Capability {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Capability::JudgeIntent => "judge.intent",
-            Capability::ReplyFirst => "reply.first",
-            Capability::ReplyAppend => "reply.append",
+            Capability::Reply => "reply",
             Capability::DefineWork => "define.work",
             Capability::ProduceArtifact => "produce.artifact",
             Capability::AssertVerification => "assert.verification",
@@ -374,12 +358,11 @@ impl PermissionMatrix {
 
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
     ///
-    /// `first` = 该轮尚无收束格：首条 → [`Capability::ReplyFirst`]，后续（重试 /
-    /// 追加）→ [`Capability::ReplyAppend`]。「轮次位置 → 能力」的映射只在
-    /// [`Capability::reply_capability`] 一处定义，调用点不复述（口径只活在 core）。
+    /// 只有一个能力 [`Capability::Reply`]：首响与追加是同一条通道上的两种位置，
+    /// 生产里所有收束都在「本轮尚无收束格」的位置（T-178 删掉了不可达的追加臂）。
     /// 未持有 ⇒ 拒绝入格（fail-closed）。
-    pub fn can_reply(&self, principal: &str, first: bool) -> bool {
-        self.can_write(principal, Capability::reply_capability(first))
+    pub fn can_reply(&self, principal: &str) -> bool {
+        self.can_write(principal, Capability::Reply)
     }
 
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`

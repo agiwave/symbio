@@ -34,7 +34,7 @@ fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "S1 直接回复", assignments: vec![
             ("event.entity", "turn"), ("event.verb", "closed"),
-            ("actor.pattern", "reasoner"), ("actor.capability", "reply.first"), ("actor.budget_ms", "300")] },
+            ("actor.pattern", "reasoner"), ("actor.capability", "reply"), ("actor.budget_ms", "300")] },
         Scenario { name: "S2 单步工具", assignments: vec![
             ("event.entity", "task"), ("event.verb", "progressed"),
             ("actor.pattern", "reasoner"), ("actor.capability", "produce.artifact"), ("actor.budget_ms", "30000")] },
@@ -66,7 +66,7 @@ fn scenarios() -> Vec<Scenario> {
             ("actor.pattern", "reasoner"), ("actor.capability", "define.work"), ("projection", "consolidate")] },
         Scenario { name: "S11 反射级应答", assignments: vec![
             ("event.entity", "turn"), ("event.verb", "closed"),
-            ("actor.pattern", "decider"), ("actor.capability", "reply.first"), ("actor.budget_ms", "80")] },
+            ("actor.pattern", "decider"), ("actor.capability", "reply"), ("actor.budget_ms", "80")] },
         Scenario { name: "S12 对等承诺", assignments: vec![
             ("event.entity", "commitment"), ("event.verb", "asserted"),
             ("actor.pattern", "translator"), ("actor.capability", "produce.artifact"), ("principal", "agent:peer-b")] },

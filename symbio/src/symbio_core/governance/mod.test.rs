@@ -5,7 +5,7 @@
 //!
 //! [04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 的接线面（判定在 core、
 //! 构造与调用在 core 外，故各钉一半）：`from_names` 认不出的能力名**拒绝整体构造**、
-//! `can_reply` 的「轮次位置 → 能力」映射（调用点不复述）。
+//! `can_reply` 只问一个 `reply` 能力（调用点不复述）。
 
 use super::*;
 use crate::symbio_core::event::Entity;
@@ -15,7 +15,7 @@ use crate::symbio_core::event::Entity;
 fn write_only_policy_is_rejected() {
     let result = PermissionMatrix::new(vec![PrincipalPolicy {
         principal: "session/rogue".into(),
-        grants: vec![Capability::ReplyFirst],
+        grants: vec![Capability::Reply],
         vis_scope: None,
     }]);
     assert_eq!(
@@ -48,19 +48,19 @@ fn read_only_policy_is_rejected() {
 fn paired_policy_serves_both_sides() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
         "session/main",
-        vec![Capability::ReplyFirst, Capability::ReplyAppend],
+        vec![Capability::Reply, Capability::Reply],
         VisScope::ThreadPrivate,
     )])
     .expect("成对策略必过");
     assert_eq!(
         matrix.grants_of("session/main"),
-        [Capability::ReplyFirst, Capability::ReplyAppend]
+        [Capability::Reply, Capability::Reply]
     );
     assert_eq!(
         matrix.sees_of("session/main"),
         Some(VisScope::ThreadPrivate)
     );
-    assert!(matrix.can_write("session/main", Capability::ReplyFirst));
+    assert!(matrix.can_write("session/main", Capability::Reply));
     assert!(
         !matrix.can_write("session/main", Capability::AssignWork),
         "未持有的能力必拒"
@@ -72,11 +72,11 @@ fn paired_policy_serves_both_sides() {
 fn unknown_principal_is_fail_closed() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
         "session/main",
-        vec![Capability::ReplyFirst],
+        vec![Capability::Reply],
         VisScope::Public,
     )])
     .expect("成对策略必过");
-    assert!(!matrix.can_write("session/ghost", Capability::ReplyFirst));
+    assert!(!matrix.can_write("session/ghost", Capability::Reply));
     assert_eq!(matrix.sees_of("session/ghost"), None);
     assert!(!matrix.can_see("session/ghost", "session/main", VisScope::Shared));
     // Public 是唯一例外：它的语义就是任何人可见。
@@ -95,7 +95,7 @@ fn thread_private_yields_zero_out_of_bounds_reads() {
     let matrix = PermissionMatrix::new(vec![
         PrincipalPolicy::paired(
             "session/main",
-            vec![Capability::ReplyFirst],
+            vec![Capability::Reply],
             VisScope::ThreadPrivate,
         ),
         PrincipalPolicy::paired(
@@ -123,20 +123,20 @@ fn thread_private_yields_zero_out_of_bounds_reads() {
 fn from_names_translates_a_name_table_into_a_paired_matrix() {
     let matrix = PermissionMatrix::from_names(&[(
         "session/main",
-        &["reply.first", "reply.append"],
+        &["reply", "reply"],
         VisScope::ThreadPrivate,
     )])
     .expect("认得出的能力名必过");
     assert_eq!(
         matrix.grants_of("session/main"),
-        [Capability::ReplyFirst, Capability::ReplyAppend]
+        [Capability::Reply, Capability::Reply]
     );
     assert_eq!(
         matrix.sees_of("session/main"),
         Some(VisScope::ThreadPrivate)
     );
     // 闭集之外的行不复存在 ⇒ 未知主体照旧 fail-closed。
-    assert!(!matrix.can_write("session/ghost", Capability::ReplyFirst));
+    assert!(!matrix.can_write("session/ghost", Capability::Reply));
 }
 
 /// `from_names` 的反向：**认不出的能力名拒绝整体构造**，且错误指名道姓。
@@ -157,36 +157,23 @@ fn a_name_outside_the_closed_set_refuses_construction() {
     assert!(text.contains("session/main"), "错误要点名那一行：{text}");
 }
 
-/// `can_reply`：**轮次位置 → 能力**的映射口径只在这一处（调用点不复述）。
+/// `can_reply`：只问**一个**能力（`reply`），不再按轮次位置分叉。
 #[test]
-fn can_reply_maps_turn_position_to_one_capability() {
-    // 只有追加能力 ⇒ 首条被拒、追加放行（证明判的是能力，不是恒真）。
-    let append_only =
-        PermissionMatrix::from_names(&[("session/worker", &["reply.append"], VisScope::default())])
-            .expect("成对策略必过");
-    assert!(
-        !append_only.can_reply("session/worker", true),
-        "缺 reply.first"
-    );
-    assert!(
-        append_only.can_reply("session/worker", false),
-        "有 reply.append"
-    );
+fn can_reply_reads_the_single_reply_capability() {
+    // 持 `reply` ⇒ 放行；不持 ⇒ 拒（证明判的是能力，不是恒真）。
+    let holder = PermissionMatrix::from_names(&[("session/main", &["reply"], VisScope::default())])
+        .expect("成对策略必过");
+    assert!(holder.can_reply("session/main"));
 
-    // 只有首响能力 ⇒ 反过来。
-    let first_only =
-        PermissionMatrix::from_names(&[("session/main", &["reply.first"], VisScope::default())])
+    let speaker_less =
+        PermissionMatrix::from_names(&[("session/worker", &["define.work"], VisScope::default())])
             .expect("成对策略必过");
-    assert!(first_only.can_reply("session/main", true));
-    assert!(
-        !first_only.can_reply("session/main", false),
-        "缺 reply.append"
-    );
+    assert!(!speaker_less.can_reply("session/worker"), "不持 reply");
 
     // 空矩阵（表构造失败时的降级兜底）⇒ 一概拒绝；未知主体 ⇒ fail-closed。
     let deny_all = PermissionMatrix::from_names(&[]).expect("空表无主体可校验");
-    assert!(!deny_all.can_reply("session/main", true));
-    assert!(!first_only.can_reply("session/ghost", true));
+    assert!(!deny_all.can_reply("session/main"));
+    assert!(!holder.can_reply("session/ghost"));
 }
 
 /// 与 S1/S2 彩排链路对接的形状预演：主体对**事件切片**的可见子集为空 ⇒ 越界读取 0。
@@ -198,7 +185,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
     let matrix = PermissionMatrix::new(vec![
         PrincipalPolicy::paired(
             "session/main",
-            vec![Capability::ReplyFirst],
+            vec![Capability::Reply],
             VisScope::ThreadPrivate,
         ),
         PrincipalPolicy::paired(
@@ -330,7 +317,7 @@ fn grants_overlay_supports_the_revoke_restore_revoke_loop() {
         "撤销按 (主体, 能力) 精确命中，不波及别的主体"
     );
     assert!(
-        !overlay.is_revoked("session/main", "reply.first"),
+        !overlay.is_revoked("session/main", "reply"),
         "也不波及同一主体的别的能力——淘汰只收回 assign.work"
     );
 
@@ -361,7 +348,7 @@ fn overlay_revokes_on_an_unrecognizable_query_name() {
     // 空覆盖层（表是权威、覆盖层只答减法）：认得出的查询名照旧答「未收回」，
     // 认不出的查询名按已收回判。
     let overlay = GrantsOverlay::fold([]);
-    assert!(!overlay.is_revoked("session/main", "reply.first"));
+    assert!(!overlay.is_revoked("session/main", "reply"));
     assert!(
         overlay.is_revoked("session/main", "reply.fisrt"),
         "认不出的查询名必须按已收回判（fail-closed）"
@@ -397,7 +384,7 @@ fn a_typoed_revoke_revokes_the_whole_principal() {
         "笔误的收回对该主体整体生效，不是只对那一格"
     );
     assert!(
-        overlay.is_revoked("session/main", "reply.first"),
+        overlay.is_revoked("session/main", "reply"),
         "任何能力查询都按已收回判"
     );
     // 只波及那一个主体：别人的查询照旧按流水答。

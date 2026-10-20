@@ -26,14 +26,14 @@ use super::*;
 use crate::symbio_core::governance::Capability;
 use crate::symbio_core::view::is_agent_id;
 
-/// 表的形状：主智能体持 6 项、缺 `assert.verification`，可见域 `thread_private`。
+/// 表的形状：主智能体持 5 项、缺 `assert.verification`，可见域 `thread_private`。
 #[test]
 fn main_agent_row_is_the_documented_shape() {
     let matrix = production_matrix();
     assert_eq!(
         matrix.grants_of(PRINCIPAL_MAIN).len(),
-        6,
-        "judge.intent / reply.first / reply.append / define.work / produce.artifact / assign.work"
+        5,
+        "judge.intent / reply / define.work / produce.artifact / assign.work"
     );
     assert_eq!(
         matrix.sees_of(PRINCIPAL_MAIN),
@@ -56,8 +56,7 @@ fn the_autonomous_row_is_narrower_than_main() {
         "自主层必须能定义工作"
     );
     assert!(
-        !matrix.can_reply(PRINCIPAL_AUTONOMOUS, true)
-            && !matrix.can_reply(PRINCIPAL_AUTONOMOUS, false),
+        !matrix.can_reply(PRINCIPAL_AUTONOMOUS) && !matrix.can_reply(PRINCIPAL_AUTONOMOUS),
         "自主行为不得冒充用户对话（首响与追加都不放行）"
     );
     assert_eq!(
@@ -82,7 +81,7 @@ fn the_reflex_row_is_narrower_than_main() {
         "判定者必须能判决意图，否则抢占判定这一步直接失效"
     );
     assert!(
-        !matrix.can_reply(PRINCIPAL_REFLEX, true) && !matrix.can_reply(PRINCIPAL_REFLEX, false),
+        !matrix.can_reply(PRINCIPAL_REFLEX) && !matrix.can_reply(PRINCIPAL_REFLEX),
         "判定者不得直接发言（首响与追加都不放行，S07 §5）"
     );
     assert_eq!(
@@ -98,7 +97,7 @@ fn the_reflex_row_is_narrower_than_main() {
         1,
         "判定者这一行只有 judge.intent，不许多出 reply.*"
     );
-    assert!(!matrix.can_reply(PRINCIPAL_REFLEX, true));
+    assert!(!matrix.can_reply(PRINCIPAL_REFLEX));
 }
 
 /// 对等主体那一行（S08 §3）：**第一个对等（图侧）主体的窄行**——只持 `produce.artifact`，
@@ -116,7 +115,7 @@ fn the_peer_row_is_narrower_than_main() {
         "对等体的权威动作是产生产物（S08 §3 的 ActorSpec 行），否则这一行没有理由存在"
     );
     assert!(
-        !matrix.can_reply(PRINCIPAL_PEER, true) && !matrix.can_reply(PRINCIPAL_PEER, false),
+        !matrix.can_reply(PRINCIPAL_PEER) && !matrix.can_reply(PRINCIPAL_PEER),
         "对等体的协作经 commitment.* 而非 chat.*——不以本机主控的身份发言"
     );
     assert_eq!(
@@ -132,7 +131,7 @@ fn the_peer_row_is_narrower_than_main() {
         caps.len() < main_len,
         "对等行必须严格窄于主智能体那一行（{main_len} 项）"
     );
-    assert!(!matrix.can_reply(PRINCIPAL_PEER, true));
+    assert!(!matrix.can_reply(PRINCIPAL_PEER));
     assert!(
         matrix.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
         "登记行是权威：对等体仍持它那一项能力"
@@ -157,7 +156,7 @@ fn the_three_society_rows_are_narrower_than_main() {
     assert_eq!(market.len(), 1, "只持 assign.work：{market:?}");
     assert!(matrix.can_write(PRINCIPAL_MARKET, Capability::AssignWork));
     assert!(
-        !matrix.can_reply(PRINCIPAL_MARKET, true) && !matrix.can_reply(PRINCIPAL_MARKET, false),
+        !matrix.can_reply(PRINCIPAL_MARKET) && !matrix.can_reply(PRINCIPAL_MARKET),
         "市场只派活、不冒充主控发言"
     );
     assert_eq!(
@@ -175,7 +174,7 @@ fn the_three_society_rows_are_narrower_than_main() {
             && !matrix.can_write(PRINCIPAL_ARBITER, Capability::ProduceArtifact),
         "C15：仲裁者不持产出/定义 ⇒ 不成对自验（构造期同款检查）"
     );
-    assert!(!matrix.can_reply(PRINCIPAL_ARBITER, true));
+    assert!(!matrix.can_reply(PRINCIPAL_ARBITER));
     assert_eq!(
         matrix.sees_of(PRINCIPAL_ARBITER),
         Some(VisScope::Public),
@@ -187,8 +186,7 @@ fn the_three_society_rows_are_narrower_than_main() {
     assert_eq!(keeper.len(), 1, "只持 judge.intent：{keeper:?}");
     assert!(matrix.can_write(PRINCIPAL_GATEKEEPER, Capability::JudgeIntent));
     assert!(
-        !matrix.can_reply(PRINCIPAL_GATEKEEPER, true)
-            && !matrix.can_reply(PRINCIPAL_GATEKEEPER, false),
+        !matrix.can_reply(PRINCIPAL_GATEKEEPER) && !matrix.can_reply(PRINCIPAL_GATEKEEPER),
         "判定者不得直接发言（与 reflex 行同款独持先例）"
     );
     assert_eq!(
@@ -216,7 +214,7 @@ fn the_three_society_rows_are_narrower_than_main() {
             matrix.can_write(p, cap),
             "登记行是权威：{p} 仍持它那一项能力"
         );
-        assert!(!matrix.can_reply(p, true));
+        assert!(!matrix.can_reply(p));
     }
 }
 
@@ -241,7 +239,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     assert_eq!(worker.len(), 1, "只持 produce.artifact：{worker:?}");
     assert!(matrix.can_write(PRINCIPAL_WORKER, Capability::ProduceArtifact));
     assert!(
-        !matrix.can_reply(PRINCIPAL_WORKER, true) && !matrix.can_reply(PRINCIPAL_WORKER, false),
+        !matrix.can_reply(PRINCIPAL_WORKER) && !matrix.can_reply(PRINCIPAL_WORKER),
         "工人以产物收束（收束闸的产物臂，ADR-067），不以主控身份发言"
     );
     assert!(
@@ -263,7 +261,7 @@ fn the_three_role_rows_are_narrower_than_main() {
         !matrix.can_write(PRINCIPAL_PLANNER, Capability::AssertVerification),
         "C15：规划者不持验证能力 ⇒ 不自我认证"
     );
-    assert!(!matrix.can_reply(PRINCIPAL_PLANNER, true));
+    assert!(!matrix.can_reply(PRINCIPAL_PLANNER));
     assert_eq!(
         matrix.sees_of(PRINCIPAL_PLANNER),
         Some(VisScope::ThreadPrivate)
@@ -278,7 +276,7 @@ fn the_three_role_rows_are_narrower_than_main() {
             && !matrix.can_write(PRINCIPAL_VERIFIER, Capability::ProduceArtifact),
         "C15：验证者不持产出/定义 ⇒ 不成对自验（构造期同款检查）"
     );
-    assert!(!matrix.can_reply(PRINCIPAL_VERIFIER, true));
+    assert!(!matrix.can_reply(PRINCIPAL_VERIFIER));
     assert_eq!(
         matrix.sees_of(PRINCIPAL_VERIFIER),
         Some(VisScope::ThreadPrivate),
@@ -304,7 +302,7 @@ fn the_three_role_rows_are_narrower_than_main() {
             matrix.can_write(p, cap),
             "登记行是权威：{p} 仍持它那一项能力"
         );
-        assert!(!matrix.can_reply(p, true));
+        assert!(!matrix.can_reply(p));
     }
 }
 
@@ -326,18 +324,18 @@ fn the_closure_gate_is_dispatched_by_kind() {
         "对等体以产物收束一轮（ADR-065 裁决的落地前提）"
     );
     assert!(
-        !matrix.can_reply(PRINCIPAL_PEER, true),
+        !matrix.can_reply(PRINCIPAL_PEER),
         "产物闸放行不改变发言闸：对等体仍无发言权"
     );
 
     // 主智能体：两道都放（发言与产物都是它的权威动作）。
-    assert!(matrix.can_reply(PRINCIPAL_MAIN, true));
+    assert!(matrix.can_reply(PRINCIPAL_MAIN));
     assert!(matrix.can_produce_artifact(PRINCIPAL_MAIN));
 
     // 判定者 / 自主层：两道都拒——它们持的能力与收束无关（fail-closed 的方向不变）。
     for p in [PRINCIPAL_REFLEX, PRINCIPAL_AUTONOMOUS] {
         assert!(
-            !matrix.can_produce_artifact(p) && !matrix.can_reply(p, true),
+            !matrix.can_produce_artifact(p) && !matrix.can_reply(p),
             "{p} 既不产生产物也不发言（各自的窄行）"
         );
     }
@@ -357,7 +355,7 @@ fn an_unregistered_subject_gets_no_row_at_all() {
         1,
         "窄行就是这一行的全部能力集"
     );
-    assert!(!autonomous.can_reply(PRINCIPAL_AUTONOMOUS, true));
+    assert!(!autonomous.can_reply(PRINCIPAL_AUTONOMOUS));
 
     // 未登记的子智能体：表里没有它的行 ⇒ 每个谓词为假（fail-closed）。
     // 反向判据：哪天有人把派生加回来，这条断言立刻变红。
@@ -366,7 +364,7 @@ fn an_unregistered_subject_gets_no_row_at_all() {
         production_matrix().grants_of(sub).is_empty(),
         "未登记主体在表里没有行（ADR-099：未登记 = 拒）"
     );
-    assert!(!production_matrix().can_reply(sub, true), "写不了收束格");
+    assert!(!production_matrix().can_reply(sub), "写不了收束格");
     assert!(
         !production_matrix().can_produce_artifact(sub),
         "也产不了产物"
@@ -374,7 +372,7 @@ fn an_unregistered_subject_gets_no_row_at_all() {
 
     // 要写收束格的子智能体必须自己登记一行——窄行是唯一入口。
     // 非 agent 命名空间同款：表里没有它 ⇒ fail-closed。
-    assert!(!production_matrix().can_reply(PRINCIPAL_USER, true));
+    assert!(!production_matrix().can_reply(PRINCIPAL_USER));
 }
 
 /// 写侧闸：收束的两种位置都放行；矩阵外主体两种位置都拒。
@@ -382,15 +380,15 @@ fn an_unregistered_subject_gets_no_row_at_all() {
 fn only_the_main_agent_may_close_a_turn() {
     let matrix = production_matrix();
     assert!(
-        matrix.can_reply("session/main", true) && matrix.can_reply("session/main", false),
+        matrix.can_reply("session/main") && matrix.can_reply("session/main"),
         "首响与追加都必须放行，否则生产对话直接断"
     );
     assert!(
-        !matrix.can_reply("session/ghost", true) && !matrix.can_reply("session/ghost", false),
+        !matrix.can_reply("session/ghost") && !matrix.can_reply("session/ghost"),
         "未知主体 fail-closed"
     );
     assert!(
-        !matrix.can_reply("user", true),
+        !matrix.can_reply("user"),
         "人不入能力表（发言不是能力），故人没有权威收束"
     );
 }
@@ -408,7 +406,7 @@ fn read_side_is_scoped_by_owner_and_membership() {
 #[test]
 fn the_degraded_empty_matrix_denies_everything() {
     let deny_all = PermissionMatrix::from_names(&[]).expect("空表无主体可校验");
-    assert!(!deny_all.can_reply("session/main", true));
+    assert!(!deny_all.can_reply("session/main"));
     assert!(
         !deny_all.can_see("user", "session/main", VisScope::ThreadPrivate),
         "非属主读不到（thread_private 比的是属主，空矩阵不给任何人开例外）"
@@ -490,11 +488,11 @@ fn tool_principals_have_declared_rows() {
 
 /// **人不入能力表**（[ADR-069 §后果] 与 [authz.rs 模块文档]「两张表里的人」）——
 /// `PRINCIPAL_USER` 归一为 `person/local` 之后仍**不立行**；判据：
-/// `production_matrix().can_reply(PRINCIPAL_USER, true)` 依旧为假。
+/// `production_matrix().can_reply(PRINCIPAL_USER)` 依旧为假。
 #[test]
 fn person_local_is_not_in_the_capability_table() {
     assert!(
-        !production_matrix().can_reply(PRINCIPAL_USER, true),
+        !production_matrix().can_reply(PRINCIPAL_USER),
         "人不入能力表——`person/local` 没有 reply.* 权限（与归一前 `user` 同）"
     );
     assert!(
@@ -524,18 +522,17 @@ fn a_bound_subject_takes_the_source_row() {
         production_matrix().grants_of(subject).is_empty(),
         "未绑定主体在合流面没有行"
     );
-    assert!(!production_matrix().can_reply(subject, true));
+    assert!(!production_matrix().can_reply(subject));
     // 根会话绑定 = 继承会话面缺省行（主智能体行）。
     bind_inheriting(subject, PRINCIPAL_MAIN);
     assert_eq!(
         production_matrix().grant_names_of(subject).len(),
-        6,
-        "拿到会话面行六项能力"
+        5,
+        "拿到会话面行五项能力"
     );
     assert!(
-        production_matrix().can_reply(subject, true)
-            && production_matrix().can_reply(subject, false),
-        "首响与追加都放行：绑定来的 reply.* 就是收束闸的判据"
+        production_matrix().can_reply(subject),
+        "绑定来的 reply 就是收束闸的判据"
     );
     assert!(production_matrix().can_produce_artifact(subject));
     assert!(
@@ -558,7 +555,7 @@ fn binding_never_widens_a_deployed_row() {
         "工人那一行（单能力独持）不因绑定调用变宽"
     );
     assert!(
-        !production_matrix().can_reply(PRINCIPAL_WORKER, true),
+        !production_matrix().can_reply(PRINCIPAL_WORKER),
         "工人仍无发言权（步 3 的行形状是静态事实，运行期绑定改不动它）"
     );
 }
@@ -571,10 +568,7 @@ fn binding_never_widens_a_deployed_row() {
 fn binding_grants_no_visibility_scope() {
     let subject = "session/t-bind-vis";
     bind_inheriting(subject, PRINCIPAL_MAIN);
-    assert!(
-        production_matrix().can_reply(subject, true),
-        "能力随绑定来了……"
-    );
+    assert!(production_matrix().can_reply(subject), "能力随绑定来了……");
     assert!(
         !production_matrix().can_see(subject, PRINCIPAL_MAIN, VisScope::Shared),
         "……但可见域不随绑定来：读不到他人 shared"
@@ -628,7 +622,7 @@ fn delegated_binding_registers_both_sides() {
         "子拿到的是父那一行的能力集"
     );
     assert!(
-        production_matrix().can_reply(child, true),
+        production_matrix().can_reply(child),
         "子会话收束闸放行（父行继承下来）"
     );
 }

@@ -2926,7 +2926,7 @@ mod scope_ceiling_tests {
         // `user` 在授权表里没有行（能力按「智能体的权威动作种类」划分）⇒ 什么都不持。
         let mut spec = ActorSpec::trivial("session/main");
         assert!(
-            spec.can_land_speech(true),
+            spec.can_land_speech(),
             "前提：主智能体自己那一行持 `reply.first`"
         );
 
@@ -2954,7 +2954,7 @@ mod scope_ceiling_tests {
         spec.scope = Scope::Child(crate::symbio_core::authz::PRINCIPAL_PEER.to_string());
 
         assert!(
-            spec.can_land_speech(true),
+            spec.can_land_speech(),
             "前提：子主体自己那一行放行（这正是「放大」的来源）"
         );
         assert!(

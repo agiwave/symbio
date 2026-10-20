@@ -1831,9 +1831,9 @@ enum ClosureKind {
 /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
     let own = match kind {
-        // `true` = 该轮尚无收束格（八个调用点全是首条收束）。「轮次位置 → 能力」的
-        // 映射住 core（`Capability::reply_capability`），规格方法与表谓词共用它。
-        ClosureKind::Speech => actor.can_land_speech(true),
+        // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
+        // ——名住 core，规格方法与表谓词共用它（ADR-103：不按轮次位置分能力）。
+        ClosureKind::Speech => actor.can_land_speech(),
         ClosureKind::Artifact => actor.can_land_artifact(),
     };
     own && within_delegation_ceiling(actor, kind)
@@ -1849,7 +1849,7 @@ fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> bool {
     };
     let matrix = crate::symbio_core::authz::production_matrix();
     match kind {
-        ClosureKind::Speech => matrix.can_reply(parent, true),
+        ClosureKind::Speech => matrix.can_reply(parent),
         ClosureKind::Artifact => matrix.can_produce_artifact(parent),
     }
 }

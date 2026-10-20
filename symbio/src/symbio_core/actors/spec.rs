@@ -28,7 +28,7 @@ impl Pattern {
     /// 主体类型名），而方法挂在 [`Pattern`] 这个既有根名下，不再多占一个根出口。
     pub(crate) fn for_principal(principal: &str) -> Pattern {
         let matrix = crate::symbio_core::authz::production_matrix();
-        if matrix.can_reply(principal, true) {
+        if matrix.can_reply(principal) {
             Pattern::Reasoner
         } else if matrix.can_produce_artifact(principal) {
             Pattern::Translator
@@ -96,10 +96,10 @@ impl ActorSpec {
     /// 写侧闸判若直接问 `matrix`，同一数据就有两个入口。判定收归规格后，
     /// **判的对象（规格）与构造的来源（表行）有了单一链条**。
     ///
-    /// 「轮次位置 → 能力」的映射不在这里复述：借用
-    /// [`crate::symbio_core::governance`] 里那一个（`reply_capability`）——口径只有一份。
-    pub fn can_land_speech(&self, first: bool) -> bool {
-        let cap = crate::symbio_core::governance::Capability::reply_capability(first);
+    /// 能力名不在调用点复述：借用 [`crate::symbio_core::governance`] 里那一个
+    /// （`Capability::Reply`）——口径只有一份。
+    pub fn can_land_speech(&self) -> bool {
+        let cap = crate::symbio_core::governance::Capability::Reply;
         self.holds(cap.name())
     }
 
