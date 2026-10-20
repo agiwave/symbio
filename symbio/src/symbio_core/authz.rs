@@ -578,9 +578,9 @@ impl EffectiveMatrix {
 
     /// 写侧判定：主体是否可以权威地做 `cap`（合流面，fail-closed）。
     ///
-    /// 判据的读方只有测试（逐能力钉行形状）；现网调用点按能力名或收束臂问
+    /// 生产读方：意图闸门（[`crate::symbio_core::actors::IntentGate::approve`]，
+    /// 升格 = `define.work`）。其余调用点按能力名或收束臂问
     /// （[`Self::can_write_name`] / [`Self::can_reply`] / [`Self::can_produce_artifact`]）。
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn can_write(&self, principal: &str, cap: Capability) -> bool {
         self.deployed.can_write(principal, cap) || self.bound_holds(principal, cap)
     }

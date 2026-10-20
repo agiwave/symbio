@@ -102,7 +102,7 @@ export const BASELINE = {
   // T-176 挂生产内核：`invariants.rs` 的 seq 重号在「严格单调且无跳号」语义下
   // 报两条（重号位 + 其后错位），`termination.rs` 加了内核判定的边界自证
   // （恰在上界合法 / 越界一轮判否）。235 → 237。
-  verifyAsserts: 237,
+  verifyAsserts: 238,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

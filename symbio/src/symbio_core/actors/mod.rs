@@ -53,7 +53,7 @@ pub use self::spec::{ActorSpec, Pattern, Scope};
 #[cfg(test)]
 pub use self::commitment::CommitmentKeeper;
 #[cfg(test)]
-pub use self::conation::{GateWarrant, IntentDecision};
+pub use self::conation::IntentDecision;
 #[cfg(test)]
 pub use self::recall::RecallTranslator;
 // `Scope` 已随 `ActorSpec` / `Pattern` 常驻出根（上文）：`ActorSpec` 的生产构造点

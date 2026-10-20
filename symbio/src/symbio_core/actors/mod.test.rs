@@ -1897,7 +1897,6 @@ fn cost_ledger_accumulates_per_principal() {
 
 use crate::symbio_core::event::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED};
 use crate::symbio_core::projection::calibration::calibration;
-use std::mem::size_of;
 
 /// S12 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
 /// （触发器产出事件，不是旁路——自主行为同样走 I1 单通道 + I2 溯源）。
@@ -2050,21 +2049,48 @@ fn conation_governance_three_rules() {
 
     // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
     let policy_off = ConationPolicy::default();
+    let grants = crate::symbio_core::authz::production_matrix();
     assert_eq!(
-        IntentGate::evaluate(&candidate, &policy_off),
+        IntentGate::evaluate(
+            &candidate,
+            &policy_off,
+            grants,
+            crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS
+        ),
         IntentDecision::Rejected("conation disabled")
     );
-    // 打开后：评估通过 → 持令牌升格（ZST：size_of == 0）。
+    // 打开后：评估通过 → 升格；溯源锚与目标都从 `ApprovedIntent` 读（字段私有）。
     let policy_on = ConationPolicy {
         enabled: true,
         max_goal_len: 200,
     };
-    let warrant = IntentGate::issue_warrant();
-    assert_eq!(size_of::<GateWarrant>(), 0, "ZST 零运行时开销");
-    let approved = IntentGate::approve(&mut candidate, &policy_on, &warrant).expect("合法意图必批");
+    let approved = IntentGate::approve(
+        &mut candidate,
+        &policy_on,
+        grants,
+        crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+    )
+    .expect("合法意图必批");
     assert!(candidate.is_approved());
-    assert_eq!(approved.goal, "整理归档");
-    assert_eq!(approved.from_seq, want.seq.map(|s| s.value()).unwrap_or(0));
+    assert_eq!(approved.goal(), "整理归档");
+    assert_eq!(
+        approved.source_seq(),
+        want.seq.map(|s| s.value()).unwrap_or(0)
+    );
+
+    // (d) 授权是真闸：开关打开，但不持 `define.work` 的主体升格被拒。
+    let mut other = ConationCandidate::from_event(want).expect("同一事件可再造候选");
+    assert_eq!(
+        IntentGate::approve(
+            &mut other,
+            &policy_on,
+            grants,
+            crate::symbio_core::authz::PRINCIPAL_WORKER
+        ),
+        Err("unauthorized: define.work"),
+        "worker 不持 define.work"
+    );
+    assert!(!other.is_approved(), "被拒的候选不得变成已批准");
 }
 
 /// S11 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。

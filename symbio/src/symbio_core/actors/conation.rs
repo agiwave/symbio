@@ -1,5 +1,7 @@
 //! 「欲」与「行」之间的一道门（02 §2.3 E2）：候选意图、治理策略、闸门令牌与升格。
 
+use crate::symbio_core::authz::EffectiveMatrix;
+use crate::symbio_core::governance::Capability;
 use crate::symbio_core::Event;
 
 /// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
@@ -58,13 +60,6 @@ impl ConationCandidate {
     }
 }
 
-/// 闸门能力令牌（ZST，私有构造 → 不可伪造；02 §2.3 E2 的可编译强制：
-/// 不持令牌则 `approve` 调用**编译失败**，`size_of == 0` 零运行时开销）。
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GateWarrant {
-    _private: (),
-}
-
 /// 闸门评估结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntentDecision {
@@ -72,21 +67,47 @@ pub enum IntentDecision {
     Rejected(&'static str),
 }
 
-/// 经闸门批准后的可执行任务（只有这一条路能造出来）。
+/// 经闸门批准后的可执行任务（**只有** [`IntentGate::approve` 能造出来：字段私有，
+/// 模块外连结构体字面量都写不出——这是 E2「欲不得直接变成行」的编译期兑现）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovedIntent {
-    pub from_seq: u64,
-    pub goal: String,
+    from_seq: u64,
+    goal: String,
+}
+
+impl ApprovedIntent {
+    /// 溯源锚：升格自哪一条 `conation.expressed`。
+    pub fn source_seq(&self) -> u64 {
+        self.from_seq
+    }
+
+    /// 被批准的目标文本。
+    pub fn goal(&self) -> &str {
+        &self.goal
+    }
 }
 
 /// 意图闸门：**「欲」与「行」之间唯一的一道门**（02 §2.3 E2）。
 pub struct IntentGate;
 
 impl IntentGate {
-    /// 评估：关停开关优先；目标过宽拒绝。真实系统里这里接价值偏好 / 预算 / 授权。
-    pub fn evaluate(candidate: &ConationCandidate, policy: &ConationPolicy) -> IntentDecision {
+    /// 评估：关停开关优先，其次授权（升格就是「定义工作」），最后目标宽度。
+    ///
+    /// 授权**不是**一句声明：判据取 [`EffectiveMatrix::can_write`] 那一份
+    /// （`define.work`），与本仓任务表写侧闸同一把尺。预算与时延不在这里判——
+    /// 它们是**执行面**的闸（`CircuitBreaker` 在真动作上判），把意图升格成任务
+    /// 本身不花预算。
+    pub(crate) fn evaluate(
+        candidate: &ConationCandidate,
+        policy: &ConationPolicy,
+        grants: &EffectiveMatrix,
+        principal: &str,
+    ) -> IntentDecision {
         if !policy.enabled {
             return IntentDecision::Rejected("conation disabled");
+        }
+        if !grants.can_write(principal, Capability::DefineWork) {
+            return IntentDecision::Rejected("unauthorized: define.work");
         }
         if candidate.goal.len() > policy.max_goal_len {
             return IntentDecision::Rejected("goal too broad");
@@ -94,14 +115,15 @@ impl IntentGate {
         IntentDecision::Approved
     }
 
-    /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数。
-    /// 要求 (a) 评估通过 (b) 持 [`GateWarrant`]（不持令牌 = 编译失败）。
-    pub fn approve(
+    /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数
+    /// （`ApprovedIntent` 字段私有，绕过它造不出可执行任务）。
+    pub(crate) fn approve(
         candidate: &mut ConationCandidate,
         policy: &ConationPolicy,
-        _warrant: &GateWarrant,
+        grants: &EffectiveMatrix,
+        principal: &str,
     ) -> Result<ApprovedIntent, &'static str> {
-        match Self::evaluate(candidate, policy) {
+        match Self::evaluate(candidate, policy, grants, principal) {
             IntentDecision::Approved => {
                 candidate.approved = true;
                 Ok(ApprovedIntent {
@@ -111,11 +133,5 @@ impl IntentGate {
             }
             IntentDecision::Rejected(r) => Err(r),
         }
-    }
-
-    /// 发牌入口——**故意做成唯一一道**：真要多一道门，就得再写一个发牌函数，
-    /// 而那个函数是可见的、可审计的（不是靠约定）。
-    pub fn issue_warrant() -> GateWarrant {
-        GateWarrant { _private: () }
     }
 }

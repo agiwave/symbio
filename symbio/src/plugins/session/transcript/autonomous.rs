@@ -251,15 +251,18 @@ impl SessionPlugin {
                 ..ConationPolicy::default()
             }
         };
-        match IntentGate::approve(&mut candidate, &policy, &IntentGate::issue_warrant()) {
+        // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
+        let grants = crate::symbio_core::authz::production_matrix();
+        let principal = crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
+        match IntentGate::approve(&mut candidate, &policy, grants, principal) {
             Ok(approved) => {
-                // E2 的**动作点**：`task.opened` 只从盖过章的候选长出来。闸门是发牌口
-                //（`issue_warrant` 是唯一一道），这一行验的是牌本身——少了它，「闸门与
-                // 自主层同批成对」就退化成一句约定。
-                if candidate.is_approved() && !long_goal_declared(&store, &approved.goal) {
+                // E2 的**动作点**：`task.opened` 只从闸门批准过的候选长出来
+                //（`ApprovedIntent` 字段私有 = 编译期唯一出口），这一行验的是升格本身
+                // ——少了它，「闸门与自主层同批成对」就退化成一句约定。
+                if candidate.is_approved() && !long_goal_declared(&store, approved.goal()) {
                     let task_id = format!("hb-{triggered_seq}");
                     let opened =
-                        initiator.open_long_goal(&task_id, &approved.goal, approved.from_seq);
+                        initiator.open_long_goal(&task_id, approved.goal(), approved.source_seq());
                     if let Err(e) = store.append(opened) {
                         crate::plugin_error!(
                             "session",
