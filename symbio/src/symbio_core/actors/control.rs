@@ -197,8 +197,15 @@ impl CircuitBreaker {
     ///
     /// - `authorized`：主体是否持外部执行能力（`ProduceArtifact`，读路径判定）；
     /// - `spent_ms` / `requested_ms` / `budget_ms`：已耗 / 本次申请 / 总预算；
-    /// - `elapsed_ms`：闸门自身耗时——超反射档预算也熔断（**有事件**的超时，
-    ///   不是静默失效；I3）。
+    /// - `elapsed_ms`：**判据输入已耗的时长**（从批首开始读事实源到调用点，
+    ///   不是「调用本函数前那几条指令」）；超过 `elapsed_budget_ms` 即熔断
+    ///   （**有事件**的超时，不是静默失效；I3）；
+    /// - `elapsed_budget_ms`：这份输入的时延预算。**由调用方给**，因为它的正确取值
+    ///   取决于输入是什么：纯查表可以用反射档（80ms），而本闸门的输入是**会话事实源
+    ///   的整段重放**（O(事件数)），那是深度档的操作——[T-186] 之前硬编码反射档，
+    ///   于是判据只在「重放不到 80ms」时可达，长会话下反而永远不触发。
+    ///
+    /// [T-186]: ../../../../docs/009-task/186-虚闸清偿批.md "T-186-虚闸清偿批"
     pub fn gate(
         &self,
         authorized: bool,
@@ -206,8 +213,9 @@ impl CircuitBreaker {
         requested_ms: u64,
         budget_ms: u64,
         elapsed_ms: u64,
+        elapsed_budget_ms: u64,
     ) -> GateDecision {
-        if elapsed_ms > crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms() {
+        if elapsed_ms > elapsed_budget_ms {
             return GateDecision::Break {
                 reason: "gate-timeout",
             };

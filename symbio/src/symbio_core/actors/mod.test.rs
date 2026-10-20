@@ -1767,7 +1767,7 @@ fn unauthorized_external_write_is_refused_without_event() {
     let authorized = matrix.can_write("session/talker", Capability::ProduceArtifact);
     let store = EventStore::new();
     let head_before = store.head().value();
-    match gate.gate(authorized, 0, 500, 1_000, 10) {
+    match gate.gate(authorized, 0, 500, 1_000, 10, 80) {
         GateDecision::Refuse => {
             assert_eq!(
                 store.head().value(),
@@ -1791,7 +1791,7 @@ fn budget_exhaustion_breaks_the_circuit() {
     let authorized = matrix.can_write("session/doer", Capability::ProduceArtifact);
     let gate = CircuitBreaker;
     // 已耗 900 / 预算 1000，申请 500 ⇒ 超支 → 熔断（必须写事件）。
-    let d = gate.gate(authorized, 900, 500, 1_000, 10);
+    let d = gate.gate(authorized, 900, 500, 1_000, 10, 80);
     assert_eq!(
         d,
         GateDecision::Break {
@@ -1809,12 +1809,12 @@ fn budget_exhaustion_breaks_the_circuit() {
     );
     // 验收 4（反向）：预算放宽到 10_000 → 同样的申请放行。
     assert_eq!(
-        gate.gate(authorized, 900, 500, 10_000, 10),
+        gate.gate(authorized, 900, 500, 10_000, 10, 80),
         GateDecision::Allow
     );
     // 闸门自身超时（>80ms 反射档）→ 也是熔断（有事件的超时，不是静默失效）。
     assert_eq!(
-        gate.gate(authorized, 0, 500, 10_000, 200),
+        gate.gate(authorized, 0, 500, 10_000, 200, 80),
         GateDecision::Break {
             reason: "gate-timeout"
         }

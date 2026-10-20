@@ -837,6 +837,11 @@ pub async fn process_tool_calls_async(
 
     // 熔断闸门的判据批首读一次（见 `BreakerInputs`）：授权表与成本台账都是只读的，
     // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
+    //
+    // `gate_started` 从**读判据之前**起算：熔断的 `gate-timeout` 量的是「这份输入
+    // 已经读了多久」（[T-186](../../../../../docs/009-task/186-虚闸清偿批.md "T-186-虚闸清偿批")）。
+    // 从前它在 `gate()` 前一刻才起算，`elapsed_ms` 恒为 0，判据永不触发。
+    let gate_started = std::time::Instant::now();
     let session_snapshot = facts.range(Seq::new(0));
     let breaker = BreakerInputs::of(&session_snapshot, &ctx);
     // 淘汰闸门的判据同批首读一次（见 [`EliminationInputs`]，S13 §3）：部署级覆盖层
@@ -1073,13 +1078,14 @@ pub async fn process_tool_calls_async(
         //   不允许静默继续）。本层写不了事实源——锚是本轮 `user.message`，它要到
         //   收束才落格 ⇒ 经出参交回调用方随收束入格（与承诺 / 任务表同一条口径）；
         // - `Allow` → 照旧开窗执行。
-        let gate_started = std::time::Instant::now();
         let decision = crate::symbio_core::CircuitBreaker.gate(
             breaker.authorized,
             breaker.spent_ms,
             breaker.requested_ms,
             breaker.budget_ms,
             gate_started.elapsed().as_millis() as u64,
+            // 输入是会话事实源的整段重放 ⇒ 拿深度档的预算，不拿反射档（见 `gate` 文档）。
+            crate::symbio_core::LatencyTier::Deep.budget_ms(),
         );
         // `(标签, 拒绝理由, failure_kind, 是否熔断)`；`None` = 放行。
         let gate_refusal: Option<(&'static str, String, &'static str, bool)> = match decision {

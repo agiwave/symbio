@@ -1242,7 +1242,8 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             inputs.spent_ms,
             inputs.requested_ms,
             inputs.spent_ms + inputs.requested_ms - 1,
-            0
+            0,
+            crate::symbio_core::LatencyTier::Deep.budget_ms(),
         ),
         crate::symbio_core::GateDecision::Break {
             reason: "budget-exhausted"
@@ -1255,7 +1256,8 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             inputs.spent_ms,
             inputs.requested_ms,
             inputs.spent_ms + inputs.requested_ms + 1,
-            0
+            0,
+            crate::symbio_core::LatencyTier::Deep.budget_ms(),
         ),
         crate::symbio_core::GateDecision::Allow
     );
