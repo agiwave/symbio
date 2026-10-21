@@ -14,7 +14,13 @@
 //! ## 子模块分工（拆文件不拆行为）
 //!
 //! - [`nodes`]           VDFS 节点构造 / 路径模型 / 消息投影（纯函数，不持有 `self`）
-//! - [`vdfs_provider`]   `impl VdfsProvider` 及其私有辅助
+//! - [`vdfs_provider`]   `impl VdfsProvider` 的路由、订阅表与跨域共用读值
+//! - [`vdfs_catalog`]    目录域：根清单 / 会话条目 / 记忆 / 子会话 / 工作目录
+//! - [`vdfs_messages`]   转写域：`<id>/message[/mid]` 的读、改、截断、清空
+//! - [`vdfs_inbox`]      收件箱域：`<id>/inbox[/iid]`（运行中会话的在途事件）
+//!
+//! 会话地址面按**域**分文件（判据：那一段错了红的是哪一面）；「路径 → 域」的映射
+//! 只在 `vdfs_provider::dispatch` 一处。
 //!
 //! 本文件保留：插件结构体与构造、内部能力（`impl SessionPlugin`）、协议路由与
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
@@ -742,10 +748,13 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 mod nodes;
 mod resident;
 mod run_actions;
+mod vdfs_catalog;
+mod vdfs_inbox;
+mod vdfs_messages;
 mod vdfs_provider;
 mod words;
 
-// 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
+// 模块内共享面：`nodes` 与 `vdfs_*` 四个域文件经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
@@ -758,7 +767,7 @@ pub(crate) use self::words::{
     OUTCOME_FAILED,
 };
 
-// 收件箱条目类型：`nodes` / `vdfs_provider` / `inbox` 经 `use super::*;` 取用
+// 收件箱条目类型：`nodes` / `vdfs_inbox` / `inbox` 经 `use super::*;` 取用
 pub(crate) use super::active::InboxItem;
 
 #[cfg(test)]

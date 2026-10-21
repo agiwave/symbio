@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::symbio_core::{
-    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VDFS_ACTION_TRUNCATE,
-    VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
+    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VDFS_ACTION_EXPAND_SKELETON,
+    VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
 };
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
 use crate::symbio_core::VdfsProvider;

@@ -13,6 +13,7 @@ mod orchestrator;
 pub(crate) mod paths;
 pub(crate) mod runtime;
 mod stats;
+mod stats_reading;
 mod temporal;
 mod transcript;
 pub(crate) mod worker_progress;
