@@ -222,7 +222,13 @@ pub fn validate(m: &AgentManifest) -> Result<(), String> {
     Ok(())
 }
 
-/// id 字符集（§5.1）
+/// id 字符集（§5.1）——**这条字符集就是「主体 id 不许自带命名空间」的执行方**。
+///
+/// 包侧 id 是裸 slug：主体的完整地址由 core 一处派生（`authz::principal_of` 把裸名兜底成
+/// `session/<id>`，对**已带命名空间**的原样认下）。所以「不含 `/`」不是排版洁癖，是身份
+/// 边界——放开斜杠等于给包开一条自述族属的入口，`id: person/local` 的包会直接从
+/// 「原样认下」那一支变成人。两侧的语法与命名空间登记表之间的一致性判据钉在
+/// `authz.test.rs::principal_of_derives_a_bare_asset_id_into_the_agent_family`。
 fn is_valid_id(id: &str) -> bool {
     let bytes = id.as_bytes();
     if bytes.is_empty() || bytes.len() > 128 {

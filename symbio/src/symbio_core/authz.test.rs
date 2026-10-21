@@ -23,7 +23,9 @@
 //! 9. **委派取交集**（[T-195]）：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
 //!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行；
 //! 10. **读侧闸一条判据**（[T-206] ⑧）：属主恒放行 ∨ 矩阵判定，两处消费方（stats
-//!     整列闸、召回逐条预过滤）共用同一个写法。
+//!     整列闸、召回逐条预过滤）共用同一个写法；
+//! 11. **主体名的两条派生分支与命名空间登记表同源**（[T-210] 项一）：资产侧的裸 slug
+//!     只能兜底进 agent 一族，完整地址不二次加前缀。
 
 use super::*;
 use crate::symbio_core::governance::Capability;
@@ -494,6 +496,37 @@ fn all_principals_are_routable_ids() {
     for p in [PRINCIPAL_USER, PRINCIPAL_TOOL_VDFS_WRITE] {
         assert!(!is_agent_id(p), "`{p}` 不属 agent 命名空间");
     }
+}
+
+/// **主体名的两条派生分支与命名空间登记表同源**（[T-210] 项一）。
+///
+/// `principal_of` 是全 crate 唯一把「资产 id」折成「主体地址」的地方，它的两条分支必须
+/// 各钉一次：**裸名兜底进 `session/`**（⇒ 这条主体恒被 `is_agent_id` 认作 agent 一族），
+/// **已带命名空间的原样认下**（⇒ 派生点绝不二次加前缀）。
+///
+/// 为什么这条判据归 core、反例却归包侧：包侧 `agent/host/manifest.rs::is_valid_id` 禁斜杠
+/// 是本判据的**前半**（不给包自述族属的入口），但它无法证明「兜底出来的主体确实在登记表
+/// 里」——那是命名空间登记表与 id 语法之间的一致性，只有这里能判。
+/// 漂移的两侧表现不同：兜底族没登记 ⇒ `visible_to` 第 3 条不挡，别的智能体发言会进本主体的
+/// prompt（越权可见）；「原样认下」这一支被放宽 ⇒ 包自称的族说了算（身份伪造）。
+#[test]
+fn principal_of_derives_a_bare_asset_id_into_the_agent_family() {
+    // ① 裸 slug ⇒ 兜底进 session 一族，且兜底结果必须落在命名空间登记表里
+    let derived = principal_of(Some("t210-agent"));
+    assert_eq!(derived, "session/t210-agent");
+    assert!(
+        is_agent_id(&derived),
+        "兜底出来的主体必须被 `AGENT_NAMESPACES` 认作 agent——登记表与 id 语法对不上，\
+         `visible_to` 第 3 条就不挡"
+    );
+    assert_eq!(principal_namespace(&derived), Some("session"));
+    // ② 完整地址原样认下：派生点绝不二次加前缀（`session/session/x` 这种形状不许出现）
+    assert_eq!(principal_of(Some("session/x")), "session/x");
+    assert_eq!(principal_of(Some("person/local")), "person/local");
+    assert!(!is_agent_id("person/local"), "人一族不在 agent 登记表里");
+    // ③ 缺省与空白 ⇒ 主会话主体（同一条判据的第三格）
+    assert_eq!(principal_of(None), PRINCIPAL_MAIN);
+    assert_eq!(principal_of(Some("   ")), PRINCIPAL_MAIN);
 }
 
 /// **三行工具主体登记进表**（[ADR-069 §决策 2 工具响应主体]）——今天写侧闸按会话主体判，

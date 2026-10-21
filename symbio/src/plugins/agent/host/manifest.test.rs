@@ -53,6 +53,52 @@ fn rejects_bad_id() {
     }
 }
 
+/// **带命名空间的 id 必须拒**（[T-210 项一] 的反例用例）。
+///
+/// 这一条拒的不是「格式不好看」：`authz::principal_of` 对已带命名空间的地址**原样认下**
+/// （那是给 `person/local` / `vdfs/write` 这类完整地址准备的分支），所以一旦放行斜杠，
+/// `id: person/local` 的包就自己声明了「我属人这一族」——授权表按主体行判，
+/// 这一格漂移表现为**包自称的族说了算**。斜杠禁在字符集这一层，族就只剩 core 那一处能定。
+#[test]
+fn rejects_id_that_self_declares_a_namespace() {
+    for bad in [
+        "session/forged",
+        "person/local",
+        "vdfs/write",
+        "system/compactor",
+        "/leading-slash",
+    ] {
+        let m = AgentManifest {
+            spec: "agent-dir/v2".into(),
+            id: bad.to_string(),
+            name: "n".into(),
+            version: "1.0.0".into(),
+            requires: Requires {
+                spec: "^2".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            validate(&m).is_err(),
+            "id `{bad}` 自带命名空间，应被拒绝（族只能由 core 的派生点定）"
+        );
+    }
+    // 正例：裸 slug 照收（它兜底出来的主体恒为 `session/<id>`）。
+    let ok = AgentManifest {
+        spec: "agent-dir/v2".into(),
+        id: "t210-agent".into(),
+        name: "n".into(),
+        version: "1.0.0".into(),
+        requires: Requires {
+            spec: "^2".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(validate(&ok).is_ok());
+}
+
 #[test]
 fn load_reads_yaml_and_json() {
     let tmp = tempfile::tempdir().unwrap();
