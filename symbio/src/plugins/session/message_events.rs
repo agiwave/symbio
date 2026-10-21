@@ -32,7 +32,7 @@
 //! 一条边界不变：存储层的 IO 灾难仍会 panic——那是 [`Store::append`] 自己的契约
 //! （「不可静默」），不是本模块的口径。
 //!
-//! ## 写者令牌：会话正跑着时编辑会落不了格（T-055 已解决）
+//! ## 写者令牌：只有**跨进程**才拿不到它（T-055 立机器，T-212 把它退成兜底）
 //!
 //! [`EventWalStore::open`] 用文件锁取写者令牌（I1 单写者的跨进程边界）。一轮
 //! 正在跑时它持有令牌，此刻来的编辑拿不到 ⇒ `NotTheWriter` ⇒ 少一条事实。
@@ -40,20 +40,44 @@
 //! 这曾是一条**静默的数据缺陷**：主读切到 WAL 之后，它会让编辑「偶发不生效」
 //! 且无人报错。修法（T-055）与 b2 的压缩寄存同手法——**变更寄存，由持令牌的一方落格**：
 //!
-//! - 拿不到令牌时，把这条变更推进 [`PARKED`]（按会话 id 分桶的进程内寄存区）；
+//! - 拿不到令牌时，把这条变更**写进寄存区**（与会话 WAL 同域的
+//!   `transcripts/pending/`，一条变更一个文件，见 [`park`]）；
 //! - 持令牌的一方（`turn_exec::execute_turn` 的执行口）在下一次落格时调
-//!   [`drain_parked`]，把寄存的变更补落进事实源。
+//!   [`drain_parked`]，把寄存的变更补落进事实源，落一条删一条。
 //!
 //! 「寄存」而不是「重试 / 阻塞等待」：编辑是**用户对列表的操作**，它的发起方
 //! （VDFS 路由）在不持令牌的那条链上；阻塞等待一轮跑完（可能几分钟）会把用户界面
 //! 拖死，而重试同样要等。「寄存 + 由令牌持有方落」是**唯一**能同时满足「事实必须
 //! 落格」与「落格必须持令牌」两条约束的形态——与 `SessionContext::consolidated`
 //! 完全同一条纪律（见该字段文档）。
+//!
+//! ## 为什么寄存区在盘上而不是内存里（T-212 项三）
+//!
+//! 触发条件先收窄过一次：[PL-014 §2.2 推论 3](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+//! 的「一写者」落地后（`SessionStore::facts` 按会话缓存**唯一**一个 RW 句柄），
+//! 同进程里第二个 RW 持令牌者的形态**不存在** ⇒ 今天还能拿到 `NotWriter` 的
+//! 只剩**跨进程**这一种。而进程内静态寄存区恰好在这种形态下**永远救不回来**：
+//! 寄存躺在没令牌的那个进程的内存里，持令牌的进程在另一个地址空间，它的
+//! `drain_parked` 看不见；没令牌的那个进程一退出（CLI 一次命令就是短命进程），
+//! 寄存随之消失——**不需要崩溃也已经丢**。所以那条静态表不是「崩溃才丢」，
+//! 是「触发即丢」，它把一次本该冒泡的失败（T-164 的 `Failed`）改成了静默的成功。
+//!
+//! 盘上寄存区改的就是这一条：**寄存的可见性不再依赖寄存者活着**。崩溃、退出、
+//! 另一个进程补落，三种都走同一条路——文件还在，下一个持令牌的窗口把它落掉。
+//! 代价是本模块多一种 IO，于是三条纪律跟着搬过来：
+//!
+//! - **先落盘再回执**：写寄存区失败就是真失败（`AppendOutcome::Failed`），
+//!   不能既没副本又回一句"改好了"（T-164 同一条判据）；
+//! - **一件一份、暂名再改名**：与 `WalStore::archive_before` 的暂存改名同一手法，
+//!   崩溃只会留下看不见的 `.staged` 半件，不会留下半条变更；
+//! - **有界 + 出声**：上界与丢最旧的告警照旧（见 [`PARK_CAP`]）。
 
 use crate::plugins::session::store::EventWalStore;
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::symbio_core::chat_node::ChatNode;
@@ -67,67 +91,138 @@ use crate::symbio_core::{
 /// 形状刻意 = `append` 的入参元组：寄存就是为了**原样重放**同一次落格，
 /// 因此不重新解释、不预先算锚（锚必须按**补落那一刻**的切片算——那时切片已经
 /// 长出了新一轮的事件，用旧的锚会指到一个过期状态）。
-#[derive(Debug, Clone)]
+///
+/// 这个形状因此就是寄存件的**盘上格式**（一件一个 JSON 文件，见 [`park`]）：
+/// 它带的全部是「重放这次落格所需的入参」，没有一条是新的词汇——
+/// 这正是「寄存不是第五种原语」的形状证据（`MessageChange` 三种原语的入参，
+/// 延迟一会儿原样再落一次；不新增 `kind`、不新增读侧投影）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ParkedChange {
-    kind: &'static str,
+    kind: String,
     verb: Verb,
-    id_prefix: &'static str,
+    id_prefix: String,
     target: String,
     payload: Value,
 }
 
-/// 进程内**寄存区**：会话 id → 未落格的变更（FIFO）。
+/// 寄存区目录：`<会话目录>/transcripts/pending`。
 ///
-/// ## 为什么是进程内静态而不是磁盘
+/// `transcripts` 这一段取自 [`paths::TRANSCRIPTS_SUBDIR`]——与会话 WAL 的归档段
+/// （`store::wal::archive_dir_of`）用同一个会话布局词汇，只定义一次；`pending`
+/// 是本模块自己的那一段。放在 `transcripts/` 之下还有一个实际好处：VDFS 会话树是
+/// **显式构造**的，这个子目录不会漏进前端的文件列表。
 ///
-/// 寄存的**生命周期**就是「直到同进程里的下一个执行口落格」。跨进程（另一个
-/// 进程持有令牌）在单写者模型里本就不该发生——令牌是**文件锁**，持锁进程崩溃时
-/// 锁自动释放、下一个进程才拿得到。此时寄存区在旧进程的内存里、随它一起消失，
-/// 这正是「进程内的东西不该假装持久」。真正需要跨崩溃保全的是**已落格**的事实，
-/// 而那正是 WAL 的职责。
-static PARKED: LazyLock<Mutex<HashMap<String, Vec<ParkedChange>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// 它落在**事实源旁边**而不是别处：寄存的目的地就是那条 WAL，路径由 WAL 句柄
+/// 自己给出（[`EventWalStore::dir`]），调用方不再重新派生一遍布局。
+fn pending_dir(store_dir: &Path) -> PathBuf {
+    store_dir
+        .join(crate::plugins::session::paths::TRANSCRIPTS_SUBDIR)
+        .join("pending")
+}
 
-/// 寄存器上界（每会话）。超出即丢**最旧**的一条并告警——见 [`park`] 的理由。
+/// 半件后缀：先写成 `<名>.staged`，`sync` 完再改名成 `<名>.json`（与
+/// `WalStore::archive_before` 的暂存改名同一手法）。
+///
+/// 看得见的顺序键只有 `.json` ⇒ 崩溃留下的半件天然不在队列里，由补落方顺手清掉；
+/// 于是"写坏了的寄存"只会是**没发生过**，不会是**半条变更**。
+const STAGED_SUFFIX: &str = "staged";
+
+/// 可见件后缀：**`.json` 才是已寄存的**。与 [`STAGED_SUFFIX`] 一起构成寄存区唯一的
+/// 两种文件名——别的扩展名一律按「不认识的东西」清掉。
+const PARKED_SUFFIX: &str = "json";
+
+/// 同一毫秒内的两次寄存靠它分开（文件名就是顺序键，见 [`park`]）。
+/// 取模只为保证宽度稳定（`{serial % 1e6}` 恒为六位）。
+static PARK_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+/// 寄存件的可见性：**`.json` 才是已寄存的**，`.staged` 是没写完的半件。
+fn is_parked(path: &Path) -> bool {
+    path.extension().is_some_and(|x| x == PARKED_SUFFIX)
+}
+
+/// 列出寄存区里的文件（按名升序 = 寄存先后）。目录不存在 ⇒ 空
+/// （「还没有人寄存过」是常态，不该是一条错误）。
+fn pending_listing(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    out.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    out
+}
+
+/// 寄存件上界（每会话）。超出即丢**最旧**的一件并告警——见 [`park`] 的理由。
 ///
 /// 取 256：一次编辑最多两条（edited），一次截断一条（removed ids 已聚合），
-/// 而寄存只发生在「一轮运行中」这个窗口里（几秒到几分钟）。256 远远够用；
-/// 真堆到这个数说明令牌持有方长期没落格（比寄存溢出更严重的缺陷），
-/// 告警把它暴露出来，而不是让它无声地撑爆内存。
+/// 而寄存只发生在「另一个进程持着令牌」这个窗口里（一轮 = 几秒到几分钟）。
+/// 256 远远够用；真堆到这个数说明**没有持令牌的窗口出现**（比寄存溢出更严重的
+/// 缺陷），告警把它暴露出来，而不是让它无声地撑爆磁盘。
 const PARK_CAP: usize = 256;
 
-/// 把一条变更寄存下来（拿不到令牌的路径）。
-fn park(session_id: &str, change: ParkedChange) {
-    let mut table = match PARKED.lock() {
-        Ok(t) => t,
-        Err(p) => p.into_inner(), // 锁中毒：寄存器是纯内存暂存，按无中毒处理（与 store 层同约定）
-    };
-    let bucket = table.entry(session_id.to_string()).or_default();
-    if bucket.len() >= PARK_CAP {
-        // 丢最旧的：寄存区是**尽力而为**的暂存，不是事实源。堆满说明持令牌方
-        // 长期没落格——那是比溢出更该被看见的缺陷，故告警而不是静默截断。
-        let dropped = bucket.remove(0);
+/// 把一条变更**写进盘上寄存区**（拿不到令牌的路径）。
+///
+/// 顺序键就是文件名：`{毫秒:013}-{pid:07}-{序号:06}.json`，字典序 = 寄存先后。
+/// 同机两个进程读的是同一个时钟，跨机不存在的形态（会话目录在同一块盘上），
+/// 所以这个排序只需要回答一件事——「先寄存的哪一件」；补落时的落格顺序
+/// 才是折叠顺序的依据，时钟回拨最多让两件先后互换，不会让它们**消失**。
+///
+/// **返回 `Err` = 这条变更没有任何副本**，调用方必须按真失败处理（T-164）：
+/// 「回执说改好了、盘上其实没有」正是这一族缺陷的原形，不能由寄存这条路自己再犯一次。
+///
+/// 上界在写入**之前**检查：满了先丢最旧并告警，再写新的——与内存版同一条纪律，
+/// 只是"丢"现在是删一件。
+fn park(store_dir: &Path, change: &ParkedChange) -> Result<(), String> {
+    let dir = pending_dir(store_dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("寄存区建不起来（{}）：{e}", dir.display()))?;
+
+    let parked: Vec<PathBuf> = pending_listing(&dir)
+        .into_iter()
+        .filter(|p| is_parked(p))
+        .collect();
+    if parked.len() >= PARK_CAP {
+        // 丢最旧的：寄存区是**尽力而为**的暂存，不是事实源。堆满说明没有持令牌的
+        // 窗口出现——那是比溢出更该被看见的缺陷，故告警而不是静默截断。
+        let dropped = &parked[0];
+        if let Err(e) = std::fs::remove_file(dropped) {
+            crate::plugin_warn!(
+                "session",
+                "[message] 寄存区已满且最旧一件删不掉（{}）：{e}",
+                dropped.display()
+            );
+        }
         crate::plugin_warn!(
             "session",
-            "[message] 寄存区已满（{PARK_CAP}），丢弃最旧的一条寄存变更（{} {target}）\
-             ——持令牌的一方长期未落格，请排查",
-            dropped.kind,
-            target = dropped.target,
+            "[message] 寄存区已满（{PARK_CAP}），丢弃最旧的一件寄存变更\
+             ——没有持写者令牌的窗口出现，请排查"
         );
     }
-    bucket.push(change);
+
+    let serial = PARK_SERIAL.fetch_add(1, Ordering::Relaxed) % 1_000_000;
+    let stem = format!(
+        "{:013}-{:07}-{serial:06}",
+        crate::symbio_core::clock_now_ms(),
+        std::process::id()
+    );
+    let visible = dir.join(format!("{stem}.{PARKED_SUFFIX}"));
+    let staged = dir.join(format!("{stem}.{STAGED_SUFFIX}"));
+    let bytes = serde_json::to_vec(change).map_err(|e| format!("寄存件序列化失败：{e}"))?;
+    let written = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        f.write_all(&bytes)?;
+        // 寄存的**全部意义**是「进程不在了它还在」，所以这一句 `sync` 不是可选项：
+        // 只写进操作系统缓冲就回执，崩溃时照样丢，等于把缺陷从内存搬到了页缓存。
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&staged, &visible)
+    })();
+    written.map_err(|e| format!("寄存写入失败（{}）：{e}", dir.display()))
 }
 
-/// 取出并清空某会话的寄存变更（持令牌方在落格前调用）。
-fn take_parked(session_id: &str) -> Vec<ParkedChange> {
-    let mut table = match PARKED.lock() {
-        Ok(t) => t,
-        Err(p) => p.into_inner(),
-    };
-    table.remove(session_id).unwrap_or_default()
-}
-
-/// **把寄存的变更补落进事实源**——持写者令牌的一方（执行口）调用。
+/// **把盘上寄存的变更补落进事实源**——持写者令牌的一方（执行口）调用。
 ///
 /// ## 为什么必须传 `store` 进来（而不是自己 `open`）
 ///
@@ -146,8 +241,7 @@ fn take_parked(session_id: &str) -> Vec<ParkedChange> {
 /// ## 幂等
 ///
 /// 逐条走 [`append_into`]，幂等键与就地落格完全一致（`{prefix}-{n}`）——因此
-/// 「同一条变更被寄存两次 / 补落两次」不会写出两条事实。补落仍失败（极端：令牌在
-/// 这一瞬间被抢走）⇒ 重新寄存，等下一个窗口。
+/// 「同一条变更被补落两次」（崩在删文件之前 ⇒ 下一次窗口再落一次）不会写出两条事实。
 ///
 /// ## 为什么补落期间要重新算锚
 ///
@@ -155,32 +249,79 @@ fn take_parked(session_id: &str) -> Vec<ParkedChange> {
 /// 补落发生在原编辑之后的某个执行口，此时切片已经长出了这一轮的事件——用编辑
 /// 那一刻的锚会把事实指到一个**过期状态**上（I2 要的是「这次变更站在哪份状态上」，
 /// 而那是**落格时刻**的状态）。
+///
+/// ## 顺序
+///
+/// 按文件名升序逐件落；**拿不到令牌就整队停下**（文件本来就在盘上，不需要重新寄存）。
+/// 跳过它继续落后面的，等于把后寄存的变更排在先寄存的**之前**落格——折叠顺序一旦错
+/// 开，「同一条消息编辑两次」就变成了倒放。
 pub fn drain_parked(store: &EventWalStore, session_id: &str) {
-    let parked = take_parked(session_id);
-    if parked.is_empty() {
-        return;
-    }
-    for change in parked {
+    let dir = pending_dir(store.dir());
+    for path in pending_listing(&dir) {
+        if !is_parked(&path) {
+            // `.staged` 半件：从没成功改名过 ⇒ 那次寄存没发生过，顺手清掉。
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            crate::plugin_warn!(
+                "session",
+                "[message] 寄存件读不出来，已放弃（{}）——该次变更丢失",
+                path.display()
+            );
+            let _ = std::fs::remove_file(&path);
+            continue;
+        };
+        let Ok(change) = serde_json::from_slice::<ParkedChange>(&bytes) else {
+            crate::plugin_warn!(
+                "session",
+                "[message] 寄存件不是合法形状，已放弃（{}）——该次变更丢失",
+                path.display()
+            );
+            let _ = std::fs::remove_file(&path);
+            continue;
+        };
         match append_into(
             store,
             session_id,
-            change.kind,
+            &change.kind,
             change.verb,
-            change.id_prefix,
+            &change.id_prefix,
             &change.target,
             change.payload.clone(),
         ) {
-            Ok(()) => {}
-            // 又拿不到令牌（极端并发）⇒ 原样放回，等下一个窗口。
-            Err(TryAppendError::NotWriter) => park(session_id, change),
-            // 无锚 / 真失败：寄存也救不了——补落没有第二次机会（调用方早已把
-            // 回执发给了用户），所以这里**出声**而不是静默。
-            Err(TryAppendError::NoAnchor) => {}
-            Err(TryAppendError::Failed(why)) => crate::plugin_error!(
-                "session",
-                "[message] 寄存的变更补落失败，该次变更已丢失（重建后不可见）：{}",
-                why
-            ),
+            Ok(()) => {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    // 已经落了，删不掉只是下一次多问一次幂等键（`Duplicate`），
+                    // 不是正确性问题——故 warn 而不改判。
+                    crate::plugin_warn!(
+                        "session",
+                        "[message] 寄存件已补落但删不掉（{}）：{e}",
+                        path.display()
+                    );
+                }
+            }
+            // 令牌还没回来 ⇒ 整队停下，队列留在盘上等下一个窗口（见函数文档「顺序」）。
+            Err(TryAppendError::NotWriter) => return,
+            // 无锚：寄存救不了它（这个会话从未走过 v2），也不能让它永远堆在寄存区里。
+            Err(TryAppendError::NoAnchor) => {
+                crate::plugin_warn!(
+                    "session",
+                    "[message] 寄存的变更补落时无可用溯源锚，已放弃（{} {}）",
+                    change.kind,
+                    change.target
+                );
+                let _ = std::fs::remove_file(&path);
+            }
+            // 真失败：补落没有第二次机会（调用方早已把回执发给了用户），出声并出队。
+            Err(TryAppendError::Failed(why)) => {
+                crate::plugin_error!(
+                    "session",
+                    "[message] 寄存的变更补落失败，该次变更已丢失（重建后不可见）：{}",
+                    why
+                );
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 }
@@ -278,7 +419,8 @@ pub(crate) enum AppendOutcome {
     Landed,
     /// 本来就没有事实可落（空列表）——不是失败，也不该在事实源上留痕。
     Nothing,
-    /// 拿不到写者令牌 ⇒ **寄存**，等持令牌方补落（T-055）。
+    /// 拿不到写者令牌（= 另一个进程持着它）⇒ **寄存**到盘上，等持令牌方补落（T-055 / T-212）。
+    /// 回执按成功走，因为这条变更已经有副本了——寄存失败不在这一格，它冒泡成 `Failed`。
     Parked,
     /// 无锚可指：事实源里没有可用的溯源锚（v1 遗留会话 / 从未走过 v2 轮）。
     /// 这类会话的读侧本就回落 `messages.json`（ADR-049），缓存仍是真源 ⇒ 豁免。
@@ -303,9 +445,9 @@ enum TryAppendError {
 fn append(
     store: &EventWalStore,
     session_id: &str,
-    kind: &'static str,
+    kind: &str,
     verb: Verb,
-    id_prefix: &'static str,
+    id_prefix: &str,
     target: &str,
     payload: Value,
 ) -> AppendOutcome {
@@ -319,23 +461,26 @@ fn append(
         payload.clone(),
     ) {
         Ok(()) => AppendOutcome::Landed,
-        // **寄存，而不是出声丢弃**（T-055）：一轮正在跑时它持着写者令牌，此刻来的
+        // **寄存，而不是出声丢弃**（T-055）：另一个进程正持着写者令牌，此刻来的
         // 编辑拿不到 ⇒ 静默少一条事实。切源之后那就是「编辑偶发不生效」且无人报错。
-        // 把变更寄存在进程内，由持令牌的一方（执行口 `drain_parked`）补落。
+        // 把变更写进盘上寄存区，由持令牌的一方（执行口 `drain_parked`）补落。
         //
         // 载荷**原样寄存**：锚与幂等键都在补落那一刻重算（见 `drain_parked`）。
+        // 寄存**写不进去**就是这条变更彻底没了 ⇒ 按真失败冒泡，而不是 `Parked`。
         Err(TryAppendError::NotWriter) => {
-            park(
-                session_id,
-                ParkedChange {
-                    kind,
-                    verb,
-                    id_prefix,
-                    target: target.to_string(),
-                    payload,
-                },
-            );
-            AppendOutcome::Parked
+            let change = ParkedChange {
+                kind: kind.to_string(),
+                verb,
+                id_prefix: id_prefix.to_string(),
+                target: target.to_string(),
+                payload,
+            };
+            match park(store.dir(), &change) {
+                Ok(()) => AppendOutcome::Parked,
+                Err(why) => {
+                    AppendOutcome::Failed(format!("令牌被另一个进程持有，寄存又失败：{why}"))
+                }
+            }
         }
         Err(TryAppendError::NoAnchor) => AppendOutcome::NoAnchor,
         Err(TryAppendError::Failed(why)) => AppendOutcome::Failed(why),

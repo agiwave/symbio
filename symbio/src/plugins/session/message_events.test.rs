@@ -47,7 +47,8 @@ fn seeded_dir(tag: &str) -> (std::path::PathBuf, u64) {
     (dir, seq)
 }
 
-/// 会话 id：寄存区按它分桶，各用例的目录名本来就唯一，直接取末段。
+/// 会话 id：只用于落格时的告警署名（寄存区是**每个会话目录一份**，不再按 id 分桶）。
+/// 各用例的目录名本来就唯一，直接取末段。
 fn sid_of(dir: &std::path::Path) -> String {
     dir.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -493,6 +494,231 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
         "锚按**补落时刻**的切片算（无承载节点退化到切片末尾 = 新落的 u-2），\
          而不是寄存那一刻的末尾（0）"
     );
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── T-212 项三：寄存区在**盘上**（跨进程兜底才成立）──────────────────────────
+
+/// 寄存区里**已寄存**的那几件（`.json`），按名升序 = 寄存先后。
+///
+/// 复用生产侧同一套可见性判据（[`super::is_parked`] / [`super::pending_listing`]）：
+/// 「什么算一件寄存」只有一处答案，用例不许自己再猜一遍扩展名。
+fn parked_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    super::pending_listing(&super::pending_dir(dir))
+        .into_iter()
+        .filter(|p| super::is_parked(p))
+        .collect()
+}
+
+/// **盘上寄存的承重判据**：寄存者那个进程**不在了**，变更仍然落得下去。
+///
+/// 这正是把寄存区从进程内静态表搬到文件系统的唯一理由：令牌被**另一个进程**持着时，
+/// 没令牌的那个进程里的内存寄存，持令牌的进程永远看不见；那个进程一退出（CLI 一条
+/// 命令就是短命进程），寄存跟着消失——旧形态不是「崩溃才丢」，是**触发即丢**。
+///
+/// 这里用「释放令牌后重开一个从未参与过寄存的句柄」复现跨进程：锁随句柄关闭自动释放，
+/// 新句柄就是那个持令牌的进程，它与写寄存件的那个实例之间**没有任何共享内存**。
+#[test]
+fn a_parked_change_is_on_disk_and_lands_for_a_fresh_token_holder() {
+    let (dir, _) = seeded_dir("park-on-disk");
+    let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+    let holder = EventWalStore::open(&wal).expect("持令牌打开");
+
+    assert!(matches!(
+        edited(
+            &open_wal(&dir),
+            &sid_of(&dir),
+            &patched_user("u-1", "换个进程来落")
+        ),
+        AppendOutcome::Parked
+    ));
+    // 寄存件在**盘上**，不在哪个进程的内存里（这一步是整条判据的支点）。
+    assert_eq!(parked_entries(&dir).len(), 1, "寄存必须看得见");
+    assert!(read_facts(&dir).is_empty(), "还没落格");
+
+    // 持令牌的那个「进程」换成了一个新句柄：它没寄存过任何东西，也不认识那次编辑。
+    drop(holder);
+    let fresh = EventWalStore::open(&wal).expect("重开拿到令牌");
+    drain_parked(&fresh, &sid_of(&dir));
+
+    let facts = read_facts(&dir);
+    assert_eq!(facts.len(), 1, "寄存者不在了也必须补落得下去");
+    let msg: ChatNode =
+        serde_json::from_value(facts[0].payload["message"].clone()).expect("载荷里是整条消息");
+    assert_eq!(
+        msg.content.as_ref().map(MessageContent::to_text).as_deref(),
+        Some("换个进程来落")
+    );
+    assert!(parked_entries(&dir).is_empty(), "落一条删一条");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// **两件寄存按寄存先后落格**——文件名就是顺序键。
+///
+/// 折叠顺序一旦错开，「同一条消息编辑两次」就变成倒放（后一次的内容被前一次盖掉），
+/// 而且**看不出来**：两条事实都在，末态是错的那个。
+#[test]
+fn parked_changes_land_in_park_order() {
+    let (dir, _) = seeded_dir("park-order");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+    let second = open_wal(&dir);
+
+    assert!(matches!(
+        edited(&second, &sid_of(&dir), &patched_user("u-1", "先寄存的")),
+        AppendOutcome::Parked
+    ));
+    assert!(matches!(
+        edited(
+            &open_wal(&dir),
+            &sid_of(&dir),
+            &patched_user("u-1", "后寄存的")
+        ),
+        AppendOutcome::Parked
+    ));
+    assert_eq!(parked_entries(&dir).len(), 2, "两件各一份");
+
+    drain_parked(&holder, &sid_of(&dir));
+
+    let texts: Vec<String> = read_facts(&dir)
+        .iter()
+        .map(|e| {
+            let msg: ChatNode = serde_json::from_value(e.payload["message"].clone()).expect("消息");
+            msg.content
+                .as_ref()
+                .map(MessageContent::to_text)
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["先寄存的".to_string(), "后寄存的".to_string()],
+        "落格顺序 = 寄存顺序（倒放会静默给出错的末态）"
+    );
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `.staged` 半件**不在队列里**，且被补落方顺手清掉。
+///
+/// 一次寄存的可见顺序键只有 `.json`：崩在改名之前留下的是半件，它不是「半条变更」，
+/// 而是**那次寄存没发生过**。让它进队列就等于让一次可能只有半个 JSON 的写入去参与
+/// 折叠——那才是真正会静默改坏历史的路径。
+#[test]
+fn a_staged_half_piece_never_lands_and_is_cleaned_up() {
+    let (dir, _) = seeded_dir("park-staged");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+    assert!(matches!(
+        edited(
+            &open_wal(&dir),
+            &sid_of(&dir),
+            &patched_user("u-1", "完整的这件")
+        ),
+        AppendOutcome::Parked
+    ));
+
+    // 手工造半件：写一半、不 sync、不改名（正是 `park` 被中断留下的形状）。
+    let pending = super::pending_dir(&dir);
+    std::fs::write(
+        pending.join("9999999999999-0000000-000000.staged"),
+        b"{\"kind\":\"message.edited\"",
+    )
+    .expect("造半件");
+
+    drain_parked(&holder, &sid_of(&dir));
+
+    assert_eq!(read_facts(&dir).len(), 1, "半件不许进事实源");
+    assert!(
+        !pending.join("9999999999999-0000000-000000.staged").exists(),
+        "半件由补落方顺手清掉（否则会永远堆在会话目录里）"
+    );
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 寄存区**满界丢最旧**：上界存在且真的生效，多出来的那件写得进、最旧那件让位。
+///
+/// 为什么必须有界：寄存只在「另一个进程持着令牌」这个窗口里发生，而这个窗口本该
+/// 很快结束。堆到上界说明**持令牌的窗口一直没出现**——那是比溢出更严重的缺陷，
+/// 所以先丢最旧并告警（`park` 里的 `plugin_warn!`），而不是无声地撑爆磁盘。
+#[test]
+fn a_full_park_drops_the_oldest_entry() {
+    let (dir, _) = seeded_dir("park-cap");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+
+    // 预置满寄存器：名字全部**早于**真实时钟读数的寄存件（首位字符 `0`）。
+    let pending = super::pending_dir(&dir);
+    std::fs::create_dir_all(&pending).expect("寄存区目录");
+    for i in 0..super::PARK_CAP {
+        std::fs::write(
+            pending.join(format!("0000-{i:04}.{}", super::PARKED_SUFFIX)),
+            br#"{"kind":"message.edited"}"#,
+        )
+        .expect("预置寄存件");
+    }
+    let oldest = pending.join(format!("0000-{:04}.{}", 0, super::PARKED_SUFFIX));
+    assert!(oldest.exists());
+
+    assert!(
+        matches!(
+            edited(
+                &open_wal(&dir),
+                &sid_of(&dir),
+                &patched_user("u-1", "第 N+1 件")
+            ),
+            AppendOutcome::Parked
+        ),
+        "满了也照样寄存这一件（丢的是最旧的，不是新的）"
+    );
+
+    assert_eq!(
+        parked_entries(&dir).len(),
+        super::PARK_CAP,
+        "有界：寄存件数停在上界，不会一直涨"
+    );
+    assert!(!oldest.exists(), "让位的是最旧的一件");
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// **寄存写不进去 ⇒ 真失败**（无副本不许回成功）。
+///
+/// 这条判据把盘上寄存与旧的内存寄存区分开：寄存一旦是一次 IO，它就可能失败，
+/// 而失败时这条变更**没有任何副本**——此刻回执必须是 `Failed`（调用方在写缓存之前
+/// 把它变成可见错误），绝不能是 `Parked`。
+/// 「回执说改好了、事实源里没有」正是这一族缺陷的原形，不能由寄存这条路自己再犯一次。
+///
+/// 手法：把寄存区的**父段**做成普通文件 ⇒ `transcripts/pending` 这条路建不起来。
+#[test]
+fn a_park_that_cannot_be_written_reports_failure() {
+    let (dir, _) = seeded_dir("park-fails");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+    // 寄存区目录的父段被一个普通文件占了 ⇒ create_dir_all 必失败。
+    std::fs::write(
+        dir.join(crate::plugins::session::paths::TRANSCRIPTS_SUBDIR),
+        b"an ordinary file, not a directory",
+    )
+    .expect("占位文件");
+
+    let outcome = edited(
+        &open_wal(&dir),
+        &sid_of(&dir),
+        &patched_user("u-1", "落不下去的编辑"),
+    );
+    assert!(
+        matches!(outcome, AppendOutcome::Failed(_)),
+        "寄存写不进去必须冒泡成真失败，实际：{outcome:?}"
+    );
+    assert!(read_facts(&dir).is_empty(), "确实一条都没落");
 
     drop(holder);
     std::fs::remove_dir_all(&dir).ok();

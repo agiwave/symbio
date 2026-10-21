@@ -308,6 +308,16 @@ impl WalStore {
         Ok(Self::build(path, events, writer))
     }
 
+    /// 事实源所在目录（= 会话目录）。
+    ///
+    /// 只给 session 域内用：寄存区要落在**它等着落进的那条 WAL 旁边**，路径由句柄
+    /// 自己给出，调用方不必重新派生一遍布局（重新派生 = 第二份布局知识，
+    /// [PL-014 §2.2 推论 1](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+    /// 要消掉的正是这个）。
+    pub(in crate::plugins::session) fn dir(&self) -> &Path {
+        self.path.parent().unwrap_or_else(|| Path::new("."))
+    }
+
     /// **只读**打开：只解析，不动文件、不取令牌。
     ///
     /// 与 [`open`](Self::open) 的差别只在「谁有资格写」：恢复（截断撕裂尾行）
