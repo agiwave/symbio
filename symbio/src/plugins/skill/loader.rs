@@ -31,10 +31,9 @@ impl Default for LoadBudget {
     }
 }
 
-/// 从多个目录加载 skills，按目录顺序累加，受 `budget` 约束
+/// 从多个目录加载 skills：按目录顺序**合并成一个集合**，`budget.max_skills` 只作用在这个集合上。
 ///
-/// 超出 `budget.max_skills` 时跳过后续；单个 body 超过 `budget.max_body_chars`
-/// 时**截断**到 `max_body_chars` 字符并 warn（避免 SKILL.md 错误导致 OOM）。
+/// 单个 body 超过 `budget.max_body_chars` 时**截断**到 `max_body_chars` 字符并 warn（避免 SKILL.md 错误导致 OOM）。
 ///
 /// 需要无上限加载时，显式传入
 /// `LoadBudget { max_skills: usize::MAX, max_body_chars: usize::MAX }`。
@@ -43,26 +42,30 @@ impl Default for LoadBudget {
 ///
 /// 不同目录里出现**同名 skill** 时，**后加载的覆盖先加载的**（后到优先）。
 /// 但会用 `tracing::warn!` 记录冲突，避免静默覆盖。
+///
+/// ## 为什么名额不能在合并前逐目录扣（T-210 项二）
+///
+/// `max_skills` 是对**清单**的约束，不是对**某一个目录**的约束。旧写法每读一个目录就
+/// 把名额扣干、扣干即 `break`，于是：目录 A `[s1, s2]` + 目录 B `[s1′, s3]`、
+/// `max_skills = 2` 时，`s3` 根本没被看过——清单只剩 `s1 / s2`。两个后果一个是数量，
+/// 一个是身份：
+///
+/// - **数量**：清单可以比预算小，而多出来的那些技能在资源树上看得见、在工具面召不出来
+///   （一份清单两个来源，正是本项要收敛的东西）；
+/// - **身份**：名额扣在合并之前，同名覆盖就还没发生，谁占格取决于目录传入顺序而不是
+///   覆盖关系——`s1′` 本该顶掉 `s1`，却因为它排在扣干之后而整个消失。
+///
+/// 改成合并后一次裁剪，覆盖先于名额，清单恰为 `max_skills` 个**去重后**的技能。
+/// 代价是后来的目录也会被扫一遍（不再中途 `break`）：后到优先要求看到全部来源才成立。
 pub async fn load_skills_from_dirs_with_budget(
     dirs: &[String],
     workdir: &Path,
     budget: LoadBudget,
 ) -> Result<Vec<Skill>, PluginError> {
-    let mut all_skills: Vec<Skill> = Vec::new();
-    // 跟踪已出现的 skill name
-    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // 合并后的唯一集合：名字集合就是它的 `name` 投影，不再另存一份 seen_names
+    let mut merged: Vec<Skill> = Vec::new();
 
     for dir_path in dirs {
-        // 预算检查：超出 max_skills 后停止
-        if all_skills.len() >= budget.max_skills {
-            warn!(
-                loaded = all_skills.len(),
-                max = budget.max_skills,
-                "已达到 max_skills 上限，跳过剩余目录: {dir_path}"
-            );
-            break;
-        }
-
         // 优先：~ 展开
         let expanded = expand_tilde(dir_path);
         let abs_dir = if expanded.is_absolute() {
@@ -73,36 +76,33 @@ pub async fn load_skills_from_dirs_with_budget(
         };
 
         if abs_dir.exists() && abs_dir.is_dir() {
-            let mut skills = load_skills_from_dir(&abs_dir, budget).await?;
-            // 单目录加载后再做预算检查
-            let remaining = budget.max_skills.saturating_sub(all_skills.len());
-            if skills.len() > remaining {
-                warn!(
-                    dir = %abs_dir.display(),
-                    loaded = skills.len(),
-                    max = remaining,
-                    "单目录 skill 数量超出剩余预算，将截断"
-                );
-                skills.truncate(remaining);
-            }
-
-            // 名称去重 + 冲突检测
-            for skill in skills {
-                if seen_names.contains(&skill.name) {
+            // 名称去重 + 冲突检测（后到优先）
+            for skill in load_skills_from_dir(&abs_dir, budget).await? {
+                if merged.iter().any(|s| s.name == skill.name) {
                     warn!(
                         skill = %skill.name,
                         file = %skill.file_path,
                         "skill 名称重复（后加载的覆盖之前的同名 skill）"
                     );
                     // 移除之前的同名 skill
-                    all_skills.retain(|s| s.name != skill.name);
+                    merged.retain(|s| s.name != skill.name);
                 }
-                seen_names.insert(skill.name.clone());
-                all_skills.push(skill);
+                merged.push(skill);
             }
         }
     }
-    Ok(all_skills)
+
+    // 预算裁剪：作用在合并后的集合上，一次判完
+    if merged.len() > budget.max_skills {
+        warn!(
+            merged = merged.len(),
+            kept = budget.max_skills,
+            "合并后的技能数超出 max_skills，按目录顺序裁剪尾部"
+        );
+        merged.truncate(budget.max_skills);
+    }
+
+    Ok(merged)
 }
 
 async fn load_skills_from_dir(dir: &Path, budget: LoadBudget) -> Result<Vec<Skill>, PluginError> {

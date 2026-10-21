@@ -255,6 +255,90 @@ async fn unique_skill_names_all_kept() {
     assert_eq!(skills.len(), 2);
 }
 
+/// T-210 项二：`max_skills` 是**清单**的名额，不是**单个目录**的名额。
+///
+/// 场景：`dir1 = [s1(旧), s2]`、`dir2 = [s1(新), s3]`——同名 `s1` 后到优先（BUG-SR1），
+/// `s3` 只在 `dir2` 里。逐目录扣名额的旧写法在这里会出错两次：
+///
+/// - 预算 3：`dir1` 先占 2 格，`dir2` 只剩 1 格，尾部 `s3` 被截掉——明明 `s1` 的新旧两份
+///   去重后只占 1 格，清单却比预算小；
+/// - 预算 2：`dir1` 就把名额扣干，`dir2` 整个没被读过——`s1(新)` 顶不掉 `s1(旧)`，
+///   后到优先这条判据被名额抢跑。
+///
+/// 合并后一次裁剪，两个分支各自落在正确的一侧。
+#[tokio::test]
+async fn budget_trim_applies_to_the_merged_collection() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    for (dir, name, desc) in [
+        ("dir1", "s1", "from dir1 s1"),
+        ("dir1", "s2", "from dir1 s2"),
+        ("dir2", "s1", "from dir2 s1"),
+        ("dir2", "s3", "from dir2 s3"),
+    ] {
+        let skill_dir = root.join(dir).join(name);
+        stdfs::create_dir_all(&skill_dir).unwrap();
+        stdfs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {desc}\n---\n\nbody\n"),
+        )
+        .unwrap();
+    }
+    let dirs = vec!["dir1".to_string(), "dir2".to_string()];
+
+    // 预算 3：去重后的集合恰好填满——`s3` 不该因为 `dir1` 先读就消失
+    let loaded = load_skills_from_dirs_with_budget(
+        &dirs,
+        root,
+        LoadBudget {
+            max_skills: 3,
+            max_body_chars: 8000,
+        },
+    )
+    .await
+    .unwrap();
+    let names: Vec<&str> = loaded.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        loaded.len(),
+        3,
+        "清单应有预算这么多个去重后的技能，实得 {names:?}"
+    );
+    assert!(
+        names.contains(&"s3"),
+        "尾部目录的技能被名额提前扣干丢了：{names:?}"
+    );
+    let s1 = loaded
+        .iter()
+        .find(|s| s.name == "s1")
+        .expect("s1 在两个目录里都有");
+    assert_eq!(
+        s1.description, "from dir2 s1",
+        "同名覆盖（后到优先）必须看得见"
+    );
+
+    // 预算 2：名额用满，且覆盖仍然赢——旧写法在这里连 `dir2` 都不会打开
+    let loaded = load_skills_from_dirs_with_budget(
+        &dirs,
+        root,
+        LoadBudget {
+            max_skills: 2,
+            max_body_chars: 8000,
+        },
+    )
+    .await
+    .unwrap();
+    let names: Vec<&str> = loaded.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(loaded.len(), 2, "预算 2 就该给 2 个，实得 {names:?}");
+    let s1 = loaded
+        .iter()
+        .find(|s| s.name == "s1")
+        .expect("s1 占了名额，不该被预算挤掉");
+    assert_eq!(
+        s1.description, "from dir2 s1",
+        "裁剪在合并之后 ⇒ 覆盖先于名额"
+    );
+}
+
 // ===== BUG-SR7：description 长度校验 =====
 
 /// TEST-SR7.1：description 长度 < 10 报错
