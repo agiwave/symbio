@@ -20,6 +20,14 @@
 //! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
 //! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")）。
 //!
+//! ## 三段分工（判据：这一段错了谁会红）
+//!
+//! | 段 | 住在 | 错了红的是 |
+//! |---|---|---|
+//! | 条目的读 / 写 / 删 / 清单 | 本文件 | 会话打不开、并发丢更新 |
+//! | 事实源句柄与投影值 | `facts` | 落不进格、读到旧结局、召回漏会话 |
+//! | 磁盘布局 | `layout` | 目录寻错址、整份写坏 |
+//!
 //! ## 与 VDFS 的关系
 //!
 //! **对外**，会话只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` / `子会话` /
@@ -36,39 +44,8 @@
 //!
 //! ## 磁盘布局
 //!
-//! ```text
-//! 顶层会话：`<根>/<safe_id>/session.json`     ← 元数据 + 清单投影（小）
-//!           `<根>/<safe_id>/messages.json`    ← 消息（大）
-//! 消息压缩存档：`<根>/<safe_id>/messages/msg_*.txt`
-//! ```
-//!
-//! ### 为什么元数据与消息要分两个文件
-//!
-//! 清单只读 `session.json`，其大小与会话聊了多久**无关**；`messages.json` 只有真的
-//! 要取转写时才读。代价是清单字段（标题 / 条数 / 摘要 / 标签）不能现算，必须在 `save`
-//! 时算好落盘——它们是**投影**（[`super::types::SessionSummary`]），可重算，不是第二份
-//! 真相。性能取舍见 `symbio/src/plugins/session/docs/019-perf.md`。
-//!
-//! 旧布局（消息内联在 `session.json`）仍**可读**：`messages.json` 缺失时回落到内联
-//! `messages` 字段；投影缺失时用内联消息**就地补算**（[`SessionMetaFile::into_summary`]）
-//! ——缺了这条兜底，清单会静默退化成显示 id。
-//!
-//! ### 子会话嵌套存储（机制约定，见 docs/005-arch/013-vdfs.md）
-//!
-//! 会话可派生子会话：子会话不是顶层平级条目，而是存放在父会话目录内的
-//! `sessions/` 子目录——`<根>/<safe(父)>/sessions/<safe(子)>/`。
-//!
-//! 归属声明与路由规则（调用方无感知）：
-//! - **归属声明**：`metadata.parent_session_id`（父会话 id）。save 时据此
-//!   路由到嵌套目录（无该元数据 = 顶层会话）；
-//! - **load / delete / session_dir**：先查顶层，未命中则扫描各会话目录的
-//!   `sessions/<id>/`（子会话可凭自身 id 直接寻址）；
-//! - **list_sessions_window**：只列顶层（子会话不出现在顶层清单）；
-//!   子会话清单走 [`list_sub_sessions`](SessionStore::list_sub_sessions)；
-//! - **级联删除**：删除父会话 = `remove_dir_all(父目录)`，子会话随之删除。
-//!
-//! 子会话 id 由系统生成，与顶层 id 同一格式约束。临时会话无目录概念，
-//! 因此不参与嵌套（`list_sub_sessions` 恒空、`session_dir` 恒 `None`）。
+//! 形状与它的两条理由（为什么元数据与消息分两个文件、子会话为什么嵌套存放）
+//! 写在 [`layout`](layout) 的模块头——那个文件就是这段布局的实现，判据同表。
 
 use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
@@ -81,12 +58,17 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
+mod facts;
+mod layout;
 mod wal;
 
 /// 持久化事实源（`Store` 端口的一种实现）。**可见性只到会话插件**：WAL 的布局 /
 /// 锁文件 / 归档段都是「会话怎么落事实」的私有细节，别的插件要拿事实走 core 的
 /// `Store` 端口或会话的地址面，而不是自己开一个 WAL。
 pub(in crate::plugins::session) use wal::EventWalStore;
+// 布局段的自由函数与两种落盘形状（`layout` 是本模块的孩子，`pub(super)` 到这里可见）。
+use facts::RuntimeFactsCache;
+use layout::*;
 
 /// 父会话目录内存放子会话的固定子目录名——**唯一定义在 `paths`**（路径词汇
 /// 单点，部署级读侧的下探遍历按同一个名字走，见 `paths::session_wals_deep`）。
@@ -121,25 +103,6 @@ pub struct SessionStore {
     /// 事实变化才重折：有写句柄时以 `head` 为戳（追加即变），只读时以 WAL 的
     /// 长度 + mtime 为戳。运行态读取（`list` / `stat`）因此不必每次重放整条 WAL。
     runtime_cache: std::sync::Mutex<HashMap<String, RuntimeFactsCache>>,
-}
-
-/// 运行态投影缓存项：值与它对应的**事实版本戳**。
-#[derive(Debug, Clone)]
-struct RuntimeFactsCache {
-    stamp: FactsStamp,
-    facts: RuntimeFacts,
-}
-
-/// 事实版本戳——两种驻留方式各一个判据，互不比较（变体不同即失效）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum FactsStamp {
-    /// 本进程持有写句柄：`head`（下一个待分配序号）即版本。
-    Writer(u64),
-    /// 只读打开：文件长度 + mtime（追加必然改长度）。
-    File {
-        len: u64,
-        modified: Option<SystemTime>,
-    },
 }
 
 impl SessionStore {
@@ -432,427 +395,12 @@ impl SessionStore {
         }
         find_nested_dir(base, session_id)
     }
-
-    // ==================== 事实源（唯一端口） ====================
-
-    /// 该会话的**唯一事实源句柄**（持久会话）；临时会话 / 目录不存在 ⇒ `None`。
-    ///
-    /// 进程内按会话构造一次并缓存：所有引擎写方共享同一实例，`head` 只有一份、
-    /// 内部写锁也只有一把。第二个 `WalStore::open` 不存在——这正是
-    /// [plan/14 §2.2 推论 3](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
-    /// 的「一写者」。跨进程写者令牌仍由 `WalStore` 自己守（旁挂锁文件）。
-    ///
-    /// **只发给引擎写点**：能力面拿到的是事实的值（读）或待落的值（写），
-    /// 不是这个句柄（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084") §1）。
-    ///
-    /// `Ok(None)` = 没有事实源（临时会话 / 目录不存在）；`Err` = 目录在、事实源
-    /// **打不开**——后者是 T-164 的真失败，调用方不得当成「没有事实源」静默跳过。
-    pub(in crate::plugins::session) fn facts(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<Arc<EventWalStore>>, String> {
-        let mut cache = self.facts.lock().expect("会话事实源表锁中毒");
-        if let Some(store) = cache.get(session_id) {
-            return Ok(Some(store.clone()));
-        }
-        let Some(dir) = self.session_dir(session_id) else {
-            return Ok(None);
-        };
-        let wal = dir.join(paths::V2_WAL_FILE);
-        // 持锁 open：两个并发 `facts` 若各自 open，后插入者可能是不持令牌的
-        // 降级实例，把先前的写者顶掉（跨进程锁是进程级独占，不是句柄级）。
-        let store = Arc::new(
-            EventWalStore::open(&wal)
-                .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?,
-        );
-        cache.insert(session_id.to_string(), store.clone());
-        Ok(Some(store))
-    }
-
-    /// 该会话的**完整史快照**（含归档前缀）；没有事实源 ⇒ `None`。
-    ///
-    /// 这是读方的唯一形态：值是 `Vec<Event>`，不是路径、不是句柄。已有写句柄时
-    /// 走它（就是本进程刚落的那些格），否则只读打开一次——读方不创建文件、
-    /// 不取令牌、不截尾。
-    pub(in crate::plugins::session) fn snapshot(&self, session_id: &str) -> Option<Vec<Event>> {
-        if let Some(store) = self
-            .facts
-            .lock()
-            .expect("会话事实源表锁中毒")
-            .get(session_id)
-            .cloned()
-        {
-            return Some(store.range(Seq::new(0)));
-        }
-        let dir = self.session_dir(session_id)?;
-        let wal = dir.join(paths::V2_WAL_FILE);
-        if !wal.is_file() {
-            return None;
-        }
-        let store = EventWalStore::open_readonly(&wal).ok()?;
-        Some(store.range(Seq::new(0)))
-    }
-
-    /// 该会话的**运行态事实投影**（上一轮结局）；临时会话 / 没有 WAL ⇒ `None`。
-    ///
-    /// [ADR-083 §5.2](../../../../../docs/010-adr/083.md "ADR-083")：结局在读侧是投影值，
-    /// 不是第二份状态。这里只交**值**，不交句柄、不交路径；投影函数是纯的
-    /// （`runtime::project`），缓存只是「事实没变就不重折」。
-    ///
-    /// 缓存失效判据按驻留方式分两种：
-    /// - 本进程有写句柄：`head`（下一个待分配序号）——任何追加都使它变化；
-    /// - 只读：WAL 长度 + mtime——别的进程追加必然改动文件。
-    ///
-    /// 归档不改变 `head` 也不改变完整史（归档段 + live 段仍拼成同一份事实），
-    /// 缓存因此不会因归档而失效，也不需要失效。
-    pub(in crate::plugins::session) fn runtime_facts(
-        &self,
-        session_id: &str,
-    ) -> Option<RuntimeFacts> {
-        let writer = self
-            .facts
-            .lock()
-            .expect("会话事实源表锁中毒")
-            .get(session_id)
-            .cloned();
-        let cached = self.runtime_cache().get(session_id).cloned();
-
-        if let Some(store) = writer {
-            let stamp = FactsStamp::Writer(store.head().value());
-            if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
-                return Some(hit.facts.clone());
-            }
-            let facts = runtime::project(&store.range(Seq::new(0)));
-            self.remember_runtime(session_id, stamp, &facts);
-            return Some(facts);
-        }
-
-        let dir = self.session_dir(session_id)?;
-        let wal = dir.join(paths::V2_WAL_FILE);
-        let md = std::fs::metadata(&wal).ok()?;
-        if !md.is_file() {
-            return None;
-        }
-        let stamp = FactsStamp::File {
-            len: md.len(),
-            modified: md.modified().ok(),
-        };
-        if let Some(hit) = cached.as_ref().filter(|c| c.stamp == stamp) {
-            return Some(hit.facts.clone());
-        }
-        let store = EventWalStore::open_readonly(&wal).ok()?;
-        let facts = runtime::project(&store.range(Seq::new(0)));
-        self.remember_runtime(session_id, stamp, &facts);
-        Some(facts)
-    }
-
-    /// 运行态投影缓存表的唯一取锁口（std 锁当无中毒用，同本文件其它表）。
-    fn runtime_cache(&self) -> std::sync::MutexGuard<'_, HashMap<String, RuntimeFactsCache>> {
-        self.runtime_cache.lock().expect("会话运行态投影缓存锁中毒")
-    }
-
-    fn remember_runtime(&self, session_id: &str, stamp: FactsStamp, facts: &RuntimeFacts) {
-        self.runtime_cache().insert(
-            session_id.to_string(),
-            RuntimeFactsCache {
-                stamp,
-                facts: facts.clone(),
-            },
-        );
-    }
-
-    /// 顶级会话事实源的召回视图（**新近优先**、名额与字节双预算）。
-    ///
-    /// 召回只扫平级会话（不含嵌套子会话）——范围裁决在
-    /// [`memory_events::recall_view`](crate::plugins::session::memory_events) 的文档里；
-    /// 本函数只负责「枚举 + 按预算开档 + 交值」，可见域过滤仍在读方。
-    ///
-    /// `own` = 这份事实源是否调用方自己的会话（按目录名比，同一个根下的两层
-    /// 派生可能不同形）——`thread_private` 的收放靠它。
-    pub(in crate::plugins::session) fn recall_snapshots(
-        &self,
-        self_id: &str,
-    ) -> Vec<FleetSnapshot> {
-        let Some(base) = self.disk() else {
-            return Vec::new();
-        };
-        let own_name = paths::safe_id(self_id);
-        let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = Vec::new();
-        if let Ok(dir) = std::fs::read_dir(base) {
-            for entry in dir.flatten() {
-                let dir = entry.path();
-                let wal = dir.join(paths::V2_WAL_FILE);
-                let Ok(md) = std::fs::metadata(&wal) else {
-                    continue;
-                };
-                if !md.is_file() || md.len() == 0 {
-                    continue;
-                }
-                if md.len() > RECALL_MAX_FILE_BYTES {
-                    crate::plugin_warn!(
-                        "session",
-                        "[memory] 召回跳过超大事实源（{} B > 上限 {} B）：{}",
-                        md.len(),
-                        RECALL_MAX_FILE_BYTES,
-                        wal.display()
-                    );
-                    continue;
-                }
-                let mtime = md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                files.push((mtime, wal, md.len()));
-            }
-        }
-        files.sort_by(|a, b| b.0.cmp(&a.0));
-
-        let mut out = Vec::new();
-        let mut bytes = 0u64;
-        for (i, (_, wal, len)) in files.into_iter().enumerate() {
-            if i >= RECALL_MAX_FILES {
-                break;
-            }
-            if bytes > 0 && bytes + len > RECALL_MAX_TOTAL_BYTES {
-                break;
-            }
-            let own = wal
-                .parent()
-                .and_then(|d| d.file_name())
-                .is_some_and(|n| n.to_string_lossy() == own_name);
-            match EventWalStore::open_readonly(&wal) {
-                Ok(store) => out.push(FleetSnapshot {
-                    own,
-                    events: store.range(Seq::new(0)),
-                }),
-                Err(e) => crate::plugin_warn!(
-                    "session",
-                    "[memory] 召回读取失败（{}）：{e}",
-                    wal.display()
-                ),
-            }
-            bytes += len;
-        }
-        out
-    }
-
-    /// 部署级全量快照（含嵌套子会话，任意深度）。
-    ///
-    /// 统计聚合与淘汰覆盖层共用：两者都要求「所有会话」完整，单个事实源打不开
-    /// ⇒ 跳过并出声，不因一个坏会话让整列消失。
-    pub(in crate::plugins::session) fn deep_snapshots(&self) -> Vec<Vec<Event>> {
-        let Some(base) = self.disk() else {
-            return Vec::new();
-        };
-        paths::session_wals_deep(base)
-            .into_iter()
-            .filter_map(|wal| match EventWalStore::open_readonly(&wal) {
-                Ok(store) => Some(store.range(Seq::new(0))),
-                Err(e) => {
-                    crate::plugin_warn!(
-                        "session",
-                        "[facts] 部署级扫描跳过打不开的事实源（{}）：{e}",
-                        wal.display()
-                    );
-                    None
-                }
-            })
-            .collect()
-    }
 }
 
-/// 召回扫描预算：最多看几个会话的事实源 / 单文件字节上限 / 总字节上限。
-///
-/// 超限 ⇒ 不扫并 `plugin_warn` 记一笔——看不见的文件不假装看得见。
-/// 预算属于**读成本策略**，枚举属于存储布局，故两者都住在存储层。
-pub(in crate::plugins::session) const RECALL_MAX_FILES: usize = 16;
-pub(in crate::plugins::session) const RECALL_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-pub(in crate::plugins::session) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
-
-// ==================== 落盘细节（自由函数） ====================
+// ==================== 读法窗口 ====================
 //
-// 都是纯映射 / 纯 IO，不需要 `&self`——挂成自由函数而非私有方法，是为了让
-// 「哪一段依赖实例状态」在名字上一眼可辨（`session_dir` 需要，`dir_for` 不需要）。
-
-/// `<base>/<safe_id>/`
-///
-/// id→段名的唯一实现在宿主层，经 [`paths::safe_id`] 进入（见模块头）。
-fn dir_for(base: &Path, session_id: &str) -> PathBuf {
-    base.join(paths::safe_id(session_id))
-}
-
-/// `<base>/<safe_id>/session.json`
-fn file_for(base: &Path, session_id: &str) -> PathBuf {
-    dir_for(base, session_id).join(SESSION_FILE)
-}
-
-/// 子会话目录：`<base>/<safe(父)>/sessions/<safe(子)>/`
-fn sub_dir_for(base: &Path, parent_id: &str, session_id: &str) -> PathBuf {
-    base.join(paths::safe_id(parent_id))
-        .join(SUB_SESSIONS_DIR)
-        .join(paths::safe_id(session_id))
-}
-
-/// `session.json` 的落盘形状 —— **元数据 + 清单投影**（小，与消息量无关）
-///
-/// `title` / `message_count` / `summary` / `meta_tags` 是**投影**：由
-/// [`SessionSummary::of`] 在保存时算好，清单只读它们、绝不读消息。
-/// 三者都带 `#[serde(default)]`，因为它们是后加的——存量文件里没有，
-/// 此时由 [`SessionMetaFile::into_summary`] 用内联消息就地补算。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SessionMetaFile {
-    id: String,
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    created_at: i64,
-    #[serde(default)]
-    updated_at: i64,
-    #[serde(default)]
-    metadata: serde_json::Value,
-    #[serde(default)]
-    message_count: usize,
-    #[serde(default)]
-    summary: Option<String>,
-    #[serde(default)]
-    meta_tags: Vec<String>,
-    /// 旧布局把消息内联在这里。新布局**不写**该字段；读的时候仍要认，
-    /// 否则存量会话会读成空。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    messages: Option<Vec<ChatNode>>,
-}
-
-impl SessionMetaFile {
-    fn of(s: &SessionSummary) -> Self {
-        Self {
-            id: s.id.clone(),
-            title: s.title.clone(),
-            created_at: s.created_at,
-            updated_at: s.updated_at,
-            metadata: s.metadata.clone(),
-            message_count: s.message_count,
-            summary: s.summary.clone(),
-            meta_tags: s.meta_tags.clone(),
-            messages: None,
-        }
-    }
-
-    /// 补上消息，得到完整 `Session`
-    fn into_session(self, messages: Vec<ChatNode>) -> Session {
-        Session {
-            id: self.id,
-            messages,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            metadata: self.metadata,
-        }
-    }
-
-    /// 清单投影。
-    ///
-    /// ⚠️ 存量文件没有投影字段（`title` 空 / `message_count` 0 / `summary` None），
-    /// 此时用**内联消息就地补算**——少了这段，清单会静默退化成显示会话 id
-    /// （一串短 guid），且不报任何错。
-    fn into_summary(self) -> SessionSummary {
-        let projection_missing = self.title.is_empty();
-        if projection_missing {
-            if let Some(messages) = self.messages.as_ref() {
-                let s = Session {
-                    id: self.id.clone(),
-                    messages: messages.clone(),
-                    created_at: self.created_at,
-                    updated_at: self.updated_at,
-                    metadata: self.metadata.clone(),
-                };
-                return SessionSummary::of(&s);
-            }
-        }
-        SessionSummary {
-            id: self.id,
-            title: self.title,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            metadata: self.metadata,
-            message_count: self.message_count,
-            summary: self.summary,
-            meta_tags: self.meta_tags,
-        }
-    }
-}
-
-/// `messages.json` 的落盘形状 —— 只有消息（大，只有真要取转写时才读）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MessagesFile {
-    #[serde(default)]
-    messages: Vec<ChatNode>,
-}
-
-/// 原子写：先落 tmp 再 rename。
-///
-/// 直接 `fs::write`（O_TRUNC + write）在并发保存交错时会留下「短 JSON + 长旧内容
-/// 残留」，产生 trailing characters 损坏；rename 保证磁盘上永远是某一刻的完整版本。
-async fn atomic_write<T: Serialize>(target: &Path, value: &T) -> Result<(), PluginError> {
-    let json = serde_json::to_string(value)
-        .map_err(|e| PluginError::InternalError(format!("序列化会话文件失败: {e}")))?;
-    let tmp = tmp_path_for(target);
-    tokio::fs::write(&tmp, json)
-        .await
-        .map_err(|e| PluginError::InternalError(format!("写入会话临时文件失败: {e}")))?;
-    tokio::fs::rename(&tmp, target)
-        .await
-        .map_err(|e| PluginError::InternalError(format!("替换会话文件失败: {e}")))
-}
-
-/// 解析 session.json 内容；存在尾部残留时截取首个完整 JSON 自愈
-/// （流式反序列化取首个完整对象），完全无法解析时返回 None。
-fn parse_meta_content(content: &str) -> Option<SessionMetaFile> {
-    parse_or_self_heal::<SessionMetaFile>(content)
-}
-
-fn parse_messages_content(content: &str) -> Option<Vec<ChatNode>> {
-    parse_or_self_heal::<MessagesFile>(content).map(|f| f.messages)
-}
-
-/// 先整体解析，失败则退回「取首个完整对象」自愈
-fn parse_or_self_heal<T: serde::de::DeserializeOwned>(content: &str) -> Option<T> {
-    match serde_json::from_str(content) {
-        Ok(v) => Some(v),
-        Err(_) => serde_json::Deserializer::from_str(content)
-            .into_iter::<T>()
-            .next()
-            .and_then(Result::ok),
-    }
-}
-
-/// 读消息——**真源是 `v2-events.wal`**（ADR-049）：
-/// 有 WAL 就从它重建；WAL 不在才回落 `messages.json` / 元数据内联（v1 时代
-/// 的遗留布局——那批会话的事实从未入格，文件是它们的唯一记录）。
-async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatNode> {
-    if let Some(msgs) = rebuild_from_wal_dir(dir) {
-        return msgs;
-    }
-    let path = dir.join(MESSAGES_FILE_NAME);
-    if let Ok(content) = tokio::fs::read_to_string(&path).await {
-        if let Some(msgs) = parse_messages_content(&content) {
-            return msgs;
-        }
-    }
-    meta.messages.clone().unwrap_or_default()
-}
-
-/// 从 `<会话目录>/v2-events.wal` 重建消息列表（真源读取）。
-///
-/// WAL 不在 / 打不开 ⇒ `None`（调用方回落遗留读法——**没有 WAL 不等于没有历史**，
-/// v1 时代落的 `messages.json` 仍是那批会话的唯一记录）。只读打开：读路径无写副作用。
-fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
-    let path = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
-    if !path.exists() {
-        return None;
-    }
-    let store = crate::plugins::session::store::EventWalStore::open_readonly(&path).ok()?;
-    // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
-    // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
-    use crate::symbio_core::Store as _;
-    let snapshot = store.range(crate::symbio_core::Seq::new(0));
-    Some(crate::symbio_core::rebuild(&snapshot))
-}
+// 不属于布局（`layout`）也不属于事实源句柄（`facts`）：它只对着一份已经读出来的
+// `&[Event]` 切窗口，没有任何 IO，红的是「上下文/进度从哪读」。
 
 /// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。
 ///
@@ -872,168 +420,6 @@ pub(crate) fn current_window(events: &[crate::symbio_core::Event]) -> &[crate::s
         Some((i, _)) => &events[i..],
         None => events,
     }
-}
-
-/// 同步版读 `messages.json`
-fn read_messages_sync(dir: &Path) -> Option<Vec<ChatNode>> {
-    let content = std::fs::read_to_string(dir.join(MESSAGES_FILE_NAME)).ok()?;
-    parse_messages_content(&content)
-}
-
-/// 读 `session.json`（同步；用于 spawn_blocking 里的批量读取）
-fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
-    let content = std::fs::read_to_string(dir.join(SESSION_FILE)).ok()?;
-    parse_meta_content(&content)
-}
-
-/// 读整个会话目录 = 元数据 + 消息（同步；嵌套查找的 miss 路径用）。
-///
-/// 消息同样以 WAL 为准（与 [`load_messages`] 同一条真源纪律），遗留读法是回落。
-fn read_session_dir(dir: &Path) -> Option<Session> {
-    let meta = read_meta(dir)?;
-    // 「两个来源都没有消息」= 空会话（不是「不存在」），别把「没有消息」当成「不存在」
-    let messages = rebuild_from_wal_dir(dir)
-        .or_else(|| read_messages_sync(dir))
-        .or_else(|| meta.messages.clone())
-        .unwrap_or_default();
-    Some(meta.into_session(messages))
-}
-
-/// 嵌套查找：在所有顶层会话目录的 `sessions/<safe_id>/` 中定位子会话，
-/// 返回其目录。仅在顶层未命中时调用（miss 路径，开销可接受）。
-fn find_nested_dir(base: &Path, session_id: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(base).ok()?;
-    for entry in entries.flatten() {
-        let dir = entry
-            .path()
-            .join(SUB_SESSIONS_DIR)
-            .join(paths::safe_id(session_id));
-        if dir.join(SESSION_FILE).is_file() {
-            return Some(dir);
-        }
-    }
-    None
-}
-
-/// 列出某目录下所有 `<dir>/<子>/session.json` 的**摘要**（跳过不可解析项）
-///
-/// 只读 `session.json`——这里正是「清单不碰消息」的落点。
-fn read_summaries_in(dir: &Path) -> Vec<SessionSummary> {
-    let mut out = Vec::new();
-    for child in session_dirs_under(dir) {
-        if let Some(meta) = read_meta(&child) {
-            out.push(meta.into_summary());
-        }
-    }
-    out
-}
-
-/// 某目录下所有「含 session.json 的子目录」
-fn session_dirs_under(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_dir() && p.join(SESSION_FILE).is_file())
-        .collect()
-}
-
-/// 递归收集所有会话目录（含嵌套子会话；迁移用——子会话也可能还是旧布局）
-fn session_dirs_deep(base: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for child in session_dirs_under(dir) {
-            out.push(child.clone());
-            walk(&child.join(SUB_SESSIONS_DIR), out);
-        }
-    }
-    let mut out = Vec::new();
-    walk(base, &mut out);
-    out
-}
-
-/// 把一个旧布局目录（消息内联）拆成两个文件，并补写缺失的投影。幂等。
-///
-/// ## 迁移边界（[ADR-049]）
-///
-/// `messages.json` 已**不再是**布局的一部分：真源是 `v2-events.wal`，本函数只为
-/// **v1 遗留目录**服务——那些把消息内联在 `session.json` 里、事实从未入格的会话。
-/// 因此判据是「**有内联消息吗**」：没有内联消息的目录（新布局会话 / 已迁过的）
-/// 一律跳过。少了这条，新会话会在首次迁移时被写出一份**空 `messages.json`**
-/// ——把我们刚停写的缓存又凭空造出来（读侧虽已不读它，但凭空多一份空文件是布局污染）。
-/// 存量补投影那半仍保留（`title` 空的旧文件要补）。
-async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
-    let Some(meta) = read_meta(dir) else {
-        return Ok(());
-    };
-    let has_split = dir.join(MESSAGES_FILE_NAME).is_file();
-    let inline = meta.messages.clone();
-    // 已是新布局（消息文件在 / 内联已空）、且投影齐全 → 无需改动。
-    //
-    // 「有内联消息」是唯一的迁移触发条件：`messages.json` 停写后，一份**既无**
-    // 消息文件、**又无**内联消息的目录就是新布局的正常态，绝不能因此补写空缓存。
-    let needs_split = inline.as_ref().is_some_and(|m| !m.is_empty());
-    let projection_missing = meta.title.is_empty();
-    if !needs_split && !projection_missing {
-        return Ok(());
-    }
-
-    let messages = if has_split {
-        // 消息文件读不出来时**不猜**：宁可留着旧投影，也不要把空写进元数据
-        match read_messages_sync(dir) {
-            Some(m) => m,
-            None => return Ok(()),
-        }
-    } else {
-        inline.unwrap_or_default()
-    };
-
-    // 只在**确有内联消息要拆**时才落 `messages.json`（停写后不再凭空补一份空缓存）。
-    if !has_split && needs_split {
-        atomic_write(
-            &dir.join(MESSAGES_FILE_NAME),
-            &MessagesFile {
-                messages: messages.clone(),
-            },
-        )
-        .await?;
-    }
-
-    // 投影**必须**按现有消息重算：这才是「存量文件补投影」的落点
-    let summary = SessionSummary::of(&Session {
-        id: meta.id.clone(),
-        messages,
-        created_at: meta.created_at,
-        updated_at: meta.updated_at,
-        metadata: meta.metadata.clone(),
-    });
-    atomic_write(&dir.join(SESSION_FILE), &SessionMetaFile::of(&summary)).await
-}
-
-/// 清单排序：`updated_at` 降序（两种驻留方式共用同一份，清单顺序不分叉）
-fn sort_summaries_desc(summaries: &mut [SessionSummary]) {
-    summaries.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
-}
-
-/// 原子写的临时文件路径：`<目标名>.<pid>.<单调序号>.tmp`
-///
-/// tmp 名**每次唯一**。早先它由调用方传固定名（`messages.json.tmp`），两次并发
-/// 保存会交错写同一个 tmp：A 写完、B 覆盖同一 tmp，A 的 rename 便把 B 的内容放进
-/// A 的目标文件——**rename 的原子性只保证「不写坏」，保证不了「写的是自己那份」**。
-///
-/// 序号取进程内原子计数（同进程两次写必然不同名），`pid` 兼顾多进程
-/// （同一目录被两个实例打开时）。
-fn tmp_path_for(target: &Path) -> PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let mut name = target
-        .file_name()
-        .map(|s| s.to_os_string())
-        .unwrap_or_default();
-    name.push(format!(".{}.{n}.tmp", std::process::id()));
-    target.with_file_name(name)
 }
 
 /// 取（或首次建）存储单例——**slot 上的懒初始化，owner 是这个自由函数**。
@@ -1070,7 +456,3 @@ mod tests;
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow symbio/src/plugins/session/store/mod.rs::delete_session: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/store/mod.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/store/mod.rs::snapshot: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/store/mod.rs::runtime_facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
-// panic-allow symbio/src/plugins/session/store/mod.rs::runtime_cache: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
