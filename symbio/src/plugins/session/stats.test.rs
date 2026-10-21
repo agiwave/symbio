@@ -1177,7 +1177,6 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
                 "content": "我喜欢喝不加糖的咖啡",
                 "tag": "经验",
                 "generation": 0u32,
-                "vec": [],
                 "vis_scope": "shared",
             })),
         )

@@ -50,7 +50,6 @@ fn seed_encoded_as(store: &EventStore, id: &str, content: &str, tag: &str, ts: i
                 "content": content,
                 "tag": tag,
                 "generation": 0u32,
-                "vec": [],
             })),
         )
         .expect("种子入格")
@@ -83,7 +82,6 @@ fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
                 "content": content,
                 "tag": MEMORY_TAG,
                 "generation": 0u32,
-                "vec": [],
                 "vis_scope": "shared",
             })),
         )
@@ -110,7 +108,6 @@ fn seed_consolidated(store: &EventStore, id: &str, content: &str, ts: i64, gener
                 "tag": MEMORY_TAG,
                 "generation": generation,
                 "fidelity": 1.0,
-                "vec": [],
             })),
         )
         .expect("种子入格")
@@ -168,11 +165,8 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         Some(0)
     );
     assert!(
-        ev.payload
-            .get("vec")
-            .and_then(|v| v.as_array())
-            .is_some_and(|a| a.is_empty()),
-        "本批不写 embedding：vec 恒空，内容在 content"
+        ev.payload.get("vec").is_none(),
+        "载荷里没有 vec 键：恒空的预留键不算承诺（ADR-110），内容只在 content"
     );
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 
@@ -386,7 +380,6 @@ fn consolidated_memory_inherits_the_source_vis_scope() {
                     "content": text,
                     "tag": MEMORY_TAG,
                     "generation": 0u32,
-                    "vec": [],
                     "vis_scope": "shared",
                 })),
             )

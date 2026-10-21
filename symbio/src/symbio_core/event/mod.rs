@@ -292,10 +292,10 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/009-task/126-长期记忆与语义检索.md "T-126-长期记忆与语义检索")）────
 
-/// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
+/// 编码：学到的语义内容（`payload: { content, tag, generation, vis_scope }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
-/// `vec` 是向量索引的载荷位：**索引未建时写 `[]`**——内容恒在 `content` 里，
-/// 索引落成时按 `content` 回填即可（写方 `plugins/session/memory_events.rs`）。
+/// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
+/// 承诺（[ADR-110](../../../../docs/010-adr/110.md "ADR-110")；写方 `plugins/loop/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";

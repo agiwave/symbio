@@ -152,7 +152,6 @@ fn recall_snapshots_scans_one_level_deliberately() {
                 "content": text,
                 "tag": "经验",
                 "generation": 0u32,
-                "vec": [],
                 "vis_scope": "shared",
             })),
         )

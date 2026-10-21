@@ -38,10 +38,11 @@
 //!   的判定方在 core，本模块不重写一遍比对。空发言不记；超长截断（`ENCODE_MAX_CHARS`）
 //!   ——转写（`messages.json`）已存全文，记忆存**提炼**，两处各存全文就等于两份
 //!   事实源。
-//! - **`vec` 恒 `[]`**：向量索引是 Store 的实现细节（01 §9.2），召回当前走标签 + 时间
-//!   口径、不消费 `vec`；内容恒在 `content`，索引落成时按 `content` 回填。本模块不给
-//!   每轮对话挂一次 ONNX 推理——那会把推理成本加到每一轮上，而收益是零（没有索引
-//!   在读它）。
+//! - **载荷里没有 `vec` 键**：向量索引是 Store 的实现细节（01 §9.2），召回走标签 +
+//!   时间口径；内容恒在 `content`，索引落成时按 `content` 回填即可。恒空的预留键
+//!   没有任何读方，却会让「写了就是有了」的假承诺进事实形状——见
+//!   [ADR-110](../../../../docs/010-adr/110.md "ADR-110")。本模块也不给每轮对话挂一次
+//!   ONNX 推理：那会把推理成本加到每一轮上，而收益是零（没有索引在读它）。
 //! - **存哪 / 怎么读**：写方只写**本会话自己的** `v2-events.wal`（共享文件需要跨进程
 //!   锁，而 `WalStore` 没有——plan/11 已确认，两进程同写一份会互相截尾）；召回反过来
 //!   **跨会话扫**（[`recall_view`]），读侧无锁、按文件数与字节双预算封顶。
@@ -362,7 +363,6 @@ pub(crate) fn encode(
                 "content": encoded,
                 "tag": content.tag,
                 "generation": 0u32,
-                "vec": [],
                 "vis_scope": content.vis_scope.name(),
             })),
         )
@@ -558,7 +558,6 @@ pub(crate) fn consolidate(
                     "generation": generation,
                     "fidelity": fidelity,
                     "sources": source_seqs,
-                    "vec": [],
                     "vis_scope": vis_scope.name(),
                 })),
             )

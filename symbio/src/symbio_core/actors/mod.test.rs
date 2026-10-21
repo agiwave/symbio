@@ -504,7 +504,7 @@ fn encode(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, sourc
             )
             .with_produced_by(source)
             .with_ts(ts)
-            .with_payload(serde_json::json!({ "content": content, "tag": tag, "vec": [0.1, 0.2] })),
+            .with_payload(serde_json::json!({ "content": content, "tag": tag })),
         )
         .expect("编码必入库");
 }
@@ -629,9 +629,7 @@ fn memory_of_a_never_appears_in_b_recall() {
             )
             .with_produced_by(0)
             .with_ts(1_100)
-            .with_payload(
-                serde_json::json!({ "content": "B 的记忆", "tag": "semantic", "vec": [] }),
-            ),
+            .with_payload(serde_json::json!({ "content": "B 的记忆", "tag": "semantic" })),
         )
         .unwrap();
     let events = || store.range(crate::symbio_core::event::Seq::new(0));
