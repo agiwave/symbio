@@ -172,8 +172,10 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// actor 是认知归属人，不是跑轮主体；那层是「最小必需隔离」，本读方这层才是
 /// 跨主体的收放）。
 ///
-/// `query` = 本轮用户发言——混合打分的**语义维**由它驱动；跨会话累计口径不变
-/// （记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
+/// `query` = 本轮用户发言——混合打分的**语义维**由它驱动；`None` = 本轮没有问题
+/// （取值点在 `chat_loop/inputs.rs::last_user_text`），投影因此退化为纯 ts 降序 =
+/// 平凡值（J2），与「查询恰好是空串」不是一回事——后者要写出来才成立。跨会话累计
+/// 口径不变（记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
 /// Turn 类事件仍 `ts = 0`，但它们不进这个视图——投影只认 `entity == memory`）。
 ///
 /// 返回的 [`RecallView`] **自带 `degraded`**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）：
@@ -181,7 +183,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// `degraded` ⇒ 视图字段）——消费方（`prompt_section`）不必回捞外壳也能说得出来。
 pub(crate) fn recall_view(
     snapshots: Vec<FleetSnapshot>,
-    query: &str,
+    query: Option<&str>,
     viewer: &str,
 ) -> Option<RecallView> {
     // 预过滤在入列前逐条收放（见上 [`recall_view`] 文档）：非记忆事件照常进切片
@@ -197,7 +199,7 @@ pub(crate) fn recall_view(
 
     // 新近在前（`sort_by` 稳定 ⇒ 同毫秒时保持「新会话优先」的输入序）。
     events.sort_by(|a, b| b.ts.cmp(&a.ts));
-    let shell = recall(PRINCIPAL_USER, None, Some(query.to_string())).apply(
+    let shell = recall(PRINCIPAL_USER, None, query.map(str::to_string)).apply(
         &events,
         i64::MAX,
         Budget::new(0, RECALL_SCAN_QUOTA),

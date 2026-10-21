@@ -395,7 +395,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
             own: true,
             events: facts.clone(),
         }],
-        "",
+        None,
         "session/main",
     )
     .expect("技能是一条记忆 ⇒ 视图非空");

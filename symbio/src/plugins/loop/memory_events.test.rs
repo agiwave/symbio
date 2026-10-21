@@ -828,7 +828,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let b = EventStore::new();
     seed_shared(&b, "b1", "B 的记忆", 2000);
 
-    let view = recall_view(vec![snap(true, &a), snap(false, &b)], "", "session/main")
+    let view = recall_view(vec![snap(true, &a), snap(false, &b)], None, "session/main")
         .expect("两个会话都有记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
@@ -839,7 +839,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
 
     // 一份快照都没有 ⇒ None（调用方据此整段省略）。
     assert!(
-        recall_view(Vec::new(), "", "session/main").is_none(),
+        recall_view(Vec::new(), None, "session/main").is_none(),
         "没记忆就不产出视图"
     );
 }
@@ -864,7 +864,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
 
     let view = recall_view(
         vec![snap(true, &store)],
-        "数据库连接池打满怎么办",
+        Some("数据库连接池打满怎么办"),
         "session/main",
     )
     .expect("有记忆");
@@ -877,8 +877,8 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
         "读方传了 query ⇒ 相关内容必须排第一（哪怕它最旧）"
     );
 
-    // 空 query ⇒ 平凡值：新近度降序，与本批落地前逐字相同。
-    let plain = recall_view(vec![snap(true, &store)], "", "session/main").expect("有记忆");
+    // 本轮没有问题（`query = None`）⇒ 平凡值：新近度降序，与混合打分落地前逐字相同。
+    let plain = recall_view(vec![snap(true, &store)], None, "session/main").expect("有记忆");
     let plain_contents: Vec<&str> = plain.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         plain_contents,
@@ -906,7 +906,7 @@ fn a_thread_private_memory_stays_in_its_own_session() {
 
     // 从 B 读（B 自己种了记忆 ⇒ 视图非空，「看不见」只能是预过滤的功劳）：
     // B 的经验在，A 的判断不在。
-    let view = recall_view(vec![snap(false, &a), snap(true, &b)], "", "session/main")
+    let view = recall_view(vec![snap(false, &a), snap(true, &b)], None, "session/main")
         .expect("B 有自己的记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert!(
@@ -919,7 +919,7 @@ fn a_thread_private_memory_stays_in_its_own_session() {
     );
 
     // 从 A 读：自己的判断照常在——「私有」是按线程，不是不存在。
-    let own = recall_view(vec![snap(true, &a), snap(false, &b)], "", "session/main")
+    let own = recall_view(vec![snap(true, &a), snap(false, &b)], None, "session/main")
         .expect("A 有自己的记忆");
     assert!(
         own.entries.iter().any(|e| e.content.contains("A 的判断")),
@@ -938,7 +938,7 @@ fn a_shared_memory_is_recalled_across_sessions_by_matrix_members() {
 
     let view = recall_view(
         vec![snap(false, &a), snap(true, &b)],
-        "共享",
+        Some("共享"),
         "session/main",
     )
     .expect("矩阵成员读得到");
@@ -962,7 +962,7 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
 
     let ghost = recall_view(
         vec![snap(false, &a), snap(true, &b)],
-        "共享",
+        Some("共享"),
         "session/ghost",
     );
     assert!(
@@ -978,7 +978,7 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     // 属主恒放行：与 `stats` 读闸的「owner 相等」分支同一次判定。
     let owner = recall_view(
         vec![snap(false, &a), snap(true, &b)],
-        "共享",
+        Some("共享"),
         crate::symbio_core::authz::SESSION_OWNER,
     )
     .expect("属主读得到");
@@ -1003,7 +1003,7 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
 
     let view = recall_view(
         vec![snap(false, &a), snap(false, &b), snap(true, &own)],
-        "",
+        None,
         "session/main",
     )
     .expect("有记忆");
@@ -1050,7 +1050,7 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
         seed_encoded(&store, &format!("deg-{i}"), &format!("片段 {i}"), 100 + i);
     }
     let degraded_view =
-        recall_view(vec![snap(true, &store)], "", "session/main").expect("有记忆 ⇒ 有视图");
+        recall_view(vec![snap(true, &store)], None, "session/main").expect("有记忆 ⇒ 有视图");
     assert!(
         degraded_view.degraded,
         "外壳降级必须被取值点誊抄进视图字段（T-104：视图脱离外壳流动时自描述）"
@@ -1076,7 +1076,7 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
     for i in 0..5i64 {
         seed_encoded(&small, &format!("full-{i}"), &format!("片段 {i}"), 100 + i);
     }
-    let full = recall_view(vec![snap(true, &small)], "", "session/main").expect("有记忆");
+    let full = recall_view(vec![snap(true, &small)], None, "session/main").expect("有记忆");
     assert!(!full.degraded, "反转前提：本视图不降级");
     let full_section = prompt_section(&full).expect("有条目 ⇒ 有段");
     assert!(

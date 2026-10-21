@@ -14,8 +14,10 @@ use super::*;
 ///
 /// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
 /// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（T-085 批②）
-/// 的语义维由它驱动；取不到 ⇒ 空串 ⇒ 投影退化为纯 ts 降序（平凡值，J2）。
-fn last_user_text(context: &SessionContext) -> String {
+/// 的语义维由它驱动；取不到 ⇒ `None` = 「本轮没有问题」，投影退化为纯 ts 降序
+/// （平凡值，J2）。用类型区分「没有问题」与「问题恰好是空串」：前者是事实，
+/// 后者得写出来才成立。
+fn last_user_text(context: &SessionContext) -> Option<String> {
     context
         .messages
         .iter()
@@ -25,7 +27,6 @@ fn last_user_text(context: &SessionContext) -> String {
             Some(MessageContent::Text(t)) => Some(t.clone()),
             _ => None,
         })
-        .unwrap_or_default()
 }
 
 /// 系统提示词的唯一真源。
@@ -272,7 +273,7 @@ async fn run_recall(
             )
             .await
             .map_err(TurnExit::Failed)?,
-        &recall_query,
+        recall_query.as_deref(),
         &recall_viewer,
     );
     // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
