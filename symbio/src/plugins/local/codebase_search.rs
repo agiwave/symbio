@@ -754,6 +754,14 @@ async fn save_to_disk(workdir: &Path, idx: &CodeIndex) -> std::io::Result<()> {
 }
 
 /// 对查询嵌入并与所有分块做余弦相似度排序，返回 top-k
+///
+/// **平手必须有稳定次级键**（[ADR-109](../../../../docs/010-adr/109.md "ADR-109")：排序口径的
+/// 共同半边）：分数相等时按相对路径、再按起始行升序，于是「全序 ⇒ 同一个索引 +
+/// 同一个查询 = 同一份 top-k」。缺了这一半，平手块的先后由 `files`/`chunks` 的
+/// 向量顺序决定，而那个顺序是**增量重建的历史**（哪些文件上次被重嵌过）——
+/// 代码没动、索引没变，两次调用却可能给出不同的前 k 条。
+/// 记忆面的同一判据住在 [`crate::symbio_core`] 的召回排序内核里（平手看编码时刻、
+/// 再看 seq），两边打分各归各（词面重叠 vs 余弦），只有这条是全项目一份。
 async fn semantic_search(
     index: &CodeIndex,
     query: &str,
@@ -770,7 +778,12 @@ async fn semantic_search(
         .flat_map(|f| f.chunks.iter().map(move |c| (f.rel.as_str(), c)))
         .map(|(rel, c)| (dot(&q, &c.norm), rel, c))
         .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.1.cmp(b.1))
+            .then_with(|| a.2.start_line.cmp(&b.2.start_line))
+    });
     scored
         .into_iter()
         .take(limit)

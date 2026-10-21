@@ -523,3 +523,79 @@ async fn valid_regex_and_empty_result_carry_no_notice() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ==================== 排序口径（ADR-109）====================
+
+/// 构造一个只有一个块的文件用于平手测试
+fn tied_chunk(start_line: usize) -> Chunk {
+    Chunk {
+        start_line,
+        end_line: start_line + 1,
+        text: format!("line {start_line}"),
+        norm: vec![1.0, 0.0, 0.0],
+    }
+}
+
+fn tied_index(files: &[(&str, &[usize])]) -> CodeIndex {
+    CodeIndex {
+        files: files
+            .iter()
+            .map(|(rel, lines)| IndexedFile {
+                rel: (*rel).to_string(),
+                fingerprint: fp(0, 1),
+                chunks: lines.iter().copied().map(tied_chunk).collect(),
+            })
+            .collect(),
+    }
+}
+
+/// 分数平手 ⇒ 按（相对路径，起始行）升序：同一份内容、不同的存放顺序给出同一份 top-k
+///
+/// 判据的两侧都钉：只写「顺序稳定」的话，一次把 `sort_by` 改成不比较任何次级键
+/// 也能过（测试自身的顺序恰好就是期望顺序）。这里故意用两份**存放顺序相反**的索引，
+/// 让「缺次级键」这一支必然失败。
+#[tokio::test]
+async fn tied_chunks_are_ordered_by_a_stable_secondary_key() {
+    let embed = CountingEmbed::new();
+    let svc = embed.as_service();
+    let keys = |v: &[Value]| -> Vec<(String, usize)> {
+        v.iter()
+            .map(|r| {
+                (
+                    r["file"].as_str().unwrap().to_string(),
+                    r["start_line"].as_u64().unwrap() as usize,
+                )
+            })
+            .collect()
+    };
+
+    let forward = semantic_search(
+        &tied_index(&[("a.rs", &[10, 20]), ("b.rs", &[5])]),
+        "query",
+        &svc,
+        8,
+    )
+    .await;
+    let reversed = semantic_search(
+        &tied_index(&[("b.rs", &[5]), ("a.rs", &[20, 10])]),
+        "query",
+        &svc,
+        8,
+    )
+    .await;
+
+    assert_eq!(
+        keys(&forward),
+        keys(&reversed),
+        "平手块的先后不该取决于索引的存放顺序（增量重建的历史）"
+    );
+    assert_eq!(
+        keys(&forward),
+        vec![
+            ("a.rs".to_string(), 10),
+            ("a.rs".to_string(), 20),
+            ("b.rs".to_string(), 5)
+        ],
+        "全序 = 分数降序之后还有稳定次级键，截断才有意义"
+    );
+}
