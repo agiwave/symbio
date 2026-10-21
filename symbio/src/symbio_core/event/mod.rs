@@ -13,10 +13,18 @@
 //! - **F5**：动词 5 个、能力 7 个、模式 3 个 —— 本模块冻结动词与实体的**闭集**
 //!   （`Verb` / `Entity` 枚举）。新增格子 = `match` 加一臂，是数据变化不是机制变化；
 //!   枚举而不是字符串，是为了让"网格之外的事件"**编译不过**（J3）。
+//!   注意 J3 钉住的是**行与列**这两维：字符串确实写不出第 12 个实体。
 //! - 事件**语法网格**（01 §6）：`实体 × 动词` 的格子上有若干**名字**（如
 //!   `chat.assistant.final` 落在 `turn × closed`）。名字是数据，加名字不加枚举。
+//!   于是「名字 ↔ 格位」这条对应关系本身要有个机器读得到的主人：[`grid`] 表。
+//!   它的判据不在编译期（名字是字符串），而在**唯一写入口**——不在表上的名字、
+//!   与自述格位不一致的名字，都落不进事实源（[`crate::symbio_core::AppendError::OffGrid`]）。
 
 use serde::{Deserialize, Serialize};
+
+/// 名字 ↔ 格位的表：判据、理由与「为什么不是枚举」都写在它的模块头。
+mod grid;
+pub use grid::{event_cell, Cell};
 
 /// 不可伪造的单调序号（[plan/01 §2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 ///
@@ -43,7 +51,9 @@ pub type Timestamp = i64;
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
 // 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
-// 网格坐标（落在哪个 entity × verb 格子）由构造方用枚举保证。
+// 「这个名字落在哪个格子」由 [`grid`] 那张表记**一份**数据：下面各常量头上的
+// 「落在 `turn × opened`」是给人的说明，表上的行是判据，写侧闸门按表拒不一致的落格。
+// 加一个名字 = 常量加一条 + 表上加一行（同一批，漏了后者第一次落格就红）。
 
 /// 用户发言。落在 `turn × opened`。
 pub const EVENT_USER_MESSAGE: &str = "user.message";
@@ -521,6 +531,14 @@ impl Event {
     pub fn with_payload(mut self, payload: serde_json::Value) -> Self {
         self.payload = payload;
         self
+    }
+
+    /// 本事件的名字在名字表上的**格位**（`None` = 名字不在表上）。
+    ///
+    /// 它判的是 `kind`，**不读** `self.entity` / `self.verb`——两者的分歧正是
+    /// [`crate::symbio_core::AppendError::OffGrid`] 要拒绝的那件事。
+    pub fn grid_cell(&self) -> Option<Cell> {
+        grid::event_cell(&self.kind)
     }
 }
 

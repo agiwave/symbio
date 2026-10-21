@@ -905,12 +905,14 @@ fn an_artifact_round_is_complete_after_reopen() {
 // ==================== 写侧不变量闸门（T-188）====================
 //
 // 闸门挂在 `WalStore::append` 这个**唯一写入口**内：三条真实写路径（用户输入 /
-// 工具结果 / 收尾落格）都从这里过。这一组钉四件事：
+// 工具结果 / 收尾落格）都从这里过。这一组钉五件事：
 //
 // 1. I2 缺溯源的声明被拒，且被拒的事件**不消耗 seq、不落盘**；
 // 2. I1 同轮第二条 final 被拒；
 // 3. I1 同轮第二条开轮被拒（不同 id——同 id 会先被 `Duplicate` 拦下）；
 // 4. I3 新轮越过未收束的旧轮**不拒**（崩溃恢复就是这个形状），但计数 + 出声。
+// 5. 名字与格位对不上被拒（[T-206 段四](../../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")）：
+//    表上没这个名字、或这个名字不住在这一格——两条都是 `OffGrid`，不是 `Invariant`。
 
 /// 一条**没有** `produced_by` 的 final（I2 的反例）。
 fn final_without_provenance(turn: u64) -> Event {
@@ -1159,4 +1161,91 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
         }
         other => panic!("拒错形态：{other:?}"),
     }
+}
+
+/// 段四·名字不在表上 ⇒ 拒，且答的是 `OffGrid { declared: None }`。
+///
+/// 这条同时是「加名字忘了登记表」的形状：写入口直接拒绝，不留下「事件在盘上、
+/// 投影读不到」的静默中间态。
+#[test]
+fn the_grid_gate_rejects_a_name_that_is_not_on_the_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = EventWalStore::open(dir.path().join("events.jsonl")).unwrap();
+
+    let err = store
+        .append(ev(
+            "u-0",
+            "user.messag",
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "拼错的名字",
+        ))
+        .expect_err("表上没有的名字不得入库");
+    match err {
+        AppendError::OffGrid {
+            event_id,
+            kind,
+            declared,
+            given,
+        } => {
+            assert_eq!(event_id, "u-0");
+            assert_eq!(kind, "user.messag");
+            assert_eq!(declared, None, "不在表上 = 没有格位，不是猜一格");
+            assert_eq!(given, (Entity::Turn, Verb::Opened));
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+    assert_eq!(store.head().value(), 0, "被拒的事件不消耗 seq");
+    assert_eq!(store.len(), 0, "被拒的事件不落盘");
+}
+
+/// 段四·名字在表上、但**不住在这一格** ⇒ 同一形态，`declared` 给出表上那一格。
+///
+/// 故意挑一条**同时**缺 `produced_by` 的事件：名字表这一臂排在 I2 之前——坐标错位时
+/// I2 读到的输入本身就是错位的，先判 I2 会把「事件自述矛盾」误报成「缺溯源」。
+#[test]
+fn the_grid_gate_rejects_a_name_claiming_another_cell() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = EventWalStore::open(dir.path().join("events.jsonl")).unwrap();
+    let given = (Entity::Turn, Verb::Opened);
+    let e = Event::pending(
+        "f-0",
+        EVENT_ASSISTANT_FINAL,
+        given.0,
+        given.1,
+        0,
+        "session/main",
+    )
+    .with_payload(serde_json::json!({ "text": "答" }));
+
+    let err = store.append(e).expect_err("名字与格位不同源的事件不得入库");
+    match err {
+        AppendError::OffGrid {
+            kind,
+            declared,
+            given,
+            ..
+        } => {
+            assert_eq!(kind, EVENT_ASSISTANT_FINAL);
+            assert_eq!(declared, Some((Entity::Turn, Verb::Closed)));
+            assert_eq!(given, (Entity::Turn, Verb::Opened));
+        }
+        other => panic!("拒错形态：{other:?}"),
+    }
+    assert_eq!(store.len(), 0, "拒了就不落盘");
+
+    // 同一个名字回到表上那一格（带溯源）⇒ 正常入库：拒的是错位，不是这个名字。
+    let ok = Event::pending(
+        "f-1",
+        EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        1,
+        "session/main",
+    )
+    .with_produced_by(0)
+    .with_payload(serde_json::json!({ "text": "答" }));
+    store.append(ok).expect("同格的名字要能落");
+    assert_eq!(store.len(), 1);
 }

@@ -65,8 +65,11 @@ impl Violation {
 /// 这一条是**开轮**事件吗（`turn × opened` 的 `user.message`）？
 ///
 /// 写侧闸门与读侧 [`open_unique_per_turn`] 共用本判据——「什么算开轮」只有一份。
+/// 名字引常量而不是字面量：拼错的字面量在比较里是**恒假**，于是开轮闸静默失效。
 pub fn is_turn_open(e: &Event) -> bool {
-    e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message"
+    e.entity == Entity::Turn
+        && e.verb == Verb::Opened
+        && e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE
 }
 
 /// 这一条是**收束发言**吗（`turn × closed` 的 `chat.assistant.final`）？

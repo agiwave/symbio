@@ -729,14 +729,16 @@ async fn run_persistent_rebuilds_from_store_without_handle() {
     let engine = f.plugin.open_chat_session(SID).await.unwrap();
     // 变更事实需要一条溯源锚（「这次变更站在哪份状态上」）；真实轮次里它由
     // 本轮开轮事件提供，这里补一条**非消息**事实——它只提供号，不会被重建
-    // 折成一条消息节点。
+    // 折成一条消息节点。名字取表上的 `system.triggered`（`system × opened`）：
+    // 手搓一个不在名字表上的名字会被写侧闸门判 `OffGrid`（T-206 段四），
+    // 而「测试里编一个名字」正是那道闸要拦的形状。
     engine
         .facts()
         .unwrap()
         .expect("持久会话有事实源")
         .append(Event::pending(
             "anchor",
-            "session.probe",
+            crate::symbio_core::EVENT_SYSTEM_TRIGGERED,
             Entity::System,
             Verb::Opened,
             0,

@@ -73,7 +73,7 @@ use std::sync::RwLock;
 
 use crate::plugins::session::paths;
 use crate::symbio_core::{
-    closes_turn, is_turn_final, is_turn_open, provenance_violation, AppendError, Event,
+    closes_turn, event_cell, is_turn_final, is_turn_open, provenance_violation, AppendError, Event,
     EventEnvelope as _, Seq, Store, StoreInvariant,
 };
 
@@ -155,7 +155,8 @@ impl WalInner {
             .copied()
     }
 
-    /// 写侧不变量闸门（[T-188](../../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批")）：
+    /// 写侧闸门（[T-188](../../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批") +
+    /// [T-206 段四](../../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")）：
     /// **唯一写入口内**的拒绝判定。
     ///
     /// 返回 `Err` = 这条事件不得入库；`Ok` = 允许（可能的「显式降级」已在内部出声）。
@@ -166,6 +167,7 @@ impl WalInner {
     ///
     /// | 判据 | 处置 | 理由 |
     /// |---|---|---|
+    /// | 名字与格位对不上（不在表上 / 自述挪了一格） | **拒绝** | 投影按格子取事实，错位是**静默少一条事实**；名字与坐标必须同源（[T-206 段四](../../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")） |
     /// | I2 声明缺 `produced_by` | **拒绝** | 没有上游的声明无法审计也无法撤销；生产者补上即可，重试是安全的 |
     /// | I1 同轮第二条 `final` | **拒绝** | 这一轮已经有收束，第二条会让「每轮至多一条 final」失效 |
     /// | I1 同轮第二条开轮（不同 id） | **拒绝** | 同 id 的重放更早就会被 `Duplicate` 拦下，能走到这里是两条不同事件抢同一轮 |
@@ -175,6 +177,19 @@ impl WalInner {
     /// [`check_all`](crate::symbio_core::check_all) 的 `unresolved_turns` 会把同一处
     /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
     fn gate(&mut self, event: &Event) -> Result<(), AppendError> {
+        // **先判名字与格位是否同源，再判事实之间的关系**：I1 / I2 / I3 的判据全部按
+        // `(entity, verb, kind)` 取事实（`is_turn_open` 认的就是这一格）。坐标本身错位时，
+        // 后面每条判定的输入都是错位的——所以这一臂排在最前，且它不需要任何索引。
+        let given = (event.entity, event.verb);
+        let declared = event_cell(&event.kind);
+        if declared != Some(given) {
+            return Err(AppendError::OffGrid {
+                event_id: event.event_id.clone(),
+                kind: event.kind.clone(),
+                declared,
+                given,
+            });
+        }
         if let Some(v) = provenance_violation(event) {
             return Err(AppendError::Invariant {
                 invariant: StoreInvariant::I2,

@@ -24,7 +24,7 @@
 use std::collections::HashSet;
 use std::sync::RwLock;
 
-use super::event::{Event, EventEnvelope, Seq};
+use super::event::{Cell, Event, EventEnvelope, Seq};
 
 /// 写侧闸门拒绝的是**哪一条**不变量（[T-188](../../../../docs/009-task/188-不变量写侧阻断批.md "T-188-不变量写侧阻断批")）。
 ///
@@ -81,6 +81,26 @@ pub enum AppendError {
         event_id: String,
         /// 人话原因（与读侧 `Violation.why` 同一套措辞来源）。
         why: String,
+    },
+    /// 名字与格位对不上（[T-206 段四](../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")）：
+    /// `kind` 不在事件名字表上，或事件自述的 `entity × verb` 不是表上那一格。
+    ///
+    /// **为什么它不是 [`Invariant`](Self::Invariant) 的一条**：I1/I2/I3 判的是事实**之间**
+    /// 的关系（同轮不重复、声明要溯源、开了要收束），本形态判的是这条事件**自己的契约
+    /// 自述**——名字与格子是不是同一个位置。它是 J3 的运行侧：枚举把行与列钉在编译期，
+    /// 名字这一维是数据（01 §6），数据的对齐只能在入库处判（表在
+    /// [`crate::symbio_core::event_cell`]）。
+    ///
+    /// 读侧投影按 `(entity, verb, kind)` 三目取事实，格位漂了的表现是**静默少一条事实**
+    /// （没有任何东西会红）——这正是本形态要在写入口拒掉的东西。
+    OffGrid {
+        event_id: String,
+        /// 事件自报的名字。
+        kind: String,
+        /// 名字表给的格位；`None` = 这个名字**不在表上**（加名字忘登记就是这个形状）。
+        declared: Option<Cell>,
+        /// 事件自己声明的格位。
+        given: Cell,
     },
 }
 

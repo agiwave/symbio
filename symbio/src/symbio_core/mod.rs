@@ -184,6 +184,10 @@ pub(crate) use event::{
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
 // **两个生产消费方**，故走非测试的 `pub(crate)` 出根（与记忆事件名表同一形态）。
 pub(crate) use event::EVENT_VERDICT_ASSERTED;
+// 名字表判据出根：唯一生产消费方是会话事实源的写侧闸门（`plugins/session/store/wal`），
+// 它在 core 之外却要判「这个名字落在哪一格」——判据本体必须在 core（名字表是共享契约），
+// 出根只到 `pub(crate)`：C-003 数 `pub use`，单消费方不该占架构公开面。
+pub(crate) use event::event_cell;
 pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
