@@ -29,8 +29,7 @@ fn allowed_users_accepts_numbers_and_strings() {
 fn defaults_apply_when_fields_are_absent() {
     let c: TelegramConfig = serde_json::from_str(r#"{"bot_token":"t"}"#).unwrap();
     assert!(c.allowed_users.is_empty());
-    assert!(c.streaming_enabled, "两个开关缺省为 true");
-    assert!(c.poll_enabled);
+    assert!(c.poll_enabled, "接收消息缺省为开");
     assert!(c.chat_id.is_none());
     assert_eq!(c.update_offset, 0, "未确认过任何更新时游标为 0");
 }
@@ -55,7 +54,6 @@ fn config_roundtrips_through_json() {
         bot_token: "tok".into(),
         chat_id: Some("-100".into()),
         api_base: "http://127.0.0.1:18090".into(),
-        streaming_enabled: false,
         poll_enabled: true,
         allowed_users: vec![7],
         update_offset: 100101,
@@ -64,7 +62,6 @@ fn config_roundtrips_through_json() {
     assert_eq!(back.bot_token, "tok");
     assert_eq!(back.chat_id.as_deref(), Some("-100"));
     assert_eq!(back.api_base, "http://127.0.0.1:18090");
-    assert!(!back.streaming_enabled);
     assert_eq!(back.allowed_users, vec![7]);
     assert_eq!(back.update_offset, 100101, "游标必须随配置一起往返");
 }
@@ -93,7 +90,7 @@ fn identity_only_manifest_falls_back_to_defaults() {
 
     assert_eq!(cfg.bot_token, "", "未配置的 token 为空串，即「未启用」");
     assert_eq!(cfg.chat_id, None);
-    assert!(cfg.streaming_enabled && cfg.poll_enabled, "开关取默认 true");
+    assert!(cfg.poll_enabled, "接收消息取默认 true");
     assert!(cfg.allowed_users.is_empty());
 }
 

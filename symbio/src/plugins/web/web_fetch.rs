@@ -1,22 +1,25 @@
 //! Web 获取工具 - 实现 Tool trait
 
+use super::net_guard::{extract_host, is_private_or_local_host};
+use super::web_config::WebConfig;
 use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
 
 /// Web 获取工具
 #[derive(Clone)]
 pub struct WebFetchTool {
-    /// 单次请求超时（秒）——来自 `WebConfig.web_timeout`，**不另写一份字面量**。
-    timeout_secs: u64,
+    /// 超时**逐次从配置读**——保存 `web_timeout` 后立即生效，不需要重载插件。
+    config: Arc<RwLock<WebConfig>>,
 }
 
 impl WebFetchTool {
-    pub fn new(timeout_secs: u64) -> Self {
-        Self { timeout_secs }
+    pub fn new(config: Arc<RwLock<WebConfig>>) -> Self {
+        Self { config }
     }
 
     async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
@@ -24,6 +27,8 @@ impl WebFetchTool {
             .get("url")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 url 参数".to_string()))?;
+
+        let timeout_secs = self.config.read().await.web_timeout;
 
         // 验证 URL
         let parsed = url::Url::parse(url)
@@ -36,9 +41,17 @@ impl WebFetchTool {
             ));
         }
 
+        // 阻止私有/本地主机（SSRF 防护，与 `http_request` 共用同一判据）
+        let host = extract_host(url)?;
+        if is_private_or_local_host(&host) {
+            return Err(PluginError::ValidationError(format!(
+                "阻止本地/私有主机: {host}"
+            )));
+        }
+
         // 创建客户端
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .user_agent("Symbio/0.1.0")
             .build()
             .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
@@ -49,8 +62,7 @@ impl WebFetchTool {
         let response = client.get(url).send().await.map_err(|e| {
             if e.is_timeout() {
                 PluginError::InternalError(format!(
-                    "请求超时：{}s 内未收到 {} 的响应（可调大 web_timeout 后重试）",
-                    self.timeout_secs, url
+                    "请求超时：{timeout_secs}s 内未收到 {url} 的响应（可调大 web_timeout 后重试）"
                 ))
             } else if e.is_connect() {
                 PluginError::InternalError(format!(
@@ -89,14 +101,8 @@ impl WebFetchTool {
         // 只取正文 ⇒ 404 页与 200 页对模型同形、截断后半截不知情。把状态并进
         // `content` 首行——回灌文本（结果节点 `content` = 它）与 JSON 字段两条
         // 路径都拿得到，不必在 tool_executor 里为单个工具开特例。
-        let content_with_meta = format!(
-            "[web_fetch] status={} · content_type={} · truncated={} · url={}\n\n{}",
-            status.as_u16(),
-            content_type,
-            truncated,
-            url,
-            content
-        );
+        let content_with_meta =
+            content_with_meta(status.as_u16(), &content_type, truncated, url, &content);
 
         Ok(json!({
             "success": true,
@@ -143,4 +149,24 @@ impl Capability for WebFetchTool {
         let result = self.execute_inner(args).await?;
         Ok(serde_json::to_value(&result)?)
     }
+}
+
+#[cfg(test)]
+#[path = "web_fetch.test.rs"]
+mod tests;
+
+/// 响应元数据头：状态码 / 内容类型 / 是否截断 / URL 并成正文首行。
+///
+/// 单独成函数是为了让形状可判——e2e 在无外网 CI 上拿不到真实 200/404 响应，
+/// 这行格式由单测钉住（`status=404` 缺了就会让模型把错误页当正常内容）。
+fn content_with_meta(
+    status: u16,
+    content_type: &str,
+    truncated: bool,
+    url: &str,
+    content: &str,
+) -> String {
+    format!(
+        "[web_fetch] status={status} · content_type={content_type} · truncated={truncated} · url={url}\n\n{content}"
+    )
 }

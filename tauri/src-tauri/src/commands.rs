@@ -2,10 +2,8 @@
 
 use crate::AppState;
 use serde_json::Value;
-use std::sync::Arc;
 use symbio::symbio_core::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey,
-    PLUGIN_PAYLOAD_KEY, TRACE_ID,
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey, TRACE_ID,
 };
 use tauri::Emitter;
 use tokio::sync::mpsc;
@@ -86,39 +84,12 @@ pub async fn route_v2(
 
     info!(trace_id = %trace_id, origin = %origin, path = %path, "Start routing");
 
-    // 创建插件上下文 (模拟 from_message 行为)
-    let mut extensions = std::collections::HashMap::new();
-
-    // 存储 payload 到扩展桶（桶名与 gateway 的 `build_ctx` 同一份契约）
-    extensions.insert(
-        PLUGIN_PAYLOAD_KEY.to_string(),
-        std::sync::Arc::new(request.payload) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
-    );
-
-    // 存储 metadata 到扩展桶中
-    for (k, v) in request
-        .metadata
-        .as_object()
-        .unwrap_or(&serde_json::Map::new())
-    {
-        if let Some(s) = v.as_str() {
-            extensions.insert(
-                k.clone(),
-                std::sync::Arc::new(s.to_string())
-                    as std::sync::Arc<dyn std::any::Any + Send + Sync>,
-            );
-        } else {
-            extensions.insert(
-                k.clone(),
-                std::sync::Arc::new(v.clone()) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
-            );
-        }
-    }
-
-    let context = Arc::new(symbio::symbio_core::PluginSimpleRequest {
-        envs: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-        extensions: std::sync::Arc::new(std::sync::RwLock::new(extensions)),
-    });
+    // 创建插件上下文——装配在 core，与 gateway 的 `build_ctx` 是**同一份**：
+    // metadata 的字符串 / JSON 两种落桶规则只在这里定义一次。
+    let context = std::sync::Arc::new(symbio::symbio_core::PluginSimpleRequest::from_parts(
+        request.payload,
+        request.metadata.as_object(),
+    ));
 
     let root = state.root.clone();
     let rm = state.route_manager.clone();

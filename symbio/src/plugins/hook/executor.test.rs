@@ -39,7 +39,6 @@ fn cmd_hook(command: impl Into<String>) -> HookConfigEntry {
         command: Some(command.into()),
         url: None,
         timeout_ms: Some(30_000),
-        matcher: None,
     }
 }
 
@@ -255,7 +254,6 @@ async fn missing_command_is_rejected() {
         command: None,
         url: None,
         timeout_ms: None,
-        matcher: None,
     };
 
     let res = HookExecutor::new()

@@ -38,13 +38,12 @@
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, SymbioKey, PLUGIN_PAYLOAD_KEY, TRACE_ID,
+    PluginPayloadWire, PluginSimpleRequest, SymbioKey, TRACE_ID,
 };
 use base64::Engine;
 use serde_json::Value;
-use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -776,28 +775,14 @@ async fn dispatch_once(
 }
 
 /// 由 `PluginMessageWire` 构造与 `route_v2` 完全一致的 `PluginSimpleRequest`
+///
+/// 装配本身在 core（[`PluginSimpleRequest::from_parts`]）：桌面命令层走同一份，
+/// 两个入口看到的 metadata 类型不能分叉。
 fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
-    let mut extensions: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
-    extensions.insert(
-        PLUGIN_PAYLOAD_KEY.to_string(),
-        Arc::new(msg.payload.clone()) as Arc<dyn Any + Send + Sync>,
-    );
-    if let Some(obj) = msg.metadata.as_object() {
-        for (k, v) in obj {
-            if let Some(s) = v.as_str() {
-                extensions.insert(
-                    k.clone(),
-                    Arc::new(s.to_string()) as Arc<dyn Any + Send + Sync>,
-                );
-            } else {
-                extensions.insert(k.clone(), Arc::new(v.clone()) as Arc<dyn Any + Send + Sync>);
-            }
-        }
-    }
-    Arc::new(PluginSimpleRequest {
-        envs: Arc::new(RwLock::new(HashMap::new())),
-        extensions: Arc::new(RwLock::new(extensions)),
-    })
+    Arc::new(PluginSimpleRequest::from_parts(
+        msg.payload.clone(),
+        msg.metadata.as_object(),
+    ))
 }
 
 // ==================== WebSocket ====================

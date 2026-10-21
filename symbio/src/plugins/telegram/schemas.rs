@@ -18,8 +18,6 @@ pub struct TelegramConfig {
     /// 指向自建 / 代理端点是网络受限环境的常见需求，也是 e2e 能打本地靶子的前提（T-114）。
     pub api_base: String,
     #[serde(default = "default_true")]
-    pub streaming_enabled: bool,
-    #[serde(default = "default_true")]
     pub poll_enabled: bool,
     #[serde(default, deserialize_with = "user_ids")]
     pub allowed_users: Vec<i64>,
@@ -70,7 +68,6 @@ impl Default for TelegramConfig {
             bot_token: "".to_string(),
             chat_id: None,
             api_base: OFFICIAL_API_BASE.to_string(),
-            streaming_enabled: true,
             poll_enabled: true,
             allowed_users: Vec::new(),
             update_offset: 0,
@@ -102,7 +99,6 @@ pub mod telegram_status {
     pub struct Response {
         pub configured: bool,
         pub has_chat_id: bool,
-        pub streaming_enabled: bool,
         pub poll_enabled: bool,
         pub listener_running: bool,
         pub update_offset: i64,

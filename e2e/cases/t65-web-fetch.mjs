@@ -1,40 +1,32 @@
 import './_selfrun.mjs';
-// T65 Web 外取：`web_fetch` 真取本地靶子 · 非法 scheme / 超时 / 404 三种失败形态 ·
-// `http_request` 的 SSRF 防护。
+// T65 Web 外取：`web_fetch` 与 `http_request` 共用同一套出站守卫 ·
+// 非法 scheme 被拒 · SSRF 拒绝发生在发请求之前。
 //
 // ## 这条用例补的是什么
 //
-// RE-005 的「Web 外取」行三格全空（面审计发现，T-076 批）。三个工具都已实现、
-// 都已注册进 LLM 可见面，却一条 e2e 都没有——**整个插件的用户可见行为没有端到端锚**。
+// RE-005 的「Web 外取」行三格全空（面审计发现，T-076 批）。两个工具的入站可见行为
+// 都没有端到端锚：一个只校验 scheme 就能带着模型给的地址打内网，另一个明确拒绝——
+// 同一类操作两种答案。现在两者共用 `net_guard`，本用例把「同一个本地地址、两个工具
+// 都拒绝」钉成可判的读数。
 //
 // ## 靶子为什么是本地 mock（`e2e/mock-http.mjs`）
 //
 // 真外网在 CI 上不存在、内容会变、对方会限流——三类失败都**不在被测系统里**，
-// 却会被记成产品缺陷。本地靶子把「网络」这一层换成确定性读数：状态码、正文，
-// 以及 `requests()` 里的**请求留痕**。留痕在本用例里承担一条关键判据：SSRF 拒绝
-// 必须发生在**发请求之前**——靶子上没有那次请求，就是「拦在了门内」的证据。
+// 却会被记成产品缺陷。本用例不需要靶子回包：本地 mock 的价值是**请求留痕**——
+// 守卫拒绝之后，靶子上应当一条请求都没有。错误文案可以照抄，留痕不能。
 //
 // ## 为什么会话要 `risk_level: 'high'`
 //
 // `http_request` 自声明 `risk: High`，而审批闸门的默认阈值是 `Medium`
-// （`risk_level_from_ctx` 的缺省）——**默认档下这个工具根本跑不到 SSRF 校验**：
+// （`risk_level_from_ctx` 的缺省）——**默认档下这个工具根本跑不到出站校验**：
 // auto 模式会直接回「权限不足」错误（`confirm_prompt_payload` 的 auto 分支）。
-// 要验 SSRF 防护，就得把阈值提到 `high`，让它真的进到 `validate_url`。
-// 这条路径本身也是产品行为（用户可以把会话风险档调高），此前同样零 e2e。
+// 要验守卫，就得把阈值提到 `high`，让它真的进到 `validate_url`。
 //
 // ## 判据怎么取
 //
 // 全部取**模型实际收到的那段文本**（`role=tool` 消息正文）与**靶子的请求留痕**：
 // 前者是「用户看得见的结果」在模型侧的唯一投影，后者是「外部世界发生了什么」。
 // 不读被测系统的任何内部存储。
-//
-// ## 元数据头与错误分流（T-109 已闭，本用例钉的是收口后的形状）
-//
-// 登记过的两条缺口已清偿：①`extract_result` 的 `content` 分支只取正文 ⇒ 404 页与
-// 200 页对模型同形——现在 `web_fetch` 把状态并进 `content` 首行元数据头
-// （`[web_fetch] status=… · …`）；②超时与连不上在 reqwest 的 Display 里同形——
-// 现在按 `is_timeout` / `is_connect` 分流成「请求超时」/「连接失败」。
-// 本用例把两处都按**收口后**的形状断言（404 必须带 `status=404`、超时必须报「超时」）。
 import {
   MockLlm,
   MockHttp,
@@ -70,29 +62,23 @@ function gatewayConfig(port) {
   };
 }
 
-/** `/slow` 的延迟必须**大于** `web_timeout`（本用例取 3s vs 2s），否则超时分支不触发。 */
-const SLOW_MS = 3000;
-const WEB_TIMEOUT_SEC = 2;
-
 export default defineCase(
-  'T65 Web 外取：web_fetch 真取本地靶子（404 / 非法 scheme / 超时）· http_request 的 SSRF 拒绝',
+  'T65 Web 外取：web_fetch 与 http_request 对本地目标的 SSRF 拒绝（拒绝先于发请求）· 非法 scheme 被拒',
   async () => {
     // 靶子先起：它的端口与随机标记要写进 mock 的工具参数与断言。
-    const http = await new MockHttp({ port: nextPort(), slowMs: SLOW_MS }).start();
+    const http = await new MockHttp({ port: nextPort() }).start();
     const PAGE = http.url('/page');
-    const SLOW = http.url('/slow');
-    const MISSING = http.url('/missing');
     const ECHO = http.url('/echo');
 
     const llm = await new MockLlm([
       // 启动器带唯一 `match`（夹具陷阱 10）。
       {
-        id: 'fetch-page',
+        id: 'fetch-local',
         match: '取一下那个页面',
         once: true,
         toolCalls: [{ id: 'c1', name: 'web_fetch', arguments: { url: PAGE } }],
       },
-      // 以下四轮全是工具结果轮 ⇒ 每条都带 `once`（夹具陷阱 14：不带就是无限工具循环）。
+      // 以下三轮全是工具结果轮 ⇒ 每条都带 `once`（夹具陷阱 14：不带就是无限工具循环）。
       {
         id: 'fetch-badscheme',
         afterTool: true,
@@ -100,22 +86,10 @@ export default defineCase(
         toolCalls: [{ id: 'c2', name: 'web_fetch', arguments: { url: 'file:///etc/passwd' } }],
       },
       {
-        id: 'fetch-slow',
-        afterTool: true,
-        once: true,
-        toolCalls: [{ id: 'c3', name: 'web_fetch', arguments: { url: SLOW } }],
-      },
-      {
-        id: 'fetch-missing',
-        afterTool: true,
-        once: true,
-        toolCalls: [{ id: 'c4', name: 'web_fetch', arguments: { url: MISSING } }],
-      },
-      {
         id: 'http-ssrf',
         afterTool: true,
         once: true,
-        toolCalls: [{ id: 'c5', name: 'http_request', arguments: { url: ECHO } }],
+        toolCalls: [{ id: 'c3', name: 'http_request', arguments: { url: ECHO } }],
       },
       { id: 'final', afterTool: true, content: '外取面跑完了。' },
     ]).start();
@@ -126,10 +100,6 @@ export default defineCase(
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
         session: { ...DIALOG_FACE_OFF },
-        // `web_timeout` 是 `web_fetch` 与 `http_request` 的**单一真源**（web_config.rs）。
-        // 取 2s 是为了让 `/slow`（3s）必然超时——这一条同时把「面板上的值真的被读」
-        // 变成可判的读数（该字段历史上曾「面板能改、代码不读」）。
-        web: { web_timeout: WEB_TIMEOUT_SEC },
       },
     });
 
@@ -177,9 +147,9 @@ export default defineCase(
         { what: '本轮跑完（实时面离开 working）', timeoutMs: 90_000 },
       );
 
-      // ── 证据①：六个请求 = 用户轮 + 五轮工具结果回灌（轮次账对得上）
+      // ── 证据①：四次请求 = 用户轮 + 三轮工具结果回灌（轮次账对得上）
       const reqs = await llm.requests();
-      assertEq(reqs.length, 6, `应六次请求（1 用户轮 + 5 工具结果轮），实际 ${reqs.length}`);
+      assertEq(reqs.length, 4, `应四次请求（1 用户轮 + 3 工具结果轮），实际 ${reqs.length}`);
       const wireNames = (reqs[0].body.tools ?? []).map((t) => t.function?.name);
       for (const name of ['web_fetch', 'http_request']) {
         assert(
@@ -188,19 +158,11 @@ export default defineCase(
         );
       }
 
-      // ── 证据②：web_fetch 正常面——本地靶子的正文原样回灌 + 元数据头（T-109 ①）
-      const pageText = toolResultText(reqs[1]);
+      // ── 证据②：web_fetch 对本地目标被拒——与 http_request 同一判据
+      const fetchText = toolResultText(reqs[1]);
       assert(
-        pageText.includes(http.marker),
-        `web_fetch 应把靶子正文交给模型（实际: ${pageText.slice(0, 400)}）`,
-      );
-      assert(
-        pageText.includes('mock 页面'),
-        `web_fetch 交回的是**原始正文**（不剥 HTML 标签）（实际: ${pageText.slice(0, 400)}）`,
-      );
-      assert(
-        pageText.includes('[web_fetch] status=200'),
-        `回灌首行应带元数据头且 status=200（T-109 ①，实际: ${pageText.slice(0, 200)}）`,
+        fetchText.includes('127.0.0.1') && /阻止|私有|本地/.test(fetchText),
+        `web_fetch 打本地主机应被出站守卫拒绝并指名主机（实际: ${fetchText.slice(0, 400)}）`,
       );
 
       // ── 证据③：非法 scheme 被拒（只允许 http/https）
@@ -210,61 +172,32 @@ export default defineCase(
         `file:// 应被拒并说明只支持 HTTP/HTTPS（实际: ${schemeText.slice(0, 400)}）`,
       );
 
-      // ── 证据④：超时——`web_timeout` 真的被读到（2s < 靶子的 3s）+ 错误分流（T-109 ②）
-      //
-      // 判据要求回灌**报出「超时」**：reqwest 的 Display 把超时与连接失败收成同一句
-      // `error sending request…`，那条同形缺口已闭——`web_fetch` 现按 `is_timeout`
-      // 分流成「请求超时：…（可调大 web_timeout 后重试）」。若哪天又退回直接
-      // `format!("请求失败: {e}")`，这条当场红。
-      const slowText = toolResultText(reqs[3]);
-      assert(
-        !slowText.includes('slow 端点终于回了'),
-        `web_timeout 未生效：3s 的靶子本该被 2s 的超时掐掉，却拿到了正文（实际: ${slowText.slice(0, 400)}）`,
-      );
-      assert(
-        slowText.includes('请求超时') && slowText.includes('web_timeout'),
-        `超时应报「请求超时」并指路 web_timeout（T-109 ②，实际: ${slowText.slice(0, 400)}）`,
-      );
-
-      // ── 证据⑤：404 的正文照回，且**带 status=404 元数据头**（T-109 ①）
-      const missingText = toolResultText(reqs[4]);
-      assert(
-        missingText.includes('没有这个页面') && missingText.includes(http.marker),
-        `404 页面的正文应回灌（实际: ${missingText.slice(0, 400)}）`,
-      );
-      assert(
-        missingText.includes('[web_fetch] status=404'),
-        `404 页面必须向模型声明 status=404（T-109 ①，实际: ${missingText.slice(0, 200)}）`,
-      );
-
-      // ── 证据⑥：http_request 对本地主机被 SSRF 防护拒绝
-      const ssrfText = toolResultText(reqs[5]);
+      // ── 证据④：http_request 对本地主机被同一守卫拒绝
+      const ssrfText = toolResultText(reqs[3]);
       assert(
         ssrfText.includes('127.0.0.1') && /阻止|私有|本地/.test(ssrfText),
-        `http_request 打本地主机应被 SSRF 防护拒绝并指名主机（实际: ${ssrfText.slice(0, 400)}）`,
+        `http_request 打本地主机应被出站守卫拒绝并指名主机（实际: ${ssrfText.slice(0, 400)}）`,
       );
 
-      // ── 证据⑦：**拒绝发生在发请求之前**——靶子上没有那次请求
+      // ── 证据⑤：**拒绝发生在发请求之前**——靶子上一条业务请求都没有
       //
       // 这是本条最关键的判据：「返回了错误」与「拦在了门内」是两回事。若某次重构
       // 把校验挪到 `send()` 之后，错误文案可以一字不变，而请求已经打到内网了。
-      const seen = await http.requests();
-      const paths = seen.map((r) => r.path);
-      assert(paths.includes('/page'), `靶子应收到 /page（实际: ${paths.join(',')}）`);
-      assert(paths.includes('/missing'), `靶子应收到 /missing（实际: ${paths.join(',')}）`);
-      assert(paths.includes('/slow'), `靶子应收到 /slow（实际: ${paths.join(',')}）`);
-      assert(
-        !paths.includes('/echo'),
-        `SSRF 被拒的请求**不得**打到靶子（实际: ${paths.join(',')}）`,
+      // `/_health` / `/_requests` 是 mock 的控制面，不算业务请求。
+      const seen = (await http.requests()).filter((r) => !r.path.startsWith('/_'));
+      assertEq(
+        seen.length,
+        0,
+        `被守卫拒绝的请求不得打到靶子（实际: ${seen.map((r) => r.path).join(',')}）`,
       );
 
-      // ── 证据⑧：转写落格，五个 tool_call 都终态化
+      // ── 证据⑥：转写落格，三个 tool_call 都终态化
       const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T65');
       const calls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
       assertEq(
         calls.map((c) => c.meta?.tool_name).join(','),
-        'web_fetch,web_fetch,web_fetch,web_fetch,http_request',
+        'web_fetch,web_fetch,http_request',
         '工具名与顺序应保持',
       );
       for (const c of calls) {

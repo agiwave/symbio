@@ -3,13 +3,20 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use crate::plugins::web::net_guard::is_private_or_local_host;
 
 fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
-    HttpRequestTool {
-        allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
-        max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
-        timeout_secs: crate::plugins::web::web_config::WebConfig::default().web_timeout,
-    }
+    HttpRequestTool::new(Arc::new(RwLock::new(
+        crate::plugins::web::web_config::WebConfig {
+            http_allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        },
+    )))
+}
+
+fn validate(tool: &HttpRequestTool, url: &str) -> Result<String, PluginError> {
+    let domains = tool.config.blocking_read().http_allowed_domains.clone();
+    HttpRequestTool::validate_url(url, &domains)
 }
 
 /// SSRF 防护必须按 **IP 语义**判，不能按字符串前缀——
@@ -75,7 +82,7 @@ fn allowlist_is_case_insensitive_and_exact_without_wildcard() {
 #[test]
 fn validate_url_rejects_non_http_and_private_targets() {
     let t = tool_with_domains(&["*"]);
-    assert!(t.validate_url("https://example.com/a").is_ok());
+    assert!(validate(&t, "https://example.com/a").is_ok());
     for bad in [
         "",
         "ftp://example.com",
@@ -85,16 +92,16 @@ fn validate_url_rejects_non_http_and_private_targets() {
         "http://169.254.169.254/latest/meta-data/",
         "http://[::1]:8080/",
     ] {
-        assert!(t.validate_url(bad).is_err(), "应拒绝：{bad}");
+        assert!(validate(&t, bad).is_err(), "应拒绝：{bad}");
     }
 }
 
 #[test]
 fn validate_url_enforces_allowlist() {
     let t = tool_with_domains(&["*.example.com"]);
-    assert!(t.validate_url("https://api.example.com/x").is_ok());
-    assert!(t.validate_url("https://evil-example.com/x").is_err());
-    assert!(t.validate_url("https://example.org/x").is_err());
+    assert!(validate(&t, "https://api.example.com/x").is_ok());
+    assert!(validate(&t, "https://evil-example.com/x").is_err());
+    assert!(validate(&t, "https://example.org/x").is_err());
 }
 
 /// 白名单**有生产路径能拿到非 `*` 的值**（T-109 ④）：缺省是 `*`，
@@ -105,10 +112,9 @@ fn default_allowlist_is_unrestricted_and_config_value_reaches_validate() {
     let c = crate::plugins::web::web_config::WebConfig::default();
     assert_eq!(c.http_allowed_domains, vec!["*".to_string()]);
 
-    let t = HttpRequestTool::new(c.web_timeout, vec!["example.com".to_string()]);
-    assert!(t.validate_url("https://example.com/x").is_ok());
-    let err = t
-        .validate_url("https://other.example.net/x")
+    let t = tool_with_domains(&["example.com"]);
+    assert!(validate(&t, "https://example.com/x").is_ok());
+    let err = validate(&t, "https://other.example.net/x")
         .unwrap_err()
         .to_string();
     assert!(
@@ -120,8 +126,8 @@ fn default_allowlist_is_unrestricted_and_config_value_reaches_validate() {
 /// 空白名单 = 回到「不限制」：列表编辑器清空保存不该静默变成「全拒」
 #[test]
 fn empty_allowlist_is_unrestricted() {
-    let t = HttpRequestTool::new(30, vec![]);
-    assert!(t.validate_url("https://example.com/x").is_ok());
+    let t = tool_with_domains(&[]);
+    assert!(validate(&t, "https://example.com/x").is_ok());
 }
 
 #[test]

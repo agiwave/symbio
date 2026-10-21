@@ -225,11 +225,11 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
     /// 直接将上下文中的载荷解析为指定的强类型 T（进程内零拷贝）
     ///
     /// 优先尝试原生类型转换，失败时自动回退到 JSON 反序列化。
-    /// 读写的桶名见 [`crate::symbio_core::PLUGIN_PAYLOAD_KEY`]。
+    /// 读写的桶名见 [`PLUGIN_PAYLOAD_KEY`]。
     fn payload<T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static>(
         &self,
     ) -> Result<T, crate::symbio_core::PluginError> {
-        let key = crate::symbio_core::PLUGIN_PAYLOAD_KEY;
+        let key = PLUGIN_PAYLOAD_KEY;
         let any = self.get_raw(key).ok_or_else(|| {
             crate::symbio_core::PluginError::ValidationError(
                 "Missing payload in context".to_string(),
@@ -266,7 +266,7 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
         &self,
         value: T,
     ) -> Result<(), crate::symbio_core::PluginError> {
-        let key = crate::symbio_core::PLUGIN_PAYLOAD_KEY;
+        let key = PLUGIN_PAYLOAD_KEY;
         self.set_raw(key, Arc::new(value));
         Ok(())
     }
@@ -296,6 +296,33 @@ impl PluginSimpleRequest {
                 crate::symbio_core::keys::CONFIG.name().to_string(),
                 Arc::new(c) as Arc<dyn Any + Send + Sync>,
             );
+        }
+        Self {
+            envs: Arc::new(RwLock::new(HashMap::new())),
+            extensions: Arc::new(RwLock::new(extensions)),
+        }
+    }
+
+    /// 由「载荷 + metadata」构造请求上下文——网关与桌面命令层**共用这一份装配**。
+    ///
+    /// 两处入口此前各写一份同构循环（网关的 `build_ctx` 与桌面 `route_message`）：
+    /// 字符串值落 `String`（`ctx.get(SymbioKey)` 的值类型就是 `String`），其余值
+    /// 落原样 JSON。两份一旦分叉，同一个路由在 HTTP 面与桌面面会看到不同的
+    /// metadata，而两边都不报错——正是「同族两实现」最贵的形态。
+    pub fn from_parts(payload: Value, metadata: Option<&serde_json::Map<String, Value>>) -> Self {
+        let mut extensions: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
+        extensions.insert(
+            PLUGIN_PAYLOAD_KEY.to_string(),
+            Arc::new(payload) as Arc<dyn Any + Send + Sync>,
+        );
+        if let Some(obj) = metadata {
+            for (k, v) in obj {
+                let value: Arc<dyn Any + Send + Sync> = match v.as_str() {
+                    Some(s) => Arc::new(s.to_string()),
+                    None => Arc::new(v.clone()),
+                };
+                extensions.insert(k.clone(), value);
+            }
         }
         Self {
             envs: Arc::new(RwLock::new(HashMap::new())),

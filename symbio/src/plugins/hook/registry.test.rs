@@ -11,7 +11,6 @@ fn entry(name: &str) -> HookConfigEntry {
         command: Some(format!("echo {name}")),
         url: None,
         timeout_ms: None,
-        matcher: None,
     }
 }
 

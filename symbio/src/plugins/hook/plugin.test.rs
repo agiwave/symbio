@@ -22,7 +22,6 @@ async fn stop_clears_the_registered_hooks() {
                 command: Some("echo hi".into()),
                 url: None,
                 timeout_ms: None,
-                matcher: None,
             }],
         })
         .await;

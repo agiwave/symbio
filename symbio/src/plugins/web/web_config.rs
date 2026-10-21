@@ -3,12 +3,11 @@ use serde::{Deserialize, Serialize};
 /// Web 工具配置。字段与配置文档（`PLUGIN.yml` 的表单定义）一一对应。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebConfig {
-    /// 单次网络请求超时（秒）——`web_fetch` 与 `http_request` **都读这一个值**。
+    /// 单次网络请求超时（秒）——`web_fetch` / `web_search` / `http_request`
+    /// **都读这一个值**，且都在每次调用时现读（保存后立即生效，无需重载插件）。
     ///
-    /// 早先这里有个 `web_timeout` 字段：面板上能改，实际从没被任何工具读过，
-    /// 真正生效的是两个工具各自写死的 30s 常量。删掉配置项并不等于问题解决，
-    /// 只是把「配置面板在骗人」换成「超时无法调」——后者连入口都没有了。
-    /// 故接回单一真源：两个工具的构造都从这里取值。
+    /// 只让面板能改不等于让配置生效：工具若把超时写死成常量，这个字段就是摆设；
+    /// 故三个工具共享同一个配置锁，不各自留一份拷贝。
     #[serde(default = "default_web_timeout")]
     pub web_timeout: u64,
     /// Tavily API Key

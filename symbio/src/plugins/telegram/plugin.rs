@@ -40,12 +40,6 @@ fn config_definition() -> DetailDefinition {
                 "Bot API 上游地址；留空即官方端点（自建 / 代理端点填这里）",
             ),
             DetailField::toggle(
-                "streaming_enabled",
-                "流式回复",
-                "边生成边推送，减少等待感",
-                d.streaming_enabled,
-            ),
-            DetailField::toggle(
                 "poll_enabled",
                 "接收消息",
                 "轮询更新，把用户消息交给会话处理",
@@ -452,7 +446,6 @@ impl TelegramPlugin {
         Ok(serde_json::to_value(telegram_status::Response {
             configured: !config.bot_token.is_empty(),
             has_chat_id: config.chat_id.is_some(),
-            streaming_enabled: config.streaming_enabled,
             poll_enabled: config.poll_enabled,
             listener_running: self.listener_running.load(Ordering::SeqCst),
             update_offset: config.update_offset,

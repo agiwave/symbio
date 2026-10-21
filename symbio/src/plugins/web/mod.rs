@@ -3,6 +3,7 @@
 //! 提供 Web 搜索、网络请求等网络相关工具
 
 mod http_request;
+mod net_guard;
 mod plugin;
 mod web_config;
 mod web_fetch;

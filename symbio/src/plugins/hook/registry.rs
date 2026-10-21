@@ -9,7 +9,6 @@ pub struct HookConfigEntry {
     pub command: Option<String>,
     pub url: Option<String>,
     pub timeout_ms: Option<u64>,
-    pub matcher: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

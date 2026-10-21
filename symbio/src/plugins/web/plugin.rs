@@ -29,7 +29,7 @@ fn config_definition() -> DetailDefinition {
             DetailField::number(
                 "web_timeout",
                 "Web 超时（秒）",
-                "单次网络请求超时（web_fetch 与 http_request 共用）",
+                "单次网络请求超时（web_fetch、web_search 与 http_request 共用）",
                 1.0,
                 300.0,
                 serde_json::json!(d.web_timeout),
@@ -88,15 +88,13 @@ impl WebPlugin {
     }
 
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: WebConfig, dir: PluginDir) -> Self {
-        let web_timeout = config.web_timeout;
-        // 白名单在构造时**拷走一份**：改 `http_allowed_domains` 后需重载才生效
-        // （与 web_timeout 同款约定——面板上改的是配置文档，工具持有的快照不动）。
-        let http_allowed_domains = config.http_allowed_domains.clone();
+        // 三个工具共享同一份配置锁，每次调用现读：保存后立即生效，无需重载插件。
+        // （构造期快照会让「面板上改了、工具还在用旧值」，且没有任何提示。）
         let config_lock = Arc::new(RwLock::new(config));
 
-        let web_fetch = Arc::new(WebFetchTool::new(web_timeout));
+        let web_fetch = Arc::new(WebFetchTool::new(Arc::clone(&config_lock)));
         let web_search = Arc::new(WebSearchTool::new(Arc::clone(&config_lock)));
-        let http_request = Arc::new(HttpRequestTool::new(web_timeout, http_allowed_domains));
+        let http_request = Arc::new(HttpRequestTool::new(Arc::clone(&config_lock)));
 
         let tool_impls: Vec<Arc<dyn Capability>> = vec![web_fetch, web_search, http_request];
 

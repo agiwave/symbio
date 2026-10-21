@@ -1,5 +1,7 @@
 //! HTTP 请求工具 - 实现 Tool trait
 
+use super::net_guard::{extract_host, is_private_or_local_host};
+use super::web_config::WebConfig;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
 };
@@ -7,29 +9,27 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 const DEFAULT_MAX_RESPONSE_SIZE: usize = 1_048_576; // 1 MB
 
 /// HTTP 请求工具
 #[derive(Clone)]
 pub struct HttpRequestTool {
-    allowed_domains: Vec<String>,
+    config: Arc<RwLock<WebConfig>>,
     max_response_size: usize,
-    timeout_secs: u64,
 }
 
 impl HttpRequestTool {
-    /// 超时来自 `WebConfig.web_timeout`、域名白名单来自 `WebConfig.http_allowed_domains`
-    /// ——与 `web_fetch` 同一真源，不在这里另留默认值（那正是「面板能改、代码不读」的来源）。
+    /// 超时与域名白名单都**逐次从配置读**——配置保存后立即生效，不需要重载插件。
     ///
     /// 白名单**必须能从配置进来**（T-109 ④）：早先在构造里写死 `vec!["*"]`，
     /// 没有任何路径能写进别的值 ⇒ `host_matches_allowlist` 恒真、「不在
     /// allowed_domains 中」的错误分支永不触发——看上去在守域名，实际什么都不守。
-    pub fn new(timeout_secs: u64, allowed_domains: Vec<String>) -> Self {
+    pub fn new(config: Arc<RwLock<WebConfig>>) -> Self {
         Self {
-            allowed_domains,
+            config,
             max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
-            timeout_secs,
         }
     }
 
@@ -41,8 +41,14 @@ impl HttpRequestTool {
 
         let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
 
+        // 配置只在入口读一次：不在 `await` 期间持有锁（保存配置不应被在途请求阻塞）。
+        let (timeout_secs, allowed_domains) = {
+            let cfg = self.config.read().await;
+            (cfg.web_timeout, cfg.http_allowed_domains.clone())
+        };
+
         // 验证 URL
-        let validated_url = self.validate_url(url)?;
+        let validated_url = Self::validate_url(url, &allowed_domains)?;
 
         // 验证方法
         let http_method = self.validate_method(method)?;
@@ -55,7 +61,7 @@ impl HttpRequestTool {
 
         // 构建客户端
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(self.timeout_secs))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
 
@@ -99,8 +105,7 @@ impl HttpRequestTool {
         let response = request.send().await.map_err(|e| {
             if e.is_timeout() {
                 PluginError::InternalError(format!(
-                    "请求超时：{}s 内未完成（可调大 web_timeout 后重试）",
-                    self.timeout_secs
+                    "请求超时：{timeout_secs}s 内未完成（可调大 web_timeout 后重试）",
                 ))
             } else if e.is_connect() {
                 PluginError::InternalError(format!(
@@ -143,7 +148,7 @@ impl HttpRequestTool {
         }))
     }
 
-    fn validate_url(&self, url: &str) -> Result<String, PluginError> {
+    fn validate_url(url: &str, allowed_domains: &[String]) -> Result<String, PluginError> {
         let url = url.trim();
 
         if url.is_empty() {
@@ -171,7 +176,7 @@ impl HttpRequestTool {
         }
 
         // 检查允许的域名
-        if !host_matches_allowlist(&host, &self.allowed_domains) {
+        if !host_matches_allowlist(&host, allowed_domains) {
             return Err(PluginError::ValidationError(format!(
                 "主机 '{host}' 不在 allowed_domains 中"
             )));
@@ -253,51 +258,7 @@ impl Default for HttpRequestTool {
     /// 默认档取 [`WebConfig`](super::WebConfig) 的默认超时与默认白名单（`*`）——
     /// **唯一真源**，不在此处另写字面量（那正是「配置不生效」的成因）。
     fn default() -> Self {
-        let c = crate::plugins::web::web_config::WebConfig::default();
-        Self::new(c.web_timeout, c.http_allowed_domains)
-    }
-}
-
-/// 从 URL 提取主机
-fn extract_host(url: &str) -> Result<String, PluginError> {
-    let url = url::Url::parse(url)
-        .map_err(|e| PluginError::ValidationError(format!("无效的 URL: {e}")))?;
-
-    url.host_str()
-        .map(|h| h.to_string())
-        .ok_or_else(|| PluginError::ValidationError("URL 缺少主机".to_string()))
-}
-
-/// 检查是否为私有 / 本地 / 不可路由的主机。
-///
-/// 判据走 **IP 语义**而不是字符串前缀：`127.0.0.1` 是前缀比较唯一认得出的回环地址，
-/// 但 `127.0.0.2`、`0.0.0.0`、`::1`、`::ffff:127.0.0.1` 全都不是它，前缀比较会逐个
-/// 放行——而这些地址指向的正是本机与内网（`169.254.169.254` 是云元数据端点）。
-fn is_private_or_local_host(host: &str) -> bool {
-    let host = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase();
-    if host == "localhost" || host.ends_with(".localhost") {
-        return true;
-    }
-    match host.parse::<std::net::IpAddr>() {
-        Ok(ip) => match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()
-                    || v6.is_unspecified()
-                    || v6.is_unique_local() // fc00::/7
-                    || v6.is_unicast_link_local() // fe80::/10
-                    // IPv4-mapped（`::ffff:127.0.0.1`）：按内层 IPv4 判
-                    || v6.to_ipv4_mapped()
-                        .is_some_and(|v4| v4.is_loopback() || v4.is_private() || v4.is_link_local())
-            }
-        },
-        // 不是 IP：内网域名的常见后缀
-        Err(_) => host.ends_with(".local") || host.ends_with(".internal"),
+        Self::new(Arc::new(RwLock::new(WebConfig::default())))
     }
 }
 

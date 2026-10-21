@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-const DEFAULT_TIMEOUT_SECS: u64 = 15;
 const DEFAULT_MAX_RESULTS: usize = 5;
 const MAX_RESULTS_LIMIT: usize = 10;
 
@@ -38,7 +37,6 @@ fn upstream_base(configured: &str, official: &str) -> String {
 pub struct WebSearchTool {
     config: Arc<RwLock<WebConfig>>,
     max_results: usize,
-    timeout_secs: u64,
 }
 
 impl WebSearchTool {
@@ -46,7 +44,6 @@ impl WebSearchTool {
         Self {
             config,
             max_results: DEFAULT_MAX_RESULTS,
-            timeout_secs: DEFAULT_TIMEOUT_SECS,
         }
     }
 
@@ -71,46 +68,73 @@ impl WebSearchTool {
             return Err(PluginError::ValidationError("搜索查询不能为空".to_string()));
         }
 
-        let cfg = self.config.read().await;
-        let base = cfg.search_api_base.clone();
+        // 配置在入口读一次并拷走所需字段：不把读锁带过 `await`——
+        // 一次搜索最长可跑 `web_timeout` 秒，期间保存配置不该被堵住。
+        let (base, timeout_secs, tavily_api_key, serper_api_key) = {
+            let cfg = self.config.read().await;
+            (
+                cfg.search_api_base.clone(),
+                cfg.web_timeout,
+                cfg.tavily_api_key.clone(),
+                cfg.serper_api_key.clone(),
+            )
+        };
 
         // 优先使用 Tavily
-        if let Some(ref api_key) = cfg.tavily_api_key {
-            if !api_key.trim().is_empty() {
-                return match self
-                    .search_tavily(&base, query, api_key, max_results, lr.as_deref())
-                    .await
-                {
-                    Ok(results) => Ok(json!({
-                        "success": true,
-                        "results": results,
-                        "provider": "tavily"
-                    })),
-                    Err(e) => Err(PluginError::InternalError(e)),
-                };
-            }
+        if let Some(api_key) = tavily_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            return match self
+                .search_tavily(
+                    &base,
+                    query,
+                    api_key,
+                    max_results,
+                    lr.as_deref(),
+                    timeout_secs,
+                )
+                .await
+            {
+                Ok(results) => Ok(json!({
+                    "success": true,
+                    "results": results,
+                    "provider": "tavily"
+                })),
+                Err(e) => Err(PluginError::InternalError(e)),
+            };
         }
 
         // 其次使用 Serper
-        if let Some(ref api_key) = cfg.serper_api_key {
-            if !api_key.trim().is_empty() {
-                return match self
-                    .search_serper(&base, query, api_key, max_results, lr.as_deref())
-                    .await
-                {
-                    Ok(results) => Ok(json!({
-                        "success": true,
-                        "results": results,
-                        "provider": "serper"
-                    })),
-                    Err(e) => Err(PluginError::InternalError(e)),
-                };
-            }
+        if let Some(api_key) = serper_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            return match self
+                .search_serper(
+                    &base,
+                    query,
+                    api_key,
+                    max_results,
+                    lr.as_deref(),
+                    timeout_secs,
+                )
+                .await
+            {
+                Ok(results) => Ok(json!({
+                    "success": true,
+                    "results": results,
+                    "provider": "serper"
+                })),
+                Err(e) => Err(PluginError::InternalError(e)),
+            };
         }
 
         // 最后回退到 DuckDuckGo (HTML 抓取)
         match self
-            .search_duckduckgo(&base, query, max_results, lr.as_deref())
+            .search_duckduckgo(&base, query, max_results, lr.as_deref(), timeout_secs)
             .await
         {
             Ok(results) => Ok(json!({
@@ -129,9 +153,10 @@ impl WebSearchTool {
         api_key: &str,
         max_results: usize,
         _lr: Option<&str>,
+        timeout_secs: u64,
     ) -> Result<Vec<Value>, String> {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(self.timeout_secs))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
@@ -183,9 +208,10 @@ impl WebSearchTool {
         api_key: &str,
         max_results: usize,
         lr: Option<&str>,
+        timeout_secs: u64,
     ) -> Result<Vec<Value>, String> {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(self.timeout_secs))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
@@ -240,6 +266,7 @@ impl WebSearchTool {
         query: &str,
         max_results: usize,
         lr: Option<&str>,
+        timeout_secs: u64,
     ) -> Result<Vec<Value>, String> {
         let encoded_query = urlencoding::encode(query);
         let mut search_url = format!(
@@ -251,7 +278,7 @@ impl WebSearchTool {
         }
 
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(self.timeout_secs))
+            .timeout(Duration::from_secs(timeout_secs))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
