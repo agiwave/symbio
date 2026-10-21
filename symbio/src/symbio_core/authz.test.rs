@@ -580,8 +580,8 @@ fn person_local_is_not_in_the_capability_table() {
 
 /// 绑定即登记：未部署的主体经 [`bind_inheriting`] 拿到来源行，收束闸随之放行。
 ///
-/// 这条钉的是 [ADR-100] 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
-/// **不再靠 `matrix_for` 静默派生主行**，而是随会话装配点的绑定拿到一行——
+/// 这条钉的是 [ADR-100](../../../docs/010-adr/100.md) 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
+/// **不再靠未登记主体的静默派生拿主行**，而是随会话装配点的绑定拿到一行——
 /// 拿得到与拿不到都由可见的登记动作决定（少一行 = 一条拒绝）。
 #[test]
 fn a_bound_subject_takes_the_source_row() {

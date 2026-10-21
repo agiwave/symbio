@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./doc-count-audit.mjs', import.meta.url))
 
 /** 造一棵最小仓库：`docs/` 一份文档，`invariants` 与 `facts` 两处来源可覆写 */
-function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mechanisms: 10, paramKeys: 11 }, verify = 1 } = {}) {
+function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mechanisms: 10, paramKeys: 11 }, verify = 1, extra = {} } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
   try {
     const write = (rel, content) => {
@@ -33,6 +33,8 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
       fs.writeFileSync(abs, content)
     }
     write(doc, body)
+    // 源码注释侧的文件集（`symbio/src/**/*.rs` 承载的是同一批数字）
+    for (const [rel, content] of Object.entries(extra)) write(rel, content)
     // `check_all` 的形状照代码写：第一条是 `let mut all = …`，其余是 `all.extend(…)`
     write(
       'symbio/src/symbio_core/invariants/mod.rs',
@@ -133,6 +135,44 @@ test('不误报：数距名字太远，中间是散文（每 turn 至多一条�
 
 test('不误报：只提名字不给数', () => {
   const r = audit({ body: '# A\n\n`check_all` 是唯一读出口。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('源码注释把条数写错 ⇒ 红（口径不止文档）', () => {
+  // 注释里写「N 条」和文档里写「N 条」是同一件事：数字的唯一来源是 `check_all` 的函数体。
+  // 而改代码的人手边没有「这条注释里写了几条」，所以它比文档漂得更快。
+  const r = audit({
+    body: OK,
+    checkAll: 8,
+    extra: {
+      'symbio/src/plugins/loop/x.test.rs': '/// 且 `check_all` 七条全绿。\nfn t() {}\n',
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /DC-001 .*x\.test\.rs:1 说 `check_all` 有 7，而代码里是 8/)
+})
+
+test('源码注释说对了数 ⇒ 绿（扩文件集不是把守卫变成噪音）', () => {
+  const r = audit({
+    body: OK,
+    checkAll: 8,
+    extra: {
+      'symbio/src/plugins/loop/x.test.rs': '/// 且 `check_all` 八条全绿。\nfn t() {}\n',
+    },
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('不误报：数与名字之间有实词（读侧 `check_all` 会把同一条…）', () => {
+  // 本仓真例（`session/store/wal.rs` 的模块注释）：那个「一条」说的是 WAL 的计数，
+  // 与 `check_all` 有几条毫无关系。「紧邻」就是用来挡住这种句子的。
+  const r = audit({
+    body: OK,
+    checkAll: 8,
+    extra: {
+      'symbio/src/symbio_core/store/wal.rs': '/// 不拒绝而是计数 + 出声，读侧 `check_all` 会把同一条反复计入。\nfn t() {}\n',
+    },
+  })
   assert.equal(r.status, 0, r.stdout)
 })
 

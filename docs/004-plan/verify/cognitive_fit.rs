@@ -134,6 +134,13 @@ fn view_recent_ignore_asof(log: &[Ev], _as_of: u64, n: usize) -> Vec<&'static st
 // 性质测试二：扩散检索必须预算有界且可降级（I3 对 Recall 同样成立）
 // ─────────────────────────────────────────────────────────────
 
+/// 扩散读数。
+///
+/// **`used_ms` 与生产侧同一个口径**：`View::used.ms` 说的不是墙钟耗时，而是
+/// 「交给闭包的窗口条数」（1 事件 = 1ms 的扫描记账，见
+/// [`symbio_core/view/mod.rs`](../../../symbio/src/symbio_core/view/mod.rs)）；
+/// 本模型里每跳按 `ms_per_hop` 累计，同样是**扫描记账**而不是实测延迟。
+/// 于是「预算有界」这条判据在两侧讲的是同一件事：used 永不超过声明的预算。
 struct Diffusion { nodes: usize, degraded: bool, used_ms: u64 }
 
 /// 正确的实现：逐跳扩散，超预算就停在已扩散的部分并标 degraded
@@ -311,6 +318,12 @@ fn main() {
     assert_ne!(before, moved, "反向用例：as-of 前移后视图必须改变（否则 as-of 是死参数）");
 
     assert!(!small.degraded, "预算充足时不应降级");
+    // 「预算有界」的全部内容由这条断言承载：`used_ms` 是扫描记账（见 [`Diffusion`] 的口径注），
+    // 它一旦能越过声明的预算，预算就成了装饰——而这条判据此前只是被 `degraded` 顺带暗示着。
+    assert!(
+        small.used_ms <= 10_000 && large.used_ms <= 100,
+        "I3 有界性：`used_ms` 不得超过声明预算（越界 = 没有闸）"
+    );
     assert!(large.degraded, "预算不足时必须降级");
     assert!(large.nodes > 0, "降级必须带部分结果，不能返回空");
     assert!(!violates_i3(&large), "降级返回不违反 I3");

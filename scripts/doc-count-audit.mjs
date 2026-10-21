@@ -36,15 +36,23 @@
  * 妥协」这句话本身就在骗人。
  *
  * **形状**：`名字` 附近（同一行、限定窗口内）出现「数 + 量词」即判。窗口小是为了
- * 不误伤散文（「check_all 是唯一读出口」这种句子没有数）。**带箭头的一律不判**
- * ——那是 D-004 的形状，不是本脚本的。
+ * 不误伤散文（「check_all 是唯一读出口」这种句子没有数），而**紧邻**才是真正的闸：
+ * 数与名字之间只许空白与「的 / 为 / 是」这类连接词，否则「读侧 `check_all` 会把同一条」
+ * 里的「一条」会被当成 check_all 的条数（那是 WAL 的计数）。
+ *
+ * **扫两类文件**：`docs/` 下的活跃文档，加 `symbio/src` 下的 `*.rs` 源码注释。
+ * 注释承载的是同一批数字，却比文档更容易漂——改代码的人手边没有「这条注释里写了几条」
+ * 这件事，而读注释的人和读代码的人都以为自己看的是真相。判据、窗口、紧邻限定两侧共用一份，
+ * 不另立规则（[T-214](../docs/009-task/214-文档口径对账批二.md "T-214-文档口径对账批二") 的 08-5 口径扩展）。
+ *
+ * **带箭头的一律不判**：数「从几个变成几个」是变更史，归 `doc-link-audit` 的 D-004。
  *
  * 用法：node scripts/doc-count-audit.mjs [--root=<仓库根>] [--strict]
  * 退出码：0 = 通过；1 = 有对不上；2 = 审计范围读不出（来源读不出来即 exit 2，
  *      **不退化成「什么都没检查」**——那正是这类守卫最安静的死法）。
  */
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns DC 文档计数对账（文档里的少数几个数 vs 代码）
+// @ns DC 文档计数对账（文档与源码注释里的少数几个数 vs 代码）
 // @codes DC-001 DC-002 DC-003 DC-004 DC-005
 
 import fs from 'node:fs'
@@ -179,16 +187,45 @@ function activeDocs(root) {
 }
 
 /**
- * 在一行里找「名字紧邻的 数+量词」。窗口取名字**前后各 6 个字符**，且
- * 只查「数**之前**」那一段，数**之后**的标点是正常的——本仓真例
- * `（\`check_all\` 八条，空 = 全绿）` 里数后面紧跟一个逗号。早先的写法把整个窗口
- * 都判一遍，于是这一行被整条放掉：**改错数字反而不红**（实测注入「七条」判据没反应）。
- * 反过来 `顶层键、三条不变量` 里顿号在数**之前**，说明跨过了并列项，抓到的是别的
- * 计数，必须放掉。
+ * 源码注释侧（DC-006）：`symbio/src` 下的 `*.rs`。
  *
- * 这两条限定是这条判据能不能用的前提：不加就会对**本仓正确的正文**误报
- * （实测会报 `每 turn 至多一条开轮` 与 `三条不变量` 两处），而天天误报的守卫最后
- * 只会被豁免喂死——这是 `grep-audit` S-012 明确拒绝词表判据时给出的教训。
+ * 为什么代码注释也在判据里：**它承载的是同一批数字**，却比文档更容易漂——改代码的人
+ * 手边没有「这条注释里写了几条」这件事。`invariants/mod.rs` 的模块头当年就写着
+ * 「八条」而函数体早已是别的条数，读注释的人按它理解机制，读函数体的人按代码理解，
+ * 两边都以为自己看的是真相。
+ *
+ * 口径与文档侧**同一条规则**（同一个 `RULES`、同一个窗口与标点限定），只是文件集不同：
+ * 判据形状为「名字 + 紧邻的 数 + 量词」，注释里那句「至多一条开轮」这类散文因为
+ * 数之前跨过标点而被放掉，误报面与文档侧同宽。
+ */
+function activeComments(root) {
+  const out = []
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (ent.isDirectory()) {
+        if (!SKIP_DIRS.has(ent.name)) walk(path.join(dir, ent.name))
+        continue
+      }
+      if (ent.name.endsWith('.rs')) out.push(path.join(dir, ent.name))
+    }
+  }
+  walk(path.join(root, 'symbio', 'src'))
+  return out.sort()
+}
+
+/**
+ * 在一行里找「名字**紧邻**的 数+量词」。窗口取名字前后各 6 个字符，但窗口只是搜索范围，
+ * **紧邻**才是判据：
+ *
+ * - 数在名字**之后**：`check_all` 八条 / `check_all`（八条）——数与名字之间只许有空白与
+ *   「的 / 为 / 是 / =」这类连接词；本仓真例 `（\`check_all\` 八条，空 = 全绿）` 里
+ *   数**后面**紧跟逗号，那是正常的，判据只看数**之前**那一段。
+ * - 数在名字**之前**：`机制表 10 个顶层键`——量词必须紧贴名字，中间不许有别的词。
+ *
+ * 少了「紧邻」这一层，注释里的散文会混进来：`读侧 \`check_all\` 会把同一条…` 的
+ * 「一条」说的是 WAL 的计数，与 `check_all` 有几条无关。这类误报一旦进判据，
+ * 天天误报的守卫最后只会被豁免喂死——这是 `grep-audit` S-012 明确拒绝词表判据时给出的教训。
+ * 反过来 `顶层键、三条不变量` 里顿号在数**之前**，说明跨过了并列项，抓到的是别的计数，同样放掉。
  *
  * **带 `→` 的一律跳过**：数「从几个变成几个」是变更史，归 D-004。
  */
@@ -203,15 +240,26 @@ const ARROW_WIN = 12
 const COUNT = /([零一二两三四五六七八九十]+|\d+)\s*[（(]?\s*(?:条|项|个|处|格)/
 /** 名字与数**之间**不得跨过的标点 */
 const PUNCT = /[、，；。：|]/
+/** 数在名字之后时，两者之间允许的连接符（空白 + 「的 / 为 / 是 / =」+ 左括号） */
+const GLUE_AFTER = /^[\s（(的为是=:：]*$/
 /** 箭头常紧跟在这个数后面（叙述一次迁移），那属于 D-004 的形状。窗口取 ARROW_WIN：
  *  13 号自己的 D0 行写着「`check_all` 的 `五条 → 七条`」——数距名字只有 4 字而
  *  箭头在 6 字外，只按 WIN 判就会把它当成「说 check_all 有 5 条」。 */
 const hasArrow = (s) => s.includes('→') || s.includes('=>')
 
-/** 取窗口里那个数；数之前跨过标点就返回 null（宁漏不误报） */
-function countIn(win) {
+/** 数在名字**之后**：取窗口里第一个数，且它与名字之间只有连接符，否则返回 null */
+function countAfter(win) {
   const m = win.match(COUNT)
   if (!m) return null
+  if (!GLUE_AFTER.test(win.slice(0, m.index))) return null
+  return cnToNum(m[1])
+}
+
+/** 数在名字**之前**：量词必须紧贴名字（匹配段落在窗口末尾），且数之前不跨过标点 */
+function countBefore(win) {
+  const m = win.match(COUNT)
+  if (!m) return null
+  if (win.slice(m.index + m[0].length).trim() !== '') return null
   if (PUNCT.test(win.slice(0, m.index))) return null
   return cnToNum(m[1])
 }
@@ -228,7 +276,7 @@ function findings(docs, rule, expected) {
       const end = at + m0[0].length
       if (hasArrow(line.slice(Math.max(0, at - ARROW_WIN), end + ARROW_WIN))) continue
       // 数在名字**之前**：`机制表 10 个顶层键`；**之后**：`顶层键（10 项）`
-      const n = countIn(line.slice(Math.max(0, at - WIN), at)) ?? countIn(line.slice(end, end + WIN))
+      const n = countBefore(line.slice(Math.max(0, at - WIN), at)) ?? countAfter(line.slice(end, end + WIN))
       if (n == null) continue
       if (n !== expected) out.push({ file: f, line: i + 1, said: n, expected, text: line.trim().slice(0, 70) })
     }
@@ -258,6 +306,7 @@ if (grid == null) {
   console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio','src','symbio_core','event','mod.rs')} 或 01 §6 表）`)
 }
 const docs = activeDocs(REPO_ROOT)
+const comments = activeComments(REPO_ROOT)
 if (docs.length === 0) {
   console.log(red('[ERROR] DC-001 审计范围读不出：`docs/` 下没有活跃文档'))
   process.exit(2)
@@ -271,8 +320,8 @@ const expected = {
 }
 let errors = 0
 for (const rule of RULES) {
-  const hits = findings(docs, rule, expected[rule.code])
-  for (const h of hits) {
+  // 文档与源码注释共用同一条判据：数字的来源只有一个（代码），说它有几条的地方有两类。
+  for (const h of findings([...docs, ...comments], rule, expected[rule.code])) {
     errors++
     console.log(
       red(
@@ -285,7 +334,7 @@ for (const rule of RULES) {
 }
 
 if (errors) {
-  console.log(`doc-count-audit 未通过：${errors} 处计数对不上（扫 ${docs.length} 份活跃文档 / ${RULES.length} 个计数）`)
+  console.log(`doc-count-audit 未通过：${errors} 处计数对不上（扫 ${docs.length + comments.length} 处声称（文档 ${docs.length} · 源码注释 ${comments.length}）/ ${RULES.length} 个计数）`)
   process.exit(1)
 }
 
@@ -307,7 +356,7 @@ if (grid) {
 
 console.log(
   green(
-    `doc-count-audit 通过：扫 ${docs.length} 份活跃文档，` +
+    `doc-count-audit 通过：扫 ${docs.length} 份活跃文档 + ${comments.length} 份源码注释，` +
       `check_all ${checkAll} 条 / 顶层键 ${facts.mechanisms} 个 / 含子键 ${facts.paramKeys} 个 / 验证程序 ${verifyPrograms} 个`,
   ),
 )

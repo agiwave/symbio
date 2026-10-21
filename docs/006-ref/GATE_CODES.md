@@ -26,7 +26,7 @@ lists: [gate-codes=owner]
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014 | `D-015` |
-| **DC** | 文档计数对账（文档里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
+| **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |

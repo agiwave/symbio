@@ -16,6 +16,13 @@
 //! | C3 / N5 | I2 无溯源不声明 | 断言类 + 收束类事件 `produced_by` 非空 | [`produced_by_coverage`] |
 //! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
+//! | 终止性前提 3（C14） | 终止性定理 | 任务依赖图**无环**且无悬空依赖 | [`acyclic_deps`] |
+//! | 终止性前提 2 | 终止性定理 | 每任务返工轮数有硬上界（`MAX_REWORK_ROUNDS`） | [`rework_bounded`] |
+//!
+//! 表里有几行 = `check_all` 里有几条（前提 1「`seq` 单调」就是第一行 C1，
+//! 三个前提因此全在这张表里）。这条等式由 `doc-count-audit` DC-001 守：
+//! 它数的是函数体里的断言，不是这张表——表少一行不会让它变绿，但读表的人会以为
+//! 终止性还没接线。
 //!
 //! ## 判定纪律
 //!

@@ -10,7 +10,7 @@
 
 use super::*;
 
-/// 缺省即出厂行为：写入 16 KiB、注入 4 KiB（与 work 插件同口径）
+/// 缺省即出厂行为：写入 16 KiB、注入 4 KiB（与 memory 插件的两腿同口径）
 #[test]
 fn memory_gate_defaults_are_the_shipped_behaviour() {
     let c = SessionConfig::default();

@@ -63,7 +63,7 @@ fn kinds(store: &EventStore) -> Vec<String> {
 }
 
 /// 正向：三项清单各按状态落格——进行中补 `progress`、已完成补 `asserted`，
-/// 且 `check_all` 七条全绿（`task.asserted` 是断言类事件，溯源必须在）。
+/// 且 `check_all` 全绿（`task.asserted` 是断言类事件，溯源必须在）。
 #[test]
 fn declaration_lands_opened_progress_and_asserted() {
     let store = EventStore::new();

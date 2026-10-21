@@ -30,7 +30,12 @@ impl Budget {
     }
 }
 
-/// 投影的产出：值 + 是否降级 + 实际消耗。
+/// 投影的产出：值 + 是否降级 + **扫描记账**。
+///
+/// `used.ms` 说的不是墙钟耗时，而是**交给闭包的窗口条数**（1 事件 = 1ms 的记账口径，
+/// 与 [`super::projection`] 的预算语义同一套）：投影是纯函数，跑多久取决于宿主与机器，
+/// 而「扫了多少」由窗口决定、可比可断言。把它读成耗时的人会拿它做延迟判据，
+/// 而那正是它承载不了的东西。
 ///
 /// **只能**是 `View`，不是 `Result`（构造即锁定，见 [`crate::symbio_core::projection::Projection`]）。
 /// 只由 [`Projection::apply`](crate::symbio_core::projection::Projection::apply) 构造

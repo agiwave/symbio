@@ -9,10 +9,13 @@
 //!
 //! | 层 | 读写面（VDFS 地址） | 注入者 | 物理落位 |
 //! |---|---|---|---|
-//! | 工作区 | work（`<根>/work/AGENTS.md`） | work | `{workdir}/AGENTS.md` |
+//! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{workdir}/AGENTS.md` |
 //! | 会话 | session（`<根>/session/<id>/MEMORY.md`） | session | `{会话目录}/MEMORY.md` |
-//! | 系统智能体 | agent（`<根>/agent/AGENTS.md`） | agent | `{homedir}/AGENTS.md` |
-//! | 子智能体 | agent（`<根>/agent/<id>/AGENTS.md`） | agent | `<agentdir>/AGENTS.md` |
+//! | 系统智能体 | memory（`<根>/memory/AGENTS.md`） | memory | `{homedir}/AGENTS.md` |
+//! | 子智能体 | memory（`<根>/agent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
+//!
+//! 挂载名与物理名**可以不同**：工作区腿的挂载名是 `WORKSPACE.md` 而物理文件仍是
+//! `AGENTS.md`——地址里已经写了作用域，名字就不必再靠目录区分（见 `plugins/memory/workspace.rs`）。
 //!
 //! 各层形态完全一样——**一个 UTF-8 文本文件、两道容量闸门、一行头信息的提示词片段、
 //! 一个 VDFS 读写节点**。几份实现就是几份会各自漂移的口径：「写侧是拒绝还是截断」
@@ -48,7 +51,7 @@
 //!
 //! ⚠️ 这条线划的是**形态**，不是「谁的名字听起来像指令」：`{homedir}/AGENTS.md`
 //! 一度以「只读指令」的身份**不在**本模块里（宿主只读它、不给地址、不设容量），
-//! 但它现在有地址（`<根>/agent/AGENTS.md`）与两道闸门、在设置页可编辑，
+//! 但它现在有地址（`<根>/memory/AGENTS.md`）与两道闸门、在设置页可编辑，
 //! 于是它**进了本模块**。反过来，模型插件注册的人格片段没有地址，就永远不进来。
 //!
 //! ## 归属：一个作用域只有一个所有者
@@ -138,7 +141,7 @@ impl MemoryInjection {
 pub struct MemorySegmentSpec<'a> {
     /// 片段标题，渲染为 `【{title}】`（如「工作区记忆」）
     pub title: &'a str,
-    /// 可编辑地址（如 `<根>/work/工作区/AGENTS.md`）——**必须真实可达**
+    /// 可编辑地址（如 `<根>/memory/WORKSPACE.md`）——**必须真实可达**
     pub address: &'a str,
     /// 附加说明（可选），如「与【工作区记忆】相互独立」
     pub note: Option<&'a str>,
@@ -345,7 +348,7 @@ impl MemoryFile {
 /// 渲染「一行头信息 + 正文」的记忆片段。
 ///
 /// ```text
-/// 【工作区记忆】（地址：<根>/work/工作区/AGENTS.md，上限：16384字节，当前：111字节；改写前先 vdfs_read，合并后整篇 vdfs_write）
+/// 【工作区记忆】（地址：<根>/memory/WORKSPACE.md，上限：16384字节，当前：111字节；改写前先 vdfs_read，合并后整篇 vdfs_write）
 /// <记忆正文>
 /// ```
 ///

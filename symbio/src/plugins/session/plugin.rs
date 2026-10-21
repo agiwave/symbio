@@ -484,10 +484,10 @@ impl Plugin for SessionPlugin {
         // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
-            // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责
-            // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `MEMORY.md` 归本
-            // 插件——三层各有一个所有者，见 `providers/memory` 的模块文档。
+            // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）与本会话无关：
+            // 那是「智能体自身」与「工作区」两个作用域，归 memory 插件（谁能读写它，谁负责
+            // 注入它）。本会话的 `MEMORY.md` 归本插件——各作用域各有一个所有者，
+            // 层数与地址见 `providers/memory` 的模块文档。
 
             // 会话记忆（`<根>/session/<id>/MEMORY.md`）：**本会话私有**，可读写、有地址、
             // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
