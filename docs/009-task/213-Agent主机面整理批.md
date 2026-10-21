@@ -2,7 +2,7 @@
 kind: task
 id: T-213-Agent主机面整理批
 title: Agent 主机面整理批——桥接三组语义拆分、委托可观测、归属表机器校验
-status: doing
+status: done
 created: 2026-10-20
 track: plan
 prio: later
@@ -10,6 +10,7 @@ deps: []
 parent: T-183-质量与机制清偿总批
 where: symbio/src/plugins/agent/host/subagent.rs · symbio/src/plugins/agent/host/subagent.test.rs · symbio/src/plugins/agent/host/mod.rs · symbio/src/plugins/agent/README.md · scripts/agent-ownership-audit.mjs · symbio/src/symbio_core/actors/commitment.rs · symbio/src/plugins/session/stats.rs
 exit: '桥接函数的三组语义（审批与提问冒泡识别、消息过滤、节点改写）拆成三个可单测函数，改写顺序依赖（主体改写须在角色改写之后）保持且有判据；`agent_run` 的能力自述补可观测判据（父会话收束时若本轮发生过 `agent_run`，存在一条可查的委托记录）；主机模块文档里的归属表加机器校验（模块文档列的归属、装配清单、实际插件目录三者一致）；全量门禁与 e2e 全绿'
+evidence: '三项全闭，三段各一个提交。段一（`ef535b9e`，S-7 归属表机器校验）：新增 `scripts/agent-ownership-audit.mjs`（AO-001…006），三条来源对账（agent 侧文档 ↔ `ASSEMBLY_SUB_AGENT_PLUGINS` ↔ 实际插件目录 ↔ `host/` 实际模块文件），只判形状不判散文；首轮输出正是 09 报告 D-4 数出的那 5 处而此前门禁全绿（`doc-link-audit` D-010 判反引号路径却放过它们），校验与订正同批落地。三份归属表副本没有合并（模块文档要就地可读），代价由 AO-002 付——同一「东西」在全部副本里只能有一个归谁与地址。判据 `agent-ownership-audit.test.mjs` 10 条。段二（`06c4f259`，S-6 委托可观测）：缺的是**读侧**——写侧与它的测试早在，出口表 S08 那行的用户可见出口却是 `—`。core 加 `commitment_records`（与 `commitment_events` 成对，写侧成格 / 读侧翻译各住一边；配对靠载荷 `id`，`asserted` 是同一条约第三格不另计，幽灵了结跳过 fail-closed），`session/stats` 加 `commitments` 列 + 面板第五段「承诺」（违约率分母取已了结数），`04 §1.3` 的 `—` 换成列名 ⇒ 无用户读数的行 10 → 9。没有新增守卫脚本。段三（`664dcb29`，S-3 桥接拆分）：`pending_bubble_of` / `message_fate` / `relabel_for_parent` 三个纯函数，桥体只剩编排（220 行，原 238——收益是可测性不是行数，拆前这四组判据一条单测都没有）；顺序依赖（主体改写排在角色改写之后）由 `relabel_rewrites_legacy_role_before_principal` 用「role 空、族靠主体折出 Assistant」的节点钉住；过滤判据补上第二个调用点，堵掉窄增量帧绕过 `user` 不透传漏进父视图的那一格。判据 +7。验证：cargo test -p symbio --lib 1948 passed / 1 ignored（1939 → 1941 → 1948，棘轮由门禁自动写回）；clippy 零告警；S-014 role 格棘轮 151 持平（夹具直写集中成一个构造点带豁免理由）；CS-001 三格未变、C-003 单消费方 14/14；全量门禁 126/126；e2e 78/78。'
 ---
 
 ## 内容
