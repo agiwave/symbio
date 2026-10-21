@@ -110,7 +110,16 @@ export const BASELINE = {
   // （切片两头的跨片边头尾对称宽限——只宽限头部等于假设"切片总是从头切"）、
   // `pending_events_are_skipped_by_dangling_check`（未入库事件跳过）。
   // 前四条是 `produced_by_coverage` 查不出的那一半：它只问"有没有边"，不问"指向谁"。
-  rustTests: 1976,
+  // T-219 新增 5 条（1976→1981，非放宽）：`turn_runner.test.rs` 的
+  // `denial_fact_tests` 一族——`a_denied_closure_lands_a_denial_fact`（拒绝落
+  // `authz.denied`，载荷答得出「拒了什么 / 谁 / 因何」，且落它不变量仍全绿）、
+  // `a_denied_turn_stays_unresolved`（`denied` **不是**收束格——本任务最容易做反的一处：
+  // 为了让日志好看而把它算成收束，等于把「静默中断」一起掩盖）、
+  // `a_denial_is_recorded_once_per_turn_and_kind`（幂等：产物臂在工具结果循环里会重复到闸前）、
+  // `speech_and_artifact_denials_do_not_collide`（两臂各自成键）、
+  // `denial_names_the_capability_the_gate_judges`（**对拍**：拒绝原因里的能力名拼写
+  // 必须真的是生产表里那一项——手写一份没有对拍就只是又一处「表授予 A、闸门判 B」）。
+  rustTests: 1981,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。

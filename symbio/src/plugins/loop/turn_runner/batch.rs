@@ -33,12 +33,22 @@ where
         // 产物闸（`ClosureKind::Artifact`，ADR-067）：不持 `produce.artifact` ⇒
         // 这条结果不入格（warn 一次，不刷屏）。结果照进 prompt / 照记
         // `all_tool_calls`——闸管的是「入格」，不是「发生过」。
-        if !closure_granted(&actor, ClosureKind::Artifact) {
+        if let Err(why) = closure_gate(&actor, ClosureKind::Artifact) {
             if oi == 0 {
+                // 拒绝落否定事实，**只落一次**：`deny` 的幂等键是
+                // `deny-{turn}-artifact`，同一轮多条结果说的是同一件事。
+                deny(
+                    store,
+                    &actor,
+                    turn,
+                    user_seq,
+                    ClosureKind::Artifact,
+                    crate::symbio_core::EVENT_ARTIFACT_ADDED,
+                    &why,
+                );
                 crate::plugin_warn!(
                     "actors",
-                    "[v2] 产物被授权拒绝（{} 缺 produce.artifact），本轮工具结果不入格（turn={turn}）",
-                    actor.principal
+                    "[v2] 产物被授权拒绝（{why}），本轮工具结果不入格（turn={turn}）"
                 );
             }
             continue;

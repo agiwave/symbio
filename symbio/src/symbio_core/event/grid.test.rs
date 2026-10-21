@@ -12,8 +12,8 @@ use serde_json::json;
 ///
 /// `event/mod.rs` 里另有两条 `EVENT_TRIGGER_*` 常量：`meta.trigger` 的**键名**与它的
 /// `kind` 取值（[ADR-077](../../../../docs/010-adr/077.md "ADR-077")）。它们不是事件名，
-/// 所以不进这张表——这条断言把「32 个事件名」钉住，将来加名字要同批改这里。
-const DECLARED_EVENT_NAMES: usize = 32;
+/// 所以不进这张表——这条断言把「33 个事件名」钉住，将来加名字要同批改这里。
+const DECLARED_EVENT_NAMES: usize = 33;
 
 #[test]
 fn the_table_is_one_row_per_name_and_covers_every_declared_name() {

@@ -702,3 +702,75 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
   })
   assert.match(r.stdout, /S-014 通过：role 格直写存量 \d+ 处，与基线持平/)
 })
+
+// ── S-015: 收束闸的否定分支必须落事实 ──────────────────────────────────
+// 规则判的是**零出现**（不是棘轮）：否定分支若回到 `if !closure_granted { … }`，
+// 「拒绝」就又是「什么都没写」——日志里与「没跑完」同形，而不会有任何东西变红。
+const S015_FILE = 'symbio/src/plugins/loop/sample.rs'
+
+function gateAudit(source, name = S015_FILE) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s015-'))
+  try {
+    const target = path.join(root, name)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, source)
+    const env = { ...process.env, NO_COLOR: '1' }
+    delete env.SCOPE
+    return spawnSync(process.execPath, [script], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test('S-015 否定分支用 `!closure_granted(` 即红，并点名改法', () => {
+  const src = 'fn f() {\n    if !closure_granted(&actor, ClosureKind::Speech) {\n        return;\n    }\n}\n'
+  const r = gateAudit(src)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-015 违例：收束闸的否定分支用 `!closure_granted\(` 判（1 处）/)
+  assert.match(r.stdout, /sample\.rs:2/)
+  assert.match(r.stdout, /closure_gate\(\.\.\)` 并调 `deny\(\.\.\)`/)
+})
+
+test('S-015 放行肯定分支与 `closure_gate` 的 Err 分支', () => {
+  // 肯定分支（`if closure_granted {…}`）是合法用法：它不落否定事实。
+  const granted = 'fn f() {\n    if closure_granted(&actor, ClosureKind::Artifact) {\n        return;\n    }\n}\n'
+  assert.equal(gateAudit(granted).status, 0, gateAudit(granted).stdout)
+  const gate = 'fn f() {\n    if let Err(why) = closure_gate(&actor, ClosureKind::Speech) {\n        deny(store, &actor, 1, 2, ClosureKind::Speech, "k", &why);\n    }\n}\n'
+  assert.equal(gateAudit(gate).status, 0, gateAudit(gate).stdout)
+})
+
+test('S-015 不判注释行，测试文件豁免，豁免必须写理由', () => {
+  const asComment = '/// 旧写法（反例）：if !closure_granted(&actor, kind) { … }\n'
+  assert.equal(gateAudit(asComment).status, 0, '注释里的形状是反例展示，不是拒绝路径')
+  // 测试文件里断言谓词本身不是拒绝路径（判据用例正是它）。
+  const inTest = 'fn t() {\n    assert!(!closure_granted(&spec, ClosureKind::Speech));\n}\n'
+  assert.equal(
+    gateAudit(inTest, 'symbio/src/plugins/loop/sample.test.rs').status,
+    0,
+    '测试文件豁免',
+  )
+  const hit = '    if !closure_granted(&a, k) {\n'
+  for (const waived of [
+    hit.replace('\n', '  // grep-audit-allow S-015: 只读探针，不落格\n'),
+    `// grep-audit-allow S-015: 只读探针，不落格\n${hit}`,
+  ]) {
+    assert.equal(gateAudit(waived).status, 0, gateAudit(waived).stdout)
+  }
+  const empty = hit.replace('\n', '  // grep-audit-allow S-015:   \n')
+  assert.equal(gateAudit(empty).status, 1, '空理由不算豁免')
+})
+
+test('S-015 真实仓库零处（存量已全部迁完）', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: SCAN_TIMEOUT_MS,
+  })
+  assert.match(r.stdout, /S-015 通过：否定分支零处/)
+})

@@ -24,6 +24,8 @@
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
  *   - S-014:        ChatNode 存量 `role` 格的直写只许降（棘轮；身份写 `principal`，
  *                   读走 `node_role()` / `legacy_role()`，字段已退出 wire）
+ *   - S-015:        收束闸的否定分支必须走 `closure_gate` + `deny`（`!closure_granted(`
+ *                   零出现）——否则「拒绝」又变成「没写」，日志里与「没跑完」同形
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -41,7 +43,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -731,6 +733,84 @@ const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
       S014_IS_REPO
         ? `S-014 通过：role 格直写存量 ${s014} 处，与基线持平（只许降）`
         : `S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比`,
+    )
+  }
+}
+console.log()
+
+// ── S-015: 收束闸的否定分支必须落事实 ─────────────────────────────────
+// 写侧闸有两个函数，用法不同：
+//   · `closure_granted(actor, kind) -> bool`：**肯定**分支用（`if closure_granted {…}`）；
+//   · `closure_gate(actor, kind) -> Result<(), String>`：**否定**分支用——
+//     它把「为什么拒」带出来，交给 `deny(…)` 落一条 `authz.denied`。
+//
+// 否定分支若回到 `if !closure_granted { … return }`，拒绝就又成了「什么都没写」：
+// 日志里「被拒」与「根本没跑完」同形，事后答不出谁/何时/因何被拒，回放重现不出
+// 这次拒绝（[T-219](../docs/009-task/219-拒绝落事实.md "T-219-拒绝落事实")）。
+// 这条不是风格问题——它违反 I1（单通道），而违反的形态**不会有任何东西变红**：
+// 该轮照样留在未收束态，`unresolved_turns` 照样报，看起来和"正常被拒"一样。
+//
+// 判据是**零出现**（不是棘轮）：新增一条否定分支就得走 `closure_gate` + `deny`，
+// 没有"存量"可言——存量已经全部迁完。
+console.log('--- S-015: 收束闸否定分支必须落事实 ---')
+{
+  const S015_ROOTS = ['symbio/src/plugins']
+  const S015_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S015_IS_REPO = path.resolve(S015_BASE) === path.resolve(repoRoot)
+  // 反斜杠一律不出现：本文件的生成/改写链路上它被吃过两次，正则写成字符判定更稳。
+  const isNegatedGate = (l) => {
+    const at = l.indexOf('closure_granted')
+    if (at < 0) return false
+    // 前面（跳过空白）必须是 `!`
+    let i = at - 1
+    while (i >= 0 && (l[i] === ' ' || l[i] === '\t')) i--
+    return i >= 0 && l[i] === '!'
+  }
+  const isComment = (l) => {
+    const t = l.trimStart()
+    return t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')
+  }
+  const isWaived = (l) => {
+    const marker = 'grep-audit-allow S-015:'
+    const at = l.indexOf(marker)
+    if (at < 0) return false
+    // 理由必须含**至少一个字母 / 数字 / 汉字**（与 S-010 / S-014 同口径：空理由不算豁免）
+    const rest = l.slice(at + marker.length)
+    return [...rest].some((c) => /[0-9A-Za-z]/.test(c) || c.codePointAt(0) > 127)
+  }
+  let s015 = 0
+  const s015List = []
+  for (const file of S015_ROOTS.flatMap((r) => walk(path.join(S015_BASE, r)))) {
+    // 测试文件豁免：那里 `!closure_granted(..)` 是**断言谓词本身**，不是拒绝路径
+    // （判据用例 `closure_is_withheld_when_the_principal_lacks_the_grant` 正是它）。
+    // 拒绝路径只在生产代码里。
+    if (path.basename(file).endsWith('.test.rs')) continue
+    let text
+    try {
+      text = fs.readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+    const lines = text.split(String.fromCharCode(10))
+    lines.forEach((l, i) => {
+      if (isComment(l)) return
+      if (!isNegatedGate(l)) return
+      if (isWaived(l) || (i > 0 && isWaived(lines[i - 1]))) return
+      s015++
+      s015List.push(`${disp(file)}:${i + 1}`)
+    })
+  }
+  if (s015 > 0) {
+    err(
+      `S-015 违例：收束闸的否定分支用 \`!closure_granted(\` 判（${s015} 处）——` +
+        '改用 `if let Err(why) = closure_gate(..)` 并调 `deny(..)` 落 `authz.denied`。' +
+        `命中：${s015List.join('、')}`,
+    )
+  } else {
+    ok(
+      S015_IS_REPO
+        ? 'S-015 通过：否定分支零处 `!closure_granted(`（全部走 closure_gate + deny）'
+        : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }
 }

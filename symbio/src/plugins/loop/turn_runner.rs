@@ -32,8 +32,8 @@
 use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     LlmTurn, PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
-    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use std::borrow::Cow;
 
@@ -561,6 +561,33 @@ enum ClosureKind {
     Artifact,
 }
 
+impl ClosureKind {
+    /// 种类名——`authz.denied` 载荷的 `kind` 与幂等键的尾段都用它。
+    ///
+    /// 一个名字一个来源：载荷里写一套、幂等键里写另一套，读侧按 `kind` 分组时
+    /// 会漏掉一半（两套都是合法拼写，谁也不报错）。
+    fn name(self) -> &'static str {
+        match self {
+            ClosureKind::Speech => "speech",
+            ClosureKind::Artifact => "artifact",
+        }
+    }
+
+    /// 这一类格要的**能力名**（拒绝原因里说的就是它）。
+    ///
+    /// 拼写与 `Capability::Reply` / `Capability::ProduceArtifact` 的 `.name()` 同值，
+    /// 但本模块看不见 `governance`（core 的私有子模块）——所以这里写一遍，
+    /// 由 `denial_names_the_capability_the_gate_judges` 用 `ActorSpec::holds`
+    /// **对拍**：拼错一个字符，那条用例当场红。手写一份没有对拍，就只是又一处
+    /// 「表授予 A、闸门判 B」。
+    fn capability_name(self) -> &'static str {
+        match self {
+            ClosureKind::Speech => "reply",
+            ClosureKind::Artifact => "produce.artifact",
+        }
+    }
+}
+
 /// 写侧授权闸（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 写侧，
 /// [04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：该主体此刻能否写
 /// `kind` 所指的那一格。
@@ -578,10 +605,14 @@ enum ClosureKind {
 /// `can_produce_artifact`。`Speech` 的 `first` 恒为 `true`：运行器一轮只落一格
 /// 发言收束（`final_unique_per_turn` 是不变量），不存在「同轮追加」那一态。
 ///
-/// 拒绝 ⇒ **不落格**：
+/// 拒绝 ⇒ **不落格，但落一条否定事实**（`authz.denied`，见 [`deny`]）：
 /// - 发言臂 ⇒ 该轮留在未收束态，`check_all` 会把它报出来（C4）——**除非本轮落过
 ///   产物格**，那同样算收束（`unresolved_turns` 与产物闸同批认可）；
 /// - 产物臂 ⇒ 那一条工具结果不入格（warn 后跳过）。
+///
+/// 「不落格」与「落否定事实」不矛盾：被拒的那一格确实没写（那是权限的结论），
+/// 而「这次拒绝发生过」本身是事实（那是 I1 的要求）。两者缺一：只不落格 ⇒
+/// 「被拒」与「没跑完」在日志上同形；只落格 ⇒ 权限形同虚设。
 ///
 /// ## 第二道：作用域上限（[T-105]）
 ///
@@ -596,28 +627,113 @@ enum ClosureKind {
 ///
 /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
+    closure_gate(actor, kind).is_ok()
+}
+
+/// 与 [`closure_granted`] **同一个判定**，但把「为什么拒」带出来。
+///
+/// 分成两个函数而不是各写一份谓词：`closure_granted` 是 `is_ok()` 的一行壳，
+/// 判据只有这一处。两处各写一套「这一类格要什么能力」就会让闸门与拒绝原因分叉
+/// ——那时 `denied` 事实记的原因与实际拒它的理由不是同一件事，比不记更坏。
+///
+/// 原因字符串里带**能力名**（`Capability::name()`）而不是「缺 reply.first」这种
+/// 手写措辞：能力名是表里的同一份数据，改了名字这里跟着改；手写措辞不会。
+fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
+    // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
+    // ——名住 core，规格方法与表谓词共用它（ADR-103：不按轮次位置分能力）。
     let own = match kind {
-        // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
-        // ——名住 core，规格方法与表谓词共用它（ADR-103：不按轮次位置分能力）。
         ClosureKind::Speech => actor.can_land_speech(),
         ClosureKind::Artifact => actor.can_land_artifact(),
     };
-    own && within_delegation_ceiling(actor, kind)
+    if !own {
+        return Err(format!(
+            "{} 不持 {}",
+            actor.principal,
+            kind.capability_name()
+        ));
+    }
+    within_delegation_ceiling(actor, kind)
+}
+
+/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]，T-219）。
+///
+/// 闸门拒绝时此前只留一条 `warn`：日志里剩下的是「该轮没收束」，与「根本没跑完」
+/// 同形。本函数把否定落成事实——判定与矩阵**一个字不动**，变的只是否定的表达。
+///
+/// ## 为什么是「落事实」而不是「返回错误」
+///
+/// I1 单通道：一切状态变更只经事实源。「被拒绝」是一个状态变更，因此它也必须
+/// 是一条事实——否则不可审计（谁 / 何时 / 因何被拒）、不可回放（没有东西可重放）。
+///
+/// ## 三条边界（与 [`EVENT_AUTHZ_DENIED`] 的载荷说明同源）
+///
+/// 1. **不是收束格**：落在 `turn × asserted`。该轮仍然未收束，`unresolved_turns`
+///    照报——把它算成收束等于把「静默中断」这条最该被发现的失效一起掩盖掉。
+/// 2. **幂等**：键 `deny-{turn}-{kind}`，`Duplicate` 静默吞掉。产物臂在工具结果的
+///    循环里，多轮 / 多个结果会重复走到闸前，而它们说的是同一件事。
+/// 3. **记账失败不改变结论**：落不进去也照原样返回拒绝结果（warn 里带错误）。
+///    闸门的结论是「不许写」，不能因为记账失败就放行。
+///
+/// `key` = 被拒的**目标格名**（`chat.assistant.final` / `.fallback` / `artifact.added`）。
+/// 义务环落地后它会换成 `Pattern` 的键（PL-016 §4.2 的 `denied(key)`）——今天没有
+/// `Decl`，先用格名，那是同一件事在日志里的名字。
+fn deny<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    kind: ClosureKind,
+    key: &str,
+    why: &str,
+) where
+    S: Store<Event = Event> + ?Sized,
+{
+    let kind_name = kind.name();
+    let event = Event::pending(
+        format!("deny-{turn}-{kind_name}"),
+        EVENT_AUTHZ_DENIED,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        &actor.principal,
+    )
+    .with_produced_by(user_seq)
+    .with_payload(serde_json::json!({
+        "key": key,
+        "kind": kind_name,
+        "why": why,
+    }));
+    match store.append(event) {
+        Ok(_) => {}
+        // 同一轮同一格被拒多次：说的是同一件事，落一条就够。
+        Err(crate::symbio_core::AppendError::Duplicate) => {}
+        Err(e) => crate::plugin_warn!(
+            "actors",
+            "[v2] 拒绝事实未入格（turn={turn} / {kind_name} / {key}）：{e:?}"
+        ),
+    }
 }
 
 /// 作用域上限（[T-105]）：`scope = child <parent>` ⇒ 父主体也必须能落这一类格。
 ///
 /// 谓词与 [`closure_granted`] 的**同一份**（`can_reply` / `can_produce_artifact`）
 /// ——两处各写一套「这一类格要什么能力」就会让上限与许可分叉。
-fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> bool {
+fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     let crate::symbio_core::Scope::Child(parent) = &actor.scope else {
-        return true;
+        return Ok(());
     };
     let matrix = crate::symbio_core::authz::production_matrix();
-    match kind {
+    let granted = match kind {
         ClosureKind::Speech => matrix.can_reply(parent),
         ClosureKind::Artifact => matrix.can_produce_artifact(parent),
+    };
+    if granted {
+        return Ok(());
     }
+    Err(format!(
+        "父主体 {parent} 不持 {}（委派不放大权威）",
+        kind.capability_name()
+    ))
 }
 
 #[cfg(test)]

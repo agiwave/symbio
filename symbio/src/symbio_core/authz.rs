@@ -20,12 +20,18 @@
 //!
 //! 1. **构造期**：认不出的能力名 ⇒ 拒绝整体构造（`PolicyError`，core 定义），
 //!    降级为**空矩阵**并告警——不是「跳过那一行」，笔误不能变成一条悄悄生效的拒绝；
-//! 2. **写侧**：运行器落格前判（`turn_runner::closure_granted`，按**种类**分两臂）：
+//! 2. **写侧**：运行器落格前判（`turn_runner::closure_gate`，按**种类**分两臂）：
 //!    发言收束（收束格）判 [`can_reply`](PermissionMatrix::can_reply)，产物收束
 //!    （`artifact.added`）判 [`can_produce_artifact`](PermissionMatrix::can_produce_artifact)
-//!    （[ADR-067](../../../docs/010-adr/067.md "ADR-067")）。未持有 ⇒ 拒绝入格：发言臂下
-//!    该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
-//!    见 `invariants::unresolved_turns`）；
+//!    （[ADR-067](../../../docs/010-adr/067.md "ADR-067")）。未持有 ⇒ **不落那一格，
+//!    但落一条否定事实** `authz.denied{key, kind, why}`（[T-219](../../../docs/009-task/219-拒绝落事实.md "T-219-拒绝落事实")）：
+//!    发言臂下该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
+//!    见 `invariants::unresolved_turns`）。
+//!
+//!    **「拒绝 = 不落格」是旧口径，已订正为「拒绝 = 落 `denied` 且不落格」。**
+//!    差别不是记账习惯：不落 `denied` 时，「被拒」与「根本没跑完」在日志上同形，
+//!    事后答不出「谁在什么时候因为什么被拒了」，回放也重现不出这次拒绝。
+//!    这违反的是 I1（单通道）——「被拒绝」是一个状态变更，它也必须是一条事实。
 //! 3. **读侧**：`stats` 按读方声明判 [`can_see`](PermissionMatrix::can_see)——属主
 //!    是**内容的属主**（`SESSION_OWNER`，部署事实）而非事件作者，于是今天的判读
 //!    就是「属主放行、其余整体拒绝」；`thread_private` 缺省（C10）。

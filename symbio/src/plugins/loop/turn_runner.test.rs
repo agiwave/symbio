@@ -2987,6 +2987,223 @@ mod scope_ceiling_tests {
     }
 }
 
+// ── 拒绝落事实（T-219，PL-016 §4.2）────────────────────────────────────
+//
+// 收束闸拒绝时此前只有一条 `warn`：日志里留下的是「该轮没收束」，与「根本没跑完」
+// **同形**。`deny(…)` 把否定落成 `authz.denied{key, kind, why}`——判定与矩阵一个字
+// 不动，变的只是否定的表达。
+//
+// 四条判据，最后一条是**对拍**：拒绝原因里写的能力名必须真的是表里那一个。
+mod denial_fact_tests {
+    use super::super::{closure_gate, deny, ClosureKind};
+    use crate::symbio_core::{check_all, unresolved_turns, ActorSpec, EventStore, Scope, Store};
+    use crate::symbio_core::{EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE};
+
+    /// 造一个「主体自己那一行放行、父主体不放行」的规格——上限那道闸是生产里
+    /// 唯一可达的拒绝路径（主体自己的行由部署事实决定，测试里不必伪造矩阵）。
+    fn child_of_a_principal_without_reply() -> ActorSpec {
+        let mut spec = ActorSpec::trivial("session/main");
+        assert!(
+            spec.can_land_speech(),
+            "前提：主智能体自己那一行持 reply——拒绝必须来自上限那道闸"
+        );
+        spec.scope = Scope::Child("user".to_string());
+        spec
+    }
+
+    /// 种一条本轮用户格（收束格的溯源锚），返回它的 seq。
+    fn seed_user_turn(store: &EventStore, turn: u64) -> u64 {
+        store
+            .append(crate::symbio_core::Event::pending(
+                format!("u-{turn}"),
+                EVENT_USER_MESSAGE,
+                crate::symbio_core::Entity::Turn,
+                crate::symbio_core::Verb::Opened,
+                turn,
+                "user",
+            ))
+            .expect("用户格入格")
+            .value()
+    }
+
+    /// 判据 1：拒绝 ⇒ 日志里有 `authz.denied`，且载荷答得出「拒了什么、为什么」。
+    #[test]
+    fn a_denied_closure_lands_a_denial_fact() {
+        let store = EventStore::new();
+        let user_seq = seed_user_turn(&store, 1);
+        let spec = child_of_a_principal_without_reply();
+        let why = closure_gate(&spec, ClosureKind::Speech).expect_err("上限那道闸必须拒");
+        deny(
+            &store,
+            &spec,
+            1,
+            user_seq,
+            ClosureKind::Speech,
+            crate::symbio_core::EVENT_ASSISTANT_FINAL,
+            &why,
+        );
+
+        let snapshot = store.range(crate::symbio_core::Seq::new(0));
+        let denied: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
+            .collect();
+        assert_eq!(denied.len(), 1, "拒绝必须落一条事实：{denied:?}");
+        let d = denied[0];
+        assert_eq!(d.entity, crate::symbio_core::Entity::Turn);
+        assert_eq!(
+            d.verb,
+            crate::symbio_core::Verb::Asserted,
+            "落在 turn × asserted，**不是** closed"
+        );
+        assert_eq!(d.turn, 1);
+        assert_eq!(d.actor, spec.principal, "谁");
+        assert_eq!(
+            d.produced_by,
+            Some(user_seq),
+            "何时/因何而起：溯源指向本轮用户格"
+        );
+        assert_eq!(
+            d.payload.get("key").and_then(|v| v.as_str()),
+            Some(crate::symbio_core::EVENT_ASSISTANT_FINAL),
+            "拒的是哪一格"
+        );
+        assert_eq!(
+            d.payload.get("kind").and_then(|v| v.as_str()),
+            Some("speech")
+        );
+        let reason = d.payload.get("why").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            reason.contains("user") && reason.contains("reply"),
+            "原因要说清是谁缺哪一项：{reason}"
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "落一条否定事实不得让不变量变红：{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    /// 判据 2：拒绝轮**仍然**未收束。
+    ///
+    /// 这是本任务最容易做反的一处：为了让日志好看而把 `denied` 算成收束，等于把
+    /// 「静默中断」这条最该被发现的失效一起掩盖掉。反向锚定——删掉这条断言，
+    /// 一个把 `denied` 当收束格的实现照样全绿。
+    #[test]
+    fn a_denied_turn_stays_unresolved() {
+        let store = EventStore::new();
+        let user_seq = seed_user_turn(&store, 1);
+        let spec = child_of_a_principal_without_reply();
+        deny(
+            &store,
+            &spec,
+            1,
+            user_seq,
+            ClosureKind::Speech,
+            crate::symbio_core::EVENT_ASSISTANT_FINAL,
+            "拒",
+        );
+
+        let snapshot = store.range(crate::symbio_core::Seq::new(0));
+        let open = unresolved_turns(&snapshot, false);
+        assert_eq!(
+            open.len(),
+            1,
+            "拒绝轮必须仍然报未收束（denied 不是收束格）：{open:?}"
+        );
+        assert!(
+            !crate::symbio_core::closes_turn(
+                snapshot
+                    .iter()
+                    .find(|e| e.kind == EVENT_AUTHZ_DENIED)
+                    .unwrap()
+            ),
+            "`authz.denied` 绝不能被认成收束格"
+        );
+    }
+
+    /// 幂等：同一轮同一格被拒多次只落一条（产物臂在工具结果循环里，会重复走到闸前）。
+    #[test]
+    fn a_denial_is_recorded_once_per_turn_and_kind() {
+        let store = EventStore::new();
+        let user_seq = seed_user_turn(&store, 1);
+        let spec = child_of_a_principal_without_reply();
+        for _ in 0..3 {
+            deny(
+                &store,
+                &spec,
+                1,
+                user_seq,
+                ClosureKind::Artifact,
+                crate::symbio_core::EVENT_ARTIFACT_ADDED,
+                "拒",
+            );
+        }
+        let snapshot = store.range(crate::symbio_core::Seq::new(0));
+        let denied = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
+            .count();
+        assert_eq!(denied, 1, "同一轮同一格只记一次：{denied}");
+    }
+
+    /// 两种拒绝落在**两个键**上：一轮里产物被拒、发言也被拒，是两条事实。
+    #[test]
+    fn speech_and_artifact_denials_do_not_collide() {
+        let store = EventStore::new();
+        let user_seq = seed_user_turn(&store, 1);
+        let spec = child_of_a_principal_without_reply();
+        for (kind, key) in [
+            (
+                ClosureKind::Speech,
+                crate::symbio_core::EVENT_ASSISTANT_FINAL,
+            ),
+            (
+                ClosureKind::Artifact,
+                crate::symbio_core::EVENT_ARTIFACT_ADDED,
+            ),
+        ] {
+            deny(&store, &spec, 1, user_seq, kind, key, "拒");
+        }
+        let snapshot = store.range(crate::symbio_core::Seq::new(0));
+        let kinds: Vec<&str> = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_AUTHZ_DENIED)
+            .filter_map(|e| e.payload.get("kind").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(kinds, vec!["speech", "artifact"], "两臂各自成键：{kinds:?}");
+    }
+
+    /// **对拍**：拒绝原因里写的能力名，必须真的是授权表里那一项。
+    ///
+    /// `capability_name()` 是手写的一份拼写（本模块看不见 core 的 `governance`，
+    /// 那是私有子模块）。手写一份没有对拍，就只是又一处「表授予 A、闸门判 B」——
+    /// 两边都是合法能力名，事后没有任何东西能指出是哪半边写错了。
+    /// 这里用**生产表派生的能力集**对拍：拼错一个字符，两条断言当场红。
+    #[test]
+    fn denial_names_the_capability_the_gate_judges() {
+        let main = ActorSpec::trivial("session/main");
+        let peer = ActorSpec::trivial(crate::symbio_core::authz::PRINCIPAL_PEER);
+
+        let speech_cap = ClosureKind::Speech.capability_name();
+        let artifact_cap = ClosureKind::Artifact.capability_name();
+
+        assert!(
+            main.capabilities.iter().any(|c| c == speech_cap),
+            "主智能体的登记行必须持 {speech_cap}——拒绝原因说的就是这一项"
+        );
+        assert!(
+            peer.capabilities.iter().any(|c| c == artifact_cap),
+            "对等主体的登记行必须持 {artifact_cap}"
+        );
+        // 反向：对等主体不持发言那一项（ADR-067 的窄行），所以上一条不是「随便都对」。
+        assert!(
+            !peer.capabilities.iter().any(|c| c == speech_cap),
+            "对等主体不持 {speech_cap}——否则上一条对拍是平凡真"
+        );
+    }
+}
+
 // ── 纯决策与答话取值（PL-014 步骤 1）─────────────────────────────────────
 //
 // 这两个函数是 768 行环体里**唯一可脱离 store / sink 单测**的部分：决策只看

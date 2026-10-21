@@ -168,11 +168,20 @@ where
             .await
             .map(PreparedFlow::Done);
         }
-        if !closure_granted(&actor, ClosureKind::Speech) {
+        if let Err(why) = closure_gate(&actor, ClosureKind::Speech) {
+            // 拒绝 ⇒ 不落收束格，但落否定事实（`authz.denied`）。
+            deny(
+                store,
+                &actor,
+                turn,
+                user_seq,
+                ClosureKind::Speech,
+                EVENT_ASSISTANT_FINAL,
+                &why,
+            );
             crate::plugin_warn!(
                 "actors",
-                "[v2] 定稿答话被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
-                actor.principal
+                "[v2] 定稿答话被授权拒绝（{why}），本轮不入格（turn={turn}）"
             );
             return Ok(PreparedFlow::Done(TurnOutcome {
                 turn,
