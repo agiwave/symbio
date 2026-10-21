@@ -45,7 +45,7 @@ pub struct AgentDirRecord {
     pub manifest: Arc<AgentManifest>,
     /// agent 目录安装目录（含 manifest 与约定能力目录）
     pub dir: PathBuf,
-    /// 来源层级（工作区级覆盖同名全局级）
+    /// 来源层级（唯一来源 = 本插件自己的目录，见 [`AgentDirScope`]）
     pub source: AgentDirScope,
 }
 
@@ -131,7 +131,7 @@ impl AgentDirStore {
         records
     }
 
-    /// 按 id 查找（工作区优先）。
+    /// 按 id 查找（清单按 id 排序后取第一条命中）。
     pub fn get(&self, agent_id: &str) -> Option<AgentDirRecord> {
         self.list().into_iter().find(|r| r.manifest.id == agent_id)
     }

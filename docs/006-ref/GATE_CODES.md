@@ -22,6 +22,7 @@ lists: [gate-codes=owner]
 
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
+| **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014 | `D-015` |
@@ -52,6 +53,12 @@ lists: [gate-codes=owner]
 
 | 判据码 | 声明脚本 |
 |---|---|
+| **AO-001** | `scripts/agent-ownership-audit.mjs` |
+| **AO-002** | `scripts/agent-ownership-audit.mjs` |
+| **AO-003** | `scripts/agent-ownership-audit.mjs` |
+| **AO-004** | `scripts/agent-ownership-audit.mjs` |
+| **AO-005** | `scripts/agent-ownership-audit.mjs` |
+| **AO-006** | `scripts/agent-ownership-audit.mjs` |
 | **C-001** | `scripts/core-export-audit.mjs` |
 | **C-002** | `scripts/core-export-audit.mjs` |
 | **C-003** | `scripts/core-export-audit.mjs` |

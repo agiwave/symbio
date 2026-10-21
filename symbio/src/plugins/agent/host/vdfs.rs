@@ -2,10 +2,11 @@
 //!
 //! ## 与其它资源插件的分工差异
 //!
-//! Agent 是**目录自管型**资源：它的落盘由 [`AgentDirStore`] 负责（工作区级 +
-//! 全局级双层、zip-slip 防护、版本硬门槛），**不经 `vdfs_service`**——
-//! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<条目 id>/…`」这一固定落位，
-//! 而 Agent 要同时看见工作目录与系统目录两层，寻址规则本身是 Agent 语义的一部分。
+//! Agent 是**目录自管型**资源：它的落盘由 [`AgentDirStore`] 负责（唯一来源就是本插件
+//! 自己的目录 `{homedir}/agent`，zip-slip 防护、导入即校验、版本硬门槛），**不经
+//! `vdfs_service`**——那三种拓扑的条目内部是**宿主自己的磁盘布局**，而 agent 条目内部是
+//! **一棵插件树**：钻进 `<id>` 之后清单由子 composite 的 `CompositeVfs` 返回，
+//! 地址递归成 `agent/<id>/<子目录>/…`。这一跳委派才是本插件自持 `impl VdfsProvider` 的理由。
 //!
 //! 相同的是**广播**：落盘后一律走 `vdfs::vdfs_notify_change`，与 `vdfs_service` 三个
 //! 实现投的是同一条频道，订阅方无需区分资源住在哪儿。
