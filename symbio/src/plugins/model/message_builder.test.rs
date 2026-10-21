@@ -775,3 +775,202 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 3, "只有显式 true 才剔除");
 }
+
+// ==================== 事故知识的具名判据（T-209）====================
+//
+// 这两条历史上只活在注释里，出事两次：树形路径拼错（结果配给了别的调用 / 包装形式
+// 认不出来）、降级后恢复轮丢失（回传了 provider 不认识的 id）。e2e
+// `t27-approval-resume` 与 `t38-transcript-tool-projection` 各端到端证了一次，
+// 但端到端红了只知道「请求包不对」，指不出是哪一格——下面三条把它钉在换算面上。
+
+/// 夹具的一个节点。`role` 格的直写**集中在这一处**，其余夹具都经它。
+fn cell(
+    id: &str,
+    parent: Option<&str>,
+    role: NodeRole,
+    style: &str,
+    kind: NodeKind,
+    text: &str,
+) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        parent_id: parent.map(str::to_string),
+        // grep-audit-allow S-014: 请求视图的夹具要能摆出 role 格与 principal 两种身份来源，而 node_role() 的第一条读法就是存量 role 格——直写点收敛成这一个构造器，新增用例不再各自写格
+        role: Some(role),
+        msg_type: Some(kind),
+        meta: (!style.is_empty()).then(|| serde_json::json!({ "style_tag": style })),
+        content: (!text.is_empty()).then(|| MessageContent::Text(text.to_string())),
+        status: Some(NodeStatus::Completed),
+        timestamp: Some(1),
+        ..Default::default()
+    }
+}
+
+/// 一个 ToolCall 节点（`meta.tool_name` 是工具名来源，`wire` 是 provider 签发的 call_id）
+fn tool_call(id: &str, parent: &str, name: &str, wire: Option<&str>) -> ChatNode {
+    let mut node = cell(
+        id,
+        Some(parent),
+        NodeRole::Assistant,
+        "tool",
+        NodeKind::Skeleton,
+        "{}",
+    );
+    if let Some(obj) = node.meta.as_mut().and_then(|m| m.as_object_mut()) {
+        obj.insert("tool_name".to_string(), serde_json::json!(name));
+    }
+    node.tool_call_id = wire.map(str::to_string);
+    node
+}
+
+/// **t27 那半**：恢复轮里的 `tool_call_id` 必须是 provider 认识的 **wire id**，
+/// 不是会话内的节点 id。两者分离后（节点 id 会话内唯一、wire id 可能被网关跨轮复用），
+/// 回传错的那一个 ⇒ 部分协议（OpenAI Responses 的 call_id 链）直接 400，
+/// 整轮恢复不回来。占位结果同样要配这个 id——「有请求无响应」的形状必须自洽。
+#[test]
+fn resumed_request_view_pairs_everything_with_the_providers_wire_id() {
+    let mut tc = tool_call("tc-node", "turn-r", "run_tests", Some("call-77"));
+    tc.timestamp = Some(2);
+    let msgs = vec![
+        cell("u1", None, NodeRole::User, "", NodeKind::Body, "跑下测试"),
+        cell(
+            "turn-r",
+            None,
+            NodeRole::Assistant,
+            "run",
+            NodeKind::Skeleton,
+            "",
+        ),
+        tc,
+    ];
+
+    let natives = flatten_chat_messages(&msgs);
+    let assistant = natives
+        .iter()
+        .find(|n| n.role == NodeRole::Assistant && n.tool_calls.is_some())
+        .expect("ToolCall 必须聚合进 assistant.tool_calls");
+    assert_eq!(
+        assistant.tool_calls.as_ref().unwrap()[0].id.as_deref(),
+        Some("call-77"),
+        "回传给 provider 的 tool_call id 是 wire id"
+    );
+
+    let placeholder = natives
+        .iter()
+        .find(|n| n.role == NodeRole::Tool)
+        .expect("无结果的 ToolCall 必须合成占位 tool 结果");
+    assert_eq!(
+        placeholder.tool_call_id.as_deref(),
+        Some("call-77"),
+        "占位结果要配同一个 wire id，否则它自己就是孤儿（会被 clean_request 扔掉）"
+    );
+
+    assert!(
+        !natives
+            .iter()
+            .any(|n| n.tool_call_id.as_deref() == Some("tc-node")
+                || n.tool_calls
+                    .as_ref()
+                    .map(|calls| calls.iter().any(|c| c.id.as_deref() == Some("tc-node")))
+                    .unwrap_or(false)),
+        "节点 id 不得冒充 wire id 出现在请求包里"
+    );
+}
+
+/// **t38 那半**：工具结果被一个 `Turn`(role=Tool) 包着（子 agent 会话整包回写的形状）
+/// 时也要配得上——`find_tool_result` 的第 2 条路径。认不出来就等于「跨轮看不见
+/// 上一轮的工具结果」，模型会重跑同一个工具。
+#[test]
+fn tool_result_wrapped_by_a_subagent_turn_is_still_paired() {
+    let msgs = vec![
+        cell(
+            "u1",
+            None,
+            NodeRole::User,
+            "",
+            NodeKind::Body,
+            "问一下子 agent",
+        ),
+        cell(
+            "turn-a",
+            None,
+            NodeRole::Assistant,
+            "run",
+            NodeKind::Skeleton,
+            "",
+        ),
+        tool_call("tc-a", "turn-a", "agent_run", Some("call-a")),
+        cell(
+            "wrap",
+            Some("tc-a"),
+            NodeRole::Tool,
+            "run",
+            NodeKind::Skeleton,
+            "",
+        ),
+        cell(
+            "inner",
+            Some("wrap"),
+            NodeRole::Tool,
+            "",
+            NodeKind::Body,
+            "子 agent 的正文",
+        ),
+    ];
+
+    let natives = flatten_chat_messages(&msgs);
+    let tool = natives
+        .iter()
+        .find(|n| n.role == NodeRole::Tool)
+        .expect("包装形状下的工具结果必须被认出来");
+    assert_eq!(tool.tool_call_id.as_deref(), Some("call-a"));
+    assert_eq!(
+        tool.content.as_ref().map(|c| c.to_text()).as_deref(),
+        Some("子 agent 的正文"),
+        "取的是包装节点里那条 Text，不是包装节点本身"
+    );
+}
+
+/// 兜底那条（第 3 条路径）与「没有结果」是两件事：ToolCall 下挂着一条**空内容**的
+/// `Text`(Tool) 时，发空结果而不是发占位——前者是「工具确实返回了空」，
+/// 后者是「工具没跑完」。混了以后模型读到的是两种不同的事实。
+#[test]
+fn empty_direct_tool_result_is_kept_instead_of_becoming_a_placeholder() {
+    let msgs = vec![
+        cell(
+            "turn-e",
+            None,
+            NodeRole::Assistant,
+            "run",
+            NodeKind::Skeleton,
+            "",
+        ),
+        tool_call("tc-e", "turn-e", "write_file", Some("call-e")),
+        ChatNode {
+            content: None,
+            ..cell(
+                "res-e",
+                Some("tc-e"),
+                NodeRole::Tool,
+                "",
+                NodeKind::Body,
+                "",
+            )
+        },
+    ];
+
+    let natives = flatten_chat_messages(&msgs);
+    let tool = natives
+        .iter()
+        .find(|n| n.role == NodeRole::Tool)
+        .expect("空内容的工具结果仍是结果，不得被当成缺件");
+    assert!(
+        !tool
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default()
+            .contains("被中断"),
+        "占位文案只能出现在真的没有结果的那条上"
+    );
+}
