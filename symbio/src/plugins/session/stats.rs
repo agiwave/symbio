@@ -107,6 +107,27 @@ pub(crate) struct SessionStats {
     /// 靠它分辨「这里没有数」与「不给你看」——与四列用「空切片 ⇒ 全零」是同一条判定，
     /// 换个列名不换判据。
     pub reputation: serde_json::Value,
+    /// 承诺 / 委托（`agent_run` 那一次立约的**读侧出口**，[T-213](../../../../docs/009-task/213-Agent主机面整理批.md "T-213-Agent主机面整理批") 段二）：
+    /// `{ items: [ { id, from, to, promise, state, why, anchor_seq } ], total, kept,
+    /// broken, settled, breach_rate }`，`items` 按承诺号字典序。
+    ///
+    /// ## 这一列把「自述」变成「查得到的事实」
+    ///
+    /// `agent_run` 在能力元数据里自声明「我记委托账」（`records_delegation_promise`），
+    /// 声明面由 `tool-decls-audit` 守着（名单封闭），但**声明说得不等于事实落了**——
+    /// 判据只能是「这一轮委托过 ⇒ 这里读得出那一条」。写侧（工具执行层 → 轮末
+    /// `record_derived`）与读侧（core 的 `commitment_records` 翻译）各钉了一段，中间
+    /// 只有 `commitment_events` 这一个成格口（I1）。
+    ///
+    /// ## 违约率的分母是**已了结**数，不是立约数
+    ///
+    /// 在途的约既没守也没违约，把它放进分母等于把「这一轮还没跑完」读成违约。
+    /// 率是纯查询（与 `unattended_rate` / `adoption_rate` 同族）：分子分母落数，
+    /// 读时再除，不落第二个数。分母为 0 ⇒ `0.0`（与那两族同一个平凡值）。
+    ///
+    /// 归**四列**那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
+    /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
+    pub commitments: serde_json::Value,
     /// 就绪任务集（S7 步 16 的**读侧**，[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
     /// `readyset` 投影原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
     /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
@@ -231,6 +252,31 @@ fn content_scope_of(snapshot: &[crate::symbio_core::Event]) -> VisScope {
         widest = widest.widen(VisScope::of_event(e));
     }
     widest
+}
+
+/// 承诺列：立约记录 + 三个计数 + 违约率。
+///
+/// 记录本身由 core 翻译（[`crate::symbio_core::commitment_records`]——配对规则在写侧
+/// 那一族里，本处不另发明一套）；这里只做**取数与排版**，与 `slo_report` /
+/// `reputation` 各列同一纪律。率的分母判据（已了结数）写在列定义里，不重复第二遍。
+fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
+    let items = crate::symbio_core::commitment_records(snapshot);
+    let kept = items.iter().filter(|r| r.state == "kept").count();
+    let broken = items.iter().filter(|r| r.state == "broken").count();
+    let settled = kept + broken;
+    let breach_rate = if settled == 0 {
+        0.0
+    } else {
+        broken as f64 / settled as f64
+    };
+    serde_json::json!({
+        "items": items,
+        "total": items.len(),
+        "kept": kept,
+        "broken": broken,
+        "settled": settled,
+        "breach_rate": breach_rate,
+    })
 }
 
 /// 实例级聚合列（P2）：把存储层交回的**全部会话快照**合并成一份读数。
@@ -446,10 +492,39 @@ fn panel_of(stats: &SessionStats) -> ReadingPanel {
         }],
     };
 
+    // 承诺：一条一行读的是清单，面板只报「几条约、几条约没守住」——违约必须
+    // 当着人的面出声（S08 §5），所以有违约就是留意语气，没有才是常态。
+    let cm = &stats.commitments;
+    let cm_total = cm.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+    let cm_broken = cm.get("broken").and_then(|v| v.as_u64()).unwrap_or(0);
+    let commitments = ReadingSection {
+        title: Some("承诺".into()),
+        rows: vec![ReadingRow {
+            label: "代际立约".into(),
+            value: if cm_total == 0 {
+                "本会话没有委托".into()
+            } else {
+                format!("{} 条 · 违约 {} 条", cm_total, cm_broken)
+            },
+            hint: Some(format!(
+                "违约率 {:.0}%（分母 = 已了结数，在途的约不算违约）",
+                cm.get("breach_rate")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
+                    * 100.0
+            )),
+            tone: if cm_broken > 0 {
+                ReadingTone::Warn
+            } else {
+                ReadingTone::Normal
+            },
+        }],
+    };
+
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: vec![perf, continuity, invariants, skills],
+        sections: vec![perf, continuity, invariants, skills, commitments],
     }
 }
 
@@ -466,7 +541,7 @@ pub(crate) struct StatsRequest {
     pub principal: Option<String>,
 }
 
-/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单。
+/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
 /// 交回（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：`snapshot` 是本会话
@@ -579,6 +654,10 @@ pub(crate) fn read(
         serde_json::json!({})
     };
 
+    // 承诺列（T-213 段二）：与声誉列读**同一批格子**，但问的是另一件事——声誉问
+    // 「这个主体几分」，本列问「这一约是什么、违约为什么」。切片已按 `may_read` 取过。
+    let commitments = commitments_reading(&snapshot);
+
     // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
     let readyset = serde_json::to_value(crate::symbio_core::readyset().read_all(&snapshot).value)
@@ -653,6 +732,7 @@ pub(crate) fn read(
         checkpoint,
         invariants,
         reputation,
+        commitments,
         readyset,
         transcript,
         conation,

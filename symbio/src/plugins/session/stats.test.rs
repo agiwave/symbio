@@ -658,8 +658,8 @@ fn panel_matches_the_columns_it_describes() {
     let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     let panel = &got.panel;
 
-    // 分区固定四段：时延兜底 / 事实源 / 不变量 / 技能
-    assert_eq!(panel.sections.len(), 4, "分区固定：{:?}", panel.sections);
+    // 分区固定五段：时延兜底 / 事实源 / 不变量 / 技能 / 承诺
+    assert_eq!(panel.sections.len(), 5, "分区固定：{:?}", panel.sections);
     assert_eq!(panel.subtitle.as_deref(), Some("s1"), "副标题带会话 id");
 
     // ① 时延段：一行对应一个档位，值与列逐字对上
@@ -750,6 +750,19 @@ fn panel_matches_the_columns_it_describes() {
             got.compiled_skills
         );
     }
+
+    // ⑤ 承诺段：条数与违约数都从那列搬来（seed 没委托过 ⇒ 「没有委托」+ 平常语气）
+    let cm_row = panel.sections[4].rows.first().expect("有承诺行");
+    assert_eq!(
+        got.commitments["total"].as_u64().unwrap_or(1),
+        0,
+        "seed 不产承诺"
+    );
+    assert_eq!(
+        cm_row.value, "本会话没有委托",
+        "零条要说人话，不显示「0 条 · 违约 0 条」"
+    );
+    assert_eq!(cm_row.tone, crate::symbio_core::ReadingTone::Normal);
 }
 
 /// 反向：**有违规 ⇒ 那一行变「需留意」**，否则面板把问题显示成没事。
@@ -1288,6 +1301,131 @@ fn reputation_column_reports_own_and_by_principal() {
     )
     .expect("读数");
     assert_eq!(denied.reputation, serde_json::json!({}));
+}
+
+/// 承诺列（[T-213](../../../../docs/009-task/213-Agent主机面整理批.md "T-213-Agent主机面整理批") 段二，S08 §5 的读侧出口）：
+/// 一轮里委托过一次 ⇒ 这里就**读得出那一条**（谁向谁、承诺了什么、违约为什么）。
+///
+/// ## 这条判据补的是哪一半
+///
+/// `agent_run` 在能力元数据里自声明「我记委托账」，声明面的**名单封闭**由
+/// `tool-decls-audit` 守着；但声明说得 ≠ 事实落了。写侧到格子的链条由
+/// `turn_exec.test.rs::full_turn_lands_derived_commitment_facts` 钉（走真实通道，
+/// 假 provider 回一个 `agent_run`），本用例钉读侧：格子 → 一条可查记录。
+/// 两头之间只有 `commitment_events` 这一个成格口，夹具调的就是它——写侧改名，
+/// 这两条一起红。
+///
+/// ## 三个方向
+///
+/// ① 违约必须带原因出现在读数里（"违约可被观测"是 S08 §5 的全部前提）；
+/// ② 违约率的分母是**已了结**数：一条在途 + 一条违约 ⇒ 率 100%，不是 50%——
+///   把没跑完的轮算进分母等于把「还在做」读成「没做到」；
+/// ③ 无读权限 ⇒ 四列那一族的空形状（`{ items: [], total: 0 }`），不是缺列。
+#[test]
+fn commitments_column_exposes_each_delegation_record() {
+    let wal = seed("commitments");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    let store = EventWalStore::open(&wal).unwrap();
+    let snap = store.range(Seq::new(0));
+    let user_seq = snap
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .expect("用户格")
+        .seq()
+        .map(|s| s.value())
+        .expect("已入格");
+    // 一次违约的委托（写方 `record_derived` 落的正是这三格：立约 + 违约 + 告知）
+    for e in crate::symbio_core::commitment_events(
+        "v2c-t1-run-1",
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        "agent:reviewer",
+        "让 reviewer 复查这段",
+        false,
+        "子智能体没起来",
+        user_seq,
+    ) {
+        store.append(e).expect("承诺入格");
+    }
+    // 一条只立了约、还没了结的（在途）
+    store
+        .append(
+            crate::symbio_core::commitment_events(
+                "v2c-t2-run-1",
+                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                "agent:worker",
+                "整理周报",
+                true,
+                "",
+                user_seq,
+            )[0]
+            .clone(),
+        )
+        .expect("立约入格");
+
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    let col = &got.commitments;
+    assert_eq!(col["total"], 2, "两条约：一条违约、一条在途");
+    assert_eq!(col["broken"], 1);
+    assert_eq!(col["kept"], 0);
+    assert_eq!(col["settled"], 1, "分母只算已了结的（在途那条不算）");
+    assert!(
+        col["breach_rate"].as_f64().unwrap_or(0.0) > 0.99,
+        "违约率 = 违约 / 已了结 = 1.0：{:?}",
+        col["breach_rate"]
+    );
+    let items = col["items"].as_array().expect("items 是数组");
+    assert_eq!(
+        items
+            .iter()
+            .map(|i| (
+                i["id"].as_str().unwrap_or(""),
+                i["state"].as_str().unwrap_or("")
+            ))
+            .collect::<Vec<_>>(),
+        vec![("v2c-t1-run-1", "broken"), ("v2c-t2-run-1", "open"),],
+        "按承诺号排序，同一份事实源永远读出同一个清单"
+    );
+    assert_eq!(items[0]["promise"], "让 reviewer 复查这段");
+    assert_eq!(items[0]["to"], "agent:reviewer");
+    assert_eq!(
+        items[0]["why"], "子智能体没起来",
+        "违约原因就是读数的一部分——用户在这里读「为什么没做到」"
+    );
+    assert_eq!(items[0]["anchor_seq"].as_u64(), Some(user_seq));
+    assert!(
+        check_all(&store.range(Seq::new(0))).is_empty(),
+        "承诺格子不新增违规：{:?}",
+        check_all(&store.range(Seq::new(0)))
+    );
+
+    // 面板那一份（人读的）与列同源：数字直接来自本列，不重算
+    let row = &got.panel.sections[4].rows[0];
+    assert!(
+        row.value.contains("2 条 · 违约 1 条"),
+        "面板与列对上：{:?}",
+        row.value
+    );
+    assert_eq!(
+        row.tone,
+        crate::symbio_core::ReadingTone::Warn,
+        "有违约 ⇒ 需留意"
+    );
+
+    // 无读权限 ⇒ 空形状（四列那一族），不是缺列、也不是零值条目
+    let denied = read_path(
+        "s1",
+        &wal,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+    assert_eq!(
+        denied.commitments["items"].as_array().map(|a| a.len()),
+        Some(0),
+        "无权读 ⇒ 切片为空 ⇒ 一条也没有（与「没委托过」同形，由 has_wal 分辨）"
+    );
+    assert_eq!(denied.commitments["total"], 0);
 }
 
 /// 就绪集列（S7 步 16，[04 §3.1 批⑨]）：候选集入列 + **复算同源** + 读侧闸（反向）。

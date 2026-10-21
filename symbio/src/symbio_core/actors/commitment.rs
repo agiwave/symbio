@@ -102,3 +102,95 @@ pub fn commitment_events(
     }
     out
 }
+
+/// 一次立约读回来的一条记录（[`commitment_records`] 的元素）。
+///
+/// 字段就是 `offer` 当初写进载荷的那几样（`id` / `from` / `to` / `promise`）加上
+/// 了结的形状；`why` 只有违约那条才有。`state` 的三个取值是本函数的**输出词表**，
+/// 不是事件名——读方拿到的是「这一约怎么样了」，不是「哪一格落了笔」。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CommitmentRecord {
+    /// 承诺号（载荷 `id`；轮末写方给的是 `v2c-{轮干}-{tool_call_id}`，跨轮不撞）。
+    pub id: String,
+    /// 承诺方（声誉记在它头上）。
+    pub from: String,
+    /// 承诺对象。
+    pub to: String,
+    /// 承诺了什么（`agent_run` 的那句 prompt）。
+    pub promise: String,
+    /// `kept` / `broken` / `open`（立了还没了结）。
+    pub state: &'static str,
+    /// 违约原因；非违约为空串。
+    pub why: String,
+    /// 溯源锚 = 立约那一轮开口的 seq（`produced_by`，I2）。
+    pub anchor_seq: u64,
+}
+
+/// `commitment.*` 一族的**读侧翻译**：事件切片 → 一条一条的立约记录。
+///
+/// ## 为什么住在 core 而不是读方
+///
+/// 与 [`EliminationDecider::verdict_grants_changes`] 同形态——**写侧的成格函数与读侧的
+/// 翻译函数各住一边，两头都不许自己另发明一套配对规则**：配对靠的是载荷 `id`
+/// （[`CommitmentKeeper`] 写进去的），那是本域的形状知识。插件出口只做取数与排版。
+///
+/// ## 三条口径
+///
+/// - **一条约 = 一个载荷 `id`**：`opened` 起一条记录，`released` / `broken` 给它收尾；
+///   `asserted`（违约时对协作方的告知）是**同一条约的第三格**，不另计一条——按格子数
+///   除以 2 或 3 都会在守约/违约混合时算错；
+/// - **认不出的了结 ⇒ 跳过**：载荷 `id` 找不到对应立约（切片被截断、或写方漏了
+///   `opened`）时不猜「大概履行了吧」——与 `verdict_grants_changes` 同一条 fail-closed；
+/// - **按 `id` 字典序输出**（`BTreeMap` 折叠）：同一份事实源永远读出同一个清单，
+///   与 `reputation` / `readyset` 的确定性口径同族（N1 双跑一致）。
+pub fn commitment_records(events: &[Event]) -> Vec<CommitmentRecord> {
+    let mut by_id: std::collections::BTreeMap<String, CommitmentRecord> =
+        std::collections::BTreeMap::new();
+    for e in events {
+        if e.entity != crate::symbio_core::event::Entity::Commitment {
+            continue;
+        }
+        let Some(id) = e.payload.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        match e.kind.as_str() {
+            crate::symbio_core::event::EVENT_COMMITMENT_OFFERED => {
+                let str_of = |k: &str| {
+                    e.payload
+                        .get(k)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                };
+                by_id.entry(id.to_string()).or_insert(CommitmentRecord {
+                    id: id.to_string(),
+                    from: str_of("from"),
+                    to: str_of("to"),
+                    promise: str_of("promise"),
+                    state: "open",
+                    why: String::new(),
+                    anchor_seq: e.produced_by.unwrap_or(0),
+                });
+            }
+            crate::symbio_core::event::EVENT_COMMITMENT_RELEASED
+            | crate::symbio_core::event::EVENT_COMMITMENT_BROKEN => {
+                if let Some(rec) = by_id.get_mut(id) {
+                    let broken = e.kind == crate::symbio_core::event::EVENT_COMMITMENT_BROKEN;
+                    rec.state = if broken { "broken" } else { "kept" };
+                    rec.why = if broken {
+                        e.payload
+                            .get("why")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    } else {
+                        String::new()
+                    };
+                }
+            }
+            // `asserted`：违约的告知，同一条约的第三格。
+            _ => {}
+        }
+    }
+    by_id.into_values().collect()
+}

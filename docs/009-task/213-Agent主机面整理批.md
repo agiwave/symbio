@@ -8,7 +8,7 @@ track: plan
 prio: later
 deps: []
 parent: T-183-质量与机制清偿总批
-where: symbio/src/plugins/agent/host/subagent.rs · symbio/src/plugins/agent/host/mod.rs · symbio/src/plugins/agent/README.md · scripts/agent-ownership-audit.mjs
+where: symbio/src/plugins/agent/host/subagent.rs · symbio/src/plugins/agent/host/mod.rs · symbio/src/plugins/agent/README.md · scripts/agent-ownership-audit.mjs · symbio/src/symbio_core/actors/commitment.rs · symbio/src/plugins/session/stats.rs
 exit: '桥接函数的三组语义（审批与提问冒泡识别、消息过滤、节点改写）拆成三个可单测函数，改写顺序依赖（主体改写须在角色改写之后）保持且有判据；`agent_run` 的能力自述补可观测判据（父会话收束时若本轮发生过 `agent_run`，存在一条可查的委托记录）；主机模块文档里的归属表加机器校验（模块文档列的归属、装配清单、实际插件目录三者一致）；全量门禁与 e2e 全绿'
 ---
 
@@ -72,3 +72,29 @@ exit: '桥接函数的三组语义（审批与提问冒泡识别、消息过滤�
 - 2026-10-21 T-214 的 S-4（agent README 5 处过期描述）**在本段一并落地**：
   校验与订正必须同批，否则脚本一上来就红（本批 2026-10-20 的分工条款已预见）。
   T-214 那边只剩「别处的文档口径」，不再重复订正这份 README。
+- 2026-10-21 段二（**S-6 委托承诺 → 可查事实**）：承诺的**写侧**早就在（`note_delegation` →
+  `take_derived` → `record_derived` 落 `commitment.*`），`turn_exec.test.rs::full_turn_lands_derived_commitment_facts`
+  也钉过「一轮真委托 ⇒ 立约与违约都进了格」。缺的是**读侧**：`session/stats` 只有声誉列
+  （把同一批格子折成一个分数），出口表 S08 那一行的「用户可见出口」是 `—`——
+  于是「承诺违约率」这一格说得出目标数值，却指不出用户在哪里读它（T-040 登记的原始病根）。
+  落法（三处，都不加新机制）：
+  ① core 加读侧翻译 [`commitment_records`](../../symbio/src/symbio_core/actors/commitment.rs)
+  （`symbio_core/actors/commitment.rs`）——与 `commitment_events` 成对，**写侧成格 / 读侧翻译
+  各住一边**（同 `EliminationDecider::verdict_grants_changes`）：配对靠载荷 `id`，
+  `asserted` 是同一条约的第三格不另计，找不到立约的了结**跳过**（fail-closed），
+  输出按 `id` 字典序。以 `pub(crate)` 出根（`symbio_core/mod.rs`），记录类型随返回值流动、
+  不在出口边界被命名——与 `ReputationView` 同形态，C-003 的单消费方棘轮一格没动（14/14）。
+  ② `session/stats` 加 `commitments` 列（`symbio/src/plugins/session/stats.rs`）：
+  `{ items, total, kept, broken, settled, breach_rate }`，归**四列那一族**（同切片同 as-of，
+  `may_read = false` ⇒ `items: []` 的空形状而非缺列）。**违约率分母取已了结数**：
+  在途的约既没守也没违约，把它算进分母等于把「这一轮还没跑完」读成「没做到」。
+  面板加第五段「承诺」（有违约 ⇒ `Warn` 语气——S08 §5 的「违约必须可观测」落到界面上就是
+  该标色的时候标）。
+  ③ 出口表 `04 §1.3` 的 S08 行把 `—` 换成 `commitments`，`slo-exit-audit` 当场把它钉成
+  「指得到一列读数」；无读数的行 10 → 9（这个数字每次门禁都打得出，是本段真正的出口）。
+  判据四条新增（`cargo test -p symbio --lib` 1939 → 1941）：core 一条（三条口径各钉：
+  `asserted` 不另计 / 在途是 `open` / 幽灵了结跳过 + 排序确定），stats 一条（一条违约 +
+  一条在途 ⇒ 读得出 promise / to / why / anchor，率 = 1.0 而不是 0.5，无权读 ⇒ 空形状），
+  面板同源一条 + 分区数一条。夹具调的是生产同一个成格口 `commitment_events`，改名两边一起红。
+  **没有新增守卫脚本**：这一段的判据落在读数与列上（`slo-exit-audit` 已在守「指认必须落到
+  真列」），再造一个脚本就是给同一条事实第二个判据源。

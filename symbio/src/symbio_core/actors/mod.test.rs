@@ -1004,8 +1004,84 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     assert_eq!(now.of("session/b").score, 0, "违约计入后声誉下降");
 }
 
-// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会") 断言 2/3/4，T-073）──
+/// 读侧翻译（`commitment_records`，[T-213](../../../../docs/009-task/213-Agent主机面整理批.md "T-213-Agent主机面整理批") 段二）：
+/// 一次立约读出**一条记录**，状态、原因、锚都在同一条上。
+///
+/// ## 这个用例挡的是什么
+///
+/// 出口表里「承诺违约率」那一格要指得到一列读数，而读数的形状由本函数定。三件事
+/// 各钉一条：① `asserted`（违约时告知协作方的第三格）**不另计一条约**——按格子数
+/// 折算的写法在这里就会多算；② 只有 `opened` 的在途约是 `open`，不是违约；
+/// ③ 找不到立约的了结事件**跳过**（fail-closed，与 `verdict_grants_changes` 同一条）。
+/// 生产写侧只走 `commitment_events`，故夹具也用它——夹具与生产共用同一个成格口，
+/// 改名时两边一起红。
+#[test]
+fn commitment_records_pair_by_payload_id() {
+    let store = EventStore::new();
+    // 守约一条、违约一条、在途一条（id 故意乱序写入，读出必须按 id 字典序）。
+    for e in commitment_events(
+        "v2c-t2-bbb",
+        "session/b",
+        "agent:reviewer",
+        "复查这段",
+        true,
+        "",
+        7,
+    ) {
+        store.append(e).unwrap();
+    }
+    for e in commitment_events(
+        "v2c-t1-aaa",
+        "session/b",
+        "agent:worker",
+        "把周报整理完",
+        false,
+        "子智能体没起来",
+        4,
+    ) {
+        store.append(e).unwrap();
+    }
+    store
+        .append(CommitmentKeeper.offer("v2c-t3-ccc", "session/a", "agent:peer", "评审设计", 9))
+        .unwrap();
+    // 找不到立约的了结 ⇒ 不猜（这一条不进记录）。
+    store
+        .append(
+            Event::pending(
+                "ghost-close",
+                crate::symbio_core::event::EVENT_COMMITMENT_BROKEN,
+                Entity::Commitment,
+                Verb::Closed,
+                0,
+                "session/x",
+            )
+            .with_payload(serde_json::json!({ "id": "never-offered", "why": "幽灵" })),
+        )
+        .unwrap();
 
+    let recs = commitment_records(&store.range(crate::symbio_core::event::Seq::new(0)));
+    assert_eq!(
+        recs.iter()
+            .map(|r| (r.id.as_str(), r.state))
+            .collect::<Vec<_>>(),
+        vec![
+            ("v2c-t1-aaa", "broken"),
+            ("v2c-t2-bbb", "kept"),
+            ("v2c-t3-ccc", "open"),
+        ],
+        "一条约一条记录，`asserted` 不另计；在途的是 open 不是违约"
+    );
+    assert_eq!(
+        recs[0].why, "子智能体没起来",
+        "违约原因跟着记录走（S08 §5）"
+    );
+    assert_eq!(recs[0].promise, "把周报整理完");
+    assert_eq!(recs[0].anchor_seq, 4, "锚 = 立约那一轮开口的 seq（I2）");
+    assert_eq!(recs[2].anchor_seq, 9, "在途那条也带着自己的锚");
+    assert_eq!(recs[1].why, "", "守约的记录不该带原因");
+}
+
+// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会") 断言 2/3/4，T-073）──
 use crate::symbio_core::actors::EliminationDecider;
 use crate::symbio_core::authz::PRINCIPAL_ARBITER;
 use crate::symbio_core::event::{Entity as VEntity, EVENT_VERDICT_ASSERTED};

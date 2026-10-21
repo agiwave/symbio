@@ -161,7 +161,10 @@ pub(crate) use event::{
 // 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
 // `recalled_event` 出根而不是主体类型本身：NDC-001（无直连）禁止定义域之外**提及
 // 主体名**——提及即可持有、持有即可绕过事实源。主体仍在 `actors` 内被本函数驱动。
-pub(crate) use actors::{commitment_events, recalled_event};
+// `commitment_records` 是 `commitment_events` 的读侧另一半（切片 → 立约记录）：
+// 配对规则（载荷 `id`）是本域的形状知识，写侧读侧各一份就等于两套账（同
+// `EliminationDecider::verdict_grants_changes`）。记录类型随返回值流动，不出根。
+pub(crate) use actors::{commitment_events, commitment_records, recalled_event};
 // prompt 的结构化渲染出口（`Reasoner::render_messages` 的一跳封装）：运行器下沉
 // `plugins/session` 后要「事件切片 → 消息数组」，但 NDC-001 禁止它在定义域之外提及主体名
 // （`scripts/no-direct-call-audit.mjs`）⇒ 与 `recalled_event` 同一形态，主体仍在 `actors`
