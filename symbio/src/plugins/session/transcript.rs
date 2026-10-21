@@ -6,7 +6,7 @@
 //!   函数里完成，没有任何旁路。
 //! - **位置序号**：每条消息在 `<根>/session/<id>/message` 这个**文件夹**里的位置。
 //!   在途消息此前没有号（只能靠 `timestamp` 兜底，同毫秒即并列），现在**创建时**就分配
-//!   （见 [`INFLIGHT_SEQ_BASE`]）。它是**节点属性**，不是投递属性——消费端按它排序，
+//!   （见 [`InflightSeq`]）。它是**节点属性**，不是投递属性——消费端按它排序，
 //!   与变更的到达顺序无关。
 //! - **变更投递**：每个变更投给 `kind = "vdfs"` 的订阅表（[`VdfsChangeSubscriptions`]），
 //!   落点是**那条消息节点自身的地址** `<id>/message/<mid>`，载荷就是这条 `ChatNode`
@@ -74,44 +74,74 @@ use self::deliver::{
 pub(crate) use self::publish::append_and_publish;
 pub(crate) use crate::symbio_core::llm_state_frame;
 
-/// 在途消息**位置序号**的起点。
+/// **在途号段**：转写侧给「还没落库的消息」发的位置序号（四套序号的归一表见本域
+/// `docs/022-vdfs-session-messages.md` §3.3）。
 ///
-/// 在途消息尚未落库，存储还没给它分配号；但并行工具的消息必须在**创建时**就有权威
-/// 顺序（否则前端只能回退 `timestamp`，同毫秒即并列）。这里给在途消息一段**远离**
-/// 存储序号的空间：存储分配的序号是「第几条消息」量级（很小），而
-/// `plugin::nodes::ordered` 按 `seq` 升序——因此从本值
-/// 开始的在途序号必然排在全部历史之后，正是「最新的消息在末尾」。
+/// 本类型只服务一条判据：**在途号永不落库**（见 [`InflightSeq::BASE`] 的文档——那里记着
+/// 一次真实的撞号事故）。它在类型上的兑现是两条各管一半：
 ///
-/// 落库后由 `overlay_live` / `persisted` 交回存储分配的序号，这段临时序号随之作废。
-///
-/// # 「在途号 / 存储号」是两个独立递增的计数器，共存的前提只有一条
-///
-/// **在途号永不落库**。一旦某个在途号被当成权威号存了下来，存储水位就被抬进在途
-/// 号段，此后两个计数器在同一数值区间里各自递增、**必然撞号**——实测同一会话里
-/// 「本轮用户消息」与「压缩节点」各持同一个在途号，
-/// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
-///
-/// 因此有两半，缺一不可：
-///
-/// 1. **存储边界拒收在途号**（见 [`is_inflight_seq`]，落实在 `chat_session` 的两条
-///    写入路径上）——这是机制：任何调用点都不必"记得"先清号，漏掉也不会再泄漏；
-/// 2. **本值取 `1 << 50`**：泄漏发生过的存量会话，其存储水位停在旧的号段。若新
-///    在途号仍从那一段起，它会**排在那些存量号之前**（「最新的消息在末尾」当场
-///    失效）。抬高之后两段重新分离，而 `1 << 50` ≈ 1.1e15，真实序号追不上它。
-pub(crate) const INFLIGHT_SEQ_BASE: i64 = 1 << 50;
+/// - **计数器侧**：`InflightSeq` 只能由 [`InflightSeq::first`] / [`InflightSeq::after`]
+///   构造，故它**发出的**号必在号段内，也不会被误接成一个存储号；
+/// - **存储边界侧**：[`InflightSeq::occupies`] 按号段识别外来 `seq`，落库前一律摘掉
+///   （见 `chat_session::write`）。
+#[derive(Clone, Copy)]
+pub(crate) struct InflightSeq(i64);
 
-/// 这个 `seq` 是否是**在途占位号**（而非存储分配的权威号）。
-///
-/// 判据只有一条：**号段**。存储号是「第几条消息」量级，从 1 起逐个递增；在途号从
-/// [`INFLIGHT_SEQ_BASE`] 起。两者之间隔着 ~1e15 的空档，「`>= INFLIGHT_SEQ_BASE`」
-/// 因此等价于「不是权威号」。
-///
-/// 它是**存储边界**的守卫（`chat_session::write::append_messages` / `replace_messages`）：
-/// 权威号只能由存储分配，带进来的在途号一律摘掉、重新分配。这条不变式放在边界上
-/// 而不是各调用点上，是因为写入路径有五条以上，而"记得清号"是典型会漏的一类约定
-/// ——漏掉的后果是**静默的**：号看起来都正常，直到两个计数器撞上才暴露。
-pub(crate) fn is_inflight_seq(seq: i64) -> bool {
-    seq >= INFLIGHT_SEQ_BASE
+impl InflightSeq {
+    /// **号段下界**（`1 << 50` ≈ 1.1e15）。
+    ///
+    /// 在途消息尚未落库，存储还没给它分配号；但**并行工具**的消息必须在**创建时**就有
+    /// 权威顺序（否则前端只能回退 `timestamp`，同毫秒即并列）。这里给在途消息一段
+    /// **远离**存储序号的空间：存储分配的序号是「第几条消息」量级（很小），而
+    /// `plugin::nodes::ordered` 按 `seq` 升序——因此从本值开始的在途序号必然排在全部
+    /// 历史之后，正是「最新的消息在末尾」。
+    ///
+    /// 落库后由 `overlay_live` / `persisted` 交回存储分配的序号，这段临时序号随之作废。
+    ///
+    /// # 「在途号 / 存储号」是两个独立递增的计数器，共存的前提只有一条
+    ///
+    /// **在途号永不落库**。一旦某个在途号被当成权威号存了下来，存储水位就被抬进在途
+    /// 号段，此后两个计数器在同一数值区间里各自递增、**必然撞号**——实测同一会话里
+    /// 「本轮用户消息」与「压缩节点」各持同一个在途号，
+    /// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
+    ///
+    /// 因此有两半，缺一不可：
+    ///
+    /// 1. **存储边界拒收在途号**（见 [`InflightSeq::occupies`]，落实在 `chat_session` 的
+    ///    两条写入路径上）——这是机制：任何调用点都不必"记得"先清号，漏掉也不会再泄漏；
+    /// 2. **本值取 `1 << 50`**：泄漏发生过的存量会话，其存储水位停在旧的号段。若新
+    ///    在途号仍从那一段起，它会**排在那些存量号之前**（「最新的消息在末尾」当场
+    ///    失效）。抬高之后两段重新分离，而 `1 << 50` ≈ 1.1e15，真实序号追不上它。
+    pub(crate) const BASE: i64 = 1 << 50;
+
+    /// 一份新转写的第一个在途号。
+    pub(crate) fn first() -> Self {
+        Self(Self::BASE)
+    }
+
+    /// 本号的下一个在途号。计数器只向上 ⇒ 构造之后永不离开号段。
+    pub(crate) fn after(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// 线上值：写进 `ChatNode.seq` 的那个数。
+    pub(crate) fn raw(self) -> i64 {
+        self.0
+    }
+
+    /// 这个 `seq` 是否是**在途占位号**（而非存储分配的权威号）。
+    ///
+    /// 判据只有一条：**号段**。存储号是「第几条消息」量级，从 1 起逐个递增；在途号从
+    /// [`InflightSeq::BASE`] 起。两者之间隔着 ~1e15 的空档，「`>= BASE`」
+    /// 因此等价于「不是权威号」。
+    ///
+    /// 它是**存储边界**的守卫（`chat_session::write::append_messages` / `replace_messages`）：
+    /// 权威号只能由存储分配，带进来的在途号一律摘掉、重新分配。这条不变式放在边界上
+    /// 而不是各调用点上，是因为写入路径有五条以上，而"记得清号"是典型会漏的一类约定
+    /// ——漏掉的后果是**静默的**：号看起来都正常，直到两个计数器撞上才暴露。
+    pub(crate) fn occupies(seq: i64) -> bool {
+        seq >= Self::BASE
+    }
 }
 
 /// 会话转写：内存图（在途视图）+ 位置序号分配 + 变更投递。
@@ -121,9 +151,9 @@ pub(crate) fn is_inflight_seq(seq: i64) -> bool {
 /// 见 `docs/022-vdfs-session-messages.md` §3.4）与压缩发射器经同一入口写入。
 pub struct Transcript {
     session_id: String,
-    /// 下一个要分配的**在途位置序号**（见 [`INFLIGHT_SEQ_BASE`]）。
+    /// 下一个要分配的**在途位置序号**（见 [`InflightSeq::BASE`]）。
     /// 只在**首次见到**一条消息、且该帧没带存储分配的号时消耗。
-    next_seq: i64,
+    next_seq: InflightSeq,
     /// **只进日志**的帧计数器——不是协议的一部分，也不下发。
     /// 日志的 `[T#n]` 用它，因此「一次流式回复有几百帧」在时间线上仍然可数
     /// （位置序号对同一节点的每一帧都是同一个值，用它就失去这个信息）。
@@ -147,7 +177,7 @@ impl Transcript {
     pub fn new(session_id: String, changes: Arc<VdfsChangeSubscriptions>) -> Self {
         Self {
             session_id,
-            next_seq: INFLIGHT_SEQ_BASE,
+            next_seq: InflightSeq::first(),
             frame_no: 0,
             nodes: IndexMap::new(),
             changes,
@@ -167,14 +197,14 @@ impl Transcript {
     /// | `status = removed` | 就地移除该节点（不落图） |
     /// | `status`（其余） | 状态迁移 |
     /// | 身份字段 / `meta` / `timestamp` | 有则覆盖（发射端持有当前完整值） |
-    /// | `seq` | 帧带了就用（存储权威值）；**没带且是新节点** ⇒ 就地分配在途号（[`INFLIGHT_SEQ_BASE`]） |
+    /// | `seq` | 帧带了就用（存储权威值）；**没带且是新节点** ⇒ 就地分配在途号（[`InflightSeq`]） |
     ///
     /// 未知 id 用帧内信息建占位再合并——帧自给自足，不依赖任何先行帧（含它的顺序：
     /// 在途号在这里就有，不必等落库）。
     ///
     /// 这里分配的**在途号是节点属性，不是落库值**：它只用来在图上排序，直到
     /// [`Self::persisted`] 把该节点交回存储。把它带进存储的路径一律被存储边界拒收
-    /// （见 [`INFLIGHT_SEQ_BASE`] 的说明——那里记着一次真实的撞号事故）。
+    /// （见 [`InflightSeq::BASE`] 的说明——那里记着一次真实的撞号事故）。
     ///
     /// ## 协议违例：同帧既带增量又带完整正文
     ///
@@ -216,13 +246,13 @@ impl Transcript {
 
         let existed = self.nodes.contains_key(&message_id);
         // 位置序号：**帧带就用**（存储权威值，落库后的对齐帧），**没带且是新节点**
-        // 就本轮分配一个在途号（见 `INFLIGHT_SEQ_BASE`）。先算再入图——下面那段要
+        // 就本轮分配一个在途号（见 [`InflightSeq`]）。先算再入图——下面那段要
         // 独占 `self.nodes` 的可变借用。
         let allocated = match msg.seq {
             Some(s) => Some(s),
             None if !existed => {
-                let s = self.next_seq;
-                self.next_seq += 1;
+                let s = self.next_seq.raw();
+                self.next_seq = self.next_seq.after();
                 Some(s)
             }
             None => None,

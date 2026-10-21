@@ -26,6 +26,12 @@ fn backfill_timestamps(messages: Vec<ChatNode>, now: i64) -> Vec<ChatNode> {
 }
 
 /// 取一批消息中已有的最大 `seq`，作为后续分配的起点（Lamport 计数器的当前水位）。
+///
+/// **最大的是「全部」，不挑号段**——这是有意的：存量会话里被泄漏抬高的水位已经躺在存储
+/// 里，把它当在途号滤掉等于**压低**水位，此后新分配的号会排到那些既有消息之前。
+/// 「在途号不落库」由**边界**保证（`InflightSeq::occupies` 摘号），因此水位这一侧
+/// 不需要也不应该再判一次号段（四套序号的归一表见
+/// `plugins/session/docs/022-vdfs-session-messages.md` §3.3）。
 pub(super) fn max_seq(messages: &[ChatNode]) -> i64 {
     messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
 }
@@ -375,11 +381,11 @@ impl PersistentChatSession {
                 chat_msg.timestamp = Some(now);
             }
             // 存储边界：**在途占位号一律摘掉**，交给下面统一分配（见
-            // `transcript::INFLIGHT_SEQ_BASE`）。不摘的后果是静默的：存储水位被抬进
+            // `transcript::InflightSeq::BASE`）。不摘的后果是静默的：存储水位被抬进
             // 在途号段，此后存储计数器与在途计数器在同一区间各自递增 ⇒ 撞号。
             if chat_msg
                 .seq
-                .is_some_and(super::super::transcript::is_inflight_seq)
+                .is_some_and(super::super::transcript::InflightSeq::occupies)
             {
                 chat_msg.seq = None;
             }
@@ -481,9 +487,11 @@ impl PersistentChatSession {
         // 存储边界：在途占位号**必须在 `assign_seq` 之前**摘掉——`assign_seq` 对
         // 既有序号是"原样保留"，放它进去就等于把在途号当成权威号写进存储
         // （`converge_inflight` 的补写路径正是带在途号进来的）。见
-        // `transcript::INFLIGHT_SEQ_BASE`。
+        // `transcript::InflightSeq::BASE`。
         for m in messages.iter_mut() {
-            if m.seq.is_some_and(super::super::transcript::is_inflight_seq) {
+            if m.seq
+                .is_some_and(super::super::transcript::InflightSeq::occupies)
+            {
                 m.seq = None;
             }
         }

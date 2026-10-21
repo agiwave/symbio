@@ -135,7 +135,7 @@ fn delta_for_unknown_id_creates_placeholder() {
     assert_eq!(v["content"], "片段", "载荷是合并后的全量正文");
     assert_eq!(
         n.seq,
-        Some(INFLIGHT_SEQ_BASE),
+        Some(InflightSeq::BASE),
         "在途消息创建时即拿到位置序号"
     );
 }
@@ -192,12 +192,12 @@ fn inflight_messages_get_their_position_seq_at_creation() {
     let (mut tr, _seen) = transcript();
     tr.apply(text_msg("t1", NodeStatus::Streaming, ""));
     tr.apply(text_msg("t2", NodeStatus::Streaming, ""));
-    // 顺序与到达顺序一致，且都落在 `INFLIGHT_SEQ_BASE` 起的段内
-    assert_eq!(tr.get("t1").unwrap().seq, Some(INFLIGHT_SEQ_BASE));
-    assert_eq!(tr.get("t2").unwrap().seq, Some(INFLIGHT_SEQ_BASE + 1));
+    // 顺序与到达顺序一致，且都落在 `InflightSeq::BASE` 起的段内
+    assert_eq!(tr.get("t1").unwrap().seq, Some(InflightSeq::BASE));
+    assert_eq!(tr.get("t2").unwrap().seq, Some(InflightSeq::BASE + 1));
     // 同一节点的后续帧**不重新分配**（位置是节点属性，不是帧属性）
     tr.apply(delta_msg("t1", "x"));
-    assert_eq!(tr.get("t1").unwrap().seq, Some(INFLIGHT_SEQ_BASE));
+    assert_eq!(tr.get("t1").unwrap().seq, Some(InflightSeq::BASE));
 
     // 存储分配的权威值（落库后回发的对齐帧）覆盖在途号
     tr.apply(cm::ChatNode {
@@ -209,7 +209,7 @@ fn inflight_messages_get_their_position_seq_at_creation() {
 }
 
 /// 在途号**排在全部历史之后**——`ordered` 按 `seq` 升序，而存储分配的序号是
-/// 「第几条消息」量级（远小于 `INFLIGHT_SEQ_BASE`）。于是「最新的消息在末尾」
+/// 「第几条消息」量级（远小于 `InflightSeq::BASE`）。于是「最新的消息在末尾」
 /// 对在途消息同样成立。
 #[test]
 fn inflight_seq_sorts_after_all_stored_messages() {
@@ -643,17 +643,32 @@ fn session_state_frame_does_not_touch_the_message_graph() {
 /// 它是存储边界的守卫（`chat_session` 的两条写入路径用它摘号），所以边界值本身
 /// 就是契约：`base - 1` 仍是权威号、`base` 是第一个在途号。
 #[test]
-fn is_inflight_seq_splits_authoritative_and_inflight_ranges() {
-    assert!(!is_inflight_seq(0), "0 是合法的「尚未分配」水位");
+fn inflight_seq_occupies_only_its_own_segment() {
+    assert!(!InflightSeq::occupies(0), "0 是合法的「尚未分配」水位");
     assert!(
-        !is_inflight_seq(INFLIGHT_SEQ_BASE - 1),
+        !InflightSeq::occupies(InflightSeq::BASE - 1),
         "在途号段下界之前必须是权威号（存储号是「第几条消息」量级）"
     );
-    assert!(is_inflight_seq(INFLIGHT_SEQ_BASE), "下界本身是第一个在途号");
-    assert!(is_inflight_seq(INFLIGHT_SEQ_BASE + 1));
+    assert!(
+        InflightSeq::occupies(InflightSeq::BASE),
+        "下界本身是第一个在途号"
+    );
+    assert!(InflightSeq::occupies(InflightSeq::BASE + 1));
 
     // 存量会话被泄漏抬高的水位（旧号段 `1 << 40`）必须仍被判为**权威号**：
     // 它已经躺在存储里，边界再把它当在途号摘掉就等于改写既有消息的顺序锚点。
-    // 这也是 `INFLIGHT_SEQ_BASE` 必须抬到 `1 << 50` 的原因。
-    assert!(!is_inflight_seq(1 << 40), "存量泄漏水位是已落库的权威号");
+    // 这也是 `InflightSeq::BASE` 必须抬到 `1 << 50` 的原因。
+    assert!(
+        !InflightSeq::occupies(1 << 40),
+        "存量泄漏水位是已落库的权威号"
+    );
+
+    // 计数器侧的同一件事：`InflightSeq` 只能从下界起、只向上走，
+    // 所以**转写自己发出的**号恒落在号段内——不需要各处"记得"校验。
+    let first = InflightSeq::first();
+    assert_eq!(first.raw(), InflightSeq::BASE, "首个在途号就是号段下界");
+    assert!(
+        InflightSeq::occupies(first.after().raw()),
+        "号段是计数器唯一的取值域"
+    );
 }

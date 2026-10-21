@@ -12,7 +12,7 @@
 //! 两者要保住的东西不同，但都只关心**一帧怎么发**——所以同住本文件，
 //! 彼此的对照关系（谁折帧序、谁折时间）一眼可见。
 //!
-//! 「在途位置序号」（`INFLIGHT_SEQ_BASE` / `is_inflight_seq`）则留在 `transcript.rs`：
+//! 「在途位置序号」（`InflightSeq`）则留在 `transcript.rs`：
 //! 它管的是**顺序**，不是**帧**，且被 `chat_session` 的存储边界引用。
 //!
 //! ## 测试在哪
@@ -81,7 +81,7 @@ pub(crate) struct DeltaLogCoalescer {
 /// 一段连续的同节点纯增量的累计量。
 ///
 /// 字段叫 `frame_*` 而不是 `seq_*`：本结构只服务于日志，而 `seq` 这个词在本模块里
-/// 已经被 [`INFLIGHT_SEQ_BASE`] 那一条语义（**位置序号**）占住了。叫错一次，
+/// 已经被 `InflightSeq::BASE` 那一条语义（**位置序号**）占住了。叫错一次，
 /// 下一个读代码的人就会以为折行碰了位置序号——它碰的从来只是日志行。
 #[derive(Debug, PartialEq, Eq)]
 struct DeltaRun {

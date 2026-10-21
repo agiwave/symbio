@@ -369,7 +369,7 @@ async fn run_add_then_read_round_trip() {
     assert_eq!(persisted[0].content.as_ref().unwrap().to_text(), "你好");
     let first_seq = persisted[0].seq.expect("存储必须分配权威 seq");
     assert!(
-        first_seq < crate::plugins::session::transcript::INFLIGHT_SEQ_BASE,
+        first_seq < crate::plugins::session::transcript::InflightSeq::BASE,
         "回给调用方的必须是存储号，不是在途号"
     );
 

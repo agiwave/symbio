@@ -633,7 +633,7 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
     );
 }
 
-/// 存储边界：**在途占位号不得落库**（事故现场见 `transcript::INFLIGHT_SEQ_BASE`）。
+/// 存储边界：**在途占位号不得落库**（事故现场见 `transcript::InflightSeq::BASE`）。
 ///
 /// `CompressionEmitter::finish` 交给 `append_messages` 的是**在途图里的节点**——
 /// 它的 `seq` 已被 `Transcript::apply` 填成在途号。存储若把它当权威号存下，存储
@@ -648,7 +648,7 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
 #[tokio::test]
 async fn append_messages_replaces_inflight_placeholder_seq() {
     let (session, dir, _tmp) = setup().await;
-    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+    let inflight = super::super::transcript::InflightSeq::BASE;
     seed_fact(&dir);
 
     let born = |node: ChatNode| super::MessageChange::Born {
@@ -710,7 +710,7 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
 #[tokio::test]
 async fn append_messages_returns_storage_authoritative_copies() {
     let (session, _dir, _tmp) = setup().await;
-    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+    let inflight = super::super::transcript::InflightSeq::BASE;
 
     // 助手侧节点的真实形态：号是在途图发的；用户那条干净（本地乐观副本也没有号）
     let mut assistant = plain_msg("a1");

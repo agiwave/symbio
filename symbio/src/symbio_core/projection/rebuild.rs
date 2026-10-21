@@ -69,9 +69,9 @@
 //!
 //! ## `seq`：重建的顺序锚点
 //!
-//! 重建按**发射顺序**发号（单调递增），因此同一事件序列恒得同一组 `seq`。
-//! 它与存储分配的号**不是同一套**——ADR-049 已写明切源后「`seq` 分配」属
-//! 呈现细节，可不同。前端只需一个稳定且单调的锚点，不需要它是存储号。
+//! 发号器、以及它与存储号为什么必须是两套，见 [`RebuildSeq`]。本模块只额外钉住
+//! **确定性**这一条：同一事件序列恒得同一组 `seq`（纯函数，不看时钟、不随机）。
+//! 前端要的是一个稳定且单调的锚点，不需要它是存储号。
 
 use std::collections::HashSet;
 
@@ -93,6 +93,27 @@ use crate::symbio_core::facts::ReportDraft;
 use crate::symbio_core::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
+
+/// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
+/// `plugins/session/docs/022-vdfs-session-messages.md` §3.3）。
+///
+/// 它与存储分配的权威号是**两套各自递增的计数器，同写 `ChatNode.seq` 一个字段**——
+/// 所以混用是本模块最容易顺手写出来的错：快照载荷里带的那份号是**存储层**的槽位号
+/// （`snapshot_slot_seq` 的口径，量级可以很大且不连续），而重建的号必须是**本模块
+/// 发号器**给出的连续顺序锚。两套号混用会让「快照列表内部单调、与后继事件不单调」，
+/// 而前端的排序键只有一个。ADR-049 已判定「切源后 `seq` 分配属呈现细节」。
+///
+/// 做成类型之后，「把外来的号直接写进节点」不再是这个模块里一个能顺手写出来的动作：
+/// 节点上的重建号只有一个来路——[`RebuildSeq::assign`]。
+struct RebuildSeq(i64);
+
+impl RebuildSeq {
+    /// 发下一个号并写进节点。
+    fn assign(&mut self, node: &mut ChatNode) {
+        self.0 += 1;
+        node.seq = Some(self.0);
+    }
+}
 
 /// 从事件序列重建会话消息节点树（**纯函数**：同输入 ⇒ 逐字同输出）。
 ///
@@ -143,7 +164,7 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
-    let mut seq: i64 = 0;
+    let mut seq = RebuildSeq(0);
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
     let (start, snapshot_messages) = match crate::symbio_core::mutations_latest_snapshot(events) {
@@ -151,12 +172,8 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
         None => (0, Vec::new()),
     };
     for mut m in snapshot_messages {
-        // 号按**本函数自己的发号器**重发，不用载荷里那份：载荷那份是**存储层**的槽位号
-        // （`snapshot_slot_seq` 的口径），而重建的号是重建自己的顺序锚。两套号混用会让
-        // 「快照列表内部单调、与后继事件不单调」——而前端的排序键只有一个。
-        // ADR-049 已判定「切源后 `seq` 分配属呈现细节」。
-        seq += 1;
-        m.seq = Some(seq);
+        // 号按**本函数自己的发号器**重发，不用载荷里那份（口径见 [`RebuildSeq`]）。
+        seq.assign(&mut m);
         at.insert(m.id.clone(), out.len());
         out.push(m);
     }
@@ -192,8 +209,7 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
             if gone.contains(&m.id) || at.contains_key(&m.id) {
                 continue;
             }
-            seq += 1;
-            m.seq = Some(seq);
+            seq.assign(&mut m);
             at.insert(m.id.clone(), out.len());
             out.push(m);
         }

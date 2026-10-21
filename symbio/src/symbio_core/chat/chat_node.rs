@@ -368,6 +368,10 @@ pub struct ChatNode {
     /// （`max_seq` / `assign_seq`，与两条写入路径 `append_messages` /
     /// `replace_messages` 同处一文件）。core 只声明**存在一个顺序锚点**，
     /// 不规定它怎么被算出来。
+    ///
+    /// **进到这一格的号有四套来源**（权威号 / 快照槽位号 / 在途号 / 重建号，另有一个
+    /// 同名但属于事件层的 WAL `Seq`）——谁是分配者、谁何时作废，归一表在
+    /// `plugins/session/docs/022-vdfs-session-messages.md` §3.3，本处不复述。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
 

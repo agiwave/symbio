@@ -120,7 +120,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_type.schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
 | T14 | `t14-no-redundant-vdfs` | **会话期间零回读**：一轮会话的路由留痕里不得出现 `vdfs/stat` / `vdfs/read` / `vdfs/list`——变更必须自带载荷（节点视图 / 正文 / 目录清单） |
 | T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/agent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
-| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（ADR-025），在途节点带 `INFLIGHT_SEQ_BASE` 高位序 |
+| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（ADR-025），在途节点带 `InflightSeq::BASE` 高位序 |
 | T17 | `t17-plugin-assembly` | 装配全链路：homedir → 装配（清单落位、二进制落位）→ 工具 → 会话收尾 → 停止生效 |
 | T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan()` 在重试前明确触发 |
 
