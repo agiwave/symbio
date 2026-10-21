@@ -8,8 +8,12 @@ use crate::symbio_core::event::{Entity, Event, EventEnvelope, Verb};
 use crate::symbio_core::store::{EventStore, Store};
 
 /// 造一条 pending 事件（未入库，无 seq）。
+///
+/// **不带溯源边**：根事件（`user.message`）本来就没有上游。带边的用例显式
+/// `.with_produced_by(..)`——此前这里默认填 0，于是"首条事件指向自己"被当成合规，
+/// 而 [`provenance_dangling`] 一上线，那个默认值就是一处假绿的来源。
 fn pending(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "main").with_produced_by(0)
+    Event::pending(id, kind, entity, verb, turn, "main")
 }
 
 /// 造一批**已入库**事件（seq 由 Store 分配 ⇒ 天然单调）。
@@ -221,16 +225,124 @@ fn reply_with_provenance_passes() {
     assert!(produced_by_coverage(&events).is_empty());
 }
 
-// ── check_all：八条合跑 ────────────────────────────────────────────────
+// ── C3 对偶：溯源不悬空 ────────────────────────────────────────────────
+//
+// 这四条钉的是「有没有」之外的另一半：「指向谁」。
+// 每一条都能在关掉 [`provenance_dangling`] 之后变绿——那正是它存在的证明。
+
+/// 造一条**已入库**事件，`seq` 由测试指定（用来造切片与空洞）。
+fn at_seq(seq: u64, id: &str, produced_by: Option<u64>) -> Event {
+    let mut e = Event::pending(
+        id,
+        "classify.verdict",
+        Entity::Verdict,
+        Verb::Asserted,
+        0,
+        "main",
+    );
+    e.seq = Some(crate::symbio_core::event::Seq::new(seq));
+    e.produced_by = produced_by;
+    e
+}
+
+#[test]
+fn provenance_to_earlier_existing_event_passes() {
+    let events = vec![at_seq(0, "e0", None), at_seq(1, "e1", Some(0))];
+    assert!(
+        provenance_dangling(&events, false).is_empty(),
+        "指向更早且存在的事件 = 合规"
+    );
+}
+
+#[test]
+fn provenance_pointing_forward_is_detected() {
+    // 指向一条**更晚**的事件：边把因果倒过来了，而日志读起来毫无异样。
+    let events = vec![
+        at_seq(0, "e0", Some(2)),
+        at_seq(1, "e1", None),
+        at_seq(2, "e2", None),
+    ];
+    let bad = provenance_dangling(&events, false);
+    assert_eq!(bad.len(), 1, "前向边必须被看见");
+    assert_eq!(bad[0].event_id, "e0");
+    assert!(bad[0].why.contains("不小于"), "{}", bad[0].why);
+}
+
+#[test]
+fn provenance_pointing_at_itself_is_detected() {
+    // `produced_by == seq` 是前向边的极端情形：自己产生自己。
+    let events = vec![at_seq(3, "e3", Some(3))];
+    let bad = provenance_dangling(&events, false);
+    assert_eq!(bad.len(), 1, "自指也必须被看见");
+}
+
+#[test]
+fn provenance_into_a_hole_is_dangling() {
+    // 切片内**有空洞**：seq 5 与 7 在，6 不在。7 指向 6 ⇒ 悬空。
+    // 这一条与"切片首部"不同：它不是"更早但在片外"，是"该在片里却不在"。
+    let events = vec![at_seq(5, "e5", None), at_seq(7, "e7", Some(6))];
+    let bad = provenance_dangling(&events, true);
+    assert_eq!(bad.len(), 1, "空洞里的溯源边必须被看见（宽限也放不过它）");
+    assert!(bad[0].why.contains("悬空"), "{}", bad[0].why);
+}
+
+#[test]
+fn provenance_across_the_slice_head_is_graced() {
+    // 切片从 seq 6 起，6 指向片外的 5：**合法**，只是本切片看不到上游。
+    let events = vec![at_seq(6, "e6", Some(5))];
+    assert!(
+        provenance_dangling(&events, true).is_empty(),
+        "读侧宽限档：跨片边不假红"
+    );
+    assert_eq!(
+        provenance_dangling(&events, false).len(),
+        1,
+        "严判档（故障注入 / 整份日志）：跨片边照样要看见——宽限是形参，不是判据"
+    );
+}
+
+#[test]
+fn provenance_beyond_the_slice_tail_is_graced_too() {
+    // 头尾**对称**：切片尾部事件的产物指向一条更晚的事实，本切片看不到它。
+    // 只宽限头部等于假设"切片总是从头切"，而读侧窗口两头都会切。
+    let events = vec![at_seq(0, "e0", None), at_seq(1, "e1", Some(9))];
+    assert!(
+        provenance_dangling(&events, true).is_empty(),
+        "尾部跨片边同样不假红（对称宽限）"
+    );
+    assert_eq!(
+        provenance_dangling(&events, false).len(),
+        1,
+        "严判档照样要看见"
+    );
+}
+
+#[test]
+fn pending_events_are_skipped_by_dangling_check() {
+    // 未入库事件还没有 seq，溯源边尚无意义（与 `seq_monotonic` 同口径）。
+    let pending_only = vec![Event::pending(
+        "p0",
+        "classify.verdict",
+        Entity::Verdict,
+        Verb::Asserted,
+        0,
+        "main",
+    )
+    .with_produced_by(999)];
+    assert!(provenance_dangling(&pending_only, false).is_empty());
+}
+
+// ── check_all：九条合跑 ────────────────────────────────────────────────
 
 #[test]
 fn check_all_on_clean_sequence_is_empty() {
     let events = stored(vec![
         pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
-        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        // 收束类**必须有**溯源（I2）：指向开轮那条。
+        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
         pending("v0", "classify.verdict", Entity::Verdict, Verb::Asserted, 0).with_produced_by(0),
     ]);
-    assert!(check_all(&events).is_empty(), "合规序列三查全绿");
+    assert!(check_all(&events).is_empty(), "合规序列九查全绿");
 }
 
 // ── 故障注入用例集（S1 步骤 4：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────

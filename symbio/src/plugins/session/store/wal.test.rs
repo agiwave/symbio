@@ -18,6 +18,16 @@ fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -
         .with_payload(serde_json::json!({ "text": text }))
 }
 
+/// 造一条**没有溯源边**的 pending 事件——只有根事件（用户发言）该用它。
+///
+/// [`ev`] 统一给 `produced_by(0)`：当日志从 0 起，seq 0 的那条就指向**自己**。
+/// I2 只查"有没有边"时这是绿的，`provenance_dangling` 上线后它必须红——
+/// 根事件本来就没有上游，正确的写法是**不带边**。
+fn ev_root(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
+    Event::pending(id, kind, entity, verb, turn, "session/main")
+        .with_payload(serde_json::json!({ "text": text }))
+}
+
 /// 验收 1：写到一半杀进程 → 重启后 `head()` 与崩溃前最后一条**已提交**事件一致。
 #[test]
 fn crash_recovery_head_matches_last_committed_event() {
@@ -100,7 +110,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     {
         let store = EventWalStore::open(&path).unwrap();
         store
-            .append(ev(
+            .append(ev_root(
                 "u0",
                 EVENT_USER_MESSAGE,
                 Entity::Turn,
@@ -181,7 +191,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
     assert!(store.is_empty(), "memory 重启即丢");
     // 但 S01 闭环照常完整运行。
     store
-        .append(ev(
+        .append(ev_root(
             "u0",
             EVENT_USER_MESSAGE,
             Entity::Turn,

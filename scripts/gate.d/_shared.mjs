@@ -102,7 +102,15 @@ export const BASELINE = {
   // `a_staged_half_piece_never_lands_and_is_cleaned_up`（`.staged` 半件不是「半条变更」）、
   // `a_full_park_drops_the_oldest_entry`（有界：停在上界且让位的是最旧的一件）、
   // `a_park_that_cannot_be_written_reports_failure`（写不进去 = 无副本 ⇒ `Failed`，不许回 `Parked`）。
-  rustTests: 1969,
+  // T-218 新增 7 条（1969→1976，非放宽）：`invariants/mod.test.rs` 的
+  // `provenance_to_earlier_existing_event_passes`（片内指向更早且存在 ⇒ 绿，正向基线）、
+  // `provenance_pointing_forward_is_detected`（前向边）、`provenance_pointing_at_itself_is_detected`（自指）、
+  // `provenance_into_a_hole_is_dangling`（片内查无此号）、
+  // `provenance_across_the_slice_head_is_graced` / `provenance_beyond_the_slice_tail_is_graced_too`
+  // （切片两头的跨片边头尾对称宽限——只宽限头部等于假设"切片总是从头切"）、
+  // `pending_events_are_skipped_by_dangling_check`（未入库事件跳过）。
+  // 前四条是 `produced_by_coverage` 查不出的那一半：它只问"有没有边"，不问"指向谁"。
+  rustTests: 1976,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -132,7 +140,10 @@ export const BASELINE = {
   // T-176 挂生产内核：`invariants.rs` 的 seq 重号在「严格单调且无跳号」语义下
   // 报两条（重号位 + 其后错位），`termination.rs` 加了内核判定的边界自证
   // （恰在上界合法 / 越界一轮判否）。235 → 237。
-  verifyAsserts: 243,
+  // T-218 增 1 条（243→244）：`invariants.rs` 在**真实日志**上注入一处悬空溯源
+  // （把一条事件的 `produced_by` 指到片内一个被删掉的号），断言 `I2DanglingProvenance`
+  // 必须响。它同时钉住新判据的反向纪律——`enable_i2_dangling: false` 时那条必须消失。
+  verifyAsserts: 244,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

@@ -480,7 +480,7 @@ impl TurnRunner {
     /// - 用户消息：`turn × opened`（`user.message`），一次；
     /// - 每轮工具调用：**不单独占格**——工具结果才是产物事实，落
     ///   `artifact × asserted`（`artifact.added`，载荷 `{ tool, text }`），
-    ///   `produced_by` 指向**本轮用户格**（S02 §3 的 `caused_by` 断言）；
+    ///   `produced_by` 指向**本轮用户格**（S02 §3 的 `produced_by` 断言）；
     /// - 收束：`chat.assistant.final`（或失败的兜底格）——**只落一次**。
     ///
     /// ## prompt 的两段

@@ -31,9 +31,47 @@ fn snap(own: bool, store: &EventStore) -> FleetSnapshot {
     }
 }
 
+/// 本日志的**根事件 seq**——记忆事件的溯源必须有真实上游。
+///
+/// `I2` 不只要求"有边"，还要求"边不悬空"（[`check_all`] 的 C3 对偶）。
+/// 夹具此前一律写 `.with_produced_by(0)`：当日志从 0 起时，那条边指向**自己**，
+/// 是一处假绿——`produced_by_coverage` 只查非空，查不出自指。
+/// 没有根就先种一条（`user.message` 本来就是每轮的第一条事实）。
+fn root_of(store: &EventStore) -> u64 {
+    match store.range(Seq::new(0)).first() {
+        Some(e) => e.seq().map(|s| s.value()).unwrap_or(0),
+        None => store
+            .append(Event::pending(
+                "root-u0",
+                "user.message",
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                PRINCIPAL_USER,
+            ))
+            .expect("根事件入格")
+            .value(),
+    }
+}
+
+/// 日志里的**记忆格事件**——夹具现在会先种一条根事件（用户格），
+/// 于是"日志有几条"不再等于"记忆有几条"。计数断言问的是后者。
+fn mem_events(store: &EventStore) -> Vec<Event> {
+    store
+        .range(Seq::new(0))
+        .into_iter()
+        .filter(|e| e.entity == Entity::Memory)
+        .collect()
+}
+
+fn mem_count(store: &EventStore) -> usize {
+    mem_events(store).len()
+}
+
 /// 种入一条 `memory.encoded`，**标签由调用方给**——巩固只合并同标签的记忆，
 /// 要证「技能不参与经验的巩固」就得能种出别的标签。
 fn seed_encoded_as(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) -> u64 {
+    let src = root_of(store);
     store
         .append(
             Event::pending(
@@ -44,7 +82,7 @@ fn seed_encoded_as(store: &EventStore, id: &str, content: &str, tag: &str, ts: i
                 0,
                 PRINCIPAL_USER,
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_ts(ts)
             .with_payload(serde_json::json!({
                 "content": content,
@@ -66,6 +104,7 @@ fn seed_encoded(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
 /// 与 [`seed_encoded`] 的差别只有载荷多一个字段——缺省（不带它）=
 /// `thread_private` ⇒ 跨会话不可见，跨会话判据想看见内容必须显式种成 shared。
 fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
+    let src = root_of(store);
     store
         .append(
             Event::pending(
@@ -76,7 +115,7 @@ fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
                 0,
                 PRINCIPAL_USER,
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_ts(ts)
             .with_payload(serde_json::json!({
                 "content": content,
@@ -91,6 +130,7 @@ fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
 
 /// 种入一条 `memory.consolidated`——代数由形参给，代数上界的拒收分支非它不可达。
 fn seed_consolidated(store: &EventStore, id: &str, content: &str, ts: i64, generation: u32) -> u64 {
+    let src = root_of(store);
     store
         .append(
             Event::pending(
@@ -101,7 +141,7 @@ fn seed_consolidated(store: &EventStore, id: &str, content: &str, ts: i64, gener
                 0,
                 PRINCIPAL_USER,
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_ts(ts)
             .with_payload(serde_json::json!({
                 "content": content,
@@ -463,17 +503,18 @@ fn consolidated_memory_inherits_the_source_vis_scope() {
 #[test]
 fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     let store = EventStore::new();
-    for (i, text) in ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
+    // 记住每条种子自己的 seq——断言问的是"合并了哪两条"，
+    // 用返回值问才不会随夹具前置事件（根事件）漂移。
+    let seeded: Vec<u64> = ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
         .iter()
         .enumerate()
-    {
-        seed_encoded(&store, &format!("e{i}"), text, 1000 + i as i64);
-    }
+        .map(|(i, text)| seed_encoded(&store, &format!("e{i}"), text, 1000 + i as i64))
+        .collect();
     let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), CONSOLIDATE_MIN_ENTRIES);
+    assert_eq!(mem_count(&store), CONSOLIDATE_MIN_ENTRIES);
 
     // 只有 3 条时不动（先把第一条拿掉再问一次）。
-    let three: Vec<Event> = snap[1..].to_vec();
+    let three: Vec<Event> = mem_events(&store)[1..].to_vec();
     assert!(
         consolidate(&store, &three, 6, 5000)
             .expect("巩固不失败")
@@ -488,7 +529,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
         .expect("第 4 条到位 ⇒ 触发合并");
     let snap2 = store.range(Seq::new(0));
     assert_eq!(
-        snap2.len(),
+        mem_count(&store),
         7,
         "Log 不删：4 条源 + 1 条合并产物 + 2 条遗忘格"
     );
@@ -518,10 +559,10 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
         .unwrap_or_default();
     assert_eq!(
         sources,
-        vec![serde_json::json!(0), serde_json::json!(1)],
-        "合并的是最旧两条（ts 1000 / 1100 ⇒ seq 0 / 1）"
+        vec![serde_json::json!(seeded[0]), serde_json::json!(seeded[1])],
+        "合并的是最旧两条（ts 1000 / 1100）"
     );
-    assert_eq!(c.produced_by, Some(0), "溯源指向最旧那条源记忆");
+    assert_eq!(c.produced_by, Some(seeded[0]), "溯源指向最旧那条源记忆");
     assert!(c.ts > 0, "记忆事件填真实编码时刻");
     assert_eq!(payload_str(c, "tag"), Some(MEMORY_TAG));
 
@@ -531,7 +572,11 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
         .collect();
     assert_eq!(forgotten.len(), 2, "两条源记忆各一条遗忘格");
     let targets: Vec<u64> = forgotten.iter().map(|e| e.produced_by.unwrap()).collect();
-    assert_eq!(targets, vec![0, 1], "遗忘格溯源到被遗忘的那条");
+    assert_eq!(
+        targets,
+        vec![seeded[0], seeded[1]],
+        "遗忘格溯源到被遗忘的那条"
+    );
     for ev in &forgotten {
         assert_eq!(ev.verb, Verb::Closed, "落在 memory × closed");
         assert_eq!(
@@ -571,27 +616,27 @@ fn consolidation_never_merges_across_tags() {
     let store = EventStore::new();
     seed_encoded_as(&store, "s0", "先写正向用例", SKILL_TAG, 1000);
     seed_encoded_as(&store, "s1", "先跑一遍再改", SKILL_TAG, 1100);
-    for (i, text) in ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
+    let exp_seq: Vec<u64> = ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
         .iter()
         .enumerate()
-    {
-        seed_encoded(&store, &format!("e{i}"), text, 1200 + i as i64);
-    }
+        .map(|(i, text)| seed_encoded(&store, &format!("e{i}"), text, 1200 + i as i64))
+        .collect();
     // 判断一组：4 条，晚于经验（各自成组，谁先谁后与判据无关）。
-    for (i, text) in ["调大连接池", "先加索引", "再看慢查询", "最后复盘"]
+    let jud_seq: Vec<u64> = ["调大连接池", "先加索引", "再看慢查询", "最后复盘"]
         .iter()
         .enumerate()
-    {
-        seed_encoded_as(
-            &store,
-            &format!("j{i}"),
-            text,
-            JUDGMENT_TAG,
-            1300 + i as i64,
-        );
-    }
+        .map(|(i, text)| {
+            seed_encoded_as(
+                &store,
+                &format!("j{i}"),
+                text,
+                JUDGMENT_TAG,
+                1300 + i as i64,
+            )
+        })
+        .collect();
     let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 10, "2 条技能 + 4 条经验 + 4 条判断");
+    assert_eq!(mem_count(&store), 10, "2 条技能 + 4 条经验 + 4 条判断");
 
     let merged = consolidate(&store, &snap, 7, 5000).expect("巩固不失败");
     assert_eq!(
@@ -621,8 +666,8 @@ fn consolidation_never_merges_across_tags() {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default(),
-        vec![serde_json::json!(2), serde_json::json!(3)],
-        "合并的是最旧的**两条经验**（技能 seq 0 / 1 与判断 seq 6..9 更旧/同代，但标签不同 ⇒ 不在候选里）"
+        vec![serde_json::json!(exp_seq[0]), serde_json::json!(exp_seq[1])],
+        "合并的是最旧的**两条经验**（技能更旧、判断同代，但标签不同 ⇒ 不在候选里）"
     );
     let merged_exp = payload_str(exp_c, "content").unwrap_or("");
     assert!(
@@ -640,7 +685,7 @@ fn consolidation_never_merges_across_tags() {
     let merged_jud = payload_str(jud_c, "content").unwrap_or("");
     assert!(
         merged_jud.contains("调大连接池") && merged_jud.contains("先加索引"),
-        "判断组合并的是最旧两条判断（seq 6 / 7）：{merged_jud}"
+        "判断组合并的是最旧两条判断：{merged_jud}"
     );
     assert!(
         !merged_jud.contains("起床先喝水"),
@@ -654,8 +699,8 @@ fn consolidation_never_merges_across_tags() {
         .collect();
     assert_eq!(
         targets,
-        vec![2, 3, 6, 7],
-        "被排除式遗忘的只有各组的源两条（经验 2/3 + 判断 6/7）"
+        vec![exp_seq[0], exp_seq[1], jud_seq[0], jud_seq[1]],
+        "被排除式遗忘的只有各组的源两条（经验 2 条 + 判断 2 条）"
     );
 
     // 技能原样留在事实源与视图里（`recall_view` 不按标签过滤 ⇒ 它们照常可召回，
@@ -690,7 +735,11 @@ fn consolidate_refuses_a_lossy_merge_and_keeps_the_sources() {
         "保真度不足 ⇒ 拒收"
     );
     let snap2 = store.range(Seq::new(0));
-    assert_eq!(snap2.len(), 4, "拒收 = 一条都没写（源记忆原样留在 Log）");
+    assert_eq!(
+        mem_count(&store),
+        4,
+        "拒收 = 一条都没写（源记忆原样留在 Log）"
+    );
 
     let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()), None)
         .apply(&snap2, i64::MAX, Budget::generous())
@@ -720,11 +769,7 @@ fn consolidate_stops_at_the_generation_ceiling() {
             .is_empty(),
         "max(3, 2) + 1 = 4 > max_gen(3) ⇒ 拒收"
     );
-    assert_eq!(
-        store.range(Seq::new(0)).len(),
-        4,
-        "代数到顶后源记忆原样保留"
-    );
+    assert_eq!(mem_count(&store), 4, "代数到顶后源记忆原样保留");
 }
 
 /// 步 13 · 代数推进：源代数 1 ⇒ 产物代数 2（读的是源事件载荷里的 `generation`，

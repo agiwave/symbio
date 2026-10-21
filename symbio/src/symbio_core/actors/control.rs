@@ -121,10 +121,15 @@ impl PreemptionDecider {
     /// 挂起事件（`task × held`）——挂起就是一条事件，不需要新状态机。
     ///
     /// 两个锚各司其职，别混：
-    /// - `source_seq` = **挂起前的 head**（04 §2.2 步 1「记录当前 seq 为 T」）——
-    ///   它同时是幂等键的后半段，因此必须**每次挂起都不同**：同一个任务可以被挂起
-    ///   多次（挂起 → 恢复 → 再挂起），拿任务开格 seq 当锚会让第二次撞 `Duplicate`
-    ///   而**静默丢掉**那次挂起（J3）。
+    /// - `source_seq` = **挂起前最后一条已落事实的 seq**（04 §2.2 步 1「记录当前
+    ///   seq 为 T」）——它是幂等键的后半段，因此必须**每次挂起都不同**：同一个任务
+    ///   可以被挂起多次（挂起 → 恢复 → 再挂起），拿任务开格 seq 当锚会让第二次撞
+    ///   `Duplicate` 而**静默丢掉**那次挂起（J3）。
+    ///
+    ///   **不能取 `head`**：`head` 是"下一条的号"，它还不是事实。拿它当
+    ///   `produced_by` 会让落格后那条边指向**自己**（`produced_by == seq`）。
+    ///   I2 只查"有没有边"时这是绿的，`provenance_dangling` 上线后它必须红——
+    ///   调用方因此传 `head - 1`（见 `inbox::append_preemption`）。
     /// - `as_of_seq` = 任务开格 seq（[`Self::decide`] 给出的 as-of 重放锚，04 §2.2
     ///   步 5）——它是判据的一部分，随事实一起落盘，不留在内存里。
     pub fn held_event(&self, task_id: &str, source_seq: u64, as_of_seq: u64) -> Event {

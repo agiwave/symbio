@@ -916,7 +916,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     assert_eq!(
         snap[1].produced_by,
         Some(0),
-        "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
+        "产物格溯源指向本轮用户格（S02 §3 的 produced_by 断言）"
     );
     assert_eq!(snap[2].kind, EVENT_ASSISTANT_FINAL);
 }

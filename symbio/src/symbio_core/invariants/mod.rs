@@ -14,6 +14,7 @@
 //! | C2 / N3 | I1 单通道 | 每 `turn` 至多 1 条 final | [`final_unique_per_turn`] |
 //! | C2 对偶 | I1 单通道 | 每 `turn` 至多 1 条开轮（`u-{turn}`） | [`open_unique_per_turn`] |
 //! | C3 / N5 | I2 无溯源不声明 | 断言类 + 收束类事件 `produced_by` 非空 | [`produced_by_coverage`] |
+//! | C3 对偶 | I2 无溯源不声明 | 片内溯源边不倒因果、不落空洞 | [`provenance_dangling`] |
 //! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
 //! | 终止性前提 3（C14） | 终止性定理 | 任务依赖图**无环**且无悬空依赖 | [`acyclic_deps`] |
@@ -237,6 +238,79 @@ fn needs_provenance(e: &Event) -> bool {
                     && e.kind == crate::symbio_core::event::EVENT_ASSISTANT_PROGRESS)))
 }
 
+/// I2 的另一半：溯源边**不悬空**。
+///
+/// [`produced_by_coverage`] 只问「有没有」，不问「指向谁」。于是
+/// `produced_by: Some(999)`——指向一条不存在的事件、或指向一条**更晚**的事件——
+/// 照样全绿。这类错**不报错**：日志能读、投影能算、回放不崩，只有
+/// 「这条事实是被谁产生的」这个问题的答案悄悄错了。
+///
+/// 两条判据，都是**切片相对**的结构判定：
+///
+/// 1. **片内不许倒因果**：指向的 `seq` 在切片里、且 `≥` 自身 `seq` ⇒ 前向边 / 自指。
+///    `produced_by` 只能取自一条**已入库**事件的 `seq`，而 `seq` 严格单调，所以今天
+///    靠"构造点都很小心"保证。写进判据是为了明天的新构造点——它一旦取了未来值，
+///    这里是唯一会响的地方。
+/// 2. **片内不许有洞**：指向的 `seq` 落在 `[head, tail]` 里却查无此号 ⇒ 悬空。
+///
+/// # 宽限形参 `allow_slice_edges`
+///
+/// 真实日志回放是**切片**（`verify/fixtures/real-session.tsv`）：切片首条与末条的
+/// 溯源边合法地指向切片**外**（更早或更晚——后者是"这一条是切片尾部事件的产物"）。
+/// 纯函数里这两种与"边写错了"**无从分辨**，所以宽限是必须的，且**头尾对称**：
+/// 只宽限头部等于假设"切片总是从头切"，而读侧窗口两头都会切。
+///
+/// 处置与 [`unresolved_turns`] 的 `allow_trailing_open` 同一条纪律——
+/// **宽限写在签名上，不写在判据里**：[`check_all`] 替读侧选 `true`（读侧要的是
+/// "别假红"），故障注入与整份日志校验传 `false`（宁严：片外也不放过）。
+///
+/// 未入库（`seq` 还是 `None`）的事件跳过——它们还不是事实，溯源边尚无意义
+/// （与 [`seq_monotonic`] 同口径）。
+pub fn provenance_dangling(events: &[Event], allow_slice_edges: bool) -> Vec<Violation> {
+    use std::collections::BTreeSet;
+
+    let seqs: BTreeSet<u64> = events
+        .iter()
+        .filter_map(|e| e.seq.map(|s| s.value()))
+        .collect();
+    let (head, tail) = match (seqs.iter().next(), seqs.iter().next_back()) {
+        (Some(&h), Some(&t)) => (h, t),
+        _ => return Vec::new(),
+    };
+
+    events
+        .iter()
+        .filter_map(|e| {
+            let own = e.seq?.value();
+            // 没有边的交给 `produced_by_coverage`：那一条判"该有没有"，
+            // 这一条只判"有了以后指向谁"——两条各管一半，不重叠。
+            let up = e.produced_by?;
+
+            if seqs.contains(&up) {
+                // 片内：因果不许倒。
+                return (up >= own).then(|| {
+                    Violation::at(
+                        e,
+                        format!(
+                            "produced_by {up} 不小于自身 seq {own}（溯源边必须指向更早的事件）"
+                        ),
+                    )
+                });
+            }
+
+            // 片外（头 / 尾）：纯函数无从分辨"切掉了"与"写错了"，宽限放行。
+            if allow_slice_edges && (up < head || up > tail) {
+                return None;
+            }
+
+            Some(Violation::at(
+                e,
+                format!("produced_by {up} 落在切片 [{head}, {tail}] 内却查无此号（悬空溯源）"),
+            ))
+        })
+        .collect()
+}
+
 /// 一条任务**最多返工几轮**：超过即违规（进 `check_all` 的清单，读出口与 e2e 共用）。
 ///
 /// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
@@ -246,9 +320,10 @@ fn needs_provenance(e: &Event) -> bool {
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
-/// 七条一起跑（S0/S1 的 CI 形态：任一违规 ⇒ 清单非空）。
+/// 九条一起跑（S0/S1 的 CI 形态：任一违规 ⇒ 清单非空）。
 ///
-/// 前三条是结构判定（C1 `seq` 单调 / C2 每轮一条 final / C3 断言带溯源）；
+/// 前四条是结构判定（C1 `seq` 单调 / C2 每轮一条 final / C3 断言带溯源 /
+/// C3 对偶 溯源不悬空）；
 /// 中两条（C4 未收束 / C5 超预算）按**读侧口径**带宽限——本函数是
 /// `session/stats` 读出口与 e2e 的入口，首日就跑真实流量，假红一次
 /// 那份清单就再没人看：
@@ -274,6 +349,7 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
     all.extend(final_unique_per_turn(events));
     all.extend(open_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
+    all.extend(provenance_dangling(events, true));
     all.extend(unresolved_turns(events, true));
     all.extend(budget_exceeded(events, declared_budget_ms(events)));
     all.extend(acyclic_deps(events));

@@ -65,6 +65,8 @@ enum Violation {
     I1SeqNotMonotonic { seq: u64, expect: u64 },
     I1DoubleFinal { turn: u64 },
     I2NoProvenance { seq: u64 },
+    /// `produced_by` 指向的 seq 不存在或**不更早**（悬空 / 前向边）。
+    I2DanglingProvenance { seq: u64, up: u64 },
     I3NoClosure { turn: u64 },
 }
 
@@ -72,12 +74,21 @@ struct Check {
     enable_i1_seq: bool,
     enable_i1_final: bool,
     enable_i2: bool,
+    /// I2 的另一半：`produced_by` 指向的 seq 必须**更早且存在**。
+    /// 与 `enable_i2`（只问「有没有」）分开，是为了让两条各有自己的反向用例。
+    enable_i2_dangling: bool,
     enable_i3: bool,
 }
 
 impl Check {
     fn all() -> Self {
-        Check { enable_i1_seq: true, enable_i1_final: true, enable_i2: true, enable_i3: true }
+        Check {
+            enable_i1_seq: true,
+            enable_i1_final: true,
+            enable_i2: true,
+            enable_i2_dangling: true,
+            enable_i3: true,
+        }
     }
 }
 
@@ -124,6 +135,13 @@ fn check(log: &[Event], c: &Check) -> Vec<Violation> {
         }
     }
 
+    // I2 的另一半：有了边以后**指向谁**。切片两头的跨片边放行（指向片外更早/更晚的
+    // 事件）——与生产侧 `provenance_dangling(events, allow_slice_edges)` 同一条宽限纪律：
+    // 宽限写在形参上、头尾对称，判据本身不放松。
+    let seqs: Vec<u64> = log.iter().map(|e| e.seq).collect();
+    let head = seqs.iter().copied().min();
+    let tail = seqs.iter().copied().max();
+
     for e in log {
         if e.kind == FINAL && !closed.contains(&e.turn) {
             closed.push(e.turn);
@@ -131,6 +149,22 @@ fn check(log: &[Event], c: &Check) -> Vec<Violation> {
 
         if c.enable_i2 && needs_provenance(&e.kind) && e.produced_by.is_none() {
             out.push(Violation::I2NoProvenance { seq: e.seq });
+        }
+
+        if c.enable_i2_dangling {
+            if let Some(up) = e.produced_by {
+                let bad = if seqs.contains(&up) {
+                    // 片内：因果不许倒（前向边 / 自指）。
+                    up >= e.seq
+                } else {
+                    // 片外（头 / 尾）：纯函数无从分辨"切掉了"与"写错了"，头尾对称宽限。
+                    let outside = head.is_some_and(|h| up < h) || tail.is_some_and(|t| up > t);
+                    !outside
+                };
+                if bad {
+                    out.push(Violation::I2DanglingProvenance { seq: e.seq, up });
+                }
+            }
         }
     }
 
@@ -156,13 +190,16 @@ fn check(log: &[Event], c: &Check) -> Vec<Violation> {
 /// 也是生产内核判的形状（严格单调且无跳号）。旧版自造日志从 1 起、只判非降序，
 /// 那是「仿判据」时代的残留；挂上生产内核后自造日志也按生产的形状造。
 fn healthy_log() -> Vec<Event> {
+    // 溯源一律指向**根事件**（seq 0 的用户格）——生产里就是这个形状：
+    // 这一轮的一切都是"被那句话引出来的"。此前每条指向自己（`Some(i)` 在 seq i 上），
+    // 那是自指边，`produced_by_coverage` 只查非空所以一直是绿的。
     vec![
         ev(0, "user.message", 1, None, 0),
-        ev(1, "classify.verdict", 1, Some(1), 40),
-        ev(2, "task.created", 1, Some(2), 300),
-        ev(3, "artifact.added", 1, Some(3), 900),
-        ev(4, "task.verified", 1, Some(4), 200),
-        ev(5, FINAL, 1, Some(5), 150),
+        ev(1, "classify.verdict", 1, Some(0), 40),
+        ev(2, "task.created", 1, Some(0), 300),
+        ev(3, "artifact.added", 1, Some(0), 900),
+        ev(4, "task.verified", 1, Some(0), 200),
+        ev(5, FINAL, 1, Some(0), 150),
     ]
 }
 
@@ -185,8 +222,8 @@ fn ev(seq: u64, kind: &str, turn: u64, produced_by: Option<u64>, cost_ms: u64) -
 /// 是**重号**——内核报「seq 3 处应为 6」。
 fn violated_log() -> Vec<Event> {
     let mut v = healthy_log();
-    v.push(ev(3, "task.progress", 1, Some(3), 10)); // seq 撞号（3 已存在）
-    v.push(ev(6, FINAL, 1, Some(4), 10)); // 双 final
+    v.push(ev(3, "task.progress", 1, Some(0), 10)); // seq 撞号（3 已存在）
+    v.push(ev(6, FINAL, 1, Some(0), 10)); // 双 final
     v.push(ev(7, "task.verified", 1, None, 10)); // 无溯源
     v.push(ev(8, "task.progress", 2, Some(7), 10)); // 第 2 轮没有收束格
     v
@@ -236,7 +273,10 @@ fn main() {
 
     println!("\n═══ 反向用例：关掉检查，违规必须消失 ═══");
     let no_i1 = check(&violated_log(), &Check { enable_i1_seq: false, enable_i1_final: false, ..Check::all() });
-    let no_i2 = check(&violated_log(), &Check { enable_i2: false, ..Check::all() });
+    let no_i2 = check(
+        &violated_log(),
+        &Check { enable_i2: false, enable_i2_dangling: false, ..Check::all() },
+    );
     let no_i3 = check(&violated_log(), &Check { enable_i3: false, ..Check::all() });
     println!("  关掉 I1 → 剩 {} 条（少了 {} 条）", no_i1.len(), dirty.len() - no_i1.len());
     println!("  关掉 I2 → 剩 {} 条（少了 {} 条）", no_i2.len(), dirty.len() - no_i2.len());
@@ -252,8 +292,10 @@ fn main() {
         "反向用例：关掉 I1 后 I1 类违规必须检测不到"
     );
     assert!(
-        !no_i2.iter().any(|v| matches!(v, Violation::I2NoProvenance { .. })),
-        "反向用例：关掉 I2 后 I2 类违规必须检测不到"
+        !no_i2
+            .iter()
+            .any(|v| matches!(v, Violation::I2NoProvenance { .. } | Violation::I2DanglingProvenance { .. })),
+        "反向用例：关掉 I2 后两条 I2 判据（有没有 / 指向谁）都必须检测不到"
     );
     assert!(
         !no_i3.iter().any(|v| matches!(v, Violation::I3NoClosure { .. })),
@@ -329,22 +371,34 @@ fn main() {
     let at = no_prov.iter().position(|e| e.kind == "artifact.added").unwrap();
     no_prov[at].produced_by = None;
     let no_closure: Vec<Event> = real.iter().filter(|e| e.kind != FINAL).cloned().collect();
+    // 悬空边：把一条事件的溯源指到一个**不存在**的 seq（比它自己小，所以不是前向边，
+    // 只是片内查无此号——真实系统里这只会来自「边写错了」或「日志被截断」）。
+    let mut dangling = real.clone();
+    let at_d = dangling.iter().position(|e| e.seq > 3).unwrap();
+    dangling[at_d].produced_by = Some(2);
+    dangling.retain(|e| e.seq != 2);
 
     let n1 = check(&bad_seq, &all);
     let n2 = check(&double_final, &all);
     let n3 = check(&no_prov, &all);
     let n4 = check(&no_closure, &all);
+    let n5 = check(&dangling, &all);
     println!(
-        "  seq 撞车 → {} 条 · 双收束 → {} 条 · 去溯源 → {} 条 · 无收束 → {} 条",
+        "  seq 撞车 → {} 条 · 双收束 → {} 条 · 去溯源 → {} 条 · 无收束 → {} 条 · 悬空溯源 → {} 条",
         n1.len(),
         n2.len(),
         n3.len(),
-        n4.len()
+        n4.len(),
+        n5.len()
     );
     assert!(n1.iter().any(|v| matches!(v, Violation::I1SeqNotMonotonic { .. })), "真实日志上 seq 撞车必须红");
     assert!(n2.iter().any(|v| matches!(v, Violation::I1DoubleFinal { .. })), "真实日志上双收束必须红");
     assert!(n3.iter().any(|v| matches!(v, Violation::I2NoProvenance { .. })), "真实日志上去溯源必须红");
     assert!(n4.iter().any(|v| matches!(v, Violation::I3NoClosure { .. })), "真实日志上无收束必须红");
+    assert!(
+        n5.iter().any(|v| matches!(v, Violation::I2DanglingProvenance { .. })),
+        "真实日志上悬空溯源必须红——`produced_by` 只查「有没有」时这一条是绿的"
+    );
 
     println!("\n✅ 全部断言通过：自造日志 + 真实日志（{} 条 / {} 轮）上三条不变量各自独立起作用。", real.len(), turns);
     println!("   边界：I3 只判得了结构面（每轮有收束格）——时间面需要单次调用耗时，日志里只有轮累计。");

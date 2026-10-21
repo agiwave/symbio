@@ -41,13 +41,29 @@ fn snapshot_node(id: &str) -> crate::symbio_core::chat_node::ChatNode {
 /// 一次「收束」级别的写入：取现有切片 → 按当前轮号入格。
 /// `turn` 每调一次递增（与真实桥的行为同形：一轮一格）。
 fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
+    // 任务事件的溯源锚 = 本轮用户格。夹具此前写死 `0`：日志从 0 起时那条边
+    // 指向**自己**（I2 只查非空所以一直是绿的）。没有根就先种一条，锚点取它。
+    let anchor = match store.range(Seq::new(0)).first() {
+        Some(e) => e.seq.map(|s| s.value()).unwrap_or(0),
+        None => store
+            .append(Event::pending(
+                format!("u-{turn}"),
+                crate::symbio_core::EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                turn,
+                crate::symbio_core::authz::PRINCIPAL_MAIN,
+            ))
+            .expect("根事件入格")
+            .value(),
+    };
     let snapshot = store.range(Seq::new(0));
     write(
         store,
         &snapshot,
         decls,
         turn,
-        0,
+        anchor,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
         &format!("v2t-test-a{turn}"),
     )
@@ -78,8 +94,13 @@ fn declaration_lands_opened_progress_and_asserted() {
     );
 
     let snapshot = store.range(Seq::new(0));
+    // 只看任务格：日志里还有一条根事件（用户格），它的存在与任务语义无关。
+    let tasks: Vec<&crate::symbio_core::Event> = snapshot
+        .iter()
+        .filter(|e| e.kind.starts_with("task."))
+        .collect();
     assert_eq!(
-        snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        tasks.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
         vec![
             EVENT_TASK_OPENED,
             EVENT_TASK_PROGRESS,
@@ -89,7 +110,7 @@ fn declaration_lands_opened_progress_and_asserted() {
         ],
         "t1 开 + 推进、t2 开（挂 t1）、t3 开 + 断言"
     );
-    let opened = &snapshot[0];
+    let opened = tasks[0];
     assert_eq!(
         opened
             .payload
@@ -99,7 +120,7 @@ fn declaration_lands_opened_progress_and_asserted() {
         Some(0)
     );
     assert_eq!(
-        snapshot[2].payload.get("depends_on").cloned(),
+        tasks[2].payload.get("depends_on").cloned(),
         Some(serde_json::json!(["t1"])),
         "任务图是数据：depends_on 原样入格"
     );

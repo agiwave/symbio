@@ -14,6 +14,26 @@ use crate::symbio_core::projection::turnstate::turnstate;
 use crate::symbio_core::store::{EventStore, Store};
 use crate::symbio_core::view::Budget;
 
+/// 种一条**根事件**（用户发言），返回它的 seq——给"溯源锚"参数用。
+///
+/// 这些夹具此前一律传 `0` 当锚：日志从 0 起时，第一条事件的 `produced_by`
+/// 就指向**自己**（`produced_by == seq`）。I2 只查"有没有边"时这是绿的，
+/// `provenance_dangling` 上线后它必须红——根事件本来就没有上游，
+/// 而"被谁引出来的"这个锚只能是那条用户格。
+fn seed_root(store: &EventStore) -> u64 {
+    store
+        .append(Event::pending(
+            "root-u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "user",
+        ))
+        .expect("根事件入格")
+        .value()
+}
+
 // ── ActorSpec / Pattern（01 §4 契约形状） ──────────────────────────────
 
 #[test]
@@ -769,6 +789,17 @@ fn memory_event_without_provenance_is_caught() {
 #[test]
 fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     let store = EventStore::new();
+    // 根事件先落：记忆事件的溯源指向它（`source = 0`），否则那条边指向自己。
+    store
+        .append(Event::pending(
+            "u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "user",
+        ))
+        .unwrap();
     encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let view = recall("session/main", None, None)
@@ -916,25 +947,30 @@ fn principals_are_isolated_until_scope_widened() {
 fn commitment_lifecycle_feeds_reputation() {
     let keeper = CommitmentKeeper;
     let store = EventStore::new();
+    let src = seed_root(&store);
     // B 立约两条：一条守约、一条违约；A 立约一条守约。
     store
-        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", 0))
-        .unwrap();
-    store.append(keeper.release("k1", "session/b", 0)).unwrap();
-    store
-        .append(keeper.offer("k2", "session/b", "session/a", "压测报告", 0))
+        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", src))
         .unwrap();
     store
-        .append(keeper.breach("k2", "session/b", "上游数据没到", 0))
+        .append(keeper.release("k1", "session/b", src))
+        .unwrap();
+    store
+        .append(keeper.offer("k2", "session/b", "session/a", "压测报告", src))
+        .unwrap();
+    store
+        .append(keeper.breach("k2", "session/b", "上游数据没到", src))
         .unwrap();
     // 对等宣告：违约状态告知协作方（普通事件，不是新通道）。
     store
-        .append(keeper.declare("k2", "session/b", "违约已告知 agent:a", 0))
+        .append(keeper.declare("k2", "session/b", "违约已告知 agent:a", src))
         .unwrap();
     store
-        .append(keeper.offer("k3", "session/a", "session/b", "评审", 0))
+        .append(keeper.offer("k3", "session/a", "session/b", "评审", src))
         .unwrap();
-    store.append(keeper.release("k3", "session/a", 0)).unwrap();
+    store
+        .append(keeper.release("k3", "session/a", src))
+        .unwrap();
 
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let view = reputation()
@@ -1305,6 +1341,18 @@ fn elimination_is_an_auditable_revocable_grants_change() {
 #[test]
 fn elimination_event_keeps_invariants_green() {
     let store = EventStore::new();
+    // 根事件先落：淘汰判决的溯源指向它（`source_seq = 0`）。
+    // 没有它，那条边就指向**自己**——`provenance_dangling` 会把自指抓成前向边。
+    store
+        .append(Event::pending(
+            "u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "user",
+        ))
+        .unwrap();
     store
         .append(EliminationDecider.elimination_event("session/b", -1, 0))
         .unwrap();
@@ -1986,9 +2034,12 @@ use crate::symbio_core::projection::calibration::calibration;
 #[test]
 fn scheduled_trigger_produces_event_not_side_channel() {
     let store = EventStore::new();
-    // 注意：此时 Log 里没有任何用户消息——纯自主场景。
+    // 本轮**没有新的用户消息**——纯自主场景；但触发必须指得着一条更早的事实：
+    // 生产路径在 `head == 0` 时直接放弃触发（`transcript/autonomous.rs`：
+    // "还没有事实源，本次不触发（无可指的溯源锚）"）。夹具照生产给一个锚。
+    let src = seed_root(&store);
     let init = AutonomousInitiator;
-    store.append(init.trigger(0)).unwrap();
+    store.append(init.trigger(src)).unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
         snapshot.iter().any(|e| e.kind == EVENT_SYSTEM_TRIGGERED),
@@ -2042,10 +2093,11 @@ fn autonomous_actor_cannot_write_to_dialog() {
 #[test]
 fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     let store = EventStore::new();
+    let src = seed_root(&store);
     let init = AutonomousInitiator;
-    store.append(init.trigger(0)).unwrap();
+    store.append(init.trigger(src)).unwrap();
     store
-        .append(init.open_long_goal("goal-1", "整理全年归档", 0))
+        .append(init.open_long_goal("goal-1", "整理全年归档", src))
         .unwrap();
     // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
     store
@@ -2058,7 +2110,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
                 0,
                 crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_cost_ms(90_000_000)
             .with_payload(serde_json::json!({ "task_id": "goal-1" })),
         )
@@ -2079,7 +2131,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
         0,
         crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
     )
-    .with_produced_by(0)
+    .with_produced_by(src)
     .with_cost_ms(70_000)
     .with_payload(serde_json::json!({ "task_id": "goal-1" }));
     let ok_events = vec![ok_event];
@@ -2100,8 +2152,9 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
 fn conation_governance_three_rules() {
     let init = AutonomousInitiator;
     let store = EventStore::new();
-    store.append(init.trigger(0)).unwrap();
-    store.append(init.express_intent("整理归档", 0)).unwrap();
+    let src = seed_root(&store);
+    store.append(init.trigger(src)).unwrap();
+    store.append(init.express_intent("整理归档", src)).unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
 
     // (a) 唯一构造路径读出的候选，approved 恒 false——欲不得直接变成行。
@@ -2202,10 +2255,11 @@ fn compiled_skill_requires_provenance() {
 #[test]
 fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     let store = EventStore::new();
+    let src = seed_root(&store);
     let compiler = SkillCompiler;
-    // 编译技能（源轨迹 seq 0）。
+    // 编译技能（源轨迹 = 那条更早的事实）。
     store
-        .append(compiler.compile("weekly-report", "周报", "三段式", 0))
+        .append(compiler.compile("weekly-report", "周报", "三段式", src))
         .unwrap();
     // 命中：反射档快路（cost 40ms，低两个数量级）。
     store
@@ -2218,7 +2272,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
                 0,
                 "session/main",
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_cost_ms(40)
             .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": false })),
         )
@@ -2234,7 +2288,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
                 0,
                 "session/main",
             )
-            .with_produced_by(0)
+            .with_produced_by(src)
             .with_cost_ms(5_000)
             .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": true })),
         )

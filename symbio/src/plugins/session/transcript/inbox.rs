@@ -397,7 +397,13 @@ impl SessionPlugin {
                 return Err(format!("开档失败：{e}"));
             }
         };
-        let anchor = store.head().value();
+        // 锚 = **最后一条已落事实的 seq**，不是 `head`。
+        //
+        // `head` 是"下一条的号"，它还不是事实。此前直接拿它当 `produced_by`，
+        // 落格后那条边指向**自己**（`produced_by == seq`）——`produced_by_coverage`
+        // 只查"有没有边"，所以这一直是绿的；`provenance_dangling` 上线后它必须红。
+        // 幂等键仍靠它保持"每次挂起都不同"：两次挂起之间必有一条恢复事实落格。
+        let anchor = store.head().value().saturating_sub(1);
         for event in build(anchor) {
             let id = event.event_id.clone();
             if let Err(e) = store.append(event) {
