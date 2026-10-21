@@ -8,7 +8,7 @@ track: plan
 prio: later
 deps: []
 parent: T-183-质量与机制清偿总批
-where: symbio/src/plugins/agent/host/subagent.rs · symbio/src/plugins/agent/host/mod.rs · symbio/src/plugins/agent/README.md · scripts/agent-ownership-audit.mjs · symbio/src/symbio_core/actors/commitment.rs · symbio/src/plugins/session/stats.rs
+where: symbio/src/plugins/agent/host/subagent.rs · symbio/src/plugins/agent/host/subagent.test.rs · symbio/src/plugins/agent/host/mod.rs · symbio/src/plugins/agent/README.md · scripts/agent-ownership-audit.mjs · symbio/src/symbio_core/actors/commitment.rs · symbio/src/plugins/session/stats.rs
 exit: '桥接函数的三组语义（审批与提问冒泡识别、消息过滤、节点改写）拆成三个可单测函数，改写顺序依赖（主体改写须在角色改写之后）保持且有判据；`agent_run` 的能力自述补可观测判据（父会话收束时若本轮发生过 `agent_run`，存在一条可查的委托记录）；主机模块文档里的归属表加机器校验（模块文档列的归属、装配清单、实际插件目录三者一致）；全量门禁与 e2e 全绿'
 ---
 
@@ -98,3 +98,27 @@ exit: '桥接函数的三组语义（审批与提问冒泡识别、消息过滤�
   面板同源一条 + 分区数一条。夹具调的是生产同一个成格口 `commitment_events`，改名两边一起红。
   **没有新增守卫脚本**：这一段的判据落在读数与列上（`slo-exit-audit` 已在守「指认必须落到
   真列」），再造一个脚本就是给同一条事实第二个判据源。
+- 2026-10-21 段三（**S-3 桥接三组语义拆分**）：`relay_bridge` 里挤着的三组翻译各归一个纯函数——
+  `pending_bubble_of`（冒泡识别：`msg_type = Interaction` ∧ `status = WaitingUserAction` 两条判据，
+  加续跑载荷的形状与 `failure_kind` 兜底）、`message_fate`（消息过滤：`Removal` / `Withheld` /
+  `Relay` 三格去向；地址形状那一半仍归 `is_message_item_addr`）、
+  `relabel_for_parent`（节点改写：锚定 → 角色 → 主体）。桥体只剩编排（读帧、回读、累积正文、收尾）。
+  **行数不是收益，可测性才是**：`relay_bridge` 仍有 220 行（原 238），删不掉的是回读与累积的编排本身；
+  换来的是三组判据各自可指可单测——拆之前这四组判据（含 `turn_end_of`）**一条单测都没有**，
+  覆盖全在 e2e `t15-subagent-inbox.mjs`。
+  **顺序依赖点名并钉住**：`node_role()` 的读法是「残留 `role` 格优先、`principal.kind` 兜底」
+  （T-147d-iii 那条共存规则），所以主体改写必须排在角色改写之后——
+  反序时「`role` 为空、族靠主体折出 `Assistant`」的那种节点在读第二次时已经是 `Tool`，
+  于是 `role` 格永远不会被写，这张工具响应在前端与 flatten 的 `find_tool_result` 两侧都认不出类型，
+  而肉眼看代码顺序却「像是对的」。判据 `relabel_rewrites_legacy_role_before_principal`
+  专门造这一形节点。
+  **唯一的语义变化（不是纯搬家，写清楚）**：过滤判据补上了第二个调用点。窄增量帧没有身份格，
+  原先按帧过滤 ⇒ 已判为不透传的 `user` 节点，它的**后续增量**会绕过那条规则漏进父视图
+  （前端拿到一张编辑必败的卡，因为该 id 不在父会话存储里）。现在 delta 快路径按 `records`
+  里的**已知身份**走同一条 `message_fate`；同一路径上的锚定也收进 `relabel_for_parent`
+  （窄帧折不出 `Assistant` ⇒ 拿到的只有锚定，与原先手写的那一格等价）。
+  夹具里 `role` 格的直写集中成**一个**构造点 `legacy_frame`（带 S-014 豁免理由）⇒
+  S-014 棘轮 151 一格没动。判据 +7（`cargo test -p symbio --lib` 1941 → 1948）：
+  地址形状一条（含五个反例）、冒泡两条（冒泡形状与续跑参数三样齐 / 三种非冒泡 + kind 兜底）、
+  过滤一条（三格去向 + 存量格与主体折叠两种身份形状）、改写三条（顶层助手改写 / 顺序依赖 / 嵌套与非助手不动）。
+

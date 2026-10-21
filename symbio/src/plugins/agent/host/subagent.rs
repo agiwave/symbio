@@ -703,6 +703,11 @@ struct RelayBridge {
 /// `tool_executor` 必须为「工具可以返回事件流」这件事付出一整段帧循环的代价。
 /// 现在翻译只剩这里一处，出口下游（转写唯一写入点）只做落地。
 ///
+/// 这里做**编排**（读帧、回读、累积正文、收尾），翻译本身分三个有名字的纯函数——
+/// [`pending_bubble_of`]（审批与提问冒泡识别）、[`message_fate`]（消息过滤，地址形状那一半
+/// 在 [`is_message_item_addr`]）、[`relabel_for_parent`]（节点改写）。每组语义因此可以被
+/// 单独引用与单测：读的人能指着一段说「这里错了」，而不是「那 238 行里某处错了」。
+///
 /// ## 收尾
 ///
 /// 返回 [`RelayOutcome`]：最终答复（= 最后一条**已完成**的助手正文）/
@@ -800,9 +805,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 let mid = message.id.clone();
 
                 // 删除优先：本地索引与父视图同步移除——身份改写、正文累积对已删
-                // 节点没有意义。`status = removed` 是消息词汇里的**删除语义**
-                // （信封上没有 deleted 取值）。
-                if message.status == Some(NodeStatus::Removed) {
+                // 节点没有意义。判据在 [`message_fate`]（与 user 过滤同一条）。
+                if matches!(message_fate(&message), MessageFate::Removal) {
                     text_by_id.remove(&mid);
                     text_order.retain(|x| x != &mid);
                     completed_ids.remove(&mid);
@@ -816,6 +820,13 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // ③ 纯增量 + 身份已知 ⇒ **零回读**（流式正文的绝大多数帧）
                 if let Some(delta) = message.delta.clone() {
                     if known.contains(&mid) {
+                        // 过滤按**已知身份**判，不按这一帧判：窄增量帧没有角色格，
+                        // 拿它当「不是 user」放行，等于把已经拦下的委托 prompt 从
+                        // 流式面漏回父视图（那条 id 不在父会话存储里，前端只能编辑失败）。
+                        let Some(record) = records.get(&mid) else { continue };
+                        if matches!(message_fate(record), MessageFate::Withheld) {
+                            continue;
+                        }
                         if let Some(buf) = text_by_id.get_mut(&mid) {
                             buf.push_str(&delta);
                         }
@@ -824,12 +835,10 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                             delta: Some(delta),
                             ..Default::default()
                         };
-                        // 锚定：顶层节点（子会话里 `parent_id = None` 的那些）
-                        // 挂到本工具调用之下。角色**不**在这里改写——父会话早已按
-                        // 首次回读时的完整帧记下了改写后的角色。
-                        if records.get(&mid).is_some_and(|r| r.parent_id.is_none()) {
-                            out.parent_id = Some(tool_call_id.clone());
-                        }
+                        // 改写走同一条判据（[`relabel_for_parent`]）。这一帧只有 id 与
+                        // 增量，折不出 `Assistant`，因此它得到的只有锚定——角色与主体
+                        // **不**在这里改写，父会话早已按首次回读的完整帧记下了改写后的角色。
+                        relabel_for_parent(&mut out, &tool_call_id);
                         sink.emit(out).await;
                         continue;
                     }
@@ -874,59 +883,25 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     completed_ids.insert(mid.clone());
                 }
 
-                // ── 审批/提问冒泡：转成**载荷**，不落节点 ──
-                // `prompt.args` 是本工具的续跑参数（`session/resume`
-                // 重执行 agent_run 时据此续跑子会话）；`failure_kind`
-                // 原样带上（驱动前端审批 UI）。
-                if message.is_interaction()
-                    && message.status == Some(NodeStatus::WaitingUserAction)
-                {
-                    pending = Some(RelayOutcome::Pending {
-                        text: text_by_id.get(&mid).cloned().unwrap_or_default(),
-                        prompt: json!({
-                            "tool_name": NAME,
-                            "args": {
-                                "agent_id": agent_id,
-                                "session_id": child_session_id,
-                                "target_id": message.id,
-                            }
-                        }),
-                        failure_kind: message
-                            .meta
-                            .as_ref()
-                            .and_then(|m| m.get("failure_kind"))
-                            .and_then(Value::as_str)
-                            .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
-                            .to_string(),
-                    });
+                // ── 审批 / 提问冒泡：转成**载荷**，不落节点 ──
+                // 判据与载荷形状都在 [`pending_bubble_of`] 里（那里有「为什么不落节点」）。
+                if let Some(bubble) = pending_bubble_of(
+                    &message,
+                    text_by_id.get(&mid).map(String::as_str).unwrap_or_default(),
+                    agent_id.as_deref(),
+                    &child_session_id,
+                ) {
+                    pending = Some(bubble);
                     continue;
                 }
 
-                // 子会话的委托 prompt（user 消息）不透传：其内容已可见于
-                // ToolCall 的请求参数（args.prompt），且 role=user 的临时
-                // 节点会在前端获得"编辑"入口（该 id 不在父会话存储中，
-                // 操作必然失败）。
-                if message.node_role() == Some(NodeRole::User) {
+                // ── 消息过滤：这一帧不落父视图 ──
+                if matches!(message_fate(&message), MessageFate::Withheld) {
                     continue;
                 }
 
-                // ── 锚定到父 ToolCall 之下 ──
-                // 子会话的顶层响应节点原 `parent_id = None`，锚定到本工具
-                // 调用之下；其角色改为 Tool（工具响应）而非 Assistant，
-                // 以符合分型结构 ToolCall(Assistant) → Turn(Tool)，
-                // 并能被 flatten 的 find_tool_result 正确识别。
-                if message.parent_id.is_none() {
-                    message.parent_id = Some(tool_call_id.clone());
-                    if message.node_role() == Some(NodeRole::Assistant) {
-                        message.set_legacy_role(NodeRole::Tool);
-                        // [T-147d-iii] 改写到哪一格就跟到哪一格：这张卡现在是
-                        // **agent_run 工具的响应**，族归工具自己——带着子会话
-                        // agent 主体的转播节点会被 `visible_to` 当作第三方私有。
-                        message.principal = Some(
-                            crate::symbio_core::principal::Principal::tool_principal(NAME),
-                        );
-                    }
-                }
+                // ── 节点改写 → 落出口 ──
+                relabel_for_parent(&mut message, &tool_call_id);
                 sink.emit(message).await;
             }
         }
@@ -956,6 +931,101 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
     // 附加子会话 id：LLM 续会话的凭据（下一次调用传 session_id 即继续此对话）。
     final_result.push_str(&format!("\n\n[subagent_session_id: {child_session_id}]"));
     RelayOutcome::Done(final_result)
+}
+
+/// 转播桥语义之一：**冒泡识别**——这一帧是不是「要用户在父视图里回应」。
+///
+/// 两条判据缺一不算：`msg_type = Interaction`（审批卡与提问卡同格，靠
+/// `meta.failure_kind` 分家）+ `status = WaitingUserAction`（同一条 Interaction 在
+/// 别的状态下只是**过去**的交互，再弹一次卡等于让用户回答已经回答过的问题）。
+///
+/// 冒出去的是**载荷**不是节点：节点身份由 `tool_executor` 以统一 id（`result_msg_id`）
+/// 构造。本桥若也落一个（子会话自己的 id），前端会得到两张同 `parent_id` 的审批卡，
+/// 而 resume 只删得掉一张。`prompt.args` 是**本工具的续跑参数**——`session/resume`
+/// 重执行 `agent_run` 时据此续跑那条子会话；`failure_kind` 原样带上（驱动前端审批 UI）。
+fn pending_bubble_of(
+    message: &ChatNode,
+    prior_text: &str,
+    agent_id: Option<&str>,
+    child_session_id: &str,
+) -> Option<RelayOutcome> {
+    if !(message.is_interaction() && message.status == Some(NodeStatus::WaitingUserAction)) {
+        return None;
+    }
+    Some(RelayOutcome::Pending {
+        text: prior_text.to_string(),
+        prompt: json!({
+            "tool_name": NAME,
+            "args": {
+                "agent_id": agent_id,
+                "session_id": child_session_id,
+                "target_id": message.id,
+            }
+        }),
+        failure_kind: message
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(Value::as_str)
+            .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
+            .to_string(),
+    })
+}
+
+/// 一条子会话消息帧在**父视图**里的去向（转播桥语义之二：消息过滤）。
+enum MessageFate {
+    /// 删除：本地索引摘除 + 一条 `llm_removed` 帧（按 id 生效，不依赖父子锚点）。
+    ///
+    /// `status = removed` 是消息词汇里的**删除语义**——信封上没有 deleted 这个取值。
+    Removal,
+    /// 不透传：子会话的委托 prompt（`role = user`）。其内容已可见于 ToolCall 的请求
+    /// 参数（`args.prompt`），而临时 user 节点会在前端拿到「编辑」入口——这个 id 不在
+    /// 父会话存储里，操作必然失败。
+    Withheld,
+    /// 转播成父视图节点（改写见 [`relabel_for_parent`]）。
+    Relay,
+}
+
+/// 本桥**唯一**的「这帧要不要进父视图」判据。
+///
+/// 有两个调用点、读的是**同一条**判据：帧自身（删除语义在帧上，窄帧也带得动），以及
+/// 已知身份的那条记录（窄增量帧没有角色格，只能按身份过滤——按帧过滤会把 user 节点的
+/// 后续增量漏进父视图）。写两遍就会漂，漂的那一侧表现为「父视图里多出一张编辑必败的卡」。
+fn message_fate(message: &ChatNode) -> MessageFate {
+    if message.status == Some(NodeStatus::Removed) {
+        return MessageFate::Removal;
+    }
+    if message.node_role() == Some(NodeRole::User) {
+        return MessageFate::Withheld;
+    }
+    MessageFate::Relay
+}
+
+/// 转播桥语义之三：**节点改写**——把子会话的节点改成父视图的形状。
+///
+/// 只做顶层节点（`parent_id = None`）：子会话内部已有的父子结构原样带过来。
+/// 顶层助手正文挂到本工具调用之下，角色改成 `Tool`（工具响应）而非 `Assistant`，
+/// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
+/// `find_tool_result` 正确识别。
+///
+/// **顺序依赖（主体改写必须排在角色改写之后）**：`node_role()` 的读法是「残留 `role`
+/// 格优先、`principal.kind` 兜底」（[T-147d-iii] 共存阶段）。先写主体的话，靠主体折出
+/// `Assistant` 的那种节点（`role` 空、`principal.kind = Agent`）在读第二次就已经是
+/// `Tool`，于是角色格**永远不会被写**——这张卡的前端与 flatten 都只能从主体猜类型，
+/// 而 `find_tool_result` 认的是 `role`。判据钉在 `relabel_..._rewrites_principal_folded`。
+fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
+    if message.parent_id.is_some() {
+        return;
+    }
+    message.parent_id = Some(tool_call_id.to_string());
+    if message.node_role() == Some(NodeRole::Assistant) {
+        message.set_legacy_role(NodeRole::Tool);
+        // 改写到哪一格就跟到哪一格：这张卡现在是 **agent_run 工具的响应**，族归
+        // 工具自己——带着子会话 agent 主体的转播节点会被 `visible_to` 当作第三方私有。
+        message.principal = Some(crate::symbio_core::principal::Principal::tool_principal(
+            NAME,
+        ));
+    }
 }
 
 /// 会话节点视图 → **本轮是否结束**：`None` = 仍在 `working`（继续等）；

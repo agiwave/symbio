@@ -95,7 +95,7 @@ export const BASELINE = {
   // 挪一格就认不出——那条 `None` 就是原先的静默失效现场）；`store/wal.test.rs` 的
   // `the_grid_gate_rejects_a_name_that_is_not_on_the_table` / `the_grid_gate_rejects_a_name_claiming_another_cell`
   // （唯一写入口拒两种错位形态，且不消耗 seq、不落盘；同名字回到同格照落）。
-  rustTests: 1941,
+  rustTests: 1948,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
