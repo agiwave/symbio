@@ -360,6 +360,103 @@ const META_READER_TS_SRC = [
   '}',
 ].join('\n')
 
+/**
+ * 后端 home/schemas.rs：D 组「模块限定」一族的后端侧。
+ *
+ * 四个模块各有一个 `Response` 而契约各不相同——这正是 `module` 限定存在的理由：
+ * 不限定时抽取器按名字取文件里**第一个**匹配，四对登记会拿同一个类型比四个接口。
+ * 每个模块头带一条 `Corresponding Frontend`（E 组的后端侧）。
+ */
+const HOME_SCHEMAS_RS = 'symbio/src/plugins/home/schemas.rs'
+const HOME_SCHEMAS_RS_SRC = [
+  'pub mod home_reload {',
+  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    pub struct Request {',
+  '        pub homedir: Option<String>',
+  '    }',
+  '    pub struct Response {',
+  '        pub old_homedir: String',
+  '        pub new_homedir: String',
+  '        pub reloaded_plugins: usize',
+  '        pub homedir_changed: bool',
+  '        pub bootstrap_path: String',
+  '    }',
+  '}',
+  'pub mod home_get_workspace {',
+  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    pub struct Response {',
+  '        pub workdir: String',
+  '        pub expanded_path: String',
+  '        pub recent_workspaces: Vec<String>',
+  '    }',
+  '}',
+  'pub mod home_set_workspace {',
+  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    pub struct Request {',
+  '        pub path: String',
+  '    }',
+  '    pub struct Response {',
+  '        pub workdir: String',
+  '        pub expanded_path: String',
+  '        pub recent_workspaces: Vec<String>',
+  '    }',
+  '}',
+  'pub mod home_get_homedir {',
+  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    pub struct Response {',
+  '        pub homedir: String',
+  '        pub bootstrap_path: String',
+  '    }',
+  '}',
+  '',
+].join('\n')
+
+/**
+ * 前端 home.ts：namespace = 后端模块名、类型名 = 后端结构体名。
+ *
+ * 接口体里每行一个 `name: type`（与后端夹具同形）——D 组按行读字段，两侧同形才比得动。
+ */
+const HOME_TS = 'tauri/src/schemas/home.ts'
+const HOME_TS_SRC = [
+  '// Corresponding Backend: symbio/src/plugins/home/schemas.rs',
+  'export namespace home_reload {',
+  '  export interface Request {',
+  '    homedir?: string',
+  '  }',
+  '  export interface Response {',
+  '    old_homedir: string',
+  '    new_homedir: string',
+  '    reloaded_plugins: number',
+  '    homedir_changed: boolean',
+  '    bootstrap_path: string',
+  '  }',
+  '}',
+  'export namespace home_get_workspace {',
+  '  export interface Response {',
+  '    workdir: string',
+  '    expanded_path: string',
+  '    recent_workspaces: string[]',
+  '  }',
+  '}',
+  'export namespace home_set_workspace {',
+  '  export interface Request {',
+  '    path: string',
+  '  }',
+  '  export interface Response {',
+  '    workdir: string',
+  '    expanded_path: string',
+  '    recent_workspaces: string[]',
+  '  }',
+  '}',
+  'export namespace home_get_homedir {',
+  '  export interface Response {',
+  '    homedir: string',
+  '    bootstrap_path: string',
+  '  }',
+  '}',
+  '',
+].join('\n')
+
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
   'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
@@ -378,6 +475,9 @@ const BASE = {
   [SESSION_META_TS]: SESSION_META_TS_SRC,
   [READING_RS]: READING_RS_SRC,
   [READING_TS]: READING_TS_SRC,
+  // D 组模块限定一族 + E 组反方向（前端 `Corresponding Backend`）
+  [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC,
+  [HOME_TS]: HOME_TS_SRC,
   [META_READER_TS]: META_READER_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
 }
@@ -420,7 +520,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 22 对结构体字段 \+ E 组 1 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 28 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
   )
 })
 
@@ -787,6 +887,41 @@ test('常量组闭集：前端词表多出一个词 → 变红（反向也不许
   assert.match(r.stdout, /前端词表多出：ghost/)
 })
 
+test('home 模块限定：后端该模块少一个字段 → 变红（证明限定真的在比对）', () => {
+  const r = mirror({
+    [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
+      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: tauri/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '        pub bootstrap_path: String', '    }', '}'].join('\n'),
+      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: tauri/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '    }', '}'].join('\n'),
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /home_get_homedir::Response/)
+  assert.match(r.stdout, /前端持有后端不存在的字段：bootstrap_path/)
+})
+
+test('home 模块限定：字段只在**另一个**同名 Response 里有 → 仍然变红', () => {
+  // `old_homedir` 是 `home_reload::Response` 的字段，`home_get_homedir::Response` 里没有。
+  // 不限定模块时这条会**静默通过**：按名字取文件里第一个匹配的做法在整份文件里搜得着
+  // `old_homedir`，于是把错配的一对当成一致。四份不同契约必须各自锁在自己的模块体内比较。
+  const r = mirror({
+    [HOME_TS]: HOME_TS_SRC.replace(
+      ['export namespace home_get_homedir {', '  export interface Response {', '    homedir: string'].join('\n'),
+      ['export namespace home_get_homedir {', '  export interface Response {', '    homedir: string', '    old_homedir: string'].join('\n'),
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /home_get_homedir\.Response/)
+  assert.match(r.stdout, /前端持有后端不存在的字段：old_homedir/)
+})
+
+test('home 模块限定：后端模块整体改名 → 报「未找到模块」而不是退回全文件搜索', () => {
+  const r = mirror({
+    [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace('pub mod home_get_homedir', 'pub mod home_homedir'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /后端未找到模块 home_get_homedir/)
+})
+
 test('常量组不存在 → 变红（不是静默跳过）', () => {
   const r = mirror({
     [DETAIL_RS]: DETAIL_RS_SRC.replace(/pub const DETAIL_PICK_[A-Z]+: &str = "[a-z]+";/g, ''),
@@ -831,15 +966,33 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
   assert.match(r.stdout, /目标不存在/)
 })
 
-test('跨栈导航头指向真实文件 → 不红', () => {
+test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /✓ symbio\/src\/symbio_core\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  assert.match(r.stdout, /✓ 后端 symbio\/src\/symbio_core\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
+  assert.match(r.stdout, /✓ 前端 tauri\/src\/schemas\/home\.ts:1 → symbio\/src\/plugins\/home\/schemas\.rs/)
+})
+
+test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这条会静默）', () => {
+  const r = mirror({
+    [HOME_TS]: HOME_TS_SRC.replace(
+      '// Corresponding Backend: symbio/src/plugins/home/schemas.rs',
+      '// Corresponding Backend: symbio/src/symbio_core/schemas/home_reload.rs',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端 tauri\/src\/schemas\/home\.ts:1 → .*（目标不存在）/)
 })
 
 test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
   const r = mirror({
     'symbio/src/symbio_core/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+    [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
+      /^(\s*)\/\/! Corresponding Frontend: .*$\n/gm,
+      '',
+    ),
+    [HOME_TS]: HOME_TS_SRC.replace('// Corresponding Backend: symbio/src/plugins/home/schemas.rs\n', ''),
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /E 组 0 条跨栈导航头/)

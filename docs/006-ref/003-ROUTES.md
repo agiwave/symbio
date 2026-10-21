@@ -27,10 +27,10 @@ lists: [route-contracts=owner]
 | `event_bus/ping` | 仓内无调用方 | pong + 当前订阅数 | 存活探测 |
 | `event_bus/subscribe` | 前端实时面 / CLI | 帧订阅连接 | 收 `kind = "vdfs"` 频道；CLI 侧须与 `vdfs/watch` 配对（曾漏后者） |
 | `gateway/status` | 前端（进程内 route，不经 HTTP） | 运行状态 JSON | `gateway/*` 显式排除于只读白名单 |
-| `home/get_homedir` | 前端（`services/home.ts`） | homedir 与引导路径 | 只读；**经 gateway 不可达**（home 是 worker 的父，入站 router 不向上转发） |
-| `home/get_workspace` | 前端（`services/home.ts`） | 工作区 / 展开路径 / 最近列表 | 只读；读 home 自己的 `work.workdir` 配置段；同样经 gateway 不可达 |
-| `home/reload` | 前端（`services/home.ts`） | 重载结果 | 写操作；切换 homedir（可选）并重建全部子插件 |
-| `home/set_workspace` | 前端（`services/home.ts`） | 设置结果 | 写操作；写入 home 自己的 `work.workdir` 与最近使用列表 |
+| `home/get_homedir` | 前端（`services/home.ts`） | `home_get_homedir::Response` | 只读；**经 gateway 不可达**（home 是 worker 的父，入站 router 不向上转发） |
+| `home/get_workspace` | 前端（`services/home.ts`） | `home_get_workspace::Response` | 只读；读 home 自己的 `work.workdir` 配置段；同样经 gateway 不可达 |
+| `home/reload` | 前端（`services/home.ts`） | `home_reload::Response` | 写操作；切换 homedir（可选）并重建全部子插件 |
+| `home/set_workspace` | 前端（`services/home.ts`） | `home_set_workspace::Response` | 写操作；写入 home 自己的 `work.workdir` 与最近使用列表 |
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；core 常量 `ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |

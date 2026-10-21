@@ -423,9 +423,9 @@ for (const f of feSchemaFiles) {
  * `// dead-code-allow R-001: <理由>` ⇒ 已承认保留（理由不可为空）。
  *
  * 为什么前端这一半也需要它：本表列的是「**确实**全库无人用」的导出，其中一部分是
- * 刻意保留的**跨栈契约半边**（如 `home_reload.Request` —— 与后端
- * `symbio_core/schemas/home_reload.rs` 的请求半边对应）。报告若不区分，读者会把它
- * 当成可清理项删掉，而删掉它并不会让任何测试变红——只会让契约少一半。
+ * 刻意保留的**跨栈契约半边**（如 `home.ts` 的 `home_reload.Request` —— 与后端
+ * `plugins/home/schemas.rs` 的请求半边对应，前端调用方只传字面量、不引这个类型）。
+ * 报告若不区分，读者会把它当成可清理项删掉，而删掉它并不会让任何测试变红——只会让契约少一半。
  */
 function feWaiverOf(f, name) {
   const lines = readFileSync(f, 'utf8').split('\n');

@@ -13,7 +13,7 @@
             symbio/src/plugins/gateway/plugin.rs（入站配置 = `<根>/gateway/PLUGIN.yml`）
   对应服务: tauri/src/services/home.ts (switchHomedir / getHomedirInfo)
             tauri/src/services/systemLocation.ts (系统目录模型与持久化)
-  对应 schema: tauri/src/schemas/home_reload.ts
+  对应 schema: tauri/src/schemas/home.ts (home_reload 命名空间)
 -->
 <template>
   <BaseModal :visible="open" panel-class="modal" @close="handleClose">
@@ -145,7 +145,7 @@ import { logger } from '@/utils/logger'
 import { useToast } from '@/composables/useToast'
 import BaseModal from './BaseModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
-import type { Response as ReloadResponse } from '@/schemas/home_reload'
+import type { home_reload } from '@/schemas/home'
 
 interface Props {
   open: boolean
@@ -153,7 +153,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
-  (e: 'reloaded', response: ReloadResponse | null): void
+  (e: 'reloaded', response: home_reload.Response | null): void
 }>()
 
 const { showToast } = useToast()

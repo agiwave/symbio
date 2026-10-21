@@ -41,10 +41,10 @@
  *   问题，少一个才是。只比字段名不比类型：类型映射正则读不出来，而"改字段名"本就是
  *   后端最常见的契约变更。
  *
- * **E. 跨栈导航头**（`Corresponding Frontend` 必须指向真实文件）
- *   后端协议文件顶部写 `// Corresponding Frontend: <路径>`，指向它的前端镜像——
- *   这是**人**在两边之间跳转的入口。它腐烂得很安静：前端改名 / 删除后，头照旧
- *   指向旧路径，没人会被告知。实测 8 条里 **7 条悬空**，其中 6 条指向
+ * **E. 跨栈导航头**（`Corresponding Frontend` / `Corresponding Backend` 必须指向真实文件）
+ *   后端协议文件顶部写 `// Corresponding Frontend: <路径>`，前端镜像文件顶部写
+ *   `// Corresponding Backend: <路径>`，两个方向都是**人**在两边之间跳转的入口。
+ *   它腐烂得很安静：对面改名 / 删除后，头照旧指向旧路径，没人会被告知。实测 8 条里 **7 条悬空**，其中 6 条指向
  *   doc-link-allow D-010: 下一行的目录正是 E 组判出的那批悬空，史实叙述不是入链
  *   `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**。
  *
@@ -111,6 +111,10 @@ const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
+// home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
+// （四个同名 namespace）。见 [ADR-112] 决策 2。
+const HOME_SCHEMAS_RS = 'symbio/src/plugins/home/schemas.rs'
+const HOME_TS = 'tauri/src/schemas/home.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
 const RUST_CONST_FILES = [VDFS_WORDS_RS, VDFS_PROTOCOL_RS]
@@ -429,6 +433,41 @@ const STRUCT_SETS = [
     what: '读数面板（[T-202]）',
     rust: { file: READING_RS, struct: 'ReadingPanel' },
     ts: { file: READING_TS, interface: 'ReadingPanel' },
+  },
+  // ── home 四条控制面臂的载荷（[T-215] 段二 / [ADR-112] 决策 2）────────────
+  //
+  // 这一族**必须**带模块限定：`plugins/home/schemas.rs` 里四个模块各有一个
+  // `Response`，不限定就会拿第一个匹配去比四个接口。前端把同名结构体放进**同名
+  // namespace**，两侧的类型名与限定词逐字一致。
+  {
+    what: 'home 重载请求（切 homedir）',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Request', module: 'home_reload' },
+    ts: { file: HOME_TS, interface: 'Request', namespace: 'home_reload' },
+  },
+  {
+    what: 'home 重载响应（切 homedir + 重建子插件）',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Response', module: 'home_reload' },
+    ts: { file: HOME_TS, interface: 'Response', namespace: 'home_reload' },
+  },
+  {
+    what: 'home 工作区读取响应',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Response', module: 'home_get_workspace' },
+    ts: { file: HOME_TS, interface: 'Response', namespace: 'home_get_workspace' },
+  },
+  {
+    what: 'home 工作区切换响应',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Response', module: 'home_set_workspace' },
+    ts: { file: HOME_TS, interface: 'Response', namespace: 'home_set_workspace' },
+  },
+  {
+    what: 'home 系统目录读数响应',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Response', module: 'home_get_homedir' },
+    ts: { file: HOME_TS, interface: 'Response', namespace: 'home_get_homedir' },
+  },
+  {
+    what: 'home 切换工作区的请求载荷',
+    rust: { file: HOME_SCHEMAS_RS, struct: 'Request', module: 'home_set_workspace' },
+    ts: { file: HOME_TS, interface: 'Request', namespace: 'home_set_workspace' },
   },
 ]
 
@@ -779,14 +818,37 @@ function declAttrs(src, idx) {
  *
  * 结构体级的 `rename_all` 会整体改写字段名，本检查器不处理——**报错**而不是
  * 默默算错（与 C 组把 `rename_all` 声明本身列为检查项同一立场）。
+ *
+ * `moduleName`（可选）：在 `pub mod <moduleName> { … }` 的**体内**找结构体。
+ * 为什么需要：一份契约文件按路由分模块时，各模块里的类型常常同名——
+ * `plugins/home/schemas.rs` 的四个模块各有一个 `Response`（reload / 取工作区 /
+ * 切工作区 / 取系统目录），四份**不同**的契约。不限定模块就只能取文件里第一个
+ * 匹配，于是四条登记会拿同一个类型比四个接口：该红的红不了（错配的对恰好字段名
+ * 重合），不该红的反而红（另一模块的字段在这里"不存在"）。
+ * 模块解析不出来 ⇒ **报错**而不是退回全文件搜索——静默退回等于把限定条件丢掉。
  */
-function rustStructFields(src, name) {
-  const m = src.match(new RegExp(`(?:pub|pub\\(crate\\))\\s+struct\\s+${name}\\b`))
-  if (!m) return { fields: null, problem: `后端未找到结构体 ${name}` }
-  if (declAttrs(src, m.index).some((a) => /rename_all\s*=/.test(a))) {
+function rustStructFields(src, name, moduleName) {
+  let scope = src
+  if (moduleName) {
+    const mod = src.match(new RegExp(`(?:pub\\s+)?mod\\s+${moduleName}\\b`))
+    if (!mod) return { fields: null, problem: `后端未找到模块 ${moduleName}（结构体 ${name} 无处可寻）` }
+    const body = braceBlock(src, mod.index)
+    if (body === null) return { fields: null, problem: `${moduleName} 的模块体解析失败` }
+    scope = body
+  }
+  const m = scope.match(new RegExp(`(?:pub|pub\\(crate\\))\\s+struct\\s+${name}\\b`))
+  if (!m) {
+    return {
+      fields: null,
+      problem: moduleName
+        ? `后端模块 ${moduleName} 里未找到结构体 ${name}`
+        : `后端未找到结构体 ${name}`,
+    }
+  }
+  if (declAttrs(scope, m.index).some((a) => /rename_all\s*=/.test(a))) {
     return { fields: null, problem: `${name} 用了结构体级 rename_all，本检查器不处理` }
   }
-  const body = braceBlock(src, m.index)
+  const body = braceBlock(scope, m.index)
   if (body === null) return { fields: null, problem: `${name} 的结构体体解析失败` }
 
   const out = []
@@ -817,11 +879,29 @@ function rustStructFields(src, name) {
  * 索引签名（`[k: string]: unknown`）与方法签名（`f(): void`）都不匹配字段正则，
  * 自动跳过——前者正是"其余键 flatten 到顶层"的写法，与后端 `#[serde(flatten)]`
  * 对位，本就不该当成一个字段。
+ *
+ * `nsName`（可选）：在 `export namespace <nsName> { … }` 的**体内**找接口。后端结构体
+ * 按路由模块各叫一个 `Response` 时，前端镜像沿用**同一个模块名**（而不是各起一个
+ * `ReloadResponse` / `WorkspaceResponse` 之类的别名）——名字两边一致，读代码的人不必
+ * 在两张表之间换算。与后端的 `moduleName` 是同一条限定的两侧，解析不出来同样**报错**。
  */
-function tsInterfaceFields(src, name) {
-  const m = src.match(new RegExp(`(?:export\\s+)?interface\\s+${name}\\b`))
-  if (!m) return { fields: null, problem: `前端未找到接口 ${name}` }
-  const body = braceBlock(src, m.index)
+function tsInterfaceFields(src, name, nsName) {
+  let scope = src
+  if (nsName) {
+    const ns = src.match(new RegExp(`(?:export\\s+)?namespace\\s+${nsName}\\b`))
+    if (!ns) return { fields: null, problem: `前端未找到命名空间 ${nsName}（接口 ${name} 无处可寻）` }
+    const nsBody = braceBlock(src, ns.index)
+    if (nsBody === null) return { fields: null, problem: `${nsName} 的命名空间体解析失败` }
+    scope = nsBody
+  }
+  const m = scope.match(new RegExp(`(?:export\\s+)?interface\\s+${name}\\b`))
+  if (!m) {
+    return {
+      fields: null,
+      problem: nsName ? `前端命名空间 ${nsName} 里未找到接口 ${name}` : `前端未找到接口 ${name}`,
+    }
+  }
+  const body = braceBlock(scope, m.index)
   if (body === null) return { fields: null, problem: `${name} 的接口体解析失败` }
   const out = []
   for (const raw of body.split(/\r?\n/)) {
@@ -1047,6 +1127,10 @@ for (const e of ENUM_SETS) {
 // ---------- D ----------
 console.log()
 console.log('--- D. 结构体字段（前端字段必须能在后端找到）---')
+
+/** 带模块限定的显示名：`home_reload::Response` 而不是 `Response`（同文件里有四个同名类型） */
+const rustLabel = (s) => (s.rust.module ? `${s.rust.module}::${s.rust.struct}` : s.rust.struct)
+const tsLabel = (s) => (s.ts.namespace ? `${s.ts.namespace}.${s.ts.interface}` : s.ts.interface)
 for (const s of STRUCT_SETS) {
   const rustSrc = readIfExists(s.rust.file)
   const tsSrc = readIfExists(s.ts.file)
@@ -1057,7 +1141,7 @@ for (const s of STRUCT_SETS) {
   if (rustSrc === null) {
     problems.push(`后端文件不存在：${s.rust.file}`)
   } else {
-    const got = rustStructFields(rustSrc, s.rust.struct)
+    const got = rustStructFields(rustSrc, s.rust.struct, s.rust.module)
     if (got.problem) problems.push(got.problem)
     else rustFields = got.fields
   }
@@ -1065,7 +1149,7 @@ for (const s of STRUCT_SETS) {
   if (tsSrc === null) {
     problems.push(`前端文件不存在：${s.ts.file}`)
   } else {
-    const got = tsInterfaceFields(tsSrc, s.ts.interface)
+    const got = tsInterfaceFields(tsSrc, s.ts.interface, s.ts.namespace)
     if (got.problem) problems.push(got.problem)
     else tsFields = got.fields
   }
@@ -1081,14 +1165,14 @@ for (const s of STRUCT_SETS) {
     const localCount = Object.keys(s.tsLocal ?? {}).length
     const via = localCount ? dim(`（另含 ${localCount} 个前端自持）`) : ''
     console.log(
-      `  ${green(OK)} ${s.rust.struct} ↔ ${s.ts.interface} —— ${s.what}` +
+      `  ${green(OK)} ${rustLabel(s)} ↔ ${tsLabel(s)} —— ${s.what}` +
         `（后端 ${rustFields.length} / 前端 ${tsFields.length} 字段）${via}`,
     )
     continue
   }
 
   errors += problems.length
-  console.log(`  ${red(BAD)} ${s.rust.struct} ↔ ${s.ts.interface} —— ${s.what}`)
+  console.log(`  ${red(BAD)} ${rustLabel(s)} ↔ ${tsLabel(s)} —— ${s.what}`)
   for (const msg of problems) console.log(`      ${red(msg)}`)
   console.log(dim(`      ${s.rust.file} ↔ ${s.ts.file}`))
   console.log(dim('      三条出路：后端换了名字 → 改前端；前端自持 → 登记本对的 tsLocal；'))
@@ -1098,42 +1182,57 @@ for (const s of STRUCT_SETS) {
 // ==================== E. 跨栈导航头 ====================
 
 /**
- * `// Corresponding Frontend: <相对仓库根的路径>` 必须指向**真实存在**的文件。
+ * 跨栈导航头两个方向都判：
+ * - 后端 `// Corresponding Frontend: <相对仓库根的路径>`；
+ * - 前端 `// Corresponding Backend: <相对仓库根的路径>`。
  *
- * 这条头是跨栈导航的入口（从后端协议文件跳到它的前端镜像），而它腐烂的方式很安静：
- * 前端文件改名 / 删除后，头照旧指向旧路径，**没人会被告知**——实测 8 条里 **7 条**
+ * 这类头是跨栈导航的入口（从一侧的协议文件跳到它在另一侧的镜像），而它腐烂的方式很安静：
+ * 对面文件改名 / 删除后，头照旧指向旧路径，**没人会被告知**——实测 8 条里 **7 条**
  * doc-link-allow D-010: 下一行的目录正是 E 组判出的那批悬空，史实叙述不是入链
  * 悬空，其中 6 条指向 `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**
  * （`git log --diff-filter=A -- 'tauri/src/protocols/*'` 为空）。
  *
- * 约定因此收紧为：**写了就必须指向真实文件；前端没有镜像就别写**。写一条假指针
+ * 为什么反方向同样要判：只守后端→前端，前端那份指针就是**免检的**。它坏了没有任何
+ * 信号，而读前端代码的人恰恰是靠它找后端的。
+ *
+ * 约定因此收紧为：**写了就必须指向真实文件；对面没有镜像就别写**。写一条假指针
  * 比不写更糟——不写只是缺个跳转，写假的会让人以为那边有人在看。
  */
 const HEADER_RE = /^\s*(?:\/\/!|\/\/)\s*Corresponding Frontend:\s*(\S+)\s*$/
+const BACK_HEADER_RE = /^\s*(?:\/\/!|\/\/)\s*Corresponding Backend:\s*(\S+)\s*$/
 
-// ---------- E 组 ----------
-console.log()
-console.log('E. 跨栈导航头（Corresponding Frontend）')
-{
-  const headers = []
-  for (const file of walkRs(path.join(REPO, 'symbio', 'src'))) {
+/** 在一堆文件里收集 `headerRe` 命中的导航头 */
+function collectHeaders(files, headerRe) {
+  const out = []
+  for (const file of files) {
     const rel = path.relative(REPO, file).split(path.sep).join('/')
     const lines = fs.readFileSync(file, 'utf8').split('\n')
     lines.forEach((line, i) => {
-      const m = line.match(HEADER_RE)
-      if (m) headers.push({ rel, target: m[1], line: i + 1 })
+      const m = line.match(headerRe)
+      if (m) out.push({ rel, target: m[1], line: i + 1 })
     })
   }
+  return out
+}
+
+// ---------- E 组 ----------
+console.log()
+console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
+{
+  const headers = [
+    ...collectHeaders(walkRs(path.join(REPO, 'symbio', 'src')), HEADER_RE).map((h) => ({ ...h, side: '后端' })),
+    ...collectHeaders(walk(path.join(REPO, 'tauri', 'src')), BACK_HEADER_RE).map((h) => ({ ...h, side: '前端' })),
+  ]
 
   let bad = 0
   for (const h of headers) {
     if (fs.existsSync(path.join(REPO, h.target))) {
-      console.log(`  ${green(OK)} ${h.rel}:${h.line} → ${h.target}`)
+      console.log(`  ${green(OK)} ${h.side} ${h.rel}:${h.line} → ${h.target}`)
     } else {
       bad += 1
       errors += 1
-      console.log(`  ${red(BAD)} ${h.rel}:${h.line} → ${h.target}（目标不存在）`)
-      console.log(dim('      前端改名/删除后这条头就悬空了；没有对应镜像就把这行删掉（假指针比没有更糟）。'))
+      console.log(`  ${red(BAD)} ${h.side} ${h.rel}:${h.line} → ${h.target}（目标不存在）`)
+      console.log(dim('      对面改名/删除后这条头就悬空了；没有对应镜像就把这行删掉（假指针比没有更糟）。'))
     }
   }
   if (headers.length === 0) console.log(dim('  （没有任何文件声明跨栈对应）'))

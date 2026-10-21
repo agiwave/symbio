@@ -21,7 +21,7 @@
 //! 不存在集中合并这一层。
 
 use super::homedir::HomedirRegistry;
-use super::schemas::{home_get_workspace, home_reload};
+use super::schemas::{home_get_homedir, home_get_workspace, home_reload, home_set_workspace};
 use crate::symbio_core::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
@@ -263,15 +263,12 @@ impl HomePlugin {
         })
     }
 
-    /// 获取当前 homedir 信息
-    pub async fn get_homedir_info(&self) -> Value {
-        serde_json::json!({
-            "homedir": HomedirRegistry::get().to_string_lossy().to_string(),
-            "bootstrap_path": HomedirRegistry::bootstrap_path_display(),
-            "default_homedir": {
-                "path": HomedirRegistry::get().to_string_lossy().to_string(),
-            }
-        })
+    /// 取回当前系统目录与引导位置（`home/get_homedir` 的载荷）
+    pub async fn get_homedir_info(&self) -> home_get_homedir::Response {
+        home_get_homedir::Response {
+            homedir: HomedirRegistry::get().to_string_lossy().to_string(),
+            bootstrap_path: HomedirRegistry::bootstrap_path_display(),
+        }
     }
 
     /// 同步版 `set_self`：构造期单线程写入，使用 `try_write` 不会失败
@@ -350,7 +347,10 @@ impl HomePlugin {
     }
 
     /// 切换工作区：候选配置保存成功后才发布到内存。
-    pub async fn set_workspace(&self, path_str: &str) -> Result<Value, PluginError> {
+    pub async fn set_workspace(
+        &self,
+        path_str: &str,
+    ) -> Result<home_set_workspace::Response, PluginError> {
         self.set_workspace_in(path_str, &home_dir()).await
     }
 
@@ -359,7 +359,7 @@ impl HomePlugin {
         &self,
         path_str: &str,
         dir: &PluginDir,
-    ) -> Result<Value, PluginError> {
+    ) -> Result<home_set_workspace::Response, PluginError> {
         let expanded_path = shellexpand::tilde(path_str).to_string();
 
         plugin_info!("home", "正在切换到工作区: {}", expanded_path);
@@ -399,12 +399,11 @@ impl HomePlugin {
                 .collect::<Vec<String>>()
         };
 
-        Ok(serde_json::json!({
-            "workdir": path_str,
-            "expanded_path": expanded_path,
-            "recent_workspaces": recents,
-            "status": "success"
-        }))
+        Ok(home_set_workspace::Response {
+            workdir: path_str.to_string(),
+            expanded_path,
+            recent_workspaces: recents,
+        })
     }
 
     /// 把内存中的配置**原子落盘**到自己的 `PLUGIN.yml`。
@@ -501,15 +500,9 @@ impl Plugin for HomePlugin {
             }
             // 切换工作区（写入 home 自己的 work.workdir 与最近使用列表）。
             "home/set_workspace" => {
-                #[derive(serde::Deserialize, Clone)]
-                struct SetWorkspaceRequest {
-                    path: String,
-                }
-                let req: SetWorkspaceRequest = ctx.payload()?;
-                let path_str = &req.path;
-
+                let req: home_set_workspace::Request = ctx.payload()?;
                 // set_workspace 已确认持久化成功，无需再后台 flush。
-                let result = self.set_workspace(path_str).await?;
+                let result = self.set_workspace(&req.path).await?;
 
                 return Ok(PluginPayload::new(&result));
             }

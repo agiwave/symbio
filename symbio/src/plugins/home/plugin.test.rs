@@ -29,7 +29,8 @@ async fn workspace_save_failure_keeps_previous_memory_and_disk() {
 
     std::fs::remove_dir(blocked).unwrap();
     let result = home.set_workspace_in("saved", &dir).await.unwrap();
-    assert_eq!(result["status"], "success");
+    assert_eq!(result.workdir, "saved");
+    assert_eq!(result.recent_workspaces, vec!["saved", "previous"]);
     let saved = dir.load::<HomeConfig>().unwrap().unwrap();
     assert_eq!(saved.work, home.config.read().await.work);
     assert_eq!(saved.work["workdir"], "saved");
