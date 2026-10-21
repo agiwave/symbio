@@ -665,6 +665,14 @@ pub(crate) fn production_matrix() -> &'static EffectiveMatrix {
 /// （绑定行替换部署行、但不带可见域），那是这张表的裁决，不是判定机制的裁决；
 /// `governance` 的 [`PermissionMatrix`] 因此保持「常量表 + fail-closed 谓词」原样。
 ///
+/// ## 两个读数的名字（[ADR-100](../../../docs/010-adr/100.md "ADR-100")「淘汰面为什么
+/// 只认部署表」一节，口径只在那一节写，这里不重述理由）
+///
+/// | 名字 | 成员 | 回答的问题 |
+/// |---|---|---|
+/// | **合流面** | `can_write` / `can_write_name` / `can_reply` / `can_produce_artifact` / `grants_of` / `grant_names_of` | 「**现在**这个主体能不能做这件事」（绑定行替换部署行，未登记才回退） |
+/// | **部署事实面** | `deployed_can_write_name` / `is_deployed` | 「这台机器**部署过**谁、给它配过什么」（只认 [`ROWS`]） |
+///
 /// 调用点不点名本类型（类型推导取方法）——收窄/扩面都在这里一处发生。
 pub(crate) struct EffectiveMatrix {
     deployed: PermissionMatrix,
