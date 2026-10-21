@@ -82,16 +82,16 @@ async fn concurrent_workspace_updates_and_flush_keep_disk_and_memory_consistent(
 #[test]
 fn parse_path_splits_name_and_rest() {
     assert_eq!(
-        HomePlugin::parse_path("/work/agent"),
-        Some(("work", "agent"))
+        HomePlugin::parse_path("/agent/host"),
+        Some(("agent", "host"))
     );
     assert_eq!(
-        HomePlugin::parse_path("work/agent"),
-        Some(("work", "agent"))
+        HomePlugin::parse_path("agent/host"),
+        Some(("agent", "host"))
     );
-    assert_eq!(HomePlugin::parse_path("/work"), Some(("work", "")));
-    assert_eq!(HomePlugin::parse_path("work"), Some(("work", "")));
-    assert_eq!(HomePlugin::parse_path("/work/"), Some(("work", "")));
+    assert_eq!(HomePlugin::parse_path("/agent"), Some(("agent", "")));
+    assert_eq!(HomePlugin::parse_path("agent"), Some(("agent", "")));
+    assert_eq!(HomePlugin::parse_path("/agent/"), Some(("agent", "")));
     assert_eq!(HomePlugin::parse_path("/"), None);
     assert_eq!(HomePlugin::parse_path(""), None);
 }
@@ -122,15 +122,15 @@ fn ctx_at(path: &str) -> Arc<dyn PluginInvokeRequest> {
     Arc::new(ctx)
 }
 
-/// `work/get_workspace` 读 Home 自己的配置缓存（"最可靠的数据源"），不去问子插件。
+/// `home/get_workspace` 读 Home 自己的配置缓存（"最可靠的数据源"），不去问子插件。
 /// 未配置时给空串而非报错——前端据此显示"未选择工作区"。
 #[tokio::test]
-async fn work_get_workspace_reads_home_config_cache() {
+async fn home_get_workspace_reads_home_config_cache() {
     let home = Arc::new(isolated_home());
 
     let empty = home
         .clone()
-        .route(ctx_at("work/get_workspace"))
+        .route(ctx_at("home/get_workspace"))
         .await
         .expect("未配置工作区也应正常返回")
         .serialize()
@@ -150,7 +150,7 @@ async fn work_get_workspace_reads_home_config_cache() {
 
     let filled = home
         .clone()
-        .route(ctx_at("work/get_workspace"))
+        .route(ctx_at("home/get_workspace"))
         .await
         .expect("应回读配置缓存")
         .serialize()

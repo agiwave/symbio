@@ -1,10 +1,10 @@
 /**
- * home 服务 —— `home/*` 与 `work/*` 四条臂的**前端进程内驱动面**（node 环境）。
+ * home 服务 —— `home/*` 四条臂的**前端进程内驱动面**（node 环境）。
  *
  * ## 为什么这四条臂落在这里，而不在 e2e
  *
- * 四条臂是 **home 插件的臂**（`work/set_workspace` · `work/get_workspace` 由 home 处理，
- * 不是独立插件路由）。它们经 gateway **不可达**——`gateway/plugin.rs` 的入站 router 是
+ * 四条臂全是 **home 插件的臂**（`home/set_workspace` · `home/get_workspace` 由 home 处理，
+ * 前缀 = 目录名，没有第二条命名空间）。它们经 gateway **不可达**——`gateway/plugin.rs` 的入站 router 是
  * worker composite，而 home 是 composite 的**父**，`Composite::route` 对认不出的名字直接
  * `NotFound`、不向上转发（[RE-005](../../../../docs/006-ref/005-e2e覆盖矩阵.md "RE-005-e2e覆盖矩阵")
  * 的边界事实由 e2e `t69 ⑦` 钉住）。真实驱动面是 Tauri 的**进程内** `callPlugin`
@@ -21,8 +21,8 @@
  * |---|---|---|
  * | `getHomedirInfo` | `home/get_homedir` | 无（缺字段 ⇒ 退形状合法的空值，页面照常渲染） |
  * | `switchHomedir` | `home/reload` | 无（失败 ⇒ `null`，调用方自己分支） |
- * | `getWorkspacePath` | `work/get_workspace` | 记最近目录（占位值不记） |
- * | `setWorkspacePath` | `work/set_workspace` | 记最近目录 |
+ * | `getWorkspacePath` | `home/get_workspace` | 记最近目录（占位值不记） |
+ * | `setWorkspacePath` | `home/set_workspace` | 记最近目录 |
  *
  * 「读类吞错返兜底 / 写类直抛」的口径由 `services/fallback.ts` 定义，本文件只消费它；
  * 占位值 `~/projects` 与 `/projects` 结尾两条**不记**的分支同样是断言的一部分——
@@ -92,19 +92,19 @@ describe('home 服务：home/* 两条臂', () => {
   })
 })
 
-describe('home 服务：work/* 两条臂', () => {
+describe('home 服务：workspace 两条臂', () => {
   const workspace = (workdir: string) => ({
     workdir,
     expanded_path: workdir,
     recent_workspaces: [workdir],
   })
 
-  it('getWorkspacePath 打 work/get_workspace 并记最近目录', async () => {
+  it('getWorkspacePath 打 home/get_workspace 并记最近目录', async () => {
     callPluginMock.mockResolvedValueOnce(workspace('/repo/app'))
 
     await getWorkspacePath()
 
-    expect(callPluginMock).toHaveBeenCalledWith('work/get_workspace', {})
+    expect(callPluginMock).toHaveBeenCalledWith('home/get_workspace', {})
     expect(setLastWorkdirMock).toHaveBeenCalledWith('/repo/app')
   })
 
@@ -124,12 +124,12 @@ describe('home 服务：work/* 两条臂', () => {
     expect(setLastWorkdirMock).not.toHaveBeenCalled()
   })
 
-  it('setWorkspacePath 打 work/set_workspace 且带 path；成功即记最近目录', async () => {
+  it('setWorkspacePath 打 home/set_workspace 且带 path；成功即记最近目录', async () => {
     callPluginMock.mockResolvedValueOnce({ ...workspace('/repo/app'), status: 'ok' })
 
     await setWorkspacePath('/repo/app')
 
-    expect(callPluginMock).toHaveBeenCalledWith('work/set_workspace', { path: '/repo/app' })
+    expect(callPluginMock).toHaveBeenCalledWith('home/set_workspace', { path: '/repo/app' })
     expect(setLastWorkdirMock).toHaveBeenCalledWith('/repo/app')
   })
 

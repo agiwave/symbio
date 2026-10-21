@@ -140,6 +140,72 @@ test('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`
   assert.match(r.stdout, /E-002 .*caller\.rs:1/)
 })
 
+// E-002 的**臂侧**：注册处写错前缀。真实案例 `work/set_workspace`——两条臂长在 home 的
+// `match` 里，`work` 既不是插件也没有目录，只扫引用的那半永远看不见它。
+const HOME_ARMS = (arms) => ({
+  'symbio/src/symbio_core/plugin/ids.rs':
+    `${CORE['symbio/src/symbio_core/plugin/ids.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
+  'symbio/src/plugins/home/plugin.rs': `use crate::symbio_core::{PluginError, PluginMeta, PATH, PLUGIN_ID_HOME};
+
+pub struct HomePlugin;
+
+impl Plugin for HomePlugin {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new(PLUGIN_ID_HOME, "系统根")
+    }
+
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
+        let path = ctx.get(PATH).unwrap_or_default();
+        match path.as_str() {
+${arms}
+            _ => Err(PluginError::NotFound(path)),
+        }
+    }
+}
+`,
+})
+
+test('E-002 臂侧命中：home 的臂前缀不是 `home`（幽灵命名空间 `work/*`）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...HOME_ARMS(`            "work/set_workspace" => Ok(PluginPayload::new(&1)),`),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-002 .*plugins\/home\/plugin\.rs:13/)
+  assert.match(r.stdout, /没有任何调用方能到达/)
+})
+
+test('E-002 臂侧不误报：home 的臂以 `home/` 开头（根容器收到的是未剥离的 PATH）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...HOME_ARMS(`            "home/set_workspace" => Ok(PluginPayload::new(&1)),`),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-002 臂侧命中：普通插件把臂写成绝对形（`session/update` 落在 session 里）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/session/plugin.rs': PLUGIN.replace(
+      '"update" => Ok(PluginPayload::new(&2)),',
+      '"session/update" => Ok(PluginPayload::new(&2)),',
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-002 .*plugins\/session\/plugin\.rs:14.*绝对形/)
+})
+
+test('E-002 臂侧可豁免：留理由的 `plugin-entry-allow`', () => {
+  const r = audit({
+    ...CLEAN,
+    ...HOME_ARMS(
+      `            // plugin-entry-allow E-002: 这条地址由根容器之外的宿主直接送达\n` +
+        `            "work/set_workspace" => Ok(PluginPayload::new(&1)),`,
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── E-003：调用侧不得写字面量 PATH ──────────────────────────────────────
 test('E-003 命中：`set(PATH, "字面量")`', () => {
   const r = audit({

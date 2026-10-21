@@ -31,7 +31,7 @@ graph TD
             W["worker（Composite）<br/>扫描自身目录，每目录一个 PLUGIN.yml"]
             HOME --> W
             W --> GROUP["agent · session · model · local · web · vdfs · skill<br/>mcp · work · telegram · gateway · plugin_manager · hook · event_bus"]
-            HOME --> HW["home/* · work/*（Home 自身终结）"]
+            HOME --> HW["home/*（Home 自身终结的四条臂）"]
         end
         subgraph PROV["Providers（基础设施）"]
             EM["Embedding（ort / ONNX Runtime）"]

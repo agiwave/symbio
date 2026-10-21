@@ -51,7 +51,8 @@
 //!
 //! **前端要用的地址不在这里登记**：前端常量是各插件 `route()` 臂的**生成物**
 //! （`tauri/src/constants/routes.gen.ts`，见 `scripts/facts/routes-ts.mjs`），本模块只服务
-//! **Rust 侧调用方**。只被前端调用的路径（`home/*` / `work/*`）在这里没有常量——
+//! **Rust 侧调用方**。只被前端调用的路径（home 的 `home/get_homedir` · `home/reload` ·
+//! `home/set_workspace` · `home/get_workspace`）在这里没有常量——
 //! 给它加一个就是零 Rust 消费方的预留常量，上面那条规则同样拦它。
 //!
 //! 与 [`plugin::ids`](crate::symbio_core::plugin::ids) 的差别：

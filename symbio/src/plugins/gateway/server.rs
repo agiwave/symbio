@@ -12,7 +12,7 @@
 //!
 //! 因此**没有引入任何新协议**：第三方或另一个 Symbio 实例拿到的能力，在 worker
 //! 子树内与前端一致——但**边界与前端不同**：gateway 挂在 worker composite 之下、
-//! `Composite::route` 不向上转发，home 的臂（`home/*` · `work/*`）经入站不可达
+//! `Composite::route` 不向上转发，home 自身终结的四条 `home/*` 臂经入站不可达
 //! （t69 ⑦ 钉住；只读白名单已与该可达面对齐，见 `config.rs::is_readonly_allowed`）。
 //!
 //! ## WebSocket 语义

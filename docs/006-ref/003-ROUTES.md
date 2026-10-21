@@ -27,8 +27,10 @@ lists: [route-contracts=owner]
 | `event_bus/ping` | 仓内无调用方 | pong + 当前订阅数 | 存活探测 |
 | `event_bus/subscribe` | 前端实时面 / CLI | 帧订阅连接 | 收 `kind = "vdfs"` 频道；CLI 侧须与 `vdfs/watch` 配对（曾漏后者） |
 | `gateway/status` | 前端（进程内 route，不经 HTTP） | 运行状态 JSON | `gateway/*` 显式排除于只读白名单 |
-| `home/get_homedir` | 前端（`services/home.ts`） | homedir 与引导路径 | 只读；gateway 只读白名单放行 |
+| `home/get_homedir` | 前端（`services/home.ts`） | homedir 与引导路径 | 只读；**经 gateway 不可达**（home 是 worker 的父，入站 router 不向上转发） |
+| `home/get_workspace` | 前端（`services/home.ts`） | 工作区 / 展开路径 / 最近列表 | 只读；读 home 自己的 `work.workdir` 配置段；同样经 gateway 不可达 |
 | `home/reload` | 前端（`services/home.ts`） | 重载结果 | 写操作；切换 homedir（可选）并重建全部子插件 |
+| `home/set_workspace` | 前端（`services/home.ts`） | 设置结果 | 写操作；写入 home 自己的 `work.workdir` 与最近使用列表 |
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；core 常量 `ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
@@ -40,8 +42,6 @@ lists: [route-contracts=owner]
 | `telegram/start_listener` | 外部客户端（gateway 原样转发） | `{success, message}` | 长轮询入队，走会话地址面 |
 | `telegram/status` | 外部客户端（gateway 原样转发） | `telegram_status::Response` | 通道运行状态 |
 | `telegram/stop_listener` | 外部客户端（gateway 原样转发） | `{success, message}` | — |
-| `work/get_workspace` | 前端（`services/home.ts`） | 工作区 / 展开路径 / 最近列表 | 只读；gateway 只读白名单放行 |
-| `work/set_workspace` | 前端（`services/home.ts`） | 设置结果 | 写操作；写入 home 自己的 `work.workdir` 与最近使用列表 |
 
 > 运行期动态分发的地址（`local/<工具短名>` / `web/<工具短名>` / `vdfs/<操作>` / 容器挂载名）没有可静态枚举的 `match` 臂，不在本表——各插件节有说明；`vdfs/*` 的逐条定义见 [RE-006 §2.2](006-当前事实表.md#22-vdfs-操作 "RE-006-当前事实表")。
 
@@ -72,9 +72,9 @@ lists: [route-contracts=owner]
 
 ## Home 插件（根容器）
 
-根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），未命中的一律兜底转发给 `worker`（源码：`plugins/home/plugin.rs` 的 `route`）。四条静态路由（`home/get_homedir` / `home/reload` / `work/get_workspace` / `work/set_workspace`）的契约见上表。
+根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），未命中的一律兜底转发给 `worker`（源码：`plugins/home/plugin.rs` 的 `route`）。四条静态路由（`home/get_homedir` / `home/get_workspace` / `home/reload` / `home/set_workspace`）的契约见上表。
 
-> **两条 `work/*` 臂在此终结**（`home` 是系统根、不挂前缀）：这是**工作区切换**的控制面（读写 `home` 自己的 `work.workdir` 配置），与 `memory` 插件的记忆挂载点（`<根>/memory`）互不相干；`memory` 插件的 `route` 恒 `NotFound`，故不冲突。
+> **这四条臂全部以 `home/` 开头**（`home` 是系统根、前缀即目录名）：工作区切换与 homedir 管理是同一份 home 自有状态（`PLUGIN.yml` 的 `work` / `homedir` 配置段），故同一条命名空间。它与 `memory` 插件的记忆挂载点（`<根>/memory`）互不相干；`memory` 插件的 `route` 恒 `NotFound`，故不冲突。
 
 ---
 

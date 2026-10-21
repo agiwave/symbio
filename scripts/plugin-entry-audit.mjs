@@ -24,7 +24,7 @@
  * | 编号  | 规则                                                          | 为什么 |
  * |-------|---------------------------------------------------------------|--------|
  * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（ADR-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
- * | E-002 | 代码里路由路径字面量的首段必须是插件目录名（或容器前缀 `worker`） | 抓「幽灵命名空间」：`hooks/...` 这种写错了前缀的路径 |
+ * | E-002 | 地址的**前缀**必须是插件目录名（或容器前缀 `worker`）——引用侧与注册侧各判一遍 | 抓「幽灵命名空间」：引用侧 `hooks/...` 是写错了前缀的路径；臂侧 `work/set_workspace`（长在 home 的 `match` 里）是**注册**了一条没有目录的名字。home 是根容器、收到未剥离的 `PATH`，故它的臂必须以 `home/` 开头；其余插件只会收到剥掉首段后的尾巴，臂写成绝对形 ⇒ 真实地址是 `<自己的目录>/<臂>`，与写它的人想的那条不是一条 |
  * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::plugin::route` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
@@ -94,7 +94,9 @@ import { blankComments, blankTestModules } from './rust-scan.mjs'
 import {
   dispatchableRoutes,
   fnBody,
+  fnBodySpan,
   relativeRouteArms,
+  routeArmLines,
   routeConstDecls,
   routeConstName,
 } from './route-facts.mjs'
@@ -340,7 +342,7 @@ function discoverPlugins() {
       // 分派形态：静态 `match` 臂 / 运行期规则 / 恒 `Err`
       //
       // 「恒 `Err`」的判据是**既没有臂、也没有运行期分发**——`agent` / `mcp` /
-      // `model` / `setting` / `work` 是这一类（`route` 直接返回 `NotFound` 并指路 VDFS）。
+      // `model` / `setting` 是这一类（`route` 直接返回 `NotFound` 并指路 VDFS）。
       // `composite` / `local` / `web` / `vdfs` 有臂为零但按运行期集合分发，不是死路由。
       kind: arms.length
         ? 'static'
@@ -667,6 +669,67 @@ for (const abs of codeFiles) {
   }
 }
 
+// ── E-002（臂侧）：注册处写下的前缀必须与「谁会把它送到这里」一致 ─────────
+//
+// 上面那条 E-002 判的是**引用**：某处写了一条 `hooks/fire`。它必须保守——全仓字面量
+// 里大半是 MIME、JSON-RPC 方法名、shell 候选与模型 id，按形状全量判会产出几十条误报。
+// 代价是「**注册侧**写错前缀」这一半原本无人判：`work/set_workspace` 就长在 home 的
+// `match` 臂里，`work` 既不是插件也没有目录，一路活到文档照抄才被人看见。
+// 本遍只看臂（`route` 的 `match` 左值），语法读 `route-facts` 的同一份实现
+// （`routeArmLines`），所以「什么算一条臂」不会在这里和生成器各有一份定义。
+//
+// 判据分两种，各对应一条分发事实：
+//
+// - **home（根容器）的臂必须以 `home/` 开头**。home 收到的 `PATH` 未经剥离，臂就是
+//   完整地址 ⇒ 首段不是 `home` 时，那条地址没有任何调用方能到达（或者更坏：首段恰好
+//   是某个兄弟名时，这条臂在 `parse_path` **之前**拦截，把本该转给 worker 子树的路径
+//   吃掉）。
+// - **其余插件的臂不得以插件目录名或容器前缀开头**。容器剥掉首段才转发，这些插件
+//   永远只收到尾巴；臂写成 `session/stats` 时真实地址是 `<自己的目录>/session/stats`，
+//   而写它的人想的是 `session/stats` —— 意图不可达，且生成器会照臂补出一个更长的
+//   假地址。
+//
+// 两侧都是注册处的事实，与「前缀 = 目录名」这条地址规则同源；`extractRouteArms` 补
+// 前缀时用的是**同一个 home 例外**，故生成物与判据不会分叉。
+for (const dirName of dirNames) {
+  for (const abs of walk(path.join(PLUGINS_DIR, dirName), isProdRs)) {
+    const txt = readCode(abs)
+    const span = fnBodySpan(txt, 'route')
+    if (!span) continue
+    const raw = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
+    const isHome = dirName === 'home'
+    for (const a of routeArmLines(span.body)) {
+      if (!a.arm.includes('/')) continue
+      const first = a.arm.slice(0, a.arm.indexOf('/'))
+      const i = span.startLine + a.line - 2
+      if (isHome) {
+        if (first === 'home') continue
+        if (exempted(raw, i, 'E-002')) continue
+        report(
+          'E-002',
+          'error',
+          rel(abs),
+          i + 1,
+          `根容器 home 的臂 \`${a.arm}\` 首段是 \`${first}\` —— home 收到的是**未剥离**的 PATH，` +
+            `臂就是完整地址：这条前缀不是 \`home\`，没有任何调用方能到达它`,
+        )
+        continue
+      }
+      if (!dirNames.has(first) && !CONTAINER_PREFIXES.has(first)) continue
+      if (exempted(raw, i, 'E-002')) continue
+      report(
+        'E-002',
+        'error',
+        rel(abs),
+        i + 1,
+        `\`${dirName}\` 的臂 \`${a.arm}\` 写成了绝对形 —— 容器剥掉首段才转发，这里只会收到尾巴；` +
+          `它真正可达的地址是 \`${dirName}/${a.arm}\`，而写它的人想的是 \`${a.arm}\``,
+      )
+    }
+  }
+}
+
+//
 // ── E-009：插件不得直接 `use crate::plugins::<兄弟插件>`（**测试代码也判**）──
 //
 // 为什么需要：`plugins/mod.rs` 声称「所有 plugin 子模块都是私有，插件之间互相

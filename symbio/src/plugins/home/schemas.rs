@@ -1,6 +1,6 @@
 //! Home 插件的请求/响应 schema
 //!
-//! 归属规则：`home_reload` 与 `work_get_workspace` 两组契约只被 HomePlugin 消费，
+//! 归属规则：`home_reload` 与 `home_get_workspace` 两组契约只被 HomePlugin 消费，
 //! 故定义在本插件内部，core 不承载。
 
 pub mod home_reload {
@@ -35,8 +35,8 @@ pub mod home_reload {
     }
 }
 
-pub mod work_get_workspace {
-    //! work/get_workspace 路由的响应 schema
+pub mod home_get_workspace {
+    //! home/get_workspace 路由的响应 schema
 
     use serde::{Deserialize, Serialize};
 

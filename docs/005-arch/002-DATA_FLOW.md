@@ -43,7 +43,7 @@ sequenceDiagram
 | 3 | 连接管理 | `tauri/src-tauri/src/route_connection.rs` | 流式连接的生命周期（send/close） |
 | 4 | 核心库入口 | `symbio/src/lib.rs` → `Routeable::route` | `self.plugins.route(&request)` |
 | 5 | 根组装 | `symbio/src/init.rs` → `create_root_plugin` | 根插件为 `home` |
-| 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`、`work/*`，其余转发 `worker` |
+| 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`（四条臂），其余转发 `worker` |
 | 7 | composite 分发 | `symbio/src/plugins/composite/` | `worker`（Composite）**扫描自己的目录**（其下一层目录即一个插件，每个一个 `PLUGIN.yml`）挂载**全部**子插件：`agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `gateway` / `plugin_manager` / `hook` / `event_bus`；清单由构造者经 `REQUIRED_PLUGINS` 传入，容器不内置 |
 | 8 | 插件处理 | 各插件 `plugin.rs` 的 `route()` | 路径清单见 [003-ROUTES.md](../006-ref/003-ROUTES.md "RE-003-ROUTES") |
 | 9 | 错误返回 | `symbio_core/plugin/error.rs` | 错误码对照 [002-ERROR_CODES.md](../006-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") |

@@ -78,7 +78,7 @@ impl Default for GatewayConfig {
 /// `symbio/src/plugins/session/docs/018-node-state-streaming.md` §11。
 ///
 /// **白名单与可达面必须一致（无死条目）**：gateway 挂在 worker composite 之下、
-/// `Composite::route` 不向上转发 ⇒ `home/get_homedir` / `work/get_workspace`（home
+/// `Composite::route` 不向上转发 ⇒ `home/get_homedir` / `home/get_workspace`（home
 /// 的臂）经入站**走不到**（e2e t69 ⑦ 实测回 400），放进白名单只是永不生效的死条目。
 /// t69 ⑦ 钉住的就是这条边界事实。撤销条件：若将来把 gateway 抬到根 composite、
 /// home 的臂经入站真的可达，先在白名单显式加回并补 e2e，再动这里。

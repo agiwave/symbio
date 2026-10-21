@@ -33,7 +33,8 @@ import './_selfrun.mjs';
 // `gateway` 插件挂在 **worker composite 之下**（`gateway/plugin.rs` 模块文档），
 // 入站请求的 router 是它的 `parent` = worker composite。而 `home` 是 composite 的
 // **父**（`home` 挂 worker），`Composite::route` 对认不出的名字直接 `NotFound`、
-// **不向上转发** ⇒ `home/get_homedir` / `home/reload` / `work/*`（这两组是 home 的臂）
+// **不向上转发** ⇒ home 的四条臂（`home/get_homedir` · `home/reload` ·
+// `home/set_workspace` · `home/get_workspace`）
 // 经 gateway **不可达**（实测 400）。它们的生产驱动面是 Tauri 的 `callPlugin`
 // （`tauri/src/services/home.ts`，进程内 `root.route`），归前端形态 e2e。
 //

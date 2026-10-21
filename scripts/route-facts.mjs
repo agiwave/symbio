@@ -81,31 +81,50 @@ export function pluginSources(dir) {
  * `route` 会先被取到，插件就被误判成「零路由臂」。
  */
 export function fnBody(txt, name) {
+  return fnBodySpan(txt, name)?.body ?? null;
+}
+
+/**
+ * 同 {@link fnBody}，但连带返回**体首行在原文里的行号**（1 起）。
+ *
+ * 需要把判据报到具体某一行的守卫（`plugin-entry-audit` 的 E-002 臂侧）读这个；
+ * 只要体的调用方继续用 `fnBody`。
+ */
+export function fnBodySpan(txt, name) {
   const i = txt.indexOf(`async fn ${name}(`);
   if (i < 0) return null;
   const open = txt.indexOf("{", i);
   if (open < 0) return null;
-  return txt.slice(open, matchBrace(txt, open) + 1);
+  return {
+    body: txt.slice(open, matchBrace(txt, open) + 1),
+    startLine: txt.slice(0, open).split("\n").length,
+  };
 }
 
 /**
- * 从一个 `route` 函数体里提取**相对臂**（不带插件前缀的 `match` 臂字面量）。
+ * 从一个 `route` 函数体里提取臂，**带函数体内的行号**（1 起）。
  *
- * 这是「什么算一条路由臂」的唯一语法实现：`extractRouteArms`（生成路由清单与前端
- * 常量）与 `plugin-entry-audit`（判某条地址是否真实存在、报告每条路由的消费方）都读
- * 它。两处各写一遍正则，就会有两份臂的定义——一份开始漏掉 `|` 复合臂时，另一份不会。
+ * 这是「什么算一条路由臂」的唯一语法实现：`relativeRouteArms`（只要名字）、
+ * `extractRouteArms`（生成路由清单与前端常量）与 `plugin-entry-audit`（判某条地址是否
+ * 真实存在、报每条臂落在哪一行）都读它。两处各写一遍正则，就会有两份臂的定义——
+ * 一份开始漏掉 `|` 复合臂时，另一份不会。
  */
-export function relativeRouteArms(body) {
-  const out = new Set();
-  for (const line of body.split("\n")) {
+export function routeArmLines(body) {
+  const out = [];
+  body.split("\n").forEach((line, k) => {
     const eq = line.indexOf("=>");
-    if (eq < 0) continue;
+    if (eq < 0) return;
     for (const m of line.slice(0, eq).matchAll(/"([a-z][a-z0-9_/-]*)"/g)) {
       if (m[1] === "_") continue;
-      out.add(m[1]);
+      out.push({ arm: m[1], line: k + 1 });
     }
-  }
-  return [...out].sort();
+  });
+  return out;
+}
+
+/** 见 {@link routeArmLines}：同一份语法的「只取名字」投影（去重、排序）。 */
+export function relativeRouteArms(body) {
+  return [...new Set(routeArmLines(body).map((x) => x.arm))].sort();
 }
 
 /**
@@ -229,7 +248,7 @@ export function dispatchableRoutes(root) {
  *
  * 两种候选里只有这一种覆盖**全部**路由：`symbio_core/plugin/route.rs` 的常量只收
  * 「有真实 Rust 调用方」的路径（该模块明令不收预留常量），而静态路由里大半是
- * **前端专用**的（`home/*`、`work/*`、`telegram/*`、`hook/*`、`skill/*`…）——
+ * **前端专用**的（`home/*`、`telegram/*`、`hook/*`、`skill/*`…）——
  * 它们没有常量，也就不可能有常量上的注释。
  *
  * 更根本的理由是**归属**：`match` 臂是这条地址的**注册处**，描述写在注册处旁边，

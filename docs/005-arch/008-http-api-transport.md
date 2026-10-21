@@ -69,14 +69,21 @@ symbio/src/plugins/gateway/
 ### 4.1 拿到转发目标：`parent.route()`
 
 **问题**：子插件的 `ctx.parent()` 只能拿到直接父级（worker `Composite`），
-拿不到 root（`HomePlugin`）。而第三方需要访问 `home/*`、`work/*` 等 root 级路由。
+拿不到 root（`HomePlugin`）。第三方经 HTTP 能到达哪些地址，就由此划定。
 `reload` 时 root 还会整个重建，捕获的 `Arc<dyn Plugin>` 会变成"旧 root"。
 
 **做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`），
-每次请求 `parent.route(ctx)` —— `Composite` 的路径合并语义与 `root.route` 等价，
-home 级路径（`home/*`、`work/*`）由 `Composite`
-未命中时的兜底上行转发覆盖。父级以 `Weak` 保存，不产生循环引用；
-`home/reload` 重建插件树时网关实例随之重建，转发目标恒为当前树。
+每次请求 `parent.route(ctx)` —— `Composite` 按首段在**已挂载子插件**里分发，
+未命中直接 `NotFound`（源码 `plugins/composite/composite.rs` 的 `route`）。
+父级以 `Weak` 保存，不产生循环引用；`home/reload` 重建插件树时网关实例随之重建，
+转发目标恒为当前树。
+
+**由此划定的可达面**：入站请求到得了 worker 子树里的每条插件路由，**到不了 home
+自己的四条臂**（`home/get_homedir` · `home/reload` · `home/set_workspace` ·
+`home/get_workspace`）——home 是 composite 的**父**，而 `Composite::route` 不向上
+转发（实测回 400，判据 e2e `t69` ⑦）。那四条臂的生产驱动面是前端的**进程内**
+`callPlugin`（`tauri/src/services/home.ts` ⇒ `root.route`），不经 HTTP。
+若将来要把边界抬到 root，先重审只读白名单（[RE-001](../006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") 的「白名单与可达面必须一致」）再改这里。
 
 ### 4.2 启动 / 重启 / 停止
 
@@ -259,8 +266,9 @@ GET /api/v1/health  → { "ok": true }
   （清单见 [001-CONFIGURATION.md](../006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")），其余 403/拒绝；
   `gateway/*` 一律拒绝，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝
   （配置含 `inbound_token` 等凭据）。
-- 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`work/set_workspace`、`vdfs/write|delete` 归为
-  `danger`）：**预留**，现行只有只读白名单一层。
+- 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`vdfs/write|delete` 归为
+  `danger`）：**预留**，现行只有只读白名单一层。home 的臂不在任何分级里——它经入站
+  根本走不到（§4.1）。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
   依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[ADR-013](../010-adr/013.md)）；若要让网关

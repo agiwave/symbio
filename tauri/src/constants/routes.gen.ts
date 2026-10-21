@@ -39,7 +39,9 @@ export const ROUTE_GATEWAY_STATUS = 'gateway/status'
 // ==================== home ====================
 
 export const ROUTE_HOME_GET_HOMEDIR = 'home/get_homedir'
+export const ROUTE_HOME_GET_WORKSPACE = 'home/get_workspace'
 export const ROUTE_HOME_RELOAD = 'home/reload'
+export const ROUTE_HOME_SET_WORKSPACE = 'home/set_workspace'
 
 // ==================== hook ====================
 
@@ -63,8 +65,3 @@ export const ROUTE_TELEGRAM_SET_CHAT_ID = 'telegram/set_chat_id'
 export const ROUTE_TELEGRAM_START_LISTENER = 'telegram/start_listener'
 export const ROUTE_TELEGRAM_STATUS = 'telegram/status'
 export const ROUTE_TELEGRAM_STOP_LISTENER = 'telegram/stop_listener'
-
-// ==================== work ====================
-
-export const ROUTE_WORK_GET_WORKSPACE = 'work/get_workspace'
-export const ROUTE_WORK_SET_WORKSPACE = 'work/set_workspace'

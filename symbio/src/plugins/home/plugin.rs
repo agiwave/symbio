@@ -21,7 +21,7 @@
 //! 不存在集中合并这一层。
 
 use super::homedir::HomedirRegistry;
-use super::schemas::{home_reload, work_get_workspace};
+use super::schemas::{home_get_workspace, home_reload};
 use crate::symbio_core::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
@@ -80,7 +80,7 @@ impl HomeConfig {
 }
 
 pub struct HomePlugin {
-    /// 子插件实例容器 (如 "work" -> AgentPlugin)
+    /// 子插件实例容器（实例名 → 实例；home 出厂只挂 `"worker"` → Composite）
     pub instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,
     /// 自己的配置缓存（`<本插件目录>/PLUGIN.yml`）
     config: Arc<RwLock<HomeConfig>>,
@@ -500,7 +500,7 @@ impl Plugin for HomePlugin {
                 return Ok(PluginPayload::new(&info));
             }
             // 切换工作区（写入 home 自己的 work.workdir 与最近使用列表）。
-            "work/set_workspace" => {
+            "home/set_workspace" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct SetWorkspaceRequest {
                     path: String,
@@ -514,7 +514,7 @@ impl Plugin for HomePlugin {
                 return Ok(PluginPayload::new(&result));
             }
             // 读取当前工作区、展开后的路径与最近工作区列表。
-            "work/get_workspace" => {
+            "home/get_workspace" => {
                 // 统一从 Home 的配置缓存中读取工作区路径，这是最可靠的数据源
                 let cfg = self.config.read().await;
                 let work_cfg = &cfg.work;
@@ -533,7 +533,7 @@ impl Plugin for HomePlugin {
                     })
                     .unwrap_or_else(Vec::new);
 
-                return Ok(PluginPayload::new(&work_get_workspace::Response {
+                return Ok(PluginPayload::new(&home_get_workspace::Response {
                     workdir: wp.to_string(),
                     expanded_path: if wp.is_empty() {
                         "".to_string()

@@ -247,7 +247,7 @@ test('M-007 不误报：浏览器路由常量（值以 / 开头）不是 vdfs �
 
 /** 一棵带生成物的树：词表就是里面那两条地址 */
 const WITH_GEN = {
-  'constants/routes.gen.ts': `export const ROUTE_HOME_RELOAD = 'home/reload'\nexport const ROUTE_WORK_GET_WORKSPACE = 'work/get_workspace'\n`,
+  'constants/routes.gen.ts': `export const ROUTE_HOME_RELOAD = 'home/reload'\nexport const ROUTE_HOME_GET_WORKSPACE = 'home/get_workspace'\n`,
 }
 
 test('M-008 命中：service 里写死一条生成物已登记的路由（第二份真相）', () => {
