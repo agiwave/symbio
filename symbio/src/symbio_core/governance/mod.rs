@@ -19,7 +19,7 @@
 //!
 //! ## 与 `capability` 域的同名辨析
 //!
-//! 本域的 [`Capability`]（权限矩阵的键，7 个封顶）与 `capability` 域的
+//! 本域的 [`Capability`]（权限矩阵的键）与 `capability` 域的
 //! `Capability`（LLM 可见工具描述符）是**两个概念**：前者回答「有权做什么」，
 //! 后者回答「暴露什么工具」。计划文本同名（01 §7），代码里以**路径限定**消歧：
 //! 本枚举只经 `governance::Capability` 引用，**不进根平铺**——两个 `Capability`
@@ -42,7 +42,7 @@
 //! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
 //! 调用点不复述（口径只活在 core）。
 //!
-//! 表为什么与机制同住 core：它是**架构元素**——「谁持有什么能力」与本域的 7 项闭集
+//! 表为什么与机制同住 core：它是**架构元素**——「谁持有什么能力」与本域的能力闭集
 //! 是一张表的两半，分家的代价是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
 //! 表仍然**不进任何插件**（E-009：插件互不可见，任一插件持有它都会逼别的插件跨插件
 //! 引用），也**不进对外公开面**（`pub(crate)` 开给全 crate）——表里写的是部署事实，
@@ -53,101 +53,118 @@
 //! 只依赖类型定义 + ④ store 的**读面**（事件切片），只读写事件——不持有
 //! ①②③⑤ 的任何句柄。
 
-/// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**6 个封顶**）。
+/// **闭集单点**：一次声明同时生成本域枚举的**枚举体 + 两个方向的名转换**。
 ///
-/// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
-/// 新动作种类才走 ADR（03 §3）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Capability {
-    /// 判决意图（快速档分类）。
-    JudgeIntent,
-    /// 发言（一轮的收束格）。首响与追加在同一条通道上，**不按轮次位置分能力**：
-    /// 生产里每次收束都是「本轮尚无收束格」，追加臂从未被派发（T-178）。
-    Reply,
-    /// 定义工作（任务分解、派活）。
-    DefineWork,
-    /// 产生产物。
-    ProduceArtifact,
-    /// 断言验证（验证者 ≠ 产出者，由 grants 表保证）。
-    AssertVerification,
-    /// 指派工作。
-    AssignWork,
-}
-
-impl Capability {
-    /// 能力名（授权表的书写形态）→ 枚举。**认不出的名 = `None`**，由
-    /// [`PermissionMatrix::from_names`] 拒绝构造——不把拼写错误静默读成
-    /// 「没有这个能力」，那等于把授权表的笔误变成一条悄悄生效的拒绝。
-    fn from_name(name: &str) -> Option<Capability> {
-        Some(match name {
-            "judge.intent" => Capability::JudgeIntent,
-            "reply" => Capability::Reply,
-            "define.work" => Capability::DefineWork,
-            "produce.artifact" => Capability::ProduceArtifact,
-            "assert.verification" => Capability::AssertVerification,
-            "assign.work" => Capability::AssignWork,
-            _ => return None,
-        })
-    }
-
-    /// 能力名（授权表的**书写形态**）——[`Self::from_name`] 的逆向。
-    ///
-    /// 读进来与写出去共用同一份映射：两处各写一遍字符串，迟早漂移成「读作 A、
-    /// 写作 B」——而两边都是合法能力名，没有任何东西会为此变红。
-    pub(crate) fn name(&self) -> &'static str {
-        match self {
-            Capability::JudgeIntent => "judge.intent",
-            Capability::Reply => "reply",
-            Capability::DefineWork => "define.work",
-            Capability::ProduceArtifact => "produce.artifact",
-            Capability::AssertVerification => "assert.verification",
-            Capability::AssignWork => "assign.work",
+/// 为什么必须是一张表而不是三段手写：这套映射的每一处**单独看都是合法形态**——
+/// 漏改一处编译照过、测试照绿，唯一的后果是「读作 A、写作 B」，而权限的失效模式
+/// 正是静默（见模块头「为什么第零天就位」）。声明表因此是这里唯一的手写处：加一个
+/// 成员动一行，枚举体、`name()`、`parse_name()` 一起跟着变，`name()` 的 match 由
+/// 编译器保证穷尽——**没有第四处可漏**。
+///
+/// `$name_vis` 单独给：枚举本身可以 `pub`（`VisScope` 经根出口给载荷用），而它的
+/// **名面**开多大是另一件事（[`Capability::name`] 只开给 crate——表里是部署事实，
+/// 不是契约）。
+macro_rules! closed_set {
+    (
+        name $name_vis:vis,
+        $(#[$enum_meta:meta])*
+        $enum_vis:vis enum $name:ident {
+            $( $(#[$variant_meta:meta])* $variant:ident => $spelling:literal, )*
         }
+    ) => {
+        $(#[$enum_meta])*
+        $enum_vis enum $name {
+            $( $(#[$variant_meta])* $variant, )*
+        }
+
+        impl $name {
+            /// 书写形态 → 枚举。认不出 = `None`——**本函数不做缺省裁决**：缺省口径是
+            /// 各闭集自己的事（[`Capability`] 由 [`PermissionMatrix::from_names`] 拒绝构造，
+            /// [`VisScope::from_name`] 按 C10 落回最窄的一格），理由写在调用处才站得住。
+            pub(crate) fn parse_name(name: &str) -> Option<Self> {
+                match name {
+                    $( $spelling => Some(Self::$variant), )*
+                    _ => None,
+                }
+            }
+
+            /// 枚举 → 书写形态——[`Self::parse_name`] 的逆向，两侧共用同一张声明表。
+            ///
+            /// 读进来与写出去各写一遍字符串，迟早漂移成「读作 A、写作 B」——而两边
+            /// 都是合法取值，没有任何东西会为此变红。
+            $name_vis const fn name(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $spelling, )*
+                }
+            }
+        }
+    };
+}
+
+closed_set! {
+    name pub(crate),
+    /// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**6 个封顶**）。
+    ///
+    /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
+    /// 新动作种类才走 ADR（03 §3）。
+    ///
+    /// 名面判据：**认不出的能力名拒绝整体构造**（[`PermissionMatrix::from_names`]）——
+    /// 不把拼写错误静默读成「没有这个能力」，那等于把授权表的笔误变成一条悄悄生效的拒绝。
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Capability {
+        /// 判决意图（快速档分类）。
+        JudgeIntent => "judge.intent",
+        /// 发言（一轮的收束格）。首响与追加在同一条通道上，**不按轮次位置分能力**：
+        /// 生产里每次收束都是「本轮尚无收束格」，追加臂从未被派发（T-178）。
+        Reply => "reply",
+        /// 定义工作（任务分解、派活）。
+        DefineWork => "define.work",
+        /// 产生产物。
+        ProduceArtifact => "produce.artifact",
+        /// 断言验证（验证者 ≠ 产出者，由 grants 表保证）。
+        AssertVerification => "assert.verification",
+        /// 指派工作。
+        AssignWork => "assign.work",
     }
 }
 
-/// 可见域（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
-///
-/// **C10**（[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：默认
-/// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
-///
-/// ## 字符串形态：内容侧可见域的载荷书写（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")）
-///
-/// [`Self::name`] / [`Self::from_name`] 是**载荷里的书写形态**（`memory.encoded`
-/// 的 `vis_scope` 字段）：判定走枚举，落盘走字符串，两套形态共用同一份映射——
-/// 各写一遍字符串迟早漂移成「写的是 shared、读的是 public」，而两边都是合法值，
-/// 没有任何东西会为此变红。缺省（载荷缺这一字段）恒为 [`VisScope::ThreadPrivate`]：
-/// 存量事件没有这个字段，把缺席读成别的值等于给历史事实改判。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum VisScope {
-    /// 仅本线程可见（默认）。
-    #[default]
-    ThreadPrivate,
-    /// 对矩阵内主体可见。
-    Shared,
-    /// 完全公开。
-    Public,
+closed_set! {
+    name pub,
+    /// 可见域（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
+    ///
+    /// **C10**（[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：默认
+    /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
+    ///
+    /// ## 字符串形态：内容侧可见域的载荷书写（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")）
+    ///
+    /// [`Self::name`] / [`Self::from_name`] 是**载荷里的书写形态**（`memory.encoded`
+    /// 的 `vis_scope` 字段）：判定走枚举，落盘走字符串，两套形态共用同一份映射——
+    /// 各写一遍字符串迟早漂移成「写的是 shared、读的是 public」，而两边都是合法值，
+    /// 没有任何东西会为此变红。缺省（载荷缺这一字段）恒为 [`VisScope::ThreadPrivate`]：
+    /// 存量事件没有这个字段，把缺席读成别的值等于给历史事实改判。
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub enum VisScope {
+        /// 仅本线程可见（默认）。
+        #[default]
+        ThreadPrivate => "thread_private",
+        /// 对矩阵内主体可见。
+        Shared => "shared",
+        /// 完全公开。
+        Public => "public",
+    }
 }
 
 impl VisScope {
-    /// 书写形态（`from_name` 的逆向）——判据只在这里出现一次。
-    pub fn name(&self) -> &'static str {
-        match self {
-            VisScope::ThreadPrivate => "thread_private",
-            VisScope::Shared => "shared",
-            VisScope::Public => "public",
-        }
-    }
-
     /// 书写形态 → 枚举。认不出的值 = [`VisScope::ThreadPrivate`]（缺省口径，
     /// 与载荷缺这一字段同义）——**不**把拼写错误静默读成更宽的可见域，
     /// 那等于把笔误变成一次越权读取。
+    ///
+    /// 与 [`Capability`] 的名面判据**不同向**而非实现风格不同：授权表认不出即
+    /// **拒绝整体构造**（[`PermissionMatrix::from_names`]，笔误落进授权表 = 一条悄悄
+    /// 生效的拒绝），载荷认不出即落回**最窄的一格**（存量事件没有这一字段是既成
+    /// 事实，只能给缺省，不能改判历史）。
     pub fn from_name(name: &str) -> VisScope {
-        match name {
-            "shared" => VisScope::Shared,
-            "public" => VisScope::Public,
-            _ => VisScope::ThreadPrivate,
-        }
+        Self::parse_name(name).unwrap_or_default()
     }
 
     /// 两个可见域里**更宽**的那个（`thread_private` < `shared` < `public`）。
@@ -226,7 +243,7 @@ impl std::fmt::Display for PolicyError {
             PolicyError::UnknownCapability { principal, name } => {
                 write!(
                     f,
-                    "主体 `{principal}` 的能力名 `{name}` 认不出来（7 项闭集）"
+                    "主体 `{principal}` 的能力名 `{name}` 认不出来（不在能力闭集内）"
                 )
             }
             PolicyError::Pairing(v) => match v {
@@ -285,7 +302,7 @@ impl PermissionMatrix {
         Ok(PermissionMatrix { policies })
     }
 
-    /// 由**能力名**表构造（宿主装配面用：插件与宿主不持有 7 项能力枚举，
+    /// 由**能力名**表构造（宿主装配面用：插件与宿主不持有本域的能力枚举，
     /// 两个同名 `Capability` 的命名纪律见 [`Capability`] 与根出口注释）。
     ///
     /// 每行 = `(主体, 能力名切片, 可见域)`。闭集校验仍在这里做：认不出的名字
@@ -296,7 +313,7 @@ impl PermissionMatrix {
         for (principal, names, vis_scope) in rows {
             let mut grants = Vec::with_capacity(names.len());
             for &name in *names {
-                match Capability::from_name(name) {
+                match Capability::parse_name(name) {
                     Some(cap) => grants.push(cap),
                     None => {
                         return Err(PolicyError::UnknownCapability {
@@ -345,15 +362,15 @@ impl PermissionMatrix {
     }
 
     /// 写侧判定（**按能力名**）：`name` 是授权表的书写形态（[`Self::from_names`] 按
-    /// 7 项闭集校验），与构造面同一套字符串。
+    /// 能力闭集校验），与构造面同一套字符串。
     ///
     /// 为什么查询侧也要一个按名入口：[`Capability`] 刻意不进根平铺（见模块头
     /// 「同名辨析」），core 的模块门也不对外开 ⇒ **core 外拿不到那个枚举**，
     /// 只能写名字。名字的对错由构造期兜住，查询侧照单全收于是不会变成
-    /// 「拼写错误被读成拒绝」的第二处判定——`from_name` 认不出即 `None`
+    /// 「拼写错误被读成拒绝」的第二处判定——`parse_name` 认不出即 `None`
     /// ⇒ `false`，fail-closed 的方向与 [`Self::can_write`] 完全一致。
     pub fn can_write_name(&self, principal: &str, name: &str) -> bool {
-        Capability::from_name(name).is_some_and(|cap| self.can_write(principal, cap))
+        Capability::parse_name(name).is_some_and(|cap| self.can_write(principal, cap))
     }
 
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
@@ -499,7 +516,7 @@ impl GrantsOverlay {
     ///
     /// 判据分三段，前两段是闭集 fail-closed（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
     ///
-    /// - **查询名认不出**（不在 [`Capability`] 7 项闭集内）⇒ 告警并按**已收回**判——
+    /// - **查询名认不出**（不在 [`Capability`] 闭集内）⇒ 告警并按**已收回**判——
     ///   「现在准不准」无从查起时宁红不漏，笔误的查询名不得变成一次静默放行；
     /// - **该主体的流水里有认不出能力名的收回项** ⇒ 对该主体的**任何**能力查询都按
     ///   已收回判：一次笔误的收回不得静默落空。这不是「某一格被收回」而是「这次
@@ -512,17 +529,17 @@ impl GrantsOverlay {
     /// 与 [`PermissionMatrix`] 的表谓词合成才是「现在准不准」：表答「登记过什么」，
     /// 本判定答「其中什么现在被收回了」。
     pub fn is_revoked(&self, principal: &str, capability: &str) -> bool {
-        if Capability::from_name(capability).is_none() {
+        if Capability::parse_name(capability).is_none() {
             crate::plugin_warn!(
                 "governance",
-                "能力名 `{capability}` 不在 7 项闭集内（主体 {principal}），按已收回判"
+                "能力名 `{capability}` 不在能力闭集内（主体 {principal}），按已收回判"
             );
             return true;
         }
         if self.changes.iter().any(|c| {
             c.is_revoke()
                 && c.principal() == principal
-                && Capability::from_name(c.capability()).is_none()
+                && Capability::parse_name(c.capability()).is_none()
         }) {
             crate::plugin_warn!(
                 "governance",

@@ -235,7 +235,7 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // core 外消费方只有 `plugins/session` 一个，但它**不能**下沉——core 内 `authz` /
 // `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
 // （C-002）⇒ 必须留根出口。故按 C-003 的接缝口径登记进 `core-export-audit` 的 WAIVERS。
-// governance::Capability（权限能力，7 个封顶）与 capability::Capability（LLM 工具
+// governance::Capability（权限能力，闭集）与 capability::Capability（LLM 工具
 // 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
 // core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。

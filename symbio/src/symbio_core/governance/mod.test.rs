@@ -266,6 +266,46 @@ fn vis_scope_name_round_trips_and_unknown_falls_back_to_private() {
     }
 }
 
+/// 能力名 round-trip（T-207 ⑥）：拼写只活在 [`closed_set!`] 的声明表里，六项各自
+/// `name → parse_name` 逐字回来——两个方向共用一张表，「读作 A、写作 B」在这里
+/// 就断掉了。判据的另一半是闭集**外**的名字必须 `None`：它的两个下游方向都是拒
+/// （`from_names` 拒绝整体构造、[`GrantsOverlay::is_revoked`] 按已收回判），
+/// 认不出却静默放行才是事故。
+#[test]
+fn capability_names_round_trip_through_the_declaration_table() {
+    use Capability::{
+        AssertVerification, AssignWork, DefineWork, JudgeIntent, ProduceArtifact, Reply,
+    };
+    for cap in [
+        JudgeIntent,
+        Reply,
+        DefineWork,
+        ProduceArtifact,
+        AssertVerification,
+        AssignWork,
+    ] {
+        assert_eq!(
+            Capability::parse_name(cap.name()),
+            Some(cap),
+            "{} 必须逐字转回",
+            cap.name()
+        );
+    }
+    for bad in [
+        "Reply",
+        "assign_work",
+        "reply.append",
+        "produce.artifacts",
+        "",
+    ] {
+        assert_eq!(
+            Capability::parse_name(bad),
+            None,
+            "`{bad}` 不在闭集内，必须认不出而不是读成某个能力"
+        );
+    }
+}
+
 /// `widen` 是全序的「取宽」：满足交换律、幂等、单调——
 /// 读侧整列闸（T-094 ②）拿它合并一批内容的可见域，性质不成立就会
 /// 「同两份事实源因为顺序不同读出不同的闸答案」，而两种答案都合法。

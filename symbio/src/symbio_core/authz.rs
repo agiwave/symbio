@@ -6,7 +6,7 @@
 //!
 //! | 谁 | 拥有 | 不拥有 |
 //! |---|---|---|
-//! | 同处 core 的 `governance` | 能力闭集（7 个封顶）、成对性与两条判定的**机制** | 「谁」是部署事实 |
+//! | 同处 core 的 `governance` | 能力闭集（成员数由 PL-001 §7 封顶）、成对性与两条判定的**机制** | 「谁」是部署事实 |
 //! | 本模块 | 主体清单与各自的 grants / 可见域 | 判定语义（复用 `governance` 的函数） |
 //! | 各插件 | 自己那道闸上「现在该判谁」 | 表本身——插件互不可见（E-009），任一插件持有它都会逼别的插件跨插件引用 |
 //!
@@ -214,7 +214,9 @@ pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 ///
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
-pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
+/// 拼法本身住在 `governance` 的声明表里（[`Capability::name`]）——本常量不重复它，
+/// 只给那道闸一个**语义名**（T-207 ⑥）。
+pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();
 
 /// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
 /// （[roadmap/S13 §2](../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")
@@ -224,7 +226,7 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 /// 授权表行（`session/market` / `session/main`）、淘汰裁决的载荷（`verdict.asserted`
 /// 的 `capability` 字段）与闸门的撤销判据（`agent_run` 前问覆盖层）——三处各写
 /// 一遍字面量，迟早漂移成「裁决收回 A、闸门判 B」。
-pub(crate) const CAP_ASSIGN_WORK: &str = "assign.work";
+pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
 /// （[roadmap/S03 §3](../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")
@@ -234,7 +236,7 @@ pub(crate) const CAP_ASSIGN_WORK: &str = "assign.work";
 /// （`session/main` / `session/autonomous` / `session/planner`）、`AutonomousInitiator` 写
 /// `task.opened` 的那项能力、任务表写侧闸的放行判据、与 `assert.verification` 配对时
 /// C15 的构造期检查。四处各写一遍字面量，迟早漂移成「表授予 A、闸门判 B」。
-pub(crate) const CAP_DEFINE_WORK: &str = "define.work";
+pub(crate) const CAP_DEFINE_WORK: &str = Capability::DefineWork.name();
 
 /// **独立验证**能力名（`AssertVerification` 的书写形态）——任务表写侧闸的另一半放行
 /// 判据（[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批")）。
@@ -242,7 +244,7 @@ pub(crate) const CAP_DEFINE_WORK: &str = "define.work";
 /// 提成常量的理由同 [`CAP_DEFINE_WORK`]：它出现在授权表行（`session/arbiter` /
 /// `session/verifier`）、淘汰裁决的写侧闸（`EliminationDecider`，T-073）、任务表写侧闸
 /// 的放行判据与 C15 构造期检查共四处。
-pub(crate) const CAP_ASSERT_VERIFICATION: &str = "assert.verification";
+pub(crate) const CAP_ASSERT_VERIFICATION: &str = Capability::AssertVerification.name();
 
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
@@ -291,20 +293,24 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
         PRINCIPAL_MAIN,
         &[
-            "judge.intent",
-            "reply",
-            "define.work",
+            Capability::JudgeIntent.name(),
+            Capability::Reply.name(),
+            CAP_DEFINE_WORK,
             CAP_EXTERNAL_EXECUTION,
-            "assign.work",
+            CAP_ASSIGN_WORK,
         ],
         VisScope::ThreadPrivate,
     ),
     (
         PRINCIPAL_AUTONOMOUS,
-        &["define.work"],
+        &[CAP_DEFINE_WORK],
         VisScope::ThreadPrivate,
     ),
-    (PRINCIPAL_REFLEX, &["judge.intent"], VisScope::ThreadPrivate),
+    (
+        PRINCIPAL_REFLEX,
+        &[Capability::JudgeIntent.name()],
+        VisScope::ThreadPrivate,
+    ),
     (
         PRINCIPAL_PEER,
         &[CAP_EXTERNAL_EXECUTION],
@@ -314,15 +320,15 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     // 三行都是**单能力独持**——与自主 / 判定 / 对等三行同一条纪律：角色出现必须自带窄行，
     // 窄行是唯一入口（ADR-099）。arbiter 持 `assert.verification` 不碰 C15（不持
     // `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
-    (PRINCIPAL_MARKET, &["assign.work"], VisScope::Public),
+    (PRINCIPAL_MARKET, &[CAP_ASSIGN_WORK], VisScope::Public),
     (
         PRINCIPAL_ARBITER,
-        &["assert.verification"],
+        &[CAP_ASSERT_VERIFICATION],
         VisScope::Public,
     ),
     (
         PRINCIPAL_GATEKEEPER,
-        &["judge.intent"],
+        &[Capability::JudgeIntent.name()],
         VisScope::ThreadPrivate,
     ),
     // S02/S03 三角色行（T-107，行与执行路径同批）：工人产生产物（树侧委派收束）、
