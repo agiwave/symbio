@@ -180,6 +180,25 @@ impl VisScope {
             _ => ThreadPrivate,
         }
     }
+
+    /// 从**事件载荷**读出这条事实的可见域——读侧唯一的取值口（[`Self::VIS_SCOPE_KEY`] 的键）。
+    ///
+    /// 这一句今天在三个读数点各写一遍（召回预过滤、巩固继承源、`session/stats` 的整列闸），
+    /// 每一遍都自带「缺字段 / 认不出 ⇒ 最窄」这条缺省口径。写三遍的风险不是啰嗦，是
+    /// **漂移方向**：把任何一遍写成 `unwrap_or(Public)` 或漏掉 `as_str()`，那条读数就
+    /// 悄悄放宽，而两边都是合法值、没有东西会变红（与 [`Self::from_name`] 文档里那条同向判据）。
+    ///
+    /// 只认载荷，不改判据：产地在 `memory_events::encode`（T-094 ①）。
+    pub fn of_event(e: &crate::symbio_core::Event) -> VisScope {
+        e.payload
+            .get(Self::VIS_SCOPE_KEY)
+            .and_then(serde_json::Value::as_str)
+            .map(VisScope::from_name)
+            .unwrap_or_default()
+    }
+
+    /// 载荷里那一格的**键名**（写方与读方共用，见 [`Self::of_event`]）。
+    pub const VIS_SCOPE_KEY: &'static str = "vis_scope";
 }
 
 /// 一个主体的完整策略：写侧（能力集合）+ 读侧（可见域）——**缺一不可**。

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::{Budget, Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt};
+use crate::symbio_core::{Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。
 ///
@@ -72,7 +72,7 @@ fn session_cost_ms(snapshot: &[Event], principal: &str) -> u64 {
     // `range(0)` 里 ⇒ 不会**静默**少算压缩前的成本（闸门说「还有余量」而实际已耗尽，
     // ADR-044 的熔断随之形同虚设）。
     crate::symbio_core::cost_ledger()
-        .apply(snapshot, i64::MAX, Budget::generous())
+        .read_all(snapshot)
         .value
         .of(principal)
         .spent_ms

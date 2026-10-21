@@ -26,8 +26,7 @@ use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
-    conation, AutonomousInitiator, Budget, ConationCandidate, ConationPolicy, IntentGate, Seq,
-    Store,
+    conation, AutonomousInitiator, ConationCandidate, ConationPolicy, IntentGate, Seq, Store,
 };
 
 impl SessionPlugin {
@@ -294,8 +293,8 @@ impl SessionPlugin {
 ///
 /// 判定住 ③ [`conation`]（core），这里只**消费**——插件不再自己扫事实源拼一个布尔。
 // doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义
-/// as-of 取上界 `i64::MAX`：问的是「这条目标曾经声明过吗」，与 `session/stats`
-/// 的复算同口径。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
+/// as-of 取全量读数口径 `read_all`：问的是「这条目标曾经声明过吗」，与 `session/stats`
+/// 的复算同一写法。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
 /// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
 ///
 // doc-link-allow D-004: 「曾经声明过」是累计口径的表述，非版本变更史
@@ -304,7 +303,7 @@ impl SessionPlugin {
 /// 一条目标，静默的重复开工）。
 fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
     conation()
-        .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
+        .read_all(&store.range(Seq::new(0)))
         .value
         .is_declared(goal)
 }

@@ -70,6 +70,27 @@ impl<V: 'static> Projection<V> {
             value: (self.f)(window, now),
         }
     }
+
+    /// **全量读数**：`apply(events, i64::MAX, Budget::generous())` 的具名口径。
+    ///
+    /// 两个参数各是一条**口径**，不是一次选择：
+    /// - `now = i64::MAX`：WAL 是**落盘**事实源，文件里每一条都已发生，没有「未来的
+    ///   事件」可滤（as-of 口径见 `plugins/session/stats.rs` §as-of）；写小一寸不是
+    ///   「更保守」，是**少读一寸事实**，而且没有任何东西会为此变红；
+    /// - `Budget::generous()`：窗口 = 全量 ⇒ `degraded` 恒假（框架接管前全部生产调用方
+    ///   的现状，见本模块头）。
+    ///
+    /// 具名之前，这一对在**生产侧 26 个读数点**逐字写着（`stats` 一处的 16 列 +
+    /// 各插件的 10 处直调）：读侧闸要落在哪、as-of 口径归谁定，散在调用方各说一遍。
+    /// 具名之后，**加一道读侧闸或改一次口径只有一个地方改**
+    /// （[T-206](../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批") ⑧）。
+    ///
+    /// **有意的窄读数不许用它**：扫描配额（召回的 `RECALL_SCAN_QUOTA`）与当前窗口
+    /// （`turnstate` 只读本轮）各自是一条判据，那些调用方继续写 `apply`——
+    /// 名字要留给「全量」这一种，否则「窄」就从例外变成看不见的默认。
+    pub fn read_all(&self, events: &[Event]) -> View<V> {
+        self.apply(events, i64::MAX, Budget::generous())
+    }
 }
 
 pub mod autonomy;

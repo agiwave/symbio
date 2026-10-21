@@ -60,8 +60,8 @@
 use std::collections::BTreeMap;
 
 use crate::symbio_core::{
-    Budget, Entity, Event, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    Entity, Event, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TASK_REWORK_CREATED,
 };
 
 // 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 5 组）：
@@ -296,7 +296,7 @@ pub(crate) fn write(
 /// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
 pub(crate) fn prompt_section(snapshot: &[Event]) -> Option<String> {
     let ready = crate::symbio_core::readyset()
-        .apply(snapshot, i64::MAX, Budget::generous())
+        .read_all(snapshot)
         .value
         .ready;
     if ready.is_empty() {

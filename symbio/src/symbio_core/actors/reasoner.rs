@@ -37,8 +37,10 @@ use crate::symbio_core::Event;
 /// 所以运行器把这一轮的交换就地累积成 `exchange` 追加到基线上——**一条基线 +
 /// 就地累积**，而不是两条渲染路径。续写轮同理：恢复产生的交换也先落格再追加。
 pub fn render_messages(events: &[Event]) -> Vec<crate::symbio_core::PromptMessage> {
+    // `read_all` 说的是**口径**（as-of 一切已发生、不设扫描窗口），不是作用域：
+    // 进来的切片已由 `turn_runner/facts.rs` 过读侧闸并按轮开窗，那一层归它定。
     crate::symbio_core::transcript()
-        .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
+        .read_all(events)
         .value
         .to_messages()
 }

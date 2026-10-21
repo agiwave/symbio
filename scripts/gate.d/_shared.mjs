@@ -83,7 +83,12 @@ export const BASELINE = {
   // `resync_of_recognizes_the_markers_this_module_produces` / `resync_of_unwraps_the_bus_envelope` /
   // `a_real_change_is_not_a_resync_marker`（两条解包入口互斥且成对——消费方「先试变更再试指令」的顺序靠它成立），
   // `subagent.test.rs` 的 `turn_end_of` 三格（working / 正常收尾 / 带错误）。
-  rustTests: 1930,
+  // T-206 段二 新增 4 条（1930→1934，非放宽）：`projection/mod.test.rs` 的
+  // `read_all_is_the_named_form_of_the_full_reading_dialect` / `read_all_never_degrades_even_on_an_empty_slice`
+  //（具名口径 ≡ 那两个参数的旧写法，逐格相等）、`governance/mod.test.rs` 的
+  // `vis_scope_of_event_only_ever_widens_on_an_exact_spelling`（内容侧取值口只在精确拼写上变宽）、
+  // `authz.test.rs` 的 `the_read_gate_is_owner_or_membership_in_one_judgement`（属主 ∨ 矩阵，一条判据）。
+  rustTests: 1934,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。

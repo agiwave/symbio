@@ -1,7 +1,7 @@
 //! `authz` 单测 —— 钉死**本机授权表的形状**（04 §3.1 批⑥ 的生产接线）。
 //!
 //! 这里不复述 core 的判定语义（`governance/mod.test.rs` 钉成对性、闭集校验与
-//! 轮次→能力的映射），只钉四件只有这张表能回答的事：
+//! 轮次→能力的映射），只钉这些件只有这张表能回答的事：
 //!
 //! 1. `agent:main` 持 6 项、**不持验证**（C15 不自验），首响与追加发言都放行；
 //! 2. **自主发起者那一行比主智能体窄**（只持 `define.work`、不持 `reply.*`，
@@ -21,7 +21,9 @@
 //! 8. **绑定即登记**（[ADR-100]）：未部署的主体经绑定拿到来源行——能力随绑定来、
 //!    **可见域不登记**、静态行不被放大、淘汰面只认部署表、委派上限两侧都在册；
 //! 9. **委派取交集**（[T-195]）：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
-//!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行。
+//!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行；
+//! 10. **读侧闸一条判据**（[T-206] ⑧）：属主恒放行 ∨ 矩阵判定，两处消费方（stats
+//!     整列闸、召回逐条预过滤）共用同一个写法。
 
 use super::*;
 use crate::symbio_core::governance::Capability;
@@ -401,6 +403,39 @@ fn read_side_is_scoped_by_owner_and_membership() {
     assert!(matrix.can_see("session/main", "session/main", VisScope::ThreadPrivate));
     assert!(!matrix.can_see("user", "session/main", VisScope::ThreadPrivate));
     assert!(!matrix.can_see("session/ghost", "session/main", VisScope::Shared));
+}
+
+/// **读侧那一条判据只有一处写法**（[`content_visible`]，T-206 ⑧）：属主恒放行 ∨ 矩阵判定。
+///
+/// 钉的是「两支叠在一起」这个形状，而不是 `can_see` 的三档语义（那些在上面那条与
+/// `governance/mod.test.rs` 里）：
+/// - 属主读**自己共享出去**的内容必须放行——`user` 在能力表里没有行（人不入表，
+///   [ADR-069 §后果]），单问 `can_see` 它连自己的 `shared` 都读不到；
+/// - 矩阵内主体读他人 `shared` 放行、矩阵外必拒（fail-closed 不因叠了属主支而松开）；
+/// - `public` 人人可读；非属主读他人 `thread_private` 必拒（C10 缺省隔离）。
+///
+/// 反判据：删掉属主那半边 ⇒ 第二条断言红；把「矩阵外必拒」写成放行 ⇒ 第四条断言红。
+#[test]
+fn the_read_gate_is_owner_or_membership_in_one_judgement() {
+    // 属主：三档全放行（含自己的 thread_private 与共享出去的 shared/public）。
+    for scope in [VisScope::ThreadPrivate, VisScope::Shared, VisScope::Public] {
+        assert!(
+            content_visible(scope, SESSION_OWNER),
+            "属主读 {scope:?} 恒放行"
+        );
+    }
+    // 属主支不是多余的：`can_see` 单独判，`user`（无矩阵行）连自己的 shared 都读不到。
+    assert!(
+        !production_matrix().can_see(SESSION_OWNER, SESSION_OWNER, VisScope::Shared),
+        "矩阵单独判不放行属主——所以这条判据必须由两处共用（stats 整列闸 / 召回预过滤）"
+    );
+
+    // 矩阵内主体：读他人 shared 放行，读他人 thread_private 拒。
+    assert!(content_visible(VisScope::Shared, PRINCIPAL_MAIN));
+    assert!(!content_visible(VisScope::ThreadPrivate, PRINCIPAL_MAIN));
+    // 矩阵外主体：shared 必拒，public 才可见。
+    assert!(!content_visible(VisScope::Shared, "session/ghost"));
+    assert!(content_visible(VisScope::Public, "session/ghost"));
 }
 
 /// 降级面：空矩阵（表构造失败时的 fail-closed 兜底）一概拒绝。

@@ -33,7 +33,7 @@
 //! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
 //! 刚写下的那些。
 
-use crate::symbio_core::{Budget, Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED};
+use crate::symbio_core::{Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED};
 // 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
@@ -174,9 +174,7 @@ pub(crate) fn record_derived(
 pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, user_seq: u64) {
     // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
     let snapshot = store.range(Seq::new(0));
-    let view = crate::symbio_core::reputation()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
+    let view = crate::symbio_core::reputation().read_all(&snapshot).value;
     // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的
     // `EliminationDecider::verdict_grants_changes`，单点定义）。
     let overlay = crate::symbio_core::GrantsOverlay::fold(

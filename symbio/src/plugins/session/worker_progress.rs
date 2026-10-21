@@ -30,7 +30,7 @@ use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::PluginError;
 
 // core 的域模块私有（C-002：外部只写 symbio_core::<符号>）⇒ 视图类型经根导出拿
-use crate::symbio_core::{transcript, turnstate, Budget, Event, WorkerProgress};
+use crate::symbio_core::{transcript, turnstate, Event, WorkerProgress};
 
 use super::chat_session::PersistentChatSession;
 use super::types::{Session, SessionSummary};
@@ -165,9 +165,7 @@ pub fn progress_from_facts(
     fallback_title: &str,
 ) -> WorkerProgress {
     // 不标注类型：视图类型随返回值流动（core 的 projection 域模块私有，C-002）
-    let entries = transcript()
-        .apply(snapshot, i64::MAX, Budget::generous())
-        .value;
+    let entries = transcript().read_all(snapshot).value;
 
     // rounds：`user.message` 条数。`transcript` 投影把开轮折成的补充（
     // `turn.supplemented`）也渲染成 role=user——它**是用户说的话**，与
@@ -195,11 +193,7 @@ pub fn progress_from_facts(
     // 未收束轮会把 `in_flight` 从 false 翻成 true（`Store::range` 归一后的必动项，
     // 见 `store::current_window`）。上面 `transcript()` 那一头自己从快照起折，不受影响。
     let state = turnstate()
-        .apply(
-            super::store::current_window(snapshot),
-            i64::MAX,
-            Budget::generous(),
-        )
+        .read_all(super::store::current_window(snapshot))
         .value;
     let in_flight = state.opened && !state.settled();
 

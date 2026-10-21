@@ -209,6 +209,27 @@ pub(crate) const PRINCIPAL_VERIFIER: &str = "session/verifier";
 /// 已是上限，再声明「内容归谁」等于给自己授权。
 pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 
+/// **读侧闸那一条判据的唯一写法**：`viewer` 能不能看 `scope` 这一档内容。
+///
+/// 两支同属一次判定（不是两个判定点）：
+/// - **属主恒放行**（owner 相等，C10 的读侧口径）——`user` 在矩阵里没有行
+///   （能力表按「智能体的权威动作种类」划分），`shared` 的「矩阵内主体可见」若不叠
+///   这一条，属主本人会被**自己共享的内容**挡在门外：那是把「本人写、智能体读」
+///   读成「本人也不能读」；
+/// - 其余走 [`PermissionMatrix::can_see`]（矩阵内放行、矩阵外必拒，
+///   fail-closed——「没说允许」永远不等于允许）。
+///
+/// ## 为什么它必须是唯一的
+///
+/// 这条判据今天有**两个消费方**：`session/stats` 的整列闸（一份事实源一个答案）与
+/// 召回的逐条预过滤（`plugins/loop/memory_events.rs`，跨会话切片逐条判）。两边各自的
+/// 那一层**作用域**差别是有意保留的（整列闸要表达「未声明读方 = 全量」，召回要表达
+/// 「别处的 `thread_private` 连属主也不进召回」），但**放宽的那两支必须同一条**——
+/// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（T-094 ②、T-206 ⑧）。
+pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
+    viewer == SESSION_OWNER || production_matrix().can_see(viewer, SESSION_OWNER, scope)
+}
+
 /// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
 /// （[roadmap/S09 §6](../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断") 验收 1）。
 ///

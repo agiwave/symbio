@@ -30,17 +30,18 @@
 //!
 //! ## as-of 口径
 //!
-//! 读数取 `now = i64::MAX`：WAL 是**落盘**事实源，文件里每一条都已发生，没有
-//! 「未来的事件」可滤——与 `projection/slo.test.rs` 的扫描口同一口径。
+//! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
+//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与 `projection/slo.test.rs`
+//! 的扫描口同一口径。
 
 use std::sync::Arc;
 
 use serde::Serialize;
 
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, ReadingPanel, VisScope, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Event,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    ReadingPanel, VisScope, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
 };
 
 use super::plugin::SessionPlugin;
@@ -225,13 +226,9 @@ fn content_scope_of(snapshot: &[crate::symbio_core::Event]) -> VisScope {
         if e.entity != crate::symbio_core::Entity::Memory {
             continue;
         }
-        let scope = e
-            .payload
-            .get("vis_scope")
-            .and_then(|v| v.as_str())
-            .map(VisScope::from_name)
-            .unwrap_or_default();
-        widest = widest.widen(scope);
+        // 取值口径在 core（`VisScope::of_event`：缺字段 / 认不出 = 最窄，C10）；
+        // 本函数只负责「一批里取最宽」这一件合并判据（`widen` 也是 core 的）。
+        widest = widest.widen(VisScope::of_event(e));
     }
     widest
 }
@@ -264,31 +261,11 @@ fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     for snapshot in snapshots {
         // SLO 四列是**累计口径**（S2.7-b2）：被快照取代而移入归档段的前缀也在
         // `range(0)` 里，实例聚合不会**静默**少算。
-        lat_parts.push(
-            slo_report()
-                .apply(snapshot, i64::MAX, Budget::generous())
-                .value,
-        );
-        fb_parts.push(
-            fallback_rate()
-                .apply(snapshot, i64::MAX, Budget::generous())
-                .value,
-        );
-        con_parts.push(
-            crate::symbio_core::conation()
-                .apply(snapshot, i64::MAX, Budget::generous())
-                .value,
-        );
-        span_parts.push(
-            crate::symbio_core::span()
-                .apply(snapshot, i64::MAX, Budget::generous())
-                .value,
-        );
-        aut_parts.push(
-            crate::symbio_core::autonomy()
-                .apply(snapshot, i64::MAX, Budget::generous())
-                .value,
-        );
+        lat_parts.push(slo_report().read_all(snapshot).value);
+        fb_parts.push(fallback_rate().read_all(snapshot).value);
+        con_parts.push(crate::symbio_core::conation().read_all(snapshot).value);
+        span_parts.push(crate::symbio_core::span().read_all(snapshot).value);
+        aut_parts.push(crate::symbio_core::autonomy().read_all(snapshot).value);
     }
 
     let latency = crate::symbio_core::SloLatencyView::merge(&lat_parts);
@@ -535,44 +512,24 @@ pub(crate) fn read(
     // 逐字一致。判据不再是恒传缺省值：「人的认知可供他人借用」（SC-010 判据 3）
     // 由此有生产读方——矩阵内主体读得到他人共享内容，矩阵外主体照旧空切片。
     //
-    // **属主恒放行**（owner 相等，C10 的读侧口径）：`user` 在矩阵里没有行
-    // （能力表按「智能体的权威动作种类」划分，两张表里的人不靠成员身份），
-    // 于是 `shared` 的「矩阵内主体可见」若不叠这一条，属主本人会被自己的
-    // 共享内容挡在门外——那是把「本人写、智能体读」读成了「本人也不能读」。
-    // 两条是同一次判定的两个分支，不是两个判定点：私有内容属主与矩阵成员的
-    // 答案本来就由 `can_see` 的一个 match 给出。
+    // **属主恒放行 + 矩阵谓词**那一条判据住在 core（`authz::content_visible`，
+    // 与召回的逐条预过滤同一条，T-206 ⑧）；本处只加自己的那一层作用域：
+    // **未声明读方 = 全量**（CLI / 前端不署名的那条路径，沿用接线前口径）。
     let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
         None => true,
-        Some(principal) => {
-            principal == crate::symbio_core::authz::SESSION_OWNER
-                || crate::symbio_core::authz::production_matrix().can_see(
-                    principal,
-                    crate::symbio_core::authz::SESSION_OWNER,
-                    content_scope,
-                )
-        }
+        Some(principal) => crate::symbio_core::authz::content_visible(content_scope, principal),
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
     // 四列全部来自同一份事件切片（ADR-044：实测与判据同源）。
-    let latency = slo_report()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
-    let fallback = fallback_rate()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
-    let cost = cost_ledger()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
+    let latency = slo_report().read_all(&snapshot).value;
+    let fallback = fallback_rate().read_all(&snapshot).value;
+    let cost = cost_ledger().read_all(&snapshot).value;
     // 校准列（[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：与四列同一份
     // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
-    let cal = calibration()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
-    let ck = checkpoint()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
+    let cal = calibration().read_all(&snapshot).value;
+    let ck = checkpoint().read_all(&snapshot).value;
 
     // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的
     // 档位都要在表里出现——漏掉一档等于把「这一档没有数」报成「这一档不存在」。
@@ -614,9 +571,7 @@ pub(crate) fn read(
 
     // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
     // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
-    let rep = crate::symbio_core::reputation()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
+    let rep = crate::symbio_core::reputation().read_all(&snapshot).value;
     let reputation = if may_read {
         let own = rep.of(session_principal);
         serde_json::json!({ "own": own, "by_principal": rep.by_principal })
@@ -626,12 +581,8 @@ pub(crate) fn read(
 
     // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    let readyset = serde_json::to_value(
-        crate::symbio_core::readyset()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
+    let readyset = serde_json::to_value(crate::symbio_core::readyset().read_all(&snapshot).value)
+        .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
     // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
@@ -639,12 +590,8 @@ pub(crate) fn read(
     // [plan/10 批 3](../../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
     // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
-    let transcript = serde_json::to_value(
-        transcript()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
+    let transcript = serde_json::to_value(transcript().read_all(&snapshot).value)
+        .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
     // 主动性列（02 §3.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
     // `conation.expressed`（欲）与 `task.opened`（升格，溯源认）——「自发发起」的
@@ -653,9 +600,7 @@ pub(crate) fn read(
     //
     // 率与流同列给出：流是**事实**（不截断，见列定义），率是**读数**（纯查询，
     // 与 `tiers` 的 `rate()`、跨会话 `ConationSummary::adoption_rate` 同一套算式）。
-    let conation_view = crate::symbio_core::conation()
-        .apply(&snapshot, i64::MAX, Budget::generous())
-        .value;
+    let conation_view = crate::symbio_core::conation().read_all(&snapshot).value;
     let conation = serde_json::json!({
         "intents": conation_view.intents,
         "adoption_rate": conation_view.adoption_rate(),
@@ -663,21 +608,13 @@ pub(crate) fn read(
 
     // 时域跨度列（同上）：`span` 投影只读事件信封的 `ts`（入库时间，与 `cost_ms`
     // 同源的实测面），as-of 之后的事件一概不见。
-    let span = serde_json::to_value(
-        crate::symbio_core::span()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
+    let span = serde_json::to_value(crate::symbio_core::span().read_all(&snapshot).value)
+        .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
 
     // 自主程度列（同上）：`autonomy` 投影认 `task.held`（插话抢占 = 外部介入在事实源
     // 里唯一的痕迹）与 `task.asserted`（闭环）。率是纯查询，此处只落分子分母。
-    let autonomy = serde_json::to_value(
-        crate::symbio_core::autonomy()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value,
-    )
-    .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
+    let autonomy = serde_json::to_value(crate::symbio_core::autonomy().read_all(&snapshot).value)
+        .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
 
     // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（ axes 两族给有据的

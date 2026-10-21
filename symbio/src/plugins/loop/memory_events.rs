@@ -219,30 +219,18 @@ pub(crate) fn recall_view(
 ///
 /// 两支各有一个 owner：
 /// - 本会话的内容 ⇒ 恒可见（判断记忆的 `thread_private` 走到这一支为止）；
-/// - 别的会话的 `shared` / `public` ⇒ `stats` 读闸（T-094 ②）同一份判据：属主
-///   `SESSION_OWNER` 恒放行（否则「本人写、本人下一轮召回」会被挡），其余走
-///   `PermissionMatrix::can_see`（矩阵内主体放行，矩阵外必拒）。缺省
-///   （存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
+/// - 别的会话的 `shared` / `public` ⇒ 走 core 的读侧闸
+///   （`symbio_core::authz::content_visible`，与 `stats` 的整列闸**同一条判据**，
+///   T-206 ⑧——那条判据若在这里复写一遍，就会漂成「stats 给看、召回不给看」）。
+///   缺省（存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
 ///
-/// 可见域从**载荷**读（`from_name` 的口径：认不出 = 私有，不把笔误读宽）——
+/// 取值口径也在 core（`symbio_core::VisScope::of_event`：认不出 = 私有，不把笔误读宽）——
 /// 产地在 `encode`，判定只消费不重算。
 fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
-    let scope = e
-        .payload
-        .get("vis_scope")
-        .and_then(|v| v.as_str())
-        .map(crate::symbio_core::VisScope::from_name)
-        .unwrap_or_default();
-    match scope {
-        crate::symbio_core::VisScope::ThreadPrivate => own,
-        s => {
-            own || viewer == crate::symbio_core::authz::SESSION_OWNER
-                || crate::symbio_core::authz::production_matrix().can_see(
-                    viewer,
-                    crate::symbio_core::authz::SESSION_OWNER,
-                    s,
-                )
-        }
+    use crate::symbio_core::VisScope;
+    match VisScope::of_event(e) {
+        VisScope::ThreadPrivate => own,
+        s => own || crate::symbio_core::authz::content_visible(s, viewer),
     }
 }
 
@@ -349,13 +337,11 @@ pub(crate) fn encode(
     let encoded = truncate_chars(trimmed, ENCODE_MAX_CHARS);
 
     // 同文去重：判定方是 core 的 `contains_content`（比的是**已落盘的全部记忆**，
-    // as-of 取 i64::MAX——落盘的都已发生，不给时钟回拨留重复口子）。范围是本会话：
+    // 走 `read_all` 的全量读数口径——落盘的都已发生，不给时钟回拨留重复口子）。范围是本会话：
     // 跨会话的同一句话在两个会话各记一条是两次独立编码，由排版去重（见上）。
     // 跨标签同文也算重复：同一个事实不必按标签记两遍。
     // `query = None`：去重问「在不在」，不问「排多前」——无查询 = 平凡值（ts 序）。
-    let view = recall(PRINCIPAL_USER, None, None)
-        .apply(snapshot, i64::MAX, Budget::generous())
-        .value;
+    let view = recall(PRINCIPAL_USER, None, None).read_all(snapshot).value;
     if view.contains_content(&encoded) {
         return Ok(None);
     }
@@ -482,7 +468,7 @@ pub(crate) fn consolidate(
         // `query = None`：巩固要的是「最旧两条」——纯 ts 降序（平凡值），混合打分
         // 会把最旧的顶下去，巩固从此推不动代数。
         let view = recall(PRINCIPAL_USER, Some(tag.to_string()), None)
-            .apply(snapshot, i64::MAX, Budget::generous())
+            .read_all(snapshot)
             .value;
         if view.entries.len() < CONSOLIDATE_MIN_ENTRIES {
             continue;
@@ -511,9 +497,7 @@ pub(crate) fn consolidate(
             snapshot
                 .iter()
                 .find(|e| e.seq.map(|s| s.value()) == Some(seq))
-                .and_then(|e| e.payload.get("vis_scope"))
-                .and_then(|v| v.as_str())
-                .map(crate::symbio_core::VisScope::from_name)
+                .map(crate::symbio_core::VisScope::of_event)
                 .unwrap_or_default()
         };
         let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;

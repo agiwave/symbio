@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
-    calibration, Budget, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
+    calibration, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
     EVENT_MEMORY_ENCODED, SKILL_TAG,
 };
 
@@ -217,9 +217,7 @@ pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
         skill_by_seq.insert(seq, (id.to_string(), trigger.to_string()));
     }
 
-    let cal = calibration()
-        .apply(events, i64::MAX, Budget::generous())
-        .value;
+    let cal = calibration().read_all(events).value;
     let router = SkillRouter;
     let mut routing = SkillRouting::default();
     let mut drop_seqs = Vec::new();

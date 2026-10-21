@@ -453,3 +453,50 @@ fn a_typoed_revoke_revokes_the_whole_principal() {
     ]);
     assert!(overlay.is_revoked("session/main", "assign.work"));
 }
+
+/// 载荷读数的**唯一取值口**（T-206 ⑧）：三处复写的那一段现在只有一份。
+/// 测试侧**故意写字面量键**（不用 `VIS_SCOPE_KEY`）：它是线上键名，产侧改了名而这里
+/// 没跟着改，本用例必须红——与 `event_bus` 里「手搓信封」那两条判据同一条纪律。
+/// 它的缺省方向必须钉住——把「认不出」读宽 = 一次静默越权读取，而两边都是合法值，
+/// 没有任何东西会为此变红（[`VisScope::from_name`] 文档里的同向判据）。
+#[test]
+fn vis_scope_of_event_only_ever_widens_on_an_exact_spelling() {
+    use crate::symbio_core::event::{Entity, Event, Verb};
+    let base = || {
+        Event::pending(
+            "e1",
+            "memory.encoded",
+            Entity::Memory,
+            Verb::Closed,
+            0,
+            "user",
+        )
+    };
+
+    // 缺字段（存量事实）⇒ 最窄。
+    assert_eq!(VisScope::of_event(&base()), VisScope::ThreadPrivate);
+    // 逐字对上的书写形态 ⇒ 读回它自己（与 `name()` 共用声明表那一份拼法）。
+    for scope in [VisScope::Shared, VisScope::Public] {
+        let mut e = base();
+        e.payload = serde_json::json!({ "vis_scope": scope.name() });
+        assert_eq!(
+            VisScope::of_event(&e),
+            scope,
+            "写的是这一格、读的必须是同一格"
+        );
+    }
+    // 认不出（大小写错 / 造的词）⇒ 落回最窄，不读宽。
+    for typo in ["Shared", "sharred", "publick", ""] {
+        let mut e = base();
+        e.payload = serde_json::json!({ "vis_scope": typo });
+        assert_eq!(
+            VisScope::of_event(&e),
+            VisScope::ThreadPrivate,
+            "笔误「{typo}」不得被读成更宽的可见域"
+        );
+    }
+    // 非字符串取值同样落回最窄（`{ "vis_scope": 1 }` 这种载荷不该让读数变宽）。
+    let mut e = base();
+    e.payload = serde_json::json!({ "vis_scope": 1 });
+    assert_eq!(VisScope::of_event(&e), VisScope::ThreadPrivate);
+}

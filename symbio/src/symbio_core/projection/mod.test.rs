@@ -100,3 +100,48 @@ fn projection_runs_on_a_snapshot_without_any_store() {
     let v = p.apply(&snapshot, 0, Budget::generous());
     assert_eq!(v.value, 1);
 }
+
+// ── `read_all`：全量读数的**具名口径**（T-206 ⑧）──────────────────────
+
+/// 一个把 `now` 透出来的投影：用它判「as-of 那一格到底传了什么」。
+///
+/// 口径写错（`now` 小一寸）在别的投影上是**静默少读事实**，这里让它可断言。
+fn as_of_projection() -> Projection<i64> {
+    Projection::new(|_events, now| now)
+}
+
+#[test]
+fn read_all_is_the_named_form_of_the_full_reading_dialect() {
+    let mut events = Vec::new();
+    for i in 0..40 {
+        events.push(ev(&format!("u{i}"), "user.message", Verb::Opened, i as u64));
+    }
+    let p = seen_count_projection();
+    let named = p.read_all(&events);
+    let spelled = p.apply(&events, i64::MAX, Budget::generous());
+    assert_eq!(
+        named, spelled,
+        "`read_all` 必须是那两个参数的**唯一写法**，不是第三种语义"
+    );
+    assert_eq!(named.value, 40, "窗口 = 全量：一条不少");
+    assert!(
+        !named.degraded,
+        "全量读数不得标降级（降级只属于有意的窄读数）"
+    );
+
+    // as-of 那一格：一切已发生 ⇒ `now` 必须是 `i64::MAX`。
+    assert_eq!(
+        as_of_projection().read_all(&events).value,
+        i64::MAX,
+        "WAL 里每一条都已发生，没有未来的事件可滤"
+    );
+}
+
+#[test]
+fn read_all_never_degrades_even_on_an_empty_slice() {
+    // 空切片是「这里确实没有数」，不是「截断了」——两者读数不同，不得混。
+    let v = seen_count_projection().read_all(&[]);
+    assert!(!v.degraded);
+    assert_eq!(v.value, 0);
+    assert_eq!(v.used.ms, 0, "used = 窗口实际长度，全量读数下就是切片长度");
+}
