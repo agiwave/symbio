@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T71 入站边界：令牌不进 URL · `Idempotency-Key` · 连接上限（T-194）。
+// T81 入站边界：令牌不进 URL · `Idempotency-Key` · 连接上限（T-194）。
 //
 // ## 这三条为什么必须走真实边界
 //
@@ -54,7 +54,7 @@ function delay(ms) {
 }
 
 export default defineCase(
-  'T71 入站边界：WS 令牌走子协议、幂等键拒绝重放、连接上限背压',
+  'T81 入站边界：WS 令牌走子协议、幂等键拒绝重放、连接上限背压',
   async () => {
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
@@ -73,12 +73,12 @@ export default defineCase(
     const cli = startLongLivedCli({
       homedir: hd.homedir,
       workdir: hd.workdir,
-      session: 't71',
+      session: 't81',
       gatewayPort: GATEWAY_PORT,
       headers: AUTH,
     });
     try {
-      await cli.waitGatewayReady(20_000, 't71');
+      await cli.waitGatewayReady(20_000, 't81');
 
       // ── ① 旧通道已关闭：WS 升级只带 `?token=` ⇒ 401 ──
       const raw = net.connect(GATEWAY_PORT, '127.0.0.1');
@@ -134,17 +134,17 @@ export default defineCase(
       const keyed = (key, path = 'telegram/status') =>
         cli.invoke(path, {}, {}, { 'idempotency-key': key });
 
-      const first = await keyed('t71-once');
+      const first = await keyed('t81-once');
       assertEq(first.status, 200, `首次带键调用应 200（实得 ${first.status}）`);
-      const dup = await keyed('t71-once');
+      const dup = await keyed('t81-once');
       assertEq(dup.status, 409, `同键未过期时重复调用应 409（实得 ${dup.status}）`);
-      const other = await keyed('t71-other');
+      const other = await keyed('t81-other');
       assertEq(other.status, 200, `不同键互不影响（实得 ${other.status}）`);
 
       // 分派失败没有副作用 ⇒ 键被释放，同键重试应再次执行（400），而不是被判为重复（409）。
-      const fail1 = await keyed('t71-fail', 'no/such/route');
+      const fail1 = await keyed('t81-fail', 'no/such/route');
       assertEq(fail1.status, 400, `未知路由应 400（实得 ${fail1.status}）`);
-      const fail2 = await keyed('t71-fail', 'no/such/route');
+      const fail2 = await keyed('t81-fail', 'no/such/route');
       assertEq(fail2.status, 400, `失败后同键应可重试（实得 ${fail2.status}）`);
 
       const badKey = await keyed('x'.repeat(201));

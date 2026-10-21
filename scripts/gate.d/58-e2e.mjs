@@ -85,6 +85,32 @@ export default {
       },
     })
 
+    // 用例号是**地址**：`node e2e/run-tests.mjs tNN` 按号选，文档与提交信息也按号引。
+    // 撞号时两件事一起坏——选一个号跑出两条（读者以为在复现一条判据），而引用它的那句话
+    // 指向不明。实测事故：`t71-gateway-boundary`（T-194 新增）与既有的
+    // `t71-peer-commitment` 各自在文件头自述「T71」，谁也没撞坏任何东西，门禁一路全绿——
+    // 因为**没有一条判据数过这件事**。上面那条棘轮只判总数，「总数对得上而号重复」
+    // 恰好是它的盲区。
+    tasks.push({
+      label: 'e2e: 用例号唯一（一个号只指向一条）',
+      run: async () => {
+        const byNum = new Map()
+        for (const c of discoverCases()) {
+          const num = /^t(\d+)-/.exec(c.name)?.[1]
+          if (!num) return { ok: false, note: `用例 ${c.name} 的编号解析不出（文件名须形如 tNN-主题.mjs）` }
+          byNum.set(num, [...(byNum.get(num) ?? []), c.name])
+        }
+        const dups = [...byNum].filter(([, names]) => names.length > 1)
+        if (dups.length) {
+          const note = dups.map(([num, names]) => `t${num} ⇒ ${names.join(' / ')}`).join('；')
+          console.log(red(`      ↳ 用例号撞车：${note}`))
+          return { ok: false, note: `用例号撞车：${note}` }
+        }
+        console.log(dim(`      ↳ ${byNum.size} 个用例号互不重复`))
+        return { ok: true }
+      },
+    })
+
 
     // 并发度判据（离线脚本 `scripts/e2e-concurrency.mjs` 的门内版本）。
     //
