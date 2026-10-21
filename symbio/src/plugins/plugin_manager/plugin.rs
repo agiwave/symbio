@@ -60,7 +60,7 @@ use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
     VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE,
-    VDFS_STATUS_DISABLED,
+    VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -143,6 +143,9 @@ fn leaf(path: &str) -> VdfsResult<&str> {
 ///
 /// `access` 恒为 `rw`：条目的正文（那份配置）是可改的，与它是不是必需无关——「不可
 /// 删除」由动作的条件表达（见 [`management_actions`]），不靠把节点降成只读。
+///
+/// 状态三态：`active`（启用且已挂载）/ `disabled`（停用）/ `failed`（想装它，装配失败，
+/// 原因写在描述里）。前两种由装配位给出，第三种只在容器给了失败原因时出现。
 fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
     let mut definition = match config.as_ref() {
         Some(item) => item
@@ -175,12 +178,21 @@ fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
         .as_ref()
         .and_then(|c| c.node.description.clone())
         .or_else(|| entry.description.clone());
-    n.status = if entry.enabled {
-        VDFS_STATUS_ACTIVE
-    } else {
-        VDFS_STATUS_DISABLED
+    // 第三种状态：装配失败。判据的顺序就是它的语义——`enabled` 是磁盘上的**意愿**，
+    // 而失败原因是**这次装配的读数**：用户想装它、它没起来，那「装配失败」比
+    // 「已启用」更接近他站在列表前需要知道的事。（停用的插件没有原因，见
+    // `PluginEntry::mount_error`——它压根没被尝试过，那是「停用」不是「失败」。）
+    n.status = match &entry.mount_error {
+        Some(_) => VDFS_STATUS_FAILED,
+        None if entry.enabled => VDFS_STATUS_ACTIVE,
+        None => VDFS_STATUS_DISABLED,
     }
     .to_string();
+    if let Some(reason) = &entry.mount_error {
+        // 原因写进描述：列表行与详情头部都读这一条，不必为它新增一个投影键
+        // 再让前端多认一个字段——「为什么不见了」这条事实的落点就是节点的描述。
+        n.description = Some(format!("装配失败：{reason}"));
+    }
     n.schema = serde_json::to_value(&definition).ok();
     n
 }

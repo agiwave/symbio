@@ -82,6 +82,17 @@ pub struct PluginRegistry {
     /// 挂载序本身由装配扫描给出（见 `dir_names` 的 `names.sort()`），所以这张表
     /// 一旦保序，整条链就是确定的。
     instances: Arc<RwLock<IndexMap<String, Arc<dyn Plugin>>>>,
+    /// 装配失败的原因：目录名 → 一句话理由（**只在这次尝试失败时**存在）。
+    ///
+    /// 为什么要有它：构造失败原先只留一行日志，注册表里那条目的表现与「它被停用了」
+    /// 难以区分——用户看到的就是「插件不见了」，而看不见的东西没法修。有了这份原因，
+    /// [`PluginRegistry::entries`] 才填得出 [`PluginEntry::mount_error`]，插件管理页
+    /// 才画得出第三种状态。
+    ///
+    /// 为什么不落盘：这是**本进程的构造结果**，换一个构建（补上了那个工厂）就该失效；
+    /// 写进 `PLUGIN.yml` 等于把一次运行的观测伪装成用户的配置。
+    /// 构造成功、卸载、重新挂载都会清掉对应记录。
+    mount_errors: RwLock<IndexMap<String, String>>,
     /// 插件根（= 本容器的目录；系统级容器的目录就是系统根）
     root: PathBuf,
     /// 构造者声明的必需插件（目录必须存在；**不可删除**，但可停用）
@@ -105,6 +116,7 @@ impl PluginRegistry {
         let required = ctx.get(REQUIRED_PLUGINS).unwrap_or_default();
         Self {
             instances: Arc::new(RwLock::new(IndexMap::new())),
+            mount_errors: RwLock::new(IndexMap::new()),
             root,
             required,
             ctx,
@@ -125,6 +137,7 @@ impl PluginRegistry {
     ) -> Self {
         Self {
             instances,
+            mount_errors: RwLock::new(IndexMap::new()),
             root,
             required,
             ctx: Arc::new(PluginSimpleRequest::new(None, None)),
@@ -189,6 +202,9 @@ impl PluginRegistry {
     /// 扫描 `<插件根>/*/`：配置**合格**（有 `PLUGIN.yml` 且 `plugin_provider` 指向
     /// 一个已注册工厂）且**启用**（见 [`PLUGIN_KEY_ENABLED`](crate::symbio_core::PLUGIN_KEY_ENABLED)）的才构造。
     pub fn mount_all(&self) {
+        // **先清掉上一轮的失败**：装配是「按当前磁盘状态重来一遍」，一条没在本轮
+        // 重现的失败原因继续挂在条目上，用户看到的就是没发生过的账。
+        lock_write(&self.mount_errors).clear();
         for name in self.dir_names() {
             let dir = self.dir_of(&name);
             let provider = match Self::provider_of(&dir) {
@@ -210,11 +226,13 @@ impl PluginRegistry {
                 // 数据目录）。装配期没有任何东西可以修它，所以与「没有 manifest」同一级别
                 // 只记 debug——WARN 通道留给真异常，一条常态化的 WARN 会把这套分级磨平。
                 // 用户要看见它不必翻日志：[`PluginRegistry::entries`] **不要求**工厂注册，
-                // 这类目录照旧进表（未挂载、可停用可卸载），展示位在插件管理面。
+                // 这类目录照旧进表（未挂载、可停用可卸载），并把这一条原因写进
+                // [`PluginEntry::mount_error`]——展示位在插件管理页。
                 crate::plugin_debug!(
                     "composite",
                     "跳过插件目录（本构建没有 Provider {provider}）{name}——仍进注册表，可停用或卸载"
                 );
+                self.remember_failure(&name, &format!("本构建没有工厂 {provider}（未注册）"));
                 continue;
             }
             let dir = dir.with_provider(&provider);
@@ -222,7 +240,11 @@ impl PluginRegistry {
                 crate::plugin_debug!("composite", "跳过已停用的插件 {name} -> {provider}");
                 continue;
             }
-            self.mount_child(&name, &provider, dir);
+            // 停用不是失败，而这里是真的失败：未注册那一类上面已经拦下了，能走到这里的
+            // 只剩「产物不是插件」与「构造 panic」，两条都是用户需要知道的事 ⇒ WARN。
+            if let Err(e) = self.mount_child(&name, &provider, dir) {
+                crate::plugin_warn!("composite", "跳过构造失败的插件 {name} -> {provider}：{e}");
+            }
         }
     }
 
@@ -269,11 +291,64 @@ impl PluginRegistry {
         }
     }
 
-    /// 构造并挂载一个子插件，把它的目录告知它
+    /// 工厂为什么**装不出一个插件**（`None` = 装得出）。三类失败里的前两类在这一层判：
+    ///
+    /// - **未注册**：本构建没有这个 id——编译期就不存在，通常是旧构建留下的目录；
+    /// - **产物不是插件**：id 在工厂表里，但它申报的是别的 trait（同一张表还住着
+    ///   `dyn ModelProtocol` 与 `dyn EmbeddingService`，见 `symbio_core::creator` 的模块文档）。
+    ///
+    /// 第三类（构造里 panic）只能在调用点捕获，见 [`Self::mount_child`]。
+    ///
+    /// **为什么判据写在调用方而不是拆开 `creator_create_object` 的返回类型**：
+    /// 机制对「`T` 是什么」一无所知（ADR-036），为一个客户拆返回值就是把注册表
+    /// 变成插件专用表。`creator_has` 与 `creator_ids::<dyn Plugin>()` 已在公共面上，
+    /// 组合它们分得开这两类，core 一个字都不用变宽。
+    fn provider_gap(provider: &str) -> Option<String> {
+        if !creator_has(provider) {
+            return Some(format!("本构建没有工厂 {provider}（未注册）"));
+        }
+        if !creator_ids::<dyn Plugin>().contains(&provider) {
+            return Some(format!(
+                "工厂 {provider} 的产物不是插件（它注册的是别的类型族）"
+            ));
+        }
+        None
+    }
+
+    /// 记下一次装配失败的原因（[`Self::entries`] 把它投影到条目上）
+    fn remember_failure(&self, name: &str, reason: &str) {
+        lock_write(&self.mount_errors).insert(name.to_string(), reason.to_string());
+    }
+
+    /// 装配成功后清掉这个插件的失败记录
+    fn forget_failure(&self, name: &str) {
+        lock_write(&self.mount_errors).shift_remove(name);
+    }
+
+    /// panic 载荷 → 一句人能读的话（`String` / `&str` 之外的载荷如实说读不出）
+    fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+        if let Some(s) = payload.downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "（panic 载荷不是字符串）".to_string()
+        }
+    }
+
+    /// 构造并挂载一个子插件，把它的目录告知它。
+    ///
+    /// 返回的 `Err` 是**给用户看的那句话**：失败一律同时记进 `mount_errors`，于是
+    /// 注册表里那条目带得上原因；日志留给调用方按自己的语境决定级别与措辞——装配期
+    /// 是流水（未注册只算 debug），而运行期的启停要把原因**回给按下按钮的人**。
     ///
     /// 子上下文只带两样东西：父引用与**自身目录**。配置不经 ctx 传递——
     /// 插件从自己的目录里读。
-    fn mount_child(&self, name: &str, provider: &str, dir: PluginDir) {
+    fn mount_child(&self, name: &str, provider: &str, dir: PluginDir) -> Result<(), String> {
+        if let Some(gap) = Self::provider_gap(provider) {
+            self.remember_failure(name, &gap);
+            return Err(gap);
+        }
         let sub = PluginSimpleRequest::child_of(&self.ctx, self.parent.clone());
         sub.set(PLUGIN_DIR, dir.clone());
         let sub_context: Arc<dyn PluginInvokeRequest> = Arc::new(sub);
@@ -282,28 +357,45 @@ impl PluginRegistry {
         // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
         // `SYMBIO_LOG=debug` 即可看到全量。
         crate::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
-        match creator_create_object::<dyn Plugin>(provider, Arc::clone(&sub_context)) {
-            Some(plugin) => {
-                // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
-                // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
-                // 此后运行期只读 manifest，停用插件因此也有名字——这条投影是
-                // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
-                if let Err(e) = dir.seed_identity(&plugin.meta()) {
-                    crate::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
-                }
-                // **生命周期钩子**（ADR-033）：装配后、开始服务前一次。
-                // 同步——装配路径里没有 async 上下文（见该 ADR）。
-                // 失败**不摘掉**插件：与 `provider_of` 同一口径——配了一半也要看得见，
-                // 摘掉它用户只看到「插件不见了」，留着则每次调用给出明确错误。
-                if let Err(e) = plugin.start(sub_context) {
-                    crate::plugin_error!("composite", "子插件启动失败 {}：{}", name, e);
-                }
-                lock_write(&self.instances).insert(name.to_string(), plugin);
+        // 构造函数是编进这个二进制的代码，它 panic 时容器不该跟着倒——一次 panic
+        // 换成这个插件的一句失败原因，与 `Err` 同一呈现、同一去处。
+        // （本工作区没有 `panic = "abort"`， unwind 策略下 `catch_unwind` 才接得住。）
+        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            creator_create_object::<dyn Plugin>(provider, Arc::clone(&sub_context))
+        }));
+        let plugin = match built {
+            Ok(Some(plugin)) => plugin,
+            Ok(None) => {
+                let reason = format!("工厂 {provider} 没有交出实例");
+                self.remember_failure(name, &reason);
+                return Err(reason);
             }
-            None => {
-                crate::plugin_warn!("composite", "子插件 Provider 构造失败 {name} -> {provider}")
+            Err(payload) => {
+                let reason = format!(
+                    "工厂 {provider} 构造时 panic：{}",
+                    Self::panic_text(&*payload)
+                );
+                self.remember_failure(name, &reason);
+                return Err(reason);
             }
+        };
+        // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
+        // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
+        // 此后运行期只读 manifest，停用插件因此也有名字——这条投影是
+        // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
+        if let Err(e) = dir.seed_identity(&plugin.meta()) {
+            crate::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
         }
+        // **生命周期钩子**（ADR-033）：装配后、开始服务前一次。
+        // 同步——装配路径里没有 async 上下文（见该 ADR）。
+        // 失败**不摘掉**插件：与 `provider_of` 同一口径——配了一半也要看得见，
+        // 摘掉它用户只看到「插件不见了」，留着则每次调用给出明确错误。
+        if let Err(e) = plugin.start(sub_context) {
+            crate::plugin_error!("composite", "子插件启动失败 {}：{}", name, e);
+        }
+        lock_write(&self.instances).insert(name.to_string(), plugin);
+        self.forget_failure(name);
+        Ok(())
     }
 
     // ==================== 注册表（运行期观测） ====================
@@ -312,6 +404,9 @@ impl PluginRegistry {
     ///
     /// 「合格」= 有 `PLUGIN.yml` 且声明了非空 `plugin_provider`——**不要求**该工厂
     /// 已注册：配错工厂名的目录也要出现在表里，否则用户既看不到它、也删不掉它。
+    ///
+    /// 「构造失败」额外带上**为什么**失败（[`PluginEntry::mount_error`]），来源就是
+    /// `mount_errors`——未挂载 + 有原因 = 装配失败，未挂载 + 没原因 = 停用了没尝试过。
     ///
     /// 每次现取（不缓存）：目录可能在应用之外被增删，缓存就多一份会漂的真相。
     pub fn entries(&self) -> Vec<PluginEntry> {
@@ -333,6 +428,7 @@ impl PluginRegistry {
                 .get(&name)
                 .map(|p| p.meta().order)
                 .unwrap_or_else(|| PluginMeta::default().order);
+            let mounted_now = mounted.contains_key(&name);
             out.push(PluginEntry {
                 title: identity.title,
                 description: identity.description,
@@ -340,7 +436,15 @@ impl PluginRegistry {
                 order,
                 required: self.is_required(&name),
                 enabled: dir.enabled(),
-                mounted: mounted.contains_key(&name),
+                mounted: mounted_now,
+                // 一条原因只在「用户想装它（enabled）、它却没在跑」时才是**失败**；
+                // 停用的插件压根没被尝试过，它的状态是「停用」。
+                // 这一层判定只写在这里（呈现口径一处），`mount_errors` 记的是构造事实。
+                mount_error: if mounted_now || !dir.enabled() {
+                    None
+                } else {
+                    lock_read(&self.mount_errors).get(&name).cloned()
+                },
                 name: name.clone(),
                 provider,
             });
@@ -389,19 +493,17 @@ impl PluginRegistry {
 
         if enabled {
             if !lock_read(&self.instances).contains_key(name) {
-                if !creator_has(&provider) {
-                    return Err(format!("未注册的插件工厂：{provider}"));
-                }
-                self.mount_child(name, &provider, dir);
-                if !lock_read(&self.instances).contains_key(name) {
-                    return Err(format!("插件「{name}」构造失败，请查看日志"));
-                }
+                // 原因**回给调用方**，不复述日志：按下「启用」的人要看到为什么没成，
+                // 而不是「请查看日志」。三类失败在 `mount_child` 里分好类。
+                self.mount_child(name, &provider, dir)?;
             }
         } else {
             // 先摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
             // `shift_remove` = **保序摘除**（`remove` 已被 indexmap 标废弃：它打乱顺序）：
             // 停用一个插件不得重排其余挂载顺序（见 `instances` 字段文档）。
             let plugin = lock_write(&self.instances).shift_remove(name);
+            // 停用之后它是「停用」，不是「装配失败」——上一轮的原因跟着清掉。
+            self.forget_failure(name);
             if let Some(p) = plugin {
                 // ADR-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
                 // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
@@ -431,8 +533,9 @@ impl PluginRegistry {
         if SYSTEM_LEVEL_PROVIDERS.contains(&provider) {
             return Err(format!("「{provider}」是系统级插件，不可作为子插件装配"));
         }
-        if !creator_has(provider) {
-            return Err(format!("未注册的插件工厂：{provider}"));
+        if let Some(gap) = Self::provider_gap(provider) {
+            // 在**建目录之前**判：装不出来的工厂不该留下一个启用着却没有实例的目录。
+            return Err(gap);
         }
         if lock_read(&self.instances).contains_key(provider) {
             return Err(format!("插件「{provider}」已在装配中"));
@@ -441,10 +544,7 @@ impl PluginRegistry {
         dir.ensure_manifest()
             .map_err(|e| format!("创建插件目录失败：{e}"))?;
         dir.set_enabled(true)?;
-        self.mount_child(provider, provider, dir.with_provider(provider));
-        if !lock_read(&self.instances).contains_key(provider) {
-            return Err(format!("插件「{provider}」构造失败，请查看日志"));
-        }
+        self.mount_child(provider, provider, dir.with_provider(provider))?;
         Ok(provider.to_string())
     }
 
@@ -469,6 +569,8 @@ impl PluginRegistry {
         // `shift_remove` = **保序摘除**：卸载一个插件不得把其余挂载顺序重排——那条顺序
         // 就是能力收集的广播序（见 `instances` 字段文档）。
         let plugin = lock_write(&self.instances).shift_remove(name);
+        // 目录都要没了，它的失败记录没有理由活过这一次卸载
+        self.forget_failure(name);
         if let Some(p) = plugin {
             if let Err(e) = p.stop(PluginStopReason::Uninstalled).await {
                 crate::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");

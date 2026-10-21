@@ -615,6 +615,14 @@ pub struct PluginEntry {
     pub enabled: bool,
     /// 是否已挂载（= `enabled` 且构造成功）
     pub mounted: bool,
+    /// 装配失败的**原因**（`None` = 没失败过）。
+    ///
+    /// 只在「启用 + 尝试构造 + 没挂上」时非空——停用不是失败，它压根没被尝试。
+    /// 有了它，「插件不见了」才说得出是**为什么**不见了：未注册 / 产物不是插件 /
+    /// 构造时 panic，三类的措辞由容器给出（它才看得见工厂表），本字段只承载结果。
+    /// 消费方据此把条目呈现成第三种状态，而不是让用户去翻日志。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mount_error: Option<String>,
 }
 
 /// 与 [`crate::symbio_core::PluginMeta`] 的缺省 `order` **同一口径**（未构造的插件没有 meta）

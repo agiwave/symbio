@@ -125,6 +125,16 @@ fn entry(name: &str, provider: &str, required: bool, enabled: bool) -> PluginEnt
         required,
         enabled,
         mounted: enabled,
+        mount_error: None,
+    }
+}
+
+/// 一条**装配失败**的条目：启用着、没挂上、容器给了原因
+fn failed_entry(name: &str, reason: &str) -> PluginEntry {
+    PluginEntry {
+        mount_error: Some(reason.to_string()),
+        mounted: false,
+        ..entry(name, "gone_factory", false, true)
     }
 }
 
@@ -239,12 +249,13 @@ async fn list_puts_plugin_entries_before_own_sections() {
     assert_eq!(items[3].node.ext.as_deref(), Some("about"));
 }
 
-/// 装配态即节点状态：启用 / 停用各画各的
+/// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
 #[tokio::test]
 async fn entry_status_follows_assembly_state() {
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
+        failed_entry("gamma", "本构建没有工厂 gone_factory（未注册）"),
     ]));
     let p = plugin_with(fake);
 
@@ -253,6 +264,20 @@ async fn entry_status_follows_assembly_state() {
         stat(&p, &vctx(), "beta").await.status,
         VDFS_STATUS_DISABLED,
         "停用的插件在清单里仍在，但状态是停用"
+    );
+    let gamma = stat(&p, &vctx(), "gamma").await;
+    assert_eq!(
+        gamma.status, VDFS_STATUS_FAILED,
+        "启用着却没挂上、且容器给了原因 ⇒ 第三种状态，不再和「已启用」混成一个点"
+    );
+    assert!(
+        gamma
+            .description
+            .as_deref()
+            .unwrap_or_default()
+            .contains("未注册"),
+        "失败原因要跟着条目走（描述位），否则用户只知道它不对、不知道为什么不装配：{}",
+        gamma.description.unwrap_or_default()
     );
 }
 

@@ -118,6 +118,118 @@ async fn identity_is_empty_for_never_seeded_dirs() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+// ==================== 装配失败的三类归因 ====================
+//
+// 「插件不见了」原本是**一种**现象、**三种**成因，而日志之外谁也分不出来：
+// 工厂没编进这个构建 / 工厂编进来了但它不是插件 / 工厂是插件而它构造时 panic。
+// 这三条各有一处判据（前两处读工厂表，第三处在调用点接 panic），
+// 各自都要在条目上留下自己的那句话——`mount_error` 就是那三个落点。
+
+/// 未注册：`PLUGIN.yml` 指向一个本构建没有的工厂（旧构建留下的目录是最常见的来路）
+#[tokio::test]
+async fn unregistered_provider_leaves_a_reason_on_the_entry() {
+    let root = temp_root("fail-unregistered");
+    put_plugin(
+        &root,
+        "alpha",
+        r#"{"plugin_provider": "no_such_factory_in_this_build"}"#,
+    );
+
+    let reg = registry_at(&root, Vec::new());
+    reg.mount_all();
+
+    let entries = reg.entries();
+    let entry = &entries[0];
+    assert!(!entry.mounted, "没挂上");
+    let reason = entry.mount_error.clone().unwrap_or_default();
+    assert!(
+        reason.contains("未注册"),
+        "原因要说是未注册，而不是「请查看日志」：{reason}"
+    );
+
+    // 停用之后再读：它是「停用」，不是「失败」——压根没被尝试过的东西没有失败原因
+    reg.set_enabled("alpha", false).await.unwrap();
+    let entries = reg.entries();
+    let entry = &entries[0];
+    assert!(!entry.enabled);
+    assert_eq!(entry.mount_error, None, "停用位的条目不投影失败原因");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 产物不是插件：id 在工厂表里，但它申报的是别的类型族（同一张表也住模型协议）
+#[tokio::test]
+async fn a_non_plugin_factory_is_told_apart_from_an_unregistered_one() {
+    let root = temp_root("fail-wrong-kind");
+    // `openai_chat` 是**真**工厂 id，但它注册的是 `dyn ModelProtocol`（见
+    // `plugins/model/protocols/mod.rs`）——正好是「工厂在、产物不是插件」那一条。
+    put_plugin(&root, "alpha", r#"{"plugin_provider": "openai_chat"}"#);
+
+    let reg = registry_at(&root, Vec::new());
+    reg.mount_all();
+
+    let entries = reg.entries();
+    let entry = &entries[0];
+    let reason = entry.mount_error.clone().unwrap_or_default();
+    assert!(
+        reason.contains("不是插件"),
+        "「工厂存在但装不出插件」要说成另一类，不能混进未注册：{reason}"
+    );
+    assert!(
+        !reason.contains("未注册"),
+        "两类归因不能共用一条措辞：{reason}"
+    );
+
+    // 运行期按下「启用」同一条款要回给用户（而不是让他去翻日志）
+    let err = reg.set_enabled("alpha", true).await.unwrap_err();
+    assert!(err.contains("不是插件"), "启用的报错复用同一条归因：{err}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 构造 panic：接住它，换一个插件的一句失败原因——容器不跟着倒
+#[tokio::test]
+async fn a_panicking_factory_is_caught_and_attributed() {
+    let root = temp_root("fail-panic");
+    put_plugin(
+        &root,
+        "alpha",
+        r#"{"plugin_provider": "registry-test-panic-factory"}"#,
+    );
+
+    let reg = registry_at(&root, Vec::new());
+    reg.mount_all();
+
+    let entries = reg.entries();
+    let entry = &entries[0];
+    assert!(!entry.mounted, "panic 的插件不该进实例表");
+    let reason = entry.mount_error.clone().unwrap_or_default();
+    assert!(reason.contains("构造时 panic"), "第三类归因：{reason}");
+    assert!(
+        reason.contains("故意 panic"),
+        "panic 的原文要带出来，否则等于没说：{reason}"
+    );
+
+    // 同一个注册表里其余目录照常装配：一家 panic 不是整棵树的理由
+    put_plugin(
+        &root,
+        "beta",
+        r#"{"plugin_provider": "no_such_factory_in_this_build"}"#,
+    );
+    reg.mount_all();
+    let names: Vec<String> = reg.entries().into_iter().map(|e| e.name).collect();
+    assert!(names.iter().any(|n| n == "beta"), "失败一家不拦其余目录");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 故意 panic 的工厂：只为第三条归因而存在（`inventory` 只在测试构建里收集它）
+fn build_panics(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+    panic!("测试工厂故意 panic")
+}
+
+crate::submit_object_creator!("registry-test-panic-factory", build_panics, dyn Plugin);
+
 // ==================== 装配期：出厂身份落位（ADR-032） ====================
 
 /// 装配期**真的**把出厂身份投影进 manifest

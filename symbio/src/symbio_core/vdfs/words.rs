@@ -11,6 +11,10 @@ pub const VDFS_STATUS_DISABLED: &str = "disabled";
 /// 「会话上次失败了」= `status == failed`，而不是「状态 + `last_failed` 布尔」——
 /// 后者要求读状态的人同时读两个字段，漏读一处就静默错。
 ///
+/// 承载者不止会话：插件条目用同一个词表达「用户想装它，这一轮装配没装成」
+/// （见 `plugins::plugin_manager` 的 `entry_node`）——「这次没跑起来」是一件事，
+/// 不该因为节点是会话还是插件而换第二个词。
+///
 /// 词面与消息层的 `NodeStatus::Failed` 一致：同一个概念在两类节点上不换词。
 pub const VDFS_STATUS_FAILED: &str = "failed";
 pub const VDFS_STATUS_UNKNOWN: &str = "unknown";

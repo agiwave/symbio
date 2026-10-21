@@ -47,11 +47,16 @@ export interface CardTag {
  * 后端取值是开放枚举（后续可加），故未知一律回落 `muted`（画一个灰点），
  * 而不是不画点——「有状态但认不出」与「没有状态」是两件事：
  * 后者由 `showStatus`（节点 `status` 为空串）单独表达。
+ *
+ * `failed` 与 `error` **同一个颜色**是刻意的：点只表达「出问题了」这一档，
+ * 而「哪一种问题」（会话的一轮以错误结束 / 插件装配失败）由文案与节点描述承担——
+ * 把它们挤进颜色里，就等于把两种互不相干的判据绑在一个只有六档的视觉通道上。
  */
 const STATUS_OF: Record<string, CardStatus> = {
   working: 'working',
   active: 'active',
   disabled: 'disabled',
+  failed: 'error',
   error: 'error',
   warning: 'warning',
 }
@@ -66,6 +71,7 @@ const STATUS_TEXT: Record<string, string> = {
   working: '进行中',
   active: '就绪',
   disabled: '已停用',
+  failed: '失败',
   error: '出错',
   warning: '需注意',
 }

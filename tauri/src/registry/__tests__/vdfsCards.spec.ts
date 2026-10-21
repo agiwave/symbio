@@ -46,6 +46,8 @@ describe('cardStatusOf', () => {
     expect(cardStatusOf(node({ status: 'working' }))).toBe('working')
     expect(cardStatusOf(node({ status: 'active' }))).toBe('active')
     expect(cardStatusOf(node({ status: 'disabled' }))).toBe('disabled')
+    // 装配失败 / 一轮以错误结束：红点，与 `error` 同色（颜色只表达「出问题了」）
+    expect(cardStatusOf(node({ status: 'failed' }))).toBe('error')
     expect(cardStatusOf(node({ status: 'error' }))).toBe('error')
     expect(cardStatusOf(node({ status: 'warning' }))).toBe('warning')
   })
@@ -61,6 +63,7 @@ describe('cardStatusTextOf', () => {
     expect(cardStatusTextOf(node({ status: 'working' }))).toBe('进行中')
     expect(cardStatusTextOf(node({ status: 'active' }))).toBe('就绪')
     expect(cardStatusTextOf(node({ status: 'disabled' }))).toBe('已停用')
+    expect(cardStatusTextOf(node({ status: 'failed' }))).toBe('失败')
     expect(cardStatusTextOf(node({ status: 'error' }))).toBe('出错')
   })
 
