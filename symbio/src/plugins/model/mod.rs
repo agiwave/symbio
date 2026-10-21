@@ -4,7 +4,7 @@
 //! - `types`:           Unified type definitions (ModelProviderConfig, NativeMessage, etc.)
 //! - `detail`:          Model 详情页定义（definition-driven detail）
 //! - `handlers`:        Non-streaming handlers (status, list_models, config)
-//! - `message_builder`: NativeMessage 构造与会话持久化（写 session 走存储锚点）
+//! - `message_builder`: ChatNode → `NativeMessage` 的请求视图构造（只读已有节点，不落库）
 //! - `protocols`:       插件私有协议契约 `ModelProtocol`（钩子收 `&ModelProviderConfig`）
 //!   + 协议事件方言 `ModelProtocolEvent` + 行解析契约 `SseLineParser`（`protocols/sse`）
 //!   + 四协议适配（SSE → 标准化事件流，`ping` 健康检查）

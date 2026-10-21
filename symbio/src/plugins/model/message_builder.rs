@@ -1,8 +1,10 @@
-//! 消息构造与会话持久化
+//! ChatNode → `NativeMessage` 的请求视图构造
 //!
 //! 负责：
-//! - 构造 ChatNode（assistant 消息、tool result 消息）
-//! - 将对话轮次产生的新消息保存到 session
+//! - 把会话树拍平成协议侧的消息序列（`flatten_chat_messages`）
+//! - 剔除标记（`meta.exclude_from_context`）与工具结果配对的读侧口径
+//!
+//! 本文件**不落库**：轮次产生的新消息由会话侧写入点落格，这里只读已有节点。
 
 use std::collections::{HashMap, HashSet};
 
@@ -34,7 +36,7 @@ const RETAINED_RECENT_REASONING: usize = 2;
 ///
 /// ## 与对话线投影的分工（看着矛盾，其实各管一条线）
 ///
-/// 本标记管**工作线**（发给模型的包）；`session/context/conversation_view.rs`
+/// 本标记管**工作线**（发给模型的包）；`plugins/loop/context/conversation_view.rs`
 /// 管**对话线**（判决 / 措辞 / 对话面板），它**不看**这个键。详见那个文件的模块文档。
 pub const META_EXCLUDE_FROM_CONTEXT: &str = "exclude_from_context";
 
