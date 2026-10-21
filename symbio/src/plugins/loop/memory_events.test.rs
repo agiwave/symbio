@@ -221,6 +221,62 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 }
 
+/// **去重读的是全史，不是近 N 条窗口**（T-211 项二，以判据结案）。
+///
+/// 立批时给的方案是「有界扫描 + 去重窗口参数」，实测把它否了：同一轮里真正贵的是
+/// 把事实切片交回值那一步（release、2 万格：`range(0)` ≈9.8 ms，而在交回的切片上跑
+/// 一遍全量去重投影 ≈0.14 ms）——砍窗口省掉的是这条链上最便宜的一节，代价是去重从此
+/// **看不见窗口外的记忆**：一句很久以前的话会被再记一条，重复的那条还继续挤占召回预算。
+/// 所以口径保持全量，并把「全量」从 `read_all` 的副产物升级成有人钉的判据。
+#[test]
+fn dedupe_covers_the_whole_history_not_the_recall_window() {
+    let store = EventStore::new();
+    let oldest = "很久以前说过的一句";
+    seed_encoded(&store, "old", oldest, 1000);
+    for i in 0..RECALL_SCAN_QUOTA {
+        seed_encoded(
+            &store,
+            &format!("m-{i}"),
+            &format!("中间的第 {i} 句"),
+            2000 + i as i64,
+        );
+    }
+    let snap = store.range(Seq::new(0));
+
+    // 最旧那条在「召回扫描配额」之外，去重照样拦得住。
+    assert_eq!(
+        encode(
+            &store,
+            &snap,
+            9,
+            41,
+            9_000,
+            EncodeContent::new(oldest, MEMORY_TAG, "v2m-w-a0"),
+        )
+        .expect("编码不失败"),
+        None,
+        "窗口外的旧记忆仍然拦得住重复：去重口径是全量"
+    );
+
+    // 反判据：按生产读方的顺序（ts 降序）读同一片事实、套上召回那份配额，最旧那条
+    // 就落在窗口外 ⇒ 用它去重会静默放行重复。配额本身只截前 N 格，「最近 N 条」是
+    // 读方先排序才有的形状——两层都在这条判据里。
+    let mut desc = snap.clone();
+    desc.sort_by(|a, b| b.ts.cmp(&a.ts));
+    let windowed = recall(PRINCIPAL_USER, None, None)
+        .apply(&desc, i64::MAX, Budget::new(0, RECALL_SCAN_QUOTA))
+        .value;
+    assert_eq!(
+        windowed.entries.len(),
+        RECALL_SCAN_QUOTA as usize,
+        "配额读数就是「最近 {RECALL_SCAN_QUOTA} 条」这个形状"
+    );
+    assert!(
+        !windowed.contains_content(oldest),
+        "窗口外的那条确实进不了视图 ⇒ 全量去重不是顺手写出来的，是有意的口径"
+    );
+}
+
 /// 步 11b（T-085 批④）：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
 /// 里 `recall:tag=judgment` 的**生产写方**（此前参数在、值缺写方）。
 ///

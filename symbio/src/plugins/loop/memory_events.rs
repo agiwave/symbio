@@ -340,7 +340,11 @@ pub(crate) fn encode(
     let encoded = truncate_chars(trimmed, ENCODE_MAX_CHARS);
 
     // 同文去重：判定方是 core 的 `contains_content`（比的是**已落盘的全部记忆**，
-    // 走 `read_all` 的全量读数口径——落盘的都已发生，不给时钟回拨留重复口子）。范围是本会话：
+    // 走 `read_all` 的全量读数口径——落盘的都已发生，不给时钟回拨留重复口子）。
+    // 全量不是省事：T-211 项二实测比过「近 N 条窗口」，窗口省掉的是本轮最便宜的一节
+    // （交回的切片上跑一遍投影），代价是窗口外的同文被再记一条——判据
+    // `dedupe_covers_the_whole_history_not_the_recall_window` 钉住这条口径。
+    // 范围是本会话：
     // 跨会话的同一句话在两个会话各记一条是两次独立编码，由排版去重（见上）。
     // 跨标签同文也算重复：同一个事实不必按标签记两遍。
     // `query = None`：去重问「在不在」，不问「排多前」——无查询 = 平凡值（ts 序）。

@@ -310,6 +310,61 @@ async fn config_document_is_reachable_by_its_real_name() {
     assert_eq!(node.ext.as_deref(), Some(crate::symbio_core::VDFS_EXT_FORM));
 }
 
+/// **内存态 = 落盘态**（T-211 项四）：经配置文档写口改一次闸门，正在生效的那份与
+/// 从盘上重新读出来的那份必须逐字段相同——两处状态、一处漂移没人知道，而闸门值
+/// 漂移的后果是「面板上写着 999、实际拒绝在 16 KiB」这种没有任何报错的错。
+///
+/// 用**部分字段**提交（表单的真实形状：只改两项）：`apply` 落内存前按结构体补全
+/// 缺省、落盘写的是提交的那份映射，所以「盘上少字段」是常态。判据因此不是
+/// 「文件里有五个键」，而是**从这份文件重启得到的内存态 == 当前内存态**。
+#[tokio::test]
+async fn config_write_leaves_memory_and_disk_in_agreement() {
+    let tmp = TempDir::new().unwrap();
+    let p = plugin_in(tmp.path());
+
+    p.dispatch(
+        &vctx(None),
+        PLUGIN_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"workspace_enabled": false, "memory_max_bytes": 999}"#),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let in_memory = serde_json::to_value(&*p.config_slot().read().await).unwrap();
+    let on_disk = serde_json::to_value(
+        p.config_file()
+            .dir()
+            .load::<super::super::config::MemoryConfig>()
+            .expect("落盘配置应可解析")
+            .expect("写过一次 ⇒ 文件在"),
+    )
+    .unwrap();
+    assert_eq!(in_memory, on_disk, "内存槽与盘上重载必须逐字段相同");
+    // 未提交的两项照走缺省（不是被清零，也不是沿用上一份的部分值）
+    assert_eq!(
+        in_memory["memory_inject_max_bytes"],
+        serde_json::json!(4 * 1024)
+    );
+    assert_eq!(
+        in_memory["workspace_max_bytes"],
+        serde_json::json!(16 * 1024)
+    );
+
+    // 重启：同目录再读一次，闸门取值与写之前的内存态一致（读的是同一份文件）。
+    let restarted = p
+        .config_file()
+        .dir()
+        .load::<super::super::config::MemoryConfig>()
+        .unwrap()
+        .unwrap();
+    assert_eq!(restarted.effective_memory_max_bytes(), 999);
+    assert!(!restarted.workspace_enabled);
+}
+
 /// 未知路径如实报未知（不为「看起来像记忆」的路径编造语义）
 #[tokio::test]
 async fn unknown_path_is_not_found() {
