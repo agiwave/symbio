@@ -95,6 +95,43 @@ test('B 的严重度：定义未使用默认只警告、--strict 才失败', () 
   assert.equal(audit(files, { strict: true }).status, 1)
 })
 
+// ── 规则 B 的来源之二：registry 词表（含入口**转发**出去的分文件）─────────
+// 组件把 registry 返回的修饰类直接绑到 `:class` 上，于是类名**不在组件源码里**。
+// 入口文件（`messageTypes.ts` 这类）只做 `export * from` 时，字面量住在分文件里：
+// 只扫入口 ⇒ 真实在用的类被报成「定义未使用」，拆文件反而买到了假红。
+const registryVue = (importSpec) => ({
+  // `main.ts` 是这条判定的可达性起点：没有它，夹具里的组件会先撞上「疑似废弃组件」，
+  // 用例测的就不是词表来源而是可达性了。
+  'tauri/src/main.ts': `import './components/Head.vue'\n`,
+  'tauri/src/registry/tokensEntry.ts': `export * from './tokensPart'\nexport const OWN = 'box'\n`,
+  'tauri/src/registry/tokensPart.ts': `export const MODIFIER = { thinking: 'thinking' }\n`,
+  'tauri/src/components/Head.vue': vue(
+    `<div class="box" />`,
+    `<style scoped>\n.box { color: red; }\n.thinking { opacity: .5; }\n</style>\n` +
+      `<script setup>\nimport { OWN } from '${importSpec}'\n</script>`,
+  ),
+})
+
+test('B 不误报：词表住在入口转发的分文件里 ⇒ 该分文件的修饰类算在用', () => {
+  assert.equal(audit(registryVue('@/registry/tokensEntry'), { strict: true }).status, 0)
+})
+
+test('B 命中：组件 import 的模块没有转发那条词表 ⇒ 仍然报「定义未使用」', () => {
+  // 同一份夹具，只把 import 换成**不含** `thinking` 的那一层（`tokensPart` 直接引到
+  // 分文件之外的入口对照）：证明展开沿 import 走，不是「registry 目录整体免检」。
+  const files = registryVue('@/registry/tokensOrphan')
+  files['tauri/src/registry/tokensOrphan.ts'] = `export const OWN = 'box'\n`
+  assert.equal(audit(files, { strict: true }).status, 1)
+})
+
+test('循环转发不挂死：A 转 B、B 转 A 时仍能给出判定', () => {
+  const files = registryVue('@/registry/tokensEntry')
+  // 夹具本身已是「entry ↔ 组件 import」的正常形状，这里再补一条**回到入口**的转发，
+  // 造出转发图上的环（拆文件时最容易手滑写出来的形状）。
+  files['tauri/src/registry/tokensPart.ts'] = `export * from './tokensEntry'\nexport const MODIFIER = { thinking: 'thinking' }\n`
+  assert.equal(audit(files, { strict: true }).status, 0)
+})
+
 // ── 空树：守卫不该空转而红 ──────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

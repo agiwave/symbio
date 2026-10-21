@@ -78,7 +78,9 @@ created: 2026-09-13
 | `composables/useVdfs.ts` | 页面逻辑（目录 / 选中 / 详情 / 实时）；**机制动作单点**（`mechanismActions`） |
 | `registry/vdfsTypes.ts` | `ext → 渲染器标识`（零组件导入） |
 | `registry/vdfsRenderers.ts` | `标识 → 组件`（唯一装配点） |
-| `registry/messageTypes.ts` / `messageRenderers.ts` | 消息域同构的一对：`facets → 渲染器标识` / `标识 → 组件` |
+| `registry/messageTypes.ts` | 消息域的**入口名**（只做转发）：消费方与机制审计文案都指它，判定不住在这里 |
+| `registry/messageFacts.ts` / `messagePresentation.ts` / `messageRouting.ts` | 消息域按职责分到的三块：`节点 → facets`（摊平与谓词）/ `facets → 呈现取值`（文案与折叠策略）/ `标识 → 组件`的登记表 |
+| `registry/messageRenderers.ts` | `标识 → 组件`（唯一装配点，登记具体组件） |
 | `registry/factory.ts` | 「标识 → 组件 + 兜底」注册表机制（上列两域各声明一次，机制只有一份） |
 | `registry/vdfsIcons.ts` | 图标映射（`kind` / `kind:ext` → SVG）+ 动作图标 |
 | `components/common/Workbench.vue` | **三栏容器原语**（纯插槽装配，无数据逻辑）：左导航 + 中列表 + 右详情 |

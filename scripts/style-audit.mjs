@@ -180,9 +180,9 @@ for (const f of globalCssFiles) {
 // 组件把返回值直接绑到 `:class` 上——于是那些词**不在组件源码里**，
 // 只扫组件必然把真实在用的 scoped 修饰类报成「定义未使用」。
 //
-// 规则（刻意不全局放宽）：**只认组件显式 import 的 registry 模块**，把其中的
-// 字面量 / 对象键 / 字符串联合成员当作该组件的潜在类名来源。它只影响 check B
-// （定义未使用），不参与 check A（使用未定义），因此不会掩盖「引用了不存在
+// 规则（刻意不全局放宽）：**只认组件显式 import 的 registry 模块**（含它 `from` 转发出去的
+// 同级分文件），把其中的字面量 / 对象键 / 字符串联合成员当作该组件的潜在类名来源。
+// 它只影响 check B（定义未使用），不参与 check A（使用未定义），因此不会掩盖「引用了不存在
 // 的类」这类真错。与文件头的既有偏向一致：宁可漏报 unused，不误报 used。
 function harvestPresentationTokens(text) {
   const src = stripJsComments(text);
@@ -199,7 +199,6 @@ const registryFiles = walk(path.join(SRC, 'registry'), ['.ts']);
 const registryTokensByFile = new Map(
   registryFiles.map((f) => [path.resolve(f), harvestPresentationTokens(fs.readFileSync(f, 'utf8'))]),
 );
-
 /** import 说明符 → 已扫描的 registry 文件（支持扩展名省略 / @ 别名） */
 function resolveRegistryModule(spec, fromFile) {
   const base = spec.startsWith('@/')
@@ -213,6 +212,44 @@ function resolveRegistryModule(spec, fromFile) {
     if (registryTokensByFile.has(abs)) return abs;
   }
   return null;
+}
+
+/**
+ * 转发要算进词表来源：入口文件（`messageTypes.ts` 这类）把映射拆到同级分文件后，
+ * 组件 import 的仍是入口名，而字面量住在被转发的分文件里。只扫入口 ⇒ 真实在用的
+ * 修饰类被报成「定义未使用」——那是拆文件买到的第一个假红。
+ *
+ * 展开按**不动点**做（A 转 B、B 转 C 一次到位），且只沿 registry 内部走：
+ * 非 registry 的说明符（`@vue`、相对路径出目录）由 `resolveRegistryModule` 认不出，
+ * 因此不会把外部模块的词表灌进来。
+ */
+{
+  const specsOf = new Map();
+  for (const f of registryFiles) {
+    const abs = path.resolve(f);
+    const text = stripJsComments(fs.readFileSync(f, 'utf8'));
+    specsOf.set(
+      abs,
+      [...text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)]
+        .map((m) => resolveRegistryModule(m[1], abs))
+        .filter((dep) => dep && dep !== abs),
+    );
+  }
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [abs, deps] of specsOf) {
+      const own = registryTokensByFile.get(abs);
+      for (const dep of deps) {
+        for (const token of registryTokensByFile.get(dep)) {
+          if (!own.has(token)) {
+            own.add(token);
+            grew = true;
+          }
+        }
+      }
+    }
+  }
 }
 
 // ── 2. 收集 Vue 组件定义与使用 ──────────────────────────────────
