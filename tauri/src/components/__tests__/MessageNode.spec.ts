@@ -280,18 +280,20 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
 /**
  * 分派器路由与内容形态 —— 分派器只做「按 NodeKind 路由」，渲染形态由各渲染器负责。
  *
- * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带压缩统计
- * 字段**（而非业务名）分道——有统计走「压缩动作」样式，无统计走 Markdown。
+ * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带读数行**
+ * （`node.stats`，[ADR-111](../../../../docs/010-adr/111.md)）分道——有行走「压缩动作」样式，
+ * 无行走 Markdown。夹具因此只给 `stats` 而不给 `meta` 数字：**本组件不认识那些字段名**，
+ * 数字→文案的口径在后端（判据在 `plugins/session/stats_reading.test.rs`）。
  */
-describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）', () => {
-  it('带统计字段的压缩 → 「系统动作」样式（notice-note），不是普通 Markdown 正文', async () => {
+describe('MessageNode：折叠叶内的压缩动作（notice + 读数行）', () => {
+  it('带读数行的压缩 → 「系统动作」样式（notice-note），不是普通 Markdown 正文', async () => {
     const w = mountNode(
       msg({
         id: 'cp1',
         type: 'notice',
         status: 'streaming',
         content: '正在压缩上下文…',
-        meta: { before_tokens: 150000 },
+        stats: { rows: [{ label: '当前水位', value: '150k' }] },
       }),
     )
     // 折叠叶默认收起，展开后看正文分道
@@ -309,7 +311,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
         status: 'failed',
         actions: ['retry_compaction'],
         content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
-        meta: { failure_kind: 'llm_error', before_tokens: 150000 },
+        stats: { rows: [{ label: '当前水位', value: '150k' }] },
       }),
     )
     await w.find('.node-head').trigger('click')
@@ -322,19 +324,20 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
     expect(w.emitted('retry')?.[0]).toEqual(['cp1'])
   })
 
-  it('字段齐全 ⇒ 事实行给水位 / 上限 / 触发来源 / 丢了几条', async () => {
+  it('后端排好的行逐字显示（水位 / 上限 / 触发来源 / 丢了几条），前端不做数值格式化', async () => {
     const w = mountNode(
       msg({
         id: 'cp1',
         type: 'notice',
         status: 'completed',
         content: '已压缩上下文（12 → 3 条）',
-        meta: {
-          compact_trigger: 'threshold',
-          context_limit: 200000,
-          before_tokens: 150000,
-          after_tokens: 30000,
-          dropped: 9,
+        stats: {
+          rows: [
+            { label: '压缩后水位', value: '30k' },
+            { label: '上限', value: '200k' },
+            { label: '触发', value: '自动整理' },
+            { label: '压掉', value: '9 条' },
+          ],
         },
       }),
     )
@@ -342,12 +345,12 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
     const facts = w.find('.notice-facts').text()
     expect(facts).toContain('压缩后水位 30k')
     expect(facts).toContain('上限 200k')
-    expect(facts).toContain('自动整理')
+    expect(facts).toContain('触发 自动整理')
     expect(facts).toContain('压掉 9 条')
     expect(w.find('.notice-note').text()).toContain('12 → 3 条')
   })
 
-  it('旧后端（无统计字段）⇒ 不算压缩动作，落 Markdown；不编事实行', async () => {
+  it('旧后端（无读数行）⇒ 不算压缩动作，落 Markdown；不编事实行', async () => {
     const w = mountNode(msg({ id: 'cp1', type: 'notice', status: 'completed', content: '压缩上下文' }))
     await w.find('.node-head').trigger('click')
     expect(w.find('.notice-note').exists()).toBe(false)
@@ -385,7 +388,13 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
       role: 'user',
       status: 'completed',
       content: '[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n要点一\n要点二',
-      meta: { compacted: true, post_tokens: 9000, transcript_path: '/store/s1/transcripts/a.json' },
+      meta: { compacted: true },
+      stats: {
+        rows: [
+          { label: '压缩后水位', value: '9k' },
+          { label: '完整历史', value: '已转存' },
+        ],
+      },
       ...extra,
     })
 
@@ -407,7 +416,7 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
     expect(w.find('.notice-pre').text()).toContain('CONTEXT SNAPSHOT')
     const facts = w.find('.notice-facts').text()
     expect(facts).toContain('压缩后水位 9k')
-    expect(facts).toContain('完整历史已转存')
+    expect(facts).toContain('完整历史 已转存')
   })
 
   it('不给悬停操作（系统记忆的编辑 / 删除不走悬停）', () => {
@@ -415,8 +424,8 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
     expect(w.findAll('.node-act')).toHaveLength(0)
   })
 
-  it('旧会话（无这些字段）⇒ 事实行不出现，不编数字', () => {
-    const w = mountNode(memory({ meta: { compacted: true } }))
+  it('旧会话（后端没给读数行）⇒ 事实行不出现，不编数字', () => {
+    const w = mountNode(memory({ stats: undefined }))
     expect(w.find('.notice-facts').exists()).toBe(false)
   })
 })

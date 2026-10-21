@@ -5,13 +5,22 @@
 //! 实例级聚合少并了一份快照 / 面板里的数与它描述的列对不上。它不碰存储、不碰路由
 //! （那些在 `stats.rs`），因此两处的红脸不同：那边红「读不到」，这边红「读错了」。
 //!
+//! 两条出口都在这里，因为它们要的是同一条纪律：
+//! - **`session/stats` 路由**：一份 [`ReadingPanel`]（`panel_of` 起）；
+//! - **消息节点交付**：一格 [`ReadingSection`]（[`present_message`] / [`notice_stats_of`]，
+//!   [ADR-111](../../../../docs/010-adr/111.md)）——压缩与记忆那几条事实行原先由前端
+//!   读 `meta` 数字自己拼，口径住在两端；现在水位、触发词、token 单位都只在本文件出现一次。
+//!
 //! 三条纪律里最硬的一条在这里落地：**只调已有投影，不另写一份统计**
 //! （[PL-010 §4](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）——
 //! 本文件里没有分位数 / 占比 / 累计的算式，只有取数、合并（`*View::merge`）与排版
 //! （起标签、定单位、挑语气）。同一份事实长出两套口径，读数与投影就会静默漂移，
 //! 而两边都自称是 SLO。
 
-use crate::symbio_core::{fallback_rate, slo_report, Event, ReadingPanel, VisScope};
+use crate::symbio_core::{
+    chat_node as cm, fallback_rate, slo_report, Event, ReadingPanel, ReadingRow, ReadingSection,
+    ReadingTone, VisScope,
+};
 
 use super::stats::SessionStats;
 
@@ -157,8 +166,6 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
 /// 可以各自漂移——而判据 `panel_matches_the_columns_it_describes` 只看结果，
 /// 看不住过程。写在这里的转换只有三类：起标签、定单位、挑语气。
 pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
-    use crate::symbio_core::{ReadingRow, ReadingSection, ReadingTone};
-
     // 档位列 → 一段「时延与兜底」。tiers 已按档位排序，此处原序输出（顺序是
     // 数据给的事实，不是排版选择）。
     let perf = ReadingSection {
@@ -310,3 +317,117 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
         sections: vec![perf, continuity, invariants, skills, commitments],
     }
 }
+
+// ==================== 消息节点的读数（ADR-111） ====================
+
+/// 会话把消息节点**交给前端**那一刻的呈现装配：core 的形状派生（`title`/`icon`/`actions`）
+/// 之后补上本域的读数行。
+///
+/// 三条交付出口（转写列表、会话叶子读、实时帧投递）都过这里，因此「消息上那几个数怎么说」
+/// 在整条链路上只有一处口径。存储与事件里的节点**永不含** `stats`——呈现不是事实，
+/// 改一次文案不需要迁移一份历史，而存量会话重新读到就带行（零迁移）。
+pub(crate) fn present_message(mut m: cm::ChatNode) -> cm::ChatNode {
+    if m.stats.is_none() {
+        m.stats = notice_stats_of(&m);
+    }
+    m.with_derived_presentation()
+}
+
+/// token 数的紧凑写法（`128000` → `128k`、`950` → `950`）——**全仓唯一的一处**。
+///
+/// 单位与精度归产者：同一条 `after_tokens` 若在两处各自格式化，早晚一个显示 `44.5k`
+/// 一个显示 `45k`，而两个数字都自称是同一个水位。
+fn format_tokens(n: u64) -> String {
+    if n < 1000 {
+        return n.to_string();
+    }
+    let k = n as f64 / 1000.0;
+    // ≥100k 取整（`200k` 比 `200.3k` 更像「快满了」要传达的量级），否则留一位小数。
+    let rounded = if k >= 100.0 {
+        format!("{}", k.round())
+    } else {
+        format!("{}", (k * 10.0).round() / 10.0)
+    };
+    format!("{rounded}k")
+}
+
+/// 触发来源 → 面向用户的词。
+///
+/// 词表住在这里而不是前端的 `COMPACTION_TRIGGER_LABELS`：取值集合是后端的协议词
+/// （`compression_stats` 的入参），前端那份是抄本。**未知取值原样透出**——那是
+/// 「协议加了新档位而这里没跟上」最省事的发现方式。
+fn trigger_label(trigger: &str) -> String {
+    match trigger {
+        "threshold" => "自动整理".into(),
+        "tool" => "模型主动".into(),
+        "retry" => "手动重试".into(),
+        other => other.into(),
+    }
+}
+
+fn row(label: &str, value: String) -> ReadingRow {
+    ReadingRow {
+        label: label.into(),
+        value,
+        hint: None,
+        tone: ReadingTone::Normal,
+    }
+}
+
+/// 一次压缩 / 一份压缩产物的**事实行**（数字取自节点 `meta`，口径见
+/// `plugins/loop/context/pipeline.rs::compression_stats` 的文档注释）。
+///
+/// ## 缺数字就不出行，绝不补 0
+///
+/// `after_tokens` 只在成功路径写入；失败 / 未触发时补一个 0 会显示成「水位已降到 0」，
+/// 那是最坏的一种谎报。同理，一个字段都没有 ⇒ [`None`]（前端因此只渲染正文那一行，
+/// 与后端没给这些字段的老会话同形）。
+pub(crate) fn notice_stats_of(m: &cm::ChatNode) -> Option<ReadingSection> {
+    let meta = m.meta.as_ref()?;
+    let num = |key: &str| meta.get(key).and_then(|v| v.as_u64());
+    let text = |key: &str| meta.get(key).and_then(|v| v.as_str());
+
+    let rows = if meta.get("compacted").and_then(|v| v.as_bool()) == Some(true) {
+        // 压缩的**产物**（那条接替历史的记忆自述）：字段名与压缩动作不同。
+        let mut rows = Vec::new();
+        if let Some(post) = num("post_tokens") {
+            rows.push(row("压缩后水位", format_tokens(post)));
+        }
+        if text("transcript_path").is_some_and(|p| !p.is_empty()) {
+            rows.push(row("完整历史", "已转存".into()));
+        }
+        rows
+    } else if m.is_compression() {
+        let mut rows = Vec::new();
+        // 有后值报「压缩后」，只有前值报「当前」——两个词说的是同一个水位槽。
+        match (num("after_tokens"), num("before_tokens")) {
+            (Some(after), _) => rows.push(row("压缩后水位", format_tokens(after))),
+            (None, Some(before)) => rows.push(row("当前水位", format_tokens(before))),
+            (None, None) => {}
+        }
+        if let Some(limit) = num("context_limit") {
+            rows.push(row("上限", format_tokens(limit)));
+        }
+        if let Some(t) = text("compact_trigger") {
+            if !t.is_empty() {
+                rows.push(row("触发", trigger_label(t)));
+            }
+        }
+        if let Some(dropped) = num("dropped") {
+            rows.push(row("压掉", format!("{dropped} 条")));
+        }
+        rows
+    } else {
+        return None;
+    };
+
+    if rows.is_empty() {
+        return None;
+    }
+    // 分区不给标题：节点自己已经有 `title`（「上下文压缩」），再来一个标题是排版噪声。
+    Some(ReadingSection { title: None, rows })
+}
+
+#[cfg(test)]
+#[path = "stats_reading.test.rs"]
+mod tests;

@@ -9,13 +9,14 @@
     （那是模型看到的那份材料，前端不改写、不删内部标记——这一页的意义是可审计），
     底下给事实行（水位 / 完整历史已转存）。它是系统产出的，**不是用户说的话**：
     分派器已把它路由到本折叠叶，而不是右对齐的用户气泡。
-  - **带统计字段**（`messageCompactionStats` 任一字段有值）：正文一行说明 + 事实行；
+  - **带读数行**（`node.stats` 有行）：正文一行说明 + 后端排好的事实行；
     失败则走错误条 +「重试」（恢复动作判据来自后端下发的 `actions`）。
   - **其余**：Markdown 正文，默认收起成单行、流式中呼吸动效
     （动效与标题都由注册表按形态给出，本组件不判断）。
 
-  读取 `meta` 字段一律经 `registry/messageTypes` 的谓词（`messageCompactionStats` /
-  `messageMemoryStats`）——字段名只在那里出现，组件不碰后端字段名。
+  「水位怎么单位、触发叫什么词、压掉几条」都不在本组件——它们由后端在交付出口排成
+  `stats.rows` 逐行下发（[ADR-111](../../../docs/010-adr/111.md)），本组件只做「有行就逐行排版」。
+  仍要读 `meta` 的字段一律经 `registry/messageTypes` 的谓词，组件不碰后端字段名。
 -->
 <template>
   <NodeShell
@@ -29,11 +30,11 @@
     <!-- 压缩后的历史记忆：正文原样（可审计）+ 事实行 -->
     <div v-if="facets.compacted" class="notice-memory">
       <pre class="notice-pre">{{ text }}</pre>
-      <p v-if="memoryFacts.length" class="notice-facts">{{ memoryFacts.join(' · ') }}</p>
+      <p v-if="factRows.length" class="notice-facts">{{ factRows.join(' · ') }}</p>
     </div>
 
     <!-- 一次压缩动作：失败给错误条 + 重试；成功给系统说明 + 事实行 -->
-    <template v-else-if="hasStats">
+    <template v-else-if="factRows.length">
       <MessageErrorBox
         v-if="canRetryCompaction(facets)"
         :text="text"
@@ -42,7 +43,7 @@
       />
       <template v-else>
         <div class="notice-note">{{ text }}</div>
-        <p v-if="statFacts.length" class="notice-facts">{{ statFacts.join(' · ') }}</p>
+        <p class="notice-facts">{{ factRows.join(' · ') }}</p>
       </template>
     </template>
 
@@ -57,10 +58,6 @@ import type { ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
   canRetryCompaction,
-  compactionTriggerLabel,
-  formatTokens,
-  messageCompactionStats,
-  messageMemoryStats,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
@@ -84,42 +81,16 @@ const { text, rendered } = useMessageContent(
 )
 
 /**
- * 是否带**统计字段**（后端随 `meta` 下发）——有则折叠体给说明行 + 事实行。
- * 一个字段都没有 ⇒ 只是一块 Markdown 正文，本组件不问它是什么业务。
+ * 后端排好的**事实行**（`node.stats.rows`，[ADR-111](../../../../docs/010-adr/111.md)）。
+ *
+ * 空数组 = 这个节点没有可报的数，折叠体因此只是一块正文——本组件不问它是什么业务，
+ * 也不做数值格式化（单位与精度在产者那一侧定，见 `schemas/reading.ts`）。
+ * 只有标签没有值的行（如「完整历史已转存」这类成对写法留给后端拆成 label + value）
+ * 照常拼：值为空就不重复一个空格。
  */
-const hasStats = computed(() => {
-  const s = messageCompactionStats(props.node)
-  return (
-    s.trigger !== undefined ||
-    s.limit !== undefined ||
-    s.beforeTokens !== undefined ||
-    s.afterTokens !== undefined ||
-    s.dropped !== undefined
-  )
-})
-
-/** 事实行（缺字段就少一项，旧后端照常只显示正文那一行） */
-const statFacts = computed<string[]>(() => {
-  const s = messageCompactionStats(props.node)
-  const parts: string[] = []
-  const water = s.afterTokens ?? s.beforeTokens
-  if (water != null) {
-    parts.push(`${s.afterTokens != null ? '压缩后水位' : '当前水位'} ${formatTokens(water)}`)
-  }
-  if (s.limit != null) parts.push(`上限 ${formatTokens(s.limit)}`)
-  if (s.trigger) parts.push(compactionTriggerLabel(s.trigger))
-  if (s.dropped != null) parts.push(`压掉 ${s.dropped} 条`)
-  return parts
-})
-
-/** 事实行（有字段才出条目——旧后端 / 旧会话因此什么都不多显示） */
-const memoryFacts = computed<string[]>(() => {
-  const s = messageMemoryStats(props.node)
-  const parts: string[] = []
-  if (s.postTokens != null) parts.push(`压缩后水位 ${formatTokens(s.postTokens)}`)
-  if (s.archived) parts.push('完整历史已转存')
-  return parts
-})
+const factRows = computed<string[]>(() =>
+  (props.node.stats?.rows ?? []).map((r) => (r.value ? `${r.label} ${r.value}` : r.label)),
+)
 </script>
 
 <style scoped>

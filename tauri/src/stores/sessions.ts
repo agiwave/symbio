@@ -411,6 +411,9 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.title != null) node.title = message.title
         if (message.icon != null) node.icon = message.icon
         if (message.actions != null) node.actions = message.actions
+        // 读数行同口径「有则覆盖」（[ADR-111](../../../docs/010-adr/111.md)）：它由后端在
+        // 交付出口现算，压缩那条节点终态帧带来，窄增量帧不带 ⇒ 不覆盖掉已有的一格。
+        if (message.stats != null) node.stats = message.stats
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
         if (message.seq != null) node.seq = message.seq
         if (message.timestamp != null) node.timestamp = message.timestamp

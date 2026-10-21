@@ -12,6 +12,8 @@
  * 呈现映射（图标 / 标题 / 标签）在 `registry/messageTypes.ts`；本文件零呈现知识。
  */
 
+import type { ReadingSection } from './reading'
+
 // ==================== 主体（Principal） ====================
 
 /**
@@ -490,6 +492,18 @@ export interface ChatNode {
    * 反推「该给什么按钮」。缺省（后端尚未填）时退回 legacy 的类型驱动判据。
    */
   actions?: ResumeAction[];
+  /**
+   * 本节点的**读数行**（后端填的呈现数据，[ADR-111](../../../docs/010-adr/111.md)）：
+   * 「压缩后水位 44.5k」「压掉 12 条」这类交代由后端排好版逐行下发，前端**只逐行排版**。
+   *
+   * 为什么这一格在顶层而不是 `meta`：判据是「不查看 `meta` 语义就能消费它」——渲染器
+   * 遍历行、拼标签与值，一个业务词都不认（G 组要求它有直接消费者）。
+   * 值里的单位与精度是后端定的（同一个数字两处格式化早晚不一致），前端不做数值格式化。
+   *
+   * 形状复用只读读数的宿主方言 `ReadingSection`（`schemas/reading.ts`，与会话读数面板
+   * 同一个形状、同一批镜像守卫）；缺省 = 这个节点没有可报的数（不是「读不到」）。
+   */
+  stats?: ReadingSection;
   meta?: Record<string, any>;
   timestamp?: number;
   /** 树形展开：前端按 `parent_id` 组装的子列表（后端只给扁平列表） */

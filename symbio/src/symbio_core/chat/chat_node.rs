@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::principal::Principal;
+use crate::symbio_core::ReadingSection;
 
 /// 消息角色
 ///
@@ -340,6 +341,24 @@ pub struct ChatNode {
     /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions: Option<Vec<ResumeAction>>,
+
+    /// 本节点的**读数片段**（[ADR-111](../../../../docs/010-adr/111.md)）：已由产者排好版的
+    /// 若干行（标签 + 值），前端**逐行排版**、不认任何业务词——压缩「压到哪儿了 / 什么触发的 /
+    /// 压掉几条」这类交代原先由前端读 `meta` 数字自己拼，口径因此住在两端。
+    ///
+    /// ## 为什么是既有形状而不是一个新结构
+    ///
+    /// [`ReadingSection`] 是只读指标读数的宿主方言（`present/reading`），已在两侧镜像并由
+    /// `protocol-mirror-audit` D 组看守；给同一个概念起第二个名字是换名不是机制化
+    /// （[ADR-070 §决策 3](../../../../docs/010-adr/070.md "ADR-070") 反对的正是这个）。
+    ///
+    /// ## 为什么不落存储
+    ///
+    /// 它由会话的**交付出口**从节点已有的 `meta` 数字现算（`plugins/session/stats_reading.rs`），
+    /// 存储与事件里的节点永不含这一格——与 `title`/`icon`/`actions` 同一条纪律
+    /// （呈现不是事实），改一次文案不必迁移历史，存量会话重新读到就带行。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<ReadingSection>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Value>,

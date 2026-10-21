@@ -448,8 +448,13 @@ const STRUCT_SETS = [
  *   前端自持的键（`owner: null`）只做第一条。
  *
  * **已知边界**：第二条判的是「字面从 owner 文件里整词消失」，不是「语义上不再
- * 产出」——`error` 这类通用词在 owner 文件里另有用途时，改名不会立刻红。真正的
- * 根治是让键名只有一份（生成常量），那是协议面变更（[ADR-070]），归 T-208。
+ * 产出」——`error` 这类通用词在 owner 文件里另有用途时，改名不会立刻红。
+ *
+ * **最省的一条清偿是删掉读点**：压缩与记忆的七个数字键（`compact_trigger` /
+ * `context_limit` / `before_tokens` / `after_tokens` / `dropped` / `post_tokens` /
+ * `transcript_path`）原先在这里登记，因为前端要拿它们自己拼口径；[ADR-111] 把口径
+ * 搬回后端排成 `node.stats` 的行之后，**前端一个都不读了**，登记随之撤掉——
+ * 漂移面从两处变成零处，比给键名生成常量更彻底。剩下的键仍是前端真在读的契约。
  *
  * **扫描范围**：只扫「提到了 `ChatNode`」的前端生产文件。`meta` 是同名重灾区
  * （日志对象、VDFS 详情、`import.meta`），按类型用法过滤比按变量名过滤可靠。
@@ -460,41 +465,6 @@ const META_KEYS = [
     key: 'compacted',
     owner: 'symbio/src/plugins/loop/context/pipeline.rs',
     what: '压缩后的历史记忆标记（渲染成记忆而非用户气泡）',
-  },
-  {
-    key: 'compact_trigger',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '这次压缩的触发来源',
-  },
-  {
-    key: 'context_limit',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '生效的上下文上限',
-  },
-  {
-    key: 'before_tokens',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '压缩前内容水位',
-  },
-  {
-    key: 'after_tokens',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '压缩后内容水位',
-  },
-  {
-    key: 'dropped',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '这次被压掉的条数',
-  },
-  {
-    key: 'post_tokens',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '压缩产物（记忆节点）的内容水位',
-  },
-  {
-    key: 'transcript_path',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
-    what: '压缩前完整历史的转存路径（存在即已归档）',
   },
   {
     key: 'error',

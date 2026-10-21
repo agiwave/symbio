@@ -17,6 +17,7 @@
 //! `pub(crate)`，由 `plugin.rs` 统一重导出；只在本文件内部使用的保持私有。
 
 use super::*;
+use crate::plugins::session::stats_reading::present_message;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
@@ -812,11 +813,9 @@ pub(crate) fn session_content(
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
-    // 呈现派生（[T-155 B3]）：会话叶子读是前端交互出口，交付前按形状算出 title/icon。
-    let messages: Vec<cm::ChatNode> = messages
-        .into_iter()
-        .map(cm::ChatNode::with_derived_presentation)
-        .collect();
+    // 呈现派生（[T-155 B3]）：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
+    // 并把压缩 / 记忆那几个数字排成读数行（[ADR-111](../../../../../docs/010-adr/111.md)）。
+    let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();
     let payload = json!({
         "id": session.id,
         "title": session.display_title(),

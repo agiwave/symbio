@@ -46,11 +46,7 @@ import {
   NODE_STATUS_LABELS,
   NODE_KIND_LABELS,
   agentNameOf,
-  compactionTriggerLabel,
-  formatTokens,
-  messageCompactionStats,
   messageIsCompacted,
-  messageMemoryStats,
   canRetryCompaction,
   canRetryTool,
   canSupplyToolArgs,
@@ -852,69 +848,3 @@ describe('压缩后的历史记忆：不是「你说的那句话」', () => {
   })
 })
 
-/**
- * 压缩相关 `meta` 字段的读取口（组件不许直读——`mechanism-audit` 判定依据）。
- *
- * 两个节点形状不同，因此有两个读取函数：压缩**动作**节点（`before/after_tokens`…）
- * 与压缩**产物**节点（`post_tokens` / `transcript_path`）。
- */
-describe('压缩字段读取：缺字段就是 undefined，绝不编数字', () => {
-  it('压缩动作节点：字段齐全时全部读出', () => {
-    const s = messageCompactionStats({
-      meta: {
-        compact_trigger: 'threshold',
-        context_limit: 200000,
-        before_tokens: 150000,
-        after_tokens: 30000,
-        dropped: 9,
-      },
-    })
-    expect(s).toEqual({
-      trigger: 'threshold',
-      limit: 200000,
-      beforeTokens: 150000,
-      afterTokens: 30000,
-      dropped: 9,
-    })
-  })
-
-  it('压缩未成功 ⇒ 没有 after_tokens（显示层据此不报「水位已降到 0」）', () => {
-    const s = messageCompactionStats({ meta: { before_tokens: 150000 } })
-    expect(s.afterTokens).toBeUndefined()
-    expect(s.dropped).toBeUndefined()
-    expect(s.beforeTokens).toBe(150000)
-  })
-
-  it('脏值（字符串 / NaN / 空串原因）不当数字用', () => {
-    const s = messageCompactionStats({
-      meta: { before_tokens: '150000', after_tokens: Number.NaN, compact_trigger: '' },
-    })
-    expect(s.beforeTokens).toBeUndefined()
-    expect(s.afterTokens).toBeUndefined()
-    expect(s.trigger).toBeUndefined()
-  })
-
-  it('记忆节点：水位与「是否已转存」', () => {
-    expect(
-      messageMemoryStats({ meta: { post_tokens: 9000, transcript_path: '/a/b.json' } }),
-    ).toEqual({ postTokens: 9000, archived: true })
-    expect(messageMemoryStats({ meta: {} })).toEqual({
-      postTokens: undefined,
-      archived: false,
-    })
-  })
-
-  it('触发来源有面向用户的词；没登记过的取值原样显示', () => {
-    expect(compactionTriggerLabel('threshold')).toBe('自动整理')
-    expect(compactionTriggerLabel('tool')).toBe('模型主动')
-    expect(compactionTriggerLabel('retry')).toBe('手动重试')
-    expect(compactionTriggerLabel('brand_new')).toBe('brand_new')
-  })
-
-  it('token 展示写法：千位以上收成 k（仅展示用，判定一律用原始数字）', () => {
-    expect(formatTokens(950)).toBe('950')
-    expect(formatTokens(9000)).toBe('9k')
-    expect(formatTokens(44500)).toBe('44.5k')
-    expect(formatTokens(200000)).toBe('200k')
-  })
-})
