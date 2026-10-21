@@ -79,7 +79,11 @@ export const BASELINE = {
   // baseline-allow rustTests: 批 T-178（02be8fc5）净删 1 条判据（1834→1833）——该批删掉
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table`：`LatentCapability`
   // 表的读方随 ClassifyOnly 退役而消失，删的是持续维护税，不是判据。基线随之下调，非放宽。
-  rustTests: 1924,
+  // T-206 段一 新增 6 条（1924→1930，非放宽）：`event_bus/tests.rs` 的
+  // `resync_of_recognizes_the_markers_this_module_produces` / `resync_of_unwraps_the_bus_envelope` /
+  // `a_real_change_is_not_a_resync_marker`（两条解包入口互斥且成对——消费方「先试变更再试指令」的顺序靠它成立），
+  // `subagent.test.rs` 的 `turn_end_of` 三格（working / 正常收尾 / 带错误）。
+  rustTests: 1930,
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 T-164 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。

@@ -47,7 +47,8 @@ use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
 use crate::symbio_core::{
-    event_bus_register_subscriber, event_bus_unregister_subscriber, event_bus_vdfs_change_of,
+    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
+    event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
 use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
@@ -754,7 +755,21 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     // 订阅被摘除：已没有第二条通道可等，直接收尾。
                     break;
                 };
-                let Some(change) = event_bus_vdfs_change_of(&frame) else { continue };
+                let Some(change) = event_bus_vdfs_change_of(&frame) else {
+                    // 不是变更：只可能是**背压重同步指令**（通道满时后端丢帧并补送它，
+                    // 含义是「你可能漏了帧，按自己的作用域重读」）。漏掉它的代价在本桥是
+                    // 不对称的——消息面另有「身份未知 ⇒ 回读基线」兜底，而会话运行态那一帧
+                    // 一旦漏掉，本轮结束就没人宣告：子会话早已收尾，这里却一直等到父会话中止。
+                    if event_bus_resync_of(&frame, EVENT_BUS_KIND_VDFS) {
+                        if let Some(node) = stat_node(&provider, &invoke_ctx, &rel_base).await {
+                            if let Some(err) = turn_end_of(&node) {
+                                relay_error = err;
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                };
 
                 // ① 会话运行态：本轮结束的唯一判据。`data` = 全量节点视图（与
                 // `stat` 同源构造，零回读）；无载荷 ⇒ 回读兜底。
@@ -764,12 +779,10 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                         None => stat_node(&provider, &invoke_ctx, &rel_base).await,
                     };
                     let Some(node) = node else { continue; };
-                    if node.status != VDFS_STATUS_WORKING {
-                        if let Some(err) = node.attributes.get("error").and_then(Value::as_str) {
-                            // 子会话以错误结束。错误本身仍是子会话节点的持久状态，
-                            // 这里只把它取出来作为本桥的结局（不再经错误帧转播）。
-                            relay_error = Some(err.to_string());
-                        }
+                    if let Some(err) = turn_end_of(&node) {
+                        // 子会话以错误结束时，错误本身仍是子会话节点的持久状态，
+                        // 这里只把它取出来作为本桥的结局（不再经错误帧转播）。
+                        relay_error = err;
                         break;
                     }
                     continue;
@@ -945,6 +958,24 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
     RelayOutcome::Done(final_result)
 }
 
+/// 会话节点视图 → **本轮是否结束**：`None` = 仍在 `working`（继续等）；
+/// `Some(错误)` = 已收尾（正常结束为 `Some(None)`，带 `error` 属性则为该错误）。
+///
+/// 本桥对「结束」有**两个读数来源**——会话变更帧自带的载荷、以及收到背压重同步指令后的
+/// 回读——判据因此只许有一份：各写一遍就会漂，而漂的那一侧表现为「子会话早已收尾、
+/// 父会话却仍在等」。结局错误取节点属性（与 `cli` 的 `turn_end_of`、telegram 的 `finish` 同判据）。
+fn turn_end_of(node: &VdfsNode) -> Option<Option<String>> {
+    if node.status == VDFS_STATUS_WORKING {
+        return None;
+    }
+    Some(
+        node.attributes
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    )
+}
+
 /// 回读一个节点的**视图**（变更不带载荷，状态只能这么拿）。
 async fn stat_node(
     provider: &Option<Arc<dyn VdfsProvider>>,
@@ -1063,3 +1094,7 @@ pub(crate) fn format_agent_dirs_brief(agent_dirs: &[super::store::AgentDirRecord
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[cfg(test)]
+#[path = "subagent.test.rs"]
+mod tests;

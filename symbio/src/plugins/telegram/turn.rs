@@ -42,9 +42,9 @@ use crate::symbio_core::chat_node::{
     message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES,
 };
 use crate::symbio_core::{
-    event_bus_register_subscriber, event_bus_unregister_subscriber, event_bus_vdfs_change_of,
-    Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt, VdfsChange, VdfsContent,
-    VdfsNode, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE, PATH, PLUGIN_ID_SESSION,
+    event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
+    event_bus_vdfs_change_of, Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, PLUGIN_ID_SESSION,
     ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, VDFS_STATUS_FAILED,
     VDFS_STATUS_WORKING, WORKDIR,
 };
@@ -423,21 +423,11 @@ async fn unwatch(
 
 /// 帧是否是一条**背压重同步标记**。
 ///
-/// 它不是一条变更（刻意不带 `path`，`event_bus_vdfs_change_of` 解不出），因此必须单独认；
-/// 顺序也不可颠倒——它靠「解不出」与真变更区分（与 `cli` 的 `bus_frame_of` 同款）。
+/// 判别本身住在 core（`event_bus_resync_of`）：它读的是线上字面量，且与产帧方同层——
+/// 本插件只声明「vdfs 频道的那一条指令归我」。手写一份判别等于给漂移留一个位置
+/// （子智能体转播桥就漏写过，见该函数文档）。
 fn is_resync(frame: &PluginFrame) -> bool {
-    let PluginFrame::Data(v) = frame else {
-        return false;
-    };
-    let Some(bus) = v.get("data") else {
-        return false;
-    };
-    bus.get("kind").and_then(Value::as_str) == Some(EVENT_BUS_KIND_VDFS)
-        && bus
-            .get("data")
-            .and_then(|d| d.get("type"))
-            .and_then(Value::as_str)
-            == Some(EVENT_BUS_RESYNC_MARKER_TYPE)
+    event_bus_resync_of(frame, EVENT_BUS_KIND_VDFS)
 }
 
 /// 一次 `vdfs/*` 调用：fork 请求上下文、设 PATH / WORKDIR / SESSION_ID、取回 JSON 载荷。

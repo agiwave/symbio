@@ -220,7 +220,16 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 | `kind` | 发布方 | 消费方 |
 |--------|--------|--------|
 | `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
-| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）——都按**地址**分派，不依赖事件到达顺序 |
+| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）、`cli`（`cli/src/client.rs`）、telegram 回合（`plugins/telegram/turn.rs`）、子智能体转播桥（`plugins/agent/host/subagent.rs`）——都按**地址**分派，不依赖事件到达顺序 |
+
+> **帧只有两种，解包入口也只有一个对**：变更由 `event_bus_vdfs_change_of` 解出，
+> **背压重同步指令**（`{ "data": { "type": "resync" } }`，刻意不带 `path`）由
+> `event_bus_resync_of` 认出——两者互斥，且都由 `symbio_core::event_bus` 提供。
+> 消费方**不许手写判别**：一条指令的含义是「你可能漏了帧，按自己的作用域重读」，
+> 而漏认它的那一方表现为「子会话早已收尾、父会话仍在等」——它没有第二条通道可等。
+> 通道满时的处置（丢帧 + **保留订阅** + 补送指令）见 `symbio_core::event_bus` 的
+> `EventBus::try_publish`；这里**没有投递序号**，靠幂等重读兜底
+> （[ADR-025](../010-adr/025.md)）。
 
 > **会话域不另设频道**：消息与运行态都是 VDFS 变更——消息是 `<根>/session/<id>/message/<mid>`
 > 这个**文件**，运行态是会话节点（`<根>/session/<id>`）的 `status`，因此都走 `kind = "vdfs"`。

@@ -339,9 +339,9 @@ pub(crate) use turn::facts::{
 
 // ==================== 事件总线 ====================
 pub use event_bus::{
-    event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
-    event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,
-    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+    event_bus_build_envelope, event_bus_register_subscriber, event_bus_resync_of,
+    event_bus_unregister_subscriber, event_bus_vdfs_change_of, EventBus, EventBusSubscribeRequest,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
 
 // ==================== 服务抽象 ====================

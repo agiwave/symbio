@@ -176,9 +176,10 @@ impl EventBus {
 
 /// 构建事件信封 `{type:"bus_event", data:{kind, session_id, data}}`。
 ///
-/// **信封形状的唯一构建入口**：投帧方一律走这里，不要手搓同形状的 `json!`
-/// ——`plugins/event_bus/plugin.rs` 的 `connected` 帧曾自己拼过一份，形状漂移
-/// 时不会有任何编译错误。`vdfs::vdfs_change_of` 是它的解包对偶。
+/// **信封形状的唯一构建入口**：投帧方一律走这里，不要手搓同形状的 `json!`——
+/// `plugins/event_bus/plugin.rs` 的 `connected` 帧与下面的 `resync_marker` 都是它的调用方，
+/// 手搓的那一份在形状漂移时不会有任何编译错误。解包侧有两个对偶：变更走
+/// [`event_bus_vdfs_change_of`]，指令走 [`event_bus_resync_of`]。
 ///
 /// ## 为什么手搓 `Map` 而不用 `json!`
 ///
@@ -206,9 +207,12 @@ pub fn event_bus_build_envelope(kind: &str, session_id: Option<&str>, data: Valu
 
 /// resync 标记的判别值（消费端按 `data.data.type` 识别）。
 ///
-/// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方是 `cli`
-/// （`cli/src/client.rs` 判别该字段）——是**线上字面量**，改名不会编译失败、只会让
-/// 消费方的判别静默失效，故留在本层（与 `plugin::route` 的地址常量同类，ADR-023）。
+/// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方在 `cli` 与各插件
+/// ——是**线上字面量**，改名不会编译失败、只会让消费方的判别静默失效，故留在本层（与
+/// `plugin::route` 的地址常量同类，ADR-023）。
+///
+/// **不要按这个常量手写判别**：走 [`event_bus_resync_of`]，它把「信封 + 频道 + 指令类型」
+/// 三步一次做完（漏写判别的那个消费方就是本常量存在的理由）。
 ///
 /// 与已退役的转写流的 `transcript_resync` 同构：都是「你可能漏了帧，
 /// 请按自己的作用域重读」的指令。这里**不改用 `VdfsChange` 的形状**——那是
@@ -255,15 +259,47 @@ pub fn event_bus_vdfs_change_of(frame: &crate::symbio_core::PluginFrame) -> Opti
 }
 
 /// 构造 resync 标记帧（`kind` 与触发它的频道一致）。
+///
+/// 一律走 [`event_bus_build_envelope`]：它声明自己是信封形状的唯一构建入口，
+/// 而这里曾是第二份手搓的 `json!`——判别 [`event_bus_resync_of`] 一旦与构建
+/// 分家，改名就只在运行期表现为「消费端收不到指令」，没有编译错误。
 fn resync_marker(kind: &str) -> PluginFrame {
-    PluginFrame::data(json!({
-        "type": "bus_event",
-        "data": {
-            "kind": kind,
-            "session_id": null,
-            "data": { "type": EVENT_BUS_RESYNC_MARKER_TYPE },
-        }
-    }))
+    PluginFrame::data(event_bus_build_envelope(
+        kind,
+        None,
+        json!({ "type": EVENT_BUS_RESYNC_MARKER_TYPE }),
+    ))
+}
+
+/// **resync 指令的判别入口**——与 [`event_bus_vdfs_change_of`] 成对，二者合起来覆盖本频道的全部帧。
+///
+/// 一条指令，不是变更：`kind` 是触发它的频道，载荷只有 `{type: "resync"}`、**刻意不带
+/// `path`**，所以 `event_bus_vdfs_change_of` 解不出它。消费端的正确姿势是「按自己的作用域
+/// 重读」，而重读的对象各不相同——telegram 与会话转播桥都只重读会话运行态，因为消息面
+/// 另有「未知身份 ⇒ 回读基线」这条幂等兜底。
+///
+/// ## 为什么必须由 core 给这一个入口
+///
+/// 判别读的是**线上字面量**（信封的 `data.kind` 与 `data.data.type`），两侧分属不同 crate。
+/// 这里曾有两个消费方各写一份（`plugins/telegram/turn.rs::is_resync`、`cli/src/client.rs`），
+/// 而第三个订阅者（`plugins/agent/host/subagent.rs` 的转播桥）**一份都没写**：它把解不出
+/// 变更的帧一律 `continue`，于是把「你可能漏了帧」这条指令也丢了——而那条指令正是它
+/// 「本轮结束」的唯一兜底（漏掉会话态帧 ⇒ 一直等到父会话中止）。
+/// 产帧方与解帧方各写一份、漏写无人发现，正是 [`event_bus_vdfs_change_of`] 存在的那个理由。
+pub fn event_bus_resync_of(frame: &crate::symbio_core::PluginFrame, kind: &str) -> bool {
+    use crate::symbio_core::PluginFrame;
+    let PluginFrame::Data(v) = frame else {
+        return false;
+    };
+    let Some(bus) = v.get("data") else {
+        return false;
+    };
+    bus.get("kind").and_then(Value::as_str) == Some(kind)
+        && bus
+            .get("data")
+            .and_then(|d| d.get("type"))
+            .and_then(Value::as_str)
+            == Some(EVENT_BUS_RESYNC_MARKER_TYPE)
 }
 
 /// 「消费过慢」告警（按订阅者限流）。

@@ -194,3 +194,73 @@ fn vdfs_change_of_handles_non_data_frames() {
     let err = PluginFrame::Error("boom".to_string(), None);
     assert!(event_bus_vdfs_change_of(&err).is_none());
 }
+
+// ── resync 指令的判别（[`event_bus_resync_of`]）──
+//
+// 本域的两条解包入口必须**互斥且成对**：一帧要么是变更、要么是指令、要么不归本频道。
+// 子智能体转播桥曾两个都不认地一律 `continue`，于是把「你可能漏了帧」也丢了——
+// 下面三条钉的就是那个漏写判别的位置。
+
+/// **产帧方与判别入口必须对上**：`resync_marker` 造的帧由 `event_bus_resync_of` 认出，
+/// 且**解不出变更**（否则它会被当成一条 `path` 缺失的变更消费）。
+#[test]
+fn resync_of_recognizes_the_markers_this_module_produces() {
+    let marker = resync_marker(EVENT_BUS_KIND_VDFS);
+    assert!(
+        event_bus_resync_of(&marker, EVENT_BUS_KIND_VDFS),
+        "本模块产的标记必须由本模块的入口认出（两侧分属不同 crate，改名只会在运行期静默）"
+    );
+    assert!(
+        event_bus_vdfs_change_of(&marker).is_none(),
+        "resync 是指令而非变更：两条入口不得同时命中同一帧"
+    );
+    // 频道也要对上：vdfs 的指令不该被当成 system 的。
+    assert!(
+        !event_bus_resync_of(&marker, EVENT_BUS_KIND_SYSTEM),
+        "判别含频道，跨频道不得误认"
+    );
+}
+
+/// 判别读的是**信封契约**而非本模块的构造函数：手搓一份线上形状，入口同样要认出。
+///
+/// 与 `vdfs_change_of_unwraps_the_bus_envelope` 同理——产帧方改了形状而这里没跟着改，
+/// 本用例必须红。
+#[test]
+fn resync_of_unwraps_the_bus_envelope() {
+    let frame = PluginFrame::data(json!({
+        "type": "bus_event",
+        "data": {
+            "kind": "vdfs",
+            "session_id": null,
+            "data": { "type": EVENT_BUS_RESYNC_MARKER_TYPE }
+        }
+    }));
+    assert!(event_bus_resync_of(&frame, EVENT_BUS_KIND_VDFS));
+}
+
+/// 真变更**不是**指令；`Error` 帧、别的频道的指令也都不算。
+///
+/// 「先试变更、再试指令」的顺序靠这两者互斥才成立（`cli` 与各消费方都按这个顺序写）。
+#[test]
+fn a_real_change_is_not_a_resync_marker() {
+    let change = PluginFrame::data(event_bus_build_envelope(
+        EVENT_BUS_KIND_VDFS,
+        None,
+        json!({ "path": "a.md" }),
+    ));
+    assert!(event_bus_vdfs_change_of(&change).is_some());
+    assert!(!event_bus_resync_of(&change, EVENT_BUS_KIND_VDFS));
+
+    assert!(
+        !event_bus_resync_of(
+            &PluginFrame::Error("boom".into(), None),
+            EVENT_BUS_KIND_VDFS
+        ),
+        "非 Data 帧不得被认成指令，也不得 panic"
+    );
+    let system_marker = resync_marker(EVENT_BUS_KIND_SYSTEM);
+    assert!(
+        !event_bus_resync_of(&system_marker, EVENT_BUS_KIND_VDFS),
+        "system 频道的指令不算 vdfs 频道的"
+    );
+}

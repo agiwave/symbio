@@ -46,8 +46,8 @@ use tokio::sync::mpsc;
 use symbio::init::create_root_plugin;
 use symbio::symbio_core::chat_node::ChatNode;
 use symbio::symbio_core::{
-    event_bus_vdfs_change_of, EventBusSubscribeRequest, VdfsChange, VdfsNode, EVENT_BUS_KIND_VDFS,
-    EVENT_BUS_RESYNC_MARKER_TYPE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+    event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, VdfsChange, VdfsNode,
+    EVENT_BUS_KIND_VDFS, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
 use symbio::symbio_core::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
@@ -113,27 +113,14 @@ pub enum Frame {
 
 /// 总线帧 → [`Frame`]；非 `vdfs` 频道帧返回 `None`。
 ///
-/// 变更解析交给 [`event_bus_vdfs_change_of`]（信封契约的唯一实现，与产帧方
-/// `event_bus_build_envelope` 同域：**形状改了那边先响**）。
-/// resync 标记**不是一条变更**（刻意不带 `path`，`event_bus_vdfs_change_of` 解不出），
-/// 单独认——顺序不可颠倒：它靠这个「解不出」与真变更区分。
+/// 两个入口都在 core：[`event_bus_vdfs_change_of`] 解变更，[`event_bus_resync_of`] 认指令
+/// （与产帧方 `event_bus_build_envelope` 同域：**形状改了那边先响）。顺序不可颠倒——
+/// resync 标记不是变更（刻意不带 `path`），它靠「解不出变更」与真变更区分。
 fn bus_frame_of(frame: PluginFrame) -> Option<Frame> {
     if let Some(c) = event_bus_vdfs_change_of(&frame) {
         return Some(Frame::Change(Box::new(c)));
     }
-    let is_resync = match &frame {
-        PluginFrame::Data(v) => {
-            let bus = v.get("data")?;
-            bus.get("kind").and_then(Value::as_str) == Some(EVENT_BUS_KIND_VDFS)
-                && bus
-                    .get("data")
-                    .and_then(|d| d.get("type"))
-                    .and_then(Value::as_str)
-                    == Some(EVENT_BUS_RESYNC_MARKER_TYPE)
-        }
-        _ => false,
-    };
-    is_resync.then_some(Frame::Resync)
+    event_bus_resync_of(&frame, EVENT_BUS_KIND_VDFS).then_some(Frame::Resync)
 }
 
 pub struct SymbioClient {

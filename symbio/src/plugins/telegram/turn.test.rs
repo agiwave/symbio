@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
-use crate::symbio_core::EVENT_BUS_KIND_SYSTEM;
+use crate::symbio_core::{EVENT_BUS_KIND_SYSTEM, EVENT_BUS_RESYNC_MARKER_TYPE};
 
 const SID: &str = "chat-1";
 const SESSION_ADDR: &str = "root/session/chat-1";
