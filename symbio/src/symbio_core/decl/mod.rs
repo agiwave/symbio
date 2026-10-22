@@ -39,10 +39,10 @@
 //!
 //! ## 首批声明
 //!
-//! 15 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
+//! 16 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
 //! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
 //! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
-//! `turn.dispatch`、`authz.denied`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
+//! `turn.dispatch`、`authz.denied`、`authz.granted`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
 //! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
 //!
 //! 视图点名决定了事实的**下限**：`in_flight` 读三个协议名（`sent` / `response` /
@@ -434,7 +434,18 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: None,
         key: &["key"],
         expand: &[],
-        fields: &["key", "kind", "reason", "detail"],
+        fields: &["key", "port", "id", "tool", "kind", "reason", "detail"],
+    },
+    // 放行事实（T-226 / PL-016 §4.2）：授权级联的正向一半。
+    //
+    // 键取 `(port, id)` 而不是 `key`：级联的派发行要与 `sent` / `failed` 关同一
+    // 逻辑调用，而协议事实的键是二元组；`key` 只是给人看的同一 id 副本。
+    FactDecl {
+        name: "authz.granted",
+        port: None,
+        key: &["port", "id"],
+        expand: &[],
+        fields: &["key", "port", "id", "tool", "risk", "deferred"],
     },
 ];
 

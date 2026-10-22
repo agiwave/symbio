@@ -186,6 +186,19 @@ impl CapabilityRiskLevel {
             _ => Self::Medium,
         }
     }
+
+    /// 审批判定的**唯一比较**：本次风险高于会话阈值且用户没批过 ⇒ 需要审批。
+    ///
+    /// 为什么把它放在类型上，而不是分别写在「执行闸门」与「授权级联的记录方」：
+    /// 两处各写一遍 `risk > threshold && !approved`，改一处漏一处时两边都合法、
+    /// 没有任何东西会红；而这是**放宽安全约束**方向的静默失效。方法只有一个实现，
+    /// 两个调用点（`providers/collectors/approval.rs` 与 `plugins/loop`）都问它。
+    ///
+    /// 注意：它只回答「要不要审批」，不回答审批卡的形状；`mode = auto` 与交互模式
+    /// 的差异（友好错误 vs 待用户动作卡）仍由执行闸门决定。
+    pub fn requires_approval(self, threshold: Self, approved: bool) -> bool {
+        self > threshold && !approved
+    }
 }
 
 #[async_trait]

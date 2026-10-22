@@ -134,6 +134,37 @@ pub(crate) fn announce<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    announce_with(store, call, turn, produced_by, serde_json::Value::Null)
+}
+
+/// 与 [`announce`] 同一条 `request`，但允许端口带上**判定所需的载荷**。
+///
+/// 工具端口的授权级联需要「这次调用请求了什么、风险多大、用户批过没有」——
+/// 它们必须和 `request` 同一条事实落盘，否则授权行只能读内存，回放就不可判。
+/// `extra` 是 JSON 对象时逐字段并入载荷；`Null` / 非对象 ⇒ 与 `announce` 逐字同形。
+///
+/// **不把 `extra` 并进 `sent`**：派发事实的载荷是端口声明 + 尝试号，判定输入
+/// 属于「请求」这一半；同一条事实写两遍输入会让两个写方各说一套。
+pub(crate) fn announce_with<S>(
+    store: &S,
+    call: &Call,
+    turn: u64,
+    produced_by: u64,
+    extra: serde_json::Value,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let mut payload = serde_json::json!({
+        "port": call.port,
+        "id": call.id,
+        "attempt": call.attempt,
+    });
+    if let (Some(dst), Some(src)) = (payload.as_object_mut(), extra.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
     append(
         store,
         Event::pending(
@@ -145,11 +176,7 @@ where
             "system",
         )
         .with_produced_by(produced_by)
-        .with_payload(serde_json::json!({
-            "port": call.port,
-            "id": call.id,
-            "attempt": call.attempt,
-        })),
+        .with_payload(payload),
     )
 }
 
@@ -172,6 +199,45 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
     W: FnOnce(&E) -> String,
+{
+    let Dispatch {
+        call,
+        turn,
+        produced_by,
+        ..
+    } = plan;
+    begin(store, ports, plan).map_err(|e| match e {
+        DispatchError::NoPort(port) => DispatchError::NoPort(port),
+        DispatchError::NotOwed(row) => DispatchError::NotOwed(row),
+        DispatchError::Store(e) => DispatchError::Store(e),
+        // `begin` 不跑执行体，构造不出 `Actor`。
+        DispatchError::Actor(never) => match never {},
+    })?;
+    match run().await {
+        Ok(value) => {
+            succeed(store, call, turn, produced_by).map_err(DispatchError::Store)?;
+            Ok(value)
+        }
+        Err(e) => {
+            // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
+            let _ = failed(store, call, turn, produced_by, &why(&e));
+            Err(DispatchError::Actor(e))
+        }
+    }
+}
+
+/// 派发的**前半段**：确认这一行还欠，然后落 `before`（通常是 `sent`）。
+///
+/// 与 [`dispatch`] 拆开是为了「先派发 N 笔、再等整批」的形态（PL-017 §3.3 的
+/// 工具批次）：每笔子调用各自落一条 `sent`，执行体在整批 `sent` 之后才跑。
+/// 记账仍然是引擎的一半——调用点只交出「这一行还欠不欠」的事实结论。
+pub(crate) fn begin<S>(
+    store: &S,
+    ports: &[PortDecl],
+    plan: Dispatch<'_>,
+) -> Result<(), DispatchError<std::convert::Infallible>>
+where
+    S: Store<Event = Event> + ?Sized,
 {
     let Dispatch {
         call,
@@ -206,36 +272,36 @@ where
             "attempt_cap": decl.max_attempts,
         })),
     )
-    .map_err(DispatchError::Store)?;
+    .map_err(DispatchError::Store)
+}
 
-    match run().await {
-        Ok(value) => {
-            append(
-                store,
-                Event::pending(
-                    call.attempt_key(EVENT_RESPONSE),
-                    EVENT_RESPONSE,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    turn,
-                    "system",
-                )
-                .with_produced_by(produced_by)
-                .with_payload(serde_json::json!({
-                    "port": call.port,
-                    "id": call.id,
-                    "attempt": call.attempt,
-                })),
-            )
-            .map_err(DispatchError::Store)?;
-            Ok(value)
-        }
-        Err(e) => {
-            // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
-            let _ = failed(store, call, turn, produced_by, &why(&e));
-            Err(DispatchError::Actor(e))
-        }
-    }
+/// 派发的**后半段**：执行体正常返回 ⇒ 落 `response`（同一次尝试）。
+pub(crate) fn succeed<S>(
+    store: &S,
+    call: &Call,
+    turn: u64,
+    produced_by: u64,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    append(
+        store,
+        Event::pending(
+            call.attempt_key(EVENT_RESPONSE),
+            EVENT_RESPONSE,
+            Entity::Turn,
+            Verb::Asserted,
+            turn,
+            "system",
+        )
+        .with_produced_by(produced_by)
+        .with_payload(serde_json::json!({
+            "port": call.port,
+            "id": call.id,
+            "attempt": call.attempt,
+        })),
+    )
 }
 
 /// 落 `failed`：这笔调用不再重试（关**逻辑 id**，所有尝试）。

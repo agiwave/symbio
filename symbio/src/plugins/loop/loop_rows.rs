@@ -1,4 +1,4 @@
-//! 义务环的行表（T-222）：五条策略行 + 一条执行决策行 + 端口的三条行（T-223）。
+//! 义务环的行表（T-222）：五条策略行 + 一条执行决策行 + 端口 / 授权级联行（T-223 / T-227）。
 //!
 //! ## 一行只写「什么时候欠、什么算还」
 //!
@@ -9,6 +9,7 @@
 //! ## 五条策略行的前后关系
 //!
 //! ```text
+//!  0 authorize-tool─ 授权级联：一笔工具请求先判「放行 / 拒绝」（T-226）
 //! 10 classify      ── 轮首判决（本幕 round=0 且有发言）
 //! 20 report        ── 中途汇报（一段静默到期，未用完配额）
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
@@ -17,8 +18,10 @@
 //! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
 //! 66 dispatch-model─ 端口派发：模型往返（T-227 步 2，在 `turn` 执行体内部）
+//! 67 dispatch-tools─ 端口派发：工具批次里的单次调用（T-227 步 3）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
 //! 71 await-model   ── 等应答（模型端口）
+//! 72 await-tools   ── 等应答（工具端口）
 //! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
 //!
@@ -51,13 +54,14 @@ use serde_json::Value;
 
 use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
-    builtin, Event, Frozen, LatencyTier, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
-    EVENT_SENT,
+    builtin, Event, Frozen, LatencyTier, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED,
+    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
 ///
-/// 当前两个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返，T-227 步 2）。
+/// 当前三个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返，T-227 步 2）、
+/// `tool`（批次里的单次工具调用，T-227 步 3）。
 ///
 /// ## 租约与尝试上限怎么定的
 ///
@@ -97,10 +101,73 @@ pub(crate) static PORTS: &[PortDecl] = &[
         lease_ms: 600_000,
         max_attempts: 1,
     },
+    // 工具批次里的**单次调用**（T-227 步 3）。一次模型响应可带 N 个调用 ⇒
+    // 同一批写 N 条 `request`，各自一个 id。
+    //
+    // 租约与尝试上限同 `turn` / `model`：执行在轮内同步等待，进程重启后等这笔
+    // 应答的 future 已不在；重试只会留下永不派发的 `request`。工具恢复仍走
+    // `resume` 幕（新 `drive_seq` ⇒ 新 id），与步 4 的唤醒事实是同一件事的两面。
+    PortDecl {
+        port: "tool",
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+    },
 ];
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
+    // ── 授权级联（T-226 ⇒ T-227 步 3）────────────────────────────────
+    //
+    // 两行，不是一行：
+    //
+    //   authorize-tool   owes: request(port=tool)      until: granted | denied
+    //   dispatch-tools   owes: granted(port=tool)      until: sent | failed
+    //
+    // ## 为什么派发行 `owes` 写 `granted` 而不是 `request ∧ granted`
+    //
+    // `Decl.owes` 是**一个** `Pattern`（单源等值），跨源合取写不出来；要写就得
+    // 改求解器，而求解器的字节是 PTS-003 的判据面（改它必须挂 ADR）。这里用
+    // **蕴含**代替合取：`granted` 只可能由 `authorize-tool` 从一笔 `request`
+    // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tools` 只欠
+    // `granted`，与 `request ∧ granted` 的可达债集合相同。
+    //
+    // 这不是近似：`denied` ⇒ 没有 `granted` ⇒ 派发行**永不**成立（fail-closed），
+    // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tools` 不欠——两种状态在
+    // 匹配上可分，正是判据 8b 要的那条区分。全程没有否定原子。
+    //
+    // ## 为什么两行的 `key` 都是 `(port, id)`
+    //
+    // `authorize-tool` 的出口是 `authz.granted` / `authz.denied`，`dispatch-tools`
+    // 的出口是 `sent` / `failed`：它们必须与协议事实关同一笔逻辑调用。`authz.denied`
+    // 的**收束格拒绝**那条载荷只有 `key`（目标格名），没有 `port` / `id`——按
+    // `(port, id)` 绑定自然取不到实例，不会误关一笔工具授权。
+    Decl {
+        name: "authorize-tool",
+        // T-226 的口径：判在派发之前。0 是这一环里最早的一档。
+        prio: 0,
+        by: Some("authorizer"),
+        // 判定是纯比较（风险档 vs 会话阈值），不调模型。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_AUTHZ_GRANTED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_AUTHZ_DENIED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
     // ── 轮首判决 ─────────────────────────────────────────────────────────
     Decl {
         name: "policy.classify",
@@ -312,6 +379,33 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // 授权级联的第二行（第一行 `authorize-tool` 在表首）：只对已放行的那笔
+    // 落 `sent`。`granted` 已蕴含 `request`，所以这里不再复写请求前件。
+    Decl {
+        name: "dispatch-tools",
+        prio: 67,
+        by: Some("courier"),
+        // 派发本身不调工具（执行在批次里）。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_AUTHZ_GRANTED,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
     // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
     // 永不选中），但它让「在等」与「没事」可区分（PL-016 §2.3）。
     Decl {
@@ -373,6 +467,36 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // 一批 N 笔，一笔一条 `sent`；`await-tools` 与其它端口的 await 同形。
+    Decl {
+        name: "await-tools",
+        prio: 72,
+        by: None,
+        tier: LatencyTier::Deep,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
     // ── 租约（**每端口不写**，一个行管所有端口）───────────────────
     //
     // 开账条件是 `stale_sent.stale`（视图把 `now` 与 `lease_ms` 折成布尔），
@@ -430,8 +554,8 @@ static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
     };
     for gap in check_rows(ROWS, &frozen) {
         match gap {
-            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧、`authz.denied`
-            // 在 T-226；装载期继续点名而不是豁免。
+            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧。装载期继续点名
+            // 而不是豁免。
             Gap::OrphanFact { fact } => {
                 crate::plugin_info!("session", "[Loop] 声明的事实暂无行消费：{}", fact);
             }

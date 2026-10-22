@@ -30,11 +30,19 @@ use std::sync::Arc;
 ///
 /// 字面量→档位的映射不在这里：[`CapabilityRiskLevel::from_name`] 是唯一解析点
 /// （参数级风险判定 `local::shell` 问同一个方法）。
-fn threshold_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskLevel {
+pub(crate) fn threshold_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskLevel {
     ctx.get(RISK_LEVEL)
         .map(|s| CapabilityRiskLevel::from_name(&s))
         .unwrap_or_default()
 }
+
+// 审批判定的**唯一比较**住在 `CapabilityRiskLevel::requires_approval`：
+// 需要审批 ⇔ 本次风险高于会话阈值且用户没批过。
+//
+// 为什么比较不写在这里：授权级联的记录方（`tool_dispatch` 的工具端口）与真正
+// 执行闸门（`approval_gate`）必须用同一份判据；两处各写一遍 `risk > threshold`，
+// 改一处漏一处时两边都合法、没有任何东西会红。**判定位置不变**：执行闸门仍是
+// 唯一放行点，记录方只决定「这笔账是否已经可以派发」。
 
 /// 审批闸门的**唯一**判定：需要审批 ⇒ `Ok(Some(载荷))`；放行 ⇒ `Ok(None)`。
 ///
@@ -58,9 +66,9 @@ pub fn approval_gate(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let threshold = threshold_from_ctx(ctx);
-    let needs_approval = tool_risk > threshold;
+    let needs = tool_risk.requires_approval(threshold, is_approved);
 
-    if !needs_approval || is_approved {
+    if !needs {
         return Ok(None);
     }
 

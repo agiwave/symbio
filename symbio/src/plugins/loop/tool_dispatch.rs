@@ -26,6 +26,7 @@
 //! 不定格它永远转「流式中」，不切节点多轮正文会粘成一条。
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -35,10 +36,14 @@ use crate::symbio_core::chat_node::{
 };
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::{
-    llm_emit_message, llm_emit_state, DispatchOutcome, DispatchPort, Event, ExecAbortSignal,
-    ExecEventSink, LlmTurn, Plugin, PluginInvokeRequest, Store,
+    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, CapabilityRiskLevel,
+    DispatchOutcome, DispatchPort, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn, Plugin,
+    PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store, Verb, CAPABILITY_VISITOR,
+    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, MODE, RISK_LEVEL,
 };
 
+use super::loop_rows;
+use super::port;
 use super::tools::process_tool_calls_async;
 use super::turn_exec::UiBridge;
 use crate::symbio_core::node_build::{
@@ -64,6 +69,16 @@ pub(crate) struct DerivedFacts {
     pub(crate) breaks: Vec<&'static str>,
 }
 
+/// 一笔已开账的工具端口调用（批次级 prepass 的产物）。
+///
+/// `granted = false` ⇒ 授权行已落 `authz.denied`，这笔调用**没有** `sent`；
+/// 执行层仍会跑它（审批 / 拒绝卡的节点由执行层唯一构造），但端口账已关。
+struct ToolPortCall {
+    id: String,
+    call: port::Call,
+    granted: bool,
+}
+
 /// v2 的工具分发方：一轮工具调用的执行 + 落节点 + 结果映射。
 pub(crate) struct SessionDispatchPort {
     /// 插件宿主（工具能力经它路由）。
@@ -80,6 +95,12 @@ pub(crate) struct SessionDispatchPort {
     abort: ExecAbortSignal,
     /// 本轮 Turn 根节点 id（助手轮消息的父节点）。
     root_id: String,
+    /// 本轮的轮号 / 用户格溯源 / 幕号（工具端口的事实要落在这条轨上）。
+    turn: u64,
+    user_seq: u64,
+    drive_seq: u64,
+    /// 本轮第几次工具批次（幂等 id 的段号；一次模型响应一批）。
+    batch_seq: AtomicU64,
     /// 流式桥：交出本轮正文节点并切下一轮。
     bridge: Arc<UiBridge>,
     /// 本轮产生的全部消息（供 chat_loop 并入落库权威镜像）。
@@ -102,6 +123,9 @@ impl SessionDispatchPort {
         facts: Arc<dyn Store<Event = Event>>,
         abort: ExecAbortSignal,
         root_id: String,
+        turn: u64,
+        user_seq: u64,
+        drive_seq: u64,
         bridge: Arc<UiBridge>,
         presentation_tree: PresentationTree,
         elimination_revoked: bool,
@@ -114,6 +138,10 @@ impl SessionDispatchPort {
             facts,
             abort,
             root_id,
+            turn,
+            user_seq,
+            drive_seq,
+            batch_seq: AtomicU64::new(0),
             bridge,
             produced: Mutex::new(Vec::new()),
             derived: Mutex::new(DerivedFacts::default()),
@@ -131,12 +159,310 @@ impl SessionDispatchPort {
     pub(crate) fn take_derived(&self) -> DerivedFacts {
         std::mem::take(&mut self.derived.lock().unwrap())
     }
+
+    /// 批次级 prepass：为每个真正可派发的调用开一笔工具账（T-227 步 3）。
+    ///
+    /// 顺序是授权的级联本身：`request` → `authorize-tool`（放行 / 拒绝）→
+    /// `dispatch-tools`（只对放行的那笔落 `sent`）。拒绝 ⇒ 没有 `granted` ⇒
+    /// 派发行永不成立（fail-closed），这正是判据 8b 要的「无授权 / 被拒绝可分」。
+    ///
+    /// ## 为什么 prepass 在批次之前
+    ///
+    /// `sent` 的语义是「这一笔已交给执行层」，不是「工具已经开始跑」。批次内的
+    /// 并发 / 串行由执行层按风险档决定（T-190），端口层不重排它；把 N 笔一次
+    /// 交出去，事实面因此能回答「本批在途几笔」，而执行层仍保有自己的窗口纪律。
+    ///
+    /// ## 跳过哪些调用
+    ///
+    /// 协议已坏的（id / name 缺失、参数 JSON 残缺、超限丢弃）不是一次可授权调用：
+    /// 它们没有可判的能力维度，执行层会各自产出协议失败结果。给它们补 `sent`
+    /// 会把「模型发了个坏调用」记成「我们把它派出去了」。
+    async fn open_tool_calls(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
+        let batch = self.batch_seq.fetch_add(1, Ordering::Relaxed);
+        let store = self.facts.as_ref();
+        let known: Vec<String> = tool_metas(&self.ctx)
+            .await
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        // 阈值读法与执行闸门同一处口径：`ctx[RISK_LEVEL]`，缺席 = `Medium`。
+        // 比较本身只问 `CapabilityRiskLevel::requires_approval`（唯一实现）。
+        let threshold = self
+            .ctx
+            .get(RISK_LEVEL)
+            .map(|s| CapabilityRiskLevel::from_name(&s))
+            .unwrap_or_default();
+        let mode = self.ctx.get(MODE).unwrap_or_default();
+        let mut out = Vec::new();
+
+        for (idx, tc) in turn.tool_calls.iter().enumerate() {
+            let Some(id) = tc.id.as_deref().filter(|s| !s.trim().is_empty()) else {
+                continue;
+            };
+            let Some(name) = tc.name.as_deref().filter(|s| !s.trim().is_empty()) else {
+                continue;
+            };
+            if tc.parse_error.is_some() || tc.overflow_notice.is_some() {
+                continue;
+            }
+            let approved = tc
+                .arguments
+                .get("approved")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let risk = risk_of(&self.ctx, name, &tc.arguments, &known).await;
+            // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
+            // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
+            let deferred = risk.is_none();
+            let granted = risk.is_none_or(|risk| !risk.requires_approval(threshold, approved));
+            let risk_name = risk.map(risk_label).unwrap_or("unknown");
+
+            let call = port::Call::new(
+                "tool",
+                format!("tool-{}-d{}-b{}-c{}", self.turn, self.drive_seq, batch, idx),
+                1,
+            );
+            if let Err(e) = port::announce_with(
+                store,
+                &call,
+                self.turn,
+                self.user_seq,
+                serde_json::json!({
+                    "tool": name,
+                    "risk": risk_name,
+                    "threshold": risk_label(threshold),
+                    "approved": approved,
+                    "deferred": deferred,
+                }),
+            ) {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 工具请求事实未落格（turn={} / {id}）：{e:?}",
+                    self.turn
+                );
+                continue;
+            }
+
+            let facts = store.range(Seq::new(0));
+            if !loop_rows::owes(
+                "authorize-tool",
+                &facts,
+                self.turn,
+                crate::symbio_core::clock_now_ms(),
+            ) {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 授权行不欠（turn={} / {id}），不派发",
+                    self.turn
+                );
+                continue;
+            }
+
+            if granted {
+                if let Err(e) = append_authz(
+                    store,
+                    granted_event(self.turn, self.user_seq, &call, name, risk_name, deferred),
+                ) {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 放行事实未落格（turn={} / {id}）：{e:?}",
+                        self.turn
+                    );
+                    continue;
+                }
+                let facts = store.range(Seq::new(0));
+                let owed = loop_rows::owes(
+                    "dispatch-tools",
+                    &facts,
+                    self.turn,
+                    crate::symbio_core::clock_now_ms(),
+                );
+                if !owed {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 派发行不欠（turn={} / {id}），不落 sent",
+                        self.turn
+                    );
+                    let _ = port::failed(
+                        store,
+                        &call,
+                        self.turn,
+                        self.user_seq,
+                        "dispatch_row_not_owed",
+                    );
+                    continue;
+                }
+                if let Err(e) = port::begin(
+                    store,
+                    loop_rows::PORTS,
+                    port::Dispatch {
+                        call: &call,
+                        turn: self.turn,
+                        produced_by: self.user_seq,
+                        owed,
+                    },
+                ) {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 工具 sent 未落格（turn={} / {id}）：{e:?}",
+                        self.turn
+                    );
+                    continue;
+                }
+                out.push(ToolPortCall {
+                    id: id.to_string(),
+                    call,
+                    granted: true,
+                });
+            } else {
+                // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
+                // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。
+                let why = if mode == "auto" {
+                    "permission_denied"
+                } else {
+                    "needs_approval"
+                };
+                if let Err(e) = append_authz(
+                    store,
+                    denied_event(self.turn, self.user_seq, &call, name, why),
+                ) {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 拒绝事实未落格（turn={} / {id}）：{e:?}",
+                        self.turn
+                    );
+                }
+                out.push(ToolPortCall {
+                    id: id.to_string(),
+                    call,
+                    granted: false,
+                });
+            }
+        }
+        out
+    }
+
+    /// 批次返回后关账：放行的每一笔都必须有 `response`（有结果）或 `failed`
+    /// （执行层没跑到它）。拒绝的那几笔已经由 `authz.denied` 关掉，不在这里补。
+    fn close_tool_calls(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
+        let store = self.facts.as_ref();
+        for call in calls.iter().filter(|c| c.granted) {
+            let answered = outcomes.iter().any(|o| o.call_id == call.id);
+            let done = if answered {
+                port::succeed(store, &call.call, self.turn, self.user_seq)
+            } else {
+                port::failed(store, &call.call, self.turn, self.user_seq, "not_executed")
+            };
+            if let Err(e) = done {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 工具应答事实未落格（turn={} / {}）：{e:?}",
+                    self.turn,
+                    call.id
+                );
+            }
+        }
+    }
+}
+
+/// 风险档的线格式（与 `CapabilityRiskLevel` 的 serde 字面量同一套词）。
+fn risk_label(risk: CapabilityRiskLevel) -> &'static str {
+    match risk {
+        CapabilityRiskLevel::Low => "low",
+        CapabilityRiskLevel::Medium => "medium",
+        CapabilityRiskLevel::High => "high",
+    }
+}
+
+/// 这次调用的风险档。`None` = 注册表里没有可判的能力（route-only 工具）。
+async fn risk_of(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    name: &str,
+    args: &serde_json::Value,
+    known: &[String],
+) -> Option<CapabilityRiskLevel> {
+    let canonical = capability_resolve(name, known.iter().map(String::as_str))?;
+    let visitor = ctx.get(CAPABILITY_VISITOR)?;
+    let cap = visitor
+        .get(canonical)
+        .await
+        .and_then(|r| r.cap().cloned())?;
+    Some(cap.risk_for(args))
+}
+
+fn granted_event(
+    turn: u64,
+    produced_by: u64,
+    call: &port::Call,
+    tool: &str,
+    risk: &str,
+    deferred: bool,
+) -> Event {
+    let id = &call.id;
+    Event::pending(
+        format!("grant-{turn}-{id}"),
+        EVENT_AUTHZ_GRANTED,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        "authorizer",
+    )
+    .with_produced_by(produced_by)
+    .with_payload(serde_json::json!({
+        "key": id,
+        "port": "tool",
+        "id": id,
+        "tool": tool,
+        "risk": risk,
+        "deferred": deferred,
+    }))
+}
+
+fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why: &str) -> Event {
+    let id = &call.id;
+    Event::pending(
+        format!("deny-tool-{turn}-{id}"),
+        EVENT_AUTHZ_DENIED,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        "authorizer",
+    )
+    .with_produced_by(produced_by)
+    .with_payload(serde_json::json!({
+        "key": id,
+        "port": "tool",
+        "id": id,
+        "tool": tool,
+        "kind": "tool",
+        "reason": crate::symbio_core::ClosureReason::Denied.as_str(),
+        "detail": why,
+    }))
+}
+
+fn append_authz<S>(store: &S, event: Event) -> Result<(), crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    match store.append(event) {
+        Ok(_) => Ok(()),
+        Err(crate::symbio_core::AppendError::Duplicate) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 #[async_trait]
 impl DispatchPort for SessionDispatchPort {
     async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
         let mut produced: Vec<ChatNode> = Vec::new();
+
+        // ⓪ 端口账：先授权、再派发（T-227 步 3）。这一步必须在执行层之前——
+        //    `sent` 的语义是「已交给执行层」，而不是「工具已经开始跑」。
+        let port_calls = if turn.tool_calls.is_empty() {
+            Vec::new()
+        } else {
+            self.open_tool_calls(turn).await
+        };
 
         // ① 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
         //    没有正文（纯工具调用轮）就不建节点——空节点是噪声。
@@ -241,7 +567,7 @@ impl DispatchPort for SessionDispatchPort {
         }
 
         // ④ 映射为 core 的事实形状（运行器据此落 `artifact.added` 并拼下一轮 prompt）。
-        tool_msgs
+        let outcomes: Vec<DispatchOutcome> = tool_msgs
             .iter()
             .map(|m| {
                 let call_id = m.parent_id.clone().unwrap_or_default();
@@ -294,7 +620,11 @@ impl DispatchPort for SessionDispatchPort {
                     result_id: m.id.clone(),
                 }
             })
-            .collect()
+            .collect();
+        // ⑤ 关账：放行的每一笔都要有 `response` / `failed`（拒绝的那几笔由 `denied`
+        //    关在授权行上）。放在结果映射之后：`call_id` 是执行层交回的权威 id。
+        self.close_tool_calls(&port_calls, &outcomes);
+        outcomes
     }
 }
 

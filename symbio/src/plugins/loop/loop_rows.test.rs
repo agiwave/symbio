@@ -426,6 +426,7 @@ fn rows_are_stable_and_globally_ordered() {
     assert_eq!(
         names,
         vec![
+            "authorize-tool",
             "policy.classify",
             "policy.report",
             "policy.compress",
@@ -433,11 +434,13 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
-            // （T-223 的 `turn` / T-227 步 2 的 `model`）。
+            // （T-223 的 `turn` / T-227 步 2 的 `model` / 步 3 的 `tool`）。
             "dispatch-turn",
             "dispatch-model",
+            "dispatch-tools",
             "await-turn",
             "await-model",
+            "await-tools",
             "lease",
         ]
     );
@@ -449,6 +452,7 @@ fn rows_are_stable_and_globally_ordered() {
         ROWS.iter().map(|d| d.tier).collect::<Vec<_>>(),
         vec![
             crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Reflex,
@@ -457,6 +461,8 @@ fn rows_are_stable_and_globally_ordered() {
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Fast,
@@ -479,10 +485,10 @@ fn facts_without_a_row_are_pinned() {
     // 后续任务，而不是遗漏。
     //
     //   turn.dispatch —— T-225 档位事实，读方是 core 的派生函数
-    //   authz.denied  —— T-226 授权拒绝行
     //
-    // 协议五名已由 T-223 的端口行全部接住（`request` / `sent` / `response` /
-    // `failed` / `retry` → dispatch / await / lease）。
+    // 协议五名已由端口行全部接住（`request` / `sent` / `response` / `failed` /
+    // `retry` → dispatch / await / lease）；`authz.granted` / `authz.denied` 由
+    // `authorize-tool` 与 `dispatch-tools` 接住（T-226 / T-227 步 3）。
     let gaps = check_rows(ROWS, &frozen());
     let orphans: Vec<_> = gaps
         .iter()
@@ -491,7 +497,7 @@ fn facts_without_a_row_are_pinned() {
             _ => None,
         })
         .collect();
-    assert_eq!(orphans, vec!["turn.dispatch", "authz.denied"]);
+    assert_eq!(orphans, vec!["turn.dispatch"]);
 }
 
 // ── 端口 `turn` 的三行（T-223）─────────────────────────────────────────
@@ -649,4 +655,155 @@ fn the_model_rows_do_not_disturb_the_turn_rows() {
         !owes("dispatch-model", &events, 0),
         "端口是债键的一部分：`turn` 的账不能开 `model` 的行"
     );
+}
+
+// ── 工具端口与授权级联（T-227 步 3）────────────────────────────────────
+
+fn tool_request(id: &str) -> Event {
+    ev(
+        1,
+        crate::symbio_core::EVENT_REQUEST,
+        json!({
+            "port": "tool",
+            "id": id,
+            "attempt": 1,
+            "tool": "read_file",
+            "risk": "low",
+            "threshold": "medium",
+            "approved": false,
+            "deferred": false,
+        }),
+    )
+}
+
+fn tool_granted(id: &str) -> Event {
+    ev(
+        1,
+        crate::symbio_core::EVENT_AUTHZ_GRANTED,
+        json!({
+            "key": id,
+            "port": "tool",
+            "id": id,
+            "tool": "read_file",
+            "risk": "low",
+            "deferred": false,
+        }),
+    )
+}
+
+fn tool_denied(id: &str) -> Event {
+    ev(
+        1,
+        crate::symbio_core::EVENT_AUTHZ_DENIED,
+        json!({
+            "key": id,
+            "port": "tool",
+            "id": id,
+            "tool": "write_file",
+            "kind": "tool",
+            "reason": "denied",
+            "detail": "needs_approval",
+        }),
+    )
+}
+
+fn tool_sent(id: &str) -> Event {
+    ev_at(
+        1,
+        crate::symbio_core::EVENT_SENT,
+        json!({
+            "port": "tool",
+            "id": id,
+            "attempt": 1,
+            "lease_ms": 600_000,
+            "attempt_cap": 1,
+        }),
+        0,
+    )
+}
+
+#[test]
+fn a_tool_request_opens_authorization_and_both_answers_close_it() {
+    let asked = vec![tool_request("c-1")];
+    assert!(
+        owes("authorize-tool", &asked, 0),
+        "请求落了、还没判 ⇒ 欠一次授权"
+    );
+    assert!(
+        !owes("dispatch-tools", &asked, 0),
+        "没放行 ⇒ 派发行不成立（fail-closed）"
+    );
+
+    let allowed = vec![tool_request("c-1"), tool_granted("c-1")];
+    assert!(!owes("authorize-tool", &allowed, 0));
+    assert!(owes("dispatch-tools", &allowed, 0));
+
+    let refused = vec![tool_request("c-1"), tool_denied("c-1")];
+    assert!(!owes("authorize-tool", &refused, 0));
+    assert!(
+        !owes("dispatch-tools", &refused, 0),
+        "拒绝 ⇒ 没有 granted ⇒ 派发行永不成立"
+    );
+}
+
+#[test]
+fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
+    let dispatched = vec![tool_request("c-1"), tool_granted("c-1"), tool_sent("c-1")];
+    assert!(!owes("dispatch-tools", &dispatched, 0));
+    let debts = owed(ROWS, &frozen(), &dispatched, 0);
+    let wait = debts
+        .iter()
+        .find(|d| d.decl.name == "await-tools")
+        .expect("等工具应答的行在");
+    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+
+    let answered = {
+        let mut e = dispatched.clone();
+        e.push(ev(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
+        ));
+        e
+    };
+    assert!(!owes("await-tools", &answered, 0));
+
+    let failed = {
+        let mut e = dispatched.clone();
+        e.push(ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({ "port": "tool", "id": "c-1", "why": "not_executed" }),
+        ));
+        e
+    };
+    assert!(!owes("dispatch-tools", &failed, 0));
+    assert!(!owes("await-tools", &failed, 0));
+}
+
+#[test]
+fn a_closure_denial_does_not_close_a_tool_authorization() {
+    // 收束格拒绝的载荷只有目标格名（`key = chat.assistant.final`），没有
+    // `port` / `id`：按 `(port, id)` 绑定取不到实例，不能误关一笔工具授权。
+    let closure_denial = ev(
+        1,
+        crate::symbio_core::EVENT_AUTHZ_DENIED,
+        json!({
+            "key": "chat.assistant.final",
+            "kind": "speech",
+            "reason": "denied",
+            "detail": "缺 reply.first",
+        }),
+    );
+    let events = vec![tool_request("c-1"), closure_denial];
+    assert!(owes("authorize-tool", &events, 0));
+    assert!(!owes("dispatch-tools", &events, 0));
+}
+
+#[test]
+fn tool_rows_do_not_disturb_the_model_rows() {
+    // 授权级联只认 `port = tool`：一条模型的 `request` 不开授权行。
+    let events = vec![model_request("m-1")];
+    assert!(!owes("authorize-tool", &events, 0));
+    assert!(!owes("dispatch-tools", &events, 0));
 }

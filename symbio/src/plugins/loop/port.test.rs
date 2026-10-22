@@ -66,6 +66,69 @@ async fn dispatch_writes_before_and_the_answer_itself() {
     assert_eq!(request["id"], json!("turn-1-r0"));
 }
 
+#[test]
+fn announce_with_merges_the_authorization_payload_into_the_request() {
+    // 授权行要读「请求了什么、风险多大、批过没有」——它们必须与 `request`
+    // 同一条事实落盘。`announce_with` 只并入对象字段，协议三字段保持不动。
+    let store = boot();
+    let call = Call::new("tool", "tool-1-d1-b0-c0", 1);
+    announce_with(
+        &store,
+        &call,
+        1,
+        7,
+        json!({
+            "tool": "read_file",
+            "risk": "low",
+            "threshold": "medium",
+            "approved": false,
+            "deferred": false,
+        }),
+    )
+    .unwrap();
+
+    let request = payload_of(&store, "request");
+    assert_eq!(request["port"], json!("tool"));
+    assert_eq!(request["id"], json!("tool-1-d1-b0-c0"));
+    assert_eq!(request["attempt"], json!(1));
+    assert_eq!(request["tool"], json!("read_file"));
+    assert_eq!(request["risk"], json!("low"));
+    assert_eq!(request["approved"], json!(false));
+}
+
+#[tokio::test]
+async fn begin_and_succeed_can_bracket_a_whole_batch() {
+    // 工具批次的形态：N 笔先各自 `sent`，执行体整批跑完后再逐笔 `response`。
+    // 事实顺序钉住这一点——「本批在途几笔」因此读得出来。
+    let store = boot();
+    let a = Call::new("tool", "tool-1-d1-b0-c0", 1);
+    let b = Call::new("tool", "tool-1-d1-b0-c1", 1);
+    for call in [&a, &b] {
+        announce(&store, call, 1, 7).unwrap();
+    }
+    for call in [&a, &b] {
+        begin(
+            &store,
+            PORTS,
+            Dispatch {
+                call,
+                turn: 1,
+                produced_by: 7,
+                owed: true,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(kinds(&store), vec!["request", "request", "sent", "sent"]);
+
+    succeed(&store, &a, 1, 7).unwrap();
+    succeed(&store, &b, 1, 7).unwrap();
+    assert_eq!(
+        kinds(&store),
+        vec!["request", "request", "sent", "sent", "response", "response"]
+    );
+}
+
 #[tokio::test]
 async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
     // 判据 3：`run = Err` ⇒ 引擎落 `failed`，执行体自己的错误原样交回。
@@ -298,7 +361,11 @@ fn every_port_row_is_in_the_table() {
     // 加一个端口 = 1 条 `PortDecl` + 2 行模板（dispatch / await）。租约行**不**
     // 按端口写（一个 `lease` 行管所有端口），少了它 `sent` 之后崩溃就永远挂着。
     for p in PORTS {
-        for row in [format!("dispatch-{}", p.port), format!("await-{}", p.port)] {
+        // 工具端口的行名沿用方案里的复数（`dispatch-tools` / `await-tools`）：
+        // 一个工具端口的债单位是**单次调用**，但一次模型响应是一批；行名读的是
+        // 批次语义。模板仍是两条（dispatch / await），不是第三条。
+        let stem = if p.port == "tool" { "tools" } else { p.port };
+        for row in [format!("dispatch-{stem}"), format!("await-{stem}")] {
             assert!(
                 ROWS.iter().any(|d| d.name == row),
                 "端口 {} 缺 {row} 行",

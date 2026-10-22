@@ -60,6 +60,7 @@ fn builtin_loads_and_freezes() {
             "session.config",
             "turn.dispatch",
             "authz.denied",
+            "authz.granted",
         ]
     );
     let views: Vec<_> = frozen.views().iter().map(|v| v.name).collect();

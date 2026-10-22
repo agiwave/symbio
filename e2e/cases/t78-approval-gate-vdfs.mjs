@@ -132,6 +132,37 @@ export default defineCase(
       return abs;
     };
 
+    // 事实面读面：授权级联（T-227 步 3）必须留下 `request` + `authz.denied`，
+    // 而拒绝的那一笔**不能**有 `sent`——「没放行 ⇒ 没派发」是 fail-closed 的
+    // 唯一可观测形态。直接读会话 WAL，不经过转写（转写是投影，不是事实源）。
+    const readWal = (sid) =>
+      readFileSyncSafe(join(hd.homedir, 'session', sid, 'v2-events.wal'))
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+    const toolFacts = (events) => events.filter((e) => e?.payload?.port === 'tool');
+    const assertDeniedWithoutSent = (sid, detail) => {
+      const facts = toolFacts(readWal(sid));
+      const denied = facts.find(
+        (e) => e.kind === 'authz.denied' && e.payload?.detail === detail,
+      );
+      assert(
+        denied,
+        `${sid}: 工具授权拒绝必须落 \`authz.denied\`（detail=${detail}）；实际: ${JSON.stringify(
+          facts.map((e) => ({ kind: e.kind, id: e.payload?.id, detail: e.payload?.detail })),
+        )}`,
+      );
+      const id = denied.payload?.id;
+      assert(
+        facts.some((e) => e.kind === 'request' && e.payload?.id === id),
+        `${sid}: 拒绝的那一笔必须先有 \`request\`（id=${id}）`,
+      );
+      assert(
+        !facts.some((e) => e.kind === 'sent' && e.payload?.id === id),
+        `${sid}: 拒绝 ⇒ 不得有 \`sent\`（id=${id}）——没放行就没派发`,
+      );
+    };
+
     let api = null;
     try {
       // ── A 幕：交互模式，首轮必须停在确认卡上（**文件仍在**是修复前后的分水岭）─────
@@ -190,6 +221,8 @@ export default defineCase(
           msgs0.filter((m) => m.parent_id === tc.id).map((m) => ({ type: m.type, status: m.status })),
         )}）`,
       );
+      // 交互幕的拒绝理由：等待用户批准。事实面必须在**执行之前**就关掉这一笔。
+      assertDeniedWithoutSent(SID_INTERACTIVE, 'needs_approval');
 
       // ── 批准恢复：`action(<sid>/message/<tc.id>, "approve")` ⇒ approved:true ⇒ 落删除 ──
       const inv = await resumeSession(
@@ -283,6 +316,8 @@ export default defineCase(
         ),
         'auto 模式不得产卡（无人可批 ⇒ 产卡等于把会话钉死在等待态）',
       );
+      // auto 幕的拒绝理由：权限不足（不是「等用户」）。同样不得有 `sent`。
+      assertDeniedWithoutSent(SID_AUTO, 'permission_denied');
     } finally {
       if (api) api.stop();
       llm.stop();
