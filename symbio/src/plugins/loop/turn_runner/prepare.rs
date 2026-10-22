@@ -43,6 +43,13 @@ pub(crate) struct Prepared {
     pub(crate) full_snapshot: Vec<Event>,
     pub(crate) inject: Option<RoundInjector>,
     pub(crate) nodes: Option<NodeFactsFn>,
+    /// 模型应答已落、工具批次尚未派发时的寄存位（T-233 拆步）。
+    ///
+    /// 放在 `Prepared` 而不是新开一份状态：它和消息 / 节点 / 成本同属**本轮草稿**，
+    /// 引擎不读它；拆步只是把「一次 `step` 做两件事」拆成两个可分别调用的动作。
+    pub(crate) pending_model: Option<LlmTurn>,
+    /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
+    pub(crate) pending_round: Option<StreamNodeFacts>,
 }
 
 pub(crate) async fn prepare_turn<S>(
@@ -351,5 +358,7 @@ where
         full_snapshot,
         inject,
         nodes,
+        pending_model: None,
+        pending_round: None,
     })))
 }

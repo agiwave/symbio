@@ -127,17 +127,28 @@ where
     }
 }
 
-/// 跑**一次**请求。`Ok(None)` = 继续下一轮；`Ok(Some(outcome))` = 本轮已收口。
+/// 一次模型往返的推进结果。
+pub(crate) enum ModelRound {
+    /// 本轮已收口（答话 / 兜底 / 中止 / 控制面失败）。
+    Done(TurnOutcome),
+    /// 模型请求了工具；应答与节点事实已寄存在 `Prepared`，等 [`tool_round`]。
+    Tools,
+}
+
+/// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
+///
+/// 与 [`tool_round`] 拆开是 T-233 的第一步：引擎要能分别选中「模型往返」与
+/// 「工具批次」两笔债，执行体就不能再把它们揉在一次调用里。
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn stream_round<S>(
+pub(crate) async fn model_round<S>(
     run: &mut Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
     tok: &FullModel,
     sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
     tools: &[crate::symbio_core::CapabilityMeta],
-    dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
-) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    has_dispatch: bool,
+) -> Result<ModelRound, crate::symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -151,14 +162,16 @@ where
     // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
     let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
         Ok(rt) => rt,
-        Err(ModelCallError::Aborted) => return aborted(run, store, llm).await.map(Some),
+        Err(ModelCallError::Aborted) => {
+            return aborted(run, store, llm).await.map(ModelRound::Done)
+        }
         Err(ModelCallError::Failed(why)) => {
-            return failed(run, store, llm, &why).await.map(Some);
+            return failed(run, store, llm, &why).await.map(ModelRound::Done);
         }
         Err(ModelCallError::Store(e)) => return Err(e),
         // 控制面自身不一致（行不欠 / 端口没声明）：模型没跑成，如实当失败报。
         Err(ModelCallError::Control(why)) => {
-            return failed(run, store, llm, &why).await.map(Some);
+            return failed(run, store, llm, &why).await.map(ModelRound::Done);
         }
     };
     run.cost_ms += rt.cost_ms;
@@ -169,13 +182,15 @@ where
     let round_facts = node_facts(&run.nodes);
 
     // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
-    if classify_round(&rt, dispatch.is_some()) == RoundDecision::Halt {
-        return halt(run, store, llm, rt, &round_facts).await.map(Some);
+    if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
+        return halt(run, store, llm, rt, &round_facts)
+            .await
+            .map(ModelRound::Done);
     }
 
-    // 2b. 模型请求了工具 ⇒ 分发。没有分发方却收到工具调用是**配置
+    // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置
     //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
-    let Some(dispatch) = dispatch else {
+    if !has_dispatch {
         let cost = run.started.elapsed().as_millis() as u64;
         // 调用本身是事实：没有分发通道也要记「请求过什么」。
         run.all_tool_calls
@@ -199,7 +214,29 @@ where
             run.artifacts_landed,
         )
         .await
-        .map(Some);
+        .map(ModelRound::Done);
+    }
+
+    run.pending_model = Some(rt);
+    run.pending_round = Some(round_facts);
+    Ok(ModelRound::Tools)
+}
+
+/// 阶段②b：派发寄存的那一批工具，落产物 / 等待 / 交换。
+///
+/// `Ok(None)` = 继续下一轮；`Ok(Some)` = 本轮收束（等待用户）。
+pub(crate) async fn tool_round<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    dispatch: &dyn crate::symbio_core::DispatchPort,
+) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let (Some(rt), Some(round_facts)) = (run.pending_model.take(), run.pending_round.take()) else {
+        // 没有寄存 = 引擎没有可派的工具批；不空转。
+        return Ok(None);
     };
     let outcomes = dispatch.dispatch(&rt).await;
 
@@ -264,6 +301,32 @@ where
         run.exchange.extend(injected);
     }
     Ok(None)
+}
+
+/// 跑**一次**请求：模型往返 +（有工具时）一批派发。
+///
+/// 保留这个组合入口给 `StepFlow::step`；引擎接管后可以分别调
+/// [`model_round`] / [`tool_round`]。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn stream_round<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    tok: &FullModel,
+    sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+    tools: &[crate::symbio_core::CapabilityMeta],
+    dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
+) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    match model_round(run, store, llm, tok, sink, tools, dispatch.is_some()).await? {
+        ModelRound::Done(outcome) => Ok(Some(outcome)),
+        ModelRound::Tools => match dispatch {
+            Some(dispatch) => tool_round(run, store, llm, dispatch).await,
+            None => Ok(None),
+        },
+    }
 }
 
 /// 2a 收束：答话 / 空答兜底 / 写侧闸拒。
