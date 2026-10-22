@@ -92,7 +92,7 @@ trait Registry {
 ```
 
 `session/loop_registry.rs` 是这张表的**第一任实现**——它现在就长这样，
-只是 `RowKind` 与 `Run::Cap` 还没落地。**策略目录的行多一个 `site` 字段**
+只是 `RowKind` 与 `Run` 的 `Cap` 变体还没落地。**策略目录的行多一个 `site` 字段**
 （决策点闭集，[ADR-093](../010-adr/093.md "ADR-093")）：能力行不按决策点分，
 所以那个字段不属于共享形状，是策略目录特有的第六列。**这张表从 session 出发，最终搬进 core**：
 策略行是 `session` 的私有知识，能力行是全插件共用的协议，两者必须同表才能说
@@ -120,7 +120,7 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 **不按这个签名实现**，三条理由：
 
 1. **现网 `Capability::execute(args, &ExecEnv, ctx) -> Result<Value, PluginError>` 已经是
-   `Run::Cap` 的完整形态**。19 个工具无一需要 `&Store`；让它们都拿到一个 store 句柄，
+   `Run` 的 `Cap` 变体的完整形态**。19 个工具无一需要 `&Store`；让它们都拿到一个 store 句柄，
    是在为一个假设给所有人加参数。
 2. **「谁落格」现在有唯一答案**：调用方（`turn_exec` 收束时写）。改成执行体自己产 Fact，
    等于同时改 19 个实现的职责与网格的写方纪律——那是另一个批次，不是搬迁。
