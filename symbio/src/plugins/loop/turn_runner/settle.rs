@@ -99,19 +99,13 @@ async fn land_failure<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    if let Err(why) = closure_gate(actor, ClosureKind::Speech) {
-        // 兜底格也是**收束格**，同过写侧闸：拒绝 ⇒ 不落格，但**落一条否定事实**
-        // （`authz.denied`）——「被拒」与「没跑完」从此在日志上不同形。
+    if let Verdict::Denied(why) =
+        allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FALLBACK)
+    {
+        // 兜底格也是**收束格**，同过授权级联（`turn.closing` → `authz.granted`）：
+        // 拒 ⇒ 收束格不落，但**否定事实已入格**（`authz.denied`）——「被拒」与
+        // 「没跑完」从此在日志上不同形。
         // `fell_back` 仍为真——模型确实失败了（I3 的「到点必答」由调用方按失败呈现）。
-        deny(
-            store,
-            actor,
-            turn,
-            user_seq,
-            ClosureKind::Speech,
-            EVENT_ASSISTANT_FALLBACK,
-            &why,
-        );
         crate::plugin_warn!(
             "actors",
             "[v2] 兜底收束被授权拒绝（{why}），本轮不入格（turn={turn}）"
@@ -177,17 +171,10 @@ pub(crate) async fn append_aborted<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    if let Err(why) = closure_gate(actor, ClosureKind::Speech) {
-        // 中止的收束格同过写侧闸，拒绝同样落否定事实（与兜底臂同一形态）。
-        deny(
-            store,
-            actor,
-            turn,
-            user_seq,
-            ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
-            &why,
-        );
+    if let Verdict::Denied(why) =
+        allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FINAL)
+    {
+        // 中止的收束格同过授权级联，拒绝同样已落否定事实（与兜底臂同一形态）。
         crate::plugin_warn!(
             "actors",
             "[v2] 中止收束被授权拒绝（{why}），本轮不入格（turn={turn}）"

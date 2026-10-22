@@ -144,6 +144,38 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// 同一件事。
 pub const EVENT_TURN_STAGE: &str = "turn.stage";
 
+/// **本幕要收束了**（载荷 `{ key, kind }`）。落在 `turn × asserted`。
+///
+/// ## 它解决的是什么
+///
+/// 「该收束了」此前是**程序状态**：`halt` / `append_fallback` / `append_aborted` /
+/// `run_reflex` 各自知道自己到点了，而日志上没有这一条。于是两件事在日志上同形：
+/// 「这一轮该收、收束格却没落」与「这一轮还在跑」。收束的授权闸
+/// （[`EVENT_AUTHZ_GRANTED`] 那一族）也因此没有前件可判——它不能以「模型回来了」
+/// 为前件：六条收束路径里有三条（首请求前中止 / 定稿答话 / 反射档）一次模型
+/// 调用都不发生（[ADR-116](../../../../docs/010-adr/116.md "ADR-116")）。
+///
+/// ## 谁写
+///
+/// **收束点的决策者**（执行体）——与 [`EVENT_REQUEST`] 同一条纪律：决策者写决策，
+/// 引擎写「派出去了 / 回来了」。它先于授权闸、先于收束格。
+///
+/// ## 载荷
+///
+/// `key` = 将要落的那一格（`chat.assistant.final` / `chat.assistant.fallback`），
+/// `kind` = `speech` / `artifact`（与 [`EVENT_AUTHZ_DENIED`] 同值域，三格共用一套
+/// 字段，读侧因此能用**一个**问题问遍「想落什么 / 许不许 / 落没落」）。
+///
+/// 它**不**重复收束格的载荷：这里记的是**决定**（收哪一种格），不记产出
+/// （正文 / 工具事实 / 节点 id）——产出随收束格入格一次，两份就是两个 owner。
+///
+/// ## 为什么不是收束格
+///
+/// `asserted` 不是 `closed`：一轮的收束只有 `chat.assistant.final` / `.fallback`
+/// 那两格。把它算成收束会让 `unresolved_turns` 少报一轮「静默中断」——那正是
+/// 最该被发现的失效（与 [`EVENT_AUTHZ_DENIED`] 同一条边界）。
+pub const EVENT_TURN_CLOSING: &str = "turn.closing";
+
 /// **轮边界汇报**（载荷 `{ text, tool_rounds, quiet_ms }`）。落在 `turn × asserted`。
 ///
 /// ## 它为什么是事实（缺口 4）
@@ -326,6 +358,31 @@ pub const EVENT_RETRY: &str = "retry";
 /// 3. **不影响判定**：落不进去也照原样返回拒绝结果——闸门的结论是「不许写」，
 ///    不能因为记账失败就放行。
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
+
+/// 写侧闸**许可**落下的**肯定事实**。落在 `turn × asserted`。
+///
+/// ## 它补的是什么
+///
+/// [`EVENT_AUTHZ_DENIED`] 让「被拒」有了事实形态，但「允许」仍然只能靠
+/// **没有 `denied`** 推断——而否定推断正是义务环里被禁掉的那件事
+/// （[ADR-115](../../../../docs/010-adr/115.md "ADR-115") 决策 6：`owes` 里不出现
+/// 否定原子）。没有 `granted`：
+///
+/// - `close-turn` 行的 `owes` 写不出来（它不能写「没有 denied」）；
+/// - 「这次收束为什么能落格」答不出来——许可与「没被拒」在日志上同形。
+///
+/// ## 载荷
+///
+/// `{ key, kind }`：`key` = 被许可的目标格名、`kind` = `speech` / `artifact`。
+/// 与 `authz.denied` 同形同值域（`denied` 另带 `reason` / `detail`，那是**拒绝**
+/// 才有的两个字段）。
+///
+/// ## 三条边界（与 `authz.denied` 逐条对称）
+///
+/// 1. **不是收束格**（`asserted`）：许可不结束一轮，落格才是。
+/// 2. **幂等**：键 `grant-{turn}-{kind}`——闸是纯函数，同一轮同一 `kind` 的结论只有一个。
+/// 3. **与 `denied` 互斥**：同一轮同一 `kind` 不会两条都有（同一条闸、同一个判定）。
+pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ── 停机原因：**一个字段、一个闭集**（T-220）──
 

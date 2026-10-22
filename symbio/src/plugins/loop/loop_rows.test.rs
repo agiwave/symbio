@@ -426,6 +426,10 @@ fn rows_are_stable_and_globally_ordered() {
     assert_eq!(
         names,
         vec![
+            // 收束的两行排最前（`prio` 0 / 5）：一轮走到收束点时 `execute-turn`
+            // 仍然欠着，收束若排在它后面就永远轮不到（ADR-116）。
+            "authorize-close",
+            "close-turn",
             "policy.classify",
             "policy.report",
             "policy.compress",
@@ -450,6 +454,9 @@ fn rows_are_stable_and_globally_ordered() {
     assert_eq!(
         ROWS.iter().map(|d| d.tier).collect::<Vec<_>>(),
         vec![
+            // 授权是纯矩阵查表，收束是落格——两者都不调模型。
+            crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
@@ -483,10 +490,10 @@ fn facts_without_a_row_are_pinned() {
     // 后续任务，而不是遗漏。
     //
     //   turn.dispatch —— T-225 档位事实，读方是 core 的派生函数
-    //   authz.denied  —— T-226 授权拒绝行
     //
     // 协议五名已由 T-223 的端口行全部接住（`request` / `sent` / `response` /
-    // `failed` / `retry` → dispatch / await / lease）。
+    // `failed` / `retry` → dispatch / await / lease）；授权族两名（`authz.denied` /
+    // `authz.granted`）与 `turn.closing` 由 ADR-116 的收束两行接住。
     let gaps = check_rows(ROWS, &frozen());
     let orphans: Vec<_> = gaps
         .iter()
@@ -495,7 +502,7 @@ fn facts_without_a_row_are_pinned() {
             _ => None,
         })
         .collect();
-    assert_eq!(orphans, vec!["turn.dispatch", "authz.denied"]);
+    assert_eq!(orphans, vec!["turn.dispatch"]);
 }
 
 // ── 端口 `turn` 的三行（T-223）─────────────────────────────────────────
@@ -652,5 +659,117 @@ fn the_model_rows_do_not_disturb_the_turn_rows() {
     assert!(
         !owes("dispatch-model", &events, 0),
         "端口是债键的一部分：`turn` 的账不能开 `model` 的行"
+    );
+}
+
+// ── 收束的授权级联（ADR-116）────────────────────────────────────────────
+//
+// 三格一条线：`turn.closing`（决策）→ `authz.granted` / `authz.denied`（结论）
+// → 收束格。用例逐个钉住「谁开账、谁关账」，以及**否定不参与 `owes`**：
+// `denied` 只关授权行，收束行根本不开账。
+
+fn closing(turn: u64, key: &str) -> Event {
+    ev(
+        turn,
+        crate::symbio_core::EVENT_TURN_CLOSING,
+        json!({ "key": key, "kind": "speech" }),
+    )
+}
+
+fn granted(turn: u64) -> Event {
+    ev(
+        turn,
+        crate::symbio_core::EVENT_AUTHZ_GRANTED,
+        json!({ "key": "chat.assistant.final", "kind": "speech" }),
+    )
+}
+
+fn denied(turn: u64) -> Event {
+    ev(
+        turn,
+        crate::symbio_core::EVENT_AUTHZ_DENIED,
+        json!({ "key": "chat.assistant.final", "kind": "speech", "reason": "denied" }),
+    )
+}
+
+#[test]
+fn a_closure_intent_opens_the_authorization_row() {
+    // 没有意图 ⇒ 不欠授权（六条收束路径之外，谁也不该被授权一次）。
+    let quiet = vec![ev(1, "user.message", json!({"text": "hi", "id": "u-1"}))];
+    assert!(!owes("authorize-close", &quiet, 0));
+
+    // 意图落下 ⇒ 欠一次授权判定。
+    let asked = vec![closing(1, "chat.assistant.final")];
+    assert!(owes("authorize-close", &asked, 0));
+
+    // 结论落下（两个方向都算关账）⇒ 不再欠。
+    let mut yes = asked.clone();
+    yes.push(granted(1));
+    assert!(!owes("authorize-close", &yes, 0));
+    let mut no = asked.clone();
+    no.push(denied(1));
+    assert!(!owes("authorize-close", &no, 0));
+}
+
+#[test]
+fn only_a_grant_opens_the_close_row() {
+    // 许可 ⇒ 欠一次收束。
+    let yes = vec![closing(1, "chat.assistant.final"), granted(1)];
+    assert!(owes("close-turn", &yes, 0));
+
+    // 拒绝 ⇒ **收束行根本不欠**：这就是「被拒的一轮没有收束格」的结构形态，
+    // 不是某个 `if` 的结论（判据 8b）。
+    let no = vec![closing(1, "chat.assistant.final"), denied(1)];
+    assert!(
+        !owes("close-turn", &no, 0),
+        "`denied` 不能让收束行开账——`owes` 里没有否定原子"
+    );
+
+    // 只有意图、还没有结论 ⇒ 也不欠（授权必须先于收束）。
+    let pending = vec![closing(1, "chat.assistant.final")];
+    assert!(!owes("close-turn", &pending, 0));
+}
+
+#[test]
+fn a_closure_cell_pays_the_close_row() {
+    // 两格收束都算还清：`final` 与 `fallback` 是同一件事的两个结果面。
+    for kind in ["chat.assistant.final", "chat.assistant.fallback"] {
+        let mut events = vec![closing(1, "chat.assistant.final"), granted(1)];
+        assert!(owes("close-turn", &events, 0));
+        events.push(ev(1, kind, json!({"text": "答完了"})));
+        assert!(!owes("close-turn", &events, 0), "{kind} 应当还清收束行");
+    }
+}
+
+#[test]
+fn the_authorization_rows_do_not_disturb_the_policy_rows() {
+    // 没有收束意图时，两条收束行对策略面完全无感：轮首该判的还是判。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": true, "auto_compress": false}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert_eq!(
+        drive(ROWS, &frozen(), &events, 0).map(|d| d.decl.name),
+        Some("policy.classify")
+    );
+
+    // 反过来：收束意图落下时，收束的两行**先于**执行行（`prio` 0 / 5 < 60）——
+    // 否则单环驱动会先再执行一次而永远收不了尾。
+    let mut closing_down = events.clone();
+    closing_down.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
+    closing_down.push(closing(1, "chat.assistant.final"));
+    assert_eq!(
+        drive(ROWS, &frozen(), &closing_down, 0).map(|d| d.decl.name),
+        Some("authorize-close")
+    );
+    closing_down.push(granted(1));
+    assert_eq!(
+        drive(ROWS, &frozen(), &closing_down, 0).map(|d| d.decl.name),
+        Some("close-turn")
     );
 }

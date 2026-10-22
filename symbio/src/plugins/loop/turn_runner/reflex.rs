@@ -82,18 +82,10 @@ impl TurnRunner {
         )?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
-        if let Err(why) = closure_gate(actor, ClosureKind::Speech) {
-            // 与深度档同一条写侧闸（见 [`closure_gate`]）：拒绝 ⇒ 不落收束格，
-            // 但落否定事实（`authz.denied`）。
-            deny(
-                store,
-                actor,
-                turn,
-                user_seq,
-                ClosureKind::Speech,
-                EVENT_ASSISTANT_FINAL,
-                &why,
-            );
+        if let Verdict::Denied(why) =
+            allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FINAL)
+        {
+            // 与深度档同一条级联（见 [`allow`]）：拒 ⇒ 不落收束格，否定事实已入格。
             crate::plugin_warn!(
                 "actors",
                 "[v2] 反射档收束被授权拒绝（{why}），本轮不入格（turn={turn}）"

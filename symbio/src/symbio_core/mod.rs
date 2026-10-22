@@ -46,14 +46,15 @@ mod view;
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{
-    event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_STAGE,
-    EVENT_TURN_SUPPLEMENTED,
+    event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_CLOSING,
+    EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
 };
 pub use event::{
     ClosureReason, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_AUTHZ_DENIED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
-    EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
+    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
+    EVENT_USER_MESSAGE,
 };
 pub use invariants::{check_all, closes_turn, is_turn_final, is_turn_open, provenance_violation};
 pub use projection::calibration::calibration;

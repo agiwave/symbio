@@ -9,6 +9,8 @@
 //! [ADR-086]: ../../../../docs/010-adr/086.md "ADR-086"
 
 mod chat_loop;
+// 收束的授权级联（ADR-116）：`turn.closing` → `authz.granted` / `denied` → 收束格。
+mod close;
 mod context;
 mod derived_facts;
 // 义务环的行表（T-222）：控制面经 `owes` 问表，判据在数据里。

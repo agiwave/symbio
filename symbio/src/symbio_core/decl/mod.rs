@@ -39,11 +39,12 @@
 //!
 //! ## 首批声明
 //!
-//! 15 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
+//! 17 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
 //! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
 //! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
-//! `turn.dispatch`、`authz.denied`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
-//! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
+//! `turn.dispatch`、`turn.closing`、`authz.denied`、`authz.granted`；7 个视图：
+//! `in_flight` / `stale_sent` / `turn_head` / `turn_stages` / `turn_closed` /
+//! `report_due` / `reported_anchors`。
 //!
 //! 视图点名决定了事实的**下限**：`in_flight` 读三个协议名（`sent` / `response` /
 //! `failed` / `retry`），`stale_sent` 读 `sent` 的租约两字段（`lease_ms` /
@@ -435,6 +436,29 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         key: &["key"],
         expand: &[],
         fields: &["key", "kind", "reason", "detail"],
+    },
+    // 许可事实（ADR-116）：与 `denied` 同形的前两个字段——三格（意图 / 许可 / 拒绝）
+    // 共用一套字段，读侧因此能用**一个**问题问遍「想落什么 / 许不许 / 落没落」。
+    //
+    // 没有 `reason` / `detail`：那是**拒绝**才有的两个字段（拒绝要解释，许可不必）。
+    FactDecl {
+        name: "authz.granted",
+        port: None,
+        key: &["key"],
+        expand: &[],
+        fields: &["key", "kind"],
+    },
+    // 收束意图（ADR-116）：`authorize-close` 行的开账条件。
+    //
+    // 幂等键是**轮 × 种类**（事件 id `closing-{turn}-{kind}`）：一轮至多一次收束，
+    // 两个种类各自最多一条。`key` / `kind` 的取值与 `authz.*` 同一套——它记的是
+    // 「打算落哪一格」，那两格记的是「许不许」。
+    FactDecl {
+        name: "turn.closing",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["key", "kind"],
     },
 ];
 

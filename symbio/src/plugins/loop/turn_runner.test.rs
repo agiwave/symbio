@@ -218,8 +218,8 @@ mod turn_runner_tests {
 
         assert_eq!(
             store.head().value(),
-            18,
-            "3 轮 × 6 事件（用户 / 派发 / 模型端口三格 / 收束）"
+            24,
+            "3 轮 × 8 事件（用户 / 派发 / 模型端口三格 / 收束决策 / 收束许可 / 收束）"
         );
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
@@ -235,7 +235,11 @@ mod turn_runner_tests {
             "{:?}",
             check_all(&snapshot)
         );
-        assert_eq!(snapshot.len(), 24);
+        assert_eq!(
+            snapshot.len(),
+            32,
+            "4 轮 × 8 事件（第 4 轮接着写在同一本台账上）"
+        );
 
         // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
         let fresh = crate::symbio_core::EventStore::new();
@@ -783,9 +787,11 @@ mod turn_runner_tests {
                 "request",
                 "sent",
                 "failed",
+                "turn.closing",
+                "authz.granted",
                 "chat.assistant.final",
             ],
-            "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
+            "用户格 + 派发格 + 模型端口三格 + 收束决策 / 许可 + 收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(
@@ -864,9 +870,11 @@ mod turn_runner_tests {
                 "request",
                 "sent",
                 "failed",
+                "turn.closing",
+                "authz.granted",
                 "chat.assistant.final",
             ],
-            "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
+            "用户格 + 派发格 + 模型端口三格 + 收束决策 / 许可 + 收束格：{snapshot:?}"
         );
         let cell = snapshot
             .iter()
@@ -1757,12 +1765,18 @@ mod tool_round_tests {
             "定稿答话轮一次模型请求都不该发"
         );
         let ev = store.range(Seq::new(0));
-        assert_eq!(ev.len(), 3, "用户格 + 派发格 + 收束格，一格不多一格不少");
+        assert_eq!(
+            ev.len(),
+            5,
+            "用户格 + 派发格 + 收束决策 + 收束许可 + 收束格，一格不多一格不少             （决策 / 许可两格由 ADR-116 的级联落）"
+        );
         assert_eq!(ev[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(ev[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
-        assert_eq!(ev[2].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(ev[2].kind, crate::symbio_core::EVENT_TURN_CLOSING);
+        assert_eq!(ev[3].kind, crate::symbio_core::EVENT_AUTHZ_GRANTED);
+        assert_eq!(ev[4].kind, EVENT_ASSISTANT_FINAL);
         assert_eq!(
-            ev[2].produced_by,
+            ev[4].produced_by,
             ev[0].seq.map(|s| s.value()),
             "I2：收束格的溯源必须指向本轮用户格"
         );
@@ -2113,8 +2127,8 @@ mod tool_round_tests {
             "角色序列里要有 tool（角色序列）：{roles:?}"
         );
 
-        // 网格：用户格 + 派发格 + **每次模型往返三格** + 产物格 + final 格
-        // （final 只一条——N3）。
+        // 网格：用户格 + 派发格 + **每次模型往返三格** + 产物格 + 收束决策 / 许可两格
+        // + final 格（final 只一条——N3）。
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
             super::kinds(&snapshot),
@@ -2131,6 +2145,8 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                "turn.closing",
+                "authz.granted",
                 "chat.assistant.final",
             ],
             "{snapshot:?}"
@@ -2290,9 +2306,11 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                "turn.closing",
+                "authz.granted",
                 "chat.assistant.fallback",
             ],
-            "用户格 + 派发格 + 模型端口三格 + 兜底格：{snapshot:?}"
+            "用户格 + 派发格 + 模型端口三格 + 收束决策 / 许可 + 兜底格：{snapshot:?}"
         );
         assert!(
             snapshot
@@ -2528,9 +2546,11 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                crate::symbio_core::EVENT_TURN_CLOSING,
+                crate::symbio_core::EVENT_AUTHZ_GRANTED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "续写**不重开用户格**，只补派发格、产物格与收束格：{snapshot:?}"
+            "续写**不重开用户格**，只补派发格、产物格、收束决策 / 许可与收束格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
@@ -2842,9 +2862,11 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                crate::symbio_core::EVENT_TURN_CLOSING,
+                crate::symbio_core::EVENT_AUTHZ_GRANTED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "两轮产物 + 一轮收束（外加派发格与三次模型往返的协议事实）：{snapshot:?}"
+            "两轮产物 + 一轮收束（外加派发格、三次模型往返的协议事实、收束决策 / 许可）：{snapshot:?}"
         );
         // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
         //
@@ -3384,9 +3406,14 @@ mod reflex_turn_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
+                // 收束的授权级联（ADR-116）：决策（`turn.closing`）→ 结论
+                // （`authz.granted`）→ 收束格。反射档零模型往返，它的前件因此
+                // 只能是决策本身——不是「模型回来了」。
+                crate::symbio_core::EVENT_TURN_CLOSING,
+                crate::symbio_core::EVENT_AUTHZ_GRANTED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "反射档落开轮 / 派发 / 收束三格（没有产物格——它没跑工具）：{snapshot:?}"
+            "反射档落开轮 / 派发 / 决策 / 许可 / 收束五格（没有产物格——它没跑工具）：{snapshot:?}"
         );
         let open = &snapshot[0];
         assert_eq!(open.entity, Entity::Turn);
@@ -3406,7 +3433,7 @@ mod reflex_turn_tests {
             "派发格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
              ActorSpec.budget_ms 由此有真读方——此断言即写侧的存在证明"
         );
-        let close = &snapshot[2];
+        let close = &snapshot[4];
         assert_eq!(close.verb, Verb::Closed);
         assert_eq!(close.turn, 0);
         assert_eq!(close.payload["text"], "先列要点；再合并同类项。");

@@ -162,17 +162,15 @@ where
             .await
             .map(PreparedFlow::Done);
         }
-        if let Err(why) = closure_gate(&actor, ClosureKind::Speech) {
-            // 拒绝 ⇒ 不落收束格，但落否定事实（`authz.denied`）。
-            deny(
-                store,
-                &actor,
-                turn,
-                user_seq,
-                ClosureKind::Speech,
-                EVENT_ASSISTANT_FINAL,
-                &why,
-            );
+        if let Verdict::Denied(why) = allow(
+            store,
+            &actor,
+            turn,
+            user_seq,
+            ClosureKind::Speech,
+            EVENT_ASSISTANT_FINAL,
+        ) {
+            // 拒 ⇒ 不落收束格，否定事实已由级联入格（`authz.denied`）。
             crate::plugin_warn!(
                 "actors",
                 "[v2] 定稿答话被授权拒绝（{why}），本轮不入格（turn={turn}）"

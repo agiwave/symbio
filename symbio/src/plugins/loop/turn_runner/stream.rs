@@ -369,19 +369,17 @@ where
         )
         .await;
     }
-    if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
-        // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all` 会把它报出来
+    if let Verdict::Denied(why) = allow(
+        store,
+        &run.actor,
+        run.turn,
+        run.user_seq,
+        ClosureKind::Speech,
+        EVENT_ASSISTANT_FINAL,
+    ) {
+        // 授权级联拒：**不落收束格**——该轮留在未收束态，`check_all` 会把它报出来
         // （C4）。**例外**：本轮落过产物格 ⇒ 已由产物收束（ADR-067）。
-        // 拒绝本身落一条否定事实（`authz.denied`），于是「被拒」不再与「没跑完」同形。
-        deny(
-            store,
-            &run.actor,
-            run.turn,
-            run.user_seq,
-            ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
-            &why,
-        );
+        // 拒绝本身已落一条否定事实（`authz.denied`），于是「被拒」不再与「没跑完」同形。
         crate::plugin_warn!(
             "actors",
             "[v2] 收束被授权拒绝（{why}），本轮不入格（turn={}）",
@@ -452,17 +450,15 @@ where
     let cost = run.started.elapsed().as_millis() as u64;
     let facts = node_facts(&run.nodes);
     let partial_text = facts.text.clone().unwrap_or_default();
-    if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
-        // 中止的收束格同过写侧闸（收束格是同一个事实，不论哪条路径写出）。
-        deny(
-            store,
-            &run.actor,
-            run.turn,
-            run.user_seq,
-            ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
-            &why,
-        );
+    if let Verdict::Denied(why) = allow(
+        store,
+        &run.actor,
+        run.turn,
+        run.user_seq,
+        ClosureKind::Speech,
+        EVENT_ASSISTANT_FINAL,
+    ) {
+        // 中止的收束格同过授权级联（收束格是同一个事实，不论哪条路径写出）。
         crate::plugin_warn!(
             "actors",
             "[v2] 中止收束被授权拒绝（{why}），本轮不入格（turn={}）",

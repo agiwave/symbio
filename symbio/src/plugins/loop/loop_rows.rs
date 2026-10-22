@@ -9,6 +9,8 @@
 //! ## 五条策略行的前后关系
 //!
 //! ```text
+//!  0 authorize-close ── 收束授权：有 `turn.closing` ⇒ 交回 granted / denied（ADR-116）
+//!  5 close-turn      ── 收束：`granted` ⇒ 落收束格（`denied` ⇒ 本行永不成立）
 //! 10 classify      ── 轮首判决（本幕 round=0 且有发言）
 //! 20 report        ── 中途汇报（一段静默到期，未用完配额）
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
@@ -23,6 +25,12 @@
 //! 72 await-tool    ── 等应答（工具端口）
 //! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
+//!
+//! 收束的两行排在**最前**（`prio` 0 / 5）：一轮走到收束点时 `execute-turn`（60）
+//! 仍然欠着（它的 `until` 是 `turn_closed`），收束若排在它后面，单环驱动会先再执行
+//! 一次而永远收不了尾。数字不取 ADR-116 写的 0 / 10，是因为 10 已被 `policy.classify`
+//! 占着，而表要求 `prio` 严格递增——为凑一个整数把十二条行全重编号，是给读者
+//! 制造一次假 diff。
 //!
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。旧表的
 //! `prio` 只是格内序，这里第一次跨行可比（T-222 判据 10）。
@@ -53,8 +61,9 @@ use serde_json::Value;
 
 use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
-    builtin, Event, Frozen, LatencyTier, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
-    EVENT_SENT,
+    builtin, Event, Frozen, LatencyTier, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
+    EVENT_RETRY, EVENT_SENT, EVENT_TURN_CLOSING,
 };
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
@@ -125,6 +134,84 @@ pub(crate) static PORTS: &[PortDecl] = &[
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
+    // ── 收束的授权级联（ADR-116）──────────────────────────────────────────
+    //
+    // 两条行，`prio` 0 / 5：**收束一旦该发生，它先于一切**。一轮走到收束点时
+    // `execute-turn`（60）仍然欠着（`until` 是 `turn_closed`），若收束行排在它后面，
+    // 单环驱动会先再执行一次而永远收不了尾。
+    //
+    // ## 为什么触发是 `turn.closing` 而不是「模型回来了」
+    //
+    // ADR-116 初稿把 `authorize-close` 的开账条件写成 `turn.has_final`（视图字段，
+    // 从 `response{port:model}` 的载荷折出）。施工时逐点核对六条收束路径，发现
+    // **三条根本没有模型事实可折**：首请求前中止（`prepare` 1c）、定稿答话
+    // （`prepare` 1b）、反射档（`run_reflex`）。以模型事实为前件，这三条会永不
+    // 收束——而它们正是「零模型往返」的三条，不是边角。
+    //
+    // 所以前件是**决策本身**：收束点先落 `turn.closing`（与 `request` 同一条纪律
+    // ——决策者写决策），授权行再据它开账。六条路径同一个前件，没有例外。
+    //
+    // ## `until` 为什么带 `kind`
+    //
+    // 闸按种类分两臂（`speech` / `artifact`）。收束只问 `speech`：产物臂的拒绝
+    // 落的是 `artifact.added` 那一格，它不结束一轮，不在本行管的范围里。
+    Decl {
+        name: "authorize-close",
+        prio: 0,
+        by: Some("authorizer"),
+        // 纯矩阵查表（`ActorSpec::can_land_speech` + 作用域上限），不调模型。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_TURN_CLOSING,
+            key: &["turn"],
+            eq: &[],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_AUTHZ_GRANTED,
+                key: &["turn"],
+                eq: &[("kind", Lit::Str("speech"))],
+            },
+            Pattern {
+                source: EVENT_AUTHZ_DENIED,
+                key: &["turn"],
+                eq: &[("kind", Lit::Str("speech"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 收束本身：**只有 `granted` 才开账**（ADR-115 决策 6 的正事实级联）。
+    //
+    // `denied` ⇒ 本行永不成立 ⇒ 收束格不落——「被拒的一轮没有收束格」从此是
+    // **结构**，不是某个 `if` 的结论（T-227 判据 8b）。`owes` 里没有否定原子。
+    //
+    // 出口是两格收束（`final` / `fallback`）：落哪一种由收束点的 `turn.closing.key`
+    // 说了算，本行只管「这一轮有没有收完」。
+    Decl {
+        name: "close-turn",
+        prio: 5,
+        by: Some("closer"),
+        // 落格是记账：正文与工具事实在收束点之前已经产出，收束本身不再调模型。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_AUTHZ_GRANTED,
+            key: &["turn"],
+            eq: &[("kind", Lit::Str("speech"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_ASSISTANT_FINAL,
+                key: &["turn"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_ASSISTANT_FALLBACK,
+                key: &["turn"],
+                eq: &[],
+            },
+        ],
+        unless: &[],
+    },
     // ── 轮首判决 ─────────────────────────────────────────────────────────
     Decl {
         name: "policy.classify",
@@ -518,8 +605,8 @@ static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
     };
     for gap in check_rows(ROWS, &frozen) {
         match gap {
-            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧、`authz.denied`
-            // 在 T-226；装载期继续点名而不是豁免。
+            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧。授权族的两个事实
+            // （`authz.denied` / `authz.granted`）自 ADR-116 起由收束行消费，不再点名。
             Gap::OrphanFact { fact } => {
                 crate::plugin_info!("session", "[Loop] 声明的事实暂无行消费：{}", fact);
             }

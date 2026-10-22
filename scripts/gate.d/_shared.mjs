@@ -137,7 +137,17 @@ export const BASELINE = {
   // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
   // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
   // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
-  rustTests: 2017,
+  // baseline-allow rustTests: 批 T-227 步 4 净增 8 条判据（2017→2025）——收束成行 + 收束行的授权级联
+  // （ADR-116）落地。逐条归属：`loop/close.test.rs` 新增 4 条（`a_granted_closure_lands_the_intent_and_the_grant`
+  // 钉三格顺序 `user.message → turn.closing → authz.granted` 与两者都带 `produced_by`、
+  // `a_denied_closure_never_opens_the_close_row` 是判据 8b 的正面用例、`asking_twice_does_not_duplicate_the_decision`
+  // 钉幂等、`the_intent_names_the_cell_it_will_land` 钉载荷 `key` 就是收束格将落的那个 key）；
+  // `loop_rows.test.rs` 新增 4 条（`a_closure_intent_opens_the_authorization_row`、
+  // `only_a_grant_opens_the_close_row`、`a_closure_cell_pays_the_close_row`、
+  // `the_authorization_rows_do_not_disturb_the_policy_rows`）。既有用例只改断言不增删：六处事件序列
+  // 断言各多两格（`turn.closing` / `authz.granted`），`turn_runner_events_are_replayable` 的 head 计数
+  // 24→32。非侵蚀，是纯增量。
+  rustTests: 2025,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -146,7 +156,8 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-161 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1436,
+  // baseline-allow ciRustTestsTotal: 批 T-227 步 4 的同一增量在 CI 口径下修一格（1436→1444），逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1444,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链
