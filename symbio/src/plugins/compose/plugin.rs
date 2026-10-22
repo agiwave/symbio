@@ -48,7 +48,7 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_COMPOSE,
 };
-use crate::symbio_core::{ComposeRequest, Verdict, WordingReply, REASON_FROM_CONTEXT};
+use crate::symbio_core::{ComposeRequest, Verdict, WordingReply};
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -117,7 +117,7 @@ impl ComposePlugin {
                 reasoning_id: None,
             };
         }
-        if requires_generation(&req.verdict) {
+        if req.verdict.needs_wording_generation() {
             if let Some(reply) = generate(ctx, req, &self.config).await {
                 return reply;
             }
@@ -131,18 +131,6 @@ impl ComposePlugin {
             reasoning_id: None,
         }
     }
-}
-
-/// 这个判决是否需要**组织语言**（而不是查表）。
-///
-/// 判据只有一个理由码：`from_context` —— "答案已在对话里"，那段文本只能从对话线
-/// 组织出来。其余理由码的**内容**是固定的（"不客气""收到""好，我来处理"），
-/// 模型只会把它们写长。
-///
-/// 它是**函数而不是表里的一列**：`from_context` 的存在与否不是措辞的属性，
-/// 而是"这条产线要不要花一次 LLM 往返"的编排判断。
-fn requires_generation(verdict: &Verdict) -> bool {
-    matches!(verdict, Verdict::Answered { reason } if reason == REASON_FROM_CONTEXT)
 }
 
 #[async_trait]

@@ -441,6 +441,11 @@ export const OUT_OF_GATE = [
   'check-commit-msg',
   'cargo-offline-refresh',
   'gate',
+  // `obligation-ring-accept`：义务环符合性的 **CLI 实测判定**（T-236 批口径 1 的第三件套）。
+  // 登记成 OUT_OF_GATE 而不是 GUARDS：它的输入是**真跑一次的 WAL + verbose 日志**，
+  // 门禁里既没有模型也没有会话目录——静态跑不出来。它进门禁会变成「拿夹具冒充实测」，
+  // 正是这条判据要防的形态。用法与判据见脚本头部（J1…J8）。
+  'obligation-ring-accept',
   // `registry-board`：登记看板的**查询台**（stdout 打印，支持 --kind / --status / --id）。
   // 登记成 OUT_OF_GATE 而不是 GUARDS：校验判据全在 `registry-audit`（它进门禁），
   // 本脚本是同一条校验的只读出口——先校验后打印，有违规拒绝出结论，本身无新判据。

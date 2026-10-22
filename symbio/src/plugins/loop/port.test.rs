@@ -379,3 +379,101 @@ fn every_port_row_is_in_the_table() {
     let await_row = ROWS.iter().find(|d| d.name == "await-turn").unwrap();
     assert_eq!(await_row.by, None);
 }
+
+// ── 内部请求也走端口（T-238）─────────────────────────────────────────────
+
+#[tokio::test]
+async fn an_internal_request_is_a_full_model_round_trip() {
+    // PL-017 判据 2 的全量口径：编排层替别人打的那次模型调用也要三格，
+    // 而且顺序是 request → sent → response（`sent` 夹在中间 = 引擎在执行体
+    // **之前**记账）。缺这条形状时的形态是「打了模型而日志一格没有」：
+    // 那次调用既没有租约可收，也没有失败事实可记。
+    let store = boot();
+    let out = round_trip(
+        &store,
+        Round {
+            turn: 3,
+            produced_by: 2,
+            drive_seq: 9,
+            now: 0,
+            step: "w0",
+            via: "compose/wording",
+        },
+        || async { Some("答话") },
+    )
+    .await
+    .expect("内部请求应当按端口 `model` 派发");
+    assert_eq!(out, Some("答话"));
+
+    let facts = store.range(Seq::new(0));
+    assert_eq!(
+        facts.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        vec!["request", "sent", "response"],
+        "三格齐、且 `sent` 排在应答之前"
+    );
+    let seqs: Vec<u64> = facts.iter().map(|e| e.seq.unwrap().value()).collect();
+    assert!(
+        seqs[0] < seqs[1] && seqs[1] < seqs[2],
+        "`sent` 的 seq 必须介于 `request` 与 `response` 之间：{seqs:?}"
+    );
+    // 逻辑 id 带**幕锚**（`model-{turn}-d{drive}-{step}`）：续写幕复用同一轮号，
+    // 不带幕锚就会与首幕撞成同一笔账，而首幕已经有过 `sent`。
+    assert_eq!(payload_of(&store, "request")["id"], json!("model-3-d9-w0"));
+    assert_eq!(payload_of(&store, "request")["port"], json!("model"));
+    assert_eq!(
+        payload_of(&store, "request")["via"],
+        json!("compose/wording")
+    );
+    assert_eq!(payload_of(&store, "sent")["id"], json!("model-3-d9-w0"));
+    assert_eq!(payload_of(&store, "response")["id"], json!("model-3-d9-w0"));
+    assert_eq!(
+        payload_of(&store, "response")["via"],
+        json!("compose/wording")
+    );
+    // 这一笔不带工具调用 ⇒ `open-tools` 的集合展开开出**零笔**子债。
+    assert_eq!(
+        store
+            .range(Seq::new(0))
+            .iter()
+            .filter(|e| e.kind == "request")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_second_internal_request_in_the_same_act_is_a_separate_call() {
+    // 同一幕里两次内部请求（步名不同）= 两笔独立的账。
+    let store = boot();
+    round_trip(
+        &store,
+        Round {
+            turn: 3,
+            produced_by: 2,
+            drive_seq: 9,
+            now: 0,
+            step: "w0",
+            via: "compose/wording",
+        },
+        || async { "第一次" },
+    )
+    .await
+    .unwrap();
+    round_trip(
+        &store,
+        Round {
+            turn: 3,
+            produced_by: 2,
+            drive_seq: 9,
+            now: 0,
+            step: "w1",
+            via: "compose/wording",
+        },
+        || async { "第二次" },
+    )
+    .await
+    .unwrap();
+    let facts = store.range(Seq::new(0));
+    assert_eq!(facts.iter().filter(|e| e.kind == "request").count(), 2);
+    assert_eq!(facts.iter().filter(|e| e.kind == "response").count(), 2);
+}

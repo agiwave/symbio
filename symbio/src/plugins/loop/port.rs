@@ -506,6 +506,83 @@ where
     }
 }
 
+/// 一次**内部请求**的端口往返（端口 `model`）。
+///
+/// ## 它管的是「编排层替别人打的模型电话」
+///
+/// 会话轮的那一次模型调用住在 v2 运行器里，由 `dispatch-model` 的执行体派发。
+/// 但一轮里还有别的模型往返，它们由编排层经容器 `route` 交给别的插件去跑
+/// （当前唯一一条：`Answered{from_context}` 的答话生成）。PL-017 判据 2 的口径是
+/// **每一次**模型调用都有 `sent` + 应答，内部请求不是例外——它同样是一次对外调用，
+/// 同样要能在崩溃后被租约看护收走。
+///
+/// ## 调用点为什么能断定「这一笔真会打模型」
+///
+/// [`crate::symbio_core::Verdict::needs_wording_generation`] 是这条判据的唯一 owner：
+/// 措辞插件按它决定是否生成，编排层按它决定要不要记账。两处各判一遍会漂移成
+/// 「记了账却没打模型」（三格从此不代表一次模型往返，日志不能再用来数调用）或
+/// 「打了模型没账」（本任务要关的那个缺口）。
+///
+/// ## 失败方向：告警 + 「无措辞」，不重试也不补打
+///
+/// 派发被拒（`NotOwed`）时执行体**根本没跑**，落格失败时它已经跑完——两种 `Err`
+/// 都不该换来第二次模型调用。调用方按「没有措辞」处置（`Answered` 那条已知是
+/// 降级进工具循环，不是沉默）。
+pub(crate) struct Round<'a> {
+    /// 这笔账属于哪一轮。
+    pub(crate) turn: u64,
+    /// 溯源锚：本轮用户格的 `seq`。
+    pub(crate) produced_by: u64,
+    /// 本幕锚——逻辑 id 必须带它，否则续写幕会与首幕撞成同一笔账。
+    pub(crate) drive_seq: u64,
+    /// 本幕的 `now`（唤醒事实的 `ts`，判据 12）：问表要用它。
+    pub(crate) now: i64,
+    /// 逻辑 id 的步名段：`model-{turn}-d{drive}-{step}`。
+    pub(crate) step: &'a str,
+    /// 这一笔是谁的往返（并进 `request` / `response` 载荷，让日志说得出用途）。
+    pub(crate) via: &'a str,
+}
+
+impl Round<'_> {
+    fn id(&self) -> String {
+        format!("model-{}-d{}-{}", self.turn, self.drive_seq, self.step)
+    }
+}
+
+/// 记账并跑一次内部请求（见 [`Round`]）。
+pub(crate) async fn round_trip<S, T, F, Fut>(
+    store: &S,
+    round: Round<'_>,
+    run: F,
+) -> Result<T, DispatchError<std::convert::Infallible>>
+where
+    S: Store<Event = Event> + ?Sized,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let call = Call::new("model", round.id(), 1);
+    let via = serde_json::json!({ "via": round.via });
+    announce_with(store, &call, round.turn, round.produced_by, via.clone())
+        .map_err(DispatchError::Store)?;
+    // 派发前切片必须是**刚写完 `request`** 的那一份：行欠不欠看它。
+    let facts = store.range(crate::symbio_core::Seq::new(0));
+    let owed = super::loop_rows::owes("dispatch-model", &facts, round.turn, round.now);
+    dispatch_with(
+        store,
+        super::loop_rows::PORTS,
+        Dispatch {
+            call: &call,
+            turn: round.turn,
+            produced_by: round.produced_by,
+            owed,
+        },
+        || async move { Ok(run().await) },
+        |never| match *never {},
+        move |_| via,
+    )
+    .await
+}
+
 #[cfg(test)]
 #[path = "port.test.rs"]
 mod tests;

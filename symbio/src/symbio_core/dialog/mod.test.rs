@@ -43,3 +43,30 @@ fn verdict_wire_shape_carries_the_reason_verbatim() {
         "未知理由码必须原样收下：外部调用方（网关）会发来自本仓词表之外的值"
     );
 }
+
+/// **一条模型往返的判据只有一份**：措辞插件按它决定是否生成，编排层按它决定
+/// 要不要落端口 `model` 的账（T-238）。两处各判一遍会漂移成「记了账却没打模型」
+/// （三格不再代表一次模型调用，日志数不准）或「打了模型没账」（要关的那个缺口）。
+#[test]
+fn only_from_context_costs_a_model_round_trip() {
+    assert!(Verdict::Answered {
+        reason: REASON_FROM_CONTEXT.into()
+    }
+    .needs_wording_generation());
+    // 其余答话理由的内容是固定措辞，模型只会把它们写长。
+    for reason in [REASON_GREETING, REASON_THANKS, REASON_ACK, REASON_EMPTY] {
+        assert!(
+            !Verdict::Answered {
+                reason: reason.into()
+            }
+            .needs_wording_generation(),
+            "理由码 `{reason}` 走模板，不该花一次模型往返"
+        );
+    }
+    // 首响与汇报同理零往返。
+    assert!(!Verdict::Escalate {
+        reason: REASON_NEEDS_WORK.into()
+    }
+    .needs_wording_generation());
+    assert!(!Verdict::Report.needs_wording_generation());
+}

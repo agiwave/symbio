@@ -67,7 +67,8 @@ use crate::symbio_core::{
 use crate::symbio_core::node_build::dialog_node;
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
-use super::state::{ChatOrchestrator, SessionContext};
+use super::super::port::{round_trip, Round};
+use super::state::{ChatOrchestrator, SessionContext, TurnState};
 
 /// 汇报节点的理由码（`meta.reason`）。
 ///
@@ -84,12 +85,17 @@ const REASON_PROGRESS: &str = "progress";
 /// `snapshot` 是**运行现状**（只有 `Report` 读它，见 [`RunSnapshot`]）。轮首的两个变体
 /// 不看运行现状——它们说的是"这一轮怎么办"，而现状说的是"干到哪一步了"。
 ///
+/// `turn` 带来这笔往返的账目位置（轮号 / 溯源锚 / 幕锚 / 本幕的 `now`）：只有
+/// `Answered{from_context}` 用到，那条产线**必然**含一次模型调用，因此它按端口
+/// `model` 记账（见 [`wording_round_trip`]）。
+///
 /// 收尾动作由调用方做（`finish_turn` 是主循环的唯一收尾点）——本函数只负责
 /// "说什么"与"写下来"，不负责"怎么结束"。
 pub(crate) async fn apply_verdict(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
+    turn: &TurnState,
     verdict: Verdict,
     snapshot: &RunSnapshot,
 ) -> (VerdictEffect, Option<WordingReply>) {
@@ -103,8 +109,14 @@ pub(crate) async fn apply_verdict(
 
     match &verdict {
         Verdict::Answered { reason } => {
-            let Some(reply) = compose_text(orchestrator, ctx, context, &verdict, snapshot).await
-            else {
+            // 生成产线那一条要经端口，模板那一条不经——判据是契约上的
+            // [`Verdict::needs_wording_generation`]，与 `compose` 分派措辞用的是同一条。
+            let reply = if verdict.needs_wording_generation() {
+                wording_round_trip(orchestrator, ctx, context, turn, &verdict, snapshot).await
+            } else {
+                compose_text(orchestrator, ctx, context, &verdict, snapshot).await
+            };
+            let Some(reply) = reply else {
                 // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
                 crate::plugin_warn!(
                     "session",
@@ -167,6 +179,66 @@ pub(crate) enum VerdictEffect {
     Spoke,
     /// 一句话都没说，本轮继续（措辞未启用 / 取不到措辞 / 措辞为空）。
     Silent,
+}
+
+/// 生成产线那一次措辞调用，**按端口 `model` 记账**（T-238）。
+///
+/// ## 为什么账记在这一侧而不是 `compose` 里
+///
+/// PL-016 §2.4：`request` 由**决策者**写。决定「这一轮欠一次模型往返」的是拿着判决
+/// 的编排层；`compose` 只是被叫去把那句话组织出来，它连事实源都没有（转写的唯一
+/// 写入者仍是 `session`，ADR-020）。而 PL-017 判据 2 要的是**每一次**模型调用都有
+/// `sent` + 应答——「内部静默请求」从来不是豁免理由：它同样是一次对外调用，
+/// 崩溃后同样得让租约看护收走它。
+///
+/// ## 为什么只包这一条产线
+///
+/// `Escalate` 首响与 `Report` 汇报都是模板，零模型往返。给它们也落一条
+/// `request(port=model)`，三格就不再等价于「一次模型调用」，日志从此数不准——
+/// 那与「调了模型没有账」是同一种病的两个方向。
+///
+/// ## 记账失败换成告警，不换成沉默，也不换成第二次调用
+///
+/// 派发被拒时执行体没跑、应答落格失败时它已经跑完，两种 `Err` 都不能靠重跑来救。
+/// 交回 `None` 走的是既有那条「无措辞 ⇒ `Answered` 降级进工具循环」的路（本轮仍然
+/// 会答，只是不再短路）。
+async fn wording_round_trip(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    context: &SessionContext,
+    turn: &TurnState,
+    verdict: &Verdict,
+    snapshot: &RunSnapshot,
+) -> Option<WordingReply> {
+    let Some(store) = context.session.facts() else {
+        // 临时会话没有事实源 ⇒ 没有账可记，照旧说话（持久轮已由 `begin_drive` 拦过）。
+        return compose_text(orchestrator, ctx, context, verdict, snapshot).await;
+    };
+    // 步名带**请求轮次**：一幕可以有多次往返（auto 续写），每次是一笔独立的账
+    // （与端口 `turn` 的 id 同一口径，见主循环的 `turn-{turn}-d{drive}-r{round}`）。
+    let step = format!("w{}", turn.request_round);
+    let round = Round {
+        turn: turn.turn_no,
+        produced_by: turn.user_seq,
+        drive_seq: turn.drive_seq,
+        now: turn.now_ms,
+        step: &step,
+        via: "compose/wording",
+    };
+    match round_trip(store.as_ref(), round, || {
+        compose_text(orchestrator, ctx, context, verdict, snapshot)
+    })
+    .await
+    {
+        Ok(reply) => reply,
+        Err(e) => {
+            crate::plugin_warn!(
+                "session",
+                "[Compose] 答话往返的端口记账失败（本轮不短路）: {e}"
+            );
+            None
+        }
+    }
 }
 
 /// 调 `compose/wording` 拿一段文本。

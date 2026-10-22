@@ -9,8 +9,8 @@ import './_selfrun.mjs';
 //
 // | 线 | 输入 | 判决 | 措辞产线 | 可观测后果 |
 // |---|---|---|---|---|
-// | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求；一条根级 `surface=reply` 节点 |
-// | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；答话**进**后续请求包 |
+// | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求、**零**端口 `model` 协议事实；一条根级 `surface=reply` 节点 |
+// | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；生成那一笔是端口 `model` 的三格账（T-238）；答话**进**后续请求包 |
 // | B 首响剔除 | 再接「读一下 README」 | `Escalate{needs_work}` | 模板 | 首响节点**不进**请求包（同一批 worker 请求里查无此句） |
 // | B 首响到达时序 | 同上（同一次投递） | 同上 | 同上 | 首响帧在实时面上**早于**第一条工具结果帧，且只占一个节点 id |
 // | C 卸载平凡值 | 「谢谢」+ 不挂载 `compose` | `Answered{thanks}` | 无 | **降级进工具循环**；转写里没有对话面文本 |
@@ -20,6 +20,14 @@ import './_selfrun.mjs';
 //
 // 模板产线的全部价值就在这个零上：「你好」「谢谢」这类输入不该付任何往返。若
 // 某天有人给模板路径加了一次"润色"请求，A 线会红——这正是它存在的意义。
+//
+// ## 为什么两条线各判一格**事实层**（T-238）
+//
+// 「打没打电话」与「日志上有没有这笔账」是两件事，而短路轮曾经两件事都不成立：
+// 答话生成直调模型、协议一格不落（CLI 实测会话 `verify-ring-1`）。现在 B 线钉
+// 「这一次模型往返有 `request` / `sent` / `response` 三格」，A 线钉「零往返也**不许**
+// 落账」。两条一起才守住那条等式：**三格 ⇔ 一次模型往返**。只写正向那一条，
+// 后来者给模板路径补一条 `request` 也是绿的，而日志从此数不准调用次数。
 //
 // ## 为什么 B 线要接第二条消息
 //
@@ -80,7 +88,36 @@ import {
   assertTranscriptInvariants,
   msgTypeOf,
   msgRoleOf,
+  readFileSyncSafe,
 } from '../helpers.mjs';
+import { join } from 'node:path';
+
+/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径）。 */
+const V2_WAL = 'v2-events.wal';
+
+/** 逐行读一份 WAL（与 t45 / t71 / t74 同一口径：判据落在**事实层**，转写只是它的投影）。 */
+function walLines(path) {
+  return readFileSyncSafe(path)
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
+}
+
+/**
+ * 端口 `model` 的一笔内部调用的三格（`request` / `sent` / `response`）。
+ *
+ * 认领方式是 `request` 载荷里的 `via`（内部请求各自有名，会话轮的模型调用没有这个
+ * 字段）——先按用途找到那一笔的逻辑 id，再按 id 收齐它自己的三格。
+ */
+function internalModelCall(homedir, sid, via) {
+  const facts = walLines(join(homedir, 'session', sid, V2_WAL));
+  const req = facts.find((e) => e.kind === 'request' && e.payload?.via === via);
+  if (!req) return { found: false, facts: [] };
+  const own = facts.filter(
+    (e) => e.payload?.port === 'model' && e.payload?.id === req.payload.id,
+  );
+  return { found: true, id: req.payload.id, facts: own };
+}
 
 /** 本用例的会话 id（一条断言线一个：四条线各自从零开始，断言互不污染） */
 const SIDS = {
@@ -247,6 +284,16 @@ export default defineCase(
         !tplMsgs.some((m) => msgTypeOf(m) === 'turn'),
         'A 线不进工具循环 ⇒ 不该有 Turn 组合节点',
       );
+      // 事实层的反向判据（T-238）：模板产线**不开**端口 `model` 的账。
+      //
+      // 上面那条「零 LLM 请求」只说明电话没打；这一条说明日志里也没有一笔**虚账**。
+      // 两者合起来才守住那句判据：`request/sent/response` 三格**恰好**代表一次模型
+      // 往返——若给零往返的产线也落一条 `request(port=model)`，三格从此数不准调用，
+      // 而「调了模型没有账」与「有账没调模型」是同一种病的两个方向。
+      assert(
+        !internalModelCall(hd.homedir, SIDS.template, 'compose/wording').found,
+        'A 线（模板产线）不该落任何端口 `model` 的协议事实',
+      );
 
       // ── B 生成路径：「我们刚才聊了什么」⇒ 分类 + 生成（各一次静默请求）──
       base = await reqCount();
@@ -281,6 +328,31 @@ export default defineCase(
       assert(genReason, '答话节点下应有 Reason 子节点（思考事实入格）');
       assertEq(genReason.content, '想一想：用户在问对话内容，直接从上下文总结即可。', 'Reason 节点正文 = 生成时的思考内容');
       assertEq(genReason.status, 'completed', 'Reason 节点落库即终态');
+
+      // ── 事实层正向判据（T-238 要关的那条缺口）────────────────────────────
+      //
+      // 旧实测（CLI 会话 `verify-ring-1`，2026-10-22）：这一句问答走了**两次**模型
+      // HTTP 调用，而 WAL 里一格协议事实都没有——短路轮直接调模型，绕开了端口，
+      // 「这一轮欠一次模型往返」只活在内存里。现在它必须是端口 `model` 的一笔账：
+      // 三格齐、同一逻辑 id、`sent` 夹在中间（引擎在执行体**之前**记账），
+      // 逻辑 id 带幕锚（`model-{轮}-d{幕}-w{请求轮次}`）。
+      const genCall = internalModelCall(hd.homedir, SIDS.generate, 'compose/wording');
+      assert(genCall.found, 'B 线那次答话生成必须落一条 `request(port=model)`');
+      const kindsInOrder = genCall.facts.map((e) => e.kind);
+      assertEq(
+        JSON.stringify(kindsInOrder),
+        JSON.stringify(['request', 'sent', 'response']),
+        `那一笔应当是三格且按派发序（实际 ${JSON.stringify(kindsInOrder)}，id=${genCall.id}）`,
+      );
+      assert(
+        genCall.id.startsWith('model-') && /-d\d+-w\d+$/.test(genCall.id),
+        `逻辑 id 应带幕锚与步名（实际 ${genCall.id}）`,
+      );
+      assertEq(
+        genCall.facts[1].payload.lease_ms,
+        600_000,
+        '`sent` 要带上派发那一刻约定的租约（崩溃后收租读的就是它）',
+      );
 
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──
       base = await reqCount();

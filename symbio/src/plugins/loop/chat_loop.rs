@@ -787,6 +787,7 @@ async fn run_turn_head(
                 orchestrator,
                 ctx,
                 context,
+                turn,
                 verdict.clone(),
                 &RunSnapshot::default(),
             )

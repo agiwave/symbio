@@ -146,6 +146,21 @@ pub const REASON_NEEDS_WORK: &str = "needs_work";
 /// 干活」，用户看到的是**沉默**——这里最坏的失败形态，因为它没有任何错误信号。
 pub const REASON_UNCLASSIFIED: &str = "unclassified";
 
+impl Verdict {
+    /// 这条判决要不要花**一次模型往返**来组织措辞。
+    ///
+    /// 判据只有一个理由码：`from_context`——「答案已在对话里」，那段文本只能从对话线
+    /// 组织出来，模板给不了；其余理由码的**内容**是固定的，模型只会把它们写长。
+    ///
+    /// 它住在契约上而不是 `compose` 的私有函数里，因为读它的不止措辞那一侧：编排层
+    /// 要按它决定「这一次对外调用是不是一笔端口 `model` 的账」（PL-017 判据 2 要求
+    /// **每一次**模型往返都有 `request` / `sent` / `response` 三格，内部静默请求不
+    /// 例外）。两处各判一遍必然漂移成「记了账却没打模型」或「打了模型没账」。
+    pub fn needs_wording_generation(&self) -> bool {
+        matches!(self, Verdict::Answered { reason } if reason == REASON_FROM_CONTEXT)
+    }
+}
+
 /// **运行现状快照** —— `session` 在调用那一刻投影出来的事实（只放事实，见模块文档）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunSnapshot {
