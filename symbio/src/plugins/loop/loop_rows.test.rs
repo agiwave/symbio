@@ -433,11 +433,13 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
-            // （T-223 的 `turn` / T-227 步 2 的 `model`）。
+            // （T-223 的 `turn` / T-227 步 2 的 `model` / 步 3 的 `tool`）。
             "dispatch-turn",
             "dispatch-model",
+            "dispatch-tool",
             "await-turn",
             "await-model",
+            "await-tool",
             "lease",
         ]
     );
@@ -457,6 +459,8 @@ fn rows_are_stable_and_globally_ordered() {
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Fast,

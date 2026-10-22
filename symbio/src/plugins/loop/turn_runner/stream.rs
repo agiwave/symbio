@@ -9,20 +9,49 @@
 
 use super::*;
 
-/// 一次模型往返的失败：三类，各有各的收口。
+/// 一次端口调用的失败：三类，各有各的收口。
 ///
 /// 为什么要分类而不是直接抛 `AdapterError`：中止与失败是**两种停法**
 /// （收束格 vs 兜底格），而控制面不一致（行不欠 / 端口没声明）**根本不是适配器的
 /// 错**——把它们揉进一个错误类型，就只能给它们同一个形状。
-enum ModelCallError {
+///
+/// 两个端口（`model` / `tool`）共用它：**分类的口径与端口无关**——端口只决定
+/// 落哪几格协议事实，不决定「失败该怎么收束」。
+enum PortCallError {
     /// 适配器中止（`AdapterError::Aborted`）——中止收束格。
     Aborted,
     /// 适配器失败——兜底格（`detail` 是适配器的人话，只给人读）。
     Failed(String),
     /// 协议事实落不进去——往上传：事件都记不下来，后面的一切都不可信。
     Store(crate::symbio_core::AppendError),
-    /// 控制面自身不一致（行不欠 / 端口没声明）——模型没跑成，如实当失败报。
+    /// 控制面自身不一致（行不欠 / 端口没声明）——执行体没跑成，如实当失败报。
     Control(String),
+}
+
+/// 决策者写 `request` 并问表：**端口无关的那一半**（announce + 行还欠不欠）。
+///
+/// 两个端口（`model` / `tool`）共用它，于是「先落 `request`、再拿刚写完的那份切片
+/// 问表」这条顺序只写一次——它是个容易写反的地方（先问表再落 `request`，行恒不欠，
+/// 于是每次派发都被拒），而写反了不会有任何东西报错。
+fn open_call<S>(
+    store: &S,
+    call: &super::super::port::Call,
+    row: &str,
+    turn: u64,
+    produced_by: u64,
+) -> Result<bool, PortCallError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    super::super::port::announce(store, call, turn, produced_by).map_err(PortCallError::Store)?;
+    // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
+    let facts = store.range(Seq::new(0));
+    Ok(super::super::loop_rows::owes(
+        row,
+        &facts,
+        turn,
+        crate::symbio_core::clock_now_ms(),
+    ))
 }
 
 /// 一次模型往返 = 端口 `model` 的一次调用（T-227 步 2）。
@@ -47,16 +76,16 @@ enum ModelCallError {
 /// 视图 `in_flight` / `stale_sent` 的关账口径按 **id** 匹配，不带端口
 /// （`open_calls`：`response` / `retry` 关同 id + attempt，`failed` 关同逻辑 id）
 /// ——也就是说，**id 必须跨端口唯一**，否则一个端口的失败会关掉另一个端口的账。
-/// 以端口名开头是最省心的做法：`turn-…` 与 `model-…` 天然不撞。
+/// 以端口名开头是最省心的做法：`turn-…` / `model-…` / `tool-…` 天然不撞。
 async fn call_model<S>(
-    run: &mut Prepared,
+    run: &Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
     tok: &FullModel,
     messages: &[crate::symbio_core::PromptMessage],
     tools: &[crate::symbio_core::CapabilityMeta],
     sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
-) -> Result<crate::symbio_core::LlmTurn, ModelCallError>
+) -> Result<crate::symbio_core::LlmTurn, PortCallError>
 where
     S: Store<Event = Event> + ?Sized,
 {
@@ -65,16 +94,7 @@ where
         format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
         1,
     );
-    super::super::port::announce(store, &call, run.turn, run.user_seq)
-        .map_err(ModelCallError::Store)?;
-    // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
-    let facts = store.range(Seq::new(0));
-    let owed = super::super::loop_rows::owes(
-        "dispatch-model",
-        &facts,
-        run.turn,
-        crate::symbio_core::clock_now_ms(),
-    );
+    let owed = open_call(store, &call, "dispatch-model", run.turn, run.user_seq)?;
     let out = super::super::port::dispatch(
         store,
         super::super::loop_rows::PORTS,
@@ -90,13 +110,68 @@ where
     match out.await {
         Ok(rt) => Ok(rt),
         Err(super::super::port::DispatchError::Actor(AdapterError::Aborted)) => {
-            Err(ModelCallError::Aborted)
+            Err(PortCallError::Aborted)
         }
         Err(super::super::port::DispatchError::Actor(e)) => {
-            Err(ModelCallError::Failed(e.to_string()))
+            Err(PortCallError::Failed(e.to_string()))
         }
-        Err(super::super::port::DispatchError::Store(e)) => Err(ModelCallError::Store(e)),
-        Err(other) => Err(ModelCallError::Control(format!("{other:?}"))),
+        Err(super::super::port::DispatchError::Store(e)) => Err(PortCallError::Store(e)),
+        Err(other) => Err(PortCallError::Control(format!("{other:?}"))),
+    }
+}
+
+/// 一次工具批 = 端口 `tool` 的一次调用（T-227 步 3）。
+///
+/// 协议事实与前两个端口**同一套**（`request` / `sent` / `response` / `failed`），
+/// 写方仍是 [`port`](crate::plugins::loop::port) 模块。
+///
+/// ## 为什么调用单元是「批」而不是「单次调用」
+///
+/// 执行体是**批原子**的：批首闸门读数一次、交互模式下一条待用户动作就收掉批尾、
+/// 批尾未执行的调用统一收口。切到单次调用会得到 N 笔无法独立派发的债——记账比
+/// 执行更细，而「更细」在这里不是精度，是**假象**（PL-017 §3.1 的 `expand` 是
+/// 为「执行体按调用跑」准备的形状，那一半还不存在）。单次调用的结果本来就逐条
+/// 是事实（`artifact.added` 带 `tool_call_id`），恢复面因此没有信息损失。
+///
+/// ## 逻辑 id 带**批号**
+///
+/// `b{tool_round}`：一次响应一个批，批号在本幕内单调。幕锚与轮号仍然要带——
+/// 续写幕复用轮号且批号从 0 重来。
+async fn call_tools<S>(
+    run: &Prepared,
+    store: &S,
+    dispatch: &dyn crate::symbio_core::DispatchPort,
+    rt: &LlmTurn,
+) -> Result<Vec<crate::symbio_core::DispatchOutcome>, PortCallError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let call = super::super::port::Call::new(
+        "tool",
+        format!("tool-{}-d{}-b{}", run.turn, run.drive_seq, run.tool_round),
+        1,
+    );
+    let owed = open_call(store, &call, "dispatch-tool", run.turn, run.user_seq)?;
+    let out = super::super::port::dispatch(
+        store,
+        super::super::loop_rows::PORTS,
+        super::super::port::Dispatch {
+            call: &call,
+            turn: run.turn,
+            produced_by: run.user_seq,
+            owed,
+        },
+        // 分发契约本身不可失败（失败是**信息性结果**：工具报错要喂回模型，不是
+        // 派发失败）。`E = String` 只是给引擎一个可写的 `why` 位，不会有人返回它。
+        || async { Ok::<_, String>(dispatch.dispatch(rt).await) },
+        |e: &String| e.clone(),
+    );
+    match out.await {
+        Ok(outcomes) => Ok(outcomes),
+        Err(super::super::port::DispatchError::Store(e)) => Err(PortCallError::Store(e)),
+        // 行不欠 / 端口没声明：批**没有跑**。如实当失败报——静默跳过工具会让模型
+        // 在下一轮看到「请求过却什么也没发生」。
+        Err(other) => Err(PortCallError::Failed(format!("{other:?}"))),
     }
 }
 
@@ -124,13 +199,13 @@ where
     // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
     let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
         Ok(rt) => rt,
-        Err(ModelCallError::Aborted) => return aborted(run, store, llm).await.map(Some),
-        Err(ModelCallError::Failed(why)) => {
+        Err(PortCallError::Aborted) => return aborted(run, store, llm).await.map(Some),
+        Err(PortCallError::Failed(why)) => {
             return failed(run, store, llm, &why).await.map(Some);
         }
-        Err(ModelCallError::Store(e)) => return Err(e),
+        Err(PortCallError::Store(e)) => return Err(e),
         // 控制面自身不一致（行不欠 / 端口没声明）：模型没跑成，如实当失败报。
-        Err(ModelCallError::Control(why)) => {
+        Err(PortCallError::Control(why)) => {
             return failed(run, store, llm, &why).await.map(Some);
         }
     };
@@ -174,7 +249,19 @@ where
         .await
         .map(Some);
     };
-    let outcomes = dispatch.dispatch(&rt).await;
+    // 2b′. 工具批也是一次端口调用（T-227 步 3）：`request` → `sent` → 跑批 →
+    //      `response`。**协议事实先于产物格**：批返回之后，它的结果才成为事实
+    //      （`artifact.added` 在 2c 落）。
+    let outcomes = match call_tools(run, store, dispatch, &rt).await {
+        Ok(outcomes) => outcomes,
+        Err(PortCallError::Store(e)) => return Err(e),
+        // 批没有跑成（控制面不一致 / 引擎判不欠）：如实落兜底格，不静默跳过工具。
+        Err(PortCallError::Failed(why)) | Err(PortCallError::Control(why)) => {
+            return failed(run, store, llm, &why).await.map(Some);
+        }
+        // 分发契约不可中止；万一将来的实现返回中止，走与模型端口同一条收束路。
+        Err(PortCallError::Aborted) => return aborted(run, store, llm).await.map(Some),
+    };
 
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;

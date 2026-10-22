@@ -17,8 +17,10 @@
 //! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
 //! 66 dispatch-model─ 端口派发：模型往返（T-227 步 2，在 `turn` 执行体内部）
+//! 67 dispatch-tool ─ 端口派发：工具批（T-227 步 3，同上）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
 //! 71 await-model   ── 等应答（模型端口）
+//! 72 await-tool    ── 等应答（工具端口）
 //! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
 //!
@@ -57,7 +59,8 @@ use crate::symbio_core::{
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
 ///
-/// 当前两个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返，T-227 步 2）。
+/// 当前三个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返，T-227 步 2）、
+/// `tool`（一次工具批，T-227 步 3）。
 ///
 /// ## 租约与尝试上限怎么定的
 ///
@@ -83,6 +86,21 @@ use crate::symbio_core::{
 /// 租约与 `turn` 同量级（慢的那一头同样是模型排队）；`max_attempts = 1` 同理：
 /// 进程重启后等这笔应答的 future 已经不在了，重试只会留下一条永不派发的
 /// `request`。等步 4 的唤醒事实接上（有活着的等待方）时，这个上限才可以 > 1。
+///
+/// ## `tool` 端口（T-227 步 3）
+///
+/// 一次**工具批**：一次模型响应带来的全部调用，作为一个派发单元。
+///
+/// **调用单元为什么是「批」而不是「单次调用」**：批才是执行体的原子单位——
+/// 批首闸门读数一次、交互模式下一条待用户动作就收掉批尾、批尾未执行的调用统一
+/// 收口（`tools/dispatch/{gates,batch,unfinished}.rs`）。把债切到单次调用会得到
+/// N 笔**无法独立派发**的账（执行体一次只吃一批），那是记账比执行更细的假象。
+/// 单次调用的**结果**本来就逐条是事实（`artifact.added`，带 `tool_call_id`），
+/// 所以「哪一次调用跑完了」不从协议面上丢。
+///
+/// 租约与 `turn` 同值：批再长也长不过它所属的那一轮，轮租约先到期就整轮判死——
+/// 工具租约设得更大只是让「谁先判死」变得不可预期。`max_attempts = 1` 同
+/// `turn`：重跑一次工具批会重放副作用（写文件 / 派活），那不是重试，是第二次执行。
 pub(crate) static PORTS: &[PortDecl] = &[
     PortDecl {
         port: "turn",
@@ -93,6 +111,12 @@ pub(crate) static PORTS: &[PortDecl] = &[
     },
     PortDecl {
         port: "model",
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+    },
+    PortDecl {
+        port: "tool",
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 1,
@@ -312,6 +336,40 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // ── 端口 `tool` 的派发行（T-227 步 3）──────────────────────────
+    //
+    // 与前两个端口**同模板**，只差端口取值。工具批的调用单元是「一次响应带来的
+    // 全部调用」（理由见 `PORTS` 的 `tool` 一节）：批内并发与批尾收口都在执行体
+    // 内部，协议面只回答「这一批派出去了没有、回来了没有」。
+    //
+    // `prio` 取 67：在 `dispatch-model` 之后、两个 `await` 之前——同一点上若模型
+    // 与工具都有账要还，模型那一笔先（工具批是它的**下游**，没有响应就没有批）。
+    // `await-tool` 与其余 `await` 行一起排在 72（见下）。
+    Decl {
+        name: "dispatch-tool",
+        prio: 67,
+        by: Some("courier"),
+        // 派发本身不调模型（工具在执行体里）。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
     // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
     // 永不选中），但它让「在等」与「没事」可区分（PL-016 §2.3）。
     Decl {
@@ -369,6 +427,36 @@ pub(crate) static ROWS: &[Decl] = &[
                 source: EVENT_RETRY,
                 key: &["port", "id"],
                 eq: &[("port", Lit::Str("model"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠（工具端口：等这一批回来）。
+    Decl {
+        name: "await-tool",
+        prio: 72,
+        by: None,
+        tier: LatencyTier::Deep,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
             },
         ],
         unless: &[],

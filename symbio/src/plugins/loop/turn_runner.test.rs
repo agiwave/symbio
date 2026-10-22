@@ -1218,6 +1218,86 @@ mod tool_round_tests {
         );
     }
 
+    /// 判据 2 的工具半边（T-227 步 3）：**每一批工具调用都落 `sent` 与应答**。
+    ///
+    /// 与 [`every_model_call_leaves_a_sent_and_an_answer`] 同一形状，只换端口：
+    /// 一次模型响应带来的全部调用是**一次** `tool` 调用（批是执行体的原子单位），
+    /// 两批 ⇒ 两个逻辑 id。
+    ///
+    /// ## 反向自检
+    ///
+    /// 把 `stream_round` 里的 `call_tools` 换回裸的 `dispatch.dispatch(&rt)`，
+    /// 本用例当场红在「一批 ⇒ 一条 request」上——而那正是它防的形态：
+    /// 工具跑了、日志里没有「派出去了」。
+    #[tokio::test]
+    async fn every_tool_batch_leaves_a_sent_and_an_answer() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("工具轮必答");
+
+        let snapshot = store.range(Seq::new(0));
+        let tool: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.payload.get("port").and_then(|v| v.as_str()) == Some("tool"))
+            .collect();
+        let id_of = |e: &Event| e.payload["id"].as_str().unwrap_or_default().to_string();
+        let by_kind = |kind: &str| -> Vec<String> {
+            tool.iter()
+                .filter(|e| e.kind == kind)
+                .map(|e| id_of(e))
+                .collect()
+        };
+
+        let requests = by_kind(crate::symbio_core::EVENT_REQUEST);
+        let sents = by_kind(crate::symbio_core::EVENT_SENT);
+        let answers = by_kind(crate::symbio_core::EVENT_RESPONSE);
+
+        // 本用例的模型只请求一次工具 ⇒ 一批。
+        assert_eq!(requests.len(), 1, "一批 ⇒ 一条 request：{tool:?}");
+        assert_eq!(sents.len(), 1, "派发前落 `sent`（引擎写）：{tool:?}");
+        assert_eq!(answers.len(), 1, "批返回后落应答：{tool:?}");
+        assert_eq!(requests, sents, "`sent` 与 `request` 同 id（同一笔账）");
+        assert_eq!(requests, answers, "应答与 `request` 同 id（同一笔账）");
+        assert!(
+            requests[0].starts_with("tool-"),
+            "id 以端口名开头（跨端口不撞）：{requests:?}"
+        );
+        // 协议事实先于产物格：批返回之后它的结果才成为事实。
+        let last_tool = snapshot
+            .iter()
+            .rposition(|e| e.payload.get("port").and_then(|v| v.as_str()) == Some("tool"))
+            .expect("工具端口有事实");
+        let first_artifact = snapshot
+            .iter()
+            .position(|e| e.kind == crate::symbio_core::EVENT_ARTIFACT_ADDED)
+            .expect("产物格在");
+        assert!(
+            last_tool < first_artifact,
+            "工具端口三格必须在产物格之前：{snapshot:?}"
+        );
+        assert!(
+            tool.iter().all(|e| e.turn == 0 && e.produced_by == Some(0)),
+            "记在本轮上、带溯源：{tool:?}"
+        );
+    }
+
     /// 注入的消息必须**进本轮的下一次请求**。
     ///
     /// ## 为什么 core 层只验这一半
@@ -2044,6 +2124,9 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                "request",
+                "sent",
+                "response",
                 "artifact.added",
                 "request",
                 "sent",
@@ -2127,10 +2210,13 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                "request",
+                "sent",
+                "response",
                 "artifact.added",
                 "chat.assistant.progress",
             ],
-            "用户格 + 派发格 + 模型端口三格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
+            "用户格 + 派发格 + 模型端口三格 + 工具端口三格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
         assert!(
@@ -2432,6 +2518,9 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                "request",
+                "sent",
+                "response",
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_PROGRESS,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
@@ -2441,7 +2530,7 @@ mod tool_round_tests {
                 "response",
                 EVENT_ASSISTANT_FINAL
             ],
-            "续写**不重开用户格**（否则 14 格），只补派发格、产物格与收束格：{snapshot:?}"
+            "续写**不重开用户格**，只补派发格、产物格与收束格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
@@ -2734,11 +2823,18 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
-                // 三次模型往返 = 三组协议事实（request / sent / response）。
+                // 三次模型往返 = 三组协议事实（request / sent / response）；
+                // 前两次各带一批工具，各再一组（工具端口，T-227 步 3）。
+                "request",
+                "sent",
+                "response",
                 "request",
                 "sent",
                 "response",
                 EVENT_ARTIFACT_ADDED,
+                "request",
+                "sent",
+                "response",
                 "request",
                 "sent",
                 "response",
