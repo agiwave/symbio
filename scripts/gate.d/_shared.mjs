@@ -129,7 +129,7 @@ export const BASELINE = {
   // （兜底必须是闭集里的取值，不是自由文本）；`turn_exec.test.rs` 的
   // `tool_free_turn_failure_leaves_fallback_event_and_bubbles` 同补一条。净增为正：
   // 只改了载荷键名（`why` → `detail`）与两条断言的目标字段，没有删判据。
-  rustTests: 2010,
+  rustTests: 2038,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。

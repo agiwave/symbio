@@ -3,12 +3,18 @@
 //! 反向用例是主菜——一个只会让正确输入通过的白名单等于没有检查。
 
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::super::event::{Entity, Verb};
+use super::super::Seq;
 use super::*;
 
+/// 未入库事件默认 `seq = None`；视图的幕锚 / 阶段折叠读的是确切的序号，
+/// 因此用例里的每条事件都按**调用顺序**分配一个递增序号（跨用例共享一个计数器
+/// 不影响单个用例内的相对顺序）。
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
-    Event::pending(
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let mut e = Event::pending(
         format!("{kind}-{turn}-{}", payload.to_string().len()),
         kind,
         Entity::Turn,
@@ -16,11 +22,17 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
         turn,
         "test",
     )
-    .with_payload(payload)
+    .with_payload(payload);
+    e.seq = Some(Seq::new(NEXT.fetch_add(1, Ordering::Relaxed)));
+    e
 }
 
 fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
     ev(turn, kind, payload).with_ts(ts)
+}
+
+fn seq(e: &Event) -> u64 {
+    e.seq.unwrap().value()
 }
 
 // ── 装载 ─────────────────────────────────────────────────────────────────
@@ -50,7 +62,17 @@ fn builtin_loads_and_freezes() {
         ]
     );
     let views: Vec<_> = frozen.views().iter().map(|v| v.name).collect();
-    assert_eq!(views, vec!["in_flight", "turn_head", "report_due"]);
+    assert_eq!(
+        views,
+        vec![
+            "in_flight",
+            "turn_head",
+            "turn_stages",
+            "turn_closed",
+            "report_due",
+            "reported_anchors",
+        ]
+    );
 
     // 端口是载荷字段：协议族声明它，收束 / 阶段 / 用户 / 拒绝都不带。
     for name in [REQUEST, SENT, RESPONSE, FAILED] {
@@ -58,10 +80,14 @@ fn builtin_loads_and_freezes() {
     }
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
 
-    // `ver` 是口径的显式版本：T-225 给 `turn_head` 加 `session.config` 时升到 2。
+    // `ver` 是口径的显式版本：T-222a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
+    // `report_due` 加静默区间身份时升到 2。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 2);
-    assert_eq!(frozen.view("report_due").unwrap().ver, 1);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 3);
+    assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
+    assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
+    assert_eq!(frozen.view("report_due").unwrap().ver, 2);
+    assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }
 
 #[test]
@@ -252,11 +278,29 @@ fn in_flight_is_attempt_scoped() {
     );
 }
 
+fn flags(classify: bool, compress: bool, persistent: bool) -> Value {
+    json!({
+        "classify_enabled": classify,
+        "auto_compress": compress,
+        "is_persistent": persistent,
+        "progress_enabled": false,
+        "progress_interval_ms": 0,
+        "progress_min_rounds": 0,
+        "progress_max_per_turn": 0,
+    })
+}
+
 #[test]
 fn turn_head_reads_round_and_done_from_facts() {
     let events = vec![
-        ev(1, "user.message", json!({"text": "hi"})),
-        ev(1, "turn.stage", json!({"stage": "recall", "round": 0})),
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", flags(true, false, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "hit"}),
+        ),
         ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
     ];
     assert_eq!(
@@ -264,34 +308,101 @@ fn turn_head_reads_round_and_done_from_facts() {
         json!({
             "turn": 1,
             "round": 0,
+            "anchor": seq(&events[0]),
             "has_utterance": true,
-            "classify_enabled": false,
-            "done": true
+            "resumed": false,
+            "classify_enabled": true,
+            "classify_done": true,
+            "auto_compress": false,
+            "compress_done": false,
+            "is_persistent": true,
+            "recall_done": true,
+            "skill_hit": true
         })
     );
 
-    // 下一轮的阶段事实出现后，轮头跟着走；`done` 只认**当前 round** 的判决格。
+    // 下一轮的事实出现后，轮头跟着走；`done` 只认**本幕**的阶段格。
     let events = vec![
-        ev(1, "user.message", json!({"text": "hi"})),
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
         ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
-        ev(2, "user.message", json!({"text": "again"})),
-        ev(2, "turn.stage", json!({"stage": "recall", "round": 1})),
+        ev(2, "user.message", json!({"text": "again", "id": "u-2"})),
+        ev(2, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let head = turn_head(&events, 0);
+    assert_eq!(head["turn"], json!(2));
+    assert_eq!(head["round"], json!(0));
+    assert_eq!(head["anchor"], json!(seq(&events[3])));
+    assert_eq!(head["has_utterance"], json!(true));
+    assert_eq!(head["classify_done"], json!(false));
+    assert_eq!(head["recall_done"], json!(false));
+}
+
+#[test]
+fn turn_head_resume_drive_starts_from_the_resume_anchor() {
+    // 续写幕复用同一轮号：首幕的 recall / decide / final 都不能算到它头上。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", flags(false, false, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "hit"}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "decide", "round": 0})),
+        ev(1, "chat.assistant.final", json!({"text": "done"})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "resume", "round": 0, "result": "approve"}),
+        ),
+        ev(1, "session.config", flags(true, true, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let head = turn_head(&events, 0);
+    assert_eq!(head["resumed"], json!(true));
+    assert_eq!(head["has_utterance"], json!(false), "续写幕不是用户新发言");
+    assert_eq!(head["anchor"], json!(seq(&events[6])));
+    assert_eq!(head["classify_done"], json!(false));
+    assert_eq!(head["recall_done"], json!(false));
+    assert_eq!(head["skill_hit"], json!(false));
+    assert_eq!(head["auto_compress"], json!(true), "配置按幕取最新一份");
+    assert_eq!(turn_closed(&events, 0), json!([]), "首幕的终态不算本幕收束");
+
+    let mut closed = events.clone();
+    closed.push(ev(1, "chat.assistant.final", json!({"text": "resumed"})));
+    assert_eq!(turn_closed(&closed, 0), json!([{"turn": 1}]));
+}
+
+#[test]
+fn turn_stages_only_sees_the_current_drive() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(1, "turn.stage", json!({"stage": "recall", "round": 0})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "resume", "round": 0, "result": "approve"}),
+        ),
+        ev(1, "session.config", flags(false, false, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
     assert_eq!(
-        turn_head(&events, 0),
-        json!({
-            "turn": 2,
-            "round": 1,
-            "has_utterance": true,
-            "classify_enabled": false,
-            "done": false
-        })
+        turn_stages(&events, 0),
+        json!([
+            {"turn": 1, "stage": "resume", "round": 0},
+            {"turn": 1, "stage": "round", "round": 0},
+        ])
     );
 }
 
 #[test]
 fn turn_head_is_empty_without_facts() {
     assert_eq!(turn_head(&[], 0), Value::Null);
+    assert_eq!(turn_stages(&[], 0), json!([]));
+    assert_eq!(turn_closed(&[], 0), json!([]));
 }
 
 #[test]
@@ -328,12 +439,24 @@ fn report_due_needs_log_and_now_only() {
     // 静默 1500ms > 1000ms，配额未用完 ⇒ 到期。
     assert_eq!(
         report_due(&events, 1520),
-        json!({"turn": 1, "due": true, "reports": 0, "quota": 2})
+        json!({
+            "turn": 1,
+            "anchor": seq(&events[1]),
+            "due": true,
+            "reports": 0,
+            "quota": 2
+        })
     );
     // 同一份切片、只换 now：不到阈值 ⇒ 不到期。
     assert_eq!(
         report_due(&events, 1000),
-        json!({"turn": 1, "due": false, "reports": 0, "quota": 2})
+        json!({
+            "turn": 1,
+            "anchor": seq(&events[1]),
+            "due": false,
+            "reports": 0,
+            "quota": 2
+        })
     );
 }
 
@@ -349,11 +472,66 @@ fn report_due_resets_quiet_on_assistant_speech() {
             900,
         ),
     ];
-    // 最近一句助手文本在 900 ⇒ 静默 200ms，未到 1000ms。
+    // 最近一句助手文本在 900 ⇒ 静默 200ms，未到 1000ms；静默区间的身份跟着前移。
     assert_eq!(
         report_due(&events, 1100),
-        json!({"turn": 1, "due": false, "reports": 1, "quota": 2})
+        json!({
+            "turn": 1,
+            "anchor": seq(&events[2]),
+            "due": false,
+            "reports": 1,
+            "quota": 2
+        })
     );
+}
+
+#[test]
+fn report_due_resets_quiet_on_resume() {
+    // 审批 / 回填发生在请求开始时：静默从那一刻起算，而不是从几天前那句用户话。
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 2), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(
+            1,
+            "turn.stage",
+            json!({"stage": "resume", "round": 0, "result": "approve"}),
+            9_000,
+        ),
+    ];
+    let due = report_due(&events, 9_500);
+    assert_eq!(due["anchor"], json!(seq(&events[2])));
+    assert_eq!(due["due"], json!(false));
+}
+
+#[test]
+fn reported_anchors_close_one_quiet_interval_each() {
+    // 每条汇报关掉它**之前**那段静默；汇报自己成为下一段的起点。
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 3), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(1, "chat.assistant.reported", json!({"text": "一"}), 900),
+        ev_at(1, "chat.assistant.reported", json!({"text": "二"}), 1900),
+    ];
+    assert_eq!(
+        reported_anchors(&events, 0),
+        json!([
+            {"turn": 1, "anchor": seq(&events[1])},
+            {"turn": 1, "anchor": seq(&events[2])},
+        ])
+    );
+    // 第二段已关；第三段自第二条汇报起算，到期时是一笔新账。
+    let due = report_due(&events, 3_000);
+    assert_eq!(due["anchor"], json!(seq(&events[3])));
+    assert_eq!(due["due"], json!(true));
+    assert_eq!(due["reports"], json!(2));
+}
+
+#[test]
+fn reported_anchors_need_a_sequence() {
+    // 未入库的汇报不是事实：没有 seq 就没有可关的区间。
+    let mut report = ev(1, "chat.assistant.reported", json!({"text": "x"}));
+    report.seq = None;
+    assert_eq!(reported_anchors(&[report], 0), json!([]));
 }
 
 #[test]
@@ -381,6 +559,26 @@ fn report_due_respects_quota_and_switch() {
         ev_at(1, "user.message", json!({"text": "hi"}), 20),
     ];
     assert_eq!(report_due(&off, 60_000)["due"], json!(false));
+}
+
+#[test]
+fn report_due_quota_is_per_drive() {
+    // 配额是请求作用域的量：续写幕重新开账，首幕报过不影响本幕的额度。
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 1), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(1, "chat.assistant.reported", json!({"text": "报过"}), 30),
+        ev_at(
+            1,
+            "turn.stage",
+            json!({"stage": "resume", "round": 0, "result": "approve"}),
+            9_000,
+        ),
+        ev_at(1, "session.config", cfg(1000, 1), 9_001),
+    ];
+    let due = report_due(&events, 10_500);
+    assert_eq!(due["reports"], json!(0));
+    assert_eq!(due["due"], json!(true));
 }
 
 #[test]

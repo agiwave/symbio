@@ -42,10 +42,12 @@
 //! 15 个事实：协议四名（`request` / `sent` / `response` / `failed`）、助手文本六格
 //! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
 //! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
-//! `turn.dispatch`、`authz.denied`；3 个视图：`in_flight` / `turn_head` / `report_due`。
+//! `turn.dispatch`、`authz.denied`；6 个视图：`in_flight` / `turn_head` /
+//! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
 //!
 //! 视图点名决定了事实的**下限**：`turn_head` 读 `user.message` / `turn.stage` /
-//! `session.config`，`report_due` 读助手文本六格 / `turn.supplemented` /
+//! `session.config`，`turn_stages` 与 `turn_closed` 读本幕锚之后的阶段 / 收束格，
+//! `report_due` 读助手文本六格 / `turn.supplemented` / `turn.stage`（恢复幕）/
 //! `session.config` + `now`。`retry` 由 T-223 补声明。
 //!
 //! ## 为什么整模块暂时 `cfg(test)`
@@ -53,13 +55,16 @@
 //! 本步的范围钉死为「只做声明层，不接控制面」（`Registry` / `LoopState` 一个字不动）。
 //! 没有生产消费方时，若把它编进非测试构建，`dead_code` 会逐个点名；而
 //! `#[allow(dead_code)]` 是只许降的棘轮。故与 `stage_events::done` 同一形态：
-//! **如实标 `cfg(test)`，不给死代码闸门开豁免**。T-222 把行表接上时删掉
-//! `symbio_core/mod.rs` 里那一行 `#[cfg(test)]` 即可。
+//! **如实标 `cfg(test)`，不给死代码闸门开豁免**。T-222a 只把 `mod` 提到
+//! `pub(crate)`（`loop_rows` 的对拍用例要读它，同样 `cfg(test)`）；
+//! T-222b 接上控制面时删掉 `symbio_core/mod.rs` 里那一行 `#[cfg(test)]`。
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::symbio_core::Event;
+
+pub(crate) mod ring;
 
 /// 一个事实名的声明。
 ///
@@ -449,48 +454,158 @@ fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
         .rfind(|e| e.turn == turn && e.kind == crate::symbio_core::EVENT_SESSION_CONFIG)
 }
 
-fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
-    let Some(turn) = events
+/// 当前这一幕的身份：轮号 + 幕锚（最新一条用户格 / 恢复格）。
+///
+/// 幕锚是「本次执行从哪开始」的唯一定义：同一轮号会被续写幕复用，按轮扫全史
+/// 会把首幕的阶段误判成「已做」（与 `stage_events::done_since` 同一条判据）。
+fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
+    const HEAD_KINDS: &[&str] = &[
+        "user.message",
+        "turn.stage",
+        "chat.assistant.final",
+        "chat.assistant.fallback",
+        "session.config",
+    ];
+    let turn = events
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind.as_str(),
-                "user.message" | "turn.stage" | "chat.assistant.final" | "session.config"
-            )
-        })
+        .filter(|e| HEAD_KINDS.contains(&e.kind.as_str()))
         .map(|e| e.turn)
-        .max()
-    else {
+        .max()?;
+    let anchor = events
+        .iter()
+        .filter(|e| e.turn == turn && is_drive_anchor(e))
+        .max_by_key(|e| (e.ts, seq_of(e)));
+    Some((turn, anchor))
+}
+
+fn is_drive_anchor(e: &Event) -> bool {
+    e.kind == "user.message" || (e.kind == "turn.stage" && str_field(e, "stage") == Some("resume"))
+}
+
+fn seq_of(e: &Event) -> u64 {
+    e.seq.map(|s| s.value()).unwrap_or(0)
+}
+
+/// 阶段「已做」的锚后判据：`seq` 必须存在且不早于幕锚。
+///
+/// `None` 的 `seq` 一律不算——未入库的事件不是事实（与 `done_since` 逐字同判）。
+fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
+    e.seq.is_some_and(|s| s.value() >= anchor_seq)
+}
+
+/// 轮头（T-222a 升到 v3）：五个策略行的**开账条件**全在这一格里。
+///
+/// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
+/// 召回阶段的结论，`resumed` 区分续写幕与用户新发言。
+fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
     };
-    let has_utterance = events
-        .iter()
-        .any(|e| e.turn == turn && e.kind == "user.message");
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    // 心跳等无用户节点的轮次也落用户格（`id: null`）——那不算「这一轮有发言」
+    // （与 `first_utterance.is_some()` 同判）。
+    let has_utterance = anchor.is_some_and(|e| {
+        e.kind == "user.message" && e.payload.get("id").is_none_or(|v| !v.is_null())
+    });
+    let resumed =
+        anchor.is_some_and(|e| e.kind == "turn.stage" && str_field(e, "stage") == Some("resume"));
+    // 请求轮次以**本幕**落下的 `round` 格为准（不是全轮最大值：续写幕会复用轮号）。
     let round = events
         .iter()
-        .filter(|e| e.turn == turn && e.kind == "turn.stage")
-        .filter_map(|e| u64_field(e, "round"))
-        .max()
+        .filter(|e| {
+            e.turn == turn
+                && e.kind == "turn.stage"
+                && str_field(e, "stage") == Some("round")
+                && after_anchor(e, anchor_seq)
+        })
+        .max_by_key(|e| seq_of(e))
+        .and_then(|e| u64_field(e, "round"))
         .unwrap_or(0);
-    // `classify_enabled` 只从事实读：配置在轮首落成 `session.config`，此后判决
-    // 看到的就是"那一轮用的配置"，不是进程里此刻的活值（T-225）。
-    let classify_enabled = config_of(events, turn)
-        .and_then(|e| e.payload.get("classify_enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let done = events.iter().any(|e| {
+    let config = config_of(events, turn);
+    let flag = |key: &str| {
+        config
+            .and_then(|e| e.payload.get(key))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    let stage_since = |stage: &str| {
+        events.iter().any(|e| {
+            e.turn == turn
+                && e.kind == "turn.stage"
+                && str_field(e, "stage") == Some(stage)
+                && u64_field(e, "round") == Some(round)
+                && after_anchor(e, anchor_seq)
+        })
+    };
+    let skill_hit = events.iter().any(|e| {
         e.turn == turn
             && e.kind == "turn.stage"
-            && str_field(e, "stage") == Some("decide")
+            && str_field(e, "stage") == Some("recall")
             && u64_field(e, "round") == Some(round)
+            && after_anchor(e, anchor_seq)
+            && str_field(e, "result") == Some("hit")
     });
     serde_json::json!({
         "turn": turn,
         "round": round,
+        "anchor": anchor_seq,
         "has_utterance": has_utterance,
-        "classify_enabled": classify_enabled,
-        "done": done,
+        "resumed": resumed,
+        "classify_enabled": flag("classify_enabled"),
+        "classify_done": stage_since("decide"),
+        "auto_compress": flag("auto_compress"),
+        "compress_done": stage_since("compress"),
+        "is_persistent": flag("is_persistent"),
+        "recall_done": stage_since("recall"),
+        "skill_hit": skill_hit,
     })
+}
+
+/// 本幕落下的阶段事实（`turn.stage`）：一次性阶段的**出口**。
+///
+/// 按幕锚收窄，续写幕因此不会被首幕落在同一轮号上的 `recall` / `compress` 关账。
+/// 数组的每个元素是一条阶段，键绑定读 `turn` 与 `round`。
+fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, anchor)) = drive_of(events) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    serde_json::Value::Array(
+        events
+            .iter()
+            .filter(|e| e.turn == turn && e.kind == "turn.stage" && after_anchor(e, anchor_seq))
+            .map(|e| {
+                serde_json::json!({
+                    "turn": e.turn,
+                    "stage": str_field(e, "stage"),
+                    "round": u64_field(e, "round").unwrap_or(0),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// 本幕是否已经收束（收束 / 兜底格出现在幕锚之后）。
+///
+/// `[]` = 还开着；一条 `{turn}` = 已关。执行行与反射行都拿它作出口。
+fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, anchor)) = drive_of(events) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    let closed = events.iter().any(|e| {
+        e.turn == turn
+            && matches!(
+                e.kind.as_str(),
+                "chat.assistant.final" | "chat.assistant.fallback"
+            )
+            && after_anchor(e, anchor_seq)
+    });
+    if closed {
+        serde_json::json!([{ "turn": turn }])
+    } else {
+        serde_json::Value::Array(Vec::new())
+    }
 }
 
 /// 中途汇报该不该说（T-225）：只吃日志与 `now`，不碰 `RoundProgress` / 墙钟。
@@ -500,32 +615,10 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
 /// `min_rounds` 不在这里判——它是触发点的前提（回调只在工具批次边界上被问），
 /// 而不是日志能回答的量。
 fn report_due(events: &[Event], now: i64) -> serde_json::Value {
-    const SPOKE: &[&str] = &[
-        "chat.assistant.reported",
-        "chat.assistant.opening",
-        "chat.assistant.final",
-        "chat.assistant.fallback",
-        "chat.assistant.progress",
-    ];
-    let Some(turn) = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.kind.as_str(),
-                "user.message"
-                    | "turn.supplemented"
-                    | "chat.assistant.reported"
-                    | "chat.assistant.opening"
-                    | "chat.assistant.final"
-                    | "chat.assistant.fallback"
-                    | "chat.assistant.progress"
-            )
-        })
-        .map(|e| e.turn)
-        .max()
-    else {
+    let Some((turn, drive_anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
     };
+    let drive_seq = drive_anchor.map(seq_of).unwrap_or(0);
     let config = config_of(events, turn);
     let enabled = config
         .and_then(|e| e.payload.get("progress_enabled"))
@@ -539,32 +632,76 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         .and_then(|e| e.payload.get("progress_max_per_turn"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    // 配额是**请求作用域**的量（旧 `RoundProgress` 随请求新建）：续写幕重新开账，
+    // 故只数本幕锚之后的汇报。
     let reports = events
         .iter()
-        .filter(|e| e.turn == turn && e.kind == "chat.assistant.reported")
+        .filter(|e| {
+            e.turn == turn && e.kind == "chat.assistant.reported" && after_anchor(e, drive_seq)
+        })
         .count() as u64;
-    let spoke_at = events
+    let anchor = events
         .iter()
-        .filter(|e| e.turn == turn && SPOKE.contains(&e.kind.as_str()))
-        .map(|e| e.ts)
-        .max();
-    let anchor = spoke_at.or_else(|| {
-        events
-            .iter()
-            .filter(|e| {
-                e.turn == turn && matches!(e.kind.as_str(), "user.message" | "turn.supplemented")
-            })
-            .map(|e| e.ts)
-            .max()
-    });
-    let quiet_ms = anchor.map(|at| (now - at).max(0)).unwrap_or(0);
+        .filter(|e| e.turn == turn && is_report_anchor(e))
+        .max_by_key(|e| (e.ts, seq_of(e)));
+    let quiet_ms = anchor.map(|e| (now - e.ts).max(0)).unwrap_or(0);
     let due = enabled && quiet_ms >= interval_ms && reports < quota;
     serde_json::json!({
         "turn": turn,
+        // 静默区间的身份 = 区间起点那一格的 seq。汇报事实落格后，本视图的锚
+        // 前移，下一段静默是新的一笔账（配额之外还要能逐段关账）。
+        "anchor": anchor.map(seq_of).unwrap_or(0),
         "due": due,
         "reports": reports,
         "quota": quota,
     })
+}
+
+/// 中途汇报的**出口**：每一条汇报事实关掉它前一段静默区间的账。
+///
+/// 汇报自己会说一句话（成为新的静默起点），所以一条汇报只能关「它之前」那段：
+/// 锚取**严格早于汇报 seq** 的最近一条动静。这样 `report_due.anchor` 与
+/// 本视图的 `anchor` 在同一段区间上逐字相等，`(turn, anchor)` 就是区间的身份。
+fn reported_anchors(events: &[Event], _now: i64) -> serde_json::Value {
+    serde_json::Value::Array(
+        events
+            .iter()
+            .filter(|e| e.kind == "chat.assistant.reported")
+            .filter_map(|report| {
+                let report_seq = report.seq?.value();
+                let anchor = events
+                    .iter()
+                    .filter(|e| {
+                        e.turn == report.turn
+                            && e.seq.is_some_and(|s| s.value() < report_seq)
+                            && is_report_anchor(e)
+                    })
+                    .max_by_key(|e| (e.ts, seq_of(e)));
+                Some(serde_json::json!({
+                    "turn": report.turn,
+                    "anchor": anchor.map(seq_of).unwrap_or(0),
+                }))
+            })
+            .collect(),
+    )
+}
+
+/// 助手说过的每一句（汇报 / 开场白 / 收束 / 兜底 / 进展）。
+const SPOKE_KINDS: &[&str] = &[
+    "chat.assistant.reported",
+    "chat.assistant.opening",
+    "chat.assistant.final",
+    "chat.assistant.fallback",
+    "chat.assistant.progress",
+];
+
+/// 静默时钟的起点候选：用户看得见的任何一次动静。
+///
+/// 用户格 / 补充格 / 恢复幕都是「用户动了一下」，助手说过的每一句同理。恢复幕
+/// 也算——审批 / 回填发生在请求开始时，那一幕的静默应当从此刻起算，而不是从
+/// 几天前的那句用户话起算。
+fn is_report_anchor(e: &Event) -> bool {
+    is_drive_anchor(e) || e.kind == "turn.supplemented" || SPOKE_KINDS.contains(&e.kind.as_str())
 }
 
 const BUILTIN_VIEWS: &[ViewDecl] = &[
@@ -584,26 +721,58 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: in_flight,
     },
-    // 轮头（T-225 升到 v2）：`classify_enabled` 从 `session.config` 读，`done` 从
-    // `turn.stage` 的 `decide` 格折叠——五个策略输入里这一格能四样全凭日志算出。
+    // 轮头（T-222a 升到 v3）：五个策略行的开账条件全在这一格里。
+    //
+    // 与 v2 的两处差别：`done` 三格按**幕锚**折叠（续写幕复用轮号），并加入
+    // `resumed` / `skill_hit`——反射行从此也只读日志，不再拿执行侧的内存布尔。
     ViewDecl {
         name: "turn_head",
-        ver: 2,
+        ver: 3,
         reads: &[
-            ("user.message", "text"),
+            ("user.message", "id"),
             ("turn.stage", "stage"),
             ("turn.stage", "round"),
+            ("turn.stage", "result"),
             ("session.config", "classify_enabled"),
-            ("chat.assistant.final", "text"),
+            ("session.config", "auto_compress"),
+            ("session.config", "is_persistent"),
         ],
         cost: 4096,
         eval: turn_head,
     },
-    // 汇报到期：静默时长 = `now` − 最近一句助手文本（或用户格）的 `ts`；
+    // 本幕落下的阶段事实：`decide` / `recall` / `compress` 三行的出口。
+    ViewDecl {
+        name: "turn_stages",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("turn.stage", "round"),
+        ],
+        cost: 4096,
+        eval: turn_stages,
+    },
+    // 本幕是否收束：执行行与反射行的出口。
+    ViewDecl {
+        name: "turn_closed",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+        ],
+        cost: 4096,
+        eval: turn_closed,
+    },
+    // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。
+    //
+    // v2 起输出 `anchor`（静默起点的 seq）：汇报行以 `(turn, anchor)` 标识一段
+    // 静默区间，`reported_anchors` 逐条关账。
     ViewDecl {
         name: "report_due",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("session.config", "progress_enabled"),
             ("session.config", "progress_interval_ms"),
@@ -615,9 +784,27 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("chat.assistant.progress", "status"),
             ("user.message", "text"),
             ("turn.supplemented", "text"),
+            ("turn.stage", "stage"),
         ],
         cost: 4096,
         eval: report_due,
+    },
+    // 汇报的出口：每条汇报事实关掉它之前那段静默区间。
+    ViewDecl {
+        name: "reported_anchors",
+        ver: 1,
+        reads: &[
+            ("user.message", "text"),
+            ("turn.supplemented", "text"),
+            ("turn.stage", "stage"),
+            ("chat.assistant.reported", "text"),
+            ("chat.assistant.opening", "text"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            ("chat.assistant.progress", "status"),
+        ],
+        cost: 4096,
+        eval: reported_anchors,
     },
 ];
 
