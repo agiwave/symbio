@@ -423,9 +423,17 @@ test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mo
     'CI 的 backend job 不该付 release 构建——e2e job 自备（`--only=e2e`）',
   )
   const fw = await import(pathToFileURL(path.join(dir, '06-facts-write.mjs')).href)
-  assert.ok(
-    fw.default.tasks({}).some((t) => String(t.label).includes('gen-verify-facts')),
-    'verify/facts/mod.rs 的生成必须在 06-facts-write 链里（先于并发批）',
+  // 链的顺序由导出的 `STEPS` 自述（它同时是 `autoChain` 的 `steps`——**判的就是跑的那份**，
+  // 不是任务展示用的 label；抄一份名单进测试必然漂移）。
+  assert.deepEqual(
+    fw.STEPS.map((s) => s.label),
+    ['gen-facts', 'registry-audit --write', 'gen-doc-refs', 'gen-verify-facts'],
+    'verify/facts/mod.rs 的生成必须在 06-facts-write 链里且排在最后（先于并发批、后于引用地址展开）',
+  )
+  assert.equal(
+    fw.default.tasks({}).length,
+    1,
+    '整条链必须是**一格**任务：逐格判差异会在中间态恒红，CI 因此点不动它（见 `_shared.autoChain`）',
   )
 })
 

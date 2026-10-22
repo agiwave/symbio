@@ -1,6 +1,7 @@
 // `gate.d/_shared.mjs` 的回归测试。
 //
-// 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）、**棘轮判据一族**
+// 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）、它的整链版 `autoChain`
+// （只在**末态**判差异，理由见下面那族用例的第一条注释）、**棘轮判据一族**
 // （`ratchetVerdict` / `cargoTestRatchet` / `BASELINE` 只增）与**源码区间扫描**
 // （`codeSpansOf` / `stringLiteralsOf` / `codeTextOf`）。前两者值得有回归
 // 测试的理由，与 `30-docs.mjs` 开头那句是同一个：**一个只会亮绿灯的机制等于没有机制**。
@@ -17,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
+  autoChain,
   autoWork,
   codeTextOf,
   cargoTestRatchet,
@@ -58,6 +60,10 @@ const SEED = {
   't4-untouched.rs': 'fn u() {}\n',
   't7.rs': 'fn g() {}\n',
   't8.rs': 'fn h() {}\n',
+  // `autoChain` 一族用这几条（同样**先以末态进初始提交**，「跑之前干净」才有明确含义）。
+  'c1.rs': 'clean-one\n',
+  'c2.rs': 'clean-two\n',
+  'c3.rs': 'clean-three\n',
 }
 for (const [p, c] of Object.entries(SEED)) fs.writeFileSync(path.join(root, p), c)
 git(['add', '-A'])
@@ -100,6 +106,26 @@ const brokenWorker = () => async () => ({
 
 const work = (run, ci = false) =>
   autoWork({ repoRoot: root, ci, run }, { label: 'probe', cmd: 'noop', args: [], cwd: root })
+
+/**
+ * 链版 `work`：`byLabel` 给出「这一步写什么」，`broken` 列出的步骤直接报错。
+ * 步骤按**给出顺序**执行——被测的正是顺序带来的中间态。
+ */
+const chain = (byLabel, ci = false, broken = []) =>
+  autoChain(
+    {
+      repoRoot: root,
+      ci,
+      run: async ({ label }) => {
+        if (broken.includes(label)) {
+          return { ok: false, code: 1, signal: null, output: 'boom', timedOut: false }
+        }
+        for (const [p, c] of Object.entries(byLabel[label] ?? {})) write(p, c)
+        return { ok: true, code: 0, signal: null, output: '', timedOut: false }
+      },
+    },
+    { label: 'probe-chain', steps: Object.keys(byLabel).map((l) => ({ label: l, cmd: 'noop' })) },
+  )
 
 // ================= 用例 =================
 
@@ -194,6 +220,67 @@ test('CI：无差异 ⇒ 通过（不误报）', async () => {
   assert.equal(r.ok, true)
 })
 
+// ================= `autoChain`：只在**末态**判差异 =================
+//
+// 这条原语存在的理由就是下面第一条：**逐格判差异时，生成链的中间态本身就是差异**
+// （`registry-audit --write` 把汇总页写成 `[[编号]]` 记号，下一格 `gen-doc-refs` 才展开）。
+// 那件事在真实链上不好复现（要跑四个生成器），所以这里用两个假步骤把「中间态 ≠ 末态」
+// 这一形状直接摆出来——它测的是判定**在哪一格做**，不是生成器写得对不对。
+
+test('链：中间态有差异而末态没有 ⇒ 绿（逐格 autoWork 会在这里恒红）', async () => {
+  const f = 'c1.rs'
+  write(f, 'clean-one\n') // 与 HEAD 一致：跑之前是干净的
+  // 步 1 写成「半成品」，步 2 再写成末态（= HEAD 那一版）。
+  const r = await chain({ 'step-1': { [f]: '半成品' }, 'step-2': { [f]: 'clean-one\n' } })
+  assert.equal(r.ok, true, '末态没有差异 ⇒ 不该红，也不该有 note')
+  assert.equal(r.note, undefined)
+  assert.equal(isStaged(f), false, '没有差异就不该动索引')
+})
+
+test('链：CI 下中间态有差异而末态没有 ⇒ 同样绿（生成链因此点得进 CI）', async () => {
+  const f = 'c1.rs'
+  write(f, 'clean-one\n')
+  const r = await chain({ 'step-1': { [f]: '半成品' }, 'step-2': { [f]: 'clean-one\n' } }, true)
+  assert.equal(r.ok, true, 'CI 侧看的是末态，不是每一步——这是本原语存在的理由')
+})
+
+test('链：末态有差异 ⇒ 本地暂存末态、CI 报红并还原到跑之前', async () => {
+  const f = 'c2.rs'
+  write(f, 'clean-two\n')
+  const END = '生成物末态\n'
+  const local = await chain({ 'step-1': { [f]: '半成品' }, 'step-2': { [f]: END } })
+  assert.equal(local.ok, true)
+  assert.match(local.note ?? '', /暂存/)
+  assert.equal(read(f), END, '本地：末态留在工作区')
+  assert.equal(isStaged(f), true, '本地：末态进索引，与本次提交同一份内容')
+
+  // CI 侧同一个红，但**不能把树留在生成物形态**（后续步骤会把它当输入）。
+  const ciRun = await chain({ 'step-1': { [f]: END }, 'step-2': { [f]: '又改写一次\n' } }, true)
+  assert.equal(ciRun.ok, false, 'CI 无法提交，只能判红')
+  assert.match(ciRun.note ?? '', /本地/)
+  assert.equal(read(f), END, 'CI：还原到**这次运行开始之前**，不是还原到 HEAD')
+  assert.equal(isStaged(f), true, 'CI 不得动索引')
+})
+
+test('链：跑之前已脏的文件不被 git restore 吞掉（按内容快照写回）', async () => {
+  const f = 'c3.rs'
+  write(f, '我自己的改动，没提交\n') // 脏、未暂存 —— 提交前的常态
+  assert.equal(worktreeDiffers(f), true)
+  const r = await chain({ 'step-1': { [f]: '生成器写的\n' } }, true)
+  assert.equal(r.ok, false, '末态与跑之前不同 ⇒ 红')
+  assert.equal(read(f), '我自己的改动，没提交\n', '人的未提交改动必须原样回来（git restore 会把它抹到索引版）')
+  assert.equal(isStaged(f), false)
+})
+
+test('链：某一步命令本身报错 ⇒ 不通过（带退出码），已生成的部分还原', async () => {
+  const f = 'c1.rs'
+  write(f, 'clean-one\n')
+  const r = await chain({ 'step-1': { [f]: '生成物\n' }, 'step-2': {} }, false, ['step-2'])
+  assert.equal(r.ok, false)
+  assert.match(r.note ?? '', /step-2 失败/)
+  assert.match(r.note ?? '', /exit=1/)
+})
+
 // ⚠️ 这条守卫针对的失效模式很具体：`autoWork` 的「CI 判红」完全依赖 `--ci`，
 // 而 ci.yml 的 docs & facts job 里那条 gate 调用——若那里漏了 `--ci`，
 // 这一步就变成「自动修复 + 暂存」并**静默放过漂移**，即一个只亮绿灯的检查项。
@@ -215,10 +302,11 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
 // 提交（三处 `[[编号]]` 记号没展开，直到下一次全量门禁才被 `gen-doc-refs` 改回来）。
 // 漏点一个阶段 id 与拼错一个的待遇完全不同：拼错当场报错，少点**没有任何信号**。
 //
-// 判据形状取「本地模式（不带 `--ci`）点了 `facts` 就必须点 `facts-write`」：CI 侧反过来
-// 不能点 `facts-write`（链的中间态在 `--ci` 下恒红，理由见 `60-facts.mjs` 头注释），
-// 它的只读末态复核由下一条钉住。反向判据（实测过）：pre-commit 退回 `--only=facts` ⇒ 本条红。
-test('本地模式的 gate 调用点了 facts 复核就必须点 facts-write 生成', () => {
+// 判据形状取「点了 `facts` 复核的 gate 调用必须同时点到生成链」——**不分本地与 CI**：
+// CI 侧原先点不动生成链（逐格 `autoWork` 看得到中间态 ⇒ `--ci` 恒红），链改成
+// `autoChain` 一格（只在末态判差异，见下一条）之后，两侧同一条规则。
+// 反向判据（实测过）：pre-commit 退回 `--only=facts` ⇒ 本条红。
+test('gate 调用点了 facts 复核就必须点 facts-write 生成链', () => {
   const files = [
     'scripts/git-hooks/pre-commit',
     'scripts/git-hooks/pre-push',
@@ -235,9 +323,9 @@ test('本地模式的 gate 调用点了 facts 复核就必须点 facts-write 生
       if (m) calls.push({ f, ids: m[1].split(','), ci: /--ci/.test(l), line: l.trim() })
     }
   }
-  const local = calls.filter(({ ids, ci }) => ids.includes('facts') && !ci)
-  assert.ok(local.length > 0, '没找到本地模式（不带 --ci）且跑 facts 复核的 gate 调用——守卫失效了')
-  for (const { f, ids, line } of local) {
+  const withFacts = calls.filter(({ ids }) => ids.includes('facts'))
+  assert.ok(withFacts.length > 0, '没找到跑 facts 复核的 gate 调用——守卫失效了')
+  for (const { f, ids, line } of withFacts) {
     assert.ok(
       ids.includes('facts-write'),
       `${f} 里这条只点了复核没点生成链（阶段 id ${ids.join(',')}），汇总页投影会在提交点变旧：${line}`,
@@ -245,9 +333,26 @@ test('本地模式的 gate 调用点了 facts 复核就必须点 facts-write 生
   }
 })
 
-// `facts` 阶段里的只读引用复核（`gen-doc-refs --check`）：它是 CI / pre-push 看得见
-// 「提交里留着未展开的记号」这一种漂移的**唯一**执行方——生成链本身在 `--ci` 下不可跑
-// （上一条注释），所以这条不得被当冗余删掉。反向判据：删掉该任务 ⇒ 本条红。
+// 生成链的**差异判定形态**：必须是 `autoChain`（末态判一次），不能退回逐格 `autoWork`。
+// 这条钉的是上一条能成立的前提——若 `06-facts-write` 仍在四格里各判一次差异，
+// CI / pre-push 一点它就在中间态上恒红（`registry-audit --write` 写的 `[[编号]]` 记号
+// 正是 `gen-doc-refs` 的输入），三处调用点又会把生成链摘掉，回到 T-250 那个形态。
+// 反向判据（实测过）：把 `autoChain(c, {` 改回 `autoWork(c, {` ⇒ 本条红。
+test('facts-write 生成链是一个 autoChain 工作（末态判差异），CI 侧才点得动', () => {
+  const src = fs.readFileSync(
+    path.join(repoRoot, 'scripts', 'gate.d', '06-facts-write.mjs'),
+    'utf8',
+  )
+  assert.match(src, /from '\.\/_shared\.mjs'/, '06-facts-write 没引入共享 runner')
+  assert.match(src, /autoChain\(c, \{/, '生成链没走 autoChain：逐格 autoWork 判差异会在中间态恒红')
+  assert.doesNotMatch(src, /autoWork\(/, '生成链里还留着逐格 autoWork：同一格判两次差异，末态判据就空转了')
+  // 链上具体有哪四步、什么顺序，归 `scripts/gate.test.mjs` 的关键路径判据（那里判的是
+  // 「mod.rs 的生成先于并发批」）——这里只判形态，不维护第二份名单。
+})
+
+// `facts` 阶段里的只读引用复核（`gen-doc-refs --check`）：生成链（`autoChain`）看的是
+// 「链跑完」的末态，而 `30-docs` 的自动修复器排在它之后——这一格看的是**整轮**跑完。
+// 这条不得被当冗余删掉。反向判据（实测过）：删掉该任务 ⇒ 本条红。
 test('facts 阶段必须带一条只读的引用地址复核（CI 侧看得到未展开的记号）', () => {
   const src = fs.readFileSync(
     path.join(repoRoot, 'scripts', 'gate.d', '60-facts.mjs'),

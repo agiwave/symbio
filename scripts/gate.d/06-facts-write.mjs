@@ -50,7 +50,7 @@
 // 少了任一环，下一环就对着半成品工作。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { autoWork } from './_shared.mjs'
+import { autoChain } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -59,63 +59,61 @@ const regAudit = path.join(scriptDir, '..', 'registry-audit.mjs')
 const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
 const verifyFacts = path.join(scriptDir, '..', 'gen-verify-facts.mjs')
 
+// **链上的四步（导出去让 `gate.test.mjs` 判顺序）**：它们是一个 `autoChain` 工作的 `steps`，
+// 不是四个门禁任务——差异判定只做在链尾一次（逐格判会在中间态恒红，见 `_shared.autoChain`）。
+export const STEPS = [
+  {
+    // 前端的路由常量是后端 `route()` 臂的投影、结构事实表是插件树的投影、
+    // 判据码登记表是各脚本声明的投影、清单归属总账是 `lists` 字段的投影——
+    // 四件事同源：`gen(输入) = 产物`（runner 遍历 `scripts/facts/` 一次跑完，
+    // 契约破损 / 目录读不出都在这一格判红）。
+    label: 'gen-facts',
+    cmd: process.execPath,
+    args: [genFacts],
+    cwd: repoRoot,
+  },
+  {
+    // 登记汇总页是**条目文件的投影**（同事实文件是代码的投影）：确定性输出，
+    // 写成 --check 只会因为「人忘了重跑」而红。校验类判据在 30-docs 的 registry-audit。
+    // 它必须在 gen-doc-refs **之前**：汇总页里渲染出来的 `[[…]]` 记号要由下一步展开。
+    label: 'registry-audit --write',
+    cmd: process.execPath,
+    args: [regAudit, '--write'],
+    cwd: repoRoot,
+  },
+  {
+    // 文档间引用**只写编号**（`[[T-008]]`），地址由本步生成/重算：编号不变则地址永远正确，
+    // 文档搬家后入链自愈——「不手写地址」这句话的执行方。未登记的编号由它判红（RF-001）。
+    label: 'gen-doc-refs',
+    cmd: process.execPath,
+    args: [docRefs],
+    cwd: repoRoot,
+  },
+  {
+    // verify 程序的期望数据是 01 §8 / 02 坐标系 / 阶梯表的投影（输入含 CURRENT §2
+    // 与已展开的引用地址，故排在全链最后）。它原先在 `55-verify` 里生成——那既让
+    // `doc-count-audit` 读一拍前的产物，也把整个 verify 阶段锁死在批后串行。
+    // 生成前移后，`55-verify` 只剩只读程序 + 写 `verify-target/`，得以进并发批。
+    label: 'gen-verify-facts',
+    cmd: process.execPath,
+    args: [verifyFacts],
+    cwd: repoRoot,
+  },
+]
+
 export default {
   id: 'facts-write',
   title: '事实生成（静态审计的前置）',
+  // 四步合成**一个** `autoChain` 工作：差异判定只看链跑完的末态。
+  // 分成四个 `autoWork` 在本地没区别（都是生成 + 暂存），但在 `--ci` 下必红——
+  // `registry-audit --write` 的产物（`[[编号]]` 记号）本身就是下一格的输入差异。
+  // 合成一格之后 CI / pre-push 才点得动这条链，登记汇总页**内容**的新鲜度因此
+  // 有了末态执行方（续接 [T-250-生成链阶段id失配](../../docs/009-task/250-生成链阶段id失配.md) 口径 4）。
   tasks(ctx) {
     return [
       {
-        // 前端的路由常量是后端 `route()` 臂的投影、结构事实表是插件树的投影、
-        // 判据码登记表是各脚本声明的投影、清单归属总账是 `lists` 字段的投影——
-        // 四件事同源：`gen(输入) = 产物`。runner 遍历 `scripts/facts/` 一次跑完，
-        // 契约破损 / 目录读不出都在这一格判红（退出码非零）。
-        label: 'gen-facts（遍历 scripts/facts/，自动重新生成全部事实）',
-        run: (c) =>
-          autoWork(c, {
-            label: 'gen-facts',
-            cmd: process.execPath,
-            args: [genFacts],
-            cwd: repoRoot,
-          }),
-      },
-      {
-        // 登记汇总页是**条目文件的投影**（同事实文件是代码的投影）：确定性输出，
-        // 写成 --check 只会因为「人忘了重跑」而红。校验判据在 30-docs 的 registry-audit。
-        // 它必须在 gen-doc-refs **之前**：汇总页里渲染出来的 `[[…]]` 记号要由下一步展开。
-        label: 'registry-audit --write（自动重新生成登记汇总页）',
-        run: (c) =>
-          autoWork(c, {
-            label: 'registry-audit --write',
-            cmd: process.execPath,
-            args: [regAudit, '--write'],
-            cwd: repoRoot,
-          }),
-      },
-      {
-        // 文档间引用**只写编号**（`[[T-008]]`），地址由本步生成/重算：编号不变则地址永远正确，
-        // 文档搬家后入链自愈——「不手写地址」这句话的执行方。未登记的编号由它判红（RF-001）。
-        label: 'gen-doc-refs（自动重算文档引用地址）',
-        run: (c) =>
-          autoWork(c, {
-            label: 'gen-doc-refs',
-            cmd: process.execPath,
-            args: [docRefs],
-            cwd: repoRoot,
-          }),
-      },
-      {
-        // verify 程序的期望数据是 01 §8 / 02 坐标系 / 阶梯表的投影（输入含 CURRENT §2
-        // 与已展开的引用地址，故排在全链最后）。它原先在 `55-verify` 里生成——那既让
-        // `doc-count-audit` 读一拍前的产物，也把整个 verify 阶段锁死在批后串行。
-        // 生成前移后，`55-verify` 只剩只读程序 + 写 `verify-target/`，得以进并发批。
-        label: 'gen-verify-facts（docs/plan → verify/facts/mod.rs）',
-        run: (c) =>
-          autoWork(c, {
-            label: 'gen-verify-facts',
-            cmd: process.execPath,
-            args: [verifyFacts],
-            cwd: repoRoot,
-          }),
+        label: '生成链（gen-facts → registry-audit → gen-doc-refs → gen-verify-facts，末态判差异）',
+        run: (c) => autoChain(c, { label: '生成链', steps: STEPS }),
       },
     ]
   },

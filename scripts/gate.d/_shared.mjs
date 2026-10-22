@@ -734,7 +734,7 @@ function contentHashes(repoRoot, paths) {
  * - CI：CI 不能提交，所以「跑完仍有差异」只能报红——那是唯一能保住不变量的信号。
  *
  * ⚠️ **「CI 报红」靠 `ctx.ci`，而 `ctx.ci` 来自 `--ci`。** 调用本原语的任务
- * （`10-backend` 的两处 fmt、`60-facts` 的生成）必须在 CI 侧被以 `--ci` 调用，
+ * （`10-backend` 的两处 fmt、`06-facts-write` 的生成链）必须在 CI 侧被以 `--ci` 调用，
  * 否则会退化成「自动修复 + 暂存」而**静默放过漂移**——一个只亮绿灯的检查项。
  * 回归测试里有一条专门断言 `.github/workflows/ci.yml` 的对应步骤传了 `--ci`。
  *
@@ -786,4 +786,109 @@ export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
   }
   console.log(yellow(`      ⚠ 门禁已自动修复并暂存 ${touched.length} 个文件：${shown}`))
   return { ok: true, note: `自动修复 ${touched.length} 个文件（已暂存）` }
+}
+
+/**
+ * `autoWork` 的**整链版**：把一串生成器当一个原子工作跑，只在**末态**与跑之前比差异。
+ *
+ * ## 为什么 `autoWork` 逐格跑不了整条链（2026-10-23 实测恒红）
+ *
+ * `autoWork` 每跑完一步就判一次「这一步有没有改写文件」。单步生成器这样是对的
+ * （它的产物就是末态）。但「事实文件 → 登记汇总页 → 引用地址 → verify 期望数据」是一条
+ * **有中间态的链**：`registry-audit --write` 把汇总页写成 `[[编号]]` 记号，
+ * 下一格 `gen-doc-refs` 才展开成地址——逐格判差异时，第一格的产物**本身就是差异**，
+ * 于是 `--ci` 侧无论树新树旧都报红。CI 要的是末态判据，不是生成器的自述。
+ *
+ * ## 语义（与 `autoWork` 同一条约定，只是判据挪到链尾）
+ *
+ * - 任一步**命令本身报错** ⇒ 不通过（真失败：工具坏了 / 输入不可解析）；CI 侧顺带还原工作区。
+ * - 本地：末态有差异 ⇒ 差异路径**当场暂存**，修复与本次提交同一份内容；无差异即绿。
+ * - CI：末态有差异 ⇒ **还原工作区**后报红。还原是这条相对 `autoWork` 多出来的一件事：
+ *   链跑完树是脏的，而 CI 的红只该说明「生成物没跟上代码」，不该把树留在半成品形态
+ *   给后续步骤（`git diff --exit-code`、产物上传）当输入。
+ *   还原口径：跑之前已脏的路径按**内容快照**写回（那是人自己的改动，不能用 `git restore`
+ *   ——它恢复到索引，会把未暂存改动抹掉）；跑之前干净的路径恢复到索引内容即正确；
+ *   跑之前不存在的（生成器新建）删掉自己写出来的东西。
+ */
+export async function autoChain(ctx, { label, steps }) {
+  const before = dirtyPaths(ctx.repoRoot)
+  const beforeHash = contentHashes(ctx.repoRoot, before)
+  const snapshot = new Map()
+  if (ctx.ci) {
+    for (const p of before) {
+      try {
+        snapshot.set(p, fs.readFileSync(path.join(ctx.repoRoot, p)))
+      } catch {
+        snapshot.set(p, null)
+      }
+    }
+  }
+  const touchedNow = () => {
+    const after = dirtyPaths(ctx.repoRoot)
+    const afterHash = contentHashes(ctx.repoRoot, after)
+    return [...after].filter((p) => !before.has(p) || beforeHash.get(p) !== afterHash.get(p))
+  }
+  const restore = () => {
+    // 本地模式不还原：那侧的约定是「生成并暂存」，而 `git restore` 会把人**未提交的改动**
+    // 一起抹掉。链某一步真失败时把现状留给人看，比替他决定该留哪一版更安全。
+    if (!ctx.ci) return null
+    const toIndex = []
+    for (const p of touchedNow()) {
+      // 跑之前已脏：那是人自己的改动，按**内容**写回（`git restore` 恢复到索引会抹掉未暂存改动）。
+      if (snapshot.has(p)) {
+        const bytes = snapshot.get(p)
+        if (bytes === null) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
+        else fs.writeFileSync(path.join(ctx.repoRoot, p), bytes)
+      } else toIndex.push(p)
+    }
+    if (!toIndex.length) return null
+    // `toIndex` 里可能混着「跑之前不存在」的新文件（生成器新建）：`git restore` 不认它们，删掉。
+    const ls = spawnSync('git', ['ls-files', '--', ...toIndex], { cwd: ctx.repoRoot, encoding: 'utf8' })
+    const tracked = new Set((ls.stdout || '').split('\n').filter(Boolean))
+    for (const p of toIndex) if (!tracked.has(p)) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
+    const keep = toIndex.filter((p) => tracked.has(p))
+    if (!keep.length) return null
+    const r = spawnSync('git', ['restore', '--worktree', '--', ...keep], {
+      cwd: ctx.repoRoot,
+      encoding: 'utf8',
+    })
+    return r.status === 0 ? null : `还原失败：${(r.stderr || '').trim()}`
+  }
+
+  for (const s of steps) {
+    const r = await ctx.run({
+      label: s.label,
+      cmd: s.cmd,
+      args: s.args ?? [],
+      cwd: s.cwd ?? ctx.repoRoot,
+    })
+    if (!r.ok) {
+      const why = r.timedOut ? '超时终止' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`
+      const back = restore()
+      return {
+        ok: false,
+        note: `${s.label} 失败（${why}）${back ? `，且${back}` : ctx.ci ? '，工作区已还原' : ''}`,
+      }
+    }
+  }
+
+  const touched = touchedNow()
+  if (touched.length === 0) return { ok: true }
+  const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
+  if (ctx.ci) {
+    const back = restore()
+    return {
+      ok: false,
+      note:
+        `${label} 跑完末态有 ${touched.length} 处差异（${shown}）——生成物没跟上代码，CI 无法提交` +
+        (back ? `，且${back}` : '，工作区已还原') +
+        '；请在本地跑一次该链（会自动生成并暂存）',
+    }
+  }
+  const add = spawnSync('git', ['add', '--', ...touched], { cwd: ctx.repoRoot, encoding: 'utf8' })
+  if (add.status !== 0) {
+    return { ok: false, note: `已生成 ${touched.length} 个文件但暂存失败：${(add.stderr || '').trim()}` }
+  }
+  console.log(yellow(`      ⚠ 门禁已自动生成并暂存 ${touched.length} 个文件：${shown}`))
+  return { ok: true, note: `自动生成 ${touched.length} 个文件（已暂存）` }
 }
