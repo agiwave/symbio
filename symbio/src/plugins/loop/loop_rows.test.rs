@@ -447,9 +447,11 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
-            // （T-223 的 `turn` / T-227 步 2 的 `model` / 步 3 的 `tool`）。
+            // （T-223 的 `turn` / T-227 步 2 的 `model` / 步 3 的 `tool`）；
+            // `open-tools` 是工具调用的创建行（ADR-117），不与派发合并。
             "dispatch-turn",
             "dispatch-model",
+            "open-tools",
             "dispatch-tools",
             "await-turn",
             "await-model",
@@ -472,6 +474,7 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
+            crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
@@ -671,6 +674,69 @@ fn the_model_rows_do_not_disturb_the_turn_rows() {
 }
 
 // ── 工具端口与授权级联（T-227 步 3）────────────────────────────────────
+
+/// ADR-117：模型响应的 `calls` 集合逐元素开**创建债**，不是一笔整批债。
+#[test]
+fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
+    let calls = json!([
+        { "port": "tool", "id": "tool-1-d0-call-a", "name": "read_file", "arguments": {} },
+        { "port": "tool", "id": "tool-1-d0-call-b", "name": "read_file", "arguments": {} },
+    ]);
+    let answered = vec![ev(
+        1,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({ "port": "model", "id": "m-1", "attempt": 1, "calls": calls }),
+    )];
+
+    let debts: Vec<_> = owed(ROWS, &frozen(), &answered, 0)
+        .into_iter()
+        .filter(|d| d.decl.name == "open-tools")
+        .collect();
+    assert_eq!(debts.len(), 2, "两个调用 = 两笔创建债");
+    assert!(debts.iter().all(|d| !d.blocked));
+
+    let requested = vec![
+        answered[0].clone(),
+        ev(
+            1,
+            crate::symbio_core::EVENT_REQUEST,
+            json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_REQUEST,
+            json!({ "port": "tool", "id": "tool-1-d0-call-b", "attempt": 1 }),
+        ),
+    ];
+    assert!(
+        !owes("open-tools", &requested, 0),
+        "两笔 request 落完即关账"
+    );
+
+    // 空集合 = 不开债：模型答了话、没要工具。
+    let no_calls = vec![ev(
+        1,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({ "port": "model", "id": "m-2", "attempt": 1, "calls": [] }),
+    )];
+    assert!(!owes("open-tools", &no_calls, 0));
+}
+
+/// 本地模型常在每轮重新用 `call_0`：协议 id 必须带上「本次模型往返」，
+/// 否则下一轮的创建债会被上一轮的 `request` 提前关掉。
+#[test]
+fn the_same_model_call_id_in_a_later_round_gets_a_distinct_protocol_id() {
+    let first =
+        super::super::tool_dispatch::batch_call_id(1, 0, 0, Some("call_0"), "model-1-d0-s1");
+    let second =
+        super::super::tool_dispatch::batch_call_id(1, 0, 0, Some("call_0"), "model-1-d0-s2");
+    assert_ne!(first, second);
+    assert_ne!(
+        super::super::tool_dispatch::batch_call_id(1, 0, 0, None, "model-1-d0-s1"),
+        super::super::tool_dispatch::batch_call_id(1, 0, 0, None, "model-1-d0-s2"),
+        "缺少模型 id 时也不能撞键"
+    );
+}
 
 fn tool_request(id: &str) -> Event {
     ev(

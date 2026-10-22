@@ -260,7 +260,7 @@ fn keys_of_expanded(
                     }
                     if let Some(Value::Array(items)) = fact_field(e, list) {
                         for item in items.iter() {
-                            keys.extend(key_from(p, |f| item.get(f).cloned()));
+                            keys.extend(key_of(p, |f| item.get(f).cloned()));
                         }
                     }
                 }
@@ -281,7 +281,7 @@ fn keys_of_expanded(
                     }
                     if let Some(Value::Array(items)) = v.get(list) {
                         for item in items.iter() {
-                            keys.extend(key_from(p, |f| item.get(f).cloned()));
+                            keys.extend(key_of(p, |f| item.get(f).cloned()));
                         }
                     }
                 }
@@ -295,6 +295,15 @@ fn key_from(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option
     if !eq_matches(p, &mut field) {
         return None;
     }
+    key_of(p, field)
+}
+
+/// 只取键字段，不再判 `eq`。
+///
+/// 集合展开时 `eq` 已经拦在**外层实例**上（ADR-116 决策 3），元素键只取身份字段；
+/// 再对元素判一次 `eq` 会把「外层是 `port=model`、元素是 `port=tool`」的组合
+/// 全部滤掉——那正是创建行 `open-tools` 的形态。
+fn key_of(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option<Key> {
     let mut key = Vec::with_capacity(p.key.len());
     for name in p.key {
         let value = field(name);

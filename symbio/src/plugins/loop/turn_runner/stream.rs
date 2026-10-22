@@ -65,6 +65,9 @@ where
         format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
         1,
     );
+    let turn = run.turn;
+    let drive = run.drive_seq;
+    let round = call.id.clone();
     super::super::port::announce(store, &call, run.turn, run.user_seq)
         .map_err(ModelCallError::Store)?;
     // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
@@ -75,7 +78,9 @@ where
         run.turn,
         crate::symbio_core::clock_now_ms(),
     );
-    let out = super::super::port::dispatch(
+    // 应答载荷带上本次交回的工具调用（ADR-117）：创建行 `open-tools` 的集合
+    // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
+    let out = super::super::port::dispatch_with(
         store,
         super::super::loop_rows::PORTS,
         super::super::port::Dispatch {
@@ -86,6 +91,28 @@ where
         },
         || llm.generate_turn(tok, messages, tools, sink.clone()),
         |e: &AdapterError| e.to_string(),
+        |rt| {
+            let calls: Vec<serde_json::Value> = rt
+                .tool_calls
+                .iter()
+                .enumerate()
+                .map(|(idx, tc)| {
+                    serde_json::json!({
+                        "port": "tool",
+                        "id": super::super::tool_dispatch::batch_call_id(
+                            turn,
+                            drive,
+                            idx,
+                            tc.id.as_deref(),
+                            &round,
+                        ),
+                        "name": tc.name.clone().unwrap_or_default(),
+                        "arguments": tc.arguments.clone(),
+                    })
+                })
+                .collect();
+            serde_json::json!({ "calls": calls })
+        },
     );
     match out.await {
         Ok(rt) => Ok(rt),

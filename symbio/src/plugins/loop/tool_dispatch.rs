@@ -26,7 +26,6 @@
 //! 不定格它永远转「流式中」，不切节点多轮正文会粘成一条。
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -92,8 +91,49 @@ pub(crate) struct ToolPort {
     turn: u64,
     user_seq: u64,
     drive_seq: u64,
-    /// 本幕第几次工具批次（端口 id 的段号；一次模型响应一批 / 一次 resume 一笔）。
-    batch_seq: AtomicU64,
+}
+
+/// 批次调用的**协议 id**：轮 + 幕 + 本次模型往返 + 模型交回的调用 id。
+///
+/// ## 为什么要带「本次模型往返」
+///
+/// 创建行 `open-tools` 的集合展开（ADR-117）从 `response.calls` 的元素里取 id，
+/// 而 `response` 在派发**之前**就写好了——那时还没有「第几批」。要让展开出的键
+/// 与随后的 `request` 同 id，id 必须只由**模型响应里已有的东西**决定：轮、幕、
+/// 模型往返（`model-…-s{step}`）、模型调用 id。
+///
+/// 只带 `tc.id` 不够：本地模型常用 `call_0` / `call_1` 这种按回合重来的短 id，
+/// 同一幕的下一轮就会撞上上一轮的键——创建债被旧 `request` 提前关掉，新调用根本
+/// 不会派发。`round` 把「同一幕的不同轮」分开；缺失模型 id 的调用用序号兜底。
+pub(crate) fn batch_call_id(
+    turn: u64,
+    drive: u64,
+    idx: usize,
+    model_id: Option<&str>,
+    round: &str,
+) -> String {
+    match model_id.filter(|s| !s.trim().is_empty()) {
+        Some(id) => format!("tool-{turn}-d{drive}-{round}-{id}"),
+        None => format!("tool-{turn}-d{drive}-{round}-c{idx}"),
+    }
+}
+
+/// 本幕最近一笔模型应答（`response(port=model)`）。
+///
+/// 派发侧不重算 id，而是读创建侧写下的 `calls`：那是**唯一真相**，也自然对齐
+/// `turn.tool_calls` 的顺序。重算只能靠再次猜「这一轮是哪一轮」，而猜错一次的
+/// 后果是创建债被旧事实提前关掉。
+fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Event> {
+    let prefix = format!("model-{turn}-d{drive}-");
+    facts.iter().rev().find(|e| {
+        e.turn == turn
+            && e.kind == crate::symbio_core::EVENT_RESPONSE
+            && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+            && e.payload
+                .get("id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|id| id.starts_with(&prefix))
+    })
 }
 
 /// 一次开账所需的请求级策略（批次内只读一次）。
@@ -133,36 +173,90 @@ impl ToolPort {
             turn,
             user_seq,
             drive_seq,
-            batch_seq: AtomicU64::new(0),
         }
     }
 
     /// 批次级 prepass：为每个真正可派发的调用开一笔工具账。
+    ///
+    /// 入口先问创建行 `open-tools` 欠不欠（ADR-117）：一个模型响应是一笔集合债，
+    /// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
+    /// 「第几批」——id 只由模型响应里已有的东西决定（[`batch_call_id`]），
+    /// 否则创建行展开出的键与 `request` 的键对不上。
     pub(crate) async fn open_batch(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
         turn: &LlmTurn,
     ) -> Vec<ToolPortCall> {
-        let batch = self.batch_seq.fetch_add(1, Ordering::Relaxed);
+        let facts = self.facts.range(Seq::new(0));
+        let latest = latest_model_response(&facts, self.turn, self.drive_seq);
+        // 旧存档里的模型应答没有 `calls`（ADR-117 之前写的）：没有创建债可言，
+        // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
+        // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
+        let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
+        if has_calls
+            && !loop_rows::owes(
+                "open-tools",
+                &facts,
+                self.turn,
+                crate::symbio_core::clock_now_ms(),
+            )
+        {
+            crate::plugin_warn!(
+                "session",
+                "[Tool] 创建行不欠（turn={}），不落 request",
+                self.turn
+            );
+            return Vec::new();
+        }
         let policy = ToolPortPolicy::read(ctx).await;
+        let round = latest
+            .and_then(|e| e.payload.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("r0");
+        let created: &[serde_json::Value] = latest
+            .and_then(|e| e.payload.get("calls"))
+            .and_then(|v| v.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let mut out = Vec::new();
         for (idx, tc) in turn.tool_calls.iter().enumerate() {
-            let Some(model_id) = tc.id.as_deref().filter(|s| !s.trim().is_empty()) else {
-                continue;
-            };
-            let Some(name) = tc.name.as_deref().filter(|s| !s.trim().is_empty()) else {
-                continue;
-            };
-            if tc.parse_error.is_some() || tc.overflow_notice.is_some() {
+            let id = created
+                .get(idx)
+                .and_then(|c| c.get("id"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    batch_call_id(self.turn, self.drive_seq, idx, tc.id.as_deref(), round)
+                });
+            let call = port::Call::new("tool", id, 1);
+            let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
+            let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
+            let dispatchable = model_id.is_some()
+                && name.is_some()
+                && tc.parse_error.is_none()
+                && tc.overflow_notice.is_none();
+            if !dispatchable {
+                // 创建行已经为它开了一笔债（响应里有这个元素），但它派不出去：
+                // 落 `failed` 关账，而不是让那笔债永远欠着。
+                let _ = port::failed(
+                    self.facts.as_ref(),
+                    &call,
+                    self.turn,
+                    self.user_seq,
+                    "invalid_tool_call",
+                );
                 continue;
             }
-            let call = port::Call::new(
-                "tool",
-                format!("tool-{}-d{}-b{}-c{}", self.turn, self.drive_seq, batch, idx),
-                1,
-            );
             if let Some(open) = self
-                .open_with(ctx, &policy, &call, model_id, name, &tc.arguments)
+                .open_with(
+                    ctx,
+                    &policy,
+                    &call,
+                    model_id.unwrap_or_default(),
+                    name.unwrap_or_default(),
+                    &tc.arguments,
+                )
                 .await
             {
                 out.push(open);

@@ -18,7 +18,8 @@
 //! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
 //! 66 dispatch-model─ 端口派发：模型往返（T-227 步 2，在 `turn` 执行体内部）
-//! 67 dispatch-tools─ 端口派发：工具批次里的单次调用（T-227 步 3）
+//! 67 open-tools    ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（ADR-117）
+//! 68 dispatch-tools─ 端口派发：工具批次里的单次调用（T-227 步 3）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
 //! 71 await-model   ── 等应答（模型端口）
 //! 72 await-tools   ── 等应答（工具端口）
@@ -395,11 +396,44 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // 工具调用的**创建**（ADR-117）：一个模型响应的 `calls` 集合逐元素开债。
+    //
+    // 与派发行分开：创建行只回答「这次响应里的调用有没有落成 request」，派发行
+    // 才回答「已放行的那一笔有没有 sent」。把两者合成一行会让授权拒绝失去
+    // 作用点——被拒绝的调用同样有模型响应，派发会绕过 `authz.denied`。
+    //
+    // `expand` 只展开 `owes`；`until` 按键命中。元素键 `id` 由模型响应携带
+    // （`tool-{turn}-d{drive}-{模型调用 id}`），与随后的 `request(port=tool)` 同 id。
+    Decl {
+        name: "open-tools",
+        prio: 67,
+        by: Some("courier"),
+        tier: LatencyTier::Fast,
+        expand: Some(("calls", "id")),
+        owes: Pattern {
+            source: EVENT_RESPONSE,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_REQUEST,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
     // 授权级联的第二行（第一行 `authorize-tool` 在表首）：只对已放行的那笔
     // 落 `sent`。`granted` 已蕴含 `request`，所以这里不再复写请求前件。
     Decl {
         name: "dispatch-tools",
-        prio: 67,
+        prio: 68,
         by: Some("courier"),
         // 派发本身不调工具（执行在批次里）。
         tier: LatencyTier::Fast,

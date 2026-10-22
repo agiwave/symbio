@@ -270,6 +270,13 @@ pub(crate) fn builtin() -> Result<Arc<Frozen>, Vec<CheckError>> {
 // 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
 const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
 
+// `response` 比请求多一个集合字段：模型应答带回来的工具调用（ADR-117）。
+//
+// 它是**创建行** `open-tools` 的展开源：一个 `response(port=model)` 的 `calls`
+// 数组逐元素开债，元素键与随后的 `request(port=tool)` 同 id。`response` 的其它
+// 端口（`turn` / `tool`）不带这个字段——缺席即空集合，不开债。
+const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls"];
+
 // `sent` 多两块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）。
 //
 // ## 为什么租约参数在事实上而不只在 `PortDecl` 里
@@ -303,8 +310,8 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         name: EVENT_RESPONSE,
         port: Some("port"),
         key: &["id", "attempt"],
-        expand: &[],
-        fields: PROTOCOL_FIELDS,
+        expand: &["calls"],
+        fields: RESPONSE_FIELDS,
     },
     // `failed` 关的是**逻辑 id**（所有尝试），所以没有 `attempt`——与协议表一致：
     // 失败不是「某一次尝试失败」，是这笔调用不再重试。

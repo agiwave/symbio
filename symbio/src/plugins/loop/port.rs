@@ -200,6 +200,29 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     W: FnOnce(&E) -> String,
 {
+    dispatch_with(store, ports, plan, run, why, |_| serde_json::Value::Null).await
+}
+
+/// 与 [`dispatch`] 同一条派发，但允许把**应答载荷**并进 `response`。
+///
+/// 模型端口的应答要携带本次交回的工具调用（`calls`，ADR-117）：创建行
+/// `open-tools` 的集合展开读的就是它。载荷只能由**跑完执行体之后**才知道，
+/// 所以以闭包形式传入，而不是让调用点先跑一遍再补写（那会变成第二个写方）。
+pub(crate) async fn dispatch_with<S, T, E, F, Fut, W, X>(
+    store: &S,
+    ports: &[PortDecl],
+    plan: Dispatch<'_>,
+    run: F,
+    why: W,
+    extra: X,
+) -> Result<T, DispatchError<E>>
+where
+    S: Store<Event = Event> + ?Sized,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    W: FnOnce(&E) -> String,
+    X: FnOnce(&T) -> serde_json::Value,
+{
     let Dispatch {
         call,
         turn,
@@ -215,7 +238,8 @@ where
     })?;
     match run().await {
         Ok(value) => {
-            succeed(store, call, turn, produced_by).map_err(DispatchError::Store)?;
+            succeed_with(store, call, turn, produced_by, extra(&value))
+                .map_err(DispatchError::Store)?;
             Ok(value)
         }
         Err(e) => {
@@ -285,6 +309,33 @@ pub(crate) fn succeed<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    succeed_with(store, call, turn, produced_by, serde_json::Value::Null)
+}
+
+/// 与 [`succeed`] 同一条 `response`，但允许并进**应答载荷**（模型端口的 `calls`）。
+///
+/// 与 [`announce_with`] 对称：输入属于请求那一半，输出属于应答这一半；两半各写
+/// 一次，不互相覆盖。
+pub(crate) fn succeed_with<S>(
+    store: &S,
+    call: &Call,
+    turn: u64,
+    produced_by: u64,
+    extra: serde_json::Value,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let mut payload = serde_json::json!({
+        "port": call.port,
+        "id": call.id,
+        "attempt": call.attempt,
+    });
+    if let (Some(dst), Some(src)) = (payload.as_object_mut(), extra.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
     append(
         store,
         Event::pending(
@@ -296,11 +347,7 @@ where
             "system",
         )
         .with_produced_by(produced_by)
-        .with_payload(serde_json::json!({
-            "port": call.port,
-            "id": call.id,
-            "attempt": call.attempt,
-        })),
+        .with_payload(payload),
     )
 }
 
