@@ -147,7 +147,14 @@ export const BASELINE = {
   // `the_authorization_rows_do_not_disturb_the_policy_rows`）。既有用例只改断言不增删：六处事件序列
   // 断言各多两格（`turn.closing` / `authz.granted`），`turn_runner_events_are_replayable` 的 head 计数
   // 24→32。非侵蚀，是纯增量。
-  rustTests: 2025,
+  // baseline-allow rustTests: 批 T-227 步 4 补两条判据（2025→2027）——步 4 落地时这两条
+  // 只"天然满足"而没有用例，本批补上：`loop_rows.test.rs::in_flight_rebuilds_per_call_not_per_turn`
+  // （判据 3：只喂一串 `request`/`sent`/`response` 问视图，要求它逐**调用**点出在途集合——
+  // 同一轮里两次模型往返 + 一批工具，回来过的那次不许留在表里；反向自检是删掉 `response`
+  // 那格后三条全在途）与 `turn_runner.test.rs::streaming_frames_reach_the_sink_without_adding_a_fact`
+  // （判据 5：同一轮跑两遍，一片 vs 三片，要求帧数跟着片数走而**事实名序列逐字相同**——
+  // 只断言「帧数 == 片数」抓不住"帧既进 sink 又进日志"的实现）。非侵蚀，是纯增量。
+  rustTests: 2027,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -156,8 +163,8 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-161 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
-  // baseline-allow ciRustTestsTotal: 批 T-227 步 4 的同一增量在 CI 口径下修一格（1436→1444），逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1444,
+  // baseline-allow ciRustTestsTotal: 批 T-227 步 4 补两条判据的同一增量在 CI 口径下修一格（1444→1446），逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1446,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

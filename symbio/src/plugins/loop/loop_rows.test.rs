@@ -773,3 +773,87 @@ fn the_authorization_rows_do_not_disturb_the_policy_rows() {
         Some("close-turn")
     );
 }
+
+/// **判据 3（T-227）**：只给日志，`in_flight` 能说出**哪一次调用**还在等——
+/// 粒度是调用，不是一轮。
+///
+/// ## 它防的是什么
+///
+/// 「一轮在途」是个太粗的说法：同一轮里可以有两次模型往返与一批工具，其中
+/// 只有一次没回来。若视图按轮折叠（「这一轮有 `sent` 就算在途」），恢复时会
+/// 把**已经回来的**那些也算成没回来——重跑它们就是重复执行副作用。
+///
+/// ## 为什么这条用例只喂日志
+///
+/// 恢复的唯一输入是日志（N2：恢复 = 重放）。用例里不构造任何执行体状态，
+/// 直接拿一串 `request` / `sent` / `response` 问视图——视图说得出，恢复就
+/// 说得出；视图说不出，恢复就只能猜。
+#[test]
+fn in_flight_rebuilds_per_call_not_per_turn() {
+    let sent = |port: &str, id: &str| {
+        ev(
+            1,
+            "sent",
+            json!({
+                "port": port,
+                "id": id,
+                "attempt": 1,
+                "lease_ms": 600_000,
+                "attempt_cap": 1,
+            }),
+        )
+    };
+    let answered = |port: &str, id: &str| {
+        ev(
+            1,
+            "response",
+            json!({"port": port, "id": id, "attempt": 1}),
+        )
+    };
+
+    let events = vec![
+        // 第一次模型往返：回来了。
+        sent("model", "model-1-d1-s0"),
+        answered("model", "model-1-d1-s0"),
+        // 第二次模型往返：派出去了，没回来。
+        sent("model", "model-1-d1-s1"),
+        // 一批工具：派出去了，没回来。
+        sent("tool", "tool-1-d1-b0"),
+    ];
+
+    let view = super::view("in_flight", &events, 1, 0).expect("视图已声明");
+    let waiting = view.as_array().expect("在途是一张表");
+    let mut got: Vec<(String, String)> = waiting
+        .iter()
+        .map(|v| {
+            (
+                v["port"].as_str().unwrap_or_default().to_string(),
+                v["id"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            ("model".to_string(), "model-1-d1-s1".to_string()),
+            ("tool".to_string(), "tool-1-d1-b0".to_string()),
+        ],
+        "在途必须逐次调用点得出：回来过的 s0 不许留在表里"
+    );
+
+    // 反向自检：把 `response` 那一格删掉，三条就都在途——那时本用例的第一条
+    // 断言会红，而不是仍然通过。这条自检说明「逐调用」不是靠数数凑出来的。
+    let all_open = vec![
+        sent("model", "model-1-d1-s0"),
+        sent("model", "model-1-d1-s1"),
+        sent("tool", "tool-1-d1-b0"),
+    ];
+    assert_eq!(
+        super::view("in_flight", &all_open, 1, 0)
+            .and_then(|v| v.as_array().map(|a| a.len()))
+            .unwrap_or_default(),
+        3
+    );
+}

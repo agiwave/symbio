@@ -3864,3 +3864,103 @@ mod round_decision_tests {
         assert_eq!(final_answer(&rt, &StreamNodeFacts::default()), "半截正文");
     }
 }
+
+/// **判据 5（T-227）**：流式帧直通前端，且**一格事实都不多**。
+///
+/// ## 它防的是什么
+///
+/// 把 token 级帧写进日志是这条流水线上最诱人的一个错误：帧已经是事实的
+/// 「进行时」，而事实面只收「完成时」。写进去的代价不是多几行，是**日志被
+/// 淹没**（一轮几千格），以及 `owed` 每轮都要扫过它们（视图成本上界当场破）。
+///
+/// ## 为什么用「同一个轮跑两遍、比事件数」
+///
+/// 只断言「帧数 == 片数」是不够的：一个把帧写进日志、同时仍然把帧送 sink 的
+/// 实现两条都满足。差别只出现在**事件数**上——所以用例跑同一个轮两次，
+/// 一次一片、一次三片，然后要求两次的事实名序列**逐字相同**。
+///
+/// 反向自检：在 `stream.rs` 的帧回调里补一条 `store.append(...)`，本用例红在
+/// 「帧数变了，事实数不许跟着变」。
+#[tokio::test]
+async fn streaming_frames_reach_the_sink_without_adding_a_fact() {
+    use crate::symbio_core::{DeltaSink, EventStore, Seq, StubLlmAdapter, TokenIssuer};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Frames(Mutex<Vec<String>>);
+
+    impl DeltaSink for Frames {
+        fn on_delta(&self, text: &str) {
+            self.0.lock().unwrap().push(text.to_string());
+        }
+        fn on_reasoning(&self, _text: &str) {}
+        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_node::ChatNode) {}
+    }
+
+    /// 跑一遍：返回（帧序列，事实名序列）。
+    async fn run_once(chunks: &[&str]) -> (Vec<String>, Vec<String>) {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed_streaming("stub-model", chunks);
+        let sink = Arc::new(Frames::default());
+        let user_seq = seed_user(&store, 0, "问");
+
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    user_seq,
+                    drive_seq: user_seq,
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    inject: None,
+                    resume: None,
+                    actor: ActorSpec::trivial("session/main"),
+                    prefix: None,
+                    final_reply: None,
+                    turn_root_id: String::new(),
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
+                    nodes: None,
+                    stages: Vec::new(),
+                    abort: None,
+                },
+                sink.clone() as Arc<dyn DeltaSink>,
+                &[],
+                None,
+            )
+            .await
+            .expect("桩必答");
+
+        let frames = sink.0.lock().unwrap().clone();
+        let snapshot = store.range(Seq::new(0));
+        let landed: Vec<String> = kinds(&snapshot).iter().map(|k| k.to_string()).collect();
+        (frames, landed)
+    }
+
+    let (one_frame, one_facts) = run_once(&["你好！"]).await;
+    let (three_frames, three_facts) = run_once(&["你", "好", "！"]).await;
+
+    // 帧：跟着分片走。
+    assert_eq!(one_frame, vec!["你好！".to_string()], "一片就是一帧全文");
+    assert_eq!(
+        three_frames,
+        vec!["你".to_string(), "好".to_string(), "！".to_string()],
+        "三片按序直通"
+    );
+
+    // 事实：**不跟着分片走**。
+    assert_eq!(
+        three_facts, one_facts,
+        "帧数变了，事实数不许跟着变——流式帧不是事实"
+    );
+    assert_eq!(
+        three_facts.iter().filter(|k| *k == "response").count(),
+        1,
+        "一次模型往返只有一条 `response`：流结束时落，不是每片落"
+    );
+}
