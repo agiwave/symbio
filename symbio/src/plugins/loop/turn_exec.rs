@@ -87,15 +87,16 @@ use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
-    llm_short_id, run_ops, ActorSpec, CapabilityMeta, ConsolidateRequest, DeltaSink, DispatchPort,
-    Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
-    ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta, ConsolidateRequest, DeltaSink,
+    DispatchPort, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel, LatencyTier,
+    LlmAdapter, ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq, SilentDeltas, Store,
+    TokenIssuer, TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
-use super::turn_runner::{TurnInput, TurnResume, TurnRunner};
+use super::turn_runner::{StepBegin, TurnInput, TurnOutcome, TurnResume, TurnRunner};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
@@ -756,6 +757,39 @@ pub(crate) struct ExecTurn<'a> {
 ///
 /// T-179 · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
 /// 本函数只留阶段间调度——调度点即原阶段边界，副作用顺序与事件批次序不变。
+/// 驱动一轮内的步进：`begin` 交回跨步状态，`step` 推进一步，直到收束。
+///
+/// T-227 步 5 把循环从 `turn_runner` 移到这里：运行器只回答「一步发生了什么」，
+/// 步的推进归执行器。下一步迁移可以把这个循环替换成「读行债 → 派发」的引擎
+/// 调度，而 `turn_runner` 的入口形状不再变。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn drive_steps<S>(
+    store: &S,
+    llm: &dyn LlmAdapter,
+    tok: &FullModel,
+    input: TurnInput,
+    sink: Arc<dyn DeltaSink>,
+    tools: &[CapabilityMeta],
+    dispatch: Option<&dyn DispatchPort>,
+) -> Result<TurnOutcome, AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let step_sink = sink.clone();
+    let mut flow = match TurnRunner::begin(store, llm, input, sink).await? {
+        StepBegin::Done(outcome) => return Ok(outcome),
+        StepBegin::Run(flow) => flow,
+    };
+    loop {
+        if let Some(outcome) = flow
+            .step(store, llm, tok, step_sink.clone(), tools, dispatch)
+            .await?
+        {
+            return Ok(outcome);
+        }
+    }
+}
+
 pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let assembled = assemble_turn(req).await?;
     let running = call_model(assembled).await?;

@@ -9,7 +9,7 @@
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
 //! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
 
-use super::{TurnInput, TurnOutcome, TurnRunner};
+use super::{StepBegin, TurnInput, TurnOutcome, TurnRunner};
 use crate::symbio_core::{
     ActorSpec, AppendError, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     SilentDeltas, Store, Verb, EVENT_USER_MESSAGE,
@@ -114,6 +114,37 @@ impl TurnRunner {
     {
         self.run_with_tools(store, llm, tok, input, sink, &[], None)
             .await
+    }
+
+    /// 测试侧的步驱动：生产里这一步由 `turn_exec::call_model` 做（T-227 步 5）。
+    /// 本文件保留它只为让既有用例继续按「一轮 = 一个调用」书写；循环不进生产面。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_with_tools<S>(
+        &self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        input: TurnInput,
+        sink: std::sync::Arc<dyn DeltaSink>,
+        tools: &[crate::symbio_core::CapabilityMeta],
+        dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
+    ) -> Result<TurnOutcome, AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        let step_sink = sink.clone();
+        let mut flow = match TurnRunner::begin(store, llm, input, sink).await? {
+            StepBegin::Done(outcome) => return Ok(outcome),
+            StepBegin::Run(flow) => flow,
+        };
+        loop {
+            if let Some(outcome) = flow
+                .step(store, llm, tok, step_sink.clone(), tools, dispatch)
+                .await?
+            {
+                return Ok(outcome);
+            }
+        }
     }
 }
 

@@ -497,57 +497,66 @@ impl TurnRunner {
     /// 工具清单 / 分发通道），没有两个属于同一概念——打包成一个结构体只是把
     /// 「七个端口」改名叫「一个结构体 + 七个字段」，调用方仍要逐个填，
     /// 却多出一层只为过 lint 而生的壳。
-    #[allow(clippy::too_many_arguments)]
-    pub async fn run_with_tools<S>(
-        &self,
+    /// 起一轮：准备阶段可能直接收束（反射档 / 早退），否则交回一个
+    /// [`StepFlow`]。**这里不再有循环**——步的推进归调用方（T-227 步 5）。
+    pub(crate) async fn begin<S>(
+        store: &S,
+        llm: &dyn LlmAdapter,
+        input: TurnInput,
+        sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+    ) -> Result<StepBegin, crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        match prepare::prepare_turn(store, llm, input, sink).await? {
+            prepare::PreparedFlow::Done(outcome) => Ok(StepBegin::Done(outcome)),
+            prepare::PreparedFlow::Run(run) => Ok(StepBegin::Run(StepFlow { run, steps: 0 })),
+        }
+    }
+}
+
+/// 一步的推进结果：`Done` = 本轮已收束，`Run` = 还有下一步。
+pub(crate) enum StepBegin {
+    Done(TurnOutcome),
+    Run(StepFlow),
+}
+
+/// 一轮的**单步**执行器：持有跨步状态，但**不持有循环**。
+///
+/// 循环由 `turn_exec::call_model` 驱动（T-227 步 5）——`turn_runner` 只回答
+/// 「这一步发生了什么」。步数上界与 `exhausted` 收束仍在同一处
+/// （[`StepFlow::step`]），所以拆分没有改变停机判据。
+pub(crate) struct StepFlow {
+    run: Box<prepare::Prepared>,
+    steps: usize,
+}
+
+impl StepFlow {
+    /// 推进一步；`None` = 适配器要求继续，`Some` = 本轮收束。
+    pub(crate) async fn step<S>(
+        &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
         tok: &FullModel,
-        input: TurnInput,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
         dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
-    ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
     where
-        // `?Sized`：调用方持的是 `&dyn Store`（loop 只见 trait object，不见会话存储实现）。
         S: Store<Event = Event> + ?Sized,
     {
-        let mut run = match prepare::prepare_turn(store, llm, input, sink.clone()).await? {
-            prepare::PreparedFlow::Done(outcome) => return Ok(outcome),
-            prepare::PreparedFlow::Run(run) => run,
-        };
-        // ── 步循环（T-227 步 1）───────────────────────────────────────────
-        //
-        // 一轮 = 若干步，一步 = 一次请求往返（`stream_round` 自己再分出
-        // 收束 / 派发 / 等待）。`Continue` / `Done` 在这里被写成一个显式的计数
-        // 循环，而不是隐在「回 `None` 就再来一圈」里：PL-017 要把每一步变成一行
-        // 债，先得有一个地方能说「这是第几步、为什么继续」——步的边界自此是
-        // **代码里的一处**，而不是「某个调用点的返回值碰巧是什么」。
-        //
-        // ## 唯一的行为变化：上界（ADR-115 决策 3）
-        //
-        // 此前这一圈**没有上界**：一个总请求工具的适配器能让 `stream_round`
-        // 永远回 `None`，而每圈都真花一次模型往返——一个不会返回的轮。上限是
-        // **停机判据**，不是性能阀。到顶落 `exhausted`（与 `finish_reason =
-        // length` 同一闭集值），读侧不必学一套新词。
-        let mut steps = 0usize;
-        loop {
-            steps += 1;
-            if steps > MAX_STEPS_PER_DRIVE {
-                crate::plugin_warn!(
-                    "actors",
-                    "[v2] 轮内步数超过上限 {MAX_STEPS_PER_DRIVE}（turn={}），收束为 exhausted（step_limit）",
-                    run.turn
-                );
-                return exceed_steps(&mut run, store, llm, "step_limit").await;
-            }
-            if let Some(outcome) =
-                stream::stream_round(&mut run, store, llm, tok, sink.clone(), tools, dispatch)
-                    .await?
-            {
-                return Ok(outcome);
-            }
+        self.steps += 1;
+        if self.steps > MAX_STEPS_PER_DRIVE {
+            crate::plugin_warn!(
+                "actors",
+                "[v2] 轮内步数超过上限 {MAX_STEPS_PER_DRIVE}（turn={}），收束为 exhausted（step_limit）",
+                self.run.turn
+            );
+            return exceed_steps(&mut self.run, store, llm, "step_limit")
+                .await
+                .map(Some);
         }
+        stream::stream_round(&mut self.run, store, llm, tok, sink, tools, dispatch).await
     }
 }
 

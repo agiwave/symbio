@@ -258,17 +258,16 @@ pub(crate) async fn execute_final_reply_turn(
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
         abort: Some(abort),
     };
-    TurnRunner
-        .run_with_tools(
-            store.as_ref(),
-            &llm,
-            &tok,
-            input,
-            Arc::new(SilentDeltas),
-            &[],
-            None,
-        )
-        .await
-        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
+    drive_steps(
+        store.as_ref(),
+        &llm,
+        &tok,
+        input,
+        Arc::new(SilentDeltas),
+        &[],
+        None,
+    )
+    .await
+    .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
     Ok(())
 }

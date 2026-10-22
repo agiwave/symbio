@@ -306,17 +306,17 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 elimination_revoked,
             );
             let dispatch_ref: &dyn DispatchPort = &dispatcher;
-            let r = TurnRunner
-                .run_with_tools(
-                    store.as_ref(),
-                    &llm,
-                    &tok,
-                    input,
-                    bridge.clone(),
-                    tools,
-                    Some(dispatch_ref),
-                )
-                .await;
+            // 步循环在**执行器**里，不在 `turn_runner` 里（T-227 步 5）。
+            let r = super::drive_steps(
+                store.as_ref(),
+                &llm,
+                &tok,
+                input,
+                bridge.clone(),
+                tools,
+                Some(dispatch_ref),
+            )
+            .await;
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
             produced = dispatcher.take_produced();
             // 收束派生事实出参同样先取走（承诺 / 任务表 / 熔断）——轮末随收束落格。

@@ -237,7 +237,10 @@ test('Windows restart: independent real processes only', {
         if (!pid) continue;
         try {
           const id = await processIdentity(pid);
-          assert.equal(id.exe.toLowerCase(), exe.toLowerCase());
+          // pid 可能已被系统回收（本文件并发起多个场景，Windows 会复用刚退出的
+          // pid）：身份对不上说明候选 / 回滚进程已经退出，没有可停的东西，更
+          // 不能按 pid 盲杀。这不是被测行为失败，而是清理面的竞态。
+          if (id.exe.toLowerCase() !== exe.toLowerCase()) continue;
           await stopVerified(pid, id.startTimeUtcTicks, id.exe);
         } catch (e) { if (!/Command failed/.test(e.message)) throw e; }
       }
