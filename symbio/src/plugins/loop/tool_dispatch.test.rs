@@ -1,4 +1,7 @@
-//! 工具端口**关账**的判据（T-244 步 4 场景三：中止唤醒得在事实面上看得见）。
+//! 工具端口三笔债的判据（T-244 步 4）：授权 / 派发 / 关账由**生产代码**写，
+//! 行表按它们判欠不欠。
+//!
+//! ## 场景三（中止唤醒）：占位结果不是应答
 //!
 //! 一条 `sent` 之后只有两种收场：工具回了话（`response`），或执行层没跑到它
 //! （`failed{why}`）。判据是「日志说的与发生的事一致」——批尾收口给没跑到的调用
@@ -10,8 +13,18 @@
 //! （`needs_approval`）都是应答，落 `response`。「凡失败都算没跑到」会把真正回了
 //! 话的调用写成没回——那是另一种失真，不是修正在第一种。
 //!
-//! 用例直接对 `ToolPort::close_batch`：它是批次关账的唯一写方，行不欠、幂等键
-//! 这些引擎纪律已由 `port.test.rs` 覆盖，这里只验「哪一种收场落哪一条事实」。
+//! ## 场景一（审批唤醒）：`authz.granted` 重新开账
+//!
+//! 授权动作落下 `authz.granted(port=tool)` 那一刻，`dispatch-tools` 必须**再次欠着**
+//! ——「用户批了」在事实面上的全部含义就是「这笔派发重新成为一笔待还的账」。
+//! 行层那几条合成用例（`loop_rows.test.rs`）对的是声明；这里对的是写方：
+//! `ToolPort::authorize_calls` / `begin_calls` 真的产出那种载荷、真的换一笔债。
+//!
+//! 场景二（补充插话）不在这里：补充不产生任何端口事实，它的判据是「`await-tools`
+//! 的 `until` 没有多一个出口」，归行表用例（`a_supplement_does_not_answer_the_in_flight_tool`）。
+//!
+//! 行不欠、幂等键这些引擎纪律已由 `port.test.rs` 覆盖，本文件只验「哪一种动作落
+//! 哪一条事实、落了之后哪一笔债开或关」。
 
 use serde_json::json;
 use std::sync::Arc;
@@ -19,8 +32,8 @@ use std::sync::Arc;
 use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{DispatchOutcome, ToolPort, ToolPortCall};
-use crate::symbio_core::{Event, EventStore, Seq, Store};
+use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy};
+use crate::symbio_core::{CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_GRANTED};
 
 /// 一轮的账：turn=1、溯源到用户格 seq=7、幕锚填占位 0（这三笔工具债不读时间视图）。
 const TURN: u64 = 1;
@@ -42,35 +55,52 @@ fn payload_of(store: &EventStore, kind: &str) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
-/// `await-tools` 此刻是否还欠着这笔 `sent`（行表口径，不是内存计数）。
+/// 某一行此刻是否欠着这笔账（行表口径，不是内存计数）。
+fn owes(row: &str, store: &EventStore) -> bool {
+    loop_rows::owes(row, &events(store), TURN, 0)
+}
+
+/// `await-tools` 此刻是否还欠着这笔 `sent`。
 fn awaits(store: &EventStore) -> bool {
-    loop_rows::owes("await-tools", &events(store), TURN, 0)
+    owes("await-tools", store)
+}
+
+/// 只落了 `request` 的一笔调用：还没判、还没派（授权行的前件）。
+fn requested(store: &EventStore, id: &str) -> ToolPortCall {
+    let call = port::Call::new("tool", id, 1);
+    port::announce(store, &call, TURN, USER_SEQ).expect("request 落格");
+    ToolPortCall {
+        model_id: format!("call-{id}"),
+        call,
+        name: "shell".into(),
+        // `risk = None` ⇒ 注册表里没有可判的能力（route-only），授权按 deferred 放行。
+        risk: None,
+        approved: false,
+        granted: false,
+        sent: false,
+    }
 }
 
 /// 已开账、已放行、已派发的一笔调用：`request` + `sent` 都经引擎原语落过。
+///
+/// 两个旗标在这里直接补齐——本函数服务**关账**用例，「派出后欠一次应答」是前提
+/// 不是被测点；派发这一步真的换债由场景一那条用例对。
 fn opened(store: &EventStore, id: &str) -> ToolPortCall {
-    let call = port::Call::new("tool", id, 1);
-    port::announce(store, &call, TURN, USER_SEQ).expect("request 落格");
+    let mut call = requested(store, id);
     port::begin(
         store,
         loop_rows::PORTS,
         port::Dispatch {
-            call: &call,
+            call: &call.call,
             turn: TURN,
             produced_by: USER_SEQ,
             owed: true,
         },
     )
     .expect("sent 落格");
-    ToolPortCall {
-        model_id: format!("call-{id}"),
-        call,
-        name: "shell".into(),
-        risk: None,
-        approved: false,
-        granted: true,
-        sent: true,
-    }
+    call.granted = true;
+    call.sent = true;
+    call
 }
 
 fn outcome(model_id: &str, failure_kind: &str) -> DispatchOutcome {
@@ -207,4 +237,53 @@ fn a_denied_or_unsent_call_lands_nothing() {
         !kinds.contains(&"failed".to_string()) && !kinds.contains(&"response".to_string()),
         "端口账已关的调用不再补记：{kinds:?}"
     );
+}
+
+/// 授权动作的策略：会话没设 `RISK_LEVEL` ⇒ 阈值走默认（与 `ToolPortPolicy::read`
+/// 缺席时同一条），能力表为空（route-only 工具按 deferred 放行）。
+fn policy() -> ToolPortPolicy {
+    ToolPortPolicy {
+        known: Vec::new(),
+        threshold: CapabilityRiskLevel::default(),
+        mode: String::new(),
+    }
+}
+
+/// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tools` 就
+/// 重新欠着；`begin_calls` 落 `sent` 后债位换到 `await-tools`。
+///
+/// 对的是**写方**（`ToolPort::authorize_calls` / `begin_calls`）而不是行声明：
+/// 行层那几条合成用例（`loop_rows.test.rs`）只能证明「表认得 granted」，证明不了
+/// 生产真的写出带 `port` / `id` 的载荷——键对不上时行永不开账，而日志一片绿。
+#[test]
+fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-resume-1-tc-1-1")];
+
+    assert!(owes("authorize-tool", &store), "请求落了、还没判");
+    assert!(
+        !owes("dispatch-tools", &store),
+        "还没判 ⇒ 派发行不成立（fail-closed）"
+    );
+
+    port.authorize_calls(&policy(), &mut calls);
+
+    assert!(calls[0].granted, "deferred 的调用交给下游路由闸门");
+    assert_eq!(
+        payload_of(&store, EVENT_AUTHZ_GRANTED)["id"],
+        json!("tool-resume-1-tc-1-1"),
+        "授权事实按 `(port, id)` 绑定：`id` 缺一格，派发行就永远不认它"
+    );
+    assert!(!owes("authorize-tool", &store), "判过了 ⇒ 授权行关账");
+    assert!(
+        owes("dispatch-tools", &store),
+        "审批落 granted ⇒ 派发重新成为一笔待还的账（判据 6 场景一）"
+    );
+
+    port.begin_calls(&mut calls);
+
+    assert!(calls[0].sent, "派发行欠 ⇒ `sent` 落格并回报旗标");
+    assert!(!owes("dispatch-tools", &store), "派出 ⇒ 派发行关账");
+    assert!(awaits(&store), "换一笔债在等应答");
 }

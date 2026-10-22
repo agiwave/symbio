@@ -77,3 +77,13 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   [PL-016](../004-plan/016-义务环.md "PL-016-义务环") §2.3 禁止的「永不派发的 request」。
   解锁条件是这两行接回执行体（本任务步 5 退役 `resume.rs` 时必须做——审批续跑要有人派），
   不是「唤醒事实接上了」；原判据把解锁条件写窄了，已按实测订正。
+- 2026-10-23 步 4 第二批（判据 6 场景一 / 场景二的**用例落点**）。三场景对完后发现
+  口径 1 要区分两件被混在一起的事：场景一的判据是「写方真写出那种载荷」，场景二的判据
+  是「`await` 的 `until` 不多出口」。补 `an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await`
+  （`tool_dispatch.test.rs`）：拿生产 `ToolPort::authorize_calls` / `begin_calls` 落
+  `authz.granted` 与 `sent`，再问行表 `owes`——行层原有的合成用例只证明「表认得
+  granted」，证明不了载荷里 `id` 那一格真在（键对不上时派发行永不开账、日志一片绿）。
+  反向判据实测：从 `granted_event` 的载荷删掉 `"id"` ⇒ 该用例转红。
+  场景二不补端口用例：补充不产生任何端口事实，判据归行表用例
+  `a_supplement_does_not_answer_the_in_flight_tool`（已有的那条），本任务只确认
+  **没有**新增 `await` 出口。生产代码零改动，`cargo test --lib` 2073 通过 / 0 失败。
