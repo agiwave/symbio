@@ -817,6 +817,29 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
     assert!(!owes("await-tools", &done, 0));
 }
 
+/// ADR-117：恢复调用的债前件是审批动作写下的 `request`，不是模型响应。
+///
+/// 这一条钉住「`dispatch-tools` 不欠模型响应」这个决定：事实切片里**没有**
+/// `response(port=model)`，恢复的那一笔仍照常走「授权 → 派发」两行。
+#[test]
+fn a_resumed_tool_call_does_not_need_a_model_response() {
+    let id = "tool-resume-1-tc-1-1";
+    let events = vec![tool_request(id), tool_granted(id)];
+
+    assert!(
+        events
+            .iter()
+            .all(|e| e.kind != crate::symbio_core::EVENT_RESPONSE
+                || e.payload.get("port").and_then(Value::as_str) != Some("model")),
+        "用例前提：日志里没有模型响应"
+    );
+    assert!(!owes("authorize-tool", &events, 0), "已放行 ⇒ 授权行关账");
+    assert!(
+        owes("dispatch-tools", &events, 0),
+        "恢复的那一笔照样欠派发：债前件是它自己的 request，与模型响应无关"
+    );
+}
+
 #[test]
 fn an_aborted_tool_closes_the_await_with_its_own_reason() {
     let events = vec![
