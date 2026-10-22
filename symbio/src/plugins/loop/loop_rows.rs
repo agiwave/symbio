@@ -16,7 +16,9 @@
 //! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
 //! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
+//! 66 dispatch-model─ 端口派发：模型往返（T-227 步 2，在 `turn` 执行体内部）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
+//! 71 await-model   ── 等应答（模型端口）
 //! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
 //!
@@ -55,7 +57,7 @@ use crate::symbio_core::{
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
 ///
-/// 当前只有一个端口：`turn`（一轮的一次请求往返）。
+/// 当前两个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返，T-227 步 2）。
 ///
 /// ## 租约与尝试上限怎么定的
 ///
@@ -69,15 +71,33 @@ use crate::symbio_core::{
 /// 派发」变成一句谎。到顶即判死（`failed{why:"lease_expired"}`），恢复走
 /// resume 幕（新的逻辑 id，旧那笔作为「没回来」留在日志里）。
 ///
-/// `retry` 因此是**有活着的等待方**的端口才用的机制（PL-017 的 `model` / `tool`：
-/// 它们的内环还在，看护者重试后由同一幕接着 await）。
-pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
-    port: "turn",
-    // 引擎在跑执行体**之前**落它（判据 2）：搬运者可能不产事实就返回。
-    before: EVENT_SENT,
-    lease_ms: 600_000,
-    max_attempts: 1,
-}];
+/// `retry` 因此是**有活着的等待方**的端口才用的机制（PL-017 的 `tool`：
+/// 它的内环还在，看护者重试后由同一幕接着 await）。
+///
+/// ## `model` 端口（T-227 步 2）
+///
+/// 一次**模型往返**。它在 `turn` 执行体**内部**发起（ADR-115 决策 5：两者之间
+/// 没有双调度器——`turn` 是普通 `by=Some` 执行体，PL-017 只是把它的内部拆成
+/// 更多行）。
+///
+/// 租约与 `turn` 同量级（慢的那一头同样是模型排队）；`max_attempts = 1` 同理：
+/// 进程重启后等这笔应答的 future 已经不在了，重试只会留下一条永不派发的
+/// `request`。等步 4 的唤醒事实接上（有活着的等待方）时，这个上限才可以 > 1。
+pub(crate) static PORTS: &[PortDecl] = &[
+    PortDecl {
+        port: "turn",
+        // 引擎在跑执行体**之前**落它（判据 2）：搬运者可能不产事实就返回。
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+    },
+    PortDecl {
+        port: "model",
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+    },
+];
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
@@ -254,6 +274,44 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // ── 端口 `model` 的两行（T-227 步 2）──────────────────────────
+    //
+    // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返，它在
+    // `turn` 执行体内部发起（ADR-115 决策 5：没有第二个调度器）。
+    //
+    // 键仍取逻辑 id：一次模型调用 = 一个 id，重试另计尝试号。
+    //
+    // ## 端口粒度为什么是「一次模型往返」而不是「一次工具批次」
+    //
+    // 模型调用是**最内层**的单次对外调用（它下面没有别的调用了），因此它是最小
+    // 的可恢复单位：崩溃后重放到「上一次模型请求」即可，不必重放整轮。工具批次
+    // 在它**外面**（一个模型响应可带多个工具调用），所以工具端口的 `expand` 是
+    // 下一层的事（PL-017 步 3）。
+    Decl {
+        name: "dispatch-model",
+        prio: 66,
+        by: Some("courier"),
+        // 派发本身不调模型（模型在执行体里）。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+        ],
+        unless: &[],
+    },
     // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
     // 永不选中），但它让「在等」与「没事」可区分（PL-016 §2.3）。
     Decl {
@@ -281,6 +339,36 @@ pub(crate) static ROWS: &[Decl] = &[
                 source: EVENT_RETRY,
                 key: &["port", "id"],
                 eq: &[("port", Lit::Str("turn"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 「已派出、等应答」——与 `await-turn` 同形：`by: None` 就是 `Wait` 的折叠。
+    Decl {
+        name: "await-model",
+        prio: 71,
+        by: None,
+        tier: LatencyTier::Deep,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("model"))],
             },
         ],
         unless: &[],

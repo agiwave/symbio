@@ -22,6 +22,12 @@ pub(crate) enum PreparedFlow {
 /// 一次工具循环的**在途状态**（阶段①产出，阶段②③④读取/推进）。
 pub(crate) struct Prepared {
     pub(crate) turn: u64,
+    /// 本幕锚（`drive_seq`）：续写幕复用轮号，端口的逻辑 id 必须带它——只带轮号会与
+    /// 首幕撞成同一笔（首幕已经有过 `sent`，幂等键命中之后派发会被拒）。
+    pub(crate) drive_seq: u64,
+    /// 轮内**步号**（1 起）：第几次模型往返。模型端口的逻辑 id 带它——
+    /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。
+    pub(crate) step: u64,
     pub(crate) actor: ActorSpec,
     pub(crate) user_seq: u64,
     pub(crate) turn_root_id: String,
@@ -328,6 +334,8 @@ where
 
     Ok(PreparedFlow::Run(Box::new(Prepared {
         turn,
+        drive_seq,
+        step: 0,
         actor,
         user_seq,
         turn_root_id,

@@ -135,8 +135,11 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
 #[tokio::test]
 async fn an_undeclared_port_is_named_not_defaulted() {
     // 漏声明 ⇒ 显形。不静默拿一个默认租约——默认值会把「漏了」变成「看起来正常」。
+    //
+    // 端口名取一个**没声明过的**（`ghost`）：`model` / `turn` 已在 `PORTS` 里，
+    // 拿它们当「未声明」会让这条判据随端口增加而失效。
     let store = boot();
-    let call = Call::new("model", "m-1", 1);
+    let call = Call::new("ghost", "m-1", 1);
     let res: Result<(), DispatchError<()>> = dispatch(
         &store,
         PORTS,
@@ -150,7 +153,7 @@ async fn an_undeclared_port_is_named_not_defaulted() {
         |_: &()| "unreachable".into(),
     )
     .await;
-    assert!(matches!(res, Err(DispatchError::NoPort("model"))));
+    assert!(matches!(res, Err(DispatchError::NoPort("ghost"))));
 }
 
 #[tokio::test]

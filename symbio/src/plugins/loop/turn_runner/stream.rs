@@ -9,6 +9,97 @@
 
 use super::*;
 
+/// 一次模型往返的失败：三类，各有各的收口。
+///
+/// 为什么要分类而不是直接抛 `AdapterError`：中止与失败是**两种停法**
+/// （收束格 vs 兜底格），而控制面不一致（行不欠 / 端口没声明）**根本不是适配器的
+/// 错**——把它们揉进一个错误类型，就只能给它们同一个形状。
+enum ModelCallError {
+    /// 适配器中止（`AdapterError::Aborted`）——中止收束格。
+    Aborted,
+    /// 适配器失败——兜底格（`detail` 是适配器的人话，只给人读）。
+    Failed(String),
+    /// 协议事实落不进去——往上传：事件都记不下来，后面的一切都不可信。
+    Store(crate::symbio_core::AppendError),
+    /// 控制面自身不一致（行不欠 / 端口没声明）——模型没跑成，如实当失败报。
+    Control(String),
+}
+
+/// 一次模型往返 = 端口 `model` 的一次调用（T-227 步 2）。
+///
+/// 协议事实由 [`port`](crate::plugins::loop::port) 模块写（**唯一写方**）：
+/// `request`（决策者：这一步欠一次模型往返）→ `sent`（引擎，跑**之前**）→
+/// `response` / `failed`。
+///
+/// ## 为什么模型调用要落事实
+///
+/// 粗端口 `turn` 的粒度是**一轮**：崩溃后只能重放整轮。模型调用是重放的**最小
+/// 单位**——落成事实之后，“上次发到第几次模型请求”有答案，而那一轮里的工具批次
+/// 也能按它对齐。
+///
+/// ## 为什么逻辑 id 带**幕锚**与**步号**
+///
+/// 续写幕复用轮号且步号从 0 重来，只带轮号会与首幕撞成同一笔——首幕已经有过
+/// `sent`，幂等键命中之后派发会被拒（与 T-223 的 `turn` 端口同一条理由）。
+///
+/// ## 为什么 id 以**端口名**开头
+///
+/// 视图 `in_flight` / `stale_sent` 的关账口径按 **id** 匹配，不带端口
+/// （`open_calls`：`response` / `retry` 关同 id + attempt，`failed` 关同逻辑 id）
+/// ——也就是说，**id 必须跨端口唯一**，否则一个端口的失败会关掉另一个端口的账。
+/// 以端口名开头是最省心的做法：`turn-…` 与 `model-…` 天然不撞。
+async fn call_model<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    tok: &FullModel,
+    messages: &[crate::symbio_core::PromptMessage],
+    tools: &[crate::symbio_core::CapabilityMeta],
+    sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+) -> Result<crate::symbio_core::LlmTurn, ModelCallError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let call = super::super::port::Call::new(
+        "model",
+        format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
+        1,
+    );
+    super::super::port::announce(store, &call, run.turn, run.user_seq)
+        .map_err(ModelCallError::Store)?;
+    // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
+    let facts = store.range(Seq::new(0));
+    let owed = super::super::loop_rows::owes(
+        "dispatch-model",
+        &facts,
+        run.turn,
+        crate::symbio_core::clock_now_ms(),
+    );
+    let out = super::super::port::dispatch(
+        store,
+        super::super::loop_rows::PORTS,
+        super::super::port::Dispatch {
+            call: &call,
+            turn: run.turn,
+            produced_by: run.user_seq,
+            owed,
+        },
+        || llm.generate_turn(tok, messages, tools, sink.clone()),
+        |e: &AdapterError| e.to_string(),
+    );
+    match out.await {
+        Ok(rt) => Ok(rt),
+        Err(super::super::port::DispatchError::Actor(AdapterError::Aborted)) => {
+            Err(ModelCallError::Aborted)
+        }
+        Err(super::super::port::DispatchError::Actor(e)) => {
+            Err(ModelCallError::Failed(e.to_string()))
+        }
+        Err(super::super::port::DispatchError::Store(e)) => Err(ModelCallError::Store(e)),
+        Err(other) => Err(ModelCallError::Control(format!("{other:?}"))),
+    }
+}
+
 /// 跑**一次**请求。`Ok(None)` = 继续下一轮；`Ok(Some(outcome))` = 本轮已收口。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_round<S>(
@@ -28,113 +119,124 @@ where
     messages.extend(run.exchange.iter().cloned());
 
     // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
-    match llm.generate_turn(tok, &messages, tools, sink.clone()).await {
-        Ok(rt) => {
-            run.cost_ms += rt.cost_ms;
-            // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
-            // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
-            let round_facts = node_facts(&run.nodes);
-
-            // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
-            if classify_round(&rt, dispatch.is_some()) == RoundDecision::Halt {
-                return halt(run, store, llm, rt, &round_facts).await.map(Some);
-            }
-
-            // 2b. 模型请求了工具 ⇒ 分发。没有分发方却收到工具调用是**配置
-            //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
-            let Some(dispatch) = dispatch else {
-                let cost = run.started.elapsed().as_millis() as u64;
-                // 调用本身是事实：没有分发通道也要记「请求过什么」。
-                run.all_tool_calls
-                    .extend(rt.tool_calls.iter().map(|tc| tool_fact_of(tc, None)));
-                let produced = produced_payload(
-                    &rt.text,
-                    llm.model_id(),
-                    &run.turn_root_id,
-                    &round_facts,
-                    &run.all_tool_calls,
-                    &run.rounds,
-                );
-                return settle::append_fallback(
-                    store,
-                    &run.actor,
-                    run.turn,
-                    run.user_seq,
-                    "模型请求了工具，但本轮没有工具分发通道",
-                    cost,
-                    produced,
-                    run.artifacts_landed,
-                )
-                .await
-                .map(Some);
-            };
-            let outcomes = dispatch.dispatch(&rt).await;
-
-            // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
-            batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;
-
-            // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
-            //     说过的话照样是事实，等待是状态），不收束轮次。
-            if outcomes.iter().any(|o| o.needs_user_action) {
-                let produced = produced_payload(
-                    &rt.text,
-                    llm.model_id(),
-                    &run.turn_root_id,
-                    &round_facts,
-                    &run.all_tool_calls,
-                    &run.rounds,
-                );
-                // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
-                // 模式）：等待轮可能已落过进展格，从 0 起会撞幂等键。
-                let progress_no = run
-                    .full_snapshot
-                    .iter()
-                    .filter(|e| e.turn == run.turn && e.kind == EVENT_ASSISTANT_PROGRESS)
-                    .count() as u64;
-                store.append(
-                    Event::pending(
-                        format!("p-{}-{progress_no}", run.turn),
-                        EVENT_ASSISTANT_PROGRESS,
-                        Entity::Turn,
-                        Verb::Progressed,
-                        run.turn,
-                        &run.actor.principal,
-                    )
-                    .with_produced_by(run.user_seq)
-                    .with_cost_ms(run.cost_ms)
-                    .with_payload(with_status(produced, "pending")),
-                )?;
-                return Ok(Some(TurnOutcome {
-                    turn: run.turn,
-                    text: rt.text,
-                    cost_ms: run.cost_ms,
-                    usage: rt.usage,
-                    fell_back: false,
-                    aborted: false,
-                    awaits_user: true,
-                    closure_denied: false,
-                    // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因。
-                    finish: rt.finish.clone(),
-                }));
-            }
-
-            // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
-            run.rounds.push(round_facts);
-            run.exchange
-                .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
-            run.tool_round += 1;
-
-            // 2f. 轮内注入（生产里是「用户中途补充」）。挂在 2e 之后：工具交换
-            // 先接上，注入的内容排在它之后——时间序。
-            if let Some(inject) = &run.inject {
-                let injected = inject(Some(run.user_seq)).await;
-                run.exchange.extend(injected);
-            }
-            Ok(None)
+    //
+    // 这一次模型往返是**端口 `model` 的一次调用**（T-227 步 2）：协议事实
+    // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
+    let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
+        Ok(rt) => rt,
+        Err(ModelCallError::Aborted) => return aborted(run, store, llm).await.map(Some),
+        Err(ModelCallError::Failed(why)) => {
+            return failed(run, store, llm, &why).await.map(Some);
         }
-        Err(AdapterError::Aborted) => aborted(run, store, llm).await.map(Some),
-        Err(e) => failed(run, store, llm, &e.to_string()).await.map(Some),
+        Err(ModelCallError::Store(e)) => return Err(e),
+        // 控制面自身不一致（行不欠 / 端口没声明）：模型没跑成，如实当失败报。
+        Err(ModelCallError::Control(why)) => {
+            return failed(run, store, llm, &why).await.map(Some);
+        }
+    };
+    run.cost_ms += rt.cost_ms;
+    // 步号 +1：下一次模型往返换一个逻辑 id（否则第二次的 `sent` 撞第一次的幂等键）。
+    run.step += 1;
+    // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
+    // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
+    let round_facts = node_facts(&run.nodes);
+
+    // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
+    if classify_round(&rt, dispatch.is_some()) == RoundDecision::Halt {
+        return halt(run, store, llm, rt, &round_facts).await.map(Some);
     }
+
+    // 2b. 模型请求了工具 ⇒ 分发。没有分发方却收到工具调用是**配置
+    //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
+    let Some(dispatch) = dispatch else {
+        let cost = run.started.elapsed().as_millis() as u64;
+        // 调用本身是事实：没有分发通道也要记「请求过什么」。
+        run.all_tool_calls
+            .extend(rt.tool_calls.iter().map(|tc| tool_fact_of(tc, None)));
+        let produced = produced_payload(
+            &rt.text,
+            llm.model_id(),
+            &run.turn_root_id,
+            &round_facts,
+            &run.all_tool_calls,
+            &run.rounds,
+        );
+        return settle::append_fallback(
+            store,
+            &run.actor,
+            run.turn,
+            run.user_seq,
+            "模型请求了工具，但本轮没有工具分发通道",
+            cost,
+            produced,
+            run.artifacts_landed,
+        )
+        .await
+        .map(Some);
+    };
+    let outcomes = dispatch.dispatch(&rt).await;
+
+    // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
+    batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;
+
+    // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
+    //     说过的话照样是事实，等待是状态），不收束轮次。
+    if outcomes.iter().any(|o| o.needs_user_action) {
+        let produced = produced_payload(
+            &rt.text,
+            llm.model_id(),
+            &run.turn_root_id,
+            &round_facts,
+            &run.all_tool_calls,
+            &run.rounds,
+        );
+        // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
+        // 模式）：等待轮可能已落过进展格，从 0 起会撞幂等键。
+        let progress_no = run
+            .full_snapshot
+            .iter()
+            .filter(|e| e.turn == run.turn && e.kind == EVENT_ASSISTANT_PROGRESS)
+            .count() as u64;
+        store.append(
+            Event::pending(
+                format!("p-{}-{progress_no}", run.turn),
+                EVENT_ASSISTANT_PROGRESS,
+                Entity::Turn,
+                Verb::Progressed,
+                run.turn,
+                &run.actor.principal,
+            )
+            .with_produced_by(run.user_seq)
+            .with_cost_ms(run.cost_ms)
+            .with_payload(with_status(produced, "pending")),
+        )?;
+        return Ok(Some(TurnOutcome {
+            turn: run.turn,
+            text: rt.text,
+            cost_ms: run.cost_ms,
+            usage: rt.usage,
+            fell_back: false,
+            aborted: false,
+            awaits_user: true,
+            closure_denied: false,
+            // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因。
+            finish: rt.finish.clone(),
+        }));
+    }
+
+    // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
+    run.rounds.push(round_facts);
+    run.exchange
+        .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
+    run.tool_round += 1;
+
+    // 2f. 轮内注入（生产里是「用户中途补充」）。挂在 2e 之后：工具交换
+    // 先接上，注入的内容排在它之后——时间序。
+    if let Some(inject) = &run.inject {
+        let injected = inject(Some(run.user_seq)).await;
+        run.exchange.extend(injected);
+    }
+    Ok(None)
 }
 
 /// 2a 收束：答话 / 空答兜底 / 写侧闸拒。

@@ -432,9 +432,12 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.recall",
             "policy.reflex",
             "execute-turn",
-            // 端口 `turn` 的两行主模板 + 一条管所有端口的租约行（T-223）。
+            // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
+            // （T-223 的 `turn` / T-227 步 2 的 `model`）。
             "dispatch-turn",
+            "dispatch-model",
             "await-turn",
+            "await-model",
             "lease",
         ]
     );
@@ -453,6 +456,8 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
             crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Fast,
         ]
@@ -572,4 +577,76 @@ fn the_lease_row_is_one_row_for_every_port() {
     assert_eq!(leases.len(), 1);
     assert_eq!(leases[0].name, "lease");
     assert_eq!(leases[0].owes.source, "stale_sent");
+}
+
+// ── 端口 `model` 的两行（T-227 步 2）────────────────────────────────────
+//
+// 与 `turn` 的两行**同模板**（T-223 判据 1）：加一个端口 = 1 条 `PortDecl` +
+// 2 行模板 + 0 条新行。下面的用例钉住「同模板」这件事本身——模板漂了
+// （比如 `model` 的行少一个 `until` 分支），端口的账就永远关不掉。
+
+fn model_request(id: &str) -> Event {
+    ev(
+        1,
+        crate::symbio_core::EVENT_REQUEST,
+        json!({ "port": "model", "id": id, "attempt": 1 }),
+    )
+}
+
+fn model_sent(id: &str) -> Event {
+    ev_at(
+        1,
+        crate::symbio_core::EVENT_SENT,
+        json!({
+            "port": "model",
+            "id": id,
+            "attempt": 1,
+            "lease_ms": 600_000,
+            "attempt_cap": 1,
+        }),
+        0,
+    )
+}
+
+#[test]
+fn a_model_request_opens_dispatch_and_sent_closes_it() {
+    // 开账：`request` 落了、`sent` 还没落 ⇒ 欠一次模型派发。
+    let asked = vec![model_request("m-1")];
+    assert!(owes("dispatch-model", &asked, 0));
+    // 关账：引擎落 `sent` 之后不再是派发的账，变成**等**的账（`by = None` ⇒ blocked）。
+    let out = vec![model_request("m-1"), model_sent("m-1")];
+    assert!(!owes("dispatch-model", &out, 0));
+    let debts = owed(ROWS, &frozen(), &out, 0);
+    let wait = debts
+        .iter()
+        .find(|d| d.decl.name == "await-model")
+        .expect("等应答的行在");
+    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+}
+
+#[test]
+fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
+    // `failed` 关的是逻辑 id（所有尝试）：派发行与等待行同时收口。
+    let events = vec![
+        model_request("m-1"),
+        model_sent("m-1"),
+        ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({ "port": "model", "id": "m-1", "why": "boom" }),
+        ),
+    ];
+    assert!(!owes("dispatch-model", &events, 0));
+    assert!(!owes("await-model", &events, 0));
+}
+
+#[test]
+fn the_model_rows_do_not_disturb_the_turn_rows() {
+    // 两个端口的行**互不串账**：一条 `turn` 的 `request` 不让 `model` 的派发行开账。
+    let events = vec![request("t-1", 1)];
+    assert!(owes("dispatch-turn", &events, 0));
+    assert!(
+        !owes("dispatch-model", &events, 0),
+        "端口是债键的一部分：`turn` 的账不能开 `model` 的行"
+    );
 }

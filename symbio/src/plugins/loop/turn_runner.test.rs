@@ -37,6 +37,14 @@ where
         .value()
 }
 
+/// 本轮落下的**事实名序列**（协议事实在内）。
+///
+/// 把它单点成一个函数：用例断言的是**整条序列**而不是几个下标，于是新增一条
+/// 协议事实时，漏改的用例会在这里报出差异，而不是散在各处静默漂移。
+fn kinds(snapshot: &[Event]) -> Vec<&str> {
+    snapshot.iter().map(|e| e.kind.as_str()).collect()
+}
+
 impl TurnRunner {
     /// 跑一轮（测试侧）：用户消息（声明档位）→ 生成 → 收束事件落格。
     ///
@@ -210,8 +218,8 @@ mod turn_runner_tests {
 
         assert_eq!(
             store.head().value(),
-            9,
-            "3 轮 × 3 事件（用户 / 派发 / 收束）"
+            18,
+            "3 轮 × 6 事件（用户 / 派发 / 模型端口三格 / 收束）"
         );
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
@@ -227,7 +235,7 @@ mod turn_runner_tests {
             "{:?}",
             check_all(&snapshot)
         );
-        assert_eq!(snapshot.len(), 12);
+        assert_eq!(snapshot.len(), 24);
 
         // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
         let fresh = crate::symbio_core::EventStore::new();
@@ -765,25 +773,41 @@ mod turn_runner_tests {
         assert!(out.text.is_empty(), "本轮没有半截产出");
 
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 收束格：{snapshot:?}");
+        // 模型端口的协议事实落在收束格**之前**（T-227 步 2）：中止也是一次模型
+        // 往返，它同样有 `request` / `sent` / `failed` 三格——中止不是「没发生」。
+        assert_eq!(
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "failed",
+                "chat.assistant.final",
+            ],
+            "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
+        );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(
             snapshot[1].kind,
             crate::symbio_core::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
-        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
-        assert_eq!(snapshot[2].payload["status"], "aborted", "终止是状态字段");
+        let cell = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .expect("中止照落收束格");
+        assert_eq!(cell.payload["status"], "aborted", "终止是状态字段");
         assert_eq!(
-            snapshot[2].payload["reason"], "interrupted",
+            cell.payload["reason"], "interrupted",
             "停机原因入格（顶层 `reason`，闭集取值——T-220）"
         );
         assert!(
-            snapshot[2].payload["terminated"]["at"].as_i64().is_some(),
+            cell.payload["terminated"]["at"].as_i64().is_some(),
             "半截产出停在哪里由 `terminated.at` 说（原因不再在 terminated 里写第二份）"
         );
         assert!(
-            snapshot[2].payload["terminated"]["at"].as_u64().is_some(),
+            cell.payload["terminated"]["at"].as_u64().is_some(),
             "终止时刻是时间戳"
         );
         assert!(
@@ -832,9 +856,22 @@ mod turn_runner_tests {
         assert_eq!(out.text, "让我想想这个名词的含义……", "半截正文随结果带走");
 
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 收束格：{snapshot:?}");
-        let cell = &snapshot[2];
-        assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "failed",
+                "chat.assistant.final",
+            ],
+            "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
+        );
+        let cell = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .expect("收束格在");
         assert_eq!(
             cell.payload["text"], "让我想想这个名词的含义……",
             "半截正文照原样入格（不因没说完就不记）"
@@ -945,7 +982,14 @@ mod turn_runner_tests {
             snapshot.iter().all(|e| e.kind != EVENT_ASSISTANT_FALLBACK),
             "中止绝不落兜底格：{snapshot:?}"
         );
-        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL, "收束 kind 不换");
+        assert_eq!(
+            snapshot
+                .iter()
+                .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+                .map(|e| e.kind.as_str()),
+            Some("chat.assistant.final"),
+            "收束 kind 不换"
+        );
         let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
         let deep = fr.value.of("deep");
         assert_eq!((deep.turns, deep.fallbacks), (1, 0), "中止不进兜底分子");
@@ -1084,6 +1128,95 @@ mod tool_round_tests {
         Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
         EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
     };
+
+    /// 判据（T-227 步 2）：**每一次**模型往返都留下完整的协议事实——
+    /// `request` → `sent` → `response` / `failed`，且三者共享同一个逻辑 id。
+    ///
+    /// ## 它钉的是什么
+    ///
+    /// 「模型调用是可重放的最小单位」这句话的可执行形状：崩溃之后能回答
+    /// 「上次发到第几次模型请求」「那次有没有回来」，靠的就是这三格。
+    /// 少一格（引擎忘了落 `sent`、或失败不落 `failed`）就是一笔**静默挂起**的账——
+    /// 没有任何东西会变红，只有这条用例能叫出来。
+    ///
+    /// ## 为什么 id 必须互不相同
+    ///
+    /// 一次往返一个逻辑 id。撞了 id，第二次的 `sent` 会被幂等键吃掉，于是「两次
+    /// 往返」在日志里长成「一次」——重放时只能发一次，而模型确实收过两次请求。
+    #[tokio::test]
+    async fn every_model_call_leaves_a_sent_and_an_answer() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("工具轮必答");
+
+        let snapshot = store.range(Seq::new(0));
+        // 模型端口的协议事实（其余端口的债不算）。
+        let model: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.payload.get("port").and_then(|v| v.as_str()) == Some("model"))
+            .collect();
+
+        let id_of = |e: &Event| e.payload["id"].as_str().unwrap_or_default().to_string();
+        let requests: Vec<String> = model
+            .iter()
+            .filter(|e| e.kind == crate::symbio_core::EVENT_REQUEST)
+            .map(|e| id_of(e))
+            .collect();
+        let sents: Vec<String> = model
+            .iter()
+            .filter(|e| e.kind == crate::symbio_core::EVENT_SENT)
+            .map(|e| id_of(e))
+            .collect();
+        let answers: Vec<String> = model
+            .iter()
+            .filter(|e| {
+                e.kind == crate::symbio_core::EVENT_RESPONSE
+                    || e.kind == crate::symbio_core::EVENT_FAILED
+            })
+            .map(|e| id_of(e))
+            .collect();
+
+        // 工具轮 = 两次模型往返（第一次请求工具、第二次收尾）。
+        assert_eq!(requests.len(), 2, "两次模型往返 ⇒ 两条 request：{model:?}");
+        assert_eq!(
+            sents.len(),
+            2,
+            "每次派发都落 `sent`（引擎写，跑之前）：{model:?}"
+        );
+        assert_eq!(
+            answers.len(),
+            2,
+            "每次派发都有应答（`response` / `failed`）：{model:?}"
+        );
+        assert_eq!(requests, sents, "`sent` 与 `request` 同 id（同一笔账）");
+        assert_eq!(requests, answers, "应答与 `request` 同 id（同一笔账）");
+        assert_ne!(requests[0], requests[1], "两次往返两个 id（撞了就是一次）");
+        assert!(
+            model.iter().all(|e| e.turn == 0),
+            "模型端口的事实记在**本轮**上（不是全局）：{model:?}"
+        );
+        assert!(
+            model.iter().all(|e| e.produced_by == Some(0)),
+            "协议事实带溯源（本轮用户格）：{model:?}"
+        );
+    }
 
     /// 注入的消息必须**进本轮的下一次请求**。
     ///
@@ -1900,9 +2033,25 @@ mod tool_round_tests {
             "角色序列里要有 tool（角色序列）：{roles:?}"
         );
 
-        // 网格：用户格 + 派发格 + 产物格 + final 格（final 只一条——N3）。
+        // 网格：用户格 + 派发格 + **每次模型往返三格** + 产物格 + final 格
+        // （final 只一条——N3）。
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 4, "{snapshot:?}");
+        assert_eq!(
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "response",
+                "artifact.added",
+                "request",
+                "sent",
+                "response",
+                "chat.assistant.final",
+            ],
+            "{snapshot:?}"
+        );
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -1914,18 +2063,24 @@ mod tool_round_tests {
             crate::symbio_core::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
-        assert_eq!(snapshot[2].kind, EVENT_ARTIFACT_ADDED);
-        assert_eq!(snapshot[2].entity, Entity::Artifact);
-        assert_eq!(snapshot[2].verb, Verb::Asserted);
-        assert_eq!(snapshot[2].payload["tool"], "vdfs_read");
-        assert_eq!(snapshot[2].payload["text"], "文件内容：hello");
+        let artifact = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ARTIFACT_ADDED)
+            .expect("产物格在");
+        assert_eq!(artifact.entity, Entity::Artifact);
+        assert_eq!(artifact.verb, Verb::Asserted);
+        assert_eq!(artifact.payload["tool"], "vdfs_read");
+        assert_eq!(artifact.payload["text"], "文件内容：hello");
         assert_eq!(
-            snapshot[2].produced_by,
+            artifact.produced_by,
             Some(0),
             "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
         );
-        assert_eq!(snapshot[3].kind, EVENT_ASSISTANT_FINAL);
-        assert_eq!(snapshot[3].payload["text"], "读到了。");
+        let cell = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .expect("收束格在");
+        assert_eq!(cell.payload["text"], "读到了。");
     }
 
     /// 收束于等待用户：运行器停下并落**进展格**（`chat.assistant.progress`，
@@ -1965,14 +2120,27 @@ mod tool_round_tests {
 
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
-            snapshot.len(),
-            4,
-            "用户格 + 派发格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "response",
+                "artifact.added",
+                "chat.assistant.progress",
+            ],
+            "用户格 + 派发格 + 模型端口三格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
-        assert_eq!(snapshot[2].kind, EVENT_ARTIFACT_ADDED);
-        let progress = &snapshot[3];
-        assert_eq!(progress.kind, EVENT_ASSISTANT_PROGRESS);
+        assert!(
+            snapshot.iter().any(|e| e.kind == EVENT_ARTIFACT_ADDED),
+            "产物格在"
+        );
+        let progress = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_PROGRESS)
+            .expect("进展格在");
         assert_eq!(progress.entity, Entity::Turn);
         assert_eq!(progress.verb, Verb::Progressed);
         assert_eq!(progress.payload["status"], "pending", "等待是状态字段");
@@ -2028,10 +2196,23 @@ mod tool_round_tests {
             out.text
         );
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 兜底格：{snapshot:?}");
         assert_eq!(
-            snapshot[2].kind,
-            crate::symbio_core::EVENT_ASSISTANT_FALLBACK
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "response",
+                "chat.assistant.fallback",
+            ],
+            "用户格 + 派发格 + 模型端口三格 + 兜底格：{snapshot:?}"
+        );
+        assert!(
+            snapshot
+                .iter()
+                .any(|e| e.kind == crate::symbio_core::EVENT_ASSISTANT_FALLBACK),
+            "兜底格在"
         );
     }
 
@@ -2248,13 +2429,19 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
+                "request",
+                "sent",
+                "response",
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_PROGRESS,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
                 EVENT_ARTIFACT_ADDED,
+                "request",
+                "sent",
+                "response",
                 EVENT_ASSISTANT_FINAL
             ],
-            "续写**不重开用户格**（否则 8 格），只补派发格、产物格与收束格：{snapshot:?}"
+            "续写**不重开用户格**（否则 14 格），只补派发格、产物格与收束格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
@@ -2264,18 +2451,30 @@ mod tool_round_tests {
             1,
             "同一句话在网格里只能出现一次"
         );
+        // 恢复的产物格 = **最后一条** `artifact.added`（前一条是等待轮那次未批准的）。
+        let resumed_artifact = snapshot
+            .iter()
+            .rfind(|e| e.kind == EVENT_ARTIFACT_ADDED)
+            .expect("恢复的产物格在");
         assert_eq!(
-            snapshot[5].payload["tool"], "vdfs_read",
+            resumed_artifact.payload["tool"], "vdfs_read",
             "恢复的产物格记被恢复的工具"
         );
-        assert_eq!(snapshot[5].payload["text"], "文件内容：hello（已批准）");
         assert_eq!(
-            snapshot[5].produced_by,
+            resumed_artifact.payload["text"],
+            "文件内容：hello（已批准）"
+        );
+        assert_eq!(
+            resumed_artifact.produced_by,
             Some(0),
             "溯源仍指向**原轮**用户格（I2）"
         );
-        assert_eq!(snapshot[6].turn, 0, "收束格记在原轮号上");
-        assert_eq!(snapshot[6].payload["text"], "批准后已完成。");
+        let cell = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .expect("收束格在");
+        assert_eq!(cell.turn, 0, "收束格记在原轮号上");
+        assert_eq!(cell.payload["text"], "批准后已完成。");
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -2535,11 +2734,21 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
+                // 三次模型往返 = 三组协议事实（request / sent / response）。
+                "request",
+                "sent",
+                "response",
                 EVENT_ARTIFACT_ADDED,
+                "request",
+                "sent",
+                "response",
                 EVENT_ARTIFACT_ADDED,
+                "request",
+                "sent",
+                "response",
                 EVENT_ASSISTANT_FINAL
             ],
-            "两轮产物 + 一轮收束（外加派发格）：{snapshot:?}"
+            "两轮产物 + 一轮收束（外加派发格与三次模型往返的协议事实）：{snapshot:?}"
         );
         // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
         //
