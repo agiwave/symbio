@@ -10,6 +10,30 @@
 
 use super::*;
 
+/// 「执行层没跑到」的两个成因——**结果节点的 `meta.failure_kind` 与端口的
+/// `failed{why}` 用同一份词表**（写方只有 [`close_unfinished`] 一处）。
+pub const ABORTED: &str = "aborted";
+pub const NOT_EXECUTED: &str = "not_executed";
+
+/// 这条 `failure_kind` 是不是「没跑到」的占位（端口关账读它）。
+///
+/// ## 为什么端口要看节点上的成因
+///
+/// 「这次调用到底有没有执行」只在收口那一刻显形——[`close_unfinished`] 数的就是
+/// 「本批没定稿父节点的那几笔」，而它把成因写在结果节点的 `meta.failure_kind` 上。
+/// 占位结果是**框架的交代**（给模型一句话、给前端一张卡），不是工具的应答：
+/// 端口若按「`outcomes` 里有这个 id 就算应答」关账，中止的调用会落成 `response`——
+/// 日志说「回来了」，而它从未执行，`await-tools` 的 `failed` 出口于是只有 resume
+/// 一条路径走过（PL-017 判据 6 的「中止唤醒」在事实面上等于没接）。
+///
+/// 反过来，工具**跑完而失败**（`error` / `overflow_dropped` / 闸门拒绝的
+/// `refusal.kind`）是应答：工具确实回了话，关账仍落 `response`。
+///
+/// 可见性 `pub`：跨域取用经 `tools` 的门面（`tool_dispatch` 是编排层，不深潜本子模块）。
+pub fn is_unanswered(failure_kind: &str) -> bool {
+    failure_kind == ABORTED || failure_kind == NOT_EXECUTED
+}
+
 /// 「工具调用未执行」的**结果子节点**——与 [`apply_not_executed`](super::super::tool_executor::apply_not_executed) 成对使用。
 ///
 /// ## 为什么父节点补丁不够（本函数存在的全部理由）
@@ -34,11 +58,12 @@ use super::*;
 /// `get_context_messages` 当失败处理，且前端会在结果节点上再渲染一条 ⚠ 错误条，
 /// 而父节点的交代由 `meta.failure_kind` 承载。
 pub(super) fn not_executed_result(tool_call_id: &str, reason: &str, tool_name: &str) -> ChatNode {
-    let text = match reason {
-        "aborted" => "本次调用已中止（用户终止），未执行，未产生结果。".to_string(),
-        _ => "本次调用未执行：同一批中排在它之前的工具未正常结束（失败或需要用户处理），\
+    let text = if reason == ABORTED {
+        "本次调用已中止（用户终止），未执行，未产生结果。".to_string()
+    } else {
+        "本次调用未执行：同一批中排在它之前的工具未正常结束（失败或需要用户处理），\
               同批剩余调用被一并跳过。需要时请重新发起这一次调用。"
-            .to_string(),
+            .to_string()
     };
     let mut msg = llm_build_tool_message(tool_call_id, &text, Some(false), None, Some(tool_name));
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
@@ -82,9 +107,9 @@ pub(crate) async fn close_unfinished(
         // `not_executed`（批被用户中止，收口却报「同批前序未结束」）——
         // 成因被谎报，事后排查就得靠猜。中止即 `aborted`，其余才是批跳过。
         let reason = if abort.is_aborted() {
-            "aborted"
+            ABORTED
         } else {
-            "not_executed"
+            NOT_EXECUTED
         };
         let result_msg = not_executed_result(id, reason, name);
         llm_emit_message(sink, result_msg.clone()).await;

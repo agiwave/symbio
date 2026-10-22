@@ -30,4 +30,5 @@ mod dispatch;
 mod tool_executor;
 mod tool_result_guard;
 
+pub use self::dispatch::unfinished::{is_unanswered, ABORTED, NOT_EXECUTED};
 pub use self::tool_executor::{apply_not_executed, execute_tool_async, process_tool_calls_async};

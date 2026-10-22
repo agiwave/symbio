@@ -55,7 +55,9 @@ use crate::symbio_core::{
 
 use super::loop_rows;
 use super::port;
-use super::tools::{execute_tool_async, process_tool_calls_async};
+use super::tools::{
+    execute_tool_async, is_unanswered, process_tool_calls_async, ABORTED, NOT_EXECUTED,
+};
 use super::turn_exec::UiBridge;
 use crate::symbio_core::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
@@ -597,16 +599,29 @@ impl ToolPort {
         one.into_iter().next()
     }
 
-    /// 批次返回后关账：放行的每一笔都必须有 `response`（有结果）或 `failed`
+    /// 批次返回后关账：放行的每一笔都必须有 `response`（工具回了话）或 `failed`
     /// （执行层没跑到它）。拒绝的那几笔已经由 `authz.denied` 关掉，不在这里补。
+    ///
+    /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
+    /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
+    /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
+    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[ADR-121](../../../../docs/010-adr/121.md "ADR-121")
+    /// 的中止作用、PL-017 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
+    /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
         for call in calls.iter().filter(|c| c.granted && c.sent) {
-            let answered = outcomes.iter().any(|o| o.call_id == call.model_id);
-            self.close(call, answered);
+            match outcomes.iter().find(|o| o.call_id == call.model_id) {
+                Some(o) if is_unanswered(&o.failure_kind) => self.fail(call, &o.failure_kind),
+                Some(_) => self.close(call, true),
+                None => self.close(call, false),
+            }
         }
     }
 
     /// 单笔关账（resume 用）：执行体已经给出成败。
+    ///
+    /// `answered = false` 同样是「执行层没跑到」，词表与批尾收口共用
+    /// [`NOT_EXECUTED`]。
     pub(crate) fn close(&self, call: &ToolPortCall, answered: bool) {
         if answered {
             if let Err(e) = port::succeed(self.facts.as_ref(), &call.call, self.turn, self.user_seq)
@@ -619,11 +634,14 @@ impl ToolPort {
                 );
             }
         } else {
-            self.fail(call, "not_executed");
+            self.fail(call, NOT_EXECUTED);
         }
     }
 
-    /// 单笔失败关账（resume 的中止路径用）：落 `failed{why}`，与「没执行」区分。
+    /// 单笔失败关账：落 `failed{why}`，与「应答」区分。
+    ///
+    /// 两个调用方：批尾关账（[`Self::close_batch`]，`why` 取结果节点的成因）与
+    /// resume 的中止路径（`why = ABORTED`）。
     pub(crate) fn fail(&self, call: &ToolPortCall, why: &str) {
         if !call.granted {
             return;
@@ -678,10 +696,14 @@ pub(crate) async fn execute_single_tool(
     )
     .await;
     if let Some(call) = open.as_ref() {
+        // 执行层**跑过了**就是应答——工具回了话，哪怕回的是错误（`success = false`
+        // 只说明内容，不说明没执行）。把它落成 `failed{not_executed}` 等于在日志里
+        // 说「这一笔没跑到」，与批尾收口那几条真没跑到的混在一起，事后无从分辨。
+        // 只有中止才是「没跑到」，与 `close_unfinished` 同一词表。
         if abort.is_aborted() {
-            port.fail(call, "aborted");
+            port.fail(call, ABORTED);
         } else {
-            port.close(call, success);
+            port.close(call, true);
         }
     }
     (res, success)
@@ -1056,3 +1078,7 @@ impl ToolDispatch for SessionDispatchPort {
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::take_produced: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::take_derived: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::dispatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+
+#[cfg(test)]
+#[path = "tool_dispatch.test.rs"]
+mod tests;

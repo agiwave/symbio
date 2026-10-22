@@ -9,7 +9,7 @@ parent: T-236-义务环符合性收口批
 prio: next
 deps: [T-240-唤醒事件时间戳取代墙钟]
 where: symbio/src/plugins/loop/resume.rs · symbio/src/plugins/loop/turn_exec.rs · symbio/src/plugins/loop/loop_rows.rs · symbio/src/symbio_core/decl/
-exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落一条唤醒事实，其**行语义按 [ADR-121](../010-adr/121.md) 定案**（审批与补充重新开账、中止落 `failed{why:"aborted"}`，不改 `await` 行的 `until`）；`resume.rs` 承担的恢复 / 审批 / 问答三条旁路逐条迁进行表后整文件退役（`turn_exec.rs:846,858` 的 `resumed` 旁路与 `loop_rows.rs:138` 的 `resume_anchor` 一并消失）；`close-turn` 收束行进表（PL-017 §3.1：owes `turn.has_final ∧ ¬closed`，until 两条收束格，by `closer`；`has_final` 的日志口径由 ADR-121 给定），收束不再只靠执行体内联；`resumed` 与续写幕两处「跳过无债守卫」的特例由行表语义接管或有名有姓留档；唤醒接好后 `tool` 端口 `max_attempts > 1`（PL-016 §2.3 行 C：重试由「有没有活着的等待方」决定，本任务即解锁条件）且 retry 用例使用真实 `PortDecl`；全量门禁与 e2e 绿。'
+exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落一条唤醒事实，其**行语义按 [ADR-121](../010-adr/121.md) 定案**（审批与补充重新开账、中止落 `failed{why:"aborted"}`，不改 `await` 行的 `until`）；`resume.rs` 承担的恢复 / 审批 / 问答三条旁路逐条迁进行表后整文件退役（`turn_exec.rs:846,858` 的 `resumed` 旁路与 `loop_rows.rs:138` 的 `resume_anchor` 一并消失）；`close-turn` 收束行进表（PL-017 §3.1：owes `turn.has_final ∧ ¬closed`，until 两条收束格，by `closer`；`has_final` 的日志口径由 ADR-121 给定），收束不再只靠执行体内联；`resumed` 与续写幕两处「跳过无债守卫」的特例由行表语义接管或有名有姓留档；`authorize-tool` / `dispatch-tools` 接回执行体之后才可以抬（口径 4：那之前放宽只会造出永不派发的 `request`）且 retry 用例使用真实 `PortDecl`；全量门禁与 e2e 绿。'
 ---
 
 ## 内容
@@ -35,6 +35,10 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
 4. `tool` 端口 `max_attempts > 1` 且 retry 用例使用真实 `PortDecl`（非 `port.test.rs`
    里合成的 `RETRYING`）——销「重试路径只有合成覆盖」；`turn` / `model` 保持 1
    （PL-016 §2.3：等待方随进程消失 ⇒ 到顶即判死，不许顺手放宽）。
+   **前半按 2026-10-23 对账推迟**（见处理过程）：`max_attempts > 1` 的解锁条件不是
+   「有活着的等待方」这一条，而是 `authorize-tool` / `dispatch-tools` 两行接回执行体——
+   接回前放宽只会造出永不派发的 `request`。本口径拆成两半：retry 用例改用真实
+   `PortDecl`（现在做），放宽上限随步 5 的接线一起做。
 5. CLI 复验：一条**审批卡中断 → 唤醒 → 续跑**的实测会话（重启进程后再放行），
    加上常规两幕；`obligation-ring-accept --strict` 全项通过 + 门禁 + e2e 全绿。
 6. 熔断线：本任务按步 4 / 步 5 分提交，每批非注释生产代码 ≤ 300 行（PL-016 §5）。
@@ -49,3 +53,27 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   两条都在 [ADR-121](../010-adr/121.md "ADR-121") 定案（唤醒按来源分「重新开账 / 协议格收清」两种作用；
   `has_final` = 本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 未收束），
   本任务的验收口径与 `exit` 按裁决订正三处，未动模块。
+- 2026-10-23 步 4 第一批（场景三：中止落协议格）。施工前对账抓到两处「事实面说假话」：
+  ① `tool_dispatch.rs` 的 `ToolPort::close_batch` 原来按
+  「`outcomes` 里有这个 id 就算应答」关账，而批尾收口给**没跑到**的调用补的占位结果
+  也在 `outcomes` 里 ⇒ 中止的调用落成 `response`，`await-tools` 的 `failed` 出口只有
+  resume 一条路走过——判据 6 的第三场景在事实面上等于没接（行级用例
+  `loop_rows.test.rs` 早已存在，但生产从不产出那种载荷）。现在词表同源：节点侧
+  `meta.failure_kind` 的两个成因（`ABORTED` / `NOT_EXECUTED`）由 `tools` 门面交出，
+  端口关账用 `is_unanswered` 判「有没有跑到」。② 同一条判据的另一半：resume 重跑的
+  工具只要 `success = false` 就落 `failed{not_executed}`，等于在日志里说「这一笔没跑到」，
+  而它执行过——改成「执行层跑过了就是应答」，只有中止才是没跑到。
+  用例：`tool_dispatch.test.rs` 六条（三条正向 + 两条反向钉「跑完而失败 / 交回审批卡
+  仍是应答」+ 一条边界钉「没放行的调用不补记」）。反向判据实测：把 `close_batch` 退回
+  `answered = outcomes.iter().any(...)` ⇒ `an_aborted_call_closes_as_failed_not_as_an_answer`
+  与 `a_skipped_call_closes_as_not_executed` 转红。`cargo test --lib` 2072 通过 / 0 失败，
+  `clippy --all-targets -D warnings` 干净。
+- 2026-10-23 口径 4 对账（前半推迟，理由进验收口径）：`reap` 重试时落的是
+  `retry{attempt}` + `request{attempt+1}`（`port.rs:439-459`），而 `dispatch-tools` 的
+  `owes` 读 `authz.granted(port=tool)`（`loop_rows.rs:220` 那段注释记录了为什么不是
+  `request`）、`authorize-tool` 与 `dispatch-tools` 两行此刻都是 `by: None`（判定住在
+  批次内部，不经派发器选债）。⇒ 今天把 `tool` 的 `max_attempts` 抬到 2，租约看护重试
+  出来的那笔 `request` 举得起授权债却**没有任何执行体会去判它、派它**，正撞
+  [PL-016](../004-plan/016-义务环.md "PL-016-义务环") §2.3 禁止的「永不派发的 request」。
+  解锁条件是这两行接回执行体（本任务步 5 退役 `resume.rs` 时必须做——审批续跑要有人派），
+  不是「唤醒事实接上了」；原判据把解锁条件写窄了，已按实测订正。
