@@ -324,25 +324,35 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
 fn the_lease_retries_while_the_port_has_attempts_left() {
     // 判据 7（重试一侧）：有活着的等待方的端口（`max_attempts > 1`）重试，
     // 落 `retry{attempt}` + `request{attempt+1}`；旧尝试由 `retry` 收清。
-    const RETRYING: &[PortDecl] = &[PortDecl {
-        port: "turn",
-        before: crate::symbio_core::EVENT_SENT,
-        lease_ms: 1_000,
-        max_attempts: 3,
-        concurrent: false,
-    }];
+    //
+    // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
+    // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
+    // 一套，真表漂了用例照样绿，而生产里那条重试路径没人走过（T-244 口径 4）。
+    let retrying: Vec<PortDecl> = PORTS
+        .iter()
+        .map(|p| PortDecl {
+            max_attempts: if p.port == "turn" { 3 } else { p.max_attempts },
+            ..*p
+        })
+        .collect();
+    let turn = retrying
+        .iter()
+        .find(|p| p.port == "turn")
+        .expect("真表里有 `turn` 端口");
     let store = boot();
-    stranded(&store, "turn-9-r0", 1, 1_000, 3);
+    // 在途格的租约 / 尝试上限与判定用的 `now` 都从**同一份真表**推出来：
+    // 换端口声明不必再改这里的数字，改了数字也不会让用例假绿。
+    stranded(&store, "turn-9-r0", 1, turn.lease_ms, turn.max_attempts);
     let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     let out = reap(
         &store,
         &frozen,
-        RETRYING,
+        &retrying,
         &store.range(Seq::new(0)),
         1,
         1,
-        1_000,
+        turn.lease_ms as i64 + 1,
     )
     .unwrap();
     assert_eq!(
@@ -355,6 +365,21 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     assert_eq!(kinds(&store), vec!["sent", "retry", "request"]);
     assert_eq!(payload_of(&store, "retry")["attempt"], json!(1));
     assert_eq!(payload_of(&store, "request")["attempt"], json!(2));
+}
+
+#[test]
+fn no_port_in_the_real_table_retries_today() {
+    // 上面那条用例改写的只有 `max_attempts` 一格，这里钉住**真表此刻的取值**：
+    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达（等待方随进程消失，到顶即判死，
+    // PL-016 §2.3）。抬上限不是顺手能做的事：`authorize-tool` / `dispatch-tools`
+    // 两行还没接回执行体，重试出来的那笔 `request` 举得起授权债却没有任何执行体
+    // 去判它、派它（T-244 口径 4 的解锁条件）。这一条转红 = 有人抬了上限，
+    // 那时重试路径必须已经有真实覆盖，而不是继续靠合成声明。
+    let caps: Vec<(&str, u64)> = PORTS.iter().map(|p| (p.port, p.max_attempts)).collect();
+    assert!(
+        caps.iter().all(|(_, n)| *n == 1),
+        "有端口抬了 `max_attempts`：{caps:?}（先确认重试出来的 `request` 有执行体会派它）"
+    );
 }
 
 #[test]

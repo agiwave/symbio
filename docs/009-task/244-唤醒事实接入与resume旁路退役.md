@@ -127,3 +127,12 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   收束第一次是**行表派发的**，不是执行体内联的。`obligation-ring-accept --strict` 的
   J1…J7 全项通过；J8 仍报 `HTTP 2 ≠ sent(model) 2 + 豁免未入账 1`，差额是 classify 短路轮
   在插件内部打的那次模型往返，与本批无关，归 [T-247](247-插件内部模型往返进环.md "T-247-插件内部模型往返进环")。
+- 2026-10-23 步 5 第二批（口径 4 前半：retry 用例改吃真实 `PortDecl`）。
+  `the_lease_retries_while_the_port_has_attempts_left` 原来带一条独立的合成声明
+  （`port` / `before` / `lease_ms` / `max_attempts` 四格自填），真表漂了用例照样绿——
+  「重试路径只有合成覆盖」就是这个形状。现在由 `loop_rows::PORTS` map 出来，只覆盖
+  `max_attempts` 一格，`stranded` 写的租约与判定用的 `now` 也从同一份真表推。
+  补一条钉住真表此刻取值的用例 `no_port_in_the_real_table_retries_today`（三端口全 1
+  ⇒ 生产里重试分支不可达），反向判据实测：把 `turn` 的上限抬到 2 ⇒ 它转红并指名
+  `[("turn", 2), ("model", 1), ("tool", 1)]` 与「先确认重试出来的 `request` 有执行体会派它」。
+  抬上限本身仍随步 5 的接线一起做（口径 4 后半未动）。
