@@ -15,18 +15,13 @@ mod capability;
 mod chat;
 mod clock;
 mod creator;
-// 事实 / 视图声明层（T-221）：字段清单与视图读法在装载期可查。按任务范围
-// **不接控制面**，T-222b 接线之前没有生产消费方；与 `stage_events::done` 同一形态，
-// 如实标 `cfg(test)`，不给死代码闸门开豁免。T-222a 起 `pub(crate)`：义务环的
-// 行表（`plugins::loop::loop_rows`，同样 `cfg(test)`）要用它做对拍。
-#[cfg(test)]
+// 事实 / 视图声明层（T-221）：字段清单与视图读法在装载期可查。T-222b 起是
+// 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
-// 义务环（T-222a）：求解在 core（`decl::ring`），行表是部署事实、住插件。整模块出根
+// 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。整模块出根
 // 到 `pub(crate)`（C-003 只数 `pub use`）：避开与 `actors::Pattern` 重名，插件只经根
 // 路径取用（C-002 禁深引域目录）。
-#[cfg(test)]
 pub(crate) use decl::ring;
-#[cfg(test)]
 pub(crate) use decl::{builtin, Frozen};
 mod dialog;
 mod embedding;

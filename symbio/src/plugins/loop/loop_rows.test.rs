@@ -1,19 +1,16 @@
-//! 行表与旧控制面的**逐行对拍**（T-222 判据 7 / 10）。
+//! 行表的判据（T-222 判据 7 / 10）。
 //!
-//! 每个用例都从同一份日志切片出发：旧 `Registry::decide` 拿 `LoopState` 判，新
-//! `owed` 拿视图判。**只差一个条件**的用例是主菜——只验「全满足时命中」在
-//! 「恒返回 Some」的实现下也通过。
+//! 每个用例都从同一份日志切片出发，只改**一个**条件：只验「全满足时命中」在
+//! 「恒返回 true」的实现下也通过。接线之后旧 `LoopState` 已不存在，这里对的是
+//! 声明本身——每一行的 `owes` / `until` 与它读的视图字段。
 //!
-//! 对拍的边界写在 `loop_rows` 模块头：汇报的 `round > 0 ∧ 工具轮数 ≥ min_rounds`
-//! 是触发点的前提（日志里没有当前工具轮数那一格），本文件对的是「静默 + 配额」
-//! 这一段；执行行是 T-222 的临时形态。
+//! 汇报的 `round > 0 ∧ 工具轮数 ≥ min_rounds` 是触发点的前提（日志里没有当前
+//! 工具轮数那一格），本文件对的是「静默 + 配额」这一段；执行行是 T-222 的临时形态。
 
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::super::chat_loop::ProgressPolicy;
-use super::super::loop_registry::{builtin, LoopState};
 use super::ROWS;
 use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap};
 use crate::symbio_core::{builtin as declarations, Frozen};
@@ -49,10 +46,6 @@ fn owes(name: &str, events: &[Event], now: i64) -> bool {
         .any(|d| d.decl.name == name && !d.blocked)
 }
 
-fn old(state: &LoopState) -> Option<&'static str> {
-    builtin().decide(state).hit().map(|h| h.capsule.name())
-}
-
 fn copy(decl: &Decl) -> Decl {
     Decl {
         name: decl.name,
@@ -65,7 +58,7 @@ fn copy(decl: &Decl) -> Decl {
     }
 }
 
-/// 只开判决、其余策略关掉的配置。
+/// 全部策略关掉的配置。
 fn plain() -> Value {
     json!({
         "classify_enabled": false,
@@ -78,10 +71,10 @@ fn plain() -> Value {
     })
 }
 
-// ── 五条策略行逐条对拍 ───────────────────────────────────────────────────
+// ── 五条策略行逐条判据 ───────────────────────────────────────────────────
 
 #[test]
-fn classify_row_matches_policy_classify() {
+fn classify_row_owes_only_at_turn_head() {
     let open = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -91,10 +84,6 @@ fn classify_row_matches_policy_classify() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(
-        old(&LoopState::turn_head(0, true, true, false)),
-        Some("decide")
-    );
     assert!(owes("policy.classify", &open, 0));
 
     // 没有发言（用户格 `id: null`）。
@@ -107,7 +96,6 @@ fn classify_row_matches_policy_classify() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(old(&LoopState::turn_head(0, false, true, false)), None);
     assert!(!owes("policy.classify", &silent, 0));
 
     // 开关关掉。
@@ -120,7 +108,6 @@ fn classify_row_matches_policy_classify() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(old(&LoopState::turn_head(0, true, false, false)), None);
     assert!(!owes("policy.classify", &off, 0));
 
     // 不是轮首。
@@ -133,18 +120,16 @@ fn classify_row_matches_policy_classify() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
     ];
-    assert_eq!(old(&LoopState::turn_head(1, true, true, false)), None);
     assert!(!owes("policy.classify", &later, 0));
 
     // 已经判过。
     let mut done = open.clone();
     done.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
-    assert_eq!(old(&LoopState::turn_head(0, true, true, true)), None);
     assert!(!owes("policy.classify", &done, 0));
 }
 
 #[test]
-fn compress_row_matches_policy_compress() {
+fn compress_row_owes_while_switch_is_on_and_not_done() {
     let on = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -154,7 +139,6 @@ fn compress_row_matches_policy_compress() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(old(&LoopState::compress(true, false)), Some("compress"));
     assert!(owes("policy.compress", &on, 0));
 
     let off = vec![
@@ -166,7 +150,6 @@ fn compress_row_matches_policy_compress() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(old(&LoopState::compress(false, false)), None);
     assert!(!owes("policy.compress", &off, 0));
 
     let mut done = on.clone();
@@ -175,12 +158,11 @@ fn compress_row_matches_policy_compress() {
         "turn.stage",
         json!({"stage": "compress", "round": 0}),
     ));
-    assert_eq!(old(&LoopState::compress(true, true)), None);
     assert!(!owes("policy.compress", &done, 0));
 }
 
 #[test]
-fn recall_row_matches_policy_recall() {
+fn recall_row_owes_only_at_turn_head_with_a_persistent_store() {
     let ready = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -190,10 +172,6 @@ fn recall_row_matches_policy_recall() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(
-        old(&LoopState::turn_prepare(0, true, false)),
-        Some("recall")
-    );
     assert!(owes("policy.recall", &ready, 0));
 
     // 临时会话：没有事实源。
@@ -206,7 +184,6 @@ fn recall_row_matches_policy_recall() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    assert_eq!(old(&LoopState::turn_prepare(0, false, false)), None);
     assert!(!owes("policy.recall", &transient, 0));
 
     let mut done = ready.clone();
@@ -215,7 +192,6 @@ fn recall_row_matches_policy_recall() {
         "turn.stage",
         json!({"stage": "recall", "round": 0, "result": "miss"}),
     ));
-    assert_eq!(old(&LoopState::turn_prepare(0, true, true)), None);
     assert!(!owes("policy.recall", &done, 0));
 
     // 不是轮首。
@@ -228,12 +204,11 @@ fn recall_row_matches_policy_recall() {
         ),
         ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
     ];
-    assert_eq!(old(&LoopState::turn_prepare(1, true, false)), None);
     assert!(!owes("policy.recall", &later, 0));
 }
 
 #[test]
-fn reflex_row_matches_policy_reflex() {
+fn reflex_row_owes_on_a_recall_hit_outside_resume() {
     let hit = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -248,7 +223,6 @@ fn reflex_row_matches_policy_reflex() {
             json!({"stage": "recall", "round": 0, "result": "hit"}),
         ),
     ];
-    assert_eq!(old(&LoopState::reflex(true, true)), Some("reflex"));
     assert!(owes("policy.reflex", &hit, 0));
 
     // 召回没命中。
@@ -266,7 +240,6 @@ fn reflex_row_matches_policy_reflex() {
             json!({"stage": "recall", "round": 0, "result": "miss"}),
         ),
     ];
-    assert_eq!(old(&LoopState::reflex(true, false)), None);
     assert!(!owes("policy.reflex", &miss, 0));
 
     // 续写幕：同一轮号、恢复格成为新幕锚 ⇒ 召回命中也不走快路。
@@ -282,21 +255,16 @@ fn reflex_row_matches_policy_reflex() {
         json!({"classify_enabled": false, "is_persistent": true}),
     ));
     resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 0})));
-    assert_eq!(old(&LoopState::reflex(false, true)), None);
     assert!(!owes("policy.reflex", &resumed, 0));
-}
 
-fn policy(interval_ms: i64, max_per_turn: u32) -> ProgressPolicy {
-    ProgressPolicy {
-        enabled: true,
-        interval_ms,
-        min_rounds: 0,
-        max_per_turn,
-    }
+    // 收束后关账。
+    let mut closed = hit.clone();
+    closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
+    assert!(!owes("policy.reflex", &closed, 0));
 }
 
 #[test]
-fn report_row_matches_policy_report_on_the_loggable_part() {
+fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     let quiet = vec![
         ev_at(
             1,
@@ -304,19 +272,19 @@ fn report_row_matches_policy_report_on_the_loggable_part() {
             json!({
                 "progress_enabled": true,
                 "progress_interval_ms": 1000,
+                "progress_min_rounds": 0,
                 "progress_max_per_turn": 2,
             }),
             10,
         ),
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
     ];
-    assert_eq!(
-        old(&LoopState::round_boundary(3, 60_000, 0, policy(1000, 2))),
-        Some("report")
-    );
     assert!(owes("policy.report", &quiet, 60_000));
 
-    // 刚说过一句：旧侧静默归零，新侧静默锚前移。
+    // 静默不够久。
+    assert!(!owes("policy.report", &quiet, 500));
+
+    // 刚说过一句：静默锚前移到那句。
     let mut spoke = quiet.clone();
     spoke.push(ev_at(
         1,
@@ -324,10 +292,6 @@ fn report_row_matches_policy_report_on_the_loggable_part() {
         json!({"text": "先报一句"}),
         60_000,
     ));
-    assert_eq!(
-        old(&LoopState::round_boundary(3, 0, 1, policy(1000, 2))),
-        None
-    );
     assert!(!owes("policy.report", &spoke, 60_000));
 
     // 配额用完。
@@ -344,10 +308,6 @@ fn report_row_matches_policy_report_on_the_loggable_part() {
         json!({"text": "二"}),
         200,
     ));
-    assert_eq!(
-        old(&LoopState::round_boundary(3, 60_000, 2, policy(1000, 2))),
-        None
-    );
     assert!(!owes("policy.report", &exhausted, 60_000));
 
     // 开关关掉。
@@ -358,23 +318,16 @@ fn report_row_matches_policy_report_on_the_loggable_part() {
             json!({
                 "progress_enabled": false,
                 "progress_interval_ms": 1000,
+                "progress_min_rounds": 0,
                 "progress_max_per_turn": 2,
             }),
             10,
         ),
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
     ];
-    let disabled = ProgressPolicy {
-        enabled: false,
-        ..policy(1000, 2)
-    };
-    assert_eq!(
-        old(&LoopState::round_boundary(3, 60_000, 0, disabled)),
-        None
-    );
     assert!(!owes("policy.report", &off, 60_000));
 
-    // 续写幕：旧侧配额随请求复位；新侧按幕锚重新数。
+    // 续写幕：配额随幕重新开账，首幕报过不影响本幕。
     let mut resumed = exhausted.clone();
     resumed.push(ev_at(
         1,
@@ -388,14 +341,11 @@ fn report_row_matches_policy_report_on_the_loggable_part() {
         json!({
             "progress_enabled": true,
             "progress_interval_ms": 1000,
+            "progress_min_rounds": 0,
             "progress_max_per_turn": 2,
         }),
         3_001,
     ));
-    assert_eq!(
-        old(&LoopState::round_boundary(1, 2_000, 0, policy(1000, 2))),
-        Some("report")
-    );
     assert!(owes("policy.report", &resumed, 5_000));
 }
 

@@ -7,7 +7,6 @@
 //! `resume.rs` 经 `chat_loop::X` 引用）故为 `pub`；其余为 `pub(super)`——
 //! 只在 `chat_loop` 及其子模块内可见。
 
-use super::progress::ProgressPolicy;
 use super::*;
 use crate::symbio_core::chat_node::CHAT_STYLE_TAG_REASONING;
 use crate::symbio_core::PluginError;
@@ -172,16 +171,6 @@ pub(crate) struct TurnState {
     pub(crate) continuation_count: u32,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
     pub(crate) last_saved: usize,
-    /// **对话线上最近一次动静**的时刻（毫秒）——轮边界汇报静默时钟的**种子**。
-    ///
-    /// 两个来源都算一次"动静"：用户发言（轮首入列的那句）与助手写下
-    /// 一句面向用户的话（首响 / 答话）。轮内判定的全部内容是
-    /// "距上次动静够久了吗"（见 `progress.rs`）。
-    ///
-    /// 轮内的那份时钟归 `RoundProgress`（它在轮边界回调里自己持有并归零），本格只
-    /// 负责把**请求开始时**的时刻递过去：`run_chat_loop` 构造 [`TurnState`] 时取一次
-    /// 当前时刻，轮首说了话就更新，`turn_exec` 装配 `on_round` 时读一次。
-    pub(crate) last_user_facing_at: i64,
     /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
     ///
     /// 锚定而不现取，是因为 `context.messages` 装着**整段历史**（`load_history = true`
@@ -248,6 +237,10 @@ pub(crate) struct TurnState {
     /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
     pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
     /// 已执行但**尚未落格**的阶段草稿——随本轮入参交给运行器（写者令牌在那边）。
+    ///
+    /// 走工具循环的一轮里，它由 [`super::super::turn_exec`] 的装配段先落
+    /// （反射档要读 `skill_hit`，那必须在问表之前成为事实）；定稿答话轮不经装配段，
+    /// 由运行器落（见 `execute_final_reply_turn`）。
     pub(crate) stages_pending: Vec<super::super::stage_events::StageFact>,
     /// 本次执行的轮号（新轮 = WAL 内既有用户格计数；续写幕 = 被续写轮号）。
     ///
@@ -258,7 +251,7 @@ pub(crate) struct TurnState {
     pub(crate) user_seq: u64,
     /// **本幕的锚**：新轮 = 用户格 seq；续写幕 = 恢复阶段事实 seq。
     ///
-    /// `done_since` 只看这个号之后的阶段事实——同一轮号会被续写幕复用，
+    /// `turn_head` 只看这个号之后的阶段事实——同一轮号会被续写幕复用，
     /// 按轮扫全史会把首幕的格误判成「已做」。
     pub(crate) drive_seq: u64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
@@ -266,32 +259,9 @@ pub(crate) struct TurnState {
 }
 
 impl TurnState {
-    /// 这一步在**本次执行**里是否已做——事实的规范折叠，不是内存缓存。
-    pub(crate) fn stage_done(
-        &self,
-        stage: super::super::stage_events::StageName,
-        round: usize,
-    ) -> bool {
-        super::super::stage_events::done_since(&self.facts, self.drive_seq, stage, round)
-    }
-
-    /// 记一次阶段执行（草稿交运行器落格；问表经 [`Self::stage_done`] 读事实）。
+    /// 记一次阶段执行（草稿交运行器落格；问表经视图读事实）。
     pub(crate) fn mark_stage(&mut self, fact: super::super::stage_events::StageFact) {
         self.stages_pending.push(fact);
-    }
-
-    /// 本轮生效的布尔配置（T-225）：只读本轮已落的 `session.config` 事实。
-    ///
-    /// 缺事实 ⇒ `false`（fail-closed）——与「配置没落就不做这一步」同向，
-    /// 不拿进程里的活值兜底：那会让同一份日志在不同时刻算出不同判决。
-    pub(crate) fn config_bool(&self, key: &str) -> bool {
-        self.facts
-            .iter()
-            .rev()
-            .find(|e| e.turn == self.turn_no && e.kind == crate::symbio_core::EVENT_SESSION_CONFIG)
-            .and_then(|e| e.payload.get(key))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
     }
 }
 
@@ -355,7 +325,7 @@ pub struct ChatOrchestrator {
     ///
     /// ## 为什么也是一个值
     ///
-    /// 与 `TurnState::config_bool` 读的判决开关同一条取值纪律：配置在一次请求生命周期内
+    /// 与判决开关（`session.config` 事实）同一条取值纪律：配置在一次请求生命周期内
     /// 不变，措辞只需要一个布尔。持有 `Arc<SessionPlugin>` 会多一条绕过配置面的路径，
     /// 而这里没有任何"当前值"要读。
     ///
@@ -380,15 +350,6 @@ pub struct ChatOrchestrator {
     /// 那句开场白（本轮照旧进工具循环），真实答复（`Answered`）不受影响。为什么独立于
     /// `compose_enabled`：后者关掉会连答复一起没，本开关只削派活前的旁白。
     pub opening_enabled: bool,
-    /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮，见 [`ProgressPolicy`]）。
-    ///
-    /// 与 `classify_enabled` / `compose_enabled` 同形（取**值快照**），但这里是一个结构体
-    /// 而不是四个平铺字段：它们是**同一个判定**的四个参数（见
-    /// [`ProgressPolicy::due`]），拆成四个字段会让"谁和谁是一组"只能靠命名猜。
-    ///
-    /// 四个参数各自能取到的值见 `SessionConfig`；构造点唯一
-    /// （`orchestrator/consume.rs`）。
-    pub progress: ProgressPolicy,
     /// 建树策略的**请求级快照**（`TurnSettings::presentation_tree`，[T-149]）。
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期

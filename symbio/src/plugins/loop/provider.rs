@@ -17,7 +17,7 @@ use crate::symbio_core::{
     VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult, LOOP_RUN_TURN, TURN_DISPATCH,
 };
 
-use super::chat_loop::{run_chat_loop, ChatOrchestrator, ProgressPolicy};
+use super::chat_loop::{run_chat_loop, ChatOrchestrator};
 use super::session_port::VdfsSessionPort;
 use super::turn_session::LoopSession;
 
@@ -94,12 +94,6 @@ async fn run_turn(
         writer: dispatch.writer.clone(),
         compose_enabled: settings.compose_enabled,
         opening_enabled: settings.opening_enabled,
-        progress: ProgressPolicy {
-            enabled: settings.progress_enabled,
-            interval_ms: settings.progress_interval_ms as i64,
-            min_rounds: settings.progress_min_rounds,
-            max_per_turn: settings.progress_max_per_turn,
-        },
         presentation_tree: settings.presentation_tree,
     });
     run_chat_loop(

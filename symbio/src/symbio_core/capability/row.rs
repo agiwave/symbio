@@ -5,7 +5,7 @@
 //!
 //! [`CapabilityRowKind`] 现有六个值，**且只装得住「在共享地址上被 ≥2 个消费方看见」的族**
 //! （[ADR-089](../../../../docs/010-adr/089.md)：`Policy` 变体已删除——策略的判据依赖 loop 私有的
-//! `LoopState`，它接不上这张表，不是「还没接上」），
+//! 运行时视图，它接不上这张表，不是「还没接上」），
 //! [`CapabilityRowPayload`] 随各族落地长变体：4a `Tool`、4b `Model`、4c `Prompt`、
 //! 4d `Mount`、4e `Option` + `Configurable`（连同两个专服单族的 trait 退场）。
 //! 提前把值写齐的理由：`list(kind)` 的签名由此在 4b–4e **不再变形**（加一个族
@@ -34,8 +34,8 @@
 //!
 //! 与 `CapabilityMeta` 同域同理：全部收集通道（工具 / 模型服务 / 提示词 /
 //! 挂载 / 选项）共用同一张表，契约是**跨插件**的，故类型在 core；表的默认实现
-//! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 session 的
-//! `loop_registry`——三处各住各的，见 AR-025 §3。
+//! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 loop 插件的
+//! `loop_rows`——三处各住各的，见 AR-025 §3。
 
 use crate::symbio_core::DetailField;
 use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsItem, VdfsProvider};

@@ -6,8 +6,7 @@
 
 use crate::symbio_core::CapabilityMeta;
 
-use super::super::loop_registry::{builtin, Capsule, LoopState};
-use super::super::stage_events::StageFact;
+use super::super::stage_events::{StageFact, StageName};
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -158,27 +157,11 @@ pub(crate) async fn prepare_turn_inputs(
 
     // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录 ∧ 未做过」。
-    // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机。
-    // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格）。
+    // 三件事（记忆 / 技能 / 任务段）共用一个阶段——它们共前提、共时机。
+    // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格，按幕锚折叠）。
     // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
-    let recall_done = turn.stage_done(
-        super::super::stage_events::StageName::Recall,
-        turn.request_round,
-    );
-    let recall_state = LoopState::turn_prepare(
-        turn.request_round,
-        turn.config_bool("is_persistent"),
-        recall_done,
-    );
-    let recall_hit = builtin().decide(&recall_state).hit();
-    if let Some(hit) = recall_hit {
-        hit.trace();
-    }
-    // 臂的穷尽分派：本格只执行 `Recall`；其余四条属于别的格（`Capsule::owner`），
-    // 显式不接——加一条臂时这里编译错误，不落到 catch-all（PL-015 §4.2）。
-    match recall_hit.map(|h| h.capsule) {
-        Some(Capsule::Recall) => run_recall(ctx, context, turn).await?,
-        Some(Capsule::Decide | Capsule::Report | Capsule::Compress | Capsule::Reflex) | None => {}
+    if super::super::loop_rows::owes("policy.recall", &turn.facts, turn.turn_no, clock_now_ms()) {
+        run_recall(ctx, context, turn).await?;
     }
     let recall_section = turn
         .recall_view
@@ -246,10 +229,10 @@ pub(crate) async fn prepare_turn_inputs(
     })
 }
 
-/// 轮首准备格的执行体（`Capsule::Recall`）：长期记忆召回 + 技能路由 + 调度段。
+/// 轮首准备格的执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
 ///
-/// 调用点只负责「取行 → 记命中 → 按臂分派」；执行体留在本层——它的入参是
-/// `TurnState` / `SessionContext` 这类私有上下文，不是 `LoopState`（ADR-107）。
+/// 调用点只问「这一格欠不欠」；执行体留在本层——它的入参是 `TurnState` /
+/// `SessionContext` 这类私有上下文，不是行本身（ADR-107）。
 async fn run_recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
@@ -310,7 +293,7 @@ async fn run_recall(
         super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
     });
     turn.mark_stage(
-        StageFact::ran(Capsule::Recall, turn.request_round).with_result(if hit {
+        StageFact::ran(StageName::Recall, turn.request_round).with_result(if hit {
             "hit"
         } else {
             "miss"
@@ -340,32 +323,14 @@ pub(crate) async fn apply_compaction(
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
-    // 下一轮照常再试；但同一轮内不重复进产线（ADR-107 判据 2）。
-    let compress_done = turn.stage_done(
-        super::super::stage_events::StageName::Compress,
-        turn.request_round,
-    );
-    let compress_hit = builtin()
-        .decide(&LoopState::compress(
-            turn.config_bool("auto_compress"),
-            compress_done,
-        ))
-        .hit();
-    if let Some(hit) = compress_hit {
-        hit.trace();
-    }
-    // 臂的穷尽分派：本格只执行 `Compress`；其余四条属于别的格（`Capsule::owner`），
-    // 显式不接——加一条臂时这里编译错误，不落到 catch-all（PL-015 §4.2）。
-    match compress_hit.map(|h| h.capsule) {
-        Some(Capsule::Compress) => {
-            run_compress(orchestrator, ctx, context, turn, overhead_tokens).await
-        }
-        Some(Capsule::Decide | Capsule::Report | Capsule::Recall | Capsule::Reflex) | None => {}
+    // 下一轮照常再试；但同一幕内不重复进产线（ADR-107 判据 2）。
+    if super::super::loop_rows::owes("policy.compress", &turn.facts, turn.turn_no, clock_now_ms()) {
+        run_compress(orchestrator, ctx, context, turn, overhead_tokens).await;
     }
     Ok(())
 }
 
-/// 压缩格的执行体（`Capsule::Compress`）：进一次压缩产线并落「已做」。
+/// 压缩格的执行体（`policy.compress`）：进一次压缩产线并落「已做」。
 ///
 /// 失败**不失败整轮**——压缩是优化项，理由见函数体内的注释。
 async fn run_compress(
@@ -403,7 +368,7 @@ async fn run_compress(
     }
     // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
     // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
-    turn.mark_stage(StageFact::ran(Capsule::Compress, turn.request_round));
+    turn.mark_stage(StageFact::ran(StageName::Compress, turn.request_round));
 }
 
 #[cfg(test)]

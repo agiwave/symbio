@@ -50,14 +50,11 @@
 //! `report_due` 读助手文本六格 / `turn.supplemented` / `turn.stage`（恢复幕）/
 //! `session.config` + `now`。`retry` 由 T-223 补声明。
 //!
-//! ## 为什么整模块暂时 `cfg(test)`
+//! ## 生产接线
 //!
-//! 本步的范围钉死为「只做声明层，不接控制面」（`Registry` / `LoopState` 一个字不动）。
-//! 没有生产消费方时，若把它编进非测试构建，`dead_code` 会逐个点名；而
-//! `#[allow(dead_code)]` 是只许降的棘轮。故与 `stage_events::done` 同一形态：
-//! **如实标 `cfg(test)`，不给死代码闸门开豁免**。T-222a 只把 `mod` 提到
-//! `pub(crate)`（`loop_rows` 的对拍用例要读它，同样 `cfg(test)`）；
-//! T-222b 接上控制面时删掉 `symbio_core/mod.rs` 里那一行 `#[cfg(test)]`。
+//! T-221 只做声明层；T-222b 起控制面（`plugins::loop::loop_rows`）经 `owed` 读它，
+//! 视图因此有了生产消费方。`Frozen::eval` 的成本上界仍按声明生效：调用方传入
+//! **本轮切片**（不是整份 WAL），一轮的事件数由轮的生命周期界定。
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -457,7 +454,7 @@ fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
 /// 当前这一幕的身份：轮号 + 幕锚（最新一条用户格 / 恢复格）。
 ///
 /// 幕锚是「本次执行从哪开始」的唯一定义：同一轮号会被续写幕复用，按轮扫全史
-/// 会把首幕的阶段误判成「已做」（与 `stage_events::done_since` 同一条判据）。
+/// 会把首幕的阶段误判成「已做」。
 fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
     const HEAD_KINDS: &[&str] = &[
         "user.message",
@@ -488,7 +485,7 @@ fn seq_of(e: &Event) -> u64 {
 
 /// 阶段「已做」的锚后判据：`seq` 必须存在且不早于幕锚。
 ///
-/// `None` 的 `seq` 一律不算——未入库的事件不是事实（与 `done_since` 逐字同判）。
+/// `None` 的 `seq` 一律不算——未入库的事件不是事实（与 `stage_events` 的落格同判）。
 fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
@@ -608,12 +605,13 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     }
 }
 
-/// 中途汇报该不该说（T-225）：只吃日志与 `now`，不碰 `RoundProgress` / 墙钟。
+/// 中途汇报该不该说（T-225）：只吃日志与 `now`，不碰内存计数 / 墙钟。
 ///
 /// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
 /// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
-/// `min_rounds` 不在这里判——它是触发点的前提（回调只在工具批次边界上被问），
-/// 而不是日志能回答的量。
+/// `min_rounds` 与 `quiet_ms` 一起交给触发点：工具轮数不在日志里（当前轮次只在
+/// 收束后才计数），所以「够不够轮」由持有轮次计数的一方判；表里这一行判的是
+/// 「静默够久 ∧ 配额未满」。
 fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let Some((turn, drive_anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -627,6 +625,10 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let interval_ms = config
         .and_then(|e| e.payload.get("progress_interval_ms"))
         .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let min_rounds = config
+        .and_then(|e| e.payload.get("progress_min_rounds"))
+        .and_then(|v| v.as_u64())
         .unwrap_or(0);
     let quota = config
         .and_then(|e| e.payload.get("progress_max_per_turn"))
@@ -652,6 +654,8 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         // 前移，下一段静默是新的一笔账（配额之外还要能逐段关账）。
         "anchor": anchor.map(seq_of).unwrap_or(0),
         "due": due,
+        "quiet_ms": quiet_ms,
+        "min_rounds": min_rounds,
         "reports": reports,
         "quota": quota,
     })
@@ -769,13 +773,15 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。
     //
     // v2 起输出 `anchor`（静默起点的 seq）：汇报行以 `(turn, anchor)` 标识一段
-    // 静默区间，`reported_anchors` 逐条关账。
+    // 静默区间，`reported_anchors` 逐条关账。v3 把 `quiet_ms` / `min_rounds`
+    // 一并交给触发点——它们不再从进程配置里读，判定输入只剩事实与 `now`。
     ViewDecl {
         name: "report_due",
-        ver: 2,
+        ver: 3,
         reads: &[
             ("session.config", "progress_enabled"),
             ("session.config", "progress_interval_ms"),
+            ("session.config", "progress_min_rounds"),
             ("session.config", "progress_max_per_turn"),
             ("chat.assistant.reported", "tool_rounds"),
             ("chat.assistant.opening", "text"),

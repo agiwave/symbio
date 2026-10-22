@@ -11,9 +11,7 @@
 mod chat_loop;
 mod context;
 mod derived_facts;
-mod loop_registry;
-// 义务环的行表（T-222a）：与旧 `loop_registry` 并存做逐行对拍；T-222b 退役旧表。
-#[cfg(test)]
+// 义务环的行表（T-222）：控制面经 `owes` 问表，判据在数据里。
 mod loop_rows;
 mod memory_events;
 mod message_build;

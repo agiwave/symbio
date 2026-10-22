@@ -81,12 +81,12 @@ fn builtin_loads_and_freezes() {
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
 
     // `ver` 是口径的显式版本：T-222a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
-    // `report_due` 加静默区间身份时升到 2。
+    // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_head").unwrap().ver, 3);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
-    assert_eq!(frozen.view("report_due").unwrap().ver, 2);
+    assert_eq!(frozen.view("report_due").unwrap().ver, 3);
     assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }
 
@@ -426,6 +426,7 @@ fn cfg(interval: i64, quota: u64) -> Value {
     json!({
         "progress_enabled": true,
         "progress_interval_ms": interval,
+        "progress_min_rounds": 0,
         "progress_max_per_turn": quota,
     })
 }
@@ -443,6 +444,8 @@ fn report_due_needs_log_and_now_only() {
             "turn": 1,
             "anchor": seq(&events[1]),
             "due": true,
+            "quiet_ms": 1500,
+            "min_rounds": 0,
             "reports": 0,
             "quota": 2
         })
@@ -454,6 +457,8 @@ fn report_due_needs_log_and_now_only() {
             "turn": 1,
             "anchor": seq(&events[1]),
             "due": false,
+            "quiet_ms": 980,
+            "min_rounds": 0,
             "reports": 0,
             "quota": 2
         })
@@ -479,6 +484,8 @@ fn report_due_resets_quiet_on_assistant_speech() {
             "turn": 1,
             "anchor": seq(&events[2]),
             "due": false,
+            "quiet_ms": 200,
+            "min_rounds": 0,
             "reports": 1,
             "quota": 2
         })

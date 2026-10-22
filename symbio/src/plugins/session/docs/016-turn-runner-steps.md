@@ -108,8 +108,8 @@ u-{turn} → [op-{turn}] → { [a-{turn}-0 … a-{turn}-n] → [p-{turn}-m] }* �
 | **1c** | 抽出**收束**：2a 的答话取值（`text` → 截断 → `reasoning` → 桥上的思考）成为纯函数 `final_answer(&rt, &round_facts)` | 单测钉截断分支（T-142 的 13KB 草稿用例） |
 
 三刀之后，环体只剩「Ask → match(decision) → 执行 → 推进」四段，768 行里属于**决策**的
-部分全部可单测。剩下的搬迁（2c 产物批、2d 进展格）留给步骤 4 的 Registry 一并做——
-它们需要 `Capsule` 与 `effects` 才能真正脱离本函数，提前搬只是换位置。
+部分全部可单测。剩下的搬迁（2c 产物批、2d 进展格）留给步骤 4 的行表一并做——
+它们需要 `push` 的产物契约与 `policy.report` 的义务查询才能真正脱离本函数，提前搬只是换位置。
 
 ## 7. 进度
 
@@ -118,5 +118,5 @@ u-{turn} → [op-{turn}] → { [a-{turn}-0 … a-{turn}-n] → [p-{turn}-m] }* �
   `turn_runner.test.rs::round_decision_tests`（3 例）。环体由此只剩
   「Ask → 决策 → 执行 → 推进」四段，768 行里属于**决策**的部分全部可单测。
   `truncated` 保留在调用点：兜底话术要区分「被截断」与「空答」，它不是取值逻辑。
-- **剩余（不属于步骤 1）**：2c 产物批与 2d 进展格的搬迁依赖 `Capsule` / `effects`，
-  随步骤 4 的 Registry 一起做——提前搬只是换位置，换不来可测性。
+- **剩余（不属于步骤 1）**：2c 产物批与 2d 进展格的搬迁依赖行表的义务查询（`policy.report` /
+  `report_due`）与 `turn_exec` 的产物契约，随步骤 4 一起做——提前搬只是换位置，换不来可测性。

@@ -1,4 +1,4 @@
-//! 义务环的行表（T-222a）：五条策略行 + 一条**临时**执行行。
+//! 义务环的行表（T-222）：五条策略行 + 一条**临时**执行行。
 //!
 //! ## 一行只写「什么时候欠、什么算还」
 //!
@@ -20,24 +20,32 @@
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。旧表的
 //! `prio` 只是格内序，这里第一次跨行可比（T-222 判据 10）。
 //!
-//! ## 两处**不在表里**的条件（写在这里，不写在事后）
+//! ## 一行**不在表里**的条件（写在这里，不写在事后）
 //!
-//! 1. **汇报的触发前提**：`round > 0 ∧ 工具轮数 ≥ progress_min_rounds`。日志里
-//!    没有「当前工具轮数」这一格（`chat.assistant.reported.tool_rounds` 只在说出口
-//!    之后才有），所以它仍是触发点的前提，直到 T-223 把 `sent` / 工具轮落成协议
-//!    事实。表里这一行判的是「静默够久 ∧ 配额未满」——静默锚是用户格时，轮首的
-//!    `quiet_ms ≈ 0`，实际不会在轮首误开账。
-//! 2. **执行行的动作**：本批只是把 `execute_turn` 包成 actor；`sent` / await /
-//!    在途收清是 T-223。故它此刻用 `turn_closed` 当出口，而不是协议事实。
+//! **汇报的轮次前提**：`轮数 > 0 ∧ 轮数 ≥ progress_min_rounds`。日志里没有
+//! 「当前工具轮数」这一格（`chat.assistant.reported.tool_rounds` 只在说出口之后
+//! 才有），所以它归触发点——`round_report_hook` 自己数批次边界，表判「静默够久
+//! ∧ 配额未满」。`report_due` 视图把 `min_rounds` 一并交出，触发点因此也不用读配置。
 //!
-//! ## 为什么模块暂时 `cfg(test)`
+//! ## 查询口：事实是输入，`now` 也是输入
 //!
-//! T-222a 的交付物是「表与求解 + 对拍」，控制面（`chat_loop` / `Registry`）一个字
-//! 不动。没有生产消费方时编进非测试构建会被 `dead_code` 逐个点名；与 `decl` 同一
-//! 形态如实标 `cfg(test)`，T-222b 接线时删掉 `mod.rs` 里的 `#[cfg(test)]`。
+//! [`owes`] / [`view`] 只收事实切片、轮号与 `now`——不读配置、不读时钟、不碰内存
+//! 缓存（ADR-115 决策 1）。切片由 [`turn_slice`] 收窄到本轮：视图声明的扫描成本
+//! 上界针对**一轮**，不是整份 WAL。
+//!
+//! ## 装载期检查
+//!
+//! 首次查询时冻结声明表并跑 [`check_rows`]：`OrphanFact` 是**已知**的后续任务
+//! （协议四名 / `turn.dispatch` / `authz.denied`），记 info；其余缺口（无出口、
+//! 键不一致、未声明源）记 error。装载失败 ⇒ 表空 ⇒ 永不前进，但系统其余部分
+//! 照常运行（T-222 判据 6）。
 
-use crate::symbio_core::ring::{Decl, Lit, Pattern};
-use crate::symbio_core::LatencyTier;
+use std::sync::{Arc, LazyLock};
+
+use serde_json::Value;
+
+use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern};
+use crate::symbio_core::{builtin, Event, Frozen, LatencyTier};
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
@@ -179,6 +187,98 @@ pub(crate) static ROWS: &[Decl] = &[
         unless: &[],
     },
 ];
+
+/// 冻结的声明表（进程内唯一）。装载失败 ⇒ `None`：所有 `owes` 恒假、环停在原处。
+static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
+    let frozen = match builtin() {
+        Ok(frozen) => frozen,
+        Err(errors) => {
+            crate::plugin_error!(
+                "session",
+                "[Loop] 事实 / 视图声明装载失败，义务环不再前进：{:?}",
+                errors
+            );
+            return None;
+        }
+    };
+    for gap in check_rows(ROWS, &frozen) {
+        match gap {
+            // 已知缺口：协议四名 / `turn.dispatch` / `authz.denied` 的消费行
+            // 归属后续任务，装载期继续点名而不是豁免。
+            Gap::OrphanFact { fact } => {
+                crate::plugin_info!("session", "[Loop] 声明的事实暂无行消费：{}", fact);
+            }
+            other => crate::plugin_error!("session", "[Loop] 行表装载期缺口：{:?}", other),
+        }
+    }
+    Some(frozen)
+});
+
+fn frozen() -> Option<Arc<Frozen>> {
+    FROZEN.clone()
+}
+
+/// 本轮的事实切片：视图只扫**一轮**（声明的成本上界针对轮，不针对整份 WAL）。
+///
+/// 轮号单调，因此「本轮第一条事件」就是本轮窗口的起点；续写幕复用轮号时，
+/// 首幕的事件也在切片里，而视图的 `drive_of` 会按**最新幕锚**收窄。
+fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
+    match events.iter().position(|e| e.turn == turn) {
+        Some(start) => &events[start..],
+        None => &[],
+    }
+}
+
+/// 这一行此刻是否欠着且可还（`owes` 命中、未被 `until` / `unless` 关掉）。
+///
+/// 返回布尔而不是 [`Debt`](crate::symbio_core::ring::Debt)：调用点只决定「这一步
+/// 做不做」。要裁决顺序（同一点多行竞争）时用 `ring::drive`，本函数不代劳。
+pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    let debt = owed(ROWS, &frozen, turn_slice(events, turn), now)
+        .into_iter()
+        .find(|d| d.decl.name == name && !d.blocked);
+    if let Some(debt) = &debt {
+        trace(&frozen, debt);
+    }
+    debt.is_some()
+}
+
+/// 按声明求一个视图值（本轮切片）。未声明 / 扫描超界 ⇒ `None`。
+pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<Value> {
+    frozen()?.eval(name, turn_slice(events, turn), now)
+}
+
+/// 这一行携带的档位。未登记 ⇒ 深度档（fail-safe：不静默提速）。
+pub(crate) fn tier(name: &str) -> LatencyTier {
+    ROWS.iter()
+        .find(|d| d.name == name)
+        .map(|d| d.tier)
+        .unwrap_or(LatencyTier::Deep)
+}
+
+/// 一笔可还的**可观测面**：行 / 债标识 / 档位 / 视图口径。与旧 `Hit::trace` 同一
+/// 目的——「某一步怎么发生了」在日志里要能指认到行与那一笔债，而不只是行名本身。
+///
+/// 视图版本一并记下（`ViewDecl.ver`）：投影读法一变，同一份事实折出的结论就变，
+/// 回放时「这一轮用了哪一版」必须在日志里有答案。
+fn trace(frozen: &Frozen, debt: &crate::symbio_core::ring::Debt<'_>) {
+    let decl = debt.decl;
+    let key = debt.key.trace();
+    let view = frozen.view(decl.owes.source);
+    crate::plugin_debug!(
+        "session",
+        "[Loop] 行 {} 可还（{} / {}ms；债 {}；视图 {} v{}）",
+        decl.name,
+        decl.tier.name(),
+        decl.tier.budget_ms(),
+        if key.is_empty() { "-" } else { key.as_str() },
+        decl.owes.source,
+        view.map(|v| v.ver).unwrap_or(0)
+    );
+}
 
 #[cfg(test)]
 #[path = "loop_rows.test.rs"]

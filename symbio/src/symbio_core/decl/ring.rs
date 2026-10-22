@@ -2,9 +2,9 @@
 //!
 //! ## 一行是数据，不是函数
 //!
-//! 现网 `loop_registry` 的一行是 `fn(&LoopState) -> Option<Capsule>`——判断住在函数
-//! 体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个 [`Pattern`] 加
-//! `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
+//! 旧策略表（`loop_registry`，T-222b 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
+//! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
+//! [`Pattern`] 加 `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
 //!
 //! ## 欠账公式
 //!
@@ -151,7 +151,12 @@ pub(crate) fn owed<'a>(
 }
 
 /// 取最小的一笔可还的债。这就是 `drive` 的**选择半边**——执行半边（跑执行体、
-/// 追加事实、无进展守卫）随 T-222b / T-223 接上，选择规则不再变。
+/// 追加事实、无进展守卫）随 T-223 接上，选择规则不再变。
+///
+/// T-222b 的调用点仍按行点问（`plugins::loop::loop_rows::owes`）；**单环驱动**
+/// （一次取下一笔、按 `prio` 裁决）在 T-223 把协议行接进来时成为唯一调度口。
+/// 在那之前本函数只被优先级用例调用，因此只在测试构建里存在。
+#[cfg(test)]
 pub(crate) fn drive<'a>(
     rows: &'a [Decl],
     frozen: &Frozen,

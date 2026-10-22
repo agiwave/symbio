@@ -3,11 +3,11 @@
 //! 两条主线：
 //!
 //! 1. **格的形状**——事件 id、载荷、落格元数据与重复落格的吸收；
-//! 2. **ADR-107 判据 2**——每一行执行完它的胶囊后，下一次问表必须 `Declined`
-//!    （`classify` / `recall` / `compress` 各展一条，不合并成循环：三格的
-//!    `LoopState` 变体不同，合并会掩盖「某一行漏了 `done`」）。
+//! 2. **ADR-107 判据 2 的事实面**——「这一步做过」按 `(turn, round, stage)` 折叠；
+//!    按幕锚的收窄在 `turn_head` 视图（续写幕复用轮号时不得把首幕的格算进来）。
+//!
+//! 行在这一格上关不关账由 `loop_rows` 的 `until` 负责，用例在那边。
 
-use super::super::loop_registry::{builtin, Capsule, LoopState, Verdict as RowVerdict};
 use super::{done, land, source_of, StageFact, StageName, VerdictFact, VerdictSource};
 use crate::symbio_core::{
     Entity, EventStore, Seq, Store, Verb, Verdict, EVENT_TURN_STAGE, REASON_ACK, REASON_CLARIFY,
@@ -90,7 +90,7 @@ fn classify_fact_carries_reason_and_source() {
 fn payload_carries_only_what_the_fact_has() {
     // 没有判决的阶段：载荷只有阶段 + 轮次，不带 `source` / `reason`。
     assert_eq!(
-        StageFact::ran(Capsule::Recall, 2).payload(),
+        StageFact::ran(StageName::Recall, 2).payload(),
         serde_json::json!({ "stage": "recall", "round": 2 })
     );
 
@@ -123,18 +123,18 @@ fn payload_carries_only_what_the_fact_has() {
 #[test]
 fn event_id_is_the_stage_identity() {
     assert_eq!(
-        StageFact::ran(Capsule::Decide, 0).event_id(7),
+        StageFact::ran(StageName::Decide, 0).event_id(7),
         "st-7-0-decide"
     );
     assert_eq!(StageFact::classify(2, None).event_id(7), "st-7-2-decide");
     assert_ne!(
-        StageFact::ran(Capsule::Recall, 0).event_id(7),
-        StageFact::ran(Capsule::Compress, 0).event_id(7),
+        StageFact::ran(StageName::Recall, 0).event_id(7),
+        StageFact::ran(StageName::Compress, 0).event_id(7),
         "同一轮的两个阶段必须是两个幂等键，否则后落的那格会被当成重复丢掉"
     );
     assert_ne!(
-        StageFact::ran(Capsule::Recall, 0).event_id(7),
-        StageFact::ran(Capsule::Recall, 1).event_id(7),
+        StageFact::ran(StageName::Recall, 0).event_id(7),
+        StageFact::ran(StageName::Recall, 1).event_id(7),
         "跨轮次的重跑是新的一次执行"
     );
 }
@@ -172,7 +172,7 @@ fn landing_the_same_stage_twice_is_absorbed() {
     // 续写幕复用同一轮号且 `request_round` 从 0 重开，召回 / 压缩会重跑；
     // 重跑撞幂等键不是失败——这一步确实已经做过。
     let store = EventStore::new();
-    let fact = StageFact::ran(Capsule::Recall, 0);
+    let fact = StageFact::ran(StageName::Recall, 0);
     let one = std::slice::from_ref(&fact);
     land(&store, 7, 0, "user", one).expect("首次落格失败");
     land(&store, 7, 0, "user", one).expect("重复落格应被吸收，而不是让整轮失败");
@@ -184,13 +184,20 @@ fn landing_the_same_stage_twice_is_absorbed() {
 #[test]
 fn done_is_scoped_by_turn_stage_and_round() {
     let store = EventStore::new();
-    land(&store, 7, 0, "user", &[StageFact::ran(Capsule::Recall, 0)]).unwrap();
     land(
         &store,
         7,
         0,
         "user",
-        &[StageFact::ran(Capsule::Compress, 0)],
+        &[StageFact::ran(StageName::Recall, 0)],
+    )
+    .unwrap();
+    land(
+        &store,
+        7,
+        0,
+        "user",
+        &[StageFact::ran(StageName::Compress, 0)],
     )
     .unwrap();
     let events = store.range(Seq::new(0));
@@ -207,109 +214,5 @@ fn done_is_scoped_by_turn_stage_and_round() {
     assert!(
         !done(&events, 7, StageName::Decide, 0),
         "同轮另一阶段没有落格，不得互相顶替"
-    );
-}
-
-// ── ADR-107 判据 2：执行后下一次问表必须 Declined ──────────────────────
-
-#[test]
-fn executed_classify_turns_the_next_ask_into_declined() {
-    let store = EventStore::new();
-    assert_eq!(
-        builtin()
-            .decide(&LoopState::turn_head(0, true, true, false))
-            .capsule(),
-        Some(Capsule::Decide),
-        "前提：没做过时这一格必须认领"
-    );
-
-    let verdict = Verdict::Escalate {
-        reason: REASON_NEEDS_WORK.into(),
-    };
-    land(
-        &store,
-        7,
-        0,
-        "user",
-        &[StageFact::classify(0, Some(&verdict))],
-    )
-    .unwrap();
-
-    let events = store.range(Seq::new(0));
-    let again = builtin().decide(&LoopState::turn_head(
-        0,
-        true,
-        true,
-        done(&events, 7, StageName::Decide, 0),
-    ));
-    assert!(
-        matches!(again, RowVerdict::Declined { .. }),
-        "判决已执行，下一次问表必须 Declined（ADR-107 判据 2），实际 {again:?}"
-    );
-}
-
-#[test]
-fn executed_recall_turns_the_next_ask_into_declined() {
-    let store = EventStore::new();
-    assert_eq!(
-        builtin()
-            .decide(&LoopState::turn_prepare(0, true, false))
-            .capsule(),
-        Some(Capsule::Recall)
-    );
-
-    land(&store, 8, 1, "user", &[StageFact::ran(Capsule::Recall, 0)]).unwrap();
-
-    let events = store.range(Seq::new(0));
-    let again = builtin().decide(&LoopState::turn_prepare(
-        0,
-        true,
-        done(&events, 8, StageName::Recall, 0),
-    ));
-    assert!(
-        matches!(again, RowVerdict::Declined { .. }),
-        "召回已执行，下一次问表必须 Declined，实际 {again:?}"
-    );
-}
-
-#[test]
-fn executed_compress_turns_the_next_ask_into_declined_but_only_for_this_round() {
-    let store = EventStore::new();
-    assert_eq!(
-        builtin()
-            .decide(&LoopState::compress(true, false))
-            .capsule(),
-        Some(Capsule::Compress)
-    );
-
-    land(
-        &store,
-        9,
-        2,
-        "user",
-        &[StageFact::ran(Capsule::Compress, 0)],
-    )
-    .unwrap();
-
-    let events = store.range(Seq::new(0));
-    let again = builtin().decide(&LoopState::compress(
-        true,
-        done(&events, 9, StageName::Compress, 0),
-    ));
-    assert!(
-        matches!(again, RowVerdict::Declined { .. }),
-        "本请求轮已进过压缩产线，下一次问表必须 Declined，实际 {again:?}"
-    );
-
-    // `done` 的口径是**本请求轮**：内核每轮重取水位，未过水位时返回 `Ok(None)`
-    // ——那不是失败，下一轮照常再试。扩到整轮会让后段的压缩永远不发生。
-    assert_eq!(
-        builtin()
-            .decide(&LoopState::compress(
-                true,
-                done(&events, 9, StageName::Compress, 1)
-            ))
-            .capsule(),
-        Some(Capsule::Compress)
     );
 }

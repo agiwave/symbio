@@ -129,7 +129,15 @@ export const BASELINE = {
   // （兜底必须是闭集里的取值，不是自由文本）；`turn_exec.test.rs` 的
   // `tool_free_turn_failure_leaves_fallback_event_and_bubbles` 同补一条。净增为正：
   // 只改了载荷键名（`why` → `detail`）与两条断言的目标字段，没有删判据。
-  rustTests: 2038,
+  // baseline-allow rustTests: 批 T-222b 净删 44 条（2038→1994）——被测对象整族退役：旧控制面
+  // `loop_registry`（31 条：五格对拍、命中臂归属、档位逐格对表、同格加行零改主循环……）与
+  // `chat_loop/progress`（10 条：`RoundProgress` 的静默时钟与配额），连同 `stage_events.test.rs`
+  // 的 3 条旧 ADR-107 用例（`executed_*_turns_the_next_ask_into_declined`，被测对象是
+  // `Verdict::Declined`）。判据没有丢：行表的开账 / 关账、全局 `prio`、装载期缺口由
+  // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
+  // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
+  // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
+  rustTests: 1994,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。

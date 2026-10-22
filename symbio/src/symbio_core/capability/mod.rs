@@ -319,8 +319,8 @@ pub mod failure_kind {
 ///
 /// [`Self::list`] 返回的顺序 = 注册顺序（工具族直接决定送给模型的 `tools` 数组
 /// 顺序，见 ADR-057）。族内**不**按名字重排：重排等于每起一个进程换一次工具面
-/// 前缀。策略行的先命中者胜排序（`(prio, name)`）住在 session 的 `loop_registry`，
-/// 与表内注册序是两件事。
+/// 前缀。策略行的先命中者胜排序（`(prio, name)`）住在 loop 插件的行表
+/// （`loop_rows` / `decl::ring`），与表内注册序是两件事。
 #[async_trait]
 pub trait Registry: Send + Sync + 'static {
     /// 入表一行（**全族的唯一写入入口**）。

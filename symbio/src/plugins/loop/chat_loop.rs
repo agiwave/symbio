@@ -23,7 +23,6 @@
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`decide`]   轮首判决：经容器 `route` 调 `classify/decide`，把判决回读成枚举
 //! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/wording`，把措辞写进转写
-//! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `compose`）
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 落库 → 流向判定
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
@@ -42,14 +41,9 @@ pub(crate) mod delegate;
 pub(crate) mod drive;
 mod inputs;
 mod io;
-mod progress;
 pub(crate) mod state;
 mod turn;
 
-// 跨模块契约：`provider.rs` / `resume.rs` 经 `chat_loop::X` 引用。
-// `ProgressPolicy` 的构造点在 `provider.rs`（那里拿着交付包与配置标量），
-// 消费方是本模块——它因此也是契约，不是内部实现细节。
-pub use self::progress::ProgressPolicy;
 pub use self::state::ChatOrchestrator;
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
@@ -76,12 +70,22 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。交回草稿
 /// 让「谁落格」这件事留在有 store 的那一侧。
 ///
-/// ## `last_spoke_at` 为什么从 `turn` 取初值
+/// ## 判定只读日志：静默与配额都从事实来
 ///
-/// 轮首 compose 说过话（`Escalate` 首响 / `Answered` 答话）就要把静默时钟归零，
-/// 而那件事改的是 `TurnState::last_user_facing_at`。本函数拿不到 `TurnState`，
-/// 所以只能在构造时**取一次快照**当起点——从那一刻起轮内的静默时钟就只由
-/// `RoundProgress`（`chat_loop/progress.rs`）一处推进，不再有两个来源。
+/// 旧 `RoundProgress` 自己持静默时钟与配额计数，是同一份事实的第二来源。
+/// T-222b 起两者都由 `report_due` 视图从**本幕已落的事实**算：
+///
+/// - 静默锚 = 最近一次用户看得见的动静（用户格 / 补充格 / 任何助手文本）；
+/// - 配额 = 本幕锚之后的汇报格数。
+///
+/// 因此 `supplemented_at` 入参不再需要（补充格已在抽干时落格，视图自会前移锚），
+/// 保留形参只为对齐 [`super::turn_exec::RoundHookFn`] 的契约。
+///
+/// ## 轮次前提留在触发点
+///
+/// 日志里没有「当前工具轮数」这一格（`tool_rounds` 只在说出口之后才有），所以
+/// 「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」由本函数自己数批次边界；`min_rounds`
+/// 仍由视图交出（不在这里读配置）。
 ///
 /// ## 会话视图：只给**轮首**那一份
 ///
@@ -95,48 +99,35 @@ pub(crate) fn round_report_hook(
     orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
     ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
     conversation: Vec<ChatNode>,
-    last_spoke_at: i64,
+    store: Arc<dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>>,
+    turn_no: u64,
 ) -> super::turn_exec::RoundHookFn {
-    let progress = Arc::new(std::sync::Mutex::new(
-        super::chat_loop::progress::RoundProgress::new(
-            orchestrator.progress.clone(),
-            last_spoke_at,
-        ),
-    ));
-    Arc::new(move |supplemented_at: Option<i64>| {
+    let rounds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    Arc::new(move |_supplemented_at: Option<i64>| {
         let orchestrator = orchestrator.clone();
         let ctx = ctx.clone();
         let conversation = conversation.clone();
-        let progress = progress.clone();
+        let store = store.clone();
+        let rounds = rounds.clone();
         Box::pin(async move {
-            // 用户刚补充过 ⇒ 静默时钟先归零，再判「距上次动静够久了吗」。
-            // 顺序反过来就会出现「用户刚说完话，助手抢着报了一句进度」。
-            if let Some(at) = supplemented_at {
-                if let Ok(mut p) = progress.lock() {
-                    p.stirred(at);
-                }
+            // 一个批次边界 = 一次「已完成一轮」。
+            let tool_rounds = rounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let now = clock_now_ms();
+            let events = store.range(crate::symbio_core::Seq::new(0));
+            let view = super::loop_rows::view("report_due", &events, turn_no, now)?;
+            // 轮次前提（见 `loop_rows` 模块头）：日志里没有这一格，归触发点。
+            let min_rounds = view.get("min_rounds").and_then(|v| v.as_u64()).unwrap_or(0);
+            if (tool_rounds as u64) < min_rounds.max(1) {
+                return None;
             }
-            // 轮首没有「进展」可报：那里刚问过模型，判定对象是用户那句话（归 decide.rs）。
-            let (snapshot, report_hit) = {
-                let Ok(mut p) = progress.lock() else {
-                    return None;
-                };
-                let snap = p.advance();
-                let hit = p.due(&snap);
-                (snap, hit)
+            if !super::loop_rows::owes("policy.report", &events, turn_no, now) {
+                return None;
+            }
+            let quiet_ms = view.get("quiet_ms").and_then(|v| v.as_i64()).unwrap_or(0);
+            let snapshot = RunSnapshot {
+                tool_rounds,
+                quiet_ms,
             };
-            let report_hit = report_hit?;
-            report_hit.trace();
-            // 臂的穷尽分派：本格只执行 `Report`；其余四条属于别的格
-            // （`Capsule::owner`），显式不接——加一条臂时这里编译错误，
-            // PL-015 §4.2 的「臂永不派发」因此不再静默。
-            match report_hit.capsule {
-                super::loop_registry::Capsule::Report => {}
-                super::loop_registry::Capsule::Decide
-                | super::loop_registry::Capsule::Compress
-                | super::loop_registry::Capsule::Recall
-                | super::loop_registry::Capsule::Reflex => return None,
-            }
             let Some(text) = super::chat_loop::compose::report_text(
                 &orchestrator,
                 &ctx,
@@ -149,13 +140,10 @@ pub(crate) fn round_report_hook(
                 // 与 `apply_verdict` 降级而不失效同一条方向。
                 return None;
             };
-            if let Ok(mut p) = progress.lock() {
-                p.spoke();
-            }
             Some(super::round_hook::ReportDraft {
                 text,
-                tool_rounds: snapshot.tool_rounds,
-                quiet_ms: snapshot.quiet_ms,
+                tool_rounds,
+                quiet_ms,
             })
         })
     })
@@ -291,10 +279,6 @@ pub async fn run_chat_loop(
     // ── 前步骤 ③：轮次状态 + 上下文容器 ───────────────────────────────────
     let mut turn = TurnState {
         abort: abort.clone(),
-        // 静默时钟的起点 = 本请求开始。用户刚说完话，"距上次有人说话"从此刻起算；
-        // 此后的更新点只有两处（助手写下对话面文本 / 轮边界折进用户补充），
-        // 都在本循环内，见 `progress.rs` 的模块文档。
-        last_user_facing_at: clock_now_ms(),
         ..Default::default()
     };
     let mut single_message = req.single_message.take();
@@ -435,10 +419,10 @@ pub async fn run_chat_loop(
         //
         // ## 判据在哪
         //
-        // 不在下面这个 `if` 里，在 [`super::loop_registry`] 的 `policy.classify` 行：
-        // 「`request_round == 0` ∧ 有发言 ∧ 开关开着」三条写在一个纯函数里，可单测、
-        // 可增删。本处只问表「下一步是什么」，命中 `Capsule::Decide` 才走这段。
-        // 加一条新策略 = 一个函数 + 一行注册，**本文件不改**（PL-014 §6 判据 1）。
+        // 不在下面这个 `if` 里，在 [`super::loop_rows`] 的 `policy.classify` 行：
+        // 「`request_round == 0` ∧ 有发言 ∧ 开关开着 ∧ 没判过」四条写在数据里，
+        // 可单测、可增删。本处只问「这一格现在欠不欠」，欠才走这段。
+        // 加一条新策略 = 一条声明，**本文件不改**（PL-014 §6 判据 1）。
         //
         // ## 为什么在 `gate_turn` 之后
         //
@@ -473,41 +457,21 @@ pub async fn run_chat_loop(
         //
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
-        let head_state = super::loop_registry::LoopState::turn_head(
-            turn.request_round,
-            first_utterance.is_some(),
-            turn.config_bool("classify_enabled"),
-            // 本次执行里已经判过就不再来一遍（ADR-107 判据 2）：前三条在这一轮内
-            // 恒真，没有这一条，任何以「再问一次表」为形状的驱动都会重判同一句话。
-            turn.stage_done(super::stage_events::StageName::Decide, turn.request_round),
-        );
-        let head_hit = super::loop_registry::builtin().decide(&head_state).hit();
-        if let Some(hit) = head_hit {
-            hit.trace();
-        }
-        // 臂的穷尽分派：本格只执行 `Decide`；其余四条属于别的格（`Capsule::owner`），
-        // 显式不接——加一条臂时这里编译错误，不落到 catch-all（PL-015 §4.2）。
-        match head_hit.map(|h| h.capsule) {
-            Some(super::loop_registry::Capsule::Decide) => {
-                if let Some(exit) = run_turn_head(
-                    orchestrator,
-                    &ctx,
-                    &mut context,
-                    &mut turn,
-                    first_utterance.as_deref(),
-                )
-                .await
-                {
-                    return finish_turn(&context, &sink, &turn, exit).await;
-                }
-            }
-            Some(
-                super::loop_registry::Capsule::Report
-                | super::loop_registry::Capsule::Compress
-                | super::loop_registry::Capsule::Recall
-                | super::loop_registry::Capsule::Reflex,
+        // `done` 也由这一问问出来：判过的格在 `turn.stage` 里，`turn_head` 视图
+        // 按幕锚折叠它（ADR-107 判据 2）。前三条在这一轮内恒真，没有这一条，
+        // 任何以「再问一次表」为形状的驱动都会重判同一句话。
+        if super::loop_rows::owes("policy.classify", &turn.facts, turn.turn_no, clock_now_ms()) {
+            if let Some(exit) = run_turn_head(
+                orchestrator,
+                &ctx,
+                &mut context,
+                &mut turn,
+                first_utterance.as_deref(),
             )
-            | None => {}
+            .await
+            {
+                return finish_turn(&context, &sink, &turn, exit).await;
+            }
         }
 
         // 补充的抽干点**不在这里**：v2 在每个批次边界抽，位置由运行器给出——
@@ -626,13 +590,17 @@ pub async fn run_chat_loop(
             }),
             supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
-            // 本函数手里），**落格**在 `turn_exec`（store 在那边）。
-            on_round: Some(round_report_hook(
-                orchestrator_arc.clone(),
-                ctx.clone(),
-                context.messages.clone(),
-                turn.last_user_facing_at,
-            )),
+            // 本函数手里），**落格**在 `turn_exec`（store 在那边）。判定读日志，
+            // 所以回调也拿一份事实源句柄（同一实例，按引用分发）。
+            on_round: context.session.facts().map(|store| {
+                round_report_hook(
+                    orchestrator_arc.clone(),
+                    ctx.clone(),
+                    context.messages.clone(),
+                    store,
+                    turn.turn_no,
+                )
+            }),
             // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `turn_exec`
             // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
             opening_text: turn.opening_text.as_deref(),
@@ -692,10 +660,10 @@ pub async fn run_chat_loop(
     }
 }
 
-/// 轮首判决格的执行体（`Capsule::Decide`）：问 `classify` → 执行判决 → 收尾。
+/// 轮首判决格的执行体（`policy.classify`）：问 `classify` → 执行判决 → 收尾。
 ///
-/// 调用点只做「取行 → 记命中 → 按臂分派」；执行体的入参是 `SessionContext` /
-/// `TurnState` 这类本层私有上下文，不是 `LoopState`（ADR-107：执行体留在格所在层）。
+/// 调用点只问「这一格欠不欠」；执行体的入参是 `SessionContext` / `TurnState`
+/// 这类本层私有上下文，不是行本身（ADR-107：执行体留在格所在层）。
 ///
 /// 返回 `Some(exit)` = 本轮就此收尾（`Answered` 等 `Finish` 效应）；`None` = 继续进
 /// 工具循环。
@@ -730,11 +698,8 @@ async fn run_turn_head(
                 &RunSnapshot::default(),
             )
             .await;
-            // 说了一句话（首响 / 答话）⇒ 静默时钟归零。不收尾的 `Escalate`
-            // 也要归零：用户刚看到"好，我来处理"，此刻不该再报进度。
-            if effect != VerdictEffect::Silent {
-                turn.last_user_facing_at = clock_now_ms();
-            }
+            // 说了一句话（首响 / 答话）⇒ 静默锚随事实前移（`chat.assistant.opening`
+            // / 收束格落格后，`report_due` 视图自会从那一刻起算），本层不再持时钟。
             if effect == VerdictEffect::Finish {
                 plugin_info!(
                     "session",

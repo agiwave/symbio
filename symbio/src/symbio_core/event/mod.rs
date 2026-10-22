@@ -152,8 +152,8 @@ pub const EVENT_TURN_STAGE: &str = "turn.stage";
 /// 发点在**工具批次边界**（`turn_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
 /// 用户轮只经过一次请求，而工具循环在运行器的环体里，真实的工具轮数只在那里
 /// （载荷里的 `tool_rounds` 就是它；计数口径见 [ADR-074](../../../../docs/010-adr/074.md)）。
-/// 该不该说是 `ProgressPolicy::due` 的四条与关系：开关开着 ∧ 沉默够久 ∧
-/// `tool_rounds >= min_rounds` ∧ 未超本轮配额。
+/// 该不该说是 `policy.report` 行的四条与关系：开关开着 ∧ 沉默够久 ∧
+/// `tool_rounds >= min_rounds` ∧ 未超本轮配额（判据在 `report_due` 视图 + 行表）。
 ///
 /// 汇报不是轮次事实（一轮可以报零到多次），所以它与 `turn.supplemented` 同格
 /// （`turn × asserted`），不占 `chat.assistant.final` 那格 N3 的「每轮至多一条」。

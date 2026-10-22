@@ -8,9 +8,9 @@
 //! （答话重复、召回重复、压缩反复调用 no-op）——ADR-107 §3 的整条推理。
 //!
 //! 本模块把「已做」落成事实：阶段执行点产出一份 [`StageFact`] 草稿，持写者令牌的
-//! 一方（运行器的 [`super::turn_runner::prepare_turn`] / `run_reflex`）在用户格
-//! 之后把它落成 `turn.stage`。下一问问表时 `done` 从它来——不是从第二份内存簿记，
-//! 也不是从 `LoopState` 里多出来的一个字段（PL-014 §2 禁第二份状态）。
+//! 一方（[`super::turn_exec`] 的装配段 / 运行器的 [`super::turn_runner::prepare_turn`]）
+//! 在用户格之后把它落成 `turn.stage`。下一问问表时 `done` 从它来——`turn_head`
+//! 视图按幕锚折叠这些格，不是从第二份内存簿记（PL-014 §2 禁第二份状态）。
 //!
 //! ## 判决事实为什么也在这里
 //!
@@ -26,11 +26,12 @@
 //! 的事实源已经变了，本轮视图应当重取）。重跑时撞幂等键 ⇒ [`land`] 按「已做过」
 //! 处理，既不重复落格也不失败。
 //!
-//! ## 生产侧读事实，但**按本次执行的锚**读
+//! ## 生产侧按幕锚读事实，而不是按轮扫全史
 //!
 //! 按轮扫全史会把续写幕的召回 / 压缩**误判为已做**（首幕落过 `round = 0` 的格），
-//! 从而改变恢复语义。因此生产侧用 [`done_since`]：只看本幕锚点（新轮 = 用户格
-//! seq；恢复幕 = 恢复阶段事实的 seq）之后落下的事实。
+//! 从而改变恢复语义。所以折叠住在本模块之外：`turn_head` 视图只看本幕锚点（新轮
+//! = 用户格 seq；恢复幕 = 恢复阶段事实的 seq）之后落下的事实。本模块只负责把
+//! 草稿按同一性落成事实，以及提供测试用的**按轮**折叠 [`done`]。
 //!
 //! `TurnState` 不再维护 `stages_done` 缓存（T-225）：缓存与事实是第二份状态，
 //! 而「这一步做过没有」在日志里已经有了唯一答案。
@@ -40,8 +41,6 @@ use crate::symbio_core::{
     REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
     REASON_THANKS, REASON_UNCLASSIFIED,
 };
-
-use super::loop_registry::Capsule;
 
 /// 判决的**来源**：理由码由规则产出、由模型产出、兜底，或根本没有判决。
 ///
@@ -78,22 +77,17 @@ impl VerdictSource {
 
 /// **一格阶段的名字**——`turn.stage` 载荷 `stage` 的闭集。
 ///
-/// ## 为什么不是直接复用 [`Capsule`]
+/// 阶段事实比派发指令集宽：`resume`（这一轮是审批 / 问答恢复）与 `round`
+/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（T-222b 起
+/// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
-/// `Capsule` 是**环认识的指令集**（一条臂 = 一段会派发的执行体）。阶段事实比它宽：
-/// `resume`（这一轮是审批 / 问答恢复）与 `round`（第几次请求）是引擎记账，不派发
-/// 任何臂；把它们塞进 `Capsule` 会凭空多出两条"永不派发"的指令，而 `Capsule::ALL`
-/// 的对偶检查（每条臂必须有产出行）随即说谎。
-///
-/// 两个闭集因此分开：`Capsule` 管"环会做什么"，`StageName` 管"事实里记了什么"。
-/// 前者与后者之间只有单向转换（[`From<Capsule>`]）。
+/// `policy.report` / `policy.reflex` 不在这里：汇报的到期由 `report_due` 视图
+/// 算，快路由 `recall` 的 `result` 判——两者都没有「这一步做过没有」要记。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageName {
     Decide,
-    Report,
     Compress,
     Recall,
-    Reflex,
     /// 这一轮是恢复幕（`result` = `retry` / `approve` / `reject` / `supply` /
     /// `answer`；`retry_subtree` 按新轮处理，不落本格）。
     Resume,
@@ -105,24 +99,10 @@ impl StageName {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Decide => "decide",
-            Self::Report => "report",
             Self::Compress => "compress",
             Self::Recall => "recall",
-            Self::Reflex => "reflex",
             Self::Resume => "resume",
             Self::Round => "round",
-        }
-    }
-}
-
-impl From<Capsule> for StageName {
-    fn from(c: Capsule) -> Self {
-        match c {
-            Capsule::Decide => Self::Decide,
-            Capsule::Report => Self::Report,
-            Capsule::Compress => Self::Compress,
-            Capsule::Recall => Self::Recall,
-            Capsule::Reflex => Self::Reflex,
         }
     }
 }
@@ -158,9 +138,9 @@ pub(crate) struct StageFact {
 
 impl StageFact {
     /// 一段没有判决的阶段（`recall` / `compress`）。
-    pub(crate) fn ran(stage: impl Into<StageName>, round: usize) -> Self {
+    pub(crate) fn ran(stage: StageName, round: usize) -> Self {
         Self {
-            stage: stage.into(),
+            stage,
             round,
             verdict: None,
             result: None,
@@ -188,8 +168,8 @@ impl StageFact {
     /// 第几次请求（T-225 的 `round` 来源）。
     ///
     /// `identity` = 本幕的锚（`drive_seq`）：同一轮号的续写幕会从 `round = 0`
-    /// 重来，只按 `(turn, round, stage)` 记会撞首幕的幂等键，于是本幕的锚
-    /// 指回首幕，`done_since` 把首幕的阶段误判进本幕。
+    /// 重来，只按 `(turn, round, stage)` 记会撞首幕的幂等键，于是撞格取回首幕
+    /// 的 seq，本幕的锚指向了错误的位置。
     pub(crate) fn request_round(round: usize, identity: &str) -> Self {
         let mut fact = Self::ran(StageName::Round, round);
         fact.identity = Some(identity.to_string());
@@ -289,7 +269,7 @@ where
 ///
 /// 调用方（`chat_loop` 的恢复幕）需要它：`drive_seq` 就是「本幕第一条阶段事实」
 /// 的位置，而那个位置只有落格方拿得到。`Duplicate`（同一格重跑）取**已落那一格**
-/// 的 seq——那一格就是本幕的起点，另造一个锚会让 `done_since` 把首幕的事实
+/// 的 seq——那一格就是本幕的起点，另造一个锚会让 `turn_head` 把首幕的事实
 /// 误算进本幕。
 pub(crate) fn land_with_seqs<S>(
     store: &S,
@@ -331,32 +311,16 @@ where
     Ok(seqs)
 }
 
-/// 🔴 这一步在事实面上是否**已经做过**（投影的规范定义，**按轮**）。
+/// 🔴 这一步在事实面上是否**已经做过**（按轮折叠，测试用）。
 ///
 /// ⚠️ 它扫全史：续写幕复用同一轮号，首幕落过的格会被判成"已做"，而续写幕的语义
-/// 恰恰是「恢复后事实源变了，本轮视图应重取」（召回 / 压缩重跑）。生产侧因此用
-/// [`done_since`]——**只在本次执行锚点之后**找同一格。本函数保留为「事实 → 已做」
-/// 的规范折叠，供单测与将来的整轮视图用。
+/// 恰恰是「恢复后事实源变了，本轮视图应重取」（召回 / 压缩重跑）。生产侧读的是
+/// `turn_head` 视图的按幕锚折叠——本函数只钉住「事实 → 已做」这个形状。
 #[cfg(test)]
 pub(crate) fn done(events: &[Event], turn: u64, stage: StageName, round: usize) -> bool {
     events.iter().any(|e| {
         e.kind == EVENT_TURN_STAGE
             && e.turn == turn
-            && e.verb == Verb::Asserted
-            && e.payload.get("stage").and_then(|v| v.as_str()) == Some(stage.name())
-            && e.payload.get("round").and_then(|v| v.as_u64()) == Some(round as u64)
-    })
-}
-
-/// 这一步在**本次执行**里是否已做过：只看 `drive_seq` 之后落下的 `turn.stage`。
-///
-/// `drive_seq` 是本幕的锚（新轮 = 用户格 seq；恢复幕 = 恢复阶段事实的 seq）。
-/// 用它的理由就是上面那条：同一轮号会被续写幕复用，按轮扫全史会把首幕的
-/// `recall` / `compress` 误判成"已做"，恢复幕于是不再重取视图。
-pub(crate) fn done_since(events: &[Event], drive_seq: u64, stage: StageName, round: usize) -> bool {
-    events.iter().any(|e| {
-        e.seq.is_some_and(|s| s.value() >= drive_seq)
-            && e.kind == EVENT_TURN_STAGE
             && e.verb == Verb::Asserted
             && e.payload.get("stage").and_then(|v| v.as_str()) == Some(stage.name())
             && e.payload.get("round").and_then(|v| v.as_u64()) == Some(round as u64)

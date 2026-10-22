@@ -1411,6 +1411,12 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
         "你好",
     );
     req.skill_hits = &hits;
+    // 生产侧由 `run_recall` 先落这一格：快路行的 `skill_hit` 只从事实读（T-225）。
+    req.stages = vec![super::super::stage_events::StageFact::ran(
+        super::super::stage_events::StageName::Recall,
+        0,
+    )
+    .with_result("hit")];
     let res = execute_turn(req).await.expect("反射档执行成功");
 
     assert_eq!(
