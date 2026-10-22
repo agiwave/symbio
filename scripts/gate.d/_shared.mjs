@@ -137,7 +137,7 @@ export const BASELINE = {
   // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
   // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
   // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
-  rustTests: 2065,
+  rustTests: 2066,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -155,8 +155,8 @@ export const BASELINE = {
   // baseline-allow vitestTests: 批 T-208 段一（ADR-111）净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `plugins/session/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
   vitestFiles: 59,
   vitestTests: 888,
-  verifyPrograms: 16,
-  verifyNegatives: 3,
+  verifyPrograms: 17,
+  verifyNegatives: 4,
   // baseline-allow e2eCases: 批 T-056 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // T-117 增 t76（召回可见域）。
   e2eCases: 78,
@@ -176,7 +176,7 @@ export const BASELINE = {
   // ② ③ 在**真实数据形状**上喂合法值 / 越界值各一次：合法值必须全绿（否则判据在误杀）、
   // 越界必须红。真实日志的**回放**不跑这条——夹具只留信封、`reason` 在载荷里、且它采于
   // T-220 之前；硬跑只会得到「每条收束格都缺 reason」的假红，那不是判据错了。
-  verifyAsserts: 247,
+  verifyAsserts: 256,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

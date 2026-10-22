@@ -11,10 +11,9 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::actor_decls;
 use super::{PORTS, ROWS};
 use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
-use crate::symbio_core::{builtin_with, Frozen};
+use crate::symbio_core::Frozen;
 use crate::symbio_core::{Entity, Event, Seq, Verb};
 
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
@@ -36,8 +35,10 @@ fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
     ev(turn, kind, payload).with_ts(ts)
 }
 
+/// 生产装载路径：六个注册口 + `seal`（声明集、执行体、端口、行一起进表）。
+/// 用例拿到的就是会话开幕时那一张表——不是「先冻结声明、行自己想起来再查」。
 fn frozen() -> Arc<Frozen> {
-    builtin_with(&actor_decls()).expect("内置声明 + 执行体注册表必须能冻结")
+    super::load(ROWS).expect("生产行表必须装载得起来，否则义务环拒绝启动")
 }
 
 /// 这一行此刻是否**欠着**这笔账（`open`：`owes` 命中且没有被 `until` 关掉）。
@@ -598,8 +599,8 @@ static GAP_CYCLE: &[Decl] = &[
 fn the_production_table_loads_with_no_gap() {
     // 判据 7 / 11 的正面：生产行表 + 生产声明表**零缺口**。装载失败即拒绝启动，
     // 所以「零缺口」不是一条可以带过的告警，而是能开幕的唯一条件。
-    let frozen = super::assemble(ROWS).expect("行表装载必须无缺口，否则义务环拒绝启动");
-    assert!(check_rows(ROWS, &frozen).is_empty());
+    // `load` 的 `Ok` 就是「§3.4 七道全过」——检查的出口只有一个，不再另跑一遍。
+    super::load(ROWS).expect("行表装载必须无缺口，否则义务环拒绝启动");
 }
 
 #[test]
@@ -633,11 +634,11 @@ fn every_kind_of_load_gap_refuses_to_load() {
     ];
 
     for (label, rows, needle) in cases {
-        let gaps = super::assemble(rows)
+        let gaps = super::load(rows)
             .err()
             .unwrap_or_else(|| panic!("{label}：有缺口的行表必须拒绝装载"));
         assert!(
-            gaps.iter().any(|g| g.contains(needle)),
+            gaps.iter().any(|g| format!("{g:?}").contains(needle)),
             "{label} 应当点名 {needle}，实际缺口：{gaps:?}"
         );
     }
@@ -1286,7 +1287,9 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
 /// （卡住的调用既在等应答，又该有人管），裁决由 `prio` 决出。
 #[test]
 fn the_overlap_report_on_the_production_table() {
-    let report = super::overlaps(ROWS, &frozen());
+    // 名单随表冻结一次（`seal` 通过才算得出），读侧只问表、不再自己算第二遍。
+    let frozen = frozen();
+    let report = frozen.overlaps();
     let rendered: Vec<(&str, &str, &[&str])> = report
         .iter()
         .map(|o| (o.rows[0], o.rows[1], o.facts.as_slice()))
@@ -1330,5 +1333,7 @@ fn the_overlap_report_on_the_production_table() {
 /// `before` 都是声明过的协议格。
 #[test]
 fn every_declared_port_has_its_answer_exits() {
-    assert!(super::check_ports(ROWS, &frozen(), super::PORTS).is_empty());
+    // 真表上的第 5 条端口侧：`load` 的 `Ok` 已经包含这一格（检查的出口只有一个），
+    // 这里再点名单问一次——它防的是「三个端口的应答出口没人还」这种静默。
+    assert!(crate::symbio_core::ring::check_ports(ROWS, &frozen(), PORTS).is_empty());
 }

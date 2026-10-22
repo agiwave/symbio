@@ -362,11 +362,14 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// |---|---|---|---|
 /// | 1 | 依赖图无环 | [`check_dependency_graph`]（`check_rows` 末段调用） | `DependencyCycle` |
 /// | 2 | 每行收口 | [`check_rows`] | `NoExit` / `KeyMismatch` / `ExpandKeyMissing` / `UndeclaredExpand` |
-/// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `Builder::seal`（视图 `reads` 与 `FactDecl` 自引用侧） | `UndeclaredPatternField` + `CheckError::UndeclaredField` / `FactFieldUndeclared` |
+/// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `seal()` 的声明侧（视图 `reads` 与 `FactDecl` 自引用） | `UndeclaredPatternField` + `UndeclaredField` / `FactFieldUndeclared` |
 /// | 4 | 相交行对 | [`overlaps`]——**只报告，不红**（静态判不出「真的同时命中」） | `Overlap` |
-/// | 5 | 写入封闭 | `Builder::seal`（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 T-249 | `CheckError::ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
+/// | 5 | 写入封闭 | `seal()` 的声明侧（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 T-249 | `ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
 /// | 6 | 执行体收口 | [`check_rows`] | `UnmannedRow` / `OrphanActor` / `ActorCannotClose` / `ActorModeTooNarrow` |
 /// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
+///
+/// 除第 4 条（报告）以外，全部走同一个 `Err`：[`Builder::seal`] 是**唯一**的装载出口，
+/// 声明侧与行侧共用下面这一个 [`Gap`] 类型。
 ///
 /// - [`Gap::NoExit`]：这一行没有 `until` / `unless` ⇒ 一旦开账就永远开账；
 /// - [`Gap::KeyMismatch`]：没有一条出口与 `owes` 绑定同一组键 ⇒ 出口永远匹配不上；
@@ -398,6 +401,24 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::PortBeforeUndeclared`]：端口的派发前格（`before`）没有声明；
 /// - [`Gap::PortWithoutAnswerExit`]：这个端口的 `response` / `failed` 不落在任何
 ///   行的出口上——派出去的钱没有还的通道。
+///
+/// ## 声明侧的格子（同一个类型，不分两套）
+///
+/// 五张注册表（fact / view / actor / port / row）经 [`Builder`](super::Builder) 进表后，
+/// 「装载期检查」只有一个出口、也就只有一个错误类型：下面这十格查的是**声明自己**
+/// （重名、撞名、引用不存在的名字、字段没声明、执行体声明了引擎独占的格），
+/// 由 `seal()` 在跑上面七道之前先报。分成两个类型只会让「拒绝启动」出现两次。
+///
+/// - [`Gap::DuplicateFact`] / [`Gap::DuplicateView`] / [`Gap::DuplicateActor`] /
+///   [`Gap::DuplicatePort`]：同一张表里两个同名——按名字查找的地方（`by`、`port` 取值、
+///   视图求值）从此不确定查到的是哪一条；
+/// - [`Gap::NameCollision`]：事实名与视图名撞名——它们共用一个名字空间（视图是合成事实）；
+/// - [`Gap::UnknownFact`] / [`Gap::UndeclaredField`]：视图 `reads` 引用了未声明的事实 /
+///   该事实没有这个字段；
+/// - [`Gap::FactFieldUndeclared`]：事实自己的 `port` / `key` / `expand` 引用了不在
+///   `fields` 里的字段；
+/// - [`Gap::UnknownReadView`]：执行体 `reads` 引用了未声明的视图——运行期静默返回空；
+/// - [`Gap::ActorWritesEngineCell`]：执行体将写协议四格里引擎独占的那些格（§2.3）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Gap {
     NoExit {
@@ -455,6 +476,43 @@ pub(crate) enum Gap {
     },
     PortWithoutAnswerExit {
         port: &'static str,
+        fact: &'static str,
+    },
+    DuplicateFact {
+        name: &'static str,
+    },
+    DuplicateView {
+        name: &'static str,
+    },
+    DuplicateActor {
+        name: &'static str,
+    },
+    DuplicatePort {
+        name: &'static str,
+    },
+    NameCollision {
+        name: &'static str,
+    },
+    UnknownFact {
+        view: &'static str,
+        fact: &'static str,
+    },
+    UndeclaredField {
+        view: &'static str,
+        fact: &'static str,
+        field: &'static str,
+    },
+    FactFieldUndeclared {
+        fact: &'static str,
+        field: &'static str,
+        role: &'static str,
+    },
+    UnknownReadView {
+        actor: &'static str,
+        view: &'static str,
+    },
+    ActorWritesEngineCell {
+        actor: &'static str,
         fact: &'static str,
     },
 }

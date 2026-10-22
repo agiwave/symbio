@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use super::super::{ActorDecl, Builder, FactDecl, ViewDecl};
 use super::*;
 use crate::symbio_core::{Entity, Event, LatencyTier, Seq, Verb};
+use std::sync::Arc;
 
 fn ev(seq: u64, turn: u64, kind: &str, payload: Value) -> Event {
     let mut e = Event::pending(
@@ -58,7 +59,12 @@ const ACT: ActorDecl = ActorDecl {
     writes: &["g", "h", "done"],
 };
 
-fn world_with(actors: &[ActorDecl]) -> std::sync::Arc<Frozen> {
+/// 用例世界的**声明集**：`f` / `g` / `h` 三个事实与两个视图，加上这一用例的执行体。
+///
+/// 这里**不带**归宿行：第 7 条「声明事实有归宿」正是下面一批反向用例的被测面，
+/// 夹具先替它们把归宿补好，那些用例就永远测不到东西。需要一份「只用来求解」的
+/// 表时用 [`decl_world`]，它按事实各补一行。
+fn declare(actors: &[ActorDecl]) -> Builder {
     let mut b = Builder::new();
     for name in ["f", "g", "h"] {
         b.fact(FactDecl {
@@ -86,13 +92,49 @@ fn world_with(actors: &[ActorDecl]) -> std::sync::Arc<Frozen> {
     for d in actors {
         b.actor(*d);
     }
-    b.seal().unwrap()
+    b
 }
 
-/// 默认世界：把 `ACT` 注册上——没有它，`by = Some("act")` 的行在装载期就是
-/// `UnmannedRow`（能选中 ⇔ 有人跑，ADR-118 订正 1）。
-fn world() -> std::sync::Arc<Frozen> {
-    world_with(&[ACT])
+/// 只为了给一个声明事实**归宿**、不参与求解的一行（`by = None`）。
+fn home(fact: &'static str) -> Decl {
+    let exit: &'static [Pattern] = Box::leak(Box::new([pattern(fact, &[], &[])]));
+    Decl {
+        name: fact,
+        prio: 99,
+        by: None,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: exit[0],
+        until: exit,
+        unless: &[],
+    }
+}
+
+/// **装载只有一个出口**（PL-016 §3.3）：五张表灌进六个注册口，`seal()` 跑完全部
+/// 检查。所以反向用例断言的是这个 `Err`，正例断言 `Ok`——不再有「先冻结、再自己想
+/// 起来跑一遍行检查」这种两段式。
+fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> {
+    let mut b = declare(actors);
+    for r in rows {
+        b.row(r.clone());
+    }
+    b.seal()
+}
+
+/// 反向用例的断言面：`seal()` 报出的缺口（装载成功 ⇒ 空表）。
+fn seal_gaps(rows: &[Decl], actors: &[ActorDecl]) -> Vec<Gap> {
+    freeze(rows, actors).err().unwrap_or_default()
+}
+
+/// 求解用例的**声明面**：事实与视图。每个事实补一行归宿才装得起来——`owed` /
+/// `drive` 拿的是各用例自己那份 `rows`，这张表只负责「名字与视图存在」，所以
+/// 归宿行写成 `by = None`，一个执行体也不注册。
+fn decl_world() -> Arc<Frozen> {
+    let mut b = declare(&[]);
+    for name in ["f", "g", "h"] {
+        b.row(home(name));
+    }
+    b.seal().expect("用例的声明集必须能冻结")
 }
 
 fn pattern(
@@ -145,7 +187,7 @@ fn open_debt_needs_owes_and_no_same_key_until() {
         // 只关掉同键那笔。
         ev(4, 1, "g", json!({"id": "a"})),
     ];
-    let debts = owed(&rows, &world(), &events, 0);
+    let debts = owed(&rows, &decl_world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert_eq!(debts[0].key, Key(vec![("id".into(), "b".into())]));
     assert!(!debts[0].blocked);
@@ -163,7 +205,7 @@ fn a_fact_without_until_keeps_the_debt_open_forever() {
         &[],
     )];
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    assert_eq!(owed(&rows, &world(), &events, 0).len(), 1);
+    assert_eq!(owed(&rows, &decl_world(), &events, 0).len(), 1);
 }
 
 #[test]
@@ -180,10 +222,10 @@ fn unless_blocks_without_closing() {
         ev(1, 1, "f", json!({"id": "a"})),
         ev(2, 1, "h", json!({"id": "a"})),
     ];
-    let debts = owed(&rows, &world(), &events, 0);
+    let debts = owed(&rows, &decl_world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked, "`unless` 命中 ⇒ 在等，而不是没事");
-    assert!(drive(&rows, &world(), &events, 0).is_none());
+    assert!(drive(&rows, &decl_world(), &events, 0).is_none());
 }
 
 #[test]
@@ -197,10 +239,10 @@ fn by_none_is_the_declared_waiting_state() {
         &[],
     )];
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    let debts = owed(&rows, &world(), &events, 0);
+    let debts = owed(&rows, &decl_world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked);
-    assert!(drive(&rows, &world(), &events, 0).is_none());
+    assert!(drive(&rows, &decl_world(), &events, 0).is_none());
 }
 
 // ── 视图当源 ─────────────────────────────────────────────────────────────
@@ -216,7 +258,7 @@ fn views_are_expanded_into_instances() {
         &[],
     )];
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    let frozen = world();
+    let frozen = decl_world();
     assert!(
         owed(&obj_rows, &frozen, &events, 99).is_empty(),
         "`now` 未到"
@@ -251,7 +293,7 @@ fn a_null_view_has_no_instances() {
         &[],
     )];
     // 没有 `f` ⇒ 对象视图返回 null ⇒ 没有实例（不是一笔空键的账）。
-    assert!(owed(&rows, &world(), &[], 0).is_empty());
+    assert!(owed(&rows, &decl_world(), &[], 0).is_empty());
 }
 
 // ── 裁决序 ───────────────────────────────────────────────────────────────
@@ -286,7 +328,7 @@ fn drive_takes_min_by_prio_then_name_then_key() {
         ev(1, 1, "f", json!({"id": "b"})),
         ev(2, 1, "f", json!({"id": "a"})),
     ];
-    let frozen = world();
+    let frozen = decl_world();
     // 同 `prio` 按行名；注册顺序相反也不影响。
     let rows = [low.clone(), earlier.clone(), later.clone()];
     let picked = drive(&rows, &frozen, &events, 0).unwrap();
@@ -310,15 +352,15 @@ fn same_row_same_prio_breaks_ties_by_key() {
         ev(1, 1, "f", json!({"id": "b"})),
         ev(2, 1, "f", json!({"id": "a"})),
     ];
-    let picked = drive(&rows, &world(), &events, 0).unwrap();
+    let picked = drive(&rows, &decl_world(), &events, 0).unwrap();
     assert_eq!(picked.key.trace(), "id=a");
 }
 
 #[test]
 fn empty_table_never_drives_but_is_complete() {
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    assert!(owed(&[], &world(), &events, 0).is_empty());
-    assert!(drive(&[], &world(), &events, 0).is_none());
+    assert!(owed(&[], &decl_world(), &events, 0).is_empty());
+    assert!(drive(&[], &decl_world(), &events, 0).is_none());
 }
 
 /// 守卫用例的替身（ADR-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，
@@ -333,7 +375,7 @@ fn a_by_without_an_actor_is_a_load_time_gap() {
         &[pattern("g", &["id"], &[])],
         &[],
     )];
-    let gaps = check_rows(&rows, &world());
+    let gaps = seal_gaps(&rows, &[ACT]);
     assert!(gaps.contains(&Gap::UnmannedRow {
         row: "unwired",
         by: "nobody"
@@ -354,7 +396,7 @@ fn a_none_by_needs_no_actor() {
         &[pattern("g", &["id"], &[]), pattern("h", &["id"], &[])],
         &[],
     )];
-    assert!(check_rows(&rows, &world_with(&[])).is_empty());
+    assert!(seal_gaps(&rows, &[]).is_empty());
 }
 
 /// 执行体写的名字必须够关上自己那一行的出口（第 6 条收口）。
@@ -369,13 +411,15 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
         &[pattern("g", &["id"], &[])],
         &[],
     )];
-    let frozen = world_with(&[ActorDecl {
-        name: "act",
-        mode: LatencyTier::Deep,
-        reads: &[],
-        writes: &["z"],
-    }]);
-    let gaps = check_rows(&rows, &frozen);
+    let gaps = seal_gaps(
+        &rows,
+        &[ActorDecl {
+            name: "act",
+            mode: LatencyTier::Deep,
+            reads: &[],
+            writes: &["z"],
+        }],
+    );
     assert!(gaps.contains(&Gap::ActorCannotClose {
         row: "r",
         actor: "act"
@@ -398,18 +442,19 @@ fn a_row_slower_than_its_actor_mode_is_a_gap() {
         d.tier = LatencyTier::Deep;
         [d]
     };
-    let frozen = world_with(&[ActorDecl {
-        name: "act",
-        mode: LatencyTier::Reflex,
-        reads: &[],
-        writes: &["g"],
-    }]);
-    assert!(
-        check_rows(&rows, &frozen).contains(&Gap::ActorModeTooNarrow {
-            row: "r",
-            actor: "act"
-        })
-    );
+    assert!(seal_gaps(
+        &rows,
+        &[ActorDecl {
+            name: "act",
+            mode: LatencyTier::Reflex,
+            reads: &[],
+            writes: &["g"],
+        }],
+    )
+    .contains(&Gap::ActorModeTooNarrow {
+        row: "r",
+        actor: "act"
+    }));
 }
 
 // ── 纯性 ─────────────────────────────────────────────────────────────────
@@ -428,7 +473,7 @@ fn same_slice_same_now_same_debts() {
         ev(1, 1, "f", json!({"id": "a"})),
         ev(2, 1, "f", json!({"id": "b"})),
     ];
-    let frozen = world();
+    let frozen = decl_world();
     let first: Vec<_> = owed(&rows, &frozen, &events, 500)
         .into_iter()
         .map(|d| (d.decl.name, d.key.trace(), d.blocked))
@@ -444,7 +489,7 @@ fn same_slice_same_now_same_debts() {
 // ── 装载期检查 ───────────────────────────────────────────────────────────
 
 #[test]
-fn check_rows_finds_every_kind_of_gap() {
+fn seal_finds_every_kind_of_gap() {
     let rows = [
         // 无出口
         row(
@@ -483,7 +528,7 @@ fn check_rows_finds_every_kind_of_gap() {
             &[],
         ),
     ];
-    let gaps = check_rows(&rows, &world());
+    let gaps = seal_gaps(&rows, &[ACT]);
     assert!(gaps.contains(&Gap::NoExit { row: "no-exit" }));
     assert!(gaps.contains(&Gap::KeyMismatch {
         row: "key-mismatch"
@@ -507,7 +552,7 @@ fn a_complete_row_set_has_no_gaps() {
         &[pattern("g", &["id"], &[]), pattern("h", &["id"], &[])],
         &[],
     )];
-    assert!(check_rows(&rows, &world()).is_empty());
+    assert!(seal_gaps(&rows, &[ACT]).is_empty());
 }
 
 // ── 端口声明（T-223）─────────────────────────────────────────────────────
@@ -542,8 +587,8 @@ fn a_port_is_declared_once_and_found_by_name() {
 
 // ── 集合展开（PL-017 §3.3）──────────────────────────────────────────────
 
-/// 一篮子的世界：`batch` 的 `calls` 声明为可展开字段。
-fn world_batch() -> std::sync::Arc<Frozen> {
+/// 一篮子的**声明集**：`batch` 的 `calls` 声明为可展开字段。
+fn declare_batch() -> Builder {
     let mut b = Builder::new();
     b.fact(FactDecl {
         name: "batch",
@@ -560,7 +605,31 @@ fn world_batch() -> std::sync::Arc<Frozen> {
         fields: &["id"],
     });
     b.actor(ACT);
-    b.seal().unwrap()
+    b
+}
+
+/// 求解用例用的篮子表：一行「`batch` 欠、`done` 还」给两个事实归宿，同时让 `act`
+/// 不是孤儿执行体——第 7 条与第 6 条都不许靠夹具说谎。
+fn world_batch() -> Arc<Frozen> {
+    let mut b = declare_batch();
+    b.row(row(
+        "home",
+        99,
+        Some("act"),
+        pattern("batch", &[], &[]),
+        &[pattern("done", &[], &[])],
+        &[],
+    ));
+    b.seal().expect("篮子世界的声明集必须能冻结")
+}
+
+/// 篮子表上的装载缺口（`rows` 与声明集一起 `seal`）。
+fn seal_batch(rows: &[Decl]) -> Vec<Gap> {
+    let mut b = declare_batch();
+    for r in rows {
+        b.row(r.clone());
+    }
+    b.seal().err().unwrap_or_default()
 }
 
 fn row_exp(
@@ -660,7 +729,7 @@ fn expand_gaps_are_load_time_errors() {
             &[pattern("done", &["id"], &[])],
         ),
     ];
-    let gaps = check_rows(&rows, &world_batch());
+    let gaps = seal_batch(&rows);
     assert!(gaps.contains(&Gap::ExpandKeyMissing {
         row: "key-missing",
         field: "call_id"
@@ -681,7 +750,7 @@ fn a_complete_expand_row_has_no_gaps() {
         pattern("batch", &["id"], &[]),
         &[pattern("done", &["id"], &[])],
     )];
-    assert!(check_rows(&rows, &world_batch()).is_empty());
+    assert!(seal_batch(&rows).is_empty());
 }
 
 // ── 装载期七道检查的反向用例（§3.4，指认表见 [`check_rows`] 的文档）─────────
@@ -701,7 +770,7 @@ fn a_pattern_field_must_be_declared_by_the_fact() {
         &[],
     )];
     assert!(
-        check_rows(&rows, &world()).contains(&Gap::UndeclaredPatternField {
+        seal_gaps(&rows, &[ACT]).contains(&Gap::UndeclaredPatternField {
             row: "typo",
             source: "f",
             field: "idea",
@@ -718,7 +787,7 @@ fn a_pattern_field_must_be_declared_by_the_fact() {
         &[],
     )];
     assert!(
-        check_rows(&rows, &world()).contains(&Gap::UndeclaredPatternField {
+        seal_gaps(&rows, &[ACT]).contains(&Gap::UndeclaredPatternField {
             row: "typo",
             source: "f",
             field: "em",
@@ -741,7 +810,7 @@ fn the_envelope_fields_need_no_declaration() {
         &[pattern("g", &["turn", "seq", "ts"], &[])],
         &[],
     )];
-    let gaps = check_rows(&rows, &world());
+    let gaps = seal_gaps(&rows, &[ACT]);
     assert!(
         !gaps
             .iter()
@@ -787,7 +856,7 @@ fn a_cycle_in_the_who_settles_whom_graph_is_a_gap() {
         ),
     ];
     assert_eq!(
-        check_rows(&rows, &world_with(&[ONE, TWO])),
+        seal_gaps(&rows, &[ONE, TWO]),
         vec![Gap::DependencyCycle {
             cycle: vec!["r1", "r2", "r1"]
         }]
@@ -806,7 +875,7 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
         &[pattern("g", &["id"], &[])],
         &[],
     )];
-    let gaps = check_rows(&rows, &world());
+    let gaps = seal_gaps(&rows, &[ACT]);
     assert!(
         !gaps
             .iter()
@@ -839,10 +908,11 @@ fn overlapping_rows_are_reported_not_rejected() {
             &[],
         ),
     ];
-    let frozen = world_with(&[]);
-    assert!(check_rows(&rows, &frozen).is_empty());
+    // 第 4 条是**报告**，只在装载成功的表上算得出：这里两张行都自洽 ⇒ `seal` 通过，
+    // 名单就挂在冻结后的表上（读侧不再自己算第二遍）。
+    let frozen = freeze(&rows, &[]).expect("相交不是缺口：第 4 条只报告");
     assert_eq!(
-        overlaps(&rows, &frozen),
+        frozen.overlaps(),
         vec![Overlap {
             rows: ["r1", "r2"],
             facts: vec!["f"],
@@ -880,9 +950,15 @@ fn rows_that_cannot_collide_are_not_reported() {
             &[],
         ),
     ];
-    let frozen = world_with(&[]);
+    // `h` 在这一批行里没人读——它不归第 4 条管，补一行归宿让它别把装载判死。
+    let mut b = declare(&[]);
+    b.row(home("h"));
+    for r in rows {
+        b.row(r.clone());
+    }
+    let frozen = b.seal().expect("相交报告只在装载成功的表上算");
     assert_eq!(
-        overlaps(&rows, &frozen),
+        frozen.overlaps(),
         vec![Overlap {
             rows: ["by-id", "go"],
             facts: vec!["f"],
@@ -890,9 +966,27 @@ fn rows_that_cannot_collide_are_not_reported() {
     );
 }
 
-/// 端口声明夹具：协议名在 `builtin` 那张表里，行夹具的 `f` / `g` / `h` 没有端口维。
-fn protocol_world() -> std::sync::Arc<Frozen> {
-    crate::symbio_core::decl::builtin_with(&[]).expect("协议名必须能冻结")
+/// 端口检查夹具：协议三格（`sent` / `response` / `failed`）按**端口字段**声明，
+/// 再与这一用例的行一起 `seal`。
+///
+/// 端口的第 5 条不再单点调用 `check_ports`——它和其余六道一样只在 [`Builder::seal`]
+/// 里跑，所以这里断言的缺口来自同一个装载出口（§3.3「检查的出口只有一个」）。
+fn seal_protocol(rows: &[Decl], port: PortDecl) -> Vec<Gap> {
+    let mut b = Builder::new();
+    for name in [EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
+        b.fact(FactDecl {
+            name,
+            port: Some("port"),
+            key: &["id"],
+            expand: &[],
+            fields: &["port", "id", "attempt"],
+        });
+    }
+    b.port(port);
+    for r in rows {
+        b.row(r.clone());
+    }
+    b.seal().err().unwrap_or_default()
 }
 
 fn port_x() -> PortDecl {
@@ -920,11 +1014,16 @@ fn a_port_without_a_failure_exit_is_a_gap() {
         &[],
     )];
     assert_eq!(
-        check_ports(&rows, &protocol_world(), &[port_x()]),
-        vec![Gap::PortWithoutAnswerExit {
-            port: "x",
-            fact: EVENT_FAILED
-        }]
+        seal_protocol(&rows, port_x()),
+        vec![
+            // 同一件事的两面：`failed` 没有行的出口读它 ⇒ 既没归宿（第 7 条），
+            // 也没有还的通道（第 5 条）。装载一次，两个名字一起说。
+            Gap::OrphanFact { fact: EVENT_FAILED },
+            Gap::PortWithoutAnswerExit {
+                port: "x",
+                fact: EVENT_FAILED
+            },
+        ]
     );
 }
 
@@ -942,7 +1041,7 @@ fn a_port_with_both_answer_exits_loads() {
         ],
         &[],
     )];
-    assert!(check_ports(&rows, &protocol_world(), &[port_x()]).is_empty());
+    assert!(seal_protocol(&rows, port_x()).is_empty());
 }
 
 /// 覆盖必须是**这个端口**的：只写了别的端口的应答格不算。
@@ -960,7 +1059,7 @@ fn another_ports_answer_does_not_cover_this_one() {
         &[],
     )];
     assert_eq!(
-        check_ports(&rows, &protocol_world(), &[port_x()]),
+        seal_protocol(&rows, port_x()),
         vec![
             Gap::PortWithoutAnswerExit {
                 port: "x",
@@ -992,7 +1091,7 @@ fn a_ports_before_cell_must_be_declared() {
     let mut port = port_x();
     port.before = "dispatched";
     assert_eq!(
-        check_ports(&rows, &protocol_world(), &[port]),
+        seal_protocol(&rows, port),
         vec![Gap::PortBeforeUndeclared {
             port: "x",
             fact: "dispatched"

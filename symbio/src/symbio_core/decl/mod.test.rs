@@ -37,9 +37,48 @@ fn seq(e: &Event) -> u64 {
 
 // ── 装载 ─────────────────────────────────────────────────────────────────
 
+/// 一行**只为归宿**存在的行（§3.4 第 7 条的最小形状）：`by` 为 `None` 时它不由引擎
+/// 跑，只回答「这个事实名有人管」；出口写成它自己，键与等值都不绑。
+///
+/// 夹具用它而不是用真行：本模块的用例测的是**声明自己**（重名 / 引用不存在的名字 /
+/// 字段没声明），行侧那几道不该混进断言。
+fn cover(fact: &'static str, by: Option<&'static str>) -> Decl {
+    let exits: &'static [ring::Pattern] = Box::leak(Box::new([ring::Pattern {
+        source: fact,
+        key: &[],
+        eq: &[],
+    }]));
+    Decl {
+        name: fact,
+        prio: 99,
+        by,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: exits[0],
+        until: exits,
+        unless: &[],
+    }
+}
+
+/// 机制层声明集**装起来**的样子：检查的出口只有一个（§3.3），所以连「只想看视图算得
+/// 对不对」的用例也得让这张表通过全部检查——给每个声明事实补一行归宿即可，控制面
+/// （`plugins::loop::loop_rows`）的真行本来就在做同一件事。
+fn core_table() -> Arc<Frozen> {
+    let mut b = Builder::builtin();
+    for &f in BUILTIN_FACTS {
+        b.row(cover(f.name, None));
+    }
+    b.seal().expect("机制层的声明集必须能冻结")
+}
+
+/// `seal()` 报出的缺口（装载成功 ⇒ 空表）。
+fn gaps_of(b: Builder) -> Vec<Gap> {
+    b.seal().err().unwrap_or_default()
+}
+
 #[test]
 fn builtin_loads_and_freezes() {
-    let frozen = builtin_with(&[]).expect("首批声明必须能冻结");
+    let frozen = core_table();
     // 名单即**控制面声明集**：每条都被某一行或某条被行用到的视图消费（判据 7）。
     // 只在审计投影里读的断言格（`turn.dispatch` → `invariants::declared_budget_ms`）
     // 不在这里——它仍是事件名表里的业务事实，只是不进表。
@@ -103,10 +142,28 @@ fn builtin_loads_and_freezes() {
     assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }
 
+/// 口径 1（T-243）：§3.2 的**六个注册口**就是 `Builder` 的全部入口，而且它们的
+/// 形状钉死了 §3.3 的三个时点。
+///
+/// 断言取的是**方法指针**——类型必须逐字对上：`fact / view / actor / port / row`
+/// 借 `&mut self`（进表），`seal` 收 `self`（**消耗** Builder）。后者是「运行期不能
+/// 注册」真正落地的那一格：冻结之后连一个 `&mut Builder` 都造不出来，注册口不是
+/// 被纪律关掉，是被类型关掉。少一个口、多一个口、或把 `seal` 改回 `&self`，这里
+/// 就编译不过。
+#[test]
+fn the_six_registration_ports_are_the_whole_surface() {
+    let _fact: fn(&mut Builder, FactDecl) = Builder::fact;
+    let _view: fn(&mut Builder, ViewDecl) = Builder::view;
+    let _actor: fn(&mut Builder, ActorDecl) = Builder::actor;
+    let _port: fn(&mut Builder, PortDecl) = Builder::port;
+    let _row: fn(&mut Builder, Decl) = Builder::row;
+    let _seal: fn(Builder) -> Result<Arc<Frozen>, Vec<Gap>> = Builder::seal;
+}
+
 #[test]
 fn every_declared_reference_is_a_field() {
     // `port` / `key` / `expand` 都是字段引用；声明不能自相矛盾。
-    let frozen = builtin_with(&[]).unwrap();
+    let frozen = core_table();
     for f in frozen.facts() {
         for field in f
             .port
@@ -124,7 +181,11 @@ fn every_declared_reference_is_a_field() {
     }
 }
 
-// ── 三道检查 ─────────────────────────────────────────────────────────────
+// ── 声明侧的检查 ─────────────────────────────────────────────────────────
+//
+// 每个用例都补一行 [`cover`] 归宿：检查的出口只有一个（§3.3），第 7 条不满足就会
+// 混进同一份 `Err` 里，而这里断言的是**声明自己**的那一格——补上夹具的归宿，
+// 「装载说的就是这一格」才成立。
 
 #[test]
 fn view_cannot_read_an_undeclared_field() {
@@ -136,6 +197,7 @@ fn view_cannot_read_an_undeclared_field() {
         expand: &[],
         fields: &["port", "id"],
     });
+    b.row(cover(EVENT_REQUEST, None));
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
@@ -144,8 +206,8 @@ fn view_cannot_read_an_undeclared_field() {
         eval: in_flight,
     });
     assert_eq!(
-        b.seal().unwrap_err(),
-        vec![CheckError::UndeclaredField {
+        gaps_of(b),
+        vec![Gap::UndeclaredField {
             view: "probe",
             fact: EVENT_REQUEST,
             field: "attmpt",
@@ -164,8 +226,8 @@ fn view_cannot_read_an_undeclared_fact() {
         eval: in_flight,
     });
     assert_eq!(
-        b.seal().unwrap_err(),
-        vec![CheckError::UnknownFact {
+        gaps_of(b),
+        vec![Gap::UnknownFact {
             view: "probe",
             fact: "ghost",
         }]
@@ -177,9 +239,10 @@ fn duplicate_fact_is_rejected() {
     let mut b = Builder::new();
     b.fact(BUILTIN_FACTS[0]);
     b.fact(BUILTIN_FACTS[0]);
+    b.row(cover(EVENT_REQUEST, None));
     assert_eq!(
-        b.seal().unwrap_err(),
-        vec![CheckError::DuplicateFact {
+        gaps_of(b),
+        vec![Gap::DuplicateFact {
             name: EVENT_REQUEST
         }]
     );
@@ -190,19 +253,18 @@ fn duplicate_view_is_rejected() {
     let mut b = Builder::new();
     for &f in BUILTIN_FACTS {
         b.fact(f);
+        b.row(cover(f.name, None));
     }
     b.view(BUILTIN_VIEWS[0]);
     b.view(BUILTIN_VIEWS[0]);
-    assert_eq!(
-        b.seal().unwrap_err(),
-        vec![CheckError::DuplicateView { name: "in_flight" }]
-    );
+    assert_eq!(gaps_of(b), vec![Gap::DuplicateView { name: "in_flight" }]);
 }
 
 #[test]
 fn fact_and_view_share_one_name_space() {
     let mut b = Builder::new();
     b.fact(BUILTIN_FACTS[0]);
+    b.row(cover(EVENT_REQUEST, None));
     b.view(ViewDecl {
         name: EVENT_REQUEST,
         ver: 1,
@@ -211,8 +273,8 @@ fn fact_and_view_share_one_name_space() {
         eval: in_flight,
     });
     assert_eq!(
-        b.seal().unwrap_err(),
-        vec![CheckError::NameCollision {
+        gaps_of(b),
+        vec![Gap::NameCollision {
             name: EVENT_REQUEST
         }]
     );
@@ -225,11 +287,8 @@ fn eval_takes_only_events_and_now() {
     // 签名即隔离：视图拿不到 `&Store`（写口）也拿不到别的视图。
     let eval: fn(&[Event], i64) -> Value = in_flight;
     assert_eq!(eval(&[], 0), json!([]));
-    assert_eq!(
-        builtin_with(&[]).unwrap().eval("in_flight", &[], 0),
-        Some(json!([]))
-    );
-    assert_eq!(builtin_with(&[]).unwrap().eval("ghost", &[], 0), None);
+    assert_eq!(core_table().eval("in_flight", &[], 0), Some(json!([])));
+    assert_eq!(core_table().eval("ghost", &[], 0), None);
 }
 
 #[test]
@@ -237,6 +296,7 @@ fn eval_respects_declared_cost() {
     // `cost` 是声明的扫描上界；超界返回 `None`，不静默算一半。
     let mut b = Builder::new();
     b.fact(BUILTIN_FACTS[1]);
+    b.row(cover(EVENT_SENT, None));
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
@@ -292,7 +352,7 @@ fn in_flight_holds_sent_until_response_or_failure() {
         ),
     ];
     assert_eq!(
-        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
+        core_table().eval("in_flight", &events, 0),
         Some(json!([{"id": "b", "port": "turn", "attempt": 1}]))
     );
 }
@@ -318,7 +378,7 @@ fn in_flight_is_attempt_scoped() {
         ),
     ];
     assert_eq!(
-        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
+        core_table().eval("in_flight", &events, 0),
         Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
     );
 }
@@ -344,7 +404,7 @@ fn in_flight_drops_the_attempt_retry_voided() {
         ),
     ];
     assert_eq!(
-        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
+        core_table().eval("in_flight", &events, 0),
         Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
     );
 }
@@ -368,12 +428,7 @@ fn sent_at(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
 #[test]
 fn stale_sent_folds_the_lease_and_the_attempt_cap() {
     let events = vec![sent_at("a", 1, 1000, 3, 1_000)];
-    let at = |now: i64| {
-        builtin_with(&[])
-            .unwrap()
-            .eval("stale_sent", &events, now)
-            .unwrap()
-    };
+    let at = |now: i64| core_table().eval("stale_sent", &events, now).unwrap();
 
     // 租约未到：不算卡住，但它在途（有实例，`stale:false`）。
     assert_eq!(
@@ -391,9 +446,7 @@ fn stale_sent_folds_the_lease_and_the_attempt_cap() {
     // 尝试到顶：同一个实例上 `exhausted` 为真——到期但要判死，不是再重试。
     let events = vec![sent_at("a", 3, 1000, 3, 1_000)];
     assert_eq!(
-        builtin_with(&[])
-            .unwrap()
-            .eval("stale_sent", &events, 9_000),
+        core_table().eval("stale_sent", &events, 9_000),
         Some(
             json!([{"port": "turn", "id": "a", "attempt": 3, "age_ms": 8000,
                     "stale": true, "exhausted": true}])
@@ -428,9 +481,7 @@ fn stale_sent_only_sees_calls_nobody_closed() {
         ),
     ];
     assert_eq!(
-        builtin_with(&[])
-            .unwrap()
-            .eval("stale_sent", &events, 100_000),
+        core_table().eval("stale_sent", &events, 100_000),
         Some(json!([]))
     );
 }
@@ -444,9 +495,7 @@ fn stale_sent_never_expires_a_call_without_a_lease() {
         json!({"port": "turn", "id": "a", "attempt": 1}),
     )];
     assert_eq!(
-        builtin_with(&[])
-            .unwrap()
-            .eval("stale_sent", &events, 1_000_000),
+        core_table().eval("stale_sent", &events, 1_000_000),
         Some(
             json!([{"port": "turn", "id": "a", "attempt": 1, "age_ms": 1_000_000,
                     "stale": false, "exhausted": false}])
@@ -800,15 +849,23 @@ fn an_actor_cannot_claim_an_engine_cell() {
         // `ActorDecl.writes` 要 `'static`；用例进程内泄漏可忽略（同 `ring.test.rs` 的出口切片）。
         let writes: &'static [&'static str] = Box::leak(Box::new([cell]));
         let mut b = Builder::new();
+        b.fact(FactDecl {
+            name: cell,
+            port: Some("port"),
+            key: &["id"],
+            expand: &[],
+            fields: &["port", "id"],
+        });
         b.actor(ActorDecl {
             name: "carrier",
             mode: LatencyTier::Deep,
             reads: &[],
             writes,
         });
+        b.row(cover(cell, Some("carrier")));
         assert_eq!(
-            b.seal().err().unwrap_or_default(),
-            vec![CheckError::ActorWritesEngineCell {
+            gaps_of(b),
+            vec![Gap::ActorWritesEngineCell {
                 actor: "carrier",
                 fact: cell
             }],
@@ -822,11 +879,19 @@ fn an_actor_cannot_claim_an_engine_cell() {
 #[test]
 fn the_request_cell_belongs_to_the_decider() {
     let mut b = Builder::new();
+    b.fact(FactDecl {
+        name: EVENT_REQUEST,
+        port: Some("port"),
+        key: &["id"],
+        expand: &[],
+        fields: &["port", "id"],
+    });
     b.actor(ActorDecl {
         name: "decider",
         mode: LatencyTier::Deep,
         reads: &[],
         writes: &[EVENT_REQUEST],
     });
-    assert!(b.seal().is_ok());
+    b.row(cover(EVENT_REQUEST, Some("decider")));
+    assert_eq!(gaps_of(b), vec![]);
 }

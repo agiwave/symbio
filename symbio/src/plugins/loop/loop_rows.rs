@@ -44,24 +44,22 @@
 //!
 //! ## 装载期检查
 //!
-//! 首次查询时冻结声明表并跑 [`check_rows`]，**任何缺口都是拒绝**（PL-016 §3.4 末句
-//! 「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后装载返回 `None`，
-//! [`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要表再干活，
-//! 拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
+//! 首次查询时经 [`load`] 把五张表灌进 `Builder` 的六个注册口并 `seal`，**任何缺口都是
+//! 拒绝**（PL-016 §3.4 末句「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后
+//! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要
+//! 表再干活，拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
 
 use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use crate::symbio_core::ring::{
-    check_ports, check_rows, overlaps, owed, Decl, Lit, Pattern, PortDecl,
-};
+use crate::symbio_core::ring::{owed, Decl, Gap, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
-    builtin_with, ActorDecl, Event, Frozen, LatencyTier, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
-    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH, EVENT_TURN_STAGE,
+    ActorDecl, Builder, Event, Frozen, LatencyTier, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
+    EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
+    EVENT_TURN_STAGE,
 };
 
 /// 这张表里**唯一有执行体的名字**：`execute`（整轮执行体）。
@@ -105,7 +103,7 @@ const ACTOR_EXECUTE: ActorDecl = ActorDecl {
 /// **执行体绑定表**（PL-016 §3.2 的 `actor` 口 + ADR-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
-/// 投影，交给 `builtin_with` 冻结）与派发器跑得动的动作（[`next`] 查出的
+/// 投影，经 `Builder::actor` 入口冻结）与派发器跑得动的动作（[`next`] 查出的
 /// [`Next::action`]）因此不可能一个有一个没有。接线一个执行体 = 在这里加一条 +
 /// 把那一行的 `by` 改回 `Some(名字)`，同一个提交。
 ///
@@ -696,28 +694,40 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 装载：冻结声明表（含执行体声明）→ 用行表 + 端口表跑装载期检查。
+/// 装载：五张注册表经 PL-016 §3.2 的**六个口**进 `Builder`，`seal()` 跑完 §3.4 的七道。
 ///
-/// **任何缺口都是装载失败**——`check_rows` 与 `check_ports` 报出的每一格（重复名 /
-/// 无出口 / 键不一致 / 未声明源 / 未声明字段 / 展开键不匹配 / 孤儿事实名 / 无人认领
-/// 的 `by` / 收不了口的执行体 / 依赖成环 / 端口没有应答出口）都进 Err 列表，不降级
-/// 成告警：一个没人消费的事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，
-/// 它在装载期就该挡住启动。
+/// 行切片与端口切片从这里进 `row` / `port` 两个入口——检查跟着表走，不由调用方
+/// 自己想起来再跑一遍：`seal` 是装载的唯一出口。
 ///
-/// 执行体声明与绑定项一起交（[`super::turn_exec::actor_decls`] 就是绑定表的
-/// `decl` 投影），所以装载期能看到的名字与派发器跑得动的名字**同源**。
+/// **任何缺口都是装载失败**——`seal` 一次报全的每一格（声明侧重名 / 撞名 / 视图引用
+/// 未声明的事实或字段 / 执行体声明了引擎独占的格，行侧无出口 / 键不一致 / 未声明源 /
+/// 未声明字段 / 展开键不匹配 / 孤儿事实名 / 无人认领的 `by` / 收不了口的执行体 /
+/// 依赖成环 / 端口没有应答出口）都在同一个 `Vec<Gap>` 里，不降级成告警：一个没人
+/// 消费的事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，它在装载期就该挡住启动。
 ///
-/// §3.4 第 4 条（相交行对）是**报告**，不是缺口：静态只能判「可能同时命中」，
-/// 谁先派发归 `drive` 的 `(prio, name, key)`。它在开幕前打一次，让遮蔽可见。
-fn assemble(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<String>> {
-    let frozen = builtin_with(&actor_decls())
-        .map_err(|errors| vec![format!("事实 / 视图 / 执行体声明装载失败：{errors:?}")])?;
-    let mut gaps = check_rows(rows, &frozen);
-    gaps.extend(check_ports(rows, &frozen, PORTS));
-    if !gaps.is_empty() {
-        return Err(gaps.iter().map(|g| format!("{g:?}")).collect());
+/// 执行体声明与绑定项一起交（[`actor_decls`] 就是绑定表的 `decl` 投影），所以装载期
+/// 能看到的名字与派发器跑得动的名字**同源**。
+pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
+    let mut b = Builder::builtin();
+    for decl in actor_decls() {
+        b.actor(decl);
     }
-    let overlapping = overlaps(rows, &frozen);
+    for &p in PORTS {
+        b.port(p);
+    }
+    for r in rows {
+        b.row(r.clone());
+    }
+    b.seal()
+}
+
+/// 真表装载，并把 §3.4 第 4 条的报告打出来。
+///
+/// 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，谁先派发归 `drive` 的
+/// `(prio, name, key)`。名单随表冻结（[`Frozen::overlaps`]），这里只负责让人看见。
+fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
+    let frozen = load(ROWS)?;
+    let overlapping = frozen.overlaps();
     if !overlapping.is_empty() {
         crate::plugin_info!(
             "session",
@@ -734,7 +744,19 @@ fn assemble(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<String>> {
 }
 
 /// 冻结的声明表（进程内唯一）。装载有任何缺口 ⇒ `None`，[`table`] 恒 `Err`。
-static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble(ROWS) {
+///
+/// ## 为什么进程级单例 ≡ 按会话注入
+///
+/// 五张表灌进 `Builder` 的全是 `&'static` 数据（`Decl` / `PortDecl` / `ActorDecl` 的
+/// 每个字段都是 `&'static str` / `&'static [_]` / `Copy`），`seal(self)` 又是**消耗**
+/// `self` 的：同一份程序文本只能冻出同一张表，按会话构造得到的就是这个值。于是
+/// `LazyLock` 不是「一条全局可变注册通道」，而是一个纯函数的记忆化——它的
+/// `Option` 缓存的是**失败**（缺口已逐条进 error 日志），不是可写的状态。
+///
+/// 与按会话注入真正不同的只有**开幕时机**：这里首次查询即装载，失败缓存后每一次开幕
+/// 都带同一个 `Err` 退出（[`table`]），不存在「这一届会话拿到了半张表」。类型面上
+/// `Session` 只持 `Arc<Frozen>`，`Frozen` 没有 `&mut self` 方法、没有内部可变性。
+static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble() {
     Ok(frozen) => Some(frozen),
     Err(gaps) => {
         crate::plugin_error!(
@@ -804,7 +826,7 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     let Some(frozen) = frozen() else {
         return false;
     };
-    let debt = owed(ROWS, &frozen, turn_slice(events, turn), now)
+    let debt = owed(frozen.rows(), &frozen, turn_slice(events, turn), now)
         .into_iter()
         .find(|d| d.decl.name == name);
     if let Some(debt) = &debt {
@@ -840,7 +862,8 @@ pub(crate) struct Next {
 /// 接回时与它的 `ActorEntry` 同批改（ADR-118 订正 1）。
 pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
     let frozen = frozen()?;
-    let debt = crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now)?;
+    let debt =
+        crate::symbio_core::ring::drive(frozen.rows(), &frozen, turn_slice(events, turn), now)?;
     trace(&frozen, &debt);
     // 选债面与动作同源：`by` 有声明 ⇔ 绑定表有这一条（两者一起构造），
     // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作。
@@ -867,10 +890,18 @@ pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<
 }
 
 /// 这一行携带的档位。未登记 ⇒ 深度档（fail-safe：不静默提速）。
+///
+/// 读的是**冻结表**里的那一行（`frozen.rows()`），不是 `static ROWS`：装载入口用
+/// `static` 灌表，读侧只认表——否则「改了 static 但表没重装」这种漂移就没有出口。
 pub(crate) fn tier(name: &str) -> LatencyTier {
-    ROWS.iter()
-        .find(|d| d.name == name)
-        .map(|d| d.tier)
+    frozen()
+        .and_then(|frozen| {
+            frozen
+                .rows()
+                .iter()
+                .find(|d| d.name == name)
+                .map(|d| d.tier)
+        })
         .unwrap_or(LatencyTier::Deep)
 }
 

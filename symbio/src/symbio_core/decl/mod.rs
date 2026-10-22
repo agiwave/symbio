@@ -77,6 +77,8 @@ use crate::symbio_core::event::{
 
 pub(crate) mod ring;
 
+use ring::{check_ports, check_rows, overlaps, Decl, Gap, Overlap, PortDecl};
+
 /// 一个事实名的声明。
 ///
 /// 字段全部是数据：`name` 是唯一的身份；`port` / `key` / `expand` 都是**字段引用**，
@@ -140,57 +142,48 @@ pub(crate) struct ActorDecl {
     pub(crate) writes: &'static [&'static str],
 }
 
-/// `seal()` 的检查失败项。一次返回全部，不是首错即停。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CheckError {
-    /// 两个 `FactDecl` 同名。
-    DuplicateFact { name: &'static str },
-    /// 两个 `ViewDecl` 同名。
-    DuplicateView { name: &'static str },
-    /// 事实名与视图名撞名（视图是合成事实，同一名字空间）。
-    NameCollision { name: &'static str },
-    /// 视图引用了一个未声明的事实。
-    UnknownFact {
-        view: &'static str,
-        fact: &'static str,
-    },
-    /// 视图引用了一个未声明的字段。
-    UndeclaredField {
-        view: &'static str,
-        fact: &'static str,
-        field: &'static str,
-    },
-    /// 事实自己的 `port` / `key` / `expand` 引用了未声明的字段。
-    FactFieldUndeclared {
-        fact: &'static str,
-        field: &'static str,
-        role: &'static str,
-    },
-    /// 两个 `ActorDecl` 同名（`by` 按名字查找，重名 ⇒ 查到哪个不确定）。
-    DuplicateActor { name: &'static str },
-    /// 执行体 `reads` 引用了一个没有声明的视图。
-    UnknownReadView {
-        actor: &'static str,
-        view: &'static str,
-    },
-    /// 执行体 `writes` 里出现了一个**引擎独占**的协议格。
-    ActorWritesEngineCell {
-        actor: &'static str,
-        fact: &'static str,
-    },
-}
-
 /// 装载期的唯一注册口。`seal()` 之后没有可变方法（见 [`Frozen`]）。
+///
+/// ## 六个口就是 PL-016 §3.2 的六个口
+///
+/// `fact` / `view` / `actor` / `port` / `row` 五个填表口 + `seal`。五张注册表在
+/// [`Builder`] 里是一一对应的五个 `Vec`，`seal(self)` **消耗** `self`——冻结后连
+/// `&mut Builder` 都不存在，「运行期不能注册」是类型而不是纪律（§3.3）。
+///
+/// ## 检查的出口只有一个
+///
+/// `seal()` 先查声明自己（重名 / 撞名 / 引用不存在的名字 / 字段没声明 / 执行体声明了
+/// 引擎独占的格），再跑 §3.4 的七道（行侧与端口侧）。它们报的都是同一个
+/// [`Gap`]，因此「装载失败即拒绝启动」只有一处判据、一处 Err——不存在「声明过了但
+/// 行还没查」这种部分成功。
 #[derive(Debug, Default)]
 pub(crate) struct Builder {
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
     actors: Vec<ActorDecl>,
+    ports: Vec<PortDecl>,
+    rows: Vec<Decl>,
 }
 
 impl Builder {
+    /// 空表：只给用例搭小世界（真表经 [`Builder::builtin`] 起头）。
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// **机制层的声明集**灌进注册口（事实 + 视图），执行体 / 端口 / 行由插件注册。
+    ///
+    /// 这就是 §3.3 的「装载期」：机制层只声明自己那两张表，业务那三张（actor /
+    /// port / row）由控制面经注册口交进来，然后一起 `seal`。
+    pub(crate) fn builtin() -> Self {
+        let mut b = Self::new();
+        for &f in BUILTIN_FACTS {
+            b.fact(f);
+        }
+        for &v in BUILTIN_VIEWS {
+            b.view(v);
+        }
+        b
     }
 
     pub(crate) fn fact(&mut self, d: FactDecl) {
@@ -205,35 +198,43 @@ impl Builder {
         self.actors.push(d);
     }
 
-    /// 冻结并检查。通过 ⇒ [`Frozen`]（只读）；失败 ⇒ 全部错误。
-    pub(crate) fn seal(self) -> Result<Arc<Frozen>, Vec<CheckError>> {
-        let mut errors = Vec::new();
+    pub(crate) fn port(&mut self, d: PortDecl) {
+        self.ports.push(d);
+    }
+
+    pub(crate) fn row(&mut self, d: Decl) {
+        self.rows.push(d);
+    }
+
+    /// 冻结并跑装载期全部检查。通过 ⇒ [`Frozen`]（只读）；失败 ⇒ 全部缺口。
+    pub(crate) fn seal(self) -> Result<Arc<Frozen>, Vec<Gap>> {
+        let mut gaps = Vec::new();
 
         let mut fact_names = HashSet::new();
         for f in &self.facts {
             if !fact_names.insert(f.name) {
-                errors.push(CheckError::DuplicateFact { name: f.name });
+                gaps.push(Gap::DuplicateFact { name: f.name });
             }
         }
         let mut view_names = HashSet::new();
         for v in &self.views {
             if !view_names.insert(v.name) {
-                errors.push(CheckError::DuplicateView { name: v.name });
+                gaps.push(Gap::DuplicateView { name: v.name });
             }
         }
         for v in &self.views {
             if fact_names.contains(v.name) {
-                errors.push(CheckError::NameCollision { name: v.name });
+                gaps.push(Gap::NameCollision { name: v.name });
             }
         }
         let mut actor_names = HashSet::new();
         for a in &self.actors {
             if !actor_names.insert(a.name) {
-                errors.push(CheckError::DuplicateActor { name: a.name });
+                gaps.push(Gap::DuplicateActor { name: a.name });
             }
             for view in a.reads {
                 if !view_names.contains(view) {
-                    errors.push(CheckError::UnknownReadView {
+                    gaps.push(Gap::UnknownReadView {
                         actor: a.name,
                         view,
                     });
@@ -243,11 +244,17 @@ impl Builder {
             // 「实际写入 ⊆ `writes`」那一半要有值返回账本才能对账，归 T-249。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
-                    errors.push(CheckError::ActorWritesEngineCell {
+                    gaps.push(Gap::ActorWritesEngineCell {
                         actor: a.name,
                         fact,
                     });
                 }
+            }
+        }
+        let mut port_names = HashSet::new();
+        for p in &self.ports {
+            if !port_names.insert(p.port) {
+                gaps.push(Gap::DuplicatePort { name: p.port });
             }
         }
 
@@ -259,7 +266,7 @@ impl Builder {
             ] {
                 for field in fields {
                     if !f.fields.contains(&field) {
-                        errors.push(CheckError::FactFieldUndeclared {
+                        gaps.push(Gap::FactFieldUndeclared {
                             fact: f.name,
                             field,
                             role,
@@ -272,37 +279,63 @@ impl Builder {
         for v in &self.views {
             for &(fact, field) in v.reads {
                 match self.facts.iter().find(|f| f.name == fact) {
-                    None => errors.push(CheckError::UnknownFact { view: v.name, fact }),
-                    Some(f) if !f.fields.contains(&field) => {
-                        errors.push(CheckError::UndeclaredField {
-                            view: v.name,
-                            fact,
-                            field,
-                        })
-                    }
+                    None => gaps.push(Gap::UnknownFact { view: v.name, fact }),
+                    Some(f) if !f.fields.contains(&field) => gaps.push(Gap::UndeclaredField {
+                        view: v.name,
+                        fact,
+                        field,
+                    }),
                     Some(_) => {}
                 }
             }
         }
 
-        if errors.is_empty() {
-            Ok(Arc::new(Frozen {
-                facts: self.facts,
-                views: self.views,
-                actors: self.actors,
-            }))
-        } else {
-            Err(errors)
+        let frozen = Frozen {
+            facts: self.facts,
+            views: self.views,
+            actors: self.actors,
+            ports: self.ports,
+            rows: self.rows,
+            // 报告要到缺口清空才算得（第 4 条读的是**这张**表），检查阶段先留空。
+            overlaps: Vec::new(),
+        };
+        // §3.4 的七道检查查的是**这张表**，所以它住在这里而不是插件里：行与端口
+        // 已经进了注册口，再让调用方自己想起来跑一遍，就是「半张表继续跑」的入口。
+        gaps.extend(check_rows(&frozen.rows, &frozen));
+        gaps.extend(check_ports(&frozen.rows, &frozen, &frozen.ports));
+        if !gaps.is_empty() {
+            return Err(gaps);
         }
+        // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归 `drive`。
+        // 名单随表冻结一次，读侧（装载日志与用例）只问表，不再自己算第二遍。
+        let overlaps = overlaps(&frozen.rows, &frozen);
+        Ok(Arc::new(Frozen {
+            facts: frozen.facts,
+            views: frozen.views,
+            actors: frozen.actors,
+            ports: frozen.ports,
+            rows: frozen.rows,
+            overlaps,
+        }))
     }
 }
 
 /// 冻结后的声明表：只有读方法，没有 `&mut self`——运行期注册口在类型上不存在。
+///
+/// 五张注册表全在这里（事实 / 视图 / 执行体 / 端口 / 行）：读侧（`owed` / `drive` /
+/// 派发适配器 / 租约看护者）拿的切片与这张表同源，插件的 `static` 只是**进表前**的
+/// 数据形状。§3.3 的「三个时点」因此能在代码上指认：编译期收集 ⇒ `Builder` 填五张表
+/// ⇒ `seal` 检查并产出这一个不可变值。
 #[derive(Debug)]
 pub(crate) struct Frozen {
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
     actors: Vec<ActorDecl>,
+    ports: Vec<PortDecl>,
+    rows: Vec<Decl>,
+    /// §3.4 第 4 条的报告（可能同时命中的行对）。**不是缺口**——冻结成功才存在，
+    /// 装载入口把它打成人读的日志，用例钉住名单。
+    overlaps: Vec<Overlap>,
 }
 
 impl Frozen {
@@ -316,6 +349,15 @@ impl Frozen {
 
     pub(crate) fn actors(&self) -> &[ActorDecl] {
         &self.actors
+    }
+
+    /// 行表（注册顺序不参与裁决，`(prio, name, key)` 才参与）。
+    pub(crate) fn rows(&self) -> &[Decl] {
+        &self.rows
+    }
+
+    pub(crate) fn overlaps(&self) -> &[Overlap] {
+        &self.overlaps
     }
 
     pub(crate) fn fact(&self, name: &str) -> Option<&FactDecl> {
@@ -340,25 +382,6 @@ impl Frozen {
         }
         Some((view.eval)(events, now))
     }
-}
-
-/// 首批声明 + **插件交来的执行体声明**（PL-016 §3.2 的 `actor` 口）。
-///
-/// 执行体声明由控制面拥有（`loop_rows` 用绑定表把它填进 `Builder`）：机制层不
-/// 认识任何业务执行体，只认「名字 + 档位 + 读哪些视图 + 写哪些事实」。
-/// 交 `&[]` = 只冻结事实与视图（测试夹具用这一档）。
-pub(crate) fn builtin_with(actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<CheckError>> {
-    let mut b = Builder::new();
-    for &f in BUILTIN_FACTS {
-        b.fact(f);
-    }
-    for &v in BUILTIN_VIEWS {
-        b.view(v);
-    }
-    for &a in actors {
-        b.actor(a);
-    }
-    b.seal()
 }
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────

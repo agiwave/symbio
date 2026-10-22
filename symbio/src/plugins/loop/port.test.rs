@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use super::super::loop_rows::{PORTS, ROWS};
+use super::super::loop_rows::{load, PORTS, ROWS};
 use super::*;
 use crate::symbio_core::ring::PortDecl;
 use crate::symbio_core::{EventStore, Seq};
@@ -276,7 +276,7 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
     // 重试只会留下一条永不派发的 `request`——等它的 future 随进程一起没了。
     let store = boot();
     stranded(&store, "turn-9-r0", 1, 1_000, 1);
-    let frozen = crate::symbio_core::builtin_with(&[]).unwrap();
+    let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     // 还没到期：不欠、不动。
     assert!(
@@ -333,7 +333,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     }];
     let store = boot();
     stranded(&store, "turn-9-r0", 1, 1_000, 3);
-    let frozen = crate::symbio_core::builtin_with(&[]).unwrap();
+    let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     let out = reap(
         &store,
