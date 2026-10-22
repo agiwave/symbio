@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 3 · 🟡 doing 3 · ☑ done 235 · ❌ wont 5（共 246）
+**计数**：☐ todo 3 · 🟡 doing 2 · ☑ done 236 · ❌ wont 5（共 246）
 
 ## 待处理（按依赖顺序）
 
@@ -75,7 +75,6 @@ board.columns: [rank, deps, evidence, reason]
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-236-义务环符合性收口批` | 义务环符合性收口批——方案自洽 + 实测缺口 + 契约层补齐（SPRINT） | now | plan | — |
-| `T-250-生成链阶段id失配` | 生成链阶段 id 从提交点/CI 掉出——facts-write 漏点与登记投影无只读复核 | now | quality | — |
 | `T-244-唤醒事实接入与resume旁路退役` | PL-017 步 4–5 收口——审批/插话/中止唤醒进 await 行，resume.rs 旁路退役 | next | plan | T-240-唤醒事件时间戳取代墙钟 |
 
 ## 已完成
@@ -134,6 +133,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-239-装载失败拒绝启动与孤名收口` | 装载失败拒绝启动——孤名告警转红 + turn.dispatch 归宿收口 | plan |
 | `T-240-唤醒事件时间戳取代墙钟` | 唤醒事件时间戳取代墙钟——owed/drive 调用点不再读 clock_now_ms | plan |
 | `T-246-ADR118回表订正` | ADR-118 回表订正——accept 谓词合法化偏差与守卫免造夹具两处撤销 | plan |
+| `T-250-生成链阶段id失配` | 生成链阶段 id 从提交点/CI 掉出——facts-write 漏点与登记投影无只读复核 | quality |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -578,7 +578,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-246-ADR118回表订正`](246-ADR118回表订正.md) ADR-118 回表订正——accept 谓词合法化偏差与守卫免造夹具两处撤销（done）
   - [`T-247-插件内部模型往返进环`](247-插件内部模型往返进环.md) 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用（todo）
   - [`T-249-执行体值返回账本`](249-执行体值返回账本.md) 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口（todo）
-- [`T-250-生成链阶段id失配`](250-生成链阶段id失配.md) 生成链阶段 id 从提交点/CI 掉出——facts-write 漏点与登记投影无只读复核（doing）
+- [`T-250-生成链阶段id失配`](250-生成链阶段id失配.md) 生成链阶段 id 从提交点/CI 掉出——facts-write 漏点与登记投影无只读复核（done）
 
 <!-- registry:summary end -->
 
