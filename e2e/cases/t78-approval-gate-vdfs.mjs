@@ -257,6 +257,27 @@ export default defineCase(
         msgs1.some((m) => msgRoleOf(m) === 'tool' && m.parent_id === tc1.id),
         '恢复后 tool_call 须有结果子节点',
       );
+
+      // 事实面：批准恢复的那一笔必须走完 `request → granted → sent → response`。
+      // 这是 T-227 步 4 的分水岭——在此之前 resume 直接调执行层，端口账上
+      // 只有首轮的 `denied`，批准后的执行是事实面的空白。
+      const aFacts = toolFacts(readWal(SID_INTERACTIVE));
+      const aGranted = aFacts
+        .filter((e) => e.kind === 'authz.granted' && e.payload?.tool === 'vdfs_delete')
+        .at(-1);
+      assert(
+        aGranted,
+        `批准恢复必须落 authz.granted（实际工具事实: ${JSON.stringify(
+          aFacts.map((e) => ({ kind: e.kind, id: e.payload?.id, tool: e.payload?.tool })),
+        )}）`,
+      );
+      const gid = aGranted.payload?.id;
+      for (const kind of ['request', 'sent', 'response']) {
+        assert(
+          aFacts.some((e) => e.kind === kind && e.payload?.id === gid),
+          `批准恢复的 ${kind} 必须与 authz.granted 同 id（id=${gid}）`,
+        );
+      }
       assertTranscriptInvariants(msgs1, 'T78-A 恢复后');
 
       api.stop();

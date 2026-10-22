@@ -782,6 +782,64 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
 }
 
 #[test]
+fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
+    // 批准恢复的那一笔是同一套账：id 带 `resume` 只是为了让重试幂等，
+    // 行层不认这个前缀（`(port, id)` 才是键）。
+    let id = "tool-resume-1-tc-1-1";
+    let open = vec![tool_request(id), tool_granted(id), tool_sent(id)];
+    assert!(!owes("authorize-tool", &open, 0));
+    assert!(!owes("dispatch-tools", &open, 0));
+    let wait = owed(ROWS, &frozen(), &open, 0)
+        .into_iter()
+        .find(|d| d.decl.name == "await-tools")
+        .expect("恢复的那一笔派出后同样在等应答");
+    assert!(wait.blocked);
+
+    let mut done = open;
+    done.push(ev(
+        1,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({ "port": "tool", "id": id, "attempt": 1 }),
+    ));
+    assert!(!owes("await-tools", &done, 0));
+}
+
+#[test]
+fn an_aborted_tool_closes_the_await_with_its_own_reason() {
+    let mut events = vec![
+        tool_request("c-1"),
+        tool_granted("c-1"),
+        tool_sent("c-1"),
+        ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({ "port": "tool", "id": "c-1", "why": "aborted" }),
+        ),
+    ];
+    assert!(!owes("dispatch-tools", &events, 0));
+    assert!(!owes("await-tools", &events, 0));
+    assert_eq!(
+        events.last().and_then(|e| e.payload.get("why")),
+        Some(&json!("aborted")),
+        "中止与批次尾的 not_executed 必须可区分"
+    );
+
+    // 补充（用户插话）不是工具应答：它既不关派发行、也不关等待行。
+    events.pop();
+    events.push(ev(
+        1,
+        "user.message",
+        json!({ "text": "等一下", "id": "u-2" }),
+    ));
+    assert!(!owes("dispatch-tools", &events, 0));
+    let wait = owed(ROWS, &frozen(), &events, 0)
+        .into_iter()
+        .find(|d| d.decl.name == "await-tools")
+        .expect("工具仍未被应答");
+    assert!(wait.blocked, "补充只改变下一轮 prompt，不是这次调用的应答");
+}
+
+#[test]
 fn a_closure_denial_does_not_close_a_tool_authorization() {
     // 收束格拒绝的载荷只有目标格名（`key = chat.assistant.final`），没有
     // `port` / `id`：按 `(port, id)` 绑定取不到实例，不能误关一笔工具授权。

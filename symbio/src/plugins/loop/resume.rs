@@ -33,7 +33,8 @@
 //! `execute_tool_async` 直接复用，无需 session 层重复 `prepare_capability_manager`。
 
 use super::chat_loop::ChatOrchestrator;
-use super::tools::{apply_not_executed, execute_tool_async};
+use super::tool_dispatch::{execute_single_tool, ToolPort};
+use super::tools::apply_not_executed;
 use super::turn_exec::ResumedTool;
 use super::turn_session::LoopSession;
 use crate::symbio_core::chat_node::{
@@ -41,7 +42,7 @@ use crate::symbio_core::chat_node::{
 };
 use crate::symbio_core::{
     llm_emit_state, llm_short_id, run_ops, AddNodesRequest, EditFrame, EditNodesRequest,
-    RemoveNodesRequest,
+    RemoveNodesRequest, Seq,
 };
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
 use crate::{plugin_error, plugin_info};
@@ -230,6 +231,24 @@ async fn process_tool_resume_action(
     let (tool_name, base_args) = extract_tool_context(&messages, tc_idx, child_idx);
     let old_child_id = messages[child_idx].id.clone();
 
+    // 恢复执行的端口账：批准 / 重试 / 补充都要和批次分发走**同一套**
+    // `request → granted → sent → response`。轮号与用户格取自事实面上那条
+    // 未收束的轮——resume 发生在 `begin_drive` 之前，不能拿内存里的默认值。
+    let tool_port = match session.facts() {
+        Some(facts) => {
+            let snapshot = facts.range(Seq::new(0));
+            let (turn_no, user_seq) = super::turn_exec::last_open_turn(&snapshot)
+                .ok_or_else(|| PluginError::NotFound("恢复找不到未收束的轮次".into()))?;
+            Some(ToolPort::new(facts, turn_no, user_seq, 0))
+        }
+        None => None,
+    };
+    let port = || {
+        tool_port
+            .as_ref()
+            .ok_or_else(|| PluginError::InternalError("工具恢复缺少事实轨".into()))
+    };
+
     // 5. 根据 action 执行。
     //
     // 会**真正重跑工具**的三个 action（approve / retry / supply）先把父 ToolCall
@@ -293,18 +312,27 @@ async fn process_tool_resume_action(
             if let Some(obj) = a.as_object_mut() {
                 obj.insert("approved".into(), json!(true));
             }
-            let (res, success) =
-                reexecute_tool(orchestrator, ctx, abort, &tool_name, a, &req.target_id).await;
+            let (res, success) = execute_single_tool(
+                &orchestrator.parent,
+                ctx,
+                abort,
+                port()?,
+                &req.target_id,
+                &tool_name,
+                a,
+            )
+            .await;
             (res, success, None)
         }
         ResumeAction::Retry => {
-            let (res, success) = reexecute_tool(
-                orchestrator,
+            let (res, success) = execute_single_tool(
+                &orchestrator.parent,
                 ctx,
                 abort,
+                port()?,
+                &req.target_id,
                 &tool_name,
                 base_args.clone(),
-                &req.target_id,
             )
             .await;
             (res, success, None)
@@ -318,13 +346,14 @@ async fn process_tool_resume_action(
                     }
                 }
             }
-            let (res, success) = reexecute_tool(
-                orchestrator,
+            let (res, success) = execute_single_tool(
+                &orchestrator.parent,
                 ctx,
                 abort,
+                port()?,
+                &req.target_id,
                 &tool_name,
                 a.clone(),
-                &req.target_id,
             )
             .await;
             (res, success, Some(a))
@@ -541,43 +570,6 @@ fn finalize_aborted_parent(
         .expect("步骤 2 已校验过 tc_idx 有效");
     apply_not_executed(tc, "aborted");
     tc.clone()
-}
-
-/// 重新执行工具（approve/retry/supply 共用）。
-///
-/// 返回 `(result_text, success)`。
-///
-/// 使用**静默出口**（[`ExecEventSink::silent`]）而非主出口，因为 `execute_tool_async` 会以
-/// `result_msg_id` 发送流式更新和完成事件，若走主出口会与 `process_tool_resume_action`
-/// 自行构造的 `new_child`（不同 id）产生重复节点。丢弃中间更新，由调用方统一
-/// 构造最终结果子节点。
-///
-/// 收口前这里靠「新建一个临时 `PluginChannel` 并起一个 drain 任务排空对端」实现
-/// 静默——那是「出口只能是通道」的产物；现在静默是出口的一种取值，两行代码即达意。
-async fn reexecute_tool(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    abort: &ExecAbortSignal,
-    tool_name: &str,
-    args: Value,
-    tool_call_id: &str,
-) -> (String, bool) {
-    let result_msg_id = llm_short_id();
-    let silent = ExecEventSink::silent();
-
-    let (res, success, _captured) = execute_tool_async(
-        &orchestrator.parent,
-        tool_name,
-        args,
-        tool_call_id,
-        &silent,
-        abort,
-        result_msg_id,
-        ctx.clone(),
-    )
-    .await;
-
-    (res, success)
 }
 
 /// 从 ToolCall 父节点和待恢复子节点中提取工具执行上下文。

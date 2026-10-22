@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 3 · ☑ done 216 · ❌ wont 5（共 224）
+**计数**：☐ todo 0 · 🟡 doing 2 · ☑ done 217 · ❌ wont 5（共 224）
 
 ## 待处理（按依赖顺序）
 
@@ -71,7 +71,6 @@ board.columns: [rank, deps, evidence, reason]
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-216-义务环收敛批` | 义务环收敛批——控制面单元从 Step 换为债（SPRINT） | now | plan | — |
-| `T-226-授权行` | 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch` | next | plan | T-222-行从函数变数据、T-224-端口协议名与判据门禁 |
 | `T-227-端口细粒度化` | 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017） | later | plan | T-223-两行模板与前置标记、T-224-端口协议名与判据门禁 |
 
 ## 已完成
@@ -165,6 +164,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-203-CLI与src-tauri收口批` | CLI 与 src-tauri 收口批——交互卡有播报、机制纪律同判据、连接管理有单测 | plan |
 | `T-204-技能与MCP面收口批` | 技能与 MCP 面收口批——前缀与组装置单点、TAG 一处定义、纸面变体清掉 | plan |
 | `T-206-事件总线读侧与协议收敛批` | 事件总线读侧与协议收敛批——resync 契约兑现、直调收敛、名实对齐 | plan |
+| `T-226-授权行` | 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch` | plan |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | e2e |
@@ -522,7 +522,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-213-Agent主机面整理批`](213-Agent主机面整理批.md) Agent 主机面整理批——桥接三组语义拆分、委托可观测、归属表机器校验（done）
   - [`T-214-文档口径对账批二`](214-文档口径对账批二.md) 文档口径对账批二——新审计点名的漂移逐条订正，预留接口登记落点（done）
   - [`T-215-路由与载荷契约单源化批`](215-路由与载荷契约单源化批.md) 路由与载荷契约单源化批——路由清单生成化评估与载荷 schema 同源探索（done）
-- [`T-216-义务环收敛批`](216-义务环收敛批.md) 义务环收敛批——控制面单元从 Step 换为债（SPRINT）（doing） · 子项 doing 1 / done 9
+- [`T-216-义务环收敛批`](216-义务环收敛批.md) 义务环收敛批——控制面单元从 Step 换为债（SPRINT）（doing） · 子项 done 10
   - [`T-217-义务环定稿与指路`](217-义务环定稿与指路.md) 义务环定稿与指路——PL-016 立为形状 owner，PL-014 加终点指路（done）
   - [`T-218-溯源不悬空`](218-溯源不悬空.md) 溯源不悬空——`produced_by` 从「有没有」查到「指向谁」（done）
   - [`T-219-拒绝落事实`](219-拒绝落事实.md) 拒绝落事实——收束闸的否定从「没写」变成「写了」（done）
@@ -532,7 +532,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-223-两行模板与前置标记`](223-两行模板与前置标记.md) 两行模板与前置标记——首端口 `turn`、`sent` 由引擎写、租约重试、`Wait`/`Ask` 折叠（done）
   - [`T-224-端口协议名与判据门禁`](224-端口协议名与判据门禁.md) 端口协议名与判据门禁——5 个协议名入库，`port` 载荷裁决，判据 1 进 CI（done）
   - [`T-225-决策输入闭包`](225-决策输入闭包.md) 决策输入闭包——`owed` 只读事实 / 视图 / 事件时间戳（done）
-  - [`T-226-授权行`](226-授权行.md) 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch`（doing）
+  - [`T-226-授权行`](226-授权行.md) 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch`（done）
 - [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（doing）
 
 <!-- registry:summary end -->
