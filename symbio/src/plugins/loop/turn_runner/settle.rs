@@ -99,9 +99,14 @@ async fn land_failure<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    if let Verdict::Denied(why) =
-        allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FALLBACK)
-    {
+    if let Verdict::Denied(why) = allow(
+        store,
+        actor,
+        turn,
+        user_seq,
+        ClosureKind::Speech,
+        EVENT_ASSISTANT_FALLBACK,
+    ) {
         // 兜底格也是**收束格**，同过授权级联（`turn.closing` → `authz.granted`）：
         // 拒 ⇒ 收束格不落，但**否定事实已入格**（`authz.denied`）——「被拒」与
         // 「没跑完」从此在日志上不同形。
@@ -171,9 +176,14 @@ pub(crate) async fn append_aborted<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    if let Verdict::Denied(why) =
-        allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FINAL)
-    {
+    if let Verdict::Denied(why) = allow(
+        store,
+        actor,
+        turn,
+        user_seq,
+        ClosureKind::Speech,
+        EVENT_ASSISTANT_FINAL,
+    ) {
         // 中止的收束格同过授权级联，拒绝同样已落否定事实（与兜底臂同一形态）。
         crate::plugin_warn!(
             "actors",

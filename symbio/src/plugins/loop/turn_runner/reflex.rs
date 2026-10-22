@@ -82,9 +82,14 @@ impl TurnRunner {
         )?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
-        if let Verdict::Denied(why) =
-            allow(store, actor, turn, user_seq, ClosureKind::Speech, EVENT_ASSISTANT_FINAL)
-        {
+        if let Verdict::Denied(why) = allow(
+            store,
+            actor,
+            turn,
+            user_seq,
+            ClosureKind::Speech,
+            EVENT_ASSISTANT_FINAL,
+        ) {
             // 与深度档同一条级联（见 [`allow`]）：拒 ⇒ 不落收束格，否定事实已入格。
             crate::plugin_warn!(
                 "actors",
