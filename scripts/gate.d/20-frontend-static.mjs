@@ -99,6 +99,26 @@ export default {
               timeoutMs: vitestBudget,
             })
           }
+          // worker 起不来是**基础设施失败**，不是判据失败：本阶段与 cargo 同批并发，
+          // 机器被编译占满时 vitest 的线程池等不到 worker 响应——实测一轮里 7 个
+          // worker 同时超时，7 个测试文件从未执行，覆盖率掉到 61%（< 62%）⇒ 假红。
+          // 重跑一次并限制 worker 数：判据（用例数 / 覆盖率阈值）一条都不放宽，
+          // 只是不在饱和的机器上同时开满线程池。
+          if (!r.ok && /Failed to start threads worker/.test(stripAnsi(r.output))) {
+            console.log('      ↳ worker 未能启动（机器被并发批占满）⇒ 限 2 个 worker 重跑一次')
+            r = await ctx.run({
+              label: 'vitest run --coverage（maxWorkers=2）',
+              cmd: process.execPath,
+              args: [
+                bin('vitest/vitest.mjs'),
+                'run',
+                '--coverage',
+                '--maxWorkers=2',
+              ],
+              cwd: frontendDir,
+              timeoutMs: vitestBudget,
+            })
+          }
           if (!r.ok) {
             const coverageRed = /Coverage for .* does not meet/.test(stripAnsi(r.output))
             if (!coverageRed) maybeSandboxDeleteHint(r.output)
