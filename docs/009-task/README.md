@@ -60,13 +60,11 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 1 · 🟡 doing 2 · ☑ done 216 · ❌ wont 5（共 224）
+**计数**：☐ todo 0 · 🟡 doing 3 · ☑ done 216 · ❌ wont 5（共 224）
 
 ## 待处理（按依赖顺序）
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-227-端口细粒度化` | 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017） | later | plan | T-223-两行模板与前置标记、T-224-端口协议名与判据门禁 |
+（无）
 
 ## 进行中
 
@@ -74,6 +72,7 @@ board.columns: [rank, deps, evidence, reason]
 |---|---|---|---|---|
 | `T-216-义务环收敛批` | 义务环收敛批——控制面单元从 Step 换为债（SPRINT） | now | plan | — |
 | `T-226-授权行` | 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch` | next | plan | T-222-行从函数变数据、T-224-端口协议名与判据门禁 |
+| `T-227-端口细粒度化` | 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017） | later | plan | T-223-两行模板与前置标记、T-224-端口协议名与判据门禁 |
 
 ## 已完成
 
@@ -534,7 +533,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-224-端口协议名与判据门禁`](224-端口协议名与判据门禁.md) 端口协议名与判据门禁——5 个协议名入库，`port` 载荷裁决，判据 1 进 CI（done）
   - [`T-225-决策输入闭包`](225-决策输入闭包.md) 决策输入闭包——`owed` 只读事实 / 视图 / 事件时间戳（done）
   - [`T-226-授权行`](226-授权行.md) 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch`（doing）
-- [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（todo）
+- [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（doing）
 
 <!-- registry:summary end -->
 

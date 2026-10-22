@@ -2890,6 +2890,124 @@ mod tool_round_tests {
             check_all(&snapshot)
         );
     }
+
+    /// 假适配器：**每一轮都要工具**——模拟适配器 / 分流在打转，永不自己收束。
+    ///
+    /// 与 [`ToolCallingLlm`] 的唯一差别是「没有最后一轮」：它存在的目的就是
+    /// 让步循环永远不会因为模型不再请求工具而停下来。
+    struct RunawayLlm {
+        calls: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for RunawayLlm {
+        fn model_id(&self) -> &str {
+            "runaway-mock"
+        }
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            *self.calls.lock().unwrap() += 1;
+            Ok(LlmTurn {
+                text: "我再查一下。".into(),
+                reasoning: String::new(),
+                tool_calls: vec![TurnToolCallInfo {
+                    id: Some("tc-loop".into()),
+                    wire_id: Some("w-loop".into()),
+                    name: Some("vdfs_read".into()),
+                    arguments: serde_json::json!({ "path": "a.md" }),
+                    parse_error: None,
+                    overflow_notice: None,
+                }],
+                finish: ModelFinishReason::Stop,
+                cost_ms: 1,
+                usage: None,
+            })
+        }
+    }
+
+    /// 步数上界（[ADR-115](../../../../docs/010-adr/115.md "ADR-115") 决策 3）：
+    /// 一个**永远**要工具的适配器不会把这一轮拖死，而是在上界处收束为
+    /// `exhausted{step_limit}`。
+    ///
+    /// ## 为什么这条判据必须有
+    ///
+    /// 步循环之前，`stream_round` 回 `None` 只有一个意思——「再欠一步」，而**没有
+    /// 上界**。一个总回工具调用的适配器因此是一次永不返回的轮，每一圈都真花一次
+    /// 模型往返。上限不是性能阀，是**停机判据**：它把「不收敛」变成一条可观测的
+    /// 事实，而不是一个卡住的会话。
+    ///
+    /// ## 为什么落兜底格而不是另开一格
+    ///
+    /// 「没说完就停」与失败同形，差别只在 `reason` 这个闭集值；另开一格会让读侧
+    /// 为了同一个问题（这一轮为什么停）去问两个名字。
+    ///
+    /// ## 反向自检
+    ///
+    /// 把上界检查删掉，本用例**不会变红，而是挂住**——那正是它防的病：一个不收敛
+    /// 的轮在测试里表现为永不返回，在生产里表现为一个永远在花钱的会话。
+    #[tokio::test]
+    async fn a_runaway_adapter_is_stopped_at_the_step_bound() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = RunawayLlm {
+            calls: Arc::new(Mutex::new(0)),
+        };
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("到点必答：上界耗尽也是一句话");
+
+        assert_eq!(
+            *llm.calls.lock().unwrap(),
+            super::super::MAX_STEPS_PER_DRIVE,
+            "打转的轮必须在上界处停下，且每步恰好一次模型往返"
+        );
+        assert!(out.fell_back, "没说完就停 ⇒ 失败形状（I3 到点必答）");
+
+        let snapshot = store.range(Seq::new(0));
+        let last = snapshot.last().expect("有收束格");
+        assert_eq!(
+            last.kind,
+            crate::symbio_core::EVENT_ASSISTANT_FALLBACK,
+            "落兜底格（失败形状）——落 final 会把「没说完」记成「答了」"
+        );
+        assert_eq!(last.payload["status"], "failed");
+        assert_eq!(
+            last.payload["reason"], "exhausted",
+            "上界耗尽用既有闭集值 exhausted，不新造词"
+        );
+        assert_eq!(last.payload["detail"], "step_limit");
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+    }
 }
 
 // ── 反射档（`run_reflex`，S11 快路的执行半边）────────────────────────────────

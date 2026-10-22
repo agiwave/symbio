@@ -516,7 +516,31 @@ impl TurnRunner {
             prepare::PreparedFlow::Done(outcome) => return Ok(outcome),
             prepare::PreparedFlow::Run(run) => run,
         };
+        // ── 步循环（T-227 步 1）───────────────────────────────────────────
+        //
+        // 一轮 = 若干步，一步 = 一次请求往返（`stream_round` 自己再分出
+        // 收束 / 派发 / 等待）。`Continue` / `Done` 在这里被写成一个显式的计数
+        // 循环，而不是隐在「回 `None` 就再来一圈」里：PL-017 要把每一步变成一行
+        // 债，先得有一个地方能说「这是第几步、为什么继续」——步的边界自此是
+        // **代码里的一处**，而不是「某个调用点的返回值碰巧是什么」。
+        //
+        // ## 唯一的行为变化：上界（ADR-115 决策 3）
+        //
+        // 此前这一圈**没有上界**：一个总请求工具的适配器能让 `stream_round`
+        // 永远回 `None`，而每圈都真花一次模型往返——一个不会返回的轮。上限是
+        // **停机判据**，不是性能阀。到顶落 `exhausted`（与 `finish_reason =
+        // length` 同一闭集值），读侧不必学一套新词。
+        let mut steps = 0usize;
         loop {
+            steps += 1;
+            if steps > MAX_STEPS_PER_DRIVE {
+                crate::plugin_warn!(
+                    "actors",
+                    "[v2] 轮内步数超过上限 {MAX_STEPS_PER_DRIVE}（turn={}），收束为 exhausted（step_limit）",
+                    run.turn
+                );
+                return exceed_steps(&mut run, store, llm, "step_limit").await;
+            }
             if let Some(outcome) =
                 stream::stream_round(&mut run, store, llm, tok, sink.clone(), tools, dispatch)
                     .await?
@@ -525,6 +549,48 @@ impl TurnRunner {
             }
         }
     }
+}
+
+/// 一轮的步数上界（ADR-115 决策 3）："停机判据"而不是性能阀。
+///
+/// 超过它 = 适配器 / 分流在打转（每轮都回「继续」），而每轮都真花一次模型往返。
+/// 取 64：工具循环的合法轮数在个位数，两个数量级的余量足够；再大就只是把
+/// 一个卡死的轮拖得更久。
+const MAX_STEPS_PER_DRIVE: usize = 64;
+
+/// 步数到顶时的收束：落兜底格但 `reason = exhausted`（与截断同一闭集值）。
+///
+/// 半截产出照样带进载荷（它们是事实，不因停在这里就丢）。
+async fn exceed_steps<S>(
+    run: &mut prepare::Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    detail: &str,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let cost = run.started.elapsed().as_millis() as u64;
+    let facts = facts::node_facts(&run.nodes);
+    let produced = facts::produced_payload(
+        &facts.text.clone().unwrap_or_default(),
+        llm.model_id(),
+        &run.turn_root_id,
+        &facts,
+        &run.all_tool_calls,
+        &run.rounds,
+    );
+    settle::append_exhausted(
+        store,
+        &run.actor,
+        run.turn,
+        run.user_seq,
+        detail,
+        cost,
+        produced,
+        run.artifacts_landed,
+    )
+    .await
 }
 
 /// 收束格的**种类**（[ADR-065] 裁决、[ADR-067] 落地形态）：同一道写侧闸按种类分派。

@@ -30,6 +30,75 @@ pub(crate) async fn append_fallback<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    land_failure(
+        store,
+        actor,
+        turn,
+        user_seq,
+        detail,
+        cost_ms,
+        produced,
+        artifacts_landed,
+        crate::symbio_core::ClosureReason::Fallback,
+    )
+    .await
+}
+
+/// 上界耗尽（T-227 步 1）：步数巡回超过上限时落**同一格**，`reason` 不同。
+///
+/// 为什么不另开一格：上界耗尽与失败都是「本轮没说完就停了」，载荷形状一模一样，
+/// 差别只在 `reason` 这个闭集值（`exhausted` = 步数 / 预算 / max_tokens 掐断）。
+/// 另开一格会让读侧为了同一个问题（「这一轮为什么停」）问两个名字。
+///
+/// 与 `append_fallback` 共用 [`land_failure`]：闸门、幂等键、`produced` 形状全部一致
+/// ——两条故障路径各写一遍落格，必然有一处先漂。
+///
+/// 入参与 `append_fallback` **逐字一致**（多一个参数都不能接受：两个构造点要能
+/// 互换而不改调用点），因此同样带 lint 豁免。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn append_exhausted<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    detail: &str,
+    cost_ms: u64,
+    produced: serde_json::Value,
+    artifacts_landed: u64,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    land_failure(
+        store,
+        actor,
+        turn,
+        user_seq,
+        detail,
+        cost_ms,
+        produced,
+        artifacts_landed,
+        crate::symbio_core::ClosureReason::Exhausted,
+    )
+    .await
+}
+
+/// 两条故障收束（兜底 / 上界）的**唯一落格点**：只差一个 `reason`。
+#[allow(clippy::too_many_arguments)]
+async fn land_failure<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    detail: &str,
+    cost_ms: u64,
+    produced: serde_json::Value,
+    artifacts_landed: u64,
+    reason: crate::symbio_core::ClosureReason,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
     if let Err(why) = closure_gate(actor, ClosureKind::Speech) {
         // 兜底格也是**收束格**，同过写侧闸：拒绝 ⇒ 不落格，但**落一条否定事实**
         // （`authz.denied`）——「被拒」与「没跑完」从此在日志上不同形。
@@ -59,13 +128,11 @@ where
             finish: crate::symbio_core::ModelFinishReason::Stop,
         });
     }
-    // `reason` 是闭集里的「兜底」（可判），`detail` 是适配器的原始人话（只给人读）。
+    // `reason` 是闭集里的那个值（可判，由调用方选：`fallback` / `exhausted`），
+    // `detail` 是适配器的原始人话（只给人读）。
     // 两件事必须分开：把原始错误塞进 `reason` 会让它不可判，只留闭集又会丢掉
     // 「具体是 402 还是超时」——而那是排障时唯一有用的东西。
-    let mut payload = with_reason(
-        with_status(produced, "failed"),
-        crate::symbio_core::ClosureReason::Fallback,
-    );
+    let mut payload = with_reason(with_status(produced, "failed"), reason);
     payload["detail"] = serde_json::Value::String(detail.to_string());
     store.append(
         Event::pending(
