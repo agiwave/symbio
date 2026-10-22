@@ -661,6 +661,75 @@ mod turn_runner_tests {
         assert!(frames[0].contains("问"));
     }
 
+    /// 判据 5：流式帧直通，但**不产生事实**——同一次请求的两种跑法事件条数相同。
+    ///
+    /// 帧走 `ExecEventSink` 直通（PL-014 §3），本来就不进存储；本用例把「帧数 =
+    /// 分片数、日志不增」钉住。若将来有人把帧顺手写进日志，条数会多出来，这里先红。
+    #[tokio::test]
+    async fn streaming_frames_do_not_add_facts() {
+        use crate::symbio_core::DeltaSink;
+        use std::sync::{Arc, Mutex};
+
+        // 非流式：一次全文，一条 final。
+        let plain_store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        TurnRunner
+            .run(
+                &plain_store,
+                &StubLlmAdapter::succeed("stub-model"),
+                &tok,
+                0,
+                "问",
+                LatencyTier::Deep,
+            )
+            .await
+            .unwrap();
+
+        // 流式：三个分片，同样一次模型往返。
+        let stream_store = EventStore::new();
+        let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+        let user_seq = super::seed_user(&stream_store, 0, "问");
+        TurnRunner
+            .run_streaming(
+                &stream_store,
+                &StubLlmAdapter::succeed_streaming("stub-model", &["你", "好", "！"]),
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    user_seq,
+                    drive_seq: user_seq,
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    resume: None,
+                    inject: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    prefix: None,
+                    final_reply: None,
+                    turn_root_id: String::new(),
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
+                    nodes: None,
+                    stages: Vec::new(),
+                    abort: None,
+                },
+                got.clone() as Arc<dyn DeltaSink>,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *got.0.lock().unwrap(),
+            vec!["你", "好", "！"],
+            "分片按序直通"
+        );
+        assert_eq!(
+            stream_store.range(Seq::new(0)).len(),
+            plain_store.range(Seq::new(0)).len(),
+            "流式帧不落事实：两种跑法事件条数相同"
+        );
+    }
+
     /// 开场白**落格的同一时刻**上线到实时面（T-136 的一半），且节点 id 就是落格载荷里
     /// 那个 `dialog.id`。
     ///
