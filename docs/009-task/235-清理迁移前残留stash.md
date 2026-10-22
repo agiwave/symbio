@@ -2,13 +2,14 @@
 kind: task
 id: T-235-清理迁移前残留stash
 title: 清理 v2 迁移前的残留 autostash
-status: todo
+status: done
 created: 2026-10-22
 track: meta
 prio: next
 deps: []
 where: 仓库根（`git stash list`）
 exit: '`refs/stash` 里那条迁移前（旧目录 `docs/plan/` · `docs/registry/`）的 autostash 被判定并处置：内容已在 v2 分支以新目录重做 ⇒ 丢弃并留一句处置理由；仍有独有内容 ⇒ 转成有编号的任务或补丁，不留在无名 stash 里。收口时 `git stash list` 为空，或每条 stash 都有明确归属（写出谁 / 为什么留）。'
+evidence: '已处置：先导出补丁到 C:\\Temp\\opencode\\v2-plan-autostash-20261012.patch（92,297 字节），再 `git stash drop stash@{0}`；收口时 `git stash list` 为空。判断依据：stash 来自 2026-10-12 的 `v2-plan` checkout autostash，路径是迁移前的 `docs/plan/`、`docs/registry/`、`docs/reference/`；`registry-lib.mjs` 与当前版本差 1849 行，属目录搬迁中间态，不是待落地工作。'
 ---
 
 ## 内容
@@ -35,3 +36,7 @@ stash@{0}: On v2-plan: [Checkout-autostash] before branch switch
   （`v2-plan` 分支的 checkout autostash），确认与当前 `v2` 的目录形状不符。
 - 处置动作本身是 `git stash drop` / `apply`，**不产生提交**；收口证据写
   「读过的判断 + 最终 `git stash list`」。
+- 2026-10-22 处置：`git stash show --name-only` 列出 27 个文件，全部落在迁移前的
+  `docs/plan/`、`docs/registry/`、`docs/reference/`；`registry-lib.mjs` 与当前版本
+  差 1849 行。先导出补丁到 `C:\Temp\opencode\v2-plan-autostash-20261012.patch`
+  （92,297 字节）再丢弃；`git stash list` 已空。
