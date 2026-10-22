@@ -702,7 +702,7 @@ fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
 ///
 /// 与 `turn_head` / `turn_stages` / `turn_closed` 同一条收窄口径：续写幕复用轮号，
 /// 按轮扫全史会把上一幕的 `sent` / `response` 算进这一幕。
-fn scoped<'a>(events: &'a [Event], turn: u64, anchor_seq: u64) -> Vec<&'a Event> {
+fn scoped(events: &[Event], turn: u64, anchor_seq: u64) -> Vec<&Event> {
     events
         .iter()
         .filter(|e| e.turn == turn && after_anchor(e, anchor_seq))
@@ -774,8 +774,7 @@ fn last_model_answer_wants_tools(events: &[Event]) -> Option<bool> {
     let anchor_seq = anchor.map(seq_of).unwrap_or(0);
     scoped(events, turn, anchor_seq)
         .iter()
-        .filter(|e| e.kind == EVENT_RESPONSE && str_field(e, "port") == Some("model"))
-        .next_back()
+        .rfind(|e| e.kind == EVENT_RESPONSE && str_field(e, "port") == Some("model"))
         .map(|e| bool_field(e, "has_tool_calls"))
 }
 
