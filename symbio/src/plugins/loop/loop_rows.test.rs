@@ -569,6 +569,30 @@ static GAP_UNDECLARED_EXPAND: &[Decl] = &[row(
     SENT_ID,
     Some(("nope", "id")),
 )];
+// 第 3 条：键字段不在 `user.message` 的载荷声明里。它与「这次没带这个字段」同形，
+// 所以运行期一声不吭——只能装载期红。
+static GAP_UNDECLARED_FIELD: &[Decl] = &[row(
+    "undeclared-field",
+    pat("user.message", &["nosuch"]),
+    CLOSED_TURN,
+    None,
+)];
+// 第 1 条：两行都绑 `execute`，而它同时写得出两行的出口（`chat.assistant.final` /
+// `fallback`）——于是 a 等 b、b 也等 a。一格执行体就够造环，不需要两份注册。
+static GAP_CYCLE: &[Decl] = &[
+    row(
+        "cycle-a",
+        pat("user.message", &["turn"]),
+        &[pat("chat.assistant.final", &["turn"])],
+        None,
+    ),
+    row(
+        "cycle-b",
+        pat("user.message", &["turn"]),
+        &[pat("chat.assistant.fallback", &["turn"])],
+        None,
+    ),
+];
 
 #[test]
 fn the_production_table_loads_with_no_gap() {
@@ -597,6 +621,15 @@ fn every_kind_of_load_gap_refuses_to_load() {
             "UndeclaredExpand",
         ),
         ("声明了却没人消费的事实名", &[], "OrphanFact"),
+        (
+            "模式引用未声明的字段",
+            GAP_UNDECLARED_FIELD,
+            "UndeclaredPatternField",
+        ),
+        ("谁还清谁成环", GAP_CYCLE, "DependencyCycle"),
+        // 端口侧同一条 fail-fast：夹具里没有 `await-*`，三个端口的 `response` /
+        // `failed` 都无人还（真表靠那三行覆盖，见 `every_declared_port_has_its_answer_exits`）。
+        ("端口没有应答出口", GAP_NO_EXIT, "PortWithoutAnswerExit"),
     ];
 
     for (label, rows, needle) in cases {
@@ -1244,4 +1277,58 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
         )
     );
     assert_eq!(once, twice);
+}
+
+/// 第 4 条在**真表**上的报告样例（T-242 验收口径 1）。
+///
+/// 钉住名单而不是钉住「非空」：新增一对相交必须在名单里显形，否则它今天就是一次
+/// 静默遮蔽。名单本身不是错误——`lease` 与三行 `await-*` 同时开账是设计如此
+/// （卡住的调用既在等应答，又该有人管），裁决由 `prio` 决出。
+#[test]
+fn the_overlap_report_on_the_production_table() {
+    let report = super::overlaps(ROWS, &frozen());
+    let rendered: Vec<(&str, &str, &[&str])> = report
+        .iter()
+        .map(|o| (o.rows[0], o.rows[1], o.facts.as_slice()))
+        .collect();
+    assert_eq!(
+        rendered,
+        vec![
+            // 三行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
+            (
+                "policy.classify",
+                "policy.compress",
+                &["session.config", "turn.stage", "user.message"][..]
+            ),
+            (
+                "policy.classify",
+                "policy.recall",
+                &["session.config", "turn.stage", "user.message"][..]
+            ),
+            (
+                "policy.compress",
+                "policy.recall",
+                &["session.config", "turn.stage", "user.message"][..]
+            ),
+            // 反射快路与整轮执行同键 `(turn)`：`skill_hit` 与 `resumed` 互斥由视图折，
+            // 装载期只报「可能」。
+            (
+                "policy.reflex",
+                "execute-turn",
+                &["session.config", "turn.stage", "user.message"][..]
+            ),
+            // 租约看护读 `stale_sent`，它与创建行 / 三行 await 的前件折出同一批协议格。
+            ("open-tools", "lease", &["response"]),
+            ("await-turn", "lease", &["sent"]),
+            ("await-model", "lease", &["sent"]),
+            ("await-tools", "lease", &["sent"]),
+        ]
+    );
+}
+
+/// 第 5 条的端口侧在**真表**上成立：三个端口的 `response` / `failed` 都有行在还，
+/// `before` 都是声明过的协议格。
+#[test]
+fn every_declared_port_has_its_answer_exits() {
+    assert!(super::check_ports(ROWS, &frozen(), super::PORTS).is_empty());
 }

@@ -173,6 +173,11 @@ pub(crate) enum CheckError {
         actor: &'static str,
         view: &'static str,
     },
+    /// 执行体 `writes` 里出现了一个**引擎独占**的协议格。
+    ActorWritesEngineCell {
+        actor: &'static str,
+        fact: &'static str,
+    },
 }
 
 /// 装载期的唯一注册口。`seal()` 之后没有可变方法（见 [`Frozen`]）。
@@ -231,6 +236,16 @@ impl Builder {
                     errors.push(CheckError::UnknownReadView {
                         actor: a.name,
                         view,
+                    });
+                }
+            }
+            // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
+            // 「实际写入 ⊆ `writes`」那一半要有值返回账本才能对账，归 T-249。
+            for fact in a.writes {
+                if ENGINE_ONLY_CELLS.contains(fact) {
+                    errors.push(CheckError::ActorWritesEngineCell {
+                        actor: a.name,
+                        fact,
                     });
                 }
             }
@@ -350,6 +365,16 @@ pub(crate) fn builtin_with(actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Chec
 //
 // 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
 const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
+
+/// **引擎独占的格子**（§3.4 第 5 条「决策者伪造 `response`」那一档的名单）。
+///
+/// `sent` 在派发**前**由引擎落、`response` 是 `Ok`、`failed` 是 `Err` 的兜底、
+/// `retry` 归租约看护者。它们写与读都只有引擎一处，所以「谁写了这一格」永远
+/// 有答案；放进执行体的 `writes` 就等于允许搬运者自己声明「我派出去了 / 我回来了」。
+///
+/// **`request` 不在名单里**：它留给决策者——「这一轮欠一次调用」是判断，不是执行
+/// （§2.3）。
+const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY];
 
 // `response` 比请求多一个集合字段：模型应答带回来的工具调用（ADR-117）。
 //

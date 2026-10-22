@@ -43,7 +43,12 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use super::Frozen;
+use crate::symbio_core::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
 use crate::symbio_core::{Event, LatencyTier};
+
+/// 信封三格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
+/// 只做等值」）。第 3 条检查对它们放行，其余字段名一律要在声明里。
+const ENVELOPE_FIELDS: &[&str] = &["turn", "seq", "ts"];
 
 /// 模式里的一个字面量。只覆盖 JSON 的三个标量型——键绑定也只认它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,6 +356,18 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 
 /// 装载期的行检查（PL-016 §3.4 的第 2 / 7 条）。
 ///
+/// ## §3.4 七道检查 → 这一层的格子（指认表）
+///
+/// | §3.4 | 检查 | 执行方 | 报出的格子 |
+/// |---|---|---|---|
+/// | 1 | 依赖图无环 | [`check_dependency_graph`]（`check_rows` 末段调用） | `DependencyCycle` |
+/// | 2 | 每行收口 | [`check_rows`] | `NoExit` / `KeyMismatch` / `ExpandKeyMissing` / `UndeclaredExpand` |
+/// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `Builder::seal`（视图 `reads` 与 `FactDecl` 自引用侧） | `UndeclaredPatternField` + `CheckError::UndeclaredField` / `FactFieldUndeclared` |
+/// | 4 | 相交行对 | [`overlaps`]——**只报告，不红**（静态判不出「真的同时命中」） | `Overlap` |
+/// | 5 | 写入封闭 | `Builder::seal`（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 T-249 | `CheckError::ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
+/// | 6 | 执行体收口 | [`check_rows`] | `UnmannedRow` / `OrphanActor` / `ActorCannotClose` / `ActorModeTooNarrow` |
+/// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
+///
 /// - [`Gap::NoExit`]：这一行没有 `until` / `unless` ⇒ 一旦开账就永远开账；
 /// - [`Gap::KeyMismatch`]：没有一条出口与 `owes` 绑定同一组键 ⇒ 出口永远匹配不上；
 /// - [`Gap::UnknownSource`]：模式引用了一个没有声明的名字；
@@ -369,7 +386,18 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///   `unless`，视图按 `reads` 展开到事实）没有交集——它返回空事实也能「成功」，
 ///   每一步都无进展（§3.4 第 6 条的后半）；
 /// - [`Gap::ActorModeTooNarrow`]：行的 `tier` 比执行体的 `mode` 更慢——反射档
-///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型。
+///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型；
+/// - [`Gap::UndeclaredPatternField`]：模式引用了一个不在那条事实载荷声明里的字段
+///   （§3.4 第 3 条）——它与「字段这次没带」在求值时同形，只能装载期拦；
+/// - [`Gap::DependencyCycle`]：两行以上的「谁还清谁」成环（§3.4 第 1 条）——
+///   类型级互相等待，运行期没有任何一步走得动。
+///
+/// 后两条不在 `check_rows` 的输入面上，由 [`check_ports`] 报（§3.4 第 5 条的
+/// 端口侧）：
+///
+/// - [`Gap::PortBeforeUndeclared`]：端口的派发前格（`before`）没有声明；
+/// - [`Gap::PortWithoutAnswerExit`]：这个端口的 `response` / `failed` 不落在任何
+///   行的出口上——派出去的钱没有还的通道。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Gap {
     NoExit {
@@ -411,6 +439,23 @@ pub(crate) enum Gap {
     ActorModeTooNarrow {
         row: &'static str,
         actor: &'static str,
+    },
+    UndeclaredPatternField {
+        row: &'static str,
+        source: &'static str,
+        field: &'static str,
+        role: &'static str,
+    },
+    DependencyCycle {
+        cycle: Vec<&'static str>,
+    },
+    PortBeforeUndeclared {
+        port: &'static str,
+        fact: &'static str,
+    },
+    PortWithoutAnswerExit {
+        port: &'static str,
+        fact: &'static str,
     },
 }
 
@@ -459,15 +504,45 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                 }
             }
         }
-        for p in std::iter::once(&decl.owes)
-            .chain(decl.until)
-            .chain(decl.unless)
-        {
-            if frozen.fact(p.source).is_none() && frozen.view(p.source).is_none() {
-                gaps.push(Gap::UnknownSource {
-                    row: decl.name,
-                    source: p.source,
-                });
+        // `owes` 与出口 / 挂起源一起查存在性；第二条布尔说「这一条的键绑在元素上」。
+        let patterns = std::iter::once((&decl.owes, decl.expand.is_some()))
+            .chain(decl.until.iter().map(|p| (p, false)))
+            .chain(decl.unless.iter().map(|p| (p, false)));
+        for (p, keys_on_elements) in patterns {
+            match frozen.fact(p.source) {
+                None => {
+                    if frozen.view(p.source).is_none() {
+                        gaps.push(Gap::UnknownSource {
+                            row: decl.name,
+                            source: p.source,
+                        });
+                    }
+                }
+                // 第 3 条：模式引用的**字段名**必须在那条事实的载荷声明里。
+                // 拼错的字段与缺席的字段在求值时同形（取不到 ⇒ 不命中），所以
+                // 「运行期静默不命中」只能在这里拦：装载期红，而不是赌一次回放。
+                //
+                // 两个例外都是构造性的，不是豁免：
+                // - 信封三格（`turn` / `seq` / `ts`）每条事实都有，逐条声明是假话；
+                // - 展开行的 `owes` 键绑在**元素**上（`calls` 数组里的一项），元素
+                //   形状不属于那条事实的 `fields`（`eq` 仍绑外层实例，照查）。
+                Some(fact) => {
+                    let mut fields: Vec<(&str, &str)> = Vec::new();
+                    if !keys_on_elements {
+                        fields.extend(p.key.iter().map(|f| ("key", *f)));
+                    }
+                    fields.extend(p.eq.iter().map(|(f, _)| ("eq", *f)));
+                    for (role, field) in fields {
+                        if !fact.fields.contains(&field) && !ENVELOPE_FIELDS.contains(&field) {
+                            gaps.push(Gap::UndeclaredPatternField {
+                                row: decl.name,
+                                source: p.source,
+                                field,
+                                role,
+                            });
+                        }
+                    }
+                }
             }
         }
         // 第 6 条的两半：`by` 指向一个**存在**的执行体，且它写的名字够得到出口。
@@ -524,6 +599,183 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
     for actor in frozen.actors() {
         if !used_by.contains(actor.name) {
             gaps.push(Gap::OrphanActor { actor: actor.name });
+        }
+    }
+    gaps.extend(check_dependency_graph(rows, frozen));
+    gaps
+}
+
+/// §3.4 第 1 条：「谁还清谁」的保守依赖图不许有环。
+///
+/// 边 `a → b` 的意思：`b` 的执行体声明写的某个**事实名**出现在 `a` 的出口（`until ∪
+/// unless`，视图按 `reads` 展开到事实）里——`a` 还不还得看 `b` 跑不跑。环 ⇒ 每一笔
+/// 都在等环里的另一笔先被派发，而「被派发」要求它此刻就开着：类型级互相等待，
+/// 运行期一步都走不动（这不是「慢」，是死锁）。
+///
+/// 两处刻意保守：
+///
+/// - **自环不算**。一行自己写自己的出口正是正常形状（执行体干活，把这一行关掉），
+///   它不构成等待；把自环算进环会让每一张真表都红。
+/// - `by = None` 的行没有出边。它的出口由插件代码落，不由某个行执行体跑；这张图
+///   只画「行等行」，不去猜代码里写了什么。
+fn check_dependency_graph(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
+    let mut gaps = Vec::new();
+    let mut state = vec![Visit::New; rows.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    for start in 0..rows.len() {
+        walk(rows, frozen, start, &mut state, &mut stack, &mut gaps);
+    }
+    gaps
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Visit {
+    New,
+    OnStack,
+    Done,
+}
+
+/// 这一行靠哪些**事实**关掉（视图展开到它的 `reads`，与第 6 条同一算法）。
+fn exit_facts(decl: &Decl, frozen: &Frozen) -> Vec<&'static str> {
+    decl.until
+        .iter()
+        .chain(decl.unless)
+        .flat_map(|p| fact_names_of(p.source, frozen))
+        .collect()
+}
+
+/// `at` 的出边：哪些**别的**行的执行体会写到它的出口。
+fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
+    let exits = exit_facts(&rows[at], frozen);
+    rows.iter()
+        .enumerate()
+        .filter(|(i, _)| *i != at)
+        .filter(|(_, other)| {
+            other
+                .by
+                .and_then(|name| frozen.actor(name))
+                .is_some_and(|actor| exits.iter().any(|f| actor.writes.contains(f)))
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// 一次深搜；回到栈上的结点 ⇒ 报那一段。每条回边只在其起点被访问时报一次，
+/// 所以同一个环不会被重复报两遍。
+fn walk(
+    rows: &[Decl],
+    frozen: &Frozen,
+    at: usize,
+    state: &mut [Visit],
+    stack: &mut Vec<usize>,
+    gaps: &mut Vec<Gap>,
+) {
+    if state[at] != Visit::New {
+        if state[at] == Visit::OnStack {
+            let from = stack.iter().position(|&i| i == at).unwrap_or_default();
+            let mut cycle: Vec<&'static str> =
+                stack[from..].iter().map(|&i| rows[i].name).collect();
+            cycle.push(rows[at].name);
+            gaps.push(Gap::DependencyCycle { cycle });
+        }
+        return;
+    }
+    state[at] = Visit::OnStack;
+    stack.push(at);
+    for next in producers_of(rows, frozen, at) {
+        walk(rows, frozen, next, state, stack, gaps);
+    }
+    stack.pop();
+    state[at] = Visit::Done;
+}
+
+/// 一对**可能同时开账**的行（§3.4 第 4 条的报告单元）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Overlap {
+    /// 表内先后，不带裁决意味——谁先被派发由 `(prio, name, key)` 决，这里不判。
+    pub(crate) rows: [&'static str; 2],
+    /// 两边都当作前件的那些事实名（字典序，一对只列一条）。
+    pub(crate) facts: Vec<&'static str>,
+}
+
+/// 「会不会真的同时命中」是**运行期**的问题（要读日志），静态只能回答「可能」。
+/// 所以第 4 条不报错，只报告：报告让遮蔽在装载期可见，裁决仍归 [`drive`] 取最小。
+///
+/// 三条全成立才报，缺一条就是噪音：
+///
+/// 1. 两边的 `owes` 展开后有共同事实名（视图按 `reads` 展开）；
+/// 2. `key` 是同一组字段——不同键的两笔债本来不会撞在同一笔上；
+/// 3. `eq` 可满足：同一字段不许有两个不同字面量（`port=tool` 与 `port=model`
+///    永不同时成立，报出来只会淹没真信号）。
+pub(crate) fn overlaps(rows: &[Decl], frozen: &Frozen) -> Vec<Overlap> {
+    let mut out = Vec::new();
+    for (i, a) in rows.iter().enumerate() {
+        for b in rows[i + 1..].iter() {
+            if a.owes.key != b.owes.key || !eq_compatible(&a.owes, &b.owes) {
+                continue;
+            }
+            let left = fact_names_of(a.owes.source, frozen);
+            let right = fact_names_of(b.owes.source, frozen);
+            // 视图的 `reads` 会把同一事实名列好几遍（每个字段一条），而报告问的是
+            // 「这两行读不读同一些事实」——按名字去重，一对只出一条。
+            let mut facts: Vec<&'static str> =
+                left.into_iter().filter(|f| right.contains(f)).collect();
+            facts.sort_unstable();
+            facts.dedup();
+            if !facts.is_empty() {
+                out.push(Overlap {
+                    rows: [a.name, b.name],
+                    facts,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// 两个模式的 `eq` 能不能同时成立：共有字段上的字面量必须一致。
+fn eq_compatible(a: &Pattern, b: &Pattern) -> bool {
+    a.eq.iter().all(|(field, lit)| {
+        b.eq.iter()
+            .find(|(other, _)| other == field)
+            .is_none_or(|(_, other)| other == lit)
+    })
+}
+
+/// §3.4 第 5 条的端口侧：每个端口的协议格必须真的有人还。
+///
+/// 判据落在行的出口上，不落在代码路径里：[`PortDecl`] 说「这个端口派发前先落
+/// `before`」，那么表里就得有一行的 `until` 能按这个端口关掉 `response` 与
+/// `failed`。缺一格的形态是「应答回来了而债还在」——求解器每一幕都选中它，
+/// 而它永远还不掉，正是第 5 条要拦的那类静默。
+///
+/// **端口字段名从声明读，不写在本文件里**：`ring.rs` 出现端口字段名就是 PTS-002
+/// 判的「引擎读端口」（加端口 = 改引擎）。`FactDecl.port` 是它唯一的声明处。
+pub(crate) fn check_ports(rows: &[Decl], frozen: &Frozen, ports: &[PortDecl]) -> Vec<Gap> {
+    let mut gaps = Vec::new();
+    let port_field = frozen.fact(EVENT_SENT).and_then(|f| f.port);
+    for port in ports {
+        if frozen.fact(port.before).is_none() {
+            gaps.push(Gap::PortBeforeUndeclared {
+                port: port.port,
+                fact: port.before,
+            });
+        }
+        for fact in [EVENT_RESPONSE, EVENT_FAILED] {
+            let covered = port_field.is_some_and(|field| {
+                rows.iter().flat_map(|d| d.until).any(|p| {
+                    p.source == fact
+                        && p.eq
+                            .iter()
+                            .any(|(name, lit)| *name == field && *lit == Lit::Str(port.port))
+                })
+            });
+            if !covered {
+                gaps.push(Gap::PortWithoutAnswerExit {
+                    port: port.port,
+                    fact,
+                });
+            }
         }
     }
     gaps

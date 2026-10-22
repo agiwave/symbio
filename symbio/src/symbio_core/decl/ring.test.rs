@@ -683,3 +683,319 @@ fn a_complete_expand_row_has_no_gaps() {
     )];
     assert!(check_rows(&rows, &world_batch()).is_empty());
 }
+
+// ── 装载期七道检查的反向用例（§3.4，指认表见 [`check_rows`] 的文档）─────────
+
+/// 第 3 条：模式引用了一个不在载荷声明里的字段。
+///
+/// 它与「这次没带这个字段」在求值时同形（取不到 ⇒ 不命中），所以运行期永远不会
+/// 说错——只能装载期说。键与等值约束各查一遍，`role` 区分是哪一侧拼错。
+#[test]
+fn a_pattern_field_must_be_declared_by_the_fact() {
+    let rows = [row(
+        "typo",
+        10,
+        None,
+        pattern("f", &["idea"], &[("x", Lit::Str("go"))]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    assert!(
+        check_rows(&rows, &world()).contains(&Gap::UndeclaredPatternField {
+            row: "typo",
+            source: "f",
+            field: "idea",
+            role: "key",
+        })
+    );
+
+    let rows = [row(
+        "typo",
+        10,
+        None,
+        pattern("f", &["id"], &[("em", Lit::Str("go"))]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    assert!(
+        check_rows(&rows, &world()).contains(&Gap::UndeclaredPatternField {
+            row: "typo",
+            source: "f",
+            field: "em",
+            role: "eq",
+        })
+    );
+}
+
+/// 第 3 条的例外：信封三格每条事实都有，不该逐条声明（判它红就是把机制当错误）。
+///
+/// 夹具世界 `world()` 只声明 `f` / `g` / `h` 与一个执行体，一张两行的表本来就会报
+/// 孤儿事实之类的缺口；这里只要求**第 3 条不响**——别把别的缺口算进这条用例。
+#[test]
+fn the_envelope_fields_need_no_declaration() {
+    let rows = [row(
+        "by-turn",
+        10,
+        None,
+        pattern("f", &["turn"], &[]),
+        &[pattern("g", &["turn", "seq", "ts"], &[])],
+        &[],
+    )];
+    let gaps = check_rows(&rows, &world());
+    assert!(
+        !gaps
+            .iter()
+            .any(|g| matches!(g, Gap::UndeclaredPatternField { .. })),
+        "信封三格不该要求逐条声明：{gaps:?}"
+    );
+}
+
+/// 第 1 条：两行互相等对方先跑——保守依赖图上有环。
+///
+/// `one` 写 `g`（`r2` 的出口），`two` 写 `h`（`r1` 的出口）：每一行都「开着等另一行」，
+/// 而另一行也在等它，于是没有任何一行能被派发到底。运行期的形状是每一步无进展。
+#[test]
+fn a_cycle_in_the_who_settles_whom_graph_is_a_gap() {
+    const ONE: ActorDecl = ActorDecl {
+        name: "one",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    const TWO: ActorDecl = ActorDecl {
+        name: "two",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    let rows = [
+        row(
+            "r1",
+            10,
+            Some("one"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "r2",
+            20,
+            Some("two"),
+            pattern("f", &["id"], &[]),
+            &[pattern("h", &["id"], &[])],
+            &[],
+        ),
+    ];
+    assert_eq!(
+        check_rows(&rows, &world_with(&[ONE, TWO])),
+        vec![Gap::DependencyCycle {
+            cycle: vec!["r1", "r2", "r1"]
+        }]
+    );
+}
+
+/// 自环不算环：一行自己写自己的出口正是正常形状（执行体干活把这一行关掉）。
+/// 把自环算成环会让每一张真表都红，所以这一条是**正例**——只要求第 1 条不响。
+#[test]
+fn a_row_that_closes_itself_is_not_a_cycle() {
+    let rows = [row(
+        "r",
+        10,
+        Some("act"),
+        pattern("f", &["id"], &[]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    let gaps = check_rows(&rows, &world());
+    assert!(
+        !gaps
+            .iter()
+            .any(|g| matches!(g, Gap::DependencyCycle { .. })),
+        "自环不是互相等待：{gaps:?}"
+    );
+}
+
+/// 第 4 条：可能同时开账的行对**只报告**。
+///
+/// 静态判不出「会不会真的同时命中」（那要读日志），所以这里不红；但遮蔽必须在装载
+/// 期可见——两行认同一笔债而 `prio` 相同，日志里看不出谁被选中，直到它静默不发生。
+#[test]
+fn overlapping_rows_are_reported_not_rejected() {
+    let rows = [
+        row(
+            "r1",
+            10,
+            None,
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "r2",
+            20,
+            None,
+            pattern("f", &["id"], &[]),
+            &[pattern("h", &["id"], &[])],
+            &[],
+        ),
+    ];
+    let frozen = world_with(&[]);
+    assert!(check_rows(&rows, &frozen).is_empty());
+    assert_eq!(
+        overlaps(&rows, &frozen),
+        vec![Overlap {
+            rows: ["r1", "r2"],
+            facts: vec!["f"],
+        }]
+    );
+}
+
+/// 第 4 条不报噪音：键不同、或等值约束互斥的行对永不同时命中。
+#[test]
+fn rows_that_cannot_collide_are_not_reported() {
+    let rows = [
+        row(
+            "by-id",
+            10,
+            None,
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "by-turn",
+            20,
+            None,
+            pattern("f", &["turn"], &[]),
+            &[pattern("g", &["turn"], &[])],
+            &[],
+        ),
+        // 同一事实同一键，但 `x` 上两个不同字面量：不可能同时成立。
+        row(
+            "go",
+            30,
+            None,
+            pattern("f", &["id"], &[("x", Lit::Str("go"))]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+    ];
+    let frozen = world_with(&[]);
+    assert_eq!(
+        overlaps(&rows, &frozen),
+        vec![Overlap {
+            rows: ["by-id", "go"],
+            facts: vec!["f"],
+        }]
+    );
+}
+
+/// 端口声明夹具：协议名在 `builtin` 那张表里，行夹具的 `f` / `g` / `h` 没有端口维。
+fn protocol_world() -> std::sync::Arc<Frozen> {
+    crate::symbio_core::decl::builtin_with(&[]).expect("协议名必须能冻结")
+}
+
+fn port_x() -> PortDecl {
+    PortDecl {
+        port: "x",
+        before: EVENT_SENT,
+        lease_ms: 1_000,
+        max_attempts: 1,
+        concurrent: false,
+    }
+}
+
+/// 第 5 条的端口侧：应答与失败两格都得落在某行的出口上。
+///
+/// 缺 `failed` 的形状是「这笔调用永远不会成功也永远不会判死」——`await` 行开着，
+/// 谁都不派发它（`by = None`），而它挡住「本轮收束」，最后由停机判据兜掉。
+#[test]
+fn a_port_without_a_failure_exit_is_a_gap() {
+    let rows = [row(
+        "await-x",
+        70,
+        None,
+        pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
+        &[pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))])],
+        &[],
+    )];
+    assert_eq!(
+        check_ports(&rows, &protocol_world(), &[port_x()]),
+        vec![Gap::PortWithoutAnswerExit {
+            port: "x",
+            fact: EVENT_FAILED
+        }]
+    );
+}
+
+/// 两格都覆盖 ⇒ 没有缺口（正例，防上一条把「有行就红」写死）。
+#[test]
+fn a_port_with_both_answer_exits_loads() {
+    let rows = [row(
+        "await-x",
+        70,
+        None,
+        pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
+        &[
+            pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
+            pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("x"))]),
+        ],
+        &[],
+    )];
+    assert!(check_ports(&rows, &protocol_world(), &[port_x()]).is_empty());
+}
+
+/// 覆盖必须是**这个端口**的：只写了别的端口的应答格不算。
+#[test]
+fn another_ports_answer_does_not_cover_this_one() {
+    let rows = [row(
+        "await-x",
+        70,
+        None,
+        pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
+        &[
+            pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("y"))]),
+            pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("y"))]),
+        ],
+        &[],
+    )];
+    assert_eq!(
+        check_ports(&rows, &protocol_world(), &[port_x()]),
+        vec![
+            Gap::PortWithoutAnswerExit {
+                port: "x",
+                fact: EVENT_RESPONSE
+            },
+            Gap::PortWithoutAnswerExit {
+                port: "x",
+                fact: EVENT_FAILED
+            },
+        ]
+    );
+}
+
+/// 派发前格（`before`）也必须是声明过的事实名——它是引擎写的，名字拼错就是
+/// 「派出去了而日志里没有」。
+#[test]
+fn a_ports_before_cell_must_be_declared() {
+    let rows = [row(
+        "await-x",
+        70,
+        None,
+        pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
+        &[
+            pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
+            pattern(EVENT_FAILED, &["id"], &[("port", Lit::Str("x"))]),
+        ],
+        &[],
+    )];
+    let mut port = port_x();
+    port.before = "dispatched";
+    assert_eq!(
+        check_ports(&rows, &protocol_world(), &[port]),
+        vec![Gap::PortBeforeUndeclared {
+            port: "x",
+            fact: "dispatched"
+        }]
+    );
+}

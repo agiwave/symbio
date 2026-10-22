@@ -788,3 +788,45 @@ fn views_are_pure_same_slice_same_now_same_value() {
     assert_eq!(report_due(&events, 5_000)["due"], json!(true));
     assert_eq!(report_due(&events, 500)["due"], json!(false));
 }
+
+/// 第 5 条（写入封闭）的声明侧：协议四格是引擎写的，执行体的账本里不许出现。
+///
+/// `writes` 是「这个执行体会落哪些格」的声明。放上 `sent` 就允许搬运者自己声明
+/// 「我派出去了」，放上 `response` 允许它自己声明「我回来了」——忘写一次没有任何
+/// 东西会红（§2.3），写一次假的也没有东西会拦。
+#[test]
+fn an_actor_cannot_claim_an_engine_cell() {
+    for cell in [EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY] {
+        // `ActorDecl.writes` 要 `'static`；用例进程内泄漏可忽略（同 `ring.test.rs` 的出口切片）。
+        let writes: &'static [&'static str] = Box::leak(Box::new([cell]));
+        let mut b = Builder::new();
+        b.actor(ActorDecl {
+            name: "carrier",
+            mode: LatencyTier::Deep,
+            reads: &[],
+            writes,
+        });
+        assert_eq!(
+            b.seal().err().unwrap_or_default(),
+            vec![CheckError::ActorWritesEngineCell {
+                actor: "carrier",
+                fact: cell
+            }],
+            "{cell} 是引擎独占的格子"
+        );
+    }
+}
+
+/// `request` 不在引擎独占名单里：它是**决策者**写的——「这一轮欠一次调用」是判断，
+/// 不是执行（§2.3）。把这条钉住，免得下次收口时顺手把它一起封掉。
+#[test]
+fn the_request_cell_belongs_to_the_decider() {
+    let mut b = Builder::new();
+    b.actor(ActorDecl {
+        name: "decider",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &[EVENT_REQUEST],
+    });
+    assert!(b.seal().is_ok());
+}

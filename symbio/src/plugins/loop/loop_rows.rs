@@ -53,7 +53,9 @@ use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use crate::symbio_core::ring::{check_rows, owed, Decl, Lit, Pattern, PortDecl};
+use crate::symbio_core::ring::{
+    check_ports, check_rows, overlaps, owed, Decl, Lit, Pattern, PortDecl,
+};
 use crate::symbio_core::{
     builtin_with, ActorDecl, Event, Frozen, LatencyTier, EVENT_ARTIFACT_ADDED,
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
@@ -694,23 +696,41 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 装载：冻结声明表（含执行体声明）→ 用行表跑装载期检查。
+/// 装载：冻结声明表（含执行体声明）→ 用行表 + 端口表跑装载期检查。
 ///
-/// **任何缺口都是装载失败**——`check_rows` 报出的每一格（重复名 / 无出口 / 键不一致 /
-/// 未声明源 / 展开键不匹配 / 孤儿事实名 / 无人认领的 `by` / 收不了口的执行体）都进
-/// Err 列表，不降级成告警：一个没人消费的事实名就是判据 7 拦的那条「拼错的名字
-/// 静默永不被消费」，它在装载期就该挡住启动。
+/// **任何缺口都是装载失败**——`check_rows` 与 `check_ports` 报出的每一格（重复名 /
+/// 无出口 / 键不一致 / 未声明源 / 未声明字段 / 展开键不匹配 / 孤儿事实名 / 无人认领
+/// 的 `by` / 收不了口的执行体 / 依赖成环 / 端口没有应答出口）都进 Err 列表，不降级
+/// 成告警：一个没人消费的事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，
+/// 它在装载期就该挡住启动。
 ///
 /// 执行体声明与绑定项一起交（[`super::turn_exec::actor_decls`] 就是绑定表的
 /// `decl` 投影），所以装载期能看到的名字与派发器跑得动的名字**同源**。
+///
+/// §3.4 第 4 条（相交行对）是**报告**，不是缺口：静态只能判「可能同时命中」，
+/// 谁先派发归 `drive` 的 `(prio, name, key)`。它在开幕前打一次，让遮蔽可见。
 fn assemble(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<String>> {
     let frozen = builtin_with(&actor_decls())
         .map_err(|errors| vec![format!("事实 / 视图 / 执行体声明装载失败：{errors:?}")])?;
-    let gaps = check_rows(rows, &frozen);
-    if gaps.is_empty() {
-        return Ok(frozen);
+    let mut gaps = check_rows(rows, &frozen);
+    gaps.extend(check_ports(rows, &frozen, PORTS));
+    if !gaps.is_empty() {
+        return Err(gaps.iter().map(|g| format!("{g:?}")).collect());
     }
-    Err(gaps.iter().map(|g| format!("{g:?}")).collect())
+    let overlapping = overlaps(rows, &frozen);
+    if !overlapping.is_empty() {
+        crate::plugin_info!(
+            "session",
+            "[Loop] 相交行对 {} 组（可能同时开账，裁决归 prio）：{}",
+            overlapping.len(),
+            overlapping
+                .iter()
+                .map(|o| format!("{}×{}@{}", o.rows[0], o.rows[1], o.facts.join("+")))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        );
+    }
+    Ok(frozen)
 }
 
 /// 冻结的声明表（进程内唯一）。装载有任何缺口 ⇒ `None`，[`table`] 恒 `Err`。
