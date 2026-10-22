@@ -66,7 +66,7 @@ pub(crate) async fn settle_reasoning(
 ///
 /// ## 工具执行与主动压缩拦截不在这里（已随 PL-014 步骤 5 退役）
 ///
-/// 工具由 v2 运行器在 `turn_exec::execute_turn` 内部经 `DispatchPort` 跑完、
+/// 工具由 v2 运行器在 `turn_exec::execute_turn` 内部经 `SessionDispatchPort` 跑完、
 /// 副作用直落事实。v1 外壳在这里有一段「工具分发 + `context_compact` 拦截」分支，
 /// 其进入条件（`TurnOutput.tool_calls` 非空）在 v2 恒不成立——生产与测试都不可达，
 /// 随外壳删除（[PL-014 步骤 5a](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")，

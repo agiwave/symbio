@@ -229,7 +229,7 @@ pub(crate) async fn tool_round<S>(
     run: &mut Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
-    dispatch: &dyn crate::symbio_core::DispatchPort,
+    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
 ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -238,7 +238,10 @@ where
         // 没有寄存 = 引擎没有可派的工具批；不空转。
         return Ok(None);
     };
-    let outcomes = dispatch.dispatch(&rt).await;
+    // 三笔债三个动作（ADR-118 决策 5）：创建 → 授权 → 派发，各自落自己那一行。
+    let mut calls = dispatch.open(&rt).await;
+    dispatch.authorize(&mut calls).await;
+    let outcomes = dispatch.dispatch(&rt, &mut calls).await;
 
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;

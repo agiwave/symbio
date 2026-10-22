@@ -1,6 +1,6 @@
 //! 阶段③ 工具批派发与产物落格（T-179 · B3，PL-015 §5 动作 B3）。
 //!
-//! 派发本身在 [`crate::symbio_core::DispatchPort`]（插件侧实现）；本段只承接
+//! 派发本身在 [`super::super::tool_dispatch::ToolDispatch`]（三动作契约）；本段只承接
 //! 回来的 [`DispatchOutcome`]：逐条过产物闸、落 `artifact.added`、把本批调用
 //! 结构累加进本轮事实。等待用户 / 继续下一轮的判定归 [`super::stream`]。
 //!
@@ -13,7 +13,7 @@ pub(crate) async fn land_artifacts<S>(
     run: &mut Prepared,
     store: &S,
     rt: &LlmTurn,
-    outcomes: &[crate::symbio_core::DispatchOutcome],
+    outcomes: &[super::super::tool_dispatch::DispatchOutcome],
     round_facts: &StreamNodeFacts,
 ) -> Result<(), crate::symbio_core::AppendError>
 where

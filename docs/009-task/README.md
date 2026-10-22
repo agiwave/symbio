@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 2 · ☑ done 225 · ❌ wont 5（共 232）
+**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 227 · ❌ wont 5（共 232）
 
 ## 待处理（按依赖顺序）
 
@@ -68,10 +68,7 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-230-内环收口批` | 内环收口批——引擎行驱动 + 工具批次 expand + 恢复调用债前件（SPRINT） | now | plan | — |
-| `T-233-引擎行驱动调度` | 引擎行驱动调度——drive_steps 的手写循环换成「读行债 → 派发」 | later | plan | T-232-创建行接入集合展开 |
+（无）
 
 ## 已完成
 
@@ -123,6 +120,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-222-行从函数变数据` | 行从函数变数据——`Registry` 的行换成 `Decl`，`decide` 换成 `owed` | plan |
 | `T-224-端口协议名与判据门禁` | 端口协议名与判据门禁——5 个协议名入库，`port` 载荷裁决，判据 1 进 CI | plan |
 | `T-223-两行模板与前置标记` | 两行模板与前置标记——首端口 `turn`、`sent` 由引擎写、租约重试、`Wait`/`Ask` 折叠 | plan |
+| `T-230-内环收口批` | 内环收口批——引擎行驱动 + 工具批次 expand + 恢复调用债前件（SPRINT） | plan |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -211,6 +209,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-227-端口细粒度化` | 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017） | plan |
 | `T-228-批次并发声明` | 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半） | plan |
 | `T-229-集合展开` | 义务环的集合展开——`Decl.expand`（PL-017 步 3 的后半） | plan |
+| `T-233-引擎行驱动调度` | 引擎行驱动调度——drive_steps 的手写循环换成「读行债 → 派发」 | plan |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta |
@@ -544,10 +543,10 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（done）
 - [`T-228-批次并发声明`](228-批次并发声明.md) 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半）（done）
 - [`T-229-集合展开`](229-集合展开.md) 义务环的集合展开——`Decl.expand`（PL-017 步 3 的后半）（done）
-- [`T-230-内环收口批`](230-内环收口批.md) 内环收口批——引擎行驱动 + 工具批次 expand + 恢复调用债前件（SPRINT）（doing） · 子项 doing 1 / done 3
+- [`T-230-内环收口批`](230-内环收口批.md) 内环收口批——引擎行驱动 + 工具批次 expand + 恢复调用债前件（SPRINT）（done） · 子项 done 4
   - [`T-231-恢复调用进债环`](231-恢复调用进债环.md) 恢复调用进债环——审批后的那一笔要有自己的债前件（done）
   - [`T-232-创建行接入集合展开`](232-创建行接入集合展开.md) 创建行接入集合展开——open-tools.owes = response(port=model) + expand（done）
-  - [`T-233-引擎行驱动调度`](233-引擎行驱动调度.md) 引擎行驱动调度——drive_steps 的手写循环换成「读行债 → 派发」（doing）
+  - [`T-233-引擎行驱动调度`](233-引擎行驱动调度.md) 引擎行驱动调度——drive_steps 的手写循环换成「读行债 → 派发」（done）
   - [`T-234-流式帧不入事实用例`](234-流式帧不入事实用例.md) 判据 5 用例——流式帧直通且日志不增（done）
 - [`T-235-清理迁移前残留stash`](235-清理迁移前残留stash.md) 清理 v2 迁移前的残留 autostash（done）
 

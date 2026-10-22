@@ -9,7 +9,7 @@
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
 //! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
 
-use super::{TurnInput, TurnOutcome, TurnRunner, TurnSessionBegin};
+use super::{TurnInput, TurnOutcome, TurnRunner};
 use crate::symbio_core::{
     ActorSpec, AppendError, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     SilentDeltas, Store, Verb, EVENT_USER_MESSAGE,
@@ -116,8 +116,10 @@ impl TurnRunner {
             .await
     }
 
-    /// 测试侧的步驱动：生产里这一步由 `turn_exec::call_model` 做（T-227 步 5）。
-    /// 本文件保留它只为让既有用例继续按「一轮 = 一个调用」书写；循环不进生产面。
+    /// 测试侧的步驱动：**直接调生产派发器**（`turn_exec::drive_steps`），不复制循环。
+    ///
+    /// 早先这里另写了一份等价循环；那会让「无进展收束」「步数上界」的用例只测到副本。
+    /// 现在测试驱动与生产驱动是同一条路径（T-233 后果 2 的验收要求）。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_with_tools<S>(
         &self,
@@ -127,39 +129,12 @@ impl TurnRunner {
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
-        dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
+        dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
     ) -> Result<TurnOutcome, AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        let step_sink = sink.clone();
-        let mut session = match TurnRunner::begin(store, llm, input, sink).await? {
-            TurnSessionBegin::Done(outcome) => return Ok(outcome),
-            TurnSessionBegin::Run(session) => session,
-        };
-        loop {
-            let has_batch = session.has_pending_batch();
-            if !has_batch && session.count_model_step() {
-                return session.exhausted(store, llm, "step_limit").await;
-            }
-            let outcome = if has_batch {
-                session.tools(store, llm, dispatch).await?
-            } else {
-                session
-                    .model(
-                        store,
-                        llm,
-                        tok,
-                        step_sink.clone(),
-                        tools,
-                        dispatch.is_some(),
-                    )
-                    .await?
-            };
-            if let Some(outcome) = outcome {
-                return Ok(outcome);
-            }
-        }
+        super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch).await
     }
 }
 
@@ -1233,15 +1208,16 @@ mod turn_runner_tests {
 mod tool_round_tests {
     use std::sync::{Arc, Mutex};
 
+    use super::super::super::tool_dispatch::{DispatchOutcome, ToolDispatch, ToolPortCall};
     use super::super::{
         NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnResume, TurnRunner,
     };
     use crate::symbio_core::{
-        check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, DispatchOutcome,
-        DispatchPort, Entity, Event, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
-        ModelFinishReason, PromptMessage, Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo,
-        Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
-        EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+        check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
+        EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage,
+        Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED,
+        EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
+        EVENT_USER_MESSAGE,
     };
 
     /// 判据（T-227 步 2）：**每一次**模型往返都留下完整的协议事实——
@@ -1681,8 +1657,18 @@ mod tool_round_tests {
     }
 
     #[async_trait::async_trait]
-    impl DispatchPort for FakeDispatch {
-        async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
+    impl ToolDispatch for FakeDispatch {
+        async fn open(&self, _turn: &LlmTurn) -> Vec<ToolPortCall> {
+            Vec::new()
+        }
+
+        async fn authorize(&self, _calls: &mut [ToolPortCall]) {}
+
+        async fn dispatch(
+            &self,
+            turn: &LlmTurn,
+            _calls: &mut [ToolPortCall],
+        ) -> Vec<DispatchOutcome> {
             *self.rounds.lock().unwrap() += 1;
             turn.tool_calls
                 .iter()
@@ -2720,8 +2706,18 @@ mod tool_round_tests {
     struct PathEchoDispatch;
 
     #[async_trait::async_trait]
-    impl DispatchPort for PathEchoDispatch {
-        async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
+    impl ToolDispatch for PathEchoDispatch {
+        async fn open(&self, _turn: &LlmTurn) -> Vec<ToolPortCall> {
+            Vec::new()
+        }
+
+        async fn authorize(&self, _calls: &mut [ToolPortCall]) {}
+
+        async fn dispatch(
+            &self,
+            turn: &LlmTurn,
+            _calls: &mut [ToolPortCall],
+        ) -> Vec<DispatchOutcome> {
             turn.tool_calls
                 .iter()
                 .map(|tc| DispatchOutcome {

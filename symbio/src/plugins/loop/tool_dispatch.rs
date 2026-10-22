@@ -1,10 +1,22 @@
-//! v2 的工具分发实现（core 的 [`DispatchPort`] 契约，插件侧落地）。
+//! v2 的工具分发实现（插件本地的 [`ToolDispatch`] 契约）。
 //!
 //! ## 为什么分发在插件侧
 //!
 //! 分发的**全部输入**都在这里：插件宿主（路由工具能力）、请求上下文（能力注册表 /
 //! 会话 id / 工作区）、事件出口（结果节点写进对话图）、会话目录（超长结果存档）。
-//! core 认识这些即违 E-009；契约留在 core、实现留在插件，依赖方向由编译器保证。
+//! core 认识这些即违 E-009；契约与实现因此都留在本插件（唯一消费方是
+//! [`super::turn_runner`]，ADR-118 决策 5）。
+//!
+//! ## 三个动作，不是一次打包调用
+//!
+//! 工具批次的三笔债各自由一个动作承担（ADR-118 决策 5）：
+//!
+//! 1. [`ToolDispatch::open`]：模型响应里的调用逐条写 `request(port=tool)`；
+//! 2. [`ToolDispatch::authorize`]：对已开账的调用写 `authz.granted` /
+//!    `authz.denied`（拒绝即止，不落 `sent`）；
+//! 3. [`ToolDispatch::dispatch`]：为放行的调用落 `sent`、跑执行层、关账。
+//!
+//! 三步各自可观测，崩溃恢复的粒度因此从「整批」变成「已落哪一笔债」。
 //!
 //! ## 与工具执行层的关系：**不是第二条执行链**
 //!
@@ -16,7 +28,7 @@
 //!    （`LlmAdapter` 交回的是收口后的 `LlmTurn`，没有那条帧流），由本处补建。
 //!    节点形状与其余对话节点**同一份**（前端读同一套字段），
 //!    因此复用 `llm_build_tool_call_nodes` / `llm_build_text_node`。
-//! 2. **把结果映射成 core 的事实形状**（[`DispatchOutcome`]），供运行器落
+//! 2. **把结果映射成运行器的事实形状**（[`DispatchOutcome`]），供运行器落
 //!    `artifact.added` 格与拼下一轮 prompt。
 //!
 //! ## 正文节点的定格
@@ -35,10 +47,10 @@ use crate::symbio_core::chat_node::{
 };
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::{
-    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, CapabilityRiskLevel,
-    DispatchOutcome, DispatchPort, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn, Plugin,
-    PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store, Verb, CAPABILITY_VISITOR,
-    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_REQUEST, MODE, RISK_LEVEL,
+    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, CapabilityRiskLevel, Entity,
+    Event, ExecAbortSignal, ExecEventSink, LlmTurn, Plugin, PluginInvokeRequest,
+    PluginInvokeRequestExt, Seq, Store, Verb, CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED,
+    EVENT_AUTHZ_GRANTED, EVENT_REQUEST, MODE, RISK_LEVEL,
 };
 
 use super::loop_rows;
@@ -68,16 +80,87 @@ pub(crate) struct DerivedFacts {
     pub(crate) breaks: Vec<&'static str>,
 }
 
-/// 一笔已开账的工具端口调用（批次级 prepass 的产物）。
+/// 一笔已开账的工具端口调用（创建动作的产物）。
 ///
-/// `granted = false` ⇒ 授权行已落 `authz.denied`，这笔调用**没有** `sent`；
-/// 执行层仍会跑它（审批 / 拒绝卡的节点由执行层唯一构造），但端口账已关。
+/// `granted = false` ⇒ 授权行已落 `authz.denied`（或授权事实落格失败），这笔调用
+/// **没有** `sent`；执行层仍会跑它（审批 / 拒绝卡的节点由执行层唯一构造），但端口
+/// 账已关。`sent = false` 且 `granted = true` ⇒ 派发行没有放行这笔账（行不欠 /
+/// `sent` 落格失败），关账时按「没执行」处理。
+#[derive(Clone)]
 pub(crate) struct ToolPortCall {
     /// 模型交回的调用 id（执行层按它回结果；与端口 id 是两件事）。
     pub(crate) model_id: String,
     /// 端口账的逻辑 id（`request` / `sent` / 应答同 id）。
     pub(crate) call: port::Call,
+    /// 工具名（LLM 可见名；授权事实的载荷要它）。
+    pub(crate) name: String,
+    /// 这次调用的风险档。`None` = 注册表里没有可判的能力（route-only 工具）。
+    pub(crate) risk: Option<CapabilityRiskLevel>,
+    /// 参数里显式带了 `approved: true`（已由人工确认过）。
+    pub(crate) approved: bool,
+    /// 授权动作的结论（创建时为 `false`，授权动作写入）。
     pub(crate) granted: bool,
+    /// 派发动作是否已落 `sent`（派发动作写入）。
+    pub(crate) sent: bool,
+}
+
+/// 一次工具调用结果的**事实形状**（[`ToolDispatch::dispatch`] 的元素类型）。
+///
+/// 刻意只装**结果**：消费方（运行器）要的是「拿什么回填给模型」与「要不要停」，
+/// 不是插件侧的节点形状。节点怎么建、往哪发，是分发方自己的事——运行器不认识
+/// `ChatNode` 的图语义（那在 `plugins/session`），只认识这段文本。
+///
+/// 它住在插件里而不是 core：生产消费方只有本插件的运行器（README §4 四问第 1 问）。
+#[derive(Debug, Clone, Default)]
+pub struct DispatchOutcome {
+    /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。
+    pub call_id: String,
+    /// 工具名（LLM 可见名）。
+    pub name: String,
+    /// 结果正文。**失败也是正文**——工具失败是信息性的，模型据此改道，不中断会话。
+    pub text: String,
+    /// 成功与否。仅供可观测/展示；**不改变**本轮终态（信息性，见上）。
+    pub ok: bool,
+    /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
+    /// 运行器据此**停止工具循环**（恢复前提见
+    /// [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
+    pub needs_user_action: bool,
+    /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
+    ///
+    /// **它是事实的一部分**：`needs_user_action` 只说明「这轮停在等用户」，而恢复
+    /// （`resume`）要拿 `meta.prompt` 复现那张卡。T-056 起读路径走 WAL 重建 ⇒ 这张卡
+    /// 必须能从事实折出来，故随载荷入格（`Some` 仅当 [`Self::needs_user_action`]）。
+    /// 运行器不认识它的形状——原样透传（与 `text` 同一条：只搬数据，不解释）。
+    pub prompt: Option<serde_json::Value>,
+    /// 等待用户的原因码（`failure_kind` 里的 pending 取值：`needs_approval` /
+    /// `needs_interaction`……）。与 [`Self::prompt`] 同批入库、同批复现。
+    pub failure_kind: String,
+    /// ToolCall 节点的 provider wire id（`tool_call_id` 字段）。节点身份的一部分：
+    /// 事件载荷记录它，重建才能复刻同一个工具卡片（`call_id` 只是节点 id）。
+    pub wire_id: String,
+    /// ToolCall 节点的**定稿参数文本**（JSON 文本 / 解析失败的残破原文）。
+    /// 重建直接回放这段文本，不经 `Value` 重序列化（键序漂移即失真）。
+    pub args: String,
+    /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
+    pub result_id: String,
+}
+
+/// 工具派发的**三个动作**（ADR-118 决策 5）：创建 / 授权 / 派发。
+///
+/// 三笔债不再由一次调用代劳——运行器按顺序各调一次，每一步只写自己那一行的
+/// 领域事实。契约住插件本地，core 不认识工具分发（E-009）。
+#[async_trait]
+pub(crate) trait ToolDispatch: Send + Sync {
+    /// 创建：为模型响应里可派发的调用逐条写 `request(port=tool)`。
+    async fn open(&self, turn: &LlmTurn) -> Vec<ToolPortCall>;
+
+    /// 授权：为已开账的调用写 `authz.granted` / `authz.denied`。
+    ///
+    /// 拒绝即止：`granted` 保持 `false`，派发动作不会为它落 `sent`。
+    async fn authorize(&self, calls: &mut [ToolPortCall]);
+
+    /// 派发：为放行的调用落 `sent`、跑执行层、关账，返回结果事实。
+    async fn dispatch(&self, turn: &LlmTurn, calls: &mut [ToolPortCall]) -> Vec<DispatchOutcome>;
 }
 
 /// 工具端口账的写方：批次分发与 resume 共用**同一套**开账 / 关账。
@@ -249,7 +332,7 @@ impl ToolPort {
                 continue;
             }
             if let Some(open) = self
-                .open_with(
+                .open_one(
                     ctx,
                     &policy,
                     &call,
@@ -263,6 +346,193 @@ impl ToolPort {
             }
         }
         out
+    }
+
+    /// 创建动作的单笔实体：只写 `request`（ADR-118 决策 5 的第一笔债）。
+    ///
+    /// 风险档在这里算定并写进请求载荷（`risk` / `threshold` / `approved` /
+    /// `deferred`），授权动作只按它判放行——两处读的是**同一个判定输入**，
+    /// 不各算一遍。
+    async fn open_one(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        policy: &ToolPortPolicy,
+        call: &port::Call,
+        model_id: &str,
+        name: &str,
+        args: &serde_json::Value,
+    ) -> Option<ToolPortCall> {
+        let approved = args
+            .get("approved")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let risk = risk_of(ctx, name, args, &policy.known).await;
+        // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
+        // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
+        let deferred = risk.is_none();
+        let risk_name = risk.map(risk_label).unwrap_or("unknown");
+
+        if let Err(e) = port::announce_with(
+            self.facts.as_ref(),
+            call,
+            self.turn,
+            self.user_seq,
+            serde_json::json!({
+                "tool": name,
+                "risk": risk_name,
+                "threshold": risk_label(policy.threshold),
+                "approved": approved,
+                "deferred": deferred,
+            }),
+        ) {
+            crate::plugin_warn!(
+                "session",
+                "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
+                self.turn
+            );
+            return None;
+        }
+        Some(ToolPortCall {
+            model_id: model_id.to_string(),
+            call: call.clone(),
+            name: name.to_string(),
+            risk,
+            approved,
+            granted: false,
+            sent: false,
+        })
+    }
+
+    /// 授权动作：为已开账的调用写 `authz.granted` / `authz.denied`（第二笔债）。
+    pub(crate) async fn authorize(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        calls: &mut [ToolPortCall],
+    ) {
+        if calls.is_empty() {
+            return;
+        }
+        let policy = ToolPortPolicy::read(ctx).await;
+        self.authorize_calls(&policy, calls);
+    }
+
+    /// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
+    fn authorize_calls(&self, policy: &ToolPortPolicy, calls: &mut [ToolPortCall]) {
+        let facts = self.facts.range(Seq::new(0));
+        if !loop_rows::owes(
+            "authorize-tool",
+            &facts,
+            self.turn,
+            crate::symbio_core::clock_now_ms(),
+        ) {
+            crate::plugin_warn!(
+                "session",
+                "[Tool] 授权行不欠（turn={}），不判放行",
+                self.turn
+            );
+            return;
+        }
+        for call in calls.iter_mut() {
+            let granted = call
+                .risk
+                .is_none_or(|risk| !risk.requires_approval(policy.threshold, call.approved));
+            let risk_name = call.risk.map(risk_label).unwrap_or("unknown");
+            if granted {
+                if let Err(e) = append_authz(
+                    self.facts.as_ref(),
+                    granted_event(
+                        self.turn,
+                        self.user_seq,
+                        &call.call,
+                        &call.name,
+                        risk_name,
+                        call.risk.is_none(),
+                    ),
+                ) {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 放行事实未落格（turn={} / {}）：{e:?}",
+                        self.turn,
+                        call.model_id
+                    );
+                    continue;
+                }
+                call.granted = true;
+            } else {
+                // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
+                // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。
+                let why = if policy.mode == "auto" {
+                    "permission_denied"
+                } else {
+                    "needs_approval"
+                };
+                if let Err(e) = append_authz(
+                    self.facts.as_ref(),
+                    denied_event(self.turn, self.user_seq, &call.call, &call.name, why),
+                ) {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 拒绝事实未落格（turn={} / {}）：{e:?}",
+                        self.turn,
+                        call.model_id
+                    );
+                }
+            }
+        }
+    }
+
+    /// 派发动作的前半（第三笔债）：为放行的调用落 `sent`。
+    ///
+    /// 执行层由调用方跑（`SessionDispatchPort::dispatch`）——`sent` 的语义是
+    /// 「已交给执行层」，所以它必须先于执行。
+    pub(crate) fn begin_calls(&self, calls: &mut [ToolPortCall]) {
+        if !calls.iter().any(|c| c.granted) {
+            return;
+        }
+        let facts = self.facts.range(Seq::new(0));
+        let owed = loop_rows::owes(
+            "dispatch-tools",
+            &facts,
+            self.turn,
+            crate::symbio_core::clock_now_ms(),
+        );
+        for call in calls.iter_mut().filter(|c| c.granted) {
+            if !owed {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 派发行不欠（turn={} / {}），不落 sent",
+                    self.turn,
+                    call.model_id
+                );
+                let _ = port::failed(
+                    self.facts.as_ref(),
+                    &call.call,
+                    self.turn,
+                    self.user_seq,
+                    "dispatch_row_not_owed",
+                );
+                continue;
+            }
+            if let Err(e) = port::begin(
+                self.facts.as_ref(),
+                loop_rows::PORTS,
+                port::Dispatch {
+                    call: &call.call,
+                    turn: self.turn,
+                    produced_by: self.user_seq,
+                    owed,
+                },
+            ) {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 工具 sent 未落格（turn={} / {}）：{e:?}",
+                    self.turn,
+                    call.model_id
+                );
+            } else {
+                call.sent = true;
+            }
+        }
     }
 
     /// 下一次 resume 的尝试号：已有几笔同目标 `request`，下一笔就是几 + 1。
@@ -308,7 +578,10 @@ impl ToolPort {
             .await
     }
 
-    /// 单笔开账的实体：`request` → 授权 → 放行才落 `sent`。
+    /// 单笔开账的实体（resume 用）：`request` → 授权 → 放行才落 `sent`。
+    ///
+    /// 批次路径按三个动作分开走；resume 的一次用户动作只涉及一笔调用，三步在
+    /// 这里连续执行，**共用同一套实体**（不另写一份开账逻辑）。
     async fn open_with(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
@@ -318,139 +591,24 @@ impl ToolPort {
         name: &str,
         args: &serde_json::Value,
     ) -> Option<ToolPortCall> {
-        let approved = args
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let risk = risk_of(ctx, name, args, &policy.known).await;
-        // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
-        // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
-        let deferred = risk.is_none();
-        let granted = risk.is_none_or(|risk| !risk.requires_approval(policy.threshold, approved));
-        let risk_name = risk.map(risk_label).unwrap_or("unknown");
-
-        if let Err(e) = port::announce_with(
-            self.facts.as_ref(),
-            call,
-            self.turn,
-            self.user_seq,
-            serde_json::json!({
-                "tool": name,
-                "risk": risk_name,
-                "threshold": risk_label(policy.threshold),
-                "approved": approved,
-                "deferred": deferred,
-            }),
-        ) {
-            crate::plugin_warn!(
-                "session",
-                "[Tool] 工具请求事实未落格（turn={} / {model_id}）：{e:?}",
-                self.turn
-            );
+        let mut one = [self
+            .open_one(ctx, policy, call, model_id, name, args)
+            .await?];
+        self.authorize_calls(policy, &mut one);
+        if !one[0].granted {
+            return one.into_iter().next();
+        }
+        self.begin_calls(&mut one);
+        if !one[0].sent {
             return None;
         }
-
-        let facts = self.facts.range(Seq::new(0));
-        if !loop_rows::owes(
-            "authorize-tool",
-            &facts,
-            self.turn,
-            crate::symbio_core::clock_now_ms(),
-        ) {
-            crate::plugin_warn!(
-                "session",
-                "[Tool] 授权行不欠（turn={} / {model_id}），不派发",
-                self.turn
-            );
-            return None;
-        }
-
-        if granted {
-            if let Err(e) = append_authz(
-                self.facts.as_ref(),
-                granted_event(self.turn, self.user_seq, call, name, risk_name, deferred),
-            ) {
-                crate::plugin_warn!(
-                    "session",
-                    "[Tool] 放行事实未落格（turn={} / {model_id}）：{e:?}",
-                    self.turn
-                );
-                return None;
-            }
-            let facts = self.facts.range(Seq::new(0));
-            let owed = loop_rows::owes(
-                "dispatch-tools",
-                &facts,
-                self.turn,
-                crate::symbio_core::clock_now_ms(),
-            );
-            if !owed {
-                crate::plugin_warn!(
-                    "session",
-                    "[Tool] 派发行不欠（turn={} / {model_id}），不落 sent",
-                    self.turn
-                );
-                let _ = port::failed(
-                    self.facts.as_ref(),
-                    call,
-                    self.turn,
-                    self.user_seq,
-                    "dispatch_row_not_owed",
-                );
-                return None;
-            }
-            if let Err(e) = port::begin(
-                self.facts.as_ref(),
-                loop_rows::PORTS,
-                port::Dispatch {
-                    call,
-                    turn: self.turn,
-                    produced_by: self.user_seq,
-                    owed,
-                },
-            ) {
-                crate::plugin_warn!(
-                    "session",
-                    "[Tool] 工具 sent 未落格（turn={} / {model_id}）：{e:?}",
-                    self.turn
-                );
-                return None;
-            }
-            Some(ToolPortCall {
-                model_id: model_id.to_string(),
-                call: call.clone(),
-                granted: true,
-            })
-        } else {
-            // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
-            // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。
-            let why = if policy.mode == "auto" {
-                "permission_denied"
-            } else {
-                "needs_approval"
-            };
-            if let Err(e) = append_authz(
-                self.facts.as_ref(),
-                denied_event(self.turn, self.user_seq, call, name, why),
-            ) {
-                crate::plugin_warn!(
-                    "session",
-                    "[Tool] 拒绝事实未落格（turn={} / {model_id}）：{e:?}",
-                    self.turn
-                );
-            }
-            Some(ToolPortCall {
-                model_id: model_id.to_string(),
-                call: call.clone(),
-                granted: false,
-            })
-        }
+        one.into_iter().next()
     }
 
     /// 批次返回后关账：放行的每一笔都必须有 `response`（有结果）或 `failed`
     /// （执行层没跑到它）。拒绝的那几笔已经由 `authz.denied` 关掉，不在这里补。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
-        for call in calls.iter().filter(|c| c.granted) {
+        for call in calls.iter().filter(|c| c.granted && c.sent) {
             let answered = outcomes.iter().any(|o| o.call_id == call.model_id);
             self.close(call, answered);
         }
@@ -612,11 +770,14 @@ impl SessionDispatchPort {
         std::mem::take(&mut self.derived.lock().unwrap())
     }
 
-    /// 批次级 prepass：为每个真正可派发的调用开一笔工具账（T-227 步 3）。
-    ///
-    /// 实体在 [`ToolPort::open_batch`]；本方法只把本轮的请求上下文递过去。
-    async fn open_tool_calls(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
+    /// 三动作契约的创建步（实体在 [`ToolPort::open_batch`]）。
+    async fn open_action(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
         self.port.open_batch(&self.ctx, turn).await
+    }
+
+    /// 三动作契约的授权步（实体在 [`ToolPort::authorize`]）。
+    async fn authorize_action(&self, calls: &mut [ToolPortCall]) {
+        self.port.authorize(&self.ctx, calls).await;
     }
 
     /// 批次返回后关账（实体在 [`ToolPort::close_batch`]）。
@@ -712,17 +873,25 @@ where
 }
 
 #[async_trait]
-impl DispatchPort for SessionDispatchPort {
-    async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
+impl ToolDispatch for SessionDispatchPort {
+    async fn open(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
+        self.open_action(turn).await
+    }
+
+    async fn authorize(&self, calls: &mut [ToolPortCall]) {
+        self.authorize_action(calls).await;
+    }
+
+    async fn dispatch(
+        &self,
+        turn: &LlmTurn,
+        port_calls: &mut [ToolPortCall],
+    ) -> Vec<DispatchOutcome> {
         let mut produced: Vec<ChatNode> = Vec::new();
 
-        // ⓪ 端口账：先授权、再派发（T-227 步 3）。这一步必须在执行层之前——
+        // ⓪ 第三笔债的前半：为放行的调用落 `sent`。必须在执行层之前——
         //    `sent` 的语义是「已交给执行层」，而不是「工具已经开始跑」。
-        let port_calls = if turn.tool_calls.is_empty() {
-            Vec::new()
-        } else {
-            self.open_tool_calls(turn).await
-        };
+        self.port.begin_calls(port_calls);
 
         // ① 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
         //    没有正文（纯工具调用轮）就不建节点——空节点是噪声。
@@ -883,7 +1052,7 @@ impl DispatchPort for SessionDispatchPort {
             .collect();
         // ⑤ 关账：放行的每一笔都要有 `response` / `failed`（拒绝的那几笔由 `denied`
         //    关在授权行上）。放在结果映射之后：`call_id` 是执行层交回的权威 id。
-        self.close_tool_calls(&port_calls, &outcomes);
+        self.close_tool_calls(port_calls, &outcomes);
         outcomes
     }
 }

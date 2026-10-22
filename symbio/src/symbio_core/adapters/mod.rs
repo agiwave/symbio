@@ -223,7 +223,7 @@ pub trait DeltaSink: Send + Sync + 'static {
     ///
     /// ## 为什么是整条消息而不是拆开的参数
     ///
-    /// **工具节点的构造权在分发方**（[`DispatchPort`]），不在这里：model 插件的
+    /// **工具节点的构造权在分发方**（`plugins/loop/tool_dispatch.rs`），不在这里：model 插件的
     /// 转写面已经用**同一个节点 id** 广播（流式 / 落库 / 执行三处同 id，见
     /// `tool_accumulator`），分发方稍后以同一 id 定格与落库。桥若在这里自建节点、
     /// 或把帧拆成裸参数再让消费端重组，就会出现第二张卡。所以消费端的义务只是
@@ -324,69 +324,6 @@ pub trait LlmAdapter: Send + Sync {
             usage: None,
         })
     }
-}
-
-/// 一次工具调用的**事实形状**（[`DispatchPort::dispatch`] 的元素类型）。
-///
-/// 刻意只装**结果**：调用方（运行器）要的是「拿什么回填给模型」与「要不要停」，
-/// 不是插件侧的节点形状。节点怎么建、往哪发，是分发方自己的事——core 不认识
-/// `ChatNode` 的图语义（那在 `plugins/session`），只认识这段文本。
-#[derive(Debug, Clone, Default)]
-pub struct DispatchOutcome {
-    /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。
-    pub call_id: String,
-    /// 工具名（LLM 可见名）。
-    pub name: String,
-    /// 结果正文。**失败也是正文**——工具失败是信息性的，模型据此改道，不中断会话。
-    pub text: String,
-    /// 成功与否。仅供可观测/展示；**不改变**本轮终态（信息性，见上）。
-    pub ok: bool,
-    /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
-    /// 运行器据此**停止工具循环**（恢复前提见
-    /// [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
-    pub needs_user_action: bool,
-    /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
-    ///
-    /// **它是事实的一部分**：`needs_user_action` 只说明「这轮停在等用户」，而恢复
-    /// （`resume`）要拿 `meta.prompt` 复现那张卡。T-056 起读路径走 WAL 重建 ⇒ 这张卡
-    /// 必须能从事实折出来，故随载荷入格（`Some` 仅当 [`Self::needs_user_action`]）。
-    /// core 不认识它的形状——原样透传（与 `text` 同一条：core 只搬数据，不解释）。
-    pub prompt: Option<serde_json::Value>,
-    /// 等待用户的原因码（`failure_kind` 里的 pending 取值：`needs_approval` /
-    /// `needs_interaction`……）。与 [`Self::prompt`] 同批入库、同批复现。
-    pub failure_kind: String,
-    /// ToolCall 节点的 provider wire id（`tool_call_id` 字段）。节点身份的一部分：
-    /// 事件载荷记录它，重建才能复刻同一个工具卡片（`call_id` 只是节点 id）。
-    pub wire_id: String,
-    /// ToolCall 节点的**定稿参数文本**（JSON 文本 / 解析失败的残破原文）。
-    /// 重建直接回放这段文本，不经 `Value` 重序列化（键序漂移即失真）。
-    pub args: String,
-    /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
-    pub result_id: String,
-}
-
-/// 工具分发端口（⑤ 的抽象面，与 [`LlmAdapter`] 并列的第二只端口）。
-///
-/// ## 为什么是 trait 而不是把分发搬进 core
-///
-/// 分发的**全部输入**都在插件侧：插件宿主（路由工具能力）、调用上下文（会话 id /
-/// 工作区 / 能力注册表）、转写（结果节点写进对话图）、会话目录（超长结果存档）。
-/// core 认识插件即违 E-009，而依赖方向由编译器保证——同 [`crate::symbio_core::ProviderLlmAdapter`]
-/// 留在 core 的那条理由（它只依赖 core 契约）。
-///
-/// ## 为什么实现方持有中止信号
-///
-/// 与 [`LlmAdapter`] 同形：中止是**调用的语境**，由构造方注入实现体，不由每轮传参。
-/// 分发方在批内逐工具检查 `abort.is_aborted()` 并提前收口（未执行的批尾必须定格，
-/// 否则前端留下永远转动的「运行中」）。
-#[async_trait]
-pub trait DispatchPort: Send + Sync {
-    /// 分发一轮的工具调用，返回每个调用的结果事实。
-    ///
-    /// `turn` 是本轮生成的完整产物——分发方需要它的 `text` 与 `tool_calls` 一起，
-    /// 才能把这一轮**落成一条完整的助手消息**（正文 + 工具调用节点），而不是只落
-    /// 工具结果（那样下一轮请求里模型看不到自己请求过什么）。
-    async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome>;
 }
 
 /// 零 LLM 桩——彩排与测试用。可注入**确定性失败**，用于演练兜底路径。

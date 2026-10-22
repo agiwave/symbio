@@ -55,7 +55,7 @@ created: 2026-09-16
              + 会话侧读写经动作面                            session_port.rs
 ④ 单轮执行层 turn_exec::execute_turn            turn_exec.rs
              + TurnRunner::run_with_tools          turn_runner.rs（工具循环在这里）
-             + SessionDispatchPort::dispatch       tool_dispatch.rs
+             + SessionDispatchPort::dispatch       tool_dispatch.rs（三动作：open / authorize / dispatch）
              + process_tool_calls_async            tools/tool_executor.rs
 ```
 
@@ -81,7 +81,7 @@ created: 2026-09-16
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
 | 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
 | 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
-| 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
+| 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `SessionDispatchPort` 三动作分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
 | 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
 | 7 | `finalize_turn_root` | 封根 Turn——子树收敛之后发出**即将落库的那条节点** | 收尾 |
@@ -108,7 +108,7 @@ created: 2026-09-16
   汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **「不完整不唤醒」由运行器环体守住**：一个批次的结果全部接进 `exchange` 之后才发
   下一次请求（§4.1），不在闸门里判在途工具。
-- **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `DispatchPort` 分发）；
+- **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort` 分发）；
   `close_turn` 只做「本轮结算 + 下一步判定」，不承担工具执行（见 §4.1）。
 
 ---

@@ -54,7 +54,7 @@ use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider, Plug
 ///
 /// 为什么正文/推理要记账而工具调用不记：model 插件的窄帧只带 `id + delta`、不带
 /// `msg_type`，正文与推理的归属只能靠登记表判；工具调用**不需要判**——它的节点
-/// 构造权在分发方（`DispatchPort`），model 插件的转写面与分发方共用**同一个节点 id**
+/// 构造权在分发方（`plugins/loop/tool_dispatch.rs`），model 插件的转写面与分发方共用**同一个节点 id**
 /// （见 `tool_accumulator`），消费端把帧原样送进自己的帧序即可，桥若自建节点或
 /// 拆装重组必然出现第二张卡。收束帧不经此桥：终态由消费方负责
 /// （model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
@@ -494,7 +494,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         }
         // 流式出口：转写帧经桥转成正文增量（桥不落盘——帧面只进回调）；
         // 中止信号直通调用方（会话轮的中止语义不因换执行路径而丢）。
-        // 工具调用帧不进 v2 文本面：工具节点的构造权在分发方（`DispatchPort` 实现），
+        // 工具调用帧不进 v2 文本面：工具节点的构造权在分发方（loop 插件），
         // 由它按**同一份** `tool_calls` 建节点——两处各建一份必然出现重复卡片。
         let env = ExecEnv::new(
             ExecEventSink::direct(Arc::new(DeltaBridge {

@@ -213,6 +213,11 @@ pub(crate) fn owed<'a>(
 /// `turn_exec::drive_steps` 直接调用它；执行半边（跑执行体、追加事实、
 /// 无进展守卫）在派发器里，选择规则不再变。
 ///
+/// `accept` 是执行体注册表：只有 `by` 命中的债才可被选中。注册表没覆盖的
+/// `by`（粗端口期 `policy.*` 与三笔工具债由整轮执行体内部完成）在选债面上
+/// 被跳过，而不是被选中后无人可跑——否则一笔内环债会把整轮顶成 `no_progress`。
+/// 求解器不看这个谓词：声明表与 `owed` 的字节不变（ADR-118 决策 1 / 8）。
+///
 /// 按行点问（`plugins::loop::loop_rows::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
 /// 调度器唯一的选债口（ADR-118 决策 1–2）。
@@ -221,10 +226,11 @@ pub(crate) fn drive<'a>(
     frozen: &Frozen,
     events: &[Event],
     now: i64,
+    accept: impl Fn(&str) -> bool,
 ) -> Option<Debt<'a>> {
     owed(rows, frozen, events, now)
         .into_iter()
-        .filter(|d| !d.blocked)
+        .filter(|d| !d.blocked && d.decl.by.is_some_and(&accept))
         .min()
 }
 

@@ -371,14 +371,14 @@ fn execute_row_closes_on_turn_closed() {
         ev(1, "session.config", plain()),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let picked = drive(ROWS, &frozen(), &open, 0).expect("开着的轮次总是欠一次执行");
+    let picked = drive(ROWS, &frozen(), &open, 0, |_| true).expect("开着的轮次总是欠一次执行");
     assert_eq!(picked.decl.name, "execute-turn");
     assert_eq!(picked.decl.by, Some("execute"));
 
     let mut closed = open.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
     assert!(
-        drive(ROWS, &frozen(), &closed, 0).is_none(),
+        drive(ROWS, &frozen(), &closed, 0, |_| true).is_none(),
         "收束后无账可还"
     );
 }
@@ -401,7 +401,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
     ];
     let f = frozen();
     assert_eq!(
-        drive(ROWS, &f, &events, 0).map(|d| d.decl.name),
+        drive(ROWS, &f, &events, 0, |_| true).map(|d| d.decl.name),
         Some("policy.classify")
     );
 
@@ -409,7 +409,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
     let mut reversed: Vec<Decl> = ROWS.iter().map(copy).collect();
     reversed.reverse();
     assert_eq!(
-        drive(&reversed, &f, &events, 0).map(|d| d.decl.name),
+        drive(&reversed, &f, &events, 0, |_| true).map(|d| d.decl.name),
         Some("policy.classify")
     );
 
@@ -417,7 +417,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
     let mut decided = events.clone();
     decided.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
     assert_eq!(
-        drive(ROWS, &f, &decided, 0).map(|d| d.decl.name),
+        drive(ROWS, &f, &decided, 0, |_| true).map(|d| d.decl.name),
         Some("policy.recall")
     );
     decided.push(ev(
@@ -426,7 +426,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
         json!({"stage": "recall", "round": 0, "result": "miss"}),
     ));
     assert_eq!(
-        drive(ROWS, &f, &decided, 0).map(|d| d.decl.name),
+        drive(ROWS, &f, &decided, 0, |_| true).map(|d| d.decl.name),
         Some("execute-turn")
     );
 }
@@ -976,7 +976,7 @@ fn tool_rows_do_not_disturb_the_model_rows() {
 #[test]
 fn next_is_none_without_events() {
     // 空表不前进：装载失败 / 还没有本幕事实时，派发器不能猜一个动作。
-    assert!(super::next(&[], 0, 0).is_none());
+    assert!(super::next(&[], 0, 0, |_| true).is_none());
 }
 
 #[test]
@@ -986,7 +986,7 @@ fn next_picks_execute_turn_while_the_turn_is_open() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0).expect("开着的幕应欠 execute-turn");
+    let next = super::next(&events, 1, 0, |_| true).expect("开着的幕应欠 execute-turn");
     assert_eq!(next.row, "execute-turn");
     assert_eq!(next.by, "execute");
 }
@@ -999,5 +999,5 @@ fn next_is_none_once_the_turn_is_closed() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
         ev(1, "chat.assistant.final", json!({"text": "ok"})),
     ];
-    assert!(super::next(&events, 1, 0).is_none());
+    assert!(super::next(&events, 1, 0, |_| true).is_none());
 }

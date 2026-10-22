@@ -2,7 +2,7 @@
 //!
 //! 两档取其一：反射档经 [`TurnRunner::run_reflex`]（零模型调用），深度档装配
 //! [`TurnInput`]（含轮内注入闭包）后经 [`SessionDispatchPort`](super::super::tool_dispatch::SessionDispatchPort)
-//! 走 [`TurnRunner::run_with_tools`]。产 [`Running`] 交阶段③ [`super::outcome`]。
+//! 走 [`TurnRunner::run_with_tools`]（内环由 [`super::drive_steps`] 驱动）。产 [`Running`] 交阶段③ [`super::outcome`]。
 //!
 //! **纯结构拆分契约**：[`call_model`] 体内自 `turn_exec.rs` 的 `execute_turn`
 //! 第二段逐字搬移；[`supplement_into_request`] 同批搬入（它是注入闭包的落格半程，
@@ -274,7 +274,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 // 接管——落完用户格、发第一个请求前检查，已中止则走中止收束格。
                 abort: Some(abort.clone()),
             };
-            // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
+            // 工具分发：契约与实现都在插件侧（ADR-118 决策 5）——它持插件宿主、
             // 请求上下文、转写出口与工具存档目录（core 认识这些即违 E-009）。
             //
             // 淘汰闸的部署级判据由 session 折叠成**一个值**（`ADR-086 §4`：全量事件
@@ -305,7 +305,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 presentation_tree,
                 elimination_revoked,
             );
-            let dispatch_ref: &dyn DispatchPort = &dispatcher;
+            let dispatch_ref: &dyn super::super::tool_dispatch::ToolDispatch = &dispatcher;
             // 步循环在**执行器**里，不在 `turn_runner` 里（T-227 步 5）。
             let r = super::drive_steps(
                 store.as_ref(),

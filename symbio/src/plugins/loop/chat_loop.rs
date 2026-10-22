@@ -327,7 +327,7 @@ pub async fn run_chat_loop(
     //   （RetrySubtree 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
     // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
-    // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。
+    // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常经 `SessionDispatchPort`。
     let mut pending_resume: Option<super::turn_exec::ResumedTool> = None;
     // 本幕若为续写幕，`turn.stage{stage:"resume"}` 的 `result` 取这条名字。
     // 只有真的产出了工具交换（`pending_resume`）才按续写幕处理——`RetrySubtree`
@@ -524,7 +524,7 @@ pub async fn run_chat_loop(
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         // 轮次经 v2 运行器（[`super::turn_exec`]）执行——事实原生入格、prompt 从转写出、
-        // 流式经 UiBridge 回同一出口、工具轮经 `DispatchPort` 契约分发（工具节点与
+        // 流式经 UiBridge 回同一出口、工具轮经三动作契约分发（工具节点与
         // 结果仍写进同一份对话图）；收口（步骤 5-7）与之共享。
         //
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
@@ -948,7 +948,7 @@ pub(crate) enum TurnFlow {
 /// `TurnState::in_flight_tools`（本轮已派发、尚未产出结果的工具调用 id 集合），
 /// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。
 ///
-/// v2 现实下它恒放行：工具在 `turn_exec::execute_turn` **内部**跑完（`DispatchPort`
+/// v2 现实下它恒放行：工具在 `turn_exec::execute_turn` **内部**跑完（`SessionDispatchPort`
 /// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
 /// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
 /// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批

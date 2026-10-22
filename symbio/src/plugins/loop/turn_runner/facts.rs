@@ -72,7 +72,7 @@ pub(crate) fn rounds_payload(rounds: &[StreamNodeFacts]) -> Vec<serde_json::Valu
 /// 一次工具调用 → 事实条目（结果配不上的记 `result_id: None`）。
 pub(crate) fn tool_fact_of(
     tc: &crate::symbio_core::TurnToolCallInfo,
-    outcome: Option<&crate::symbio_core::DispatchOutcome>,
+    outcome: Option<&super::super::tool_dispatch::DispatchOutcome>,
 ) -> ToolCallFact {
     ToolCallFact {
         id: outcome
@@ -93,9 +93,9 @@ pub(crate) fn tool_fact_of(
 
 /// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
 pub(crate) fn outcome_of<'a>(
-    outcomes: &'a [crate::symbio_core::DispatchOutcome],
+    outcomes: &'a [super::super::tool_dispatch::DispatchOutcome],
     tc: &crate::symbio_core::TurnToolCallInfo,
-) -> Option<&'a crate::symbio_core::DispatchOutcome> {
+) -> Option<&'a super::super::tool_dispatch::DispatchOutcome> {
     outcomes.iter().find(|o| {
         tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false)
             || (!o.wire_id.is_empty() && tc.wire_id.as_deref() == Some(o.wire_id.as_str()))
@@ -274,7 +274,7 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
 /// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
 pub(crate) fn tool_exchange_messages(
     turn: &crate::symbio_core::LlmTurn,
-    outcomes: &[crate::symbio_core::DispatchOutcome],
+    outcomes: &[super::super::tool_dispatch::DispatchOutcome],
     round: usize,
 ) -> Vec<crate::symbio_core::PromptMessage> {
     let mut out: Vec<crate::symbio_core::PromptMessage> = Vec::new();

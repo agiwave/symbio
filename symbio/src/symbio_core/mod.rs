@@ -220,11 +220,9 @@ pub(crate) use view::{principal_namespace, visible_to};
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
-// 两只端口并列：`LlmAdapter`（生成）与 `DispatchPort`（工具分发）——运行器只认这两只，
-// 不认任何具体实现（插件宿主/转写都在实现侧）。
+// 生成端口 `LlmAdapter` 是 core 的唯一适配器契约；工具分发归 loop 插件本地（ADR-118）。
 pub use adapters::{
-    DeltaSink, DispatchOutcome, DispatchPort, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter,
-    SilentDeltas, TokenIssuer,
+    DeltaSink, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
 // 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `plugins/session/turn_runner.rs` 后，仍需要的
 // core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`

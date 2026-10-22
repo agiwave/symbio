@@ -137,7 +137,7 @@ export const BASELINE = {
   // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
   // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
   // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
-  rustTests: 2039,
+  rustTests: 2040,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。

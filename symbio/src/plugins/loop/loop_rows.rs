@@ -659,10 +659,9 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
 
 /// 引擎的**选债口**：本幕当前最小的一笔可还债。
 ///
-/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本函数回答「下一步谁欠」。
-/// 后者是 `turn_exec::drive_steps` 的唯一选债依据（ADR-118 决策 1–2）——
-/// 派发器不按行名 / 端口名 / 业务语义分支。过渡态里它只回答「还欠不欠」，
-/// 执行体注册表按 `by` 接线随后果 2 落地。
+/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠」。
+/// [`next`] 是 `turn_exec::drive_steps` 的唯一选债依据（ADR-118 决策 1–2）——
+/// 派发器不按行名 / 端口名 / 业务语义分支，只按 `by` 查执行体注册表。
 pub(crate) struct Next {
     /// 行名（日志与停机理由用）。
     pub(crate) row: &'static str,
@@ -677,9 +676,19 @@ pub(crate) struct Next {
 /// 这是 `ring::drive` 的生产包装：切片只含**本轮**事件（视图成本上界按轮），
 /// 并复用与 [`owes`] 同一份冻结声明表。装载失败返回 `None` 而不是 panic——
 /// 派发器据此停住，不拿半张表继续走。
-pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
+///
+/// `accept` 是派发器的执行体注册表（`by` → 执行体）：注册表没覆盖的债不参与
+/// 选债（粗端口期 `policy.*` 与三笔工具债在整轮执行体内部完成），否则一笔内环债
+/// 会把整轮顶成 `no_progress`。
+pub(crate) fn next(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    accept: impl Fn(&str) -> bool,
+) -> Option<Next> {
     let frozen = frozen()?;
-    let debt = crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now)?;
+    let debt =
+        crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now, accept)?;
     trace(&frozen, &debt);
     Some(Next {
         row: debt.decl.name,

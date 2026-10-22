@@ -584,7 +584,7 @@ impl TurnSession {
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
-        dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
+        dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
     ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,

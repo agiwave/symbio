@@ -165,7 +165,7 @@ fn unless_blocks_without_closing() {
     let debts = owed(&rows, &world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked, "`unless` 命中 ⇒ 在等，而不是没事");
-    assert!(drive(&rows, &world(), &events, 0).is_none());
+    assert!(drive(&rows, &world(), &events, 0, |_| true).is_none());
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn by_none_is_the_declared_waiting_state() {
     let debts = owed(&rows, &world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked);
-    assert!(drive(&rows, &world(), &events, 0).is_none());
+    assert!(drive(&rows, &world(), &events, 0, |_| true).is_none());
 }
 
 // ── 视图当源 ─────────────────────────────────────────────────────────────
@@ -271,11 +271,17 @@ fn drive_takes_min_by_prio_then_name_then_key() {
     let frozen = world();
     // 同 `prio` 按行名；注册顺序相反也不影响。
     let rows = [low.clone(), earlier.clone(), later.clone()];
-    let picked = drive(&rows, &frozen, &events, 0).unwrap();
+    let picked = drive(&rows, &frozen, &events, 0, |_| true).unwrap();
     assert_eq!(picked.decl.name, "a");
 
     let rows = [later.clone(), earlier.clone(), low.clone()];
-    assert_eq!(drive(&rows, &frozen, &events, 0).unwrap().decl.name, "a");
+    assert_eq!(
+        drive(&rows, &frozen, &events, 0, |_| true)
+            .unwrap()
+            .decl
+            .name,
+        "a"
+    );
 }
 
 #[test]
@@ -292,7 +298,7 @@ fn same_row_same_prio_breaks_ties_by_key() {
         ev(1, 1, "f", json!({"id": "b"})),
         ev(2, 1, "f", json!({"id": "a"})),
     ];
-    let picked = drive(&rows, &world(), &events, 0).unwrap();
+    let picked = drive(&rows, &world(), &events, 0, |_| true).unwrap();
     assert_eq!(picked.key.trace(), "id=a");
 }
 
@@ -300,7 +306,35 @@ fn same_row_same_prio_breaks_ties_by_key() {
 fn empty_table_never_drives_but_is_complete() {
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
     assert!(owed(&[], &world(), &events, 0).is_empty());
-    assert!(drive(&[], &world(), &events, 0).is_none());
+    assert!(drive(&[], &world(), &events, 0, |_| true).is_none());
+}
+
+#[test]
+fn accept_skips_rows_without_an_executor() {
+    // 执行体注册表是选债面的一部分：未接线的 `by` 不参与裁决，也不挡住更小的
+    // 已接线债（否则一笔内环债会把整轮顶成 `no_progress`）。
+    let rows = [
+        row(
+            "unwired",
+            0,
+            Some("nobody"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "wired",
+            10,
+            Some("act"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[])],
+            &[],
+        ),
+    ];
+    let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
+    let picked = drive(&rows, &world(), &events, 0, |by| by == "act").unwrap();
+    assert_eq!(picked.decl.name, "wired");
+    assert!(drive(&rows, &world(), &events, 0, |_| false).is_none());
 }
 
 // ── 纯性 ─────────────────────────────────────────────────────────────────
