@@ -156,6 +156,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("authorizer"),
         // 判定是纯比较（风险档 vs 会话阈值），不调模型。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id"],
@@ -182,6 +183,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("decide"),
         // 判决可能落到模型，但不生成：快速档（与旧行 `effects.tier` 同值）。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: "turn_head",
             key: &["turn", "round"],
@@ -209,6 +211,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("report"),
         // 模板产线，零模型往返。
         tier: LatencyTier::Reflex,
+        expand: None,
         owes: Pattern {
             source: "report_due",
             key: &["turn", "anchor"],
@@ -228,6 +231,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("compress"),
         // 语义压缩调模型：深度档。
         tier: LatencyTier::Deep,
+        expand: None,
         owes: Pattern {
             source: "turn_head",
             key: &["turn", "round"],
@@ -250,6 +254,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("recall"),
         // 事实投影的纯读 + 技能路由，不调模型。
         tier: LatencyTier::Reflex,
+        expand: None,
         owes: Pattern {
             source: "turn_head",
             key: &["turn", "round"],
@@ -276,6 +281,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("reflex"),
         // 快路就是「不调模型」：反射档是它的定义。
         tier: LatencyTier::Reflex,
+        expand: None,
         owes: Pattern {
             source: "turn_head",
             key: &["turn"],
@@ -302,6 +308,7 @@ pub(crate) static ROWS: &[Decl] = &[
         prio: 60,
         by: Some("execute"),
         tier: LatencyTier::Deep,
+        expand: None,
         owes: Pattern {
             source: "turn_head",
             key: &["turn"],
@@ -329,6 +336,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("courier"),
         // 派发本身不调模型（模型在执行体里）。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id"],
@@ -367,6 +375,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("courier"),
         // 派发本身不调模型（模型在执行体里）。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
             key: &["port", "id"],
@@ -394,6 +403,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("courier"),
         // 派发本身不调工具（执行在批次里）。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: EVENT_AUTHZ_GRANTED,
             key: &["port", "id"],
@@ -420,6 +430,7 @@ pub(crate) static ROWS: &[Decl] = &[
         prio: 70,
         by: None,
         tier: LatencyTier::Deep,
+        expand: None,
         owes: Pattern {
             source: EVENT_SENT,
             key: &["port", "id"],
@@ -450,6 +461,7 @@ pub(crate) static ROWS: &[Decl] = &[
         prio: 71,
         by: None,
         tier: LatencyTier::Deep,
+        expand: None,
         owes: Pattern {
             source: EVENT_SENT,
             key: &["port", "id"],
@@ -480,6 +492,7 @@ pub(crate) static ROWS: &[Decl] = &[
         prio: 72,
         by: None,
         tier: LatencyTier::Deep,
+        expand: None,
         owes: Pattern {
             source: EVENT_SENT,
             key: &["port", "id"],
@@ -520,6 +533,7 @@ pub(crate) static ROWS: &[Decl] = &[
         by: Some("lease_keeper"),
         // 看护本身是记账，不调模型。
         tier: LatencyTier::Fast,
+        expand: None,
         owes: Pattern {
             source: "stale_sent",
             key: &["port", "id"],

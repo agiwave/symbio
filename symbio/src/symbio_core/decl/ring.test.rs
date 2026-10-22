@@ -100,6 +100,7 @@ fn row(
         prio,
         by,
         tier: LatencyTier::Reflex,
+        expand: None,
         owes,
         until: leak(until),
         unless: leak(unless),
@@ -428,4 +429,147 @@ fn a_port_is_declared_once_and_found_by_name() {
     assert_eq!(port_of(PORTS, "tool").map(|p| p.concurrent), Some(true));
     // 没有这个端口 ⇒ `None`，不是默认值：漏声明要显形，不能静默拿一个默认租约。
     assert!(port_of(PORTS, "model").is_none());
+}
+
+// ── 集合展开（PL-017 §3.3）──────────────────────────────────────────────
+
+/// 一篮子的世界：`batch` 的 `calls` 声明为可展开字段。
+fn world_batch() -> std::sync::Arc<Frozen> {
+    let mut b = Builder::new();
+    b.fact(FactDecl {
+        name: "batch",
+        port: None,
+        key: &[],
+        expand: &["calls"],
+        fields: &["id", "calls", "turn"],
+    });
+    b.fact(FactDecl {
+        name: "done",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["id"],
+    });
+    b.seal().unwrap()
+}
+
+fn row_exp(
+    name: &'static str,
+    expand: Option<(&'static str, &'static str)>,
+    owes: Pattern,
+    until: &[Pattern],
+) -> Decl {
+    let leak = |p: &[Pattern]| Box::leak(p.to_vec().into_boxed_slice()) as &'static [Pattern];
+    Decl {
+        name,
+        prio: 10,
+        by: Some("act"),
+        tier: LatencyTier::Reflex,
+        expand,
+        owes,
+        until: leak(until),
+        unless: &[],
+    }
+}
+
+/// 一个 `owes` 实例的列表逐元素开债；键取自元素，元素之间互不相同。
+#[test]
+fn expand_opens_one_debt_per_element() {
+    let rows = [row_exp(
+        "r",
+        Some(("calls", "id")),
+        pattern("batch", &["id"], &[]),
+        &[pattern("done", &["id"], &[])],
+    )];
+    let events = vec![ev(
+        1,
+        1,
+        "batch",
+        json!({"id": "b1", "calls": [{"id": "c1"}, {"id": "c2"}, {"id": "c3"}]}),
+    )];
+    let debts = owed(&rows, &world_batch(), &events, 0);
+    let keys: Vec<String> = debts.iter().map(|d| d.key.trace()).collect();
+    assert_eq!(keys, vec!["id=c1", "id=c2", "id=c3"]);
+}
+
+/// 出口按键逐元素还：还掉两笔只留一笔在途。
+#[test]
+fn expand_until_closes_elements_one_by_one() {
+    let rows = [row_exp(
+        "r",
+        Some(("calls", "id")),
+        pattern("batch", &["id"], &[]),
+        &[pattern("done", &["id"], &[])],
+    )];
+    let events = vec![
+        ev(
+            1,
+            1,
+            "batch",
+            json!({"id": "b1", "calls": [{"id": "c1"}, {"id": "c2"}, {"id": "c3"}]}),
+        ),
+        ev(2, 1, "done", json!({"id": "c1"})),
+        ev(3, 1, "done", json!({"id": "c3"})),
+    ];
+    let debts = owed(&rows, &world_batch(), &events, 0);
+    let keys: Vec<String> = debts.iter().map(|d| d.key.trace()).collect();
+    assert_eq!(keys, vec!["id=c2"]);
+}
+
+/// 列表字段缺失 / 不是数组 ⇒ 一笔都不开，不是「开一笔空键的债」。
+#[test]
+fn expand_without_the_list_opens_no_debt() {
+    let rows = [row_exp(
+        "r",
+        Some(("calls", "id")),
+        pattern("batch", &["id"], &[]),
+        &[pattern("done", &["id"], &[])],
+    )];
+    for payload in [json!({"id": "b1"}), json!({"id": "b1", "calls": []})] {
+        let events = vec![ev(1, 1, "batch", payload)];
+        assert!(owed(&rows, &world_batch(), &events, 0).is_empty());
+    }
+}
+
+/// 元素键字段必须在 `owes.key` 里，事实字段必须由 `FactDecl.expand` 承认。
+#[test]
+fn expand_gaps_are_load_time_errors() {
+    let rows = [
+        // `call_id` 不在 `owes.key = ["id"]` 里：元素之间分不出谁是谁。
+        row_exp(
+            "key-missing",
+            Some(("calls", "call_id")),
+            pattern("batch", &["id"], &[]),
+            &[pattern("done", &["id"], &[])],
+        ),
+        // `nosuch` 没写进 `batch` 的 `expand` 声明。
+        row_exp(
+            "undeclared",
+            Some(("nosuch", "id")),
+            pattern("batch", &["id"], &[]),
+            &[pattern("done", &["id"], &[])],
+        ),
+    ];
+    let gaps = check_rows(&rows, &world_batch());
+    assert!(gaps.contains(&Gap::ExpandKeyMissing {
+        row: "key-missing",
+        field: "call_id"
+    }));
+    assert!(gaps.contains(&Gap::UndeclaredExpand {
+        row: "undeclared",
+        source: "batch",
+        field: "nosuch"
+    }));
+}
+
+/// 展开行本身是自洽的：没有 gap（正例，防上一条用例把「有 expand 就红」写死）。
+#[test]
+fn a_complete_expand_row_has_no_gaps() {
+    let rows = [row_exp(
+        "r",
+        Some(("calls", "id")),
+        pattern("batch", &["id"], &[]),
+        &[pattern("done", &["id"], &[])],
+    )];
+    assert!(check_rows(&rows, &world_batch()).is_empty());
 }

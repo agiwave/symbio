@@ -78,6 +78,17 @@ pub(crate) struct Decl {
     /// 这一行动作允许的时延档。
     pub(crate) tier: LatencyTier,
     pub(crate) owes: Pattern,
+    /// 集合展开：`Some((list_field, element_key_field))` ⇒ `owes` 实例的
+    /// `list_field` 是数组，**逐元素**开一笔债（PL-017 §3.3；`FactDecl.expand`
+    /// 是它在事实侧的另一半）。
+    ///
+    /// 展开后键绑定**对元素求值**：`owes.key` 里每个字段都从元素上取。
+    /// `element_key_field` 必须出现在 `owes.key` 里——它是元素的身份字段，
+    /// 缺了它只能开一堆同键债，`until` 无从分辨还了哪一笔。
+    ///
+    /// 只有 `owes` 展开：`until` / `unless` 按键命中，键已经唯一，再展开只会
+    /// 把同一笔出口读成多笔。
+    pub(crate) expand: Option<(&'static str, &'static str)>,
     /// 任一命中（同键）即视为还清。
     pub(crate) until: &'static [Pattern],
     /// 任一命中（同键）即挂起。
@@ -187,7 +198,7 @@ pub(crate) fn owed<'a>(
     for decl in rows {
         let until = keys_of_all(decl.until, frozen, events, now);
         let unless = keys_of_all(decl.unless, frozen, events, now);
-        for key in keys_of(&decl.owes, frozen, events, now) {
+        for key in keys_of_expanded(&decl.owes, decl.expand, frozen, events, now) {
             if until.contains(&key) {
                 continue;
             }
@@ -225,32 +236,64 @@ fn keys_of_all(patterns: &[Pattern], frozen: &Frozen, events: &[Event], now: i64
 }
 
 fn keys_of(p: &Pattern, frozen: &Frozen, events: &[Event], now: i64) -> Vec<Key> {
+    keys_of_expanded(p, None, frozen, events, now)
+}
+
+/// `owes` 的键集合。`expand = None` ⇒ 一个实例一笔债；`Some` ⇒ 每个实例的
+/// 列表字段逐元素展开，键绑定对**元素**求值（见 [`Decl::expand`]）。
+fn keys_of_expanded(
+    p: &Pattern,
+    expand: Option<(&'static str, &'static str)>,
+    frozen: &Frozen,
+    events: &[Event],
+    now: i64,
+) -> Vec<Key> {
+    let mut keys = Vec::new();
     if frozen.fact(p.source).is_some() {
-        events
-            .iter()
-            .filter(|e| e.kind == p.source)
-            .filter_map(|e| key_from(p, |f| fact_field(e, f)))
-            .collect()
-    } else if frozen.view(p.source).is_some() {
-        match frozen.eval(p.source, events, now) {
-            Some(Value::Array(items)) => items
-                .iter()
-                .filter_map(|v| key_from(p, |f| v.get(f).cloned()))
-                .collect(),
-            Some(v @ Value::Object(_)) => key_from(p, |f| v.get(f).cloned()).into_iter().collect(),
-            _ => Vec::new(),
+        for e in events.iter().filter(|e| e.kind == p.source) {
+            match expand {
+                None => keys.extend(key_from(p, |f| fact_field(e, f))),
+                Some((list, _)) => {
+                    // 等值约束仍拦在**外层实例**上（`port=model`），键则取自元素。
+                    if !eq_matches(p, |f| fact_field(e, f)) {
+                        continue;
+                    }
+                    if let Some(Value::Array(items)) = fact_field(e, list) {
+                        for item in items.iter() {
+                            keys.extend(key_from(p, |f| item.get(f).cloned()));
+                        }
+                    }
+                }
+            }
         }
-    } else {
-        Vec::new()
+    } else if frozen.view(p.source).is_some() {
+        let instances: Vec<Value> = match frozen.eval(p.source, events, now) {
+            Some(Value::Array(items)) => items,
+            Some(v @ Value::Object(_)) => vec![v],
+            _ => Vec::new(),
+        };
+        for v in instances {
+            match expand {
+                None => keys.extend(key_from(p, |f| v.get(f).cloned())),
+                Some((list, _)) => {
+                    if !eq_matches(p, |f| v.get(f).cloned()) {
+                        continue;
+                    }
+                    if let Some(Value::Array(items)) = v.get(list) {
+                        for item in items.iter() {
+                            keys.extend(key_from(p, |f| item.get(f).cloned()));
+                        }
+                    }
+                }
+            }
+        }
     }
+    keys
 }
 
 fn key_from(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option<Key> {
-    for &(name, lit) in p.eq {
-        let value = field(name);
-        if !lit_matches(lit, value.as_ref()) {
-            return None;
-        }
+    if !eq_matches(p, &mut field) {
+        return None;
     }
     let mut key = Vec::with_capacity(p.key.len());
     for name in p.key {
@@ -258,6 +301,11 @@ fn key_from(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option
         key.push(((*name).to_string(), scalar(value.as_ref())?));
     }
     Some(Key(key))
+}
+
+fn eq_matches(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> bool {
+    p.eq.iter()
+        .all(|&(name, lit)| lit_matches(lit, field(name).as_ref()))
 }
 
 fn fact_field(e: &Event, name: &str) -> Option<Value> {
@@ -295,7 +343,11 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UnknownSource`]：模式引用了一个没有声明的名字；
 /// - [`Gap::DuplicateName`]：两行同名；
 /// - [`Gap::OrphanFact`]：一个被声明的事实没有任何行**直接或经由视图**读到——
-///   拼错名字的静默形态，也是旧 `Verdict::Unmanned` 那一档的可观测性替代物。
+///   拼错名字的静默形态，也是旧 `Verdict::Unmanned` 那一档的可观测性替代物；
+/// - [`Gap::ExpandKeyMissing`]：`expand` 的元素键字段不在 `owes.key` 里——元素
+///   之间分不出谁是谁，`until` 无从按键还账；
+/// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
+///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Gap {
     NoExit {
@@ -313,6 +365,15 @@ pub(crate) enum Gap {
     },
     OrphanFact {
         fact: &'static str,
+    },
+    ExpandKeyMissing {
+        row: &'static str,
+        field: &'static str,
+    },
+    UndeclaredExpand {
+        row: &'static str,
+        source: &'static str,
+        field: &'static str,
     },
 }
 
@@ -332,6 +393,23 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
             .any(|p| p.key == decl.owes.key)
         {
             gaps.push(Gap::KeyMismatch { row: decl.name });
+        }
+        if let Some((list, elem_key)) = decl.expand {
+            if !decl.owes.key.contains(&elem_key) {
+                gaps.push(Gap::ExpandKeyMissing {
+                    row: decl.name,
+                    field: elem_key,
+                });
+            }
+            if let Some(fact) = frozen.fact(decl.owes.source) {
+                if !fact.expand.contains(&list) {
+                    gaps.push(Gap::UndeclaredExpand {
+                        row: decl.name,
+                        source: decl.owes.source,
+                        field: list,
+                    });
+                }
+            }
         }
         for p in std::iter::once(&decl.owes)
             .chain(decl.until)

@@ -52,6 +52,7 @@ fn copy(decl: &Decl) -> Decl {
         prio: decl.prio,
         by: decl.by,
         tier: decl.tier,
+        expand: decl.expand,
         owes: decl.owes,
         until: decl.until,
         unless: decl.unless,
