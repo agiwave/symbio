@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 1 · ☑ done 219 · ❌ wont 5（共 225）
+**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 220 · ❌ wont 5（共 225）
 
 ## 待处理（按依赖顺序）
 
@@ -68,9 +68,7 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-228-批次并发声明` | 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半） | later | plan | T-227-端口细粒度化 |
+（无）
 
 ## 已完成
 
@@ -204,6 +202,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-214-文档口径对账批二` | 文档口径对账批二——新审计点名的漂移逐条订正，预留接口登记落点 | doc |
 | `T-215-路由与载荷契约单源化批` | 路由与载荷契约单源化批——路由清单生成化评估与载荷 schema 同源探索 | plan |
 | `T-227-端口细粒度化` | 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017） | plan |
+| `T-228-批次并发声明` | 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半） | plan |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta |
@@ -535,7 +534,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-225-决策输入闭包`](225-决策输入闭包.md) 决策输入闭包——`owed` 只读事实 / 视图 / 事件时间戳（done）
   - [`T-226-授权行`](226-授权行.md) 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch`（done）
 - [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（done）
-- [`T-228-批次并发声明`](228-批次并发声明.md) 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半）（doing）
+- [`T-228-批次并发声明`](228-批次并发声明.md) 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半）（done）
 
 <!-- registry:summary end -->
 

@@ -471,6 +471,55 @@ impl LlmAdapter for StubLlmAdapter {
         self.model
     }
 
+    /// 桩的 `cost_ms` 取**注入延迟**，不取墙钟。
+    ///
+    /// 默认实现用 `Instant` 实测；零延迟桩在并发测试里偶尔会是 1ms，于是
+    /// 「重放台账 == 直写台账」这类判据会在同一份代码上随机红（T-228 门禁
+    /// 实际撞到过）。桩的职责是给测试一个**可复现**的外部源，不是复刻调度
+    /// 抖动：延迟参数就是它声明的耗时，0 就是 0。
+    async fn generate_turn(
+        &self,
+        _tok: &FullModel,
+        messages: &[PromptMessage],
+        _tools: &[CapabilityMeta],
+        sink: std::sync::Arc<dyn DeltaSink>,
+    ) -> Result<LlmTurn, AdapterError> {
+        if self.abort {
+            return Err(AdapterError::Aborted);
+        }
+        if self.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        }
+        if let Some(msg) = self.fail_with {
+            return Err(AdapterError::GenerationFailed(msg.to_string()));
+        }
+        let text = match &self.chunks {
+            Some(chunks) => {
+                for c in chunks {
+                    sink.on_delta(c);
+                }
+                chunks.concat()
+            }
+            None => {
+                let text = format!(
+                    "[{}] {}",
+                    self.model,
+                    messages.last().map(|m| m.text.as_str()).unwrap_or("")
+                );
+                sink.on_delta(&text);
+                text
+            }
+        };
+        Ok(LlmTurn {
+            text,
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            finish: ModelFinishReason::Other("unknown".to_string()),
+            cost_ms: self.delay_ms,
+            usage: None,
+        })
+    }
+
     async fn generate(
         &self,
         _tok: &FullModel,
