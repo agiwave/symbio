@@ -94,12 +94,16 @@ pub(crate) static PORTS: &[PortDecl] = &[
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 1,
+        // 一轮只有一个 `turn` 调用，没有同批子债。
+        concurrent: false,
     },
     PortDecl {
         port: "model",
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 1,
+        // 一次模型往返是一条调用；同批并发在它下面的工具端口。
+        concurrent: false,
     },
     // 工具批次里的**单次调用**（T-227 步 3）。一次模型响应可带 N 个调用 ⇒
     // 同一批写 N 条 `request`，各自一个 id。
@@ -112,6 +116,9 @@ pub(crate) static PORTS: &[PortDecl] = &[
         before: EVENT_SENT,
         lease_ms: 600_000,
         max_attempts: 1,
+        // 一次模型响应可带 N 个工具调用：同批子债允许并发，
+        // 具体哪几条同时在途仍由风险档决定（`dispatch/parallel.rs`）。
+        concurrent: true,
     },
 ];
 

@@ -41,6 +41,24 @@ fn interactive_mode_forces_serial() {
     );
 }
 
+/// 端口声明是**硬闸**：`concurrent=false` 压过风险档与模式；`true` 时逐字沿用
+/// 既有规则。这是「并发集合是声明，不是执行体自觉」的最小判据。
+#[test]
+fn a_non_concurrent_port_forces_serial() {
+    assert_eq!(
+        policy_for_port(false, "auto", ExecPolicy::Parallel),
+        ExecPolicy::Serial
+    );
+    assert_eq!(
+        policy_for_port(true, "auto", ExecPolicy::Parallel),
+        ExecPolicy::Parallel
+    );
+    assert_eq!(
+        policy_for_port(true, "interactive", ExecPolicy::Parallel),
+        ExecPolicy::Serial
+    );
+}
+
 /// 两种名字形态都能查到：注册表名（`local/read`）与线上名（`local__read`）。
 /// 只收一种的话，模型发来的名字永远查不到 ⇒ 全部落到 `Medium` ⇒ 并行从不生效，
 /// 而这条静默失效没有任何东西会红。

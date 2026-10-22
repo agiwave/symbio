@@ -827,6 +827,7 @@ pub(crate) async fn run_batch(
     let task_table = &readings.task_table;
     let decls = &readings.decls;
     let risks = &readings.risks;
+    let concurrent = readings.concurrent;
     let seen_calls = &mut readings.seen_calls;
 
     // 在途执行（启动顺序 = 调用顺序）、待收口队列与已完成产出。
@@ -904,7 +905,8 @@ pub(crate) async fn run_batch(
                     i += 1;
                     // 分流：风险档映射（唯一映射在 `parallel::policy_for_risk`），
                     // 交互模式整批压成串行（审批 / 提问一次只处理一张卡）。
-                    let policy = policy_for_mode(mode, risks.policy_for_call(&ready.name));
+                    let policy =
+                        policy_for_port(concurrent, mode, risks.policy_for_call(&ready.name));
                     if policy == ExecPolicy::Serial {
                         // 串行边界：在途先全部按序收口，本调用独占执行窗口。
                         flush_all(

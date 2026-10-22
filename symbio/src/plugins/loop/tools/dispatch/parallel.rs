@@ -60,6 +60,19 @@ pub(crate) fn policy_for_mode(mode: &str, risk_policy: ExecPolicy) -> ExecPolicy
     }
 }
 
+/// 端口声明 → 整批策略。`concurrent=false` 是**硬闸**：即使风险档是 `Low`、
+/// 模式是 `auto`，也不得并行。`true` 时仍走 [`policy_for_mode`] 的既有规则。
+///
+/// 声明与策略分开的理由见 `PortDecl.concurrent`：端口只说「允不允许同批并发」，
+/// 具体哪几条能同时在途由风险档决定；两者不是一个问题，不能互相替代。
+pub(crate) fn policy_for_port(concurrent: bool, mode: &str, risk_policy: ExecPolicy) -> ExecPolicy {
+    if !concurrent {
+        ExecPolicy::Serial
+    } else {
+        policy_for_mode(mode, risk_policy)
+    }
+}
+
 /// 批首读一次的工具风险表（键 = **线上名**与能力名，两者都收）。
 ///
 /// 键要收两种形态，因为两条链路各用各的：注册表里是能力名（`local/read`），

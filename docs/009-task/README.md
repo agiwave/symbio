@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 219 · ❌ wont 5（共 224）
+**计数**：☐ todo 0 · 🟡 doing 1 · ☑ done 219 · ❌ wont 5（共 225）
 
 ## 待处理（按依赖顺序）
 
@@ -68,7 +68,9 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-228-批次并发声明` | 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半） | later | plan | T-227-端口细粒度化 |
 
 ## 已完成
 
@@ -533,6 +535,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-225-决策输入闭包`](225-决策输入闭包.md) 决策输入闭包——`owed` 只读事实 / 视图 / 事件时间戳（done）
   - [`T-226-授权行`](226-授权行.md) 授权行——`granted` / `denied` 正事实级联，`authorize` 先于 `dispatch`（done）
 - [`T-227-端口细粒度化`](227-端口细粒度化.md) 端口细粒度化——把 `run_with_tools` 的内环拆成模型 / 工具债（PL-017）（done）
+- [`T-228-批次并发声明`](228-批次并发声明.md) 批次并发由端口声明承担——`PortDecl.concurrent`（PL-017 步 3 的前半）（doing）
 
 <!-- registry:summary end -->
 

@@ -112,6 +112,12 @@ pub(crate) struct PortDecl {
     pub(crate) lease_ms: u64,
     /// 最多尝试几次（含首次）。到顶之后租约看护者判死而不是再重试。
     pub(crate) max_attempts: u64,
+    /// 同一批次的子债是否允许并发派发（PL-017 §3.3）。
+    ///
+    /// **声明与策略分开**：这里只说「这个端口允许同批并发」；具体哪几条能同时在途
+    /// 仍由执行层的风险档决定（`tools/dispatch/parallel.rs`）。`false` 是硬闸——
+    /// 执行层不得以风险档为由绕过它。
+    pub(crate) concurrent: bool,
 }
 
 /// 按端口名取声明。`None` = 没有这个端口（漏声明，不是默认值）。

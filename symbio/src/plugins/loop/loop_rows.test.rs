@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::ROWS;
+use super::{PORTS, ROWS};
 use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap};
 use crate::symbio_core::{builtin as declarations, Frozen};
 use crate::symbio_core::{Entity, Event, Seq, Verb};
@@ -69,6 +69,18 @@ fn plain() -> Value {
         "progress_min_rounds": 0,
         "progress_max_per_turn": 0,
     })
+}
+
+// ── 端口声明 ─────────────────────────────────────────────────────────────
+
+/// 批次并发是端口声明的一部分：只有 `tool` 允许同批并发；`turn` / `model`
+/// 都是一次调用，没有「同批子债」。
+#[test]
+fn only_the_tool_port_declares_batch_concurrency() {
+    let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrent);
+    assert_eq!(of("tool"), Some(true));
+    assert_eq!(of("turn"), Some(false));
+    assert_eq!(of("model"), Some(false));
 }
 
 // ── 五条策略行逐条判据 ───────────────────────────────────────────────────

@@ -329,6 +329,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
         before: crate::symbio_core::EVENT_SENT,
         lease_ms: 1_000,
         max_attempts: 3,
+        concurrent: false,
     }];
     let store = boot();
     stranded(&store, "turn-9-r0", 1, 1_000, 3);

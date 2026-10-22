@@ -42,6 +42,10 @@ pub(crate) struct GateReadings {
     pub(crate) decls: ToolDecls,
     /// 工具自声明的风险档（T-190）：批内执行策略的分流依据，与 `decls` 同一份元数据。
     pub(crate) risks: ToolRisks,
+    /// `tool` 端口是否声明同批可并发（PL-017 §3.3 / T-228）。
+    ///
+    /// 批首读一次，阶段②只消费这个布尔；`false` 是硬闸，不能被风险档绕过。
+    pub(crate) concurrent: bool,
     /// 本批留底 `(id, name, args)`——阶段③「哪些没被执行」的收口依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账（T-140 步 2）；阶段②逐条登记，故为可变读数。
@@ -110,6 +114,10 @@ pub(crate) async fn read_batch_gates(
     let metas = crate::symbio_core::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);
     let risks = ToolRisks::of_metas(&metas);
+    // 端口声明与元数据同一处读数：批内能否并发由 `PortDecl` 说，执行层只消费。
+    let concurrent =
+        crate::symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
+            .is_some_and(|p| p.concurrent);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -140,6 +148,7 @@ pub(crate) async fn read_batch_gates(
         task_table,
         decls,
         risks,
+        concurrent,
         batch_meta,
         seen_calls,
     }
