@@ -18,6 +18,8 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 export default {
   id: 'fmt',
   title: '格式化（屏障：先于所有并发泳道）',
+  // 会改写并暂存受版本控制文件的自声明，消费方是 `gate-wiring-audit` 的 GW-005。
+  regenerates: true,
   tasks(ctx) {
     if (!fs.existsSync(path.join(repoRoot, 'Cargo.toml'))) return []
     return [

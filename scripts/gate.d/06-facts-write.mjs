@@ -104,6 +104,8 @@ export const STEPS = [
 export default {
   id: 'facts-write',
   title: '事实生成（静态审计的前置）',
+  // 会改写并暂存受版本控制文件的自声明，消费方是 `gate-wiring-audit` 的 GW-005。
+  regenerates: true,
   // 四步合成**一个** `autoChain` 工作：差异判定只看链跑完的末态。
   // 分成四个 `autoWork` 在本地没区别（都是生成 + 暂存），但在 `--ci` 下必红——
   // `registry-audit --write` 的产物（`[[编号]]` 记号）本身就是下一格的输入差异。

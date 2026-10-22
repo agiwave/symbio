@@ -23,12 +23,21 @@
  *     `route-facts.mjs`：M10 把它立为「什么算一条路由臂」的唯一语法实现、被三个判定
  *     共读，它自己却没有一道门禁步骤。**放行对照**：`scripts/gate.d/*.mjs` 的阶段文件
  *     由 `gate.mjs` **按目录扫描**接入（不需要登记），它们的顺序由 GW-005 判。
- *   - **GW-005**（阶段顺序）`gate.mjs` 按**文件名排序**加载 `gate.d/*.mjs`，而
- *     `autoWork`（重生成并暂存）的阶段必须**排在最后**——它要把暂存状态定格成
- *     「本次改动的终态」，排在它后面跑就会让暂存发生在被验证的改动之前，
- *     `git status` 再也看不出前一阶段有没有碰过东西。判据取「源码里 import 了
- *     `autoWork`」这个形状（与 `55-verify` 读 `should_not_compile` 同源：能力由源码
- *     自声明，不维护第二份名单），于是新增一个 `65-*.mjs` 就会把它顶掉 ⇒ 红。
+ *   - **GW-005**（阶段顺序）`gate.mjs` 按**文件名排序**加载 `gate.d/*.mjs`，本条判三件事：
+ *     ① 阶段自声明（`regenerates` / `recheck`）与源码里的 `autoWork(` / `autoChain(` **调用形状**
+ *     双向对上——声明了却没调用、调用了却没声明都红；② 有 `regenerates` 就必须有 `recheck`；
+ *     ③ **最后一个生成阶段必须早于每一个只读复核阶段**。
+ *     ②③ 合起来是这条判据真正想保护的东西：**改写工作树的工作全部做完之后，还得有人只读地
+ *     对一次末态**，否则「谁碰过文件」只能靠 `git status` 的位置巧合来看。
+ *     它**不是**旧写法的那条「重生成阶段必须排在阶段序列末尾」——那条已被实测否证：
+ *     生成链（`06-facts-write`）排在静态审计**之前**是刻意的（`30-docs` 的 D-007 / RF-003 要看
+ *     展开后的末态，`gate.test.mjs` 钉着 `facts-write < docs` 这条不变量），实测 11 个阶段里
+ *     只有 `05-fmt` 与 `06-facts-write` 真的调用重生成原语，其余阶段跑完后 `git status` 不变。
+ *     被否决的另一支（把 `06` 挪到末尾以满足旧字面）会让 CI 的静态审计读上一版投影，代价更大。
+ *     旧写法还有一个更隐蔽的病：它用 `includes('autoWork')` 认阶段，于是**注释措辞**决定判定——
+ *     删掉 `60-facts.mjs` 头里一句叙述（零行为改动）实测报出 5 条假阳性，而反过来把真正在
+ *     暂存文件的 `06-facts-write` 那句注释改成人话，这个生成阶段就从判定里消失、判据空转。
+ *     登记见 [T-251](../docs/009-task/251-GW005文本包含认重生成阶段.md "T-251-GW005文本包含认重生成阶段")。
  *
  * 名单仍然是手写的、仍然带注释——本脚本不生成它，只判它有没有覆盖目录事实。
  * 这正是它有意义的原因：**两份真相**（名单 + 目录）各说各话时才红，
@@ -103,6 +112,40 @@ function stageFilesOf(root) {
     .sort()
 }
 
+/**
+ * 阶段的**自声明元数据**（GW-005 读它）。三条来源各自独立，缺一就判不出真相：
+ *  - `regenerates` / `recheck`：`export default` 里的字段（动态 import 读，和 `gate.mjs`
+ *    加载阶段是同一条路径，不是第二份解析）；
+ *  - `calls`：源码里有没有 `autoWork(` / `autoChain(` 的**调用形状**——只认带左括号的，
+ *    于是注释里提到原语的名字不影响判定（旧判据 `includes('autoWork')` 恰恰相反，
+ *    见文件头 GW-005 那条与 [T-251](../docs/009-task/251-GW005文本包含认重生成阶段.md "T-251-GW005文本包含认重生成阶段")）。
+ * import 失败不再静默按「没声明」处理：那会让一条真判据悄悄空转，报成 GW-005 失效。
+ */
+async function stageMetaOf(root, stageList) {
+  const out = []
+  for (const f of stageList) {
+    const abs = path.join(root, 'scripts', 'gate.d', f)
+    let regenerates = false
+    let recheck = false
+    let error = null
+    try {
+      const mod = await import(pathToFileURL(abs).href)
+      regenerates = mod.default?.regenerates === true
+      recheck = mod.default?.recheck === true
+    } catch (e) {
+      error = (e && e.message ? e.message : String(e)).split('\n')[0]
+    }
+    let calls = false
+    try {
+      calls = /auto(?:Work|Chain)\(/.test(fs.readFileSync(abs, 'utf8'))
+    } catch {
+      /* 读不出源码：calls=false，与 import 失败叠成同一条 GW-005 失效 */
+    }
+    out.push({ file: f, regenerates, recheck, calls, error })
+  }
+  return out
+}
+
 /** 读 30-docs 导出的名单；读不出（没导出 / 语法错）即「审计范围读不出」 */
 async function listsOf(root) {
   const modPath = path.join(root, 'scripts', 'gate.d', '30-docs.mjs')
@@ -155,18 +198,20 @@ const unregistered = scripts
   .filter((f) => !(f.rel.startsWith('gate.d/') && !f.rel.slice('gate.d/'.length).startsWith('_')))
   .filter((f) => !registered.has(f.name))
 
-// GW-005：重生成阶段（源码里 import 了 `autoWork`）必须排在阶段序列末尾。
-// 判据取**源码自声明**的形状，理由同 `55-verify` 读 `should_not_compile`：
-// 不维护第二份「哪些阶段会重生成」的名单——那种名单必然漂移。
-const regen = stages.filter((f) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'gate.d', f), 'utf8').includes('autoWork')
-  } catch {
-    return false
-  }
-})
-const lastRegen = regen.length ? regen[regen.length - 1] : null
-const afterLastRegen = lastRegen ? stages.filter((f) => f > lastRegen) : []
+// GW-005：阶段顺序。**判据读自声明字段，不读注释措辞**。
+// 形状与理由见文件头 GW-005 那条（含它为什么不再是「重生成必须排末尾」）。
+const meta = await stageMetaOf(REPO_ROOT, stages)
+const unreadable = meta.filter((m) => m.error)
+const declaredButSilent = meta.filter((m) => m.regenerates && !m.calls)
+const callingButUndeclared = meta.filter((m) => m.calls && !m.regenerates)
+const doubleFlagged = meta.filter((m) => m.regenerates && m.recheck)
+const regenStages = meta.filter((m) => m.regenerates)
+const recheckStages = meta.filter((m) => m.recheck)
+// 有生成却没有只读复核 ⇒ 没有人判「整轮跑完树还干净吗」，生成阶段自己那一次末态比对
+// 只覆盖到链跑完为止（`30-docs` 的自动修复器排在它后面）。
+const noRecheck = regenStages.length > 0 && recheckStages.length === 0
+const lastRegen = regenStages[regenStages.length - 1] ?? null
+const rechecksBeforeGeneration = lastRegen ? recheckStages.filter((m) => m.file < lastRegen.file) : []
 
 let errors = 0
 for (const n of unwired) {
@@ -194,12 +239,51 @@ for (const f of unregistered) {
     ),
   )
 }
-for (const f of afterLastRegen) {
+for (const m of unreadable) {
   errors++
   console.log(
     red(
-      `[ERROR] GW-005 scripts/gate.d/${f} 排在重生成阶段 ${lastRegen} 之后 ⇒ ` +
-        `暂存会发生在被验证的改动之前，git status 再也看不出前一阶段碰没碰过东西`,
+      `[ERROR] GW-005 scripts/gate.d/${m.file} 导入失败（${m.error}）⇒ 它的 \`regenerates\` / \`recheck\` 声明读不出来，这条次序判定不可信`,
+    ),
+  )
+}
+for (const m of declaredButSilent) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-005 scripts/gate.d/${m.file} 声明 \`regenerates: true\`，源码里却没有 \`autoWork(\` / \`autoChain(\` 的调用 ⇒ 声明是假的：生成器已被删掉就该撤声明，` +
+        `自己写文件绕过原语则末态判差异就此失效`,
+    ),
+  )
+}
+for (const m of callingButUndeclared) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-005 scripts/gate.d/${m.file} 调用 \`autoWork\` / \`autoChain\`（会改写并暂存受版本控制文件），却没有 \`regenerates: true\` 声明 ⇒ ` +
+        `GW-005 看不见它，「生成先于只读复核」这条次序没人守`,
+    ),
+  )
+}
+for (const m of doubleFlagged) {
+  errors++
+  console.log(
+    red(`[ERROR] GW-005 scripts/gate.d/${m.file} 同时声明 \`regenerates\` 与 \`recheck\` ⇒ 一个阶段既是生成又是复核，两条判据各自成立、合起来什么都判不了`),
+  )
+}
+if (noRecheck) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-005 ${regenStages.length} 个阶段声明 \`regenerates\`，却没有一个阶段声明 \`recheck\` ⇒ 没有只读执行方判「整轮跑完生成物仍然一致」（生成阶段自己只比到链跑完为止）`,
+    ),
+  )
+}
+for (const m of rechecksBeforeGeneration) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-005 scripts/gate.d/${m.file}（\`recheck\`）排在生成阶段 scripts/gate.d/${lastRegen.file} 之前 ⇒ 它复核的是上一版投影，恒真；生成之后没人再对末态`,
     ),
   )
 }
@@ -215,6 +299,6 @@ console.log(
   green(
     `gate-wiring-audit 通过：磁盘 ${files.length} 份测试全部接线，` +
       `名单 ${lists.guards.length} + ${lists.testOnly.length} + ${lists.libs.length} + ${lists.outOfGate.length} 项逐一对应；` +
-      `${scripts.length - files.length} 份脚本全部登记；重生成阶段 ${lastRegen ?? '（无）'} 排在阶段末尾`,
+      `${scripts.length - files.length} 份脚本全部登记；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ${recheckStages.map((m) => m.file).join(' / ') || '（无）'}`,
   ),
 )

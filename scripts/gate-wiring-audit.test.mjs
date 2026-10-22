@@ -218,51 +218,95 @@ test('GW-002 扩面：LIBS 指名磁盘上没有的 .mjs ⇒ 红（「已覆盖�
   assert.match(r.stdout, /GW-002 .*ghost-lib\.mjs/)
 })
 
-// ── GW-005 · 阶段顺序 ────────────────────────────────────────────────
-// `autoWork`（重生成并暂存）必须排在阶段末尾，否则暂存发生在被验证的改动之前，
-// `git status` 再也看不出前一阶段碰没碰过东西。
+// ── GW-005 · 阶段顺序（读自声明，不读注释措辞）─────────────────────────
+// 判据是「改写工作树的工作做完之后，有人只读地对一次末态」：`regenerates` 阶段必须早于
+// 每一个 `recheck` 阶段，且声明与源码里的 `autoWork(` / `autoChain(` 调用形状双向对上。
+// 旧的「`includes('autoWork')` 的阶段必须排末尾」已被实测否证（判定的真假取决于注释里有没有
+// 那个词），见 `gate-wiring-audit.mjs` 文件头与 `docs/009-task/251-*.md`。
 
-test('GW-005 放一个不重生成的阶段在 autoWork 阶段之后 ⇒ 红', () => {
-  const r = audit({
-    guards: [],
-    testOnly: [],
-    tests: [],
-    stages: [
-      { name: '30-docs.mjs', body: 'export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs"}\n' },
-      { name: '60-facts.mjs', body: 'import { autoWork } from "./_shared.mjs"\nexport default { id: "facts" }\n' },
-      { name: '65-late.mjs', body: 'export default { id: "late" }\n' },
-    ],
-  })
+/** 会重生成的阶段：声明 + 调用形状都在 */
+const GEN = (id) => `export default { id: ${JSON.stringify(id)}, regenerates: true, tasks: () => [{ run: (c) => autoWork(c, {}) }] }\n`
+/** 只读复核阶段 */
+const RECHK = (id) => `export default { id: ${JSON.stringify(id)}, recheck: true, tasks: () => [] }\n`
+/** 什么都不做的阶段 */
+const PLAIN = (id) => `export default { id: ${JSON.stringify(id)}, tasks: () => [] }\n`
+const DOCS = 'export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs",tasks:()=>[]}\n'
+const run = (stages) => audit({ guards: [], testOnly: [], tests: [], stages: [{ name: '30-docs.mjs', body: DOCS }, ...stages] })
+
+test('GW-005 真实形状：生成在前、只读复核在后 ⇒ 绿（放行对照）', () => {
+  const r = run([
+    { name: '05-fmt.mjs', body: GEN('fmt') },
+    { name: '06-facts-write.mjs', body: GEN('facts-write') },
+    { name: '55-verify.mjs', body: PLAIN('verify') },
+    { name: '60-facts.mjs', body: RECHK('facts') },
+  ])
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /生成阶段 06-facts-write\.mjs 先于只读复核 60-facts\.mjs/)
+})
+
+test('GW-005 只读复核排在生成阶段之前 ⇒ 红（它复核的是上一版投影）', () => {
+  const r = run([
+    { name: '50-facts.mjs', body: RECHK('facts') },
+    { name: '60-facts-write.mjs', body: GEN('facts-write') },
+  ])
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/65-late\.mjs/)
+  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/50-facts\.mjs/)
 })
 
-test('GW-005 autoWork 阶段排在末尾 ⇒ 绿（放行对照）', () => {
-  const r = audit({
-    guards: [],
-    testOnly: [],
-    tests: [],
-    stages: [
-      { name: '30-docs.mjs', body: 'export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs"}\n' },
-      { name: '55-verify.mjs', body: 'import { autoWork } from "./_shared.mjs"\nexport default { id: "verify" }\n' },
-      { name: '60-facts.mjs', body: 'import { autoWork } from "./_shared.mjs"\nexport default { id: "facts" }\n' },
-    ],
-  })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /重生成阶段 60-facts\.mjs 排在阶段末尾/)
+test('GW-005 声明 regenerates 却没有调用形状 ⇒ 红（声明是假的）', () => {
+  const r = run([
+    { name: '06-facts-write.mjs', body: `export default { id: "facts-write", regenerates: true, tasks: () => [] }\n` },
+    { name: '60-facts.mjs', body: RECHK('facts') },
+  ])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/06-facts-write\.mjs 声明 .*regenerates.*却没有/)
 })
 
-test('GW-005 一个 autoWork 阶段都没有时不判（无重生成 ⇒ 无「排在最后」可言）', () => {
-  const r = audit({
-    guards: [],
-    testOnly: [],
-    tests: [],
-    stages: [
-      { name: '10-a.mjs', body: 'export default { id: "a" }\n' },
-      { name: '20-b.mjs', body: 'export default { id: "b" }\n' },
-      { name: '30-docs.mjs', body: 'export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs"}\n' },
-    ],
-  })
+test('GW-005 调用了原语却不声明 ⇒ 红（判据看不见这个生成阶段）', () => {
+  const r = run([
+    { name: '06-facts-write.mjs', body: `export default { id: "facts-write", tasks: () => [{ run: (c) => autoChain(c, {}) }] }\n` },
+    { name: '60-facts.mjs', body: RECHK('facts') },
+  ])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/06-facts-write\.mjs 调用/)
+})
+
+test('GW-005 有生成却没有只读复核 ⇒ 红（没人对整轮末态）', () => {
+  const r = run([{ name: '06-facts-write.mjs', body: GEN('facts-write') }, { name: '55-verify.mjs', body: PLAIN('verify') }])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-005 1 个阶段声明 .*regenerates.*，却没有一个阶段声明 .*recheck/)
+})
+
+test('GW-005 注释里出现 `autoWork` 一词不影响判定 ⇒ 绿（旧写法的假阳性来源）', () => {
+  // 这一条就是反向判据的正面形式：旧版把这段注释删掉会报 5 条红，新版对措辞无感。
+  const r = run([
+    { name: '06-facts-write.mjs', body: GEN('facts-write') },
+    { name: '30-docs.mjs', body: DOCS },
+    { name: '60-facts.mjs', body: `// 生成链按 \`autoWork\` 逐格判差异这一段历史叙述里提到 autoWork\n${RECHK('facts')}` },
+  ])
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /重生成阶段 （无）/)
+})
+
+test('GW-005 同时声明 regenerates 与 recheck ⇒ 红（两条判据合起来什么都判不了）', () => {
+  const r = run([
+    { name: '06-facts-write.mjs', body: GEN('facts-write') },
+    { name: '60-facts.mjs', body: `export default { id: "facts", regenerates: true, recheck: true, tasks: () => [{ run: (c) => autoWork(c, {}) }] }\n` },
+  ])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/60-facts\.mjs 同时声明/)
+})
+
+test('GW-005 阶段文件读不进（语法错）⇒ 红，不再静默按「没声明」处理', () => {
+  const r = run([
+    { name: '06-facts-write.mjs', body: GEN('facts-write') },
+    { name: '60-facts.mjs', body: 'export default { id: "facts", recheck: true,\n' },
+  ])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/60-facts\.mjs 导入失败/)
+})
+
+test('GW-005 没有生成阶段也没有复核 ⇒ 不判（空表不制造义务）', () => {
+  const r = run([{ name: '10-a.mjs', body: PLAIN('a') }, { name: '20-b.mjs', body: PLAIN('b') }])
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /生成阶段 （无）/)
 })

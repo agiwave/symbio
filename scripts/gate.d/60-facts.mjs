@@ -1,4 +1,5 @@
 // facts 复核阶段（**必须最后**）：「跑完这一整轮，事实还和代码一致吗」。
+// 「必须最后」由 `default.recheck` 自声明、`gate-wiring-audit` 的 GW-005 执行，不靠文件名巧合。
 //
 // ## 它与 `06-facts-write` 的分工
 //
@@ -11,15 +12,13 @@
 //
 // 本机这一步恒绿（生成器跑过之后没人改代码）；CI 侧它与生成链的末态差异判定互为两道。
 //
-// ## 这两格 `--check` 不负责「让 CI 看见生成物漂移」——那件事以前没人做
+// ## 这两格 `--check` 判的是「整轮」，链的末态判据判的是「链」
 //
-// 2026-10-23 的形态：生成链按 `autoWork` **逐格**判差异，而 `registry-audit --write` 的产物
-// （`[[编号]]` 记号）本身就是下一格 `gen-doc-refs` 的输入 ⇒ `--ci` 下**恒红**。
-// 于是三个 gate 调用点都没敢点 `facts-write`，CI / pre-push 完全看不见
-// 「改了 front-matter 没重生成汇总页」这一类漂移。
-// 现在链合成了一个 `autoChain` 工作（只在**末态**判差异，见 `06-facts-write` 头注释），
-// CI 点得动它了；本阶段留着这两条只读复核，是因为它们覆盖的是**生成之后那一截**。
-// 登记续接见 [T-250-生成链阶段id失配](../../docs/009-task/250-生成链阶段id失配.md)。
+// 两道不重复：`06-facts-write` 的 `autoChain` 只在**链跑完**那一刻比一次差异，而 `30-docs`
+// 的自动修复器排在它后面——链绿着但汇总页被后续阶段改脏，只有这里看得见。
+// 「逐格判差异」在链上不可行：`registry-audit --write` 的产物（`[[编号]]` 记号）本身就是
+// 下一格的输入，逐格判在 `--ci` 下恒红，理由见 `06-facts-write` 头注释与
+// [T-250-生成链阶段id失配](../../docs/009-task/250-生成链阶段id失配.md)。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -31,6 +30,8 @@ const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
 export default {
   id: 'facts',
   title: '事实复核（必须最后）',
+  // 只读复核阶段的自声明，消费方是 `gate-wiring-audit` 的 GW-005（判「生成先于复核」）。
+  recheck: true,
   tasks(ctx) {
     return [
       {
