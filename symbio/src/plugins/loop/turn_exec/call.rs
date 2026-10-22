@@ -25,6 +25,7 @@ pub(crate) struct Running<'a> {
     pub(crate) derived: super::super::tool_dispatch::DerivedFacts,
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) turn_no: u64,
+    pub(crate) user_seq: u64,
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
@@ -46,8 +47,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         root_id,
         sink,
         user_text,
-        user_node_id,
-        user_meta,
         window_turns,
         tools,
         supplements,
@@ -62,6 +61,8 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         presentation_tree,
         store,
         turn_no,
+        user_seq,
+        drive_seq,
         resume_anchor,
         collected,
         bridge,
@@ -94,8 +95,9 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                     store.as_ref(),
                     &tok,
                     turn_no,
+                    user_seq,
+                    drive_seq,
                     &actor,
-                    user_text,
                     &h.content,
                     bridge.clone(),
                     // 反射档不经过 `prepare_turn`，阶段事实由本入口自己落
@@ -110,7 +112,8 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
             let tok = TokenIssuer::issue_deep();
             let input = TurnInput {
                 turn: turn_no,
-                text: user_text.to_string(),
+                user_seq,
+                drive_seq,
                 tier,
                 window_turns: Some(window_turns),
                 resume: resume_anchor,
@@ -244,13 +247,11 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 // （开场白后面照常进工具循环，故不占收束格）。
                 opening_text: opening_text.map(str::to_string),
                 opening_dialog,
-                // 落格身份三件套：本轮 Turn 根 id（载荷 `turn_id`）、用户消息节点 id
-                // （用户格载荷记它）、流式节点取数口。取数口是**快照闭包**：运行器每轮
-                // 收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，中途正文与思考
-                // 因此逐轮入格（半截中止时它们是唯一幸存者）。
+                // 落格身份：本轮 Turn 根 id（载荷 `turn_id`）+ 流式节点取数口。用户格
+                // 已由编排层先落（T-225），运行器只收它的 seq。取数口是**快照闭包**：
+                // 运行器每轮收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，
+                // 中途正文与思考因此逐轮入格（半截中止时它们是唯一幸存者）。
                 turn_root_id: root_id.to_string(),
-                user_node_id,
-                user_meta,
                 nodes: Some(std::sync::Arc::new({
                     let bridge = bridge.clone();
                     move || {
@@ -334,6 +335,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
         derived,
         collected,
         turn_no,
+        user_seq,
         principal,
         to,
         user_text,

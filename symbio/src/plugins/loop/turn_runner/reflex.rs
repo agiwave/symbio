@@ -27,10 +27,11 @@ impl TurnRunner {
     ///
     /// ## 落格与 [`Self::run_with_tools`] 同一份纪律
     ///
-    /// `u-{turn}`（开轮）→ `f-{turn}`（收束，`produced_by` 指向开轮格、`cost_ms` 实测）。
-    /// 开轮载荷的 `tier` 恒为 `reflex`——档位不是调用方填的字符串，而是**令牌类型**所
-    /// 证明的那一档（`RuleOnly` 与 [`LatencyTier::Reflex`] 是同一个事实的两种写法，
-    /// 另写一处必然漂移）。收束载荷的 `model` 也记 `reflex`：反射档没有模型，但"这段话
+    /// 用户格已由编排层在判决之前落（T-225），本入口收到它的 seq 与幕号：先落
+    /// 阶段事实，再落 `turn.dispatch`（档位恒为 `reflex`——档位不是调用方填的字符串，
+    /// 而是**令牌类型**所证明的那一档，`RuleOnly` 与 [`LatencyTier::Reflex`] 是同一个
+    /// 事实的两种写法），最后落收束格 `f-{turn}`（`produced_by` 指向用户格、
+    /// `cost_ms` 实测）。收束载荷的 `model` 也记 `reflex`：反射档没有模型，但"这段话
     /// 是谁产的"仍要可观测，空着会让命中轮与普通轮在事件面上无从区分；**命中哪一条技能**
     /// 则由触发串与技能事件唯一确定，不在这里复述一遍（能算出来的不占字段）。
     ///
@@ -39,17 +40,18 @@ impl TurnRunner {
     ///
     /// ## 为什么参数多到要 `allow`
     ///
-    /// 八个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 主体 / 用户发言 / 产物 /
-    /// 出口 / 阶段事实），与 [`Self::run_with_tools`] 同款理由：打包成一个结构体只是把
-    /// "八个端口"改名叫"一个结构体 + 八个字段"，调用方仍要逐个填。
+    /// 九个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 用户格锚 / 幕号 /
+    /// 主体 / 产物 / 出口 / 阶段事实），与 [`Self::run_with_tools`] 同款理由：打包成
+    /// 一个结构体只是把"九个端口"改名叫"一个结构体 + 九个字段"，调用方仍要逐个填。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_reflex<S>(
         &self,
         store: &S,
         _tok: &crate::symbio_core::RuleOnly,
         turn: u64,
+        user_seq: u64,
+        drive_seq: u64,
         actor: &ActorSpec,
-        utterance: &str,
         text: &str,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
         stages: &[super::super::stage_events::StageFact],
@@ -58,28 +60,26 @@ impl TurnRunner {
         S: Store<Event = Event> + ?Sized,
     {
         let started = std::time::Instant::now();
-        let user_seq = store
-            .append(
-                Event::pending(
-                    format!("u-{turn}"),
-                    EVENT_USER_MESSAGE,
-                    Entity::Turn,
-                    Verb::Opened,
-                    turn,
-                    "user",
-                )
-                .with_payload(serde_json::json!({
-                    "text": utterance,
-                    "tier": LatencyTier::Reflex.name(),
-                    // 规格派生的预算数值（T-082 批①），与深度档开轮格同一形状：
-                    // 读方 `invariants::declared_budget_ms` 优先读它。
-                    "budget_ms": actor.budget_ms,
-                })),
-            )
-            .map(|seq| seq.value())?;
         // 一次性阶段（判决 / 召回 / 压缩）：反射档不经过 `prepare_turn`，但同样在
         // 用户格之后落（I2 的溯源锚）；此处的 `done` 同样让本轮后续不再问这些格。
         super::super::stage_events::land(store, turn, user_seq, &actor.principal, stages)?;
+        // 派发档（T-225）：用户格先于判决落 ⇒ 档位另立一格，幂等键带幕号。
+        store.append(
+            Event::pending(
+                format!("d-{turn}-{drive_seq}"),
+                EVENT_TURN_DISPATCH,
+                Entity::Turn,
+                Verb::Asserted,
+                turn,
+                &actor.principal,
+            )
+            .with_produced_by(user_seq)
+            .with_payload(serde_json::json!({
+                "tier": LatencyTier::Reflex.name(),
+                "budget_ms": actor.budget_ms,
+                "principal": actor.principal,
+            })),
+        )?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
         if let Err(why) = closure_gate(actor, ClosureKind::Speech) {

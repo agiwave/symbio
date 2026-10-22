@@ -20,6 +20,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         derived,
         collected,
         turn_no,
+        user_seq,
         principal,
         to,
         user_text,
@@ -37,65 +38,53 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // doc-link-allow D-004: 「曾经落过什么」问的是事实网格里有无该条记录，属数据语义
     // 判据与状态推导要看**曾经**落过什么。被快照取代而移入归档段的那些事实同样在
     // `range(0)` 里 ⇒ 压缩前开过的任务不会在就绪集里消失，幂等判据也不会失效
-    // （看不见 ⇒ 重复落格）。`user_seq` 本身取的是**本轮**开口（就在窗口尾部），
-    // 但同一次读取顺带把历史带上，省一次 IO。
+    // （看不见 ⇒ 重复落格）。
+    //
+    // 用户格 seq **不再从这里反查**（T-225）：它在判决之前就落了，由编排层沿
+    // `ExecTurn::user_seq` 直给——本函数只把完整史带给累计口径的写方。
     let all = store.range(Seq::new(0));
-    match all
-        .iter()
-        .find(|e| e.kind == EVENT_USER_MESSAGE && e.turn == turn_no)
-        .and_then(|e| e.seq.map(|s| s.value()))
-    {
-        Some(user_seq) => {
-            // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
-            // 每族的失败在函数内各自记日志、互不打断——轮次已收束，派生事实失败不该
-            // 把成功的一轮说成失败（与记忆三段同一条口径）。本调用点因此不判返回值。
-            //
-            // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
-            // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
-            // 在 `ctx` 被移进分发口之前取好）。
-            super::super::derived_facts::record_derived(
-                session.session_id(),
-                store.as_ref(),
-                &all,
-                turn_no,
-                user_seq,
-                &principal,
-                &to,
-                &format!("t{turn_no}"),
-                &derived.delegations,
-                &derived.tasks,
-                &derived.breaks,
-            );
-            // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
-            // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
-            // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
-            super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
-            // 记忆与学习：同一函数（`record_learning`）。
-            super::super::derived_facts::record_learning(
-                session.session_id(),
-                // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
-                // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
-                store.as_ref(),
-                &all,
-                turn_no,
-                user_seq,
-                user_text,
-                &principal,
-                &format!("t{turn_no}"),
-                response,
-                recalled,
-                skill_obs,
-                session.skill_compile_enabled(),
-                crate::symbio_core::clock_now_ms(),
-            );
-        }
-        // 锚缺失即**不写**并出声：静默锚在 0 上会把记忆挂到不存在的轮次，
-        // 那比不写更坏（`produced_by` 是 I2 的判据）。
-        None => crate::plugin_warn!(
-            "session",
-            "[turn-exec] 本轮用户格缺失，记忆与学习不入格（turn={turn_no}）"
-        ),
-    }
+    // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
+    // 每族的失败在函数内各自记日志、互不打断——轮次已收束，派生事实失败不该
+    // 把成功的一轮说成失败（与记忆三段同一条口径）。本调用点因此不判返回值。
+    //
+    // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
+    // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
+    // 在 `ctx` 被移进分发口之前取好）。
+    super::super::derived_facts::record_derived(
+        session.session_id(),
+        store.as_ref(),
+        &all,
+        turn_no,
+        user_seq,
+        &principal,
+        &to,
+        &format!("t{turn_no}"),
+        &derived.delegations,
+        &derived.tasks,
+        &derived.breaks,
+    );
+    // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
+    // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
+    // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
+    super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
+    // 记忆与学习：同一函数（`record_learning`）。
+    super::super::derived_facts::record_learning(
+        session.session_id(),
+        // `store` 是 `Arc<dyn Store>`（轮内注入闭包要 `'static`），而本函数
+        // 收 `&dyn Store` ⇒ `as_ref()` 一次取到 trait object。
+        store.as_ref(),
+        &all,
+        turn_no,
+        user_seq,
+        user_text,
+        &principal,
+        &format!("t{turn_no}"),
+        response,
+        recalled,
+        skill_obs,
+        session.skill_compile_enabled(),
+        crate::symbio_core::clock_now_ms(),
+    );
 
     // 兜底已入格（I3），失败呈现走 Failed 出口 + 重试。
     if outcome.fell_back {
@@ -137,21 +126,21 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 }
 
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
-/// 但轮次事实（用户格 + 收束格）仍须由 v2 运行器落。
+/// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落，T-225）。
 ///
 /// ## 它解决的是什么
 ///
 /// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`super::execute_turn`]**；
-/// 而 `EVENT_USER_MESSAGE` 是**运行器落的**。⇒ 那一轮在事实网格里**一格都没有**：
-/// 没有用户格，也没有 `chat.assistant.final`。于是下一轮 prompt 里这次问答**整个消失**，
-/// `session/stats` 的轮次计数也不含它——而 `messages.json` 里有（`context.messages` 落库）
-/// ⇒ **两条真源**。完全静默：不报错、不告警、既有断言全绿。判据 = e2e `t22`。
+/// 若就此返回，那一轮在事实网格里只有用户格、没有 `chat.assistant.final`。于是下一轮
+/// prompt 里这次问答**整个消失**，`session/stats` 的轮次计数也缺收束——而
+/// `messages.json` 里有（`context.messages` 落库）⇒ **两条真源**。完全静默：不报错、
+/// 不告警、既有断言全绿。判据 = e2e `t22`。
 ///
-/// ## 为什么走运行器，而不是本函数自己写那两格
+/// ## 为什么走运行器，而不是本函数自己写收束格
 ///
 /// 「一个 turn = 用户格 opened + 至多一条收束 closed」这条不变量由运行器守着。插件自己
 /// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来。所以答话交给运行器
-/// （`TurnInput::final_reply`），格仍由它落。
+/// （`TurnInput::final_reply`），收束格仍由它落。
 ///
 /// ## 与 [`super::execute_turn`] 的两处刻意差异
 ///
@@ -167,18 +156,20 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
 ///
-/// 形参到 9 个（`consolidation` 是 S2.7-b2 加的，`stages` 是 T-189 加的）：与
-/// [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是一个宽签名，收成
-/// 结构体只会把同一次调用拆成两处。
+/// 形参宽（`consolidation` 是 S2.7-b2 加的，`stages` 是 T-189 加的，三个 seq 是
+/// T-225 加的）：与 [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
+/// 一个宽签名，收成结构体只会把同一次调用拆成两处。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
     session: &LoopSession,
     ctx: &Arc<dyn crate::symbio_core::PluginInvokeRequest>,
     provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
-    user_text: &str,
-    user_node_id: Option<String>,
-    user_meta: Option<serde_json::Value>,
+    // 轮号与溯源锚由编排层在判决之前定下（T-225）：答话轮同样先落用户格，
+    // 这里只收三个 seq（`drive_seq` 供派发格幂等键）。
+    turn_no: u64,
+    user_seq: u64,
+    drive_seq: u64,
     reply: &str,
     // 答话**对话面节点**的身份与标记（`id` / `reason` / `exclude_from_context`）：
     // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；必须随
@@ -201,14 +192,10 @@ pub(crate) async fn execute_final_reply_turn(
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
     // **补落寄存的变更**（T-055）：答话轮同样是会话侧的落格窗口，经端口动作发起。
-    // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
+    // 与 `execute_turn` 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
-    let snapshot = store.range(Seq::new(0));
-    // turn 号口径与 [`super::execute_turn`] 同源（WAL 内既有 `user.message` 计数）——两处各写
-    // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
-    let turn_no = count_user_messages(&snapshot);
     // 身份与档位取值点同 [`super::execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
@@ -233,7 +220,8 @@ pub(crate) async fn execute_final_reply_turn(
     let tok = TokenIssuer::issue_deep();
     let input = TurnInput {
         turn: turn_no,
-        text: user_text.to_string(),
+        user_seq,
+        drive_seq,
         tier: LatencyTier::Deep,
         // 不生成 ⇒ 没有 prompt，也就没有窗口可裁。
         window_turns: None,
@@ -253,8 +241,6 @@ pub(crate) async fn execute_final_reply_turn(
         opening_text: None,
         opening_dialog: None,
         turn_root_id: String::new(),
-        user_node_id,
-        user_meta,
         // 取数口：**恒定快照**——答话轮没有流式过程（措辞插件的模型往返是静默的，
         // 此刻已结束），思考事实是调用方搬运来的定值。挂上它，1b 收束格的
         // `produced` 载荷才带 `reasoning` / `reasoning_id`（重建据此复刻 Reason 节点）。

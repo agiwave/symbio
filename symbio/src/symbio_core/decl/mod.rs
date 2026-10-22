@@ -39,11 +39,14 @@
 //!
 //! ## 首批声明
 //!
-//! 8 个事实：协议四名（`request` / `sent` / `response` / `failed`）、`chat.assistant.final`、
-//! `turn.stage`、`user.message`、`authz.denied`；2 个视图：`in_flight` / `turn_head`。
-//! 视图点名决定了事实的**下限**：`turn_head` 今天读 `user.message` 与 `turn.stage`，
-//! 不声明它们，视图这一半的检查就没有对象。`retry` 与 `session.config` 分别由
-//! T-223 / T-225 补声明。
+//! 15 个事实：协议四名（`request` / `sent` / `response` / `failed`）、助手文本六格
+//! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
+//! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
+//! `turn.dispatch`、`authz.denied`；3 个视图：`in_flight` / `turn_head` / `report_due`。
+//!
+//! 视图点名决定了事实的**下限**：`turn_head` 读 `user.message` / `turn.stage` /
+//! `session.config`，`report_due` 读助手文本六格 / `turn.supplemented` /
+//! `session.config` + `now`。`retry` 由 T-223 补声明。
 //!
 //! ## 为什么整模块暂时 `cfg(test)`
 //!
@@ -315,21 +318,89 @@ const BUILTIN_FACTS: &[FactDecl] = &[
             "terminated",
         ],
     },
-    // 阶段事实：`result` 由 T-225 加（召回命中 / 续写种类）。
+    // 助手文本事实的另一半（`report_due` 的「最近一句」锚点，T-225）：
+    // 兜底与收束同为 `Closed`，其余三格落 `turn × asserted / progressed`。
+    FactDecl {
+        name: "chat.assistant.fallback",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text", "status", "reason", "detail"],
+    },
+    FactDecl {
+        name: "chat.assistant.reported",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text", "tool_rounds", "quiet_ms", "id"],
+    },
+    FactDecl {
+        name: "chat.assistant.opening",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text", "id", "reason", "exclude_from_context"],
+    },
+    // 进展格载荷与收束格共用产出形状（`produced_payload`）+ `status`，
+    // 只声明本视图读得到的字段，不复制整份形状（形状的 owner 是 `facts.rs`）。
+    FactDecl {
+        name: "chat.assistant.progress",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text", "status"],
+    },
+    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类，T-225）。
     FactDecl {
         name: "turn.stage",
         port: None,
         key: &[],
         expand: &[],
-        fields: &["stage", "round", "source", "reason"],
+        fields: &["stage", "round", "source", "reason", "result"],
     },
     // 用户格：`meta` 是可选的补充元数据（`prepare.rs` 只在非空时写）。
+    //
+    // `tier` / `budget_ms` 是**历史形态**：T-225 起用户格先于任何判决落，档位那时
+    // 还没定 ⇒ 新写入不再带它们。声明保留，读方（`declared_tier` / `declared_budget_ms`）
+    // 因此仍能读旧 WAL；新事实的档位在 `turn.dispatch`。
     FactDecl {
         name: "user.message",
         port: None,
         key: &[],
         expand: &[],
         fields: &["text", "tier", "budget_ms", "id", "meta"],
+    },
+    // 用户补充格：静默锚点也会退到它（`report_due`），与用户格同族。
+    FactDecl {
+        name: "turn.supplemented",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text", "count", "id", "ids"],
+    },
+    // 本轮配置快照（T-225）：决策只读它，不读 `SessionConfig` 活值。
+    FactDecl {
+        name: "session.config",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &[
+            "classify_enabled",
+            "auto_compress",
+            "progress_enabled",
+            "progress_interval_ms",
+            "progress_min_rounds",
+            "progress_max_per_turn",
+            "is_persistent",
+        ],
+    },
+    // 本轮派发档（T-225）：用户格先落、档位后定 ⇒ 两者分开记（见事件常量文档）。
+    FactDecl {
+        name: "turn.dispatch",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["tier", "budget_ms", "principal"],
     },
     // 拒绝事实（T-219）：`key` 是「主体 × 能力 × 资源」的编码。
     FactDecl {
@@ -371,13 +442,20 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
     )
 }
 
+/// 这一轮**最新一份配置**（按事件序取最后一条；`None` = 这一轮没落配置事实）。
+fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
+    events
+        .iter()
+        .rfind(|e| e.turn == turn && e.kind == crate::symbio_core::EVENT_SESSION_CONFIG)
+}
+
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some(turn) = events
         .iter()
         .filter(|e| {
             matches!(
                 e.kind.as_str(),
-                "user.message" | "turn.stage" | "chat.assistant.final"
+                "user.message" | "turn.stage" | "chat.assistant.final" | "session.config"
             )
         })
         .map(|e| e.turn)
@@ -394,6 +472,12 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         .filter_map(|e| u64_field(e, "round"))
         .max()
         .unwrap_or(0);
+    // `classify_enabled` 只从事实读：配置在轮首落成 `session.config`，此后判决
+    // 看到的就是"那一轮用的配置"，不是进程里此刻的活值（T-225）。
+    let classify_enabled = config_of(events, turn)
+        .and_then(|e| e.payload.get("classify_enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let done = events.iter().any(|e| {
         e.turn == turn
             && e.kind == "turn.stage"
@@ -404,7 +488,82 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "turn": turn,
         "round": round,
         "has_utterance": has_utterance,
+        "classify_enabled": classify_enabled,
         "done": done,
+    })
+}
+
+/// 中途汇报该不该说（T-225）：只吃日志与 `now`，不碰 `RoundProgress` / 墙钟。
+///
+/// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
+/// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
+/// `min_rounds` 不在这里判——它是触发点的前提（回调只在工具批次边界上被问），
+/// 而不是日志能回答的量。
+fn report_due(events: &[Event], now: i64) -> serde_json::Value {
+    const SPOKE: &[&str] = &[
+        "chat.assistant.reported",
+        "chat.assistant.opening",
+        "chat.assistant.final",
+        "chat.assistant.fallback",
+        "chat.assistant.progress",
+    ];
+    let Some(turn) = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind.as_str(),
+                "user.message"
+                    | "turn.supplemented"
+                    | "chat.assistant.reported"
+                    | "chat.assistant.opening"
+                    | "chat.assistant.final"
+                    | "chat.assistant.fallback"
+                    | "chat.assistant.progress"
+            )
+        })
+        .map(|e| e.turn)
+        .max()
+    else {
+        return serde_json::Value::Null;
+    };
+    let config = config_of(events, turn);
+    let enabled = config
+        .and_then(|e| e.payload.get("progress_enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let interval_ms = config
+        .and_then(|e| e.payload.get("progress_interval_ms"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let quota = config
+        .and_then(|e| e.payload.get("progress_max_per_turn"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let reports = events
+        .iter()
+        .filter(|e| e.turn == turn && e.kind == "chat.assistant.reported")
+        .count() as u64;
+    let spoke_at = events
+        .iter()
+        .filter(|e| e.turn == turn && SPOKE.contains(&e.kind.as_str()))
+        .map(|e| e.ts)
+        .max();
+    let anchor = spoke_at.or_else(|| {
+        events
+            .iter()
+            .filter(|e| {
+                e.turn == turn && matches!(e.kind.as_str(), "user.message" | "turn.supplemented")
+            })
+            .map(|e| e.ts)
+            .max()
+    });
+    let quiet_ms = anchor.map(|at| (now - at).max(0)).unwrap_or(0);
+    let due = enabled && quiet_ms >= interval_ms && reports < quota;
+    serde_json::json!({
+        "turn": turn,
+        "due": due,
+        "reports": reports,
+        "quota": quota,
     })
 }
 
@@ -425,18 +584,40 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: in_flight,
     },
-    // 轮头：今天 `LoopState::TurnHead` 的四个量里，`classify_enabled` 要等
-    // `session.config` 事实（T-225，届时 `ver` 升到 2）；这一版只声明能凭日志算出的三个。
+    // 轮头（T-225 升到 v2）：`classify_enabled` 从 `session.config` 读，`done` 从
+    // `turn.stage` 的 `decide` 格折叠——五个策略输入里这一格能四样全凭日志算出。
     ViewDecl {
         name: "turn_head",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("user.message", "text"),
             ("turn.stage", "stage"),
             ("turn.stage", "round"),
+            ("session.config", "classify_enabled"),
+            ("chat.assistant.final", "text"),
         ],
         cost: 4096,
         eval: turn_head,
+    },
+    // 汇报到期：静默时长 = `now` − 最近一句助手文本（或用户格）的 `ts`；
+    // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。
+    ViewDecl {
+        name: "report_due",
+        ver: 1,
+        reads: &[
+            ("session.config", "progress_enabled"),
+            ("session.config", "progress_interval_ms"),
+            ("session.config", "progress_max_per_turn"),
+            ("chat.assistant.reported", "tool_rounds"),
+            ("chat.assistant.opening", "text"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            ("chat.assistant.progress", "status"),
+            ("user.message", "text"),
+            ("turn.supplemented", "text"),
+        ],
+        cost: 4096,
+        eval: report_due,
     },
 ];
 

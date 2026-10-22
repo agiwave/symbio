@@ -19,6 +19,10 @@ fn ev(turn: u64, kind: &str, payload: Value) -> Event {
     .with_payload(payload)
 }
 
+fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
+    ev(turn, kind, payload).with_ts(ts)
+}
+
 // ── 装载 ─────────────────────────────────────────────────────────────────
 
 #[test]
@@ -33,13 +37,20 @@ fn builtin_loads_and_freezes() {
             RESPONSE,
             FAILED,
             "chat.assistant.final",
+            "chat.assistant.fallback",
+            "chat.assistant.reported",
+            "chat.assistant.opening",
+            "chat.assistant.progress",
             "turn.stage",
             "user.message",
+            "turn.supplemented",
+            "session.config",
+            "turn.dispatch",
             "authz.denied",
         ]
     );
     let views: Vec<_> = frozen.views().iter().map(|v| v.name).collect();
-    assert_eq!(views, vec!["in_flight", "turn_head"]);
+    assert_eq!(views, vec!["in_flight", "turn_head", "report_due"]);
 
     // 端口是载荷字段：协议族声明它，收束 / 阶段 / 用户 / 拒绝都不带。
     for name in [REQUEST, SENT, RESPONSE, FAILED] {
@@ -49,7 +60,8 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：T-225 给 `turn_head` 加 `session.config` 时升到 2。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 1);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 2);
+    assert_eq!(frozen.view("report_due").unwrap().ver, 1);
 }
 
 #[test]
@@ -249,7 +261,13 @@ fn turn_head_reads_round_and_done_from_facts() {
     ];
     assert_eq!(
         turn_head(&events, 0),
-        json!({"turn": 1, "round": 0, "has_utterance": true, "done": true})
+        json!({
+            "turn": 1,
+            "round": 0,
+            "has_utterance": true,
+            "classify_enabled": false,
+            "done": true
+        })
     );
 
     // 下一轮的阶段事实出现后，轮头跟着走；`done` 只认**当前 round** 的判决格。
@@ -261,11 +279,131 @@ fn turn_head_reads_round_and_done_from_facts() {
     ];
     assert_eq!(
         turn_head(&events, 0),
-        json!({"turn": 2, "round": 1, "has_utterance": true, "done": false})
+        json!({
+            "turn": 2,
+            "round": 1,
+            "has_utterance": true,
+            "classify_enabled": false,
+            "done": false
+        })
     );
 }
 
 #[test]
 fn turn_head_is_empty_without_facts() {
     assert_eq!(turn_head(&[], 0), Value::Null);
+}
+
+#[test]
+fn turn_head_reads_classify_switch_from_config_fact() {
+    // 配置是**一轮一条事实**：判决读的是那一轮落下的快照，不是进程里的活值。
+    let events = vec![
+        ev_at(1, "session.config", json!({"classify_enabled": false}), 1),
+        ev_at(1, "session.config", json!({"classify_enabled": true}), 2),
+        ev_at(1, "user.message", json!({"text": "hi"}), 3),
+    ];
+    assert_eq!(
+        turn_head(&events, 5)["classify_enabled"],
+        json!(true),
+        "同一轮多份配置时取最后一份（恢复幕会追加新快照）"
+    );
+}
+
+// ── report_due：只用事实 + now ──────────────────────────────────────────
+
+fn cfg(interval: i64, quota: u64) -> Value {
+    json!({
+        "progress_enabled": true,
+        "progress_interval_ms": interval,
+        "progress_max_per_turn": quota,
+    })
+}
+
+#[test]
+fn report_due_needs_log_and_now_only() {
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 2), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+    ];
+    // 静默 1500ms > 1000ms，配额未用完 ⇒ 到期。
+    assert_eq!(
+        report_due(&events, 1520),
+        json!({"turn": 1, "due": true, "reports": 0, "quota": 2})
+    );
+    // 同一份切片、只换 now：不到阈值 ⇒ 不到期。
+    assert_eq!(
+        report_due(&events, 1000),
+        json!({"turn": 1, "due": false, "reports": 0, "quota": 2})
+    );
+}
+
+#[test]
+fn report_due_resets_quiet_on_assistant_speech() {
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 2), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(
+            1,
+            "chat.assistant.reported",
+            json!({"text": "先报一句"}),
+            900,
+        ),
+    ];
+    // 最近一句助手文本在 900 ⇒ 静默 200ms，未到 1000ms。
+    assert_eq!(
+        report_due(&events, 1100),
+        json!({"turn": 1, "due": false, "reports": 1, "quota": 2})
+    );
+}
+
+#[test]
+fn report_due_respects_quota_and_switch() {
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 1), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(1, "chat.assistant.reported", json!({"text": "报过"}), 30),
+    ];
+    // 配额 1 已用完 ⇒ 静默再久也不到期。
+    assert_eq!(report_due(&events, 60_000)["due"], json!(false));
+
+    // 开关关掉时其余量一律不作数。
+    let off = vec![
+        ev_at(
+            1,
+            "session.config",
+            json!({
+                "progress_enabled": false,
+                "progress_interval_ms": 1,
+                "progress_max_per_turn": 9,
+            }),
+            10,
+        ),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+    ];
+    assert_eq!(report_due(&off, 60_000)["due"], json!(false));
+}
+
+#[test]
+fn report_due_is_empty_without_facts() {
+    assert_eq!(report_due(&[], 1_000), Value::Null);
+}
+
+#[test]
+fn views_are_pure_same_slice_same_now_same_value() {
+    // ADR-115 决策 1：`now` 是入参。同一份事实切片求值两次逐字相同；
+    // 不同 `now` 只通过比较影响 `due`——视图自己不读时钟。
+    let events = vec![
+        ev_at(1, "session.config", cfg(1000, 3), 10),
+        ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ev_at(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "hit"}),
+            30,
+        ),
+    ];
+    assert_eq!(report_due(&events, 5_000), report_due(&events, 5_000));
+    assert_eq!(turn_head(&events, 5_000), turn_head(&events, 5_000));
+    assert_eq!(report_due(&events, 5_000)["due"], json!(true));
+    assert_eq!(report_due(&events, 500)["due"], json!(false));
 }

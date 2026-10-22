@@ -472,7 +472,7 @@ fn reflex_requires_a_fresh_turn_and_a_match() {
         builtin().decide(&LoopState::reflex(true, true)).capsule(),
         Some(Capsule::Reflex)
     );
-    // 续写轮不走快路：它会撞幂等键（复用 `resume.user_seq` 却新开一轮）。
+    // 续写轮不走快路：它会撞幂等键（复用原轮用户格却新开一轮）。
     assert_eq!(
         builtin().decide(&LoopState::reflex(false, true)).capsule(),
         None

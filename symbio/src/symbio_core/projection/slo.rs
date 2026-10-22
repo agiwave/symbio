@@ -7,8 +7,9 @@
 //! 里，由读方按需取用。
 //!
 //! 档位归属与 [`super::fallback::fallback_rate`] 同一判据（共享
-//! [`declared_tier`] 单源）：final 按 turn 号归到本轮用户消息声明的档位；
-//! 缺失/未知 ⇒ `unspecified` 桶（可观测，不静默归类）。
+//! [`declared_tier`] 单源）：final 按 turn 号归到本轮 `turn.dispatch` 声明的档位
+//! （历史事件回退 `user.message` 的 `tier`）；缺失/未知 ⇒ `unspecified` 桶
+//! （可观测，不静默归类）。
 //!
 //! 分位数是**读方计算**：视图只携带升序样本（构造即排序，逐字节确定，N1），
 //! `percentile` 是纯查询——投影只报数，SLO 是承诺。

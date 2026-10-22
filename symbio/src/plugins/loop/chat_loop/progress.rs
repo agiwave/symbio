@@ -41,8 +41,9 @@ use crate::symbio_core::RunSnapshot;
 /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮）。
 ///
 /// 构造点唯一：`orchestrator/consume.rs`——那里拿着插件、能读配置，与
-/// `ChatOrchestrator::classify_enabled` / `compose_enabled` 是同一条取值纪律
-/// （取**值快照**，不把插件交给主循环）。
+/// `compose_enabled` 是同一条取值纪律（取**值快照**，不把插件交给主循环）；
+/// 判决开关不同——它由 `begin_drive` 落成 `session.config` 事实，读方是
+/// `TurnState::config_bool`。
 #[derive(Debug, Clone)]
 pub struct ProgressPolicy {
     /// 总开关（`SessionConfig::progress_enabled`）

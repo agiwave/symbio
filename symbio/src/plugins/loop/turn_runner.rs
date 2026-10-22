@@ -33,7 +33,7 @@ use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     LlmTurn, PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
 };
 use std::borrow::Cow;
 
@@ -74,8 +74,17 @@ pub struct TurnInput {
     /// 续写轮（[`Self::resume`] 为 `Some`）时，调用方填的是**被续写轮**的号
     /// （已开未收束的那一轮），不是新号。
     pub turn: u64,
-    /// 用户发言。续写轮不新开用户格，此字段不参与入格（用户没再说话）。
-    pub text: String,
+    /// 本轮**用户格的 seq**——判决的溯源锚点（I2 / T-225）。
+    ///
+    /// 用户格已由**调用方**在进运行器之前落格（ADR-114：事实先于任何判决），
+    /// 因此这里收到的是它的位置而不是正文：运行器不再拥有「用户说了什么」，
+    /// 只拥有「拿哪一格当锚」。续写轮同样填被续写轮的用户格。
+    pub user_seq: u64,
+    /// 本次执行的**幕号**（`turn.dispatch` / 阶段事实的幂等键尾段，T-225）。
+    ///
+    /// 新开一轮 = 用户格的 seq；续写幕 = 续写阶段事实的 seq。同一轮里多次执行
+    /// （恢复后的续写幕）因此各有一组互不撞号的格。
+    pub drive_seq: u64,
     /// **本轮的中止信号**（ADR-052：中止是事实的**状态**，不是「什么都没发生」）。
     ///
     /// ## 为什么运行器要拿它
@@ -232,22 +241,6 @@ pub struct TurnInput {
     /// 落库回包用的是**同一个 id**，两边各自现造就必然对不上（重建出的 Turn 根与
     /// 落库的 Turn 根是两个节点）。
     pub turn_root_id: String,
-    /// 本轮**用户消息节点 id**（`user.message` 载荷记它）。`None` = 本轮没有用户
-    /// 节点（续写轮不新开用户格，不消费）。
-    ///
-    /// 与 [`Self::turn_root_id`] 同一条纪律：id 由调用方生成（用户消息在进运行器
-    /// 之前就已存在），这里只负责**记**。
-    pub user_node_id: Option<String>,
-    /// 本轮**用户消息节点的 `meta`**（`user.message` 载荷记它；`None` = 无 meta）。
-    ///
-    /// ## 为什么 `meta` 也是事实的一部分
-    ///
-    /// 用户消息不只有正文：折进的那一条（合并补充）带 `meta.supplement*` 三键——
-    /// 前端据它认出「这是一次折进」，重建据它复刻节点形状。这些键若不随事实
-    /// 入格，重建出的用户节点就**丢了这些键**，
-    /// 于是同一条发言在实时面与重建面是两个身份（t19 的空闲抽干线照出来的正是这一处）。
-    /// 与 `id` 同属「节点身份/形状是事实的一部分」（T-052 原则）。
-    pub user_meta: Option<serde_json::Value>,
     /// **流式期已分配的节点身份**（正文 / 推理子节点的 id 与推理正文）——收束事件
     /// 的载荷要记它们（WAL 载荷补全：消息节点 id 入格，重建才无损）。
     ///
@@ -347,7 +340,8 @@ impl std::fmt::Debug for TurnInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TurnInput")
             .field("turn", &self.turn)
-            .field("text", &self.text)
+            .field("user_seq", &self.user_seq)
+            .field("drive_seq", &self.drive_seq)
             // 中止信号只打印「有没有」：`ExecAbortSignal` 是内部句柄（AtomicBool +
             // 通知），展开它对本入参包的可读性没有增量，反而多出一堆内部字段。
             .field("abort", &self.abort.as_ref().map(|_| "<信号>"))
@@ -362,8 +356,6 @@ impl std::fmt::Debug for TurnInput {
             .field("opening_text", &self.opening_text)
             .field("opening_dialog", &self.opening_dialog)
             .field("turn_root_id", &self.turn_root_id)
-            .field("user_node_id", &self.user_node_id)
-            .field("user_meta", &self.user_meta)
             // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
             .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
             .field("nodes", &self.nodes.as_ref().map(|_| "<闭包>"))
@@ -388,8 +380,6 @@ impl std::fmt::Debug for TurnInput {
 /// `window_by_turn`）会把那一轮数成两轮。
 #[derive(Debug, Clone)]
 pub struct TurnResume {
-    /// 被续写轮次的用户格 `seq`（`produced_by` 的锚点，I2）。
-    pub user_seq: u64,
     /// 恢复后的工具调用（渲染 prompt 的交换段；形状复用
     /// [`crate::symbio_core::TurnToolCallInfo`]，
     /// 不另立一份——`name` / `arguments` 的取法必须与在途工具轮逐字一致）。

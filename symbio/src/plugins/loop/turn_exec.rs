@@ -14,18 +14,18 @@
 //!
 //! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走
 //! [`TurnRunner::run_reflex`]——以技能正文收束，**一次模型调用都不发生**。
-//! 它不是"又一条执行链"：产物落的是**同一对格子**（`u-{turn}` / `f-{turn}`），
-//! 收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；变的只是
-//! **生成那一格**由谁产出（反射档没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
+//! 它不是"又一条执行链"：产物落的是**同一轮的三格**（`u-{turn}` / `turn.dispatch` /
+//! `f-{turn}`），收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；
+//! 变的只是**生成那一格**由谁产出（反射档没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
 //!
 //! 两条边界，缺一条都会静默走错：
-//! - **只对新开轮**：续写轮不新开用户格（复用 `resume.user_seq`），而反射档的落格形状
-//!   就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
+//! - **只对新开轮**：续写轮不新开用户格（调用方直给原轮的 `user_seq`），而反射档的
+//!   落格形状就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
 //! - **开关默认关**：关着时候选集恒空，本轮照常走 `run_with_tools`。
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
-//! 该值随主体走、并由 `execute_turn` 以**数值**写入开轮格载荷的 `budget_ms`
-//! （T-082）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! 该值随主体走、并由 `execute_turn` 以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
+//! （T-082 / T-225）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
 //! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
@@ -87,11 +87,10 @@ use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
-    count_user_messages, llm_short_id, run_ops, ActorSpec, CapabilityMeta, ConsolidateRequest,
-    DeltaSink, DispatchPort, Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier,
-    ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer,
-    TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    llm_short_id, run_ops, ActorSpec, CapabilityMeta, ConsolidateRequest, DeltaSink, DispatchPort,
+    Entity, Event, ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
+    ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
@@ -110,9 +109,9 @@ mod outcome;
 mod persist;
 
 pub(crate) use self::assemble::{assemble_turn, Assembled};
-// 原 `execute_turn` 首段的辅助判据随阶段① 搬走；本文件测试仍按老名字直接调用它。
-#[cfg(test)]
-use self::assemble::last_open_turn;
+// 续写幕的开幕方（`chat_loop::drive`）要用同一个「已开未收束」判据：
+// 这里的收束口径（只认 final / fallback）与 C4（兼认产物）刻意不同，见函数文档。
+pub(crate) use self::assemble::last_open_turn;
 pub(crate) use self::call::{call_model, Running};
 pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
 pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
@@ -647,16 +646,14 @@ pub(crate) struct ExecTurn<'a> {
     pub root_id: &'a str,
     /// 事件出口（UI 帧经此回到对话面）。
     pub sink: &'a ExecEventSink,
-    /// 本轮用户发言（事实入格与 prompt 的同一来源）。
+    /// 本轮用户发言（反射档的技能命中判定与轮末学习用它；事实与 prompt 都从
+    /// 用户格出，不再经过这里）。
     pub user_text: &'a str,
-    /// 本轮用户消息节点 id（落库镜像里那条用户消息的 id）——收束格 / 进展格的
-    /// 载荷记它，重建侧据此把本轮锚回用户发言。id 由 chat_loop 分配（消息镜像的
-    /// 写方），这里只读不生成。
-    pub user_node_id: Option<String>,
-    /// 本轮用户消息节点的 `meta`（`None` = 无 meta）。折进的合并补充带
-    /// `meta.supplement*`——它是节点形状的一部分，必须随用户格事实入格（见
-    /// [`super::turn_runner::TurnInput::user_meta`]）。
-    pub user_meta: Option<serde_json::Value>,
+    /// 本轮 turn 号与溯源锚：由 `chat_loop::drive` 在判决之前定下（用户格先落）。
+    pub turn_no: u64,
+    pub user_seq: u64,
+    /// 本幕的锚（新轮 = 用户格 seq；续写幕 = 恢复阶段事实 seq）。
+    pub drive_seq: u64,
     /// 对话窗口（最近轮数，含当前轮）。
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。

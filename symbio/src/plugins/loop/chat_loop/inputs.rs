@@ -150,7 +150,7 @@ pub(crate) async fn prepare_turn_inputs(
     let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
 
     // ── ③ 压缩（收口 ③：自动语义压缩，唯一响应点）───────────────────────────
-    apply_compaction(orchestrator, ctx, context, turn, req, overhead_tokens).await?;
+    apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
     let root_id: String = llm_short_id();
@@ -161,10 +161,13 @@ pub(crate) async fn prepare_turn_inputs(
     // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机。
     // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格）。
     // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
-    let recall_done = turn.stage_done(turn.request_round, Capsule::Recall);
+    let recall_done = turn.stage_done(
+        super::super::stage_events::StageName::Recall,
+        turn.request_round,
+    );
     let recall_state = LoopState::turn_prepare(
         turn.request_round,
-        context.session.is_persistent(),
+        turn.config_bool("is_persistent"),
         recall_done,
     );
     let recall_hit = builtin().decide(&recall_state).hit();
@@ -301,8 +304,18 @@ async fn run_recall(
     turn.skill_route = routing.obs;
     turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
-    // 落格交给运行器（写者令牌在 `turn_exec`）。
-    turn.mark_stage(StageFact::ran(Capsule::Recall, turn.request_round));
+    // 落格交给运行器（写者令牌在 `turn_exec`）。`result` 记技能命中与否——
+    // 义务环的 `has_match` 只从日志读（T-225 的输入闭包）。
+    let hit = last_user_text(context).as_deref().is_some_and(|text| {
+        super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
+    });
+    turn.mark_stage(
+        StageFact::ran(Capsule::Recall, turn.request_round).with_result(if hit {
+            "hit"
+        } else {
+            "miss"
+        }),
+    );
     Ok(())
 }
 
@@ -322,16 +335,21 @@ pub(crate) async fn apply_compaction(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     turn: &mut TurnState,
-    req: &TurnRequest,
     overhead_tokens: usize,
 ) -> Result<(), TurnExit> {
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
     // 下一轮照常再试；但同一轮内不重复进产线（ADR-107 判据 2）。
-    let compress_done = turn.stage_done(turn.request_round, Capsule::Compress);
+    let compress_done = turn.stage_done(
+        super::super::stage_events::StageName::Compress,
+        turn.request_round,
+    );
     let compress_hit = builtin()
-        .decide(&LoopState::compress(req.auto_compress, compress_done))
+        .decide(&LoopState::compress(
+            turn.config_bool("auto_compress"),
+            compress_done,
+        ))
         .hit();
     if let Some(hit) = compress_hit {
         hit.trace();

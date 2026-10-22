@@ -361,39 +361,44 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
 
 /// 本切片**声明过**的预算里最宽的一档；一条都没声明 ⇒ `None`（C5 跳过）。
 ///
-/// 预算声明有**两种形态**，同一条事实、同一个来源（开轮事件 `user.message` 的载荷）：
-/// - 一等形态：`budget_ms`（**数值**，写方 `turn_runner` 从 `ActorSpec.budget_ms` 取，
+/// 预算声明有**两种形态**，同一个来源（本轮的派发 / 开轮事件载荷）：
+/// - 一等形态：`budget_ms`（**数值**，写方从 `ActorSpec.budget_ms` 取，
 ///   即「这一轮的角色行声明了多少预算」）——优先读它。
 /// - 兼容形态：`tier`（档位名），经 `LatencyTier::from_name` 映射成预算——只在
 ///   缺 `budget_ms` 时回退（接线前落的历史事件 / 旧 WAL）。回退是**向后兼容**，
-///   不是第二处判定：两种形态都不会同时被读，`or_else` 保证至多一处生效。
+///   不是第二处判定：两种形态都不会被同时读。
 ///
-/// 与 `projection::fallback` 的 `declared_tier` 同一个字段族，只是问的问题不同：
-/// 那边是「这一轮归哪一档」（按轮归位），这边是「这份切片最宽的预算是多少」
-/// （一个全局上界，因此不会误伤任何一档）。
+/// 读**哪个事件**同样有新旧两种：`turn.dispatch`（T-225：用户格先于判决落，
+/// 档位另立一格）优先；没有它就回退 `user.message`（历史切片）。同一格内
+/// 数值优先、档位名回退——两条路径读的都是同一条事实的两种形态。
 fn declared_budget_ms(events: &[Event]) -> Option<u64> {
-    events
-        .iter()
-        .filter(|e| {
-            e.entity == Entity::Turn
-                && e.verb == Verb::Opened
-                && e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE
-        })
-        .filter_map(|e| {
-            // 一等形态优先：规格派生的数值（见上方文档）。
+    let widest = |kind: &str, verb: Verb| {
+        let kind = kind.to_string();
+        events
+            .iter()
+            .filter(move |e| e.entity == Entity::Turn && e.verb == verb && e.kind == kind)
+            .filter_map(declared_budget_of)
+            .max()
+    };
+    widest(
+        crate::symbio_core::event::EVENT_TURN_DISPATCH,
+        Verb::Asserted,
+    )
+    .or_else(|| widest(crate::symbio_core::event::EVENT_USER_MESSAGE, Verb::Opened))
+}
+
+/// 一条声明事件的预算：数值优先，档位名回退。
+fn declared_budget_of(e: &Event) -> Option<u64> {
+    e.payload
+        .get("budget_ms")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
             e.payload
-                .get("budget_ms")
-                .and_then(|v| v.as_u64())
-                .or_else(|| {
-                    // 兼容形态：档位名映射（缺数值时的回退）。
-                    e.payload
-                        .get("tier")
-                        .and_then(|v| v.as_str())
-                        .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
-                        .map(|t| t.budget_ms())
-                })
+                .get("tier")
+                .and_then(|v| v.as_str())
+                .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
+                .map(|t| t.budget_ms())
         })
-        .max()
 }
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。

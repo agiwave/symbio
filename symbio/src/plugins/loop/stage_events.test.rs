@@ -8,7 +8,7 @@
 //!    `LoopState` 变体不同，合并会掩盖「某一行漏了 `done`」）。
 
 use super::super::loop_registry::{builtin, Capsule, LoopState, Verdict as RowVerdict};
-use super::{done, land, source_of, StageFact, VerdictFact, VerdictSource};
+use super::{done, land, source_of, StageFact, StageName, VerdictFact, VerdictSource};
 use crate::symbio_core::{
     Entity, EventStore, Seq, Store, Verb, Verdict, EVENT_TURN_STAGE, REASON_ACK, REASON_CLARIFY,
     REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
@@ -48,12 +48,14 @@ fn classify_fact_carries_reason_and_source() {
     assert_eq!(
         StageFact::classify(0, Some(&ruled)),
         StageFact {
-            stage: Capsule::Decide,
+            stage: StageName::Decide,
             round: 0,
             verdict: Some(VerdictFact {
                 reason: Some(REASON_GREETING.into()),
                 source: VerdictSource::Rule,
             }),
+            result: None,
+            identity: None,
         }
     );
 
@@ -72,12 +74,14 @@ fn classify_fact_carries_reason_and_source() {
     assert_eq!(
         StageFact::classify(0, None),
         StageFact {
-            stage: Capsule::Decide,
+            stage: StageName::Decide,
             round: 0,
             verdict: Some(VerdictFact {
                 reason: None,
                 source: VerdictSource::Absent,
             }),
+            result: None,
+            identity: None,
         }
     );
 }
@@ -191,17 +195,17 @@ fn done_is_scoped_by_turn_stage_and_round() {
     .unwrap();
     let events = store.range(Seq::new(0));
 
-    assert!(done(&events, 7, Capsule::Recall, 0));
+    assert!(done(&events, 7, StageName::Recall, 0));
     assert!(
-        !done(&events, 8, Capsule::Recall, 0),
+        !done(&events, 8, StageName::Recall, 0),
         "别轮的同一阶段不算本轮已做"
     );
     assert!(
-        !done(&events, 7, Capsule::Recall, 1),
+        !done(&events, 7, StageName::Recall, 1),
         "别轮次不算本请求轮已做"
     );
     assert!(
-        !done(&events, 7, Capsule::Decide, 0),
+        !done(&events, 7, StageName::Decide, 0),
         "同轮另一阶段没有落格，不得互相顶替"
     );
 }
@@ -236,7 +240,7 @@ fn executed_classify_turns_the_next_ask_into_declined() {
         0,
         true,
         true,
-        done(&events, 7, Capsule::Decide, 0),
+        done(&events, 7, StageName::Decide, 0),
     ));
     assert!(
         matches!(again, RowVerdict::Declined { .. }),
@@ -260,7 +264,7 @@ fn executed_recall_turns_the_next_ask_into_declined() {
     let again = builtin().decide(&LoopState::turn_prepare(
         0,
         true,
-        done(&events, 8, Capsule::Recall, 0),
+        done(&events, 8, StageName::Recall, 0),
     ));
     assert!(
         matches!(again, RowVerdict::Declined { .. }),
@@ -290,7 +294,7 @@ fn executed_compress_turns_the_next_ask_into_declined_but_only_for_this_round() 
     let events = store.range(Seq::new(0));
     let again = builtin().decide(&LoopState::compress(
         true,
-        done(&events, 9, Capsule::Compress, 0),
+        done(&events, 9, StageName::Compress, 0),
     ));
     assert!(
         matches!(again, RowVerdict::Declined { .. }),
@@ -303,7 +307,7 @@ fn executed_compress_turns_the_next_ask_into_declined_but_only_for_this_round() 
         builtin()
             .decide(&LoopState::compress(
                 true,
-                done(&events, 9, Capsule::Compress, 1)
+                done(&events, 9, StageName::Compress, 1)
             ))
             .capsule(),
         Some(Capsule::Compress)

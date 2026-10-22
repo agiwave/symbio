@@ -1,8 +1,11 @@
 //! 阶段① 轮首准备（T-179 · B3，PL-015 §5 动作 B3）。
 //!
-//! 用户格入格 → 开场白 / 定稿答话两条早退路 → 窗口与基线 prompt → 续写产物补写 →
-//! 首请求前的中止检查。产出的 [`Prepared`] 是后续阶段的**唯一状态来源**：
-//! 请求阶段只读它、批处理阶段只改它，阶段之间不传第二份事实。
+//! 阶段事实与派发档入格 → 开场白 / 定稿答话两条早退路 → 窗口与基线 prompt →
+//! 续写产物补写 → 首请求前的中止检查。产出的 [`Prepared`] 是后续阶段的**唯一
+//! 状态来源**：请求阶段只读它、批处理阶段只改它，阶段之间不传第二份事实。
+//!
+//! 用户格**不在这里落**（T-225）：它先于任何判决，由编排层在 `drive` 之前写入，
+//! 本阶段收到的是它的 seq（`TurnInput::user_seq`）。
 //!
 //! **纯结构拆分契约**：本文件体内的顺序、判据与副作用逐字来自
 //! `run_with_tools` 的第一段；早退（定稿答话 / 空答兜底 / 首请求前中止）在
@@ -47,7 +50,8 @@ where
 {
     let TurnInput {
         turn,
-        text,
+        user_seq,
+        drive_seq,
         tier,
         window_turns,
         inject,
@@ -59,8 +63,6 @@ where
         opening_text,
         opening_dialog,
         turn_root_id,
-        user_node_id,
-        user_meta,
         nodes,
         abort,
         stages,
@@ -70,41 +72,9 @@ where
     // 本轮**新落**的产物格数（[ADR-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
     // 收束，发言闸再拒也不算未收束（`TurnOutcome::closure_denied` 与 C4 都认它）。
     let mut artifacts_landed = 0u64;
-    // 1. 用户消息入格（turn × opened），档位随载荷入账。
+    // 1. 用户格**不在这里落**（T-225）：它已由编排层在判决之前落格，本函数收到的是
+    // 它的 seq（`user_seq`）——运行器只拿它当溯源锚点，不再拥有「用户说了什么」。
     //
-    // 续写轮（`resume`）**不新开用户格**：用户没再说话，重开会让同一句话在网格里
-    // 出现两次、把那一轮数成两轮；且 C4 按 turn 号配对——续写轮要的正是让**原轮**
-    // 收到收束事件（见 [`TurnResume`]）。此时复用该轮既有的用户格 seq 作溯源锚点。
-    let user_seq = match &resume {
-        None => {
-            let mut payload = serde_json::json!({
-                "text": text,
-                "tier": tier.name(),
-                // 主体规格的时延预算（I3），T-082 批①：与 `tier` 同源
-                // （`request_actor_spec` 由档位派生），但以**数值**入格。
-                "budget_ms": actor.budget_ms,
-                // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
-                "id": user_node_id,
-            });
-            if let Some(meta) = user_meta.as_ref().filter(|m| !m.is_null()) {
-                payload["meta"] = meta.clone();
-            }
-            store
-                .append(
-                    Event::pending(
-                        format!("u-{turn}"),
-                        EVENT_USER_MESSAGE,
-                        Entity::Turn,
-                        Verb::Opened,
-                        turn,
-                        "user",
-                    )
-                    .with_payload(payload),
-                )
-                .map(|seq| seq.value())?
-        }
-        Some(r) => r.user_seq,
-    };
     // 1′. 一次性阶段的「已做」与判决事实（ADR-107 判据 2）：`classify` / `recall` /
     // `compress` 在本轮执行过 ⇒ 各落一格 `turn.stage`。放在用户格之后：断言类
     // 事件必须带溯源锚点（I2），而那只有落完用户格才有。
@@ -112,6 +82,24 @@ where
     // 续写幕复用同一 turn 号、`request_round` 从 0 重来，召回 / 压缩会重跑——重跑
     // 时撞幂等键 ⇒ `land` 按「已做过」吸收（不重复落、也不失败）。
     super::super::stage_events::land(store, turn, user_seq, &actor.principal, &stages)?;
+    // 1″. 本轮派发档（T-225）：用户格先于判决落，档位要到执行装配期才定 ⇒ 另立一格。
+    // 幂等键带**幕号**：同一轮可以被恢复幕再执行一次，两幕的档位各记各的。
+    store.append(
+        Event::pending(
+            format!("d-{turn}-{drive_seq}"),
+            EVENT_TURN_DISPATCH,
+            Entity::Turn,
+            Verb::Asserted,
+            turn,
+            &actor.principal,
+        )
+        .with_produced_by(user_seq)
+        .with_payload(serde_json::json!({
+            "tier": tier.name(),
+            "budget_ms": actor.budget_ms,
+            "principal": actor.principal,
+        })),
+    )?;
     // 1a. 对话面开场白（T-056）：`Escalate` 首响——本轮随后**照进工具循环**，
     // 所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
     //

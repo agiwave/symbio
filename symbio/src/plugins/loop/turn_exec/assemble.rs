@@ -25,8 +25,6 @@ pub(crate) struct Assembled<'a> {
     pub(crate) root_id: &'a str,
     pub(crate) sink: &'a ExecEventSink,
     pub(crate) user_text: &'a str,
-    pub(crate) user_node_id: Option<String>,
-    pub(crate) user_meta: Option<serde_json::Value>,
     pub(crate) window_turns: u64,
     pub(crate) tools: &'a [CapabilityMeta],
     pub(crate) supplements: Option<SupplementFn>,
@@ -42,6 +40,8 @@ pub(crate) struct Assembled<'a> {
     // —— 阶段① 的读数与构造 ——
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) turn_no: u64,
+    pub(crate) user_seq: u64,
+    pub(crate) drive_seq: u64,
     pub(crate) resume_anchor: Option<TurnResume>,
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) bridge: Arc<UiBridge>,
@@ -65,8 +65,9 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         root_id,
         sink,
         user_text,
-        user_node_id,
-        user_meta,
+        turn_no,
+        user_seq,
+        drive_seq,
         window_turns,
         tools,
         resume,
@@ -93,53 +94,34 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 会得到 `NotTheWriter` ⇒ 该变更被寄存在会话侧。本函数是持有交付包的时刻，
     // 经端口动作让 session 在**它自己的令牌窗口**里补落。
     //
-    // 位置在 `snapshot` 之前：本函数后面的所有判据（turn 号 / 续写锚 / 幂等键）
-    // 都从 `store.range(...)` 折，补落改的就是那份切片 ⇒ 必须在读切片之前落完，
-    // 否则本轮会站在一份**缺了那次编辑**的状态上做判断。
+    // 位置在运行器落格之前：补落改的就是运行器即将读的那份切片（prompt 窗口 /
+    // 产物编号），不先落完，本轮会站在一份**缺了那次编辑**的状态上做判断。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
-    let snapshot = store.range(Seq::new(0));
 
-    // turn 号与续写锚点：
-    // - 新开轮：号 = WAL 内既有 `user.message` 计数；
-    // - 续写轮：号 = **已开未收束**的那一轮（审批 / 问答恢复），并取它的用户格 seq
-    //   作溯源锚点——续写**不新开用户格**，收束仍记在该轮上（C4 按 turn 配对，
-    //   另开新轮会把原轮变成永久假缺口，见 core `TurnResume`）。
-    let (turn_no, resume_anchor) = match &resume {
-        None => (count_user_messages(&snapshot), None),
-        Some(r) => {
-            // 未收束的那一轮在**完整史**里找（含归档前缀，ADR-085）：快照取代的是
-            // 消息列表，不是轮次生命周期——等待用户动作的轮在压缩落格后照样「已开
-            // 未收束」（C4 也读完整史）。按现行窗口找会把它漏成 `InternalError`
-            // （T-169：压缩恰好在它等审批期间落格）。轮号与锚点同读一份切片。
-            let (turn, user_seq) = last_open_turn(&snapshot).ok_or_else(|| {
-                PluginError::InternalError(
-                    "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
-                )
-            })?;
-            (
-                turn,
-                Some(TurnResume {
-                    user_seq,
-                    call: TurnToolCallInfo {
-                        id: None,
-                        wire_id: None,
-                        name: Some(r.name.clone()),
-                        arguments: r.args.clone(),
-                        parse_error: None,
-                        overflow_notice: None,
-                    },
-                    text: r.text.clone(),
-                    // 节点身份（调用 / 轮根 / 结果）随恢复方直给的取值入格——续写轮的
-                    // `artifact.added` 复用它们，重建才把结果挂回**原来那张卡**之下。
-                    call_id: Some(r.call_id.clone()),
-                    turn_id: Some(r.turn_id.clone()),
-                    result_id: Some(r.result_id.clone()),
-                }),
-            )
-        }
-    };
+    // 轮号与溯源锚由编排层在判决之前定下（T-225）：用户格先落，这里只收三个
+    // seq，不再从切片反推。
+    // - 新开轮：`turn_no` = 第几条用户格，`user_seq` = 该格的 seq；
+    // - 续写轮：`turn_no` = **已开未收束**的那一轮（审批 / 问答恢复），`user_seq`
+    //   是它的原用户格 seq——续写**不新开用户格**，收束仍记在该轮上（C4 按 turn
+    //   配对，另开新轮会把原轮变成永久假缺口，见 core `TurnResume`）。
+    let resume_anchor = resume.map(|r| TurnResume {
+        call: TurnToolCallInfo {
+            id: None,
+            wire_id: None,
+            name: Some(r.name.clone()),
+            arguments: r.args.clone(),
+            parse_error: None,
+            overflow_notice: None,
+        },
+        text: r.text.clone(),
+        // 节点身份（调用 / 轮根 / 结果）随恢复方直给的取值入格——续写轮的
+        // `artifact.added` 复用它们，重建才把结果挂回**原来那张卡**之下。
+        call_id: Some(r.call_id.clone()),
+        turn_id: Some(r.turn_id.clone()),
+        result_id: Some(r.result_id.clone()),
+    });
 
     // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
     // 执行完随 `ExecTurnResult` 回灌进 `context.messages`（落库动作就是
@@ -227,7 +209,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 一次模型调用都不发生。两关缺一不可：
     //
     // - **逐字命中**（`take_match`：判据是数据，更宽的匹配接进来时改的是它）；
-    // - **只对新开轮**：续写轮**不新开用户格**（运行器复用 `resume.user_seq`），而
+    // - **只对新开轮**：续写轮**不新开用户格**（调用方直给原轮的 `user_seq`），而
     //   反射档的落格形状就是新开一轮（`u-{turn}`）⇒ 续写轮走它会撞幂等键
     //   （`AppendError::Duplicate` → Failed 出口），既完不成收束、也把本轮变成错误。
     //   语义上同样说不通：续写要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
@@ -287,14 +269,13 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
 
     // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
     //
-    // **必须在 `(turn_no, resume_anchor)` 之后**：两者的判据都要求「本轮自己的
-    // 用户格还没落」——轮号若把本轮数进去会从 `u-{n}` 跳到 `u-{n+1}`。归档移走
-    // 前缀**不影响**续写锚：`last_open_turn` 读完整史（ADR-085），等待轮被压进
-    // 归档段后仍是「已开未收束」。
+    // 必须在运行器落格**之前**：本轮的用户格已由编排层先落，先归档才能让
+    // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的
+    // 旧事件，现行窗口不再自洽）。
     //
-    // 也必须**在运行器之前**：本轮自己的用户格由运行器落，先归档才能让
-    // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，
-    // 现行窗口不再自洽）。
+    // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（ADR-085），
+    // 等待轮被压进归档段后仍然成立——而且续写锚此刻已经由编排层按 seq 直给，
+    // 本段不再从切片折它。
     if let Some(msgs) = consolidation {
         if let Err(e) = session
             .run_op_unit(
@@ -318,8 +299,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         root_id,
         sink,
         user_text,
-        user_node_id,
-        user_meta,
         window_turns,
         tools,
         supplements,
@@ -334,6 +313,8 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         presentation_tree,
         store,
         turn_no,
+        user_seq,
+        drive_seq,
         resume_anchor,
         collected,
         bridge,
@@ -366,7 +347,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
 /// 本函数与 C4 的**范围**（完整史）由 ADR-085 对齐；差异只在收束种类。
 /// 取**最后**一个：恢复请求总是续写最近一次停顿。被压缩掉的陈轮不会抢占锚点——
 /// 它若已被 final / fallback 收束就不在候选集里；仍开着的轮按开盘序排在它后面。
-pub(super) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
+pub(crate) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
     let mut open: Vec<(u64, u64)> = Vec::new();
     for e in events {
         if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE {

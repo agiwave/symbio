@@ -39,6 +39,7 @@
 mod compose;
 mod decide;
 pub(crate) mod delegate;
+pub(crate) mod drive;
 mod inputs;
 mod io;
 mod progress;
@@ -57,6 +58,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
+pub(crate) use self::drive::begin_drive;
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
@@ -315,9 +317,8 @@ pub async fn run_chat_loop(
         Some((m.id.clone(), text))
     });
     // 同一个锚点取本轮输入的 `meta`（折进的合并补充带 `meta.supplement*`）：它与 id /
-    // 正文同属一条用户消息的形状，必须一起入格（见 `TurnInput::user_meta`）。
-    let user_meta: Option<serde_json::Value> = single_message.as_ref().and_then(|m| m.meta.clone());
-
+    // 正文同属一条用户消息的形状，由 `begin_drive` 落进用户格载荷（T-225）。
+    //
     // 本轮用户发言（**判决的输入**）。
     //
     // 取值点在循环**之前**、`single_message` 被消费之前，因为它是「本请求带了什么
@@ -344,6 +345,13 @@ pub async fn run_chat_loop(
     // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
     // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。
     let mut pending_resume: Option<super::turn_exec::ResumedTool> = None;
+    // 本幕若为续写幕，`turn.stage{stage:"resume"}` 的 `result` 取这条名字。
+    // 只有真的产出了工具交换（`pending_resume`）才按续写幕处理——`RetrySubtree`
+    // 的语义是「删掉失败轮，重新开一轮」，不是续写。
+    let resume_stage_kind = req
+        .resume
+        .as_ref()
+        .map(|r| super::chat_loop::drive::resume_kind(&r.action));
     if let Some(tr) = req.resume.take() {
         match super::resume::process_resume(
             orchestrator,
@@ -368,6 +376,10 @@ pub async fn run_chat_loop(
             }
         }
     }
+
+    // 只有**第一幕**可能是续写幕：工具交换随第一次 `execute_turn` 被取走，
+    // 后续轮次（长度截断的自动续写）各自开新轮。
+    let mut next_drive_resume = pending_resume.as_ref().and(resume_stage_kind);
 
     loop {
         // ── 步骤 1：加载本轮上下文 ───────────────────────────────────────────
@@ -405,6 +417,14 @@ pub async fn run_chat_loop(
         if let Gate::Exit(exit) = gate_turn(&turn) {
             return finish_turn(&context, &sink, &turn, exit).await;
         }
+
+        // ── 步骤 2a：开一幕（T-225）────────────────────────────────────────
+        // 用户格（或恢复格）+ 当轮配置 + 轮次事实先于任何判决入格。裁决只读
+        // 事实：配置、轮号、幕锚都在这一处定下，后续阶段不再各自数一遍。
+        let drive = match begin_drive(&context, &mut turn, &turn_req, next_drive_resume.take()) {
+            Ok(d) => d,
+            Err(exit) => return finish_turn(&context, &sink, &turn, exit).await,
+        };
 
         // ── 步骤 2b：轮首判决（唯一判决点）───────────────────────────────────
         //
@@ -456,10 +476,10 @@ pub async fn run_chat_loop(
         let head_state = super::loop_registry::LoopState::turn_head(
             turn.request_round,
             first_utterance.is_some(),
-            orchestrator.classify_enabled,
+            turn.config_bool("classify_enabled"),
             // 本次执行里已经判过就不再来一遍（ADR-107 判据 2）：前三条在这一轮内
             // 恒真，没有这一条，任何以「再问一次表」为形状的驱动都会重判同一句话。
-            turn.stage_done(turn.request_round, super::loop_registry::Capsule::Decide),
+            turn.stage_done(super::stage_events::StageName::Decide, turn.request_round),
         );
         let head_hit = super::loop_registry::builtin().decide(&head_state).hit();
         if let Some(hit) = head_hit {
@@ -475,7 +495,6 @@ pub async fn run_chat_loop(
                     &mut context,
                     &mut turn,
                     first_utterance.as_deref(),
-                    &user_meta,
                 )
                 .await
                 {
@@ -546,21 +565,6 @@ pub async fn run_chat_loop(
         //
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
-        // 本轮用户文本与用户消息节点 id：轮首已入列的最后一条用户消息（同一取值点，
-        // 落格载荷的 `id` 记的就是这个节点 id，重建侧据此锚回用户发言）。
-        let (user_node_id, user_text) = context
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.node_role() == Some(NodeRole::User))
-            .map(|m| {
-                let text = match &m.content {
-                    Some(MessageContent::Text(t)) => t.clone(),
-                    _ => String::new(),
-                };
-                (Some(m.id.clone()), text)
-            })
-            .unwrap_or((None, String::new()));
         // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该落一次，
         // 而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。落格与归档
         // 由 `execute_turn` 做（唯一持写者令牌之处），这里只负责把「压成了什么」递过去。
@@ -574,9 +578,10 @@ pub async fn run_chat_loop(
             abort: turn.abort.clone(),
             root_id: &inputs.root_id,
             sink: &sink,
-            user_text: &user_text,
-            user_node_id,
-            user_meta: user_meta.clone(),
+            user_text: drive.user_text.as_str(),
+            turn_no: drive.turn_no,
+            user_seq: drive.user_seq,
+            drive_seq: drive.drive_seq,
             window_turns: orchestrator.session.context_window(),
             tools: &inputs.tools,
             resume: pending_resume.take(),
@@ -700,7 +705,6 @@ async fn run_turn_head(
     context: &mut SessionContext,
     turn: &mut TurnState,
     first_utterance: Option<&str>,
-    user_meta: &Option<serde_json::Value>,
 ) -> Option<TurnExit> {
     if let Some(utterance) = first_utterance {
         // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
@@ -738,12 +742,12 @@ async fn run_turn_head(
                 );
                 // ── 缺口 5：这一轮的**轮次事实仍须入格** ──────────────────
                 //
-                // `Answered` 在这一步就收尾，而 `EVENT_USER_MESSAGE` 的写方是 v2
-                // 运行器 ⇒ 不落这两格，下一轮 prompt 里这次问答**整个消失**，
-                // `session/stats` 的轮次计数也不含它——而 `messages.json` 里有
-                // （`apply_verdict` 刚 push 的答话会随 `finish_turn` 落库）
-                // ⇒ **两条真源**。修法 = 把答话交给运行器落格（见
-                // `turn_exec::execute_final_reply_turn` 的文档）。
+                // `Answered` 在这一步就收尾，收束格必须由 v2 运行器补落（用户格
+                // 已在 `drive` 里先落）⇒ 不落收束格，下一轮 prompt 里这次问答
+                // **整个消失**，`session/stats` 的轮次计数也缺收束——而
+                // `messages.json` 里有（`apply_verdict` 刚 push 的答话会随
+                // `finish_turn` 落库）⇒ **两条真源**。修法 = 把答话交给运行器落格
+                // （见 `turn_exec::execute_final_reply_turn` 的文档）。
                 // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条
                 // assistant 消息）。取它而不是再算一遍：措辞归 `compose` 所有，
                 // 这里只搬运。
@@ -788,10 +792,9 @@ async fn run_turn_head(
                     ctx,
                     orchestrator.provider.clone(),
                     turn.abort.clone(),
-                    utterance,
-                    turn.input_utterance.as_ref().map(|(id, _)| id.clone()),
-                    // 用户格 `meta`（折进的合并补充带 `meta.supplement*`）。
-                    user_meta.clone(),
+                    turn.turn_no,
+                    turn.user_seq,
+                    turn.drive_seq,
                     &reply,
                     dialog,
                     // 生成这次答话的思考事实：措辞产线是这条轮次里唯一一次

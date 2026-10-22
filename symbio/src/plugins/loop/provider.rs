@@ -92,7 +92,6 @@ async fn run_turn(
         context_limit: dispatch.context_limit,
         session,
         writer: dispatch.writer.clone(),
-        classify_enabled: settings.classify_enabled,
         compose_enabled: settings.compose_enabled,
         opening_enabled: settings.opening_enabled,
         progress: ProgressPolicy {

@@ -11,9 +11,31 @@
 
 use super::{TurnInput, TurnOutcome, TurnRunner};
 use crate::symbio_core::{
-    ActorSpec, AppendError, DeltaSink, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas,
-    Store,
+    ActorSpec, AppendError, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter,
+    SilentDeltas, Store, Verb, EVENT_USER_MESSAGE,
 };
+
+/// 测试侧先落用户格（T-225）：生产里由 `chat_loop::drive` 在任何判决之前落，
+/// 运行器只收 seq。返回用户格 seq（单幕场景下 `user_seq == drive_seq`）。
+fn seed_user<S>(store: &S, turn: u64, text: &str) -> u64
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    store
+        .append(
+            Event::pending(
+                format!("u-{turn}"),
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                turn,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": text })),
+        )
+        .expect("用户格入格")
+        .value()
+}
 
 impl TurnRunner {
     /// 跑一轮（测试侧）：用户消息（声明档位）→ 生成 → 收束事件落格。
@@ -33,13 +55,15 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
+        let user_seq = seed_user(store, turn, text);
         self.run_streaming(
             store,
             llm,
             tok,
             TurnInput {
                 turn,
-                text: text.to_string(),
+                user_seq,
+                drive_seq: user_seq,
                 tier,
                 window_turns: None,
                 // 单请求入口（无工具轮）没有轮内循环 ⇒ 没有注入时机。
@@ -52,8 +76,6 @@ impl TurnRunner {
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
                 final_reply: None,
                 turn_root_id: String::new(),
-                user_node_id: None,
-                user_meta: None,
                 dialog: None,
                 opening_text: None,
                 opening_dialog: None,
@@ -186,7 +208,11 @@ mod turn_runner_tests {
                 .expect("桩必答");
         }
 
-        assert_eq!(store.head().value(), 6, "3 轮 × 2 事件");
+        assert_eq!(
+            store.head().value(),
+            9,
+            "3 轮 × 3 事件（用户 / 派发 / 收束）"
+        );
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
         let out = TurnRunner
@@ -201,7 +227,7 @@ mod turn_runner_tests {
             "{:?}",
             check_all(&snapshot)
         );
-        assert_eq!(snapshot.len(), 8);
+        assert_eq!(snapshot.len(), 12);
 
         // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
         let fresh = crate::symbio_core::EventStore::new();
@@ -236,8 +262,34 @@ mod turn_runner_tests {
             .run(&store, &llm, &tok, 0, "第一轮", LatencyTier::Deep)
             .await
             .unwrap();
+        // 第二轮沿用同一轮号：用户格已落（`seed_user` 会先撞），故直接用同一份
+        // 输入再跑一遍——派发格 / 收束格的幂等键同样必须挡住重号。
         let err = TurnRunner
-            .run(&store, &llm, &tok, 0, "重复 turn 号", LatencyTier::Deep)
+            .run_streaming(
+                &store,
+                &llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    user_seq: 0,
+                    drive_seq: 0,
+                    tier: LatencyTier::Deep,
+                    inject: None,
+                    window_turns: None,
+                    resume: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    prefix: None,
+                    final_reply: None,
+                    turn_root_id: String::new(),
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
+                    nodes: None,
+                    stages: Vec::new(),
+                    abort: None,
+                },
+                std::sync::Arc::new(SilentDeltas),
+            )
             .await;
         assert!(err.is_err(), "事件 id 撞车必须被 Store 幂等键拒绝");
         assert!(matches!(
@@ -483,6 +535,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = StubLlmAdapter::succeed_streaming("stub-model", &["你", "好", "！"]);
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+        let user_seq = super::seed_user(&store, 0, "问");
 
         let out = TurnRunner
             .run_streaming(
@@ -491,7 +544,8 @@ mod turn_runner_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: "问".into(),
+                    user_seq,
+                    drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     resume: None,
@@ -501,8 +555,6 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: None,
                     opening_dialog: None,
@@ -535,6 +587,7 @@ mod turn_runner_tests {
         let store2 = EventStore::new();
         let llm2 = StubLlmAdapter::succeed("stub-model");
         let got2 = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+        let user_seq = super::seed_user(&store2, 0, "问");
         TurnRunner
             .run_streaming(
                 &store2,
@@ -542,7 +595,8 @@ mod turn_runner_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: "问".into(),
+                    user_seq,
+                    drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
@@ -552,8 +606,6 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: None,
                     opening_dialog: None,
@@ -618,6 +670,7 @@ mod turn_runner_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = StubLlmAdapter::succeed_streaming("stub-model", &["答", "话"]);
         let got = Arc::new(Frames::default());
+        let user_seq = super::seed_user(&store, 0, "问");
 
         TurnRunner
             .run_streaming(
@@ -626,7 +679,8 @@ mod turn_runner_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: "问".into(),
+                    user_seq,
+                    drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
@@ -635,8 +689,6 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: Some("我先看一下。".into()),
                     opening_dialog: Some(DialogFacts {
@@ -663,10 +715,12 @@ mod turn_runner_tests {
 
     /// 中止轮的入参包：半截产出事实经 `nodes` 闭包随收束入格（生产里这个闭包读
     /// UI 桥上攒的半截正文 / 思考；测试直接给值）。
-    fn abort_input(nodes: NodeFactsFn) -> TurnInput {
+    fn abort_input(store: &EventStore, nodes: NodeFactsFn) -> TurnInput {
+        let user_seq = super::seed_user(store, 0, "问");
         TurnInput {
             turn: 0,
-            text: "问".into(),
+            user_seq,
+            drive_seq: user_seq,
             tier: LatencyTier::Deep,
             window_turns: None,
             inject: None,
@@ -676,8 +730,6 @@ mod turn_runner_tests {
             prefix: None,
             final_reply: None,
             turn_root_id: "r-1".into(),
-            user_node_id: None,
-            user_meta: None,
             dialog: None,
             opening_text: None,
             opening_dialog: None,
@@ -713,20 +765,25 @@ mod turn_runner_tests {
         assert!(out.text.is_empty(), "本轮没有半截产出");
 
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 2, "用户格 + 收束格：{snapshot:?}");
+        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 收束格：{snapshot:?}");
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(snapshot[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
-        assert_eq!(snapshot[1].payload["status"], "aborted", "终止是状态字段");
         assert_eq!(
-            snapshot[1].payload["reason"], "interrupted",
+            snapshot[1].kind,
+            crate::symbio_core::EVENT_TURN_DISPATCH,
+            "派发档另立一格（T-225）"
+        );
+        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
+        assert_eq!(snapshot[2].payload["status"], "aborted", "终止是状态字段");
+        assert_eq!(
+            snapshot[2].payload["reason"], "interrupted",
             "停机原因入格（顶层 `reason`，闭集取值——T-220）"
         );
         assert!(
-            snapshot[1].payload["terminated"]["at"].as_i64().is_some(),
+            snapshot[2].payload["terminated"]["at"].as_i64().is_some(),
             "半截产出停在哪里由 `terminated.at` 说（原因不再在 terminated 里写第二份）"
         );
         assert!(
-            snapshot[1].payload["terminated"]["at"].as_u64().is_some(),
+            snapshot[2].payload["terminated"]["at"].as_u64().is_some(),
             "终止时刻是时间戳"
         );
         assert!(
@@ -755,12 +812,15 @@ mod turn_runner_tests {
                 &store,
                 &llm,
                 &tok,
-                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
-                    text_id: Some("n-text".into()),
-                    text: Some("让我想想这个名词的含义……".into()),
-                    reasoning_id: None,
-                    reasoning: None,
-                })),
+                abort_input(
+                    &store,
+                    std::sync::Arc::new(|| StreamNodeFacts {
+                        text_id: Some("n-text".into()),
+                        text: Some("让我想想这个名词的含义……".into()),
+                        reasoning_id: None,
+                        reasoning: None,
+                    }),
+                ),
                 std::sync::Arc::new(SilentDeltas),
                 &[],
                 None,
@@ -772,8 +832,8 @@ mod turn_runner_tests {
         assert_eq!(out.text, "让我想想这个名词的含义……", "半截正文随结果带走");
 
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 2, "用户格 + 收束格：{snapshot:?}");
-        let cell = &snapshot[1];
+        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 收束格：{snapshot:?}");
+        let cell = &snapshot[2];
         assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
         assert_eq!(
             cell.payload["text"], "让我想想这个名词的含义……",
@@ -816,12 +876,15 @@ mod turn_runner_tests {
                 &store,
                 &llm,
                 &tok,
-                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
-                    text_id: None,
-                    text: None,
-                    reasoning_id: Some("n-rea".into()),
-                    reasoning: Some("这个名词需要先定义。".into()),
-                })),
+                abort_input(
+                    &store,
+                    std::sync::Arc::new(|| StreamNodeFacts {
+                        text_id: None,
+                        text: None,
+                        reasoning_id: Some("n-rea".into()),
+                        reasoning: Some("这个名词需要先定义。".into()),
+                    }),
+                ),
                 std::sync::Arc::new(SilentDeltas),
                 &[],
                 None,
@@ -860,12 +923,15 @@ mod turn_runner_tests {
                 &store,
                 &llm,
                 &tok,
-                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
-                    text_id: Some("n-text".into()),
-                    text: Some("让我想想这个名词的含义……".into()),
-                    reasoning_id: None,
-                    reasoning: None,
-                })),
+                abort_input(
+                    &store,
+                    std::sync::Arc::new(|| StreamNodeFacts {
+                        text_id: Some("n-text".into()),
+                        text: Some("让我想想这个名词的含义……".into()),
+                        reasoning_id: None,
+                        reasoning: None,
+                    }),
+                ),
                 std::sync::Arc::new(SilentDeltas),
                 &[],
                 None,
@@ -879,7 +945,7 @@ mod turn_runner_tests {
             snapshot.iter().all(|e| e.kind != EVENT_ASSISTANT_FALLBACK),
             "中止绝不落兜底格：{snapshot:?}"
         );
-        assert_eq!(snapshot[1].kind, EVENT_ASSISTANT_FINAL, "收束 kind 不换");
+        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL, "收束 kind 不换");
         let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
         let deep = fr.value.of("deep");
         assert_eq!((deep.turns, deep.fallbacks), (1, 0), "中止不进兜底分子");
@@ -911,6 +977,7 @@ mod turn_runner_tests {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
         let llm = StubLlmAdapter::succeed("stub-model");
+        let user_seq = super::seed_user(&store, 0, "问");
         let out = TurnRunner
             .run_with_tools(
                 &store,
@@ -918,7 +985,8 @@ mod turn_runner_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: "问".into(),
+                    user_seq,
+                    drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
@@ -928,8 +996,6 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: None,
                     opening_dialog: None,
@@ -961,6 +1027,7 @@ mod turn_runner_tests {
 
         // ── 放行对照：`agent:main` 持 `reply.first` ⇒ final 照落 ───────────
         let store2 = EventStore::new();
+        let user_seq = super::seed_user(&store2, 0, "问");
         TurnRunner
             .run_with_tools(
                 &store2,
@@ -968,7 +1035,8 @@ mod turn_runner_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: "问".into(),
+                    user_seq,
+                    drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
@@ -978,8 +1046,6 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: None,
                     opening_dialog: None,
@@ -1073,7 +1139,7 @@ mod tool_round_tests {
             ) as RoundInjector
         };
 
-        let mut i = input();
+        let mut i = input(&store);
         i.inject = Some(inject);
         TurnRunner
             .run_with_tools(
@@ -1407,10 +1473,26 @@ mod tool_round_tests {
         }]
     }
 
-    fn input() -> TurnInput {
+    fn input(store: &EventStore) -> TurnInput {
+        input_at(store, 0, "读 a.md")
+    }
+
+    /// 第 `turn` 轮的入参（测试侧先落该轮用户格）。
+    fn input_at(store: &EventStore, turn: u64, text: &str) -> TurnInput {
+        let user_seq = super::seed_user(store, turn, text);
+        TurnInput {
+            turn,
+            user_seq,
+            drive_seq: user_seq,
+            ..input_base()
+        }
+    }
+
+    fn input_base() -> TurnInput {
         TurnInput {
             turn: 0,
-            text: "读 a.md".into(),
+            user_seq: 0,
+            drive_seq: 0,
             tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
@@ -1420,8 +1502,6 @@ mod tool_round_tests {
             prefix: None,
             final_reply: None,
             turn_root_id: String::new(),
-            user_node_id: None,
-            user_meta: None,
             dialog: None,
             opening_text: None,
             opening_dialog: None,
@@ -1451,7 +1531,7 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = ToolCallingLlm::new();
         let prompts = llm.prompts.clone();
-        let mut i = input();
+        let mut i = input(&store);
         i.final_reply = Some("北京今天晴。".into());
         let out = TurnRunner
             .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1464,11 +1544,12 @@ mod tool_round_tests {
             "定稿答话轮一次模型请求都不该发"
         );
         let ev = store.range(Seq::new(0));
-        assert_eq!(ev.len(), 2, "用户格 + 收束格，一格不多一格不少");
+        assert_eq!(ev.len(), 3, "用户格 + 派发格 + 收束格，一格不多一格不少");
         assert_eq!(ev[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(ev[1].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(ev[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
+        assert_eq!(ev[2].kind, EVENT_ASSISTANT_FINAL);
         assert_eq!(
-            ev[1].produced_by,
+            ev[2].produced_by,
             ev[0].seq.map(|s| s.value()),
             "I2：收束格的溯源必须指向本轮用户格"
         );
@@ -1499,7 +1580,7 @@ mod tool_round_tests {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
         };
-        let mut i = input();
+        let mut i = input(&store);
         i.prefix = Some("【长期记忆】\n- 偏好：简洁".to_string());
 
         TurnRunner
@@ -1565,7 +1646,7 @@ mod tool_round_tests {
             let store = EventStore::new();
             let llm = ToolCallingLlm::new();
             let prompts = llm.prompts.clone();
-            let mut i = input();
+            let mut i = input(&store);
             i.prefix = empty;
             TurnRunner
                 .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1599,9 +1680,7 @@ mod tool_round_tests {
         let prompts = llm.prompts.clone();
 
         for turn in 0..3u64 {
-            let mut i = input();
-            i.turn = turn;
-            i.text = format!("第 {turn} 轮问题");
+            let mut i = input_at(&store, turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
             TurnRunner
                 .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1635,9 +1714,7 @@ mod tool_round_tests {
         let llm = EchoLlm::new();
         let prompts = llm.prompts.clone();
         for turn in 0..3u64 {
-            let mut i = input();
-            i.turn = turn;
-            i.text = format!("第 {turn} 轮问题");
+            let mut i = input_at(&store, turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(1);
             TurnRunner
                 .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1694,9 +1771,7 @@ mod tool_round_tests {
 
         // ② 其后的两轮真实事实。
         for turn in 0..2u64 {
-            let mut i = input();
-            i.turn = turn;
-            i.text = format!("第 {turn} 轮问题");
+            let mut i = input_at(&store, turn, &format!("第 {turn} 轮问题"));
             i.window_turns = Some(0);
             TurnRunner
                 .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1705,9 +1780,7 @@ mod tool_round_tests {
         }
 
         // ③ 第 3 轮：窗口只留最近 1 轮（快照的 turn 不在窗口内）。
-        let mut i = input();
-        i.turn = 2;
-        i.text = "压缩之后的问题".to_string();
+        let mut i = input_at(&store, 2, "压缩之后的问题");
         i.window_turns = Some(1);
         TurnRunner
             .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
@@ -1747,7 +1820,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&dispatch),
@@ -1827,27 +1900,32 @@ mod tool_round_tests {
             "角色序列里要有 tool（角色序列）：{roles:?}"
         );
 
-        // 网格：用户格 + 产物格 + final 格（final 只一条——N3）。
+        // 网格：用户格 + 派发格 + 产物格 + final 格（final 只一条——N3）。
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 3, "{snapshot:?}");
+        assert_eq!(snapshot.len(), 4, "{snapshot:?}");
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
             check_all(&snapshot)
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(snapshot[1].kind, EVENT_ARTIFACT_ADDED);
-        assert_eq!(snapshot[1].entity, Entity::Artifact);
-        assert_eq!(snapshot[1].verb, Verb::Asserted);
-        assert_eq!(snapshot[1].payload["tool"], "vdfs_read");
-        assert_eq!(snapshot[1].payload["text"], "文件内容：hello");
         assert_eq!(
-            snapshot[1].produced_by,
+            snapshot[1].kind,
+            crate::symbio_core::EVENT_TURN_DISPATCH,
+            "派发档另立一格（T-225）"
+        );
+        assert_eq!(snapshot[2].kind, EVENT_ARTIFACT_ADDED);
+        assert_eq!(snapshot[2].entity, Entity::Artifact);
+        assert_eq!(snapshot[2].verb, Verb::Asserted);
+        assert_eq!(snapshot[2].payload["tool"], "vdfs_read");
+        assert_eq!(snapshot[2].payload["text"], "文件内容：hello");
+        assert_eq!(
+            snapshot[2].produced_by,
             Some(0),
             "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
         );
-        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL);
-        assert_eq!(snapshot[2].payload["text"], "读到了。");
+        assert_eq!(snapshot[3].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(snapshot[3].payload["text"], "读到了。");
     }
 
     /// 收束于等待用户：运行器停下并落**进展格**（`chat.assistant.progress`，
@@ -1870,7 +1948,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&dispatch),
@@ -1888,11 +1966,12 @@ mod tool_round_tests {
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
             snapshot.len(),
-            3,
-            "用户格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
+            4,
+            "用户格 + 派发格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
-        assert_eq!(snapshot[1].kind, EVENT_ARTIFACT_ADDED);
-        let progress = &snapshot[2];
+        assert_eq!(snapshot[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
+        assert_eq!(snapshot[2].kind, EVENT_ARTIFACT_ADDED);
+        let progress = &snapshot[3];
         assert_eq!(progress.kind, EVENT_ASSISTANT_PROGRESS);
         assert_eq!(progress.entity, Entity::Turn);
         assert_eq!(progress.verb, Verb::Progressed);
@@ -1934,7 +2013,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 None,
@@ -1949,9 +2028,9 @@ mod tool_round_tests {
             out.text
         );
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 2, "用户格 + 兜底格：{snapshot:?}");
+        assert_eq!(snapshot.len(), 3, "用户格 + 派发格 + 兜底格：{snapshot:?}");
         assert_eq!(
-            snapshot[1].kind,
+            snapshot[2].kind,
             crate::symbio_core::EVENT_ASSISTANT_FALLBACK
         );
     }
@@ -1973,7 +2052,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &[],
                 None,
@@ -2042,7 +2121,7 @@ mod tool_round_tests {
                 &store,
                 &TruncatedLlm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &[],
                 None,
@@ -2088,7 +2167,7 @@ mod tool_round_tests {
                 &store,
                 &pending_llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&pending_dispatch),
@@ -2112,13 +2191,15 @@ mod tool_round_tests {
                 &tok,
                 TurnInput {
                     turn: 0,
-                    text: String::new(), // 续写不新开用户格，此字段不参与入格
+                    // 续写不新开用户格：溯源锚 = 首幕用户格 seq。
+                    user_seq: 0,
+                    // 本幕锚与首幕（0）不同 ⇒ 派发格幂等键不撞。
+                    drive_seq: 1,
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     resume: Some(TurnResume {
-                        user_seq: 0,
                         call: TurnToolCallInfo {
                             id: Some("tc-1".into()),
                             wire_id: Some("w-1".into()),
@@ -2138,8 +2219,6 @@ mod tool_round_tests {
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
-                    user_node_id: None,
-                    user_meta: None,
                     dialog: None,
                     opening_text: None,
                     opening_dialog: None,
@@ -2168,12 +2247,14 @@ mod tool_round_tests {
             kinds,
             vec![
                 EVENT_USER_MESSAGE,
+                crate::symbio_core::EVENT_TURN_DISPATCH,
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_PROGRESS,
+                crate::symbio_core::EVENT_TURN_DISPATCH,
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "续写**不重开用户格**（否则 6 格），只补产物格与收束格：{snapshot:?}"
+            "续写**不重开用户格**（否则 8 格），只补派发格、产物格与收束格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
@@ -2184,17 +2265,17 @@ mod tool_round_tests {
             "同一句话在网格里只能出现一次"
         );
         assert_eq!(
-            snapshot[3].payload["tool"], "vdfs_read",
+            snapshot[5].payload["tool"], "vdfs_read",
             "恢复的产物格记被恢复的工具"
         );
-        assert_eq!(snapshot[3].payload["text"], "文件内容：hello（已批准）");
+        assert_eq!(snapshot[5].payload["text"], "文件内容：hello（已批准）");
         assert_eq!(
-            snapshot[3].produced_by,
+            snapshot[5].produced_by,
             Some(0),
             "溯源仍指向**原轮**用户格（I2）"
         );
-        assert_eq!(snapshot[4].turn, 0, "收束格记在原轮号上");
-        assert_eq!(snapshot[4].payload["text"], "批准后已完成。");
+        assert_eq!(snapshot[6].turn, 0, "收束格记在原轮号上");
+        assert_eq!(snapshot[6].payload["text"], "批准后已完成。");
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -2382,7 +2463,7 @@ mod tool_round_tests {
                 &tok,
                 TurnInput {
                     nodes: Some(nodes),
-                    ..input()
+                    ..input(&store)
                 },
                 Arc::new(SilentDeltas),
                 &tools(),
@@ -2453,11 +2534,12 @@ mod tool_round_tests {
             kinds,
             vec![
                 EVENT_USER_MESSAGE,
+                crate::symbio_core::EVENT_TURN_DISPATCH,
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "两轮产物 + 一轮收束：{snapshot:?}"
+            "两轮产物 + 一轮收束（外加派发格）：{snapshot:?}"
         );
         // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
         //
@@ -2576,7 +2658,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&PathEchoDispatch),
@@ -2669,7 +2751,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&PathEchoDispatch),
@@ -2766,7 +2848,7 @@ mod tool_round_tests {
                 &store,
                 &llm,
                 &tok,
-                input(),
+                input(&store),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&PathEchoDispatch),
@@ -2848,14 +2930,16 @@ mod reflex_turn_tests {
         let tok = TokenIssuer::issue_reflex();
         let actor = ActorSpec::trivial("session/main");
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+        let user_seq = super::seed_user(&store, 0, "把周报整理成摘要");
 
         let out = TurnRunner
             .run_reflex(
                 &store,
                 &tok,
                 0,
+                user_seq,
+                user_seq,
                 &actor,
-                "把周报整理成摘要",
                 "先列要点；再合并同类项。",
                 got.clone() as Arc<dyn DeltaSink>,
                 &[],
@@ -2874,8 +2958,12 @@ mod reflex_turn_tests {
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
             snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-            vec![EVENT_USER_MESSAGE, EVENT_ASSISTANT_FINAL],
-            "反射档只落开轮与收束两格（没有产物格——它没跑工具）：{snapshot:?}"
+            vec![
+                EVENT_USER_MESSAGE,
+                crate::symbio_core::EVENT_TURN_DISPATCH,
+                EVENT_ASSISTANT_FINAL
+            ],
+            "反射档落开轮 / 派发 / 收束三格（没有产物格——它没跑工具）：{snapshot:?}"
         );
         let open = &snapshot[0];
         assert_eq!(open.entity, Entity::Turn);
@@ -2884,16 +2972,18 @@ mod reflex_turn_tests {
             open.payload["text"], "把周报整理成摘要",
             "开轮格记的是**用户说的**，不是反射产物"
         );
+        let dispatch = &snapshot[1];
         assert_eq!(
-            open.payload["tier"], "reflex",
-            "档位由令牌类型给出（RuleOnly ⇒ reflex），不是调用方填的字符串"
+            dispatch.payload["tier"], "reflex",
+            "档位由令牌类型给出（RuleOnly ⇒ reflex），不是调用方填的字符串。\
+             T-225：档位另立派发格——用户格先于判决落，那时档位还没定"
         );
         assert_eq!(
-            open.payload["budget_ms"], actor.budget_ms,
-            "开轮格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
+            dispatch.payload["budget_ms"], actor.budget_ms,
+            "派发格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
              ActorSpec.budget_ms 由此有真读方——此断言即写侧的存在证明"
         );
-        let close = &snapshot[1];
+        let close = &snapshot[2];
         assert_eq!(close.verb, Verb::Closed);
         assert_eq!(close.turn, 0);
         assert_eq!(close.payload["text"], "先列要点；再合并同类项。");

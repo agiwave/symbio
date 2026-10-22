@@ -17,8 +17,9 @@ use super::*;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
-    check_all, run_ops, CapabilityMeta, ConsolidateRequest, ExecTranscriptWriter,
-    PluginSimpleRequest, Seq, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    check_all, run_ops, CapabilityMeta, ConsolidateRequest, Entity, Event, ExecTranscriptWriter,
+    PluginSimpleRequest, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{
     Capability, CapabilityRow, EventStore, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
@@ -93,6 +94,49 @@ fn turn_facts(e: &Event) -> bool {
 
 /// 无工具轮的入参包（本文件的三个用例都是这一形态）。
 fn tool_free_req<'a>(
+    fx: &'a Fixture,
+    provider: Arc<dyn ModelProvider>,
+    sink: &'a crate::symbio_core::ExecEventSink,
+    abort: crate::symbio_core::ExecAbortSignal,
+    turn_no: u64,
+    user_text: &'a str,
+) -> ExecTurn<'a> {
+    let user_seq = seed_user(fx, turn_no, user_text);
+    ExecTurn {
+        turn_no,
+        user_seq,
+        drive_seq: user_seq,
+        user_text,
+        ..exec_base(&fx.session, provider, sink, abort)
+    }
+}
+
+/// 续写幕的入参包：**不新开用户格**，溯源锚由调用方直给（T-225）。
+fn resume_req<'a>(
+    fx: &'a Fixture,
+    provider: Arc<dyn ModelProvider>,
+    sink: &'a crate::symbio_core::ExecEventSink,
+    abort: crate::symbio_core::ExecAbortSignal,
+    turn_no: u64,
+    user_seq: u64,
+) -> ExecTurn<'a> {
+    ExecTurn {
+        turn_no,
+        user_seq,
+        drive_seq: user_seq,
+        resume: Some(ResumedTool {
+            name: "vdfs_read".into(),
+            args: serde_json::json!({ "path": "a.md" }),
+            text: "文件内容：hello".into(),
+            call_id: String::new(),
+            turn_id: String::new(),
+            result_id: String::new(),
+        }),
+        ..exec_base(&fx.session, provider, sink, abort)
+    }
+}
+
+fn exec_base<'a>(
     session: &'a LoopSession,
     provider: Arc<dyn ModelProvider>,
     sink: &'a crate::symbio_core::ExecEventSink,
@@ -108,7 +152,9 @@ fn tool_free_req<'a>(
         root_id: "r-1",
         sink,
         user_text: "你好",
-        user_node_id: None,
+        turn_no: 0,
+        user_seq: 0,
+        drive_seq: 0,
         window_turns: 6,
         tools: &[],
         resume: None,
@@ -122,13 +168,30 @@ fn tool_free_req<'a>(
         stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
-        user_meta: None,
         on_round: None,
         // 开场白（T-056）：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
         opening_text: None,
         opening_dialog: None,
         presentation_tree: crate::symbio_core::node_build::PresentationTree::Grouped,
     }
+}
+
+/// 测试侧先落用户格（T-225）：生产由 `chat_loop::drive` 在判决之前落。
+fn seed_user(fx: &Fixture, turn: u64, text: &str) -> u64 {
+    fx.facts
+        .append(
+            Event::pending(
+                format!("u-{turn}"),
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                turn,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": text })),
+        )
+        .expect("用户格入格")
+        .value()
 }
 
 /// 帧收集口（测试的 ExecEventSink 出口）。
@@ -201,7 +264,11 @@ async fn supplements_become_facts_visible_next_turn() {
         }) as super::SupplementFn
     };
 
+    let user_seq = seed_user(&fx, 0, "读一下 a.md");
     execute_turn(ExecTurn {
+        turn_no: 0,
+        user_seq,
+        drive_seq: user_seq,
         session: &fx.session,
         provider: Arc::new(provider),
         parent: None,
@@ -211,7 +278,6 @@ async fn supplements_become_facts_visible_next_turn() {
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
-        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "vdfs_read".into(),
@@ -230,7 +296,6 @@ async fn supplements_become_facts_visible_next_turn() {
         stages: Vec::new(),
         supplements: Some(supplements),
         supplemental_no: Default::default(),
-        user_meta: None,
         on_round: None,
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
@@ -562,10 +627,12 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     let res = execute_turn(tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     ))
     .await
     .expect("v2 执行成功");
@@ -623,10 +690,12 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     let err = execute_turn(tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Fail).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     ))
     .await
     .err()
@@ -664,10 +733,12 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     let err = execute_turn(tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Abort).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     ))
     .await
     .err()
@@ -708,10 +779,12 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     let err = execute_turn(tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::AbortAfterPartial).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     ))
     .await
     .err()
@@ -771,7 +844,11 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
+    let user_seq = seed_user(&fx, 0, "读一下 a.md");
     let res = execute_turn(ExecTurn {
+        turn_no: 0,
+        user_seq,
+        drive_seq: user_seq,
         session: &fx.session,
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ 工具分发按「没有父插件」诚实失败——本用例验的是**链路**
@@ -784,7 +861,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
-        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "vdfs_read".into(),
@@ -804,7 +880,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
-        user_meta: None,
         on_round: None,
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
@@ -989,7 +1064,11 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         }) as super::RoundHookFn
     };
 
+    let user_seq = seed_user(&fx, 0, "读一下 a.md");
     let res = execute_turn(ExecTurn {
+        turn_no: 0,
+        user_seq,
+        drive_seq: user_seq,
         session: &fx.session,
         provider: Arc::new(provider),
         parent: None,
@@ -999,7 +1078,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
-        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "vdfs_read".into(),
@@ -1018,7 +1096,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
-        user_meta: None,
         on_round: Some(on_round),
         opening_text: None,
         opening_dialog: None,
@@ -1128,10 +1205,12 @@ async fn full_turn_lands_memory_and_learning_facts() {
     // 技能路由判定由读侧给出（生产里是 `prepare_turn_inputs` 调 `skill_events::route`）。
     let obs = [("sk-1".to_string(), false)];
     let mut req = tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(provider),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     );
     req.skill_obs = &obs;
     execute_turn(req).await.expect("full 轮执行成功");
@@ -1223,7 +1302,11 @@ async fn full_turn_lands_derived_commitment_facts() {
         ..Default::default()
     };
 
+    let user_seq = seed_user(&fx, 0, "请委托评审");
     let res = execute_turn(ExecTurn {
+        turn_no: 0,
+        user_seq,
+        drive_seq: user_seq,
         session: &fx.session,
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
@@ -1235,7 +1318,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         root_id: "r-1",
         sink: &sink,
         user_text: "请委托评审",
-        user_node_id: None,
         window_turns: 6,
         tools: std::slice::from_ref(&tool_meta),
         resume: None,
@@ -1248,7 +1330,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
-        user_meta: None,
         on_round: None,
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
@@ -1322,10 +1403,12 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
         content: "先列要点；再合并同类项。".into(),
     }];
     let mut req = tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(provider),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        "你好",
     );
     req.skill_hits = &hits;
     let res = execute_turn(req).await.expect("反射档执行成功");
@@ -1353,9 +1436,18 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "开轮格 + 收束格（没有产物格）：{snap:?}");
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
+    let dispatch = all
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_TURN_DISPATCH && e.turn == 0)
+        .expect("反射档同样要有派发格（T-225）");
     assert_eq!(
-        snap[0].payload["tier"], "reflex",
-        "开轮格声明反射档（S11 §3 的档位观测；兜底率按层统计靠它）"
+        dispatch.payload["tier"], "reflex",
+        "派发格声明反射档（S11 §3 的档位观测；兜底率按层统计靠它）"
+    );
+    assert_eq!(
+        dispatch.payload["budget_ms"],
+        LatencyTier::Reflex.budget_ms(),
+        "预算数值随派发格入格"
     );
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
     assert_eq!(snap[1].payload["text"], "先列要点；再合并同类项。");
@@ -1382,7 +1474,8 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
 
     // 续写轮的前提是「本轮已开未收束」（`last_open_turn` 要能找到它）——先手工开一轮。
     // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉执行链的判据。
-    fx.facts
+    let user_seq = fx
+        .facts
         .append(
             Event::pending(
                 "u-0",
@@ -1394,30 +1487,23 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
             )
             .with_payload(serde_json::json!({ "text": "你好", "tier": "deep" })),
         )
-        .expect("开轮格");
+        .expect("开轮格")
+        .value();
 
     let hits = [super::super::skill_events::SkillLlmHit {
         skill_id: "sk-1".into(),
         trigger: "你好".into(),
         content: "先列要点；再合并同类项。".into(),
     }];
-    let mut req = tool_free_req(
-        &fx.session,
+    let mut req = resume_req(
+        &fx,
         Arc::new(provider),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        user_seq,
     );
     req.skill_hits = &hits;
-    req.resume = Some(ResumedTool {
-        name: "vdfs_read".into(),
-        args: serde_json::json!({ "path": "a.md" }),
-        text: "文件内容：hello".into(),
-        // 节点身份（调用 / 轮根 / 结果）：本用例验的是续写路径与技能不顶替，
-        // 不验节点挂靠——留空 ⇒ 回落合成。
-        call_id: String::new(),
-        turn_id: String::new(),
-        result_id: String::new(),
-    });
 
     let res = execute_turn(req).await.expect("续写轮执行成功");
     assert_eq!(
@@ -1747,44 +1833,50 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
 }
 
 /// 跑一轮（无工具、成功）。
-async fn run_one_turn(fx: &Fixture, sink: &crate::symbio_core::ExecEventSink) {
+async fn run_one_turn(fx: &Fixture, sink: &crate::symbio_core::ExecEventSink, turn: u64) {
+    let text = format!("第 {turn} 轮问题");
     execute_turn(tool_free_req(
-        &fx.session,
+        fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        turn,
+        &text,
     ))
     .await
     .expect("无工具轮应成功");
 }
 
 /// 压缩动作的**转发**与**顺序**：执行口把寄存的整份列表原样交给会话端口，且
-/// 发生在运行器之前（快照落在本轮用户格之前）。
+/// 发生在运行器之前（快照先于本轮的执行事实）。
 ///
 /// ## 判据与反向自检
 ///
 /// ① 端口收到的 id 序列与寄存值逐字相同（驱动器不改写压缩结果）；
-/// ② 快照事件排在本轮用户格**之前**——顺序反了，「本轮之前的一切」就不再是被
-/// 快照取代的那段，现行窗口会夹着旧事件。
+/// ② 快照事件排在本轮**派发格之前**——压缩仍是本轮执行的前置动作，归档把旧史
+/// 整段移走。用户格按 T-225 先于快照落（它必须先于压缩判决），随归档段保留在
+/// 完整史里；派发 / 阶段 / 收束格都排在快照之后，现行窗口不夹旧事件。
 ///
 /// 反向自检：去掉 `execute_turn` 里的 `session.consolidate` 调用 ⇒ ① 红；
 /// 把它挪到运行器之后 ⇒ ② 红。
 #[tokio::test]
-async fn consolidation_is_forwarded_before_the_turn_opens() {
+async fn consolidation_is_forwarded_before_the_turn_runs() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
 
     // 第一轮：落 user + final——这就是「被取代的前缀」。
-    run_one_turn(&fx, &sink).await;
+    run_one_turn(&fx, &sink, 0).await;
 
     // 第二轮：带上「本轮之前压过一次」的寄存位。
     let compacted = consolidated(&["snap-1"]);
     let mut req = tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        1,
+        "第二轮",
     );
     req.consolidation = Some(compacted.as_slice());
     execute_turn(req).await.expect("第二轮成功");
@@ -1795,7 +1887,7 @@ async fn consolidation_is_forwarded_before_the_turn_opens() {
     let ids: Vec<&str> = got[0].iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["snap-1"], "驱动器不改写压缩结果");
 
-    // ── ② 顺序：快照事件在本轮用户格之前 ──
+    // ── ② 顺序：快照先于本轮派发格，用户格在快照之前 ──
     let all = fx.facts.range(Seq::new(0));
     let snap_at = all
         .iter()
@@ -1803,59 +1895,20 @@ async fn consolidation_is_forwarded_before_the_turn_opens() {
         .expect("快照应已由会话动作落格");
     let second_user_at = all
         .iter()
-        .enumerate()
-        .filter(|(_, e)| e.kind == EVENT_USER_MESSAGE)
-        .nth(1)
-        .map(|(i, _)| i)
+        .position(|e| e.kind == EVENT_USER_MESSAGE && e.turn == 1)
         .expect("第二轮的用户格应已落");
+    let dispatch_at = all
+        .iter()
+        .position(|e| e.kind == crate::symbio_core::EVENT_TURN_DISPATCH && e.turn == 1)
+        .expect("第二轮的派发格应已落");
     assert!(
-        snap_at < second_user_at,
-        "快照必须先于本轮用户格：snapshot={snap_at} user={second_user_at}"
+        second_user_at < snap_at,
+        "用户格先于压缩快照（T-225：用户格先于任何判决）"
     );
-}
-
-/// **轮次水位**：快照取代了之前的一切，而轮号数的是现行窗口里的
-/// `user.message` ⇒ 快照载荷必须带回 `turns` 水位，否则压缩之后轮号会从 0
-/// 重新数起，而 `u-{turn}` 是幂等键。
-///
-/// 这条只钉**执行链的读法**：`execute_turn` 数轮号时读的是
-/// [`crate::symbio_core::count_user_messages`]（水位 + 其后计数）。快照的落格 /
-/// 归档是会话动作，由会话存储层用例钉住。
-#[tokio::test]
-async fn the_turn_number_continues_across_a_snapshot() {
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
-
-    run_one_turn(&fx, &sink).await; // 第 1 轮：turn 0
-    fx.port
-        .call(
-            run_ops::CONSOLIDATE,
-            serde_json::to_value(ConsolidateRequest {
-                messages: consolidated(&["snap-1"]),
-            })
-            .expect("测试载荷"),
-        )
-        .await
-        .expect("轮外压缩动作");
-    let turns = fx
-        .facts
-        .range(Seq::new(0))
-        .iter()
-        .rev()
-        .find(|e| e.kind == crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
-        .and_then(|e| e.payload["turns"].as_u64());
-    assert_eq!(turns, Some(1), "快照带走水位：它取代了 1 轮");
-
-    // 第二轮：轮号接着水位走（不是从 0 重新数）。
-    run_one_turn(&fx, &sink).await;
-    let all = fx.facts.range(Seq::new(0));
-    let turns: Vec<u64> = all
-        .iter()
-        .filter(|e| e.kind == EVENT_USER_MESSAGE)
-        .map(|e| e.turn)
-        .collect();
-    assert_eq!(turns, vec![0, 1], "第二轮的用户格是 turn 1：{turns:?}");
+    assert!(
+        snap_at < dispatch_at,
+        "快照必须早于本轮派发（压缩是执行的前置动作）：snapshot={snap_at} dispatch={dispatch_at}"
+    );
 }
 
 // ==================== T-169：快照之后的恢复锚（ADR-085） ====================
@@ -1883,18 +1936,6 @@ fn open_turn_without_closure(fx: &Fixture, turn: u64, text: &str) -> u64 {
         )
         .expect("开轮格")
         .value()
-}
-
-/// 恢复请求交回的工具交换（节点身份留空 ⇒ 回落到按轮根合成；本组不验挂靠）。
-fn resumed_tool() -> ResumedTool {
-    ResumedTool {
-        name: "vdfs_read".into(),
-        args: serde_json::json!({ "path": "a.md" }),
-        text: "文件内容：hello".into(),
-        call_id: String::new(),
-        turn_id: String::new(),
-        result_id: String::new(),
-    }
 }
 
 /// 某轮的收束格（final / fallback）——与 `last_open_turn` 的收束口径一致。
@@ -1955,13 +1996,14 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         "完整史里它仍是已开未收束——恢复锚的判据本身（ADR-085）"
     );
 
-    let mut req = tool_free_req(
-        &fx.session,
+    let req = resume_req(
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        user_seq,
     );
-    req.resume = Some(resumed_tool());
     execute_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
@@ -2000,10 +2042,12 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     // 用户格——u-0 因此进了被取代的那段。
     let compacted = consolidated(&["snap-1"]);
     let mut first = tool_free_req(
-        &fx.session,
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        1,
+        "第二轮",
     );
     first.consolidation = Some(compacted.as_slice());
     execute_turn(first).await.expect("第 1 轮成功");
@@ -2029,13 +2073,14 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         "第 1 轮已收束，完整史里唯一的未收束轮仍是第 0 轮"
     );
 
-    let mut req = tool_free_req(
-        &fx.session,
+    let req = resume_req(
+        &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
         crate::symbio_core::ExecAbortSignal::new(),
+        0,
+        user_seq,
     );
-    req.resume = Some(resumed_tool());
     execute_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");

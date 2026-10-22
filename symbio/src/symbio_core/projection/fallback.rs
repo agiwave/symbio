@@ -6,13 +6,16 @@
 //!
 //! 口径：
 //! - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-//! - **档位** = 用户消息载荷 `tier`（[`crate::symbio_core::adapters::LatencyTier`]
-//!   的名字）——**调度决定是数据**：谁装配 turn 进哪一档，谁写进载荷；
-//!   缺失/未知 ⇒ `unspecified` 桶（可观测，不静默归类）；
+//! - **档位** = `turn.dispatch` 载荷 `tier`（[`crate::symbio_core::adapters::LatencyTier`]
+//!   的名字）——**调度决定是数据**：档位要到执行装配期才定，故另立一格；
+//!   历史事件没有这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified`
+//!   桶（可观测，不静默归类）；
 //! - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有
 //!   输出（I3），fallback 落在哪档就是哪档的兜底。
 
-use super::super::event::{Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
+use super::super::event::{
+    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
+};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -89,23 +92,45 @@ impl FallbackRateView {
     }
 }
 
-/// 本轮声明的档位：找 `turn` 号在本事件**之前**开启的那条 `user.message`，
-/// 读载荷 `tier`；缺失/未知 ⇒ `unspecified` 桶（可观测，不静默归类）。
+/// 本轮声明的档位：优先读本轮 `turn.dispatch` 载荷的 `tier`，历史切片没有
+/// 这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified` 桶
+/// （可观测，不静默归类）。
+///
+/// `before_seq`：
+/// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底事件要归到**它之前**那一幕的档位）；
+/// - `None` ⇒ 不限 seq，取**最早**一条派发格——开轮事件的分母按「这一轮以哪一档
+///   开局」归位（续写幕可以换档，那是另一幕的事实）。
 ///
 /// 兜底率与时延报告（[`super::slo`]）共用的**唯一判据**——档位归属只在这
 /// 一处定义，两列统计不各自为政。
 pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
-    events
-        .iter()
-        .rev()
-        .find(|u| {
-            u.entity == Entity::Turn
-                && u.verb == Verb::Opened
-                && u.turn == turn
-                && u.kind == EVENT_USER_MESSAGE
-                && u.seq.map(|s| s.value()) < before_seq
+    let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
+    let is_dispatch = |e: &Event| {
+        e.entity == Entity::Turn
+            && e.verb == Verb::Asserted
+            && e.kind == EVENT_TURN_DISPATCH
+            && e.turn == turn
+    };
+    let dispatch = match before_seq {
+        None => events.iter().find(|e| is_dispatch(e) && before(e)),
+        Some(_) => events.iter().rev().find(|e| is_dispatch(e) && before(e)),
+    };
+    dispatch
+        .and_then(|e| e.payload.get("tier").and_then(|v| v.as_str()))
+        // 接线前的历史事件：档位随开轮格写入（`user.message.tier`）。
+        .or_else(|| {
+            events
+                .iter()
+                .rev()
+                .find(|u| {
+                    u.entity == Entity::Turn
+                        && u.verb == Verb::Opened
+                        && u.turn == turn
+                        && u.kind == EVENT_USER_MESSAGE
+                        && before(u)
+                })
+                .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
         })
-        .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
         .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
         .map(|t| t.name().to_string())
         .unwrap_or_else(|| "unspecified".to_string())
@@ -127,14 +152,9 @@ pub fn fallback_rate() -> Projection<FallbackRateView> {
                     if e.kind != EVENT_USER_MESSAGE {
                         continue;
                     }
-                    // 档位 = 用户消息载荷 tier；缺失/未知进 unspecified（可观测）。
-                    let tier = e
-                        .payload
-                        .get("tier")
-                        .and_then(|v| v.as_str())
-                        .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
-                        .map(|t| t.name().to_string())
-                        .unwrap_or_else(|| "unspecified".to_string());
+                    // 档位 = 本轮派发格（历史事件回退开轮格）；缺失/未知进
+                    // unspecified（可观测）。分母按整条史取**最早**一幕的派发档。
+                    let tier = declared_tier(events, e.turn, None);
                     let st = by_tier.entry(tier.clone()).or_insert_with(|| TierStats {
                         tier,
                         turns: 0,

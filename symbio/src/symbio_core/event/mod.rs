@@ -57,6 +57,37 @@ pub type Timestamp = i64;
 
 /// 用户发言。落在 `turn × opened`。
 pub const EVENT_USER_MESSAGE: &str = "user.message";
+/// **本轮生效的配置**（载荷 `{ classify_enabled, auto_compress, progress_* , is_persistent }`）。
+/// 落在 `turn × asserted`。
+///
+/// ## 为什么配置也是事实（T-225）
+///
+/// 判决 / 召回 / 压缩 / 汇报的判据都读配置。若决策现场直接读 `SessionConfig`，同一份
+/// 日志在不同时刻会算出不同的欠账——配置变了，回放看到的是"新配置"而不是"那一轮用的
+/// 配置"。落成事实之后，「哪一轮用了哪份配置」可回放、可 diff。
+///
+/// 与 `turn.stage` 同格：它是「这一轮以什么配置运行」的断言，与阶段事实同族。
+/// **每一幕落一条**（`cfg-{turn}-{drive_seq}`）：配置项里有请求级开关
+/// （`auto_compress`），续写幕的生效值可以与首幕不同；id 带幕号，「哪一幕用了
+/// 哪份配置」才是可回放的。读方按 `(turn, seq <= 判决)` 取最近一条。
+pub const EVENT_SESSION_CONFIG: &str = "session.config";
+
+/// **本轮的派发档**（载荷 `{ tier, budget_ms, principal }`）。落在 `turn × asserted`。
+///
+/// ## 为什么档位从 `user.message` 里分出来（T-225）
+///
+/// 用户格必须在**任何判决之前**落（`owed` 要拿它匹配"这一轮开始了"），而档位要到
+/// 召回 / 技能命中之后才知道（反射档 vs 深度档）。把档位留在用户格上，就只能要么
+/// 提前写一个还没定的值（SLO / 兜底率按它分组 ⇒ 统计说谎），要么把用户格推回判决
+/// 之后（输入闭包重新破掉）。本格是第三条路：开轮格只说"用户说了什么"，本格说
+/// "这一轮按哪一档跑"——与 [ADR-044] 的「档位是数据」同一条事实，只是分两次落。
+///
+/// 读方（`projection::fallback::declared_tier` / `slo` / `invariants::declared_budget_ms`）
+/// 优先读本格；历史 WAL 没有本格时回退读 `user.message` 的 `tier` / `budget_ms`。
+///
+/// [ADR-044]: ../../../../docs/010-adr/044.md "ADR-044"
+pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
+
 /// **轮边界折进的补充**（载荷 `{ text, count }`）。落在 `turn × asserted`。
 ///
 /// ## 为什么它必须是一格事实（缺口 3）
@@ -82,7 +113,7 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// 与「用户连说了 5 句」对模型是不同的输入，而网格不该只保留前者。
 pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 
-/// **一次性阶段已执行**（载荷 `{ stage, round, reason?, source? }`）。落在 `turn × asserted`。
+/// **一次性阶段已执行**（载荷 `{ stage, round, source?, reason?, result? }`）。落在 `turn × asserted`。
 ///
 /// ## 它解决的是什么（ADR-107 判据 2）
 ///
@@ -93,10 +124,11 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// 落为事实**，下一问问表时从它投影 `done`。
 ///
 /// `stage` 取环的胶囊臂名（`decide` / `recall` / `compress`），与日志里那条命名
-/// 同源；`round` 是 `TurnState::request_round`——压缩与召回的「本轮一次」就是按它计
-/// 的口径，跨请求轮重新可做。事件 id 是 `st-{turn}-{round}-{stage}`：
-/// `(turn, round, stage)` 就是这一格的**同一性**，续写幕重放同一轮时撞幂等键 ⇒
-/// 按已做处理（见 `stage_events`）。
+/// 同源；`round` 是第几次请求——压缩与召回的「本轮一次」就是按它计的口径，跨请求
+/// 轮重新可做。`result` 是这一步的结论（`recall` 的 `hit` / `miss`，`resume` 的
+/// `kind`），供 `owed` 只凭事实判断输入。事件 id 是
+/// `st-{turn}-{round}-{stage}-{identity}`：`identity` 是本幕的锚（`drive_seq`），
+/// 续写幕的 `round` 从 0 重来也不会撞首幕的幂等键（见 `stage_events`）。
 ///
 /// ## 为什么不是 `verdict.asserted`
 ///

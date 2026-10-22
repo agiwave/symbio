@@ -910,8 +910,8 @@ fn policy_recall(state: &LoopState) -> Option<Capsule> {
 
 /// 反射档的判据（步骤 3 ④）。两关缺一不可：
 ///
-/// - `resume_allowed`：**续写轮不走快路**。续写轮不新开用户格（运行器复用
-///   `resume.user_seq`），而反射档的落格形状就是新开一轮 ⇒ 走它会撞幂等键
+/// - `resume_allowed`：**续写轮不走快路**。续写轮不新开用户格（运行器收到调用方
+///   直给的 `user_seq`），而反射档的落格形状就是新开一轮 ⇒ 走它会撞幂等键
 ///   （`AppendError::Duplicate` → Failed 出口）。语义上同样说不通：续写要跑的是
 ///   刚被用户批准的那次工具，不是拿技能顶掉它。
 /// - `has_match`：逐字命中一条已编译技能（判据是数据，见 `skill_events::take_match`）。

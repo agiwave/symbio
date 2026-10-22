@@ -47,7 +47,7 @@ pub(crate) fn request_source_principal(
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
 /// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
-/// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 开轮时把它以**数值**写入载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退 `tier` 映射） |
+/// | `budget_ms` | 档位（与派发格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 以**数值**写入 `turn.dispatch` 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退历史 `user.message` 的 `tier` 映射） |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[T-105]） |
 ///
 /// [ADR-065]: ../../../../../docs/010-adr/065.md "ADR-065"
@@ -247,32 +247,51 @@ pub(crate) struct TurnState {
     /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
     /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
     pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
-    /// **本次执行**已做过的一次性阶段（`(round, capsule)`）——问表时折算成
-    /// `LoopState` 的 `done`（ADR-107 判据 2）。
-    ///
-    /// 只活在这一次 `run_chat_loop` 调用里：续写幕是新的执行，召回 / 压缩按
-    /// 「恢复后事实源变了，本轮视图应重取」的既有语义重跑。它不是第二份状态——
-    /// 每项是从 `turn.stage` 事实折出来的缓存，规范定义在
-    /// [`super::super::stage_events::done`]，落格由运行器在用户格之后完成。
-    pub(crate) stages_done: Vec<(usize, super::super::loop_registry::Capsule)>,
     /// 已执行但**尚未落格**的阶段草稿——随本轮入参交给运行器（写者令牌在那边）。
     pub(crate) stages_pending: Vec<super::super::stage_events::StageFact>,
+    /// 本次执行的轮号（新轮 = WAL 内既有用户格计数；续写幕 = 被续写轮号）。
+    ///
+    /// 由开轮块（`chat_loop` 步骤 2a）在**任何判决之前**定下：用户格先落，
+    /// 运行器不再自己数（T-225）。
+    pub(crate) turn_no: u64,
+    /// 本轮的**溯源锚**（用户格 seq；续写幕 = 原轮用户格 seq）。
+    pub(crate) user_seq: u64,
+    /// **本幕的锚**：新轮 = 用户格 seq；续写幕 = 恢复阶段事实 seq。
+    ///
+    /// `done_since` 只看这个号之后的阶段事实——同一轮号会被续写幕复用，
+    /// 按轮扫全史会把首幕的格误判成「已做」。
+    pub(crate) drive_seq: u64,
+    /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
+    pub(crate) facts: Vec<crate::symbio_core::Event>,
 }
 
 impl TurnState {
-    /// 这一步在**本次执行**里是否已做。
+    /// 这一步在**本次执行**里是否已做——事实的规范折叠，不是内存缓存。
     pub(crate) fn stage_done(
         &self,
+        stage: super::super::stage_events::StageName,
         round: usize,
-        stage: super::super::loop_registry::Capsule,
     ) -> bool {
-        self.stages_done.contains(&(round, stage))
+        super::super::stage_events::done_since(&self.facts, self.drive_seq, stage, round)
     }
 
-    /// 记一次阶段执行：问表经 [`Self::stage_done`] 读到「已做」，草稿交运行器落格。
+    /// 记一次阶段执行（草稿交运行器落格；问表经 [`Self::stage_done`] 读事实）。
     pub(crate) fn mark_stage(&mut self, fact: super::super::stage_events::StageFact) {
-        self.stages_done.push((fact.round, fact.stage));
         self.stages_pending.push(fact);
+    }
+
+    /// 本轮生效的布尔配置（T-225）：只读本轮已落的 `session.config` 事实。
+    ///
+    /// 缺事实 ⇒ `false`（fail-closed）——与「配置没落就不做这一步」同向，
+    /// 不拿进程里的活值兜底：那会让同一份日志在不同时刻算出不同判决。
+    pub(crate) fn config_bool(&self, key: &str) -> bool {
+        self.facts
+            .iter()
+            .rev()
+            .find(|e| e.turn == self.turn_no && e.kind == crate::symbio_core::EVENT_SESSION_CONFIG)
+            .and_then(|e| e.payload.get(key))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 }
 
@@ -332,26 +351,11 @@ pub struct ChatOrchestrator {
     pub session: Arc<super::super::turn_session::LoopSession>,
     /// 压缩增量改道用的转写写口（`TurnDispatch.writer`：session 的转写唯一写入点）。
     pub writer: Arc<dyn crate::symbio_core::ExecTranscriptWriter>,
-    /// 轮首判决的**请求级开关快照**（`TurnSettings.classify_enabled`）。
-    ///
-    /// ## 为什么是一个值而不是一个持有者
-    ///
-    /// `compression` / `supplements` 必须持有插件，因为它们要读会话状态与配置的
-    /// **当前值**（压缩水位、队列深度）；判决只需要一个布尔：配置在一次请求的生命
-    /// 周期内不变，因此在这里取一次快照就够——多持一个 `Arc<SessionPlugin>` 只会
-    /// 多一条可以绕过配置面的路径。
-    ///
-    /// ## 它关掉的是什么
-    ///
-    /// `false` ⇒ 本循环**不调用** `classify/decide`，全部输入直接进工具循环——
-    /// 与未挂载该插件时的行为一致（两条路径都退化成"今天的行为"，但验证的
-    /// 是两件不同的事：这里是"分支写对了"，卸载是"插件边界真的存在"）。
-    pub classify_enabled: bool,
     /// 对话面措辞的**请求级开关快照**（`SessionConfig::compose_enabled`）。
     ///
     /// ## 为什么也是一个值
     ///
-    /// 与 [`ChatOrchestrator::classify_enabled`] 同一条理由：配置在一次请求生命周期内
+    /// 与 `TurnState::config_bool` 读的判决开关同一条取值纪律：配置在一次请求生命周期内
     /// 不变，措辞只需要一个布尔。持有 `Arc<SessionPlugin>` 会多一条绕过配置面的路径，
     /// 而这里没有任何"当前值"要读。
     ///
