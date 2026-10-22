@@ -1,30 +1,42 @@
 #!/bin/sh
 #
-# pre-commit — 把「事实文件与代码同批再生成」落进提交点（实测 ~1s）
+# pre-commit — 把「事实文件与登记投影与代码同批再生成」落进提交点（实测 1.8s）
 #
 # 启用（一次性，本机生效）：
 #   git config core.hooksPath scripts/git-hooks
 #
-# 为什么要在提交点：`CURRENT.md` 与登记 `INDEX.md` 是生成物，漏了重生成**不报错、只变旧**。
+# 为什么要在提交点：`CURRENT.md` 与登记汇总页是生成物，漏了重生成**不报错、只变旧**。
 # 原先只有 pre-push 挡（`--ci` 只报红不代改，见其头注释），于是漂移攒到推送点集中爆发，
 # 修复被推成 push 前的独立 chore 提交——**漂移不归属造成它的那次提交**。2026-10-13 实测
 # 事故形态：三个功能提交门禁段全写「本次跳过」，INDEX 投影落后两批收口，push 被连挡。
 #
 # 为什么它不违反「提交与门禁解耦（提交要秒级）」：被撤走的是**全量门禁**（10+ 分钟，含
-# 编译测试）；本钩子只跑 `--only=facts`，全部是生成器 + 登记校验，实测 1s。且本地模式的
-# 暂存纪律在 `_shared.autoWork` 里已经立好：**只暂存生成器自己改写的文件**，
+# 编译测试）；本钩子只跑 `--only=facts-write,facts`（生成链 + 末态复核），实测 1.8s。
+# 且本地的暂存纪律在 `_shared.autoWork` 里已经立好：**只暂存生成器自己改写的文件**，
 # 提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
+#
+# ⚠️ 这里的阶段 id 名单在 2026-10-23 断过一次，形态值得记：生成链拆出去的那天
+# （`06-facts-write`），本钩子仍写 `--only=facts`——`facts` 这个 id 从此只剩
+# `gen-facts --check` 一项。`gate.mjs` 对**不存在的 id** 报错，对「存在但少点了一个阶段」
+# 什么都不说，于是钩子跑完 1/1 全绿、本文件头却写着「全部是生成器 + 登记校验」，
+# 而汇总页投影实实在在落后了两个提交（`docs/009-task/README.md` 等三处的记号没展开，
+# 直到下一次全量门禁才被 `gen-doc-refs` 改写回来）。同族第三次失配，见 T-089 / T-092。
+# 现在这条由 `_shared.test.mjs` 的「本地模式的 gate 调用点了 facts 就必须点 facts-write」
+# 钉住；`facts` 阶段同批补了只读的 `gen-doc-refs --check`，实测 1s 一格，CI 与 pre-push 因此
+# 也看得见「提交里留着未展开的记号」这一种漂移。
 #
 # 与 pre-push 的关系：不是重复，是同一判据的两道闸——pre-commit 保证提交诞生时事实即新；
 # pre-push 兜住 `core.hooksPath` 没设的机器（该配置会静默丢失，2026-10-07 实测过），
-# CI 的 `--only=docs,facts --ci` 是第三道。
+# CI 的 docs & facts job 是第三道（都带 `--ci`：只报红不代改）。
 #
 # 已知边界：
 #   - registry-audit / gen-doc-refs 的**校验类判据**（RG-xxx / RF-xxx）也会在此拦下提交。
 #     这些判据本来就拦 push，只是提前一段；WIP 想跳过：git commit --no-verify
 #   - `git commit -- <pathspec>` 部分提交：钩子暂存的文件不落入选中的 pathspec，无害，
 #     漂移留给 pre-push 或下一次提交兜住。
+#   - 汇总页**内容**（计数 / 状态分布）的新鲜度在这里靠生成器改写，而 CI 侧只读复核
+#     看不住——`registry-audit` 没有 `--check`，缺口登记续接见 T-250。
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-commit
 
-node scripts/gate.mjs --only=facts
+node scripts/gate.mjs --only=facts-write,facts

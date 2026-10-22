@@ -195,7 +195,7 @@ test('CI：无差异 ⇒ 通过（不误报）', async () => {
 })
 
 // ⚠️ 这条守卫针对的失效模式很具体：`autoWork` 的「CI 判红」完全依赖 `--ci`，
-// 而 facts 阶段在 ci.yml 里跑的是 `--only=docs,facts`——若那里漏了 `--ci`，
+// 而 ci.yml 的 docs & facts job 里那条 gate 调用——若那里漏了 `--ci`，
 // 这一步就变成「自动修复 + 暂存」并**静默放过漂移**，即一个只亮绿灯的检查项。
 // 参数漏写不会报错、不会变慢、本地也复现不出来，只能靠断言钉住。
 test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
@@ -207,6 +207,57 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
   for (const l of factsCalls) {
     assert.match(l, /--ci/, `facts 阶段必须传 --ci，否则漂移会静默通过：${l.trim()}`)
   }
+})
+
+// ⚠️ 第四条同族失配，2026-10-23 实测：生成链拆成 `06-facts-write` 之后，pre-commit 仍写
+// `--only=facts`。`gate.mjs` 认得的 id 里 `facts` 只剩复核那一项（`gen-facts --check`），
+// 于是钩子跑完 **1/1 全绿**、头注释照写「全部是生成器 + 登记校验」，而汇总页投影落后两个
+// 提交（三处 `[[编号]]` 记号没展开，直到下一次全量门禁才被 `gen-doc-refs` 改回来）。
+// 漏点一个阶段 id 与拼错一个的待遇完全不同：拼错当场报错，少点**没有任何信号**。
+//
+// 判据形状取「本地模式（不带 `--ci`）点了 `facts` 就必须点 `facts-write`」：CI 侧反过来
+// 不能点 `facts-write`（链的中间态在 `--ci` 下恒红，理由见 `60-facts.mjs` 头注释），
+// 它的只读末态复核由下一条钉住。反向判据（实测过）：pre-commit 退回 `--only=facts` ⇒ 本条红。
+test('本地模式的 gate 调用点了 facts 复核就必须点 facts-write 生成', () => {
+  const files = [
+    'scripts/git-hooks/pre-commit',
+    'scripts/git-hooks/pre-push',
+    '.github/workflows/ci.yml',
+  ]
+  const calls = []
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(repoRoot, f), 'utf8')
+    for (const l of src.split('\n')) {
+      if (!l.includes('gate.mjs') || l.trim().startsWith('#')) continue
+      const m = /--only=([\w,-]+)/.exec(l)
+      // 阶段 id 按逗号拆开**精确匹配**：`facts-write` 里的 `facts` 后面跟的是 `-`，
+      // 用 `\bfacts\b` 数它会把它数进来——那条调用其实没点复核，判据就空转了。
+      if (m) calls.push({ f, ids: m[1].split(','), ci: /--ci/.test(l), line: l.trim() })
+    }
+  }
+  const local = calls.filter(({ ids, ci }) => ids.includes('facts') && !ci)
+  assert.ok(local.length > 0, '没找到本地模式（不带 --ci）且跑 facts 复核的 gate 调用——守卫失效了')
+  for (const { f, ids, line } of local) {
+    assert.ok(
+      ids.includes('facts-write'),
+      `${f} 里这条只点了复核没点生成链（阶段 id ${ids.join(',')}），汇总页投影会在提交点变旧：${line}`,
+    )
+  }
+})
+
+// `facts` 阶段里的只读引用复核（`gen-doc-refs --check`）：它是 CI / pre-push 看得见
+// 「提交里留着未展开的记号」这一种漂移的**唯一**执行方——生成链本身在 `--ci` 下不可跑
+// （上一条注释），所以这条不得被当冗余删掉。反向判据：删掉该任务 ⇒ 本条红。
+test('facts 阶段必须带一条只读的引用地址复核（CI 侧看得到未展开的记号）', () => {
+  const src = fs.readFileSync(
+    path.join(repoRoot, 'scripts', 'gate.d', '60-facts.mjs'),
+    'utf8',
+  )
+  assert.match(
+    src,
+    /args:\s*\[docRefs,\s*'--check'\]/,
+    '60-facts.mjs 里没有 `gen-doc-refs --check` —— CI 与 pre-push 就看不见未展开的记号',
+  )
 })
 
 // ⚠️ 下面两条钉的是**同一种失效模式：没有信号的漏跑**——漏跑时门禁与日志都一片绿，
