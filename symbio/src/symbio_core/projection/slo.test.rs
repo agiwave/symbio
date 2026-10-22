@@ -91,7 +91,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
             )
             .with_produced_by(s3)
             .with_cost_ms(3000)
-            .with_payload(serde_json::json!({ "why": "上游 500" })),
+            .with_payload(serde_json::json!({ "reason": "fallback", "detail": "上游 500" })),
         )
         .unwrap();
 

@@ -8,7 +8,7 @@
 //! 口径（**四格 → 三角色**）：
 //! - `user.message`（`turn × opened`）→ `user` 行（载荷 `text`）；
 //! - `chat.assistant.final`（`turn × closed`）→ `assistant` 行（载荷 `text`）；
-//! - `chat.assistant.fallback`（`turn × closed`）→ `assistant` 行（载荷 `why`）——
+//! - `chat.assistant.fallback`（`turn × closed`）→ `assistant` 行（载荷 `detail`）——
 //!   兜底话术是用户实际看到的回复，模型必须知道它「说」过这个；
 //! - `artifact.added`（`artifact × asserted`）→ `tool` 行（载荷 `tool` + `text`）。
 //!
@@ -340,11 +340,18 @@ pub fn transcript() -> Projection<TranscriptView> {
                     }
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => {
-                    let why = e.payload.get("why").and_then(|v| v.as_str()).unwrap_or("");
+                    // 兜底那一行给用户看的就是失败原因本身（I3：到点必答——
+                    // 失败也是一句话）。它读 `detail`（人话），**不是** `reason`
+                    // （闭集）：闭集是给判据与统计的，读给用户的是原文。
+                    let detail = e
+                        .payload
+                        .get("detail")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     push(
                         TranscriptEntry {
                             role: "assistant".into(),
-                            text: why.to_string(),
+                            text: detail.to_string(),
                             tool: None,
                             exclude_from_context: false,
                         },

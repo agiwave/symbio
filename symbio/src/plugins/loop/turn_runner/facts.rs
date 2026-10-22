@@ -108,6 +108,40 @@ pub(crate) fn with_status(mut produced: serde_json::Value, status: &str) -> serd
     produced
 }
 
+/// 给收束格载荷补**停机原因**（`reason`，T-220）。
+///
+/// 与 [`with_status`] 是两个维度，缺一不可：
+/// - `status` 说**结果**是哪一类（三值，读侧按它折出 `RuntimeOutcome`）；
+/// - `reason` 说**为什么停**（闭集，可判、可统计）。
+///
+/// 合成一个字段会让「截断但答出来了」（`status: completed` + `reason: exhausted`）
+/// 这类组合表达不出来——而那正是此前 `status: completed` 把「自然说完」与
+/// 「被上限掐断」混在一起的原因。
+pub(crate) fn with_reason(
+    mut payload: serde_json::Value,
+    reason: crate::symbio_core::ClosureReason,
+) -> serde_json::Value {
+    payload["reason"] = serde_json::Value::String(reason.as_str().to_string());
+    payload
+}
+
+/// 从本轮结果折出**停机原因**：被上限掐断（`finish_reason = length`）记
+/// [`ClosureReason::Exhausted`]，其余自然结束记 [`ClosureReason::Completed`]。
+///
+/// 只判 `Length`：内容安全过滤（`ContentFilter`）与未识别原因（`Other`）今天
+/// 也走自然收束——把它们另立取值是发明闭集以外的值，而闭集的意义就在于
+/// 可穷举。这一处残留的混淆记录在 T-220 的处理过程里。
+pub(crate) fn reason_of_finish(
+    finish: &crate::symbio_core::ModelFinishReason,
+) -> crate::symbio_core::ClosureReason {
+    match finish {
+        crate::symbio_core::ModelFinishReason::Length => {
+            crate::symbio_core::ClosureReason::Exhausted
+        }
+        _ => crate::symbio_core::ClosureReason::Completed,
+    }
+}
+
 /// 把定稿答话的**对话面节点身份**并入收束格载荷（见 [`TurnInput::dialog`]）。
 ///
 /// 缺席（`None` = 这一轮不是答话轮）⇒ 载荷原样返回：普通收束格的重建路径不受影响，
@@ -126,11 +160,14 @@ pub(crate) fn with_dialog(
     produced
 }
 
-/// 终止信息（`terminated: { reason, at }`，仅终止时有）：终止的事实被截到哪一刻、
-/// 被什么截断——半截正文停在哪里由此可观测。
+/// 终止信息（`terminated: { at }`，仅终止时有）：终止的事实被截到哪一刻——
+/// 半截正文停在哪里由此可观测。
+///
+/// **`terminated.reason` 已退役**（T-220）：「为什么中止」由顶层 `reason`
+/// （`interrupted`）说，这里只留时刻。两处各写一份原因，必然有一处先漂——
+/// 而漂的时候两边都是合法拼写，谁也不报错。
 pub(crate) fn with_terminated(mut payload: serde_json::Value) -> serde_json::Value {
     payload["terminated"] = serde_json::json!({
-        "reason": "aborted",
         "at": crate::symbio_core::clock_now_ms(),
     });
     payload

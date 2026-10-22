@@ -25,11 +25,11 @@ fn final_with(status: &str) -> Event {
     )
 }
 
-fn fallback(why: &str) -> Event {
+fn fallback(detail: &str) -> Event {
     ev(
         EVENT_ASSISTANT_FALLBACK,
         Verb::Closed,
-        json!({ "why": why, "text": "兜底", "id": "fb-1" }),
+        json!({ "reason": "fallback", "detail": detail, "text": "兜底", "id": "fb-1" }),
     )
 }
 
@@ -113,11 +113,11 @@ fn final_aborted_settles_aborted() {
 }
 
 #[test]
-fn final_failed_carries_the_why() {
+fn final_failed_carries_the_detail() {
     let e = ev(
         EVENT_ASSISTANT_FINAL,
         Verb::Closed,
-        json!({ "status": "failed", "why": "工具崩了" }),
+        json!({ "status": "failed", "reason": "fallback", "detail": "工具崩了" }),
     );
     assert_eq!(
         outcome(&[opened(), e]),

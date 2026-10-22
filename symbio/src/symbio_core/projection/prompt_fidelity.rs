@@ -166,7 +166,11 @@ fn is_snapshot(e: &Event) -> bool {
 /// 所以这里只做「有没有」，正文比对交给 `SourceRef` 的坐标）。
 fn payload_text(e: &Event) -> &str {
     match e.kind.as_str() {
-        EVENT_ASSISTANT_FALLBACK => e.payload.get("why").and_then(|v| v.as_str()).unwrap_or(""),
+        EVENT_ASSISTANT_FALLBACK => e
+            .payload
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
         k if k == EVENT_ARTIFACT_ADDED => {
             e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("")
         }

@@ -2,7 +2,8 @@
 //!
 //! I1 单通道   —— 一切状态变更经唯一写入口；同一 turn 的 final 发言唯一
 //! I2 无溯源不声明 —— 断言类事件必须能追溯到产生它的事件
-//! I3 到点必答   —— 每一轮都必须有一条收束格（不许静默消失）
+//! I3 到点必答   —— 每一轮都必须有一条收束格（不许静默消失）；
+//!                且每条停机格必须说得出「为什么停」（闭集，T-220）
 //!
 //! ## 判定走生产内核（T-176）
 //!
@@ -57,6 +58,7 @@ struct Event {
     status: String,           // 收束格的状态（`completed` / `aborted` / `-`）
     fell_back: bool,          // 走了兜底
     budget_ms: Option<u64>,   // 该轮的单次调用预算（只有用户格带）
+    reason: Option<String>,   // 停机原因（闭集；只有停机格带，T-220）
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -68,6 +70,8 @@ enum Violation {
     /// `produced_by` 指向的 seq 不存在或**不更早**（悬空 / 前向边）。
     I2DanglingProvenance { seq: u64, up: u64 },
     I3NoClosure { turn: u64 },
+    /// 收束格 / `authz.denied` 的 `reason` 缺失或越界（T-220）。
+    I3NoClosureReason { seq: u64, got: String },
 }
 
 struct Check {
@@ -78,6 +82,9 @@ struct Check {
     /// 与 `enable_i2`（只问「有没有」）分开，是为了让两条各有自己的反向用例。
     enable_i2_dangling: bool,
     enable_i3: bool,
+    /// I3 的另一半：停机原因 `reason` 必填且在闭集内。与 `enable_i3`（只问
+    /// 「有没有收束」）分开，是为了让两条各有自己的反向用例。
+    enable_i3_reason: bool,
 }
 
 impl Check {
@@ -88,11 +95,25 @@ impl Check {
             enable_i2: true,
             enable_i2_dangling: true,
             enable_i3: true,
+            enable_i3_reason: true,
         }
     }
 }
 
 const FINAL: &str = "chat.assistant.final";
+
+/// 停机原因的闭集（T-220）——与生产侧 `ClosureReason::ALL` **同一份取值**。
+/// 这里手写而不是引用：验证器被 `#[path]` 包含进来跑，不能拖进整个 core；
+/// 两处各写一份的代价由 `closure_reason_matches_production` 这条用例钉住。
+const REASONS: [&str; 5] = ["completed", "interrupted", "exhausted", "fallback", "denied"];
+
+/// 这一条是**停机格**吗：`turn × closed` 的两种收束格 + `authz.denied`（拒绝不产生
+/// 收束格，但它同样是一次"停"）。与生产侧 `closure_reason_closed` 同口径。
+fn is_stop(e: &Event) -> bool {
+    e.kind == FINAL
+        || e.kind == "chat.assistant.fallback"
+        || e.kind == "authz.denied"
+}
 
 /// 需要溯源的事件种类（断言类）
 fn needs_provenance(kind: &str) -> bool {
@@ -168,6 +189,19 @@ fn check(log: &[Event], c: &Check) -> Vec<Violation> {
         }
     }
 
+    // I3 的另一半：停机原因必须在闭集内（T-220）。
+    if c.enable_i3_reason {
+        for e in log.iter().filter(|e| is_stop(e)) {
+            let got = e.reason.as_deref().unwrap_or("");
+            if REASONS.iter().all(|r| *r != got) {
+                out.push(Violation::I3NoClosureReason {
+                    seq: e.seq,
+                    got: got.to_string(),
+                });
+            }
+        }
+    }
+
     // I3：出现过事件的每一轮都必须有收束格——「静默消失」正是这条要防的形态
     if c.enable_i3 {
         let mut turns: Vec<u64> = log.iter().map(|e| e.turn).collect();
@@ -194,16 +228,25 @@ fn healthy_log() -> Vec<Event> {
     // 这一轮的一切都是"被那句话引出来的"。此前每条指向自己（`Some(i)` 在 seq i 上），
     // 那是自指边，`produced_by_coverage` 只查非空所以一直是绿的。
     vec![
-        ev(0, "user.message", 1, None, 0),
-        ev(1, "classify.verdict", 1, Some(0), 40),
-        ev(2, "task.created", 1, Some(0), 300),
-        ev(3, "artifact.added", 1, Some(0), 900),
-        ev(4, "task.verified", 1, Some(0), 200),
-        ev(5, FINAL, 1, Some(0), 150),
+        ev(0, "user.message", 1, None, 0, None),
+        ev(1, "classify.verdict", 1, Some(0), 40, None),
+        ev(2, "task.created", 1, Some(0), 300, None),
+        ev(3, "artifact.added", 1, Some(0), 900, None),
+        ev(4, "task.verified", 1, Some(0), 200, None),
+        // 收束格必带停机原因（T-220）——`completed` = 自然说完。
+        ev(5, FINAL, 1, Some(0), 150, Some("completed")),
     ]
 }
 
-fn ev(seq: u64, kind: &str, turn: u64, produced_by: Option<u64>, cost_ms: u64) -> Event {
+#[allow(clippy::too_many_arguments)]
+fn ev(
+    seq: u64,
+    kind: &str,
+    turn: u64,
+    produced_by: Option<u64>,
+    cost_ms: u64,
+    reason: Option<&str>,
+) -> Event {
     Event {
         seq,
         kind: kind.to_string(),
@@ -213,19 +256,25 @@ fn ev(seq: u64, kind: &str, turn: u64, produced_by: Option<u64>, cost_ms: u64) -
         status: if kind == FINAL { "completed".to_string() } else { "-".to_string() },
         fell_back: false,
         budget_ms: None,
+        reason: reason.map(str::to_string),
     }
 }
 
-/// 注入四类违规：seq 撞号、第二个 final、无溯源、某轮没有收束格。
+
+/// 注入五类违规：seq 撞号、第二个 final、无溯源、某轮没有收束格、停机原因越界。
 ///
 /// 「seq 回退」的形状按内核语义造：追加的序列 6,7,8 本身连续，第 1 条 seq=3
 /// 是**重号**——内核报「seq 3 处应为 6」。
 fn violated_log() -> Vec<Event> {
     let mut v = healthy_log();
-    v.push(ev(3, "task.progress", 1, Some(0), 10)); // seq 撞号（3 已存在）
-    v.push(ev(6, FINAL, 1, Some(0), 10)); // 双 final
-    v.push(ev(7, "task.verified", 1, None, 10)); // 无溯源
-    v.push(ev(8, "task.progress", 2, Some(7), 10)); // 第 2 轮没有收束格
+    v.push(ev(3, "task.progress", 1, Some(0), 10, None)); // seq 撞号（3 已存在）
+    v.push(ev(6, FINAL, 1, Some(0), 10, Some("completed"))); // 双 final
+    v.push(ev(7, "task.verified", 1, None, 10, None)); // 无溯源
+    v.push(ev(8, "task.progress", 2, Some(7), 10, None)); // 第 2 轮没有收束格
+    // 停机原因越界：写了一个不在闭集里的值（T-220）。用 `authz.denied` 而不是
+    // 再塞一条 final——后者会把第 2 轮收束掉，于是「无收束」那条判据反而消失了
+    // （注入一条违规弄丢另一条，是这类自造假绿里最常见的一种）。
+    v.push(ev(9, "authz.denied", 2, Some(0), 10, Some("timeout")));
     v
 }
 
@@ -252,6 +301,7 @@ fn parse_envelopes(tsv: &str) -> Vec<Event> {
             status: f[6].to_string(),
             fell_back: f.get(7).is_some_and(|s| *s == "1"),
             budget_ms: f.get(8).and_then(|s| s.parse().ok()),
+            reason: f.get(9).filter(|s| **s != "-").map(|s| s.to_string()),
         });
     }
     out
@@ -277,16 +327,19 @@ fn main() {
         &violated_log(),
         &Check { enable_i2: false, enable_i2_dangling: false, ..Check::all() },
     );
-    let no_i3 = check(&violated_log(), &Check { enable_i3: false, ..Check::all() });
+    let no_i3 = check(
+        &violated_log(),
+        &Check { enable_i3: false, enable_i3_reason: false, ..Check::all() },
+    );
     println!("  关掉 I1 → 剩 {} 条（少了 {} 条）", no_i1.len(), dirty.len() - no_i1.len());
     println!("  关掉 I2 → 剩 {} 条（少了 {} 条）", no_i2.len(), dirty.len() - no_i2.len());
     println!("  关掉 I3 → 剩 {} 条（少了 {} 条）", no_i3.len(), dirty.len() - no_i3.len());
 
     assert!(clean.is_empty(), "健康日志不应有违规");
-    // 注入 4 类违规捕到 **5** 条：seq 重号在内核语义下报两条——重号位「处应为 6」
+    // 注入 5 类违规捕到 **6** 条：seq 重号在内核语义下报两条——重号位「处应为 6」
     // 与其后一位「处应为 4」。这不是过杀：生产语义里 seq 撞车之后**全部错位**，
     // 只报第一条反而会把「后面还有多少条对不上」藏起来。
-    assert_eq!(dirty.len(), 5, "注入的 4 类违规应被全部捕获（seq 重号算两条）");
+    assert_eq!(dirty.len(), 6, "注入的 5 类违规应被全部捕获（seq 重号算两条）");
     assert!(
         !no_i1.iter().any(|v| matches!(v, Violation::I1SeqNotMonotonic { .. } | Violation::I1DoubleFinal { .. })),
         "反向用例：关掉 I1 后 I1 类违规必须检测不到"
@@ -312,7 +365,11 @@ fn main() {
         t.dedup();
         t.len()
     };
-    let real_v = check(&real, &all);
+    // 回放**不跑** C6：这份夹具只留信封（没有载荷），而 `reason` 在载荷里，
+    // 且它采于 T-220 之前。硬跑只会得到「每条收束格都缺 reason」——那不是判据
+    // 错了，是夹具没这个字段。C6 对真实数据形状的证明在下方单独做（取真实那条
+    // 收束格，喂合法值 / 越界值各一次）。
+    let real_v = check(&real, &Check { enable_i3_reason: false, ..Check::all() });
     println!("  {} 条事件 · {} 轮 · 违规 {} 条", real.len(), turns, real_v.len());
     for v in &real_v {
         println!("  ✗ {:?}", v);
@@ -366,7 +423,7 @@ fn main() {
     let mut bad_seq = real.clone();
     bad_seq[10].seq = bad_seq[5].seq; // 序号撞车
     let mut double_final = real.clone();
-    double_final.push(ev(999, FINAL, 0, Some(24), 1)); // 第 0 轮再收一次
+    double_final.push(ev(999, FINAL, 0, Some(24), 1, Some("completed"))); // 第 0 轮再收一次
     let mut no_prov = real.clone();
     let at = no_prov.iter().position(|e| e.kind == "artifact.added").unwrap();
     no_prov[at].produced_by = None;
@@ -400,6 +457,46 @@ fn main() {
         "真实日志上悬空溯源必须红——`produced_by` 只查「有没有」时这一条是绿的"
     );
 
+    // ── C6：停机原因闭集 ──
+    //
+    // 真实日志的回放**不跑**这条：夹具只留信封（没有载荷），而 `reason` 在载荷里，
+    // 且这份夹具采于 T-220 之前。把它并进 `check(&real, &all)` 只会得到一条
+    // 「每条收束格都缺 reason」的假红——那不是判据错了，是夹具没这个字段。
+    // 所以改成**在真实数据形状上注入**：取真实那条收束格，分别喂合法值与越界值。
+    let at_stop = real.iter().position(|e| is_stop(e)).expect("夹具里有一条收束格");
+    let mut good_reason = real.clone();
+    good_reason[at_stop].reason = Some("interrupted".to_string());
+    let mut bad_reason = real.clone();
+    bad_reason[at_stop].reason = Some("timeout".to_string());
+    let mut no_reason = real.clone();
+    no_reason[at_stop].reason = None;
+
+    let r_ok = check(&good_reason, &all);
+    let r_bad = check(&bad_reason, &all);
+    let r_none = check(&no_reason, &Check { enable_i3_reason: false, ..Check::all() });
+    println!(
+        "  停机原因：合法值 → {} 条 · 越界值 → {} 条 · 缺值（关掉判据）→ {} 条",
+        r_ok.len(),
+        r_bad.len(),
+        r_none.len()
+    );
+    assert!(
+        r_ok.is_empty(),
+        "真实数据形状上喂一个合法 `reason` 必须全绿（否则判据在误杀）：{r_ok:?}"
+    );
+    assert!(
+        r_bad
+            .iter()
+            .any(|v| matches!(v, Violation::I3NoClosureReason { .. })),
+        "真实数据形状上喂一个越界 `reason` 必须红"
+    );
+    assert!(
+        !r_none
+            .iter()
+            .any(|v| matches!(v, Violation::I3NoClosureReason { .. })),
+        "反向用例：关掉 C6 后越界必须检测不到"
+    );
+
     println!("\n✅ 全部断言通过：自造日志 + 真实日志（{} 条 / {} 轮）上三条不变量各自独立起作用。", real.len(), turns);
-    println!("   边界：I3 只判得了结构面（每轮有收束格）——时间面需要单次调用耗时，日志里只有轮累计。");
+    println!("   边界：I3 只判得了结构面（每轮有收束格 / 停机原因在闭集内）——时间面需要单次调用耗时，日志里只有轮累计。");
 }

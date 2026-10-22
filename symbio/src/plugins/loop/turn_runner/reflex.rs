@@ -124,16 +124,19 @@ impl TurnRunner {
             // 与深度档同一个产出形状（`produced_payload`）+ 状态字段：反射档无模型、
             // 无流式节点，`turn_id` 记空串（重建侧按事件 id 稳定合成）、取数口不挂。
             // 载荷形状不另写一份——重建只按一个形状读。
-            .with_payload(with_status(
-                produced_payload(
-                    text,
-                    LatencyTier::Reflex.name(),
-                    "",
-                    &StreamNodeFacts::default(),
-                    &[],
-                    &[],
+            .with_payload(with_reason(
+                with_status(
+                    produced_payload(
+                        text,
+                        LatencyTier::Reflex.name(),
+                        "",
+                        &StreamNodeFacts::default(),
+                        &[],
+                        &[],
+                    ),
+                    "completed",
                 ),
-                "completed",
+                crate::symbio_core::ClosureReason::Completed,
             )),
         )?;
         Ok(TurnOutcome {

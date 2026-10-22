@@ -11,7 +11,8 @@ use super::*;
 /// 兜底落格（I3）的唯一构造点：失败也是一句话。
 ///
 /// 载荷 = **产出部分**（`produced`，失败前已产出的半截正文 / 思考 / 工具事实——
-/// 它们是事实，不因失败就不记）+ `why`（失败原因）+ `status: "failed"`。
+/// 它们是事实，不因失败就不记）+ `reason: fallback`（闭集，可判）+
+/// `detail`（失败原因的人话，只给人读）+ `status: "failed"`。
 ///
 /// `artifacts_landed` = 本轮已新落的产物格数（ADR-067 的产物收束判据）：兜底格
 /// 本身也是发言收束，发言闸拒它时，本轮**落过产物**就不算未收束。
@@ -21,7 +22,7 @@ pub(crate) async fn append_fallback<S>(
     actor: &ActorSpec,
     turn: u64,
     user_seq: u64,
-    why: &str,
+    detail: &str,
     cost_ms: u64,
     produced: serde_json::Value,
     artifacts_landed: u64,
@@ -58,8 +59,14 @@ where
             finish: crate::symbio_core::ModelFinishReason::Stop,
         });
     }
-    let mut payload = with_status(produced, "failed");
-    payload["why"] = serde_json::Value::String(why.to_string());
+    // `reason` 是闭集里的「兜底」（可判），`detail` 是适配器的原始人话（只给人读）。
+    // 两件事必须分开：把原始错误塞进 `reason` 会让它不可判，只留闭集又会丢掉
+    // 「具体是 402 还是超时」——而那是排障时唯一有用的东西。
+    let mut payload = with_reason(
+        with_status(produced, "failed"),
+        crate::symbio_core::ClosureReason::Fallback,
+    );
+    payload["detail"] = serde_json::Value::String(detail.to_string());
     store.append(
         Event::pending(
             format!("fb-{turn}"),
@@ -75,7 +82,8 @@ where
     )?;
     Ok(TurnOutcome {
         turn,
-        text: why.to_string(),
+        // 兜底的那句话就是失败原因本身（I3：到点必答——失败也是一句话）。
+        text: detail.to_string(),
         cost_ms,
         usage: None,
         fell_back: true,
@@ -149,7 +157,10 @@ where
         )
         .with_produced_by(user_seq)
         .with_cost_ms(0)
-        .with_payload(with_terminated(with_status(produced, "aborted"))),
+        .with_payload(with_terminated(with_reason(
+            with_status(produced, "aborted"),
+            crate::symbio_core::ClosureReason::Interrupted,
+        ))),
     )?;
     Ok(TurnOutcome {
         turn,

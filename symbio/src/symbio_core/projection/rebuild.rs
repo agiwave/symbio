@@ -470,14 +470,17 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     let status = status_of(e);
     let text = text_of(e, "text");
     let reasoning = text_of(e, "reasoning");
-    // 兜底格的 `why` = 这一轮**为什么失败**（写侧 `append_fallback` 记的原因码文本）。
+    // 兜底格的 `detail` = 这一轮**为什么失败**（写侧 `append_fallback` 记的原因码文本）。
     // 它必须折回节点：界面的组级交代条（`TurnGroupNode` → `MessageErrorBox`）读的是
     // 节点 `error`，取不到就只剩一个 failed 状态 + 一串产出——用户看到的是「模型想了
     // 很久然后什么也没说」，而事实是「模型没答，原因 X」。失败原因在网格里是事实，
     // 到界面上却不是，等于把已记的东西丢掉。
+    //
+    // 读 `detail` 而不是 `reason`：后者是闭集（`fallback`），对用户没有信息量；
+    // 闭集服务判据与统计，人话服务界面——这正是 T-220 把两者分开的原因。
     let why = e
         .payload
-        .get("why")
+        .get("detail")
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string);

@@ -74,6 +74,9 @@ pub(crate) fn project(events: &[Event]) -> RuntimeFacts {
 
 /// 一条事件对结局的作用：`None` = 不是证据；`Some(None)` = 开新轮清空；
 /// `Some(Some(_))` = 一轮收束。
+///
+/// 结局问的是**结果面**，所以读 `status`（三值）；「为什么停」读 `reason`
+/// （闭集，T-220）——两个问题两个字段，本函数只问前者。
 fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
     match e.kind.as_str() {
         EVENT_USER_MESSAGE => Some(None),
@@ -81,12 +84,12 @@ fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
             Some("aborted") => RuntimeOutcome::Aborted,
             // 收束格的 `failed` 先于兜底格存在时也要认——两格读同一个状态词。
             Some("failed") => RuntimeOutcome::Failed {
-                error: payload_str(e, "why"),
+                error: payload_str(e, "detail"),
             },
             _ => RuntimeOutcome::Completed,
         })),
         EVENT_ASSISTANT_FALLBACK => Some(Some(RuntimeOutcome::Failed {
-            error: payload_str(e, "why"),
+            error: payload_str(e, "detail"),
         })),
         // 等待用户：本轮以 Ok 收尾（恢复续写是下一轮的事），与现网结局一致。
         EVENT_ASSISTANT_PROGRESS => Some(Some(RuntimeOutcome::Completed)),

@@ -59,7 +59,7 @@
 //!
 //! 中止语义：生成被中止时运行器**照落收束格**（`f-{turn}`，kind 仍是
 //! `chat.assistant.final`——中止是事实的**状态**，不是另一种事实；载荷
-//! `status: "aborted"` + `terminated: { reason, at }`），本函数上抛
+//! `status: "aborted"` + `terminated: { at }` + 顶层 `reason: interrupted`），本函数上抛
 //! [`TurnExecExit::Aborted`]——chat_loop 走独立出口，会话结局 `aborted`
 //! （**不是** `failed`），半截产出随出口入格。
 //! 中止与失败在**类型上**分开（`AdapterError` / `TurnOutcome.aborted`），

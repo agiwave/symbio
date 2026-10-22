@@ -207,7 +207,10 @@ where
             .with_produced_by(user_seq)
             .with_cost_ms(0)
             .with_payload(with_dialog(
-                with_status(produced, "completed"),
+                with_reason(
+                    with_status(produced, "completed"),
+                    crate::symbio_core::ClosureReason::Completed,
+                ),
                 dialog.as_ref(),
             )),
         )?;

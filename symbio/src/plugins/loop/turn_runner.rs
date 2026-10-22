@@ -429,7 +429,7 @@ pub struct TurnOutcome {
     pub usage: Option<crate::symbio_core::ModelUsage>,
     pub fell_back: bool,
     /// 中止（用户主动停止 / 会话销毁）：**中止照落收束格**（`chat.assistant.final`，
-    /// 载荷 `status: "aborted"` + `terminated: { reason, at }`）——模型已产出的半截
+    /// 载荷 `status: "aborted"` + `terminated: { at }` + 顶层 `reason: interrupted`）——模型已产出的半截
     /// 正文 / 半截思考是事实，`text` 就是那半截正文（可为空）。收束 kind 绝不复用
     /// 兜底格（`chat.assistant.fallback` 是**失败**的形状），因此与 `fell_back` 互斥、
     /// **绝不进兜底分子**（兜底率是失败的指标：用户按的停止不是「模型答不出」）。
@@ -495,7 +495,7 @@ impl TurnRunner {
     ///
     /// 两者都照落一格事实——**思考 / 正文 / 工具是事实，完成 / 终止 / 等待是状态**：
     /// 中止落收束格（`chat.assistant.final`，载荷 `status: "aborted"` +
-    /// `terminated: { reason, at }`，半截正文 / 半截思考一并入格），绝不复用兜底格
+    /// `terminated: { at }` + 顶层 `reason: interrupted`，半截正文 / 半截思考一并入格），绝不复用兜底格
     /// （那是**失败**的形状，且会污染兜底率）；等待用户落进展格
     /// （`chat.assistant.progress`，`turn × progressed`，载荷 `status: "pending"`），
     /// 不收束轮次（[plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
@@ -677,6 +677,11 @@ fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
 /// `key` = 被拒的**目标格名**（`chat.assistant.final` / `.fallback` / `artifact.added`）。
 /// 义务环落地后它会换成 `Pattern` 的键（PL-016 §4.2 的 `denied(key)`）——今天没有
 /// `Decl`，先用格名，那是同一件事在日志里的名字。
+/// 落一条**否定事实**（[`EVENT_AUTHZ_DENIED`]，T-219）。
+///
+/// 载荷 `{ key, kind, reason, detail }`：`reason` 取 [`ClosureReason::Denied`]——
+/// 与收束格**同一个字段名、同一个闭集**，于是读侧能用**一个**问题（「这一轮为什么停」）
+/// 问遍两种格，不必先猜这是收束格还是否定事实。`detail` 是人话，只给人读。
 fn deny<S>(
     store: &S,
     actor: &ActorSpec,
@@ -684,7 +689,7 @@ fn deny<S>(
     user_seq: u64,
     kind: ClosureKind,
     key: &str,
-    why: &str,
+    detail: &str,
 ) where
     S: Store<Event = Event> + ?Sized,
 {
@@ -701,7 +706,8 @@ fn deny<S>(
     .with_payload(serde_json::json!({
         "key": key,
         "kind": kind_name,
-        "why": why,
+        "reason": crate::symbio_core::ClosureReason::Denied.as_str(),
+        "detail": detail,
     }));
     match store.append(event) {
         Ok(_) => {}

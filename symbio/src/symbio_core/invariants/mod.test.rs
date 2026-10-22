@@ -6,6 +6,7 @@
 use super::*;
 use crate::symbio_core::event::{Entity, Event, EventEnvelope, Verb};
 use crate::symbio_core::store::{EventStore, Store};
+use crate::symbio_core::ClosureReason;
 
 /// 造一条 pending 事件（未入库，无 seq）。
 ///
@@ -330,6 +331,112 @@ fn pending_events_are_skipped_by_dangling_check() {
     )
     .with_produced_by(999)];
     assert!(provenance_dangling(&pending_only, false).is_empty());
+}
+
+// ── C6：停机原因闭集 ───────────────────────────────────────────────────
+
+/// 造一条带 `reason` 的收束格。
+fn closed(id: &str, kind: &str, reason: Option<&str>) -> Event {
+    let payload = match reason {
+        Some(r) => serde_json::json!({ "reason": r }),
+        None => serde_json::json!({}),
+    };
+    Event::pending(id, kind, Entity::Turn, Verb::Closed, 0, "main").with_payload(payload)
+}
+
+#[test]
+fn closure_reason_in_the_closed_set_passes() {
+    for r in ClosureReason::ALL {
+        let events = vec![closed("f0", "chat.assistant.final", Some(r.as_str()))];
+        assert!(
+            closure_reason_closed(&events, true).is_empty(),
+            "{r:?} 是闭集里的合法取值，不该红"
+        );
+    }
+}
+
+#[test]
+fn closure_reason_missing_is_reported_when_not_graced() {
+    let events = vec![closed("f0", "chat.assistant.final", None)];
+    let strict = closure_reason_closed(&events, false);
+    assert_eq!(strict.len(), 1, "严判档：缺 `reason` 必须红");
+    assert!(
+        strict[0].why.contains("缺 `reason`"),
+        "要说清缺的是什么：{}",
+        strict[0].why
+    );
+    assert!(
+        closure_reason_closed(&events, true).is_empty(),
+        "读侧宽限档：接线前落库的历史收束格没有 `reason`，首日不假红"
+    );
+}
+
+#[test]
+fn closure_reason_outside_the_closed_set_is_reported_either_way() {
+    // 越界**不放宽**：写了一个不在闭集里的值，从来不是历史问题。
+    let events = vec![closed("f0", "chat.assistant.final", Some("timeout"))];
+    for graced in [true, false] {
+        let bad = closure_reason_closed(&events, graced);
+        assert_eq!(bad.len(), 1, "越界在两种档位下都要红（graced={graced}）");
+        assert!(
+            bad[0].why.contains("timeout") && bad[0].why.contains("闭集"),
+            "要把越界的值与合法取值一起给出：{}",
+            bad[0].why
+        );
+    }
+}
+
+#[test]
+fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
+    // `fallback` 是另一个格名，`authz.denied` 根本不是收束格——三处都问同一个问题。
+    let events = vec![
+        closed("f0", "chat.assistant.final", None),
+        closed("fb0", "chat.assistant.fallback", None),
+        Event::pending(
+            "d0",
+            "authz.denied",
+            Entity::Turn,
+            Verb::Asserted,
+            0,
+            "main",
+        ),
+    ];
+    assert_eq!(
+        closure_reason_closed(&events, false).len(),
+        3,
+        "两种收束格 + 否定事实，缺 `reason` 一个都逃不掉"
+    );
+}
+
+#[test]
+fn closure_reason_denied_on_a_denial_fact_passes() {
+    let e = Event::pending(
+        "d0",
+        "authz.denied",
+        Entity::Turn,
+        Verb::Asserted,
+        0,
+        "main",
+    )
+    .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
+    assert!(closure_reason_closed(&[e], false).is_empty());
+}
+
+#[test]
+fn non_closure_cells_are_not_asked_for_a_reason() {
+    // `turn × progressed`（等待用户）**没有停**，不该被问「为什么停」。
+    let events = vec![Event::pending(
+        "p0",
+        "chat.assistant.progress",
+        Entity::Turn,
+        Verb::Progressed,
+        0,
+        "main",
+    )];
+    assert!(
+        closure_reason_closed(&events, false).is_empty(),
+        "进展格不是停机格"
+    );
 }
 
 // ── check_all：九条合跑 ────────────────────────────────────────────────

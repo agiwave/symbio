@@ -646,8 +646,12 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     assert_eq!(snap.len(), 2, "用户格 + fallback 格：{snap:?}");
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FALLBACK);
-    let why = snap[1].payload["why"].as_str().unwrap_or_default();
+    let why = snap[1].payload["detail"].as_str().unwrap_or_default();
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
+    assert_eq!(
+        snap[1].payload["reason"], "fallback",
+        "停机原因是闭集里的取值，不是自由文本"
+    );
 }
 
 /// 中止轮：**照落收束格**（`chat.assistant.final`，载荷 `status: "aborted"` +
@@ -681,8 +685,12 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
     assert_eq!(snap[1].payload["status"], "aborted", "终止是状态字段");
     assert_eq!(
-        snap[1].payload["terminated"]["reason"], "aborted",
-        "终止原因入格"
+        snap[1].payload["reason"], "interrupted",
+        "停机原因入格（顶层 `reason`，闭集取值）"
+    );
+    assert!(
+        snap[1].payload["terminated"]["at"].as_i64().is_some(),
+        "终止时刻入格"
     );
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
@@ -734,7 +742,12 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     let cell = snap[1];
     assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
     assert_eq!(cell.payload["status"], "aborted");
-    assert_eq!(cell.payload["terminated"]["reason"], "aborted");
+    // 停机原因在**顶层** `reason`（闭集），`terminated` 只留时刻（T-220）。
+    assert_eq!(cell.payload["reason"], "interrupted");
+    assert!(
+        cell.payload["terminated"]["at"].as_i64().is_some(),
+        "半截产出停在哪里由 `terminated.at` 说，原因不再在 terminated 里写第二份"
+    );
     assert_eq!(cell.payload["text"], "让我想想这个名词", "半截正文入格");
     assert_eq!(
         cell.payload["reasoning"], "这个名词需要先定义。",

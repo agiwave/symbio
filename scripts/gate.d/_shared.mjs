@@ -119,7 +119,17 @@ export const BASELINE = {
   // `speech_and_artifact_denials_do_not_collide`（两臂各自成键）、
   // `denial_names_the_capability_the_gate_judges`（**对拍**：拒绝原因里的能力名拼写
   // 必须真的是生产表里那一项——手写一份没有对拍就只是又一处「表授予 A、闸门判 B」）。
-  rustTests: 1981,
+  // baseline-allow rustTests: 批 T-220 净增 6 条判据（1981→1987）——停机原因闭集落地。
+  // 逐条：`invariants/mod.test.rs` 新增 5 条（`closure_reason_in_the_closed_set_passes`
+  // 五个取值全过 / `closure_reason_missing_is_reported_when_not_graced` 严判档红、读侧宽限档绿 /
+  // `closure_reason_outside_the_closed_set_is_reported_either_way` 越界在两种档位下都红 /
+  // `closure_reason_covers_both_closure_cells_and_the_denial_fact` 两种收束格 + `authz.denied`
+  // 一个都逃不掉 / `closure_reason_denied_on_a_denial_fact_passes`）；`turn_runner.test.rs`
+  // 的 `final_round_with_neither_text_nor_reasoning_still_falls_back` 补一条 `reason` 断言
+  // （兜底必须是闭集里的取值，不是自由文本）；`turn_exec.test.rs` 的
+  // `tool_free_turn_failure_leaves_fallback_event_and_bubbles` 同补一条。净增为正：
+  // 只改了载荷键名（`why` → `detail`）与两条断言的目标字段，没有删判据。
+  rustTests: 1987,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -152,7 +162,13 @@ export const BASELINE = {
   // T-218 增 1 条（243→244）：`invariants.rs` 在**真实日志**上注入一处悬空溯源
   // （把一条事件的 `produced_by` 指到片内一个被删掉的号），断言 `I2DanglingProvenance`
   // 必须响。它同时钉住新判据的反向纪律——`enable_i2_dangling: false` 时那条必须消失。
-  verifyAsserts: 244,
+  // T-220 增 3 条（244→247）：停机原因闭集。① 自造 `violated_log` 注入一处越界
+  // `reason`（`"timeout"`，用 `authz.denied` 而不是再塞一条 final——后者会把那一轮
+  // 收束掉，于是「无收束」那条判据反而消失，注入一条违规弄丢另一条是自假绿）；
+  // ② ③ 在**真实数据形状**上喂合法值 / 越界值各一次：合法值必须全绿（否则判据在误杀）、
+  // 越界必须红。真实日志的**回放**不跑这条——夹具只留信封、`reason` 在载荷里、且它采于
+  // T-220 之前；硬跑只会得到「每条收束格都缺 reason」的假红，那不是判据错了。
+  verifyAsserts: 247,
   // 唯一一处**向上**的 panic 面（实测 77）：段归档（S2.7-b2）与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定

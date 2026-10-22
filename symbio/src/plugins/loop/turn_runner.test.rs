@@ -136,7 +136,7 @@ mod turn_runner_tests {
         assert!(view.value.settled() && view.value.final_text.is_some());
     }
 
-    /// 失败轮（I3）：兜底事件落格（`turn × closed` + `why`），`fell_back = true`，
+    /// 失败轮（I3）：兜底事件落格（`turn × closed` + `reason`），`fell_back = true`，
     /// 不变量照常绿——「失败也是一句话」，不是静默。
     #[tokio::test]
     async fn turn_runner_failure_lands_fallback_not_silence() {
@@ -313,7 +313,7 @@ mod turn_runner_tests {
         assert_eq!(view.value, again.value);
     }
 
-    /// fallback 行进转写（assistant / why）——兜底话术是用户实际看到的回复。
+    /// fallback 行进转写（assistant / detail）——兜底话术是用户实际看到的回复。
     #[test]
     fn transcript_includes_fallback_as_assistant_line() {
         use crate::symbio_core::{Entity, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
@@ -342,7 +342,10 @@ mod turn_runner_tests {
                     "session/main",
                 )
                 .with_produced_by(0)
-                .with_payload(serde_json::json!({ "why": "上游 402" })),
+                .with_payload(serde_json::json!({
+                    "reason": "fallback",
+                    "detail": "上游 402",
+                })),
             )
             .unwrap();
         let snapshot = store.range(Seq::new(0));
@@ -687,7 +690,7 @@ mod turn_runner_tests {
     }
 
     /// 中止（AdapterError::Aborted）：**照落收束格**（`chat.assistant.final`，
-    /// 载荷 `status: "aborted"` + `terminated: { reason, at }`）——思考 / 正文是
+    /// 载荷 `status: "aborted"` + `terminated: { at }` + 顶层 `reason: interrupted`）——思考 / 正文是
     /// 事实，完成 / 终止是**状态**：「用户按了停止」是本轮的结局，不是另一种
     /// 事实种类，kind 不为它新增变体，也绝不复用兜底格（`chat.assistant.fallback`
     /// 是**失败**的形状）。本轮无半截产出时 `text` 为空，收束格照落：轮次必须
@@ -715,8 +718,12 @@ mod turn_runner_tests {
         assert_eq!(snapshot[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
         assert_eq!(snapshot[1].payload["status"], "aborted", "终止是状态字段");
         assert_eq!(
-            snapshot[1].payload["terminated"]["reason"], "aborted",
-            "终止原因入格（半截产出停在哪里由此可观测）"
+            snapshot[1].payload["reason"], "interrupted",
+            "停机原因入格（顶层 `reason`，闭集取值——T-220）"
+        );
+        assert!(
+            snapshot[1].payload["terminated"]["at"].as_i64().is_some(),
+            "半截产出停在哪里由 `terminated.at` 说（原因不再在 terminated 里写第二份）"
         );
         assert!(
             snapshot[1].payload["terminated"]["at"].as_u64().is_some(),
@@ -2674,7 +2681,11 @@ mod tool_round_tests {
         let snapshot = store.range(Seq::new(0));
         let last = snapshot.last().expect("有兜底格");
         assert_eq!(last.kind, crate::symbio_core::EVENT_ASSISTANT_FALLBACK);
-        assert_eq!(last.payload["why"], "model returned empty text");
+        assert_eq!(last.payload["detail"], "model returned empty text");
+        assert_eq!(
+            last.payload["reason"], "fallback",
+            "兜底是闭集里的一个取值，不是自由文本"
+        );
         assert_eq!(last.payload["status"], "failed");
     }
 
@@ -2784,12 +2795,12 @@ mod tool_round_tests {
             "答话载荷是空的：草稿不得冒充正文"
         );
         assert!(
-            last.payload["why"]
+            last.payload["detail"]
                 .as_str()
                 .unwrap_or_default()
                 .contains("长度上限"),
             "兜底原因要说得出是长度截断，不是一句「空文本」（实得 {:?}）",
-            last.payload["why"]
+            last.payload["detail"]
         );
         assert!(
             check_all(&snapshot).is_empty(),
@@ -2990,7 +3001,7 @@ mod scope_ceiling_tests {
 // ── 拒绝落事实（T-219，PL-016 §4.2）────────────────────────────────────
 //
 // 收束闸拒绝时此前只有一条 `warn`：日志里留下的是「该轮没收束」，与「根本没跑完」
-// **同形**。`deny(…)` 把否定落成 `authz.denied{key, kind, why}`——判定与矩阵一个字
+// **同形**。`deny(…)` 把否定落成 `authz.denied{key, kind, reason, detail}`——判定与矩阵一个字
 // 不动，变的只是否定的表达。
 //
 // 四条判据，最后一条是**对拍**：拒绝原因里写的能力名必须真的是表里那一个。
@@ -3072,7 +3083,11 @@ mod denial_fact_tests {
             d.payload.get("kind").and_then(|v| v.as_str()),
             Some("speech")
         );
-        let reason = d.payload.get("why").and_then(|v| v.as_str()).unwrap_or("");
+        let reason = d
+            .payload
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert!(
             reason.contains("user") && reason.contains("reply"),
             "原因要说清是谁缺哪一项：{reason}"

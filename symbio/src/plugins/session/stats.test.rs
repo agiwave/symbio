@@ -127,7 +127,7 @@ fn seed(tag: &str) -> PathBuf {
             )
             .with_produced_by(s1)
             .with_cost_ms(3000)
-            .with_payload(serde_json::json!({ "why": "模型超时" })),
+            .with_payload(serde_json::json!({ "reason": "fallback", "detail": "模型超时" })),
         )
         .unwrap();
 

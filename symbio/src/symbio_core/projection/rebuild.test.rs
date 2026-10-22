@@ -228,7 +228,8 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
                 { "text_id": null, "text": null, "reasoning_id": "R1", "reasoning": "第二轮在想" },
             ],
             "status": "failed",
-            "why": "model returned empty text",
+            "reason": "fallback",
+            "detail": "model returned empty text",
         })),
     ];
 

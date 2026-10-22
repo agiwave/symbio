@@ -880,12 +880,12 @@ fn close_completed(turn: u64) -> Event {
     )
 }
 
-fn close_failed(turn: u64, why: &str) -> Event {
+fn close_failed(turn: u64, detail: &str) -> Event {
     lifecycle_event(
         crate::symbio_core::EVENT_ASSISTANT_FINAL,
         crate::symbio_core::Verb::Closed,
         turn,
-        json!({ "status": "failed", "why": why, "text": "答", "id": "a-1" }),
+        json!({ "status": "failed", "reason": "fallback", "detail": detail, "text": "答", "id": "a-1" }),
     )
 }
 

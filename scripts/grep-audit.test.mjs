@@ -774,3 +774,86 @@ test('S-015 真实仓库零处（存量已全部迁完）', () => {
   })
   assert.match(r.stdout, /S-015 通过：否定分支零处/)
 })
+
+// ── S-016: 停机原因单形状 ────────────────────────────────────────────
+// 判据盯的是三个构造点文件（`turn_runner.rs` / `facts.rs` / `settle.rs`）：
+// 停机格载荷只从这三处出生。扫整个目录会把 `memory_events` 那个格子的 `why`
+// （没有竞争的 `reason` 字段）一起卷进来——范围错了的规则会教人学会忽略它。
+const S016_TARGET = 'symbio/src/plugins/loop/turn_runner/settle.rs'
+const S016_OTHER_CELL = 'symbio/src/plugins/loop/memory_events.rs'
+
+function gateAudit16(source, name = S016_TARGET) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s016-'))
+  try {
+    const target = path.join(root, name)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, source)
+    const env = { ...process.env, NO_COLOR: '1' }
+    delete env.SCOPE
+    return spawnSync(process.execPath, [script], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test('S-016 已退役的两个形状各自即红', () => {
+  const terminated = 'fn f() {\n    payload["terminated"] = json!({ "reason": "aborted", "at": 1 });\n}\n'
+  const r1 = gateAudit16(terminated)
+  assert.equal(r1.status, 1, r1.stdout)
+  assert.match(r1.stdout, /S-016 违例：停机原因出现已退役的形状（1 处）/)
+  assert.match(r1.stdout, /settle\.rs:2/)
+
+  const why = 'fn f() {\n    payload["why"] = "上游 402".to_string();\n}\n'
+  const r2 = gateAudit16(why)
+  assert.equal(r2.status, 1, r2.stdout)
+  assert.match(r2.stdout, /settle\.rs:2/)
+})
+
+test('S-016 放行新形状与合法组合', () => {
+  // 新形状：顶层 `reason` + `detail`。
+  const fresh = 'fn f() {\n    payload["reason"] = "fallback".to_string();\n    payload["detail"] = "上游 402".to_string();\n}\n'
+  assert.equal(gateAudit16(fresh).status, 0, gateAudit16(fresh).stdout)
+  // 合法组合：`with_terminated(with_reason(..))` 里 `terminated` 与 `reason`
+  // 出现在同一行，但那是两个不同的键——误报会教人学会忽略这条规则。
+  const composed = 'fn f() {\n    .with_payload(with_terminated(with_reason(p, ClosureReason::Interrupted)))\n}\n'
+  assert.equal(gateAudit16(composed).status, 0, gateAudit16(composed).stdout)
+  // 时刻仍在：`terminated.at` 是保留的形状。
+  const at = 'fn f() {\n    payload["terminated"] = json!({ "at": clock_now_ms() });\n}\n'
+  assert.equal(gateAudit16(at).status, 0, gateAudit16(at).stdout)
+})
+
+test('S-016 只管停机格：别的格子的 `why` 不误伤', () => {
+  // `memory_events` 的 `"why": "consolidated"` 没有竞争的 `reason` 字段，
+  // 不在本规则范围内——范围写大了的规则比没有规则更糟。
+  const other = 'fn f() {\n    payload["why"] = "consolidated".to_string();\n}\n'
+  assert.equal(
+    gateAudit16(other, S016_OTHER_CELL).status,
+    0,
+    '非构造点文件不判',
+  )
+})
+
+test('S-016 注释行不判，豁免必须写理由', () => {
+  const asComment = '/// 旧形状（反例）：terminated: { reason, at }\n'
+  assert.equal(gateAudit16(asComment).status, 0, '注释里的反例不是写入')
+  const hit = '    payload["why"] = "x".to_string();\n'
+  const waived = `${hit.replace('\n', '  // grep-audit-allow S-016: 兼容旧 WAL 回放，只读不写\n')}`
+  assert.equal(gateAudit16(waived).status, 0, gateAudit16(waived).stdout)
+  const empty = hit.replace('\n', '  // grep-audit-allow S-016:   \n')
+  assert.equal(gateAudit16(empty).status, 1, '空理由不算豁免')
+})
+
+test('S-016 真实仓库零处（两个形状已全部迁完）', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: SCAN_TIMEOUT_MS,
+  })
+  assert.match(r.stdout, /S-016 通过/)
+})

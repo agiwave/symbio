@@ -195,10 +195,12 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 ///
 /// ## 载荷
 ///
-/// `{ key, kind, why }`：`key` = 被拒的**目标格名**（`chat.assistant.final` /
-/// `chat.assistant.fallback` / `artifact.added`）、`kind` = `speech` / `artifact`
-/// （与写侧闸按种类分两臂的划分同源）、`why` = 人话原因（缺哪一项能力，
-/// 或哪一道作用域上限）。作者（`actor`）就是被拒的主体——「谁」不再单独记一份。
+/// `{ key, kind, reason, detail }`：`key` = 被拒的**目标格名**
+/// （`chat.assistant.final` / `chat.assistant.fallback` / `artifact.added`）、
+/// `kind` = `speech` / `artifact`（与写侧闸按种类分两臂的划分同源）、
+/// `reason` = [`ClosureReason::Denied`]（与收束格同一个字段、同一个闭集）、
+/// `detail` = 人话原因（缺哪一项能力，或哪一道作用域上限）。作者（`actor`）
+/// 就是被拒的主体——「谁」不再单独记一份。
 ///
 /// 义务环落地后 `key` 会换成 `Pattern` 的键（PL-016 §4.2 的 `denied(key)`）；
 /// 今天没有 `Decl`，先用格名——它是同一件事在日志里的名字。
@@ -213,6 +215,79 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 /// 3. **不影响判定**：落不进去也照原样返回拒绝结果——闸门的结论是「不许写」，
 ///    不能因为记账失败就放行。
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
+
+// ── 停机原因：**一个字段、一个闭集**（T-220）──
+
+/// 停机原因——「这一轮为什么停」的唯一答案，取值是**闭集**。
+///
+/// ## 它收掉的是三个形状
+///
+/// 此前同一个问题有三个载体，语义互相重叠且都不够用：
+///
+/// | 旧形状 | 问题 |
+/// |---|---|
+/// | `payload.status` ∈ `completed` / `failed` / `aborted` | 结果与原因混在一个字段里 |
+/// | `payload.terminated.reason` | 恒为 `"aborted"`，等于没有信息 |
+/// | `payload.why` | 自由文本，不可判 |
+///
+/// 于是「这一轮为什么停」只能靠读三个键 + 猜。而它正是重启后最需要回答的问题：
+/// 义务环里没有 `Halt` 这个值——"停"只有一种表达，就是"没有债了"，那么
+/// "为什么没有债了"必须写在事实里（PL-014 需要一个运行期分支
+/// `None => halt(NoRule)`；义务环里那个分支不存在——装载期"每行收口"已拦住，
+/// 所以闭集里**没有 `no_rule`**，这不是遗漏）。
+///
+/// ## 与 `status` 的分工
+///
+/// `status` 留下，但只留**结果面**三值（`completed` / `failed` / `aborted`）：
+/// 结果与原因是两个维度，合成一个字段会让「截断但答出来了」「失败且被拒」
+/// 这类组合表达不出来。
+///
+/// ## `detail`：人话细节，唯一不可判的字段
+///
+/// 闭集回答"是哪一类"，`detail` 回答"具体是什么"（如适配器原始错误文本）。
+/// 二者分开是因为：把细节塞进闭集会让它不可判，把闭集市写成自由文本会让它
+/// 不可统计。**只许对 `reason` 做分支，`detail` 只给人读。**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosureReason {
+    /// 说完了（自然结束）。
+    Completed,
+    /// 用户打断（或首请求前到达的中止）。
+    Interrupted,
+    /// 上界耗尽——`finish_reason = length`：步数 / 预算 / max_tokens 掐断。
+    Exhausted,
+    /// 主路径失败，兜底顶上。
+    Fallback,
+    /// 收束闸拒绝（T-219）。**不产生收束格**——被拒的一轮仍然未收束，
+    /// 这个值只落在 `authz.denied` 上。
+    Denied,
+}
+
+impl ClosureReason {
+    /// 全部取值——审计判据的闭集由这里派生，**不另写一份**。
+    pub const ALL: [ClosureReason; 5] = [
+        ClosureReason::Completed,
+        ClosureReason::Interrupted,
+        ClosureReason::Exhausted,
+        ClosureReason::Fallback,
+        ClosureReason::Denied,
+    ];
+
+    /// 线上拼写（载荷 `reason` 的值）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClosureReason::Completed => "completed",
+            ClosureReason::Interrupted => "interrupted",
+            ClosureReason::Exhausted => "exhausted",
+            ClosureReason::Fallback => "fallback",
+            ClosureReason::Denied => "denied",
+        }
+    }
+
+    /// 从载荷字符串解析（读侧 / 审计用）。`None` = 越界——这正是判据要抓的。
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == raw)
+    }
+}
 
 // ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/009-task/122-工具调用与产物.md "T-122-工具调用与产物")）──
 //

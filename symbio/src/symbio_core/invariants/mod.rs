@@ -17,6 +17,7 @@
 //! | C3 对偶 | I2 无溯源不声明 | 片内溯源边不倒因果、不落空洞 | [`provenance_dangling`] |
 //! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
+//! | C6 | I3 到点必答 | 每条收束格 / `authz.denied` 的 `reason` 在闭集内 | [`closure_reason_closed`] |
 //! | 终止性前提 3（C14） | 终止性定理 | 任务依赖图**无环**且无悬空依赖 | [`acyclic_deps`] |
 //! | 终止性前提 2 | 终止性定理 | 每任务返工轮数有硬上界（`MAX_REWORK_ROUNDS`） | [`rework_bounded`] |
 //!
@@ -352,6 +353,7 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
     all.extend(provenance_dangling(events, true));
     all.extend(unresolved_turns(events, true));
     all.extend(budget_exceeded(events, declared_budget_ms(events)));
+    all.extend(closure_reason_closed(events, true));
     all.extend(acyclic_deps(events));
     all.extend(rework_bounded(events, MAX_REWORK_ROUNDS));
     all
@@ -451,6 +453,69 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
         ));
     }
     bad
+}
+
+/// C6（I3 到点必答）：每条 `turn × closed` 事实必带 `reason`，且取值在闭集内（T-220）。
+///
+/// ## 它查的是什么
+///
+/// 「这一轮为什么停」必须是**可判的**。此前三个形状（`status` / `terminated.reason` /
+/// `why`）问的是同一个问题，于是一个字段缺失或越界时不会有任何东西变红——日志能读、
+/// 投影能算、回放不崩，只有"为什么停了"这个问题的答案悄悄不可用。而它正是重启后
+/// 最需要回答的问题（PL-014 需要一个运行期 `halt(NoRule)` 分支；义务环里那个分支
+/// 不存在，"停"只有"没有债了"一种表达，那么"为什么没有债了"必须写在事实里）。
+///
+/// ## 判定范围
+///
+/// `turn × closed` 的两种格（`chat.assistant.final` / `chat.assistant.fallback`）
+/// 加上 `authz.denied`（T-219：拒绝不产生收束格，但它同样是一次"停"）。
+/// 闭集由 [`ClosureReason::ALL`] 派生，**不在这里另写一份**——两处各写一份，
+/// 加一个新原因时就会出现"写侧合法、读侧报红"的两套绿。
+///
+/// # 宽限：历史事件
+///
+/// 接线前落库的收束格没有 `reason`。把它们一并报出会让首日清单整片飘红，于是
+/// 读侧只对**缺字段**放宽（见 [`closure_reason_closed`] 的形参）；**越界不放宽**——
+/// 写了一个不在闭集里的值，从来不是历史问题。
+pub fn closure_reason_closed(events: &[Event], allow_missing: bool) -> Vec<Violation> {
+    events
+        .iter()
+        .filter(|e| closes_turn(e) || e.kind == crate::symbio_core::event::EVENT_AUTHZ_DENIED)
+        .filter_map(|e| {
+            let raw = e.payload.get("reason").and_then(|v| v.as_str());
+            match raw {
+                None => {
+                    if allow_missing {
+                        return None;
+                    }
+                    Some(Violation::at(
+                        e,
+                        format!(
+                            "{} 缺 `reason`（这一轮为什么停必须写在事实里，I3 到点必答）",
+                            e.kind
+                        ),
+                    ))
+                }
+                Some(r) => {
+                    if crate::symbio_core::ClosureReason::parse(r).is_some() {
+                        return None;
+                    }
+                    Some(Violation::at(
+                        e,
+                        format!(
+                            "{} 的 `reason` = {r:?} 不在闭集内（合法取值：{}）",
+                            e.kind,
+                            crate::symbio_core::ClosureReason::ALL
+                                .iter()
+                                .map(|x| x.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" / ")
+                        ),
+                    ))
+                }
+            }
+        })
+        .collect()
 }
 
 /// C5（I3 到点必答）：事件的 `cost_ms` 不得超过主体预算。

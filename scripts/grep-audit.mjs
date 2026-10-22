@@ -43,7 +43,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015 S-016
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -811,6 +811,69 @@ console.log('--- S-015: 收束闸否定分支必须落事实 ---')
       S015_IS_REPO
         ? 'S-015 通过：否定分支零处 `!closure_granted(`（全部走 closure_gate + deny）'
         : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
+    )
+  }
+}
+console.log()
+
+// ── S-016: 停机原因只有一个形状（T-220）─────────────────────────────
+// 收束格 / 否定事实的「为什么停」只能写在顶层 `reason`（闭集）。两个已退役的
+// 形状不许复活：
+//   · `terminated.reason` —— 与顶层 `reason` 是同一件事的两份账，必然有一处先漂；
+//   · 停机格载荷里的 `why` —— 自由文本，与 `reason` 语义重叠，读侧要靠猜。
+// （`why` 在别的格子上仍然合法：commitment.breach / memory.consolidated 等没有
+//   竞争的 `reason` 字段，那条不在本规则的范围内。）
+//
+// 判据是**零出现**：这两个形状已经全部迁完，没有存量可言。放任一条回来的代价
+// 不是风格问题——读侧从此要判两个键，而多出来的那个键**不会让任何东西变红**。
+//
+// 范围收在**三个构造点文件**（`with_terminated` / `append_fallback` / `deny`）：
+// 停机格载荷只从这三处出生，扫整个目录会把 `memory_events` 那个格子的 `why`
+// （没有竞争的 `reason` 字段，不在本规则范围内）一起卷进来。
+// 正则要求 `"reason"` / `reason` **带冒号或引号**：否则 `with_terminated(with_reason(..)`
+// 这种合法组合会被 `terminated…reason` 误命中——一条误报就会让人学会忽略这条规则。
+console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---')
+{
+  const S016_FILES = [
+    'symbio/src/plugins/loop/turn_runner.rs',
+    'symbio/src/plugins/loop/turn_runner/facts.rs',
+    'symbio/src/plugins/loop/turn_runner/settle.rs',
+  ]
+  const S016_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S016_IS_REPO = path.resolve(S016_BASE) === path.resolve(repoRoot)
+  // 两种写法都要认：`json!({ "why": .. })`（键后冒号）与 `payload["why"] = ..`
+  // （下标赋值）。只认前者会漏掉生产里真正在用的那种。
+  const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\bwhy"\s*:/
+  const WAIVER_S016_RE = /\/\/\s*grep-audit-allow S-016:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+  let s016 = 0
+  const s016List = []
+  for (const rel of S016_FILES) {
+    const file = path.join(S016_BASE, rel)
+    let lines
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      continue
+    }
+    lines.forEach((l, i) => {
+      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
+      if (!RETIRED_RE.test(l)) return
+      if (WAIVER_S016_RE.test(l) || (i > 0 && WAIVER_S016_RE.test(lines[i - 1]))) return
+      s016++
+      s016List.push(`${disp(file)}:${i + 1}`)
+    })
+  }
+  if (s016 > 0) {
+    err(
+      `S-016 违例：停机原因出现已退役的形状（${s016} 处）——` +
+        '`terminated.reason` 与停机格的 `why` 都已并入顶层 `reason`（闭集）。' +
+        `命中：${s016List.join('、')}`,
+    )
+  } else {
+    ok(
+      S016_IS_REPO
+        ? 'S-016 通过：`turn_runner/` 下零处已退役的停机原因形状'
+        : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }
 }

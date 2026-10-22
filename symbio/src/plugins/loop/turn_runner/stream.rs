@@ -230,7 +230,12 @@ where
         )
         .with_produced_by(run.user_seq)
         .with_cost_ms(run.cost_ms)
-        .with_payload(with_status(produced, "completed")),
+        // `reason` 由 `finish` 折出：被 max_tokens 掐断的一轮**答出来了但没答完**，
+        // 它与自然说完在 `status` 上同形（都是 completed）、在 `reason` 上不同形。
+        .with_payload(with_reason(
+            with_status(produced, "completed"),
+            reason_of_finish(&rt.finish),
+        )),
     )?;
     Ok(TurnOutcome {
         turn: run.turn,
@@ -306,7 +311,10 @@ where
         )
         .with_produced_by(run.user_seq)
         .with_cost_ms(cost)
-        .with_payload(with_terminated(with_status(produced, "aborted"))),
+        .with_payload(with_terminated(with_reason(
+            with_status(produced, "aborted"),
+            crate::symbio_core::ClosureReason::Interrupted,
+        ))),
     )?;
     Ok(TurnOutcome {
         turn: run.turn,
