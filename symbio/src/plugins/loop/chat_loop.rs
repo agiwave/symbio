@@ -78,8 +78,9 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// - 静默锚 = 最近一次用户看得见的动静（用户格 / 补充格 / 任何助手文本）；
 /// - 配额 = 本幕锚之后的汇报格数。
 ///
-/// 因此 `supplemented_at` 入参不再需要（补充格已在抽干时落格，视图自会前移锚），
-/// 保留形参只为对齐 [`super::turn_exec::RoundHookFn`] 的契约。
+/// `now_ms` 由开幕交下来（本幕唤醒事实的 `ts`，判据 12）：静默长度是「本幕的现在」
+/// 减那条事实，两个读数都在日志里。回调因此没有入参——抽干时落的补充格已经把
+/// 静默锚前移，再递一个「抽到的时刻」只是在判决路径上多留一个墙钟读数。
 ///
 /// ## 轮次前提留在触发点
 ///
@@ -101,9 +102,10 @@ pub(crate) fn round_report_hook(
     conversation: Vec<ChatNode>,
     store: Arc<dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>>,
     turn_no: u64,
+    now_ms: i64,
 ) -> super::turn_exec::RoundHookFn {
     let rounds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    Arc::new(move |_supplemented_at: Option<i64>| {
+    Arc::new(move || {
         let orchestrator = orchestrator.clone();
         let ctx = ctx.clone();
         let conversation = conversation.clone();
@@ -112,15 +114,14 @@ pub(crate) fn round_report_hook(
         Box::pin(async move {
             // 一个批次边界 = 一次「已完成一轮」。
             let tool_rounds = rounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            let now = clock_now_ms();
             let events = store.range(crate::symbio_core::Seq::new(0));
-            let view = super::loop_rows::view("report_due", &events, turn_no, now)?;
+            let view = super::loop_rows::view("report_due", &events, turn_no, now_ms)?;
             // 轮次前提（见 `loop_rows` 模块头）：日志里没有这一格，归触发点。
             let min_rounds = view.get("min_rounds").and_then(|v| v.as_u64()).unwrap_or(0);
             if (tool_rounds as u64) < min_rounds.max(1) {
                 return None;
             }
-            if !super::loop_rows::owes("policy.report", &events, turn_no, now) {
+            if !super::loop_rows::owes("policy.report", &events, turn_no, now_ms) {
                 return None;
             }
             let quiet_ms = view.get("quiet_ms").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -225,8 +226,7 @@ use crate::symbio_core::chat_request;
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
-    clock_now_ms, llm_emit_message, llm_short_id, run_ops, RunSnapshot, TurnOutput, TurnReport,
-    TurnStatus,
+    llm_emit_message, llm_short_id, run_ops, RunSnapshot, TurnOutput, TurnReport, TurnStatus,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginInvokeRequest,
@@ -460,7 +460,7 @@ pub async fn run_chat_loop(
         // `done` 也由这一问问出来：判过的格在 `turn.stage` 里，`turn_head` 视图
         // 按幕锚折叠它（ADR-107 判据 2）。前三条在这一轮内恒真，没有这一条，
         // 任何以「再问一次表」为形状的驱动都会重判同一句话。
-        if super::loop_rows::owes("policy.classify", &turn.facts, turn.turn_no, clock_now_ms()) {
+        if super::loop_rows::owes("policy.classify", &turn.facts, turn.turn_no, turn.now_ms) {
             if let Some(exit) = run_turn_head(
                 orchestrator,
                 &ctx,
@@ -479,8 +479,8 @@ pub async fn run_chat_loop(
         // 要发下一次请求才抽」与「绝不落在 `assistant(tool_calls)` 与其 `tool` 结果
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
         // v2 下永不成立；裁决见 [ADR-074](../../../../docs/010-adr/074.md)）。
-        // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干结果作为 `supplemented_at` 随
-        // [`super::round_hook::RoundHookFn`] 的入参带出来（见 `turn_exec.rs` 的注入闭包）。
+        // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
+        // 视图从日志里读它（回调不再有时刻入参，见 `round_hook::RoundHookFn`）。
         plugin_info!(
             "session",
             "[Turn] 第 {} 次请求开始 (msgs={})",
@@ -586,8 +586,7 @@ pub async fn run_chat_loop(
         }
         // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
         turn.facts = store.range(crate::symbio_core::Seq::new(0));
-        let owed =
-            super::loop_rows::owes("dispatch-turn", &turn.facts, turn.turn_no, clock_now_ms());
+        let owed = super::loop_rows::owes("dispatch-turn", &turn.facts, turn.turn_no, turn.now_ms);
         let out = match super::port::dispatch(
             store.as_ref(),
             super::loop_rows::PORTS,
@@ -668,6 +667,7 @@ pub async fn run_chat_loop(
                             context.messages.clone(),
                             store,
                             turn.turn_no,
+                            turn.now_ms,
                         )
                     }),
                     // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `turn_exec`

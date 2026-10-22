@@ -177,10 +177,9 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                             // **落格在这里**（本函数开着 store）。所以回调交回来的是一份
                             // **草稿**，不是已落的事实——落格这一半不外包出去。
                             //
-                            // 交出去的那个时刻就是「本批抽到了补充」：静默时钟由它归零，
-                            // 于是「先抽干、后汇报」不是一句写在注释里的纪律，而是数据。
-                            let supplemented_at =
-                                (!injected.is_empty()).then(crate::symbio_core::clock_now_ms);
+                            // 「先抽干、后汇报」仍是顺序纪律，但归零静默时钟的信号不再是
+                            // 一个时刻入参：上面那次抽干已经把补充格落进日志，
+                            // `report_due` 视图读的就是它（判据 12）。
                             if let Some(report) = report {
                                 // **落格即上线**（T-136 的另一半）：这句话的设计目的就是「本轮还要
                                 // 跑很久，先报一句」，只落格不下发就等于把它压到轮末、把目的抵消。
@@ -188,7 +187,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                                 // （`rebuild::reported_node` 走 `event_payload_node_id`）读的就是它，
                                 // 于是实时面与重建面是同一个身份，轮末落库镜像再送一次时按 id 合并，
                                 // 不多一张卡（与 `op-*` 那条开场白同纪律）。
-                                if let Some(draft) = report(supplemented_at).await {
+                                if let Some(draft) = report().await {
                                     match anchor {
                                         Some(anchor) => {
                                             let no = supplemental_no.fetch_add(

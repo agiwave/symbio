@@ -1040,7 +1040,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     let fired = Arc::new(Mutex::new(false));
     let on_round = {
         let fired = fired.clone();
-        Arc::new(move |_supplemented_at: Option<i64>| {
+        Arc::new(move || {
             let fired = fired.clone();
             Box::pin(async move {
                 let mut once = fired.lock().unwrap();

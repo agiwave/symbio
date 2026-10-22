@@ -72,12 +72,7 @@ where
         .map_err(ModelCallError::Store)?;
     // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
     let facts = store.range(Seq::new(0));
-    let owed = super::super::loop_rows::owes(
-        "dispatch-model",
-        &facts,
-        run.turn,
-        crate::symbio_core::clock_now_ms(),
-    );
+    let owed = super::super::loop_rows::owes("dispatch-model", &facts, run.turn, run.now_ms());
     // 应答载荷带上本次交回的工具调用（ADR-117）：创建行 `open-tools` 的集合
     // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
     let out = super::super::port::dispatch_with(

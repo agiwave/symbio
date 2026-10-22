@@ -649,6 +649,24 @@ fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
     }
 }
 
+/// 本次 `drive` 的 `now`：**幕锚那条事实的 `ts`**（判据 12，PL-016 §2.1）。
+///
+/// 幕锚 = `drive_seq`：新轮是用户格，续写幕是恢复阶段事实——两者都是**触发本次
+/// drive 的那条事实**。墙钟进入日志的唯一合法通道是落这条事实时 `Store::append`
+/// 补的落格时刻，此后本次 drive 的所有时间条件（静默、租约）都只读它的 `ts`。
+/// 于是同一个日志重放两次，`now` 相同，`owed` 逐字相同；而现取墙钟会让「回放可
+/// 重建」在这些路径上成为假话。
+///
+/// 切片里没有这一条 ⇒ `0`（切片比幕旧，或幕锚填的是占位值）：没有任何时间条件
+/// 可以满足，宁可判「还不该做」也不拿一个来路不明的时刻去凑。
+pub(crate) fn wake_now_ms(events: &[Event], drive_seq: u64) -> i64 {
+    events
+        .iter()
+        .find(|e| e.seq.is_some_and(|s| s.value() == drive_seq))
+        .map(|e| e.ts)
+        .unwrap_or(0)
+}
+
 /// 这一行此刻是否欠着且可还（`owes` 命中、未被 `until` / `unless` 关掉）。
 ///
 /// 返回布尔而不是 [`Debt`](crate::symbio_core::ring::Debt)：调用点只决定「这一步

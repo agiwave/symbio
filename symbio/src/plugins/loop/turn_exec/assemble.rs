@@ -232,11 +232,12 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 阶段落下的 `result`），本处不再递交内存布尔。`hit` 是行命中之后才取用的
     // 执行体输入，表不接触它。
     let matched = super::super::skill_events::take_match(skill_hits, user_text);
+    let slice = store.range(crate::symbio_core::Seq::new(0));
     let (hit, tier) = if super::super::loop_rows::owes(
         "policy.reflex",
-        &store.range(crate::symbio_core::Seq::new(0)),
+        &slice,
         turn_no,
-        crate::symbio_core::clock_now_ms(),
+        super::super::loop_rows::wake_now_ms(&slice, drive_seq),
     ) {
         (matched, super::super::loop_rows::tier("policy.reflex"))
     } else {

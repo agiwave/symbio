@@ -259,6 +259,15 @@ impl ToolPort {
         }
     }
 
+    /// 本次 drive 的 `now`：幕锚那条唤醒事实的 `ts`（判据 12）。
+    ///
+    /// 恢复幕在 `begin_drive` **之前**执行，`drive_seq` 填的是占位 0 ⇒ 这里得 0；
+    /// 本行的三笔工具债（`open-tools` / `authorize-tool` / `dispatch-tools`）不读
+    /// 带时间的视图，`now` 参与不了判据。要新增读时间的行，得先把真实幕锚传进来。
+    fn now_ms(&self, facts: &[Event]) -> i64 {
+        loop_rows::wake_now_ms(facts, self.drive_seq)
+    }
+
     /// 批次级 prepass：为每个真正可派发的调用开一笔工具账。
     ///
     /// 入口先问创建行 `open-tools` 欠不欠（ADR-117）：一个模型响应是一笔集合债，
@@ -276,14 +285,7 @@ impl ToolPort {
         // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
         // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
         let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
-        if has_calls
-            && !loop_rows::owes(
-                "open-tools",
-                &facts,
-                self.turn,
-                crate::symbio_core::clock_now_ms(),
-            )
-        {
+        if has_calls && !loop_rows::owes("open-tools", &facts, self.turn, self.now_ms(&facts)) {
             crate::plugin_warn!(
                 "session",
                 "[Tool] 创建行不欠（turn={}），不落 request",
@@ -419,12 +421,7 @@ impl ToolPort {
     /// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
     fn authorize_calls(&self, policy: &ToolPortPolicy, calls: &mut [ToolPortCall]) {
         let facts = self.facts.range(Seq::new(0));
-        if !loop_rows::owes(
-            "authorize-tool",
-            &facts,
-            self.turn,
-            crate::symbio_core::clock_now_ms(),
-        ) {
+        if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
             crate::plugin_warn!(
                 "session",
                 "[Tool] 授权行不欠（turn={}），不判放行",
@@ -490,12 +487,7 @@ impl ToolPort {
             return;
         }
         let facts = self.facts.range(Seq::new(0));
-        let owed = loop_rows::owes(
-            "dispatch-tools",
-            &facts,
-            self.turn,
-            crate::symbio_core::clock_now_ms(),
-        );
+        let owed = loop_rows::owes("dispatch-tools", &facts, self.turn, self.now_ms(&facts));
         for call in calls.iter_mut().filter(|c| c.granted) {
             if !owed {
                 crate::plugin_warn!(

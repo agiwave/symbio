@@ -1097,3 +1097,79 @@ fn next_is_none_once_the_turn_is_closed() {
     ];
     assert!(super::next(&events, 1, 0, |_| true).is_none());
 }
+
+// ── 本次 drive 的 `now`：只来自唤醒事实（判据 12 · T-240）──────────────────
+
+/// 一幕的日志：唤醒格（`ts = wake_ts`）+ 上一世派出、没回来的 `sent`（租约 1000ms）。
+///
+/// 返回切片与**幕锚**——唤醒格的 seq，生产代码里它就是 `drive_seq`。
+fn drive_with_stale_sent(wake_ts: i64) -> (Vec<Event>, u64) {
+    let wake = ev_at(
+        1,
+        "user.message",
+        json!({ "text": "hi", "id": "u-1" }),
+        wake_ts,
+    );
+    let anchor = wake.seq.expect("测试里的事件都带号").value();
+    let mut events = vec![wake, sent("t-1", 1, 1_000, 1, 0)];
+    events.insert(1, ev_at(1, "session.config", plain(), wake_ts - 1));
+    (events, anchor)
+}
+
+#[test]
+fn the_drive_now_is_the_wake_fact_timestamp() {
+    // 唤醒 ts 落在租约期内 ⇒ 表说不欠收租。同一份日志换一个更大的 `now`（墙钟会给
+    // 出的那种量级）就变成欠——这条差异正是「时间从日志来」与「时间现读」的分界。
+    let (events, anchor) = drive_with_stale_sent(500);
+    assert_eq!(super::wake_now_ms(&events, anchor), 500);
+    assert!(!owes("lease", &events, super::wake_now_ms(&events, anchor)));
+    assert!(owes("lease", &events, 60_000));
+
+    // 停机更久的一次唤醒：日志没变，只是那条事实的 ts 更晚 ⇒ 租约到期。
+    let (later, later_anchor) = drive_with_stale_sent(1_500);
+    assert!(owes(
+        "lease",
+        &later,
+        super::wake_now_ms(&later, later_anchor)
+    ));
+
+    // 幕锚不在这份切片里 ⇒ 0，不猜一个来路不明的时刻。
+    assert_eq!(super::wake_now_ms(&events[1..], anchor), 0);
+}
+
+#[test]
+fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
+    // 幕内 `now` 不漂移：本幕之后落的新格（哪怕 ts 更晚）不改本次 drive 的时刻，
+    // 于是同一份日志的两次求值逐字相同（回放可重建的前提）。
+    let (events, anchor) = drive_with_stale_sent(500);
+    let once = format!(
+        "{:?}",
+        owed(
+            ROWS,
+            &frozen(),
+            &events,
+            super::wake_now_ms(&events, anchor)
+        )
+    );
+    let mut grown = events.clone();
+    grown.push(ev_at(
+        1,
+        "turn.stage",
+        json!({ "stage": "round", "round": 0 }),
+        9_000_000,
+    ));
+    assert_eq!(
+        super::wake_now_ms(&grown, anchor),
+        super::wake_now_ms(&events, anchor)
+    );
+    let twice = format!(
+        "{:?}",
+        owed(
+            ROWS,
+            &frozen(),
+            &events,
+            super::wake_now_ms(&events, anchor)
+        )
+    );
+    assert_eq!(once, twice);
+}

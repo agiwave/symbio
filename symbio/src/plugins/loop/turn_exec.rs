@@ -791,12 +791,8 @@ where
         // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查执行体注册表 →
         // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。
         let facts = store.range(Seq::new(0));
-        let next = super::loop_rows::next(
-            &facts,
-            session.turn(),
-            crate::symbio_core::clock_now_ms(),
-            Executor::accepts,
-        );
+        let next =
+            super::loop_rows::next(&facts, session.turn(), session.now_ms(), Executor::accepts);
         if next.is_none() && !resumed {
             // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
             // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。

@@ -160,7 +160,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 三件事（记忆 / 技能 / 任务段）共用一个阶段——它们共前提、共时机。
     // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格，按幕锚折叠）。
     // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
-    if super::super::loop_rows::owes("policy.recall", &turn.facts, turn.turn_no, clock_now_ms()) {
+    if super::super::loop_rows::owes("policy.recall", &turn.facts, turn.turn_no, turn.now_ms) {
         run_recall(ctx, context, turn).await?;
     }
     let recall_section = turn
@@ -324,7 +324,7 @@ pub(crate) async fn apply_compaction(
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
     // 下一轮照常再试；但同一幕内不重复进产线（ADR-107 判据 2）。
-    if super::super::loop_rows::owes("policy.compress", &turn.facts, turn.turn_no, clock_now_ms()) {
+    if super::super::loop_rows::owes("policy.compress", &turn.facts, turn.turn_no, turn.now_ms) {
         run_compress(orchestrator, ctx, context, turn, overhead_tokens).await;
     }
     Ok(())

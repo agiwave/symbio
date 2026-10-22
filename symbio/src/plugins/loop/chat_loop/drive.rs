@@ -77,7 +77,10 @@ pub(crate) fn resume_kind(action: &crate::symbio_core::chat_node::ResumeAction) 
     }
 }
 
-/// 开一幕：用户格（或恢复格）→ 配置 → 本幕锚 → 刷新本轮事实切片。
+/// 开一幕：唤醒格（用户格 / 恢复格）→ 收租 → 配置 → 本幕锚 → 刷新本轮事实切片。
+///
+/// 唤醒格排在收租**之前**：`now` 只能来自那条事实的 `ts`（判据 12），所以本次
+/// `drive` 的时间要先进日志，租约才有得算。
 ///
 /// 返回的 [`Drive`] 是本幕的**唯一身份来源**——后续的派发格、阶段格、收束格
 /// 都从它取 `(turn_no, user_seq, drive_seq)`，不再各自数一遍事实。
@@ -98,36 +101,6 @@ pub(crate) fn begin_drive(
     // 「跳过收租继续开新幕」——没有表就没有 `owed`，那一幕只会静默停在原处。
     let frozen = super::super::loop_rows::table().map_err(super::state::TurnExit::Failed)?;
     let snapshot = store.range(Seq::new(0));
-    // ── 先收租（T-223）：上一段生命里派出去、没回来的调用 ─────────────────
-    //
-    // 看护点就是**恢复点**：时间只在事件上推进，所以一条 `sent` 只要跨过进程
-    // 重启就一定已经超时。重试还是判死由 `PortDecl.max_attempts` 定（`turn`
-    // 是 1 ⇒ 判死，因为等它的 future 已经没了）。
-    //
-    // 切片按声明的扫描上界（4096）取尾部：租约要看的只是最近那几笔在途，
-    // 超过上界就交给调用方分层而不是让视图静默算不出来。
-    {
-        let tail = &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..];
-        // 被收的那几笔属于**它们自己那一轮**（往往不是即将开的这一幕）。
-        let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);
-        let anchor = tail
-            .last()
-            .and_then(|e| e.seq)
-            .map(|s| s.value())
-            .unwrap_or(0);
-        if let Err(e) = super::super::port::reap(
-            store.as_ref(),
-            &frozen,
-            super::super::loop_rows::PORTS,
-            tail,
-            stale_turn,
-            anchor,
-            crate::symbio_core::clock_now_ms(),
-        ) {
-            // 收租失败不阻断新局面：那一笔欠账仍然在日志里开着（不静默当它死了）。
-            crate::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
-        }
-    }
     let (turn_no, user_seq, drive_seq, user_text) = match resume_kind {
         Some(kind) => {
             let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
@@ -191,6 +164,42 @@ pub(crate) fn begin_drive(
             (turn_no, seq.value(), seq.value(), text)
         }
     };
+    // ── 本次 drive 的 `now` = 刚落下这条唤醒事实的 `ts`（判据 12）─────────────
+    //
+    // 幕内每一次债求值都用这一个值。持久事实源在入库处给缺时刻的事件补落格时刻
+    // （`EventEnvelope::fallback_timestamp`），于是这个 `ts` 就是唤醒发生的那一
+    // 毫秒——停机跨了多久由这条事实带进日志，而不是由判决现读墙钟。
+    let now_ms = super::super::loop_rows::wake_now_ms(&store.range(Seq::new(drive_seq)), drive_seq);
+    // ── 收租（T-223）：上一段生命里派出去、没回来的调用 ─────────────────
+    //
+    // 看护点就是**恢复点**：唤醒事实的 `ts` 比上一世最后一条 `sent` 晚了一整个
+    // 停机区间，所以跨过进程重启的那笔一定已经超时。重试还是判死由
+    // `PortDecl.max_attempts` 定（`turn` 是 1 ⇒ 判死，因为等它的 future 已经没了）。
+    //
+    // 扫描窗口取**开幕前**那份快照的尾部（按视图声明的 4096 上界切）：被收的那几笔
+    // 属于它们自己那一轮，与刚落的唤醒格无关；切在开幕前也让 `anchor` 仍是上一世
+    // 的最后一条。
+    {
+        let tail = &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..];
+        let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);
+        let anchor = tail
+            .last()
+            .and_then(|e| e.seq)
+            .map(|s| s.value())
+            .unwrap_or(0);
+        if let Err(e) = super::super::port::reap(
+            store.as_ref(),
+            &frozen,
+            super::super::loop_rows::PORTS,
+            tail,
+            stale_turn,
+            anchor,
+            now_ms,
+        ) {
+            // 收租失败不阻断新局面：那一笔欠账仍然在日志里开着（不静默当它死了）。
+            crate::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
+        }
+    }
     let settings = context.session.settings();
     store
         .append(
@@ -237,6 +246,7 @@ pub(crate) fn begin_drive(
     turn.turn_no = turn_no;
     turn.user_seq = user_seq;
     turn.drive_seq = drive_seq;
+    turn.now_ms = now_ms;
     turn.facts = store.range(Seq::new(0));
     Ok(Drive {
         turn_no,

@@ -24,6 +24,9 @@ pub(crate) struct Prepared {
     pub(crate) turn: u64,
     /// 本幕锚（`drive_seq`）：续写幕复用轮号，端口的逻辑 id 必须带它——只带轮号会与
     /// 首幕撞成同一笔（首幕已经有过 `sent`，幂等键命中之后派发会被拒）。
+    ///
+    /// 它同时是**本次 drive 的时间锚**：幕首落的那条唤醒事实就在这个 seq 上
+    /// （见 [`Prepared::now_ms`]）。
     pub(crate) drive_seq: u64,
     /// 轮内**步号**（1 起）：第几次模型往返。模型端口的逻辑 id 带它——
     /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。
@@ -50,6 +53,16 @@ pub(crate) struct Prepared {
     pub(crate) pending_model: Option<LlmTurn>,
     /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
     pub(crate) pending_round: Option<StreamNodeFacts>,
+}
+
+impl Prepared {
+    /// 本次 `drive` 的 `now`：幕锚那条**唤醒事实**的 `ts`（判据 12 / PL-016 §2.1）。
+    ///
+    /// 切片取准备段读到的那一份，而用户格（或恢复格）在进运行器之前就落了 ⇒
+    /// 幕锚一定在里面。不在 ⇒ 0：宁可判「还没有任何时间条件成立」。
+    pub(crate) fn now_ms(&self) -> i64 {
+        super::super::loop_rows::wake_now_ms(&self.full_snapshot, self.drive_seq)
+    }
 }
 
 pub(crate) async fn prepare_turn<S>(

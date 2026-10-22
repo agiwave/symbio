@@ -234,6 +234,8 @@ async fn process_tool_resume_action(
     // 恢复执行的端口账：批准 / 重试 / 补充都要和批次分发走**同一套**
     // `request → granted → sent → response`。轮号与用户格取自事实面上那条
     // 未收束的轮——resume 发生在 `begin_drive` 之前，不能拿内存里的默认值。
+    // 幕锚同样还没有（恢复格在 `begin_drive` 里才落），填 0 ⇒ 本层的债求值拿到
+    // `now = 0`；这里的三笔工具债不读带时间的视图，判据与 `now` 无关。
     let tool_port = match session.facts() {
         Some(facts) => {
             let snapshot = facts.range(Seq::new(0));

@@ -254,6 +254,12 @@ pub(crate) struct TurnState {
     /// `turn_head` 只看这个号之后的阶段事实——同一轮号会被续写幕复用，
     /// 按轮扫全史会把首幕的格误判成「已做」。
     pub(crate) drive_seq: u64,
+    /// 本幕的 `now`：**唤醒事实的 `ts`**（判据 12 / PL-016 §2.1）。
+    ///
+    /// 幕内所有 `owed` / `next` / 带时间的视图都用它，不再各读一次墙钟——否则
+    /// 同一个日志重放两次会走两条路。幕首由 [`super::drive::begin_drive`] 从刚
+    /// 落格的那条事实读回；0 = 尚未开幕（与 `turn_no` 的默认值同义）。
+    pub(crate) now_ms: i64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
     pub(crate) facts: Vec<crate::symbio_core::Event>,
 }

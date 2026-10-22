@@ -600,6 +600,11 @@ impl TurnSession {
         self.run.turn
     }
 
+    /// 本次 drive 的 `now`（幕锚那条唤醒事实的 `ts`，判据 12）——派发器选债用它。
+    pub(crate) fn now_ms(&self) -> i64 {
+        self.run.now_ms()
+    }
+
     /// 停机收束：落兜底格且 `reason = exhausted`（`step_limit` / `no_progress`）。
     ///
     /// 派发器在「表里没有可还的债」或「执行体返回空且事实没长」时调用它；

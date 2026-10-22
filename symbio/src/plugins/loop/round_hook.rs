@@ -37,16 +37,12 @@ pub(crate) use crate::symbio_core::facts::ReportDraft;
 /// 刻意**不合成一条**：合起来就得靠「返回值有时有意义有时没有」来区分，那在
 /// 调用点读不出来。
 ///
-/// 入参是**本批次边界抽到用户补充的时刻**（`None` = 没抽到）。判定方（`chat_loop`
-/// 那边）拿不到队列，也不该拿到——这个事实只有正在翻批次边界的一侧知道，于是
-/// 「先抽干、后汇报 ⇒ 静默时钟归零」是一条**数据**而不是一句注释纪律：注释纪律
-/// 失效时没有任何测试会变红，入参会（裁决背景见
-/// [ADR-074](../../../../docs/010-adr/074.md "ADR-074")）。
+/// **没有入参**：判决要的两样东西都在日志里——本幕唤醒事实的 `ts`（`now`）与抽干
+/// 时落的补充格（静默锚），`report_due` 视图读它们。于是「先抽干、后汇报 ⇒ 静默
+/// 时钟归零」是一条**数据**，而判决路径上没有墙钟读数（PL-016 判据 12；这条纪律的
+/// 来历与载体变更见 [ADR-074](../../../../docs/010-adr/074.md "ADR-074")）。
 pub(crate) type RoundHookFn = Arc<
-    dyn Fn(
-            Option<i64>,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ReportDraft>> + Send>>
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ReportDraft>> + Send>>
         + Send
         + Sync,
 >;
