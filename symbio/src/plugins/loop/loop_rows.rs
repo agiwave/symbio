@@ -657,6 +657,37 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     debt.is_some()
 }
 
+/// 引擎的**选债口**：本幕当前最小的一笔可还债。
+///
+/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本函数回答「下一步谁欠」。
+/// 后者是 `turn_exec::drive_steps` 的唯一选债依据（ADR-118 决策 1–2）——
+/// 派发器不按行名 / 端口名 / 业务语义分支。过渡态里它只回答「还欠不欠」，
+/// 执行体注册表按 `by` 接线随后果 2 落地。
+pub(crate) struct Next {
+    /// 行名（日志与停机理由用）。
+    pub(crate) row: &'static str,
+    /// 执行体名。`drive` 已滤掉 `by: None`，这里必有值。
+    pub(crate) by: &'static str,
+    /// 债键的人读形状（日志用）。
+    pub(crate) key: String,
+}
+
+/// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
+///
+/// 这是 `ring::drive` 的生产包装：切片只含**本轮**事件（视图成本上界按轮），
+/// 并复用与 [`owes`] 同一份冻结声明表。装载失败返回 `None` 而不是 panic——
+/// 派发器据此停住，不拿半张表继续走。
+pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
+    let frozen = frozen()?;
+    let debt = crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now)?;
+    trace(&frozen, &debt);
+    Some(Next {
+        row: debt.decl.name,
+        by: debt.decl.by?,
+        key: debt.key.trace(),
+    })
+}
+
 /// 按声明求一个视图值（本轮切片）。未声明 / 扫描超界 ⇒ `None`。
 pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<Value> {
     frozen()?.eval(name, turn_slice(events, turn), now)

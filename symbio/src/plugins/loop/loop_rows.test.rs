@@ -970,3 +970,34 @@ fn tool_rows_do_not_disturb_the_model_rows() {
     assert!(!owes("authorize-tool", &events, 0));
     assert!(!owes("dispatch-tools", &events, 0));
 }
+
+// ── 派发器的选债口（T-233）────────────────────────────────────────────
+
+#[test]
+fn next_is_none_without_events() {
+    // 空表不前进：装载失败 / 还没有本幕事实时，派发器不能猜一个动作。
+    assert!(super::next(&[], 0, 0).is_none());
+}
+
+#[test]
+fn next_picks_execute_turn_while_the_turn_is_open() {
+    // 开着的幕欠一次执行；`execute-turn` 是当前最小可还债（其它策略都关着）。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let next = super::next(&events, 1, 0).expect("开着的幕应欠 execute-turn");
+    assert_eq!(next.row, "execute-turn");
+    assert_eq!(next.by, "execute");
+}
+
+#[test]
+fn next_is_none_once_the_turn_is_closed() {
+    // 收束格出现后，`execute-turn` 的出口命中；表里没有别的可还债。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(1, "chat.assistant.final", json!({"text": "ok"})),
+    ];
+    assert!(super::next(&events, 1, 0).is_none());
+}

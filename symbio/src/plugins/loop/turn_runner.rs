@@ -558,6 +558,27 @@ impl StepFlow {
         }
         stream::stream_round(&mut self.run, store, llm, tok, sink, tools, dispatch).await
     }
+
+    /// 本步属于哪一轮（派发器读事实切片与日志用）。
+    pub(crate) fn turn(&self) -> u64 {
+        self.run.turn
+    }
+
+    /// 停机收束：落兜底格且 `reason = exhausted`（`step_limit` / `no_progress`）。
+    ///
+    /// 派发器在「表里没有可还的债」或「执行体返回空且事实没长」时调用它；
+    /// 收束判据仍只有这一处写方（ADR-115 决策 3–4）。
+    pub(crate) async fn exhausted<S>(
+        &mut self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+        detail: &str,
+    ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        exceed_steps(&mut self.run, store, llm, detail).await
+    }
 }
 
 /// 一轮的步数上界（ADR-115 决策 3）："停机判据"而不是性能阀。
