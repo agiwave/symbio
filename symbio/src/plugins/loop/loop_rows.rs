@@ -44,16 +44,16 @@
 //!
 //! ## 装载期检查
 //!
-//! 首次查询时冻结声明表并跑 [`check_rows`]：`OrphanFact` 是**已知**的后续任务
-//! （协议四名 / `turn.dispatch` / `authz.denied`），记 info；其余缺口（无出口、
-//! 键不一致、未声明源）记 error。装载失败 ⇒ 表空 ⇒ 永不前进，但系统其余部分
-//! 照常运行（T-222 判据 6）。
+//! 首次查询时冻结声明表并跑 [`check_rows`]，**任何缺口都是拒绝**（PL-016 §3.4 末句
+//! 「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后装载返回 `None`，
+//! [`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要表再干活，
+//! 拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
 
 use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern, PortDecl};
+use crate::symbio_core::ring::{check_rows, owed, Decl, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
     builtin, Event, Frozen, LatencyTier, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED,
     EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
@@ -594,35 +594,44 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 冻结的声明表（进程内唯一）。装载失败 ⇒ `None`：所有 `owes` 恒假、环停在原处。
-static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
-    let frozen = match builtin() {
-        Ok(frozen) => frozen,
-        Err(errors) => {
-            crate::plugin_error!(
-                "session",
-                "[Loop] 事实 / 视图声明装载失败，义务环不再前进：{:?}",
-                errors
-            );
-            return None;
-        }
-    };
-    for gap in check_rows(ROWS, &frozen) {
-        match gap {
-            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧。装载期继续点名
-            // 而不是豁免。
-            Gap::OrphanFact { fact } => {
-                crate::plugin_info!("session", "[Loop] 声明的事实暂无行消费：{}", fact);
-            }
-            other => crate::plugin_error!("session", "[Loop] 行表装载期缺口：{:?}", other),
-        }
+/// 装载：冻结声明表 → 用行表跑装载期检查。
+///
+/// **任何缺口都是装载失败**——`check_rows` 报出的每一格（重复名 / 无出口 / 键不一致 /
+/// 未声明源 / 展开键不匹配 / 孤儿事实名）都进 Err 列表，不降级成告警：一个没人消费的
+/// 事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，它在装载期就该挡住启动。
+fn assemble(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<String>> {
+    let frozen =
+        builtin().map_err(|errors| vec![format!("事实 / 视图声明装载失败：{errors:?}")])?;
+    let gaps = check_rows(rows, &frozen);
+    if gaps.is_empty() {
+        return Ok(frozen);
     }
-    Some(frozen)
+    Err(gaps.iter().map(|g| format!("{g:?}")).collect())
+}
+
+/// 冻结的声明表（进程内唯一）。装载有任何缺口 ⇒ `None`，[`table`] 恒 `Err`。
+static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble(ROWS) {
+    Ok(frozen) => Some(frozen),
+    Err(gaps) => {
+        crate::plugin_error!(
+            "session",
+            "[Loop] 行表装载失败，义务环拒绝启动（开幕带错退出）：{:?}",
+            gaps
+        );
+        None
+    }
 });
 
 /// 冻结的声明表（租约看护者自己也要求它——它不重复装载一份）。
-pub(crate) fn table() -> Option<Arc<Frozen>> {
-    FROZEN.clone()
+///
+/// 装载有任何缺口 ⇒ `Err`：调用方（开幕）带着它退出，不存在「表没装好但轮照常跑」
+/// 这种部分成功。
+pub(crate) fn table() -> Result<Arc<Frozen>, crate::symbio_core::PluginError> {
+    frozen().ok_or_else(|| {
+        crate::symbio_core::PluginError::InternalError(
+            "义务环行表装载失败（装载期检查有缺口），本轮拒绝开幕；详见启动日志 [Loop] 行表装载失败".into(),
+        )
+    })
 }
 
 fn frozen() -> Option<Arc<Frozen>> {

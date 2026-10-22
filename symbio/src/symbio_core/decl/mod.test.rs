@@ -40,6 +40,9 @@ fn seq(e: &Event) -> u64 {
 #[test]
 fn builtin_loads_and_freezes() {
     let frozen = builtin().expect("首批声明必须能冻结");
+    // 名单即**控制面声明集**：每条都被某一行或某条被行用到的视图消费（判据 7）。
+    // 只在审计投影里读的断言格（`turn.dispatch` → `invariants::declared_budget_ms`）
+    // 不在这里——它仍是事件名表里的业务事实，只是不进表。
     let facts: Vec<_> = frozen.facts().iter().map(|f| f.name).collect();
     assert_eq!(
         facts,
@@ -58,7 +61,6 @@ fn builtin_loads_and_freezes() {
             "user.message",
             "turn.supplemented",
             "session.config",
-            "turn.dispatch",
             "authz.denied",
             "authz.granted",
         ]

@@ -92,6 +92,11 @@ pub(crate) fn begin_drive(
             "v2 执行需要持久会话（临时会话无事实源）".into(),
         ))
     })?;
+    // ── 行表是开幕的前提（PL-016 §3.4：装载失败即拒绝启动，不许部分成功）──────
+    //
+    // 装载期任何缺口都让 [`table`](super::super::loop_rows::table) 恒 `Err`。这里不
+    // 「跳过收租继续开新幕」——没有表就没有 `owed`，那一幕只会静默停在原处。
+    let frozen = super::super::loop_rows::table().map_err(super::state::TurnExit::Failed)?;
     let snapshot = store.range(Seq::new(0));
     // ── 先收租（T-223）：上一段生命里派出去、没回来的调用 ─────────────────
     //
@@ -101,7 +106,7 @@ pub(crate) fn begin_drive(
     //
     // 切片按声明的扫描上界（4096）取尾部：租约要看的只是最近那几笔在途，
     // 超过上界就交给调用方分层而不是让视图静默算不出来。
-    if let Some(frozen) = super::super::loop_rows::table() {
+    {
         let tail = &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..];
         // 被收的那几笔属于**它们自己那一轮**（往往不是即将开的这一幕）。
         let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);

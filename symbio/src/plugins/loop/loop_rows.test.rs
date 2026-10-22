@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::{PORTS, ROWS};
-use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap};
+use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
 use crate::symbio_core::{builtin as declarations, Frozen};
 use crate::symbio_core::{Entity, Event, Seq, Verb};
 
@@ -486,34 +486,130 @@ fn rows_are_stable_and_globally_ordered() {
     );
 }
 
+// ── 装载期检查的反面夹具（T-239：装载失败即拒绝启动）──────────────────────
+//
+// 每个夹具只破一道检查，好让「拒绝装载」逐条有名：行名就是它破的那一格。
+
+const fn pat(source: &'static str, key: &'static [&'static str]) -> Pattern {
+    Pattern {
+        source,
+        key,
+        eq: &[],
+    }
+}
+
+const fn row(
+    name: &'static str,
+    owes: Pattern,
+    until: &'static [Pattern],
+    expand: Option<(&'static str, &'static str)>,
+) -> Decl {
+    Decl {
+        name,
+        prio: 1,
+        by: Some("execute"),
+        tier: crate::symbio_core::LatencyTier::Fast,
+        owes,
+        expand,
+        until,
+        unless: &[],
+    }
+}
+
+static CLOSED: &[Pattern] = &[pat("turn_closed", &[])];
+static CLOSED_TURN: &[Pattern] = &[pat("turn_closed", &["turn"])];
+static SENT: &[Pattern] = &[pat("sent", &[])];
+static SENT_ID: &[Pattern] = &[pat("sent", &["id"])];
+
+static GAP_DUP: &[Decl] = &[
+    row("dup", pat("user.message", &[]), CLOSED, None),
+    row("dup", pat("user.message", &[]), CLOSED, None),
+];
+static GAP_NO_EXIT: &[Decl] = &[row("no-exit", pat("user.message", &[]), &[], None)];
+static GAP_KEY_MISMATCH: &[Decl] = &[row(
+    "key-mismatch",
+    pat("user.message", &["port", "id"]),
+    CLOSED_TURN,
+    None,
+)];
+static GAP_UNKNOWN_SOURCE: &[Decl] = &[row("unknown-source", pat("nope.fact", &[]), CLOSED, None)];
+static GAP_EXPAND_KEY: &[Decl] = &[row(
+    "expand-key-missing",
+    pat("response", &[]),
+    SENT,
+    Some(("calls", "id")),
+)];
+static GAP_UNDECLARED_EXPAND: &[Decl] = &[row(
+    "undeclared-expand",
+    pat("response", &["id"]),
+    SENT_ID,
+    Some(("nope", "id")),
+)];
+
 #[test]
-fn every_row_is_closed_and_every_used_source_declared() {
-    let gaps = check_rows(ROWS, &frozen());
-    assert!(
-        gaps.iter().all(|g| matches!(g, Gap::OrphanFact { .. })),
-        "行表自身的缺口（无出口 / 键不一致 / 源未声明）：{gaps:?}"
-    );
+fn the_production_table_loads_with_no_gap() {
+    // 判据 7 / 11 的正面：生产行表 + 生产声明表**零缺口**。装载失败即拒绝启动，
+    // 所以「零缺口」不是一条可以带过的告警，而是能开幕的唯一条件。
+    let frozen = super::assemble(ROWS).expect("行表装载必须无缺口，否则义务环拒绝启动");
+    assert!(check_rows(ROWS, &frozen).is_empty());
 }
 
 #[test]
-fn facts_without_a_row_are_pinned() {
-    // 「每个声明的事实都有归宿」的缺口不能静默消失：下列每一条都是**已知**的
-    // 后续任务，而不是遗漏。
+fn every_kind_of_load_gap_refuses_to_load() {
+    // 反向用例：每种缺口各造一行，装载逐条点名并拒绝（不降级成 info / error 日志）。
+    let cases: &[(&str, &[Decl], &str)] = &[
+        ("重复行名", GAP_DUP, "DuplicateName"),
+        ("无出口的行", GAP_NO_EXIT, "NoExit"),
+        ("键不一致的行", GAP_KEY_MISMATCH, "KeyMismatch"),
+        ("源没声明的行", GAP_UNKNOWN_SOURCE, "UnknownSource"),
+        (
+            "展开元素键不在 owes.key",
+            GAP_EXPAND_KEY,
+            "ExpandKeyMissing",
+        ),
+        (
+            "展开字段未在事实声明",
+            GAP_UNDECLARED_EXPAND,
+            "UndeclaredExpand",
+        ),
+        ("声明了却没人消费的事实名", &[], "OrphanFact"),
+    ];
+
+    for (label, rows, needle) in cases {
+        let gaps = super::assemble(rows)
+            .err()
+            .unwrap_or_else(|| panic!("{label}：有缺口的行表必须拒绝装载"));
+        assert!(
+            gaps.iter().any(|g| g.contains(needle)),
+            "{label} 应当点名 {needle}，实际缺口：{gaps:?}"
+        );
+    }
+}
+
+#[test]
+fn declared_facts_all_have_a_row_home() {
+    // 「每个控制面声明的事实都有归宿」（判据 7）钉在这里：孤儿事实名会让装载
+    // 直接拒绝，而它防的是「拼错的名字静默永不被消费」。
     //
-    //   turn.dispatch —— T-225 档位事实，读方是 core 的派生函数
-    //
-    // 协议五名已由端口行全部接住（`request` / `sent` / `response` / `failed` /
-    // `retry` → dispatch / await / lease）；`authz.granted` / `authz.denied` 由
-    // `authorize-tool` 与 `dispatch-tools` 接住（T-226 / T-227 步 3）。
-    let gaps = check_rows(ROWS, &frozen());
-    let orphans: Vec<_> = gaps
+    // `turn.dispatch` 因此**不在声明集**：它的读方是审计投影
+    // （`invariants::declared_budget_ms`），表里没有一行以它为前件或出口——
+    // 按口径它是业务事实，归投影管，不该挂进表里当孤儿。
+    let frozen = frozen();
+    let orphans: Vec<_> = check_rows(ROWS, &frozen)
         .iter()
         .filter_map(|g| match g {
             Gap::OrphanFact { fact } => Some(*fact),
             _ => None,
         })
         .collect();
-    assert_eq!(orphans, vec!["turn.dispatch"]);
+    assert!(
+        orphans.is_empty(),
+        "声明集里仍有没人消费的事实名：{orphans:?}"
+    );
+    assert!(
+        frozen.fact("turn.dispatch").is_none(),
+        "turn.dispatch 不该在控制面声明集里（它没有行消费者）"
+    );
 }
 
 // ── 端口 `turn` 的三行（T-223）─────────────────────────────────────────

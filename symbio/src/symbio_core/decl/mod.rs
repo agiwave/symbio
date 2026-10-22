@@ -37,19 +37,25 @@
 //! 视图自己读时钟，同一份日志重放两次必须得到同一结果（ADR-115 决策 1）。
 //! PL-016 判据 3（视图互不可见）因此落在类型上，不落在纪律上。
 //!
-//! ## 首批声明
+//! ## 首批声明（= 控制面声明集）
 //!
-//! 16 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
+//! 16 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本五格
 //! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
 //! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
-//! `turn.dispatch`、`authz.denied`、`authz.granted`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
+//! `authz.denied`、`authz.granted`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
 //! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
+//!
+//! **进这张表的唯一资格**：某一行以它为 `owes` / `until` / `unless`，或某条**被行用到的**
+//! 视图读它（PL-016 判据 7 的控制面声明集）。只在审计 / SLO 投影里读的断言格不进表——
+//! `turn.dispatch` 是这一类的现例：它的读方是 `invariants::declared_budget_ms`，
+//! 表里没有一行以它为前件或出口，所以它是业务事实，归投影管（判据 7 不约束业务事实，
+//! 强迫它们各挂一行只会造出装饰行）。
 //!
 //! 视图点名决定了事实的**下限**：`in_flight` 读三个协议名（`sent` / `response` /
 //! `failed` / `retry`），`stale_sent` 读 `sent` 的租约两字段（`lease_ms` /
 //! `attempt_cap`）与三个出口，`turn_head` 读 `user.message` / `turn.stage` /
 //! `session.config`，`turn_stages` 与 `turn_closed` 读本幕锚之后的阶段 / 收束格，
-//! `report_due` 读助手文本六格 / `turn.supplemented` / `turn.stage`（恢复幕）/
+//! `report_due` 读助手文本五格 / `turn.supplemented` / `turn.stage`（恢复幕）/
 //! `session.config` + `now`。
 //!
 //! ## 生产接线
@@ -427,14 +433,10 @@ const BUILTIN_FACTS: &[FactDecl] = &[
             "is_persistent",
         ],
     },
-    // 本轮派发档（T-225）：用户格先落、档位后定 ⇒ 两者分开记（见事件常量文档）。
-    FactDecl {
-        name: "turn.dispatch",
-        port: None,
-        key: &[],
-        expand: &[],
-        fields: &["tier", "budget_ms", "principal"],
-    },
+    // 本轮派发档（`turn.dispatch`）**不在本表**：表里没有一行以它为前件或出口，
+    // 也没有一条被行用到的视图读它；它的读方是审计投影
+    // （`invariants::declared_budget_ms`）。按判据 7 的口径它是业务事实，
+    // 名字与写方都照旧，只是不进控制面声明集。
     // 拒绝事实（T-219）：`key` 是「主体 × 能力 × 资源」的编码。
     FactDecl {
         name: "authz.denied",
