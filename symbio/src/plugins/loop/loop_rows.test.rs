@@ -806,7 +806,7 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
 
 #[test]
 fn an_aborted_tool_closes_the_await_with_its_own_reason() {
-    let mut events = vec![
+    let events = vec![
         tool_request("c-1"),
         tool_granted("c-1"),
         tool_sent("c-1"),
@@ -823,14 +823,17 @@ fn an_aborted_tool_closes_the_await_with_its_own_reason() {
         Some(&json!("aborted")),
         "中止与批次尾的 not_executed 必须可区分"
     );
+}
 
+#[test]
+fn a_supplement_does_not_answer_the_in_flight_tool() {
     // 补充（用户插话）不是工具应答：它既不关派发行、也不关等待行。
-    events.pop();
-    events.push(ev(
-        1,
-        "user.message",
-        json!({ "text": "等一下", "id": "u-2" }),
-    ));
+    let events = vec![
+        tool_request("c-1"),
+        tool_granted("c-1"),
+        tool_sent("c-1"),
+        ev(1, "user.message", json!({ "text": "等一下", "id": "u-2" })),
+    ];
     assert!(!owes("dispatch-tools", &events, 0));
     let wait = owed(ROWS, &frozen(), &events, 0)
         .into_iter()
