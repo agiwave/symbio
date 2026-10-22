@@ -470,6 +470,8 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.compress",
             "policy.recall",
             "policy.reflex",
+            // 收束（T-244 步 5）：前件是 `turn.has_final`，执行体是 `close`。
+            "close-turn",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
             // （T-223 的 `turn` / T-227 步 2 的 `model` / 步 3 的 `tool`）；
@@ -496,6 +498,8 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Reflex,
+            crate::symbio_core::LatencyTier::Reflex,
+            // 收束入格不调模型：反射档（T-244 步 5）。
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
@@ -529,10 +533,25 @@ const fn row(
     until: &'static [Pattern],
     expand: Option<(&'static str, &'static str)>,
 ) -> Decl {
+    row_by(name, owes, until, expand, "execute")
+}
+
+/// [`row`] 的另一半：`by` 可以指到别的执行体。
+///
+/// 只给「两行共享一个出口事实集」那类夹具用——T-244 步 5 之后表里有两个执行体
+/// （`execute` 写 `fallback`、`close` 写 `final`），一条真环需要两个名字，
+/// 单执行体的旧造法已经被出口的收窄拆掉了。
+const fn row_by(
+    name: &'static str,
+    owes: Pattern,
+    until: &'static [Pattern],
+    expand: Option<(&'static str, &'static str)>,
+    by: &'static str,
+) -> Decl {
     Decl {
         name,
         prio: 1,
-        by: Some("execute"),
+        by: Some(by),
         tier: crate::symbio_core::LatencyTier::Fast,
         owes,
         expand,
@@ -578,20 +597,24 @@ static GAP_UNDECLARED_FIELD: &[Decl] = &[row(
     CLOSED_TURN,
     None,
 )];
-// 第 1 条：两行都绑 `execute`，而它同时写得出两行的出口（`chat.assistant.final` /
-// `fallback`）——于是 a 等 b、b 也等 a。一格执行体就够造环，不需要两份注册。
+// 第 1 条：`cycle-a` 的出口格由 `cycle-b` 的执行体写，反向也一样——两行互相等对方
+// 跑一次。一格执行体不够造环（自环 exempt），两个名字才成环：`execute` 写
+// `fallback`、`close` 写 `final`，所以 a 绑 `execute` 出口写 `final`，b 绑 `close`
+// 出口写 `fallback`，边 `a → b`（b 的执行体写得出 a 的出口）与 `b → a` 同时成立。
 static GAP_CYCLE: &[Decl] = &[
-    row(
+    row_by(
         "cycle-a",
         pat("user.message", &["turn"]),
         &[pat("chat.assistant.final", &["turn"])],
         None,
+        "execute",
     ),
-    row(
+    row_by(
         "cycle-b",
         pat("user.message", &["turn"]),
         &[pat("chat.assistant.fallback", &["turn"])],
         None,
+        "close",
     ),
 ];
 
@@ -1154,6 +1177,82 @@ fn next_picks_execute_turn_while_the_turn_is_open() {
     assert_eq!(next.by, "execute");
 }
 
+/// 一条空 `calls` 的模型应答（「答完了」那一格）。
+fn model_answer(turn: u64, id: &str) -> Event {
+    ev(
+        turn,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({ "port": "model", "id": id, "attempt": 1, "calls": [] }),
+    )
+}
+
+/// 收束行（T-244 步 5）：答完了就欠一次入格，且它比执行行**先**被选中（55 < 60）。
+///
+/// 这条裁决序是这一格存在的全部理由：日志上已经有「没有工具调用的应答」时，
+/// 下一个动作必须是入格，而不是再跑一次模型往返。
+#[test]
+fn close_row_owes_only_after_an_answer_without_calls() {
+    let open = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert!(!owes("close-turn", &open, 0), "还没有模型应答 ⇒ 不欠收束");
+
+    let with_calls = vec![
+        open[0].clone(),
+        open[1].clone(),
+        ev(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({
+                "port": "model",
+                "id": "m-1",
+                "attempt": 1,
+                "calls": [{ "port": "tool", "id": "c-1" }],
+            }),
+        ),
+    ];
+    assert!(
+        !owes("close-turn", &with_calls, 0),
+        "最近一条应答还带工具调用 ⇒ 该还的是工具批次"
+    );
+
+    let mut answered = with_calls[..2].to_vec();
+    answered.push(model_answer(1, "m-2"));
+    assert!(owes("close-turn", &answered, 0), "应答落地 ⇒ 欠一次入格");
+
+    let mut landed = answered.clone();
+    landed.push(ev(1, "chat.assistant.final", json!({ "text": "答完了" })));
+    assert!(!owes("close-turn", &landed, 0), "`final` 命中出口 ⇒ 关门");
+
+    // 空答兜底那一格不在 `until` 里（两行共享出口会让第 1 条成环，理由写在行的注释上），
+    // 它靠**前件**关门：兜底一落 `closed` 真 ⇒ `has_final` 假 ⇒ 这笔债不再开账。
+    let mut fell_back = answered;
+    fell_back.push(ev(
+        1,
+        "chat.assistant.fallback",
+        json!({ "text": "", "status": "error" }),
+    ));
+    assert!(
+        !owes("close-turn", &fell_back, 0),
+        "兜底格落下 ⇒ 前件自己关门，不留一笔永不兑现的债"
+    );
+}
+
+#[test]
+fn next_picks_close_turn_before_execute_turn_once_answered() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        model_answer(1, "m-1"),
+    ];
+    let next = super::next(&events, 1, 0).expect("答完了的幕欠一次收束");
+    assert_eq!(next.row, "close-turn");
+    assert_eq!(next.by, super::CLOSE);
+    let run: super::super::turn_exec::Action = super::super::turn_exec::run_close;
+    assert!(std::ptr::fn_addr_eq(next.action, run));
+}
+
 #[test]
 fn next_is_none_once_the_turn_is_closed() {
     // 收束格出现后，`execute-turn` 的出口命中；表里没有别的可还债。
@@ -1294,32 +1393,31 @@ fn the_overlap_report_on_the_production_table() {
         .iter()
         .map(|o| (o.rows[0], o.rows[1], o.facts.as_slice()))
         .collect();
+    // `turn_head` 自 T-244 步 5 起多读两类格（`has_final` 的前件：模型响应的
+    // `calls` + 两条收束格），凡是共用这个幕头的相交对，名单就一起变宽——
+    // 这正是第 4 条要「点名而不只报非空」的理由。
+    let head: &[&str] = &[
+        "chat.assistant.fallback",
+        "chat.assistant.final",
+        "response",
+        "session.config",
+        "turn.stage",
+        "user.message",
+    ];
     assert_eq!(
         rendered,
         vec![
             // 三行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
-            (
-                "policy.classify",
-                "policy.compress",
-                &["session.config", "turn.stage", "user.message"][..]
-            ),
-            (
-                "policy.classify",
-                "policy.recall",
-                &["session.config", "turn.stage", "user.message"][..]
-            ),
-            (
-                "policy.compress",
-                "policy.recall",
-                &["session.config", "turn.stage", "user.message"][..]
-            ),
-            // 反射快路与整轮执行同键 `(turn)`：`skill_hit` 与 `resumed` 互斥由视图折，
-            // 装载期只报「可能」。
-            (
-                "policy.reflex",
-                "execute-turn",
-                &["session.config", "turn.stage", "user.message"][..]
-            ),
+            ("policy.classify", "policy.compress", head),
+            ("policy.classify", "policy.recall", head),
+            ("policy.compress", "policy.recall", head),
+            // 反射快路 / 收束 / 整轮执行同键 `(turn)`：`skill_hit` 与 `resumed` 互斥由
+            // 视图折，装载期只报「可能」。
+            ("policy.reflex", "close-turn", head),
+            ("policy.reflex", "execute-turn", head),
+            // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
+            // 谁先还得由前件（`has_final`）与 `prio` 决——报告不知道这些。
+            ("close-turn", "execute-turn", head),
             // 租约看护读 `stale_sent`，它与创建行 / 三行 await 的前件折出同一批协议格。
             ("open-tools", "lease", &["response"]),
             ("await-turn", "lease", &["sent"]),

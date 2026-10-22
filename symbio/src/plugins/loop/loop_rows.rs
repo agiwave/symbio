@@ -15,6 +15,7 @@
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
 //! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
 //! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
+//! 55 close-turn    ── 收束：本幕最近一次模型应答没有工具调用（T-244 步 5）
 //! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
 //! 66 dispatch-model─ 端口派发：模型往返（T-227 步 2，在 `turn` 执行体内部）
@@ -62,7 +63,7 @@ use crate::symbio_core::{
     EVENT_TURN_STAGE,
 };
 
-/// 这张表里**唯一有执行体的名字**：`execute`（整轮执行体）。
+/// 这张表里**接了线的两个名字**：`execute`（整轮执行体）与 `close`（收束执行体）。
 ///
 /// `by` 只有两种取值（PL-016 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（ADR-118 订正 1）——
@@ -78,6 +79,8 @@ use crate::symbio_core::{
 /// 协议四格（`request` / `sent` / `response` / `failed` / `retry`）不在任何执行体的
 /// `writes` 里——它们只由引擎写（§2.3）。
 const EXECUTE: &str = "execute";
+/// 收束执行体（T-244 步 5）：把寄存的那一次应答落成收束格。
+const CLOSE: &str = "close";
 
 const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     name: EXECUTE,
@@ -86,7 +89,6 @@ const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
     reads: &[],
     writes: &[
-        EVENT_ASSISTANT_FINAL,
         EVENT_ASSISTANT_FALLBACK,
         EVENT_ASSISTANT_PROGRESS,
         EVENT_ASSISTANT_OPENING,
@@ -96,6 +98,24 @@ const ACTOR_EXECUTE: ActorDecl = ActorDecl {
         EVENT_ARTIFACT_ADDED,
         EVENT_SESSION_CONSOLIDATED,
         EVENT_AUTHZ_GRANTED,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// 收束执行体（T-244 步 5）：它不调模型，只把寄存的那一次应答落成收束格。
+///
+/// `writes` 里**没有** `chat.assistant.final` 之外的账：`finalize` 之前那半段
+/// （模型往返、工具批次）归 [`ACTOR_EXECUTE`]，这一格只从「应答已寄存」走到
+/// 「本幕收束」。`authz.denied` 是写侧闸拒那一条路留下的否定事实（C4），
+/// 它和收束格同一次动作里落，所以也在名单上。
+const ACTOR_CLOSE: ActorDecl = ActorDecl {
+    name: CLOSE,
+    // 收束就是「把已经拿到手的应答入格」：反射档，不调模型。
+    mode: LatencyTier::Reflex,
+    reads: &[],
+    writes: &[
+        EVENT_ASSISTANT_FINAL,
+        EVENT_ASSISTANT_FALLBACK,
         EVENT_AUTHZ_DENIED,
     ],
 };
@@ -113,10 +133,16 @@ pub(crate) struct ActorEntry {
     pub(crate) run: super::turn_exec::Action,
 }
 
-static ACTORS: &[ActorEntry] = &[ActorEntry {
-    decl: ACTOR_EXECUTE,
-    run: super::turn_exec::run_execute,
-}];
+static ACTORS: &[ActorEntry] = &[
+    ActorEntry {
+        decl: ACTOR_EXECUTE,
+        run: super::turn_exec::run_execute,
+    },
+    ActorEntry {
+        decl: ACTOR_CLOSE,
+        run: super::turn_exec::run_close,
+    },
+];
 
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
 pub(crate) fn actor_decls() -> Vec<ActorDecl> {
@@ -387,6 +413,53 @@ pub(crate) static ROWS: &[Decl] = &[
         },
         until: &[Pattern {
             source: "turn_closed",
+            key: &["turn"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    // ── 收束（T-244 步 5）─────────────────────────────────────────────────
+    //
+    // 「答完了还没入格」是一笔独立的账：前件是日志上的 `turn.has_final`
+    // （本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
+    // ADR-121 决策 2），执行体是 [`CLOSE`]——方案（PL-017 §3.1）要的就是一个
+    // 独立的 `closer`，不是整轮执行体里的第四个内部动作。它排在 `execute-turn`
+    // **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，而不是再跑一次
+    // 模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
+    //
+    // ## 出口只写 `final`，不写 `fallback`（与方案的一格偏差，理由在这里）
+    //
+    // 方案给的是 `final | fallback`。今天照抄会撞 §3.4 第 1 条：`execute-turn` 与
+    // `close-turn` 共用同一个出口事实集，而两个执行体都写得住里面的格
+    // （`execute` 写错误路径的 `fallback`，`close` 写 `final`），依赖图于是同时有
+    // `close → execute` 与 `execute → close` 两条边——两节点环，装载红。
+    // 环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是字节判据面，
+    // 改它要挂 ADR；这里按判据的字面收窄：每一行的出口只留**自己那个执行体**写的格。
+    //
+    // 空答兜底（正文与思考都空 ⇒ `halt` 落 `fallback`）因此不走 `until` 关门，
+    // 而是由前件自己关门：`fallback` 一落，`closed` 真 ⇒ `has_final` 假 ⇒ 这笔债
+    // 不再开账。少了一次「出口命中」的显形，多了一条依赖前件的说法——这是粗端口期
+    // 的过渡形状，细端口接上、`execute-turn` 那行退场之后按方案复原成 `final | fallback`
+    // （届时无共享出口，环自然消失）。差异记在 T-244 的处理过程。
+    //
+    // ## 它只管「答完了」这一条收束路径
+    //
+    // 中止 / 适配器失败 / 步数到顶那三格兜底**仍由执行体内部直接落**：那些幕压根
+    // 没有一条「空 `calls` 的模型响应」，`has_final` 不成立，收束行不开账。
+    Decl {
+        name: "close-turn",
+        prio: 55,
+        by: Some(CLOSE),
+        // 入格不调模型：反射档（比执行体的 `mode` 更慢就装载红，第 6 条的 mode 闸门）。
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn"],
+            eq: &[("has_final", Lit::Bool(true))],
+        },
+        until: &[Pattern {
+            source: EVENT_ASSISTANT_FINAL,
             key: &["turn"],
             eq: &[],
         }],

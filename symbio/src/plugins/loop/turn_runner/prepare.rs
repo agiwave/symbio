@@ -53,6 +53,14 @@ pub(crate) struct Prepared {
     pub(crate) pending_model: Option<LlmTurn>,
     /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
     pub(crate) pending_round: Option<StreamNodeFacts>,
+    /// 应答已落、**收束还没发生**时的寄存位（T-244 步 5）。
+    ///
+    /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
+    /// [`Prepared::pending_model`] 的形状是「本轮有工具调用、还没派发」——
+    /// 执行体按后者选动作（`has_pending_batch`），揉在一起会让收束幕去派发
+    /// 一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取应答与
+    /// 节点事实，落 `chat.assistant.final` / `fallback`。
+    pub(crate) closing: Option<(LlmTurn, StreamNodeFacts)>,
 }
 
 impl Prepared {
@@ -373,5 +381,6 @@ where
         nodes,
         pending_model: None,
         pending_round: None,
+        closing: None,
     })))
 }

@@ -87,3 +87,43 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   场景二不补端口用例：补充不产生任何端口事实，判据归行表用例
   `a_supplement_does_not_answer_the_in_flight_tool`（已有的那条），本任务只确认
   **没有**新增 `await` 出口。生产代码零改动，`cargo test --lib` 2073 通过 / 0 失败。
+- 2026-10-23 步 5 第一批（`close-turn` 进表 + `turn.has_final` 进视图声明）。
+  [PL-017](../004-plan/017-端口细粒度化.md "PL-017-端口细粒度化") §3.1 收束那一行落地：
+  `close-turn`（prio 55，赶在 `execute-turn` 的 60 前）+ 独立执行体 `close`，前件按
+  [ADR-121](../010-adr/121.md "ADR-121") 决策 2 的口径折进视图 `turn_head`——`ver` 3 → 4，
+  `reads` 加 `response.port` / `response.calls` 与两条收束格的 `text`。写入侧
+  `halt` 仍是收束格唯一写方，只是多了一个调用点（`ModelRound::Close` 不再内联收束，
+  应答寄存于 `Prepared::closing`）。
+  **两处与 §3.1 的字面偏差，都是过渡形状**：
+  ① 出口收窄成只有 `chat.assistant.final`，`chat.assistant.fallback` 暂留 `execute-turn`。
+  原因是装载期检查的边定义（「b 的执行体写得出 a 的出口格 ⇒ 边 a→b」）：粗端口期两行
+  若共享 `{final, fallback}` 出口集，`execute` 与 `close` 两个执行体互为对方的出口写方，
+  表直接以 `DependencyCycle ["close-turn","execute-turn","close-turn"]` 拒装。
+  收窄后两个执行体各写一格、两条边指向不同行，环消失、表装得上。复原条件与时间：
+  步 5b 把 `authorize-tool` / `dispatch-tools` 接回执行体、`execute-turn` 退成薄壳之后，
+  按 §3.1 恢复 `final | fallback`。
+  ② 口径 3 的「`chat.assistant.final` / `chat.assistant.fallback` **经它收口**」本批只算
+  部分兑现：走 `close-turn` 的只有「答完了」这一条路径。中止 / 工具失败 / `step_limit`
+  三条兜底格仍在执行体内部直接落——那些幕里没有一次 `calls` 为空的模型应答，
+  `has_final` 的前件门关着，`close-turn` 判不出欠账。要接管它们得先给「没收束且不会再
+  有应答」立一个视图字段，那是步 5d 之后的事，不在本批范围。
+  **本批新增一条有名有姓的旁路**（口径 1「续写幕特例由行表语义接管**或**有名有姓留档」，
+  本批走后半句）：`turn_exec.rs::run_execute` 的首分支读 `has_pending_close()`。续写幕
+  带着「已落应答、未收束」的草稿进来，而派发器的选债口只看**本轮事件切片**——那条
+  `response` 在归档段里，切片读不到 ⇒ `close-turn` 判不出欠账；没有这一分支就反复跑
+  模型直到 `step_limit`。反向判据实测：删掉该分支 ⇒
+  `an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor` 转
+  `Failed(InternalError("step_limit"))`。删除条件写在 `TurnSession::has_pending_close`
+  的文档里：步 5d 退役 `resume.rs` 的 `resumed` 旁路时，连同它一起删。
+  用例：`loop_rows.test.rs` 三条（前件真值 / 反向钉「有调用时不欠」/ `next` 在答完后
+  先派 `close-turn`）+ `decl/mod.test.rs` 三条（`has_final` 正向、四种「还没答完」的形状、
+  幕锚之前的响应不算）。门禁：`cargo test --lib` 2078 通过 / 0 失败，
+  `cargo clippy --all-targets -p symbio -- -D warnings` 干净，CS-001 ✓（core 形状未变宽），
+  PTS-001…004 ✓（`decl/ring.rs` 字节未变）。非注释生产代码 +112 行（熔断线 300）。
+  CLI 实证（会话 `cli1a165d53fcc0`，Provider `LMStudio`，两幕）：第二幕日志里
+  `[Loop] 派发 execute-turn（执行体 execute…）` 之后模型应答落 `calls: []`，紧接
+  `[Loop] 行 close-turn 可还（reflex / 80ms；债 turn=1）` 与
+  `[Loop] 派发 close-turn（执行体 close；债 turn=1）`，收束格由它落出（WAL seq 20→21）——
+  收束第一次是**行表派发的**，不是执行体内联的。`obligation-ring-accept --strict` 的
+  J1…J7 全项通过；J8 仍报 `HTTP 2 ≠ sent(model) 2 + 豁免未入账 1`，差额是 classify 短路轮
+  在插件内部打的那次模型往返，与本批无关，归 [T-247](247-插件内部模型往返进环.md "T-247-插件内部模型往返进环")。

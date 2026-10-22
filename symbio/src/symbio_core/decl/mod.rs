@@ -702,7 +702,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
 
-/// 轮头（T-222a 升到 v3）：五个策略行的**开账条件**全在这一格里。
+/// 轮头（T-244 步 5 升到 v4）：五个策略行的开账条件全在这一格里，收束行也是。
 ///
 /// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
 /// 召回阶段的结论，`resumed` 区分续写幕与用户新发言。
@@ -754,6 +754,38 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             && after_anchor(e, anchor_seq)
             && str_field(e, "result") == Some("hit")
     });
+    // 本幕是否已收束（与 [`turn_closed`] 同一判法：幕锚之后出现过收束格）。
+    let closed = events.iter().any(|e| {
+        e.turn == turn
+            && matches!(
+                e.kind.as_str(),
+                "chat.assistant.final" | "chat.assistant.fallback"
+            )
+            && after_anchor(e, anchor_seq)
+    });
+    // 收束该不该发生（ADR-121 决策 2）：口径钉在日志上——**本幕最近一条
+    // `response(port=model)` 的 `calls` 为空**（`expand: ["calls"]` 是「这条响应要不要
+    // 转出工具债」的唯一数据面），且本幕未收束。执行体手里那份草稿不参与判定，
+    // 否则崩溃恢复之后「答完了没」就成了假话。
+    //
+    // `calls` 取不到数组 ⇒ 不算收束（宁可让 `close-turn` 不开账，也不拿一个来路不明的
+    // 形状把没答完的一轮判成答完）；没有响应（首步就中止 / 失败的轮）同理。
+    let has_final = !closed
+        && events
+            .iter()
+            .filter(|e| {
+                e.turn == turn
+                    && e.kind == "response"
+                    && str_field(e, "port") == Some("model")
+                    && after_anchor(e, anchor_seq)
+            })
+            .max_by_key(|e| seq_of(e))
+            .is_some_and(|e| {
+                e.payload
+                    .get("calls")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|calls| calls.is_empty())
+            });
     serde_json::json!({
         "turn": turn,
         "round": round,
@@ -767,6 +799,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "is_persistent": flag("is_persistent"),
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
+        "has_final": has_final,
     })
 }
 
@@ -964,13 +997,14 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: stale_sent,
     },
-    // 轮头（T-222a 升到 v3）：五个策略行的开账条件全在这一格里。
+    // 轮头（T-244 步 5 升到 v4）：五个策略行的开账条件 + `close-turn` 的开账条件。
     //
-    // 与 v2 的两处差别：`done` 三格按**幕锚**折叠（续写幕复用轮号），并加入
-    // `resumed` / `skill_hit`——反射行从此也只读日志，不再拿执行侧的内存布尔。
+    // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，
+    // 因此读面要连收束格与模型响应的 `calls` 一起声明——视图声明的字段名是装载期
+    // 的孤儿事实判据（`OrphanFact`）的输入，声明与算法不一致就是给表少报一条边。
     ViewDecl {
         name: "turn_head",
-        ver: 3,
+        ver: 4,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -979,6 +1013,10 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("session.config", "classify_enabled"),
             ("session.config", "auto_compress"),
             ("session.config", "is_persistent"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "calls"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
         ],
         cost: 4096,
         eval: turn_head,

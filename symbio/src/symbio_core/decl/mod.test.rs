@@ -132,10 +132,11 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：T-222a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
     // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
-    // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2。
+    // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
+    // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 3);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 4);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
@@ -542,7 +543,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "compress_done": false,
             "is_persistent": true,
             "recall_done": true,
-            "skill_hit": true
+            "skill_hit": true,
+            "has_final": false
         })
     );
 
@@ -642,6 +644,102 @@ fn turn_head_reads_classify_switch_from_config_fact() {
         turn_head(&events, 5)["classify_enabled"],
         json!(true),
         "同一轮多份配置时取最后一份（恢复幕会追加新快照）"
+    );
+}
+
+/// 模型应答：`calls` 为给定数组（空数组 = 「答了话、没要工具」）。
+fn model_response(turn: u64, id: &str, calls: Value) -> Event {
+    ev(
+        turn,
+        EVENT_RESPONSE,
+        json!({ "port": "model", "id": id, "attempt": 1, "calls": calls }),
+    )
+}
+
+#[test]
+fn turn_head_has_final_reads_the_latest_model_response_calls() {
+    // ADR-121 决策 2：`has_final` 是**视图字段**，口径钉在日志上——本幕**最近一条**
+    // `response(port=model)` 的 `calls` 为空。收束行（`close-turn`）的前件只有这一格，
+    // 执行体手里那份内存草稿不参与判定。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
+        model_response(1, "m-2", json!([])),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["has_final"],
+        json!(true),
+        "最新一条响应没有调用 ⇒ 本幕欠一次收束"
+    );
+}
+
+#[test]
+fn turn_head_has_final_is_false_in_every_not_done_yet_shape() {
+    let open = vec![ev(1, "user.message", json!({"text": "hi", "id": "u-1"}))];
+    assert_eq!(
+        turn_head(&open, 0)["has_final"],
+        json!(false),
+        "还没有任何模型应答（首步之前 / 中止幕）"
+    );
+
+    let still_calling = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([])),
+        model_response(1, "m-2", json!([{"port": "tool", "id": "c-1"}])),
+    ];
+    assert_eq!(
+        turn_head(&still_calling, 0)["has_final"],
+        json!(false),
+        "最新一条响应还带调用 ⇒ 只有一条空 `calls` 的响应不算收束"
+    );
+
+    let other_port = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
+        ),
+    ];
+    assert_eq!(
+        turn_head(&other_port, 0)["has_final"],
+        json!(false),
+        "`calls` 缺席的其它端口响应不是「模型答完了」"
+    );
+
+    let mut closed = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([])),
+    ];
+    assert_eq!(turn_head(&closed, 0)["has_final"], json!(true));
+    closed.push(ev(
+        1,
+        "chat.assistant.final",
+        json!({ "text": "done", "status": "ok" }),
+    ));
+    assert_eq!(
+        turn_head(&closed, 0)["has_final"],
+        json!(false),
+        "本幕已收束 ⇒ 不再欠收束（否则 `close-turn` 永远开着）"
+    );
+}
+
+#[test]
+fn turn_head_has_final_ignores_responses_from_an_earlier_drive() {
+    // 续写幕复用轮号：首幕那条空 `calls` 的响应不能替新幕开收束债（幕锚收窄）。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([])),
+        ev(
+            1,
+            "turn.stage",
+            json!({ "stage": "resume", "round": 0, "result": "approve" }),
+        ),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["has_final"],
+        json!(false),
+        "锚点之前的响应属于首幕"
     );
 }
 

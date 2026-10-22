@@ -527,11 +527,12 @@ pub(crate) enum TurnSessionBegin {
 ///
 /// 驱动归派发器（`turn_exec::drive_steps`），「这两个动作跑哪一个」归执行体
 /// （[`super::turn_exec::run_execute`] 读草稿决定）；本类型只回答「这一个动作
-/// 发生了什么」（ADR-118 决策 4）。动作有两个，各自只写自己那一半事实：
+/// 发生了什么」（ADR-118 决策 4）。动作有三个，各自只写自己那一半事实：
 ///
 /// - [`Self::model`]：一次模型往返——拼消息、调模型、分类；请求工具时把应答留在
-///   草稿里，不派发；
-/// - [`Self::tools`]：派发草稿里的那一批工具，落产物 / 等待 / 交换。
+///   草稿里，不派发；答完时把应答留在 [`prepare::Prepared::closing`]，不收束；
+/// - [`Self::tools`]：派发草稿里的那一批工具，落产物 / 等待 / 交换；
+/// - [`Self::close`]：收束寄存的那一次应答（`close-turn` 行的执行体）。
 ///
 /// 停机判据（步数上界 / 无进展 / 中止 / 租约）不在这里，归派发器（ADR-118 决策 7）；
 /// 本类型的 [`Self::exhausted`] 只是那三格收束事实的**唯一写方**。
@@ -546,6 +547,16 @@ impl TurnSession {
     /// 这不是调度判断：草稿归派发器所有（ADR-118 决策 4），读它的动作归执行体。
     pub(crate) fn has_pending_batch(&self) -> bool {
         self.run.pending_model.is_some()
+    }
+
+    /// 草稿里是否有一次**已答完、未入格**的应答（`close-turn` 那笔债的内存镜像）。
+    ///
+    /// 派发面正常走的是行：`close-turn` 的 `prio`（55）比 `execute-turn`（60）小，
+    /// 应答一落地选债口就给收束行。这个方法只服务于续写幕旁路——那条路上表头指向
+    /// 新轮，两行都看不见（见 [`super::turn_exec::run_execute`]），旁路交回执行行时
+    /// 不能把已经答完的一轮再跑一遍模型。旁路退役后它随之删除。
+    pub(crate) fn has_pending_close(&self) -> bool {
+        self.run.closing.is_some()
     }
 
     /// 记一次模型往返（执行体自己知道这一步有没有调模型）。
@@ -580,7 +591,25 @@ impl TurnSession {
         {
             stream::ModelRound::Done(outcome) => Ok(Some(outcome)),
             stream::ModelRound::Tools => Ok(None),
+            // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
+            stream::ModelRound::Close => Ok(None),
         }
+    }
+
+    /// 收束寄存的那一次应答：落 `chat.assistant.final` / `fallback`。
+    ///
+    /// 它是 `close-turn` 行的动作（T-244 步 5）。跑不跑这一步由**日志**决定
+    /// （`turn.has_final`），不由这里决定；没有寄存时它不做任何事，派发器的
+    /// 「无进展」判据会把那种收错账的形态显形。
+    pub(crate) async fn close<S>(
+        &mut self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        stream::close_round(&mut self.run, store, llm).await
     }
 
     /// 派发草稿里那一批工具；`None` = 继续下一轮，`Some` = 本轮收束（等待用户）。

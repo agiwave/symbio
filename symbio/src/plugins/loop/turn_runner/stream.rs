@@ -124,10 +124,13 @@ where
 
 /// 一次模型往返的推进结果。
 pub(crate) enum ModelRound {
-    /// 本轮已收口（答话 / 兜底 / 中止 / 控制面失败）。
+    /// 本轮已收口（兜底 / 中止 / 控制面失败——都没有可收束的应答）。
     Done(TurnOutcome),
     /// 模型请求了工具；应答与节点事实已寄存在 `Prepared`，等 [`tool_round`]。
     Tools,
+    /// 模型答完了（本幕最近一条 `response(port=model)` 的 `calls` 为空）；
+    /// 应答寄存在 [`Prepared::closing`]，收束归 `close-turn` 行的执行体（T-244 步 5）。
+    Close,
 }
 
 /// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
@@ -176,11 +179,12 @@ where
     // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
     let round_facts = node_facts(&run.nodes);
 
-    // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
+    // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**（T-244 步 5）：
+    //     `close-turn` 行的前件（`turn.has_final`）此刻已经在日志上，派发器下一步
+    //     就会选中它，把收束交给 `closer` 执行体。
     if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
-        return halt(run, store, llm, rt, &round_facts)
-            .await
-            .map(ModelRound::Done);
+        run.closing = Some((rt, round_facts));
+        return Ok(ModelRound::Close);
     }
 
     // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置
@@ -215,6 +219,25 @@ where
     run.pending_model = Some(rt);
     run.pending_round = Some(round_facts);
     Ok(ModelRound::Tools)
+}
+
+/// 阶段②c：收束寄存的那一次应答（T-244 步 5，`close-turn` 行的动作）。
+///
+/// 前件由日志说（本幕最近一条 `response(port=model)` 的 `calls` 为空），落格在这里做。
+/// 没有寄存 ⇒ 引擎收错了账：不落任何格、返回 `None`，让派发器的「无进展」判据把
+/// 它显形——不拿一份来历不明的草稿硬造一条收束。
+pub(crate) async fn close_round<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let Some((rt, round_facts)) = run.closing.take() else {
+        return Ok(None);
+    };
+    halt(run, store, llm, rt, &round_facts).await.map(Some)
 }
 
 /// 阶段②b：派发寄存的那一批工具，落产物 / 等待 / 交换。

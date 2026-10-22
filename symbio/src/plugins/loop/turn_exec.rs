@@ -792,11 +792,24 @@ pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 /// 工具就派发它（创建 / 授权 / 派发三段都在里面），否则跑一次模型往返。这个分支
 /// 读的是**派发器自己持有的草稿**，不是事实，也不是行名（ADR-118 决策 4）。
 ///
+/// 最前那条 `has_pending_close()` 只为一件事存在：**续写幕旁路**。行表只有一个
+/// 全局表头，恢复一段被后续轮次归档的旧轮时 [`super::loop_rows::resume_anchor`] 交回
+/// 的是执行行，而草稿里可能已经躺着一次没入格的应答——直接再跑一轮模型就是把答完
+/// 的一轮重跑（64 步之后 `step_limit`）。收束格仍然只有
+/// [`super::turn_runner::stream::close_round`] 一个写方，这里是它的第二个调用点。
+/// 旁路在步 5d 退役，这一条分支与 [`super::turn_runner::TurnSession::has_pending_close`]
+/// 一起删。
+///
+/// 正常情况下收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被
+/// 选中，入格归 `close` 执行体；这条分支在那条路上永远不成立。
+///
 /// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
 /// 上界判断在派发器——停机判据不搬进执行体（ADR-118 决策 7）。
 pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
-        if step.session.has_pending_batch() {
+        if step.session.has_pending_close() {
+            step.session.close(step.store, step.llm).await
+        } else if step.session.has_pending_batch() {
             step.session
                 .tools(step.store, step.llm, step.dispatch)
                 .await
@@ -814,6 +827,15 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
                 .await
         }
     })
+}
+
+/// `close` 执行体：把寄存的那一次应答落成收束格（T-244 步 5）。
+///
+/// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.has_final`），不由草稿说：
+/// 与 [`run_execute`] 的分工是「谁欠什么」在表里、「怎么还」在动作里。不记步数——
+/// 收束不是一次模型往返，步数口径与拆分前一致（ADR-115 决策 3）。
+pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move { step.session.close(step.store, step.llm).await })
 }
 
 /// 驱动一轮：每步读事实切片 → `loop_rows::next` 选最小可还债（连带查出它的动作）→
