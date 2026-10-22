@@ -303,32 +303,6 @@ where
     Ok(None)
 }
 
-/// 跑**一次**请求：模型往返 +（有工具时）一批派发。
-///
-/// 保留这个组合入口给 `StepFlow::step`；引擎接管后可以分别调
-/// [`model_round`] / [`tool_round`]。
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn stream_round<S>(
-    run: &mut Prepared,
-    store: &S,
-    llm: &dyn LlmAdapter,
-    tok: &FullModel,
-    sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
-    tools: &[crate::symbio_core::CapabilityMeta],
-    dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
-) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
-where
-    S: Store<Event = Event> + ?Sized,
-{
-    match model_round(run, store, llm, tok, sink, tools, dispatch.is_some()).await? {
-        ModelRound::Done(outcome) => Ok(Some(outcome)),
-        ModelRound::Tools => match dispatch {
-            Some(dispatch) => tool_round(run, store, llm, dispatch).await,
-            None => Ok(None),
-        },
-    }
-}
-
 /// 2a 收束：答话 / 空答兜底 / 写侧闸拒。
 async fn halt<S>(
     run: &mut Prepared,

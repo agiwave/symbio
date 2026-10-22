@@ -96,7 +96,7 @@ use crate::symbio_core::{
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
-use super::turn_runner::{StepBegin, TurnInput, TurnOutcome, TurnResume, TurnRunner};
+use super::turn_runner::{TurnInput, TurnOutcome, TurnResume, TurnRunner, TurnSessionBegin};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
@@ -753,21 +753,18 @@ pub(crate) struct ExecTurn<'a> {
     pub presentation_tree: crate::symbio_core::node_build::PresentationTree,
 }
 
-/// 一轮的执行：装配（阶段①）→ 调用（阶段②）→ 结局归类（阶段③）→ 落格（阶段④）。
-///
-/// T-179 · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
-/// 本函数只留阶段间调度——调度点即原阶段边界，副作用顺序与事件批次序不变。
-/// 驱动一轮内的步进：每步读事实切片 → `loop_rows::next` 选最小可还债 →
-/// 跑**一个**执行体，直到收束。
+/// 驱动一轮：每步读事实切片 → `loop_rows::next` 选最小可还债 → 跑**一个执行体
+/// 动作**，直到收束。
 ///
 /// T-227 步 5 把循环从 `turn_runner` 移到这里；T-233 把「执行器自己知道
 /// 下一步」换成「引擎从行表读」：`decl::ring::drive` 是生产入口，派发器不再
 /// 手写 `begin` / `step` 的推进条件，也不按行名 / 端口名分支（ADR-118 决策 1–2）。
 ///
-/// 过渡态（ADR-118 后果 1）：执行体注册表尚未接线——选中任一债都仍由整轮
-/// `StepFlow` 跑一步（`courier` / `creator` / `authorizer` 与 `policy.*` 的
-/// 独立实现随后果 2 落地）。行为与替换前等价；`by` 只进 debug 日志。
-/// 停机判据（64 步 / 无进展 / 中止 / 租约）仍在运行器与派发器里，不随选债口搬家。
+/// 过渡态（ADR-118 后果 2 进行中）：执行体注册表尚未按 `by` 一一接线，`policy.*`
+/// 与三笔工具债仍在内环里完成；派发器按**自己持有的草稿**选动作——有寄存的工具批
+/// 就跑 [`TurnSession::tools`]，没有就跑 [`TurnSession::model`]。因此
+/// `turn_runner` 只回答「一个动作发生了什么」，不再在一个 `step` 里同时跑模型与工具。
+/// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_steps<S>(
     store: &S,
@@ -783,63 +780,75 @@ where
 {
     let step_sink = sink.clone();
     // `input` 在 `begin` 里被移走；「是不是续写幕」先留一份——它是过渡态的
-    // 旁路判据（见下）。轮号改由 `StepFlow::turn` 提供。
+    // 旁路判据（见下）。轮号改由 `TurnSession::turn` 提供。
     let resumed = input.resume.is_some();
-    let mut flow = match TurnRunner::begin(store, llm, input, sink).await? {
-        StepBegin::Done(outcome) => return Ok(outcome),
-        StepBegin::Run(flow) => flow,
+    let mut session = match TurnRunner::begin(store, llm, input, sink).await? {
+        TurnSessionBegin::Done(outcome) => return Ok(outcome),
+        TurnSessionBegin::Run(session) => session,
     };
     loop {
         // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 跑**一个**执行体，
         // 然后重新读切片。不按行名 / 端口名 / 业务语义分支。
         let facts = store.range(Seq::new(0));
-        let Some(next) =
-            super::loop_rows::next(&facts, flow.turn(), crate::symbio_core::clock_now_ms())
-        else {
-            // 过渡态（ADR-118 后果 3）：`resume` 旁路还没退役。直调执行器的续写幕
-            // 可能没有本幕锚事实（生产里由 `chat_loop::drive` 落），行表看不到
-            // 这一轮；此时仍由运行器把这一步跑完，等步 3 删旁路时一起收口。
-            if resumed {
-                loop {
-                    if let Some(outcome) = flow
-                        .step(store, llm, tok, step_sink.clone(), tools, dispatch)
-                        .await?
-                    {
-                        return Ok(outcome);
-                    }
-                }
-            }
+        let next =
+            super::loop_rows::next(&facts, session.turn(), crate::symbio_core::clock_now_ms());
+        if next.is_none() && !resumed {
             // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
             // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
-            return flow.exhausted(store, llm, "no_progress").await;
-        };
-        // 过渡态（ADR-118 后果 1）：执行体注册表尚未接线——`courier` /
-        // `creator` / `authorizer` 承担的行仍由整轮执行体在内部处理
-        // （`dispatch-*` / `open-tools` / `authorize-tool`），`policy.report` 的
-        // 触发点在 `stream_round` 的轮边界钩子里。因此「欠着」⇒ 跑一步，
-        // 选中的是哪一行只进日志；后果 2 再把各执行体接上。
-        crate::plugin_debug!(
-            "session",
-            "[Loop] 派发 {}（执行体 {}；债 {}）",
-            next.row,
-            next.by,
-            next.key
-        );
+            return session.exhausted(store, llm, "no_progress").await;
+        }
+        // 过渡态（ADR-118 后果 1）：`by` 只进日志；后果 2 把各执行体接上后，
+        // 这里换成按 `by` 查注册表。续写幕没有本幕锚事实时行表看不到这一轮，
+        // 它仍靠草稿把动作跑完（后果 3 删旁路时一起收口）。
+        if let Some(next) = &next {
+            crate::plugin_debug!(
+                "session",
+                "[Loop] 派发 {}（执行体 {}；债 {}）",
+                next.row,
+                next.by,
+                next.key
+            );
+        }
+        // 草稿归派发器所有（ADR-118 决策 4）：有寄存的工具批就派发它，否则跑模型。
+        let has_batch = session.has_pending_batch();
+        if !has_batch && session.count_model_step() {
+            crate::plugin_warn!(
+                "actors",
+                "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
+                session.turn()
+            );
+            return session.exhausted(store, llm, "step_limit").await;
+        }
         let head = facts.len();
-        if let Some(outcome) = flow
-            .step(store, llm, tok, step_sink.clone(), tools, dispatch)
-            .await?
-        {
+        let outcome = if has_batch {
+            session.tools(store, llm, dispatch).await?
+        } else {
+            session
+                .model(
+                    store,
+                    llm,
+                    tok,
+                    step_sink.clone(),
+                    tools,
+                    dispatch.is_some(),
+                )
+                .await?
+        };
+        if let Some(outcome) = outcome {
             return Ok(outcome);
         }
         // ADR-118 决策 7：每步之后比较日志头。执行体返回空且事实没长
         // ⇒ 环不会前进，落 `exhausted{no_progress}` 而不是空转到步数上界。
         if store.range(Seq::new(0)).len() == head {
-            return flow.exhausted(store, llm, "no_progress").await;
+            return session.exhausted(store, llm, "no_progress").await;
         }
     }
 }
 
+/// 一轮的执行：装配（阶段①）→ 调用（阶段②）→ 结局归类（阶段③）→ 落格（阶段④）。
+///
+/// T-179 · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
+/// 本函数只留阶段间调度——调度点即原阶段边界，副作用顺序与事件批次序不变。
 pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let assembled = assemble_turn(req).await?;
     let running = call_model(assembled).await?;

@@ -9,7 +9,7 @@
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
 //! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
 
-use super::{StepBegin, TurnInput, TurnOutcome, TurnRunner};
+use super::{TurnInput, TurnOutcome, TurnRunner, TurnSessionBegin};
 use crate::symbio_core::{
     ActorSpec, AppendError, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     SilentDeltas, Store, Verb, EVENT_USER_MESSAGE,
@@ -133,15 +133,30 @@ impl TurnRunner {
         S: Store<Event = Event> + ?Sized,
     {
         let step_sink = sink.clone();
-        let mut flow = match TurnRunner::begin(store, llm, input, sink).await? {
-            StepBegin::Done(outcome) => return Ok(outcome),
-            StepBegin::Run(flow) => flow,
+        let mut session = match TurnRunner::begin(store, llm, input, sink).await? {
+            TurnSessionBegin::Done(outcome) => return Ok(outcome),
+            TurnSessionBegin::Run(session) => session,
         };
         loop {
-            if let Some(outcome) = flow
-                .step(store, llm, tok, step_sink.clone(), tools, dispatch)
-                .await?
-            {
+            let has_batch = session.has_pending_batch();
+            if !has_batch && session.count_model_step() {
+                return session.exhausted(store, llm, "step_limit").await;
+            }
+            let outcome = if has_batch {
+                session.tools(store, llm, dispatch).await?
+            } else {
+                session
+                    .model(
+                        store,
+                        llm,
+                        tok,
+                        step_sink.clone(),
+                        tools,
+                        dispatch.is_some(),
+                    )
+                    .await?
+            };
+            if let Some(outcome) = outcome {
                 return Ok(outcome);
             }
         }
@@ -3252,7 +3267,7 @@ mod tool_round_tests {
     ///
     /// ## 为什么这条判据必须有
     ///
-    /// 步循环之前，`stream_round` 回 `None` 只有一个意思——「再欠一步」，而**没有
+    /// 步循环之前，模型往返回「未收束」只有一个意思——「再欠一步」，而**没有
     /// 上界**。一个总回工具调用的适配器因此是一次永不返回的轮，每一圈都真花一次
     /// 模型往返。上限不是性能阀，是**停机判据**：它把「不收敛」变成一条可观测的
     /// 事实，而不是一个卡住的会话。

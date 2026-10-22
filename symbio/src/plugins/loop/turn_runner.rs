@@ -498,68 +498,104 @@ impl TurnRunner {
     /// 「七个端口」改名叫「一个结构体 + 七个字段」，调用方仍要逐个填，
     /// 却多出一层只为过 lint 而生的壳。
     /// 起一轮：准备阶段可能直接收束（反射档 / 早退），否则交回一个
-    /// [`StepFlow`]。**这里不再有循环**——步的推进归调用方（T-227 步 5）。
+    /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方（T-227 步 5）。
     pub(crate) async fn begin<S>(
         store: &S,
         llm: &dyn LlmAdapter,
         input: TurnInput,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
-    ) -> Result<StepBegin, crate::symbio_core::AppendError>
+    ) -> Result<TurnSessionBegin, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
         match prepare::prepare_turn(store, llm, input, sink).await? {
-            prepare::PreparedFlow::Done(outcome) => Ok(StepBegin::Done(outcome)),
-            prepare::PreparedFlow::Run(run) => Ok(StepBegin::Run(StepFlow { run, steps: 0 })),
+            prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
+            prepare::PreparedFlow::Run(run) => {
+                Ok(TurnSessionBegin::Run(TurnSession { run, steps: 0 }))
+            }
         }
     }
 }
 
-/// 一步的推进结果：`Done` = 本轮已收束，`Run` = 还有下一步。
-pub(crate) enum StepBegin {
+/// 开一轮的结果：`Done` = 本轮已收束，`Run` = 还有动作要跑。
+pub(crate) enum TurnSessionBegin {
     Done(TurnOutcome),
-    Run(StepFlow),
+    Run(TurnSession),
 }
 
-/// 一轮的**单步**执行器：持有跨步状态，但**不持有循环**。
+/// 一轮的**会话草稿**：持有跨动作状态，但**不持有驱动**。
 ///
-/// 循环由 `turn_exec::call_model` 驱动（T-227 步 5）——`turn_runner` 只回答
-/// 「这一步发生了什么」。步数上界与 `exhausted` 收束仍在同一处
-/// （[`StepFlow::step`]），所以拆分没有改变停机判据。
-pub(crate) struct StepFlow {
+/// 派发器（`turn_exec::drive_steps`）决定跑哪个动作；本类型只回答「这一个动作
+/// 发生了什么」（ADR-118 决策 4）。动作有两类，各自只写自己那一半事实：
+///
+/// - [`Self::model`]：一次模型往返——拼消息、调模型、分类；请求工具时把应答留在
+///   草稿里，不派发；
+/// - [`Self::tools`]：派发草稿里的那一批工具，落产物 / 等待 / 交换。
+///
+/// 停机判据（步数上界 / 无进展 / 中止 / 租约）不在这里，归派发器（ADR-118 决策 7）；
+/// 本类型的 [`Self::exhausted`] 只是那三格收束事实的**唯一写方**。
+pub(crate) struct TurnSession {
     run: Box<prepare::Prepared>,
     steps: usize,
 }
 
-impl StepFlow {
-    /// 推进一步；`None` = 适配器要求继续，`Some` = 本轮收束。
-    pub(crate) async fn step<S>(
+impl TurnSession {
+    /// 草稿里是否有一批**已请求、未派发**的工具（派发器据它选下一个动作）。
+    ///
+    /// 这不是调度判断：草稿归派发器所有（ADR-118 决策 4），它只读自己持有的那份状态。
+    pub(crate) fn has_pending_batch(&self) -> bool {
+        self.run.pending_model.is_some()
+    }
+
+    /// 记一次模型步并回答是否越过上界（`MAX_STEPS_PER_DRIVE`）。
+    ///
+    /// 只数**模型往返**：工具批次不额外消耗步数，与拆分前「一步 = 一轮往返」同口径。
+    pub(crate) fn count_model_step(&mut self) -> bool {
+        self.steps += 1;
+        self.steps > MAX_STEPS_PER_DRIVE
+    }
+
+    /// 跑**一次模型往返**；`None` = 请求了工具（草稿已寄存，等 [`Self::tools`]），
+    /// `Some` = 本轮收束。
+    pub(crate) async fn model<S>(
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
         tok: &FullModel,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
+        has_dispatch: bool,
+    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        match stream::model_round(&mut self.run, store, llm, tok, sink, tools, has_dispatch).await?
+        {
+            stream::ModelRound::Done(outcome) => Ok(Some(outcome)),
+            stream::ModelRound::Tools => Ok(None),
+        }
+    }
+
+    /// 派发草稿里那一批工具；`None` = 继续下一轮，`Some` = 本轮收束（等待用户）。
+    ///
+    /// 没有草稿 / 没有分发通道时不做任何事——派发器只在草稿存在时选这个动作，
+    /// 这里的空返回是防御，不是第二条选择路径。
+    pub(crate) async fn tools<S>(
+        &mut self,
+        store: &S,
+        llm: &dyn LlmAdapter,
         dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
     ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        self.steps += 1;
-        if self.steps > MAX_STEPS_PER_DRIVE {
-            crate::plugin_warn!(
-                "actors",
-                "[v2] 轮内步数超过上限 {MAX_STEPS_PER_DRIVE}（turn={}），收束为 exhausted（step_limit）",
-                self.run.turn
-            );
-            return exceed_steps(&mut self.run, store, llm, "step_limit")
-                .await
-                .map(Some);
+        match dispatch {
+            Some(dispatch) => stream::tool_round(&mut self.run, store, llm, dispatch).await,
+            None => Ok(None),
         }
-        stream::stream_round(&mut self.run, store, llm, tok, sink, tools, dispatch).await
     }
 
-    /// 本步属于哪一轮（派发器读事实切片与日志用）。
+    /// 本动作属于哪一轮（派发器读事实切片与日志用）。
     pub(crate) fn turn(&self) -> u64 {
         self.run.turn
     }
