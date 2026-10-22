@@ -21,7 +21,7 @@
  *      （RG-024 结构 / RG-025 父子状态一致性），层级只是投影（INDEX 分解树小节、board
  *      `--children`）——与「目录不参与判定」同款哲学：位置与层级都会变，身份不朽。
  *   2. **汇总 = 投影**：任何「列表 / 看板 / 总账」都由本库渲染，
- *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/60-facts.mjs` 的 `autoWork`），
+ *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/06-facts-write.mjs` 的生成链），
  *      不存在第二处手抄；
  *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
  *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-025），

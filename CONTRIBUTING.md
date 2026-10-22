@@ -143,13 +143,15 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
 CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=docs,facts,baseline --ci`
+（`--only=backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=facts-write,docs,facts,baseline --ci`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`——门禁**自动执行**
-的工作，少了 `--ci` 就没有判红手段；`facts` 阶段是两条**只读复核**（`gen-facts --check` 与
-`gen-doc-refs --check`），它必须与本地末态同一条口径。生成链 `facts-write` 只在本地跑：
-它在 `--ci` 下**恒红**（链上先写 `[[编号]]` 记号、下一步才展开，逐步判差异看到的是中间态），
-理由与末态判据都记在 `scripts/gate.d/60-facts.mjs` 头注释。
+的工作，少了 `--ci` 就没有判红手段；`facts-write` 是**生成链**（事实 → 汇总页 → 引用地址 →
+verify 期望数据），`facts` 是两条**只读复核**（`gen-facts --check` 与 `gen-doc-refs --check`）。
+两者在 `--ci` 下的分工：链按 `autoChain` 跑，**只在末态**判差异（逐格判会在中间态恒红——
+先写 `[[编号]]` 记号、下一步才展开），于是 CI 看得见「改了 front-matter 没重生成汇总页」；
+复核看的是**整轮**跑完（`docs` 的自动修复器排在链之后）。理由记在
+`scripts/gate.d/60-facts.mjs` 与 `06-facts-write.mjs` 的头注释。
 
 提交信息规范由 `scripts/check-commit-msg.mjs` 判定，**两处都要接上**：
 
@@ -162,8 +164,8 @@ git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 | 钩子 | 拦什么 | 为什么是它 |
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
-| `pre-commit` | 事实文件与登记投影在提交点变旧 | 跑 `gate.mjs --only=facts-write,facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**，再复核引用地址末态），实测 1.8s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/006-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 1.8s。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-commit` | 事实文件与登记投影在提交点变旧 | 跑 `gate.mjs --only=facts-write,facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**，再复核引用地址末态），实测 1.7s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
+| `pre-push` | `docs/006-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。

@@ -15,12 +15,14 @@
 # 这条钩子是第二层；第一层是 CI 的 docs & facts job（`.github/workflows/ci.yml`，
 # 检查项清单只在 `scripts/gate.mjs` 里，此处不重抄）。
 #
-# 为什么带 `--ci`：CI 模式下 facts 阶段**不自动修复、有差异即报红**；本地模式它会
-# 自动改写并暂存——在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
+# 为什么带 `--ci`：CI 模式下这些阶段**不自动修复、有差异即报红**；本地模式它们会自动
+# 改写并暂存——在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
 # 所以这里只报红，修复交给人：`node scripts/gate.mjs --only=facts-write,facts`（会生成并暂存）。
-# ⚠️ 本钩子**不能**照抄那一条：`--ci` 下把生成链拉进来会恒红——链上 `registry-audit --write`
-# 先写 `[[编号]]` 记号、`gen-doc-refs` 再展开，`autoWork` 逐步判差异时看到的是中间态。
-# CI 侧的只读复核因此落在 `facts` 阶段的 `gen-doc-refs --check`，详见 `60-facts.mjs` 头注释。
+# ⚠️ 生成链（`facts-write`）在 2026-10-23 之前**点不进**这条钩子：它按 `autoWork` 逐格判
+# 差异，而 `registry-audit --write` 先写 `[[编号]]` 记号、`gen-doc-refs` 再展开，中间态
+# 本身就是差异 ⇒ `--ci` 恒红。现在链是一个 `autoChain` 工作（只在末态判差异，见
+# `gate.d/06-facts-write.mjs`），点得进了——汇总页**内容**（计数 / 状态分布）落后代码时
+# 这里挡得住，那道缺口曾是 T-250 口径 4。
 #
 # 2026-10-13 把 `fmt` 也拉进来：**同一类「只在 CI 里才红」的漏网**，这次漏的是格式化。
 #   `c8ed5ee7` 手工恢复 `stream.rs`（编辑器按 GBK 读 UTF-8 致全文乱码）后没跑格式化，
@@ -32,10 +34,9 @@
 #   已知代价：判据看的是**工作区**，所以推送时若手边有未格式化的 `.rs` 脏改动，
 #   也会红一次（此时该跑门禁把它们格式化）——宁可多红一次，不要漏一次。
 #
-# 耗时实测 1.8s（`cargo fmt` 只判差异 + `gen-facts --check` + `gen-doc-refs --check`，
-# 不编译、不跑测试）。
+# 耗时实测 2s（`cargo fmt --all` 判差异 + 生成链一格 + 两条 `--check`），不编译、不跑测试。
 # 想跳过某一次：git push --no-verify
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-push
 
-node scripts/gate.mjs --only=fmt,facts --ci
+node scripts/gate.mjs --only=fmt,facts-write,facts --ci

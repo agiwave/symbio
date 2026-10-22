@@ -48,7 +48,7 @@
  * | 码 | 判什么 | 怎么处置 |
  * |---|---|---|
  * | **RF-001** | `[[编号]]` 解析不出目标（未登记 / 拼错 / 目标文件不在） | 判红，**不改任何文件**（改一半等于两份半截状态） |
- * | **RF-002** | 已展开的 `[编号](地址)` / `[文字](地址 "编号")` 里，地址 ≠ 该编号当前所在文件 | 本脚本自动改成当前地址（门禁 `60-facts` 的 autoWork 跑它并暂存） |
+ * | **RF-002** | 已展开的 `[编号](地址)` / `[文字](地址 "编号")` 里，地址 ≠ 该编号当前所在文件 | 本脚本自动改成当前地址（门禁 `06-facts-write` 的生成链跑它并暂存） |
  * | **RF-003** | 地址指向已登记文档，但链接既不认编号标签也不认编号标题（手工地址，**文档正文**） | 判红并要求写成 `[[编号]]` / `[[编号\|显示文字]]`（这种地址机制搬不动） |
  * | **RF-004** | 手工地址指向已登记文档且**目标可唯一识别**（**源码注释**） | 自动接管：补编号标题 + 重算成相对本文件的地址（改完即受 RF-002 管） |
  *
@@ -247,7 +247,7 @@ export function runGenDocRefs(argv) {
   let check = false
   for (const a of argv) {
     if (a === '--check') check = true
-    else if (a === '--write') continue // 默认即改写；--write 是显式同义词（门禁 autoWork 用）
+    else if (a === '--write') continue // 默认即改写；--write 是显式同义词（门禁生成链用）
     else if (a === '--strict') continue // 门禁对所有 GUARDS 传 --strict；本脚本无 WARNING 档
     else if (a.startsWith('--root=')) root = path.resolve(a.slice(7))
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE], changed: [] }

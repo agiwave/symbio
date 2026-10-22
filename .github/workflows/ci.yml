@@ -362,7 +362,12 @@ jobs:
         # 的确定性机械工作，本地跑会「自动修复 + 暂存」，而 CI 无法提交、只能判红。
         # 少了 `--ci`，这一步就退化成「修复完静默放过漂移」——一个只亮绿灯的检查项。
         # 回归测试 scripts/gate.d/_shared.test.mjs 断言了这一行必须带 `--ci`。
-        run: node scripts/gate.mjs --only=docs,facts,baseline --ci
+        #
+        # `facts-write`（生成链）在 2026-10-23 之前点不进 CI job：它按 `autoWork` 逐格判差异，
+        # 而链上 `registry-audit --write` 的产物（`[[编号]]` 记号）正是下一格 `gen-doc-refs`
+        # 的输入 ⇒ `--ci` 恒红。合成一个 `autoChain` 工作（只在末态判差异）后点得进了，
+        # 汇总页**内容**落后代码这件事从此这里挡得住（T-250 口径 4）。
+        run: node scripts/gate.mjs --only=facts-write,docs,facts,baseline --ci
         continue-on-error: false
 
       - name: Check for obvious documentation issues

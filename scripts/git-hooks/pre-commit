@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# pre-commit — 把「事实文件与登记投影与代码同批再生成」落进提交点（实测 1.8s）
+# pre-commit — 把「事实文件与登记投影与代码同批再生成」落进提交点（实测 1.7s）
 #
 # 启用（一次性，本机生效）：
 #   git config core.hooksPath scripts/git-hooks
@@ -11,9 +11,9 @@
 # 事故形态：三个功能提交门禁段全写「本次跳过」，INDEX 投影落后两批收口，push 被连挡。
 #
 # 为什么它不违反「提交与门禁解耦（提交要秒级）」：被撤走的是**全量门禁**（10+ 分钟，含
-# 编译测试）；本钩子只跑 `--only=facts-write,facts`（生成链 + 末态复核），实测 1.8s。
-# 且本地的暂存纪律在 `_shared.autoWork` 里已经立好：**只暂存生成器自己改写的文件**，
-# 提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
+# 编译测试）；本钩子只跑 `--only=facts-write,facts`（生成链 + 末态复核），实测 1.7s。
+# 且本地的暂存纪律在 `_shared.autoWork` / `autoChain` 里已经立好：**只暂存生成器自己改写
+# 的文件**，提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
 #
 # ⚠️ 这里的阶段 id 名单在 2026-10-23 断过一次，形态值得记：生成链拆出去的那天
 # （`06-facts-write`），本钩子仍写 `--only=facts`——`facts` 这个 id 从此只剩
@@ -21,9 +21,9 @@
 # 什么都不说，于是钩子跑完 1/1 全绿、本文件头却写着「全部是生成器 + 登记校验」，
 # 而汇总页投影实实在在落后了两个提交（`docs/009-task/README.md` 等三处的记号没展开，
 # 直到下一次全量门禁才被 `gen-doc-refs` 改写回来）。同族第三次失配，见 T-089 / T-092。
-# 现在这条由 `_shared.test.mjs` 的「本地模式的 gate 调用点了 facts 就必须点 facts-write」
-# 钉住；`facts` 阶段同批补了只读的 `gen-doc-refs --check`，实测 1s 一格，CI 与 pre-push 因此
-# 也看得见「提交里留着未展开的记号」这一种漂移。
+# 现在这条由 `_shared.test.mjs` 的「gate 调用点了 facts 复核就必须点 facts-write 生成链」
+# 钉住（不分本地与 CI）；`facts` 阶段同批补了只读的 `gen-doc-refs --check`，实测 1s 一格，
+# 与生成链的末态判定互为两道（链看「链跑完」，它看「整轮跑完」）。
 #
 # 与 pre-push 的关系：不是重复，是同一判据的两道闸——pre-commit 保证提交诞生时事实即新；
 # pre-push 兜住 `core.hooksPath` 没设的机器（该配置会静默丢失，2026-10-07 实测过），
@@ -34,8 +34,10 @@
 #     这些判据本来就拦 push，只是提前一段；WIP 想跳过：git commit --no-verify
 #   - `git commit -- <pathspec>` 部分提交：钩子暂存的文件不落入选中的 pathspec，无害，
 #     漂移留给 pre-push 或下一次提交兜住。
-#   - 汇总页**内容**（计数 / 状态分布）的新鲜度在这里靠生成器改写，而 CI 侧只读复核
-#     看不住——`registry-audit` 没有 `--check`，缺口登记续接见 T-250。
+#   - 汇总页**内容**（计数 / 状态分布）的新鲜度：本钩子跑的就是生成它的那条链（一格
+#     `autoChain`，只在**末态**与跑之前比差异）；CI / pre-push 点同一条链，只是带 `--ci`
+#     ⇒ 只判红不代改。逐格判差异会在链的中间态恒红，所以判据只能做在链尾——
+#     理由记在 `gate.d/06-facts-write.mjs` 头注释。
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-commit
 
