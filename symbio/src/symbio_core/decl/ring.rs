@@ -213,10 +213,9 @@ pub(crate) fn owed<'a>(
 /// `turn_exec::drive_steps` 直接调用它；执行半边（跑执行体、追加事实、
 /// 无进展守卫）在派发器里，选择规则不再变。
 ///
-/// `accept` 是执行体注册表：只有 `by` 命中的债才可被选中。注册表没覆盖的
-/// `by`（粗端口期 `policy.*` 与三笔工具债由整轮执行体内部完成）在选债面上
-/// 被跳过，而不是被选中后无人可跑——否则一笔内环债会把整轮顶成 `no_progress`。
-/// 求解器不看这个谓词：声明表与 `owed` 的字节不变（ADR-118 决策 1 / 8）。
+/// 可还性只有一个声明位：[`owed`] 的 `blocked`（`by = None ∨ unless` 命中）。
+/// 「执行体还没接线」不是求解器的第四种条件——那种行显式写 `by = None`，
+/// 接线时与 `ActorDecl` 注册同批改回 `Some`（PL-016 §2.2 / ADR-118 订正 1）。
 ///
 /// 按行点问（`plugins::loop::loop_rows::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
@@ -226,11 +225,10 @@ pub(crate) fn drive<'a>(
     frozen: &Frozen,
     events: &[Event],
     now: i64,
-    accept: impl Fn(&str) -> bool,
 ) -> Option<Debt<'a>> {
     owed(rows, frozen, events, now)
         .into_iter()
-        .filter(|d| !d.blocked && d.decl.by.is_some_and(&accept))
+        .filter(|d| !d.blocked)
         .min()
 }
 
@@ -362,7 +360,16 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::ExpandKeyMissing`]：`expand` 的元素键字段不在 `owes.key` 里——元素
 ///   之间分不出谁是谁，`until` 无从按键还账；
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
-///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段。
+///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
+/// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
+///   有人跑」是假话，选中它只会得到 `no_progress`（PL-016 §3.4 第 6 条的前半）；
+/// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
+///   接线接了个没人派发的名字；
+/// - [`Gap::ActorCannotClose`]：执行体写的**事实名**与它那一行的出口（`until` /
+///   `unless`，视图按 `reads` 展开到事实）没有交集——它返回空事实也能「成功」，
+///   每一步都无进展（§3.4 第 6 条的后半）；
+/// - [`Gap::ActorModeTooNarrow`]：行的 `tier` 比执行体的 `mode` 更慢——反射档
+///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Gap {
     NoExit {
@@ -390,6 +397,32 @@ pub(crate) enum Gap {
         source: &'static str,
         field: &'static str,
     },
+    UnmannedRow {
+        row: &'static str,
+        by: &'static str,
+    },
+    OrphanActor {
+        actor: &'static str,
+    },
+    ActorCannotClose {
+        row: &'static str,
+        actor: &'static str,
+    },
+    ActorModeTooNarrow {
+        row: &'static str,
+        actor: &'static str,
+    },
+}
+
+/// 一个模式源展开成**事实名**：事实源就是它自己，视图源是它 `reads` 里的那些事实。
+///
+/// 第 6 条检查比的是「执行体写的名字」与「这一行靠什么收口」，两边都在事实层；
+/// 行的出口常写成视图（`turn_closed`），不展开就会把每一个真收口判成收不了口。
+fn fact_names_of(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
+    match frozen.view(source) {
+        Some(view) => view.reads.iter().map(|(f, _)| *f).collect(),
+        None => vec![source],
+    }
 }
 
 pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
@@ -437,6 +470,34 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                 });
             }
         }
+        // 第 6 条的两半：`by` 指向一个**存在**的执行体，且它写的名字够得到出口。
+        // 未接线的行不在这儿豁免——它写 `by = None`（「这笔账不由引擎执行」的唯一
+        // 声明位），而不是留一个没人跑的名字。
+        if let Some(by) = decl.by {
+            match frozen.actor(by) {
+                None => gaps.push(Gap::UnmannedRow { row: decl.name, by }),
+                Some(actor) => {
+                    let exits: Vec<&'static str> = decl
+                        .until
+                        .iter()
+                        .chain(decl.unless)
+                        .flat_map(|p| fact_names_of(p.source, frozen))
+                        .collect();
+                    if !exits.iter().any(|f| actor.writes.contains(f)) {
+                        gaps.push(Gap::ActorCannotClose {
+                            row: decl.name,
+                            actor: actor.name,
+                        });
+                    }
+                    if decl.tier > actor.mode {
+                        gaps.push(Gap::ActorModeTooNarrow {
+                            row: decl.name,
+                            actor: actor.name,
+                        });
+                    }
+                }
+            }
+        }
     }
     // 「有归宿」= 行直接读它，或行用了某个读它的视图。两跳都算——义务环的行
     // 面向视图写，事实是视图的下游；只认直接引用会把所有视图源的事实全判成孤儿。
@@ -455,6 +516,14 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
     for fact in frozen.facts() {
         if !used_sources.contains(fact.name) && !read_by_used_view(fact.name) {
             gaps.push(Gap::OrphanFact { fact: fact.name });
+        }
+    }
+    // 执行体的另一半：声明了却没有任何行指向它，等于注册了一段死代码。
+    // 它与 `UnmannedRow` 合起来才是「一个 `by` 一个执行体」——两边都不许多。
+    let used_by: HashSet<&str> = rows.iter().filter_map(|d| d.by).collect();
+    for actor in frozen.actors() {
+        if !used_by.contains(actor.name) {
+            gaps.push(Gap::OrphanActor { actor: actor.name });
         }
     }
     gaps

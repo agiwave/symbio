@@ -525,8 +525,9 @@ pub(crate) enum TurnSessionBegin {
 
 /// 一轮的**会话草稿**：持有跨动作状态，但**不持有驱动**。
 ///
-/// 派发器（`turn_exec::drive_steps`）决定跑哪个动作；本类型只回答「这一个动作
-/// 发生了什么」（ADR-118 决策 4）。动作有两类，各自只写自己那一半事实：
+/// 驱动归派发器（`turn_exec::drive_steps`），「这两个动作跑哪一个」归执行体
+/// （[`super::turn_exec::run_execute`] 读草稿决定）；本类型只回答「这一个动作
+/// 发生了什么」（ADR-118 决策 4）。动作有两个，各自只写自己那一半事实：
 ///
 /// - [`Self::model`]：一次模型往返——拼消息、调模型、分类；请求工具时把应答留在
 ///   草稿里，不派发；
@@ -540,19 +541,25 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
-    /// 草稿里是否有一批**已请求、未派发**的工具（派发器据它选下一个动作）。
+    /// 草稿里是否有一批**已请求、未派发**的工具（执行体据它选下一个动作）。
     ///
-    /// 这不是调度判断：草稿归派发器所有（ADR-118 决策 4），它只读自己持有的那份状态。
+    /// 这不是调度判断：草稿归派发器所有（ADR-118 决策 4），读它的动作归执行体。
     pub(crate) fn has_pending_batch(&self) -> bool {
         self.run.pending_model.is_some()
     }
 
-    /// 记一次模型步并回答是否越过上界（`MAX_STEPS_PER_DRIVE`）。
+    /// 记一次模型往返（执行体自己知道这一步有没有调模型）。
     ///
     /// 只数**模型往返**：工具批次不额外消耗步数，与拆分前「一步 = 一轮往返」同口径。
-    pub(crate) fn count_model_step(&mut self) -> bool {
+    /// 上界判断不在这里——停机判据归派发器（ADR-118 决策 7），它读
+    /// [`Self::over_step_limit`]。
+    pub(crate) fn record_model_step(&mut self) {
         self.steps += 1;
-        self.steps > MAX_STEPS_PER_DRIVE
+    }
+
+    /// 模型往返步数是否已到上界（派发器每步前问一次，到顶即 `exhausted{step_limit}`）。
+    pub(crate) fn over_step_limit(&self) -> bool {
+        self.steps >= MAX_STEPS_PER_DRIVE
     }
 
     /// 跑**一次模型往返**；`None` = 请求了工具（草稿已寄存，等 [`Self::tools`]），

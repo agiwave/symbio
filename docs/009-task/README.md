@@ -60,17 +60,17 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 6 · 🟡 doing 1 · ☑ done 232 · ❌ wont 5（共 244）
+**计数**：☐ todo 6 · 🟡 doing 1 · ☑ done 233 · ❌ wont 5（共 245）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-241-ActorDecl执行体注册表` | ActorDecl 执行体注册表——by 名字到执行体一个动作，派发器业务分支退役 | next | plan | T-238-短路轮进债环 |
 | `T-242-装载检查余四道` | 装载检查余四道——依赖图无环 / 相交行对 / 写入封闭 / 执行体收口 | next | plan | T-241-ActorDecl执行体注册表 |
 | `T-243-Builder六口与按会话seal` | Builder 六口与按会话 seal——行/端口/执行体经注册口进表，LazyLock 单例退役 | next | plan | T-241-ActorDecl执行体注册表、T-242-装载检查余四道 |
 | `T-244-唤醒事实接入与resume旁路退役` | PL-017 步 4–5 收口——审批/插话/中止唤醒进 await 行，resume.rs 旁路退役 | next | plan | T-240-唤醒事件时间戳取代墙钟 |
 | `T-247-插件内部模型往返进环` | 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用 | next | plan | T-238-短路轮进债环 |
+| `T-249-执行体值返回账本` | 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口 | next | plan | T-241-ActorDecl执行体注册表 |
 | `T-245-判据硬化批` | 判据硬化批——生产表回放用例 / PTS-002 端口取值 / 收束 reason 严档 / 无进展可触发 | later | plan | T-241-ActorDecl执行体注册表 |
 
 ## 进行中
@@ -182,6 +182,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-232-创建行接入集合展开` | 创建行接入集合展开——open-tools.owes = response(port=model) + expand | plan |
 | `T-234-流式帧不入事实用例` | 判据 5 用例——流式帧直通且日志不增 | plan |
 | `T-235-清理迁移前残留stash` | 清理 v2 迁移前的残留 autostash | meta |
+| `T-241-ActorDecl执行体注册表` | ActorDecl 执行体注册表——by 名字到执行体一个动作，派发器业务分支退役 | plan |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | e2e |
@@ -563,18 +564,19 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-233-引擎行驱动调度`](233-引擎行驱动调度.md) 引擎行驱动调度——drive_steps 的手写循环换成「读行债 → 派发」（done）
   - [`T-234-流式帧不入事实用例`](234-流式帧不入事实用例.md) 判据 5 用例——流式帧直通且日志不增（done）
 - [`T-235-清理迁移前残留stash`](235-清理迁移前残留stash.md) 清理 v2 迁移前的残留 autostash（done）
-- [`T-236-义务环符合性收口批`](236-义务环符合性收口批.md) 义务环符合性收口批——方案自洽 + 实测缺口 + 契约层补齐（SPRINT）（doing） · 子项 todo 6 / done 5
+- [`T-236-义务环符合性收口批`](236-义务环符合性收口批.md) 义务环符合性收口批——方案自洽 + 实测缺口 + 契约层补齐（SPRINT）（doing） · 子项 todo 6 / done 6
   - [`T-237-方案自洽与命名统一`](237-方案自洽与命名统一.md) 方案自洽与命名统一——PL-016/PL-017/PL-014 三处互斥与一名两写（done）
   - [`T-238-短路轮进债环`](238-短路轮进债环.md) 短路轮进债环——Answered 判定的模型调用不得绕开端口（done）
   - [`T-239-装载失败拒绝启动与孤名收口`](239-装载失败拒绝启动与孤名收口.md) 装载失败拒绝启动——孤名告警转红 + turn.dispatch 归宿收口（done）
   - [`T-240-唤醒事件时间戳取代墙钟`](240-唤醒事件时间戳取代墙钟.md) 唤醒事件时间戳取代墙钟——owed/drive 调用点不再读 clock_now_ms（done）
-  - [`T-241-ActorDecl执行体注册表`](241-ActorDecl执行体注册表.md) ActorDecl 执行体注册表——by 名字到执行体一个动作，派发器业务分支退役（todo）
+  - [`T-241-ActorDecl执行体注册表`](241-ActorDecl执行体注册表.md) ActorDecl 执行体注册表——by 名字到执行体一个动作，派发器业务分支退役（done）
   - [`T-242-装载检查余四道`](242-装载检查余四道.md) 装载检查余四道——依赖图无环 / 相交行对 / 写入封闭 / 执行体收口（todo）
   - [`T-243-Builder六口与按会话seal`](243-Builder六口与按会话seal.md) Builder 六口与按会话 seal——行/端口/执行体经注册口进表，LazyLock 单例退役（todo）
   - [`T-244-唤醒事实接入与resume旁路退役`](244-唤醒事实接入与resume旁路退役.md) PL-017 步 4–5 收口——审批/插话/中止唤醒进 await 行，resume.rs 旁路退役（todo）
   - [`T-245-判据硬化批`](245-判据硬化批.md) 判据硬化批——生产表回放用例 / PTS-002 端口取值 / 收束 reason 严档 / 无进展可触发（todo）
   - [`T-246-ADR118回表订正`](246-ADR118回表订正.md) ADR-118 回表订正——accept 谓词合法化偏差与守卫免造夹具两处撤销（done）
   - [`T-247-插件内部模型往返进环`](247-插件内部模型往返进环.md) 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用（todo）
+  - [`T-249-执行体值返回账本`](249-执行体值返回账本.md) 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口（todo）
 
 <!-- registry:summary end -->
 

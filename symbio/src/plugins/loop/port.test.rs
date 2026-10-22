@@ -276,7 +276,7 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
     // 重试只会留下一条永不派发的 `request`——等它的 future 随进程一起没了。
     let store = boot();
     stranded(&store, "turn-9-r0", 1, 1_000, 1);
-    let frozen = crate::symbio_core::builtin().unwrap();
+    let frozen = crate::symbio_core::builtin_with(&[]).unwrap();
 
     // 还没到期：不欠、不动。
     assert!(
@@ -333,7 +333,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     }];
     let store = boot();
     stranded(&store, "turn-9-r0", 1, 1_000, 3);
-    let frozen = crate::symbio_core::builtin().unwrap();
+    let frozen = crate::symbio_core::builtin_with(&[]).unwrap();
 
     let out = reap(
         &store,

@@ -39,7 +39,7 @@ fn seq(e: &Event) -> u64 {
 
 #[test]
 fn builtin_loads_and_freezes() {
-    let frozen = builtin().expect("首批声明必须能冻结");
+    let frozen = builtin_with(&[]).expect("首批声明必须能冻结");
     // 名单即**控制面声明集**：每条都被某一行或某条被行用到的视图消费（判据 7）。
     // 只在审计投影里读的断言格（`turn.dispatch` → `invariants::declared_budget_ms`）
     // 不在这里——它仍是事件名表里的业务事实，只是不进表。
@@ -106,7 +106,7 @@ fn builtin_loads_and_freezes() {
 #[test]
 fn every_declared_reference_is_a_field() {
     // `port` / `key` / `expand` 都是字段引用；声明不能自相矛盾。
-    let frozen = builtin().unwrap();
+    let frozen = builtin_with(&[]).unwrap();
     for f in frozen.facts() {
         for field in f
             .port
@@ -226,10 +226,10 @@ fn eval_takes_only_events_and_now() {
     let eval: fn(&[Event], i64) -> Value = in_flight;
     assert_eq!(eval(&[], 0), json!([]));
     assert_eq!(
-        builtin().unwrap().eval("in_flight", &[], 0),
+        builtin_with(&[]).unwrap().eval("in_flight", &[], 0),
         Some(json!([]))
     );
-    assert_eq!(builtin().unwrap().eval("ghost", &[], 0), None);
+    assert_eq!(builtin_with(&[]).unwrap().eval("ghost", &[], 0), None);
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn in_flight_holds_sent_until_response_or_failure() {
         ),
     ];
     assert_eq!(
-        builtin().unwrap().eval("in_flight", &events, 0),
+        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
         Some(json!([{"id": "b", "port": "turn", "attempt": 1}]))
     );
 }
@@ -318,7 +318,7 @@ fn in_flight_is_attempt_scoped() {
         ),
     ];
     assert_eq!(
-        builtin().unwrap().eval("in_flight", &events, 0),
+        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
         Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
     );
 }
@@ -344,7 +344,7 @@ fn in_flight_drops_the_attempt_retry_voided() {
         ),
     ];
     assert_eq!(
-        builtin().unwrap().eval("in_flight", &events, 0),
+        builtin_with(&[]).unwrap().eval("in_flight", &events, 0),
         Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
     );
 }
@@ -368,7 +368,12 @@ fn sent_at(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
 #[test]
 fn stale_sent_folds_the_lease_and_the_attempt_cap() {
     let events = vec![sent_at("a", 1, 1000, 3, 1_000)];
-    let at = |now: i64| builtin().unwrap().eval("stale_sent", &events, now).unwrap();
+    let at = |now: i64| {
+        builtin_with(&[])
+            .unwrap()
+            .eval("stale_sent", &events, now)
+            .unwrap()
+    };
 
     // 租约未到：不算卡住，但它在途（有实例，`stale:false`）。
     assert_eq!(
@@ -386,7 +391,9 @@ fn stale_sent_folds_the_lease_and_the_attempt_cap() {
     // 尝试到顶：同一个实例上 `exhausted` 为真——到期但要判死，不是再重试。
     let events = vec![sent_at("a", 3, 1000, 3, 1_000)];
     assert_eq!(
-        builtin().unwrap().eval("stale_sent", &events, 9_000),
+        builtin_with(&[])
+            .unwrap()
+            .eval("stale_sent", &events, 9_000),
         Some(
             json!([{"port": "turn", "id": "a", "attempt": 3, "age_ms": 8000,
                     "stale": true, "exhausted": true}])
@@ -421,7 +428,9 @@ fn stale_sent_only_sees_calls_nobody_closed() {
         ),
     ];
     assert_eq!(
-        builtin().unwrap().eval("stale_sent", &events, 100_000),
+        builtin_with(&[])
+            .unwrap()
+            .eval("stale_sent", &events, 100_000),
         Some(json!([]))
     );
 }
@@ -435,7 +444,9 @@ fn stale_sent_never_expires_a_call_without_a_lease() {
         json!({"port": "turn", "id": "a", "attempt": 1}),
     )];
     assert_eq!(
-        builtin().unwrap().eval("stale_sent", &events, 1_000_000),
+        builtin_with(&[])
+            .unwrap()
+            .eval("stale_sent", &events, 1_000_000),
         Some(
             json!([{"port": "turn", "id": "a", "attempt": 1, "age_ms": 1_000_000,
                     "stale": false, "exhausted": false}])

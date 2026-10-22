@@ -97,7 +97,9 @@ use crate::symbio_core::{
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
-use super::turn_runner::{TurnInput, TurnOutcome, TurnResume, TurnRunner, TurnSessionBegin};
+use super::turn_runner::{
+    TurnInput, TurnOutcome, TurnResume, TurnRunner, TurnSession, TurnSessionBegin,
+};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
@@ -754,31 +756,90 @@ pub(crate) struct ExecTurn<'a> {
     pub presentation_tree: crate::symbio_core::node_build::PresentationTree,
 }
 
-/// 驱动一轮：每步读事实切片 → `loop_rows::next` 选最小可还债 → 跑**一个执行体
-/// 动作**，直到收束。
+/// 一次执行体动作需要的**全部**环境：本轮草稿 + 七个端口。
+///
+/// 它是派发器与执行体之间唯一的界面：执行体拿得到草稿与端口，拿不到第二份草稿，
+/// 也拿不到「下一个动作是什么」的选择权（ADR-118 决策 4）。
+pub(crate) struct TurnStep<'a> {
+    pub(crate) session: &'a mut TurnSession,
+    pub(crate) store: &'a dyn Store<Event = Event>,
+    pub(crate) llm: &'a dyn LlmAdapter,
+    pub(crate) tok: &'a FullModel,
+    pub(crate) sink: Arc<dyn DeltaSink>,
+    pub(crate) tools: &'a [CapabilityMeta],
+    pub(crate) dispatch: Option<&'a dyn super::tool_dispatch::ToolDispatch>,
+}
+
+/// 动作的返回：`None` = 本轮继续（下一步还欠着），`Some` = 本轮收束。
+///
+/// `+ Send` 不是装饰：插件的 `dispatch` 未来要交回线程池，派发器在它里面 await
+/// 这个动作。
+type StepFuture<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Option<TurnOutcome>, AppendError>> + Send + 'a>,
+>;
+
+/// 绑定表里的动作类型。**一个 `by` 一个动作**：派发器只调它，不按行名 / 端口名 /
+/// 业务语义分支（ADR-118 决策 1–2；`Executor::for_by` 的名字 match 已退役）。
+///
+/// 借用只有一条寿命：`TurnStep` 的端口字段全是 `Arc`，唯一借来的东西是本轮草稿
+/// （派发器持有的 `TurnSession`）。这就是 §2.3 草图里 `'static` 换不来的那条——
+/// 草稿必须被借走，动作就不能是 `'static`（ADR-119）。
+pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
+
+/// `execute` 执行体：按草稿跑**一个**动作。
+///
+/// 粗端口期（PL-016 §7.2）内环在这一个执行体内部：草稿里有一批已请求、未派发的
+/// 工具就派发它（创建 / 授权 / 派发三段都在里面），否则跑一次模型往返。这个分支
+/// 读的是**派发器自己持有的草稿**，不是事实，也不是行名（ADR-118 决策 4）。
+///
+/// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
+/// 上界判断在派发器——停机判据不搬进执行体（ADR-118 决策 7）。
+pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        if step.session.has_pending_batch() {
+            step.session
+                .tools(step.store, step.llm, step.dispatch)
+                .await
+        } else {
+            step.session.record_model_step();
+            step.session
+                .model(
+                    step.store,
+                    step.llm,
+                    step.tok,
+                    step.sink.clone(),
+                    step.tools,
+                    step.dispatch.is_some(),
+                )
+                .await
+        }
+    })
+}
+
+/// 驱动一轮：每步读事实切片 → `loop_rows::next` 选最小可还债（连带查出它的动作）→
+/// 跑**一个执行体动作**，直到收束。
 ///
 /// T-227 步 5 把循环从 `turn_runner` 移到这里；T-233 把「执行器自己知道
 /// 下一步」换成「引擎从行表读」：`decl::ring::drive` 是生产入口，派发器不再
 /// 手写 `begin` / `step` 的推进条件，也不按行名 / 端口名分支（ADR-118 决策 1–2）。
 ///
-/// 过渡态（ADR-118 后果 2 进行中）：执行体注册表尚未按 `by` 一一接线，`policy.*`
-/// 与三笔工具债仍在内环里完成；派发器按**自己持有的草稿**选动作——有寄存的工具批
-/// 就跑 [`TurnSession::tools`]，没有就跑 [`TurnSession::model`]。因此
-/// `turn_runner` 只回答「一个动作发生了什么」，不再在一个 `step` 里同时跑模型与工具。
+/// T-241 把最后一处业务分支收进执行体：`by` → 动作是绑定表
+/// （[`loop_rows::ACTORS`](super::loop_rows::ACTORS)）里的一次查找，派发器对
+/// `by` 只有一个动作 `(next.action)(&mut step)`；模型往返与工具批次的选择住在
+/// [`run_execute`] 里，读的是草稿而不是行名。未接线的行显式 `by = None`
+/// （ADR-118 订正 1），选债面不再需要 `accept` 谓词。
+///
 /// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn drive_steps<S>(
-    store: &S,
+pub(crate) async fn drive_steps(
+    store: &dyn Store<Event = Event>,
     llm: &dyn LlmAdapter,
     tok: &FullModel,
     input: TurnInput,
     sink: Arc<dyn DeltaSink>,
     tools: &[CapabilityMeta],
     dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
-) -> Result<TurnOutcome, AppendError>
-where
-    S: Store<Event = Event> + ?Sized,
-{
+) -> Result<TurnOutcome, AppendError> {
     let step_sink = sink.clone();
     // 续写幕旁路（**不是兼容层**，见下方 `next.is_none` 处的理由）：`turn_head` 是
     // 全局最新一幕的表头，恢复一条已被后续轮次归档的旧轮时，表头已指向新轮。
@@ -788,58 +849,35 @@ where
         TurnSessionBegin::Run(session) => session,
     };
     loop {
-        // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查执行体注册表 →
+        // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
         // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。
         let facts = store.range(Seq::new(0));
-        let next =
-            super::loop_rows::next(&facts, session.turn(), session.now_ms(), Executor::accepts);
-        if next.is_none() && !resumed {
-            // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
-            // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
-            //
-            // 续写幕走旁路：行表只有**一个**全局表头（`turn_head` 取最新一轮），
+        let next = super::loop_rows::next(&facts, session.turn(), session.now_ms());
+        let next = match next {
+            Some(next) => next,
+            None if !resumed => {
+                // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
+                // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
+                return session.exhausted(store, llm, "no_progress").await;
+            }
+            // 续写幕旁路：行表只有**一个**全局表头（`turn_head` 取最新一轮），
             // 恢复一段被后续轮次归档的旧轮时它指向新轮，旧轮的 `execute-turn`
             // 在表里看不到。这限制在表侧，堵在这里只会让恢复永远 `no_progress`
             // （用例 `an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor`）。
-            return session.exhausted(store, llm, "no_progress").await;
-        }
-        // 执行体：**粗端口期内环**（PL-016 §7.2）——`execute-turn` 在整轮收束前恒欠，
-        // 每步都落在它上面；细端口债（`dispatch-model` / `open-tools` /
-        // `authorize-tool` / `dispatch-tools`）由这个执行体**内部**写，
-        // 不另起第二调度器（否则两批之间会有两个调度器抢同一份事实）。
-        // 动作由派发器持有的草稿决定（模型往返 ↔ 工具批次，ADR-118 决策 4）。
-        //
-        // 按注册表筛过的选债面：注册表还没覆盖到的 `by`（`policy.*` 与三笔工具债，
-        // 粗端口期都由整轮执行体内部完成）不会被选中，不能让它把整轮顶成
-        // `no_progress`。
-        let executor = match &next {
-            Some(next) => {
-                crate::plugin_debug!(
-                    "session",
-                    "[Loop] 派发 {}（执行体 {}；债 {}）",
-                    next.row,
-                    next.by,
-                    next.key
-                );
-                // 选债面已按同一个注册表筛过；这里再查一次只为消灭「选中但没有
-                // 执行体」的静默状态——查不到就按 no_progress 显形，不猜动作。
-                let Some(executor) = Executor::for_by(next.by) else {
-                    crate::plugin_warn!(
-                        "session",
-                        "[Loop] 行表与执行体注册表脱节（选中 `by={}` 无执行体），按 no_progress 收束",
-                        next.by
-                    );
-                    return session.exhausted(store, llm, "no_progress").await;
-                };
-                executor
-            }
-            // 续写幕旁路：行表看不见被归档的旧轮（见上方 `is_none && !resumed`），
-            // 按整轮执行体继续跑——这是旁路唯一的作用点。
-            None => Executor::Execute,
+            // 旁路唯一的作用点就是这一行：把那**一行**连同它的动作一起交回来。
+            None => match super::loop_rows::resume_anchor(session.turn()) {
+                Some(next) => next,
+                None => return session.exhausted(store, llm, "no_progress").await,
+            },
         };
-        // 草稿归派发器所有（ADR-118 决策 4）：有寄存的工具批就派发它，否则跑模型。
-        let has_batch = session.has_pending_batch();
-        if !has_batch && session.count_model_step() {
+        crate::plugin_debug!(
+            "session",
+            "[Loop] 派发 {}（执行体 {}；债 {}）",
+            next.row,
+            next.by,
+            next.key
+        );
+        if session.over_step_limit() {
             crate::plugin_warn!(
                 "actors",
                 "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
@@ -848,24 +886,17 @@ where
             return session.exhausted(store, llm, "step_limit").await;
         }
         let head = facts.len();
-        let outcome = match executor {
-            // 粗端口期唯一执行体：按草稿跑一次模型往返或一次工具批。
-            Executor::Execute => {
-                if has_batch {
-                    session.tools(store, llm, dispatch).await?
-                } else {
-                    session
-                        .model(
-                            store,
-                            llm,
-                            tok,
-                            step_sink.clone(),
-                            tools,
-                            dispatch.is_some(),
-                        )
-                        .await?
-                }
-            }
+        let outcome = {
+            let mut step = TurnStep {
+                session: &mut session,
+                store,
+                llm,
+                tok,
+                sink: step_sink.clone(),
+                tools,
+                dispatch,
+            };
+            (next.action)(&mut step).await?
         };
         if let Some(outcome) = outcome {
             return Ok(outcome);
@@ -875,33 +906,6 @@ where
         if store.range(Seq::new(0)).len() == head {
             return session.exhausted(store, llm, "no_progress").await;
         }
-    }
-}
-
-/// 派发器的执行体注册表（ADR-118 决策 2）：`Debt.decl.by` → 执行体。
-///
-/// **粗端口期只有一档**（ADR-118 决策 3）：`execute-turn` 在整轮收束前恒欠，
-/// 工具三笔债由它在内部按三个动作写。选债时按注册表筛：还没接线的 `by`
-/// （`policy.*` 与三笔工具债）在粗端口期都由整轮执行体内部完成，它们不参与
-/// 派发器选债——否则一笔内环债会把整轮顶成 `no_progress`。
-/// 其余 `by` 的执行体随对方行在 PL-017 的细端口里变得可选中再接。
-#[derive(Clone, Copy)]
-enum Executor {
-    /// 本轮的执行体：按持有草稿跑一次模型往返或一次工具批。
-    Execute,
-}
-
-impl Executor {
-    fn for_by(by: &str) -> Option<Self> {
-        match by {
-            "execute" => Some(Self::Execute),
-            _ => None,
-        }
-    }
-
-    /// 选债面用的谓词：`by` 有没有执行体。
-    fn accepts(by: &str) -> bool {
-        Self::for_by(by).is_some()
     }
 }
 

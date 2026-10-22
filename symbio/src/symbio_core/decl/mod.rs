@@ -68,6 +68,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::symbio_core::Event;
+use crate::symbio_core::LatencyTier;
 // 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
 use crate::symbio_core::event::{
@@ -109,6 +110,36 @@ pub(crate) struct ViewDecl {
     pub(crate) eval: fn(&[Event], i64) -> serde_json::Value,
 }
 
+/// 一个**执行体**的声明（PL-016 §2.3）。
+///
+/// ## 为什么四个字段都不是装饰
+///
+/// `name` 是 `by` 的查找键；`mode` 是令牌闸门的依据（反射档拿不到模型句柄）；
+/// `reads` 在冻结期逐个查视图存在（视图名打错 ⇒ 运行期静默返回空）；`writes` 是
+/// 第 5 / 6 条检查的输入（写入封闭、执行体收口）。裸函数这三样全部失效。
+///
+/// ## `run` 不在这里
+///
+/// 方案 §2.3 的草图把 `run` 画进 `ActorDecl`，其签名 `BoxFuture<'static, …>` 与
+/// §2.6 契约 1（`drive` 是 async、持本轮草稿）在类型上互斥：`'static` 的 future
+/// 借不到草稿，也借不到 `&dyn LlmAdapter`。执行体的可调用面因此住在**注册它的
+/// 插件**里（`plugins::loop::turn_exec::ACTORS`），机制层只持有静态可查的四样——
+/// 「一个 `by` 一个动作」由绑定表与冻结表同时保证。裁决见 ADR-119。
+///
+/// 与 `actors::ActorSpec` 无关：那里的 actor 是**主体**（人格 / 推理），这里的
+/// actor 是**执行体**（表里一个名字对应一次动作）。方案用同一个词，此处不改名。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActorDecl {
+    /// 执行体名——行表 `by` 指向它。
+    pub(crate) name: &'static str,
+    /// 时延档：这个执行体允许的**最慢**一档（与行的 `tier` 同词表）。
+    pub(crate) mode: LatencyTier,
+    /// 读的**视图名**（存在性检查的对象；空 = 这个执行体不读任何视图）。
+    pub(crate) reads: &'static [&'static str],
+    /// 写的**事实名**（写入封闭与第 6 条收口检查的对象）。
+    pub(crate) writes: &'static [&'static str],
+}
+
 /// `seal()` 的检查失败项。一次返回全部，不是首错即停。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CheckError {
@@ -135,6 +166,13 @@ pub(crate) enum CheckError {
         field: &'static str,
         role: &'static str,
     },
+    /// 两个 `ActorDecl` 同名（`by` 按名字查找，重名 ⇒ 查到哪个不确定）。
+    DuplicateActor { name: &'static str },
+    /// 执行体 `reads` 引用了一个没有声明的视图。
+    UnknownReadView {
+        actor: &'static str,
+        view: &'static str,
+    },
 }
 
 /// 装载期的唯一注册口。`seal()` 之后没有可变方法（见 [`Frozen`]）。
@@ -142,6 +180,7 @@ pub(crate) enum CheckError {
 pub(crate) struct Builder {
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
+    actors: Vec<ActorDecl>,
 }
 
 impl Builder {
@@ -155,6 +194,10 @@ impl Builder {
 
     pub(crate) fn view(&mut self, d: ViewDecl) {
         self.views.push(d);
+    }
+
+    pub(crate) fn actor(&mut self, d: ActorDecl) {
+        self.actors.push(d);
     }
 
     /// 冻结并检查。通过 ⇒ [`Frozen`]（只读）；失败 ⇒ 全部错误。
@@ -176,6 +219,20 @@ impl Builder {
         for v in &self.views {
             if fact_names.contains(v.name) {
                 errors.push(CheckError::NameCollision { name: v.name });
+            }
+        }
+        let mut actor_names = HashSet::new();
+        for a in &self.actors {
+            if !actor_names.insert(a.name) {
+                errors.push(CheckError::DuplicateActor { name: a.name });
+            }
+            for view in a.reads {
+                if !view_names.contains(view) {
+                    errors.push(CheckError::UnknownReadView {
+                        actor: a.name,
+                        view,
+                    });
+                }
             }
         }
 
@@ -217,6 +274,7 @@ impl Builder {
             Ok(Arc::new(Frozen {
                 facts: self.facts,
                 views: self.views,
+                actors: self.actors,
             }))
         } else {
             Err(errors)
@@ -229,6 +287,7 @@ impl Builder {
 pub(crate) struct Frozen {
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
+    actors: Vec<ActorDecl>,
 }
 
 impl Frozen {
@@ -240,12 +299,21 @@ impl Frozen {
         &self.views
     }
 
+    pub(crate) fn actors(&self) -> &[ActorDecl] {
+        &self.actors
+    }
+
     pub(crate) fn fact(&self, name: &str) -> Option<&FactDecl> {
         self.facts.iter().find(|f| f.name == name)
     }
 
     pub(crate) fn view(&self, name: &str) -> Option<&ViewDecl> {
         self.views.iter().find(|v| v.name == name)
+    }
+
+    /// 按 `by` 里的名字取执行体声明。`None` = 这个名字没有执行体（行表与绑定表脱节）。
+    pub(crate) fn actor(&self, name: &str) -> Option<&ActorDecl> {
+        self.actors.iter().find(|a| a.name == name)
     }
 
     /// 按声明求值：未声明、或扫描条数超过声明的 `cost` 上界 ⇒ `None`。
@@ -259,14 +327,21 @@ impl Frozen {
     }
 }
 
-/// 首批声明能装载并冻结（T-221 的交付物）。
-pub(crate) fn builtin() -> Result<Arc<Frozen>, Vec<CheckError>> {
+/// 首批声明 + **插件交来的执行体声明**（PL-016 §3.2 的 `actor` 口）。
+///
+/// 执行体声明由控制面拥有（`loop_rows` 用绑定表把它填进 `Builder`）：机制层不
+/// 认识任何业务执行体，只认「名字 + 档位 + 读哪些视图 + 写哪些事实」。
+/// 交 `&[]` = 只冻结事实与视图（测试夹具用这一档）。
+pub(crate) fn builtin_with(actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<CheckError>> {
     let mut b = Builder::new();
     for &f in BUILTIN_FACTS {
         b.fact(f);
     }
     for &v in BUILTIN_VIEWS {
         b.view(v);
+    }
+    for &a in actors {
+        b.actor(a);
     }
     b.seal()
 }

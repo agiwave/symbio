@@ -101,17 +101,14 @@ impl TurnRunner {
     ///
     /// 无工具轮 = [`Self::run_with_tools`] 的**入参为空的同一路径**（工具清单空、无分发方）
     /// ——「有工具」与「无工具」不是两条执行路径。
-    pub async fn run_streaming<S>(
+    pub async fn run_streaming(
         &self,
-        store: &S,
+        store: &dyn Store<Event = Event>,
         llm: &dyn LlmAdapter,
         tok: &FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
-    ) -> Result<TurnOutcome, AppendError>
-    where
-        S: Store<Event = Event>,
-    {
+    ) -> Result<TurnOutcome, AppendError> {
         self.run_with_tools(store, llm, tok, input, sink, &[], None)
             .await
     }
@@ -121,19 +118,16 @@ impl TurnRunner {
     /// 早先这里另写了一份等价循环；那会让「无进展收束」「步数上界」的用例只测到副本。
     /// 现在测试驱动与生产驱动是同一条路径（T-233 后果 2 的验收要求）。
     #[allow(clippy::too_many_arguments)]
-    pub async fn run_with_tools<S>(
+    pub async fn run_with_tools(
         &self,
-        store: &S,
+        store: &dyn Store<Event = Event>,
         llm: &dyn LlmAdapter,
         tok: &FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
         dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
-    ) -> Result<TurnOutcome, AppendError>
-    where
-        S: Store<Event = Event> + ?Sized,
-    {
+    ) -> Result<TurnOutcome, AppendError> {
         super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch).await
     }
 }

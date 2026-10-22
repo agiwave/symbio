@@ -5,7 +5,7 @@
 
 use serde_json::{json, Value};
 
-use super::super::{Builder, FactDecl, ViewDecl};
+use super::super::{ActorDecl, Builder, FactDecl, ViewDecl};
 use super::*;
 use crate::symbio_core::{Entity, Event, LatencyTier, Seq, Verb};
 
@@ -49,7 +49,16 @@ fn list_view(events: &[Event], _now: i64) -> Value {
     )
 }
 
-fn world() -> std::sync::Arc<Frozen> {
+/// 用例世界里的唯一执行体：`act`。行的 `by` 只有指向它才算「有人跑」。
+/// 写的两个事实正好覆盖各用例的出口（`g` / `h`），`done` 给批量世界用。
+const ACT: ActorDecl = ActorDecl {
+    name: "act",
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &["g", "h", "done"],
+};
+
+fn world_with(actors: &[ActorDecl]) -> std::sync::Arc<Frozen> {
     let mut b = Builder::new();
     for name in ["f", "g", "h"] {
         b.fact(FactDecl {
@@ -74,7 +83,16 @@ fn world() -> std::sync::Arc<Frozen> {
         cost: 64,
         eval: list_view,
     });
+    for d in actors {
+        b.actor(*d);
+    }
     b.seal().unwrap()
+}
+
+/// 默认世界：把 `ACT` 注册上——没有它，`by = Some("act")` 的行在装载期就是
+/// `UnmannedRow`（能选中 ⇔ 有人跑，ADR-118 订正 1）。
+fn world() -> std::sync::Arc<Frozen> {
+    world_with(&[ACT])
 }
 
 fn pattern(
@@ -165,7 +183,7 @@ fn unless_blocks_without_closing() {
     let debts = owed(&rows, &world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked, "`unless` 命中 ⇒ 在等，而不是没事");
-    assert!(drive(&rows, &world(), &events, 0, |_| true).is_none());
+    assert!(drive(&rows, &world(), &events, 0).is_none());
 }
 
 #[test]
@@ -182,7 +200,7 @@ fn by_none_is_the_declared_waiting_state() {
     let debts = owed(&rows, &world(), &events, 0);
     assert_eq!(debts.len(), 1);
     assert!(debts[0].blocked);
-    assert!(drive(&rows, &world(), &events, 0, |_| true).is_none());
+    assert!(drive(&rows, &world(), &events, 0).is_none());
 }
 
 // ── 视图当源 ─────────────────────────────────────────────────────────────
@@ -271,17 +289,11 @@ fn drive_takes_min_by_prio_then_name_then_key() {
     let frozen = world();
     // 同 `prio` 按行名；注册顺序相反也不影响。
     let rows = [low.clone(), earlier.clone(), later.clone()];
-    let picked = drive(&rows, &frozen, &events, 0, |_| true).unwrap();
+    let picked = drive(&rows, &frozen, &events, 0).unwrap();
     assert_eq!(picked.decl.name, "a");
 
     let rows = [later.clone(), earlier.clone(), low.clone()];
-    assert_eq!(
-        drive(&rows, &frozen, &events, 0, |_| true)
-            .unwrap()
-            .decl
-            .name,
-        "a"
-    );
+    assert_eq!(drive(&rows, &frozen, &events, 0).unwrap().decl.name, "a");
 }
 
 #[test]
@@ -298,7 +310,7 @@ fn same_row_same_prio_breaks_ties_by_key() {
         ev(1, 1, "f", json!({"id": "b"})),
         ev(2, 1, "f", json!({"id": "a"})),
     ];
-    let picked = drive(&rows, &world(), &events, 0, |_| true).unwrap();
+    let picked = drive(&rows, &world(), &events, 0).unwrap();
     assert_eq!(picked.key.trace(), "id=a");
 }
 
@@ -306,35 +318,98 @@ fn same_row_same_prio_breaks_ties_by_key() {
 fn empty_table_never_drives_but_is_complete() {
     let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
     assert!(owed(&[], &world(), &events, 0).is_empty());
-    assert!(drive(&[], &world(), &events, 0, |_| true).is_none());
+    assert!(drive(&[], &world(), &events, 0).is_none());
 }
 
+/// 守卫用例的替身（ADR-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，
+/// 而是装载期就红。`accept` 谓词存在时，这一行会永远不被选中却全绿；现在它拒绝启动。
 #[test]
-fn accept_skips_rows_without_an_executor() {
-    // 执行体注册表是选债面的一部分：未接线的 `by` 不参与裁决，也不挡住更小的
-    // 已接线债（否则一笔内环债会把整轮顶成 `no_progress`）。
-    let rows = [
-        row(
-            "unwired",
-            0,
-            Some("nobody"),
-            pattern("f", &["id"], &[]),
-            &[pattern("g", &["id"], &[])],
-            &[],
-        ),
-        row(
-            "wired",
+fn a_by_without_an_actor_is_a_load_time_gap() {
+    let rows = [row(
+        "unwired",
+        0,
+        Some("nobody"),
+        pattern("f", &["id"], &[]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    let gaps = check_rows(&rows, &world());
+    assert!(gaps.contains(&Gap::UnmannedRow {
+        row: "unwired",
+        by: "nobody"
+    }));
+    // 反方向同样要红：声明了执行体却没有行指向它 = 裸函数换了个写法。
+    assert!(gaps.contains(&Gap::OrphanActor { actor: "act" }));
+}
+
+/// `by = None` 是「这笔账不由引擎执行」的唯一声明位：它不是缺口，
+/// 但它也不该带来一个执行体。
+#[test]
+fn a_none_by_needs_no_actor() {
+    let rows = [row(
+        "waiting",
+        0,
+        None,
+        pattern("f", &["id"], &[]),
+        &[pattern("g", &["id"], &[]), pattern("h", &["id"], &[])],
+        &[],
+    )];
+    assert!(check_rows(&rows, &world_with(&[])).is_empty());
+}
+
+/// 执行体写的名字必须够关上自己那一行的出口（第 6 条收口）。
+/// 否则「有人跑」也只是跑得离那笔债更近不了——装载期就该指出。
+#[test]
+fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
+    let rows = [row(
+        "r",
+        10,
+        Some("act"),
+        pattern("f", &["id"], &[]),
+        &[pattern("g", &["id"], &[])],
+        &[],
+    )];
+    let frozen = world_with(&[ActorDecl {
+        name: "act",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["z"],
+    }]);
+    let gaps = check_rows(&rows, &frozen);
+    assert!(gaps.contains(&Gap::ActorCannotClose {
+        row: "r",
+        actor: "act"
+    }));
+}
+
+/// 时延闸门：行的 `tier` 比执行体的 `mode` 更慢 ⇒ 这一行不可能按时跑完。
+/// （反射档拿不到模型句柄——PL-016 §3.4 第 6 条的后半。）
+#[test]
+fn a_row_slower_than_its_actor_mode_is_a_gap() {
+    let rows = {
+        let mut d = row(
+            "r",
             10,
             Some("act"),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
-        ),
-    ];
-    let events = vec![ev(1, 1, "f", json!({"id": "a"}))];
-    let picked = drive(&rows, &world(), &events, 0, |by| by == "act").unwrap();
-    assert_eq!(picked.decl.name, "wired");
-    assert!(drive(&rows, &world(), &events, 0, |_| false).is_none());
+        );
+        d.tier = LatencyTier::Deep;
+        [d]
+    };
+    let frozen = world_with(&[ActorDecl {
+        name: "act",
+        mode: LatencyTier::Reflex,
+        reads: &[],
+        writes: &["g"],
+    }]);
+    assert!(
+        check_rows(&rows, &frozen).contains(&Gap::ActorModeTooNarrow {
+            row: "r",
+            actor: "act"
+        })
+    );
 }
 
 // ── 纯性 ─────────────────────────────────────────────────────────────────
@@ -375,7 +450,7 @@ fn check_rows_finds_every_kind_of_gap() {
         row(
             "no-exit",
             10,
-            Some("x"),
+            Some("act"),
             pattern("f", &["id"], &[]),
             &[],
             &[],
@@ -384,7 +459,7 @@ fn check_rows_finds_every_kind_of_gap() {
         row(
             "key-mismatch",
             20,
-            Some("x"),
+            Some("act"),
             pattern("f", &["id"], &[]),
             &[pattern("g", &[], &[])],
             &[],
@@ -393,7 +468,7 @@ fn check_rows_finds_every_kind_of_gap() {
         row(
             "unknown",
             30,
-            Some("x"),
+            Some("act"),
             pattern("ghost", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -402,7 +477,7 @@ fn check_rows_finds_every_kind_of_gap() {
         row(
             "unknown",
             40,
-            Some("x"),
+            Some("act"),
             pattern("f", &["id"], &[]),
             &[pattern("g", &["id"], &[])],
             &[],
@@ -484,6 +559,7 @@ fn world_batch() -> std::sync::Arc<Frozen> {
         expand: &[],
         fields: &["id"],
     });
+    b.actor(ACT);
     b.seal().unwrap()
 }
 

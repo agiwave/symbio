@@ -11,9 +11,10 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use super::actor_decls;
 use super::{PORTS, ROWS};
 use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
-use crate::symbio_core::{builtin as declarations, Frozen};
+use crate::symbio_core::{builtin_with, Frozen};
 use crate::symbio_core::{Entity, Event, Seq, Verb};
 
 fn ev(turn: u64, kind: &str, payload: Value) -> Event {
@@ -36,14 +37,17 @@ fn ev_at(turn: u64, kind: &str, payload: Value, ts: i64) -> Event {
 }
 
 fn frozen() -> Arc<Frozen> {
-    declarations().expect("内置声明必须能冻结")
+    builtin_with(&actor_decls()).expect("内置声明 + 执行体注册表必须能冻结")
 }
 
-/// 新表里这一行此刻是否可还（`owes` 命中且未被 `until` / `unless` 关掉）。
+/// 这一行此刻是否**欠着**这笔账（`open`：`owes` 命中且没有被 `until` 关掉）。
+///
+/// 不看 `blocked`：「在等」与「没事」必须可区分（PL-016 §2.2），而 `by = None`
+/// 的未接线行是**在等**，不是没欠。要验可还性请用 `drive` / `next` 或直读 `blocked`。
 fn owes(name: &str, events: &[Event], now: i64) -> bool {
     owed(ROWS, &frozen(), events, now)
         .iter()
-        .any(|d| d.decl.name == name && !d.blocked)
+        .any(|d| d.decl.name == name)
 }
 
 fn copy(decl: &Decl) -> Decl {
@@ -57,6 +61,22 @@ fn copy(decl: &Decl) -> Decl {
         until: decl.until,
         unless: decl.unless,
     }
+}
+
+/// 把指定几行接到真实动作上，其余照抄整张表。
+///
+/// 只在验**裁决序**时用：未接线的行 `by = None` ⇒ `blocked`，`drive` 不选它。
+/// 造出一张「同时可还」的表才能看出 `prio` 的相对顺序。
+fn wired(names: &[&str]) -> Vec<Decl> {
+    ROWS.iter()
+        .map(|d| {
+            let mut c = copy(d);
+            if names.contains(&c.name) {
+                c.by = Some(super::EXECUTE);
+            }
+            c
+        })
+        .collect()
 }
 
 /// 全部策略关掉的配置。
@@ -371,14 +391,14 @@ fn execute_row_closes_on_turn_closed() {
         ev(1, "session.config", plain()),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let picked = drive(ROWS, &frozen(), &open, 0, |_| true).expect("开着的轮次总是欠一次执行");
+    let picked = drive(ROWS, &frozen(), &open, 0).expect("开着的轮次总是欠一次执行");
     assert_eq!(picked.decl.name, "execute-turn");
     assert_eq!(picked.decl.by, Some("execute"));
 
     let mut closed = open.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
     assert!(
-        drive(ROWS, &frozen(), &closed, 0, |_| true).is_none(),
+        drive(ROWS, &frozen(), &closed, 0).is_none(),
         "收束后无账可还"
     );
 }
@@ -386,6 +406,9 @@ fn execute_row_closes_on_turn_closed() {
 #[test]
 fn prio_is_global_and_registration_order_does_not_matter() {
     // 判决 / 召回 / 执行同时可还：`prio` 最小者胜，而不是表里先出现的那行。
+    //
+    // 本用例验的是**裁决序**，不是接线面，所以把这三行都接到同一个动作上：
+    // 未接线的行 `by = None` ⇒ `blocked`，会被 `drive` 滤掉（ADR-118 订正 1）。
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(
@@ -400,16 +423,17 @@ fn prio_is_global_and_registration_order_does_not_matter() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
     let f = frozen();
+    let rows = wired(&["policy.classify", "policy.recall", "execute-turn"]);
     assert_eq!(
-        drive(ROWS, &f, &events, 0, |_| true).map(|d| d.decl.name),
+        drive(&rows, &f, &events, 0).map(|d| d.decl.name),
         Some("policy.classify")
     );
 
     // 注册顺序反过来，结论不变。
-    let mut reversed: Vec<Decl> = ROWS.iter().map(copy).collect();
+    let mut reversed = rows.clone();
     reversed.reverse();
     assert_eq!(
-        drive(&reversed, &f, &events, 0, |_| true).map(|d| d.decl.name),
+        drive(&reversed, &f, &events, 0).map(|d| d.decl.name),
         Some("policy.classify")
     );
 
@@ -417,7 +441,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
     let mut decided = events.clone();
     decided.push(ev(1, "turn.stage", json!({"stage": "decide", "round": 0})));
     assert_eq!(
-        drive(ROWS, &f, &decided, 0, |_| true).map(|d| d.decl.name),
+        drive(&rows, &f, &decided, 0).map(|d| d.decl.name),
         Some("policy.recall")
     );
     decided.push(ev(
@@ -426,7 +450,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
         json!({"stage": "recall", "round": 0, "result": "miss"}),
     ));
     assert_eq!(
-        drive(ROWS, &f, &decided, 0, |_| true).map(|d| d.decl.name),
+        drive(&rows, &f, &decided, 0).map(|d| d.decl.name),
         Some("execute-turn")
     );
 }
@@ -789,7 +813,16 @@ fn a_model_response_expands_its_tool_calls_into_one_debt_each() {
         .filter(|d| d.decl.name == "open-tools")
         .collect();
     assert_eq!(debts.len(), 2, "两个调用 = 两笔创建债");
-    assert!(debts.iter().all(|d| !d.blocked));
+    // 两笔各自成键：展开的意义就是元素之间分得开（`blocked` 不看——`open-tools`
+    // 是未接线行，`by = None` 恒在等，但账确实欠着两笔）。
+    let keys: Vec<_> = debts.iter().map(|d| d.key.trace()).collect();
+    assert_eq!(
+        keys,
+        vec![
+            "port=tool,id=tool-1-d0-call-a",
+            "port=tool,id=tool-1-d0-call-b"
+        ]
+    );
 
     let requested = vec![
         answered[0].clone(),
@@ -1072,7 +1105,7 @@ fn tool_rows_do_not_disturb_the_model_rows() {
 #[test]
 fn next_is_none_without_events() {
     // 空表不前进：装载失败 / 还没有本幕事实时，派发器不能猜一个动作。
-    assert!(super::next(&[], 0, 0, |_| true).is_none());
+    assert!(super::next(&[], 0, 0).is_none());
 }
 
 #[test]
@@ -1082,7 +1115,7 @@ fn next_picks_execute_turn_while_the_turn_is_open() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0, |_| true).expect("开着的幕应欠 execute-turn");
+    let next = super::next(&events, 1, 0).expect("开着的幕应欠 execute-turn");
     assert_eq!(next.row, "execute-turn");
     assert_eq!(next.by, "execute");
 }
@@ -1095,7 +1128,46 @@ fn next_is_none_once_the_turn_is_closed() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
         ev(1, "chat.assistant.final", json!({"text": "ok"})),
     ];
-    assert!(super::next(&events, 1, 0, |_| true).is_none());
+    assert!(super::next(&events, 1, 0).is_none());
+}
+
+/// 「能选中」与「有人跑」是同一件事的两面：`next` 交出的不只是行名，还有动作本体。
+/// 派发器因此没有任何按行名分支的余地（ADR-118 决策 1–2）。
+#[test]
+fn next_hands_back_the_action_itself() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let next = super::next(&events, 1, 0).expect("开着的幕欠 execute-turn");
+    assert_eq!(next.row, "execute-turn");
+    assert_eq!(next.by, super::EXECUTE);
+    let run: super::super::turn_exec::Action = super::super::turn_exec::run_execute;
+    // 函数指针的 `==` 不作数（同一函数在不同 codegen unit 里地址可不同）；
+    // `fn_addr_eq` 是这条比较的唯一合法写法。
+    assert!(std::ptr::fn_addr_eq(next.action, run));
+}
+
+/// 行表与绑定表同批冻结：两个方向都不许多——每个 `by` 查得到动作，
+/// 每个注册过的执行体也有行指向它。这正是装载期 `UnmannedRow` / `OrphanActor`
+/// 在产线上兑现出来的形状，这里对着真表再验一次。
+#[test]
+fn the_row_table_and_the_binding_table_agree() {
+    let f = frozen();
+    let mut used: Vec<&str> = Vec::new();
+    for d in ROWS {
+        let Some(by) = d.by else { continue };
+        assert!(
+            super::action_of(by).is_some(),
+            "行 {} 的 `by` 没有动作",
+            d.name
+        );
+        assert!(f.actor(by).is_some(), "行 {} 的 `by` 没有声明", d.name);
+        used.push(by);
+    }
+    for a in f.actors() {
+        assert!(used.contains(&a.name), "执行体 {} 没有任何行指向它", a.name);
+    }
 }
 
 // ── 本次 drive 的 `now`：只来自唤醒事实（判据 12 · T-240）──────────────────

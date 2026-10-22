@@ -55,9 +55,96 @@ use serde_json::Value;
 
 use crate::symbio_core::ring::{check_rows, owed, Decl, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
-    builtin, Event, Frozen, LatencyTier, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    builtin_with, ActorDecl, Event, Frozen, LatencyTier, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH, EVENT_TURN_STAGE,
 };
+
+/// 这张表里**唯一有执行体的名字**：`execute`（整轮执行体）。
+///
+/// `by` 只有两种取值（PL-016 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
+/// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（ADR-118 订正 1）——
+/// 未接线的行显式写 `None`，进表、可 diff，接线时把 `Some(名字)` 与
+/// [`turn_exec`](super::turn_exec) 里那条 `ActorEntry` 同批改回。
+/// 检查方在装载期：`by = Some(a)` 而 `a` 没有声明 ⇒
+/// [`Gap::UnmannedRow`](crate::symbio_core::ring::Gap::UnmannedRow) ⇒ 装载红。
+///
+/// 声明本身（PL-016 §2.3）与 [`turn_exec::ACTORS`](super::turn_exec::ACTORS) 的
+/// 绑定项一起构造，这里只放静态可查的四样。
+///
+/// `writes` 是这个执行体**直接落格**的领域事实（账本语义：单写者是 store，不是引擎）。
+/// 协议四格（`request` / `sent` / `response` / `failed` / `retry`）不在任何执行体的
+/// `writes` 里——它们只由引擎写（§2.3）。
+const EXECUTE: &str = "execute";
+
+const ACTOR_EXECUTE: ActorDecl = ActorDecl {
+    name: EXECUTE,
+    // 整轮执行体调模型：深度档。
+    mode: LatencyTier::Deep,
+    // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
+    reads: &[],
+    writes: &[
+        EVENT_ASSISTANT_FINAL,
+        EVENT_ASSISTANT_FALLBACK,
+        EVENT_ASSISTANT_PROGRESS,
+        EVENT_ASSISTANT_OPENING,
+        EVENT_ASSISTANT_REPORTED,
+        EVENT_TURN_STAGE,
+        EVENT_TURN_DISPATCH,
+        EVENT_ARTIFACT_ADDED,
+        EVENT_SESSION_CONSOLIDATED,
+        EVENT_AUTHZ_GRANTED,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// **执行体绑定表**（PL-016 §3.2 的 `actor` 口 + ADR-118 决策 2）：一条 = 一个 `by`。
+///
+/// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
+/// 投影，交给 `builtin_with` 冻结）与派发器跑得动的动作（[`next`] 查出的
+/// [`Next::action`]）因此不可能一个有一个没有。接线一个执行体 = 在这里加一条 +
+/// 把那一行的 `by` 改回 `Some(名字)`，同一个提交。
+///
+/// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
+pub(crate) struct ActorEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::turn_exec::Action,
+}
+
+static ACTORS: &[ActorEntry] = &[ActorEntry {
+    decl: ACTOR_EXECUTE,
+    run: super::turn_exec::run_execute,
+}];
+
+/// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
+pub(crate) fn actor_decls() -> Vec<ActorDecl> {
+    ACTORS.iter().map(|e| e.decl).collect()
+}
+
+/// `by` → 动作。`None` = 绑定表没有这个名字（装载期的 `UnmannedRow` 已拦，
+/// 这里是派发面把「表被改坏」显形，不猜动作）。
+fn action_of(by: &str) -> Option<super::turn_exec::Action> {
+    ACTORS.iter().find(|e| e.decl.name == by).map(|e| e.run)
+}
+
+/// 续写幕旁路的交还形状：`execute-turn` 与它的动作。
+///
+/// 行表只有一个全局表头（`turn_head` 取最新一轮），恢复一段已被后续轮次归档的
+/// 旧轮时 [`next`] 看不见它；这里不是第二套选债逻辑，而是把那**一行**连同它的
+/// 动作一起交回派发器（债键按轮，与行的 `key: &["turn"]` 同形状）。表头按轮
+/// 参数化之后这一格整格删除。
+pub(crate) fn resume_anchor(turn: u64) -> Option<Next> {
+    let decl = ROWS.iter().find(|d| d.name == "execute-turn")?;
+    let action = action_of(decl.by?)?;
+    Some(Next {
+        row: decl.name,
+        by: decl.by?,
+        key: format!("turn={turn}"),
+        action,
+    })
+}
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
 ///
@@ -154,7 +241,9 @@ pub(crate) static ROWS: &[Decl] = &[
         name: "authorize-tool",
         // T-226 的口径：判在派发之前。0 是这一环里最早的一档。
         prio: 0,
-        by: Some("authorizer"),
+        // 判定住在批次里（粗端口期由整轮执行体内部按三个动作写），不经派发器选债；
+        // 接 `authorizer` 执行体的那一批同时改这里与 `ACTORS`。
+        by: None,
         // 判定是纯比较（风险档 vs 会话阈值），不调模型。
         tier: LatencyTier::Fast,
         expand: None,
@@ -181,7 +270,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.classify",
         prio: 10,
-        by: Some("decide"),
+        // 未接线：判决由 `chat_loop` 按 `owes` 点问自己执行；与 `decide` 执行体同批接回。
+        by: None,
         // 判决可能落到模型，但不生成：快速档（与旧行 `effects.tier` 同值）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -209,7 +299,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.report",
         prio: 20,
-        by: Some("report"),
+        // 未接线：触发点在 `round_report_hook`（它自己数批次边界）；与 `report` 执行体同批接回。
+        by: None,
         // 模板产线，零模型往返。
         tier: LatencyTier::Reflex,
         expand: None,
@@ -229,7 +320,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.compress",
         prio: 30,
-        by: Some("compress"),
+        // 未接线：压缩在 `assemble` 段按 `owes` 点问执行；与 `compress` 执行体同批接回。
+        by: None,
         // 语义压缩调模型：深度档。
         tier: LatencyTier::Deep,
         expand: None,
@@ -252,7 +344,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.recall",
         prio: 40,
-        by: Some("recall"),
+        // 未接线：召回落在 `inputs` 段按 `owes` 点问执行；与 `recall` 执行体同批接回。
+        by: None,
         // 事实投影的纯读 + 技能路由，不调模型。
         tier: LatencyTier::Reflex,
         expand: None,
@@ -279,7 +372,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.reflex",
         prio: 50,
-        by: Some("reflex"),
+        // 未接线：快路在装配段命中即收束（它不调模型）；与 `reflex` 执行体同批接回。
+        by: None,
         // 快路就是「不调模型」：反射档是它的定义。
         tier: LatencyTier::Reflex,
         expand: None,
@@ -307,7 +401,7 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "execute-turn",
         prio: 60,
-        by: Some("execute"),
+        by: Some(EXECUTE),
         tier: LatencyTier::Deep,
         expand: None,
         owes: Pattern {
@@ -334,7 +428,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "dispatch-turn",
         prio: 65,
-        by: Some("courier"),
+        // 未接线：`turn` 端口的往返就在整轮执行体里跑，`courier` 执行体随细端口接回。
+        by: None,
         // 派发本身不调模型（模型在执行体里）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -373,7 +468,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "dispatch-model",
         prio: 66,
-        by: Some("courier"),
+        // 未接线：引擎面在 `port::round_trip`（落 `sent` + 跑一次往返），调用点还在执行体内。
+        by: None,
         // 派发本身不调模型（模型在执行体里）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -407,7 +503,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "open-tools",
         prio: 67,
-        by: Some("courier"),
+        // 未接线：`calls` 展开成 `request` 那一步在批次段里（`tool_dispatch`），整轮执行体内部。
+        by: None,
         tier: LatencyTier::Fast,
         expand: Some(("calls", "id")),
         owes: Pattern {
@@ -434,7 +531,8 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "dispatch-tools",
         prio: 68,
-        by: Some("courier"),
+        // 未接线：放行后的单次派发也在 `tool_dispatch` 里，与 `courier` 同批接回。
+        by: None,
         // 派发本身不调工具（执行在批次里）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -564,7 +662,9 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "lease",
         prio: 80,
-        by: Some("lease_keeper"),
+        // 未接线：看护者在唤醒路径上自己扫 `stale_sent`，不经派发器选债；与
+        // `lease_keeper` 执行体同批接回。
+        by: None,
         // 看护本身是记账，不调模型。
         tier: LatencyTier::Fast,
         expand: None,
@@ -594,14 +694,18 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 装载：冻结声明表 → 用行表跑装载期检查。
+/// 装载：冻结声明表（含执行体声明）→ 用行表跑装载期检查。
 ///
 /// **任何缺口都是装载失败**——`check_rows` 报出的每一格（重复名 / 无出口 / 键不一致 /
-/// 未声明源 / 展开键不匹配 / 孤儿事实名）都进 Err 列表，不降级成告警：一个没人消费的
-/// 事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，它在装载期就该挡住启动。
+/// 未声明源 / 展开键不匹配 / 孤儿事实名 / 无人认领的 `by` / 收不了口的执行体）都进
+/// Err 列表，不降级成告警：一个没人消费的事实名就是判据 7 拦的那条「拼错的名字
+/// 静默永不被消费」，它在装载期就该挡住启动。
+///
+/// 执行体声明与绑定项一起交（[`super::turn_exec::actor_decls`] 就是绑定表的
+/// `decl` 投影），所以装载期能看到的名字与派发器跑得动的名字**同源**。
 fn assemble(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<String>> {
-    let frozen =
-        builtin().map_err(|errors| vec![format!("事实 / 视图声明装载失败：{errors:?}")])?;
+    let frozen = builtin_with(&actor_decls())
+        .map_err(|errors| vec![format!("事实 / 视图 / 执行体声明装载失败：{errors:?}")])?;
     let gaps = check_rows(rows, &frozen);
     if gaps.is_empty() {
         return Ok(frozen);
@@ -667,7 +771,12 @@ pub(crate) fn wake_now_ms(events: &[Event], drive_seq: u64) -> i64 {
         .unwrap_or(0)
 }
 
-/// 这一行此刻是否欠着且可还（`owes` 命中、未被 `until` / `unless` 关掉）。
+/// 这一行此刻**欠着**吗（`owes` 命中且未被 `until` 关掉）。
+///
+/// 这是 §2.2 的 `open`，不是 `actionable`：`by = None` 的行照样欠着。「在等」与
+/// 「没事」可区分正是 `by = None` 存在的理由，所以点问口不能把它折掉——调用点
+/// （`port.rs` 的往返、`tool_dispatch` 的三段、`chat_loop` 的策略段）问的都是
+/// 「这笔账在不在」，而「引擎该不该现在去还」只由 [`next`] 回答。
 ///
 /// 返回布尔而不是 [`Debt`](crate::symbio_core::ring::Debt)：调用点只决定「这一步
 /// 做不做」。要裁决顺序（同一点多行竞争）时用 `ring::drive`，本函数不代劳。
@@ -677,18 +786,18 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     };
     let debt = owed(ROWS, &frozen, turn_slice(events, turn), now)
         .into_iter()
-        .find(|d| d.decl.name == name && !d.blocked);
+        .find(|d| d.decl.name == name);
     if let Some(debt) = &debt {
         trace(&frozen, debt);
     }
     debt.is_some()
 }
 
-/// 引擎的**选债口**：本幕当前最小的一笔可还债。
+/// 引擎的**选债口**：本幕当前最小的一笔可还债，连带它的动作。
 ///
-/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠」。
-/// [`next`] 是 `turn_exec::drive_steps` 的唯一选债依据（ADR-118 决策 1–2）——
-/// 派发器不按行名 / 端口名 / 业务语义分支，只按 `by` 查执行体注册表。
+/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠、
+/// 跑什么」。[`next`] 是 `turn_exec::drive_steps` 的唯一选债依据（ADR-118 决策 1–2）——
+/// 派发器不按行名 / 端口名 / 业务语义分支，只调 `Next.action` 这**一个**动作。
 pub(crate) struct Next {
     /// 行名（日志与停机理由用）。
     pub(crate) row: &'static str,
@@ -696,6 +805,8 @@ pub(crate) struct Next {
     pub(crate) by: &'static str,
     /// 债键的人读形状（日志用）。
     pub(crate) key: String,
+    /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
+    pub(crate) action: super::turn_exec::Action,
 }
 
 /// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
@@ -704,23 +815,29 @@ pub(crate) struct Next {
 /// 并复用与 [`owes`] 同一份冻结声明表。装载失败返回 `None` 而不是 panic——
 /// 派发器据此停住，不拿半张表继续走。
 ///
-/// `accept` 是派发器的执行体注册表（`by` → 执行体）：注册表没覆盖的债不参与
-/// 选债（粗端口期 `policy.*` 与三笔工具债在整轮执行体内部完成），否则一笔内环债
-/// 会把整轮顶成 `no_progress`。
-pub(crate) fn next(
-    events: &[Event],
-    turn: u64,
-    now: i64,
-    accept: impl Fn(&str) -> bool,
-) -> Option<Next> {
+/// 可还性只有一个声明位：`owed` 的 `blocked`（`by = None ∨ unless`）。
+/// 「注册表没覆盖的 `by`」不是第四个过滤条件——那种行直接写 `by = None`，
+/// 接回时与它的 `ActorEntry` 同批改（ADR-118 订正 1）。
+pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
     let frozen = frozen()?;
-    let debt =
-        crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now, accept)?;
+    let debt = crate::symbio_core::ring::drive(ROWS, &frozen, turn_slice(events, turn), now)?;
     trace(&frozen, &debt);
+    // 选债面与动作同源：`by` 有声明 ⇔ 绑定表有这一条（两者一起构造），
+    // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作。
+    let Some(action) = debt.decl.by.and_then(action_of) else {
+        crate::plugin_warn!(
+            "session",
+            "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",
+            debt.decl.name,
+            debt.decl.by
+        );
+        return None;
+    };
     Some(Next {
         row: debt.decl.name,
         by: debt.decl.by?,
         key: debt.key.trace(),
+        action,
     })
 }
 
