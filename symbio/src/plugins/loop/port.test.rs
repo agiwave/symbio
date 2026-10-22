@@ -52,6 +52,7 @@ async fn dispatch_writes_before_and_the_answer_itself() {
         },
         || async { Ok("答完了") },
         |_: &()| unreachable!("成功路径不该问 why"),
+        |_: &&str| json!({}),
     )
     .await
     .expect("派发成功");
@@ -84,6 +85,7 @@ async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
         },
         || async { Err("模型超时") },
         |e: &&'static str| format!("failed: {e}"),
+        |_: &()| json!({}),
     )
     .await;
 
@@ -121,6 +123,7 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
             }
         },
         |_: &()| "unreachable".into(),
+        |_: &()| json!({}),
     )
     .await;
 
@@ -151,6 +154,7 @@ async fn an_undeclared_port_is_named_not_defaulted() {
         },
         || async { Ok(()) },
         |_: &()| "unreachable".into(),
+        |_: &()| json!({}),
     )
     .await;
     assert!(matches!(res, Err(DispatchError::NoPort("ghost"))));
@@ -174,6 +178,7 @@ async fn dispatching_twice_does_not_double_the_facts() {
             },
             || async { Ok(()) },
             |_: &()| "unreachable".into(),
+            |_: &()| json!({}),
         )
         .await;
         out.expect("第二次派发只该撞幂等键");

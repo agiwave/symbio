@@ -106,6 +106,10 @@ where
         },
         || llm.generate_turn(tok, messages, tools, sink.clone()),
         |e: &AdapterError| e.to_string(),
+        // 应答的形状位（T-227 步 5a）：`turn_tools_due` 视图的唯一输入。
+        // 「请求了工具」是这次往返的**结论**，由引擎随 `response` 一并入格——
+        // 执行体不自己补写应答（那会有两个应答写方）。
+        |rt: &crate::symbio_core::LlmTurn| serde_json::json!({ "has_tool_calls": !rt.tool_calls.is_empty() }),
     );
     match out.await {
         Ok(rt) => Ok(rt),
@@ -165,6 +169,9 @@ where
         // 派发失败）。`E = String` 只是给引擎一个可写的 `why` 位，不会有人返回它。
         || async { Ok::<_, String>(dispatch.dispatch(rt).await) },
         |e: &String| e.clone(),
+        // 工具端口的应答没有形状位：批里跑了几条由 `artifact.added` 逐条记账，
+        // `response` 只回答「这一批回来了」。
+        |_: &Vec<crate::symbio_core::DispatchOutcome>| serde_json::json!({}),
     );
     match out.await {
         Ok(outcomes) => Ok(outcomes),
@@ -216,8 +223,16 @@ where
     // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
     let round_facts = node_facts(&run.nodes);
 
-    // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
-    if classify_round(&rt, dispatch.is_some()) == RoundDecision::Halt {
+    // 2a. 本幕还欠一批工具吗？**问表**（T-227 步 5a）：`turn_tools_due` 视图折的是
+    //     「末次模型应答请求了工具 ∧ 那之后还没有工具应答 ∧ 没有在途的工具批」。
+    //     判据从此在数据里，而不是在「刚才那个响应长什么样」的内存里。
+    let tools_due = super::super::loop_rows::due(
+        "turn_tools_due",
+        &store.range(Seq::new(0)),
+        run.turn,
+        crate::symbio_core::clock_now_ms(),
+    );
+    if classify_round(tools_due, dispatch.is_some()) == RoundDecision::Halt {
         return halt(run, store, llm, rt, &round_facts).await.map(Some);
     }
 

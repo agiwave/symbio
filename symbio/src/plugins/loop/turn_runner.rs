@@ -539,13 +539,34 @@ impl TurnRunner {
                     "[v2] 轮内步数超过上限 {MAX_STEPS_PER_DRIVE}（turn={}），收束为 exhausted（step_limit）",
                     run.turn
                 );
-                return exceed_steps(&mut run, store, llm, "step_limit").await;
+                return close_exhausted(&mut run, store, llm, "step_limit").await;
             }
             if let Some(outcome) =
                 stream::stream_round(&mut run, store, llm, tok, sink.clone(), tools, dispatch)
                     .await?
             {
                 return Ok(outcome);
+            }
+            // ── 无进展守卫（ADR-115 决策 3 的第二半，T-227 步 5a）──────────
+            //
+            // 上一步跑完了却没给结论（返回 `None` = 「还有下一步」）。下一步存在
+            // 吗？**问表**：`turn_model_due` 说本幕还欠一次模型往返。不欠却也没
+            // 收束 ⇒ 这一步没有推动这一轮，继续转下去只会白花往返。
+            //
+            // 与上界的分工：上界管「转得太多」，这里管「转了但没动」。两者都落
+            // `exhausted`（同一闭集值），只差 `detail`——读侧不必学新词。
+            if !super::loop_rows::due(
+                "turn_model_due",
+                &store.range(Seq::new(0)),
+                run.turn,
+                crate::symbio_core::clock_now_ms(),
+            ) {
+                crate::plugin_warn!(
+                    "actors",
+                    "[v2] 本幕不再欠模型往返却未收束（turn={}），收束为 exhausted（no_progress）",
+                    run.turn
+                );
+                return close_exhausted(&mut run, store, llm, "no_progress").await;
             }
         }
     }
@@ -558,10 +579,13 @@ impl TurnRunner {
 /// 一个卡死的轮拖得更久。
 const MAX_STEPS_PER_DRIVE: usize = 64;
 
-/// 步数到顶时的收束：落兜底格但 `reason = exhausted`（与截断同一闭集值）。
+/// 走到停机判据时的收束：落兜底格但 `reason = exhausted`（与截断同一闭集值）。
+///
+/// 两个调用点各带一个 `detail`：`step_limit`（步数到顶）与 `no_progress`
+/// （上一步没推动这一轮）。两者是**同一闭集值**下的两个原因，读侧不必学新词。
 ///
 /// 半截产出照样带进载荷（它们是事实，不因停在这里就丢）。
-async fn exceed_steps<S>(
+async fn close_exhausted<S>(
     run: &mut prepare::Prepared,
     store: &S,
     llm: &dyn LlmAdapter,

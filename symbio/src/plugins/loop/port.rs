@@ -160,18 +160,25 @@ where
 ///
 /// `owed` 是调用点刚问过的结论（`dispatch-<port>` 行还欠不欠）。不欠 ⇒ 立刻返回
 /// [`DispatchError::NotOwed`]，**执行体不会被跑**——没有账的调用不许发出。
-pub(crate) async fn dispatch<S, T, E, F, Fut, W>(
+///
+/// `answer` 把执行体产出的**形状**折成应答载荷里除协议三元组之外的那几位
+/// （T-227 步 5a）。它存在的理由：`response` 是引擎写的（不让「有没有记账」依赖
+/// 搬运者的纪律），但「这次应答请求了工具吗」只有执行体的返回值知道。给一个
+/// 提取口，比让执行体自己补写一条应答要稳——那样就有了两个应答写方。
+pub(crate) async fn dispatch<S, T, E, F, Fut, W, A>(
     store: &S,
     ports: &[PortDecl],
     plan: Dispatch<'_>,
     run: F,
     why: W,
+    answer: A,
 ) -> Result<T, DispatchError<E>>
 where
     S: Store<Event = Event> + ?Sized,
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
     W: FnOnce(&E) -> String,
+    A: FnOnce(&T) -> serde_json::Value,
 {
     let Dispatch {
         call,
@@ -210,6 +217,17 @@ where
 
     match run().await {
         Ok(value) => {
+            // 协议三元组 + 执行体折出的形状位（`answer`）。
+            let mut payload = serde_json::json!({
+                "port": call.port,
+                "id": call.id,
+                "attempt": call.attempt,
+            });
+            if let (Some(obj), serde_json::Value::Object(extra)) =
+                (payload.as_object_mut(), answer(&value))
+            {
+                obj.extend(extra);
+            }
             append(
                 store,
                 Event::pending(
@@ -221,11 +239,7 @@ where
                     "system",
                 )
                 .with_produced_by(produced_by)
-                .with_payload(serde_json::json!({
-                    "port": call.port,
-                    "id": call.id,
-                    "attempt": call.attempt,
-                })),
+                .with_payload(payload),
             )
             .map_err(DispatchError::Store)?;
             Ok(value)

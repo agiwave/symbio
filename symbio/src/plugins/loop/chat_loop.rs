@@ -683,6 +683,9 @@ pub async fn run_chat_loop(
                 super::turn_exec::TurnExecExit::Aborted(_) => "aborted".to_string(),
                 super::turn_exec::TurnExecExit::Failed(err) => format!("failed: {err}"),
             },
+            // 粗端口 `turn` 的应答没有形状位：模型 / 工具的形状在它**内部**的
+            // 两个细端口上（`model` / `tool`），这里只回答「这一幕执行完了」。
+            |_: &super::turn_exec::ExecTurnResult| serde_json::json!({}),
         )
         .await
         {

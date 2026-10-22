@@ -73,6 +73,8 @@ fn builtin_loads_and_freezes() {
             "turn_head",
             "turn_stages",
             "turn_closed",
+            "turn_model_due",
+            "turn_tools_due",
             "report_due",
             "reported_anchors",
         ]
@@ -98,6 +100,9 @@ fn builtin_loads_and_freezes() {
     assert_eq!(frozen.view("turn_head").unwrap().ver, 3);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
+    // T-227 步 5a：两个「欠不欠一次对外调用」的视图。
+    assert_eq!(frozen.view("turn_model_due").unwrap().ver, 1);
+    assert_eq!(frozen.view("turn_tools_due").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
     assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }

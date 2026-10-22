@@ -285,6 +285,25 @@ const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
 // 必要信息：端口参数未来改了，历史调用的租约仍是当时那个（不是「今天这个」）。
 const SENT_FIELDS: &[&str] = &["port", "id", "attempt", "lease_ms", "attempt_cap"];
 
+/// `response` 的载荷字段：协议三元组 + **这次应答请求了工具吗**（T-227 步 5a）。
+///
+/// ## 为什么只有 `response` 多一个字段
+///
+/// `request` / `retry` 记的是「要发 / 换一次尝试」，它们与应答内容无关；只有应答
+/// 携带「模型说了什么形状的话」。而 `turn_tools_due` 视图的唯一输入就是这一位：
+/// 「欠一次工具批」= 末次应答请求了工具。
+///
+/// ## 为什么不是新事实名
+///
+/// 端口是载荷（ADR-115 决策 7），一次应答的形状也是载荷——加一个字段不等于
+/// 加一种事实。加端口仍然只要 `1 个 PortDecl + 2 行`（判据 7 不变）。
+///
+/// ## 与 ADR-116 的关系
+///
+/// ADR-116 的裁决是「**收束**的前件不需要它」（收束以 `turn.closing` 为前件），
+/// 不是「任何地方都不需要它」。工具批的派发前件需要它，且只在这里需要。
+const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "has_tool_calls"];
+
 const BUILTIN_FACTS: &[FactDecl] = &[
     FactDecl {
         name: EVENT_REQUEST,
@@ -305,7 +324,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
-        fields: PROTOCOL_FIELDS,
+        fields: RESPONSE_FIELDS,
     },
     // `failed` 关的是**逻辑 id**（所有尝试），所以没有 `attempt`——与协议表一致：
     // 失败不是「某一次尝试失败」，是这笔调用不再重试。
@@ -480,9 +499,13 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
 /// **在途**协议调用的唯一口径：`sent` 中没有被 `response`（同 id + attempt）
 /// 或 `failed`（同逻辑 id）或 `retry`（同 id + attempt）关掉的。
 ///
-/// 两个视图（`in_flight` / `stale_sent`）共用它，而不是各写一遍关账规则：
-/// 「什么算在途」只能有一处口径，否则两个视图会在某个角落说不同的话。
-fn open_calls(events: &[Event]) -> Vec<&Event> {
+/// 三个视图（`in_flight` / `stale_sent` / `turn_model_due` / `turn_tools_due`）
+/// 共用它，而不是各写一遍关账规则：「什么算在途」只能有一处口径，否则视图会在
+/// 某个角落说不同的话。
+///
+/// 收**迭代器**而不是切片：前两个视图扫整份切片，后两个只扫本幕（幕锚之后）
+/// ——口径一样，范围不同。
+fn open_calls<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<&'a Event> {
     let mut open: Vec<&Event> = Vec::new();
     for e in events {
         match e.kind.as_str() {
@@ -673,6 +696,146 @@ fn turn_stages(events: &[Event], _now: i64) -> serde_json::Value {
             })
             .collect(),
     )
+}
+
+/// 本幕的事实（幕锚之后）——续写幕只看自己那一幕，不看上一幕的协议账。
+///
+/// 与 `turn_head` / `turn_stages` / `turn_closed` 同一条收窄口径：续写幕复用轮号，
+/// 按轮扫全史会把上一幕的 `sent` / `response` 算进这一幕。
+fn scoped<'a>(events: &'a [Event], turn: u64, anchor_seq: u64) -> Vec<&'a Event> {
+    events
+        .iter()
+        .filter(|e| e.turn == turn && after_anchor(e, anchor_seq))
+        .collect()
+}
+
+/// 本幕的端口账（T-227 步 5a）：两个「欠不欠一次对外调用」的视图共用它。
+///
+/// 口径只该有一处——`turn_model_due` 与 `turn_tools_due` 若各算一遍「在途」与
+/// 「批跑完没有」，它们迟早会在某个角落说不同的话，而那种不一致在日志上看起来
+/// 完全正常（一条永远不欠的账与一条永远欠着的账都只是「没动静」）。
+struct TurnCalls {
+    /// 本幕已收束（收束 / 兜底格已落）。
+    closed: bool,
+    /// 有在途的模型调用（`sent` 了还没应答）。
+    model_busy: bool,
+    /// 有在途的工具批。
+    tools_busy: bool,
+    /// 本幕模型**要过工具**的应答次数。
+    wants: usize,
+    /// 本幕工具应答的次数。
+    done: usize,
+}
+
+/// 本幕的端口账。`None` = 还没有幕（没有用户格 / 恢复格）。
+fn turn_calls(events: &[Event]) -> Option<(u64, TurnCalls)> {
+    let (turn, anchor) = drive_of(events)?;
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    let scoped = scoped(events, turn, anchor_seq);
+
+    let closed = scoped.iter().any(|e| {
+        matches!(
+            e.kind.as_str(),
+            "chat.assistant.final" | "chat.assistant.fallback"
+        )
+    });
+    let open = open_calls(scoped.iter().copied());
+    let model_busy = open.iter().any(|e| str_field(e, "port") == Some("model"));
+    let tools_busy = open.iter().any(|e| str_field(e, "port") == Some("tool"));
+    // 「这一批跑过了」按**次数**对：一次应答一批。本幕只有一批的说法不成立
+    // （一轮里可以有多次往返），所以模型要过 N 次、工具回了 M 次，M < N 就还欠。
+    let wants = scoped
+        .iter()
+        .filter(|e| {
+            e.kind == EVENT_RESPONSE
+                && str_field(e, "port") == Some("model")
+                && bool_field(e, "has_tool_calls")
+        })
+        .count();
+    let done = scoped
+        .iter()
+        .filter(|e| e.kind == EVENT_RESPONSE && str_field(e, "port") == Some("tool"))
+        .count();
+    Some((
+        turn,
+        TurnCalls {
+            closed,
+            model_busy,
+            tools_busy,
+            wants,
+            done,
+        },
+    ))
+}
+
+/// 本幕末次**模型应答**请求了工具吗（`None` = 还没有应答）。
+fn last_model_answer_wants_tools(events: &[Event]) -> Option<bool> {
+    let (turn, anchor) = drive_of(events)?;
+    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
+    scoped(events, turn, anchor_seq)
+        .iter()
+        .filter(|e| e.kind == EVENT_RESPONSE && str_field(e, "port") == Some("model"))
+        .next_back()
+        .map(|e| bool_field(e, "has_tool_calls"))
+}
+
+/// 本幕还欠一次**模型往返**吗（T-227 步 5a）：`[]` = 不欠，一条 `{turn}` = 欠。
+///
+/// ## 为什么它不能以 `request` 为前件
+///
+/// `request` 是**调用点自己**在派发前一刻写的（`loop/port::announce`）。以它为
+/// 前件，驱动器问「现在欠什么」得到的恒是「什么也不欠」——能让它欠的那条事实
+/// 还没写；写了之后表当然说欠，可那时调用已经决定要发生了。于是「下一步调模型
+/// 还是调工具」这个判断只能留在代码里，表无从参与，判据 1（循环离开执行体）
+/// 也就无从落地：把循环搬到别处只是换了个文件放同一段顺序。
+///
+/// ## 四条合起来才是「欠」
+///
+/// - **未收束**：收束之后不再有往返。
+/// - **没有在途的模型调用**：一次往返还没回来时不许发第二次。
+/// - **没有待办 / 在途的工具批**：模型刚回完、批还没跑时若说「欠往返」，驱动器
+///   （`prio` 66 先于工具批的 67）会**跳过工具批再调一次模型**——模型会看到
+///   「请求过却什么也没发生」，然后多半再请求一次同一个工具。这一条把那个顺序
+///   钉在数据里，而不是钉在某个 `if` 的书写顺序里。
+/// - **末次应答请求了工具，或本幕还没有应答**。
+fn turn_model_due(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, calls)) = turn_calls(events) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    if calls.closed || calls.model_busy {
+        return serde_json::Value::Array(Vec::new());
+    }
+    let due = match last_model_answer_wants_tools(events) {
+        // 还没有应答：该发第一次。
+        None => true,
+        // 末次应答不带工具 = 定稿，交给收束行。
+        Some(false) => false,
+        // 末次应答要工具：**批没跑完之前不欠往返**（欠的是批）；跑完了才再欠一次。
+        Some(true) => calls.wants <= calls.done && !calls.tools_busy,
+    };
+    if due {
+        serde_json::json!([{ "turn": turn }])
+    } else {
+        serde_json::Value::Array(Vec::new())
+    }
+}
+
+/// 本幕还欠一次**工具批**吗（T-227 步 5a）：`[]` = 不欠，一条 `{turn}` = 欠。
+///
+/// 三条缺一：缺「末次应答要工具」会在模型没要工具时凭空跑一批；缺「还没跑完」
+/// 会把同一批跑两遍（副作用重复）；缺「没有在途批」会让批还没回来时再派一批。
+fn turn_tools_due(events: &[Event], _now: i64) -> serde_json::Value {
+    let Some((turn, calls)) = turn_calls(events) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    if calls.closed || calls.tools_busy || calls.model_busy {
+        return serde_json::Value::Array(Vec::new());
+    }
+    if last_model_answer_wants_tools(events) == Some(true) && calls.wants > calls.done {
+        serde_json::json!([{ "turn": turn }])
+    } else {
+        serde_json::Value::Array(Vec::new())
+    }
 }
 
 /// 本幕是否已经收束（收束 / 兜底格出现在幕锚之后）。
@@ -889,6 +1052,55 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: turn_closed,
     },
+    // 本幕欠一次模型往返（T-227 步 5a）：`dispatch-model` 的开账条件。
+    //
+    // 读 `response.has_tool_calls` 与协议四名——**不读 `request`**：那一位是调用点
+    // 自己写的，以它为前件表永远说「不欠」（理由见 `turn_model_due` 的文档）。
+    ViewDecl {
+        name: "turn_model_due",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_RESPONSE, "has_tool_calls"),
+            (EVENT_FAILED, "id"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
+        ],
+        cost: 4096,
+        eval: turn_model_due,
+    },
+    // 本幕欠一次工具批（T-227 步 5a）：`dispatch-tool` 的开账条件。
+    ViewDecl {
+        name: "turn_tools_due",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_RESPONSE, "has_tool_calls"),
+            (EVENT_FAILED, "id"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
+        ],
+        cost: 4096,
+        eval: turn_tools_due,
+    },
     // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。
     //
@@ -940,6 +1152,14 @@ fn str_field<'a>(e: &'a Event, key: &str) -> Option<&'a str> {
 
 fn u64_field(e: &Event, key: &str) -> Option<u64> {
     e.payload.get(key).and_then(|v| v.as_u64())
+}
+
+/// 布尔字段。缺失读成 `false`——「没写」不是「写了真」。
+fn bool_field(e: &Event, key: &str) -> bool {
+    e.payload
+        .get(key)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

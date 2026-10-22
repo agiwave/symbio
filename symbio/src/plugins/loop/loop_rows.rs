@@ -658,6 +658,24 @@ pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<
     frozen()?.eval(name, turn_slice(events, turn), now)
 }
 
+/// **视图口径的「欠」**：视图回一条 `[{..}]` = 欠，`[]` / `Null` / 未声明 = 不欠。
+///
+/// ## 与 [`owes`] 的分工
+///
+/// [`owes`] 问的是**行**：它把 `owes` / `until` / `unless` / `blocked` 一起算了，
+/// 回答「这一行现在可不可还」。本函数问的是**视图**：视图自己就是判据
+/// （`turn_model_due` 已经把「收束 / 在途 / 待办批」三件事折完了），调用点只需要
+/// 一个布尔。
+///
+/// ## 为什么两个口都要有
+///
+/// 行名与视图名共用一张名字空间，但**语义不同**：拿视图名去问 [`owes`] 会一个
+/// 字都匹配不上，静默回 `false`——一个「永远不欠」的驱动器，没有任何报错。
+/// 把两种问法分成两个函数，误用会变成编译期的名字错误而不是运行期的静默。
+pub(crate) fn due(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
+    matches!(view(name, events, turn, now), Some(Value::Array(ref a)) if !a.is_empty())
+}
+
 /// 这一行携带的档位。未登记 ⇒ 深度档（fail-safe：不静默提速）。
 pub(crate) fn tier(name: &str) -> LatencyTier {
     ROWS.iter()

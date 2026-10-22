@@ -154,7 +154,15 @@ export const BASELINE = {
   // 那格后三条全在途）与 `turn_runner.test.rs::streaming_frames_reach_the_sink_without_adding_a_fact`
   // （判据 5：同一轮跑两遍，一片 vs 三片，要求帧数跟着片数走而**事实名序列逐字相同**——
   // 只断言「帧数 == 片数」抓不住"帧既进 sink 又进日志"的实现）。非侵蚀，是纯增量。
-  rustTests: 2027,
+  // baseline-allow rustTests: 批 T-227 步 5a 净增 2 条判据（2027→2029）——把「下一步调模型还是
+  // 调工具」从内存里的响应搬到事实面（`turn_model_due` / `turn_tools_due` 两个视图 +
+  // `response.has_tool_calls` 载荷）。新增：`a_turn_owes_a_model_round_trip_until_the_model_gives_a_final_answer`
+  // （钉整条弧：没有应答 ⇒ 欠；在途 ⇒ 不欠；要工具 ⇒ 先欠批；批回来 ⇒ 又欠；定稿 ⇒ 不欠；
+  // 收束 ⇒ 不欠）与 `a_turn_owes_a_tool_batch_only_while_the_answer_wants_one`（含反向自检：
+  // 旧日志没有 `has_tool_calls` 时读成「不要工具」而不是「要」）。既有用例只改断言不增删：
+  // `classify_round_covers_all_four_combinations` 从传 `&LlmTurn` 改成传布尔（判决不再读内存），
+  // `port.test.rs` 五处 `dispatch` 调用各补一个应答形状提取口。非侵蚀，是纯增量。
+  rustTests: 2029,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -164,7 +172,8 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-227 步 4 补两条判据的同一增量在 CI 口径下修一格（1444→1446），逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1446,
+  // baseline-allow ciRustTestsTotal: 批 T-227 步 5a 的同一增量在 CI 口径下修一格（1446→1448），逐条归属见上方 `rustTests` 的注。
+  ciRustTestsTotal: 1448,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

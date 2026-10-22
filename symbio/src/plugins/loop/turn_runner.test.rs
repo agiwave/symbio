@@ -3767,43 +3767,33 @@ mod denial_fact_tests {
 
 mod round_decision_tests {
     use super::super::{classify_round, final_answer, RoundDecision, StreamNodeFacts};
-    use crate::symbio_core::{LlmTurn, ModelFinishReason, TurnToolCallInfo};
-
-    fn one_tool_call() -> TurnToolCallInfo {
-        TurnToolCallInfo {
-            id: Some("c1".to_string()),
-            wire_id: Some("w1".to_string()),
-            name: Some("vdfs_read".to_string()),
-            arguments: serde_json::json!({}),
-            parse_error: None,
-            overflow_notice: None,
-        }
-    }
+    use crate::symbio_core::{LlmTurn, ModelFinishReason};
 
     /// 四种组合逐一钉住——环的**唯一**决策点，错一格就是「该收束时去派发」。
+    ///
+    /// 第一维是「欠不欠一批工具」，由 `turn_tools_due` 视图给出（T-227 步 5a）：
+    /// 这里传布尔而不是 `LlmTurn`，正是为了钉住「判决不再读内存里的响应」。
     #[test]
     fn classify_round_covers_all_four_combinations() {
-        let mut rt = LlmTurn::default();
         assert_eq!(
-            classify_round(&rt, true),
+            classify_round(false, true),
             RoundDecision::Halt,
-            "无工具调用 ⇒ 收束"
+            "不欠批 ⇒ 收束"
         );
         assert_eq!(
-            classify_round(&rt, false),
+            classify_round(false, false),
             RoundDecision::Halt,
-            "无工具调用时通道有无都不影响收束"
+            "不欠批时通道有无都不影响收束"
         );
-        rt.tool_calls.push(one_tool_call());
         assert_eq!(
-            classify_round(&rt, true),
+            classify_round(true, true),
             RoundDecision::Act,
-            "有调用且有通道 ⇒ 派发"
+            "欠批且有通道 ⇒ 派发"
         );
         assert_eq!(
-            classify_round(&rt, false),
+            classify_round(true, false),
             RoundDecision::ConfigGap,
-            "有调用无通道 ⇒ 配置缺口（不是正常收束）"
+            "欠批无通道 ⇒ 配置缺口（不是正常收束）"
         );
     }
 

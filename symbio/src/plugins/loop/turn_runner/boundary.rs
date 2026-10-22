@@ -20,12 +20,26 @@ pub(crate) enum RoundDecision {
     ConfigGap,
 }
 
-/// 纯决策：只看响应与「有没有分发通道」，不读任何外部状态。
-pub(crate) fn classify_round(rt: &LlmTurn, has_dispatch: bool) -> RoundDecision {
-    match (rt.tool_calls.is_empty(), has_dispatch) {
-        (true, _) => RoundDecision::Halt,
-        (false, true) => RoundDecision::Act,
-        (false, false) => RoundDecision::ConfigGap,
+/// 纯决策：只看「欠不欠一批工具」与「有没有分发通道」，不读任何外部状态。
+///
+/// ## 第一维来自表，不来自响应（T-227 步 5a）
+///
+/// `tools_due` 由调用点问 `turn_tools_due` 视图得到（末次模型应答请求了工具、
+/// 那之后还没有工具应答、且没有在途的工具批）。这一维**从内存里的响应搬到事实面**
+/// 之后，「该不该跑一批工具」在回放时也答得出——而读 `rt.tool_calls` 只有当场
+/// 那一次答得出。
+///
+/// ## 第二维为什么留在代码里
+///
+/// 「本轮有没有分发通道」不在事实面：它是这次装配的**入参**（`dispatch: Option<&dyn
+/// DispatchPort>`），不是日志里发生过的事。把配置也落成事实是另一件事（`session.config`
+/// 已经在做，但通道存在性是装配侧的知识），本步不动它。于是这一维诚实地留在这里，
+/// 而不是假装它也在表里。
+pub(crate) fn classify_round(tools_due: bool, has_dispatch: bool) -> RoundDecision {
+    match (tools_due, has_dispatch) {
+        (false, _) => RoundDecision::Halt,
+        (true, true) => RoundDecision::Act,
+        (true, false) => RoundDecision::ConfigGap,
     }
 }
 

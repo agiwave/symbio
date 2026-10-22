@@ -803,13 +803,8 @@ fn in_flight_rebuilds_per_call_not_per_turn() {
             }),
         )
     };
-    let answered = |port: &str, id: &str| {
-        ev(
-            1,
-            "response",
-            json!({"port": port, "id": id, "attempt": 1}),
-        )
-    };
+    let answered =
+        |port: &str, id: &str| ev(1, "response", json!({"port": port, "id": id, "attempt": 1}));
 
     let events = vec![
         // 第一次模型往返：回来了。
@@ -855,5 +850,172 @@ fn in_flight_rebuilds_per_call_not_per_turn() {
             .and_then(|v| v.as_array().map(|a| a.len()))
             .unwrap_or_default(),
         3
+    );
+}
+
+// ── 本幕欠不欠一次对外调用（T-227 步 5a）────────────────────────────────
+//
+// 两个视图（`turn_model_due` / `turn_tools_due`）把「下一步调模型还是调工具」从
+// 内存里的响应搬到事实面。下面两组用例钉的是**同一条弧**：一次往返 → 一批工具 →
+// 再一次往返 → 定稿。每一步都只问视图，不问任何内存状态。
+
+/// 视图口径的「欠」（与 `owes` 同形，但问的是视图而不是行）。
+fn due(name: &str, events: &[Event]) -> bool {
+    matches!(
+        super::view(name, events, 1, 0),
+        Some(Value::Array(ref a)) if !a.is_empty()
+    )
+}
+
+fn user_said_hi() -> Vec<Event> {
+    vec![
+        ev(
+            1,
+            "user.message",
+            json!({"text": "帮我查一下", "id": "u-1"}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ]
+}
+
+fn model_answered(wants_tools: bool) -> Event {
+    ev(
+        1,
+        "response",
+        json!({
+            "port": "model",
+            "id": "model-1-d1-s0",
+            "attempt": 1,
+            "has_tool_calls": wants_tools,
+        }),
+    )
+}
+
+fn model_went_out(step: u64) -> Event {
+    ev(
+        1,
+        "sent",
+        json!({
+            "port": "model",
+            "id": format!("model-1-d1-s{step}"),
+            "attempt": 1,
+            "lease_ms": 600_000,
+            "attempt_cap": 1,
+        }),
+    )
+}
+
+fn tool_went_out(batch: u64) -> Event {
+    ev(
+        1,
+        "sent",
+        json!({
+            "port": "tool",
+            "id": format!("tool-1-d1-b{batch}"),
+            "attempt": 1,
+            "lease_ms": 600_000,
+            "attempt_cap": 1,
+        }),
+    )
+}
+
+fn tool_answered(batch: u64) -> Event {
+    ev(
+        1,
+        "response",
+        json!({
+            "port": "tool",
+            "id": format!("tool-1-d1-b{batch}"),
+            "attempt": 1,
+        }),
+    )
+}
+
+/// 模型往返的那条弧：没有应答 ⇒ 欠；要工具 ⇒ 先欠批、不欠往返；批回来 ⇒ 又欠
+/// 往返；定稿 ⇒ 不欠；收束 ⇒ 不欠。
+#[test]
+fn a_turn_owes_a_model_round_trip_until_the_model_gives_a_final_answer() {
+    let mut events = user_said_hi();
+    assert!(due("turn_model_due", &events), "还没有应答 ⇒ 欠一次往返");
+    assert!(
+        !due("turn_tools_due", &events),
+        "没有应答就没有批可跑——不许凭空派发"
+    );
+
+    // 派出去了、还没回来 ⇒ 不欠（一次往返还没回来时不许发第二次）。
+    events.push(model_went_out(0));
+    assert!(!due("turn_model_due", &events), "在途时不许再发一次");
+    events.pop();
+
+    // 应答要工具 ⇒ 往返不欠（欠的是批）。
+    events.push(model_answered(true));
+    assert!(
+        !due("turn_model_due", &events),
+        "要工具的应答不是定稿：此刻欠的是批，不是又一次往返"
+    );
+    assert!(due("turn_tools_due", &events), "要工具 ⇒ 欠一批");
+
+    // 批回来了 ⇒ 又欠一次往返。
+    events.push(tool_went_out(0));
+    events.push(tool_answered(0));
+    assert!(due("turn_model_due", &events), "批回来了 ⇒ 该再问模型一次");
+    assert!(!due("turn_tools_due", &events), "批跑完了 ⇒ 不欠批");
+
+    // 第二次应答不要工具 ⇒ 定稿。
+    events.push(model_went_out(1));
+    events.push(ev(
+        1,
+        "response",
+        json!({
+            "port": "model",
+            "id": "model-1-d1-s1",
+            "attempt": 1,
+            "has_tool_calls": false,
+        }),
+    ));
+    assert!(
+        !due("turn_model_due", &events),
+        "不带工具的应答 = 定稿，交给收束行"
+    );
+
+    // 收束之后两条都不欠（`until` 之外的第二个出口：视图自己看得见收束格）。
+    events.push(ev(1, "chat.assistant.final", json!({"text": "查到了"})));
+    assert!(!due("turn_model_due", &events));
+    assert!(!due("turn_tools_due", &events));
+}
+
+/// 工具批的那条弧：只有「末次应答要工具 ∧ 还没跑 ∧ 没有在途批」三条同时成立才欠。
+#[test]
+fn a_turn_owes_a_tool_batch_only_while_the_answer_wants_one() {
+    // 应答不要工具 ⇒ 不欠。
+    let mut events = user_said_hi();
+    events.push(model_answered(false));
+    assert!(!due("turn_tools_due", &events), "定稿没有批");
+
+    // 要工具但批已经在途 ⇒ 不欠（否则会把同一批跑两遍，副作用重复）。
+    let mut events = user_said_hi();
+    events.push(model_answered(true));
+    assert!(due("turn_tools_due", &events));
+    events.push(tool_went_out(0));
+    assert!(
+        !due("turn_tools_due", &events),
+        "批在途时不许再派一批——那不是重试，是第二次执行"
+    );
+
+    // 批回来了 ⇒ 不欠（`wants` 与 `done` 对上了）。
+    events.push(tool_answered(0));
+    assert!(!due("turn_tools_due", &events));
+
+    // 反向自检：把 `has_tool_calls` 那一格删掉，视图读成「不要工具」⇒ 不欠。
+    // 这条自检钉的是「缺失读成 false」的口径——猜 `true` 会在恢复时凭空跑一批工具。
+    let mut no_field = user_said_hi();
+    no_field.push(ev(
+        1,
+        "response",
+        json!({"port": "model", "id": "model-1-d1-s0", "attempt": 1}),
+    ));
+    assert!(
+        !due("turn_tools_due", &no_field),
+        "没有 `has_tool_calls` 的旧日志读成「没有工具调用」，不是「有」"
     );
 }
