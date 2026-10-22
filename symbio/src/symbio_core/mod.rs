@@ -159,6 +159,9 @@ pub(crate) use event::{
     EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
     EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
+// 协议族（T-224）的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
+// 适配器）——都在本 crate 内，所以走 `pub(crate)` 而不是根公开面（C-003 数 `pub use`）。
+pub(crate) use event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
 // 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的

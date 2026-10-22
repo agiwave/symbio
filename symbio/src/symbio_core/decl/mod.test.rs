@@ -48,6 +48,7 @@ fn builtin_loads_and_freezes() {
             EVENT_SENT,
             EVENT_RESPONSE,
             EVENT_FAILED,
+            EVENT_RETRY,
             "chat.assistant.final",
             "chat.assistant.fallback",
             "chat.assistant.reported",
@@ -66,6 +67,7 @@ fn builtin_loads_and_freezes() {
         views,
         vec![
             "in_flight",
+            "stale_sent",
             "turn_head",
             "turn_stages",
             "turn_closed",
@@ -75,14 +77,22 @@ fn builtin_loads_and_freezes() {
     );
 
     // 端口是载荷字段：协议族声明它，收束 / 阶段 / 用户 / 拒绝都不带。
-    for name in [EVENT_REQUEST, EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
+    for name in [
+        EVENT_REQUEST,
+        EVENT_SENT,
+        EVENT_RESPONSE,
+        EVENT_FAILED,
+        EVENT_RETRY,
+    ] {
         assert_eq!(frozen.fact(name).unwrap().port, Some("port"), "{name}");
     }
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
 
     // `ver` 是口径的显式版本：T-222a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
-    // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）。
-    assert_eq!(frozen.view("in_flight").unwrap().ver, 1);
+    // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
+    // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2。
+    assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
+    assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_head").unwrap().ver, 3);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
@@ -307,6 +317,126 @@ fn in_flight_is_attempt_scoped() {
     assert_eq!(
         builtin().unwrap().eval("in_flight", &events, 0),
         Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
+    );
+}
+
+#[test]
+fn in_flight_drops_the_attempt_retry_voided() {
+    // `retry` 只关它那一次尝试：没有它，被作废的那次会永远留在在途里。
+    let events = vec![
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "a", "attempt": 1}),
+        ),
+        ev(
+            1,
+            EVENT_RETRY,
+            json!({"port": "turn", "id": "a", "attempt": 1}),
+        ),
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "a", "attempt": 2}),
+        ),
+    ];
+    assert_eq!(
+        builtin().unwrap().eval("in_flight", &events, 0),
+        Some(json!([{"id": "a", "port": "turn", "attempt": 2}]))
+    );
+}
+
+/// 一条带租约的派发事实（T-223 的 `sent` 形状）。
+fn sent_at(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
+    ev_at(
+        1,
+        EVENT_SENT,
+        json!({
+            "port": "turn",
+            "id": id,
+            "attempt": attempt,
+            "lease_ms": lease_ms,
+            "attempt_cap": cap,
+        }),
+        ts,
+    )
+}
+
+#[test]
+fn stale_sent_folds_the_lease_and_the_attempt_cap() {
+    let events = vec![sent_at("a", 1, 1000, 3, 1_000)];
+    let at = |now: i64| builtin().unwrap().eval("stale_sent", &events, now).unwrap();
+
+    // 租约未到：不算卡住，但它在途（有实例，`stale:false`）。
+    assert_eq!(
+        at(1_999),
+        json!([{"port": "turn", "id": "a", "attempt": 1, "age_ms": 999,
+               "stale": false, "exhausted": false}])
+    );
+    // 到期即卡住（>= 而不是 >：边界算到期）。
+    assert_eq!(
+        at(2_000),
+        json!([{"port": "turn", "id": "a", "attempt": 1, "age_ms": 1000,
+               "stale": true, "exhausted": false}])
+    );
+
+    // 尝试到顶：同一个实例上 `exhausted` 为真——到期但要判死，不是再重试。
+    let events = vec![sent_at("a", 3, 1000, 3, 1_000)];
+    assert_eq!(
+        builtin().unwrap().eval("stale_sent", &events, 9_000),
+        Some(
+            json!([{"port": "turn", "id": "a", "attempt": 3, "age_ms": 8000,
+                    "stale": true, "exhausted": true}])
+        )
+    );
+}
+
+#[test]
+fn stale_sent_only_sees_calls_nobody_closed() {
+    // 三个出口各关一条：被应答 / 被判死 / 被作废的都不该再算卡住。
+    let events = vec![
+        sent_at("answered", 1, 1000, 3, 0),
+        ev_at(
+            1,
+            EVENT_RESPONSE,
+            json!({"port": "turn", "id": "answered", "attempt": 1}),
+            1,
+        ),
+        sent_at("dead", 1, 1000, 3, 0),
+        ev_at(
+            1,
+            EVENT_FAILED,
+            json!({"port": "turn", "id": "dead", "why": "x"}),
+            1,
+        ),
+        sent_at("retried", 1, 1000, 3, 0),
+        ev_at(
+            1,
+            EVENT_RETRY,
+            json!({"port": "turn", "id": "retried", "attempt": 1}),
+            1,
+        ),
+    ];
+    assert_eq!(
+        builtin().unwrap().eval("stale_sent", &events, 100_000),
+        Some(json!([]))
+    );
+}
+
+#[test]
+fn stale_sent_never_expires_a_call_without_a_lease() {
+    // 旧日志里的 `sent` 没有 `lease_ms`：0 = 没有租约，永不被判成卡住。
+    let events = vec![ev(
+        1,
+        EVENT_SENT,
+        json!({"port": "turn", "id": "a", "attempt": 1}),
+    )];
+    assert_eq!(
+        builtin().unwrap().eval("stale_sent", &events, 1_000_000),
+        Some(
+            json!([{"port": "turn", "id": "a", "attempt": 1, "age_ms": 1_000_000,
+                    "stale": false, "exhausted": false}])
+        )
     );
 }
 

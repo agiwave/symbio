@@ -1,4 +1,4 @@
-//! 义务环的行表（T-222）：五条策略行 + 一条**临时**执行行。
+//! 义务环的行表（T-222）：五条策略行 + 一条执行决策行 + 端口的三条行（T-223）。
 //!
 //! ## 一行只写「什么时候欠、什么算还」
 //!
@@ -9,12 +9,15 @@
 //! ## 五条策略行的前后关系
 //!
 //! ```text
-//! 10 classify ── 轮首判决（本幕 round=0 且有发言）
-//! 20 report   ── 中途汇报（一段静默到期，未用完配额）
-//! 30 compress ── 自动压缩（开关开着且本幕还没压过）
-//! 40 recall   ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
-//! 50 reflex   ── 技能快路（非续写幕且本幕召回命中）
-//! 60 execute  ── 临时执行行：包住现有 `execute_turn`（T-223 再给它 sent / await）
+//! 10 classify      ── 轮首判决（本幕 round=0 且有发言）
+//! 20 report        ── 中途汇报（一段静默到期，未用完配额）
+//! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
+//! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
+//! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
+//! 60 execute       ── 执行决策：本幕未收束 ⇒ 写一条 `request{port:turn}`
+//! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
+//! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
+//! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
 //!
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。旧表的
@@ -44,8 +47,37 @@ use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern};
-use crate::symbio_core::{builtin, Event, Frozen, LatencyTier};
+use crate::symbio_core::ring::{check_rows, owed, Decl, Gap, Lit, Pattern, PortDecl};
+use crate::symbio_core::{
+    builtin, Event, Frozen, LatencyTier, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT,
+};
+
+/// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。
+///
+/// 当前只有一个端口：`turn`（一轮的一次请求往返）。
+///
+/// ## 租约与尝试上限怎么定的
+///
+/// `lease_ms` 是「派出去多久没应答算卡住」：`turn` 是一次模型往返，且含工具轮，
+/// 慢的那一头可能是模型排队——太短会把正在进行的一轮误判成卡住（重试会再调一次
+/// 模型，代价真实）。取 10 分钟：既比最慢的可接受往返长，又比「用户已经以为坏了」短。
+///
+/// `max_attempts = 1`——**`turn` 调用不重试**。理由不是成本，是**没人 await**：
+/// 租约到期只发生在进程重启之后（时间只在事件上推进），而等这笔应答的 future
+/// 已经随进程一起没了。重试只会留下一条**永不派发**的 `request`，让「欠一次
+/// 派发」变成一句谎。到顶即判死（`failed{why:"lease_expired"}`），恢复走
+/// resume 幕（新的逻辑 id，旧那笔作为「没回来」留在日志里）。
+///
+/// `retry` 因此是**有活着的等待方**的端口才用的机制（PL-017 的 `model` / `tool`：
+/// 它们的内环还在，看护者重试后由同一幕接着 await）。
+pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
+    port: "turn",
+    // 引擎在跑执行体**之前**落它（判据 2）：搬运者可能不产事实就返回。
+    before: EVENT_SENT,
+    lease_ms: 600_000,
+    max_attempts: 1,
+}];
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
@@ -165,10 +197,12 @@ pub(crate) static ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // ── 执行（临时行）────────────────────────────────────────────────────
+    // ── 执行（决策行）────────────────────────────────────────────────────
     //
-    // T-222 让控制面第一次成为真环：只要本幕还开着，就欠一次执行。T-223 把它
-    // 拆成 `sent` / await 两笔，`by` 换成协议适配器；那一批**不新增调度器**。
+    // 只要本幕还开着，就欠一次执行。它的**后果**是写一条 `request`（决策者的
+    // 动作），派发本身归 `dispatch-turn`。没把它并进协议行：两者的粒度不同
+    // （本幕 vs 一次请求往返）——一幕可以有多次往返（auto 续写），
+    // 而「本幕还欠不欠」只有一个答案。
     Decl {
         name: "execute-turn",
         prio: 60,
@@ -184,6 +218,111 @@ pub(crate) static ROWS: &[Decl] = &[
             key: &["turn"],
             eq: &[],
         }],
+        unless: &[],
+    },
+    // ── 端口 `turn` 的两行主模板（T-223）───────────────────────────
+    //
+    // 每端口固定两行：`dispatch-<port>` 与 `await-<port>`，差异只有 `by`。
+    // 第三行（租约）**每端口不写**——一个 `lease` 行管所有端口，它按
+    // `stale_sent` 的实例而不是按端口开账。
+    //
+    // 键取 **逻辑 id**（`(port, id)`）而不是 `(port, id, attempt)`：`failed`
+    // 关的是逻辑 id（所有尝试），带 attempt 的键永远匹配不上它。尝试级口径
+    // 归视图（`in_flight` / `stale_sent`），行层是逻辑账。
+    Decl {
+        name: "dispatch-turn",
+        prio: 65,
+        by: Some("courier"),
+        // 派发本身不调模型（模型在执行体里）。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("turn"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
+    // 永不选中），但它让「在等」与「没事」可区分（PL-016 §2.3）。
+    Decl {
+        name: "await-turn",
+        prio: 70,
+        by: None,
+        tier: LatencyTier::Deep,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("turn"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+        ],
+        unless: &[],
+    },
+    // ── 租约（**每端口不写**，一个行管所有端口）───────────────────
+    //
+    // 开账条件是 `stale_sent.stale`（视图把 `now` 与 `lease_ms` 折成布尔），
+    // 所以时间不进欠账公式。
+    //
+    // ## 为什么没有 `unless: attempt ≥ max_attempts`
+    //
+    // PL-016 §2.3 的草稿把「尝试到顶」写成 `unless`——那会让行在到顶时挂起，
+    // 而「判死」（落 `failed`）恰恰要在到顶时发生。到顶是**看护者的判断**，不是
+    // 行的出口：行只负责「这笔卡住了，有人要管」，重试还是判死归执行体。
+    Decl {
+        name: "lease",
+        prio: 80,
+        by: Some("lease_keeper"),
+        // 看护本身是记账，不调模型。
+        tier: LatencyTier::Fast,
+        owes: Pattern {
+            source: "stale_sent",
+            key: &["port", "id"],
+            eq: &[("stale", Lit::Bool(true))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id"],
+                eq: &[],
+            },
+        ],
         unless: &[],
     },
 ];
@@ -203,8 +342,8 @@ static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
     };
     for gap in check_rows(ROWS, &frozen) {
         match gap {
-            // 已知缺口：协议四名 / `turn.dispatch` / `authz.denied` 的消费行
-            // 归属后续任务，装载期继续点名而不是豁免。
+            // 已知缺口：`turn.dispatch` 的消费行在 T-225 读侧、`authz.denied`
+            // 在 T-226；装载期继续点名而不是豁免。
             Gap::OrphanFact { fact } => {
                 crate::plugin_info!("session", "[Loop] 声明的事实暂无行消费：{}", fact);
             }
@@ -213,6 +352,11 @@ static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| {
     }
     Some(frozen)
 });
+
+/// 冻结的声明表（租约看护者自己也要求它——它不重复装载一份）。
+pub(crate) fn table() -> Option<Arc<Frozen>> {
+    FROZEN.clone()
+}
 
 fn frozen() -> Option<Arc<Frozen>> {
     FROZEN.clone()

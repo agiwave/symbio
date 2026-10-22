@@ -16,6 +16,8 @@ mod loop_rows;
 mod memory_events;
 mod message_build;
 mod plugin;
+// 端口的执行半边（T-223）：协议事实的唯一写方 + 租约看护。
+mod port;
 mod provider;
 mod resume;
 mod round_hook;

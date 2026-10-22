@@ -30,6 +30,13 @@
 //!
 //! **视图源**按求值结果展开：数组的每个元素是一条实例，对象是一条实例，`null`
 //! 或求值失败 ⇒ 没有实例。
+//!
+//! ## 表之外的第二张表：`PortDecl`
+//!
+//! 端口级的东西（派发前先落哪个事实、租约多久、最多试几次）对**同一个端口的
+//! 每一行都一样，所以不写进行里（那会是三份会漂移的副本），而是每个端口声明
+//! 一次（[`PortDecl`]）。加一个端口 = 1 条 `PortDecl` + 适配器 + 2 行模板，
+//! 求解器与行表不变（PL-016 §6 判据 1，执行方 `scripts/port-surface-audit.mjs`）。
 
 use std::collections::HashSet;
 
@@ -75,6 +82,41 @@ pub(crate) struct Decl {
     pub(crate) until: &'static [Pattern],
     /// 任一命中（同键）即挂起。
     pub(crate) unless: &'static [Pattern],
+}
+
+/// 一个**端口**的声明（T-223）：适配器协议里那几项每端口不同、又必须被引擎与
+/// 租约看护者读到的东西。
+///
+/// ## 为什么不把这些字段塞进 `Decl`
+///
+/// `before` / `lease_ms` / `max_attempts` 对**同一个端口的每一行**都一样，写进
+/// 行里就是三份副本（dispatch / await / lease），而副本必然漂移。端口级的东西
+/// 按端口声明一次：加一个端口 = 加一条 `PortDecl` + 适配器 + 2 行模板（PL-016 §6
+/// 判据 1）。
+///
+/// ## 为什么在 `ring` 而不在插件
+///
+/// 它与 [`Decl`] 是同一张表的两半：行说「什么时候欠、什么算还」，端口说
+/// 「派发时先落什么、等多久、试几次」。租约看护者与派发适配器都只读这张表，
+/// 不看对方。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PortDecl {
+    /// 端口名——`request` / `sent` / … 载荷里的 `port` 取值。
+    pub(crate) port: &'static str,
+    /// 引擎在运行执行体**之前**落的那个事实名（协议族里的 `sent`）。
+    ///
+    /// 搬运行者不写它：它的 `run` 可能**不产生事实就返回**，依赖它自觉 ⇒
+    /// 派发行永远不还清，而没有任何东西会红（PL-016 §2.3；T-223 判据 2）。
+    pub(crate) before: &'static str,
+    /// 租约：`sent` 之后多久没有应答算「卡住」（毫秒）。
+    pub(crate) lease_ms: u64,
+    /// 最多尝试几次（含首次）。到顶之后租约看护者判死而不是再重试。
+    pub(crate) max_attempts: u64,
+}
+
+/// 按端口名取声明。`None` = 没有这个端口（漏声明，不是默认值）。
+pub(crate) fn port_of<'a>(ports: &'a [PortDecl], name: &str) -> Option<&'a PortDecl> {
+    ports.iter().find(|p| p.port == name)
 }
 
 /// 一笔债的标识：模式 `key` 字段的 `(名字, 值)` 列表，按声明顺序。

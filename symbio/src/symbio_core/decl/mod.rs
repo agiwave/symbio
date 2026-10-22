@@ -39,16 +39,18 @@
 //!
 //! ## 首批声明
 //!
-//! 15 个事实：协议四名（`request` / `sent` / `response` / `failed`）、助手文本六格
+//! 15 个事实：协议五名（`request` / `sent` / `response` / `failed` / `retry`）、助手文本六格
 //! （`chat.assistant.final` / `fallback` / `reported` / `opening` / `progress`）、
 //! `turn.stage`、`user.message`、`turn.supplemented`、`session.config`、
-//! `turn.dispatch`、`authz.denied`；6 个视图：`in_flight` / `turn_head` /
+//! `turn.dispatch`、`authz.denied`；7 个视图：`in_flight` / `stale_sent` / `turn_head` /
 //! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
 //!
-//! 视图点名决定了事实的**下限**：`turn_head` 读 `user.message` / `turn.stage` /
+//! 视图点名决定了事实的**下限**：`in_flight` 读三个协议名（`sent` / `response` /
+//! `failed` / `retry`），`stale_sent` 读 `sent` 的租约两字段（`lease_ms` /
+//! `attempt_cap`）与三个出口，`turn_head` 读 `user.message` / `turn.stage` /
 //! `session.config`，`turn_stages` 与 `turn_closed` 读本幕锚之后的阶段 / 收束格，
 //! `report_due` 读助手文本六格 / `turn.supplemented` / `turn.stage`（恢复幕）/
-//! `session.config` + `now`。`retry` 由 T-223 补声明。
+//! `session.config` + `now`。
 //!
 //! ## 生产接线
 //!
@@ -62,7 +64,9 @@ use std::sync::Arc;
 use crate::symbio_core::Event;
 // 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
-use crate::symbio_core::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT};
+use crate::symbio_core::event::{
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+};
 
 pub(crate) mod ring;
 
@@ -263,9 +267,22 @@ pub(crate) fn builtin() -> Result<Arc<Frozen>, Vec<CheckError>> {
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
-// 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上；
-// `retry` 的声明由 T-223 补上（它随租约行一起落地）。
+// 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
 const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
+
+// `sent` 多两块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）。
+//
+// ## 为什么租约参数在事实上而不只在 `PortDecl` 里
+//
+// `stale_sent` 是视图——它的入参只有事实切片与 `now`（ADR-115 决策 1），读不到
+// 代码里的 `PortDecl`。没有这两块，视图算不出「这次派发等了多久算卡住」。
+//
+// ## 为什么在 `sent` 上而不是在 `request` 上
+//
+// 租约是**派发那一刻**的约定（“这次出去，N 毫秒没应答就算卡住”），写进 `sent`
+// 就不必再按 `(port,id,attempt)` 与 `request` 做一次连接。且它同时是回放的
+// 必要信息：端口参数未来改了，历史调用的租约仍是当时那个（不是「今天这个」）。
+const SENT_FIELDS: &[&str] = &["port", "id", "attempt", "lease_ms", "attempt_cap"];
 
 const BUILTIN_FACTS: &[FactDecl] = &[
     FactDecl {
@@ -280,7 +297,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
-        fields: PROTOCOL_FIELDS,
+        fields: SENT_FIELDS,
     },
     FactDecl {
         name: EVENT_RESPONSE,
@@ -297,6 +314,15 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         key: &["id"],
         expand: &[],
         fields: &["port", "id", "why"],
+    },
+    // 尝试级否定（T-223）：租约看护者落的「这一次作废、换一次」。
+    // 与 `failed` 的边界：`failed` 关**逻辑 id**（不再重试），`retry` 只关一次尝试。
+    FactDecl {
+        name: EVENT_RETRY,
+        port: Some("port"),
+        key: &["id", "attempt"],
+        expand: &[],
+        fields: PROTOCOL_FIELDS,
     },
     // 收束格：字段来自 `turn_runner::produced_payload` + T-220 的 `status` / `reason` / `terminated`。
     FactDecl {
@@ -413,15 +439,37 @@ const BUILTIN_FACTS: &[FactDecl] = &[
 ];
 
 fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
+    serde_json::Value::Array(
+        open_calls(events)
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": str_field(e, "id"),
+                    "port": str_field(e, "port"),
+                    "attempt": u64_field(e, "attempt"),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// **在途**协议调用的唯一口径：`sent` 中没有被 `response`（同 id + attempt）
+/// 或 `failed`（同逻辑 id）或 `retry`（同 id + attempt）关掉的。
+///
+/// 两个视图（`in_flight` / `stale_sent`）共用它，而不是各写一遍关账规则：
+/// 「什么算在途」只能有一处口径，否则两个视图会在某个角落说不同的话。
+fn open_calls(events: &[Event]) -> Vec<&Event> {
     let mut open: Vec<&Event> = Vec::new();
     for e in events {
         match e.kind.as_str() {
             EVENT_SENT => open.push(e),
-            EVENT_RESPONSE => {
+            // 一次尝试被应答 / 被作废：只关那一次。
+            EVENT_RESPONSE | EVENT_RETRY => {
                 let id = str_field(e, "id");
                 let attempt = u64_field(e, "attempt");
                 open.retain(|s| !(str_field(s, "id") == id && u64_field(s, "attempt") == attempt));
             }
+            // 失败关的是**逻辑 id**（所有尝试）：这笔调用不再重试。
             EVENT_FAILED => {
                 let id = str_field(e, "id");
                 open.retain(|s| str_field(s, "id") != id);
@@ -429,13 +477,36 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
             _ => {}
         }
     }
+    open
+}
+
+/// **卡住的在途**（T-223）：`sent` 之后超过 `lease_ms` 仍无应答的那些。
+///
+/// `now` 是入参而不是时钟（ADR-115 决策 1）——同一份日志给定同一个 `now`，
+/// 两次求值必须得到同一结果。
+///
+/// 字段：`stale` 是租约到期（租约行的开账条件），`exhausted` 是尝试已到顶
+/// （判死而不是再重试）。两者分开而不是折成一个布尔：它们回答的是不同问题，
+/// 而「到期但还能重试」与「到期且已到顶」是两种不同的收尾。
+///
+/// `lease_ms == 0`（旧日志 / 未带租约的派发）⇒ 永不过期。这不是默认值而是
+/// 语义：没有租约的调用不能被看护者判成卡住。
+fn stale_sent(events: &[Event], now: i64) -> serde_json::Value {
     serde_json::Value::Array(
-        open.into_iter()
+        open_calls(events)
+            .into_iter()
             .map(|e| {
+                let attempt = u64_field(e, "attempt").unwrap_or(0);
+                let lease_ms = u64_field(e, "lease_ms").unwrap_or(0);
+                let cap = u64_field(e, "attempt_cap").unwrap_or(0);
+                let age_ms = (now - e.ts).max(0) as u64;
                 serde_json::json!({
-                    "id": str_field(e, "id"),
                     "port": str_field(e, "port"),
-                    "attempt": u64_field(e, "attempt"),
+                    "id": str_field(e, "id"),
+                    "attempt": attempt,
+                    "age_ms": age_ms,
+                    "stale": lease_ms > 0 && age_ms >= lease_ms,
+                    "exhausted": cap > 0 && attempt >= cap,
                 })
             })
             .collect(),
@@ -707,11 +778,14 @@ fn is_report_anchor(e: &Event) -> bool {
 }
 
 const BUILTIN_VIEWS: &[ViewDecl] = &[
-    // 在途 = `sent` 中没有对应 `response`（同 id + attempt）或 `failed`（同 id）的那些。
-    // `retry` 由 T-223 加进 `until` 一侧（本视图那时补读 `retry.id`）。
+    // 在途 = `sent` 中没有对应 `response`（同 id + attempt）、`failed`（同 id）
+    // 或 `retry`（同 id + attempt）的那些。
+    //
+    // v2（T-223）：加入 `retry` 一侧。没有它，被作废的那次尝试会永远留在「在途」里
+    // ——而它已经不会再回来了。
     ViewDecl {
         name: "in_flight",
-        ver: 1,
+        ver: 2,
         reads: &[
             (EVENT_SENT, "id"),
             (EVENT_SENT, "port"),
@@ -719,9 +793,33 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_RESPONSE, "id"),
             (EVENT_RESPONSE, "attempt"),
             (EVENT_FAILED, "id"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
         ],
         cost: 4096,
         eval: in_flight,
+    },
+    // 卡住（T-223）：与 `in_flight` 同一口径的在途集合，加上租约与尝试上限两个判断。
+    //
+    // 时间不进欠账公式：`stale` 由本视图把 `now` 折成布尔，租约行只对 `true` 开账
+    // （与 `report_due.due` 同一条纪律）。
+    ViewDecl {
+        name: "stale_sent",
+        ver: 1,
+        reads: &[
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_SENT, "lease_ms"),
+            (EVENT_SENT, "attempt_cap"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_FAILED, "id"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
+        ],
+        cost: 4096,
+        eval: stale_sent,
     },
     // 轮头（T-222a 升到 v3）：五个策略行的开账条件全在这一格里。
     //

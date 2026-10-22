@@ -399,3 +399,29 @@ fn a_complete_row_set_has_no_gaps() {
     )];
     assert!(check_rows(&rows, &world()).is_empty());
 }
+
+// ── 端口声明（T-223）─────────────────────────────────────────────────────
+
+/// 端口的声明是**按端口一次**，不是按行三次：`before` / `lease_ms` /
+/// `max_attempts` 对同一个端口的每一行都一样，抄进行里就是三份会漂移的副本。
+#[test]
+fn a_port_is_declared_once_and_found_by_name() {
+    const PORTS: &[PortDecl] = &[
+        PortDecl {
+            port: "turn",
+            before: "sent",
+            lease_ms: 600_000,
+            max_attempts: 3,
+        },
+        PortDecl {
+            port: "tool",
+            before: "sent",
+            lease_ms: 30_000,
+            max_attempts: 2,
+        },
+    ];
+    assert_eq!(port_of(PORTS, "turn").map(|p| p.lease_ms), Some(600_000));
+    assert_eq!(port_of(PORTS, "tool").map(|p| p.max_attempts), Some(2));
+    // 没有这个端口 ⇒ `None`，不是默认值：漏声明要显形，不能静默拿一个默认租约。
+    assert!(port_of(PORTS, "model").is_none());
+}

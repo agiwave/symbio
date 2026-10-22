@@ -25,6 +25,10 @@ use crate::symbio_core::{
 
 use super::super::stage_events::{self, StageFact};
 
+/// 租约看护的扫描窗口（条）——与视图声明的 `cost` 上界同值：超过它视图
+/// 就会拒绝求值，所以调用方自己先切（分层而不是让视图静默算不出来）。
+const LEASE_WINDOW: usize = 4096;
+
 /// 本幕的身份与输入。
 pub(crate) struct Drive {
     pub(crate) turn_no: u64,
@@ -89,6 +93,36 @@ pub(crate) fn begin_drive(
         ))
     })?;
     let snapshot = store.range(Seq::new(0));
+    // ── 先收租（T-223）：上一段生命里派出去、没回来的调用 ─────────────────
+    //
+    // 看护点就是**恢复点**：时间只在事件上推进，所以一条 `sent` 只要跨过进程
+    // 重启就一定已经超时。重试还是判死由 `PortDecl.max_attempts` 定（`turn`
+    // 是 1 ⇒ 判死，因为等它的 future 已经没了）。
+    //
+    // 切片按声明的扫描上界（4096）取尾部：租约要看的只是最近那几笔在途，
+    // 超过上界就交给调用方分层而不是让视图静默算不出来。
+    if let Some(frozen) = super::super::loop_rows::table() {
+        let tail = &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..];
+        // 被收的那几笔属于**它们自己那一轮**（往往不是即将开的这一幕）。
+        let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);
+        let anchor = tail
+            .last()
+            .and_then(|e| e.seq)
+            .map(|s| s.value())
+            .unwrap_or(0);
+        if let Err(e) = super::super::port::reap(
+            store.as_ref(),
+            &frozen,
+            super::super::loop_rows::PORTS,
+            tail,
+            stale_turn,
+            anchor,
+            crate::symbio_core::clock_now_ms(),
+        ) {
+            // 收租失败不阻断新局面：那一笔欠账仍然在日志里开着（不静默当它死了）。
+            crate::plugin_warn!("session", "[Loop] 租约看护失败（继续开新幕）: {e:?}");
+        }
+    }
     let (turn_no, user_seq, drive_seq, user_text) = match resume_kind {
         Some(kind) => {
             let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)

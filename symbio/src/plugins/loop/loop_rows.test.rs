@@ -432,6 +432,10 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.recall",
             "policy.reflex",
             "execute-turn",
+            // 端口 `turn` 的两行主模板 + 一条管所有端口的租约行（T-223）。
+            "dispatch-turn",
+            "await-turn",
+            "lease",
         ]
     );
     assert!(
@@ -447,6 +451,10 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
+            // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
+            crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Deep,
+            crate::symbio_core::LatencyTier::Fast,
         ]
     );
 }
@@ -465,9 +473,11 @@ fn facts_without_a_row_are_pinned() {
     // 「每个声明的事实都有归宿」的缺口不能静默消失：下列每一条都是**已知**的
     // 后续任务，而不是遗漏。
     //
-    //   request / sent / response / failed —— T-223 协议行（in_flight 的读方）
-    //   turn.dispatch                     —— T-225 档位事实，读方是 core 的派生函数
-    //   authz.denied                      —— T-226 授权拒绝行
+    //   turn.dispatch —— T-225 档位事实，读方是 core 的派生函数
+    //   authz.denied  —— T-226 授权拒绝行
+    //
+    // 协议五名已由 T-223 的端口行全部接住（`request` / `sent` / `response` /
+    // `failed` / `retry` → dispatch / await / lease）。
     let gaps = check_rows(ROWS, &frozen());
     let orphans: Vec<_> = gaps
         .iter()
@@ -476,15 +486,90 @@ fn facts_without_a_row_are_pinned() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        orphans,
-        vec![
-            "request",
-            "sent",
-            "response",
-            "failed",
-            "turn.dispatch",
-            "authz.denied",
-        ]
-    );
+    assert_eq!(orphans, vec!["turn.dispatch", "authz.denied"]);
+}
+
+// ── 端口 `turn` 的三行（T-223）─────────────────────────────────────────
+
+fn request(id: &str, attempt: u64) -> Event {
+    ev(
+        1,
+        crate::symbio_core::EVENT_REQUEST,
+        json!({ "port": "turn", "id": id, "attempt": attempt }),
+    )
+}
+
+fn sent(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
+    ev_at(
+        1,
+        crate::symbio_core::EVENT_SENT,
+        json!({
+            "port": "turn",
+            "id": id,
+            "attempt": attempt,
+            "lease_ms": lease_ms,
+            "attempt_cap": cap,
+        }),
+        ts,
+    )
+}
+
+#[test]
+fn a_request_opens_dispatch_and_sent_closes_it() {
+    // 开账：`request` 落了、`sent` 还没落 ⇒ 欠一次派发。
+    let asked = vec![request("t-1", 1)];
+    assert!(owes("dispatch-turn", &asked, 0));
+    // 关账：引擎落 `sent` 之后不再是派发的账。
+    let out = vec![request("t-1", 1), sent("t-1", 1, 1_000, 1, 0)];
+    assert!(!owes("dispatch-turn", &out, 0));
+    // 但它变成**等**的账：`await-turn` 在（且是 blocked：`by = None`）。
+    let debts = owed(ROWS, &frozen(), &out, 0);
+    let wait = debts.iter().find(|d| d.decl.name == "await-turn").unwrap();
+    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+}
+
+#[test]
+fn a_failure_closes_both_the_dispatch_and_the_wait() {
+    // `failed` 关的是逻辑 id（所有尝试）：派发行与等待行同时收口。
+    let events = vec![
+        request("t-1", 1),
+        sent("t-1", 1, 1_000, 1, 0),
+        ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({ "port": "turn", "id": "t-1", "why": "boom" }),
+        ),
+    ];
+    assert!(!owes("dispatch-turn", &events, 0));
+    assert!(!owes("await-turn", &events, 0));
+}
+
+#[test]
+fn the_lease_row_opens_only_after_the_deadline() {
+    // 时间不进欠账公式：租约行只对 `stale_sent.stale` 开账。
+    let events = vec![sent("t-1", 1, 1_000, 1, 0)];
+    assert!(!owes("lease", &events, 999));
+    assert!(owes("lease", &events, 1_000));
+
+    // 应答回来之后，哪怕时间继续走也不欠了。
+    let mut answered = events.clone();
+    answered.push(ev(
+        1,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({ "port": "turn", "id": "t-1", "attempt": 1 }),
+    ));
+    assert!(!owes("lease", &answered, 100_000));
+}
+
+#[test]
+fn the_lease_row_is_one_row_for_every_port() {
+    // 第三行不按端口写：它读 `stale_sent` 的实例，端口在债键里。
+    // 少了这一条性质，加端口就要加租约行，判据 1 的「0 个新行」就成了假话。
+    let leases: Vec<_> = ROWS
+        .iter()
+        .filter(|d| d.name.starts_with("lease"))
+        .collect();
+    assert_eq!(leases.len(), 1);
+    assert_eq!(leases[0].name, "lease");
+    assert_eq!(leases[0].owes.source, "stale_sent");
 }
