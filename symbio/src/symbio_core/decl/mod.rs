@@ -60,6 +60,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::symbio_core::Event;
+// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
+// 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
+use crate::symbio_core::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT};
 
 pub(crate) mod ring;
 
@@ -260,32 +263,27 @@ pub(crate) fn builtin() -> Result<Arc<Frozen>, Vec<CheckError>> {
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
-// 暂时住本模块：T-224 把它们升进 `event/mod.rs` 的名字表并登记 `CELLS`。
-// 现在升上去会让四个常量在非测试构建里没有消费者（死代码），而它们还不在网格上。
-const REQUEST: &str = "request";
-const SENT: &str = "sent";
-const RESPONSE: &str = "response";
-const FAILED: &str = "failed";
-
+// 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上；
+// `retry` 的声明由 T-223 补上（它随租约行一起落地）。
 const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
 
 const BUILTIN_FACTS: &[FactDecl] = &[
     FactDecl {
-        name: REQUEST,
+        name: EVENT_REQUEST,
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
         fields: PROTOCOL_FIELDS,
     },
     FactDecl {
-        name: SENT,
+        name: EVENT_SENT,
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
         fields: PROTOCOL_FIELDS,
     },
     FactDecl {
-        name: RESPONSE,
+        name: EVENT_RESPONSE,
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
@@ -294,7 +292,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
     // `failed` 关的是**逻辑 id**（所有尝试），所以没有 `attempt`——与协议表一致：
     // 失败不是「某一次尝试失败」，是这笔调用不再重试。
     FactDecl {
-        name: FAILED,
+        name: EVENT_FAILED,
         port: Some("port"),
         key: &["id"],
         expand: &[],
@@ -418,13 +416,13 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
     let mut open: Vec<&Event> = Vec::new();
     for e in events {
         match e.kind.as_str() {
-            SENT => open.push(e),
-            RESPONSE => {
+            EVENT_SENT => open.push(e),
+            EVENT_RESPONSE => {
                 let id = str_field(e, "id");
                 let attempt = u64_field(e, "attempt");
                 open.retain(|s| !(str_field(s, "id") == id && u64_field(s, "attempt") == attempt));
             }
-            FAILED => {
+            EVENT_FAILED => {
                 let id = str_field(e, "id");
                 open.retain(|s| str_field(s, "id") != id);
             }
@@ -715,12 +713,12 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         name: "in_flight",
         ver: 1,
         reads: &[
-            (SENT, "id"),
-            (SENT, "port"),
-            (SENT, "attempt"),
-            (RESPONSE, "id"),
-            (RESPONSE, "attempt"),
-            (FAILED, "id"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_FAILED, "id"),
         ],
         cost: 4096,
         eval: in_flight,

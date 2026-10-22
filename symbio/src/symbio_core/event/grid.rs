@@ -47,9 +47,10 @@ use super::{
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
     EVENT_AUTHZ_DENIED, EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN,
     EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED, EVENT_CONATION_EXPRESSED,
-    EVENT_CONTROL_OPENED, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
-    EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED, EVENT_SYSTEM_HEALTH,
+    EVENT_CONTROL_OPENED, EVENT_FAILED, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_MESSAGE_ADDED,
+    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED, EVENT_SYSTEM_HEALTH,
     EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_TURN_DISPATCH, EVENT_TURN_STAGE,
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
@@ -73,6 +74,32 @@ const CELLS: &[(&str, Cell)] = &[
     (EVENT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed)),
     (EVENT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)),
     (EVENT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)),
+    // ── 协议族（对外调用，T-224）─────────────────────────────────────────
+    //
+    // 五个名字**同格同族**：`turn × asserted` = 「关于这一轮的断言」这一格的成员。
+    // 逐条理由（为什么不是 `progressed` / `closed` / `opened`）：
+    //
+    // - `request`（该调了）：一条关于这一轮的断言，不是状态迁移。`opened` 是轮次
+    //   的**开始**（一个 turn 只能有一次），协议事实不是。
+    // - `sent`（已经派出去了）：与 `request` 同族——一次调用的两个阶段是同一条账的
+    //   两个断言。**由引擎在 `before` 位写**（搬运者可能不产事实就返回，依赖它自觉
+    //   ⇒ 派发行永远不还清且无人报错）。
+    // - `response`（回来了）：**不是收束格**——轮子由 `chat.assistant.final` /
+    //   `fallback` 收束，一次端口应答不结束一轮。
+    // - `failed`（没成功）：**不是收束格**——失败的一轮仍可能重试 / 降级 / 兜底。
+    //   与 `authz.denied` 同一条纪律：把它算成收束会掩盖「静默中断」。
+    // - `retry`（这次尝试作废）：租约看护者落的一次尝试级否定断言。
+    //
+    // **为什么不落 `turn × progressed`**：那一格是**用户看得见**的动静
+    // （`chat.assistant.progress`），协议事实是机器对机器的账；且 `needs_provenance`
+    // 只对 `progressed` 里的 `chat.assistant.progress` 要求溯源——协议事实落那一格
+    // 就会**静默失去 I2 的溯源要求**（断言类才有）。落 `asserted` ⇒ 五条都自动受
+    // 「断言类必须带 `produced_by`」约束。
+    (EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
+    (EVENT_SENT, (Entity::Turn, Verb::Asserted)),
+    (EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),
+    (EVENT_FAILED, (Entity::Turn, Verb::Asserted)),
+    (EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
     // 否定事实与收束格**不同格**（`asserted` vs `closed`）：被拒的一轮仍然未收束。
     (EVENT_AUTHZ_DENIED, (Entity::Turn, Verb::Asserted)),
     // ── 产物（artifact）──

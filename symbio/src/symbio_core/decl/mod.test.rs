@@ -44,10 +44,10 @@ fn builtin_loads_and_freezes() {
     assert_eq!(
         facts,
         vec![
-            REQUEST,
-            SENT,
-            RESPONSE,
-            FAILED,
+            EVENT_REQUEST,
+            EVENT_SENT,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
             "chat.assistant.final",
             "chat.assistant.fallback",
             "chat.assistant.reported",
@@ -75,7 +75,7 @@ fn builtin_loads_and_freezes() {
     );
 
     // 端口是载荷字段：协议族声明它，收束 / 阶段 / 用户 / 拒绝都不带。
-    for name in [REQUEST, SENT, RESPONSE, FAILED] {
+    for name in [EVENT_REQUEST, EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
         assert_eq!(frozen.fact(name).unwrap().port, Some("port"), "{name}");
     }
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
@@ -117,7 +117,7 @@ fn every_declared_reference_is_a_field() {
 fn view_cannot_read_an_undeclared_field() {
     let mut b = Builder::new();
     b.fact(FactDecl {
-        name: REQUEST,
+        name: EVENT_REQUEST,
         port: Some("port"),
         key: &["id"],
         expand: &[],
@@ -126,7 +126,7 @@ fn view_cannot_read_an_undeclared_field() {
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
-        reads: &[(REQUEST, "attmpt")],
+        reads: &[(EVENT_REQUEST, "attmpt")],
         cost: 1,
         eval: in_flight,
     });
@@ -134,7 +134,7 @@ fn view_cannot_read_an_undeclared_field() {
         b.seal().unwrap_err(),
         vec![CheckError::UndeclaredField {
             view: "probe",
-            fact: REQUEST,
+            fact: EVENT_REQUEST,
             field: "attmpt",
         }]
     );
@@ -166,7 +166,9 @@ fn duplicate_fact_is_rejected() {
     b.fact(BUILTIN_FACTS[0]);
     assert_eq!(
         b.seal().unwrap_err(),
-        vec![CheckError::DuplicateFact { name: REQUEST }]
+        vec![CheckError::DuplicateFact {
+            name: EVENT_REQUEST
+        }]
     );
 }
 
@@ -189,15 +191,17 @@ fn fact_and_view_share_one_name_space() {
     let mut b = Builder::new();
     b.fact(BUILTIN_FACTS[0]);
     b.view(ViewDecl {
-        name: REQUEST,
+        name: EVENT_REQUEST,
         ver: 1,
-        reads: &[(REQUEST, "id")],
+        reads: &[(EVENT_REQUEST, "id")],
         cost: 1,
         eval: in_flight,
     });
     assert_eq!(
         b.seal().unwrap_err(),
-        vec![CheckError::NameCollision { name: REQUEST }]
+        vec![CheckError::NameCollision {
+            name: EVENT_REQUEST
+        }]
     );
 }
 
@@ -223,20 +227,24 @@ fn eval_respects_declared_cost() {
     b.view(ViewDecl {
         name: "probe",
         ver: 1,
-        reads: &[(SENT, "id")],
+        reads: &[(EVENT_SENT, "id")],
         cost: 1,
         eval: in_flight,
     });
     let frozen = b.seal().unwrap();
     let one = vec![ev(
         1,
-        SENT,
+        EVENT_SENT,
         json!({"port": "turn", "id": "a", "attempt": 1}),
     )];
     assert!(frozen.eval("probe", &one, 0).is_some());
     let two = vec![
         one[0].clone(),
-        ev(1, SENT, json!({"port": "turn", "id": "b", "attempt": 1})),
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "b", "attempt": 1}),
+        ),
     ];
     assert_eq!(frozen.eval("probe", &two, 0), None);
 }
@@ -244,15 +252,31 @@ fn eval_respects_declared_cost() {
 #[test]
 fn in_flight_holds_sent_until_response_or_failure() {
     let events = vec![
-        ev(1, SENT, json!({"port": "turn", "id": "a", "attempt": 1})),
-        ev(1, SENT, json!({"port": "turn", "id": "b", "attempt": 1})),
         ev(
             1,
-            RESPONSE,
+            EVENT_SENT,
             json!({"port": "turn", "id": "a", "attempt": 1}),
         ),
-        ev(2, SENT, json!({"port": "turn", "id": "c", "attempt": 2})),
-        ev(2, FAILED, json!({"port": "turn", "id": "c", "why": "boom"})),
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "b", "attempt": 1}),
+        ),
+        ev(
+            1,
+            EVENT_RESPONSE,
+            json!({"port": "turn", "id": "a", "attempt": 1}),
+        ),
+        ev(
+            2,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "c", "attempt": 2}),
+        ),
+        ev(
+            2,
+            EVENT_FAILED,
+            json!({"port": "turn", "id": "c", "why": "boom"}),
+        ),
     ];
     assert_eq!(
         builtin().unwrap().eval("in_flight", &events, 0),
@@ -264,11 +288,19 @@ fn in_flight_holds_sent_until_response_or_failure() {
 fn in_flight_is_attempt_scoped() {
     // 旧尝试的 `response` 不能收清新尝试的 `sent`（T-223 判据 8 的声明侧）。
     let events = vec![
-        ev(1, SENT, json!({"port": "turn", "id": "a", "attempt": 1})),
-        ev(1, SENT, json!({"port": "turn", "id": "a", "attempt": 2})),
         ev(
             1,
-            RESPONSE,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "a", "attempt": 1}),
+        ),
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "turn", "id": "a", "attempt": 2}),
+        ),
+        ev(
+            1,
+            EVENT_RESPONSE,
             json!({"port": "turn", "id": "a", "attempt": 1}),
         ),
     ];

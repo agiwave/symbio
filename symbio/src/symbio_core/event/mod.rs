@@ -212,6 +212,85 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 进不进请求包相反，混在一处必然让其中一半被静默滤掉。
 pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 
+// ── 协议族（port protocol）：**对外调用落成事实**（T-224）──
+//
+// 这五个名字是**新增**，不是替换：现网的事实名全是业务词汇（`memory.recalled` /
+// `task.rework_created` / `chat.assistant.final` / `commitment.broken` …），
+// 有各自真实的读方，**一个不动**。把它们压成几个协议名不是简化，是销毁语义。
+//
+// 补上的是**一类从来不存在的事实**：今天「我要调模型」「我要调工具」只活在内存里
+// （PL-014 §2.1 的「意图」）。落成事实之后，每一次对外调用都可回放、可恢复、可审计。
+//
+// **端口是载荷，不是事实种类**：只有这五个名字带 `port` 字段（PL-016 §2.4 的裁决），
+// 端口的取值（`turn` / `model` / `tool` / …）写在载荷里。**加一个端口 = 0 个新事实名。**
+//
+// 落格：**五个都在 `turn × asserted`**，逐条理由写在各自的文档与 `grid.rs` 的对应行注释里。
+
+/// **该调了**（载荷 `{ port, id, attempt }`）。落在 `turn × asserted`。
+///
+/// ## 谁写
+/// 决策者——写下「这一轮要发起这次调用」的那一方。
+///
+/// ## 为什么落 `turn × asserted`
+/// 它是一条**关于这一轮的断言**（「这一轮欠一次 `port` 调用」），不是状态迁移：
+/// `turn × opened` 是轮次的**开始**（一个 turn 只能有一次），`turn × closed` 是轮次的
+/// **结束**（收束格），`turn × progressed` 是**用户看得见**的动静（`chat.assistant.progress`）。
+/// 协议事实是**机器对机器**的账：不进对话面、不产节点、不进请求包。
+///
+/// ## 载荷
+/// `port` = 端口名；`id` = **逻辑 id**（同一笔调用的各次尝试共用它，幂等键按它去重）；
+/// `attempt` = 尝试号（重试时 +1）。
+pub const EVENT_REQUEST: &str = "request";
+
+/// **已经派出去了**（载荷 `{ port, id, attempt }`）。落在 `turn × asserted`。
+///
+/// ## 谁写
+/// **引擎**（`before` 标记位），不是搬运者——搬运者的 `run` 可能不产生事实就返回。
+/// 若由它写 `sent`，「派出去了」就依赖对方自觉：它一忘，`dispatch` 行永远不还清，
+/// 而**没有任何东西会红**（PL-016 §2.3；T-223 判据 2）。
+///
+/// ## 为什么落 `turn × asserted`
+/// 与 `request` 同格同族：一次调用的两个阶段是同一条账的两个断言。
+/// 「已派出」不是用户看得见的动静，故不占 `turn × progressed`。
+pub const EVENT_SENT: &str = "sent";
+
+/// **回来了**（载荷 `{ port, id, attempt }`）。落在 `turn × asserted`。
+///
+/// ## 谁写
+/// 搬运者（拿到应答的一方）。
+///
+/// ## 为什么落 `turn × asserted`
+/// 「有应答」是一条关于这一轮的断言。它**不是**收束格：轮子由
+/// `chat.assistant.final` / `fallback` 收束，一次端口调用的应答不结束一轮。
+pub const EVENT_RESPONSE: &str = "response";
+
+/// **没成功**（载荷 `{ port, id, why }`）。落在 `turn × asserted`。
+///
+/// ## 谁写
+/// 搬运者；引擎在执行体 `run` 返 `Err` 时兜底写它——**失败也是事实**，
+/// 义务环里没有异常分支（PL-016 §2.6 契约 3）。
+///
+/// ## 为什么落 `turn × asserted`（而不是 `closed`）
+/// 与 `authz.denied` 同一条纪律：一次端口调用失败**不关轮**——轮还可能重试、
+/// 走降级、或以兜底话术收束。把它算成收束会让 `unresolved_turns` 少报一轮
+/// 「静默中断」，而那正是**最该被发现的失效**。
+///
+/// ## 载荷
+/// 没有 `attempt`：`failed` 关的是**逻辑 id**（所有尝试），不是「某一次尝试失败」。
+pub const EVENT_FAILED: &str = "failed";
+
+/// **这次尝试作废，换一次**（载荷 `{ port, id, attempt }`）。落在 `turn × asserted`。
+///
+/// ## 谁写
+/// 租约看护者（`lease_keeper`）——`sent` 之后长时间无应答时，它按
+/// `PortDecl.max_attempts` 决定重试（落 `retry` + 新一轮 `request`）或判死
+/// （落 `failed`）。
+///
+/// ## 为什么需要它
+/// 没有它，`sent` 之后崩溃 ⇒ `await` 行永远 blocked ⇒ 那笔账永远挂着，
+/// 而日志上「发出去了」与「卡住了」长得一样（PL-016 §2.6 契约 7）。
+pub const EVENT_RETRY: &str = "retry";
+
 // ── 授权（authz）：**拒绝也是一条事实**（T-219）──
 
 /// 写侧闸拒绝落下的**否定事实**。落在 `turn × asserted`。
