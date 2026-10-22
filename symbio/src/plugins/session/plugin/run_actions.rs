@@ -497,7 +497,7 @@ async fn run_elimination_revoked(
     );
     let revoked = overlay.is_revoked(
         &dispatch.spec.principal,
-        crate::symbio_core::authz::CAP_ASSIGN_WORK,
+        crate::symbio_core::CAP_ASSIGN_WORK,
     );
     action_data(op, format!("assign.work 已收回：{revoked}"), revoked)
 }

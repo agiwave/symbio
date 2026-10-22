@@ -816,10 +816,10 @@ async fn run_elimination_revoked_sees_a_verdict_from_another_session() {
     append_to_session(
         &f.plugin.storage_dir(),
         "sess-a",
-        EliminationDecider.elimination_event(crate::symbio_core::authz::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(crate::symbio_core::PRINCIPAL_MAIN, -1, 7),
     );
 
-    assert!(revoked(&f, crate::symbio_core::authz::PRINCIPAL_MAIN).await);
+    assert!(revoked(&f, crate::symbio_core::PRINCIPAL_MAIN).await);
 }
 
 /// **嵌套子会话**里的裁决在本会话生效（T-107 批发现并修的静默面）。
@@ -832,10 +832,10 @@ async fn run_elimination_revoked_scans_nested_sub_sessions() {
         &f.plugin.storage_dir(),
         "sess-parent",
         "sess-child",
-        EliminationDecider.elimination_event(crate::symbio_core::authz::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(crate::symbio_core::PRINCIPAL_MAIN, -1, 7),
     );
 
-    assert!(revoked(&f, crate::symbio_core::authz::PRINCIPAL_MAIN).await);
+    assert!(revoked(&f, crate::symbio_core::PRINCIPAL_MAIN).await);
 }
 
 /// 恢复可逆：revoke + restore（last-wins）⇒ 闸门放行。
@@ -845,7 +845,7 @@ async fn run_elimination_revoked_scans_nested_sub_sessions() {
 async fn run_elimination_revoked_is_flipped_back_by_a_restoration() {
     let f = fixture();
     let root = f.plugin.storage_dir();
-    let principal = crate::symbio_core::authz::PRINCIPAL_MAIN;
+    let principal = crate::symbio_core::PRINCIPAL_MAIN;
     append_to_session(
         &root,
         "sess-a",
@@ -870,7 +870,7 @@ async fn run_elimination_revoked_hits_only_the_verdict_subject() {
         EliminationDecider.elimination_event("session/ghost", -1, 7),
     );
 
-    assert!(!revoked(&f, crate::symbio_core::authz::PRINCIPAL_MAIN).await);
+    assert!(!revoked(&f, crate::symbio_core::PRINCIPAL_MAIN).await);
     assert!(revoked(&f, "session/ghost").await);
 }
 
@@ -878,5 +878,5 @@ async fn run_elimination_revoked_hits_only_the_verdict_subject() {
 #[tokio::test(flavor = "multi_thread")]
 async fn run_elimination_revoked_on_an_empty_deployment_is_false() {
     let f = fixture();
-    assert!(!revoked(&f, crate::symbio_core::authz::PRINCIPAL_MAIN).await);
+    assert!(!revoked(&f, crate::symbio_core::PRINCIPAL_MAIN).await);
 }

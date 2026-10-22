@@ -43,7 +43,7 @@ fn seed_turn(
                 Entity::Turn,
                 Verb::Opened,
                 turn,
-                crate::symbio_core::authz::PRINCIPAL_USER,
+                crate::symbio_core::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "text": text, "tier": "deep" })),
         )
@@ -77,7 +77,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -94,8 +94,8 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -128,12 +128,12 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
-        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        Some(crate::symbio_core::PRINCIPAL_MAIN),
         "承诺方 = 会话主体（声誉记在承诺方头上）"
     );
     assert_eq!(
         opened.payload.get("to").and_then(|v| v.as_str()),
-        Some(crate::symbio_core::authz::PRINCIPAL_USER),
+        Some(crate::symbio_core::PRINCIPAL_USER),
         "承诺对象 = 会话外的另一方"
     );
     assert_eq!(
@@ -160,7 +160,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_PEER,
+        crate::symbio_core::PRINCIPAL_PEER,
         0,
         "对等主体跑一轮",
         50,
@@ -177,8 +177,8 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_PEER,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_PEER,
+        crate::symbio_core::PRINCIPAL_MAIN,
         "t0",
         &delegations,
         &[],
@@ -194,12 +194,12 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         .expect("立约格");
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
-        Some(crate::symbio_core::authz::PRINCIPAL_PEER),
+        Some(crate::symbio_core::PRINCIPAL_PEER),
         "承诺方 = 跑轮的主体（对等体）"
     );
     assert_eq!(
         opened.payload.get("to").and_then(|v| v.as_str()),
-        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        Some(crate::symbio_core::PRINCIPAL_MAIN),
         "承诺对象 = 来源主体（传入的数据，不是写死的常量）"
     );
 }
@@ -213,7 +213,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -230,8 +230,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -262,7 +262,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         .and_then(|v| v.as_str())
         .expect("宣告载荷带原话");
     assert!(
-        statement.contains(crate::symbio_core::authz::PRINCIPAL_USER)
+        statement.contains(crate::symbio_core::PRINCIPAL_USER)
             && statement.contains("子会话中途失败"),
         "宣告 = 把这次违约告知承诺对象：{statement}"
     );
@@ -285,7 +285,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "让它跑一遍",
         7,
@@ -296,8 +296,8 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &[],
         &[],
@@ -323,21 +323,15 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
 
     // ── 没理由（`Refuse` 或未触发）：一格都不落 ────────────────────────
     let quiet = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &quiet,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        0,
-        "问",
-        1,
-    );
+    let (snapshot, user_seq) = seed_turn(&quiet, crate::symbio_core::PRINCIPAL_MAIN, 0, "问", 1);
     record_derived(
         "derived-test",
         &quiet,
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &[],
         &[],
@@ -365,7 +359,7 @@ fn record_learning_wires_all_three_memory_steps() {
     for i in 0..4u64 {
         let (snapshot, user_seq) = seed_turn(
             &store,
-            crate::symbio_core::authz::PRINCIPAL_MAIN,
+            crate::symbio_core::PRINCIPAL_MAIN,
             i,
             &format!("第 {i} 条约定"),
             i,
@@ -377,7 +371,7 @@ fn record_learning_wires_all_three_memory_steps() {
             i,
             user_seq,
             &format!("第 {i} 条约定"),
-            crate::symbio_core::authz::PRINCIPAL_MAIN,
+            crate::symbio_core::PRINCIPAL_MAIN,
             &format!("t{i}"),
             Some("答"),
             None,
@@ -421,18 +415,13 @@ fn record_learning_wires_all_three_memory_steps() {
     );
 
     // 步 12：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
-    let view = recall(crate::symbio_core::authz::PRINCIPAL_USER, None, None)
+    let view = recall(crate::symbio_core::PRINCIPAL_USER, None, None)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     assert!(!view.entries.is_empty(), "还有活记忆可召回");
 
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        4,
-        "第五句",
-        44,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, crate::symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
     record_learning(
         "derived-test",
         &store,
@@ -440,7 +429,7 @@ fn record_learning_wires_all_three_memory_steps() {
         4,
         user_seq,
         "第五句",
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         "t4",
         Some("答"),
         Some(&view),
@@ -480,7 +469,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -497,8 +486,8 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -518,7 +507,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     assert_eq!(verdict.verb, Verb::Asserted);
     assert_eq!(
         verdict.actor,
-        crate::symbio_core::authz::PRINCIPAL_ARBITER,
+        crate::symbio_core::PRINCIPAL_ARBITER,
         "裁决者是仲裁者，不是被淘汰主体"
     );
     assert_eq!(
@@ -527,7 +516,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         "裁决同锚在本轮开口（I2）"
     );
     let p = &verdict.payload;
-    assert_eq!(p["subject"], crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(p["subject"], crate::symbio_core::PRINCIPAL_MAIN);
     assert_eq!(p["capability"], "assign.work");
     assert_eq!(p["change"], "revoke");
     assert_eq!(p["score"], -1, "判据值随事件落盘，审计方看得见");
@@ -542,7 +531,7 @@ fn a_kept_delegation_never_eliminates() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -559,8 +548,8 @@ fn a_kept_delegation_never_eliminates() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -586,7 +575,7 @@ fn elimination_does_not_write_a_second_verdict() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -603,8 +592,8 @@ fn elimination_does_not_write_a_second_verdict() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -633,7 +622,7 @@ fn a_principal_without_assign_work_is_never_eliminated() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_PEER,
+        crate::symbio_core::PRINCIPAL_PEER,
         0,
         "对等主体跑一轮",
         50,
@@ -650,8 +639,8 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_PEER,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_PEER,
+        crate::symbio_core::PRINCIPAL_MAIN,
         "t0",
         &delegations,
         &[],
@@ -701,7 +690,7 @@ fn commitment_failure_does_not_block_task_or_breaker() {
     let store = EventStore::new();
     let (snapshot, user_seq) = seed_turn(
         &store,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         0,
         "交给子智能体",
         50,
@@ -714,8 +703,8 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         &snapshot,
         0,
         user_seq,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        crate::symbio_core::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_USER,
         "t0",
         &[Delegation {
             id: "call-1".to_string(),

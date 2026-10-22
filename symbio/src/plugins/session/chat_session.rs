@@ -207,7 +207,7 @@ impl PersistentChatSession {
 }
 
 /// 委派链上的**父主体**——三段取值（子 `metadata.parent_session_id` → 父
-/// `metadata.agent_id` → [`crate::symbio_core::authz::principal_of`]）的**唯一实现**。
+/// `metadata.agent_id` → [`crate::symbio_core::principal_of`]）的**唯一实现**。
 ///
 /// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
 /// （`commands::session_upsert`）也要用同一份判据登记主体行（[T-182]），两处
@@ -219,7 +219,7 @@ pub(super) async fn delegating_principal_in(
     let parent_id = session.parent_session_id()?;
     let parent = store.load_session(parent_id).await.ok()?;
     let agent = parent.metadata.get("agent_id").and_then(|v| v.as_str());
-    Some(crate::symbio_core::authz::principal_of(agent))
+    Some(crate::symbio_core::principal_of(agent))
 }
 
 #[cfg(test)]

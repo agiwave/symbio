@@ -8,7 +8,10 @@
 use std::sync::Arc;
 
 use crate::symbio_core::PluginInvokeRequest;
-use crate::symbio_core::{authz, PluginInvokeRequestExt};
+use crate::symbio_core::{
+    principal_of, production_matrix, PluginInvokeRequestExt, CAP_ASSERT_VERIFICATION,
+    CAP_DEFINE_WORK,
+};
 
 /// 任务表写侧闸的**判据**（[roadmap/S03 §3](../../../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）：
 /// 本会话主体能否写任务表（`todo_write`）。
@@ -44,13 +47,13 @@ impl TaskTableInputs {
     ///
     /// 谓词按**能力名**问（`can_write_name`）：能力闭集与拼写由构造期兜住
     /// （`from_names` 认不出即拒绝整体构造），读侧照单全收——与
-    /// [`authz::CAP_DEFINE_WORK`] / [`authz::CAP_ASSERT_VERIFICATION`] 两处常量
+    /// [`crate::symbio_core::CAP_DEFINE_WORK`] / [`crate::symbio_core::CAP_ASSERT_VERIFICATION`] 两处常量
     /// 同一套拼写（表授予 A、闸门判 B 的漂移面由此收窄到一处）。
     pub fn of(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal = authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
-        let matrix = authz::production_matrix();
-        let may_write = matrix.can_write_name(&principal, authz::CAP_DEFINE_WORK)
-            || matrix.can_write_name(&principal, authz::CAP_ASSERT_VERIFICATION);
+        let principal = principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
+        let matrix = production_matrix();
+        let may_write = matrix.can_write_name(&principal, CAP_DEFINE_WORK)
+            || matrix.can_write_name(&principal, CAP_ASSERT_VERIFICATION);
         Self {
             principal,
             may_write,

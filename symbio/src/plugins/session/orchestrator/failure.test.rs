@@ -44,7 +44,7 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
             crate::symbio_core::Entity::Message,
             crate::symbio_core::Verb::Opened,
             0,
-            crate::symbio_core::authz::PRINCIPAL_USER,
+            crate::symbio_core::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "messages": payload })),
     )
@@ -65,7 +65,7 @@ fn seed_user_message(dir: &std::path::Path) {
             crate::symbio_core::Entity::Turn,
             crate::symbio_core::Verb::Opened,
             1,
-            crate::symbio_core::authz::PRINCIPAL_USER,
+            crate::symbio_core::PRINCIPAL_USER,
         )
         .with_payload(serde_json::json!({ "text": "第一问", "id": "u-open" })),
     )

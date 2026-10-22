@@ -56,8 +56,8 @@
 // 本模块续一条原名短路径——调用点一行不动。
 use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
-use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::FleetSnapshot;
+use crate::symbio_core::PRINCIPAL_USER;
 use crate::symbio_core::{
     accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, RecallView,
     Rejection, Seq, Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
@@ -223,7 +223,7 @@ pub(crate) fn recall_view(
 /// 两支各有一个 owner：
 /// - 本会话的内容 ⇒ 恒可见（判断记忆的 `thread_private` 走到这一支为止）；
 /// - 别的会话的 `shared` / `public` ⇒ 走 core 的读侧闸
-///   （`symbio_core::authz::content_visible`，与 `stats` 的整列闸**同一条判据**，
+///   （`symbio_core::content_visible`，与 `stats` 的整列闸**同一条判据**，
 ///   T-206 ⑧——那条判据若在这里复写一遍，就会漂成「stats 给看、召回不给看」）。
 ///   缺省（存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
 ///
@@ -233,7 +233,7 @@ fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
     use crate::symbio_core::VisScope;
     match VisScope::of_event(e) {
         VisScope::ThreadPrivate => own,
-        s => own || crate::symbio_core::authz::content_visible(s, viewer),
+        s => own || crate::symbio_core::content_visible(s, viewer),
     }
 }
 

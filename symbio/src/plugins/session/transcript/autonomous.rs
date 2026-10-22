@@ -251,8 +251,8 @@ impl SessionPlugin {
             }
         };
         // 授权与本体同一把尺：自主主体在 `authz::ROWS` 里只持 `define.work`。
-        let grants = crate::symbio_core::authz::production_matrix();
-        let principal = crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
+        let grants = crate::symbio_core::production_matrix();
+        let principal = crate::symbio_core::PRINCIPAL_AUTONOMOUS;
         match IntentGate::approve(&mut candidate, &policy, grants, principal) {
             Ok(approved) => {
                 // E2 的**动作点**：`task.opened` 只从闸门批准过的候选长出来

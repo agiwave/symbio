@@ -108,7 +108,7 @@ impl SessionPort for FakeSessionPort {
                                 Entity::Message,
                                 Verb::Progressed,
                                 0,
-                                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                                crate::symbio_core::PRINCIPAL_MAIN,
                             )
                             .with_payload(json!({
                                 "messages": messages,
@@ -153,7 +153,7 @@ pub(crate) fn turn_spec(
         session_id: session_id.to_string(),
         tool_archive_dir,
         transcript_archive_dir,
-        principal: crate::symbio_core::authz::PRINCIPAL_USER.to_string(),
+        principal: crate::symbio_core::PRINCIPAL_USER.to_string(),
         scope: Scope::Root,
         persistent: true,
         context_window: 6,

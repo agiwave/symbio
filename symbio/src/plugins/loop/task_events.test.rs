@@ -52,7 +52,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
                 Entity::Turn,
                 Verb::Opened,
                 turn,
-                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                crate::symbio_core::PRINCIPAL_MAIN,
             ))
             .expect("根事件入格")
             .value(),
@@ -64,7 +64,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
         decls,
         turn,
         anchor,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         &format!("v2t-test-a{turn}"),
     )
     .expect("任务事件入格");
@@ -407,7 +407,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
                 Entity::Message,
                 Verb::Progressed,
                 0,
-                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                crate::symbio_core::PRINCIPAL_MAIN,
             )
             .with_payload(serde_json::json!({
                 // 载荷是**合法**的快照（一份真的 `ChatNode` 列表）：不合法的话

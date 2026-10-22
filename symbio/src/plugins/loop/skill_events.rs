@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::symbio_core::authz::PRINCIPAL_USER;
+use crate::symbio_core::PRINCIPAL_USER;
 use crate::symbio_core::{
     calibration, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
     EVENT_MEMORY_ENCODED, SKILL_TAG,

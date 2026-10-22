@@ -15,7 +15,7 @@ use crate::symbio_core::PluginError;
 // 「本请求所属会话的主体身份」这个取值点已上移 core（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三 1 组）：
 // 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
 // 读写两侧隔着插件墙都要用。本文件与 `chat_loop` 经这条短路径拿它。
-use crate::symbio_core::authz::request_principal;
+use crate::symbio_core::request_principal;
 
 /// 本请求的**来源主体**（[ADR-067]）：入站消息的出处，`commitment.*` 的 `to`。
 ///
@@ -35,7 +35,7 @@ pub(crate) fn request_source_principal(
     ctx.get(crate::symbio_core::SOURCE_PRINCIPAL)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| crate::symbio_core::authz::PRINCIPAL_USER.to_string())
+        .unwrap_or_else(|| crate::symbio_core::PRINCIPAL_USER.to_string())
 }
 
 /// 本请求的**主体规格**（`ActorSpec` 的唯一生产构造点，[ADR-065] 合并批落地）。
@@ -70,13 +70,11 @@ pub(crate) fn request_actor_spec(
     let session_id = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
     match &scope {
         crate::symbio_core::Scope::Child(parent) => {
-            crate::symbio_core::authz::bind_inheriting(&session_id, &principal, parent)
+            crate::symbio_core::bind_inheriting(&session_id, &principal, parent)
         }
-        crate::symbio_core::Scope::Root => {
-            crate::symbio_core::authz::bind_root(&session_id, &principal)
-        }
+        crate::symbio_core::Scope::Root => crate::symbio_core::bind_root(&session_id, &principal),
     }
-    let matrix = crate::symbio_core::authz::production_matrix();
+    let matrix = crate::symbio_core::production_matrix();
     ActorSpec {
         principal: principal.clone(),
         // 模式判据住在定义域内（[`crate::symbio_core::Pattern::for_principal`]）——

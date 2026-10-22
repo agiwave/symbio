@@ -259,7 +259,7 @@ async fn run_recall(
     // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
     // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
     // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
-    let recall_viewer = crate::symbio_core::authz::request_principal(ctx.as_ref());
+    let recall_viewer = crate::symbio_core::request_principal(ctx.as_ref());
     // 事实是**值**（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）：
     // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
     // 它们看到的是同一刻的事实，不各开各的文件。

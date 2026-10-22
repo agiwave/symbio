@@ -311,7 +311,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     }
 }
 
-/// 收束格按**种类**判（[ADR-067](../../../docs/010-adr/067.md "ADR-067")，T-072 的单测判据）：
+/// 收束格按**种类**判（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")，T-072 的单测判据）：
 /// 产物收束问 `produce.artifact`、发言收束仍按 `reply.*`——同一张表的两道闸。
 ///
 /// 钉的是谓词面的**分派**，不是每个主体自己的窄行（那些在上面各测里）：对等主体
@@ -349,7 +349,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     assert!(!matrix.can_produce_artifact("session/ghost"));
 }
 
-/// 取表口只有一条口径（[ADR-099](../../../docs/010-adr/099.md "ADR-099")）：
+/// 取表口只有一条口径（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
 /// **登记过的主体走表，未登记的主体什么也拿不到**——少一行是一条拒绝，不是一条漏判。
 #[test]
 fn an_unregistered_subject_gets_no_row_at_all() {
@@ -555,7 +555,7 @@ fn tool_principals_have_declared_rows() {
     }
 }
 
-/// **人不入能力表**（[ADR-069 §后果] 与 [authz.rs 模块文档]「两张表里的人」）——
+/// **人不入能力表**（[ADR-069 §后果] 与 [authz/mod.rs 模块文档]「两张表里的人」）——
 /// `PRINCIPAL_USER` 归一为 `person/local` 之后仍**不立行**；判据：
 /// `production_matrix().can_reply(PRINCIPAL_USER)` 依旧为假。
 #[test]
@@ -580,7 +580,7 @@ fn person_local_is_not_in_the_capability_table() {
 
 /// 绑定即登记：未部署的主体经 [`bind_inheriting`] 拿到来源行，收束闸随之放行。
 ///
-/// 这条钉的是 [ADR-100](../../../docs/010-adr/100.md) 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
+/// 这条钉的是 [ADR-100](../../../../docs/010-adr/100.md) 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
 /// **不再靠未登记主体的静默派生拿主行**，而是随会话装配点的绑定拿到一行——
 /// 拿得到与拿不到都由可见的登记动作决定（少一行 = 一条拒绝）。
 #[test]

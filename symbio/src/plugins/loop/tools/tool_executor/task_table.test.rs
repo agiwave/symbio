@@ -7,7 +7,9 @@
 //! （T-158），见 `decls.test.rs` 的匹配口径用例。
 
 use super::TaskTableInputs;
-use crate::symbio_core::{authz, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
+use crate::symbio_core::{
+    principal_of, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PRINCIPAL_MAIN,
+};
 
 /// 带 `AGENT_ID` 的请求上下文：闸门按它派生主体（同 `EliminationInputs` 的取值口径）。
 fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn PluginInvokeRequest> {
@@ -31,7 +33,7 @@ fn every_define_work_holder_may_declare_tasks() {
         let inputs = TaskTableInputs::of(&agent_ctx(agent));
         assert_eq!(
             inputs.principal,
-            authz::principal_of(Some(agent)),
+            principal_of(Some(agent)),
             "主体派生应与 request_principal 同源"
         );
         assert!(
@@ -48,7 +50,7 @@ fn every_define_work_holder_may_declare_tasks() {
 #[test]
 fn the_trivial_session_keeps_its_task_table() {
     let inputs = TaskTableInputs::of(&bare_ctx());
-    assert_eq!(inputs.principal, authz::PRINCIPAL_MAIN);
+    assert_eq!(inputs.principal, PRINCIPAL_MAIN);
     assert!(inputs.may_write, "平凡值会话（agent:main）必须能写任务表");
 }
 
@@ -88,7 +90,7 @@ fn producer_only_and_dispatch_only_principals_are_refused() {
 /// [ADR-100] 绑定登记前没有行）。
 ///
 /// 子智能体要写任务表就得**先经会话装配点绑定登记**（根会话继承会话面缺省行、
-/// 委派子会话继承父行，见 `authz::bind_inheriting`）——本用例走的是 `TaskTableInputs::of`
+/// 委派子会话继承父行，见 `symbio_core::bind_inheriting`）——本用例走的是 `TaskTableInputs::of`
 /// 直读合流面、**不经过装配点绑定**的那一支：没有登记动作就没有行，闸诚实拒止。
 /// 与收束闸同一口径：「忘配/忘绑」的后果是一条会被看见的拒绝，不是一次静默超权。
 #[test]

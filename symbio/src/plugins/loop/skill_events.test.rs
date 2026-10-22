@@ -3,12 +3,12 @@
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
 use super::{compile, route, take_match, SkillLlmHit};
-use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use crate::symbio_core::SKILL_TAG;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FINAL,
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
+use crate::symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 
 /// 一轮的**溯源锚**：`user.message` 开轮 + `assistant.final` 收束——
 /// 技能的 `produced_by` 指向开轮格（I2），`check_all` 才看得见整条链是绿的。
@@ -21,7 +21,7 @@ fn seed_turn(store: &EventStore) -> u64 {
                 Entity::Turn,
                 Verb::Opened,
                 0,
-                crate::symbio_core::authz::PRINCIPAL_USER,
+                crate::symbio_core::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({
                 "text": "帮我写测试",

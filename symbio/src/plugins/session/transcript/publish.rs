@@ -108,9 +108,7 @@ fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     // `meta.tool_name` 合成）——authz 登记的主体行（`vdfs/write`…）就是这批值。
     // 没有工具名的（协议级失败调用）退回本会话主体，与字段删除前的今天同格。
     out.principal = Some(match out.node_role() {
-        Some(cm::NodeRole::User) => {
-            Principal::from_legacy(crate::symbio_core::authz::PRINCIPAL_USER)
-        }
+        Some(cm::NodeRole::User) => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
         Some(cm::NodeRole::Tool) => match out.tool_name() {
             Some(name) => Principal::tool_principal(name),
             None => Principal::from_legacy(session_principal),

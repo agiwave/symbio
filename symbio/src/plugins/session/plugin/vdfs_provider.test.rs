@@ -420,15 +420,15 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
     .into_write()
     .unwrap();
 
-    let principal = crate::symbio_core::authz::principal_of(Some("t182-agent"));
+    let principal = crate::symbio_core::principal_of(Some("t182-agent"));
     assert!(
-        crate::symbio_core::authz::production_matrix().can_reply(&principal),
+        crate::symbio_core::production_matrix().can_reply(&principal),
         "创建即登记：未部署身份拿到会话面缺省行"
     );
 
     p.delete_session_internal(sid).await.unwrap();
     assert!(
-        crate::symbio_core::authz::production_matrix()
+        crate::symbio_core::production_matrix()
             .grants_of(&principal)
             .is_empty(),
         "会话删除 ⇒ 登记行随之回收"
@@ -463,9 +463,9 @@ async fn rewriting_the_agent_identity_replaces_the_session_binding() {
     .into_write()
     .unwrap();
 
-    let old = crate::symbio_core::authz::principal_of(Some("t182-rewrite-old"));
-    let new = crate::symbio_core::authz::principal_of(Some("t182-rewrite-new"));
-    let matrix = crate::symbio_core::authz::production_matrix();
+    let old = crate::symbio_core::principal_of(Some("t182-rewrite-old"));
+    let new = crate::symbio_core::principal_of(Some("t182-rewrite-new"));
+    let matrix = crate::symbio_core::production_matrix();
     assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
     assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
     p.delete_session_internal(sid).await.unwrap();
@@ -502,8 +502,8 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
     .await
     .unwrap();
 
-    let child_principal = crate::symbio_core::authz::principal_of(Some("t182-child-agent"));
-    let matrix = crate::symbio_core::authz::production_matrix();
+    let child_principal = crate::symbio_core::principal_of(Some("t182-child-agent"));
+    let matrix = crate::symbio_core::production_matrix();
     assert!(
         !matrix.can_reply(&child_principal),
         "委派取交集：worker 无发言权 ⇒ 子也无"
@@ -515,7 +515,7 @@ async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_pare
 
     p.delete_session_internal(parent).await.unwrap();
     assert!(
-        crate::symbio_core::authz::production_matrix()
+        crate::symbio_core::production_matrix()
             .grants_of(&child_principal)
             .is_empty(),
         "父会话删除（子会话一并删除）⇒ 子登记随子树回收"
@@ -940,7 +940,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 crate::symbio_core::Verb::Opened,
                 0,
-                crate::symbio_core::authz::PRINCIPAL_USER,
+                crate::symbio_core::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "messages": payload })),
         )

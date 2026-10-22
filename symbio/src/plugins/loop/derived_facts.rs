@@ -192,19 +192,19 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         );
         return;
     }
-    let matrix = crate::symbio_core::authz::production_matrix();
+    let matrix = crate::symbio_core::production_matrix();
     for (principal, entry) in &view.by_principal {
         // 条件 2：持 assign.work 的**部署**主体（淘汰面只认部署表：绑定登记
         // （[ADR-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
         // 未部署的 `agent:<id>` 不在表里 ⇒ 不淘汰，边界同函数文档）。
-        if !matrix.deployed_can_write_name(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
+        if !matrix.deployed_can_write_name(principal, crate::symbio_core::CAP_ASSIGN_WORK) {
             continue;
         }
         if !decider.should_eliminate(entry) {
             continue;
         }
         // 条件 3：已有生效撤销 ⇒ 不重复落格（审计面不缺、幂等键不撞）。
-        if overlay.is_revoked(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
+        if overlay.is_revoked(principal, crate::symbio_core::CAP_ASSIGN_WORK) {
             continue;
         }
         let ev = decider.elimination_event(principal, entry.score, user_seq);

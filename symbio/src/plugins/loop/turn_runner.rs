@@ -728,7 +728,7 @@ fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> Result<(),
     let crate::symbio_core::Scope::Child(parent) = &actor.scope else {
         return Ok(());
     };
-    let matrix = crate::symbio_core::authz::production_matrix();
+    let matrix = crate::symbio_core::production_matrix();
     let granted = match kind {
         ClosureKind::Speech => matrix.can_reply(parent),
         ClosureKind::Artifact => matrix.can_produce_artifact(parent),

@@ -15,6 +15,11 @@ mod capability;
 mod chat;
 mod clock;
 mod creator;
+// 事实 / 视图声明层（T-221）：字段清单与视图读法在装载期可查。按任务范围
+// **不接控制面**，T-222 接线之前没有生产消费方；与 `stage_events::done` 同一形态，
+// 如实标 `cfg(test)`，不给死代码闸门开豁免——T-222 删掉这一行即可。
+#[cfg(test)]
+mod decl;
 mod dialog;
 mod embedding;
 mod event;
@@ -262,6 +267,20 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
 pub(crate) use governance::GrantsOverlay;
 pub use governance::VisScope;
+// 授权表的**外部面**（T-221 同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
+// 就是一条深路径（C-002 判红），而插件侧有十几个符号在用。按 §1 的口径，根平铺是
+// 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。`pub(crate)` 与
+// `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。
+pub(crate) use authz::{
+    bind_inheriting, bind_root, content_visible, principal_of, production_matrix,
+    request_principal, unbind_session, CAP_ASSERT_VERIFICATION, CAP_ASSIGN_WORK, CAP_DEFINE_WORK,
+    CAP_EXTERNAL_EXECUTION, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN, PRINCIPAL_USER,
+};
+// 三个只在**测试**里被 core 外点名的行名 / 属主：生产侧没有任何 core 外消费方，
+// 非测试构建里出根就是三处死代码。`cfg(test)` 出根与 `EVENT_COMMITMENT_*` 同形态——
+// 出根是给测试用的，不是把它们藏着。
+#[cfg(test)]
+pub(crate) use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, SESSION_OWNER};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

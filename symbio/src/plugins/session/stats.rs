@@ -312,7 +312,7 @@ pub(crate) fn read(
     let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
         None => true,
-        Some(principal) => crate::symbio_core::authz::content_visible(content_scope, principal),
+        Some(principal) => crate::symbio_core::content_visible(content_scope, principal),
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
@@ -515,8 +515,8 @@ impl SessionPlugin {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
         }) {
-            Some(agent) => crate::symbio_core::authz::principal_of(Some(&agent)),
-            None => crate::symbio_core::authz::request_principal(ctx.as_ref()),
+            Some(agent) => crate::symbio_core::principal_of(Some(&agent)),
+            None => crate::symbio_core::request_principal(ctx.as_ref()),
         };
         // 技能编译开关是部署配置（不在这份事实源里）：与已编译数并读，才分得清
         // 「关着」与「开着但没编译过」两种零。

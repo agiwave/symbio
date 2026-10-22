@@ -32,9 +32,8 @@ pub struct EliminationInputs {
 impl EliminationInputs {
     /// 批首读一次判据：主体派生 + 搬运 session 折好的撤销结论。
     pub fn of(delegation_revoked: bool, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal = crate::symbio_core::authz::principal_of(
-            ctx.get(crate::symbio_core::AGENT_ID).as_deref(),
-        );
+        let principal =
+            crate::symbio_core::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
         Self {
             principal,
             delegation_revoked,

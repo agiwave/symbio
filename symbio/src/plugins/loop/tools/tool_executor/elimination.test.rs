@@ -37,7 +37,7 @@ fn an_unrevoked_verdict_is_carried_verbatim() {
 fn the_principal_comes_from_the_agent_id() {
     assert_eq!(
         EliminationInputs::of(false, &agent_ctx(None)).principal,
-        crate::symbio_core::authz::PRINCIPAL_MAIN
+        crate::symbio_core::PRINCIPAL_MAIN
     );
     assert_eq!(
         EliminationInputs::of(false, &agent_ctx(Some("ghost"))).principal,

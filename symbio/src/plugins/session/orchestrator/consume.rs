@@ -294,7 +294,7 @@ impl TurnLauncher {
                 &session_id,
                 super::super::paths::TRANSCRIPTS_SUBDIR,
             ),
-            principal: crate::symbio_core::authz::request_principal(&*chat_ctx),
+            principal: crate::symbio_core::request_principal(&*chat_ctx),
             scope,
             persistent: session.store_handle().is_persistent(),
             context_window: session.context_window(),

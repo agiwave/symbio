@@ -15,8 +15,8 @@ use super::{
 };
 use crate::symbio_core::SKILL_TAG;
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
-use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::merge_kernel::split_sentences;
+use crate::symbio_core::PRINCIPAL_USER;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq,
     Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
@@ -1080,7 +1080,7 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     let owner = recall_view(
         vec![snap(false, &a), snap(true, &b)],
         Some("共享"),
-        crate::symbio_core::authz::SESSION_OWNER,
+        crate::symbio_core::SESSION_OWNER,
     )
     .expect("属主读得到");
     assert!(
@@ -1218,7 +1218,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         &store,
         &view,
         trigger,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         9000,
     )
     .expect("入格");
@@ -1233,7 +1233,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert_eq!(ev.actor, "session/main");
     assert_eq!(
         ev.actor,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         "Translator 写死的 actor 必须与本机主智能体常量同值（对齐测试）"
     );
     assert_eq!(ev.ts, 9000, "检索事实也填时刻");
@@ -1245,7 +1245,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         &store,
         &view,
         trigger,
-        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::PRINCIPAL_MAIN,
         9001,
     )
     .expect("重复调用不失败");

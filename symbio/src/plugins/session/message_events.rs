@@ -497,7 +497,7 @@ fn append(
 /// 取不到时回落到 `user` + `ts = 0`（旧行为）。回落是为了老写方不被这次修正打懵，
 /// 但它是**兜底不是默认**：有 principal / role 可判时绝不落到上面。
 fn actor_and_ts(payload: &Value) -> (String, i64) {
-    use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+    use crate::symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 
     let msg = payload.get("message").cloned().or_else(|| {
         payload

@@ -903,9 +903,9 @@ mod turn_runner_tests {
     ///   「闸把所有人都拒了」的平凡真）。
     #[tokio::test]
     async fn closure_is_withheld_when_the_principal_lacks_the_grant() {
-        use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
         use crate::symbio_core::unresolved_turns;
         use crate::symbio_core::ActorSpec;
+        use crate::symbio_core::PRINCIPAL_AUTONOMOUS;
 
         // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
         let store = EventStore::new();
@@ -2972,7 +2972,7 @@ mod scope_ceiling_tests {
     #[test]
     fn a_narrow_parent_cannot_spawn_a_wider_child() {
         let mut spec = ActorSpec::trivial("session/main");
-        spec.scope = Scope::Child(crate::symbio_core::authz::PRINCIPAL_PEER.to_string());
+        spec.scope = Scope::Child(crate::symbio_core::PRINCIPAL_PEER.to_string());
 
         assert!(
             spec.can_land_speech(),
@@ -3198,7 +3198,7 @@ mod denial_fact_tests {
     #[test]
     fn denial_names_the_capability_the_gate_judges() {
         let main = ActorSpec::trivial("session/main");
-        let peer = ActorSpec::trivial(crate::symbio_core::authz::PRINCIPAL_PEER);
+        let peer = ActorSpec::trivial(crate::symbio_core::PRINCIPAL_PEER);
 
         let speech_cap = ClosureKind::Speech.capability_name();
         let artifact_cap = ClosureKind::Artifact.capability_name();
