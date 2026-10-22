@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 3 · 🟡 doing 2 · ☑ done 236 · ❌ wont 5（共 246）
+**计数**：☐ todo 4 · 🟡 doing 2 · ☑ done 236 · ❌ wont 5（共 247）
 
 ## 待处理（按依赖顺序）
 
@@ -68,6 +68,7 @@ board.columns: [rank, deps, evidence, reason]
 |---|---|---|---|---|
 | `T-247-插件内部模型往返进环` | 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用 | next | plan | T-238-短路轮进债环 |
 | `T-249-执行体值返回账本` | 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口 | next | plan | T-241-ActorDecl执行体注册表 |
+| `T-251-GW005文本包含认重生成阶段` | GW-005 用文本包含认「重生成阶段」——判定的真假取决于注释措辞 | next | quality | — |
 | `T-245-判据硬化批` | 判据硬化批——生产表回放用例 / PTS-002 端口取值 / 收束 reason 严档 / 无进展可触发 | later | plan | T-241-ActorDecl执行体注册表 |
 
 ## 进行中
@@ -579,6 +580,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-247-插件内部模型往返进环`](247-插件内部模型往返进环.md) 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用（todo）
   - [`T-249-执行体值返回账本`](249-执行体值返回账本.md) 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口（todo）
 - [`T-250-生成链阶段id失配`](250-生成链阶段id失配.md) 生成链阶段 id 从提交点/CI 掉出——facts-write 漏点与登记投影无只读复核（done）
+- [`T-251-GW005文本包含认重生成阶段`](251-GW005文本包含认重生成阶段.md) GW-005 用文本包含认「重生成阶段」——判定的真假取决于注释措辞（todo）
 
 <!-- registry:summary end -->
 
