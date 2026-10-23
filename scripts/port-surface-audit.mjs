@@ -11,8 +11,9 @@
  * | PTS-003 | 求解器那两个函数的**字节**与基线一致 | 判据 1 的原文口径：「`drive` 与 `owed` 源码 diff = 0」 |
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
  * | PTS-005 | 协议格的**写点只在一个文件里**（扫 `symbio/src` 的 `Event::pending`，名字位上是协议常量或 `PortDecl::before`） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（PL-016 §2.3 / T-249 判据 5） |
+ * | PTS-006 | PL-016 §2.6 契约表的第 7 行**同时写着「重试」与「未启用」** | **条文与机制分叉**——条文说重试是第二条路，真表上重试出来的 `request` 不欠任何一行（T-252） |
  *
- * ## 为什么是这四格（而不是「机制键守恒」那种计数）
+ * ## 为什么是这几格（而不是「机制键守恒」那种计数）
  *
  * PL-016 §6 判据 1 是本方案最硬的一条：**加一个端口 = 0 个新事实名 + 1 个
  * `PortDecl` + 适配器 + 2 行模板，`drive` 与 `owed` 的源码 diff = 0**。
@@ -23,7 +24,7 @@
  * 新端口带出新事实名（协议族闭集被稀释）、引擎里长出 `if port == "…"`（端口渗进）、
  * 引擎为某个端口加了特判（字节变了而没人说得清是谁的锅）。
  *
- * ## 四格的关系（一句话说清谁管什么）
+ * ## 各格的关系（一句话说清谁管什么）
  *
  * - **PTS-001 管「事实名这一侧」**：端口是**载荷**，协议名全局只有 5 条。
  *   新端口 ⇒ 新 `PortDecl` + 适配器 + 2 行，**事实名一个都不加**。
@@ -46,6 +47,11 @@
  *   （今天全仓零处；要关掉这个缝得先收窄 `Event` 字段，那是 core 形状的事，
  *   挂 `core-shape-audit` 而不挂本条）。把名字先存进一个认不出来的变量同样能绕，
  *   这一处按 `decl.before` 补判（`sent` 的名字正是它，全仓只在端口层读一次）。
+ * - **PTS-006 管「条文与机制对不对得上」**：前五格判声明、引擎与写侧，这一格判**散文**——
+ *   契约 7 若继续写「`lease` 行重试或判死」，读者会以为重试是生产里的第二条路。
+ *   机制侧由用例 `no_port_in_the_real_table_retries_today` 钉住取值，条文侧由本条钉
+ *   限定词，两侧各钉一头；任何一侧单独放宽都不足以让「重试通道未启用」重新成立。
+ *   边界：它只认 §2.6 契约表第 7 行的文字，判不出别的段落里的同类说法。
  *
  * ## 基线在哪、为什么是文件而不是常量
  *
@@ -83,8 +89,8 @@
  */
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一）
-// @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005
+// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 契约 7 的重试限定）
+// @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005 PTS-006
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -106,6 +112,8 @@ const EVENT_REL = 'symbio/src/symbio_core/event/mod.rs'
 const DECL_REL = 'symbio/src/symbio_core/decl/mod.rs'
 /** 基线（判据面之一，见文件头「基线在哪」） */
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
+/** 契约 7 的条文所在（PTS-006 的唯一输入：§2.6 契约表的第 7 行） */
+const PLAN_REL = 'docs/004-plan/016-义务环.md'
 
 /**
  * 协议族：**哪五个常量**是协议族（PL-016 §2.4 的「五个协议名」）。
@@ -526,6 +534,54 @@ if (writers.length === 0) {
   )
 }
 
+// ───────────────────────── PTS-006 契约 7 的重试限定 ─────────────────────────
+
+/**
+ * PL-016 §2.6 契约表第 7 行：重试这一路**今天没启用**（T-252 出口 ②）。
+ *
+ * 判据只认契约表第 7 行那一段文字。条文若继续写「`lease` 行重试或判死」，读者会
+ * 以为重试是生产里的第二条路；真表上 `max_attempts` 全为 1、债键是 `(port, id)`
+ * ⇒ 重试出来的 `request` 没人派。两个词缺一个都是分叉：删掉「重试」是把机制里
+ * 存在的一条路藏起来，留着「重试」而不写「未启用」是把没在跑的路说成在跑。
+ *
+ * 找不到 §2.6 / 第 7 行同样判红——锚点漂了不是「没什么可判」。
+ */
+const CONTRACT_RETRY_ROW_RE = /^\|\s*7\s*\|/
+
+function contractRetryRow() {
+  const text = readText(PLAN_REL)
+  if (text === null) {
+    report('PTS-006', `读不出 ${PLAN_REL} —— 契约 7 的条文是这条判据的唯一输入，宁红不静默`)
+    return null
+  }
+  const start = text.indexOf('### 2.6 ')
+  if (start < 0) {
+    report('PTS-006', `${PLAN_REL} 里找不到「### 2.6 」小节 —— 契约表的锚点没了，判据没有输入`)
+    return null
+  }
+  const end = text.indexOf('\n### ', start + 1)
+  const section = text.slice(start, end < 0 ? text.length : end)
+  const rows = section.split('\n').filter((l) => CONTRACT_RETRY_ROW_RE.test(l))
+  if (rows.length !== 1) {
+    report('PTS-006', `§2.6 契约表的第 7 行找到 ${rows.length} 条（应恰好 1 条）—— 锚点漂了，判据没有输入`)
+    return null
+  }
+  return rows[0]
+}
+
+const contractRow = contractRetryRow()
+if (contractRow !== null && !contractRow.includes('重试')) {
+  report(
+    'PTS-006',
+    `§2.6 契约 7 那一行不再提「重试」—— 重试的实现（\`lease_keeper\` 的 \`retry\` + \`request{attempt+1}\`）还在，条文藏起它就是漏账；应写明「重试通道未启用」`,
+  )
+} else if (contractRow !== null && !contractRow.includes('未启用')) {
+  report(
+    'PTS-006',
+    `§2.6 契约 7 那一行写了「重试」却没说**未启用** —— 真表 \`max_attempts\` 全为 1、债键是 \`(port, id)\`，重试出来的 \`request\` 不欠任何一行；条文与机制分叉（T-252）`,
+  )
+}
+
 // ───────────────────────── 输出 ─────────────────────────
 
 const ruleLine = (ok, rule, desc) =>
@@ -552,6 +608,7 @@ if (errors.length === 0) {
     'PTS-005',
     `协议格写方唯一：${writers.join(' / ')}（命中 ${[...writePoints.values()].reduce((n, l) => n + l.length, 0)} 处构造）`,
   )
+  ruleLine(true, 'PTS-006', `契约 7 标明重试未启用：${PLAN_REL} §2.6`)
   process.exit(0)
 }
 

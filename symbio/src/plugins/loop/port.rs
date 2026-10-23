@@ -393,6 +393,8 @@ pub(crate) enum Reaped {
 
 /// **租约看护**：把 `sent` 之后超时无应答的调用重试或判死（判据 7）。
 ///
+/// 重试那一侧今天走不到（真表 `max_attempts` 全为 1），理由见下方 `retry` 分支。
+///
 /// 输入只有事实切片、端口声明与 `now`——不给内存状态，所以「崩溃后重放」与
 /// 「正常跑」走同一条路（判据 4 的另一半：`in_flight` 从日志重建）。
 ///
@@ -436,12 +438,13 @@ where
             out.push(Reaped::Killed { id, attempt });
             continue;
         }
-        // 作废这次尝试，并立刻举起下一次。**这句「就欠了」今天是假的**：三行派发债的
+        // 作废这次尝试，并立刻举起下一次。这条支路今天**不可达**：三行派发债的
         // 键是 `(port, id)`（不含 `attempt`，见 `loop_rows.rs` 的键口径注释），
         // 上一 attempt 的出口格已经把那一行关掉 ⇒ 这笔 `request{attempt+1}` 在行表里
-        // 不欠任何东西，没有任何执行体会派它。键要不要含 attempt 是一条机制裁决，
-        // 见 T-252；在它落地之前，真表上 `max_attempts` 全为 1（重试分支不可达，
-        // 用例 `no_port_in_the_real_table_retries_today` 钉着）。
+        // 不欠任何东西，没有任何执行体会派它。裁决是 T-252 出口 ②：**重试通道未启用**，
+        // 真表 `max_attempts` 全为 1 ⇒ 到顶即判死（用例
+        // `no_port_in_the_real_table_retries_today` 钉着取值，PL-016 §2.6 契约 7 钉着条文）。
+        // 抬上限的前置是让重试出来的那笔进债键：键含 attempt，或给 retry 单开一行。
         append(
             store,
             Event::pending(

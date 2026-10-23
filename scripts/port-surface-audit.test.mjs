@@ -1,8 +1,8 @@
 /**
  * port-surface-audit 回归测试
  *
- * 这条守卫的失效形态**全是恒真**：五格判据读不出输入（事件名字表读空、事实声明表
- * 读空、基线读空、写点扫空）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
+ * 这条守卫的失效形态**全是恒真**：各格判据读不出输入（事件名字表读空、事实声明表
+ * 读空、基线读空、写点扫空、契约表锚点漂走）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
  * PL-016 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
  *
  * 所以第一组用例拿**真仓当前状态**做非零对照（协议事实数 > 0、指纹非空），
@@ -30,6 +30,8 @@ const BASELINE_REL = 'scripts/baselines/port-surface.json'
 const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'
 /** 协议格写点所在文件（PTS-005 判**写方唯一**，不判这个路径——路径只是夹具的落点） */
 const WRITER_REL = 'symbio/src/plugins/loop/port.rs'
+/** 契约 7 的条文（PTS-006 的唯一输入） */
+const PLAN_REL = 'docs/004-plan/016-义务环.md'
 
 /** 协议族常量（五个名字的定义，值取协议名的字面值） */
 const EVENT_SRC = `pub const EVENT_REQUEST: &str = "request";
@@ -115,12 +117,27 @@ pub(crate) fn succeed<S>(store: &S, call: &Call, turn: u64) -> Result<(), Append
 `
 
 /**
+ * 契约 7 的夹具条文：**合规的形状**（同时写「重试」与「未启用」）。
+ *
+ * 每份夹具都自带它——PTS-006 的输入不是这条判据的开关，而是仓库里本来就有的一份
+ * 文档；夹具缺了它就等于「真仓的门在夹具上永远开着」，其余用过绿灯的用例也就不再
+ * 证明它们各自的格。
+ */
+const PLAN_SRC = `### 2.6 执行契约
+
+| # | 契约 | 不做的后果 |
+|---|---|---|
+| 6 | 无进展守卫 | 静默停摆 |
+| 7 | 在途请求带租约；到顶即判死，重试通道未启用 | 永久在等 |
+`
+
+/**
  * 造一棵最小仓库。
  *
- * `facts` / `solver` / `event` / `writer` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
+ * `facts` / `solver` / `event` / `writer` / `plan` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
  * 算出来**（基线是文件，随树走——这样「求解器变了」才是能被夹具表达的那件事）。
  */
-function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
+function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, plan = PLAN_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'port-surface-'))
   const write = (rel, body) => {
     const abs = path.join(root, rel)
@@ -132,6 +149,8 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
   write(SOLVER_REL, solver)
   write(PORTS_REL, ports)
   write(WRITER_REL, writer)
+  // `plan: null` = 夹具里没有这份文档（用来证明 PTS-006 读不到输入时判红）。
+  if (plan !== null) write(PLAN_REL, plan)
   // 基线挂的 ADR 必须**能打开**（PTS-004）——夹具里给它一份空壳决策。
   if (createAdr) {
     const id = String(adr).match(/ADR-(\d+[a-z]?)/)?.[1]
@@ -166,7 +185,7 @@ function cleanup(root) {
 
 // ── ① 真仓当前状态：绿，且**数得出东西**（防恒真）─────────────────────
 
-test('真仓当前状态通过，且五格判据都数得出非零输入', () => {
+test('真仓当前状态通过，且各格判据都数得出非零输入', () => {
   const r = spawnSync(process.execPath, [script], {
     env: { ...process.env, NO_COLOR: '1' },
     encoding: 'utf8',
@@ -188,6 +207,8 @@ test('真仓当前状态通过，且五格判据都数得出非零输入', () =>
   for (const v of ['turn', 'model', 'tool']) {
     assert.ok(values[1].includes(v), `端口取值名单里没有 ${v}：提取器与端口表脱节`)
   }
+  // PTS-006 的输入也要真的存在（真仓里那份文档不是夹具自动补的）。
+  assert.match(r.stdout, /PTS-006.*契约 7.*§2\.6/, '真仓里契约 7 的条文没被判到 ⇒ PTS-006 可能没有输入')
 })
 
 // ── ② PTS-001：协议名闭集 ─────────────────────────────────────────────
@@ -463,6 +484,63 @@ test('PTS-005 行表里的 `source: EVENT_SENT` 不算写点（模式不是账�
     const r = run(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
     assert.match(r.stdout, /PTS-005.*协议格写方唯一/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+// ── ⑦ PTS-006：契约 7 的「重试」必须带「未启用」 ──────────────────────
+
+test('PTS-006 契约 7 说「重试或判死」却不提未启用 ⇒ 红（条文与机制分叉）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('到顶即判死，重试通道未启用', '重试或判死') })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-006.*未启用/s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-006 契约 7 把「重试」整词删掉 ⇒ 红（实现的另一路被藏起来）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('到顶即判死，重试通道未启用', '到顶即判死') })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-006.*第 7 行|PTS-006.*不再提「重试」/s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-006 契约表的第 7 行找不到 ⇒ 红（锚点漂了不是没什么可判）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('| 7 | 在途请求带租约；到顶即判死，重试通道未启用 | 永久在等 |\n', '') })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-006.*找到 0 条/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-006 §2.6 小节不在了 ⇒ 红（判据没有输入）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('### 2.6 执行契约', '### 别的标题') })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-006.*找不到「### 2\.6 /s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-006 契约 7 文档读不出 ⇒ 红（不得「没读到 ⇒ 没什么可判」）', () => {
+  const root = fixture({ plan: null })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-006.*读不出/)
   } finally {
     cleanup(root)
   }

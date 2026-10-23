@@ -327,7 +327,8 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     //
     // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
     // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
-    // 一套，真表漂了用例照样绿，而生产里那条重试路径没人走过（T-244 口径 4）。
+    // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里它不可达，
+    // 因为重试通道未启用（T-252 出口 ②，见下一条用例）。
     let retrying: Vec<PortDecl> = PORTS
         .iter()
         .map(|p| PortDecl {
@@ -370,11 +371,11 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
 #[test]
 fn no_port_in_the_real_table_retries_today() {
     // 上面那条用例改写的只有 `max_attempts` 一格，这里钉住**真表此刻的取值**：
-    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达（等待方随进程消失，到顶即判死，
-    // PL-016 §2.3）。抬上限不是顺手能做的事：`authorize-tool` / `dispatch-tools`
-    // 两行还没接回执行体，重试出来的那笔 `request` 举得起授权债却没有任何执行体
-    // 去判它、派它（T-244 口径 4 的解锁条件）。这一条转红 = 有人抬了上限，
-    // 那时重试路径必须已经有真实覆盖，而不是继续靠合成声明。
+    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达，到顶即判死（PL-016 §2.3）。
+    // 这是「重试通道未启用」的机制侧一半（条文的另一半由 PTS-006 钉住）。抬上限
+    // 不是顺手能做的事：行层债键是 `(port, id)`，上一 attempt 的出口格已经把那行
+    // 关掉 ⇒ 重试出来的 `request` 不欠任何一行，没有执行体会派它（T-252）。
+    // 这一条转红 = 有人抬了上限，那时重试出来的那笔必须已经有行会选中它。
     let caps: Vec<(&str, u64)> = PORTS.iter().map(|p| (p.port, p.max_attempts)).collect();
     assert!(
         caps.iter().all(|(_, n)| *n == 1),
