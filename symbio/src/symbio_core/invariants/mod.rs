@@ -109,6 +109,24 @@ pub fn closes_turn(e: &Event) -> bool {
             && e.kind == crate::symbio_core::event::EVENT_ARTIFACT_ADDED)
 }
 
+/// 这一条是**停机事实**吗（C6 的口径：它得回答「这一轮为什么停」）？
+///
+/// 两种收束格 + 收束闸的否定事实（T-219：被拒不产生收束格，但它同样是一次停）。
+/// **与 [`closes_turn`] 不是一把尺**：后者问「本轮结算了吗」，产物格算结算；
+/// 产物不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
+/// （PL-016 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
+/// 就会向生产要一个它永远写不出的字段。
+pub fn is_stop_fact(e: &Event) -> bool {
+    (e.entity == Entity::Turn
+        && e.verb == Verb::Closed
+        && matches!(
+            e.kind.as_str(),
+            crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+                | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
+        ))
+        || e.kind == crate::symbio_core::event::EVENT_AUTHZ_DENIED
+}
+
 /// 单事件的 I2 判据：`Some` = 这条**声明**缺溯源，写侧应拒绝它。
 ///
 /// 与 [`produced_by_coverage`] 同源（后者就是对本函数的逐条调用）——读侧与写侧
@@ -477,20 +495,41 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
 /// 闭集由 [`ClosureReason::ALL`] 派生，**不在这里另写一份**——两处各写一份，
 /// 加一个新原因时就会出现"写侧合法、读侧报红"的两套绿。
 ///
-/// # 宽限：历史事件
+/// # 宽限：只宽限到「这条日志里第一条带 `reason` 的停机格」为止
 ///
 /// 接线前落库的收束格没有 `reason`。把它们一并报出会让首日清单整片飘红，于是
 /// 读侧只对**缺字段**放宽（见 [`closure_reason_closed`] 的形参）；**越界不放宽**——
 /// 写了一个不在闭集里的值，从来不是历史问题。
+///
+/// 但「整段放宽」是条**没有边界**的宽限：写方从今天起每条都带 `reason`，而一条
+/// 新落的格漏了 `reason`，在整段放宽下永远绿——判据 10 因此在生产里没有执行方
+/// （T-245 口径 ③）。宽限的边界改成日志自己说：第一条带 `reason` 的停机格
+/// （收束格或 `authz.denied`）就是分界，**它之前**是历史归档段（放宽），**它之后**
+/// 每一条都必须带。这个位置不需要常量、不需要日期——写方一旦开始写 `reason`，
+/// 之后的缺口就不可能再是历史造成的。整条日志一个 `reason` 都没有 ⇒ 分界落在末尾，
+/// 与旧行为逐字等价（纯历史存档不飘红）。
 pub fn closure_reason_closed(events: &[Event], allow_missing: bool) -> Vec<Violation> {
+    // 分界下标：第一条带 `reason` 的停机格。严判档把分界放在开头 ⇒ 一段都不放宽；
+    // 宽限档找不到分界 ⇒ 放在末尾，整段都算历史归档。
+    let boundary = if allow_missing {
+        events
+            .iter()
+            .position(|e| {
+                is_stop_fact(e) && e.payload.get("reason").and_then(|v| v.as_str()).is_some()
+            })
+            .unwrap_or(events.len())
+    } else {
+        0
+    };
     events
         .iter()
-        .filter(|e| closes_turn(e) || e.kind == crate::symbio_core::event::EVENT_AUTHZ_DENIED)
-        .filter_map(|e| {
+        .enumerate()
+        .filter(|(_, e)| is_stop_fact(e))
+        .filter_map(|(idx, e)| {
             let raw = e.payload.get("reason").and_then(|v| v.as_str());
             match raw {
                 None => {
-                    if allow_missing {
+                    if idx < boundary {
                         return None;
                     }
                     Some(Violation::at(

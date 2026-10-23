@@ -1345,17 +1345,20 @@ fn the_drive_now_is_the_wake_fact_timestamp() {
 #[test]
 fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
     // 幕内 `now` 不漂移：本幕之后落的新格（哪怕 ts 更晚）不改本次 drive 的时刻，
-    // 于是同一份日志的两次求值逐字相同（回放可重建的前提）。
+    // 也不改本次 drive 的欠账（回放可重建的前提）。
     let (events, anchor) = drive_with_stale_sent(500);
-    let once = format!(
-        "{:?}",
-        owed(
-            ROWS,
-            &frozen(),
-            &events,
-            super::wake_now_ms(&events, anchor)
-        )
+    let once = owed(
+        ROWS,
+        &frozen(),
+        &events,
+        super::wake_now_ms(&events, anchor),
     );
+    let once_text = format!("{once:?}");
+    assert!(
+        !once.is_empty(),
+        "空账上的「逐字相同」是恒真断言，这条必须先看住非空"
+    );
+
     let mut grown = events.clone();
     grown.push(ev_at(
         1,
@@ -1365,18 +1368,13 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
     ));
     assert_eq!(
         super::wake_now_ms(&grown, anchor),
-        super::wake_now_ms(&events, anchor)
+        super::wake_now_ms(&events, anchor),
+        "幕锚定了 `now`，本幕之后的事实再晚也不改它"
     );
-    let twice = format!(
-        "{:?}",
-        owed(
-            ROWS,
-            &frozen(),
-            &events,
-            super::wake_now_ms(&events, anchor)
-        )
-    );
-    assert_eq!(once, twice);
+    let twice = owed(ROWS, &frozen(), &grown, super::wake_now_ms(&grown, anchor));
+    // 第二次拿的是**变长后的那份日志**：新格既能改 `now`（已钉住），也能改欠账
+    // （多一条事实就多一次模式匹配）。两条都不变，才是「同一份日志重放逐字相同」。
+    assert_eq!(once_text, format!("{twice:?}"));
 }
 
 /// 第 4 条在**真表**上的报告样例（T-242 验收口径 1）。

@@ -26,6 +26,8 @@ const EVENT_REL = 'symbio/src/symbio_core/event/mod.rs'
 const DECL_REL = 'symbio/src/symbio_core/decl/mod.rs'
 const SOLVER_REL = 'symbio/src/symbio_core/decl/ring.rs'
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
+/** 端口表所在文件（脚本按「含 `PortDecl {` 的 .rs」扫取值名单，路径本身不钉死） */
+const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'
 
 /** 协议族常量（五个名字的定义，值取协议名的字面值） */
 const EVENT_SRC = `pub const EVENT_REQUEST: &str = "request";
@@ -72,12 +74,23 @@ pub(crate) fn drive(rows: &[Decl]) -> usize {
 `
 
 /**
+ * 端口表（PTS-002 的**取值**名单来源）：脚本扫「含 `PortDecl {` 的 `.rs`」，
+ * 所以夹具里也要有一份——没有它，取值一侧的判据在夹具树上永远没有输入，
+ * 「注入一个 `if port == "tool"`」就红不起来。
+ */
+const PORTS_SRC = `pub(crate) static PORTS: &[PortDecl] = &[
+    PortDecl { port: "turn", before: EVENT_SENT, lease_ms: 600_000, max_attempts: 1, concurrent: false },
+    PortDecl { port: "tool", before: EVENT_SENT, lease_ms: 600_000, max_attempts: 1, concurrent: true },
+];
+`
+
+/**
  * 造一棵最小仓库。
  *
  * `facts` / `solver` / `event` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
  * 算出来**（基线是文件，随树走——这样「求解器变了」才是能被夹具表达的那件事）。
  */
-function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
+function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'port-surface-'))
   const write = (rel, body) => {
     const abs = path.join(root, rel)
@@ -87,6 +100,7 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, adr
   write(EVENT_REL, event)
   write(DECL_REL, facts)
   write(SOLVER_REL, solver)
+  write(PORTS_REL, ports)
   // 基线挂的 ADR 必须**能打开**（PTS-004）——夹具里给它一份空壳决策。
   if (createAdr) {
     const id = String(adr).match(/ADR-(\d+[a-z]?)/)?.[1]
@@ -133,6 +147,12 @@ test('真仓当前状态通过，且四格判据都数得出非零输入', () =>
   assert.ok(Number(facts[1]) > 0, '真仓里带端口的事实数为 0 ⇒ 提取器与源码形状脱节')
   assert.match(r.stdout, /PTS-003.*sha256:/)
   assert.match(r.stdout, /PTS-004.*ADR-/)
+  // 取值一侧也要数得出名单（否则「扫端口表」扫空了没人知道，判据静默变回只判字段名）。
+  const values = /端口取值（名单 ([^）]*)）/.exec(r.stdout)
+  assert.ok(values, '通过信息里没有「端口取值名单」⇒ 取值一侧可能没有输入')
+  for (const v of ['turn', 'model', 'tool']) {
+    assert.ok(values[1].includes(v), `端口取值名单里没有 ${v}：提取器与端口表脱节`)
+  }
 })
 
 // ── ② PTS-001：协议名闭集 ─────────────────────────────────────────────
@@ -226,6 +246,73 @@ test('PTS-002 求解器里出现端口字段名（注释里不算）⇒ 绿', ()
   try {
     const r = run(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    cleanup(root)
+  }
+})
+
+// 取值一侧（T-245 口径 ②）：`if port == "tool"` 不命名 `port` 字段，
+// 但它是同一件事的另一种写法——引擎按端口值分支 ⇒ 加端口 = 改引擎。
+
+test('PTS-002 求解器函数体里出现端口取值 ⇒ 红（不命名字段也渗进）', () => {
+  const root = fixture({
+    solver: SOLVER_SRC.replace(
+      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    owed(rows)\n}',
+      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    let _ = "tool";\n    owed(rows)\n}',
+    ),
+  })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-002.*端口取值 `tool`/s)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-002 端口取值只在注释里 ⇒ 绿（散文不是分支）', () => {
+  const root = fixture({
+    solver: '// 恢复时 tool 端口的那笔要重放——这是叙述，不是代码\n' + SOLVER_SRC,
+  })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-002 端口取值在两个函数体之外 ⇒ 绿（自陈的边界：判据面是 owed / drive）', () => {
+  // 边界要有名有姓：`ring.rs` 的信封字段名里就有 `"turn"`（轮号），它与端口
+  // `turn` 的取值同名。把整份文件都算进来，这条真仓现状就成了假红。
+  const root = fixture({
+    solver: `const ENVELOPE: &[&str] = &["turn", "tool"];\n${SOLVER_SRC}`,
+  })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-002 端口名单来自扫描而不是文件路径 ⇒ 换一张表也判得到', () => {
+  // 脚本按「含 `PortDecl {` 的 .rs」收名单。把端口表搬到别的文件、原位置清空，
+  // 注入的取值分支照样要红——否则「钉住某张表」会变成新的静默。
+  const root = fixture({
+    ports: '// 这张表搬走了\n',
+    solver: SOLVER_SRC.replace(
+      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    owed(rows)\n}',
+      'pub(crate) fn drive(rows: &[Decl]) -> usize {\n    let _ = "tool";\n    owed(rows)\n}',
+    ),
+  })
+  try {
+    const moved = path.join(root, 'symbio/src/plugins/other/ports.rs')
+    fs.mkdirSync(path.dirname(moved), { recursive: true })
+    fs.writeFileSync(moved, PORTS_SRC, 'utf8')
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-002.*端口取值 `tool`/s)
   } finally {
     cleanup(root)
   }

@@ -387,6 +387,64 @@ fn closure_reason_outside_the_closed_set_is_reported_either_way() {
 }
 
 #[test]
+fn grace_ends_at_the_first_stop_cell_that_carries_a_reason() {
+    // T-245 口径 ③：宽限的分界由日志自己说——第一条带 `reason` 的停机格之前是历史段。
+    let events = vec![
+        closed("f0", "chat.assistant.final", None),
+        closed("f1", "chat.assistant.final", Some("completed")),
+    ];
+    assert!(
+        closure_reason_closed(&events, true).is_empty(),
+        "分界**之前**的缺口算历史归档，仍要放宽"
+    );
+    assert_eq!(
+        closure_reason_closed(&events, false).len(),
+        1,
+        "严判档不看分界：历史段的缺口一样报"
+    );
+}
+
+#[test]
+fn a_new_gap_after_the_boundary_is_red_under_the_graced_read() {
+    // 这条是「整段放宽」与「按分界放宽」的实测差异点：
+    // 写方已经开始写 `reason`，之后漏一条就不可能再是历史造成的。
+    let events = vec![
+        closed("f0", "chat.assistant.final", Some("completed")),
+        closed("f1", "chat.assistant.final", None),
+    ];
+    let bad = closure_reason_closed(&events, true);
+    assert_eq!(
+        bad.len(),
+        1,
+        "分界**之后**缺 `reason` 必须红（旧口径下这条永远绿）"
+    );
+    assert!(
+        bad[0].why.contains("缺 `reason`"),
+        "要指出缺的是 `reason`：{}",
+        bad[0].why
+    );
+}
+
+#[test]
+fn an_all_historical_log_stays_green_under_the_graced_read() {
+    // 整条日志一个 `reason` 都没有 ⇒ 没有分界，与旧「整段放宽」逐字等价。
+    let events = vec![
+        closed("f0", "chat.assistant.final", None),
+        closed("f1", "chat.assistant.fallback", None),
+        closed("f2", "chat.assistant.final", None),
+    ];
+    assert!(
+        closure_reason_closed(&events, true).is_empty(),
+        "纯历史存档不该飘红"
+    );
+    assert_eq!(
+        closure_reason_closed(&events, false).len(),
+        3,
+        "严判档仍逐条报"
+    );
+}
+
+#[test]
 fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
     // `fallback` 是另一个格名，`authz.denied` 根本不是收束格——三处都问同一个问题。
     let events = vec![
@@ -436,6 +494,29 @@ fn non_closure_cells_are_not_asked_for_a_reason() {
     assert!(
         closure_reason_closed(&events, false).is_empty(),
         "进展格不是停机格"
+    );
+}
+
+#[test]
+fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
+    // `closes_turn`（I3「结算了吗」）把产物格算进去；C6 问的是「为什么停」，
+    // 产物落格后轮还在走，生产写方永远写不出这条 reason。把两把尺合一，
+    // 判据就变成向生产要一个它给不出的字段（`artifact.added 缺 reason` 的飘红）。
+    let events = vec![
+        closed("f0", "chat.assistant.final", Some("completed")),
+        Event::pending(
+            "a0",
+            "artifact.added",
+            Entity::Artifact,
+            Verb::Asserted,
+            0,
+            "main",
+        ),
+    ];
+    assert!(
+        closure_reason_closed(&events, false).is_empty(),
+        "产物格不是停机格：{:?}",
+        closure_reason_closed(&events, false)
     );
 }
 

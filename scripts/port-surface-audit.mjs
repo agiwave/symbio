@@ -7,7 +7,7 @@
  * | 编号 | 判据 | 它拦的是哪一种走样 |
  * |---|---|---|
  * | PTS-001 | 带端口载荷的**事实名** ⊆ 协议族（`request` / `sent` / `response` / `failed` / `retry`），且端口字段名唯一 | **加端口顺手加事实名**——端口是载荷，不是事实种类（PL-016 §2.4 裁决） |
- * | PTS-002 | 求解器（`owed` / `drive` 所在文件）里**不出现端口字段名** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
+ * | PTS-002 | 求解器（`owed` / `drive` 所在文件）里**不出现端口字段名与端口取值** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
  * | PTS-003 | 求解器那两个函数的**字节**与基线一致 | 判据 1 的原文口径：「`drive` 与 `owed` 源码 diff = 0」 |
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
  *
@@ -49,6 +49,14 @@
  * - PTS-001 只判**声明层**（`decl/mod.rs` 的 `FactDecl`）。事实真的落不落这个字段、
  *   载荷里有没有真的带上端口，是**装载期 / 运行期**的事（`seal` 的字段检查与
  *   写侧闸），本脚本不重复判。
+ * - PTS-002 判**字段名 + 取值**两侧（T-245 口径 ②，把原来自陈的边界关掉）：
+ *   字段名在整份求解器文件里查（剥注释前都会红），取值在 `owed` / `drive` 两个
+ *   **函数体**里查（同一份剥注释后的文本，与 PTS-003 比对的字节同源）。取值为什么不
+ *   查整份文件：`ring.rs` 的信封字段名里就有 `"turn"`（轮号，`fact_field` 的特判），
+ *   它与端口 `turn` 的取值同名——那是命名巧合，不是引擎读端口。
+ *   还剩的边界：`if port == PORT_TOOL` 这种**经常量**的分支看不见（字面量不在
+ *   函数体里）。常量本身会在别处出现，而把「常量名不许出现在求解器」判成红会
+ *   连 `MAX_STEPS` 这类无关常量一起红——宁可按字面量判，也不造一条常年需要豁免的规则。
  * - PTS-002 判的是「引擎不**命名**端口字段」。若引擎通过别的键名读同一个值
  *   （`e.payload.get("endpoint")`），本脚本看不见——但那已经违反 PTS-001 的
  *   「端口字段名唯一」，而端口字段名只能由 `FactDecl.port` 声明。
@@ -245,6 +253,37 @@ for (const f of portFacts) {
 
 // ───────────────────────── 求解器：指纹与端口字段 ─────────────────────────
 
+/**
+ * 端口**取值**名单：谁声明端口，谁的 `PortDecl` 就是名单来源——扫 `symbio/src` 下
+ * 含 `PortDecl {` 的 `.rs`，不钉某一张表。钉住文件会把插件路径写进这条 core 侧
+ * 判据，而「再加一张端口表」就判不到了。
+ */
+function portValueLiterals() {
+  const out = new Set()
+  const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(path.join(dir, entry.name))
+        continue
+      }
+      if (!entry.name.endsWith('.rs')) continue
+      const text = fs
+        .readFileSync(path.join(dir, entry.name), 'utf8')
+        .replace(/\r\n/g, '\n')
+      if (!text.includes('PortDecl {')) continue
+      for (const m of blankComments(text).join('\n').matchAll(/\bport\s*:\s*"([^"]+)"/g)) {
+        out.add(m[1])
+      }
+    }
+  }
+  walk(path.join(ROOT, 'symbio', 'src'))
+  return out
+}
+
+const portValues = portValueLiterals()
+
 const baseline = readBaseline()
 const solverRel = baseline?.solver?.file ?? 'symbio/src/symbio_core/decl/ring.rs'
 const solverText = readText(solverRel)
@@ -305,6 +344,23 @@ if (solver && solver.missing) {
       `求解器（${solverRel}）里出现了端口字段名 \`${field}\` —— 引擎一旦读端口，端口数就会变成引擎的分支数（加端口 = 改引擎），判据 1 立刻破`,
     )
   }
+  // **取值**一侧（T-245 口径 ②）：`if port == "tool"` 这种分支不命名 `port`
+  // 字段也照样是「引擎认识端口」，而且它比字段名更隐蔽——字段名会出现在
+  // 任何一次读法里，取值只出现在特判里。判据面因此要同时问名单。
+  // 面收窄到**两个函数体**（剥注释后的那段，与 PTS-003 同一段文本）：整份
+  // `ring.rs` 里有信封字段名 `"turn"`（轮号，`fact_field` 的特判），它与
+  // 端口 `turn` 的取值同名——那是信封与端口的命名巧合，不是引擎读端口。
+  if (solver && solver.source) {
+    const engineLiterals = new Set(stringLiteralsOf(solver.source))
+    for (const value of [...portValues].sort()) {
+      if (engineLiterals.has(value)) {
+        report(
+          'PTS-002',
+          `求解器（${solverRel} 的 ${SOLVER_FNS.join(' / ')}）里出现了端口取值 \`${value}\` —— 按端口值分支就是「加端口 = 改引擎」的另一种写法，判据 1 立刻破`,
+        )
+      }
+    }
+  }
 }
 
 // PTS-003：求解器字节与基线一致
@@ -357,7 +413,7 @@ if (errors.length === 0) {
     true,
     'PTS-002',
     portFacts.length > 0
-      ? `求解器对端口无感：${solverRel} 里没有端口字段名 \`${[...portFields][0]}\``
+      ? `求解器对端口无感：${solverRel} 里没有端口字段名 \`${[...portFields][0]}\`，${SOLVER_FNS.join(' / ')} 里也没有端口取值（名单 ${[...portValues].sort().join(' / ') || '空'}）`
       : '求解器对端口无感：当前没有带端口的事实声明（判据待首个端口落地时生效）',
   )
   ruleLine(true, 'PTS-003', `求解器字节与基线一致：${solverHash}`)

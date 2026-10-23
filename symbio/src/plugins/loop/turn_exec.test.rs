@@ -18,7 +18,7 @@ use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     check_all, run_ops, CapabilityMeta, ConsolidateRequest, Entity, Event, ExecTranscriptWriter,
-    PluginSimpleRequest, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    Frozen, PluginSimpleRequest, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{
@@ -2098,4 +2098,75 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         "收束记在等待中的那一轮、溯源仍是归档段里的用户格（I2）"
     );
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+}
+
+// ==================== 判据 12 的生产形状（T-245 口径 ①）====================
+//
+// `loop_rows.test.rs` 那组用手造切片钉住「`now` 只从幕锚来」这条规则本身；本组证明
+// **真跑过一轮的会话**在**生产句柄**（`loop_rows::table()`，会话开幕拿的那一个）上
+// 重算，账目逐字不变。两次调用之间日志从存储层重取——等值因此不是同参重跑的恒真式，
+// 它检查的是求解不夹带内存状态。空账上的「逐字相同」什么都测不到，所以先钉非空。
+
+#[tokio::test]
+async fn the_production_table_owes_the_same_rows_on_a_real_log() {
+    let fx = setup_full();
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+
+    // 真实日志由生产写方落格：这一幕只有用户格，`execute-turn` 还欠着。
+    let anchor = open_turn_without_closure(&fx, 1, "秋天是什么");
+    let table = super::super::loop_rows::table().expect("生产行表装载得起来");
+    let start = || {
+        let log = fx.facts.range(Seq::new(0));
+        let at = log
+            .iter()
+            .position(|e| e.turn == 1)
+            .expect("本轮应有事实格");
+        log[at..].to_vec()
+    };
+    let slice = start();
+    let now = super::super::loop_rows::wake_now_ms(&slice, anchor);
+    let solve = |log: &[Event], frozen: &Arc<Frozen>| {
+        crate::symbio_core::ring::owed(super::super::loop_rows::ROWS, frozen, log, now)
+    };
+
+    let once = solve(&slice, &table);
+    assert!(
+        once.iter().any(|d| d.decl.name == "execute-turn"),
+        "跑过开轮的真实日志上 `execute-turn` 该欠着——空账上的「逐字相同」什么都测不到：{once:?}"
+    );
+
+    // 日志从存储层**重取**再算一遍：等值检查的是求解不夹带内存状态。
+    assert_eq!(
+        format!("{once:?}"),
+        format!("{:?}", solve(&start(), &table)),
+        "同一份日志、同一个生产句柄，重算必须逐字相同"
+    );
+
+    // 生产句柄与「把同一张表重新装载一遍」必须给同一笔账——`table()` 的 seal 不夹带过滤。
+    let reloaded = super::super::loop_rows::load(super::super::loop_rows::ROWS)
+        .expect("同一张表重新装载应通过装载期检查");
+    assert_eq!(
+        format!("{once:?}"),
+        format!("{:?}", solve(&slice, &reloaded)),
+        "开幕用的那张表与重新装载的那张表必须是同一张"
+    );
+
+    // 账还得掉：续写把这一轮跑到收束，同一张表、同一个幕锚上 `execute-turn` 不再欠。
+    execute_turn(resume_req(
+        &fx,
+        Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+        1,
+        anchor,
+    ))
+    .await
+    .expect("续写轮应跑完");
+    assert!(
+        !solve(&start(), &table)
+            .iter()
+            .any(|d| d.decl.name == "execute-turn"),
+        "本轮已收束，`execute-turn` 不该还欠着"
+    );
 }
