@@ -51,7 +51,7 @@ mod stream;
 use self::facts::*;
 
 pub(crate) use self::boundary::{classify_round, final_answer, RoundDecision};
-pub(crate) use self::prepare::Prepared;
+pub(crate) use self::prepare::{PendingClose, Prepared};
 
 // ── v2 会话运行时：turn 运行器（chat_loop 切换的第一块可复用件）────────
 //
@@ -486,12 +486,12 @@ pub(crate) enum TurnSessionBegin {
 /// 发生了什么」（ADR-118 决策 4）。动作有五个，各自只写自己那一半事实：
 ///
 /// - [`Self::model`]：一次模型往返——拼消息、调模型、分类；请求工具时把应答留在
-///   草稿里，不派发；答完时把应答留在 [`prepare::Prepared::closing`]，不收束；
+///   草稿里，不派发；该收束时把**结局**留在 [`prepare::Prepared::closing`]，不收束；
 /// - [`Self::open`]：为模型交回的调用逐条开账（`open-tools` 行的执行体）；
 /// - [`Self::authorize`]：对已开账的调用判放行 / 拒绝（`authorize-tool` 行）；
 /// - [`Self::dispatch`]：派发那一批工具，落产物 / 等待 / 交换（`dispatch-tools` /
 ///   `deny-tools` 两行）；
-/// - [`Self::close`]：收束寄存的那一次应答（`close-turn` 行的执行体）。
+/// - [`Self::close`]：落寄存的那份结局（`close-turn` 行的执行体）。
 ///
 /// 停机判据（步数上界 / 无进展 / 中止 / 租约）不在这里，归派发器（ADR-118 决策 7）；
 /// 本类型的 [`Self::exhausted`] 只是那三格收束事实的**唯一写方**。
@@ -515,8 +515,12 @@ impl TurnSession {
         self.steps >= MAX_STEPS_PER_DRIVE
     }
 
-    /// 跑**一次模型往返**：请求了工具就把应答留在草稿里等 [`Self::tools`]，答完了就
-    /// 留给 `close-turn`；本轮就地收口（兜底 / 中止 / 控制面失败）时把产出寄存在草稿。
+    /// 跑**一次模型往返**：请求了工具就把应答留在草稿里等 [`Self::tools`]；
+    /// 该收束了（答完了 / 模型没答成 / 中止）就把**结局**留给 `close-turn`。
+    ///
+    /// 只有一条路就地收口：**控制面**失败（模型往返压根没派发）——它在日志上没有
+    /// 模型的终局事实，收束行开不出账，兜底格只能由这一步落（`execute` 执行体的
+    /// 过渡豁免，见 `loop_rows::ACTORS`）。
     ///
     /// 它**不交回**产出（ADR-123 决策 5）：「本轮结束了没有」由派发器读账本判，
     /// 执行体只写自己那一半事实。
@@ -542,10 +546,12 @@ impl TurnSession {
         Ok(())
     }
 
-    /// 收束寄存的那一次应答：落 `chat.assistant.final` / `fallback`，产出寄存在草稿。
+    /// 落寄存的那份**结局**：答完了落 `chat.assistant.final`、模型没答成落
+    /// `chat.assistant.fallback`、中止也落 `chat.assistant.final`（中止是**状态**，
+    /// 不是另一种事实）；产出寄存在草稿。
     ///
-    /// 它是 `close-turn` 行的动作（T-244 步 5）。跑不跑这一步由**日志**决定
-    /// （`turn.has_final`），不由这里决定；没有寄存时它不做任何事，派发器的
+    /// 它是 `close-turn` 行的动作（T-244 步 5 / 步 5c）。跑不跑这一步由**日志**
+    /// 决定（`turn.closeable`），不由这里决定；没有寄存时它不做任何事，派发器的
     /// 「无进展」判据会把那种收错账的形态显形。
     pub(crate) async fn close<S>(
         &mut self,

@@ -218,3 +218,41 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   门禁：`cargo test --lib` 2094 通过 / 0 失败，`node scripts/gate.mjs` 130/130 全绿
   （含 e2e 78/78）。基线随本批下调三格，各带归属说明：`rustTests` 2097→2094、
   `ciRustTestsTotal` 1436→1433、`LEGACY_ROLE_WRITE_BASELINE` 151→146。
+- 2026-10-23 步 5c（收束格全部归 `close` 执行体）。断环的方式是**让两个执行体写的格
+  不相交**，不是改判据：`chat.assistant.final` 与 `chat.assistant.fallback` 两条收束格
+  全归 `close`，`execute` 那一步只跑模型往返。代价是收束行的前件得能看出「模型没答成」
+  ——`has_final`（本幕最近一条 `response(port=model)` 的 `calls` 为空）在中止轮与适配器
+  失败轮**不成立**（答都没答成，哪来应答），于是新增视图字段 `turn.closeable`
+  （`turn_head` v6 → v7）：`has_final` ∨ `model_outcome_failed`。
+  `model_outcome_failed` 的口径：幕锚之后最新一条 `response` / `failed`（`port=model`）
+  是 `failed`，**且**同一 `(port, id)` 的 `request(port=model)` 也在幕锚之后。后半句不是
+  装饰——崩溃恢复时租约看护会在幕锚之后落一条 `failed(port=model)`，它收的是上一世那笔
+  卡住的调用（`request` 在锚之前）：少了它，恢复幕一进门就把「重跑一次模型往返」读成
+  「这一轮已经答不上来了」。
+  运行侧：模型往返的三种收法（答完了 / 模型没答成 / 中止）不再就地落格，而是把**结局**
+  寄存在 `Prepared::closing`（新枚举 `PendingClose` 三变体），由 `close-turn` 行的执行体
+  落——中止格与兜底格因此从执行体内部挪到了收束动作里。`close-turn` 的出口按
+  [PL-017](../004-plan/017-端口细粒度化.md "PL-017-端口细粒度化") §3.1 复原成
+  `final | fallback`（步 5 第一批为绕环临时收窄成只有 `final`，本批复原）。
+  **两条控制面失败仍留在 `execute` 就地落**：模型往返压根没派发（行不欠 / 端口没声明）
+  与工具批开不出来（模型要了工具而本轮没有分发通道）。它们在日志上**没有**模型的终局
+  事实（`failed(port=model)` 落不下来）⇒ 收束行开不出账 ⇒ 那两格只能由 `execute` 写，
+  走它的**过渡豁免**（`loop_rows::ACTORS` 里 `execute` 那条的 `transitional` 现在只有
+  `chat.assistant.fallback` 一条，步 5 第一批时是 `chat.assistant.final`）。生产里这两条
+  都不可达（模型调用点恒带分发通道：工具轮带、定稿答话轮走 `final_reply` 一步不发请求）。
+  **反向判据实测**：① 把 `closeable` 退回 `has_final`（去掉 `model_outcome_failed` 一支）
+  ⇒ `turn_runner.test.rs::aborted_run_closes_the_cell_with_aborted_status` 转红
+  （「中止必须在结果里可见」——中止轮收不成，结局根本交不回来）；② 把
+  `chat.assistant.final` 放回 `execute` 的 `writes` ⇒ 装载期判红
+  `DependencyCycle { cycle: ["close-turn", "execute-turn", "close-turn"] }`
+  （`loop_rows.test.rs::the_production_table_loads_with_no_gap`）。
+  用例：`decl/mod.test.rs` 三条（`closeable` 正向 / 上一世的失败不算本幕的 / 收束过就不欠）
+  + `loop_rows.test.rs` 一条（收束行在「本幕模型往返以失败收场」时开账）。
+  门禁：`cargo test --lib` 2098 通过 / 0 失败，`node scripts/gate.mjs` 130/130 全绿
+  （含 e2e 78/78）。基线随本批上调两格：`rustTests` 2094→2098（门禁自动回填）、
+  `ciRustTestsTotal` 1433→1437（同批新增的 4 条无 `cfg` 门，CI 求和同样多这 4 条）。
+  **与 PL-017 §3.1 的一处字面偏差**：那一行写的是 `owes: turn.has_final ∧ ¬closed`，
+  今天是 `turn.closeable`（`¬closed` 折在 `closeable` 里）。偏差的来源是方案自身的
+  缺口——§3.1 的前件只认「答完了」，而 §3.1 的**出口**却写着两条收束格（兜底格与中止格
+  都要落），前件认不全时出口的那一格永远开不了账。步 5 第一批已把这个缺口记在案
+  （「要接管它们得先给『没收束且不会再有应答』立一个视图字段」），本批就是那个字段。

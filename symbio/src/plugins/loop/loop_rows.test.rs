@@ -542,9 +542,9 @@ const fn row(
 
 /// [`row`] 的另一半：`by` 可以指到别的执行体。
 ///
-/// 只给「两行共享一个出口事实集」那类夹具用——T-244 步 5 之后表里有两个执行体
-/// （`execute` 写 `fallback`、`close` 写 `final`），一条真环需要两个名字，
-/// 单执行体的旧造法已经被出口的收窄拆掉了。
+/// 只给「两行共享一个出口事实集」那类夹具用——一条真环需要两个**执行体**的写入集
+/// 有交集（自环 exempt，单执行体造不出环）。生产表里 `execute` 与 `authorizer`
+/// 都写 `authz.denied`，于是拿它们能造出真环。
 const fn row_by(
     name: &'static str,
     owes: Pattern,
@@ -602,23 +602,25 @@ static GAP_UNDECLARED_FIELD: &[Decl] = &[row(
     None,
 )];
 // 第 1 条：`cycle-a` 的出口格由 `cycle-b` 的执行体写，反向也一样——两行互相等对方
-// 跑一次。一格执行体不够造环（自环 exempt），两个名字才成环：`execute` 写
-// `fallback`、`close` 写 `final`，所以 a 绑 `execute` 出口写 `final`，b 绑 `close`
-// 出口写 `fallback`，边 `a → b`（b 的执行体写得出 a 的出口）与 `b → a` 同时成立。
+// 跑一次。一格执行体不够造环（自环 exempt），两个**写入集有交集**的执行体才成环：
+// 生产表里 `execute`（收束闸拒那条路）与 `authorizer`（工具授权拒那条路）都写
+// `authz.denied`，于是 a 绑 `execute` 出口写 `authz.denied`、b 绑 `authorizer`
+// 出口也写 `authz.denied`，边 `a → b`（b 的执行体写得出 a 的出口）与 `b → a`
+// 同时成立。
 static GAP_CYCLE: &[Decl] = &[
     row_by(
         "cycle-a",
         pat("user.message", &["turn"]),
-        &[pat("chat.assistant.final", &["turn"])],
+        &[pat("authz.denied", &["turn"])],
         None,
         "execute",
     ),
     row_by(
         "cycle-b",
         pat("user.message", &["turn"]),
-        &[pat("chat.assistant.fallback", &["turn"])],
+        &[pat("authz.denied", &["turn"])],
         None,
-        "close",
+        "authorizer",
     ),
 ];
 
@@ -1322,8 +1324,8 @@ fn close_row_owes_only_after_an_answer_without_calls() {
     landed.push(ev(1, "chat.assistant.final", json!({ "text": "答完了" })));
     assert!(!owes("close-turn", &landed, 0), "`final` 命中出口 ⇒ 关门");
 
-    // 空答兜底那一格不在 `until` 里（两行共享出口会让第 1 条成环，理由写在行的注释上），
-    // 它靠**前件**关门：兜底一落 `closed` 真 ⇒ `has_final` 假 ⇒ 这笔债不再开账。
+    // 兜底格也在出口里（步 5c 复原 PL-017 §3.1 的 `final | fallback`：两个执行体写的
+    // 格不相交之后，环没了，出口可以照方案写全）⇒ 命中即关门。
     let mut fell_back = answered;
     fell_back.push(ev(
         1,
@@ -1332,7 +1334,59 @@ fn close_row_owes_only_after_an_answer_without_calls() {
     ));
     assert!(
         !owes("close-turn", &fell_back, 0),
-        "兜底格落下 ⇒ 前件自己关门，不留一笔永不兑现的债"
+        "兜底格落下 ⇒ 出口命中，这笔债关门，不留一笔永不兑现的债"
+    );
+}
+
+/// 收束行的前件是 `turn.closeable`（T-244 步 5c）：**答完了**或**模型没答成**。
+///
+/// 后半条是中止 / 适配器失败那两条路唯一的进账依据：它们没有「`calls` 为空的
+/// 模型应答」（答都没答成，哪来应答），`has_final` 因此不成立；而收束格只由
+/// `close` 执行体写，行表得能从日志上判出「该收束了」。
+#[test]
+fn close_row_owes_when_the_model_round_failed_in_this_drive() {
+    let open = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert!(!owes("close-turn", &open, 0), "还没派发模型往返 ⇒ 不欠收束");
+
+    let mut failed = open.clone();
+    failed.push(ev(
+        1,
+        crate::symbio_core::EVENT_REQUEST,
+        json!({ "port": "model", "id": "m-1", "attempt": 1 }),
+    ));
+    failed.push(ev(
+        1,
+        crate::symbio_core::EVENT_FAILED,
+        json!({ "port": "model", "id": "m-1", "why": "adapter error" }),
+    ));
+    assert!(
+        owes("close-turn", &failed, 0),
+        "模型没答成 ⇒ 欠一次收束（中止格 / 兜底格由它落）"
+    );
+
+    // 请求不在本幕（上一世那笔卡住的调用被看护者判死）⇒ 不是本幕的模型往返。
+    let mut stale = open.clone();
+    stale.push(ev(
+        1,
+        crate::symbio_core::EVENT_REQUEST,
+        json!({ "port": "model", "id": "m-1", "attempt": 1 }),
+    ));
+    stale.push(ev(
+        1,
+        "turn.stage",
+        json!({ "stage": "resume", "round": 0, "result": "approve" }),
+    ));
+    stale.push(ev(
+        1,
+        crate::symbio_core::EVENT_FAILED,
+        json!({ "port": "model", "id": "m-1", "why": "lease_expired" }),
+    ));
+    assert!(
+        !owes("close-turn", &stale, 0),
+        "失败收的是上一世那笔调用 ⇒ 本幕仍欠一次模型往返，不是一次收束"
     );
 }
 
@@ -1403,8 +1457,10 @@ fn the_row_table_and_the_binding_table_agree() {
 /// 过渡豁免是一条**有名有姓、会自己变红**的名单（ADR-123 决策 2）。
 ///
 /// 它放宽的是运行期写入封闭，每加一条都要回答「为什么这条执行体声明不了这一格」——
-/// `execute` + `chat.assistant.final` 那一条的理由与删除条件记在 `ActorEntry::transitional`
-/// 的头注（T-244 步 5b/5d 之后这条应当整条为空）。名单变长必须先过这条用例。
+/// `execute` + `chat.assistant.fallback` 那一条的理由与删除条件记在
+/// `ActorEntry::transitional` 的头注（步 5c 之后：收束格全部归 `close` 执行体，
+/// 只剩两条**控制面**失败——它们在日志上没有模型的终局事实，收束行开不出账）。
+/// 名单变长必须先过这条用例。
 #[test]
 fn the_transitional_exemptions_are_pinned() {
     let actual: Vec<(&str, &[&str])> = super::ACTORS
@@ -1412,7 +1468,7 @@ fn the_transitional_exemptions_are_pinned() {
         .map(|e| (e.decl.name, e.transitional))
         .filter(|(_, list)| !list.is_empty())
         .collect();
-    let expected: Vec<(&str, &[&str])> = vec![(super::EXECUTE, &["chat.assistant.final"])];
+    let expected: Vec<(&str, &[&str])> = vec![(super::EXECUTE, &["chat.assistant.fallback"])];
     assert_eq!(actual, expected, "过渡豁免名单变了——先补裁决，再改这条用例");
 }
 
@@ -1432,7 +1488,12 @@ fn writes_closed_admits_declared_protocol_and_exempted_only() {
     // 协议五格：引擎写，本来就不许出现在 `writes` 里（装载期 `ENGINE_ONLY_CELLS` 拦）。
     assert!(next.writes_closed("response"));
     // 过渡豁免：确实写得出、装载期声明不了的那一格。
-    assert!(next.writes_closed("chat.assistant.final"));
+    assert!(next.writes_closed("chat.assistant.fallback"));
+    // 收束格归 `close` 执行体（步 5c）⇒ `execute` 写它就是越界。
+    assert!(
+        !next.writes_closed("chat.assistant.final"),
+        "收束格不在 `execute` 的名单里——两个执行体写同一批格会让依赖图成环"
+    );
     // 名单外：越界。
     assert!(
         !next.writes_closed("memory.encoded"),

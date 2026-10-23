@@ -128,8 +128,11 @@ pub(crate) enum ModelRound {
     Done(TurnOutcome),
     /// 模型请求了工具；应答与节点事实已寄存在 `Prepared`，等 [`tool_round`]。
     Tools,
-    /// 模型答完了（本幕最近一条 `response(port=model)` 的 `calls` 为空）；
-    /// 应答寄存在 [`Prepared::closing`]，收束归 `close-turn` 行的执行体（T-244 步 5）。
+    /// 本轮该收束了；**结局**寄存在 [`Prepared::closing`]，落格归 `close-turn`
+    /// 行的执行体（T-244 步 5 / 步 5c）。
+    ///
+    /// 三种收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
+    /// 但**都是「这一轮该收了」**，而收束格只由 `close` 执行体写。
     Close,
 }
 
@@ -160,16 +163,44 @@ where
     // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
     let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
         Ok(rt) => rt,
+        // 中止：收束格（`status: "aborted"`）由收束动作落，这里只寄存结局。
         Err(ModelCallError::Aborted) => {
-            return aborted(run, store, llm).await.map(ModelRound::Done)
+            let (cost_ms, produced, text) = aborted_payload(run, llm);
+            run.closing = Some(PendingClose::Aborted {
+                cost_ms,
+                produced,
+                text,
+            });
+            return Ok(ModelRound::Close);
         }
+        // 适配器失败：兜底格由收束动作落，这里只寄存结局。
         Err(ModelCallError::Failed(why)) => {
-            return failed(run, store, llm, &why).await.map(ModelRound::Done);
+            let (cost_ms, produced) = failed_payload(run, llm);
+            run.closing = Some(PendingClose::Failed {
+                detail: why,
+                cost_ms,
+                produced,
+            });
+            return Ok(ModelRound::Close);
         }
         Err(ModelCallError::Store(e)) => return Err(e),
-        // 控制面自身不一致（行不欠 / 端口没声明）：模型没跑成，如实当失败报。
+        // 控制面自身不一致（行不欠 / 端口没声明）：模型**压根没派发**，
+        // 端口没有终局事实（`failed(port=model)` 落不下来）⇒ 收束行开不出账
+        // ⇒ 兜底格只能就地落（`execute` 执行体的过渡豁免，见 `loop_rows::ACTORS`）。
         Err(ModelCallError::Control(why)) => {
-            return failed(run, store, llm, &why).await.map(ModelRound::Done);
+            let (cost_ms, produced) = failed_payload(run, llm);
+            return settle::append_fallback(
+                store,
+                &run.actor,
+                run.turn,
+                run.user_seq,
+                &why,
+                cost_ms,
+                produced,
+                run.artifacts_landed,
+            )
+            .await
+            .map(ModelRound::Done);
         }
     };
     run.cost_ms += rt.cost_ms;
@@ -180,15 +211,24 @@ where
     let round_facts = node_facts(&run.nodes);
 
     // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**（T-244 步 5）：
-    //     `close-turn` 行的前件（`turn.has_final`）此刻已经在日志上，派发器下一步
+    //     `close-turn` 行的前件（`turn.closeable`）此刻已经在日志上，派发器下一步
     //     就会选中它，把收束交给 `closer` 执行体。
     if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
-        run.closing = Some((rt, round_facts));
+        run.closing = Some(PendingClose::Answer {
+            rt,
+            facts: round_facts,
+        });
         return Ok(ModelRound::Close);
     }
 
     // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置
     //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
+    //
+    //     这一格**就地落**（不走收束动作）：工具批开不出来这件事在日志上没有
+    //     任何事实（`failed(port=model)` 落不下来——模型应答是好的，缺的是分发
+    //     通道），收束行因此判不出「该收束了」；它由 `execute` 执行体的**过渡
+    //     豁免**兜着（`loop_rows::ACTORS`）。生产里这一路不可达（模型调用点恒带
+    //     分发通道）。
     if !has_dispatch {
         let cost = run.started.elapsed().as_millis() as u64;
         // 调用本身是事实：没有分发通道也要记「请求过什么」。
@@ -221,9 +261,9 @@ where
     Ok(ModelRound::Tools)
 }
 
-/// 阶段②c：收束寄存的那一次应答（T-244 步 5，`close-turn` 行的动作）。
+/// 阶段②c：收束寄存的**结局**（T-244 步 5 / 步 5c，`close-turn` 行的动作）。
 ///
-/// 前件由日志说（本幕最近一条 `response(port=model)` 的 `calls` 为空），落格在这里做。
+/// 前件由日志说（本幕要么「答完了」、要么「模型没答成」），落格在这里做。
 /// 没有寄存 ⇒ 引擎收错了账：不落任何格、返回 `None`，让派发器的「无进展」判据把
 /// 它显形——不拿一份来历不明的草稿硬造一条收束。
 pub(crate) async fn close_round<S>(
@@ -234,10 +274,35 @@ pub(crate) async fn close_round<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let Some((rt, round_facts)) = run.closing.take() else {
+    let Some(pending) = run.closing.take() else {
         return Ok(None);
     };
-    halt(run, store, llm, rt, &round_facts).await.map(Some)
+    match pending {
+        PendingClose::Answer { rt, facts } => halt(run, store, llm, rt, &facts).await.map(Some),
+        PendingClose::Failed {
+            detail,
+            cost_ms,
+            produced,
+        } => settle::append_fallback(
+            store,
+            &run.actor,
+            run.turn,
+            run.user_seq,
+            &detail,
+            cost_ms,
+            produced,
+            run.artifacts_landed,
+        )
+        .await
+        .map(Some),
+        PendingClose::Aborted {
+            cost_ms,
+            produced,
+            text,
+        } => land_aborted(run, store, cost_ms, produced, &text)
+            .await
+            .map(Some),
+    }
 }
 
 /// 阶段②b-1：创建（`open-tools` 行的动作，T-244 步 5b）。
@@ -486,19 +551,36 @@ where
     })
 }
 
+/// 3a 中止的**载荷**（T-244 步 5c）：半截产出与实测耗时。
+///
+/// 载荷与落格分开：收束格只由 `close` 执行体写，中止那一步只负责把结局寄存下来。
+fn aborted_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value, String) {
+    let cost_ms = run.started.elapsed().as_millis() as u64;
+    let facts = node_facts(&run.nodes);
+    let text = facts.text.clone().unwrap_or_default();
+    let produced = produced_payload(
+        &text,
+        llm.model_id(),
+        &run.turn_root_id,
+        &facts,
+        &run.all_tool_calls,
+        &run.rounds,
+    );
+    (cost_ms, produced, text)
+}
+
 /// 3a 中止：照落收束格（`status: "aborted"` + `terminated`）——思考 / 正文是事实，
 /// 终止是状态；收束 kind 绝不复用兜底格。
-async fn aborted<S>(
+async fn land_aborted<S>(
     run: &mut Prepared,
     store: &S,
-    llm: &dyn LlmAdapter,
+    cost_ms: u64,
+    produced: serde_json::Value,
+    partial_text: &str,
 ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let cost = run.started.elapsed().as_millis() as u64;
-    let facts = node_facts(&run.nodes);
-    let partial_text = facts.text.clone().unwrap_or_default();
     if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
         // 中止的收束格同过写侧闸（收束格是同一个事实，不论哪条路径写出）。
         deny(
@@ -517,8 +599,8 @@ where
         );
         return Ok(TurnOutcome {
             turn: run.turn,
-            text: partial_text,
-            cost_ms: cost,
+            text: partial_text.to_string(),
+            cost_ms,
             usage: None,
             fell_back: false,
             aborted: true,
@@ -528,14 +610,6 @@ where
             finish: crate::symbio_core::ModelFinishReason::Stop,
         });
     }
-    let produced = produced_payload(
-        &partial_text,
-        llm.model_id(),
-        &run.turn_root_id,
-        &facts,
-        &run.all_tool_calls,
-        &run.rounds,
-    );
     store.append(
         Event::pending(
             format!("f-{}", run.turn),
@@ -546,7 +620,7 @@ where
             &run.actor.principal,
         )
         .with_produced_by(run.user_seq)
-        .with_cost_ms(cost)
+        .with_cost_ms(cost_ms)
         .with_payload(with_terminated(with_reason(
             with_status(produced, "aborted"),
             crate::symbio_core::ClosureReason::Interrupted,
@@ -554,8 +628,8 @@ where
     )?;
     Ok(TurnOutcome {
         turn: run.turn,
-        text: partial_text,
-        cost_ms: cost,
+        text: partial_text.to_string(),
+        cost_ms,
         usage: None,
         fell_back: false,
         aborted: true,
@@ -566,18 +640,11 @@ where
     })
 }
 
-/// 3b 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
-async fn failed<S>(
-    run: &mut Prepared,
-    store: &S,
-    llm: &dyn LlmAdapter,
-    why: &str,
-) -> Result<TurnOutcome, crate::symbio_core::AppendError>
-where
-    S: Store<Event = Event> + ?Sized,
-{
-    // 失败前已产出的半截正文 / 思考照样进载荷（它们是事实）。
-    let cost = run.started.elapsed().as_millis() as u64;
+/// 3b 兜底的**载荷**（T-244 步 5c）：失败前已产出的半截产出与实测耗时。
+///
+/// 失败前已产出的半截正文 / 思考照样进载荷（它们是事实，不因失败就不记）。
+fn failed_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value) {
+    let cost_ms = run.started.elapsed().as_millis() as u64;
     let facts = node_facts(&run.nodes);
     let produced = produced_payload(
         &facts.text.clone().unwrap_or_default(),
@@ -587,15 +654,5 @@ where
         &run.all_tool_calls,
         &run.rounds,
     );
-    settle::append_fallback(
-        store,
-        &run.actor,
-        run.turn,
-        run.user_seq,
-        why,
-        cost,
-        produced,
-        run.artifacts_landed,
-    )
-    .await
+    (cost_ms, produced)
 }

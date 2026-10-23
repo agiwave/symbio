@@ -151,7 +151,7 @@ export const BASELINE = {
   // `interactive_break_leaves_result_for_skipped_calls` 断言（状态 Completed / 无 error /
   // `meta.failure_kind = not_executed`）。
   // 新增 4 条（唤醒路径：落格 / 读侧 / 拒绝 / 关账后读不回）。
-  rustTests: 2094,
+  rustTests: 2098,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -163,7 +163,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-244 步 5d 的同一净删 3 条在 CI 口径下的折算（1436→1433）——
   // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
   // `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 1433,
+  ciRustTestsTotal: 1437,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

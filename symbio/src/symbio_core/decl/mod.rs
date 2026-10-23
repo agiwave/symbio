@@ -803,6 +803,40 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `calls` 取不到数组 ⇒ 不算收束（宁可让 `close-turn` 不开账，也不拿一个来路不明的
     // 形状把没答完的一轮判成答完）；没有响应（首步就中止 / 失败的轮）同理。
     let has_final = !closed && model_calls.is_some_and(|calls| calls.is_empty());
+    // 本幕模型端口的**结局**（T-244 步 5c）：本幕**派发过**的一次模型往返，最后落在
+    // `failed(port=model)` 上——模型没答成，且之后没有更晚的成功应答。
+    //
+    // 这一格是「中止 / 适配器失败」那两种**收束**的前件：它们没有「`calls` 为空的
+    // 模型应答」（答都没答成，哪来应答），`has_final` 因此不成立；但它们同样要把
+    // 这一轮收掉（兜底格 / 中止格），而收束格只由 `close` 执行体写 ⇒ 行表得能
+    // 判出「该收束了」，判据只能是日志上的东西。
+    //
+    // 「派发过」（同一 `(port, id)` 的 `request` 也在本幕锚之后）这一条不是装饰：
+    // 崩溃恢复时租约看护会在**本幕锚之后**落一条 `failed(port=model)`——它收的是
+    // 上一世那笔卡住的调用，而那笔的 `request` 在锚之前。少了这条，恢复幕一进门
+    // 就会判「该收束了」，把「重跑一次模型往返」读成「这一轮已经答不上来了」。
+    let model_outcome_failed = events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
+                && str_field(e, "port") == Some("model")
+                && after_anchor(e, anchor_seq)
+        })
+        .max_by_key(|e| seq_of(e))
+        .is_some_and(|e| {
+            e.kind == EVENT_FAILED
+                && events.iter().any(|r| {
+                    r.turn == turn
+                        && r.kind == EVENT_REQUEST
+                        && str_field(r, "port") == Some("model")
+                        && after_anchor(r, anchor_seq)
+                        && str_field(r, "id") == str_field(e, "id")
+                })
+        });
+    // 该不该收束：`has_final`（答完了）∨ 模型没答成（不会再有应答）。两条都要求
+    // 本幕未收束——收束过就不欠了。
+    let closeable = !closed && (has_final || model_outcome_failed);
     // 工具批还开着（T-244 步 5b）：交回的调用里至少有一笔没被 `response` / `failed`
     // （同 `port=tool` 同 id）关掉。两格互斥（`calls` 空 vs 非空），所以执行行只在
     // 「有活没干完」的时候让位。
@@ -855,6 +889,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
         "has_final": has_final,
+        "closeable": closeable,
         "tools_open": tools_open,
     })
 }
@@ -1062,9 +1097,12 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // v4 → v5 加 `tools_open`：它读 `failed` 的 `port` / `id`（工具批的另一种终局），
     // 其余读面不变。
     // v5 → v6 给 `tools_open` 补请求面：它读 `request(port=tool)` 的 `port` / `id`。
+    // v6 → v7 加 `closeable`：收束行的前件从「答完了」扩到「答完了 **或** 模型没答成」
+    // ——后者的读面是 `failed` 的 `port`（`failed(port=model)`）与 `request` 的
+    // `port` / `id`（判「本幕派发过」），v4 / v5 起就已在读面里，故读面不变。
     ViewDecl {
         name: "turn_head",
-        ver: 6,
+        ver: 7,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),

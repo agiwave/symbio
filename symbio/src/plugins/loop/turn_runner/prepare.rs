@@ -19,6 +19,33 @@ pub(crate) enum PreparedFlow {
     Done(TurnOutcome),
 }
 
+/// 待收束的**结局**（T-244 步 5c）：模型往返的三种收法各带自己的载荷。
+///
+/// 收束格只由 `close` 执行体写（装载期的依赖图要求两个执行体写的格不相交），
+/// 所以「这一轮怎么收」不能由模型往返那一步就地落格，只能**寄存**在这里，
+/// 由收束动作来落。
+///
+/// 三种收法各带自己的载荷，因为它们落的格子与载荷形状都不同：
+/// [`Self::Answer`] 落 `chat.assistant.final`（答完了），
+/// [`Self::Failed`] 落 `chat.assistant.fallback`（模型没答成），
+/// [`Self::Aborted`] 也落 `chat.assistant.final`（中止是**状态**，不是另一种事实）。
+pub(crate) enum PendingClose {
+    /// 答完了：应答与本轮的流式节点事实（收束动作据此落 `chat.assistant.final`）。
+    Answer { rt: LlmTurn, facts: StreamNodeFacts },
+    /// 模型没答成：失败原因（人话，只给人读）与失败前已产出的半截产出。
+    Failed {
+        detail: String,
+        cost_ms: u64,
+        produced: serde_json::Value,
+    },
+    /// 中止：中止前的半截产出、实测耗时。
+    Aborted {
+        cost_ms: u64,
+        produced: serde_json::Value,
+        text: String,
+    },
+}
+
 /// 一次工具循环的**在途状态**（阶段①产出，阶段②③④读取/推进）。
 pub(crate) struct Prepared {
     pub(crate) turn: u64,
@@ -62,9 +89,9 @@ pub(crate) struct Prepared {
     /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
     /// [`Prepared::pending_model`] 的形状是「本轮有工具调用、还没派发」——
     /// 两批债各由自己的行（`close-turn` / `open-tools`）选中，揉在一起会让收束幕
-    /// 去派发一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取应答与
-    /// 节点事实，落 `chat.assistant.final` / `fallback`。
-    pub(crate) closing: Option<(LlmTurn, StreamNodeFacts)>,
+    /// 去派发一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取结局，
+    /// 落 `chat.assistant.final` / `fallback`。
+    pub(crate) closing: Option<PendingClose>,
     /// 本轮**收束动作的产出**（ADR-123 决策 5）：落收束 / 停机格的那一步把它寄存进草稿，
     /// 派发器在账本上看到停机格后从这里取走交回调用方。
     ///

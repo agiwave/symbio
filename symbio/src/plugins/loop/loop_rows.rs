@@ -102,8 +102,10 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     mode: LatencyTier::Deep,
     // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
     reads: &[],
+    // **收束格不在这里**（T-244 步 5c）：`chat.assistant.final` / `chat.assistant.fallback`
+    // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
+    // `execute → close`），装载红（PL-016 §3.4 第 1 条）。
     writes: &[
-        EVENT_ASSISTANT_FALLBACK,
         EVENT_ASSISTANT_OPENING,
         EVENT_TURN_STAGE,
         EVENT_TURN_DISPATCH,
@@ -149,12 +151,14 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     ],
 };
 
-/// 收束执行体（T-244 步 5）：它不调模型，只把寄存的那一次应答落成收束格。
+/// 收束执行体（T-244 步 5；步 5c 起独占收束格）：它不调模型，只把寄存的那一次
+/// 模型往返的**结局**落成收束格。
 ///
-/// `writes` 里**没有** `chat.assistant.final` 之外的账：`finalize` 之前那半段
-/// （模型往返、工具批次）归 [`ACTOR_EXECUTE`]，这一格只从「应答已寄存」走到
-/// 「本幕收束」。`authz.denied` 是写侧闸拒那一条路留下的否定事实（C4），
-/// 它和收束格同一次动作里落，所以也在名单上。
+/// 两条收束格都在它名下：`chat.assistant.final`（答完了 / 中止）与
+/// `chat.assistant.fallback`（模型没答成 / 空答）。独占不是洁癖，是装载期的硬约束：
+/// 两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与 `execute → close`），
+/// 表装不上（PL-016 §3.4 第 1 条）。`authz.denied` 是写侧闸拒那一条路留下的否定事实
+/// （C4），它和收束格同一次动作里落，所以也在名单上。
 const ACTOR_CLOSE: ActorDecl = ActorDecl {
     name: CLOSE,
     // 收束就是「把已经拿到手的应答入格」：反射档，不调模型。
@@ -177,15 +181,18 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 /// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
 ///
 /// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
-/// 声明不了不是遗漏，是装载期会红：把 `chat.assistant.final` 写进 `execute` 的名单，
-/// `close-turn` 的出口格就同时是两个执行体的出口格 ⇒
+/// 声明不了不是遗漏，是装载期会红：把收束格写进 `execute` 的名单，`close-turn` 的出口格
+/// 就同时是两个执行体的出口格 ⇒
 /// [`Gap::DependencyCycle`](crate::symbio_core::ring::Gap::DependencyCycle)（T-244 步 5 注①）。
 /// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
 /// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
 /// 而不是将错就错地放宽名单。
 ///
-/// 删除条件：T-244 步 5b/5d——中止轮与续写幕旁路的收束都改走 `close-turn` 行之后，
-/// 这两条一从表里删，运行期对账就恢复成「名单外即红」。
+/// 删除条件：收束格**全部**归 `close` 执行体之后。步 5c 已把中止轮与适配器失败两条
+/// 挪进收束动作，剩下的是两条控制面失败（见 [`ACTOR_EXECUTE`] 那条表项的注释）——
+/// 它们在生产里不可达，仍留豁免；真要让它们也走收束动作，得先给「模型往返压根没派发」
+/// 与「工具批开不出来」各立一个日志事实（视图折不出这两条：折出来的判据分不开
+/// 「开不出来」与「还没开」）。
 ///
 /// 这张表是**派发器的入参**（[`super::turn_exec::drive_steps`] 的 `actors`，ADR-123
 /// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
@@ -201,10 +208,16 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
-        // 中止轮（`stream::aborted` 就地落收束格）与正常收束两处——都在 `execute`
-        // 这一步里由运行器写收束格，而收束格归 `close` 执行体声明 ⇒ 名单对不上，
-        // 只能走过渡豁免（`close-turn` 行接手收束后本条即删）。
-        transitional: &[EVENT_ASSISTANT_FINAL],
+        // 两条**控制面**失败就地落的兜底格：模型往返派不出去（行不欠 / 端口没声明）
+        // 与工具批开不出来（模型要了工具而本轮没有分发通道）。这两条路在日志上
+        // **没有**模型的终局事实（`failed(port=model)` 落不下来）⇒ 收束行开不出账
+        // ⇒ 那两格只能由 `execute` 写。声明不了不是遗漏：写进 `decl.writes` 会让
+        // `close-turn` 的出口格被两个执行体写 ⇒ 依赖图成环，装载红。
+        //
+        // 两条在生产里都不可达（`turn_exec` 的模型调用点恒带分发通道；行表装载失败
+        // 时整幕开不起来），只有单测走得到——故留一条**有名有姓**的豁免，而不是
+        // 把收束格的名额还给 `execute`。
+        transitional: &[EVENT_ASSISTANT_FALLBACK],
     },
     ActorEntry {
         decl: ACTOR_CLOSE,
@@ -520,34 +533,33 @@ pub(crate) static ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // ── 收束（T-244 步 5）─────────────────────────────────────────────────
+    // ── 收束（T-244 步 5 / 步 5c）────────────────────────────────────────
     //
-    // 「答完了还没入格」是一笔独立的账：前件是日志上的 `turn.has_final`
-    // （本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
-    // ADR-121 决策 2），执行体是 [`CLOSE`]——方案（PL-017 §3.1）要的就是一个
-    // 独立的 `closer`，不是整轮执行体里的第四个内部动作。它排在 `execute-turn`
-    // **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，而不是再跑一次
-    // 模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
+    // 「这一轮该收束了、还没入格」是一笔独立的账：前件是日志上的 `turn.closeable`
+    // （`has_final`〔本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
+    // ADR-121 决策 2〕∨「本幕派发过的模型往返以失败收场」），执行体是 [`CLOSE`]——
+    // 方案（PL-017 §3.1）要的就是一个独立的 `closer`，不是整轮执行体里的第四个内部动作。
+    // 它排在 `execute-turn` **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，
+    // 而不是再跑一次模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
     //
-    // ## 出口只写 `final`，不写 `fallback`（与方案的一格偏差，理由在这里）
+    // ## 出口是 `final | fallback`（PL-017 §3.1 的字面形状，步 5c 复原）
     //
-    // 方案给的是 `final | fallback`。今天照抄会撞 §3.4 第 1 条：`execute-turn` 与
-    // `close-turn` 共用同一个出口事实集，而两个执行体都写得住里面的格
-    // （`execute` 写错误路径的 `fallback`，`close` 写 `final`），依赖图于是同时有
-    // `close → execute` 与 `execute → close` 两条边——两节点环，装载红。
-    // 环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是字节判据面，
-    // 改它要挂 ADR；这里按判据的字面收窄：每一行的出口只留**自己那个执行体**写的格。
+    // 步 5 第一批照抄 §3.1 装不上表：`execute-turn` 与 `close-turn` 共用同一个出口
+    // 事实集时，两个执行体互为对方的出口写方（`execute` 写错误路径的 `fallback`，
+    // `close` 写 `final`），依赖图于是有 `close → execute` 与 `execute → close` 两条边
+    // ——两节点环，装载红。环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是
+    // 字节判据面，改它要挂 ADR。
     //
-    // 空答兜底（正文与思考都空 ⇒ `halt` 落 `fallback`）因此不走 `until` 关门，
-    // 而是由前件自己关门：`fallback` 一落，`closed` 真 ⇒ `has_final` 假 ⇒ 这笔债
-    // 不再开账。少了一次「出口命中」的显形，多了一条依赖前件的说法——这是粗端口期
-    // 的过渡形状，细端口接上、`execute-turn` 那行退场之后按方案复原成 `final | fallback`
-    // （届时无共享出口，环自然消失）。差异记在 T-244 的处理过程。
+    // 步 5c 断环的方式是**让两个执行体写的格不相交**，不是改判据：收束格
+    // （`final` 与 `fallback`）全部归 `close` 执行体——`execute` 那一步只跑模型往返，
+    // 收束格由 `close-turn` 行的执行体落（中止 / 适配器失败两条路径的收束格因此
+    // 从执行体内部挪到了收束动作里）。断环之后 `close-turn` 没有出边（只有 `close`
+    // 写它的出口，而自环不算），`execute-turn → close-turn` 单独一条边，表装得上。
     //
-    // ## 它只管「答完了」这一条收束路径
-    //
-    // 中止 / 适配器失败 / 步数到顶那三格兜底**仍由执行体内部直接落**：那些幕压根
-    // 没有一条「空 `calls` 的模型响应」，`has_final` 不成立，收束行不开账。
+    // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）仍在 `execute` 那一步
+    // 就地落兜底格：它们的模型端口**没有终局事实**（`failed(port=model)` 落不下来）
+    // ⇒ 收束行开不出账 ⇒ 那两格由 `execute` 写，并走它的**过渡豁免**（见
+    // [`ACTOR_EXECUTE`] 的 `transitional`）。
     Decl {
         name: "close-turn",
         prio: 55,
@@ -558,13 +570,20 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: "turn_head",
             key: &["turn"],
-            eq: &[("has_final", Lit::Bool(true))],
+            eq: &[("closeable", Lit::Bool(true))],
         },
-        until: &[Pattern {
-            source: EVENT_ASSISTANT_FINAL,
-            key: &["turn"],
-            eq: &[],
-        }],
+        until: &[
+            Pattern {
+                source: EVENT_ASSISTANT_FINAL,
+                key: &["turn"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_ASSISTANT_FALLBACK,
+                key: &["turn"],
+                eq: &[],
+            },
+        ],
         unless: &[],
     },
     // ── 执行（决策行）────────────────────────────────────────────────────

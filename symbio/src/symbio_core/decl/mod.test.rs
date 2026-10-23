@@ -135,10 +135,11 @@ fn builtin_loads_and_freezes() {
     // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
     // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
     // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5；
-    // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6。
+    // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6；
+    // 步 5c 加 `closeable`（收束行的前件扩到「模型没答成」）⇒ 升到 7。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 6);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 7);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
@@ -547,6 +548,7 @@ fn turn_head_reads_round_and_done_from_facts() {
             "recall_done": true,
             "skill_hit": true,
             "has_final": false,
+            "closeable": false,
             "tools_open": false
         })
     );
@@ -743,6 +745,89 @@ fn turn_head_has_final_ignores_responses_from_an_earlier_drive() {
         turn_head(&events, 0)["has_final"],
         json!(false),
         "锚点之前的响应属于首幕"
+    );
+}
+
+#[test]
+fn turn_head_closeable_is_true_when_the_model_round_never_answered() {
+    // T-244 步 5c：收束行的前件从「答完了」扩到「**模型没答成**」——
+    // 中止与适配器失败这两条路没有「`calls` 为空的应答」（答都没答成，哪来应答），
+    // `has_final` 因此不成立；但它们同样要把这一轮收掉，而收束格只由 `close`
+    // 执行体写 ⇒ 行表得能从日志上判出「该收束了」。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            EVENT_REQUEST,
+            json!({ "port": "model", "id": "m-1", "attempt": 1 }),
+        ),
+        ev(
+            1,
+            EVENT_FAILED,
+            json!({ "port": "model", "id": "m-1", "why": "adapter error" }),
+        ),
+    ];
+    let head = turn_head(&events, 0);
+    assert_eq!(head["has_final"], json!(false), "没有应答 ⇒ 没有「答完了」");
+    assert_eq!(head["closeable"], json!(true), "模型没答成 ⇒ 该收束了");
+}
+
+#[test]
+fn turn_head_closeable_ignores_a_failure_raised_for_an_earlier_drive() {
+    // 崩溃恢复时租约看护会在**本幕锚之后**落一条 `failed(port=model)`——它收的是
+    // 上一世那笔卡住的调用，而那笔的 `request` 在锚之前。少了「同一 `(port, id)`
+    // 的请求也在本幕」这一条，恢复幕一进门就会判「该收束了」，把「重跑一次模型
+    // 往返」读成「这一轮已经答不上来了」。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            EVENT_REQUEST,
+            json!({ "port": "model", "id": "m-1", "attempt": 1 }),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({ "stage": "resume", "round": 0, "result": "approve" }),
+        ),
+        ev(
+            1,
+            EVENT_FAILED,
+            json!({ "port": "model", "id": "m-1", "why": "lease_expired" }),
+        ),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["closeable"],
+        json!(false),
+        "请求在锚之前 ⇒ 这笔失败不是本幕的模型往返"
+    );
+}
+
+#[test]
+fn turn_head_closeable_is_false_once_the_turn_is_closed() {
+    let mut events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            EVENT_REQUEST,
+            json!({ "port": "model", "id": "m-1", "attempt": 1 }),
+        ),
+        ev(
+            1,
+            EVENT_FAILED,
+            json!({ "port": "model", "id": "m-1", "why": "adapter error" }),
+        ),
+    ];
+    assert_eq!(turn_head(&events, 0)["closeable"], json!(true));
+    events.push(ev(
+        1,
+        "chat.assistant.fallback",
+        json!({ "text": "", "status": "failed" }),
+    ));
+    assert_eq!(
+        turn_head(&events, 0)["closeable"],
+        json!(false),
+        "收束格落下 ⇒ 不再欠收束（否则 `close-turn` 永远开着）"
     );
 }
 

@@ -826,11 +826,16 @@ pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `close` 执行体：把寄存的那一次应答落成收束格（T-244 步 5）。
+/// `close` 执行体：把寄存的那份**结局**落成收束格（T-244 步 5 / 步 5c）。
 ///
-/// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.has_final`），不由草稿说：
-/// 与 [`run_execute`] 的分工是「谁欠什么」在表里、「怎么还」在动作里。不记步数——
-/// 收束不是一次模型往返，步数口径与拆分前一致（ADR-115 决策 3）。
+/// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.closeable`：答完了 **或**
+/// 模型没答成），不由草稿说：与 [`run_execute`] 的分工是「谁欠什么」在表里、
+/// 「怎么还」在动作里。不记步数——收束不是一次模型往返，步数口径与拆分前一致
+/// （ADR-115 决策 3）。
+///
+/// 两条收束格都在它名下（`chat.assistant.final` / `chat.assistant.fallback`）：
+/// `execute` 那一步只跑模型往返，收束格一律由这里落（中止 / 适配器失败两条路径
+/// 因此从执行体内部挪到了收束动作里）。
 pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
