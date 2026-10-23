@@ -1,4 +1,4 @@
-//! 义务环的行表：五条策略行 + 一条执行决策行 + 端口 / 授权级联行（ / ）。
+//! 义务环的行表：五条策略行 + 一条执行决策行 + 端口 / 授权级联行（/ ）。
 //!
 //! ## 一行只写「什么时候欠、什么算还」
 //!
@@ -15,13 +15,13 @@
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
 //! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
 //! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
-//! 55 close-turn ── 收束：本幕最近一次模型应答没有工具调用（ 步 5）
+//! 55 close-turn ── 收束：本幕最近一次模型应答没有工具调用
 //! 60 execute       ── 执行决策：本幕未收束且手上没有开着的工具批 ⇒ 跑一次模型往返
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
-//! 66 dispatch-model─ 端口派发：模型往返（ 步 2，在 `turn` 执行体内部）
+//! 66 dispatch-model─ 端口派发：模型往返（在 `turn` 执行体内部）
 //! 67 open-tools ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
-//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用（ 步 3）
-//! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（ 步 5b）
+//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用
+//! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（b）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
 //! 71 await-model   ── 等应答（模型端口）
 //! 72 await-tools   ── 等应答（工具端口）
@@ -29,7 +29,7 @@
 //! ```
 //!
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。旧表的
-//! `prio` 只是格内序，这里第一次跨行可比（ 判据 10）。
+//! `prio` 只是格内序，这里第一次跨行可比（判据 10）。
 //!
 //! ## 一行**不在表里**的条件（写在这里，不写在事后）
 //!
@@ -83,13 +83,13 @@ use crate::symbio_core::{
 /// `opener`，所以它出现在 [`ACTOR_OPENER`] 的名单里（运行期账本仍把它当协议格豁免，
 /// 两份名单在这一点上不冲突：豁免的是「不必声明」，声明的是「确由我写」）。
 const EXECUTE: &str = "execute";
-/// 收束执行体（ 步 5）：把寄存的那一次应答落成收束格。
+/// 收束执行体：把寄存的那一次应答落成收束格。
 const CLOSE: &str = "close";
-/// 创建执行体（ 步 5b）：模型交回的调用逐条落 `request(port=tool)`。
+/// 创建执行体（b）：模型交回的调用逐条落 `request(port=tool)`。
 const OPENER: &str = "opener";
-/// 授权执行体（ 步 5b）：对已开账的工具调用落放行 / 拒绝事实。
+/// 授权执行体（b）：对已开账的工具调用落放行 / 拒绝事实。
 const AUTHORIZER: &str = "authorizer";
-/// 派发执行体（ 步 5b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
+/// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
 const COURIER: &str = "courier";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
@@ -102,7 +102,7 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     mode: LatencyTier::Deep,
     // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
     reads: &[],
-    // **收束格不在这里**（ 步 5c）：`chat.assistant.final` / `chat.assistant.fallback`
+    // **收束格不在这里**（c）：`chat.assistant.final` / `chat.assistant.fallback`
     // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
     // `execute → close`），装载红（DE-015 §3.4 第 1 条）。
     writes: &[
@@ -115,7 +115,7 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     ],
 };
 
-/// 创建执行体（ 步 5b）：一个模型响应的 `calls` 逐条落 `request(port=tool)`。
+/// 创建执行体（b）：一个模型响应的 `calls` 逐条落 `request(port=tool)`。
 ///
 /// `request` 是**决策者**的事实（§2.3），批次里做这个决定的就是它；`sent` 之后
 /// 的协议格仍只由引擎写。装载期「出口全是引擎格时名单不许空」（D-124）在
@@ -128,7 +128,7 @@ const ACTOR_OPENER: ActorDecl = ActorDecl {
     writes: &[EVENT_REQUEST],
 };
 
-/// 授权执行体（ 步 5b）：风险档 vs 会话阈值的一次纯比较。
+/// 授权执行体（b）：风险档 vs 会话阈值的一次纯比较。
 const ACTOR_AUTHORIZER: ActorDecl = ActorDecl {
     name: AUTHORIZER,
     mode: LatencyTier::Fast,
@@ -136,7 +136,7 @@ const ACTOR_AUTHORIZER: ActorDecl = ActorDecl {
     writes: &[EVENT_AUTHZ_GRANTED, EVENT_AUTHZ_DENIED],
 };
 
-/// 派发执行体（ 步 5b）：已放行的落 `sent` 并交给执行层；批尾把每一笔关掉
+/// 派发执行体（b）：已放行的落 `sent` 并交给执行层；批尾把每一笔关掉
 /// （应答 / 没跑到 / 被拒），落产物、等待格与轮内注入。
 const ACTOR_COURIER: ActorDecl = ActorDecl {
     name: COURIER,
@@ -151,7 +151,7 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     ],
 };
 
-/// 收束执行体（ 步 5；步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
+/// 收束执行体（步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
 /// 模型往返的**结局**落成收束格。
 ///
 /// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
@@ -188,7 +188,7 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 /// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
 /// 声明不了不是遗漏，是装载期会红：把收束格写进 `execute` 的名单，`close-turn` 的出口格
 /// 就同时是两个执行体的出口格 ⇒
-/// `Gap::DependencyCycle`（ 步 5 注①）。
+/// `Gap::DependencyCycle`（注①）。
 /// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
 /// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
 /// 而不是将错就错地放宽名单。
@@ -314,7 +314,7 @@ impl Next {
 /// `retry` 因此是**有活着的等待方**的端口才用的机制（DE-015 的 `tool`：
 /// 它的内环还在，看护者重试后由同一幕接着 await）。
 ///
-/// ## `model` 端口（ 步 2）
+/// ## `model` 端口
 ///
 /// 一次**模型往返**。它在 `turn` 执行体**内部**发起（D-115 决策 5：两者之间
 /// 没有双调度器——`turn` 是普通 `by=Some` 执行体，DE-015 只是把它的内部拆成
@@ -341,7 +341,7 @@ pub(crate) static PORTS: &[PortDecl] = &[
         // 一次模型往返是一条调用；同批并发在它下面的工具端口。
         concurrent: false,
     },
-    // 工具批次里的**单次调用**（ 步 3）。一次模型响应可带 N 个调用 ⇒
+    // 工具批次里的**单次调用**。一次模型响应可带 N 个调用 ⇒
     // 同一批写 N 条 `request`，各自一个 id。
     //
     // 租约与尝试上限同 `turn` / `model`：执行在轮内同步等待，进程重启后等这笔
@@ -360,7 +360,7 @@ pub(crate) static PORTS: &[PortDecl] = &[
 
 /// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
 pub(crate) static ROWS: &[Decl] = &[
-    // ── 授权级联（ ⇒ 步 3）────────────────────────────────
+    // ── 授权级联（⇒ 步 3）────────────────────────────────
     //
     // 两行，不是一行：
     //
@@ -389,7 +389,7 @@ pub(crate) static ROWS: &[Decl] = &[
         name: "authorize-tool",
         // 的口径：判在派发之前。0 是这一环里最早的一档。
         prio: 0,
-        // 判定是纯比较（风险档 vs 会话阈值），不调模型（ 步 5b 接线）。
+        // 判定是纯比较（风险档 vs 会话阈值），不调模型（b 接线）。
         by: Some(AUTHORIZER),
         tier: LatencyTier::Fast,
         expand: None,
@@ -538,7 +538,7 @@ pub(crate) static ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // ── 收束（ 步 5 / 步 5c）────────────────────────────────────────
+    // ── 收束（/ 步 5c）────────────────────────────────────────
     //
     // 「这一轮该收束了、还没入格」是一笔独立的账：前件是日志上的 `turn.closeable`
     // （`has_final`〔本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
@@ -598,7 +598,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 两者的粒度不同（本幕 vs 一次请求往返）——一幕可以有多次往返（auto 续写），
     // 而「本幕还欠不欠」只有一个答案。
     //
-    // `tools_open = false`（ 步 5b）：模型交回了工具调用、其中还有没关账的，
+    // `tools_open = false`（b）：模型交回了工具调用、其中还有没关账的，
     // 这一步就让位——否则它每次都比创建 / 授权 / 派发（67 / 68 / 69）先生效，
     // 工具批永远等不到人跑（下一轮模型往返会带着没有结果的交换再次出发）。
     Decl {
@@ -655,7 +655,7 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
-    // ── 端口 `model` 的两行（ 步 2）──────────────────────────
+    // ── 端口 `model` 的两行──────────────────────────
     //
     // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返，它在
     // `turn` 执行体内部发起（D-115 决策 5：没有第二个调度器）。
@@ -706,7 +706,7 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "open-tools",
         prio: 67,
-        // 创建动作（ 步 5b）：逐条落 `request(port=tool)`，不调模型、不跑工具。
+        // 创建动作（b）：逐条落 `request(port=tool)`，不调模型、不跑工具。
         by: Some(OPENER),
         tier: LatencyTier::Fast,
         expand: Some(("calls", "id")),
@@ -734,7 +734,7 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "dispatch-tools",
         prio: 68,
-        // 派发动作（ 步 5b）：放行的落 `sent` 并交执行层，批尾把每一笔关掉。
+        // 派发动作（b）：放行的落 `sent` 并交执行层，批尾把每一笔关掉。
         by: Some(COURIER),
         // 派发本身不调工具（执行在批次里）。
         tier: LatencyTier::Fast,
@@ -758,7 +758,7 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
-    // 被拒的调用也要有人收尾（ 步 5b）：`authz.denied` 关掉了授权行，但
+    // 被拒的调用也要有人收尾（b）：`authz.denied` 关掉了授权行，但
     // `dispatch-tools` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
     // 执行层就永远跑不到，`failed{why}` 也永远不落。这一行把「拒绝之后还必须做一次
     // 收尾」说成债务：出口与派发行同一格，动作也是同一个派发执行体（混合批次里

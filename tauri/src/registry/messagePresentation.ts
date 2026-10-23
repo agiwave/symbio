@@ -75,7 +75,7 @@ export const MESSAGE_ROLE_LABELS: Record<string, string> = {
 /**
  * 类型 → 文案。
  *
- * 覆盖 wire 闭集五值（`NODE_KINDS`）——[ B2a] 起前端只认这五格，业务旧词在
+ * 覆盖 wire 闭集五值（`NODE_KINDS`）——起前端只认这五格，业务旧词在
  * 读边界经 `nodeKindOf` 归一后不再进入取值域。漏一格会把机制词原样摆给用户看，
  * 由单测锁死覆盖率。
  */
@@ -131,7 +131,7 @@ export function messageStatusLabel(status: string): string {
 // `messageRendererKey` 里**各出现一次**——新增一种呈现要改 7 处，且没有任何东西
 // 保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。现在每个形态只在这里出现一次。
 //
-// ## [ B2a]：取值域收到 wire 五值 `NodeKind`
+// ## 取值域收到 wire 五值 `NodeKind`
 //
 // 分派轴只有五格（`body` / `notice` / `skeleton` / `interaction` / `typing`）。同格内
 // 的业务差异（思考 vs 压缩、整轮 vs 工具）**不进这张表**——后端在交互面把它折成
@@ -178,7 +178,7 @@ interface TypePresentation {
 }
 
 /**
- * 形态 → 呈现（[ B2a]：取值域就是 wire 闭集五值 `NodeKind`）。
+ * 形态 → 呈现：取值域就是 wire 闭集五值 `NodeKind`）。
  *
  * 用 `Record<NodeKind, …>`：**漏登记一格是编译错误，不是运行期兜底**。同格内的业务
  * 差异（思考 vs 压缩、整轮 vs 工具）**不在此表**——由后端在交互面折成 `title`/`icon`/
@@ -473,7 +473,7 @@ export function nextOpenOf(
 /**
  * 渲染器标识（机制级的呈现形态，不含场景语义）。
  *
- * [ B2a]：与 wire 五值 `NodeKind` 一一对应（`typing` 占位走 `fallback`）——
+ * 与 wire 五值 `NodeKind` 一一对应（`typing` 占位走 `fallback`）——
  * 前端分派轴**只有** NodeKind，不再有业务形态标识。
  *
  * - `body`        正文叶：用户气泡 / 助手正文 / 工具请求·返回

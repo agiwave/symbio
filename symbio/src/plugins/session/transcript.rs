@@ -518,7 +518,7 @@ impl Transcript {
     /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
     ///
     /// 呈现（`title`/`icon` 与读数行 `stats`）在这里从节点**形状 + 已有数字**现算
-    /// （[ B3] + [D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：图里存的、事件里的
+    /// （[D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：图里存的、事件里的
     /// 节点都不含呈现——它是「session 把数据交给前端那一刻」才填的交互面元素，不属于
     /// 后端业务/存储事实。窄增量帧无 `msg_type`，派生判据全不命中即原样透传（幂等无副作用）。
     fn publish(&self, message: cm::ChatNode) {

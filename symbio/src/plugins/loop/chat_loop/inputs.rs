@@ -13,7 +13,7 @@ use super::*;
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
 ///
 /// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
-/// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（ 批②）
+/// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分
 /// 的语义维由它驱动；取不到 ⇒ `None` = 「本轮没有问题」，投影退化为纯 ts 降序
 /// （平凡值，J2）。用类型区分「没有问题」与「问题恰好是空串」：前者是事实，
 /// 后者得写出来才成立。
@@ -130,7 +130,7 @@ pub(crate) struct TurnInputs {
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
 /// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
-/// ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
+///    ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
 /// 7. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
@@ -153,7 +153,7 @@ pub(crate) async fn prepare_turn_inputs(
     apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
-    // 续写幕复用原 Turn 根（ 步 5d）：那个骨架在本轮首幕已经发过，再发一次
+    // 续写幕复用原 Turn 根（d）：那个骨架在本轮首幕已经发过，再发一次
     // 只会让同一个 id 重生一条「流式中」的根，把已完成的卡打回运行态。
     let root_id: String = match turn.resume_root.take() {
         Some(root) => root,
@@ -247,7 +247,7 @@ async fn run_recall(
     context: &SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), TurnExit> {
-    // `query` = 本轮用户发言（ 批②：混合打分的语义维）——与 `turn_exec`
+    // `query` = 本轮用户发言（混合打分的语义维）——与 `turn_exec`
     // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
     let recall_query = last_user_text(context);
@@ -297,7 +297,7 @@ async fn run_recall(
     turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
     // 落格交给运行器（写者令牌在 `turn_exec`）。`result` 记技能命中与否——
-    // 义务环的 `has_match` 只从日志读（ 的输入闭包）。
+    // 义务环的 `has_match` 只从日志读（输入闭包）。
     let hit = last_user_text(context).as_deref().is_some_and(|text| {
         super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
     });

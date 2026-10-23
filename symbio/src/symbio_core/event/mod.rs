@@ -174,7 +174,7 @@ pub const EVENT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 /// **开始前**的开场白。这句是事实，随本格入格（WAL 为唯一事实源）——
 /// 不入格则重建折不出这条根级对话面节点——实测 t20 / t22 的「恰有一条对话面
 /// 节点」全部落空（`meta.surface = "reply"` / `meta.reason = needs_work`）。
-/// 节点形状是事实的一部分（ 原则），故单立一格。
+/// 节点形状是事实的一部分（原则），故单立一格。
 ///
 /// ## 为什么与 `chat.assistant.reported` 分格而不是复用
 ///
@@ -327,7 +327,7 @@ pub const EVENT_RETRY: &str = "retry";
 ///    不能因为记账失败就放行。
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 
-/// **放行事实**：授权级联的正向一半（ / DE-015 §4.2）。
+/// **放行事实**：授权级联的正向一半（/ DE-015 §4.2）。
 ///
 /// ## 为什么放行也要落一条
 ///
@@ -438,7 +438,7 @@ impl ClosureReason {
 /// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
-// ── 消息列表变更的格子（，D-053 / D-054）──
+// ── 消息列表变更的格子（D-053 / D-054）──
 //
 // 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
 // `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，

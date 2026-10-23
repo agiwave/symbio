@@ -266,7 +266,7 @@ fn vis_scope_name_round_trips_and_unknown_falls_back_to_private() {
     }
 }
 
-/// 能力名 round-trip（ ⑥）：拼写只活在 [`closed_set!`] 的声明表里，六项各自
+/// 能力名 round-trip（⑥）：拼写只活在 [`closed_set!`] 的声明表里，六项各自
 /// `name → parse_name` 逐字回来——两个方向共用一张表，「读作 A、写作 B」在这里
 /// 就断掉了。判据的另一半是闭集**外**的名字必须 `None`：它的两个下游方向都是拒
 /// （`from_names` 拒绝整体构造、[`GrantsOverlay::is_revoked`] 按已收回判），
@@ -307,7 +307,7 @@ fn capability_names_round_trip_through_the_declaration_table() {
 }
 
 /// `widen` 是全序的「取宽」：满足交换律、幂等、单调——
-/// 读侧整列闸（ ②）拿它合并一批内容的可见域，性质不成立就会
+/// 读侧整列闸（②）拿它合并一批内容的可见域，性质不成立就会
 /// 「同两份事实源因为顺序不同读出不同的闸答案」，而两种答案都合法。
 #[test]
 fn widen_is_commutative_idempotent_and_monotone() {
@@ -454,7 +454,7 @@ fn a_typoed_revoke_revokes_the_whole_principal() {
     assert!(overlay.is_revoked("session/main", "assign.work"));
 }
 
-/// 载荷读数的**唯一取值口**（ ⑧）：三处复写的那一段现在只有一份。
+/// 载荷读数的**唯一取值口**（⑧）：三处复写的那一段现在只有一份。
 /// 测试侧**故意写字面量键**（不用 `VIS_SCOPE_KEY`）：它是线上键名，产侧改了名而这里
 /// 没跟着改，本用例必须红——与 `event_bus` 里「手搓信封」那两条判据同一条纪律。
 /// 它的缺省方向必须钉住——把「认不出」读宽 = 一次静默越权读取，而两边都是合法值，

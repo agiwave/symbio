@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * `InboxPending` 组件级测试 —— 排队中的用户消息（ 步③）
+ * `InboxPending` 组件级测试 —— 排队中的用户消息
  *
  * 锁三件事：
  * 1. **空队列不渲染**（`entries: []` ⇒ 整个组件不在 DOM 里，不留一行空白）；

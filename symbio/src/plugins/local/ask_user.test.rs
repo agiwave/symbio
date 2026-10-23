@@ -54,7 +54,7 @@ async fn interactive_mode_returns_pending_intent_not_a_channel() {
     );
 }
 
-/// 结果形状契约（ / 04 报告建议 3）：正文写在 `content` 字符串里。
+/// 结果形状契约（/ 04 报告建议 3）：正文写在 `content` 字符串里。
 ///
 /// 消费方 `extract_result`（loop 插件）第 1 条判据读 `content`，两侧互不可见——
 /// 这条断言是「约定可执行」的生产方一半。若哪天把正文改塞进 `prompt` 或只留整包

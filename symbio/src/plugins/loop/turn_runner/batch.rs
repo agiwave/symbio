@@ -1,4 +1,4 @@
-//! 阶段③ 工具批派发与产物落格（ · B3，DE-021 §5 动作 B3）。
+//! 阶段③ 工具批派发与产物落格（· B3，DE-021 §5 动作 B3）。
 //!
 //! 派发本身在 [`super::super::tool_dispatch::ToolDispatch`]（三动作契约）；本段只承接
 //! 回来的 [`DispatchOutcome`]：逐条过产物闸、落 `artifact.added`、把本批调用

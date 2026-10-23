@@ -87,7 +87,7 @@ pub(crate) struct DerivedFacts {
 /// 账已关。`sent = false` 且 `granted = true` ⇒ 派发行没有放行这笔账（行不欠 /
 /// `sent` 落格失败），关账时按「没执行」处理。
 ///
-/// `deny_why` 是拒绝的**收尾凭据**（ 步 5b）：`authz.denied` 关的是授权行，
+/// `deny_why` 是拒绝的**收尾凭据**（b）：`authz.denied` 关的是授权行，
 /// 而被拒的调用还要在批尾落一条 `failed{why}`（`deny-tools` 行的出口）——否则
 /// 「拒绝」在端口账上只留下半句话，创建行的集合债永远少一个终局。
 #[derive(Clone)]
@@ -113,7 +113,7 @@ pub(crate) struct ToolPortCall {
     pub(crate) deny_why: Option<&'static str>,
     /// 派发动作是否已落 `sent`（派发动作写入）。
     pub(crate) sent: bool,
-    /// 这一笔是**恢复幕的唤醒调用**（ 步 5d）：由用户动作（批准 / 重试 /
+    /// 这一笔是**恢复幕的唤醒调用**（d）：由用户动作（批准 / 重试 /
     /// 补充 / 回答 / 拒绝）落成的 `request`，不是某个模型响应里的调用。
     ///
     /// 派发动作据它决定「跑工具」还是「只合成结果」——两者的事实完全一样
@@ -121,7 +121,7 @@ pub(crate) struct ToolPortCall {
     pub(crate) wake: Option<WakeIntent>,
 }
 
-/// 唤醒调用的种类（ 步 5d）。
+/// 唤醒调用的种类（d）。
 ///
 /// 恢复幕没有新的模型应答，工具批的入口是**用户动作**。用户动作先落成一笔
 /// `request(port=tool)`（[`ToolPort::land_wake`]），之后与批次走同一条授权 / 派发
@@ -276,7 +276,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
         calls: &mut [ToolPortCall],
     ) -> Vec<DispatchOutcome>;
 
-    /// 读一笔**唤醒调用**（ 步 5d）。
+    /// 读一笔**唤醒调用**（d）。
     ///
     /// 恢复幕没有模型应答可寄存：用户在等待卡上点了按钮，唤醒请求已在开幕之前
     /// 落格。行表选中授权 / 派发行时，动作从这里把那一笔取回来——没有唤醒请求
@@ -289,7 +289,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
 /// 工具端口账的写方：批次分发与 resume 共用**同一套**开账 / 关账。
 ///
 /// 为什么把它从 `SessionDispatchPort` 里拆出来：resume 的批准路径也要落
-/// `request → granted → sent → response`（ 步 4 / 判据 6）。如果
+/// `request → granted → sent → response`（/ 判据 6）。如果
 /// resume 自己再写一遍，两个写方就会在 id、授权判定、关账时机上各长一套——
 /// 而那正是「旁路」的定义。
 pub(crate) struct ToolPort {
@@ -671,7 +671,7 @@ impl ToolPort {
         n + 1
     }
 
-    /// 落一笔**唤醒请求**（ 步 5d）：用户动作在开幕之前变成 `request(port=tool)`。
+    /// 落一笔**唤醒请求**（d）：用户动作在开幕之前变成 `request(port=tool)`。
     ///
     /// ## 为什么只落 `request`，不顺便落授权
     ///

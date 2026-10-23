@@ -324,7 +324,7 @@ pub async fn run_chat_loop(
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：在原轮上落一笔
     //   `request(port=tool)`（载荷带 `resume` 标记）。之后的授权 / 派发由行表
     //   自己的 `authorize-tool` / `dispatch-tools` / `deny-tools` 承担——恢复路径
-    // 不再自己写协议事实、不再自己跑执行层（ 步 5d）。
+    // 不再自己写协议事实、不再自己跑执行层（d）。
     //
     // 唤醒请求落在幕锚之前，但 `turn_head` 的请求面按 seq 判终局，照样看得见它；
     // 本幕因此从「工具批没关」开始，执行行让位给授权 / 派发行。
@@ -501,7 +501,7 @@ pub async fn run_chat_loop(
             }
         };
 
-        // **不要在这里拦中止**（ / D-052）：在此处 `return
+        // **不要在这里拦中止**（/ D-052）：在此处 `return
         // TurnExit::Aborted(Vec::new())` 会让运行器从不落 `user.message`，中止
         // 这一轮**一条事实都没有**（e2e t7 钉的是这件事：`v2-events.wal` 不存在、
         // 投影里看不到用户说过什么）。D-052 决策 1 要求「一轮的产出无论完成 / 失败 /

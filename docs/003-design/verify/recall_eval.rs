@@ -11,7 +11,7 @@
 //!
 //! 排序经 `#[path]` **包含生产文件**：[`recall_score`]（`symbio/src/symbio_core/
 //! projection/recall_score.rs`——`recall` 投影的排序实现）。因此这里出的
-//! recall@k 是**生产投影的口径**（ 批②③）：查询驱动的内容重叠分降序，
+//! recall@k 是**生产投影的口径**：查询驱动的内容重叠分降序，
 //! 平手 ts 降序、再平手 seq 降序。
 //!
 //! ## 代价：这套数字与生产绑死
@@ -140,7 +140,7 @@ fn production_recall(pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
         .collect()
 }
 
-/// 平凡值路径：同一内核在无查询时 = 纯 ts 降序（ 批②的 J2 判据）。
+/// 平凡值路径：同一内核在无查询时 = 纯 ts 降序（ J2 判据）。
 fn trivial_recall(pool: &[Memory], _query: &str, k: usize) -> Vec<usize> {
     let entries: Vec<ScoreEntry> = pool
         .iter()

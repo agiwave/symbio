@@ -1,5 +1,5 @@
 //! 阶段①「批首闸门读数」——`process_tool_calls_async` 三段拆分的第一段
-//! （ / [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! （/ [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 判据（「这段错了谁会红」）：闸门判据**只在批首读一次**、整批复用的读数用例红
 //! （`breaker` / `elimination` / `task_table` 的批首读场景与 `tool_executor.test.rs`
@@ -48,7 +48,7 @@ pub(crate) struct GateReadings {
     pub(crate) concurrent: bool,
     /// 本批留底 `(id, name, args)`——阶段③「哪些没被执行」的收口依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
-    /// 同参重复调用台账（ 步 2）；阶段②逐条登记，故为可变读数。
+    /// 同参重复调用台账；阶段②逐条登记，故为可变读数。
     pub(crate) seen_calls: Vec<String>,
 }
 
@@ -109,7 +109,7 @@ pub(crate) async fn read_batch_gates(
     // 记账 / 任务表三族的管辖对象从能力注册表读，不按名字判。没有 visitor ⇒
     // 三个集合皆空 ⇒ 三道闸都不命中（缺声明与漏声明同形，e2e 兜行为）。
     //
-    // 同一份元数据还给出**风险档**（ 的执行策略）：登记表只读一次，两个
+    // 同一份元数据还给出**风险档**（执行策略）：登记表只读一次，两个
     // 消费者按值复用——再遍历一遍收集管线等于把批首读数变成两处时延源。
     let metas = crate::symbio_core::tool_metas(&ctx).await;
     let decls = ToolDecls::of_metas(&metas);

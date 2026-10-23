@@ -404,7 +404,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         );
                     }
                 }
-                // 对话面开场白（，`Escalate` 首响）：与轮边界汇报同一条纪律
+                // 对话面开场白（`Escalate` 首响）：与轮边界汇报同一条纪律
                 // ——助手说的界面文本，`exclude_from_context = true`（进转写、
                 // 不进 `to_messages()`）。理由码不同只影响 `meta.reason`，转写这层
                 // 只关心「谁说了一句给人看的话」。

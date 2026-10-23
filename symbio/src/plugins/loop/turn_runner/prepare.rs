@@ -1,4 +1,4 @@
-//! 阶段① 轮首准备（ · B3，DE-021 §5 动作 B3）。
+//! 阶段① 轮首准备（· B3，DE-021 §5 动作 B3）。
 //!
 //! 阶段事实与派发档入格 → 开场白 / 定稿答话两条早退路 → 窗口与基线 prompt →
 //! 续写产物补写 → 首请求前的中止检查。产出的 [`Prepared`] 是后续阶段的**唯一
@@ -19,7 +19,7 @@ pub(crate) enum PreparedFlow {
     Done(TurnOutcome),
 }
 
-/// 待收束的**结局**（ 步 5c）：模型往返的三种收法各带自己的载荷。
+/// 待收束的**结局**（c）：模型往返的三种收法各带自己的载荷。
 ///
 /// 收束格只由 `close` 执行体写（装载期的依赖图要求两个执行体写的格不相交），
 /// 所以「这一轮怎么收」不能由模型往返那一步就地落格，只能**寄存**在这里，
@@ -73,18 +73,18 @@ pub(crate) struct Prepared {
     pub(crate) full_snapshot: Vec<Event>,
     pub(crate) inject: Option<RoundInjector>,
     pub(crate) nodes: Option<NodeFactsFn>,
-    /// 模型应答已落、工具批次尚未派发时的寄存位（ 拆步）。
+    /// 模型应答已落、工具批次尚未派发时的寄存位（拆步）。
     ///
     /// 放在 `Prepared` 而不是新开一份状态：它和消息 / 节点 / 成本同属**本轮草稿**，
     /// 引擎不读它；拆步只是把「一次 `step` 做两件事」拆成两个可分别调用的动作。
     pub(crate) pending_model: Option<LlmTurn>,
     /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
     pub(crate) pending_round: Option<StreamNodeFacts>,
-    /// 创建动作开出的端口账（ 步 5b）：创建 → 授权 → 派发三个动作之间**唯一**
+    /// 创建动作开出的端口账（b）：创建 → 授权 → 派发三个动作之间**唯一**
     /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
     /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
     pub(crate) pending_calls: Option<Vec<super::super::tool_dispatch::ToolPortCall>>,
-    /// 应答已落、**收束还没发生**时的寄存位（ 步 5）。
+    /// 应答已落、**收束还没发生**时的寄存位。
     ///
     /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
     /// [`Prepared::pending_model`] 的形状是「本轮有工具调用、还没派发」——

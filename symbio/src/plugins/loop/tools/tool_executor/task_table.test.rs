@@ -56,7 +56,7 @@ fn the_trivial_session_keeps_its_task_table() {
 
 /// `assert.verification` 的两个持有者都能写任务表——独立判定是任务表上的另一半权威。
 ///
-/// 仲裁者（ 淘汰回路）与验证者（ 新登记）同持验证能力而不同角色，
+/// 仲裁者（淘汰回路）与验证者（新登记）同持验证能力而不同角色，
 /// 放行判据相同：盖章的动作不论源自声誉裁决还是质量判定。
 #[test]
 fn every_assert_verification_holder_may_judge_tasks() {

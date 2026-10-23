@@ -389,7 +389,7 @@ fn record_learning_wires_all_three_memory_steps() {
         4,
         "步 11：每轮各编码一条经验"
     );
-    // 步 11b（ 批④）：判断编码同文去重——四轮收束都是同一句「答」，
+    // 步 11b：判断编码同文去重——四轮收束都是同一句「答」，
     // 跨标签同文也只记一条（`contains_content` 比的是全部记忆）。
     assert_eq!(
         snap.iter()

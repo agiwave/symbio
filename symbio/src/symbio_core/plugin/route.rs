@@ -117,7 +117,7 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
 /// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
 ///
-/// 后来删掉的第三个是 `ROUTE_SESSION_CHAT_SEND`（ 步②，输入面双轨退役）：
+/// 后来删掉的第三个是 `ROUTE_SESSION_CHAT_SEND`（输入面双轨退役）：
 /// 它的四个调用方全部改走地址面，session 插件上的 `chat/send` / `chat/abort` 两条
 /// 相对臂与 `handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 一并删除——
 /// 「接收消息」与「跑一轮」分开之后，那条路由既无输入可收，也无响应可给。

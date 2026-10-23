@@ -106,7 +106,7 @@ u-{turn} → [op-{turn}] → { [a-{turn}-0 … a-{turn}-n] → [p-{turn}-m] }* �
 |---|---|---|
 | **1a** | 本文档（施工图） | 文档评审通过 |
 | **1b** | 抽出**纯决策**：`classify_round(&rt, has_dispatch) -> RoundDecision`（`Halt` / `Act` / `ConfigGap`），环体改成 `match classify_round(...)` | 单测钉四个分支；e2e t27 + 全量 e2e 零漂移 |
-| **1c** | 抽出**收束**：2a 的答话取值（`text` → 截断 → `reasoning` → 桥上的思考）成为纯函数 `final_answer(&rt, &round_facts)` | 单测钉截断分支（ 的 13KB 草稿用例） |
+| **1c** | 抽出**收束**：2a 的答话取值（`text` → 截断 → `reasoning` → 桥上的思考）成为纯函数 `final_answer(&rt, &round_facts)` | 单测钉截断分支（ 13KB 草稿用例） |
 
 三刀之后，环体只剩「Ask → match(decision) → 执行 → 推进」四段，768 行里属于**决策**的
 部分全部可单测。剩下的搬迁（2c 产物批、2d 进展格）留给步骤 4 的行表一并做——

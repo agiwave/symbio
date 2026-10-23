@@ -39,7 +39,7 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 /// [D-048a](../../session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "symbio/src/plugins/session/README") 后果节本身就是一条 system（记忆段 /
 /// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
 /// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
-/// （ 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
+/// （门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
 /// 后果不是「格式不好看」而是硬失败：那类 provider 上 `full` 档第一轮就走不出去。
 ///
 /// ## 为什么是「并入基础 system」而不是让各协议自己并

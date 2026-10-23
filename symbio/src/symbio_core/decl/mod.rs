@@ -69,7 +69,7 @@ use std::sync::Arc;
 
 use crate::symbio_core::Event;
 use crate::symbio_core::LatencyTier;
-// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（ 起），并登记在 `CELLS` 上。
+// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
 use crate::symbio_core::event::{
     EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
@@ -387,7 +387,7 @@ impl Frozen {
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
-// 名字住在 `event/mod.rs` 的事件名字表（ 起），并登记在 `CELLS` 上。
+// 名字住在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
 //
 // `via` 是**这一次往返是谁的**（D-122 决策 2）：这一轮自己的模型往返**不带**
 // 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
@@ -589,7 +589,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["key", "port", "id", "tool", "kind", "reason", "detail"],
     },
-    // 放行事实（ / DE-015 §4.2）：授权级联的正向一半。
+    // 放行事实（/ DE-015 §4.2）：授权级联的正向一半。
     //
     // 键取 `(port, id)` 而不是 `key`：级联的派发行要与 `sent` / `failed` 关同一
     // 逻辑调用，而协议事实的键是二元组；`key` 只是给人看的同一 id 副本。
@@ -735,7 +735,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
 
-/// 轮头（ 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
+/// 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
 /// 收束行与执行行也是。
 ///
 /// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
@@ -743,10 +743,10 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 ///
 /// v5 加一格 `tools_open`：本幕最近一条模型应答交回了工具调用、且其中至少一笔
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
-/// （ 步 5b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
+/// （b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
 /// v6 给它补了请求面（见该格的注释）：恢复幕的唤醒请求也在「有活没干完」之列。
 ///
-/// v8（ / D-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
+/// v8（/ D-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
 /// 只看**这一轮自己的**模型往返（`via` 缺席的那些）——内部往返（判决 / 措辞 / 摘要）
 /// 的应答 `calls` 为空，混进来会让一条判决往返被读成「这一轮答完了」。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
@@ -832,7 +832,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `calls` 取不到数组 ⇒ 不算收束（宁可让 `close-turn` 不开账，也不拿一个来路不明的
     // 形状把没答完的一轮判成答完）；没有响应（首步就中止 / 失败的轮）同理。
     let has_final = !closed && model_calls.is_some_and(|calls| calls.is_empty());
-    // 本幕模型端口的**结局**（ 步 5c）：本幕**派发过**的一次模型往返，最后落在
+    // 本幕模型端口的**结局**（c）：本幕**派发过**的一次模型往返，最后落在
     // `failed(port=model)` 上——模型没答成，且之后没有更晚的成功应答。
     //
     // 这一格是「中止 / 适配器失败」那两种**收束**的前件：它们没有「`calls` 为空的
@@ -872,11 +872,11 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 该不该收束：`has_final`（答完了）∨ 模型没答成（不会再有应答）。两条都要求
     // 本幕未收束——收束过就不欠了。
     let closeable = !closed && (has_final || model_outcome_failed);
-    // 工具批还开着（ 步 5b）：交回的调用里至少有一笔没被 `response` / `failed`
+    // 工具批还开着（b）：交回的调用里至少有一笔没被 `response` / `failed`
     // （同 `port=tool` 同 id）关掉。两格互斥（`calls` 空 vs 非空），所以执行行只在
     // 「有活没干完」的时候让位。
     //
-    // v6（ 步 5d）再加一条**请求面**的判据：清点的是**本轮**（不是本幕）里
+    // v6（d）再加一条**请求面**的判据：清点的是**本轮**（不是本幕）里
     // 落过、却还没有终局的 `request(port=tool)`。恢复幕交回的那一笔就靠它：模型
     // 响应是首幕的（本幕没有新的模型应答），旧批次也早已关账，唯一的「开着」是
     // 唤醒请求本身——不看请求面，执行行会在派发之前抢先跑一次模型往返。
@@ -1123,7 +1123,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: stale_sent,
     },
-    // 轮头（ 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
+    // 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
     // `close-turn` / `execute-turn` 的开账条件。
     //
     // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，

@@ -388,7 +388,7 @@ const S31_1_PATH = join(REPO, 'docs', '005-spec', '015.md')
 // 回归测试用 `--root=` 注入最小仓库，那里没有条目——**没有台账就不判这一条**
 // （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里条目在，规则才生效。
 //
-// 规则源优先读 `docs/005-spec/015.md`（ 起的批号闭集 owner），
+// 规则源优先读 `docs/005-spec/015.md`（起的批号闭集 owner），
 // 读不到再退回 04 §3.1 的旧表（迁移期兼容 / fixture 无条目）。
 const S31_1 = existsSync(S31_1_PATH) ? readFileSync(S31_1_PATH, 'utf8') : null
 const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null

@@ -290,7 +290,7 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
     assert_eq!(m.tool_name(), Some("new"));
 }
 
-/// 呈现派生（[ B3]）：title/icon 从**形状**现算，且只在前后端交互面调用。
+/// 呈现派生：title/icon 从**形状**现算，且只在前后端交互面调用。
 ///
 /// 钉住三件事——(1) 每类形状算出什么；(2) `run` 骨架标题是智能体名（上下文相关），
 /// 这里绝不钉死；(3) 已有值不覆盖（幂等，重复投递安全）。
@@ -352,7 +352,7 @@ fn derived_presentation_from_shape() {
     assert_eq!(kept.title.as_deref(), Some("自定义"));
 }
 
-/// 恢复动作派生（[ B3]）：业务→动词的翻译在后端交互面完成，逐条镜像前端 legacy 判据。
+/// 恢复动作派生：业务→动词的翻译在后端交互面完成，逐条镜像前端 legacy 判据。
 #[test]
 fn derived_actions_from_shape_status_meta() {
     let has = |n: &ChatNode, a: ResumeAction| {

@@ -921,7 +921,7 @@ fn an_artifact_round_is_complete_after_reopen() {
 // 2. I1 同轮第二条 final 被拒；
 // 3. I1 同轮第二条开轮被拒（不同 id——同 id 会先被 `Duplicate` 拦下）；
 // 4. I3 新轮越过未收束的旧轮**不拒**（崩溃恢复就是这个形状），但计数 + 出声。
-// 5. 名字与格位对不上被拒（ 段四）：
+// 5. 名字与格位对不上被拒（段四）：
 //    表上没这个名字、或这个名字不住在这一格——两条都是 `OffGrid`，不是 `Invariant`。
 
 /// 一条**没有** `produced_by` 的 final（I2 的反例）。

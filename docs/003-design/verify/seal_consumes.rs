@@ -131,7 +131,7 @@ pub mod decl {
         }
     }
 
-    /// 一个会话——它从构造那一刻起手里就只有一张 `Arc<Frozen>`（ 的「按会话注入」
+    /// 一个会话——它从构造那一刻起手里就只有一张 `Arc<Frozen>`（「按会话注入」
     /// 与进程级记忆化只在开幕时机上有分歧，这一格类型两边相同）。
     pub struct Session {
         table: Arc<Frozen>,

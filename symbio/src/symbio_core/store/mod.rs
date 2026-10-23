@@ -82,7 +82,7 @@ pub enum AppendError {
         /// 人话原因（与读侧 `Violation.why` 同一套措辞来源）。
         why: String,
     },
-    /// 名字与格位对不上（ 段四）：
+    /// 名字与格位对不上（段四）：
     /// `kind` 不在事件名字表上，或事件自述的 `entity × verb` 不是表上那一格。
     ///
     /// **为什么它不是 `Invariant` 的一条**：I1/I2/I3 判的是事实**之间**

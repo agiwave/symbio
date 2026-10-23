@@ -146,7 +146,7 @@ fn recall_snapshots_scans_one_level_deliberately() {
                 "user",
             )
             .with_ts(1000)
-            // 记忆事件是 I2 的声明类事件：没有上游就没有可撤销的溯源（ 写侧闸门）。
+            // 记忆事件是 I2 的声明类事件：没有上游就没有可撤销的溯源（写侧闸门）。
             .with_produced_by(0)
             .with_payload(json!({
                 "content": text,

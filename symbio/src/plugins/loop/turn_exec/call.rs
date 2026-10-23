@@ -1,4 +1,4 @@
-//! 阶段② 调用——`execute_turn` 四段之二（ · B2，DE-021 §5 动作 B2）。
+//! 阶段② 调用——`execute_turn` 四段之二（· B2，DE-021 §5 动作 B2）。
 //!
 //! 两档取其一：反射档经 [`TurnRunner::run_reflex`]（零模型调用），深度档装配
 //! [`TurnInput`]（含轮内注入闭包）后经 `SessionDispatchPort`
@@ -179,7 +179,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                             // 一个时刻入参：上面那次抽干已经把补充格落进日志，
                             // `report_due` 视图读的就是它（判据 12）。
                             if let Some(report) = report {
-                                // **落格即上线**（ 的另一半）：这句话的设计目的就是「本轮还要
+                                // **落格即上线**（另一半）：这句话的设计目的就是「本轮还要
                                 // 跑很久，先报一句」，只落格不下发就等于把它压到轮末、把目的抵消。
                                 // 节点由 `to_message()` **现造一次**，id 同写进落格载荷——重建侧
                                 // （`rebuild::reported_node` 走 `event_payload_node_id`）读的就是它，
@@ -237,7 +237,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 final_reply: None,
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
-                // 对话面开场白（，`Escalate` 首响）：由 `chat_loop::apply_verdict`
+                // 对话面开场白（`Escalate` 首响）：由 `chat_loop::apply_verdict`
                 // 产出、随 `ExecTurn` 递进来，运行器据它落 `chat.assistant.opening` 格
                 // （开场白后面照常进工具循环，故不占收束格）。
                 opening_text: opening_text.map(str::to_string),
@@ -303,7 +303,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 elimination_revoked,
             );
             let dispatch_ref: &dyn super::super::tool_dispatch::ToolDispatch = &dispatcher;
-            // 步循环在**执行器**里，不在 `turn_runner` 里（ 步 5）。
+            // 步循环在**执行器**里，不在 `turn_runner` 里。
             let r = super::drive_steps(
                 store.as_ref(),
                 &llm,
@@ -397,7 +397,7 @@ pub(crate) fn supplement_into_request(
             &actor.principal,
         )
         .with_produced_by(anchor)
-        // 载荷带上**节点身份**（ 的原则：节点身份是事实的一部分）：重建按 `id`
+        // 载荷带上**节点身份**（原则：节点身份是事实的一部分）：重建按 `id`
         // 复刻这条用户消息的身份、按 `ids` 复刻 `meta.supplement_ids`。缺了它们，
         // 重建只能合成 id（每次重开都换一批），且合并标记里的原始条目 id 无处可寻
         // ——而「合并后原始条目只此一处留痕」（见 `transcript::supplements` 的模块头）。

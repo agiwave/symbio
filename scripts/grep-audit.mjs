@@ -597,9 +597,9 @@ console.log()
 // ext4 上是哈希序。于是同一份代码、同一个查询在两个平台给出行序不同的结果，而下游三处
 // 判定都切在这个序上——`content_search` 的 `offset` / `head_limit` 分页窗口、
 // `MAX_RESULTS` 截断点、`codebase_search` 降级路径的 `limit` 截断。
-// 病灶实例（ ①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
+// 病灶实例（①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
 // （用户看到的是「换台机器同一查询少几行 / 换一批行」）。这类「判据依赖平台」的病
-// 在本仓已有两次实例（ 是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
+// 在本仓已有两次实例（是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
 //
 // 判据：`WalkBuilder::new(` 之后，**同一函数体内**（往后扫到下一个 `fn` 起头为止）
 // 必须出现一次 `.sort_by(` / `.sort_by_file_name(`。
@@ -698,7 +698,7 @@ const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
-// 151 → 146（ 步 5d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
+// 151 → 146（d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
   : 146
@@ -756,7 +756,7 @@ console.log()
 // 判据是**零出现**（不是棘轮）：没有"存量"可言——存量已经全部迁完。两条形状，
 // 各自都还能真的变红：
 // ① 布尔壳 `closure_granted` 零出现。它是 时期 `closure_gate(..).is_ok`
-// 的一行壳，随收束闸收敛到单一 owner（ 步 5d 删掉它唯一的生产调用点后
+// 的一行壳，随收束闸收敛到单一 owner（d 删掉它唯一的生产调用点后
 //     一并删除）而退役。复活它就是复活「拒绝不落事实」的那个形态。
 //   ② 闸的调用行必须**当场**处理 `Err`：不许 `.is_ok()` / `.is_err()` 取布尔，
 //     也不许把结果存到别处再判（那种写法拒绝照样不落事实）。
@@ -895,7 +895,7 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
 }
 console.log()
 
-// ── S-017: 恢复路径不许再有旁路（ 步 5d）─────────────────────────
+// ── S-017: 恢复路径不许再有旁路（d）─────────────────────────
 // 恢复 / 审批 / 问答三条唤醒路径曾经走 `resume.rs` 的**私有旁路**：它自己写协议
 // 事实、自己跑执行体，绕开行表。旁路退役之后，这条路径的唯一入口是**事实**——
 // 用户动作落成 `request(port=tool)`，之后与批次走同一条授权 / 派发链。

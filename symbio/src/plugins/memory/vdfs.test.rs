@@ -310,7 +310,7 @@ async fn config_document_is_reachable_by_its_real_name() {
     assert_eq!(node.ext.as_deref(), Some(crate::symbio_core::VDFS_EXT_FORM));
 }
 
-/// **内存态 = 落盘态**（ 项四）：经配置文档写口改一次闸门，正在生效的那份与
+/// **内存态 = 落盘态**（项四）：经配置文档写口改一次闸门，正在生效的那份与
 /// 从盘上重新读出来的那份必须逐字段相同——两处状态、一处漂移没人知道，而闸门值
 /// 漂移的后果是「面板上写着 999、实际拒绝在 16 KiB」这种没有任何报错的错。
 ///

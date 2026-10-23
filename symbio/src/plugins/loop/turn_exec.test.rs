@@ -113,7 +113,7 @@ fn tool_free_req<'a>(
 
 /// **已开未收束**那一轮的入参包：**不新开用户格**，溯源锚由调用方直给。
 ///
-/// 唤醒幕的身份不再由入参携带（ 步 5d：旁路退役）：它落在**事实**上——
+/// 唤醒幕的身份不再由入参携带（d：旁路退役）：它落在**事实**上——
 /// `turn.stage{stage:"resume"}` 是本幕的锚，`turn_head` 据此判「本幕是续写幕」。
 fn open_turn_req<'a>(
     fx: &'a Fixture,
@@ -133,7 +133,7 @@ fn open_turn_req<'a>(
 
 /// 落**恢复阶段事实**（唤醒幕的锚），交回它的 seq。
 ///
-/// 生产里这一格由 `chat_loop::begin_drive` 落（ 步 5d 之后）：续写的身份
+/// 生产里这一格由 `chat_loop::begin_drive` 落（d 之后）：续写的身份
 /// 在**事实**上，不在入参里。幕锚从用户格挪到这一条 ⇒ 幕锚轮号回到被续写的那
 /// 一轮（哪怕它已被后来的轮次归档），`turn_head.resumed = true`。
 fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> u64 {
@@ -776,7 +776,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-/// 事实完整性（ 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
+/// 事实完整性（判据）：**中止后那半句话还在**——模型说到一半（"让我想想
 /// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走
 /// （`TurnExecExit::Aborted(partial)`，由消费循环 `persist_failure` 收尾入格），
 /// （二）照原样入格
@@ -1251,7 +1251,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 
     let obs_events: Vec<&Event> = events
         .iter()
-        // 按**格子**认自己的输入（ 批①：校准观测从 `memory.recalled` 搬进
+        // 按**格子**认自己的输入（校准观测从 `memory.recalled` 搬进
         // `memory.calibrated`）。旧写法按载荷字段判别——那正是本判据要证明不再依赖的。
         .filter(|e| e.kind == EVENT_MEMORY_CALIBRATED)
         .collect();
@@ -1479,7 +1479,7 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
 /// 反向（边界）：命中集非空但本幕是**唤醒幕** ⇒ 一律走完整推理，技能不得顶掉
 /// 刚被批准的那次工具。
 ///
-/// 唤醒幕的身份是**事实**（ 步 5d 之后不再由入参携带）：`turn.stage{stage:"resume"}`
+/// 唤醒幕的身份是**事实**（d 之后不再由入参携带）：`turn.stage{stage:"resume"}`
 /// 是本幕的锚，`turn_head` 据此判 `resumed` ⇒ `policy.reflex` 那行不成立 ⇒ 快路不走。
 #[tokio::test]
 async fn a_skill_hit_never_takes_over_a_resumed_turn() {
@@ -2129,7 +2129,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-// ==================== 判据 12 的生产形状（ 口径 ①）====================
+// ==================== 判据 12 的生产形状（口径 ①）====================
 //
 // `loop_rows.test.rs` 那组用手造切片钉住「`now` 只从幕锚来」这条规则本身；本组证明
 // **真跑过一轮的会话**在**生产句柄**（`loop_rows::table()`，会话开幕拿的那一个）上

@@ -170,7 +170,7 @@ impl VisScope {
     /// 两个可见域里**更宽**的那个（`thread_private` < `shared` < `public`）。
     ///
     /// 唯一的合并判据：读侧要就一批内容回答「这份整体给不给人看」时用它
-    /// （ ② 的整列闸）——各调用点自己排大小就会漂移成「这边 public 赢、
+    /// （② 的整列闸）——各调用点自己排大小就会漂移成「这边 public 赢、
     /// 那边 shared 赢」，而两种答案都是合法取值，没有任何东西会变红。
     pub fn widen(self, other: VisScope) -> VisScope {
         use VisScope::{Public, Shared, ThreadPrivate};
@@ -188,7 +188,7 @@ impl VisScope {
     /// **漂移方向**：把任何一遍写成 `unwrap_or(Public)` 或漏掉 `as_str()`，那条读数就
     /// 悄悄放宽，而两边都是合法值、没有东西会变红（与 [`Self::from_name`] 文档里那条同向判据）。
     ///
-    /// 只认载荷，不改判据：产地在 `memory_events::encode`（ ①）。
+    /// 只认载荷，不改判据：产地在 `memory_events::encode`（①）。
     pub fn of_event(e: &crate::symbio_core::Event) -> VisScope {
         e.payload
             .get(Self::VIS_SCOPE_KEY)
@@ -395,7 +395,7 @@ impl PermissionMatrix {
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
     ///
     /// 只有一个能力 [`Capability::Reply`]：首响与追加是同一条通道上的两种位置，
-    /// 生产里所有收束都在「本轮尚无收束格」的位置（ 删掉了不可达的追加臂）。
+    /// 生产里所有收束都在「本轮尚无收束格」的位置（删掉了不可达的追加臂）。
     /// 未持有 ⇒ 拒绝入格（fail-closed）。
     pub fn can_reply(&self, principal: &str) -> bool {
         self.can_write(principal, Capability::Reply)

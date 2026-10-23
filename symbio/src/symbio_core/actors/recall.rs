@@ -9,7 +9,7 @@ use crate::symbio_core::Event;
 /// （`memory × asserted` 格子，带溯源指向触发它的事件）。检索是
 /// 「读视图 → 产出事实」，这正是 Actor 定义对 Translator 的要求。
 ///
-/// 载荷三键 `found` / `top` / `degraded` **全是视图自带的**数据（：降级也要有
+/// 载荷三键 `found` / `top` / `degraded` **全是视图自带的**数据（降级也要有
 /// 生产读数口——只活在投影外壳或提示词里，就没有一条事件说得出「这轮记忆只显示了一部分」）。
 pub struct RecallTranslator;
 

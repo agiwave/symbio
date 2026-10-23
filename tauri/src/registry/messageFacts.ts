@@ -67,7 +67,7 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 // ==================== 节点 → 词表取值（缺省规则） ====================
 
 /**
- * 节点的角色——**唯一读入口**（，镜像后端 `ChatNode::node_role`）。
+ * 节点的角色——**唯一读入口**（镜像后端 `ChatNode::node_role`）。
  *
  * 折叠实现住在契约层（`schemas/chat_node.messageRoleOf`，纯逻辑层同源共用）；
  * 这里只转出，registry 的消费面保持稳定。
@@ -75,7 +75,7 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 export { messageRoleOf }
 
 /**
- * 节点的**生效形态**（[ B2a]，[D-070 §决策 3]）：wire 五值 `NodeKind`。
+ * 节点的**生效形态**（[D-070 §决策 3]）：wire 五值 `NodeKind`。
  *
  * 这是分派轴的**唯一读入口**。它只做一件事——把 `node.type` 归一到闭集五值（历史
  * 业务旧词经 `nodeKindOf` 一次性折叠，`run`/`tool`→`skeleton`、`reasoning`/`compression`→
@@ -93,7 +93,7 @@ export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
 }
 
 /**
- * 工具名（：顶层 `name` 已退役，工具名唯一住 `meta.tool_name`）。
+ * 工具名（顶层 `name` 已退役，工具名唯一住 `meta.tool_name`）。
  *
  * 与后端 `ChatNode::tool_name()` 同一条读法；历史数据的 attrs `tool_name`
  * 已在 `sessionTranscriptSync.messageOfNode` 折进 meta，这里不必再兜旧形态。
@@ -392,7 +392,7 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
 // 且**规则变了只改一处**。
 
 /**
- * 节点是否携带某个可用恢复动作（[ B2a] 纯数据判据的唯一读法）。
+ * 节点是否携带某个可用恢复动作（纯数据判据的唯一读法）。
  *
  * `actions` 由后端在交互面派生（[D-070 §决策 3]），前端不再按业务类型 / `recoverable`
  * 反推「能不能重试」——「有对应动词即有入口，没有即不画」。`actions` 缺席（历史数据、
@@ -405,7 +405,7 @@ function hasAction(actions: ResumeAction[] | undefined, action: ResumeAction): b
 /**
  * 工具失败能否**就地重试**（resume action=`retry`）。
  *
- * [ B2a] 判据已是**纯数据**：后端在交互面（[D-070 §决策 3]）把「这条节点能发
+ * 判据已是**纯数据**：后端在交互面（[D-070 §决策 3]）把「这条节点能发
  * 哪种恢复动词」折成 `actions` 列表随节点下发，前端只读「有 `retry` 就画重试」。
  * 不再从业务类型（工具 / 可恢复标记）反推——那是本模块最后一处业务耦合。
  */
@@ -452,7 +452,7 @@ export type MessageRetryAction = Extract<
 /**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
- * 三个粒度，**粒度由后端下发的 `actions` 决定**（[ B2a]，[D-070 §决策 3]）：
+ * 三个粒度，**粒度由后端下发的 `actions` 决定**（[D-070 §决策 3]）：
  * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
  * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
@@ -465,7 +465,7 @@ export interface MessageRetryTarget {
 /**
  * 由失败节点推出该发哪种重试（**重试分派的唯一实现**）。
  *
- * [ B2a]：动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
+ * 动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
  * `retry_compaction`、运行骨架带 `retry_subtree`，粒度与靶子都由数据给出，前端不再 `switch(type)`。
  * `actions` 缺席（历史数据、合成节点、或尚未走到交互面的本地视图）时退回一条**不认业务类型**
  * 的兜底：失败 / 中止一律整轮重试，叶子回溯到父骨架（后端 `process_retry_subtree` 要求

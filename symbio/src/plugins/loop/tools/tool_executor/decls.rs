@@ -39,7 +39,7 @@ pub struct ToolDecls {
 }
 
 impl ToolDecls {
-    /// 按值复用同一份元数据（ 的执行策略与本类型是两个消费者，批首只遍历
+    /// 按值复用同一份元数据（执行策略与本类型是两个消费者，批首只遍历
     /// 一次收集管线；没有 visitor 时元数据为空 ⇒ 三个集合皆空 ⇒ 三道闸都不命中）。
     pub(crate) fn of_metas(metas: &[CapabilityMeta]) -> Self {
         let mut decls = Self::default();

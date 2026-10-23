@@ -166,7 +166,7 @@ export const BASELINE = {
   ciRustTestsTotal: 1437,
   cliRustTests: 21,
   tauriRustTests: 4,
-  // doc-link-allow D-010: 下一行是退役文件的历史叙述（ 已把这两个文件删掉），不是入链
+  // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
   // baseline-allow vitestFiles: 批 （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `symbio/src/plugins/session/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
   // baseline-allow vitestTests: 同一批 ：上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
   // baseline-allow vitestTests: 批 段一（D-111）净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `plugins/session/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。

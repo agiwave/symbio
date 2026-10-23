@@ -23,7 +23,7 @@ pub struct HttpRequestTool {
 impl HttpRequestTool {
     /// 超时与域名白名单都**逐次从配置读**——配置保存后立即生效，不需要重载插件。
     ///
-    /// 白名单**必须能从配置进来**（ ④）：早先在构造里写死 `vec!["*"]`，
+    /// 白名单**必须能从配置进来**（④）：早先在构造里写死 `vec!["*"]`，
     /// 没有任何路径能写进别的值 ⇒ `host_matches_allowlist` 恒真、「不在
     /// allowed_domains 中」的错误分支永不触发——看上去在守域名，实际什么都不守。
     pub fn new(config: Arc<RwLock<WebConfig>>) -> Self {
@@ -99,7 +99,7 @@ impl HttpRequestTool {
             }
         }
 
-        // 发送请求。**错误要分流**（ ②，与 `web_fetch` 同一形状）：
+        // 发送请求。**错误要分流**（②，与 `web_fetch` 同一形状）：
         // reqwest 的 Display 把超时与连接失败收成同一句 `error sending request…`
         // ⇒ 用户看不出该重试还是该改地址。
         let response = request.send().await.map_err(|e| {
@@ -271,7 +271,7 @@ impl Default for HttpRequestTool {
 /// 原实现另有一处笔误 `host == &suffix[1..]`：`"example.com"[1..]` 是 `"xample.com"`，
 /// 本意应是「裸域名自身」，而这一点已由 `ends_with(".suffix")` 的反面覆盖，故删掉。
 fn host_matches_allowlist(host: &str, allowlist: &[String]) -> bool {
-    // 空白名单按缺省 `*` 处理（ ④）：白名单是 `Vec<String>`，前端列表编辑器
+    // 空白名单按缺省 `*` 处理（④）：白名单是 `Vec<String>`，前端列表编辑器
     // 很容易把条目删光保存——那应当回到「不限制」，而不是静默变成「全拒」
     // （全拒等于废掉 http_request 这一整个工具，且没有任何错误指向白名单）。
     if allowlist.is_empty() {

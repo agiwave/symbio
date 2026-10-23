@@ -261,7 +261,7 @@ pub(crate) struct TurnState {
     pub(crate) now_ms: i64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
     pub(crate) facts: Vec<crate::symbio_core::Event>,
-    /// 续写幕复用的 Turn 根节点 id（ 步 5d）。
+    /// 续写幕复用的 Turn 根节点 id（d）。
     ///
     /// 唤醒请求发生在开幕之前，`prepare_turn_inputs` 按它决定「要不要新开一个根」：
     /// 有值 ⇒ 复用被续写轮的根（结果卡挂回原来那棵树），并且**不重发**流式占位

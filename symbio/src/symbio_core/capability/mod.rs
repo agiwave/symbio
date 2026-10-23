@@ -365,7 +365,7 @@ pub trait Registry: Send + Sync + 'static {
     /// 按族列行（**取代了 `list_capability`**）。
     ///
     /// 顺序 = 注册顺序（见 trait 文档）。返回的是**行**而不是元数据：元数据经
-    /// [`CapabilityRow::meta`] 现取（ 的三个声明位同样在 meta 上）。
+    /// [`CapabilityRow::meta`] 现取（三个声明位同样在 meta 上）。
     async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
 
     // 模型族（4 方法，4b）与系统提示词族（2 方法，4c）已改走表：写入是在表的

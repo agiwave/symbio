@@ -270,7 +270,7 @@ pub struct ChatNode {
     /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
     /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（S08 §4 平凡值要求逐字一致）。
     ///
-    /// **读侧兼容**（，[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
+    /// **读侧兼容**（[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
     /// 裸字符串（`"agent:main"` / `"user"` / `"session/main"`）由 [`Principal::deserialize`]
     /// 一次性映射成结构体；写侧一律构造 `Principal`，序列化只出对象形态。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,7 +588,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
 }
 
 impl ChatNode {
-    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（，替代已退役的
+    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（替代已退役的
     /// 顶层 `name` 字段）。值是 LLM 可见工具名（可能是限定形态 `local/todo_write`，
     /// 也可能裸名，取决于产地）。
     pub fn tool_name(&self) -> Option<&str> {
@@ -717,7 +717,7 @@ impl ChatNode {
         self.msg_type == Some(NodeKind::Interaction)
     }
 
-    /// **呈现派生**（[ B3]，[D-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
+    /// **呈现派生**（[D-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
     /// 前端的呈现数据——`title` / `icon`（头部）与 `actions`（可发起的恢复动作）——**只在
     /// 前后端交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
     ///

@@ -1,5 +1,5 @@
 //! 阶段②「逐条执行」——`process_tool_calls_async` 三段拆分的第二段
-//! （ / [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! （/ [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
 //! 超限丢弃 → 外部执行闸 → 淘汰闸 → 任务表闸 → Pre 钩子 → 执行 → Post 钩子 → 记账
@@ -801,7 +801,7 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 /// 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
 // 拆分段以局部绑定沿用拆分前的变量名（`decls` 等），循环体逐字未动——
 // `&decls` 这类取放在拆分前是 `&Vec`/`&T`、现在是 `&&T`，语义同一，clippy 的
-// needless_borrow 在这里是对「纯结构拆分」的误报（ 判据 1：不动代码行）。
+// needless_borrow 在这里是对「纯结构拆分」的误报（判据 1：不动代码行）。
 #[allow(clippy::needless_borrow)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_batch(
@@ -870,7 +870,7 @@ pub(crate) async fn run_batch(
             {
                 PreCheck::Terminal(terminal) => {
                     // 先让此前的在途调用按序收口，再发本条终结出口；结果批序因此
-                    // 与调用顺序一致（ 判据）。
+                    // 与调用顺序一致（判据）。
                     flush_all(
                         &mut inflight,
                         &mut order,

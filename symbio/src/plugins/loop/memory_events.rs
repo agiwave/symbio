@@ -41,7 +41,7 @@
 //! - **载荷里没有 `vec` 键**：向量索引是 Store 的实现细节（01 §9.2），召回走标签 +
 //!   时间口径；内容恒在 `content`，索引落成时按 `content` 回填即可。恒空的预留键
 //!   没有任何读方，却会让「写了就是有了」的假承诺进事实形状——见
-//! [D-110](../memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "symbio/src/plugins/memory/README")。本模块也不给每轮对话挂一次
+//!   [D-110](../memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "symbio/src/plugins/memory/README")。本模块也不给每轮对话挂一次
 //!   ONNX 推理：那会把推理成本加到每一轮上，而收益是零（没有索引在读它）。
 //! - **存哪 / 怎么读**：写方只写**本会话自己的** `v2-events.wal`（共享文件需要跨进程
 //!   锁，而 `WalStore` 没有——plan/11 已确认，两进程同写一份会互相截尾）；召回反过来
@@ -51,7 +51,7 @@
 //!   注册段」的纪律（`plugins/session/README.md`）；也不置尾——置尾会把「最后一条
 //!   user 消息」从用户的问题换成记忆，mock 场景匹配与轮次窗口都会读错。
 
-// 巩固合并的纯计算内核：生产与 verify 共有同一份源码（ 批① 立这条纪律，
+// 巩固合并的纯计算内核：生产与 verify 共有同一份源码（立这条纪律，
 // 住址随 [D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三归位 core 文本域）。
 // 本模块续一条原名短路径——调用点一行不动。
 use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
@@ -73,9 +73,9 @@ use crate::symbio_core::{
 /// 分组，空标签等于没有分组。
 pub(crate) const MEMORY_TAG: &str = "经验";
 
-/// 认知内容标签「**判断**」：智能体自己的收束结论（ 批④）。
+/// 认知内容标签「**判断**」：智能体自己的收束结论。
 ///
-/// S10 的 `recall:tag=judgment` 的**唯一生产写方**（ §3.1）：
+/// S10 的 `recall:tag=judgment` 的**唯一生产写方**（§3.1）：
 /// 轮末把本轮成功收束的正文（`response`）编成一条判断记忆，
 /// 与用户发言那条（[`MEMORY_TAG`]）同文去重、同截断、同溯源（本轮开口格）。
 /// 兜底收束的正文不记（`response = None`）——固化失败套路等于把没走通的路写成
@@ -132,7 +132,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 存储层 `range(0)` 口径）⇒ 压缩前记下的记忆不会被静默丢掉。
 ///
 /// 合并后排序由投影的 `query` 决定：传本轮用户正文 ⇒ 内容重叠分降序
-/// （ 批②：旧但相关的记忆不再输给新但无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
+/// （旧但相关的记忆不再输给新但无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
 ///
 /// ## 扫描范围 = 平级会话（刻意不含嵌套子会话， 裁决）
 ///
@@ -141,7 +141,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 ///
 /// 1. **子会话的事实经工具结果回流**（S08 代际承诺：`agent_run` 的收束答复进父
 ///    会话上下文）——子会话的 shared 记忆内容（被委派的 prompt）父会话本来就有
-/// （是它发的），判断记忆 thread_private 本就不出会话：深遍的边际
+///    （是它发的），判断记忆 thread_private 本就不出会话：深遍的边际
 ///    信息量 ≈ 0；
 /// 2. **召回是有预算的检索**（存储层的 16 个名额 + 字节双上限）：分形委派
 ///    树的 WAL 恒最新（mtime 序），深遍会让一棵树占满名额、把平级会话挤出
@@ -160,11 +160,11 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 ///
 /// - `thread_private`（判断记忆的写方取值）：只对**记录它的那个会话**的轮次可见
 ///   （`FleetSnapshot::own` = 快照就是调用方的会话）——判断是本部署私有的工作记忆，
-/// 跨会话可见正是 要消灭的泄漏；存量事件没这个字段 ⇒ 缺省也是它
+///   跨会话可见正是 要消灭的泄漏；存量事件没这个字段 ⇒ 缺省也是它
 ///   （C10 缺省隔离，`VisScope::from_name` 同一口径，不把笔误读宽）；
 /// - `shared` / `public`：本会话恒可见（可见域只管**跨会话**收放，见
 ///   [`memory_visible`]），跨会话时矩阵内主体可见、矩阵外不可见——与 `stats` 读闸
-/// （ ②）**同一份判据**（`can_see` + 属主 `SESSION_OWNER` 恒放行）：
+///   （②）**同一份判据**（`can_see` + 属主 `SESSION_OWNER` 恒放行）：
 ///   「人的认知可供他人借用」（SC-010），但只借给部署矩阵里的人。
 ///
 /// 预过滤**先于**投影：投影拿到的是可见切片，预算与降级口径也只对可见事实计。
@@ -224,7 +224,7 @@ pub(crate) fn recall_view(
 /// - 本会话的内容 ⇒ 恒可见（判断记忆的 `thread_private` 走到这一支为止）；
 /// - 别的会话的 `shared` / `public` ⇒ 走 core 的读侧闸
 ///   （`symbio_core::content_visible`，与 `stats` 的整列闸**同一条判据**，
-/// ⑧——那条判据若在这里复写一遍，就会漂成「stats 给看、召回不给看」）。
+///   ⑧——那条判据若在这里复写一遍，就会漂成「stats 给看、召回不给看」）。
 ///   缺省（存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
 ///
 /// 取值口径也在 core（`symbio_core::VisScope::of_event`：认不出 = 私有，不把笔误读宽）——
@@ -323,7 +323,7 @@ impl<'a> EncodeContent<'a> {
 /// 100%，见 `invariants::produced_by_coverage`）；`ts` 是**编码时刻**（`RecallEntry::ts`
 /// 的契约，跨会话新近度排序靠它）。
 ///
-/// 载荷的 `vis_scope` = [`EncodeContent::vis_scope`]（：内容侧可见域产地）——
+/// 载荷的 `vis_scope` = [`EncodeContent::vis_scope`]（内容侧可见域产地）——
 /// 读侧判定（`stats` 的可见域闸、跨主体召回）读的是这个字段，写侧不判。
 pub(crate) fn encode(
     store: &dyn Store<Event = Event>,
@@ -496,7 +496,7 @@ pub(crate) fn consolidate(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32
         };
-        // 可见域同样从源事件载荷读（：合并产物继承源记忆的内容侧可见域）——
+        // 可见域同样从源事件载荷读（合并产物继承源记忆的内容侧可见域）——
         // 同标签的源可见域相同（写方按标签定，见 `record_learning`），取不到
         // （源不在快照里）时落 thread_private：合并放大可见域比丢一次合并更坏。
         let scope_of = |seq: u64| -> crate::symbio_core::VisScope {

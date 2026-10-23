@@ -37,7 +37,7 @@ use crate::symbio_core::{
 };
 use std::borrow::Cow;
 
-// ── 阶段拆分层（ · B3，DE-021 §5 动作 B）──────────────────────────
+// ── 阶段拆分层（· B3，DE-021 §5 动作 B）──────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
 // 阶段之间只传 [`prepare::Prepared`]，不传第二份事实。
 mod batch;
@@ -216,7 +216,7 @@ pub struct TurnInput {
     /// `meta.surface = "reply"` / `meta.reason` / 可选的 `meta.exclude_from_context`）。
     /// 收束格若只记正文（`final_reply`），重建便**折不出这条节点**——实测
     /// t20 / t21 / t22 / t25 全部「0 条对话面节点」。节点形状是事实的一部分
-    /// （ 原则），故随收束格一并入格（WAL 为唯一事实源，D-049）。
+    /// （原则），故随收束格一并入格（WAL 为唯一事实源，D-049）。
     pub dialog: Option<DialogFacts>,
     /// **对话面开场白**：`Escalate` 首响正文（`Some` = 本轮有一句开场白）。
     ///
@@ -454,7 +454,7 @@ impl TurnRunner {
     /// 「七个端口」改名叫「一个结构体 + 七个字段」，调用方仍要逐个填，
     /// 却多出一层只为过 lint 而生的壳。
     /// 起一轮：准备阶段可能直接收束（反射档 / 早退），否则交回一个
-    /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方（ 步 5）。
+    /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
     pub(crate) async fn begin<S>(
         store: &S,
         llm: &dyn LlmAdapter,
@@ -550,7 +550,7 @@ impl TurnSession {
     /// `chat.assistant.fallback`、中止也落 `chat.assistant.final`（中止是**状态**，
     /// 不是另一种事实）；产出寄存在草稿。
     ///
-    /// 它是 `close-turn` 行的动作（ 步 5 / 步 5c）。跑不跑这一步由**日志**
+    /// 它是 `close-turn` 行的动作（/ 步 5c）。跑不跑这一步由**日志**
     /// 决定（`turn.closeable`），不由这里决定；没有寄存时它不做任何事，派发器的
     /// 「无进展」判据会把那种收错账的形态显形。
     pub(crate) async fn close<S>(
@@ -565,7 +565,7 @@ impl TurnSession {
         Ok(())
     }
 
-    /// 创建动作（`open-tools` 行的执行体）：开账，结果寄存在草稿里（ 步 5b）。
+    /// 创建动作（`open-tools` 行的执行体）：开账，结果寄存在草稿里（b）。
     ///
     /// 没有模型应答 / 没有分发通道时不做任何事——派发器只在 `open-tools` 欠时才选
     /// 这个动作，这里的空返回是防御，不是第二条选择路径。

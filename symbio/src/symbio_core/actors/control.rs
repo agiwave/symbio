@@ -206,7 +206,7 @@ impl CircuitBreaker {
     ///   （**有事件**的超时，不是静默失效；I3）；
     /// - `elapsed_budget_ms`：这份输入的时延预算。**由调用方给**，因为它的正确取值
     ///   取决于输入是什么：纯查表可以用反射档（80ms），而本闸门的输入是**会话事实源
-    /// 的整段重放**（O(事件数)），那是深度档的操作——[] 之前硬编码反射档，
+    ///   的整段重放**（O(事件数)），那是深度档的操作——[] 之前硬编码反射档，
     ///   于是判据只在「重放不到 80ms」时可达，长会话下反而永远不触发。
     ///
     pub fn gate(
@@ -291,7 +291,7 @@ impl EliminationDecider {
     /// （净分为负）就触发。它是**参数不是架构**（S13 §4 的平凡值表同口径）：
     /// 换阈值不改本判定的形状；`should_eliminate` 是唯一读它的地方。
     ///
-    /// **为什么不分档（ 项 13 的复核结论）**：分档要的是**分数上的梯度**，
+    /// **为什么不分档（项 13 的复核结论）**：分档要的是**分数上的梯度**，
     /// 而 `plain_score` 的取值只有计数差（一次立约了结 = ±1），没有任何一维能撑起
     /// 「警告档 / 观察档 / 收回档」的**后果差异**——今天唯一的后果就是收回
     /// `assign.work` 这一格（[D-108](../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览") 记的
@@ -304,7 +304,7 @@ impl EliminationDecider {
     ///
     /// `{ principal: session/arbiter, pattern: decider, capabilities: [assert.verification],
     /// budget_ms: 80, scope: root }`——五个字段全部**取实**：principal / capabilities
-    /// 同源于授权表那一行（ 落地的 `PRINCIPAL_ARBITER` 窄行），pattern 按
+    /// 同源于授权表那一行（落地的 `PRINCIPAL_ARBITER` 窄行），pattern 按
     /// [`Pattern::for_principal`] 派生（仲裁者无 `reply.*` 也无 `produce.artifact`
     /// ⇒ `Decider`，三新角色同一答案——**模式闭集不变宽**，exit ① 的另一半），
     /// budget = 反射档（淘汰判定是规则折叠，毫秒级），scope = root。

@@ -1,5 +1,5 @@
 //! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数，
-//! 外加混合打分（ 批②）的语义维判据。
+//! 外加混合打分的语义维判据。
 //!
 //! 对应 [roadmap/S10 §5](../../../../docs/001-goal/130-个人认知体系注入.md "GO-130-个人认知体系注入") 的结论：
 //! 「通用性过滤」与 `memory.forgotten` 同构 ⇒ 它必须是**读侧投影参数**、不能是写侧过滤，
@@ -143,7 +143,7 @@ fn changing_the_tag_changes_the_view() {
     assert_ne!(contents(&recall_with(None, &snap)), contents(&a));
 }
 
-// ── 判据四：混合打分（ 批②，语义维）────────────────────────────────
+// ── 判据四：混合打分（语义维）────────────────────────────────
 
 fn recall_query(query: &str, events: &[Event]) -> RecallView {
     recall(VIEWER, None, Some(query.to_string()))

@@ -443,7 +443,7 @@ impl SessionPlugin {
 
         let mut inner = state.inner.write().await;
         inner.preempt_judged = true;
-        // 判定者行（`ActorSpec`）由 `spec` 现构造——预算从行上读（ 批②），
+        // 判定者行（`ActorSpec`）由 `spec` 现构造——预算从行上读，
         // 不再是调用方现算一个裸数值塞进来。
         let spec = PreemptionDecider.spec();
         if let Preemption::Suspend { task_id, as_of_seq } =
@@ -469,7 +469,7 @@ impl SessionPlugin {
         let Some((task_id, as_of_seq)) = hold else {
             return;
         };
-        // 写侧闸（ 批②，与 `turn_runner::closure_gate` 同一形态）：落控制事实
+        // 写侧闸（与 `turn_runner::closure_gate` 同一形态）：落控制事实
         // 需要 `judge.intent`——判定者只产控制事件、无 `reply.*`（S07 §5），那条界限
         // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。

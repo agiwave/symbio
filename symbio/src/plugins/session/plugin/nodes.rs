@@ -813,7 +813,7 @@ pub(crate) fn session_content(
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
-    // 呈现派生（[ B3]）：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
+    // 呈现派生：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
     // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
     let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();
     let payload = json!({

@@ -81,7 +81,7 @@ impl VerdictSource {
 /// **一格阶段的名字**——`turn.stage` 载荷 `stage` 的闭集。
 ///
 /// 阶段事实比派发指令集宽：`resume`（这一轮是审批 / 问答恢复）与 `round`
-/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（ 起
+/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（事实侧多出这两格，
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
 /// `policy.report` / `policy.reflex` 不在这里：汇报的到期由 `report_due` 视图
@@ -166,7 +166,7 @@ impl StageFact {
         self
     }
 
-    /// 恢复幕：这一轮以哪种恢复动作续写（ 的 `resume_allowed` 来源）。
+    /// 恢复幕：这一轮以哪种恢复动作续写（ `resume_allowed` 来源）。
     ///
     /// `identity` = 本幕的序数：同一轮可以先后恢复两次**同类**动作，只按
     /// `(turn, round, stage, kind)` 记会把第二次静默吸收掉（幂等键撞上就会让
@@ -177,7 +177,7 @@ impl StageFact {
         fact
     }
 
-    /// 第几次请求（ 的 `round` 来源）。
+    /// 第几次请求（ `round` 来源）。
     ///
     /// `identity` = 本幕的锚（`drive_seq`）：同一轮号的续写幕会从 `round = 0`
     /// 重来，只按 `(turn, round, stage)` 记会撞首幕的幂等键，于是撞格取回首幕

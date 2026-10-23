@@ -43,7 +43,7 @@ pub(crate) use tool_visitor::DefaultToolVisitor;
 use crate::symbio_core::Registry;
 use std::sync::Arc;
 
-/// 三条收集通道的**共用构造点**（ / 04 报告建议 2）。
+/// 三条收集通道的**共用构造点**（/ 04 报告建议 2）。
 ///
 /// ## 为什么需要一个具名构造点
 ///

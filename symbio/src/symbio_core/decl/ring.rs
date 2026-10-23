@@ -382,7 +382,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
 ///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
 /// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
-/// 有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
+///   有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
 /// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
 ///   接线接了个没人派发的名字；
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——

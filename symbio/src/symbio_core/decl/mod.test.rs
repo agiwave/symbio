@@ -364,7 +364,7 @@ fn in_flight_holds_sent_until_response_or_failure() {
 
 #[test]
 fn in_flight_is_attempt_scoped() {
-    // 旧尝试的 `response` 不能收清新尝试的 `sent`（ 判据 8 的声明侧）。
+    // 旧尝试的 `response` 不能收清新尝试的 `sent`（判据 8 的声明侧）。
     let events = vec![
         ev(
             1,
@@ -414,7 +414,7 @@ fn in_flight_drops_the_attempt_retry_voided() {
     );
 }
 
-/// 一条带租约的派发事实（ 的 `sent` 形状）。
+/// 一条带租约的派发事实（ `sent` 形状）。
 fn sent_at(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
     ev_at(
         1,
@@ -834,7 +834,7 @@ fn turn_head_closeable_is_false_once_the_turn_is_closed() {
 
 #[test]
 fn turn_head_tools_open_until_this_batchs_last_call_is_closed() {
-    // `tools_open` 是执行行给工具批让位的前件（ 步 5b）：本幕最近一条模型响应
+    // `tools_open` 是执行行给工具批让位的前件（b）：本幕最近一条模型响应
     // 要过工具，而其中**还有一笔**没落 `response` / `failed` ⇒ 执行行不欠，创建 /
     // 授权 / 派发先跑完。
     let mut events = vec![
@@ -909,7 +909,7 @@ fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
 fn turn_head_follows_a_resume_anchor_back_to_an_archived_turn() {
     // 恢复一条被后续轮次归档的旧轮：切片从旧轮首条事件延伸到今天，最大轮号指向
     // 新轮。表头必须跟着**最新幕锚**（恢复幕的 `turn.stage`）回到旧轮——
-    // 否则收束 / 执行两行看的是新轮，旧轮的恢复永远无债可还（ 步 5d 退役
+    // 否则收束 / 执行两行看的是新轮，旧轮的恢复永远无债可还（d 退役
     // `resume_anchor` 旁路的前提）。
     let events = vec![
         ev_at(1, "user.message", json!({"text": "旧轮", "id": "u-1"}), 10),

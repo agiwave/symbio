@@ -131,7 +131,7 @@ export const CHAT_ROLES = [
 export type ChatRole = (typeof CHAT_ROLES)[number]
 
 /**
- * 主体族 → 角色词的**一次性折叠**（，镜像后端 `ChatNode::node_role`
+ * 主体族 → 角色词的**一次性折叠**（镜像后端 `ChatNode::node_role`
  * 的 kind 兜底分支）：Person↔User / Agent↔Assistant / Tool↔Tool / System↔System。
  * 无主体 ⇒ `undefined`——缺省语义（当助手）留在调用侧折叠点，不在这里替它做主。
  */
@@ -153,7 +153,7 @@ export function roleOfPrincipal(
 }
 
 /**
- * 节点角色的**唯一折叠点**（，镜像后端 `ChatNode::node_role`）。
+ * 节点角色的**唯一折叠点**（镜像后端 `ChatNode::node_role`）。
  *
  * 共存阶段优先级「残留 `role` 格在先、`principal.kind` 兜底」；`role` 字段退役
  * （末档）后删首行即收敛成纯 kind 折叠。缺省仍是助手——未标身份的写方按模型
@@ -166,7 +166,7 @@ export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatR
 
 // ==================== 消息形态 ====================
 
-// ---- wire 闭集五值 = 前端唯一分派轴（[ B2a]，[D-070 §决策 3]）----
+// ---- wire 闭集五值 = 前端唯一分派轴（[D-070 §决策 3]）----
 //
 // 这五值是**纯 UI 形状**，不含任何业务：同格内的业务差异（思考 vs 压缩、run vs tool）
 // 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**（[D-070 §决策 2]），
@@ -207,7 +207,7 @@ export const NODE_KINDS = [
 export type NodeKind = (typeof NODE_KINDS)[number]
 
 /**
- * 历史业务词 → wire 五值的一次性折叠（[ B2a]，读边界唯一实现）。
+ * 历史业务词 → wire 五值的一次性折叠（读边界唯一实现）。
  *
  * 存量快照与后端旧转写把形态写成业务词（`turn` / `tool_call` / `text` / `reasoning` /
  * `compression` / `user_prompt`）；新协议一律发五值。本函数在**读取那一刻**把旧词归到
@@ -441,7 +441,7 @@ export interface ChatNode {
    */
   principal?: Principal | string;
   /**
-   * 形态词：**闭集五值 `NodeKind`**（[ B2a]，[D-070 §决策 3]）——前端唯一分派轴。
+   * 形态词：**闭集五值 `NodeKind`**（[D-070 §决策 3]）——前端唯一分派轴。
    *
    * wire 与前端内部表示同一个五值；存量快照的业务旧词在**读边界**由 `nodeKindOf` 一次性
    * 归一，业务词不进入任何判定。同格业务差异走 `title`/`icon`/`actions` 数据，不读 `meta`。

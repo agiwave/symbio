@@ -1196,7 +1196,7 @@ fn self_reported_reputation_never_enters_the_projection() {
     );
 }
 
-/// 仲裁者行（ exit ① 的表半边）：`spec` 五字段全部**取实**——
+/// 仲裁者行（exit ① 的表半边）：`spec` 五字段全部**取实**——
 /// principal / capabilities 同源于授权表窄行，pattern 按 `for_principal` 派生。
 ///
 /// 三新角色（市场 / 仲裁 / 守门）都派生 `Decider`：模式闭集**不变宽**

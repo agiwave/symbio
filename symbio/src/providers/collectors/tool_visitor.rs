@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 ///   按注册顺序保序。这条顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，
 ///   写成哈希表时**每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
 ///   （设计文档 实测 18KB 对正文 1.1KB），换序等于每轮把这段
-/// 前缀作废——这也是 D-057 一度记下「数组顺序每次不同」的根因。
+///   前缀作废——这也是 D-057 一度记下「数组顺序每次不同」的根因。
 ///   模型行（4b）一行一个已启用 provider，**当次生效者带生效位**——生效者是目录里的
 ///   一员不再是纪律而是结构（见 `capability/model.rs`）；提示词行（4c）一行一段文字，
 ///   表序即送达顺序（见 `capability/prompt.rs`）；挂载行（4d）一行一个目录，
@@ -49,7 +49,7 @@ impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
         // 闸门住在收口点：每条进表的**工具**能力都裹一层 [`ApprovalGate`]——
         // `meta` / `name` / `risk_for` 原样透传（见 `approval.rs`），故 `get` 与
-        // `list` 看到的名字、声明位（ 三位）与风险档都不变；判定只发生在
+        // `list` 看到的名字、声明位（三位）与风险档都不变；判定只发生在
         // 执行那一步（`capability_invoke` → `Capability::execute`，）。
         // 非工具行（4b–4e 落位的各族）不裹，原样入表。
         let row = match row.cap().cloned() {

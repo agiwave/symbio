@@ -128,7 +128,7 @@ pub(crate) fn due(view: &SessionView, anchor: Option<i64>, now: i64) -> Option<i
 ///
 /// - `meta.heartbeat = true`：给**前端**区分展示用（这条是自动发的）；
 /// - `meta.trigger = {kind, idle_ms}`：给**会话写臂**就地消费的触发声明
-/// （[D-076](README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "symbio/src/plugins/heartbeat/README") 的标记落法）。它由写臂在入队前
+///   （[D-076](README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "symbio/src/plugins/heartbeat/README") 的标记落法）。它由写臂在入队前
 ///   折叠成事实源里的四格，**不要求活到转写**——两片各归各的消费者，不合成一个。
 ///
 /// 消息 id 带触发时刻的毫秒（`hb_<sid>_<毫秒>`），同一会话的两次心跳消息因此天然不同 id。

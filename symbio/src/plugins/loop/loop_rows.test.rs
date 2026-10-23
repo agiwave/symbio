@@ -1,4 +1,4 @@
-//! 行表的判据（ 判据 7 / 10）。
+//! 行表的判据（判据 7 / 10）。
 //!
 //! 每个用例都从同一份日志切片出发，只改**一个**条件：只验「全满足时命中」在
 //! 「恒返回 true」的实现下也通过。接线之后旧 `LoopState` 已不存在，这里对的是
@@ -412,7 +412,7 @@ fn execute_row_closes_on_turn_closed() {
 /// 非空就在轮首准备里收束、`PreparedFlow::Done` 返回——驱动循环压根没起来，**表没被问**。
 ///
 /// 为什么要钉一条「表说该派发、实际上不问」的用例：只看表的人会得出「它应该被派发」，
-/// 然后去追一个不存在的 bug（ 的第一版判断就是这么来的）。把不对称钉在用例里，
+/// 然后去追一个不存在的 bug（第一版判断就是这么来的）。把不对称钉在用例里，
 /// 它就从「疑似漏派发」变成「已知且写明的边界」。
 #[test]
 fn a_drafted_turns_closing_row_is_owed_but_the_driver_never_asks() {
@@ -508,11 +508,11 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.compress",
             "policy.recall",
             "policy.reflex",
-            // 收束（ 步 5）：前件是 `turn.has_final`，执行体是 `close`。
+            // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
-            // （ 的 `turn` / 步 2 的 `model` / 步 3 的 `tool`）；
+            // （ `turn` / 步 2 的 `model` / 步 3 的 `tool`）；
             // `open-tools` 是工具调用的创建行（D-117），不与派发合并。
             "dispatch-turn",
             "dispatch-model",
@@ -539,7 +539,7 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Reflex,
-            // 收束入格不调模型：反射档（ 步 5）。
+            // 收束入格不调模型：反射档。
             crate::symbio_core::LatencyTier::Reflex,
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
@@ -557,7 +557,7 @@ fn rows_are_stable_and_globally_ordered() {
     );
 }
 
-// ── 装载期检查的反面夹具（：装载失败即拒绝启动）──────────────────────
+// ── 装载期检查的反面夹具（装载失败即拒绝启动）──────────────────────
 //
 // 每个夹具只破一道检查，好让「拒绝装载」逐条有名：行名就是它破的那一格。
 
@@ -822,9 +822,9 @@ fn the_lease_row_is_one_row_for_every_port() {
     assert_eq!(leases[0].owes.source, "stale_sent");
 }
 
-// ── 端口 `model` 的两行（ 步 2）────────────────────────────────────
+// ── 端口 `model` 的两行────────────────────────────────────
 //
-// 与 `turn` 的两行**同模板**（ 判据 1）：加一个端口 = 1 条 `PortDecl` +
+// 与 `turn` 的两行**同模板**（判据 1）：加一个端口 = 1 条 `PortDecl` +
 // 2 行模板 + 0 条新行。下面的用例钉住「同模板」这件事本身——模板漂了
 // （比如 `model` 的行少一个 `until` 分支），端口的账就永远关不掉。
 
@@ -894,7 +894,7 @@ fn the_model_rows_do_not_disturb_the_turn_rows() {
     );
 }
 
-// ── 工具端口与授权级联（ 步 3）────────────────────────────────────
+// ── 工具端口与授权级联────────────────────────────────────
 
 /// D-117：模型响应的 `calls` 集合逐元素开**创建债**，不是一笔整批债。
 #[test]
@@ -1323,7 +1323,7 @@ fn model_answer(turn: u64, id: &str) -> Event {
     )
 }
 
-/// 收束行（ 步 5）：答完了就欠一次入格，且它比执行行**先**被选中（55 < 60）。
+/// 收束行：答完了就欠一次入格，且它比执行行**先**被选中（55 < 60）。
 ///
 /// 这条裁决序是这一格存在的全部理由：日志上已经有「没有工具调用的应答」时，
 /// 下一个动作必须是入格，而不是再跑一次模型往返。
@@ -1376,7 +1376,7 @@ fn close_row_owes_only_after_an_answer_without_calls() {
     );
 }
 
-/// 收束行的前件是 `turn.closeable`（ 步 5c）：**答完了**或**模型没答成**。
+/// 收束行的前件是 `turn.closeable`（c）：**答完了**或**模型没答成**。
 ///
 /// 后半条是中止 / 适配器失败那两条路唯一的进账依据：它们没有「`calls` 为空的
 /// 模型应答」（答都没答成，哪来应答），`has_final` 因此不成立；而收束格只由
@@ -1613,7 +1613,7 @@ fn the_same_log_owes_the_same_rows_whatever_the_clock_says() {
     assert_eq!(once_text, format!("{twice:?}"));
 }
 
-/// 第 4 条在**真表**上的报告样例（ 验收口径 1）。
+/// 第 4 条在**真表**上的报告样例（验收口径 1）。
 ///
 /// 钉住名单而不是钉住「非空」：新增一对相交必须在名单里显形，否则它今天就是一次
 /// 静默遮蔽。名单本身不是错误——`lease` 与三行 `await-*` 同时开账是设计如此

@@ -330,7 +330,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
     // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
     // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里它不可达，
-    // 因为重试通道未启用（ 出口 ②，见下一条用例）。
+    // 因为重试通道未启用（出口 ②，见下一条用例）。
     let retrying: Vec<PortDecl> = PORTS
         .iter()
         .map(|p| PortDecl {

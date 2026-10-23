@@ -1,4 +1,4 @@
-//! 唤醒（ 步 5d）：用户动作在开幕之前落成一条**工具调用请求**。
+//! 唤醒（d）：用户动作在开幕之前落成一条**工具调用请求**。
 //!
 //! ## 与旧 `resume.rs` 的区别
 //!
@@ -135,7 +135,7 @@ async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOut
 
 /// 工具调用的唤醒：把用户动作落成一笔 `request(port=tool)`。
 ///
-/// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（ 步 5d）。
+/// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（d）。
 async fn land_tool_wake(
     session: &LoopSession,
     req: ResumeRequest,

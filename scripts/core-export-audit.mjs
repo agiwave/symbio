@@ -133,7 +133,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
       mutations_latest_snapshot:
         '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / turn_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
-      // 2026-10-21（ 段一）：事件 kind 名是**事件网格的命名空间**，README §3
+      // 2026-10-21（段一）：事件 kind 名是**事件网格的命名空间**，README §3
       // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
       // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop
       // 私有行为——它是 WAL / 回放 / 任何读侧的线上数据键，C-002 禁插件深引事件域

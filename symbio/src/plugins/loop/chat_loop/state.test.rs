@@ -53,7 +53,7 @@ fn load_history_false_is_honored() {
     assert!(!r.load_history);
 }
 
-// ── `request_actor_spec` 的五字段真值（ exit ③）─────────────────────────
+// ── `request_actor_spec` 的五字段真值（exit ③）─────────────────────────
 //
 // 会话选定哪个 agent ⇒ 规格就从授权表那一行取。三个角色主体（工人 / 规划者 / 验证者）
 // 逐一钉：**能力集从登记行取**（单一真源，不是空表也不是硬编码清单）、**模式按矩阵

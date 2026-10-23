@@ -276,7 +276,7 @@ impl TurnLauncher {
 
         // 本轮纯值快照：配置标量一次取完（请求生命周期内不变）。
         let cfg = self.config.read().await.clone();
-        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（ 的同一读法，
+        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（同一读法，
         // 从驱动器搬到会话侧：这是元数据事实，驱动器不再回头读父会话）。
         let scope = match session.delegating_principal().await {
             Some(parent) => crate::symbio_core::Scope::Child(parent),

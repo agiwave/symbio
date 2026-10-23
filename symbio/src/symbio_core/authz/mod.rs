@@ -23,8 +23,8 @@
 //! 2. **写侧**：运行器落格前判（`turn_runner::closure_gate`，按**种类**分两臂）：
 //!    发言收束（收束格）判 `can_reply`，产物收束
 //!    （`artifact.added`）判 `can_produce_artifact`
-//! （[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。未持有 ⇒ **不落那一格，
-//! 但落一条否定事实** `authz.denied{key, kind, why}`：
+//!    （[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。未持有 ⇒ **不落那一格，
+//!    但落一条否定事实** `authz.denied{key, kind, why}`：
 //!    发言臂下该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
 //!    见 `invariants::unresolved_turns`）。
 //!
@@ -231,7 +231,7 @@ pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 /// 召回的逐条预过滤（`plugins/loop/memory_events.rs`，跨会话切片逐条判）。两边各自的
 /// 那一层**作用域**差别是有意保留的（整列闸要表达「未声明读方 = 全量」，召回要表达
 /// 「别处的 `thread_private` 连属主也不进召回」），但**放宽的那两支必须同一条**——
-/// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（ ②、 ⑧）。
+/// 各写一遍就会漂成「stats 给看、召回不给看」这类没有理由的半开半掩（②、 ⑧）。
 pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
     viewer == SESSION_OWNER || production_matrix().can_see(viewer, SESSION_OWNER, scope)
 }
@@ -242,7 +242,7 @@ pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
 /// 拼法本身住在 `governance` 的声明表里（[`Capability::name`]）——本常量不重复它，
-/// 只给那道闸一个**语义名**（ ⑥）。
+/// 只给那道闸一个**语义名**（⑥）。
 pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();
 
 /// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
@@ -290,20 +290,20 @@ pub(crate) const CAP_ASSERT_VERIFICATION: &str = Capability::AssertVerification.
 ///   权威动作是产生产物（S08 §3 的 ActorSpec 行 `capabilities: [ProduceArtifact]`），
 ///   协作经 `commitment.*` 而非 `chat.*`；
 /// - [`PRINCIPAL_MARKET`]（市场）**只持 `assign.work`**，可见域 `public`——派活是市场的
-/// 权威动作，公告是公共域事实（S13 §3，）；
+///   权威动作，公告是公共域事实（S13 §3，）；
 /// - [`PRINCIPAL_ARBITER`]（仲裁者）**只持 `assert.verification`**，可见域 `public`——
-/// 验证能力在本表的持有者之一；裁决是集体决策的产物（S13 §1/§3，）；
+///   验证能力在本表的持有者之一；裁决是集体决策的产物（S13 §1/§3，）；
 /// - [`PRINCIPAL_GATEKEEPER`]（守门者）**只持 `judge.intent`**，可见域 `thread_private`——
-/// 准入门槛判来者意图，与判定行同款独持（S13 §3，）；
+///   准入门槛判来者意图，与判定行同款独持（S13 §3，）；
 /// - [`PRINCIPAL_WORKER`]（工人）**只持 `produce.artifact`**——树侧委派链上以产物收束的
-/// 子主体（S02 worker 行，）：与对等行窄的方向相同而角色不同（树侧委派 vs 图侧协作），
+///   子主体（S02 worker 行，）：与对等行窄的方向相同而角色不同（树侧委派 vs 图侧协作），
 ///   故另立一行；它的驱动路径 = `agent_run` 委派（子会话绑 `worker` ⇒ 主体 `session/worker`
 ///   ⇒ 工具结果落 `artifact.added`，作者是它自己）；
 /// - [`PRINCIPAL_PLANNER`]（规划者）**只持 `define.work`**——立任务是规划者的权威动作
-/// （S03 §3，）：与自主行同款独持（`AutonomousInitiator` 的先例），模式派生为
+///   （S03 §3，）：与自主行同款独持（`AutonomousInitiator` 的先例），模式派生为
 ///   `Decider`（规则驱动的规划步，不是会说话的会话主体）；
 /// - [`PRINCIPAL_VERIFIER`]（验证者）**只持 `assert.verification`**——独立验证的权威动作
-/// 是对判定盖章（S03 §3，）：与仲裁行同持验证能力而不同角色（任务质量判定 vs
+///   是对判定盖章（S03 §3，）：与仲裁行同持验证能力而不同角色（任务质量判定 vs
 ///   声誉裁决），C15 由构造期保证（本行不持 `define.work` / `produce.artifact`）。
 ///
 /// 后九行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
@@ -358,7 +358,7 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
         &[Capability::JudgeIntent.name()],
         VisScope::ThreadPrivate,
     ),
-    // S02/S03 三角色行（，行与执行路径同批）：工人产生产物（树侧委派收束）、
+    // S02/S03 三角色行（行与执行路径同批）：工人产生产物（树侧委派收束）、
     // 规划者立任务、验证者独立判定。三行都是**单能力独持**——与自主 / 判定 / 对等 /
     // 市场 / 仲裁 / 守门六行同一条纪律：角色出现必须自带窄行，窄行是唯一入口
     // （D-099）。planner 持 `define.work` 不碰 C15（不持 `assert.verification`）；verifier

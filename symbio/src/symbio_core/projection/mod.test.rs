@@ -101,7 +101,7 @@ fn projection_runs_on_a_snapshot_without_any_store() {
     assert_eq!(v.value, 1);
 }
 
-// ── `read_all`：全量读数的**具名口径**（ ⑧）──────────────────────
+// ── `read_all`：全量读数的**具名口径**（⑧）──────────────────────
 
 /// 一个把 `now` 透出来的投影：用它判「as-of 那一格到底传了什么」。
 ///

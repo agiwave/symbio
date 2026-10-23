@@ -115,7 +115,7 @@ impl TurnRunner {
     /// 测试侧的步驱动：**直接调生产派发器**（`turn_exec::drive_steps`），不复制循环。
     ///
     /// 早先这里另写了一份等价循环；那会让「无进展收束」「步数上界」的用例只测到副本。
-    /// 现在测试驱动与生产驱动是同一条路径（ 后果 2 的验收要求）。
+    /// 现在测试驱动与生产驱动是同一条路径（后果 2 的验收要求）。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_with_tools(
         &self,
@@ -740,7 +740,7 @@ mod turn_runner_tests {
         );
     }
 
-    /// 开场白**落格的同一时刻**上线到实时面（ 的一半），且节点 id 就是落格载荷里
+    /// 开场白**落格的同一时刻**上线到实时面（一半），且节点 id 就是落格载荷里
     /// 那个 `dialog.id`。
     ///
     /// ## 为什么要钉「它就是第一帧」
@@ -881,7 +881,7 @@ mod turn_runner_tests {
         assert!(out.text.is_empty(), "本轮没有半截产出");
 
         let snapshot = store.range(Seq::new(0));
-        // 模型端口的协议事实落在收束格**之前**（ 步 2）：中止也是一次模型
+        // 模型端口的协议事实落在收束格**之前**：中止也是一次模型
         // 往返，它同样有 `request` / `sent` / `failed` 三格——中止不是「没发生」。
         assert_eq!(
             super::kinds(&snapshot),
@@ -1236,7 +1236,7 @@ mod tool_round_tests {
         EVENT_USER_MESSAGE,
     };
 
-    /// 判据（ 步 2）：**每一次**模型往返都留下完整的协议事实——
+    /// 判据：**每一次**模型往返都留下完整的协议事实——
     /// `request` → `sent` → `response` / `failed`，且三者共享同一个逻辑 id。
     ///
     /// ## 它钉的是什么
@@ -1702,7 +1702,7 @@ mod tool_round_tests {
 
     /// 替身按生产口径开账：逐条落 `request(port=tool)`，id 取模型应答 `calls` 里那一笔。
     ///
-    /// 行表按事实判欠不欠：替身不落账，`open-tools` 就永远挨不到派发（ 步 5b）。
+    /// 行表按事实判欠不欠：替身不落账，`open-tools` 就永远挨不到派发（b）。
     fn open_batch(store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall> {
         let Some((turn_no, produced_by, ids)) = model_batch(store) else {
             return Vec::new();
@@ -1824,7 +1824,7 @@ mod tool_round_tests {
     /// 假分发方：把工具调用映射成一条结果事实；`pending` 决定是否收束于等用户。
     ///
     /// 它按生产口径落协议事实（`request` → `authz.granted` → `sent` → `response`）：
-    /// 行表按事实判欠不欠，替身不落账，创建行就永远挨不到派发（ 步 5b）。
+    /// 行表按事实判欠不欠，替身不落账，创建行就永远挨不到派发（b）。
     struct FakeDispatch {
         pending: bool,
         rounds: Arc<Mutex<usize>>,
@@ -2011,7 +2011,7 @@ mod tool_round_tests {
     }
 
     /// 全批拒绝的假分发方：证明 `deny-tools` 那一行真的被选中并跑到执行层，
-    /// 且被拒的 `request` 以 `failed{why}` 关账（ 步 5b）。
+    /// 且被拒的 `request` 以 `failed{why}` 关账（b）。
     struct DenyDispatch {
         rounds: Arc<Mutex<usize>>,
     }
@@ -2915,7 +2915,7 @@ mod tool_round_tests {
     /// 永远等不到收束事件——C4 的产物口径（D-067）会掩盖它，但 `last_open_turn`
     /// 仍按 final / fallback 找轮，恢复链路会先断。
     ///
-    /// ## 唤醒身份在**事实**上，不在入参里（ 步 5d）
+    /// ## 唤醒身份在**事实**上，不在入参里（d）
     ///
     /// 用户动作先落成 `request(port=tool)`（载荷带 `resume` 标记），行表的
     /// `authorize-tool`（0）与 `dispatch-tools`（68）两行自己认领它——恢复路径不再
@@ -4019,7 +4019,7 @@ mod scope_ceiling_tests {
     }
 }
 
-// ── 拒绝落事实（，DE-015 §4.2）────────────────────────────────────
+// ── 拒绝落事实（DE-015 §4.2）────────────────────────────────────
 //
 // 收束闸拒绝时此前只有一条 `warn`：日志里留下的是「该轮没收束」，与「根本没跑完」
 // **同形**。`deny(…)` 把否定落成 `authz.denied{key, kind, reason, detail}`——判定与矩阵一个字
@@ -4346,7 +4346,7 @@ mod round_decision_tests {
     }
 }
 
-// ── 派发器读账本（ 判据 4 / 判据 2）：换绑定表的两条夹具 ──────────────────
+// ── 派发器读账本（判据 4 / 判据 2）：换绑定表的两条夹具 ──────────────────
 //
 // 判据要的是「**不接线就红**」，不是「按构造不可达」：
 // - 判据 4（空账本 ⇒ `exhausted{no_progress}`）：删掉派发器的空账本守卫，本模块第一条
@@ -4399,7 +4399,7 @@ mod actor_ledger_tests {
 
     /// 夹具绑定表：名单照抄生产声明（[`ACTOR_EXECUTE`]），只换手法。
     ///
-    /// `transitional` 清空——那两条豁免是给收束格的旁路写的（ 步 5d 随旁路一起删），
+    /// `transitional` 清空——那两条豁免是给收束格的旁路写的（d 随旁路一起删），
     /// 留着就等于把要测的越界路径关掉。
     static ACTORS_WRITE_NOTHING: &[ActorEntry] = &[ActorEntry {
         decl: ACTOR_EXECUTE,

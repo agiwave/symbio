@@ -64,7 +64,7 @@
 //!   （[`PluginDir::save`] 等）自动补回。
 //! - **身份键是 manifest 的**：出厂声明在 `Plugin::meta()`，装配期经
 //!   [`PluginDir::seed_identity`] 投影一次；此后 manifest 权威，运行期经
-//! [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
+//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
 //!
 //! ## 职责划分（本方案的全部要点）
 //!

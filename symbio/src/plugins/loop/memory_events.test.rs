@@ -261,7 +261,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 }
 
-/// **去重读的是全史，不是近 N 条窗口**（ 项二，以判据结案）。
+/// **去重读的是全史，不是近 N 条窗口**（项二，以判据结案）。
 ///
 /// 立批时给的方案是「有界扫描 + 去重窗口参数」，实测把它否了：同一轮里真正贵的是
 /// 把事实切片交回值那一步（release、2 万格：`range(0)` ≈9.8 ms，而在交回的切片上跑
@@ -317,7 +317,7 @@ fn dedupe_covers_the_whole_history_not_the_recall_window() {
     );
 }
 
-/// 步 11b（ 批④）：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
+/// 步 11b：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
 /// 里 `recall:tag=judgment` 的**生产写方**（此前参数在、值缺写方）。
 ///
 /// 与经验那条同文去重 / 同截断 / 同溯源（本轮开口格）；空正文不记。
@@ -453,7 +453,7 @@ fn encode_payload_carries_the_content_side_vis_scope() {
 
 /// ① 的巩固侧判据：合并产物**继承源记忆的内容侧可见域**——合并不放大
 /// 可见域（源是 shared ⇒ 产物 shared；源读不到 ⇒ 落 thread_private）。
-/// 写方与读方同批（ 纪律）：产地（encode）→ 继承（consolidate）→ 读方
+/// 写方与读方同批（纪律）：产地（encode）→ 继承（consolidate）→ 读方
 /// （stats 的闸，见该处测试）三点一批，不留「有产地无人读」的半边。
 #[test]
 fn consolidated_memory_inherits_the_source_vis_scope() {
@@ -945,7 +945,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     );
 }
 
-/// 步 12 读方**消费混合打分**（ 批②）：本轮用户正文作 query 时，
+/// 步 12 读方**消费混合打分**：本轮用户正文作 query 时，
 /// 内容相关的旧记忆排到无关的新记忆前面——注入段「最新在前」的排版因此
 /// 把最相关的排在模型眼前。
 ///
@@ -994,7 +994,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
 
 // ==================== 步 12 · 读侧预过滤 ====================
 
-/// **判断记忆不出会话**（ 产地的第二个消费方落地）：`thread_private` 的记忆
+/// **判断记忆不出会话**（产地的第二个消费方落地）：`thread_private` 的记忆
 /// 只给**记录它的那个会话**看——别的会话的召回视图里没有它，本会话照常看得见。
 /// 判断记忆用生产写方的缺省形态（载荷不带 `vis_scope` 字段 ⇒ 缺省私有），
 /// 顺带钉住「存量事件按 C10 缺省收窄」。

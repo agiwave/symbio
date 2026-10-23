@@ -260,7 +260,7 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
 // core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
 //
-// `PermissionMatrix` **不在根出口**（ 收窄）：它最后一个 core 外消费方是
+// `PermissionMatrix` **不在根出口**（收窄）：它最后一个 core 外消费方是
 // `stats.rs` 的读侧闸—— 把那一格改成按内容侧可见域判之后，闸只经
 // `authz::production_matrix()` 拿表（返回类型走类型推导，不点名），插件侧再没有
 // 一处指称这个类型 ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
@@ -274,7 +274,7 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
 pub(crate) use governance::GrantsOverlay;
 pub use governance::VisScope;
-// 授权表的**外部面**（ 同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
+// 授权表的**外部面**（同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
 // 就是一条深路径（C-002 判红），而插件侧有十几个符号在用。按 §1 的口径，根平铺是
 // 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。`pub(crate)` 与
 // `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。
@@ -456,7 +456,7 @@ pub use logger::{
 pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{text_floor_char_boundary, text_truncate_bytes};
 // 巩固合并的纯计算内核：只依赖 `std`，被 `docs/003-design/verify/` 的 standalone
-// 程序以 `#[path]` 包含同一份源码（ 批① 的纪律，住址随 D-082 裁决三上移）。
+// 程序以 `#[path]` 包含同一份源码（纪律，住址随 D-082 裁决三上移）。
 // 开**模块命名空间**而不是逐个 `pub use`：函数名（`truncate_chars` / `split_sentences`
 // / `merge_with_fidelity`）不是对外契约，也不该进根公开面。
 pub(crate) use text::merge_kernel;

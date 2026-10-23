@@ -1061,7 +1061,7 @@ fn declaring_the_owner_reads_everything() {
 /// `has_wal` 仍为真 ⇒ 「有源但不给你看」与 `missing_wal` 那条「没有源」可分辨；
 /// 不变量列同为空——没看见事实，就没有属于你的缺口可报。
 ///
-/// 前提（ ② 之后要说清的一句）：本事实源**没有共享内容**——`seed` 只种
+/// 前提（② 之后要说清的一句）：本事实源**没有共享内容**——`seed` 只种
 /// 对话格不种记忆，内容侧可见域因此是 C10 缺省 `thread_private`，闸的答案
 /// 与接线前逐字相同。共享内容的读方见下一条。
 #[test]
@@ -1296,7 +1296,7 @@ fn reputation_column_reports_own_and_by_principal() {
     assert_eq!(denied.reputation, serde_json::json!({}));
 }
 
-/// 承诺列（ 段二，S08 §5 的读侧出口）：
+/// 承诺列（段二，S08 §5 的读侧出口）：
 /// 一轮里委托过一次 ⇒ 这里就**读得出那一条**（谁向谁、承诺了什么、违约为什么）。
 ///
 /// ## 这条判据补的是哪一半
@@ -1512,7 +1512,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
                 .append(
                     Event::pending(
                         id,
-                        // 校准观测走**自己的格子**（ 批①）。旧写法把它写在
+                        // 校准观测走**自己的格子**。旧写法把它写在
                         // `memory.recalled` 上、靠载荷字段认——那正是读侧赌「别的格子
                         // 恰好不带这两个字段」的那段。
                         EVENT_MEMORY_CALIBRATED,

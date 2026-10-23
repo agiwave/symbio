@@ -26,7 +26,7 @@
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由 `execute_turn` 以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
-//! （ / ）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! （/ ）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
 //! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
@@ -102,7 +102,7 @@ use super::turn_runner::{TurnInput, TurnOutcome, TurnRunner, TurnSession, TurnSe
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
 
-// —— 阶段拆分（ · B2，DE-021 §5 动作 B2）——
+// —— 阶段拆分（· B2，DE-021 §5 动作 B2）——
 // `execute_turn` 的四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
 // （消费方与本文件测试都不必改引用）。阶段体是逐字搬移，本文件只留调度。
 mod assemble;
@@ -772,12 +772,12 @@ pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 
 /// `execute` 执行体：跑**一次**模型往返。
 ///
-/// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（ 步 5b），不再在这个
+/// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（b），不再在这个
 /// 执行体里按草稿分支：[`super::turn_exec::run_open`] / `run_authorize` /
 /// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步。
 ///
 /// 收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被选中，入格
-/// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（ 步 5d）：唤醒请求进
+/// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（d）：唤醒请求进
 /// 行表之后，恢复幕与普通幕走同一组行。
 ///
 /// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
@@ -800,7 +800,7 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `opener` 执行体（ 步 5b）：`open-tools` 行选中的动作——逐条开账。
+/// `opener` 执行体（b）：`open-tools` 行选中的动作——逐条开账。
 pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session.open(step.store, step.dispatch).await;
@@ -808,7 +808,7 @@ pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `authorizer` 执行体（ 步 5b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
+/// `authorizer` 执行体（b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
 pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session.authorize(step.store, step.dispatch).await;
@@ -816,7 +816,7 @@ pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `courier` 执行体（ 步 5b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
+/// `courier` 执行体（b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
 pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
@@ -826,7 +826,7 @@ pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `close` 执行体：把寄存的那份**结局**落成收束格（ 步 5 / 步 5c）。
+/// `close` 执行体：把寄存的那份**结局**落成收束格（/ 步 5c）。
 ///
 /// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.closeable`：答完了 **或**
 /// 模型没答成），不由草稿说：与 [`run_execute`] 的分工是「谁欠什么」在表里、
@@ -855,7 +855,7 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// 把最后一处业务分支收进执行体：`by` → 动作是绑定表
 /// （`loop_rows::ACTORS`）里的一次查找，派发器对
 /// `by` 只有一个动作 `(next.action)(&mut step)`；工具批的三笔债各有自己的行与
-/// 执行体（ 步 5b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
+/// 执行体（b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
 /// （D-118 订正 1），选债面不再需要 `accept` 谓词。
 ///
 /// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。
@@ -990,7 +990,7 @@ pub(crate) async fn drive_steps(
 ///   （判据 = e2e `t78` 的 auto 幕）。
 /// - 收束于**等待用户**那一格进展（`status: "pending"`）：它不是停机格（本轮尚未了结，
 ///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
-/// 把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
+///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
 fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if e.turn != turn {
         return false;

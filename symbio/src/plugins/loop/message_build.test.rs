@@ -236,7 +236,7 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     let reasoning_child = msgs.iter().find(|m| m.is_reasoning()).unwrap();
     assert_eq!(reasoning_child.msg_type, Some(NodeKind::Notice));
     assert_eq!(reasoning_child.style_tag(), Some(CHAT_STYLE_TAG_REASONING));
-    // 呈现（title/icon）**不属于落库事实**（[ B3]）：into_messages 产的是进存储的
+    // 呈现（title/icon）**不属于落库事实**：into_messages 产的是进存储的
     // 节点，只带形状（msg_type + style_tag），呈现由前后端交互面统一派生——这里必须为空。
     assert_eq!(reasoning_child.title, None);
     assert_eq!(reasoning_child.icon, None);
