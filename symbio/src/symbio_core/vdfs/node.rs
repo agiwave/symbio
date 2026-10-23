@@ -125,7 +125,7 @@ impl VdfsNewType {
 ///
 /// 地址是**某一份列表**给这个节点的定位，不是节点自己的属性——同一个节点可以在
 /// 不同列表里以不同地址出现。实证：设置页的一项指向插件自己那份配置文档
-/// （[`capability_entry_of`] 给它的地址是 `<目录名>/PLUGIN.yml`，落在**另一个挂载点**里），
+/// （[`capability_entry_of`](crate::symbio_core::capability_entry_of) 给它的地址是 `<目录名>/PLUGIN.yml`，落在**另一个挂载点**里），
 /// 而同一份文档在自己的目录里就叫 `PLUGIN.yml`。若把 `path` 放进节点，这两个
 /// 列表就必须各造一个节点副本，且「谁填的」无从判定。
 ///
