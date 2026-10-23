@@ -21,7 +21,7 @@
  * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request`。**例外**：被拒的那一笔（`authz.denied`）没有 `sent` 是对的——没放行就没派发（e2e T78 的同一条判据）；反过来「拒了却派发了」判红 | PL-016 §4 五事实 |
  * | J2 | `user.message` 的 seq 先于本轮任何协议 `request` | PL-017 判据 2（溯源不悬空的时间面） |
  * | J3 | `sent` 的 seq 严格小于终态的 seq | PL-016 §4（引擎写 before，应答在后） |
- * | J4 | 收束格（`chat.assistant.final`）的 `reason` 非空 | PL-016 §6 结局必须有名 |
+ * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`，两种都算）的 `reason` 非空 | PL-016 §6 结局必须有名 |
  * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | PL-016 §4 溯源不悬空 |
  * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | T-239（装载期硬拒的实测对账） |
  * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | PL-017 判据 2 全量口径 + [T-238] |
@@ -283,7 +283,13 @@ function judgeSession(homedir, sid, strict) {
     }
   }
   // J4 收束格 reason 非空
-  const finals = events.filter((e) => e.kind === 'chat.assistant.final')
+  //
+  // 「收束格」是**两种**：`chat.assistant.final`（正常定稿）与 `chat.assistant.fallback`
+  // （模型没答成 / 空答，T-244 步 5c 起由 `close` 执行体独占写）。只认 final 会把
+  // **每一条失败轮**都判成「没跑到定稿」——而失败轮恰恰是 ADR-122 决策 5 要求
+  // 「照样有格」的那一轮。判据的口径必须与方案里的收束格集合一致。
+  const CLOSING = ['chat.assistant.final', 'chat.assistant.fallback']
+  const finals = events.filter((e) => CLOSING.includes(e.kind))
   if (finals.length === 0) note('J4 没有收束格（这次实测没跑到定稿）')
   for (const f of finals) {
     if (typeof f.payload?.reason !== 'string' || !f.payload.reason) note(`J4 收束格#${f.seq} 的 reason 为空`)
