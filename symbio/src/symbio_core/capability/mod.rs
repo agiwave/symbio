@@ -92,7 +92,7 @@ pub struct CapabilityMeta {
     /// 使用示例列表
     #[serde(skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<String>>,
-    /// 工具风险等级（`None` = 默认 `Medium`，由 [`effective_risk`](Self::effective_risk) 兜底）
+    /// 工具风险等级（`None` = 默认 `Medium`，由 `effective_risk` 兜底）
     ///
     /// 机制说明：工具在 `CapabilityMeta` 中**自声明**风险等级，审批闸门
     /// （`local::policy`）读这个字段判定，**不硬编码工具名**——工具增删不改闸门。
@@ -101,7 +101,7 @@ pub struct CapabilityMeta {
     pub risk: Option<CapabilityRiskLevel>,
     /// 本工具是否提供 `assign.work`（派活）——**淘汰闸的管辖对象**（S13 §3，）。
     ///
-    /// 机制说明：与 [`risk`](Self::risk) 同一条纪律——**工具自声明**，闸门读这个
+    /// 机制说明：与 `risk` 同一条纪律——**工具自声明**，闸门读这个
     /// 字段判定，**不硬编码工具名**。`assign.work` 被淘汰回路收回时，
     /// 执行器据本字段把调用判为淘汰拒止；未声明的工具不在淘汰闸管辖内。作用域
     /// 投影（子智能体的改名包装）只换名字、原样透传本字段——闸门跟随**工具**，
@@ -110,7 +110,7 @@ pub struct CapabilityMeta {
     pub provides_assign_work: bool,
     /// 本工具是否**立约**（跨主体承诺）——承诺出参的记账对象（S08 §3）。
     ///
-    /// 机制说明：同 [`provides_assign_work`](Self::provides_assign_work) 的自声明
+    /// 机制说明：同 `provides_assign_work` 的自声明
     /// 纪律。承诺记账（`commitment.*` 格）只为声明了本位的工具记；没跑
     /// 到的一样记违约——「约」本身已经存在。未声明 ⇒ 不记：本主体自办的调用是
     /// 执行结果，不是承诺。
@@ -307,7 +307,7 @@ pub mod failure_kind {
     }
 }
 
-/// 收集口：**一张表，三个方法**（DE-008）。
+/// 收集口：**一张表，三个方法**（AR-025）。
 ///
 /// 收敛前这里是十六个方法的形态：`register` / `register_batch` /
 /// `list_capability` / `invoke` / `has_capability` 五个方法专服工具一族，
@@ -324,7 +324,7 @@ pub mod failure_kind {
 ///
 /// 执行不是表的职责：表答「这一行是什么、怎么找到它」，
 /// [`Capability::execute`] 答「跑起来是什么」。按名执行是 `get(name)` +
-/// [`capability_invoke`](crate::symbio_core::capability_invoke) 两步——拆开之后，
+/// `capability_invoke` 两步——拆开之后，
 /// 这三个方法在 4a–4e 各族（工具 / 模型 / 提示词 / 挂载 / 选项）全部复用：
 /// 4b 的模型族落位时一个方法都没有变形（只加了行的形态）。
 ///

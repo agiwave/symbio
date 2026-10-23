@@ -720,7 +720,7 @@ where
 /// ## 计数为什么由闭包数
 ///
 /// 「派发被拒（执行体压根没跑）= 0」与「跑完但落格失败 = 1」分得开的唯一办法是
-/// 在**跑之前**加一——与 [`classify`](self::classify) 的口径同源。
+/// 在**跑之前**加一——与 `classify` 的口径同源。
 pub(crate) struct Compress {
     store: Arc<dyn Store<Event = Event>>,
     turn: u64,

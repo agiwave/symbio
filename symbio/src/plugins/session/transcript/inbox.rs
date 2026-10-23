@@ -59,7 +59,7 @@ const RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
 /// 「还有活没干完」的两种等待方式——**事件**与**时间**，不混用。
 ///
 /// 分开之后，消费者不再需要「每 50ms 醒来看看有没有变化」：会话收轮会叫醒它
-/// （[`WorkingState::apply`](super::super::working::WorkingState::apply) 返回「由忙
+/// （`WorkingState::apply` 返回「由忙
 /// 变闲」时 `turn_done` 通知一次），入队会叫醒它（`inbox_wake`），只有真正的重试
 /// 才落到时间上。
 #[derive(Default)]
@@ -109,7 +109,7 @@ fn announce_drained(change_subs: &VdfsChangeSubscriptions, session_id: &str, bat
 /// 取一个会话的队首只需要：**上界从哪来**（`config`）、**队列在哪**（`state.inner.inbox`）、
 /// **通知投给谁**（`change_subs`）——插件本身在这一步没有贡献。于是它不住在
 /// `impl SessionPlugin` 上，需要它的一方（`chat_loop::SupplementDrain`）拿的就是这三样，
-/// 而不是整个插件（[D-075](../../../../../docs/003-design/002-架构总览.md "D-075") 前置 P2）。
+/// 而不是整个插件（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）。
 ///
 /// ## 上界与通知都不另写一份
 ///

@@ -164,7 +164,7 @@ impl Registry for SubAgentVisitor {
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
-        // 换成 put（DE-008 4a）。
+        // 换成 put（AR-025 4a）。
         let Some(cap) = row.cap().cloned() else {
             return;
         };

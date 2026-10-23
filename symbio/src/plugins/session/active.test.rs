@@ -3,7 +3,7 @@
 //! - 自动压缩熔断状态机（`compression_should_skip` / `record_success` /
 //!   `record_failure`）：刻意收在三个方法里，不依赖 LLM / 存储；
 //! - 运行态合并规则（`begin_turn` / `finish_turn` / `set_warning` 与
-//!   `runtime_of_state`）：钉住 D-083 §5.2 的「工作态 > 进程内缓存 > 事实投影」。
+//! `runtime_of_state`）：钉住 D-083 §5.2 的「工作态 > 进程内缓存 > 事实投影」。
 //!
 //! 回归动机：实测会话 `09d74431` 在运行过程中**反复**自动压缩失败，但旧代码既不记录
 //! 原因、也不停止重试——每轮用户消息都白等一次数分钟的注定失败请求。熔断要解决的

@@ -10,7 +10,7 @@
 //! ## 契约出处
 //!
 //! 形状逐字来自可执行论证
-//! [`docs/003-design/verify/latency_gate.rs`](../../../../docs/003-design/verify/latency_gate.rs)；
+//! `docs/003-design/verify/latency_gate.rs`；
 //! 四层预算表来自 [plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
 //!
 //! ## 「依赖」的边界（诚实划界）
@@ -101,7 +101,7 @@ impl FullModel {
 /// 令牌签发中心：**唯一**能造令牌的地方，按档位签发（一个 match，零运行时开销）。
 ///
 /// **只有两档有令牌**。快速档曾是三档之一（`ClassifyOnly` / `issue_fast`），
-/// [D-096](../../plugins/model/README.md "D-096") 把它退役了：它守的端口
+/// [D-096](../../plugins/model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "symbio/src/plugins/model/README") 把它退役了：它守的端口
 /// （`Classifier`）在生产里从未存在，而「快速档不得生成」这条约束在 classify 插件上
 /// 由**返回类型**（`parse_verdict -> Option<Verdict>`，四变体闭集）与**工具集判据**
 /// （`traverse_contributes_no_tools`）承载——换的是承重墙，不是拆掉约束。
@@ -298,7 +298,7 @@ pub trait LlmAdapter: Send + Sync {
     ///
     /// 默认实现 = **忽略工具清单、`tool_calls` 恒空**——这是**诚实降级**而非失败：
     /// 不支持工具的适配器照常答文本。没有这条通道，运行器在**类型上**就拿不到模型
-    /// 请求的工具调用（见 `symbio/src/plugins/session/docs/102-core-loop.md` §1）。
+    /// 请求的工具调用（见 设计文档 §1）。
     ///
     /// 与 [`Self::generate_streaming`] 的关系：无工具时两者等价（默认实现即经它委托）
     /// ——「有工具」与「无工具」不是两条执行路径，是同一条的两种入参。

@@ -375,7 +375,7 @@ async fn converge_inflight_is_idempotent() {
     );
 }
 
-// ==================== flat 档子树并集（相应批次）====================
+// ==================== flat 档子树并集（[]）====================
 
 /// `subtree_of`：`flat` 档下本轮直接子节点升了根（`parent_id: None`），靠
 /// `meta.turn_root` 记号认回——并集必须把「骨架 ∪ {turn_root==骨架}」收全，

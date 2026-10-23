@@ -13,7 +13,7 @@
 //! 汇报那条**草稿类型本身**（`ReportDraft` + `to_message`）不住这里：写侧在这里
 //! （轮边界回调的返回），读侧在留守的 `rebuild::reported_node`（回放同一格），
 //! 隔着驱动器/留守的切线两头都要用 —— 它因此住
-//! [`crate::symbio_core::facts`]（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 2 组）。
+//! [`crate::symbio_core::facts`]（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 2 组）。
 //! 本文件留的是**回调机制**：`RoundHookFn` 的形态与「两个可选口打成一个」的门。
 //!
 //! ## `to_message`：为什么汇报也要一条 `ChatNode`
@@ -40,7 +40,7 @@ pub(crate) use crate::symbio_core::facts::ReportDraft;
 /// **没有入参**：判决要的两样东西都在日志里——本幕唤醒事实的 `ts`（`now`）与抽干
 /// 时落的补充格（静默锚），`report_due` 视图读它们。于是「先抽干、后汇报 ⇒ 静默
 /// 时钟归零」是一条**数据**，而判决路径上没有墙钟读数（DE-015 判据 12；这条纪律的
-/// 来历与载体变更见 [D-074](../../../../docs/003-design/014-单环一表.md "D-074")）。
+/// 来历与载体变更见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
 pub(crate) type RoundHookFn = Arc<
     dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ReportDraft>> + Send>>
         + Send

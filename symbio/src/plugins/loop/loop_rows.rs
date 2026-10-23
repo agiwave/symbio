@@ -3,7 +3,7 @@
 //! ## 一行只写「什么时候欠、什么算还」
 //!
 //! 判据全部是数据：`owes` / `until` / `unless` 三个模式，`prio` 是**全局**裁决序
-//! （`(prio, name, key)` 升序）。执行体只拿到一笔 [`Debt`](crate::symbio_core::ring::Debt)，
+//! （`(prio, name, key)` 升序）。执行体只拿到一笔 `Debt`，
 //! 不再读任何请求作用域状态——旧 `LoopState` 的五个变体在这里对应五个视图读到的事实。
 //!
 //! ## 五条策略行的前后关系
@@ -19,7 +19,7 @@
 //! 60 execute       ── 执行决策：本幕未收束且手上没有开着的工具批 ⇒ 跑一次模型往返
 //! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
 //! 66 dispatch-model─ 端口派发：模型往返（ 步 2，在 `turn` 执行体内部）
-//! 67 open-tools    ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
+//! 67 open-tools ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
 //! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用（ 步 3）
 //! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（ 步 5b）
 //! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
@@ -70,11 +70,11 @@ use crate::symbio_core::{
 /// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
 /// 未接线的行显式写 `None`，进表、可 diff，接线时把 `Some(名字)` 与
-/// [`turn_exec`](super::turn_exec) 里那条 `ActorEntry` 同批改回。
+/// `turn_exec` 里那条 `ActorEntry` 同批改回。
 /// 检查方在装载期：`by = Some(a)` 而 `a` 没有声明 ⇒
-/// [`Gap::UnmannedRow`](crate::symbio_core::ring::Gap::UnmannedRow) ⇒ 装载红。
+/// `Gap::UnmannedRow` ⇒ 装载红。
 ///
-/// 声明本身（DE-015 §2.3）与 [`turn_exec::ACTORS`](super::turn_exec::ACTORS) 的
+/// 声明本身（DE-015 §2.3）与 `turn_exec::ACTORS` 的
 /// 绑定项一起构造，这里只放静态可查的四样。
 ///
 /// `writes` 是这个执行体**直接落格**的领域事实（账本语义：单写者是 store，不是引擎）。
@@ -188,7 +188,7 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 /// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
 /// 声明不了不是遗漏，是装载期会红：把收束格写进 `execute` 的名单，`close-turn` 的出口格
 /// 就同时是两个执行体的出口格 ⇒
-/// [`Gap::DependencyCycle`](crate::symbio_core::ring::Gap::DependencyCycle)（ 步 5 注①）。
+/// `Gap::DependencyCycle`（ 步 5 注①）。
 /// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
 /// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
 /// 而不是将错就错地放宽名单。
@@ -923,7 +923,7 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 装载：五张注册表经 DE-015 §3.2 的**六个口**进 `Builder`，`seal()` 跑完 §3.4 的七道。
+/// 装载：五张注册表经 DE-015 §3.2 的**六个口**进 `Builder`，`seal` 跑完 §3.4 的七道。
 ///
 /// 行切片与端口切片从这里进 `row` / `port` 两个入口——检查跟着表走，不由调用方
 /// 自己想起来再跑一遍：`seal` 是装载的唯一出口。
@@ -1049,7 +1049,7 @@ pub(crate) fn wake_now_ms(events: &[Event], drive_seq: u64) -> i64 {
 /// （`port.rs` 的往返、`tool_dispatch` 的三段、`chat_loop` 的策略段）问的都是
 /// 「这笔账在不在」，而「引擎该不该现在去还」只由 [`next`] 回答。
 ///
-/// 返回布尔而不是 [`Debt`](crate::symbio_core::ring::Debt)：调用点只决定「这一步
+/// 返回布尔而不是 `Debt`：调用点只决定「这一步
 /// 做不做」。要裁决顺序（同一点多行竞争）时用 `ring::drive`，本函数不代劳。
 pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     let Some(frozen) = frozen() else {

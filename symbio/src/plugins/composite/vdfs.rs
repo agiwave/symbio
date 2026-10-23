@@ -22,7 +22,7 @@
 //! | 跨子目录拒绝 | `move` 只允许在同一子目录内 |
 //! | 事件补全 | 子插件报出的相对路径补成树内全路径再交给上层 sink |
 //!
-//! **本层不填条目地址**：地址是「某一份列表」的定位（[`VdfsItem::path`](crate::symbio_core::VdfsItem::path)），
+//! **本层不填条目地址**：地址是「某一份列表」的定位（`VdfsItem::path`），
 //! 按 `<父地址>/<name>` 推导即可，由访问层（`plugins/vdfs/host.rs::fill_paths`）
 //! 用**请求地址**统一回填。本层若自己填，就必须知道自己的挂载前缀——而它不知道
 //! （composite 可被另一个 composite 包含），填出来的会缺前缀。
@@ -285,7 +285,7 @@ impl CompositeVdfs {
     /// 节点在自己的 `list` 结果里带 [`VdfsNode::new_type`]」是**同一条通道**，
     /// 使用方不必先知道某个节点是不是根，才能问它「你能新建什么」。
     ///
-    /// 只取 `new_type`：其余字段仍以 [`dir_node`](Self::dir_node) 为准。provider
+    /// 只取 `new_type`：其余字段仍以 `dir_node` 为准。provider
     /// 没答上来时按「根下不可新建」处理——与 `new_type: None` 的语义一致。
     async fn dir_node_full(
         registry: &PluginRegistry,

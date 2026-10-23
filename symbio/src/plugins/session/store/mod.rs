@@ -4,7 +4,7 @@
 //!
 //! **没有可切换的存储后端**：会话只有一种落盘布局，临时会话只是「不持久化」。
 //! 为什么不做多后端选型（以及当初那个形状被推翻的两个前提），见
-//! DE-002——此处不复述。
+//! D-008——此处不复述。
 //!
 //! 差异收成构造时的一次选型：
 //!
@@ -16,7 +16,7 @@
 //! ## 事件事实源（子模块 `wal`）
 //!
 //! 会话的**权威事件流**也住本模块：JSONL 追加、跨进程写者令牌、被压缩取代的前缀
-//! 归档。它实现 core 的 [`Store`](crate::symbio_core::Store) 端口，而类型本身
+//! 归档。它实现 core 的 `Store` 端口，而类型本身
 //! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
 //! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 //!
@@ -40,12 +40,12 @@
 //! 共用的只是**寻址**：根由调用方传入，id→段名取
 //! [`crate::providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
-//! `docs/003-design/009-VDFS规范.md` §13.4（agent 目录是先例）。
+//! `../../../../../docs/003-design/009-VDFS规范.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
 //! 形状与它的两条理由（为什么元数据与消息分两个文件、子会话为什么嵌套存放）
-//! 写在 [`layout`](layout) 的模块头——那个文件就是这段布局的实现，判据同表。
+//! 写在 `layout` 的模块头——那个文件就是这段布局的实现，判据同表。
 
 use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
@@ -90,15 +90,15 @@ pub struct SessionStore {
     base_dir: Option<PathBuf>,
     /// 不落盘时的进程内条目表（落盘型恒空）
     mem: RwLock<BTreeMap<String, Session>>,
-    /// 每会话一把写入锁（见 [`lock_writes`](Self::lock_writes)）
+    /// 每会话一把写入锁（见 `lock_writes`）
     write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    /// 每会话**一个**事实源句柄（见 [`facts`](Self::facts)）。
+    /// 每会话**一个**事实源句柄（见 `facts`）。
     ///
     /// 这是进程内唯一持有写者令牌的实例：同一会话的第二个 `WalStore::open`
     /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
     /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
     facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
-    /// 每会话**一份运行态投影值**（见 [`runtime_facts`](Self::runtime_facts)）。
+    /// 每会话**一份运行态投影值**（见 `runtime_facts`）。
     ///
     /// 事实变化才重折：有写句柄时以 `head` 为戳（追加即变），只读时以 WAL 的
     /// 长度 + mtime 为戳。运行态读取（`list` / `stat`）因此不必每次重放整条 WAL。
@@ -107,7 +107,7 @@ pub struct SessionStore {
 
 impl SessionStore {
     /// 持久会话存储；`base_dir` 通常是
-    /// [`SessionPlugin::storage_dir`](super::plugin::SessionPlugin::storage_dir)
+    /// `SessionPlugin::storage_dir`
     /// （= 本插件自己的目录），测试注入临时目录。
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
@@ -160,7 +160,7 @@ impl SessionStore {
     /// 本存储是否落在磁盘上（临时会话没有根目录）。
     ///
     /// 计划表的「有落盘目录」判据用这个**能力布尔**：调用方要知道的是
-    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../../docs/003-design/001-核心架构.md "D-084")）。
+    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
     pub(in crate::plugins::session) fn is_persistent(&self) -> bool {
         self.disk().is_some()
     }
@@ -298,7 +298,7 @@ impl SessionStore {
     ///
     /// 排序与截断都在内存里做：窗口约束的是**响应大小**（少传多少节点给前端），
     /// 而 IO 成本已经由「清单只读 `session.json`」压平了——再引入一份索引文件
-    /// 换来的收益不值一个新文件（见 docs/106-perf.md §3）。
+    /// 换来的收益不值一个新文件（见 docs/019-perf.md §3）。
     pub async fn list_sessions_window(
         &self,
         limit: Option<u32>,
@@ -364,7 +364,7 @@ impl SessionStore {
     ///
     /// 幂等：新布局且投影齐全的目录直接跳过（`get_store` 每次构造只跑一次）。
     /// 为什么要补投影：投影字段是后来加的 `#[serde(default)]`，存量文件里没有，
-    /// 少了它清单会静默退化成显示 id（见 docs/106-perf.md §11.3）。
+    /// 少了它清单会静默退化成显示 id（见 docs/019-perf.md §11.3）。
     pub(crate) async fn migrate_split_messages(&self) -> Result<(), PluginError> {
         let Some(base) = self.disk() else {
             return Ok(());
@@ -404,13 +404,13 @@ impl SessionStore {
 
 /// **现行窗口**：从最近一份快照事件起的那段（含快照本身；没有快照 ⇒ 整份都是现行）。
 ///
-/// [`Store::range`](crate::symbio_core::Store::range) 归一后给的是**完整史**（含被
-/// [`archive_before`](crate::plugins::session::store::WalStore::archive_before) 移出的前缀，
+/// `Store::range` 归一后给的是**完整史**（含被
+/// `archive_before` 移出的前缀，
 /// [plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1），
 /// 本函数服务的是「**上下文 / 进度**该从哪读」这类问题。
 ///
 /// **它不判轮次生命周期**：「已开未收束」必须读完整史
-/// （[D-085](../README.md "D-085")）——压缩期间等待审批的那一轮
+/// （[D-085](../README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "symbio/src/plugins/session/README")）——压缩期间等待审批的那一轮
 /// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」。
 /// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
 /// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）

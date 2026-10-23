@@ -384,7 +384,7 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
 /// （「压缩前开的、还没做完」= 现在还没做完），不是「最近没被取代的那些事件」。
 ///
 /// 存储层归档（被取代的前缀移进归档段）不改变 `Store::range` 的「完整史」语义
-/// （[D-085](../session/README.md "D-085")；归档自身的判据在
+/// （[D-085](../session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "symbio/src/plugins/session/README")；归档自身的判据在
 /// `session::store::wal.test.rs`）。本用例因此只需一份「较早任务格 + 较晚快照」的完整史。
 ///
 /// **反向自检**：把 `task_events::prompt_section` 的切片换成「从最新快照起自切窗口」

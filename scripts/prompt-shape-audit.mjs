@@ -68,7 +68,7 @@ import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-export const BASELINE_REL = join('docs', '006-ref', 'PROMPT_SHAPE.md')
+export const BASELINE_REL = join('docs', '004-ref', 'PROMPT_SHAPE.md')
 // 2：工具面开始按「平台变体归一」入判据（见 `PLATFORM_VARIANT_TOOL`）。
 // `diffShapes` 会把 schema 不一致直接判成漂移 ⇒ 旧基线**不会**被拿去做逐字段比，
 // 而是得到一句「重生成」。否则这次过渡会表现为一串看不懂的「新增/移除」。
@@ -292,7 +292,7 @@ export function renderBaselineDoc (shape, observations, { capturedAt = '' } = {}
 
 > ⚠️ **生成物，不手改。** 唯一写者是 \`node e2e/cases/t46-prompt-shape-baseline.mjs\`
 > 带 \`PROMPT_SHAPE_UPDATE=1\`；判据由那条用例在门禁里每次复算（改了装配就红），
-> 口径与「什么进基线、什么只作观测」见 [D-057](../010-adr/057.md)，
+> 口径与「什么进基线、什么只作观测」见 [D-057](../../symbio/src/plugins/session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 \`scripts/prompt-shape-audit.mjs\`。
 
 场景 \`${shape.scenario}\` · 重生成于 ${capturedAt || '（未标时间）'} · 请求数 ${shape.requests.length}

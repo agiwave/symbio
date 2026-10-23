@@ -81,7 +81,7 @@ impl VerdictSource {
 /// **一格阶段的名字**——`turn.stage` 载荷 `stage` 的闭集。
 ///
 /// 阶段事实比派发指令集宽：`resume`（这一轮是审批 / 问答恢复）与 `round`
-/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（b 起
+/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（ 起
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
 /// `policy.report` / `policy.reflex` 不在这里：汇报的到期由 `report_due` 视图

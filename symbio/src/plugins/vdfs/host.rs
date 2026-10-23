@@ -33,7 +33,7 @@
 //! 而非报错——「系统没有资源」与「资源为空」表现一致，前端与 LLM 都不必特判；
 //! 物理层与它无关，照常可用。
 //!
-//! [`UnifiedFs`]: super::fs::UnifiedFs
+//! `UnifiedFs`
 
 pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
@@ -312,7 +312,7 @@ async fn root(
 ///
 /// 为什么需要它（而不是「有内容就给搜索框」）：一屏能摆下的卡片就十来张，
 /// 少于这个量时用户一眼看完，搜索框不但帮不上忙，还会被读成「可以搜库」——
-/// 而它实际只筛当前这页已加载的条目（见 `tauri/docs/111-INTERACTION.md` 的
+/// 而它实际只筛当前这页已加载的条目（见 `../../../../tauri/docs/111-INTERACTION.md` 的
 /// 「刻意不做」）。
 ///
 /// 阀值住在服务端（而不是各前端），因此网页端 / 桌面端 / CLI 看到的是同一个答案；

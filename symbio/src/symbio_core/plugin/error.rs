@@ -32,7 +32,7 @@ pub enum PluginError {
     /// 插件私有的退出类型携带（生产方与消费方都在 loop，两侧编译期可见），
     /// 见 [D-095]。
     ///
-    /// [D-095]: ../../../../docs/003-design/005-协议规范.md "D-095"
+    /// 决策 D-095 见 [D-095](../../../../docs/003-design/005-协议规范.md#d-095-keys-域环拆解键与值同住aborted-载荷不跨域vdfs_change_of-归-event_bus "D-095")
     #[error("操作中止")]
     Aborted,
     #[error("上下文丢失，需要重试")]

@@ -82,7 +82,7 @@ function toolSkeleton(
   args: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  // 相应批次 呈现意图来自后端数据：工具名经 `title` 下发，前端不再从 `meta.tool_name` 现推。
+  // [] 呈现意图来自后端数据：工具名经 `title` 下发，前端不再从 `meta.tool_name` 现推。
   return { id, parent_id: parent, role: 'assistant', type: 'skeleton', title: name, status, content: args } as unknown as ChatNode
 }
 /**

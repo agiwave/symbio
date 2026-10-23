@@ -20,11 +20,11 @@
 //!    验证者不产出）在表这一层可见；
 //! 8. **绑定即登记**（[D-100]）：未部署的主体经绑定拿到来源行——能力随绑定来、
 //!    **可见域不登记**、静态行不被放大、淘汰面只认部署表、委派上限两侧都在册；
-//! 9. **委派取交集**（相应批次）：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
+//! 9. **委派取交集**（[]）：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
 //!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行；
-//! 10. **读侧闸一条判据**（相应批次 ⑧）：属主恒放行 ∨ 矩阵判定，两处消费方（stats
+//! 10. **读侧闸一条判据**（[] ⑧）：属主恒放行 ∨ 矩阵判定，两处消费方（stats
 //!     整列闸、召回逐条预过滤）共用同一个写法；
-//! 11. **主体名的两条派生分支与命名空间登记表同源**（相应批次 项一）：资产侧的裸 slug
+//! 11. **主体名的两条派生分支与命名空间登记表同源**（[] 项一）：资产侧的裸 slug
 //!     只能兜底进 agent 一族，完整地址不二次加前缀。
 
 use super::*;
@@ -245,7 +245,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     assert!(matrix.can_write(PRINCIPAL_WORKER, Capability::ProduceArtifact));
     assert!(
         !matrix.can_reply(PRINCIPAL_WORKER) && !matrix.can_reply(PRINCIPAL_WORKER),
-        "工人以产物收束（收束闸的产物臂，D-067），不以主控身份发言"
+        "工人以产物收束（收束闸的产物臂，ADR-067），不以主控身份发言"
     );
     assert!(
         !matrix.can_write(PRINCIPAL_WORKER, Capability::DefineWork)
@@ -311,7 +311,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     }
 }
 
-/// 收束格按**种类**判（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")， 的单测判据）：
+/// 收束格按**种类**判（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")， 的单测判据）：
 /// 产物收束问 `produce.artifact`、发言收束仍按 `reply.*`——同一张表的两道闸。
 ///
 /// 钉的是谓词面的**分派**，不是每个主体自己的窄行（那些在上面各测里）：对等主体
@@ -326,7 +326,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     // 对等主体：产物收束放行、发言收束仍拒（「没有发言权」≠「留不下任何事实」）。
     assert!(
         matrix.can_produce_artifact(PRINCIPAL_PEER),
-        "对等体以产物收束一轮（D-065 裁决的落地前提）"
+        "对等体以产物收束一轮（ADR-065 裁决的落地前提）"
     );
     assert!(
         !matrix.can_reply(PRINCIPAL_PEER),
@@ -349,7 +349,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     assert!(!matrix.can_produce_artifact("session/ghost"));
 }
 
-/// 取表口只有一条口径（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）：
+/// 取表口只有一条口径（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）：
 /// **登记过的主体走表，未登记的主体什么也拿不到**——少一行是一条拒绝，不是一条漏判。
 #[test]
 fn an_unregistered_subject_gets_no_row_at_all() {
@@ -367,7 +367,7 @@ fn an_unregistered_subject_gets_no_row_at_all() {
     let sub = "session/sub";
     assert!(
         production_matrix().grants_of(sub).is_empty(),
-        "未登记主体在表里没有行（D-099：未登记 = 拒）"
+        "未登记主体在表里没有行（ADR-099：未登记 = 拒）"
     );
     assert!(!production_matrix().can_reply(sub), "写不了收束格");
     assert!(
@@ -412,7 +412,7 @@ fn read_side_is_scoped_by_owner_and_membership() {
 /// 钉的是「两支叠在一起」这个形状，而不是 `can_see` 的三档语义（那些在上面那条与
 /// `governance/mod.test.rs` 里）：
 /// - 属主读**自己共享出去**的内容必须放行——`user` 在能力表里没有行（人不入表，
-///   [D-069 §后果]），单问 `can_see` 它连自己的 `shared` 都读不到；
+/// [D-069 §后果]），单问 `can_see` 它连自己的 `shared` 都读不到；
 /// - 矩阵内主体读他人 `shared` 放行、矩阵外必拒（fail-closed 不因叠了属主支而松开）；
 /// - `public` 人人可读；非属主读他人 `thread_private` 必拒（C10 缺省隔离）。
 ///
@@ -498,7 +498,7 @@ fn all_principals_are_routable_ids() {
     }
 }
 
-/// **主体名的两条派生分支与命名空间登记表同源**（相应批次 项一）。
+/// **主体名的两条派生分支与命名空间登记表同源**（[] 项一）。
 ///
 /// `principal_of` 是全 crate 唯一把「资产 id」折成「主体地址」的地方，它的两条分支必须
 /// 各钉一次：**裸名兜底进 `session/`**（⇒ 这条主体恒被 `is_agent_id` 认作 agent 一族），
@@ -530,7 +530,7 @@ fn principal_of_derives_a_bare_asset_id_into_the_agent_family() {
 }
 
 /// **三行工具主体登记进表**（[D-069 §决策 2 工具响应主体]）——今天写侧闸按会话主体判，
-/// 这三行是**声明性**的；但表里没有行就等于「工具不是主体」，相应批次 之后
+/// 这三行是**声明性**的；但表里没有行就等于「工具不是主体」，[] 之后
 /// `plugin::attributed` 按 kind=Tool 补上的 principal 就没底。
 #[test]
 fn tool_principals_have_declared_rows() {
@@ -541,7 +541,7 @@ fn tool_principals_have_declared_rows() {
         PRINCIPAL_TOOL_CONTENT_SEARCH,
     ] {
         let grants = matrix.grants_of(tool);
-        assert!(!grants.is_empty(), "`{tool}` 应在授权表里有一行（D-069）");
+        assert!(!grants.is_empty(), "`{tool}` 应在授权表里有一行（ADR-069）");
         assert!(
             grants.contains(&Capability::ProduceArtifact),
             "`{tool}` 的权威动作是产生产物（produce.artifact）"
@@ -550,7 +550,7 @@ fn tool_principals_have_declared_rows() {
         // 工具的响应在会话线程里对任何 viewer 都可见。
         assert!(
             !is_agent_id(tool),
-            "`{tool}` 的 namespace 不在 agent 登记表里（[D-069 §决策 3]）"
+            "`{tool}` 的 namespace 不在 agent 登记表里（[ADR-069 §决策 3]）"
         );
     }
 }
@@ -580,7 +580,7 @@ fn person_local_is_not_in_the_capability_table() {
 
 /// 绑定即登记：未部署的主体经 [`bind_inheriting`] 拿到来源行，收束闸随之放行。
 ///
-/// 这条钉的是 [D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
+/// 这条钉的是 [D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-100-绑定即登记能力随会话创建而来与会话同寿可见域不登记 "DE-008-能力注册表与能力坐标系") 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
 /// **不再靠未登记主体的静默派生拿主行**，而是随会话装配点的绑定拿到一行——
 /// 拿得到与拿不到都由可见的登记动作决定（少一行 = 一条拒绝）。
 #[test]
@@ -697,7 +697,7 @@ fn delegated_binding_registers_both_sides() {
     );
 }
 
-// ── 创建即登记与同寿回收（相应批次）─────────────────────────────────────
+// ── 创建即登记与同寿回收（[]）─────────────────────────────────────
 //
 // 下面的用例钉的是**生命周期**而不是判定口径：登记以会话为持有人，会话结束
 // （`unbind_session`，生产由 `delete_session_internal` 调用）时整册消失。

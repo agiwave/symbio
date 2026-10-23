@@ -98,7 +98,7 @@ pub fn store(
 ///
 /// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
 /// 返回 `String`，不能借给返回值长期持有）。排版由共享实现
-/// [`MemoryFile::segment`](crate::providers::MemoryFile::segment) 统一决定。
+/// `MemoryFile::segment` 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

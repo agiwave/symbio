@@ -1,10 +1,10 @@
 //! 能力表的**行词汇**——收集口 trait 收敛为 `put` / `get` / `list` 三方法后，
-//! 一张表装下全部收集通道（DE-008 §3 的目标形状）。
+//! 一张表装下全部收集通道（AR-025 §3 的目标形状）。
 //!
 //! ## 族是**一个一个**落位的（Tool ✓ → Model ✓ → Prompt ✓ → Mount ✓ → Option ✓ → Configurable ✓）
 //!
 //! [`CapabilityRowKind`] 现有六个值，**且只装得住「在共享地址上被 ≥2 个消费方看见」的族**
-//! （[D-089](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")：`Policy` 变体已删除——策略的判据依赖 loop 私有的
+//! （[D-089](../../../../docs/003-design/014-单环一表.md#d-089-一表的准确表述一个行形状--两个目录按消费方分删除-policy-死变体 "DE-014-单环一表")：`Policy` 变体已删除——策略的判据依赖 loop 私有的
 //! 运行时视图，它接不上这张表，不是「还没接上」），
 //! [`CapabilityRowPayload`] 随各族落地长变体：4a `Tool`、4b `Model`、4c `Prompt`、
 //! 4d `Mount`、4e `Option` + `Configurable`（连同两个专服单族的 trait 退场）。
@@ -35,7 +35,7 @@
 //! 与 `CapabilityMeta` 同域同理：全部收集通道（工具 / 模型服务 / 提示词 /
 //! 挂载 / 选项）共用同一张表，契约是**跨插件**的，故类型在 core；表的默认实现
 //! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 loop 插件的
-//! `loop_rows`——三处各住各的，见 DE-008 §3。
+//! `loop_rows`——三处各住各的，见 AR-025 §3。
 
 use crate::symbio_core::DetailField;
 use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsItem, VdfsProvider};

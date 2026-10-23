@@ -1,8 +1,8 @@
-//! `conation` 投影（S12 第 21 步，[roadmap/S12 §3](../../../../docs/007-task/132-自主层与长期目标.md ")、
+//! `conation` 投影（S12 第 21 步，[roadmap/S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")、
 //! [02 §2.3](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
 //!
 //! **「欲」的读侧形态**：从事件序列算出「当前表达了哪些欲、各自有没有升格成任务」。
-//! 与 [`readyset`](super::readyset) 同形——就绪判定是纯函数，这里「欲的升格状态」也是：
+//! 与 `readyset` 同形——就绪判定是纯函数，这里「欲的升格状态」也是：
 //! 同一份事件切片永远算出同一个视图（N1），调度 / 去重都不需要内部状态。
 //!
 //! ## 为什么这是一条**投影**而不是插件里的一次全表扫
@@ -10,23 +10,23 @@
 //! 判定「这条长目标声明过没有」是**投影**，消费方（`plugins/session/transcript/autonomous.rs`）
 //! 拿的是 `View`，不自己 `range(0).any(…)` 扫事实源——判定与它读的事实同一处
 //! （改口径只动一个文件）。可执行论证
-//! 见 [`verify/conation_minimal.rs`](../../../../docs/003-design/verify/conation_minimal.rs) 的
+//! 见 `verify/conation_minimal.rs` 的
 //! `current_intents`（同一条口径：`(日志, now, budget) → 意图集合`）。
 //!
 //! ## 两条口径
 //!
 //! - **升格靠溯源认**：一条欲「已升格」当且仅当存在一条 `task.opened` 的 `produced_by`
-//!   指向它——这正是 [`IntentGate`](crate::symbio_core::IntentGate) 批准后
+//!   指向它——这正是 `IntentGate` 批准后
 //!   `AutonomousInitiator::open_long_goal` 落格的形状（`from_seq` = 欲事件 seq）。
 //!   不靠 goal 字符串相等：字符串相等会把**别的**来源开的同目标任务也算成这条欲的产物。
 //! - **as-of**：形参 `now` 就是 as-of 锚（`ts > now` 的欲与升格一概不见），与其余投影同口径。
 // doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义非版本史
-//!   全量复算（「这条目标曾经声明过吗」）走 [`Projection::read_all`](super::Projection)——与 `session/stats` 同一写法。
+//!   全量复算（「这条目标曾经声明过吗」）走 `Projection::read_all`——与 `session/stats` 同一写法。
 //!
 //! ## 边界（诚实划界）
 //!
 //! - **溯源合法性不在这里判**：`conation.expressed` 缺 `produced_by` 时
-//!   [`ConationCandidate::from_event`](crate::symbio_core::ConationCandidate::from_event)
+//!   `ConationCandidate::from_event`
 //!   返回 `None`（I2 强化）。本投影只读事实，不替闸门做准入——来路不明的欲照样入视图
 //!   （它是**事实**，藏起来才是撒谎），但它永远不会有 `task_id`（升不了格）。
 //! - **「完成」没有独立事件**：今天没有 `conation.fulfilled`，欲一旦升格就一直是
@@ -94,7 +94,7 @@ impl ConationView {
 /// 跨会话汇总（实例级聚合列 `fleet` 的主动性族）。
 ///
 /// 只收分子 / 分母（率由 `adoption_rate` 从汇总值重算）——与
-/// [`FallbackRateView::merge`](super::fallback::FallbackRateView::merge) 同款：
+/// `FallbackRateView::merge` 同款：
 /// 合并的是**可加的量**，率是同一套算式在汇总值上的再应用，不是另一份口径。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ConationSummary {
@@ -134,7 +134,7 @@ impl ConationView {
 /// `conation` 投影：从事件序列算出当前表达过的欲及其升格状态。
 ///
 /// 预算语义见框架层（[`super::Projection::apply`]，[D-105]）：生产调用方一律传
-/// [`Budget::generous`](crate::symbio_core::view::Budget::generous)，窗口恒为全量——
+/// `Budget::generous`，窗口恒为全量——
 /// 欲是**流**，调用方不收紧预算就是「不设配额」的现行兑现。
 pub fn conation() -> Projection<ConationView> {
     Projection::new(|events: &[Event], now| {

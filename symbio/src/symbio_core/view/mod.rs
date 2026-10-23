@@ -38,8 +38,8 @@ impl Budget {
 /// 而那正是它承载不了的东西。
 ///
 /// **只能**是 `View`，不是 `Result`（构造即锁定，见 [`crate::symbio_core::projection::Projection`]）。
-/// 只由 [`Projection::apply`](crate::symbio_core::projection::Projection::apply) 构造
-/// （[D-105](../../../../docs/003-design/001-核心架构.md "D-105")：降级与预算在框架层统一执行，
+/// 只由 `Projection::apply` 构造
+/// （[D-105](../../../../docs/003-design/001-核心架构.md#d-105-投影预算语义收敛到框架层闭包只返回-v窗口截断由-apply-统一执行 "DE-001-核心架构")：降级与预算在框架层统一执行，
 /// `ok` / `degraded` 构造器随闭包签名一并退役）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View<V> {
@@ -56,7 +56,7 @@ pub struct View<V> {
 
 use crate::symbio_core::event::Timestamp;
 
-/// **智能体命名空间登记表**（[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md "D-069")）。
+/// **智能体命名空间登记表**（[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）。
 ///
 /// 主体 id 是可路由地址 `<namespace>/<name>`；kind 是元数据，与 id 分家。判定「这条 id
 /// 是不是智能体一族」不再靠字符串前缀，而是查这张**登记表**——把 reflex 拆到独立 decider
@@ -80,10 +80,10 @@ pub fn is_agent_id(id: &str) -> bool {
     principal_namespace(id).is_some_and(|ns| AGENT_NAMESPACES.contains(&ns))
 }
 
-/// **可见域的平凡判据**（[plan/11 批 1](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ③，
+/// **可见域的平凡判据**（plan/11 批 1 ③，
 /// S08 §4 的 `vis_scope` 平凡值）：`actor` 这条事实在 `viewer` 的视图里可见吗？
 ///
-/// 三条规则，一条判定方（判据在 相应批次 后由前缀切到命名空间登记表）：
+/// 三条规则，一条判定方（判据在 [] 后由前缀切到命名空间登记表）：
 ///
 /// 1. 自己的发言可见（`actor == viewer`）；
 /// 2. 会话内的另一方（人）与**未标身份**的事件可见——会话是一条双向线程，
@@ -114,14 +114,14 @@ pub struct RecallEntry {
 
 /// 召回视图：as-of 可见、未被遗忘、按新近度排序的记忆条目。
 ///
-/// ## 为什么视图自带 `degraded`（相应批次）
+/// ## 为什么视图自带 `degraded`
 ///
 /// 投影产出的 [`View`] 外壳已经带 `degraded`（F2：可降级是类型义务），但召回视图
 /// **会脱离外壳单独流动**——`memory_events::recall_view` 取 `.value` 后把它存进
 /// `TurnState.recall_view`、再交给注入段（`prompt_section`）。外壳一丢，
 /// 「这次只显示了一部分」就没人说得出来（静默的形态从「空且不标」变成「有部分结果
 /// 且不标」）。故让视图**自描述**：取值点把外壳的 `degraded` **誊抄**进本字段
-/// （[D-105](../../../../docs/003-design/001-核心架构.md "D-105")：外壳是唯一的降级事实源，
+/// （[D-105](../../../../docs/003-design/001-核心架构.md#d-105-投影预算语义收敛到框架层闭包只返回-v窗口截断由-apply-统一执行 "DE-001-核心架构")：外壳是唯一的降级事实源，
 /// 闭包不自置，字段由唯一丢外壳的取值点落笔），消费方不必回捞外壳。
 ///
 /// `#[serde(default)]`：旧序列化形态（无此字段）仍读得出，缺省 `false`（不谎称降级）。

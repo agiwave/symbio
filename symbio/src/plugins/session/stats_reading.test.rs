@@ -1,4 +1,4 @@
-//! 消息节点读数的判据（[D-111](README.md "symbio/src/plugins/session/README")）：
+//! 消息节点读数的判据（[D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：
 //! 那几行「压到哪儿了 / 什么触发的 / 压掉几条」由后端排好，前端只逐行排版。
 //!
 //! 这批判据钉的是**口径搬回来之后不再漂移**的三条：

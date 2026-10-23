@@ -54,7 +54,7 @@ function makeRoot() {
   }
   // RG-011 要求任何根都有 SP-001（schema 的文档侧真相）——字段表与 kind 形状对账
   fs.writeFileSync(
-    path.join(base, 'docs', '008-spec', '001.md'),
+    path.join(base, 'docs', '005-spec', '001.md'),
     fm({ kind: 'spec', id: 'SP-001', title: '字段规范（夹具）', status: 'active', created: '2026-10-11', scope: '夹具' }) +
       '\n## 规范\n\n条文。\n\n## 字段\n\n| 字段 | 说明 |\n|---|---|\n' +
       allKeys(KINDS).map((k) => `| \`${k}\` | 说明 |`).join('\n') +
@@ -62,13 +62,13 @@ function makeRoot() {
   )
   // owner A：生成物条目（RE-006 形）——正常登记，`routes` 的唯一真 owner
   fs.writeFileSync(
-    path.join(base, 'docs', '006-ref', '006-当前事实表.md'),
+    path.join(base, 'docs', '004-ref', '006-当前事实表.md'),
     fm({ kind: 'ref', id: 'RE-006-当前事实表', title: '当前事实表', status: 'active', created: '2026-10-11', lists: '[routes=owner]' }) +
       '# 当前事实表\n\n<!-- list:routes owner -->\n\n| 地址 | 一句话职责 |\n|---|---|\n| `a/x` | 示例 |\n',
   )
   // owner B（注入落点）：手写契约页（RE-003 形）——地址在这里是**键**不是第二张清单
   fs.writeFileSync(
-    path.join(base, 'docs', '006-ref', '003-ROUTES.md'),
+    path.join(base, 'docs', '004-ref', '003-ROUTES.md'),
     fm({ kind: 'ref', id: 'RE-003-ROUTES', title: '路由参考', status: 'active', created: '2026-10-11', lists: '[route-contracts=owner]' }) +
       '# 路由参考\n\n<!-- list:route-contracts owner -->\n\n| 地址 | 调用方 | 返回类型 |\n|---|---|---|\n| `a/x` | `session` | `Verdict` |\n',
   )
@@ -110,7 +110,7 @@ const CASES = [
   },
 ]
 
-const TARGET = path.join('docs', '006-ref', '003-ROUTES.md')
+const TARGET = path.join('docs', '004-ref', '003-ROUTES.md')
 
 for (const c of CASES) {
   test(`lists 判据反向验证：${c.name}`, () => {

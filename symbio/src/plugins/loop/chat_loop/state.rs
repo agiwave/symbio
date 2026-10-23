@@ -11,7 +11,7 @@ use super::*;
 use crate::symbio_core::chat_node::CHAT_STYLE_TAG_REASONING;
 use crate::symbio_core::PluginError;
 
-// 「本请求所属会话的主体身份」这个取值点已上移 core（[D-082](../../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 1 组）：
+// 「本请求所属会话的主体身份」这个取值点已上移 core（[D-082](../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 1 组）：
 // 它是 core 既有键 `AGENT_ID` 的纯派生函数，不属于任何一个切片，会话驱动器切出去后
 // 读写两侧隔着插件墙都要用。本文件与 `chat_loop` 经这条短路径拿它。
 use crate::symbio_core::request_principal;
@@ -26,7 +26,7 @@ use crate::symbio_core::request_principal;
 /// （会话主体，写事件的 `actor`），这里是「这条消息是谁发的」（跨体承诺的
 /// 对方）。两个都从 ctx 取但键不同，混用会把「向谁宣告」错写成「谁在宣告」。
 ///
-/// [D-067]: ../../../../../docs/003-design/011-Agent目录规范.md "D-067"
+/// 决策 D-067 见 [D-067](../../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "D-067")
 pub(crate) fn request_source_principal(
     ctx: &dyn crate::symbio_core::PluginInvokeRequest,
 ) -> String {
@@ -47,10 +47,9 @@ pub(crate) fn request_source_principal(
 /// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 档位（与派发格的 `tier` 同一个事实，调用方传入）。 批①起它有**真读方**：`turn_runner` 以**数值**写入 `turn.dispatch` 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退历史 `user.message` 的 `tier` 映射） |
-/// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，相应批次） |
+/// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[]） |
 ///
-/// [D-065]: ../../../../../docs/003-design/011-Agent目录规范.md "D-065"
-/// 相应批次: ../../../../../docs/007-task/105-Scope-Child首产点批.md "
+/// 决策 D-065 见 [D-065](../../../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
 pub(crate) fn request_actor_spec(
     ctx: &dyn crate::symbio_core::PluginInvokeRequest,
     tier: crate::symbio_core::LatencyTier,
@@ -59,7 +58,7 @@ pub(crate) fn request_actor_spec(
     use crate::symbio_core::{ActorSpec, PluginInvokeRequestExt};
     let principal = request_principal(ctx);
     // 绑定即登记（[D-100]）：登记的主 owner 是**会话创建点**
-    // （`session::commands::session_upsert` 的 create 分支，相应批次）；这里只在
+    // （`session::commands::session_upsert` 的 create 分支，[]）；这里只在
     // 「本请求显式改写了身份」（请求级 `agent_id`）或临时会话没有创建点时做
     // **幂等兜底**——同一会话重绑只替换自己那一条，行仍随会话回收。
     //
@@ -165,7 +164,7 @@ pub(crate) struct TurnState {
     /// 轮首判决、长期记忆召回、`user_prompt_submit` 钩子、流式起始的轮次标注都是它。
     /// 把请求数当工具轮数用会**静默失效**（判据恒假而默认值看起来像「没配」），
     /// 那条病灶与它三个读方各自的去处见
-    /// [D-074](../../../../../docs/003-design/014-单环一表.md "D-074")。
+    /// [D-074](../../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")。
     pub(crate) request_round: usize,
     /// 长度截断自动续写次数（跨轮累加）
     pub(crate) continuation_count: u32,
@@ -368,7 +367,7 @@ pub struct ChatOrchestrator {
     /// 那句开场白（本轮照旧进工具循环），真实答复（`Answered`）不受影响。为什么独立于
     /// `compose_enabled`：后者关掉会连答复一起没，本开关只削派活前的旁白。
     pub opening_enabled: bool,
-    /// 建树策略的**请求级快照**（`TurnSettings::presentation_tree`，相应批次）。
+    /// 建树策略的**请求级快照**（`TurnSettings::presentation_tree`，[]）。
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
     /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
@@ -473,7 +472,7 @@ impl ChatOrchestrator {
                     // 答案取自思考：这一格就是正文（`Body`），不挂 reasoning tag。
                     finalized
                 } else {
-                    // 独立思考：归位 `Notice`（折叠叶，相应批次），呈现（title/icon）
+                    // 独立思考：归位 `Notice`（折叠叶，[]），呈现（title/icon）
                     // 由前后端交互面统一派生，不在这里写；tag 只作后端业务注记。
                     let mut n = finalized;
                     n.msg_type = Some(NodeKind::Notice);
@@ -511,7 +510,7 @@ impl ChatOrchestrator {
         // `Completed` / `WaitingUserAction`；未执行的批尾统一收口）。审批恢复不再
         // 另走一条执行路径——它把用户动作落成唤醒请求，仍由同一执行方收口。
         //
-        // 状态机见 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §2.3；
+        // 状态机见 `../../session/docs/105-node-state-streaming.md` §2.3；
         // 「每个 ToolCall 必然到达终态」这条不变量由这一处负责保证。
 
         // 根 Turn 的终态**不在此发出**。

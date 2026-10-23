@@ -4,7 +4,7 @@
 //!
 //! | 作用域 | 字段 | 闸门 | 超限行为 |
 //! |---|---|---|---|
-//! | 智能体自身（分形：随实例走） | `memory_max_bytes` / `memory_inject_max_bytes` | [`MemoryFile::write`](crate::providers::MemoryFile::write) / [`MemoryFile::inject`](crate::providers::MemoryFile::inject) | **拒绝** / **截断** + 告知地址 |
+//! | 智能体自身（分形：随实例走） | `memory_max_bytes` / `memory_inject_max_bytes` | `MemoryFile::write` / `MemoryFile::inject` | **拒绝** / **截断** + 告知地址 |
 //! | 工作区（会话作用域 `ctx[WORKDIR]`） | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
 //!
 //! 注入为什么比写入小得多：注入的正文**每一轮**都在烧上下文（4 KiB），

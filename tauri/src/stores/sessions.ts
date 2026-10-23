@@ -20,7 +20,7 @@
  * 由应用外壳（`MainLayout`）显式启动；本 store 只提供状态与收敛动作，
  * 因此可被独立构造与测试。
  *
- * 规范见 `symbio/src/plugins/session/docs/105-node-state-streaming.md`。
+ * 规范见 `../../../symbio/src/plugins/session/docs/105-node-state-streaming.md`。
  *
  * ## 关键状态
  *
@@ -89,7 +89,7 @@ import {
   sortTranscript,
   truncateIdsFrom,
 } from './sessionTranscript'
-// c-ii wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
+// wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
 // 从此只可能是呈现词表，下游（渲染 / 判定）不再接触 wire 词。
 import { messageTypeOf } from '@/registry/messageTypes'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
@@ -398,20 +398,20 @@ export const useSessionsStore = defineStore('sessions', () => {
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
         if (message.role != null) node.role = message.role
-        // d-iii 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
+        // 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
         // 分派的唯一承载点，流式窄帧不带、终态权威帧带——合并规则两边通用。
         if (message.principal != null) node.principal = message.principal
         if (message.type != null) node.type = messageTypeOf(message)
-        // d-i `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
-        // d-ii 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
+        // `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
+        // 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
         if (message.meta != null) node.meta = message.meta
-        // 呈现数据（相应批次 交互面下发）：后端把「这条长什么样」折进顶层 `title`/`icon`/
+        // 呈现数据（[] 交互面下发）：后端把「这条长什么样」折进顶层 `title`/`icon`/
         // `actions`，渲染期 `facetsOf` 从节点顶层直读。合并必须与身份字段同口径「有则覆盖」——
         // 否则首帧带来的工具名/图标/可用动作被后续窄帧丢光，界面退回按形态兜底（工具名消失）。
         if (message.title != null) node.title = message.title
         if (message.icon != null) node.icon = message.icon
         if (message.actions != null) node.actions = message.actions
-        // 读数行同口径「有则覆盖」（[D-111](../../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）：它由后端在
+        // 读数行同口径「有则覆盖」（[D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：它由后端在
         // 交付出口现算，压缩那条节点终态帧带来，窄增量帧不带 ⇒ 不覆盖掉已有的一格。
         if (message.stats != null) node.stats = message.stats
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。

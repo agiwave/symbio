@@ -8,7 +8,7 @@
 //! 两条出口都在这里，因为它们要的是同一条纪律：
 //! - **`session/stats` 路由**：一份 [`ReadingPanel`]（`panel_of` 起）；
 //! - **消息节点交付**：一格 [`ReadingSection`]（[`present_message`] / [`notice_stats_of`]，
-//!   [D-111](README.md "symbio/src/plugins/session/README")）——压缩与记忆那几条事实行原先由前端
+//! [D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）——压缩与记忆那几条事实行原先由前端
 //!   读 `meta` 数字自己拼，口径住在两端；现在水位、触发词、token 单位都只在本文件出现一次。
 //!
 //! 三条纪律里最硬的一条在这里落地：**只调已有投影，不另写一份统计**

@@ -57,7 +57,7 @@ pub const MODEL_PROTOCOL_GEMINI_API: &str = "gemini_api";
 /// **未识别值返回 `None`，不兜底**。兜底 `openai_chat` 会把「配了 anthropic 却发
 /// OpenAI 请求体」伪装成一次可用的配置：错误不在保存时报，而要等运行期的 4xx / 空流
 /// 才暴露，且症状指不到协议解析这一层。判据方向与
-/// [`CapabilityRiskLevel::from_name`](crate::symbio_core::CapabilityRiskLevel::from_name)
+/// `CapabilityRiskLevel::from_name`
 /// 一致——**宁可报错，不静默放宽**。存量配置里的合法别名均已覆盖，反转只影响写错的值。
 pub fn resolve_protocol_id(api_protocol: &str) -> Option<&'static str> {
     match api_protocol {

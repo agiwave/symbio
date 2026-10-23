@@ -54,7 +54,7 @@ async fn record_protocol_failure(
         Some(false),
         Some(result_msg_id),
         // 协议级失败：调用本身的 id/name 就非法，工具名**无从说起**——主体由
-        // `attributed` 按会话主体兜底（d-iii）。
+        // `attributed` 按会话主体兜底。
         None,
     );
     // 失败属信息性：结果以 Completed 留在上下文（Failed 会被 get_context_messages
@@ -118,7 +118,7 @@ async fn record_protocol_failure(
 /// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
 /// 是"还在跑"还是"卡死了"。
 ///
-/// 状态机（`symbio/src/plugins/session/docs/105-node-state-streaming.md` §2.3）：
+/// 状态机（`../../../session/docs/105-node-state-streaming.md` §2.3）：
 /// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
 /// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
 ///
@@ -258,7 +258,7 @@ async fn prepare_call(
         }
     };
 
-    // 同参重复调用的判据（相应批次 步 2）：签名与落库节点里的参数文本同源
+    // 同参重复调用的判据（[] 步 2）：签名与落库节点里的参数文本同源
     // （[`tool_call_args_text`]），于是「上下文里的那一次」与「这一次」可比。
     // 只登记、只回报——不拦截、不改执行结果。
     let signature = call_signature(&name, &tool_call_args_text(tc));

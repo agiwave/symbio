@@ -47,7 +47,7 @@ pub struct ModelPlugin {
     /// VDFS 侧条目清单（内存镜像：`id → provider.json` 原文）
     ///
     /// 规范 §13.4：model 的列表来自内存。镜像与注册表**同一处更新**
-    /// （[`after_uploaded`](Self::after_uploaded)），因此不存在第二个写入者。
+    /// （`after_uploaded`），因此不存在第二个写入者。
     entries: MemoryVdfs,
 }
 
@@ -244,7 +244,7 @@ impl ModelPlugin {
     /// Provider**（请求显式 > 默认）——这一步的解析链只有后端知道
     /// （`providers.default_provider_id`），故由后端把结论写进定义：会话 metadata
     /// 里没有 `provider_id` 时，前端按 `default` 显示生效的那个（见
-    /// `docs/archive/session-options-unification.md` §6）。
+    /// 设计文档 §6）。
     ///
     /// **不回填当前值**：值来自会话 `metadata.provider_id`，这里只声明候选与缺省。
     async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
@@ -845,7 +845,7 @@ impl Plugin for ModelPlugin {
                     "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
                 );
             }
-            // 入表：**一行一个已启用 provider**，当次生效者带**生效位**（DE-008 4b）。
+            // 入表：**一行一个已启用 provider**，当次生效者带**生效位**（AR-025 4b）。
             // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
             // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
             // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。

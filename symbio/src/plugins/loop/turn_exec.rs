@@ -130,7 +130,7 @@ enum UiNodeKind {
 
 impl UiNodeKind {
     /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[D-070 §决策 3]
-    /// 相应批次——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
+    /// []——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
     fn shape(self, node: ChatNode) -> ChatNode {
         match self {
             UiNodeKind::Text => node,
@@ -671,7 +671,7 @@ pub(crate) struct ExecTurn<'a> {
     pub skill_hits: &'a [super::skill_events::SkillLlmHit],
     /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
     /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
-    /// （见 [`TurnInput::prefix`](super::turn_runner::TurnInput::prefix)）。
+    /// （见 `TurnInput::prefix`）。
     ///
     /// ## 为什么必须显式带进来
     ///
@@ -693,7 +693,7 @@ pub(crate) struct ExecTurn<'a> {
     ///
     /// `None` = 本轮没压过（常态）。
     ///
-    /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
+    /// `SessionContext::consolidated`
     pub consolidation: Option<&'a [ChatNode]>,
     /// 本轮**已执行的一次性阶段**（`turn.stage` 草稿，D-107 判据 2）。
     ///
@@ -853,7 +853,7 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// 手写 `begin` / `step` 的推进条件，也不按行名 / 端口名分支（D-118 决策 1–2）。
 ///
 /// 把最后一处业务分支收进执行体：`by` → 动作是绑定表
-/// （[`loop_rows::ACTORS`](super::loop_rows::ACTORS)）里的一次查找，派发器对
+/// （`loop_rows::ACTORS`）里的一次查找，派发器对
 /// `by` 只有一个动作 `(next.action)(&mut step)`；工具批的三笔债各有自己的行与
 /// 执行体（ 步 5b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
 /// （D-118 订正 1），选债面不再需要 `accept` 谓词。
@@ -990,7 +990,7 @@ pub(crate) async fn drive_steps(
 ///   （判据 = e2e `t78` 的 auto 幕）。
 /// - 收束于**等待用户**那一格进展（`status: "pending"`）：它不是停机格（本轮尚未了结，
 ///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
-///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
+/// 把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
 fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if e.turn != turn {
         return false;

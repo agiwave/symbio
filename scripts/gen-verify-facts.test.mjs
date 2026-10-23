@@ -576,7 +576,7 @@ test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
 })
 
 test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是同一个集合', () => {
-  const f = frameOf(fs.readFileSync(path.join(REPO, 'docs', '004-plan', '002-能力坐标系.md'), 'utf8'))
+  const f = frameOf(fs.readFileSync(path.join(REPO, 'docs', '003-design', '008-能力注册表与能力坐标系.md'), 'utf8'))
   assert.equal(f.dimensions.length, f.dimCounts.length)
   assert.equal(
     f.dimCounts.reduce((s, [, n]) => s + n, 0),
@@ -593,7 +593,7 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
 })
 
 test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
-  const s10 = fs.readFileSync(path.join(REPO, 'docs', '009-task', '130-个人认知体系注入.md'), 'utf8')
+  const s10 = fs.readFileSync(path.join(REPO, 'docs', '001-goal', '130-个人认知体系注入.md'), 'utf8')
   const ds = demandsOf(s10, 'S10')
   assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
   assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')
@@ -601,7 +601,7 @@ test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数�
 })
 
 test('生成物与 docs/003-design/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
-  const onDisk = fs.readFileSync(path.join(REPO, 'docs', '004-plan', 'verify', 'facts', 'mod.rs'), 'utf8')
+  const onDisk = fs.readFileSync(path.join(REPO, 'docs', '003-design', 'verify', 'facts', 'mod.rs'), 'utf8')
   assert.equal(onDisk, generate(REPO))
 })
 

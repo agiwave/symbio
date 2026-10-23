@@ -70,7 +70,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str, tool_name: &
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
     // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
     msg.status = Some(NodeStatus::Completed);
-    // **并入**而非整格替换：`meta.tool_name` 是结果节点身份的一部分（d-iii），
+    // **并入**而非整格替换：`meta.tool_name` 是结果节点身份的一部分，
     // 整格覆盖会连它一起丢掉。
     if let Some(obj) = msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
         obj.insert("failure_kind".into(), json!(reason));

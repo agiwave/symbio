@@ -6,7 +6,7 @@
 //! （`vdfs_catalog`）分开：一处红的是「看不见」，一处红的是「改坏了」。
 //!
 //! 写语义本身不在这里：本文件只把 `Write` / `Action` 翻译成对
-//! [`commands`](super::super::commands) 的调用，再把变更投进订阅表。
+//! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
 use crate::symbio_core::chat_node as cm;

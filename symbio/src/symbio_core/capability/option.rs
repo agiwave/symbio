@@ -8,7 +8,7 @@
 //! **写入落位到同一张表**（4e）：选项是 `CapabilityRow::option(order, 字段)` 一行，
 //! 读侧是本文件的 [`capability_option_fields`]——广播通道仍各走各的，变的只是
 //! 「行住哪张表」：两个专服单族的 trait（`OptionVisitor` 随 4e）退场，收集口只剩
-//! `put` / `get` / `list` 三个方法（DE-008）。
+//! `put` / `get` / `list` 三个方法（AR-025）。
 //!
 //! ```text
 //! session ──collect_options(parent, ctx)──▶ parent.traverse(available_options)
@@ -29,7 +29,7 @@
 //! 各自在 `traverse` 里注册字段），键 `OPTION_VISITOR` 的值类型是 `Registry`。
 //!
 //! 端点字面量
-//! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)
+//! `TRAVERSE_AVAILABLE_OPTIONS`
 //! **不在这里**：它属于 `Plugin::traverse` 的契约，与 `TRAVERSE_AVAILABLE_TOOLS` 同处
 //! `plugin::traverse`——同一份协议的两个端点该住在一起。本域只是那条通道的**产出方之一**。
 //!
@@ -52,7 +52,7 @@
 //! ——「候选」「条件显隐/禁用」「子表单」各只有一份实现与一个校验器：产物只有
 //! [`DetailField`] 一种形状（独立的 `OptionNode` 节点类型与 `options/list` 端点已随
 //! 「会话选项 schema 化」下线，2026-09-23）。
-//! （`docs/archive/session-options-unification.md` §9 S4）。
+//! （设计文档 §9 S4）。
 //!
 //! ## 为什么不与工具同通道广播，但仍同表
 //!
@@ -60,7 +60,7 @@
 //! 工具广播分开，产物语义也不同（可展示的**数据节点**，不是可调用对象）；但两者
 //! 已经不需要两个 trait：表按载荷分族，`list(CapabilityRowKind::Option)` 只回选项行，
 //! 工具协议（`list(Tool)`）根本看不见它们——混装的代价在**载荷类型**上就挡住了，
-//! 不靠分 trait。这也是 DE-008 把两个专服单族 trait 收回同一张表的判据。
+//! 不靠分 trait。这也是 AR-025 把两个专服单族 trait 收回同一张表的判据。
 //!
 //! ## 契约
 //!

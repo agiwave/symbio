@@ -1,5 +1,5 @@
-//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4；
-//! 行表化见 [D-094](../../../../../docs/003-design/014-单环一表.md "D-094")）。
+//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
+//! 行表化见 [D-094](../../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 //!
 //! ## 为什么需要这条面
 //!
@@ -28,7 +28,7 @@
 //! ## 写动作自己发帧
 //!
 //! 落库与发帧是**一个**出口（`transcript::publish::append_and_publish`，见
-//! `session/docs/109-vdfs-session-messages.md` §3.4）：动作在 session 侧调用它，
+//! `../docs/109-vdfs-session-messages.md` §3.4）：动作在 session 侧调用它，
 //! 把权威副本直接投进本会话转写；loop 拿回权威副本只为维护自己的内存镜像。
 //! 不把「落库」与「发帧」分居两插件——那正是「落库的忘了发、发帧的拿错号」的
 //! 温床。
@@ -83,7 +83,7 @@ type RunOpFn = for<'a> fn(
 /// 行表的一行：op 名（[`run_ops`] 词表常量）与它的处理函数。
 ///
 /// **一行一 fn**：「在表内」与「有臂」由构造保证相等，这是本面唯一的
-/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[D-094](../../../../../docs/003-design/014-单环一表.md "D-094")）。
+/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[D-094](../../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 struct RunOp {
     op: &'static str,
     run: RunOpFn,

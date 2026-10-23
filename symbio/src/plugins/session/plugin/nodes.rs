@@ -28,7 +28,7 @@ use crate::symbio_core::{
 ///
 /// 它是「会话节点状态」的唯一来源：节点 `status` 与 `attributes.outcome` /
 /// `attributes.error` 全部由它投影，因此「会话忙不忙 / 上一轮怎么结束的」
-/// 在任何消费端都只有一处判据（见 `session/docs/105-node-state-streaming.md` §2.3）。
+/// 在任何消费端都只有一处判据（见 `../docs/105-node-state-streaming.md` §2.3）。
 ///
 /// 为什么不是一个 `is_working: bool` 参数：布尔只能表达两态，而会话需要三态
 /// （`working` / `active` / `failed`），且 `failed` 还要带上错误文案。
@@ -448,8 +448,8 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 /// 声明的**词汇**是共享的（写方 [`crate::plugins::heartbeat`] 与读方本写臂分属两个插件，
 /// 故键名与 kind 住在 core 的 `event` 域）；声明的**后果**是存储所有者的写窗口纪律
 /// （先把事实源那四格落进，落成了才入队）。两者都在这条写臂上收口，见
-/// [D-076](../../heartbeat/README.md "D-076") #4 与
-/// [D-077](../../heartbeat/README.md "D-077") 后果段。
+/// [D-076](../../heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "symbio/src/plugins/heartbeat/README") #4 与
+/// [D-077](../../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README") 后果段。
 ///
 /// ## 不认识的 `kind` 报 `Invalid`，而不是当没看见
 ///
@@ -528,7 +528,7 @@ pub(crate) enum VdfsSessionPath<'a> {
     SubSession { id: &'a str, sub: &'a str },
     /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
-    /// `<id>/_run/<op>`：loop→session 的内部动作（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4）。
+    /// `<id>/_run/<op>`：loop→session 的内部动作（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
     ///
     /// **不是资源**：不出现在 `list` 里，只接受 `Action`；op 闭集与授权判据
     /// 都住在 `plugin/run_actions.rs`。
@@ -605,7 +605,7 @@ pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> 
 /// 会话内部的虚拟子项（工作目录按会话是否声明 workdir 决定是否出现）。
 ///
 /// `memory` 由调用方构造好传入（形状由共享实现
-/// [`MemoryFile::node`](crate::providers::MemoryFile::node) 产出，
+/// `MemoryFile::node` 产出，
 /// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与各目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
 ///
@@ -800,7 +800,7 @@ pub(crate) fn session_content(
     // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
     // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。
     _reconcile_with: &str,
-    // 建树策略（相应批次）：呈现读侧的投影档位。调用方（`vdfs_provider` 的两个
+    // 建树策略（[]）：呈现读侧的投影档位。调用方（`vdfs_provider` 的两个
     // Read 分支）从本插件 `SessionConfig` 取值传入——`grouped` 档下投影即时返回、
     // 形状与今天逐字相同，`flat` 档把本轮响应骨架的直接子节点升根。
     mode: super::super::config::PresentationTree,
@@ -813,8 +813,8 @@ pub(crate) fn session_content(
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
-    // 呈现派生（B3）：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
-    // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../README.md "symbio/src/plugins/session/README")）。
+    // 呈现派生（[ B3]）：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
+    // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
     let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();
     let payload = json!({
         "id": session.id,

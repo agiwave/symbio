@@ -448,7 +448,7 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
     //    replay 出重复的 `head`（同会话不许两个写方并存）。
     state.inner.write().await.set_working_for_test(true);
     assert!(!p.clone().drain_inbox_once().await, "忙则一趟不启动");
-    assert_eq!(p.inbox_items(sid).await.len(), 1, "忙则排队（D-026）不变");
+    assert_eq!(p.inbox_items(sid).await.len(), 1, "忙则排队（ADR-026）不变");
     assert_eq!(
         ready_ids(&p, sid),
         vec!["x1".to_string()],

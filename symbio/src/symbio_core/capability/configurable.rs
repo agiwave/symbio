@@ -26,13 +26,13 @@
 //!   一份来源（拥有者的 [`PluginConfigFile`]），
 //!   列表只是把它转述出去。
 //!
-//! ## 为什么产物是 [`VdfsItem`] 而不是 [`VdfsNode`](crate::symbio_core::VdfsNode)
+//! ## 为什么产物是 [`VdfsItem`] 而不是 `VdfsNode`
 //!
 //! 因为**地址在这里不可推导**。设置页的条目指向 `<目录名>/PLUGIN.yml`——那是一个
 //! **跨挂载点**的地址（文件在插件自己的目录里，条目却列在设置页这棵子树下）。
 //! 分发层回填地址的规则是 `<父地址>/<name>`，在这里会算成
 //! `plugin_manager/<目录名>`——一个根本不存在的位置。所以拥有者必须**连地址一起**交出来，
-//! 而地址属于「这一份列表」，不属于节点本身（节点是纯自述）。这就是 [`VdfsNode`](crate::symbio_core::VdfsNode)
+//! 而地址属于「这一份列表」，不属于节点本身（节点是纯自述）。这就是 `VdfsNode`
 //! 不带 `path`、而 [`VdfsItem`] 带的理由；本文件是这条边界的**唯一现存实例**。
 //!
 //! 图标不在这里：VDFS 不下发图标，前端按 `kind:名字` 查自己的 UI 映射表
@@ -42,7 +42,7 @@
 //! ## 注册时机
 //!
 //! 与挂载点注册完全相同（同为 `put`：挂载族走 `CapabilityRow::mount`），插件在自己的
-//! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS)
+//! `TRAVERSE_AVAILABLE_TOOLS`
 //! 分支里顺带声明，一次广播同时喂饱两条链路。插件侧只有一个入口
 //! [`capability_announce_configurable`]，条目形状在那里统一构造，各插件不必各写一遍。
 //!

@@ -4,11 +4,11 @@
 //!
 //! 本模块不维护任务表、不记轮次、不开通道：装配 `LoopSession` 与
 //! [`ChatOrchestrator`] 之后直接 `await run_chat_loop`，结局以
-//! [`TurnReport`](crate::symbio_core::TurnReport) 序列化进动作响应。session 侧
+//! `TurnReport` 序列化进动作响应。session 侧
 //! 拿到的是「这一轮怎么结束的」，不是一串帧——帧已经经 `TurnDispatch.sink` 与
 //! 动作面写回会话转写了。
 //!
-//! [D-086]: ../../../../docs/003-design/014-单环一表.md "D-086"
+//! 决策 D-086 见 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
 use std::sync::Arc;
 

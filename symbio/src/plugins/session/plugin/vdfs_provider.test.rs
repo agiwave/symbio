@@ -398,7 +398,7 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
     );
 }
 
-/// **创建即登记**（相应批次）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
+/// **创建即登记**（[]）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
 /// 缺省行；删除会话时登记随之回收（同寿）。
 ///
 /// 判据落在**生产路径**上（VDFS `write` 的 create 分支 → `session_upsert`），
@@ -435,7 +435,7 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
     );
 }
 
-/// **身份改写换行**（相应批次）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
+/// **身份改写换行**（[]）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
 /// 换掉时，旧主体的登记随即撤回、新主体即时有行——不等下一轮装配点兜底。
 #[tokio::test]
 async fn rewriting_the_agent_identity_replaces_the_session_binding() {

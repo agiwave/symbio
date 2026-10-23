@@ -6,7 +6,7 @@
 //! 与 `cost_ms` 同源（D-044：实测与判据同源）。
 //!
 //! 单会话一次 apply 产出一个 span；跨会话中位数由 [`SpanView::merge`] 收齐各会话
-//! 的 span 后按 P50 取（最近邻取法与 [`TierLatency::percentile`](super::slo::TierLatency::percentile)
+//! 的 span 后按 P50 取（最近邻取法与 `TierLatency::percentile`
 //! 同款——「P50 是什么」全仓一个答案）。
 //!
 //! ## 为什么「一个事件的会话」不进中位数

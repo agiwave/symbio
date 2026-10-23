@@ -131,7 +131,7 @@ pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn 
 /// 表）的定位依据，贡献插件据此算出**候选集**。
 ///
 /// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
-/// 定义只声明「有哪些字段与候选」（`docs/archive/session-options-unification.md`
+/// 定义只声明「有哪些字段与候选」（设计文档
 /// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
 ///
 /// 失败降级语义与 `collect_capabilities`（本文件）一致：

@@ -2,7 +2,7 @@
 
 > ⚠️ **生成物，不手改。** 唯一写者是 `node e2e/cases/t46-prompt-shape-baseline.mjs`
 > 带 `PROMPT_SHAPE_UPDATE=1`；判据由那条用例在门禁里每次复算（改了装配就红），
-> 口径与「什么进基线、什么只作观测」见 [[symbio/src/plugins/session/README|D-057]]，
+> 口径与「什么进基线、什么只作观测」见 [D-057](../../symbio/src/plugins/session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 `scripts/prompt-shape-audit.mjs`。
 
 场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-10-18 · 请求数 3

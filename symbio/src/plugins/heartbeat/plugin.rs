@@ -6,7 +6,7 @@
 //!
 //! ## 启动点为什么在 `build` 而不是 `start`
 //!
-//! [`Plugin::start`] 是**同步**钩子（[D-033](../../../../docs/003-design/002-架构总览.md "D-033")：
+//! [`Plugin::start`] 是**同步**钩子（[D-033](../../../../docs/003-design/002-架构总览.md#d-033-生命周期钩子start-同步stop-异步停用与卸载各给理由 "DE-002-架构总览")：
 //! 装配路径整条是同步的），而循环体是 task。session 的常驻任务同在此处
 //! （`plugins/session/plugin.rs` 的 `start_resident_tasks`）——两处都在**构造点**交出句柄，
 //! 「谁来持有句柄」因此只有一个注册点。
@@ -44,10 +44,10 @@ pub struct HeartbeatPlugin {
     parent: Option<Weak<dyn Plugin>>,
     /// 空闲锚点：会话 id → 最近一次**触发成功**的毫秒。
     ///
-    /// 它是 [`idle_baseline`](super::scheduler::idle_baseline) 的下限那一半：磁盘侧
+    /// 它是 `idle_baseline` 的下限那一半：磁盘侧
     /// `updated_at` 停在回合开始前（回合零写盘退出）时，靠它防止逐 tick 热循环重触发。
     /// 切出本插件前这一格住在宿主的 `heartbeat_state`，由回合侧的 `mark_activity` 维护；
-    /// 切片后**只有本插件读写它**（[D-077](README.md "D-077") 后果 #7）。
+    /// 切片后**只有本插件读写它**（[D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README") 后果 #7）。
     anchors: RwLock<HashMap<String, i64>>,
     /// 常驻扫描循环的句柄（停机点据此等到它真的退出）。
     ///
@@ -146,7 +146,7 @@ impl HeartbeatPlugin {
     }
 
     /// 父引用的一份拷贝：给「本轮合成的请求体」当宿主态用（见
-    /// [D-077](README.md "D-077") 裁决三——经容器取数**需要**一个
+    /// [D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README") 裁决三——经容器取数**需要**一个
     /// 宿主态承载访客表，`VdfsContext::empty()` 在容器转发下当场失败）。
     pub(crate) fn parent_handle(&self) -> Option<Weak<dyn Plugin>> {
         self.parent.clone()

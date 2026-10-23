@@ -203,7 +203,7 @@ impl Plugin for GatewayPlugin {
         Some(self)
     }
 
-    /// 停用即收口入站服务（相应批次）：
+    /// 停用即收口入站服务：
     /// 停止接受新连接、关闭实时通道；已进入分派的请求跑完（语义住在
     /// `server::stop` 的文档里，不在调用点复述）。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {

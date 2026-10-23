@@ -150,7 +150,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
 }
 
-/// `to` 是**数据**（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")， 的单测判据）：
+/// `to` 是**数据**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")， 的单测判据）：
 /// 来源主体由调用方传入——对等主体向「把消息交进来的那个主体」立约，不再写死
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
@@ -275,7 +275,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
 /// `Break` 的理由落成 `control × opened`，溯源锚是本轮开口；`breaks` 为空 ⇒ 一格都不落。
 ///
-/// 这是 [roadmap/S09 §6](../../../../docs/007-task/129-外部执行与熔断.md ") 的两条
+/// 这是 [roadmap/S09 §6](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断") 的两条
 /// **相反**验收：验收 1（未授权 ⇒ 拒绝且不产生事件）与验收 2（预算耗尽 ⇒ 必须产出
 /// 熔断事件）。两条必须由**同一个出参**分别触发——有理由就落、没理由就不落；
 /// 「反正都落一条」违反 1，「反正都不落」违反 2。

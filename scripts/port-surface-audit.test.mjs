@@ -151,10 +151,10 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
   write(WRITER_REL, writer)
   // `plan: null` = 夹具里没有这份文档（用来证明 PTS-006 读不到输入时判红）。
   if (plan !== null) write(PLAN_REL, plan)
-  // 基线挂的 ADR 必须**能打开**（PTS-004）——夹具里给它一份空壳决策。
+  // 基线挂的决策必须**能打开**（PTS-004）——夹具在设计文档里写一条 `### D-NNN`。
   if (createAdr) {
-    const id = String(adr).match(/ADR-(\d+[a-z]?)/)?.[1]
-    if (id) write(`docs/003-design/${id}.md`, `---\nkind: adr\nid: ADR-${id}\ntitle: 夹具\n---\n`)
+    const id = String(adr).match(/D-(\d+[a-z]?)/)?.[1]
+    if (id) write('docs/003-design/020-夹具决策.md', `# 夹具决策\n\n### D-${id} 夹具决策\n\n正文。\n`)
   }
   if (!skipBaseline) {
     const printed = spawnSync(process.execPath, [script, `--root=${root}`, '--print-baseline'], {
@@ -196,7 +196,7 @@ test('真仓当前状态通过，且各格判据都数得出非零输入', () =>
   assert.ok(facts, '通过信息里没有「带端口的事实条数」⇒ 判据可能已恒真')
   assert.ok(Number(facts[1]) > 0, '真仓里带端口的事实数为 0 ⇒ 提取器与源码形状脱节')
   assert.match(r.stdout, /PTS-003.*sha256:/)
-  assert.match(r.stdout, /PTS-004.*ADR-/)
+  assert.match(r.stdout, /PTS-004.*D-\d/)
   // PTS-005 也要数得出写点（扫空了就是判据静默变成「永远绿」）。
   const sites = /协议格写方唯一：(\S+)（命中 (\d+) 处构造）/.exec(r.stdout)
   assert.ok(sites, '通过信息里没有「协议格写方唯一」的实测名单与命中数 ⇒ PTS-005 可能没有输入')
@@ -251,7 +251,7 @@ test('PTS-001 端口字段名不唯一 ⇒ 红', () => {
   }
 })
 
-test('豁免口：第 6 个协议名必须挂一条能打开的 ADR', () => {
+test('豁免口：第 6 个协议名必须挂一条能打开的决策', () => {
   const root = fixture({
     facts: DECL_SRC.replace('name: EVENT_SENT,', 'name: "turn.sent",'),
   })
@@ -403,7 +403,7 @@ test('PTS-003 基线缺失 ⇒ 红（没有基准就没有判据）', () => {
   }
 })
 
-test('PTS-004 基线引用的 ADR 打不开 ⇒ 红', () => {
+test('PTS-004 基线引用的决策打不开 ⇒ 红', () => {
   const root = fixture({ adr: 'D-999', createAdr: false })
   try {
     const r = run(root)

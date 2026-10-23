@@ -1,7 +1,7 @@
 //! 消息列表的**读侧**（D-053）——变更索引、压缩快照、行翻译的唯一读法。
 //!
-//! 本模块**不含 `Projection::new`**（是可共享的读侧普通函数，与 [`rebuild`](super::rebuild)
-//! / [`turns`](super::turns) 同族）：投影 A 不得读投影 B 的输出（L2，DE-001 §13.2），
+//! 本模块**不含 `Projection::new`**（是可共享的读侧普通函数，与 `rebuild`
+//! / `turns` 同族）：投影 A 不得读投影 B 的输出（L2，DE-001 §13.2），
 //! 而「变更怎么折、快照怎么读」是多个投影（`transcript` / `rebuild` / `turns`）与
 //! 复核（`prompt_fidelity`）**共用**的读法。这条不变量由
 //! `scripts/projection-purity.mjs` 静态守——**产投影的文件不得导入产投影的兄弟模块**，

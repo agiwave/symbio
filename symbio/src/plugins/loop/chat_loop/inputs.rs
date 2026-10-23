@@ -130,7 +130,7 @@ pub(crate) struct TurnInputs {
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
 /// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
-///    ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
+/// ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
 /// 7. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
@@ -180,7 +180,7 @@ pub(crate) async fn prepare_turn_inputs(
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
     // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——
     // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
-    // [D-078](../../session/README.md "D-078") 退役。
+    // [D-078](../../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README") 退役。
     //
     // ── ⑥′ 委派者真源段（D-047）：Q1 判定 + Q2 能力目录 ─────────────────────
     //
@@ -255,7 +255,7 @@ async fn run_recall(
     // 召回的可见切片按它收放——判断记忆只给自己会话看，共享记忆只
     // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
     let recall_viewer = crate::symbio_core::request_principal(ctx.as_ref());
-    // 事实是**值**（[D-084](../../../../../docs/003-design/001-核心架构.md "D-084")）：
+    // 事实是**值**（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
     // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
     // 它们看到的是同一刻的事实，不各开各的文件。
     let facts = context.session.facts_snapshot();
@@ -317,7 +317,7 @@ async fn run_recall(
 ///
 /// 按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），压缩结果直接
 /// 决定后续请求视图的水位。55% 水位提醒（nudge）已随 `context_compact` 一并退役
-/// （[D-072](../../session/README.md "symbio/src/plugins/session/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
+/// （[D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
 /// 一条指向空处的指令。
 ///
 /// 将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估是否恢复提醒——

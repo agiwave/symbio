@@ -33,7 +33,7 @@ use async_trait::async_trait;
 /// 执行期事件出口：直连转写唯一写入点 + 会话级状态分派。
 ///
 /// 告警走 [`Convergence`] 而不是整个插件：本出口活在 `run_chat_loop` 的后台任务里，
-/// 它要的就是一帧会话级告警（[D-075](../../../../../docs/003-design/002-架构总览.md "D-075") 前置 P2）。
+/// 它要的就是一帧会话级告警（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）。
 pub(crate) struct TranscriptSink {
     convergence: Convergence,
     state: Arc<ActiveSessionState>,

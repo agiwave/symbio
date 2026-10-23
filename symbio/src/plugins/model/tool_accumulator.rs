@@ -30,8 +30,8 @@
 //! 3. **参数 JSON 非空且解析失败时保留残破原文**（`parse_error`），绝不伪装成空参数：
 //!    静默 `{}` 会让工具报「缺少必填参数」，模型看不懂原因便原样重试，卡死在思考循环里。
 //!
-//! [`process_delta`]: TurnToolCallAccumulator::process_delta
-//! [`finish`]: TurnToolCallAccumulator::finish
+//! `process_delta`
+//! `finish`
 
 use crate::plugin_warn;
 use crate::symbio_core::{llm_short_id, TurnToolCallInfo};

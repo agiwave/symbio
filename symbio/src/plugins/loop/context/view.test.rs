@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `view.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! 对话体的淡化 / 骨架化已按 [D-078](../../session/README.md "symbio/src/plugins/session/README") 退役，
+//! 对话体的淡化 / 骨架化已按 [D-078](../../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README") 退役，
 //! 本文件的判据只剩一件事：**三段注入的次序与位置**。
 
 use super::*;

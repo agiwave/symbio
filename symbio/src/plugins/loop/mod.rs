@@ -6,7 +6,7 @@
 //!
 //! 入口只有一个：session 派发 `loop/<sid>` 的 `run_turn`（见 [`provider`]）。
 //!
-//! [D-086]: ../../../../docs/003-design/014-单环一表.md "D-086"
+//! 决策 D-086 见 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
 mod chat_loop;
 mod context;

@@ -291,7 +291,7 @@ test('端到端：`--check` 对漂移判红、对一致判绿', () => {
  * 它占着判据码，让人以为这一族已被守住。改按**内容**定位。
  */
 const CAPABILITY_SEC = (() => {
-  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '004-ref', '006-当前事实表.md'), 'utf8')
   const i = doc.search(/^### \d+\.1 LLM 可见工具$/m)
   assert.notEqual(i, -1, 'CURRENT.md 里找不到「LLM 可见工具」小节——判据自己失效了')
   const rest = doc.slice(i)
@@ -432,7 +432,7 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   // 文档引用本表，都不算——那是指路不是复述。
   // 口径：每个集合**覆盖最全**的那处是 owner；其余任何一处若也集中列了 ≥3 个成员判红。
   // 「处」不限于表格——当年那份重复的 §3.2 是一行 ` · ` 串起来的清单，见 `tableKeys`。
-  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '004-ref', '006-当前事实表.md'), 'utf8')
   const tables = tableKeys(doc)
   assert.ok(tables.length >= 5, `只认出 ${tables.length} 张表——判据自己失效了`)
 
@@ -721,7 +721,7 @@ test('散文里的 RE-006 节次指路：节次必须存在', () => {
   // 取舍：宁可漏一种形态，也不要一条会误报的判据。漏掉的这一种靠**位置中立写法**
   // 消解——登记条目的 evidence 不该用节号指路（节号是位置，会动；「能力矩阵」是
   // 那件东西，不会动）。 已按此改写。
-  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '004-ref', '006-当前事实表.md'), 'utf8')
   const actual = new Set([...doc.matchAll(/^#{2,3}\s+([\d.]+)\.?\s/gm)].map((m) => m[1].replace(/\.$/, '')))
 
   const bad = []
@@ -758,11 +758,11 @@ test('散文判据的扫描面：文档目录全进语料，工具产物目录�
   //   · 只判「`docs/` 进」⇒ 门禁失败详情（引用被扫文档的原文）会把判据喂成永久红。
   //   · `tmp/`（`.gitignore` 的临时区）与两者同口径：报告草稿不进语料、也不砍空。
   const root = tmp()
-  fs.mkdirSync(path.join(root, 'docs', '006-ref'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs', '004-ref'), { recursive: true })
   fs.mkdirSync(path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438'), { recursive: true })
   fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true })
   fs.mkdirSync(path.join(root, 'tmp', 'analysis'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'docs', '006-ref', 'a.md'), '见 RE-006 §99 那一节\n')
+  fs.writeFileSync(path.join(root, 'docs', '004-ref', 'a.md'), '见 RE-006 §99 那一节\n')
   fs.writeFileSync(
     path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438', '_summary.md'),
     '失败详情里引用了「见 RE-006 §99 那一节」这句原文\n',
@@ -788,8 +788,8 @@ test('RE-003 契约表的键必须是 §2.3 的静态路由（多一个键判红
   // 它在这仓代码里从未存在（`git log -S '"_root"' -- symbio/` 零命中）。
   //
   // 口径：两边都取 `| \`地址\` | …` 形态的表行；表头与分隔行没有反引号地址，天然排除。
-  const cur = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
-  const re003 = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '003-ROUTES.md'), 'utf8')
+  const cur = fs.readFileSync(path.join(REPO, 'docs', '004-ref', '006-当前事实表.md'), 'utf8')
+  const re003 = fs.readFileSync(path.join(REPO, 'docs', '004-ref', '003-ROUTES.md'), 'utf8')
 
   const extraKeysOf = (currentText, routesText) => {
     const i = currentText.indexOf('### 2.3')

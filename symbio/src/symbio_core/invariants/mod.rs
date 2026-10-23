@@ -5,8 +5,8 @@
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/007-task/121-最小闭环.md ")；
-//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 补入）
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")；
+//! [`open_unique_per_turn`] 随 plan/11 批 0 补入）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
@@ -48,7 +48,7 @@ use super::event::{Entity, Event, Verb};
 
 // 判据内核（std-only）：算法层住 `kernel.rs`，本模块只做「事件切片 ⇒ 内核输入」
 // 的解析。verify/ 下的两个程序 `#[path]` 包含的就是那个文件——判定与生产共用
-// 一份代码，判据见 kernel.rs 文档与 相应批次。
+// 一份代码，判据见 kernel.rs 文档与 。
 mod kernel;
 
 /// 一处违规：事件（按 seq 定位）+ 人话。
@@ -151,7 +151,7 @@ pub fn provenance_violation(e: &Event) -> Option<Violation> {
 /// 唯一写入口」。`pending`（未入库）事件跳过不查（它们还没有 seq）。
 pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
     // 解析层：收出已入库事件的 seq 序列（pending 还不是事实，跳过），
-    // 判定走 [kernel::seq_monotonic_core](kernel)——verify/invariants.rs
+    // 判定走 kernel::seq_monotonic_core——verify/invariants.rs
     // 包含的是同一份内核。
     let seqs: Vec<u64> = events
         .iter()
@@ -179,7 +179,7 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
 pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 哪些事件算数（final 的判据）是本模块的解析层；「每 turn 至多一条」
-    // 的判定走 [kernel::unique_per_turn_core](kernel)——verify/invariants.rs
+    // 的判定走 kernel::unique_per_turn_core——verify/invariants.rs
     // 包含的是同一份内核。
     let finals = events.iter().filter(|e| is_turn_final(e));
     kernel::unique_per_turn_core(finals.map(|e| (e.turn, e.event_id.as_str())))
@@ -203,12 +203,12 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 /// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
 /// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
 /// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
-/// 典型痕迹。[plan/11 批 0](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
+/// 典型痕迹。plan/11 批 0
 /// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
 /// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
-    // 与 [final_unique_per_turn](self::final_unique_per_turn) 同一内核：
-    // 「哪些事件算数」在解析层，「每 turn 至多一条」在 [kernel](kernel)。
+    // 与 final_unique_per_turn 同一内核：
+    // 「哪些事件算数」在解析层，「每 turn 至多一条」在 kernel。
     let opens = events.iter().filter(|e| is_turn_open(e));
     kernel::unique_per_turn_core(opens.map(|e| (e.turn, e.event_id.as_str())))
         .into_iter()
@@ -232,8 +232,8 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 /// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
-/// 宣称"已经答复"（[roadmap/S01 §5](../../../../docs/007-task/121-最小闭环.md ")）；
-/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/007-task/126-长期记忆与语义检索.md ")
+///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")）；
+/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/001-goal/126-长期记忆与语义检索.md "GO-126-长期记忆与语义检索")
 ///   步骤 11 出口判据：溯源覆盖 100%——无溯源的记忆无法审计，也无法在遗忘时被追溯）。
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
@@ -241,7 +241,7 @@ pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
     events.iter().filter_map(provenance_violation).collect()
 }
 
-/// I2 的覆盖判据（参照 [`docs/003-design/verify/invariants.rs`](../../../../docs/003-design/verify/invariants.rs)
+/// I2 的覆盖判据（参照 `docs/003-design/verify/invariants.rs`
 /// 的 `needs_provenance`；S1 扩展收束类，S5 扩展记忆类）。
 fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
@@ -335,7 +335,7 @@ pub fn provenance_dangling(events: &[Event], allow_slice_edges: bool) -> Vec<Vio
 /// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
 /// 读出口 `session/stats` 因此共享同一条口径，e2e 不必自己挑一个数字。
 /// 取 3：返工两轮还在返，说明当初的任务拆得或验收得有问题，该被看见而不是被
-/// 默许（[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")
+/// 默许（[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
@@ -421,12 +421,12 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。
 ///
-/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/007-task/121-最小闭环.md ")）：
+/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")）：
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
 ///
-/// # 产物也算收束（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）
+/// # 产物也算收束（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）
 ///
 /// `artifact.added`（`artifact × asserted`）同样关闭一轮：工具结果是**说给用户的
 /// 话**（界面上就是一张卡片），不是内部噪声。没有它，只持 `produce.artifact` 的
@@ -594,7 +594,7 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 
 /// C14（终止性前提 3）：任务依赖图**无环且无悬空依赖**（Kahn 拓扑排序）。
 ///
-/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")），
+/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")），
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
@@ -603,7 +603,7 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 /// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     // 解析层：从任务开轮格收出 (task_id, depends_on)；判定（悬空 + Kahn 环）
-    // 走 [kernel::dep_graph_core](kernel)——verify/termination.rs 包含的是同一份内核。
+    // 走 kernel::dep_graph_core——verify/termination.rs 包含的是同一份内核。
     let mut pairs: Vec<(String, Vec<String>)> = Vec::new();
     for e in events {
         if e.entity != Entity::Task || e.verb != Verb::Opened {
@@ -666,10 +666,10 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 ///
 /// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
 /// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
-/// （[docs/003-design/verify/termination.rs](../../../../docs/003-design/verify/termination.rs) 前提 2）。
+/// （docs/003-design/verify/termination.rs 前提 2）。
 /// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
-    // 解析层：收出按时间序的 replaces 序列；计数判定走 [kernel::rework_core](kernel)
+    // 解析层：收出按时间序的 replaces 序列；计数判定走 kernel::rework_core
     // ——verify/termination.rs 的前提 2 用例包含的是同一份内核。
     let replaces: Vec<&str> = events
         .iter()

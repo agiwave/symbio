@@ -225,7 +225,7 @@ pub struct DispatchOutcome {
     pub ok: bool,
     /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
     /// 运行器据此**停止工具循环**（恢复前提见
-    /// [plan/11 批 2](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")）。
+    /// plan/11 批 2）。
     pub needs_user_action: bool,
     /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
     ///
@@ -876,7 +876,7 @@ impl ToolPort {
     /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
-    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../../docs/003-design/015-义务环.md "D-121")
+    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
     /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {

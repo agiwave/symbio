@@ -3,7 +3,7 @@
 //! 三个字段各司其职、互相**正交**：
 //! - `kind`：**一族**（Person / Agent / Tool / System），编译期闭集，运行期判据读它
 //! - `id`：可路由地址 `<namespace>/<name>`——找到主体、调用它、查看它的信息都靠这个地址；
-//!   第一段是归属（哪个插件或概念），后续段是归属内的名字（[D-069 §决策 2]）
+//! 第一段是归属（哪个插件或概念），后续段是归属内的名字（[D-069 §决策 2]）
 //! - `title`：**显示名**，渲染层用（工具响应节点常带、系统主体常不带）
 //!
 //! kind 与 id 分家是这条类型的**核心纪律**——过去把 kind 编进 id（`agent:main`）
@@ -16,7 +16,7 @@ use serde_json::Value;
 /// **主体族**（[D-069 §决策 1]）——四值闭集。
 ///
 /// `role` 已退出协议顶层，`kind` 是主体族的唯一承载点。
-/// 因此 相应批次 里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
+/// 因此 [] 里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
 /// `Tool` ↔ `Tool`，`System` ↔ `System`；读侧一次性别名靠这套映射把旧消息里的 role 补进 kind。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -45,7 +45,7 @@ impl PrincipalKind {
     /// 是否智能体一族——`visible_to` 的运行时判据（[D-069 §决策 3]）。
     ///
     /// 注意与 [`crate::symbio_core::view::is_agent_id`] 的分工：那条**从 id 反推 kind**（用于
-    /// 只有字符串的授权表判据），本条**从结构体字段直接读**。相应批次 之后协议携带 `Principal`
+    /// 只有字符串的授权表判据），本条**从结构体字段直接读**。[] 之后协议携带 `Principal`
     /// 结构体，`visible_to` 会切到 `kind.is_agent()`——`is_agent_id` 只服务 id 层的
     /// 可见域判据（`view::visible_to`）。
     pub fn is_agent(&self) -> bool {
@@ -127,7 +127,7 @@ impl Principal {
         self
     }
 
-    /// 由 **LLM 可见工具名**（wire 形态）构造工具一族的主体（d-iii）。
+    /// 由 **LLM 可见工具名**（wire 形态）构造工具一族的主体。
     ///
     /// 工具的结果节点归**工具自己**（[D-069 §决策 1]：`Tool` 族「工具的响应节点
     /// 归属它自己，不是调用它的 agent」）。地址仍按 `<namespace>/<name>` 规范合成：
@@ -171,7 +171,7 @@ impl Principal {
     ///   （`agent:main` ⇒ `{Agent, session/main}`）。
     /// - 裸 `user` ⇒ `{Person, person/local}`（今天的会话属主）。
     ///
-    /// 只在 相应批次 的一次性读侧别名里用；新写入点直接构造 `Principal` 结构体，
+    /// 只在 [] 的一次性读侧别名里用；新写入点直接构造 `Principal` 结构体，
     /// 不走这条映射（构造即定型）。
     pub fn from_legacy(s: &str) -> Principal {
         // 新形态：`<ns>/<name>` 已带 namespace。
@@ -209,7 +209,7 @@ impl Principal {
     }
 }
 
-// **读侧兼容反序列化**（[D-069 §决策 6]，b）：`Option<Principal>` 字段上的
+// **读侧兼容反序列化**（[D-069 §决策 6]，）：`Option<Principal>` 字段上的
 // 显式标记，语义已由 [`Principal::deserialize`] 的实现给出——`null` / 缺席 ⇒ `None`，
 // 字符串 ⇒ `Principal::from_legacy`，对象 ⇒ 正常解构。字段用 `#[serde(default)]` 即可。
 //

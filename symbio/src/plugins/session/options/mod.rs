@@ -8,7 +8,7 @@
 //! 自己的 `traverse(available_options)` 分支注册（agent → 智能体、model → Model、
 //! `heartbeat` → 心跳任务）。
 //!
-//! ## 三条通路（`docs/archive/session-options-unification.md` §3.2）
+//! ## 三条通路（设计文档 §3.2）
 //!
 //! ```text
 //! 定义   <根>/session/<id> → node.schema               = DetailDefinition { binding: "option", … }
@@ -57,7 +57,7 @@ impl SessionPlugin {
     /// 只声明**有哪些字段**，**不带当前值**——值随节点 `attributes.metadata`
     /// 下发（设计文档 §3.2）。因此本函数与「是哪个会话」无关：可在会话清单里
     /// 算一次、给每一项复用（清单一次取全是既有取向，见
-    /// `session/docs/109-vdfs-session-messages.md`）。
+    /// `../docs/109-vdfs-session-messages.md`）。
     ///
     /// 返回 `(order, field)`：`order` 只给收集层排序用，不下发。
     pub(crate) fn session_option_fields(&self) -> Vec<(i32, DetailField)> {
@@ -71,7 +71,7 @@ impl SessionPlugin {
     /// 会话的**选项定义**（`binding = "option"`）——选项栏与会话详情页共用同一份。
     ///
     /// 载体有两处，内容同一份（一处真相、两处投递）：已落盘会话挂
-    /// [`VdfsNode::schema`](crate::symbio_core::VdfsNode::schema)，
+    /// `VdfsNode::schema`，
     /// 新建草稿挂 `VdfsNewType::schema`。
     ///
     /// 本定义同时承载会话详情页**头部动作区**的动作（`actions`）——会话的详情是

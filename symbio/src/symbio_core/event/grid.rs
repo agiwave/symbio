@@ -7,16 +7,16 @@
 //! 「名字是数据，加名字不加枚举」）。于是「`user.message` 落在 `turn × opened`」这条
 //! **对应关系**此前只有两个载体：常量头上的散文说明，与各构造点手填的 `entity` / `verb`。
 //! 散文不判、构造点没人核 ⇒ 漂了没有任何信号。而投影是**按格子**取事实的
-//! （[`event_node_of`](super::event_node_of) 的 `match` 三目键就是 `(entity, verb, kind)`），
+//! （`event_node_of` 的 `match` 三目键就是 `(entity, verb, kind)`），
 //! 漂一寸的表现是**静默少一条事实**——不是报错。
 //!
 //! 本模块把这条关系落成 [`CELLS`] 一张表，判据是 [`event_cell`]，强制点在
 //! **唯一写入口**内（会话事实源的写侧闸门，报错形态见
-//! [`AppendError::OffGrid`](crate::symbio_core::AppendError::OffGrid)）。
+//! `AppendError::OffGrid`）。
 //!
 //! ## 为什么是「表 + 入库闸」，不是 `EventKind` 枚举
 //!
-//! 审计稿（相应批次
+//! 审计稿（
 //! 来源的 08 报告建议 7）提的是「`kind` 由 `(entity, verb)` 派生，`EventKind` 枚举一张表」。
 //! 那条路走不通，两条理由都是硬的：
 //!
@@ -28,7 +28,7 @@
 //! J3「网格之外的事件编译不过」钉的是**实体与动词**这一半（字符串写不出第三个格子，
 //! 编译期已经在管）。名字这一维本来就是数据，能给它的最强约束是**入库时对齐**——
 //! 与 `ts = 0` 那条同一条纪律：逐构造点手收必然再漏，故收口在入库处（见
-//! [`EventEnvelope::fallback_timestamp`](crate::symbio_core::EventEnvelope::fallback_timestamp) 的教训记录）。
+//! `EventEnvelope::fallback_timestamp` 的教训记录）。
 //!
 //! ## 覆盖是自迫的，不需要新增扫描
 //!

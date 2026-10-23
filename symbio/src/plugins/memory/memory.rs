@@ -12,7 +12,7 @@
 //! 智能体自己**的目录——不需要任何新的上下文键，也不需要宿主额外告知。
 //!
 //! 文件名刻意对齐行业惯例（Agent 目录的指令 / 记忆文件，见
-//! `docs/003-design/011-Agent目录规范.md` §6）：收益是记忆**不属于 symbio**——随
+//! `../../../../docs/003-design/011-Agent目录规范.md` §6）：收益是记忆**不属于 symbio**——随
 //! agent 目录整包分发，换个工具照样生效（工作区那份是同一族约定，物理名同为
 //! `AGENTS.md`，但属于工作区作用域，与本层互不干涉）。
 //!
@@ -121,7 +121,7 @@ pub fn rel_path() -> &'static str {
 ///
 /// `address` 由调用方算好传入（`address` 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由共享实现
-/// [`MemoryFile::segment`](crate::providers::MemoryFile::segment) 统一决定。
+/// `MemoryFile::segment` 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

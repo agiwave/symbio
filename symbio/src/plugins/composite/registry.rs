@@ -17,7 +17,7 @@
 //!
 //! - **合格性**：[`PluginRegistry::provider_of`] 的三态（不是插件 / 可加载 / 配了一半）；
 //! - **必需**：构造者经 [`REQUIRED_PLUGINS`] 声明的清单（缺目录就补出来）；
-//! - **启用**：[`PLUGIN_KEY_ENABLED`](crate::symbio_core::PLUGIN_KEY_ENABLED)（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
+//! - **启用**：`PLUGIN_KEY_ENABLED`（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
 //!
 //! ## 为什么运行期能改，而不用重启
 //!
@@ -200,7 +200,7 @@ impl PluginRegistry {
     /// 装配：**插件目录是子项的唯一来源**
     ///
     /// 扫描 `<插件根>/*/`：配置**合格**（有 `PLUGIN.yml` 且 `plugin_provider` 指向
-    /// 一个已注册工厂）且**启用**（见 [`PLUGIN_KEY_ENABLED`](crate::symbio_core::PLUGIN_KEY_ENABLED)）的才构造。
+    /// 一个已注册工厂）且**启用**（见 `PLUGIN_KEY_ENABLED`）的才构造。
     pub fn mount_all(&self) {
         // **先清掉上一轮的失败**：装配是「按当前磁盘状态重来一遍」，一条没在本轮
         // 重现的失败原因继续挂在条目上，用户看到的就是没发生过的账。

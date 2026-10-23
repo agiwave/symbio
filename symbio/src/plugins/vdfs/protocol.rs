@@ -15,7 +15,7 @@
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
 //! `plugins/model/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::VdfsProvider
+//! `VdfsProvider`
 
 use crate::symbio_core::{
     VdfsContent, VdfsItem, VdfsNode, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
@@ -209,7 +209,7 @@ pub struct VdfsTreeResponse {
     /// 为什么必须回这一份：`d781a6c7` 号会话里，一次 `vdfs_tree({"depth":3})` 的 500 个
     /// 配额被 `.workbuddy-ai`(180) + `.git`(73) + `.symbio`(60) 吃掉大半，`docs/adr`
     /// 只剩一个目录节点——那 63 个 ADR 一个都没有，而回执**只说 `truncated: true`，
-    /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`docs/003-design/014-单环一表.md` …一路猜到  doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到 D-062，该文件当时不存在），非入链。
+    /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`../../../../docs/003-design/014-单环一表.md` …一路猜到 doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到 D-062，该文件当时不存在），非入链。
     /// `D-213.md`），逐个用 shell 试，132 次全是「系统找不到指定的文件」，会话跑
     /// 188 秒 181 次工具调用后被用户中止，**最终零产出**。
     ///
@@ -289,7 +289,7 @@ pub struct VdfsSearchResult {
 // （`super::fs::UnifiedFs`）把 [`VdfsChange`] **原样**投上总线
 // （`subscribe({ kind: 'vdfs' })`）。前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`。
 //
-// [`VdfsChange`]: crate::symbio_core::VdfsChange
+// `VdfsChange`
 
 #[cfg(test)]
 #[path = "protocol.test.rs"]

@@ -1,4 +1,4 @@
-//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../../docs/007-task/131-技能编译与自我改进.md ")）。
+//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../../docs/001-goal/131-技能编译与自我改进.md "GO-131-技能编译与自我改进")）。
 //!
 //! **技能是事实，不是特殊类型**（S11 §2 / J1）：编译产物就是一条
 //! `memory.encoded{tag:"skill"}`——与普通记忆同格子、同召回、同巩固，读侧
@@ -17,7 +17,7 @@
 //! - **快路的作用点是执行**：`SkillFastPath` 命中时本轮**不调模型**，直接以技能正文
 //!   收束（S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」、§6.2「命中后
 //!   `cost_ms` 显著低于未命中路径」）。执行侧由 core 的
-//!   [`TurnRunner::run_reflex`](crate::plugins::session::turn_runner::TurnRunner::run_reflex) 承担——
+//!   `TurnRunner::run_reflex` 承担——
 //!   它**没有 `llm` 形参**，因此"反射档调模型"在类型上写不出来
 //!   （`verify/latency_gate.rs::assemble(Reflex)` 的落地形态）。本模块只做**命中判定**
 //!   与候选集的装配：`route` 判出可用技能，`take_match` 判本轮发言命中哪一条。
@@ -112,7 +112,7 @@ pub(crate) fn compile(
     ev.actor = PRINCIPAL_USER.to_string();
     ev.turn = turn;
     ev.ts = now;
-    // **内容侧可见域 = `shared`**（相应批次）：
+    // **内容侧可见域 = `shared`**：
     // 技能是**固化的可复用经验**（成功轨迹的套路），与「经验」同属
     // 「人的认知可供借用」（SC-010）——跨会话命中是它的设计意图（t35 证据②：
     // B 会话命中 A 会话编译的技能，跨进程稳定判据）。缺席 = 缺省
@@ -189,7 +189,7 @@ pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option
 ///   判不了 ⇒ 原样留在视图里当背景事实，不假装判过；
 /// - **巩固产物判不了**（合并后的条目有新 seq、不再带 `skill_id`）⇒ 同样原样保留。
 ///
-/// `snapshot` 是本会话事实的**值**（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）：
+/// `snapshot` 是本会话事实的**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
     if !view.entries.iter().any(|e| e.tag == SKILL_TAG) {

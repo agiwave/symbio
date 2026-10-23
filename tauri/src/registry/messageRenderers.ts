@@ -6,7 +6,7 @@
  * - `registry/messageTypes.ts`  纯 UI 映射：facets → 渲染器标识；标识 → 组件登记表
  * - 本文件                      把标识绑定到具体 Vue 组件（**唯一 import 组件的地方**）
  *
- * B2a：渲染器标识就是 wire 五值 `NodeKind`（`typing` 占位走 `fallback`）——
+ * [ B2a]：渲染器标识就是 wire 五值 `NodeKind`（`typing` 占位走 `fallback`）——
  * 五个组件、五格形状，前端分派轴不再有任何业务名（`turn` / `tool_call` / `reasoning` /
  * `compression` / `memory` / `user_prompt` 全部并入形状格）。
  *

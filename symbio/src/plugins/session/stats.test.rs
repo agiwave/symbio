@@ -300,7 +300,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
 /// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
 ///
 /// 「哪些事实源打得开」由存储层判（`deep_snapshots` 跳过并出声）；本列只对
-/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）。
+/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
 #[test]
 fn fleet_aggregates_the_snapshots_it_is_given() {
     let (root, _wals) = seed_instance("values", 2);
@@ -1296,7 +1296,7 @@ fn reputation_column_reports_own_and_by_principal() {
     assert_eq!(denied.reputation, serde_json::json!({}));
 }
 
-/// 承诺列（相应批次 段二，S08 §5 的读侧出口）：
+/// 承诺列（ 段二，S08 §5 的读侧出口）：
 /// 一轮里委托过一次 ⇒ 这里就**读得出那一条**（谁向谁、承诺了什么、违约为什么）。
 ///
 /// ## 这条判据补的是哪一半
@@ -1688,7 +1688,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案")）：
+/// 转写列把**工具结果**也读出来（plan/10 批 3）：
 /// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
 ///
 /// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。

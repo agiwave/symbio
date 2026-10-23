@@ -133,8 +133,8 @@ impl SymbioKey for TurnDispatchKey {
 }
 pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 
-/// loop→session 内部动作段的**地址词表**（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §4；
-/// 闭集的去处见 [D-094](../../../../docs/003-design/014-单环一表.md "D-094")）。
+/// loop→session 内部动作段的**地址词表**（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
+/// 闭集的去处见 [D-094](../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 ///
 /// `_run` 是会话挂载点下的一级段：`session/<sid>/_run/<op>`。地址末段与
 /// `Action.action` 必须**字面相等**——两者只在这里命名一次，两侧都从这里取。
@@ -172,7 +172,7 @@ pub mod run_ops {
 /// 两侧隔着插件墙各写一遍字面量会静默漂移（拼方与解方必须逐字相等），
 /// 故与 `run_ops` 同住 core——它是**纯值词汇**，不是新机制。
 ///
-/// [D-086]: ../../../../../docs/003-design/014-单环一表.md "D-086"
+/// 决策 D-086 见 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 pub const LOOP_RUN_TURN: &str = "run_turn";
 
 // ── 动作载荷（纯值，两侧共同命名）──────────────────────────────────────

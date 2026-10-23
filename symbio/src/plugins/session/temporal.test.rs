@@ -1,4 +1,4 @@
-//! [`temporal_context`](super::temporal_context) 的单元测试。
+//! `temporal_context` 的单元测试。
 //!
 //! 同时钉住**一次移除**：本模块不得再出现任何 `AGENTS.md` 的读取（智能体自身那个
 //! 文件归 `agent` 插件，工作区那个归 `work` 插件）。

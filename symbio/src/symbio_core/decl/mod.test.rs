@@ -130,7 +130,7 @@ fn builtin_loads_and_freezes() {
     }
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
 
-    // `ver` 是口径的显式版本：a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
+    // `ver` 是口径的显式版本： 给 `turn_head` 加幕锚 / 技能命中时升到 3，
     // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
     // 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
     // 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；

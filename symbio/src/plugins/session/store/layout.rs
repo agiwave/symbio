@@ -22,13 +22,13 @@
 //! 清单只读 `session.json`，其大小与会话聊了多久**无关**；`messages.json` 只有真的
 //! 要取转写时才读。代价是清单字段（标题 / 条数 / 摘要 / 标签）不能现算，必须在 `save`
 //! 时算好落盘——它们是**投影**（[`super::types::SessionSummary`]），可重算，不是第二份
-//! 真相。性能取舍见 `symbio/src/plugins/session/docs/106-perf.md`。
+//! 真相。性能取舍见 `../docs/106-perf.md`。
 //!
 //! 旧布局（消息内联在 `session.json`）仍**可读**：`messages.json` 缺失时回落到内联
 //! `messages` 字段；投影缺失时用内联消息**就地补算**（[`SessionMetaFile::into_summary`]）
 //! ——缺了这条兜底，清单会静默退化成显示 id。
 //!
-//! ## 子会话嵌套存储（机制约定，见 docs/003-design/009-VDFS规范.md）
+//! ## 子会话嵌套存储（机制约定，见 ../../../../../docs/003-design/009-VDFS规范.md）
 //!
 //! 会话可派生子会话：子会话不是顶层平级条目，而是存放在父会话目录内的
 //! `sessions/` 子目录——`<根>/<safe(父)>/sessions/<safe(子)>/`。

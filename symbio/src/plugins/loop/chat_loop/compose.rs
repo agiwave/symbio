@@ -63,7 +63,7 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_COMPOSE_WORDING,
     SESSION_ID,
 };
-// 对话面节点的构造器已上移 core `node_build`（[D-082](../../../../../docs/003-design/014-单环一表.md "D-082") 裁决三）
+// 对话面节点的构造器已上移 core `node_build`（[D-082](../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）
 use crate::symbio_core::node_build::dialog_node;
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};

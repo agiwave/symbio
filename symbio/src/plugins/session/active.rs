@@ -104,7 +104,7 @@ pub struct ActiveSessionStateInner {
     ///
     /// 这是**状态**而不是事件：提示音 / 错误条 / 重试入口都据此判定，
     /// 不需要「Abort 与 Error 谁先到」这种顺序知识（见
-    /// `session/docs/105-node-state-streaming.md` §3.3）。
+    /// `docs/105-node-state-streaming.md` §3.3）。
     ///
     /// `None` = 本进程内还没有跑完过一轮（或刚被新一轮请求复位）。
     pub last_outcome: Option<String>,
@@ -193,7 +193,7 @@ pub struct ActiveSessionState {
     ///
     /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
     pub transcript: Arc<Mutex<super::transcript::Transcript>>,
-    /// 「本轮收尾」唤醒（相应批次）：
+    /// 「本轮收尾」唤醒：
     /// 工作态**由忙变闲**时通知一次。
     ///
     /// 收件箱消费者挂在它上面等「某个排队会话让出」，取代此前的 50ms 轮询。
@@ -397,7 +397,7 @@ impl ActiveSessionState {
 
 /// 无进程内缓存时的运行态读法：**事实投影**作答。
 ///
-/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "D-083")），
+/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
 /// 由调用方原样带上。
 fn runtime_from_facts(facts: Option<&RuntimeFacts>, warning: Option<String>) -> SessionRuntime {
     match facts.and_then(|f| f.outcome.clone()) {

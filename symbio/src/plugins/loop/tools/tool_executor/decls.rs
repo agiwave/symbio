@@ -2,15 +2,15 @@
 //!
 //! 三处闸门（淘汰闸 / 承诺记账 / 任务表）若各自把工具名字面量抄一遍，
 //! 工具改名时**没有测试会失败**——闸门静默失效（J3 要消灭的形态）。本位把它们
-//! 的管辖对象改成 [`CapabilityMeta`](crate::symbio_core::CapabilityMeta) 上的
+//! 的管辖对象改成 `CapabilityMeta` 上的
 //! **自声明字段**，与 `risk` / `context_retention` 同一条纪律：工具说「我受这项
 //! 管辖」，闸门只负责读声明。
 //!
 //! ## 读的时机与来源
 //!
-//! 批首经收集管线的读侧助手 [`tool_metas`](crate::symbio_core::tool_metas)
+//! 批首经收集管线的读侧助手 `tool_metas`
 //! 读一次工具元数据——与
-//! [`execute_tool_async`](super::execute_tool_async) 解析线上名同一来源；一次读给
+//! `execute_tool_async` 解析线上名同一来源；一次读给
 //! 整批复用，与 `BreakerInputs` / `EliminationInputs` 的批首读同口径（每个调用点
 //! 各重放一次事实源，闸门自己就变成时延源了）。
 //!

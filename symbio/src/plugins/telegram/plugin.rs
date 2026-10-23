@@ -329,7 +329,7 @@ impl TelegramPlugin {
     /// 启动监听器
     ///
     /// **不接受「注入 LLM 插件」参数**：跨插件调用一律经 `ctx.parent()` 走容器，
-    /// 见 `docs/003-design/006-插件路由与地址.md`。
+    /// 见 `../../../../docs/003-design/006-插件路由与地址.md`。
     ///
     /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
     /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是
@@ -604,7 +604,7 @@ impl Plugin for TelegramPlugin {
         Some(self)
     }
 
-    /// 停用即收口长轮询（相应批次）：
+    /// 停用即收口长轮询：
     /// 复用 `stop_listener` 的取消令牌——路由臂与停用路径必须是**同一条**收口逻辑，
     /// 否则「面板上停了」与「插件被停用」会走出两种状态。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {

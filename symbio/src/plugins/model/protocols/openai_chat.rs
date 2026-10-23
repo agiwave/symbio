@@ -36,7 +36,7 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 /// ## 为什么要并
 ///
 /// 出厂形状原本是**两条** system：这里 prepend 一条，而消息数组的第一元素按
-/// [D-048a](../../session/README.md "symbio/src/plugins/session/README") 后果节本身就是一条 system（记忆段 /
+/// [D-048a](../../session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "symbio/src/plugins/session/README") 后果节本身就是一条 system（记忆段 /
 /// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
 /// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
 /// （ 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。

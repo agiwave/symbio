@@ -235,7 +235,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
     'completed', 'aborted', 'failed', 'removed',
   ]
   if (!known.includes(status)) return null
-  // c-ii `attributes.type` 可能是五值形态的新词（写方迁移后）或旧业务词（存量），
+  // `attributes.type` 可能是五值形态的新词（写方迁移后）或旧业务词（存量），
   // 一律经 `nodeKindOf` 在读边界一次性归一成五值——折叠幂等，落地口再折一次不会漂移。
   const folded = typeof v.type === 'string' ? nodeKindOf(v.type) : undefined
 
@@ -244,7 +244,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
     try {
       const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
-        // d-ii 历史正文 JSON 还带顶层 `name`：折进 meta.tool_name（非覆盖），
+        // 历史正文 JSON 还带顶层 `name`：折进 meta.tool_name（非覆盖），
         // 与后端 message_of_node 的属性折叠同一纪律。
         const legacy = (parsed as { name?: string }).name
         const pm = parsed.meta as Record<string, unknown> | undefined
@@ -260,16 +260,16 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
 
   const out: ChatNode = { id: node.name }
   if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
-  // d-iii attrs.principal 是后端 `message_node` 一直写的那格——照折进来，
+  // attrs.principal 是后端 `message_node` 一直写的那格——照折进来，
   // role 退役后它就是 `messageRoleOf` 的兜底来源（对象/历史字符串都由 normalize 吃下）。
   if (v.principal != null) out.principal = v.principal as ChatNode['principal']
   if (folded) out.type = folded
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
-  // d-i `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。
+  // `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。
   if (typeof v.seq === 'number') out.seq = v.seq
   if (typeof v.error === 'string') out.error = v.error
   if (v.meta != null && typeof v.meta === 'object') out.meta = v.meta as ChatNode['meta']
-  // d-ii 存量 attrs.tool_name 折进 meta.tool_name（非覆盖）——顶层 name 已退役
+  // 存量 attrs.tool_name 折进 meta.tool_name（非覆盖）——顶层 name 已退役
   if (typeof v.tool_name === 'string') {
     const m = (out.meta ??= {}) as Record<string, unknown>
     if (m.tool_name == null) m.tool_name = v.tool_name

@@ -13,7 +13,7 @@ use super::node::{VdfsItem, VdfsNode};
 ///
 /// ## 为什么没有「写到哪了」的地址
 ///
-/// 写入的目标地址是**调用方给的**（[`VdfsProvider::dispatch`](super::VdfsProvider::dispatch) 的 `path` 参数），
+/// 写入的目标地址是**调用方给的**（`VdfsProvider::dispatch` 的 `path` 参数），
 /// 回传它等于把调用方已经知道的东西还回去。唯一调用方不知道的是**匿名写**
 /// （打在目录自身上的那一次，见 [`VdfsRequest::Write`] 的两种目标形态）里
 /// provider 生成的**名字**——那正是 [`Self::name`] 承载的唯一信息。
@@ -110,8 +110,8 @@ pub enum VdfsRequest {
     /// 列出 `path` 目录的直接子节点（`l` 位）。
     ///
     /// 有界窗口**不在请求里**：`limit` / `before` 是**调用级参数袋**的键
-    /// （[`VDFS_PARAM_LIMIT`](super::VDFS_PARAM_LIMIT) /
-    /// [`VDFS_PARAM_BEFORE`](super::VDFS_PARAM_BEFORE)），由访问层翻译给认识它们的
+    /// （`VDFS_PARAM_LIMIT` /
+    /// `VDFS_PARAM_BEFORE`），由访问层翻译给认识它们的
     /// provider——请求只回答「列哪个目录」，窗口是调用方的上下文，不是操作负载。
     List {},
     /// 读取 `path` 节点的元数据
@@ -155,7 +155,7 @@ impl std::fmt::Debug for VdfsRequest {
 
 // ==================== 响应（唯一接口的出参） ====================
 
-/// [`VdfsProvider::dispatch`](super::VdfsProvider::dispatch) 的响应：与请求变体一一对应。
+/// `VdfsProvider::dispatch` 的响应：与请求变体一一对应。
 ///
 /// [`VdfsResponse::Unit`] 承载「成功但没有产物」的操作（delete / mkdir /
 /// watch / unwatch——失败走 `Err`，成功无值可带）。

@@ -209,7 +209,7 @@ pub(super) fn build_user_prompt_message(
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
         role: Some(NodeRole::Tool),
-        // d-iii 等待用户的交互卡同样是**工具的结果**：族归工具自己。
+        // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
         principal: Some(crate::symbio_core::principal::Principal::tool_principal(
             tool_name,
         )),
@@ -340,7 +340,7 @@ pub async fn execute_tool_async(
             let visitor = tool_visitor.clone();
             let tool_ctx2 = tool_ctx.clone();
             let canonical = invoke_name.clone();
-            // 执行不在表上（DE-008 §3）：按名取行 + capability_invoke；查不到即
+            // 执行不在表上（AR-025 §3）：按名取行 + capability_invoke；查不到即
             // 诚实的 NotFound（文案与机制化之前逐字一致）。
             Box::pin(async move {
                 match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
@@ -391,7 +391,7 @@ pub async fn execute_tool_async(
     //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
-    //      永远停在 `Streaming`（违反 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §8 #11）；
+    //      永远停在 `Streaming`（违反 `../../session/docs/105-node-state-streaming.md` §8 #11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
     // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
     //

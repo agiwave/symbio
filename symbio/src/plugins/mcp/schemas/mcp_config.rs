@@ -131,7 +131,7 @@ fn default_true() -> bool {
 ///
 /// 磁盘上每个 server 是**自己的目录条目**：`<本插件目录>/<name>/server.json`
 /// （见 `plugin.rs` 的 `MANIFEST`）。本结构只承载这些条目的内存视图，由
-/// [`load_from_storage`](crate::plugins::mcp::plugin::McpPlugin) 灌入、
+/// `load_from_storage` 灌入、
 /// 写 / 删后同步——不落盘、也不读配置文件。
 #[derive(Debug, Clone, Default)]
 pub struct McpConfig {

@@ -3,7 +3,7 @@
 //! ## 它读写的是**别人的存储**，走的是地址面
 //!
 //! 切出本插件前它直接持有 `Weak<SessionPlugin>` 并调 `get_or_create_session` /
-//! `save_session`（宿主的私有项，[D-075](../../../../docs/003-design/002-架构总览.md "D-075") P3 那条
+//! `save_session`（宿主的私有项，[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") P3 那条
 //! 「被切的那片不再 `use super::` 宿主的私有项」要消掉的正是这个）。现在它对会话只说两句话：
 //! `stat(<会话>)` 读旧值、`write(<会话>)` 写 `{metadata:{heartbeat:{…}}}`——浅合并由会话侧
 //! 的写窗口做（`Session::merge_metadata_object` 是 metadata 写入的唯一实现），本文件不复制那份算术。
@@ -36,7 +36,7 @@ const MIN_INTERVAL_SECS: u64 = 10;
 
 /// 心跳设置工具
 ///
-/// 由 [`HeartbeatPlugin`] 的 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 注册进
+/// 由 [`HeartbeatPlugin`] 的 `Plugin::traverse` 注册进
 /// 能力表；弱引用宿主插件，避免 插件 ↔ 工具 的 Arc 循环。
 pub struct HeartbeatTool {
     plugin: Weak<HeartbeatPlugin>,

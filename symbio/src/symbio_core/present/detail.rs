@@ -17,8 +17,8 @@
 //! 里声明的动作——**导入与导出都在这里**（[`VDFS_ACTION_IMPORT`] /
 //! [`VDFS_ACTION_EXPORT`]），它们与「测试连接」「删除」同级，没有特殊地位。
 //!
-//! [`VDFS_ACTION_IMPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_IMPORT
-//! [`VDFS_ACTION_EXPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_EXPORT
+//! `VDFS_ACTION_IMPORT`
+//! `VDFS_ACTION_EXPORT`
 
 use crate::symbio_core::vdfs::VdfsFieldError;
 use crate::symbio_core::VdfsValidationError;

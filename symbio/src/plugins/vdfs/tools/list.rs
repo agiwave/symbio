@@ -7,7 +7,7 @@
 //!
 //! 条目地址在本工具里用不上（只报 `name`），所以只取 `item.node`。
 //!
-//! [`VdfsItem`]: crate::symbio_core::VdfsItem
+//! `VdfsItem`
 //!
 //! **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；对 `.vdfsv2` 列目录
 //! 即返回当前可访问的全部类别，无需独立工具。

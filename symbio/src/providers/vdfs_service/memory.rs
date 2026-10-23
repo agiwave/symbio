@@ -9,8 +9,8 @@
 //! 典型用法：
 //!
 //! - **内存清单**：运行期注册表直接作为挂载点内容（无 IO、无漂移）；
-//! - **磁盘镜像**：启动时 [`DirVdfs`](super::dir::DirVdfs) /
-//!   [`SingleFileVdfs`](super::single_file::SingleFileVdfs) 灌入，写盘成功后回灌
+//! - **磁盘镜像**：启动时 `DirVdfs` /
+//!   `SingleFileVdfs` 灌入，写盘成功后回灌
 //!   ——列表读走内存，落盘走另一型。
 
 use crate::symbio_core::clock_now_ms;

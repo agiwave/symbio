@@ -3,7 +3,7 @@
 //!
 //! 与 `super::memory`（本会话 `MEMORY.md` 置顶约定，文件形态）的分工：那层记
 //! 「钉住的约定」，本层是
-//! [roadmap/S06](../../../../docs/007-task/126-长期记忆与语义检索.md ") 的**事件
+//! [roadmap/S06](../../../../docs/001-goal/126-长期记忆与语义检索.md "GO-126-长期记忆与语义检索") 的**事件
 //! 记忆**——不另开文件，记忆就是 `v2-events.wal` 里的普通事件（D-044 同族纪律：
 //! 同一事实一份持久化，没有旁路存储）。
 //!
@@ -11,7 +11,7 @@
 //!
 //! | 段 | core 的判定方 | 本模块做什么 |
 //! |---|---|---|
-//! | 步 11 编码 | [`RecallView::contains_content`](crate::symbio_core::RecallView) 同文去重 | 本轮用户发言 → `memory.encoded` |
+//! | 步 11 编码 | `RecallView::contains_content` 同文去重 | 本轮用户发言 → `memory.encoded` |
 //! | 步 12 召回 | `recall` 投影（as-of / 排除式遗忘 / 预算 / 混合打分） | 读视图 → 注入请求视图 + `memory.recalled` |
 //! | 步 13 巩固 | `consolidate::accept`（代数上界 + 保真度下界） | 合并最旧两条，**过门才入格** |
 //!
@@ -41,7 +41,7 @@
 //! - **载荷里没有 `vec` 键**：向量索引是 Store 的实现细节（01 §9.2），召回走标签 +
 //!   时间口径；内容恒在 `content`，索引落成时按 `content` 回填即可。恒空的预留键
 //!   没有任何读方，却会让「写了就是有了」的假承诺进事实形状——见
-//!   [D-110](../memory/README.md "D-110")。本模块也不给每轮对话挂一次
+//! [D-110](../memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "symbio/src/plugins/memory/README")。本模块也不给每轮对话挂一次
 //!   ONNX 推理：那会把推理成本加到每一轮上，而收益是零（没有索引在读它）。
 //! - **存哪 / 怎么读**：写方只写**本会话自己的** `v2-events.wal`（共享文件需要跨进程
 //!   锁，而 `WalStore` 没有——plan/11 已确认，两进程同写一份会互相截尾）；召回反过来
@@ -52,7 +52,7 @@
 //!   user 消息」从用户的问题换成记忆，mock 场景匹配与轮次窗口都会读错。
 
 // 巩固合并的纯计算内核：生产与 verify 共有同一份源码（ 批① 立这条纪律，
-// 住址随 [D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三归位 core 文本域）。
+// 住址随 [D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三归位 core 文本域）。
 // 本模块续一条原名短路径——调用点一行不动。
 use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
@@ -67,7 +67,7 @@ use crate::symbio_core::{
 // ==================== 常量（口径的数值面，单点定义） ====================
 
 /// 认知内容标签：自动编码的情景内容一律标「**经验**」（七类：知识 / 经验 / 技能 /
-/// 判断 / 策略 / 直觉 / 情绪，[roadmap/00](../../../../docs/007-task/120-路线图总览.md ")）。
+/// 判断 / 策略 / 直觉 / 情绪，[roadmap/00](../../../../docs/001-goal/120-路线图总览.md "GO-120-路线图总览")）。
 ///
 /// 分类需要模型判断，不在本步（分类的落点是 S10）——但标签不能留空：巩固按标签
 /// 分组，空标签等于没有分组。
@@ -113,7 +113,7 @@ pub(crate) const RECALL_SCAN_QUOTA: u64 = 500;
 /// 注入段抬头——e2e 与单测都以它为锚。
 pub(crate) const RECALL_SECTION_HEAD: &str = "【长期记忆】";
 
-/// 降级标注的措辞（相应批次）：
+/// 降级标注的措辞：
 /// 只在**有部分结果**时追加到注入段抬头之后。空结果走整段省略（`prompt_section` 返回
 /// `None`，不印空壳），两者合起来才是 S06 §6 验收 2「不允许空且不标降级」的读侧出口——
 /// 「有部分结果且不标」与「空且不标」是同一个静默的两种形态。
@@ -124,19 +124,19 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 
 /// 步 12 的读方：**跨会话**召回 → [`RecallView`]（一条记忆都没有 ⇒ `None`）。
 ///
-/// `snapshots` 是存储层交回的**值**（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）：
+/// `snapshots` 是存储层交回的**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 枚举平级会话、mtime 新近优先、文件数与字节双预算、判定哪份是调用方自己的
 /// 会话——全在
-/// [`SessionStore::recall_snapshots`](super::store::SessionStore::recall_snapshots)；
+/// `SessionStore::recall_snapshots`；
 /// 本函数只做「可见域预过滤 → 投影」。每份快照是**完整史**（含归档前缀，
 /// 存储层 `range(0)` 口径）⇒ 压缩前记下的记忆不会被静默丢掉。
 ///
 /// 合并后排序由投影的 `query` 决定：传本轮用户正文 ⇒ 内容重叠分降序
 /// （ 批②：旧但相关的记忆不再输给新但无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
 ///
-/// ## 扫描范围 = 平级会话（刻意不含嵌套子会话，相应批次 裁决）
+/// ## 扫描范围 = 平级会话（刻意不含嵌套子会话， 裁决）
 ///
-/// 只扫一层不是没看见 [`session_wals_deep`](super::paths::session_wals_deep) 那棵树，
+/// 只扫一层不是没看见 `session_wals_deep` 那棵树，
 /// 是**范围跟着信息增量走**（与淘汰闸 / stats 的「部署级事实必须完整」不同性质）：
 ///
 /// 1. **子会话的事实经工具结果回流**（S08 代际承诺：`agent_run` 的收束答复进父
@@ -152,7 +152,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// as-of 取 `i64::MAX`：与 `session/stats` 同一条口径——WAL 是落盘事实源，文件里
 /// 每一条都已发生（见 `stats.rs` 模块文档）。
 ///
-/// ## `viewer` = 本轮主体（相应批次）
+/// ## `viewer` = 本轮主体
 ///
 /// **读侧预过滤**（`projection/recall.rs` 模块文档指派给读侧的那一半）：记忆事件
 /// 的载荷带着内容侧可见域（`memory_events::encode` 的产地， ①），本读方按它
@@ -178,7 +178,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 口径不变（记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
 /// Turn 类事件仍 `ts = 0`，但它们不进这个视图——投影只认 `entity == memory`）。
 ///
-/// 返回的 [`RecallView`] **自带 `degraded`**（相应批次）：
+/// 返回的 [`RecallView`] **自带 `degraded`**：
 /// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息由**这里誊抄**（外壳
 /// `degraded` ⇒ 视图字段）——消费方（`prompt_section`）不必回捞外壳也能说得出来。
 pub(crate) fn recall_view(
@@ -239,7 +239,7 @@ fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
 
 /// 把召回视图排成注入段（无条目 ⇒ `None`，整段省略——不印空壳标题）。
 ///
-/// **降级要说得出来**（相应批次）：
+/// **降级要说得出来**：
 /// `view.degraded` 为真 ⇒ 抬头后追加 [`RECALL_DEGRADED_NOTE`]。这一步是 `degraded`
 /// 从**投影口径**走到**用户眼前**的出口——读方若只取 `View::value` 就把降级丢了，
 /// 「只显示了一部分」没有任何一处说得出来（S06 §7）。
@@ -289,10 +289,10 @@ pub(crate) struct EncodeContent<'a> {
     pub user_text: &'a str,
     pub tag: &'a str,
     pub event_id: String,
-    /// **内容侧可见域**（相应批次）：
+    /// **内容侧可见域**：
     /// 这条记忆对谁可见——判定依赖的输入若没有事实来源，判定就只能是平凡值
     /// （同 D-053 / D-054 把「变更」升为事实的同一条纪律）。落盘形态 =
-    /// [`VisScope::name`](crate::symbio_core::VisScope) 的字符串；生产取值只有两个：
+    /// `VisScope::name` 的字符串；生产取值只有两个：
     /// 经验（用户发言，人的认知可供借用）取 `shared`，判断（智能体收束，本部署
     /// 私有的工作记忆）取 `thread_private`。
     pub vis_scope: crate::symbio_core::VisScope,

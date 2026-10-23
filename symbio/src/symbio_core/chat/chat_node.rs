@@ -21,7 +21,7 @@ pub enum NodeRole {
 }
 
 /// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`），
-/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]，相应批次）。这五值是**纯 UI 形状**概念
+/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]，[]）。这五值是**纯 UI 形状**概念
 /// （展开叶 / 折叠叶 / 容器 / 交互 / 占位），不含任何业务。同 shape 内的业务变体
 /// （run/tool/reasoning/compression…）走 `meta.style_tag`，**只在后端作业务判据**，
 /// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据（[D-070 §决策 2]）。
@@ -34,7 +34,7 @@ pub enum NodeRole {
 /// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
 /// 在 [`message_of_node`] 读边界一次性折叠成新形态 + `style_tag` 注入。
 ///
-/// 决策依据：[D-070 §决策 1 / 3]·父批：相应批次。
+/// 决策依据：[D-070 §决策 1 / 3]·父批：[]。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -52,7 +52,7 @@ pub enum NodeKind {
     Skeleton,
     /// 等待用户回应（`ask_user` 提问或工具执行前确认）
     Interaction,
-    /// 进行中的占位（前端合成，见 相应批次）
+    /// 进行中的占位（前端合成，见 []）
     Typing,
 }
 
@@ -88,7 +88,7 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
 
 /// **style_tag 词表**（[D-070 §决策 3]）——同一 shape 下的**后端业务注记**。
 ///
-/// 相应批次 起它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
+/// [] 起它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
 /// 数据渲染，从不 `switch(style_tag)`。本词表住在 `meta` 里，只服务后端业务判据
 /// （`is_run` / `is_tool_call` / `is_reasoning` / `is_compression`）与 LLM 请求重建。
 /// 后端认识业务天经地义；前端不认。加一个业务变体 = 加一行常量 + 后端填 `title`/`icon`，前端零改动。
@@ -250,7 +250,7 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
-    /// **存量只读格**（d-iii）：`role` 已退出 wire（`skip_serializing` ⇒
+    /// **存量只读格**：`role` 已退出 wire（`skip_serializing` ⇒
     /// 写方不再发、读侧折叠按 `principal.kind` 走），这一格只为**存量数据**保留：
     /// 历史 `messages.json` / 容器正文里带 `"role"` 的节点反序列化进来后，
     /// [`Self::node_role`] 仍按「格先 kind 后」折叠——与前端 `messageRoleOf` 同一判据。
@@ -263,14 +263,14 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<NodeRole>,
 
-    /// **这条发言是谁说的**（[plan/11 批 1](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
+    /// **这条发言是谁说的**（plan/11 批 1
     /// ② 的跨栈身份字段）：主体地址（`{kind, id, title?}`，[D-069 §决策 1]）。
     ///
     /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
     /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
     /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（S08 §4 平凡值要求逐字一致）。
     ///
-    /// **读侧兼容**（b，[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
+    /// **读侧兼容**（，[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
     /// 裸字符串（`"agent:main"` / `"user"` / `"session/main"`）由 [`Principal::deserialize`]
     /// 一次性映射成结构体；写侧一律构造 `Principal`，序列化只出对象形态。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -279,7 +279,7 @@ pub struct ChatNode {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub msg_type: Option<NodeKind>,
 
-    /// d-ii：顶层 `name` 字段**已退役**——工具名是结构细节，住
+    /// ：顶层 `name` 字段**已退役**——工具名是结构细节，住
     /// `meta.tool_name`（读写唯一入口 [`ChatNode::tool_name`] /
     /// [`ChatNode::with_tool_name`]）。存量两条路径都在读边界折进来：
     /// VDFS 属性 `tool_name`（[`message_of_node`]）与容器节点正文 JSON 的
@@ -324,25 +324,25 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
-    /// 呈现标题（[D-070 §决策 2 / 3]，相应批次）：后端在构造节点时填的**面向用户显示文本**
+    /// 呈现标题（[D-070 §决策 2 / 3]，[]）：后端在构造节点时填的**面向用户显示文本**
     /// （思考="思考过程" / 压缩="上下文压缩" / 工具=工具名 / 轮=智能体名）。
     /// 前端**照数据显示**，不再按业务类型查表生成——这是"前端不懂业务"的落点之一。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
-    /// 呈现徽标标识（相应批次）：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
+    /// 呈现徽标标识（[]）：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
     /// 映射到 UI 资产表（class→svg 那种映射，不是 `switch(type)`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
 
-    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]，相应批次）：后端算好「这个节点现在
+    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]，[]）：后端算好「这个节点现在
     /// 能重试 / 审批 / 补参 / 回答 / 重跑压缩」中的哪几种，随节点下发。前端只做
     /// 「列表里有 `retry` 就画重试按钮」的**数据渲染**，不再按业务类型（tool/compression/run）
     /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions: Option<Vec<ResumeAction>>,
 
-    /// 本节点的**读数片段**（[D-111](../../plugins/session/README.md "symbio/src/plugins/session/README")）：已由产者排好版的
+    /// 本节点的**读数片段**（[D-111](../../plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：已由产者排好版的
     /// 若干行（标签 + 值），前端**逐行排版**、不认任何业务词——压缩「压到哪儿了 / 什么触发的 /
     /// 压掉几条」这类交代原先由前端读 `meta` 数字自己拼，口径因此住在两端。
     ///
@@ -350,7 +350,7 @@ pub struct ChatNode {
     ///
     /// [`ReadingSection`] 是只读指标读数的宿主方言（`present/reading`），已在两侧镜像并由
     /// `protocol-mirror-audit` D 组看守；给同一个概念起第二个名字是换名不是机制化
-    /// （[D-070 §决策 3](../../../../docs/003-design/002-架构总览.md "D-070") 反对的正是这个）。
+    /// （D-070 §决策 3 反对的正是这个）。
     ///
     /// ## 为什么不落存储
     ///
@@ -390,7 +390,7 @@ pub struct ChatNode {
     ///
     /// **进到这一格的号有四套来源**（权威号 / 快照槽位号 / 在途号 / 重建号，另有一个
     /// 同名但属于事件层的 WAL `Seq`）——谁是分配者、谁何时作废，归一表在
-    /// `plugins/session/docs/109-vdfs-session-messages.md` §3.3，本处不复述。
+    /// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3，本处不复述。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
 
@@ -411,7 +411,7 @@ pub struct ChatNode {
     /// 存放在本字段，仅在构建 LLM 请求包时使用（部分协议要求回传原值，如
     /// OpenAI Responses 的 `call_id` 链）。历史数据无此字段：请求构建回退节点 id。
     ///
-    /// ## d-i：**wire 上不存在，只在后端内存里活着**
+    /// ## ：**wire 上不存在，只在后端内存里活着**
     ///
     /// `#[serde(skip)]` 让它**不进出** `ChatNode` 的序列化形状——前端从不消费它
     /// （过去只是 copy-through 到 store），LLM 请求构造侧仍走 Rust 结构体字段读取。
@@ -547,7 +547,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
         .cloned()
         .filter(|v| !v.is_null());
     // 存量属性里的旧结构键**非覆盖**折进 meta（与 style_tag 同一条纪律：新写方
-    // 带着完整 meta 进来时不覆盖）。d-ii：顶层 `name` 退役后，属性
+    // 带着完整 meta 进来时不覆盖）。：顶层 `name` 退役后，属性
     // `tool_name` 的唯一归宿是 `meta.tool_name`。
     for (key, value) in [
         ("style_tag", legacy_tag.map(Value::from)),
@@ -588,7 +588,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
 }
 
 impl ChatNode {
-    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（d-ii，替代已退役的
+    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（，替代已退役的
     /// 顶层 `name` 字段）。值是 LLM 可见工具名（可能是限定形态 `local/todo_write`，
     /// 也可能裸名，取决于产地）。
     pub fn tool_name(&self) -> Option<&str> {
@@ -598,7 +598,7 @@ impl ChatNode {
             .and_then(Value::as_str)
     }
 
-    /// 写 `meta.tool_name`（链式构造 helper，d-ii 构造侧）。`None` 不写
+    /// 写 `meta.tool_name`（链式构造 helper， 构造侧）。`None` 不写
     /// （缺席=没有，不往 meta 里塞 null）。
     pub fn with_tool_name(mut self, name: Option<String>) -> Self {
         let Some(name) = name else { return self };
@@ -611,7 +611,7 @@ impl ChatNode {
         self
     }
 
-    /// 归属折叠判据（d-iii）：`role` 的**唯一读入口**。
+    /// 归属折叠判据：`role` 的**唯一读入口**。
     ///
     /// 共存阶段的优先级是「残留格优先、`principal.kind` 兜底」：今天仍有构造点只写
     /// `role` 不写 `principal`（子会话转播改写 `role=Tool` 这类），kind 折叠一旦
@@ -631,7 +631,7 @@ impl ChatNode {
         })
     }
 
-    /// **过渡入口**（d-iii）：写存量只读格 `role`。
+    /// **过渡入口**：写存量只读格 `role`。
     ///
     /// 语义上等价于直写字段，存在的理由是**可搜寻性**：写存量格的调用点全部
     /// 冠以 `with_role` / `set_legacy_role`，下一档清零时一处 grep 就是完整清单
@@ -663,7 +663,7 @@ impl ChatNode {
             .and_then(Value::as_str)
     }
 
-    /// 写入 `meta.style_tag`（链式构造 helper，c-ii 构造侧）。
+    /// 写入 `meta.style_tag`（链式构造 helper， 构造侧）。
     ///
     /// `meta` 已有对象则并入该对象；`meta` 是非对象 JSON（不该发生）时原样保留、不注入。
     pub fn with_style_tag(mut self, tag: &'static str) -> Self {
@@ -688,7 +688,7 @@ impl ChatNode {
 
     /// 本节点是不是「推理正文」（`Notice` + tag `reasoning`）。
     ///
-    /// 相应批次：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[DE-019 §3]）——
+    /// []：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[DE-019 §3]）——
     /// 与 compression 同格，靠 `style_tag` 在后端区分。
     pub fn is_reasoning(&self) -> bool {
         self.msg_type == Some(NodeKind::Notice)
@@ -697,14 +697,14 @@ impl ChatNode {
 
     /// 本节点是不是「普通正文」（`Body`）。
     ///
-    /// 相应批次：reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
+    /// []：reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
     pub fn is_text(&self) -> bool {
         self.msg_type == Some(NodeKind::Body)
     }
 
     /// 本节点是不是「压缩记录」（`Notice` 且**不是** reasoning）。
     ///
-    /// 相应批次：`Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
+    /// []：`Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
     /// 会把思考也算成压缩——压缩判据必须显式排除 reasoning。存量无 tag 的裸 `Notice`
     /// 仍按压缩兜底（历史上 compression 是唯一 Notice 变体）。
     pub fn is_compression(&self) -> bool {
@@ -717,7 +717,7 @@ impl ChatNode {
         self.msg_type == Some(NodeKind::Interaction)
     }
 
-    /// **呈现派生**（B3，[D-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
+    /// **呈现派生**（[ B3]，[D-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
     /// 前端的呈现数据——`title` / `icon`（头部）与 `actions`（可发起的恢复动作）——**只在
     /// 前后端交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
     ///

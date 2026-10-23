@@ -14,7 +14,7 @@
 //!
 //! 这些操作没有第二种实现需要切换（磁盘就是磁盘），把它们抽成 trait 只会
 //! 重新制造「`EntityStore` 抽象 + 一个实现」那层空转。类型化入口都收在
-//! [`DirVdfs`](super::dir::DirVdfs) / [`SingleFileVdfs`](super::single_file::SingleFileVdfs)
+//! `DirVdfs` / `SingleFileVdfs`
 //! 自己身上。
 
 use crate::symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};

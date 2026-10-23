@@ -1,4 +1,4 @@
-//! 会话工作态的小状态机（P5 运行态归源，相应批次）。
+//! 会话工作态的小状态机（P5 运行态归源，）。
 //!
 //! ## 为什么是一个闭集，而不是散落的布尔写点
 //!
@@ -12,7 +12,7 @@
 //! `ActiveSessionState::turn_done` 上。新增一条收尾路径时，只要它要改变工作态就必须
 //! 经 `apply`——**绕过去状态根本不会变**，而不是「变了但没人被叫醒」。
 //!
-//! ## 进程局部量的边界（[D-083](../../../../docs/003-design/001-核心架构.md "D-083") 残余条款）
+//! ## 进程局部量的边界（[D-083](../../../../docs/003-design/001-核心架构.md#d-083-自上而下再推导废除服务端口进-core跨插件通货闭族在既有机制词汇切片补立前置-p5运行态归源 "DE-001-核心架构") 残余条款）
 //!
 //! 工作态**不参与事实投影**：它是宿主内存里的当前值，重启后按 [`WorkingState::Idle`]
 //! 起算，上一轮结局再由事实投影补上。因此崩溃不会留下「永久处理中」——内存没了，
@@ -35,11 +35,11 @@ pub(crate) enum WorkingState {
 /// 改变工作态的**全部**事件。
 ///
 /// 三个变体对应三类路径，没有第四条：
-/// - [`Begin`](Self::Begin)：开轮（`entry` 的同步置位 + `emit_session_state(Working)`）；
-/// - [`EarlyExit`](Self::EarlyExit)：收尾**之前**先让位（正常收尾 / 中止兜底 / 崩溃兜底）——
+/// - `Begin`：开轮（`entry` 的同步置位 + `emit_session_state(Working)`）；
+/// - `EarlyExit`：收尾**之前**先让位（正常收尾 / 中止兜底 / 崩溃兜底）——
 ///   这几步还要清在途图、注销中止信号、写失败节点，期间必须已可接新请求，
 ///   否则用户点重试会被 `session_busy` 静默拒绝；
-/// - [`Finish`](Self::Finish)：收轮写结局（`emit_session_state(Finished)`）。
+/// - `Finish`：收轮写结局（`emit_session_state(Finished)`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkingTransition {
     Begin,

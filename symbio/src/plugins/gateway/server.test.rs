@@ -380,7 +380,7 @@ async fn ws_frames_roundtrip_through_all_length_forms() {
     }
 }
 
-/// 停用 ⇒ 监听真的关了（相应批次）。
+/// 停用 ⇒ 监听真的关了。
 ///
 /// 判据用**独立探针**（另一条 `TcpStream`）而不是问插件「你停了吗」：先证明服务
 /// 活着（健康检查回 200），再 `stop`，最后证明新连接**连不上**。`inbound_port: 0`

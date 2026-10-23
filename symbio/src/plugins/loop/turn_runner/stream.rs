@@ -27,7 +27,7 @@ enum ModelCallError {
 
 /// 一次模型往返 = 端口 `model` 的一次调用（ 步 2）。
 ///
-/// 协议事实由 [`port`](crate::plugins::loop::port) 模块写（**唯一写方**）：
+/// 协议事实由 `port` 模块写（**唯一写方**）：
 /// `request`（决策者：这一步欠一次模型往返）→ `sent`（引擎，跑**之前**）→
 /// `response` / `failed`。
 ///

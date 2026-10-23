@@ -57,7 +57,7 @@ impl HooksPlugin {
     /// `Plugin::meta()` 唯一生产消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
     /// `name`/`description`/`hidden` 聚合组合视图），但路由按目录名分发、
     /// `PluginMeta.id` 不参与路由，所以那个错名**不影响路由**，却足以让
-    /// `docs/004-ref/006-当前事实表.md` 的生成器与三处文档写出 `hooks/fire` 这类**不存在的路由**。
+    /// 设计文档 的生成器与三处文档写出 `hooks/fire` 这类**不存在的路由**。
     /// 改用 `PLUGIN_ID_HOOK` 后三者对齐，由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_HOOK, "钩子插件")
@@ -114,7 +114,7 @@ impl Plugin for HooksPlugin {
         Self::metadata()
     }
 
-    /// 停用即清空注册态（相应批次）：
+    /// 停用即清空注册态：
     /// hook 注册只活在内存里，没有常驻任务——要收口的只有这张名单。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
         self.registry.write().await.clear().await;

@@ -6,11 +6,11 @@
 //! `docs/003-design/verify/latency_gate.rs` 的 `should_not_compile` feature）。
 //! 这里守的是运行时可测的半场：预算表与档位语义。
 //!
-//! [D-096](../../plugins/model/README.md "D-096") 退役了快速档令牌
+//! [D-096](../../plugins/model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "symbio/src/plugins/model/README") 退役了快速档令牌
 //! （`ClassifyOnly` / `issue_fast` / `CanClassify` / `CanGenerate`）：那只原本守
 //! 「分类端口」的令牌，端口在生产里从未存在。档位语义由**预算值**承载
 //! （严格递增的四档）；`may_call_model` / `may_generate` 两个孤儿谓词无生产读方，
-//! 随后一并删除（相应批次）。
+//! 随后一并删除。
 
 use super::*;
 

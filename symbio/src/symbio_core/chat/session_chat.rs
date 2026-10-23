@@ -14,7 +14,7 @@ pub struct Request {
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
     /// 与 `mode` / `risk_level` 是**完全对称**的三条链：`req > session.metadata > 默认`
     /// （`plugins/session/orchestrator/entry.rs::resolve_session_params`）。
-    /// 这条回退是 [D-066](../../../../docs/003-design/012-会话输入与地址.md "D-066") 的前提——
+    /// 这条回退是 [D-066](../../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") 的前提——
     /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
@@ -32,7 +32,7 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<String>,
     /// 入站请求的**来源主体**（[DE-001 §12.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
-    /// 跨体承诺的「向谁宣告」，[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）。
+    /// 跨体承诺的「向谁宣告」，[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。
     ///
     /// 完整主体名（如 `agent:main`）——**谁把这条消息交进来**。它不是「以谁的身份
     /// 跑轮」（那是 `agent_id` ⇒ 会话主体），而是「这条入站消息的出处」：轮末

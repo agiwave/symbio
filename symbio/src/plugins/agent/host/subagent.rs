@@ -20,12 +20,12 @@
 //! 1. 校验目标 agent 目录存在、`working_dir` 合法；
 //! 2. `vdfs/write <会话地址>` 落子会话元数据（`parent_session_id` → 存储归档父会话
 //!    子目录、不进用户会话列表；`mode` / `risk_level` / `provider_id` 随本条落成
-//!    会话属性，[D-066]）；
+//! 会话属性，[D-066]）；
 //! 3. `vdfs/write <会话地址>/inbox` 发起本轮（输入面双轨已退役：`session/chat/send`
 //!    不再存在，而子会话不是本进程持有的会话实例，跨作用域写者只能走地址面；
 //!    该写入**受理即返回**，本轮在后台推进）；
 //! 4. 订阅子会话的实时面（**一条**：`event_bus` + `vdfs/watch <会话地址>`——
-//!    消息流式与会话运行态都在上面，见 D-025），把子会话过程经出口转播到
+//! 消息流式与会话运行态都在上面，见 D-025），把子会话过程经出口转播到
 //!    父视图（节点锚定到本工具调用之下）；
 //! 5. 子会话完成（idle 无待审批）→ 工具结果 = 最终文本（末尾附
 //!    `[subagent_session_id]`，供 LLM 后续续会话）；等待审批 → 工具以待审批
@@ -1009,7 +1009,7 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// `find_tool_result` 正确识别。
 ///
 /// **顺序依赖（主体改写必须排在角色改写之后）**：`node_role()` 的读法是「残留 `role`
-/// 格优先、`principal.kind` 兜底」（d-iii 共存阶段）。先写主体的话，靠主体折出
+/// 格优先、`principal.kind` 兜底」（ 共存阶段）。先写主体的话，靠主体折出
 /// `Assistant` 的那种节点（`role` 空、`principal.kind = Agent`）在读第二次就已经是
 /// `Tool`，于是角色格**永远不会被写**——这张卡的前端与 flatten 都只能从主体猜类型，
 /// 而 `find_tool_result` 认的是 `role`。判据钉在 `relabel_..._rewrites_principal_folded`。

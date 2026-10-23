@@ -8,7 +8,7 @@
 //!
 //! ## 系统工具机制集成
 //!
-//! 与 [`web`](crate::plugins::web) 插件完全一致：
+//! 与 `web` 插件完全一致：
 //! - 静态插件持有 `manager: Arc<McpManager>`（无状态 transport 路由器）
 //! - `traverse(TRAVERSE_AVAILABLE_TOOLS)` 时遍历 `McpConfig.servers`，
 //!   对每个 enabled server 调用 `manager.discover_tools` 动态发现工具，

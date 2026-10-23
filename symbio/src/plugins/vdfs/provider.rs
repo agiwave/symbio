@@ -19,7 +19,7 @@
 //! 「裸地址补 `local/` 前缀 → 再拆挂载名 → 按名取 provider」三步翻译，
 //! 现在只需要把地址原样交给门面。
 //!
-//! [`host::root_of`]: super::host::root_of
+//! `host::root_of`
 
 use super::fs::UnifiedFs;
 use super::host::call_params;

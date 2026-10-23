@@ -16,7 +16,7 @@
 //! 入口只有 [`terms`] / [`overlap`] / [`rank`] 三个纯函数与 [`ScoreEntry`] 一个
 //! 数据结构。算法判据（怎么分词、怎么算重叠、平手怎么断）只有这一份。
 //!
-//! ## 它与代码检索的关系（[D-109](../../plugins/memory/README.md "D-109")）
+//! ## 它与代码检索的关系（[D-109](../../plugins/memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "symbio/src/plugins/memory/README")）
 //!
 //! 本文件是**记忆侧**「查询 → 相关性」这条打分口径的唯一 owner。代码检索
 //! （`plugins/local/codebase_search.rs` 的 `semantic_search`）是**另一份**打分实现

@@ -10,7 +10,7 @@
 //!   与订阅表（`watch` / `unwatch`）：它们服务的是「同一个值在几个域里长一样」，
 //!   红的是**几面同时**，因此留在路由这一处，不跟着域分散；
 //! - 写侧：**本文件不实现任何写语义**——各域方法把 `Write` / `Delete` / `Action` 翻译成
-//!   对 [`commands`](super::super::commands) 的调用（消息改写 / 截断 / 清空、会话新建 /
+//!   对 `commands` 的调用（消息改写 / 截断 / 清空、会话新建 /
 //!   覆盖 / 删除），再把变更投进这里的订阅表。「谁能改会话」的答案在 `commands` 一处。
 
 use super::*;
@@ -128,14 +128,14 @@ impl SessionPlugin {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
         let mut messages = ordered(overlay_live(session.messages, live));
-        // 呈现投影（相应批次）：转写列表与会话叶子是同一份数据的两个地址，必须给
+        // 呈现投影（[]）：转写列表与会话叶子是同一份数据的两个地址，必须给
         // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
         // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
         let mode = self.presentation_mode().await;
         crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
-        // 呈现派生（B3）：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
+        // 呈现派生（[ B3]）：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
         // 历史/切回走这里）。存储与事件里的节点不含 title/icon 也不含读数行，
-        // 交付前按形状统一算出（读数口径见 [D-111](../README.md "symbio/src/plugins/session/README")）。
+        // 交付前按形状统一算出（读数口径见 [D-111](../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
         Ok(messages.into_iter().map(present_message).collect())
     }
 
@@ -218,7 +218,7 @@ impl SessionPlugin {
 
     /// 会话记忆 → VDFS 节点。
     ///
-    /// 形状由共享实现 [`MemoryFile::node`](crate::providers::MemoryFile::node) 产出，
+    /// 形状由共享实现 `MemoryFile::node` 产出，
     /// `list`（经 `internal_dirs`）与 `stat`
     /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
     pub(super) async fn memory_node_of(&self, id: &str) -> VdfsNode {

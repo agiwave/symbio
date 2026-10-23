@@ -34,7 +34,7 @@
 //! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——插件在
 //!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
 //!   [`crate::providers`] 的两种接线方式），**不进** `creator_create_object`。
-//!   硬抽 trait 只会把一次构造换成一次字符串查表（D-035）。
+//! 硬抽 trait 只会把一次构造换成一次字符串查表（D-035）。
 //!
 //! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
 //! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：各层各写各的文件、
@@ -124,7 +124,7 @@ impl MemoryInjection {
     /// 文本上系统性低估占用。边界回退复用 [`text_floor_char_boundary`]
     /// （全项目唯一的「安全字节切片」实现，不在此另写一份）。
     ///
-    /// [`text_floor_char_boundary`]: crate::symbio_core::text_floor_char_boundary
+    /// `text_floor_char_boundary`
     pub fn cut(text: &str, budget_bytes: usize) -> Self {
         let end = crate::symbio_core::text_floor_char_boundary(text, budget_bytes);
         Self {
@@ -328,7 +328,7 @@ impl MemoryFile {
     /// 这里对无作用域退回空名，与 `instruction::host_dir` 对「取不到父目录」的处理
     /// 同一口径：理论上不该发生，但降级比 panic 好。
     ///
-    /// [`file_name`]: MemoryFile::file_name
+    /// `file_name`
     pub fn node(&self, spec: &MemoryNodeSpec) -> VdfsNode {
         // 节点名：规格给了覆盖就用覆盖（挂载名），否则用真实文件名
         let name = spec

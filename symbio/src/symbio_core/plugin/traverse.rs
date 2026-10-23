@@ -18,7 +18,7 @@
 //!
 //! ## 为什么住 `plugin` 域
 //!
-//! 它们是 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 的入参取值，
+//! 它们是 `Plugin::traverse` 的入参取值，
 //! 与 `Plugin` trait 是**同一份契约**。此前两者分居两处（一个在 crate 根、一个在
 //! `capability` 域），同一份协议的两个端点看不出是同一份协议；现在同处一个文件。
 //!

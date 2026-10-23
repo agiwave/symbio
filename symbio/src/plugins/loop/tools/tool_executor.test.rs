@@ -349,7 +349,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     assert_eq!(updates[0].status, Some(NodeStatus::Completed));
 }
 
-/// 相应批次 步 2 判据：**第二次同参调用不再静默**。
+/// [] 步 2 判据：**第二次同参调用不再静默**。
 ///
 /// 事故现场（会话 `cli1a14222066f0`）：模型要的是「一共多少处命中」，而截断结果里
 /// 没有一个字的总数，它唯一的动作就是原样重发 ⇒ 同一份结果执行两次、白跑一轮。
@@ -909,7 +909,7 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     assert_eq!(msg.msg_type, Some(NodeKind::Interaction));
     assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
     assert_eq!(msg.role, Some(NodeRole::Tool));
-    // d-iii 交互卡也是工具的结果：主体归工具一族，工具名随行入格
+    // 交互卡也是工具的结果：主体归工具一族，工具名随行入格
     assert_eq!(
         msg.principal.as_ref().map(|p| p.id.as_str()),
         Some("vdfs/write")
@@ -1121,7 +1121,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/007-task/129-外部执行与熔断.md ")
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层

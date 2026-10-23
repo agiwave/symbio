@@ -9,7 +9,7 @@
 //! 闸门的编译期反向用例（无法在运行期测试，注释为证）：
 //! `TokenIssuer::issue_reflex()` 拿到的 `RuleOnly` 传给 `generate` 是编译错误——
 //! 反射层调模型不是被检测到，是编译不过（`generate` 只收 `&FullModel`）。
-//! 快速档（`LatencyTier::Fast`）**没有令牌**：[D-096](README.md "D-096")
+//! 快速档（`LatencyTier::Fast`）**没有令牌**：[D-096](README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "symbio/src/plugins/model/README")
 //! 把它退役了，那条「只分类不生成」的约束由 classify 插件的返回类型与工具集判据承载。
 
 use std::io::{Read, Write};
@@ -549,7 +549,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
 ///   给模型留出主导份额）、**max ≤ 300ms**（快速档——最坏情况不得溢出快速档；
 ///   溢出说明链路自身失控，与模型无关）。
 ///
-/// 实测值记录在 [docs/004-ref/004-slo-calibration.md](../../../../docs/004-ref/004-slo-calibration.md "RE-004-slo-calibration")。
+/// 实测值记录在 ../../../../docs/004-ref/004-slo-calibration.md。
 #[tokio::test]
 async fn reflex_tier_system_overhead_is_measured_and_bounded() {
     let mut samples: Vec<u64> = Vec::new();
@@ -603,7 +603,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
 /// 链路与 CI 侧校准（[`reflex_tier_system_overhead_is_measured_and_bounded`]）
 /// **完全同形**：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
 /// `ProviderLlmAdapter` → 真实端点。差异只在端点——mock 即答量的是**系统自身开销**，
-/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/004-ref/004-slo-calibration.md` 的报告行。
+/// 真实模型量的是**主导项延迟**。产出可抄进 设计文档 的报告行。
 ///
 /// 守卫：每轮落在**深度档**（60s）内——真实模型延迟的主导项必须被四层预算接住。
 ///

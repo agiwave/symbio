@@ -1,9 +1,9 @@
 //! 请求级注入段 —— 只影响**单次请求、不落库**的置顶文本。
 //!
 //! 唯一入口 [`build_request_sections`]：长期记忆 / 就绪任务 / 委派者真源，按**调用方
-//! 给定的次序**装配。**对话体不在这里加工**：发给模型的历史是事实网格的纯投影（[D-048a](../../session/README.md "symbio/src/plugins/session/README")），
+//! 给定的次序**装配。**对话体不在这里加工**：发给模型的历史是事实网格的纯投影（[D-048a](../../session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "symbio/src/plugins/session/README")），
 //! 请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按
-//! [D-078](../../session/README.md "symbio/src/plugins/session/README") 退役。
+//! [D-078](../../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README") 退役。
 //!
 //! 各段都是**追加的读视图**，不是对既有消息的改写——所以它们与「请求体 = 投影」不冲突：
 //! 它们以一条 `system` 前缀消息进入请求（见 `chat_loop::request_view_prefix`），

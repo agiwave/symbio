@@ -703,7 +703,7 @@ async fn dispatch_protocol_event(
             }
 
             // 工具调用骨架节点（`Skeleton` + tag `tool`）：自身 content 即**请求参数**（不设独立的请求子节点，
-            // 见 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §2.2）。两条路径与正文 / 推理
+            // 见 `../session/docs/105-node-state-streaming.md` §2.2）。两条路径与正文 / 推理
             // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增量 → 窄追加（`Append`，O(delta)），接收端尾部拼接。

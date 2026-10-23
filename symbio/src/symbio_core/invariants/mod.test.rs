@@ -579,7 +579,7 @@ fn fault_timeout_avoided_by_fallback_event() {
 
 #[test]
 fn fault_timeout_avoided_by_artifact_event() {
-    // 反向（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）：只落了**产物格**的轮
+    // 反向（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：只落了**产物格**的轮
     // 同样算收束——工具结果是说给用户的话，没有发言权的主体（对等主体）以它收束。
     // 没有这条，对等主体每跑一轮都永久留一条违规，e2e 的「不变量清单为空」无从谈起。
     let events = stored(vec![

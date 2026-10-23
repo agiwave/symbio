@@ -78,12 +78,12 @@ impl DirVdfs {
 
     /// 条目内相对路径 → 绝对路径，**并校验它不逃出条目目录**。
     ///
-    /// [`inner_path`](Self::inner_path) 是裸拼接口径：条目 id 由
-    /// [`safe_segment`](entry::safe_segment) 保证安全，但 `rel` 此前**未经任何
+    /// `inner_path` 是裸拼接口径：条目 id 由
+    /// `safe_segment` 保证安全，但 `rel` 此前**未经任何
     /// 校验**。虚拟地址只以 `/` 分段，因此合法的 `rel` 必须既不含 `..` 段
     /// （`\` 也是分隔符，见 [`vdfs_has_parent_segment`]），也不含 `\`——否则
     /// Windows 会把 `demo/..\..\escaped.txt` 解析到条目目录之外，而
-    /// [`remove_inner`](Self::remove_inner) 用的是 `remove_dir_all`。
+    /// `remove_inner` 用的是 `remove_dir_all`。
     ///
     /// 这是**纵深防御**：访问层的 `plugins::vdfs::fs::normalize_addr` 已拦一道，
     /// 但 provider 可能经其它访问路径被复用（解包、直接构造），不能假设上游
@@ -129,7 +129,7 @@ impl DirVdfs {
     /// 写 JSON 主文件（`to_string_pretty`）+ 变更广播
     ///
     /// 主文件不是 JSON 的资源（如 `SKILL.md` 是 Markdown）必须用
-    /// [`write_text`](Self::write_text)：把纯文本包成 JSON 值会写上引号、
+    /// `write_text`：把纯文本包成 JSON 值会写上引号、
     /// 并把换行转义成字面 `\n`，文件被静默写坏而写入报成功。
     pub async fn write_json(&self, id: &str, value: &serde_json::Value) -> VdfsResult<bool> {
         let text = serde_json::to_string_pretty(value)

@@ -891,7 +891,7 @@ if (fs.existsSync(LOOP_DIR)) {
 // 又为什么不是所有 `.md`：`docs/archive/` 与各插件的迁移记录里会有大量历史路径，
 // 只扫「自称是当前权威清单」的那几份。
 const ROUTE_AUTHORITY_FILES = [
-  path.join(repoRoot, 'docs', '006-ref', '003-ROUTES.md'),
+  path.join(repoRoot, 'docs', '004-ref', '003-ROUTES.md'),
   ...(() => {
     try {
       return fs

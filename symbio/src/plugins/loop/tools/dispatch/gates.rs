@@ -94,7 +94,7 @@ pub(crate) async fn read_batch_gates(
     // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
     //
     // `gate_started` 从**读判据之前**起算：熔断的 `gate-timeout` 量的是「这份输入
-    // 已经读了多久」（相应批次）。
+    // 已经读了多久」。
     // 从前它在 `gate()` 前一刻才起算，`elapsed_ms` 恒为 0，判据永不触发。
     let gate_started = std::time::Instant::now();
     let session_snapshot = facts.range(Seq::new(0));
@@ -135,7 +135,7 @@ pub(crate) async fn read_batch_gates(
         })
         .collect();
 
-    // 同参重复调用的**台账**（相应批次 步 2）：批首收进本批之外已出现过的调用签名，
+    // 同参重复调用的**台账**（[] 步 2）：批首收进本批之外已出现过的调用签名，
     // 之后每处理一条调用就登记一条。登记以**模型发出的调用**为准，被闸门拒掉的也算
     // ——「绕圈」是模型侧的事实，与本次执行成败无关。
     let current_call_ids: Vec<String> = tool_calls.iter().filter_map(|tc| tc.id.clone()).collect();

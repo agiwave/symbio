@@ -200,15 +200,6 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('docs/003-design/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
-  const r = audit({
-    ...RS,
-    'docs/003-design/002-架构总览.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
-    'README.md': '正常文档。\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-})
-
 test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,

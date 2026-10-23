@@ -46,10 +46,10 @@ pub struct AgentManifest {
     ///
     /// 运行期没有任何一处代码读它——四个字段（`fs` / `network` / `limits`）都没有
     /// 执行方。字段名因此回到「它到底是什么」：`declared_permissions`。
-    /// 宿主侧真正的边界是授权表（[D-099](../../../../../docs/003-design/011-Agent目录规范.md "D-099")）
-    /// 与审批闸（[D-068](../../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-068")）；
+    /// 宿主侧真正的边界是授权表（[D-099](../../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）
+    /// 与审批闸（[D-068](../../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-068-审批闸门住在能力注册的收口点defaulttoolvisitorregister判据一份入口两处 "DE-008-能力注册表与能力坐标系")）；
     /// 为什么不在这里补执行方、以及补的时候要满足什么，见
-    /// [D-102](../../../../../docs/003-design/011-Agent目录规范.md "D-102")。
+    /// [D-102](../../../../../docs/003-design/011-Agent目录规范.md#d-102-agent-权限声明当前无执行方字段改回声明性质补齐须四字段同批 "DE-011-Agent目录规范")。
     ///
     /// **线格式不变**（`permissions`）：改名的是 Rust 侧语义，不是 Agent 包的公开键。
     #[serde(rename = "permissions", skip_serializing_if = "Permissions::is_empty")]

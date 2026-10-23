@@ -1,7 +1,7 @@
 //! 阶段② 调用——`execute_turn` 四段之二（ · B2，DE-021 §5 动作 B2）。
 //!
 //! 两档取其一：反射档经 [`TurnRunner::run_reflex`]（零模型调用），深度档装配
-//! [`TurnInput`]（含轮内注入闭包）后经 [`SessionDispatchPort`](super::super::tool_dispatch::SessionDispatchPort)
+//! [`TurnInput`]（含轮内注入闭包）后经 `SessionDispatchPort`
 //! 走 [`TurnRunner::run_with_tools`]（内环由 [`super::drive_steps`] 驱动）。产 [`Running`] 交阶段③ [`super::outcome`]。
 //!
 //! **纯结构拆分契约**：[`call_model`] 体内自 `turn_exec.rs` 的 `execute_turn`

@@ -11,13 +11,13 @@
 //!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。
 //! - `tool_result_guard` —— 结果守卫：单条结果进存储前的体积上限（`guard_tool_result`
 //!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
-//!   （[D-078](../session/README.md "D-078")）。
+//! （[D-078](../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README")）。
 //!
 //! 生命周期钩子（`fire_hook`）上移 core：session 派发前与 loop 轮内都触发它，
-//! 两边共用同一条路由助手（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6）。
+//! 两边共用同一条路由助手（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 //!
 //! `heartbeat` 工具**不在这里**：它随调度一起切出为 `plugins/heartbeat`
-//! （[D-077](../heartbeat/README.md "D-077")），而本域是分发与执行基础设施。
+//! （[D-077](../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")），而本域是分发与执行基础设施。
 //!
 //! ## 共享面走门面，不深潜
 //!

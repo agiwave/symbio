@@ -2,14 +2,14 @@
 //!
 //! ## 为什么实现在这里，而端口在 core
 //!
-//! [`Store`](crate::symbio_core::Store) 是机制层的**端口**（append / range / head，F1
+//! `Store` 是机制层的**端口**（append / range / head，F1
 //! 冻结），它只规定「一个事实源要守的五条语义」，不认识 JSONL、不认识 `.lock`、
 //! 不认识 `transcripts/wal-archive`。那些是**一种磁盘布局**的细节，而只有会话需要
 //! 这种布局 ⇒ 细节住在使用方。分层判据收成编译边界：core 不再导出本类型，
 //! 任何别的插件想拿 WAL 去自己开一个事实源，**写不出来**（[plan/14 §2.2
-//! 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
+//! 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表收敛")）。
 //!
-//! [`Store`](crate::symbio_core::Store) trait 冻结之后换实现**零接口改动**：调用方把
+//! `Store` trait 冻结之后换实现**零接口改动**：调用方把
 //! `EventStore` 换成 `EventWalStore`，其余代码一行不动
 //! （[plan/05 §4](../../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：实现替换不构成架构改动）。
 //!
@@ -20,24 +20,24 @@
 //!
 //! ## 单写者：跨进程写者令牌
 //!
-//! 「每 thread 一个 FIFO，串行」（[`Store`](crate::symbio_core::Store) 五条语义之首）由
+//! 「每 thread 一个 FIFO，串行」（`Store` 五条语义之首）由
 //! **进程内** `RwLock` 加**跨进程**写者令牌一起保证：两个进程各持一份 `WalStore`，各自
 //! `head` 从文件重放算出，`append` 只 append 不校验 ⇒ seq 重号 / 事件交错，
-//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")）。
+//! 且**没有任何错误信号**（plan/11 §2-B）。
 //!
 //! 本实现把它升级为**跨进程**的写者令牌：`open` 对一个**旁挂锁文件**
-//! （`<wal>.lock`）取一次非阻塞独占锁（[`File::try_lock`](std::fs::File::try_lock)：
+//! （`<wal>.lock`）取一次非阻塞独占锁（`File::try_lock`：
 //! Unix `flock` / Windows `LockFileEx`，随句柄关闭自动释放）。
 //!
 //! | 入口 | 令牌 | `append` |
 //! |---|---|---|
-//! | [`open`](Self::open) 拿到锁 | 持 | 正常落盘 |
-//! | [`open`](Self::open) 拿不到锁 | 不持 | [`AppendError::NotTheWriter`](crate::symbio_core::AppendError::NotTheWriter) |
-//! | [`open_readonly`](Self::open_readonly) | 从不取锁 | 同上（读方在类型上就不该写） |
+//! | `open` 拿到锁 | 持 | 正常落盘 |
+//! | `open` 拿不到锁 | 不持 | `AppendError::NotTheWriter` |
+//! | `open_readonly` | 从不取锁 | 同上（读方在类型上就不该写） |
 //!
 //! 拿不到令牌**不报错、降级成「非写者」**：读照常（`range` / `head` 不看令牌），
 //! 只有写被拒。这样「第二个写者」拿到的是一个可判别的信号，而不是一个静默的
-//! 重复 seq——[plan/11 §4](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
+//! 重复 seq——plan/11 §4
 //! 要的正是这个反向用例。
 //!
 //! ### 锁为什么落在旁挂文件、而不是 WAL 文件自身
@@ -62,7 +62,7 @@
 //! （不完整 JSON）⇒ 恢复时丢弃并截断到最后一行完整记录——这是**恢复语义的
 //! 一部分**，不是错误。反向用例（S05 §6.4）证明该边界真实存在。
 //!
-//! 截断是**写方**的语义，因此只有持令牌者才做（[`open_readonly`](Self::open_readonly)
+//! 截断是**写方**的语义，因此只有持令牌者才做（`open_readonly`
 //! 从不截断，拿不到令牌的降级写者也不截断）。
 
 use std::collections::HashSet;
@@ -81,7 +81,7 @@ use crate::symbio_core::{
 ///
 /// **信封是具体的 `Event`**：写侧闸门要读 `entity` / `verb` / `turn` / `produced_by`
 /// 才能判 I1 / I2，而泛型参数上只有
-/// [`EventEnvelope`](crate::symbio_core::EventEnvelope) 的三件事可用。仓内唯一的
+/// `EventEnvelope` 的三件事可用。仓内唯一的
 /// 实例化是 `WalStore` 装 `Event`；把信封写实，闸门才能挂在唯一写入口**内部**——
 /// 闸门不是一个可选装饰。
 pub struct WalStore {
@@ -94,7 +94,7 @@ pub struct WalStore {
     inner: RwLock<WalInner>,
     /// 归档段的并集（按段名首号升序），`None` = 本实例还没读过。
     ///
-    /// [`range`](Store::range) 的口径含归档前缀，而归档段一旦 `rename` 就位就不再变
+    /// `range` 的口径含归档前缀，而归档段一旦 `rename` 就位就不再变
     /// （只增不改；同名重写是同一份内容的幂等重复）⇒ 读一次就可以缓存，
     /// 本实例 `archive_before` 之后失效重读。**跨实例的时效性与 live 段同一口径**：
     /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
@@ -155,7 +155,7 @@ impl WalInner {
             .copied()
     }
 
-    /// 写侧闸门（相应批次 +
+    /// 写侧闸门（ +
     /// 段四）：
     /// **唯一写入口内**的拒绝判定。
     ///
@@ -167,14 +167,14 @@ impl WalInner {
     ///
     /// | 判据 | 处置 | 理由 |
     /// |---|---|---|
-    /// | 名字与格位对不上（不在表上 / 自述挪了一格） | **拒绝** | 投影按格子取事实，错位是**静默少一条事实**；名字与坐标必须同源（段四） |
+    /// | 名字与格位对不上（不在表上 / 自述挪了一格） | **拒绝** | 投影按格子取事实，错位是**静默少一条事实**；名字与坐标必须同源（ 段四） |
     /// | I2 声明缺 `produced_by` | **拒绝** | 没有上游的声明无法审计也无法撤销；生产者补上即可，重试是安全的 |
     /// | I1 同轮第二条 `final` | **拒绝** | 这一轮已经有收束，第二条会让「每轮至多一条 final」失效 |
     /// | I1 同轮第二条开轮（不同 id） | **拒绝** | 同 id 的重放更早就会被 `Duplicate` 拦下，能走到这里是两条不同事件抢同一轮 |
     /// | I3 新轮越过未收束的旧轮 | **降级**（出声 + 计数） | 崩溃恢复**恰好长这样**：上一轮停在半路，重启后开下一轮。拒绝会让会话再也写不进任何事实 |
     ///
     /// I3 的降级不是「静默放过」：它在写入口当场 `plugin_warn!` 出声，读侧
-    /// [`check_all`](crate::symbio_core::check_all) 的 `unresolved_turns` 会把同一处
+    /// `check_all` 的 `unresolved_turns` 会把同一处
     /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
     fn gate(&mut self, event: &Event) -> Result<(), AppendError> {
         // **先判名字与格位是否同源，再判事实之间的关系**：I1 / I2 / I3 的判据全部按
@@ -270,7 +270,7 @@ impl WalStore {
     /// 打开（或创建）一个 WAL 文件，并**尝试取得写者令牌**。
     ///
     /// 拿不到令牌（另一个写者持有）⇒ 返回一个可读、但 `append` 恒
-    /// [`NotTheWriter`](crate::symbio_core::AppendError::NotTheWriter) 的实例——降级不是失败，
+    /// `NotTheWriter` 的实例——降级不是失败，
     /// 是「这次你不是写者」这个事实本身。
     ///
     /// **恢复在这里发生**：持令牌者重放所有完整行，撕裂的尾行被丢弃并截断
@@ -320,10 +320,10 @@ impl WalStore {
 
     /// **只读**打开：只解析，不动文件、不取令牌。
     ///
-    /// 与 [`open`](Self::open) 的差别只在「谁有资格写」：恢复（截断撕裂尾行）
+    /// 与 `open` 的差别只在「谁有资格写」：恢复（截断撕裂尾行）
     /// 是**写方**的语义，读方不能顺手做——读数口在会话进行中随时可能被调用，
     /// 而写点恒在当前 EOF：读方若在写方落一行的中途截断了它，剩下的字节会接在
-    /// 被截掉的位置之后 ⇒ 那一行静默损坏。解析器仍是同一个（[`replay`](Self::replay)），
+    /// 被截掉的位置之后 ⇒ 那一行静默损坏。解析器仍是同一个（`replay`），
     /// 撕裂尾行同样丢弃，只是**不改文件**。
     ///
     /// 文件不存在 ⇒ 空仓（「还没有事实源」是常态，读方不该为了读而创建文件）。
@@ -336,8 +336,8 @@ impl WalStore {
     /// 重放到最后一行完整记录（撕裂尾行丢弃——**提交边界**，S05 §6.1）。
     ///
     /// 返回 `(事件, 最后一条完整记录的结束偏移)`；文件不存在 ⇒ 空。
-    /// 不写文件：写不写由调用方决定（[`open`](Self::open) 截断 /
-    /// [`open_readonly`](Self::open_readonly) 不动）。
+    /// 不写文件：写不写由调用方决定（`open` 截断 /
+    /// `open_readonly` 不动）。
     fn replay(path: &Path) -> std::io::Result<(Vec<Event>, u64)> {
         let mut events = Vec::new();
         if !path.exists() {
@@ -417,7 +417,7 @@ impl WalStore {
 
     /// **段归档**：把 `seq < cut` 的事件移入归档段，live 文件从 `cut` 起。
     ///
-    /// 由 [`EVENT_SESSION_CONSOLIDATED`](crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
+    /// 由 `EVENT_SESSION_CONSOLIDATED`
     /// 的写方调用（压缩成功之后）：快照**取代**了它之前的一切，那些事件对 live 读侧
     /// 不再有意义（读侧要的是「当前有效的历史」），而它们仍然**不可删**（审计 / 回溯）。
     /// 于是「上下文压缩」与「WAL 无界增长」由同一个机制解决（D-053 决策 6）。
@@ -541,8 +541,8 @@ impl WalStore {
 
     /// **归档段的并集**（全部归档段按段名首号升序拼接，**不含 live**）。
     ///
-    /// 这是 [`range`](Store::range) 的另一半：`range` 的口径是「从 `from` 起的全部
-    /// 事实，含被 [`archive_before`](Self::archive_before) 移出 live 的前缀」，而那段
+    /// 这是 `range` 的另一半：`range` 的口径是「从 `from` 起的全部
+    /// 事实，含被 `archive_before` 移出 live 的前缀」，而那段
     /// 前缀不在内存里。归档段一旦 `rename` 就位就不再变（只增不改；同名重写是同一份
     /// 内容的幂等重复），故**读一次缓存一次**，本实例归档之后失效重读——每次读都重扫
     /// 目录不是「读法归一」的成本，而是把一次目录扫描搬进了热路径（每轮 prompt

@@ -1,6 +1,6 @@
 //! VDFS（Virtual Dynamic File System）—— 统一的资源与数据访问层
 //!
-//! 规范：`docs/003-design/009-VDFS规范.md`。
+//! 规范：`../../../../docs/003-design/009-VDFS规范.md`。
 //!
 //! ## 模块边界（重要）
 //!
@@ -40,7 +40,7 @@
 //! `address::absolute_addr` 用「上下文父地址 + 相对地址」拼出——不写死、
 //! 不问全局。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::vdfs::VdfsProvider
+//! `VdfsProvider`
 //!
 //! 本模块（`vdfs`）是 symbio 侧的**薄桥**：把纯接口接到
 //! `PluginInvokeRequest` / `PluginError` 上，供实现方（如 `plugin_manager` 插件）复用。

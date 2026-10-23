@@ -1,8 +1,8 @@
-//! 判据内核（std-only）——[`mod`](super) 各检查的**算法层**。
+//! 判据内核（std-only）——`mod` 各检查的**算法层**。
 //!
 //! ## 为什么有这个文件
 //!
-//! [`docs/003-design/verify/`](../../../../docs/003-design/verify/termination.rs) 的验证
+//! `docs/003-design/verify/` 的验证
 //! 程序是**独立 rustc 编译**的（无 serde / tokio，见 gate 的 `55-verify.mjs`），
 //! 而本模块的检查吃的是 `Event`（载荷是 `serde_json::Value`）——verify 程序
 //! 包含不了它们。在 之前的结果是：verify/termination.rs 自己又写了一遍

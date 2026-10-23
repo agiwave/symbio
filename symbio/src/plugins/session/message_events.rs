@@ -24,7 +24,7 @@
 //! - [`AppendOutcome::Landed`] / [`AppendOutcome::Nothing`]：落了 / 本来就没有事实可落；
 //! - [`AppendOutcome::Parked`]：拿不到写者令牌 ⇒ **寄存**，由持令牌方补落；
 //! - [`AppendOutcome::NoAnchor`]：事实源里没有可用的溯源锚——v1 遗留会话 / 从未走过
-//!   v2 轮。这类会话的读侧本就回落 `messages.json`（D-049），缓存仍是真源 ⇒ **豁免**；
+//! v2 轮。这类会话的读侧本就回落 `messages.json`（D-049），缓存仍是真源 ⇒ **豁免**；
 //! - [`AppendOutcome::Failed`]：事实源打不开 / 追加被拒。**这是真失败**：主读已切 WAL，
 //!   这次变更在重建后会丢。`chat_session::apply` 在写缓存**之前**把它变成可见错误
 //!   ——报失败是如实，不是「把成功的动作说成失败」。
@@ -512,7 +512,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         return (PRINCIPAL_USER.to_string(), 0);
     };
 
-    // `principal` 兼容两种 wire 形态（b，[D-069 §决策 6]）：新形态是
+    // `principal` 兼容两种 wire 形态（，[D-069 §决策 6]）：新形态是
     // `{kind, id, title?}` 对象、历史 `messages.json` 里是裸字符串——都通过
     // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg

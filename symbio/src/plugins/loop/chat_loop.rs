@@ -1,7 +1,7 @@
 //! SESSION 聊天主循环
 //!
 //! 本文件只保留**主循环骨架**，其余按职责拆到子模块
-//! （切分依据见 `symbio/src/plugins/session/docs/104-module-layout.md` §0 五判据与 §1.1 编排层落点）：
+//! （切分依据见 `../session/docs/104-module-layout.md` §0 五判据与 §1.1 编排层落点）：
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
@@ -49,7 +49,7 @@ pub use self::state::ChatOrchestrator;
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
 pub(crate) use self::compose::{apply_verdict, VerdictEffect};
-// 对话面节点构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三），
+// 对话面节点构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三），
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
@@ -74,7 +74,7 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// ## 判定只读日志：静默与配额都从事实来
 ///
 /// 旧 `RoundProgress` 自己持静默时钟与配额计数，是同一份事实的第二来源。
-/// b 起两者都由 `report_due` 视图从**本幕已落的事实**算：
+/// 起两者都由 `report_due` 视图从**本幕已落的事实**算：
 ///
 /// - 静默锚 = 最近一次用户看得见的动静（用户格 / 补充格 / 任何助手文本）；
 /// - 配额 = 本幕锚之后的汇报格数。
@@ -377,7 +377,7 @@ pub async fn run_chat_loop(
 
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）。
         // `UserPromptSubmit` 钩子**不在这里**：它由 session 在派发本轮之前触发
-        // （[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6——钩子与会话生命周期同侧，
+        // （[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6——钩子与会话生命周期同侧，
         // 驱动器只负责执行）。
         if turn.request_round == 0 {
             if let Some(msg) = single_message.take() {
@@ -472,7 +472,7 @@ pub async fn run_chat_loop(
         // `turn_runner.rs` 的 2f 紧接 2e（本批结果已接进 `exchange`），于是「只有确定
         // 要发下一次请求才抽」与「绝不落在 `assistant(tool_calls)` 与其 `tool` 结果
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
-        // v2 下永不成立；裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
+        // v2 下永不成立；裁决见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
         // 视图从日志里读它（回调不再有时刻入参，见 `round_hook::RoundHookFn`）。
         plugin_info!(
@@ -971,7 +971,7 @@ pub(crate) enum TurnFlow {
 ///
 /// 闸门能读的只有本轮的请求数，而**工具轮数在运行器的环体里**（`turn_runner.rs` 的
 /// `tool_round`）。挂在这里判的是一个恒 0 的字段，v2 下永不命中——那条配置项与它的
-/// 退役裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
+/// 退役裁决见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
 /// 2f（轮内注入）之间。
 ///
 /// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
@@ -996,7 +996,7 @@ fn gate_turn(turn: &TurnState) -> Gate {
 /// 收口前，12 个出口各自重写「Stop 钩子 + 落库 + 返回」三件套。现在每个出口只负责
 /// 判定 [`TurnExit`]，收尾动作只在本函数出现一次。
 ///
-/// Stop 钩子**不在这里**（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6）：
+/// Stop 钩子**不在这里**（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）：
 /// 它归会话生命周期，session 拿 [`TurnReport::last_message`] 统一触发——「恰好一次」
 /// 因此仍由生命周期保证，而不是由两侧各记一次。
 ///

@@ -59,7 +59,7 @@ use crate::symbio_core::{DetailField, DetailOption};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-/// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
+/// 规范标识（见 `../../../../../docs/003-design/011-Agent目录规范.md`）
 ///
 /// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec`、且通过 §10 版本门槛时
 /// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既
@@ -243,7 +243,7 @@ impl AgentPlugin {
     ///
     /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
     /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
-    /// `current_label`（见 `docs/archive/session-options-unification.md` §6）。
+    /// `current_label`（见 设计文档 §6）。
     async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;
@@ -352,7 +352,7 @@ impl Plugin for AgentPlugin {
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());
-        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（DE-008 4a）：
+        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（AR-025 4a）：
         // 其实这里从来只有一个能力，批入口本无存在理由。
         // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
         let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(

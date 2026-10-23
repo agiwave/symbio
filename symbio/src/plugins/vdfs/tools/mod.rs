@@ -13,7 +13,7 @@
 //!
 //! 工具不认识能力管理器、不认识目录拓扑、不走协议信封——地址规则（`.vdfsv2`
 //! 前缀 = 虚拟，其余 = 磁盘）、两半分流、workdir 透传全部在 [`ToolVdfs`] 背后的
-//! [`UnifiedFs`](super::fs::UnifiedFs) 一处，与前端链路（`super::host`）
+//! `UnifiedFs` 一处，与前端链路（`super::host`）
 //! 共用同一份实现，不存在第二套。
 //!
 //! ## 地址规则（实现在 `UnifiedFs`）

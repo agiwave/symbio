@@ -6,7 +6,7 @@
 //! `{"status":"accepted"}`，不是 `session_chat::Response`。本插件曾按后者解析回包
 //! （`payload.get::<session_chat::Response>()`），于是 `full_text` 恒空、用户永远
 //! 收到「无响应」——而 `if let Ok(..)` 把反序列化失败吞掉了，全程没有任何报错。
-//! 同一缺陷在 2026-09-22 修过一次（`docs/archive/streaming-chain-review-2026-09-22.md`
+//! 同一缺陷在 2026-09-22 修过一次（设计文档
 //! §4.9），后随实时面下沉 VDFS（D-025）而回归。
 //!
 //! 现在走**地址面**，答复从**实时面**取回——与 `cli` 和 `agent_run` 的转播桥

@@ -15,7 +15,7 @@ use std::path::Path;
 
 /// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///
-/// 字段名与 [`VdfsContent::b64`](crate::symbio_core::VdfsContent) 同构——
+/// 字段名与 `VdfsContent::b64` 同构——
 /// 前端据此把它当**文件载荷**处理（有 `filename` + `b64` 就下载），
 /// 不认识「导出」这个动作本身。
 #[derive(Debug, Clone, Serialize, Deserialize)]

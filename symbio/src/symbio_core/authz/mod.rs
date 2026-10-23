@@ -13,7 +13,7 @@
 //! 表是**架构元素**：「谁持有什么」与「能不能」是同一张表的两半，分家的代价是
 //! 「表授予 A、闸门判 B」这种错位**没有任何东西会变红**——两边都是合法能力名，
 //! 事后没有任何东西能指出是哪半边写错了。故它与机制同住一棵模块树，
-//! 整块经 [`pub(crate)`](crate::symbio_core) 开给全 crate（见 `symbio_core/mod.rs`）：
+//! 整块经 `pub(crate)` 开给全 crate（见 `symbio_core/mod.rs`）：
 //! 跨插件可见，却不进对外公开面——表里写的是部署事实，不是契约。
 //!
 //! ## fail-closed 三层
@@ -21,10 +21,10 @@
 //! 1. **构造期**：认不出的能力名 ⇒ 拒绝整体构造（`PolicyError`，core 定义），
 //!    降级为**空矩阵**并告警——不是「跳过那一行」，笔误不能变成一条悄悄生效的拒绝；
 //! 2. **写侧**：运行器落格前判（`turn_runner::closure_gate`，按**种类**分两臂）：
-//!    发言收束（收束格）判 [`can_reply`](PermissionMatrix::can_reply)，产物收束
-//!    （`artifact.added`）判 [`can_produce_artifact`](PermissionMatrix::can_produce_artifact)
-//!    （[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）。未持有 ⇒ **不落那一格，
-//! 但落一条否定事实** `authz.denied{key, kind, why}`（相应批次）：
+//!    发言收束（收束格）判 `can_reply`，产物收束
+//!    （`artifact.added`）判 `can_produce_artifact`
+//! （[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。未持有 ⇒ **不落那一格，
+//! 但落一条否定事实** `authz.denied{key, kind, why}`：
 //!    发言臂下该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
 //!    见 `invariants::unresolved_turns`）。
 //!
@@ -32,7 +32,7 @@
 //!    差别不是记账习惯：不落 `denied` 时，「被拒」与「根本没跑完」在日志上同形，
 //!    事后答不出「谁在什么时候因为什么被拒了」，回放也重现不出这次拒绝。
 //!    这违反的是 I1（单通道）——「被拒绝」是一个状态变更，它也必须是一条事实。
-//! 3. **读侧**：`stats` 按读方声明判 [`can_see`](PermissionMatrix::can_see)——属主
+//! 3. **读侧**：`stats` 按读方声明判 `can_see`——属主
 //!    是**内容的属主**（`SESSION_OWNER`，部署事实）而非事件作者，于是今天的判读
 //!    就是「属主放行、其余整体拒绝」；`thread_private` 缺省（C10）。
 //!
@@ -45,17 +45,17 @@
 //!
 //! ## 本表会怎么长
 //!
-//! 多主体加固（[plan/11 批 2](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") /
+//! 多主体加固（plan/11 批 2 /
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
 //!
-//! 自主发起者那一行已按 [S12 §3](../../../../docs/007-task/132-自主层与长期目标.md ")
+//! 自主发起者那一行已按 [S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")
 //! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
-//! 说明一件事——**窄行是唯一入口**（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）：
+//! 说明一件事——**窄行是唯一入口**（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）：
 //! 未登记的主体在表里没有行 ⇒ 每个谓词为假，登记过的一行就是它的权威能力集，
 //! 谁都不派生谁。
 //!
-//! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [S07 §5](../../../../docs/007-task/127-插话与实时打断.md ")
+//! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [S07 §5](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")
 //! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，判据是
 //! 「没有行 = 拒」——断言与表同一方向。
 
@@ -69,7 +69,7 @@ use crate::symbio_core::{principal_namespace, VisScope};
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
 /// 到「判的是 A、写的是 B」而没有任何东西会变红。
 ///
-/// id 是**可路由地址**（[D-069 §决策 2](../../../../docs/003-design/005-协议规范.md "D-069")）：
+/// id 是**可路由地址**（[D-069 §决策 2](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）：
 /// `<namespace>/<name>`——`session` 是本机智能体的归属 namespace。
 pub(crate) const PRINCIPAL_MAIN: &str = "session/main";
 
@@ -78,7 +78,7 @@ pub(crate) const PRINCIPAL_MAIN: &str = "session/main";
 /// [D-069] 把它从裸字面量 `user` 归一为可路由地址 `person/local`——
 /// `person` 是概念 namespace（无插件归属时用概念名）。语义不变：`user.message`
 /// **不入能力表**（能力按「智能体的权威动作种类」划分，人的发言不是动作种类），
-/// 本表**不为它立行**——表里没有它的行 ⇒ `can_reply` fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）。
+/// 本表**不为它立行**——表里没有它的行 ⇒ `can_reply` fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）。
 pub(crate) const PRINCIPAL_USER: &str = "person/local";
 
 /// **vdfs 写工具**的身份（[D-069 §决策 2]）——工具响应叶子的 `principal`；
@@ -87,7 +87,7 @@ pub(crate) const PRINCIPAL_USER: &str = "person/local";
 /// 本表给它一行：`produce.artifact`——工具的权威动作是**产生产物**
 /// （`artifact.added` 的响应正文），与 `session/worker` / `session/peer-b` 同款独持。
 /// 今天写侧闸按会话主体判，不按工具主体判，故这一行是**声明性**的——它把「工具
-/// 是主体」写进表；相应批次 之后 `plugin::attributed` 会按 kind=Tool 补上这个
+/// 是主体」写进表；[] 之后 `plugin::attributed` 会按 kind=Tool 补上这个
 /// principal 值，判据不变。
 pub(crate) const PRINCIPAL_TOOL_VDFS_WRITE: &str = "vdfs/write";
 
@@ -101,10 +101,10 @@ pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 ///
 /// 这里**不立 Rust 常量**：今天压缩节点由会话主体落、写侧没有消费方，`dead_code`
 /// 会逐条点名，而 R-002 的棘轮不许为「将来会用」加承认标记——常量的唯一 owner 是
-/// [D-069 §决策 2] 那张表，写侧接线时（相应批次 把「压缩由谁写」的判据换掉）随接线
+/// [D-069 §决策 2] 那张表，写侧接线时（[] 把「压缩由谁写」的判据换掉）随接线
 /// 一批立常量、随布线摘标记，两步同批发生。
 ///
-/// 自主发起者的身份（[roadmap/S12 §3](../../../../docs/007-task/132-自主层与长期目标.md ")）
+/// 自主发起者的身份（[roadmap/S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")）
 /// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
 ///
 /// 与 [`PRINCIPAL_MAIN`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，两边
@@ -113,7 +113,7 @@ pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 /// 死记录，而自主行为照旧能冒充用户对话。
 pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 
-/// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/007-task/127-插话与实时打断.md ")）
+/// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")）
 /// ——表里那一行的名字与 `PreemptionDecider` 三个事件（`task.held` /
 /// `task.progressed` / `control.opened`）的 `actor` 是同一个常量。
 ///
@@ -123,7 +123,7 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 /// 「不得发言」与断言同方向（D-099：表是权威，未登记 = 拒）。
 pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 
-/// **对等主体**的身份（[roadmap/S08 §3](../../../../docs/007-task/128-多主体与对等承诺.md ")）
+/// **对等主体**的身份（[roadmap/S08 §3](../../../../docs/001-goal/128-多主体与对等承诺.md "GO-128-多主体与对等承诺")）
 /// ——表里那一行的名字与对等体写事件用的 `actor` 是同一个常量。
 ///
 /// 它是本表里**第一个对等（图侧）主体**：与主从树的子智能体不同，对等体不依附某个会话，
@@ -131,13 +131,13 @@ pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 /// `chat.*`——故这一行**只有一项能力**，比主智能体窄得多。
 ///
 /// **为什么必须登记**：未登记的 `session/<id>` 在表里没有行 ⇒ 每个谓词为假
-/// （[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）；登记过的行就是它的权威能力集。
-/// S08 §3.1 的纪律是：**对等主体出现必须自带窄行同批落地**（同 PL-009「闸不能晚于
+/// （[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）；登记过的行就是它的权威能力集。
+/// S08 §3.1 的纪律是：**对等主体出现必须自带窄行同批落地**（同 设计文档「闸不能晚于
 /// 发起者」）——窄行不是补丁，是它唯一的入口。
 pub(crate) const PRINCIPAL_PEER: &str = "session/peer-b";
 
-/// **市场**的身份（[roadmap/S13 §3](../../../../docs/007-task/133-多智能体社会.md ")）——
-/// 组织形态三角色的第一行，相应批次 落地。
+/// **市场**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// 组织形态三角色的第一行， 落地。
 ///
 /// 只持 `assign.work`：市场的权威动作是**派活**（`agent_run` 的委托面），不是自己干活。
 /// 可见域 `public`——市场公告（派给谁、什么活）是**公共域**的事实， §3 的
@@ -147,8 +147,8 @@ pub(crate) const PRINCIPAL_PEER: &str = "session/peer-b";
 /// 拿主智能体整套（含 `reply.*`）——「市场不得冒充主控发言」于是被静默推翻。
 pub(crate) const PRINCIPAL_MARKET: &str = "session/market";
 
-/// **仲裁者**的身份（[roadmap/S13 §3](../../../../docs/007-task/133-多智能体社会.md ")）——
-/// 组织形态三角色的第二行，相应批次 落地。
+/// **仲裁者**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// 组织形态三角色的第二行， 落地。
 ///
 /// 只持 `assert.verification`：仲裁的权威动作是**对判定盖章**（`verdict.asserted`，
 /// 淘汰回路的那一格）。C15「验证者 ≠ 产出者」是构造期约束——本行不持
@@ -159,20 +159,20 @@ pub(crate) const PRINCIPAL_MARKET: &str = "session/market";
 /// verdict 的竞争 + 仲裁者」），藏起来的裁决没有仲裁。
 pub(crate) const PRINCIPAL_ARBITER: &str = "session/arbiter";
 
-/// **守门者**的身份（[roadmap/S13 §3](../../../../docs/007-task/133-多智能体社会.md ")）——
-/// 组织形态三角色的第三行，相应批次 落地。
+/// **守门者**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// 组织形态三角色的第三行， 落地。
 ///
 /// 只持 `judge.intent`：准入门槛的权威动作是**判来者意图**，与 [`PRINCIPAL_REFLEX`]
 /// 同款独持先例（判定者不得直接发言）。可见域 `thread_private`：守门判定是判定者自己的
 /// 工作记录（S13 §3「public 与 thread_private 并存」的另一半），不是公共域公告。
 pub(crate) const PRINCIPAL_GATEKEEPER: &str = "session/gatekeeper";
 
-/// **工人**的身份（[roadmap/S02 §3](../../../../docs/007-task/122-工具调用与产物.md ")）——
-/// S02 worker 行，相应批次 与执行路径同批落地。
+/// **工人**的身份（[roadmap/S02 §3](../../../../docs/001-goal/122-工具调用与产物.md "GO-122-工具调用与产物")）——
+/// S02 worker 行， 与执行路径同批落地。
 ///
 /// 只持 `produce.artifact`：工人的权威动作是**产生产物**（`agent_run` 委派链上以产物
 /// 收束的子主体，与对等行同形）。它**没有发言权**（不持 `reply.*`）——「以产物收束」
-/// 的字面含义：这一轮的答话不入格，工具结果入格（收束闸的产物臂，[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）。
+/// 的字面含义：这一轮的答话不入格，工具结果入格（收束闸的产物臂，[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。
 ///
 /// 与 [`PRINCIPAL_PEER`] 的两点不同，正是它必须**另立一行**的理由：对等体是**图侧**的
 /// 协作方（`scope: root`，与主智能体平级），工人是**树侧**的委派落点（`agent_run` 派生的
@@ -181,21 +181,21 @@ pub(crate) const PRINCIPAL_GATEKEEPER: &str = "session/gatekeeper";
 /// 共享同一个主体名，而两者的驱动路径与上限判据都不同。
 pub(crate) const PRINCIPAL_WORKER: &str = "session/worker";
 
-/// **规划者**的身份（[roadmap/S03 §3](../../../../docs/007-task/123-多步任务与返工.md ")）——
-/// S03 规划者行，相应批次 落地（行本批落，驱动路径的裁决见该任务文档）。
+/// **规划者**的身份（[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）——
+/// S03 规划者行， 落地（行本批落，驱动路径的裁决见该任务文档）。
 ///
 /// 只持 `define.work`：规划的权威动作是**立任务**（任务图的开格与推进），与
 /// [`PRINCIPAL_AUTONOMOUS`] 同款独持先例（自主发起者也只持它——「欲」升格为任务的那道
 /// 闸后面写 `task.opened` 的就是这一项能力）。不持 `reply.*`：规划者不冒充用户对话。
 ///
-/// 模式派生为 [`Pattern::Decider`](crate::symbio_core::Pattern)（无发言权而无产物能力
+/// 模式派生为 `Pattern::Decider`（无发言权而无产物能力
 /// ⇒ 判据见 `Pattern::for_principal`）——与 S03 §3 的 ActorSpec 行 `pattern: decider`
 /// 一致：规划步在该阶的规格里是**规则驱动**的（同 `AutonomousInitiator` 先例），
 /// 不是又一个会说话的会话主体。
 pub(crate) const PRINCIPAL_PLANNER: &str = "session/planner";
 
-/// **验证者**的身份（[roadmap/S03 §3](../../../../docs/007-task/123-多步任务与返工.md ")）——
-/// S03 验证者行，相应批次 落地（行本批落，驱动路径的裁决见该任务文档）。
+/// **验证者**的身份（[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）——
+/// S03 验证者行， 落地（行本批落，驱动路径的裁决见该任务文档）。
 ///
 /// 只持 `assert.verification`：独立验证的权威动作是**对判定盖章**（S03 §2「独立验证者 =
 /// 一行 ActorSpec，`capabilities: [AssertVerification]`」）。C15「验证者 ≠ 产出者」由
@@ -237,7 +237,7 @@ pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
 }
 
 /// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
-/// （[roadmap/S09 §6](../../../../docs/007-task/129-外部执行与熔断.md ") 验收 1）。
+/// （[roadmap/S09 §6](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断") 验收 1）。
 ///
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
@@ -246,7 +246,7 @@ pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
 pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();
 
 /// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
-/// （[roadmap/S13 §2](../../../../docs/007-task/133-多智能体社会.md ")
+/// （[roadmap/S13 §2](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")
 /// 「淘汰 = 声誉投影低于阈值 → 不再被授予 `assign.work`」）。
 ///
 /// 与 [`CAP_EXTERNAL_EXECUTION`] 同一条理由提成常量：这个名字出现在三个地方——
@@ -256,8 +256,8 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name
 pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
-/// （[roadmap/S03 §3](../../../../docs/007-task/123-多步任务与返工.md ")
-/// 「规划者 ▸ `define.work`」，相应批次 落地其读方）。
+/// （[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")
+/// 「规划者 ▸ `define.work`」， 落地其读方）。
 ///
 /// 与 [`CAP_ASSIGN_WORK`] 同一条理由提成常量：这个名字今天出现在四个地方——授权表行
 /// （`session/main` / `session/autonomous` / `session/planner`）、`AutonomousInitiator` 写
@@ -266,7 +266,7 @@ pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 pub(crate) const CAP_DEFINE_WORK: &str = Capability::DefineWork.name();
 
 /// **独立验证**能力名（`AssertVerification` 的书写形态）——任务表写侧闸的另一半放行
-/// 判据（相应批次）。
+/// 判据。
 ///
 /// 提成常量的理由同 [`CAP_DEFINE_WORK`]：它出现在授权表行（`session/arbiter` /
 /// `session/verifier`）、淘汰裁决的写侧闸（`EliminationDecider`，）、任务表写侧闸
@@ -313,7 +313,7 @@ pub(crate) const CAP_ASSERT_VERIFICATION: &str = Capability::AssertVerification.
 /// **以主控身份发言**（产物收束 ≠ 发言），规划行怕的是**自验**（C15：不持验证能力），
 /// 验证行怕的是**既产出又认证**（C15：不持产出能力）。
 ///
-/// 少了这些行会怎样（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099") 起）：**该主体什么
+/// 少了这些行会怎样（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范") 起）：**该主体什么
 /// 都做不了**——未登记主体在表里没有行，每个谓词为假（fail-closed）。「忘配窄行」的
 /// 后果是一条**会被看见的拒绝**，不是一次静默超权。
 const ROWS: &[(&str, &[&str], VisScope)] = &[
@@ -406,7 +406,7 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
 
 static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
 
-/// **运行期绑定登记**（[D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-100")：绑定即登记）：
+/// **运行期绑定登记**（[D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-100-绑定即登记能力随会话创建而来与会话同寿可见域不登记 "DE-008-能力注册表与能力坐标系")：绑定即登记）：
 /// 主体 ⇒ 各**会话**为它声明的能力行。
 ///
 /// 与 [`ROWS`] 的分工：表是**部署事实**（常量、构造期定稿），这里是**运行期身份事实**
@@ -416,7 +416,7 @@ static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
 /// （[`EffectiveMatrix::can_see`] 只认部署表）：能力可以随绑定来，
 /// 「看见别人的 shared」只能来自部署登记。
 ///
-/// **登记与会话同寿**（相应批次）：
+/// **登记与会话同寿**：
 /// 每条登记都带**登记者**（会话 id），会话删除时随 [`unbind_session`] 整册回收。
 /// 同一会话重复登记只替换自己那一条（幂等）；同一主体被多个存活会话登记时取
 /// **最近一次**——收束闸与委派上限的读法不变，变的是行不再比会话活得久。
@@ -543,7 +543,7 @@ fn bind_inheriting_in(matrix: &EffectiveMatrix, session_id: &str, principal: &st
     insert_binding(&mut map, session_id, principal, row);
 }
 
-/// **会话结束 ⇒ 登记行回收**（相应批次）：一次删掉该会话登记过的全部行。
+/// **会话结束 ⇒ 登记行回收**（[]）：一次删掉该会话登记过的全部行。
 ///
 /// 与 [`bind_root`] / [`bind_inheriting`] 的登记者是同一个键——会话 id 因此是
 /// 绑定面的**生命周期单位**，进程级只增不减只属于「会话还活着」的那些行。
@@ -620,7 +620,7 @@ fn insert_binding(map: &mut BoundRows, holder: &str, principal: &str, grants: Ve
 /// 会话选定了哪个 agent，这轮所有断言就是哪个主体；未选 ⇒ 主智能体。
 ///
 /// 判据取自 core 的命名空间登记表 [`principal_namespace`]
-/// （[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md "D-069")）——
+/// （[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md#d-069-principal-三字段kind-与-id-分家id-是可路由地址 "DE-005-协议规范")）——
 /// 「什么地址算哪一族」只定义一次，可见域判据（`view::is_agent_id`）与身份派生
 /// 共用登记表，两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
 ///
@@ -644,9 +644,9 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
 /// 那个 id」。写事件的 `actor`、写消息的 `principal`、写侧闸判的对象三者都走它——
 /// 三处各推一次迟早漂移成「判的是 A、写的是 B」。
 ///
-/// 为什么住 core 而不留会话插件（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 1 组）：
+/// 为什么住 core 而不留会话插件（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 1 组）：
 /// 它是对 core 既有键（`AGENT_ID`）的**纯派生函数**，不属于任何一个切片；会话驱动器
-/// 切成独立插件后（[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014")），
+/// 切成独立插件后（[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")），
 /// 读侧（`session/stats`）与写侧隔着 E-009 的插件墙两头都要用，留在任一侧都会变成
 /// 另一条反向引用。
 pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeRequest) -> String {
@@ -657,11 +657,11 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
 /// 本机授权矩阵——**该主体当次判定的唯一取表口**（行的形状不变：`(主体, 能力名, 可见域)`，
 /// 见本模块文档「本表会怎么长」）。懒构造一次；构造失败 ⇒ 空矩阵 = 谁都不许，并告警。
 ///
-/// 判定口径两条，合成才是「现在准不准」（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099") +
-/// [D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-100")）：
+/// 判定口径两条，合成才是「现在准不准」（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范") +
+/// [D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-100-绑定即登记能力随会话创建而来与会话同寿可见域不登记 "DE-008-能力注册表与能力坐标系")）：
 ///
 /// - **能力面**（`grants_*` / `can_write*` / `can_reply` / `can_produce_artifact`）=
-///   部署表，[绑定登记](bind_inheriting)存在时以**绑定行为有效行**（未登记才回退
+///   部署表，绑定登记存在时以**绑定行为有效行**（未登记才回退
 ///   部署行）——根会话未部署时登记会话面缺省，委派子会话登记父行 ∩ 自己的声明行，
 ///   两者都没有 ⇒ 每个谓词为假 ⇒ **fail-closed**：少一行是一条**拒绝**，不是一次
 ///   静默超权；
@@ -692,7 +692,7 @@ pub(crate) fn production_matrix() -> &'static EffectiveMatrix {
 /// （绑定行替换部署行、但不带可见域），那是这张表的裁决，不是判定机制的裁决；
 /// `governance` 的 [`PermissionMatrix`] 因此保持「常量表 + fail-closed 谓词」原样。
 ///
-/// ## 两个读数的名字（[D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-100")「淘汰面为什么
+/// ## 两个读数的名字（[D-100](../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-100-绑定即登记能力随会话创建而来与会话同寿可见域不登记 "DE-008-能力注册表与能力坐标系")「淘汰面为什么
 /// 只认部署表」一节，口径只在那一节写，这里不重述理由）
 ///
 /// | 名字 | 成员 | 回答的问题 |
@@ -806,7 +806,7 @@ impl EffectiveMatrix {
         }
     }
 
-    /// 写侧判定（产物闸）：主体能否**产生产物**（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")
+    /// 写侧判定（产物闸）：主体能否**产生产物**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")
     /// 的第二条收束路）；判据取有效行（含委派交集）。
     pub(crate) fn can_produce_artifact(&self, principal: &str) -> bool {
         match self.bound_row(principal) {

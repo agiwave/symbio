@@ -3,7 +3,7 @@
 //! 目标形态是**主会话不持有工具**，于是它缺三样外部事实：worker 何时启动、自己有哪些
 //! 能力、进展如何。三问的答案都必须是**可穷举测试的数据**，否则主会话就得重新持有
 //! 工具——那正是「不持有工具」这个目标形态的反面。本模块是**三样**的生产处，
-//! owner 是 [`prepare_turn_inputs`](super::inputs::prepare_turn_inputs)：
+//! owner 是 `prepare_turn_inputs`：
 //! **能力收集之后**才动笔，产出的段落并进 `build_request_view` 既有的请求视图次序。
 //!
 //! ## 为什么不做成插件 / 注册表 / 跨插件调用
@@ -25,12 +25,12 @@
 //! / `worker_keywords` / `worker_min_chars` 投影成 [`WorkerPolicy`]；出厂值的**单一
 //! 真源在 core**（`WORKER_FORCE_PREFIX` / `WORKER_KEYWORDS` / `WORKER_MIN_CHARS`，
 //! session 配置面与判定侧共用），本模块**不持第二份字面量**。字段表同步
-//! [CONFIGURATION](../../../../../docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")。
+//! CONFIGURATION。
 //!
 //! ## Q3 的读数不住在本模块
 //!
 //! - **Q3（worker 进展）的类型、两种读法与逐子会话编排**已整体搬到
-//!   [`super::super::worker_progress`]（[D-081](../../../../../docs/003-design/014-单环一表.md "D-081")
+//! [`super::super::worker_progress`]（[D-081](../../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
 //!   裁决一第 4 条——进展是「读存储算出来的数」，那条链归存储侧的一个入口；
 //!   本模块是驱动器侧，只消费算好的数）。三处口径与新旧读法的对应见该模块头。
 

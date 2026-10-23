@@ -1,4 +1,4 @@
-//! Stop 钩子的幂等触发器（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §6）。
+//! Stop 钩子的幂等触发器（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 //!
 //! 契约：**一个请求生命周期内，Stop 恰好触发一次**——无论该生命周期以何种方式
 //! 结束（正常完成 / 各类错误 / abort / 软上限 / 消费循环超时 / 任务 panic）。
@@ -45,7 +45,7 @@ impl StopSignal {
     /// `last_message` 由驱动器经 [`TurnReport::last_message`] 交回
     /// （无消息的失败出口传空串）。
     ///
-    /// [TurnReport::last_message]: crate::symbio_core::TurnReport::last_message
+    /// TurnReport::last_message
     pub(crate) async fn fire_text(&self, last_message: String) -> bool {
         if self.fired.swap(true, Ordering::SeqCst) {
             return false;

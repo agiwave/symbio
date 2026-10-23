@@ -24,7 +24,7 @@
  *   **D-012**（CLI 产物指路路径）：现行文档里 `target/<profile>/symbio-cli(.exe)` 这类
  *     会被读者照抄的产物路径，必须等于 `scripts/cli-binary.mjs` 的 `cliArtifactRelPath`
  *     （构建真正落点，见文件末）。带具名目录段（`symbio/target/…`、`cli/target/…`）一律红；
- *     只带 `./` / `../` 的按该 md 的命令执行目录归一后比。任务登记册（`docs/009-task`）
+ *     只带 `./` / `../` 的按该 md 的命令执行目录归一后比。任务登记册（`docs/007-task`）
  *     排除——那里引用旧路径是记录本身，不是指路。
  *
  * 为什么 D-009 要「同族」这道闸：全大写 + 下划线不只是常量的形态，也是**环境变量、CI
@@ -108,7 +108,7 @@ const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', '.trae'])
 /** 整目录排除：ADR 记的是**当时**的设计，其中被指认的符号可能早已改名 / 删除，
  *  按现行代码判它会永久误报；归档同理。两者都是「文档说的不是现状」。 */
-const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/010-adr']
+const EXCLUDE_MD_DIRS = ['docs/archive']
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的。
  *  「判为删除 / 已判：删除」是台账（04 §3.1）对被删符号的固定说法——它和「已删除」
  *  是同一类叙述：这行明说那个名字已经不在了，按现行代码判它必然是误红。 */
@@ -441,7 +441,7 @@ let constRefs = 0
 //     没有就是仓库根）归一，必须等于 `scripts/cli-binary.mjs` 的 `cliArtifactRelPath` —
 //     「CLI 产物在哪」的唯一来路，这里不另起一份拼接（另起一份就是第二个会漂的真相）。
 //
-// 语料**排除任务登记册**（`docs/009-task`）：那里的条目记的是「当时撞上了什么」，
+// 语料**排除任务登记册**（`docs/007-task`）：那里的条目记的是「当时撞上了什么」，
 // 引用一句旧路径正是那条记录的内容本身，不是给读者的指路。
 const REGISTER_MD_PREFIXES = ['docs/007-task']
 const CLI_ARTIFACT_RE = /(?:[\w.-]+[\\/])*target[\\/](debug|release)[\\/]symbio-cli(?:\.exe)?/g

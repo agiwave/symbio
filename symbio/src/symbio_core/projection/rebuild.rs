@@ -18,7 +18,7 @@
 //!
 //! ## 形状来源：不在这里定义
 //!
-//! 本模块在 [D-086](../../../../docs/003-design/014-单环一表.md "D-086") §7 上移到 core：
+//! 本模块在 [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7 上移到 core：
 //! session 的主读与 loop 的轮次窗口共用同一份折叠，不能各写一遍。
 //!
 //! **写入侧怎么构造，重建就怎么构造**——同一个节点只有一份形状定义。生产侧已经在
@@ -87,7 +87,7 @@ use crate::symbio_core::{
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
-// 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三）：
+// 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
 use crate::symbio_core::facts::ReportDraft;
 use crate::symbio_core::node_build::{
@@ -95,7 +95,7 @@ use crate::symbio_core::node_build::{
 };
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
-/// `plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
+/// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
 ///
 /// 它与存储分配的权威号是**两套各自递增的计数器，同写 `ChatNode.seq` 一个字段**——
 /// 所以混用是本模块最容易顺手写出来的错：快照载荷里带的那份号是**存储层**的槽位号
@@ -643,7 +643,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         .to_string();
     if !failure_kind.is_empty() {
         // **并入**而非整格替换：构造侧的 `meta.style_tag` / `meta.tool_name` 是
-        // 节点身份的一部分（c-ii-s3 后骨架与工具名只活在 meta 里），
+        // 节点身份的一部分（ 后骨架与工具名只活在 meta 里），
         // 整格覆盖 = 重建一次丢一次形态词，前端折叠退回 `turn`（e2e t27 抓到）。
         let mut meta = call.meta.clone().unwrap_or_else(|| serde_json::json!({}));
         if let Some(obj) = meta.as_object_mut() {

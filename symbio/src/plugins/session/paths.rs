@@ -32,7 +32,7 @@ pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
 pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
 
 /// 父会话目录内安放**子会话**的固定子目录名（机制约定，见
-/// [`store`](crate::plugins::session::store) 模块头「子会话嵌套存储」）：
+/// `store` 模块头「子会话嵌套存储」）：
 /// `<根>/<safe(父)>/sessions/<safe(子)>/`。
 ///
 /// 与另两个子目录常量同处一地：路径词汇只定义一次。此前它住在 `store` 里，
@@ -84,7 +84,7 @@ pub(crate) fn session_subdir(
 ///   子会话事实经工具结果回流、shared 记忆与父会话重复、判断记忆本不出会话，
 ///   深遍的边际信息量 ≈ 0 且会把预算名额让给分形树。理由与判据见
 ///   `memory_events::recall_view` 的「扫描范围」节与
-/// 相应批次。）
+/// 。）
 ///
 /// ## 为什么是深遍而不是「多层」
 ///

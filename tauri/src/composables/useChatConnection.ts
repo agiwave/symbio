@@ -80,7 +80,7 @@ export interface UseChatConnectionReturn {
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
    *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。
    *
-   *  ⚠️ 它是**入队**：实现是往 `<A>/inbox/<消息 id>` **写一次**（D-026），
+   * ⚠️ 它是**入队**：实现是往 `<A>/inbox/<消息 id>` **写一次**（D-026），
    *  由那个空间自己在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在
    *  消息列表里，是后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
    *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
@@ -88,7 +88,7 @@ export interface UseChatConnectionReturn {
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
- /** 按需重取一个已折叠释放骨架的子树（相应批次 只读动作） */
+  /** 按需重取一个已折叠释放骨架的子树（[] 只读动作） */
   expandSkeleton: (mid: string, depth?: '1' | 'all') => Promise<void>
 }
 
@@ -301,7 +301,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
     const visible = filtered.filter(m => !isEmptyLeaf(m))
-    // Typing 占位（相应批次）：后端不发，前端按「骨架容器 streaming 且尚无子」合成一条
+    // Typing 占位（[]）：后端不发，前端按「骨架容器 streaming 且尚无子」合成一条
     // 派生 typing 子节点。合成挂在可见集之后——它随 messageTree 一起建进树，
     // 从不写 store（派生态）；宿主一旦有子或收束，谓词转假、下一帧即消失（即「替换 / 移除」）。
     return [...visible, ...synthesizeTypingChildren(visible)]
@@ -594,7 +594,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   }
 
   /**
- * 按需重取一个已折叠释放的骨架的子树（相应批次 前端读侧）。
+   * 按需重取一个已折叠释放的骨架的子树（[] 前端读侧）。
    *
    * 折叠时本地把骨架的后代从转写里摘掉、只在账本留一个计数；用户重新展开时，向
    * 后端那条 message 地址发一次 `expand_skeleton` 动作拿回子树窄帧，走**唯一落地口**

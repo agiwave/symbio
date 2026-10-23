@@ -39,7 +39,7 @@ pub fn is_safe_relative_path(path: &str) -> bool {
 /// 字段与 local 插件的配置文档（`LocalConfig`）一一对应——配置文档是人类入口，
 /// 这里是运行期真源。**默认值即「全放开」是裁决，不是默认没做**：安全边界在审批闸
 /// （工具级风险 + 命令级 `risk_for`），这里管的是用户自己的执行偏好——分层与理由见
-/// [D-101](../../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-101")。
+/// [D-101](../../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-101-内置插件的执行策略保留放开默认安全边界在审批闸不在用户偏好 "DE-008-能力注册表与能力坐标系")。
 #[derive(Debug, Clone)]
 pub struct PolicyRules {
     pub autonomy: AutonomyLevel,

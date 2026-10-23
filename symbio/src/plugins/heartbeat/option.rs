@@ -7,7 +7,7 @@
 //! 只有本插件知道（[`super::setting`] 是它的 owner），所以声明也该由本插件产出——
 //! 与 `agent` 贡献「智能体」、`model` 贡献「Model」同一条通道，零新机制。
 //!
-//! 副作用即 [D-077](README.md "D-077") 的守卫后半：停用 `heartbeat`
+//! 副作用即 [D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README") 的守卫后半：停用 `heartbeat`
 //! ⇒ 下一轮收集里这一行不在，会话选项栏少一格，其余照旧。
 //!
 //! ## order 号段是跨插件协调，禁止插件间直接依赖
@@ -44,7 +44,7 @@ fn option(value: &str, label: &str, description: &str) -> DetailOption {
 ///
 /// 它是 [`heartbeat_field`] 的 `default`（`form` widget 的子对象缺省值）：
 /// 未配置过心跳的会话因此显示「未开启」而不是把字段名印在按钮上，子表单也据此预填。
-/// 与 [`HeartbeatConfig::default`](super::setting::HeartbeatConfig::default) 同义，
+/// 与 `HeartbeatConfig::default` 同义，
 /// 两处的一致性由 `option.test.rs` 钉着。
 fn heartbeat_defaults() -> Value {
     json!({

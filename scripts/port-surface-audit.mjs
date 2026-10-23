@@ -141,6 +141,40 @@ const SOLVER_FNS = ['owed', 'drive']
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
 
+// 决策的存在形态是设计文档里的 `### D-NNN` 条目——adr 目录已废除，决策折入设计正文。
+// 全量扫一遍设计文档与组件级就地文档后缓存：一次读、多次判。
+let decisionSet = null
+function decisionExists(id) {
+  if (decisionSet === null) {
+    decisionSet = new Set()
+    const roots = [path.join(ROOT, 'docs', '003-design'), path.join(ROOT, 'symbio', 'src'), path.join(ROOT, 'cli', 'docs'), path.join(ROOT, 'tauri', 'docs')]
+    const walk = (d) => {
+      let list
+      try {
+        list = fs.readdirSync(d, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of list) {
+        const abs = path.join(d, e.name)
+        if (e.isDirectory()) {
+          if (e.name === 'archive' || e.name === 'target' || e.name === 'node_modules') continue
+          walk(abs)
+          continue
+        }
+        if (!e.name.endsWith('.md')) continue
+        for (const line of fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))) {
+          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
+          if (m) decisionSet.add(m[1])
+        }
+      }
+    }
+    for (const r of roots) walk(r)
+  }
+  return decisionSet.has(`D-${id}`)
+}
+
+
 function readText(rel) {
   const abs = path.join(ROOT, rel)
   if (!fs.existsSync(abs)) return null
@@ -234,14 +268,14 @@ const allowedProtocols = new Map()
   if (self !== null) {
     for (const m of self.matchAll(WAIVER_RE)) {
       allowedProtocols.set(m[1], m[2].trim())
-      const refs = [...m[2].matchAll(/ADR-(\d+[a-z]?)/g)].map((r) => r[1])
+      const refs = [...m[2].matchAll(/(?:ADR|D)-(\d+[a-z]?)/g)].map((r) => r[1])
       if (refs.length === 0) {
         report('PTS-001', `豁免 \`protocol ${m[1]}\` 的理由里没有 ADR 编号 —— 协议族是闭集，加一个成员是机制变更，必须挂一条决策`)
         continue
       }
       for (const id of refs) {
-        if (!fs.existsSync(path.join(ROOT, 'docs', '010-adr', `${id}.md`))) {
-          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了 \`ADR-${id}\`，但 \`docs/003-design/${id}.md\` 打不开 —— 指向不存在的决策的豁免不算豁免`)
+        if (!decisionExists(id)) {
+          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档里没有 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`)
         }
       }
     }
@@ -406,13 +440,13 @@ if (baseline) {
   if (reason === '') {
     report('PTS-004', `基线的 \`reason\` 为空 —— 基线是判据的一面，改它必须写清「为什么这次引擎可以动」`)
   }
-  const refs = [...String(s.adr ?? '').matchAll(/ADR-(\d+[a-z]?)/g)].map((r) => r[1])
+  const refs = [...String(s.adr ?? '').matchAll(/(?:ADR|D)-(\d+[a-z]?)/g)].map((r) => r[1])
   if (refs.length === 0) {
     report('PTS-004', `基线的 \`adr\` 里没有 ADR 编号 —— 改求解器是一次架构决策，必须挂一条能打开的决策`)
   }
   for (const id of refs) {
-    if (!fs.existsSync(path.join(ROOT, 'docs', '010-adr', `${id}.md`))) {
-      report('PTS-004', `基线引用了 \`ADR-${id}\`，但 \`docs/003-design/${id}.md\` 打不开 —— 指向不存在的决策的豁免不算豁免`)
+    if (!decisionExists(id)) {
+      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档里没有 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`)
     }
   }
 }

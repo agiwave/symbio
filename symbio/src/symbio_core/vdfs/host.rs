@@ -22,7 +22,7 @@
 //! 得到的 [`PluginError`] 翻回协议错误。让它去依赖 `plugins/vdfs` 会破坏
 //! 「插件之间不互相依赖」的分层。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::vdfs::VdfsProvider
+//! `VdfsProvider`
 
 use super::{VdfsChange, VdfsChangeSink, VdfsContext, VdfsError, VdfsResult, VdfsValidationError};
 use crate::symbio_core::{PluginError, PluginInvokeRequest};

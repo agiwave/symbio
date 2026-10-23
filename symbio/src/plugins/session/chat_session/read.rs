@@ -41,7 +41,7 @@ fn sliding_window(messages: &[ChatNode], max_turns: usize) -> Vec<ChatNode> {
 ///
 /// 仅作用于返回的构造结果，不修改存储。
 fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
-    // 占位消息（无角色）直接丢弃（判据走 `node_role` 折叠，d-iii）
+    // 占位消息（无角色）直接丢弃（判据走 `node_role` 折叠，）
     msg.node_role()?;
     let content_ok = matches!(
         &msg.content,
@@ -111,7 +111,7 @@ impl PersistentChatSession {
         //      排序退化为依赖数组当前顺序，而数组顺序又会被上一次错误排序打乱。
         // 改用写入时分配的单调 seq 后，两者都被消除。
         messages.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
-        // 建树策略投影（相应批次）：重建核心 config-free、从事件 `turn_id` 一律重derive
+        // 建树策略投影（[]）：重建核心 config-free、从事件 `turn_id` 一律重derive
         // 成 grouped（哪怕落库/消息文件写的是 flat）。`flat` 档在这里把本轮响应骨架的
         // 直接子节点升根并打 `turn_root` 记号——与 live 流式帧、`session_content` 呈现
         // 同一个投影，三格锁步。`grouped` 档下 `flatten_whole_tree` 立即返回，零改动。
@@ -129,7 +129,7 @@ impl PersistentChatSession {
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatNode>, PluginError> {
         let messages = self.get_messages().await?;
-        // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/108-turn-tool-mechanisms.md 2.6）：
+        // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/021-turn-tool-mechanisms.md 2.6）：
         // 用户选择不重试、直接继续对话时，模型必须看到上一轮的中断现场——
         // 失败 Turn 的半截输出 + 中断说明——否则思维链断裂。
         // persist_failure 只把根 Turn 标 Failed（半截子节点定稿 Completed），

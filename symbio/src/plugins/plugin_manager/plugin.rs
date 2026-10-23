@@ -95,9 +95,9 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 ///
 /// ⚠️ **显式声明无状态**（[`VDFS_STATUS_NONE`]）：分区是静态的，没有「运行中 / 就绪」
 /// 可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个绿点——那是个不存在
-/// 的信息（见 `docs/003-design/010-VDFS前端页面规范.md` §4.2）。
+/// 的信息（见 `../../../../docs/003-design/010-VDFS前端页面规范.md` §4.2）。
 ///
-/// [`VDFS_STATUS_NONE`]: crate::symbio_core::VDFS_STATUS_NONE
+/// `VDFS_STATUS_NONE`
 fn section_node(s: &SectionSpec) -> VdfsNode {
     let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
     n.kind = PLUGIN_ID_MANAGER.to_string();
@@ -538,7 +538,7 @@ impl PluginManagerPlugin {
     /// 新插件的名字由容器生成并经 [`VdfsWriteResponse::name`] 交回——与「新建一项
     /// 资源」同形，调用方本来就知道它请求的是哪个目录，地址不必由 provider 代拼。
     ///
-    /// [`VdfsWriteResponse::name`]: crate::symbio_core::VdfsWriteResponse::name
+    /// `VdfsWriteResponse::name`
     async fn install(&self, ctx: &VdfsContext, content: VdfsContent) -> VdfsResult<VdfsResponse> {
         let w = self
             .forward(ctx, "", VdfsRequest::Write { content })

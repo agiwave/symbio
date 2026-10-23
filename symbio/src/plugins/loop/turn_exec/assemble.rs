@@ -235,7 +235,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它 ⇒ 该字段不再是
     // "算了却看不见"。`tier` 仍入格（兜底率按层统计的口径锚），且作为缺 `budget_ms`
     // 时的回退路径保留——两条路径读的是同一条事实的两种形态。
-    // 身份进事件（[plan/11 批 1](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ①）：
+    // 身份进事件（plan/11 批 1 ①）：
     // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：
     // 能力集与模式不再是 `trivial` 的空表平凡值——它们与写侧闸判的是同一张表
     // （判的对象 = 写的对象 = 表授予的对象）。未选智能体 ⇒ `agent:main`
@@ -244,7 +244,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // `principal` 已在落阶段事实时取过（同一取值点 `request_principal`）：
     // `actor` 随 `input` 被移动进运行器，轮末的记忆与学习写方（`record_learning`）
     // 仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
-    // 作用域（相应批次）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域（[]）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
     // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), tier, scope);
@@ -314,7 +314,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
 ///
 /// ## 输入必须是完整史
 ///
-/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[D-085](../../session/README.md "D-085")）：
+/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[D-085](../../session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "symbio/src/plugins/session/README")）：
 /// 压缩快照取代的是消息列表，不是轮次生命周期——等待用户动作的轮在被压缩落格归档后
 /// 仍是「已开未收束」（C4 同样读完整史）。按窗口找会把它漏成「找不到未收束的轮次」
 /// （：压缩恰好在它等审批期间落格）。

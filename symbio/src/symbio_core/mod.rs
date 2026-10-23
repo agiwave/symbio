@@ -15,7 +15,7 @@ mod capability;
 mod chat;
 mod clock;
 mod creator;
-// 事实 / 视图声明层：字段清单与视图读法在装载期可查。b 起是
+// 事实 / 视图声明层：字段清单与视图读法在装载期可查。 起是
 // 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。整模块出根
@@ -155,7 +155,7 @@ pub(crate) use actors::{
 // `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
 // 生产方（`plugins/heartbeat`）与消费方（`plugins/session` 的收件箱写臂）分属两个
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
-// 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md "D-077")。
+// 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")。
 #[allow(unused_imports)]
 pub(crate) use event::{
     EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
@@ -345,7 +345,7 @@ pub use present::{
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
 pub use turn::{facts, node_build};
-// 6b-③ 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md "D-086") §7）：session 与
+// 6b-③ 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §7）：session 与
 // loop 两侧共同命名。全部 `pub(crate)` 出根——消费方仍在本 crate 内（C-003 只数
 // `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
 pub(crate) use capability::tool_metas;

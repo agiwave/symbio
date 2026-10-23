@@ -47,7 +47,7 @@ impl Seq {
 /// 事件时间戳：Unix 毫秒（UTC），口径同 [`crate::symbio_core::clock_now_ms`]。
 pub type Timestamp = i64;
 
-// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/007-task/121-最小闭环.md ")）────
+// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")）────
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
 // 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
@@ -85,7 +85,7 @@ pub const EVENT_SESSION_CONFIG: &str = "session.config";
 /// 读方（`projection::fallback::declared_tier` / `slo` / `invariants::declared_budget_ms`）
 /// 优先读本格；历史 WAL 没有本格时回退读 `user.message` 的 `tier` / `budget_ms`。
 ///
-/// [D-044]: ../../../../docs/003-design/016-工程落地与验证.md "D-044"
+/// 决策 D-044 见 [D-044](../../../../docs/003-design/016-工程落地与验证.md#d-044-实测与判据同源成本--时延--兜底率是事件网格一等数据 "D-044")
 pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
 
 /// **轮边界折进的补充**（载荷 `{ text, count }`）。落在 `turn × asserted`。
@@ -151,7 +151,7 @@ pub const EVENT_TURN_STAGE: &str = "turn.stage";
 /// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
 /// 发点在**工具批次边界**（`turn_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
 /// 用户轮只经过一次请求，而工具循环在运行器的环体里，真实的工具轮数只在那里
-/// （载荷里的 `tool_rounds` 就是它；计数口径见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
+/// （载荷里的 `tool_rounds` 就是它；计数口径见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
 /// 该不该说是 `policy.report` 行的四条与关系：开关开着 ∧ 沉默够久 ∧
 /// `tool_rounds >= min_rounds` ∧ 未超本轮配额（判据在 `report_due` 视图 + 行表）。
 ///
@@ -427,7 +427,7 @@ impl ClosureReason {
     }
 }
 
-// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/007-task/122-工具调用与产物.md ")）──
+// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/001-goal/122-工具调用与产物.md "GO-122-工具调用与产物")）──
 //
 // 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**
 // 不单独占格（同一件事两格必然漂移）；`produced_by` 指向**本轮用户格**，即
@@ -537,12 +537,12 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 /// 一次压缩 = 多一条快照事件 + 把被取代的前缀移入归档段。
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
-// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/007-task/126-长期记忆与语义检索.md ")）────
+// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/001-goal/126-长期记忆与语义检索.md "GO-126-长期记忆与语义检索")）────
 
 /// 编码：学到的语义内容（`payload: { content, tag, generation, vis_scope }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
 /// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
-/// 承诺（[D-110](../../plugins/memory/README.md "D-110")；写方 `plugins/loop/memory_events.rs`）。
+/// 承诺（[D-110](../../plugins/memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "symbio/src/plugins/memory/README")；写方 `plugins/loop/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
@@ -565,7 +565,7 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 /// 收束族，**不开第二写通道**——I1）。
 pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
-// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/007-task/128-多主体与对等承诺.md ")）──
+// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/001-goal/128-多主体与对等承诺.md "GO-128-多主体与对等承诺")）──
 //
 // 立约 = `commitment` 实体的一格事件（**加格子，不加机制**——对等协作是图，
 // 子智能体递归的树表达不了，才需要这组格子）。声誉是它的投影（`projection = reputation`）。
@@ -581,7 +581,7 @@ pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 落在 `commitment × asserted`。
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
-// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/007-task/123-多步任务与返工.md ")）──
+// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）──
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
@@ -594,7 +594,7 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/007-task/127-插话与实时打断.md ")
+/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
 pub const EVENT_TASK_HELD: &str = "task.held";
@@ -604,8 +604,8 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/007-task/127-插话与实时打断.md ")、
-// [roadmap/S09 §3](../../../../docs/007-task/129-外部执行与熔断.md ")）────
+// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")、
+//    [roadmap/S09 §3](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")）────
 //
 // 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
 // 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
@@ -616,7 +616,7 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
-// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/007-task/132-自主层与长期目标.md ")）──
+// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")）──
 //
 // 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
 // `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
@@ -639,7 +639,7 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 /// 它不是事件名，而是**同一个事实的另一种写法**：写体 `meta.trigger` 声明的是
 /// 「这一轮由系统自己发起」，落进事实源就是 [`EVENT_SYSTEM_TRIGGERED`] 那一格。
 /// 两侧必须同源——`meta` 是自由 JSON，键名拼错编译器管不到，生产方（调度侧）与
-/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../plugins/heartbeat/README.md "D-077") 裁决二）。
+/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README") 裁决二）。
 ///
 /// 形状：`meta.trigger = { "kind": <EVENT_TRIGGER_KIND_*>, "idle_ms": N }`，
 /// **在写臂就地消费**，不要求它活到转写。
@@ -648,7 +648,7 @@ pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
 /// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
 pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";
 
-// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/007-task/133-多智能体社会.md ")）──
+// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）──
 //
 // 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集
 // 里一直有这一行）在 S13 取的第一个值就是**淘汰裁决**——声誉投影低于阈值的主体

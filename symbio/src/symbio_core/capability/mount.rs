@@ -1,5 +1,5 @@
 //! VDFS 挂载族的**读写协议**——表（`Registry` 的 `put` / `get` / `list`）
-//! 之上的挂载专用词法（DE-008 §5 步 4d）。
+//! 之上的挂载专用词法（AR-025 §5 步 4d）。
 //!
 //! ## 一族两形：挂载点（多行）与根（单槽）
 //!
@@ -8,7 +8,7 @@
 //!
 //! | | 写 | 读 |
 //! |---|---|---|
-//! | 挂载点 | 容器按 [`Plugin::get_vfs_provider`](crate::symbio_core::Plugin::get_vfs_provider) 派生后 `put(CapabilityRow::mount(实例名, provider))` | [`capability_mounts`] / [`capability_mount`] |
+//! | 挂载点 | 容器按 `Plugin::get_vfs_provider` 派生后 `put(CapabilityRow::mount(实例名, provider))` | [`capability_mounts`] / [`capability_mount`] |
 //! | 根 | `put(CapabilityRow::mount_root(provider))` | [`capability_vdfs_root`] |
 //!
 //! 根行带**根位**（[`CapabilityRow::active`]），单槽移交因此与模型族的生效位同一条规则

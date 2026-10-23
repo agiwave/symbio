@@ -320,7 +320,7 @@ test('E-006 命中：003-ROUTES.md 里写了 `sessions/update`', () => {
     },
     { strict: true },
   )
-  assert.match(r.stdout, /\[WARN\]\s+E-006 docs\/006-ref\/003-ROUTES\.md:1/)
+  assert.match(r.stdout, /\[WARN\]\s+E-006 docs\/004-ref\/003-ROUTES\.md:1/)
 })
 
 test('E-006 不误报：退役路由的**前缀**仍然合法（`session/append`）', () => {

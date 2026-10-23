@@ -5,7 +5,7 @@
 //!   非 `Action` 请求 ⇒ `Invalid`；
 //! - **行为与帧形**：每个 op 的返回值是调用方经地址面能看到的全部，帧则经本会话
 //!   订阅表观察（`Transcript::publish` 是消息帧的唯一出口）——两者一起锁住
-//!   「写动作自己发帧」这条契约（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4）。
+//! 「写动作自己发帧」这条契约（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
 
 use super::*;
 use crate::plugins::session::paths;
@@ -670,7 +670,7 @@ async fn run_compression_begin_and_finish() {
     );
     assert_eq!(
         begin_reply["skipped"], false,
-        "熔断未触发 ⇒ loop 应照常压缩（D-086 §6）"
+        "熔断未触发 ⇒ loop 应照常压缩（ADR-086 §6）"
     );
     let begin = frames(&seen);
     assert_eq!(begin.len(), 1);

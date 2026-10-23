@@ -6,7 +6,7 @@
 //! 一部分，随 `StopSignal` 留在 session（[D-086] §6）。本插件只把末条正文经
 //! `TurnReport.last_message` 交回。
 //!
-//! [D-086]: ../../../../../docs/003-design/014-单环一表.md "D-086"
+//! 决策 D-086 见 [D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 
 use super::*;
 use crate::symbio_core::chat_node::CHAT_STYLE_TAG_RUN;
@@ -45,7 +45,7 @@ pub(crate) async fn finalize_turn_root(
 /// 发的是 `append_and_publish` 交回的**存储权威副本**（`content` 整条替换），不是
 /// 本插件内存镜像里那份：后者没有号——存储是在临界区内给自己的私有副本补号的。
 ///
-/// [D-086]: ../../../../../docs/003-design/014-单环一表.md "D-086"
+/// 决策 D-086 见 [D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "D-086")
 pub(crate) async fn persist_messages(
     context: &SessionContext,
     last_saved: usize,

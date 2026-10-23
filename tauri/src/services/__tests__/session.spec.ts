@@ -170,7 +170,7 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
   it('挂载根下与资源并列的配置文件不进清单（按 ext 判据，不按名字特判）', async () => {
     mockList([
       sessionItem({ name: 'abc' }),
-      // 本插件的配置文件：真实文件名 `PLUGIN.yml`，ext = form（见 docs/003-design/009-VDFS规范.md §3.4）
+      // 本插件的配置文件：真实文件名 `PLUGIN.yml`，ext = form（见 ../../../../docs/003-design/009-VDFS规范.md §3.4）
       sessionItem({ name: 'PLUGIN.yml', title: '会话设置', ext: 'form' }),
     ])
 

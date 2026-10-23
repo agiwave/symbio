@@ -9,7 +9,7 @@
 //!   钩子拦下与正常执行四条出口。
 //! - [`unfinished`] —— ③ 未执行收口：本批没跑到的调用统一补父节点终态与结果子节点。
 //!
-//! 编排入口仍是 [`tool_executor::process_tool_calls_async`](super::tool_executor::process_tool_calls_async)
+//! 编排入口仍是 `tool_executor::process_tool_calls_async`
 //! （签名与 `tools` 门面不变），它只做：空批早退 → ① → ② → ③。
 //!
 //! **纯结构拆分纪律**（DE-021 §5 纪律 2）：三段代码逐字来自拆分前的单体函数体，

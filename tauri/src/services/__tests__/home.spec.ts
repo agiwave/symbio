@@ -6,10 +6,10 @@
  * 四条臂全是 **home 插件的臂**（`home/set_workspace` · `home/get_workspace` 由 home 处理，
  * 前缀 = 目录名，没有第二条命名空间）。它们经 gateway **不可达**——`gateway/plugin.rs` 的入站 router 是
  * worker composite，而 home 是 composite 的**父**，`Composite::route` 对认不出的名字直接
- * `NotFound`、不向上转发（[RE-005](../../../../docs/004-ref/005-e2e覆盖矩阵.md "RE-005-e2e覆盖矩阵")
+ * `NotFound`、不向上转发（RE-005
  * 的边界事实由 e2e `t69 ⑦` 钉住）。真实驱动面是 Tauri 的**进程内** `callPlugin`
  * （`services/home.ts` ⇒ `services/plugin.ts`），而那条链路只有真窗口里跑得起来——
- * 浏览器层 runner 的裁决见 RE-005「明确不做」（相应批次(../../../../docs/007-task/075-前端形态e2e补位.md ")）。
+ * 浏览器层 runner 的裁决见 RE-005「明确不做」。
  *
  * ## 本文件钉什么
  *

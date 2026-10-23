@@ -26,7 +26,7 @@
  * 这也是机制审计（`scripts/mechanism-audit.mjs` M-001）的判定依据：`components/` 下
  * 不允许出现对后端 meta 字段的直接读取。
  *
- * 口径提醒：随 [D-111](../../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")，「那几个数怎么说」
+ * 口径提醒：随 [D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")，「那几个数怎么说」
  * （压缩水位 / 触发来源 / token 单位）**不在这里**——那是交付出口的读数行 `node.stats`，
  * 本层只留「这条节点是不是压缩产物」这类形状判定。
  */
@@ -67,7 +67,7 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 // ==================== 节点 → 词表取值（缺省规则） ====================
 
 /**
- * 节点的角色——**唯一读入口**（d-iii，镜像后端 `ChatNode::node_role`）。
+ * 节点的角色——**唯一读入口**（，镜像后端 `ChatNode::node_role`）。
  *
  * 折叠实现住在契约层（`schemas/chat_node.messageRoleOf`，纯逻辑层同源共用）；
  * 这里只转出，registry 的消费面保持稳定。
@@ -75,7 +75,7 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 export { messageRoleOf }
 
 /**
- * 节点的**生效形态**（B2a，[D-070 §决策 3]）：wire 五值 `NodeKind`。
+ * 节点的**生效形态**（[ B2a]，[D-070 §决策 3]）：wire 五值 `NodeKind`。
  *
  * 这是分派轴的**唯一读入口**。它只做一件事——把 `node.type` 归一到闭集五值（历史
  * 业务旧词经 `nodeKindOf` 一次性折叠，`run`/`tool`→`skeleton`、`reasoning`/`compression`→
@@ -93,7 +93,7 @@ export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
 }
 
 /**
- * 工具名（d-ii：顶层 `name` 已退役，工具名唯一住 `meta.tool_name`）。
+ * 工具名（：顶层 `name` 已退役，工具名唯一住 `meta.tool_name`）。
  *
  * 与后端 `ChatNode::tool_name()` 同一条读法；历史数据的 attrs `tool_name`
  * 已在 `sessionTranscriptSync.messageOfNode` 折进 meta，这里不必再兜旧形态。
@@ -108,7 +108,7 @@ export function toolNameOf(node: Pick<ChatNode, 'meta'>): string | undefined {
  * 优先级：`meta.agent_id` > 按是否子会话取兜底名。
  * `meta` 是后端 flatten 的场景字段，这里只做取值，不解释语义。
  * （曾经的 `node.name` 首选项已随顶层字段退役删除——后端从未把智能体名写进
- * name，那条只是一条空通道，d-ii。`meta.agent_name` 同样从未有生产者，
+ * name，那条只是一条空通道，。`meta.agent_name` 同样从未有生产者，
  * 一并删除：读一个没人写的键只会让下一个人以为存在第二份名字来源。）
  */
 export function agentNameOf(
@@ -123,7 +123,7 @@ export function agentNameOf(
   )
 }
 
-// ==================== principal 前缀 → 身份呈现（相应批次 独立表） ====================
+// ==================== principal 前缀 → 身份呈现（[] 独立表） ====================
 //
 // 「这条发言是谁说的」的可视化——与「这条是什么形态」（`TYPE_PRESENTATION`）正交：
 // 前者按**可路由地址的命名空间**（`<ns>/<name>`，[D-069 §决策 1]）分派，后者按
@@ -214,21 +214,21 @@ export interface MessageFacets {
   role: ChatRole
   type: NodeKind
   status: NodeStatus
- /** 工具名（`meta.tool_name`，d-ii） */
+  /** 工具名（`meta.tool_name`，） */
   name?: string
   /**
- * 后端填的头部标题（相应批次 呈现数据）——有值即优先于 legacy 类型表。
+   * 后端填的头部标题（[] 呈现数据）——有值即优先于 legacy 类型表。
    * 前端机制化的落点：呈现意图来自节点数据，不靠 `switch(style_tag)` 现推。
    */
   title?: string
   /** 后端填的头部图标（同上，缺省退 legacy 表）。 */
   icon?: string
   /**
- * 后端声明的**可用恢复动作**（相应批次 呈现数据）——重试 / 补充参数 / 审批入口
+   * 后端声明的**可用恢复动作**（[] 呈现数据）——重试 / 补充参数 / 审批入口
    * 的首选判据；缺省（后端未填）退回按业务类型反推的 legacy 判据。
    */
   actions?: ResumeAction[]
- /** principal 身份呈现（相应批次 独立表：命名空间优先、kind 兜底，无主体 → `undefined`） */
+  /** principal 身份呈现（[] 独立表：命名空间优先、kind 兜底，无主体 → `undefined`） */
   principal?: PrincipalPresentation
   /** 子会话骨架（`role = tool` 的骨架）：某工具「过程」段 */
   subSession: boolean
@@ -274,11 +274,11 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     type,
     status: messageStatusOf(node),
     name: toolNameOf(node),
-    // 呈现数据从节点顶层直读（相应批次）——不经 meta，是后端填的权威呈现意图。
+    // 呈现数据从节点顶层直读（[]）——不经 meta，是后端填的权威呈现意图。
     title: node.title,
     icon: node.icon,
     actions: node.actions,
-    // principal 身份呈现（相应批次 独立表；组件据此画徽标，缺主体则不画）
+    // principal 身份呈现（[] 独立表；组件据此画徽标，缺主体则不画）
     principal: principalPresentationOf(node.principal),
     // 子会话过程段 = `role=tool` 的骨架：与根级骨架同构（都走容器递归），但无组级操作
     subSession: type === NODE_KIND_SKELETON && role === CHAT_ROLE_TOOL,
@@ -304,7 +304,7 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
   }
 }
 
-// ==================== 组件侧判据谓词（相应批次） ====================
+// ==================== 组件侧判据谓词（[]） ====================
 //
 // 「这条是不是用户消息 / 容器骨架」这类判据原先在各渲染组件里就地比较协议
 // 枚举字面量（`facets.role === 'user'`、`c.type === 'skeleton'`）——每个组件都
@@ -392,7 +392,7 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
 // 且**规则变了只改一处**。
 
 /**
- * 节点是否携带某个可用恢复动作（B2a 纯数据判据的唯一读法）。
+ * 节点是否携带某个可用恢复动作（[ B2a] 纯数据判据的唯一读法）。
  *
  * `actions` 由后端在交互面派生（[D-070 §决策 3]），前端不再按业务类型 / `recoverable`
  * 反推「能不能重试」——「有对应动词即有入口，没有即不画」。`actions` 缺席（历史数据、
@@ -405,7 +405,7 @@ function hasAction(actions: ResumeAction[] | undefined, action: ResumeAction): b
 /**
  * 工具失败能否**就地重试**（resume action=`retry`）。
  *
- * B2a 判据已是**纯数据**：后端在交互面（[D-070 §决策 3]）把「这条节点能发
+ * [ B2a] 判据已是**纯数据**：后端在交互面（[D-070 §决策 3]）把「这条节点能发
  * 哪种恢复动词」折成 `actions` 列表随节点下发，前端只读「有 `retry` 就画重试」。
  * 不再从业务类型（工具 / 可恢复标记）反推——那是本模块最后一处业务耦合。
  */
@@ -452,7 +452,7 @@ export type MessageRetryAction = Extract<
 /**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
- * 三个粒度，**粒度由后端下发的 `actions` 决定**（B2a，[D-070 §决策 3]）：
+ * 三个粒度，**粒度由后端下发的 `actions` 决定**（[ B2a]，[D-070 §决策 3]）：
  * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
  * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
@@ -465,7 +465,7 @@ export interface MessageRetryTarget {
 /**
  * 由失败节点推出该发哪种重试（**重试分派的唯一实现**）。
  *
- * B2a：动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
+ * [ B2a]：动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
  * `retry_compaction`、运行骨架带 `retry_subtree`，粒度与靶子都由数据给出，前端不再 `switch(type)`。
  * `actions` 缺席（历史数据、合成节点、或尚未走到交互面的本地视图）时退回一条**不认业务类型**
  * 的兜底：失败 / 中止一律整轮重试，叶子回溯到父骨架（后端 `process_retry_subtree` 要求

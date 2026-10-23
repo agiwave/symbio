@@ -239,7 +239,7 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
     /// 「无工具调用 + 空文本」才是失败。
     ///
-    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[D-048a](../../plugins/session/README.md "symbio/src/plugins/session/README")）
+    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[D-048a](../../plugins/session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "symbio/src/plugins/session/README")）
     ///
     /// ```text
     /// // 反例——整段 prompt 拍成一条 user 消息：
@@ -429,7 +429,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                 //   不需要协议级的配对；
                 // - 降级不是丢信息：工具名与结果正文都在正文里；
                 // - 标成 assistant 而不是 user，因为它**确实是本主体做过的事**，
-                //   标成 user 就是撒谎（这与 D-048a 判定的「拍平成 user 消息」同一个病）。
+                // 标成 user 就是撒谎（这与 D-048a 判定的「拍平成 user 消息」同一个病）。
                 //
                 // ⚠️ 唯一的损失是 `tool_call_id` 的配对能力——而**本轮**的调用与结果
                 // 仍走上面的树形路径，配对能力完好。跨轮结果的配对本来就无从谈起

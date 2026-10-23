@@ -5,7 +5,7 @@
 //! `turnstate`（"只看当前 turn"）——它是**最小可用视图**，后面的 `snapshot` /
 //! `checkpoint` 都从这里长出。
 //!
-//! 纯净性由 [`Projection::new`](super::Projection::new) 的构造约束保证：
+//! 纯净性由 `Projection::new` 的构造约束保证：
 //! 形参只有 `&[Event]` / `Timestamp`，拿不到 `Store`（F2 一级强制）。
 
 use super::super::event::{Event, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL};

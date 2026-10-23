@@ -111,7 +111,7 @@ fn from_legacy_is_idempotent_on_new_shape() {
         "person/local",
         "vdfs/write",
         "system/compactor",
-        // d-iii `tool_principal` 合成的三个 namespace 都要读回 Tool 族
+        // `tool_principal` 合成的三个 namespace 都要读回 Tool 族
         "legacy/todo_write",
         "mcp/mockserv/echo",
         "agent/run",
@@ -122,7 +122,7 @@ fn from_legacy_is_idempotent_on_new_shape() {
     }
 }
 
-/// `tool_principal`：LLM 可见工具名（wire 形态）→ 可路由的 Tool 主体（d-iii）。
+/// `tool_principal`：LLM 可见工具名（wire 形态）→ 可路由的 Tool 主体。
 #[test]
 fn tool_principal_maps_wire_tool_names() {
     // 首段是归属插件 ⇒ `ns/其余`，与 authz 登记的主体行逐一对齐

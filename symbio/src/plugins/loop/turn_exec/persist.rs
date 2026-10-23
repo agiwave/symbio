@@ -199,7 +199,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 身份与档位取值点同 [`super::execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
-    // 作用域与身份同批取（相应批次）：子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域与身份同批取（[]）：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
     // 压缩入格 + 归档：与 [`super::execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。

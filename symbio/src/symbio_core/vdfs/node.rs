@@ -27,17 +27,17 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 ///
 /// 现在只留**类型**这一层：本结构描述「这类东西落成后长什么样」，由 provider
 /// 自持。**导入不是类型的一种**，它是详情页上的一条动作
-/// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），与 [`VDFS_ACTION_EXPORT`](super::VDFS_ACTION_EXPORT) / `delete` 同级——
+/// （`VDFS_ACTION_IMPORT`），与 `VDFS_ACTION_EXPORT` / `delete` 同级——
 /// 见 D-029。
 ///
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///
-/// [`ext`](Self::ext) 是**呈现扩展名**——地址末段可能带的后缀，provider 用
+/// `ext` 是**呈现扩展名**——地址末段可能带的后缀，provider 用
 /// `entry::id_of` 一族按它剥出条目 id（`<根>/model/openai-1.model` → `openai-1`）。
 /// 它**不**决定详情怎么渲染：配置型资源（`model` / `mcp` / `skill`）落成后统一是
 /// `ext = form`，呈现扩展名只留在地址里。
 ///
-/// [`node_ext`](Self::node_ext) 才是**新元素落成后的 [`VdfsNode::ext`]**（详情渲染器键）。
+/// `node_ext` 才是**新元素落成后的 [`VdfsNode::ext`]**（详情渲染器键）。
 /// 缺省 = 用 `ext`——会话这类「呈现扩展名就是渲染器键」的资源不必声明。
 ///
 /// 两个键分开声明，是为了让使用方在**还没创建**时就能渲染出该类型的详情页
@@ -45,10 +45,10 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 ///
 /// ## 创建语义仍归 provider
 ///
-/// 「新建」在机制上就是一次 [`VdfsRequest::Write`](super::VdfsRequest::Write)（`create: true`）。本结构
+/// 「新建」在机制上就是一次 `VdfsRequest::Write`（`create: true`）。本结构
 /// 只声明**草稿长什么样**；具体写什么、怎么校验，由 provider 在 `write` 中自持。
 /// 需要「先选个本地包再落盘」这类**额外操作**时，那是详情页的动作
-/// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不是本结构的字段。
+/// （`VDFS_ACTION_IMPORT`），不是本结构的字段。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
     /// 新元素**呈现扩展名**（地址末段后缀，`id_of` 按它剥 id；**不是**渲染器键）
@@ -61,7 +61,7 @@ pub struct VdfsNewType {
     /// 图标名（使用方纯 UI 映射）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 新元素落成后的 [`VdfsNode::ext`]（**详情渲染器键**）；缺省 = 与 [`ext`](Self::ext) 相同
+    /// 新元素落成后的 [`VdfsNode::ext`]（**详情渲染器键**）；缺省 = 与 `ext` 相同
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_ext: Option<String>,
     /// 新元素的呈现描述（与 [`VdfsNode::schema`] 同义）。
@@ -94,7 +94,7 @@ impl VdfsNewType {
         self
     }
 
-    /// 新元素落成后的呈现扩展名（详情渲染器键）——与 [`ext`](Self::ext) 不同的资源必填
+    /// 新元素落成后的呈现扩展名（详情渲染器键）——与 `ext` 不同的资源必填
     pub fn with_node_ext(mut self, node_ext: impl Into<String>) -> Self {
         self.node_ext = Some(node_ext.into());
         self
@@ -132,7 +132,7 @@ impl VdfsNewType {
 /// 于是地址落在**条目**上（[`VdfsItem`]：地址 + 节点），由分发层按
 /// `<父地址>/<name>` 回填，provider 只在「地址不是这个形状」时才自己填。
 ///
-/// [`capability_entry_of`]: crate::symbio_core::capability_entry_of
+/// `capability_entry_of`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsNode {
     /// 唯一标识：父节点内的路径段
@@ -215,7 +215,7 @@ pub struct VdfsNode {
     ///
     /// 列表响应里的目录节点本来就是「你此刻看到的这个目录视图」的自述
     /// （分发层同一处把 `title` / `ext` 补齐），使用方已经在读它的
-    /// [`new_type`](Self::new_type)——多一个字段就是多一行判据，不必再多一份
+    /// `new_type`——多一个字段就是多一行判据，不必再多一份
     /// 「响应级配置」让消费端另外记一个引用。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search: Option<bool>,
@@ -226,7 +226,7 @@ pub struct VdfsNode {
     ///
     /// ⚠️ 它是**至多一种**（见 [`VdfsNewType`]）：一个目录接受的是**一类**东西。
     /// 同一个类型的多种落盘路径（表单填 / 整包导入）不是两种类型，后者是详情页
-    /// 上的一条动作（[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不在这里堆成一张清单。
+    /// 上的一条动作（`VDFS_ACTION_IMPORT`），不在这里堆成一张清单。
     ///
     /// `Box` 不是随手加的：`VdfsNewType` 带四个 `Option<String>` + `schema`
     /// （≈150 字节），而 `VdfsNode` 是**全系统数量最多**的类型
@@ -383,7 +383,7 @@ pub fn vdfs_derive_ext(name: &str) -> Option<String> {
 
 /// 列表条目 = **地址 + 节点**。
 ///
-/// 这是列表响应里元素的形状（[`VdfsResponse::List`](super::VdfsResponse::List) / `vdfs/list` / `vdfs/tree`），
+/// 这是列表响应里元素的形状（`VdfsResponse::List` / `vdfs/list` / `vdfs/tree`），
 /// 也是「地址为什么不在 [`VdfsNode`] 里」的答案：地址属于**这一次列举**，不属于
 /// 节点——同一个节点可以在不同列表里以不同地址出现（见 [`VdfsNode`] 的文档）。
 ///
@@ -436,7 +436,7 @@ impl From<VdfsNode> for VdfsItem {
 
 /// serde 辅助：`false` 不序列化（保持线上形状与「缺省即 false」的字段兼容）
 ///
-/// 用于 [`VdfsNode::hidden`] 与 [`VdfsContent::create`](super::VdfsContent::create) 这类**绝大多数情况为
+/// 用于 [`VdfsNode::hidden`] 与 `VdfsContent::create` 这类**绝大多数情况为
 /// false** 的布尔位——省掉它们能让既有消费者的 JSON 形状一字不变。
 pub(super) fn is_false(b: &bool) -> bool {
     !*b

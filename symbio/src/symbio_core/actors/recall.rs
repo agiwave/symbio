@@ -41,7 +41,7 @@ impl RecallTranslator {
         .with_payload(serde_json::json!({
             "found": view.entries.len(),
             "top": top,
-            // 本次召回是否只给出**部分结果**（相应批次）。
+            // 本次召回是否只给出**部分结果**。
             // 观测落进事实才有**生产读数口**：降级只活在投影外壳 / 提示词里，就没有
             // 一条事件说得出「这一轮的记忆只显示了一部分」（静默的两种形态之一）。
             "degraded": view.degraded,

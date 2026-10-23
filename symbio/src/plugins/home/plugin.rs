@@ -8,7 +8,7 @@
 //!
 //! Home 是**系统根插件**：它的目录就是系统根 [`HomedirRegistry::get()`] 本身，
 //! 配置在 `<homedir>/PLUGIN.yml`——与其它插件**同一套规范**
-//! （见 [`PluginConfigFile`](crate::symbio_core::PluginConfigFile)），只是它住在系统根而不是
+//! （见 `PluginConfigFile`），只是它住在系统根而不是
 //! 业务插件**并列**在系统根下（它管辖的插件根就是系统根本身）。
 //! homedir 切换通过 `home/reload` 路由热重载实现。
 //!
@@ -37,7 +37,7 @@ use tokio::sync::RwLock;
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///
 /// 系统（根）Agent 挂载的插件清单。**当前与子 Agent 子树逐项相同**，故直接取
-/// `symbio_core` 的 [`ASSEMBLY_SUB_AGENT_PLUGINS`](crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS)
+/// `symbio_core` 的 `ASSEMBLY_SUB_AGENT_PLUGINS`
 /// ——这里**不是**第二份手抄的字面量。父子因此「结构一致、能力对齐」；二者的差异在
 /// **收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
 /// `ASSEMBLY_SUB_AGENT_PLUGINS` 的文档。

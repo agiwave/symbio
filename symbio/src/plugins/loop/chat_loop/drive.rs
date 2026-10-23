@@ -97,7 +97,7 @@ pub(crate) fn begin_drive(
     })?;
     // ── 行表是开幕的前提（DE-015 §3.4：装载失败即拒绝启动，不许部分成功）──────
     //
-    // 装载期任何缺口都让 [`table`](super::super::loop_rows::table) 恒 `Err`。这里不
+    // 装载期任何缺口都让 `table` 恒 `Err`。这里不
     // 「跳过收租继续开新幕」——没有表就没有 `owed`，那一幕只会静默停在原处。
     let frozen = super::super::loop_rows::table().map_err(super::state::TurnExit::Failed)?;
     let snapshot = store.range(Seq::new(0));

@@ -7,7 +7,7 @@
 //! 反面）。
 //!
 //! 适用：内容就是**一份清单文件**的资源——Model Provider（`provider.json`）。
-//! 有多份文件、需要浏览条目内部的资源用 [`DirVdfs`](super::dir::DirVdfs)。
+//! 有多份文件、需要浏览条目内部的资源用 `DirVdfs`。
 
 use super::entry;
 use crate::symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
@@ -34,7 +34,7 @@ pub struct SingleFileVdfs {
 impl SingleFileVdfs {
     // 注：早先这里有 `for_category(kind)`——按类别名反推全局落位
     //（`<homedir>/<kind>`）。homedir 下沉到 `home` 后 core 不再有全局根，
-    // 调用方（model 迁移旧分类）改为自己推出作用域根再走 [`at`](Self::at)。
+    // 调用方（model 迁移旧分类）改为自己推出作用域根再走 `at`。
 
     /// 显式指定类别根（生产路径：根 = 调用方的插件目录）
     pub fn at(
@@ -97,7 +97,7 @@ impl SingleFileVdfs {
     ///
     /// **主文件不是 JSON 的资源不要用本方法**——把 Markdown 包成 JSON 值会写上
     /// 引号并把换行转义成字面 `\n`，文件被静默写坏而写入报成功（用
-    /// [`write_text`](Self::write_text)）。
+    /// `write_text`）。
     pub async fn write_json(&self, id: &str, value: &serde_json::Value) -> VdfsResult<bool> {
         let text = serde_json::to_string_pretty(value)
             .map_err(|e| VdfsError::internal(format!("序列化主文件失败：{e}")))?;

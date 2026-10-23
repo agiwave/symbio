@@ -53,7 +53,7 @@ impl HookRegistry {
         self.hooks.clone()
     }
 
-    /// 停用时清空注册态（相应批次）：
+    /// 停用时清空注册态：
     /// 注册只活在内存里，插件被停用后不应再有一份「看起来还在」的 hooks 名单。
     pub async fn clear(&mut self) {
         self.hooks.clear();

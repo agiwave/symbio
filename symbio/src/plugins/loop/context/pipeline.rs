@@ -5,7 +5,7 @@
 //!
 //! 自动压缩与用户重试（[`retry_compaction`]）都经 [`auto_compress_process`] 进入
 //! [`compress_with_snapshot_core`] 这一个执行内核——"何时压"有一个入口两种触发，
-//! "怎么压"只有一个实现。主动 `context_compact` 工具已随 v1 外壳退役（[D-072](../../session/README.md "symbio/src/plugins/session/README")）。
+//! "怎么压"只有一个实现。主动 `context_compact` 工具已随 v1 外壳退役（[D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README")）。
 
 use super::*;
 

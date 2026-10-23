@@ -55,7 +55,7 @@ use std::sync::{Arc, RwLock, Weak};
 ///
 /// | 半 | 字段 | 消费方式 |
 /// |---|---|---|
-/// | **身份** | `id` / `name` / `description` / `version` / `author` | 装配期**一次性投影**进 `PLUGIN.yml`（[`PluginDir::seed_identity`](crate::symbio_core::PluginDir::seed_identity)），此后运行期读 manifest |
+/// | **身份** | `id` / `name` / `description` / `version` / `author` | 装配期**一次性投影**进 `PLUGIN.yml`（`PluginDir::seed_identity`），此后运行期读 manifest |
 /// | **挂载点呈现** | `order` / `icon` / `hidden` / `root_access` | 运行期读：`composite/vdfs.rs` 合成挂载点目录节点、`composite/registry.rs` 排序 |
 ///
 /// 为什么分两半：**身份必须常在**（「这个插件叫什么」与它开没开无关，停用的插件
@@ -81,7 +81,7 @@ pub struct PluginMeta {
     /// 图标名（使用方纯 UI 映射；缺省无）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 [`VdfsNode::hidden`](crate::symbio_core::VdfsNode::hidden) 一致）
+    /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 `VdfsNode::hidden` 一致）
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
     /// 挂载点（根目录）的访问位（缺省「可列目录」）

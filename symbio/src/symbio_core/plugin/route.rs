@@ -3,7 +3,7 @@
 //! # 地址规则
 //!
 //! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
-//! > [`docs/003-design/006-插件路由与地址.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")。
+//! > [`../../../../docs/003-design/006-插件路由与地址.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")。
 //!
 //! ## 一、地址只有两种形态
 //!
@@ -23,7 +23,7 @@
 //! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**不参与路由**——路由按目录名
 //! 分发，`PluginMeta` 唯一运行期消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
 //! `name`/`description`/`hidden` 聚合组合视图），拿 id 当前缀会产出**不存在的路由**——
-//! `hook` 插件写成 `"hooks"` 就曾让 `docs/004-ref/006-当前事实表.md` 与两处文档照抄出 `hooks/fire`。
+//! `hook` 插件写成 `"hooks"` 就曾让 设计文档 与两处文档照抄出 `hooks/fire`。
 //! 该不一致由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
 //!
 //! ## 三、过路由才设 `PATH`；直连方法**不设**
@@ -34,8 +34,8 @@
 //!
 //! ## 四、`traverse` 的 `PATH` 只有两个合法值
 //!
-//! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS) 与
-//! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)。
+//! `TRAVERSE_AVAILABLE_TOOLS` 与
+//! `TRAVERSE_AVAILABLE_OPTIONS`。
 //! 它们是**协议端点**，不是插件路径，因此不进本模块——住在 [`super::traverse`]。
 //!
 //! # 本模块的职责与边界
@@ -55,7 +55,7 @@
 //! `home/set_workspace` · `home/get_workspace`）在这里没有常量——
 //! 给它加一个就是零 Rust 消费方的预留常量，上面那条规则同样拦它。
 //!
-//! 与 [`plugin::ids`](crate::symbio_core::plugin::ids) 的差别：
+//! 与 `plugin::ids` 的差别：
 //! - `ids` 描述「注册到注册表的对象 id」（插件工厂、服务）；
 //! - 本模块描述「运行期跨插件调用的路由路径」（`<插件目录名>/<子路径>`）。
 //!

@@ -32,11 +32,11 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec
     // 规则源（ 后）：批号闭集的 owner 是 `docs/005-spec/015.md`；
     // 04 §3.1 退为迁移期兼容来源。R-002 ③「承认必须挂到计划步」只在规则源存在时判。
     if (spec) {
-      fs.mkdirSync(path.join(root, 'docs/008-spec'), { recursive: true })
+      fs.mkdirSync(path.join(root, 'docs/005-spec'), { recursive: true })
       fs.writeFileSync(path.join(root, 'docs/005-spec/015.md'), spec)
     }
     if (plan) {
-      fs.mkdirSync(path.join(root, 'docs/004-plan'), { recursive: true })
+      fs.mkdirSync(path.join(root, 'docs/003-design'), { recursive: true })
       fs.writeFileSync(path.join(root, 'docs/003-design/016-工程落地与验证.md'), plan)
     }
     const env = { ...process.env, NO_COLOR: '1', ...extraEnv }

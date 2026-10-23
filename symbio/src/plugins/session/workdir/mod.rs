@@ -28,8 +28,8 @@ pub const TREE_KIND: &str = "dir";
 
 /// 会话内部：子会话清单的 kind（`<sid>/subsession` 自身，不是它里面的树节点）。
 ///
-/// 与 [`KIND_MESSAGES`](crate::plugins::session::plugin::words::KIND_MESSAGES) /
-/// [`KIND_INBOX`](crate::plugins::session::plugin::words::KIND_INBOX) 同一手法：
+/// 与 `KIND_MESSAGES` /
+/// `KIND_INBOX` 同一手法：
 /// `name` / `title` 是展示名，`kind` 是**协议词**。侧栏与卡片按它取图标，
 /// 因此不必把段名（`subsession`）写进任何消费方的判据里。
 pub const KIND_SUB_SESSIONS: &str = "subsession";
@@ -456,7 +456,7 @@ impl WorkdirWatchManager {
         });
     }
 
-    /// 停机时一次性交还全部监听（[D-075](../../../../../docs/003-design/002-架构总览.md "DE-002-架构总览") 的前置 P1，由 `Plugin::stop` 调用）。
+    /// 停机时一次性交还全部监听（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1，由 `Plugin::stop` 调用）。
     ///
     /// 与 `release_watch` 的区别只有**不等宽限期**：宽限防的是「离开→返回」期间
     /// 迟到的 unwatch 误杀刚重建的订阅，而停机之后不再有重建，晚一步交还就是

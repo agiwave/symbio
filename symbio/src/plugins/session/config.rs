@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md "D-082")
+// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
 // 裁决三，[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切片批）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
@@ -67,7 +67,7 @@ pub struct SessionConfig {
     ///
     /// 这是「存储保留事实、压缩只换基」架构原则的**唯一例外**：存在理由仅是控制
     /// 工具密集型会话的磁盘与节点树体积，本开关不影响发给模型的上下文大小
-    /// （请求体是事实网格的纯投影，见 [D-078](README.md "D-078")）。
+    /// （请求体是事实网格的纯投影，见 [D-078](README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README")）。
     ///
     /// - `true`（默认）：保持历史行为，超出窗口的工具链在存储层被物理删除，
     ///   前端节点树同样看不到这些历史工具调用；
@@ -254,7 +254,7 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/007-task/131-技能编译与自我改进.md ")）。
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/001-goal/131-技能编译与自我改进.md "GO-131-技能编译与自我改进")）。
     ///
     /// ## 它控制什么
     ///
@@ -274,10 +274,10 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/007-task/131-技能编译与自我改进.md ")
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/001-goal/131-技能编译与自我改进.md "GO-131-技能编译与自我改进")
     /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
-    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../../docs/003-design/005-协议规范.md "D-079")）：
+    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
     /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
     /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
     /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
@@ -333,7 +333,7 @@ pub struct SessionConfig {
     /// 建树策略（`grouped` / `flat`，出厂默认 `grouped` = 今天行为；见 [`PresentationTree`]）。
     ///
     /// 后端组树时决定本轮节点的 `parent_id` 挂哪，前端只按 `parent_id` 插树、
-    /// **不知道这个开关存在**——这是 相应批次 判据的核心：切档前端零代码改动。
+    /// **不知道这个开关存在**——这是 [] 判据的核心：切档前端零代码改动。
     /// 认不出的写法按出厂默认处理（手写 `PLUGIN.yml` 写错不该改变组树），与
     /// `SettingConfig::verbosity` 同一条读侧容错纪律。`deep` 档随子会话转播桥
     /// 改造在 149-ii 接线。

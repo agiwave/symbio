@@ -117,7 +117,7 @@ impl PersistentChatSession {
         }
     }
 
-    /// 同 [`ephemeral`](Self::ephemeral)，但配置以**值快照**传入（调用方无需自行构造
+    /// 同 `ephemeral`，但配置以**值快照**传入（调用方无需自行构造
     /// `Arc<RwLock<_>>`）：内存会话不接 `session/config` 热更新，快照即其终生命周期的配置。
     pub fn detached(session_id: impl Into<String>, config: SessionConfig) -> Self {
         Self::ephemeral(session_id, Arc::new(RwLock::new(config)))
@@ -144,7 +144,7 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
-    /// 本会话所属**父会话的主体**——委派链上的父主体（相应批次）。
+    /// 本会话所属**父会话的主体**——委派链上的父主体（[]）。
     ///
     /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
     /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
@@ -154,7 +154,6 @@ impl PersistentChatSession {
     /// **这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
     /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_gate`）。
     ///
-    /// 相应批次: ../../../../docs/007-task/105-Scope-Child首产点批.md "
     pub(crate) async fn delegating_principal(&self) -> Option<String> {
         let session = self.load_session().await.ok()?;
         delegating_principal_in(&self.store, &session).await
@@ -162,7 +161,7 @@ impl PersistentChatSession {
 
     /// 子会话清单（Q3 worker 进展的读侧入口）：委托 store 枚举
     /// `<根>/<safe(本会话)>/sessions/*/session.json`——**按路径天然只含本父之子**，
-    /// 归属复核另走 [`Session::parent_session_id`](super::types::Session::parent_session_id)。
+    /// 归属复核另走 `Session::parent_session_id`。
     ///
     /// 只读 `session.json`（「清单不碰消息」，与会话量脱钩）；`messages.json` 由
     /// [`Self::load_sub_session`] 按需单独取。
@@ -210,7 +209,7 @@ impl PersistentChatSession {
 /// `metadata.agent_id` → [`crate::symbio_core::principal_of`]）的**唯一实现**。
 ///
 /// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
-/// （`commands::session_upsert`）也要用同一份判据登记主体行（相应批次），两处
+/// （`commands::session_upsert`）也要用同一份判据登记主体行（[]），两处
 /// 各写一遍迟早分叉成「登记挂 A、运行期判 B」。
 pub(super) async fn delegating_principal_in(
     store: &SessionStore,

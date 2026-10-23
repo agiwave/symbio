@@ -100,8 +100,10 @@ function docDoc(relWithDocs, over = {}) {
   const rel = relWithDocs.startsWith('docs/') ? relWithDocs : `docs/${relWithDocs}`
   const { body, ...meta } = over
   const title = over.title ?? `${rel.replace(/\.md$/, '')} 文档`
+  // `impl` 是 design 的必填轴（「做到哪一步」），其余文档类 kind 不声明该字段。
+  const impl = (meta.kind ?? 'design') === 'design' ? { impl: 'done' } : {}
   return (
-    fm({ kind: 'arch', id: rel.replace(/\.md$/, ''), title, status: 'active', created: '2026-10-11', ...meta }) +
+    fm({ kind: 'design', id: rel.replace(/\.md$/, ''), title, status: 'active', created: '2026-10-11', ...impl, ...meta }) +
     (body ?? `# ${title}\n\n正文。\n`)
   )
 }
@@ -309,38 +311,38 @@ test('RG-008：doing 要求前置已闭环；前置 done 则放行（反向）',
   assert.deepEqual(errsOf(ok), [], '前置已闭环 ⇒ 开工不判')
 })
 
-test('RG-008：依赖机制全部 kind 同一套——文档类 / adr 的 active 同样要求前置已闭环', () => {
+test('RG-008：依赖机制全部 kind 同一套——文档类的 active 同样要求前置已闭环', () => {
   // 文档类不搞特殊化：`active` 断言「这篇现行」，其 `deps` 前置就必须已闭环
   const blockedDoc = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', deps: ['DE-008-b'] }),
-    'docs/003-design/002-b.md': docDoc('docs/003-design/002-b.md', { kind: 'plan', id: 'DE-008-b', status: 'draft' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b', status: 'draft' }),
   })
   expectOnly(errsOf(blockedDoc), /RG-008 status=active 要求前置 `DE-008-b` 已闭环，而它是 draft/)
 
   const okDoc = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', deps: ['DE-008-b'] }),
-    'docs/003-design/002-b.md': docDoc('docs/003-design/002-b.md', { kind: 'plan', id: 'DE-008-b' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b' }),
   })
   assert.deepEqual(errsOf(okDoc), [], '前置 active ⇒ 放行')
 
   // 跨 kind 同样强制：文档的 active 前置可以是一条已闭环的 task
   const okTask = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', deps: ['T-002'] }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['T-002'] }),
     'task/002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
   })
   assert.deepEqual(errsOf(okTask), [], '前置 task 已 done ⇒ 放行')
 
-  // adr 与 spec / 文档类同构：active 要求前置已闭环
-  const blockedAdr = caseRoot({
-    'adr/090.md': adrDoc('D-090', { deps: ['D-091'] }),
-    'adr/091.md': adrDoc('D-091', { status: 'withdrawn', reason: '夹具' }),
+  // design 与其他文档类同构：active 要求前置已闭环
+  const blockedDesign = caseRoot({
+    'docs/003-design/090-x.md': docDoc('docs/003-design/090-x.md', { id: 'DE-090-x', deps: ['DE-091-x'] }),
+    'docs/003-design/091-x.md': docDoc('docs/003-design/091-x.md', { id: 'DE-091-x', status: 'retired', reason: '夹具' }),
   })
-  expectOnly(errsOf(blockedAdr), /RG-008 status=active 要求前置 `D-091` 已闭环，而它是 withdrawn/)
+  expectOnly(errsOf(blockedDesign), /RG-008 status=active 要求前置 `DE-091-x` 已闭环，而它是 retired/)
 
   // draft 文档可以引草案——门槛只档「生效中」状态
   const draft = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', status: 'draft', deps: ['DE-008-b'] }),
-    'docs/003-design/002-b.md': docDoc('docs/003-design/002-b.md', { kind: 'plan', id: 'DE-008-b', status: 'draft' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', status: 'draft', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b', status: 'draft' }),
   })
   assert.deepEqual(errsOf(draft), [], 'draft 引 draft 不判')
 })
@@ -349,7 +351,7 @@ test('RG-022：全仓一套编号规范——编号条目 <前缀>-<三位序号
   // 合规编号条目放行（前缀在闭集、序号三位、名称段中文合法）
   const okEntry = caseRoot({
     'docs/003-design/001-核心架构.md': docDoc('docs/003-design/001-核心架构.md', {
-      kind: 'plan',
+      kind: 'design',
       id: 'DE-001-核心架构',
     }),
     'task/016.md': taskDoc('T-016', { track: 'S' }),
@@ -358,25 +360,25 @@ test('RG-022：全仓一套编号规范——编号条目 <前缀>-<三位序号
 
   // 历史遗留前缀（轨前缀 S2.7 / 无连字符）不合新语法 ⇒ 红
   const badPrefix = caseRoot({
-    'docs/003-design/S2.7.md': docDoc('docs/003-design/S2.7.md', { kind: 'plan', id: 'S2.7' }),
+    'docs/003-design/S2.7.md': docDoc('docs/003-design/S2.7.md', { kind: 'design', id: 'S2.7' }),
   })
   expectOnly(errsOf(badPrefix), /RG-022 编号条目 id 必须匹配/)
 
   // 前缀不在闭集 ⇒ 红
   const badKind = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'XX-001-a' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'XX-001-a' }),
   })
   expectOnly(errsOf(badKind), /RG-022 编号条目 id 必须匹配/)
 
   // 语法合法但前缀与 kind 不符（plan 用了 T-）⇒ 红——编号空间才可盲信
   const wrongPrefix = caseRoot({
-    'docs/003-design/056.md': docDoc('docs/003-design/056.md', { kind: 'plan', id: 'T-056' }),
+    'docs/003-design/056.md': docDoc('docs/003-design/056.md', { kind: 'design', id: 'T-056' }),
   })
-  expectOnly(errsOf(wrongPrefix), /RG-022 plan 的编号前缀必须是 `PL-`/)
+  expectOnly(errsOf(wrongPrefix), /RG-022 design 的编号前缀必须是 `DE-`/)
 
   // 编号条目：文件名与编号不符 ⇒ 红
   const mismatch = caseRoot({
-    'docs/003-design/别的名字.md': docDoc('docs/003-design/别的名字.md', { kind: 'plan', id: 'DE-001-核心架构' }),
+    'docs/003-design/别的名字.md': docDoc('docs/003-design/别的名字.md', { kind: 'design', id: 'DE-001-核心架构' }),
   })
   expectOnly(errsOf(mismatch), /RG-003 文件名编号对账/)
 
@@ -391,14 +393,14 @@ test('RG-022：全仓一套编号规范——编号条目 <前缀>-<三位序号
 
 test('RG-023：deps 是依赖图的边，只收编号条目——导航文档（id 含 /）判红', () => {
   const bad = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', deps: ['docs/README'] }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['docs/README'] }),
     'docs/README.md': rootDoc(),
   })
   expectOnly(errsOf(bad), /RG-023 deps 目标必须是编号条目/)
 
   const ok = caseRoot({
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a', deps: ['DE-008-b'] }),
-    'docs/003-design/002-b.md': docDoc('docs/003-design/002-b.md', { kind: 'plan', id: 'DE-008-b' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['DE-008-b'] }),
+    'docs/003-design/008-b.md': docDoc('docs/003-design/008-b.md', { kind: 'design', id: 'DE-008-b' }),
   })
   assert.deepEqual(errsOf(ok), [], '编号条目互依赖放行')
 })
@@ -421,12 +423,12 @@ test('RG-024：parent 含 / / 不存在 / 跨 kind / 自指 / 成环 各自变�
   const missing = caseRoot({ 'task/050.md': taskDoc('T-050', { parent: 'T-999' }) })
   expectOnly(errsOf(missing), /RG-024 parent 指到不存在的编号 `T-999`/)
 
-  // 跨 kind：分解是同类事物的大小之分——task 挂到 plan 下没有语义（走 deps / 引用）
+  // 跨 kind：分解是同类事物的大小之分——task 挂到 design 下没有语义（走 deps / 引用）
   const cross = caseRoot({
     'task/050.md': taskDoc('T-050', { parent: 'DE-001-a' }),
-    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'plan', id: 'DE-001-a' }),
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a' }),
   })
-  expectOnly(errsOf(cross), /RG-024 parent `DE-001-a` 是计划/)
+  expectOnly(errsOf(cross), /RG-024 parent `DE-001-a` 是设计/)
 
   const self = caseRoot({ 'task/050.md': taskDoc('T-050', { parent: 'T-050' }) })
   expectOnly(errsOf(self), /RG-024 parent 含自身/)
@@ -479,8 +481,8 @@ test('RG-025：父子状态档位单调——子 doing 父 todo / 父 done 子 d
 
   // 文档类同款：子 active ⇒ 父不得停在 draft（goal 树：子目标现行、总目标草案 = 谎报）
   const docR1 = caseRoot({
-    'docs/003-design/010-a.md': docDoc('docs/003-design/010-a.md', { kind: 'plan', id: 'DE-016-a', status: 'draft' }),
-    'docs/003-design/010-b.md': docDoc('docs/003-design/010-b.md', { kind: 'plan', id: 'DE-016-b', parent: 'DE-016-a' }),
+    'docs/003-design/016-a.md': docDoc('docs/003-design/016-a.md', { kind: 'design', id: 'DE-016-a', status: 'draft' }),
+    'docs/003-design/016-b.md': docDoc('docs/003-design/016-b.md', { kind: 'design', id: 'DE-016-b', parent: 'DE-016-a' }),
   })
   expectOnly(errsOf(docR1), /RG-025 子条目 status=active（生效档）要求父条目 `DE-016-a` 同在生效档/)
 })
@@ -606,73 +608,69 @@ test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 tas
   assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
 })
 
-// ================= adr kind（RG-017 / RG-018） =================
+// ================= design 的两轴（RG-017 / RG-015） =================
 //
-// `adr` 是与 `task` / `spec` 并列的第三个 kind，存在的核心理由只有一条：
-// **把「这条决策还算不算数」（`status`）与「做到哪一步」（`impl`）拆成两个字段**。
-// 所以它必须有独立的回归——退化成一列自由文本就等于这个 kind 白开了。
+// `status` 与 `impl` 是正交两轴：**「这篇还算不算数」（status）** 与 **「做到哪一步」（impl）**
+// 必须拆成两个字段——adr kind 废除后，决策折入设计正文的 `### D-NNN` 条目，这两轴落在
+// `design` 上。回归照旧要有：退化成一列自由文本就等于两轴白分。
 
-test('RG-017：adr 的 impl 词表外变红；合法值放行（反向）', () => {
-  const bad = caseRoot({ 'adr/100.md': adrDoc('D-100', { impl: '半成品' }) })
+test('RG-017：design 的 impl 词表外变红；合法值放行（反向）', () => {
+  const bad = caseRoot({
+    'docs/003-design/100-x.md': docDoc('docs/003-design/100-x.md', { id: 'DE-100-x', impl: '半成品' }),
+  })
   expectOnly(errsOf(bad), /RG-017 impl 不在词表/)
 
-  const ok = caseRoot({ 'adr/101.md': adrDoc('D-101', { impl: 'partial' }) })
+  const ok = caseRoot({
+    'docs/003-design/101-x.md': docDoc('docs/003-design/101-x.md', { id: 'DE-101-x', impl: 'partial' }),
+  })
   assert.deepEqual(errsOf(ok), [], 'impl=partial 是合法词 ⇒ 放行（现行但只落地了一半）')
 })
 
-test('RG-017：adr 状态机（active / superseded / withdrawn）——superseded 必填 reason', () => {
-  const badStatus = caseRoot({ 'adr/110.md': adrDoc('D-110', { status: 'retired', reason: 'x' }) })
-  expectOnly(errsOf(badStatus), /RG-004 status="retired" 不在 adr 的状态词/)
+test('RG-007：design 的 retired 必填 reason（废止要留理由）', () => {
+  const noReason = caseRoot({
+    'docs/003-design/110-x.md': docDoc('docs/003-design/110-x.md', { id: 'DE-110-x', status: 'retired' }),
+  })
+  expectOnly(errsOf(noReason), /RG-007 status=retired 必须填 `reason`/)
 
-  const noReason = caseRoot({ 'adr/111.md': adrDoc('D-111', { status: 'superseded' }) })
-  expectOnly(errsOf(noReason), /RG-007 status=superseded 必须填 `reason`/)
-
-  const withdrawn = caseRoot({ 'adr/112.md': adrDoc('D-112', { status: 'withdrawn', reason: '已回退' }) })
-  assert.deepEqual(errsOf(withdrawn), [], 'withdrawn + reason ⇒ 放行（反向）')
+  const ok = caseRoot({
+    'docs/003-design/111-x.md': docDoc('docs/003-design/111-x.md', { id: 'DE-111-x', status: 'retired', reason: '已并入 001' }),
+  })
+  assert.deepEqual(errsOf(ok), [], 'retired + reason ⇒ 放行（反向）')
 })
 
-test('RG-018：adr 字段与 id 不一致变红；一致则放行（反向）', () => {
-  const idMismatch = caseRoot({ 'adr/120.md': adrDoc('D-120', { adr: '999' }) })
-  expectOnly(errsOf(idMismatch), /RG-018 adr=`999` 与 id `D-120` 不一致/)
-
-  const ok = caseRoot({ 'adr/122.md': adrDoc('D-122') })
-  assert.deepEqual(errsOf(ok), [], 'id ↔ adr 对上 ⇒ 放行（反向）')
-})
-
-test('adr 渲染：status 分组、impl 成列（「现行但只落地一半」能在机读面表达）', () => {
+test('design 渲染：status 分组、impl 成列（「现行但只落地一半」能在机读面表达）', () => {
   const base = caseRoot({
-    'adr/200.md': adrDoc('D-200', { impl: 'partial', title: '半落地的现行决策' }),
-    'adr/201.md': adrDoc('D-201', { status: 'superseded', reason: '被 D-200 取代' }),
+    'docs/003-design/200-x.md': docDoc('docs/003-design/200-x.md', { id: 'DE-200-x', impl: 'partial', title: '半落地的现行设计' }),
+    'docs/003-design/201-x.md': docDoc('docs/003-design/201-x.md', { id: 'DE-201-x', status: 'retired', reason: '被 DE-200 取代' }),
   })
   const { entries } = loadEntries(base)
-  const a = renderKindIndex('adr', entries, REPO_KINDS)
-  assert.equal(a, renderKindIndex('adr', entries, REPO_KINDS), '同输入逐字节同输出')
-  assert.match(a, /现行决策（active）/)
-  assert.match(a, /已被取代（superseded）/)
-  assert.match(a, /\| 编号 \| 决策 \| 域 \| 落地 \| 取代 \|/, 'active 表含「落地」列')
-  assert.match(a, /D-200.*部分实施/, 'impl=partial 渲染成「部分实施」')
-  assert.match(a, /计数.*active 1 · superseded 1/)
+  const a = renderKindIndex('design', entries, REPO_KINDS)
+  assert.equal(a, renderKindIndex('design', entries, REPO_KINDS), '同输入逐字节同输出')
+  assert.match(a, /现行设计（active）/)
+  assert.match(a, /废止（retired）/)
+  assert.match(a, /DE-200-x.*部分落地/, 'impl=partial 渲染成「部分落地」')
+  assert.match(a, /active 1 · draft 0 · retired 1/)
 })
 
-test('RG-015（adr）：取代链方向属于**取代者**——旧条 superseded 不写 supersedes', () => {
+test('RG-015（design）：取代链方向属于**取代者**——旧条 retired 不写 supersedes', () => {
   // 方向语义：`supersedes` 是新条指认「我取代了谁」。这条回归钉的是**语义方向**——
   // 把 supersedes 写到被取代的旧条上是本仓真实出过的错（DE-002/016 互指反了）。
   const ok = caseRoot({
-    'adr/300.md': adrDoc('D-300', { supersedes: ['D-301'] }),
-    'adr/301.md': adrDoc('D-301', { status: 'superseded', reason: '被 D-300 取代' }),
+    'docs/003-design/300-x.md': docDoc('docs/003-design/300-x.md', { id: 'DE-300-x', supersedes: ['DE-301-x'] }),
+    'docs/003-design/301-x.md': docDoc('docs/003-design/301-x.md', { id: 'DE-301-x', status: 'retired', reason: '被 DE-300 取代' }),
   })
-  assert.deepEqual(errsOf(ok), [], '新条 supersedes 旧条（旧条 superseded）⇒ 合法')
+  assert.deepEqual(errsOf(ok), [], '新条 supersedes 旧条（旧条 retired）⇒ 合法')
 
   // 反向：两条都 active 时 supersedes 仍是未消解的矛盾（与 spec 同判）
   const bothActive = caseRoot({
-    'adr/302.md': adrDoc('D-302', { supersedes: ['D-303'] }),
-    'adr/303.md': adrDoc('D-303'),
+    'docs/003-design/302-x.md': docDoc('docs/003-design/302-x.md', { id: 'DE-302-x', supersedes: ['DE-303-x'] }),
+    'docs/003-design/303-x.md': docDoc('docs/003-design/303-x.md', { id: 'DE-303-x' }),
   })
-  expectOnly(errsOf(bothActive), /RG-015 status=active 的架构决策不得取代另一条 active 架构决策/)
+  expectOnly(errsOf(bothActive), /RG-015 status=active 的设计不得取代另一条 active 设计/)
 
   // 跨 kind 取代没有语义
   const crossKind = caseRoot({
-    'adr/304.md': adrDoc('D-304', { supersedes: ['SP-010'] }),
+    'docs/003-design/304-x.md': docDoc('docs/003-design/304-x.md', { id: 'DE-304-x', supersedes: ['SP-010'] }),
     'spec/010.md': specDoc('SP-010'),
   })
   expectOnly(errsOf(crossKind), /RG-015 supersedes 指向 spec（`SP-010`）——取代关系只在同 kind 之间/)
@@ -795,10 +793,10 @@ test('排序：拓扑序永远在前；同层按 prio 再按编号（确定性�
 
 test('RG-020：未登记文档（无 front-matter / 缺 kind）变红', () => {
   const bare = caseRoot({ 'docs/003-design/notes.md': '# 裸文档\n\n没有 front-matter。\n' })
-  expectOnly(errsOf(bare), /docs\/004-plan\/notes\.md：RG-020 未登记文档/)
+  expectOnly(errsOf(bare), /docs\/003-design\/notes\.md：RG-020 未登记文档/)
 
   const noKind = caseRoot({ 'docs/003-design/notes.md': '---\nstatus: active\ncreated: 2026-10-11\n---\n\n# 裸文档\n' })
-  expectOnly(errsOf(noKind), /docs\/004-plan\/notes\.md：RG-020 front-matter 缺 `kind`/)
+  expectOnly(errsOf(noKind), /docs\/003-design\/notes\.md：RG-020 front-matter 缺 `kind`/)
 })
 
 test('RG-003（导航文档）：id 含 / 必须等于仓根相对路径；写错即红（反向：写对放行）', () => {
@@ -810,14 +808,16 @@ test('RG-003（导航文档）：id 含 / 必须等于仓根相对路径；写�
 })
 
 test('RG-021：title 必须逐字等于正文首个 H1；缺 H1 或不对账即红', () => {
-  const mismatch = caseRoot({ 'docs/003-design/x.md': docDoc('docs/003-design/x.md', { title: '标题 A', body: '# 标题 B\n\n正文。\n' }) })
+  // 挑 `titleEqualsH1: true` 的 kind（ref）——design / spec / task 的 id 自带名称段，
+  // meta 里显式关掉了这条判据，用它们测等于测一个已声明不生效的规则。
+  const mismatch = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '# 标题 B\n\n正文。\n' }) })
   expectOnly(errsOf(mismatch), /RG-021 title="标题 A" 与正文首个 H1 "标题 B" 不一致/)
 
-  const noH1 = caseRoot({ 'docs/003-design/x.md': docDoc('docs/003-design/x.md', { title: '标题 A', body: '没有标题。\n' }) })
+  const noH1 = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '没有标题。\n' }) })
   expectOnly(errsOf(noH1), /RG-021 文档类缺正文首个 `# 标题`/)
 
   // 反向：代码围栏里的 `# ` 不算 H1（第一行 H1 才是 title 的来源）
-  const fenced = caseRoot({ 'docs/003-design/x.md': docDoc('docs/003-design/x.md', { title: '标题 A', body: '```\n# 不是标题\n```\n\n# 标题 A\n' }) })
+  const fenced = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '```\n# 不是标题\n```\n\n# 标题 A\n' }) })
   assert.deepEqual(errsOf(fenced), [], '围栏内的 # 不算 H1 ⇒ 放行（反向）')
 })
 
@@ -829,8 +829,8 @@ test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向
     'docs/003-design/README.md':
       // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
       // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
-      '---\nkind: plan\nid: PL-000-计划汇总\ntitle: 计划登记索引（自动生成）\n' +
-      'status: active\nprojection: true\ncreated: 2026-10-14\nprefix: PL\nlabel: 计划\ndesc: 计划汇总\n---\n\n# 计划登记索引（自动生成）\n',
+      '---\nkind: design\nid: DE-000-设计总览\ntitle: 设计登记索引（自动生成）\n' +
+      'status: active\nprojection: true\ncreated: 2026-10-14\nprefix: DE\nlabel: 设计\ndesc: 设计汇总\n---\n\n# 设计登记索引（自动生成）\n',
     '/AGENTS.md': '# 指令（无 front-matter）\n',
   })
   assert.deepEqual(errsOf(base), [], '豁免面不得误报')
@@ -838,22 +838,22 @@ test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向
 
 test('文档类渲染：按 status 分组、编号列是可点的相对链接（从索引一步到正文）', () => {
   const base = caseRoot({
-    'docs/003-design/a.md': docDoc('docs/003-design/a.md', { kind: 'plan', title: 'A 文档' }),
-    'docs/003-design/b.md': docDoc('docs/003-design/b.md', { kind: 'plan', title: 'B 草案', status: 'draft' }),
-    'docs/003-design/c.md': docDoc('docs/003-design/c.md', { kind: 'plan', title: 'C 废止', status: 'retired', reason: '被 A 取代' }),
+    'docs/003-design/a.md': docDoc('docs/003-design/a.md', { kind: 'design', title: 'A 文档' }),
+    'docs/003-design/b.md': docDoc('docs/003-design/b.md', { kind: 'design', title: 'B 草案', status: 'draft' }),
+    'docs/003-design/c.md': docDoc('docs/003-design/c.md', { kind: 'design', title: 'C 废止', status: 'retired', reason: '被 A 取代' }),
   })
   const { entries } = loadEntries(base)
-  const out = renderKindIndex('plan', entries, REPO_KINDS)
-  assert.equal(out, renderKindIndex('plan', entries, REPO_KINDS), '同输入逐字节同输出')
-  assert.match(out, /现行文档（active）/)
+  const out = renderKindIndex('design', entries, REPO_KINDS)
+  assert.equal(out, renderKindIndex('design', entries, REPO_KINDS), '同输入逐字节同输出')
+  assert.match(out, /现行设计（active）/)
   assert.match(out, /草案（draft）/)
   assert.match(out, /废止（retired）/)
-  assert.match(out, /\[`docs\/004-plan\/a`\]\(a\.md\)/, '同目录文档应渲染成同目录相对链接（从索引一步到正文）')
-  // 跨目录：从 docs/003-design/README.md 到 docs/003-design/x.md 必须写成 ../005-arch/x.md
+  assert.match(out, /\[`docs\/003-design\/a`\]\(a\.md\)/, '同目录文档应渲染成同目录相对链接（从索引一步到正文）')
+  // 跨目录：从 docs/003-design/README.md 到 docs/003-design/x.md 必须写成 ../003-design/x.md
   const cross = caseRoot({ 'docs/003-design/x.md': docDoc('docs/003-design/x.md', { title: 'X 文档' }) })
   assert.match(
-    renderKindIndex('arch', loadEntries(cross).entries, REPO_KINDS),
-    /\[`docs\/005-arch\/x`\]\(x\.md\)/,
+    renderKindIndex('design', loadEntries(cross).entries, REPO_KINDS),
+    /\[`docs\/003-design\/x`\]\(x\.md\)/,
     '索引到正文的链接必须能从汇总页直接点开',
   )
   assert.match(out, /被 A 取代/, 'retired 表带理由列')
@@ -862,7 +862,8 @@ test('文档类渲染：按 status 分组、编号列是可点的相对链接（
 
 test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
   const base = caseRoot({
-    'task/001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }),
+    // done 是过渡档（收口即删）：汇总页只列 open 的任务，所以夹具用 todo
+    'task/001.md': taskDoc('T-001', { status: 'todo', prio: 'now' }),
     'docs/README.md': rootDoc(),
   })
   const first = runRegistryAudit([`--root=${base}`, '--write'])
@@ -920,26 +921,25 @@ test('registry-board：先校验后打印；有违规只报错不打印看板', 
 
 // 守卫对自己也要成立：本仓真实登记必须零违规，且**每一类 kind 都真的读到了条目**——
 // 只断言「exit 0」挡不住「读空即全绿」（解析口径失效时什么条目都读不到），
-// 只数总数也挡不住「某一类整体装载不到」——所以九个 kind 逐个断言非空。
+// 只数总数也挡不住「某一类整体装载不到」——所以七个 kind 逐个断言非空。
 test('本仓当前登记自洽，且每类 kind 都读到了条目', () => {
   const r = runRegistryAudit([`--root=${repoRoot}`])
   assert.equal(r.code, 0, stripAnsi(r.lines.join('\n')))
   const { entries } = loadEntries(repoRoot)
   const tasks = entries.filter((e) => e.kind === 'task')
   const specs = entries.filter((e) => e.kind === 'spec')
-  const adrs = entries.filter((e) => e.kind === 'adr')
-  assert.ok(tasks.length >= 3, `只读到 ${tasks.length} 个任务——装载口径或种子有问题`)
+  // 任务只留 open 的（done / wont 收口即删，只进 git 历史），所以这里不设高水位。
+  assert.ok(tasks.length >= 1, `只读到 ${tasks.length} 个任务——装载口径或种子有问题`)
   assert.ok(specs.length >= 1, `只读到 ${specs.length} 个规范——SP-001 装载不到`)
-  assert.ok(adrs.length >= 1, `只读到 ${adrs.length} 个决策——adr kind 装载不到`)
   for (const kind of Object.keys(REPO_KINDS)) {
     assert.ok(entries.filter((e) => e.kind === kind).length >= 1, `文档类 kind \`${kind}\` 一个条目都没读到`)
   }
   assert.ok(
-    entries.some((e) => e.kind === 'arch' && e.rel.startsWith('docs/003-design/')),
-    '系统级文档必须真的进了 arch（在位文档装载口径）',
+    entries.some((e) => e.kind === 'design' && e.rel.startsWith('docs/003-design/')),
+    '系统级文档必须真的进了 design（在位文档装载口径）',
   )
   assert.ok(
-    entries.some((e) => e.kind === 'arch' && e.rel.includes('symbio/src/')),
+    entries.some((e) => e.kind === 'design' && e.rel.includes('symbio/src/')),
     '模块级文档（模块 README / docs）必须在同一机制内',
   )
   assert.ok(

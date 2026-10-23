@@ -1,4 +1,4 @@
-//! `grid` 单测 —— 名字表自身的三条判据（相应批次 段四）。
+//! `grid` 单测 —— 名字表自身的三条判据（ 段四）。
 //!
 //! 写侧闸门的拒绝行为在 `plugins/session/store/wal.test.rs`（判它的地方就是强制点
 //! 所在的那一层），本文件只钉**表**：一行一名、精确拼写、与读侧三目 `match` 同格。
@@ -11,7 +11,7 @@ use serde_json::json;
 /// 表上事件名的条数 = 名字表里**事件名**常量的条数。
 ///
 /// `event/mod.rs` 里另有两条 `EVENT_TRIGGER_*` 常量：`meta.trigger` 的**键名**与它的
-/// `kind` 取值（[D-077](../../plugins/heartbeat/README.md "D-077")）。它们不是事件名，
+/// `kind` 取值（[D-077](../../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")）。它们不是事件名，
 /// 所以不进这张表——这条断言把「41 个事件名」钉住，将来加名字要同批改这里。
 const DECLARED_EVENT_NAMES: usize = 41;
 

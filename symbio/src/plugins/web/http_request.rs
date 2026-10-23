@@ -255,7 +255,7 @@ impl Capability for HttpRequestTool {
 }
 
 impl Default for HttpRequestTool {
-    /// 默认档取 [`WebConfig`](super::WebConfig) 的默认超时与默认白名单（`*`）——
+    /// 默认档取 `WebConfig` 的默认超时与默认白名单（`*`）——
     /// **唯一真源**，不在此处另写字面量（那正是「配置不生效」的成因）。
     fn default() -> Self {
         Self::new(Arc::new(RwLock::new(WebConfig::default())))

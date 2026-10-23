@@ -36,7 +36,7 @@
 //! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_gate`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
-//! 两道写侧闸判的是**两件事**（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")：收束格按种类判）：
+//! 两道写侧闸判的是**两件事**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")：收束格按种类判）：
 //! 发言收束问 `reply.*`、产物收束问 `produce.artifact`。没有发言权的主体（对等主体
 //! `agent:peer-b` 只持 `produce.artifact`）因此仍能以**产物**收束一轮——「没有说话
 //! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
@@ -135,7 +135,7 @@ closed_set! {
     /// **C10**（[plan/04 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：默认
     /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
     ///
-    /// ## 字符串形态：内容侧可见域的载荷书写（相应批次）
+    /// ## 字符串形态：内容侧可见域的载荷书写
     ///
     /// [`Self::name`] / [`Self::from_name`] 是**载荷里的书写形态**（`memory.encoded`
     /// 的 `vis_scope` 字段）：判定走枚举，落盘走字符串，两套形态共用同一份映射——
@@ -240,7 +240,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）。
     SelfVerifier { principal: String },
 }
 
@@ -305,7 +305,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/007-task/129-外部执行与熔断.md ")
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
@@ -404,7 +404,7 @@ impl PermissionMatrix {
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`
     /// 前的判据（`turn_runner::closure_gate` 的 `ClosureKind::Artifact` 臂）。
     ///
-    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）：
+    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：
     /// 收束有两条路，谓词各问自己那一项能力。对等主体（`agent:peer-b`）只持
     /// `produce.artifact`，发言闸对它恒拒而产物闸恒放——它因此能收束为**一件
     /// 产物**，而不是每一轮都留下一条 C4 未收束。
@@ -438,7 +438,7 @@ impl PermissionMatrix {
     }
 }
 
-/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/007-task/133-多智能体社会.md ")）：
+/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）：
 /// 对某主体某项能力的一次**收回**或**恢复**。
 ///
 /// ## 为什么是数据而不是状态
@@ -533,7 +533,7 @@ impl GrantsOverlay {
 
     /// 该主体的该能力**现在是否被收回**。
     ///
-    /// 判据分三段，前两段是闭集 fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）：
+    /// 判据分三段，前两段是闭集 fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）：
     ///
     /// - **查询名认不出**（不在 [`Capability`] 闭集内）⇒ 告警并按**已收回**判——
     ///   「现在准不准」无从查起时宁红不漏，笔误的查询名不得变成一次静默放行；

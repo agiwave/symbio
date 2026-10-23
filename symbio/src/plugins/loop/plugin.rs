@@ -1,7 +1,7 @@
-//! 单环驱动器插件（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §8）。
+//! 单环驱动器插件（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §8）。
 //!
 //! 本插件**只有一个入口**：`loop/<sid>` 上的 `Action("run_turn")`。动作体就是
-//! 整轮 future（`run_chat_loop`），结局以 [`TurnReport`](crate::symbio_core::TurnReport)
+//! 整轮 future（`run_chat_loop`），结局以 `TurnReport`
 //! 序列化进动作响应交回 session。
 //!
 //! ## 授权三条（与 session 的 `_run` 动作面同一条纪律）
@@ -9,7 +9,7 @@
 //! 地址面对前端、LLM 工具、心跳全部可达。只看地址等于给「跑任意会话的轮次」开了
 //! 公开面，故：
 //!
-//! 1. 宿主 ctx 上有 [`TURN_DISPATCH`](crate::symbio_core::TURN_DISPATCH)
+//! 1. 宿主 ctx 上有 `TURN_DISPATCH`
 //!    （`WIRE=false` 的进程内键，线上不可伪造）；
 //! 2. `dispatch.spec.session_id == <sid>`（交付包只对**本轮会话**有效）；
 //! 3. 动作名逐字等于 `run_turn`，路径形如 `<sid>`（没有子路径）。

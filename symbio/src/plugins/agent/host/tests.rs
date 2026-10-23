@@ -21,7 +21,7 @@ use crate::symbio_core::{vdfs_context, VdfsProvider};
 use std::path::Path;
 use std::sync::Arc;
 
-/// 收集器的工具元数据（DE-008 4a 后 `list_capability` 收敛为 `list(kind)`）——
+/// 收集器的工具元数据（AR-025 4a 后 `list_capability` 收敛为 `list(kind)`）——
 /// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。
 async fn tool_metas_of(manager: &DefaultToolVisitor) -> Vec<CapabilityMeta> {
     manager
@@ -249,7 +249,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 子 Agent 是一棵 composite 插件树（规范 `agent-dir/v2`，
-// `docs/003-design/011-Agent目录规范.md`）
+// `../../../../../docs/003-design/011-Agent目录规范.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
 // 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `memory`

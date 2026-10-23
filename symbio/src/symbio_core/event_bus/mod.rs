@@ -12,8 +12,8 @@
 //! 名字叫「总线」而它不承担路由，是有意的取舍而不是待补的债：`event_bus` 是插件身份，
 //! `bus_event` 是**跨栈线上名**（前端、`cli`、telegram、子智能体转播桥四方都在解它），
 //! 改它是一次协议变更（旧连接当场失联），而那份认知债的账主是**这段说明**——协议面与
-//! 判据的权威表述在 `docs/003-design/005-协议规范.md` §事件总线频道，裁决记录在
-//! 相应批次。
+//! 判据的权威表述在 `../../../../docs/003-design/005-协议规范.md` §事件总线频道，裁决记录在
+//! 。
 //! 真要做成多频道总线（服务端按 `kind` 分流）时，第一个改动点就是这里：先加一条 ADR，
 //! 再谈 `kind` 过滤与新增频道。
 //!
@@ -49,12 +49,12 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// `chat_node.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
 /// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`EVENT_BUS_KIND_VDFS` 由 vdfs 发）。
-/// 文档见 `docs/003-design/005-协议规范.md` §事件总线频道——那一行带
+/// 文档见 `../../../../docs/003-design/005-协议规范.md` §事件总线频道——那一行带
 /// `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit` 的 E-008 与代码**双向**比对；
 /// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 ///
 /// `KIND_SESSION`（会话域专用事件频道）**已废除**：会话状态与
-/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `session/docs/105-node-state-streaming.md`）。
+/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `../../plugins/session/docs/105-node-state-streaming.md`）。
 /// 常量留在词表里只会让「再发一条会话事件」看起来仍然合法。
 pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 
@@ -129,7 +129,7 @@ pub fn event_bus_unregister_subscriber(connection_id: &str) {
 ///
 /// 其他插件（vdfs 等）调用静态方法 `publish` 推送事件。会话域的 `kind = "session"`
 /// 频道已废除——会话状态与转写都是 VDFS 节点变更，走 `EVENT_BUS_KIND_VDFS`（见
-/// `session/docs/105-node-state-streaming.md`）。
+/// `../../plugins/session/docs/105-node-state-streaming.md`）。
 pub struct EventBus;
 
 impl EventBus {

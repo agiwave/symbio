@@ -99,6 +99,6 @@ fn an_unbound_subagent_is_refused_the_task_table() {
     assert_eq!(inputs.principal, "session/reviewer");
     assert!(
         !inputs.may_write,
-        "未绑定登记的主体在合流面没有行 ⇒ 不放行（D-099 / D-100）"
+        "未绑定登记的主体在合流面没有行 ⇒ 不放行（ADR-099 / ADR-100）"
     );
 }

@@ -58,13 +58,13 @@
 //! ```
 //!
 //! - **加载判据**（由装配方 `composite` 执行）：文件存在、可解析、且
-//!   `plugin_provider` 指向一个已注册的工厂（[`creator_has`](crate::symbio_core::creator_has)）。
+//!   `plugin_provider` 指向一个已注册的工厂（`creator_has`）。
 //! - **保留键是装配方的**：见 [`PLUGIN_RESERVED_KEYS`]（单一清单）——它们不参与插件配置的
 //!   反序列化（[`PluginDir::load`] 剥离），插件配置也不得占用同名键；写入时
 //!   （[`PluginDir::save`] 等）自动补回。
 //! - **身份键是 manifest 的**：出厂声明在 `Plugin::meta()`，装配期经
 //!   [`PluginDir::seed_identity`] 投影一次；此后 manifest 权威，运行期经
-//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
+//! [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
 //!
 //! ## 职责划分（本方案的全部要点）
 //!
@@ -274,7 +274,7 @@ pub fn plugin_expand_tilde_path(p: &Path) -> PathBuf {
 
 /// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键（D-032）
 ///
-/// 与 [`PluginMeta`](crate::symbio_core::PluginMeta) 的关系：`PluginMeta` 是插件的
+/// 与 `PluginMeta` 的关系：`PluginMeta` 是插件的
 /// **出厂自述**（代码里声明的），本结构是它的**落盘形态**（manifest 里的值）。
 /// 运行期一切消费（插件列表 / 挂载点目录节点）都读本结构——因此**停用的插件也有
 /// 身份**：它只是不被构造，不是不存在。
@@ -324,7 +324,7 @@ impl PluginDir {
     ///
     /// ⚠️ 只有**系统级插件**（`home` / `composite`，其目录就是系统根）可以这样看。
     /// 叶子插件调它拿到的是自己的目录，不是任何「根」——需要自己的目录直接用
-    /// [`dir`](Self::dir)。名字里的 `as_` 正是在提示这是一种**视角转换**，不是查询。
+    /// `dir`。名字里的 `as_` 正是在提示这是一种**视角转换**，不是查询。
     pub fn as_plugins_root(&self) -> PathBuf {
         self.dir.clone()
     }
@@ -399,7 +399,7 @@ impl PluginDir {
 
     /// 读本插件的身份 —— manifest 是运行期**唯一**来源
     ///
-    /// 与 [`enabled`](Self::enabled) 同一口径：文件缺失 / 不可读 / 不可解析一律按
+    /// 与 `enabled` 同一口径：文件缺失 / 不可读 / 不可解析一律按
     /// 「无身份」处理（各字段取缺省），由消费方按目录名兜底——「读不出来」不是本判据
     /// 该报警的事。
     ///
@@ -461,7 +461,7 @@ impl PluginDir {
     ///   （身份 / 装配位 / 授予），否则「在设置页保存一次配置」就等于把停用的插件
     ///   启用了，或把用户改过的标题还原成出厂值。
     ///
-    /// ⚠️ 想**主动改**某个保留键的调用方（如 [`set_enabled`](Self::set_enabled)）
+    /// ⚠️ 想**主动改**某个保留键的调用方（如 `set_enabled`）
     /// 必须在本方法**之后**写那一个键。
     fn carry_over_reserved(&self, map: &mut Map<String, Value>) {
         if let Ok(Some(existing)) = self.read_manifest() {

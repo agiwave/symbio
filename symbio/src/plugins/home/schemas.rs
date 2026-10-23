@@ -4,7 +4,7 @@
 //!
 //! **每条臂的载荷都必须是一个类型**：`json!({...})` 现拼的响应没有结构体可指，
 //! 前端那份抄本就没有任何守卫能读它（`protocol-mirror-audit` D 组按结构体名取字段，
-//! 找不到类型时是**报错**而不是跳过）。见 [D-112](../../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 决策 2。
+//! 找不到类型时是**报错**而不是跳过）。见 [D-112](../../../../docs/003-design/005-协议规范.md#d-112-跨栈清单与载荷不另立自述面路由的真相是-route-的臂载荷的真相是命名类型 "DE-005-协议规范") 决策 2。
 
 pub mod home_reload {
     //! home/reload 路由的请求/响应 schema（对应 HomePlugin::route 的 reload 分支）
@@ -79,7 +79,7 @@ pub mod home_set_workspace {
     /// 切换工作区响应
     ///
     /// **没有 `status` 格**：成功已经由「这条臂返回 Ok」表达，再带一个恒为
-    /// `"success"` 的字段是第二次说同一件事（它零消费方，见 [D-112](../../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 决策 2）。
+    /// `"success"` 的字段是第二次说同一件事（它零消费方，见 [D-112](../../../../docs/003-design/005-协议规范.md#d-112-跨栈清单与载荷不另立自述面路由的真相是-route-的臂载荷的真相是命名类型 "DE-005-协议规范") 决策 2）。
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Response {
         /// 落进配置的原值（可能是 `~` 前缀形态）
@@ -101,7 +101,7 @@ pub mod home_get_homedir {
     /// 系统目录信息
     ///
     /// **没有 `default_homedir` 格**：它的 `path` 与 `homedir` 同源同值，
-    /// 且全仓零消费方——一份事实的第二个名字（[D-112](../../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 决策 2）。
+    /// 且全仓零消费方——一份事实的第二个名字（[D-112](../../../../docs/003-design/005-协议规范.md#d-112-跨栈清单与载荷不另立自述面路由的真相是-route-的臂载荷的真相是命名类型 "DE-005-协议规范") 决策 2）。
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Response {
         /// 当前系统根目录（`HomedirRegistry::get()`）

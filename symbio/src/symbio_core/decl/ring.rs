@@ -1,8 +1,8 @@
-//! 义务环的**表与求解**（a）：模式 / 行 / 债 / `owed` / `drive`。
+//! 义务环的**表与求解**：模式 / 行 / 债 / `owed` / `drive`。
 //!
 //! ## 一行是数据，不是函数
 //!
-//! 旧策略表（`loop_registry`，b 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
+//! 旧策略表（`loop_registry`， 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
 //! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
 //! [`Pattern`] 加 `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
 //!
@@ -17,7 +17,7 @@
 //!
 //! 时间不进公式：需要时间的条件由视图把 `now` 折成布尔字段（[`Frozen::eval`]
 //! 的 `now` 是入参）。因此 `owed` 只读**事实切片 + 视图值 + 触发事件时间戳**，
-//! 不读配置、墙钟、内存缓存（[D-115](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 决策 1）。
+//! 不读配置、墙钟、内存缓存（[D-115](../../../../docs/003-design/015-义务环.md#d-115-义务环的输入闭包与执行契约owed-只读事实视图事件时间执行体异步可失败端口分两级 "DE-015-义务环") 决策 1）。
 //!
 //! ## 模式只做等值
 //!
@@ -382,7 +382,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
 ///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
 /// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
-///   有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
+/// 有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
 /// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
 ///   接线接了个没人派发的名字；
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
@@ -405,7 +405,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///
 /// ## 声明侧的格子（同一个类型，不分两套）
 ///
-/// 五张注册表（fact / view / actor / port / row）经 [`Builder`](super::Builder) 进表后，
+/// 五张注册表（fact / view / actor / port / row）经 `Builder` 进表后，
 /// 「装载期检查」只有一个出口、也就只有一个错误类型：下面这十格查的是**声明自己**
 /// （重名、撞名、引用不存在的名字、字段没声明、执行体声明了引擎独占的格），
 /// 由 `seal()` 在跑上面七道之前先报。分成两个类型只会让「拒绝启动」出现两次。
