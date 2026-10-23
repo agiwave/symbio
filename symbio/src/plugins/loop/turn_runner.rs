@@ -527,11 +527,14 @@ pub(crate) enum TurnSessionBegin {
 ///
 /// 驱动归派发器（`turn_exec::drive_steps`），「这两个动作跑哪一个」归执行体
 /// （[`super::turn_exec::run_execute`] 读草稿决定）；本类型只回答「这一个动作
-/// 发生了什么」（ADR-118 决策 4）。动作有三个，各自只写自己那一半事实：
+/// 发生了什么」（ADR-118 决策 4）。动作有五个，各自只写自己那一半事实：
 ///
 /// - [`Self::model`]：一次模型往返——拼消息、调模型、分类；请求工具时把应答留在
 ///   草稿里，不派发；答完时把应答留在 [`prepare::Prepared::closing`]，不收束；
-/// - [`Self::tools`]：派发草稿里的那一批工具，落产物 / 等待 / 交换；
+/// - [`Self::open`]：为模型交回的调用逐条开账（`open-tools` 行的执行体）；
+/// - [`Self::authorize`]：对已开账的调用判放行 / 拒绝（`authorize-tool` 行）；
+/// - [`Self::dispatch`]：派发那一批工具，落产物 / 等待 / 交换（`dispatch-tools` /
+///   `deny-tools` 两行）；
 /// - [`Self::close`]：收束寄存的那一次应答（`close-turn` 行的执行体）。
 ///
 /// 停机判据（步数上界 / 无进展 / 中止 / 租约）不在这里，归派发器（ADR-118 决策 7）；
@@ -542,13 +545,6 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
-    /// 草稿里是否有一批**已请求、未派发**的工具（执行体据它选下一个动作）。
-    ///
-    /// 这不是调度判断：草稿归派发器所有（ADR-118 决策 4），读它的动作归执行体。
-    pub(crate) fn has_pending_batch(&self) -> bool {
-        self.run.pending_model.is_some()
-    }
-
     /// 草稿里是否有一次**已答完、未入格**的应答（`close-turn` 那笔债的内存镜像）。
     ///
     /// 派发面正常走的是行：`close-turn` 的 `prio`（55）比 `execute-turn`（60）小，
@@ -617,22 +613,43 @@ impl TurnSession {
         Ok(())
     }
 
-    /// 派发草稿里那一批工具：继续下一轮就把交换累加进草稿，收束于等待用户就把
-    /// 产出寄存在草稿。
+    /// 创建动作（`open-tools` 行的执行体）：开账，结果寄存在草稿里（T-244 步 5b）。
     ///
-    /// 没有草稿 / 没有分发通道时不做任何事——派发器只在草稿存在时选这个动作，
-    /// 这里的空返回是防御，不是第二条选择路径。
-    pub(crate) async fn tools<S>(
+    /// 没有模型应答 / 没有分发通道时不做任何事——派发器只在 `open-tools` 欠时才选
+    /// 这个动作，这里的空返回是防御，不是第二条选择路径。
+    pub(crate) async fn open(
         &mut self,
-        store: &S,
+        store: &dyn Store<Event = Event>,
+        dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+    ) {
+        if let Some(dispatch) = dispatch {
+            stream::open_round(&mut self.run, store, dispatch).await;
+        }
+    }
+
+    /// 授权动作（`authorize-tool` 行的执行体）：对已开账的调用落放行 / 拒绝。
+    pub(crate) async fn authorize(
+        &mut self,
+        store: &dyn Store<Event = Event>,
+        dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+    ) {
+        if let Some(dispatch) = dispatch {
+            stream::authorize_round(&mut self.run, store, dispatch).await;
+        }
+    }
+
+    /// 派发动作（`dispatch-tools` / `deny-tools` 两行的执行体）：落 `sent`、跑执行
+    /// 层、关账；继续下一轮就把交换累加进草稿，收束于等待用户就把产出寄存在草稿。
+    ///
+    /// 没有草稿 / 没有分发通道时不做任何事——同上，防御而不是选择路径。
+    pub(crate) async fn dispatch(
+        &mut self,
+        store: &dyn Store<Event = Event>,
         llm: &dyn LlmAdapter,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
-    ) -> Result<(), crate::symbio_core::AppendError>
-    where
-        S: Store<Event = Event> + ?Sized,
-    {
+    ) -> Result<(), crate::symbio_core::AppendError> {
         if let Some(dispatch) = dispatch {
-            self.run.settled = stream::tool_round(&mut self.run, store, llm, dispatch).await?;
+            self.run.settled = stream::dispatch_round(&mut self.run, store, llm, dispatch).await?;
         }
         Ok(())
     }

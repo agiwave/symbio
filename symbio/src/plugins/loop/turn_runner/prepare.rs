@@ -53,12 +53,16 @@ pub(crate) struct Prepared {
     pub(crate) pending_model: Option<LlmTurn>,
     /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
     pub(crate) pending_round: Option<StreamNodeFacts>,
+    /// 创建动作开出的端口账（T-244 步 5b）：创建 → 授权 → 派发三个动作之间**唯一**
+    /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
+    /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
+    pub(crate) pending_calls: Option<Vec<super::super::tool_dispatch::ToolPortCall>>,
     /// 应答已落、**收束还没发生**时的寄存位（T-244 步 5）。
     ///
     /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
     /// [`Prepared::pending_model`] 的形状是「本轮有工具调用、还没派发」——
-    /// 执行体按后者选动作（`has_pending_batch`），揉在一起会让收束幕去派发
-    /// 一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取应答与
+    /// 两批债各由自己的行（`close-turn` / `open-tools`）选中，揉在一起会让收束幕
+    /// 去派发一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取应答与
     /// 节点事实，落 `chat.assistant.final` / `fallback`。
     pub(crate) closing: Option<(LlmTurn, StreamNodeFacts)>,
     /// 本轮**收束动作的产出**（ADR-123 决策 5）：落收束 / 停机格的那一步把它寄存进草稿，
@@ -387,6 +391,7 @@ where
         nodes,
         pending_model: None,
         pending_round: None,
+        pending_calls: None,
         closing: None,
         settled: None,
     })))

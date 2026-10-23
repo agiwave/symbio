@@ -807,11 +807,12 @@ pub(crate) type StepFuture<'a> =
 /// 草稿必须被借走，动作就不能是 `'static`（ADR-119）。
 pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 
-/// `execute` 执行体：按草稿跑**一个**动作。
+/// `execute` 执行体：跑**一次**模型往返。
 ///
-/// 粗端口期（PL-016 §7.2）内环在这一个执行体内部：草稿里有一批已请求、未派发的
-/// 工具就派发它（创建 / 授权 / 派发三段都在里面），否则跑一次模型往返。这个分支
-/// 读的是**派发器自己持有的草稿**，不是事实，也不是行名（ADR-118 决策 4）。
+/// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（T-244 步 5b），不再在这个
+/// 执行体里按草稿分支：[`super::turn_exec::run_open`] / `run_authorize` /
+/// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步，或收束
+/// （收束的常规路径是 `close-turn`，见下）。
 ///
 /// 最前那条 `has_pending_close()` 只为一件事存在：**续写幕旁路**。行表只有一个
 /// 全局表头，恢复一段被后续轮次归档的旧轮时 [`super::loop_rows::resume_anchor`] 交回
@@ -834,11 +835,6 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
                 .close(step.store, step.llm)
                 .await
                 .map_err(append)
-        } else if step.session.has_pending_batch() {
-            step.session
-                .tools(step.store, step.llm, step.dispatch)
-                .await
-                .map_err(append)
         } else {
             step.session.record_model_step();
             step.session
@@ -853,6 +849,32 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
                 .await
                 .map_err(append)
         }
+    })
+}
+
+/// `opener` 执行体（T-244 步 5b）：`open-tools` 行选中的动作——逐条开账。
+pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        step.session.open(step.store, step.dispatch).await;
+        Ok(())
+    })
+}
+
+/// `authorizer` 执行体（T-244 步 5b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
+pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        step.session.authorize(step.store, step.dispatch).await;
+        Ok(())
+    })
+}
+
+/// `courier` 执行体（T-244 步 5b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
+pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        step.session
+            .dispatch(step.store, step.llm, step.dispatch)
+            .await
+            .map_err(ActorError::Append)
     })
 }
 
@@ -879,8 +901,8 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 ///
 /// T-241 把最后一处业务分支收进执行体：`by` → 动作是绑定表
 /// （[`loop_rows::ACTORS`](super::loop_rows::ACTORS)）里的一次查找，派发器对
-/// `by` 只有一个动作 `(next.action)(&mut step)`；模型往返与工具批次的选择住在
-/// [`run_execute`] 里，读的是草稿而不是行名。未接线的行显式 `by = None`
+/// `by` 只有一个动作 `(next.action)(&mut step)`；工具批的三笔债各有自己的行与
+/// 执行体（T-244 步 5b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
 /// （ADR-118 订正 1），选债面不再需要 `accept` 谓词。
 ///
 /// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。

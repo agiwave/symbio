@@ -480,6 +480,8 @@ fn rows_are_stable_and_globally_ordered() {
             "dispatch-model",
             "open-tools",
             "dispatch-tools",
+            // 拒绝之后还得有人收尾（否则全被拒的一批永远跑不到 `failed`）。
+            "deny-tools",
             "await-turn",
             "await-model",
             "await-tools",
@@ -506,6 +508,8 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
+            crate::symbio_core::LatencyTier::Fast,
+            // 拒绝收尾与派发同一执行体（不调工具）。
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Deep,
             crate::symbio_core::LatencyTier::Deep,
@@ -1012,6 +1016,34 @@ fn a_tool_request_opens_authorization_and_both_answers_close_it() {
 }
 
 #[test]
+fn a_denied_tool_call_owes_a_close_only() {
+    // T-244 步 5b：`dispatch-tools` 只欠 `granted`——一批全被拒时它不欠，若不另立
+    // 一行，`failed{why}` 永不落，`request` 那笔账也永远不关。
+    let refused = vec![tool_request("c-1"), tool_denied("c-1")];
+    assert!(
+        owes("deny-tools", &refused, 0),
+        "被拒的一笔仍欠一次收尾（落 `failed`）"
+    );
+    assert!(!owes("dispatch-tools", &refused, 0));
+
+    let mut closed = refused.clone();
+    closed.push(ev(
+        1,
+        crate::symbio_core::EVENT_FAILED,
+        json!({ "port": "tool", "id": "c-1", "why": "denied" }),
+    ));
+    assert!(!owes("deny-tools", &closed, 0), "`failed` 关掉这一笔");
+
+    // 收束格的拒绝（不带 `port`）不是端口面的拒绝：按 eq 取不到实例，不误开工具债。
+    let closure = vec![ev(
+        1,
+        crate::symbio_core::EVENT_AUTHZ_DENIED,
+        json!({ "kind": "speech", "key": "chat.assistant.final", "detail": "拒" }),
+    )];
+    assert!(!owes("deny-tools", &closure, 0));
+}
+
+#[test]
 fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
     let dispatched = vec![tool_request("c-1"), tool_granted("c-1"), tool_sent("c-1")];
     assert!(!owes("dispatch-tools", &dispatched, 0));
@@ -1497,11 +1529,12 @@ fn the_overlap_report_on_the_production_table() {
         .map(|o| (o.rows[0], o.rows[1], o.facts.as_slice()))
         .collect();
     // `turn_head` 自 T-244 步 5 起多读两类格（`has_final` 的前件：模型响应的
-    // `calls` + 两条收束格），凡是共用这个幕头的相交对，名单就一起变宽——
-    // 这正是第 4 条要「点名而不只报非空」的理由。
+    // `calls` + 两条收束格），步 5b 又加了 `failed`（`tools_open` 的另一种终局），
+    // 凡是共用这个幕头的相交对，名单就一起变宽——这正是第 4 条要「点名而不只报非空」的理由。
     let head: &[&str] = &[
         "chat.assistant.fallback",
         "chat.assistant.final",
+        "failed",
         "response",
         "session.config",
         "turn.stage",

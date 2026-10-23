@@ -1675,7 +1675,164 @@ mod tool_round_tests {
         }
     }
 
+    /// 本批的**事实面口径**：最新一条 `response(port=model)` 的轮号、溯源与
+    /// `calls` 里的端口 id。
+    ///
+    /// 替身必须按这条应答写 `request`：`open-tools` 行的展开读的就是 `calls`，
+    /// 重算一个别的 id 会让创建债永远还不掉（派发器在同一笔债上空转到步数上界）。
+    fn model_batch(store: &dyn Store<Event = Event>) -> Option<(u64, u64, Vec<String>)> {
+        let facts = store.range(Seq::new(0));
+        let e = facts.iter().rev().find(|e| {
+            e.kind == crate::symbio_core::EVENT_RESPONSE
+                && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+        })?;
+        let ids = e
+            .payload
+            .get("calls")?
+            .as_array()?
+            .iter()
+            .map(|c| {
+                c.get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        Some((e.turn, e.produced_by.unwrap_or(0), ids))
+    }
+
+    /// 替身落协议事实：幂等键命中按「已经落过」处理，其余错误让用例红。
+    fn append_fact(store: &dyn Store<Event = Event>, event: Event) {
+        match store.append(event) {
+            Ok(_) | Err(crate::symbio_core::AppendError::Duplicate) => {}
+            Err(e) => panic!("替身协议事实落格失败：{e:?}"),
+        }
+    }
+
+    /// 替身按生产口径开账：逐条落 `request(port=tool)`，id 取模型应答 `calls` 里那一笔。
+    ///
+    /// 行表按事实判欠不欠：替身不落账，`open-tools` 就永远挨不到派发（T-244 步 5b）。
+    fn open_batch(store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall> {
+        let Some((turn_no, produced_by, ids)) = model_batch(store) else {
+            return Vec::new();
+        };
+        turn.tool_calls
+            .iter()
+            .enumerate()
+            .map(|(idx, tc)| {
+                let id = ids
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or_else(|| format!("tool-{turn_no}-c{idx}"));
+                let call = super::super::super::port::Call::new("tool", id, 1);
+                append_fact(
+                    store,
+                    Event::pending(
+                        format!("request-tool-{}-{}", call.id, call.attempt),
+                        "request",
+                        Entity::Turn,
+                        Verb::Asserted,
+                        turn_no,
+                        "system",
+                    )
+                    .with_produced_by(produced_by)
+                    .with_payload(serde_json::json!({
+                        "port": "tool",
+                        "id": call.id,
+                        "attempt": call.attempt,
+                    })),
+                );
+                ToolPortCall {
+                    model_id: tc.id.clone().unwrap_or_default(),
+                    call,
+                    name: tc.name.clone().unwrap_or_default(),
+                    risk: None,
+                    approved: false,
+                    invalid: false,
+                    granted: false,
+                    deny_why: None,
+                    sent: false,
+                }
+            })
+            .collect()
+    }
+
+    /// 替身把一批调用全部放行，并落 `authz.granted`。
+    fn authorize_batch(store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+        let Some((turn_no, produced_by, _)) = model_batch(store) else {
+            return;
+        };
+        for call in calls.iter_mut() {
+            let id = call.call.id.clone();
+            append_fact(
+                store,
+                Event::pending(
+                    format!("grant-{turn_no}-{id}"),
+                    crate::symbio_core::EVENT_AUTHZ_GRANTED,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    turn_no,
+                    "authorizer",
+                )
+                .with_produced_by(produced_by)
+                .with_payload(serde_json::json!({
+                    "key": id,
+                    "port": "tool",
+                    "id": id,
+                    "tool": call.name,
+                    "risk": "unknown",
+                    "deferred": true,
+                })),
+            );
+            call.granted = true;
+        }
+    }
+
+    /// 替身逐条落 `sent`（`port::begin` 同时问行表「还欠不欠」）。
+    fn begin_batch(
+        store: &dyn Store<Event = Event>,
+        calls: &mut [ToolPortCall],
+    ) -> Option<(u64, u64)> {
+        let (turn_no, produced_by, _) = model_batch(store)?;
+        for call in calls.iter_mut().filter(|c| c.granted) {
+            if super::super::super::port::begin(
+                store,
+                super::super::super::loop_rows::PORTS,
+                super::super::super::port::Dispatch {
+                    call: &call.call,
+                    turn: turn_no,
+                    produced_by,
+                    owed: true,
+                },
+            )
+            .is_ok()
+            {
+                call.sent = true;
+            }
+        }
+        Some((turn_no, produced_by))
+    }
+
+    /// 替身逐条落 `response`（`port::succeed`）。
+    fn succeed_batch(
+        store: &dyn Store<Event = Event>,
+        calls: &[ToolPortCall],
+        turn_no: u64,
+        produced_by: u64,
+    ) {
+        for call in calls.iter().filter(|c| c.granted && c.sent) {
+            if let Err(e) =
+                super::super::super::port::succeed(store, &call.call, turn_no, produced_by)
+            {
+                panic!("替身应答落格失败：{e:?}");
+            }
+        }
+    }
+
     /// 假分发方：把工具调用映射成一条结果事实；`pending` 决定是否收束于等用户。
+    ///
+    /// 它按生产口径落协议事实（`request` → `authz.granted` → `sent` → `response`）：
+    /// 行表按事实判欠不欠，替身不落账，创建行就永远挨不到派发（T-244 步 5b）。
     struct FakeDispatch {
         pending: bool,
         rounds: Arc<Mutex<usize>>,
@@ -1683,19 +1840,30 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for FakeDispatch {
-        async fn open(&self, _turn: &LlmTurn) -> Vec<ToolPortCall> {
-            Vec::new()
+        async fn open(
+            &self,
+            store: &dyn Store<Event = Event>,
+            turn: &LlmTurn,
+        ) -> Vec<ToolPortCall> {
+            open_batch(store, turn)
         }
 
-        async fn authorize(&self, _calls: &mut [ToolPortCall]) {}
+        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+            authorize_batch(store, calls);
+        }
 
         async fn dispatch(
             &self,
+            store: &dyn Store<Event = Event>,
             turn: &LlmTurn,
-            _calls: &mut [ToolPortCall],
+            calls: &mut [ToolPortCall],
         ) -> Vec<DispatchOutcome> {
             *self.rounds.lock().unwrap() += 1;
-            turn.tool_calls
+            let Some((turn_no, produced_by)) = begin_batch(store, calls) else {
+                return Vec::new();
+            };
+            let outcomes: Vec<DispatchOutcome> = turn
+                .tool_calls
                 .iter()
                 .map(|tc| DispatchOutcome {
                     call_id: tc.id.clone().unwrap_or_default(),
@@ -1717,6 +1885,91 @@ mod tool_round_tests {
                     },
                     // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
                     // （`result_id` 空串 = 无结果子节点）。
+                    wire_id: tc.wire_id.clone().unwrap_or_default(),
+                    args: crate::symbio_core::node_build::tool_call_args_text(tc),
+                    result_id: String::new(),
+                })
+                .collect();
+            succeed_batch(store, calls, turn_no, produced_by);
+            outcomes
+        }
+    }
+
+    /// 全批拒绝的假分发方：证明 `deny-tools` 那一行真的被选中并跑到执行层，
+    /// 且被拒的 `request` 以 `failed{why}` 关账（T-244 步 5b）。
+    struct DenyDispatch {
+        rounds: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolDispatch for DenyDispatch {
+        async fn open(
+            &self,
+            store: &dyn Store<Event = Event>,
+            turn: &LlmTurn,
+        ) -> Vec<ToolPortCall> {
+            open_batch(store, turn)
+        }
+
+        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+            let Some((turn_no, produced_by, _)) = model_batch(store) else {
+                return;
+            };
+            for call in calls.iter_mut() {
+                let id = call.call.id.clone();
+                append_fact(
+                    store,
+                    Event::pending(
+                        format!("deny-{turn_no}-{id}"),
+                        crate::symbio_core::EVENT_AUTHZ_DENIED,
+                        Entity::Turn,
+                        Verb::Asserted,
+                        turn_no,
+                        "authorizer",
+                    )
+                    .with_produced_by(produced_by)
+                    .with_payload(serde_json::json!({
+                        "key": id,
+                        "port": "tool",
+                        "id": id,
+                        "tool": call.name,
+                        "kind": "tool",
+                        "reason": "denied",
+                        "detail": "needs_approval",
+                    })),
+                );
+                call.deny_why = Some("needs_approval");
+            }
+        }
+
+        async fn dispatch(
+            &self,
+            store: &dyn Store<Event = Event>,
+            turn: &LlmTurn,
+            calls: &mut [ToolPortCall],
+        ) -> Vec<DispatchOutcome> {
+            *self.rounds.lock().unwrap() += 1;
+            let Some((turn_no, produced_by, _)) = model_batch(store) else {
+                return Vec::new();
+            };
+            for call in calls.iter().filter(|c| !c.granted) {
+                let why = call.deny_why.unwrap_or("denied");
+                if let Err(e) =
+                    super::super::super::port::failed(store, &call.call, turn_no, produced_by, why)
+                {
+                    panic!("替身拒绝落格失败：{e:?}");
+                }
+            }
+            turn.tool_calls
+                .iter()
+                .map(|tc| DispatchOutcome {
+                    call_id: tc.id.clone().unwrap_or_default(),
+                    name: tc.name.clone().unwrap_or_default(),
+                    text: "工具被拒绝：needs_approval".into(),
+                    ok: false,
+                    needs_user_action: false,
+                    prompt: None,
+                    failure_kind: "denied".into(),
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: crate::symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
@@ -2159,8 +2412,8 @@ mod tool_round_tests {
             "角色序列里要有 tool（角色序列）：{roles:?}"
         );
 
-        // 网格：用户格 + 派发格 + **每次模型往返三格** + 产物格 + final 格
-        // （final 只一条——N3）。
+        // 网格：用户格 + 派发格 + **每次模型往返三格** + 工具批三笔债的协议格
+        // + 产物格 + final 格（final 只一条——N3）。
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
             super::kinds(&snapshot),
@@ -2168,6 +2421,11 @@ mod tool_round_tests {
                 "user.message",
                 "turn.dispatch",
                 "request",
+                "sent",
+                "response",
+                // 工具批：创建（request）/ 授权（granted）/ 派发（sent + response）。
+                "request",
+                "authz.granted",
                 "sent",
                 "response",
                 "artifact.added",
@@ -2207,6 +2465,86 @@ mod tool_round_tests {
             .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
             .expect("收束格在");
         assert_eq!(cell.payload["text"], "读到了。");
+    }
+
+    /// 一批**全被拒**的调用：`dispatch-tools` 不欠（没有 `granted`），收尾归
+    /// `deny-tools`——它把同一动作选出来，落 `failed{why}` 关掉每一笔 `request`。
+    ///
+    /// 反向自检：删掉 `deny-tools` 行，派发器在授权之后直接 `no_progress`，
+    /// 下面的 `failed` 与第二轮请求都消失。
+    #[tokio::test]
+    async fn a_fully_denied_batch_is_closed_by_deny_tools() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let prompts = llm.prompts.clone();
+        let dispatch = DenyDispatch {
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("拒绝不中止本轮");
+
+        assert_eq!(out.text, "读到了。", "拒绝之后模型接着答完");
+        assert_eq!(*dispatch.rounds.lock().unwrap(), 1, "执行层跑过一次");
+
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(
+            super::kinds(&snapshot),
+            vec![
+                "user.message",
+                "turn.dispatch",
+                "request",
+                "sent",
+                "response",
+                "request",
+                "authz.denied",
+                "failed",
+                "artifact.added",
+                "request",
+                "sent",
+                "response",
+                "chat.assistant.final",
+            ],
+            "{snapshot:?}"
+        );
+        let failed = snapshot
+            .iter()
+            .find(|e| e.kind == crate::symbio_core::EVENT_FAILED)
+            .expect("被拒的一笔以 failed 关账");
+        assert_eq!(failed.payload["port"], "tool");
+        assert_eq!(failed.payload["why"], "needs_approval");
+        assert!(
+            !snapshot
+                .iter()
+                .any(|e| e.kind == "sent" && e.payload["port"] == "tool"),
+            "拒绝的调用不得落 `sent`（那等于说它被派出去了）"
+        );
+
+        // 拒绝的事实回灌进下一次请求：模型看得到「这一笔没执行」。
+        let seen: Vec<Seen> = prompts
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .map(Seen::from)
+            .collect();
+        assert_eq!(
+            seen[1].tools(),
+            vec![("工具被拒绝：needs_approval", Some("vdfs_read"), Some("w-1"))],
+            "拒绝结果带角色与调用 id 进下一轮：{:?}",
+            seen[1]
+        );
     }
 
     /// 收束于等待用户：运行器停下并落**进展格**（`chat.assistant.progress`，
@@ -2253,10 +2591,16 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                // 工具批的创建 / 授权 / 派发各有协议事实；等待用户是**状态**，
+                // 所以结果格与进展格照落，收束格没有。
+                "request",
+                "authz.granted",
+                "sent",
+                "response",
                 "artifact.added",
                 "chat.assistant.progress",
             ],
-            "用户格 + 派发格 + 模型端口三格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
+            "用户格 + 派发格 + 模型端口三格 + 工具批协议格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[1].kind, crate::symbio_core::EVENT_TURN_DISPATCH);
         assert!(
@@ -2558,6 +2902,11 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
+                // 首幕工具批的创建 / 授权 / 派发协议格（T-244 步 5b）。
+                "request",
+                "authz.granted",
+                "sent",
+                "response",
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_PROGRESS,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
@@ -2732,18 +3081,29 @@ mod tool_round_tests {
 
     #[async_trait::async_trait]
     impl ToolDispatch for PathEchoDispatch {
-        async fn open(&self, _turn: &LlmTurn) -> Vec<ToolPortCall> {
-            Vec::new()
+        async fn open(
+            &self,
+            store: &dyn Store<Event = Event>,
+            turn: &LlmTurn,
+        ) -> Vec<ToolPortCall> {
+            open_batch(store, turn)
         }
 
-        async fn authorize(&self, _calls: &mut [ToolPortCall]) {}
+        async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+            authorize_batch(store, calls);
+        }
 
         async fn dispatch(
             &self,
+            store: &dyn Store<Event = Event>,
             turn: &LlmTurn,
-            _calls: &mut [ToolPortCall],
+            calls: &mut [ToolPortCall],
         ) -> Vec<DispatchOutcome> {
-            turn.tool_calls
+            let Some((turn_no, produced_by)) = begin_batch(store, calls) else {
+                return Vec::new();
+            };
+            let outcomes: Vec<DispatchOutcome> = turn
+                .tool_calls
                 .iter()
                 .map(|tc| DispatchOutcome {
                     call_id: tc.id.clone().unwrap_or_default(),
@@ -2763,7 +3123,9 @@ mod tool_round_tests {
                     args: crate::symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
                 })
-                .collect()
+                .collect();
+            succeed_batch(store, calls, turn_no, produced_by);
+            outcomes
         }
     }
 
@@ -2870,12 +3232,21 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 crate::symbio_core::EVENT_TURN_DISPATCH,
-                // 三次模型往返 = 三组协议事实（request / sent / response）。
+                // 三次模型往返 = 三组协议事实（request / sent / response）；
+                // 两个工具批各带创建 / 授权 / 派发三笔债的协议格。
                 "request",
+                "sent",
+                "response",
+                "request",
+                "authz.granted",
                 "sent",
                 "response",
                 EVENT_ARTIFACT_ADDED,
                 "request",
+                "sent",
+                "response",
+                "request",
+                "authz.granted",
                 "sent",
                 "response",
                 EVENT_ARTIFACT_ADDED,
@@ -2884,7 +3255,7 @@ mod tool_round_tests {
                 "response",
                 EVENT_ASSISTANT_FINAL
             ],
-            "两轮产物 + 一轮收束（外加派发格与三次模型往返的协议事实）：{snapshot:?}"
+            "两轮产物 + 一轮收束（外加派发格、三次模型往返与两个工具批的协议事实）：{snapshot:?}"
         );
         // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
         //

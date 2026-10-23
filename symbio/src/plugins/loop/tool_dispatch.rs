@@ -88,6 +88,10 @@ pub(crate) struct DerivedFacts {
 /// **没有** `sent`；执行层仍会跑它（审批 / 拒绝卡的节点由执行层唯一构造），但端口
 /// 账已关。`sent = false` 且 `granted = true` ⇒ 派发行没有放行这笔账（行不欠 /
 /// `sent` 落格失败），关账时按「没执行」处理。
+///
+/// `deny_why` 是拒绝的**收尾凭据**（T-244 步 5b）：`authz.denied` 关的是授权行，
+/// 而被拒的调用还要在批尾落一条 `failed{why}`（`deny-tools` 行的出口）——否则
+/// 「拒绝」在端口账上只留下半句话，创建行的集合债永远少一个终局。
 #[derive(Clone)]
 pub(crate) struct ToolPortCall {
     /// 模型交回的调用 id（执行层按它回结果；与端口 id 是两件事）。
@@ -100,8 +104,15 @@ pub(crate) struct ToolPortCall {
     pub(crate) risk: Option<CapabilityRiskLevel>,
     /// 参数里显式带了 `approved: true`（已由人工确认过）。
     pub(crate) approved: bool,
+    /// 模型交回的调用本身不可派发（缺 id / 缺名字 / 参数解析失败 / 超长）。
+    ///
+    /// 它仍然要开账（创建行的集合里有这个元素），随后由授权动作以
+    /// `invalid_tool_call` 拒绝——不能跳过开账，那样创建债就永远欠着。
+    pub(crate) invalid: bool,
     /// 授权动作的结论（创建时为 `false`，授权动作写入）。
     pub(crate) granted: bool,
+    /// 授权动作写下的拒绝原因（`None` = 放行或还没判）；批尾据此落 `failed`。
+    pub(crate) deny_why: Option<&'static str>,
     /// 派发动作是否已落 `sent`（派发动作写入）。
     pub(crate) sent: bool,
 }
@@ -149,20 +160,32 @@ pub struct DispatchOutcome {
 
 /// 工具派发的**三个动作**（ADR-118 决策 5）：创建 / 授权 / 派发。
 ///
-/// 三笔债不再由一次调用代劳——运行器按顺序各调一次，每一步只写自己那一行的
+/// 三笔债不再由一次调用代劳——运行器按行各调一次，每一步只写自己那一行的
 /// 领域事实。契约住插件本地，core 不认识工具分发（E-009）。
+///
+/// ## 为什么每个方法都收一个 `store`
+///
+/// 生产实现自己有写口（[`ToolPort`] 持 `Arc<dyn Store>`），这个参数在那里是重复的；
+/// 它服务于**测试替身**：行表按事实判欠不欠，替身若不落协议事实，创建行永远欠着，
+/// 派发器会在同一笔债上空转到步数上界。把「写哪一份日志」交给调用点（派发器手里
+/// 正拿着这一轮的那份），替身就与生产走同一条循环。
 #[async_trait]
 pub(crate) trait ToolDispatch: Send + Sync {
-    /// 创建：为模型响应里可派发的调用逐条写 `request(port=tool)`。
-    async fn open(&self, turn: &LlmTurn) -> Vec<ToolPortCall>;
+    /// 创建：为模型响应里交回的调用逐条写 `request(port=tool)`。
+    async fn open(&self, store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall>;
 
     /// 授权：为已开账的调用写 `authz.granted` / `authz.denied`。
     ///
     /// 拒绝即止：`granted` 保持 `false`，派发动作不会为它落 `sent`。
-    async fn authorize(&self, calls: &mut [ToolPortCall]);
+    async fn authorize(&self, store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]);
 
     /// 派发：为放行的调用落 `sent`、跑执行层、关账，返回结果事实。
-    async fn dispatch(&self, turn: &LlmTurn, calls: &mut [ToolPortCall]) -> Vec<DispatchOutcome>;
+    async fn dispatch(
+        &self,
+        store: &dyn Store<Event = Event>,
+        turn: &LlmTurn,
+        calls: &mut [ToolPortCall],
+    ) -> Vec<DispatchOutcome>;
 }
 
 /// 工具端口账的写方：批次分发与 resume 共用**同一套**开账 / 关账。
@@ -319,23 +342,13 @@ impl ToolPort {
             let call = port::Call::new("tool", id, 1);
             let model_id = tc.id.as_deref().filter(|s| !s.trim().is_empty());
             let name = tc.name.as_deref().filter(|s| !s.trim().is_empty());
-            let dispatchable = model_id.is_some()
-                && name.is_some()
-                && tc.parse_error.is_none()
-                && tc.overflow_notice.is_none();
-            if !dispatchable {
-                // 创建行已经为它开了一笔债（响应里有这个元素），但它派不出去：
-                // 落 `failed` 关账，而不是让那笔债永远欠着。
-                let _ = port::failed(
-                    self.facts.as_ref(),
-                    &call,
-                    self.turn,
-                    self.user_seq,
-                    "invalid_tool_call",
-                );
-                continue;
-            }
-            if let Some(open) = self
+            // 不可派发的调用**也开账**：创建行的集合里有这个元素，跳过它那一笔
+            // 集合债就永远欠着。它的终局是「授权拒绝 + 批尾 failed」，不是「不存在」。
+            let invalid = model_id.is_none()
+                || name.is_none()
+                || tc.parse_error.is_some()
+                || tc.overflow_notice.is_some();
+            if let Some(mut open) = self
                 .open_one(
                     ctx,
                     &policy,
@@ -346,6 +359,7 @@ impl ToolPort {
                 )
                 .await
             {
+                open.invalid = invalid;
                 out.push(open);
             }
         }
@@ -402,7 +416,9 @@ impl ToolPort {
             name: name.to_string(),
             risk,
             approved,
+            invalid: false,
             granted: false,
+            deny_why: None,
             sent: false,
         })
     }
@@ -432,9 +448,11 @@ impl ToolPort {
             return;
         }
         for call in calls.iter_mut() {
-            let granted = call
-                .risk
-                .is_none_or(|risk| !risk.requires_approval(policy.threshold, call.approved));
+            // 非法调用先判：它没有可执行的名字 / 参数，风险档再低也不能放行。
+            let granted = !call.invalid
+                && call
+                    .risk
+                    .is_none_or(|risk| !risk.requires_approval(policy.threshold, call.approved));
             let risk_name = call.risk.map(risk_label).unwrap_or("unknown");
             if granted {
                 if let Err(e) = append_authz(
@@ -459,8 +477,11 @@ impl ToolPort {
                 call.granted = true;
             } else {
                 // 交互模式 ⇒ 执行层会建审批卡；auto ⇒ 执行层会回 `permission_denied`。
-                // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。
-                let why = if policy.mode == "auto" {
+                // 两种都不是「已派发」，所以只有 `denied`、没有 `sent`。非法调用
+                // 不分模式：执行层会回一条协议错误，原因码独立。
+                let why: &'static str = if call.invalid {
+                    "invalid_tool_call"
+                } else if policy.mode == "auto" {
                     "permission_denied"
                 } else {
                     "needs_approval"
@@ -475,7 +496,9 @@ impl ToolPort {
                         self.turn,
                         call.model_id
                     );
+                    continue;
                 }
+                call.deny_why = Some(why);
             }
         }
     }
@@ -599,8 +622,12 @@ impl ToolPort {
         one.into_iter().next()
     }
 
-    /// 批次返回后关账：放行的每一笔都必须有 `response`（工具回了话）或 `failed`
-    /// （执行层没跑到它）。拒绝的那几笔已经由 `authz.denied` 关掉，不在这里补。
+    /// 批次返回后关账：**每一笔**都要有终局。
+    ///
+    /// - 放行且已派发：`response`（工具回了话）或 `failed`（执行层没跑到它）；
+    /// - 被拒（`deny_why` 有值）：`failed{why}`——授权行已由 `authz.denied` 关掉，
+    ///   但创建行的集合债与「拒绝收尾」这一笔债务（`deny-tools`）还等着终局；
+    /// - 放行但没落 `sent`：`begin_calls` 已经替它落过 `failed`，这里不重复。
     ///
     /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
@@ -609,7 +636,16 @@ impl ToolPort {
     /// 的中止作用、PL-017 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
-        for call in calls.iter().filter(|c| c.granted && c.sent) {
+        for call in calls {
+            if !call.granted {
+                if let Some(why) = call.deny_why {
+                    self.fail(call, why);
+                }
+                continue;
+            }
+            if !call.sent {
+                continue;
+            }
             match outcomes.iter().find(|o| o.call_id == call.model_id) {
                 Some(o) if is_unanswered(&o.failure_kind) => self.fail(call, &o.failure_kind),
                 Some(_) => self.close(call, true),
@@ -640,12 +676,10 @@ impl ToolPort {
 
     /// 单笔失败关账：落 `failed{why}`，与「应答」区分。
     ///
-    /// 两个调用方：批尾关账（[`Self::close_batch`]，`why` 取结果节点的成因）与
-    /// resume 的中止路径（`why = ABORTED`）。
+    /// 三个调用方：批尾关账（[`Self::close_batch`]，`why` 取结果节点的成因或被拒
+    /// 原因）、resume 的中止路径（`why = ABORTED`）、以及「放行但没派出去」那几笔
+    /// （`begin_calls` 自己落 `failed{dispatch_row_not_owed}`）。
     pub(crate) fn fail(&self, call: &ToolPortCall, why: &str) {
-        if !call.granted {
-            return;
-        }
         if let Err(e) = port::failed(
             self.facts.as_ref(),
             &call.call,
@@ -888,16 +922,17 @@ where
 
 #[async_trait]
 impl ToolDispatch for SessionDispatchPort {
-    async fn open(&self, turn: &LlmTurn) -> Vec<ToolPortCall> {
+    async fn open(&self, _store: &dyn Store<Event = Event>, turn: &LlmTurn) -> Vec<ToolPortCall> {
         self.open_action(turn).await
     }
 
-    async fn authorize(&self, calls: &mut [ToolPortCall]) {
+    async fn authorize(&self, _store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
         self.authorize_action(calls).await;
     }
 
     async fn dispatch(
         &self,
+        _store: &dyn Store<Event = Event>,
         turn: &LlmTurn,
         port_calls: &mut [ToolPortCall],
     ) -> Vec<DispatchOutcome> {

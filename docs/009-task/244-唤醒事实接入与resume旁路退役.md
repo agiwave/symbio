@@ -157,3 +157,36 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   `request{attempt+1}` ⇒ 上一 attempt 的 `granted` 已经把这一行的门关上，接线接不出
   「重试出来的那笔有人派」。抬 `max_attempts` 的前置是键口径，另立
   [T-252-租约重试的债键不含尝试号](252-租约重试的债键不含尝试号.md)。
+- 2026-10-23 步 5b（工具批三笔债接回执行体：创建 / 授权 / 派发 / 拒绝收尾）。
+  `ToolDispatch` 从一次调用改成三个动作（`open` / `authorize` / `dispatch`，各收一个
+  `store`：行表按事实判欠不欠，测试替身不落协议事实就会在同一笔债上空转到步数上界）；
+  `Prepared` 加 `pending_calls` 作三步之间的寄存位；`TurnSession` 对五类动作
+  （`model` / `open` / `authorize` / `dispatch` / `close`）各给一个方法，派发器仍只有
+  「按 `by` 查表、跑一个动作」一条通路（ADR-118 决策 2）。
+  表侧三处：
+  ① `open-tools`（67）/ `dispatch-tools`（68）接上 `opener` / `courier` 执行体；
+  ② 新增 `deny-tools`（69，owes `authz.denied(port=tool)`，until `failed(port=tool)`）——
+  `dispatch-tools` 只欠 `granted`，一批全被拒（或全是非法调用）时它不欠，没有这一行
+  执行层永远跑不到、`failed{why}` 永不落；混合批次里那一笔由 68 顺带关掉，本行随后
+  自然不欠。不带 `port` 的收束格拒绝按 `eq` 取不到实例，不误开工具债；
+  ③ `turn_head` 升 v5 加 `tools_open`（本幕最近一条模型响应的 `calls` 里还有没落
+  `response` / `failed` 的）——`execute-turn` 的 `owes` 加 `tools_open = false`，
+  它因此给工具批让位；否则 60 永远比 67/68/69 先生效，新一批交换会带着没有结果的
+  调用再跑一轮模型。
+  非法调用（缺 id / 缺工具名 / 参数解析失败 / 超长回执）也照样开账再拒绝
+  （`invalid` + `deny_why`），不再在开账时静默跳过——跳过会让 `open-tools` 的展开
+  永远关不掉那一笔。`close_batch` 对拒绝项落 `failed{why}`（`fail` 不再对未放行的
+  调用提前返回）。
+  **反向判据实测**：`deny-tools` 改回 `by: None` ⇒
+  `a_fully_denied_batch_is_closed_by_deny_tools` 转 `no_progress`；删掉
+  `execute-turn.owes` 的 `tools_open` 条件 ⇒ `tool_round_lands_artifact_and_feeds_next_prompt`
+  的分发计数读到 0。用例：`turn_runner.test.rs` 新增全批拒绝一条（协议序列 + 无
+  `sent(tool)` + 拒绝结果带角色 / id 进下一轮），旧三条工具轮用例的事实序列按新增的
+  工具协议格更新；`loop_rows.test.rs` 新增 `deny-tools` 两正一反；`decl/mod.test.rs`
+  新增 `tools_open` 两条（逐笔关账 / 幕锚之前的应答不算）。门禁：`cargo test --lib`
+  2095 通过 / 0 失败，`node scripts/gate.mjs` 130/130 全绿（含 e2e 78/78）。
+  非注释生产代码 +206 行（熔断线 300）。
+- 2026-10-23 步 5b 的边界（留给步 5c/5d）：`dispatch-turn` / `dispatch-model` 两行仍是
+  `by: None`（它们的派发点还在执行体内，随细端口接回）；`close-turn` 的出口仍只有
+  `chat.assistant.final`、`execute-turn` 仍带 `chat.assistant.final` 的过渡豁免，两者
+  一起等 `run_execute` 的 `has_pending_close` 旁路退役后按 §3.1 复原。

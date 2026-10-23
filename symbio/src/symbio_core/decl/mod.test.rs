@@ -133,10 +133,11 @@ fn builtin_loads_and_freezes() {
     // `ver` 是口径的显式版本：T-222a 给 `turn_head` 加幕锚 / 技能命中时升到 3，
     // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
     // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
-    // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4。
+    // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
+    // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 4);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 5);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
@@ -544,7 +545,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "is_persistent": true,
             "recall_done": true,
             "skill_hit": true,
-            "has_final": false
+            "has_final": false,
+            "tools_open": false
         })
     );
 
@@ -740,6 +742,79 @@ fn turn_head_has_final_ignores_responses_from_an_earlier_drive() {
         turn_head(&events, 0)["has_final"],
         json!(false),
         "锚点之前的响应属于首幕"
+    );
+}
+
+#[test]
+fn turn_head_tools_open_until_this_batchs_last_call_is_closed() {
+    // `tools_open` 是执行行给工具批让位的前件（T-244 步 5b）：本幕最近一条模型响应
+    // 要过工具，而其中**还有一笔**没落 `response` / `failed` ⇒ 执行行不欠，创建 /
+    // 授权 / 派发先跑完。
+    let mut events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(
+            1,
+            "m-1",
+            json!([
+                {"port": "tool", "id": "c-1"},
+                {"port": "tool", "id": "c-2"},
+            ]),
+        ),
+        ev(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
+        ),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["tools_open"],
+        json!(true),
+        "还剩一笔没关账 ⇒ 工具批仍开着"
+    );
+
+    // 最后一笔由 `failed` 关（拒绝 / 中止都是这条出口）。
+    events.push(ev(
+        1,
+        EVENT_FAILED,
+        json!({ "port": "tool", "id": "c-2", "why": "denied" }),
+    ));
+    assert_eq!(
+        turn_head(&events, 0)["tools_open"],
+        json!(false),
+        "每一笔都有终局 ⇒ 换成执行行欠"
+    );
+
+    // 没有工具调用的应答：`tools_open` 恒假（收束路径）。
+    let done = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([])),
+    ];
+    assert_eq!(turn_head(&done, 0)["tools_open"], json!(false));
+}
+
+#[test]
+fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
+    // 续写幕复用轮号：首幕那条工具应答不能替新幕的同一 id 关账——否则新一批
+    // 一开账就被判成「已经关过」，执行行抢先跑，工具批永无派发。
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
+        ev(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({ "stage": "resume", "round": 0, "result": "approve" }),
+        ),
+        model_response(1, "m-2", json!([{"port": "tool", "id": "c-1"}])),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["tools_open"],
+        json!(true),
+        "锚点之前的应答属于首幕"
     );
 }
 

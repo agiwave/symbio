@@ -135,7 +135,7 @@ pub(crate) enum ModelRound {
 
 /// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
 ///
-/// 与 [`tool_round`] 拆开是 T-233 的第一步：引擎要能分别选中「模型往返」与
+/// 与 [`dispatch_round`] 拆开是 T-233 的第一步：引擎要能分别选中「模型往返」与
 /// 「工具批次」两笔债，执行体就不能再把它们揉在一次调用里。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn model_round<S>(
@@ -240,26 +240,59 @@ where
     halt(run, store, llm, rt, &round_facts).await.map(Some)
 }
 
-/// 阶段②b：派发寄存的那一批工具，落产物 / 等待 / 交换。
+/// 阶段②b-1：创建（`open-tools` 行的动作，T-244 步 5b）。
+///
+/// 把模型交回的调用逐条开成 `request(port=tool)`，开出的账寄存在草稿里交给授权步。
+/// 没有寄存的模型应答 ⇒ 引擎选错了行：不写任何格，派发器的「无进展」判据会显形。
+pub(crate) async fn open_round(
+    run: &mut Prepared,
+    store: &dyn Store<Event = Event>,
+    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
+) {
+    let Some(rt) = run.pending_model.as_ref() else {
+        return;
+    };
+    let calls = dispatch.open(store, rt).await;
+    run.pending_calls = Some(calls);
+}
+
+/// 阶段②b-2：授权（`authorize-tool` 行的动作）：为已开账的调用落放行 / 拒绝。
+pub(crate) async fn authorize_round(
+    run: &mut Prepared,
+    store: &dyn Store<Event = Event>,
+    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
+) {
+    let Some(calls) = run.pending_calls.as_mut() else {
+        return;
+    };
+    dispatch.authorize(store, calls).await;
+}
+
+/// 阶段②b-3：派发（`dispatch-tools` / `deny-tools` 两行的动作）：落 `sent`、
+/// 跑执行层、关账，落产物 / 等待 / 交换。
 ///
 /// `Ok(None)` = 继续下一轮；`Ok(Some)` = 本轮收束（等待用户）。
-pub(crate) async fn tool_round<S>(
+///
+/// 两行共用这一个动作：混合批次里 `dispatch-tools` 先被选中，它顺手把被拒的那几笔
+/// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tools` 不欠，`deny-tools` 选中
+/// 本动作，仍然要走执行层（审批卡 / 拒绝反馈由它唯一构造）。
+pub(crate) async fn dispatch_round(
     run: &mut Prepared,
-    store: &S,
+    store: &dyn Store<Event = Event>,
     llm: &dyn LlmAdapter,
     dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
-) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
-where
-    S: Store<Event = Event> + ?Sized,
-{
-    let (Some(rt), Some(round_facts)) = (run.pending_model.take(), run.pending_round.take()) else {
+) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError> {
+    let Some(rt) = run.pending_model.take() else {
         // 没有寄存 = 引擎没有可派的工具批；不空转。
         return Ok(None);
     };
-    // 三笔债三个动作（ADR-118 决策 5）：创建 → 授权 → 派发，各自落自己那一行。
-    let mut calls = dispatch.open(&rt).await;
-    dispatch.authorize(&mut calls).await;
-    let outcomes = dispatch.dispatch(&rt, &mut calls).await;
+    let Some(round_facts) = run.pending_round.take() else {
+        return Ok(None);
+    };
+    let Some(mut calls) = run.pending_calls.take() else {
+        return Ok(None);
+    };
+    let outcomes = dispatch.dispatch(store, &rt, &mut calls).await;
 
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;

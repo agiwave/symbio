@@ -76,7 +76,9 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
         // `risk = None` ⇒ 注册表里没有可判的能力（route-only），授权按 deferred 放行。
         risk: None,
         approved: false,
+        invalid: false,
         granted: false,
+        deny_why: None,
         sent: false,
     }
 }
