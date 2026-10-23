@@ -90,16 +90,19 @@ export function cliArtifactRelPath(profile = 'debug') {
 }
 
 /**
- * 取**最新**的那个已存在候选，而不是第一个。
+ * 按 profile 取**实际存在**的最新产物；一个都不存在 ⇒ `null`。
  *
- * 换过 `cli/.cargo/config.toml`（或从别的机器拷来 target/）之后，两个位置可能
- * 各躺着一份。此时「第一个」可能恰是几个月前那份——正是要防的过期产物。
- * 构建产物里最新的一份才对应最近一次构建。
+ * 为什么单列这个出口：[`cliBinaryPath`] 在「一份都没有」时会回落到第一候选（那是给
+ * 状态报告用的，它要能说出「预期在哪儿」）。而**构建脚本**问的是另一个问题——
+ * 「我刚刚建出来的那份，现在到底在哪」。这两个问题混用就会出现本文件开头记的那类
+ * 事故：构建成功、打印一条规范路径、而那条路径在本机不存在（`cli/.cargo/config.toml`
+ * 可以把 `target-dir` 重定向到别处），读者照着它敲，用的是几个月前的旧产物。
+ *
+ * 所以：**要判断「有没有」，问这个函数；要报告「预期在哪」，问 `cliBinaryPath`。**
  */
-export function cliBinaryPath(repoRoot) {
-  const candidates = cliBinaryCandidates(repoRoot)
+export function cliArtifactPath(repoRoot, profile = 'release') {
   let best = null
-  for (const p of candidates) {
+  for (const p of cliBinaryCandidates(repoRoot, profile)) {
     let st
     try {
       st = fs.statSync(p)
@@ -108,7 +111,20 @@ export function cliBinaryPath(repoRoot) {
     }
     if (!best || st.mtimeMs > best.mtimeMs) best = { p, mtimeMs: st.mtimeMs }
   }
-  return best ? best.p : candidates[0]
+  return best ? best.p : null
+}
+
+/**
+ * 取**最新**的那个已存在候选，而不是第一个。
+ *
+ * 换过 `cli/.cargo/config.toml`（或从别的机器拷来 target/）之后，两个位置可能
+ * 各躺着一份。此时「第一个」可能恰是几个月前那份——正是要防的过期产物。
+ * 构建产物里最新的一份才对应最近一次构建。
+ *
+ * 一份都不存在时回落到第一候选：调用方（`cliBinaryState`）要用它说出「预期在哪」。
+ */
+export function cliBinaryPath(repoRoot, profile = 'release') {
+  return cliArtifactPath(repoRoot, profile) ?? cliBinaryCandidates(repoRoot, profile)[0]
 }
 
 /** 递归列出目录下的全部文件（目录不存在 ⇒ 空，不抛） */

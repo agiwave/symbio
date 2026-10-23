@@ -35,16 +35,18 @@
 //   MSVC_VER      VC/Tools/MSVC 下的版本目录名
 //   SDK_VER       Windows Kits\10\Include 下的版本目录名
 //
-// 产物：`<仓库根>/target/<debug|release>/symbio-cli(.exe)`。构建成功后本脚本把这一行
-// 原样打印出来，文档指路（根 README / `cli/docs`）照它抄——一致性由 `doc-symbol-audit`
-// 的 D-012 在门内看着，不靠人复查。路径的唯一来路是 `scripts/cli-binary.mjs`
-// 的 `cliArtifactRelPath`（与门禁取 release 二进制的地方同一份知识）。
+// 产物：**规范位置**是 `<仓库根>/target/<debug|release>/symbio-cli(.exe)`，但本机若改过
+// `cli/.cargo/config.toml` 的 `target-dir`（本仓为复用 C 依赖缓存会重定向到
+// `../symbio/target`），实际落点就不是它。所以构建成功后本脚本打印的是**解析出来的
+// 真实路径**（绝对路径），并在与规范位置不一致时补一行说明——「产物在哪」这件事，
+// 脚本自证，不靠读者猜。规范位置的唯一来路仍是 `scripts/cli-binary.mjs` 的
+// `cliArtifactRelPath`（文档指路照它抄，一致性由 `doc-symbol-audit` 的 D-012 看着）。
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { cliArtifactRelPath } from '../../scripts/cli-binary.mjs';
+import { cliArtifactRelPath, cliArtifactPath, cliBinaryCandidates } from '../../scripts/cli-binary.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = path.resolve(HERE, '..');
@@ -154,7 +156,29 @@ const r = spawnSync('cargo', [MODE, '--offline', ...extra, ...passthrough], {
 });
 const status = r.status ?? 1;
 if (MODE === 'build' && status === 0) {
-  console.log(`产物：${cliArtifactRelPath(PROFILE)}`);
+  // 打印的必须是**实际存在**的那份产物，不是「规范位置」。
+  //
+  // 为什么不能直接打印 `cliArtifactRelPath(PROFILE)`：那个值回答的是「按标准布局应该
+  // 落在哪」，而本机 `cli/.cargo/config.toml`（机器本地、不入库）可能把 `target-dir`
+  // 重定向到别处（本仓的做法是复用 `../symbio/target` 的 C 依赖缓存）。此时规范位置
+  // 里躺着的是几个月前的旧产物——照它敲命令，整批结论会跑在旧二进制上，且失败形态
+  // 与眼前源码直接矛盾（2026-10-23 实测踩过一次：WAL 只有 2 格，J4 假红）。
+  //
+  // 所以这里做两件事：① 解析真实产物并**校验存在**；② 两行都打印，读者照哪一行都不走错。
+  const repoRoot = path.resolve(CLI_DIR, '..');
+  const actual = cliArtifactPath(repoRoot, PROFILE);
+  const canonical = cliArtifactRelPath(PROFILE);
+  if (!actual) {
+    console.error(`✖ 构建返回 0，但找不到产物。预期其一：`);
+    for (const p of cliBinaryCandidates(repoRoot, PROFILE)) console.error(`    ${p}`);
+    console.error(`  这通常意味着 cargo 的 target-dir 与脚本的假设不一致——先查 cli/.cargo/config.toml。`);
+    process.exit(3);
+  }
+  console.log(`产物：${actual}`);
+  const shown = path.relative(repoRoot, actual).split(path.sep).join('/');
+  if (shown !== canonical) {
+    console.log(`      （规范位置是 ${canonical}；本机 target-dir 被重定向，实际落点以本行为准）`);
+  }
 }
 process.exit(status);
 

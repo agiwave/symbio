@@ -67,6 +67,12 @@ printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 
 产物：`../target/debug/symbio-cli.exe`（相对 `cli/`；仓库根看就是 `target/debug/…`）。
 
+> **以构建脚本打印的绝对路径为准。** 上面是**规范位置**（根 workspace 单 target）。
+> 若本机 `cli/.cargo/config.toml` 改过 `target-dir`（该文件是机器本地配置、不入库；
+> 本仓的常见改法是重定向到 `../symbio/target` 以复用 C 依赖缓存），真实产物就不在这里——
+> `node scripts/build-cli.mjs` 构建成功后会打印它实际解析到的绝对路径，照那一行敲。
+> 本页**不写**具体机器的落点：那会让每个读者都去用一台机器上的布局。
+
 ## 参数
 
 > **参数清单不在本页**：权威清单是 [RE-006 §5.2](../docs/004-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
