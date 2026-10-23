@@ -60,7 +60,7 @@ use crate::symbio_core::{
     EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
     EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST,
     EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
-    EVENT_TURN_STAGE,
+    EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
 };
 
 /// 这张表里**接了线的两个名字**：`execute`（整轮执行体）与 `close`（收束执行体）。
@@ -99,6 +99,9 @@ const ACTOR_EXECUTE: ActorDecl = ActorDecl {
         EVENT_SESSION_CONSOLIDATED,
         EVENT_AUTHZ_GRANTED,
         EVENT_AUTHZ_DENIED,
+        // 轮内抽干的用户补充（`turn_exec/call.rs` 的 `supplement_into_request`）：
+        // 它在模型往返**之内**落格，落格动作属于这一步执行体。
+        EVENT_TURN_SUPPLEMENTED,
     ],
 };
 
@@ -128,19 +131,35 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 /// 把那一行的 `by` 改回 `Some(名字)`，同一个提交。
 ///
 /// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
+///
+/// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
+/// 声明不了不是遗漏，是装载期会红：把 `chat.assistant.final` 写进 `execute` 的名单，
+/// `close-turn` 的出口格就同时是两个执行体的出口格 ⇒
+/// [`Gap::DependencyCycle`](crate::symbio_core::ring::Gap::DependencyCycle)（T-244 步 5 注①）。
+/// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
+/// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
+/// 而不是将错就错地放宽名单。
+///
+/// 删除条件：T-244 步 5b/5d——中止轮与续写幕旁路的收束都改走 `close-turn` 行之后，
+/// 这两条一从表里删，运行期对账就恢复成「名单外即红」。
 pub(crate) struct ActorEntry {
     pub(crate) decl: ActorDecl,
     pub(crate) run: super::turn_exec::Action,
+    pub(crate) transitional: &'static [&'static str],
 }
 
 static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
+        // 中止轮（`stream::aborted` 就地落收束格）与续写幕旁路（`run_execute` 里那条
+        // `has_pending_close()` 分支直接调收束）——两条都在 `execute` 这一步里写收束格。
+        transitional: &[EVENT_ASSISTANT_FINAL],
     },
     ActorEntry {
         decl: ACTOR_CLOSE,
         run: super::turn_exec::run_close,
+        transitional: &[],
     },
 ];
 
@@ -149,10 +168,44 @@ pub(crate) fn actor_decls() -> Vec<ActorDecl> {
     ACTORS.iter().map(|e| e.decl).collect()
 }
 
-/// `by` → 动作。`None` = 绑定表没有这个名字（装载期的 `UnmannedRow` 已拦，
-/// 这里是派发面把「表被改坏」显形，不猜动作）。
-fn action_of(by: &str) -> Option<super::turn_exec::Action> {
-    ACTORS.iter().find(|e| e.decl.name == by).map(|e| e.run)
+/// `by` → 绑定表里的那一条。`None` = 表里没有这个名字（装载期的 `UnmannedRow` 已拦，
+/// 这里是派发面把「表被改坏」显形，不猜动作、也不猜它写了什么）。
+///
+/// 动作与声明**必须一次查全**：派发器读账本时要豁免的协议五格、以及
+/// 「这个执行体声明过哪些领域格」，都来自同一条 `ActorEntry`。分两次查就是
+/// 给「声明与动作漂移」留缝。
+fn entry_of(by: &'static str) -> Option<&'static ActorEntry> {
+    ACTORS.iter().find(|e| e.decl.name == by)
+}
+
+/// 协议五格：运行期写入封闭的**豁免名单**。
+///
+/// 它们由引擎写（`port.rs` 那一个文件，PTS-005 钉着），因此**不该**出现在任何
+/// `ActorDecl::writes` 里——装载期 [`crate::symbio_core::decl`] 的
+/// `ENGINE_ONLY_CELLS` 检查拦的就是「执行体声明了引擎独占的格」。运行期读账本时
+/// 它们当然在：粗端口期 `port::dispatch` 就在执行体内部跑（PL-017 §7.2 承认的过渡
+/// 形状），端口行接回派发器之后写点位置变、豁免名单不变。
+const PROTOCOL_CELLS: &[&str] = &[
+    EVENT_REQUEST,
+    EVENT_SENT,
+    EVENT_RESPONSE,
+    EVENT_FAILED,
+    EVENT_RETRY,
+];
+
+/// [`Next`] 上的运行期对账口（PL-016 §3.4 第 5 条的**运行期那一半**，ADR-123 决策 2）。
+///
+/// 装载期只能查声明面（名字存在、不与引擎独占的格相撞），「执行体实际只写它声明过的
+/// 领域格」只能拿**实际写入**对账——而实际写入的唯一可信取法是日志尾段（决策 1）。
+impl Next {
+    /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
+    /// （引擎写）、`decl.writes`（执行体声明）、`transitional`（过渡豁免）。
+    /// 对不上就是越界，派发器不静默。
+    pub(crate) fn writes_closed(&self, kind: &str) -> bool {
+        PROTOCOL_CELLS.contains(&kind)
+            || self.writes.contains(&kind)
+            || self.tolerated.contains(&kind)
+    }
 }
 
 /// 续写幕旁路的交还形状：`execute-turn` 与它的动作。
@@ -163,12 +216,14 @@ fn action_of(by: &str) -> Option<super::turn_exec::Action> {
 /// 参数化之后这一格整格删除。
 pub(crate) fn resume_anchor(turn: u64) -> Option<Next> {
     let decl = ROWS.iter().find(|d| d.name == "execute-turn")?;
-    let action = action_of(decl.by?)?;
+    let entry = entry_of(decl.by?)?;
     Some(Next {
         row: decl.name,
-        by: decl.by?,
+        by: entry.decl.name,
         key: format!("turn={turn}"),
-        action,
+        action: entry.run,
+        writes: entry.decl.writes,
+        tolerated: entry.transitional,
     })
 }
 
@@ -922,6 +977,14 @@ pub(crate) struct Next {
     pub(crate) key: String,
     /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
     pub(crate) action: super::turn_exec::Action,
+    /// 同一个动作的**声明面**：它登记过会写哪些领域格。
+    ///
+    /// 派发器拿账本（日志尾段）对它对账（[`Next::writes_closed`]）。放在 `Next` 上而不是
+    /// 让派发器再查一次表，是因为「跑哪个动作」与「它写了什么」必须同源——
+    /// 分两次查就能查出两份答案（ADR-123 决策 2）。
+    pub(crate) writes: &'static [&'static str],
+    /// 这条执行体的**过渡豁免名单**（[`ActorEntry::transitional`] 的同一份，同源）。
+    pub(crate) tolerated: &'static [&'static str],
 }
 
 /// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
@@ -939,8 +1002,8 @@ pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
         crate::symbio_core::ring::drive(frozen.rows(), &frozen, turn_slice(events, turn), now)?;
     trace(&frozen, &debt);
     // 选债面与动作同源：`by` 有声明 ⇔ 绑定表有这一条（两者一起构造），
-    // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作。
-    let Some(action) = debt.decl.by.and_then(action_of) else {
+    // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作、也不猜它的写入名单。
+    let Some(entry) = debt.decl.by.and_then(entry_of) else {
         crate::plugin_warn!(
             "session",
             "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",
@@ -951,9 +1014,11 @@ pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
     };
     Some(Next {
         row: debt.decl.name,
-        by: debt.decl.by?,
+        by: entry.decl.name,
         key: debt.key.trace(),
-        action,
+        action: entry.run,
+        writes: entry.decl.writes,
+        tolerated: entry.transitional,
     })
 }
 

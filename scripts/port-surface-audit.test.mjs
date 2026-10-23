@@ -1,8 +1,8 @@
 /**
  * port-surface-audit 回归测试
  *
- * 这条守卫的失效形态**全是恒真**：四格判据读不出输入（事件名字表读空、事实声明表
- * 读空、基线读空）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
+ * 这条守卫的失效形态**全是恒真**：五格判据读不出输入（事件名字表读空、事实声明表
+ * 读空、基线读空、写点扫空）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
  * PL-016 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
  *
  * 所以第一组用例拿**真仓当前状态**做非零对照（协议事实数 > 0、指纹非空），
@@ -28,6 +28,8 @@ const SOLVER_REL = 'symbio/src/symbio_core/decl/ring.rs'
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 端口表所在文件（脚本按「含 `PortDecl {` 的 .rs」扫取值名单，路径本身不钉死） */
 const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'
+/** 协议格写点所在文件（PTS-005 判**写方唯一**，不判这个路径——路径只是夹具的落点） */
+const WRITER_REL = 'symbio/src/plugins/loop/port.rs'
 
 /** 协议族常量（五个名字的定义，值取协议名的字面值） */
 const EVENT_SRC = `pub const EVENT_REQUEST: &str = "request";
@@ -85,12 +87,40 @@ const PORTS_SRC = `pub(crate) static PORTS: &[PortDecl] = &[
 `
 
 /**
+ * 协议格的写点（PTS-005 的输入）：`sent` 的名字是 `decl.before`（变量），
+ * `response` 是常量——两种形态都要在夹具里出现，否则「按名字实参判」这条实现
+ * 只测到了一半，把 `before` 那一支写坏也没人红。
+ */
+const WRITER_SRC = `pub(crate) fn begin<S>(store: &S, call: &Call, turn: u64) -> Result<(), AppendError> {
+    store.append(Event::pending(
+        call.attempt_key(decl.before),
+        decl.before,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        "system",
+    ))
+}
+
+pub(crate) fn succeed<S>(store: &S, call: &Call, turn: u64) -> Result<(), AppendError> {
+    store.append(Event::pending(
+        call.attempt_key(EVENT_RESPONSE),
+        EVENT_RESPONSE,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        "system",
+    ))
+}
+`
+
+/**
  * 造一棵最小仓库。
  *
- * `facts` / `solver` / `event` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
+ * `facts` / `solver` / `event` / `writer` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
  * 算出来**（基线是文件，随树走——这样「求解器变了」才是能被夹具表达的那件事）。
  */
-function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
+function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'port-surface-'))
   const write = (rel, body) => {
     const abs = path.join(root, rel)
@@ -101,6 +131,7 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
   write(DECL_REL, facts)
   write(SOLVER_REL, solver)
   write(PORTS_REL, ports)
+  write(WRITER_REL, writer)
   // 基线挂的 ADR 必须**能打开**（PTS-004）——夹具里给它一份空壳决策。
   if (createAdr) {
     const id = String(adr).match(/ADR-(\d+[a-z]?)/)?.[1]
@@ -135,7 +166,7 @@ function cleanup(root) {
 
 // ── ① 真仓当前状态：绿，且**数得出东西**（防恒真）─────────────────────
 
-test('真仓当前状态通过，且四格判据都数得出非零输入', () => {
+test('真仓当前状态通过，且五格判据都数得出非零输入', () => {
   const r = spawnSync(process.execPath, [script], {
     env: { ...process.env, NO_COLOR: '1' },
     encoding: 'utf8',
@@ -147,6 +178,10 @@ test('真仓当前状态通过，且四格判据都数得出非零输入', () =>
   assert.ok(Number(facts[1]) > 0, '真仓里带端口的事实数为 0 ⇒ 提取器与源码形状脱节')
   assert.match(r.stdout, /PTS-003.*sha256:/)
   assert.match(r.stdout, /PTS-004.*ADR-/)
+  // PTS-005 也要数得出写点（扫空了就是判据静默变成「永远绿」）。
+  const sites = /协议格写方唯一：(\S+)（命中 (\d+) 处构造）/.exec(r.stdout)
+  assert.ok(sites, '通过信息里没有「协议格写方唯一」的实测名单与命中数 ⇒ PTS-005 可能没有输入')
+  assert.ok(Number(sites[2]) > 0, `真仓里协议格写点命中数为 0（${sites[1]}）⇒ 提取器与源码形状脱节`)
   // 取值一侧也要数得出名单（否则「扫端口表」扫空了没人知道，判据静默变回只判字段名）。
   const values = /端口取值（名单 ([^）]*)）/.exec(r.stdout)
   assert.ok(values, '通过信息里没有「端口取值名单」⇒ 取值一侧可能没有输入')
@@ -369,8 +404,71 @@ test('PTS-004 基线的理由为空 ⇒ 红', () => {
   }
 })
 
-// ── ⑤ 读不出输入时必须红，不得静默通过 ────────────────────────────────
+// ── ⑤ PTS-005：协议格写方唯一 ────────────────────────────────────────
 
+test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）', () => {
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'symbio/src/plugins/other'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'symbio/src/plugins/other/extra.rs'),
+      `pub(crate) fn cheat<S>(store: &S) {\n    let _ = store.append(Event::pending("x", EVENT_FAILED, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-005.*2 个写点文件/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-005 `before` 那一支也算写点（sent 的名字是变量，不是常量）', () => {
+  const root = fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'symbio/src/plugins/other'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, 'symbio/src/plugins/other/extra.rs'),
+      `pub(crate) fn cheat<S>(store: &S, decl: &PortDecl) {\n    let _ = store.append(Event::pending("x", decl.before, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-005/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-005 读不出任何写点 ⇒ 红（协议格没人写是环不转，不是没什么可判）', () => {
+  const root = fixture({ writer: 'pub(crate) fn nothing() {}\n' })
+  try {
+    const r = run(root)
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stderr, /PTS-005.*全仓找不到协议格的写点/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('PTS-005 行表里的 `source: EVENT_SENT` 不算写点（模式不是账）', () => {
+  const root = fixture()
+  try {
+    fs.writeFileSync(
+      path.join(root, PORTS_REL),
+      PORTS_SRC +
+        'const ROWS: &[Decl] = &[Decl { owes: Pattern::Fact { source: EVENT_SENT, ..P }, until: Pattern::Fact { source: EVENT_RESPONSE, ..P } }];\n',
+      'utf8',
+    )
+    const r = run(root)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /PTS-005.*协议格写方唯一/)
+  } finally {
+    cleanup(root)
+  }
+})
+
+// ── ⑥ 读不出输入时必须红，不得静默通过 ────────────────────────────────
 test('事件名字表读不出 ⇒ 红（不得「没读到 ⇒ 没什么可判」）', () => {
   const root = fixture()
   try {

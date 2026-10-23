@@ -241,7 +241,8 @@ impl Builder {
                 }
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
-            // 「实际写入 ⊆ `writes`」那一半要有值返回账本才能对账，归 T-249。
+            // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是
+            // 执行体交回的陈述（ADR-123 决策 1–2；实现 `plugins/loop` 的 `drive_steps`）。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
                     gaps.push(Gap::ActorWritesEngineCell {

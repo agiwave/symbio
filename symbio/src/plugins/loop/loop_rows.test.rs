@@ -1291,7 +1291,7 @@ fn the_row_table_and_the_binding_table_agree() {
     for d in ROWS {
         let Some(by) = d.by else { continue };
         assert!(
-            super::action_of(by).is_some(),
+            super::entry_of(by).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );
@@ -1301,6 +1301,46 @@ fn the_row_table_and_the_binding_table_agree() {
     for a in f.actors() {
         assert!(used.contains(&a.name), "执行体 {} 没有任何行指向它", a.name);
     }
+}
+
+/// 过渡豁免是一条**有名有姓、会自己变红**的名单（ADR-123 决策 2）。
+///
+/// 它放宽的是运行期写入封闭，每加一条都要回答「为什么这条执行体声明不了这一格」——
+/// `execute` + `chat.assistant.final` 那一条的理由与删除条件记在 `ActorEntry::transitional`
+/// 的头注（T-244 步 5b/5d 之后这条应当整条为空）。名单变长必须先过这条用例。
+#[test]
+fn the_transitional_exemptions_are_pinned() {
+    let actual: Vec<(&str, &[&str])> = super::ACTORS
+        .iter()
+        .map(|e| (e.decl.name, e.transitional))
+        .filter(|(_, list)| !list.is_empty())
+        .collect();
+    let expected: Vec<(&str, &[&str])> = vec![(super::EXECUTE, &["chat.assistant.final"])];
+    assert_eq!(actual, expected, "过渡豁免名单变了——先补裁决，再改这条用例");
+}
+
+/// 运行期写入封闭的口径（ADR-123 决策 2 的那一句「协议格豁免，领域格必须声明」）。
+///
+/// 派发器读账本用的就是这一个谓词：这里钉住三类各一条，越界那一类必须为假——
+/// 名单外的领域格正是这条判据要拦的事。
+#[test]
+fn writes_closed_admits_declared_protocol_and_exempted_only() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let next = super::next(&events, 1, 0).expect("开着的幕欠 execute-turn");
+    // 声明过的领域格。
+    assert!(next.writes_closed("turn.dispatch"));
+    // 协议五格：引擎写，本来就不许出现在 `writes` 里（装载期 `ENGINE_ONLY_CELLS` 拦）。
+    assert!(next.writes_closed("response"));
+    // 过渡豁免：确实写得出、装载期声明不了的那一格。
+    assert!(next.writes_closed("chat.assistant.final"));
+    // 名单外：越界。
+    assert!(
+        !next.writes_closed("memory.encoded"),
+        "名单外的领域格必须判越界，否则对账是空转"
+    );
 }
 
 // ── 本次 drive 的 `now`：只来自唤醒事实（判据 12 · T-240）──────────────────

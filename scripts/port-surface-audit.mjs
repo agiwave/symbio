@@ -10,6 +10,7 @@
  * | PTS-002 | 求解器（`owed` / `drive` 所在文件）里**不出现端口字段名与端口取值** | **端口渗进引擎**——引擎一旦认识端口，加端口就得改引擎 |
  * | PTS-003 | 求解器那两个函数的**字节**与基线一致 | 判据 1 的原文口径：「`drive` 与 `owed` 源码 diff = 0」 |
  * | PTS-004 | 基线引用的 ADR **能打开**、理由**非空** | **改判据而不留决策**——基线是判据的一面，改它必须有决策挂得住 |
+ * | PTS-005 | 协议格的**写点只在一个文件里**（扫 `symbio/src` 的 `Event::pending`，名字位上是协议常量或 `PortDecl::before`） | **协议格到处有人写**——「四格由引擎独占」从此靠自觉（PL-016 §2.3 / T-249 判据 5） |
  *
  * ## 为什么是这四格（而不是「机制键守恒」那种计数）
  *
@@ -34,6 +35,17 @@
  *   于是「改引擎」从此不是顺手的事，而是一份决策。
  * - **PTS-004 管「基线本身」**：基线是一处**判据面**，改它等于改判据，
  *   按本仓纪律（`08 §0 纪律 3`）必须有能打开的 ADR。
+ * - **PTS-005 管「谁在写协议格」**：前四格判的是声明与引擎，这一格判**写侧**——
+ *   `sent` / `response` / `failed` / `retry` 由引擎独占（PL-016 §2.3），装载期
+ *   `ENGINE_ONLY_CELLS` 拦的是「执行体**声明**了它们」，而「另一个文件直接落一条
+ *   `sent`」声明面上查不到。这条判据不钉文件名：它钉**写方唯一**（名单长度 == 1），
+ *   因为「唯一」才是判据，「是 `port.rs`」只是今天的实测值。写点为 0 同样判红——
+ *   协议格没人写就是环不转，而不是「没什么可判」。
+ *   边界（写在绿灯里，别把它当证明）：判定基于 `Event::pending(` 的**名字实参**文本。
+ *   本仓 `Event` 的**字段是 `pub`**，所以手搓结构体字面量在类型上合法、本条看不见
+ *   （今天全仓零处；要关掉这个缝得先收窄 `Event` 字段，那是 core 形状的事，
+ *   挂 `core-shape-audit` 而不挂本条）。把名字先存进一个认不出来的变量同样能绕，
+ *   这一处按 `decl.before` 补判（`sent` 的名字正是它，全仓只在端口层读一次）。
  *
  * ## 基线在哪、为什么是文件而不是常量
  *
@@ -71,15 +83,15 @@
  */
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线）
-// @codes PTS-001 PTS-002 PTS-003 PTS-004
+// @ns PTS 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一）
+// @codes PTS-001 PTS-002 PTS-003 PTS-004 PTS-005
 
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
-import { blankComments, matchBrace } from './rust-scan.mjs'
+import { blankComments, blankTestModules, matchBrace, skipString } from './rust-scan.mjs'
 import { stringLiteralsOf } from './gate.d/_shared.mjs'
 
 const argv = process.argv.slice(2)
@@ -397,6 +409,123 @@ if (baseline) {
   }
 }
 
+// ───────────────────────── PTS-005 协议格写方唯一 ─────────────────────────
+
+/**
+ * 协议四格里**由引擎写**的那四格（T-249 判据 5 的名单）。
+ *
+ * 钉常量名不钉字面量：字面量的 owner 在 `event/mod.rs`（与 PTS-001 同一口径）。
+ *
+ * `request` **不在名单里**，这是口径不是遗漏：协议五格里只有这四格是引擎独占
+ * （`decl/mod.rs` 的 `ENGINE_ONLY_CELLS`），`request` 由**决策者**写（PL-016 §2.4），
+ * 把它算进「引擎的账」就把契约写反了。代价说清楚：今天它的写点也在 `port.rs`，
+ * 但第二个 `request` 写点本条看不见——那条缝归装载期与运行期对账（T-249 判据 2）。
+ */
+const WRITE_CONSTS = ['EVENT_SENT', 'EVENT_RESPONSE', 'EVENT_FAILED', 'EVENT_RETRY']
+
+/**
+ * 取调用表达式的一个实参文本：`openIdx` 指向左括号，`n` 从 0 起。
+ *
+ * 为什么按实参而不是按行：`Event::pending(` 的名字实参与它隔着换行是常态，
+ * 按行匹配会把行表里的 `source: EVENT_SENT`（那是**模式**，不是写）读成写点，
+ * 也会漏掉名字与构造点不同行的真写点。嵌套括号 / 方括号里的逗号不算分隔，
+ * 字符串里的都不算（`skipString` 认原始串）。
+ */
+function argumentAt(code, openIdx, n) {
+  let depth = 0
+  let cur = ''
+  const args = []
+  for (let i = openIdx; i < code.length; i++) {
+    const ch = code[i]
+    if (ch === '"') {
+      const end = skipString(code, i)
+      cur += code.slice(i, end + 1)
+      i = end
+      continue
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth++
+      if (depth > 1) cur += ch
+      continue
+    }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      depth--
+      if (depth === 0) {
+        args.push(cur)
+        return args[n]
+      }
+      cur += ch
+      continue
+    }
+    if (ch === ',' && depth === 1) {
+      args.push(cur)
+      cur = ''
+      continue
+    }
+    if (depth >= 1) cur += ch
+  }
+  return undefined
+}
+
+/**
+ * `symbio/src` 下的协议格写点，按文件聚合（值是命中行号）。
+ *
+ * 排除测试：`.test.rs` 文件与 `#[cfg(test)]` 模块里造一条 `sent` 是**布置事实**，
+ * 不是建立第二个写方（与 PTS-002 剥注释同一取向——散文与排演都不算算法）。
+ * `blankComments` + `blankTestModules` 都保留换行，所以报告里的行号对得上原文件。
+ */
+function protocolWritePoints() {
+  const hits = new Map()
+  const skip = new Set(['target', 'node_modules', '.git', '.symbio', '.workbuddy-ai'])
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(path.join(dir, entry.name))
+        continue
+      }
+      if (!entry.name.endsWith('.rs') || entry.name.endsWith('.test.rs')) continue
+      const abs = path.join(dir, entry.name)
+      const code = blankTestModules(
+        blankComments(fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')).join('\n'),
+      )
+      const lines = []
+      for (const m of code.matchAll(/\bEvent\s*::\s*pending\s*\(/g)) {
+        const open = code.indexOf('(', m.index)
+        const name = argumentAt(code, open, 1)
+        if (name === undefined) continue
+        const hit =
+          WRITE_CONSTS.some((c) => new RegExp(`\\b${c}\\b`).test(name)) ||
+          /\bbefore\b/.test(name)
+        if (!hit) continue
+        const line = code.slice(0, m.index).split('\n').length
+        lines.push(line)
+      }
+      if (lines.length > 0) {
+        hits.set(path.relative(ROOT, abs).split(path.sep).join('/'), lines)
+      }
+    }
+  }
+  walk(path.join(ROOT, 'symbio', 'src'))
+  return hits
+}
+
+const writePoints = protocolWritePoints()
+const writers = [...writePoints.keys()].sort()
+if (writers.length === 0) {
+  report(
+    'PTS-005',
+    `全仓找不到协议格的写点（扫 \`Event::pending\` 的名字实参 ⊆ ${WRITE_CONSTS.join(' / ')} / before）——` +
+      `协议格没人写就是环不转，不是「没什么可判」；判据没有输入，宁红不静默`,
+  )
+} else if (writers.length > 1) {
+  report(
+    'PTS-005',
+    `协议格有 ${writers.length} 个写点文件（${writers.join(' / ')}）—— 协议格由引擎独占（PL-016 §2.3）：` +
+      `第二处写点会让「四格 = 引擎的账」变成自觉，端口层的幂等键与租约也不再是单点逻辑`,
+  )
+}
+
 // ───────────────────────── 输出 ─────────────────────────
 
 const ruleLine = (ok, rule, desc) =>
@@ -418,6 +547,11 @@ if (errors.length === 0) {
   )
   ruleLine(true, 'PTS-003', `求解器字节与基线一致：${solverHash}`)
   ruleLine(true, 'PTS-004', `基线挂得住决策：${baseline?.solver?.adr ?? '(无)'}`)
+  ruleLine(
+    true,
+    'PTS-005',
+    `协议格写方唯一：${writers.join(' / ')}（命中 ${[...writePoints.values()].reduce((n, l) => n + l.length, 0)} 处构造）`,
+  )
   process.exit(0)
 }
 
