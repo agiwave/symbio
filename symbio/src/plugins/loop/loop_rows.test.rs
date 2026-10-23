@@ -404,6 +404,36 @@ fn execute_row_closes_on_turn_closed() {
     );
 }
 
+/// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进驱动**。
+///
+/// 这条不对称是 [ADR-125](../../../../docs/010-adr/125.md "ADR-125") 决策 4 点名要写下来的：
+/// 措辞往返的 `response(port=model)` 带 `calls: []` ⇒ `turn.has_final` 成立 ⇒ 收束行的前件
+/// **成立**。但那一轮的答话是 `compose` 在轮首之前备好的（草稿），运行器一看 `final_reply`
+/// 非空就在轮首准备里收束、`PreparedFlow::Done` 返回——驱动循环压根没起来，**表没被问**。
+///
+/// 为什么要钉一条「表说该派发、实际上不问」的用例：只看表的人会得出「它应该被派发」，
+/// 然后去追一个不存在的 bug（T-253 的第一版判断就是这么来的）。把不对称钉在用例里，
+/// 它就从「疑似漏派发」变成「已知且写明的边界」。
+#[test]
+fn a_drafted_turns_closing_row_is_owed_but_the_driver_never_asks() {
+    let drafted = vec![
+        ev(1, "user.message", json!({"text": "现在几点了", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "decide", "reason": "from_context"})),
+        ev(
+            1,
+            "response",
+            json!({"port": "model", "id": "model-0-d0-w0", "calls": []}),
+        ),
+        ev(1, "turn.dispatch", json!({})),
+    ];
+    let picked = drive(ROWS, &frozen(), &drafted, 0).expect("表里有可还的债");
+    assert_eq!(
+        picked.decl.name, "close-turn",
+        "措辞往返的 calls 为空 ⇒ has_final 成立 ⇒ 收束行前件成立（表没问，但问的话就是这个答案）"
+    );
+    assert_eq!(picked.decl.by, Some("close"));
+}
+
 #[test]
 fn prio_is_global_and_registration_order_does_not_matter() {
     // 判决 / 召回 / 执行同时可还：`prio` 最小者胜，而不是表里先出现的那行。
