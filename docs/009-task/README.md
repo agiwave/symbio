@@ -68,7 +68,7 @@ board.columns: [rank, deps, evidence, reason]
 |---|---|---|---|---|
 | `T-247-插件内部模型往返进环` | 插件内部的模型往返进环——classify 判决与压缩摘要两类未入账调用 | next | plan | T-238-短路轮进债环 |
 | `T-249-执行体值返回账本` | 执行体值返回账本——run 交回 Vec<Fact>，Err 由引擎写 failed，协议四格收口 | next | plan | T-241-ActorDecl执行体注册表 |
-| `T-245-判据硬化批` | 判据硬化批——生产表回放用例 / PTS-002 端口取值 / 收束 reason 严档 / 无进展可触发 | later | plan | T-241-ActorDecl执行体注册表 |
+| `T-245-判据硬化批` | 判据硬化批——生产表回放用例 / PTS-002 端口取值 / 收束 reason 严档 / 无进展可触发 | later | plan | T-241-ActorDecl执行体注册表、T-249-执行体值返回账本 |
 
 ## 进行中
 
