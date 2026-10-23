@@ -98,7 +98,7 @@ cargo clippy --lib --tests -- -D warnings
 ## 目录结构速览
 
 **一个插件 = 一个目录**（配置与数据同处，整目录可拷贝移植；机制见
-[design/013-vdfs.md](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3.4 与 `symbio_core::plugin::dir`）：
+[VDFS 前端页面规范](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3.4 与 `symbio_core::plugin::dir`）：
 
 ```
 <homedir>/ # 默认 ~/.symbio
@@ -117,9 +117,9 @@ cargo clippy --lib --tests -- -D warnings
 
 ## 下一步
 
-- 了解架构: [003-OVERVIEW.md](../003-design/002-架构总览.md "DE-002-架构总览")
-- 开发插件: [005-PLUGIN_DEVELOPMENT.md](005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")
-- 查看所有路由: [003-ROUTES.md](../004-ref/003-ROUTES.md "RE-003-ROUTES")
+- 了解架构: [架构总览与目标形态](../003-design/002-架构总览.md "DE-002-架构总览")
+- 开发插件: [插件开发指南](005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")
+- 查看所有路由: [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")
 
 ---
 

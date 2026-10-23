@@ -12,8 +12,8 @@ impl: done
 > 目标：在 App 运行期间对外提供一套纯 HTTP/WebSocket 接口，让第三方应用像前端一样访问和控制整个应用。
 > 接口服务本身作为**一个普通插件**纳入现有插件体系，配置/开启/关闭**复用现有设置页机制**，前端零改动。
 
-- 现状：已实现（`gateway` 插件）。现行端点清单见 [reference/003-ROUTES.md](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [reference/001-CONFIGURATION.md](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [architecture/002-DATA_FLOW.md](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
-- 关联：[architecture/004-PROTOCOLS.md](005-协议规范.md "DE-005-协议规范")（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
+- 现状：已实现（`gateway` 插件）。现行端点清单见 [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [数据流与调用链（DATA_FLOW）](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
+- 关联：[协议规范](005-协议规范.md "DE-005-协议规范")（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
 
 ---
 
@@ -45,7 +45,7 @@ impl: done
 
 > 依托点**不是** `config/get` / `config/set` 协议、`SETTING_SECTIONS` 分区表或
 > `load_path` / `save_path`——这三样都不存在（配置已回到插件目录）。本设计的结论是
-> **做成插件、复用既有机制、前端零改动**，依托点是 VDFS 的配置文件 + 可配置收集通道，见 [design/013-vdfs.md](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3.4 / §13.1。
+> **做成插件、复用既有机制、前端零改动**，依托点是 VDFS 的配置文件 + 可配置收集通道，见 [VDFS 前端页面规范](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3.4 / §13.1。
 
 ---
 
@@ -60,7 +60,7 @@ symbio/src/plugins/gateway/
 ```
 
 - 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（`symbio_core/plugin/ids.rs`）。
-- 配置键、默认值与只读白名单：见 [reference/001-CONFIGURATION.md](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
+- 配置键、默认值与只读白名单：见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 
 ---
@@ -264,7 +264,7 @@ GET /api/v1/health → { "ok": true }
 - CORS：响应头固定 `Access-Control-Allow-Origin: *`（`OPTIONS` 预检直接放行），
  跨域隔离依赖 token 与绑定地址，不靠 Origin 白名单。
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
- （清单见 [001-CONFIGURATION.md](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")），其余 403/拒绝；
+ （清单见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")），其余 403/拒绝；
  `gateway/*` 一律拒绝，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝
  （配置含 `inbound_token` 等凭据）。
 - 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`vdfs/write|delete` 归为
@@ -284,7 +284,7 @@ GET /api/v1/health → { "ok": true }
 
 | 做法 | 评价 |
 |---|---|
-| **不做，第三方照前端调用方式拼路径**（现行） | 可接受：路径清单在 [003-ROUTES.md](../004-ref/003-ROUTES.md "RE-003-ROUTES") 人工维护 |
+| **不做，第三方照前端调用方式拼路径**（现行） | 可接受：路径清单在 [RE-003-ROUTES](../004-ref/003-ROUTES.md) 人工维护 |
 | 给 `Plugin` trait 加可选 `fn manifest(&self) -> Vec<RouteMeta>`（默认空），Composite 递归聚合 | ✅ 最符合项目"机制化"风格：一处定义、自动聚合、前端与新传输层同时受益 |
 | 手写 OpenAPI 分片 | 易与代码漂移 |
 

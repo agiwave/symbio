@@ -100,7 +100,7 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 ## 构建（要点）
 
 **统一走 `node scripts/build-cli.mjs`**（它负责把 C 工具链喂给 cc-rs，并保证环境字节级一致）。
-关键环节与坑见 [cli/docs/003-building.md](docs/003-building.md "GU-003-building")，三句话概括：
+关键环节与坑见 [构建](docs/003-building.md "GU-003-building")，三句话概括：
 
 1. **C 编译器必须显式注入**（`CC`/`CXX`/`INCLUDE`/`LIB`，不碰 `PATH`）；`aws-lc-sys` 0.44 自带
  prebuilt NASM 对象，**既不需要 cmake 也不需要 nasm**。

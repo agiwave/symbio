@@ -24,7 +24,7 @@ impl: done
 ## 路由
 
 `home/*` 由本插件自身终结；其余路径剥离首段后转发给 `worker`。
-**完整清单以 [003-ROUTES.md](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Home 插件为准**——本 README 不抄路由表。
+**完整清单以 [路由参考](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Home 插件为准**——本 README 不抄路由表。
 
 > 资源类别清单不设终结路由：`<根>` 自身的 `vdfs/list` 就是子目录清单
 > （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/003-design/009-VDFS规范.md` §2.5）。

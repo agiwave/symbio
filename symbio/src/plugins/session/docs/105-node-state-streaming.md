@@ -9,9 +9,9 @@ impl: done
 
 # 节点状态流（Node-State Streaming）—— 实时面即节点状态
 
-> 前置阅读：[013-vdfs.md](../../../../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")（机制规范）、
-> [022-vdfs-session-messages.md](109-vdfs-session-messages.md "DE-109-vdfs-session-messages")（转写即列表）、
-> [015-core-loop.md](102-core-loop.md "DE-102-core-loop")（会话主循环）。
+> 前置阅读：[VDFS 前端页面规范](../../../../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")（机制规范）、
+> [会话消息的 VDFS 化 —— 转写即列表，流式即追加](109-vdfs-session-messages.md "DE-109-vdfs-session-messages")（转写即列表）、
+> [会话核心循环（LLM × 工具）](102-core-loop.md "DE-102-core-loop")（会话主循环）。
 >
 > 本文回答一个问题：**会话的"正在发生什么"如何只由节点状态表达**，
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。

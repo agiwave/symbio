@@ -167,7 +167,7 @@ DEBUG trace_id=abc123 path=session/stats Routing finished
 
 回读类路由（`vdfs/list` / `stat` / `read`）另有 `origin`——`trace_id` 串链，
 `origin` 说明**谁、为什么**（闭集，对照表见
-[007-TROUBLESHOOTING.md](../006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") 的「追踪请求链」）。
+[故障排查指南](../006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") 的「追踪请求链」）。
 
 ---
 

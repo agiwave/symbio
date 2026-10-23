@@ -26,14 +26,14 @@ impl: done
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
-| [015-core-loop.md](102-core-loop.md "DE-102-core-loop") | 现行设计 | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`）；§6 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
-| [017-module-layout.md](104-module-layout.md "DE-104-module-layout") | 现行规范 | 插件怎么分域：五个判据、编排层/领域层落点、测试布局、可见性与共享面、纯搬移自证 |
-| [014-context-compression-design.md](101-context-compression-design.md "DE-101-context-compression-design") | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |
-| [021-turn-tool-mechanisms.md](108-turn-tool-mechanisms.md "DE-108-turn-tool-mechanisms") | 现行机制 | 工具失败如何回传（信息性、不中断循环）、Turn 终态如何定 |
-| [016-heartbeat-mechanism.md](../../heartbeat/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism") | 现行设计 | 会话空闲心跳：调度语义、设置工具、CLI 守护模式、homedir 传导 |
-| [019-perf.md](106-perf.md "DE-106-perf") | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
-| [022-vdfs-session-messages.md](109-vdfs-session-messages.md "DE-109-vdfs-session-messages") | 现行设计 | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、不变量 |
-| [020-session-options.md](107-session-options.md "DE-107-session-options") | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
+| [DE-102-core-loop](102-core-loop.md) | 现行设计 | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`）；§6 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
+| [DE-104-module-layout](104-module-layout.md) | 现行规范 | 插件怎么分域：五个判据、编排层/领域层落点、测试布局、可见性与共享面、纯搬移自证 |
+| [DE-101-context-compression-design](101-context-compression-design.md) | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |
+| [DE-108-turn-tool-mechanisms](108-turn-tool-mechanisms.md) | 现行机制 | 工具失败如何回传（信息性、不中断循环）、Turn 终态如何定 |
+| [DE-113-heartbeat-mechanism](../../heartbeat/docs/113-heartbeat-mechanism.md) | 现行设计 | 会话空闲心跳：调度语义、设置工具、CLI 守护模式、homedir 传导 |
+| [DE-106-perf](106-perf.md) | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
+| [DE-109-vdfs-session-messages](109-vdfs-session-messages.md) | 现行设计 | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、不变量 |
+| [DE-107-session-options](107-session-options.md) | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
 > **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：
 > [`legacy-route-migration.md`](../../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、

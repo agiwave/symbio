@@ -9,7 +9,7 @@ impl: done
 
 # VDFS —— 虚拟动态文件系统规范
 
-状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）
+纯接口 + 统一文件系统 + 容器拓扑。
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）
 关联：
 `symbio/src/symbio_core/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
@@ -347,7 +347,7 @@ size updated_at children binary hidden schema new_type attributes
 **导入不是「新建类型」的一种**，因此 `VdfsNewType` 里没有它的位置
 （见 [设计总览](README.md "DE-000-设计总览") D-029）。动作声明 `pack` 表明「载荷是一个
 本地文件」，使用方据此先取文件再执行；provider 不支持时返回 `NotImplemented`，
-使用方据此不给出入口（详见 [012-vdfs-frontend.md](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §5）。
+使用方据此不给出入口（详见 [VDFS 前端页面规范](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §5）。
 
 > 目录型资源的**存储层原语**仍接受二进制写入（`vdfs/write { b64 }` = 解包），
 > 但那是对内的原语，不是对外的入口形态——对外只有 `import` 动作一条路。
@@ -388,7 +388,7 @@ size updated_at children binary hidden schema new_type attributes
  字段同处一个文件，但**不参与配置反序列化**（`PluginDir` 读写时自动剥离 / 补回）。
  装配方据此判定「这个目录是不是一个可加载的插件」：文件存在、可解析、且
  `plugin_provider` 指向一个已注册的工厂（见
- [composite/README.md](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README")）。
+ [Composite 插件](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README")）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
  `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
 - **实现只写一次**：`symbio_core::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
@@ -397,7 +397,7 @@ size updated_at children binary hidden schema new_type attributes
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
  对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
 - **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见
- [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README")），但条目
+ [Plugin_manager 插件（插件管理）](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README")），但条目
  携带的是**它自己的真实地址**（`<插件目录>/PLUGIN.yml`），读写仍走拥有者——同一份
  配置只有一个地址，设置页不代理读写、也不复制一份。
 
@@ -421,7 +421,7 @@ size updated_at children binary hidden schema new_type attributes
 ## 5. 协议操作
 
 `plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
-core 不暴露**）；操作闭集见 [CURRENT.md](../004-ref/006-当前事实表.md "RE-006-当前事实表") §3.2，信封的线上形状以
+core 不暴露**）；操作闭集见 [当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表") §3.2，信封的线上形状以
 `protocol.rs` 为准。语义要点：
 
 - `vdfs/root` **不给地址**：回包 `path` 即根地址（消费方当运行期数据持有，§3.1）。
@@ -603,7 +603,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 
 前端分层（`schemas/vdfs.ts` → `registry/vdfsTypes.ts` → `registry/vdfsRenderers.ts`）、
 页面与路由（`views/VdfsView.vue`，`/vdfs/:dir(.*)*`）以及「新增一类资源前端零页面
-开发」的完整契约，见 [012-vdfs-frontend.md](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")。
+开发」的完整契约，见 [VDFS 前端页面规范](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")。
 
 ## 8. 校验职责
 
@@ -724,7 +724,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 **零改动面**：访问层、门面（`UnifiedFs`）、物理层、容器（`composite`）、前端
 （导航 / 列表 / 详情）都无需改动——新子目录自动出现在 `<根>` 之下、LLM 侧
 `<根>/<插件名>/…` 自动可寻址；仅当需要一类全新的详情渲染器时才在前端登记一个
-`ext` → 组件映射。工具与操作闭集见 [CURRENT.md](../004-ref/006-当前事实表.md "RE-006-当前事实表") §2 / §3。
+`ext` → 组件映射。工具与操作闭集见 [当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表") §2 / §3。
 
 **零改动面**还包括「进入空目录 ⇒ 直接给该类型的新建详情、中栏让位」：判据是
 `new_type` 的**存在性**，与类型名无关（按类型名分支 ⇒ 只有那一种类型有）。

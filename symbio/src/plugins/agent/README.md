@@ -51,7 +51,7 @@ MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户�
 
 [D-040](../memory/README.md "symbio/src/plugins/memory/README") 的切法因此是按**归属**划：两份 `AGENTS.md`
 的落位、可编辑地址、两道闸门与空文件约定都归 `memory` 自己写
-（[../memory/README.md](../memory/README.md "symbio/src/plugins/memory/README") 与
+（[Memory 插件](../memory/README.md "symbio/src/plugins/memory/README") 与
 [006 规范附录 A.3](../../../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
 本插件交出的是**分形**：子树里那个 `memory` 实例的父目录恰好就是 agent 目录，
 落位因此天然正确，谁也不必认识「系统智能体」与「子智能体」这两个词。
@@ -79,7 +79,7 @@ MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户�
 读到同一份文件（双重注入），且「工作」这个名字与它承载的作用域名实不符。
 子树工作区腿继承父会话的 `WORKDIR`（规范附录 A.3 的同一条警告）。
 
-## 寻址（无自有路由，权威登记见 [003-ROUTES.md](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Agent 插件）
+## 寻址（无自有路由，权威登记见 [路由参考](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Agent 插件）
 
 agent 目录的寻址是**挂载点语义**而非平铺三段（`route` 直接返回 `NotFound` 并指引到 VDFS）：
 

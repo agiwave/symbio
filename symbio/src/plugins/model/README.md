@@ -26,7 +26,7 @@ impl: done
 
 ## 路由
 
-**无**（权威登记见 [003-ROUTES.md](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Model 插件）。model 的全部对外能力
+**无**（权威登记见 [路由参考](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Model 插件）。model 的全部对外能力
 都在 VDFS 上（`<根>/model`）。持久化分两处：跨条目状态（`default_provider_id`）写自己的
 `plugins/model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
 

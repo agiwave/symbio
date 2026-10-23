@@ -28,7 +28,7 @@ impl: done
 
 ## 路由
 
-**无**（权威登记见 [003-ROUTES.md](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
+**无**（权威登记见 [路由参考](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
 本插件是无状态 provider，`route` 恒 `NotFound`。
 
 ## 清单 = 各插件的条目 + 自有分区

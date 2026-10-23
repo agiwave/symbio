@@ -60,7 +60,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 
 驻留进程，为本 homedir 下**所有启用了心跳的会话**按各自配置触发空闲心跳（空闲 N 秒自动注入
 心跳提示词驱动一轮工作），并把工作/空闲/错误状态渲染到 stderr。与 `-m`、`--repl` 互斥。
-机制细节见 [symbio/src/plugins/heartbeat/docs/113-heartbeat-mechanism.md](../../symbio/src/plugins/heartbeat/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism")。
+机制细节见 [会话心跳机制（heartbeat）](../../symbio/src/plugins/heartbeat/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism")。
 
 模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
 
