@@ -417,8 +417,16 @@ fn execute_row_closes_on_turn_closed() {
 #[test]
 fn a_drafted_turns_closing_row_is_owed_but_the_driver_never_asks() {
     let drafted = vec![
-        ev(1, "user.message", json!({"text": "现在几点了", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "decide", "reason": "from_context"})),
+        ev(
+            1,
+            "user.message",
+            json!({"text": "现在几点了", "id": "u-1"}),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "decide", "reason": "from_context"}),
+        ),
         ev(
             1,
             "response",
