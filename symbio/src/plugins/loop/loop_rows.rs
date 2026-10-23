@@ -82,7 +82,11 @@ const EXECUTE: &str = "execute";
 /// 收束执行体（T-244 步 5）：把寄存的那一次应答落成收束格。
 const CLOSE: &str = "close";
 
-const ACTOR_EXECUTE: ActorDecl = ActorDecl {
+/// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
+///
+/// 对外的用处不止 [`ACTORS`]：判据 2 / 判据 4 的**夹具绑定表**在同一个 `by` 上换动作时，
+/// 照抄的就是这一份声明——名单一改，夹具与生产一起改，不会各拿一份名单。
+pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     name: EXECUTE,
     // 整轮执行体调模型：深度档。
     mode: LatencyTier::Deep,
@@ -142,13 +146,18 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
 ///
 /// 删除条件：T-244 步 5b/5d——中止轮与续写幕旁路的收束都改走 `close-turn` 行之后，
 /// 这两条一从表里删，运行期对账就恢复成「名单外即红」。
+///
+/// 这张表是**派发器的入参**（[`super::turn_exec::drive_steps`] 的 `actors`，ADR-123
+/// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
+/// 「动作写了零格 ⇒ `exhausted{no_progress}`」的用例就靠这条接缝——没有它只能永远说
+/// 那条分支「按构造不可达」。
 pub(crate) struct ActorEntry {
     pub(crate) decl: ActorDecl,
     pub(crate) run: super::turn_exec::Action,
     pub(crate) transitional: &'static [&'static str],
 }
 
-static ACTORS: &[ActorEntry] = &[
+pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
@@ -174,8 +183,11 @@ pub(crate) fn actor_decls() -> Vec<ActorDecl> {
 /// 动作与声明**必须一次查全**：派发器读账本时要豁免的协议五格、以及
 /// 「这个执行体声明过哪些领域格」，都来自同一条 `ActorEntry`。分两次查就是
 /// 给「声明与动作漂移」留缝。
-fn entry_of(by: &'static str) -> Option<&'static ActorEntry> {
-    ACTORS.iter().find(|e| e.decl.name == by)
+///
+/// 查的是**传进来的那张表**（ADR-123 决策 4）：`ACTORS` 是生产表，接缝让夹具能在
+/// 同名 `by` 上注册别的动作。
+fn entry_of(by: &'static str, actors: &'static [ActorEntry]) -> Option<&'static ActorEntry> {
+    actors.iter().find(|e| e.decl.name == by)
 }
 
 /// 协议五格：运行期写入封闭的**豁免名单**。
@@ -214,9 +226,9 @@ impl Next {
 /// 旧轮时 [`next`] 看不见它；这里不是第二套选债逻辑，而是把那**一行**连同它的
 /// 动作一起交回派发器（债键按轮，与行的 `key: &["turn"]` 同形状）。表头按轮
 /// 参数化之后这一格整格删除。
-pub(crate) fn resume_anchor(turn: u64) -> Option<Next> {
+pub(crate) fn resume_anchor(turn: u64, actors: &'static [ActorEntry]) -> Option<Next> {
     let decl = ROWS.iter().find(|d| d.name == "execute-turn")?;
-    let entry = entry_of(decl.by?)?;
+    let entry = entry_of(decl.by?, actors)?;
     Some(Next {
         row: decl.name,
         by: entry.decl.name,
@@ -996,14 +1008,23 @@ pub(crate) struct Next {
 /// 可还性只有一个声明位：`owed` 的 `blocked`（`by = None ∨ unless`）。
 /// 「注册表没覆盖的 `by`」不是第四个过滤条件——那种行直接写 `by = None`，
 /// 接回时与它的 `ActorEntry` 同批改（ADR-118 订正 1）。
-pub(crate) fn next(events: &[Event], turn: u64, now: i64) -> Option<Next> {
+///
+/// `actors` 是派发器手里的那张绑定表（生产 = [`ACTORS`]，ADR-123 决策 4）：行表决定
+/// 「谁欠什么」，这张表决定「这个名字跑哪个动作、它登记写哪些格」，读账本对账用的
+/// 名单也来自同一处。
+pub(crate) fn next(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [ActorEntry],
+) -> Option<Next> {
     let frozen = frozen()?;
     let debt =
         crate::symbio_core::ring::drive(frozen.rows(), &frozen, turn_slice(events, turn), now)?;
     trace(&frozen, &debt);
     // 选债面与动作同源：`by` 有声明 ⇔ 绑定表有这一条（两者一起构造），
     // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作、也不猜它的写入名单。
-    let Some(entry) = debt.decl.by.and_then(entry_of) else {
+    let Some(entry) = debt.decl.by.and_then(|by| entry_of(by, actors)) else {
         crate::plugin_warn!(
             "session",
             "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",

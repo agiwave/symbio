@@ -573,8 +573,11 @@ impl TurnSession {
         self.steps >= MAX_STEPS_PER_DRIVE
     }
 
-    /// 跑**一次模型往返**；`None` = 请求了工具（草稿已寄存，等 [`Self::tools`]），
-    /// `Some` = 本轮收束。
+    /// 跑**一次模型往返**：请求了工具就把应答留在草稿里等 [`Self::tools`]，答完了就
+    /// 留给 `close-turn`；本轮就地收口（兜底 / 中止 / 控制面失败）时把产出寄存在草稿。
+    ///
+    /// 它**不交回**产出（ADR-123 决策 5）：「本轮结束了没有」由派发器读账本判，
+    /// 执行体只写自己那一半事实。
     pub(crate) async fn model<S>(
         &mut self,
         store: &S,
@@ -583,20 +586,21 @@ impl TurnSession {
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
         has_dispatch: bool,
-    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    ) -> Result<(), crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
         match stream::model_round(&mut self.run, store, llm, tok, sink, tools, has_dispatch).await?
         {
-            stream::ModelRound::Done(outcome) => Ok(Some(outcome)),
-            stream::ModelRound::Tools => Ok(None),
+            stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
+            stream::ModelRound::Tools => {}
             // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
-            stream::ModelRound::Close => Ok(None),
+            stream::ModelRound::Close => {}
         }
+        Ok(())
     }
 
-    /// 收束寄存的那一次应答：落 `chat.assistant.final` / `fallback`。
+    /// 收束寄存的那一次应答：落 `chat.assistant.final` / `fallback`，产出寄存在草稿。
     ///
     /// 它是 `close-turn` 行的动作（T-244 步 5）。跑不跑这一步由**日志**决定
     /// （`turn.has_final`），不由这里决定；没有寄存时它不做任何事，派发器的
@@ -605,14 +609,16 @@ impl TurnSession {
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
-    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    ) -> Result<(), crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        stream::close_round(&mut self.run, store, llm).await
+        self.run.settled = stream::close_round(&mut self.run, store, llm).await?;
+        Ok(())
     }
 
-    /// 派发草稿里那一批工具；`None` = 继续下一轮，`Some` = 本轮收束（等待用户）。
+    /// 派发草稿里那一批工具：继续下一轮就把交换累加进草稿，收束于等待用户就把
+    /// 产出寄存在草稿。
     ///
     /// 没有草稿 / 没有分发通道时不做任何事——派发器只在草稿存在时选这个动作，
     /// 这里的空返回是防御，不是第二条选择路径。
@@ -621,14 +627,21 @@ impl TurnSession {
         store: &S,
         llm: &dyn LlmAdapter,
         dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
-    ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
+    ) -> Result<(), crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        match dispatch {
-            Some(dispatch) => stream::tool_round(&mut self.run, store, llm, dispatch).await,
-            None => Ok(None),
+        if let Some(dispatch) = dispatch {
+            self.run.settled = stream::tool_round(&mut self.run, store, llm, dispatch).await?;
         }
+        Ok(())
+    }
+
+    /// 派发器收工时取走本轮产出（[`prepare::Prepared::settled`]）。
+    ///
+    /// 取（`take`）而不是看：一次 drive 只交回一个产出，留着的第二次读会拿到上一轮的。
+    pub(crate) fn take_settled(&mut self) -> Option<TurnOutcome> {
+        self.run.settled.take()
     }
 
     /// 本动作属于哪一轮（派发器读事实切片与日志用）。

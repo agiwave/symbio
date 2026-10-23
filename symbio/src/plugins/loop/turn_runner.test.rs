@@ -128,7 +128,38 @@ impl TurnRunner {
         tools: &[crate::symbio_core::CapabilityMeta],
         dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
     ) -> Result<TurnOutcome, AppendError> {
-        super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch).await
+        self.drive_with_actors(
+            store,
+            llm,
+            tok,
+            input,
+            sink,
+            tools,
+            dispatch,
+            super::super::loop_rows::ACTORS,
+        )
+        .await
+    }
+
+    /// **换绑定表**的同一条派发路径（ADR-123 决策 4 的接缝）：在真实行表还在欠
+    /// `execute-turn` 时，让那个 `by` 跑一个别的动作（空动作 / 越界动作）。
+    ///
+    /// 判据 14「动作写了零格 ⇒ `exhausted{no_progress}`」与判据 2「写了名单外的格 ⇒
+    /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn drive_with_actors(
+        &self,
+        store: &dyn Store<Event = Event>,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        input: TurnInput,
+        sink: std::sync::Arc<dyn DeltaSink>,
+        tools: &[crate::symbio_core::CapabilityMeta],
+        dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
+        actors: &'static [super::super::loop_rows::ActorEntry],
+    ) -> Result<TurnOutcome, AppendError> {
+        super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch, actors)
+            .await
     }
 }
 
@@ -3844,5 +3875,172 @@ mod round_decision_tests {
             ..Default::default()
         };
         assert_eq!(final_answer(&rt, &StreamNodeFacts::default()), "半截正文");
+    }
+}
+
+// ── 派发器读账本（T-249 判据 4 / 判据 2）：换绑定表的两条夹具 ──────────────────
+//
+// 判据要的是「**不接线就红**」，不是「按构造不可达」：
+// - 判据 4（空账本 ⇒ `exhausted{no_progress}`）：删掉派发器的空账本守卫，本模块第一条
+//   用例落在 `step_limit` 而不是 `no_progress` ⇒ 红；
+// - 判据 2（名单外的格 ⇒ `exhausted{undeclared-write}`）：删掉对账，第一条越界写入
+//   静默入格 ⇒ 红。
+//
+// 两条都走生产派发器（`turn_exec::drive_steps`），差别只在**绑定表**：真实行表照旧欠
+// `execute-turn`，那个 `by` 上换的是别的手法（写零格 / 写名单外）。生产动作既不会写零格
+// 也不会写名单外的格 ⇒ 没有这条接缝，两条判据只能挂在口头。
+mod actor_ledger_tests {
+    use std::sync::Arc;
+
+    use super::super::super::loop_rows::{ActorEntry, ACTOR_EXECUTE};
+    use super::super::super::turn_exec::{ActorError, StepFuture, TurnStep};
+    use super::super::{TurnInput, TurnRunner};
+    use crate::symbio_core::{
+        check_all, ActorSpec, Entity, Event, EventStore, LatencyTier, Seq, SilentDeltas, Store,
+        TokenIssuer, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED,
+    };
+
+    /// 写**零格**的手法：只记一次模型往返（步数口径归执行体），不落任何事实。
+    ///
+    /// 那一步 `record_model_step()` 是为反向自检留的：守卫一旦被删，派发器会继续选同一笔债，
+    /// 记步数让它收在 `step_limit`（用例红），不记就永不返回（用例挂）。
+    fn writes_nothing<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+        Box::pin(async move {
+            step.session.record_model_step();
+            Ok(())
+        })
+    }
+
+    /// 写**名单外**格的手法：`message.added` 既不在 `execute` 的 `writes` 里，也不是协议格。
+    fn writes_off_the_list<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+        Box::pin(async move {
+            let turn = step.session.turn();
+            step.store
+                .append(Event::pending(
+                    "fixture-off-list".to_string(),
+                    EVENT_MESSAGE_ADDED,
+                    Entity::Message,
+                    Verb::Asserted,
+                    turn,
+                    "session/main",
+                ))
+                .map_err(ActorError::Append)?;
+            Ok(())
+        })
+    }
+
+    /// 夹具绑定表：名单照抄生产声明（[`ACTOR_EXECUTE`]），只换手法。
+    ///
+    /// `transitional` 清空——那两条豁免是给收束格的旁路写的（T-244 步 5d 随旁路一起删），
+    /// 留着就等于把要测的越界路径关掉。
+    static ACTORS_WRITE_NOTHING: &[ActorEntry] = &[ActorEntry {
+        decl: ACTOR_EXECUTE,
+        run: writes_nothing,
+        transitional: &[],
+    }];
+    static ACTORS_WRITE_OFF_LIST: &[ActorEntry] = &[ActorEntry {
+        decl: ACTOR_EXECUTE,
+        run: writes_off_the_list,
+        transitional: &[],
+    }];
+
+    /// 本轮入参：先落用户格（与 [`super::seed_user`] 同一条纪律），执行体一律不给工具。
+    fn input(store: &EventStore) -> TurnInput {
+        let user_seq = super::seed_user(store, 0, "账本夹具");
+        TurnInput {
+            turn: 0,
+            user_seq,
+            drive_seq: user_seq,
+            tier: LatencyTier::Deep,
+            inject: None,
+            window_turns: None,
+            resume: None,
+            actor: ActorSpec::trivial("session/main"),
+            prefix: None,
+            final_reply: None,
+            turn_root_id: String::new(),
+            dialog: None,
+            opening_text: None,
+            opening_dialog: None,
+            nodes: None,
+            stages: Vec::new(),
+            abort: None,
+        }
+    }
+
+    /// 空账本：动作什么都没写 ⇒ 环不会前进 ⇒ 收在 `exhausted{no_progress}`。
+    ///
+    /// 这条用例钉的是「执行体不自报进展」这件事：账本是日志尾段，不是返回值。
+    #[tokio::test]
+    async fn an_actor_that_writes_nothing_stops_as_no_progress() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = crate::symbio_core::StubLlmAdapter::succeed("stub-model");
+
+        let out = TurnRunner
+            .drive_with_actors(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &[],
+                None,
+                ACTORS_WRITE_NOTHING,
+            )
+            .await
+            .expect("到点必答：停机也是一句话");
+
+        assert!(out.fell_back, "什么都没写的收束是失败形状，不是「答完了」");
+        let snapshot = store.range(Seq::new(0));
+        let last = snapshot.last().expect("有收束格");
+        assert_eq!(last.kind, EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(last.payload["reason"], "exhausted");
+        assert_eq!(
+            last.payload["detail"], "no_progress",
+            "空账本收在 no_progress；删掉派发器的守卫会收在 step_limit——那条分支就是这条用例的红"
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    /// 名单外的写入：动作落了一格 `execute` 没声明的领域格 ⇒ 收在
+    /// `exhausted{undeclared-write}`，且那一格**确实在账本里**（对账读的是实际写入）。
+    #[tokio::test]
+    async fn an_actor_that_writes_off_its_list_stops_as_undeclared_write() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = crate::symbio_core::StubLlmAdapter::succeed("stub-model");
+
+        let out = TurnRunner
+            .drive_with_actors(
+                &store,
+                &llm,
+                &tok,
+                input(&store),
+                Arc::new(SilentDeltas),
+                &[],
+                None,
+                ACTORS_WRITE_OFF_LIST,
+            )
+            .await
+            .expect("越界也是一条事实，不是 panic");
+
+        assert!(out.fell_back);
+        let snapshot = store.range(Seq::new(0));
+        let kinds: Vec<&str> = snapshot.iter().map(|e| e.kind.as_str()).collect();
+        assert!(
+            kinds.contains(&EVENT_MESSAGE_ADDED),
+            "越界那一格要先真入格，对账才有东西可对：{kinds:?}"
+        );
+        let last = snapshot.last().expect("有收束格");
+        assert_eq!(last.kind, EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(
+            last.payload["detail"], "undeclared-write",
+            "名单外即停机；删掉对账这一步，这条用例红在 `no_progress`/静默收束上"
+        );
     }
 }

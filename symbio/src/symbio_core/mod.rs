@@ -56,7 +56,9 @@ pub use event::{
     EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
     EVENT_USER_MESSAGE,
 };
-pub use invariants::{check_all, closes_turn, is_turn_final, is_turn_open, provenance_violation};
+pub use invariants::{
+    check_all, closes_turn, is_stop_fact, is_turn_final, is_turn_open, provenance_violation,
+};
 pub use projection::calibration::calibration;
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::cost::cost_ledger;

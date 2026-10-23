@@ -2170,3 +2170,109 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
         "本轮已收束，`execute-turn` 不该还欠着"
     );
 }
+
+/// 收工判据（ADR-123 决策 5 的 `ends_the_drive`）：账本上哪一格让本轮收工。
+///
+/// ## 它钉的是「一把尺问两个问题」这件事
+///
+/// core 的停机尺 [`is_stop_fact`] 问的是 C6 的问题——「这一轮为什么停」，两种授权拒绝
+/// 都要答（都带 `reason`）。派发器问的是另一个问题：「本轮还往下走吗」。**端口面**的
+/// 授权拒绝（`authz.denied` 带 `port`）说的是那一笔工具没放行，载荷回灌给模型后轮还在
+/// 走；照搬停机尺会把 auto 幕的一次拒批读成本轮结束（现场 = e2e `t78` 的 auto 幕，
+/// 读侧看到的是「工具结果节点根本没长出来」）。
+///
+/// 反过来，「等待用户」那一格进展**不在**停机尺上（本轮尚未了结，收束格留给恢复幕），
+/// 却确实是本轮的最后一步——不补这一格，环会再跑一次模型往返，把「等你回答」跑成
+/// 「又答了一轮」。
+#[test]
+fn the_ledger_decides_which_cell_ends_the_drive() {
+    use crate::symbio_core::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_SENT};
+    use serde_json::Value;
+
+    let cell = |kind: &'static str, entity: Entity, verb: Verb, turn: u64, payload: Value| {
+        Event::pending(
+            format!("c-{kind}-{turn}"),
+            kind,
+            entity,
+            verb,
+            turn,
+            "session/main",
+        )
+        .with_payload(payload)
+    };
+    let ends = |e: &Event| ends_the_drive(e, 7);
+
+    // 收束格 / 兜底格：本轮了结。
+    assert!(ends(&cell(
+        EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        7,
+        Value::Null
+    )));
+    assert!(ends(&cell(
+        EVENT_ASSISTANT_FALLBACK,
+        Entity::Turn,
+        Verb::Closed,
+        7,
+        Value::Null
+    )));
+    // 别的轮的收束格不算本轮的工（切片按轮，但判据自己也得站得住）。
+    assert!(!ends(&cell(
+        EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        6,
+        Value::Null
+    )));
+
+    // 收束闸被拒：不落收束格，但它就是本轮的停（T-219）。
+    assert!(ends(&cell(
+        EVENT_AUTHZ_DENIED,
+        Entity::Turn,
+        Verb::Asserted,
+        7,
+        serde_json::json!({ "kind": "speech", "reason": "denied" })
+    )));
+    // 端口面被拒：那一笔工具没放行，**轮还在走**——这条就是回归现场。
+    assert!(!ends(&cell(
+        EVENT_AUTHZ_DENIED,
+        Entity::Turn,
+        Verb::Asserted,
+        7,
+        serde_json::json!({ "port": "tool", "id": "call_1", "reason": "denied" })
+    )));
+
+    // 等待用户：不是停机格，但是本轮最后一步。
+    assert!(ends(&cell(
+        EVENT_ASSISTANT_PROGRESS,
+        Entity::Turn,
+        Verb::Progressed,
+        7,
+        serde_json::json!({ "status": "pending" })
+    )));
+    // 中途汇报 / 开场白那类进展格：轮还在走。
+    assert!(!ends(&cell(
+        EVENT_ASSISTANT_PROGRESS,
+        Entity::Turn,
+        Verb::Progressed,
+        7,
+        serde_json::json!({ "status": "running" })
+    )));
+    // 产物格：算结算不算停（`closes_turn` 与停机尺不是一把尺，ADR-067）。
+    assert!(!ends(&cell(
+        EVENT_ARTIFACT_ADDED,
+        Entity::Artifact,
+        Verb::Asserted,
+        7,
+        Value::Null
+    )));
+    // 协议格没人拿来收工。
+    assert!(!ends(&cell(
+        EVENT_SENT,
+        Entity::Control,
+        Verb::Held,
+        7,
+        serde_json::json!({ "port": "model", "id": "m-1" })
+    )));
+}

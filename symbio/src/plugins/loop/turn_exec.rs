@@ -88,11 +88,11 @@ use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
-    llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta, ConsolidateRequest, DeltaSink,
-    Entity, Event, ExecAbortSignal, ExecEventSink, FullModel, LatencyTier, LlmAdapter,
-    ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer,
-    TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,
+    ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
+    LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq,
+    SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
@@ -788,17 +788,16 @@ pub(crate) enum ActorError {
     Append(AppendError),
 }
 
-/// 动作的返回：`None` = 本轮继续（下一步还欠着），`Some` = 本轮收束。
+/// 动作的返回：`Ok(())` = 这一步做完了（本轮是否收束由派发器读账本判），`Err` = 失败。
+///
+/// **动作不交回产出**（ADR-123 决策 5）：收束的判据在日志上（账本里出现停机格），
+/// 产出由收束那一步寄存在本轮草稿（[`prepare::Prepared::settled`]），派发器收工时取走。
+/// 让它交回 `Option<TurnOutcome>` 等于把「本轮结束了没有」的判断权还给执行体。
 ///
 /// `+ Send` 不是装饰：插件的 `dispatch` 未来要交回线程池，派发器在它里面 await
 /// 这个动作。
-///
-/// `Option<TurnOutcome>` 这一半在 ADR-123 决策 5 里退役（收束判断改读账本、产出从
-/// 草稿取）；本批先把错误通道换成 [`ActorError`]，两个通道不能分两批改——一次动作
-/// 既不交回 outcome 又不报错的时候，收束判断**必须**已经有地方可读。
-type StepFuture<'a> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<Option<TurnOutcome>, ActorError>> + Send + 'a>,
->;
+pub(crate) type StepFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ActorError>> + Send + 'a>>;
 
 /// 绑定表里的动作类型。**一个 `by` 一个动作**：派发器只调它，不按行名 / 端口名 /
 /// 业务语义分支（ADR-118 决策 1–2；`Executor::for_by` 的名字 match 已退役）。
@@ -887,8 +886,12 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。
 ///
 /// ADR-123 给派发器补了**读账本**这一步：动作前后各读一次日志，尾段就是这一次动作的
-/// 实际写入（不由执行体自报）。两格停机理由都从它来——名单外的领域格 ⇒
-/// `exhausted{undeclared-write}`，空账本 ⇒ `exhausted{no_progress}`。
+/// 实际写入（不由执行体自报）。三件事都从它来，按这个顺序判：
+/// 名单外的领域格 ⇒ `exhausted{undeclared-write}`，尾段里出现停机格 ⇒ 本轮收工、
+/// 产出从草稿取（决策 5），空账本 ⇒ `exhausted{no_progress}`。
+///
+/// `actors` 是**这一轮用的执行体绑定表**（决策 4）：生产传 [`loop_rows::ACTORS`]，
+/// 夹具在同名 `by` 上注册别的动作。「无进展」这条用例没有接缝就永远造不出来。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_steps(
     store: &dyn Store<Event = Event>,
@@ -898,6 +901,7 @@ pub(crate) async fn drive_steps(
     sink: Arc<dyn DeltaSink>,
     tools: &[CapabilityMeta],
     dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+    actors: &'static [super::loop_rows::ActorEntry],
 ) -> Result<TurnOutcome, AppendError> {
     let step_sink = sink.clone();
     // 续写幕旁路（**不是兼容层**，见下方 `next.is_none` 处的理由）：`turn_head` 是
@@ -911,7 +915,7 @@ pub(crate) async fn drive_steps(
         // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
         // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。
         let facts = store.range(Seq::new(0));
-        let next = super::loop_rows::next(&facts, session.turn(), session.now_ms());
+        let next = super::loop_rows::next(&facts, session.turn(), session.now_ms(), actors);
         let next = match next {
             Some(next) => next,
             None if !resumed => {
@@ -924,7 +928,7 @@ pub(crate) async fn drive_steps(
             // 在表里看不到。这限制在表侧，堵在这里只会让恢复永远 `no_progress`
             // （用例 `an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor`）。
             // 旁路唯一的作用点就是这一行：把那**一行**连同它的动作一起交回来。
-            None => match super::loop_rows::resume_anchor(session.turn()) {
+            None => match super::loop_rows::resume_anchor(session.turn(), actors) {
                 Some(next) => next,
                 None => return session.exhausted(store, llm, "no_progress").await,
             },
@@ -945,7 +949,7 @@ pub(crate) async fn drive_steps(
             return session.exhausted(store, llm, "step_limit").await;
         }
         let head = store.head();
-        let outcome = {
+        {
             let mut step = TurnStep {
                 session: &mut session,
                 store,
@@ -955,13 +959,14 @@ pub(crate) async fn drive_steps(
                 tools,
                 dispatch,
             };
+            // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（ADR-123 决策 5）。
             match (next.action)(&mut step).await {
-                Ok(outcome) => outcome,
+                Ok(()) => {}
                 // 一元枚举：动作面今天只会因落格失败，原样交回调用方（与换通道之前
                 // 逐字同行为）。加变体时要在这里回答「派发器为它落哪条事实」。
                 Err(ActorError::Append(e)) => return Err(e),
             }
-        };
+        }
         // **账本**（ADR-123 决策 1）：这一次动作的**实际写入** = 日志尾段（动作前的
         // `head` 起），不是执行体自报的一份陈述。写不经过返回值（PL-016 §2.3 明文
         // 「单写者是 store，不是引擎函数」），所以自报的 `Vec<Fact>` 漏一条就对账不上一条，
@@ -986,7 +991,22 @@ pub(crate) async fn drive_steps(
             );
             return session.exhausted(store, llm, "undeclared-write").await;
         }
-        if let Some(outcome) = outcome {
+        // **收束判断读账本**（ADR-123 决策 5）：本轮收不收工由日志说，不由执行体说。
+        // 产出是收束那一步寄存进草稿的（`prepare::Prepared::settled`），派发器取走交回调用方。
+        if let Some(closing) = ledger.iter().find(|e| ends_the_drive(e, session.turn())) {
+            let Some(outcome) = session.take_settled() else {
+                // 账本说收了工、草稿里没有产出可交回 = 有一条收束路径写了停机格却没寄存它。
+                // 不猜一个产出（那等于把「没记账」读成「记了个空账」）：出声 + 落停机格。
+                crate::plugin_warn!(
+                    "actors",
+                    "[v2] 执行体 {} 落了停机格 `{}`（行 {}，turn={}）却没寄存本轮产出——收束路径漏记",
+                    next.by,
+                    closing.kind,
+                    next.row,
+                    session.turn()
+                );
+                return session.exhausted(store, llm, "unrecorded-outcome").await;
+            };
             return Ok(outcome);
         }
         // ADR-118 决策 7 + ADR-123 决策 1：账本为空 ⇒ 这一次动作什么都没写，环不会前进，
@@ -996,6 +1016,29 @@ pub(crate) async fn drive_steps(
             return session.exhausted(store, llm, "no_progress").await;
         }
     }
+}
+
+/// 账本上的这一格是否让**本轮收工**（ADR-123 决策 5 的收束判据）。
+///
+/// 三种形态，各对应「本轮不再往下走」的一个理由：
+/// - 收束格 / 兜底格（[`is_stop_fact`] 的第一臂）；
+/// - **收束闸**被拒的否定事实——`authz.denied` **不带 `port`** 的那一条。带 `port`
+///   的是**端口面**的授权拒绝（`tool_dispatch::denied_event`），它说的是「那一笔工具
+///   没放行」，拒绝载荷回灌给模型后**轮还在走**；拿 core 的停机尺（C6 问「这一轮为什么
+///   停」，两种拒绝都要答）直接当收工判据，会把 auto 幕的一次拒批读成本轮结束
+///   （判据 = e2e `t78` 的 auto 幕）。
+/// - 收束于**等待用户**那一格进展（`status: "pending"`）：它不是停机格（本轮尚未了结，
+///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
+///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 ADR-123。
+fn ends_the_drive(e: &Event, turn: u64) -> bool {
+    if e.turn != turn {
+        return false;
+    }
+    if is_stop_fact(e) {
+        return e.kind != EVENT_AUTHZ_DENIED || e.payload.get("port").is_none();
+    }
+    e.kind == EVENT_ASSISTANT_PROGRESS
+        && e.payload.get("status").and_then(|v| v.as_str()) == Some("pending")
 }
 
 /// 一轮的执行：装配（阶段①）→ 调用（阶段②）→ 结局归类（阶段③）→ 落格（阶段④）。

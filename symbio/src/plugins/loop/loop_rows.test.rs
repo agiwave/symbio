@@ -1162,7 +1162,7 @@ fn tool_rows_do_not_disturb_the_model_rows() {
 #[test]
 fn next_is_none_without_events() {
     // 空表不前进：装载失败 / 还没有本幕事实时，派发器不能猜一个动作。
-    assert!(super::next(&[], 0, 0).is_none());
+    assert!(super::next(&[], 0, 0, super::ACTORS).is_none());
 }
 
 #[test]
@@ -1172,7 +1172,7 @@ fn next_picks_execute_turn_while_the_turn_is_open() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0).expect("开着的幕应欠 execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕应欠 execute-turn");
     assert_eq!(next.row, "execute-turn");
     assert_eq!(next.by, "execute");
 }
@@ -1246,7 +1246,7 @@ fn next_picks_close_turn_before_execute_turn_once_answered() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
         model_answer(1, "m-1"),
     ];
-    let next = super::next(&events, 1, 0).expect("答完了的幕欠一次收束");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("答完了的幕欠一次收束");
     assert_eq!(next.row, "close-turn");
     assert_eq!(next.by, super::CLOSE);
     let run: super::super::turn_exec::Action = super::super::turn_exec::run_close;
@@ -1261,7 +1261,7 @@ fn next_is_none_once_the_turn_is_closed() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
         ev(1, "chat.assistant.final", json!({"text": "ok"})),
     ];
-    assert!(super::next(&events, 1, 0).is_none());
+    assert!(super::next(&events, 1, 0, super::ACTORS).is_none());
 }
 
 /// 「能选中」与「有人跑」是同一件事的两面：`next` 交出的不只是行名，还有动作本体。
@@ -1272,7 +1272,7 @@ fn next_hands_back_the_action_itself() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0).expect("开着的幕欠 execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
     assert_eq!(next.row, "execute-turn");
     assert_eq!(next.by, super::EXECUTE);
     let run: super::super::turn_exec::Action = super::super::turn_exec::run_execute;
@@ -1291,7 +1291,7 @@ fn the_row_table_and_the_binding_table_agree() {
     for d in ROWS {
         let Some(by) = d.by else { continue };
         assert!(
-            super::entry_of(by).is_some(),
+            super::entry_of(by, super::ACTORS).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );
@@ -1329,7 +1329,7 @@ fn writes_closed_admits_declared_protocol_and_exempted_only() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0).expect("开着的幕欠 execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
     // 声明过的领域格。
     assert!(next.writes_closed("turn.dispatch"));
     // 协议五格：引擎写，本来就不许出现在 `writes` 里（装载期 `ENGINE_ONLY_CELLS` 拦）。

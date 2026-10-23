@@ -61,6 +61,12 @@ pub(crate) struct Prepared {
     /// 一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取应答与
     /// 节点事实，落 `chat.assistant.final` / `fallback`。
     pub(crate) closing: Option<(LlmTurn, StreamNodeFacts)>,
+    /// 本轮**收束动作的产出**（ADR-123 决策 5）：落收束 / 停机格的那一步把它寄存进草稿，
+    /// 派发器在账本上看到停机格后从这里取走交回调用方。
+    ///
+    /// 为什么放草稿而不是让动作交回来：执行体不判断「本轮结束了没有」——那一半判据在
+    /// 日志上（账本里出现停机格），交回 `Option<TurnOutcome>` 等于让它自己宣布收束。
+    pub(crate) settled: Option<TurnOutcome>,
 }
 
 impl Prepared {
@@ -382,5 +388,6 @@ where
         pending_model: None,
         pending_round: None,
         closing: None,
+        settled: None,
     })))
 }

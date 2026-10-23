@@ -314,6 +314,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 bridge.clone(),
                 tools,
                 Some(dispatch_ref),
+                super::super::loop_rows::ACTORS,
             )
             .await;
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。

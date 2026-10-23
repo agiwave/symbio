@@ -266,6 +266,7 @@ pub(crate) async fn execute_final_reply_turn(
         Arc::new(SilentDeltas),
         &[],
         None,
+        super::super::loop_rows::ACTORS,
     )
     .await
     .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
