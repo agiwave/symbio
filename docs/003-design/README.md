@@ -66,7 +66,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 73 · draft 0 · retired 0（共 73）
+**计数**：active 74 · draft 0 · retired 0（共 74）
 
 ## 现行设计（active）
 
@@ -107,6 +107,7 @@ board.columns: [impl]
 | [`DE-041-技能编译与自我改进`](041-技能编译与自我改进.md) | 技能编译与自我改进 | 与代码一致 |
 | [`DE-042-自主层与长期目标`](042-自主层与长期目标.md) | 自主层与长期目标 | 部分落地 |
 | [`DE-043-多智能体社会`](043-多智能体社会.md) | 多智能体社会 | 部分落地 |
+| [`DE-044-能力注册表建设`](044-能力注册表建设.md) | 能力注册表建设 | 与代码一致 |
 | [`DE-101-context-compression-design`](../../symbio/src/plugins/session/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-102-core-loop`](../../symbio/src/plugins/session/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 与代码一致 |
 | [`DE-103-turn-runner-steps`](../../symbio/src/plugins/session/docs/103-turn-runner-steps.md) | 016 · `run_with_tools` 的 Step 施工图（DE-014 步骤 1） | 与代码一致 |

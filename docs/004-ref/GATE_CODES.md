@@ -27,6 +27,7 @@ lists: [gate-codes=owner]
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016 | `D-017` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
+| **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
@@ -37,6 +38,7 @@ lists: [gate-codes=owner]
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
+| **OB** | 义务环派发面（旁路直调计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–003 | `OB-004` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–003 | `PP-004` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
@@ -85,6 +87,8 @@ lists: [gate-codes=owner]
 | **DC-003** | `scripts/doc-count-audit.mjs` |
 | **DC-004** | `scripts/doc-count-audit.mjs` |
 | **DC-005** | `scripts/doc-count-audit.mjs` |
+| **DS-001** | `scripts/doc-section-audit.mjs` |
+| **DS-002** | `scripts/doc-section-audit.mjs` |
 | **E-001** | `scripts/plugin-entry-audit.mjs` |
 | **E-002** | `scripts/plugin-entry-audit.mjs` |
 | **E-003** | `scripts/plugin-entry-audit.mjs` |
@@ -138,6 +142,9 @@ lists: [gate-codes=owner]
 | **N-005** | `scripts/core-naming-audit.mjs` |
 | **NDC-001** | `scripts/no-direct-call-audit.mjs` |
 | **NDC-002** | `scripts/no-direct-call-audit.mjs` |
+| **OB-001** | `scripts/obligation-bypass-audit.mjs` |
+| **OB-002** | `scripts/obligation-bypass-audit.mjs` |
+| **OB-003** | `scripts/obligation-bypass-audit.mjs` |
 | **PN-001** | `scripts/panic-audit.mjs` |
 | **PN-002** | `scripts/panic-audit.mjs` |
 | **PN-003** | `scripts/panic-audit.mjs` |

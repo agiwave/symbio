@@ -85,6 +85,17 @@ function legacyRoleCells(text) {
   return cells
 }
 
+/** `scripts/obligation-bypass-audit.mjs` 的 `BYPASS_BASELINE`（OB-001）：同构的三元形状，
+ *  一格——旁路直调 `owes()` 的点数上限（只许降）。它是「收口完成 = 计数归零」这条定义
+ *  的**唯一持有者**：设计文档正文只写口径，数字住这里，所以放宽它就等于放宽那个定义。 */
+function obligationBypassCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.OBLIGATION_BYPASS_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('OB-001', Number(m[1]))
+  return cells
+}
+
 /** `tauri/vitest.config.ts` 的 `coverage.thresholds`：一个嵌套块，四条全局 + 一条分目录。
  *  **只扫 `thresholds: {` 块**——同一文件里别处也有 `lines:` 这类键。 */
 function coverageCells(text) {
@@ -176,6 +187,18 @@ const RATCHETS = [
     waivers: waiverReader('legacy-role-allow'),
     envVar: 'LEGACY_ROLE_WRITE_BASELINE',
     label: 'S-014 ChatNode 存量 role 格直写（只许降）',
+  },
+  {
+    // 旁路直调 `owes()` 的点数。DE-015 §5.3 把「收口完成」定义成**这个数归零**，
+    // 而定义要成立，那个数就不能被悄悄改大——「改一个数字」看起来像维护，实际是在
+    // 取消一条已经写进设计的定义。
+    id: 'obligation-bypass',
+    file: 'scripts/obligation-bypass-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: obligationBypassCells,
+    waivers: waiverReader('obligation-bypass-allow'),
+    envVar: 'OBLIGATION_BYPASS_BASELINE',
+    label: '旁路直调 `owes()` 的点数（只许降，归零 = 派发面收口完成）',
   },
   {
     id: 'coverage',

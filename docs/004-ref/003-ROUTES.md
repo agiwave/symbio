@@ -62,11 +62,11 @@ lists: [route-contracts=owner]
 
 ### 配置管理（**没有配置路由**）
 
-配置就是一个**普通的可寻址文档**：`<插件目录>/PLUGIN.yml`，对外地址`<根>/<插件>/PLUGIN.yml`（`ext = form`）。读写用的就是 `vdfs/read` / `vdfs/write`——与任何其它资源同一条链路、同一套寻址，因此前端与 LLM 用同一种方式改配置。定义与校验归**配置的拥有者**，默认值从它自己的 `Default` 读出（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3.4）。
+配置就是一个**普通的可寻址文档**：`<插件目录>/PLUGIN.yml`，对外地址`<根>/<插件>/PLUGIN.yml`（`ext = form`）。读写用的就是 `vdfs/read` / `vdfs/write`——与任何其它资源同一条链路、同一套寻址，因此前端与 LLM 用同一种方式改配置。定义与校验归**配置的拥有者**，默认值从它自己的 `Default` 读出（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §3 地址模型）。
 
 ### 资源（VDFS）
 
-资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md#22-vdfs-操作 "RE-006-当前事实表")**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `symbio/src/providers/vdfs_service/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §11 / §13.4）。
+资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md#22-vdfs-操作 "RE-006-当前事实表")**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `symbio/src/providers/vdfs_service/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
 
 ---
 
@@ -248,7 +248,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 **本插件无自有路由**。清单与取值分别由 `<根>/plugin_manager` 的 `vdfs/list` / `vdfs/read` 承担。
 
-它是本智能体**插件集合**的门面：清单 = **各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）。前者由各插件在 `traverse` 里经 `capability_announce_configurable` 声明，容器用共享收集器收下并写回请求 ctx（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §13.1）——因此**新增一个可配置插件不需要在本插件登记任何东西**；自有分区的数据在前端 store，`read` / `write` 对它们恒 `Forbidden`。
+它是本智能体**插件集合**的门面：清单 = **各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）。前者由各插件在 `traverse` 里经 `capability_announce_configurable` 声明，容器用共享收集器收下并写回请求 ctx（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点）——因此**新增一个可配置插件不需要在本插件登记任何东西**；自有分区的数据在前端 store，`read` / `write` 对它们恒 `Forbidden`。
 
 配置条目**不是第二种东西**：它就是那个插件的配置，入口挂在`<根>/plugin_manager/<插件名>`，读 / 写转发到容器根下的 `<插件名>/PLUGIN.yml`——同一份配置仍然只有一个**文件**、一份**定义**（拥有者给的那份）。
 

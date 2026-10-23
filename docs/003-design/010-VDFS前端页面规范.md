@@ -395,7 +395,7 @@ pub struct VdfsNewType {
  多级深链。每个地址是一个**可回退的页面**——「浏览内部」= push 进容器目录地址，不是浮层。
 - **后端**：资源存储只有 `providers/vdfs_service` 的三个 `VdfsProvider` 实现
  （单文件 / 目录 / 内存）；`EntityProvider` / `EntityVdfsAdapter` / `EntityStore` /
- `StorageService` 一套实体与存储抽象**已不存在**（见 [VDFS 前端页面规范](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §13.4）。
+ `StorageService` 一套实体与存储抽象**已不存在**（见本文 §8 一致性要求）。
 
 ---
 
