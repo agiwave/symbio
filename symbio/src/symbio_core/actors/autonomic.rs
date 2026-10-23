@@ -1,9 +1,9 @@
-//! 自主发起者（[roadmap/S12](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")）：定时触发、表达欲、开长目标任务、健康自检。
+//! 自主发起者（[roadmap/S12](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）：定时触发、表达欲、开长目标任务、健康自检。
 
 use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
 use crate::symbio_core::Event;
 
-/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")）。
+/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）。
 ///
 /// 形状 = `pattern: decider`（规则驱动，零 LLM）、能力只 `define.work`、
 /// `budget_ms` = 自主档 [`LatencyTier::Autonomic`]（四层时延的第四个取值——自主层不是

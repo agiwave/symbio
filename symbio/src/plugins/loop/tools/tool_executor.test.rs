@@ -1121,7 +1121,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层

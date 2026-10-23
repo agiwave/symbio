@@ -34,7 +34,7 @@
 //! - **回退出终态 = 返工**：`completed → pending / in_progress` 写
 //!   `task.rework_created` + 一个**新节点**的 `task.opened`（`{id}-r{n}`），
 //!   旧节点仍是终态——返工是新增一条事实，不是回滚
-//!   （[roadmap/S03 §2](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）。
+//!   （[roadmap/S03 §2](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
 //!   这正是 `rework_bounded` 的**生产写方**：不是一条永远空转的断言。
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规

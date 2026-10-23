@@ -385,7 +385,7 @@ ToolCall 标 `Completed`**，前端在执行窗口内就没有任何「运行中
 | 正常分发 | `tool_executor::process_tool_calls_async` |
 | 恢复执行（approve / retry / supply） | `resume::process_tool_resume_action` |
 | 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口：父节点 `Completed` + `meta.failure_kind = "not_executed"`，并由 `not_executed_result` 补一条结果子节点（**成对**，缺一就是「有请求无响应」） |
-| 外部执行闸门拒绝（[plan/DE-016](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") S8 步 20） | `process_tool_calls_async` 内**就地收场**：父节点 `Completed`，`meta.failure_kind = "permission_denied"`（`Refuse`，未授权）或 `"tool_unavailable"`（`Break`，熔断），结果子节点文本 `Refused: …`。判据在钩子**之前**读、结论在钩子**之前**出——被拒的调用不跑 `PreToolUse`，`Refuse` 连一条事件都不产生（[roadmap/GO-129 §6](../../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")） |
+| 外部执行闸门拒绝（[DE-016](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") S8 步 20） | `process_tool_calls_async` 内**就地收场**：父节点 `Completed`，`meta.failure_kind = "permission_denied"`（`Refuse`，未授权）或 `"tool_unavailable"`（`Break`，熔断），结果子节点文本 `Refused: …`。判据在钩子**之前**读、结论在钩子**之前**出——被拒的调用不跑 `PreToolUse`，`Refuse` 连一条事件都不产生（[DE-039 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")） |
 
 **"本批每一个 ToolCall 都必须以终态收场"** 由 `process_tool_calls_async` 负责保证：
 调用前广播 `Streaming`，调用后广播终态，未执行的批尾在函数末尾一次性收口。

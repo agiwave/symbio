@@ -61,7 +61,7 @@ function printGroup(lines, mine, status, title, depth, cols, glyph) {
 }
 
 /**
- * 编号找不到时的友好提示：文档类编号带名称段（`GO-001-前端去业务化`），
+ * 编号找不到时的友好提示：文档类编号带名称段（`DE-001-核心架构`），
  * 传裸前缀（`GO-001`）时指出唯一候选——查询仍保持精确匹配（与 `--id` 同语义）。
  */
 function notFound(lines, entries, id, what) {

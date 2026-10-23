@@ -1,4 +1,4 @@
-//! 成本台账（S8 第 20 步，[roadmap/S09 §3](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")
+//! 成本台账（S8 第 20 步，[roadmap/S09 §3](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
 //! 的 `projection = budget` 参数；实现名 `cost_ledger`——`budget` 这个词让给
 //! view 域的 [`crate::symbio_core::view::Budget`]（记账口径），这里只做累计视图）。
 //!

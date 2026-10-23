@@ -240,7 +240,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
     SelfVerifier { principal: String },
 }
 
@@ -305,7 +305,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断")
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
@@ -438,7 +438,7 @@ impl PermissionMatrix {
     }
 }
 
-/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）：
+/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 对某主体某项能力的一次**收回**或**恢复**。
 ///
 /// ## 为什么是数据而不是状态

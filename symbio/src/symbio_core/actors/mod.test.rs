@@ -3,7 +3,7 @@
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
-//! [roadmap/S01 §6](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")。
+//! [roadmap/S01 §6](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")。
 
 use super::*;
 use crate::symbio_core::event::{
@@ -1115,7 +1115,7 @@ fn commitment_records_pair_by_payload_id() {
     assert_eq!(recs[1].why, "", "守约的记录不该带原因");
 }
 
-// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会") 断言 2/3/4，）──
+// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") 断言 2/3/4，）──
 use crate::symbio_core::actors::EliminationDecider;
 use crate::symbio_core::authz::PRINCIPAL_ARBITER;
 use crate::symbio_core::event::{Entity as VEntity, EVENT_VERDICT_ASSERTED};

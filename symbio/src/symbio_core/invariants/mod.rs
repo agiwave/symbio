@@ -5,7 +5,7 @@
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")；
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")；
 //! [`open_unique_per_turn`] 随 plan/11 批 0 补入）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
@@ -232,8 +232,8 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 /// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
-///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")）；
-/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/001-goal/126-长期记忆与语义检索.md "GO-126-长期记忆与语义检索")
+///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）；
+/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")
 ///   步骤 11 出口判据：溯源覆盖 100%——无溯源的记忆无法审计，也无法在遗忘时被追溯）。
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
@@ -335,7 +335,7 @@ pub fn provenance_dangling(events: &[Event], allow_slice_edges: bool) -> Vec<Vio
 /// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
 /// 读出口 `session/stats` 因此共享同一条口径，e2e 不必自己挑一个数字。
 /// 取 3：返工两轮还在返，说明当初的任务拆得或验收得有问题，该被看见而不是被
-/// 默许（[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")
+/// 默许（[roadmap/S03 §5](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
@@ -421,7 +421,7 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。
 ///
-/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/001-goal/121-最小闭环.md "GO-121-最小闭环")）：
+/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）：
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
@@ -594,7 +594,7 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 
 /// C14（终止性前提 3）：任务依赖图**无环且无悬空依赖**（Kahn 拓扑排序）。
 ///
-/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")），
+/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")），
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。

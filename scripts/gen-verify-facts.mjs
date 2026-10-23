@@ -64,8 +64,8 @@ const OUT_REL = path.join('docs', '003-design', 'verify', 'facts', 'mod.rs')
 
 const ARCH_REL = path.join('docs', '003-design', '001-核心架构.md')
 const FRAME_REL = path.join('docs', '003-design', '008-能力注册表与能力坐标系.md')
-const LADDER_REL = path.join('docs', '001-goal', '120-路线图总览.md')
-const STAGE_DIR_REL = path.join('docs', '001-goal')
+const LADDER_REL = path.join('docs', '003-design', '030-能力阶梯总览.md')
+const STAGE_DIR_REL = path.join('docs', '003-design')
 
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')
 
@@ -507,9 +507,9 @@ export function claimsOf(ladderMd) {
  */
 export function stageFilesOf(dirEntries) {
   return dirEntries
-    .filter((f) => /^1(2[1-9]|3[0-3])-.+\.md$/.test(f)) // 121–133 是阶；120 是总览，其余是普通任务
+    .filter((f) => /^0(3[1-9]|4[0-3])-.+\.md$/.test(f)) // 031–043 是阶；030 是总览，其余是别的设计
     .sort()
-    .map((f) => ({ id: `S${String(parseInt(f.slice(0, 3), 10) - 120).padStart(2, '0')}`, file: f }))
+    .map((f) => ({ id: `S${String(parseInt(f.slice(0, 3), 10) - 30).padStart(2, '0')}`, file: f }))
 }
 
 /** 汇总成一份 facts 文本（导出给测试用：同一份代码，测试喂假文档） */
@@ -525,7 +525,7 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
   const absent = claims.filter((c) => !files.some((f) => f.id === c.id)).map((c) => c.id)
   if (missing.length || absent.length) {
     throw new Error(
-      `阶梯总表与阶文档（GO-121–133）不是一对一同名：只在总表里 ${absent.join(', ') || '无'}；` +
+      `阶梯总表与阶文档（DE-031–043）不是一对一同名：只在总表里 ${absent.join(', ') || '无'}；` +
         `只在目录里 ${missing.join(', ') || '无'}`,
     )
   }
@@ -572,8 +572,8 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
 
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
-  out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/001-goal 与 docs/003-design 抽取，**不要手改**。')
-  out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。')
+  out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。')
+  out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
   out.push('// 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，')
@@ -741,7 +741,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     .map(([n, a]) => `\n    (${rs(n)}, ${rs(a)}),`)
     .join('')}\n];`)
   out.push('')
-  out.push('/// 路线图总表 §1 对某一阶的**声明**——是被验的结论，不是输入')
+  out.push('/// 能力阶梯总表 §1 对某一阶的**声明**——是被验的结论，不是输入')
   out.push(`pub struct StageClaim {
     pub id: &'static str,
     pub name: &'static str,

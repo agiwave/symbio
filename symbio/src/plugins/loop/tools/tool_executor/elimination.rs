@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
-/// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）：
+/// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 本会话主体是否已被收回 `assign.work`。
 ///
 /// 与 [`super::breaker::BreakerInputs`] 同一条纪律：判据在**批首**读一次，

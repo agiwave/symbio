@@ -254,7 +254,7 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/001-goal/131-技能编译与自我改进.md "GO-131-技能编译与自我改进")）。
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
     ///
     /// ## 它控制什么
     ///
@@ -274,7 +274,7 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/001-goal/131-技能编译与自我改进.md "GO-131-技能编译与自我改进")
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
     /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
     /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：

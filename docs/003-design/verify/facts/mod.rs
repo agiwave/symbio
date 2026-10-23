@@ -1,5 +1,5 @@
-// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/001-goal 与 docs/003-design 抽取，**不要手改**。
-// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。
+// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。
+// 要改这些数据就改文档（01 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。
 //
 // 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；
 // 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，
@@ -807,7 +807,7 @@ pub const DECLARED_SOCIAL: &[(&str, &str)] = &[
     ("可撤销的承诺", "时域跨度"),
 ];
 
-/// 路线图总表 §1 对某一阶的**声明**——是被验的结论，不是输入
+/// 能力阶梯总表 §1 对某一阶的**声明**——是被验的结论，不是输入
 pub struct StageClaim {
     pub id: &'static str,
     pub name: &'static str,
@@ -911,7 +911,7 @@ pub struct StageDoc {
 pub const STAGE_DOCS: &[StageDoc] = &[
     StageDoc {
         id: "S01",
-        file: "121-最小闭环.md",
+        file: "031-最小闭环.md",
         assigns: &[
             ("event.entity", "turn"),
             ("event.verb", "closed"),
@@ -924,7 +924,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S02",
-        file: "122-工具调用与产物.md",
+        file: "032-工具调用与产物.md",
         assigns: &[
             ("event.entity", "artifact"),
             ("event.verb", "asserted"),
@@ -935,7 +935,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S03",
-        file: "123-多步任务与返工.md",
+        file: "033-多步任务与返工.md",
         assigns: &[
             ("event.entity", "task"),
             ("event.verb", "progressed"),
@@ -947,7 +947,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S04",
-        file: "124-并发调度与租约.md",
+        file: "034-并发调度与租约.md",
         assigns: &[
             ("event.verb", "held"),
             ("actor.capability", "assign.work"),
@@ -958,7 +958,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S05",
-        file: "125-长会话与断点恢复.md",
+        file: "035-长会话与断点恢复.md",
         assigns: &[
             ("event.entity", "thread"),
             ("projection", "checkpoint"),
@@ -968,7 +968,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S06",
-        file: "126-长期记忆与语义检索.md",
+        file: "036-长期记忆与语义检索.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "asserted"),
@@ -979,7 +979,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S07",
-        file: "127-插话与实时打断.md",
+        file: "037-插话与实时打断.md",
         assigns: &[
             ("event.entity", "control"),
             ("event.verb", "held"),
@@ -990,7 +990,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S08",
-        file: "128-多主体与对等承诺.md",
+        file: "038-多主体与对等承诺.md",
         assigns: &[
             ("event.entity", "commitment"),
             ("principal", "agent:peer-b"),
@@ -1002,7 +1002,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S09",
-        file: "129-外部执行与熔断.md",
+        file: "039-外部执行与熔断.md",
         assigns: &[
             ("event.entity", "control"),
             ("event.verb", "asserted"),
@@ -1013,7 +1013,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S10",
-        file: "130-个人认知体系注入.md",
+        file: "040-个人认知体系注入.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "asserted"),
@@ -1025,7 +1025,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S11",
-        file: "131-技能编译与自我改进.md",
+        file: "041-技能编译与自我改进.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "progressed"),
@@ -1036,7 +1036,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S12",
-        file: "132-自主层与长期目标.md",
+        file: "042-自主层与长期目标.md",
         assigns: &[
             ("event.entity", "system"),
             ("event.verb", "opened"),
@@ -1047,7 +1047,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S13",
-        file: "133-多智能体社会.md",
+        file: "043-多智能体社会.md",
         assigns: &[
             ("event.entity", "commitment"),
             ("event.verb", "asserted"),

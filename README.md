@@ -92,7 +92,7 @@ symbio/
 
 | | |
 | --- | --- |
-| **入门** | [快速上手](docs/006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/003-design/004-系统地图.md "DE-004-系统地图") · [价值主张](docs/001-goal/000-价值主张.md "GO-000-价值主张") · [场景](docs/002-scene/README.md "SC-000-场景汇总") |
+| **入门** | [快速上手](docs/006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/003-design/004-系统地图.md "DE-004-系统地图") · [产品目标](docs/001-goal/001-产品目标.md "GO-001-产品目标") · [场景](docs/002-scene/README.md "SC-000-场景汇总") |
 | **架构** | [总览](docs/003-design/002-架构总览.md "DE-002-架构总览") · [数据流](docs/003-design/003-数据流与调用链.md "DE-003-数据流与调用链") · [协议](docs/003-design/005-协议规范.md "DE-005-协议规范") · [决策记录](docs/003-design/README.md "DE-000-设计总览") |
 | **参考** | [事实表](docs/004-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | **开发** | [插件开发](docs/006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [文档中心与登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |

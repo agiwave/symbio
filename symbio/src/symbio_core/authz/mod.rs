@@ -49,13 +49,13 @@
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
 //!
-//! 自主发起者那一行已按 [S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")
+//! 自主发起者那一行已按 [S12 §3](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")
 //! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
 //! 说明一件事——**窄行是唯一入口**（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）：
 //! 未登记的主体在表里没有行 ⇒ 每个谓词为假，登记过的一行就是它的权威能力集，
 //! 谁都不派生谁。
 //!
-//! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [S07 §5](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")
+//! 抢占判定者那一行（`session/reflex`，只持 `judge.intent`）按 [S07 §5](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
 //! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，判据是
 //! 「没有行 = 拒」——断言与表同一方向。
 
@@ -104,7 +104,7 @@ pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 /// [D-069 §决策 2] 那张表，写侧接线时（[] 把「压缩由谁写」的判据换掉）随接线
 /// 一批立常量、随布线摘标记，两步同批发生。
 ///
-/// 自主发起者的身份（[roadmap/S12 §3](../../../../docs/001-goal/132-自主层与长期目标.md "GO-132-自主层与长期目标")）
+/// 自主发起者的身份（[roadmap/S12 §3](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）
 /// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
 ///
 /// 与 [`PRINCIPAL_MAIN`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，两边
@@ -113,7 +113,7 @@ pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 /// 死记录，而自主行为照旧能冒充用户对话。
 pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 
-/// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/001-goal/127-插话与实时打断.md "GO-127-插话与实时打断")）
+/// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）
 /// ——表里那一行的名字与 `PreemptionDecider` 三个事件（`task.held` /
 /// `task.progressed` / `control.opened`）的 `actor` 是同一个常量。
 ///
@@ -123,7 +123,7 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 /// 「不得发言」与断言同方向（D-099：表是权威，未登记 = 拒）。
 pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 
-/// **对等主体**的身份（[roadmap/S08 §3](../../../../docs/001-goal/128-多主体与对等承诺.md "GO-128-多主体与对等承诺")）
+/// **对等主体**的身份（[roadmap/S08 §3](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）
 /// ——表里那一行的名字与对等体写事件用的 `actor` 是同一个常量。
 ///
 /// 它是本表里**第一个对等（图侧）主体**：与主从树的子智能体不同，对等体不依附某个会话，
@@ -136,7 +136,7 @@ pub(crate) const PRINCIPAL_REFLEX: &str = "session/reflex";
 /// 发起者」）——窄行不是补丁，是它唯一的入口。
 pub(crate) const PRINCIPAL_PEER: &str = "session/peer-b";
 
-/// **市场**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// **市场**的身份（[roadmap/S13 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）——
 /// 组织形态三角色的第一行， 落地。
 ///
 /// 只持 `assign.work`：市场的权威动作是**派活**（`agent_run` 的委托面），不是自己干活。
@@ -147,7 +147,7 @@ pub(crate) const PRINCIPAL_PEER: &str = "session/peer-b";
 /// 拿主智能体整套（含 `reply.*`）——「市场不得冒充主控发言」于是被静默推翻。
 pub(crate) const PRINCIPAL_MARKET: &str = "session/market";
 
-/// **仲裁者**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// **仲裁者**的身份（[roadmap/S13 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）——
 /// 组织形态三角色的第二行， 落地。
 ///
 /// 只持 `assert.verification`：仲裁的权威动作是**对判定盖章**（`verdict.asserted`，
@@ -159,7 +159,7 @@ pub(crate) const PRINCIPAL_MARKET: &str = "session/market";
 /// verdict 的竞争 + 仲裁者」），藏起来的裁决没有仲裁。
 pub(crate) const PRINCIPAL_ARBITER: &str = "session/arbiter";
 
-/// **守门者**的身份（[roadmap/S13 §3](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")）——
+/// **守门者**的身份（[roadmap/S13 §3](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）——
 /// 组织形态三角色的第三行， 落地。
 ///
 /// 只持 `judge.intent`：准入门槛的权威动作是**判来者意图**，与 [`PRINCIPAL_REFLEX`]
@@ -167,7 +167,7 @@ pub(crate) const PRINCIPAL_ARBITER: &str = "session/arbiter";
 /// 工作记录（S13 §3「public 与 thread_private 并存」的另一半），不是公共域公告。
 pub(crate) const PRINCIPAL_GATEKEEPER: &str = "session/gatekeeper";
 
-/// **工人**的身份（[roadmap/S02 §3](../../../../docs/001-goal/122-工具调用与产物.md "GO-122-工具调用与产物")）——
+/// **工人**的身份（[roadmap/S02 §3](../../../../docs/003-design/032-工具调用与产物.md "DE-032-工具调用与产物")）——
 /// S02 worker 行， 与执行路径同批落地。
 ///
 /// 只持 `produce.artifact`：工人的权威动作是**产生产物**（`agent_run` 委派链上以产物
@@ -181,7 +181,7 @@ pub(crate) const PRINCIPAL_GATEKEEPER: &str = "session/gatekeeper";
 /// 共享同一个主体名，而两者的驱动路径与上限判据都不同。
 pub(crate) const PRINCIPAL_WORKER: &str = "session/worker";
 
-/// **规划者**的身份（[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）——
+/// **规划者**的身份（[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）——
 /// S03 规划者行， 落地（行本批落，驱动路径的裁决见该任务文档）。
 ///
 /// 只持 `define.work`：规划的权威动作是**立任务**（任务图的开格与推进），与
@@ -194,7 +194,7 @@ pub(crate) const PRINCIPAL_WORKER: &str = "session/worker";
 /// 不是又一个会说话的会话主体。
 pub(crate) const PRINCIPAL_PLANNER: &str = "session/planner";
 
-/// **验证者**的身份（[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")）——
+/// **验证者**的身份（[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）——
 /// S03 验证者行， 落地（行本批落，驱动路径的裁决见该任务文档）。
 ///
 /// 只持 `assert.verification`：独立验证的权威动作是**对判定盖章**（S03 §2「独立验证者 =
@@ -237,7 +237,7 @@ pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
 }
 
 /// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
-/// （[roadmap/S09 §6](../../../../docs/001-goal/129-外部执行与熔断.md "GO-129-外部执行与熔断") 验收 1）。
+/// （[roadmap/S09 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 验收 1）。
 ///
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
@@ -246,7 +246,7 @@ pub(crate) fn content_visible(scope: VisScope, viewer: &str) -> bool {
 pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();
 
 /// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
-/// （[roadmap/S13 §2](../../../../docs/001-goal/133-多智能体社会.md "GO-133-多智能体社会")
+/// （[roadmap/S13 §2](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")
 /// 「淘汰 = 声誉投影低于阈值 → 不再被授予 `assign.work`」）。
 ///
 /// 与 [`CAP_EXTERNAL_EXECUTION`] 同一条理由提成常量：这个名字出现在三个地方——
@@ -256,7 +256,7 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name
 pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
-/// （[roadmap/S03 §3](../../../../docs/001-goal/123-多步任务与返工.md "GO-123-多步任务与返工")
+/// （[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")
 /// 「规划者 ▸ `define.work`」， 落地其读方）。
 ///
 /// 与 [`CAP_ASSIGN_WORK`] 同一条理由提成常量：这个名字今天出现在四个地方——授权表行
