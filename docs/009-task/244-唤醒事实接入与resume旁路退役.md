@@ -2,14 +2,15 @@
 kind: task
 id: T-244-唤醒事实接入与resume旁路退役
 title: PL-017 步 4–5 收口——审批/插话/中止唤醒进 await 行，resume.rs 旁路退役
-status: doing
+status: done
 created: 2026-10-22
 track: plan
 parent: T-236-义务环符合性收口批
 prio: next
 deps: [T-240-唤醒事件时间戳取代墙钟]
 where: symbio/src/plugins/loop/resume.rs · symbio/src/plugins/loop/turn_exec.rs · symbio/src/plugins/loop/loop_rows.rs · symbio/src/symbio_core/decl/
-exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落一条唤醒事实，其**行语义按 [ADR-121](../010-adr/121.md) 定案**（审批与补充重新开账、中止落 `failed{why:"aborted"}`，不改 `await` 行的 `until`）；`resume.rs` 承担的恢复 / 审批 / 问答三条旁路逐条迁进行表后整文件退役（`turn_exec.rs:846,858` 的 `resumed` 旁路与 `loop_rows.rs:138` 的 `resume_anchor` 一并消失）；`close-turn` 收束行进表（PL-017 §3.1：owes `turn.has_final ∧ ¬closed`，until 两条收束格，by `closer`；`has_final` 的日志口径由 ADR-121 给定），收束不再只靠执行体内联；`resumed` 与续写幕两处「跳过无债守卫」的特例由行表语义接管或有名有姓留档；`authorize-tool` / `dispatch-tools` 接回执行体之后才可以抬（口径 4：那之前放宽只会造出永不派发的 `request`）且 retry 用例使用真实 `PortDecl`；全量门禁与 e2e 绿。'
+exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落一条唤醒事实，其**行语义按 [ADR-121](../010-adr/121.md) 定案**（审批与补充重新开账、中止落 `failed{why:"aborted"}`，不改 `await` 行的 `until`）；`resume.rs` 承担的恢复 / 审批 / 问答三条旁路逐条迁进行表后整文件退役（`turn_exec.rs:846,858` 的 `resumed` 旁路与 `loop_rows.rs:138` 的 `resume_anchor` 一并消失）；`close-turn` 收束行进表（PL-017 §3.1：owes `turn.has_final ∧ ¬closed`，until 两条收束格，by `closer`；`has_final` 的日志口径由 ADR-121 给定），收束不再只靠执行体内联（**定稿答话轮除外**：那一轮一次模型往返都不发，`close-turn` 开不出账，缺口归 [T-253](253-定稿答话轮的收束格不进环.md "T-253-定稿答话轮的收束格不进环")）；`resumed` 与续写幕两处「跳过无债守卫」的特例由行表语义接管或有名有姓留档；`authorize-tool` / `dispatch-tools` 接回执行体之后才可以抬（口径 4：那之前放宽只会造出永不派发的 `request`）且 retry 用例使用真实 `PortDecl`；全量门禁与 e2e 绿。'
+evidence: 步 4 / 5 共五批提交（git log 的 `refactor(loop)` 五条）；CLI 复验（口径 5）：会话 `verify-t244-f`（审批卡中断 → 重启进程 → 放行 → 续跑）与 `verify-t244-a`（常规两幕）在 `obligation-ring-accept --strict` 下 J1…J8 全项通过；门禁 `node scripts/gate.mjs` 130/130 全绿（含 e2e 78/78）；守卫锚 S-017（`resume.rs` / `resume_anchor` / `resumed` 零出现）；例外：定稿答话轮的收束格缺口归 [T-253](253-定稿答话轮的收束格不进环.md "T-253-定稿答话轮的收束格不进环")
 ---
 
 ## 内容
@@ -32,6 +33,16 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
 3. `close-turn` 行在表且 `chat.assistant.final` / `chat.assistant.fallback` 经它收口；
    `turn.has_final` 进视图声明（口径：本幕最近一条 `response(port=model)` 的 `calls` 为空
    ∧ 未收束），视图 `ver` 相应升号。
+   **2026-10-23 步 5e 对账（口径收窄）**：本条覆盖的是**派发过模型往返的轮**（工具轮 /
+   普通轮，含中止与适配器失败两条兜底路径——它们的收束格由 `close` 执行体落）。
+   **定稿答话轮**（`classify` 判 `Answered` 的短路轮）的收束格**不经** `close-turn` 行：
+   那一轮一次模型往返都不发，日志上没有 `response(port=model)` ⇒ `turn.has_final`
+   不成立 ⇒ 收束行开不出账；它的收束格由轮首准备 1b 分支就地落
+   （`turn_runner/prepare.rs`）。这不是实现取巧，是 [ADR-121](../010-adr/121.md) 的
+   `has_final` 口径与 [PL-017](../004-plan/017-端口细粒度化.md "PL-017-端口细粒度化") §3.1 的行形状**合起来
+   覆盖不到**这一轮（视图只读日志，而「有一份备好的答话待入格」是内存草稿状态——
+   ADR-121 明文否决把内存布尔折进视图）。缺口与候选形状登记为
+   [T-253-定稿答话轮的收束格不进环](253-定稿答话轮的收束格不进环.md)（裁决先行）。
 4. `tool` 端口 `max_attempts > 1` 且 retry 用例使用真实 `PortDecl`（非 `port.test.rs`
    里合成的 `RETRYING`）——销「重试路径只有合成覆盖」；`turn` / `model` 保持 1
    （PL-016 §2.3：等待方随进程消失 ⇒ 到顶即判死，不许顺手放宽）。
@@ -256,3 +267,34 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   缺口——§3.1 的前件只认「答完了」，而 §3.1 的**出口**却写着两条收束格（兜底格与中止格
   都要落），前件认不全时出口的那一格永远开不了账。步 5 第一批已把这个缺口记在案
   （「要接管它们得先给『没收束且不会再有应答』立一个视图字段」），本批就是那个字段。
+- 2026-10-23 步 5e（口径 5：审批卡中断 → 唤醒 → 续跑 的 CLI 实证 + 判据脚本一处口径订正）。
+  实测会话 `verify-t244-f`（Provider `LMStudio`，网关 `127.0.0.1:9241`）：第一程里模型要
+  `http_request` 打 `https://example.com`，该工具风险等级 `high` ⇒ 要审批 ⇒ CLI 没有应答
+  入口 ⇒ 本轮停在审批卡上。日志里的派发序列是 `execute-turn`（执行体 execute）→
+  `open-tools`（执行体 opener）→ `authorize-tool`（执行体 authorizer）→
+  `deny-tools`（执行体 courier），CLI 印的是「⏸ 等待用户动作：需要确认：发送 HTTP 请求…」
+  与「CLI 没有回答入口：本轮停在这里，请在桌面端作答后继续」。事实面那一笔走的是
+  `request`（seq 12）→ `authz.denied{detail:"needs_approval"}`（13）→
+  `failed{why:"needs_approval"}`（14）—— **没有 `sent`**：没放行就没派发。
+  第二程**重启进程**后放行（经与桌面端同构的 `/api/v1/invoke` 边界送
+  `vdfs/action(…, "approve")`，HTTP 200 + `ok:true`）：唤醒落成 `request(port=tool)`
+  id `tool-resume-0-32134f43-1`（seq 20），派发序列变成 `authorize-tool`（authorizer）→
+  `dispatch-tools`（courier）→ `execute-turn`（execute）→ **`close-turn`（close）**；
+  事实面 `authz.granted`（27）→ `sent`（28）→ `response`（29），模型再跑一轮后
+  `response(port=model)` 带 `calls: []`（33）⇒ `has_final` 成立 ⇒ 收束格
+  `chat.assistant.final`（34）由 `close-turn` 行的执行体落。
+  **判据脚本一处口径订正**：`obligation-ring-accept.mjs` 的 J1 原本要求每一组端口往返都有
+  `sent`，而这一笔被拒的调用**不该**有 `sent`（e2e T78 判的正是「拒 ⇒ 不得派发」）
+  ⇒ J1 改为「缺 `sent` 只在没被拒时判红；被拒却派发了判红」。改前 `verify-t244-f` 红在
+  「J1 tool-0-d0-model-0-d0-s0-32134f43: 缺 sent」；改后常规两幕 `verify-t244-a`
+  （纯问答 + 工具轮，58 格 / 11 组往返，`HTTP 8 / sent(model) 6 / 豁免未入账 2`）与
+  审批续跑 `verify-t244-f`（39 格 / 6 组往返，`HTTP 3 / sent(model) 2 / 豁免未入账 1`）
+  在 `--strict` 下全项通过。豁免的那 1 与 2 是 `classify` 插件内部的判决往返，归
+  [T-247](247-插件内部模型往返进环.md "T-247-插件内部模型往返进环")。
+  **一处与口径 3 的偏差**（当场登记，不顺手改）：定稿答话轮（`classify` 判 `Answered` 的
+  短路轮）的收束格**不经** `close-turn` 行——那一轮一次模型往返都不发，日志上没有
+  `response(port=model)` ⇒ `turn.has_final` 不成立 ⇒ 收束行开不出账；它的收束格由轮首
+  准备 1b 分支就地落（`turn_runner/prepare.rs`）。这不是实现取巧，是 ADR-121 的 `has_final`
+  口径与 PL-017 §3.1 的行形状合起来覆盖不到这一轮。缺口与三个候选形状登记为
+  [T-253-定稿答话轮的收束格不进环](253-定稿答话轮的收束格不进环.md "T-253-定稿答话轮的收束格不进环")
+  （裁决先行，未裁决不动模块）；本任务的 `exit` 与口径 3 同批订正（例外条款 + 缺口归属）。

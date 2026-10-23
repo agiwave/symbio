@@ -18,7 +18,7 @@
  *
  * | # | 判据 | 口径来源 |
  * |---|------|----------|
- * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request` | PL-016 §4 五事实 |
+ * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request`。**例外**：被拒的那一笔（`authz.denied`）没有 `sent` 是对的——没放行就没派发（e2e T78 的同一条判据）；反过来「拒了却派发了」判红 | PL-016 §4 五事实 |
  * | J2 | `user.message` 的 seq 先于本轮任何协议 `request` | PL-017 判据 2（溯源不悬空的时间面） |
  * | J3 | `sent` 的 seq 严格小于终态的 seq | PL-016 §4（引擎写 before，应答在后） |
  * | J4 | 收束格（`chat.assistant.final`）的 `reason` 非空 | PL-016 §6 结局必须有名 |
@@ -262,10 +262,14 @@ function judgeSession(homedir, sid, strict) {
     const requests = g.filter((f) => f.kind === 'request')
     const sent = g.find((f) => f.kind === 'sent')
     const terminals = g.filter((f) => TERMINAL.has(f.kind))
+    // **被拒的那一笔没有 `sent` 是对的**：没放行就没派发（e2e T78 判的正是这一条）。
+    // 所以「缺 sent」只在**没被拒**时判红；被拒的判据另取：拒了却派发了 ⇒ 判红。
+    const denied = events.some((e) => e.kind === 'authz.denied' && e.payload?.id === id)
     if (requests.length !== 1) {
       note(`J1 ${id}: request 有 ${requests.length} 笔（应为 1）—— ${g.map((f) => f.kind).join('/')}`)
     }
-    if (!sent) note(`J1 ${id}: 缺 sent`)
+    if (!sent && !denied) note(`J1 ${id}: 缺 sent`)
+    if (denied && sent) note(`J1 ${id}: 授权被拒却派发了（拒 ⇒ 不得有 sent）`)
     if (terminals.length !== 1) note(`J1 ${id}: 终态（response|failed）有 ${terminals.length} 笔（应为 1）`)
     // J3 sent 先于终态
     if (sent && terminals.length > 0 && !terminals.every((t) => t.seq > sent.seq)) {
