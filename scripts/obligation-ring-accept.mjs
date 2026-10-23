@@ -52,6 +52,12 @@
  *   node scripts/obligation-ring-accept.mjs --homedir=.symbio --session=verify-ring-3 \
  *        [--session=verify-ring-2] [--cli-log=<file>] [--strict]
  * 退出码：0 = 全项通过；1 = 有失效；2 = 输入读不出（会话目录 / WAL 缺失 / JSON 不可解析）。
+ *
+ * ⚠️ **`--cli-log` 那份日志必须是带 `-v` 的 CLI 实测产物**。`classify/decide` 的观测是
+ * 一行 `plugin_debug!`（`decide.rs:146`），不带 `-v` 时整份日志里没有它 ⇒ 豁免额判成 0
+ * ⇒ J8 把「分类真的打了模型」读成「一条没人记账的模型路径」而判红。那是假红（实测
+ * 2026-10-23：不带 `-v` 报 `HTTP 6 ≠ 入账 4 + 豁免 0`，带 `-v` 同一套动作报
+ * `HTTP 7 = 入账 5 + 豁免 2` 全项通过），但假红与真红在终端上长得一样，所以写在这里。
  */
 
 import fs from 'node:fs'
