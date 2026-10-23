@@ -41,7 +41,6 @@ pub(crate) struct Assembled<'a> {
     pub(crate) turn_no: u64,
     pub(crate) user_seq: u64,
     pub(crate) drive_seq: u64,
-    pub(crate) resume_anchor: Option<TurnResume>,
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) bridge: Arc<UiBridge>,
     pub(crate) emitter: tokio::task::JoinHandle<()>,
@@ -69,7 +68,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         drive_seq,
         window_turns,
         tools,
-        resume,
         recalled,
         supplements,
         on_round,
@@ -116,25 +114,9 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 轮号与溯源锚由编排层在判决之前定下（T-225）：用户格先落，这里只收三个
     // seq，不再从切片反推。
     // - 新开轮：`turn_no` = 第几条用户格，`user_seq` = 该格的 seq；
-    // - 续写轮：`turn_no` = **已开未收束**的那一轮（审批 / 问答恢复），`user_seq`
-    //   是它的原用户格 seq——续写**不新开用户格**，收束仍记在该轮上（C4 按 turn
-    //   配对，另开新轮会把原轮变成永久假缺口，见 core `TurnResume`）。
-    let resume_anchor = resume.map(|r| TurnResume {
-        call: TurnToolCallInfo {
-            id: None,
-            wire_id: None,
-            name: Some(r.name.clone()),
-            arguments: r.args.clone(),
-            parse_error: None,
-            overflow_notice: None,
-        },
-        text: r.text.clone(),
-        // 节点身份（调用 / 轮根 / 结果）随恢复方直给的取值入格——续写轮的
-        // `artifact.added` 复用它们，重建才把结果挂回**原来那张卡**之下。
-        call_id: Some(r.call_id.clone()),
-        turn_id: Some(r.turn_id.clone()),
-        result_id: Some(r.result_id.clone()),
-    });
+    // - 唤醒幕：`turn_no` = **已开未收束**的那一轮（审批 / 问答恢复），`user_seq`
+    //   是它的原用户格 seq——唤醒**不新开用户格**，收束仍记在该轮上（C4 按 turn
+    //   配对，另开新轮会把原轮变成永久假缺口）。
 
     // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
     // 执行完随 `ExecTurnResult` 回灌进 `context.messages`（落库动作就是
@@ -222,11 +204,11 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 一次模型调用都不发生。两关缺一不可：
     //
     // - **逐字命中**（`take_match`：判据是数据，更宽的匹配接进来时改的是它）；
-    // - **只对新开轮**：续写轮**不新开用户格**（调用方直给原轮的 `user_seq`），而
-    //   反射档的落格形状就是新开一轮（`u-{turn}`）⇒ 续写轮走它会撞幂等键
+    // - **只对新开轮**：唤醒幕（审批 / 问答恢复）**不新开用户格**（调用方直给原轮的
+    //   `user_seq`），而反射档的落格形状就是新开一轮（`u-{turn}`）⇒ 唤醒幕走它会撞幂等键
     //   （`AppendError::Duplicate` → Failed 出口），既完不成收束、也把本轮变成错误。
-    //   语义上同样说不通：续写要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
-    //   故 `resume_anchor` 非空时一律不走快路（判定根本不算，不是算了再丢）。
+    //   语义上同样说不通：唤醒要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
+    //   故唤醒幕一律不走快路（判定根本不算，不是算了再丢）。
     // 先做**一次**匹配，再问表"这一格要不要走快路"。判据在 `loop_rows` 的
     // `policy.reflex`（`!resumed ∧ skill_hit`）——两个输入都是事实（幕锚与召回
     // 阶段落下的 `result`），本处不再递交内存布尔。`hit` 是行命中之后才取用的
@@ -317,7 +299,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         turn_no,
         user_seq,
         drive_seq,
-        resume_anchor,
         collected,
         bridge,
         emitter,

@@ -762,45 +762,31 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         Some("not_executed")
     );
     assert_eq!(updates.len(), 2, "两次调用都必须有终态");
-}
-
-/// 未执行的终态必须是 `Completed` 而非 `Failed`。
-///
-/// `Failed` 会让 `get_context_messages` 过滤掉父 ToolCall 节点，留下"孤儿 tool 结果"
-/// → 下一轮 LLM 请求携带非法 `tool_call_id`。与既有口径一致：工具失败属**信息性**，
-/// 差异由 `meta.failure_kind` 承载。
-#[test]
-fn not_executed_patch_is_completed_not_failed() {
-    // 完整副本 + 就地应用终态（发射端从权威转写取副本后调用）
-    let mut p = ChatNode {
-        id: "tc1".into(),
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
-        ..Default::default()
-    };
-    apply_not_executed(&mut p, "not_executed");
-    assert_eq!(p.id, "tc1", "整条替换语义下 id 必须保持");
-    assert_eq!(p.status, Some(NodeStatus::Completed));
-    assert!(p.error.is_none());
+    // 父节点的终态补丁：**没跑到**的成因写进 `meta.failure_kind`，且状态是
+    // `Completed` 而不是 `Failed`——`Failed` 会让 `get_context_messages` 过滤掉
+    // 父 ToolCall 节点，留下「孤儿 tool 结果」→ 下一轮请求携带非法 `tool_call_id`。
+    // 工具失败属**信息性**，差异由 `failure_kind` 承载。
+    let skipped_parent = updates
+        .iter()
+        .find(|u| u.id == "tc2")
+        .expect("tc2 的父节点终态缺失");
+    assert_eq!(skipped_parent.status, Some(NodeStatus::Completed));
+    assert!(skipped_parent.error.is_none());
     assert_eq!(
-        p.meta.as_ref().and_then(|m| m.get("success")),
-        Some(&json!(false))
+        skipped_parent
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("success"))
+            .and_then(|v| v.as_bool()),
+        Some(false)
     );
     assert_eq!(
-        p.meta.as_ref().and_then(|m| m.get("failure_kind")),
-        Some(&json!("not_executed"))
-    );
-    // 成因可区分：「被钩子拦下」与「批次没轮到」不是同一件事，
-    // 共用一个标记会让事后排查只能靠猜。
-    let mut blocked = ChatNode {
-        id: "tc1".into(),
-        ..Default::default()
-    };
-    apply_not_executed(&mut blocked, "blocked");
-    assert_eq!(
-        blocked.meta.as_ref().and_then(|m| m.get("failure_kind")),
-        Some(&json!("blocked"))
+        skipped_parent
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some("not_executed")
     );
 }
 

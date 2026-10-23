@@ -45,7 +45,7 @@ run_with_tools
 | 2a | `Halt` | `rt.tool_calls.is_empty()` | `f-{turn}` · completed（`finish` 随载荷带出） |
 | 2a 空答 | `Emit` → `Halt` | 答话取值为空（含 `finish=length` 的截断） | 兜底格 |
 | 2b | `Emit` → `Halt` | 有工具调用但 `dispatch` 缺 | 兜底格（配置缺口，诚实回报） |
-| 2c | `Emit` × N | 每条 `outcome`（过 `closure_granted(Artifact)` 闸） | `a-{turn}-{n}` · `EVENT_ARTIFACT_ADDED` · 首格带 `round` |
+| 2c | `Emit` × N | 每条 `outcome`（过 `closure_gate(Artifact)` 闸） | `a-{turn}-{n}` · `EVENT_ARTIFACT_ADDED` · 首格带 `round` |
 | 2d | `Emit` → `Halt` | `outcomes.any(needs_user_action)` | `p-{turn}-{n}` · `EVENT_ASSISTANT_PROGRESS` · `status: pending` |
 | 2e/2f | （无 Step） | 纯内存状态推进 | 无（`exchange` / `rounds` / `tool_round` 是投影的原料，不是事实） |
 | 3a | `Emit` → `Halt` | `Err(AdapterError::Aborted)` | `f-{turn}` · aborted + `terminated` |
@@ -93,7 +93,7 @@ u-{turn} → [op-{turn}] → { [a-{turn}-0 … a-{turn}-n] → [p-{turn}-m] }* �
 |---|---|---|---|
 | 兜底 | 模型空答 / 请求异常 / 无 dispatch | 兜底格（`fell_back` 形状） | `fell_back: true` |
 | 中止 | `AdapterError::Aborted` / 1c 检查 | 中止收束格（`terminated`） | `aborted: true` |
-| 授权拒绝 | `closure_granted` 为假 | **不落格**（本轮留未收束，C4 报得出） | `closure_denied: true` |
+| 授权拒绝 | `closure_gate` 判拒 | **不落格**（本轮留未收束，C4 报得出）+ 落一条 `authz.denied` | `closure_denied: true` |
 | 截断 | `finish.is_length()` 且正文空 | 不提升思考为正文，草稿仍作思考事实入格 | `finish: Length` |
 
 **判据**：兜底与中止**绝不复用彼此的格**——把「用户按了停止」记成「模型答不出」会抬高

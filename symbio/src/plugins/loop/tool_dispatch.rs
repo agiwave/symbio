@@ -50,14 +50,12 @@ use crate::symbio_core::{
     capability_resolve, llm_emit_message, llm_emit_state, tool_metas, CapabilityRiskLevel, Entity,
     Event, ExecAbortSignal, ExecEventSink, LlmTurn, Plugin, PluginInvokeRequest,
     PluginInvokeRequestExt, Seq, Store, Verb, CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED,
-    EVENT_AUTHZ_GRANTED, EVENT_REQUEST, MODE, RISK_LEVEL,
+    EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE, RISK_LEVEL,
 };
 
 use super::loop_rows;
 use super::port;
-use super::tools::{
-    execute_tool_async, is_unanswered, process_tool_calls_async, ABORTED, NOT_EXECUTED,
-};
+use super::tools::{is_unanswered, process_tool_calls_async, NOT_EXECUTED};
 use super::turn_exec::UiBridge;
 use crate::symbio_core::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
@@ -115,6 +113,97 @@ pub(crate) struct ToolPortCall {
     pub(crate) deny_why: Option<&'static str>,
     /// 派发动作是否已落 `sent`（派发动作写入）。
     pub(crate) sent: bool,
+    /// 这一笔是**恢复幕的唤醒调用**（T-244 步 5d）：由用户动作（批准 / 重试 /
+    /// 补充 / 回答 / 拒绝）落成的 `request`，不是某个模型响应里的调用。
+    ///
+    /// 派发动作据它决定「跑工具」还是「只合成结果」——两者的事实完全一样
+    /// （`request → authz → sent → response / failed`），差别只在读侧。
+    pub(crate) wake: Option<WakeIntent>,
+}
+
+/// 唤醒调用的种类（T-244 步 5d）。
+///
+/// 恢复幕没有新的模型应答，工具批的入口是**用户动作**。用户动作先落成一笔
+/// `request(port=tool)`（[`ToolPort::land_wake`]），之后与批次走同一条授权 / 派发
+/// 链；本枚举只说明那一笔要不要真正跑工具。
+#[derive(Debug, Clone)]
+pub(crate) enum WakeIntent {
+    /// approve / retry / supply：用户要求重跑一次工具。
+    Execute,
+    /// answer / reject：用户给出了结果（答案或拒绝理由），工具不再执行。
+    ///
+    /// `denied = true` ⇒ 授权行落 `authz.denied`、派发尾落 `failed{user_rejected}`；
+    /// 其余 ⇒ 授权放行、派发落 `response`。
+    Result {
+        text: String,
+        ok: bool,
+        denied: bool,
+    },
+}
+
+impl WakeIntent {
+    /// 从 `request` 载荷的 `resume` 字段还原（[`Self::kind`] 的反函数）。
+    fn from_payload(payload: &serde_json::Value) -> Option<Self> {
+        match payload.get("resume").and_then(|v| v.as_str())? {
+            "answer" => Some(Self::Result {
+                text: payload
+                    .get("result_text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                ok: true,
+                denied: false,
+            }),
+            "reject" => Some(Self::Result {
+                text: payload
+                    .get("result_text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                ok: false,
+                denied: true,
+            }),
+            _ => Some(Self::Execute),
+        }
+    }
+}
+
+/// 一次唤醒**要落的内容**（[`ToolPort::land_wake`] 的入参）。
+///
+/// 打包成一个形状而不是七个位置参数：这些字段同属「用户动作」这一件事，分成
+/// 位置参数时调用点要靠顺序记住谁是谁，而顺序错了编译器不报错——载荷里
+/// `wire_id` 与 `turn_id` 互换的后果是结果挂错卡片。
+pub(crate) struct WakeSpec<'a> {
+    /// 用户动作的种类（`approve` / `retry` / `supply` / `answer` / `reject`）——
+    /// 落进载荷的 `resume` 标记，读侧据此还原意图。
+    pub(crate) kind: &'static str,
+    /// 被唤醒的那张卡（ToolCall 节点 id）：结果挂回它。
+    pub(crate) target: &'a str,
+    /// 工具名（LLM 可见名）。
+    pub(crate) tool: &'a str,
+    /// 这次调用的参数。
+    pub(crate) args: &'a serde_json::Value,
+    /// ToolCall 节点的 provider wire id。
+    pub(crate) wire_id: &'a str,
+    /// 本轮 Turn 根节点 id（UI 帧挂载的父节点）。
+    pub(crate) turn_root: &'a str,
+    /// 这一笔要不要真跑工具。
+    pub(crate) intent: &'a WakeIntent,
+}
+
+/// 一次唤醒的**读侧形状**：把 `request` 载荷还原成派发 / 授权动作要的那份调用。
+///
+/// 为什么在派发时才还原、而不是像模型批次那样把创建结果寄存在草稿里：唤醒请求
+/// 是在**开幕之前**落的（它要让 `turn_head` 看见「本幕有活没干完」），那时还没进
+/// 执行体。行表选中授权 / 派发行时，草稿里没有 `pending_*`——这一格就是那两行
+/// 动作的入口。
+pub(crate) struct WakeBatch {
+    /// 还原出的「模型往返」：`tool_calls` 里只有被唤醒的那一笔，节点 id 就是原
+    /// ToolCall（结果因此挂回原来那张卡，而不是新长一张）。
+    pub(crate) turn: LlmTurn,
+    /// 还原出的端口账（一笔）。**意图与目标节点都在这一笔里**
+    /// （`calls[0].wake` / `calls[0].model_id`）——不另立第二份形状。
+    pub(crate) calls: Vec<ToolPortCall>,
 }
 
 /// 一次工具调用结果的**事实形状**（[`ToolDispatch::dispatch`] 的元素类型）。
@@ -186,6 +275,15 @@ pub(crate) trait ToolDispatch: Send + Sync {
         turn: &LlmTurn,
         calls: &mut [ToolPortCall],
     ) -> Vec<DispatchOutcome>;
+
+    /// 读一笔**唤醒调用**（T-244 步 5d）。
+    ///
+    /// 恢复幕没有模型应答可寄存：用户在等待卡上点了按钮，唤醒请求已在开幕之前
+    /// 落格。行表选中授权 / 派发行时，动作从这里把那一笔取回来——没有唤醒请求
+    /// ⇒ `None`，调用方按「引擎选错了账」处理（不写任何格）。
+    async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
+        None
+    }
 }
 
 /// 工具端口账的写方：批次分发与 resume 共用**同一套**开账 / 关账。
@@ -420,6 +518,7 @@ impl ToolPort {
             granted: false,
             deny_why: None,
             sent: false,
+            wake: None,
         })
     }
 
@@ -572,54 +671,199 @@ impl ToolPort {
         n + 1
     }
 
-    /// 单笔开账（resume 用）：一次用户动作就是一个新批次。
+    /// 落一笔**唤醒请求**（T-244 步 5d）：用户动作在开幕之前变成 `request(port=tool)`。
     ///
-    /// `attempt` 由调用方从事实面数出来（`tool-resume-{turn}-{target}-{n}`），
-    /// 而不是从内存计数器来——进程重启后计数器归零，若拿它当 id 段号，第二次
-    /// 恢复会撞上第一次的幂等键，事实面就把两次尝试当成了一次。
-    pub(crate) async fn open_resume(
+    /// ## 为什么只落 `request`，不顺便落授权
+    ///
+    /// 唤醒之后要走的是**同一条**债链：`authorize-tool`（0）判放行 / 拒绝，
+    /// `dispatch-tools` / `deny-tools`（68 / 69）落 `sent` 并收尾。在这里把三笔
+    /// 一起写掉，等于让恢复路径又长出一条绕过行表的旁路——那正是本步要退役的东西。
+    ///
+    /// ## 旧账先关
+    ///
+    /// 同轮里若还有一笔**开着**的唤醒请求（上次进程死在派发中途），先按
+    /// `failed{superseded}` 关掉：它的结果永远不会来，而新的一次用户动作是新账。
+    /// 不关的话 `turn_head.tools_open` 会看见两笔开着，`departed` 的集合债也永远
+    /// 差一个终局。
+    pub(crate) fn land_wake(
         &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        target_id: &str,
-        attempt: u64,
-        name: &str,
-        args: &serde_json::Value,
-    ) -> Option<ToolPortCall> {
-        let policy = ToolPortPolicy::read(ctx).await;
+        spec: &WakeSpec<'_>,
+    ) -> Result<(), crate::symbio_core::AppendError> {
+        let facts = self.facts.range(Seq::new(0));
+        for stale in facts.iter().filter(|e| {
+            e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
+        }) {
+            let call = port::Call::new(
+                "tool",
+                stale
+                    .payload
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default(),
+                stale
+                    .payload
+                    .get("attempt")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1),
+            );
+            port::failed(
+                self.facts.as_ref(),
+                &call,
+                self.turn,
+                self.user_seq,
+                "superseded",
+            )?;
+        }
+        let attempt = self.resume_attempt(spec.target);
         let call = port::Call::new(
             "tool",
-            format!("tool-resume-{}-{}-{}", self.turn, target_id, attempt),
+            format!("tool-resume-{}-{}-{}", self.turn, spec.target, attempt),
             attempt,
         );
-        self.open_with(ctx, &policy, &call, target_id, name, args)
-            .await
+        let mut extra = serde_json::json!({
+            "tool": spec.tool,
+            "args": spec.args,
+            "wire_id": spec.wire_id,
+            "turn_id": spec.turn_root,
+            "target": spec.target,
+            "resume": spec.kind,
+        });
+        if let WakeIntent::Result { text, ok, .. } = spec.intent {
+            extra["result_text"] = serde_json::json!(text);
+            extra["result_ok"] = serde_json::json!(ok);
+        }
+        port::announce_with(self.facts.as_ref(), &call, self.turn, self.user_seq, extra)
     }
 
-    /// 单笔开账的实体（resume 用）：`request` → 授权 → 放行才落 `sent`。
+    /// 读回**开着**的唤醒请求（最新一笔），还原成授权 / 派发动作的入参。
     ///
-    /// 批次路径按三个动作分开走；resume 的一次用户动作只涉及一笔调用，三步在
-    /// 这里连续执行，**共用同一套实体**（不另写一份开账逻辑）。
-    async fn open_with(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        policy: &ToolPortPolicy,
-        call: &port::Call,
-        model_id: &str,
-        name: &str,
-        args: &serde_json::Value,
-    ) -> Option<ToolPortCall> {
-        let mut one = [self
-            .open_one(ctx, policy, call, model_id, name, args)
-            .await?];
-        self.authorize_calls(policy, &mut one);
-        if !one[0].granted {
-            return one.into_iter().next();
+    /// 终局按**事实 seq** 判（`response` / `failed` 晚于请求即关闭）——与
+    /// `turn_head.tools_open` 的请求面同一口径。已关账 ⇒ `None`：这一笔的派发
+    /// 已经发生过，动作不该再跑第二遍。
+    pub(crate) fn wake_batch(&self) -> Option<WakeBatch> {
+        let facts = self.facts.range(Seq::new(0));
+        let req = facts.iter().rev().find(|e| {
+            e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
+        })?;
+        let payload = &req.payload;
+        let target = payload.get("target")?.as_str()?.to_string();
+        let tool = payload
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let args = payload
+            .get("args")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let wire_id = payload
+            .get("wire_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let id = payload.get("id").and_then(|v| v.as_str())?.to_string();
+        let attempt = payload.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
+        let intent = WakeIntent::from_payload(payload)?;
+        let authz = facts.iter().find_map(|e| {
+            let same = e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
+                && e.payload.get("id").and_then(|v| v.as_str()) == Some(id.as_str());
+            if !same {
+                return None;
+            }
+            match e.kind.as_str() {
+                EVENT_AUTHZ_GRANTED => Some((true, None)),
+                EVENT_AUTHZ_DENIED => Some((false, Some("user_rejected"))),
+                _ => None,
+            }
+        });
+        let (granted, deny_why) = authz.unwrap_or((false, None));
+        let turn = LlmTurn {
+            tool_calls: vec![crate::symbio_core::TurnToolCallInfo {
+                id: Some(target.clone()),
+                wire_id: (!wire_id.is_empty()).then(|| wire_id.clone()),
+                name: Some(tool.clone()),
+                arguments: args.clone(),
+                parse_error: None,
+                overflow_notice: None,
+            }],
+            ..Default::default()
+        };
+        Some(WakeBatch {
+            turn,
+            calls: vec![ToolPortCall {
+                model_id: target.clone(),
+                call: port::Call::new("tool", id, attempt),
+                name: tool,
+                risk: None,
+                approved: args
+                    .get("approved")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                invalid: false,
+                granted,
+                deny_why,
+                sent: false,
+                wake: Some(intent),
+            }],
+        })
+    }
+
+    /// 授权唤醒调用（`authorize-tool` 行的动作在草稿里没有批次时的入口）。
+    ///
+    /// 用户动作是**授权本身**：批准 / 重试 / 补充 / 回答一律放行；拒绝落
+    /// `authz.denied{user_rejected}`。风险档比较不参与——用户已经做过这一次判断，
+    /// 再按阈值拒一次会让审批卡永远点不动。
+    pub(crate) fn authorize_wake(&self, calls: &mut [ToolPortCall]) {
+        let facts = self.facts.range(Seq::new(0));
+        if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
+            crate::plugin_warn!(
+                "session",
+                "[Tool] 授权行不欠（turn={}），不判唤醒放行",
+                self.turn
+            );
+            return;
         }
-        self.begin_calls(&mut one);
-        if !one[0].sent {
-            return None;
+        for call in calls.iter_mut() {
+            let denied = matches!(call.wake, Some(WakeIntent::Result { denied: true, .. }));
+            let written = if denied {
+                append_authz(
+                    self.facts.as_ref(),
+                    denied_event(
+                        self.turn,
+                        self.user_seq,
+                        &call.call,
+                        &call.name,
+                        "user_rejected",
+                    ),
+                )
+            } else {
+                append_authz(
+                    self.facts.as_ref(),
+                    granted_event(
+                        self.turn,
+                        self.user_seq,
+                        &call.call,
+                        &call.name,
+                        "unknown",
+                        true,
+                    ),
+                )
+            };
+            if let Err(e) = written {
+                crate::plugin_warn!(
+                    "session",
+                    "[Tool] 唤醒授权事实未落格（turn={} / {}）：{e:?}",
+                    self.turn,
+                    call.model_id
+                );
+                continue;
+            }
+            if denied {
+                call.deny_why = Some("user_rejected");
+            } else {
+                call.granted = true;
+            }
         }
-        one.into_iter().next()
     }
 
     /// 批次返回后关账：**每一笔**都要有终局。
@@ -697,50 +941,24 @@ impl ToolPort {
     }
 }
 
-/// 单笔工具执行（resume 的 approve/retry/supply 用）：端口账 + 执行层。
-///
-/// 这是 resume 与批次**共用**的那一段执行语义：静默出口、`result_msg_id`、
-/// `execute_tool_async` 的调用形状都在这里；resume 只负责把用户动作翻译成
-/// `(tool_name, args)` 和结果节点的重建。执行层自己的审批闸门仍然跑
-/// （defense in depth）——端口开账不替代它。
-pub(crate) async fn execute_single_tool(
-    parent: &Option<Arc<dyn Plugin>>,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    abort: &ExecAbortSignal,
-    port: &ToolPort,
-    target_id: &str,
-    tool_name: &str,
-    args: serde_json::Value,
-) -> (String, bool) {
-    let attempt = port.resume_attempt(target_id);
-    let open = port
-        .open_resume(ctx, target_id, attempt, tool_name, &args)
-        .await;
-    let result_msg_id = crate::symbio_core::llm_short_id();
-    let silent = ExecEventSink::silent();
-    let (res, success, _captured) = execute_tool_async(
-        parent,
-        tool_name,
-        args,
-        target_id,
-        &silent,
-        abort,
-        result_msg_id,
-        ctx.clone(),
-    )
-    .await;
-    if let Some(call) = open.as_ref() {
-        // 执行层**跑过了**就是应答——工具回了话，哪怕回的是错误（`success = false`
-        // 只说明内容，不说明没执行）。把它落成 `failed{not_executed}` 等于在日志里
-        // 说「这一笔没跑到」，与批尾收口那几条真没跑到的混在一起，事后无从分辨。
-        // 只有中止才是「没跑到」，与 `close_unfinished` 同一词表。
-        if abort.is_aborted() {
-            port.fail(call, ABORTED);
-        } else {
-            port.close(call, true);
-        }
-    }
-    (res, success)
+/// 这一格是不是一笔唤醒请求（用户动作落成的工具调用）。
+fn is_wake_request(e: &Event) -> bool {
+    e.kind == EVENT_REQUEST
+        && e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
+        && e.payload.get("resume").is_some()
+}
+
+/// 唤醒请求是否已有终局（同逻辑 id 的 `response` / `failed` 晚于它）。
+fn wake_terminal(facts: &[Event], turn: u64, req: &Event) -> bool {
+    let id = req.payload.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let at = req.seq.map(|s| s.value()).unwrap_or(0);
+    facts.iter().any(|e| {
+        e.turn == turn
+            && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
+            && e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
+            && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)
+            && e.seq.map(|s| s.value()).unwrap_or(0) > at
+    })
 }
 
 /// v2 的工具分发方：一轮工具调用的执行 + 落节点 + 结果映射。
@@ -831,6 +1049,110 @@ impl SessionDispatchPort {
     /// 批次返回后关账（实体在 [`ToolPort::close_batch`]）。
     fn close_tool_calls(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
         self.port.close_batch(calls, outcomes);
+    }
+
+    /// 用户结果（answer / reject）的派发：不跑执行层，直接合成调用卡与结果卡。
+    ///
+    /// 与正常派发共用**同一条关账**（`begin_calls` + `close_batch`）：回答是
+    /// `sent → response`，拒绝是 `denied → failed`（授权行已落 `authz.denied`，
+    /// `close_batch` 按 `deny_why` 收尾）。
+    ///
+    /// 调用卡沿用原节点 id（`turn.tool_calls[0].id == target`）：重建面按
+    /// `artifact.added` 的 `tool_call_id` 复刻同一张卡，实时面这里发的是**终态
+    /// 整条**——两面的 id、参数文本与状态因此一致。
+    async fn dispatch_wake_result(
+        &self,
+        turn: &LlmTurn,
+        port_calls: &mut [ToolPortCall],
+    ) -> Vec<DispatchOutcome> {
+        self.port.begin_calls(port_calls);
+        let Some(call) = port_calls.first() else {
+            return Vec::new();
+        };
+        let (text, ok) = match &call.wake {
+            Some(WakeIntent::Result { text, ok, .. }) => (text.clone(), *ok),
+            _ => (String::new(), false),
+        };
+        let failure_kind = if ok { "" } else { "error" };
+        let name = call.name.clone();
+        let final_status = if ok {
+            NodeStatus::Completed
+        } else {
+            NodeStatus::Failed
+        };
+
+        let mut call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
+        for node in call_nodes.iter_mut() {
+            detach_if_flat(node, &self.root_id, self.presentation_tree);
+            node.status = Some(final_status.clone());
+            // **并入**而非整格替换：`meta.style_tag` / `tool_name` 是卡片身份
+            // （与执行器 `emit_parent_finalized` 的合并口径同构）。
+            let mut meta = node
+                .meta
+                .clone()
+                .filter(|m| m.is_object())
+                .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("success".into(), serde_json::json!(ok));
+                obj.insert("tool_name".into(), serde_json::json!(name));
+                if !ok {
+                    obj.insert("failure_kind".into(), serde_json::json!("error"));
+                }
+            }
+            node.meta = Some(meta);
+        }
+        let call_id = call_nodes
+            .first()
+            .map(|n| n.id.clone())
+            .unwrap_or_else(|| call.model_id.clone());
+        let wire_id = call_nodes
+            .first()
+            .and_then(|n| n.tool_call_id.clone())
+            .unwrap_or_default();
+        let args = call_nodes
+            .first()
+            .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
+            .unwrap_or_default();
+        let result_id = crate::symbio_core::llm_short_id();
+        let mut result_meta = serde_json::json!({ "success": ok, "tool_name": name });
+        if !ok {
+            result_meta["failure_kind"] = serde_json::json!("error");
+        }
+        let result = ChatNode {
+            id: result_id.clone(),
+            parent_id: Some(call_id.clone()),
+            role: Some(NodeRole::Tool),
+            principal: Some(crate::symbio_core::principal::Principal::tool_principal(
+                &name,
+            )),
+            msg_type: Some(NodeKind::Body),
+            content: Some(MessageContent::Text(text.clone())),
+            status: Some(final_status),
+            meta: Some(result_meta),
+            timestamp: Some(crate::symbio_core::clock_now_ms()),
+            ..Default::default()
+        };
+
+        for node in call_nodes.iter().chain(std::iter::once(&result)) {
+            llm_emit_message(&self.sink, node.clone()).await;
+        }
+        let outcome = DispatchOutcome {
+            call_id,
+            name,
+            text,
+            ok,
+            needs_user_action: false,
+            prompt: None,
+            failure_kind: failure_kind.to_string(),
+            wire_id,
+            args,
+            result_id,
+        };
+        let mut produced = call_nodes;
+        produced.push(result);
+        self.produced.lock().unwrap().extend(produced);
+        self.close_tool_calls(port_calls, std::slice::from_ref(&outcome));
+        vec![outcome]
     }
 }
 
@@ -927,7 +1249,18 @@ impl ToolDispatch for SessionDispatchPort {
     }
 
     async fn authorize(&self, _store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+        if calls.is_empty() {
+            // 恢复幕：草稿里没有批次，判断的是开幕前列队的那一笔唤醒调用。
+            if let Some(mut batch) = self.port.wake_batch() {
+                self.port.authorize_wake(&mut batch.calls);
+            }
+            return;
+        }
         self.authorize_action(calls).await;
+    }
+
+    async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
+        self.port.wake_batch()
     }
 
     async fn dispatch(
@@ -936,6 +1269,15 @@ impl ToolDispatch for SessionDispatchPort {
         turn: &LlmTurn,
         port_calls: &mut [ToolPortCall],
     ) -> Vec<DispatchOutcome> {
+        // 唤醒的用户结果（回答 / 拒绝）不跑工具：节点与事实在这里合成。
+        // 批准 / 重试 / 补充仍然走下面的正常派发路径——执行层只知道
+        // 「有一次调用要跑」，不关心它是模型要的，还是用户点的。
+        if port_calls
+            .iter()
+            .any(|c| matches!(c.wake, Some(WakeIntent::Result { .. })))
+        {
+            return self.dispatch_wake_result(turn, port_calls).await;
+        }
         let mut produced: Vec<ChatNode> = Vec::new();
 
         // ⓪ 第三笔债的前半：为放行的调用落 `sent`。必须在执行层之前——
@@ -1113,6 +1455,7 @@ impl ToolDispatch for SessionDispatchPort {
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::take_produced: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::take_derived: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/loop/tool_dispatch.rs::dispatch: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/loop/tool_dispatch.rs::dispatch_wake_result: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 
 #[cfg(test)]
 #[path = "tool_dispatch.test.rs"]

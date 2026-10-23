@@ -32,8 +32,11 @@ use std::sync::Arc;
 use super::super::tools::{ABORTED, NOT_EXECUTED};
 use super::loop_rows;
 use super::port;
-use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy};
-use crate::symbio_core::{CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_GRANTED};
+use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
+use crate::symbio_core::{
+    CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
+    EVENT_REQUEST, EVENT_SENT,
+};
 
 /// 一轮的账：turn=1、溯源到用户格 seq=7、幕锚填占位 0（这三笔工具债不读时间视图）。
 const TURN: u64 = 1;
@@ -80,6 +83,7 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
         granted: false,
         deny_why: None,
         sent: false,
+        wake: None,
     }
 }
 
@@ -288,4 +292,173 @@ fn an_authorization_reopens_the_dispatch_debt_and_a_send_moves_to_the_await() {
     assert!(calls[0].sent, "派发行欠 ⇒ `sent` 落格并回报旗标");
     assert!(!owes("dispatch-tools", &store), "派出 ⇒ 派发行关账");
     assert!(awaits(&store), "换一笔债在等应答");
+}
+
+// ── 唤醒幕（T-244 步 5d）：用户动作落成的那一笔 `request` ──────────────────
+//
+// 唤醒路径的对称面在别处：唤醒幕没有模型应答，工具批的入口是**用户动作**。
+// 用户动作先落成一笔 `request(port=tool)`，之后与批次走**同一条**授权 / 派发链。
+// 这一组用例钉的是写方与读侧：那一笔的载荷形状（读侧靠它还原）、授权行认不认它、
+// 关账之后还在不在。
+
+/// 用户动作落成的那一笔：`request(port=tool)`，**只有**这一笔。
+///
+/// 关键在「只有」：授权与派发由行表的 `authorize-tool` / `dispatch-tools` 两行
+/// 承担，写方在这里一并落掉就等于恢复路径又长出一条绕过行表的旁路。
+#[test]
+fn a_wake_request_lands_as_a_port_request_carrying_the_resume_marker() {
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+
+    port.land_wake(&WakeSpec {
+        kind: "approve",
+        target: "tc-1",
+        tool: "vdfs_read",
+        args: &json!({ "path": "a.md", "approved": true }),
+        wire_id: "w-1",
+        turn_root: "root-1",
+        intent: &WakeIntent::Execute,
+    })
+    .expect("唤醒请求落格");
+
+    let facts = events(&store);
+    let req = facts
+        .iter()
+        .find(|e| e.kind == EVENT_REQUEST)
+        .expect("请求格在");
+    assert_eq!(req.payload["port"], json!("tool"));
+    assert_eq!(
+        req.payload["id"],
+        json!("tool-resume-1-tc-1-1"),
+        "唤醒账的 id 带轮号 / 目标 / 尝试号（重启后仍可对上）"
+    );
+    assert_eq!(req.payload["attempt"], json!(1));
+    assert_eq!(req.payload["resume"], json!("approve"), "唤醒标记在载荷上");
+    assert_eq!(req.payload["target"], json!("tc-1"), "目标节点 id 在载荷上");
+    assert_eq!(req.payload["tool"], json!("vdfs_read"));
+    assert_eq!(req.payload["wire_id"], json!("w-1"));
+
+    assert!(
+        !facts.iter().any(|e| e.kind == EVENT_AUTHZ_GRANTED),
+        "用户动作落格时**不**落授权：授权是行表的动作"
+    );
+    assert!(
+        !facts.iter().any(|e| e.kind == EVENT_SENT),
+        "用户动作落格时**不**落 `sent`：派发是行表的动作"
+    );
+    assert!(
+        owes("authorize-tool", &store),
+        "唤醒请求一落，授权行就欠着（它自己会认领这一笔）"
+    );
+}
+
+/// 读侧：唤醒那一笔能被还原成派发 / 授权动作要的那份调用。
+///
+/// 还原出来的东西缺一格，引擎就会拿空的目标去跑工具（结果挂不回原来那张卡）。
+#[test]
+fn the_wake_read_side_restores_the_intent_and_the_target() {
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    port.land_wake(&WakeSpec {
+        kind: "approve",
+        target: "tc-1",
+        tool: "vdfs_read",
+        args: &json!({ "path": "a.md", "approved": true }),
+        wire_id: "w-1",
+        turn_root: "root-1",
+        intent: &WakeIntent::Execute,
+    })
+    .expect("唤醒请求落格");
+
+    let batch = port.wake_batch().expect("唤醒请求读得回");
+    assert_eq!(batch.calls.len(), 1, "唤醒只还原被唤醒的那一笔");
+    let call = &batch.calls[0];
+    assert_eq!(call.model_id, "tc-1", "目标节点 id 落在模型侧 id 上");
+    assert_eq!(call.name, "vdfs_read");
+    assert_eq!(call.call.id, "tool-resume-1-tc-1-1");
+    assert!(call.approved, "参数里带 `approved: true` ⇒ 已由人工确认过");
+    assert!(
+        matches!(call.wake, Some(WakeIntent::Execute)),
+        "唤醒意图从载荷还原：{:?}",
+        call.wake
+    );
+    assert!(!call.granted, "还没判 ⇒ 未放行");
+
+    let tc = &batch.turn.tool_calls[0];
+    assert_eq!(tc.id.as_deref(), Some("tc-1"), "结果挂回原来那张卡");
+    assert_eq!(tc.name.as_deref(), Some("vdfs_read"));
+    assert_eq!(tc.wire_id.as_deref(), Some("w-1"));
+    assert_eq!(tc.arguments["path"], json!("a.md"));
+}
+
+/// 用户**拒绝**：意图从载荷还原成「有结果的拒绝」，授权行落 `authz.denied`。
+///
+/// 反向的那一半同样重要：拒绝之后派发尾要落 `failed{user_rejected}`，
+/// 否则创建行的集合债永远差一个终局（见 `deny-tools` 行）。
+#[test]
+fn a_wake_that_the_user_rejected_reads_back_as_a_denial() {
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let intent = WakeIntent::Result {
+        text: "用户拒绝执行: 有风险".into(),
+        ok: false,
+        denied: true,
+    };
+    port.land_wake(&WakeSpec {
+        kind: "reject",
+        target: "tc-1",
+        tool: "shell",
+        args: &json!({ "cmd": "rm -rf /" }),
+        wire_id: "w-1",
+        turn_root: "root-1",
+        intent: &intent,
+    })
+    .expect("唤醒请求落格");
+
+    let mut batch = port.wake_batch().expect("唤醒请求读得回");
+    match &batch.calls[0].wake {
+        Some(WakeIntent::Result { text, ok, denied }) => {
+            assert_eq!(text, "用户拒绝执行: 有风险");
+            assert!(!ok);
+            assert!(denied);
+        }
+        other => panic!("唤醒意图还原错了：{other:?}"),
+    }
+
+    port.authorize_wake(&mut batch.calls);
+    assert!(!batch.calls[0].granted, "拒绝不放行：执行层不会跑它");
+    assert_eq!(batch.calls[0].deny_why, Some("user_rejected"));
+    assert!(
+        events(&store).iter().any(|e| e.kind == EVENT_AUTHZ_DENIED),
+        "拒绝落 `authz.denied`（授权行由此关账）"
+    );
+}
+
+/// 关账之后读不回来了：这一笔的派发已经发生过，动作不该再跑第二遍。
+#[test]
+fn a_closed_wake_request_is_not_read_back() {
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    port.land_wake(&WakeSpec {
+        kind: "approve",
+        target: "tc-1",
+        tool: "vdfs_read",
+        args: &json!({ "path": "a.md" }),
+        wire_id: "w-1",
+        turn_root: "root-1",
+        intent: &WakeIntent::Execute,
+    })
+    .expect("唤醒请求落格");
+
+    let mut batch = port.wake_batch().expect("唤醒请求读得回");
+    port.authorize_wake(&mut batch.calls);
+    assert!(batch.calls[0].granted, "批准 ⇒ 放行");
+    port.begin_calls(&mut batch.calls);
+    assert!(batch.calls[0].sent, "派发行欠 ⇒ 落 `sent`");
+    port.close(&batch.calls[0], true);
+
+    assert!(
+        port.wake_batch().is_none(),
+        "已关账的唤醒请求不再读回（否则同一笔会派发两遍）"
+    );
 }

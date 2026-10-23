@@ -24,8 +24,12 @@
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
  *   - S-014:        ChatNode 存量 `role` 格的直写只许降（棘轮；身份写 `principal`，
  *                   读走 `node_role()` / `legacy_role()`，字段已退出 wire）
- *   - S-015:        收束闸的否定分支必须走 `closure_gate` + `deny`（`!closure_granted(`
- *                   零出现）——否则「拒绝」又变成「没写」，日志里与「没跑完」同形
+ *   - S-015:        收束闸只有一个 owner（`closure_gate`），且每次调用当场处理 `Err`
+ *                   （布尔壳 `closure_granted` 零出现）——否则「拒绝」又变成「没写」，
+ *                   日志里与「没跑完」同形
+ *   - S-016:        停机原因只有一个形状（`terminated.reason` / 停机格的 `why` 不许回来）
+ *   - S-017:        恢复路径不许再有旁路（`resume.rs` 与 `resume_anchor` 零出现）——
+ *                   唤醒 / 续写只能从事实进环
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -43,7 +47,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015 S-016
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015 S-016 S-017
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -694,9 +698,10 @@ const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
+// 151 → 146（T-244 步 5d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
-  : 151
+  : 146
 {
   let s014 = 0
   const s014List = []
@@ -738,34 +743,32 @@ const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
 }
 console.log()
 
-// ── S-015: 收束闸的否定分支必须落事实 ─────────────────────────────────
-// 写侧闸有两个函数，用法不同：
-//   · `closure_granted(actor, kind) -> bool`：**肯定**分支用（`if closure_granted {…}`）；
-//   · `closure_gate(actor, kind) -> Result<(), String>`：**否定**分支用——
-//     它把「为什么拒」带出来，交给 `deny(…)` 落一条 `authz.denied`。
+// ── S-015: 收束闸只有一个 owner，且每次调用都当场处理 Err ────────────────
+// 写侧闸今天只有一个函数：`closure_gate(actor, kind) -> Result<(), String>`。
+// 它把「为什么拒」带出来，交给 `deny(…)` 落一条 `authz.denied`。
 //
-// 否定分支若回到 `if !closure_granted { … return }`，拒绝就又成了「什么都没写」：
+// 否定分支若把闸压成布尔或把结果存起来另判，拒绝就又成了「什么都没写」：
 // 日志里「被拒」与「根本没跑完」同形，事后答不出谁/何时/因何被拒，回放重现不出
 // 这次拒绝（[T-219](../docs/009-task/219-拒绝落事实.md "T-219-拒绝落事实")）。
 // 这条不是风格问题——它违反 I1（单通道），而违反的形态**不会有任何东西变红**：
 // 该轮照样留在未收束态，`unresolved_turns` 照样报，看起来和"正常被拒"一样。
 //
-// 判据是**零出现**（不是棘轮）：新增一条否定分支就得走 `closure_gate` + `deny`，
-// 没有"存量"可言——存量已经全部迁完。
-console.log('--- S-015: 收束闸否定分支必须落事实 ---')
+// 判据是**零出现**（不是棘轮）：没有"存量"可言——存量已经全部迁完。两条形状，
+// 各自都还能真的变红：
+//   ① 布尔壳 `closure_granted` 零出现。它是 T-219 时期 `closure_gate(..).is_ok()`
+//     的一行壳，随收束闸收敛到单一 owner（T-244 步 5d 删掉它唯一的生产调用点后
+//     一并删除）而退役。复活它就是复活「拒绝不落事实」的那个形态。
+//   ② 闸的调用行必须**当场**处理 `Err`：不许 `.is_ok()` / `.is_err()` 取布尔，
+//     也不许把结果存到别处再判（那种写法拒绝照样不落事实）。
+//
+// 为什么形状②不写成「不许 `.is_ok()`」就够：拆行的写法
+// `let r = closure_gate(..)` + 下一行 `if r.is_ok()` 骗得过行级正则。
+// 「调用行自己带 `if let Err(`」这条判据把那种写法一并挡住（拆行时按上一行同看）。
+console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
 {
   const S015_ROOTS = ['symbio/src/plugins']
   const S015_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
   const S015_IS_REPO = path.resolve(S015_BASE) === path.resolve(repoRoot)
-  // 反斜杠一律不出现：本文件的生成/改写链路上它被吃过两次，正则写成字符判定更稳。
-  const isNegatedGate = (l) => {
-    const at = l.indexOf('closure_granted')
-    if (at < 0) return false
-    // 前面（跳过空白）必须是 `!`
-    let i = at - 1
-    while (i >= 0 && (l[i] === ' ' || l[i] === '\t')) i--
-    return i >= 0 && l[i] === '!'
-  }
   const isComment = (l) => {
     const t = l.trimStart()
     return t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')
@@ -778,11 +781,15 @@ console.log('--- S-015: 收束闸否定分支必须落事实 ---')
     const rest = l.slice(at + marker.length)
     return [...rest].some((c) => /[0-9A-Za-z]/.test(c) || c.codePointAt(0) > 127)
   }
+  /** 形状①：退役的布尔壳。 */
+  const isRetiredShell = (l) => /\bclosure_granted\b/.test(l)
+  /** 形状②：闸的调用行——定义行不算，调用行必须自己带 `if let Err(`。 */
+  const isGateCall = (l) => /\bclosure_gate\s*\(/.test(l) && !/\bfn\s+closure_gate\b/.test(l)
+  const handlesErr = (l) => l.includes('if let Err(')
   let s015 = 0
   const s015List = []
   for (const file of S015_ROOTS.flatMap((r) => walk(path.join(S015_BASE, r)))) {
-    // 测试文件豁免：那里 `!closure_granted(..)` 是**断言谓词本身**，不是拒绝路径
-    // （判据用例 `closure_is_withheld_when_the_principal_lacks_the_grant` 正是它）。
+    // 测试文件豁免：那里断言的是谓词本身，不是拒绝路径。
     // 拒绝路径只在生产代码里。
     if (path.basename(file).endsWith('.test.rs')) continue
     let text
@@ -794,22 +801,31 @@ console.log('--- S-015: 收束闸否定分支必须落事实 ---')
     const lines = text.split(String.fromCharCode(10))
     lines.forEach((l, i) => {
       if (isComment(l)) return
-      if (!isNegatedGate(l)) return
       if (isWaived(l) || (i > 0 && isWaived(lines[i - 1]))) return
+      if (isRetiredShell(l)) {
+        s015++
+        s015List.push(`${disp(file)}:${i + 1}（布尔壳 \`closure_granted\`）`)
+        return
+      }
+      if (!isGateCall(l)) return
+      // 拆行写法：`if let Err(why) =` 上一行、调用在下一行 ⇒ 上一行同看。
+      if (handlesErr(l)) return
+      if (i > 0 && handlesErr(lines[i - 1])) return
       s015++
-      s015List.push(`${disp(file)}:${i + 1}`)
+      s015List.push(`${disp(file)}:${i + 1}（闸的调用没当场处理 \`Err\`）`)
     })
   }
   if (s015 > 0) {
     err(
-      `S-015 违例：收束闸的否定分支用 \`!closure_granted(\` 判（${s015} 处）——` +
-        '改用 `if let Err(why) = closure_gate(..)` 并调 `deny(..)` 落 `authz.denied`。' +
+      `S-015 违例：收束闸被压回布尔形态（${s015} 处）——` +
+        '布尔壳 `closure_granted` 已退役；闸的每一次调用都要当场 `if let Err(why) = closure_gate(..)` ' +
+        '并调 `deny(..)` 落 `authz.denied`。' +
         `命中：${s015List.join('、')}`,
     )
   } else {
     ok(
       S015_IS_REPO
-        ? 'S-015 通过：否定分支零处 `!closure_granted(`（全部走 closure_gate + deny）'
+        ? 'S-015 通过：布尔壳零处、七处闸调用都当场处理 `Err`（全部走 closure_gate + deny）'
         : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }
@@ -874,6 +890,91 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
       S016_IS_REPO
         ? 'S-016 通过：`turn_runner/` 下零处已退役的停机原因形状'
         : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
+    )
+  }
+}
+console.log()
+
+// ── S-017: 恢复路径不许再有旁路（T-244 步 5d）─────────────────────────
+// 恢复 / 审批 / 问答三条唤醒路径曾经走 `resume.rs` 的**私有旁路**：它自己写协议
+// 事实、自己跑执行体，绕开行表。旁路退役之后，这条路径的唯一入口是**事实**——
+// 用户动作落成 `request(port=tool)`，之后与批次走同一条授权 / 派发链。
+//
+// 判据是**零出现**（不是棘轮）：旁路已经全部迁完，没有存量可言。放任它回来的
+// 代价不是风格问题——恢复路径会**绕过行表**写事实，于是「这一轮欠了什么」
+// 与「这一轮做了什么」对不上账，而没有任何东西会变红。
+//
+// 扫三样：
+//   · `resume.rs` / `resume.test.rs` 两个文件不许存在；
+//   · 生产代码里 `resume_anchor`（旁路的选债口）零出现；
+//   · `turn_exec.rs` / `turn_exec/` 里 `resumed` 分支零出现（该词在
+//     `loop_rows.rs` 里是视图字段名 `turn_head.resumed`，不在本规则范围内）。
+console.log('--- S-017: 恢复路径不许再有旁路 ---')
+{
+  const S017_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S017_IS_REPO = path.resolve(S017_BASE) === path.resolve(repoRoot)
+  const RETIRED_FILES = [
+    'symbio/src/plugins/loop/resume.rs',
+    'symbio/src/plugins/loop/resume.test.rs',
+  ]
+  // `resumed` 只在执行体那两处判——`loop_rows.rs` 里的 `turn_head.resumed` 是
+  // 视图字段名，不是旁路分支。
+  const RESUMED_FILES = [
+    'symbio/src/plugins/loop/turn_exec.rs',
+    'symbio/src/plugins/loop/turn_exec',
+  ]
+  let s017 = 0
+  const s017List = []
+  for (const rel of RETIRED_FILES) {
+    if (fs.existsSync(path.join(S017_BASE, rel))) {
+      s017++
+      s017List.push(rel)
+    }
+  }
+  const scan = (rel, re) => {
+    const file = path.join(S017_BASE, rel)
+    let lines
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      return
+    }
+    lines.forEach((l, i) => {
+      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
+      if (!re.test(l)) return
+      s017++
+      s017List.push(`${disp(file)}:${i + 1}`)
+    })
+  }
+  // `resume_anchor`：整个生产树（插件 + core 的视图层）都不许再有这个名字。
+  for (const file of ['symbio/src/plugins', 'symbio/src/symbio_core'].flatMap((r) =>
+    walk(path.join(S017_BASE, r)),
+  )) {
+    if (path.basename(file).endsWith('.test.rs')) continue
+    scan(path.relative(S017_BASE, file), /\bresume_anchor\b/)
+  }
+  // `resumed` 分支：只在执行体那两处判。
+  for (const rel of RESUMED_FILES) {
+    const abs = path.join(S017_BASE, rel)
+    if (!fs.existsSync(abs)) continue
+    const files = fs.statSync(abs).isDirectory() ? walk(abs) : [abs]
+    for (const file of files) {
+      if (path.basename(file).endsWith('.test.rs')) continue
+      scan(path.relative(S017_BASE, file), /\bresumed\b/)
+    }
+  }
+  if (s017 > 0) {
+    err(
+      `S-017 违例：恢复路径的私有旁路回来了（${s017} 处）——` +
+        '唤醒 / 续写只能从事实进环：用户动作落成 `request(port=tool)`，' +
+        '之后与批次走同一条授权 / 派发链（`resume.rs` 与 `resume_anchor` 均已退役）。' +
+        `命中：${s017List.join('、')}`,
+    )
+  } else {
+    ok(
+      S017_IS_REPO
+        ? 'S-017 通过：恢复路径零旁路（`resume.rs` 已退役、`resume_anchor` 与 `resumed` 分支零出现）'
+        : 'S-017 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }
 }

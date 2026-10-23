@@ -111,8 +111,11 @@ fn tool_free_req<'a>(
     }
 }
 
-/// 续写幕的入参包：**不新开用户格**，溯源锚由调用方直给（T-225）。
-fn resume_req<'a>(
+/// **已开未收束**那一轮的入参包：**不新开用户格**，溯源锚由调用方直给（T-225）。
+///
+/// 唤醒幕的身份不再由入参携带（T-244 步 5d：旁路退役）：它落在**事实**上——
+/// `turn.stage{stage:"resume"}` 是本幕的锚，`turn_head` 据此判「本幕是续写幕」。
+fn open_turn_req<'a>(
     fx: &'a Fixture,
     provider: Arc<dyn ModelProvider>,
     sink: &'a crate::symbio_core::ExecEventSink,
@@ -124,16 +127,25 @@ fn resume_req<'a>(
         turn_no,
         user_seq,
         drive_seq: user_seq,
-        resume: Some(ResumedTool {
-            name: "vdfs_read".into(),
-            args: serde_json::json!({ "path": "a.md" }),
-            text: "文件内容：hello".into(),
-            call_id: String::new(),
-            turn_id: String::new(),
-            result_id: String::new(),
-        }),
         ..exec_base(&fx.session, provider, sink, abort)
     }
+}
+
+/// 落**恢复阶段事实**（唤醒幕的锚），交回它的 seq。
+///
+/// 生产里这一格由 `chat_loop::begin_drive` 落（T-244 步 5d 之后）：续写的身份
+/// 在**事实**上，不在入参里。幕锚从用户格挪到这一条 ⇒ 幕锚轮号回到被续写的那
+/// 一轮（哪怕它已被后来的轮次归档），`turn_head.resumed = true`。
+fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> u64 {
+    let seqs = super::super::stage_events::land_with_seqs(
+        fx.facts.as_ref(),
+        turn_no,
+        user_seq,
+        "system",
+        &[super::super::stage_events::StageFact::resume(0, kind, "1")],
+    )
+    .expect("恢复阶段事实落格");
+    seqs.first().copied().unwrap_or(user_seq)
 }
 
 fn exec_base<'a>(
@@ -157,7 +169,6 @@ fn exec_base<'a>(
         drive_seq: 0,
         window_turns: 6,
         tools: &[],
-        resume: None,
         recalled: None,
         skill_obs: &[],
         // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
@@ -287,7 +298,6 @@ async fn supplements_become_facts_visible_next_turn() {
             examples: None,
             ..Default::default()
         }],
-        resume: None,
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
@@ -870,7 +880,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             examples: None,
             ..Default::default()
         }],
-        resume: None,
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
@@ -1087,7 +1096,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
             examples: None,
             ..Default::default()
         }],
-        resume: None,
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
@@ -1320,7 +1328,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         user_text: "请委托评审",
         window_turns: 6,
         tools: std::slice::from_ref(&tool_meta),
-        resume: None,
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
@@ -1387,8 +1394,8 @@ async fn full_turn_lands_derived_commitment_facts() {
 /// 时反射档会去新开一个 `u-{turn}` 格，而该轮的用户格**已经在网格里**（等待轮落的）
 /// ⇒ 撞幂等键（`AppendError::Duplicate` → Failed 出口），本轮既完不成收束、又变成一次
 /// 报错。语义上同样说不通：续写要跑的是刚被批准的那次工具，不是拿技能顶掉它。
-/// 该边界由 `turn_exec` 的 `resume_anchor.is_none()` 判定，故此处钉住：`resume` 为
-/// `Some` 时即便命中集非空，也照走完整推理（模型被调用）。
+/// 该边界由 `loop_rows` 的 `policy.reflex` 行判（`owes` 里 `resumed = false`），
+/// 故此处钉住：续写幕时即便命中集非空，也照走完整推理（模型被调用）。
 #[tokio::test]
 async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
     let fx = setup_full();
@@ -1469,8 +1476,11 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-/// 反向（边界）：命中集非空但本轮是**续写轮** ⇒ 一律走完整推理，技能不得顶掉
+/// 反向（边界）：命中集非空但本幕是**唤醒幕** ⇒ 一律走完整推理，技能不得顶掉
 /// 刚被批准的那次工具。
+///
+/// 唤醒幕的身份是**事实**（T-244 步 5d 之后不再由入参携带）：`turn.stage{stage:"resume"}`
+/// 是本幕的锚，`turn_head` 据此判 `resumed` ⇒ `policy.reflex` 那行不成立 ⇒ 快路不走。
 #[tokio::test]
 async fn a_skill_hit_never_takes_over_a_resumed_turn() {
     let fx = setup_full();
@@ -1478,7 +1488,7 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
 
-    // 续写轮的前提是「本轮已开未收束」（`last_open_turn` 要能找到它）——先手工开一轮。
+    // 唤醒幕的前提是「本轮已开未收束」（`last_open_turn` 要能找到它）——先手工开一轮。
     // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉执行链的判据。
     let user_seq = fx
         .facts
@@ -1496,12 +1506,25 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
         .expect("开轮格")
         .value();
 
+    // 本幕锚 = 恢复阶段事实（`chat_loop::begin_drive` 在生产里落它）：它把幕锚从
+    // 用户格挪到这一条 ⇒ `turn_head.resumed = true`。
+    super::super::stage_events::land_with_seqs(
+        fx.facts.as_ref(),
+        0,
+        user_seq,
+        "system",
+        &[super::super::stage_events::StageFact::resume(
+            0, "approve", "1",
+        )],
+    )
+    .expect("恢复阶段事实落格");
+
     let hits = [super::super::skill_events::SkillLlmHit {
         skill_id: "sk-1".into(),
         trigger: "你好".into(),
         content: "先列要点；再合并同类项。".into(),
     }];
-    let mut req = resume_req(
+    let mut req = open_turn_req(
         &fx,
         Arc::new(provider),
         &sink,
@@ -2002,7 +2025,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         "完整史里它仍是已开未收束——恢复锚的判据本身（ADR-085）"
     );
 
-    let req = resume_req(
+    let mut req = open_turn_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
@@ -2010,6 +2033,9 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         0,
         user_seq,
     );
+    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：它把幕锚
+    // 从「归档段里的用户格」挪到这一条 ⇒ 幕锚轮号回到第 0 轮。
+    req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
     execute_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
@@ -2079,7 +2105,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         "第 1 轮已收束，完整史里唯一的未收束轮仍是第 0 轮"
     );
 
-    let req = resume_req(
+    let mut req = open_turn_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
@@ -2087,6 +2113,9 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         0,
         user_seq,
     );
+    // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：第 1 轮的
+    // 用户格更晚，但幕锚看的是**恢复格**⇒ 幕锚轮号回到被续写的第 0 轮。
+    req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
     execute_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
@@ -2153,7 +2182,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     );
 
     // 账还得掉：续写把这一轮跑到收束，同一张表、同一个幕锚上 `execute-turn` 不再欠。
-    execute_turn(resume_req(
+    execute_turn(open_turn_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,

@@ -47,7 +47,7 @@
 //!
 //! **写侧授权闸**（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
-//! 判（`turn_runner::closure_granted`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
+//! 判（`turn_runner::closure_gate`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
 //! 跳过本轮的派生事实（见下方收束派生事实的收尾）。
 //!
@@ -91,15 +91,13 @@ use crate::symbio_core::{
     is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,
     ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
     LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq,
-    SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK,
+    SilentDeltas, Store, TokenIssuer, TurnOutput, Verb, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
-use super::turn_runner::{
-    TurnInput, TurnOutcome, TurnResume, TurnRunner, TurnSession, TurnSessionBegin,
-};
+use super::turn_runner::{TurnInput, TurnOutcome, TurnRunner, TurnSession, TurnSessionBegin};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
@@ -119,38 +117,6 @@ pub(crate) use self::assemble::last_open_turn;
 pub(crate) use self::call::{call_model, Running};
 pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
 pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
-
-/// 恢复产生的工具交换（审批 / 问答恢复后，由恢复路径交回）。
-///
-/// **为什么由恢复路径交回而不是 v2 自己从会话读**：恢复方（`resume.rs`）是唯一
-/// 知道「刚重跑了哪个工具、拿到什么」的地方；让 v2 去会话存储里猜「哪条是刚恢复的
-/// 结果」是启发式，恢复方直给是事实。
-#[derive(Debug, Clone)]
-pub(crate) struct ResumedTool {
-    /// 被恢复的工具名。
-    pub name: String,
-    /// 恢复时实际使用的参数（`approve` / `supply` 可能改写）。
-    pub args: serde_json::Value,
-    /// 恢复产生的结果正文。
-    pub text: String,
-    /// **被恢复的 ToolCall 节点 id**（= 恢复请求的 `target_id`）。
-    ///
-    /// 续写轮落 `artifact.added` 时要把它记进载荷的 `tool_call_id`：读路径走 WAL
-    /// 重建后，「结果节点挂在哪个调用之下」只能靠这条事实复刻。缺了它，重建会
-    /// 按事件 id 合成一个新调用节点 ⇒ 原调用成了**孤儿**（有请求无响应，e2e t27 抓过）。
-    pub call_id: String,
-    /// **被恢复轮次的 Turn 根节点 id**（原调用节点的 `parent_id`）。
-    ///
-    /// 同上：重建把结果节点挂在 `tool_id` 之下，而调用节点自身要落在**原来那一轮**
-    /// 的 Turn 根上——否则同一轮会长出第二个 Turn 根。
-    pub turn_id: String,
-    /// 结果**子节点**的节点 id（恢复方分配，`resume.rs` 步 7 的 `new_child_id`）。
-    ///
-    /// `Carrier::Runner` 的语义是「这条节点由运行器承载、不落出生事实」；承载它的
-    /// 事实就是本次 `artifact.added`——载荷必须复用**同一个 id**，否则实时面与重建
-    /// 面是两条不同的节点（前端按 id 合并，换 id 即多出一条）。
-    pub result_id: String,
-}
 
 /// UI 桥承载的节点类型：正文与推理**分属两条流**，各自一个节点，不合并。
 ///
@@ -662,9 +628,6 @@ pub(crate) struct ExecTurn<'a> {
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
     pub tools: &'a [CapabilityMeta],
-    /// 续写锚点：`Some` ⇒ 本轮续写**已开未收束**的轮次（审批 / 问答恢复），
-    /// `None` ⇒ 新开一轮。见 [`ResumedTool`] 与 core 的 `TurnResume`。
-    pub resume: Option<ResumedTool>,
     /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
     /// [`super::derived_facts::record_learning`] 落一条 `memory.recalled`。
     ///
@@ -811,44 +774,29 @@ pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 ///
 /// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（T-244 步 5b），不再在这个
 /// 执行体里按草稿分支：[`super::turn_exec::run_open`] / `run_authorize` /
-/// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步，或收束
-/// （收束的常规路径是 `close-turn`，见下）。
+/// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步。
 ///
-/// 最前那条 `has_pending_close()` 只为一件事存在：**续写幕旁路**。行表只有一个
-/// 全局表头，恢复一段被后续轮次归档的旧轮时 [`super::loop_rows::resume_anchor`] 交回
-/// 的是执行行，而草稿里可能已经躺着一次没入格的应答——直接再跑一轮模型就是把答完
-/// 的一轮重跑（64 步之后 `step_limit`）。收束格仍然只有
-/// [`super::turn_runner::stream::close_round`] 一个写方，这里是它的第二个调用点。
-/// 旁路在步 5d 退役，这一条分支与 [`super::turn_runner::TurnSession::has_pending_close`]
-/// 一起删。
-///
-/// 正常情况下收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被
-/// 选中，入格归 `close` 执行体；这条分支在那条路上永远不成立。
+/// 收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被选中，入格
+/// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（T-244 步 5d）：唤醒请求进
+/// 行表之后，恢复幕与普通幕走同一组行。
 ///
 /// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
 /// 上界判断在派发器——停机判据不搬进执行体（ADR-118 决策 7）。
 pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let append = |e: AppendError| ActorError::Append(e);
-        if step.session.has_pending_close() {
-            step.session
-                .close(step.store, step.llm)
-                .await
-                .map_err(append)
-        } else {
-            step.session.record_model_step();
-            step.session
-                .model(
-                    step.store,
-                    step.llm,
-                    step.tok,
-                    step.sink.clone(),
-                    step.tools,
-                    step.dispatch.is_some(),
-                )
-                .await
-                .map_err(append)
-        }
+        step.session.record_model_step();
+        step.session
+            .model(
+                step.store,
+                step.llm,
+                step.tok,
+                step.sink.clone(),
+                step.tools,
+                step.dispatch.is_some(),
+            )
+            .await
+            .map_err(append)
     })
 }
 
@@ -926,9 +874,6 @@ pub(crate) async fn drive_steps(
     actors: &'static [super::loop_rows::ActorEntry],
 ) -> Result<TurnOutcome, AppendError> {
     let step_sink = sink.clone();
-    // 续写幕旁路（**不是兼容层**，见下方 `next.is_none` 处的理由）：`turn_head` 是
-    // 全局最新一幕的表头，恢复一条已被后续轮次归档的旧轮时，表头已指向新轮。
-    let resumed = input.resume.is_some();
     let mut session = match TurnRunner::begin(store, llm, input, sink).await? {
         TurnSessionBegin::Done(outcome) => return Ok(outcome),
         TurnSessionBegin::Run(session) => session,
@@ -940,20 +885,9 @@ pub(crate) async fn drive_steps(
         let next = super::loop_rows::next(&facts, session.turn(), session.now_ms(), actors);
         let next = match next {
             Some(next) => next,
-            None if !resumed => {
-                // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
-                // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
-                return session.exhausted(store, llm, "no_progress").await;
-            }
-            // 续写幕旁路：行表只有**一个**全局表头（`turn_head` 取最新一轮），
-            // 恢复一段被后续轮次归档的旧轮时它指向新轮，旧轮的 `execute-turn`
-            // 在表里看不到。这限制在表侧，堵在这里只会让恢复永远 `no_progress`
-            // （用例 `an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor`）。
-            // 旁路唯一的作用点就是这一行：把那**一行**连同它的动作一起交回来。
-            None => match super::loop_rows::resume_anchor(session.turn(), actors) {
-                Some(next) => next,
-                None => return session.exhausted(store, llm, "no_progress").await,
-            },
+            // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
+            // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
+            None => return session.exhausted(store, llm, "no_progress").await,
         };
         crate::plugin_debug!(
             "session",

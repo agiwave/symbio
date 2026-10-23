@@ -152,7 +152,7 @@ impl PersistentChatSession {
     /// 任一环落空 ⇒ `None`：顶层会话的正常形态，或父会话已删 / 读失败。调用方
     /// （`orchestrator::consume`）按 `Scope::Root` 处置——与接线前逐字一致。
     /// **这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
-    /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_granted`）。
+    /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_gate`）。
     ///
     /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
     pub(crate) async fn delegating_principal(&self) -> Option<String> {

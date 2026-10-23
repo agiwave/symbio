@@ -43,6 +43,7 @@ mod inputs;
 mod io;
 pub(crate) mod state;
 mod turn;
+mod wake;
 
 pub use self::state::ChatOrchestrator;
 
@@ -315,55 +316,48 @@ pub async fn run_chat_loop(
     //   后者由规则表判成 `Answered{empty}`，前者根本不进判决。
     let first_utterance: Option<String> = turn.input_utterance.as_ref().map(|(_, t)| t.clone());
 
-    // ── 会话恢复（resume）：在 turn 循环前处理 ──────────────────────────────
+    // ── 会话恢复（resume）：在 turn 循环前把用户动作落成唤醒请求 ─────────────
     //
-    // 当 `req.resume` 存在时，本调用是用户的恢复操作：
-    // - `RetrySubtree`：LLM 失败重试，删除 Failed Turn 及其所有子节点，重新走 LLM 请求
-    // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复，删除旧子节点、
-    //   重新执行工具、创建新结果子节点并持久化。CAPABILITY_VISITOR 已由 agent chat
-    //   handler 设置，`execute_tool_async` 直接复用。
+    // `req.resume` 存在时，本调用是用户的恢复操作：
+    // - `RetrySubtree`：删掉失败轮的消息，按普通新轮重来；
+    // - `RetryCompaction`：重跑一次压缩，不进对话轮次；
+    // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：在原轮上落一笔
+    //   `request(port=tool)`（载荷带 `resume` 标记）。之后的授权 / 派发由行表
+    //   自己的 `authorize-tool` / `dispatch-tools` / `deny-tools` 承担——恢复路径
+    //   不再自己写协议事实、不再自己跑执行层（T-244 步 5d）。
     //
-    // 成功 → `Continue`：turn 循环从 session 加载含新工具结果的历史，续写 LLM
-    //   （RetrySubtree 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
-    // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
-    // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
-    // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常经 `SessionDispatchPort`。
-    let mut pending_resume: Option<super::turn_exec::ResumedTool> = None;
-    // 本幕若为续写幕，`turn.stage{stage:"resume"}` 的 `result` 取这条名字。
-    // 只有真的产出了工具交换（`pending_resume`）才按续写幕处理——`RetrySubtree`
-    // 的语义是「删掉失败轮，重新开一轮」，不是续写。
-    let resume_stage_kind = req
-        .resume
-        .as_ref()
-        .map(|r| super::chat_loop::drive::resume_kind(&r.action));
+    // 唤醒请求落在幕锚之前，但 `turn_head` 的请求面按 seq 判终局，照样看得见它；
+    // 本幕因此从「工具批没关」开始，执行行让位给授权 / 派发行。
+    let mut next_drive_resume: Option<&'static str> = None;
     if let Some(tr) = req.resume.take() {
-        match super::resume::process_resume(
+        match super::chat_loop::wake::process_wake(
             orchestrator,
             &ctx,
-            &sink,
             &turn.abort,
             &context.session,
             tr,
         )
         .await
         {
-            Ok(super::resume::ResumeOutcome::Continue { resumed }) => {
-                // 成功：turn 循环会从 session 加载含新工具结果的历史
-                pending_resume = resumed;
+            Ok(super::chat_loop::wake::WakeOutcome::Woken {
+                kind,
+                root_id,
+                old_child,
+            }) => {
+                turn.resume_root = Some(root_id);
+                turn.resume_old_child = old_child;
+                next_drive_resume = Some(kind);
             }
-            Ok(super::resume::ResumeOutcome::Done) => {
+            Ok(super::chat_loop::wake::WakeOutcome::NewTurn) => {}
+            Ok(super::chat_loop::wake::WakeOutcome::Done) => {
                 return finish_turn(&context, &sink, &turn, TurnExit::ResumeDone).await;
             }
             Err(e) => {
-                plugin_warn!("session", "[Resume] process_resume failed: {}", e);
+                plugin_warn!("session", "[Wake] process_wake failed: {}", e);
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
         }
     }
-
-    // 只有**第一幕**可能是续写幕：工具交换随第一次 `execute_turn` 被取走，
-    // 后续轮次（长度截断的自动续写）各自开新轮。
-    let mut next_drive_resume = pending_resume.as_ref().and(resume_stage_kind);
 
     loop {
         // ── 步骤 1：加载本轮上下文 ───────────────────────────────────────────
@@ -612,7 +606,6 @@ pub async fn run_chat_loop(
                     drive_seq: drive.drive_seq,
                     window_turns: orchestrator.session.context_window(),
                     tools: &inputs.tools,
-                    resume: pending_resume.take(),
                     // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
                     // （它们的写方是 `derived_facts::record_learning`，见其文档）。
                     recalled: turn.recall_view.as_ref(),
@@ -690,7 +683,20 @@ pub async fn run_chat_loop(
                 // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
                 // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
                 // 不并入就只看得见、不落库（重启即丢）。
-                context.messages.extend(res.messages);
+                //
+                // 按 id 并入而不是整段 extend：续写幕的调用卡已经在历史里，新结果
+                // 还要替换旧结果子节点（见 `wake::merge_runner_messages`）。
+                let session = context.session.clone();
+                if let Err(e) = super::chat_loop::wake::merge_runner_messages(
+                    &session,
+                    &mut context,
+                    &mut turn,
+                    res.messages,
+                )
+                .await
+                {
+                    return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
+                }
                 res.output
             }
             Err(super::port::DispatchError::Actor(super::turn_exec::TurnExecExit::Aborted(

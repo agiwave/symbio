@@ -165,7 +165,7 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
     // 技能自我改进（S11）就整体失效。
     //
     // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
-    // 套路。写侧闸拒（`closure_denied`，见运行器的 `closure_granted`）：收束格
+    // 套路。写侧闸拒（`closure_denied`，见运行器的 `closure_gate`）：收束格
     // **未入格** ⇒ 本轮的派生事实**也不写**（承诺 / 任务 / 熔断 / 记忆全不写）。
     // 用户的答案照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
     if outcome.closure_denied {

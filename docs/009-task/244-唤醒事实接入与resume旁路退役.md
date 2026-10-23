@@ -117,7 +117,7 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   `response` 在归档段里，切片读不到 ⇒ `close-turn` 判不出欠账；没有这一分支就反复跑
   模型直到 `step_limit`。反向判据实测：删掉该分支 ⇒
   `an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor` 转
-  `Failed(InternalError("step_limit"))`。删除条件写在 `TurnSession::has_pending_close`
+  `Failed(InternalError("step_limit"))`。删除条件写在 `TurnSession::has_pending_close`<!-- doc-symbol-allow: 记名的是恢复旁路时期的旧符号（`has_pending_close`），随 T-244 步 5d 的旁路退役而删除——「不存在」正是退役已落地的状态 -->
   的文档里：步 5d 退役 `resume.rs` 的 `resumed` 旁路时，连同它一起删。
   用例：`loop_rows.test.rs` 三条（前件真值 / 反向钉「有调用时不欠」/ `next` 在答完后
   先派 `close-turn`）+ `decl/mod.test.rs` 三条（`has_final` 正向、四种「还没答完」的形状、
@@ -190,3 +190,31 @@ exit: 'PL-017 §4 步 4 与步 5 落地：审批 / 用户补充 / 中止各落�
   `by: None`（它们的派发点还在执行体内，随细端口接回）；`close-turn` 的出口仍只有
   `chat.assistant.final`、`execute-turn` 仍带 `chat.assistant.final` 的过渡豁免，两者
   一起等 `run_execute` 的 `has_pending_close` 旁路退役后按 §3.1 复原。
+- 2026-10-23 步 5d（唤醒请求进环 + `resume.rs` 旁路整文件退役）。恢复路径今天只落
+  **一笔事实**：`ToolPort::land_wake` 写 `request(port=tool)`（载荷带 `resume` 标记，
+  键 `tool-resume-{turn}-{target}-{attempt}`）；授权 / 派发 / 拒绝由行表自己的
+  `authorize-tool`（0）/ `dispatch-tools`（68）/ `deny-tools`（69）承担——它们从那笔
+  `request` 的载荷复原工具批（`ToolPort::wake_batch`），再按各自的 `owes` 判欠不欠。
+  **环外不再有第二条恢复事实**：`resume.rs`（632 行）+ `resume.test.rs`（255 行）整份
+  删除，`TurnInput.resume` / `TurnResume` / `turn_exec::ResumedTool` 三处入参形状退场，<!-- doc-symbol-allow: 记名的是本批随 `resume.rs` 退役而删除的旧入参形状（`ResumedTool`）——「不存在」正是退役已落地的状态 -->
+  `run_execute` 的 `has_pending_close()` 首分支、`loop_rows::resume_anchor` 整格、
+  续写幕的 `resumed` 特例一并消失；`tools::apply_not_executed` 随之删除。<!-- doc-symbol-allow: 记名的是本批随 `resume.rs` 退役而删除的旧函数（`apply_not_executed`）——「不存在」正是退役已落地的状态 -->
+  它的跨域取用方只有 `resume.rs`，随它一并退场。
+  形状改动三处：① `WakeSpec` 把七个位置参数收成一个结构体（位置错序编译器不报——
+  `wire_id` 与 `turn_id` 互换过一次）；② `WakeIntent::{Execute, Result}` 区分「继续跑
+  工具」与「答复内容」两种唤醒；③ 唤醒 id 带 `attempt`：同一笔被重复唤醒时旧的那笔
+  `request` 由 `failed{superseded}` 关掉（`wake_terminal` 按事实 seq 判，不看墙钟）。
+  **反向判据实测**：把 `resume.rs` 放回来 ⇒ 新守卫 S-017 转红（文件存在即违例）；
+  `resume_anchor` / `resumed` 任一名字回来 ⇒ 转红；`land_wake` 载荷的 `id` 那一格删掉
+  ⇒ `tool_dispatch.test.rs` 的唤醒用例转红（键对不上时派发行永不开账、日志一片绿）。
+  门禁侧两处：① **新增 S-017**（恢复路径不许再有旁路：`resume.rs` 文件不存在 +
+  `resume_anchor` / `resumed` 零出现），配 4 条回归用例；② **S-015 重指**——布尔壳
+  `closure_granted` 随它唯一的生产调用点（续写幕的产物臂）退场而删除后，旧判据
+  （`!closure_granted(` 零出现）已不可能变红 ⇒ 空转守卫。重指为两条可证伪的形状：
+  布尔壳零出现、闸的每次调用当场处理 `Err`（不许 `.is_ok()` / `.is_err()` 取布尔，
+  也不许把结果存起来另判——拆行写法骗得过行级正则）。回归用例 4 条 → 5 条。
+  文档侧：21 处失效符号指认随本批清零——`turn_runner::closure_granted` 16 处随改名跟进，<!-- doc-symbol-allow: 记名的是收束闸的旧布尔形态（`closure_granted`），它随收束闸收敛到单一 owner 而退役——「不存在」正是单一 owner 生效的状态 -->
+  `turn_exec::ResumedTool` / `ToolPort::open_resume` / `tool_dispatch::open_resume` 5 处随旁路退役走行内承认通道——`doc-symbol-audit` 由 21 处红转绿。<!-- doc-symbol-allow: 记名的是恢复旁路时期的旧符号（`ResumedTool` / `open_resume`），随 T-244 步 5d 的旁路退役而删除——「不存在」正是退役已落地的状态 -->
+  门禁：`cargo test --lib` 2094 通过 / 0 失败，`node scripts/gate.mjs` 130/130 全绿
+  （含 e2e 78/78）。基线随本批下调三格，各带归属说明：`rustTests` 2097→2094、
+  `ciRustTestsTotal` 1436→1433、`LEGACY_ROLE_WRITE_BASELINE` 151→146。

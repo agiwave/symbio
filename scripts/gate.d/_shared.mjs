@@ -137,7 +137,21 @@ export const BASELINE = {
   // `loop_rows.test.rs` 十条钉住；阶段折叠与 `report_due` 的纯函数判据在
   // `decl/mod.test.rs`；旧对拍的另一半（同一份日志切片的「已做」判定）由 `turn_head`
   // 视图的用例与 `stage_events.test.rs` 保留的 7 条承担。
-  rustTests: 2097,
+  // baseline-allow rustTests: 批 T-244 步 5d 净删 3 条（2097→2094）——被测对象整条退役：
+  // ① `resume.rs` / `resume.test.rs` 整份删除（6 条），被测的是**恢复路径的私有旁路**
+  // （自己写协议事实、自己跑执行体）；旁路退役后唤醒 / 续写只能从事实进环。判据没有丢：
+  // 唤醒那一笔的落格形状、读侧还原、拒绝还原、关账后读不回，由新增的
+  // `tool_dispatch.test.rs` 四条钉住；「续写不重开用户格、收束记在原轮上」由
+  // `turn_runner.test.rs` 的 `a_wake_continues_the_same_turn_without_reopening_the_user_cell`
+  // 接手（它走生产 `ToolPort::land_wake` / `wake_batch`）；「恢复路径零旁路」由门禁
+  // `S-017`（`scripts/grep-audit.mjs`）钉住。
+  // ② `tool_executor.test.rs` 删 1 条（`not_executed_patch_is_completed_not_failed`）——
+  // 被测的 `apply_not_executed` 是父节点终态的**第二个写方**，随它退役，父节点终态改由
+  // `close_unfinished` 一处写；该形状改由同文件保留的
+  // `interactive_break_leaves_result_for_skipped_calls` 断言（状态 Completed / 无 error /
+  // `meta.failure_kind = not_executed`）。
+  // 新增 4 条（唤醒路径：落格 / 读侧 / 拒绝 / 关账后读不回）。
+  rustTests: 2094,
 
   // baseline-allow ciRustTestsTotal: 批 T-051 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 PL-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（ADR-078 三层淡化整族退役）。非侵蚀。
@@ -146,7 +160,10 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 T-161 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 批 T-178（02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
-  ciRustTestsTotal: 1436,
+  // baseline-allow ciRustTestsTotal: 批 T-244 步 5d 的同一净删 3 条在 CI 口径下的折算（1436→1433）——
+  // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
+  // `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 1433,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（T-070 已把这两个文件删掉），不是入链

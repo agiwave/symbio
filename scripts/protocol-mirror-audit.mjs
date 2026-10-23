@@ -507,8 +507,8 @@ const META_KEYS = [
   },
   {
     key: 'error',
-    owner: 'symbio/src/plugins/loop/resume.rs',
-    what: '旧路径的失败原因（顶层 error 缺失时的兜底）',
+    owner: 'symbio/src/plugins/loop/tools/dispatch/batch.rs',
+    what: '失败原因（旧路径的兜底读点；今天的失败文本由本文件写进父节点顶层 `error`）',
   },
   {
     key: 'failure_kind',
@@ -517,7 +517,7 @@ const META_KEYS = [
   },
   {
     key: 'started_at',
-    owner: 'symbio/src/plugins/loop/resume.rs',
+    owner: 'symbio/src/plugins/loop/tools/dispatch/batch.rs',
     what: '工具开始执行的时刻（运行时长锚点）',
   },
   {

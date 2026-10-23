@@ -225,8 +225,6 @@ pub(crate) async fn execute_final_reply_turn(
         tier: LatencyTier::Deep,
         // 不生成 ⇒ 没有 prompt，也就没有窗口可裁。
         window_turns: None,
-        // `Answered` 只在轮首成立（`request_round == 0`），不带恢复锚点。
-        resume: None,
         actor,
         prefix: None,
         stages,

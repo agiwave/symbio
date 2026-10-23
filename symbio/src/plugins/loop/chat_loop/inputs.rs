@@ -152,8 +152,16 @@ pub(crate) async fn prepare_turn_inputs(
     apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
-    let root_id: String = llm_short_id();
-    emit_streaming_start(sink, &root_id, Some(turn.request_round)).await;
+    // 续写幕复用原 Turn 根（T-244 步 5d）：那个骨架在本轮首幕已经发过，再发一次
+    // 只会让同一个 id 重生一条「流式中」的根，把已完成的卡打回运行态。
+    let root_id: String = match turn.resume_root.take() {
+        Some(root) => root,
+        None => {
+            let root = llm_short_id();
+            emit_streaming_start(sink, &root, Some(turn.request_round)).await;
+            root
+        }
+    };
 
     // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录 ∧ 未做过」。

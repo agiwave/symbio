@@ -14,7 +14,7 @@ pub(crate) async fn land_artifacts<S>(
     store: &S,
     rt: &LlmTurn,
     outcomes: &[super::super::tool_dispatch::DispatchOutcome],
-    round_facts: &StreamNodeFacts,
+    round_facts: Option<&StreamNodeFacts>,
 ) -> Result<(), crate::symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -26,9 +26,14 @@ where
     // 本轮的中途产出（思考 / 正文）**随这一轮第一格产物入格**。顺序是判据：
     // 实时面是「思考→卡片→思考→卡片」，若只记在收束格，重开会话会整体挪到
     // 全部工具卡片之后（见拆分前 2c 的长注释）。
-    let round_nodes = rounds_payload(std::slice::from_ref(round_facts))
-        .pop()
-        .unwrap_or_else(|| serde_json::json!({}));
+    //
+    // 唤醒派发没有「本次模型往返」：`None` ⇒ 载荷不带 `round`（重建不会凭空
+    // 长出一组中途产出节点）。空对象也不行——它是「这一轮说了一段空话」。
+    let round_nodes = round_facts.map(|facts| {
+        rounds_payload(std::slice::from_ref(facts))
+            .pop()
+            .unwrap_or_else(|| serde_json::json!({}))
+    });
     for (oi, outcome) in outcomes.iter().enumerate() {
         // 产物闸（`ClosureKind::Artifact`，ADR-067）：不持 `produce.artifact` ⇒
         // 这条结果不入格（warn 一次，不刷屏）。结果照进 prompt / 照记
@@ -79,7 +84,7 @@ where
                 "turn_id": turn_root_id,
                 // 本轮中途产出：只随**第一格**带一次（同一轮多张卡片时
                 // 思考只有一段，挂两处即两个 owner）。
-                "round": (oi == 0).then(|| round_nodes.clone()),
+                "round": (oi == 0).then(|| round_nodes.clone()).flatten(),
             })),
         )?;
         run.artifact_no += 1;

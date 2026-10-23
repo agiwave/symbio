@@ -99,7 +99,6 @@ where
         tier,
         window_turns,
         inject,
-        resume,
         actor,
         prefix,
         final_reply,
@@ -115,7 +114,7 @@ where
     let viewer = Some(actor.principal.as_str());
     // 本轮**新落**的产物格数（[ADR-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
     // 收束，发言闸再拒也不算未收束（`TurnOutcome::closure_denied` 与 C4 都认它）。
-    let mut artifacts_landed = 0u64;
+    let artifacts_landed = 0u64;
     // 1. 用户格**不在这里落**（T-225）：它已由编排层在判决之前落格，本函数收到的是
     // 它的 seq（`user_seq`）——运行器只拿它当溯源锚点，不再拥有「用户说了什么」。
     //
@@ -296,69 +295,23 @@ where
 
     let started = std::time::Instant::now();
     // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
-    let mut exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
+    let exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
     // 本回合内已走完的**工具轮数**——只用于给合成 id 编号。
     let tool_round: usize = 0;
     // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
     let cost_ms = 0u64;
     // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。续写轮从**该轮
     // 已有产物数**起编号——等待轮可能已落过产物格，从 0 起会撞幂等键。
-    let mut artifact_no = full_snapshot
+    let artifact_no = full_snapshot
         .iter()
         .filter(|e| e.turn == turn && e.kind == crate::symbio_core::EVENT_ARTIFACT_ADDED)
         .count() as u64;
-    let mut all_tool_calls: Vec<ToolCallFact> = Vec::new();
+    let all_tool_calls: Vec<ToolCallFact> = Vec::new();
     let rounds: Vec<StreamNodeFacts> = Vec::new();
 
-    // 续写轮：恢复产生的工具交换是**本轮已发生的事实**——先落格再拼进 prompt。
-    // 落格之后它固然进了投影，但本轮的 `base_prompt` 已在上方渲染完毕，故仍就地追加。
-    if let Some(r) = &resume {
-        // 产物闸（`ClosureKind::Artifact`）：不持 `produce.artifact` ⇒ 这一格不落。
-        // 结果**照进 prompt**（模型看得见）+ 照记 `all_tool_calls`（请求发生过）。
-        if closure_granted(&actor, ClosureKind::Artifact) {
-            store.append(
-                Event::pending(
-                    format!("a-{turn}-{artifact_no}"),
-                    crate::symbio_core::EVENT_ARTIFACT_ADDED,
-                    Entity::Artifact,
-                    Verb::Asserted,
-                    turn,
-                    &actor.principal,
-                )
-                .with_produced_by(user_seq)
-                .with_payload(serde_json::json!({
-                    "tool": r.call.name.clone().unwrap_or_default(),
-                    "text": r.text,
-                    "tool_call_id": r.call_id.clone().or_else(|| r.call.id.clone()),
-                    "wire_id": r.call.wire_id,
-                    "args": crate::symbio_core::node_build::tool_call_args_text(&r.call),
-                    "result_id": r.result_id,
-                    "success": true,
-                    "turn_id": r.turn_id.clone().unwrap_or_else(|| turn_root_id.to_string()),
-                })),
-            )?;
-            artifact_no += 1;
-            artifacts_landed += 1;
-            all_tool_calls.push(ToolCallFact {
-                id: r
-                    .call_id
-                    .clone()
-                    .or_else(|| r.call.id.clone())
-                    .unwrap_or_default(),
-                name: r.call.name.clone().unwrap_or_default(),
-                args: crate::symbio_core::node_build::tool_call_args_text(&r.call),
-                wire_id: r.call.wire_id.clone().unwrap_or_default(),
-                result_id: r.result_id.clone(),
-            });
-        } else {
-            crate::plugin_warn!(
-                "actors",
-                "[v2] 产物被授权拒绝（{} 缺 produce.artifact），本条结果不入格（turn={turn}）",
-                actor.principal
-            );
-        }
-        exchange.extend(exchange_messages(&r.call, &r.text));
-    }
+    // 唤醒幕（审批 / 问答恢复）**不在这里续写交换**：用户动作落成唤醒请求
+    // （`chat_loop::wake`），授权与派发由行表承担，工具交换由派发动作自己产生
+    // （`stream::dispatch_round`）——本段不再私自拼一段 prompt。
 
     // 1c. **闸门与首请求之间的中止**（ADR-052 决策 1）。检查点在这里：用户格已落、
     // 请求未发，已中止则直接走中止收束格，与 adapter 中途返回 Aborted 落的是同一格。

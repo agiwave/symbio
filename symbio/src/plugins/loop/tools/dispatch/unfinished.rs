@@ -34,7 +34,8 @@ pub fn is_unanswered(failure_kind: &str) -> bool {
     failure_kind == ABORTED || failure_kind == NOT_EXECUTED
 }
 
-/// 「工具调用未执行」的**结果子节点**——与 [`apply_not_executed`](super::super::tool_executor::apply_not_executed) 成对使用。
+/// 「工具调用未执行」的**结果子节点**——与父节点终态补丁成对使用（补丁在
+/// [`close_unfinished`] 里落：`success: false` + `failure_kind`）。
 ///
 /// ## 为什么父节点补丁不够（本函数存在的全部理由）
 ///
@@ -49,8 +50,8 @@ pub fn is_unanswered(failure_kind: &str) -> bool {
 /// 因此「**有调用必有结果**」这条不变量必须在**存储**里成立（本函数写入 `tool_messages`
 /// ⇒ 落库 + 广播 + 进下一轮上下文），而不是只在请求视图里成立。
 ///
-/// `reason` 与 [`apply_not_executed`](super::super::tool_executor::apply_not_executed) 同源（成因可区分，事后排查不必靠猜）：
-/// 中止 / 批次跳过。
+/// `reason` 与端口侧 `failed{why}` 用同一份词表（[`ABORTED`] / [`NOT_EXECUTED`]，
+/// 成因可区分，事后排查不必靠猜）：中止 / 批次跳过。
 ///
 /// ## 为什么是 `Completed`
 ///

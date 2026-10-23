@@ -76,7 +76,6 @@ impl TurnRunner {
                 window_turns: None,
                 // 单请求入口（无工具轮）没有轮内循环 ⇒ 没有注入时机。
                 inject: None,
-                resume: None,
                 // 平凡值身份（S08 §4：单主体 = 今天的状态）。
                 actor: ActorSpec::trivial("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
@@ -330,7 +329,6 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
@@ -602,7 +600,6 @@ mod turn_runner_tests {
                     drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     window_turns: None,
-                    resume: None,
                     inject: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
@@ -654,7 +651,6 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
@@ -715,7 +711,6 @@ mod turn_runner_tests {
                     drive_seq: user_seq,
                     tier: LatencyTier::Deep,
                     window_turns: None,
-                    resume: None,
                     inject: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
@@ -807,7 +802,6 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
-                    resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
@@ -847,7 +841,6 @@ mod turn_runner_tests {
             tier: LatencyTier::Deep,
             window_turns: None,
             inject: None,
-            resume: None,
             actor: crate::symbio_core::ActorSpec::trivial("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
@@ -1117,7 +1110,7 @@ mod turn_runner_tests {
     ///
     /// ## 这个用例挡的是什么
     ///
-    /// 收束格的写方是**运行器**（闸在落格前判，见 `closure_granted`）。闸漏判不会
+    /// 收束格的写方是**运行器**（闸在落格前判，见 `closure_gate`）。闸漏判不会
     /// 让任何东西变红——收束格照落、既有断言全绿，只有未收束态的 C4 与本用例
     /// 看得见它。
     ///
@@ -1149,7 +1142,6 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    resume: None,
                     actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
@@ -1199,7 +1191,6 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    resume: None,
                     actor: ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
@@ -1233,10 +1224,10 @@ mod turn_runner_tests {
 mod tool_round_tests {
     use std::sync::{Arc, Mutex};
 
-    use super::super::super::tool_dispatch::{DispatchOutcome, ToolDispatch, ToolPortCall};
-    use super::super::{
-        NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnResume, TurnRunner,
+    use super::super::super::tool_dispatch::{
+        DispatchOutcome, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
+    use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
         EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage,
@@ -1752,6 +1743,7 @@ mod tool_round_tests {
                     granted: false,
                     deny_why: None,
                     sent: false,
+                    wake: None,
                 }
             })
             .collect()
@@ -1895,6 +1887,129 @@ mod tool_round_tests {
         }
     }
 
+    /// 唤醒幕的假分发方：认领**开着**的唤醒请求（`request(port=tool)`），按行表的
+    /// 两行（授权 → 派发）把它走完。
+    ///
+    /// 读回那一笔用的是**生产**的读侧（[`ToolPort::wake_batch`]）：唤醒载荷的形状
+    /// 不在替身里复述一遍（复述即第二处真相——改了一处，另一处还认旧形状）。
+    struct WakeDispatch {
+        store: Arc<EventStore>,
+        turn: u64,
+        user_seq: u64,
+        rounds: Arc<Mutex<usize>>,
+    }
+
+    impl WakeDispatch {
+        fn port(&self) -> ToolPort {
+            let facts: Arc<dyn Store<Event = Event>> = self.store.clone();
+            ToolPort::new(facts, self.turn, self.user_seq, 0)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolDispatch for WakeDispatch {
+        async fn open(
+            &self,
+            _store: &dyn Store<Event = Event>,
+            _turn: &LlmTurn,
+        ) -> Vec<ToolPortCall> {
+            // 唤醒幕没有模型应答可寄存。
+            Vec::new()
+        }
+
+        async fn authorize(&self, _store: &dyn Store<Event = Event>, calls: &mut [ToolPortCall]) {
+            if !calls.is_empty() {
+                return;
+            }
+            // 草稿里没有模型批次 ⇒ 认领开幕前列队的那一笔唤醒请求。
+            let Some(mut batch) = self.port().wake_batch() else {
+                return;
+            };
+            // 用户已经做过判断 ⇒ 放行（授权事实按 `(port, id)` 绑定，与生产同键）。
+            for call in batch.calls.iter_mut() {
+                let id = call.call.id.clone();
+                append_fact(
+                    self.store.as_ref(),
+                    Event::pending(
+                        format!("grant-{}-{}", self.turn, id),
+                        crate::symbio_core::EVENT_AUTHZ_GRANTED,
+                        Entity::Turn,
+                        Verb::Asserted,
+                        self.turn,
+                        "authorizer",
+                    )
+                    .with_produced_by(self.user_seq)
+                    .with_payload(serde_json::json!({
+                        "key": id,
+                        "port": "tool",
+                        "id": id,
+                        "tool": call.name,
+                        "risk": "unknown",
+                        "deferred": true,
+                    })),
+                );
+                call.granted = true;
+            }
+        }
+
+        async fn dispatch(
+            &self,
+            _store: &dyn Store<Event = Event>,
+            turn: &LlmTurn,
+            calls: &mut [ToolPortCall],
+        ) -> Vec<DispatchOutcome> {
+            *self.rounds.lock().unwrap() += 1;
+            // 派发前落 `sent`（端口账第三笔：派出）。
+            for call in calls.iter_mut().filter(|c| c.granted) {
+                if super::super::super::port::begin(
+                    self.store.as_ref(),
+                    super::super::super::loop_rows::PORTS,
+                    super::super::super::port::Dispatch {
+                        call: &call.call,
+                        turn: self.turn,
+                        produced_by: self.user_seq,
+                        owed: true,
+                    },
+                )
+                .is_ok()
+                {
+                    call.sent = true;
+                }
+            }
+            let outcomes: Vec<DispatchOutcome> = turn
+                .tool_calls
+                .iter()
+                .map(|tc| DispatchOutcome {
+                    call_id: tc.id.clone().unwrap_or_default(),
+                    name: tc.name.clone().unwrap_or_default(),
+                    text: "文件内容：hello（已批准）".into(),
+                    ok: true,
+                    needs_user_action: false,
+                    prompt: None,
+                    failure_kind: String::new(),
+                    wire_id: tc.wire_id.clone().unwrap_or_default(),
+                    args: crate::symbio_core::node_build::tool_call_args_text(tc),
+                    result_id: String::new(),
+                })
+                .collect();
+            // 关账：工具回了话 ⇒ `response`。
+            for call in calls.iter().filter(|c| c.granted && c.sent) {
+                super::super::super::port::succeed(
+                    self.store.as_ref(),
+                    &call.call,
+                    self.turn,
+                    self.user_seq,
+                )
+                .expect("唤醒应答落格");
+            }
+            outcomes
+        }
+
+        async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
+            self.port().wake_batch()
+        }
+    }
+
     /// 全批拒绝的假分发方：证明 `deny-tools` 那一行真的被选中并跑到执行层，
     /// 且被拒的 `request` 以 `failed{why}` 关账（T-244 步 5b）。
     struct DenyDispatch {
@@ -2008,7 +2123,6 @@ mod tool_round_tests {
             tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
-            resume: None,
             actor: crate::symbio_core::ActorSpec::trivial("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
@@ -2793,16 +2907,23 @@ mod tool_round_tests {
         );
     }
 
-    /// 续写同一轮（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
+    /// **唤醒幕续写同一轮**（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
     ///
     /// 这是 [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
     /// 的核心判据：等待轮的**收束格**刻意留给恢复幕（进展格不是收束格），续写把它
     /// **真正填上**（见收尾的 kinds 断言）。若续写另开新轮（`u-1` + `f-1`），原轮
     /// 永远等不到收束事件——C4 的产物口径（ADR-067）会掩盖它，但 `last_open_turn`
     /// 仍按 final / fallback 找轮，恢复链路会先断。
+    ///
+    /// ## 唤醒身份在**事实**上，不在入参里（T-244 步 5d）
+    ///
+    /// 用户动作先落成 `request(port=tool)`（载荷带 `resume` 标记），行表的
+    /// `authorize-tool`（0）与 `dispatch-tools`（68）两行自己认领它——恢复路径不再
+    /// 自己写协议事实、也不再自己跑执行层。派发方读回那一笔用的是**生产**的读侧
+    /// （[`ToolPort::wake_batch`]）：载荷形状不在替身里复述一遍。
     #[tokio::test]
-    async fn resume_continues_same_turn_without_reopening_user_cell() {
-        let store = EventStore::new();
+    async fn a_wake_continues_the_same_turn_without_reopening_the_user_cell() {
+        let store = Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
 
         // ① 等待轮：工具报 pending ⇒ 停下、落进展格、不落收束格。
@@ -2815,10 +2936,10 @@ mod tool_round_tests {
         };
         let first = TurnRunner
             .run_with_tools(
-                &store,
+                store.as_ref(),
                 &pending_llm,
                 &tok,
-                input(&store),
+                input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 &tools(),
                 Some(&pending_dispatch),
@@ -2831,41 +2952,60 @@ mod tool_round_tests {
             !mid.iter().any(|e| e.kind == EVENT_ASSISTANT_FINAL),
             "等待轮不落收束格（收束格留给恢复幕）：{mid:?}"
         );
+        let user_seq = mid
+            .iter()
+            .find(|e| e.kind == EVENT_USER_MESSAGE)
+            .and_then(|e| e.produced_by)
+            .or_else(|| {
+                mid.iter()
+                    .find(|e| e.kind == EVENT_USER_MESSAGE)
+                    .map(|e| e.seq.map(|s| s.value()).unwrap_or(0))
+            })
+            .expect("本轮有用户格");
 
-        // ② 恢复：续写**同一轮**（turn 0），用户格 seq = 0（网格第一格）。
+        // ② 用户点了「批准」⇒ 唤醒请求落格（幕锚**之前**）：它只是一笔
+        //    `request(port=tool)`，授权与派发由行表的两行承担。
+        let facts: Arc<dyn Store<Event = Event>> = store.clone();
+        let port = ToolPort::new(facts, 0, user_seq, 0);
+        port.land_wake(&WakeSpec {
+            kind: "approve",
+            target: "tc-1",
+            tool: "vdfs_read",
+            args: &serde_json::json!({ "path": "a.md", "approved": true }),
+            wire_id: "w-1",
+            turn_root: "root-1",
+            intent: &super::super::super::tool_dispatch::WakeIntent::Execute,
+        })
+        .expect("唤醒请求落格");
+        assert!(
+            super::super::super::loop_rows::owes("authorize-tool", &store.range(Seq::new(0)), 0, 0),
+            "唤醒请求一落，授权行就欠着（它自己会认领这一笔）"
+        );
+
+        // ③ 唤醒幕：续写**同一轮**（turn 0），用户格 seq 不变，本幕锚是新落的那条。
         let answer_llm = AnsweringLlm::new();
         let prompts = answer_llm.prompts.clone();
+        let wake_dispatch = WakeDispatch {
+            store: store.clone(),
+            turn: 0,
+            user_seq,
+            rounds: Arc::new(Mutex::new(0)),
+        };
         let out = TurnRunner
             .run_with_tools(
-                &store,
+                store.as_ref(),
                 &answer_llm,
                 &tok,
                 TurnInput {
                     turn: 0,
                     // 续写不新开用户格：溯源锚 = 首幕用户格 seq。
-                    user_seq: 0,
+                    user_seq,
                     // 本幕锚与首幕（0）不同 ⇒ 派发格幂等键不撞。
                     drive_seq: 1,
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
-                    resume: Some(TurnResume {
-                        call: TurnToolCallInfo {
-                            id: Some("tc-1".into()),
-                            wire_id: Some("w-1".into()),
-                            name: Some("vdfs_read".into()),
-                            arguments: serde_json::json!({ "path": "a.md", "approved": true }),
-                            parse_error: None,
-                            overflow_notice: None,
-                        },
-                        text: "文件内容：hello（已批准）".into(),
-                        // 单测不验节点身份（那条判据在 e2e t27）：留空 ⇒ 走回落合成，
-                        // 与接线前同形。
-                        call_id: None,
-                        turn_id: None,
-                        result_id: None,
-                    }),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -2879,77 +3019,43 @@ mod tool_round_tests {
                 },
                 Arc::new(SilentDeltas),
                 &tools(),
-                // 续写轮若真的再请求工具才有分发可言；本用例的收尾轮不请求工具。
-                Some(&FakeDispatch {
-                    pending: false,
-                    rounds: Arc::new(Mutex::new(0)),
-                }),
+                Some(&wake_dispatch),
             )
             .await
-            .expect("续写轮必答");
+            .expect("唤醒幕必答");
 
         assert_eq!(out.turn, 0, "续写记在原轮上");
         assert_eq!(out.text, "批准后已完成。");
         assert!(!out.fell_back && !out.aborted && !out.awaits_user);
 
         let snapshot = store.range(Seq::new(0));
-        let kinds: Vec<&str> = snapshot.iter().map(|e| e.kind.as_str()).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                EVENT_USER_MESSAGE,
-                crate::symbio_core::EVENT_TURN_DISPATCH,
-                "request",
-                "sent",
-                "response",
-                // 首幕工具批的创建 / 授权 / 派发协议格（T-244 步 5b）。
-                "request",
-                "authz.granted",
-                "sent",
-                "response",
-                EVENT_ARTIFACT_ADDED,
-                EVENT_ASSISTANT_PROGRESS,
-                crate::symbio_core::EVENT_TURN_DISPATCH,
-                EVENT_ARTIFACT_ADDED,
-                "request",
-                "sent",
-                "response",
-                EVENT_ASSISTANT_FINAL
-            ],
-            "续写**不重开用户格**（否则 14 格），只补派发格、产物格与收束格：{snapshot:?}"
-        );
         assert_eq!(
             snapshot
                 .iter()
                 .filter(|e| e.kind == EVENT_USER_MESSAGE)
                 .count(),
             1,
-            "同一句话在网格里只能出现一次"
+            "同一句话在网格里只能出现一次（唤醒幕不重开用户格）"
         );
-        // 恢复的产物格 = **最后一条** `artifact.added`（前一条是等待轮那次未批准的）。
-        let resumed_artifact = snapshot
-            .iter()
-            .rfind(|e| e.kind == EVENT_ARTIFACT_ADDED)
-            .expect("恢复的产物格在");
-        assert_eq!(
-            resumed_artifact.payload["tool"], "vdfs_read",
-            "恢复的产物格记被恢复的工具"
-        );
-        assert_eq!(
-            resumed_artifact.payload["text"],
-            "文件内容：hello（已批准）"
-        );
-        assert_eq!(
-            resumed_artifact.produced_by,
-            Some(0),
-            "溯源仍指向**原轮**用户格（I2）"
-        );
+        // 收束格记在**原轮**上，溯源仍是原轮用户格（I2）——它填上了 C4 的缺口。
         let cell = snapshot
             .iter()
             .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
             .expect("收束格在");
         assert_eq!(cell.turn, 0, "收束格记在原轮号上");
         assert_eq!(cell.payload["text"], "批准后已完成。");
+        assert_eq!(
+            cell.produced_by,
+            Some(user_seq),
+            "溯源仍指向原轮用户格（I2）"
+        );
+        // 唤醒那一笔的结果落成产物格（同在原轮上）。
+        let resumed_artifact = snapshot
+            .iter()
+            .rfind(|e| e.kind == crate::symbio_core::EVENT_ARTIFACT_ADDED)
+            .expect("唤醒的产物格在");
+        assert_eq!(resumed_artifact.payload["tool"], "vdfs_read");
+        assert_eq!(resumed_artifact.produced_by, Some(user_seq));
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -2960,38 +3066,30 @@ mod tool_round_tests {
             "续写填上了原轮的缺口（否则 C4 会把它当永久假缺口）"
         );
 
-        // prompt：恢复的交换进了模型看得见的地方（形状与在途工具轮同一套消息）。
+        // 端口面：唤醒请求已关账（`sent` → `response`），不留悬着的债。
+        assert!(
+            snapshot.iter().any(|e| {
+                e.kind == crate::symbio_core::EVENT_RESPONSE
+                    && e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
+            }),
+            "唤醒那一笔必须有应答（端口债关清）：{snapshot:?}"
+        );
+
+        // prompt：唤醒的结果进了模型看得见的地方——**带角色**的一条 `role: tool`
+        // 消息（与在途工具轮同形），不是「拼在末尾的一段文字」。
+        //
+        // 首幕那一笔的结果也还在（跨轮累加）：唤醒幕不是新会话，它接的是同一轮
+        // 的上下文；模型看得见「等审批时那次读到的」与「批准后这次读到的」。
         let seen = prompts.lock().unwrap().clone();
         assert_eq!(seen.len(), 1, "收尾轮一次请求：{seen:?}");
         let s = Seen::from(seen[0].clone());
-        assert!(
-            s.texts_of("assistant")
-                .iter()
-                .any(|x| x.contains("调用工具 vdfs_read")),
-            "恢复的工具调用要进 prompt（作为 assistant 消息）：{s:?}"
-        );
-        // 结果**带角色**：这是续写轮与在途工具轮同形的判据——恢复的结果不是
-        // 「拼在末尾的一段文字」，而是一条 `role: tool` 消息，带调用 id。
-        //
-        // **两条** tool 消息都是事实，不是重复：等待轮落了一条未批准的结果
-        // （`文件内容：hello`），续写轮又落了一条已批准的（`…（已批准）`）。
-        // 网格是 append-only 的事实源，两次调用两次结果都在；把它们合成一条
-        // 才是信息丢失。
+        let tool_msgs = s.tools();
         assert_eq!(
-            s.tools(),
-            vec![
-                (
-                    "文件内容：hello",
-                    Some("vdfs_read"),
-                    Some("call_vdfs_read_0")
-                ),
-                ("文件内容：hello（已批准）", Some("vdfs_read"), Some("w-1")),
-            ],
-            "两次调用的两次结果都在，且各带**自己那次调用**的 id：{s:?}\n\
-             （第二条的 id 是 resumed 调用自带的 wire id，不再是按名字合成的同名 id——\
-             两次调用合成同一个 id 会让 adapter 的「同一次调用只留最终那条结果」把\
-             前一条吃掉。）"
+            tool_msgs.last(),
+            Some(&("文件内容：hello（已批准）", Some("vdfs_read"), Some("w-1"))),
+            "唤醒的结果带自己的调用 id 进 prompt：{s:?}"
         );
+        assert_eq!(tool_msgs.len(), 2, "首幕那次的结果仍在（跨轮累加）：{s:?}");
     }
 
     // ── 守卫：交换**跨轮累加**（失忆的实测形状）───────────────────────────────
@@ -3855,13 +3953,13 @@ mod reflex_turn_tests {
 
 /// 作用域上限：**委派不放大权威**（[T-105]）。
 ///
-/// `closure_granted` 的两道——主体自己那一行、以及 `scope = child <parent>` 时的父主体那道。
+/// `closure_gate` 的两道——主体自己那一行、以及 `scope = child <parent>` 时的父主体那道。
 /// 本模块钉的是**第二道**：同一份能力集，换 `scope` 必须换结果（反向用例），
 /// 且父主体持同一能力时不受影响（正向对照）。
 ///
 /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 mod scope_ceiling_tests {
-    use super::super::{closure_granted, ClosureKind};
+    use super::super::{closure_gate, ClosureKind};
     use crate::symbio_core::{ActorSpec, Scope};
 
     /// 反向用例：父主体**不持**该能力 ⇒ 收束被拒；把 `scope` 改回 `Root`（接线前的形状）
@@ -3877,13 +3975,13 @@ mod scope_ceiling_tests {
 
         spec.scope = Scope::Child("user".to_string());
         assert!(
-            !closure_granted(&spec, ClosureKind::Speech),
+            closure_gate(&spec, ClosureKind::Speech).is_err(),
             "父主体不持 `reply.first` ⇒ 子主体的发言收束必须被拒"
         );
 
         spec.scope = Scope::Root;
         assert!(
-            closure_granted(&spec, ClosureKind::Speech),
+            closure_gate(&spec, ClosureKind::Speech).is_ok(),
             "改回 `Root`（无上限的独立主体）⇒ 同一份能力集必须放行"
         );
     }
@@ -3903,11 +4001,11 @@ mod scope_ceiling_tests {
             "前提：子主体自己那一行放行（这正是「放大」的来源）"
         );
         assert!(
-            !closure_granted(&spec, ClosureKind::Speech),
+            closure_gate(&spec, ClosureKind::Speech).is_err(),
             "父主体（对等体）不持 `reply.*` ⇒ 子主体不得发言"
         );
         assert!(
-            closure_granted(&spec, ClosureKind::Artifact),
+            closure_gate(&spec, ClosureKind::Artifact).is_ok(),
             "父主体持 `produce.artifact` ⇒ 产物收束不受上限影响"
         );
     }
@@ -3917,8 +4015,8 @@ mod scope_ceiling_tests {
     fn a_child_of_an_equally_strong_parent_is_unaffected() {
         let mut spec = ActorSpec::trivial("session/main");
         spec.scope = Scope::Child("session/main".to_string());
-        assert!(closure_granted(&spec, ClosureKind::Speech));
-        assert!(closure_granted(&spec, ClosureKind::Artifact));
+        assert!(closure_gate(&spec, ClosureKind::Speech).is_ok());
+        assert!(closure_gate(&spec, ClosureKind::Artifact).is_ok());
     }
 }
 
@@ -4325,7 +4423,6 @@ mod actor_ledger_tests {
             tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
-            resume: None,
             actor: ActorSpec::trivial("session/main"),
             prefix: None,
             final_reply: None,

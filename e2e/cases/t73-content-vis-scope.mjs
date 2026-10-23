@@ -25,7 +25,7 @@ import './_selfrun.mjs';
 // ## 会话 B 怎么造
 //
 // `--agent reflex` 把轮次主体绑到 `session/reflex`——授权表里登记的窄行（只持
-// `judge.intent`，无 `reply.*`）。运行器落收束格前判 `closure_granted`（发言臂），
+// `judge.intent`，无 `reply.*`）。运行器落收束格前判 `closure_gate`（发言臂），
 // 未持有 ⇒ 拒绝入格：无 final 格 ⇒ 本轮派生事实（承诺 / 任务 / 记忆）全不写。
 // 用户的答案照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
 // （同形先例：t71 对等主体的汇总轮，发言闸拒 ⇒ 那句话不进任何格子。）

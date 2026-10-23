@@ -703,9 +703,10 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
   assert.match(r.stdout, /S-014 通过：role 格直写存量 \d+ 处，与基线持平/)
 })
 
-// ── S-015: 收束闸的否定分支必须落事实 ──────────────────────────────────
-// 规则判的是**零出现**（不是棘轮）：否定分支若回到 `if !closure_granted { … }`，
-// 「拒绝」就又是「什么都没写」——日志里与「没跑完」同形，而不会有任何东西变红。
+// ── S-015: 收束闸单一 owner 且调用当场处理 Err ───────────────────────────
+// 规则判的是**零出现**（不是棘轮）：布尔壳 `closure_granted` 复活、或闸被压回
+// 布尔形态，「拒绝」就又是「什么都没写」——日志里与「没跑完」同形，而不会有任何
+// 东西变红。
 const S015_FILE = 'symbio/src/plugins/loop/sample.rs'
 
 function gateAudit(source, name = S015_FILE) {
@@ -727,21 +728,31 @@ function gateAudit(source, name = S015_FILE) {
   }
 }
 
-test('S-015 否定分支用 `!closure_granted(` 即红，并点名改法', () => {
+test('S-015 布尔壳 `closure_granted` 复活即红，并点名改法', () => {
   const src = 'fn f() {\n    if !closure_granted(&actor, ClosureKind::Speech) {\n        return;\n    }\n}\n'
   const r = gateAudit(src)
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-015 违例：收束闸的否定分支用 `!closure_granted\(` 判（1 处）/)
+  assert.match(r.stdout, /S-015 违例：收束闸被压回布尔形态（1 处）/)
   assert.match(r.stdout, /sample\.rs:2/)
-  assert.match(r.stdout, /closure_gate\(\.\.\)` 并调 `deny\(\.\.\)`/)
+  assert.match(r.stdout, /布尔壳 `closure_granted` 已退役/)
+  assert.match(r.stdout, /if let Err\(why\) = closure_gate\(\.\.\)/)
 })
 
-test('S-015 放行肯定分支与 `closure_gate` 的 Err 分支', () => {
-  // 肯定分支（`if closure_granted {…}`）是合法用法：它不落否定事实。
-  const granted = 'fn f() {\n    if closure_granted(&actor, ClosureKind::Artifact) {\n        return;\n    }\n}\n'
-  assert.equal(gateAudit(granted).status, 0, gateAudit(granted).stdout)
+test('S-015 闸被压成布尔或存起来另判即红', () => {
+  const boolShape = 'fn f() {\n    if closure_gate(&actor, ClosureKind::Speech).is_ok() {\n        land();\n    }\n}\n'
+  const r = gateAudit(boolShape)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /闸的调用没当场处理 `Err`/)
+  // 拆行写法骗得过「不许 `.is_ok()`」那种行级正则——这条判据按上一行同看挡住它。
+  const split = 'fn f() {\n    if let Err(why) =\n        closure_gate(&actor, ClosureKind::Speech)\n    {\n        deny(why);\n    }\n}\n'
+  assert.equal(gateAudit(split).status, 0, gateAudit(split).stdout)
+})
+
+test('S-015 放行当场处理 Err 的调用与闸的定义行', () => {
   const gate = 'fn f() {\n    if let Err(why) = closure_gate(&actor, ClosureKind::Speech) {\n        deny(store, &actor, 1, 2, ClosureKind::Speech, "k", &why);\n    }\n}\n'
   assert.equal(gateAudit(gate).status, 0, gateAudit(gate).stdout)
+  const def = 'fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {\n    Ok(())\n}\n'
+  assert.equal(gateAudit(def).status, 0, gateAudit(def).stdout)
 })
 
 test('S-015 不判注释行，测试文件豁免，豁免必须写理由', () => {
@@ -772,7 +783,7 @@ test('S-015 真实仓库零处（存量已全部迁完）', () => {
     encoding: 'utf8',
     timeout: SCAN_TIMEOUT_MS,
   })
-  assert.match(r.stdout, /S-015 通过：否定分支零处/)
+  assert.match(r.stdout, /S-015 通过：布尔壳零处/)
 })
 
 // ── S-016: 停机原因单形状 ────────────────────────────────────────────
@@ -856,4 +867,80 @@ test('S-016 真实仓库零处（两个形状已全部迁完）', () => {
     timeout: SCAN_TIMEOUT_MS,
   })
   assert.match(r.stdout, /S-016 通过/)
+})
+
+// ── S-017: 恢复路径不许再有旁路 ───────────────────────────────────────
+// 判据是**零出现**：恢复 / 审批 / 问答三条唤醒路径曾经走 `resume.rs` 的私有旁路
+// （自己写协议事实、自己跑执行体，绕开行表）。旁路退役后唯一入口是**事实**。
+// 放任它回来的代价不是风格问题——恢复路径会绕过行表写事实，于是「这一轮欠了
+// 什么」与「这一轮做了什么」对不上账，而没有任何东西会变红。
+const S017_LOOP = 'symbio/src/plugins/loop'
+
+/** 多文件临时树（这条规则要同时看「文件在不在」与「文件里写了什么」）。 */
+function gateAudit17(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s017-'))
+  try {
+    for (const [rel, body] of Object.entries(files)) {
+      const target = path.join(root, rel)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, body)
+    }
+    const env = { ...process.env, NO_COLOR: '1' }
+    delete env.SCOPE
+    return spawnSync(process.execPath, [script], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test('S-017 `resume_anchor` 与 `resumed` 分支回来即红', () => {
+  const anchor = gateAudit17({
+    [`${S017_LOOP}/loop_rows.rs`]: 'fn pick() -> u64 {\n    resume_anchor(&facts, 0)\n}\n',
+  })
+  assert.equal(anchor.status, 1, anchor.stdout)
+  assert.match(anchor.stdout, /S-017 违例：恢复路径的私有旁路回来了/)
+  assert.match(anchor.stdout, /loop_rows\.rs:2/)
+
+  const resumed = gateAudit17({
+    [`${S017_LOOP}/turn_exec.rs`]: 'fn f() {\n    if resumed {\n        return;\n    }\n}\n',
+  })
+  assert.equal(resumed.status, 1, resumed.stdout)
+  assert.match(resumed.stdout, /turn_exec\.rs:2/)
+})
+
+test('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () => {
+  const r = gateAudit17({
+    [`${S017_LOOP}/resume.rs`]: 'pub fn resume() {}\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-017 违例：恢复路径的私有旁路回来了/)
+  assert.match(r.stdout, /resume\.rs/)
+})
+
+test('S-017 注释行不判；视图字段名 `turn_head.resumed` 不在本规则范围内', () => {
+  const asComment = gateAudit17({
+    [`${S017_LOOP}/turn_exec.rs`]: '/// 旧形状（反例）：if resumed { … }\n',
+  })
+  assert.equal(asComment.status, 0, asComment.stdout)
+  // `loop_rows.rs` 里的 `resumed` 是**视图字段名**（`turn_head.resumed`），
+  // 不是旁路分支——范围写大了的规则比没有规则更糟。
+  const field = gateAudit17({
+    [`${S017_LOOP}/loop_rows.rs`]: 'fn cond() {\n    ("resumed", Lit::Bool(false))\n}\n',
+  })
+  assert.equal(field.status, 0, field.stdout)
+})
+
+test('S-017 真实仓库零处（旁路已全部退役）', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: SCAN_TIMEOUT_MS,
+  })
+  assert.match(r.stdout, /S-017 通过/)
 })

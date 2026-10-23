@@ -4,7 +4,7 @@
 //! 单轮状态、闸门判定结果、退出原因，以及编排器与 Stop 信号。
 //!
 //! 可见性：`ChatOrchestrator` / `StopSignal` 是**跨模块契约**（`orchestrator.rs`、
-//! `resume.rs` 经 `chat_loop::X` 引用）故为 `pub`；其余为 `pub(super)`——
+//! `wake.rs` 经 `chat_loop::X` 引用）故为 `pub`；其余为 `pub(super)`——
 //! 只在 `chat_loop` 及其子模块内可见。
 
 use super::*;
@@ -44,7 +44,7 @@ pub(crate) fn request_source_principal(
 /// | 字段 | 取法 |
 /// |---|---|
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
-/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
+/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 档位（与派发格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 以**数值**写入 `turn.dispatch` 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退历史 `user.message` 的 `tier` 映射） |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[T-105]） |
@@ -262,6 +262,18 @@ pub(crate) struct TurnState {
     pub(crate) now_ms: i64,
     /// 本幕读到的事实切片（阶段「已做」与配置快照的唯一输入）。
     pub(crate) facts: Vec<crate::symbio_core::Event>,
+    /// 续写幕复用的 Turn 根节点 id（T-244 步 5d）。
+    ///
+    /// 唤醒请求发生在开幕之前，`prepare_turn_inputs` 按它决定「要不要新开一个根」：
+    /// 有值 ⇒ 复用被续写轮的根（结果卡挂回原来那棵树），并且**不重发**流式占位
+    /// ——那个骨架早在本轮首幕就发过了。`None` = 新轮，照常新开。
+    pub(crate) resume_root: Option<String>,
+    /// 续写幕要**替换**的旧结果子节点（失败结果 / 等待用户的结果）。
+    ///
+    /// 新结果随执行器交回，落库之前把旧的删掉：留着会让同一笔调用出现两条结果，
+    /// 重建面（只按 `artifact.added` 复刻新结果）与实时面因此各说一套。删除放在
+    /// 派发**成功之后**（`chat_loop` 的并入处），派发失败时旧卡仍在。
+    pub(crate) resume_old_child: Option<String>,
 }
 
 impl TurnState {
@@ -495,12 +507,12 @@ impl ChatOrchestrator {
         // 判断是"还在跑"还是"卡死了"。
         //
         // 因此 ToolCall 的终态只由**执行方**给出，且恰好一处：
-        // - 正常分发：`tool_executor::process_tool_calls_async`（执行前 `Streaming`，
-        //   执行后 `Completed` / `WaitingUserAction`；未执行的批尾统一收口）
-        // - 恢复执行：`resume::process_tool_resume_action`（approve/retry/supply）
+        // `tool_executor::process_tool_calls_async`（执行前 `Streaming`，执行后
+        // `Completed` / `WaitingUserAction`；未执行的批尾统一收口）。审批恢复不再
+        // 另走一条执行路径——它把用户动作落成唤醒请求，仍由同一执行方收口。
         //
         // 状态机见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.3；
-        // 「每个 ToolCall 必然到达终态」这条不变量由上面两处负责保证。
+        // 「每个 ToolCall 必然到达终态」这条不变量由这一处负责保证。
 
         // 根 Turn 的终态**不在此发出**。
         //

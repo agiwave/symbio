@@ -494,37 +494,6 @@ pub async fn execute_tool_async(
 
 // 批量工具调用处理
 
-/// 本批**未执行**的工具调用的终态。`reason` 区分成因，写进 `meta.failure_kind`：
-///
-/// - `"not_executed"`：批次没轮到它（用户中止 / 交互模式下前一个工具待用户恢复）；
-/// - `"blocked"`：被 `PreToolUse` 钩子拦下（已有 `Blocked:` 结果子节点）。
-///
-/// 两条路径都必须给出终态，否则节点会永远停在 `Streaming`——前端一直转"运行中"。
-/// （`Streaming` 是瞬态状态：只经广播通道下发，持久层拒绝落盘——见
-/// `chat_session.rs::ensure_durable_states`。停在 Streaming 的节点是**广播层**的
-/// 收口缺口，`converge_inflight` 负责兜住。）
-///
-/// ## 为什么是 `Completed` 而不是 `Failed`
-///
-/// `Failed` 的语义是"以错误结束"，而"没轮到执行"与"被策略拦下"都不是错误。
-/// 标 `Failed` 还会连带两个后果：前端渲染 ⚠ 错误条（用户以为工具真的失败了），以及
-/// `get_context_messages` 过滤掉父节点后留下孤儿结果子节点（下一轮请求非法）。
-/// 与既有口径一致——工具失败属**信息性**，父节点一律 `Completed`，
-/// 差异由 `meta.failure_kind` 承载。
-///
-/// 可见性 `pub`：`resume.rs`（跨域，经 `tools` 域门面取用）要用同一份定义，
-/// 否则同一语义会长出第二个写法。
-/// 就地应用于**完整消息副本**（发射端自己组装好终态快照再广播），不再返回
-/// 「只有 id + status 的补丁」——那需要接收端猜意图，正是已删除的补丁语义。
-pub fn apply_not_executed(parent: &mut ChatNode, reason: &str) {
-    parent.status = Some(NodeStatus::Completed);
-    let mut meta = parent.meta.clone().unwrap_or_else(|| json!({}));
-    if let Some(obj) = meta.as_object_mut() {
-        obj.insert("success".into(), json!(false));
-        obj.insert("failure_kind".into(), json!(reason));
-    }
-    parent.meta = Some(meta);
-}
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）

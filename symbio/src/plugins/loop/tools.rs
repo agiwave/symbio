@@ -3,12 +3,12 @@
 //! 域内三个子模块：
 //!
 //! - `tool_executor` —— 执行编排：单工具路由与执行（`execute_tool_async`）、
-//!   批量分发与结果广播（`process_tool_calls_async`）、
-//!   「未执行」结果的统一写法（`apply_not_executed`）。它是工具结果节点的
+//!   批量分发与结果广播（`process_tool_calls_async`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
 //! - `dispatch` —— `process_tool_calls_async` 的**阶段拆分层**（T-179 / PL-015 §5 动作 B）：
 //!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
-//!   本层只是它的三段落点，不改门面。
+//!   本层只是它的三段落点，不改门面。收口段（`unfinished`）同时是「没跑到」的
+//!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。
 //! - `tool_result_guard` —— 结果守卫：单条结果进存储前的体积上限（`guard_tool_result`
 //!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
 //!   （[ADR-078](../../../../docs/010-adr/078.md "ADR-078")）。
@@ -30,5 +30,10 @@ mod dispatch;
 mod tool_executor;
 mod tool_result_guard;
 
-pub use self::dispatch::unfinished::{is_unanswered, ABORTED, NOT_EXECUTED};
-pub use self::tool_executor::{apply_not_executed, execute_tool_async, process_tool_calls_async};
+pub use self::dispatch::unfinished::{is_unanswered, NOT_EXECUTED};
+// 中止的成因词：与 `NOT_EXECUTED` 同属「没跑到」的词表，跨域取值只经这条门面。
+// 生产面没有引用点（端口关账读的是结果节点上的 `failure_kind` 本身），
+// 非测试构建下允许无引用——同 core 事件字典的做法（见 `symbio_core::mod.rs`）。
+#[allow(unused_imports)]
+pub use self::dispatch::unfinished::ABORTED;
+pub use self::tool_executor::process_tool_calls_async;

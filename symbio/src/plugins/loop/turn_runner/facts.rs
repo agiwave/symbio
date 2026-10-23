@@ -341,38 +341,6 @@ pub(crate) fn tool_exchange_messages(
     out
 }
 
-/// 续写轮的恢复交换 → 结构化消息。与 [`tool_exchange_messages`] 同形：
-/// 「这一轮是续写」是**调度事实**，不该变成模型眼里的另一种协议。
-pub(crate) fn exchange_messages(
-    call: &crate::symbio_core::TurnToolCallInfo,
-    text: &str,
-) -> Vec<crate::symbio_core::PromptMessage> {
-    let name = call.name.as_deref().unwrap_or("<unnamed>");
-    // 恢复交换只有这一次调用 ⇒ 轮次记 0（id 仍优先取调用自带的身份，见
-    // [`prompt_call_id`]）：恢复的调用与本轮其它调用共属同一次请求，撞名即错配。
-    let id = prompt_call_id(call, 0, 0);
-    vec![
-        crate::symbio_core::PromptMessage {
-            role: "assistant".into(),
-            text: format!("调用工具 {} {}", name, call.arguments),
-            tool_call_id: Some(id.clone()),
-            tool: Some(name.to_string()),
-            tool_calls: Some(vec![PromptToolCall {
-                id: id.clone(),
-                name: name.to_string(),
-                arguments: call.arguments.clone(),
-            }]),
-        },
-        crate::symbio_core::PromptMessage {
-            role: "tool".into(),
-            text: text.to_string(),
-            tool_call_id: Some(id),
-            tool: Some(name.to_string()),
-            tool_calls: None,
-        },
-    ]
-}
-
 /// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`tool_exchange_messages`] 的 `round`）。
 ///
 /// 优先级与 v1 的请求构建**同一口径**（`plugins/model/message_builder.rs`：wire id

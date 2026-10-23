@@ -262,10 +262,14 @@ pub(crate) async fn authorize_round(
     store: &dyn Store<Event = Event>,
     dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
 ) {
-    let Some(calls) = run.pending_calls.as_mut() else {
-        return;
-    };
-    dispatch.authorize(store, calls).await;
+    match run.pending_calls.as_mut() {
+        Some(calls) => dispatch.authorize(store, calls).await,
+        None => {
+            // 恢复幕：草稿里没有模型批次，动作自己去读开幕前列队的唤醒请求。
+            let mut none: Vec<super::super::tool_dispatch::ToolPortCall> = Vec::new();
+            dispatch.authorize(store, &mut none).await;
+        }
+    }
 }
 
 /// 阶段②b-3：派发（`dispatch-tools` / `deny-tools` 两行的动作）：落 `sent`、
@@ -282,29 +286,38 @@ pub(crate) async fn dispatch_round(
     llm: &dyn LlmAdapter,
     dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
 ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError> {
-    let Some(rt) = run.pending_model.take() else {
-        // 没有寄存 = 引擎没有可派的工具批；不空转。
-        return Ok(None);
+    // 三格齐 ⇒ 正常批次；三格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
+    // 只缺一两格是草稿错位，不拿唤醒兜底掩盖它。
+    let normal = match (
+        run.pending_model.take(),
+        run.pending_round.take(),
+        run.pending_calls.take(),
+    ) {
+        (Some(rt), Some(round_facts), Some(calls)) => Some((rt, Some(round_facts), calls)),
+        _ => None,
     };
-    let Some(round_facts) = run.pending_round.take() else {
-        return Ok(None);
-    };
-    let Some(mut calls) = run.pending_calls.take() else {
-        return Ok(None);
+    let (rt, round_facts, mut calls) = match normal {
+        Some(parts) => parts,
+        None => match dispatch.wake(store).await {
+            Some(batch) => (batch.turn, None, batch.calls),
+            // 没有寄存、也没有唤醒请求 = 引擎没有可派的工具批；不空转。
+            None => return Ok(None),
+        },
     };
     let outcomes = dispatch.dispatch(store, &rt, &mut calls).await;
 
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
-    batch::land_artifacts(run, store, &rt, &outcomes, &round_facts).await?;
+    batch::land_artifacts(run, store, &rt, &outcomes, round_facts.as_ref()).await?;
 
     // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
     //     说过的话照样是事实，等待是状态），不收束轮次。
     if outcomes.iter().any(|o| o.needs_user_action) {
+        let empty = StreamNodeFacts::default();
         let produced = produced_payload(
             &rt.text,
             llm.model_id(),
             &run.turn_root_id,
-            &round_facts,
+            round_facts.as_ref().unwrap_or(&empty),
             &run.all_tool_calls,
             &run.rounds,
         );
@@ -343,7 +356,10 @@ pub(crate) async fn dispatch_round(
     }
 
     // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
-    run.rounds.push(round_facts);
+    // 唤醒幕没有模型往返（`round_facts` 为 `None`）：它本来就没有节点事实可累加。
+    if let Some(round_facts) = round_facts {
+        run.rounds.push(round_facts);
+    }
     run.exchange
         .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
     run.tool_round += 1;

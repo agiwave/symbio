@@ -62,7 +62,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         turn_no,
         user_seq,
         drive_seq,
-        resume_anchor,
         collected,
         bridge,
         emitter,
@@ -115,7 +114,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 drive_seq,
                 tier,
                 window_turns: Some(window_turns),
-                resume: resume_anchor,
                 actor: actor.clone(),
                 prefix,
                 // 一次性阶段已由装配段落格（I2 的溯源锚那时已在）：运行器不再重落。

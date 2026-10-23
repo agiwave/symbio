@@ -32,8 +32,8 @@
 //!
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
-//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_granted`，`ClosureKind::Speech`） | [`can_reply`]（`reply`） |
-//! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_granted`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
+//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_gate`，`ClosureKind::Speech`） | [`can_reply`]（`reply`） |
+//! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_gate`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
 //! 两道写侧闸判的是**两件事**（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")：收束格按种类判）：
@@ -402,7 +402,7 @@ impl PermissionMatrix {
     }
 
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`
-    /// 前的判据（`turn_runner::closure_granted` 的 `ClosureKind::Artifact` 臂）。
+    /// 前的判据（`turn_runner::closure_gate` 的 `ClosureKind::Artifact` 臂）。
     ///
     /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）：
     /// 收束有两条路，谓词各问自己那一项能力。对等主体（`agent:peer-b`）只持

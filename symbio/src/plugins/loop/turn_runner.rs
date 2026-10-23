@@ -71,8 +71,8 @@ pub(crate) use self::prepare::Prepared;
 pub struct TurnInput {
     /// 本轮 turn 号（调用方保证单调递增——N3 的轮次锚）。
     ///
-    /// 续写轮（[`Self::resume`] 为 `Some`）时，调用方填的是**被续写轮**的号
-    /// （已开未收束的那一轮），不是新号。
+    /// 唤醒幕（审批 / 问答恢复）填的是**被续写轮**的号（已开未收束的那一轮），
+    /// 不是新号。
     pub turn: u64,
     /// 本轮**用户格的 seq**——判决的溯源锚点（I2 / T-225）。
     ///
@@ -118,9 +118,6 @@ pub struct TurnInput {
     /// 会话轮必填——WAL 里的事实只增不减，不带窗口的 prompt 会随会话
     /// 无界增长；窗口值由调用方的窗口配置给出（如 `context_messages`）。
     pub window_turns: Option<u64>,
-    /// 续写锚点：`Some` ⇒ 本轮**续写**一个已开未收束的轮次（审批 / 问答恢复），
-    /// `None` ⇒ 新开一轮。见 [`TurnResume`]。
-    pub resume: Option<TurnResume>,
     /// **本轮以哪个主体的身份记账**——收束 / 产物事件的 `actor`、窗口可见域的
     /// `viewer` 都取它（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
     /// ①：`"session/main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
@@ -347,7 +344,6 @@ impl std::fmt::Debug for TurnInput {
             .field("abort", &self.abort.as_ref().map(|_| "<信号>"))
             .field("tier", &self.tier)
             .field("window_turns", &self.window_turns)
-            .field("resume", &self.resume)
             .field("actor", &self.actor)
             .field("prefix", &self.prefix)
             .field("stages", &self.stages)
@@ -361,46 +357,6 @@ impl std::fmt::Debug for TurnInput {
             .field("nodes", &self.nodes.as_ref().map(|_| "<闭包>"))
             .finish()
     }
-}
-
-/// 续写锚点（审批 / 问答恢复）：本轮**续写**一个已开未收束的轮次，而不是新开。
-///
-/// ## 为什么必须续写同一轮，而不是新开一轮
-///
-/// C4（`symbio_core::unresolved_turns`，core 的 `invariants` 域）按 **turn 号**配对：
-/// 一个 `user.message` 只有遇到**同号**的收束事件才算收束。等待用户的那一轮已经
-/// 落了用户格、没落收束格（`awaits_user` 是「还没完」的诚实缺口）；若恢复时另开
-/// 新轮，原轮永远等不到收束事件，C4 会把它当**永久缺口**（假阳性）——不变量随即
-/// 失去判据价值。续写同一轮才是它的解：恢复后收束仍记在该轮上，缺口被真正填上。
-///
-/// ## 为什么用户格不重开
-///
-/// 恢复请求（approve / reject / answer）**没有**新的用户发言（`single_message`
-/// 为 `None`）；重开一格会让同一句话在网格里出现两次，且视图窗口（本模块的
-/// `window_by_turn`）会把那一轮数成两轮。
-#[derive(Debug, Clone)]
-pub struct TurnResume {
-    /// 恢复后的工具调用（渲染 prompt 的交换段；形状复用
-    /// [`crate::symbio_core::TurnToolCallInfo`]，
-    /// 不另立一份——`name` / `arguments` 的取法必须与在途工具轮逐字一致）。
-    pub call: crate::symbio_core::TurnToolCallInfo,
-    /// 恢复后的结果正文（落 `artifact.added`，并作为交换段的结果行）。
-    pub text: String,
-    /// **被恢复的 ToolCall 节点 id**（恢复请求的 `target_id`）。
-    ///
-    /// 续写轮落 `artifact.added` 时记进载荷的 `tool_call_id`：读路径走 WAL 重建后，
-    /// 「结果挂在哪个调用之下」只能靠这条事实复刻。空缺（老调用点 / 单测）时回落到
-    /// 按本轮 `turn_root_id` 合成——与接线前同形，但那会让原调用成孤儿（e2e t27）。
-    pub call_id: Option<String>,
-    /// **被恢复轮次的 Turn 根节点 id**（原调用节点的 `parent_id`）。
-    ///
-    /// 与 [`Self::call_id`] 同批入格：重建把调用节点落在这一轮上，缺了就长出新 Turn 根。
-    pub turn_id: Option<String>,
-    /// 恢复方分配的**结果子节点 id**（`resume.rs` 步 7）。
-    ///
-    /// `Carrier::Runner` = 这条节点没有出生事实，承载它的是续写轮的 `artifact.added`；
-    /// 载荷复用同一个 id，实时面与重建面才是同一条节点。
-    pub result_id: Option<String>,
 }
 
 /// 一轮的结果：`fell_back = false` ⇒ 模型作答；`true` ⇒ 兜底（`text` 即
@@ -430,7 +386,7 @@ pub struct TurnOutcome {
     /// 照样是事实；恢复是 [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 的
     /// 能力，恢复后以收束格了结（进展格不占「一轮至多一条收束格」）。
     pub awaits_user: bool,
-    /// 本轮收束**被写侧闸拒绝**（主体不持 `reply.first`，见 [`closure_granted`]）：
+    /// 本轮收束**被写侧闸拒绝**（主体不持 `reply.first`，见 [`closure_gate`]）：
     /// 收束格未入格、且本轮**没有落过产物格**，该轮留在未收束态（`check_all` 的 C4
     /// 报得出）。与 `aborted` / `awaits_user` 同属「网格少一格」，但**原因在授权**，
     /// 不是放弃也不是等待——调用方据此**跳过本轮的派生事实**（承诺 / 任务 / 熔断 /
@@ -545,16 +501,6 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
-    /// 草稿里是否有一次**已答完、未入格**的应答（`close-turn` 那笔债的内存镜像）。
-    ///
-    /// 派发面正常走的是行：`close-turn` 的 `prio`（55）比 `execute-turn`（60）小，
-    /// 应答一落地选债口就给收束行。这个方法只服务于续写幕旁路——那条路上表头指向
-    /// 新轮，两行都看不见（见 [`super::turn_exec::run_execute`]），旁路交回执行行时
-    /// 不能把已经答完的一轮再跑一遍模型。旁路退役后它随之删除。
-    pub(crate) fn has_pending_close(&self) -> bool {
-        self.run.closing.is_some()
-    }
-
     /// 记一次模型往返（执行体自己知道这一步有没有调模型）。
     ///
     /// 只数**模型往返**：工具批次不额外消耗步数，与拆分前「一步 = 一轮往返」同口径。
@@ -819,18 +765,11 @@ impl ClosureKind {
 /// 闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
 ///
 /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
-fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
-    closure_gate(actor, kind).is_ok()
-}
-
-/// 与 [`closure_granted`] **同一个判定**，但把「为什么拒」带出来。
+/// ## 为什么带出原因
 ///
-/// 分成两个函数而不是各写一份谓词：`closure_granted` 是 `is_ok()` 的一行壳，
-/// 判据只有这一处。两处各写一套「这一类格要什么能力」就会让闸门与拒绝原因分叉
-/// ——那时 `denied` 事实记的原因与实际拒它的理由不是同一件事，比不记更坏。
-///
-/// 原因字符串里带**能力名**（`Capability::name()`）而不是「缺 reply.first」这种
-/// 手写措辞：能力名是表里的同一份数据，改了名字这里跟着改；手写措辞不会。
+/// 拒绝原因（`authz.denied` 的 `detail`）答的是「缺哪项能力」——判据与判据
+/// 同源，只多带一句人话。布尔形态（`is_ok()` 壳）已删：生产面七处收束落格
+/// 都要原因，没人再取「过没过」这个形状。
 fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
     // ——名住 core，规格方法与表谓词共用它（ADR-103：不按轮次位置分能力）。
@@ -915,7 +854,7 @@ fn deny<S>(
 
 /// 作用域上限（[T-105]）：`scope = child <parent>` ⇒ 父主体也必须能落这一类格。
 ///
-/// 谓词与 [`closure_granted`] 的**同一份**（`can_reply` / `can_produce_artifact`）
+/// 谓词与 [`closure_gate`] 的**同一份**（`can_reply` / `can_produce_artifact`）
 /// ——两处各写一套「这一类格要什么能力」就会让上限与许可分叉。
 fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     let crate::symbio_core::Scope::Child(parent) = &actor.scope else {

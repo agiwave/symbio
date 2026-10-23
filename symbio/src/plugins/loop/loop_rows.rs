@@ -201,8 +201,9 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
-        // 中止轮（`stream::aborted` 就地落收束格）与续写幕旁路（`run_execute` 里那条
-        // `has_pending_close()` 分支直接调收束）——两条都在 `execute` 这一步里写收束格。
+        // 中止轮（`stream::aborted` 就地落收束格）与正常收束两处——都在 `execute`
+        // 这一步里由运行器写收束格，而收束格归 `close` 执行体声明 ⇒ 名单对不上，
+        // 只能走过渡豁免（`close-turn` 行接手收束后本条即删）。
         transitional: &[EVENT_ASSISTANT_FINAL],
     },
     ActorEntry {
@@ -273,25 +274,6 @@ impl Next {
             || self.writes.contains(&kind)
             || self.tolerated.contains(&kind)
     }
-}
-
-/// 续写幕旁路的交还形状：`execute-turn` 与它的动作。
-///
-/// 行表只有一个全局表头（`turn_head` 取最新一轮），恢复一段已被后续轮次归档的
-/// 旧轮时 [`next`] 看不见它；这里不是第二套选债逻辑，而是把那**一行**连同它的
-/// 动作一起交回派发器（债键按轮，与行的 `key: &["turn"]` 同形状）。表头按轮
-/// 参数化之后这一格整格删除。
-pub(crate) fn resume_anchor(turn: u64, actors: &'static [ActorEntry]) -> Option<Next> {
-    let decl = ROWS.iter().find(|d| d.name == "execute-turn")?;
-    let entry = entry_of(decl.by?, actors)?;
-    Some(Next {
-        row: decl.name,
-        by: entry.decl.name,
-        key: format!("turn={turn}"),
-        action: entry.run,
-        writes: entry.decl.writes,
-        tolerated: entry.transitional,
-    })
 }
 
 /// 端口声明（T-223）——**加一个端口只加这一条**，不加事实名、不改求解器。

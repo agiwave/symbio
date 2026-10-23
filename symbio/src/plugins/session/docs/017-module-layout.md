@@ -161,8 +161,8 @@ X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、workdir/）
 ## 3. 可见性与共享面
 
 - **域根即门面**：跨域要拿的东西在域根（`X.rs` / `X/mod.rs`）以 `pub use` 汇总，
-  调用方只认域根，不深入子模块（先例：`tools.rs` 的 `execute_tool_async` /
-  `summarize_*`，`options` 对 `capabilities::collect_options` 的引用）。
+  调用方只认域根，不深入子模块（先例：`tool_dispatch.rs` 取 `tools` 域根的
+  `process_tool_calls_async` / `is_unanswered`，`options` 对 `capabilities::collect_options` 的引用）。
 - **`pub use` 要求条目为 `pub`**：跨子模块的共享面用 `pub(crate) use` 搭配
   `pub(crate)` 条目，写反了会报 `E0364 / E0365`。
 - **字段可见性不随结构体**：跨模块访问的字段逐个标注，结构体公开不等于字段可读。
