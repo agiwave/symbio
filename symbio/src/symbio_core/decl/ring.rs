@@ -385,9 +385,10 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///   有人跑」是假话，选中它只会得到 `no_progress`（PL-016 §3.4 第 6 条的前半）；
 /// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
 ///   接线接了个没人派发的名字；
-/// - [`Gap::ActorCannotClose`]：执行体写的**事实名**与它那一行的出口（`until` /
-///   `unless`，视图按 `reads` 展开到事实）没有交集——它返回空事实也能「成功」，
-///   每一步都无进展（§3.4 第 6 条的后半）；
+/// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
+///   出口里有可声明的领域格时，判它与出口（`until` / `unless`，视图按 `reads` 展开到
+///   事实）**有无交集**；出口全是引擎独占格时（派发行的形状：引擎落 `before` / `failed`
+///   替它关门），判它的**名单是不是空的**。两支都指向同一个故障：动作什么都不写；
 /// - [`Gap::ActorModeTooNarrow`]：行的 `tier` 比执行体的 `mode` 更慢——反射档
 ///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型；
 /// - [`Gap::UndeclaredPatternField`]：模式引用了一个不在那条事实载荷声明里的字段
@@ -603,7 +604,7 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                 }
             }
         }
-        // 第 6 条的两半：`by` 指向一个**存在**的执行体，且它写的名字够得到出口。
+        // 第 6 条的两半：`by` 指向一个**存在**的执行体，且它够得到这一行的收口。
         // 未接线的行不在这儿豁免——它写 `by = None`（「这笔账不由引擎执行」的唯一
         // 声明位），而不是留一个没人跑的名字。
         if let Some(by) = decl.by {
@@ -616,7 +617,21 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                         .chain(decl.unless)
                         .flat_map(|p| fact_names_of(p.source, frozen))
                         .collect();
-                    if !exits.iter().any(|f| actor.writes.contains(f)) {
+                    // 两档（ADR-124）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
+                    // 出口**全是**引擎独占格 ⇒ 那是派发行的形状——引擎按 `PortDecl::before`
+                    // 在动作之前落 `sent`、失败/租约到顶落 `failed`，关门本来就不归执行体。
+                    // 此时若还要求交集，就是要求执行体声明第 5 条禁止它声明的格：
+                    // 两条检查互斥 ⇒ 这一行永远不许接线。改判这一档判得住的那半
+                    // （名单非空 = 不许注册一段什么都不写的动作），
+                    // 「这次真没写」由运行期的空账本守卫判（ADR-123 决策 1）。
+                    let engine_only_exits = !exits.is_empty()
+                        && exits.iter().all(|f| super::ENGINE_ONLY_CELLS.contains(f));
+                    let reaches_exit = if engine_only_exits {
+                        !actor.writes.is_empty()
+                    } else {
+                        exits.iter().any(|f| actor.writes.contains(f))
+                    };
+                    if !reaches_exit {
                         gaps.push(Gap::ActorCannotClose {
                             row: decl.name,
                             actor: actor.name,

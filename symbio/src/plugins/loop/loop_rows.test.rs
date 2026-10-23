@@ -1046,6 +1046,71 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
     assert!(!owes("await-tools", &failed, 0));
 }
 
+/// T-252 判据 1：**先把现状钉成用例**（裁决之前也得有人钉住它）。
+///
+/// 租约到顶重试落的是**同一 `(port, id)`** 的 `retry{attempt:1}` + `request{attempt:2}`
+/// （`port.rs` 的 `reap`），而三行工具债的键是 `(port, id)`、不含 `attempt`
+/// （理由记在 `loop_rows.rs` 的键口径注释：`failed` 要能一次关掉所有尝试）
+/// ⇒ 上一 attempt 的 `granted` 已经把授权行的门关上，第二次尝试的那笔 `request`
+/// 在行表里**不欠任何东西**：没有任何执行体会判它、派它。
+/// 「抬 `max_attempts` 的前置是键口径，不是把派发行接回执行体」——那条订正的全部根据
+/// 就是这一段切片。
+#[test]
+fn a_retried_request_is_invisible_to_the_row_table() {
+    let id = "c-1";
+    let mut sliced = vec![
+        tool_request(id),
+        tool_granted(id),
+        tool_sent(id),
+        ev(
+            1,
+            crate::symbio_core::EVENT_RETRY,
+            json!({ "port": "tool", "id": id, "attempt": 1 }),
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_REQUEST,
+            json!({
+                "port": "tool",
+                "id": id,
+                "attempt": 2,
+                "tool": "read_file",
+                "risk": "low",
+                "threshold": "medium",
+                "approved": false,
+                "deferred": false,
+            }),
+        ),
+    ];
+    assert!(
+        !owes("authorize-tool", &sliced, 0),
+        "第二次尝试的 `request` 不开新账：键 `(port, id)` 已被上一 attempt 的 `granted` 关掉"
+    );
+    assert!(
+        !owes("dispatch-tools", &sliced, 0),
+        "也就没有任何执行体会派它（PL-016 §2.3 禁止的「永不派发的 request」）"
+    );
+
+    // 派发侧同一件事，而且要能红：未接线的行 `blocked`，`drive` 谁都不选，
+    // 那样这条断言只是空转——所以把两行接到真实动作上再验「取不到这笔账」。
+    let f = frozen();
+    let rows = wired(&["authorize-tool", "dispatch-tools"]);
+    assert_eq!(
+        drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
+        None,
+        "接回执行体也派不动重试出来的那一笔 ⇒ 抬 max_attempts 的前置在键上（T-252）"
+    );
+
+    // 反向自检：红点必须落在「`granted` 提前关门」这一格，而不是键本身写错——
+    // 同一组事实里去掉那一格，第二次尝试的 `request` 就重新开账。
+    sliced.retain(|e| e.kind != crate::symbio_core::EVENT_AUTHZ_GRANTED);
+    assert_eq!(
+        drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
+        Some("authorize-tool"),
+        "没有上一 attempt 的出口格时派发器就选中它 ⇒ 隐形来自键的口径，不是模式拼错"
+    );
+}
+
 #[test]
 fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
     // 批准恢复的那一笔是同一套账：id 带 `resume` 只是为了让重试幂等，

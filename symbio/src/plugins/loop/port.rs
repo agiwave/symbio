@@ -436,7 +436,12 @@ where
             out.push(Reaped::Killed { id, attempt });
             continue;
         }
-        // 作废这次尝试，并立刻举起下一次——`request` 一落，`dispatch-<port>` 就欠了。
+        // 作废这次尝试，并立刻举起下一次。**这句「就欠了」今天是假的**：三行派发债的
+        // 键是 `(port, id)`（不含 `attempt`，见 `loop_rows.rs` 的键口径注释），
+        // 上一 attempt 的出口格已经把那一行关掉 ⇒ 这笔 `request{attempt+1}` 在行表里
+        // 不欠任何东西，没有任何执行体会派它。键要不要含 attempt 是一条机制裁决，
+        // 见 T-252；在它落地之前，真表上 `max_attempts` 全为 1（重试分支不可达，
+        // 用例 `no_port_in_the_real_table_retries_today` 钉着）。
         append(
             store,
             Event::pending(

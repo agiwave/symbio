@@ -426,6 +426,55 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
     }));
 }
 
+/// 第 6 条的第二档（ADR-124）：出口**全是**引擎独占格的行——派发行的形状。
+///
+/// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
+/// 这一行永远只能 `by: None`（`dispatch-turn` / `dispatch-model` / `dispatch-tools`
+/// 正是这个形状，PL-017 §3.1 要给它们接 `courier`）。改判成「名单非空」之后，
+/// **空名单仍然要红**——这一档不是「不判」。
+#[test]
+fn an_actor_serving_an_engine_exit_row_must_still_declare_writes() {
+    let gaps_for = |writes: &'static [&'static str]| -> Vec<Gap> {
+        let mut b = declare(&[ActorDecl {
+            name: "act",
+            mode: LatencyTier::Deep,
+            reads: &[],
+            writes,
+        }]);
+        // 派发行按**端口**开账，夹具世界照生产那一格补上 `sent` 与它的字段。
+        b.fact(FactDecl {
+            name: "sent",
+            port: Some("port"),
+            key: &["id", "attempt"],
+            expand: &[],
+            fields: &["port", "id", "attempt", "lease_ms", "attempt_cap"],
+        });
+        b.row(home("f"));
+        b.row(home("sent"));
+        b.row(row(
+            "r",
+            10,
+            Some("act"),
+            pattern("f", &["id"], &[]),
+            &[pattern("sent", &["id"], &[])],
+            &[],
+        ));
+        b.seal().err().unwrap_or_default()
+    };
+    let gap = Gap::ActorCannotClose {
+        row: "r",
+        actor: "act",
+    };
+    assert!(
+        !gaps_for(&["g"]).contains(&gap),
+        "出口全为引擎格、名单登记了领域格 ⇒ 派发行可接线（第二档判得住）"
+    );
+    assert!(
+        gaps_for(&[]).contains(&gap),
+        "同样这一行，名单为空 ⇒ 仍然红：第二档不是豁免，是换了判的那一半"
+    );
+}
+
 /// 时延闸门：行的 `tier` 比执行体的 `mode` 更慢 ⇒ 这一行不可能按时跑完。
 /// （反射档拿不到模型句柄——PL-016 §3.4 第 6 条的后半。）
 #[test]
