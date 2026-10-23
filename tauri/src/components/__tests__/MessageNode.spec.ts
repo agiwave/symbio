@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * MessageNode 组件级测试 —— 渲染只按 wire `NodeKind` 五值分派（[ADR-070 §后果 2]）。
+ * MessageNode 组件级测试 —— 渲染只按 wire `NodeKind` 五值分派（[D-070 §后果 2]）。
  *
  * 分派轴只有五格（body / notice / skeleton / interaction / typing）：每格只按**形状 +
  * 呈现数据**（title / icon / actions）渲染，不含任何业务分支。类名钩子来自 `NodeShell`
@@ -281,7 +281,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
  * 分派器路由与内容形态 —— 分派器只做「按 NodeKind 路由」，渲染形态由各渲染器负责。
  *
  * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带读数行**
- * （`node.stats`，[ADR-111](../../../../docs/010-adr/111.md)）分道——有行走「压缩动作」样式，
+ * （`node.stats`，[D-111](../../../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）分道——有行走「压缩动作」样式，
  * 无行走 Markdown。夹具因此只给 `stats` 而不给 `meta` 数字：**本组件不认识那些字段名**，
  * 数字→文案的口径在后端（判据在 `plugins/session/stats_reading.test.rs`）。
  */

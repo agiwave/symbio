@@ -105,7 +105,7 @@ impl SessionPlugin {
                 let message = parse_inbox_message(raw)?;
                 // 写体声明了 `meta.trigger` ⇒ 这条写入在说「这是一次自主触发」，
                 // 于是它**先落事实才准入队**：存储所有者的写窗口纪律住在
-                // `transcript/autonomous.rs`（[ADR-076](../../../../../docs/010-adr/076.md "ADR-076")），
+                // `transcript/autonomous.rs`（[D-076](../../heartbeat/README.md "D-076")），
                 // 识别与判据住在这条臂上。落格没成 ⇒ `Conflict` 且**队列没碰**——
                 // 收件箱是 FIFO，一条永远跑不起来的队首会把后面的用户消息一起堵死。
                 let idle_ms = trigger_declaration(&message)?;
@@ -132,7 +132,7 @@ impl SessionPlugin {
                         let workdir = vdfs_host_ctx(ctx)
                             .ok()
                             .and_then(|h| h.get(crate::symbio_core::WORKDIR));
-                        // 来源主体（ADR-067）：同取**请求上下文**（线上入口 =
+                        // 来源主体（D-067）：同取**请求上下文**（线上入口 =
                         // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
                         // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，
                         // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。

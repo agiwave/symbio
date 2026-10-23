@@ -1,7 +1,7 @@
-//! 视图与预算 —— 投影产出的共享类型层（[plan/01 §3](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+//! 视图与预算 —— 投影产出的共享类型层（[plan/01 §3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
 //! 与 [`crate::symbio_core::event`] 同理：`projections`（③）与将来的 `actors`（②）
-//! 都只 import 本模块的类型定义，互不持有句柄（[plan/05 §3.1](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
+//! 都只 import 本模块的类型定义，互不持有句柄（[plan/05 §3.1](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。
 //!
 //! ## 冻结锚点
 //!
@@ -21,7 +21,7 @@ impl Budget {
         Budget { tokens, ms }
     }
 
-    /// 平凡值（[plan/03 §2.1](../../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证")：慢但正确）。
+    /// 平凡值（[plan/03 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")：慢但正确）。
     pub const fn generous() -> Self {
         Budget {
             tokens: u32::MAX,
@@ -39,7 +39,7 @@ impl Budget {
 ///
 /// **只能**是 `View`，不是 `Result`（构造即锁定，见 [`crate::symbio_core::projection::Projection`]）。
 /// 只由 [`Projection::apply`](crate::symbio_core::projection::Projection::apply) 构造
-/// （[ADR-105](../../../../docs/010-adr/105.md "ADR-105")：降级与预算在框架层统一执行，
+/// （[D-105](../../../../docs/003-design/001-核心架构.md "D-105")：降级与预算在框架层统一执行，
 /// `ok` / `degraded` 构造器随闭包签名一并退役）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View<V> {
@@ -48,15 +48,15 @@ pub struct View<V> {
     pub used: Budget,
 }
 
-// ── 召回视图（S5，[plan/01 §9](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）────────────────
+// ── 召回视图（S5，[plan/01 §9](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）────────────────
 //
-// 住 view 域的理由（[plan/05 §3.1](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）：③ 的投影
+// 住 view 域的理由（[plan/05 §3.1](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）：③ 的投影
 // 产出它、② 的检索 Translator 消费它——跨包共享的**视图类型**必须住中性层，
 // 谁也不持有谁的句柄。
 
 use crate::symbio_core::event::Timestamp;
 
-/// **智能体命名空间登记表**（[ADR-069 §决策 3](../../../../docs/010-adr/069.md "ADR-069")）。
+/// **智能体命名空间登记表**（[D-069 §决策 3](../../../../docs/003-design/005-协议规范.md "D-069")）。
 ///
 /// 主体 id 是可路由地址 `<namespace>/<name>`；kind 是元数据，与 id 分家。判定「这条 id
 /// 是不是智能体一族」不再靠字符串前缀，而是查这张**登记表**——把 reflex 拆到独立 decider
@@ -71,7 +71,7 @@ pub fn principal_namespace(id: &str) -> Option<&str> {
     id.split_once('/').map(|(ns, _)| ns)
 }
 
-/// 这条主体 id 属于**智能体一族**吗？（[ADR-069 §决策 3]）
+/// 这条主体 id 属于**智能体一族**吗？（[D-069 §决策 3]）
 ///
 /// 判据：`namespace` 落在 [`AGENT_NAMESPACES`] 登记表里 ⇒ 智能体；否则 ⇒ 不是。
 /// **未识别的 namespace** 也返回 `false`——不是 agent，`visible_to` 第 3 条就会放行；
@@ -80,10 +80,10 @@ pub fn is_agent_id(id: &str) -> bool {
     principal_namespace(id).is_some_and(|ns| AGENT_NAMESPACES.contains(&ns))
 }
 
-/// **可见域的平凡判据**（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ③，
+/// **可见域的平凡判据**（[plan/11 批 1](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ③，
 /// S08 §4 的 `vis_scope` 平凡值）：`actor` 这条事实在 `viewer` 的视图里可见吗？
 ///
-/// 三条规则，一条判定方（判据在 [T-146] 后由前缀切到命名空间登记表）：
+/// 三条规则，一条判定方（判据在 相应批次 后由前缀切到命名空间登记表）：
 ///
 /// 1. 自己的发言可见（`actor == viewer`）；
 /// 2. 会话内的另一方（人）与**未标身份**的事件可见——会话是一条双向线程，
@@ -107,21 +107,21 @@ pub struct RecallEntry {
     pub ts: Timestamp,
     /// 内容（编码时的正文）。
     pub content: String,
-    /// 认知内容标签（七类，[plan/01 §9.1](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")；
+    /// 认知内容标签（七类，[plan/01 §9.1](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")；
     /// 「记忆类型」不是枚举，是过滤参数——加第六类只加参数）。
     pub tag: String,
 }
 
 /// 召回视图：as-of 可见、未被遗忘、按新近度排序的记忆条目。
 ///
-/// ## 为什么视图自带 `degraded`（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）
+/// ## 为什么视图自带 `degraded`（相应批次）
 ///
 /// 投影产出的 [`View`] 外壳已经带 `degraded`（F2：可降级是类型义务），但召回视图
 /// **会脱离外壳单独流动**——`memory_events::recall_view` 取 `.value` 后把它存进
 /// `TurnState.recall_view`、再交给注入段（`prompt_section`）。外壳一丢，
 /// 「这次只显示了一部分」就没人说得出来（静默的形态从「空且不标」变成「有部分结果
 /// 且不标」）。故让视图**自描述**：取值点把外壳的 `degraded` **誊抄**进本字段
-/// （[ADR-105](../../../../docs/010-adr/105.md "ADR-105")：外壳是唯一的降级事实源，
+/// （[D-105](../../../../docs/003-design/001-核心架构.md "D-105")：外壳是唯一的降级事实源，
 /// 闭包不自置，字段由唯一丢外壳的取值点落笔），消费方不必回捞外壳。
 ///
 /// `#[serde(default)]`：旧序列化形态（无此字段）仍读得出，缺省 `false`（不谎称降级）。

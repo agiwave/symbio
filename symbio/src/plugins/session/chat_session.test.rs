@@ -274,7 +274,7 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
         "对应的 ToolCall 应一并裁剪"
     );
     assert!(msgs.iter().any(|m| m.id == "r2"), "最近一轮工具结果应保留");
-    // T-054：裁剪必须报出被删的 id（调用方据此落 `message.removed`）。
+    // ：裁剪必须报出被删的 id（调用方据此落 `message.removed`）。
     assert!(
         removed.contains(&"r1".to_string()) && removed.contains(&"t1".to_string()),
         "被裁节点 id 必须全部报出（否则切主后它们会复活）：{removed:?}"
@@ -285,7 +285,7 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
     );
 }
 
-/// T-054：裁剪集合**按原列表顺序**给出（事实与回执的 id 序列必须稳定——
+/// ：裁剪集合**按原列表顺序**给出（事实与回执的 id 序列必须稳定——
 /// `to_remove` 是 `HashSet`，顺序不定；直接倒它会让同一会话的两次裁剪给出不同的序列）。
 #[tokio::test]
 async fn prune_removed_ids_follow_original_list_order() {
@@ -358,7 +358,7 @@ async fn prune_drops_nodes_but_never_deletes_archive_files() {
 
 /// 回归（P0-2）：`context_messages = 0` 走完整 `append_messages` 链路也不得失败。
 ///
-/// 切主后（ADR-049）正文的真源是事实投影，`append_messages` 交回的**权威副本**
+/// 切主后（D-049）正文的真源是事实投影，`append_messages` 交回的**权威副本**
 /// 就是写边界机制（窗口/裁剪/补号）的可观测面——持久判据另由 `apply_*` 与
 /// `store` 测试钉。本判据只看「0 = 不限制」：回执里窗口外的工具结果仍在。
 #[tokio::test]
@@ -424,7 +424,7 @@ async fn append_messages_prunes_tool_chain_by_default() {
     );
 }
 
-/// **T-054 的承重判据**：写入期裁剪是**列表变更**，必须落 `message.removed`。
+/// ** 的承重判据**：写入期裁剪是**列表变更**，必须落 `message.removed`。
 ///
 /// 不落格的后果是**静默的**（这是它被登记成任务的原因）：WAL（唯一真源）里那些
 /// 被裁节点还在，只是 `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒
@@ -485,7 +485,7 @@ async fn prune_on_write_lands_a_removed_fact() {
     );
 }
 
-/// **T-054 的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
+/// ** 的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
 #[tokio::test]
 async fn turn_window_eviction_lands_a_removed_fact() {
     let config = SessionConfig {
@@ -592,7 +592,7 @@ async fn max_messages_zero_means_unlimited() {
 /// 2. 跨次追加**严格递增**：若新消息拿到比已有消息小的号，前端的顺序锚点就会
 ///    把新消息排到旧消息之前（“刚发的跑到中间去”）。
 ///
-/// 切主后（ADR-049）正文的真源是事实投影：**只有落了事实的节点才进投影**，跨次
+/// 切主后（D-049）正文的真源是事实投影：**只有落了事实的节点才进投影**，跨次
 /// 递增的「已有水位」也由投影供。所以本判据走生产路径（`apply` 的 Born{Here}
 /// ——事实先落、再折列表、回包带存储号）：「读回存储」那半归 `apply_*` +
 /// `store` 冷重建，这里盯写边界当场交出的那份。
@@ -699,7 +699,7 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
     assert!(s3 > s2, "后续追加必须继续递增：compact1={s2} → u2={s3}");
 }
 
-/// 落库回包契约（`docs/022-vdfs-session-messages.md` §3.4）：`append_messages` 必须
+/// 落库回包契约（`docs/109-vdfs-session-messages.md` §3.4）：`append_messages` 必须
 /// **把存储里的权威副本交回调用方**——带存储分配的 `seq` / `timestamp`，在途号已换掉。
 ///
 /// 这条契约是正确性而非便利：`seq` 只在存储写入时分配，前端又只认存储号
@@ -892,7 +892,7 @@ fn assign_seq_places_trailing_run_after_last_existing() {
     assert_eq!(msgs[1].seq, Some(6));
 }
 
-// ── `apply`：唯一写入口（S2.7-b3 前置，ADR-054 决策 2 + 3）──────────────
+// ── `apply`：唯一写入口（S2.7-b3 前置，D-054 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
 use crate::symbio_core::{Event, Seq, Store};
@@ -1087,7 +1087,7 @@ async fn apply_removed_lands_a_fact_and_drops_nodes() {
     assert_eq!(removed.len(), 1, "一次删除落**一条**事实（ids 表达区间）");
 }
 
-/// **T-164 的承重判据**：事实落不下去 ⇒ `apply` 报失败，且**什么都没发生**。
+/// ** 的承重判据**：事实落不下去 ⇒ `apply` 报失败，且**什么都没发生**。
 ///
 /// 旧口径是「事实失败只记日志」——那在缓存是读侧真源时成立（影子失败不该让本体
 /// 失败）。b3 把主读切到 WAL 之后事实就是本体：放过它等于「回执说改好了、重建后
@@ -1126,13 +1126,13 @@ async fn apply_reports_a_failed_fact_write_and_writes_nothing() {
     );
 }
 
-// ── 作用域的第一个生产构造点（[T-105]）──────────────────────────────────────
+// ── 作用域的第一个生产构造点（相应批次）──────────────────────────────────────
 //
 // `PersistentChatSession::delegating_principal` 按会话元数据的**委派链**取值：子会话挂
 // 父主体，顶层会话恒 `None`（调用方据此落 `Scope::Root`）。本段钉的是「取值链读得出
 // 真值」——语义（委派不放大权威）的判据在 `turn_runner.test.rs::scope_ceiling_tests`。
 //
-// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+// 相应批次: ../../../../docs/007-task/105-Scope-Child首产点批.md "
 
 /// 顶层会话 ⇒ `None`；`agent_run` 登记形态的子会话 ⇒ `Some(父主体)`。
 ///

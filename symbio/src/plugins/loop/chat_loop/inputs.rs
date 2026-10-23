@@ -13,7 +13,7 @@ use super::*;
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
 ///
 /// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
-/// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（T-085 批②）
+/// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（ 批②）
 /// 的语义维由它驱动；取不到 ⇒ `None` = 「本轮没有问题」，投影退化为纯 ts 降序
 /// （平凡值，J2）。用类型区分「没有问题」与「问题恰好是空串」：前者是事实，
 /// 后者得写出来才成立。
@@ -121,7 +121,7 @@ pub(crate) struct TurnInputs {
 /// 使查询成为可观开销，或需要"一次请求内人格与工具集冻结"），**必须两者一起提升**，
 /// 不允许只提升其一。
 ///
-/// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 ADR-047 新增）
+/// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 D-047 新增）
 ///
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
 /// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，见 [`apply_compaction`]）
@@ -130,7 +130,7 @@ pub(crate) struct TurnInputs {
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
 /// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
-///    ——这是 ADR-047 的注入点约束本身，见 [`delegate`] 模块头
+///    ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
 /// 7. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
@@ -153,7 +153,7 @@ pub(crate) async fn prepare_turn_inputs(
     apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
-    // 续写幕复用原 Turn 根（T-244 步 5d）：那个骨架在本轮首幕已经发过，再发一次
+    // 续写幕复用原 Turn 根（ 步 5d）：那个骨架在本轮首幕已经发过，再发一次
     // 只会让同一个 id 重生一条「流式中」的根，把已完成的卡打回运行态。
     let root_id: String = match turn.resume_root.take() {
         Some(root) => root,
@@ -179,10 +179,10 @@ pub(crate) async fn prepare_turn_inputs(
 
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
     // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——
-    // 对话体是事实网格的纯投影（ADR-048a），请求视图级的淡化 / 骨架化已按
-    // [ADR-078](../../../../../docs/010-adr/078.md "ADR-078") 退役。
+    // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
+    // [D-078](../../session/README.md "D-078") 退役。
     //
-    // ── ⑥′ 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录 ─────────────────────
+    // ── ⑥′ 委派者真源段（D-047）：Q1 判定 + Q2 能力目录 ─────────────────────
     //
     // **位置即约束**：能力目录必须在 ①② 把 `tools` 收集成形**之后**才动笔——收集是
     // 广播，遍历期取集合必然漏掉还没被访问到的兄弟插件（静默、且漏哪几项次次不同）。
@@ -193,7 +193,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 同一请求内不随工具轮变化，判定不漂移；`None` = resume / 心跳这类没有用户新
     // 发言的请求，判决无从谈起（与判决侧「None 根本不进判决」同一条口径）。
     // Q3：worker 进展现读磁盘（无子会话 ⇒ 零额外 IO）。整条读链住在
-    // `session::worker_progress`（ADR-081 裁决一第 4 条），驱动器只调这一个入口。
+    // `session::worker_progress`（D-081 裁决一第 4 条），驱动器只调这一个入口。
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
     let workers = context
         .session
@@ -226,7 +226,7 @@ pub(crate) async fn prepare_turn_inputs(
             context::SectionKind::ReadySet,
             turn.ready_section.as_deref(),
         ),
-        // 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录。
+        // 委派者真源段（D-047）：Q1 判定 + Q2 能力目录。
         (context::SectionKind::Delegate, delegate_section.as_deref()),
     ]);
 
@@ -241,21 +241,21 @@ pub(crate) async fn prepare_turn_inputs(
 /// 轮首准备格的执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
 ///
 /// 调用点只问「这一格欠不欠」；执行体留在本层——它的入参是 `TurnState` /
-/// `SessionContext` 这类私有上下文，不是行本身（ADR-107）。
+/// `SessionContext` 这类私有上下文，不是行本身（D-107）。
 async fn run_recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), TurnExit> {
-    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `turn_exec`
+    // `query` = 本轮用户发言（ 批②：混合打分的语义维）——与 `turn_exec`
     // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
     let recall_query = last_user_text(context);
     // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
-    // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
+    // 召回的可见切片按它收放——判断记忆只给自己会话看，共享记忆只
     // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
     let recall_viewer = crate::symbio_core::request_principal(ctx.as_ref());
-    // 事实是**值**（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）：
+    // 事实是**值**（[D-084](../../../../../docs/003-design/001-核心架构.md "D-084")）：
     // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
     // 它们看到的是同一刻的事实，不各开各的文件。
     let facts = context.session.facts_snapshot();
@@ -274,7 +274,7 @@ async fn run_recall(
     // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
     // 召回同一条口径（同一轮内集合不漂移）。
     turn.ready_section = super::super::task_events::prompt_section(&facts);
-    // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+    // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
     // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
     // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
@@ -289,7 +289,7 @@ async fn run_recall(
         .map(|view| super::super::skill_events::route(&facts, view))
         .unwrap_or_default();
     // 快路开关（S11 §4 参数表的 `actor.pattern`；**不是** core 的 `ActorSpec.pattern`，
-    // 两者同名不同物，见 ADR-079）：关着时可用集恒空——判定照常发生、
+    // 两者同名不同物，见 D-079）：关着时可用集恒空——判定照常发生、
     // 观测照常落格（"只编译不加速"的观察形态），只是没人拿它去装配——这就是它
     // 作为一个独立开关的全部含义（见 `SessionConfig` 字段文档）。
     let fast_armed = context.session.skill_fast_path();
@@ -297,7 +297,7 @@ async fn run_recall(
     turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
     // 落格交给运行器（写者令牌在 `turn_exec`）。`result` 记技能命中与否——
-    // 义务环的 `has_match` 只从日志读（T-225 的输入闭包）。
+    // 义务环的 `has_match` 只从日志读（ 的输入闭包）。
     let hit = last_user_text(context).as_deref().is_some_and(|text| {
         super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
     });
@@ -317,7 +317,7 @@ async fn run_recall(
 ///
 /// 按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），压缩结果直接
 /// 决定后续请求视图的水位。55% 水位提醒（nudge）已随 `context_compact` 一并退役
-/// （[ADR-072](../../../../../docs/010-adr/072.md)）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
+/// （[D-072](../../session/README.md "symbio/src/plugins/session/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
 /// 一条指向空处的指令。
 ///
 /// 将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估是否恢复提醒——
@@ -332,7 +332,7 @@ pub(crate) async fn apply_compaction(
     // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
     // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
-    // 下一轮照常再试；但同一幕内不重复进产线（ADR-107 判据 2）。
+    // 下一轮照常再试；但同一幕内不重复进产线（D-107 判据 2）。
     if super::super::loop_rows::owes("policy.compress", &turn.facts, turn.turn_no, turn.now_ms) {
         run_compress(orchestrator, ctx, context, turn, overhead_tokens).await;
     }
@@ -349,7 +349,7 @@ async fn run_compress(
     turn: &mut TurnState,
     overhead_tokens: usize,
 ) {
-    // 入账面：摘要那次模型往返走端口 `model`（ADR-122 决策 2）——三格由端口层落，
+    // 入账面：摘要那次模型往返走端口 `model`（D-122 决策 2）——三格由端口层落，
     // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话），压缩照旧跑，
     // 只是那一次不在账上。
     let compress = context.session.facts().map(|store| {

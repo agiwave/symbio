@@ -2,13 +2,13 @@
 //! 履行了没有」交出来，由轮末收束的 `derived_facts::record_derived` 落成 `commitment.*` 格。
 //!
 //! 记录类型 [`Delegation`] 本身不住这里——它是隔着驱动器与留守存储两侧都要用的
-//! 词汇，住在 [`crate::symbio_core::facts`]（[ADR-082](../../../../../../docs/010-adr/082.md "ADR-082") 裁决三 4 组）。
+//! 词汇，住在 [`crate::symbio_core::facts`]（[D-082](../../../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 4 组）。
 //! 本文件只留**判据与门**：哪一次调用算承诺、算不算履约——那是机制，随观察点住插件侧。
 
 use crate::symbio_core::facts::Delegation;
 
 /// 承诺出参的**唯一写入点**（见 [`Delegation`]）：只有声明了
-/// `records_delegation_promise` 的工具会被记账（T-158），且在每个终态分支各记
+/// `records_delegation_promise` 的工具会被记账，且在每个终态分支各记
 /// 一次——没跑到的（协议错 / 被拦 / 批次跳过）同样是**没履约**，记成违约比
 /// "查无此约"诚实（S08 §5：违约可被观测是 T5 的全部前提）。
 pub fn note_delegation(

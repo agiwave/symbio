@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 1](../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 1](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「mock-llm `toolCalls` → 工具执行 → **`/_requests` 回读**：工具结果进了下一次请求；
 // 网格有 `artifact.added` 且带溯源」。
 //
@@ -154,7 +154,7 @@ export default defineCase(
       // 第二次请求：模型请求过的工具 + 工具结果都在请求里。
       //
       // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」「工具名
-      // 对得上」（ADR-048a）——而不是「某个字符串出现过」。
+      // 对得上」（D-048a）——而不是「某个字符串出现过」。
       const secondBody = reqs[1].body;
       const secondMsgs = secondBody.messages ?? [];
       const llmCalls = secondMsgs.flatMap((m) => m.tool_calls ?? []);

@@ -14,14 +14,14 @@ created: 2026-09-11
 ## 它和 tauri 前端的唯一差别是传输层
 
 ```
-                 ┌────────────────────┐
-   tauri/  ──────▶│  route_v2 (IPC)    │──┐
-                 └────────────────────┘  │      ┌───────────────────────────┐
-                                         ├─────▶│  home → worker(composite) │
-                 ┌────────────────────┐  │      │   ├─ session              │
-   cli/    ──────▶│ root.route(ctx)    │──┘      │   ├─ model                │
-                 │  （进程内直连）      │         │   ├─ event_bus  …         │
-                 └────────────────────┘         └───────────────────────────┘
+ ┌────────────────────┐
+ tauri/ ──────▶│ route_v2 (IPC) │──┐
+ └────────────────────┘ │ ┌───────────────────────────┐
+ ├─────▶│ home → worker(composite) │
+ ┌────────────────────┐ │ │ ├─ session │
+ cli/ ──────▶│ root.route(ctx) │──┘ │ ├─ model │
+ │ （进程内直连） │ │ ├─ event_bus … │
+ └────────────────────┘ └───────────────────────────┘
 ```
 
 两者调用的是**同一套上下文键**（`PATH` / `PAYLOAD` / `SESSION_ID` / `WORKDIR` / …）
@@ -29,16 +29,16 @@ created: 2026-09-11
 
 - 上行：`PluginSimpleRequest` 装上下文 → `root.route(ctx)`（`Arc<dyn Plugin>` 进程内直连）
 - 下行：**两条连接，各归其域**——消息实时面订阅 **`session/stream`**（消息帧：
-  `session_id` + 流内单调 `seq` + 一条 `ChatMessage`，按 `content` / `delta` / `status`
-  直接落地到终端视图）；会话运行态
-  订阅 **event_bus**（`kind = "vdfs"` 的变更帧，承载会话节点的 `status` / `outcome`）。
-  两条都与「当前打开哪个会话」解耦 —— 订阅一次，之后切会话不必重建连接。
+ `session_id` + 流内单调 `seq` + 一条 `ChatMessage`，按 `content` / `delta` / `status`
+ 直接落地到终端视图）；会话运行态
+ 订阅 **event_bus**（`kind = "vdfs"` 的变更帧，承载会话节点的 `status` / `outcome`）。
+ 两条都与「当前打开哪个会话」解耦 —— 订阅一次，之后切会话不必重建连接。
 
 ## 📚 文档
 
 详细的架构、构建、用法文档在 [`cli/docs/`](docs/README.md "cli/docs/README")：
 
-- [架构](docs/001-architecture.md "AR-001-architecture") — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
+- [架构](docs/112-architecture.md "DE-112-architecture") — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
 - [构建](docs/003-building.md "GU-003-building") — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
 - [用法](docs/004-usage.md "GU-004-usage") — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
 
@@ -69,7 +69,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 
 ## 参数
 
-> **参数清单不在本页**：权威清单是 [RE-006 §5.2](../docs/006-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
+> **参数清单不在本页**：权威清单是 [RE-006 §5.2](../docs/004-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
 
 模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道非交互 → 否则 REPL。
 
@@ -84,7 +84,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 | **stdout** | 模型正文 + 交互提示符（可直接管道给下游程序） |
 | **stderr** | 进度、工具调用、错误、插件日志（可整体 `2>/dev/null` 静音） |
 
-为此本 CLI **刻意不调用** `symbio::init::initialize()`：它会安装写 stdout 的 tracing
+为此本 CLI **刻意不调用** `symbio::init::initialize`：它会安装写 stdout 的 tracing
 subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进正文。不初始化时，
 插件日志宏退回 `eprintln!`，正好落在 stderr。
 
@@ -103,16 +103,16 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 关键环节与坑见 [cli/docs/003-building.md](docs/003-building.md "GU-003-building")，三句话概括：
 
 1. **C 编译器必须显式注入**（`CC`/`CXX`/`INCLUDE`/`LIB`，不碰 `PATH`）；`aws-lc-sys` 0.44 自带
-   prebuilt NASM 对象，**既不需要 cmake 也不需要 nasm**。
+ prebuilt NASM 对象，**既不需要 cmake 也不需要 nasm**。
 2. **`INCLUDE`/`LIB` 分隔符必须统一成 `/`**，否则 Git Bash MSYS 改写路径导致 aws-lc-sys 反复全量重编。
 3. **`build.target-dir` 必须绝对路径**，否则 cargo 不归一化、所有 C 依赖被判定过期重编挂死。
 
 ## 已知边界
 
 - **不做工具审批交互**。默认 `--mode auto`：遇到需要审批的工具，后端返回友好错误后
-  继续，不会挂起等待。人在环的审批卡片属于 tauri 前端的职责。
+ 继续，不会挂起等待。人在环的审批卡片属于 tauri 前端的职责。
 - **不做消息树持久渲染**。终端只做流式增量输出；历史回看用 `--session <ID>` 续接会话
-  （上下文由后端从存储加载），而不是在本进程重放整棵树。
+ （上下文由后端从存储加载），而不是在本进程重放整棵树。
 - 插件树是**全量**启动的，因此 `gateway` 插件会尝试监听 `127.0.0.1:9231`、
-  `telegram` 插件会读它自己的配置。与正在运行的 Tauri 实例并存时，gateway 端口
-  冲突只会在 stderr 记一条错误，不影响会话。
+ `telegram` 插件会读它自己的配置。与正在运行的 Tauri 实例并存时，gateway 端口
+ 冲突只会在 stderr 记一条错误，不影响会话。

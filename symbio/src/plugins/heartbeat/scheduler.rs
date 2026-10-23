@@ -7,9 +7,9 @@
 //! ## 为什么每 tick 重新取清单（不缓存）
 //!
 //! 空闲判定要的是**磁盘侧的 `updated_at`**，而它是回合内每条消息落盘持续推进的那一格。
-//! 缓存清单等于把 `metadata.heartbeat` 抄成第二份 owner——[ADR-076](../../../../docs/010-adr/076.md "ADR-076")
+//! 缓存清单等于把 `metadata.heartbeat` 抄成第二份 owner——[D-076](README.md "D-076")
 //! #5 要避免的正是这个形态。代价（每 tick 一次全项目 options 广播）已在
-//! [ADR-077](../../../../docs/010-adr/077.md "ADR-077") 后果段**认下并命名**，不在本批优化。
+//! [D-077](README.md "D-077") 后果段**认下并命名**，不在本批优化。
 //!
 //! ## 触发失败为什么不写锚点
 //!
@@ -128,7 +128,7 @@ pub(crate) fn due(view: &SessionView, anchor: Option<i64>, now: i64) -> Option<i
 ///
 /// - `meta.heartbeat = true`：给**前端**区分展示用（这条是自动发的）；
 /// - `meta.trigger = {kind, idle_ms}`：给**会话写臂**就地消费的触发声明
-///   （[ADR-076](../../../../docs/010-adr/076.md "ADR-076") 的标记落法）。它由写臂在入队前
+///   （[D-076](README.md "D-076") 的标记落法）。它由写臂在入队前
 ///   折叠成事实源里的四格，**不要求活到转写**——两片各归各的消费者，不合成一个。
 ///
 /// 消息 id 带触发时刻的毫秒（`hb_<sid>_<毫秒>`），同一会话的两次心跳消息因此天然不同 id。
@@ -191,7 +191,7 @@ impl HeartbeatPlugin {
             return;
         };
         // 经容器取数需要一个宿主态来承载本轮的访客表（`empty()` 在容器转发下当场失败，
-        // 见 ADR-077 裁决三）。这里给的是「无前端会话、无配置」的那个宿主。
+        // 见 D-077 裁决三）。这里给的是「无前端会话、无配置」的那个宿主。
         let req: Arc<dyn PluginInvokeRequest> =
             Arc::new(PluginSimpleRequest::new(self.parent_handle(), None));
         let vctx = vdfs_context(&req);
@@ -239,7 +239,7 @@ impl HeartbeatPlugin {
         }
     }
 
-    /// 开一轮 = 向 `<会话>/inbox` 写一次（写臂负责落格与入队，见 `ADR-076` #4）。
+    /// 开一轮 = 向 `<会话>/inbox` 写一次（写臂负责落格与入队，见 `D-076` #4）。
     async fn fire_once(
         &self,
         provider: &DynVdfsProvider,

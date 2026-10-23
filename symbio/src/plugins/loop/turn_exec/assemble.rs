@@ -1,4 +1,4 @@
-//! 阶段① 装配——`execute_turn` 拆分四段之首（T-179 · B2，PL-015 §5 动作 B2）。
+//! 阶段① 装配——`execute_turn` 拆分四段之首（ · B2，DE-021 §5 动作 B2）。
 //!
 //! 拆交付包、取事实源、补落寄存变更、定轮号与续写锚、建收集器与流式桥（连同
 //! 发射任务）、判反射命中、派生档位与身份、压缩入格——随后把一切装进
@@ -83,11 +83,11 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     } = req;
     // 事实源：本会话的**唯一句柄**（由交付包按值带来、按引用分发）。
     // 与运行器落格、收件箱补落、轮外压缩进的是同一份实例——进程内不存在
-    // 第二个各自 replay 的写者（ADR-084 §2）。
+    // 第二个各自 replay 的写者（D-084 §2）。
     let store = session.facts().ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
-    // **补落寄存的变更**（T-055）：跨进程另一写者持令牌时，本进程的编辑 / 截断
+    // **补落寄存的变更**：跨进程另一写者持令牌时，本进程的编辑 / 截断
     // 会得到 `NotTheWriter` ⇒ 该变更被寄存在会话侧。本函数是持有交付包的时刻，
     // 经端口动作让 session 在**它自己的令牌窗口**里补落。
     //
@@ -111,7 +111,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
             )))
         })?;
 
-    // 轮号与溯源锚由编排层在判决之前定下（T-225）：用户格先落，这里只收三个
+    // 轮号与溯源锚由编排层在判决之前定下：用户格先落，这里只收三个
     // seq，不再从切片反推。
     // - 新开轮：`turn_no` = 第几条用户格，`user_seq` = 该格的 seq；
     // - 唤醒幕：`turn_no` = **已开未收束**的那一轮（审批 / 问答恢复），`user_seq`
@@ -227,15 +227,15 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     };
 
     // 档位由**命中的那条行**携带（`loop_rows::tier`），不由本处按「有没有命中」
-    // 反推：判据与档位是同一条声明上的两个字段（PL-014 §4 机制 2）。
+    // 反推：判据与档位是同一条声明上的两个字段（DE-014 §4 机制 2）。
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
     // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
     //
-    // 读方（T-082 批①）：派生出的数值随主体走，`turn_runner` 开轮时以**数值**写入
+    // 读方（ 批①）：派生出的数值随主体走，`turn_runner` 开轮时以**数值**写入
     // 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它 ⇒ 该字段不再是
     // "算了却看不见"。`tier` 仍入格（兜底率按层统计的口径锚），且作为缺 `budget_ms`
     // 时的回退路径保留——两条路径读的是同一条事实的两种形态。
-    // 身份进事件（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
+    // 身份进事件（[plan/11 批 1](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ①）：
     // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：
     // 能力集与模式不再是 `trivial` 的空表平凡值——它们与写侧闸判的是同一张表
     // （判的对象 = 写的对象 = 表授予的对象）。未选智能体 ⇒ `agent:main`
@@ -244,11 +244,11 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // `principal` 已在落阶段事实时取过（同一取值点 `request_principal`）：
     // `actor` 随 `input` 被移动进运行器，轮末的记忆与学习写方（`record_learning`）
     // 仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
-    // 作用域（[T-105]）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域（相应批次）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
     // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), tier, scope);
-    // 来源主体（ADR-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
+    // 来源主体（D-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
     let to = super::super::chat_loop::request_source_principal(ctx.as_ref());
 
@@ -258,7 +258,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的
     // 旧事件，现行窗口不再自洽）。
     //
-    // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（ADR-085），
+    // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（D-085），
     // 等待轮被压进归档段后仍然成立——而且续写锚此刻已经由编排层按 seq 直给，
     // 本段不再从切片折它。
     if let Some(msgs) = consolidation {
@@ -314,20 +314,20 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
 ///
 /// ## 输入必须是完整史
 ///
-/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[ADR-085](../../../../../docs/010-adr/085.md "ADR-085")）：
+/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[D-085](../../session/README.md "D-085")）：
 /// 压缩快照取代的是消息列表，不是轮次生命周期——等待用户动作的轮在被压缩落格归档后
 /// 仍是「已开未收束」（C4 同样读完整史）。按窗口找会把它漏成「找不到未收束的轮次」
-/// （T-169：压缩恰好在它等审批期间落格）。
+/// （：压缩恰好在它等审批期间落格）。
 ///
 /// ## 认什么收束与在哪个范围找，是两件事
 ///
 /// 与 core 的 `invariants::unresolved_turns`（C4）**刻意不同口径**：这里只认
-/// final / fallback 收束格、**不认产物格**（C4 经 ADR-067 认）。原因：等待用户
+/// final / fallback 收束格、**不认产物格**（C4 经 D-067 认）。原因：等待用户
 /// 动作的那一轮（进展格不是收束格，但往往已落过产物格）的收束格刻意留给恢复幕
 /// ——若这里也把「落过产物」当成已收束，恢复请求会报「找不到未收束的轮次」，
 /// 审批 / 问答恢复整条链路断掉。C4 只负责「不再报它静默中断」，恢复锚仍按
-/// final / fallback 找——两处口径的差异是 ADR-067 落地时的显式决策，不是漏改。
-/// 本函数与 C4 的**范围**（完整史）由 ADR-085 对齐；差异只在收束种类。
+/// final / fallback 找——两处口径的差异是 D-067 落地时的显式决策，不是漏改。
+/// 本函数与 C4 的**范围**（完整史）由 D-085 对齐；差异只在收束种类。
 /// 取**最后**一个：恢复请求总是续写最近一次停顿。被压缩掉的陈轮不会抢占锚点——
 /// 它若已被 final / fallback 收束就不在候选集里；仍开着的轮按开盘序排在它后面。
 pub(crate) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {

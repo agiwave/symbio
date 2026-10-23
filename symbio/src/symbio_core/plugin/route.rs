@@ -3,7 +3,7 @@
 //! # 地址规则
 //!
 //! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
-//! > [`docs/005-arch/009-plugin-route-address.md`](../../../../docs/005-arch/009-plugin-route-address.md "AR-009-plugin-route-address")。
+//! > [`docs/003-design/006-插件路由与地址.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")。
 //!
 //! ## 一、地址只有两种形态
 //!
@@ -23,7 +23,7 @@
 //! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**不参与路由**——路由按目录名
 //! 分发，`PluginMeta` 唯一运行期消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
 //! `name`/`description`/`hidden` 聚合组合视图），拿 id 当前缀会产出**不存在的路由**——
-//! `hook` 插件写成 `"hooks"` 就曾让 `docs/006-ref/006-当前事实表.md` 与两处文档照抄出 `hooks/fire`。
+//! `hook` 插件写成 `"hooks"` 就曾让 `docs/004-ref/006-当前事实表.md` 与两处文档照抄出 `hooks/fire`。
 //! 该不一致由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
 //!
 //! ## 三、过路由才设 `PATH`；直连方法**不设**
@@ -117,7 +117,7 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
 /// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
 ///
-/// 后来删掉的第三个是 `ROUTE_SESSION_CHAT_SEND`（T-077 步②，输入面双轨退役）：
+/// 后来删掉的第三个是 `ROUTE_SESSION_CHAT_SEND`（ 步②，输入面双轨退役）：
 /// 它的四个调用方全部改走地址面，session 插件上的 `chat/send` / `chat/abort` 两条
 /// 相对臂与 `handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 一并删除——
 /// 「接收消息」与「跑一轮」分开之后，那条路由既无输入可收，也无响应可给。
@@ -129,7 +129,7 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// 唯一调用方：`session` 的 `chat_loop/decide.rs`（轮首判决）。返回
 /// [`crate::symbio_core::DecideOutcome`]——**判决**，或**一次待跑的模型往返**。
 ///
-/// ## 为什么出参不是 `Verdict`（ADR-122 决策 2）
+/// ## 为什么出参不是 `Verdict`（D-122 决策 2）
 ///
 /// 判决的模型往返搬进了引擎的 `model` 端口派发路径：插件不再自己打模型。
 /// 于是「判不判得出来」与「要不要打模型」在调用前分成两件事——规则表命中时

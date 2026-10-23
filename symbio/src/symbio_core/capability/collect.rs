@@ -7,7 +7,7 @@
 //! 广播面（`Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS / _OPTIONS)`）与收集器实例
 //! 各自一对——键没变，变的是行住哪张表。
 //!
-//! ## 键与值同住（ADR-095 根因一）
+//! ## 键与值同住（D-095 根因一）
 //!
 //! 三条键的值类型都是 `Arc<dyn Registry>`（本域契约），故键住本域；`symbio_core::keys`
 //! 只留机制与通用词汇键。键名（`tool_visitor` / `option_visitor` /
@@ -15,10 +15,10 @@
 //!
 //! 读侧助手（[`tool_metas`]）原先住 session 的 `capabilities.rs`，四个读点共用
 //! （LLM 工具面 / 请求级开销估算 / 闸门声明位 / 线上名解析）。
-//! [ADR-086](../../../../docs/010-adr/086.md "ADR-086") §7 上移 core：驱动器切成
+//! [D-086](../../../../docs/003-design/014-单环一表.md "D-086") §7 上移 core：驱动器切成
 //! 独立插件后，工具面读取在 session 与 loop 两侧都要用。
 //!
-//! 顺序 = 注册顺序（ADR-057），调用方不得重排；取不到收集器落空表。
+//! 顺序 = 注册顺序（D-057），调用方不得重排；取不到收集器落空表。
 
 use std::sync::Arc;
 

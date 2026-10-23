@@ -1,4 +1,4 @@
-//! 任务表写侧闸（S03 §3，T-107）：`todo_write` 前的授权判据——**立任务
+//! 任务表写侧闸（S03 §3，）：`todo_write` 前的授权判据——**立任务
 //! （`define.work`）或独立判定（`assert.verification`）二居其一**。
 //!
 //! 与 [`super::elimination`] 同一条纪律：判据在**批首**读一次（主体派生 + 矩阵谓词），
@@ -13,7 +13,7 @@ use crate::symbio_core::{
     CAP_DEFINE_WORK,
 };
 
-/// 任务表写侧闸的**判据**（[roadmap/S03 §3](../../../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）：
+/// 任务表写侧闸的**判据**（[roadmap/S03 §3](../../../../../../docs/007-task/123-多步任务与返工.md ")）：
 /// 本会话主体能否写任务表（`todo_write`）。
 ///
 /// ## 为什么是**两项能力 或**
@@ -23,7 +23,7 @@ use crate::symbio_core::{
 /// - **立任务**（`define.work`）——开格 / 推进任务图。持有者：主智能体（自己的工作
 ///   跟踪）、自主发起者（「欲」升格为任务，`AutonomousInitiator` 先例）、规划者；
 /// - **独立判定**（`assert.verification`）——对完成 / 返工盖章。持有者：验证者、仲裁者
-///   （T-073 的淘汰回路）。
+/// （ 的淘汰回路）。
 ///
 /// 两项**互不可写**（C15：`PermissionMatrix::new` 拒绝同持）⇒ 没有任何一个主体能
 /// 同时「自己立、自己验」——「产出者不得自我认证」在任务表这一层是结构性的。
@@ -33,7 +33,7 @@ use crate::symbio_core::{
 /// 纯产出主体（工人 / 对等体——只持 `produce.artifact`）与纯派活主体（市场——只持
 /// `assign.work`）：它们**不写任务表**。工人的交付物是产物格，任务的立与验归工作
 /// 权威；今天没有任何生产路径让这些主体调 `todo_write`，故此闸今天不改变任何现有
-/// 行为——它改变的是**未来了**：角色行落地后（T-107），一个绑 `worker` 的子会话
+/// 行为——它改变的是**未来了**：角色行落地后，一个绑 `worker` 的子会话
 /// 调 `todo_write` 会被诚实地拒止，而不是静默地以主智能体的资格写下去。
 pub struct TaskTableInputs {
     /// 判据指向的主体（本会话选定的 agent；消息与日志里要点名）。
@@ -62,7 +62,7 @@ impl TaskTableInputs {
 }
 
 // 「谁是任务表写入」这个判据不在本文件：它在工具自己的
-// `CapabilityMeta::owns_task_table` 上自声明（T-158），执行器经
+// `CapabilityMeta::owns_task_table` 上自声明，执行器经
 // [`ToolDecls`](super::ToolDecls) 读声明——把名字抄进闸门的那份副本
 // （`TODO_WRITE_TOOL` / `is_task_table_tool`）随机制化一并退役。
 

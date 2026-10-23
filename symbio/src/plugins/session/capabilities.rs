@@ -111,12 +111,12 @@ pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn 
 }
 
 // 读侧助手 `tool_metas` 的实现住 core（[`crate::symbio_core::tool_metas`]）：loop
-// 切出后它也是驱动器的读点，跨插件共用同一条口径（ADR-086 §7）。
+// 切出后它也是驱动器的读点，跨插件共用同一条口径（D-086 §7）。
 
 // ==================== 选项收集机制（宿主侧） ====================
 //
 // 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
-// ADR-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
+// D-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
 // 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
 // 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
 // 故两者同处本文件，不因历史路径而分居。

@@ -2,7 +2,7 @@
 //!
 //! 两处负向断言是本文件的重点，各自钉住一条**被否决的方案**：
 //! - `length_zero_is_off`：阈值 0 若判成「任何长度都命中」，每条寒暄都会开后台会话
-//!   （ADR-047 被否决方案第一条）；
+//!   （D-047 被否决方案第一条）；
 //! - `empty_prefix_never_matches`：空前缀若不跳过，`starts_with("")` 恒真 ⇒ 一切
 //!   消息都命中，判定权等于没有。
 
@@ -81,7 +81,7 @@ mod knobs {
         assert!(long.contains("reason=topic_length"), "{long}");
 
         // 出厂值这两层是**关闭**的：同一条消息在默认配置下不命中（否则每条寒暄
-        // 都开一个后台会话，ADR-047 被否决方案第一条）。
+        // 都开一个后台会话，D-047 被否决方案第一条）。
         let off = factory_section(Some("帮我把这个重构掉"), &[], &[]).unwrap();
         assert!(off.contains("未命中任何委派判据"), "{off}");
     }

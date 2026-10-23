@@ -1,4 +1,4 @@
-// T-048 的 runner：**门外**实验，真实模型上的「结构化 vs 拍平」对照。
+// 的 runner：**门外**实验，真实模型上的「结构化 vs 拍平」对照。
 //
 // 为什么是**回放**而不是「跑两次端到端会话」
 // --------------------------------------
@@ -11,7 +11,7 @@
 // --------------
 // system 前缀与 `tools` 数组整体取自一次**真实链路捕获**（`capture-corpus.mjs`：
 // CLI × mock-llm × mock-mcp，出厂 `full` 档，对话面关闭 —— 与
-// [ADR-057](../../docs/010-adr/057.md) 形状基线同一条链路同一个场景名）。
+// [D-057](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 形状基线同一条链路同一个场景名）。
 // 题目只替换尾部消息。缺 `--corpus=` 就现场跑一次捕获。
 //
 // 判据（全部机械可读回，口径归 `tasks.mjs`）
@@ -23,7 +23,7 @@
 // - `attributed_correctly`：attribution 题——结果↔调用的对应关系还读得回来（答对且没串到另一条）
 // - 臂 B 独有一条 `protocol_followed`：文本协议那一行 JSON 是否被遵守（这是拍平自己新引入的失败面）
 //
-// **不进判据的**：时延、token 数、字节数——它们进报告的观测列。理由与 ADR-057 同源：
+// **不进判据的**：时延、token 数、字节数——它们进报告的观测列。理由与 D-057 同源：
 // 规模同时由夹具与负载决定，钉进结论会让读数解释不了自己。
 //
 // 用法
@@ -31,7 +31,7 @@
 //     node e2e/ab/run.mjs --provider=LMStudio [--corpus=<file>] [--tasks=id1,id2]
 //                         [--repeat=1] [--temperature=0] [--json=<out>] [--dry-run]
 // `--dry-run` 只打印两臂的请求体形状与字节数，**一个请求都不发**（不花任何预算）。
-// 报告默认写 `docs/006-ref/PROMPT_AB.md`（生成物，唯一写者是本脚本）。
+// 报告默认写 `docs/004-ref/PROMPT_AB.md`（生成物，唯一写者是本脚本）。
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -346,7 +346,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   lines.push('');
   lines.push('> ⚠️ **生成物，不手改。** 唯一写者是 `node e2e/ab/run.mjs`。');
   lines.push('> 判据口径归 `e2e/ab/tasks.mjs` 与 `e2e/ab/flatten.mjs`，');
-  lines.push('> **结论与边界**归 [`docs/009-task/048.md`](../009-task/048.md)（本文件不写结论）。');
+  lines.push('> **结论与边界**归 [`docs/007-task/048.md`](../009-task/048.md)（本文件不写结论）。');
   lines.push('');
   lines.push(`生成于 ${generatedAt} · 模型 \`${provider.model}\`（provider \`${provider.id}\`）· 题 ${byTask.size} 道 × 两臂 × ${repeat} 次`);
   lines.push(
@@ -370,7 +370,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   row('拍平侧：文本协议被遵守（臂 A 不适用）', 'protocol');
   row('拍平侧：正文漏出模型内部调用格式（越少越好）', 'native_leak');
   lines.push('');
-  lines.push('## 观测列（**不进判据**，与 ADR-057 同一取舍）');
+  lines.push('## 观测列（**不进判据**，与 D-057 同一取舍）');
   lines.push('');
   lines.push('| | 臂 A | 臂 B |');
   lines.push('|---|---|---|');

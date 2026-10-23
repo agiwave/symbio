@@ -21,7 +21,7 @@
 //! 所有会话动作都经 [`SessionPort::call`] 递过去——这正是「主动发起流程走
 //! 统一端口/协议」的形态。动作集是**装配期冻结的闭集**（session 行表），
 //! 本结构不为每个动作设包装：两个泛化助手（`run_op` / `run_op_unit`）
-//! 加调用点的回型标注就是全部（[ADR-094](../../../../docs/010-adr/094.md "ADR-094")）。
+//! 加调用点的回型标注就是全部（[D-094](../../../../docs/003-design/014-单环一表.md "D-094")）。
 
 use std::path::Path;
 use std::sync::Arc;
@@ -106,7 +106,7 @@ impl LoopSession {
     /// 发一个内部动作并取回体：`op` 取 [`run_ops`] 常量，回体类型 `T` 由调用点
     /// 标注，载荷形状由 core 的请求结构体定（`run_op(run_ops::EDIT_NODES, EditNodesRequest { nodes, frame })`）。
     ///
-    /// 这是本结构上**唯一**的动作出口——没有「一动作一方法」的宽面（ADR-094）：
+    /// 这是本结构上**唯一**的动作出口——没有「一动作一方法」的宽面（D-094）：
     /// 动作集是 session 行表那个装配期冻结的闭集，加一个交互不用在这里加方法。
     pub(crate) async fn run_op<T: DeserializeOwned>(
         &self,

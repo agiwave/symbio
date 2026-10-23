@@ -12,7 +12,7 @@
 > **现行机制**见 [design/vdfs.md](../design/vdfs.md) §13.4——各资源插件直接实现
 > `VdfsProvider`。（本文件原先指向的 `EntityProvider` 抽象与 `EntityVdfsAdapter`
 > 亦已于 2026-09-15 一并删除，见
-> [archive/entity-provider-mechanism.md](./entity-provider-mechanism.md)。）
+> [archive/entity-provider-mechanism.md](entity-provider-mechanism.md)。）
 >
 > **终局**：连 `EntityStore` / `StorageService` 与 `symbio_core::entities` 那组
 > 存储原语也已于同日一并废除——资源存储现在是「`VdfsProvider` 的三个集中实现」

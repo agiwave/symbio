@@ -13,7 +13,7 @@
 //! `plugins::model` 是私有模块（core 侧**在可见性上**就到不了它）——
 //! 依赖方向由编译器保证，不靠约定。
 //!
-//! ## 依赖方对照表（ADR-023 决策 3；T-197 复审）
+//! ## 依赖方对照表（D-023 决策 3； 复审）
 //!
 //! | 消费方 | 用什么 | 场景 |
 //! |---|---|---|
@@ -212,7 +212,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         //
         // ⚠️ 这条回退有一条前提：**那段思考写完了**。`finish = length` 时它是被
         // `max_tokens` 掐断的半段草稿，既不是答案也不是写完的思考——回退它等于把
-        // 草稿当答话交付（无工具请求的这条路上就是摘要 / 措辞的正文，T-142 同一条判据）。
+        // 草稿当答话交付（无工具请求的这条路上就是摘要 / 措辞的正文， 同一条判据）。
         let answer = if !turn.text.trim().is_empty() {
             turn.text
         } else if turn.finish.is_length() {
@@ -239,7 +239,7 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
     /// 「无工具调用 + 空文本」才是失败。
     ///
-    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[ADR-048a](../../../../docs/010-adr/048a.md)）
+    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[D-048a](../../plugins/session/README.md "symbio/src/plugins/session/README")）
     ///
     /// ```text
     /// // 反例——整段 prompt 拍成一条 user 消息：
@@ -429,7 +429,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                 //   不需要协议级的配对；
                 // - 降级不是丢信息：工具名与结果正文都在正文里；
                 // - 标成 assistant 而不是 user，因为它**确实是本主体做过的事**，
-                //   标成 user 就是撒谎（这与 ADR-048a 判定的「拍平成 user 消息」同一个病）。
+                //   标成 user 就是撒谎（这与 D-048a 判定的「拍平成 user 消息」同一个病）。
                 //
                 // ⚠️ 唯一的损失是 `tool_call_id` 的配对能力——而**本轮**的调用与结果
                 // 仍走上面的树形路径，配对能力完好。跨轮结果的配对本来就无从谈起
@@ -509,7 +509,7 @@ impl LlmAdapter for ProviderLlmAdapter {
             .execute_turn(self.system_prompt(), &wire, tools, &llm_short_id(), &env)
             .await
             .map_err(|e| match e {
-                // 中止不压成失败：调用方据此**不落兜底格**（ADR-044 同源纪律）。
+                // 中止不压成失败：调用方据此**不落兜底格**（D-044 同源纪律）。
                 PluginError::Aborted => AdapterError::Aborted,
                 other => AdapterError::GenerationFailed(format!("{other}")),
             })?;

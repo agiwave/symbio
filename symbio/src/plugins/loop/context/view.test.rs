@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `view.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! 对话体的淡化 / 骨架化已按 [ADR-078](../../../../../docs/010-adr/078.md) 退役，
+//! 对话体的淡化 / 骨架化已按 [D-078](../../session/README.md "symbio/src/plugins/session/README") 退役，
 //! 本文件的判据只剩一件事：**三段注入的次序与位置**。
 
 use super::*;
@@ -31,7 +31,7 @@ fn text_of(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
-/// 记忆段置顶（S5 步 12，[04 §3.1 批⑦](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+/// 记忆段置顶（S5 步 12，[04 §3.1 批⑦](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 一条 `meta.kind = recall_context` 的消息，正文逐字送达。
 #[test]
 fn memory_section_is_prepended() {
@@ -66,7 +66,7 @@ fn readyset_section_sits_after_memory() {
     assert_eq!(kind_of(&alone[0]).as_deref(), Some("readyset"));
 }
 
-/// 委派者真源段落落 **index 2**（ADR-047）。
+/// 委派者真源段落落 **index 2**（D-047）。
 ///
 /// 三个位置**一起**断言：只测「委派段存在」的话，把它插在末尾、插在 index 0，
 /// 或者干脆让记忆段把它顶掉，全都能过——而段位置就是模型读到的上下文次序，

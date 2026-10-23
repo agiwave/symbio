@@ -20,7 +20,7 @@
  *
  * 分派轴只有 wire 五值（`body` / `notice` / `skeleton` / `interaction` / `typing`）。
  * 同格内的业务差异（思考 vs 压缩、整轮 vs 工具）**不进这张表**——后端在交付出口把它折成
- * `title` / `icon` / `actions` **数据**（[ADR-070](../../../docs/010-adr/070.md) §决策 3），取值函数优先读数据、
+ * `title` / `icon` / `actions` **数据**（[D-070](../../../docs/003-design/002-架构总览.md "DE-002-架构总览") §决策 3），取值函数优先读数据、
  * 缺省才退到本行多数形态。前端因此不 `switch(style_tag)`，也不认任何业务名。
  *
  * ## 表**不表达优先级**——优先级是跨形态的规则
@@ -75,7 +75,7 @@ export const MESSAGE_ROLE_LABELS: Record<string, string> = {
 /**
  * 类型 → 文案。
  *
- * 覆盖 wire 闭集五值（`NODE_KINDS`）——[T-155 B2a] 起前端只认这五格，业务旧词在
+ * 覆盖 wire 闭集五值（`NODE_KINDS`）——B2a 起前端只认这五格，业务旧词在
  * 读边界经 `nodeKindOf` 归一后不再进入取值域。漏一格会把机制词原样摆给用户看，
  * 由单测锁死覆盖率。
  */
@@ -131,7 +131,7 @@ export function messageStatusLabel(status: string): string {
 // `messageRendererKey` 里**各出现一次**——新增一种呈现要改 7 处，且没有任何东西
 // 保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。现在每个形态只在这里出现一次。
 //
-// ## [T-155 B2a]：取值域收到 wire 五值 `NodeKind`
+// ## B2a：取值域收到 wire 五值 `NodeKind`
 //
 // 分派轴只有五格（`body` / `notice` / `skeleton` / `interaction` / `typing`）。同格内
 // 的业务差异（思考 vs 压缩、整轮 vs 工具）**不进这张表**——后端在交互面把它折成
@@ -178,7 +178,7 @@ interface TypePresentation {
 }
 
 /**
- * 形态 → 呈现（[T-155 B2a]：取值域就是 wire 闭集五值 `NodeKind`）。
+ * 形态 → 呈现（B2a：取值域就是 wire 闭集五值 `NodeKind`）。
  *
  * 用 `Record<NodeKind, …>`：**漏登记一格是编译错误，不是运行期兜底**。同格内的业务
  * 差异（思考 vs 压缩、整轮 vs 工具）**不在此表**——由后端在交互面折成 `title`/`icon`/
@@ -237,7 +237,7 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
     defaultOpen: () => true,
   },
 
-  // 进行中占位（[T-151] 前端合成）：折叠单行、只挂「生成中」信号，无正文。
+  // 进行中占位（相应批次 前端合成）：折叠单行、只挂「生成中」信号，无正文。
   [NODE_KIND_TYPING]: {
     icon: '⋯',
     title: '生成中',
@@ -276,7 +276,7 @@ function facetValue<T>(v: Facet<T>, f: MessageFacets, agentName = ''): T {
 /**
  * 头部图标。
  *
- * [T-155] 呈现数据优先：后端填了 `node.icon` 就直接用（前端不再从业务类型现推）。
+ * 相应批次 呈现数据优先：后端填了 `node.icon` 就直接用（前端不再从业务类型现推）。
  * 缺省才落 legacy 优先级链：用户消息 > 合成请求 > 工具返回 > 类型表。
  * 请求 / 返回只出现在 `type = text` 上（`facetsOf` 保证），故在查表前判定。
  */
@@ -292,7 +292,7 @@ export function messageIcon(f: MessageFacets): string {
 /**
  * 头部标题。
  *
- * [T-155] 呈现数据优先：后端填了 `node.title` 就直接用。
+ * 相应批次 呈现数据优先：后端填了 `node.title` 就直接用。
  * `agentName` 由调用方传入（骨架容器的标题是「该智能体的名称」，取值逻辑见 `agentNameOf`）。
  * 缺省才落 legacy 优先级与同源（用户 > 请求 > 返回 > 类型表）。
  */
@@ -473,7 +473,7 @@ export function nextOpenOf(
 /**
  * 渲染器标识（机制级的呈现形态，不含场景语义）。
  *
- * [T-155 B2a]：与 wire 五值 `NodeKind` 一一对应（`typing` 占位走 `fallback`）——
+ * B2a：与 wire 五值 `NodeKind` 一一对应（`typing` 占位走 `fallback`）——
  * 前端分派轴**只有** NodeKind，不再有业务形态标识。
  *
  * - `body`        正文叶：用户气泡 / 助手正文 / 工具请求·返回

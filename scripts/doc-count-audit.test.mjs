@@ -47,14 +47,14 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
       ].join('\n'),
     )
     write(
-      'docs/004-plan/verify/facts/mod.rs',
+      'docs/003-design/verify/facts/mod.rs',
       [
         `pub const MECHANISMS: &[&str] = &[${Array.from({ length: facts.mechanisms }, (_, i) => `"k${i}"`).join(', ')}];`,
         `pub const PARAM_KEYS: &[&str] = &[${Array.from({ length: facts.paramKeys }, (_, i) => `"k${i}"`).join(', ')}];`,
       ].join('\n'),
     )
-    // DC-004 的来源：`docs/004-plan/verify/` 顶层那几个 `.rs`（门禁 55 阶段逐个编译运行的那批）
-    for (let i = 0; i < verify; i++) write(`docs/004-plan/verify/p${i + 1}.rs`, 'fn main() {}')
+    // DC-004 的来源：`docs/003-design/verify/` 顶层那几个 `.rs`（门禁 55 阶段逐个编译运行的那批）
+    for (let i = 0; i < verify; i++) write(`docs/003-design/verify/p${i + 1}.rs`, 'fn main() {}')
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',

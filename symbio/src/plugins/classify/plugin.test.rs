@@ -4,7 +4,7 @@
 //!
 //! ## 本文件覆盖的是「插件这一侧」的契约
 //!
-//! ADR-122 决策 2 之后，判决路由的出参**不是判决**，而是 [`DecideOutcome`]：
+//! D-122 决策 2 之后，判决路由的出参**不是判决**，而是 [`DecideOutcome`]：
 //! **判决**或**待跑的计划**。于是本文件钉住的是三条：
 //!
 //! 1. 规则表命中 ⇒ `Decided{Answered}`，**零模型往返**（上下文里连模型服务都没有）；
@@ -147,7 +147,7 @@ async fn rule_miss_hands_over_a_plan_instead_of_a_verdict() {
 
 /// 计划是**数据**：编排层拿到它不必懂分类，只需照着打。
 ///
-/// 三件东西缺一，编排层就得反过来猜——而「猜」正是 ADR-122 否掉的候选 ②。
+/// 三件东西缺一，编排层就得反过来猜——而「猜」正是 D-122 否掉的候选 ②。
 fn assert_plan_is_usable(plan: &DecisionPlan, utterance: &str) {
     assert!(
         !plan.system_prompt.trim().is_empty(),
@@ -323,7 +323,7 @@ async fn unknown_subcommand_is_not_found() {
 /// 判据刻意数注册表而不是数 `traverse` 的回包：模型能调用的工具来自
 /// `Registry::list(CapabilityRowKind::Tool)`（`tool_metas` 读的就是它），回包是 `[]`
 /// 只说明「没往回包里写东西」，注册表为零才说明「没进模型的工具清单」。
-/// 这条是 [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 给「快速档不得生成」
+/// 这条是 [D-096](../model/README.md "D-096") 给「快速档不得生成」
 /// 配的第三颗牙：原来靠「本插件恰好不注册能力」这个结构巧合，现在是可执行断言。
 ///
 /// 对照项是同一份 ctx 上的 `CONFIGURABLE_VISITOR`：它必须恰好收到 1 行。有这一行，

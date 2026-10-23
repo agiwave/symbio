@@ -6,7 +6,7 @@
 //! 「这一次开轮是一次**自主触发**，先把四格事实落进这个会话的事实源，落成了才准开」。
 //! 后者不是定时器的属性——它回答的是**谁有资格开这个会话的事实源、在什么时刻开**，
 //! 那是存储所有者的写窗口纪律，不是某个触发器的私事（归属裁决见
-//! [ADR-076](../../../../../docs/010-adr/076.md "ADR-076") 裁决一 #5/#6）。
+//! [D-076](../../heartbeat/README.md "D-076") 裁决一 #5/#6）。
 //!
 //! 于是「谁来发起」在这里不重要：今天唯一的入口是收件箱写臂（`write(<会话地址>/inbox)`，
 //! 写体带 `meta.trigger` 触发声明，识别在 `plugin/nodes.rs::trigger_declaration`），
@@ -38,7 +38,7 @@ impl SessionPlugin {
     ///
     /// 运行参数（`mode` / `include_history`）在这里由**服务端按会话自己的数据**推导，
     /// 不从调用方随身带（地址写入面不承载运行选项，见
-    /// [ADR-066](../../../../../docs/010-adr/066.md "ADR-066") 决策 4）：
+    /// [D-066](../../../../../docs/003-design/012-会话输入与地址.md "D-066") 决策 4）：
     /// 会话 metadata 是这两格唯一的 owner，与 `resolve_session_params` 的元数据回退同一口径
     /// （`orchestrator/entry.rs` 的 `req > metadata > 默认`）。
     ///
@@ -81,7 +81,7 @@ impl SessionPlugin {
             // 其余字段留空：`agent_id` / `risk_level` / `provider_id` 由
             // `resolve_session_params` 回退到会话 metadata，工作目录同（`start_turn` 的
             // `ctx > metadata > 报错` 第一档之前没有更早的来源）。自主触发是**本机**路径，
-            // 无「来源声明」——轮末承诺的 `to` 由取值点落本机用户（那条不一致的归属见 ADR-076 后果）。
+            // 无「来源声明」——轮末承诺的 `to` 由取值点落本机用户（那条不一致的归属见 D-076 后果）。
             ..Default::default()
         };
         Some(
@@ -90,7 +90,7 @@ impl SessionPlugin {
         )
     }
 
-    /// 把一次定时触发落成事实（S9 第 21 步，[roadmap/S12](../../../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")）。
+    /// 把一次定时触发落成事实（S9 第 21 步，[roadmap/S12](../../../../../docs/007-task/132-自主层与长期目标.md ")）。
     ///
     /// 返回 `true` = 触发事实已入格；`false` = 这一趟不触发（原因已记日志）。
     ///
@@ -139,7 +139,7 @@ impl SessionPlugin {
             }
         }
 
-        // 事实源句柄由存储层构造一次并按会话缓存（ADR-084 §2）——本函数不再拼路径开档。
+        // 事实源句柄由存储层构造一次并按会话缓存（D-084 §2）——本函数不再拼路径开档。
         let store = match self.get_store().await {
             Ok(store) => store,
             Err(e) => {

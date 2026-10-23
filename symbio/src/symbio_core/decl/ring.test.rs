@@ -110,7 +110,7 @@ fn home(fact: &'static str) -> Decl {
     }
 }
 
-/// **装载只有一个出口**（PL-016 §3.3）：五张表灌进六个注册口，`seal()` 跑完全部
+/// **装载只有一个出口**（DE-015 §3.3）：五张表灌进六个注册口，`seal()` 跑完全部
 /// 检查。所以反向用例断言的是这个 `Err`，正例断言 `Ok`——不再有「先冻结、再自己想
 /// 起来跑一遍行检查」这种两段式。
 fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> {
@@ -363,7 +363,7 @@ fn empty_table_never_drives_but_is_complete() {
     assert!(drive(&[], &decl_world(), &events, 0).is_none());
 }
 
-/// 守卫用例的替身（ADR-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，
+/// 守卫用例的替身（D-118 订正 1）：「`by` 查不到动作」不再是求解时静默跳过，
 /// 而是装载期就红。`accept` 谓词存在时，这一行会永远不被选中却全绿；现在它拒绝启动。
 #[test]
 fn a_by_without_an_actor_is_a_load_time_gap() {
@@ -426,11 +426,11 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
     }));
 }
 
-/// 第 6 条的第二档（ADR-124）：出口**全是**引擎独占格的行——派发行的形状。
+/// 第 6 条的第二档（D-124）：出口**全是**引擎独占格的行——派发行的形状。
 ///
 /// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
 /// 这一行永远只能 `by: None`（`dispatch-turn` / `dispatch-model` / `dispatch-tools`
-/// 正是这个形状，PL-017 §3.1 要给它们接 `courier`）。改判成「名单非空」之后，
+/// 正是这个形状，DE-015 §3.1 要给它们接 `courier`）。改判成「名单非空」之后，
 /// **空名单仍然要红**——这一档不是「不判」。
 #[test]
 fn an_actor_serving_an_engine_exit_row_must_still_declare_writes() {
@@ -476,7 +476,7 @@ fn an_actor_serving_an_engine_exit_row_must_still_declare_writes() {
 }
 
 /// 时延闸门：行的 `tier` 比执行体的 `mode` 更慢 ⇒ 这一行不可能按时跑完。
-/// （反射档拿不到模型句柄——PL-016 §3.4 第 6 条的后半。）
+/// （反射档拿不到模型句柄——DE-015 §3.4 第 6 条的后半。）
 #[test]
 fn a_row_slower_than_its_actor_mode_is_a_gap() {
     let rows = {
@@ -604,7 +604,7 @@ fn a_complete_row_set_has_no_gaps() {
     assert!(seal_gaps(&rows, &[ACT]).is_empty());
 }
 
-// ── 端口声明（T-223）─────────────────────────────────────────────────────
+// ── 端口声明─────────────────────────────────────────────────────
 
 /// 端口的声明是**按端口一次**，不是按行三次：`before` / `lease_ms` /
 /// `max_attempts` 对同一个端口的每一行都一样，抄进行里就是三份会漂移的副本。
@@ -634,7 +634,7 @@ fn a_port_is_declared_once_and_found_by_name() {
     assert!(port_of(PORTS, "model").is_none());
 }
 
-// ── 集合展开（PL-017 §3.3）──────────────────────────────────────────────
+// ── 集合展开（DE-015 §3.3）──────────────────────────────────────────────
 
 /// 一篮子的**声明集**：`batch` 的 `calls` 声明为可展开字段。
 fn declare_batch() -> Builder {

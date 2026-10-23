@@ -1,4 +1,4 @@
-//! 唤醒（T-244 步 5d）：用户动作在开幕之前落成一条**工具调用请求**。
+//! 唤醒（ 步 5d）：用户动作在开幕之前落成一条**工具调用请求**。
 //!
 //! ## 与旧 `resume.rs` 的区别
 //!
@@ -75,7 +75,7 @@ pub(crate) async fn process_wake(
 
 /// `RetrySubtree`：删除失败轮及其全部子孙节点，按普通新轮重来。
 ///
-/// 删除走 `remove-nodes` 动作面（ADR-054 决策 2）：删掉的是一棵子树 ⇒ 一次动作落
+/// 删除走 `remove-nodes` 动作面（D-054 决策 2）：删掉的是一棵子树 ⇒ 一次动作落
 /// **一条** `message.removed`。不落格的话，主读路径切到「从 WAL 重建」之后这棵子树
 /// 会整棵复活——重建只看事实，而事实里从未有过「它们没了」这句话。
 async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOutcome, PluginError> {
@@ -135,7 +135,7 @@ async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOut
 
 /// 工具调用的唤醒：把用户动作落成一笔 `request(port=tool)`。
 ///
-/// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（T-244 步 5d）。
+/// 不在这里执行工具、不写授权 / 结果——那些归行表的授权行与派发行（ 步 5d）。
 async fn land_tool_wake(
     session: &LoopSession,
     req: ResumeRequest,

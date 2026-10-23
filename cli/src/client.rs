@@ -26,14 +26,14 @@
 //! **这条推理不成立**：消息与会话运行态分属两条通道时，两者的到达顺序没有
 //! 机制保证，「会话报不忙」推不出「本轮消息都已终态」，前端因此挂过一张宽限期复查
 //! 的兜底网。根因是把「数据的属性」当成了「传输的属性」——顺序由单一订阅连接给出，
-//! 不由帧里的序号给出（ADR-025）。
+//! 不由帧里的序号给出（D-025）。
 //!
 //! 信封没有操作枚举（S27）：形状 `{path, data?}`，语义全在 `data` 的字段上
 //! （`delta` 追加 / `content` 替换 / `status = removed` 移除）。
 //!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
 //! ——会话运行态由**会话节点**（`status` + `attributes.outcome` / `.error`）承载
-//! （见 `session/docs/018-node-state-streaming.md`）。
+//! （见 `session/docs/105-node-state-streaming.md`）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -233,7 +233,7 @@ impl SymbioClient {
         // 与前端同款：启动期问一次，之后一律从父地址往下拼。
         client.root_addr = client.fetch_root_addr().await?;
         client.watch_session_changes().await?;
-        // 选项会话化：provider / mode / risk 落在会话 metadata 上（ADR-066）。
+        // 选项会话化：provider / mode / risk 落在会话 metadata 上（D-066）。
         // 这里已随会话创建写过一次，故 `options_dirty` 初值为 `false`。
         client.ensure_session().await?;
         Ok(client)
@@ -392,7 +392,7 @@ impl SymbioClient {
     /// 切换 Provider（下次发送即生效，无需重建连接）。
     ///
     /// 落库推迟到**下一次发送**（`ask` 见 `options_dirty`）：`provider_id` 描述的是
-    /// **会话级事实**（这个会话用哪个 provider，[ADR-066](../../docs/010-adr/066.md "ADR-066")），
+    /// **会话级事实**（这个会话用哪个 provider，[D-066](../../docs/003-design/012-会话输入与地址.md "D-066")），
     /// 它的落点是会话 metadata，不是某条消息的写体。置脏而不是立刻写，是为了让
     /// 「开着 REPL 连续切几次」只落最后一次。
     pub fn switch_provider(&mut self, provider: Option<String>) {
@@ -437,10 +437,10 @@ impl SymbioClient {
 
         // 本端选项自上次落库以来变过，才先把它们落成会话 metadata。
         //
-        // `session/chat/send` 已随输入面双轨退役（[ADR-066](../../docs/010-adr/066.md "ADR-066") /
-        // T-077 步②），收件箱写入面**不承载运行选项**。从前「随请求携带 provider / mode /
+        // `session/chat/send` 已随输入面双轨退役（[D-066](../../docs/003-design/012-会话输入与地址.md "D-066") /
+        // 步②），收件箱写入面**不承载运行选项**。从前「随请求携带 provider / mode /
         // risk」的语义因此改走会话 metadata——而 metadata 本就是这三项的**唯一**写入
-        // 落点（[ADR-066] 理由 1：同一件会话级事实有两个 owner 正是双轨期的病）。
+        // 落点（[D-066] 理由 1：同一件会话级事实有两个 owner 正是双轨期的病）。
         // 从前那条注释写的「即便会话元数据被外部改写，本次发送依然生效」是**刻意**的
         // 调用级覆盖意图；它没有被否决，否决的是把它寄托在消息写体上——覆盖仍在下一次
         // 发送前生效（本段就是），只是落点是会话而不是消息。
@@ -466,7 +466,7 @@ impl SymbioClient {
                 json!({
                     "path": inbox_addr,
                     // 正文是**纯文本**：`parse_inbox_message` 的判别式是「不以 `{` 开头」
-                    // ⇒ 整段就是消息正文，身份与缺省由 provider 一侧补齐（ADR-066 决策 1）。
+                    // ⇒ 整段就是消息正文，身份与缺省由 provider 一侧补齐（D-066 决策 1）。
                     "text": text,
                 }),
                 None,
@@ -701,7 +701,7 @@ impl SymbioClient {
             .unwrap_or_else(|| "default（系统目录配置）".to_string())
     }
 
-    /// 全局收尾（T-078）：对整棵插件树发一次 `stop(PluginStopReason::Shutdown)`。
+    /// 全局收尾：对整棵插件树发一次 `stop(PluginStopReason::Shutdown)`。
     ///
     /// 调用点 = `main` 的**唯一出口**——四种使用方式（心跳守护 / 单条消息 /
     /// 管道 / REPL）跑完各自返回，`main` 统一在本方法里收尾，任何一种用法的

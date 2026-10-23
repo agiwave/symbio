@@ -4,8 +4,8 @@
 //! 纯构造器（`llm_build_text_node` / `llm_build_tool_call_nodes` / `llm_build_tool_message`
 //! / `tool_call_args_text`）与建树折叠（`detach_if_flat` / `flatten_whole_tree` /
 //! `turn_root_of` / 枚举 `PresentationTree`）住
-//! [`crate::symbio_core::node_build`]（[ADR-082](../../../../docs/010-adr/082.md "ADR-082")
-//! 裁决三，[plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014") T-167 切片批）——
+//! [`crate::symbio_core::node_build`]（[D-082](../../../../docs/003-design/014-单环一表.md "D-082")
+//! 裁决三，[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014") 切片批）——
 //! 驱动器切成独立插件 `loop` 后，留守的读侧投影（`rebuild`）与驱动器写侧隔着 E-009 的
 //! 插件墙共用同一份形状源。本文件留下的是**只有驱动器有的组合**：
 //!

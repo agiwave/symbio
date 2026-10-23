@@ -1,4 +1,4 @@
-//! 阶段③ 工具批派发与产物落格（T-179 · B3，PL-015 §5 动作 B3）。
+//! 阶段③ 工具批派发与产物落格（ · B3，DE-021 §5 动作 B3）。
 //!
 //! 派发本身在 [`super::super::tool_dispatch::ToolDispatch`]（三动作契约）；本段只承接
 //! 回来的 [`DispatchOutcome`]：逐条过产物闸、落 `artifact.added`、把本批调用
@@ -35,7 +35,7 @@ where
             .unwrap_or_else(|| serde_json::json!({}))
     });
     for (oi, outcome) in outcomes.iter().enumerate() {
-        // 产物闸（`ClosureKind::Artifact`，ADR-067）：不持 `produce.artifact` ⇒
+        // 产物闸（`ClosureKind::Artifact`，D-067）：不持 `produce.artifact` ⇒
         // 这条结果不入格（warn 一次，不刷屏）。结果照进 prompt / 照记
         // `all_tool_calls`——闸管的是「入格」，不是「发生过」。
         if let Err(why) = closure_gate(&actor, ClosureKind::Artifact) {

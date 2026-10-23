@@ -1,4 +1,4 @@
-//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）。
+//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../../docs/007-task/131-技能编译与自我改进.md ")）。
 //!
 //! **技能是事实，不是特殊类型**（S11 §2 / J1）：编译产物就是一条
 //! `memory.encoded{tag:"skill"}`——与普通记忆同格子、同召回、同巩固，读侧
@@ -112,7 +112,7 @@ pub(crate) fn compile(
     ev.actor = PRINCIPAL_USER.to_string();
     ev.turn = turn;
     ev.ts = now;
-    // **内容侧可见域 = `shared`**（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")）：
+    // **内容侧可见域 = `shared`**（相应批次）：
     // 技能是**固化的可复用经验**（成功轨迹的套路），与「经验」同属
     // 「人的认知可供借用」（SC-010）——跨会话命中是它的设计意图（t35 证据②：
     // B 会话命中 A 会话编译的技能，跨进程稳定判据）。缺席 = 缺省
@@ -189,7 +189,7 @@ pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option
 ///   判不了 ⇒ 原样留在视图里当背景事实，不假装判过；
 /// - **巩固产物判不了**（合并后的条目有新 seq、不再带 `skill_id`）⇒ 同样原样保留。
 ///
-/// `snapshot` 是本会话事实的**值**（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：
+/// `snapshot` 是本会话事实的**值**（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
     if !view.entries.iter().any(|e| e.tag == SKILL_TAG) {

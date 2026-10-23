@@ -28,7 +28,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 
 /// 直落一条用户发言格（生产中每轮首帧的事实，`turn_exec` 落的 `u-{turn}`）。
 ///
-/// 切主后（ADR-049）存储里的正文 = 事实投影：空切片上，收口要落的变更事实
+/// 切主后（D-049）存储里的正文 = 事实投影：空切片上，收口要落的变更事实
 /// （`message_events::append`）连溯源锚都解不出、会按口径被丢弃。
 fn seed_user_message(dir: &std::path::Path) {
     use crate::symbio_core::Store as _;

@@ -251,7 +251,7 @@ impl CompositeVdfs {
 
     /// 子目录节点（`<dir>`）——合成的目录节点。
     ///
-    /// 两类字段**两个来源**（ADR-032）：
+    /// 两类字段**两个来源**（D-032）：
     ///
     /// - **身份**（`title` / `description`）来自该插件目录的 `PLUGIN.yml`
     ///   （[`PluginRegistry::dir_of`] → `PluginDir::identity`）——与插件列表同一份，

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * 骨架惰性重取（[T-150] 前端半）——纯原语 + localStorage 账本
+ * 骨架惰性重取（相应批次 前端半）——纯原语 + localStorage 账本
  *
  * 覆盖 exit 判据里两块**无需浏览器即可证**的部分：
  * 1. **往返一致**：`releaseSkeleton` 摘掉子树（保留 root），`mergeReleased` 把重取帧

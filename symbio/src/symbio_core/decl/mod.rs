@@ -1,4 +1,4 @@
-//! 事实与视图的**声明层**——让「字段都在声明里」第一次可查（PL-016 §3.2 / §3.4）。
+//! 事实与视图的**声明层**——让「字段都在声明里」第一次可查（DE-015 §3.2 / §3.4）。
 //!
 //! ## 它解决什么
 //!
@@ -34,8 +34,8 @@
 //! ## 视图 `eval` 的签名就是隔离
 //!
 //! `fn(&[Event], i64) -> Value`：拿不到写口，也拿不到别的视图；`now` 是入参而不是
-//! 视图自己读时钟，同一份日志重放两次必须得到同一结果（ADR-115 决策 1）。
-//! PL-016 判据 3（视图互不可见）因此落在类型上，不落在纪律上。
+//! 视图自己读时钟，同一份日志重放两次必须得到同一结果（D-115 决策 1）。
+//! DE-015 判据 3（视图互不可见）因此落在类型上，不落在纪律上。
 //!
 //! ## 首批声明（= 控制面声明集）
 //!
@@ -46,7 +46,7 @@
 //! `turn_stages` / `turn_closed` / `report_due` / `reported_anchors`。
 //!
 //! **进这张表的唯一资格**：某一行以它为 `owes` / `until` / `unless`，或某条**被行用到的**
-//! 视图读它（PL-016 判据 7 的控制面声明集）。只在审计 / SLO 投影里读的断言格不进表——
+//! 视图读它（DE-015 判据 7 的控制面声明集）。只在审计 / SLO 投影里读的断言格不进表——
 //! `turn.dispatch` 是这一类的现例：它的读方是 `invariants::declared_budget_ms`，
 //! 表里没有一行以它为前件或出口，所以它是业务事实，归投影管（判据 7 不约束业务事实，
 //! 强迫它们各挂一行只会造出装饰行）。
@@ -60,7 +60,7 @@
 //!
 //! ## 生产接线
 //!
-//! T-221 只做声明层；T-222b 起控制面（`plugins::loop::loop_rows`）经 `owed` 读它，
+//! 只做声明层；b 起控制面（`plugins::loop::loop_rows`）经 `owed` 读它，
 //! 视图因此有了生产消费方。`Frozen::eval` 的成本上界仍按声明生效：调用方传入
 //! **本轮切片**（不是整份 WAL），一轮的事件数由轮的生命周期界定。
 
@@ -69,7 +69,7 @@ use std::sync::Arc;
 
 use crate::symbio_core::Event;
 use crate::symbio_core::LatencyTier;
-// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
+// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表（ 起），并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
 use crate::symbio_core::event::{
     EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
@@ -112,7 +112,7 @@ pub(crate) struct ViewDecl {
     pub(crate) eval: fn(&[Event], i64) -> serde_json::Value,
 }
 
-/// 一个**执行体**的声明（PL-016 §2.3）。
+/// 一个**执行体**的声明（DE-015 §2.3）。
 ///
 /// ## 为什么四个字段都不是装饰
 ///
@@ -126,7 +126,7 @@ pub(crate) struct ViewDecl {
 /// §2.6 契约 1（`drive` 是 async、持本轮草稿）在类型上互斥：`'static` 的 future
 /// 借不到草稿，也借不到 `&dyn LlmAdapter`。执行体的可调用面因此住在**注册它的
 /// 插件**里（`plugins::loop::turn_exec::ACTORS`），机制层只持有静态可查的四样——
-/// 「一个 `by` 一个动作」由绑定表与冻结表同时保证。裁决见 ADR-119。
+/// 「一个 `by` 一个动作」由绑定表与冻结表同时保证。裁决见 D-119。
 ///
 /// 与 `actors::ActorSpec` 无关：那里的 actor 是**主体**（人格 / 推理），这里的
 /// actor 是**执行体**（表里一个名字对应一次动作）。方案用同一个词，此处不改名。
@@ -144,7 +144,7 @@ pub(crate) struct ActorDecl {
 
 /// 装载期的唯一注册口。`seal()` 之后没有可变方法（见 [`Frozen`]）。
 ///
-/// ## 六个口就是 PL-016 §3.2 的六个口
+/// ## 六个口就是 DE-015 §3.2 的六个口
 ///
 /// `fact` / `view` / `actor` / `port` / `row` 五个填表口 + `seal`。五张注册表在
 /// [`Builder`] 里是一一对应的五个 `Vec`，`seal(self)` **消耗** `self`——冻结后连
@@ -242,7 +242,7 @@ impl Builder {
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
             // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是
-            // 执行体交回的陈述（ADR-123 决策 1–2；实现 `plugins/loop` 的 `drive_steps`）。
+            // 执行体交回的陈述（D-123 决策 1–2；实现 `plugins/loop` 的 `drive_steps`）。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
                     gaps.push(Gap::ActorWritesEngineCell {
@@ -387,9 +387,9 @@ impl Frozen {
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
-// 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
+// 名字住在 `event/mod.rs` 的事件名字表（ 起），并登记在 `CELLS` 上。
 //
-// `via` 是**这一次往返是谁的**（ADR-122 决策 2）：这一轮自己的模型往返**不带**
+// `via` 是**这一次往返是谁的**（D-122 决策 2）：这一轮自己的模型往返**不带**
 // 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
 // 内部往返的应答 `calls` 为空（它不带工具），若混进「本轮最近一次模型应答」的口径，
 // 一条判决往返就会被读成「这一轮答完了」。
@@ -405,7 +405,7 @@ const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via"];
 /// （§2.3）。
 const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY];
 
-// `response` 比请求多一个集合字段：模型应答带回来的工具调用（ADR-117）。
+// `response` 比请求多一个集合字段：模型应答带回来的工具调用（D-117）。
 //
 // 它是**创建行** `open-tools` 的展开源：一个 `response(port=model)` 的 `calls`
 // 数组逐元素开债，元素键与随后的 `request(port=tool)` 同 id。`response` 的其它
@@ -416,7 +416,7 @@ const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls", "via"];
 //
 // ## 为什么租约参数在事实上而不只在 `PortDecl` 里
 //
-// `stale_sent` 是视图——它的入参只有事实切片与 `now`（ADR-115 决策 1），读不到
+// `stale_sent` 是视图——它的入参只有事实切片与 `now`（D-115 决策 1），读不到
 // 代码里的 `PortDecl`。没有这两块，视图算不出「这次派发等了多久算卡住」。
 //
 // ## 为什么在 `sent` 上而不是在 `request` 上
@@ -460,7 +460,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["port", "id", "why", "via"],
     },
-    // 尝试级否定（T-223）：租约看护者落的「这一次作废、换一次」。
+    // 尝试级否定：租约看护者落的「这一次作废、换一次」。
     // 与 `failed` 的边界：`failed` 关**逻辑 id**（不再重试），`retry` 只关一次尝试。
     FactDecl {
         name: EVENT_RETRY,
@@ -469,7 +469,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: PROTOCOL_FIELDS,
     },
-    // 收束格：字段来自 `turn_runner::produced_payload` + T-220 的 `status` / `reason` / `terminated`。
+    // 收束格：字段来自 `turn_runner::produced_payload` + 的 `status` / `reason` / `terminated`。
     FactDecl {
         name: "chat.assistant.final",
         port: None,
@@ -489,7 +489,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
             "terminated",
         ],
     },
-    // 助手文本事实的另一半（`report_due` 的「最近一句」锚点，T-225）：
+    // 助手文本事实的另一半（`report_due` 的「最近一句」锚点，）：
     // 兜底与收束同为 `Closed`，其余三格落 `turn × asserted / progressed`。
     FactDecl {
         name: "chat.assistant.fallback",
@@ -521,9 +521,9 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["text", "status"],
     },
-    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类，T-225）。
+    // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类，）。
     //
-    // `model_calls` 是**这一步打了几次模型**（ADR-122 决策 4 / 5）：`source` 记的是
+    // `model_calls` 是**这一步打了几次模型**（D-122 决策 4 / 5）：`source` 记的是
     // 判决的**来源**，读不出「有没有打过模型」（模型调了而应答不可解析 ⇒
     // `source=fallback`）。这一格是那次模型往返在事实层唯一的**数**——判据侧
     // 拿它对账「观测 ⇔ 三格」。
@@ -543,7 +543,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
     },
     // 用户格：`meta` 是可选的补充元数据（`prepare.rs` 只在非空时写）。
     //
-    // `tier` / `budget_ms` 是**历史形态**：T-225 起用户格先于任何判决落，档位那时
+    // `tier` / `budget_ms` 是**历史形态**： 起用户格先于任何判决落，档位那时
     // 还没定 ⇒ 新写入不再带它们。声明保留，读方（`declared_tier` / `declared_budget_ms`）
     // 因此仍能读旧 WAL；新事实的档位在 `turn.dispatch`。
     FactDecl {
@@ -561,7 +561,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["text", "count", "id", "ids"],
     },
-    // 本轮配置快照（T-225）：决策只读它，不读 `SessionConfig` 活值。
+    // 本轮配置快照：决策只读它，不读 `SessionConfig` 活值。
     FactDecl {
         name: "session.config",
         port: None,
@@ -581,7 +581,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
     // 也没有一条被行用到的视图读它；它的读方是审计投影
     // （`invariants::declared_budget_ms`）。按判据 7 的口径它是业务事实，
     // 名字与写方都照旧，只是不进控制面声明集。
-    // 拒绝事实（T-219）：`key` 是「主体 × 能力 × 资源」的编码。
+    // 拒绝事实：`key` 是「主体 × 能力 × 资源」的编码。
     FactDecl {
         name: "authz.denied",
         port: None,
@@ -589,7 +589,7 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &[],
         fields: &["key", "port", "id", "tool", "kind", "reason", "detail"],
     },
-    // 放行事实（T-226 / PL-016 §4.2）：授权级联的正向一半。
+    // 放行事实（ / DE-015 §4.2）：授权级联的正向一半。
     //
     // 键取 `(port, id)` 而不是 `key`：级联的派发行要与 `sent` / `failed` 关同一
     // 逻辑调用，而协议事实的键是二元组；`key` 只是给人看的同一 id 副本。
@@ -644,9 +644,9 @@ fn open_calls(events: &[Event]) -> Vec<&Event> {
     open
 }
 
-/// **卡住的在途**（T-223）：`sent` 之后超过 `lease_ms` 仍无应答的那些。
+/// **卡住的在途**：`sent` 之后超过 `lease_ms` 仍无应答的那些。
 ///
-/// `now` 是入参而不是时钟（ADR-115 决策 1）——同一份日志给定同一个 `now`，
+/// `now` 是入参而不是时钟（D-115 决策 1）——同一份日志给定同一个 `now`，
 /// 两次求值必须得到同一结果。
 ///
 /// 字段：`stale` 是租约到期（租约行的开账条件），`exhausted` 是尝试已到顶
@@ -691,7 +691,7 @@ fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
 ///
 /// 轮号跟着**最新幕锚**走，而不是取切片里最大的轮号：恢复一条被后续轮次归档
 /// 的旧轮时，切片从旧轮首条事件一直延伸到今天，最大轮号指向新轮——旧轮的恢复幕
-/// 在表头里根本看不见（这正是 `resume_anchor` 旁路存在的原因，T-244 步 5d）。
+/// 在表头里根本看不见（这正是 `resume_anchor` 旁路存在的原因， 步 5d）。
 /// 恢复幕的 `turn.stage{stage:"resume"}` 是开演时刚落的，`ts` 比任何既有轮次都新，
 /// 按 `(ts, seq)` 取最后一条幕锚即可让表头回到被续写的那一轮。
 ///
@@ -735,7 +735,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
 
-/// 轮头（T-244 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
+/// 轮头（ 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
 /// 收束行与执行行也是。
 ///
 /// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
@@ -743,10 +743,10 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 ///
 /// v5 加一格 `tools_open`：本幕最近一条模型应答交回了工具调用、且其中至少一笔
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
-/// （T-244 步 5b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
+/// （ 步 5b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
 /// v6 给它补了请求面（见该格的注释）：恢复幕的唤醒请求也在「有活没干完」之列。
 ///
-/// v8（T-247 / ADR-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
+/// v8（ / D-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
 /// 只看**这一轮自己的**模型往返（`via` 缺席的那些）——内部往返（判决 / 措辞 / 摘要）
 /// 的应答 `calls` 为空，混进来会让一条判决往返被读成「这一轮答完了」。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
@@ -809,7 +809,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 本幕最近一条 `response(port=model)`：收束格（`calls` 空）与工具格
     // （`calls` 非空且未关完）共用同一次选取，口径只在这里。
     //
-    // **只取这一轮自己的模型往返**（`via` 缺席的那些，ADR-122 决策 2）：判决 / 措辞 /
+    // **只取这一轮自己的模型往返**（`via` 缺席的那些，D-122 决策 2）：判决 / 措辞 /
     // 摘要那些内部往返的应答 `calls` 为空（它们不带工具），混进来会让一条判决往返
     // 被读成「这一轮答完了」⇒ 收束行提前开账。
     let model_calls = events
@@ -824,7 +824,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         .max_by_key(|e| seq_of(e))
         .and_then(|e| e.payload.get("calls"))
         .and_then(|v| v.as_array());
-    // 收束该不该发生（ADR-121 决策 2）：口径钉在日志上——**本幕最近一条
+    // 收束该不该发生（D-121 决策 2）：口径钉在日志上——**本幕最近一条
     // `response(port=model)` 的 `calls` 为空**（`expand: ["calls"]` 是「这条响应要不要
     // 转出工具债」的唯一数据面），且本幕未收束。执行体手里那份草稿不参与判定，
     // 否则崩溃恢复之后「答完了没」就成了假话。
@@ -832,7 +832,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // `calls` 取不到数组 ⇒ 不算收束（宁可让 `close-turn` 不开账，也不拿一个来路不明的
     // 形状把没答完的一轮判成答完）；没有响应（首步就中止 / 失败的轮）同理。
     let has_final = !closed && model_calls.is_some_and(|calls| calls.is_empty());
-    // 本幕模型端口的**结局**（T-244 步 5c）：本幕**派发过**的一次模型往返，最后落在
+    // 本幕模型端口的**结局**（ 步 5c）：本幕**派发过**的一次模型往返，最后落在
     // `failed(port=model)` 上——模型没答成，且之后没有更晚的成功应答。
     //
     // 这一格是「中止 / 适配器失败」那两种**收束**的前件：它们没有「`calls` 为空的
@@ -845,7 +845,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 上一世那笔卡住的调用，而那笔的 `request` 在锚之前。少了这条，恢复幕一进门
     // 就会判「该收束了」，把「重跑一次模型往返」读成「这一轮已经答不上来了」。
     //
-    // `via` 缺席的那些才是「这一轮自己的模型往返」（ADR-122 决策 2）：内部往返失败
+    // `via` 缺席的那些才是「这一轮自己的模型往返」（D-122 决策 2）：内部往返失败
     // （判决没打出来）退化成「判不出来 ⇒ 进工具循环」，**不是**「模型没答成 ⇒
     // 收束」——后者会让一条判决失败把整轮收掉。
     let model_outcome_failed = events
@@ -872,11 +872,11 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 该不该收束：`has_final`（答完了）∨ 模型没答成（不会再有应答）。两条都要求
     // 本幕未收束——收束过就不欠了。
     let closeable = !closed && (has_final || model_outcome_failed);
-    // 工具批还开着（T-244 步 5b）：交回的调用里至少有一笔没被 `response` / `failed`
+    // 工具批还开着（ 步 5b）：交回的调用里至少有一笔没被 `response` / `failed`
     // （同 `port=tool` 同 id）关掉。两格互斥（`calls` 空 vs 非空），所以执行行只在
     // 「有活没干完」的时候让位。
     //
-    // v6（T-244 步 5d）再加一条**请求面**的判据：清点的是**本轮**（不是本幕）里
+    // v6（ 步 5d）再加一条**请求面**的判据：清点的是**本轮**（不是本幕）里
     // 落过、却还没有终局的 `request(port=tool)`。恢复幕交回的那一笔就靠它：模型
     // 响应是首幕的（本幕没有新的模型应答），旧批次也早已关账，唯一的「开着」是
     // 唤醒请求本身——不看请求面，执行行会在派发之前抢先跑一次模型往返。
@@ -976,7 +976,7 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     }
 }
 
-/// 中途汇报该不该说（T-225）：只吃日志与 `now`，不碰内存计数 / 墙钟。
+/// 中途汇报该不该说：只吃日志与 `now`，不碰内存计数 / 墙钟。
 ///
 /// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
 /// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
@@ -1083,7 +1083,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // 在途 = `sent` 中没有对应 `response`（同 id + attempt）、`failed`（同 id）
     // 或 `retry`（同 id + attempt）的那些。
     //
-    // v2（T-223）：加入 `retry` 一侧。没有它，被作废的那次尝试会永远留在「在途」里
+    // v2：加入 `retry` 一侧。没有它，被作废的那次尝试会永远留在「在途」里
     // ——而它已经不会再回来了。
     ViewDecl {
         name: "in_flight",
@@ -1101,7 +1101,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: in_flight,
     },
-    // 卡住（T-223）：与 `in_flight` 同一口径的在途集合，加上租约与尝试上限两个判断。
+    // 卡住：与 `in_flight` 同一口径的在途集合，加上租约与尝试上限两个判断。
     //
     // 时间不进欠账公式：`stale` 由本视图把 `now` 折成布尔，租约行只对 `true` 开账
     // （与 `report_due.due` 同一条纪律）。
@@ -1123,7 +1123,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: stale_sent,
     },
-    // 轮头（T-244 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
+    // 轮头（ 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
     // `close-turn` / `execute-turn` 的开账条件。
     //
     // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，
@@ -1136,7 +1136,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // ——后者的读面是 `failed` 的 `port`（`failed(port=model)`）与 `request` 的
     // `port` / `id`（判「本幕派发过」），v4 / v5 起就已在读面里，故读面不变。
     // v7 → v8：口径收窄到「这一轮自己的模型往返」——`request` / `response` / `failed`
-    // 三个协议名的 `via` 字段进读面（ADR-122 决策 2）。内部往返（判决 / 措辞 /
+    // 三个协议名的 `via` 字段进读面（D-122 决策 2）。内部往返（判决 / 措辞 /
     // 摘要）带 `via`，这一轮自己的不带；不带的那批才是「答完了 / 没答成」的判据。
     ViewDecl {
         name: "turn_head",

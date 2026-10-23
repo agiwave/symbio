@@ -15,7 +15,7 @@ pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: Option<String>,
     /// Bot API 上游基址；缺省即官方端点（对现有部署零行为变化）。
-    /// 指向自建 / 代理端点是网络受限环境的常见需求，也是 e2e 能打本地靶子的前提（T-114）。
+    /// 指向自建 / 代理端点是网络受限环境的常见需求，也是 e2e 能打本地靶子的前提。
     pub api_base: String,
     #[serde(default = "default_true")]
     pub poll_enabled: bool,

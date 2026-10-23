@@ -32,7 +32,7 @@
 //!
 //! 代价：`PluginMeta` 是构造物，停用就拿不到标题 / 版本 / 描述，
 //! [`PluginEntry`] 的那几个字段因此为空、消费方按目录名兜底。**已解决**：身份归
-//! `PLUGIN.yml`（ADR-032），装配期由 [`PluginRegistry::mount_child`] 把出厂身份
+//! `PLUGIN.yml`（D-032），装配期由 [`PluginRegistry::mount_child`] 把出厂身份
 //! **投影进 manifest 一次**，此后运行期只读 manifest——停用的插件照样有名字。
 //!
 //! 挂载点呈现（`order` / `hidden` / `root_access`）仍取自 `PluginMeta`，这是刻意的：
@@ -58,7 +58,7 @@ use serde_json::Value;
 /// - 运行期：它们**不作为可安装插件**出现在插件注册表里——把 `home` 装成一个
 ///   子插件，系统里就会出现第二个根。
 ///
-/// 判据：只被本模块消费（`installable` 排除、`install` 拒绝），故按 ADR-023 的
+/// 判据：只被本模块消费（`installable` 排除、`install` 拒绝），故按 D-023 的
 /// 依赖方判据从 `symbio_core::plugin::ids` 下沉到**执行它的地方**——规则的 owner
 /// 与实现同处，不再隔着两层。
 const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_ID_HOME, PLUGIN_ID_COMPOSITE];
@@ -161,7 +161,7 @@ impl PluginRegistry {
             .collect()
     }
 
-    /// 全局收尾（T-078）：整树停机——对**每一个已挂载插件**发恰一次
+    /// 全局收尾：整树停机——对**每一个已挂载插件**发恰一次
     /// `stop(PluginStopReason::Shutdown)`，单家失败只留痕、不拦其余。
     ///
     /// 与停用/卸载是**两条路**：那些是对单个插件的处置（走插件管理插件的注册表
@@ -181,7 +181,7 @@ impl PluginRegistry {
         self.required.iter().any(|n| n == name)
     }
 
-    /// 某插件的目录（**公开**：资源树合成挂载点节点时也要读它的身份，见 ADR-032）
+    /// 某插件的目录（**公开**：资源树合成挂载点节点时也要读它的身份，见 D-032）
     pub fn dir_of(&self, name: &str) -> PluginDir {
         PluginDir::at(self.root.join(name), name)
     }
@@ -300,7 +300,7 @@ impl PluginRegistry {
     /// 第三类（构造里 panic）只能在调用点捕获，见 [`Self::mount_child`]。
     ///
     /// **为什么判据写在调用方而不是拆开 `creator_create_object` 的返回类型**：
-    /// 机制对「`T` 是什么」一无所知（ADR-036），为一个客户拆返回值就是把注册表
+    /// 机制对「`T` 是什么」一无所知（D-036），为一个客户拆返回值就是把注册表
     /// 变成插件专用表。`creator_has` 与 `creator_ids::<dyn Plugin>()` 已在公共面上，
     /// 组合它们分得开这两类，core 一个字都不用变宽。
     fn provider_gap(provider: &str) -> Option<String> {
@@ -379,14 +379,14 @@ impl PluginRegistry {
                 return Err(reason);
             }
         };
-        // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
+        // **出厂身份投影**（D-032）：构造成功后才拿得到 `PluginMeta`，
         // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
         // 此后运行期只读 manifest，停用插件因此也有名字——这条投影是
         // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
         if let Err(e) = dir.seed_identity(&plugin.meta()) {
             crate::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
         }
-        // **生命周期钩子**（ADR-033）：装配后、开始服务前一次。
+        // **生命周期钩子**（D-033）：装配后、开始服务前一次。
         // 同步——装配路径里没有 async 上下文（见该 ADR）。
         // 失败**不摘掉**插件：与 `provider_of` 同一口径——配了一半也要看得见，
         // 摘掉它用户只看到「插件不见了」，留着则每次调用给出明确错误。
@@ -420,7 +420,7 @@ impl PluginRegistry {
                 _ => continue,
             };
             let dir = dir.with_provider(&provider);
-            // 身份从 **manifest** 读（ADR-032）——停用的插件也有名字；只有从未
+            // 身份从 **manifest** 读（D-032）——停用的插件也有名字；只有从未
             // 落位过的目录才为空，消费方按 `name` 兜底。
             let identity = dir.identity();
             // 排序用的 `order` 是**挂载点呈现**，仍取自构造物——没挂载就没有位置。
@@ -475,7 +475,7 @@ impl PluginRegistry {
     ///
     /// 界面底座插件（[`ASSEMBLY_UNDISABLABLE_PLUGINS`]）拒绝停用——理由见该常量文档。
     ///
-    /// 停用一侧会先调 [`Plugin::stop`]（ADR-033）：**摘实例之前**，
+    /// 停用一侧会先调 [`Plugin::stop`]（D-033）：**摘实例之前**，
     /// 让插件有一次清理的机会（关监听 / 停后台任务 / 落盘）。
     pub async fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         if !enabled && ASSEMBLY_UNDISABLABLE_PLUGINS.contains(&name) {
@@ -505,7 +505,7 @@ impl PluginRegistry {
             // 停用之后它是「停用」，不是「装配失败」——上一轮的原因跟着清掉。
             self.forget_failure(name);
             if let Some(p) = plugin {
-                // ADR-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
+                // D-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
                 // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
                 // 让插件停不掉（那时插件只剩 `Drop`，而 `Drop` 不能 await）。
                 if let Err(e) = p.stop(PluginStopReason::Disabled).await {
@@ -553,7 +553,7 @@ impl PluginRegistry {
     /// 只对**非必需**插件可用——必需插件是构造者声明的「这个智能体必须有它」，
     /// 用户能做的是停用（见 [`Self::set_enabled`]），不是删除。
     ///
-    /// 顺序（ADR-033）：`stop(Uninstalled)` 在**删目录之前**——那是插件**最后**
+    /// 顺序（D-033）：`stop(Uninstalled)` 在**删目录之前**——那是插件**最后**
     /// 一次能写盘的机会。
     pub async fn uninstall(&self, name: &str) -> Result<(), String> {
         if self.is_required(name) {

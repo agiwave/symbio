@@ -20,7 +20,7 @@ use crate::symbio_core::event::{
 ///
 /// ⚠️ 这里**必须**构造 `PromptMessage` 而不是 `TranscriptEntry`：判据验的是
 /// 「送进模型的那批」，而那条路上 `tool` 消息还带着 `tool_call_id`。用投影条目
-/// 构造会让判据少验一样东西（而那恰恰是 ADR-048a 要保的东西）。
+/// 构造会让判据少验一样东西（而那恰恰是 D-048a 要保的东西）。
 fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
     PromptMessage {
         role: role.to_string(),

@@ -15,7 +15,7 @@ mod capability;
 mod chat;
 mod clock;
 mod creator;
-// 事实 / 视图声明层（T-221）：字段清单与视图读法在装载期可查。T-222b 起是
+// 事实 / 视图声明层：字段清单与视图读法在装载期可查。b 起是
 // 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。整模块出根
@@ -96,7 +96,7 @@ pub(crate) use projection::span::{span, SpanView};
 // 前端（Tauri + CLI），都必须经根路径拿类型，不能深引 `schemas` 域目录。
 pub use present::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 pub use projection::transcript::transcript;
-// 结构化 prompt 消息（ADR-048a）：core 的**最小结构化出口**——角色、正文、
+// 结构化 prompt 消息（D-048a）：core 的**最小结构化出口**——角色、正文、
 // `tool_call_id`、`tool_calls`。线格式（`ChatNode`）由 adapter 边界翻译，
 // core 内部不认识 provider 的图语义。
 //
@@ -134,7 +134,7 @@ pub use actors::{ActorSpec, Pattern};
 // `skill_id`、路由不落观测就没有 `fallback`，置信度恒 1.0，S11 §5 静默失效）。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
-// `EliminationDecider`（S13 淘汰回路的裁决侧，T-073）：判定在 core、轮末驱动与
+// `EliminationDecider`（S13 淘汰回路的裁决侧，）：判定在 core、轮末驱动与
 // 闸门接线都在 `plugins/session`（derived_facts 的轮末步 + 工具执行层的撤销闸），
 // 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
 pub(crate) use actors::{
@@ -148,28 +148,28 @@ pub(crate) use actors::{
 // `plugins/session/task_events` 按名字落格——**单消费方**，故与记忆事件名字表（下）、
 // `readyset` 出根（同批）同一形态：`pub(crate)` 出根（C-003 数 `pub use`），只在本
 // crate 内可见、不进对外公开面。收窄成「下沉到 `plugins/session`」会让写方复述字面量、
-// 制造第二处真相，违反 ADR-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
+// 制造第二处真相，违反 D-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
 // 名字表的根别名：生产写方走 `event::` 完整路径（`actors/` 各处），此处别名主要
 // 服务测试与插件写方——故非测试构建下允许无引用，不为此造 `pub` 出口。
 //
 // `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
 // 生产方（`plugins/heartbeat`）与消费方（`plugins/session` 的收件箱写臂）分属两个
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
-// 插件里（否则另一侧复述字面量），判据见 [ADR-077](../../../docs/010-adr/077.md "ADR-077")。
+// 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md "D-077")。
 #[allow(unused_imports)]
 pub(crate) use event::{
     EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
     EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
     EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
-// 协议族（T-224）的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
+// 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以走 `pub(crate)` 而不是根公开面（C-003 数 `pub use`）。
 pub(crate) use event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
 // 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的
 // 口径是「单消费方不算架构元素，该下沉」——可下沉的只有消费方，算法不行：
-// `recall` 是 ③ 的投影、`consolidate` 是 01 §9.3 的接受边界、事件名字表是 ADR-043
+// `recall` 是 ③ 的投影、`consolidate` 是 01 §9.3 的接受边界、事件名字表是 D-043
 // 的单点定义，都必须留在 core。故按 `symbio_core/README.md §4 四问` 留 core，以
 // **`pub(crate)`** 出根：只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`），
 // 与 `lock_read` / `ObjectConstructor` 同一形态。记忆事件名字表同样只对写方可见——
@@ -198,7 +198,7 @@ pub(crate) use event::{
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
     EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
-// 淘汰裁决事件名（S13 §3，T-073）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
+// 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
 // **两个生产消费方**，故走非测试的 `pub(crate)` 出根（与记忆事件名表同一形态）。
 pub(crate) use event::EVENT_VERDICT_ASSERTED;
@@ -222,7 +222,7 @@ pub(crate) use view::{principal_namespace, visible_to};
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
-// 生成端口 `LlmAdapter` 是 core 的唯一适配器契约；工具分发归 loop 插件本地（ADR-118）。
+// 生成端口 `LlmAdapter` 是 core 的唯一适配器契约；工具分发归 loop 插件本地（D-118）。
 pub use adapters::{
     DeltaSink, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, SilentDeltas, TokenIssuer,
 };
@@ -241,7 +241,7 @@ pub(crate) use adapters::StubLlmAdapter;
 // 它深引 `symbio_core::invariants::…` ⇒ 同 `StubLlmAdapter` 一形态，只在 `cfg(test)` 出根。
 #[cfg(test)]
 pub(crate) use invariants::unresolved_turns;
-// 事实网格 → prompt 的双向完整性复核（ADR-048）：下沉后的运行器组装 prompt 时调它。
+// 事实网格 → prompt 的双向完整性复核（D-048）：下沉后的运行器组装 prompt 时调它。
 pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
 // `plugins/session`，而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以
@@ -260,13 +260,13 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
 // core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
 //
-// `PermissionMatrix` **不在根出口**（T-094 收窄）：它最后一个 core 外消费方是
-// `stats.rs` 的读侧闸——T-094 把那一格改成按内容侧可见域判之后，闸只经
+// `PermissionMatrix` **不在根出口**（ 收窄）：它最后一个 core 外消费方是
+// `stats.rs` 的读侧闸—— 把那一格改成按内容侧可见域判之后，闸只经
 // `authz::production_matrix()` 拿表（返回类型走类型推导，不点名），插件侧再没有
 // 一处指称这个类型 ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
 // （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
 //
-// `GrantsOverlay`（S13 淘汰回路的机制半边，T-073）：授权表是装配期常量，淘汰是
+// `GrantsOverlay`（S13 淘汰回路的机制半边，）：授权表是装配期常量，淘汰是
 // 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
 // 两个插件侧消费方——`derived_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
 // 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub(crate)` 出根。
@@ -274,7 +274,7 @@ pub(crate) use store::{AppendError, StoreInvariant};
 // `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
 pub(crate) use governance::GrantsOverlay;
 pub use governance::VisScope;
-// 授权表的**外部面**（T-221 同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
+// 授权表的**外部面**（ 同批）：`authz` 收敛成域目录后，`symbio_core::authz::…`
 // 就是一条深路径（C-002 判红），而插件侧有十几个符号在用。按 §1 的口径，根平铺是
 // 唯一合法路径 ⇒ 表仍住 `authz/`，出口逐个列在这里。`pub(crate)` 与
 // `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。
@@ -324,7 +324,7 @@ pub use vdfs::{
 // 地址机制（crate 内部装配用，不是公开契约）
 pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 
-// ==================== 跨插件契约（分域，ADR-087） ====================
+// ==================== 跨插件契约（分域，D-087） ====================
 // 这里曾是 `schemas/` 一个目录：协议词与宿主方言混装，一个名字说不清「这是什么」。
 // 2026-10-19 按**它描述什么**拆成四个域（`chat` / `dialog` / `present` / `turn`
 // 与两处搬家：`plugin` 的 hook/响应壳、`projection` 的 rebuild）：
@@ -345,7 +345,7 @@ pub use present::{
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
 pub use turn::{facts, node_build};
-// 6b-③ 跨墙词表（[ADR-086](../../../docs/010-adr/086.md "ADR-086") §7）：session 与
+// 6b-③ 跨墙词表（[D-086](../../../docs/003-design/014-单环一表.md "D-086") §7）：session 与
 // loop 两侧共同命名。全部 `pub(crate)` 出根——消费方仍在本 crate 内（C-003 只数
 // `pub use`），而 C-002 禁止插件深引域目录 ⇒ 根别名是唯一合法路径。
 pub(crate) use capability::tool_metas;
@@ -421,7 +421,7 @@ pub(crate) use creator::{ObjectConstructor, Submit};
 
 // ==================== 键面 ====================
 // 只剩机制（`SymbioKey` trait）与值类型为通用词汇（String / Value / Vec<String>）的键——
-// 值类型属某域的键已随值搬去该域（exec / plugin / capability，ADR-095 根因一）。
+// 值类型属某域的键已随值搬去该域（exec / plugin / capability，D-095 根因一）。
 pub use keys::{
     SymbioKey, AGENT_ID, CONTENT, ID, MODE, NAME, PATH, PROVIDER_ID, REQUIRED_PLUGINS,
     RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID, TRACE_ID,
@@ -455,8 +455,8 @@ pub use logger::{
 // 定义自己的文件名常量（`memory::memory::MEMORY_FILE` 等），core 不设统一约定。
 pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{text_floor_char_boundary, text_truncate_bytes};
-// 巩固合并的纯计算内核：只依赖 `std`，被 `docs/004-plan/verify/` 的 standalone
-// 程序以 `#[path]` 包含同一份源码（T-086 批① 的纪律，住址随 ADR-082 裁决三上移）。
+// 巩固合并的纯计算内核：只依赖 `std`，被 `docs/003-design/verify/` 的 standalone
+// 程序以 `#[path]` 包含同一份源码（ 批① 的纪律，住址随 D-082 裁决三上移）。
 // 开**模块命名空间**而不是逐个 `pub use`：函数名（`truncate_chars` / `split_sentences`
 // / `merge_with_fidelity`）不是对外契约，也不该进根公开面。
 pub(crate) use text::merge_kernel;

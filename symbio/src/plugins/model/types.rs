@@ -70,7 +70,7 @@ impl From<NativeMessage> for ChatNode {
             delta: None,
             status: Some(crate::symbio_core::chat_node::NodeStatus::Completed),
             meta: None,
-            // 读数行只在交付出口的呈现装配里出现，消息本体不带（[ADR-111]）。
+            // 读数行只在交付出口的呈现装配里出现，消息本体不带（[D-111]）。
             stats: None,
             timestamp: Some(msg.timestamp),
             seq: msg.seq,

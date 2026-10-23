@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 2b](../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 2b](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「`confirm` 工具 → 本轮停在等用户 → 回填答案 → 续跑并收束」。
 //
 // 这条判据之所以必须端到端，是因为它要证的三件事**各自只能在一处被看见**：
@@ -37,7 +37,7 @@ import './_selfrun.mjs';
 // 「e2e 直发」：经 gateway HTTP 边界（与 Tauri 前端同构的 `/api/v1/invoke`）
 // 发一条恢复请求。
 //
-// 入口形状随输入面双轨退役改过一次（T-077 步② / [ADR-066]）：曾经的
+// 入口形状随输入面双轨退役改过一次（ 步② / [D-066]）：曾经的
 // `session/chat/send` `resume` 字段已删除，恢复改走**节点动作**——
 // `vdfs/action(<sid>/message/<target_id>, "answer", { answer })`。好处依旧是不动
 // 生产代码，且验的正是**前端恢复走的同一条路**（`vdfs_provider` 的 resume 臂 →
@@ -177,7 +177,7 @@ export default defineCase(
         // ── 第二幕：回填答案（恢复入口 = `action(<sid>/message/<target_id>, "answer")`）──
         //
         // 落点是提问所在的 tool_call 节点 id（稳定锚点）；`mode` 是**调用级**运行
-        // 选项，只有会话 metadata 里没有时才由它兜底（ADR-066 决策 2）。
+        // 选项，只有会话 metadata 里没有时才由它兜底（D-066 决策 2）。
         const inv = await resumeSession(
           api,
           SID,
@@ -227,7 +227,7 @@ export default defineCase(
             .join('\n');
         const reqs = await llm.requests();
         assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（提问轮 + 恢复收尾轮）');
-        // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」（ADR-048a）
+        // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」（D-048a）
         // ——而不是「某个字符串出现过」。
         const secondMsgs = reqs[1].body.messages ?? [];
         const second = promptOf(reqs[1].body);

@@ -154,7 +154,7 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 图标查找**必须与列表卡片同一函数**（[`iconForNode`]，回退链与其顺序规则见该
    * 函数文档）。这一行曾引发重大回归：`<根>` 的挂载点 `kind` 全是 `"dir"`，
    * 按 kind 优先会让六个挂载点整排退成同一张默认图——完整记录见
-   * `docs/005-arch/007-frontend-ui-ux-plan.md` §9。护栏见本文件同目录的 spec。
+   * `docs/003-design/020-前端UI-UX.md` §9。护栏见本文件同目录的 spec。
    */
   const navItems = computed<WorkbenchRailItem[]>(() => {
     // 挂载层的高亮是**当前挂载**（地址导出的身份），不是 selectedName——
@@ -741,7 +741,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 「导入整包」不在这里：它是**详情页上的一条动作**（由定义声明、经
   // `DetailAction.pack` 表明载荷是一个本地文件），由 `runPackAction` 执行。
   // 曾经它被表达成类型的第二种「入口形态」，于是前端要先问「选哪种方式」，
-  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段（见 ADR-029）。
+  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段（见 D-029）。
 
   /** 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建） */
   const creatableType = computed<VdfsNewType | undefined>(() => cwdNode.value?.new_type)

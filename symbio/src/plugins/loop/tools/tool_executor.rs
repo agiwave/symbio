@@ -209,7 +209,7 @@ pub(super) fn build_user_prompt_message(
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
         role: Some(NodeRole::Tool),
-        // [T-147d-iii] 等待用户的交互卡同样是**工具的结果**：族归工具自己。
+        // d-iii 等待用户的交互卡同样是**工具的结果**：族归工具自己。
         principal: Some(crate::symbio_core::principal::Principal::tool_principal(
             tool_name,
         )),
@@ -340,7 +340,7 @@ pub async fn execute_tool_async(
             let visitor = tool_visitor.clone();
             let tool_ctx2 = tool_ctx.clone();
             let canonical = invoke_name.clone();
-            // 执行不在表上（AR-025 §3）：按名取行 + capability_invoke；查不到即
+            // 执行不在表上（DE-008 §3）：按名取行 + capability_invoke；查不到即
             // 诚实的 NotFound（文案与机制化之前逐字一致）。
             Box::pin(async move {
                 match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
@@ -391,7 +391,7 @@ pub async fn execute_tool_async(
     //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
-    //      永远停在 `Streaming`（违反 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §8 #11）；
+    //      永远停在 `Streaming`（违反 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §8 #11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
     // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
     //
@@ -519,10 +519,10 @@ pub async fn execute_tool_async(
 /// 3. **外部执行闸门在每个调用点各判一次**（S8 第 20 步）：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
-/// 4. **淘汰闸只拦 `agent_run`**（S13 §3，T-073）：判据同批首读一次
+/// 4. **淘汰闸只拦 `agent_run`**（S13 §3，）：判据同批首读一次
 ///    （[`EliminationInputs`]，部署级覆盖层）——被收回 `assign.work` 的主体
 ///    派不活；拒因进工具结果，违约随收束如实记账。
-/// 5. **任务表写侧闸只拦 `todo_write`**（S03 §3，T-107）：判据同批首读一次
+/// 5. **任务表写侧闸只拦 `todo_write`**（S03 §3，）：判据同批首读一次
 ///    （[`TaskTableInputs`]）——不持 `define.work` / `assert.verification` 的主体
 ///    （纯产出 / 纯派活）写不了任务表；拒因进工具结果，**不产事件、不记任务声明**。
 #[allow(clippy::too_many_arguments)]
@@ -537,9 +537,9 @@ pub async fn process_tool_calls_async(
     // 上下文反推插件目录——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
     tool_archive_dir: &std::path::Path,
     // 本会话事实轨：闸门判据以**值**读（本会话完整史），本函数不拼路径、不开 WAL
-    // （ADR-084 §1-A）。
+    // （D-084 §1-A）。
     facts: &dyn Store<Event = Event>,
-    // 淘汰闸的部署级判据（session 已折成一个值，见 ADR-086 §4）。
+    // 淘汰闸的部署级判据（session 已折成一个值，见 D-086 §4）。
     elimination_revoked: bool,
     // 代际立约出参（批⑧）：`agent_run` 的承诺记录，交回调用方随收束入格。
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
@@ -553,7 +553,7 @@ pub async fn process_tool_calls_async(
     // 不得产生任何事件，两种拒绝在事件面上必须分得开。
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
-    // ① 批首闸门读数（阶段拆分见 `dispatch/{gates,batch,unfinished}`，T-179 / PL-015 §5 动作 B）。
+    // ① 批首闸门读数（阶段拆分见 `dispatch/{gates,batch,unfinished}`， / DE-021 §5 动作 B）。
     //    空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
         return (Vec::new(), Vec::new());

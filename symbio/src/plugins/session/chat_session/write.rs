@@ -2,7 +2,7 @@
 //! 两个存储原语（[`PersistentChatSession::append_messages`] /
 //! [`PersistentChatSession::replace_all`]）。
 //!
-//! 顺序反转（ADR-054 决策 2）在这里落地：
+//! 顺序反转（D-054 决策 2）在这里落地：
 //! `apply` **先落事实**、再折列表、再写缓存——内存列表是事实的一个渲染，
 //! 不是「正在被编辑的真相」。事实与缓存从此不可能分开（决策 3 的类型强制）。
 //!
@@ -31,7 +31,7 @@ fn backfill_timestamps(messages: Vec<ChatNode>, now: i64) -> Vec<ChatNode> {
 /// 里，把它当在途号滤掉等于**压低**水位，此后新分配的号会排到那些既有消息之前。
 /// 「在途号不落库」由**边界**保证（`InflightSeq::occupies` 摘号），因此水位这一侧
 /// 不需要也不应该再判一次号段（四套序号的归一表见
-/// `plugins/session/docs/022-vdfs-session-messages.md` §3.3）。
+/// `plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
 pub(super) fn max_seq(messages: &[ChatNode]) -> i64 {
     messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
 }
@@ -128,9 +128,9 @@ pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
     cursor
 }
 
-/// 一次**消息列表变更**（ADR-054 决策 2 + 3）。
+/// 一次**消息列表变更**（D-054 决策 2 + 3）。
 ///
-/// 这是 ADR-054 的**闭集原语**落到类型上：
+/// 这是 D-054 的**闭集原语**落到类型上：
 /// 消息列表的变更只有「诞生 / 断言 / 关闭」三种节点级原语（第四种「取代」是列表级的
 /// 压缩快照，见 [`PersistentChatSession::replace_all`]——它的事实 owner 不同）。
 ///
@@ -139,12 +139,12 @@ pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
 /// 旧形态是 `replace_messages(整份列表)`：调用方自己折好列表再整体写入，事实
 /// **事后补**——于是「改了列表却没落事实」在编译期**表达得出来**（实测 10 个
 /// 写入口里 6 个没落）。收成枚举之后，`apply` 在**同一个函数里**落事实、折列表、
-/// 写缓存，那句话在类型上**表达不出来**——这就是 ADR-054 决策 3 要的类型强制。
+/// 写缓存，那句话在类型上**表达不出来**——这就是 D-054 决策 3 要的类型强制。
 pub(crate) enum MessageChange {
     /// **诞生**：一个此前不存在的节点出现。
     Born {
         nodes: Vec<ChatNode>,
-        /// 它的**承载事实**由谁落——一个事实只能有一个 owner（[ADR-049] 理由 1）。
+        /// 它的**承载事实**由谁落——一个事实只能有一个 owner（[D-049] 理由 1）。
         carrier: Carrier,
     },
     /// **断言**：一个已存在的节点现在读作 Y ⇒ 落 `message.edited`。
@@ -172,7 +172,7 @@ pub(crate) enum Carrier {
 }
 
 impl PersistentChatSession {
-    /// 一次消息列表变更的**唯一写入口**（ADR-054
+    /// 一次消息列表变更的**唯一写入口**（D-054
     /// 决策 2 的「顺序反转」）。
     ///
     /// 顺序是**先落事实、再折列表、再写缓存**。这与旧形态（`读列表 → 改 Vec →
@@ -180,15 +180,15 @@ impl PersistentChatSession {
     /// 所以它天然是可选项——忘了补，代码照样编译、测试照样绿。本函数把「落事实」
     /// 收进写入路径本身，**没有「补」这一步**，也就没有「忘了补」这个失败。
     ///
-    /// ## 失败口径：事实失败即本次变更失败（T-164）
+    /// ## 失败口径：事实失败即本次变更失败
     ///
     /// 旧口径是「附加事实失败不该把成功的动作说成失败」——那在 b3 之前成立：缓存是
     /// 读侧真源、事实是影子。b3 把主读切到 WAL 之后**事实就是本体**，放过它等于
     /// 「回执说改好了、重建后一看没改」，而且用户无感。
     ///
     /// 步骤 ① 在写缓存**之前**，所以这里返回错误时什么都已经没发生——报失败是如实。
-    /// 两处例外各自有理由：拿不到写者令牌 ⇒ 寄存（T-055，稍后由持令牌方补落）；
-    /// 无锚可指 ⇒ v1 遗留会话，读侧本就回落 `messages.json`（ADR-049），缓存仍是真源。
+    /// 两处例外各自有理由：拿不到写者令牌 ⇒ 寄存（，稍后由持令牌方补落）；
+    /// 无锚可指 ⇒ v1 遗留会话，读侧本就回落 `messages.json`（D-049），缓存仍是真源。
     ///
     /// ## 返回值
     ///
@@ -197,8 +197,8 @@ impl PersistentChatSession {
     /// `Removed` 回空（被删的节点不在存储里，交回它们等于让前端对齐幻影）。
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
-        // 事实源句柄由存储层按会话构造一次（ADR-084 §2）——本函数不再拼目录自己 open。
-        // 打不开是**真失败**（T-164）：与「没有事实源」（临时会话）必须是两种处置。
+        // 事实源句柄由存储层按会话构造一次（D-084 §2）——本函数不再拼目录自己 open。
+        // 打不开是**真失败**：与「没有事实源」（临时会话）必须是两种处置。
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
             Err(why) => {
@@ -260,7 +260,7 @@ impl PersistentChatSession {
             MessageChange::Born { nodes, .. } => {
                 let (persisted, removed) = self.append_messages(nodes).await?;
                 // 写入期裁剪（`prune_tool_history` / `max_messages`）是**列表变更**，
-                // 必须入格（T-054 · ADR-054 决策 1 的「关闭」原语）。裁剪发生在
+                // 必须入格（ · D-054 决策 1 的「关闭」原语）。裁剪发生在
                 // `append_messages` 的存储临界区内（它才拿得到权威列表与配置），
                 // 故由本处补落 `message.removed`——**事实仍由 `apply` 这一个入口落**，
                 // 没有开出第二个写入口。
@@ -269,7 +269,7 @@ impl PersistentChatSession {
                 // `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒ **被裁节点
                 // 复活**——用户会看到早已淘汰的旧工具链重新出现在历史里。
                 //
-                // **这一步不能升级为错误**（T-164 的另一半）：它发生在写缓存**之后**
+                // **这一步不能升级为错误**（ 的另一半）：它发生在写缓存**之后**
                 // （裁剪决策在 `append_messages` 的临界区内产生），此时追加已经成功；
                 // 报失败会让调用方重试，而重试等于把同一条用户消息再追加一遍。代价
                 // 因此取「出声 + 有界」：被裁节点在下次重建后复活（列表变长，不是
@@ -327,7 +327,7 @@ impl PersistentChatSession {
     ///
     /// ## 为什么回消息，而不是回条数
     ///
-    /// `seq` 只在存储写入时分配（见 `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4），调用方
+    /// `seq` 只在存储写入时分配（见 `symbio/src/plugins/session/docs/109-vdfs-session-messages.md` §3.4），调用方
     /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
     /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
     /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
@@ -337,9 +337,9 @@ impl PersistentChatSession {
     /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
     /// 存在的消息，等于让前端"对齐"到幻影。
     ///
-    /// 第二个返回值（**T-054**）是本次写入期裁剪删掉的 id：调用方（`apply`）
+    /// 第二个返回值（****）是本次写入期裁剪删掉的 id：调用方（`apply`）
     /// 据此落 `message.removed`。为什么由调用方落而不是本函数落——本函数是
-    /// **存储原语**，事实落格收在 `apply` 一个入口（ADR-054 决策 2/3 的类型强制）；
+    /// **存储原语**，事实落格收在 `apply` 一个入口（D-054 决策 2/3 的类型强制）；
     /// 本函数只**报告**它动了哪些节点。空 `Vec` = 没裁任何节点。
     ///
     /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
@@ -412,7 +412,7 @@ impl PersistentChatSession {
         drop(cfg);
 
         // 写入期裁剪删掉的全部 id（两类裁剪的并集，按被删顺序累积）——回给调用方
-        // 落 `message.removed`（T-054）。空 = 没裁任何节点。
+        // 落 `message.removed`。空 = 没裁任何节点。
         let mut removed_ids: Vec<String> = Vec::new();
 
         // 写入期工具链裁剪：架构原则（存储保持完整原文）的唯一例外，默认开启以
@@ -454,7 +454,7 @@ impl PersistentChatSession {
         session.updated_at = now;
         self.save_session(&session).await?;
 
-        // 落库回包（见 `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
+        // 落库回包（见 `symbio/src/plugins/session/docs/109-vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
         // 交回调用方下发。从 `session.messages` 取而非回传入参副本——上面两道写入期
         // 变换（轮次窗口淘汰、工具链裁剪）可能已经动过它们，回执必须与磁盘逐字段一致。
         // 已被淘汰的（批量追加超过窗口时可能发生）自然被滤掉：交回一条存储里并不
@@ -587,8 +587,8 @@ pub(super) fn ensure_durable_states(
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
 ///
 /// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。
-/// 这是 T-054 的承重面：裁剪是**列表变更**，
-/// 而列表变更必须入格（ADR-054
+/// 这是 的承重面：裁剪是**列表变更**，
+/// 而列表变更必须入格（D-054
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
 pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usize) -> Vec<String> {

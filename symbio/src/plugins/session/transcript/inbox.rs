@@ -5,7 +5,7 @@
 //! `chat/send` 把「接收消息」与「跑一轮」绑在一起，并且要有一个**调用方连接**在
 //! 那儿等结果。子智能体空间没有这样的调用方——它的会话照样要能完整地跑。于是
 //! 用户消息改以**对空间的写入**表达：往 `<sid>/inbox` 写一条即入队，由空间自己
-//! 消费（ADR-026）。顶层会话走同一条路，只是恰好也有人替它
+//! 消费（D-026）。顶层会话走同一条路，只是恰好也有人替它
 //! 调 `chat/send`——`chat/send` 因此退化成「入队」。
 //!
 //! ## 一条消息的两个落点
@@ -19,7 +19,7 @@
 //! 「正在处理的那条」在转写里，不在队列里——所以取消它走中止
 //! （`action(<会话地址>, "abort")`），而不是删队列项。
 //!
-//! ## 消费规则（与 ADR-026 的三条决定一一对应）
+//! ## 消费规则（与 D-026 的三条决定一一对应）
 //!
 //! 1. **FIFO**：同一个会话严格按入队顺序，先到先跑；
 //! 2. **忙则排队，不抢占**：会话正在跑（`is_working`）时只把条目留在队里，等这一轮
@@ -27,7 +27,7 @@
 //!    忙窗里 core 的抢占判定者（`PreemptionDecider`）会评估当前任务要不要挂起
 //!    （S8 第 19 步），结论经 [`super::super::active::PreemptPending`] 跨过忙窗、
 //!    在空闲分支落成事实。挂起 / 恢复**都不开新轮、都不动队列**，所以与「不抢占」
-//!    不冲突（判定顺序见 [04 §2.1](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）；
+//!    不冲突（判定顺序见 [04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
 //! 3. **机制统一**：顶层会话与子智能体空间共用本模块，没有"子智能体专用分支"。
 //!
 //! ## 为什么是**每插件实例一个**消费者
@@ -109,7 +109,7 @@ fn announce_drained(change_subs: &VdfsChangeSubscriptions, session_id: &str, bat
 /// 取一个会话的队首只需要：**上界从哪来**（`config`）、**队列在哪**（`state.inner.inbox`）、
 /// **通知投给谁**（`change_subs`）——插件本身在这一步没有贡献。于是它不住在
 /// `impl SessionPlugin` 上，需要它的一方（`chat_loop::SupplementDrain`）拿的就是这三样，
-/// 而不是整个插件（[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）。
+/// 而不是整个插件（[D-075](../../../../../docs/003-design/002-架构总览.md "D-075") 前置 P2）。
 ///
 /// ## 上界与通知都不另写一份
 ///
@@ -142,7 +142,7 @@ impl SessionPlugin {
     ///
     /// 同时做两件事，顺序固定：入队 → 发变更 → 唤醒消费者。变更落在**条目自身**的
     /// 地址上（`<sid>/inbox/<iid>`）并带条目节点视图，因此订阅方零回读即可显示
-    /// "有一条待发的消息"（与 ADR-025 的落点约定一致）。
+    /// "有一条待发的消息"（与 D-025 的落点约定一致）。
     ///
     /// ## 条目 id 的三个来源（优先级从高到低）
     ///
@@ -337,7 +337,7 @@ impl SessionPlugin {
     /// `chat.assistant.final`，两者都只在**轮末收束**时入格。这就是「一忙窗一判」
     /// 成立的前提：忙窗内本切片不会变，判过一次不等于漏判。
     async fn preemption_facts(&self, session_id: &str) -> Vec<Event> {
-        // 事实的值由存储层交回（ADR-084：读方拿切片，不拿路径 / 句柄）。
+        // 事实的值由存储层交回（D-084：读方拿切片，不拿路径 / 句柄）。
         let Ok(store) = self.get_store().await else {
             return Vec::new();
         };
@@ -416,7 +416,7 @@ impl SessionPlugin {
         Ok(Some(anchor))
     }
 
-    /// 忙窗内的抢占判定（S8 第 19 步，[04 §2.1](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+    /// 忙窗内的抢占判定（S8 第 19 步，[04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
     ///
     /// 三条边界，少一条这个函数就会变成噪声或变成第二个时延源：
     ///
@@ -443,7 +443,7 @@ impl SessionPlugin {
 
         let mut inner = state.inner.write().await;
         inner.preempt_judged = true;
-        // 判定者行（`ActorSpec`）由 `spec()` 现构造——预算从行上读（T-082 批②），
+        // 判定者行（`ActorSpec`）由 `spec` 现构造——预算从行上读（ 批②），
         // 不再是调用方现算一个裸数值塞进来。
         let spec = PreemptionDecider.spec();
         if let Preemption::Suspend { task_id, as_of_seq } =
@@ -469,7 +469,7 @@ impl SessionPlugin {
         let Some((task_id, as_of_seq)) = hold else {
             return;
         };
-        // 写侧闸（T-082 批②，与 `turn_runner::closure_gate` 同一形态）：落控制事实
+        // 写侧闸（ 批②，与 `turn_runner::closure_gate` 同一形态）：落控制事实
         // 需要 `judge.intent`——判定者只产控制事件、无 `reply.*`（S07 §5），那条界限
         // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
@@ -581,7 +581,7 @@ impl SessionPlugin {
             //
             // **出队要逐条发变更**：条目已经不在队列里了，而不通知就等于告诉订阅方
             // 「它还在」。变更是**无载荷**的（`bare`）——删掉的节点本就没有视图可带，
-            // 消费方按「载荷缺失 + 回读 NotFound」收敛（ADR-025 的删除表达）。
+            // 消费方按「载荷缺失 + 回读 NotFound」收敛（D-025 的删除表达）。
             // 与 `cancel_inbox_item` 同一手法：两种「没了」对订阅方是同一件事。
             let batch = self.take_inbox_batch(&state).await;
             if batch.is_empty() {
@@ -607,7 +607,7 @@ impl SessionPlugin {
                     );
                     // 启动失败 = 这一批没被消费。**按原顺序整体放回队首**：
                     // 倒序 push_front 才是原顺序——顺序是这个队列唯一的不变量
-                    // （FIFO，ADR-026），放错就再也对不回来。
+                    // （FIFO，D-026），放错就再也对不回来。
                     let mut inner = state.inner.write().await;
                     for item in batch.into_iter().rev() {
                         inner.inbox.push_front(item);
@@ -668,7 +668,7 @@ impl SessionPlugin {
         if let Some(w) = &first.workdir {
             ctx.set(WORKDIR, w.clone());
         }
-        // 来源主体（ADR-067）：随**第一条**寄存（本轮参数取自它，与 `params` 同一
+        // 来源主体（D-067）：随**第一条**寄存（本轮参数取自它，与 `params` 同一
         // 口径）。缺省不设 ⇒ 执行侧回落本机用户——心跳等本机路径与接线前逐字一致。
         if let Some(sp) = first
             .params

@@ -5,7 +5,7 @@
 > 现行行为以 `docs/architecture/DATA_FLOW.md`、`docs/architecture/PROTOCOLS.md`、
 > `symbio/src/plugins/session/docs/node-state-streaming.md` 为准；本文只做评估与建议。
 >
-> ⚠️ **后记（S26 / ADR-025，2026-09-23）：本文的架构基线已被取消。**
+> ⚠️ **后记（S26 / D-025，2026-09-23）：本文的架构基线已被取消。**
 > 本文把「实时面两条通道」当作问题、并建议把它们**合并**（§4.1 是当时判定的最高价值
 > 改进点）。合并（批次 E）做过，**S26 又整体反向**：实时面迁回 **VDFS 变更**
 > （`updated` + `delta`），`session/stream` 与 `symbio_core/transcript_stream.rs` 退役。
@@ -164,7 +164,7 @@ emit_session_state（orchestrator/broadcast.rs:102）
 
 ## 3. 做得对的地方（不宜改动）
 
-1. **执行期与传输层分离**（ADR-020）。`EventSink`（出方向）+ `AbortSignal`（入方向）取代 `PluginChannel` 双职责，进程内零 serde、无帧、无轮询。这是链路能保持短的关键。
+1. **执行期与传输层分离**（D-020）。`EventSink`（出方向）+ `AbortSignal`（入方向）取代 `PluginChannel` 双职责，进程内零 serde、无帧、无轮询。这是链路能保持短的关键。
 2. **转写唯一写入点**。`Transcript::apply` 是后端唯一写入点，`applyTranscriptMessage` 是前端唯一落地口，两端判据同源（§2.2）。
 3. **单一出口不变量**。会话运行态只有 `emit_session_state` 一个出口；漏调即 UI 永久停旧状态，这条不变量被文档显式锁定（`node-state-streaming.md` §8 #6）。
 4. **组合节点终态跟随子树**。`finalize_turn_root` 全流程唯一一处（`chat_loop/io.rs:19`），修掉了「容器已完成、工具仍在跑」的自相矛盾形状。

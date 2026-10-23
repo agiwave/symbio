@@ -222,7 +222,7 @@ test('GW-002 扩面：LIBS 指名磁盘上没有的 .mjs ⇒ 红（「已覆盖�
 // 判据是「改写工作树的工作做完之后，有人只读地对一次末态」：`regenerates` 阶段必须早于
 // 每一个 `recheck` 阶段，且声明与源码里的 `autoWork(` / `autoChain(` 调用形状双向对上。
 // 旧的「`includes('autoWork')` 的阶段必须排末尾」已被实测否证（判定的真假取决于注释里有没有
-// 那个词），见 `gate-wiring-audit.mjs` 文件头与 `docs/009-task/251-*.md`。
+// 那个词），见 `gate-wiring-audit.mjs` 文件头与 `docs/007-task/251-*.md`。
 
 /** 会重生成的阶段：声明 + 调用形状都在 */
 const GEN = (id) => `export default { id: ${JSON.stringify(id)}, regenerates: true, tasks: () => [{ run: (c) => autoWork(c, {}) }] }\n`

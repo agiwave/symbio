@@ -3,7 +3,7 @@
  *
  * 这条守卫的失效形态**全是恒真**：各格判据读不出输入（事件名字表读空、事实声明表
  * 读空、基线读空、写点扫空、契约表锚点漂走）时，最省事的实现是「没读到 ⇒ 没什么可判 ⇒ 通过」。而判据 1 是
- * PL-016 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
+ * DE-015 最硬的一条——它恒真就等于「加端口可以随便改引擎」这条最贵的走样没人管。
  *
  * 所以第一组用例拿**真仓当前状态**做非零对照（协议事实数 > 0、指纹非空），
  * 后面几组逐条注入违规，断言脚本**变红且只红该红的那条**。
@@ -31,7 +31,7 @@ const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'
 /** 协议格写点所在文件（PTS-005 判**写方唯一**，不判这个路径——路径只是夹具的落点） */
 const WRITER_REL = 'symbio/src/plugins/loop/port.rs'
 /** 契约 7 的条文（PTS-006 的唯一输入） */
-const PLAN_REL = 'docs/004-plan/016-义务环.md'
+const PLAN_REL = 'docs/003-design/015-义务环.md'
 
 /** 协议族常量（五个名字的定义，值取协议名的字面值） */
 const EVENT_SRC = `pub const EVENT_REQUEST: &str = "request";
@@ -137,7 +137,7 @@ const PLAN_SRC = `### 2.6 执行契约
  * `facts` / `solver` / `event` / `writer` / `plan` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
  * 算出来**（基线是文件，随树走——这样「求解器变了」才是能被夹具表达的那件事）。
  */
-function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, plan = PLAN_SRC, adr = 'ADR-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
+function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, plan = PLAN_SRC, adr = 'D-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'port-surface-'))
   const write = (rel, body) => {
     const abs = path.join(root, rel)
@@ -154,7 +154,7 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
   // 基线挂的 ADR 必须**能打开**（PTS-004）——夹具里给它一份空壳决策。
   if (createAdr) {
     const id = String(adr).match(/ADR-(\d+[a-z]?)/)?.[1]
-    if (id) write(`docs/010-adr/${id}.md`, `---\nkind: adr\nid: ADR-${id}\ntitle: 夹具\n---\n`)
+    if (id) write(`docs/003-design/${id}.md`, `---\nkind: adr\nid: ADR-${id}\ntitle: 夹具\n---\n`)
   }
   if (!skipBaseline) {
     const printed = spawnSync(process.execPath, [script, `--root=${root}`, '--print-baseline'], {
@@ -262,7 +262,7 @@ test('豁免口：第 6 个协议名必须挂一条能打开的 ADR', () => {
     const self = fs.readFileSync(script, 'utf8')
     const patched = self.replace(
       'const WAIVER_RE =',
-      '// port-surface-allow protocol turn.sent: ADR-115 —— 夹具：协议族扩一个成员\nconst WAIVER_RE =',
+      '// port-surface-allow protocol turn.sent: D-115 —— 夹具：协议族扩一个成员\nconst WAIVER_RE =',
     )
     assert.notEqual(patched, self)
     fs.writeFileSync(script, patched, 'utf8')
@@ -307,7 +307,7 @@ test('PTS-002 求解器里出现端口字段名（注释里不算）⇒ 绿', ()
   }
 })
 
-// 取值一侧（T-245 口径 ②）：`if port == "tool"` 不命名 `port` 字段，
+// 取值一侧（ 口径 ②）：`if port == "tool"` 不命名 `port` 字段，
 // 但它是同一件事的另一种写法——引擎按端口值分支 ⇒ 加端口 = 改引擎。
 
 test('PTS-002 求解器函数体里出现端口取值 ⇒ 红（不命名字段也渗进）', () => {
@@ -404,11 +404,11 @@ test('PTS-003 基线缺失 ⇒ 红（没有基准就没有判据）', () => {
 })
 
 test('PTS-004 基线引用的 ADR 打不开 ⇒ 红', () => {
-  const root = fixture({ adr: 'ADR-999', createAdr: false })
+  const root = fixture({ adr: 'D-999', createAdr: false })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-004.*ADR-999/)
+    assert.match(r.stderr, /PTS-004.*D-999/)
   } finally {
     cleanup(root)
   }

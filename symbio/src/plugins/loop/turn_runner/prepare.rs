@@ -1,10 +1,10 @@
-//! 阶段① 轮首准备（T-179 · B3，PL-015 §5 动作 B3）。
+//! 阶段① 轮首准备（ · B3，DE-021 §5 动作 B3）。
 //!
 //! 阶段事实与派发档入格 → 开场白 / 定稿答话两条早退路 → 窗口与基线 prompt →
 //! 续写产物补写 → 首请求前的中止检查。产出的 [`Prepared`] 是后续阶段的**唯一
 //! 状态来源**：请求阶段只读它、批处理阶段只改它，阶段之间不传第二份事实。
 //!
-//! 用户格**不在这里落**（T-225）：它先于任何判决，由编排层在 `drive` 之前写入，
+//! 用户格**不在这里落**：它先于任何判决，由编排层在 `drive` 之前写入，
 //! 本阶段收到的是它的 seq（`TurnInput::user_seq`）。
 //!
 //! **纯结构拆分契约**：本文件体内的顺序、判据与副作用逐字来自
@@ -19,7 +19,7 @@ pub(crate) enum PreparedFlow {
     Done(TurnOutcome),
 }
 
-/// 待收束的**结局**（T-244 步 5c）：模型往返的三种收法各带自己的载荷。
+/// 待收束的**结局**（ 步 5c）：模型往返的三种收法各带自己的载荷。
 ///
 /// 收束格只由 `close` 执行体写（装载期的依赖图要求两个执行体写的格不相交），
 /// 所以「这一轮怎么收」不能由模型往返那一步就地落格，只能**寄存**在这里，
@@ -73,18 +73,18 @@ pub(crate) struct Prepared {
     pub(crate) full_snapshot: Vec<Event>,
     pub(crate) inject: Option<RoundInjector>,
     pub(crate) nodes: Option<NodeFactsFn>,
-    /// 模型应答已落、工具批次尚未派发时的寄存位（T-233 拆步）。
+    /// 模型应答已落、工具批次尚未派发时的寄存位（ 拆步）。
     ///
     /// 放在 `Prepared` 而不是新开一份状态：它和消息 / 节点 / 成本同属**本轮草稿**，
     /// 引擎不读它；拆步只是把「一次 `step` 做两件事」拆成两个可分别调用的动作。
     pub(crate) pending_model: Option<LlmTurn>,
     /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
     pub(crate) pending_round: Option<StreamNodeFacts>,
-    /// 创建动作开出的端口账（T-244 步 5b）：创建 → 授权 → 派发三个动作之间**唯一**
+    /// 创建动作开出的端口账（ 步 5b）：创建 → 授权 → 派发三个动作之间**唯一**
     /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
     /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
     pub(crate) pending_calls: Option<Vec<super::super::tool_dispatch::ToolPortCall>>,
-    /// 应答已落、**收束还没发生**时的寄存位（T-244 步 5）。
+    /// 应答已落、**收束还没发生**时的寄存位（ 步 5）。
     ///
     /// 与上面两格分开放是刻意的：这一格的形状是「本轮没有工具调用」，而
     /// [`Prepared::pending_model`] 的形状是「本轮有工具调用、还没派发」——
@@ -92,7 +92,7 @@ pub(crate) struct Prepared {
     /// 去派发一批不存在的工具。收束归 `close-turn` 行的执行体，它从这里取结局，
     /// 落 `chat.assistant.final` / `fallback`。
     pub(crate) closing: Option<PendingClose>,
-    /// 本轮**收束动作的产出**（ADR-123 决策 5）：落收束 / 停机格的那一步把它寄存进草稿，
+    /// 本轮**收束动作的产出**（D-123 决策 5）：落收束 / 停机格的那一步把它寄存进草稿，
     /// 派发器在账本上看到停机格后从这里取走交回调用方。
     ///
     /// 为什么放草稿而不是让动作交回来：执行体不判断「本轮结束了没有」——那一半判据在
@@ -101,7 +101,7 @@ pub(crate) struct Prepared {
 }
 
 impl Prepared {
-    /// 本次 `drive` 的 `now`：幕锚那条**唤醒事实**的 `ts`（判据 12 / PL-016 §2.1）。
+    /// 本次 `drive` 的 `now`：幕锚那条**唤醒事实**的 `ts`（判据 12 / DE-015 §2.1）。
     ///
     /// 切片取准备段读到的那一份，而用户格（或恢复格）在进运行器之前就落了 ⇒
     /// 幕锚一定在里面。不在 ⇒ 0：宁可判「还没有任何时间条件成立」。
@@ -139,20 +139,20 @@ where
     } = input;
     // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
     let viewer = Some(actor.principal.as_str());
-    // 本轮**新落**的产物格数（[ADR-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
+    // 本轮**新落**的产物格数（[D-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
     // 收束，发言闸再拒也不算未收束（`TurnOutcome::closure_denied` 与 C4 都认它）。
     let artifacts_landed = 0u64;
-    // 1. 用户格**不在这里落**（T-225）：它已由编排层在判决之前落格，本函数收到的是
+    // 1. 用户格**不在这里落**：它已由编排层在判决之前落格，本函数收到的是
     // 它的 seq（`user_seq`）——运行器只拿它当溯源锚点，不再拥有「用户说了什么」。
     //
-    // 1′. 一次性阶段的「已做」与判决事实（ADR-107 判据 2）：`classify` / `recall` /
+    // 1′. 一次性阶段的「已做」与判决事实（D-107 判据 2）：`classify` / `recall` /
     // `compress` 在本轮执行过 ⇒ 各落一格 `turn.stage`。放在用户格之后：断言类
     // 事件必须带溯源锚点（I2），而那只有落完用户格才有。
     //
     // 续写幕复用同一 turn 号、`request_round` 从 0 重来，召回 / 压缩会重跑——重跑
     // 时撞幂等键 ⇒ `land` 按「已做过」吸收（不重复落、也不失败）。
     super::super::stage_events::land(store, turn, user_seq, &actor.principal, &stages)?;
-    // 1″. 本轮派发档（T-225）：用户格先于判决落，档位要到执行装配期才定 ⇒ 另立一格。
+    // 1″. 本轮派发档：用户格先于判决落，档位要到执行装配期才定 ⇒ 另立一格。
     // 幂等键带**幕号**：同一轮可以被恢复幕再执行一次，两幕的档位各记各的。
     store.append(
         Event::pending(
@@ -170,7 +170,7 @@ where
             "principal": actor.principal,
         })),
     )?;
-    // 1a. 对话面开场白（T-056）：`Escalate` 首响——本轮随后**照进工具循环**，
+    // 1a. 对话面开场白：`Escalate` 首响——本轮随后**照进工具循环**，
     // 所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
     //
     // 放在用户格之后：断言类事件必须带溯源锚点（I2），而那只有落完用户格才有。
@@ -210,7 +210,7 @@ where
     // （渲染 prompt、调模型）对它全都是白工。放在用户格之后是因为收束格的
     // 溯源必须指向本轮用户格（I2）——而那只有落完用户格才有。
     //
-    // **这是方案允许的形状，不是遗留缺口**（[ADR-125](../../../../../docs/010-adr/125.md "ADR-125")）：
+    // **这是方案允许的形状，不是遗留缺口**（[D-125](../../../../../docs/003-design/015-义务环.md "D-125")）：
     // 环调度的是「还没还的债」，而这一轮一件都不欠——模板产线出话时零往返，措辞产线
     // 出话时那一次由 `compose` 在轮首之前发起并已入账（`via=compose/wording`），
     // 它不是本轮的债。所以收束格由这里就地落，`close` 执行体的「唯一写方」限定在
@@ -298,7 +298,7 @@ where
         None => filter_visible(&full_snapshot, viewer),
         Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
     };
-    // 基线：**结构化**消息数组（ADR-048a）。prefix（请求视图三段）作为最前的
+    // 基线：**结构化**消息数组（D-048a）。prefix（请求视图三段）作为最前的
     // 一条独立 system 消息插进去，而不是拼进第一段正文——理由见 `TurnInput::prefix`。
     let mut base_messages = crate::symbio_core::render_messages(&snapshot);
     if let Some(p) = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
@@ -313,7 +313,7 @@ where
             },
         );
     }
-    // **双向完整性复核**（ADR-048 防线）：缺口只出声不抛错——prompt 已经发出去了，
+    // **双向完整性复核**（D-048 防线）：缺口只出声不抛错——prompt 已经发出去了，
     // 此时抛错只会把「模型看得不全」变成「这一轮直接失败」；而看得不全恰恰是静默的。
     {
         let declared = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty());
@@ -332,7 +332,7 @@ where
     let exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
     // 本回合内已走完的**工具轮数**——只用于给合成 id 编号。
     let tool_round: usize = 0;
-    // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
+    // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，D-044 的实测口径）。
     let cost_ms = 0u64;
     // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。续写轮从**该轮
     // 已有产物数**起编号——等待轮可能已落过产物格，从 0 起会撞幂等键。
@@ -347,7 +347,7 @@ where
     // （`chat_loop::wake`），授权与派发由行表承担，工具交换由派发动作自己产生
     // （`stream::dispatch_round`）——本段不再私自拼一段 prompt。
 
-    // 1c. **闸门与首请求之间的中止**（ADR-052 决策 1）。检查点在这里：用户格已落、
+    // 1c. **闸门与首请求之间的中止**（D-052 决策 1）。检查点在这里：用户格已落、
     // 请求未发，已中止则直接走中止收束格，与 adapter 中途返回 Aborted 落的是同一格。
     if let Some(sig) = abort.as_ref() {
         if sig.is_aborted() {

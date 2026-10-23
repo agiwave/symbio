@@ -10,7 +10,7 @@
 //!
 //! ## 为什么是一个独立插件（而不是 session 里的一个函数）
 //!
-//! 三条判据（缺一不可，见 `docs/004-plan/007-对话面插件拆分实施方案.md` §2.4）：
+//! 三条判据（缺一不可，见 `symbio/src/plugins/classify/README.md` §2.4）：
 //!
 //! 1. **一个能力一个插件**：插件名 = 能力名（措辞）；
 //! 2. **可卸载**：没有它，系统**完整运行**——没有对话面产出的文本，而 worker 的正文
@@ -41,7 +41,7 @@
 //!
 //! ## 本插件**不写转写**
 //!
-//! 文本由 `session` 落库，转写只有一个写入者（ADR-020）。本插件只返回字符串。
+//! 文本由 `session` 落库，转写只有一个写入者（D-020）。本插件只返回字符串。
 
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,

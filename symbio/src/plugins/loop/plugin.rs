@@ -1,4 +1,4 @@
-//! 单环驱动器插件（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §8）。
+//! 单环驱动器插件（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §8）。
 //!
 //! 本插件**只有一个入口**：`loop/<sid>` 上的 `Action("run_turn")`。动作体就是
 //! 整轮 future（`run_chat_loop`），结局以 [`TurnReport`](crate::symbio_core::TurnReport)
@@ -18,7 +18,7 @@
 //!
 //! 本插件对前端与 LLM 都不贡献任何可列举的东西：没有配置文档、没有工具、没有
 //! 独立资源树。挂载点是**回程地址**——session 经容器找 `loop` 的 provider 派发
-//! `run_turn`（[ADR-086] §5），与前端经 VDFS 看它是两件事。
+//! `run_turn`（[D-086] §5），与前端经 VDFS 看它是两件事。
 
 use async_trait::async_trait;
 use std::sync::Arc;

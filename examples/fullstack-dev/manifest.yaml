@@ -6,7 +6,7 @@
 # 这两种形态下目录内容完全相同（agent-dir/v2 §1.1 的「同构」），
 # 区别只在「谁托管」与「挂载多少插件」。这是分形结构，不是两种格式。
 #
-# 规范：docs/005-arch/006-agent-directory-spec.md
+# 规范：docs/003-design/011-Agent目录规范.md
 # 能力插件无需在本清单登记：mcp/ skill/ 目录里「存在即安装」（§4.1）。
 spec: "agent-dir/v2"
 id: "com.symbio.fullstack-dev"

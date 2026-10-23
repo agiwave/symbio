@@ -39,7 +39,7 @@ import './_selfrun.mjs';
 // （`tauri/src/services/home.ts`，进程内 `root.route`），归前端形态 e2e。
 //
 // 这条断言是**事实钉住**而不是「期望如此」：若将来 gateway 的 router 抬到 home
-// （T-115 已按裁决②「收白名单」收口——只读白名单删掉两条走不到的死条目、
+// （ 已按裁决②「收白名单」收口——只读白名单删掉两条走不到的死条目、
 // `server.rs` 模块文档改为「在 worker 子树内一致」；路①「抬边界」的撤销条件
 // 写在 `config.rs`），本断言会变红——那正是它该做的事，届时按新的边界重审。
 //
@@ -48,7 +48,7 @@ import './_selfrun.mjs';
 // `telegram` 六路由中，`set_chat_id`（写内存配置）· `status`（读配置）· `stop_listener`
 // （取消令牌 + 置标志）**不碰上游**，可直发驱动；另三条（`send` · `get_updates` ·
 // `start_listener`）都打 `api_url()`，而它把 `https://api.telegram.org/bot<token>` **写死**
-// （`telegram/plugin.rs:117-122`）⇒ 无靶子可打，转交 T-114（需先加地址配置位）。
+// （`telegram/plugin.rs:117-122`）⇒ 无靶子可打，转交 （需先加地址配置位）。
 // 所以本用例覆盖 6 条中的 3 条，另 3 条有明确归属——不是「只补一条就宣布整面已覆盖」。
 import {
   MockHttp,

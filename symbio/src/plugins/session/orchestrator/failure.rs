@@ -58,7 +58,7 @@ impl Convergence {
     ///
     /// `collected` 是**整个 `run_chat_loop` 调用期间**累积的全部流式消息快照。
     /// 一次调用可以跑几十上百轮工具（v2 没有轮数上限，见
-    /// [ADR-074](../../../../../docs/010-adr/074.md)），因此它往往包含几十上百个
+    /// [D-074](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")），因此它往往包含几十上百个
     /// **早已成功定稿**的历史 Turn——那些轮次的工具早已执行完毕、结果也早已由
     /// Model 插件在每轮结束时落库。
     ///
@@ -277,7 +277,7 @@ impl Convergence {
             }
         }
 
-        // **顺序反转**（ADR-054 决策 2）：经唯一
+        // **顺序反转**（D-054 决策 2）：经唯一
         // 写入口 `apply` 落，按「改写已有 / 补写缺失」拆成两个原语——
         // - **断言**（`Edited`）：根 Turn 的 Failed + error、子节点定稿 Completed、
         //   `partial` 对同 id 节点的整条覆盖；
@@ -352,7 +352,7 @@ impl Convergence {
     /// 直接 `break`（`!is_working`），**跳过 `persist_failure`**；而工具节点早已被
     /// `emit_tool_running` 置为 `Streaming` 并广播出去。结果：会话显示「已中止」，
     /// 节点显示「运行中」，且没有任何机制会纠正它——违反
-    /// `session/docs/018-node-state-streaming.md` §8 #11「不得有节点停在 Streaming」。
+    /// `session/docs/105-node-state-streaming.md` §8 #11「不得有节点停在 Streaming」。
     ///
     /// 因此中止路径**自己**承担收口责任，不依赖 chat_loop 是否已退出：这是个
     /// 「谁宣称状态、谁负责收口」的划分，不是补丁。
@@ -415,7 +415,7 @@ impl Convergence {
             return 0;
         }
 
-        // **顺序反转**（ADR-054 决策 2）：经唯一
+        // **顺序反转**（D-054 决策 2）：经唯一
         // 写入口 `apply` 落 `Born`。本函数只**补写**存储里没有的节点（已在存储的
         // 一律跳过，见上面的过滤），所以这里只有「诞生」一个原语。
         //

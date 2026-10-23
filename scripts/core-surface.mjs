@@ -2,7 +2,7 @@
  * core-surface — `symbio_core` **公开面**的枚举（共享模块，不直接执行）
  *
  * 被三个审计脚本使用：
- *   - `core-surface-audit.mjs`（**报告型**）：数每个符号的消费方数量（ADR-023 判据）
+ *   - `core-surface-audit.mjs`（**报告型**）：数每个符号的消费方数量（D-023 判据）
  *   - `core-naming-audit.mjs`（**判定型**）：检查每个符号的前缀是否落在所属域登记的前缀里
  *   - `core-export-audit.mjs`（**判定型**）：判「根显式出口」与「≥2 个模块消费」
  *

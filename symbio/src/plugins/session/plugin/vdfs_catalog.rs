@@ -46,7 +46,7 @@ impl SessionPlugin {
                 // schema**（运行期汇流，见 [`Self::session_schema`]）。它是本插件自述中
                 // 唯一动态的部分，因此随**根节点自述**一起给出（容器合成挂载点节点时
                 // 向本 provider 发一次 `Stat("")` 取走 `new_type`），而不是 trait 上的
-                // 另一个方法——见 ADR-030。
+                // 另一个方法——见 D-030。
                 //
                 // ⚠️ 代价要认：`session_schema()` 会做一次全项目广播（options 收集，
                 // 含 agent 目录扫描），因此**列 / stat 会话挂载根**比 stat 某个会话贵。
@@ -154,7 +154,7 @@ impl SessionPlugin {
             // 落点是**会话节点自身**（`<sid>`），而不是 `<sid>/inbox`：在途那一轮
             // 早已出队，它现在是转写里的消息；队列上的动作只该管「还没被消费的」
             // （取消 = 删条目，清空 = `clear`）。两个动词作用在**两个不同的对象**上
-            // ，因此是两个地址——与 ADR-026 已确立的分界同一条。
+            // ，因此是两个地址——与 D-026 已确立的分界同一条。
             VdfsRequest::Action { action, .. } => match action.as_str() {
                 VDFS_ACTION_ABORT => {
                     // 存在性校验：会话不在就没有「它的一轮」可谈

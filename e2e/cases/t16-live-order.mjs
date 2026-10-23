@@ -3,9 +3,9 @@ import './_selfrun.mjs';
 //
 // ## 钉的是哪条不变量
 //
-// `ChatMessage.seq` 是**唯一权威顺序锚点**（ADR-025：顺序是节点属性，不是投递属性），
+// `ChatMessage.seq` 是**唯一权威顺序锚点**（D-025：顺序是节点属性，不是投递属性），
 // 而它**只由存储在写入时分配**。因此有一条硬约束（见
-// `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4）：
+// `symbio/src/plugins/session/docs/109-vdfs-session-messages.md` §3.4）：
 //
 // > 每一条被落库的消息都必须发一次变更（带存储分配的 `seq`）。
 //
@@ -160,7 +160,7 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
         if (d.seq != null) cur.seq = d.seq;
         if (d.timestamp != null) cur.timestamp = d.timestamp;
         if (d.role != null) cur.role = d.role;
-        // [T-147d-iii] `role` 退出 wire 后，身份的实时载体是 `principal`——
+        // d-iii `role` 退出 wire 后，身份的实时载体是 `principal`——
         // 合并通道必须一起带上，否则 `msgRoleOf(cur)` 在实时面永远折出默认值。
         if (d.principal != null) cur.principal = d.principal;
         if (d.type != null) cur.type = d.type;

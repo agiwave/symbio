@@ -46,7 +46,7 @@ describe('appearance store', () => {
     expect(store.fontSize).toBe('small')
   })
 
-  it('退役的分栏键被忽略（ADR-063）——持久化里残留 dialogPanelSplit 不再产生任何外观状态', () => {
+  it('退役的分栏键被忽略（D-063）——持久化里残留 dialogPanelSplit 不再产生任何外观状态', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: 'dark', fontSize: 'large', dialogPanelSplit: false }))
     const store = useAppearanceStore()
     expect(store.theme).toBe('dark')

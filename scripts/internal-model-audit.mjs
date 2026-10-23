@@ -7,7 +7,7 @@
  * 档位闸门只有一个挂点：`LlmAdapter::generate(&FullModel, …)`。`FullModel` 是胶囊令牌
  * （与 `ClassifyOnly` / `RuleOnly` 同族，私有构造），拿得到它才受档位约束。而
  * `ModelProvider::execute_turn` 是对所有插件开放的 core trait——**直调它就绕过闸门**
- * （[T-168](../docs/009-task/168-模型档位闸门对内部请求无效.md "T-168-模型档位闸门对内部请求无效")）。
+ * （相应批次）。
  *
  * 绕过本身不是罪：内部请求（无工具 + `silent()` 出口 + 固定 system prompt）本来就不该
  * 走对话链路的闸门。问题在于**没人枚举这些调用点**——闸门的覆盖范围因此无法复查，
@@ -20,7 +20,7 @@
  * | IM-001 | 生产代码里 `\.execute_turn\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
  * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
- * | IM-004 | 登记的形状与 [ADR-106](../docs/010-adr/106.md "ADR-106-模型消费端口归一") 决策 2 的定义不符 | ADR-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
+ * | IM-004 | 登记的形状与 [D-106](../symbio/src/plugins/model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
  *
  * ## 为什么逐处豁免，不用数字基线
  *
@@ -34,9 +34,9 @@
  *    它**转发调用方的工具集**，这正是 IM-004 允许（且要求）它唯一拥有的形状。
  * 2. `session/context/pipeline.rs::run_compression_llm` —— 压缩摘要（内部请求）。
  *
- * 2026-10-20 之前还有 classify / compose 两处；[T-197](../docs/009-task/197-模型消费端口归一批.md "T-197-模型消费端口归一批")
- * 把它们改经 `ProviderLlmAdapter`，直调点随之消失（[ADR-106](../docs/010-adr/106.md "ADR-106")）。
- * 压缩摘要仍是唯一登记豁免（[ADR-106](../docs/010-adr/106.md "ADR-106") 决策 2 重述了
+ * 2026-10-20 之前还有 classify / compose 两处；相应批次
+ * 把它们改经 `ProviderLlmAdapter`，直调点随之消失（[D-106](../symbio/src/plugins/model/README.md "D-106")）。
+ * 压缩摘要仍是唯一登记豁免（[D-106](../symbio/src/plugins/model/README.md "D-106") 决策 2 重述了
  * 「内部请求」的形状）；
  * 本守卫不判它该不该在，只判「在，且有人说过为什么」，外加 IM-004 那一刀**形状**。
  *
@@ -60,7 +60,7 @@
  * 平台无关（纯 Node），带回归测试（internal-model-audit.test.mjs）。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns IM 内部请求模型调用（档位闸门的覆盖范围）
 // @codes IM-001 IM-002 IM-003 IM-004
 
@@ -251,7 +251,7 @@ export function audit(srcRoot) {
       })
       continue
     }
-    // ④ IM-004 形状判据：ADR-106 决策 2 定义的「内部请求」四条里，`tools` 空切片
+    // ④ IM-004 形状判据：D-106 决策 2 定义的「内部请求」四条里，`tools` 空切片
     //    是唯一能机械核的一条（其余三条要跨函数读）。内部请求点必须是 `&[]`；
     //    闸门本体（`/gate`）必须**转发**调用方的工具集，而不是自己造一个空的。
     const args = callArgs(site.stem, site.offset)
@@ -262,7 +262,7 @@ export function audit(srcRoot) {
         code: 'IM-004',
         key,
         text:
-          `登记的形状与 ADR-106 决策 2 不符（tools 实参 = ${tokens(tools)}）：\n        ${site.text}\n` +
+          `登记的形状与 D-106 决策 2 不符（tools 实参 = ${tokens(tools)}）：\n        ${site.text}\n` +
           (allowed.get(key).gate
             ? '        闸门本体要**透传**调用方的工具集；自己造一个空的说明它不再是闸门'
             : '        内部请求必须把 tools 传空切片——不空就不是内部请求，得重新裁'),

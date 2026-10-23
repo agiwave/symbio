@@ -4,7 +4,7 @@
  *
  * ## 为什么需要它
  *
- * ADR-023 的判据是**依赖方数量**：「只被一个模块依赖的内容一律下沉回该模块」。
+ * D-023 的判据是**依赖方数量**：「只被一个模块依赖的内容一律下沉回该模块」。
  * 这条规则写在 `symbio_core/README.md` 与 ADR 里，但**此前没有任何脚本在判它** ——
  * 2026-09-26 那次审计是靠人工逐条 grep 的，且当场就漏报了：`TurnToolCallAccumulator`
  * （当时住 `symbio_core::llm::turn`）的真实消费方 `plugins/model/stream.rs` 走的是
@@ -24,7 +24,7 @@
  *
  * ## 计数口径
  *
- * **口径与解析收在 [`core-surface.mjs`](./core-surface.mjs)**，本脚本与
+ * **口径与解析收在 [`core-surface.mjs`](core-surface.mjs)**，本脚本与
  * `core-naming-audit.mjs` 共用同一份「公开面是什么」的答案——各写一份必然演化成
  * 两套口径（报告说 A、判定说 B）。四条口径的全文见该模块文件头，摘要：
  *
@@ -73,7 +73,7 @@ const symbols = surface.symbols
 
 // ==================== 数消费方 ====================
 //
-// 计数口径收在 [`core-surface.mjs`](./core-surface.mjs)——判定型的 `core-export-audit.mjs`
+// 计数口径收在 [`core-surface.mjs`](core-surface.mjs)——判定型的 `core-export-audit.mjs`
 // 判「≥2 个模块消费」走的是**同一份**计数，避免「报告说 A、判定说 B」。
 //
 // **两问两口径**（理由见 `core-surface.mjs` 的 `collectConsumers` 与
@@ -110,7 +110,7 @@ console.log(
 
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 
-console.log(`\n--- 仅 1 个消费方（ADR-023 的**下放候选**，逐条判定，见 README §4 四问）---`)
+console.log(`\n--- 仅 1 个消费方（D-023 的**下放候选**，逐条判定，见 README §4 四问）---`)
 console.log(`    口径：跨 core 生产消费方恰 1 个**且 core 内没有另一个生产模块在用**；`)
 console.log(`    core 内有人用的已排除（下沉出去就编译不过）。判定型另扣 WAIVERS 账本（现 6 条）。`)
 console.log(`    ⚠️ 动手前先排除两类误判：① 它是某个**多消费方函数的形参/返回类型**吗？`)

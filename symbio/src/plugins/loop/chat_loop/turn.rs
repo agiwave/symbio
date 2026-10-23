@@ -34,7 +34,7 @@ pub(crate) async fn settle_reasoning(
     feedback_estimate(usage, &out);
 
     let mut new_msgs = out.into_messages(root_id);
-    // 建树策略（[T-149]）：flat 下本轮响应骨架的直接子节点升根 + 打 turn_root 记号，
+    // 建树策略（相应批次）：flat 下本轮响应骨架的直接子节点升根 + 打 turn_root 记号，
     // 与流式层（`finalize_assistant_turn`）逐字同规则，保证 live↔存储↔WAL 三视图一致。
     for n in new_msgs.iter_mut() {
         detach_if_flat(n, root_id, orchestrator.presentation_tree);
@@ -64,13 +64,13 @@ pub(crate) async fn settle_reasoning(
 /// 统一执行（本函数返回 `Finish` 前会把 [`TurnState::last_saved`] 推进到最新，
 /// 使 `finish_turn` 的落库成为 no-op）。
 ///
-/// ## 工具执行与主动压缩拦截不在这里（已随 PL-014 步骤 5 退役）
+/// ## 工具执行与主动压缩拦截不在这里（已随 DE-014 步骤 5 退役）
 ///
 /// 工具由 v2 运行器在 `turn_exec::execute_turn` 内部经 `SessionDispatchPort` 跑完、
 /// 副作用直落事实。v1 外壳在这里有一段「工具分发 + `context_compact` 拦截」分支，
 /// 其进入条件（`TurnOutput.tool_calls` 非空）在 v2 恒不成立——生产与测试都不可达，
-/// 随外壳删除（[PL-014 步骤 5a](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")，
-/// 其中 `context_compact` 那一条链的裁决见 [ADR-072](../../../../../docs/010-adr/072.md)）；
+/// 随外壳删除（[DE-014 步骤 5a](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")，
+/// 其中 `context_compact` 那一条链的裁决见 [D-072](../../session/README.md "symbio/src/plugins/session/README")）；
 /// 真实时序见 `turn_exec` / `turn_runner` 的模块文档。
 pub(crate) async fn close_turn(
     sink: &ExecEventSink,

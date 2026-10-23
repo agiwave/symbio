@@ -1,5 +1,5 @@
 /**
- * [T-147d-iii] 角色折叠的判据钉死（`messageRoleOf` / `normalizePrincipal` /
+ * d-iii 角色折叠的判据钉死（`messageRoleOf` / `normalizePrincipal` /
  * `roleOfPrincipal`）——镜像后端 `ChatNode::node_role()` 与 `Principal::from_legacy`。
  */
 import { describe, expect, it } from 'vitest'

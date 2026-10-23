@@ -1,14 +1,14 @@
 //! `symbio_core/schemas/session/node_build.rs` 的单元测试 —— 与实现同级分文件
 //! （约定：`X.rs` + `X.test.rs`）。
 //!
-//! 两批用例随构造器自 session 上移（[ADR-082](../../../../docs/010-adr/082.md "ADR-082")
-//! 裁决三，[plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014") T-167 切片批）：
+//! 两批用例随构造器自 session 上移（[D-082](../../../../docs/003-design/014-单环一表.md "D-082")
+//! 裁决三，[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014") 切片批）：
 //!
 //! - **对话面节点形状**（原 `chat_loop/compose.test.rs`）：`dialog_node` 承载的
 //!   「落点 + 两个标记」——错了不会报错、只表现为界面不对，必须由断言钉住。
 //!   其中依赖 `conversation_view` 投影的两条**留在 session 侧**（投影不是 core 的地盘）。
 //! - **建树 flat 折叠**（原 `message_build.test.rs`）：`detach_if_flat` /
-//!   `flatten_whole_tree` / `turn_root_of` 的 [T-149] 判据——`grouped`/`deep` 逐字
+//! `flatten_whole_tree` / `turn_root_of` 的 相应批次 判据——`grouped`/`deep` 逐字
 //!   零改动、flat 只脱本轮直接子节点、夹在工具卡内的子会话骨架绝不折叠。
 
 use super::*;
@@ -144,7 +144,7 @@ fn each_node_gets_its_own_id() {
     assert_ne!(a.id, b.id, "两个节点不能共用 id");
 }
 
-// ── 建树策略 flat 折叠（[T-149]，原 message_build.test.rs）──────────────
+// ── 建树策略 flat 折叠（相应批次，原 message_build.test.rs）──────────────
 
 fn node(id: &str, parent: Option<&str>) -> ChatNode {
     ChatNode {

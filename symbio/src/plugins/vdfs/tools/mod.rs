@@ -107,7 +107,7 @@ pub fn tool(
         category: Some(CapabilityCategory::Resource),
         examples: Some(examples.into_iter().map(str::to_string).collect()),
         risk: Some(risk),
-        // 行为位（T-158）：VDFS 工具不参与派活 / 立约 / 任务表三族闸门——
+        // 行为位：VDFS 工具不参与派活 / 立约 / 任务表三族闸门——
         // 显式声明「不」而不是省略字段：将来给这里加一位时要过肉眼。
         provides_assign_work: false,
         records_delegation_promise: false,

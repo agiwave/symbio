@@ -3,7 +3,7 @@
 //! 第 7 步：`grants_of` / `sees_of` 成对，只有写侧 → 拒绝；
 //! 第 8 步：`vis_scope` 默认 `thread_private` → 越界读取 0。
 //!
-//! [04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 的接线面（判定在 core、
+//! [04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的接线面（判定在 core、
 //! 构造与调用在 core 外，故各钉一半）：`from_names` 认不出的能力名**拒绝整体构造**、
 //! `can_reply` 只问一个 `reply` 能力（调用点不复述）。
 
@@ -238,7 +238,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
     assert_eq!(own[0].kind, EVENT_ASSISTANT_FINAL);
 }
 
-// ── T-094：可见域的字符串形态（内容侧产地的书写面）─────────────────────
+// ── ：可见域的字符串形态（内容侧产地的书写面）─────────────────────
 
 /// 书写形态 round-trip：三个取值各自 `name → from_name` 逐字回来。
 /// 判据不是「能转回来」而是「**只有**这三个能转回来」——载荷里出现第四个值
@@ -266,7 +266,7 @@ fn vis_scope_name_round_trips_and_unknown_falls_back_to_private() {
     }
 }
 
-/// 能力名 round-trip（T-207 ⑥）：拼写只活在 [`closed_set!`] 的声明表里，六项各自
+/// 能力名 round-trip（ ⑥）：拼写只活在 [`closed_set!`] 的声明表里，六项各自
 /// `name → parse_name` 逐字回来——两个方向共用一张表，「读作 A、写作 B」在这里
 /// 就断掉了。判据的另一半是闭集**外**的名字必须 `None`：它的两个下游方向都是拒
 /// （`from_names` 拒绝整体构造、[`GrantsOverlay::is_revoked`] 按已收回判），
@@ -307,7 +307,7 @@ fn capability_names_round_trip_through_the_declaration_table() {
 }
 
 /// `widen` 是全序的「取宽」：满足交换律、幂等、单调——
-/// 读侧整列闸（T-094 ②）拿它合并一批内容的可见域，性质不成立就会
+/// 读侧整列闸（ ②）拿它合并一批内容的可见域，性质不成立就会
 /// 「同两份事实源因为顺序不同读出不同的闸答案」，而两种答案都合法。
 #[test]
 fn widen_is_commutative_idempotent_and_monotone() {
@@ -325,7 +325,7 @@ fn widen_is_commutative_idempotent_and_monotone() {
     assert_eq!(Shared.widen(Public), Public);
 }
 
-// ── T-073：授权覆盖层（淘汰回路的机制半边）─────────────────────────────
+// ── ：授权覆盖层（淘汰回路的机制半边）─────────────────────────────
 
 /// 撤销回路（S13 §6 断言 3「淘汰 = 一条可审计、可撤销的 grants 变更事件」）：
 /// 收回 ⇒ `is_revoked` 翻真 ⇒ 恢复 ⇒ 翻假 ⇒ **再收回** ⇒ 又翻真。
@@ -378,7 +378,7 @@ fn grants_overlay_supports_the_revoke_restore_revoke_loop() {
     );
 }
 
-/// 覆盖层的 fail-closed（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
+/// 覆盖层的 fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）：
 /// **查询侧**的能力名不在 `Capability` 闭集内 ⇒ 告警并按**已收回**判。
 ///
 /// 方向与其余 fail-closed 面同侧：查询名认不出时「现在准不准」无从查起，
@@ -403,7 +403,7 @@ fn overlay_revokes_on_an_unrecognizable_query_name() {
 }
 
 /// 变更流水里的**收回**项带认不出的能力名 ⇒ 该主体对**任何**能力查询都按已收回判
-/// （[ADR-099](../../../../docs/010-adr/099.md "ADR-099")：一次笔误的收回不得静默落空）。
+/// （[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")：一次笔误的收回不得静默落空）。
 ///
 /// 读法（ADR 字面「变更流水里带认不出能力名的收回项对该主体的任何能力查询都按
 /// 已收回判」）：认不出名字的收回不是「某一格被收回」，而是「这次收回落不到任何
@@ -454,7 +454,7 @@ fn a_typoed_revoke_revokes_the_whole_principal() {
     assert!(overlay.is_revoked("session/main", "assign.work"));
 }
 
-/// 载荷读数的**唯一取值口**（T-206 ⑧）：三处复写的那一段现在只有一份。
+/// 载荷读数的**唯一取值口**（ ⑧）：三处复写的那一段现在只有一份。
 /// 测试侧**故意写字面量键**（不用 `VIS_SCOPE_KEY`）：它是线上键名，产侧改了名而这里
 /// 没跟着改，本用例必须红——与 `event_bus` 里「手搓信封」那两条判据同一条纪律。
 /// 它的缺省方向必须钉住——把「认不出」读宽 = 一次静默越权读取，而两边都是合法值，

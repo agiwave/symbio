@@ -5,7 +5,7 @@
 //! ## 落库树在这里是**本地 fixture**
 //!
 //! 真正的构造器（`llm_build_assistant_messages` / `TurnStreamChildIds` /
-//! `TurnOutput::into_messages`）生产上只有 session 一个消费方，已随 ADR-023 从
+//! `TurnOutput::into_messages`）生产上只有 session 一个消费方，已随 D-023 从
 //! `symbio_core::llm::turn` 下沉到 `plugins/session/message_build.rs`；
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），本文件不能再调它。
 //!
@@ -776,7 +776,7 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
     assert_eq!(natives.len(), 3, "只有显式 true 才剔除");
 }
 
-// ==================== 事故知识的具名判据（T-209）====================
+// ==================== 事故知识的具名判据====================
 //
 // 这两条历史上只活在注释里，出事两次：树形路径拼错（结果配给了别的调用 / 包装形式
 // 认不出来）、降级后恢复轮丢失（回传了 provider 不认识的 id）。e2e

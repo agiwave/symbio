@@ -1,6 +1,6 @@
 //! VDFS（Virtual Dynamic File System）—— 统一的资源与数据访问层
 //!
-//! 规范：`docs/005-arch/013-vdfs.md`。
+//! 规范：`docs/003-design/009-VDFS规范.md`。
 //!
 //! ## 模块边界（重要）
 //!

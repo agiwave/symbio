@@ -7,7 +7,7 @@ use super::{
     shell::ShellTool, todo_write::TodoWriteTool,
 };
 // 审批闸门的判定住在能力收集器（`DefaultToolVisitor` 那条收口路径的唯一真源）；
-// 本插件的 `route` 兜底也调它——两条路径**判定只有一份**（T-138）。
+// 本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
 use crate::providers::approval_gate;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
@@ -243,7 +243,7 @@ impl Plugin for LocalPlugin {
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             // 审批闸门由收口点（`DefaultToolVisitor::put`）统一加壳，
             // 本处只交裸工具——过去在这里手工 `SecureToolWrapper::new` 的做法
-            // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了（T-138）。
+            // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了。
             for tool in self.tool_impls.iter() {
                 visitor.put(CapabilityRow::tool(tool.clone())).await;
             }

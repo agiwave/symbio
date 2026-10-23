@@ -81,7 +81,7 @@ export function cliBinaryCandidates(repoRoot, profile = 'release') {
  *
  * 为什么单列一个出口：[`cliBinaryCandidates`] 为了「找不到即判定缺失」这个假失败，
  * 容忍过渡期的旧位置（见其文档），而**指路的文档不能容忍**——写着旧位置的那一刻
- * 它就把读者送去用一份过期二进制（[T-134] 实测：照 `../symbio/target/debug/…` 找产物，
+ * 它就把读者送去用一份过期二进制（[] 实测：照 `../symbio/target/debug/…` 找产物，
  * 一整批结论都跑在旧产物上）。所以 doc 侧判据（`doc-symbol-audit` D-012）只比
  * 这里给的第一候选，且用相对写法——文档里能直接照抄。
  */

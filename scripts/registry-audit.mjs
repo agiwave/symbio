@@ -5,7 +5,7 @@
  * ## 它守什么
  *
  * 「单文档 + 元信息 + 自动汇总」这套顶层机制的**全部强制力**都在这里（判据码
- * RG-001…RG-025，逐条语义与消息住 `registry-lib`，登记表见 `docs/006-ref/GATE_CODES.md`）：
+ * RG-001…RG-025，逐条语义与消息住 `registry-lib`，登记表见 `docs/004-ref/GATE_CODES.md`）：
  *
  *   - **RG-001** front-matter 可解析（受限 YAML 子集），未知 / 重复字段按 kind 判；
  *   - **RG-002** 必填字段非空（kind 只来自 front-matter，目录不参与判定）；
@@ -68,7 +68,7 @@
  * 退出码：0 = 通过；1 = 有违规 / 解析失败；2 = 范围读不出（扫不到任何条目、
  * 参数不识别）。汇总页的「忘更新」**不判红**：那是确定性投影，由门禁
  * `gate.d/06-facts-write.mjs` 的生成链（`autoChain`）自动重生成并暂存（与
- * `docs/006-ref/006-当前事实表.md` 同一条约定）。
+ * `docs/004-ref/006-当前事实表.md` 同一条约定）。
  */
 
 import fs from 'node:fs'

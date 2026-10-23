@@ -153,7 +153,7 @@ async fn fan_out_shares_one_payload_allocation() {
 }
 
 // ── VDFS 频道帧的解包（随 `event_bus_vdfs_change_of` 从 `vdfs/change.rs` 搬来，
-// ADR-095 第三刀：信封的外层与频道判别值都是本域的契约，解包入口与它同住）──
+// D-095 第三刀：信封的外层与频道判别值都是本域的契约，解包入口与它同住）──
 
 /// **信封契约**：`event_bus_vdfs_change_of` 必须能解出本总线产出的帧。
 ///

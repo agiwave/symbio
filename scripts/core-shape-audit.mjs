@@ -11,7 +11,7 @@
  * | CS-001 | `traits` | `pub trait` 声明数（冻结 16） | **新增接缝**：每多一个抽象，就多一处「所有实现方都得知道」的地方 |
  * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 56） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 18） | **接口上长实现**：行为代码住进架构模块 |
- * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/010-adr/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
  * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
@@ -29,7 +29,7 @@
  *
  * ⇒ 一次把核心契约面扩到十倍、并在接口上多挂 9 个默认体的改动，**门禁全绿也能提交**。
  * 而这条纪律本仓早就写了：`08 §0 纪律 3`「架构改动必须逐条论证『必需』」，登记条目
- * [SP-007](../docs/008-spec/007.md)——它的判据写的是「论证不出即删（**人工核对**）」。
+ * [SP-007](../docs/005-spec/007.md)——它的判据写的是「论证不出即删（**人工核对**）」。
  * 于是「架构改动」的全部约束，取决于执行的人**记得**去核对；而批次执行时最不缺的就是
  * 合理化：「加 9 个方法是实现层的样板收敛，不算架构改动」。
  *
@@ -53,7 +53,7 @@
  * | 本脚本 | core 公共**形状**的量（三格）+ 放宽痕迹必须挂得住一条决策 |
  * | `core-export-audit`（C-001…C-003） | 根出口的**归属**：什么能出现在公共面上、谁在用 |
  * | `gate.d/35-baseline` | 基线数字本身**不得比上一版更松**（比对 git 基准版本）；本脚本的三格登记在它的 `RATCHETS` 清单里，`CORE_SHAPE_BASELINE` 的环境变量覆盖由它兜 |
- * | [SP-007](../docs/008-spec/007.md) | 纪律**条文**本身（owner 在 `08 §3`），本脚本是它的判据执行方 |
+ * | [SP-007](../docs/005-spec/007.md) | 纪律**条文**本身（owner 在 `08 §3`），本脚本是它的判据执行方 |
  *
  * CS-002 与 `35-baseline` 各判半条：那边只发现「数字变松了」（红不红取决于有没有豁免注释），
  * 这边判「这条豁免**够不够格**」。两边合起来才是完整的「放宽 = 写决策」。
@@ -78,7 +78,7 @@
  * 「覆盖值不得比默认值更松」。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
 // @codes CS-001 CS-002
 
@@ -101,7 +101,53 @@ const CORE_REL = 'symbio/src/symbio_core'
 const SELF_REL = 'scripts/core-shape-audit.mjs'
 
 /**
- * 形状基线（2026-10-12 冻结，决策与理由见 [ADR-055](../docs/010-adr/055.md)）。
+ * 决策条目是否存在：`D-NNN` 是设计文档内的锚点（`### D-NNN <标题>`），不是独立文件。
+ * 全量扫一遍设计目录（`docs/003-design/*.md` + 组件级就地文档）后缓存。
+ */
+let decisionSet = null
+function hasDecisionAnchor(id) {
+  if (decisionSet === null) {
+    decisionSet = new Set()
+    const roots = [
+      path.join(ROOT, 'docs', '003-design'),
+      path.join(ROOT, 'symbio', 'src', 'plugins'),
+      path.join(ROOT, 'tauri', 'docs'),
+      path.join(ROOT, 'cli', 'docs'),
+    ]
+    const walk = (dir) => {
+      let list
+      try {
+        list = fs.readdirSync(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const ent of list) {
+        const abs = path.join(dir, ent.name)
+        if (ent.isDirectory()) {
+          if (ent.name === 'node_modules' || ent.name === 'target' || ent.name === 'archive') continue
+          walk(abs)
+          continue
+        }
+        if (!ent.name.endsWith('.md')) continue
+        let text = ''
+        try {
+          text = fs.readFileSync(abs, 'utf8')
+        } catch {
+          continue
+        }
+        for (const line of text.split('\n')) {
+          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
+          if (m) decisionSet.add(m[1].slice(2))
+        }
+      }
+    }
+    for (const r of roots) walk(r)
+  }
+  return decisionSet.has(id)
+}
+
+/**
+ * 形状基线（2026-10-12 冻结，决策与理由见 [D-055](../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
  * 三格都是**上限**，只许降。数字本身不是判据，**改数字才是**：任何让形状变宽的改动都会
  * 撞红，而把它继续推下去只有一条路——改这一行的数字，那又会要求 CS-002 的一条
  * `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 文件必须真实存在。
@@ -110,8 +156,8 @@ const SELF_REL = 'scripts/core-shape-audit.mjs'
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
  * 也必须是 `35-baseline` 那条提取函数认的键名；任何一边单改都会红。
  */
-// core-shape-allow methods: ADR-062 —— WalStore 唯一写入口对事件类型是泛型的（Store::Event: EventEnvelope），泛型触达信封自身 ts 的唯一通道就是 trait 成员（与 assign_seq 同纪律），下沉回十余处构造点即 ADR-062 明确否决的方案
-// core-shape-allow defaults: ADR-062 —— 无时刻概念的信封须「保持原样」，默认 no-op 体就是它的平凡值（README §3 的 J2）；去掉默认体反而让每个实现方手写同一个空函数，公共面更宽
+// core-shape-allow methods: D-062 —— WalStore 唯一写入口对事件类型是泛型的（Store::Event: EventEnvelope），泛型触达信封自身 ts 的唯一通道就是 trait 成员（与 assign_seq 同纪律），下沉回十余处构造点即 D-062 明确否决的方案
+// core-shape-allow defaults: D-062 —— 无时刻概念的信封须「保持原样」，默认 no-op 体就是它的平凡值（README §3 的 J2）；去掉默认体反而让每个实现方手写同一个空函数，公共面更宽
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
@@ -127,7 +173,7 @@ const CELL_LABEL = {
 
 /** 放宽痕迹的读法：与 `35-baseline` 的 `waiverReader('core-shape-allow')` 同一条拼写约定 */
 const WAIVER_RE = /^ {0,2}\/\/\s*core-shape-allow\s+([A-Za-z0-9_]+)\s*:\s*(\S[^\n]*)$/gm
-const ADR_REF_RE = /ADR-(\d+[a-z]?)/g
+const ADR_REF_RE = /(?<!-)(?:D|ADR)-(\d+[a-z]?)/g
 
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
@@ -230,8 +276,8 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
     report(
       'CS-001',
       `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_core 的公共形状只许收窄。` +
-        `要让这一步成立，先在 \`docs/010-adr/\` 立一条 ADR 逐条论证「必需」（08 §0 纪律 3，登记条目 SP-007；` +
-        `被这份棘轮钉住的先例见 ADR-055），再在基线旁写 core-shape-allow ${key}: ADR-NNN <理由>。逐 trait 清单：--verbose`,
+        `要让这一步成立，先在 \`docs/003-design/\` 立一条 ADR 逐条论证「必需」（08 §0 纪律 3，登记条目 SP-007；` +
+        `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: ADR-NNN <理由>。逐 trait 清单：--verbose`,
     )
   }
 }
@@ -271,10 +317,10 @@ if (fs.existsSync(selfPath)) {
       continue
     }
     for (const id of refs) {
-      if (!fs.existsSync(path.join(ROOT, 'docs', '010-adr', `${id}.md`))) {
+      if (!hasDecisionAnchor(id)) {
         report(
           'CS-002',
-          `放宽 \`${key}\` 引用了 \`ADR-${id}\`，但 \`docs/010-adr/${id}.md\` 打不开 —— 指向不存在的决策的豁免不算豁免`,
+          `放宽 \`${key}\` 引用了 \`D-${id}\`，但设计文档里没有任何 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`,
         )
       }
     }
@@ -321,7 +367,7 @@ console.error(`\n== core-shape-audit：${errors.length} 处违规 ==`)
 for (const e of errors) console.error(`  ${red(e.rule)}  ${e.msg}`)
 console.error(
   `\n${yellow('提示')}：形状量的口径与不判什么见本脚本文件头；放宽口径见 ` +
-    `${green('docs/010-adr/055.md')}；逐 trait 清单跑 node scripts/core-shape-audit.mjs --verbose`,
+    `${green('docs/003-design/001-核心架构.md')}；逐 trait 清单跑 node scripts/core-shape-audit.mjs --verbose`,
 )
 if (VERBOSE) {
   for (const r of shape.rows)

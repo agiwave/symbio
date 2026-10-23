@@ -111,7 +111,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Install Linux system libs (OpenSSL)
-        # HTTP 出口的 TLS 走平台原生栈（ADR-013）：Windows = SChannel、macOS =
+        # HTTP 出口的 TLS 走平台原生栈（D-013）：Windows = SChannel、macOS =
         # Security.framework、**Linux = 系统 OpenSSL** ⇒ 只有 Ubuntu runner 需要它。
         # runner 镜像通常已预装，此处显式声明是为了：① 让这条平台前置在 CI 里可见；
         # ② 镜像变更时以「openssl-sys 找不到库」之外的方式暴露出来。
@@ -197,7 +197,7 @@ jobs:
         run: rustup toolchain install 1.91.0 --profile minimal
 
       - name: Install Linux system libs (OpenSSL)
-        # 同 rust-checks：Linux 侧 TLS 依赖系统 OpenSSL（ADR-013）
+        # 同 rust-checks：Linux 侧 TLS 依赖系统 OpenSSL（D-013）
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Cache cargo registry
@@ -213,9 +213,9 @@ jobs:
       - name: MSRV gate
         run: node scripts/gate.mjs --only=msrv
 
-  # 架构证据验证：`docs/004-plan/verify/` 的 14 个程序**自己证明自己**。
+  # 架构证据验证：`docs/003-design/verify/` 的 14 个程序**自己证明自己**。
   #
-  # 这批程序是 v2 方案对外声称的"硬证据"（`docs/004-plan/README.md §4`），此前只能
+  # 这批程序是 v2 方案对外声称的"硬证据"（`docs/003-design/README.md §4`），此前只能
   # 手敲 rustc 跑一遍、结果抄进 `OUTPUT.md` 提交——**快照不是守卫**，没有任何东西
   # 保证它明天还绿。更关键的是 C29：3 个程序带 `should_not_compile`，声称"投影纯度 /
   # 时延闸门 / 欲的最小形态是编译期强制"。**强制本身必须有反向用例**（验证纪律第 4 条），
@@ -355,7 +355,7 @@ jobs:
         # 与本地同一条命令。检查项清单只在 scripts/gate.mjs 里（此处不重抄，抄了会漂移）：
         # 静态审计阶段含 grep-audit（S-002 异步锁等）、style-audit（使用的类必须有定义）、
         # doc-link-audit（已豁免 docs/archive/）、test-layout-audit、dead-code-audit，
-        # 外加报告型 schema-audit；facts 阶段是 docs/006-ref/006-当前事实表.md 漂移门禁——事实表由代码
+        # 外加报告型 schema-audit；facts 阶段是 docs/004-ref/006-当前事实表.md 漂移门禁——事实表由代码
         # 提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
         #
         # ⚠️ `--ci` 是必需的，不是装饰：facts（以及 backend 的 fmt）已改为**门禁自己执行**
@@ -366,7 +366,7 @@ jobs:
         # `facts-write`（生成链）在 2026-10-23 之前点不进 CI job：它按 `autoWork` 逐格判差异，
         # 而链上 `registry-audit --write` 的产物（`[[编号]]` 记号）正是下一格 `gen-doc-refs`
         # 的输入 ⇒ `--ci` 恒红。合成一个 `autoChain` 工作（只在末态判差异）后点得进了，
-        # 汇总页**内容**落后代码这件事从此这里挡得住（T-250 口径 4）。
+        # 汇总页**内容**落后代码这件事从此这里挡得住（口径 4）。
         run: node scripts/gate.mjs --only=facts-write,docs,facts,baseline --ci
         continue-on-error: false
 

@@ -28,7 +28,7 @@
 > **对外只有一个协议（VDFS）**：`entities/*` 调用协议已于 S11 下线，前端统一实体页
 > 机制已于 S5 收口（前端资源页只有 VDFS 一台，见 [vdfs-frontend.md](../design/vdfs-frontend.md) §7）。
 > 历史形态（含迁移期的端点映射表）见
-> [archive/entity-management-mechanism.md](./entity-management-mechanism.md)。
+> [archive/entity-management-mechanism.md](entity-management-mechanism.md)。
 >
 > 本文件只写**规范与机制**。具体实体（会话、模型、设置分区……）如何应用机制一律
 > 属于**范例**（§7），不是机制的组成部分；实例的新增/下线/调整不影响本规范的效力，

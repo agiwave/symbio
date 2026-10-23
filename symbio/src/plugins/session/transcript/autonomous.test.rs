@@ -11,7 +11,7 @@ use std::sync::Arc;
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
 // 「欲」永远入格、任务却**只在闸门放行时**才长出来。分开断言是因为三者各自的失效
 // 都不报错：漏了触发 = 自主行为查无此事；漏了自检 = `system` 实体只开不进；
-// 漏了闸门 = 自己写自己的对话（[roadmap/S12 §5](../../../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")「自主写入对话 0」）。
+// 漏了闸门 = 自己写自己的对话（[roadmap/S12 §5](../../../../../docs/007-task/132-自主层与长期目标.md ")「自主写入对话 0」）。
 
 fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");

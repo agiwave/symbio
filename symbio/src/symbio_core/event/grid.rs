@@ -3,7 +3,7 @@
 //! ## 它补的是哪一格
 //!
 //! 网格的**形状**由两个闭集枚举钉死（[`Entity`] 11 行 × [`Verb`] 5 列，F5），
-//! 名字却是**字符串常量**（[plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：
+//! 名字却是**字符串常量**（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：
 //! 「名字是数据，加名字不加枚举」）。于是「`user.message` 落在 `turn × opened`」这条
 //! **对应关系**此前只有两个载体：常量头上的散文说明，与各构造点手填的 `entity` / `verb`。
 //! 散文不判、构造点没人核 ⇒ 漂了没有任何信号。而投影是**按格子**取事实的
@@ -16,7 +16,7 @@
 //!
 //! ## 为什么是「表 + 入库闸」，不是 `EventKind` 枚举
 //!
-//! 审计稿（[T-206](../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")
+//! 审计稿（相应批次
 //! 来源的 08 报告建议 7）提的是「`kind` 由 `(entity, verb)` 派生，`EventKind` 枚举一张表」。
 //! 那条路走不通，两条理由都是硬的：
 //!
@@ -64,7 +64,7 @@ pub type Cell = (Entity, Verb);
 const CELLS: &[(&str, Cell)] = &[
     // ── 对话面（turn）──
     (EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened)),
-    // 配置与派发档都是「这一轮以什么方式运行」的断言（T-225），与阶段事实同格。
+    // 配置与派发档都是「这一轮以什么方式运行」的断言，与阶段事实同格。
     (EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)),
     (EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted)),
     (EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)),
@@ -74,7 +74,7 @@ const CELLS: &[(&str, Cell)] = &[
     (EVENT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed)),
     (EVENT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)),
     (EVENT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)),
-    // ── 协议族（对外调用，T-224）─────────────────────────────────────────
+    // ── 协议族（对外调用，）─────────────────────────────────────────
     //
     // 五个名字**同格同族**：`turn × asserted` = 「关于这一轮的断言」这一格的成员。
     // 逐条理由（为什么不是 `progressed` / `closed` / `opened`）：
@@ -106,7 +106,7 @@ const CELLS: &[(&str, Cell)] = &[
     (EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
     // ── 产物（artifact）──
     (EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)),
-    // ── 消息列表的变更（message，ADR-053 / ADR-054 的闭集四格）──
+    // ── 消息列表的变更（message，D-053 / D-054 的闭集四格）──
     (EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)),
     (EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)),
     (EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)),

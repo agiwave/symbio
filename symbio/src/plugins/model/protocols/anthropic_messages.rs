@@ -250,7 +250,7 @@ impl ModelProtocol for AnthropicProtocol {
             // 确保 max_tokens 大于 budget
             // ⚠️ 这条赋值在两种输入下都不生效（`max_tokens` 为 `None` 时本判据恒假；
             // 为 `Some(m)` 时被下方 `if let Some(m)` 覆盖回 `m`），故请求体里可能出现
-            // `budget_tokens > max_tokens`。改动它是语义变更，须单独裁决（T-161 勘察）。
+            // `budget_tokens > max_tokens`。改动它是语义变更，须单独裁决（ 勘察）。
             if cfg
                 .max_tokens
                 .unwrap_or(profile::ANTHROPIC_MESSAGES.default)

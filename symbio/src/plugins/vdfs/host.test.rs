@@ -703,7 +703,7 @@ async fn resolve_fs_fetches_root_via_trait_method() {
 //
 // 那次会话一次 `vdfs_tree({"depth":3})` 用 500 个配额打根目录，长度被
 // `.workbuddy-ai` 这类噪声吃掉大半，`docs/adr` 只剩一个目录节点——回执却只说
-// `truncated: true`，没说缺了什么。于是模型开始**猜**文件名（一路猜到 `ADR-213.md`），
+// `truncated: true`，没说缺了什么。于是模型开始**猜**文件名（一路猜到 `D-213.md`），
 // 132 次「找不到文件」后被用户中止，会话零产出。
 //
 // 教训：**只声明「被截断了」而不给补全地址，等于把补全交给猜**。

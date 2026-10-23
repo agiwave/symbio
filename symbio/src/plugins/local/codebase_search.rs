@@ -238,7 +238,7 @@ impl CodebaseSearchTool {
         let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         let embed = creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
         // 实例恒能拿到（初始化失败时工厂给的是 Noop），所以「可不可用」必须单独问一次：
-        // 否则「语义检索没搜到」与「语义检索根本没跑」在返回体里同形（T-199）。
+        // 否则「语义检索没搜到」与「语义检索根本没跑」在返回体里同形。
         let semantic_unavailable = if embed.is_none() {
             Some("embedding 服务未注册".to_string())
         } else {
@@ -306,7 +306,7 @@ impl CodebaseSearchTool {
             "results": results,
             "count": results.len(),
             "index": index_info,
-            // 降级原因（无降级 = null）：让「搜不到」与「没在搜」可分（T-199）。
+            // 降级原因（无降级 = null）：让「搜不到」与「没在搜」可分。
             "notice": notice,
             "message": message,
         }))
@@ -755,7 +755,7 @@ async fn save_to_disk(workdir: &Path, idx: &CodeIndex) -> std::io::Result<()> {
 
 /// 对查询嵌入并与所有分块做余弦相似度排序，返回 top-k
 ///
-/// **平手必须有稳定次级键**（[ADR-109](../../../../docs/010-adr/109.md "ADR-109")：排序口径的
+/// **平手必须有稳定次级键**（[D-109](../memory/README.md "D-109")：排序口径的
 /// 共同半边）：分数相等时按相对路径、再按起始行升序，于是「全序 ⇒ 同一个索引 +
 /// 同一个查询 = 同一份 top-k」。缺了这一半，平手块的先后由 `files`/`chunks` 的
 /// 向量顺序决定，而那个顺序是**增量重建的历史**（哪些文件上次被重嵌过）——
@@ -802,7 +802,7 @@ async fn semantic_search(
 /// 降级：用 ripgrep 库做正则关键词检索（跨平台，不依赖 `rg` 可执行文件）
 ///
 /// 返回 `(片段, 降级说明)`。查询不是合法正则时**不静默返回空**（那与「真的没搜到」
-/// 同形，T-199）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
+/// 同形，）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
 /// 说明；字面量也编译不出来时才返回空 + 说明。
 async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> (Vec<Value>, Option<String>) {
     let (matcher, notice) = match RegexMatcherBuilder::new().case_smart(false).build(query) {

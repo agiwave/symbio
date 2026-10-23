@@ -398,7 +398,7 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
     );
 }
 
-/// **创建即登记**（[T-182]）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
+/// **创建即登记**（相应批次）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
 /// 缺省行；删除会话时登记随之回收（同寿）。
 ///
 /// 判据落在**生产路径**上（VDFS `write` 的 create 分支 → `session_upsert`），
@@ -435,7 +435,7 @@ async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims
     );
 }
 
-/// **身份改写换行**（[T-182]）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
+/// **身份改写换行**（相应批次）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
 /// 换掉时，旧主体的登记随即撤回、新主体即时有行——不等下一轮装配点兜底。
 #[tokio::test]
 async fn rewriting_the_agent_identity_replaces_the_session_binding() {
@@ -885,7 +885,7 @@ async fn new_session_ids_are_distinct() {
 // 在用户眼里是同一件事的两种做法（都让这一屏变空），留着只会让人在两条重叠的
 // 路径之间犹豫，因此整体下线——转写区段上只剩 `truncate` 这一个集合动词。
 //
-// 消息域的实时面与历史面合流为同一条 `vdfs/watch`（ADR-025）。断言面是
+// 消息域的实时面与历史面合流为同一条 `vdfs/watch`（D-025）。断言面是
 // 「投递了几条变更、每条说了什么」（`watch_changes`）：截断一例钉住这正是当前
 // 机制要守的边界（删除**逐条**下发，消费端不必整份重读；什么都没删**一条都不发**）。
 //
@@ -895,7 +895,7 @@ async fn new_session_ids_are_distinct() {
 
 /// 造一个带 N 条消息的会话：id 为 `m0..mN`、`seq` 单调（顺序的唯一权威锚点）。
 ///
-/// 切主后（ADR-049）消息正文的真源是**事实源**，缓存只留元数据：
+/// 切主后（D-049）消息正文的真源是**事实源**，缓存只留元数据：
 /// 先种一条开场事件（给 `message.added` 立溯源锚——空切片上变更事实按口径
 /// 不落格），再落诞生事实。开场事件**不带节点 id**：它只当锚，不该在投影里
 /// 多出一条虚构发言（转写列表 = `m0..mN`）。

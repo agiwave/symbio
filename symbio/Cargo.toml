@@ -77,7 +77,7 @@ encoding_rs = "0.8.35"
 # 本地嵌入（`providers/embedding/local.rs`）：跑 int8 量化的 bge-small-zh-v1.5
 # （model.onnx / tokenizer.json 由 `include_bytes!` 编进二进制，**从不下载模型**）。
 #
-# 选型见 ADR-016（本行下方是结论，理由与实测数据在 ADR 里）：
+# 选型见 D-016（本行下方是结论，理由与实测数据在 ADR 里）：
 # - **推理用 `ort`**（ONNX Runtime 的 Rust 绑定）。此前用 `tract-onnx` 纯 Rust 推理，
 #   因实测每 token ≈ 22.5ms、512 token 单块 ≈ 9.83s，全仓建索引 ≈ 6 小时，**不可用**；
 #   换 ort 后同一块 19ms（≈520×），全仓建索引 59s。
@@ -96,7 +96,7 @@ encoding_rs = "0.8.35"
 #   而分词我们自己用 `tokenizers` + `fancy-regex`（纯 Rust）就够——`fastembed` 唯一
 #   不可替代的部分只是"调 ORT"，直接依赖 `ort` 即可。
 # - MSRV：`ort` 2.0.0-rc.13 = 1.88，低于本仓 1.91。
-# - 数值基线：CLS 池化 + L2 归一化；与 tract 时代的余弦相似度见 ADR-016（实测 ≥0.9967）。
+# - 数值基线：CLS 池化 + L2 归一化；与 tract 时代的余弦相似度见 D-016（实测 ≥0.9967）。
 ort = "2.0.0-rc.13"
 tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
 moka = { version = "0.12.16", features = ["future"] }

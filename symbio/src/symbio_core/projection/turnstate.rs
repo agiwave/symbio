@@ -1,6 +1,6 @@
-//! `turnstate` 投影（S1，[plan/05 §4](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")：③ 加 `turnstate`）。
+//! `turnstate` 投影（S1，[plan/05 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：③ 加 `turnstate`）。
 //!
-//! **projection 参数表的取值**（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
+//! **projection 参数表的取值**（[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
 //! `projection = turnstate`），平凡值链的终点：S01 说 `projection` 平凡值是
 //! `turnstate`（"只看当前 turn"）——它是**最小可用视图**，后面的 `snapshot` /
 //! `checkpoint` 都从这里长出。

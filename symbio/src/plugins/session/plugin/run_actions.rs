@@ -1,5 +1,5 @@
-//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4；
-//! 行表化见 [ADR-094](../../../../../docs/010-adr/094.md "ADR-094")）。
+//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4；
+//! 行表化见 [D-094](../../../../../docs/003-design/014-单环一表.md "D-094")）。
 //!
 //! ## 为什么需要这条面
 //!
@@ -18,7 +18,7 @@
 //! 2. `dispatch.spec.session_id == <sid>`（令牌只对**本轮会话**有效）；
 //! 3. 动作名在下方的行表 [`RUN_OPS`] 闭集内，且与地址末段**字面相等**。
 //!
-//! ## 行表即闭集（ADR-094）
+//! ## 行表即闭集（D-094）
 //!
 //! 闭集不是另一份手写清单，而是**行表自身**：授权判据第 3 条读它，派发也读它。
 //! 「在表内」与「有臂」因此是同一件事——清单与实现分居两地要靠人工对账，
@@ -28,7 +28,7 @@
 //! ## 写动作自己发帧
 //!
 //! 落库与发帧是**一个**出口（`transcript::publish::append_and_publish`，见
-//! `session/docs/022-vdfs-session-messages.md` §3.4）：动作在 session 侧调用它，
+//! `session/docs/109-vdfs-session-messages.md` §3.4）：动作在 session 侧调用它，
 //! 把权威副本直接投进本会话转写；loop 拿回权威副本只为维护自己的内存镜像。
 //! 不把「落库」与「发帧」分居两插件——那正是「落库的忘了发、发帧的拿错号」的
 //! 温床。
@@ -38,7 +38,7 @@
 //! 临时会话（`_t_`）的引擎持有**实例级**内存存储，按 id 重建会得到另一份空列表。
 //! 编排入口在派发前已把本轮会话句柄挂进 `chat_ctx`，动作面原样复用；只有持久
 //! 会话在缺句柄时才经 `Convergence` 重建（引擎无实例状态，重建等价）。
-//! 「缺句柄 ⇒ 回退临时会话」的驱动器侧豁免已随本刀废除（ADR-082 裁决五）。
+//! 「缺句柄 ⇒ 回退临时会话」的驱动器侧豁免已随本刀废除（D-082 裁决五）。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -83,7 +83,7 @@ type RunOpFn = for<'a> fn(
 /// 行表的一行：op 名（[`run_ops`] 词表常量）与它的处理函数。
 ///
 /// **一行一 fn**：「在表内」与「有臂」由构造保证相等，这是本面唯一的
-/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[ADR-094](../../../../../docs/010-adr/094.md "ADR-094")）。
+/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[D-094](../../../../../docs/003-design/014-单环一表.md "D-094")）。
 struct RunOp {
     op: &'static str,
     run: RunOpFn,
@@ -327,7 +327,7 @@ async fn run_edit_nodes(
         .apply(MessageChange::Edited(nodes))
         .await
         .map_err(vdfs_from_plugin_error)?;
-    // 帧形由调用方指定（ADR-086 §4）：状态帧只更新身份 + 状态，
+    // 帧形由调用方指定（D-086 §4）：状态帧只更新身份 + 状态，
     // 完整消息帧替换整条正文。压成一个形状会让其中一处多发一次全文
     // 或让另一处前端停在旧状态。
     for message in &persisted {
@@ -489,7 +489,7 @@ async fn run_elimination_revoked(
 ) -> VdfsResult<VdfsResponse> {
     let session = plugin.run_session(host, dispatch).await?;
     // 存储布局与遍历留在 session，折叠判据仍在 core；loop 只收结论值
-    // （ADR-086 §4：全量事件过墙是 P6「值注入」的反面）。
+    // （D-086 §4：全量事件过墙是 P6「值注入」的反面）。
     let fleet = session.store_handle().deep_snapshots();
     let events: Vec<_> = fleet.into_iter().flatten().collect();
     let overlay = crate::symbio_core::GrantsOverlay::fold(
@@ -512,7 +512,7 @@ async fn run_compression_begin(
     let CompressionBeginRequest { node_id, force } = parse_payload(payload)?;
     let session = plugin.run_session(host, dispatch).await?;
     let emitter = plugin.compression_emitter(session.session_id()).await;
-    // 熔断判定随 begin 落在这里（ADR-086 §6）：计数器是会话级
+    // 熔断判定随 begin 落在这里（D-086 §6）：计数器是会话级
     // 节奏状态，loop 只收「这次要不要跑」。`force`（用户手动压缩 /
     // 主动压缩工具）绕过熔断——用户已经表达了意图，不必再替他省。
     let skipped = !force && emitter.should_skip().await;
@@ -536,7 +536,7 @@ async fn run_compression_finish(
     let finish: CompressionFinishRequest = parse_payload(payload)?;
     let session = plugin.run_session(host, dispatch).await?;
     let emitter = plugin.compression_emitter(session.session_id()).await;
-    // 熔断记账与定稿同一次动作（[ADR-086] §6）：只有 session 知道
+    // 熔断记账与定稿同一次动作（[D-086] §6）：只有 session 知道
     // 会话级计数器；loop 报结局，不自己留第二份。
     match finish.outcome {
         CompressionOutcome::Success => emitter.record_success().await,

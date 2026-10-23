@@ -3,7 +3,7 @@
 //! 只在本插件内使用（`#[cfg(test)]`）：E-009 连测试一起判，测试路径里也不出现
 //! `crate::plugins::session`。假件模拟的是[端口](super::session_port::SessionPort)
 //! 的**契约**，不是会话存储实现——消息列表在内存里，事实轨由用例自己持一份
-//! [`EventStore`]交进来。ADR-094 后端口收窄成一个 `call`，假件同款：按 op
+//! [`EventStore`]交进来。D-094 后端口收窄成一个 `call`，假件同款：按 op
 //! 分派是模拟服务端的份内事（生产侧的那次分派已经消失）。
 
 use std::sync::{Arc, Mutex};

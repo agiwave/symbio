@@ -17,9 +17,9 @@ import type { ReadingSection } from './reading'
 // ==================== 主体（Principal） ====================
 
 /**
- * **主体族**——后端 `PrincipalKind` 的镜像（[ADR-069 §决策 1]，四值闭集）。
+ * **主体族**——后端 `PrincipalKind` 的镜像（[D-069 §决策 1]，四值闭集）。
  *
- * 与曾经的 `role` 是**同一件事**：`role` 从协议顶层退役（[T-147d]）后，`kind` 是
+ * 与曾经的 `role` 是**同一件事**：`role` 从协议顶层退役（d）后，`kind` 是
  * 这条发言归属哪一族的唯一判据。类型由常量数组派生，加一族只加一行。
  */
 export const PRINCIPAL_KIND_PERSON = 'person'
@@ -37,7 +37,7 @@ export const PRINCIPAL_KINDS = [
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number]
 
 /**
- * **主体地址**——后端 `symbio_core::principal::Principal` 的镜像（[ADR-069 §决策 1]）。
+ * **主体地址**——后端 `symbio_core::principal::Principal` 的镜像（[D-069 §决策 1]）。
  *
  * 三个字段正交：`kind` 是一族、`id` 是可路由地址 `<namespace>/<name>`（找到 / 调用 / 查看
  * 主体都靠这个地址）、`title` 是显示名。写侧构造即定型，序列化只出对象形态；
@@ -51,7 +51,7 @@ export interface Principal {
 }
 
 /**
- * **读侧一次性映射**（[ADR-069 §决策 6]，[T-147b]）：历史 `messages.json` 里的
+ * **读侧一次性映射**（[D-069 §决策 6]，b）：历史 `messages.json` 里的
  * `principal` 是**裸字符串**（`"agent:main"` / `"user"` / `"session/main"`），新协议
  * 里是 `Principal` 结构体；前端消费方一律通过本函数拿到结构体形态。
  *
@@ -78,7 +78,7 @@ export function normalizePrincipal(value: Principal | string | undefined | null)
             : PRINCIPAL_KIND_AGENT
     return { kind, id: s }
   }
-  // 旧形态 `<kind>:<name>`（ADR-069 v1）。
+  // 旧形态 `<kind>:<name>`（D-069 v1）。
   const colon = s.indexOf(':')
   if (colon > 0) {
     const kindWord = s.slice(0, colon)
@@ -131,7 +131,7 @@ export const CHAT_ROLES = [
 export type ChatRole = (typeof CHAT_ROLES)[number]
 
 /**
- * 主体族 → 角色词的**一次性折叠**（[T-147d-iii]，镜像后端 `ChatNode::node_role()`
+ * 主体族 → 角色词的**一次性折叠**（d-iii，镜像后端 `ChatNode::node_role`
  * 的 kind 兜底分支）：Person↔User / Agent↔Assistant / Tool↔Tool / System↔System。
  * 无主体 ⇒ `undefined`——缺省语义（当助手）留在调用侧折叠点，不在这里替它做主。
  */
@@ -153,7 +153,7 @@ export function roleOfPrincipal(
 }
 
 /**
- * 节点角色的**唯一折叠点**（[T-147d-iii]，镜像后端 `ChatNode::node_role()`）。
+ * 节点角色的**唯一折叠点**（d-iii，镜像后端 `ChatNode::node_role`）。
  *
  * 共存阶段优先级「残留 `role` 格在先、`principal.kind` 兜底」；`role` 字段退役
  * （末档）后删首行即收敛成纯 kind 折叠。缺省仍是助手——未标身份的写方按模型
@@ -166,10 +166,10 @@ export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatR
 
 // ==================== 消息形态 ====================
 
-// ---- wire 闭集五值 = 前端唯一分派轴（[T-155 B2a]，[ADR-070 §决策 3]）----
+// ---- wire 闭集五值 = 前端唯一分派轴（B2a，[D-070 §决策 3]）----
 //
 // 这五值是**纯 UI 形状**，不含任何业务：同格内的业务差异（思考 vs 压缩、run vs tool）
-// 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**（[ADR-070 §决策 2]），
+// 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**（[D-070 §决策 2]），
 // 前端照数据显示，绝不读 `meta.style_tag` 反推。`style_tag` 就此从前端 wire 退役——
 // 它仍是后端业务判据（沉 `meta`），但不是前端消费的顶层字段。
 
@@ -192,7 +192,7 @@ export const NODE_KIND_NOTICE = 'notice'
 export const NODE_KIND_SKELETON = 'skeleton'
 /** 等待用户回应（ask_user 提问 / 工具确认） */
 export const NODE_KIND_INTERACTION = 'interaction'
-/** 进行中占位（前端合成，见 [T-151]） */
+/** 进行中占位（前端合成，见 相应批次） */
 export const NODE_KIND_TYPING = 'typing'
 
 export const NODE_KINDS = [
@@ -207,7 +207,7 @@ export const NODE_KINDS = [
 export type NodeKind = (typeof NODE_KINDS)[number]
 
 /**
- * 历史业务词 → wire 五值的一次性折叠（[T-155 B2a]，读边界唯一实现）。
+ * 历史业务词 → wire 五值的一次性折叠（B2a，读边界唯一实现）。
  *
  * 存量快照与后端旧转写把形态写成业务词（`turn` / `tool_call` / `text` / `reasoning` /
  * `compression` / `user_prompt`）；新协议一律发五值。本函数在**读取那一刻**把旧词归到
@@ -328,7 +328,7 @@ export function isUnsettledNodeStatus(status?: NodeStatus | null): boolean {
  * `scripts/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
  */
 
-/** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求（[ADR-070 §决策 5]） */
+/** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求（[D-070 §决策 5]） */
 export const RESUME_ACTION_RETRY_SUBTREE = 'retry_subtree'
 /** **单工具**重试：删除该工具的失败结果 → 用原参数重新执行 */
 export const RESUME_ACTION_RETRY = 'retry'
@@ -427,7 +427,7 @@ export interface ChatNode {
   /**
    * **这条发言是谁说的**（跨栈身份字段，后端 `ChatNode.principal` 的镜像）。
    *
-   * [T-147b] / [ADR-069 §决策 1]：wire 上是**主体地址结构体** `{kind, id, title?}`——
+ * b / [D-069 §决策 1]：wire 上是**主体地址结构体** `{kind, id, title?}`——
    * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
    * `title` 是显示名。写侧构造即定型，序列化只出对象形态。
    *
@@ -441,13 +441,13 @@ export interface ChatNode {
    */
   principal?: Principal | string;
   /**
-   * 形态词：**闭集五值 `NodeKind`**（[T-155 B2a]，[ADR-070 §决策 3]）——前端唯一分派轴。
+ * 形态词：**闭集五值 `NodeKind`**（B2a，[D-070 §决策 3]）——前端唯一分派轴。
    *
    * wire 与前端内部表示同一个五值；存量快照的业务旧词在**读边界**由 `nodeKindOf` 一次性
    * 归一，业务词不进入任何判定。同格业务差异走 `title`/`icon`/`actions` 数据，不读 `meta`。
    */
   type?: NodeKind;
-  // [T-147d-ii] 顶层 `name` 从 wire 退役——工具名住 `meta.tool_name`（读写唯一入口
+  // d-ii 顶层 `name` 从 wire 退役——工具名住 `meta.tool_name`（读写唯一入口
   // `registry/messageTypes.toolNameOf`），存量 attrs `tool_name` 在读边界折进 meta。
   content?: MessageContent;
   /**
@@ -475,7 +475,7 @@ export interface ChatNode {
   /** 失败原因（面向用户的可读短消息），仅当 status === 'failed' 时存在 */
   error?: string;
   /**
-   * 头部**标题**——后端填的呈现数据（[T-155]，[ADR-070 §决策 2]）。
+ * 头部**标题**——后端填的呈现数据（相应批次，[D-070 §决策 2]）。
    *
    * 机制化目标：前端按 `type`(NodeKind) + `title`/`icon`/`actions` 这些数据渲染，
    * **不再 `switch(style_tag)`**。`title`/`icon` 有值即优先用（后端是呈现权威）；
@@ -486,14 +486,14 @@ export interface ChatNode {
   /** 头部**图标**——后端填的呈现数据（同上，缺省退 legacy 表）。 */
   icon?: string;
   /**
-   * 本节点**可用的恢复动作**（后端填的呈现数据，[ADR-070 §决策 2]）。
+   * 本节点**可用的恢复动作**（后端填的呈现数据，[D-070 §决策 2]）。
    *
    * 前端据此决定是否给重试 / 补充参数 / 审批入口，而不是按业务类型（tool / compression）
    * 反推「该给什么按钮」。缺省（后端尚未填）时退回 legacy 的类型驱动判据。
    */
   actions?: ResumeAction[];
   /**
-   * 本节点的**读数行**（后端填的呈现数据，[ADR-111](../../../docs/010-adr/111.md)）：
+   * 本节点的**读数行**（后端填的呈现数据，[D-111](../../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）：
    * 「压缩后水位 44.5k」「压掉 12 条」这类交代由后端排好版逐行下发，前端**只逐行排版**。
    *
    * 为什么这一格在顶层而不是 `meta`：判据是「不查看 `meta` 语义就能消费它」——渲染器

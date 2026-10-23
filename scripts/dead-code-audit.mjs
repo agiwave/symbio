@@ -30,7 +30,7 @@
  * R-002 同理只认**字面属性**：`cfg_attr` 里拼出来的 `allow`、宏内部生成的属性
  * （`define_string_key!` 靠调用点透传臂转发）都按调用点那行算。
  */
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns R 死代码
 // @codes R-001 R-002
 
@@ -349,7 +349,7 @@ if (rustWaived.length) {
 //      或其上 3 行内写 `// dead-code-allow R-002: <非空理由>`——与 R-001 同一判空；
 //   ② 数量走棘轮：只许降（接线一批、摘一批），`grep -c` 即可复核，不靠自觉。
 //   ③ 理由必须指到**清偿步**（`04 §3.1 批N` 或其 A/B 表行）：接入 + 摘标记 + 步状态
-//      改"完成"三者同批发生，账在 `docs/004-plan/004-工程落地.md §3.1`，本文件只判数量。
+//      改"完成"三者同批发生，账在 `docs/003-design/016-工程落地与验证.md §3.1`，本文件只判数量。
 //      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
@@ -375,20 +375,20 @@ function r002Reason(lines, i) {
 }
 
 // ③ **承认必须挂到计划步**：理由里给出 `04 §3.1 批N`（或 `04 §3.1 C 类`），
-//    且批号必须真实存在于 `docs/004-plan/004-工程落地.md §3.1` 的清偿批次表。
+//    且批号必须真实存在于 `docs/003-design/016-工程落地与验证.md §3.1` 的清偿批次表。
 //    于是「一处死码 ↔ 一个计划步」双向可查：`grep "04 §3.1 批⑥"` = 该批待摘清单，
 //    表里的 `-N` = 该批完成判据；批次号以表为唯一来源，写不存在的批号等于没挂。
 //
-//    T-006 起两处**登记形态**（不迁事实）：① 本段的 3 条口径已登记为条目
+// 起两处**登记形态**（不迁事实）：① 本段的 3 条口径已登记为条目
 //    `SP-015`——批号**闭集**（`批①…批⑫` + `C 类`）
 //    随口径一并登记在该条目里；② 规则源改读 `SP-015`（批号词表），04 §3.1 只留指路。
 //    「批号必须真实存在」这条对账关系（防写不存在的批号）是价值所在，规则源跟着词表走。
-const PLAN_04_PATH = join(REPO, 'docs', '004-plan', '004-工程落地.md')
-const S31_1_PATH = join(REPO, 'docs', '008-spec', '015.md')
+const PLAN_04_PATH = join(REPO, 'docs', '003-design', '016-工程落地与验证.md')
+const S31_1_PATH = join(REPO, 'docs', '005-spec', '015.md')
 // 回归测试用 `--root=` 注入最小仓库，那里没有条目——**没有台账就不判这一条**
 // （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里条目在，规则才生效。
 //
-// 规则源优先读 `docs/008-spec/015.md`（T-006 起的批号闭集 owner），
+// 规则源优先读 `docs/005-spec/015.md`（ 起的批号闭集 owner），
 // 读不到再退回 04 §3.1 的旧表（迁移期兼容 / fixture 无条目）。
 const S31_1 = existsSync(S31_1_PATH) ? readFileSync(S31_1_PATH, 'utf8') : null
 const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null

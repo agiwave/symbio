@@ -104,7 +104,7 @@ fn validate_url_enforces_allowlist() {
     assert!(validate(&t, "https://example.org/x").is_err());
 }
 
-/// 白名单**有生产路径能拿到非 `*` 的值**（T-109 ④）：缺省是 `*`，
+/// 白名单**有生产路径能拿到非 `*` 的值**（ ④）：缺省是 `*`，
 /// 配置里写了别的 ⇒ 拒绝文案指名「不在 allowed_domains 中」。
 /// 早先 `new` 里写死 `vec!["*"]`，这条分支恒不触发——守卫恒真。
 #[test]

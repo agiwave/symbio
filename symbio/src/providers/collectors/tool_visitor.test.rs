@@ -61,7 +61,7 @@ fn provider(id: &str) -> Arc<dyn ModelProvider> {
     })
 }
 
-// ==================== 模型族（AR-025 4b：一行一个 provider，生效位在行上） ====================
+// ==================== 模型族（DE-008 4b：一行一个 provider，生效位在行上） ====================
 //
 // 机制化之前这族是**单槽目录 + 批量注册**（`register_model_providers`）；4b 把它改成
 // 与工具族同一张表：写是逐行 `put`，读是 `capability_model_*` 两个自由函数。
@@ -238,7 +238,7 @@ async fn system_prompt_overwrite_keeps_first_registration_slot() {
     );
 }
 
-// ==================== 工具行表（AR-025 4a：put / get / list） ====================
+// ==================== 工具行表（DE-008 4a：put / get / list） ====================
 //
 // 机制化之前这五条用例不存在——`register` / `invoke` / `list_capability` 的语义
 // 只由插件侧的使用方式间接兜着。表的三方法落位后，把语义钉在本文件：
@@ -276,9 +276,9 @@ fn decl_tool(name: &str) -> Arc<dyn Capability> {
     }))
 }
 
-/// **守门人**（AR-025 §5）：同一份工具清单以两种口径导出，逐条相等——
+/// **守门人**（DE-008 §5）：同一份工具清单以两种口径导出，逐条相等——
 /// 走表的 `list(Tool)` 与「入表时给的元数据」全量转储。顺序也逐条一致
-/// （注册序即表序，ADR-057 的工具面有序性就架在这条上）。
+/// （注册序即表序，D-057 的工具面有序性就架在这条上）。
 #[tokio::test]
 async fn tool_rows_match_the_meta_dump_entry_by_entry() {
     let mgr = DefaultToolVisitor::new();
@@ -344,7 +344,7 @@ async fn tool_list_of_another_kind_is_empty() {
     assert!(mgr.list(CapabilityRowKind::Model).await.is_empty());
 }
 
-// ==================== 挂载族（AR-025 4d：挂载点与根同表，按根位区分） ====================
+// ==================== 挂载族（DE-008 4d：挂载点与根同表，按根位区分） ====================
 
 /// 可辨认的 VDFS 桧：`dispatch(Read)` 回自己的标签（身份 = 内容）。
 struct StubMount(&'static str);
@@ -418,7 +418,7 @@ async fn root_re_registration_is_a_single_slot_handover() {
     );
 }
 
-// ==================== 选项 / 可配置两族（AR-025 4e：两个专服单族 trait 退场） ====================
+// ==================== 选项 / 可配置两族（DE-008 4e：两个专服单族 trait 退场） ====================
 
 // （原 2 个默认收集器的 4 条守门人测试逐字迁入本文件：行词汇合一后，去重 / 覆盖 /
 // 排序都成了表与读协议的语义，被测对象从两个专用实现换成这个全表共用的唯一实现。）

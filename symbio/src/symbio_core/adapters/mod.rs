@@ -1,17 +1,17 @@
-//! `adapters` —— 外部资源的唯一接缝（v2 ⑤，[plan/05 §3.3](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
+//! `adapters` —— 外部资源的唯一接缝（v2 ⑤，[plan/05 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。
 //!
 //! ## 为什么令牌住这里
 //!
 //! 「能不能碰模型」本质是「能不能拿到外部资源句柄」——归属 ⑤ 是唯一的正确位置
-//! （[plan/05 §3.3](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。时延闸门不是新机制，
+//! （[plan/05 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。时延闸门不是新机制，
 //! 就是本包的**依赖注入策略**：`assemble` / 令牌签发按档位给证，调用方拿到的
 //! 令牌类型决定它能调哪些方法——**反射档超时不是被检测到，而是不可能发生**。
 //!
 //! ## 契约出处
 //!
 //! 形状逐字来自可执行论证
-//! [`docs/004-plan/verify/latency_gate.rs`](../../../../docs/004-plan/verify/latency_gate.rs)；
-//! 四层预算表来自 [plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")。
+//! [`docs/003-design/verify/latency_gate.rs`](../../../../docs/003-design/verify/latency_gate.rs)；
+//! 四层预算表来自 [plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
 //!
 //! ## 「依赖」的边界（诚实划界）
 //!
@@ -26,7 +26,7 @@ use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
 
-// ── 四层时延（[plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")，一等契约） ──
+// ── 四层时延（[plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
 
 /// 时延档位。**判据是时延，不是形式**——约束的是 `budget_ms`，不是"工具"这个名词。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,7 +42,7 @@ pub enum LatencyTier {
 }
 
 impl LatencyTier {
-    /// 四层预算（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表）。
+    /// 四层预算（[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表）。
     pub fn budget_ms(self) -> u64 {
         match self {
             LatencyTier::Reflex => 80,
@@ -101,7 +101,7 @@ impl FullModel {
 /// 令牌签发中心：**唯一**能造令牌的地方，按档位签发（一个 match，零运行时开销）。
 ///
 /// **只有两档有令牌**。快速档曾是三档之一（`ClassifyOnly` / `issue_fast`），
-/// [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 把它退役了：它守的端口
+/// [D-096](../../plugins/model/README.md "D-096") 把它退役了：它守的端口
 /// （`Classifier`）在生产里从未存在，而「快速档不得生成」这条约束在 classify 插件上
 /// 由**返回类型**（`parse_verdict -> Option<Verdict>`，四变体闭集）与**工具集判据**
 /// （`traverse_contributes_no_tools`）承载——换的是承重墙，不是拆掉约束。
@@ -126,7 +126,7 @@ pub enum AdapterError {
     /// 生成被中止（用户主动停止 / 会话销毁）。
     ///
     /// **调用方不得产出兜底事件**——中止不是失败：轮未收束，网格少一格是
-    /// 诚实的缺口（ADR-044 的转写纪律同源），也绝不能被计入兜底（兜底率是
+    /// 诚实的缺口（D-044 的转写纪律同源），也绝不能被计入兜底（兜底率是
     /// 失败的指标：用户按的停止不是「模型答不出」）。中止与失败的差别必须
     /// **在类型上**可见：压成一个变体，消费方就只能靠错误文本猜（会话结局
     /// `aborted` 与 `failed` 的分派即由此定）。
@@ -173,7 +173,7 @@ pub struct LlmTurn {
     /// 只看得到 `text` 与 `reasoning` 两段文本，而**被 `max_tokens` 掐断的半段思考
     /// 既不是答案、也不是写完的思考**。少了这一格，那条判据只能把「思考即正文」一路
     /// 成立到底：实测一次 `finish=length`、正文 0 字符的轮次，13045 字的思考草稿被
-    /// 原样当答话交付，退出码还是 0（T-142）。
+    /// 原样当答话交付，退出码还是 0。
     ///
     /// 缺省 [`ModelFinishReason::Stop`] 的含义是「自然结束」，**不属于**给不出原因的
     /// 实现——那类实现（本 trait 的默认 `generate_turn`）填 [`ModelFinishReason::Other`]
@@ -252,7 +252,7 @@ pub trait LlmAdapter: Send + Sync {
     fn model_id(&self) -> &str;
     /// 生成。`tok` 是闸门：没有 `FullModel` 就调不到这里。
     ///
-    /// **入参是消息数组而不是一段文本**（ADR-048a）：
+    /// **入参是消息数组而不是一段文本**（D-048a）：
     /// 角色与正文分开，工具结果保持 `role: "tool"`——`ModelProvider::execute_turn` 的签名
     /// `(system_prompt, messages: &[ChatNode], …)` 本来就是消息数组；拍成一段文本会让
     /// `role` 在 adapter 边界被拍平，模型收到的是散文而不是消息序列。
@@ -262,7 +262,7 @@ pub trait LlmAdapter: Send + Sync {
         messages: &[PromptMessage],
     ) -> Result<String, AdapterError>;
 
-    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
     /// `Instant`——桩与真实适配器零改动共享；调用方把它写到 final 事件的
     /// `cost_ms`，成本台账（③ cost_ledger）与熔断判据从此有了真实来源
@@ -298,7 +298,7 @@ pub trait LlmAdapter: Send + Sync {
     ///
     /// 默认实现 = **忽略工具清单、`tool_calls` 恒空**——这是**诚实降级**而非失败：
     /// 不支持工具的适配器照常答文本。没有这条通道，运行器在**类型上**就拿不到模型
-    /// 请求的工具调用（见 `docs/004-plan/008-工具轮v2化实施方案.md` §1）。
+    /// 请求的工具调用（见 `symbio/src/plugins/session/docs/102-core-loop.md` §1）。
     ///
     /// 与 [`Self::generate_streaming`] 的关系：无工具时两者等价（默认实现即经它委托）
     /// ——「有工具」与「无工具」不是两条执行路径，是同一条的两种入参。
@@ -317,7 +317,7 @@ pub trait LlmAdapter: Send + Sync {
             reasoning: String::new(),
             tool_calls: Vec::new(),
             // 同一条如实：`generate_streaming` 不带结束原因，这一层**看不见** finish。
-            // 填 `Stop` 是假称「自然结束」——那正是 T-142 被放过的形态；`Other("unknown")`
+            // 填 `Stop` 是假称「自然结束」——那正是 被放过的形态；`Other("unknown")`
             // 说的是「这一层给不出原因」，判据据此按未知处理而不是按完成处理。
             finish: ModelFinishReason::Other("unknown".to_string()),
             cost_ms,
@@ -411,7 +411,7 @@ impl LlmAdapter for StubLlmAdapter {
     /// 桩的 `cost_ms` 取**注入延迟**，不取墙钟。
     ///
     /// 默认实现用 `Instant` 实测；零延迟桩在并发测试里偶尔会是 1ms，于是
-    /// 「重放台账 == 直写台账」这类判据会在同一份代码上随机红（T-228 门禁
+    /// 「重放台账 == 直写台账」这类判据会在同一份代码上随机红（ 门禁
     /// 实际撞到过）。桩的职责是给测试一个**可复现**的外部源，不是复刻调度
     /// 抖动：延迟参数就是它声明的耗时，0 就是 0。
     async fn generate_turn(

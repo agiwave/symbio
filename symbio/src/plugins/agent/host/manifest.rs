@@ -46,10 +46,10 @@ pub struct AgentManifest {
     ///
     /// 运行期没有任何一处代码读它——四个字段（`fs` / `network` / `limits`）都没有
     /// 执行方。字段名因此回到「它到底是什么」：`declared_permissions`。
-    /// 宿主侧真正的边界是授权表（[ADR-099](../../../../../docs/010-adr/099.md "ADR-099")）
-    /// 与审批闸（[ADR-068](../../../../../docs/010-adr/068.md "ADR-068")）；
+    /// 宿主侧真正的边界是授权表（[D-099](../../../../../docs/003-design/011-Agent目录规范.md "D-099")）
+    /// 与审批闸（[D-068](../../../../../docs/003-design/008-能力注册表与能力坐标系.md "D-068")）；
     /// 为什么不在这里补执行方、以及补的时候要满足什么，见
-    /// [ADR-102](../../../../../docs/010-adr/102.md "ADR-102")。
+    /// [D-102](../../../../../docs/003-design/011-Agent目录规范.md "D-102")。
     ///
     /// **线格式不变**（`permissions`）：改名的是 Rust 侧语义，不是 Agent 包的公开键。
     #[serde(rename = "permissions", skip_serializing_if = "Permissions::is_empty")]

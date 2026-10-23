@@ -1,11 +1,11 @@
-//! 反射档（S11 快路）——技能命中即收束，一次模型调用都不发生（T-179 · B3 搬移）。
+//! 反射档（S11 快路）——技能命中即收束，一次模型调用都不发生（ · B3 搬移）。
 //!
 //! 从 `turn_runner.rs` 逐字搬入；本文件只承载 `TurnRunner::run_reflex`。
 
 use super::*;
 
 impl TurnRunner {
-    /// **反射档的一轮**（[roadmap/S11 §2–§3](../../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）：
+    /// **反射档的一轮**（[roadmap/S11 §2–§3](../../../../../docs/007-task/131-技能编译与自我改进.md ")）：
     /// 技能命中 ⇒ 以技能正文收束，**一次模型调用都不发生**。
     ///
     /// ## 为什么是独立入口，而不是给 [`Self::run_with_tools`] 塞一个"不调模型"的适配器
@@ -13,7 +13,7 @@ impl TurnRunner {
     /// 时延闸门的全部表达在**签名**上（[`crate::symbio_core::adapters`] 模块文档）：
     /// `run_with_tools` 要 `&FullModel`，而反射档只能签出 `RuleOnly`。若为了复用那条
     /// 路径给反射档发一张 `FullModel`，「反射档不得调用模型」就从**构造期约束**退回成
-    /// 一句声明——正是 `docs/004-plan/verify/latency_gate.rs` 要取代的那种形态（那里
+    /// 一句声明——正是 `docs/003-design/verify/latency_gate.rs` 要取代的那种形态（那里
     /// `assemble(Reflex)` 的产物**结构上就没有 LLM 字段**）。本函数是它的落地：
     /// **没有 `llm` 形参**，于是"反射档调模型"不是被检测到，而是写不出来。
     ///
@@ -27,7 +27,7 @@ impl TurnRunner {
     ///
     /// ## 落格与 [`Self::run_with_tools`] 同一份纪律
     ///
-    /// 用户格已由编排层在判决之前落（T-225），本入口收到它的 seq 与幕号：先落
+    /// 用户格已由编排层在判决之前落，本入口收到它的 seq 与幕号：先落
     /// 阶段事实，再落 `turn.dispatch`（档位恒为 `reflex`——档位不是调用方填的字符串，
     /// 而是**令牌类型**所证明的那一档，`RuleOnly` 与 [`LatencyTier::Reflex`] 是同一个
     /// 事实的两种写法），最后落收束格 `f-{turn}`（`produced_by` 指向用户格、
@@ -63,7 +63,7 @@ impl TurnRunner {
         // 一次性阶段（判决 / 召回 / 压缩）：反射档不经过 `prepare_turn`，但同样在
         // 用户格之后落（I2 的溯源锚）；此处的 `done` 同样让本轮后续不再问这些格。
         super::super::stage_events::land(store, turn, user_seq, &actor.principal, stages)?;
-        // 派发档（T-225）：用户格先于判决落 ⇒ 档位另立一格，幂等键带幕号。
+        // 派发档：用户格先于判决落 ⇒ 档位另立一格，幂等键带幕号。
         store.append(
             Event::pending(
                 format!("d-{turn}-{drive_seq}"),

@@ -9,17 +9,17 @@
 ## 0. 基线与方法
 
 - HEAD：`09ddf8b`（2026-09-24 21:54，refactor(vdfs): 地址从节点挪到条目，VdfsItem 拆出）。
-- 方法：①读 `docs/DECISIONS.md` 的 ADR-011 / ADR-025 全文；②读 `vdfs_provider.rs` 的 `VdfsChange`
+- 方法：①读 `docs/DECISIONS.md` 的 D-011 / D-025 全文；②读 `vdfs_provider.rs` 的 `VdfsChange`
   定义（第一手核实，不凭快照）；③读 `physical.rs` 的 `FsPolicy` 与 `path_allowed`；④读
   `vdfs_service/entry.rs` 与 `single_file.rs` 的 `category_dir` / `for_category` 注释；⑤核对
-  `with_id` 在 model / mcp 两处的位置与 ADR-011 依据。
+  `with_id` 在 model / mcp 两处的位置与 D-011 依据。
 
 > **方法论注**：本次评估发现，上一轮凭印象把 `category_dir` 判为「迁移残留（技术债）」是**误判**——
 > 读注释后发现它是有明确职责的兼容路径。教训：**评估结论必须逐条核实代码注释与 ADR，不凭印象**。
 
 ## 1. 变更通知契约（`VdfsChange`）—— 现行事实
 
-**权威定义**（`symbio_core/vdfs_provider.rs:1003-1035`，ADR-025 之后）：
+**权威定义**（`symbio_core/vdfs_provider.rs:1003-1035`，D-025 之后）：
 
 ```rust
 pub struct VdfsChange {
@@ -37,9 +37,9 @@ impl VdfsChange {
 
 | 时点 | 决策 | 出处 |
 |---|---|---|
-| S16–S19 | 消息挂 VDFS 变更频道（`appended`+`delta`、`truncated`、`renamed`+`to`、`node`/`content`） | ADR-025 背景 |
-| S23–S25 + 批次 E/G | 拆掉载荷，`VdfsChange` 收窄为 `{path, change}` 三取值，消息改走 `session/stream` | ADR-011 批次 G 补充（DECISIONS.md:287-292） |
-| **ADR-025（2026-09-23）** | **推翻「无载荷」**：加回 `data: Option<Value>` 载荷字段（承载 `ChatMessage`/`VdfsNode`）；`delta` 是 `ChatMessage` 帧内字段（尾部追加、零回读），`VdfsChange` 载荷字段名是 `data` 不是 `delta` | ADR-025（DECISIONS.md:1477-1566）+ vdfs_provider.rs:1003 |
+| S16–S19 | 消息挂 VDFS 变更频道（`appended`+`delta`、`truncated`、`renamed`+`to`、`node`/`content`） | D-025 背景 |
+| S23–S25 + 批次 E/G | 拆掉载荷，`VdfsChange` 收窄为 `{path, change}` 三取值，消息改走 `session/stream` | D-011 批次 G 补充（DECISIONS.md:287-292） |
+| **D-025（2026-09-23）** | **推翻「无载荷」**：加回 `data: Option<Value>` 载荷字段（承载 `ChatMessage`/`VdfsNode`）；`delta` 是 `ChatMessage` 帧内字段（尾部追加、零回读），`VdfsChange` 载荷字段名是 `data` 不是 `delta` | D-025（DECISIONS.md:1477-1566）+ vdfs_provider.rs:1003 |
 
 **要点**：
 - 取值集合 = `created` / `updated` / `deleted`（无操作枚举，形状收敛到 `{path, data?}`，见 vdfs_provider.rs:978-984）。
@@ -64,10 +64,10 @@ impl VdfsChange {
 
 **待决策**：见 §5 决策项 1。
 
-## 3. `with_id` 双份 —— ADR-011 有意为之
+## 3. `with_id` 双份 —— D-011 有意为之
 
 - `plugins/model/plugin.rs:506` 与 `plugins/mcp/plugin.rs:545` 各持一份 `with_id`（manifest 补齐 id）。
-- 依据：`docs/DECISIONS.md:332`（ADR-011 后果）——「manifest 补齐 id」这条不变量不再有唯一实现，
+- 依据：`docs/DECISIONS.md:332`（D-011 后果）——「manifest 补齐 id」这条不变量不再有唯一实现，
   `model` / `mcp` 各持一份 `with_id`。
 - 观察：双份是**有意**的（不引入共享抽象），但**没有测试锁等价**——若两处逻辑漂移，无守卫发现。
   **建议**：补一条断言测试锁两处 `with_id` 行为等价（输入同一 manifest，输出一致）。
@@ -100,12 +100,12 @@ impl VdfsChange {
 | 架构 | ★★★★★ | 单一契约 dispatch、单一地址门面 fs.rs、单向分层、克制 |
 | 文档一致性 | ★★★★★ | CURRENT.md 自动生成 + CI 门禁（60-facts.mjs） |
 | 安全 | ★★★★☆ | 默认全盘可读、仅黑名单兜底（安全面偏大，待决策） |
-| 重复度 | ★★★★☆ | with_id 双份（ADR-011 有意，缺锁等价测试） |
+| 重复度 | ★★★★☆ | with_id 双份（D-011 有意，缺锁等价测试） |
 | 可维护性 | ★★★★★ | 三实现共用 entry.rs 原语，注释详实 |
 
 ## 7. 本报告自身的元教训（写给未来的自我）
 
 1. **评估结论必须逐条核实**（读代码注释 + ADR 全文），不凭印象/快照。本次 `category_dir` 误判即教训。
-2. **带 ADR 编号的断言尤其危险**：ADR-011 批次 G 说「无载荷」是**历史时点**，ADR-025 已推翻——
+2. **带 ADR 编号的断言尤其危险**：D-011 批次 G 说「无载荷」是**历史时点**，D-025 已推翻——
    引用 ADR 时必须确认**该 ADR 的当前状态**（是否已被后续 ADR 推翻）。
 3. **评估结论要沉淀到 `docs/archive/`**（项目既有惯例），不只留会话记忆——压缩后新会话才能看到。

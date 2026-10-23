@@ -5,11 +5,11 @@
 //! 分发的**全部输入**都在这里：插件宿主（路由工具能力）、请求上下文（能力注册表 /
 //! 会话 id / 工作区）、事件出口（结果节点写进对话图）、会话目录（超长结果存档）。
 //! core 认识这些即违 E-009；契约与实现因此都留在本插件（唯一消费方是
-//! [`super::turn_runner`]，ADR-118 决策 5）。
+//! [`super::turn_runner`]，D-118 决策 5）。
 //!
 //! ## 三个动作，不是一次打包调用
 //!
-//! 工具批次的三笔债各自由一个动作承担（ADR-118 决策 5）：
+//! 工具批次的三笔债各自由一个动作承担（D-118 决策 5）：
 //!
 //! 1. [`ToolDispatch::open`]：模型响应里的调用逐条写 `request(port=tool)`；
 //! 2. [`ToolDispatch::authorize`]：对已开账的调用写 `authz.granted` /
@@ -87,7 +87,7 @@ pub(crate) struct DerivedFacts {
 /// 账已关。`sent = false` 且 `granted = true` ⇒ 派发行没有放行这笔账（行不欠 /
 /// `sent` 落格失败），关账时按「没执行」处理。
 ///
-/// `deny_why` 是拒绝的**收尾凭据**（T-244 步 5b）：`authz.denied` 关的是授权行，
+/// `deny_why` 是拒绝的**收尾凭据**（ 步 5b）：`authz.denied` 关的是授权行，
 /// 而被拒的调用还要在批尾落一条 `failed{why}`（`deny-tools` 行的出口）——否则
 /// 「拒绝」在端口账上只留下半句话，创建行的集合债永远少一个终局。
 #[derive(Clone)]
@@ -113,7 +113,7 @@ pub(crate) struct ToolPortCall {
     pub(crate) deny_why: Option<&'static str>,
     /// 派发动作是否已落 `sent`（派发动作写入）。
     pub(crate) sent: bool,
-    /// 这一笔是**恢复幕的唤醒调用**（T-244 步 5d）：由用户动作（批准 / 重试 /
+    /// 这一笔是**恢复幕的唤醒调用**（ 步 5d）：由用户动作（批准 / 重试 /
     /// 补充 / 回答 / 拒绝）落成的 `request`，不是某个模型响应里的调用。
     ///
     /// 派发动作据它决定「跑工具」还是「只合成结果」——两者的事实完全一样
@@ -121,7 +121,7 @@ pub(crate) struct ToolPortCall {
     pub(crate) wake: Option<WakeIntent>,
 }
 
-/// 唤醒调用的种类（T-244 步 5d）。
+/// 唤醒调用的种类（ 步 5d）。
 ///
 /// 恢复幕没有新的模型应答，工具批的入口是**用户动作**。用户动作先落成一笔
 /// `request(port=tool)`（[`ToolPort::land_wake`]），之后与批次走同一条授权 / 派发
@@ -225,12 +225,12 @@ pub struct DispatchOutcome {
     pub ok: bool,
     /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
     /// 运行器据此**停止工具循环**（恢复前提见
-    /// [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
+    /// [plan/11 批 2](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")）。
     pub needs_user_action: bool,
     /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
     ///
     /// **它是事实的一部分**：`needs_user_action` 只说明「这轮停在等用户」，而恢复
-    /// （`resume`）要拿 `meta.prompt` 复现那张卡。T-056 起读路径走 WAL 重建 ⇒ 这张卡
+    /// （`resume`）要拿 `meta.prompt` 复现那张卡。 起读路径走 WAL 重建 ⇒ 这张卡
     /// 必须能从事实折出来，故随载荷入格（`Some` 仅当 [`Self::needs_user_action`]）。
     /// 运行器不认识它的形状——原样透传（与 `text` 同一条：只搬数据，不解释）。
     pub prompt: Option<serde_json::Value>,
@@ -247,7 +247,7 @@ pub struct DispatchOutcome {
     pub result_id: String,
 }
 
-/// 工具派发的**三个动作**（ADR-118 决策 5）：创建 / 授权 / 派发。
+/// 工具派发的**三个动作**（D-118 决策 5）：创建 / 授权 / 派发。
 ///
 /// 三笔债不再由一次调用代劳——运行器按行各调一次，每一步只写自己那一行的
 /// 领域事实。契约住插件本地，core 不认识工具分发（E-009）。
@@ -276,7 +276,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
         calls: &mut [ToolPortCall],
     ) -> Vec<DispatchOutcome>;
 
-    /// 读一笔**唤醒调用**（T-244 步 5d）。
+    /// 读一笔**唤醒调用**（ 步 5d）。
     ///
     /// 恢复幕没有模型应答可寄存：用户在等待卡上点了按钮，唤醒请求已在开幕之前
     /// 落格。行表选中授权 / 派发行时，动作从这里把那一笔取回来——没有唤醒请求
@@ -289,7 +289,7 @@ pub(crate) trait ToolDispatch: Send + Sync {
 /// 工具端口账的写方：批次分发与 resume 共用**同一套**开账 / 关账。
 ///
 /// 为什么把它从 `SessionDispatchPort` 里拆出来：resume 的批准路径也要落
-/// `request → granted → sent → response`（T-227 步 4 / T-226 判据 6）。如果
+/// `request → granted → sent → response`（ 步 4 / 判据 6）。如果
 /// resume 自己再写一遍，两个写方就会在 id、授权判定、关账时机上各长一套——
 /// 而那正是「旁路」的定义。
 pub(crate) struct ToolPort {
@@ -303,7 +303,7 @@ pub(crate) struct ToolPort {
 ///
 /// ## 为什么要带「本次模型往返」
 ///
-/// 创建行 `open-tools` 的集合展开（ADR-117）从 `response.calls` 的元素里取 id，
+/// 创建行 `open-tools` 的集合展开（D-117）从 `response.calls` 的元素里取 id，
 /// 而 `response` 在派发**之前**就写好了——那时还没有「第几批」。要让展开出的键
 /// 与随后的 `request` 同 id，id 必须只由**模型响应里已有的东西**决定：轮、幕、
 /// 模型往返（`model-…-s{step}`）、模型调用 id。
@@ -393,7 +393,7 @@ impl ToolPort {
 
     /// 批次级 prepass：为每个真正可派发的调用开一笔工具账。
     ///
-    /// 入口先问创建行 `open-tools` 欠不欠（ADR-117）：一个模型响应是一笔集合债，
+    /// 入口先问创建行 `open-tools` 欠不欠（D-117）：一个模型响应是一笔集合债，
     /// 逐元素展开成 N 笔调用；全部 `request` 落完之后它就不再欠。这里不自己数
     /// 「第几批」——id 只由模型响应里已有的东西决定（[`batch_call_id`]），
     /// 否则创建行展开出的键与 `request` 的键对不上。
@@ -404,7 +404,7 @@ impl ToolPort {
     ) -> Vec<ToolPortCall> {
         let facts = self.facts.range(Seq::new(0));
         let latest = latest_model_response(&facts, self.turn, self.drive_seq);
-        // 旧存档里的模型应答没有 `calls`（ADR-117 之前写的）：没有创建债可言，
+        // 旧存档里的模型应答没有 `calls`（D-117 之前写的）：没有创建债可言，
         // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
         // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
         let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
@@ -464,7 +464,7 @@ impl ToolPort {
         out
     }
 
-    /// 创建动作的单笔实体：只写 `request`（ADR-118 决策 5 的第一笔债）。
+    /// 创建动作的单笔实体：只写 `request`（D-118 决策 5 的第一笔债）。
     ///
     /// 风险档在这里算定并写进请求载荷（`risk` / `threshold` / `approved` /
     /// `deferred`），授权动作只按它判放行——两处读的是**同一个判定输入**，
@@ -671,7 +671,7 @@ impl ToolPort {
         n + 1
     }
 
-    /// 落一笔**唤醒请求**（T-244 步 5d）：用户动作在开幕之前变成 `request(port=tool)`。
+    /// 落一笔**唤醒请求**（ 步 5d）：用户动作在开幕之前变成 `request(port=tool)`。
     ///
     /// ## 为什么只落 `request`，不顺便落授权
     ///
@@ -876,8 +876,8 @@ impl ToolPort {
     /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
-    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[ADR-121](../../../../docs/010-adr/121.md "ADR-121")
-    /// 的中止作用、PL-017 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
+    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../../docs/003-design/015-义务环.md "D-121")
+    /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
         for call in calls {
@@ -971,7 +971,7 @@ pub(crate) struct SessionDispatchPort {
     sink: ExecEventSink,
     /// 工具结果存档目录（session 在派发前算好的会话子目录）。
     tool_archive_dir: PathBuf,
-    /// 本会话事实轨：闸门判据按值取自它（ADR-084 §2，能力面不见存储实现）。
+    /// 本会话事实轨：闸门判据按值取自它（D-084 §2，能力面不见存储实现）。
     facts: Arc<dyn Store<Event = Event>>,
     /// 本轮中止信号：批内逐工具检查，未执行的批尾必须定格。
     abort: ExecAbortSignal,
@@ -987,7 +987,7 @@ pub(crate) struct SessionDispatchPort {
     derived: Mutex<DerivedFacts>,
     /// 本轮建树策略（`ExecTurn` 的请求级快照，与流式发射同一个取值）。
     presentation_tree: PresentationTree,
-    /// 淘汰闸的部署级判据（session 已折成**一个值**，见 ADR-086 §4）。
+    /// 淘汰闸的部署级判据（session 已折成**一个值**，见 D-086 §4）。
     elimination_revoked: bool,
 }
 

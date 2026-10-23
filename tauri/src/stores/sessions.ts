@@ -20,7 +20,7 @@
  * 由应用外壳（`MainLayout`）显式启动；本 store 只提供状态与收敛动作，
  * 因此可被独立构造与测试。
  *
- * 规范见 `symbio/src/plugins/session/docs/018-node-state-streaming.md`。
+ * 规范见 `symbio/src/plugins/session/docs/105-node-state-streaming.md`。
  *
  * ## 关键状态
  *
@@ -89,7 +89,7 @@ import {
   sortTranscript,
   truncateIdsFrom,
 } from './sessionTranscript'
-// [T-147c-ii] wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
+// c-ii wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
 // 从此只可能是呈现词表，下游（渲染 / 判定）不再接触 wire 词。
 import { messageTypeOf } from '@/registry/messageTypes'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
@@ -248,7 +248,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // ── 收件箱（排队中的用户消息） ──
   //
   // 与 `sessionMessages` 分开两张表，因为它们是**两个集合**：转写里是已落库的
-  // 消息，这里是还没被消费的待发消息（ADR-026 的 inbox）。同一条用户消息先在这
+  // 消息，这里是还没被消费的待发消息（D-026 的 inbox）。同一条用户消息先在这
   // 里、被消费后换到转写里——**id 不变**，所以是「换位置」不是「多一条」。
   //
   // 值就是展示所需的全部（地址末段即身份 + 后端给的预览文案），不做成
@@ -398,20 +398,20 @@ export const useSessionsStore = defineStore('sessions', () => {
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
         if (message.role != null) node.role = message.role
-        // [T-147d-iii] 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
+        // d-iii 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
         // 分派的唯一承载点，流式窄帧不带、终态权威帧带——合并规则两边通用。
         if (message.principal != null) node.principal = message.principal
         if (message.type != null) node.type = messageTypeOf(message)
-        // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
-        // [T-147d-ii] 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
+        // d-i `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
+        // d-ii 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
         if (message.meta != null) node.meta = message.meta
-        // 呈现数据（[T-155] 交互面下发）：后端把「这条长什么样」折进顶层 `title`/`icon`/
+        // 呈现数据（相应批次 交互面下发）：后端把「这条长什么样」折进顶层 `title`/`icon`/
         // `actions`，渲染期 `facetsOf` 从节点顶层直读。合并必须与身份字段同口径「有则覆盖」——
         // 否则首帧带来的工具名/图标/可用动作被后续窄帧丢光，界面退回按形态兜底（工具名消失）。
         if (message.title != null) node.title = message.title
         if (message.icon != null) node.icon = message.icon
         if (message.actions != null) node.actions = message.actions
-        // 读数行同口径「有则覆盖」（[ADR-111](../../../docs/010-adr/111.md)）：它由后端在
+        // 读数行同口径「有则覆盖」（[D-111](../../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）：它由后端在
         // 交付出口现算，压缩那条节点终态帧带来，窄增量帧不带 ⇒ 不覆盖掉已有的一格。
         if (message.stats != null) node.stats = message.stats
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
@@ -1167,7 +1167,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 收敛动作（`removeSessionLocal` / `refreshList`），不自己挂监听器，
   // 因此可被独立构造与测试。
   //
-  // **运行态在这条链路上**（ADR-025 后实时面只有一条通道）：`<sid>` 的变更
+  // **运行态在这条链路上**（D-025 后实时面只有一条通道）：`<sid>` 的变更
   // 经 `sessionTranscriptSync` 回读 `stat` → `applySessionState`；清单订阅
   // （`sessionNodeSync`）对同一批变更做防抖重拉——两条收敛路径幂等且同源。
 
@@ -1182,7 +1182,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 为什么可以断言「这一帧到达时本轮转写已完整」
    *
-   * 顺序是**节点属性**（ADR-025）：显示顺序由 `ChatNode.seq` 决定，与到达
+   * 顺序是**节点属性**（D-025）：显示顺序由 `ChatNode.seq` 决定，与到达
    * 顺序无关；「会话离开 `working`」不再被用来推出「本轮消息帧都已到达」——
    * 增量是否到齐由变更通道本身保证（满通道 → resync → 整份重读）。
    *

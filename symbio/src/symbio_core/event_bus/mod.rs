@@ -12,8 +12,8 @@
 //! 名字叫「总线」而它不承担路由，是有意的取舍而不是待补的债：`event_bus` 是插件身份，
 //! `bus_event` 是**跨栈线上名**（前端、`cli`、telegram、子智能体转播桥四方都在解它），
 //! 改它是一次协议变更（旧连接当场失联），而那份认知债的账主是**这段说明**——协议面与
-//! 判据的权威表述在 `docs/005-arch/004-PROTOCOLS.md` §事件总线频道，裁决记录在
-//! [T-206](../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")。
+//! 判据的权威表述在 `docs/003-design/005-协议规范.md` §事件总线频道，裁决记录在
+//! 相应批次。
 //! 真要做成多频道总线（服务端按 `kind` 分流）时，第一个改动点就是这里：先加一条 ADR，
 //! 再谈 `kind` 过滤与新增频道。
 //!
@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 /// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与已退役的转写流（`session/stream`
-/// ，2026-09-23 随 ADR-025 一起删）同量级。
+/// ，2026-09-23 随 D-025 一起删）同量级。
 const RESYNC_RETRY: usize = 20;
 const RESYNC_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -49,12 +49,12 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// `chat_node.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
 /// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`EVENT_BUS_KIND_VDFS` 由 vdfs 发）。
-/// 文档见 `docs/005-arch/004-PROTOCOLS.md` §事件总线频道——那一行带
+/// 文档见 `docs/003-design/005-协议规范.md` §事件总线频道——那一行带
 /// `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit` 的 E-008 与代码**双向**比对；
 /// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 ///
 /// `KIND_SESSION`（会话域专用事件频道）**已废除**：会话状态与
-/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `session/docs/018-node-state-streaming.md`）。
+/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `session/docs/105-node-state-streaming.md`）。
 /// 常量留在词表里只会让「再发一条会话事件」看起来仍然合法。
 pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 
@@ -83,7 +83,7 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 
 /// 订阅请求。
 ///
-/// ## 依赖方对照表（ADR-023 决策 2）
+/// ## 依赖方对照表（D-023 决策 2）
 ///
 /// | 角色 | 谁 |
 /// |---|---|
@@ -129,7 +129,7 @@ pub fn event_bus_unregister_subscriber(connection_id: &str) {
 ///
 /// 其他插件（vdfs 等）调用静态方法 `publish` 推送事件。会话域的 `kind = "session"`
 /// 频道已废除——会话状态与转写都是 VDFS 节点变更，走 `EVENT_BUS_KIND_VDFS`（见
-/// `session/docs/018-node-state-streaming.md`）。
+/// `session/docs/105-node-state-streaming.md`）。
 pub struct EventBus;
 
 impl EventBus {
@@ -223,7 +223,7 @@ pub fn event_bus_build_envelope(kind: &str, session_id: Option<&str>, data: Valu
 ///
 /// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方在 `cli` 与各插件
 /// ——是**线上字面量**，改名不会编译失败、只会让消费方的判别静默失效，故留在本层（与
-/// `plugin::route` 的地址常量同类，ADR-023）。
+/// `plugin::route` 的地址常量同类，D-023）。
 ///
 /// **不要按这个常量手写判别**：走 [`event_bus_resync_of`]，它把「信封 + 频道 + 指令类型」
 /// 三步一次做完（漏写判别的那个消费方就是本常量存在的理由）。
@@ -255,7 +255,7 @@ pub const EVENT_BUS_RESYNC_MARKER_TYPE: &str = "resync";
 /// [`event_bus_build_envelope`] / [`EVENT_BUS_KIND_VDFS`]）；只有载荷形状
 /// `VdfsChange` 是 vdfs 域的。住在 vdfs 域会让资源域认识总线（`vdfs → event_bus`
 /// 与 `vdfs → plugin` 两条边，构成依赖环族的一条路径）；搬来本域只多一条
-/// `event_bus → vdfs`（载荷类型），而 vdfs 拆边后是汇点，不成环（ADR-095）。
+/// `event_bus → vdfs`（载荷类型），而 vdfs 拆边后是汇点，不成环（D-095）。
 /// 「拆信封 → 取 `data` → 反序列化」因此仍只有一份实现：消费端各手写一份
 /// 正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
 ///
@@ -336,7 +336,7 @@ fn warn_slow_once(id: &str) {
 ///
 /// **无论补送成功与否都不摘除订阅**——这是与已退役的转写流的有意差异：
 /// 它有**流内帧序号**（`NodeEvent.seq`），摘除后消费端能靠跳号自愈；本频道没有
-/// 序号（ADR-025：顺序是节点属性），摘除即永久失联。
+/// 序号（D-025：顺序是节点属性），摘除即永久失联。
 /// 因此这里宁可让一个卡死的订阅者留在表里（每次变更限流告警一次，可观测），
 /// 也不做那个不可逆的动作。
 fn schedule_resync(kind: &str, id: String, tx: mpsc::Sender<PluginFrame>) {

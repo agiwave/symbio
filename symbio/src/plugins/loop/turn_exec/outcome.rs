@@ -1,4 +1,4 @@
-//! 阶段③ 结局归类 + 一轮执行的出口类型（T-179 · B2，PL-015 §5 动作 B2）。
+//! 阶段③ 结局归类 + 一轮执行的出口类型（ · B2，DE-021 §5 动作 B2）。
 //!
 //! 桥上取走未定格的正文/思考 → 桥归零（发射端退出的唯一信号）→ 发射任务收干 →
 //! 按 `aborted / closure_denied / 正常` 三条结局归类：前两条直接现成收口
@@ -29,9 +29,9 @@ pub(crate) struct ExecTurnResult {
 /// 被丢掉），loop 侧由 `execute_turn` 见到 `outcome.aborted` 后**重新构造**
 /// 一份。半截产出的唯一生产方与唯一消费方都在 loop 内、是一次普通的进程内
 /// Rust 调用，型在两侧编译期可见；塞进共享词汇再拆箱（无论用不用 `Any`）
-/// 都是给一条不跨墙的数据付跨墙的税（[ADR-095]）。
+/// 都是给一条不跨墙的数据付跨墙的税（[D-095]）。
 ///
-/// [ADR-095]: ../../../../../docs/010-adr/095.md "ADR-095"
+/// [D-095]: ../../../../../docs/003-design/005-协议规范.md "D-095"
 #[derive(Debug)]
 pub(crate) enum TurnExecExit {
     /// 用户中止且半截产出已在手（正文 / 思考 / 工具节点）——它们是事实，
@@ -43,7 +43,7 @@ pub(crate) enum TurnExecExit {
 
 impl From<PluginError> for TurnExecExit {
     fn from(e: PluginError) -> Self {
-        // `Aborted` 一律走中止出口，不压成失败（ADR-044 同源纪律）：走到这里的
+        // `Aborted` 一律走中止出口，不压成失败（D-044 同源纪律）：走到这里的
         // 中止没有半截产出可带（模型侧中止在 adapters 边界已转
         // `AdapterError::Aborted`，由 `outcome.aborted` 那条路重新构造）。
         match e {
@@ -189,7 +189,7 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
                 // 校准比冻结在初值 1.0，压缩预检会把本可成功的摘要请求误判成
                 // 「注定超限」。
                 usage: outcome.usage,
-                // 末轮原因直通（T-144）：`..Default::default()` 会把 finish 静默填成
+                // 末轮原因直通：`..Default::default` 会把 finish 静默填成
                 // Stop，chat_loop 的长度戳与自动续写判据因此读不到真值。反射档 /
                 // 兜底 / 中止没有模型轮 ⇒ Stop 就是诚实值。
                 finish: outcome.finish,

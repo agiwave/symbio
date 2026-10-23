@@ -1,14 +1,14 @@
-//! 事件契约 —— v2 事件溯源的共享类型层（[plan/01 §2 / §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+//! 事件契约 —— v2 事件溯源的共享类型层（[plan/01 §2 / §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
 //! ## 为什么是独立模块
 //!
 //! 施工视图的六个包（`actors` / `projections` / `store` / `adapters` / `governance`）
 //! 彼此**禁止互相依赖**，唯一例外是「事件与 View 的类型定义」——那是共享契约
-//! （[plan/05 §3.1](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")，01 §13.5「契约从边上挪到中心」）。
+//! （[plan/05 §3.1](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")，01 §13.5「契约从边上挪到中心」）。
 //! 因此事件类型必须住在**中性层**：`store`（④）与 `projection`（③）都只 import 本模块，
 //! 谁也拿不到谁的句柄。
 //!
-//! ## 冻结锚点（[plan/03 §1](../../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证")）
+//! ## 冻结锚点（[plan/03 §1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）
 //!
 //! - **F5**：动词 5 个、能力 7 个、模式 3 个 —— 本模块冻结动词与实体的**闭集**
 //!   （`Verb` / `Entity` 枚举）。新增格子 = `match` 加一臂，是数据变化不是机制变化；
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 mod grid;
 pub use grid::{event_cell, Cell};
 
-/// 不可伪造的单调序号（[plan/01 §2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+/// 不可伪造的单调序号（[plan/01 §2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// 字段私有：**只有 `Store` 能构造**（`pub(crate)`），调用方只能拿到与比较——
 /// 自己 `Seq(5)` 伪造一个序号编译不过。这就是「类型强制单调」的构造侧。
@@ -47,7 +47,7 @@ impl Seq {
 /// 事件时间戳：Unix 毫秒（UTC），口径同 [`crate::symbio_core::clock_now_ms`]。
 pub type Timestamp = i64;
 
-// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）────
+// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/007-task/121-最小闭环.md ")）────
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
 // 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
@@ -60,7 +60,7 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// **本轮生效的配置**（载荷 `{ classify_enabled, auto_compress, progress_* , is_persistent }`）。
 /// 落在 `turn × asserted`。
 ///
-/// ## 为什么配置也是事实（T-225）
+/// ## 为什么配置也是事实
 ///
 /// 判决 / 召回 / 压缩 / 汇报的判据都读配置。若决策现场直接读 `SessionConfig`，同一份
 /// 日志在不同时刻会算出不同的欠账——配置变了，回放看到的是"新配置"而不是"那一轮用的
@@ -74,18 +74,18 @@ pub const EVENT_SESSION_CONFIG: &str = "session.config";
 
 /// **本轮的派发档**（载荷 `{ tier, budget_ms, principal }`）。落在 `turn × asserted`。
 ///
-/// ## 为什么档位从 `user.message` 里分出来（T-225）
+/// ## 为什么档位从 `user.message` 里分出来
 ///
 /// 用户格必须在**任何判决之前**落（`owed` 要拿它匹配"这一轮开始了"），而档位要到
 /// 召回 / 技能命中之后才知道（反射档 vs 深度档）。把档位留在用户格上，就只能要么
 /// 提前写一个还没定的值（SLO / 兜底率按它分组 ⇒ 统计说谎），要么把用户格推回判决
 /// 之后（输入闭包重新破掉）。本格是第三条路：开轮格只说"用户说了什么"，本格说
-/// "这一轮按哪一档跑"——与 [ADR-044] 的「档位是数据」同一条事实，只是分两次落。
+/// "这一轮按哪一档跑"——与 [D-044] 的「档位是数据」同一条事实，只是分两次落。
 ///
 /// 读方（`projection::fallback::declared_tier` / `slo` / `invariants::declared_budget_ms`）
 /// 优先读本格；历史 WAL 没有本格时回退读 `user.message` 的 `tier` / `budget_ms`。
 ///
-/// [ADR-044]: ../../../../docs/010-adr/044.md "ADR-044"
+/// [D-044]: ../../../../docs/003-design/016-工程落地与验证.md "D-044"
 pub const EVENT_TURN_DISPATCH: &str = "turn.dispatch";
 
 /// **轮边界折进的补充**（载荷 `{ text, count }`）。落在 `turn × asserted`。
@@ -115,12 +115,12 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 
 /// **一次性阶段已执行**（载荷 `{ stage, round, source?, reason?, result? }`）。落在 `turn × asserted`。
 ///
-/// ## 它解决的是什么（ADR-107 判据 2）
+/// ## 它解决的是什么（D-107 判据 2）
 ///
 /// `policy.classify` / `policy.recall` / `policy.compress` 的判据在一轮内**恒真**
 /// （`round == 0` 直到收轮才变），只有「这一步做完了没有」能让它转假。而这层簿记
 /// 若存在内存里，drive 的第二次迭代会再执行一遍同一步；若存在 `TurnState` 里，
-/// 它就与事实源分叉（PL-014 §2 禁止的第二份状态）。本格是第三选项：**「已做」
+/// 它就与事实源分叉（DE-014 §2 禁止的第二份状态）。本格是第三选项：**「已做」
 /// 落为事实**，下一问问表时从它投影 `done`。
 ///
 /// `stage` 取环的胶囊臂名（`decide` / `recall` / `compress`），与日志里那条命名
@@ -151,7 +151,7 @@ pub const EVENT_TURN_STAGE: &str = "turn.stage";
 /// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
 /// 发点在**工具批次边界**（`turn_exec` 的汇报闭包）而不是 `chat_loop` 的轮边界——后者每个
 /// 用户轮只经过一次请求，而工具循环在运行器的环体里，真实的工具轮数只在那里
-/// （载荷里的 `tool_rounds` 就是它；计数口径见 [ADR-074](../../../../docs/010-adr/074.md)）。
+/// （载荷里的 `tool_rounds` 就是它；计数口径见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 /// 该不该说是 `policy.report` 行的四条与关系：开关开着 ∧ 沉默够久 ∧
 /// `tool_rounds >= min_rounds` ∧ 未超本轮配额（判据在 `report_due` 视图 + 行表）。
 ///
@@ -167,14 +167,14 @@ pub const EVENT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 /// **对话面开场白**（载荷 `{ text, id, reason, exclude_from_context }`）。落在 `turn × asserted`。
 ///
-/// ## 它为什么是事实（T-056）
+/// ## 它为什么是事实
 ///
 /// `Escalate` 判决在轮首产出一句首响（「好，我来处理」），随后本轮**继续**进工具循环
 /// ——它与 `chat.assistant.final` 不是同一条：收束格是干活干完之后的答复，本格干活
-/// **开始前**的开场白。这句是事实（T-052），随本格入格（WAL 为唯一事实源）——
+/// **开始前**的开场白。这句是事实，随本格入格（WAL 为唯一事实源）——
 /// 不入格则重建折不出这条根级对话面节点——实测 t20 / t22 的「恰有一条对话面
 /// 节点」全部落空（`meta.surface = "reply"` / `meta.reason = needs_work`）。
-/// 节点形状是事实的一部分（T-052 原则），故单立一格。
+/// 节点形状是事实的一部分（ 原则），故单立一格。
 ///
 /// ## 为什么与 `chat.assistant.reported` 分格而不是复用
 ///
@@ -212,16 +212,16 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 进不进请求包相反，混在一处必然让其中一半被静默滤掉。
 pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 
-// ── 协议族（port protocol）：**对外调用落成事实**（T-224）──
+// ── 协议族（port protocol）：**对外调用落成事实**──
 //
 // 这五个名字是**新增**，不是替换：现网的事实名全是业务词汇（`memory.recalled` /
 // `task.rework_created` / `chat.assistant.final` / `commitment.broken` …），
 // 有各自真实的读方，**一个不动**。把它们压成几个协议名不是简化，是销毁语义。
 //
 // 补上的是**一类从来不存在的事实**：今天「我要调模型」「我要调工具」只活在内存里
-// （PL-014 §2.1 的「意图」）。落成事实之后，每一次对外调用都可回放、可恢复、可审计。
+// （DE-014 §2.1 的「意图」）。落成事实之后，每一次对外调用都可回放、可恢复、可审计。
 //
-// **端口是载荷，不是事实种类**：只有这五个名字带 `port` 字段（PL-016 §2.4 的裁决），
+// **端口是载荷，不是事实种类**：只有这五个名字带 `port` 字段（DE-015 §2.4 的裁决），
 // 端口的取值（`turn` / `model` / `tool` / …）写在载荷里。**加一个端口 = 0 个新事实名。**
 //
 // 落格：**五个都在 `turn × asserted`**，逐条理由写在各自的文档与 `grid.rs` 的对应行注释里。
@@ -247,7 +247,7 @@ pub const EVENT_REQUEST: &str = "request";
 /// ## 谁写
 /// **引擎**（`before` 标记位），不是搬运者——搬运者的 `run` 可能不产生事实就返回。
 /// 若由它写 `sent`，「派出去了」就依赖对方自觉：它一忘，`dispatch` 行永远不还清，
-/// 而**没有任何东西会红**（PL-016 §2.3；T-223 判据 2）。
+/// 而**没有任何东西会红**（DE-015 §2.3； 判据 2）。
 ///
 /// ## 为什么落 `turn × asserted`
 /// 与 `request` 同格同族：一次调用的两个阶段是同一条账的两个断言。
@@ -268,7 +268,7 @@ pub const EVENT_RESPONSE: &str = "response";
 ///
 /// ## 谁写
 /// 搬运者；引擎在执行体 `run` 返 `Err` 时兜底写它——**失败也是事实**，
-/// 义务环里没有异常分支（PL-016 §2.6 契约 3）。
+/// 义务环里没有异常分支（DE-015 §2.6 契约 3）。
 ///
 /// ## 为什么落 `turn × asserted`（而不是 `closed`）
 /// 与 `authz.denied` 同一条纪律：一次端口调用失败**不关轮**——轮还可能重试、
@@ -288,10 +288,10 @@ pub const EVENT_FAILED: &str = "failed";
 ///
 /// ## 为什么需要它
 /// 没有它，`sent` 之后崩溃 ⇒ `await` 行永远 blocked ⇒ 那笔账永远挂着，
-/// 而日志上「发出去了」与「卡住了」长得一样（PL-016 §2.6 契约 7）。
+/// 而日志上「发出去了」与「卡住了」长得一样（DE-015 §2.6 契约 7）。
 pub const EVENT_RETRY: &str = "retry";
 
-// ── 授权（authz）：**拒绝也是一条事实**（T-219）──
+// ── 授权（authz）：**拒绝也是一条事实**──
 
 /// 写侧闸拒绝落下的**否定事实**。落在 `turn × asserted`。
 ///
@@ -313,7 +313,7 @@ pub const EVENT_RETRY: &str = "retry";
 /// `detail` = 人话原因（缺哪一项能力，或哪一道作用域上限）。作者（`actor`）
 /// 就是被拒的主体——「谁」不再单独记一份。
 ///
-/// 义务环落地后 `key` 会换成 `Pattern` 的键（PL-016 §4.2 的 `denied(key)`）；
+/// 义务环落地后 `key` 会换成 `Pattern` 的键（DE-015 §4.2 的 `denied(key)`）；
 /// 今天没有 `Decl`，先用格名——它是同一件事在日志里的名字。
 ///
 /// ## 三条边界
@@ -327,7 +327,7 @@ pub const EVENT_RETRY: &str = "retry";
 ///    不能因为记账失败就放行。
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 
-/// **放行事实**：授权级联的正向一半（T-226 / PL-016 §4.2）。
+/// **放行事实**：授权级联的正向一半（ / DE-015 §4.2）。
 ///
 /// ## 为什么放行也要落一条
 ///
@@ -354,7 +354,7 @@ pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 ///    「这次判定发生在派发之前」，不替代任何一条判定。
 pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
-// ── 停机原因：**一个字段、一个闭集**（T-220）──
+// ── 停机原因：**一个字段、一个闭集**──
 
 /// 停机原因——「这一轮为什么停」的唯一答案，取值是**闭集**。
 ///
@@ -370,7 +370,7 @@ pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 ///
 /// 于是「这一轮为什么停」只能靠读三个键 + 猜。而它正是重启后最需要回答的问题：
 /// 义务环里没有 `Halt` 这个值——"停"只有一种表达，就是"没有债了"，那么
-/// "为什么没有债了"必须写在事实里（PL-014 需要一个运行期分支
+/// "为什么没有债了"必须写在事实里（DE-014 需要一个运行期分支
 /// `None => halt(NoRule)`；义务环里那个分支不存在——装载期"每行收口"已拦住，
 /// 所以闭集里**没有 `no_rule`**，这不是遗漏）。
 ///
@@ -395,7 +395,7 @@ pub enum ClosureReason {
     Exhausted,
     /// 主路径失败，兜底顶上。
     Fallback,
-    /// 收束闸拒绝（T-219）。**不产生收束格**——被拒的一轮仍然未收束，
+    /// 收束闸拒绝。**不产生收束格**——被拒的一轮仍然未收束，
     /// 这个值只落在 `authz.denied` 上。
     Denied,
 }
@@ -427,7 +427,7 @@ impl ClosureReason {
     }
 }
 
-// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/009-task/122-工具调用与产物.md "T-122-工具调用与产物")）──
+// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/007-task/122-工具调用与产物.md ")）──
 //
 // 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**
 // 不单独占格（同一件事两格必然漂移）；`produced_by` 指向**本轮用户格**，即
@@ -435,16 +435,16 @@ impl ClosureReason {
 // 它的 `task/turn`。
 
 /// 产物产出：一次工具调用的**结果**（载荷 `{ tool, text }`）。
-/// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+/// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
-// ── 消息列表变更的格子（T-056，ADR-053 / ADR-054）──
+// ── 消息列表变更的格子（，D-053 / D-054）──
 //
 // 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
 // `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，
 // **被截断的消息会复活、编辑过的内容会回退**。
 //
-// 这一族是**闭集**（ADR-054 决策 1）——列表的改动只有四种，三个节点级 + 一个列表级：
+// 这一族是**闭集**（D-054 决策 1）——列表的改动只有四种，三个节点级 + 一个列表级：
 // 诞生（本格）/ 断言（`message.edited`）/ 关闭（`message.removed`）/ 取代
 // （`session.consolidated`）。任何场景都是它们的组合；**新场景若需要第五种 ⇒ 模型错了**，
 // 应当改模型而不是加一格。
@@ -467,13 +467,13 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 /// 不是任何一轮的产出，也不属于任何工具调用。
 ///
 /// 少了这一格，那类节点在事实源里**从来没有出生过** ⇒ 切主读路径之后它们整条消失
-/// （ADR-054 决策 1 的「诞生」原语）。
+/// （D-054 决策 1 的「诞生」原语）。
 ///
 /// ## 边界：它是「没有语义承载」的那一格
 ///
 /// 判据是**否定的**——只有当一条节点的诞生**找不到别的格**时才用它。承载着对话内容的
 /// 节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，否则同一条节点
-/// 有两个 owner（ADR-049 理由 1）。
+/// 有两个 owner（D-049 理由 1）。
 /// 因此本格的节点是**界面文本**类（`prompt_fidelity` 的 `excluded_from_prompt`），
 /// 不进模型请求包。
 ///
@@ -515,8 +515,8 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 ///
 /// ## 为什么是 `message × progressed` 而不是 `system`
 ///
-/// 用 ADR-053 自己的判据：双源对账
-/// （`session.reconciled`，已随 T-053 退役）曾归 `system`，理由是「它说的不是
+/// 用 D-053 自己的判据：双源对账
+/// （`session.reconciled`，已随 退役）曾归 `system`，理由是「它说的不是
 /// 『这个会话发生了什么』，而是『两个读源此刻是否一致』」——诊断。而压缩**确实发生过**：
 /// 一段历史被摘要取代、列表从此读作快照那一份。那是
 /// **会话事实**，故归 `message`（本实体正是「消息列表上的变更」）。动词取 `progressed`
@@ -529,20 +529,20 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 /// 都是「最近快照 + 其后事实」——那是**折叠**从最近一份快照起折出来的，不是读口
 /// 只给了那一段。被取代的那一段**不删**——持久化实现把它移入归档段，
 /// 留作审计与回溯，而 `range` 的口径恒是完整史
-/// （[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
+/// （[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
 /// **不删是因为事实不可凭空消失**；移入归档段是因为「压缩」的语义就是「那段历史已被
 /// 摘要取代」，它不再需要留在增长优化的窗口里。
 ///
-/// 于是「WAL 无界增长」与「上下文压缩」由**同一个机制**解决（ADR-053 决策 6）：
+/// 于是「WAL 无界增长」与「上下文压缩」由**同一个机制**解决（D-053 决策 6）：
 /// 一次压缩 = 多一条快照事件 + 把被取代的前缀移入归档段。
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
-// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/009-task/126-长期记忆与语义检索.md "T-126-长期记忆与语义检索")）────
+// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/007-task/126-长期记忆与语义检索.md ")）────
 
 /// 编码：学到的语义内容（`payload: { content, tag, generation, vis_scope }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
 /// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
-/// 承诺（[ADR-110](../../../../docs/010-adr/110.md "ADR-110")；写方 `plugins/loop/memory_events.rs`）。
+/// 承诺（[D-110](../../plugins/memory/README.md "D-110")；写方 `plugins/loop/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
@@ -565,7 +565,7 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 /// 收束族，**不开第二写通道**——I1）。
 pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
-// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/009-task/128-多主体与对等承诺.md "T-128-多主体与对等承诺")）──
+// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/007-task/128-多主体与对等承诺.md ")）──
 //
 // 立约 = `commitment` 实体的一格事件（**加格子，不加机制**——对等协作是图，
 // 子智能体递归的树表达不了，才需要这组格子）。声誉是它的投影（`projection = reputation`）。
@@ -581,7 +581,7 @@ pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 落在 `commitment × asserted`。
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
-// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）──
+// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/007-task/123-多步任务与返工.md ")）──
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
@@ -594,7 +594,7 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")
+/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/007-task/127-插话与实时打断.md ")
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
 pub const EVENT_TASK_HELD: &str = "task.held";
@@ -604,8 +604,8 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")、
-//    [roadmap/S09 §3](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）────
+// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/007-task/127-插话与实时打断.md ")、
+// [roadmap/S09 §3](../../../../docs/007-task/129-外部执行与熔断.md ")）────
 //
 // 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
 // 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
@@ -616,7 +616,7 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
-// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")）──
+// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/007-task/132-自主层与长期目标.md ")）──
 //
 // 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
 // `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
@@ -639,7 +639,7 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 /// 它不是事件名，而是**同一个事实的另一种写法**：写体 `meta.trigger` 声明的是
 /// 「这一轮由系统自己发起」，落进事实源就是 [`EVENT_SYSTEM_TRIGGERED`] 那一格。
 /// 两侧必须同源——`meta` 是自由 JSON，键名拼错编译器管不到，生产方（调度侧）与
-/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[ADR-077](../../../../docs/010-adr/077.md "ADR-077") 裁决二）。
+/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../plugins/heartbeat/README.md "D-077") 裁决二）。
 ///
 /// 形状：`meta.trigger = { "kind": <EVENT_TRIGGER_KIND_*>, "idle_ms": N }`，
 /// **在写臂就地消费**，不要求它活到转写。
@@ -648,7 +648,7 @@ pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
 /// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
 pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";
 
-// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）──
+// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/007-task/133-多智能体社会.md ")）──
 //
 // 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集
 // 里一直有这一行）在 S13 取的第一个值就是**淘汰裁决**——声誉投影低于阈值的主体
@@ -669,7 +669,7 @@ pub const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，11 个）。
 ///
-/// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证")）：
+/// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 加枚举臂 + ADR 登记，不是机制变更。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Entity {
@@ -891,7 +891,7 @@ fn payload_str(e: &Event, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 信封的最小契约（[plan/01 §2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的 `type Event: EventEnvelope`）。
+/// 信封的最小契约（[plan/01 §2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的 `type Event: EventEnvelope`）。
 ///
 /// `Store` 只需要知道三件事：幂等键是什么、seq 在不在、seq 怎么赋值。
 /// 剩余字段对存储层不可见——将来 WAL / 分片实现携带更富的信封也不动 trait（F1）。

@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T31 任务表（S7 步 16–18，[04 §3.1 批⑨](../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+// T31 任务表（S7 步 16–18，[04 §3.1 批⑨](../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 // 模型调 `todo_write` 声明一张**带依赖的任务图** ⇒ 收束时把声明落成任务事实 ⇒
 // 读出口 `session/stats` 的 `readyset` 列与请求视图的**调度段**都从同一份事实源算出来。
 //
@@ -146,7 +146,7 @@ export default defineCase(
       // （`落地实现` 在 `todo_write` 的入参里），拿整包当判据等于在断言「历史里
       // 有历史」。
       const nextMsgs = reqs[2].body.messages ?? [];
-      // 请求级三段是**系统注入的读视图** ⇒ `role: system`（ADR-048a；标成 `user`
+      // 请求级三段是**系统注入的读视图** ⇒ `role: system`（D-048a；标成 `user`
       // 会让「最后一条 user = 本轮发言」这个判据失真——t36 就是这么红的）。
       const sections = nextMsgs.filter(
         (m) => m.role === 'system' && textOf(m).includes('【任务调度】'),

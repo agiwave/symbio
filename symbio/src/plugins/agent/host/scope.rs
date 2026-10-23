@@ -98,7 +98,7 @@ impl Capability for PrefixedCapability {
     ///
     /// 默认实现读 `self.meta().effective_risk()`——那是**静态**档。风险随参数变化
     /// 的工具（shell 按命令分级）覆写 `risk_for`，改名包装若不显式转发，注册收口点
-    /// 的审批闸就读到默认档而丢掉动态分级（T-138：闸门住在 `DefaultToolVisitor`
+    /// 的审批闸就读到默认档而丢掉动态分级（：闸门住在 `DefaultToolVisitor`
     /// 之后，这条透传路径必须完整）。
     fn risk_for(&self, args: &serde_json::Value) -> crate::symbio_core::CapabilityRiskLevel {
         self.inner.risk_for(args)
@@ -164,7 +164,7 @@ impl Registry for SubAgentVisitor {
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
-        // 换成 put（AR-025 4a）。
+        // 换成 put（DE-008 4a）。
         let Some(cap) = row.cap().cloned() else {
             return;
         };

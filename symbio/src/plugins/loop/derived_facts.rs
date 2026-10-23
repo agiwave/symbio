@@ -34,7 +34,7 @@
 //! 刚写下的那些。
 
 use crate::symbio_core::{Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED};
-// 记录类型住 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三 4/5 组）：
+// 记录类型住 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 
@@ -90,7 +90,7 @@ pub(crate) fn record_derived(
     // 幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、把整轮
     // 收束拖失败。
     //
-    // `to` = **来源主体**（ADR-067：从调用点常量变成数据）——本主体向「这条消息
+    // `to` = **来源主体**（D-067：从调用点常量变成数据）——本主体向「这条消息
     // 的出处」立约；缺省由取值点（`request_source_principal`）落本机用户。
     for d in delegations {
         let cid = format!("v2c-{anchor_id}-{}", d.id);
@@ -136,7 +136,7 @@ pub(crate) fn record_derived(
     }
 }
 
-/// 收束派生事实中的**淘汰回路**半边（S13 §3，T-073）：轮末按**刷新后**的声誉投影
+/// 收束派生事实中的**淘汰回路**半边（S13 §3，）：轮末按**刷新后**的声誉投影
 /// 裁决「谁不再被授予 `assign.work`」，落成一条 `verdict.asserted`（可审计、可撤销
 /// 的 grants 变更事件，`governance::GrantsOverlay` 的读侧半边）。
 ///
@@ -165,8 +165,8 @@ pub(crate) fn record_derived(
 /// 恢复必须走**申诉 / 人工复位**（写一条 `change = "restore"` 的同格事件，机制半边
 /// 在 `EliminationDecider::restoration_event` 与撤销回路单测里证过）。本步不造一个
 /// 「假装能自动恢复」的回路；这条缺席已按**边界**登记在
-/// [ADR-108](../../../../docs/010-adr/108.md "ADR-108")（含重开条件），任务层的缺口账
-/// 在 [T-133](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会") §现状 ①。
+/// [D-108](../../../../docs/003-design/002-架构总览.md "D-108")（含重开条件），任务层的缺口账
+/// 在 相应批次 §现状 ①。
 ///
 /// ## 失败只记日志不冒泡
 ///
@@ -195,7 +195,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     let matrix = crate::symbio_core::production_matrix();
     for (principal, entry) in &view.by_principal {
         // 条件 2：持 assign.work 的**部署**主体（淘汰面只认部署表：绑定登记
-        // （[ADR-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
+        // （[D-100]）是运行期身份事实，不构成「部署授予过 assign.work」——
         // 未部署的 `agent:<id>` 不在表里 ⇒ 不淘汰，边界同函数文档）。
         if !matrix.deployed_can_write_name(principal, crate::symbio_core::CAP_ASSIGN_WORK) {
             continue;
@@ -276,7 +276,7 @@ pub(crate) fn record_learning(
 
     // ── 步 11 编码（S5，04 §3.1 批⑦）────────────────────────────────────
     // 经验（用户发言）= **人的认知**，可见域 `shared`——智能体读、本人写
-    // （T-130 §3 的 grants 行语义，T-094 ①：内容侧产地）。单归属主部署下
+    // （ §3 的 grants 行语义， ①：内容侧产地）。单归属主部署下
     // 「这个人」= 本机用户，认知可供本部署的矩阵内主体借用（SC-010 判据 3）。
     if let Err(why) = super::memory_events::encode(
         store,
@@ -293,12 +293,12 @@ pub(crate) fn record_learning(
     ) {
         remember("步 11 编码", why);
     }
-    // ── 步 11b 判断编码（T-085 批④，S10 七类认知内容的「判断」写方）────────
+    // ── 步 11b 判断编码（ 批④，S10 七类认知内容的「判断」写方）────────
     // 本轮**成功收束**的正文（`response`）→ 一条 tag="判断" 的记忆，与用户发言
     // 那条同文去重 / 同截断 / 同溯源。兜底收束不记（`response = None`）——固化
     // 失败套路等于把没走通的路写成记忆（与技能编译同一条纪律）。
     // 判断 = 智能体自己的收束记录，可见域 `thread_private`（C10 缺省）——
-    // 它是会话私有的工作记忆，不是可跨主体借用的认知（T-094 ①）。
+    // 它是会话私有的工作记忆，不是可跨主体借用的认知（ ①）。
     if let Some(response) = response {
         if let Err(why) = super::memory_events::encode(
             store,
@@ -336,7 +336,7 @@ pub(crate) fn record_learning(
     // ── 步 22 · 技能路由观测（S11，04 §3.1 批⑪ 子批 B）───────────────────
     //
     // 观测只带数据 `{ skill_id, fallback }`——`calibration` 投影的契约就是这两个
-    // 字段（S11 §3「不加新格子」曾把它们复用在 `memory.recalled` 上；T-085 批①
+    // 字段（S11 §3「不加新格子」曾把它们复用在 `memory.recalled` 上； 批①
     // 把它们搬进**自己的格子** `memory.calibrated`，读侧改按 `kind` 过滤——
     // 复用两张格子靠载荷字段判别，读侧就得赌「别的格子恰好不带这两个字段」）。
     // **没有这一步，回退永远不会发生**：零使用时置信度按 1.0 算，技能再错也一直

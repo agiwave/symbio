@@ -49,7 +49,7 @@ fn nameless_write_generates_an_id() {
     assert_eq!(id.len(), "mcp-".len() + 8, "随机段定长：{id}");
 }
 
-/// `with_id` 与 `model/plugin.rs` 的同名实现**锁等价**（ADR-011 双份实现）。
+/// `with_id` 与 `model/plugin.rs` 的同名实现**锁等价**（D-011 双份实现）。
 ///
 /// 用例与 `model/plugin.test.rs` 逐字同构：缺 id 补路径段、已有 id 原样保留、
 /// 空串 id 视为缺失。任一侧改动行为，这里（或 model 侧）必有一个测试失败，

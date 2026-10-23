@@ -20,12 +20,12 @@
 //! 1. 校验目标 agent 目录存在、`working_dir` 合法；
 //! 2. `vdfs/write <会话地址>` 落子会话元数据（`parent_session_id` → 存储归档父会话
 //!    子目录、不进用户会话列表；`mode` / `risk_level` / `provider_id` 随本条落成
-//!    会话属性，[ADR-066]）；
+//!    会话属性，[D-066]）；
 //! 3. `vdfs/write <会话地址>/inbox` 发起本轮（输入面双轨已退役：`session/chat/send`
 //!    不再存在，而子会话不是本进程持有的会话实例，跨作用域写者只能走地址面；
 //!    该写入**受理即返回**，本轮在后台推进）；
 //! 4. 订阅子会话的实时面（**一条**：`event_bus` + `vdfs/watch <会话地址>`——
-//!    消息流式与会话运行态都在上面，见 ADR-025），把子会话过程经出口转播到
+//!    消息流式与会话运行态都在上面，见 D-025），把子会话过程经出口转播到
 //!    父视图（节点锚定到本工具调用之下）；
 //! 5. 子会话完成（idle 无待审批）→ 工具结果 = 最终文本（末尾附
 //!    `[subagent_session_id]`，供 LLM 后续续会话）；等待审批 → 工具以待审批
@@ -110,7 +110,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
     fn meta(&self) -> crate::symbio_core::CapabilityMeta {
         crate::symbio_core::CapabilityMeta {
             name: NAME.to_string(),
-            // 行为位自声明（T-158）：本工具提供 `assign.work`（淘汰闸的管辖对象），
+            // 行为位自声明：本工具提供 `assign.work`（淘汰闸的管辖对象），
             // 且是跨主体立约型工具（承诺记账对象）。执行器读这两个位判，不认名字——
             // 作用域投影只换名字、原样透传两位（改名包装器不重判风险的同一条纪律）。
             provides_assign_work: true,
@@ -303,7 +303,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
                 // `mode` / `risk_level` / `provider_id` 也随之落成会话属性——
                 // 它们定义「这个子会话怎么跑」，属**会话事实**而非消息属性
-                // （[ADR-066]：地址写入不承载运行选项，三项的归属是会话 metadata）。
+                // （[D-066]：地址写入不承载运行选项，三项的归属是会话 metadata）。
                 let sid = uuid::Uuid::new_v4().to_string();
                 if let Err(e) = register_subsession(
                     parent.clone(),
@@ -331,7 +331,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         //
         // 与 CLI / 前端**同构**：`event_bus/subscribe` 收件 + `vdfs/watch <会话地址>`
         // 开闸，**两步缺一不可**（只订阅 = 永不响的频道；只 watch = 没有收件人）。
-        // 会话域的实时面**只有这一条**（ADR-025）：
+        // 会话域的实时面**只有这一条**（D-025）：
         //
         // - 消息流式 = `<sid>/message/<mid>` 的 `updated` + `delta`；
         // - 会话运行态 = `<sid>` 的 `updated`——**本轮结束的唯一判据**（一轮里根
@@ -364,7 +364,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
 
         // ── 发起这一轮：发消息 = 写收件箱；恢复 = 对目标消息做动作 ──
         //
-        // `session/chat/send` 已随输入面双轨退役（[ADR-066] / T-077 步②）。进程内入队
+        // `session/chat/send` 已随输入面双轨退役（[D-066] / 步②）。进程内入队
         // 从此只剩**会话自己**那两条内部路径（收件箱写臂与它调的自主开轮）；一切跨作用域
         // 的写者——本工具建的子会话、CLI、telegram、心跳调度插件——都写地址面，
         // 因为它们都不持有（也不该持有）那个 `SessionPlugin` 实例。
@@ -372,7 +372,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // `mode` / `risk_level` / `provider_id` 随**会话 metadata** 继承
         // （见上面 `register_subsession` 的 json）：它们是会话属性，解析链
         // `req > metadata > 默认` 的第二档已经给了答案，随行携带会让同一事实有两个
-        // owner（[ADR-066] 理由 1）。
+        // owner（[D-066] 理由 1）。
         let vctx = vdfs_context(&ctx);
         let rel = format!("{PLUGIN_ID_SESSION}/{child_session_id}");
         let started: Result<(), PluginError> = if let Some(m) = first_message {
@@ -675,7 +675,7 @@ struct RelayBridge {
 ///
 /// ## 一条通道，两类地址（与 `cli/src/client.rs` 同构）
 ///
-/// 会话域的实时面只有一条（ADR-025），落点恒为**被变更节点自身的地址**：
+/// 会话域的实时面只有一条（D-025），落点恒为**被变更节点自身的地址**：
 ///
 /// - `<sid>` = **会话运行态**（容器节点）——本轮结束的唯一判据（一轮里根 Turn 会
 ///   多次定格，只有会话节点离开 `working` 才是整轮结束）。变更随 `data` 带全量节点
@@ -692,7 +692,7 @@ struct RelayBridge {
 ///
 /// 两类变更**不靠到达顺序**协作。旧版靠「同一条流 + 同一个 `seq` 计数器」推出
 /// 「读到不忙 ⇒ 本轮消息帧都已处理」；那条推理的前提（顺序是**传输**属性）已被
-/// ADR-025 纠正为「顺序是**节点**属性」（`ChatNode.seq` 决定显示顺序）。现在
+/// D-025 纠正为「顺序是**节点**属性」（`ChatNode.seq` 决定显示顺序）。现在
 /// 的收尾判据是会话节点的 `status` 本身——回读即得，与谁先到无关。
 ///
 /// ## 本桥是「子会话 → 父视图」的**唯一翻译点**
@@ -1009,7 +1009,7 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// `find_tool_result` 正确识别。
 ///
 /// **顺序依赖（主体改写必须排在角色改写之后）**：`node_role()` 的读法是「残留 `role`
-/// 格优先、`principal.kind` 兜底」（[T-147d-iii] 共存阶段）。先写主体的话，靠主体折出
+/// 格优先、`principal.kind` 兜底」（d-iii 共存阶段）。先写主体的话，靠主体折出
 /// `Assistant` 的那种节点（`role` 空、`principal.kind = Agent`）在读第二次就已经是
 /// `Tool`，于是角色格**永远不会被写**——这张卡的前端与 flatten 都只能从主体猜类型，
 /// 而 `find_tool_result` 认的是 `role`。判据钉在 `relabel_..._rewrites_principal_folded`。

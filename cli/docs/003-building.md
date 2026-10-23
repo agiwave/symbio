@@ -12,10 +12,10 @@ created: 2026-09-11
 > cc-rs，并把路径分隔符归一化，保证与 `symbio/` 原生构建的环境逐字节一致。
 
 ```bash
-node scripts/build-cli.mjs            # cargo build --offline
-node scripts/build-cli.mjs --check    # 只做类型检查（更快）
-node scripts/build-cli.mjs -- --release   # `--` 之后原样透传给 cargo
-cd cli && cargo test                  # 参数解析单测（4 个用例）
+node scripts/build-cli.mjs # cargo build --offline
+node scripts/build-cli.mjs --check # 只做类型检查（更快）
+node scripts/build-cli.mjs -- --release # `--` 之后原样透传给 cargo
+cd cli && cargo test # 参数解析单测（4 个用例）
 ```
 
 产物：`../target/debug/symbio-cli.exe`（相对 `cli/`）。**没有第二个 target 目录**——`cli` 是仓库根
@@ -73,11 +73,11 @@ CARGO_LOG=cargo::core::compiler::fingerprint=info cargo build 2>&1 | grep -i dir
 ## 其余必须对齐的两点
 
 - **离线由脚本显式给**：`build-cli.mjs` 传 `--offline`，构建永不触网（不依赖 cargo 配置文件）。
-  新增或升级依赖后要跑一次 `node scripts/cargo-offline-refresh.mjs` 把新 crate 拉进本地缓存，
-  否则下一次离线构建直接报「缺少 crate」。
+ 新增或升级依赖后要跑一次 `node scripts/cargo-offline-refresh.mjs` 把新 crate 拉进本地缓存，
+ 否则下一次离线构建直接报「缺少 crate」。
 - **工具链只有一个来源**：根 `rust-toolchain.toml` 锁 `1.93.1`，成员目录不再各放一份。理由仍是
-  `E0514: found crate X compiled by an incompatible version of rustc`——产物文件名**不含**编译器
-  版本，两个 rustc 的产物混进同一个 target 目录时，cargo 会把异版本产物当成新鲜的直接复用。
+ `E0514: found crate X compiled by an incompatible version of rustc`——产物文件名**不含**编译器
+ 版本，两个 rustc 的产物混进同一个 target 目录时，cargo 会把异版本产物当成新鲜的直接复用。
 
 ---
 
@@ -93,7 +93,7 @@ CARGO_LOG=cargo::core::compiler::fingerprint=info cargo build 2>&1 | grep -i dir
 `CC`/`INCLUDE`/`LIB` 再重跑。
 
 ```bash
-node scripts/build-cli.mjs --check                    # 先看当前是否干净
+node scripts/build-cli.mjs --check # 先看当前是否干净
 node scripts/repair-target-cache.mjs --fix
 ```
 

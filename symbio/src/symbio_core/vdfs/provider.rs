@@ -12,7 +12,7 @@
 //!   （`plugins/vdfs/protocol.rs`），**core 不暴露这些类型**。
 //!
 //! **分层、依赖方向、开放边界（本模块可原样抽出为独立 crate）见
-//! `docs/005-arch/013-vdfs.md` §2**——此处不复述。
+//! `docs/003-design/009-VDFS规范.md` §2**——此处不复述。
 //!
 //! 数据模型速览：
 //!
@@ -61,7 +61,7 @@ use super::request::{VdfsRequest, VdfsResponse};
 /// 这样做的理由不是「少一个方法」，而是**通道只有一条才不会有第二种答案**：
 /// 根与更深层的节点（由 provider 自己在 `list` 里给出 [`VdfsNode::new_type`](super::VdfsNode::new_type)）
 /// 走的是同一条路，使用方不必知道「这个节点是不是根」才能问它「你能新建什么」。
-/// 详见 ADR-030。
+/// 详见 D-030。
 ///
 /// ## 实现约定
 ///

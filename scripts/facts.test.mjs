@@ -40,7 +40,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gen-facts-'))
 /**
  * 收集一棵树里的 `.md` 语料——「散文指路」类判据的扫描面。
  *
- * ## 为什么必须跳过 `.workbuddy-ai/`（T-108 之后）
+ * ## 为什么必须跳过 `.workbuddy-ai/`（ 之后）
  *
  * 门禁的失败详情会把**失败项日志的末 N 行**写进
  * `.workbuddy-ai/gate-logs/<runId>/_summary.md`，而那段正文就是**被扫文档的原文引用**。
@@ -48,7 +48,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gen-facts-'))
  * 永久喂红——而且红在一个日志文件上、与源码无关（症状：改完文档重跑仍红，
  * 指出的行号落在一个 `_summary.md` 里，读者以为判据坏了）。
  *
- * 这不是假设：本轮修 `T-110` 的 `RE-006 §6` 时正是如此——源文档改对了，
+ * 这不是假设：本轮修 `` 的 `RE-006 §6` 时正是如此——源文档改对了，
  * 上一轮的失败详情仍在语料里，判据继续红。
  *
  * ## 范围收窄到哪里为止
@@ -365,7 +365,7 @@ test('能力矩阵：每条静态路由都有一句职责（缺一条就是「�
  *
  * 覆盖面对账：职责边界表里每个**可能有成员集合**的 owner 投影，要么在上面这份声明里，
  * 要么在 `_sets.mjs` 的 `NO_MEMBER_SET` 里带一条「为什么没有集合可判」的理由
- * （PROMPT_SHAPE 是运行时形状、AR-013 操作族与 VDFS 操作同源）。不写理由的那一栏
+ * （PROMPT_SHAPE 是运行时形状、DE-009 操作族与 VDFS 操作同源）。不写理由的那一栏
  * 留空，就等于把「都覆盖了吗」推给人读一遍表——正是判据要省掉的那件事。
  */
 const SETS = closedSets(REPO)
@@ -443,7 +443,7 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   // VDFS 操作，正是跨文档判据首版误报的同一处。同一文档内的重复归这条，但它只对
   // 「我控制生成器」的文档成立。
   for (const [setName, set] of SETS) {
-    if (set.ownerRel !== 'docs/006-ref/006-当前事实表.md') continue
+    if (set.ownerRel !== 'docs/004-ref/006-当前事实表.md') continue
     const members = set.members
     // 每张表命中了哪些成员
     const hits = tables.map((keys, i) => ({ i, n: keys.filter((k) => members.has(k)).length }))
@@ -483,14 +483,14 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
   // 这条把上条判据**推广到全仓**。口径按**成员身份**判，不按字面形状（理由见
   // `SETS` 上面那段）。
   //
-  // ## 覆盖面（T-100）
+  // ## 覆盖面
   //
   // 首版只查 CURRENT.md 投影的三个封闭集；职责边界表里其余的 owner 投影
   // （错误码 / 配置项 / 判据码）各有一张表而无人守。现在集合声明住在
   // `scripts/facts/_sets.mjs`，判据遍历**全部**集合：每个集合的 owner 从各文档
   // front-matter 的 `lists: [<id>=owner]` 声明里读（与 RE-007 同源），成员从
   // 代码 / Rust 枚举 / 脚本声明 / owner 自己的被标记清单里提。没有成员集合可判的
-  // 两个投影（PROMPT_SHAPE、AR-013 操作族）在 `_sets.mjs` 的 `NO_MEMBER_SET` 里
+  // 两个投影（PROMPT_SHAPE、DE-009 操作族）在 `_sets.mjs` 的 `NO_MEMBER_SET` 里
   // 各带一条理由——「覆盖了吗」因此是一句可查的话，不是一篇散文。
   //
   // ## 为什么跨文档只判「成表」，不判散文
@@ -520,7 +520,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
   // 新增一条必须同样写清；判据抓的是「抄一张清单」，抓不到「拿它当索引」。
   const ALLOW = new Map([
     [
-      'docs/006-ref/003-ROUTES.md',
+      'docs/004-ref/003-ROUTES.md',
       new Map([
         [
           '前端 / 宿主路由',
@@ -540,7 +540,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
       ]),
     ],
     [
-      'docs/004-plan/007-对话面插件拆分实施方案.md',
+      'symbio/src/plugins/classify/README.md',
       new Map([
         [
           '配置项',
@@ -653,7 +653,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
   // ── ③ 反向验证：每个集合都必须能被「复制 owner 的表到别处」触发 ──
   //
   // 「全绿」只说明判据没被触发，不说明它能触发。三个首版集合当年注入过三种重复形态；
-  // T-100 新接的三个集合（错误码 / 配置项 / 判据码）各注入一次，缺一次就是恒真。
+  // 新接的三个集合（错误码 / 配置项 / 判据码）各注入一次，缺一次就是恒真。
   //
   // 注入的是**合成文档**（不进真仓），与真仓其余文档一起过同一个 `scanDocs`：
   // 豁免名单、集归属、阈值全走真实路径，只有这一份是假的。
@@ -677,7 +677,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
     const dir = tmp()
     const injectedPath = path.join(dir, 'injected.md')
     fs.writeFileSync(injectedPath, injected, 'utf8')
-    const withInject = scanDocs([{ rel: 'docs/006-ref/999-injected.md', file: injectedPath }, ...docs])
+    const withInject = scanDocs([{ rel: 'docs/004-ref/999-injected.md', file: injectedPath }, ...docs])
     assert.ok(
       withInject.bad.length > bad.length,
       `反向用例失效：把 owner 的${why}复制到别处，判据不红——集合「${setName}」是恒真的`,
@@ -707,27 +707,27 @@ test('散文里的 RE-006 节次指路：节次必须存在', () => {
   //
   // ## 口径为什么收窄到「指向 CURRENT.md 的指路」
   //
-  // 第一版按「同一行里出现过 CURRENT.md」一刀切，当场**三处误判**：ADR-039 的 `§0`、
-  // T-077 里同句并列的 `AR-010 §5.5`、T-099 evidence 里的 `§7`（那指阶段文档（今 T-121–133）的节次，
+  // 第一版按「同一行里出现过 CURRENT.md」一刀切，当场**三处误判**：D-039 的 `§0`、
+  // 里同句并列的 `DE-012 §5.5`、 evidence 里的 `§7`（那指阶段文档（今 –133）的节次，
   // 与 CURRENT 无关）。守卫一旦开始误报就是被整体豁免，比没有守卫更糟。
   // 改成只判**明确指向 CURRENT.md 的那两种形态**（链接目标含 CURRENT.md / 散文写全
   // `CURRENT.md §x`），那之外一律放过。
   //
   // ## 刻意漏掉的形态（不是疏忽，是取舍）
   //
-  // 「CURRENT.md」与「§N.M」之间**隔着一个词**的散文——如 T-098 evidence 里的
+  // 「CURRENT.md」与「§N.M」之间**隔着一个词**的散文——如 evidence 里的
   // 「CURRENT.md 新增 §6 能力矩阵」——**不判**。要判它就得允许中间是任意散文，
   // 那必然误伤「CURRENT.md 与 §7 顺延为 §8」这类**指向别的文档**的同句并列。
   // 取舍：宁可漏一种形态，也不要一条会误报的判据。漏掉的这一种靠**位置中立写法**
   // 消解——登记条目的 evidence 不该用节号指路（节号是位置，会动；「能力矩阵」是
-  // 那件东西，不会动）。T-098 已按此改写。
+  // 那件东西，不会动）。 已按此改写。
   const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
   const actual = new Set([...doc.matchAll(/^#{2,3}\s+([\d.]+)\.?\s/gm)].map((m) => m[1].replace(/\.$/, '')))
 
   const bad = []
   let scanned = 0
   for (const f of proseDocs(REPO)) {
-    if (f.rel.endsWith('docs/006-ref/006-当前事实表.md')) continue
+    if (f.rel.endsWith('docs/004-ref/006-当前事实表.md')) continue
     scanned++
     f.text.split(/\r?\n/).forEach((l0, i) => {
       // **先剥代码跨**：`[§6.3](…)` 写在反引号里是**举例**（「当年长这样」），
@@ -772,13 +772,13 @@ test('散文判据的扫描面：文档目录全进语料，工具产物目录�
   const rels = proseDocs(root).map((f) => f.rel).sort()
   assert.deepEqual(
     rels,
-    ['docs/006-ref/a.md'],
+    ['docs/004-ref/a.md'],
     `扫描面应恰好是文档目录（实得 ${JSON.stringify(rels)}）——多一个就是把引用当指路，少一个就是把判据砍空`,
   )
 })
 
 test('RE-003 契约表的键必须是 §2.3 的静态路由（多一个键判红）', () => {
-  // 分工（T-102 定，view 取消后仍成立）：**地址与一句话职责的唯一表是 RE-006 §2.3**
+  // 分工（ 定，view 取消后仍成立）：**地址与一句话职责的唯一表是 RE-006 §2.3**
   // （代码投影）；RE-003 只放**契约**（调用方 / 返回类型 / 备注）——以地址为**键**，
   // 与 session README「工具名 → 结果字段」同一种形状（以封闭集成员为键讲另一件事，
   // 见上面判据的「已知边界」）。**没有第二张地址表**，也就没有「两个渲染器分叉」可判。

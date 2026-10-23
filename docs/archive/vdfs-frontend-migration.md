@@ -11,8 +11,8 @@
 >
 > 现行文档：[vdfs-frontend.md](../design/vdfs-frontend.md)（前端页面规范）、
 > [vdfs.md](../design/vdfs.md)（机制规范，§13.4 记存储层形态）。
-> 关联档案：[vdfs-review.md](./vdfs-review.md)（更早的机制评估）、
-> [entity-provider-mechanism.md](./entity-provider-mechanism.md)（已废除的实体机制）。
+> 关联档案：[vdfs-review.md](vdfs-review.md)（更早的机制评估）、
+> [entity-provider-mechanism.md](entity-provider-mechanism.md)（已废除的实体机制）。
 
 ---
 

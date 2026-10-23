@@ -1,9 +1,10 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/classify/README
 title: Classify 插件（对话面：判决）
 status: active
 created: 2026-09-29
+impl: done
 ---
 
 # Classify 插件（对话面：判决）
@@ -15,14 +16,14 @@ created: 2026-09-29
 
 ## 路由
 
-清单见 [`docs/006-ref/003-ROUTES.md`](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Classify 插件（**权威**）：
+清单见 [`docs/004-ref/003-ROUTES.md`](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Classify 插件（**权威**）：
 `classify/decide`。
 
 ## 契约
 
 入参 `DecideRequest`、出参 `Verdict`，都在
 [`symbio_core::dialog`](../../symbio_core/dialog/mod.rs) ——
-契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（ADR-023）。
+契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（D-023）。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；
 其中的 `reason` 是**理由码**（数据），词表就在同一个模块里（`REASON_*`）——新增一类
@@ -34,9 +35,9 @@ created: 2026-09-29
 
 ```text
 decide(utterance)
-  ├─ 规则表命中（问候 / 致谢 / 确认 / 空输入）→ Answered{reason}   0 次 LLM 往返
-  ├─ 未命中 → 快速档分类（一次静默 LLM 往返，四选一）→ Answered / Escalate
-  └─ 判不出来（无模型服务 / 响应不可解析）→ Escalate{unclassified}
+ ├─ 规则表命中（问候 / 致谢 / 确认 / 空输入）→ Answered{reason} 0 次 LLM 往返
+ ├─ 未命中 → 快速档分类（一次静默 LLM 往返，四选一）→ Answered / Escalate
+ └─ 判不出来（无模型服务 / 响应不可解析）→ Escalate{unclassified}
 ```
 
 只有**快速档**那条会碰模型，用的模型由本插件的 `model` 决定（缺席则用会话选定值）——
@@ -45,7 +46,7 @@ decide(utterance)
 | 产线 | 文件 | 判据 |
 |---|---|---|
 | 反射档规则表 | [`rules.rs`](rules.rs) | **归一化后逐字全等**——包含匹配会把「你好，帮我读一下 README」判成问候，从而**静默吞掉真实请求** |
-| 快速档分类 | [`decide.rs`](decide.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent()` |
+| 快速档分类 | [`decide.rs`](decide.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent` |
 
 **顺序是判据的一部分**：先规则、后分类。反过来，规则短路省下的那次往返会被分类请求吃掉。
 
@@ -74,17 +75,17 @@ decide(utterance)
 ## 机制
 
 - **无工具**是结构保证：本插件不注册任何 `Capability`，而模型的工具集来自
-  `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `Registry::put`（工具行）——
-  因此工具集里**在结构上不可能**出现本插件（不需要 CI 断言补偿）。
+ `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `Registry::put`（工具行）——
+ 因此工具集里**在结构上不可能**出现本插件（不需要 CI 断言补偿）。
 - **会调用模型，但不暴露工具**：快速档分类是一次**内部请求**（静默出口，
-  与上下文压缩摘要同款形状）——不注册 `Capability` 与不调用模型是两件事。
+ 与上下文压缩摘要同款形状）——不注册 `Capability` 与不调用模型是两件事。
 - **无状态、无副作用、不持有地址**：不实现 `VdfsProvider`，因此没有挂载视图；
-  它不回写转写（转写只有 `session` 一个写入者，见 ADR-020）。
+ 它不回写转写（转写只有 `session` 一个写入者，见 D-020）。
 - **可卸载**：不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（= 卸载前的行为）。
-  这是**装配期**的状态（停用即不构造），不是运行期读一个 `enabled` 字段。
+ 这是**装配期**的状态（停用即不构造），不是运行期读一个 `enabled` 字段。
 
 ## 关联
 
 - 措辞：`../compose/README.md`
-- 切分依据（为什么是两个插件）：`docs/004-plan/007-对话面插件拆分实施方案.md`
-- 地址规则：`docs/005-arch/009-plugin-route-address.md`
+- 切分依据（为什么是两个插件）：`symbio/src/plugins/classify/README.md`
+- 地址规则：`docs/003-design/006-插件路由与地址.md`

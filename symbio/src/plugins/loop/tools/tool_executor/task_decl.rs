@@ -3,14 +3,14 @@
 //!
 //! 记录类型 [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] 不住这里——它们隔着
 //! 驱动器与留守存储两侧都要用，住在 [`crate::symbio_core::facts`]
-//! （[ADR-082](../../../../../../docs/010-adr/082.md "ADR-082") 裁决三 5 组）。本文件只留
+//! （[D-082](../../../../../../docs/003-design/014-单环一表.md "D-082") 裁决三 5 组）。本文件只留
 //! **判据与门**：哪一次调用算声明、声明里有什么——那是机制，随观察点住插件侧。
 
 use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use serde_json::Value;
 
 /// 任务表出参的**唯一写入点**（见 [`TaskDeclaration`]）：只认**声明了
-/// `owns_task_table` 的工具**（`local/todo_write` 即是；T-158 改了判据的住址，
+/// `owns_task_table` 的工具**（`local/todo_write` 即是； 改了判据的住址，
 /// 没改这条语义）。
 ///
 /// 匹配口径取**短名**（最后一个 `/` 之后的部分）：LLM 可见全名是 `<挂载点>/<短名>`

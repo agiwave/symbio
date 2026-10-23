@@ -32,7 +32,7 @@ pub struct CapabilityError {
     pub message: String,
 }
 
-/// 能力收集期**错误桶** Key —— **键与值同住**（ADR-095 根因一）
+/// 能力收集期**错误桶** Key —— **键与值同住**（D-095 根因一）
 ///
 /// 值类型带 [`CapabilityError`]（本域类型），故键住本域。键名（`capability_errors`）
 /// 是 `ctx` 上的外部协议面，不随搬迁而变。

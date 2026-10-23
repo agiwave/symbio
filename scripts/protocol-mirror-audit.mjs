@@ -112,7 +112,7 @@ const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
-// （四个同名 namespace）。见 [ADR-112] 决策 2。
+// （四个同名 namespace）。见 [D-112] 决策 2。
 const HOME_SCHEMAS_RS = 'symbio/src/plugins/home/schemas.rs'
 const HOME_TS = 'tauri/src/schemas/home.ts'
 
@@ -196,7 +196,7 @@ const ALIASES = [
  * **当前为空**，且这个状态是刚刚挣来的：曾经这里有两条
  * （`VDFS_NEW_ENTRY_TYPE` / `VDFS_NEW_ENTRY_IMPORT`），它们是「新建」提示态里
  * 那两个入口按钮的动作 id。整包导入改走详情页动作（`VDFS_ACTION_IMPORT`，
- * 见 ADR-029）之后，前端不再有自己的动作词汇——**每一个动作名都由后端解释**，
+ * 见 D-029）之后，前端不再有自己的动作词汇——**每一个动作名都由后端解释**，
  * 于是没有任何一条常量需要留在这个逃生舱里。空着是对的：它意味着「前端不认识
  * 任何后端不认识的动词」这条不变式现在是**结构性成立**的，不是靠登记维持的。
  */
@@ -434,7 +434,7 @@ const STRUCT_SETS = [
     rust: { file: READING_RS, struct: 'ReadingPanel' },
     ts: { file: READING_TS, interface: 'ReadingPanel' },
   },
-  // ── home 四条控制面臂的载荷（[T-215] 段二 / [ADR-112] 决策 2）────────────
+  // ── home 四条控制面臂的载荷（相应批次 段二 / [D-112] 决策 2）────────────
   //
   // 这一族**必须**带模块限定：`plugins/home/schemas.rs` 里四个模块各有一个
   // `Response`，不限定就会拿第一个匹配去比四个接口。前端把同名结构体放进**同名
@@ -491,7 +491,7 @@ const STRUCT_SETS = [
  *
  * **最省的一条清偿是删掉读点**：压缩与记忆的七个数字键（`compact_trigger` /
  * `context_limit` / `before_tokens` / `after_tokens` / `dropped` / `post_tokens` /
- * `transcript_path`）原先在这里登记，因为前端要拿它们自己拼口径；[ADR-111] 把口径
+ * `transcript_path`）原先在这里登记，因为前端要拿它们自己拼口径；[D-111] 把口径
  * 搬回后端排成 `node.stats` 的行之后，**前端一个都不读了**，登记随之撤掉——
  * 漂移面从两处变成零处，比给键名生成常量更彻底。剩下的键仍是前端真在读的契约。
  *
@@ -1245,7 +1245,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
 /**
  * ChatNode 的每一个**顶层字段**都必须有「不通过 `meta` 间接读」的直接消费者。
  *
- * 决策依据：[ADR-070 §决策 2]（把「前端机制化 vs 业务化」的分界变成可判红的判据）。
+ * 决策依据：[D-070 §决策 2]（把「前端机制化 vs 业务化」的分界变成可判红的判据）。
  * 一次「顺手往顶层加个 `tool_call_id`」的 PR 就能把纪律抹掉——没有这条守卫，纪律只是口号。
  *
  * 判据（只钉「被 meta 代理」这一种违规，不误伤别处）：

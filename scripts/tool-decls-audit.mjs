@@ -8,11 +8,11 @@
  * `provides_assign_work`（淘汰闸）/ `records_delegation_promise`（承诺记账）/
  * `owns_task_table`（任务表写侧资格闸）。判定读的是**位**，不认工具名字——
  * 于是「该声明的工具漏了声明」与「这工具压根不在管辖面」在代码上长得一样，
- * 三道闸对它**静默不命中**（[T-158] 行为位自声明 / [T-177] ③ 声明面 fail-closed）。
+ * 三道闸对它**静默不命中**（[] 行为位自声明 / [] ③ 声明面 fail-closed）。
  *
  * 这条判据守的是**声明面本身的封闭性**，不判哪一位声明得对不对（那语义判据
  * 机械化不了）：LLM 可见工具的**名单**是一份从代码提取的事实
- * （`facts/_capability.mjs::toolFacts`，即 `docs/006-ref/006-当前事实表.md` §2.1 的
+ * （`facts/_capability.mjs::toolFacts`，即 `docs/004-ref/006-当前事实表.md` §2.1 的
  * 生成源），声明面基线是另一份**冻结快照**。两份必须逐名相等——工具进了注册表
  * 却没有基线行 ⇒ 声明面从来没有为它过账（**漏声明**）；基线有行而工具不在册
  * ⇒ 账上留着一个已经不存在的工具（**悬空行**）。任一方向都是红。
@@ -41,7 +41,7 @@
  *      （`TOOL_DECLS_BASELINE` 环境变量可整体替换基线，回归测试用）
  * 退出码：0 = 两份逐一相等；1 = 有失效；2 = 工具清单读不出。
  */
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns TD 工具自声明行为位（声明面基线对账）
 // @codes TD-001 TD-002
 
@@ -57,7 +57,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 /**
  * 声明面基线：LLM 可见工具的**冻结名单**，一行一个短名。
  *
- * 成员由 `facts/_capability.mjs::toolFacts` 生成（与 `docs/006-ref/006-当前事实表.md`
+ * 成员由 `facts/_capability.mjs::toolFacts` 生成（与 `docs/004-ref/006-当前事实表.md`
  * §2.1 同一份提取），在此冻结成账。加一个 LLM 可见工具 = 在此加一行；
  * 删一个 = 在此删一行——两个方向都必须显式过账（TD-001 / TD-002 各守一头）。
  */

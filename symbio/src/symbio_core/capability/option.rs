@@ -8,7 +8,7 @@
 //! **写入落位到同一张表**（4e）：选项是 `CapabilityRow::option(order, 字段)` 一行，
 //! 读侧是本文件的 [`capability_option_fields`]——广播通道仍各走各的，变的只是
 //! 「行住哪张表」：两个专服单族的 trait（`OptionVisitor` 随 4e）退场，收集口只剩
-//! `put` / `get` / `list` 三个方法（AR-025）。
+//! `put` / `get` / `list` 三个方法（DE-008）。
 //!
 //! ```text
 //! session ──collect_options(parent, ctx)──▶ parent.traverse(available_options)
@@ -37,7 +37,7 @@
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
 //! 故不隶属于任何插件。
 //! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
-//! 按「依赖方数量」判据（ADR-023）下沉到 `plugins/session/capabilities.rs`。
+//! 按「依赖方数量」判据（D-023）下沉到 `plugins/session/capabilities.rs`。
 //!
 //! ```text
 //! 在 core：行词汇 + 读协议（本文件）        ← 写入者、读写者都认
@@ -60,7 +60,7 @@
 //! 工具广播分开，产物语义也不同（可展示的**数据节点**，不是可调用对象）；但两者
 //! 已经不需要两个 trait：表按载荷分族，`list(CapabilityRowKind::Option)` 只回选项行，
 //! 工具协议（`list(Tool)`）根本看不见它们——混装的代价在**载荷类型**上就挡住了，
-//! 不靠分 trait。这也是 AR-025 把两个专服单族 trait 收回同一张表的判据。
+//! 不靠分 trait。这也是 DE-008 把两个专服单族 trait 收回同一张表的判据。
 //!
 //! ## 契约
 //!

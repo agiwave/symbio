@@ -6,12 +6,12 @@
 //!
 //! ## 启动点为什么在 `build` 而不是 `start`
 //!
-//! [`Plugin::start`] 是**同步**钩子（[ADR-033](../../../../docs/010-adr/033.md "ADR-033")：
+//! [`Plugin::start`] 是**同步**钩子（[D-033](../../../../docs/003-design/002-架构总览.md "D-033")：
 //! 装配路径整条是同步的），而循环体是 task。session 的常驻任务同在此处
 //! （`plugins/session/plugin.rs` 的 `start_resident_tasks`）——两处都在**构造点**交出句柄，
 //! 「谁来持有句柄」因此只有一个注册点。
 //!
-//! ## 停机形状沿用 ADR-075 的 P1
+//! ## 停机形状沿用 D-075 的 P1
 //!
 //! 一个停机位 + 一个唤醒 + 一个有界等待：循环体**先挂唤醒再读位**（反序会留一条
 //! 「读完没停 ⇒ 挂唤醒之前置了位 ⇒ 从此睡死」的竞态窗口，而 `notify_waiters()`
@@ -47,7 +47,7 @@ pub struct HeartbeatPlugin {
     /// 它是 [`idle_baseline`](super::scheduler::idle_baseline) 的下限那一半：磁盘侧
     /// `updated_at` 停在回合开始前（回合零写盘退出）时，靠它防止逐 tick 热循环重触发。
     /// 切出本插件前这一格住在宿主的 `heartbeat_state`，由回合侧的 `mark_activity` 维护；
-    /// 切片后**只有本插件读写它**（[ADR-077](../../../../docs/010-adr/077.md "ADR-077") 后果 #7）。
+    /// 切片后**只有本插件读写它**（[D-077](README.md "D-077") 后果 #7）。
     anchors: RwLock<HashMap<String, i64>>,
     /// 常驻扫描循环的句柄（停机点据此等到它真的退出）。
     ///
@@ -146,7 +146,7 @@ impl HeartbeatPlugin {
     }
 
     /// 父引用的一份拷贝：给「本轮合成的请求体」当宿主态用（见
-    /// [ADR-077](../../../../docs/010-adr/077.md "ADR-077") 裁决三——经容器取数**需要**一个
+    /// [D-077](README.md "D-077") 裁决三——经容器取数**需要**一个
     /// 宿主态承载访客表，`VdfsContext::empty()` 在容器转发下当场失败）。
     pub(crate) fn parent_handle(&self) -> Option<Weak<dyn Plugin>> {
         self.parent.clone()

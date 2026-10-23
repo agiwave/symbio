@@ -1,4 +1,4 @@
-//! 阶段④ 落格 + 定稿答话轮的独立入口（T-179 · B2，PL-015 §5 动作 B2）。
+//! 阶段④ 落格 + 定稿答话轮的独立入口（ · B2，DE-021 §5 动作 B2）。
 //!
 //! [`persist_turn`] 是 `execute_turn` 的末段：派生事实（承诺 / 任务表 / 熔断 /
 //! 淘汰 / 记忆）落格、兜底结局上抛、折进的补充并入落库镜像。
@@ -40,14 +40,14 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
     // `range(0)` 里 ⇒ 压缩前开过的任务不会在就绪集里消失，幂等判据也不会失效
     // （看不见 ⇒ 重复落格）。
     //
-    // 用户格 seq **不再从这里反查**（T-225）：它在判决之前就落了，由编排层沿
+    // 用户格 seq **不再从这里反查**：它在判决之前就落了，由编排层沿
     // `ExecTurn::user_seq` 直给——本函数只把完整史带给累计口径的写方。
     let all = store.range(Seq::new(0));
     // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
     // 每族的失败在函数内各自记日志、互不打断——轮次已收束，派生事实失败不该
     // 把成功的一轮说成失败（与记忆三段同一条口径）。本调用点因此不判返回值。
     //
-    // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
+    // `to` = 来源主体（D-067）：本主体向「这条消息的出处」立约。缺省落
     // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
     // 在 `ctx` 被移进分发口之前取好）。
     super::super::derived_facts::record_derived(
@@ -63,7 +63,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &derived.tasks,
         &derived.breaks,
     );
-    // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
+    // 淘汰回路（S13 §3，）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
     super::super::derived_facts::record_elimination(store.as_ref(), turn_no, user_seq);
@@ -116,7 +116,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
             reasoning_child_id,
             // 实测用量直通：校准反馈的唯一数据源（缺口 6），与上面被拒出口同一条。
             usage: outcome.usage,
-            // 末轮原因直通（T-144）：与上面被拒出口同一条纪律。`..Default::default()`
+            // 末轮原因直通：与上面被拒出口同一条纪律。`..Default::default`
             // 会把这一格静默填成 Stop，长度截断的自动续写因此不可达。
             finish: outcome.finish,
             ..Default::default()
@@ -126,7 +126,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 }
 
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
-/// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落，T-225）。
+/// 但收束格仍须由 v2 运行器落（用户格已由编排层在判决之前落，）。
 ///
 /// ## 它解决的是什么
 ///
@@ -156,8 +156,8 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
 ///
-/// 形参宽（`consolidation` 是 S2.7-b2 加的，`stages` 是 T-189 加的，三个 seq 是
-/// T-225 加的）：与 [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
+/// 形参宽（`consolidation` 是 S2.7-b2 加的，`stages` 是 加的，三个 seq 是
+/// 加的）：与 [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
 /// 一个宽签名，收成结构体只会把同一次调用拆成两处。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
@@ -165,7 +165,7 @@ pub(crate) async fn execute_final_reply_turn(
     ctx: &Arc<dyn crate::symbio_core::PluginInvokeRequest>,
     provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
-    // 轮号与溯源锚由编排层在判决之前定下（T-225）：答话轮同样先落用户格，
+    // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
     // 这里只收三个 seq（`drive_seq` 供派发格幂等键）。
     turn_no: u64,
     user_seq: u64,
@@ -183,15 +183,15 @@ pub(crate) async fn execute_final_reply_turn(
     // 答话轮在步骤 2 就短路收尾，**不进** [`super::execute_turn`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
     consolidation: Option<&[ChatNode]>,
-    // 本轮已执行的一次性阶段（判决事实 + 「已做」，ADR-107 判据 2）。答话轮同样
+    // 本轮已执行的一次性阶段（判决事实 + 「已做」，D-107 判据 2）。答话轮同样
     // 不进 [`super::execute_turn`]，判决草稿由本入口随 `TurnInput` 递进运行器。
     stages: Vec<super::super::stage_events::StageFact>,
 ) -> Result<(), PluginError> {
-    // 事实源：与 [`super::execute_turn`] 同一条路径——交付包构造的唯一句柄（ADR-084 §2）。
+    // 事实源：与 [`super::execute_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
     let store = session.facts().ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
-    // **补落寄存的变更**（T-055）：答话轮同样是会话侧的落格窗口，经端口动作发起。
+    // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
     // 与 `execute_turn` 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
@@ -199,7 +199,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 身份与档位取值点同 [`super::execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
-    // 作用域与身份同批取（[T-105]）：子会话挂父主体，顶层会话恒 `Root`。
+    // 作用域与身份同批取（相应批次）：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
     // 压缩入格 + 归档：与 [`super::execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。

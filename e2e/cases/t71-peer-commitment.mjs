@@ -1,13 +1,13 @@
 import './_selfrun.mjs';
-// T71 对等主体跑一轮（[T-072](../../docs/009-task/072-对等主体生产增量.md "T-072-对等主体生产增量") 合并批 ②+③，
-// [ADR-065](../../docs/010-adr/065.md) / [ADR-067](../../docs/010-adr/067.md)）：
+// T71 对等主体跑一轮（相应批次 合并批 ②+③，
+// [D-065](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") / [D-067](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）：
 // **收束格按种类判** + **入站「来源主体」格数据**。
 //
 // ## 本用例钉的是什么
 //
-// - [ADR-065](../../docs/010-adr/065.md "ADR-065") 的判据原文：「e2e（两会话两主体，
+// - [D-065](../../docs/003-design/011-Agent目录规范.md "D-065") 的判据原文：「e2e（两会话两主体，
 //   对等主体跑一轮 ⇒ 它的 `commitment.*` 入格、请求包不串主体，`t30` 纪律复用）」；
-// - [ADR-067](../../docs/010-adr/067.md "ADR-067") 的三处下游口径：
+// - [D-067](../../docs/003-design/011-Agent目录规范.md "D-067") 的三处下游口径：
 //   C4 认产物（`invariants` 为空）、`closure_denied` 数产物（派生事实照写）、
 //   发言闸拒 ≠ 静默中断。
 //
@@ -221,7 +221,7 @@ export default defineCase(
           '开轮格的正文 = 收件箱那条消息',
         );
 
-        // 产物收束（ADR-065 / ADR-067）：产物格在、actor = 对等主体、溯源指回开轮格。
+        // 产物收束（D-065 / D-067）：产物格在、actor = 对等主体、溯源指回开轮格。
         const artifact = peerEvents.find((e) => e.kind === 'artifact.added');
         assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(kinds)}）`);
         assertEq(artifact.actor, 'session/peer-b', '产物格的作者 = 对等主体');
@@ -270,7 +270,7 @@ export default defineCase(
         assertEq(
           stats.invariants.length,
           0,
-          `产物收束 ⇒ 不变量清单为空（C4 认产物格，ADR-067；实际: ${JSON.stringify(stats.invariants)}）`,
+          `产物收束 ⇒ 不变量清单为空（C4 认产物格，D-067；实际: ${JSON.stringify(stats.invariants)}）`,
         );
         const peerRep = stats.reputation.by_principal['session/peer-b'];
         assert(peerRep, `声誉列应有对等主体的条目（实际: ${JSON.stringify(stats.reputation)}）`);

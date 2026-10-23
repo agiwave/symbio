@@ -139,10 +139,10 @@ test('GC-004 输出了未登记的码 ⇒ 红；加判定要先登记', () => {
   assert.ok(errs.some((e) => /GC-004.*S-002.*没有任何脚本声明/.test(e)), errs.join('\n'))
 })
 
-test('GC-004 反向：前缀未登记的码形如 ADR-023 ⇒ 不判（它不是判据码）', () => {
+test('GC-004 反向：前缀未登记的码形如 D-023 ⇒ 不判（它不是判据码）', () => {
   const errs = errors({
-    'a-audit.mjs': decl('S 源码 grep 形态', 'S-001', 'console.log("S-001 ADR-023")'),
-    'b-audit.mjs': `console.log('依据 ADR-023')\n`,
+    'a-audit.mjs': decl('S 源码 grep 形态', 'S-001', 'console.log("S-001 D-023")'),
+    'b-audit.mjs': `console.log('依据 D-023')\n`,
   })
   assert.deepEqual(errs, [])
 })

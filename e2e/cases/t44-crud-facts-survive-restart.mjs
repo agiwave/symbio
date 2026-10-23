@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T44 消息变更**入格且持久**（[ADR-053] / [ADR-054] 的 e2e 判据）：
+// T44 消息变更**入格且持久**（[D-053] / [D-054] 的 e2e 判据）：
 // 跑两轮 ⇒ **编辑**第一问 ⇒ **截断**第二问 ⇒ **重启进程**（冷开新进程）⇒
 // 从生产读出口读回的历史仍是**变更之后**的那份（编辑生效、被截的那轮没复活）。
 //
@@ -21,7 +21,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么不比 `seq` / `timestamp`
 //
-// ADR-049 已判定切源后 `seq` 分配属呈现细节。而且本用例里被编辑的那条**刻意不重发号**
+// D-049 已判定切源后 `seq` 分配属呈现细节。而且本用例里被编辑的那条**刻意不重发号**
 // ——位置锚在编辑前后逐字相同，这正是「编辑不动位置」的判据。
 import {
   MockLlm,
@@ -60,7 +60,7 @@ function contentText(m) {
   return JSON.stringify(c);
 }
 
-/** 消息的**可比形状**（剔除呈现细节 `seq` / `timestamp`——ADR-049 判定切源后 seq 分配属呈现细节）。 */
+/** 消息的**可比形状**（剔除呈现细节 `seq` / `timestamp`——D-049 判定切源后 seq 分配属呈现细节）。 */
 function shapeOf(msgs) {
   return msgs.map((m) =>
     [
@@ -69,7 +69,7 @@ function shapeOf(msgs) {
       msgRoleOf(m) ?? '',
       m.type ?? m.msg_type ?? '',
       m.status ?? '',
-      // [T-147d-ii] 顶层 name 已退役——工具名住 meta.tool_name
+      // d-ii 顶层 name 已退役——工具名住 meta.tool_name
       m.meta?.tool_name ?? '',
       m.tool_call_id ?? '',
       contentText(m),
@@ -78,7 +78,7 @@ function shapeOf(msgs) {
 }
 
 export default defineCase(
-  'T44 变更入格且持久：编辑 / 截断后重启进程，读回的历史是**变更之后**的那份（ADR-053/054 判据）',
+  'T44 变更入格且持久：编辑 / 截断后重启进程，读回的历史是**变更之后**的那份（D-053/054 判据）',
   async () => {
     const llm = await new MockLlm([
       { id: 'q1', match: Q1, content: '第一答。' },

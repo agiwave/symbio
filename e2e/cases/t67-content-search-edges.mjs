@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T67 `content_search` 边界批（T-111 的①②）：
+// T67 `content_search` 边界批（ 的①②）：
 //   - `output_mode` 三取值（`content` / `files_with_matches` / `count`）的输出形状；
 //   - `head_limit` / `offset` 按**行**分页（对齐 Trae Grep）；
 //   - 输出超过 `MAX_OUTPUT_BYTES`（1 MiB）时的截断与尾注。
@@ -198,7 +198,7 @@ export default defineCase(
 
       // ── ④ 分页：`offset` 跳过前面的行、`head_limit` 截短输出 ──
       //
-      // `content` 模式每匹配行一条、行间单换行（T-113 已修：`UTF8Sink` 的 `text`
+      // `content` 模式每匹配行一条、行间单换行（ 已修：`UTF8Sink` 的 `text`
       // 原本含行终止符 ⇒ 输出 `行\n\n行`，`apply_line_pagination` 按**输出行**切，
       // `head_limit=2` 只覆盖 1 个匹配行）。分页判据因此收紧为**匹配行**口径：
       // `offset=1, head_limit=2` ⇒ 恰好第 2、3 个匹配行（a.ts:2 / a.ts:3）。

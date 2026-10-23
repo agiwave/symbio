@@ -11,7 +11,7 @@
  * 2026-09-18 的审计抓到三处真实漂移，都是这个形状：
  *
  * - `hook` 插件的 `PluginMeta::new("hooks", …)` 与目录名 `hook` 不一致
- *   → `docs/006-ref/006-当前事实表.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
+ *   → `docs/004-ref/006-当前事实表.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
  * - Telegram 用 `SESSION_CHAT`（`"session/chat"`）路由——**该路径不存在**，
  *   session 只认 `chat/send` / `chat/abort`，所以那处调用以前必定落到 `NotFound`；
  * - `symbio_core::plugin::route` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
@@ -23,7 +23,7 @@
  *
  * | 编号  | 规则                                                          | 为什么 |
  * |-------|---------------------------------------------------------------|--------|
- * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（ADR-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
+ * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（D-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
  * | E-002 | 地址的**前缀**必须是插件目录名（或容器前缀 `worker`）——引用侧与注册侧各判一遍 | 抓「幽灵命名空间」：引用侧 `hooks/...` 是写错了前缀的路径；臂侧 `work/set_workspace`（长在 home 的 `match` 里）是**注册**了一条没有目录的名字。home 是根容器、收到未剥离的 `PATH`，故它的臂必须以 `home/` 开头；其余插件只会收到剥掉首段后的尾巴，臂写成绝对形 ⇒ 真实地址是 `<自己的目录>/<臂>`，与写它的人想的那条不是一条 |
  * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::plugin::route` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
@@ -32,12 +32,12 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`，**测试代码同样判**  | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定）。测试也在范围内：一条要跨插件比对数据的测试，本身就要求先把一个模块的隔离拆掉——那是这条规则要拦的形态，不是它的例外 |
- * | E-013 | `plugins/loop/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super`），**测试同样判** | 驱动器片跨墙只准用 [ADR-083 §4](../docs/010-adr/083.md "ADR-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦 `crate::plugins::<兄弟>`，但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 ADR-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
+ * | E-013 | `plugins/loop/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super`），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦 `crate::plugins::<兄弟>`，但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  *
  * （原 E-010「消费方不得深引 `symbio_core::<域>::`」已迁至
- * [`core-export-audit.mjs`](./core-export-audit.mjs) 的 **C-002** 并退役：深引是
+ * [`core-export-audit.mjs`](core-export-audit.mjs) 的 **C-002** 并退役：深引是
  * **内核出口**的事，不是插件门面的事；两处各判一遍就是两个 owner，域清单与豁免通道
  * 必然分叉。C-002 是它的全量版——域目录动态取自 core、额外拦裸 `use …::core::<域>;`。）
  *
@@ -79,7 +79,7 @@
  * 平台无关（Windows / macOS / Linux 通用）：纯 Node，不依赖 bash / ripgrep。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
 // @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013
 
@@ -461,7 +461,7 @@ const UPWARD_FIELD_NAMES = new Set(['parent', 'router'])
  * 2. 类型含 `HashMap` / `BTreeMap` / `IndexMap` / `Vec` —— 容器按名持有**多个子实例**
  *    （`composite.instances`、`home.instances`、`agent.host.sub_agents`）。枚举的是
  *    **容器形态**而非某一种表：`composite.instances` 为让挂载序确定改成了保插入序的
- *    `IndexMap`（见 `ADR-057`），豁免跟着形态走——跟错了就会把「容器的正常形态」报成
+ *    `IndexMap`（见 `D-057`），豁免跟着形态走——跟错了就会把「容器的正常形态」报成
  *    「按值持有兄弟插件」。
  * 3. 字段名是 `parent` / `router` —— 向上引用，见 `UPWARD_FIELD_NAMES`；
  * 4. 类型以 `&` 开头 —— 借用，**字段不可能长这样**（没有生命周期的结构体字段
@@ -590,7 +590,7 @@ for (const abs of codeFiles) {
           i + 1,
           `\`${m[1]}: ${m[2]}\` —— 插件不得按值持有兄弟插件实例；` +
             `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`` +
-            `（绝对地址由容器分发，见 \`docs/005-arch/009-plugin-route-address.md\`）`,
+            `（绝对地址由容器分发，见 \`docs/003-design/006-插件路由与地址.md\`）`,
         )
       }
     }
@@ -768,15 +768,15 @@ for (const abs of codeFiles) {
 
 // ── E-013：`plugins/loop/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
-// [ADR-083](../docs/010-adr/083.md) §4 把跨墙通货收成闭族（穷举即白名单，族外无
-// 通货），[ADR-086](../docs/010-adr/086.md) §9 把「import 根 ⊆ 闭族」列为切片判据。
+// [D-083](../docs/003-design/001-核心架构.md "DE-001-核心架构") §4 把跨墙通货收成闭族（穷举即白名单，族外无
+// 通货），[D-086](../docs/003-design/014-单环一表.md "DE-014-单环一表") §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦 `crate::plugins::<兄弟>`；它拦不住 `crate::providers`、`crate::<其它模块>`
 // 或一个新第三方 crate——这些同样会把 loop 钉回仓内实现面。
 //
 // 判据分两半：
 //   ① `crate::<根>` 只许 `symbio_core` 与 crate 根的日志/工厂宏（它们是跨插件共用的
 //      机制词汇，不是某个插件的私有项）；
-//   ② `use <外部根>::` 只许通用库。清单是**闭集**：新增一个根必须回到 ADR-083 §4
+//   ② `use <外部根>::` 只许通用库。清单是**闭集**：新增一个根必须回到 D-083 §4
 //      回答「它代表哪条事实，或哪个方向的世界端口」——答不出即族外。
 //
 // 测试同样判（与 E-009 同口径）：测试里为了拿一个会话侧类型而放开 import，正是在
@@ -840,7 +840,7 @@ if (fs.existsSync(LOOP_DIR)) {
         lineAt(m.index),
         root,
         `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
-          `（ADR-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
+          `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
       )
     }
     for (const m of text.matchAll(/\bcrate\s*::\s*\{([\s\S]*?)\}/g)) {
@@ -853,7 +853,7 @@ if (fs.existsSync(LOOP_DIR)) {
           lineIdx,
           root,
           `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`crate::symbio_core\` ` +
-            `（ADR-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
+            `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
         )
       }
     }
@@ -868,7 +868,7 @@ if (fs.existsSync(LOOP_DIR)) {
       flag(
         lineAt(m.index + m[0].indexOf('use')),
         root,
-        `\`use ${root}::…\` 不在驱动器闭族内 —— 族外新增须先按 ADR-083 §4 论证` +
+        `\`use ${root}::…\` 不在驱动器闭族内 —— 族外新增须先按 D-083 §4 论证` +
           `「它代表哪条事实，或哪个方向的世界端口」`,
       )
     }
@@ -878,7 +878,7 @@ if (fs.existsSync(LOOP_DIR)) {
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
-// `docs/006-ref/006-当前事实表.md`、`docs/006-ref/003-ROUTES.md` 与 `hook/README.md` 三处文档中。
+// `docs/004-ref/006-当前事实表.md`、`docs/004-ref/003-ROUTES.md` 与 `hook/README.md` 三处文档中。
 // 只扫代码的守卫会**完整地漏掉它**。
 //
 // 为什么只判**前缀**、不判整条路径是否存在：权威清单里**必须**能提到已退役的路由
@@ -932,7 +932,7 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
 // ── E-008：文档标了 `<!-- vocab:PREFIX_ -->` 的词表行必须与代码常量逐字一致 ──
 //
 // 为什么需要：词表是**闭集**，而闭集的第二份真相最常驻在文档里。真实事故：
-// `docs/005-arch/013-vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
+// `docs/003-design/009-VDFS规范.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
 // `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
 // 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
 //（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的；

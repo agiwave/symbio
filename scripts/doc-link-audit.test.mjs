@@ -53,11 +53,11 @@ test('失效链接 → 失败（默认即失败，不再需要 --strict）', () 
 test('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描根，D-001 不适用豁免）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/010-adr/001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
+    'docs/003-design/002-架构总览.md': '# D-001\n\n见 [兄弟](./D-999.md)。\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /docs\/010-adr\/001\.md/)
-  assert.match(r.stdout, /ADR-999\.md/)
+  assert.match(r.stdout, /D-999\.md/)
 })
 
 test('散文体检不碰 docs/：条目的处理过程天生记历史、引用当时存在的路径', () => {
@@ -65,7 +65,7 @@ test('散文体检不碰 docs/：条目的处理过程天生记历史、引用�
   // 但登记条目是台账不是现行文档——把这两条判据套上去，等于判台账漏记历史。
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/009-task/001.md':
+    'docs/007-task/001.md':
       '---\nkind: task\nid: T-001\n---\n\n## 内容\n\n原本写 `docs/GONE.md`，已改为 `docs/live.md`。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -145,8 +145,8 @@ test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档�
 const REVIEW_DOC = '# 某系统评审\n\n> **文档类型：评审（一次性结论，不是规范）**\n\n正文。\n'
 const IMPLEMENTED_DOC = '# 某改动实施方案\n\n状态：**已实施**（S1–S6 全部落地）\n\n正文。\n'
 
-test('D-002：评审类文档留在 docs/005-arch/ → 失败', () => {
-  const r = audit({ 'docs/005-arch/review.md': REVIEW_DOC })
+test('D-002：评审类文档留在 docs/003-design/ → 失败', () => {
+  const r = audit({ 'docs/003-design/review.md': REVIEW_DOC })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /docs\/005-arch\/review\.md/)
 })
@@ -163,7 +163,7 @@ test('D-002：examples/ 不扫（是示例包内容，不是项目文档）', ()
 })
 
 test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
-  const r = audit({ 'docs/005-arch/plan.md': IMPLEMENTED_DOC })
+  const r = audit({ 'docs/003-design/plan.md': IMPLEMENTED_DOC })
   assert.equal(r.status, 1)
 })
 
@@ -178,22 +178,22 @@ test('D-002：同样的内容放进 docs/archive/ → 通过', () => {
 
 test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
   const r = audit({
-    'docs/005-arch/013-vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
+    'docs/003-design/009-VDFS规范.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
   })
   assert.equal(r.status, 0)
 })
 
 test('D-002：豁免必须带理由，空理由视为未豁免', () => {
   const withReason = `<!-- doc-link-allow D-002: 本文是现行规范，「评审」指代码评审流程 -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/005-arch/kept.md': withReason }).status, 0)
+  assert.equal(audit({ 'docs/003-design/kept.md': withReason }).status, 0)
 
   const emptyReason = `<!-- doc-link-allow D-002:    -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/005-arch/kept.md': emptyReason }).status, 1, '空理由不算豁免')
+  assert.equal(audit({ 'docs/003-design/kept.md': emptyReason }).status, 1, '空理由不算豁免')
 })
 
 test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () => {
   const late = `${REVIEW_DOC}\n${'填充行\n'.repeat(20)}<!-- doc-link-allow D-002: 理由 -->\n`
-  assert.equal(audit({ 'docs/005-arch/late.md': late }).status, 1)
+  assert.equal(audit({ 'docs/003-design/late.md': late }).status, 1)
 })
 
 // ── D-003：行数预算（活跃文档 ≤ 800 行）────────────────────────────────
@@ -339,7 +339,7 @@ test('D-004：正文后的豁免注释不整篇豁免（全文档只认首行非
 
 // ── D-006：反引号里的文件路径（D-001 的盲区补丁）─────────────────────────
 // D-001 只认 `[文字](目标)`，而本仓正文**更常**用行内反引号指路。实测
-// `tauri/docs/023-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
+// `tauri/docs/110-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
 // 很久了——**守卫报 0 不等于没有坏链，只等于它看不见**。这组用例钉住它会红。
 test('D-006：反引号指向不存在的路径 → 失败（D-001 看不见这类）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n详见 `docs/nope.md`。\n' })
@@ -359,8 +359,8 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `ADR-000-架构决策汇总.md`。\n',
-      'docs/010-adr/README.md': '# 索引\n',
+      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `D-000-架构决策汇总.md`。\n',
+      'docs/003-design/README.md': '# 索引\n',
     }).status,
     0,
     '相对仓库根应命中'
@@ -420,7 +420,7 @@ test('D-006：docs/archive/ 整体豁免（归档记录当时形态，改写等�
 // ── D-007：站内锚点 ─────────────────────────────────────────────────────
 test('D-007：跨册锚点指向不存在的标题 → 失败（D-001 会剥掉 # 后段，看不见这类）', () => {
   const r = audit({
-    'docs/decisions/core.md': '# 平台基座\n\n## ADR-001: 分形插件架构\n',
+    'docs/decisions/core.md': '# 平台基座\n\n## D-001: 分形插件架构\n',
     'docs/README.md': '[001](./decisions/core.md#adr-999-不存在的那条)\n',
   })
   assert.equal(r.status, 1, r.stdout)
@@ -430,7 +430,7 @@ test('D-007：跨册锚点指向不存在的标题 → 失败（D-001 会剥掉 
 
 test('D-007：锚点指向真实标题 → 通过', () => {
   const r = audit({
-    'docs/decisions/core.md': '# 平台基座\n\n## ADR-001: 分形插件架构\n',
+    'docs/decisions/core.md': '# 平台基座\n\n## D-001: 分形插件架构\n',
     'docs/README.md': '[001](./decisions/core.md#adr-001-分形插件架构)\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -438,10 +438,10 @@ test('D-007：锚点指向真实标题 → 通过', () => {
 })
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
-  // 标题取自 `ADR-000-架构决策汇总.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 标题取自 `D-000-架构决策汇总.md` D-020 的真实形状：`EventSink`（出）后**无空格**，
   // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
   const heading =
-    '## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'
+    '## D-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'
   const r = audit({
     'docs/decisions/core.md': `# 平台基座\n\n${heading}\n`,
     'docs/README.md':
@@ -451,8 +451,8 @@ test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括�
 })
 
 test('D-007：` 是 ` 两侧的空格各产生一个连字符（漏了就红——这正是真仓库 3 处失效的形态）', () => {
-  // 标题取自 ADR-025：`顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**`
-  const heading = '## ADR-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**'
+  // 标题取自 D-025：`顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**`
+  const heading = '## D-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**'
   const r = audit({
     'docs/decisions/session.md': `# 会话与执行\n\n${heading}\n`,
     'docs/good.md': '[025-good](./decisions/session.md#adr-025-顺序是节点属性delta-是-updated-的传输形态)\n',
@@ -563,7 +563,7 @@ test('D-013：正斜杠盘符路径同样判（形态不分分隔符）', () => 
 test('D-013：登记条目照判（本机盘符不是「当时的事实」，是换台机器就失效的写法）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/009-task/001.md': '---\nkind: task\nid: T-001\n---\n\n实测 C:\\Users\\someone\\symbio 可用。\n',
+    'docs/007-task/001.md': '---\nkind: task\nid: T-001\n---\n\n实测 C:\\Users\\someone\\symbio 可用。\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /docs\/009-task\/001\.md/)
@@ -573,7 +573,7 @@ test('D-013：登记条目照判（本机盘符不是「当时的事实」，是
 test('D-013：front-matter（evidence / where）也判——它是文档的一部分', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/009-task/001.md':
+    'docs/007-task/001.md':
       '---\nkind: task\nid: T-001\nevidence: 实测 D:\\work\\repo\\target 可跑\n---\n\n正文。\n',
   })
   assert.equal(r.status, 1, r.stdout)

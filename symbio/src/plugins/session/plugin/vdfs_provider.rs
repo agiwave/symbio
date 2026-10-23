@@ -117,25 +117,25 @@ impl SessionPlugin {
     ///
     /// 存在性校验在此一并完成（`session_of`），因此调用方不必再查一次。
     ///
-    /// ## 落库那份已由存储层交给真源（T-053）
+    /// ## 落库那份已由存储层交给真源
     ///
     /// [`Self::session_of`] 走 `load_session`，而存储层的 `load_messages` **已是
     /// WAL 重建优先**、`messages.json` 只作 v1 遗留兜底（见 `store::load_messages`）。
     /// 因此这里取 `session.messages` 拿到的就是真源那一份——本函数不再自己判断
     /// 「缓存在不在、要不要重建」：那是**存储层的职责**，在插件层再判一次就是同一条
-    /// 规矩的第二份口径（T-056 早期「缓存不在才重建」的过渡形态，T-053 收敛掉）。
+    /// 规矩的第二份口径（ 早期「缓存不在才重建」的过渡形态， 收敛掉）。
     pub(super) async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatNode>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
         let mut messages = ordered(overlay_live(session.messages, live));
-        // 呈现投影（[T-149]）：转写列表与会话叶子是同一份数据的两个地址，必须给
+        // 呈现投影（相应批次）：转写列表与会话叶子是同一份数据的两个地址，必须给
         // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
         // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
         let mode = self.presentation_mode().await;
         crate::symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
-        // 呈现派生（[T-155 B3]）：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
+        // 呈现派生（B3）：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
         // 历史/切回走这里）。存储与事件里的节点不含 title/icon 也不含读数行，
-        // 交付前按形状统一算出（读数口径见 [ADR-111](../../../../../docs/010-adr/111.md)）。
+        // 交付前按形状统一算出（读数口径见 [D-111](../README.md "symbio/src/plugins/session/README")）。
         Ok(messages.into_iter().map(present_message).collect())
     }
 

@@ -1,6 +1,6 @@
-//! 主体规格、模式与作用域（[plan/01 §4](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+//! 主体规格、模式与作用域（[plan/01 §4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 
-/// 主体模式（[plan/01 §4](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：机制，**3 个封顶**）。
+/// 主体模式（[plan/01 §4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：机制，**3 个封顶**）。
 ///
 /// 模式选择的判据是函数不是清单：可写成确定性规则 → [`Pattern::Decider`]；
 /// 只需重述已有事实 → [`Pattern::Translator`]；否则 → [`Pattern::Reasoner`]。
@@ -19,7 +19,7 @@ impl Pattern {
     ///
     /// 与授权表同源，不另立清单：持 `reply.*` ⇒ [`Pattern::Reasoner`]（会话主体按
     /// 模型驱动跑轮）；无发言权而有 `produce.artifact` ⇒ [`Pattern::Translator`]
-    /// （对等主体的权威动作是**产生产物**，复现 T-128 §3 的 ActorSpec 对等行）；
+    /// （对等主体的权威动作是**产生产物**，复现 §3 的 ActorSpec 对等行）；
     /// 其余 ⇒ [`Pattern::Decider`]。判据问的是矩阵谓词本身（`can_reply` /
     /// `can_produce_artifact`），调用方不抄能力名清单。
     ///
@@ -38,7 +38,7 @@ impl Pattern {
     }
 }
 
-/// 作用域（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+/// 作用域（[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：
 /// 不出现 `if (children.is_empty())` 分支）。
@@ -49,7 +49,7 @@ pub enum Scope {
     Child(String),
 }
 
-/// 主体规格（[plan/01 §4](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的 `ActorSpec`，五字段）。
+/// 主体规格（[plan/01 §4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
 pub struct ActorSpec {
     /// 身份（数据，无限增长——如 `"session/main"`）。
@@ -65,10 +65,10 @@ pub struct ActorSpec {
 }
 
 impl ActorSpec {
-    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）：
+    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/007-task/121-最小闭环.md ")）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
     ///
-    /// ## `capabilities` 取该主体**自己的授权行**（[T-082](../../../../docs/009-task/082-角色行生产构造批.md "T-082-角色行生产构造批")）
+    /// ## `capabilities` 取该主体**自己的授权行**（相应批次）
     ///
     /// 空表与「平凡值下系统**完整运行**」自相矛盾：收束闸判读规格身上的能力集之后，
     /// 空表意味着平凡值连一轮对话都收束不了。所以它必须是**真值**，不能是「算了却
@@ -92,7 +92,7 @@ impl ActorSpec {
     /// 写侧判定（收束 · **发言臂**）：本规格能否落收束格。
     ///
     /// 读的是**自己身上**的 `capabilities`（构造时从授权表行取数，`grant_names_of`），
-    /// 不再回头查表——[T-082](../../../../docs/009-task/082-角色行生产构造批.md "T-082-角色行生产构造批")：
+    /// 不再回头查表——相应批次：
     /// 写侧闸判若直接问 `matrix`，同一数据就有两个入口。判定收归规格后，
     /// **判的对象（规格）与构造的来源（表行）有了单一链条**。
     ///
@@ -105,7 +105,7 @@ impl ActorSpec {
 
     /// 写侧判定（收束 · **产物臂**）：本规格能否落 `artifact.added`。
     ///
-    /// 与 [`Self::can_land_speech`] 并列而**不是**它的分支（ADR-067）：对等主体只持
+    /// 与 [`Self::can_land_speech`] 并列而**不是**它的分支（D-067）：对等主体只持
     /// `produce.artifact` ⇒ 发言臂拒、产物臂放，它因此能收束为一件产物。
     pub fn can_land_artifact(&self) -> bool {
         self.holds(crate::symbio_core::governance::Capability::ProduceArtifact.name())
@@ -115,11 +115,11 @@ impl ActorSpec {
     /// `control`）。
     ///
     /// 与收束两臂并列的第三个能力读方：`judge.intent` 是判定者的**全部**权威
-    /// （[S07 §5](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")
+    /// （[S07 §5](../../../../docs/007-task/127-插话与实时打断.md ")
     /// 「判定者不得直接发言」——它没有 `reply.*`，只有 `judge.intent`，由
     /// `authz::ROWS` 那一行保证）。该字段在生产里必须**真被读**：`inbox`
     /// 直驱判定者时若绕开规格、写控制事实也不查 `judge.intent`，这条权威就只是
-    /// 声明（[T-082](../../../../docs/009-task/082-角色行生产构造批.md "T-082-角色行生产构造批")）。
+    /// 声明（相应批次）。
     pub fn can_judge_intent(&self) -> bool {
         self.holds(crate::symbio_core::governance::Capability::JudgeIntent.name())
     }

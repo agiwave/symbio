@@ -2,7 +2,7 @@
 //!
 //! [`crate::symbio_core::actors::Reasoner`] 组 prompt 的输入：多轮对话时模型
 //! 需要看到自己说过什么（否则第二轮起失忆）。转写是**纯函数读视图**——
-//! 历史来自同一份事实源，不另存副本（ADR-044：实测与判据同源的同族纪律）。
+//! 历史来自同一份事实源，不另存副本（D-044：实测与判据同源的同族纪律）。
 //!
 // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
 //! 口径（**四格 → 三角色**）：
@@ -17,7 +17,7 @@
 //! 它也不产行，而是把此前整段历史**换基**成载荷里那份列表。三者都见 [`transcript`]
 //! 的文档。
 //!
-//! ## 工具结果为什么也在转写里（[plan/10 批 3](../../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案")）
+//! ## 工具结果为什么也在转写里（[plan/10 批 3](../../../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案")）
 //!
 //! 工具轮**当轮**的交换由运行器就地追加（网格里还没有那部分历史，见
 //! [`crate::symbio_core::actors::render_messages`] 的文档）；而**跨轮**的工具结果
@@ -41,7 +41,7 @@ use crate::symbio_core::chat_node::ChatNode;
 
 use serde::{Deserialize, Serialize};
 
-// 行类型与快照读法住在**消息读侧**（`super::mutations`，ADR-053）：
+// 行类型与快照读法住在**消息读侧**（`super::mutations`，D-053）：
 // `transcript` 折叠与 `prompt_fidelity` 复核共用同一份「一条消息被读作什么」——
 // 投影 A 不读投影 B（L2）：mutations 不含 `Projection::new`，是可共享的读侧普通函数
 // （`projection-purity.mjs` 静态守：产投影的文件不得导入产投影的兄弟模块）。
@@ -65,9 +65,9 @@ pub struct TranscriptView {
 ///
 /// 所以 core 出**最小结构化形态**，由 adapter 边界翻译成 provider 的消息
 /// （`ProviderLlmAdapter` 原样交给 `execute_turn`）。**结构在 core、线格式在
-/// adapter**——与 ADR-043 的域边界一致。
+/// adapter**——与 D-043 的域边界一致。
 ///
-/// ## 为什么必须有它（ADR-048a）
+/// ## 为什么必须有它（D-048a）
 ///
 /// `ModelProvider::execute_turn` 的签名本身就是
 /// `(system_prompt, messages: &[ChatNode], …)`——`role` + `tool_call_id` 是**跨栈契约**
@@ -143,7 +143,7 @@ impl From<&TranscriptEntry> for PromptMessage {
 }
 
 impl TranscriptView {
-    /// 投影成**消息数组**（ADR-048a 的结构化出口，**唯一出口**）。
+    /// 投影成**消息数组**（D-048a 的结构化出口，**唯一出口**）。
     ///
     /// 不裁剪、不改写、不补分隔符：**它就是网格里的那些条**，按事件顺序。
     /// 任何「为了 prompt 好看」的加工都会让模型看到网格没有的东西——那正是
@@ -190,7 +190,7 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
-/// ## 折叠：不只是追加（S2.7-b1，ADR-053）
+/// ## 折叠：不只是追加（S2.7-b1，D-053）
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。少了这一段，一次截断在 prompt 面上等于**没发生过**：模型
@@ -404,7 +404,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         );
                     }
                 }
-                // 对话面开场白（T-056，`Escalate` 首响）：与轮边界汇报同一条纪律
+                // 对话面开场白（，`Escalate` 首响）：与轮边界汇报同一条纪律
                 // ——助手说的界面文本，`exclude_from_context = true`（进转写、
                 // 不进 `to_messages()`）。理由码不同只影响 `meta.reason`，转写这层
                 // 只关心「谁说了一句给人看的话」。
@@ -438,7 +438,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         false,
                     );
                 }
-                // 诞生格（`message × opened`，ADR-054
+                // 诞生格（`message × opened`，D-054
                 // 决策 1）：**没有别的格可搭车**的节点在这里出生——今天只有压缩记录节点
                 // （「已压缩上下文」那张卡）。
                 //

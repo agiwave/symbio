@@ -30,9 +30,9 @@ pub enum PluginError {
     /// 就跨不过插件墙：`to_frame` 只写错误码与文案，模型侧的中止在 `adapters`
     /// 边界转成 `AdapterError::Aborted`（载荷在那里被丢掉）。半截产出由 loop
     /// 插件私有的退出类型携带（生产方与消费方都在 loop，两侧编译期可见），
-    /// 见 [ADR-095]。
+    /// 见 [D-095]。
     ///
-    /// [ADR-095]: ../../../../docs/010-adr/095.md "ADR-095"
+    /// [D-095]: ../../../../docs/003-design/005-协议规范.md "D-095"
     #[error("操作中止")]
     Aborted,
     #[error("上下文丢失，需要重试")]

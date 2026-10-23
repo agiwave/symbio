@@ -1,4 +1,4 @@
-//! 运行器的纯取值 / 载荷辅助（T-179 · B3 搬移）。
+//! 运行器的纯取值 / 载荷辅助（ · B3 搬移）。
 //!
 //! 产出载荷、窗口视图、工具交换消息与 id 合成——都是无状态的纯函数，
 //! 因此与阶段拆分层分开放：阶段文件只描述流程，这里只描述形状。
@@ -108,7 +108,7 @@ pub(crate) fn with_status(mut produced: serde_json::Value, status: &str) -> serd
     produced
 }
 
-/// 给收束格载荷补**停机原因**（`reason`，T-220）。
+/// 给收束格载荷补**停机原因**（`reason`，）。
 ///
 /// 与 [`with_status`] 是两个维度，缺一不可：
 /// - `status` 说**结果**是哪一类（三值，读侧按它折出 `RuntimeOutcome`）；
@@ -130,7 +130,7 @@ pub(crate) fn with_reason(
 ///
 /// 只判 `Length`：内容安全过滤（`ContentFilter`）与未识别原因（`Other`）今天
 /// 也走自然收束——把它们另立取值是发明闭集以外的值，而闭集的意义就在于
-/// 可穷举。这一处残留的混淆记录在 T-220 的处理过程里。
+/// 可穷举。这一处残留的混淆记录在 的处理过程里。
 pub(crate) fn reason_of_finish(
     finish: &crate::symbio_core::ModelFinishReason,
 ) -> crate::symbio_core::ClosureReason {
@@ -163,7 +163,7 @@ pub(crate) fn with_dialog(
 /// 终止信息（`terminated: { at }`，仅终止时有）：终止的事实被截到哪一刻——
 /// 半截正文停在哪里由此可观测。
 ///
-/// **`terminated.reason` 已退役**（T-220）：「为什么中止」由顶层 `reason`
+/// **`terminated.reason` 已退役**：「为什么中止」由顶层 `reason`
 /// （`interrupted`）说，这里只留时刻。两处各写一份原因，必然有一处先漂——
 /// 而漂的时候两边都是合法拼写，谁也不报错。
 pub(crate) fn with_terminated(mut payload: serde_json::Value) -> serde_json::Value {
@@ -173,7 +173,7 @@ pub(crate) fn with_terminated(mut payload: serde_json::Value) -> serde_json::Val
     payload
 }
 
-/// 按主体过滤一批事件（**可见域入口**，[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
+/// 按主体过滤一批事件（**可见域入口**，[plan/11 批 1](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
 /// ③）：`None` = 不过滤（与接线前逐字一致），`Some(v)` = 只交 `visible_to` 通过的事件。
 ///
 /// 全部可见时**不复制**（借用原切片）——平凡值下（单主体会话）这条路径与
@@ -257,7 +257,7 @@ pub(crate) fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
     })
 }
 
-/// 一轮工具交换 → **结构化**消息（ADR-048a）。
+/// 一轮工具交换 → **结构化**消息（D-048a）。
 ///
 /// 出的是真消息：assistant（带 `tool_calls` 摘要）/ tool（带 `tool_call_id`）。
 /// 拍成散文（`助手请求工具: … / 工具结果(x): …`）会同时坏三件事——把工具调用当成

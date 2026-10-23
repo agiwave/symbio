@@ -2,7 +2,7 @@
 
 > **【归档说明】** 本文档是 **2026-09-12 的一次性复杂度审计（过程产物）**，已于 2026-09-17
 > 移入 `docs/archive/implementation-logs/`。它的接续版本是同目录的
-> [`session-mechanism-audit.md`](./session-mechanism-audit.md)；session 现行机制见
+> [`session-mechanism-audit.md`](session-mechanism-audit.md)；session 现行机制见
 > [`session/README.md`](../../../symbio/src/plugins/session/README.md) 与
 > [`session/docs/`](../../../symbio/src/plugins/session/docs/)。本文不再更新。
 

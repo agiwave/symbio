@@ -126,7 +126,7 @@ impl HookEvent {
     }
 }
 
-/// 钩子**没跑起来**时注入 `context` 的固定标记（T-199）。
+/// 钩子**没跑起来**时注入 `context` 的固定标记。
 ///
 /// 钩子是旁路观察者，失败必须留在执行路径上（`should_proceed` 不变、调用点不中断），
 /// 但「钩子跑了」与「钩子没跑」不能同形：装配错了挂钩插件的会话，此前看到的是
@@ -140,7 +140,7 @@ pub const HOOK_UNAVAILABLE_MARKER: &str = "[hook-unavailable]";
 /// 报错）在函数内部就吞成 `HookOutput::default()`，因此调用点的 `let _ = fire_hook(...)`
 /// **丢的不是错误**（没有错误可丢），只是不需要那份输出。
 ///
-/// [ADR-086](../../../../docs/010-adr/086.md "ADR-086") §6 上移 core：session 在派发前
+/// [D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6 上移 core：session 在派发前
 /// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact` / `PreToolUse` / `PostToolUse`，
 /// 两个插件共用这一条路由助手（不是新机制）。
 pub async fn fire_hook(
@@ -166,7 +166,7 @@ pub async fn fire_hook(
         Ok(resp) => match resp.get::<HookOutput>() {
             Ok(output) => output,
             // 插件在、但返回的东西不是钩子输出（版本不匹配 / 外部脚本吐了别的帧）：
-            // 这与「没有钩子」同形，标记 + 告警把它分开（T-199）。
+            // 这与「没有钩子」同形，标记 + 告警把它分开。
             Err(e) => {
                 tracing::warn!(
                     "钩子 {} 的输出无法解析：{e}（按未执行处理，不拦截）",

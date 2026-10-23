@@ -52,7 +52,7 @@
 
 **应保持现状**：合并需下沉到 core，而这是仅 10 行的函数——
 按 `plugin-entry-audit` E-009（插件互引禁止）本就不该互引，
-为 10 行在 core 增加一个公开面（还要过 ADR-023 依赖方判据）是净负收益。
+为 10 行在 core 增加一个公开面（还要过 D-023 依赖方判据）是净负收益。
 
 ---
 
@@ -81,7 +81,7 @@
 `llm_emit_state` / `llm_emit_removed` / `llm_state_frame` 有 **7 个文件**引用
 （`chat_loop.rs` 及 `chat_loop/{io,state,turn}.rs`、`resume.rs`、`tool_executor.rs`、
 `pipeline.rs`），是**跨子模块的公共门面**。58 行里约 30 行是必要文档
-（ADR-023/038 的下沉理由），实质代码约 20 行。**保留原样。**
+（D-023/038 的下沉理由），实质代码约 20 行。**保留原样。**
 
 ### 结论：**不可提取**
 

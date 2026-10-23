@@ -122,11 +122,11 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
     cm::MessageContent::Parts(parts)
 }
 
-/// 抽干结果（类型已随 ADR-086 §7 上移 core：loop 的补充注入与 session 的抽干口
+/// 抽干结果（类型已随 D-086 §7 上移 core：loop 的补充注入与 session 的抽干口
 /// 都要命名它；这里只留 session 侧的短路径别名）。
 pub(crate) use crate::symbio_core::DrainedSupplement;
 
-/// 「取批 + 合并 + 成形」的**同步单一入口**（[ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三）。
+/// 「取批 + 合并 + 成形」的**同步单一入口**（[D-081](../../../../../docs/003-design/014-单环一表.md "D-081") 裁决三）。
 ///
 /// 补充消息的**到达**归存储（队列与变更通知都在本域），驱动器只掌握**要的时机**
 /// （工具循环的批次边界）——于是这三步整体住在本域，`chat_loop::SupplementDrain`
@@ -177,7 +177,7 @@ pub(crate) fn take_supplement_batch_sync(
     })
 }
 
-/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §6）。
+/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §6）。
 ///
 /// ## 为什么住 session 而不随驱动器迁走
 ///
@@ -187,7 +187,7 @@ pub(crate) fn take_supplement_batch_sync(
 /// ## 它只做一件事
 ///
 /// 委托本域的单一入口 [`take_supplement_batch_sync`]（取批 + 合并 + 成形三步整体
-/// 住在本域，见 [ADR-081](../../../../../docs/010-adr/081.md "ADR-081") 裁决三），
+/// 住在本域，见 [D-081](../../../../../docs/003-design/014-单环一表.md "D-081") 裁决三），
 /// **不在驱动器侧自拼步骤、不写任何地址、不落格、不落库**：抽干发生在工具循环的
 /// **批次边界**，落格与「进下一次请求」都在 loop 的 `turn_exec.rs` 的
 /// `supplement_into_request`（由 `turn_runner.rs` 的 2f 触发）。

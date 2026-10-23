@@ -95,7 +95,7 @@ fn non_data_lines_produce_nothing() {
     }
 }
 
-// ── 出厂只发一条 system（T-015）──────────────────────────────────────────
+// ── 出厂只发一条 system──────────────────────────────────────────
 //
 // 部分 OpenAI 兼容网关只认「消息数组第一条是 system **且只有一条**」，两条 system
 // 直接 400（`System message must be at the beginning.`）——那类 provider 上 `full`

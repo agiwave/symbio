@@ -1,8 +1,8 @@
-//! 义务环的**表与求解**（T-222a）：模式 / 行 / 债 / `owed` / `drive`。
+//! 义务环的**表与求解**（a）：模式 / 行 / 债 / `owed` / `drive`。
 //!
 //! ## 一行是数据，不是函数
 //!
-//! 旧策略表（`loop_registry`，T-222b 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
+//! 旧策略表（`loop_registry`，b 已退役）的一行是 `fn(&LoopState) -> Option<Capsule>`
 //! ——判断住在函数体里。这里的一行是 [`Decl`]：`owes` / `until` / `unless` 三个
 //! [`Pattern`] 加 `by` / `prio`。判断因此可 diff、可装载期检查；执行体只拿到一笔 [`Debt`]。
 //!
@@ -17,13 +17,13 @@
 //!
 //! 时间不进公式：需要时间的条件由视图把 `now` 折成布尔字段（[`Frozen::eval`]
 //! 的 `now` 是入参）。因此 `owed` 只读**事实切片 + 视图值 + 触发事件时间戳**，
-//! 不读配置、墙钟、内存缓存（[ADR-115](../../../../docs/010-adr/115.md) 决策 1）。
+//! 不读配置、墙钟、内存缓存（[D-115](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 决策 1）。
 //!
 //! ## 模式只做等值
 //!
 //! `eq` 是 `(字段, 字面量)` 列表，`key` 是参与债标识的字段名。没有否定、没有
 //! 比较、没有函数——更复杂的条件要么折成视图字段，要么留在执行体里。这是
-//! 「表里零代码」的类型形态（PL-016 判据 2）。
+//! 「表里零代码」的类型形态（DE-015 判据 2）。
 //!
 //! **事实源的字段**先查载荷，再落三个信封字段：`turn` / `seq` / `ts`。它们不是
 //! `FactDecl.fields` 的一部分——信封是每条事实都有的，不必逐条声明。
@@ -36,7 +36,7 @@
 //! 端口级的东西（派发前先落哪个事实、租约多久、最多试几次）对**同一个端口的
 //! 每一行都一样，所以不写进行里（那会是三份会漂移的副本），而是每个端口声明
 //! 一次（[`PortDecl`]）。加一个端口 = 1 条 `PortDecl` + 适配器 + 2 行模板，
-//! 求解器与行表不变（PL-016 §6 判据 1，执行方 `scripts/port-surface-audit.mjs`）。
+//! 求解器与行表不变（DE-015 §6 判据 1，执行方 `scripts/port-surface-audit.mjs`）。
 
 use std::collections::HashSet;
 
@@ -84,7 +84,7 @@ pub(crate) struct Decl {
     pub(crate) tier: LatencyTier,
     pub(crate) owes: Pattern,
     /// 集合展开：`Some((list_field, element_key_field))` ⇒ `owes` 实例的
-    /// `list_field` 是数组，**逐元素**开一笔债（PL-017 §3.3；`FactDecl.expand`
+    /// `list_field` 是数组，**逐元素**开一笔债（DE-015 §3.3；`FactDecl.expand`
     /// 是它在事实侧的另一半）。
     ///
     /// 展开后键绑定**对元素求值**：`owes.key` 里每个字段都从元素上取。
@@ -100,14 +100,14 @@ pub(crate) struct Decl {
     pub(crate) unless: &'static [Pattern],
 }
 
-/// 一个**端口**的声明（T-223）：适配器协议里那几项每端口不同、又必须被引擎与
+/// 一个**端口**的声明：适配器协议里那几项每端口不同、又必须被引擎与
 /// 租约看护者读到的东西。
 ///
 /// ## 为什么不把这些字段塞进 `Decl`
 ///
 /// `before` / `lease_ms` / `max_attempts` 对**同一个端口的每一行**都一样，写进
 /// 行里就是三份副本（dispatch / await / lease），而副本必然漂移。端口级的东西
-/// 按端口声明一次：加一个端口 = 加一条 `PortDecl` + 适配器 + 2 行模板（PL-016 §6
+/// 按端口声明一次：加一个端口 = 加一条 `PortDecl` + 适配器 + 2 行模板（DE-015 §6
 /// 判据 1）。
 ///
 /// ## 为什么在 `ring` 而不在插件
@@ -122,13 +122,13 @@ pub(crate) struct PortDecl {
     /// 引擎在运行执行体**之前**落的那个事实名（协议族里的 `sent`）。
     ///
     /// 搬运行者不写它：它的 `run` 可能**不产生事实就返回**，依赖它自觉 ⇒
-    /// 派发行永远不还清，而没有任何东西会红（PL-016 §2.3；T-223 判据 2）。
+    /// 派发行永远不还清，而没有任何东西会红（DE-015 §2.3； 判据 2）。
     pub(crate) before: &'static str,
     /// 租约：`sent` 之后多久没有应答算「卡住」（毫秒）。
     pub(crate) lease_ms: u64,
     /// 最多尝试几次（含首次）。到顶之后租约看护者判死而不是再重试。
     pub(crate) max_attempts: u64,
-    /// 同一批次的子债是否允许并发派发（PL-017 §3.3）。
+    /// 同一批次的子债是否允许并发派发（DE-015 §3.3）。
     ///
     /// **声明与策略分开**：这里只说「这个端口允许同批并发」；具体哪几条能同时在途
     /// 仍由执行层的风险档决定（`tools/dispatch/parallel.rs`）。`false` 是硬闸——
@@ -220,11 +220,11 @@ pub(crate) fn owed<'a>(
 ///
 /// 可还性只有一个声明位：[`owed`] 的 `blocked`（`by = None ∨ unless` 命中）。
 /// 「执行体还没接线」不是求解器的第四种条件——那种行显式写 `by = None`，
-/// 接线时与 `ActorDecl` 注册同批改回 `Some`（PL-016 §2.2 / ADR-118 订正 1）。
+/// 接线时与 `ActorDecl` 注册同批改回 `Some`（DE-015 §2.2 / D-118 订正 1）。
 ///
 /// 按行点问（`plugins::loop::loop_rows::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
-/// 调度器唯一的选债口（ADR-118 决策 1–2）。
+/// 调度器唯一的选债口（D-118 决策 1–2）。
 pub(crate) fn drive<'a>(
     rows: &'a [Decl],
     frozen: &Frozen,
@@ -309,7 +309,7 @@ fn key_from(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option
 
 /// 只取键字段，不再判 `eq`。
 ///
-/// 集合展开时 `eq` 已经拦在**外层实例**上（ADR-116 决策 3），元素键只取身份字段；
+/// 集合展开时 `eq` 已经拦在**外层实例**上（D-116 决策 3），元素键只取身份字段；
 /// 再对元素判一次 `eq` 会把「外层是 `port=model`、元素是 `port=tool`」的组合
 /// 全部滤掉——那正是创建行 `open-tools` 的形态。
 fn key_of(p: &Pattern, mut field: impl FnMut(&str) -> Option<Value>) -> Option<Key> {
@@ -354,7 +354,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
     value.as_str().map(str::to_string)
 }
 
-/// 装载期的行检查（PL-016 §3.4 的第 2 / 7 条）。
+/// 装载期的行检查（DE-015 §3.4 的第 2 / 7 条）。
 ///
 /// ## §3.4 七道检查 → 这一层的格子（指认表）
 ///
@@ -364,7 +364,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// | 2 | 每行收口 | [`check_rows`] | `NoExit` / `KeyMismatch` / `ExpandKeyMissing` / `UndeclaredExpand` |
 /// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `seal()` 的声明侧（视图 `reads` 与 `FactDecl` 自引用） | `UndeclaredPatternField` + `UndeclaredField` / `FactFieldUndeclared` |
 /// | 4 | 相交行对 | [`overlaps`]——**只报告，不红**（静态判不出「真的同时命中」） | `Overlap` |
-/// | 5 | 写入封闭 | `seal()` 的声明侧（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 T-249 | `ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
+/// | 5 | 写入封闭 | `seal` 的声明侧（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 | `ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
 /// | 6 | 执行体收口 | [`check_rows`] | `UnmannedRow` / `OrphanActor` / `ActorCannotClose` / `ActorModeTooNarrow` |
 /// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
 ///
@@ -382,7 +382,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
 ///   那条事实的 `FactDecl.expand`——求解器会去读一个事实自己都不承认的字段；
 /// - [`Gap::UnmannedRow`]：`by = Some(名字)` 而这个名字没有执行体声明——「这行
-///   有人跑」是假话，选中它只会得到 `no_progress`（PL-016 §3.4 第 6 条的前半）；
+///   有人跑」是假话，选中它只会得到 `no_progress`（DE-015 §3.4 第 6 条的前半）；
 /// - [`Gap::OrphanActor`]：声明了执行体却没有任何行指向它——裸函数的另一面，
 ///   接线接了个没人派发的名字；
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
@@ -617,13 +617,13 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                         .chain(decl.unless)
                         .flat_map(|p| fact_names_of(p.source, frozen))
                         .collect();
-                    // 两档（ADR-124）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
+                    // 两档（D-124）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
                     // 出口**全是**引擎独占格 ⇒ 那是派发行的形状——引擎按 `PortDecl::before`
                     // 在动作之前落 `sent`、失败/租约到顶落 `failed`，关门本来就不归执行体。
                     // 此时若还要求交集，就是要求执行体声明第 5 条禁止它声明的格：
                     // 两条检查互斥 ⇒ 这一行永远不许接线。改判这一档判得住的那半
                     // （名单非空 = 不许注册一段什么都不写的动作），
-                    // 「这次真没写」由运行期的空账本守卫判（ADR-123 决策 1）。
+                    // 「这次真没写」由运行期的空账本守卫判（D-123 决策 1）。
                     let engine_only_exits = !exits.is_empty()
                         && exits.iter().all(|f| super::ENGINE_ONLY_CELLS.contains(f));
                     let reaches_exit = if engine_only_exits {

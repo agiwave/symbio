@@ -59,7 +59,7 @@ use crate::symbio_core::{DetailField, DetailOption};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-/// 规范标识（见 `docs/005-arch/006-agent-directory-spec.md`）
+/// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
 ///
 /// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec`、且通过 §10 版本门槛时
 /// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既
@@ -352,7 +352,7 @@ impl Plugin for AgentPlugin {
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());
-        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（AR-025 4a）：
+        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（DE-008 4a）：
         // 其实这里从来只有一个能力，批入口本无存在理由。
         // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
         let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(

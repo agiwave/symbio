@@ -6,7 +6,7 @@
 //!
 //! 本文件**不落库**：轮次产生的新消息由会话侧写入点落格，这里只读已有节点。
 //!
-//! ## 换算分成三个模块（[T-209](../../../../docs/009-task/209-消息树换算下沉批.md "T-209-消息树换算下沉批")）
+//! ## 换算分成三个模块（相应批次）
 //!
 //! | 段 | 住哪 | 只回答 |
 //! |---|---|---|
@@ -19,7 +19,7 @@
 //! 这三类只会笼统报成「请求包不对」，而 275 行里找一格错位正是历史上两次事故
 //! （树形路径拼错、降级后恢复轮丢失）的现场。
 //!
-//! 三段都是**纯函数**（不含 IO），但**不下沉 `symbio_core`**：判据是 ADR-023 的
+//! 三段都是**纯函数**（不含 IO），但**不下沉 `symbio_core`**：判据是 D-023 的
 //! 依赖方数量——`flatten_chat_messages` 的四个调用点（anthropic / gemini /
 //! openai_chat / openai_responses）**同住 model 一个模块**，一个模块依赖的内容
 //! 一律留在该模块内；core 只放契约不放实现。第二个模块出现时再谈上提。
@@ -119,7 +119,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
 
 // ChatNode 的**构造**不在本插件：`llm_build_assistant_messages` /
 // `llm_build_tool_message` / `TurnStreamChildIds` / `TurnOutput::into_messages`
-// 生产上只有 session 一个消费方，已随 ADR-023 从 `symbio_core::llm::turn` 下沉到
+// 生产上只有 session 一个消费方，已随 D-023 从 `symbio_core::llm::turn` 下沉到
 // `plugins/session/message_build.rs`。本文件是**读侧**（存储树 → 请求包），
 // 测试用同形状的本地 fixture（理由见 tests 模块文件头）。
 

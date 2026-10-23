@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T81 入站边界：令牌不进 URL · `Idempotency-Key` · 连接上限（T-194）。
+// T81 入站边界：令牌不进 URL · `Idempotency-Key` · 连接上限。
 //
 // ## 这三条为什么必须走真实边界
 //

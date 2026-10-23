@@ -1,9 +1,9 @@
 import './_selfrun.mjs';
-// T78 审批闸门的覆盖面（T-138）：`vdfs_delete` 声明 `risk=High`，执行期必须被读到。
+// T78 审批闸门的覆盖面：`vdfs_delete` 声明 `risk=High`，执行期必须被读到。
 //
 // ## 本用例钉的是什么
 //
-// T-138 的出口判据原文：「经任一注册入口进 ToolManager 的能力都过同一道 `approval_gate`；
+// 的出口判据原文：「经任一注册入口进 ToolManager 的能力都过同一道 `approval_gate`；
 // 判据 = 一条 e2e，交互模式下 `vdfs_delete` 必须先出确认卡、批准后才删除，`auto`
 // 模式下按 `PERMISSION_DENIED` 继续」。
 //
@@ -132,7 +132,7 @@ export default defineCase(
       return abs;
     };
 
-    // 事实面读面：授权级联（T-227 步 3）必须留下 `request` + `authz.denied`，
+    // 事实面读面：授权级联（ 步 3）必须留下 `request` + `authz.denied`，
     // 而拒绝的那一笔**不能**有 `sent`——「没放行 ⇒ 没派发」是 fail-closed 的
     // 唯一可观测形态。直接读会话 WAL，不经过转写（转写是投影，不是事实源）。
     const readWal = (sid) =>
@@ -185,7 +185,7 @@ export default defineCase(
         `交互首轮应以「本轮停在等用户」的正常形态退出（stderr: ${first.stderr.slice(0, 600)}）`,
       );
 
-      // **磁盘侧判据**：闸门若没生效，文件会被直接删——这是 T-138 的原始现场。
+      // **磁盘侧判据**：闸门若没生效，文件会被直接删——这是 的原始现场。
       assert(
         existsSync(victimA),
         `首轮**必须停在卡上**——磁盘上文件仍在才算闸门生效（修复前它直接被删）`,
@@ -259,7 +259,7 @@ export default defineCase(
       );
 
       // 事实面：批准恢复的那一笔必须走完 `request → granted → sent → response`。
-      // 这是 T-227 步 4 的分水岭——在此之前 resume 直接调执行层，端口账上
+      // 这是 步 4 的分水岭——在此之前 resume 直接调执行层，端口账上
       // 只有首轮的 `denied`，批准后的执行是事实面的空白。
       const aFacts = toolFacts(readWal(SID_INTERACTIVE));
       const aGranted = aFacts

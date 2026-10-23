@@ -67,7 +67,7 @@ fn resume_action_wire_words_are_snake_case() {
     }
 }
 
-// ==================== [T-147c-ii] 目标形状与 style_tag ====================
+// ==================== c-ii 目标形状与 style_tag ====================
 
 /// 六词旧 wire 词 + 五词新 wire 词都能被 [`legacy_shape_to_style_tag`] 折成
 /// 目标五值 + 对应 style_tag。这张映射表是 [`message_of_node`] 读边界折叠存量
@@ -171,7 +171,7 @@ fn style_tag_reads_and_merges_meta() {
     assert!(meta.get("prompt").is_some(), "既有 meta 键不得被挤掉");
 }
 
-// ==================== [T-147c-ii-s4] message_of_node 读边界折叠存量旧词 ====================
+// ==================== c-ii-s4 message_of_node 读边界折叠存量旧词 ====================
 
 /// 用 `attributes` JSON 造一个 VDFS 节点（`message_of_node` 的输入形状）。
 fn vdfs_with_attrs(name: &str, attrs: serde_json::Value) -> crate::symbio_core::VdfsNode {
@@ -259,7 +259,7 @@ fn message_of_node_keeps_target_words_and_existing_tags() {
     assert_eq!(m.msg_type, None);
 }
 
-/// [T-147d-ii]：存量属性 `tool_name` 折进 `meta.tool_name`——顶层 `name` 已退出
+/// d-ii：存量属性 `tool_name` 折进 `meta.tool_name`——顶层 `name` 已退出
 /// wire，读边界注入是历史数据工具名的唯一落点；非覆盖纪律与 `style_tag` 同一条。
 #[test]
 fn message_of_node_folds_attr_tool_name_into_meta() {
@@ -290,7 +290,7 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
     assert_eq!(m.tool_name(), Some("new"));
 }
 
-/// 呈现派生（[T-155 B3]）：title/icon 从**形状**现算，且只在前后端交互面调用。
+/// 呈现派生（B3）：title/icon 从**形状**现算，且只在前后端交互面调用。
 ///
 /// 钉住三件事——(1) 每类形状算出什么；(2) `run` 骨架标题是智能体名（上下文相关），
 /// 这里绝不钉死；(3) 已有值不覆盖（幂等，重复投递安全）。
@@ -352,7 +352,7 @@ fn derived_presentation_from_shape() {
     assert_eq!(kept.title.as_deref(), Some("自定义"));
 }
 
-/// 恢复动作派生（[T-155 B3]）：业务→动词的翻译在后端交互面完成，逐条镜像前端 legacy 判据。
+/// 恢复动作派生（B3）：业务→动词的翻译在后端交互面完成，逐条镜像前端 legacy 判据。
 #[test]
 fn derived_actions_from_shape_status_meta() {
     let has = |n: &ChatNode, a: ResumeAction| {

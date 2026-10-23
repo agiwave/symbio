@@ -8,7 +8,7 @@ mod prompt;
 mod row;
 mod tool_name;
 
-// 三条收集通道键与错误桶键住本域（键与值同住，ADR-095 根因一）。**只导实例、
+// 三条收集通道键与错误桶键住本域（键与值同住，D-095 根因一）。**只导实例、
 // 不导 `…Key` 类型**——实例是 `ctx` 上的读写凭据（对外协议面），类型名没有任何
 // 域外消费方（C-003），`pub struct` 留在子模块里由本域自用。`CapabilityError`
 // 同理不出本域：读侧经 `capability_take_errors` 的返回类型推断拿到它，
@@ -99,10 +99,10 @@ pub struct CapabilityMeta {
     /// 取值只能是枚举变体（不接受字符串字面量），编译器强制这一点。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub risk: Option<CapabilityRiskLevel>,
-    /// 本工具是否提供 `assign.work`（派活）——**淘汰闸的管辖对象**（S13 §3，T-073）。
+    /// 本工具是否提供 `assign.work`（派活）——**淘汰闸的管辖对象**（S13 §3，）。
     ///
     /// 机制说明：与 [`risk`](Self::risk) 同一条纪律——**工具自声明**，闸门读这个
-    /// 字段判定，**不硬编码工具名**（T-158）。`assign.work` 被淘汰回路收回时，
+    /// 字段判定，**不硬编码工具名**。`assign.work` 被淘汰回路收回时，
     /// 执行器据本字段把调用判为淘汰拒止；未声明的工具不在淘汰闸管辖内。作用域
     /// 投影（子智能体的改名包装）只换名字、原样透传本字段——闸门跟随**工具**，
     /// 不跟随它在哪个作用域里叫什么。
@@ -111,16 +111,16 @@ pub struct CapabilityMeta {
     /// 本工具是否**立约**（跨主体承诺）——承诺出参的记账对象（S08 §3）。
     ///
     /// 机制说明：同 [`provides_assign_work`](Self::provides_assign_work) 的自声明
-    /// 纪律（T-158）。承诺记账（`commitment.*` 格）只为声明了本位的工具记；没跑
+    /// 纪律。承诺记账（`commitment.*` 格）只为声明了本位的工具记；没跑
     /// 到的一样记违约——「约」本身已经存在。未声明 ⇒ 不记：本主体自办的调用是
     /// 执行结果，不是承诺。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub records_delegation_promise: bool,
     /// 本工具是否写**任务表**——任务表写侧资格闸与任务声明记账的管辖对象
-    /// （S03 §3，T-107）。
+    /// （S03 §3，）。
     ///
     /// 机制说明：写侧资格（`define.work` / `assert.verification` 二居其一）与任务
-    /// 声明记账都只为声明了本位的工具生效（T-158）。线上名 `<挂载点>/<短名>` 取
+    /// 声明记账都只为声明了本位的工具生效。线上名 `<挂载点>/<短名>` 取
     /// 末段这个**匹配口径**不变，变的是「谁是管辖对象」——从执行器里的字面量
     /// 改成工具自己的声明。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -307,7 +307,7 @@ pub mod failure_kind {
     }
 }
 
-/// 收集口：**一张表，三个方法**（AR-025）。
+/// 收集口：**一张表，三个方法**（DE-008）。
 ///
 /// 收敛前这里是十六个方法的形态：`register` / `register_batch` /
 /// `list_capability` / `invoke` / `has_capability` 五个方法专服工具一族，
@@ -331,7 +331,7 @@ pub mod failure_kind {
 /// ## 顺序是表的一部分
 ///
 /// [`Self::list`] 返回的顺序 = 注册顺序（工具族直接决定送给模型的 `tools` 数组
-/// 顺序，见 ADR-057）。族内**不**按名字重排：重排等于每起一个进程换一次工具面
+/// 顺序，见 D-057）。族内**不**按名字重排：重排等于每起一个进程换一次工具面
 /// 前缀。策略行的先命中者胜排序（`(prio, name)`）住在 loop 插件的行表
 /// （`loop_rows` / `decl::ring`），与表内注册序是两件事。
 #[async_trait]
@@ -340,7 +340,7 @@ pub trait Registry: Send + Sync + 'static {
     ///
     /// 实现必须把每条进表的能力裹上审批闸
     /// （`providers/collectors/approval.rs`）：闸门住在收口点，`meta` /
-    /// `risk_for` 原样透传，故 `get` / `list` 都不受影响，执行那一步才判定（T-138）。
+    /// `risk_for` 原样透传，故 `get` / `list` 都不受影响，执行那一步才判定。
     ///
     /// ## 单槽族的**唯一生效**也在这里维持
     ///
@@ -365,7 +365,7 @@ pub trait Registry: Send + Sync + 'static {
     /// 按族列行（**取代了 `list_capability`**）。
     ///
     /// 顺序 = 注册顺序（见 trait 文档）。返回的是**行**而不是元数据：元数据经
-    /// [`CapabilityRow::meta`] 现取（T-158 的三个声明位同样在 meta 上）。
+    /// [`CapabilityRow::meta`] 现取（ 的三个声明位同样在 meta 上）。
     async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
 
     // 模型族（4 方法，4b）与系统提示词族（2 方法，4c）已改走表：写入是在表的

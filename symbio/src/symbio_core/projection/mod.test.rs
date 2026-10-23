@@ -1,4 +1,4 @@
-//! `projection` 单测 —— S0 出口判据 N1（投影确定性：双跑逐字节相同，[plan/04 §4 C6](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+//! `projection` 单测 —— S0 出口判据 N1（投影确定性：双跑逐字节相同，[plan/04 §4 C6](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //!
 //! 纯净性本身是**编译期**的（`new` 的泛型约束）；这里守的是二级：确定性可观测。
 
@@ -12,7 +12,7 @@ fn ev(id: &str, kind: &str, verb: Verb, turn: u64) -> Event {
 }
 
 /// 骨架投影：统计**交给它的事件**里某 kind 的条数（S1 起的 `turnstate` 视图从
-/// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行（ADR-105）。
+/// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行（D-105）。
 fn seen_count_projection() -> Projection<usize> {
     Projection::new(|events, _now| events.iter().filter(|e| e.kind == "user.message").count())
 }
@@ -65,7 +65,7 @@ fn view_changes_when_input_changes() {
 
 #[test]
 fn over_budget_projection_degrades_instead_of_erroring() {
-    // 预算语义在框架层（ADR-105）：`budget.ms` 为扫描配额，超窗只交**切片头部**，
+    // 预算语义在框架层（D-105）：`budget.ms` 为扫描配额，超窗只交**切片头部**，
     // 截断 ⇒ 外壳 `degraded`。闭包对此一无所知——它只统计见到的事件。
     let p: Projection<String> = Projection::new(|events, _now| format!("{} 条", events.len()));
     let events: Vec<Event> = (0..10)
@@ -101,7 +101,7 @@ fn projection_runs_on_a_snapshot_without_any_store() {
     assert_eq!(v.value, 1);
 }
 
-// ── `read_all`：全量读数的**具名口径**（T-206 ⑧）──────────────────────
+// ── `read_all`：全量读数的**具名口径**（ ⑧）──────────────────────
 
 /// 一个把 `now` 透出来的投影：用它判「as-of 那一格到底传了什么」。
 ///

@@ -728,7 +728,7 @@ export async function sessionAddr(cli, sid) {
  * `session/chat/send` 悄悄代劳（它 `get_or_create`），于是「先建后写」这件事在
  * 调用方看起来可有可无；走地址面后它显式化了：一次写路径一个事实，会话的存在
  * 由**会话节点的那一次写**负责，消息写入不附带建会话的语义（也不该由它带——
- * 那正是 ADR-066 清掉的「选项随消息走」的同一处乖违）。
+ * 那正是 D-066 清掉的「选项随消息走」的同一处乖违）。
  *
  * 与前端 `createSession`、`register_subsession`、CLI `ensure_session` 同一条形状：
  * 带 `create` 的写是 **upsert**（不存在则就地创建，已存在则浅合并 metadata），
@@ -753,7 +753,7 @@ export async function createSession(cli, sid, metadata = {}) {
 /**
  * 经 HTTP 边界**发一条用户消息**（收件箱地址面——输入面双轨退役后唯一入口）。
  *
- * `session/chat/send` 已于 T-077 步② 移除（[ADR-066]）：那条路由的 `message` 分支
+ * `session/chat/send` 已移除（[D-066]）：那条路由的 `message` 分支
  * 只是入队的薄包装、回包恒为 `accepted`，而「接收消息」与「跑一轮」本来就在两处。
  * 现在发消息 = 对空间的一次 `vdfs/write(<根>/session/<sid>/inbox, text)`——
  * 与 T15 写**子智能体空间**收件箱同一条地址语义，机制统一、没有顶层专用分支。
@@ -795,7 +795,7 @@ export async function abortSession(cli, sid, metadata = {}) {
 /**
  * 经 HTTP 边界**回填一次恢复**（`action(<sid>/message/<mid>, <动作词>)`）。
  *
- * 曾经的入口是 `session/chat/send` 的 `resume` 字段（输入面双轨退役，T-077 步②）。
+ * 曾经的入口是 `session/chat/send` 的 `resume` 字段（输入面双轨退役）。
  * 落点是**目标消息自身**：恢复不产生新用户消息，它就落在当时那条消息上
  * （删除-重建），而入队会让它排到新消息之后、候选早已被改写。
  *
@@ -933,13 +933,13 @@ export function turnFacts(events) {
 /**
  * wire 形态词 → 断言用的**旧类型词**折叠（e2e 侧判据，与前端分派轴无关）。
  *
- * [T-147c-ii-s3/s4] 之后 ChatNode 的 `type` 只有五值
+ * ChatNode 的 `type` 只有五值
  * （body/notice/skeleton/interaction/typing），呈现变体住 `meta.style_tag`。
  * e2e 若继续拿 `m.type === 'tool_call'` 这类**旧词**比较，条件永远不成立——
  * 断言不报错、只是不再命中靶子（静默跳过），这比失败更危险。
  * 所有对消息节点 / 实时帧 `type` 的判据一律经本函数折叠回旧词再比。
  *
- * 前端不认这些旧词（[T-155] 它只按五值分派）；这里保留旧词是因为**用例断言的就是
+ * 前端不认这些旧词（前端只按五值分派）；这里保留旧词是因为**用例断言的就是
  * 后端标注的事实**——`style_tag` 是后端随节点下发的注解，读它正当。
  *
  * 旧词与未知值原样透传（存量 fixture 与未来新词都不会被误判成别的）。
@@ -949,7 +949,7 @@ export function msgTypeOf(m) {
   const tag = m?.meta?.style_tag;
   if (t === 'skeleton') return tag === 'tool' ? 'tool_call' : 'turn';
   if (t === 'body') return tag === 'reasoning' ? 'reasoning' : 'text';
-  // [T-155]：思考事实从 `body + tag` 归位到 `notice`（折叠叶），与压缩同格——
+  // 相应批次：思考事实从 `body + tag` 归位到 `notice`（折叠叶），与压缩同格——
   // 两格共用一个 type，变体只在 style_tag 上分。
   if (t === 'notice') return tag === 'reasoning' ? 'reasoning' : 'compression';
   if (t === 'interaction') return 'user_prompt';
@@ -959,7 +959,7 @@ export function msgTypeOf(m) {
 /**
  * wire 角色的折叠读法（镜像前端 `schemas/chat_node.messageRoleOf` 的判据）。
  *
- * [T-147d-iii] 之后 `role` 退出 wire（`skip_serializing_if`）：实时帧与**新落盘**
+ * `role` 已退出 wire（`skip_serializing_if`）：实时帧与**新落盘**
  * 的消息都不再带这一格。直接拿 `m.role === 'tool'` 比较的断言会静默失去靶子
  * （147f 的同一课）——一律经本函数折叠再比。
  *
@@ -1017,7 +1017,7 @@ export const INFLIGHT_SEQ_BASE = 1 << 50;
  * 断言一个节点流上的 `seq` 是**节点属性**、不是投递序号。
  *
  * `seq` 只在存储写入时分配（见
- * `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4），而节点是先以
+ * `symbio/src/plugins/session/docs/109-vdfs-session-messages.md` §3.4），而节点是先以
  * **在途号**上线的；落库后由一条带存储号的完整帧把它交回权威号——这是**唯一**的
  * 换号时机。因此一条节点流的合法形态只有：
  *

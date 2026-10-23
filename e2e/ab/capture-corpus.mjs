@@ -1,8 +1,8 @@
-// T-048 语料捕获：从**出厂真实链路**拿一份原样请求体，作为两个臂的共同输入。
+// 语料捕获：从**出厂真实链路**拿一份原样请求体，作为两个臂的共同输入。
 //
 // 为什么不在脚本里手写 prompt：本实验要回答的是「**出厂形状**对模型是好是坏」，
 // 手写一份「长得像出厂」的 prompt 会让结论落在夹具上而不是产品上。捕获口径与
-// [ADR-057](../../docs/010-adr/057.md) 的形状基线同源 —— 同一条链路
+// [D-057](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 的形状基线同源 —— 同一条链路
 // （CLI × mock-llm × mock-mcp）、同一个场景名（对话面显式关闭）、同一份原样请求体。
 //
 // 产物是一份 JSON：`{ captured_at, scenario, request }`，`request` = mock-llm 收到的

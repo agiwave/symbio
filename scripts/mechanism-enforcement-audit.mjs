@@ -7,7 +7,7 @@
  * 仓里的机制按「违规时谁会红」分三级：① 编译期强制 / ② 运行时阻断 / ③ 纯声明。
  * 前两级有执行方，第三级**没有**——它只写在文档、配置或默认值里。单看每个机制都
  * 「设计得不错」，但设计得好的机制里规则没有被执行方接住时，代码上长得完全一样：
- * 没有任何东西会红（[T-184] 的来源审计把这称为 9 个 B 的共同根因）。
+ * 没有任何东西会红（[] 的来源审计把这称为 9 个 B 的共同根因）。
  *
  * 本脚本不重复判「哪条机制该是几级」（那是 [RE-010] 的正文与各守卫的事），只判
  * **清单本身是否闭合**：
@@ -22,7 +22,7 @@
  *
  * ## 两条口径
  *
- * - **判据码只有一份登记**：执行方写判据码时必须是 `docs/006-ref/GATE_CODES.md`
+ * - **判据码只有一份登记**：执行方写判据码时必须是 `docs/004-ref/GATE_CODES.md`
  *   里真实存在的号；写代码锚点（`path` / `path::symbol`）时文件必须存在、符号名
  *   必须在该文件正文里出现。两种形态都不认 ⇒ ME-003，不做「看起来像就算」。
  * - **豁免即期限**：`mechanism-allow <键>: <ADR 或任务编号> <理由>` 的第二列必须是
@@ -36,7 +36,7 @@
  *
  * 退出码：0 = 清单闭合；1 = 有失效；2 = 判据输入读不出（不许「读空即全绿」）。
  */
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns ME 机制强制等级清单
 // @codes ME-001 ME-002 ME-003 ME-004 ME-005
 
@@ -52,11 +52,11 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 
 /** 清单的地址（唯一 owner；地址变了就改这一处）。 */
-export const LEDGER_REL = 'docs/006-ref/010-机制强制等级清单.md'
-/** 机制键的机器可读来源（生成物：`scripts/gen-verify-facts.mjs` 从 PL-001 §8 抽取）。 */
-export const MECHANISMS_REL = 'docs/004-plan/verify/facts/mod.rs'
+export const LEDGER_REL = 'docs/004-ref/010-机制强制等级清单.md'
+/** 机制键的机器可读来源（生成物：`scripts/gen-verify-facts.mjs` 从 DE-001 §8 抽取）。 */
+export const MECHANISMS_REL = 'docs/003-design/verify/facts/mod.rs'
 /** 判据码登记表（生成物：`scripts/facts/gate-codes.mjs`）。 */
-export const GATE_CODES_REL = 'docs/006-ref/GATE_CODES.md'
+export const GATE_CODES_REL = 'docs/004-ref/GATE_CODES.md'
 
 /** ③ 类豁免的总数上限。调大这个数等于弱化清单本身——要论证就走 ADR。 */
 export const MAX_EXEMPTIONS = 8
@@ -293,7 +293,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(red(`✗ 失去判据：${GATE_CODES_REL} 里一个判据码都没读出来`))
     process.exit(2)
   }
-  // 豁免期限写短号（`T-188` / `ADR-099`），登记条目的 id 带标题后缀——两种形态都要认。
+  // 豁免期限写短号（`` / `D-099`），登记条目的 id 带标题后缀——两种形态都要认。
   const entries = new Map()
   for (const e of registry.entries) {
     const id = String(e.meta.id)

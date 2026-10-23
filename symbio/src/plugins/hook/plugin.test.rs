@@ -3,7 +3,7 @@
 use super::super::registry::{HookConfigEntry, HookType};
 use super::*;
 
-/// 停用 ⇒ 注册态清空（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）。
+/// 停用 ⇒ 注册态清空（相应批次）。
 ///
 /// 判据是**名单**而不是「调用过 stop」：注册只活在内存里，插件被停用后若名单仍在，
 /// 下一次 `hook/list` 会给出一个已经不该存在的答案。

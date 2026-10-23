@@ -4,7 +4,7 @@
  *
  * ## 它治什么
  *
- * [ADR-087](../docs/010-adr/087.md "ADR-087") 把 `symbio_core/schemas/` 拆成
+ * [D-087](../docs/003-design/001-核心架构.md "D-087") 把 `symbio_core/schemas/` 拆成
  * `chat` / `dialog` / `present` / `turn` 四个域，并给出两条**可执行**的判据：
  *
  * 1. `schemas` 目录不再存在——它是「暂时没处放」的同义词，重新长出来意味着分类失败；
@@ -13,7 +13,7 @@
  *    只会让「改一个域要改另一个域、再改回来」慢慢变成常态。
  *
  * 第二条是本脚本真正的内容：`core-naming-audit` 判**名字**、`core-export-audit` 判
- * **出口宽度**，没有任何一道门禁判**依赖方向**。ADR-087 §2 那张图当时是人工核对的，
+ * **出口宽度**，没有任何一道门禁判**依赖方向**。D-087 §2 那张图当时是人工核对的，
  * 人工核对的东西会在下一次搬家时失效。
  *
  * ## 依赖边怎么取（口径）
@@ -49,7 +49,7 @@
  * 退出码：0 = 通过；1 = 有违规；2 = 范围读不出。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成）
 // @ns V core 分域
 // @codes V-001 V-002
 
@@ -79,7 +79,7 @@ if (fs.existsSync(schemasDir)) {
   report(
     'V-001',
     'symbio_core/schemas/',
-    '这个目录已被 ADR-087 拆成 chat / dialog / present / turn —— 它重新出现意味着' +
+    '这个目录已被 D-087 拆成 chat / dialog / present / turn —— 它重新出现意味着' +
       '又出现了「暂时没处放」的东西，请按「它描述什么」找域，而不是新建一个抽屉',
   )
 }
@@ -193,9 +193,9 @@ const cyclic = sccs.filter((c) => c.length > 1).map((c) => c.join('|')).sort()
 const DEFAULT_BASELINE = [
   // adapters（LLM 适配接缝）与 projection 互指：`fallback` 读适配层的档位统计，
   // 适配层又按它的时延档表产出。拆法存在（档位词表下沉一层），但那是 adapters
-  // 自己的改造，不在 ADR-087 的范围内。
+  // 自己的改造，不在 D-087 的范围内。
   'adapters|projection',
-  // 2026-10-20 拆掉的八域族（ADR-095）：曾是
+  // 2026-10-20 拆掉的八域族（D-095）：曾是
   // plugin ⇄ keys ⇄ vdfs ⇄ chat/present ⇄ capability ⇄ llm ⇄ exec ⇄ event_bus。
   // 根因是 **`keys` 的键值类型指向各域的类型**（键必须能装 `Arc<dyn Capability>`），
   // 而各域又用键取上下文——「万能胶」型的环。三刀拆解：

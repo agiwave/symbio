@@ -1,16 +1,16 @@
-//! 一次性阶段的**事实**——`turn.stage`（ADR-107 判据 2 的落地）。
+//! 一次性阶段的**事实**——`turn.stage`（D-107 判据 2 的落地）。
 //!
 //! ## 它解决什么
 //!
 //! `policy.classify` / `policy.recall` / `policy.compress` 的判据在一轮内恒真：
 //! `turn.request_round` 只在收轮后 +1，`auto_compress` 是开关不是水位。于是
 //! 「这一步做完没有」若没有来源，外环 `drive` 的第二次迭代就会再执行一遍
-//! （答话重复、召回重复、压缩反复调用 no-op）——ADR-107 §3 的整条推理。
+//! （答话重复、召回重复、压缩反复调用 no-op）——D-107 §3 的整条推理。
 //!
 //! 本模块把「已做」落成事实：阶段执行点产出一份 [`StageFact`] 草稿，持写者令牌的
 //! 一方（[`super::turn_exec`] 的装配段 / 运行器的 [`super::turn_runner::prepare_turn`]）
 //! 在用户格之后把它落成 `turn.stage`。下一问问表时 `done` 从它来——`turn_head`
-//! 视图按幕锚折叠这些格，不是从第二份内存簿记（PL-014 §2 禁第二份状态）。
+//! 视图按幕锚折叠这些格，不是从第二份内存簿记（DE-014 §2 禁第二份状态）。
 //!
 //! ## 判决事实为什么也在这里
 //!
@@ -36,7 +36,7 @@
 //! = 用户格 seq；恢复幕 = 恢复阶段事实的 seq）之后落下的事实。本模块只负责把
 //! 草稿按同一性落成事实，以及提供测试用的**按轮**折叠 [`done`]。
 //!
-//! `TurnState` 不再维护 `stages_done` 缓存（T-225）：缓存与事实是第二份状态，
+//! `TurnState` 不再维护 `stages_done` 缓存：缓存与事实是第二份状态，
 //! 而「这一步做过没有」在日志里已经有了唯一答案。
 
 use crate::symbio_core::{
@@ -81,7 +81,7 @@ impl VerdictSource {
 /// **一格阶段的名字**——`turn.stage` 载荷 `stage` 的闭集。
 ///
 /// 阶段事实比派发指令集宽：`resume`（这一轮是审批 / 问答恢复）与 `round`
-/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（T-222b 起
+/// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（b 起
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
 /// `policy.report` / `policy.reflex` 不在这里：汇报的到期由 `report_due` 视图
@@ -94,7 +94,7 @@ pub(crate) enum StageName {
     /// 这一轮是恢复幕（`result` = `retry` / `approve` / `reject` / `supply` /
     /// `answer`；`retry_subtree` 按新轮处理，不落本格）。
     Resume,
-    /// 第几次请求——`round` 的**事实形态**（T-225）。引擎在每次请求前落。
+    /// 第几次请求——`round` 的**事实形态**。引擎在每次请求前落。
     Round,
 }
 
@@ -130,14 +130,14 @@ pub(crate) struct StageFact {
     pub(crate) round: usize,
     /// 仅 `classify` 携带；其余阶段 `None`（载荷不带 `reason` / `source`）。
     pub(crate) verdict: Option<VerdictFact>,
-    /// 这一步的**结论**（T-225）：`recall` 的 `hit` / `miss`、`resume` 的恢复种类、
+    /// 这一步的**结论**：`recall` 的 `hit` / `miss`、`resume` 的恢复种类、
     /// `round` 无结论。`None` = 这一步没有可记的结论（载荷不带 `result`）。
     pub(crate) result: Option<String>,
     /// 同一性里的**附加段**（不进载荷）：`resume` 用它区分同一轮同类的两次恢复
     /// （两次 `approve` 是同一种动作，却是两次不同的恢复）。`None` = 同一性只由
     /// `(turn, round, stage[, result])` 决定。
     pub(crate) identity: Option<String>,
-    /// 这一步打了几次**模型**（ADR-122 决策 4 / 5）。
+    /// 这一步打了几次**模型**（D-122 决策 4 / 5）。
     ///
     /// 它是那次往返在事实层唯一的**数**：`source` 记的是判决的**来源**，读不出
     /// 「有没有打过模型」（模型调了而应答不可解析 ⇒ 判决落 `Escalate{unclassified}`
@@ -166,7 +166,7 @@ impl StageFact {
         self
     }
 
-    /// 恢复幕：这一轮以哪种恢复动作续写（T-225 的 `resume_allowed` 来源）。
+    /// 恢复幕：这一轮以哪种恢复动作续写（ 的 `resume_allowed` 来源）。
     ///
     /// `identity` = 本幕的序数：同一轮可以先后恢复两次**同类**动作，只按
     /// `(turn, round, stage, kind)` 记会把第二次静默吸收掉（幂等键撞上就会让
@@ -177,7 +177,7 @@ impl StageFact {
         fact
     }
 
-    /// 第几次请求（T-225 的 `round` 来源）。
+    /// 第几次请求（ 的 `round` 来源）。
     ///
     /// `identity` = 本幕的锚（`drive_seq`）：同一轮号的续写幕会从 `round = 0`
     /// 重来，只按 `(turn, round, stage)` 记会撞首幕的幂等键，于是撞格取回首幕
@@ -211,7 +211,7 @@ impl StageFact {
         }
     }
 
-    /// 压缩格：这一次压缩打了几次模型（ADR-122 决策 2 / 5）。
+    /// 压缩格：这一次压缩打了几次模型（D-122 决策 2 / 5）。
     ///
     /// `identity` = 本幕的锚（`drive_seq`）：压缩在**续写幕**会重跑（恢复后事实源
     /// 变了，本轮视图应当重取），而同一性若只按 `(turn, round, stage)` 算，续写幕

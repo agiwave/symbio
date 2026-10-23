@@ -255,7 +255,7 @@ async fn unique_skill_names_all_kept() {
     assert_eq!(skills.len(), 2);
 }
 
-/// T-210 项二：`max_skills` 是**清单**的名额，不是**单个目录**的名额。
+/// 项二：`max_skills` 是**清单**的名额，不是**单个目录**的名额。
 ///
 /// 场景：`dir1 = [s1(旧), s2]`、`dir2 = [s1(新), s3]`——同名 `s1` 后到优先（BUG-SR1），
 /// `s3` 只在 `dir2` 里。逐目录扣名额的旧写法在这里会出错两次：

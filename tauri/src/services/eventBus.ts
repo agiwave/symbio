@@ -218,7 +218,7 @@ export async function connectEventBus(): Promise<Connection> {
  * 那段机制存在的唯一理由，就是「事件是有顺序的」这个前提。会话显示现在不再
  * 消费任何事件：运行态是**会话节点的属性**，变更携带全量节点视图，因此幂等、
  * 可交换、丢一次也不影响正确性（见
- * `symbio/src/plugins/session/docs/018-node-state-streaming.md` §4）。
+ * `symbio/src/plugins/session/docs/105-node-state-streaming.md` §4）。
  * 前提没了，补丁也就不需要了。
  *
  * @returns 取消订阅函数
@@ -267,7 +267,7 @@ export function subscribe(
 // 一张「按变更频率分配载荷宽度」的表，全部**没有生产性生产者**（或与载荷语义
 // 重复），S27 整体退役——判据见 `schemas/vdfs.VdfsChange`。
 //
-// 顺序敏感的实时面（会话运行态 / 消息正文）**也在这条通道上**（ADR-025）：
+// 顺序敏感的实时面（会话运行态 / 消息正文）**也在这条通道上**（D-025）：
 // 顺序是**节点属性**（`ChatNode.seq` 决定显示顺序），不靠到达顺序——消费端
 // 的协调规则见 `stores/sessionTranscriptSync.ts`。
 

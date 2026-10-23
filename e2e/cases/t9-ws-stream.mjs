@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // `WS /api/v1/ws` 是 Tauri 前端「会话实时面」的真实等价物：首帧发
 // `PluginMessageWire`（与 route_v2 同线格式），此后这条连接只承载该频道的帧。
 //
-// ## 实时面**只有一条通道**（S27 / ADR-025）
+// ## 实时面**只有一条通道**（S27 / D-025）
 //
 // 订阅是**两步**，缺一不可（见 `helpers.subscribeSessionRealtime` 的文档）：
 //   ① `event_bus/subscribe` → 总线广播口（收 `kind = "vdfs"` 的帧）；

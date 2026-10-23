@@ -1,9 +1,10 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/setting/README
 title: Setting 插件
 status: active
 created: 2026-09-09
+impl: done
 ---
 
 # Setting 插件

@@ -16,7 +16,7 @@ const MAX_RESULTS_LIMIT: usize = 10;
 
 /// 三家供应商的官方上游基址与路径。**路径是供应商契约的一部分**（Tavily/Serper
 /// 是 `POST /search`、DuckDuckGo HTML 是 `GET /html/?q=…`），配置只允许替换
-/// 基址（T-109 ⑤：此前连基址都写死 ⇒ e2e 无本地靶子可打、CI 无网即零覆盖），
+/// 基址（ ⑤：此前连基址都写死 ⇒ e2e 无本地靶子可打、CI 无网即零覆盖），
 /// 不允许改路径形状——那等于换了另一家服务。
 const TAVILY_OFFICIAL_BASE: &str = "https://api.tavily.com";
 const SERPER_OFFICIAL_BASE: &str = "https://google.serper.dev";

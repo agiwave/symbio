@@ -4,7 +4,7 @@
 > 本文记录对「大模型服务 → 前端」整条流式链路的一次系统评审，含**实测验证**、**发现的问题**
 > 与**优化建议**。规范本身仍以
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
-> 与 `symbio_core/transcript_stream.rs`（**该模块已于 2026-09-23 随 ADR-025 退役**，
+> 与 `symbio_core/transcript_stream.rs`（**该模块已于 2026-09-23 随 D-025 退役**，
 > 会话实时面迁回 VDFS 变更——现行规范见 [`design/vdfs.md`](./vdfs.md) §9 与
 > `symbio_core/vdfs_provider.rs` 的「变更通知」小节）为准。
 >
@@ -26,15 +26,15 @@
 > `applySessionNode` 触发点一并删除；`sessionRouteOf`（按地址分派的实现）也因再无
 > 调用方而删除。**本文的结论「跨通道顺序假设是 P0」因此是被正面解决的**，而不是被
 > 兜住的——这正是那份自愈网当初要掩盖的问题。详见
-> [`streaming-chain-review-2026-09-22.md`](./streaming-chain-review-2026-09-22.md) §7.1。
+> [`streaming-chain-review-2026-09-22.md`](streaming-chain-review-2026-09-22.md) §7.1。
 >
-> **再后记（S26 / ADR-025，2026-09-23）：上一条的「结构性保证」本身也被判定为不必要的。**
+> **再后记（S26 / D-025，2026-09-23）：上一条的「结构性保证」本身也被判定为不必要的。**
 > 实时面**迁回 VDFS 变更**（`updated` + `delta`），`session/stream` 与
 > `symbio_core::transcript_stream` 退役。批次 E 用「单通道 + 共用 `seq`」解决的那个问题
 > （跨通道顺序假设），**根本前提是错的**——顺序是**节点属性**（`ChatMessage.seq`）不是
 > 投递属性，因此**不存在**跨通道顺序假设这回事。这解释了为什么「跨通道顺序假设是 P0」
 > 这条结论在 S20–S26 之间反复出现又反复消失：它每次都在**同一个错误前提**上被重新推导。
-> 详见 [ADR-025](../DECISIONS.md)。
+> 详见 [D-025](../DECISIONS.md)。
 
 ---
 
@@ -80,7 +80,7 @@
 - ② 的「完整行解析 + 未结束行增量提取」双轨是**延迟与正确性的显式取舍**，
   `LineProgress` 记账保证两者不重复计数——不是冗余，是为了让首字节不必等换行。
 - ⑤ 的 `EventSink`（出）/ `AbortSignal`（入）取代了「通道兼任执行期协议」，
-  使帧里不存在中止帧，是 ADR-020 的实质收益，值得保留。
+  使帧里不存在中止帧，是 D-020 的实质收益，值得保留。
 - ⑥ 的「唯一写入点 + 单调 seq」是整条链路里最有价值的一处收敛：
   上游有十几个发射点，但 seq 与内存图只有一个写入者。
 

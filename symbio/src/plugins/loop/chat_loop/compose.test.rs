@@ -4,7 +4,7 @@
 //!
 //! ## 为什么只剩投影认它这几条
 //!
-//! `dialog_node` 的构造器已上移 core `node_build`（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082")
+//! `dialog_node` 的构造器已上移 core `node_build`（[D-082](../../../../../docs/003-design/014-单环一表.md "D-082")
 //! 裁决三），它的**纯形状**断言（落点 / 两个标记 / 理由码透传 / id 唯一）随构造器住进
 //! `node_build.test.rs`。留在本文件的是另一半契约：**core 产出的这个节点，
 //! session 的请求视图投影认不认**——`conversation_view` 不是 core 的地盘，这条边

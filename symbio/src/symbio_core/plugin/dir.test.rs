@@ -190,7 +190,7 @@ async fn apply_writes_the_plugins_own_file() {
     assert!(text.contains("plugin_provider: demo"), "{text}");
 }
 
-// ==================== 身份（ADR-032） ====================
+// ==================== 身份（D-032） ====================
 
 /// 从未落位过的目录（manifest 里没有身份键）→ 身份全空，消费方按目录名兜底
 #[test]

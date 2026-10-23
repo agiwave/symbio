@@ -64,7 +64,7 @@
 //!   （[`PluginDir::save`] 等）自动补回。
 //! - **身份键是 manifest 的**：出厂声明在 `Plugin::meta()`，装配期经
 //!   [`PluginDir::seed_identity`] 投影一次；此后 manifest 权威，运行期经
-//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（ADR-032）。
+//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
 //!
 //! ## 职责划分（本方案的全部要点）
 //!
@@ -135,7 +135,7 @@ pub const PLUGIN_KEY_NAME: &str = "plugin_name";
 /// 而「停用」是一个**显式**动作。反过来（缺省停用）会让每一个新插件都先隐形。
 pub const PLUGIN_KEY_ENABLED: &str = "plugin_enabled";
 
-// ==================== 身份键：manifest 是运行期唯一来源（ADR-032） ====================
+// ==================== 身份键：manifest 是运行期唯一来源（D-032） ====================
 //
 // 出厂声明在 `Plugin::meta()`，装配期由容器经 [`PluginDir::seed_identity`] **投影**
 // 进 manifest（键缺失才写，用户改过的不覆盖）。此后 manifest 权威：插件列表、
@@ -211,7 +211,7 @@ pub const PLUGIN_KEY_REQUIRED: &str = "plugin_required";
 /// 投影键：是否允许停用（= 不在 [`crate::symbio_core::ASSEMBLY_UNDISABLABLE_PLUGINS`] 里）
 pub const PLUGIN_KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
-/// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（ADR-095 根因一）
+/// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（D-095 根因一）
 ///
 /// 容器构造子插件时把它挂到子上下文上——插件据此知道「我的目录在哪」，
 /// 从而自己读写 `PLUGIN.yml`（父插件不再代管任何配置）。键名（`plugin_dir`）
@@ -272,7 +272,7 @@ pub fn plugin_expand_tilde_path(p: &Path) -> PathBuf {
 
 // ==================== 插件身份 ====================
 
-/// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键（ADR-032）
+/// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键（D-032）
 ///
 /// 与 [`PluginMeta`](crate::symbio_core::PluginMeta) 的关系：`PluginMeta` 是插件的
 /// **出厂自述**（代码里声明的），本结构是它的**落盘形态**（manifest 里的值）。
@@ -395,7 +395,7 @@ impl PluginDir {
             })
     }
 
-    // ==================== 身份（ADR-032） ====================
+    // ==================== 身份（D-032） ====================
 
     /// 读本插件的身份 —— manifest 是运行期**唯一**来源
     ///
@@ -404,7 +404,7 @@ impl PluginDir {
     /// 该报警的事。
     ///
     /// 之所以能从 manifest 读（而不问 `Plugin::meta()`）：**停用的插件不被构造**，
-    /// 而插件列表必须能显示它的名字。见 ADR-032。
+    /// 而插件列表必须能显示它的名字。见 D-032。
     pub fn identity(&self) -> PluginIdentity {
         let map = self.read_manifest().ok().flatten().unwrap_or_default();
         PluginIdentity {
@@ -584,7 +584,7 @@ impl PluginDir {
 ///
 /// `title` / `description` / `version` 来自 `PLUGIN.yml` 的身份键
 /// （[`PluginDir::identity`]），因此**停用的插件也有身份**——它只是不被构造，
-/// 不是不存在（ADR-032）。
+/// 不是不存在（D-032）。
 ///
 /// 字段仍可能为空：该目录**从未落位过**（新装 / 手写，但从未构造成功 ⇒ 出厂身份
 /// 还没被投影）。那时消费方按 `name`（目录名）兜底。
@@ -791,7 +791,7 @@ impl PluginConfigFile {
 /// 挂载根下**不止一份配置**、或有资源条的插件（model / skill / mcp / agent /
 /// work / session / plugin_manager）**不适用**本 trait——它们的 `dispatch` 携带
 /// 真实资源语义（条目 CRUD、动态子节点、订阅）。硬套会让机制去猜插件语义，
-/// 那正是本仓反复拒绝的方向（见 ADR-023）。
+/// 那正是本仓反复拒绝的方向（见 D-023）。
 #[async_trait]
 pub trait PluginConfigMount: Send + Sync + 'static {
     /// 配置结构体（本插件的 `PLUGIN.yml` 反序列化目标）

@@ -5,11 +5,11 @@
  * ## 它判什么
  *
  * `Projection::new` 的泛型约束是**一级**强制（句柄进不来，编译期）——但它拦不住
- * 「形参表合法、体内偷看全局」（PL-001 §1.4.1 的诚实划界）。本脚本是**二级**：
+ * 「形参表合法、体内偷看全局」（DE-001 §1.4.1 的诚实划界）。本脚本是**二级**：
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | PP-001 | 产投影文件不得 `use` 导入**产投影的兄弟模块**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `consolidate` / `recall_score`——谁都可以导） | 投影 A 读投影 B 的输出（L2，PL-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
+ * | PP-001 | 产投影文件不得 `use` 导入**产投影的兄弟模块**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `consolidate` / `recall_score`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
  * | PP-002 | `projection/*.rs` 生产文件禁 `SystemTime::now` / `rand::` / `static mut` / `std::time::Instant` | 隐式全局依赖：时钟、随机数、全局可变状态——确定性（N1）的口径外漏洞 |
  * | PP-003 | 每个 `pub fn X(..) -> Projection<` 构造器必须有 `projection/` 之外的**生产消费方**，或同文件里一行 `// projection-purity-allow <X>: 非空理由` | 死构造器：抽了纯函数视图却没有调用方——「为将来准备」的投机抽象（本仓只认消费方定的契约） |
  *
@@ -28,7 +28,7 @@
  * 退出码：0 = 通过；1 = 违规。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns PP 投影纯净性
 // @codes PP-001 PP-002 PP-003
 
@@ -103,7 +103,7 @@ for (const f of producers) {
       const mod = name.split('::')[0]
       if (producerNames.has(mod)) {
         fail(
-          `PP-001 ${f.rel}:${i + 1} 导入产投影兄弟 \`${mod}\`——投影 A 不读投影 B（L2，PL-001 §13.2）`,
+          `PP-001 ${f.rel}:${i + 1} 导入产投影兄弟 \`${mod}\`——投影 A 不读投影 B（L2，DE-001 §13.2）`,
         )
       }
     }
@@ -161,7 +161,7 @@ for (const f of producers) {
 // ── 输出 ───────────────────────────────────────────────────────────────
 if (errors.length > 0) {
   for (const e of errors) console.log(red('[ERROR]'), e)
-  console.log(dim(`\n共 ${errors.length} 处违规（判据见 docs/010-adr/105.md）`))
+  console.log(dim(`\n共 ${errors.length} 处违规（判据见 docs/003-design/001-核心架构.md）`))
   process.exit(1)
 }
 

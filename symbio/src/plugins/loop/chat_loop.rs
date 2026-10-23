@@ -1,7 +1,7 @@
 //! SESSION 聊天主循环
 //!
 //! 本文件只保留**主循环骨架**，其余按职责拆到子模块
-//! （切分依据见 `symbio/src/plugins/session/docs/017-module-layout.md` §0 五判据与 §1.1 编排层落点）：
+//! （切分依据见 `symbio/src/plugins/session/docs/104-module-layout.md` §0 五判据与 §1.1 编排层落点）：
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
@@ -49,7 +49,7 @@ pub use self::state::ChatOrchestrator;
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
 pub(crate) use self::compose::{apply_verdict, VerdictEffect};
-// 对话面节点构造器已上移 core `node_build`（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三），
+// 对话面节点构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三），
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
@@ -74,7 +74,7 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// ## 判定只读日志：静默与配额都从事实来
 ///
 /// 旧 `RoundProgress` 自己持静默时钟与配额计数，是同一份事实的第二来源。
-/// T-222b 起两者都由 `report_due` 视图从**本幕已落的事实**算：
+/// b 起两者都由 `report_due` 视图从**本幕已落的事实**算：
 ///
 /// - 静默锚 = 最近一次用户看得见的动静（用户格 / 补充格 / 任何助手文本）；
 /// - 配额 = 本幕锚之后的汇报格数。
@@ -302,7 +302,7 @@ pub async fn run_chat_loop(
         Some((m.id.clone(), text))
     });
     // 同一个锚点取本轮输入的 `meta`（折进的合并补充带 `meta.supplement*`）：它与 id /
-    // 正文同属一条用户消息的形状，由 `begin_drive` 落进用户格载荷（T-225）。
+    // 正文同属一条用户消息的形状，由 `begin_drive` 落进用户格载荷。
     //
     // 本轮用户发言（**判决的输入**）。
     //
@@ -324,7 +324,7 @@ pub async fn run_chat_loop(
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：在原轮上落一笔
     //   `request(port=tool)`（载荷带 `resume` 标记）。之后的授权 / 派发由行表
     //   自己的 `authorize-tool` / `dispatch-tools` / `deny-tools` 承担——恢复路径
-    //   不再自己写协议事实、不再自己跑执行层（T-244 步 5d）。
+    // 不再自己写协议事实、不再自己跑执行层（ 步 5d）。
     //
     // 唤醒请求落在幕锚之前，但 `turn_head` 的请求面按 seq 判终局，照样看得见它；
     // 本幕因此从「工具批没关」开始，执行行让位给授权 / 派发行。
@@ -377,7 +377,7 @@ pub async fn run_chat_loop(
 
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）。
         // `UserPromptSubmit` 钩子**不在这里**：它由 session 在派发本轮之前触发
-        // （[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §6——钩子与会话生命周期同侧，
+        // （[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6——钩子与会话生命周期同侧，
         // 驱动器只负责执行）。
         if turn.request_round == 0 {
             if let Some(msg) = single_message.take() {
@@ -396,7 +396,7 @@ pub async fn run_chat_loop(
             return finish_turn(&context, &sink, &turn, exit).await;
         }
 
-        // ── 步骤 2a：开一幕（T-225）────────────────────────────────────────
+        // ── 步骤 2a：开一幕────────────────────────────────────────
         // 用户格（或恢复格）+ 当轮配置 + 轮次事实先于任何判决入格。裁决只读
         // 事实：配置、轮号、幕锚都在这一处定下，后续阶段不再各自数一遍。
         let drive = match begin_drive(&context, &mut turn, &turn_req, next_drive_resume.take()) {
@@ -416,7 +416,7 @@ pub async fn run_chat_loop(
         // 不在下面这个 `if` 里，在 [`super::loop_rows`] 的 `policy.classify` 行：
         // 「`request_round == 0` ∧ 有发言 ∧ 开关开着 ∧ 没判过」四条写在数据里，
         // 可单测、可增删。本处只问「这一格现在欠不欠」，欠才走这段。
-        // 加一条新策略 = 一条声明，**本文件不改**（PL-014 §6 判据 1）。
+        // 加一条新策略 = 一条声明，**本文件不改**（DE-014 §6 判据 1）。
         //
         // ## 为什么在 `gate_turn` 之后
         //
@@ -452,7 +452,7 @@ pub async fn run_chat_loop(
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
         // `done` 也由这一问问出来：判过的格在 `turn.stage` 里，`turn_head` 视图
-        // 按幕锚折叠它（ADR-107 判据 2）。前三条在这一轮内恒真，没有这一条，
+        // 按幕锚折叠它（D-107 判据 2）。前三条在这一轮内恒真，没有这一条，
         // 任何以「再问一次表」为形状的驱动都会重判同一句话。
         if super::loop_rows::owes("policy.classify", &turn.facts, turn.turn_no, turn.now_ms) {
             if let Some(exit) = run_turn_head(
@@ -472,7 +472,7 @@ pub async fn run_chat_loop(
         // `turn_runner.rs` 的 2f 紧接 2e（本批结果已接进 `exchange`），于是「只有确定
         // 要发下一次请求才抽」与「绝不落在 `assistant(tool_calls)` 与其 `tool` 结果
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
-        // v2 下永不成立；裁决见 [ADR-074](../../../../docs/010-adr/074.md)）。
+        // v2 下永不成立；裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
         // 视图从日志里读它（回调不再有时刻入参，见 `round_hook::RoundHookFn`）。
         plugin_info!(
@@ -501,10 +501,10 @@ pub async fn run_chat_loop(
             }
         };
 
-        // **不要在这里拦中止**（T-056 / ADR-052）：在此处 `return
+        // **不要在这里拦中止**（ / D-052）：在此处 `return
         // TurnExit::Aborted(Vec::new())` 会让运行器从不落 `user.message`，中止
         // 这一轮**一条事实都没有**（e2e t7 钉的是这件事：`v2-events.wal` 不存在、
-        // 投影里看不到用户说过什么）。ADR-052 决策 1 要求「一轮的产出无论完成 / 失败 /
+        // 投影里看不到用户说过什么）。D-052 决策 1 要求「一轮的产出无论完成 / 失败 /
         // 被中断 / 悬在等待用户，都入格」，决策 2 要求终止以**状态**入账。
         //
         // 检查点已**下沉**到 `turn_runner::run_with_tools` 的 1c 步：用户格已落、
@@ -524,7 +524,7 @@ pub async fn run_chat_loop(
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
         //
-        // ## 外面多了一层：端口 `turn`（T-223）
+        // ## 外面多了一层：端口 `turn`
         //
         // 「这一轮欠一次 `turn` 调用」从函数调用变成**事实**：
         //
@@ -663,7 +663,7 @@ pub async fn run_chat_loop(
                             turn.now_ms,
                         )
                     }),
-                    // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `turn_exec`
+                    // 对话面开场白：步骤 2b 的 `Escalate` 首响。落格在 `turn_exec`
                     // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
                     opening_text: turn.opening_text.as_deref(),
                     opening_dialog: turn.opening_dialog.take(),
@@ -762,7 +762,7 @@ pub async fn run_chat_loop(
 /// 轮首判决格的执行体（`policy.classify`）：问 `classify` → 执行判决 → 收尾。
 ///
 /// 调用点只问「这一格欠不欠」；执行体的入参是 `SessionContext` / `TurnState`
-/// 这类本层私有上下文，不是行本身（ADR-107：执行体留在格所在层）。
+/// 这类本层私有上下文，不是行本身（D-107：执行体留在格所在层）。
 ///
 /// 返回 `Some(exit)` = 本轮就此收尾（`Answered` 等 `Finish` 效应）；`None` = 继续进
 /// 工具循环。
@@ -782,7 +782,7 @@ async fn run_turn_head(
         // 唯一事实面记录，`done` 是下一问问表时不再重判的依据。落格在
         // `turn_exec`（写者令牌在那边），这里只产草稿。
         //
-        // `model_calls` 是这次判决打了几次模型（ADR-122 决策 4）：它是那次往返
+        // `model_calls` 是这次判决打了几次模型（D-122 决策 4）：它是那次往返
         // 在事实层唯一的**数**——判据侧拿它对账「观测 ⇔ 三格」（`source` 读不出
         // 「有没有打过模型」：模型调了而应答不可解析时 `source` 落 `fallback`）。
         turn.mark_stage(super::stage_events::StageFact::classify(
@@ -896,15 +896,15 @@ async fn run_turn_head(
                 }
                 return Some(TurnExit::Completed);
             }
-            // ── T-056：`Escalate` 首响必须入格（本批新增）────────────────
+            // ── ：`Escalate` 首响必须入格（本批新增）────────────────
             //
             // `Escalate` 的效应是 `Spoke`（不是 `Silent` / `Finish`）：本轮
             // **继续**进工具循环，开场白只是干活前说的一句话。轮首这里唯一
             // 能产出 `Spoke` 的判决就是 `Escalate`（`Report` 不在轮首产生，
             // 见上方注释与轮边界汇报回调）。
             //
-            // 这句开场白是事实（T-052）：随收束格入格（WAL 为唯一事实源，
-            // ADR-049），不入格则重建折不出这条根级对话面节点 ⇒ t20 / t22 的
+            // 这句开场白是事实：随收束格入格（WAL 为唯一事实源，
+            // D-049），不入格则重建折不出这条根级对话面节点 ⇒ t20 / t22 的
             // 「恰有一条对话面节点」全部落空。落格在 `execute_turn`（唯一持
             // 写者令牌处）——这里只把「说了什么 / 节点身份」递过去，与缺口 5
             // 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
@@ -961,7 +961,7 @@ pub(crate) enum TurnFlow {
 /// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。
 ///
 /// v2 现实下它恒放行：工具在 `turn_exec::execute_turn` **内部**跑完（`SessionDispatchPort`
-/// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [PL-014 步骤 5](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")
+/// 同步分发、批批接上），没有任何代码路径往那个集合里登记 id——它是 [DE-014 步骤 5](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
 /// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
 /// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批
 /// 结果接进 `exchange` 之后才发下一次请求**（`turn_runner.rs` 2e），
@@ -971,7 +971,7 @@ pub(crate) enum TurnFlow {
 ///
 /// 闸门能读的只有本轮的请求数，而**工具轮数在运行器的环体里**（`turn_runner.rs` 的
 /// `tool_round`）。挂在这里判的是一个恒 0 的字段，v2 下永不命中——那条配置项与它的
-/// 退役裁决见 [ADR-074](../../../../docs/010-adr/074.md)；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
+/// 退役裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
 /// 2f（轮内注入）之间。
 ///
 /// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
@@ -996,7 +996,7 @@ fn gate_turn(turn: &TurnState) -> Gate {
 /// 收口前，12 个出口各自重写「Stop 钩子 + 落库 + 返回」三件套。现在每个出口只负责
 /// 判定 [`TurnExit`]，收尾动作只在本函数出现一次。
 ///
-/// Stop 钩子**不在这里**（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §6）：
+/// Stop 钩子**不在这里**（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §6）：
 /// 它归会话生命周期，session 拿 [`TurnReport::last_message`] 统一触发——「恰好一次」
 /// 因此仍由生命周期保证，而不是由两侧各记一次。
 ///

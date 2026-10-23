@@ -74,7 +74,7 @@ async fn entries_cover_qualified_dirs_including_disabled_ones() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// **身份来自 manifest，不依赖被构造**（ADR-032）：未挂载也有名字
+/// **身份来自 manifest，不依赖被构造**（D-032）：未挂载也有名字
 ///
 /// 这正是「停用后仍能在插件列表里看到它叫什么」的机制——停用不构造，而身份早已
 /// 在首次装配时落位。
@@ -230,7 +230,7 @@ fn build_panics(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
 
 crate::submit_object_creator!("registry-test-panic-factory", build_panics, dyn Plugin);
 
-// ==================== 装配期：出厂身份落位（ADR-032） ====================
+// ==================== 装配期：出厂身份落位（D-032） ====================
 
 /// 装配期**真的**把出厂身份投影进 manifest
 ///

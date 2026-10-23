@@ -231,7 +231,7 @@ impl Plugin for Composite {
         Some(root)
     }
 
-    /// 全局收尾（T-078）：`Shutdown` ⇒ 整树广播 `stop(Shutdown)`
+    /// 全局收尾：`Shutdown` ⇒ 整树广播 `stop(Shutdown)`
     /// （遍历 owner = [`PluginRegistry::shutdown_all`]）。
     ///
     /// 只有 `Shutdown` 走这条路：`Disabled` / `Uninstalled` 是对**单个插件**的处置

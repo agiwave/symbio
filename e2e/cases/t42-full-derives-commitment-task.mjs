@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 // ## 熔断那一支为什么**不在这里**
 //
 // 早先版本还用「注入一条超预算的账 ⇒ 闸门 Break ⇒ `task.controlled` 入格」覆盖熔断。
-// 但那条构造是**存储手术**（直写 `v2-events.wal` 的 JSONL）——[ADR-049] 读通道
+// 但那条构造是**存储手术**（直写 `v2-events.wal` 的 JSONL）——[D-049] 读通道
 // 禁令下，e2e 不该知道存储布局。熔断的**存储层判断**（闸门判 Break、`task.controlled`
 // 的理由与锚）已在 Rust 单测面（`tool_executor.test.rs` 直接摆台账调
 // `process_tool_calls_async`）覆盖；e2e 这一支**整体删除**，不为过渡形态背约束。

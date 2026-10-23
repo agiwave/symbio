@@ -1,16 +1,16 @@
-//! 技能编译与路由（[roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）：成功轨迹固化为技能事实、按置信度决定快路 / 回退。
+//! 技能编译与路由（[roadmap/S11](../../../../docs/007-task/131-技能编译与自我改进.md ")）：成功轨迹固化为技能事实、按置信度决定快路 / 回退。
 
 use crate::symbio_core::Event;
 
 /// 技能的认知内容标签（`memory.encoded` 载荷里的 `tag`）。
 ///
-/// 名字是数据、单点定义（ADR-043）：写方（[`SkillCompiler::compile`]）、读侧路由
+/// 名字是数据、单点定义（D-043）：写方（[`SkillCompiler::compile`]）、读侧路由
 /// （`plugins/loop/skill_events.rs`）与读数口（`plugins/session/stats.rs`）都 `use`
 /// 这一处。两处各写一个字面量时，改一边不改另一边 ⇒ 技能被当成普通记忆召回却不进
 /// 路由，全程没有任何报错。
 pub const SKILL_TAG: &str = "skill";
 
-/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）。
+/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/007-task/131-技能编译与自我改进.md ")）。
 ///
 /// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
 /// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
@@ -32,7 +32,7 @@ impl SkillCompiler {
             crate::symbio_core::event::Verb::Opened,
             0,
             // 占位 actor 一律走常量，不写字面量：`session/xxx` 形态的裸串会被
-            // plugin-entry-audit 的 E-005 当成路由地址查一遍（ADR-043：名字是数据、
+            // plugin-entry-audit 的 E-005 当成路由地址查一遍（D-043：名字是数据、
             // 单点定义）。写方落格前归位，见 `skill_events::compile`。
             crate::symbio_core::authz::PRINCIPAL_MAIN,
         )

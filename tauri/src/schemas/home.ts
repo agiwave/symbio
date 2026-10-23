@@ -6,7 +6,7 @@
  * **命名空间 = 后端模块名**（`home_reload` / `home_get_workspace` /
  * `home_set_workspace` / `home_get_homedir`），**类型名 = 后端结构体名**——那一个
  * 文件里四个模块各有一个 `Response`，靠同名限定区分，两侧用同一个词，读代码的人
- * 不做换算（[ADR-112](../../../docs/010-adr/112.md) 决策 2）。
+ * 不做换算（[D-112](../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 决策 2）。
  */
 export namespace home_reload {
   /** home/reload 请求 */

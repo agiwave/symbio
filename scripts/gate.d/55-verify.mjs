@@ -1,6 +1,6 @@
-// verify 阶段：`docs/004-plan/verify/` 的验证程序**自己证明自己**。
+// verify 阶段：`docs/003-design/verify/` 的验证程序**自己证明自己**。
 //
-// 这批程序是 v2 方案的"硬证据"（`docs/004-plan/README.md §4`、`04 §4` 的 C29），
+// 这批程序是 v2 方案的"硬证据"（`docs/003-design/README.md §4`、`04 §4` 的 C29），
 // 在此之前它们只能手敲 `rustc --edition 2021 <f>.rs -o <out> && <out>` 跑一遍，
 // 输出一份**手工提交的快照**——零断言的守卫等于没有守卫，
 // 而"人手跑过一次"同样不是守卫：没有任何东西保证它明天还绿。
@@ -29,7 +29,7 @@
 // 文件名 `55-`：并发批只由**连续**标 `parallel` 的阶段组成（`gate.mjs` 的泳道调度），
 // 所以它必须紧跟在 `50-msrv` 之后、`56-frontend-build`（串行）之前。
 //
-// ## 谁耦合了生产（实读表，T-176 起维护）
+// ## 谁耦合了生产（实读表， 起维护）
 //
 // 「程序数 16」里有两类证据，可信度不同，读者必须能分清：
 //
@@ -40,8 +40,8 @@
 //   |---|---|---|
 //   | `consolidation_fidelity` | `symbio_core/text/merge_kernel.rs` | 巩固合并的保真度下界 |
 //   | `recall_eval` | `symbio_core/projection/recall_score.rs` | 检索排序的 recall@k / 依赖度 |
-//   | `invariants` | `symbio_core/invariants/kernel.rs`（T-176） | I1 的 seq 单调无跳号 / 每 turn 一条 final |
-//   | `termination` | `symbio_core/invariants/kernel.rs`（T-176） | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
+// | `invariants` | `symbio_core/invariants/kernel.rs` | I1 的 seq 单调无跳号 / 每 turn 一条 final |
+// | `termination` | `symbio_core/invariants/kernel.rs` | 终止性前提 2（返工上界）/ 前提 3（依赖图无环） |
 //
 // - **只与文档/自造数据耦合**（其余 12 个）：证明「判据在自造样本上自洽」，
 //   不证明「生产实现遵守判据」。其中有几个的被测对象本来就是文档
@@ -58,7 +58,7 @@ import { BASELINE, ratchetOrBump } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const verifyDir = path.join(repoRoot, 'docs', '004-plan', 'verify')
+const verifyDir = path.join(repoRoot, 'docs', '003-design', 'verify')
 const outDir = path.join(repoRoot, '.workbuddy-ai', 'verify-target')
 const genVerifyFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
 
@@ -78,7 +78,7 @@ const matchErrorCodes = (output) => {
 
 export default {
   id: 'verify',
-  title: '验证程序（docs/004-plan/verify · 含编译期反例 C29）',
+  title: '验证程序（docs/003-design/verify · 含编译期反例 C29）',
   // 每个验证程序是**独立的 rustc 调用**（各自一个源文件、各自的输出 exe），
   // 彼此无共享状态 ⇒ 并发跑。批的边界在 `程序数棘轮` 那一步之后：预热与棘轮
   // 串行在泳道头部（各自几毫秒到几秒），程序批次内部并发。
@@ -97,7 +97,7 @@ export default {
       yield {
         label: 'verify',
         run: async () => 'skipped',
-        skipNote: `docs/004-plan/verify/ 不存在（${path.relative(repoRoot, verifyDir)}）`,
+        skipNote: `docs/003-design/verify/ 不存在（${path.relative(repoRoot, verifyDir)}）`,
       }
       return
     }

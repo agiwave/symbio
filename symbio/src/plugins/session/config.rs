@@ -22,8 +22,8 @@
 
 use serde::{Deserialize, Serialize};
 
-// 建树策略的形状与 flat 折叠住 core `node_build`（[ADR-082](../../../../docs/010-adr/082.md "ADR-082")
-// 裁决三，[plan/14 步 6](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") T-167 切片批）：写侧构造
+// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md "D-082")
+// 裁决三，[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切片批）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
 pub use crate::symbio_core::node_build::PresentationTree;
@@ -67,7 +67,7 @@ pub struct SessionConfig {
     ///
     /// 这是「存储保留事实、压缩只换基」架构原则的**唯一例外**：存在理由仅是控制
     /// 工具密集型会话的磁盘与节点树体积，本开关不影响发给模型的上下文大小
-    /// （请求体是事实网格的纯投影，见 [ADR-078](../../../../docs/010-adr/078.md "ADR-078")）。
+    /// （请求体是事实网格的纯投影，见 [D-078](README.md "D-078")）。
     ///
     /// - `true`（默认）：保持历史行为，超出窗口的工具链在存储层被物理删除，
     ///   前端节点树同样看不到这些历史工具调用；
@@ -225,7 +225,7 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
-    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../../docs/004-plan/002-能力坐标系.md "PL-002-能力坐标系")）。
+    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     ///
     /// ## 它控制什么
     ///
@@ -254,7 +254,7 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）。
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/007-task/131-技能编译与自我改进.md ")）。
     ///
     /// ## 它控制什么
     ///
@@ -274,10 +274,10 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/007-task/131-技能编译与自我改进.md ")
     /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
-    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[ADR-079](../../../../docs/010-adr/079.md "ADR-079")）：
+    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../../docs/003-design/005-协议规范.md "D-079")）：
     /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
     /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
     /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
@@ -311,11 +311,11 @@ pub struct SessionConfig {
     /// 这就是它作为一个独立开关的全部含义。见 `chat_loop/inputs.rs` 的 `fast_armed`。
     #[serde(default = "default_skill_fast_path")]
     pub skill_fast_path: bool,
-    // ── Q1：worker 启动判据的三条旋钮（ADR-047 批 B 的「独立一批」）────────
+    // ── Q1：worker 启动判据的三条旋钮（D-047 批 B 的「独立一批」）────────
     //
     // 出厂值即判据原样，两个平凡值都是**这一层关闭**，不是「永远命中」：
     // 阈值 0 若也判长度，任何非空消息都命中 ⇒ 每条寒暄都开一个后台会话，
-    // 那正是 ADR-047 被否决方案的第一条。
+    // 那正是 D-047 被否决方案的第一条。
     /// 显式前缀（**带尾空格**：`/work 干活` 命中，`/worker 是什么` 不命中）。
     /// 空串 = 本层关闭（`starts_with("")` 恒真，故显式跳过）。
     #[serde(default = "default_worker_force_prefix")]
@@ -333,7 +333,7 @@ pub struct SessionConfig {
     /// 建树策略（`grouped` / `flat`，出厂默认 `grouped` = 今天行为；见 [`PresentationTree`]）。
     ///
     /// 后端组树时决定本轮节点的 `parent_id` 挂哪，前端只按 `parent_id` 插树、
-    /// **不知道这个开关存在**——这是 [T-149] 判据的核心：切档前端零代码改动。
+    /// **不知道这个开关存在**——这是 相应批次 判据的核心：切档前端零代码改动。
     /// 认不出的写法按出厂默认处理（手写 `PLUGIN.yml` 写错不该改变组树），与
     /// `SettingConfig::verbosity` 同一条读侧容错纪律。`deep` 档随子会话转播桥
     /// 改造在 149-ii 接线。
@@ -439,15 +439,15 @@ pub fn default_skill_compile_enabled() -> bool {
     // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
     // 技能从经验里学来，不是系统的前提。
     //
-    // 翻向 true 的前置条件（T-086 批③写死，T-131 §3.1 同步）：① S11 读数落地
-    // （凸度或明确替代刻度——今天只有 reliability）；② PL-010 价值验收埋点出数。
+    // 翻向 true 的前置条件（ 批③写死， §3.1 同步）：① S11 读数落地
+    // （凸度或明确替代刻度——今天只有 reliability）；② DE-016 价值验收埋点出数。
     // 两条都满足才归届时的开关批翻向；在那之前 false 是安全退路口。
     false
 }
 
 pub fn default_skill_fast_path() -> bool {
     // S11 §4 平凡值：参数 `actor.pattern = reasoner`（永远走完整推理，退化成 S03）——
-    // 注意这是**参数表的取值**，不是 core 的 `ActorSpec.pattern`（ADR-079）。
+    // 注意这是**参数表的取值**，不是 core 的 `ActorSpec.pattern`（D-079）。
     // 开它是**行为改变**（命中时以技能正文收束、不调模型），因此默认关：
     // 「不加速」是安全退路口，而"只编译不加速"本身是有意义的观察形态。
     false

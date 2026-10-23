@@ -3,7 +3,7 @@
 //! 依赖方向是**单向**的：`chat_loop` 读本模块，本模块不读 `chat_loop`。反过来
 //! （投影类型与读法住在 `chat_loop::delegate`、本模块的 WAL 读法回头拿
 //! `delegate::WorkerProgress`）就是一条 `worker_progress → chat_loop` 的反向依赖，
-//! 切谁都是环。[ADR-081](../../../../docs/010-adr/081.md "ADR-081") 裁决一：
+//! 切谁都是环。[D-081](../../../../docs/003-design/014-单环一表.md "D-081") 裁决一：
 //! **进展是「读存储算出来的数」，归本域**；`chat_loop::delegate` 只留线格式
 //! （`worker_line`）与三段合成，驱动器（`chat_loop::inputs`）只调 [`for_session`]。
 //!
@@ -19,7 +19,7 @@
 //! 「末轮有没有收束事件」。两者语义同源——`chat.assistant.final` / `fallback`
 //! 正是落库那条 Completed 消息的**事实来源**（同一个动作既落格又落库）。
 //!
-//! ## 旧读法的去向（T-053）
+//! ## 旧读法的去向
 //!
 //! [`progress_of`]（读落库消息的那一份）**没有退役**：它仍是「没有 WAL 的会话」的
 //! 回落——v1 遗留会话的事实从未入格，它们的进展只在落库消息里。退役的是**两读法
@@ -122,7 +122,7 @@ pub(crate) fn is_terminal(status: Option<&cm::NodeStatus>) -> bool {
 /// （`nested.exists()` 短路），[`PersistentChatSession::load_sub_session`] 一次都不调。
 /// 主会话没开 worker 时，本函数只多一次目录存在性判定。
 ///
-/// [ADR-081](../../../../docs/010-adr/081.md "ADR-081") 裁决一第 4 条「不自拼存储侧
+/// [D-081](../../../../docs/003-design/014-单环一表.md "D-081") 裁决一第 4 条「不自拼存储侧
 /// 多步编排」的落点：这条链（枚举 + 加载 + 复核 + 两种读法）整体是本域的**一个入口**，
 /// 驱动器（`chat_loop::inputs`）只在收集段调用一次，不持有其中任何中间步骤。
 pub(crate) async fn for_session(
@@ -137,10 +137,10 @@ pub(crate) async fn for_session(
             continue;
         }
         // 子会话的进展是**值**：存储层按 id 寻址并读完，本模块只投影
-        // （[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。没有事实源
+        // （[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）。没有事实源
         // （v1 遗留 / 临时会话）⇒ 回落旧读法：那样的会话只在落库消息里有进展。
         //
-        // T-053 退掉了这里的**双源并读对账**：切源之后落库消息就是 WAL 重建的
+        // 退掉了这里的**双源并读对账**：切源之后落库消息就是 WAL 重建的
         // 那一份（`store::load_messages` 已 WAL 优先），再拿它跟 WAL 投影比是
         // 「真源跟真源比」——口径差异会变成稳定误报。对账对象已随单源消失。
         let Some(snapshot) = session.store_handle().snapshot(&summary.id) else {
@@ -152,7 +152,7 @@ pub(crate) async fn for_session(
     Ok(out)
 }
 
-// ── WAL 读法（轨 S 第二步，ADR-049：读侧逐点切到事实源）────────────────
+// ── WAL 读法（轨 S 第二步，D-049：读侧逐点切到事实源）────────────────
 
 /// 从事实快照算出 Q3 进展（**纯函数**：只吃一份事件切片，可穷举测试）。
 ///

@@ -5,8 +5,8 @@ import './_selfrun.mjs';
 //
 // RE-005「通道与自动化面」行的 `telegram` 格：t69 已入三条**纯本地**路由
 // （`status` / `set_chat_id` / `stop_listener`），另三条都打 `api_url()`，而它曾把
-// `https://api.telegram.org/bot<token>` **写死** ⇒ 无靶子可打（转交 T-114）。
-// T-114 给 `TelegramConfig` 加了 `api_base`（缺省即官方端点，对现有部署零行为变化），
+// `https://api.telegram.org/bot<token>` **写死** ⇒ 无靶子可打（转交 ）。
+// 给 `TelegramConfig` 加了 `api_base`（缺省即官方端点，对现有部署零行为变化），
 // 本用例把它指向 `MockHttp`，三条上游路由各钉一条判据。
 //
 // ## 判据为什么取「靶子收到什么」+「回包被消化」
@@ -28,7 +28,7 @@ import './_selfrun.mjs';
 // ## ④ 为什么要真的重启一次进程
 //
 // 游标与 `chat_id` 曾经纯内存：重启 = 从头再拉一遍历史更新 / 绑定丢失。它们现在
-// 落在 `PLUGIN.yml`（T-194），而「落盘了」只有**从同一目录重建插件树**才证明得了——
+// 落在 `PLUGIN.yml`，而「落盘了」只有**从同一目录重建插件树**才证明得了——
 // 单进程内读到的是同一个 `RwLock`，那份读数与磁盘无关。故末尾停掉 CLI 再起一个。
 import {
   MockHttp,

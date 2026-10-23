@@ -1,4 +1,4 @@
-//! Principal 与 PrincipalKind 的判据钉死（[ADR-069 §决策]）。
+//! Principal 与 PrincipalKind 的判据钉死（[D-069 §决策]）。
 
 use super::*;
 
@@ -48,7 +48,7 @@ fn is_agent_covers_only_agent_kind() {
     assert!(!PrincipalKind::System.is_agent());
 }
 
-/// **旧形态一次性映射**（[ADR-069 §决策 6]）——历史 `messages.json` 里的 principal
+/// **旧形态一次性映射**（[D-069 §决策 6]）——历史 `messages.json` 里的 principal
 /// 字符串读进协议时都从 `from_legacy` 走，读侧别名与 kind 归属**唯一入口**。
 #[test]
 fn from_legacy_maps_all_known_shapes() {
@@ -111,7 +111,7 @@ fn from_legacy_is_idempotent_on_new_shape() {
         "person/local",
         "vdfs/write",
         "system/compactor",
-        // [T-147d-iii] `tool_principal` 合成的三个 namespace 都要读回 Tool 族
+        // d-iii `tool_principal` 合成的三个 namespace 都要读回 Tool 族
         "legacy/todo_write",
         "mcp/mockserv/echo",
         "agent/run",
@@ -122,7 +122,7 @@ fn from_legacy_is_idempotent_on_new_shape() {
     }
 }
 
-/// `tool_principal`：LLM 可见工具名（wire 形态）→ 可路由的 Tool 主体（[T-147d-iii]）。
+/// `tool_principal`：LLM 可见工具名（wire 形态）→ 可路由的 Tool 主体（d-iii）。
 #[test]
 fn tool_principal_maps_wire_tool_names() {
     // 首段是归属插件 ⇒ `ns/其余`，与 authz 登记的主体行逐一对齐

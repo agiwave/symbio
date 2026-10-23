@@ -1,9 +1,9 @@
 //! 请求级注入段 —— 只影响**单次请求、不落库**的置顶文本。
 //!
 //! 唯一入口 [`build_request_sections`]：长期记忆 / 就绪任务 / 委派者真源，按**调用方
-//! 给定的次序**装配。**对话体不在这里加工**：发给模型的历史是事实网格的纯投影（[ADR-048a](../../../../../docs/010-adr/048a.md)），
+//! 给定的次序**装配。**对话体不在这里加工**：发给模型的历史是事实网格的纯投影（[D-048a](../../session/README.md "symbio/src/plugins/session/README")），
 //! 请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按
-//! [ADR-078](../../../../../docs/010-adr/078.md) 退役。
+//! [D-078](../../session/README.md "symbio/src/plugins/session/README") 退役。
 //!
 //! 各段都是**追加的读视图**，不是对既有消息的改写——所以它们与「请求体 = 投影」不冲突：
 //! 它们以一条 `system` 前缀消息进入请求（见 `chat_loop::request_view_prefix`），
@@ -33,9 +33,9 @@ use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 pub enum SectionKind {
     /// 长期记忆（S5 步 12）。
     Recall,
-    /// 任务调度候选集（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+    /// 任务调度候选集（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
     ReadySet,
-    /// 委派者真源（ADR-047）。
+    /// 委派者真源（D-047）。
     Delegate,
 }
 

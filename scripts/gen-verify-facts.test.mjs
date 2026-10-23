@@ -600,7 +600,7 @@ test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数�
   assert.equal(new Set(ds.map((d) => d.stage)).size >= 5, true, '落点跨阶：认知体系不是单独一阶')
 })
 
-test('生成物与 docs/004-plan/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
+test('生成物与 docs/003-design/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
   const onDisk = fs.readFileSync(path.join(REPO, 'docs', '004-plan', 'verify', 'facts', 'mod.rs'), 'utf8')
   assert.equal(onDisk, generate(REPO))
 })

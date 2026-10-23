@@ -49,7 +49,7 @@ const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------
 const backendFiles = walk(join(ROOT, 'symbio/src'), ['.rs']);
-// ── 后端半边已退役（[ADR-087](../docs/010-adr/087.md "ADR-087")，2026-10-19）──────
+// ── 后端半边已退役（[D-087](../docs/003-design/001-核心架构.md "D-087")，2026-10-19）──────
 // `symbio_core/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
 // 本脚本赖以工作的三个前提同时消失：①有一个叫 schemas 的目录可枚举；②引用写成
 // `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
@@ -207,7 +207,7 @@ for (const f of backendFiles) {
 // ---------- 后端报告 ----------
 console.log('==================== 后端 schemas 审计 ====================\n');
 if (!backendSchemaFiles.length) {
-  console.log('  ⚠ 后端半边**已退役**（ADR-087）：schemas 已拆成 chat / dialog / present / turn。');
+  console.log('  ⚠ 后端半边**已退役**（D-087）：schemas 已拆成 chat / dialog / present / turn。');
   console.log('    「契约定义有无外部消费方」由 core-export-audit C-003 承接（零/单消费方棘轮），');
   console.log('    本脚本此后只审前端镜像面——不在这里维护第二份口径。\n');
 }

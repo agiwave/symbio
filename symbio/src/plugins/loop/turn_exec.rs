@@ -1,8 +1,8 @@
-//! v2 执行器——轮次经 v2 运行器**原生执行**（唯一执行路径，ADR-051）。
+//! v2 执行器——轮次经 v2 运行器**原生执行**（唯一执行路径，D-051）。
 //!
 //! 事实与呈现同源（网格不漏轮也不双记）：事实在生成路径上**直接入格**——轮次事实
 //! （`u-{turn}` 开口 / 收束格）由 v2 运行器落，派生事实由本模块轮末补（见下）；
-//! prompt 从转写出（同一事实源，ADR-044 同族），流式增量经 [`UiBridge`]
+//! prompt 从转写出（同一事实源，D-044 同族），流式增量经 [`UiBridge`]
 //! 回到事件出口（用户看到的仍是逐字上屏的对话面）。
 //!
 //! 覆盖面（诚实划界）：**无工具轮与工具轮**。工具分发走工具执行层
@@ -26,7 +26,7 @@
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由 `execute_turn` 以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
-//! （T-082 / T-225）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! （ / ）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
 //! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
@@ -45,7 +45,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）判的是「主体此刻
+//! **写侧授权闸**（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_gate`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
@@ -102,7 +102,7 @@ use super::turn_runner::{TurnInput, TurnOutcome, TurnRunner, TurnSession, TurnSe
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
 
-// —— 阶段拆分（T-179 · B2，PL-015 §5 动作 B2）——
+// —— 阶段拆分（ · B2，DE-021 §5 动作 B2）——
 // `execute_turn` 的四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
 // （消费方与本文件测试都不必改引用）。阶段体是逐字搬移，本文件只留调度。
 mod assemble;
@@ -129,8 +129,8 @@ enum UiNodeKind {
 }
 
 impl UiNodeKind {
-    /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[ADR-070 §决策 3]
-    /// [T-155]——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
+    /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[D-070 §决策 3]
+    /// 相应批次——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
     fn shape(self, node: ChatNode) -> ChatNode {
         match self {
             UiNodeKind::Text => node,
@@ -695,13 +695,13 @@ pub(crate) struct ExecTurn<'a> {
     ///
     /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
     pub consolidation: Option<&'a [ChatNode]>,
-    /// 本轮**已执行的一次性阶段**（`turn.stage` 草稿，ADR-107 判据 2）。
+    /// 本轮**已执行的一次性阶段**（`turn.stage` 草稿，D-107 判据 2）。
     ///
     /// 由 `chat_loop` 在阶段执行点产出（判决 / 召回 / 压缩），落格在运行器——
     /// 用户格之后（I2 要求断言类事件带溯源）。两档都要落：深度档经
     /// [`super::turn_runner::TurnInput::stages`]，反射档经 `run_reflex` 的入参。
     pub stages: Vec<super::stage_events::StageFact>,
-    /// **对话面开场白正文**（T-056）：`Escalate` 首响，本轮随后照进工具循环。
+    /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
     /// `progress`——汇报走 `on_round`/`EVENT_ASSISTANT_REPORTED`）。落格在
@@ -722,7 +722,7 @@ pub(crate) struct ExecTurn<'a> {
 /// 一次执行体动作需要的**全部**环境：本轮草稿 + 七个端口。
 ///
 /// 它是派发器与执行体之间唯一的界面：执行体拿得到草稿与端口，拿不到第二份草稿，
-/// 也拿不到「下一个动作是什么」的选择权（ADR-118 决策 4）。
+/// 也拿不到「下一个动作是什么」的选择权（D-118 决策 4）。
 pub(crate) struct TurnStep<'a> {
     pub(crate) session: &'a mut TurnSession,
     pub(crate) store: &'a dyn Store<Event = Event>,
@@ -733,7 +733,7 @@ pub(crate) struct TurnStep<'a> {
     pub(crate) dispatch: Option<&'a dyn super::tool_dispatch::ToolDispatch>,
 }
 
-/// 动作面的失败种类（ADR-123 决策 3，按 ADR-119 决策 1 落在**部署层**而不是机制层）。
+/// 动作面的失败种类（D-123 决策 3，按 D-119 决策 1 落在**部署层**而不是机制层）。
 ///
 /// 它是执行体与派发器之间唯一的失败通道：从此扩展失败种类**只能靠加变体**，而每加
 /// 一个变体都要回答「派发器为它落哪条事实」——`String` 版失败会把这件事藏进文本。
@@ -742,7 +742,7 @@ pub(crate) struct TurnStep<'a> {
 /// 是「除落格外，执行体还没有别的失败形态」这件事的类型化表达。
 ///
 /// 为什么不进 `symbio_core`：机制层既不产它也不读它（`ring::drive` 只裁决欠不欠，
-/// `run` 的指针按 ADR-119 本来就留在部署层），放进 core 就是一个**单消费方导出**，
+/// `run` 的指针按 D-119 本来就留在部署层），放进 core 就是一个**单消费方导出**，
 /// 正是 `core-export-audit` C-003 要往下沉的那种东西——判据的实质（不是 `String`、
 /// 加变体才扩展）与类型住在哪一层无关。
 #[derive(Debug)]
@@ -753,7 +753,7 @@ pub(crate) enum ActorError {
 
 /// 动作的返回：`Ok(())` = 这一步做完了（本轮是否收束由派发器读账本判），`Err` = 失败。
 ///
-/// **动作不交回产出**（ADR-123 决策 5）：收束的判据在日志上（账本里出现停机格），
+/// **动作不交回产出**（D-123 决策 5）：收束的判据在日志上（账本里出现停机格），
 /// 产出由收束那一步寄存在本轮草稿（[`prepare::Prepared::settled`]），派发器收工时取走。
 /// 让它交回 `Option<TurnOutcome>` 等于把「本轮结束了没有」的判断权还给执行体。
 ///
@@ -763,25 +763,25 @@ pub(crate) type StepFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ActorError>> + Send + 'a>>;
 
 /// 绑定表里的动作类型。**一个 `by` 一个动作**：派发器只调它，不按行名 / 端口名 /
-/// 业务语义分支（ADR-118 决策 1–2；`Executor::for_by` 的名字 match 已退役）。
+/// 业务语义分支（D-118 决策 1–2；`Executor::for_by` 的名字 match 已退役）。
 ///
 /// 借用只有一条寿命：`TurnStep` 的端口字段全是 `Arc`，唯一借来的东西是本轮草稿
 /// （派发器持有的 `TurnSession`）。这就是 §2.3 草图里 `'static` 换不来的那条——
-/// 草稿必须被借走，动作就不能是 `'static`（ADR-119）。
+/// 草稿必须被借走，动作就不能是 `'static`（D-119）。
 pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 
 /// `execute` 执行体：跑**一次**模型往返。
 ///
-/// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（T-244 步 5b），不再在这个
+/// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（ 步 5b），不再在这个
 /// 执行体里按草稿分支：[`super::turn_exec::run_open`] / `run_authorize` /
 /// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步。
 ///
 /// 收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被选中，入格
-/// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（T-244 步 5d）：唤醒请求进
+/// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（ 步 5d）：唤醒请求进
 /// 行表之后，恢复幕与普通幕走同一组行。
 ///
 /// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
-/// 上界判断在派发器——停机判据不搬进执行体（ADR-118 决策 7）。
+/// 上界判断在派发器——停机判据不搬进执行体（D-118 决策 7）。
 pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let append = |e: AppendError| ActorError::Append(e);
@@ -800,7 +800,7 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `opener` 执行体（T-244 步 5b）：`open-tools` 行选中的动作——逐条开账。
+/// `opener` 执行体（ 步 5b）：`open-tools` 行选中的动作——逐条开账。
 pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session.open(step.store, step.dispatch).await;
@@ -808,7 +808,7 @@ pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `authorizer` 执行体（T-244 步 5b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
+/// `authorizer` 执行体（ 步 5b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
 pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session.authorize(step.store, step.dispatch).await;
@@ -816,7 +816,7 @@ pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `courier` 执行体（T-244 步 5b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
+/// `courier` 执行体（ 步 5b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
 pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
@@ -826,12 +826,12 @@ pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `close` 执行体：把寄存的那份**结局**落成收束格（T-244 步 5 / 步 5c）。
+/// `close` 执行体：把寄存的那份**结局**落成收束格（ 步 5 / 步 5c）。
 ///
 /// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.closeable`：答完了 **或**
 /// 模型没答成），不由草稿说：与 [`run_execute`] 的分工是「谁欠什么」在表里、
 /// 「怎么还」在动作里。不记步数——收束不是一次模型往返，步数口径与拆分前一致
-/// （ADR-115 决策 3）。
+/// （D-115 决策 3）。
 ///
 /// 两条收束格都在它名下（`chat.assistant.final` / `chat.assistant.fallback`）：
 /// `execute` 那一步只跑模型往返，收束格一律由这里落（中止 / 适配器失败两条路径
@@ -848,19 +848,19 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// 驱动一轮：每步读事实切片 → `loop_rows::next` 选最小可还债（连带查出它的动作）→
 /// 跑**一个执行体动作**，直到收束。
 ///
-/// T-227 步 5 把循环从 `turn_runner` 移到这里；T-233 把「执行器自己知道
+/// 步 5 把循环从 `turn_runner` 移到这里； 把「执行器自己知道
 /// 下一步」换成「引擎从行表读」：`decl::ring::drive` 是生产入口，派发器不再
-/// 手写 `begin` / `step` 的推进条件，也不按行名 / 端口名分支（ADR-118 决策 1–2）。
+/// 手写 `begin` / `step` 的推进条件，也不按行名 / 端口名分支（D-118 决策 1–2）。
 ///
-/// T-241 把最后一处业务分支收进执行体：`by` → 动作是绑定表
+/// 把最后一处业务分支收进执行体：`by` → 动作是绑定表
 /// （[`loop_rows::ACTORS`](super::loop_rows::ACTORS)）里的一次查找，派发器对
 /// `by` 只有一个动作 `(next.action)(&mut step)`；工具批的三笔债各有自己的行与
-/// 执行体（T-244 步 5b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
-/// （ADR-118 订正 1），选债面不再需要 `accept` 谓词。
+/// 执行体（ 步 5b），`run_execute` 只跑模型往返。未接线的行显式 `by = None`
+/// （D-118 订正 1），选债面不再需要 `accept` 谓词。
 ///
 /// 停机判据（64 步 / 无进展 / 中止 / 租约）留在派发器，不随选债口搬家。
 ///
-/// ADR-123 给派发器补了**读账本**这一步：动作前后各读一次日志，尾段就是这一次动作的
+/// D-123 给派发器补了**读账本**这一步：动作前后各读一次日志，尾段就是这一次动作的
 /// 实际写入（不由执行体自报）。三件事都从它来，按这个顺序判：
 /// 名单外的领域格 ⇒ `exhausted{undeclared-write}`，尾段里出现停机格 ⇒ 本轮收工、
 /// 产出从草稿取（决策 5），空账本 ⇒ `exhausted{no_progress}`。
@@ -884,7 +884,7 @@ pub(crate) async fn drive_steps(
         TurnSessionBegin::Run(session) => session,
     };
     loop {
-        // ADR-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
+        // D-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
         // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。
         let facts = store.range(Seq::new(0));
         let next = super::loop_rows::next(&facts, session.turn(), session.now_ms(), actors);
@@ -920,7 +920,7 @@ pub(crate) async fn drive_steps(
                 tools,
                 dispatch,
             };
-            // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（ADR-123 决策 5）。
+            // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（D-123 决策 5）。
             match (next.action)(&mut step).await {
                 Ok(()) => {}
                 // 一元枚举：动作面今天只会因落格失败，原样交回调用方（与换通道之前
@@ -928,13 +928,13 @@ pub(crate) async fn drive_steps(
                 Err(ActorError::Append(e)) => return Err(e),
             }
         }
-        // **账本**（ADR-123 决策 1）：这一次动作的**实际写入** = 日志尾段（动作前的
-        // `head` 起），不是执行体自报的一份陈述。写不经过返回值（PL-016 §2.3 明文
+        // **账本**（D-123 决策 1）：这一次动作的**实际写入** = 日志尾段（动作前的
+        // `head` 起），不是执行体自报的一份陈述。写不经过返回值（DE-015 §2.3 明文
         // 「单写者是 store，不是引擎函数」），所以自报的 `Vec<Fact>` 漏一条就对账不上一条，
         // 而漏报正是这条判据要拦的事；本仓的写点还散在 15 个文件、部分不经
         // `TurnStep.store`（`session.consolidated` 由会话侧落格），包一个记账句柄也包不全。
         let ledger = store.range(head);
-        // 运行期写入封闭（PL-016 §3.4 第 5 条的那一半，ADR-123 决策 2）：领域格必须
+        // 运行期写入封闭（DE-015 §3.4 第 5 条的那一半，D-123 决策 2）：领域格必须
         // 在这个执行体登记过的名单里，协议五格豁免（引擎写，见 `Next::writes_closed`）。
         // 越界不静默、不 panic：落一条带理由的停机格，让它在事实面显形（同 `no_progress`）。
         if let Some(offender) = ledger
@@ -952,7 +952,7 @@ pub(crate) async fn drive_steps(
             );
             return session.exhausted(store, llm, "undeclared-write").await;
         }
-        // **收束判断读账本**（ADR-123 决策 5）：本轮收不收工由日志说，不由执行体说。
+        // **收束判断读账本**（D-123 决策 5）：本轮收不收工由日志说，不由执行体说。
         // 产出是收束那一步寄存进草稿的（`prepare::Prepared::settled`），派发器取走交回调用方。
         if let Some(closing) = ledger.iter().find(|e| ends_the_drive(e, session.turn())) {
             let Some(outcome) = session.take_settled() else {
@@ -970,16 +970,16 @@ pub(crate) async fn drive_steps(
             };
             return Ok(outcome);
         }
-        // ADR-118 决策 7 + ADR-123 决策 1：账本为空 ⇒ 这一次动作什么都没写，环不会前进，
+        // D-118 决策 7 + D-123 决策 1：账本为空 ⇒ 这一次动作什么都没写，环不会前进，
         // 落 `exhausted{no_progress}` 而不是空转到步数上界。判据 14 的夹具走的就是这条
-        // 分支（空动作注册在同一个 `by` 上 ⇒ 不接线就红，见 T-249 判据 4）。
+        // 分支（空动作注册在同一个 `by` 上 ⇒ 不接线就红，见 判据 4）。
         if ledger.is_empty() {
             return session.exhausted(store, llm, "no_progress").await;
         }
     }
 }
 
-/// 账本上的这一格是否让**本轮收工**（ADR-123 决策 5 的收束判据）。
+/// 账本上的这一格是否让**本轮收工**（D-123 决策 5 的收束判据）。
 ///
 /// 三种形态，各对应「本轮不再往下走」的一个理由：
 /// - 收束格 / 兜底格（[`is_stop_fact`] 的第一臂）；
@@ -990,7 +990,7 @@ pub(crate) async fn drive_steps(
 ///   （判据 = e2e `t78` 的 auto 幕）。
 /// - 收束于**等待用户**那一格进展（`status: "pending"`）：它不是停机格（本轮尚未了结，
 ///   收束格留给恢复幕），但它是本轮的最后一步——继续选债就会再跑一次模型往返，
-///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 ADR-123。
+///   把「等你回答」跑成「又答了一轮」。字面口径与这里的差异记在 D-123。
 fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if e.turn != turn {
         return false;
@@ -1004,7 +1004,7 @@ fn ends_the_drive(e: &Event, turn: u64) -> bool {
 
 /// 一轮的执行：装配（阶段①）→ 调用（阶段②）→ 结局归类（阶段③）→ 落格（阶段④）。
 ///
-/// T-179 · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
+/// · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
 /// 本函数只留阶段间调度——调度点即原阶段边界，副作用顺序与事件批次序不变。
 pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let assembled = assemble_turn(req).await?;

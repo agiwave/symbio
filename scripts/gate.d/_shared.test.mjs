@@ -336,7 +336,7 @@ test('gate 调用点了 facts 复核就必须点 facts-write 生成链', () => {
 // 生成链的**差异判定形态**：必须是 `autoChain`（末态判一次），不能退回逐格 `autoWork`。
 // 这条钉的是上一条能成立的前提——若 `06-facts-write` 仍在四格里各判一次差异，
 // CI / pre-push 一点它就在中间态上恒红（`registry-audit --write` 写的 `[[编号]]` 记号
-// 正是 `gen-doc-refs` 的输入），三处调用点又会把生成链摘掉，回到 T-250 那个形态。
+// 正是 `gen-doc-refs` 的输入），三处调用点又会把生成链摘掉，回到 那个形态。
 // 反向判据（实测过）：把 `autoChain(c, {` 改回 `autoWork(c, {` ⇒ 本条红。
 test('facts-write 生成链是一个 autoChain 工作（末态判差异），CI 侧才点得动', () => {
   const src = fs.readFileSync(
@@ -401,7 +401,7 @@ test('ci.yml：承载 v2 工作的分支必须在 push 与 pull_request 的触�
   assert.match(yml, /^ {2}workflow_dispatch:/m, '没有 workflow_dispatch ⇒ 分支名写错时连手动补跑都不可能')
 })
 
-// verify 阶段是 `docs/004-plan/verify/` 那 14 个「架构证据」的自动化 runner（C29 兑现）。
+// verify 阶段是 `docs/003-design/verify/` 那 14 个「架构证据」的自动化 runner（C29 兑现）。
 // 在此之前它们只能手敲 rustc 跑、结果抄进 OUTPUT.md 提交——**快照不是守卫**。
 // 少了这个 job，证据是否仍然成立取决于有没有人记得去手跑一遍。
 test('ci.yml：verify 阶段必须上 CI', () => {

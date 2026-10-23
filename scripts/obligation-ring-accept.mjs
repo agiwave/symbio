@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * obligation-ring-accept — 义务环符合性的 **CLI 实测判定**（[T-236] 批口径 1 的第三件套）
+ * obligation-ring-accept — 义务环符合性的 **CLI 实测判定**（[] 批口径 1 的第三件套）
  *
  * ## 它治的病
  *
  * 「跑了一遍 CLI，看着日志挺全」不是证据。判据必须能在**没有人读日志**的情况下重跑，
- * 否则同一次实测在不同人手里得出不同结论——[T-238] 登记的缺口正是这样活了很久：
+ * 否则同一次实测在不同人手里得出不同结论——[] 登记的缺口正是这样活了很久：
  * 短路轮两次打模型、协议格为 0，而代码里到处是「每次往返都有三格」的注释。
  *
  * ## 输入 = 一份 CLI 实测产物，不是构造的夹具
@@ -18,14 +18,14 @@
  *
  * | # | 判据 | 口径来源 |
  * |---|------|----------|
- * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request`。**例外**：被拒的那一笔（`authz.denied`）没有 `sent` 是对的——没放行就没派发（e2e T78 的同一条判据）；反过来「拒了却派发了」判红 | PL-016 §4 五事实 |
- * | J2 | `user.message` 的 seq 先于本轮任何协议 `request` | PL-017 判据 2（溯源不悬空的时间面） |
- * | J3 | `sent` 的 seq 严格小于终态的 seq | PL-016 §4（引擎写 before，应答在后） |
- * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`，两种都算）的 `reason` 非空 | PL-016 §6 结局必须有名 |
- * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | PL-016 §4 溯源不悬空 |
- * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | T-239（装载期硬拒的实测对账） |
- * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | PL-017 判据 2 全量口径 + [T-238] |
- * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数（整轮）。`--strict` 下没给日志即判红 | PL-016 §0「没有别的调度代码」 |
+ * | J1 | 每一组端口往返（按 `payload.id` 分组）四要素齐整：`request` → `sent` → 终态（`response` \| `failed`），且**有且只有一次** `request`。**例外**：被拒的那一笔（`authz.denied`）没有 `sent` 是对的——没放行就没派发（e2e T78 的同一条判据）；反过来「拒了却派发了」判红 | DE-015 §4 五事实 |
+ * | J2 | `user.message` 的 seq 先于本轮任何协议 `request` | DE-015 判据 2（溯源不悬空的时间面） |
+ * | J3 | `sent` 的 seq 严格小于终态的 seq | DE-015 §4（引擎写 before，应答在后） |
+ * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`，两种都算）的 `reason` 非空 | DE-015 §6 结局必须有名 |
+ * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | DE-015 §4 溯源不悬空 |
+ * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | （装载期硬拒的实测对账） |
+ * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | DE-015 判据 2 全量口径 + [] |
+ * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数（整轮）。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
  *
  * ## 观测口径为什么必须是「这次调用打过模型」，不是「判决来自模型」
  *
@@ -65,7 +65,7 @@ import { green, red, dim } from './color.mjs'
 // 判据码命名空间：本脚本不占 `GATE_CODES.md` 的编号空间（它不是门禁步骤，
 // 判据编号 J1…J8 只在本文件与任务 evidence 里被引用）。
 
-/** 五个协议事实名（PL-016 §4：事实名是闭集，端口是载荷）。 */
+/** 五个协议事实名（DE-015 §4：事实名是闭集，端口是载荷）。 */
 const PROTOCOL = new Set(['request', 'sent', 'response', 'failed'])
 /** 终态：一次往返的两种结局。 */
 const TERMINAL = new Set(['response', 'failed'])
@@ -76,7 +76,7 @@ const TERMINAL = new Set(['response', 'failed'])
  * 这里写成一份常量而不是去解析 Rust 源码：J6 判的是「CLI 跑起来的这次装载里，
  * 有没有人往一个没人消费的端口上写事实」，它要的是**运行时事实**与声明的对账。
  * 声明侧的静态对账（行引用了未声明的端口 ⇒ 拒绝启动）已经在装载期判掉了，
- * 那部分是 [T-239] 的 `ring.rs` 静态审计（`Decl` 引用不到就 Err，不成告警）。
+ * 那部分是 [] 的 `ring.rs` 静态审计（`Decl` 引用不到就 Err，不成告警）。
  * 两侧名单若漂移，本常量会被 J6 判红（写了 `port=foo` 的事实却在声明集里查不到）。
  */
 const DECLARED_PORTS = ['turn', 'model', 'tool']
@@ -87,7 +87,7 @@ const DECLARED_PORTS = ['turn', 'model', 'tool']
  * 一条路径 = 「事实面上的某个观测 ⇒ 必然对应一组 `via` 相同的 port 三格」。
  * 两个方向都判，缺哪个都红：
  *  - 只有三格没有观测 ⇒ 一次没人发起的往返（不会发生，但形状上成立）；
- *  - 只有观测没有三格 ⇒ **一条绕开债环的模型调用**——[T-238] 登记的正是这一形态。
+ * - 只有观测没有三格 ⇒ **一条绕开债环的模型调用**——[] 登记的正是这一形态。
  *
  * `observed` 返回**权重**（这一格代表几次模型往返），求和即得观测次数。权重大于 1
  * 是真实情形：`turn.stage{decide}` 一格里记着这一轮判决打了几次模型。
@@ -285,8 +285,8 @@ function judgeSession(homedir, sid, strict) {
   // J4 收束格 reason 非空
   //
   // 「收束格」是**两种**：`chat.assistant.final`（正常定稿）与 `chat.assistant.fallback`
-  // （模型没答成 / 空答，T-244 步 5c 起由 `close` 执行体独占写）。只认 final 会把
-  // **每一条失败轮**都判成「没跑到定稿」——而失败轮恰恰是 ADR-122 决策 5 要求
+  // （模型没答成 / 空答， 步 5c 起由 `close` 执行体独占写）。只认 final 会把
+  // **每一条失败轮**都判成「没跑到定稿」——而失败轮恰恰是 D-122 决策 5 要求
   // 「照样有格」的那一轮。判据的口径必须与方案里的收束格集合一致。
   const CLOSING = ['chat.assistant.final', 'chat.assistant.fallback']
   const finals = events.filter((e) => CLOSING.includes(e.kind))

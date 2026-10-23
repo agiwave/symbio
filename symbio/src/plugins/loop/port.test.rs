@@ -1,4 +1,4 @@
-//! 端口引擎的用例（T-223）：谁写哪一条（判据 2 / 3）、行不欠就不派发、幂等、
+//! 端口引擎的用例：谁写哪一条（判据 2 / 3）、行不欠就不派发、幂等、
 //! 租约的重试与判死（判据 7）。
 //!
 //! 反向用例是主菜——「引擎忘了落 `sent`」「失败静默挂起」「租约到期没人管」三种
@@ -330,7 +330,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
     // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
     // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里它不可达，
-    // 因为重试通道未启用（T-252 出口 ②，见下一条用例）。
+    // 因为重试通道未启用（ 出口 ②，见下一条用例）。
     let retrying: Vec<PortDecl> = PORTS
         .iter()
         .map(|p| PortDecl {
@@ -373,10 +373,10 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
 #[test]
 fn no_port_in_the_real_table_retries_today() {
     // 上面那条用例改写的只有 `max_attempts` 一格，这里钉住**真表此刻的取值**：
-    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达，到顶即判死（PL-016 §2.3）。
+    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达，到顶即判死（DE-015 §2.3）。
     // 这是「重试通道未启用」的机制侧一半（条文的另一半由 PTS-006 钉住）。抬上限
     // 不是顺手能做的事：行层债键是 `(port, id)`，上一 attempt 的出口格已经把那行
-    // 关掉 ⇒ 重试出来的 `request` 不欠任何一行，没有执行体会派它（T-252）。
+    // 关掉 ⇒ 重试出来的 `request` 不欠任何一行，没有执行体会派它。
     // 这一条转红 = 有人抬了上限，那时重试出来的那笔必须已经有行会选中它。
     let caps: Vec<(&str, u64)> = PORTS.iter().map(|p| (p.port, p.max_attempts)).collect();
     assert!(
@@ -408,11 +408,11 @@ fn every_port_row_is_in_the_table() {
     assert_eq!(await_row.by, None);
 }
 
-// ── 内部请求也走端口（T-238）─────────────────────────────────────────────
+// ── 内部请求也走端口─────────────────────────────────────────────
 
 #[tokio::test]
 async fn an_internal_request_is_a_full_model_round_trip() {
-    // PL-017 判据 2 的全量口径：编排层替别人打的那次模型调用也要三格，
+    // DE-015 判据 2 的全量口径：编排层替别人打的那次模型调用也要三格，
     // 而且顺序是 request → sent → response（`sent` 夹在中间 = 引擎在执行体
     // **之前**记账）。缺这条形状时的形态是「打了模型而日志一格没有」：
     // 那次调用既没有租约可收，也没有失败事实可记。
@@ -506,11 +506,11 @@ async fn a_second_internal_request_in_the_same_act_is_a_separate_call() {
     assert_eq!(facts.iter().filter(|e| e.kind == "response").count(), 2);
 }
 
-// ── 压缩摘要也走端口（T-247）─────────────────────────────────────────────
+// ── 压缩摘要也走端口─────────────────────────────────────────────
 
 #[tokio::test]
 async fn a_compression_summary_is_accounted_as_a_model_round_trip() {
-    // 压缩摘要是一次**内部**模型往返（ADR-122 决策 2）：同样三格，同样带身份。
+    // 压缩摘要是一次**内部**模型往返（D-122 决策 2）：同样三格，同样带身份。
     // 身份是判据侧把「这次内部往返」与「这一轮自己答完了」分开的唯一依据——
     // 混进来会让判据读到一条 `response` 就以为本轮已收束。
     let store = Arc::new(boot());
@@ -568,7 +568,7 @@ async fn the_correction_retry_is_a_separate_call_and_a_failure_still_has_its_cel
         .collect();
     assert_eq!(ids, vec!["model-3-d9-z0-0", "model-3-d9-z0-1"]);
     // 失败那笔也有带身份的 `failed` 格：压缩失败不收束这一轮（它是优化项），
-    // 但那次往返**发生过**——账上必须有它（ADR-122 决策 5）。
+    // 但那次往返**发生过**——账上必须有它（D-122 决策 5）。
     let failed = facts
         .iter()
         .find(|e| e.kind == "failed")

@@ -219,7 +219,7 @@ const S010_SUSPECT_MD = '# 指南\n\n会话在 `.vdfs/session` 之下。\n'
 test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
   for (const [rel, content] of [
     ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
-    ['docs/007-guide/x.md', S010_SUSPECT_MD],
+    ['docs/006-guide/x.md', S010_SUSPECT_MD],
     ['symbio/src/plugins/session/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
   ]) {
     const r = s010Audit({ [rel]: content })
@@ -281,7 +281,7 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
     '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
-    'docs/007-guide/x.md': S010_SUSPECT_MD,
+    'docs/006-guide/x.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /S-010/)
@@ -464,7 +464,7 @@ test('S-012 fires on a batch number with no plan anchor', () => {
 
 test('S-012 accepts the same batch number with its plan anchor', () => {
   const src =
-    '/// 恢复前提见 [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md)。\n'
+    '/// 恢复前提见 [plan/11 批 2](../../../../docs/003-design/011-Agent目录规范.md)。\n'
   assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
 })
 
@@ -487,7 +487,7 @@ test('S-012 does not touch runtime prose about a batch of tool calls', () => {
 })
 
 test('S-012 covers cli and the verify programs, not just symbio', () => {
-  for (const file of ['cli/src/client.rs', 'docs/004-plan/verify/scenario_ladder.rs']) {
+  for (const file of ['cli/src/client.rs', 'docs/003-design/verify/scenario_ladder.rs']) {
     const r = s010Audit({ [file]: '/// 这一格随批 3 补。\n' })
     assert.equal(r.status, 1, `${file} ⇒ ${r.stdout}`)
   }
@@ -521,7 +521,7 @@ test('S-012 finds no batch-relative narration in this repository', () => {
 // ── S-013: `WalkBuilder` 构造点必须钉遍历序 ────────────────────────────
 // 默认遍历序 = 文件系统返回序（NTFS 名字序 / ext4 哈希序）。下游的 `offset` /
 // `head_limit` 分页窗口、`MAX_RESULTS` 与降级路径的 `limit` 截断都切在这个序上，
-// 于是同一查询换平台就换一批行。病灶见 T-116 ①（两条分页单测 Linux 红）。
+// 于是同一查询换平台就换一批行。病灶见 ①（两条分页单测 Linux 红）。
 const S013_FILE = 'symbio/src/plugins/local/walker.rs'
 const S013_UNPINNED = `fn collect(workdir: &Path) -> Vec<PathBuf> {
     let mut builder = WalkBuilder::new(workdir);
@@ -679,8 +679,8 @@ test('S-014 不判注释行，豁免必须写理由（本行或紧邻上一行�
   const asComment = `/// 例：${hit.trim()}\n`
   assert.equal(roleAudit(asComment, 0).status, 0, '注释里的形状是反例展示，不是债务')
   for (const waived of [
-    hit.replace('\n', '  // grep-audit-allow S-014: 读侧兼容出口，随 T-147d 收口清\n'),
-    `// grep-audit-allow S-014: 读侧兼容出口，随 T-147d 收口清\n${hit}`,
+    hit.replace('\n', '  // grep-audit-allow S-014: 读侧兼容出口，随 d 收口清\n'),
+    `// grep-audit-allow S-014: 读侧兼容出口，随 d 收口清\n${hit}`,
   ]) {
     assert.equal(roleAudit(waived, 0).status, 0, roleAudit(waived, 0).stdout)
   }

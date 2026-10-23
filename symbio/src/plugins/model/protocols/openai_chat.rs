@@ -36,15 +36,15 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 /// ## 为什么要并
 ///
 /// 出厂形状原本是**两条** system：这里 prepend 一条，而消息数组的第一元素按
-/// [ADR-048a](../../../../../docs/010-adr/048a.md) 后果节本身就是一条 system（记忆段 /
+/// [D-048a](../../session/README.md "symbio/src/plugins/session/README") 后果节本身就是一条 system（记忆段 /
 /// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
 /// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
-/// （T-015 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
+/// （ 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
 /// 后果不是「格式不好看」而是硬失败：那类 provider 上 `full` 档第一轮就走不出去。
 ///
 /// ## 为什么是「并入基础 system」而不是让各协议自己并
 ///
-/// 后者要把「合并」写进每一家协议，而**形状基线（ADR-057）钉的是出厂送出了什么形状**——
+/// 后者要把「合并」写进每一家协议，而**形状基线（D-057）钉的是出厂送出了什么形状**——
 /// 形状只该有一个产地。故在此处一次并掉：前缀的文本拼到基础 system 之后（原顺序，
 /// 先基础后前缀），空行分段。
 ///

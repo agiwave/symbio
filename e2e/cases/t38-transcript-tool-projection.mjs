@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 3](../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 3](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「两轮工具轮的会话，第二轮请求包里带第一轮的工具结果」。
 //
 // 为什么必须端到端：单测（`actors/mod.test.rs::transcript_includes_artifact_as_tool_line`）
@@ -146,7 +146,7 @@ export default defineCase(
       const p1 = promptOf(reqs[1].body);
       const p2 = promptOf(reqs[2].body);
 
-      // ⚠️ 判据在**消息层**上：验「这条内容在**哪个角色**的消息里」（ADR-048a）
+      // ⚠️ 判据在**消息层**上：验「这条内容在**哪个角色**的消息里」（D-048a）
       // ——`role: user` / `role: assistant` / `role: tool` 三种消息，而不是文本前缀；
       // 「把用户发言标成 assistant」这类退化因此会红。
       // ⚠️ 只读 **LLM 请求包**里的消息——「用户如何对话就如何读」：

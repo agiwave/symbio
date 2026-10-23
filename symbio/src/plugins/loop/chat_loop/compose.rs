@@ -4,7 +4,7 @@
 //!
 //! 1. 把**对话线**投影出来（与 `decide.rs` 同一个函数、同一个窗口）；
 //! 2. 经容器 `route` 调 `compose/wording`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
-//! 3. 把返回的文本**写进转写**——唯一写入者仍是 `session`（ADR-020）。
+//! 3. 把返回的文本**写进转写**——唯一写入者仍是 `session`（D-020）。
 //!    `compose` 只返回一个 `String`，一个节点都不写。
 //!
 //! ## 落点：**根级**，不是某个 Turn 之下
@@ -63,7 +63,7 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_COMPOSE_WORDING,
     SESSION_ID,
 };
-// 对话面节点的构造器已上移 core `node_build`（[ADR-082](../../../../../docs/010-adr/082.md "ADR-082") 裁决三）
+// 对话面节点的构造器已上移 core `node_build`（[D-082](../../../../../docs/003-design/014-单环一表.md "D-082") 裁决三）
 use crate::symbio_core::node_build::dialog_node;
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
@@ -181,13 +181,13 @@ pub(crate) enum VerdictEffect {
     Silent,
 }
 
-/// 生成产线那一次措辞调用，**按端口 `model` 记账**（T-238）。
+/// 生成产线那一次措辞调用，**按端口 `model` 记账**。
 ///
 /// ## 为什么账记在这一侧而不是 `compose` 里
 ///
-/// PL-016 §2.4：`request` 由**决策者**写。决定「这一轮欠一次模型往返」的是拿着判决
+/// DE-015 §2.4：`request` 由**决策者**写。决定「这一轮欠一次模型往返」的是拿着判决
 /// 的编排层；`compose` 只是被叫去把那句话组织出来，它连事实源都没有（转写的唯一
-/// 写入者仍是 `session`，ADR-020）。而 PL-017 判据 2 要的是**每一次**模型调用都有
+/// 写入者仍是 `session`，D-020）。而 DE-015 判据 2 要的是**每一次**模型调用都有
 /// `sent` + 应答——「内部静默请求」从来不是豁免理由：它同样是一次对外调用，
 /// 崩溃后同样得让租约看护收走它。
 ///

@@ -89,7 +89,7 @@ export default defineCase(
           assertEq(yamlValue(text, 'plugin_name'), p, `${p} 的 plugin_name`);
         }
 
-        // ② ADR-032：出厂身份在**装配期**投影进 manifest
+        // ② D-032：出厂身份在**装配期**投影进 manifest
         //    这是「停用插件也有身份」的唯一来路——它只在插件被构造的那一刻落盘一次。
         const localYml = readFileSync(join(hd.homedir, 'local', 'PLUGIN.yml'), 'utf8');
         assertEq(yamlValue(localYml, 'plugin_title'), '本地工具', 'local 的出厂标题应投影进 manifest');

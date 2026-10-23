@@ -2,10 +2,10 @@
 
 状态：一次性复核报告（非规范、非事实表）
 范围：`tauri/src`（复核起点 **93 实现文件 / 18948 行；44 测试文件 / 8543 行**）
-依据：第一轮 [`frontend-mechanization-review.md`](./frontend-mechanization-review.md) 的结论
+依据：第一轮 [`frontend-mechanization-review.md`](frontend-mechanization-review.md) 的结论
 （机制主干已成立，缺口在详情渲染器层）+ 本轮对 `schemas/` `services/` `components/` 的逐文件实读
 配套：结构事实以 `docs/CURRENT.md` §3、§5.1 为准，本文件只写判断与待办
-**后续追加**：P8–P12 落地（§6）之后，又完成了「跨栈契约守卫扩展 + ADR-019」——
+**后续追加**：P8–P12 落地（§6）之后，又完成了「跨栈契约守卫扩展 + D-019」——
 即本文末尾那节"涉及后端的部分"从**规划**转为**已实施**；同时查清并修掉了
 「前端测试跑完不退出」的根因（见 §7 后的说明）。
 
@@ -50,7 +50,7 @@
 | `services/vdfsTranscriptSync.ts` | `messageStatusOf` 的 `switch` 再枚举一遍 |
 | `registry/messageTypes.ts` | `MESSAGE_STATUS_LABELS` 文案表 |
 
-即**新增一个消息状态词要改 4 处**——正是 ADR-017 触发条件 1 描述的
+即**新增一个消息状态词要改 4 处**——正是 DE-002 触发条件 1 描述的
 「改 A 必须同时改 B 的跨文件连锁」。
 
 **这不是理论风险，它已经造成过故障**：`aborted` 只补进了 `vdfs.ts` 那份，
@@ -138,7 +138,7 @@ ESC + Tab 焦点陷阱 + 打开时自动聚焦，四处共用；`ConfirmDialog` 
 | P11 | 路由登记合并：`constants/pluginPaths.ts`（控制面）与 `schemas/vdfs.ts`（10 个 VDFS op）两处登记 | 两文件 | ≈20 行 |
 | P12 | 写入方收敛：`sessionMessages` 5 个写入方、`sessionStatuses` 6 个写入方收敛为 store 的少数命令 | `stores/sessions.ts` + 各写入方 | 不定（**根治竞态**，非行数） |
 
-P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015 确立的
+P12 的风险与收益都最高：它是"多路写同一份数据"，而 D-015 确立的
 「前端显示由节点状态驱动」正是为了消灭这类竞态。**建议单独一轮、带回归测试做。**
 （实施后发现：`sessionMessages` 侧早已收敛，只剩 `sessionStatuses` 侧没跟上；
 也没有潜伏 bug——见 §6。）
@@ -394,14 +394,14 @@ P8 当时收敛了 9 处，漏了同文件里的 `listVdfs` / `statVdfs` / `read
 
 ---
 
-## 附：涉及后端的部分 —— 已按 ADR-019 规划并实施
+## 附：涉及后端的部分 —— 已按 D-019 规划并实施
 
 `schemas/` 与 Rust 结构体是**手工镜像**（如 `chat_message.ts` ↔
 `symbio_core/schemas/session/chat_message.rs` 逐字段对应）。本节原先把"跨栈重复"
 列成两条路（生成侧 `ts-rs`/`schemars` vs 检查侧扩审计），并判定要先按 ADR 的粒度
 整体规划。
 
-**规划已完成并落地**（见 `docs/DECISIONS.md` 的 **ADR-019**）：
+**规划已完成并落地**（见 `docs/DECISIONS.md` 的 **D-019**）：
 
 | 数据源 | 处置 | 落地形式 |
 |---|---|---|
@@ -417,7 +417,7 @@ P8 当时收敛了 9 处，漏了同文件里的 `listVdfs` / `statVdfs` / `read
 > ⇒ **18 对**。**数字以 `scripts/protocol-mirror-audit.mjs` 的 `ENUM_SETS` /
 > `STRUCT_SETS` 长度为准**，本报告不追着改（它是一次性复核，不是事实表）。
 
-**决策是"审计"而非"生成"**（ADR-019）：`serde` 在**格式层**已单源，重复只在
+**决策是"审计"而非"生成"**（D-019）：`serde` 在**格式层**已单源，重复只在
 **符号层**（Rust 标识符 vs TS 常量名）；且 95 处 serde 标注里的 `untagged` /
 `tag = "type"` / `skip_serializing_if` 让机器导出不可靠。既有 `X-001..X-003`
 正是"审计镜像"的先例——扩展它与既有机制同向，引入生成器则是架构级改动。

@@ -1,4 +1,4 @@
-//! 阶段② 请求 / 流式（T-179 · B3，PL-015 §5 动作 B3）。
+//! 阶段② 请求 / 流式（ · B3，DE-021 §5 动作 B3）。
 //!
 //! 一次工具循环迭代：拼请求消息 → 调模型 → 按 [`classify_round`] 分流。
 //! 收束（`Halt`）与配置缺口（`ConfigGap`）在这里就地落格；派发（`Act`）把
@@ -25,7 +25,7 @@ enum ModelCallError {
     Control(String),
 }
 
-/// 一次模型往返 = 端口 `model` 的一次调用（T-227 步 2）。
+/// 一次模型往返 = 端口 `model` 的一次调用（ 步 2）。
 ///
 /// 协议事实由 [`port`](crate::plugins::loop::port) 模块写（**唯一写方**）：
 /// `request`（决策者：这一步欠一次模型往返）→ `sent`（引擎，跑**之前**）→
@@ -40,7 +40,7 @@ enum ModelCallError {
 /// ## 为什么逻辑 id 带**幕锚**与**步号**
 ///
 /// 续写幕复用轮号且步号从 0 重来，只带轮号会与首幕撞成同一笔——首幕已经有过
-/// `sent`，幂等键命中之后派发会被拒（与 T-223 的 `turn` 端口同一条理由）。
+/// `sent`，幂等键命中之后派发会被拒（与 的 `turn` 端口同一条理由）。
 ///
 /// ## 为什么 id 以**端口名**开头
 ///
@@ -73,7 +73,7 @@ where
     // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
     let facts = store.range(Seq::new(0));
     let owed = super::super::loop_rows::owes("dispatch-model", &facts, run.turn, run.now_ms());
-    // 应答载荷带上本次交回的工具调用（ADR-117）：创建行 `open-tools` 的集合
+    // 应答载荷带上本次交回的工具调用（D-117）：创建行 `open-tools` 的集合
     // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
     let out = super::super::port::dispatch_with(
         store,
@@ -129,7 +129,7 @@ pub(crate) enum ModelRound {
     /// 模型请求了工具；应答与节点事实已寄存在 `Prepared`，等 [`tool_round`]。
     Tools,
     /// 本轮该收束了；**结局**寄存在 [`Prepared::closing`]，落格归 `close-turn`
-    /// 行的执行体（T-244 步 5 / 步 5c）。
+    /// 行的执行体（ 步 5 / 步 5c）。
     ///
     /// 三种收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
     /// 但**都是「这一轮该收了」**，而收束格只由 `close` 执行体写。
@@ -138,7 +138,7 @@ pub(crate) enum ModelRound {
 
 /// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
 ///
-/// 与 [`dispatch_round`] 拆开是 T-233 的第一步：引擎要能分别选中「模型往返」与
+/// 与 [`dispatch_round`] 拆开是 的第一步：引擎要能分别选中「模型往返」与
 /// 「工具批次」两笔债，执行体就不能再把它们揉在一次调用里。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn model_round<S>(
@@ -159,7 +159,7 @@ where
 
     // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
     //
-    // 这一次模型往返是**端口 `model` 的一次调用**（T-227 步 2）：协议事实
+    // 这一次模型往返是**端口 `model` 的一次调用**（ 步 2）：协议事实
     // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
     let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
         Ok(rt) => rt,
@@ -210,7 +210,7 @@ where
     // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
     let round_facts = node_facts(&run.nodes);
 
-    // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**（T-244 步 5）：
+    // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**（ 步 5）：
     //     `close-turn` 行的前件（`turn.closeable`）此刻已经在日志上，派发器下一步
     //     就会选中它，把收束交给 `closer` 执行体。
     if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
@@ -261,7 +261,7 @@ where
     Ok(ModelRound::Tools)
 }
 
-/// 阶段②c：收束寄存的**结局**（T-244 步 5 / 步 5c，`close-turn` 行的动作）。
+/// 阶段②c：收束寄存的**结局**（ 步 5 / 步 5c，`close-turn` 行的动作）。
 ///
 /// 前件由日志说（本幕要么「答完了」、要么「模型没答成」），落格在这里做。
 /// 没有寄存 ⇒ 引擎收错了账：不落任何格、返回 `None`，让派发器的「无进展」判据把
@@ -305,7 +305,7 @@ where
     }
 }
 
-/// 阶段②b-1：创建（`open-tools` 行的动作，T-244 步 5b）。
+/// 阶段②b-1：创建（`open-tools` 行的动作， 步 5b）。
 ///
 /// 把模型交回的调用逐条开成 `request(port=tool)`，开出的账寄存在草稿里交给授权步。
 /// 没有寄存的模型应答 ⇒ 引擎选错了行：不写任何格，派发器的「无进展」判据会显形。
@@ -483,7 +483,7 @@ where
     }
     if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
         // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all` 会把它报出来
-        // （C4）。**例外**：本轮落过产物格 ⇒ 已由产物收束（ADR-067）。
+        // （C4）。**例外**：本轮落过产物格 ⇒ 已由产物收束（D-067）。
         // 拒绝本身落一条否定事实（`authz.denied`），于是「被拒」不再与「没跑完」同形。
         deny(
             store,
@@ -508,7 +508,7 @@ where
             aborted: false,
             awaits_user: false,
             closure_denied: run.artifacts_landed == 0,
-            // 末轮原因随本轮的收束一起带出去（T-144）。
+            // 末轮原因随本轮的收束一起带出去。
             finish: rt.finish.clone(),
         });
     }
@@ -551,7 +551,7 @@ where
     })
 }
 
-/// 3a 中止的**载荷**（T-244 步 5c）：半截产出与实测耗时。
+/// 3a 中止的**载荷**（ 步 5c）：半截产出与实测耗时。
 ///
 /// 载荷与落格分开：收束格只由 `close` 执行体写，中止那一步只负责把结局寄存下来。
 fn aborted_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value, String) {
@@ -640,7 +640,7 @@ where
     })
 }
 
-/// 3b 兜底的**载荷**（T-244 步 5c）：失败前已产出的半截产出与实测耗时。
+/// 3b 兜底的**载荷**（ 步 5c）：失败前已产出的半截产出与实测耗时。
 ///
 /// 失败前已产出的半截正文 / 思考照样进载荷（它们是事实，不因失败就不记）。
 fn failed_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value) {

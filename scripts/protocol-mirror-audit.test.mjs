@@ -333,7 +333,7 @@ const SESSION_META_TS_SRC = [
   tsArray('SESSION_MODES', "'auto'", "'interactive'"),
 ].join('\n')
 
-/** 后端 present/reading.rs：[T-202] 读数方言的 3 个结构体 + 1 个闭集 */
+/** 后端 present/reading.rs：读数方言的 3 个结构体 + 1 个闭集 */
 const READING_RS_SRC = [
   rsStruct('ReadingRow', 'label', 'value', 'hint', 'tone'),
   rsStruct('ReadingSection', 'title', 'rows'),
@@ -342,7 +342,7 @@ const READING_RS_SRC = [
   rsEnum('ReadingTone', ['Normal', 'Warn'], 'lowercase'),
 ].join('\n')
 
-/** 前端 schemas/reading.ts：[T-202] 的镜像侧（3 个接口 + 1 张词表） */
+/** 前端 schemas/reading.ts：读数方言的镜像侧（3 个接口 + 1 张词表） */
 const READING_TS_SRC = [
   tsIface('ReadingRow', 'label', 'value', 'hint', 'tone'),
   tsIface('ReadingSection', 'title', 'rows'),

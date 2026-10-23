@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 事实 · `docs/006-ref/GATE_CODES.md` —— 判据码登记表
+ * 事实 · `docs/004-ref/GATE_CODES.md` —— 判据码登记表
  *
  * 存在理由同 `facts/current.mjs`：**能生成的表不手抄**。判据码的归属只有
  * 脚本自己知道，人在别处抄一份就必然出现「表说有这条、脚本里早删了」；而这张表
@@ -19,7 +19,7 @@ import path from "node:path";
 
 // 本文件住 `scripts/facts/`，故仓根要上溯两级（原来在 `scripts/` 下只需一级）。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT_REL = "docs/006-ref/GATE_CODES.md";
+const OUT_REL = "docs/004-ref/GATE_CODES.md";
 
 const num = (code) => Number(code.slice(code.indexOf('-') + 1))
 
@@ -82,7 +82,7 @@ function render() {
   L.push('>')
   L.push('> 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。')
   L.push('> 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由')
-  L.push('> [`scripts/gate-codes-audit.mjs`](../../scripts/gate-codes-audit.mjs) 判（GC-001–006）。')
+  L.push('> [`scripts/gate-codes-audit.mjs`](../gate-codes-audit.mjs) 判（GC-001–006）。')
   L.push('')
   L.push('<!-- list:gate-codes owner -->')
   L.push('')

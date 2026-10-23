@@ -53,7 +53,7 @@ fn load_history_false_is_honored() {
     assert!(!r.load_history);
 }
 
-// ── `request_actor_spec` 的五字段真值（T-107 exit ③）─────────────────────────
+// ── `request_actor_spec` 的五字段真值（ exit ③）─────────────────────────
 //
 // 会话选定哪个 agent ⇒ 规格就从授权表那一行取。三个角色主体（工人 / 规划者 / 验证者）
 // 逐一钉：**能力集从登记行取**（单一真源，不是空表也不是硬编码清单）、**模式按矩阵
@@ -67,7 +67,7 @@ fn load_history_false_is_honored() {
 fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn crate::symbio_core::PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::AGENT_ID, agent_id.to_string());
-    // 绑定登记以会话为持有人（[T-182]）：没有会话 id 就没有登记，未部署主体
+    // 绑定登记以会话为持有人（相应批次）：没有会话 id 就没有登记，未部署主体
     // 会 fail-closed——这组用例要钉的是「规格从登记行取」，所以给一个每例独有的 id。
     req.set(
         crate::symbio_core::SESSION_ID,
@@ -130,17 +130,17 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
     assert_eq!(verifier.budget_ms, LatencyTier::Fast.budget_ms());
 }
 
-/// **会跑模型的那个主体派生 `Reasoner`**——这是 [ADR-079] 的反证。
+/// **会跑模型的那个主体派生 `Reasoner`**——这是 [D-079] 的反证。
 ///
 /// `pattern` 由授权谓词派生（持 `reply` ⇒ `Reasoner`），而**每一个会跑模型的轮次
 /// 主体都持 `reply`**。所以凡是要判「跑不跑模型」的地方，读到的永远是 `Reasoner`：
 /// 把它接成分派闸门，等于把技能快路（S11 §4 参数表的同名参数，落地形态是
-/// `SessionConfig::skill_fast_path`）永久关死。两者的区别见 [ADR-079]。
+/// `SessionConfig::skill_fast_path`）永久关死。两者的区别见 [D-079]。
 ///
 /// 机器判据不在这里（单测拦不住调用点的闸门），在 `e2e/cases/t41-skill-fast-path.mjs`：
 /// 把 pattern 接成分派点 ⇒ 快路永不命中 ⇒ 那条用例的「零模型调用」断言不成立。
 ///
-/// [ADR-079]: ../../../../../docs/010-adr/079.md "ADR-079"
+/// [D-079]: ../../../../../docs/003-design/005-协议规范.md "D-079"
 #[test]
 fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
     use crate::symbio_core::{LatencyTier, Pattern, Scope};
@@ -162,7 +162,7 @@ fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
 fn a_delegated_worker_spec_is_scoped_to_its_parent() {
     use crate::symbio_core::{LatencyTier, Scope};
     // 委派链上（agent_run 派生的子会话）：作用域挂父主体——「委派不放大权威」的
-    // 规格侧形态（T-105）。工人那一行不变，变的是 scope。
+    // 规格侧形态。工人那一行不变，变的是 scope。
     let spec = request_actor_spec(
         agent_ctx("worker").as_ref(),
         LatencyTier::Deep,

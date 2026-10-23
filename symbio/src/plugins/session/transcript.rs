@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 
 /// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
 pub(crate) mod autonomous;
-/// 压缩节点发射器与熔断计数（`compression-*` 动作的执行体，ADR-086 §6）：
+/// 压缩节点发射器与熔断计数（`compression-*` 动作的执行体，D-086 §6）：
 /// 持活跃名册与转写，随 session 留守。
 pub(crate) mod compression;
 pub(crate) mod inbox;
@@ -60,7 +60,7 @@ pub(crate) mod supplements;
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;
 /// 落库回包（§3.4 的唯一落地点）：`append_and_publish` 与它的两条发布通道。
-/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[ADR-075](../../../../docs/010-adr/075.md "ADR-075")
+/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[D-075](../../../../docs/003-design/002-架构总览.md "D-075")
 /// 前置 P3 的第一处归位，理由写在 `publish.rs` 模块头。
 pub(crate) mod publish;
 // 域内共享面：状态机（`impl Transcript`）与本域测试经 `super::*` 取用。
@@ -69,13 +69,13 @@ use self::deliver::{
     DELIVER_WINDOW_MS,
 };
 
-// 域内门面：状态帧 / 删除帧的实现已随 ADR-086 §7 上移 core（loop 也要发），
+// 域内门面：状态帧 / 删除帧的实现已随 D-086 §7 上移 core（loop 也要发），
 // 这里只留 session 侧调用点的短路径别名。
 pub(crate) use self::publish::append_and_publish;
 pub(crate) use crate::symbio_core::llm_state_frame;
 
 /// **在途号段**：转写侧给「还没落库的消息」发的位置序号（四套序号的归一表见本域
-/// `docs/022-vdfs-session-messages.md` §3.3）。
+/// `docs/109-vdfs-session-messages.md` §3.3）。
 ///
 /// 本类型只服务一条判据：**在途号永不落库**（见 [`InflightSeq::BASE`] 的文档——那里记着
 /// 一次真实的撞号事故）。它在类型上的兑现是两条各管一半：
@@ -148,7 +148,7 @@ impl InflightSeq {
 ///
 /// 挂在 [`crate::plugins::session::active::ActiveSessionState`] 上（每会话一个），
 /// 消费循环是它唯一的常规写入者；落库回包（用户消息 / 助手侧增量 / 压缩节点，
-/// 见 `docs/022-vdfs-session-messages.md` §3.4）与压缩发射器经同一入口写入。
+/// 见 `docs/109-vdfs-session-messages.md` §3.4）与压缩发射器经同一入口写入。
 pub struct Transcript {
     session_id: String,
     /// 下一个要分配的**在途位置序号**（见 [`InflightSeq::BASE`]）。
@@ -518,7 +518,7 @@ impl Transcript {
     /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
     ///
     /// 呈现（`title`/`icon` 与读数行 `stats`）在这里从节点**形状 + 已有数字**现算
-    /// （[T-155 B3] + [ADR-111](../../../../docs/010-adr/111.md)）：图里存的、事件里的
+    /// （B3 + [D-111](README.md "symbio/src/plugins/session/README")）：图里存的、事件里的
     /// 节点都不含呈现——它是「session 把数据交给前端那一刻」才填的交互面元素，不属于
     /// 后端业务/存储事实。窄增量帧无 `msg_type`，派生判据全不命中即原样透传（幂等无副作用）。
     fn publish(&self, message: cm::ChatNode) {
@@ -532,7 +532,7 @@ impl Transcript {
     /// 发布一次**会话运行态**变更：`<sid>` 上 `data = VdfsNode`（全量节点视图）。
     ///
     /// 与消息走**同一张订阅表**：会话节点就是 `<sid>`（它既是清单里的文件又是
-    /// 容器目录，变更落点是它自身）。这与 ADR-025 的结论一致——实时面与历史面
+    /// 容器目录，变更落点是它自身）。这与 D-025 的结论一致——实时面与历史面
     /// 是同一条 `vdfs/watch`。
     ///
     /// ## `data` 为什么带**全量节点视图**
@@ -585,7 +585,7 @@ impl Transcript {
 ///
 /// 原先住在 `chat_loop/state.rs`（[`super::super::chat_loop::CompressionEmitter::transcript_writer`]
 /// 的私有桥）。桥的全部工作是「锁转写 → apply」，而 `Transcript` 是本域类型——把它的
-/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [ADR-081](../../../../docs/010-adr/081.md "ADR-081")
+/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [D-081](../../../../docs/003-design/014-单环一表.md "D-081")
 /// 裁决一第 3 条禁的形状。桥整体迁进本域，对 core trait 的实现一行不削，只是换住址；
 /// 驱动器侧的 `transcript_writer` 退化为一次 [`compression_writer`] 调用。
 struct TranscriptWriterBridge {

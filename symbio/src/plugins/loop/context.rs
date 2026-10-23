@@ -13,8 +13,8 @@
 //! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议 |
 //! | [`pipeline`] | 压缩执行流水线：阈值触发的自动压缩与用户重试共用的唯一内核 |
 //!
-//! **对话体不在这里加工**（[ADR-078](../../../../docs/010-adr/078.md)）：请求里的历史是
-//! 事实网格的纯投影（[ADR-048a](../../../../docs/010-adr/048a.md)），请求视图级的
+//! **对话体不在这里加工**（[D-078](../session/README.md "symbio/src/plugins/session/README")）：请求里的历史是
+//! 事实网格的纯投影（[D-048a](../session/README.md "symbio/src/plugins/session/README")），请求视图级的
 //! 内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已退役。本域对历史的唯一动作是
 //! **换基**（语义压缩写成 `session.consolidated` 一格事实），不是改写视图。
 //!

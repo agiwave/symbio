@@ -1,6 +1,6 @@
 //! 会话运行态的**事实投影**：上一轮结局从生命周期事实折出。
 //!
-//! [ADR-083 §5.2](../../../../docs/010-adr/083.md "ADR-083") 的落地侧：结局在网格里
+//! [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "D-083") 的落地侧：结局在网格里
 //! 有确切的证据格，因此它是投影而不是又一份状态；`working` / `warning` 是点名论证过的
 //! 进程局部量，不在这里。
 //!
@@ -15,7 +15,7 @@
 //! | 根 run 节点的 `message.edited` / `message.added` | `Failed` / `Aborted` 即失败/中止收口 |
 //!
 //! 按**完整史**扫描、取最后一条证据：压缩只取代消息列表，不取代轮次生命周期
-//! （[ADR-085](../../../../docs/010-adr/085.md "ADR-085") 的同一条取向）。非生命周期事件（产出、汇报、
+//! （[D-085](README.md "D-085") 的同一条取向）。非生命周期事件（产出、汇报、
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use crate::symbio_core::chat_node as cm;
@@ -76,7 +76,7 @@ pub(crate) fn project(events: &[Event]) -> RuntimeFacts {
 /// `Some(Some(_))` = 一轮收束。
 ///
 /// 结局问的是**结果面**，所以读 `status`（三值）；「为什么停」读 `reason`
-/// （闭集，T-220）——两个问题两个字段，本函数只问前者。
+/// （闭集，）——两个问题两个字段，本函数只问前者。
 fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
     match e.kind.as_str() {
         EVENT_USER_MESSAGE => Some(None),

@@ -1,10 +1,10 @@
 import './_selfrun.mjs';
-// T80 孤儿插件目录（T-141①）：`.symbio/` 是跨构建存活的数据目录，旧构建留下的
+// T80 孤儿插件目录（①）：`.symbio/` 是跨构建存活的数据目录，旧构建留下的
 // `PLUGIN.yml` 指向一个本构建不存在的工厂 ⇒ 装配时**不是异常**，不许喊 WARN。
 //
 // 判据分两段，对应退出条件的两半：
 //  ① 干净系统目录启动零条 `[composite WARN]`；
-//  ② 种下孤儿目录（与 T-141 实测同一形态：`projection/PLUGIN.yml` 声明
+// ② 种下孤儿目录（与 实测同一形态：`projection/PLUGIN.yml` 声明
 //     `plugin_provider: projection`，全仓无此工厂）后再启动，WARN 仍为零，
 //     且默认级别下连目录名都不出现（降级到 debug，不是换句措辞继续喊）。
 //

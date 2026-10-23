@@ -51,7 +51,7 @@ pub struct InboxItem {
     pub workdir: Option<String>,
 }
 
-/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 ///
 /// 判定与落格必须分开，因为两者要的时刻不同：
 /// - **判定**只能在忙窗（`is_working == true` 且有插话排着）做——那时事实源里只有
@@ -104,7 +104,7 @@ pub struct ActiveSessionStateInner {
     ///
     /// 这是**状态**而不是事件：提示音 / 错误条 / 重试入口都据此判定，
     /// 不需要「Abort 与 Error 谁先到」这种顺序知识（见
-    /// `session/docs/018-node-state-streaming.md` §3.3）。
+    /// `session/docs/105-node-state-streaming.md` §3.3）。
     ///
     /// `None` = 本进程内还没有跑完过一轮（或刚被新一轮请求复位）。
     pub last_outcome: Option<String>,
@@ -193,7 +193,7 @@ pub struct ActiveSessionState {
     ///
     /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
     pub transcript: Arc<Mutex<super::transcript::Transcript>>,
-    /// 「本轮收尾」唤醒（[T-191](../../../../docs/009-task/191-运行态小状态机收口批.md "T-191-运行态小状态机收口批")）：
+    /// 「本轮收尾」唤醒（相应批次）：
     /// 工作态**由忙变闲**时通知一次。
     ///
     /// 收件箱消费者挂在它上面等「某个排队会话让出」，取代此前的 50ms 轮询。
@@ -275,7 +275,7 @@ impl ActiveSessionState {
     //
     // `is_working` / `last_outcome` / `last_error` / `last_warning` 的**唯一写点**。
     // 它们不是第二份可独立演化的状态：结局是 turn 事实投影（`runtime::project`）的
-    // 写穿缓存，开轮 / 收轮 / 告警 / 中止各只经一个方法（[ADR-083 §5.2]）。
+    // 写穿缓存，开轮 / 收轮 / 告警 / 中止各只经一个方法（[D-083 §5.2]）。
     // 拆散成调用点各写各的字段，正是 P5 要消掉的双写面。
     //
     // 工作态的迁移是**闭集**：只有 `WorkingTransition` 的三个变体，且唯一迁移函数是
@@ -397,7 +397,7 @@ impl ActiveSessionState {
 
 /// 无进程内缓存时的运行态读法：**事实投影**作答。
 ///
-/// `warning` 不是事实（宿主局部，见 [ADR-083 §5.2](../../../../docs/010-adr/083.md "ADR-083")），
+/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "D-083")），
 /// 由调用方原样带上。
 fn runtime_from_facts(facts: Option<&RuntimeFacts>, warning: Option<String>) -> SessionRuntime {
     match facts.and_then(|f| f.outcome.clone()) {

@@ -1,12 +1,12 @@
 //! 阶段②「逐条执行」——`process_tool_calls_async` 三段拆分的第二段
-//! （T-179 / [PL-015 §5 动作 B](../../../../../../docs/004-plan/015-可扩充性与插件切分.md "PL-015-可扩充性与插件切分")）。
+//! （ / [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
 //! 超限丢弃 → 外部执行闸 → 淘汰闸 → 任务表闸 → Pre 钩子 → 执行 → Post 钩子 → 记账
 //! → 结果与父终态广播」。批首读数经 [`GateReadings`] 传入，台账（`seen_calls`）在
 //! 本段逐条登记。
 //!
-//! ## 批内并行（T-190）
+//! ## 批内并行
 //!
 //! 判据只看**风险档**（[`ToolRisks`]，映射单点在 `dispatch::parallel`）：`Low`
 //! （只读）可与其它只读调用**同时在途**，`Medium` / `High` 与交互模式一律独占执行
@@ -21,7 +21,7 @@
 //!
 //! 判据（「这段错了谁会红」）：批内事件与父节点终态用例红——`tool_executor.test.rs`
 //! 的 `process_tool_calls_async` 组（中止、交互 break、闸门拒止、协议失败、
-//! 待用户审批的 `WaitingUserAction`）、事件批序断言，以及 T-190 的并行组。
+//! 待用户审批的 `WaitingUserAction`）、事件批序断言，以及 的并行组。
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, VecDeque};
@@ -54,7 +54,7 @@ async fn record_protocol_failure(
         Some(false),
         Some(result_msg_id),
         // 协议级失败：调用本身的 id/name 就非法，工具名**无从说起**——主体由
-        // `attributed` 按会话主体兜底（[T-147d-iii]）。
+        // `attributed` 按会话主体兜底（d-iii）。
         None,
     );
     // 失败属信息性：结果以 Completed 留在上下文（Failed 会被 get_context_messages
@@ -118,7 +118,7 @@ async fn record_protocol_failure(
 /// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
 /// 是"还在跑"还是"卡死了"。
 ///
-/// 状态机（`symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.3）：
+/// 状态机（`symbio/src/plugins/session/docs/105-node-state-streaming.md` §2.3）：
 /// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
 /// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
 ///
@@ -154,7 +154,7 @@ async fn emit_tool_running(
     llm_emit_state(sink, running).await;
 }
 
-// ── 准备 / 执行 / 收口的三个阶段（T-190）──────────────────────────────────
+// ── 准备 / 执行 / 收口的三个阶段──────────────────────────────────
 
 /// 一次执行的产出：`(结果正文, 成功, 待用户动作)`。
 type ExecOutcome = (String, bool, Option<PendingPrompt>);
@@ -258,7 +258,7 @@ async fn prepare_call(
         }
     };
 
-    // 同参重复调用的判据（[T-140] 步 2）：签名与落库节点里的参数文本同源
+    // 同参重复调用的判据（相应批次 步 2）：签名与落库节点里的参数文本同源
     // （[`tool_call_args_text`]），于是「上下文里的那一次」与「这一次」可比。
     // 只登记、只回报——不拦截、不改执行结果。
     let signature = call_signature(&name, &tool_call_args_text(tc));
@@ -274,7 +274,7 @@ async fn prepare_call(
         });
     seen_calls.push(signature);
     if repeat_note.is_some() {
-        // 「要不要真的拦」留给实际数据判（见 T-140），先把绕圈的次数记进日志。
+        // 「要不要真的拦」留给实际数据判（见 ），先把绕圈的次数记进日志。
         plugin_warn!("session", "[Tool] 同参重复调用：{name}（调用 id={id}）");
     }
 
@@ -326,7 +326,7 @@ async fn prepare_call(
         });
     }
 
-    // ── 闸门表（T-196）：外部执行 / 淘汰 / 任务表，先命中者胜 ────────────
+    // ── 闸门表：外部执行 / 淘汰 / 任务表，先命中者胜 ────────────
     //
     // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
     // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
@@ -801,7 +801,7 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
 /// 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
 // 拆分段以局部绑定沿用拆分前的变量名（`decls` 等），循环体逐字未动——
 // `&decls` 这类取放在拆分前是 `&Vec`/`&T`、现在是 `&&T`，语义同一，clippy 的
-// needless_borrow 在这里是对「纯结构拆分」的误报（T-179 判据 1：不动代码行）。
+// needless_borrow 在这里是对「纯结构拆分」的误报（ 判据 1：不动代码行）。
 #[allow(clippy::needless_borrow)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_batch(
@@ -870,7 +870,7 @@ pub(crate) async fn run_batch(
             {
                 PreCheck::Terminal(terminal) => {
                     // 先让此前的在途调用按序收口，再发本条终结出口；结果批序因此
-                    // 与调用顺序一致（T-190 判据）。
+                    // 与调用顺序一致（ 判据）。
                     flush_all(
                         &mut inflight,
                         &mut order,

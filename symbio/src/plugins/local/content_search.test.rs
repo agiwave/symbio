@@ -2,7 +2,7 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）。
 //!
-//! 重点钉 T-113 的两件事（都是「结果看着像对的、其实不对」的形状病）：
+//! 重点钉 的两件事（都是「结果看着像对的、其实不对」的形状病）：
 //!
 //! 1. **输出形状**——`content` 模式每个匹配行一条、行间单换行（不再有空行）。
 //!    修复前 `UTF8Sink` 给的 `text` 含行终止符，`format!` 原样拼进结果再
@@ -75,7 +75,7 @@ async fn search_window(dir: &Path, offset: usize, head_limit: usize) -> String {
 // ==================== 输出形状（三种 output_mode 各一） ====================
 
 /// `content` 模式：每匹配行一条 `<路径>:<行号>:<行内容>`，**行间单换行**——
-/// 空行即回归（T-113 修复前 `UTF8Sink` 的 text 带终止符，行间成 `\n\n`）。
+/// 空行即回归（ 修复前 `UTF8Sink` 的 text 带终止符，行间成 `\n\n`）。
 #[tokio::test]
 async fn content_mode_has_one_line_per_match_without_blank_lines() {
     let dir = fixture().await;
@@ -254,7 +254,7 @@ async fn offset_and_head_limit_combine_on_match_lines() {
 }
 
 /// 窗口切满但未给全 ⇒ 尾部读数必须同时给出**总量**与**取回方式**
-/// （T-140：只说「限制了」不说「一共多少」，聚合型问题就逼出原样重发）。
+/// （：只说「限制了」不说「一共多少」，聚合型问题就逼出原样重发）。
 #[tokio::test]
 async fn truncated_tail_reports_total_and_next_offset() {
     let dir = fixture().await;
@@ -313,7 +313,7 @@ async fn no_window_returns_everything_without_note() {
     assert!(!out.contains('['), "未截断不加读数（实际 {out:?}）");
 }
 
-// ==================== 结果形状契约（T-196 / 04 报告建议 3） ====================
+// ==================== 结果形状契约（ / 04 报告建议 3） ====================
 
 /// 结果形状契约：正文写在 `output` 字符串里（不是整包 JSON、不是别的键）。
 ///

@@ -15,7 +15,7 @@
 //! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
 //! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
 //! 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`）本就住 `turn` 域。
-//! 判据见 `symbio_core/README.md` §1.2 与 ADR-095。
+//! 判据见 `symbio_core/README.md` §1.2 与 D-095。
 //!
 //! ## 命名：两种形态，互不重叠
 //!
@@ -119,12 +119,12 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
-// 入站请求的**来源主体**（PL-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
+// 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
 // `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
 // `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口
 // 取走它随条目寄存，轮末 `record_derived` 用它做 `commitment.*` 的 `to`。
 // 缺省（同机直呼 / 心跳等无来源声明的路径）⇒ 本机用户——与接线前写死的常量
-// 逐字一致（ADR-067：`to` 从调用点常量变成数据）。
+// 逐字一致（D-067：`to` 从调用点常量变成数据）。
 define_string_key!(SourcePrincipalKey, SOURCE_PRINCIPAL, "source_principal");
 // 请求链路 id：同一条链上的多次请求共用它，把跨插件的日志串回一条线。
 // 线上形态 = 请求 `metadata.trace_id`，因此读它的地方就是读 metadata 的地方
@@ -174,7 +174,7 @@ define_string_key!(
 
 // 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
 // `symbio_core::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
-// `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_core::plugin`。判据同 ADR-095 根因一。
+// `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_core::plugin`。判据同 D-095 根因一。
 
 // 初始配置 Key (Value)
 pub struct ConfigKey;
@@ -225,4 +225,4 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 // （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型
 // `Arc<dyn Registry>` 搬去 `symbio_core::capability::collect`；错误桶键
 // `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `symbio_core::capability::error`。
-// 判据同 ADR-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。
+// 判据同 D-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。

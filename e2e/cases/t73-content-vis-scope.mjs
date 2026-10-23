@@ -1,11 +1,11 @@
 import './_selfrun.mjs';
-// T73 内容侧可见域（[T-094](../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批") ②）：
+// T73 内容侧可见域（相应批次 ②）：
 // 矩阵内主体读得到**他人**的共享内容，矩阵外主体读不到；且判据随**内容**走——
 // 同一个读方（`session/main`）在「无共享内容」的会话上照旧空切片。
 //
 // ## 本用例钉的是什么
 //
-// T-130 §3.1 的 grants 行 `person:*` ▸ shared 判为**不加行**（归属裁决：人的读权 =
+// §3.1 的 grants 行 `person:*` ▸ shared 判为**不加行**（归属裁决：人的读权 =
 // owner 相等），「共享」落成**内容侧**可见域产地。生产链三格，本用例钉后两格的端到端：
 //
 // | 格 | 单测钉在哪 | 只有 e2e 能看见什么 |
@@ -16,7 +16,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么必须有两个会话
 //
-// 只有「共享会话」一半的话，闸退化成「矩阵成员恒放行」也能全绿——那正是 T-094 之前
+// 只有「共享会话」一半的话，闸退化成「矩阵成员恒放行」也能全绿——那正是 之前
 // 恒传 `VisScope::default()`（thread_private）的镜像错误。负面对照会话 B 把这件事钉住：
 // 它**有过轮次**（WAL 在、属主读得到）但**没有共享内容**（发言臂收束被授权拒绝 ⇒
 // 派生事实不落格，`turn_exec` 的 `closure_denied` 早退）⇒ `session/main` 照旧空切片。
@@ -116,7 +116,7 @@ export default defineCase(
       });
       assertEq(b.code, 0, `会话 B 一轮退出码（stderr: ${b.stderr.slice(0, 400)}）`);
 
-      // ── ③ 事实源直读（T-094 ① 的生产出口）：产地真的落进了 WAL ─────────────
+      // ── ③ 事实源直读（ ① 的生产出口）：产地真的落进了 WAL ─────────────
       const sharedEvents = walLines(sharedWal);
       const sharedMemory = sharedEvents.find((e) => e.kind === 'memory.encoded');
       assert(
@@ -164,7 +164,7 @@ export default defineCase(
           `属主看得到会话 A 的事实（实际: ${ownerA.checkpoint.event_count}）`,
         );
 
-        // 矩阵内主体（`session/main`）⇒ **读得到**他人的共享内容——T-094 ② 的正判据。
+        // 矩阵内主体（`session/main`）⇒ **读得到**他人的共享内容—— ② 的正判据。
         // 读数与属主逐字相同：闸是整列判定，放行即放行整个快照。
         const mainA = (await readAs('session/main', SHARED_SID)).body.data;
         assertEq(mainA.has_wal, true, 'session/main: 事实源存在，只是今天给你看');

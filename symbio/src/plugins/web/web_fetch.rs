@@ -56,7 +56,7 @@ impl WebFetchTool {
             .build()
             .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
 
-        // 发送请求。**错误要分流**（T-109 ②）：reqwest 对超时与连接失败的
+        // 发送请求。**错误要分流**（ ②）：reqwest 对超时与连接失败的
         // `Display` 同形（都是 `error sending request…`），直接回灌则「对方慢」
         // 与「地址不通」对模型与用户同形——而两者的下一步（重试 vs 改地址）相反。
         let response = client.get(url).send().await.map_err(|e| {
@@ -97,7 +97,7 @@ impl WebFetchTool {
             (body, false)
         };
 
-        // **元数据头随正文回灌**（T-109 ①）：`extract_result` 的 `content` 分支
+        // **元数据头随正文回灌**（ ①）：`extract_result` 的 `content` 分支
         // 只取正文 ⇒ 404 页与 200 页对模型同形、截断后半截不知情。把状态并进
         // `content` 首行——回灌文本（结果节点 `content` = 它）与 JSON 字段两条
         // 路径都拿得到，不必在 tool_executor 里为单个工具开特例。

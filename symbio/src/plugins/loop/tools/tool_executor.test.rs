@@ -12,7 +12,7 @@ use crate::symbio_core::facts::TaskStatus;
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use crate::symbio_core::Store;
 // `failure_kind` 与 `Seq` 同样是**测试自己**要的：批首闸门读数与逐条执行的闸门段
-// 已按 T-179 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
+// 已按 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
 use crate::symbio_core::{failure_kind, Seq};
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
@@ -34,7 +34,7 @@ fn test_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("symbio-test/session-tool-executor")
 }
 
-// ── T-158 注册面：闸门问声明，测试喂一份与生产同形的声明 ────────────────
+// ── 注册面：闸门问声明，测试喂一份与生产同形的声明 ────────────────
 //
 // 机制化之前这些用例直接写工具名调 `note_*`；判据搬到 `CapabilityMeta` 的
 // 自声明位之后，同一批用例经 `ToolDecls` 喂注册面——生产三件套各 declare 各的
@@ -349,7 +349,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     assert_eq!(updates[0].status, Some(NodeStatus::Completed));
 }
 
-/// [T-140] 步 2 判据：**第二次同参调用不再静默**。
+/// 相应批次 步 2 判据：**第二次同参调用不再静默**。
 ///
 /// 事故现场（会话 `cli1a14222066f0`）：模型要的是「一共多少处命中」，而截断结果里
 /// 没有一个字的总数，它唯一的动作就是原样重发 ⇒ 同一份结果执行两次、白跑一轮。
@@ -909,7 +909,7 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     assert_eq!(msg.msg_type, Some(NodeKind::Interaction));
     assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
     assert_eq!(msg.role, Some(NodeRole::Tool));
-    // [T-147d-iii] 交互卡也是工具的结果：主体归工具一族，工具名随行入格
+    // d-iii 交互卡也是工具的结果：主体归工具一族，工具名随行入格
     assert_eq!(
         msg.principal.as_ref().map(|p| p.id.as_str()),
         Some("vdfs/write")
@@ -1088,7 +1088,7 @@ async fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
 // ==================== 外部执行闸门（S8 第 20 步，04 §3.1 批⑩） ====================
 
 /// 带会话 id 的请求上下文。成本台账不再按它定位——事实轨以**值**交给执行层
-/// （ADR-084 §1-A）；会话 id 仍随上下文走，因为其余工具面按它归属。
+/// （D-084 §1-A）；会话 id 仍随上下文走，因为其余工具面按它归属。
 fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::SESSION_ID, session_id.to_string());
@@ -1098,7 +1098,7 @@ fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
 /// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
 ///
 /// `agent:*` 身份会话在**会话装配点经绑定登记**拿到会话面缺省行（含
-/// `produce.artifact`，[ADR-100]）——本用例直读合流面（不经装配点），取的是
+/// `produce.artifact`，[D-100]）——本用例直读合流面（不经装配点），取的是
 /// 部署表那一行的判据；`Refuse` 只可能来自**不属于这一族**的主体——判据为 false
 /// 就是 false，没有任何「认不出 ⇒ 放行」的旁路。另一侧的判据（预算）见下方端到端用例。
 #[test]
@@ -1121,7 +1121,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/007-task/129-外部执行与熔断.md ")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层
@@ -1133,8 +1133,8 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     std::fs::create_dir_all(&dir).expect("建 L0 存档目录");
 
     // 台账：一条已耗超过会话累计上限的收束事件（`cost_ledger` 按 actor 归账，
-    // ADR-044：闸门读台账，不读运行时计数器）。事实轨以**值**交给执行层
-    // （ADR-084 §1-A）——夹具直接造这份切片，不摆存储目录。
+    // D-044：闸门读台账，不读运行时计数器）。事实轨以**值**交给执行层
+    // （D-084 §1-A）——夹具直接造这份切片，不摆存储目录。
     let sid = "gate-sess";
     let facts = EventStore::new();
     facts
@@ -1255,7 +1255,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
 /// 台账读的是**交给闸门的事实值**。
 ///
 /// 历史事故：曾有实现按 `<插件目录>/v2-events.wal` 取账（漏了会话 id 那层）⇒
-/// `spent_ms` 恒 0 ⇒ 预算分支永远走不到，且没有任何东西会变红。ADR-084 §1-A
+/// `spent_ms` 恒 0 ⇒ 预算分支永远走不到，且没有任何东西会变红。D-084 §1-A
 /// 之后「读哪份事实」收进会话存储层，本层拿的是值：**空值 ⇒ 零账，带成本格的值
 /// ⇒ 照实读出**。判据两侧都钉在值上，路径错位在这一层已无立足点。
 #[tokio::test]
@@ -1385,13 +1385,13 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ==================== 任务表写侧闸：纯产出主体不立任务（S03 §3，T-107） ====================
+// ==================== 任务表写侧闸：纯产出主体不立任务（S03 §3，） ====================
 //
 // 钉的是**闸门的接线**（判据本身在 `task_table.test.rs`）：`todo_write` 到达执行窗口
 // 之前被拒——`Refused:` 回灌模型、父节点收敛、工具没有执行（没有路由往返）、
 // **不记任务声明**（`note_tasks` 只在跑完后记成功调用）。
 //
-// T-158 之后这道闸的判据是**注册面**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
+// 之后这道闸的判据是**注册面**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
 // 自声明 `owns_task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带
 // 一份与生产同形的注册面，否则闸「看不见」这次调用（无声明 = 不命中，由 e2e
 // 兜真实行为）。
@@ -1410,7 +1410,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
     let worker_ctx = {
         let req = PluginSimpleRequest::new(None, None);
         req.set(crate::symbio_core::AGENT_ID, "worker".to_string());
-        // 注册面：`todo_write` 自声明任务表位（生产同形；T-158 后闸问声明）。
+        // 注册面：`todo_write` 自声明任务表位（生产同形； 后闸问声明）。
         let visitor = Arc::new(DefaultToolVisitor::new());
         visitor
             .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
@@ -1547,7 +1547,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ==================== T-190 批内并行：只读并行、其余串行、收口按序 ====================
+// ==================== 批内并行：只读并行、其余串行、收口按序 ====================
 //
 // 这组用例钉四件事，各自都有一条能红的判据：
 // 1. 两个只读调用**真的同时在途**（用 2 方屏障；串行实现会死等 → 超时红）；

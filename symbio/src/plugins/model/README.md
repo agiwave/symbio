@@ -1,9 +1,10 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/model/README
 title: Model 插件
 status: active
 created: 2026-07-20
+impl: done
 ---
 
 # Model 插件
@@ -25,7 +26,7 @@ created: 2026-07-20
 
 ## 路由
 
-**无**（权威登记见 [003-ROUTES.md](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Model 插件）。model 的全部对外能力
+**无**（权威登记见 [003-ROUTES.md](../../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Model 插件）。model 的全部对外能力
 都在 VDFS 上（`<根>/model`）。持久化分两处：跨条目状态（`default_provider_id`）写自己的
 `plugins/model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
 
@@ -39,3 +40,32 @@ created: 2026-07-20
 
 - 上游消费者：`loop`（`chat_loop` 直连；session 经驱动器间接使用）
 - 协议适配层代码：`protocols/`
+
+## 关键决策
+
+> 本节是**仍然约束现行代码的取舍**：每条一句决策、一句理由。已退场或主题已消失的决策不在其中（`git log` 是历史）。
+
+### D-004 多协议 LLM 适配（4 套适配器）
+
+`model` 内置 4 套协议适配器——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`。 供应商无关（同一套代码对接多家）；协议演进（OpenAI 从 Chat 到 Responses）；各家工具调用格式不同。 `model` 代码量较大；新增协议 = 新增适配器。
+
+### D-013 TLS 后端 = 平台原生栈（native-tls），不做纯 Rust 密码学
+
+HTTP 出口（LLM 适配、MCP http transport、web 插件、telegram）统一走 `reqwest`，其 TLS 原由 rustls 提供，而 rustls 的两个官方密码学后端默认 `aws-lc-rs`（`aws-lc-sys` 是整份 BoringSSL 分支，~69 MB C 源码，且无条件依赖 `cmake`）与备选 `ring`（8.3 MB C）。
+
+### D-016 本地嵌入改用 ort（ONNX Runtime）——推翻 DE-002 的性能前提
+
+DE-002 选 `tract-onnx` 而弃 ORT，理由有三（零 C/C++ 编译、不引入 ~391 MB ORT 预编译产物、不交付 `DirectML.dll`）；它对性能的判断是「嵌入场景是离线索引 + 单条查询，秒级可接受」。
+
+### D-048 出厂档位改 full——v2 链路是出厂路径，bridge 退役
+
+`V2Mode` 的 `#[default]` 由 `Bridge` 改为 `Full`，并退役 `bridge` 档—— 转写路径（`record` / `record_to_wal` / `authorize_close` / `first_user_utterance` / `last_assistant_text` / `V2Closure`）与只服务于「跳过它」的 `TurnState::v2_executed`<!-- do…
+
+### D-096 快速档裁 (ii) 一次受限模型调用，ClassifyOnly 令牌闸门显式退役——「不得生成」的强制力搬到返回类型与工具集判据上
+
+快速档 = (ii) 一次受限的模型调用（不是 (i) 纯规则分类器）， `ClassifyOnly` / `TokenIssuer::issue_fast` / `CanClassify` / `CanGenerate` 从 `symbio_core` 契约面收掉， `RuleOnly` / `FullModel` 两档令牌与 `LlmAdapter::generate(&FullModel)` 不动。
+
+### D-106 模型消费端口归一：内部请求共享 LlmAdapter，未识别协议不静默兜底
+
+`LlmAdapter` + `TokenIssuer`。 `classify/decide.rs` 与 `compose/wording.rs` 改经 `ProviderLlmAdapter::for_turn` + `generate_turn(&FullModel, …)`；内部请求的形态 一项不少——工具集 `&[]`、出口 `SilentDeltas`、system prompt 就地构造、中止走 调用方给的共享信号。
+

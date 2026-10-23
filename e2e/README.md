@@ -22,7 +22,7 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 | `mock-http.mjs` | **本地 HTTP 靶子**（`web_fetch` / `http_request` 的对面那一端）：确定性端点 `/page` `/json` `/big` `/slow` `/missing` `/echo`，正文含每次启动随机生成的标记，请求留痕 `GET /_requests`。存在的理由是**真外网在 CI 上不存在、内容会变、对方会限流**——那三类失败都不在被测系统里，却会被记成产品缺陷。T65 起 |
 | `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
 | `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排（`MockLlm` / `MockHttp`）、CLI 运行器、`defineCase`、共享不变量断言 |
-| `llm-contract.mjs` | **LLM 调用契约断言库**（模型视角判据，LC-001…007）：从 mock-llm 的 `/_requests` 抽信封 / system 装配 / 历史 / 工具面 / 工具反馈 / user 纯度 / 辅助请求形状，判「用户请求 → 系统实际发给模型的调用」是否正确（配套 `t56`–`t63`，任务 T-096） |
+| `llm-contract.mjs` | **LLM 调用契约断言库**（模型视角判据，LC-001…007）：从 mock-llm 的 `/_requests` 抽信封 / system 装配 / 历史 / 工具面 / 工具反馈 / user 纯度 / 辅助请求形状，判「用户请求 → 系统实际发给模型的调用」是否正确（配套 `t56`–`t63`，任务 ） |
 | `cases/*.mjs` | **测试用例（每用例一文件）** |
 | `cases/_selfrun.mjs` | 用例自执行引导（`_` 前缀 = 共享材料，不当作用例） |
 | `run-tests.mjs` | runner：发现式加载 `cases/`，每用例独立子进程运行；开跑前确保被测二进制对应当前源码 |
@@ -30,10 +30,10 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 ## 运行
 
 ```bash
-node e2e/run-tests.mjs                # 全量（被测二进制由机制保证最新，见下）
-node e2e/run-tests.mjs t2             # 按名称过滤
-node e2e/cases/t5-llm-http-error.mjs  # 单独跑一个用例（文件可直接执行）
-E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
+node e2e/run-tests.mjs # 全量（被测二进制由机制保证最新，见下）
+node e2e/run-tests.mjs t2 # 按名称过滤
+node e2e/cases/t5-llm-http-error.mjs # 单独跑一个用例（文件可直接执行）
+E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
 ```
 
 **被测二进制不需要你记得重建**：`scripts/cli-binary.mjs` 是这条知识的唯一真相
@@ -61,16 +61,16 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 每个用例独立临时 homedir + 独立 mock 实例（端口自动分配，18080 起），
 进程结束自动清理；runner 层面每个用例再套一层独立子进程，互不拖垮。
 
-异常注入的总体纪律（T-067）：mock 模拟的是**真实 LLM 服务与真实网络环境**，
+异常注入的总体纪律：mock 模拟的是**真实 LLM 服务与真实网络环境**，
 用例的判据从**用户视角**取（CLI 成败 / 转写读出口 / 可见错误信息 / 共享转写不变量），
-不读后端内部状态——主体是黑盒（详见 [T-067](../docs/009-task/067-mockLLM体系化机制化.md "T-067-mockLLM体系化机制化")）。
+不读后端内部状态——主体是黑盒（详见 该批）。
 
 ## 新增一个用例
 
 1. 新建 `cases/t7-<名字>.mjs`（`t<数字>` 前缀保证排序稳定）；
 2. 首行 `import './_selfrun.mjs';`（自执行引导）；
-3. `export default defineCase('T7 描述', async () => { ... })`，
-   断言用 `helpers.mjs` 的 `assert` / `assertEq` / `assertTranscriptInvariants`。
+3. `export default defineCase('T7 描述', async => { ... })`，
+ 断言用 `helpers.mjs` 的 `assert` / `assertEq` / `assertTranscriptInvariants`。
 
 没有清单要登记：`run-tests.mjs` 与门控（`scripts/gate.d/58-e2e.mjs`）都按
 目录**发现式**加载，保存即生效。
@@ -116,13 +116,13 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T9 | `t9-ws-stream` | gateway WS 实时面（`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记）：变更非空（两步订阅缺一不可）、首帧全量 + 窄 `delta`、增量拼接 == 完整正文、同一节点 `seq` 逐帧相同、会话收尾帧到达晚于全部消息帧 |
 | T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（`delta` 必先有身份帧、终态收敛、无孤儿）；先后按**到达序**判（单一 FIFO） |
 | T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流（终态带结果正文）、位置契约（早于所属 Turn）、失败 `failure_kind`、重写 `removed` + 快照收敛 |
-| T12 | `t12-content-type` | LLM POST 必须带 `Content-Type: application/json`（`&[u8]` + `.body()` 不会自动补） |
+| T12 | `t12-content-type` | LLM POST 必须带 `Content-Type: application/json`（`&[u8]` + `.body` 不会自动补） |
 | T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_type.schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
 | T14 | `t14-no-redundant-vdfs` | **会话期间零回读**：一轮会话的路由留痕里不得出现 `vdfs/stat` / `vdfs/read` / `vdfs/list`——变更必须自带载荷（节点视图 / 正文 / 目录清单） |
 | T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/agent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
-| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（ADR-025），在途节点带 `InflightSeq::BASE` 高位序 |
+| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（D-025），在途节点带 `InflightSeq::BASE` 高位序 |
 | T17 | `t17-plugin-assembly` | 装配全链路：homedir → 装配（清单落位、二进制落位）→ 工具 → 会话收尾 → 停止生效 |
-| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan()` 在重试前明确触发 |
+| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan` 在重试前明确触发 |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 
@@ -140,79 +140,79 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 写新用例时先过一遍这几条——它们的共同形状是**「用例看起来对、其实测的是别的东西」**：
 
 1. **`gateway` 配置是 homedir 级的**。在 `pluginConfigs.gateway` 里开 `inbound_enabled`，
-   同 homedir 下**每一个** CLI 进程（含一次性 `runCli`）都会去绑同一个 `inbound_port`：
-   长驻进程没抢到端口时，「网关就绪」（`waitGatewayReady` 轮询的是那个端口）就时对时错。
-   **不需要网关的用例就别配它**；需要时避免让多个进程同时活着（参考 `t28`：先用 `runCli`
-   跑轮次，再起一个长驻 CLI 只用于读出口）。
+ 同 homedir 下**每一个** CLI 进程（含一次性 `runCli`）都会去绑同一个 `inbound_port`：
+ 长驻进程没抢到端口时，「网关就绪」（`waitGatewayReady` 轮询的是那个端口）就时对时错。
+ **不需要网关的用例就别配它**；需要时避免让多个进程同时活着（参考 `t28`：先用 `runCli`
+ 跑轮次，再起一个长驻 CLI 只用于读出口）。
 2. **`startLongLivedCli({ session: X })` 会在启动时把 X 的 `session.json` 落一次盘**
-   （`updated_at = now`）。所以：拿**被测会话**当 REPL 会话，会把你手工构造的会话状态
-   （如回拨的 `updated_at`）抹掉。心跳/调度类用例要用**中立会话 id**。
+ （`updated_at = now`）。所以：拿**被测会话**当 REPL 会话，会把你手工构造的会话状态
+ （如回拨的 `updated_at`）抹掉。心跳/调度类用例要用**中立会话 id**。
 3. **后台调度器有 tick，别用墙上时钟空等**。心跳调度器 15s 一 tick（
-   `heartbeat/mod.rs::HEARTBEAT_TICK_SECS`），且首次 tick 被跳过；触发还要等空闲满
-   `interval_seconds + 抖动(0–30s)`。两招压时间：把 `updated_at` **回拨**（把「已空闲很久」
-   这个前置条件直接摆好）＋ 让 `interval_seconds > 一个 tick`（保证观测窗内**恰好一次**
-   触发，否则判据会随 tick 数漂移）。参考 `t36`。
+ `heartbeat/mod.rs::HEARTBEAT_TICK_SECS`），且首次 tick 被跳过；触发还要等空闲满
+ `interval_seconds + 抖动(0–30s)`。两招压时间：把 `updated_at` **回拨**（把「已空闲很久」
+ 这个前置条件直接摆好）＋ 让 `interval_seconds > 一个 tick`（保证观测窗内**恰好一次**
+ 触发，否则判据会随 tick 数漂移）。参考 `t36`。
 4. **「事实先落」≠「那一轮跑完」**。若被测机制是「先落事实、再开轮」（心跳就是），
-   等到事实出现只证明「要跑」，不证明「跑完了」——断言轮次之前要**再等**收束转写落格。
-   参考 `t36` 的证据③。
+ 等到事实出现只证明「要跑」，不证明「跑完了」——断言轮次之前要**再等**收束转写落格。
+ 参考 `t36` 的证据③。
 5. **`serde_json::Value` 的键序是字典序**（底层 `BTreeMap`）。服务端回来的对象**不能**
-   拿手写对象字面量直接 `JSON.stringify` 比对（字面量是书写序）——逐字段比。参考 `t28`。
-6. **收尾等子进程退干净**。Windows 上带着活子进程 `process.exit()` 会撞 libuv 断言，
-   表现是「断言全过、退出码 `0xC0000409`」。`finally` 里要
-   `await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'))`。
+ 拿手写对象字面量直接 `JSON.stringify` 比对（字面量是书写序）——逐字段比。参考 `t28`。
+6. **收尾等子进程退干净**。Windows 上带着活子进程 `process.exit` 会撞 libuv 断言，
+ 表现是「断言全过、退出码 `0xC0000409`」。`finally` 里要
+ `await waitFor( => !process.getActiveResourcesInfo.includes('ProcessWrap'))`。
 7. **mock-llm 的 `match` 是对「最后一条 user 消息」的子串匹配，而 `full` 档的 prompt
-   是整段转写**（含长期记忆的注入段）。于是**第 2 轮起的 prompt 里会出现第 1 轮的用户
-   发言**（它作为一条记忆被召回注入），早先写的 `match: <第 1 轮那句话>` 场景会把后面
-   每一轮都吃掉——表现为「换了句话问，答的还是上一轮的模板」。**数组顺序即优先级**：
-   把更具体的 `match` 排在前面，或改用 `once: true`。参考 `t41`。
+ 是整段转写**（含长期记忆的注入段）。于是**第 2 轮起的 prompt 里会出现第 1 轮的用户
+ 发言**（它作为一条记忆被召回注入），早先写的 `match: <第 1 轮那句话>` 场景会把后面
+ 每一轮都吃掉——表现为「换了句话问，答的还是上一轮的模板」。**数组顺序即优先级**：
+ 把更具体的 `match` 排在前面，或改用 `once: true`。参考 `t41`。
 8. **同一个 WAL 的写者令牌是独占的**（`wal.rs` 的 `<wal>.lock`，非阻塞 `try_lock`）。
-   在测试里先 `EventWalStore::open(...)` 播种、再调被测函数（它自己也会 `open`），
-   第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会
-   全线失败。播种要在**独立的块里做完并 drop**（参考 `turn_exec.test.rs` 的
-   `a_skill_hit_never_takes_over_a_resumed_turn`）。
+ 在测试里先 `EventWalStore::open(...)` 播种、再调被测函数（它自己也会 `open`），
+ 第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会
+ 全线失败。播种要在**独立的块里做完并 drop**（参考 `turn_exec.test.rs` 的
+ `a_skill_hit_never_takes_over_a_resumed_turn`）。
 9. **REPL 的 stdin 是按行消费的**。一条带 `\n` 的发言写进去就是**两轮**（症状：轮次账
-   比设计的多出几倍，而系统没坏）。负载类用例的发言文本必须单行；要多字节材料就让
-   **工具结果**去承担。参考 `t47` 的 `TOPICS`。
+ 比设计的多出几倍，而系统没坏）。负载类用例的发言文本必须单行；要多字节材料就让
+ **工具结果**去承担。参考 `t47` 的 `TOPICS`。
 10. **没有 `match` 的场景是「先声明者先被消费」**，而 `match` 命中者一律优先。于是长
-    工具轮的**启动器**如果写成无 `match` 兜底项，会被第一个普通轮吃掉——表现为「长轮
-    根本没跑，负载没压到机制」，而所有断言仍然绿（它判的是别的东西）。给每一个要按
-    时序出场的场景配一个唯一 marker 做 `match`。参考 `t47`（`early-read` / `deep-start`）。
+ 工具轮的**启动器**如果写成无 `match` 兜底项，会被第一个普通轮吃掉——表现为「长轮
+ 根本没跑，负载没压到机制」，而所有断言仍然绿（它判的是别的东西）。给每一个要按
+ 时序出场的场景配一个唯一 marker 做 `match`。参考 `t47`（`early-read` / `deep-start`）。
 11. **`times: N` 与 `failTimes: N` 是两套计数器**：前者按**选中次数**（一次 HTTP 命中）
-    计，后者按**逻辑请求**（请求体指纹）计。静态参数的工具循环里每个请求体逐字节相同，
-    所以按 `times` 的名额会被一次用光 ⇒ 循环停不下来（实测 3400+ 次请求）。反过来说：
-    需要「这条场景只被选 N 次」就用 `times`，别拿 `failTimes` 的口径去想它。
+ 计，后者按**逻辑请求**（请求体指纹）计。静态参数的工具循环里每个请求体逐字节相同，
+ 所以按 `times` 的名额会被一次用光 ⇒ 循环停不下来（实测 3400+ 次请求）。反过来说：
+ 需要「这条场景只被选 N 次」就用 `times`，别拿 `failTimes` 的口径去想它。
 12. **压缩水位线要跟估算器对表，不是跟字节数**。mock 每轮恒报 `prompt_tokens: 64`，
-    校准比值被压到下限 `0.2`（`tokenizer.rs::feedback` 的 clamp），于是估算 token 只有
-    真实体量的两成——按字节算「该压了」的窗口值会让压缩**永不触发**，再小一档则顶到
-    「摘要请求本身超上限」的注定失败分支并触发熔断。取值靠实测矩阵（见 `t47` 的
-    `CONTEXT_WINDOW_TOKENS` 文档），而窗口大小本身**不是**判据。
+ 校准比值被压到下限 `0.2`（`tokenizer.rs::feedback` 的 clamp），于是估算 token 只有
+ 真实体量的两成——按字节算「该压了」的窗口值会让压缩**永不触发**，再小一档则顶到
+ 「摘要请求本身超上限」的注定失败分支并触发熔断。取值靠实测矩阵（见 `t47` 的
+ `CONTEXT_WINDOW_TOKENS` 文档），而窗口大小本身**不是**判据。
 13. **等「某一个」子进程退出不要用全局 `ProcessWrap` 探针**。用例跑到一半时 mock-llm
-    还活着，全局探针永远非空 ⇒ 恒超时；那是等待写错了对象。挂在句柄的事件上：
-    `cli.proc.once('exit', …)`（Windows 的 `kill()` 走信号路径，`exitCode` 恒 `null`，
-    只盯 `exitCode` 同样会等到超时）。全局那条只用在 `finally`（第 6 条）。
+ 还活着，全局探针永远非空 ⇒ 恒超时；那是等待写错了对象。挂在句柄的事件上：
+ `cli.proc.once('exit', …)`（Windows 的 `kill` 走信号路径，`exitCode` 恒 `null`，
+ 只盯 `exitCode` 同样会等到超时）。全局那条只用在 `finally`（第 6 条）。
 14. **`afterTool` 场景不写 `once` / `times` ⇒ 它吃掉每一个工具结果轮**（含它自己那一次
-    的结果轮），于是模型反复发同一个工具调用：**无限工具循环**。症状是 CLI 撞满
-    `runCli` 的 120s 超时（**不是断言红**），日志里刷成百上千行 `⚙ 调用工具: <同一个>`，
-    而「哪条场景失控」要翻到最前面才看得出。`afterTool` 只是「工具结果轮的**优先池**」
-    （`pickScenario`：池里选不出才退回全池），池里**不限名额**的那一条会一直赢。
-    收尾场景（`content`）与中间的每个工具场景**都要各写一条**，且除最后一条外都带
-    `once: true`（或 `times: N`）。参考 `t64`（第一版漏了 `once`，跑了 8600 轮）。
+ 的结果轮），于是模型反复发同一个工具调用：**无限工具循环**。症状是 CLI 撞满
+ `runCli` 的 120s 超时（**不是断言红**），日志里刷成百上千行 `⚙ 调用工具: <同一个>`，
+ 而「哪条场景失控」要翻到最前面才看得出。`afterTool` 只是「工具结果轮的**优先池**」
+ （`pickScenario`：池里选不出才退回全池），池里**不限名额**的那一条会一直赢。
+ 收尾场景（`content`）与中间的每个工具场景**都要各写一条**，且除最后一条外都带
+ `once: true`（或 `times: N`）。参考 `t64`（第一版漏了 `once`，跑了 8600 轮）。
 15. **`mock-llm` 的工具结果轮判定必须按协议形状**（`readTurn`）：四协议的请求体不同，
-    工具结果分别在 `messages[].role:"tool"`（openai_chat）/ `input[].function_call_output`
-    （openai_responses）/ `messages[].content[].tool_result`（anthropic_messages）/
-    `contents[].parts[].functionResponse`（gemini_api）。只认 openai_chat 一家的形状会让
-    其余三协议的 `afterTool` **恒不命中** ⇒ 工具结果轮落到普通池 ⇒ 无限工具循环（症状同
-    第 14 条：撞超时不是断言红）。参考 `t66`（负向自检：破坏 anthropic 判定即红）。
-16. **`MockHttp.requests()` 的留痕里含**控制面请求（`/_health` 是 `start()` 的就绪探针、
-    `/_requests` 是**读留痕这个动作本身**）⇒ 拿「留痕条数」当判据时必须**按路径过滤**，
-    否则每读一次计数就涨一次，涨的还是自己的读动作。症状：第一条「未发生任何请求」的
-    断言直接失败（实得 1 或 2），而用例看着完全合理。参考 `t69` 的 `hookHits()`。
+ 工具结果分别在 `messages[].role:"tool"`（openai_chat）/ `input[].function_call_output`
+ （openai_responses）/ `messages[].content[].tool_result`（anthropic_messages）/
+ `contents[].parts[].functionResponse`（gemini_api）。只认 openai_chat 一家的形状会让
+ 其余三协议的 `afterTool` **恒不命中** ⇒ 工具结果轮落到普通池 ⇒ 无限工具循环（症状同
+ 第 14 条：撞超时不是断言红）。参考 `t66`（负向自检：破坏 anthropic 判定即红）。
+16. **`MockHttp.requests` 的留痕里含**控制面请求（`/_health` 是 `start` 的就绪探针、
+ `/_requests` 是**读留痕这个动作本身**）⇒ 拿「留痕条数」当判据时必须**按路径过滤**，
+ 否则每读一次计数就涨一次，涨的还是自己的读动作。症状：第一条「未发生任何请求」的
+ 断言直接失败（实得 1 或 2），而用例看着完全合理。参考 `t69` 的 `hookHits`。
 17. **`HookType::Command` 的钩子在 Windows 上跑不动含空格的命令**：
-    `cmd /C <command> <event_path>` 里命令串被 Rust 转义成 `"echo X"`，`cmd` 对 `/C "…"`
-    的引号解析把事件路径并进命令名 ⇒ 回包
-    `Command error: 文件名、目录名或卷标语法不正确。 (os error 123)`。要验**钩子机制**
-    就用 `Http` 类型指向本地靶子（跨平台，且能一并钉住「事件 JSON 透传」）；要验
-    `Command` 类型本身则用**单 token** 命令。参考 `t69`。
+ `cmd /C <command> <event_path>` 里命令串被 Rust 转义成 `"echo X"`，`cmd` 对 `/C "…"`
+ 的引号解析把事件路径并进命令名 ⇒ 回包
+ `Command error: 文件名、目录名或卷标语法不正确。 (os error 123)`。要验**钩子机制**
+ 就用 `Http` 类型指向本地靶子（跨平台，且能一并钉住「事件 JSON 透传」）；要验
+ `Command` 类型本身则用**单 token** 命令。参考 `t69`。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /
@@ -222,7 +222,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 **没有开关可翻的接线**（纯读列、投影消费）：负向自检就**把接线点临时改成常量**
 （如把新读列写成 `json!({"entries": []})`）——若用例仍绿，说明它没在读那份事实。
 参考 `t37`（转写读列）。注意别让临时改动**遮蔽同名函数**（局部 `let transcript`
-会盖住 `transcript()`，那是编译错、不是判据红——改完记得 `grep` 一遍临时标记）。
+会盖住 `transcript`，那是编译错、不是判据红——改完记得 `grep` 一遍临时标记）。
 
 **恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
 `runCli` / `startLongLivedCli.send` 都**不带** resume。要在 e2e 里驱动恢复（审批 / 回填答案），
@@ -230,8 +230,8 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 
 ```js
 await api.invoke('vdfs/action',
-  { path: `${root}/session/${SID}/message/${tcId}`, action: 'answer', payload: { answer: {...} } },
-  { session_id: SID });
+ { path: `${root}/session/${SID}/message/${tcId}`, action: 'answer', payload: { answer: {...} } },
+ { session_id: SID });
 ```
 
 （等价的封装是 `helpers.mjs` 的 `resumeSession(cli, sid, targetId, action, payload, metadata)`。）
@@ -243,9 +243,9 @@ await api.invoke('vdfs/action',
 
 `node e2e/ab/run.mjs` 跑的是**真 provider**（本机 `.symbio/model/` 里配好的那一个），CI 上没有
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
-它把出厂形状与被 [ADR-048a](../docs/010-adr/048a.md) 否决的拍平形状，在同一份真实链路
+它把出厂形状与被 [D-048a](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
-形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/006-ref/PROMPT_AB.md`（生成物）——
+形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/004-ref/PROMPT_AB.md`（生成物）——
 本处只留指路，不复述。
 
 ## 门控接入
@@ -253,8 +253,8 @@ LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶�
 e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/58-e2e.mjs`）：
 
 ```bash
-node scripts/gate.mjs --only=e2e      # 只跑 e2e 阶段（先按源码指纹确保二进制最新）
-node scripts/gate.mjs                 # 全量门禁（e2e 在静态审计之后）
+node scripts/gate.mjs --only=e2e # 只跑 e2e 阶段（先按源码指纹确保二进制最新）
+node scripts/gate.mjs # 全量门禁（e2e 在静态审计之后）
 ```
 
 用例清单不在门控里维护——与 runner 同一套发现逻辑，新增用例文件自动纳入。
@@ -264,9 +264,9 @@ node scripts/gate.mjs                 # 全量门禁（e2e 在静态审计之后
 提交相关工作（门禁 → 生成合规消息 → git commit → 清理临时文件）收在一条命令里：
 
 ```bash
-node scripts/commit.mjs               # 交互式
-node scripts/commit.mjs --dry-run --yes --type=feat --scope=e2e --title="..."   # 预览消息
-node scripts/commit.mjs --no-gate     # 紧急热修跳过门禁（自担风险）
+node scripts/commit.mjs # 交互式
+node scripts/commit.mjs --dry-run --yes --type=feat --scope=e2e --title="..." # 预览消息
+node scripts/commit.mjs --no-gate # 紧急热修跳过门禁（自担风险）
 ```
 
 ## 首个战果

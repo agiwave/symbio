@@ -14,7 +14,7 @@
  *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
  *     但**仅当它的同族**（首段 + `_`，如 `ROUTE_`）在代码里另有成员时才判红。
- *   **D-011**（名册锚点列）：[02 §6.1 能力名册](../docs/004-plan/002-能力坐标系.md "PL-002-能力坐标系")
+ *   **D-011**（名册锚点列）：[02 §6.1 能力名册](../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")
  *     的「锚点」列——名册 54 行能力若没有任何一行能回答"它在代码里是哪几行"，
  *     "坐标系已归位"与"这条能力真的存在"在日志里长得一模一样。
  *     取值 `文件` / `文件::符号`（反引号形态）或 `—`：**非 `—` 的必须指得到**
@@ -50,7 +50,7 @@
  *
  * 豁免（都对应「文档说的不是现状」）：
  * doc-link-allow D-010: 下一行的 `001.md` 是占位编号示例（真正的 ADR 文件名是去前缀编号）
- *   1. `docs/archive/`、`docs/010-adr/` 整体排除——ADR 正文（`docs/010-adr/001.md`）
+ *   1. `docs/archive/`、`docs/003-design/` 整体排除——ADR 正文（`docs/003-design/002-架构总览.md`）
  *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，
  *      如迁移表里「已删除」的行、台账里「`X` 判为删除」的行；
@@ -72,7 +72,7 @@
  * D-009 只在同族存在时才判，一个**整族都不存在**的杜撰名（`ROUTE_` 全没了还写 `ROUTE_X`）
  * 落在闸外——那是结构事实，归 CURRENT.md 的生成表管。
  */
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
 // @codes D-005 D-009 D-011 D-012 D-014
 
@@ -89,9 +89,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 
-/** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/004-plan/verify` 是硬证据程序
+/** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。
@@ -214,7 +214,7 @@ for (const f of feFiles) indexCrossStack(readFileSync(f, 'utf8'))
 for (const f of toolFiles) indexExistence(readFileSync(f, 'utf8'))
 
 /** D-011 的名册表所在文件（02 §6.1，全仓唯一一份能力名册）。 */
-const ROSTER_MD = 'docs/004-plan/002-能力坐标系.md'
+const ROSTER_MD = 'docs/003-design/008-能力注册表与能力坐标系.md'
 /** 名册行的判别：第 2 列是「维」闭集（知 / 行 / 言 / 省 / 欲）——只看列数会撞上
  *  02 里其它同样 8 列的表，靠维的闭集把它钉住。 */
 const DIMS = new Set(['知', '行', '言', '省', '欲'])
@@ -228,7 +228,7 @@ const DIMS = new Set(['知', '行', '言', '省', '欲'])
  *
  * 回归测试造的是**最小仓库**（只有 README.md 与一小片语料），里面没有全仓唯一那份
  * 名册——那是夹具的性质，不是漂移。真仓若真把名册删了，`registry-audit` 的 RG-020
- * 会先在登记侧红（PL-002 是登记条目），不需要这条跨文档判据再补一刀。**判据只在
+ * 会先在登记侧红（DE-008 是登记条目），不需要这条跨文档判据再补一刀。**判据只在
  * 判据的对象存在时才有意义**，硬判只会让每条夹具用例都为「没有名册」陪跑。
  *
  * 反向用例（回归测试注入）：锚点指向不存在的符号 / 不存在的文件 ⇒ 红。这条是硬要求——
@@ -306,9 +306,9 @@ function auditRosterAnchors () {
  * 反向用例（回归测试注入）：加一个 §8 没写的取值 / 把一个承接方改成不存在的文件 /
  * 往目录里塞一个未归类模块 ⇒ 各自变红。
  */
-const PARAMS_MD = 'docs/004-plan/001-核心架构.md'
+const PARAMS_MD = 'docs/003-design/001-核心架构.md'
 const PROJ_DIR = 'symbio/src/symbio_core/projection'
-const MAP_MD = 'docs/006-ref/009-投影映射.md'
+const MAP_MD = 'docs/004-ref/009-投影映射.md'
 
 /** 反引号 token 提取（表格单元格里可能套着 `**` 粗体） */
 const ticks = (s) => (s.match(/`([^`]+)`/g) || []).map((t) => t.slice(1, -1).trim())
@@ -428,7 +428,7 @@ let constRefs = 0
 
 // ── D-012：指路文档写的 CLI 产物路径必须就是构建出来的那一条 ──────────────
 //
-// 判据对象是**读者会照抄的路径**。这条指路错过一次真事故（[T-134] 实测）：文档写
+// 判据对象是**读者会照抄的路径**。这条指路错过一次真事故（相应批次 实测）：文档写
 // `../symbio/target/debug/symbio-cli.exe`，而 `cli` 早已是仓库根 workspace 的成员，
 // cargo 把所有成员产物写进**同一个** `<仓库根>/target/`——旧位置躺着几个月前的产物，
 // 于是整批实测跑在旧二进制上，两条已修的缺陷被当成还在的重复观测到。
@@ -443,7 +443,7 @@ let constRefs = 0
 //
 // 语料**排除任务登记册**（`docs/009-task`）：那里的条目记的是「当时撞上了什么」，
 // 引用一句旧路径正是那条记录的内容本身，不是给读者的指路。
-const REGISTER_MD_PREFIXES = ['docs/009-task']
+const REGISTER_MD_PREFIXES = ['docs/007-task']
 const CLI_ARTIFACT_RE = /(?:[\w.-]+[\\/])*target[\\/](debug|release)[\\/]symbio-cli(?:\.exe)?/g
 const CLI_BUILD_SCRIPT_RE = /build-cli\.mjs/
 

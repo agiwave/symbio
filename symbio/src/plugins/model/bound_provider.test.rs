@@ -9,7 +9,7 @@
 //! 闸门的编译期反向用例（无法在运行期测试，注释为证）：
 //! `TokenIssuer::issue_reflex()` 拿到的 `RuleOnly` 传给 `generate` 是编译错误——
 //! 反射层调模型不是被检测到，是编译不过（`generate` 只收 `&FullModel`）。
-//! 快速档（`LatencyTier::Fast`）**没有令牌**：[ADR-096](../../../../docs/010-adr/096.md "ADR-096")
+//! 快速档（`LatencyTier::Fast`）**没有令牌**：[D-096](README.md "D-096")
 //! 把它退役了，那条「只分类不生成」的约束由 classify 插件的返回类型与工具集判据承载。
 
 use std::io::{Read, Write};
@@ -144,7 +144,7 @@ const SSE_REASONING: &str = concat!(
 );
 
 /// 只有推理、**被长度掐断**的流：正文 0 字符 + `finish_reason=length`。
-/// 本机 24B 模型在 `max_tokens: 4096` 那一档的真实现场（T-142）。
+/// 本机 24B 模型在 `max_tokens: 4096` 那一档的真实现场。
 const SSE_REASONING_TRUNCATED: &str = concat!(
     "HTTP/1.1 200 OK\r\n",
     "Content-Type: text/event-stream\r\n",
@@ -464,7 +464,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
     assert!(request.to_lowercase().contains("bearer test-key"));
 }
 
-/// 一条 user 消息的请求包（结构化入参，ADR-048a）。
+/// 一条 user 消息的请求包（结构化入参，D-048a）。
 ///
 /// 本文件测的是**传输层**，不是 prompt 组装，所以这里用最短形态即可——但它
 /// 必须**真的**走消息数组入参，否则这个测试在签名回退到 `&str` 时仍会绿，
@@ -494,7 +494,7 @@ async fn empty_stream_is_a_failure_not_an_empty_answer() {
     assert!(format!("{err:?}").contains("empty"), "{err:?}");
 }
 
-/// 「思考即正文」（T-095）的**这一格**：被 `max_tokens` 掐断的半段思考不是答话。
+/// 「思考即正文」的**这一格**：被 `max_tokens` 掐断的半段思考不是答话。
 ///
 /// 无工具的请求（摘要 / 措辞这类静默往返）也走同一条回退，因此判据在这一层要单独立一次：
 /// 两条断言是一对**只差结束原因**的流——把「一刀切关掉回退」当成修法时第二条必红，
@@ -540,7 +540,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
     assert!(result.is_err(), "不可达端点必须失败");
 }
 
-/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") §1.2）：
+/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §1.2）：
 /// **系统自身开销**（不含模型推理——mock 即答）在 N 轮真实 HTTP/SSE 全链路上的
 /// 分布。这个数字回答 G2 的缺口「只有预算断言，没有实测」：
 ///
@@ -549,7 +549,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
 ///   给模型留出主导份额）、**max ≤ 300ms**（快速档——最坏情况不得溢出快速档；
 ///   溢出说明链路自身失控，与模型无关）。
 ///
-/// 实测值记录在 [docs/006-ref/004-slo-calibration.md](../../../../docs/006-ref/004-slo-calibration.md "RE-004-slo-calibration")。
+/// 实测值记录在 [docs/004-ref/004-slo-calibration.md](../../../../docs/004-ref/004-slo-calibration.md "RE-004-slo-calibration")。
 #[tokio::test]
 async fn reflex_tier_system_overhead_is_measured_and_bounded() {
     let mut samples: Vec<u64> = Vec::new();
@@ -603,7 +603,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
 /// 链路与 CI 侧校准（[`reflex_tier_system_overhead_is_measured_and_bounded`]）
 /// **完全同形**：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
 /// `ProviderLlmAdapter` → 真实端点。差异只在端点——mock 即答量的是**系统自身开销**，
-/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/006-ref/004-slo-calibration.md` 的报告行。
+/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/004-ref/004-slo-calibration.md` 的报告行。
 ///
 /// 守卫：每轮落在**深度档**（60s）内——真实模型延迟的主导项必须被四层预算接住。
 ///
@@ -671,5 +671,5 @@ async fn real_provider_full_calibration() {
     println!("═══ 真实端点校准（{rounds} 轮，{model}，适配器边界实测）═══");
     println!("样本：{samples:?}");
     println!("P50 = {p50}ms · P95 = {p95}ms · max = {max}ms · 总耗 = {total}ms");
-    println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/006-ref/004-slo-calibration.md）");
+    println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/004-ref/004-slo-calibration.md）");
 }

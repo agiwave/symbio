@@ -20,7 +20,7 @@
 //! 「就地 return」的两条出口自行完成收尾，因此前端不会收到第二条 idle 事件。
 //!
 //! ⚠️ **事故敏感区**：`StopSignal` 配对语义与「中止不是失败」的结局判定曾出过事故
-//! （189 个 Turn 被误标 Failed），改动前先读 ADR-018 与相关条目。
+//! （189 个 Turn 被误标 Failed），改动前先读 D-018 与相关条目。
 //!
 //! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `start_turn` 调用（在它 spawn 的
 //! 任务体内），故标 `pub(super)`。
@@ -230,7 +230,7 @@ impl TurnLauncher {
                 provider.max_context_tokens()
             );
         }
-        // ── 本轮交付包（[ADR-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
+        // ── 本轮交付包（[D-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
         //
         // 出口：进程内直连转写唯一写入点（会话侧持有），随包交给驱动器；
         // 驱动器的每一次节点变更仍直接落进这张转写（不经「序列化 → 反序列化」）。
@@ -276,7 +276,7 @@ impl TurnLauncher {
 
         // 本轮纯值快照：配置标量一次取完（请求生命周期内不变）。
         let cfg = self.config.read().await.clone();
-        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（T-105 的同一读法，
+        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（ 的同一读法，
         // 从驱动器搬到会话侧：这是元数据事实，驱动器不再回头读父会话）。
         let scope = match session.delegating_principal().await {
             Some(parent) => crate::symbio_core::Scope::Child(parent),
@@ -334,7 +334,7 @@ impl TurnLauncher {
                 }
             };
 
-        // `UserPromptSubmit` 归会话生命周期（[ADR-086] §6）：在派发之前触发，
+        // `UserPromptSubmit` 归会话生命周期（[D-086] §6）：在派发之前触发，
         // 与搬家前「首轮追加用户消息后立即触发」的时点一致。resume 没有
         // `single_message` ⇒ 不触发（工具结果不是用户发言）。
         let hook_prompt = chat_ctx
@@ -436,7 +436,7 @@ impl TurnLauncher {
 
         match outcome {
             TurnOutcome::Finished(Ok(Ok(report))) => {
-                // Stop 钩子归会话生命周期（[ADR-086] §6）：驱动器把末条正文交回，
+                // Stop 钩子归会话生命周期（[D-086] §6）：驱动器把末条正文交回，
                 // 这里统一触发——「恰好一次」由生命周期保证，不是两侧各记一次。
                 stop.fire_text(report.last_message.unwrap_or_default())
                     .await;
@@ -488,7 +488,7 @@ impl TurnLauncher {
                 }
             }
             TurnOutcome::Finished(Ok(Err(PluginError::NotFound(msg)))) => {
-                // 容器里没有 loop 挂载点 = 部署形状错误（[ADR-086] §5）：
+                // 容器里没有 loop 挂载点 = 部署形状错误（[D-086] §5）：
                 // 走「进入驱动器之前就失败」的统一收尾。
                 self.fail_before_loop(&state, &session_id, &transcript, &stop, msg)
                     .await;

@@ -7,7 +7,7 @@
 //! 「怎么把分片攒成一次调用」是 model 的实现细节，不是两侧共用的契约。
 //!
 //! 历史上它住在 `symbio_core::llm::turn`，理由是「`TurnOutput::into_messages`
-//! 依赖它」。那是**循环论证**（ADR-023 开头点名的那种推理）：`TurnOutput` 之所以
+//! 依赖它」。那是**循环论证**（D-023 开头点名的那种推理）：`TurnOutput` 之所以
 //! 依赖它，只因为它把累积器当字段带着；把字段换成**结果形态**
 //! （`tool_calls: Vec<TurnToolCallInfo>`）之后，这条依赖自己就消失了。
 //!

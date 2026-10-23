@@ -1,10 +1,10 @@
-//! 任务表写侧闸判据（S03 §3，T-107）——批首读一次的主体资格。
+//! 任务表写侧闸判据（S03 §3，）——批首读一次的主体资格。
 //!
 //! 五条判据：**立任务者放行**（`define.work` 三持有者逐一）、**独立判定者放行**
 //! （`assert.verification` 两持有者）、**纯产出 / 纯派活主体拒**（工人 / 对等体 / 市场）、
 //! **未绑定登记的子智能体闸拒**、以及平凡值主体照常放行。
 //! 「谁是任务表写入」不在这里判——它在工具自己的 `owns_task_table` 声明上
-//! （T-158），见 `decls.test.rs` 的匹配口径用例。
+//! ，见 `decls.test.rs` 的匹配口径用例。
 
 use super::TaskTableInputs;
 use crate::symbio_core::{
@@ -26,7 +26,7 @@ fn bare_ctx() -> std::sync::Arc<dyn PluginInvokeRequest> {
 /// `define.work` 的三个持有者都能立任务——现有流程一步都不能断。
 ///
 /// 主智能体（自己的工作跟踪）与自主发起者（`AutonomousInitiator` 先例）是**已在生产**
-/// 的两条路；规划者是 T-107 新登记的行。三者放行是「闸不改变现有行为」的判据。
+/// 的两条路；规划者是 新登记的行。三者放行是「闸不改变现有行为」的判据。
 #[test]
 fn every_define_work_holder_may_declare_tasks() {
     for agent in ["main", "autonomous", "planner"] {
@@ -56,7 +56,7 @@ fn the_trivial_session_keeps_its_task_table() {
 
 /// `assert.verification` 的两个持有者都能写任务表——独立判定是任务表上的另一半权威。
 ///
-/// 仲裁者（T-073 淘汰回路）与验证者（T-107 新登记）同持验证能力而不同角色，
+/// 仲裁者（ 淘汰回路）与验证者（ 新登记）同持验证能力而不同角色，
 /// 放行判据相同：盖章的动作不论源自声誉裁决还是质量判定。
 #[test]
 fn every_assert_verification_holder_may_judge_tasks() {
@@ -86,8 +86,8 @@ fn producer_only_and_dispatch_only_principals_are_refused() {
     }
 }
 
-/// 未绑定登记的主体在合流面没有行 ⇒ 闸拒（[ADR-099] 未登记 = 拒 +
-/// [ADR-100] 绑定登记前没有行）。
+/// 未绑定登记的主体在合流面没有行 ⇒ 闸拒（[D-099] 未登记 = 拒 +
+/// [D-100] 绑定登记前没有行）。
 ///
 /// 子智能体要写任务表就得**先经会话装配点绑定登记**（根会话继承会话面缺省行、
 /// 委派子会话继承父行，见 `symbio_core::bind_inheriting`）——本用例走的是 `TaskTableInputs::of`
@@ -99,6 +99,6 @@ fn an_unbound_subagent_is_refused_the_task_table() {
     assert_eq!(inputs.principal, "session/reviewer");
     assert!(
         !inputs.may_write,
-        "未绑定登记的主体在合流面没有行 ⇒ 不放行（ADR-099 / ADR-100）"
+        "未绑定登记的主体在合流面没有行 ⇒ 不放行（D-099 / D-100）"
     );
 }

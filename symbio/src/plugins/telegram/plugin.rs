@@ -329,7 +329,7 @@ impl TelegramPlugin {
     /// 启动监听器
     ///
     /// **不接受「注入 LLM 插件」参数**：跨插件调用一律经 `ctx.parent()` 走容器，
-    /// 见 `docs/005-arch/009-plugin-route-address.md`。
+    /// 见 `docs/003-design/006-插件路由与地址.md`。
     ///
     /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
     /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是
@@ -512,7 +512,7 @@ impl TelegramPlugin {
         //
         // 中断语义（`latest_version`）要求并发：同一 chat 的后来者把版本推高，前一轮
         // 据此放弃回复；串行 `await` 下那条判定恒不成立。
-        // 同一会话的两轮由收件箱**单写者 FIFO** 串行（ADR-064），因此并发不会让
+        // 同一会话的两轮由收件箱**单写者 FIFO** 串行（D-064），因此并发不会让
         // 两轮交错写同一条转写。
         let latest = Arc::clone(latest_version);
         let text = text.to_string();
@@ -604,7 +604,7 @@ impl Plugin for TelegramPlugin {
         Some(self)
     }
 
-    /// 停用即收口长轮询（[T-185](../../../../docs/009-task/185-插件停用收口批.md "T-185")）：
+    /// 停用即收口长轮询（相应批次）：
     /// 复用 `stop_listener` 的取消令牌——路由臂与停用路径必须是**同一条**收口逻辑，
     /// 否则「面板上停了」与「插件被停用」会走出两种状态。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {

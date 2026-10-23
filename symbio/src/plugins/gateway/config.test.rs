@@ -31,7 +31,7 @@ fn readonly_allowlist() {
     assert!(is_readonly_allowed("vdfs/read", &at("session/abc")));
     assert!(is_readonly_allowed("vdfs/search", &at("model")));
 
-    // 拒绝：home 的臂——**白名单与可达面必须一致**（T-115）：gateway 挂在
+    // 拒绝：home 的臂——**白名单与可达面必须一致**：gateway 挂在
     // worker composite 之下、`Composite::route` 不向上转发 ⇒ 这些臂经入站走不到
     // （t69 ⑦ 实测 400），白名单若挂着也只是不可达的死条目，故不登记
     assert!(!is_readonly_allowed("home/get_homedir", &none));

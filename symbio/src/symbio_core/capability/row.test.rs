@@ -125,7 +125,7 @@ fn a_tool_row_takes_its_name_from_the_capability_self_report() {
 }
 
 /// 改名装饰器：行键取自**装饰后**的自述，`cap()` 拿到的是装饰器本身——
-/// 执行经它透传到内层，注册收口点的审批闸因此读到的也是装饰后的 meta（T-138
+/// 执行经它透传到内层，注册收口点的审批闸因此读到的也是装饰后的 meta（
 /// 透传纪律在词汇层的对应物）。
 #[test]
 fn a_renaming_decorator_is_not_cut_off_by_the_row_vocabulary() {

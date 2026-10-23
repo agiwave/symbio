@@ -4,7 +4,7 @@
  *
  * ## 它判什么
  *
- * [ADR-084](../docs/010-adr/084.md "ADR-084") §1 把「能力可以取得什么」收成五类（A/B/C/D/E），
+ * [D-084](../docs/003-design/001-核心架构.md "D-084") §1 把「能力可以取得什么」收成五类（A/B/C/D/E），
  * 其中三条硬不变量里最容易被写回去的是**路径**：能力拿不到 store 类型（编译边界已挡），
  * 但只要它还知道「`session_dir` + `V2_WAL_FILE` 拼出事实源」，它就能再 `open` 一次，
  * 而下一个读到这份代码的人会把那个 `open` 当成第二个允许的入口。
@@ -12,14 +12,14 @@
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
  * | FB-001 | 生产 Rust 源码里 `EventWalStore::open` / `open_readonly` 只许出现在 `plugins/session/store/` | 引擎写点绕过 `SessionStore::facts` 自己开档（第二个 `head`、第二把令牌） |
- * | FB-002 | ADR-084 §4 的十二个能力文件里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
+ * | FB-002 | D-084 §4 的十二个能力文件里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
  *
  * ## 为什么判生产文件而不是全仓
  *
  * 测试夹具**必须**能直接造事实源：`wal.test.rs` 测的就是令牌与归档，`inbox.test.rs`
  * 要往盘上落一轮事实。它们不是能力面，也不参与生产调用链。判据若连夹具一起判，
  * 唯一能让门禁变绿的办法是把夹具也套进 `SessionStore`——那既没测到被测对象，
- * 又让「新测试怎么造事实」变成一条不成文的规矩。ADR-084 的判据因此写明**生产代码**；
+ * 又让「新测试怎么造事实」变成一条不成文的规矩。D-084 的判据因此写明**生产代码**；
  * 排除口径与 `core-shape-audit` 同一套（`*.test.rs` / `tests.rs`）。
  *
  * ## 已知边界
@@ -29,7 +29,7 @@
  * - 路径别名（`use ... as Wal`）能绕过 FB-001——但类型本身仍是
  *   `pub(in crate::plugins::session)`，绕过者必须就在会话插件内，且 FB-002 仍会命中
  *   它拼路径的那一半；
- * - 它挡的是「顺手写回去」，不挡「刻意开新口」——后者要先改 ADR-084。
+ * - 它挡的是「顺手写回去」，不挡「刻意开新口」——后者要先改 D-084。
  *
  * ## 用法
  *   node scripts/facts-boundary-audit.mjs              # 判定真实仓库
@@ -37,7 +37,7 @@
  * 退出码：0 = 通过；1 = 违规。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns FB 事实轨边界
 // @codes FB-001 FB-002
 
@@ -54,7 +54,7 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..')
 
-/** ADR-084 §4 的十二个能力文件（PL-014 迁移表「能力自取磁盘」一行；
+/** D-084 §4 的十二个能力文件（DE-014 迁移表「能力自取磁盘」一行；
  *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。 */
 const CAPABILITY_FILES = [
   'symbio/src/plugins/loop/skill_events.rs',
@@ -119,7 +119,7 @@ for (const abs of production) {
     text,
     OPEN_TOKENS,
     'FB-001',
-    '事实源只经 SessionStore::facts / snapshot 取得（ADR-084 §2）',
+    '事实源只经 SessionStore::facts / snapshot 取得（D-084 §2）',
   )
 }
 
@@ -127,7 +127,7 @@ for (const abs of production) {
 for (const rel of CAPABILITY_FILES) {
   const text = readBlanked(rel)
   if (text === null) {
-    fail(`FB-002 ${rel} 不存在——能力文件清单与仓内结构漂移了（改清单要先改 ADR-084 §4）`)
+    fail(`FB-002 ${rel} 不存在——能力文件清单与仓内结构漂移了（改清单要先改 D-084 §4）`)
     continue
   }
   scanTokens(
@@ -135,14 +135,14 @@ for (const rel of CAPABILITY_FILES) {
     text,
     CAPABILITY_TOKENS,
     'FB-002',
-    '能力面 0 条路径（ADR-084 §1 不变量 2：值由引擎递，不自己拼事实源）',
+    '能力面 0 条路径（D-084 §1 不变量 2：值由引擎递，不自己拼事实源）',
   )
 }
 
 // ── 输出 ───────────────────────────────────────────────────────────────
 if (errors.length > 0) {
   for (const e of errors) console.log(red('[ERROR]'), e)
-  console.log(dim(`\n共 ${errors.length} 处违规（判据见 docs/010-adr/084.md §4）`))
+  console.log(dim(`\n共 ${errors.length} 处违规（判据见 docs/003-design/001-核心架构.md §4）`))
   process.exit(1)
 }
 

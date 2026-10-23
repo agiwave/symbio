@@ -46,7 +46,7 @@
  * 声明的码在本文件里出现）。CLI 出口只有两个：`registry-audit`（守卫）与
  * `registry-board`（查询），它们只 import，不重复判据。
  */
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
 // @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030
 
@@ -86,7 +86,7 @@ export const LIST_ROLES = ['owner']
  * 其余 kind 一律用文档类通用形状（`docKind`）。**这份表只管「形状」，不管「身份」**：
  * 一个 kind 存不存在、前缀是什么、叫什么名，由各 kind 目录的 `README.md` meta 声明
  * （`loadKinds` 扫描装载）——新增一个 kind = 建一个编号目录 + 写 README meta，不改代码。
- * 字段事实的文档侧真相是 `docs/008-spec/001.md`（其字段表由 RG-011 与本配置对账）。
+ * 字段事实的文档侧真相是 `docs/005-spec/001.md`（其字段表由 RG-011 与本配置对账）。
  */
 /**
  * 文档类 kind 的**共享状态机**：`draft`（草案）/ `active`（现行）/ `retired`（废止）。
@@ -396,9 +396,9 @@ export const allKeys = (kinds) => [
 ].sort()
 
 // 编号必须能当标识：字母 / 数字 / 点开头，其后为字母数字 / . _ - / 与 Unicode 字母数字。
-// 文档类的编号是**仓根相对路径**（如 `PL-001-核心架构`、`.github/workflows/README`），
-// 所以放行 `/`、数字开头与隐藏目录前导点（`01-核心架构` / `T-0491-最小闭环` 这类「编号 + 名字」
-// 天然合法）；条目类的历史批次号里有 `T-046` 这类圈号——编号是**身份**不是代号，
+// 文档类的编号是**仓根相对路径**（如 `DE-001-核心架构`、`.github/workflows/README`），
+// 所以放行 `/`、数字开头与隐藏目录前导点（`01-核心架构` / `1-最小闭环` 这类「编号 + 名字」
+// 天然合法）；条目类的历史批次号里有 `` 这类圈号——编号是**身份**不是代号，
 // 迁移登记时不得重排。
 export const ID_RE = /^[A-Za-z0-9.][A-Za-z0-9._\/\-\p{L}\p{N}\p{M}]+$/u
 /** 路径形编号的额外约束：不空段、不以 `/` 起止、不含 `..` 段（ID_RE 管字符集，这里管形状）。 */
@@ -448,14 +448,14 @@ export const SCAN_SKIP_DIRS = new Set([
 export const SCAN_SKIP_PREFIXES = ['docs/archive/']
 /** 单文件豁免：路径 → 理由（与职责表 / plan/14「明确不接管」同口径）。 */
 export const SCAN_SKIP_FILES = new Map([
-  ['docs/006-ref/GATE_CODES.md', '代码投影（facts/gate-codes 生成）'],
-  ['docs/006-ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
-  ['docs/006-ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
+  ['docs/004-ref/GATE_CODES.md', '代码投影（facts/gate-codes 生成）'],
+  ['docs/004-ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
+  ['docs/004-ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
   ['AGENTS.md', '指令注入面（每会话直接进上下文，不是阅读文档）'],
   [
-    'docs/004-plan/verify/fixtures/README.md',
+    'docs/003-design/verify/fixtures/README.md',
     '验证程序的夹具说明（数据来历 / 重新生成命令）——owner 是它旁边那份数据与读它的验证程序，' +
-      '不是登记表；同一节里各验证程序本身也不登记，它们由 `PL-003` 的验证器清单管',
+      '不是登记表；同一节里各验证程序本身也不登记，它们由 `DE-016` 的验证器清单管',
   ],
 ])
 
@@ -823,12 +823,12 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
         )
       } else {
         // 编号 ↔ 文件对账（新规）：**id 保留类型前缀，文件名去掉**——
-        // `id: T-121-最小闭环` ↔ `001-最小闭环.md`。落点形态**两种等价**（分形：
+        // `id: ↔ `001-最小闭环.md`。落点形态**两种等价**（分形：
         // 与 kind 登记处 `NNN-kind/README.md` 同构），按文件系统事实自判，不设模式声明：
         // - 平铺：`<stem>.md`；
         // - 目录：`<stem>/README.md`（父目录名 = stem，README 即条目）。
         // 对账规则：id 去掉 `<前缀>-` 后的「序号[-名称]」必须与文件名主干**逐字相等**。
-        // 身份（id）与位置（文件名 / 目录名）分离：改名只动一处，`[[T-121]]` 引用永不搬家。
+        // 身份（id）与位置（文件名 / 目录名）分离：改名只动一处，`[相应批次]` 引用永不搬家。
         const stem = meta.id.slice(kinds[e.kind].prefix.length + 1)
         const parentDir = e.rel.split('/').at(-2)
         const ok = e.name === `${stem}.md` || (e.name === 'README.md' && parentDir === stem)
@@ -1291,7 +1291,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
 
   // ---- RG-018：序号字段与 id 两面对账 ----
   // kind README meta 声明 `serial: <字段名>`（如 adr 的 `serial: adr`）：`id` 是登记身份
-  // （`ADR-048a`），序号字段是序号本身（`048a`）——两者必须只差一个 `<前缀>-`
+  // （`D-048a`），序号字段是序号本身（`048a`）——两者必须只差一个 `<前缀>-`
   // （存在的理由：文件名可改名 / 可手抄错，序号字段会与取代链、渲染列一起被机器读，
   // 它是序号的**数据面**，必须与身份严格对账）。
   for (const e of entries) {
@@ -1487,7 +1487,7 @@ function withTree(kind, allEntries, lines, dir, cfgStatusRules) {
 const HEADER_NOTE =
   '> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**\n' +
   '> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，' +
-  '机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。\n'
+  '机制见 [[DE-017-登记与汇总机制|DE-017 · 登记与汇总机制]]。\n'
 
 /** posix 相对路径：从目录 `fromDir` 到文件 `toRel`（确定性，不依赖 path.relative 的平台差异）。 */
 export function relFrom(fromDir, toRel) {
@@ -1690,7 +1690,7 @@ export function renderRootIndex(allEntries, { kinds }) {
   return [
     '> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**',
     '> 条目各是一个单文档：条目类**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
-    '> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
+    '> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [[DE-017-登记与汇总机制|DE-017 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
     '',
     table(['类别', '身份', '回答什么', '条目数', '状态分布', '分解'], rows),
     '',

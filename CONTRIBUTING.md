@@ -26,14 +26,14 @@ created: 2026-07-20
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
-| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[ADR-013](docs/010-adr/013.md)）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
+| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[D-013](symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
 
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
 > Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
 > 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
-> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[ADR-016](docs/010-adr/016.md)）
+> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[D-016](symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")）
 > 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
 
 ---
@@ -42,25 +42,25 @@ created: 2026-07-20
 
 ```
 symbio/
-├── symbio/              # Rust 核心库（crate 根：cargo 命令在此目录跑）
-│   ├── src/
-│   │   ├── symbio_core/ # 框架层：Plugin trait / 路由 / Schema
-│   │   ├── plugins/     # 业务插件（各含 README.md）
-│   │   ├── providers/   # 基础设施（嵌入、文件存储）
-│   │   ├── init.rs      # 根插件装配入口
-│   │   └── lib.rs
-│   ├── rust-toolchain.toml   # 锁定 Rust 版本
-│   └── Cargo.toml
-├── tauri/               # Vue 3 桌面端
-│   ├── src/             # 前端代码
-│   └── src-tauri/       # 仅 3 个 Tauri command 的薄适配层
-├── cli/                 # 纯 Rust CLI 前端（进程内直连插件树）
-├── docs/                # 系统级文档（历史归档在 docs/archive/）
-├── scripts/             # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
-└── rustfmt.toml · clippy.toml   # 位于仓库根
+├── symbio/ # Rust 核心库（crate 根：cargo 命令在此目录跑）
+│ ├── src/
+│ │ ├── symbio_core/ # 框架层：Plugin trait / 路由 / Schema
+│ │ ├── plugins/ # 业务插件（各含 README.md）
+│ │ ├── providers/ # 基础设施（嵌入、文件存储）
+│ │ ├── init.rs # 根插件装配入口
+│ │ └── lib.rs
+│ ├── rust-toolchain.toml # 锁定 Rust 版本
+│ └── Cargo.toml
+├── tauri/ # Vue 3 桌面端
+│ ├── src/ # 前端代码
+│ └── src-tauri/ # 仅 3 个 Tauri command 的薄适配层
+├── cli/ # 纯 Rust CLI 前端（进程内直连插件树）
+├── docs/ # 系统级文档（历史归档在 docs/archive/）
+├── scripts/ # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
+└── rustfmt.toml · clippy.toml # 位于仓库根
 ```
 
-> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/006-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
+> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/004-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
 
 ---
 
@@ -69,10 +69,10 @@ symbio/
 **一条命令跑完全部**（后端含 `cli/` → 前端 → 静态审计 → MSRV → 事实文件）：
 
 ```bash
-node scripts/gate.mjs                 # 全量
-node scripts/gate.mjs --only=msrv     # 单阶段（也有 --skip=）
+node scripts/gate.mjs # 全量
+node scripts/gate.mjs --only=msrv # 单阶段（也有 --skip=）
 node scripts/gate.mjs --only=frontend-static,frontend-build # 前端两段：静态检查 + 构建
-node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
+node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 ```
 
 覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、静态审计、
@@ -134,7 +134,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 ⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
 抄了必然漂移。要加检查就改 `gate.mjs`。
 
-同理，**判据码的全表只在 [docs/006-ref/GATE_CODES.md](./docs/006-ref/GATE_CODES.md)**
+同理，**判据码的全表只在 [docs/004-ref/GATE_CODES.md](docs/004-ref/GATE_CODES.md)**
 （由各脚本的 `@codes` 声明生成）：文档指认判据码时只写**具体那一条**（如 D-004），
 **不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
 抄了必然漂移。
@@ -142,7 +142,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
-CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
+CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的是**同一个脚本**
 （`--only=backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=facts-write,docs,facts,baseline --ci`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`——门禁**自动执行**
@@ -156,7 +156,7 @@ verify 期望数据），`facts` 是两条**只读复核**（`gen-facts --check`
 提交信息规范由 `scripts/check-commit-msg.mjs` 判定，**两处都要接上**：
 
 ```bash
-git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
+git config core.hooksPath scripts/git-hooks # 本机：写提交时即时拦
 ```
 
 钩子目录里有三个，**判据各不相同**：
@@ -165,7 +165,7 @@ git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
 | `pre-commit` | 事实文件与登记投影在提交点变旧 | 跑 `gate.mjs --only=facts-write,facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**，再复核引用地址末态），实测 1.7s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/006-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-push` | `docs/004-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。
@@ -183,24 +183,24 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 - ⚠️ **无备份绝不 `git checkout -- .` / 大范围删除**。回滚先 `stash push` 或 `git diff > <临时目录>/x.patch`。
 - ⚠️ **rustfmt 只用 `cargo fmt`**，绝不裸跑 `rustfmt`（工具链锁定版本不同 ⇒ 格式漂移）。
 - ⚠️ 改 `.github/workflows/*.yml` 后**先自检语法**：YAML 错了 CI 会直接不触发（而非报错），
-  很容易误判成"没跑"。本机若无 `js-yaml`，可用 `python -c "import yaml; yaml.safe_load(open(...))"`
-  （必要时在隔离 venv 里 `pip install pyyaml`）。
+ 很容易误判成"没跑"。本机若无 `js-yaml`，可用 `python -c "import yaml; yaml.safe_load(open(...))"`
+ （必要时在隔离 venv 里 `pip install pyyaml`）。
 - ⚠️ **改 `.rs` 后必须保持 LF**（`.gitattributes` 锁定 `*.rs text eol=lf`，对齐
-  `rustfmt.toml` 的 `newline_style = "Unix"`）。用脚本批量改 Rust 文件时尤其容易踩：
-  写入时把 `\n` 转成了 CRLF，rustfmt 会**逐文件**报 `Incorrect newline style` 并以
-  非零码退出，症状是「fmt 门禁突然挂了但代码没变」。
+ `rustfmt.toml` 的 `newline_style = "Unix"`）。用脚本批量改 Rust 文件时尤其容易踩：
+ 写入时把 `\n` 转成了 CRLF，rustfmt 会**逐文件**报 `Incorrect newline style` 并以
+ 非零码退出，症状是「fmt 门禁突然挂了但代码没变」。
 - ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
 - ⚠️ **「棘轮」（单向基线）不止 `gate.mjs` 里那一处**，`scripts/` 下多个审计脚本各自带一个常量，
-  且方向**不统一**，别记反：
-  - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——
-    实际值**低于**基线直接**报红**（「有测试被删或失败」），**高于**基线只打黄字让你上调。
-  - `test-layout-audit.mjs` 的 `RATCHETS`（按 Rust crate 分别设 `files` / `tests` 两个**天花板**）——
-    实际值**高于**基线**报红**（「往源代码文件里加测试不被接受」），**低于**基线只打黄字让你下调。
-    它的判据是**测试函数数**而非模块名：`#[test]` / `#[tokio::test]` 无论写在哪个模块、哪个文件都数；
-    旧判据只认 `mod tests` 名字，于是 `turn.rs` 那种 `mod tool_call_tests { … }` 里的测试一个都数不到。
-  两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
-  删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
-  写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。
+ 且方向**不统一**，别记反：
+ - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——
+ 实际值**低于**基线直接**报红**（「有测试被删或失败」），**高于**基线只打黄字让你上调。
+ - `test-layout-audit.mjs` 的 `RATCHETS`（按 Rust crate 分别设 `files` / `tests` 两个**天花板**）——
+ 实际值**高于**基线**报红**（「往源代码文件里加测试不被接受」），**低于**基线只打黄字让你下调。
+ 它的判据是**测试函数数**而非模块名：`#[test]` / `#[tokio::test]` 无论写在哪个模块、哪个文件都数；
+ 旧判据只认 `mod tests` 名字，于是 `turn.rs` 那种 `mod tool_call_tests { … }` 里的测试一个都数不到。
+ 两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
+ 删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
+ 写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
 ---
@@ -215,40 +215,40 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 文档写「机制与取舍」**，两者互不复述。
 
 - 注释**应该写**：为什么是这个常量 / 这个顺序、有什么坑、字段归谁消费（例：会话的工具结果
-  字段约定）。
+ 字段约定）。
 - 注释**不要写**：系统架构综述、文档里已有的机制与表格、变更史（「曾经…已改为…」）。
-  这些要么属文档、要么属 `git log`——写进注释只会在下次改动时漏掉一处。
+ 这些要么属文档、要么属 `git log`——写进注释只会在下次改动时漏掉一处。
 - 文档**不要抄**代码签名与字段表：要清单就读定义（或它的 `//!` 头注释）。手抄的表必然漂移
-  ——本仓库已数次出现「文档列的文件早已不存在」。
+ ——本仓库已数次出现「文档列的文件早已不存在」。
 - **过程文档必须归档**：一次性评审 / 迁移记录 / 已落地的实施方案一律 `git mv` 进
-  `docs/archive/`（**模块目录同样适用**），由 `node scripts/doc-link-audit.mjs` 的 D-002 判定。
+ `docs/archive/`（**模块目录同样适用**），由 `node scripts/doc-link-audit.mjs` 的 D-002 判定。
 - **活跃文档不得超过 800 行**（D-003，**无豁免**）：超限不是"需要解释的特例"，而是「内容该归
-  别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
-  （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
-  ```bash
-  node scripts/doc-link-audit.mjs   # 文档体检（D 系判据），任一命中即失败
-  ```
+ 别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
+ （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
+ ```bash
+ node scripts/doc-link-audit.mjs # 文档体检（D 系判据），任一命中即失败
+ ```
 
 ### Rust 侧
 
 - 遵循 `rustfmt.toml` + `clippy.toml`，**不要**手动格式化后被 CI 反复退回。
 - 异步上下文请使用 `tokio::sync::Mutex` / `tokio::sync::RwLock`；`std::sync::*` 只在 `spawn_blocking` 内部使用。
-  - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
-  - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/grep-audit.test.mjs` 已接入统一门禁。
+ - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
+ - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/grep-audit.test.mjs` 已接入统一门禁。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
-  - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
+ - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
-  路由规则见 [docs/005-arch/003-OVERVIEW.md](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW")，
-  请求全链路见 [docs/005-arch/002-DATA_FLOW.md](docs/005-arch/002-DATA_FLOW.md "AR-002-DATA_FLOW")。
+ 路由规则见 [docs/003-design/002-架构总览.md](docs/003-design/002-架构总览.md "DE-002-架构总览")，
+ 请求全链路见 [docs/003-design/003-数据流与调用链.md](docs/003-design/003-数据流与调用链.md "DE-003-数据流与调用链")。
 
 #### 测试文件布局（约定）
 
 测试**独立成文件**，且与**被测试的实现文件同级**、同名加 `.test` 后缀：
 
 ```text
-capabilities.rs          实现
-capabilities.test.rs     它的测试（同级，不放子目录）
+capabilities.rs 实现
+capabilities.test.rs 它的测试（同级，不放子目录）
 ```
 
 父文件末尾用 `#[path]` 指向同级测试文件：
@@ -263,12 +263,12 @@ mod tests;
 
 - 布局由 `node scripts/test-layout-audit.mjs` 判定（已接入 `gate.mjs`），不靠人工记住。
 - **一个实现文件对应一个测试文件**。不要写"一个测试文件同时测几个实现文件"，
-  也不要写"几个测试文件测同一个实现文件"——测试跟着它测的那个实现走。
+ 也不要写"几个测试文件测同一个实现文件"——测试跟着它测的那个实现走。
 - **不要为测试文件单独建目录**。`X/tests.rs` 那种形态会让"模块"与"目录"两个概念
-  混在一起；`#[path]` 相对声明它的文件解析，测试文件完全可以与实现同级。
+ 混在一起；`#[path]` 相对声明它的文件解析，测试文件完全可以与实现同级。
 - **例外**：模块文件是 `mod.rs` 的（如 `store/mod.rs`），测试放同级的 `tests.rs`。
 - `#[path]` **不改变模块路径**（仍是 `X::tests`），故 `use super::*;` 语义与内联
-  `mod tests { … }` 完全一致，拆分/搬移是纯文件操作，不涉及可见性调整。
+ `mod tests { … }` 完全一致，拆分/搬移是纯文件操作，不涉及可见性调整。
 
 > 存量代码里仍有大量内联 `#[cfg(test)] mod tests { … }`。**新增代码请按上述约定**；
 > 存量按"改到哪个文件就顺手拆哪个"渐进处理，不做全仓一次性搬移。
@@ -279,8 +279,8 @@ mod tests;
 - 严禁 `any`（callPlugin 泛型默认已是 `unknown`，调用方需显式标注）。
 - 日志：使用 `logger` from `@/utils/logger`，**不要**用 `console.*`（CI 会查）。
 - 控制面路由地址：一律从 `@/constants/routes.gen.ts` 导入常量，**不要**在 `services/` /
-  `stores/` / `composables/` 里写死 `'plugin/arm'` 字符串——那份常量是门禁从后端 `route()` 的
-  `match` 臂**生成**的，写死同一条地址由 `mechanism-audit` 的 M-008 判红。
+ `stores/` / `composables/` 里写死 `'plugin/arm'` 字符串——那份常量是门禁从后端 `route` 的
+ `match` 臂**生成**的，写死同一条地址由 `mechanism-audit` 的 M-008 判红。
 
 ---
 
@@ -290,20 +290,20 @@ mod tests;
 
 1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
 2. 在 `symbio/src/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
-3. 实现 [`Plugin`](docs/005-arch/004-PROTOCOLS.md "AR-004-PROTOCOLS") trait 的 `route()` 与 `traverse()`；在文件末尾用
-   `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
-   **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
+3. 实现 [`Plugin`](docs/003-design/005-协议规范.md "DE-005-协议规范") trait 的 `route` 与 `traverse`；在文件末尾用
+ `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
+ **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
 4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
-   `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
-5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route()` 里加一条 `match` 臂，门禁即把它生成进
-   `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
-6. 文档按**唯一来源**更新：**新增路由只在 [003-ROUTES.md](docs/006-ref/003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 001-CONFIGURATION.md、错误码进 002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
+ `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition` 加返回 `config_definition(...)` 的分支。
+5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route` 里加一条 `match` 臂，门禁即把它生成进
+ `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
+6. 文档按**唯一来源**更新：**新增路由只在 [003-ROUTES.md](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 001-CONFIGURATION.md、错误码进 002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，
 > 且提交信息**与代码同一次提交**。要查「某次改动为什么」：`git log --grep=<词>` / `git log -S<符号>`；
 > 要查「某条机制写在哪」：`node scripts/doc-find.mjs <词>`。
 
-完整教程见 [docs/007-guide/005-PLUGIN_DEVELOPMENT.md](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")。
+完整教程见 [docs/006-guide/005-PLUGIN_DEVELOPMENT.md](docs/006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")。
 
 ---
 
@@ -311,16 +311,16 @@ mod tests;
 
 1. **Fork** 仓库，创建分支（`feat/xxx` / `fix/xxx` / `docs/xxx`）。
 2. 提交信息推荐格式：
-   ```
-   <scope>: <summary>
-   
-   <details>
-   ```
-   scope 例：`agent` / `tauri/services` / `docs`。
+ ```
+ <scope>: <summary>
+
+ <details>
+ ```
+ scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/010-adr/README.md "ADR-000-架构决策汇总")（一条 ADR），
-   「改了什么 / 为什么」写在提交信息里。
+5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/003-design/README.md "DE-000-设计总览")（一条 ADR），
+ 「改了什么 / 为什么」写在提交信息里。
 
 ---
 
@@ -343,4 +343,4 @@ mod tests;
 
 ## 9. 许可证
 
-提交即表示你同意本项目以 [MIT License](./LICENSE) 发布你的贡献。
+提交即表示你同意本项目以 [MIT License](LICENSE) 发布你的贡献。

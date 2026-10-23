@@ -144,7 +144,7 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
-    /// 本会话所属**父会话的主体**——委派链上的父主体（[T-105]）。
+    /// 本会话所属**父会话的主体**——委派链上的父主体（相应批次）。
     ///
     /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
     /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
@@ -154,7 +154,7 @@ impl PersistentChatSession {
     /// **这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
     /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_gate`）。
     ///
-    /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+    /// 相应批次: ../../../../docs/007-task/105-Scope-Child首产点批.md "
     pub(crate) async fn delegating_principal(&self) -> Option<String> {
         let session = self.load_session().await.ok()?;
         delegating_principal_in(&self.store, &session).await
@@ -185,7 +185,7 @@ impl PersistentChatSession {
         self.store.save_session(session).await
     }
 
-    /// 本会话的**事实源句柄**（ADR-084 §1-B）：会话内写方/读方拿它落格、取切片，
+    /// 本会话的**事实源句柄**（D-084 §1-B）：会话内写方/读方拿它落格、取切片，
     /// 不再自己拼目录 `open`。临时会话 ⇒ `Ok(None)`；事实源打不开 ⇒ `Err`（真失败）。
     pub(in crate::plugins::session) fn facts(
         &self,
@@ -195,7 +195,7 @@ impl PersistentChatSession {
             .map_err(PluginError::InternalError)
     }
 
-    /// 存储句柄（ADR-084 §2 的引擎侧端口）：只许 session 插件内的引擎面持有，
+    /// 存储句柄（D-084 §2 的引擎侧端口）：只许 session 插件内的引擎面持有，
     /// 能力面不得见到 `SessionStore` 类型。
     pub(in crate::plugins::session) fn store_handle(&self) -> Arc<SessionStore> {
         self.store.clone()
@@ -210,7 +210,7 @@ impl PersistentChatSession {
 /// `metadata.agent_id` → [`crate::symbio_core::principal_of`]）的**唯一实现**。
 ///
 /// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
-/// （`commands::session_upsert`）也要用同一份判据登记主体行（[T-182]），两处
+/// （`commands::session_upsert`）也要用同一份判据登记主体行（相应批次），两处
 /// 各写一遍迟早分叉成「登记挂 A、运行期判 B」。
 pub(super) async fn delegating_principal_in(
     store: &SessionStore,

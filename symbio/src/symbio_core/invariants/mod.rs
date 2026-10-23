@@ -1,12 +1,12 @@
-//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")、[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、[plan/04 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //!
 //! ## 形态：纯函数，不是 trait
 //!
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")；
-//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 补入）
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/007-task/121-最小闭环.md ")；
+//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 补入）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
@@ -48,7 +48,7 @@ use super::event::{Entity, Event, Verb};
 
 // 判据内核（std-only）：算法层住 `kernel.rs`，本模块只做「事件切片 ⇒ 内核输入」
 // 的解析。verify/ 下的两个程序 `#[path]` 包含的就是那个文件——判定与生产共用
-// 一份代码，判据见 kernel.rs 文档与 [T-176](../../../../docs/009-task/176-验证器与生产的耦合率.md "T-176-验证器与生产的耦合率")。
+// 一份代码，判据见 kernel.rs 文档与 相应批次。
 mod kernel;
 
 /// 一处违规：事件（按 seq 定位）+ 人话。
@@ -93,7 +93,7 @@ pub fn is_turn_final(e: &Event) -> bool {
 
 /// 这一条让某一轮**算收束**吗（[`unresolved_turns`] 的口径）？
 ///
-/// 三种形态：发言收束（final / fallback）、产物收束（`artifact.added`，ADR-067）。
+/// 三种形态：发言收束（final / fallback）、产物收束（`artifact.added`，D-067）。
 /// 写侧判「新开轮是否越过了未收束的旧轮」必须与读侧同口径，否则会出现
 /// 「写侧说越界、读侧说没事」的两套绿。
 pub fn closes_turn(e: &Event) -> bool {
@@ -111,10 +111,10 @@ pub fn closes_turn(e: &Event) -> bool {
 
 /// 这一条是**停机事实**吗（C6 的口径：它得回答「这一轮为什么停」）？
 ///
-/// 两种收束格 + 收束闸的否定事实（T-219：被拒不产生收束格，但它同样是一次停）。
+/// 两种收束格 + 收束闸的否定事实（：被拒不产生收束格，但它同样是一次停）。
 /// **与 [`closes_turn`] 不是一把尺**：后者问「本轮结算了吗」，产物格算结算；
 /// 产物不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
-/// （PL-016 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
+/// （DE-015 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
 /// 就会向生产要一个它永远写不出的字段。
 pub fn is_stop_fact(e: &Event) -> bool {
     (e.entity == Entity::Turn
@@ -175,7 +175,7 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
 
 /// C2 / N3（I1）：每 `turn` 至多 1 条 final。
 ///
-/// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+/// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
 pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     // 哪些事件算数（final 的判据）是本模块的解析层；「每 turn 至多一条」
@@ -199,11 +199,11 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
 ///
-/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")），
+/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
 /// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
 /// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
 /// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
-/// 典型痕迹。[plan/11 批 0](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
+/// 典型痕迹。[plan/11 批 0](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
 /// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
 /// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
@@ -229,11 +229,11 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
-/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证")）：
+/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
-///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）；
-/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/009-task/126-长期记忆与语义检索.md "T-126-长期记忆与语义检索")
+/// 宣称"已经答复"（[roadmap/S01 §5](../../../../docs/007-task/121-最小闭环.md ")）；
+/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/007-task/126-长期记忆与语义检索.md ")
 ///   步骤 11 出口判据：溯源覆盖 100%——无溯源的记忆无法审计，也无法在遗忘时被追溯）。
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
@@ -241,7 +241,7 @@ pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
     events.iter().filter_map(provenance_violation).collect()
 }
 
-/// I2 的覆盖判据（参照 [`docs/004-plan/verify/invariants.rs`](../../../../docs/004-plan/verify/invariants.rs)
+/// I2 的覆盖判据（参照 [`docs/003-design/verify/invariants.rs`](../../../../docs/003-design/verify/invariants.rs)
 /// 的 `needs_provenance`；S1 扩展收束类，S5 扩展记忆类）。
 fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
@@ -335,7 +335,7 @@ pub fn provenance_dangling(events: &[Event], allow_slice_edges: bool) -> Vec<Vio
 /// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
 /// 读出口 `session/stats` 因此共享同一条口径，e2e 不必自己挑一个数字。
 /// 取 3：返工两轮还在返，说明当初的任务拆得或验收得有问题，该被看见而不是被
-/// 默许（[roadmap/S03 §5](../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")
+/// 默许（[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
@@ -357,7 +357,7 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 ///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
 ///
 /// 末两条是任务表的判定（[`acyclic_deps`]：依赖成环 / 悬空，即
-/// [04 §4 断言清单](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 的 C14；
+/// [04 §4 断言清单](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的 C14；
 /// [`rework_bounded`]：同一任务的返工轮数不超过 [`MAX_REWORK_ROUNDS`]）——
 /// 都是**结构判定、无宽限**：环与超界不是「读取瞬间的时序假象」，不会假红
 /// （04 §3.1 批⑨ 的「断言进 CI」）。
@@ -386,7 +386,7 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
 ///   缺 `budget_ms` 时回退（接线前落的历史事件 / 旧 WAL）。回退是**向后兼容**，
 ///   不是第二处判定：两种形态都不会被同时读。
 ///
-/// 读**哪个事件**同样有新旧两种：`turn.dispatch`（T-225：用户格先于判决落，
+/// 读**哪个事件**同样有新旧两种：`turn.dispatch`（：用户格先于判决落，
 /// 档位另立一格）优先；没有它就回退 `user.message`（历史切片）。同一格内
 /// 数值优先、档位名回退——两条路径读的都是同一条事实的两种形态。
 fn declared_budget_ms(events: &[Event]) -> Option<u64> {
@@ -421,12 +421,12 @@ fn declared_budget_of(e: &Event) -> Option<u64> {
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。
 ///
-/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）：
+/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/007-task/121-最小闭环.md ")）：
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
 ///
-/// # 产物也算收束（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）
+/// # 产物也算收束（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）
 ///
 /// `artifact.added`（`artifact × asserted`）同样关闭一轮：工具结果是**说给用户的
 /// 话**（界面上就是一张卡片），不是内部噪声。没有它，只持 `produce.artifact` 的
@@ -456,7 +456,7 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
             opened.push((i, e.turn, e));
             last_open_pos = Some(i);
         }
-        // 收束 = 发言收束（final / fallback）或产物收束（ADR-067，落过工具结果）。
+        // 收束 = 发言收束（final / fallback）或产物收束（D-067，落过工具结果）。
         // 判据与写侧闸门共用 [`closes_turn`]：两处各写一份必然漂移。
         if closes_turn(e) {
             opened.retain(|(_, turn, _)| *turn != e.turn);
@@ -478,20 +478,20 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
     bad
 }
 
-/// C6（I3 到点必答）：每条 `turn × closed` 事实必带 `reason`，且取值在闭集内（T-220）。
+/// C6（I3 到点必答）：每条 `turn × closed` 事实必带 `reason`，且取值在闭集内。
 ///
 /// ## 它查的是什么
 ///
 /// 「这一轮为什么停」必须是**可判的**。此前三个形状（`status` / `terminated.reason` /
 /// `why`）问的是同一个问题，于是一个字段缺失或越界时不会有任何东西变红——日志能读、
 /// 投影能算、回放不崩，只有"为什么停了"这个问题的答案悄悄不可用。而它正是重启后
-/// 最需要回答的问题（PL-014 需要一个运行期 `halt(NoRule)` 分支；义务环里那个分支
+/// 最需要回答的问题（DE-014 需要一个运行期 `halt(NoRule)` 分支；义务环里那个分支
 /// 不存在，"停"只有"没有债了"一种表达，那么"为什么没有债了"必须写在事实里）。
 ///
 /// ## 判定范围
 ///
 /// `turn × closed` 的两种格（`chat.assistant.final` / `chat.assistant.fallback`）
-/// 加上 `authz.denied`（T-219：拒绝不产生收束格，但它同样是一次"停"）。
+/// 加上 `authz.denied`（：拒绝不产生收束格，但它同样是一次"停"）。
 /// 闭集由 [`ClosureReason::ALL`] 派生，**不在这里另写一份**——两处各写一份，
 /// 加一个新原因时就会出现"写侧合法、读侧报红"的两套绿。
 ///
@@ -503,7 +503,7 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
 ///
 /// 但「整段放宽」是条**没有边界**的宽限：写方从今天起每条都带 `reason`，而一条
 /// 新落的格漏了 `reason`，在整段放宽下永远绿——判据 10 因此在生产里没有执行方
-/// （T-245 口径 ③）。宽限的边界改成日志自己说：第一条带 `reason` 的停机格
+/// （ 口径 ③）。宽限的边界改成日志自己说：第一条带 `reason` 的停机格
 /// （收束格或 `authz.denied`）就是分界，**它之前**是历史归档段（放宽），**它之后**
 /// 每一条都必须带。这个位置不需要常量、不需要日期——写方一旦开始写 `reason`，
 /// 之后的缺口就不可能再是历史造成的。整条日志一个 `reason` 都没有 ⇒ 分界落在末尾，
@@ -594,12 +594,12 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 
 /// C14（终止性前提 3）：任务依赖图**无环且无悬空依赖**（Kahn 拓扑排序）。
 ///
-/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")），
+/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")），
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
 ///
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 的
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的
 /// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     // 解析层：从任务开轮格收出 (task_id, depends_on)；判定（悬空 + Kahn 环）
@@ -666,8 +666,8 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 ///
 /// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
 /// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
-/// （[docs/004-plan/verify/termination.rs](../../../../docs/004-plan/verify/termination.rs) 前提 2）。
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
+/// （[docs/003-design/verify/termination.rs](../../../../docs/003-design/verify/termination.rs) 前提 2）。
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
     // 解析层：收出按时间序的 replaces 序列；计数判定走 [kernel::rework_core](kernel)
     // ——verify/termination.rs 的前提 2 用例包含的是同一份内核。

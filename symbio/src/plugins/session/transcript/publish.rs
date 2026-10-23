@@ -1,10 +1,10 @@
 //! 落库回包：「谁落库、谁发帧」这条硬不变量的**唯一落地点**
-//! （`session/docs/022-vdfs-session-messages.md` §3.4）。
+//! （`session/docs/109-vdfs-session-messages.md` §3.4）。
 //!
 //! ## 为什么这一段原来住在宿主外壳、现在住在转写域
 //!
 //! 它原先在 `plugin.rs` 里，于是被切的两片（驱动器、上下文）都反过来 `use super::plugin::`
-//! 拿它——那是 [ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P3 判据点名的
+//! 拿它——那是 [D-075](../../../../../docs/003-design/002-架构总览.md "D-075") 前置 P3 判据点名的
 //! 「跨片调用走表或端口」里最机械的一类：这个函数的真实依赖是**会话引擎**
 //! （`PersistentChatSession::apply`）与**两条发布通道**（执行期 sink / 活跃名册），
 //! 插件那一格从未参与。owner 跟着真实依赖走，它就搬进转写域（消息级变更的唯一写入点与发射器）。
@@ -19,14 +19,14 @@
 //!
 //! 追加与回包的行为经 `chat_loop` / `orchestrator` / `context` 三侧的用例覆盖——
 //! 它是三条路径共用的出口，脱离调用方单测等于把同一段语义钉两遍
-//! （见 `session/docs/017-module-layout.md` §2）。
+//! （见 `session/docs/104-module-layout.md` §2）。
 
 use super::super::active::ActiveSessionManager;
 use super::super::chat_session::{Carrier, MessageChange, PersistentChatSession};
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::PluginError;
 
-/// 落库 + **落库回包**的唯一实现（`session/docs/022-vdfs-session-messages.md` §3.4）。
+/// 落库 + **落库回包**的唯一实现（`session/docs/109-vdfs-session-messages.md` §3.4）。
 ///
 /// 两步顺序写死在这里：`apply(Born)` 落库（存储在临界区内给消息补权威 `seq` /
 /// `timestamp`，交回**权威副本**），随即把权威副本逐条下发——权威号由此换入实时面。
@@ -42,7 +42,7 @@ use crate::symbio_core::PluginError;
 /// `content` 两个字段必须分开的原因——同一个消费端既可能需要追加（流式），也可能
 /// 需要替换（权威副本对齐），而帧必须自证是哪一种。
 ///
-/// ## 落库补身份在这里，不在别处（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ②）
+/// ## 落库补身份在这里，不在别处（[plan/11 批 1](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ②）
 ///
 /// 本函数是**唯一的**消息追加写点（生产代码里没有第二处往列表里追加节点），
 /// 所以 [`attributed`] 补在这里就等于「每条持久化消息都带身份」——补在各处建消息
@@ -68,7 +68,7 @@ pub(crate) async fn append_and_publish(
     session_id: &str,
     session_principal: &str,
 ) -> Result<Vec<cm::ChatNode>, PluginError> {
-    // 事实落格收在 `apply` 里（[ADR-054] 决策 2 的顺序反转）：`carrier` 声明
+    // 事实落格收在 `apply` 里（[D-054] 决策 2 的顺序反转）：`carrier` 声明
     // 「这条节点的诞生事实由谁落」——运行器承载的（用户发言 / 助手正文 / 工具结果）
     // 不另落，没有承载格的（压缩记录）落 `message.added`。
     let persisted = session
@@ -85,7 +85,7 @@ pub(crate) async fn append_and_publish(
             .await;
     }
     // 交回权威副本：loop 经地址面调用本条出口时，本地镜像要靠它换入存储分配的
-    // `seq` / `timestamp`（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4）。
+    // `seq` / `timestamp`（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4）。
     Ok(persisted)
 }
 
@@ -101,10 +101,10 @@ fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     }
     use crate::symbio_core::principal::Principal;
     let mut out = m;
-    // 归属判据与 [T-146] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
+    // 归属判据与 相应批次 的字符串主体一致，这里只把它折成 `Principal` 结构体：
     // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
     //
-    // [T-147d-iii] `role = tool` 的结果节点归**工具自己**（Tool 一族，地址由
+    // d-iii `role = tool` 的结果节点归**工具自己**（Tool 一族，地址由
     // `meta.tool_name` 合成）——authz 登记的主体行（`vdfs/write`…）就是这批值。
     // 没有工具名的（协议级失败调用）退回本会话主体，与字段删除前的今天同格。
     out.principal = Some(match out.node_role() {

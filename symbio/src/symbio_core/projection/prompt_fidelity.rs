@@ -1,4 +1,4 @@
-//! 事实网格 → prompt 的**双向完整性**判据（ADR-048）。
+//! 事实网格 → prompt 的**双向完整性**判据（D-048）。
 //!
 //! ## 它防的是什么
 //!
@@ -20,7 +20,7 @@
 //! | `role` 完好 | `role == "tool"` 的 entry 必须带工具名 | 工具结果的机器可读关联 |
 //! | prompt → 网格 | 每条 entry 都能在网格里找到出处 | 「模型看到了事实源没有的东西」= 两条真源 |
 //!
-//! ## 第三类：变更格（S2.7-b1，ADR-053）
+//! ## 第三类：变更格（S2.7-b1，D-053）
 //!
 //! `message.edited` / `message.removed` **既不产 entry**（它们不是新的对话内容），
 //! **也不是**「按设计不进请求包」的界面文本（那是汇报 / 首响）。缺了这一类，
@@ -126,10 +126,10 @@ fn excluded_from_prompt(e: &Event) -> bool {
     matches!(
         (e.entity, e.verb, e.kind.as_str()),
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED)
-            // 对话面开场白（T-056）：与汇报同为界面文本（`exclude_from_context`），
+            // 对话面开场白：与汇报同为界面文本（`exclude_from_context`），
             // 按设计不进请求包——漏进去要红。
             | (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING)
-            // 诞生格（ADR-054 决策 1）：本格的节点按定义是**界面文本**——只有
+            // 诞生格（D-054 决策 1）：本格的节点按定义是**界面文本**——只有
             // 「找不到别的格承载诞生」的节点才落这里（见 `EVENT_MESSAGE_ADDED`
             // 的边界），而承载对话内容的节点必须由它自己的事实落。
             | (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED)

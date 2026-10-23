@@ -45,7 +45,7 @@
  * Windows / macOS / Linux 通用（仓库约定：脚本一律平台无关）。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
 // @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014 S-015 S-016 S-017
 
@@ -246,7 +246,7 @@ console.log()
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
-// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/005-arch/013-vdfs.md`
+// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/003-design/009-VDFS规范.md`
 // §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //
@@ -293,7 +293,7 @@ console.log()
 // ── S-009: 事件总线 kind 不得用裸字面量 ────────────────────────────────
 //
 // 词表只有一套：`symbio_core::event_bus::KIND_*`（文档见
-// `docs/005-arch/004-PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
+// `docs/003-design/005-协议规范.md` §事件总线频道）。与 S-008 同源：`kind` 是
 // **跨进程**字符串，改名不会编译失败，只会让消费方的「按 kind 分派」静默失效。
 //
 // 为什么单独立一条：真实事故就是「发布点写裸字面量 → 常量声明出来却无人引用」，
@@ -431,7 +431,7 @@ console.log()
 
 // ── S-011: 补充注入点必须在「工具结果已接进请求」之后、汇报判定之前 ──────
 //
-// 抽干点在 v2 搬了家（5b-2：改到运行器的批次边界，见 ADR-074），约束一条没少，
+// 抽干点在 v2 搬了家（5b-2：改到运行器的批次边界，见 D-074），约束一条没少，
 // 而且**违反时依然没有测试会变红**——所以判据换成搬家后的**两处行序断言**：
 //   ① `turn_runner.rs`：2f 的 `inject` 必须排在 2e 的 `tool_exchange_messages` **之后**。
 //      反过来写 = 用户那句补充插进 `assistant(tool_calls)` 与它的 `tool` 结果之间——
@@ -448,7 +448,7 @@ console.log()
 //
 // 豁免：`// grep-audit-allow S-011: 理由`（写在**后一个锚点**那一行，理由不可为空）——
 // 只在"位置确实不对但已确认可接受"时用。
-// 文档侧的定义见 `docs/004-plan/007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
+// 文档侧的定义见 `symbio/src/plugins/classify/README.md` §5 S0 的 C-D2b。
 console.log('--- S-011: 补充注入点位置检查 ---')
 
 const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
@@ -540,7 +540,7 @@ console.log()
 //
 // 判据只取**两种无歧义形态**（同 D-004「只收结构标记」的取舍）：
 //   ① 待办标记：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头——待办有自己的
-//      登记处（`docs/009-task/` 下登记条目：引入新待办就登记成条目，
+// 登记处（`docs/007-task/` 下登记条目：引入新待办就登记成条目，
 //      **不是代码注释**），写在注释里就等于「谁也不会再看见」的那一类；
 //   ② 无出处的批次号：`批 N` / `批次 N` 且**同一行没有 `plan/NN`**。批次号属实施
 //      计划，单独一个数字不知道是哪份计划的哪一批；带出处就是合法指认
@@ -551,12 +551,12 @@ console.log()
 // 收口不变量），as-of 投影里「这条目标曾经声明过吗」是查询语义。实测把它们列进词表：
 // `本批|待接|尚未接` 在 `symbio/src` 命中 50 处、绝大多数是运行期 prose，`曾经` 命中
 // 59 处含真误报——**一条天天误报的守卫最后只会被人用豁免喂死**（本文件反复写的那条）。
-// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/004-plan/verify`），
+// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/003-design/verify`），
 // 测试文件同样参与检查（与 S-002 一致）。
 // 豁免：`// grep-audit-allow S-012: 理由`（写在命中行或其紧邻上一行，理由不可为空，同 S-010）。
 console.log('--- S-012: 代码注释里的实施排期指认 ---')
 
-const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
 const S012_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
@@ -597,9 +597,9 @@ console.log()
 // ext4 上是哈希序。于是同一份代码、同一个查询在两个平台给出行序不同的结果，而下游三处
 // 判定都切在这个序上——`content_search` 的 `offset` / `head_limit` 分页窗口、
 // `MAX_RESULTS` 截断点、`codebase_search` 降级路径的 `limit` 截断。
-// 病灶实例（T-116 ①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
+// 病灶实例（ ①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
 // （用户看到的是「换台机器同一查询少几行 / 换一批行」）。这类「判据依赖平台」的病
-// 在本仓已有两次实例（T-093 是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
+// 在本仓已有两次实例（ 是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
 //
 // 判据：`WalkBuilder::new(` 之后，**同一函数体内**（往后扫到下一个 `fn` 起头为止）
 // 必须出现一次 `.sort_by(` / `.sort_by_file_name(`。
@@ -608,11 +608,11 @@ console.log()
 // 都是「构造 + 链式配置同作用域」的形状，而一条天天误报的守卫最后只会被人用豁免喂死
 // （本文件反复写的那条）。跨函数传 builder 真出现时，人会看见这条注释。
 // 范围：`.rs` 源码根（同 S-012：`symbio/src`、`cli/src`、`tauri/src-tauri/src`、
-// `docs/004-plan/verify`），测试文件同样参与。
+// `docs/003-design/verify`），测试文件同样参与。
 // 豁免：`// grep-audit-allow S-013: 理由`（写在构造行或其紧邻上一行，理由不可为空，同 S-010）。
 console.log('--- S-013: WalkBuilder 构造点的遍历序 ---')
 
-const S013_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const S013_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 const S013_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 const S013_WALK_RE = /WalkBuilder::new\s*\(/
 const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
@@ -664,7 +664,7 @@ console.log()
 
 // ── S-014: ChatNode `role`（存量格）的直写只许降 ───────────────────────
 //
-// [T-147d-iii]：`role` 已退出 wire（`skip_serializing_if`），身份的权威是
+// d-iii：`role` 已退出 wire（`skip_serializing_if`），身份的权威是
 // `principal.kind`——读侧一律经 `node_role()` / `legacy_role()` 折叠（与前端
 // `messageRoleOf` 同一判据），写侧的每一处直写都是待清零的存量债务。
 //
@@ -686,7 +686,7 @@ console.log()
 // 由下面那条「cwd 下有 `symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
 console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
 
-const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 // **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
 // `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `symbio/src/...` 的几层目录，
@@ -698,7 +698,7 @@ const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
-// 151 → 146（T-244 步 5d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
+// 151 → 146（ 步 5d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
   : 146
@@ -749,14 +749,14 @@ console.log()
 //
 // 否定分支若把闸压成布尔或把结果存起来另判，拒绝就又成了「什么都没写」：
 // 日志里「被拒」与「根本没跑完」同形，事后答不出谁/何时/因何被拒，回放重现不出
-// 这次拒绝（[T-219](../docs/009-task/219-拒绝落事实.md "T-219-拒绝落事实")）。
+// 这次拒绝（相应批次）。
 // 这条不是风格问题——它违反 I1（单通道），而违反的形态**不会有任何东西变红**：
 // 该轮照样留在未收束态，`unresolved_turns` 照样报，看起来和"正常被拒"一样。
 //
 // 判据是**零出现**（不是棘轮）：没有"存量"可言——存量已经全部迁完。两条形状，
 // 各自都还能真的变红：
-//   ① 布尔壳 `closure_granted` 零出现。它是 T-219 时期 `closure_gate(..).is_ok()`
-//     的一行壳，随收束闸收敛到单一 owner（T-244 步 5d 删掉它唯一的生产调用点后
+// ① 布尔壳 `closure_granted` 零出现。它是 时期 `closure_gate(..).is_ok`
+// 的一行壳，随收束闸收敛到单一 owner（ 步 5d 删掉它唯一的生产调用点后
 //     一并删除）而退役。复活它就是复活「拒绝不落事实」的那个形态。
 //   ② 闸的调用行必须**当场**处理 `Err`：不许 `.is_ok()` / `.is_err()` 取布尔，
 //     也不许把结果存到别处再判（那种写法拒绝照样不落事实）。
@@ -832,7 +832,7 @@ console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
 }
 console.log()
 
-// ── S-016: 停机原因只有一个形状（T-220）─────────────────────────────
+// ── S-016: 停机原因只有一个形状─────────────────────────────
 // 收束格 / 否定事实的「为什么停」只能写在顶层 `reason`（闭集）。两个已退役的
 // 形状不许复活：
 //   · `terminated.reason` —— 与顶层 `reason` 是同一件事的两份账，必然有一处先漂；
@@ -895,7 +895,7 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
 }
 console.log()
 
-// ── S-017: 恢复路径不许再有旁路（T-244 步 5d）─────────────────────────
+// ── S-017: 恢复路径不许再有旁路（ 步 5d）─────────────────────────
 // 恢复 / 审批 / 问答三条唤醒路径曾经走 `resume.rs` 的**私有旁路**：它自己写协议
 // 事实、自己跑执行体，绕开行表。旁路退役之后，这条路径的唯一入口是**事实**——
 // 用户动作落成 `request(port=tool)`，之后与批次走同一条授权 / 派发链。

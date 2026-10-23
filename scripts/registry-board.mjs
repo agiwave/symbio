@@ -11,9 +11,9 @@
  *   node scripts/registry-board.mjs                    全部分组（任务 / 规范 / 决策 / 各文档类 kind）
  *   node scripts/registry-board.mjs --kind=task        只看某个 kind（含 goal / stage / plan / arch / ref / guide）
  *   node scripts/registry-board.mjs --status=todo      按状态过滤
- *   node scripts/registry-board.mjs --id=T-001         打印单条（字段 + 正文全文；文档类的 id 是相对路径）
- *   node scripts/registry-board.mjs --children=T-056   打印该条目的分解子树（parent 字段，递归孙辈）
- *   node scripts/registry-board.mjs --parent=T-062     打印该条目的父链（从顶层祖先到当前条目）
+ * node scripts/registry-board.mjs --id= 打印单条（字段 + 正文全文；文档类的 id 是相对路径）
+ * node scripts/registry-board.mjs --children= 打印该条目的分解子树（parent 字段，递归孙辈）
+ * node scripts/registry-board.mjs --parent= 打印该条目的父链（从顶层祖先到当前条目）
  *   node scripts/registry-board.mjs --root=<仓库根>    （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 条目有违规（不打印看板）；2 = 范围读不出 / 参数不识别。

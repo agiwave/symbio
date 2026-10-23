@@ -2,8 +2,8 @@
 //!
 //! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由 core 的投影算得出，
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
-//! 无法验收、回归也看不见（[plan/12 §2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）。
-//! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")
+//! 无法验收、回归也看不见（[plan/12 §2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+//! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
 //! 的出口形态②（只读路由）。
 //!
 //! ## 两个文件的分工（判据：这一段错了谁会红）
@@ -19,16 +19,16 @@
 //!
 //! ## 三条纪律
 //!
-//! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+//! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 //!   这两个文件里没有分位数 / 占比 / 累计的算式——口径只活在 core 的投影里，出口
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
 //!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
-//!   由 core 定（[04 §3.1 批④](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")——本处不复判）。
+//!   由 core 定（[04 §3.1 批④](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")——本处不复判）。
 //! - **真·只读**：事实由存储层以**值**交回（`SessionStore::snapshot` / 部署级
 //!   扫描），本模块不拼路径、不开文件、不取令牌。存储层只读打开：不创建文件、
 //!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
-//!   （[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。
+//!   （[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）。
 //! - **不命名 core 的视图类型**：core 的域模块是私有的（C-002：外部只写
 //!   `symbio_core::<符号>`），插件侧因此只出现**根导出的函数名**，类型随返回值
 //!   流动、在出口边界一次性序列化。这里没有 `SloLatencyView` 之类的名字，也
@@ -77,7 +77,7 @@ pub(crate) struct TierRow {
     pub samples: usize,
 }
 
-/// 会话级读数（四列同源，ADR-044）。
+/// 会话级读数（四列同源，D-044）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SessionStats {
     /// 会话 id。
@@ -89,7 +89,7 @@ pub(crate) struct SessionStats {
     pub tiers: Vec<TierRow>,
     /// 成本台账（`cost_ledger` 视图原样序列化）。
     pub cost: serde_json::Value,
-    /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+    /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
     /// core 的投影里，本处不重算。
@@ -110,11 +110,11 @@ pub(crate) struct SessionStats {
     /// 按声明档位取预算、切片首部的跨片溯源边放行、历史收束格缺 `reason` 放行）
     /// 在 core 的 `check_all`，
     /// 任务表两条**无宽限**（环与超界不是时序假象），本处只取数——
-    /// [04 §3.1 批④](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")
+    /// [04 §3.1 批④](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
     /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
-    /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") +
-    /// [plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：`own` = 本会话
+    /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") +
+    /// [plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：`own` = 本会话
     /// 主体自己的条目，`by_principal` = 这份事实源里每个主体的条目（`own` 在其中，
     /// 原样摊开、不另造口径）。
     ///
@@ -122,7 +122,7 @@ pub(crate) struct SessionStats {
     /// 靠它分辨「这里没有数」与「不给你看」——与四列用「空切片 ⇒ 全零」是同一条判定，
     /// 换个列名不换判据。
     pub reputation: serde_json::Value,
-    /// 承诺 / 委托（`agent_run` 那一次立约的**读侧出口**，[T-213](../../../../docs/009-task/213-Agent主机面整理批.md "T-213-Agent主机面整理批") 段二）：
+    /// 承诺 / 委托（`agent_run` 那一次立约的**读侧出口**，相应批次 段二）：
     /// `{ items: [ { id, from, to, promise, state, why, anchor_seq } ], total, kept,
     /// broken, settled, breach_rate }`，`items` 按承诺号字典序。
     ///
@@ -143,7 +143,7 @@ pub(crate) struct SessionStats {
     /// 归**四列**那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
     /// `{ items: [], total: 0, … }`，两种「零条」由 `has_wal` 分辨。
     pub commitments: serde_json::Value,
-    /// 就绪任务集（S7 步 16 的**读侧**，[04 §3.1 批⑨](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+    /// 就绪任务集（S7 步 16 的**读侧**，[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// `readyset` 投影原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
     /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
     ///
@@ -152,26 +152,26 @@ pub(crate) struct SessionStats {
     /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
     /// 上下游（清单在不在）分辨，不靠列的形状。
     pub readyset: serde_json::Value,
-    /// 转写（**对话面读侧**，[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+    /// 转写（**对话面读侧**，[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
     /// append-only 的时间序；`role` 是 `"user"` / `"assistant"` / `"tool"`，
     /// 工具行另带 `tool` = 工具名）。
     ///
     /// 读的是**事实源本身**（`user.message` / `chat.assistant.final` /
     /// `chat.assistant.fallback` / `artifact.added` 四格——最后一格是
-    /// [plan/10 批 3](../../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 纳入的工具结果），
+    /// [plan/10 批 3](../../../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 纳入的工具结果），
     /// 不是会话存储里的消息副本——同一份事实既喂模型（`Reasoner` 组 prompt 的输入）
-    /// 又能从这里读回，ADR-044 的「实测与判据同源」。
+    /// 又能从这里读回，D-044 的「实测与判据同源」。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒
     /// `{ entries: [] }`），不取声誉列的空对象形态：对话为空与「不给你看」由 `has_wal`
     /// 分辨——同一份判定，换个列名不换判据。
     ///
-    /// 逐条可见域（「这条是谁说的」）属 [11 §2-E](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
+    /// 逐条可见域（「这条是谁说的」）属 [11 §2-E](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案")
     /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
     /// 不在这里先造一个半开的判据。
     pub transcript: serde_json::Value,
-    /// 主动性（[02 §3.1 外部效标](../../../../docs/004-plan/002-能力坐标系.md "PL-002-能力坐标系") · 主动性）：
+    /// 主动性（[02 §3.1 外部效标](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") · 主动性）：
     /// `conation` 投影原样序列化（`{ intents: [ { seq, ts, goal, task_id } ] }`，按 seq 升序）——
     /// 「自发发起且被采纳」的分子 / 分母同出一列：已升格（`task_id` 非空）/ 已表达。
     ///
@@ -197,7 +197,7 @@ pub(crate) struct SessionStats {
     /// ## 为什么读数也要一份描述
     ///
     /// 「这些数是什么意思、该叫什么、单位与精度怎么取」只有**产者**知道。前端自己
-    /// 拼就等于把口径抄进第二处（ADR-044 的反面），而读数一改，抄本不报错、只静静
+    /// 拼就等于把口径抄进第二处（D-044 的反面），而读数一改，抄本不报错、只静静
     /// 显示旧标签。故本字段由 [`panel_of`](super::stats_reading::panel_of) 从**上面各列已算出的值**生成——
     /// 前端只按 [`ReadingPanel`] 排版，不解析任何会话/统计语义。
     ///
@@ -229,7 +229,7 @@ pub(crate) struct SessionStats {
     /// 口径是把本插件目录下**所有**会话的 WAL 各跑一遍四列里的两个投影
     /// （时延 / 兜底），再交给 core 的 `SloLatencyView::merge` /
     /// `FallbackRateView::merge` 合并。分子分母与分位数因此与单会话列**逐字同一套
-    /// 口径**（ADR-044：实测与判据同源），本处不另写一套统计。
+    /// 口径**（D-044：实测与判据同源），本处不另写一套统计。
     ///
     /// ## 为什么这不是「多一份真相」
     ///
@@ -249,7 +249,7 @@ pub(crate) struct SessionStats {
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
 ///
-/// `principal` 是读方身份（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 读侧）：
+/// `principal` 是读方身份（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 读侧）：
 /// 声明了才判可见域，没声明就不判定。**这里的选择权只在读方，可见域与属主
 /// 不在载荷里**——请求方自己声明「我能看到什么」等于给自己授权（governance 模块
 /// 文档点名的那条捷径），本字段只回答「我是谁」。
@@ -263,7 +263,7 @@ pub(crate) struct StatsRequest {
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
-/// 交回（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）：`snapshot` 是本会话
+/// 交回（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）：`snapshot` 是本会话
 /// 完整史（含归档前缀），`deep_facts` 是部署级快照的**惰性取数**——只有读方有权
 /// 看时才调用（`may_read` 由本函数**单点**判定，见下）。
 ///
@@ -288,7 +288,7 @@ pub(crate) fn read(
     // 完整史（归档段 + 未取代的那段）：`snapshot` 由存储层按 `range(0)` 口径交值。
     let snapshot = snapshot.unwrap_or_default();
 
-    // 读侧闸（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：**读什么由能看
+    // 读侧闸（[04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：**读什么由能看
     // 什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
     //
     // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，S4 的
@@ -299,15 +299,15 @@ pub(crate) fn read(
     // 可见域只判**一次**：四列、声誉列、就绪集列与转写列共用同一个答案——两个判定点 = 两套判据，
     // 必然漂移成「四列能看、声誉不能看」这种没有理由的半开半掩。
     //
-    // **scope 取内容侧的事实**（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批") ②）：
-    // 本会话记忆载荷里记的 `vis_scope`（`memory_events::encode` 的产地，T-094 ①），
+    // **scope 取内容侧的事实**（相应批次 ②）：
+    // 本会话记忆载荷里记的 `vis_scope`（`memory_events::encode` 的产地， ①），
     // 取**最宽**的那个——这份事实源里只要有共享内容，它就不是纯私有的。缺省
     // （没有任何记忆 / 存量事件没这个字段）= `thread_private`（C10），与接线前
     // 逐字一致。判据不再是恒传缺省值：「人的认知可供他人借用」（SC-010 判据 3）
     // 由此有生产读方——矩阵内主体读得到他人共享内容，矩阵外主体照旧空切片。
     //
     // **属主恒放行 + 矩阵谓词**那一条判据住在 core（`authz::content_visible`，
-    // 与召回的逐条预过滤同一条，T-206 ⑧）；本处只加自己的那一层作用域：
+    // 与召回的逐条预过滤同一条， ⑧）；本处只加自己的那一层作用域：
     // **未声明读方 = 全量**（CLI / 前端不署名的那条路径，沿用接线前口径）。
     let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
@@ -316,11 +316,11 @@ pub(crate) fn read(
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
-    // 四列全部来自同一份事件切片（ADR-044：实测与判据同源）。
+    // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
     let latency = slo_report().read_all(&snapshot).value;
     let fallback = fallback_rate().read_all(&snapshot).value;
     let cost = cost_ledger().read_all(&snapshot).value;
-    // 校准列（[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：与四列同一份
+    // 校准列（[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：与四列同一份
     // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
     let cal = calibration().read_all(&snapshot).value;
     let ck = checkpoint().read_all(&snapshot).value;
@@ -373,7 +373,7 @@ pub(crate) fn read(
         serde_json::json!({})
     };
 
-    // 承诺列（T-213 段二）：与声誉列读**同一批格子**，但问的是另一件事——声誉问
+    // 承诺列（ 段二）：与声誉列读**同一批格子**，但问的是另一件事——声誉问
     // 「这个主体几分」，本列问「这一约是什么、违约为什么」。切片已按 `may_read` 取过。
     let commitments = commitments_reading(&snapshot);
 
@@ -382,10 +382,10 @@ pub(crate) fn read(
     let readyset = serde_json::to_value(crate::symbio_core::readyset().read_all(&snapshot).value)
         .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
-    // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+    // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
     // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含
-    // [plan/10 批 3](../../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的工具结果）只活在 core
+    // [plan/10 批 3](../../../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
     // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
     let transcript = serde_json::to_value(transcript().read_all(&snapshot).value)

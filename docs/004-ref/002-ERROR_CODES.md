@@ -1,0 +1,174 @@
+---
+lists: [error-codes=owner]
+kind: ref
+id: RE-002-ERROR_CODES
+title: Symbio 错误码参考
+status: active
+created: 2026-09-07
+---
+
+# Symbio 错误码参考
+
+> **文档类型：参考** — 错误码的完整清单与处理建议。
+
+## 错误码约定
+
+错误码是 **ABI 的一部分**，跨版本禁止随意变更。
+
+```rust
+// symbio_core/plugin/error.rs（节选）— PluginError 是枚举，非结构体
+pub enum PluginError {
+ NotFound(String), // -> "NOT_FOUND"
+ NotImplemented, // -> "NOT_IMPLEMENTED"
+ ValidationError(String), // -> "VALIDATION_ERROR"
+ // ... 共 12 个变体，完整清单见下表
+}
+
+impl PluginError {
+ /// 获取机器可读的错误码（跨版本稳定，属 ABI 的一部分）
+ pub fn code(&self) -> &'static str;
+}
+```
+
+错误经 `PluginPayload` 的 Error 形态返回：`code` 为机器可读码（下表），`message` 为人类可读信息。
+
+---
+
+## 标准错误码
+
+<!-- list:error-codes owner -->
+
+| 错误码 | HTTP 等价 | 含义 | 常见场景 |
+|--------|-----------|------|----------|
+| `NOT_FOUND` | 404 | 路由路径不存在或子插件未找到 | 路径拼写错误、插件未注册 |
+| `VALIDATION_ERROR` | 400 | 输入参数格式或内容校验不通过 | payload 缺少必填字段 |
+| `INTERNAL_ERROR` | 500 | 内部执行异常 | 代码 panic、外部 API 异常 |
+| `TIMEOUT` | 408 | 请求超时 | 网络延迟、LLM 响应慢 |
+| `FORBIDDEN` | 403 | 权限不足或触发安全策略 | Shell 命令被策略拦截 |
+| `NOT_IMPLEMENTED` | 501 | 插件调用未实现 | 插件未实现该子路径 |
+| `RATE_LIMITED` | 429 | 请求频率受限 | 触发限流策略 |
+| `PARSE_ERROR` | 400 | 解析错误 | JSON 反序列化失败 |
+| `ABORTED` | 499 | 操作中止 | 客户端取消、流被中断 |
+| `RETRY_WITHOUT_CONTEXT_ID` | 409 | 上下文丢失，需要重试 | 会话上下文过期 |
+| `STREAM_ERROR` | 502 | 流解析错误 | 流式响应格式异常 |
+| `COMPRESSION_FAILED` | 500 | 压缩失败 | 历史消息压缩失败 |
+
+---
+
+## 错误响应格式
+
+### JSON 格式
+
+```json
+{
+ "error": {
+ "code": "NOT_FOUND",
+ "message": "路由路径不存在: session/chat/unknown",
+ "details": {
+ "path": "session/chat/unknown",
+ "available": ["session/stats"]
+ }
+ }
+}
+```
+
+### PluginFrame 格式
+
+```rust
+PluginFrame::Error(
+ "路由路径不存在: agent/unknown".to_string,
+ Some(serde_json::json!({
+ "code": "NOT_FOUND",
+ "details": { "path": "agent/unknown" }
+ }))
+)
+```
+
+---
+
+## 错误处理最佳实践
+
+### 后端 (Rust)
+
+```rust
+use thiserror::derive;
+
+#[derive(Debug, thiserror::Error)]
+pub enum MyError {
+ #[error("配置缺失: {0}")]
+ ConfigMissing(String), // code = "CONFIG_ERROR"
+
+ #[error("外部 API 失败: {0}")]
+ ExternalApiFailed(String), // code = "EXTERNAL_ERROR"
+}
+```
+
+### 前端 (TypeScript)
+
+```typescript
+try {
+ const result = await invoke('route_v2', { request });
+} catch (error) {
+ const { code, message, details } = parseError(error);
+
+ switch (code) {
+ case 'NOT_FOUND':
+ // 提示用户检查路径
+ break;
+ case 'FORBIDDEN':
+ // 提示权限不足
+ break;
+ case 'TIMEOUT':
+ // 提供重试选项
+ break;
+ default:
+ // 通用错误提示
+ }
+}
+```
+
+---
+
+## 错误码是闭集
+
+码只有 [`PluginErrorCode`](../../symbio/src/symbio_core/plugin/error.rs) 的 13 个变体这一份真源：
+生产侧 `PluginError::code` 给出枚举、传输侧 `to_frame` 写 `as_str`、消费侧
+`PluginFrame::error_code` 解析回枚举后按值分派。
+
+**插件不自造码。** 帧里出现认不出的码，消费侧一律降级为 `PluginErrorCode::Unknown`——它不参与
+等值分派，所以「`MODEL_` 前缀 + 自造后缀」这类约定**写不出一个读得到的错误码**。域内具体故障
+（Key 含非法字符、上游限流、目录校验失败……）走 `message` / `details` 与日志。
+
+要新增一类**可分派**的故障就动那个枚举：变体、`as_str`、`from_code` 三处一起改，回来补
+上面那张表，并按[错误码约定](#错误码约定)走 ADR——它是 ABI。
+
+---
+
+## 调试技巧
+
+### 启用调试日志
+
+```bash
+# Rust 后端
+RUST_LOG=debug cargo run
+
+# 前端
+VITE_LOG_LEVEL=debug npm run dev
+```
+
+### 追踪调用链
+
+每个请求的 `metadata` 应包含 `trace_id`，后端会记录在日志中：
+
+```
+INFO trace_id=abc123 path=session/stats Start routing
+DEBUG trace_id=abc123 path=session/stats Routing finished
+```
+
+回读类路由（`vdfs/list` / `stat` / `read`）另有 `origin`——`trace_id` 串链，
+`origin` 说明**谁、为什么**（闭集，对照表见
+[007-TROUBLESHOOTING.md](../006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") 的「追踪请求链」）。
+
+---
+
+> **维护原则**：新增错误码必须在此文档登记，并说明触发条件与处理建议。

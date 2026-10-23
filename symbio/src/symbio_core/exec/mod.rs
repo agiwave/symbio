@@ -362,7 +362,7 @@ impl std::fmt::Debug for ExecAbortSignal {
     }
 }
 
-// ─── 执行期通道键（与值同住，ADR-095 根因一） ───
+// ─── 执行期通道键（与值同住，D-095 根因一） ───
 //
 // 这两个键是 [`ExecEventSink`]（出）与 [`ExecAbortSignal`]（入）在 `ctx` 上的唯一
 // 读写凭据。它们曾住 `symbio_core::keys`，与机制分家；搬来本域的判据是**键与值同住**：

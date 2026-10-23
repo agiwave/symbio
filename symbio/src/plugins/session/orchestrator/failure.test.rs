@@ -29,7 +29,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 
 /// 直落一条 `message.added` 事实（形状同 `message_events::added` 的产出）。
 ///
-/// 切主后（ADR-049）存储里的正文 = **事实投影**：夹具里「上一轮的世界」也必须
+/// 切主后（D-049）存储里的正文 = **事实投影**：夹具里「上一轮的世界」也必须
 /// 以事实在场。空切片上，生产收口路径要落的变更事实（`message_events::append`）
 /// 连溯源锚都解不出、会按口径被丢弃——测的就不再是收口本身。
 fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
@@ -375,7 +375,7 @@ async fn converge_inflight_is_idempotent() {
     );
 }
 
-// ==================== flat 档子树并集（[T-149]）====================
+// ==================== flat 档子树并集（相应批次）====================
 
 /// `subtree_of`：`flat` 档下本轮直接子节点升了根（`parent_id: None`），靠
 /// `meta.turn_root` 记号认回——并集必须把「骨架 ∪ {turn_root==骨架}」收全，

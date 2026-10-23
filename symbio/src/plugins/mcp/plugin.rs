@@ -321,7 +321,7 @@ impl VdfsProvider for McpPlugin {
                     // 形态——差别只在草稿没有内容，且此时**多出一条「导入整包」动作**
                     // （[`VDFS_ACTION_IMPORT`]，见 `detail::mcp_detail_definition`）。
                     // 导入**不是类型里的字段**：类型只说「这类东西落成后长什么样」
-                    // （见 ADR-029）。
+                    // （见 D-029）。
                     //
                     // `ext = mcp` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的
                     // 节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。

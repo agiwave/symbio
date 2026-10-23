@@ -1,17 +1,18 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/loop/README
 title: Loop 插件（单环驱动器）
 status: active
 created: 2026-10-19
+impl: done
 ---
 
 # Loop 插件（单环驱动器）
 
 一轮对话的**执行引擎**：上下文装配、轮首判决、工具循环、收束与派生事实。它是
-[T-167](../../../../docs/009-task/167-会话插件切分.md "T-167-会话插件切分") 批次 6b
-从 session 切出的驱动器件，形状由 [ADR-086](../../../../docs/010-adr/086.md "ADR-086")
-裁决；跨墙通货闭族见 [ADR-083](../../../../docs/010-adr/083.md "ADR-083") §4。
+该批 批次 6b
+从 session 切出的驱动器件，形状由 [D-086](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
+裁决；跨墙通货闭族见 [D-083](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") §4。
 
 ## 它不拥有什么
 
@@ -38,7 +39,7 @@ created: 2026-10-19
 | session → loop | `loop/<sid>` `run_turn` + `TurnDispatch` | 触发一轮；`TurnSpec` 纯值 + `facts` / `sink` / `writer` / `abort` 等闭族对象 |
 | loop → session | `session/<sid>/_run/<op>`（[`session_port.rs`](session_port.rs)） | 回读历史 / 写转写 / 压缩入格 / 补充取批 / worker 进展 / 恢复等会话侧动作 |
 
-任何第三条连接都要先改 ADR-086。本插件的 import 根被
+任何第三条连接都要先改 D-086。本插件的 import 根被
 [`E-013`](../../../../scripts/plugin-entry-audit.mjs) 钉在闭族内：只准
 `crate::symbio_core` + 通用库 + crate 根日志 / 工厂宏，不得引用 `crate::plugins::session`
 或任何兄弟插件。
@@ -59,5 +60,5 @@ created: 2026-10-19
 `model_chat.rs`）· 工具与分派（`tools*` / `tool_dispatch.rs`）· 事实与记忆
 （`derived_facts.rs` / `memory_events.rs` / `skill_events.rs` / `task_events.rs` /
 `resume.rs`）。逐项职责见
-[`../session/docs/017-module-layout.md`](../session/docs/017-module-layout.md "AR-017-module-layout")
-§1.4，主环结构见 [`../session/docs/015-core-loop.md`](../session/docs/015-core-loop.md "AR-015-core-loop")。
+[`../session/docs/104-module-layout.md`](../session/docs/104-module-layout.md "DE-104-module-layout")
+§1.4，主环结构见 [`../session/docs/102-core-loop.md`](../session/docs/102-core-loop.md "DE-102-core-loop")。

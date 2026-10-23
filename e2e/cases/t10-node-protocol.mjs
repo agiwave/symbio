@@ -95,7 +95,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t10', gatewayPort: GATEWAY_PORT });
 
     // ② 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写。
-    //    写入面**不承载**运行选项（[ADR-066] 决策 1）——`mode` 由会话 metadata 提供
+    //    写入面**不承载**运行选项（[D-066] 决策 1）——`mode` 由会话 metadata 提供
     //    （此处恰为默认值 auto），不需要也不该随消息再带一次。
     await createSession(cli, 'e2e-t10', { workdir: hd.workdir });
 

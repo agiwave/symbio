@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T68 `codebase_search` 边界批（T-111 的③④⑤）：
+// T68 `codebase_search` 边界批（ 的③④⑤）：
 //   - 索引的**增量时效性**：同一工作区连搜两次，第二次 `embedded_files == 0`
 //     （文件集指纹未变 ⇒ 一次嵌入都不做，索引原样复用）；
 //   - `rebuild: true` 强制**全量重建**（`embedded_files == files`）；

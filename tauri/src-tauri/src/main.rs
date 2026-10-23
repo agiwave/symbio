@@ -110,7 +110,7 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // 全局收尾（T-078）：事件循环结束时对整棵插件树发一次
+            // 全局收尾：事件循环结束时对整棵插件树发一次
             // `stop(PluginStopReason::Shutdown)`，让插件做最后落盘（心跳任务、
             // 会话状态等）。遍历 owner 是 `PluginRegistry::shutdown_all`，
             // CLI 的退出路径走的是同一条——两个前端一种语义。

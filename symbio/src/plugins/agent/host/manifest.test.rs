@@ -53,7 +53,7 @@ fn rejects_bad_id() {
     }
 }
 
-/// **带命名空间的 id 必须拒**（[T-210 项一] 的反例用例）。
+/// **带命名空间的 id 必须拒**（项一 的反例用例）。
 ///
 /// 这一条拒的不是「格式不好看」：`authz::principal_of` 对已带命名空间的地址**原样认下**
 /// （那是给 `person/local` / `vdfs/write` 这类完整地址准备的分支），所以一旦放行斜杠，
@@ -110,7 +110,7 @@ fn load_reads_yaml_and_json() {
     assert_eq!(load(tmp.path()).unwrap().id, "a");
 }
 
-/// 权限清单是**声明性质**（[ADR-102](../../../../../docs/010-adr/102.md "ADR-102")）：
+/// 权限清单是**声明性质**（[D-102](../../../../../docs/003-design/011-Agent目录规范.md "D-102")）：
 /// Rust 侧叫 `declared_permissions`（名字说清它没有执行方），但 Agent 包的公开键
 /// 仍是 `permissions`——改名不得变成线格式破坏。
 #[test]

@@ -1,4 +1,4 @@
-//! 重建引擎 —— 事件网格 → `ChatNode` 节点树（ADR-049 的读侧真源）。
+//! 重建引擎 —— 事件网格 → `ChatNode` 节点树（D-049 的读侧真源）。
 //!
 //! ## 为什么需要它
 //!
@@ -18,7 +18,7 @@
 //!
 //! ## 形状来源：不在这里定义
 //!
-//! 本模块在 [ADR-086](../../../../docs/010-adr/086.md "ADR-086") §7 上移到 core：
+//! 本模块在 [D-086](../../../../docs/003-design/014-单环一表.md "D-086") §7 上移到 core：
 //! session 的主读与 loop 的轮次窗口共用同一份折叠，不能各写一遍。
 //!
 //! **写入侧怎么构造，重建就怎么构造**——同一个节点只有一份形状定义。生产侧已经在
@@ -34,16 +34,16 @@
 //! （`rebuild.test.rs` 的形状复刻用例）。不在这里自作主张给用户消息补 `status`
 //! ——落库那份没有，于是同一条发言在实时面与重建面是两个身份，前端的节点合并键
 //! （把 `status` 算在内）当场失效。**重建不得"改进"形状**：改进属写侧，重建只负责
-//! 把发生过的事原样折回来（ADR-049 的零行为变更）。
+//! 把发生过的事原样折回来（D-049 的零行为变更）。
 //!
-//! ## 变更格不产节点（ADR-053）
+//! ## 变更格不产节点（D-053）
 //!
 //! `message.edited` / `message.removed` 不在上表里，因为它们**没有自己的节点**——
 //! 它们说的是「已有的某个节点现在读作 Y / 已经没了」，因此不经过 `nodes_of`，
 //! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
-//! `message.added`（ADR-054）恰恰相反：它是
+//! `message.added`（D-054）恰恰相反：它是
 //! **诞生格**，载荷里每条消息自带完整形状（写侧 `message_events::added` 直给），所以
 //! **每条都产节点**、经 `nodes_of` 的 `added_nodes` 逐条收下。边界同样封闭：只准
 //! 「无其他承载方的节点」（压缩记录等界面文本）搭这格；带对话内容的节点必须由
@@ -57,7 +57,7 @@
 //! 是**纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
 //! 事件自身的 `ts`——它才是「这件事发生在什么时候」的权威答案。
 //!
-//! ## 载荷里的节点结构（T-052 铺的路）
+//! ## 载荷里的节点结构（ 铺的路）
 //!
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
 //! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
@@ -87,7 +87,7 @@ use crate::symbio_core::{
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
-// 节点形状与汇报格的单点定义都在 core 词汇表（[ADR-082](../../../../docs/010-adr/082.md "ADR-082") 裁决三）：
+// 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md "D-082") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
 use crate::symbio_core::facts::ReportDraft;
 use crate::symbio_core::node_build::{
@@ -95,13 +95,13 @@ use crate::symbio_core::node_build::{
 };
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
-/// `plugins/session/docs/022-vdfs-session-messages.md` §3.3）。
+/// `plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
 ///
 /// 它与存储分配的权威号是**两套各自递增的计数器，同写 `ChatNode.seq` 一个字段**——
 /// 所以混用是本模块最容易顺手写出来的错：快照载荷里带的那份号是**存储层**的槽位号
 /// （`snapshot_slot_seq` 的口径，量级可以很大且不连续），而重建的号必须是**本模块
 /// 发号器**给出的连续顺序锚。两套号混用会让「快照列表内部单调、与后继事件不单调」，
-/// 而前端的排序键只有一个。ADR-049 已判定「切源后 `seq` 分配属呈现细节」。
+/// 而前端的排序键只有一个。D-049 已判定「切源后 `seq` 分配属呈现细节」。
 ///
 /// 做成类型之后，「把外来的号直接写进节点」不再是这个模块里一个能顺手写出来的动作：
 /// 节点上的重建号只有一个来路——[`RebuildSeq::assign`]。
@@ -123,7 +123,7 @@ impl RebuildSeq {
 /// 出现的那一份——收束载荷的 `tool_calls[]` 与 `artifact.added` 记的是同一批调用，
 /// 只认先到的那条（它们形状相同，但结果正文只归 `artifact.added`，见模块文档）。
 ///
-/// ## 折叠：不只是追加（S2.7-b1，ADR-053）
+/// ## 折叠：不只是追加（S2.7-b1，D-053）
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。它们是**变更格**，语义不是「加一条节点」而是：
@@ -279,7 +279,7 @@ fn nodes_of(e: &Event) -> Vec<ChatNode> {
         ) => produced_nodes(e),
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
-        // 对话面开场白（T-056，`Escalate` 首响）：与汇报同形（根级 / 带
+        // 对话面开场白（，`Escalate` 首响）：与汇报同形（根级 / 带
         // `meta.surface = "reply"` / `exclude_from_context`），只有理由码不同。
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => vec![opening_node(e)],
@@ -305,7 +305,7 @@ fn nodes_of(e: &Event) -> Vec<ChatNode> {
 /// （`completed`）就是两个身份：前端的节点合并键把 `status` 算在内
 /// （`useChatConnection.ts` 的 `own` 键），合并当场失效、历史里冒出重复节点。
 /// 「用户发言算不算完成态」是一个可以单独讨论的形状改进，但它属于**写侧**，
-/// 不归重建——重建只负责把发生过的事原样折回来（ADR-049 的零行为变更）。
+/// 不归重建——重建只负责把发生过的事原样折回来（D-049 的零行为变更）。
 fn user_node(e: &Event) -> ChatNode {
     ChatNode {
         id: event_payload_node_id(e, "id"),
@@ -328,9 +328,9 @@ fn user_node(e: &Event) -> ChatNode {
 /// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
 /// 否则同一条补充在实时面与重建面是两个节点。
 ///
-/// `id` 与 `ids` 由**载荷**给出（T-052 的原则：节点身份是事实的一部分）。载荷缺 `id`
+/// `id` 与 `ids` 由**载荷**给出（ 的原则：节点身份是事实的一部分）。载荷缺 `id`
 /// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
-/// 实时面那份不同，但**内容与角色一致**（ADR-049 的「呈现细节可能不同」）。
+/// 实时面那份不同，但**内容与角色一致**（D-049 的「呈现细节可能不同」）。
 fn supplement_node(e: &Event) -> ChatNode {
     use crate::symbio_core::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
     let count = e.payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -384,7 +384,7 @@ fn reported_node(e: &Event) -> ChatNode {
     m
 }
 
-/// 对话面开场白（`turn × asserted`，T-056）：`Escalate` 首响。
+/// 对话面开场白（`turn × asserted`，）：`Escalate` 首响。
 ///
 /// 形状经 [`crate::symbio_core::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
@@ -477,7 +477,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 到界面上却不是，等于把已记的东西丢掉。
     //
     // 读 `detail` 而不是 `reason`：后者是闭集（`fallback`），对用户没有信息量；
-    // 闭集服务判据与统计，人话服务界面——这正是 T-220 把两者分开的原因。
+    // 闭集服务判据与统计，人话服务界面——这正是 把两者分开的原因。
     let why = e
         .payload
         .get("detail")
@@ -643,7 +643,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         .to_string();
     if !failure_kind.is_empty() {
         // **并入**而非整格替换：构造侧的 `meta.style_tag` / `meta.tool_name` 是
-        // 节点身份的一部分（[T-147c-ii-s3] 后骨架与工具名只活在 meta 里），
+        // 节点身份的一部分（c-ii-s3 后骨架与工具名只活在 meta 里），
         // 整格覆盖 = 重建一次丢一次形态词，前端折叠退回 `turn`（e2e t27 抓到）。
         let mut meta = call.meta.clone().unwrap_or_else(|| serde_json::json!({}));
         if let Some(obj) = meta.as_object_mut() {

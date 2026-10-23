@@ -76,4 +76,4 @@ pub const PLUGIN_ID_VDFS: &str = "vdfs";
 pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 
 // 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
-// `plugins/composite` 一个模块消费，按 ADR-023 的依赖方判据已下沉到该模块。
+// `plugins/composite` 一个模块消费，按 D-023 的依赖方判据已下沉到该模块。

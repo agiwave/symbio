@@ -61,7 +61,7 @@ impl TodoWriteTool {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("task_{}", i + 1));
-            // 依赖：任务图是**数据不是机制**（`T-123-多步任务与返工` §2），所以它必须
+            // 依赖：任务图是**数据不是机制**（` §2），所以它必须
             // 由调用方声明在清单里，而不是由框架推断。省略 ⇒ `[]`（默认无依赖，日常
             // 调用不受影响；成环由 `acyclic_deps` 在读侧报，不在这里拦——拦下它就变成
             // 了框架替模型决定任务图）。
@@ -112,7 +112,7 @@ impl TodoWriteTool {
 
         // 回显策略：**只回确认，不回全量清单**。
         // 全量清单对当轮推理是重复（输入参数里刚写过一遍）；更早的调用在请求体里
-        // 保持原样（ADR-078：请求体是事实的纯投影，不做骨架化改写），因此工具结果
+        // 保持原样（D-078：请求体是事实的纯投影，不做骨架化改写），因此工具结果
         // 本身无需再背一份副本——清单的"唯一有效状态"由本次调用的参数承担。
         let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let message = if summary.is_empty() {
@@ -165,7 +165,7 @@ impl Capability for TodoWriteTool {
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),
             ]),
-            // 行为位自声明（T-158）：任务表写侧资格闸与任务声明记账的管辖对象。
+            // 行为位自声明：任务表写侧资格闸与任务声明记账的管辖对象。
             // 执行器读这一位判，不认名字——与风险同一条自声明纪律。
             owns_task_table: true,
             ..Default::default()

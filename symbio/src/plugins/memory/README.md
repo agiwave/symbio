@@ -1,9 +1,10 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/memory/README
 title: Memory 插件
 status: active
 created: 2026-09-28
+impl: done
 ---
 
 # Memory 插件
@@ -61,7 +62,7 @@ created: 2026-09-28
 工作区记忆空文件也注入（带空内容提示，教会模型建立记忆）；智能体记忆空文件整段省略
 （没写过就不占上下文）。
 
-> 这一腿原属独立的 `work` 插件（2026-09 并入，见 [ADR-040](../../../../docs/010-adr/040.md)）：
+> 这一腿原属独立的 `work` 插件（2026-09 并入，见 [D-040](README.md "symbio/src/plugins/memory/README")）：
 > 两个作用域同属「记忆」，收进同一个所有者后，「谁能读写它，谁负责注入它」在插件内
 > 一次成立。
 
@@ -95,4 +96,21 @@ created: 2026-09-28
 - 会话级记忆（另一层记忆）：`../session/README.md`
 - 记忆的共享实现（各层共用）：`../../../providers/` 下的 `providers/memory`
 - 子智能体目录与子树装配：`../agent/README.md`
-- Agent 目录规范 §6：`docs/005-arch/006-agent-directory-spec.md`
+- Agent 目录规范 §6：`docs/003-design/011-Agent目录规范.md`
+
+## 关键决策
+
+> 本节是**仍然约束现行代码的取舍**：每条一句决策、一句理由。已退场或主题已消失的决策不在其中（`git log` 是历史）。
+
+### D-040 work 并入 memory：记忆的两个作用域同属一个所有者
+
+①`work` 整体并入 `memory`，`<根>/memory` 一个挂载点住两份记忆——`AGENTS.md`（智能体腿，分形）+ `WORKSPACE.md`（工作区腿）；`PLUGIN_ID_WORK`、装配清单条目与 `plugins/work/` 整体删除。
+
+### D-109 两套检索内核不合一：打分各归各，「平手有稳定次级键、截断在全序之后」是全项目一份的排序口径
+
+记忆召回与代码检索不合成一套内核，结案方式是「裁决 + 一条口径补实」两种合法形态之一。
+
+### D-110 恒空预留键不进事实形状：记忆的向量键与它的写方同批落格
+
+机制强制等级清单把「embedding 事件 `vec` 恒空」列为「规则写了、无执行方」的实例。
+

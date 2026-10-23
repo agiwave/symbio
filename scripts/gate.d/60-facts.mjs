@@ -18,7 +18,7 @@
 // 的自动修复器排在它后面——链绿着但汇总页被后续阶段改脏，只有这里看得见。
 // 「逐格判差异」在链上不可行：`registry-audit --write` 的产物（`[[编号]]` 记号）本身就是
 // 下一格的输入，逐格判在 `--ci` 下恒红，理由见 `06-facts-write` 头注释与
-// [T-250-生成链阶段id失配](../../docs/009-task/250-生成链阶段id失配.md)。
+// 生成链阶段id失配。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 

@@ -66,7 +66,7 @@ fn config_roundtrips_through_json() {
     assert_eq!(back.update_offset, 100101, "游标必须随配置一起往返");
 }
 
-/// `api_base` 缺省即官方端点——**对现有部署零行为变化**是加这一位的前提（T-114）。
+/// `api_base` 缺省即官方端点——**对现有部署零行为变化**是加这一位的前提。
 #[test]
 fn api_base_defaults_to_official_endpoint() {
     let c: TelegramConfig = serde_json::from_str(r#"{"bot_token":"t"}"#).unwrap();

@@ -166,7 +166,7 @@ const RATCHETS = [
     label: 'R-002 `#[allow(dead_code)]` 存量（只许降）',
   },
   {
-    // [T-147d-iii]：`role` 退出 wire 后每一处直写都是待清零的债务。字段私有化
+    // d-iii：`role` 退出 wire 后每一处直写都是待清零的债务。字段私有化
     // 会炸掉全部 `..Default::default()` 构造点（函数式更新要求字段可见），
     // 所以钉数字而不是钉编译。
     id: 'legacy-role',

@@ -200,10 +200,10 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('docs/010-adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
+test('docs/003-design/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/010-adr/001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
+    'docs/003-design/002-架构总览.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -264,7 +264,7 @@ test('审计范围读不出：没有 .rs 语料 ⇒ 失败而非绿灯（exit 1�
 
 /** 最小名册：一行「工作记忆」，锚点列由用例填 */
 const roster = (anchor) => ({
-  'docs/004-plan/002-能力坐标系.md': [
+  'docs/003-design/008-能力注册表与能力坐标系.md': [
     '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
     '|---|---|---|:-:|:-:|:-:|:-:|---|',
     `| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | ${anchor} |`,
@@ -297,7 +297,7 @@ test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都�
   const r = audit({
     ...RS,
     ...ROSTER_RS,
-    'docs/004-plan/002-能力坐标系.md': [
+    'docs/003-design/008-能力注册表与能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
       '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `symbio/src/plugins/session/context.rs` |',
@@ -324,7 +324,7 @@ test('D-011 名册不在扫描范围 ⇒ 本条不适用，不为「没有名册
 test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭集写错了？）', () => {
   const r = audit({
     ...RS,
-    'docs/004-plan/002-能力坐标系.md': [
+    'docs/003-design/008-能力注册表与能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
       '| 工作记忆 | 未知维 | 抽象层级 | T1 | L1 | 认知 | S01 | — |',
@@ -399,7 +399,7 @@ test('D-012 任务登记册排除：条目引用旧路径是记录本身，不�
     ...RS,
     'cli/Cargo.toml': '[package]\nname = "cli"\n',
     ...teach(['产物：`../target/debug/symbio-cli.exe`']),
-    'docs/009-task/141-x.md': '事故经过：照 `../symbio/target/debug/symbio-cli.exe` 跑，全是旧产物。\n',
+    'docs/007-task/141-x.md': '事故经过：照 `../symbio/target/debug/symbio-cli.exe` 跑，全是旧产物。\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /CLI 产物指路 1 处/)
@@ -425,7 +425,7 @@ test('D-012 没有讲构建的文档 ⇒ 不适用（不陪跑，日志说明原
 
 /** 最小参数表：`projection` 行的取值域就是 ① 侧的对象 */
 const PARAMS = {
-  'docs/004-plan/001-核心架构.md': [
+  'docs/003-design/001-核心架构.md': [
     '# 架构',
     '',
     '| 参数键 | 取值域 | 平凡值 | 用于 |',
@@ -445,7 +445,7 @@ const PROJ_RS = {
 
 /** 映射表：`v` 覆盖 §1 的行，`m` 覆盖 §2 的行 */
 const mapDoc = ({ v, m }) => ({
-  'docs/006-ref/009-投影映射.md': [
+  'docs/004-ref/009-投影映射.md': [
     '# 投影映射',
     '',
     '## 1. 取值',
@@ -481,7 +481,7 @@ test('D-014 三侧一致 ⇒ 通过（exit 0）', () => {
 
 test('D-014 §8 加了取值、映射表没跟上 ⇒ 红（exit 1）', () => {
   const files = fixture()
-  files['docs/004-plan/001-核心架构.md'] = files['docs/004-plan/001-核心架构.md']
+  files['docs/003-design/001-核心架构.md'] = files['docs/003-design/001-核心架构.md']
     .replace('`conation`', '`conation` / `display`')
   const r = audit(files)
   assert.equal(r.status, 1, r.stdout)
@@ -531,7 +531,7 @@ test('D-014 `—` 行合法：平凡值 / 写侧函数 / 已裁决不做都不�
     ],
   })
   // `eval` 必须同时在 §8 的取值域里——否则这一行是「表过期」，不是「已裁决的现状」
-  files['docs/004-plan/001-核心架构.md'] = files['docs/004-plan/001-核心架构.md']
+  files['docs/003-design/001-核心架构.md'] = files['docs/003-design/001-核心架构.md']
     .replace('`conation`', '`conation` / `eval`')
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout)

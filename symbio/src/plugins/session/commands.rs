@@ -27,7 +27,7 @@
 //! `truncate_*` / `clear_*` / `named_create_*` / `write_merges_*` 等用例）：
 //! 这些操作在线上本来就是**按地址寻址**的，把它们放到 provider 那一侧观察
 //! （地址 → 回执 + 变更帧）比直接调本域方法更接近真实调用面。故本域不另立
-//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/017-module-layout.md` §2）。
+//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/104-module-layout.md` §2）。
 
 use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;
@@ -133,7 +133,7 @@ impl SessionPlugin {
             self.save_session(&session)
                 .await
                 .map_err(vdfs_from_plugin_error)?;
-            // 创建即登记（[T-182]）：会话诞生的那一刻声明主体行，运行期装配点
+            // 创建即登记（相应批次）：会话诞生的那一刻声明主体行，运行期装配点
             // 只在身份被显式改写时做幂等兜底。
             self.bind_session_identity(&session).await;
             self.notify_change(&id);
@@ -329,14 +329,14 @@ impl SessionPlugin {
             }
         }
 
-        // **规范化只做一次**（T-056·t44 抓过）：事实与帧必须是**同一条节点**。
+        // **规范化只做一次**（·t44 抓过）：事实与帧必须是**同一条节点**。
         // 旧形态里事实落 `updated`（原样）、帧发 `llm_message_frame(&updated)`（补
         // `status: completed`）——两者对同一节点给出两种读法，于是「编辑后立刻读」
         // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实
         // 与视图不一致**：`status` 一旦缺失，重建就再也补不回来（事实源里没有它）。
         // 统一口径：规范化后的那条同时进事实与帧，重建与实时读读的是同一条。
         let updated = crate::symbio_core::llm_message_frame(&existing.clone());
-        // **顺序反转**（[ADR-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
+        // **顺序反转**（[D-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
         // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
         // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
         chat_session
@@ -372,7 +372,7 @@ impl SessionPlugin {
             None => Vec::new(),
         };
 
-        // **顺序反转**（[ADR-054] 决策 2）：经唯一写入口 `apply` 落。一次截断落
+        // **顺序反转**（[D-054] 决策 2）：经唯一写入口 `apply` 落。一次截断落
         // **一条** `message.removed`，区间用 `ids` 表达——逐条发事件会把一个动作拆成
         // n 条事实，n 随消息量增长，而事实网格的价值正在于「一件事一个键」。
         // 空列表不落格（`apply` 里 `removed` 自己判）：「什么都没删」不该在事实源上
@@ -396,7 +396,7 @@ impl SessionPlugin {
         Ok(deleted_ids)
     }
 
-    // ==================== 创建即登记（[T-182]） ====================
+    // ==================== 创建即登记（相应批次） ====================
 
     /// **绑定会话身份**：会话创建时登记，身份被 metadata 改写时换行。
     ///
@@ -472,7 +472,7 @@ impl SessionPlugin {
         // 清理活跃条目
         self.active_mgr.sessions.write().await.remove(session_id);
 
-        // 子会话随父目录一起删除：登记面也按会话回收（[T-182]），所以在删除**前**
+        // 子会话随父目录一起删除：登记面也按会话回收（相应批次），所以在删除**前**
         // 先把后代 id 记下来——删完之后磁盘上不再有可枚举的来源。
         let descendants = self.descendant_session_ids(session_id).await;
 

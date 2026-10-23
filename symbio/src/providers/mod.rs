@@ -15,7 +15,7 @@
 //!
 //! > **只有多个插件模块公用的东西才进本层。只有一个模块用的，一律下沉回那个模块。**
 //!
-//! 这是 ADR-023「依赖方数量」判据在本层的直接应用，
+//! 这是 D-023「依赖方数量」判据在本层的直接应用，
 //! 与 `symbio_core` 用的是同一把尺子。**出口的每个符号都要能报出它的消费者**
 //! ——报不出的就不该在出口（见下方 `pub(crate) use` 处对 `MemoryInjection` 的说明）。
 //!
@@ -70,7 +70,7 @@
 //!    `dyn VdfsProvider`，那些方法一个都调不到。
 //!
 //! 把它们塞进工厂等于「三次 `ctx` 存取 + 一次字符串查表 + 一次 downcast」换掉一次
-//! 编译期检查的直接构造——ADR-035 决策 1 否决的就是这个。
+//! 编译期检查的直接构造——D-035 决策 1 否决的就是这个。
 //!
 //! ## 磁盘布局（统一约定）
 //!
@@ -110,7 +110,7 @@ pub(crate) use collectors::DefaultToolVisitor;
 pub(crate) use memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 // `embedding` 的**实例**不在这里：两个实现经 `submit_object_creator!` 注册，
 // 业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_*, ctx)` 取。
-// 只出口「为什么不可用」（T-199）：工具降级时要把原因写进返回体，而原因不是实例。
+// 只出口「为什么不可用」：工具降级时要把原因写进返回体，而原因不是实例。
 pub(crate) use embedding::unavailable_reason as embedding_unavailable_reason;
 pub(crate) use vdfs_service::{
     auto_id as vdfs_auto_id, id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs,

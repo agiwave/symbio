@@ -1,4 +1,4 @@
-//! 阶段② 调用——`execute_turn` 四段之二（T-179 · B2，PL-015 §5 动作 B2）。
+//! 阶段② 调用——`execute_turn` 四段之二（ · B2，DE-021 §5 动作 B2）。
 //!
 //! 两档取其一：反射档经 [`TurnRunner::run_reflex`]（零模型调用），深度档装配
 //! [`TurnInput`]（含轮内注入闭包）后经 [`SessionDispatchPort`](super::super::tool_dispatch::SessionDispatchPort)
@@ -79,7 +79,7 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
     let outcome = match &hit {
         // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
         // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
-        // 这正是 `docs/004-plan/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
+        // 这正是 `docs/003-design/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
         // （反射档装不进 LLM 字段），而不是"装配了模型但约定不调它"。
         Some(h) => {
             crate::plugin_info!(
@@ -179,7 +179,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                             // 一个时刻入参：上面那次抽干已经把补充格落进日志，
                             // `report_due` 视图读的就是它（判据 12）。
                             if let Some(report) = report {
-                                // **落格即上线**（T-136 的另一半）：这句话的设计目的就是「本轮还要
+                                // **落格即上线**（ 的另一半）：这句话的设计目的就是「本轮还要
                                 // 跑很久，先报一句」，只落格不下发就等于把它压到轮末、把目的抵消。
                                 // 节点由 `to_message()` **现造一次**，id 同写进落格载荷——重建侧
                                 // （`rebuild::reported_node` 走 `event_payload_node_id`）读的就是它，
@@ -237,13 +237,13 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 final_reply: None,
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
-                // 对话面开场白（T-056，`Escalate` 首响）：由 `chat_loop::apply_verdict`
+                // 对话面开场白（，`Escalate` 首响）：由 `chat_loop::apply_verdict`
                 // 产出、随 `ExecTurn` 递进来，运行器据它落 `chat.assistant.opening` 格
                 // （开场白后面照常进工具循环，故不占收束格）。
                 opening_text: opening_text.map(str::to_string),
                 opening_dialog,
                 // 落格身份：本轮 Turn 根 id（载荷 `turn_id`）+ 流式节点取数口。用户格
-                // 已由编排层先落（T-225），运行器只收它的 seq。取数口是**快照闭包**：
+                // 已由编排层先落，运行器只收它的 seq。取数口是**快照闭包**：
                 // 运行器每轮收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，
                 // 中途正文与思考因此逐轮入格（半截中止时它们是唯一幸存者）。
                 turn_root_id: root_id.to_string(),
@@ -267,14 +267,14 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                     }
                 })
                     as super::super::turn_runner::NodeFactsFn),
-                // 中途中止信号（ADR-052 决策 1）：闸门与首请求之间的空隙由运行器
+                // 中途中止信号（D-052 决策 1）：闸门与首请求之间的空隙由运行器
                 // 接管——落完用户格、发第一个请求前检查，已中止则走中止收束格。
                 abort: Some(abort.clone()),
             };
-            // 工具分发：契约与实现都在插件侧（ADR-118 决策 5）——它持插件宿主、
+            // 工具分发：契约与实现都在插件侧（D-118 决策 5）——它持插件宿主、
             // 请求上下文、转写出口与工具存档目录（core 认识这些即违 E-009）。
             //
-            // 淘汰闸的部署级判据由 session 折叠成**一个值**（`ADR-086 §4`：全量事件
+            // 淘汰闸的部署级判据由 session 折叠成**一个值**（`D-086 §4`：全量事件
             // 过墙是 P6「值注入」的反面）；取失败按「未收回」继续并出声——与
             // 「读不出的 WAL 跳过」的既有口径一致。
             let elimination_revoked = session
@@ -303,7 +303,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 elimination_revoked,
             );
             let dispatch_ref: &dyn super::super::tool_dispatch::ToolDispatch = &dispatcher;
-            // 步循环在**执行器**里，不在 `turn_runner` 里（T-227 步 5）。
+            // 步循环在**执行器**里，不在 `turn_runner` 里（ 步 5）。
             let r = super::drive_steps(
                 store.as_ref(),
                 &llm,
@@ -397,7 +397,7 @@ pub(crate) fn supplement_into_request(
             &actor.principal,
         )
         .with_produced_by(anchor)
-        // 载荷带上**节点身份**（T-052 的原则：节点身份是事实的一部分）：重建按 `id`
+        // 载荷带上**节点身份**（ 的原则：节点身份是事实的一部分）：重建按 `id`
         // 复刻这条用户消息的身份、按 `ids` 复刻 `meta.supplement_ids`。缺了它们，
         // 重建只能合成 id（每次重开都换一批），且合并标记里的原始条目 id 无处可寻
         // ——而「合并后原始条目只此一处留痕」（见 `transcript::supplements` 的模块头）。

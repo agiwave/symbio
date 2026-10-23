@@ -3,7 +3,7 @@
  *
  * 域类型与常量对齐后端纯接口：symbio/src/symbio_core/vdfs/
  * 操作路径/信封对齐后端线路层：symbio/src/plugins/vdfs/protocol.rs
- * 规范：docs/005-arch/013-vdfs.md
+ * 规范：docs/003-design/009-VDFS规范.md
  *
  * 前端只消费协议形状；**资源类型、能力、标签、路径模板一律来自后端**，
  * 前端仅持有 ext → 渲染器、资源类别 → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。
@@ -70,7 +70,7 @@ export const VDFS_STATUS_ACTIVE = 'active'
  *
  * 会话用它取代「`active` + `last_failed` 布尔」这种「状态 + 平行标志位」写法：
  * 「上一轮失败了吗」= `status == VDFS_STATUS_FAILED`，一处判定，不会漏读。
- * 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.3.1。 */
+ * 见 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §2.3.1。 */
 export const VDFS_STATUS_FAILED = NODE_STATUS_FAILED
 /** 节点状态：未开始（消息；会话没有这个态——它是长驻容器） */
 export const VDFS_STATUS_PENDING = NODE_STATUS_PENDING
@@ -166,7 +166,7 @@ export interface VdfsAccess {
  * 「怎么把它造出来」不在这里——**导入整包是详情页上的一条动作**
  * （`VDFS_ACTION_IMPORT`，载荷见 `DetailAction.pack`），与「导出」「删除」同级。
  * 曾经它带 `source` / `import` 两个字段承载导入，那让一个呈现结构承担了操作语义，
- * 也让 `VdfsProvider` 上多出一个系统级接口（见 ADR-029）。
+ * 也让 `VdfsProvider` 上多出一个系统级接口（见 D-029）。
  *
  * ## 两条独立的键：`ext` 与 `node_ext`
  *
@@ -243,7 +243,7 @@ export interface VdfsNode {
    *
    * 一个目录接受的是**一类**东西——「可新建两类」是伪命题：那其实是同一个类型的
    * 两种落盘路径，而第二条（整包导入）是详情页上的一条**动作**，不是第二种类型
-   * （见 {@link VdfsNewType} 与 ADR-029）。
+   * （见 {@link VdfsNewType} 与 D-029）。
    */
   new_type?: VdfsNewType
   /** 场景扩展字段（flatten 到顶层） */
@@ -697,7 +697,7 @@ export function parseVdfsSessionAddr(addr: string): { mountDir: string; id: stri
 //
 // 于是前端不需要「知道上一条事件是什么」就能渲染正确——这正是
 // `eventBus.replayBuffer`（切会话防乱序缓冲）可以被删掉的原因。
-// 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §3.3。
+// 见 `symbio/src/plugins/session/docs/105-node-state-streaming.md` §3.3。
 
 /** 结局：正常结束 */
 export const OUTCOME_COMPLETED = 'completed'

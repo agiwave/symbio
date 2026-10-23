@@ -9,7 +9,7 @@
  * 于是「新增一种呈现形态」的完整代价是：
  *   1. wire 侧：后端枚举 + 前端 `NODE_KINDS` 各加一值（闭集跨栈批次）；若只是既有五值的
  *      呈现变体（思考 vs 压缩、整轮 vs 工具），**前端零改动**——后端在交付出口把它折成
- *      `title` / `icon` / `actions` 数据即可（[ADR-070](../../../docs/010-adr/070.md) §决策 3）；
+ *      `title` / `icon` / `actions` 数据即可（[D-070](../../../docs/003-design/002-架构总览.md "DE-002-架构总览") §决策 3）；
  *   2. `messagePresentation.ts` 的 `TYPE_PRESENTATION` 加一行（仅当新增的是第六个形态）、
  *      文案表加一行；
  *   3. `messageRenderers.ts` 加一行注册。
@@ -46,9 +46,9 @@ import { messageRendererKey, type MessageRenderer } from './messagePresentation'
 import { createRendererRegistry } from './factory'
 
 
-// ==================== Typing 占位合成（[T-151]，纯函数） ====================
+// ==================== Typing 占位合成（相应批次，纯函数） ====================
 //
-// 后端**从不发** typing 帧（见 T-151 exit）；「生成中」的即时反馈由前端按一条规则
+// 后端**从不发** typing 帧（见 exit）；「生成中」的即时反馈由前端按一条规则
 // 合成：一个**根级骨架容器**（`type = skeleton` 且无父节点）正在 streaming、且**还没有
 // 任何真实子节点**时，给它挂一个 typing 占位当第一个孩子。三条状态都由这一个谓词推出：
 //

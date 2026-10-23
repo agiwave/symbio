@@ -160,18 +160,18 @@ test('放宽注释里没有 ADR 编号 ⇒ CS-002 变红', () => {
 
 test('放宽注释引用了不存在的 ADR ⇒ CS-002 变红', () => {
   const r = audit(
-    core(ONE, { 'scripts/core-shape-audit.mjs': '// core-shape-allow methods: ADR-077 扩到 2 个成员的理由\n' }),
+    core(ONE, { 'scripts/core-shape-audit.mjs': '// core-shape-allow methods: D-077 扩到 2 个成员的理由\n' }),
     { baseline: '1:2:0' },
   )
   assert.equal(r.status, 1, '指向打不开的决策 = 空引用')
-  assert.match(r.stderr, /ADR-077.*打不开|打不开/)
+  assert.match(r.stderr, /D-077.*打不开|打不开/)
 })
 
 test('放宽注释挂着能打开的 ADR ⇒ 通过（棘轮不判论证内容，只保证决策存在）', () => {
   const r = audit(
     core(ONE, {
-      'scripts/core-shape-audit.mjs': '// core-shape-allow methods: ADR-077 扩到 2 个成员的理由\n',
-      'docs/010-adr/077.md': '---\nkind: adr\n---\n',
+      'scripts/core-shape-audit.mjs': '// core-shape-allow methods: D-077 扩到 2 个成员的理由\n',
+      'symbio/src/plugins/heartbeat/README.md': '---\nkind: adr\n---\n',
     }),
     { baseline: '1:2:0' },
   )
@@ -181,8 +181,8 @@ test('放宽注释挂着能打开的 ADR ⇒ 通过（棘轮不判论证内容�
 test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当豁免）', () => {
   const r = audit(
     core(ONE, {
-      'scripts/core-shape-audit.mjs': '// core-shape-allow methodz: ADR-077 打错了键名\n',
-      'docs/010-adr/077.md': '---\nkind: adr\n---\n',
+      'scripts/core-shape-audit.mjs': '// core-shape-allow methodz: D-077 打错了键名\n',
+      'symbio/src/plugins/heartbeat/README.md': '---\nkind: adr\n---\n',
     }),
     { baseline: '1:2:0' },
   )

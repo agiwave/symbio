@@ -45,7 +45,7 @@ fn verdict_wire_shape_carries_the_reason_verbatim() {
 }
 
 /// **一条模型往返的判据只有一份**：措辞插件按它决定是否生成，编排层按它决定
-/// 要不要落端口 `model` 的账（T-238）。两处各判一遍会漂移成「记了账却没打模型」
+/// 要不要落端口 `model` 的账。两处各判一遍会漂移成「记了账却没打模型」
 /// （三格不再代表一次模型调用，日志数不准）或「打了模型没账」（要关的那个缺口）。
 #[test]
 fn only_from_context_costs_a_model_round_trip() {

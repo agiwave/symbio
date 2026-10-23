@@ -1,4 +1,4 @@
-//! 一次轮次的**进程内交付包**：session → loop 的唯一输入面（ADR-086 §2/§3）。
+//! 一次轮次的**进程内交付包**：session → loop 的唯一输入面（D-086 §2/§3）。
 //!
 //! 它只装三类东西：纯值输入（[`TurnSpec`]）、本会话事实轨端口（`Arc<dyn Store>`）、
 //! 世界端口（sink / writer / abort / provider / 作用域容器）。这些对象都不跨进程，
@@ -101,7 +101,7 @@ pub struct TurnReport {
     /// `Failed` 的原因。
     pub error: Option<String>,
     /// `Aborted` 时已产出的半截消息（由 loop 私有的退出类型携带过来——
-    /// 它不住 `PluginError`：那是不跨墙的数据，ADR-095）。
+    /// 它不住 `PluginError`：那是不跨墙的数据，D-095）。
     pub partial: Vec<ChatNode>,
     /// Stop 钩子的 `last_message`（今日 `fire_stop_hook` 的取值）。
     pub last_message: Option<String>,
@@ -133,8 +133,8 @@ impl SymbioKey for TurnDispatchKey {
 }
 pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 
-/// loop→session 内部动作段的**地址词表**（[ADR-086](../../../../docs/010-adr/086.md "ADR-086") §4；
-/// 闭集的去处见 [ADR-094](../../../../docs/010-adr/094.md "ADR-094")）。
+/// loop→session 内部动作段的**地址词表**（[D-086](../../../../docs/003-design/014-单环一表.md "D-086") §4；
+/// 闭集的去处见 [D-094](../../../../docs/003-design/014-单环一表.md "D-094")）。
 ///
 /// `_run` 是会话挂载点下的一级段：`session/<sid>/_run/<op>`。地址末段与
 /// `Action.action` 必须**字面相等**——两者只在这里命名一次，两侧都从这里取。
@@ -144,7 +144,7 @@ pub const TURN_DISPATCH: TurnDispatchKey = TurnDispatchKey;
 /// 它不是资源段：不出现在 `list` 里（`internal_dirs` 不收它）。
 ///
 /// **闭集不在这里**：「session 实现了哪些动作」是执行侧事实，与处理函数同住
-/// session 的行表（ADR-094）——授权判据第 3 条读那张表，「在表内」与「有臂」
+/// session 的行表（D-094）——授权判据第 3 条读那张表，「在表内」与「有臂」
 /// 是同一件事。清单与实现分居两地要靠人工对账，而漏一份是静默的授权缺口。
 pub mod run_ops {
     /// 内部动作段的段名。
@@ -167,12 +167,12 @@ pub mod run_ops {
     pub const COMPRESSION_FINISH: &str = "compression-finish";
 }
 
-/// session → loop 的唯一动作名（[ADR-086] §5）：`loop/<sid>` 只接受它。
+/// session → loop 的唯一动作名（[D-086] §5）：`loop/<sid>` 只接受它。
 ///
 /// 两侧隔着插件墙各写一遍字面量会静默漂移（拼方与解方必须逐字相等），
 /// 故与 `run_ops` 同住 core——它是**纯值词汇**，不是新机制。
 ///
-/// [ADR-086]: ../../../../../docs/010-adr/086.md "ADR-086"
+/// [D-086]: ../../../../../docs/003-design/014-单环一表.md "D-086"
 pub const LOOP_RUN_TURN: &str = "run_turn";
 
 // ── 动作载荷（纯值，两侧共同命名）──────────────────────────────────────

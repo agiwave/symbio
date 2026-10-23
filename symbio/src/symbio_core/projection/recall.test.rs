@@ -1,7 +1,7 @@
 //! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数，
-//! 外加混合打分（T-085 批②）的语义维判据。
+//! 外加混合打分（ 批②）的语义维判据。
 //!
-//! 对应 [roadmap/S10 §5](../../../../docs/009-task/130-个人认知体系注入.md "T-130-个人认知体系注入") 的结论：
+//! 对应 [roadmap/S10 §5](../../../../docs/007-task/130-个人认知体系注入.md ") 的结论：
 //! 「通用性过滤」与 `memory.forgotten` 同构 ⇒ 它必须是**读侧投影参数**、不能是写侧过滤，
 //! 因为只有读侧**可逆**（改参数即可召回，事实从不丢）。`tag` 是该机制**唯一已落地**的实例，
 //! 而且是**承重**的：`memory_events::consolidate` 依赖它（只合并同标签的记忆）。
@@ -143,7 +143,7 @@ fn changing_the_tag_changes_the_view() {
     assert_ne!(contents(&recall_with(None, &snap)), contents(&a));
 }
 
-// ── 判据四：混合打分（T-085 批②，语义维）────────────────────────────────
+// ── 判据四：混合打分（ 批②，语义维）────────────────────────────────
 
 fn recall_query(query: &str, events: &[Event]) -> RecallView {
     recall(VIEWER, None, Some(query.to_string()))
@@ -291,7 +291,7 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
     }
     let snap = store.range(Seq::new(0));
 
-    // 配额 5：窗口只交**切片头部** 5 条 ⇒ 外壳降级 + 部分结果（ADR-105：预算
+    // 配额 5：窗口只交**切片头部** 5 条 ⇒ 外壳降级 + 部分结果（D-105：预算
     // 语义收敛到框架层 `apply`，投影闭包不再自带配额扫描）。
     let starved = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::new(0, 5));
     assert!(
@@ -308,7 +308,7 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
         "窗口只交配额内的切片头部（给定顺序即主张顺序，截尾不截头）"
     );
 
-    // T-104：视图字段与外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
+    // ：视图字段与外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
     // 视图字段是消费方唯一能读到的降级信号。誊抄义务在**取值点**
     // （`memory_events::recall_view`，那是唯一丢外壳的地方），投影闭包不再自置。
 

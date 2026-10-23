@@ -1,4 +1,4 @@
-//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../../docs/009-task/125-长会话与断点恢复.md "T-125-长会话与断点恢复")
+//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../../docs/007-task/125-长会话与断点恢复.md ")
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
@@ -377,7 +377,7 @@ fn open_readonly_on_a_missing_file_creates_nothing() {
     );
 }
 
-/// 批 0 反向用例（[plan/11 §3 批 0](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 判据）：
+/// 批 0 反向用例（[plan/11 §3 批 0](../../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") 判据）：
 /// 两个写者交错 ⇒ 第二个拿不到写者令牌、`append` 返回 `NotTheWriter`，且**盘上零丢失**。
 ///
 /// 这是本批的核心：在此之前「单写者」只由进程内 `RwLock` 保证，第二个写者会静默地
@@ -719,7 +719,7 @@ fn reopening_after_archival_sees_only_the_live_tail() {
 /// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
 /// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
 /// 「这条会话压缩过没有」——那是布局泄漏进抽象
-/// （[plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
+/// （[plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
 #[test]
 fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);
@@ -728,7 +728,7 @@ fn range_unions_archives_with_live_in_seq_order() {
     // live 段只是尾部两条——那是实现的内部形态，不再是公开读法。
     assert_eq!(live_seqs(&store), vec![10, 11]);
 
-    // 完整史是原样的 12 条（逐条不重不漏——ADR-053 迁移表 b2 行的「零回退损失」）。
+    // 完整史是原样的 12 条（逐条不重不漏——D-053 迁移表 b2 行的「零回退损失」）。
     let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()
@@ -912,7 +912,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 }
 
-// ==================== 写侧不变量闸门（T-188）====================
+// ==================== 写侧不变量闸门====================
 //
 // 闸门挂在 `WalStore::append` 这个**唯一写入口**内：三条真实写路径（用户输入 /
 // 工具结果 / 收尾落格）都从这里过。这一组钉五件事：
@@ -921,7 +921,7 @@ fn an_artifact_round_is_complete_after_reopen() {
 // 2. I1 同轮第二条 final 被拒；
 // 3. I1 同轮第二条开轮被拒（不同 id——同 id 会先被 `Duplicate` 拦下）；
 // 4. I3 新轮越过未收束的旧轮**不拒**（崩溃恢复就是这个形状），但计数 + 出声。
-// 5. 名字与格位对不上被拒（[T-206 段四](../../../../../docs/009-task/206-事件总线读侧与协议收敛批.md "T-206-事件总线读侧与协议收敛批")）：
+// 5. 名字与格位对不上被拒（段四）：
 //    表上没这个名字、或这个名字不住在这一格——两条都是 `OffGrid`，不是 `Invariant`。
 
 /// 一条**没有** `produced_by` 的 final（I2 的反例）。
@@ -980,7 +980,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
             "问",
         ))
         .unwrap();
-    // 产物收束（ADR-067）：它让「这一轮算收束」，但 final 还没落——必须还能落。
+    // 产物收束（D-067）：它让「这一轮算收束」，但 final 还没落——必须还能落。
     store
         .append(
             Event::pending(

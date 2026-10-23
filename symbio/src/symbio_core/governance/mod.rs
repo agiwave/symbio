@@ -1,9 +1,9 @@
-//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
 //! ## 为什么第零天就位
 //!
 //! 权限是**静默失效**的——违反时没有测试会失败（J3）。事后补，代价是重写所有
-//! 历史事件（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。所以 S3 一阶
+//! 历史事件（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。所以 S3 一阶
 //! 只做两件事：授权矩阵（第 7 步）与默认隔离（第 8 步），其余一切等它。
 //!
 //! ## 授权必须成对（01 §7 的核心设计）
@@ -14,7 +14,7 @@
 //! | 读侧 | [`PermissionMatrix::can_see`] | 只有写侧 = 看得到一切 |
 //!
 //! 因此矩阵**构造时**就拒绝不成对的主体策略：只有写侧 → 拒绝（出口判据，
-//! [plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 7 步）；查询对未知主体
+//! [plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 7 步）；查询对未知主体
 //! 一律 fail-closed——「没说允许」就是拒绝，不是放行。
 //!
 //! ## 与 `capability` 域的同名辨析
@@ -25,7 +25,7 @@
 //! 本枚举只经 `governance::Capability` 引用，**不进根平铺**——两个 `Capability`
 //! 同时出现在调用点，正是命名纪律要阻止的错位。
 //!
-//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）
+//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）
 //!
 //! 矩阵**构造**在 [`crate::symbio_core::authz`]（本机主体清单，与本域同住一棵模块树），
 //! **判定**在 `plugins/session` 两处：
@@ -36,7 +36,7 @@
 //! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_gate`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
-//! 两道写侧闸判的是**两件事**（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")：收束格按种类判）：
+//! 两道写侧闸判的是**两件事**（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")：收束格按种类判）：
 //! 发言收束问 `reply.*`、产物收束问 `produce.artifact`。没有发言权的主体（对等主体
 //! `agent:peer-b` 只持 `produce.artifact`）因此仍能以**产物**收束一轮——「没有说话
 //! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
@@ -48,7 +48,7 @@
 //! 引用），也**不进对外公开面**（`pub(crate)` 开给全 crate）——表里写的是部署事实，
 //! 不是契约。
 //!
-//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") ⑥ 行）
+//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") ⑥ 行）
 //!
 //! 只依赖类型定义 + ④ store 的**读面**（事件切片），只读写事件——不持有
 //! ①②③⑤ 的任何句柄。
@@ -103,7 +103,7 @@ macro_rules! closed_set {
 
 closed_set! {
     name pub(crate),
-    /// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**6 个封顶**）。
+    /// 权限能力（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：**6 个封顶**）。
     ///
     /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
     /// 新动作种类才走 ADR（03 §3）。
@@ -115,7 +115,7 @@ closed_set! {
         /// 判决意图（快速档分类）。
         JudgeIntent => "judge.intent",
         /// 发言（一轮的收束格）。首响与追加在同一条通道上，**不按轮次位置分能力**：
-        /// 生产里每次收束都是「本轮尚无收束格」，追加臂从未被派发（T-178）。
+        /// 生产里每次收束都是「本轮尚无收束格」，追加臂从未被派发。
         Reply => "reply",
         /// 定义工作（任务分解、派活）。
         DefineWork => "define.work",
@@ -130,12 +130,12 @@ closed_set! {
 
 closed_set! {
     name pub,
-    /// 可见域（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
+    /// 可见域（[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表：3 个取值）。
     ///
-    /// **C10**（[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：默认
+    /// **C10**（[plan/04 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：默认
     /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
     ///
-    /// ## 字符串形态：内容侧可见域的载荷书写（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")）
+    /// ## 字符串形态：内容侧可见域的载荷书写（相应批次）
     ///
     /// [`Self::name`] / [`Self::from_name`] 是**载荷里的书写形态**（`memory.encoded`
     /// 的 `vis_scope` 字段）：判定走枚举，落盘走字符串，两套形态共用同一份映射——
@@ -170,7 +170,7 @@ impl VisScope {
     /// 两个可见域里**更宽**的那个（`thread_private` < `shared` < `public`）。
     ///
     /// 唯一的合并判据：读侧要就一批内容回答「这份整体给不给人看」时用它
-    /// （T-094 ② 的整列闸）——各调用点自己排大小就会漂移成「这边 public 赢、
+    /// （ ② 的整列闸）——各调用点自己排大小就会漂移成「这边 public 赢、
     /// 那边 shared 赢」，而两种答案都是合法取值，没有任何东西会变红。
     pub fn widen(self, other: VisScope) -> VisScope {
         use VisScope::{Public, Shared, ThreadPrivate};
@@ -188,7 +188,7 @@ impl VisScope {
     /// **漂移方向**：把任何一遍写成 `unwrap_or(Public)` 或漏掉 `as_str()`，那条读数就
     /// 悄悄放宽，而两边都是合法值、没有东西会变红（与 [`Self::from_name`] 文档里那条同向判据）。
     ///
-    /// 只认载荷，不改判据：产地在 `memory_events::encode`（T-094 ①）。
+    /// 只认载荷，不改判据：产地在 `memory_events::encode`（ ①）。
     pub fn of_event(e: &crate::symbio_core::Event) -> VisScope {
         e.payload
             .get(Self::VIS_SCOPE_KEY)
@@ -240,7 +240,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/007-task/123-多步任务与返工.md ")）。
     SelfVerifier { principal: String },
 }
 
@@ -291,7 +291,7 @@ pub struct PermissionMatrix {
 
 impl PermissionMatrix {
     /// 由主体策略集构造。**任何一侧缺失即整体拒绝**（出口判据「只有写侧 → 拒绝」，
-    /// [plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 7 步）。
+    /// [plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 7 步）。
     pub fn new(policies: Vec<PrincipalPolicy>) -> Result<Self, PairingViolation> {
         for p in &policies {
             if p.grants.is_empty() {
@@ -305,7 +305,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/007-task/129-外部执行与熔断.md ")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
@@ -395,7 +395,7 @@ impl PermissionMatrix {
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
     ///
     /// 只有一个能力 [`Capability::Reply`]：首响与追加是同一条通道上的两种位置，
-    /// 生产里所有收束都在「本轮尚无收束格」的位置（T-178 删掉了不可达的追加臂）。
+    /// 生产里所有收束都在「本轮尚无收束格」的位置（ 删掉了不可达的追加臂）。
     /// 未持有 ⇒ 拒绝入格（fail-closed）。
     pub fn can_reply(&self, principal: &str) -> bool {
         self.can_write(principal, Capability::Reply)
@@ -404,7 +404,7 @@ impl PermissionMatrix {
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`
     /// 前的判据（`turn_runner::closure_gate` 的 `ClosureKind::Artifact` 臂）。
     ///
-    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）：
+    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[D-067](../../../../docs/003-design/011-Agent目录规范.md "D-067")）：
     /// 收束有两条路，谓词各问自己那一项能力。对等主体（`agent:peer-b`）只持
     /// `produce.artifact`，发言闸对它恒拒而产物闸恒放——它因此能收束为**一件
     /// 产物**，而不是每一轮都留下一条 C4 未收束。
@@ -438,7 +438,7 @@ impl PermissionMatrix {
     }
 }
 
-/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）：
+/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/007-task/133-多智能体社会.md ")）：
 /// 对某主体某项能力的一次**收回**或**恢复**。
 ///
 /// ## 为什么是数据而不是状态
@@ -533,7 +533,7 @@ impl GrantsOverlay {
 
     /// 该主体的该能力**现在是否被收回**。
     ///
-    /// 判据分三段，前两段是闭集 fail-closed（[ADR-099](../../../../docs/010-adr/099.md "ADR-099")）：
+    /// 判据分三段，前两段是闭集 fail-closed（[D-099](../../../../docs/003-design/011-Agent目录规范.md "D-099")）：
     ///
     /// - **查询名认不出**（不在 [`Capability`] 闭集内）⇒ 告警并按**已收回**判——
     ///   「现在准不准」无从查起时宁红不漏，笔误的查询名不得变成一次静默放行；

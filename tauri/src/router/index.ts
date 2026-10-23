@@ -71,7 +71,7 @@ const router = createRouter({
         // 深链与「浏览内部」push 出来的地址页都由本路由承接。
         { path: 'vdfs/:dir(.*)*', name: 'vdfs', component: VdfsView },
         // 旧地址的兼容 redirect（书签 / 深链）：指向同名挂载的 VDFS 页。
-        // 机制与沿革见 docs/005-arch/013-vdfs.md，此处只保留 URL 字面量。
+        // 机制与沿革见 docs/003-design/009-VDFS规范.md，此处只保留 URL 字面量。
         {
           path: 'entities/:types?',
           redirect: (to) => {
@@ -100,7 +100,7 @@ const router = createRouter({
       ]
     },
     // 容器内部的整页入口不再需要：内部结构由 VDFS 的
-    // `<id>/<子类别>/<条目>` 寻址承担（钻入 = push 一个地址页，见 docs/005-arch/013-vdfs.md）。
+    // `<id>/<子类别>/<条目>` 寻址承担（钻入 = push 一个地址页，见 docs/003-design/009-VDFS规范.md）。
   ]
 })
 

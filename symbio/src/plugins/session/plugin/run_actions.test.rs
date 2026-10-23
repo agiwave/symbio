@@ -5,7 +5,7 @@
 //!   非 `Action` 请求 ⇒ `Invalid`；
 //! - **行为与帧形**：每个 op 的返回值是调用方经地址面能看到的全部，帧则经本会话
 //!   订阅表观察（`Transcript::publish` 是消息帧的唯一出口）——两者一起锁住
-//!   「写动作自己发帧」这条契约（[ADR-086](../../../../../docs/010-adr/086.md "ADR-086") §4）。
+//!   「写动作自己发帧」这条契约（[D-086](../../../../../docs/003-design/014-单环一表.md "D-086") §4）。
 
 use super::*;
 use crate::plugins::session::paths;
@@ -277,7 +277,7 @@ async fn run_only_accepts_actions() {
     assert!(matches!(err, VdfsError::Invalid(_)), "得到 {err:?}");
 }
 
-// ==================== 行表（闭集的组织方式，ADR-094）====================
+// ==================== 行表（闭集的组织方式，D-094）====================
 
 /// 闭集 = 行表自身：**op 词表的每个常量在行表里恰好出现一次**。
 ///
@@ -670,7 +670,7 @@ async fn run_compression_begin_and_finish() {
     );
     assert_eq!(
         begin_reply["skipped"], false,
-        "熔断未触发 ⇒ loop 应照常压缩（ADR-086 §6）"
+        "熔断未触发 ⇒ loop 应照常压缩（D-086 §6）"
     );
     let begin = frames(&seen);
     assert_eq!(begin.len(), 1);
@@ -724,13 +724,13 @@ async fn run_compression_begin_and_finish() {
 async fn run_persistent_rebuilds_from_store_without_handle() {
     let f = fixture();
     // 先落元数据（`session.json` 是会话存在的判据），再走引擎写 WAL——
-    // ADR-049：`v2-events.wal` 是消息的唯一事实源，`messages.json` 停写。
+    // D-049：`v2-events.wal` 是消息的唯一事实源，`messages.json` 停写。
     f.plugin.save_session(&Session::new(SID)).await.unwrap();
     let engine = f.plugin.open_chat_session(SID).await.unwrap();
     // 变更事实需要一条溯源锚（「这次变更站在哪份状态上」）；真实轮次里它由
     // 本轮开轮事件提供，这里补一条**非消息**事实——它只提供号，不会被重建
     // 折成一条消息节点。名字取表上的 `system.triggered`（`system × opened`）：
-    // 手搓一个不在名字表上的名字会被写侧闸门判 `OffGrid`（T-206 段四），
+    // 手搓一个不在名字表上的名字会被写侧闸门判 `OffGrid`（ 段四），
     // 而「测试里编一个名字」正是那道闸要拦的形状。
     engine
         .facts()
@@ -769,7 +769,7 @@ async fn run_persistent_rebuilds_from_store_without_handle() {
 // ==================== 部署级淘汰覆盖层 ====================
 //
 // 扫描范围跟着存储布局走，两半都在 session：`deep_snapshots` 深遍全会话（含
-// 嵌套），折叠判据在 core，动作只交结论值（ADR-086 §4）。loop 侧只钉值搬运
+// 嵌套），折叠判据在 core，动作只交结论值（D-086 §4）。loop 侧只钉值搬运
 // （`loop/tools/tool_executor/elimination.test.rs`）。
 
 /// 在 `<root>/<safe(sid)>/v2-events.wal` 落一条事件（平级会话布局）。
@@ -822,7 +822,7 @@ async fn run_elimination_revoked_sees_a_verdict_from_another_session() {
     assert!(revoked(&f, crate::symbio_core::PRINCIPAL_MAIN).await);
 }
 
-/// **嵌套子会话**里的裁决在本会话生效（T-107 批发现并修的静默面）。
+/// **嵌套子会话**里的裁决在本会话生效（ 批发现并修的静默面）。
 ///
 /// 子会话不是顶层平级目录，只扫一层的覆盖层整棵子树都看不见。
 #[tokio::test(flavor = "multi_thread")]

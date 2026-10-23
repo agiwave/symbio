@@ -5,7 +5,7 @@
 //!
 //! 自动压缩与用户重试（[`retry_compaction`]）都经 [`auto_compress_process`] 进入
 //! [`compress_with_snapshot_core`] 这一个执行内核——"何时压"有一个入口两种触发，
-//! "怎么压"只有一个实现。主动 `context_compact` 工具已随 v1 外壳退役（[ADR-072](../../../../../docs/010-adr/072.md)）。
+//! "怎么压"只有一个实现。主动 `context_compact` 工具已随 v1 外壳退役（[D-072](../../session/README.md "symbio/src/plugins/session/README")）。
 
 use super::*;
 
@@ -27,7 +27,7 @@ use super::super::port::Compress;
 /// （`retry_compaction`）传入——此时同时**绕过熔断**：熔断约束的是"每轮自动白等
 /// 一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住。
 ///
-/// `compress` = 摘要请求的**入账面**（ADR-122 决策 2）：有它 ⇒ 摘要那次模型往返
+/// `compress` = 摘要请求的**入账面**（D-122 决策 2）：有它 ⇒ 摘要那次模型往返
 /// 走端口 `model`（三格带 `via`）；`None` ⇒ 轮外路径（用户主动重试，见
 /// [`retry_compaction`]），那一侧没有轮可挂，本次不入账。
 #[allow(clippy::too_many_arguments)]
@@ -69,7 +69,7 @@ pub(crate) async fn auto_compress_process(
     }
 
     // 压缩内核（唯一实现）：失败已在核心内就地回滚，这里只区分"成功/未压缩"两种结果。
-    // 熔断判定与压缩记账都在 session 侧的动作面里（ADR-086 §4）：`begin` 返回
+    // 熔断判定与压缩记账都在 session 侧的动作面里（D-086 §4）：`begin` 返回
     // `skipped` 即「冷却中，本次跳过」，`finish` 按结局记账——驱动器不持计数器。
     let original_count = context.messages.len();
     let post_tokens = compress_with_snapshot_core(
@@ -417,7 +417,7 @@ async fn compress_snapshot_inner(
     context.consolidated = Some(new_messages.clone());
     context.messages = new_messages;
 
-    // **取代原语**（[ADR-054] 闭集的第四种，列表级）：走 `replace_all`——它的
+    // **取代原语**（[D-054] 闭集的第四种，列表级）：走 `replace_all`——它的
     // **事实 owner 是执行口**，不是这里。压缩现场不持写者令牌，就地落
     // `session.consolidated` 会拿到 `NotTheWriter`，而那是静默的（压缩照常生效、
     // 界面照常变短，只有事实源里少一条事件）。所以这份快照**寄存**在上面那行
@@ -697,9 +697,9 @@ pub(crate) async fn retry_compaction(
     // `get_context_messages` 的过滤里本就看不见（它会滤掉 Failed 消息），
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     //
-    // **顺序反转**（[ADR-054] 决策 2）：经动作面落 `remove_nodes`。这条路径的
+    // **顺序反转**（[D-054] 决策 2）：经动作面落 `remove_nodes`。这条路径的
     // 全部意义就是「重试不留旧失败痕迹」——不落格的话，主读切到「从 WAL 重建」之后
-    // 它会**复活**。删除帧由动作面自己广播（ADR-086 §4）。
+    // 它会**复活**。删除帧由动作面自己广播（D-086 §4）。
     session
         .run_op_unit(
             run_ops::REMOVE_NODES,
@@ -737,7 +737,7 @@ pub(crate) async fn retry_compaction(
         // force = true：跳过阈值判定并绕过熔断（用户主动重试）
         true,
         // 轮外路径：这一压没有轮可挂（唤醒请求不进 turn 循环），摘要那次模型往返
-        // **不入账**。它是 J8 口径上唯一的已知缺口，登记在 T-254。
+        // **不入账**。它是 J8 口径上唯一的已知缺口，登记在 。
         None,
     )
     .await;
@@ -884,7 +884,7 @@ async fn send_compression_request(
     let env = ExecEnv::new(sink.clone(), abort.clone());
     let result = match compress {
         // 有入账面 ⇒ 这一次模型往返走端口 `model`（三格带 `via = "compress/summary"`，
-        // ADR-122 决策 2）。协议事实由端口层落，插件侧只交出「这次往返长什么样」。
+        // D-122 决策 2）。协议事实由端口层落，插件侧只交出「这次往返长什么样」。
         Some(c) => c
             .summary(|| run_compression_llm(orchestrator, system_prompt, messages, root_id, &env))
             .await
@@ -982,7 +982,7 @@ async fn run_compression_llm(
     // 出口静默、中止共享；协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
     let out = orchestrator
         .provider
-        // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属由 T-168 裁 A/B
+        // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属由 裁 A/B
         .execute_turn(system_prompt, messages, &[], root_id, env)
         .await?;
 

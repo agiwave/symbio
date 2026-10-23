@@ -5,7 +5,7 @@
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
 > 与 [`design/vdfs.md`](./vdfs.md) 为准。本文只记录**某一时刻的观察与判断**。
 >
-> ⚠️ **后记（S26 / ADR-025，2026-09-23）：本文的两条基线已改变。**
+> ⚠️ **后记（S26 / D-025，2026-09-23）：本文的两条基线已改变。**
 > ① 本文把「转写流 `session/stream`」与「VDFS 变更（`kind=vdfs`）」的**分治**当作既定事实
 > 来分析（§2.3 的通道表、§3.6 的「转写流没有服务端会话过滤」等），**那个分治已取消**：
 > 实时面迁回 VDFS 变更（`updated` + `delta`），`session/stream` 与 `transcript_stream.rs`
@@ -15,8 +15,8 @@
 > 其中「合帧窗口」这一项随转写流一起退役（`event_bus` 侧的限流与 resync 兜底已对等）。
 >
 > **与前面两份的关系**：
-> [`design/streaming-chain-review-2026-09.md`](./streaming-chain-review-2026-09.md)（第一轮）
-> 与 [`streaming-chain-review-2026-09-22.md`](./streaming-chain-review-2026-09-22.md)
+> [`design/streaming-chain-review-2026-09.md`](streaming-chain-review-2026-09.md)（第一轮）
+> 与 [`streaming-chain-review-2026-09-22.md`](streaming-chain-review-2026-09-22.md)
 > 驱动了 **A–G 七批**落地（满通道语义、cancel_token、前端合帧、一次序列化 + `Arc` 扇出、
 > 会话运行态并入转写流、`VdfsChange` 收窄为闭集）。本文在 **E/F/G 之后的新基线**上重做，
 > 已落地的项不再重复提出；被判定为「有意的不对称」的项在 §4 二次复核。
@@ -145,7 +145,7 @@ Transcript::apply（唯一写入点 + 唯一 seq 分配）
 
 | 项 | 为什么对 |
 |---|---|
-| 工具执行**进程内直连**，不经 HTTP/WS | 省掉一次跨界 serde 往返，也让 `AbortSignal` / `EventSink` 能直接注入（`tool_executor.rs:326-327`）。ADR-020 的实质收益 |
+| 工具执行**进程内直连**，不经 HTTP/WS | 省掉一次跨界 serde 往返，也让 `AbortSignal` / `EventSink` 能直接注入（`tool_executor.rs:326-327`）。D-020 的实质收益 |
 | `Capability::execute` 返回裸 `Value` | 工具从来只用 `Data` 一个变体；信封换算收口在 `invoke_capability` 一处（`capability.rs:210-218` 明写理由） |
 | 会话运行态并入转写流（E） | 「不忙 ⇒ 已终态」从**时序巧合**变成**结构保证**（同一 `seq` 空间 + 单通道保序）；前端反而**净删**了一套自愈机制 |
 | `VdfsChange` 收窄为闭集（G） | 判据「无生产者的取值不是词汇的一部分」可执行；现在 `useVdfs` 没有快速路径，一律重拉收敛 |

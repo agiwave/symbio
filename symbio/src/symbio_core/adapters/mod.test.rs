@@ -1,16 +1,16 @@
-//! `adapters` 单测 —— 四层预算表与令牌闸门（[plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")、
-//! [plan/05 §3.3](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构")）。
+//! `adapters` 单测 —— 四层预算表与令牌闸门（[plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")、
+//! [plan/05 §3.3](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")）。
 //!
 //! 编译期负例（低档令牌传给 `generate`）无法在常规测试里表达——它由**签名**承载：
 //! `generate` 只收 `&FullModel`，给 `RuleOnly` 编译不过（参照
-//! `docs/004-plan/verify/latency_gate.rs` 的 `should_not_compile` feature）。
+//! `docs/003-design/verify/latency_gate.rs` 的 `should_not_compile` feature）。
 //! 这里守的是运行时可测的半场：预算表与档位语义。
 //!
-//! [ADR-096](../../../../docs/010-adr/096.md "ADR-096") 退役了快速档令牌
+//! [D-096](../../plugins/model/README.md "D-096") 退役了快速档令牌
 //! （`ClassifyOnly` / `issue_fast` / `CanClassify` / `CanGenerate`）：那只原本守
 //! 「分类端口」的令牌，端口在生产里从未存在。档位语义由**预算值**承载
 //! （严格递增的四档）；`may_call_model` / `may_generate` 两个孤儿谓词无生产读方，
-//! 随后一并删除（[T-178](../../../../docs/009-task/178-过度机制清偿批.md "T-178")）。
+//! 随后一并删除（相应批次）。
 
 use super::*;
 
@@ -41,7 +41,7 @@ fn four_tier_budgets_are_strictly_increasing() {
 
 /// 令牌是**零大小**的：凭据不该带载荷，带了就意味着「凭据里还能塞别的意思」。
 ///
-/// 这条替掉了 ADR-096 退役的 `full_model_token_satisfies_classify_and_generate`
+/// 这条替掉了 D-096 退役的 `full_model_token_satisfies_classify_and_generate`
 /// （那只 trait 层级随快速档令牌一起收掉）。判的是同一件事的另一半：闸门的开销
 /// 为零、且加字段会让这条红——「顺手在令牌里塞个字段」是本仓最容易被放过的走形。
 #[test]

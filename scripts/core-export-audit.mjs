@@ -14,7 +14,7 @@
  * |---|---|---|
  * | C-001 | 根 `mod.rs` 不得有 `pub mod <域>;` | 域目录一旦 `pub mod`，整个子树就是公共面：`core-surface` 枚举的「公开面 = 根重导出」当场失真，外部还能直接深引绕过根 |
  * | C-002 | core 外的**代码**不得出现 `symbio_core::<域>`（含裸 `use crate::symbio_core::<域>;`） | 深引 = 消费方绕过根出口：符号从根导出移除后深引点照样编译通过，公开面变成两套。裸模块导入此前**没有**任何审计在拦（旧 E-010 的正则要求尾 `::`） |
- * | C-003 | 根导出符号的**生产**消费方数必须 ≥2 | ADR-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动 |
+ * | C-003 | 根导出符号的**生产**消费方数必须 ≥2 | D-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动 |
  *
  * ## 「消费方」的口径（2026-10-09 修正，C-003 的判据输入）
  *
@@ -74,7 +74,7 @@
  * 退出码：0 = 通过，1 = 违规（源头可改）。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns C core 出口
 // @codes C-001 C-002 C-003
 
@@ -133,7 +133,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
       mutations_latest_snapshot:
         '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / turn_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
-      // 2026-10-21（T-189 段一）：事件 kind 名是**事件网格的命名空间**，README §3
+      // 2026-10-21（ 段一）：事件 kind 名是**事件网格的命名空间**，README §3
       // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
       // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop
       // 私有行为——它是 WAL / 回放 / 任何读侧的线上数据键，C-002 禁插件深引事件域
@@ -163,7 +163,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   ⚠️ 这**抵消了** 2026-10-09 那次口径修正引入的一格虚高（当时 one 61→77 是测量口径
  *   的一次真实变化；这次把 two 条口径各归其位后回落到 58，不再需要
  *   `core-export-allow one` 那条棘轮格下修豁免）。
- * - **T-072 合并批**（2026-10-14）降一格 58 → 57：`Pattern::Reasoner` 的派生下沉回
+ * - ** 合并批**（2026-10-14）降一格 58 → 57：`Pattern::Reasoner` 的派生下沉回
  *   actors 定义域（`Pattern::for_principal`，插件层不再出现主体类型名——NDC-001 同一
  *   纪律），`Reasoner` 退出单消费方清单；`SOURCE_PRINCIPAL` 作为线上协议键登记豁免
  *   （跨进程契约，不可下沉，见账本）。

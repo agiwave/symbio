@@ -25,8 +25,8 @@
 | 4 | `test-layout-audit` 对"测试独立成文件"零判定，且统计口径把两类文件混算 | 名不副实的守卫 | 高 |
 | 5 | `OPTION_PICK_FILE` 的豁免理由不成立：前端那处是**第二份真相**，不是"消费方" | 豁免掩盖了跨栈重复 | 中高 |
 | 6 | `schema-audit` 报出的死项（`SchemaResponse`）无人处置 | 报告型守卫无闭环 | 中 |
-| 7 | ADR-019 / ADR-010 / ADR-012 / ADR-017 四处事实漂移（已实测、已修正） | 文档漂移 | 中 |
-| 8 | ADR-014「修订」段仍在描述已删除的 `tract` | 死知识伪装成现行约束 | 低 |
+| 7 | D-019 / DE-002 / D-012 / DE-002 四处事实漂移（已实测、已修正） | 文档漂移 | 中 |
+| 8 | DE-002「修订」段仍在描述已删除的 `tract` | 死知识伪装成现行约束 | 低 |
 
 ---
 
@@ -149,23 +149,23 @@ pub const OPTION_PICK_FILE: &str = "file";
 
 | ADR | 文档原写 | 实测 | 处置 |
 |---|---|---|---|
-| ADR-019 | C 组守 `rename_all = "snake_case"` 枚举，4 张词表 | 现按声明取值自动分派（`snake_case` / `lowercase`），**6 张**词表 | 已改 |
-| ADR-010 | 「只剩 `schemas/entities.rs` 里的 `DetailDefinition`」 | 该文件**已不存在**（随 ADR-011 删除），`DetailDefinition` 现住 `plugins/*/detail.rs` | 已改 |
-| ADR-012 | 「列表类多列 **7** 个条目名」 | `JSON_DIGEST_MAX_NAMES = 8`（`context_window.rs:116`），且同文件注释也写 8 | 已改 |
-| ADR-017 | session **14340 行 / 29.3%**，测试 **7044 行** | 2026-09-20 复测：**14517 行 / 25.3%**（总计 57426），测试 **7021 行** | 已改 |
+| D-019 | C 组守 `rename_all = "snake_case"` 枚举，4 张词表 | 现按声明取值自动分派（`snake_case` / `lowercase`），**6 张**词表 | 已改 |
+| DE-002 | 「只剩 `schemas/entities.rs` 里的 `DetailDefinition`」 | 该文件**已不存在**（随 D-011 删除），`DetailDefinition` 现住 `plugins/*/detail.rs` | 已改 |
+| D-012 | 「列表类多列 **7** 个条目名」 | `JSON_DIGEST_MAX_NAMES = 8`（`context_window.rs:116`），且同文件注释也写 8 | 已改 |
+| DE-002 | session **14340 行 / 29.3%**，测试 **7044 行** | 2026-09-20 复测：**14517 行 / 25.3%**（总计 57426），测试 **7021 行** | 已改 |
 
-ADR-017 的另一条断言「全部在独立 `*.test.rs` 里，内联为 0」**仍然成立**
+DE-002 的另一条断言「全部在独立 `*.test.rs` 里，内联为 0」**仍然成立**
 （实测 `plugins/session` 下 `mod tests {` 命中 0），故保留未动。
 
-**为什么这类漂移值得单独记一笔**：ADR-012 立下的正是"事实从代码提取、不从人手抄"的
+**为什么这类漂移值得单独记一笔**：D-012 立下的正是"事实从代码提取、不从人手抄"的
 原则，而 ADR 正文里那些具体数字恰恰是**手抄的**。原则管住了 `CURRENT.md`，没管住
 ADR 自己。
 
-### 附：ADR-014 的「修订」段是死知识
+### 附：DE-002 的「修订」段是死知识
 
-ADR-014 的 `### 修订（2026-09-18）` 整段（两条 tract 硬约束 + 一张数值对照表）描述的
-是 `tract-onnx 0.23.7` 的行为，而 tract 已随 ADR-016 彻底退出依赖树。它作为决策记录
-保留是合理的，但它**没有作废标记**，读起来与现行约束无法区分。ADR-014 顶部有推翻声明，
+DE-002 的 `### 修订（2026-09-18）` 整段（两条 tract 硬约束 + 一张数值对照表）描述的
+是 `tract-onnx 0.23.7` 的行为，而 tract 已随 D-016 彻底退出依赖树。它作为决策记录
+保留是合理的，但它**没有作废标记**，读起来与现行约束无法区分。DE-002 顶部有推翻声明，
 但只覆盖了"用 tract 做推理"与"性能"两点，没点名这一段。
 
 ---
@@ -193,16 +193,16 @@ ADR-014 的 `### 修订（2026-09-18）` 整段（两条 tract 硬约束 + 一�
 
 复核不能只挑毛病。以下声明一度被列为嫌疑，实测后确认无误：
 
-- **ADR-008**：`store_kind` / `create_store` 确已删除（仅存于 `config.rs` 与
+- **DE-002**：`store_kind` / `create_store` 确已删除（仅存于 `config.rs` 与
   `store/mod.rs` 的历史说明注释，且注释本身写得很清楚）；
-- **ADR-009**：`CapabilityCategory::Metacognition` 确仍存在（`capability.rs:24`）；
-- **ADR-006**：Tauri 命令确为 3 个（`route_v2` / `route_v2_send` / `route_v2_close`，
+- **DE-002**：`CapabilityCategory::Metacognition` 确仍存在（`capability.rs:24`）；
+- **D-006**：Tauri 命令确为 3 个（`route_v2` / `route_v2_send` / `route_v2_close`，
   `meta` 已注释停用）；
-- **ADR-015**：前端生产代码里确无 `switch (event.type)`（两处命中都在注释里，
+- **D-015**：前端生产代码里确无 `switch (event.type)`（两处命中都在注释里，
   且注释正是在解释"为什么没有"），`sessionBusWatcher.ts` 确已删除；
-- **ADR-013 / ADR-016**：`native-tls` 与 `ort = "2.0.0-rc.13"` 均在 `Cargo.toml` 中，
+- **D-013 / D-016**：`native-tls` 与 `ort = "2.0.0-rc.13"` 均在 `Cargo.toml` 中，
   `tract` 确已退出；
-- **ADR-004**：4 套协议适配器目录确在 `plugins/model/protocols/`。
+- **D-004**：4 套协议适配器目录确在 `plugins/model/protocols/`。
 
 ---
 
@@ -224,7 +224,7 @@ ADR-014 的 `### 修订（2026-09-18）` 整段（两条 tract 硬约束 + 一�
    暂无守卫"）。后者只是诚实，前者才解决问题——但它**涉及后端**，按约定须先整体规划。
 5. **给 `SchemaResponse` 一个处置**（删除或登记豁免理由），并考虑让报告型守卫的
    "长期未处置项"有个可见出口。
-6. 给 ADR-014 的「修订」段加作废标记。
+6. 给 DE-002 的「修订」段加作废标记。
 
 ### 实施状态（2026-09-20 当天跟进）
 

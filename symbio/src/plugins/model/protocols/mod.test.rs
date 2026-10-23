@@ -47,7 +47,7 @@ fn protocol_aliases_resolve_to_registered_ids() {
 }
 
 /// 未识别值**不兜底**：写错的配置必须在保存 / 收集期可见，而不是悄悄变成
-/// `openai_chat` 请求体（T-197 的兜底反转）。
+/// `openai_chat` 请求体（ 的兜底反转）。
 #[test]
 fn unknown_protocol_is_rejected_not_defaulted() {
     for bad in ["bogus", "", "OpenAI", "anthropic-messages"] {

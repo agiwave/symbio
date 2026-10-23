@@ -4,7 +4,7 @@
 //!
 //! **没有可切换的存储后端**：会话只有一种落盘布局，临时会话只是「不持久化」。
 //! 为什么不做多后端选型（以及当初那个形状被推翻的两个前提），见
-//! ADR-008——此处不复述。
+//! DE-002——此处不复述。
 //!
 //! 差异收成构造时的一次选型：
 //!
@@ -18,7 +18,7 @@
 //! 会话的**权威事件流**也住本模块：JSONL 追加、跨进程写者令牌、被压缩取代的前缀
 //! 归档。它实现 core 的 [`Store`](crate::symbio_core::Store) 端口，而类型本身
 //! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
-//! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛")）。
+//! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 //!
 //! ## 三段分工（判据：这一段错了谁会红）
 //!
@@ -40,7 +40,7 @@
 //! 共用的只是**寻址**：根由调用方传入，id→段名取
 //! [`crate::providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
-//! `docs/005-arch/013-vdfs.md` §13.4（agent 目录是先例）。
+//! `docs/003-design/009-VDFS规范.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
@@ -160,7 +160,7 @@ impl SessionStore {
     /// 本存储是否落在磁盘上（临时会话没有根目录）。
     ///
     /// 计划表的「有落盘目录」判据用这个**能力布尔**：调用方要知道的是
-    /// 「有没有事实可读」，不是目录形状（[ADR-084](../../../../../docs/010-adr/084.md "ADR-084")）。
+    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../../docs/003-design/001-核心架构.md "D-084")）。
     pub(in crate::plugins::session) fn is_persistent(&self) -> bool {
         self.disk().is_some()
     }
@@ -235,7 +235,7 @@ impl SessionStore {
             .await
             .map_err(|e| PluginError::InternalError(format!("创建会话目录失败: {e}")))?;
 
-        // 元数据落盘（[ADR-049]：**消息正文不再由 store 写**）：`v2-events.wal` 是
+        // 元数据落盘（[D-049]：**消息正文不再由 store 写**）：`v2-events.wal` 是
         // 会话消息的唯一事实源（由事实路径 `chat_session/write.rs` 入格），`messages.json`
         // 停写——它是 v1 遗留会话的唯一记录，只在「WAL 不在」时作回落读法被读。
         //
@@ -298,7 +298,7 @@ impl SessionStore {
     ///
     /// 排序与截断都在内存里做：窗口约束的是**响应大小**（少传多少节点给前端），
     /// 而 IO 成本已经由「清单只读 `session.json`」压平了——再引入一份索引文件
-    /// 换来的收益不值一个新文件（见 docs/019-perf.md §3）。
+    /// 换来的收益不值一个新文件（见 docs/106-perf.md §3）。
     pub async fn list_sessions_window(
         &self,
         limit: Option<u32>,
@@ -364,7 +364,7 @@ impl SessionStore {
     ///
     /// 幂等：新布局且投影齐全的目录直接跳过（`get_store` 每次构造只跑一次）。
     /// 为什么要补投影：投影字段是后来加的 `#[serde(default)]`，存量文件里没有，
-    /// 少了它清单会静默退化成显示 id（见 docs/019-perf.md §11.3）。
+    /// 少了它清单会静默退化成显示 id（见 docs/106-perf.md §11.3）。
     pub(crate) async fn migrate_split_messages(&self) -> Result<(), PluginError> {
         let Some(base) = self.disk() else {
             return Ok(());
@@ -406,12 +406,12 @@ impl SessionStore {
 ///
 /// [`Store::range`](crate::symbio_core::Store::range) 归一后给的是**完整史**（含被
 /// [`archive_before`](crate::plugins::session::store::WalStore::archive_before) 移出的前缀，
-/// [plan/14 §2.2](../../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1），
+/// [plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1），
 /// 本函数服务的是「**上下文 / 进度**该从哪读」这类问题。
 ///
 /// **它不判轮次生命周期**：「已开未收束」必须读完整史
-/// （[ADR-085](../../../../../docs/010-adr/085.md "ADR-085")）——压缩期间等待审批的那一轮
-/// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」（T-169）。
+/// （[D-085](../README.md "D-085")）——压缩期间等待审批的那一轮
+/// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」。
 /// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
 /// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）
 /// 已经内建在 `mutations_latest_snapshot` 的用法里，不需要本函数。

@@ -221,7 +221,7 @@ impl Drop for WorkingGuard {
 }
 
 // 子模块：两个手柄的 `impl` 块按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。
-/// 压缩快照入格（`consolidate` 动作的执行体，ADR-086 §4/§6）：事实源归档不在
+/// 压缩快照入格（`consolidate` 动作的执行体，D-086 §4/§6）：事实源归档不在
 /// core `Store` 面内，因此写方必须留在持令牌的 session。
 pub(crate) mod consolidate;
 mod consume;
@@ -230,7 +230,7 @@ mod failure;
 mod rate_limit;
 mod runner;
 mod sink;
-/// Stop 钩子的幂等触发器：随会话生命周期留在 session（ADR-086 §6），
+/// Stop 钩子的幂等触发器：随会话生命周期留在 session（D-086 §6），
 /// 驱动器只交回 `TurnReport.last_message`。
 pub(crate) mod stop;
 

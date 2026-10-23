@@ -1,11 +1,11 @@
 import './_selfrun.mjs';
-// T75 角色主体执行路径（[T-107](../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批")，S02/S03）：
+// T75 角色主体执行路径（相应批次，S02/S03）：
 // `session/worker` 经**委派链真跑一轮**——产物格的作者是工人自己；同一轮里它调
 // `todo_write` 被**任务表写侧闸**诚实拒止（纯产出主体不立任务，C15 的精神）。
 //
 // ## 本用例钉的是什么
 //
-// T-107 的 exit ①/④：worker 行**与驱动路径同批**——不是「表里有一行、生产里没人」。
+// 的 exit ①/④：worker 行**与驱动路径同批**——不是「表里有一行、生产里没人」。
 // 四格各只有 e2e 能看见**接在一起**：
 //
 // | 格 | 单测钉在哪 | 这里钉什么 |
@@ -220,7 +220,7 @@ export default defineCase(
       const userCell = childEvents.find((e) => e.kind === 'user.message');
       assert(userCell, `子会话应有开轮格（实际 kinds: ${JSON.stringify(kinds)}）`);
 
-      // 产物收束（ADR-067）：工具结果入格，**作者 = 工人自己**。
+      // 产物收束（D-067）：工具结果入格，**作者 = 工人自己**。
       const artifact = childEvents.find((e) => e.kind === 'artifact.added');
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
       assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
@@ -279,7 +279,7 @@ export default defineCase(
         assertEq(
           childStats.body?.data?.invariants.length,
           0,
-          `产物收束 ⇒ 子会话不变量清单为空（C4 认产物格，ADR-067；实际: ${JSON.stringify(childStats.body?.data?.invariants)}）`,
+          `产物收束 ⇒ 子会话不变量清单为空（C4 认产物格，D-067；实际: ${JSON.stringify(childStats.body?.data?.invariants)}）`,
         );
 
         // 声誉列（两个事实各断一面）：

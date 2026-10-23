@@ -6,8 +6,8 @@
 > [plan/06–09](../plan/README.md) 收敛为 `triage`（判决）× `reply`（措辞）两个能力插件，
 > **已全部落地**（批次 S0–S6，见 [09 §5](../plan/09-对话面插件拆分实施方案.md)）。
 > 已于 2026-09-29 移入 `docs/archive/`；其中的 ADR 草案已迁为
-> [ADR-041](../decisions/session.md#adr-041-会话的响应性由编排层调度--无副作用对话服务承担)
-> 与 [ADR-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)。
+> [D-041](../decisions/session.md#adr-041-会话的响应性由编排层调度--无副作用对话服务承担)
+> 与 [D-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)。
 > 目标架构与迁移计划见 [plan/README.md](../plan/README.md)，「现在是什么」见
 > [CURRENT.md](../CURRENT.md)。本文不再更新。
 >
@@ -33,13 +33,13 @@
 
 | 环节 | 现状 | 三条目标下的缺口 |
 |---|---|---|
-| 输入 | 收件箱 FIFO，**一条消息 = 一轮**，忙则排队不抢占（ADR-026） | 目标 2：补充会各占一轮，不是"整体处理" |
+| 输入 | 收件箱 FIFO，**一条消息 = 一轮**，忙则排队不抢占（D-026） | 目标 2：补充会各占一轮，不是"整体处理" |
 | 决策 | 每条消息都无条件进入完整工具循环 | 目标 1：简单问题也走完整循环，慢且贵 |
 | 输出 | 模型在一次 LLM 调用里同时承担「干活」与「说话」，说与不说由模型自发决定 | 目标 3：长任务中途可以一句话都没有 |
 
 **已有能力（复用，不重造）**：运行现状已经是可查询的节点树（会话节点 `status` / `attributes.outcome`
 / `attributes.error`，消息节点的 `type` / `status` / `meta.started_at`）；实时面只有一条通道
-（`event_bus` 的 `kind = "vdfs"`，ADR-025）；跨插件调用已有范式（`agent_run` 经
+（`event_bus` 的 `kind = "vdfs"`，D-025）；跨插件调用已有范式（`agent_run` 经
 `parent.route(ctx{PATH})` 调 `session/chat/send`）。
 
 ---
@@ -102,7 +102,7 @@
 
 ```rust
 /// 拟新增：session/context/conversation_view.rs
-/// 对话线：只有"人对人说过的话"。纯函数，可重放（ADR-015 的派生要求）。
+/// 对话线：只有"人对人说过的话"。纯函数，可重放（D-015 的派生要求）。
 pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMessage>;
 ```
 
@@ -153,7 +153,7 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 - **双写**：一条 assistant 消息落地时要劈成两半、分别写两份存储；写一半失败即状态不一致。
 - **join**：请求包必须把两半拼回一条，拼不回去（顺序 / 归属错）就是 400。
 - **第二份事实**：`StatVisitor` 的实质问题**不是"多一个接口"，而是"把节点已有的信息复制一份"**。
-  运行现状的 owner 是节点（ADR-015 / ADR-025）：worker 的进展、工具状态、已用时长，
+  运行现状的 owner 是节点（D-015 / D-025）：worker 的进展、工具状态、已用时长，
   全都已经是节点属性。再收集一次 ⇒ 必然漂移，表现是"chat 说的和界面上显示的不一样"。
   而 chat 要的"进展 summary"本来就**不是原始事实**，是**面向人的措辞**——它应该由 chat
   从投影出的 `RunSnapshot`（§3.3）自己生成，而不是由另一个插件预先嚼好喂进来。
@@ -210,7 +210,7 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 | **工作** | Turn / 推理 / 工具调用 / 工具结果（含状态与已用时长） | 工作线 |
 
 - **工具卡片不再插进对话流**——它进工作面板。对话面板因此是一份**可以整段回读、复制、分享**的干净记录。
-- 两个面板共享**同一个顺序锚点**（`ChatMessage.seq` 是节点属性，ADR-025），
+- 两个面板共享**同一个顺序锚点**（`ChatMessage.seq` 是节点属性，D-025），
   因此"这一轮工作了 3 分钟"与"我中途插了一句话"在时间轴上**可对齐**，
   但**不在同一列里混排**。
 - 实时面仍然只有一条通道（`kind = "vdfs"`），两个面板按**作用域**订阅同一批变更，
@@ -222,7 +222,7 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 
 ### 3.1 类型
 
-契约住在 `symbio_core::schemas`（跨插件：session 生产、chat 消费，满足 ADR-023 的 core 准入判据）。
+契约住在 `symbio_core::schemas`（跨插件：session 生产、chat 消费，满足 D-023 的 core 准入判据）。
 
 ```rust
 /// 拟新增：symbio_core/schemas/chat/mod.rs
@@ -306,7 +306,7 @@ session 的会话记忆段有两道作用域闸门（`ctx[SESSION_ID]` 缺失即
 ——与 session 装配 `chat_ctx` 用的是同一组键（§7.3）。
 
 **为什么运行现状不走 `register_system_prompt`**：状态不是"注册型"贡献，它每次都在变；
-且它的 owner 是**节点**（ADR-015 / ADR-025）。把它做成一个收集接口（`StatVisitor`）就是给
+且它的 owner 是**节点**（D-015 / D-025）。把它做成一个收集接口（`StatVisitor`）就是给
 同一份事实造第二个来源，必然漂移——表现是"chat 说的和界面上显示的不一样"。
 （两种做法的完整对照见 §2.4。）
 
@@ -492,7 +492,7 @@ let out: ReplyOutcome = parent.clone().route(c).await?.payload()?;   // parent =
 ```
 
 调用方**不 `use` 被调方任何符号**：session 只写路径常量，chat 只实现 `Plugin`、
-不知道谁在调它。`agent_run` 调 `session/chat/send` 已经是这个形态——本方案把它写成明文规则（[ADR-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)）。
+不知道谁在调它。`agent_run` 调 `session/chat/send` 已经是这个形态——本方案把它写成明文规则（[D-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)）。
 
 ### 7.3 chat 怎么拿到 `ModelProvider` 与记忆
 
@@ -598,7 +598,7 @@ P1 与 P2 是**必须做对**的两批（对应目标 1 与目标 2）；P3 是*
 
 1. **插件名**：`chat` 在本仓已有"会话轮次"的含义（`session/chat/send`、`chat_loop`、
    `chat_message`），新插件用同名会让它承担第二个意思。建议 `dialog`；路由上不冲突，
-   故可议。**地址一旦定下就是身份**（ADR-032），须在写第一行代码前定。
+   故可议。**地址一旦定下就是身份**（D-032），须在写第一行代码前定。
 2. **`Answered` 是否也写用户消息**：本方案为"写"（用户说过的话必须落库）。
    若实测发现模型频繁与既有历史重复，再考虑只落答话。
 3. **抽干是否需要"静默窗口"**：用户连续敲三条补充，若第一条到达时恰好是轮边界，
@@ -618,9 +618,9 @@ P1 与 P2 是**必须做对**的两批（对应目标 1 与目标 2）；P3 是*
 
 | 不做 | 一行理由 |
 |---|---|
-| chat 直接写转写 | 转写只有一个写入者（ADR-020），两个写入者会让 `seq` / 合帧 / 终态收敛同时失去单点保证 |
+| chat 直接写转写 | 转写只有一个写入者（D-020），两个写入者会让 `seq` / 合帧 / 终态收敛同时失去单点保证 |
 | chat 自己订阅状态、自行决定何时播报 | 触发条件归编排层（状态派生），chat 只负责措辞 |
-| 新建 `StatVisitor` | 运行现状的 owner 是节点（ADR-015 / ADR-025），第二个来源必然漂移 |
+| 新建 `StatVisitor` | 运行现状的 owner 是节点（D-015 / D-025），第二个来源必然漂移 |
 | 为 chat 另建记忆 / 人格收集通道 | `register_system_prompt` 已是唯一注册入口，与 worker 共用同一批段 |
 | 对话线与工作线各存一份 | 一条助手消息会横跨两流（正文 vs 工具调用），请求视图必须再拼回来——混乱从呈现层搬到数据层 |
 | 把"两条线"实现成两处各自的过滤条件 | 分界规则必须是单点纯函数（§2.4），散落三处必然错位：界面看得到、chat 看不到 |

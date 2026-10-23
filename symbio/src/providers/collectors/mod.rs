@@ -5,7 +5,7 @@
 //! 收集口 **trait** 是契约（住 `symbio_core::capability`）；它的**默认实现**
 //! 是「不存在第二种实现的机制底座」，因此按 [`crate::providers`] 的第二种接线方式
 //! **直接组合具体类型，不套 `dyn` 工厂**——再套一层 `creator_create_object` 只是把一次
-//! 构造换成一次字符串查表（与 `vdfs_service` 同款判断；ADR-035 决策 1.1「≥2 实现才
+//! 构造换成一次字符串查表（与 `vdfs_service` 同款判断；D-035 决策 1.1「≥2 实现才
 //! provider 化」因此**不适用于这里**）。
 //!
 //! 4e 之后**一个实现装全部族**（工具 / 模型 / 提示词 / 挂载 / 选项 / 可配置）：
@@ -43,7 +43,7 @@ pub(crate) use tool_visitor::DefaultToolVisitor;
 use crate::symbio_core::Registry;
 use std::sync::Arc;
 
-/// 三条收集通道的**共用构造点**（T-196 / 04 报告建议 2）。
+/// 三条收集通道的**共用构造点**（ / 04 报告建议 2）。
 ///
 /// ## 为什么需要一个具名构造点
 ///

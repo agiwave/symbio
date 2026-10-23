@@ -1,4 +1,4 @@
-//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 //!
 //! 1. **复算**——出口的读数与直接 `apply` 逐字相等。同一切片、同一个 as-of：
 //!    出口只能调已有的投影，不许另写一份统计（否则两套口径会静默漂移）。
@@ -300,7 +300,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
 /// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
 ///
 /// 「哪些事实源打得开」由存储层判（`deep_snapshots` 跳过并出声）；本列只对
-/// 交到手里的值套投影——两半不要混在一个函数里（[ADR-084](../../../../docs/010-adr/084.md "ADR-084")）。
+/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../../docs/003-design/001-核心架构.md "D-084")）。
 #[test]
 fn fleet_aggregates_the_snapshots_it_is_given() {
     let (root, _wals) = seed_instance("values", 2);
@@ -592,7 +592,7 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
             crate::symbio_core::PRINCIPAL_AUTONOMOUS,
         )
         .with_ts(ts)
-        // 任务断言是 I2 的声明类事件（T-188）：没有上游就没有可撤销的溯源。
+        // 任务断言是 I2 的声明类事件：没有上游就没有可撤销的溯源。
         .with_produced_by(0)
         .with_payload(serde_json::json!({ "task_id": task }))
     };
@@ -902,7 +902,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
     assert_eq!(after.checkpoint["event_count"], 2);
 }
 
-/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
+/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
 #[test]
 fn invariants_move_when_the_wal_changes() {
@@ -955,7 +955,7 @@ fn invariants_move_when_the_wal_changes() {
 ///    它们从分母 / 分子 / 样本里抹掉。
 ///
 /// 按布局分叉的第二个读法（只给窗口）因此不是「多一个选择」，而是把布局知识
-/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../../docs/004-plan/014-单环一表收敛.md "PL-014-单环一表收敛") 推论 1）。
+/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
 ///
 /// ## 反向自检
 ///
@@ -1034,7 +1034,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     );
 }
 
-/// 读侧闸（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：声明**属主**
+/// 读侧闸（[04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：声明**属主**
 /// 身份 ⇒ 与不声明逐字相同——闸的存在不是为了把属主挡在外面。
 #[test]
 fn declaring_the_owner_reads_everything() {
@@ -1061,7 +1061,7 @@ fn declaring_the_owner_reads_everything() {
 /// `has_wal` 仍为真 ⇒ 「有源但不给你看」与 `missing_wal` 那条「没有源」可分辨；
 /// 不变量列同为空——没看见事实，就没有属于你的缺口可报。
 ///
-/// 前提（T-094 ② 之后要说清的一句）：本事实源**没有共享内容**——`seed` 只种
+/// 前提（ ② 之后要说清的一句）：本事实源**没有共享内容**——`seed` 只种
 /// 对话格不种记忆，内容侧可见域因此是 C10 缺省 `thread_private`，闸的答案
 /// 与接线前逐字相同。共享内容的读方见下一条。
 #[test]
@@ -1109,7 +1109,7 @@ fn a_non_owner_reads_nothing_at_all() {
     }
 }
 
-/// T-094 ② 的判据：读侧闸传的是**内容侧**的可见域——本会话记忆载荷里记了
+/// ② 的判据：读侧闸传的是**内容侧**的可见域——本会话记忆载荷里记了
 /// `shared`（人的认知可供借用，SC-010 判据 3）⇒ 矩阵内主体（`agent:main`）
 /// 读得到他人共享内容；矩阵外主体（`agent:ghost`）照旧空切片。
 ///
@@ -1232,7 +1232,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列（[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")，S6 第 15 步的读侧）：
+/// 声誉列（[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S6 第 15 步的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -1296,7 +1296,7 @@ fn reputation_column_reports_own_and_by_principal() {
     assert_eq!(denied.reputation, serde_json::json!({}));
 }
 
-/// 承诺列（[T-213](../../../../docs/009-task/213-Agent主机面整理批.md "T-213-Agent主机面整理批") 段二，S08 §5 的读侧出口）：
+/// 承诺列（相应批次 段二，S08 §5 的读侧出口）：
 /// 一轮里委托过一次 ⇒ 这里就**读得出那一条**（谁向谁、承诺了什么、违约为什么）。
 ///
 /// ## 这条判据补的是哪一半
@@ -1495,7 +1495,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`
@@ -1512,7 +1512,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
                 .append(
                     Event::pending(
                         id,
-                        // 校准观测走**自己的格子**（T-085 批①）。旧写法把它写在
+                        // 校准观测走**自己的格子**（ 批①）。旧写法把它写在
                         // `memory.recalled` 上、靠载荷字段认——那正是读侧赌「别的格子
                         // 恰好不带这两个字段」的那段。
                         EVENT_MEMORY_CALIBRATED,
@@ -1629,7 +1629,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 
-/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///
@@ -1688,7 +1688,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../docs/004-plan/008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案")）：
+/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案")）：
 /// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
 ///
 /// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。

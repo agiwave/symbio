@@ -1,4 +1,4 @@
-//! 消息变更**写方**的判据（S2.7-b1，ADR-053）。
+//! 消息变更**写方**的判据（S2.7-b1，D-053）。
 //!
 //! 写侧的失效形态与读侧相反：读侧是「折不出来」，写侧是**落不下去**——而且它
 //! **静默**（缓存照样写成功、用户照样看到「改好了」，事实源里却没有这一笔）。
@@ -9,7 +9,7 @@
 //! 生产路径是 `commands::patch_message` / `truncate_messages` → 本模块（见那两个
 //! 方法的文档）。两条 `append` 调用点各一行、没有分支，而 VDFS 边界的回执 / 变更帧
 //! 已由 `vdfs_provider.test.rs` 覆盖——同一段语义不在两处各钉一遍
-//! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
+//! （`docs/104-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::plugins::session::store::EventWalStore;
@@ -185,7 +185,7 @@ fn a_missing_source_of_truth_lands_nothing_and_does_not_panic() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时会话目录");
 
-    // 无锚是**豁免**而不是失败：这类会话的读侧回落 `messages.json`（ADR-049）。
+    // 无锚是**豁免**而不是失败：这类会话的读侧回落 `messages.json`（D-049）。
     assert!(
         matches!(
             edited(&open_wal(&dir), &sid_of(&dir), &patched_user("u-1", "改")),
@@ -309,9 +309,9 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ── T-055：写者令牌被占时**寄存**，由持令牌方补落 ─────────────────────────
+// ── ：写者令牌被占时**寄存**，由持令牌方补落 ─────────────────────────
 
-/// **T-055 的承重判据**：令牌被占时编辑**不丢**——寄存，补落后仍在。
+/// ** 的承重判据**：令牌被占时编辑**不丢**——寄存，补落后仍在。
 ///
 /// 这条就是「编辑偶发不生效」的对偶：不寄存时，`append` 拿 `NotTheWriter`、
 /// 出声后丢弃，用户以为改了、切源后一看没改，而**没有任何机制会纠正**。
@@ -499,7 +499,7 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ── T-212 项三：寄存区在**盘上**（跨进程兜底才成立）──────────────────────────
+// ── 项三：寄存区在**盘上**（跨进程兜底才成立）──────────────────────────
 
 /// 寄存区里**已寄存**的那几件（`.json`），按名升序 = 寄存先后。
 ///

@@ -119,7 +119,7 @@ impl Plugin for ProviderChild {
 /// 并行测试互删目录。
 ///
 /// 用真实 `homedir` 会让用例随用户环境漂——目录标题现在来自磁盘上的 manifest
-/// （ADR-032），必须由测试自己铺。
+/// （D-032），必须由测试自己铺。
 fn fresh_root() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
@@ -158,7 +158,7 @@ fn container_map(map: IndexMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
 
 /// 造容器：临时插件根 + 每个子插件一份带身份的 `PLUGIN.yml`
 ///
-/// 子目录的**标题来自 manifest**（ADR-032），而 `order` / `hidden` 仍来自
+/// 子目录的**标题来自 manifest**（D-032），而 `order` / `hidden` 仍来自
 /// 假插件的 `meta()`——两类字段两个来源，正是本文件要锁住的契约。
 fn container(children: Vec<FakeChild>) -> CompositeVdfs {
     let root = fresh_root();

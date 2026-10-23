@@ -1,5 +1,5 @@
 //! 阶段③「未执行收口」——`process_tool_calls_async` 三段拆分的第三段
-//! （T-179 / [PL-015 §5 动作 B](../../../../../../docs/004-plan/015-可扩充性与插件切分.md "PL-015-可扩充性与插件切分")）。
+//! （ / [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 两条路径会让批内留下没跑到的调用（用户中止 / 交互模式前序待用户）；本段给它们
 //! 统一补「结果子节点 + 父节点终态」，并如实记未履约的承诺。收口依据是阶段①的
@@ -24,7 +24,7 @@ pub const NOT_EXECUTED: &str = "not_executed";
 /// 占位结果是**框架的交代**（给模型一句话、给前端一张卡），不是工具的应答：
 /// 端口若按「`outcomes` 里有这个 id 就算应答」关账，中止的调用会落成 `response`——
 /// 日志说「回来了」，而它从未执行，`await-tools` 的 `failed` 出口于是只有 resume
-/// 一条路径走过（PL-017 判据 6 的「中止唤醒」在事实面上等于没接）。
+/// 一条路径走过（DE-015 判据 6 的「中止唤醒」在事实面上等于没接）。
 ///
 /// 反过来，工具**跑完而失败**（`error` / `overflow_dropped` / 闸门拒绝的
 /// `refusal.kind`）是应答：工具确实回了话，关账仍落 `response`。
@@ -70,7 +70,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str, tool_name: &
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
     // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
     msg.status = Some(NodeStatus::Completed);
-    // **并入**而非整格替换：`meta.tool_name` 是结果节点身份的一部分（[T-147d-iii]），
+    // **并入**而非整格替换：`meta.tool_name` 是结果节点身份的一部分（d-iii），
     // 整格覆盖会连它一起丢掉。
     if let Some(obj) = msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
         obj.insert("failure_kind".into(), json!(reason));

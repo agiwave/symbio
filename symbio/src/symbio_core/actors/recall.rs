@@ -1,15 +1,15 @@
-//! 检索 Translator（`pattern = Translator`）：读视图 → 一格 `memory.recalled` 事实（[plan/01 §9.2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+//! 检索 Translator（`pattern = Translator`）：读视图 → 一格 `memory.recalled` 事实（[plan/01 §9.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 
 use crate::symbio_core::Event;
 
-/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
+/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// **Translator 不创造信息**：召回内容原样来自 `RecallView`（③ 的投影产出），
 /// 本体的职责只是把「读视图」落成「一条事实」——`memory.recalled` 事件
 /// （`memory × asserted` 格子，带溯源指向触发它的事件）。检索是
 /// 「读视图 → 产出事实」，这正是 Actor 定义对 Translator 的要求。
 ///
-/// 载荷三键 `found` / `top` / `degraded` **全是视图自带的**数据（T-104：降级也要有
+/// 载荷三键 `found` / `top` / `degraded` **全是视图自带的**数据（：降级也要有
 /// 生产读数口——只活在投影外壳或提示词里，就没有一条事件说得出「这轮记忆只显示了一部分」）。
 pub struct RecallTranslator;
 
@@ -41,7 +41,7 @@ impl RecallTranslator {
         .with_payload(serde_json::json!({
             "found": view.entries.len(),
             "top": top,
-            // 本次召回是否只给出**部分结果**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）。
+            // 本次召回是否只给出**部分结果**（相应批次）。
             // 观测落进事实才有**生产读数口**：降级只活在投影外壳 / 提示词里，就没有
             // 一条事件说得出「这一轮的记忆只显示了一部分」（静默的两种形态之一）。
             "degraded": view.degraded,

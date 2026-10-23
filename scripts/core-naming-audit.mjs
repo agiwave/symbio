@@ -64,7 +64,7 @@
  *   比域名更有信息量。模块在 `core-surface.mjs` 的 `declaredModules` 里识别，本脚本
  *   **跳过但计数**（静默跳过会让公开面出现看不见的口子）。
  * - 只判 `symbio_core` 的**根平铺公开面**，与 `core-surface-audit` 共用
- *   [`core-surface.mjs`](./core-surface.mjs) 的同一份口径——两者必须对「公开面是什么」
+ *   [`core-surface.mjs`](core-surface.mjs) 的同一份口径——两者必须对「公开面是什么」
  *   给出同一个答案。
  * - `schemas` 域整体豁免：协议词就是它的命名空间，逐字段与前端镜像，改名要跨栈同步。
  *
@@ -76,7 +76,7 @@
  * 退出码：0 = 通过；1 = 有违规或规则源不可解析。
  */
 
-// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns N core 命名
 // @codes N-001 N-002 N-003 N-004 N-005
 

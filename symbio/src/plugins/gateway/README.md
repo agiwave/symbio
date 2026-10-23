@@ -1,9 +1,10 @@
 ---
-kind: arch
+kind: design
 id: symbio/src/plugins/gateway/README
 title: Gateway 插件
 status: active
 created: 2026-09-09
+impl: done
 ---
 
 # Gateway 插件
@@ -12,29 +13,29 @@ created: 2026-09-09
 
 ## 路由
 
-端点清单见 `docs/006-ref/003-ROUTES.md` §Gateway 插件（**权威**，含逐条路径、鉴权与只读白名单）。
+端点清单见 `docs/004-ref/003-ROUTES.md` §Gateway 插件（**权威**，含逐条路径、鉴权与只读白名单）。
 入站面按交付形态分三类——健康检查、一次性调用（对齐 `route_v2`）、WS 长连接（首帧即请求体，
 此后双向 `PluginFrame`）；**路径不在此复述**，避免第二份会漂移的端点表。本插件自身接口
 **恒走进程内**（in-process），前端不经 HTTP 访问（`gateway/status` 除外）。
 
 > 「进程内」= 不经 HTTP/WS 传输、由宿主直接调用。这与已删除的 `PluginPayload::Native`
-> 变体**无关**——那曾是协议层的一个死变体（见 `docs/005-arch/004-PROTOCOLS.md` §载荷协议）。
+> 变体**无关**——那曾是协议层的一个死变体（见 `docs/003-design/005-协议规范.md` §载荷协议）。
 
 ## 机制
 
 - **交付分类**：`classify_payload` 把 `PluginPayload` 的 3 态分成「一次性」（`Data` /
-  `Empty`）与「长连接」（`Session`）——**两个入口共用它**，各自只保留真差异（HTTP 把
-  `Session` 折叠为最后一帧、WS 双向转发；`Empty` 在 HTTP 写 `null`、在 WS 直接关连接）。
-  从前这段分类在两个入口各写一遍，漏改一处就出现「HTTP 能调、WS 不能调」这类不对称。
+ `Empty`）与「长连接」（`Session`）——**两个入口共用它**，各自只保留真差异（HTTP 把
+ `Session` 折叠为最后一帧、WS 双向转发；`Empty` 在 HTTP 写 `null`、在 WS 直接关连接）。
+ 从前这段分类在两个入口各写一遍，漏改一处就出现「HTTP 能调、WS 不能调」这类不对称。
 - **协议转换**：HTTP body → `PluginInvokeRequest`（PATH/payload/SESSION_ID），响应 → `PluginInvokeResponse<PluginPayload>`。
 - **流式**：WS 场景下把 `Session(PluginChannel)` 帧逐条推送（不用 SSE——会话需双向通道）。
 - **入站边界**：令牌只走 `Authorization`（浏览器 WS 走子协议 `bearer.<token>`，握手只回选
-  `symbio.v1`），不接受查询串令牌；`inbound_max_connections` 经 `Semaphore` 在 `accept`
-  之前取配额（背压交给内核队列）；`POST /api/v1/invoke` 的 `Idempotency-Key` 在分派前登记，
-  重复即 409、失败释放。语义与理由见 `docs/005-arch/008-http-api-transport.md` §5.1.1 / §5.2 / §6。
-- **鉴权与错误**：错误码遵循 `docs/006-ref/002-ERROR_CODES.md`。
+ `symbio.v1`），不接受查询串令牌；`inbound_max_connections` 经 `Semaphore` 在 `accept`
+ 之前取配额（背压交给内核队列）；`POST /api/v1/invoke` 的 `Idempotency-Key` 在分派前登记，
+ 重复即 409、失败释放。语义与理由见 `docs/003-design/013-HTTP开放接口.md` §5.1.1 / §5.2 / §6。
+- **鉴权与错误**：错误码遵循 `docs/004-ref/002-ERROR_CODES.md`。
 
 ## 关联
 
-- 设计文档：`docs/005-arch/008-http-api-transport.md`
-- 数据流转：`docs/005-arch/002-DATA_FLOW.md`
+- 设计文档：`docs/003-design/013-HTTP开放接口.md`
+- 数据流转：`docs/003-design/003-数据流与调用链.md`

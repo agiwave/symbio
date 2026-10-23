@@ -1,4 +1,4 @@
-//! 判决往返的入账形状（T-247 验收口径 2）：两条用例各钉一侧。
+//! 判决往返的入账形状（ 验收口径 2）：两条用例各钉一侧。
 //!
 //! 正向那条钉「打了模型 ⇒ 三格齐且带 `via`」，反向那条钉「规则短路 ⇒ 零格」。
 //! 两条都跑**同一个**派发点（[`classify_round_trip`]）——反向用例不是「按构造
@@ -88,7 +88,7 @@ async fn the_judgment_round_trip_is_accounted_as_three_cells_with_its_via() {
 #[tokio::test]
 async fn the_rule_shortcut_leaves_no_accounting_cell_at_all() {
     // 判据 2 的反向（不许用「按构造不可达」代替）：规则短路 ⇒ **零入账格**。
-    // 这是 ADR-122 决策 4 的形状——「行不成立」，不是「行成立但没写格」。
+    // 这是 D-122 决策 4 的形状——「行不成立」，不是「行成立但没写格」。
     let store = EventStore::new();
     // 旗子把「模型没被打」变成可断言的事实：panic 只能证明「没走到那一步」。
     let called = Arc::new(AtomicBool::new(false));

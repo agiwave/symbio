@@ -95,7 +95,7 @@ impl Plugin for SessionPlugin {
 const CLEAN = {
   ...CORE,
   'symbio/src/plugins/session/plugin.rs': PLUGIN,
-  'docs/006-ref/003-ROUTES.md': '| `session/chat/send` | 发言 |\n',
+  'docs/004-ref/003-ROUTES.md': '| `session/chat/send` | 发言 |\n',
 }
 
 test('干净树通过（exit 0）', () => {
@@ -316,7 +316,7 @@ test('E-006 命中：003-ROUTES.md 里写了 `sessions/update`', () => {
         'PluginMeta::new(PLUGIN_ID_SESSION',
         'PluginMeta::new("sessions"',
       ),
-      'docs/006-ref/003-ROUTES.md': '| `sessions/update` | 合并写入 |\n',
+      'docs/004-ref/003-ROUTES.md': '| `sessions/update` | 合并写入 |\n',
     },
     { strict: true },
   )
@@ -327,7 +327,7 @@ test('E-006 不误报：退役路由的**前缀**仍然合法（`session/append`
   const r = audit(
     {
       ...CLEAN,
-      'docs/006-ref/003-ROUTES.md':
+      'docs/004-ref/003-ROUTES.md':
         '> `session/append` **已退役**（与 `vdfs/delete` 共用实现）。\n',
     },
     { strict: true },
@@ -461,7 +461,7 @@ test('E-007 不误报：`Weak`（向上引用父）', () => {
 })
 
 test('E-007 不误报：容器按名持有多个子实例（豁免认**容器形态**，不认某一种表）', () => {
-  // `composite.instances` 为保挂载序把 `HashMap` 换成 `IndexMap`（ADR-057），
+  // `composite.instances` 为保挂载序把 `HashMap` 换成 `IndexMap`（D-057），
   // 豁免只列 `HashMap` 时它就被报成「按值持有兄弟插件」——一条判据拦住了它本该放行的形态。
   for (const map of ['HashMap', 'IndexMap', 'BTreeMap']) {
     const r = audit(withField(`instances: Arc<RwLock<${map}<String, Arc<dyn Plugin>>>>,`))
@@ -563,14 +563,14 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
 
 // ── E-008：文档词表必须与代码常量逐字一致 ──────────────────────────────
 //
-// 真实事故的形状：`docs/005-arch/013-vdfs.md` §3.2 的 status 行一直写 `error`，而代码
+// 真实事故的形状：`docs/003-design/009-VDFS规范.md` §3.2 的 status 行一直写 `error`，而代码
 // 已把该词改名为 `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边
 // 各说各话，没有任何测试因此变红；而人读文档写的代码会照 `error` 写。
 const VOCAB_CORE = {
   'symbio/src/symbio_core/vdfs/words.rs':
     `pub const FOO_ONE: &str = "one";\npub const FOO_TWO: &str = "two";\n`,
 }
-const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/005-arch/013-vdfs.md': `${line}\n` })
+const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/003-design/009-VDFS规范.md': `${line}\n` })
 
 test('E-008 命中：文档写着代码里已不存在的词', () => {
   const r = audit(vocabDoc('| `status` | `one` / `legacy` <!-- vocab:FOO_ --> |'))
@@ -852,7 +852,7 @@ test('E-012 不误报：注释里的示例声明（文档写了一条不存在�
 
 // ── E-013：`plugins/loop/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
-// ADR-083 §4 的闭族是枚举白名单；ADR-086 §9 把「import 根 ⊆ 闭族」列为切片判据。
+// D-083 §4 的闭族是枚举白名单；D-086 §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦兄弟插件，拦不住 `crate::providers` / 族外第三方 crate 这类族外根。
 const E013_HIT = /\[ERROR\]\s+E-013\s+symbio\/src\/plugins\/loop\//
 

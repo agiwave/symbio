@@ -1,5 +1,5 @@
-//! `view` 域的单元测试——可见域判据（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ③，
-//! [ADR-069 §决策 3](../../../../docs/010-adr/069.md "ADR-069")）。
+//! `view` 域的单元测试——可见域判据（[plan/11 批 1](../../../../docs/003-design/011-Agent目录规范.md "PL-009-多执行器与多主体加固实施方案") ③，
+//! [D-069 §决策 3](../../../../docs/003-design/005-协议规范.md "D-069")）。
 //!
 //! 判据**只有一条**（[`visible_to`]），本文件把它钉死在三条规则上：
 //! 任何一次「顺手多放行 / 多挡一条」都得先改这里的断言——规则的改动必须是
@@ -29,7 +29,7 @@ fn visible_to_hides_only_other_agents() {
 }
 
 /// **命名空间登记表**是判据形状，不是主体清单：session 后面接什么都走同一条判定；
-/// 加一个 namespace（例如 `decider`）就扩容一族智能体，无需改函数（[ADR-069 §决策 3]）。
+/// 加一个 namespace（例如 `decider`）就扩容一族智能体，无需改函数（[D-069 §决策 3]）。
 #[test]
 fn agent_namespaces_are_a_registry_not_a_prefix() {
     // 登记表今天的取值——加一条就多一族，不改判据。
@@ -69,7 +69,7 @@ fn agent_namespaces_are_a_registry_not_a_prefix() {
 }
 
 /// **可路由地址的归属段解析**：`<ns>/<name>` 或更长的路径都能取到第一段——
-/// 与 VDFS 地址、route 常量同族形状；这是 [ADR-069 §决策 2] 的"地址"含义。
+/// 与 VDFS 地址、route 常量同族形状；这是 [D-069 §决策 2] 的"地址"含义。
 #[test]
 fn principal_namespace_is_the_first_route_segment() {
     assert_eq!(principal_namespace("session/main"), Some("session"));
