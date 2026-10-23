@@ -97,7 +97,7 @@ impl: done
 消息是 `<根>/session/<id>/message` 目录里的**文件**，流式输出 = 该文件内容的
 **增长**（`updated` + `delta`）；会话运行态是会话节点 `<根>/session/<id>` 的
 `status`（`updated`，无 `delta` ⇒ 回读）。判据与推导见
-[D-025](002-架构总览.md "DE-002-架构总览")
+[D-025](005-协议规范.md "DE-005-协议规范")
 与 `symbio/src/plugins/session/docs/105-node-state-streaming.md`。
 
 ---

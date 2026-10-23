@@ -56,7 +56,7 @@ test('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描�
     'docs/003-design/002-架构总览.md': '# D-001\n\n见 [兄弟](./D-999.md)。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/010-adr\/001\.md/)
+  assert.match(r.stdout, /docs\/003-design\/002-架构总览\.md/)
   assert.match(r.stdout, /D-999\.md/)
 })
 
@@ -148,7 +148,7 @@ const IMPLEMENTED_DOC = '# 某改动实施方案\n\n状态：**已实施**（S1�
 test('D-002：评审类文档留在 docs/003-design/ → 失败', () => {
   const r = audit({ 'docs/003-design/review.md': REVIEW_DOC })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /docs\/005-arch\/review\.md/)
+  assert.match(r.stdout, /docs\/003-design\/review\.md/)
 })
 
 test('D-002：过程文档留在**模块目录**同样失败（只扫 docs/ 会漏掉这一整类）', () => {
@@ -431,7 +431,7 @@ test('D-007：跨册锚点指向不存在的标题 → 失败（D-001 会剥掉 
 test('D-007：锚点指向真实标题 → 通过', () => {
   const r = audit({
     'docs/decisions/core.md': '# 平台基座\n\n## D-001: 分形插件架构\n',
-    'docs/README.md': '[001](./decisions/core.md#adr-001-分形插件架构)\n',
+    'docs/README.md': '[001](./decisions/core.md#d-001-分形插件架构)\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
@@ -445,7 +445,7 @@ test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括�
   const r = audit({
     'docs/decisions/core.md': `# 平台基座\n\n${heading}\n`,
     'docs/README.md':
-      '[020](./decisions/core.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)\n',
+      '[020](./decisions/core.md#d-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -455,11 +455,11 @@ test('D-007：` 是 ` 两侧的空格各产生一个连字符（漏了就红—�
   const heading = '## D-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**'
   const r = audit({
     'docs/decisions/session.md': `# 会话与执行\n\n${heading}\n`,
-    'docs/good.md': '[025-good](./decisions/session.md#adr-025-顺序是节点属性delta-是-updated-的传输形态)\n',
-    'docs/README.md': '[025-bad](./decisions/session.md#adr-025-顺序是节点属性delta-是updated的传输形态)\n',
+    'docs/good.md': '[025-good](./decisions/session.md#d-025-顺序是节点属性delta-是-updated-的传输形态)\n',
+    'docs/README.md': '[025-bad](./decisions/session.md#d-025-顺序是节点属性delta-是updated的传输形态)\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /README\.md.*#adr-025-顺序是节点属性delta-是updated的传输形态/s)
+  assert.match(r.stdout, /README\.md.*#d-025-顺序是节点属性delta-是updated的传输形态/s)
   assert.doesNotMatch(r.stdout, /good\.md/)
 })
 
@@ -566,7 +566,7 @@ test('D-013：登记条目照判（本机盘符不是「当时的事实」，是
     'docs/007-task/001.md': '---\nkind: task\nid: T-001\n---\n\n实测 C:\\Users\\someone\\symbio 可用。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/009-task\/001\.md/)
+  assert.match(r.stdout, /docs\/007-task\/001\.md/)
   assert.match(r.stdout, /C:\\Users\\someone\\symbio/)
 })
 
@@ -577,7 +577,7 @@ test('D-013：front-matter（evidence / where）也判——它是文档的一�
       '---\nkind: task\nid: T-001\nevidence: 实测 D:\\work\\repo\\target 可跑\n---\n\n正文。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/009-task\/001\.md:4/)
+  assert.match(r.stdout, /docs\/007-task\/001\.md:4/)
 })
 
 test('D-013：占位式写法通过（`<盘符>` / `<仓库根>` 不指向任何人的机器）', () => {

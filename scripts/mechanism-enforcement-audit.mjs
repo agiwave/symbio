@@ -300,6 +300,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const m = id.match(/^([A-Z]{1,4}-\d{3})/)
     entries.set(m ? m[1] : id, String(e.meta.status))
   }
+  // 豁免期限也可以指向**一条决策**（`### D-NNN`）：那表示「这条纯声明是刻意的」，
+  // 由设计文档的决策条目承接，而不是挂在一个随时会删的 task 上。
+  // 决策不是条目、没有状态机，按 `active` 记——它不会「闭环」。
+  {
+    const dir = path.join(ROOT, 'docs', '003-design')
+    const walk = (d) => {
+      let list
+      try {
+        list = fs.readdirSync(d, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const ent of list) {
+        const abs = path.join(d, ent.name)
+        if (ent.isDirectory()) {
+          walk(abs)
+          continue
+        }
+        const md = fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))
+        for (const line of md) {
+          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
+          if (m && !entries.has(m[1])) entries.set(m[1], 'active')
+        }
+      }
+    }
+    walk(dir)
+  }
 
   const { errors, rows, allows } = audit({ text, mechanisms, codes, resolveAnchor, entries })
 

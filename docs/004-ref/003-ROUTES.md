@@ -276,7 +276,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## 退役路由索引
 
-**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 ADR 索引、变更史见 `git log`，完整迁移审计见 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
+**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见决策索引、变更史见 `git log`，完整迁移审计见 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
 
 > `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 

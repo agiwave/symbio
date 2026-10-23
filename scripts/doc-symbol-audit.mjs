@@ -519,7 +519,13 @@ function docBase (rel) {
 
 for (const rel of mdFiles) {
   const lines = readFileSync(join(REPO_ROOT, rel), 'utf8').split(/\r?\n/)
+  // 决策段（`### D-NNN`）与 ADR 正文同性质：记的是**当时**的设计，其中的符号可能早已改名 / 删除。
+  // `adr` kind 已废除、正文折进设计文档的这一节，故豁免按**节**判，而不是按目录判。
+  let inDecision = false
   lines.forEach((line, i) => {
+    if (/^#{2,6}\s+D-\d{3}[a-z]?\b/.test(line)) inDecision = true
+    else if (/^#{1,2}\s/.test(line)) inDecision = false
+    if (inDecision) return
     const allow = line.match(ALLOW_RE)
     if (allow && allow[1].trim()) return // 承认通道：理由非空
     if (HISTORY_RE.test(line)) return // 这行说的是历史

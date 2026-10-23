@@ -18,7 +18,7 @@
  *     Markdown 形式的站内链接必须可达（精确判定），反引号仓库路径必须存在（启发式档，
  *     带行内豁免）。扫描口径（哪些文件、哪些是注释行）**从 `gen-doc-refs` 导入**——
  *     审计判的行必须与自动改写的行是同一批，两边各数一遍必然漂移。
- *   D-014 过程文档引用：非 task 文档与源码注释里不得出现 `T-NNN` 编号。task 是唯一允许
+ *   D-016 过程文档引用：非 task 文档与源码注释里不得出现 `T-NNN` 编号。task 是唯一允许
  *     保留过程信息的 kind，且**收口即删**（结论先进设计文档、再删文件）——引用它等于引用一个
  *     随时会消失的东西。要指「为什么这样设计」，指设计文档的 `### D-NNN`。
  *
@@ -165,7 +165,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-014
+// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-016
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -981,7 +981,7 @@ if (machinePaths.length > 0) {
   console.log('      本条**不给豁免**：判的是形态，不是这段文字想说明什么。')
 }
 
-// ---- D-014：过程文档引用（非 task 文档 / 源码注释不得出现 T-NNN） ----
+// ---- D-016：过程文档引用（非 task 文档 / 源码注释不得出现 T-NNN） ----
 const taskRefs = []
 {
   const walk = (dir) => {
@@ -1018,7 +1018,7 @@ const taskRefs = []
     }
   }
 }
-console.log(`D-014 过程文档引用：命中 ${taskRefs.length} 处`)
+console.log(`D-016 过程文档引用：命中 ${taskRefs.length} 处`)
 for (const { rel, line, token } of taskRefs) console.log(`  ✗ ${rel}:${line}  ${token}`)
 if (taskRefs.length > 0) {
   console.log('提示：task 是唯一允许保留过程信息的 kind，且收口即删——引用它等于引用一个随时会消失的东西。')

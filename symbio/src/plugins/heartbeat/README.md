@@ -77,9 +77,8 @@ impl: done
 
 ## 关联
 
-- 切分与落点裁决：[`symbio/src/plugins/heartbeat/README.md`](README.md "symbio/src/plugins/heartbeat/README")（本插件的存在理由）
- / [`symbio/src/plugins/heartbeat/README.md`](README.md "symbio/src/plugins/heartbeat/README")（谁有资格开这个会话的事实源）
-- 施工所在：[docs/007-task/167-会话插件切分.md](../../../../docs/007-task/167-会话插件切分.md " 批次 2b
+- 切分与落点裁决：[D-077](#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出)（本插件的存在理由）
+ / [D-076](#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂)（谁有资格开这个会话的事实源）
 - 会话那一侧的入口：`../session/plugin/nodes.rs` 的 `trigger_declaration`、
  `../session/transcript/autonomous.rs` 的 `request_autonomous_round`
 
@@ -89,9 +88,9 @@ impl: done
 
 ### D-076 心跳片的八个宿主触点逐条落位：调度随片走，触发事实落进收件箱写臂
 
-[D-075](README.md "symbio/src/plugins/heartbeat/README") 裁决一把 P3 的判据立成「被切的那片不再 `use super::` 宿主的 私有项」，裁决三点名心跳为第一片，并在 P3 那条留下批次 3 的读数与一句结论——这批的实际工作量在 这些口上，不在搬目录上。本 ADR 就是那句结论的裁决：逐口定归属，之后才谈施工。 读数口径：P1 落地之后，心跳对宿主的全部私有触点，实测八条。
+[D-075](../../../../docs/003-design/002-架构总览.md "DE-002-架构总览") 裁决一把 P3 的判据立成「被切的那片不再 `use super::` 宿主的 私有项」，裁决三点名心跳为第一片，并在 P3 那条留下批次 3 的读数与一句结论——这批的实际工作量在 这些口上，不在搬目录上。本决策就是那句结论的裁决：逐口定归属，之后才谈施工。 读数口径：P1 落地之后，心跳对宿主的全部私有触点，实测八条。
 
 ### D-077 心跳片的落点定为一层的插件目录：卸载单位与第二个消费单位都由它给出
 
-[D-076](README.md "symbio/src/plugins/heartbeat/README") 把心跳裁成两件事并逐口定了归属，2a 已把落格与参数推导搬进 `transcript/autonomous.rs`；那条末尾留下一道没答的题——「标记词汇表进不进 core 由 2b 的切片落点 决定」，而那个落点本身是新的形状裁决。本 ADR 就答这一题：调度半（间隔 / 抖动 / 空闲基线 / 常驻循环 / 设置工具 / 选项族那一行）住在哪。
+[D-076](README.md "symbio/src/plugins/heartbeat/README") 把心跳裁成两件事并逐口定了归属，2a 已把落格与参数推导搬进 `transcript/autonomous.rs`；那条末尾留下一道没答的题——「标记词汇表进不进 core 由 2b 的切片落点 决定」，而那个落点本身是新的形状裁决。本决策就答这一题：调度半（间隔 / 抖动 / 空闲基线 / 常驻循环 / 设置工具 / 选项族那一行）住在哪。
 
