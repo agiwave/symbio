@@ -46,7 +46,7 @@ fn classify_fact_carries_reason_and_source() {
         reason: REASON_GREETING.into(),
     };
     assert_eq!(
-        StageFact::classify(0, Some(&ruled)),
+        StageFact::classify(0, Some(&ruled), 0),
         StageFact {
             stage: StageName::Decide,
             round: 0,
@@ -56,6 +56,7 @@ fn classify_fact_carries_reason_and_source() {
             }),
             result: None,
             identity: None,
+            model_calls: 0,
         }
     );
 
@@ -63,7 +64,7 @@ fn classify_fact_carries_reason_and_source() {
         reason: REASON_NEEDS_WORK.into(),
     };
     assert_eq!(
-        StageFact::classify(4, Some(&modelled)).verdict,
+        StageFact::classify(4, Some(&modelled), 1).verdict,
         Some(VerdictFact {
             reason: Some(REASON_NEEDS_WORK.into()),
             source: VerdictSource::Model,
@@ -72,7 +73,7 @@ fn classify_fact_carries_reason_and_source() {
 
     // 分类器没给出判决（未挂载 / 路由失败）⇒ 仍是一次执行，记 `absent`。
     assert_eq!(
-        StageFact::classify(0, None),
+        StageFact::classify(0, None, 0),
         StageFact {
             stage: StageName::Decide,
             round: 0,
@@ -82,6 +83,7 @@ fn classify_fact_carries_reason_and_source() {
             }),
             result: None,
             identity: None,
+            model_calls: 0,
         }
     );
 }
@@ -99,6 +101,7 @@ fn payload_carries_only_what_the_fact_has() {
         Some(&Verdict::Answered {
             reason: REASON_GREETING.into(),
         }),
+        0,
     );
     assert_eq!(
         decided.payload(),
@@ -107,18 +110,61 @@ fn payload_carries_only_what_the_fact_has() {
             "round": 0,
             "source": "rule",
             "reason": REASON_GREETING,
+            "model_calls": 0,
         })
     );
 
     // 没有理由码时 `reason` 整键缺席，而不是 `null`：读侧按 `as_str` 取值，
     // 两种写法虽都能得到 `None`，但「没有这个事实」与「有事实且为空」不该混。
     assert_eq!(
-        StageFact::classify(0, None).payload(),
-        serde_json::json!({ "stage": "decide", "round": 0, "source": "absent" })
+        StageFact::classify(0, None, 0).payload(),
+        serde_json::json!({ "stage": "decide", "round": 0, "source": "absent", "model_calls": 0 })
+    );
+}
+
+#[test]
+fn the_model_call_count_is_carried_by_the_decide_fact() {
+    // `source` 读不出「有没有打过模型」（模型调了而应答不可解析 ⇒ `source=fallback`），
+    // 那次往返在事实层唯一的**数**是 `model_calls`：判据侧拿它对账「观测 ⇔ 三格」。
+    let modelled = Verdict::Escalate {
+        reason: REASON_NEEDS_WORK.into(),
+    };
+    assert_eq!(
+        StageFact::classify(0, Some(&modelled), 1).payload()["model_calls"],
+        serde_json::json!(1)
+    );
+    // 其余阶段不写这个字段——「恒 0 的字段」是噪声。
+    assert_eq!(
+        StageFact::ran(StageName::Recall, 0)
+            .payload()
+            .get("model_calls"),
+        None
     );
 }
 
 // ── 同一性与落格 ───────────────────────────────────────────────────────
+
+#[test]
+fn the_compress_fact_carries_its_call_count_and_a_per_act_identity() {
+    // 压缩在续写幕会重跑（同一轮号、`request_round` 从 0 重开）。同一性若只按
+    // `(turn, round, stage)` 算，续写幕那格会撞首幕的幂等键 ⇒ 载荷（含
+    // `model_calls`）**不落** ⇒ 那一笔模型往返在事实层没了数，判据侧对不上账。
+    // 所以 identity = 本幕的锚（`drive_seq`）：两幕各一格。
+    let first = StageFact::compress(0, 2, 17);
+    assert_eq!(first.event_id(7), "st-7-0-compress-17");
+    assert_eq!(
+        first.payload()["model_calls"],
+        serde_json::json!(2),
+        "压缩那格必须带着这次往返的数"
+    );
+    assert_ne!(
+        first.event_id(7),
+        StageFact::compress(0, 1, 23).event_id(7),
+        "两幕的压缩是两格；撞键会让后一幕的 `model_calls` 静默消失"
+    );
+    // `identity` 只进事件 id，不进载荷——格里的数是 `model_calls`，不是锚。
+    assert!(first.payload().get("identity").is_none());
+}
 
 #[test]
 fn event_id_is_the_stage_identity() {
@@ -126,7 +172,7 @@ fn event_id_is_the_stage_identity() {
         StageFact::ran(StageName::Decide, 0).event_id(7),
         "st-7-0-decide"
     );
-    assert_eq!(StageFact::classify(2, None).event_id(7), "st-7-2-decide");
+    assert_eq!(StageFact::classify(2, None, 0).event_id(7), "st-7-2-decide");
     assert_ne!(
         StageFact::ran(StageName::Recall, 0).event_id(7),
         StageFact::ran(StageName::Compress, 0).event_id(7),
@@ -147,6 +193,7 @@ fn land_writes_the_turn_stage_cell() {
         Some(&Verdict::Escalate {
             reason: REASON_NEEDS_WORK.into(),
         }),
+        1,
     );
     land(&store, 7, 4, "user-1", &[fact]).expect("落格失败");
 

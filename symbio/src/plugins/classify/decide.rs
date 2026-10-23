@@ -1,21 +1,18 @@
-//! 快速档分类 —— 一次**静默** LLM 往返，四选一。
+//! 快速档分类 —— **四选一**的词表、提示词与解析。
 //!
-//! ## 为什么是「静默」而不是「一次正常请求」
+//! ## 为什么这里**不再打模型**
 //!
-//! 分类请求是**内部请求**：它的流式帧（Turn 骨架 / 思考 / 正文增量）绝不能以自有
-//! 身份进入对话流。否则每判一次就在前端留下一个永不 finalize 的空 Turn——
-//! 长会话下逐个累积，且只在"每轮都判"之后才复现，极易误判成渲染层问题。
+//! ADR-122 决策 2：判决的模型往返走**引擎的 `model` 端口派发路径**——插件侧不再
+//! 保留直接打模型的入口。于是本模块从「一次静默 LLM 往返」缩成三件**纯**事：
 //!
-//! 调用经 `ProviderLlmAdapter` 的端口面（`generate_turn` + `SilentDeltas`）：静默是
-//! 端口的入参形态，不是这里自己搭的出口。判决与上下文压缩摘要是**同一形状**——
-//! 内部模型调用 + 不产生可见节点；区别只在本条已经收敛到 `LlmAdapter`，压缩仍在
-//! 直调（唯一登记豁免，见 [ADR-106](../../../../docs/010-adr/106.md "ADR-106")）。
+//! 1. 规则表命中与否（判完 ⇒ 零往返，编排层直接收判决）；
+//! 2. 没命中时备一份**计划**（提示词 + 消息 + 模型）交给编排层去打；
+//! 3. 编排层把应答拿回来时，按四个词解析成判决。
 //!
-//! ## 为什么「拿不准」的兜底是 `Escalate`
-//!
-//! 分类失败（没有可用的模型服务 / 响应不可解析）必须有一个方向。选 `Escalate`
-//! 的理由是失败方向：`Escalate` 退化成「今天的行为」（全部进工具循环，功能完整），
-//! 而 `Answered` 会让一次分类故障表现成**用户什么都收不到**——静默，无信号。
+//! 「为什么是静默而不是一次正常请求」这条理由**没有变**，只是搬到了编排层：分类请求
+//! 的流式帧绝不能以自有身份进入对话流（否则每判一次就在前端留下一个永不 finalize
+//! 的空 Turn）。判据归谁管是另一件事——**分类请求的形状**（空工具、静默、调用方中止）
+//! 由计划里的消息与编排层的出口形态保证。
 //!
 //! ## 为什么只认四个词
 //!
@@ -23,28 +20,17 @@
 //! 加一个「要干活」。多出来的类别（情绪 / 领域 / 优先级）没有对应的编排动作，
 //! 收了也只能丢掉——那是给提示词加装饰，不是加能力。
 //!
-//! ## 为什么这次调用走深度档端口而**不持**快速档令牌
+//! ## 为什么「拿不准」的兜底是 `Escalate`
 //!
-//! 这里就是快速档本身，但它经 [`ProviderLlmAdapter`] + `TokenIssuer::issue_deep()`
-//! 发一次静默往返，不拿 `ClassifyOnly`——[ADR-096](../../../../docs/010-adr/096.md "ADR-096")
-//! 把那张令牌退役了。理由：它守的 `Classifier` 端口在生产里从未存在（全仓只在
-//! `verify/latency_gate.rs` 里作为编译期桩），而「输出只能是四个词之一」由
-//! [`parse_verdict`] 的返回类型强制，「不带工具」由本插件不写工具行强制
-//! （`traverse_registers_no_tool_rows` 数注册表）。令牌在这里只能证明
-//! 「持码者被允许分类」，那句证明不带来任何调用方会检查的东西。
-//!
-//! 走深度档端口不是「升档」：内部请求的形状（空工具、静默、调用方中止）没有变，
-//! 变的是**取模型能力的路**——全仓只剩一条（[ADR-106](../../../../docs/010-adr/106.md "ADR-106")）。
-//! 以前直调 `execute_turn` 的那条旁路同时绕开了闸门与 adapter 的 cost_ms 实测。
-
-use std::sync::Arc;
+//! 分类失败（没有可用的模型服务 / 响应不可解析）必须有一个方向。选 `Escalate`
+//! 的理由是失败方向：`Escalate` 退化成「今天的行为」（全部进工具循环，功能完整），
+//! 而 `Answered` 会让一次分类故障表现成**用户什么都收不到**——静默，无信号。
 
 use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 use crate::symbio_core::Verdict;
 use crate::symbio_core::{
-    capability_model_resolve, ExecAbortSignal, LlmAdapter, PluginInvokeRequest,
-    PluginInvokeRequestExt, PromptMessage, ProviderLlmAdapter, Registry, SilentDeltas, TokenIssuer,
-    CAPABILITY_VISITOR, REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
+    DecisionPlan, PromptMessage, REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK,
+    REASON_REFUSE,
 };
 
 use super::config::ClassifyConfig;
@@ -117,70 +103,28 @@ fn normalize_word(raw: &str) -> String {
         .to_string()
 }
 
-/// 快速档分类：一次静默 LLM 往返。
+/// 备好一次判决模型往返的**计划**（ADR-122 决策 2）。
 ///
 /// `context` 是**对话线**投影（`session` 经 `context::conversation_view` 投影后带来），
 /// 最后一条即本轮用户发言。它为空（仓外调用方直呼本路由）时退回「只用这句话」。
 ///
-/// 模型与提示词都来自**本插件自己的配置**（`config.rs`）：配置了 `model` 就用它
+/// 提示词与模型都来自**本插件自己的配置**（`config.rs`）：配置了 `model` 就用它
 /// （判决是一次四选一分类，最便宜最快的模型就够），取不到落回会话选定的那个；
 /// 配置了 `system_prompt` 就覆盖内置那份。
 ///
-/// 返回 `None` = 判不出来（没有可用的模型服务 / 请求失败 / 响应不可解析）——
-/// 调用方据此落 `Escalate`（见模块文档的失败方向说明）。
-pub(crate) async fn decide(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    utterance: &str,
-    context: &[ChatNode],
-    config: &ClassifyConfig,
-) -> Option<Verdict> {
-    // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
-    // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
-    // 取不到就落回当次生效的那个——降级而不失效。
-    let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
-    let provider = capability_model_resolve(&*visitor, config.model_id()).await?;
-
-    // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
-    // 一切照常），这行日志是唯一的线索。
-    crate::plugin_debug!(
-        "classify",
-        "[Classify] 分类使用模型 '{}'（配置 model={:?}）",
-        provider.provider_id(),
-        config.model_id()
-    );
-
-    let system_prompt = config.prompt_override().unwrap_or(SYSTEM_PROMPT);
-    let messages = build_messages(utterance, context);
-    // 中止 = 调用方若给了就跟着走，没给就是一个永不中止的独立信号（`route()` 直呼
-    // 没有编排层，也就没有中止来源——见 `ExecAbortSignal::of`）。
-    let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, ExecAbortSignal::of(&**ctx));
-    let tok = TokenIssuer::issue_deep();
-
-    // 端口面直接给 `LlmTurn`：正文、实测耗时与用量是同一次响应的产物，不为「只要
-    // 文本」再走一条降级路径。`SilentDeltas` 是内部请求的出口形态（不产生任何帧）。
-    match llm
-        .generate_turn(&tok, &messages, &[], Arc::new(SilentDeltas))
-        .await
-    {
-        Ok(turn) => {
-            // cost_ms 与对话轮同一条实测口径（adapter 边界）；内部请求不写事件，
-            // 因此它进日志而不是成本台账（台账的唯一输入仍是落格事件，ADR-044）。
-            crate::plugin_debug!(
-                "classify",
-                "[Classify] 分类往返完成（cost_ms={}）",
-                turn.cost_ms
-            );
-            parse_verdict(&turn.text)
-        }
-        Err(e) => {
-            // 分类失败**不是**本轮的失败：它只让判决退回 `Escalate`（= 今天的行为）。
-            // 因此这里 warn 而不 error——把它报成错误会让一次限流看起来像会话故障。
-            crate::plugin_warn!(
-                "classify",
-                "[Classify] 快速档分类请求失败，按 Escalate 处理：{e}"
-            );
-            None
-        }
+/// ## 为什么计划里带**模型 id** 而不是带一个 provider
+///
+/// 契约跨插件，而 provider 是**运行期对象**（`Arc<dyn ModelProvider>`）——它过不了
+/// 契约的序列化面。带 id 让编排层自己去解析（`capability_model_resolve`：严格查找 +
+/// 单点降级），解析不到就整轮不落格——「没有模型服务」这一档因此仍是**零往返**。
+pub(crate) fn plan(utterance: &str, context: &[ChatNode], config: &ClassifyConfig) -> DecisionPlan {
+    DecisionPlan {
+        system_prompt: config
+            .prompt_override()
+            .unwrap_or(SYSTEM_PROMPT)
+            .to_string(),
+        messages: build_messages(utterance, context),
+        model_id: config.model_id().map(str::to_string),
     }
 }
 

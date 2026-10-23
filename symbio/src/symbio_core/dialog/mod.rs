@@ -58,6 +58,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::symbio_core::chat_node::ChatNode;
+use crate::symbio_core::projection::transcript::PromptMessage;
 
 /// `classify` 的入参：这一轮发生了什么
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +82,72 @@ pub struct DecideRequest {
     /// S2 里投影函数与它的第一个消费方同批落位，字段与生产者同时出现。
     #[serde(default)]
     pub context: Vec<ChatNode>,
+}
+
+/// `classify` 的**判决结果**：判决本身，或一次**待跑的模型往返**。
+///
+/// ## 为什么不是一个 `Verdict`
+///
+/// ADR-122 决策 2：判决的模型往返走**引擎的 `model` 端口派发路径**，插件侧不再
+/// 保留直接打模型的入口。于是「判不判得出来」与「要不要打模型」在调用前是**两件事**
+/// ——规则表命中时压根没有模型往返（决策 4：零往返 = 行不成立）。
+///
+/// 契约把这两件事分成两个变体，编排层据此决定**要不要派发**：
+///
+/// - [`DecideOutcome::Decided`]：已经判完（规则短路 / 本轮没有用户发言）——零入账格；
+/// - [`DecideOutcome::NeedsModel`]：请引擎打一次模型，附一份**计划**。
+///
+/// ## 为什么计划走契约，而不是插件自己去打
+///
+/// 「这一轮欠一次模型往返」是**编排层的判断**（PL-016 §2.3：`request` 由决策者写），
+/// 而模型怎么打是**能力的内部知识**（提示词、消息怎么拼）。两者分处两个插件 ⇒ 计划
+/// 只能经契约传递。计划是**数据**：编排层拿到它不必懂分类，只需照着打。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum DecideOutcome {
+    /// 判完了（规则短路命中 / 本轮没有用户发言）：**零模型往返**。
+    Decided {
+        /// 判决（闭集枚举）。
+        verdict: Verdict,
+    },
+    /// 需要一次模型往返：编排层按 [`DecisionPlan`] 派发，把应答交回 `classify/parse`。
+    NeedsModel {
+        /// 这一次往返的**计划**。
+        plan: DecisionPlan,
+    },
+}
+
+/// 一次判决模型往返的**计划**（`classify` 备好，编排层执行）。
+///
+/// 三个字段都是**执行所需的全部**：提示词、消息、模型。三者缺一，编排层就得反过来
+/// 猜——而「猜」正是 ADR-122 否掉的候选 ②（调用前问「会不会打模型」）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionPlan {
+    /// 系统提示词（内置那份或本插件配置覆盖的那份）。
+    pub system_prompt: String,
+    /// 消息（对话线投影 + 本轮这句话）。
+    pub messages: Vec<PromptMessage>,
+    /// 判决用的 provider id（`<根>/model/<id>`）。
+    ///
+    /// `None` = 用**会话选定**的那一个（配置的 id 写错时也落回它——降级而不失效）。
+    #[serde(default)]
+    pub model_id: Option<String>,
+}
+
+/// `classify/parse` 的入参：把分类器的**自由文本**解析成判决。
+///
+/// ## 为什么解析是**另一次路由**，而不是回参里带一句
+///
+/// 判决是闭集枚举，而模型的输出是自由文本（提示词要求只输出一个词，模型不总听话）。
+/// 把「解析」留在 `classify` 侧，编排层就只认枚举——它不需要知道四个词是哪四个
+/// （词表是 `classify` 的内部知识）。文本经容器路由回 `classify`，与判决同一个插件
+/// 拥有同一份词表 ⇒ 词表只有一处。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParseVerdictRequest {
+    /// 会话 id（插件据此取自己的上下文）。
+    pub session_id: String,
+    /// 分类器的应答正文（自由文本）。
+    pub text: String,
 }
 
 /// 编排层要**执行**的那个枚举：这一轮该走哪条路。

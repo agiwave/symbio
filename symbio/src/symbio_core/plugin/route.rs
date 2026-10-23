@@ -127,7 +127,14 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// classify/decide — 判决这一轮该直接回答、还是派给工具循环
 ///
 /// 唯一调用方：`session` 的 `chat_loop/decide.rs`（轮首判决）。返回
-/// [`crate::symbio_core::Verdict`]——一个**闭集枚举**，不是文本。
+/// [`crate::symbio_core::DecideOutcome`]——**判决**，或**一次待跑的模型往返**。
+///
+/// ## 为什么出参不是 `Verdict`（ADR-122 决策 2）
+///
+/// 判决的模型往返搬进了引擎的 `model` 端口派发路径：插件不再自己打模型。
+/// 于是「判不判得出来」与「要不要打模型」在调用前分成两件事——规则表命中时
+/// 压根没有模型往返。出参因此是二选一：判完了（零往返），或请引擎打一次
+/// （附一份**计划**）。
 ///
 /// ## 为什么直到 S2 才加这个常量
 ///
@@ -136,6 +143,25 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// 那时加它就是一个零消费方的预留常量。S2 落下第一个调用方的同一批里，
 /// 它才被登记进来。
 pub const ROUTE_CLASSIFY_DECIDE: &str = "classify/decide";
+
+/// classify/parse — 把分类器的自由文本解析成判决
+///
+/// 唯一调用方：`session` 的 `chat_loop/decide.rs`（判决往返的**解析点**）。
+/// 入参 [`crate::symbio_core::ParseVerdictRequest`]，出参
+/// [`crate::symbio_core::Verdict`]。
+///
+/// ## 为什么解析要另开一条路由
+///
+/// 模型的输出是自由文本（提示词要求只输出一个词，模型不总听话），判决是闭集枚举。
+/// 解析留在 `classify` 侧，编排层就只认枚举——它不需要知道四个词是哪四个（词表是
+/// `classify` 的内部知识）。同一份词表因此只有一处，不会出现「插件改了词表而编排层
+/// 还按旧的解析」这种两处各判一遍的漂移。
+///
+/// ## 它为什么与 [`ROUTE_CLASSIFY_DECIDE`] 同批登记
+///
+/// 判决往返搬进引擎之后，「打完模型」与「把应答变成判决」分处两侧（前者是编排层的
+/// 端口派发，后者是 `classify` 的内部知识）⇒ 少一条路由就没法闭环。
+pub const ROUTE_CLASSIFY_PARSE: &str = "classify/parse";
 
 // ============ Compose 插件 ============
 /// compose/wording — 按上游判决产出一段**面向用户**的文本

@@ -19,12 +19,15 @@
 //! 多带 `reason` + `source`（`rule` / `model` / `fallback` / `absent`）就够——
 //! 判决与「已做」描述的是同一件事（这一段执行过），载荷只是说得更细。
 //!
-//! ## 同一性 = `(turn, round, stage)`
+//! ## 同一性 = `(turn, round, stage)` + **附加段**
 //!
-//! 事件 id 是 `st-{turn}-{round}-{stage}`。续写幕（审批 / 问答恢复）**复用同一轮号**
-//! 且 `request_round` 从 0 重新开始，于是召回 / 压缩会重跑（这是既有行为：恢复后
-//! 的事实源已经变了，本轮视图应当重取）。重跑时撞幂等键 ⇒ [`land`] 按「已做过」
-//! 处理，既不重复落格也不失败。
+//! 事件 id 是 `st-{turn}-{round}-{stage}`，必要时再缀一段 `identity`（不进载荷）。
+//! 续写幕（审批 / 问答恢复）**复用同一轮号**且 `request_round` 从 0 重新开始，
+//! 于是召回 / 压缩会重跑（这是既有行为：恢复后的事实源已经变了，本轮视图应当重取）。
+//! 重跑时若还撞幂等键 ⇒ [`land`] 按「已做过」处理，既不重复落格也不失败——
+//! 但那一格**载荷里的数就没了**（压缩那格带着 `model_calls`：它是一次模型往返在
+//! 事实层唯一的数）。于是「会在续写幕重跑」的那几步把 `identity` 缀上本幕的锚
+//! （`drive_seq`），各幕各一格，撞键不再发生。
 //!
 //! ## 生产侧按幕锚读事实，而不是按轮扫全史
 //!
@@ -134,6 +137,14 @@ pub(crate) struct StageFact {
     /// （两次 `approve` 是同一种动作，却是两次不同的恢复）。`None` = 同一性只由
     /// `(turn, round, stage[, result])` 决定。
     pub(crate) identity: Option<String>,
+    /// 这一步打了几次**模型**（ADR-122 决策 4 / 5）。
+    ///
+    /// 它是那次往返在事实层唯一的**数**：`source` 记的是判决的**来源**，读不出
+    /// 「有没有打过模型」（模型调了而应答不可解析 ⇒ 判决落 `Escalate{unclassified}`
+    /// ⇒ `source=fallback`）。判据侧拿它对账「观测 ⇔ 三格」。
+    ///
+    /// 只有 `decide` 与 `compress` 这两步带它（其余阶段恒 0，载荷里不写）。
+    pub(crate) model_calls: u64,
 }
 
 impl StageFact {
@@ -145,6 +156,7 @@ impl StageFact {
             verdict: None,
             result: None,
             identity: None,
+            model_calls: 0,
         }
     }
 
@@ -177,7 +189,9 @@ impl StageFact {
     }
 
     /// 轮首判决：理由码与来源一并入格（`None` = 分类器没给出判决，记 `absent`）。
-    pub(crate) fn classify(round: usize, verdict: Option<&Verdict>) -> Self {
+    ///
+    /// `model_calls` 是这次判决打了几次模型（0 = 规则短路 / 没有模型服务）。
+    pub(crate) fn classify(round: usize, verdict: Option<&Verdict>, model_calls: u64) -> Self {
         let reason = verdict.and_then(|v| match v {
             Verdict::Answered { reason } | Verdict::Escalate { reason } => Some(reason.clone()),
             // `Report` 由 session 在轮边界产出，不进轮首判决；没有理由码可记。
@@ -193,7 +207,21 @@ impl StageFact {
             verdict: Some(VerdictFact { reason, source }),
             result: None,
             identity: None,
+            model_calls,
         }
+    }
+
+    /// 压缩格：这一次压缩打了几次模型（ADR-122 决策 2 / 5）。
+    ///
+    /// `identity` = 本幕的锚（`drive_seq`）：压缩在**续写幕**会重跑（恢复后事实源
+    /// 变了，本轮视图应当重取），而同一性若只按 `(turn, round, stage)` 算，续写幕
+    /// 那格会撞首幕的幂等键 ⇒ 载荷（含 `model_calls`）**不落** ⇒ 那一笔模型往返
+    /// 在事实层没了数，判据侧对不上账。
+    pub(crate) fn compress(round: usize, model_calls: u64, drive_seq: u64) -> Self {
+        let mut fact = Self::ran(StageName::Compress, round);
+        fact.model_calls = model_calls;
+        fact.identity = Some(drive_seq.to_string());
+        fact
     }
 
     /// 事件 id：`(turn, round, stage)` 是这一格的**同一性**（见模块文档）。
@@ -228,6 +256,11 @@ impl StageFact {
         }
         if let Some(result) = &self.result {
             payload["result"] = serde_json::Value::String(result.clone());
+        }
+        // `model_calls` 只对**打过模型的那几步**有意义（它是那次往返的数）：
+        // 判决与压缩。其余阶段恒 0，载荷里不写这个字段——「恒 0 的字段」是噪声。
+        if matches!(self.stage, StageName::Decide | StageName::Compress) {
+            payload["model_calls"] = serde_json::Value::from(self.model_calls);
         }
         payload
     }

@@ -26,14 +26,19 @@
 //! （`parse_verdict -> Option<Verdict>`，四变体闭集）与这条**工具集判据**上。约束没变弱，
 //! 承重墙换了——靠「本插件恰好没注册能力」这个结构巧合不算强制力。
 //!
-//! ## 两条产线（S2）
+//! ## 两条产线
 //!
 //! ```text
 //! decide(utterance)
-//!   ├─ 规则表命中（问候 / 致谢 / 确认 / 空输入）→ Answered{reason}   0 次 LLM 往返
-//!   ├─ 未命中 → 快速档分类（一次静默 LLM 往返，四选一）→ Answered / Escalate
+//!   ├─ 规则表命中（问候 / 致谢 / 确认 / 空输入）→ Answered{reason}   0 次模型往返
+//!   ├─ 未命中 → 给一份**计划**（提示词 + 消息 + 模型）→ 编排层经引擎 `model` 端口打
+//!   │            → 应答拿回来经 parse 路由解析 → Answered / Escalate
 //!   └─ 判不出来（无模型服务 / 响应不可解析）→ Escalate{unclassified}（= 今天的行为）
 //! ```
+//!
+//! **模型往返不在本插件里发生**（ADR-122 决策 2）：往返走引擎的 `model` 端口派发路径，
+//! 好让那次往返落进义务环的三格（请求 / 已发 / 应答）——插件自己打模型的话，那次
+//! 往返在账上是**看不见**的。本插件因此只做三件纯事：判规则、备计划、解析应答。
 //!
 //! 规则表由本插件自己的配置开关（`ClassifyConfig::rule_shortcut`）管辖——它是本插件的
 //! 内部策略，不该出现在调用方的配置面里（见 `config.rs` 的模块文档）。
@@ -47,17 +52,18 @@
 
 use std::sync::Arc;
 
+use crate::symbio_core::REASON_UNCLASSIFIED;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_CLASSIFY,
 };
-use crate::symbio_core::{DecideRequest, Verdict, REASON_UNCLASSIFIED};
+use crate::symbio_core::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 
 use super::config::ClassifyConfig;
-use super::decide::decide;
+use super::decide::{parse_verdict, plan};
 use super::rules::classify_by_rule;
 
 /// Classify 插件（无状态、无副作用、不持有任何地址）
@@ -110,11 +116,21 @@ impl ClassifyPlugin {
     ///
     /// 顺序是判据的一部分：**先规则、后分类**。反过来的话，规则短路省下的那次
     /// 往返会被分类请求吃掉——「简单问题反而更慢」。
-    async fn decide(&self, ctx: &Arc<dyn PluginInvokeRequest>, req: &DecideRequest) -> Verdict {
+    ///
+    /// ## 出参是**判决或计划**，不是一个判决（ADR-122 决策 2）
+    ///
+    /// 规则表命中 ⇒ 直接给判决（**零模型往返**，编排层一条格都不落）；
+    /// 没命中 ⇒ 给一份**计划**，由编排层经引擎的 `model` 端口打那次模型。
+    /// 插件不再自己打模型——于是「这一轮欠一次模型往返」是编排层的判断，
+    /// 「这次往返长什么样」是本插件的知识，两者经契约分开。
+    async fn decide(&self, req: &DecideRequest) -> DecideOutcome {
         let Some(utterance) = req.utterance.as_deref() else {
             // 没有用户发言（后台触发的判定）：无事可判。兜底方向与判不出来一致——
             // `Escalate` = 今天的行为，绝不返回 `Answered`（那会让用户看到沉默）。
-            return escalate_unclassified();
+            // 它是**零往返**的一种（连计划都不给）。
+            return DecideOutcome::Decided {
+                verdict: escalate_unclassified(),
+            };
         };
 
         if self.config.rule_shortcut {
@@ -125,15 +141,16 @@ impl ClassifyPlugin {
                     req.session_id,
                     reason
                 );
-                return Verdict::Answered {
-                    reason: reason.to_string(),
+                return DecideOutcome::Decided {
+                    verdict: Verdict::Answered {
+                        reason: reason.to_string(),
+                    },
                 };
             }
         }
 
-        match decide(ctx, utterance, &req.context, &self.config).await {
-            Some(verdict) => verdict,
-            None => escalate_unclassified(),
+        DecideOutcome::NeedsModel {
+            plan: plan(utterance, &req.context, &self.config),
         }
     }
 }
@@ -160,10 +177,23 @@ impl Plugin for ClassifyPlugin {
 
         match path {
             // 判决这一轮该直接回答、还是派给工具循环。
+            //
+            // 出参是 `DecideOutcome`：**判决**或**待跑的计划**（ADR-122 决策 2）。
+            // 走计划的分支不在这里打模型——模型往返由编排层经引擎的 `model` 端口
+            // 派发，好让那次往返落进义务环的三格（请求 / 已发 / 应答）。
             "decide" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: DecideRequest = ctx.payload()?;
-                Ok(PluginPayload::new(&self.decide(&ctx, &req).await))
+                Ok(PluginPayload::new(&self.decide(&req).await))
+            }
+            // 把一次判决往返的**应答**解析成判决（ADR-122 决策 2 的另一半）。
+            //
+            // 解析与「要不要打模型」分开：模型往返由编排层走端口派发（那里才有义务环
+            // 的三格），而「应答长什么样算哪个词」是本插件的知识。
+            "parse" => {
+                let req: ParseVerdictRequest = ctx.payload()?;
+                let verdict = parse_verdict(&req.text).unwrap_or_else(escalate_unclassified);
+                Ok(PluginPayload::new(&verdict))
             }
             _ => Err(PluginError::NotFound(format!(
                 "[classify] 未知子命令: {path}"
@@ -174,10 +204,11 @@ impl Plugin for ClassifyPlugin {
     /// 不参与**能力**收集：本插件不注册 `Capability`，也没有挂载视图
     /// （它无状态、不持有地址，因此不实现 `VdfsProvider`）。
     ///
-    /// ⚠️ 「不注册 `Capability`」与「不调用模型」是**两件事**：本插件确实会发起一次
-    /// 静默的模型请求（快速档分类），但那次请求不向模型暴露任何工具，本插件也从不
-    /// 出现在模型的工具清单里——工具集来自 `Registry::put` 的能力行，而这里
-    /// 一个也没注册（`traverse_registers_no_tool_rows` 数的是注册表本身）。
+    /// ⚠️ 「不注册 `Capability`」与「不调用模型」是**两件事**：本插件**不再自己**发起
+    /// 模型请求（ADR-122 决策 2——往返由编排层走引擎的 `model` 端口），但它**备出**的
+    /// 那次分类请求不向模型暴露任何工具，本插件也从不出现在模型的工具清单里——工具集
+    /// 来自 `Registry::put` 的能力行，而这里一个也没注册（`traverse_registers_no_tool_rows`
+    /// 数的是注册表本身）。
     ///
     /// 它参与的是**另一条通道**（`CONFIGURABLE_VISITOR`）：声明「本插件有一份配置
     /// 文档」，设置页据此列出并指路 `<根>/classify/PLUGIN.yml`。缺了它插件照常工作，

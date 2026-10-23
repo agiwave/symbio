@@ -225,8 +225,11 @@ async fn wording_round_trip(
         step: &step,
         via: "compose/wording",
     };
-    match round_trip(store.as_ref(), round, || {
-        compose_text(orchestrator, ctx, context, verdict, snapshot)
+    match round_trip(store.as_ref(), round, || async {
+        // 措辞拿不到（未挂载 / 生成失败）是**这一趟的平凡结果**，不是这次往返的
+        // 失败：往返本身成了（请求 / 已发 / 应答三格齐），只是它没带来文本。
+        // 于是错误类型是 `String`——这一趟没有失败，只有「没有文本」。
+        Ok::<_, String>(compose_text(orchestrator, ctx, context, verdict, snapshot).await)
     })
     .await
     {

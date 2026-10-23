@@ -4,6 +4,8 @@
 //! 反向用例是主菜——「引擎忘了落 `sent`」「失败静默挂起」「租约到期没人管」三种
 //! 形态都不会自己报错，只有用例能把它们叫出来。
 
+use std::sync::Arc;
+
 use serde_json::json;
 
 use super::super::loop_rows::{load, PORTS, ROWS};
@@ -425,7 +427,7 @@ async fn an_internal_request_is_a_full_model_round_trip() {
             step: "w0",
             via: "compose/wording",
         },
-        || async { Some("答话") },
+        || async { Ok::<_, String>(Some("答话")) },
     )
     .await
     .expect("内部请求应当按端口 `model` 派发");
@@ -481,7 +483,7 @@ async fn a_second_internal_request_in_the_same_act_is_a_separate_call() {
             step: "w0",
             via: "compose/wording",
         },
-        || async { "第一次" },
+        || async { Ok::<_, String>("第一次") },
     )
     .await
     .unwrap();
@@ -495,11 +497,82 @@ async fn a_second_internal_request_in_the_same_act_is_a_separate_call() {
             step: "w1",
             via: "compose/wording",
         },
-        || async { "第二次" },
+        || async { Ok::<_, String>("第二次") },
     )
     .await
     .unwrap();
     let facts = store.range(Seq::new(0));
     assert_eq!(facts.iter().filter(|e| e.kind == "request").count(), 2);
     assert_eq!(facts.iter().filter(|e| e.kind == "response").count(), 2);
+}
+
+// ── 压缩摘要也走端口（T-247）─────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_compression_summary_is_accounted_as_a_model_round_trip() {
+    // 压缩摘要是一次**内部**模型往返（ADR-122 决策 2）：同样三格，同样带身份。
+    // 身份是判据侧把「这次内部往返」与「这一轮自己答完了」分开的唯一依据——
+    // 混进来会让判据读到一条 `response` 就以为本轮已收束。
+    let store = Arc::new(boot());
+    let compress = Compress::new(store.clone(), 3, 2, 9, 0, 0);
+    let out = compress
+        .summary(|| async { Ok::<_, String>("摘要") })
+        .await
+        .expect("压缩摘要应当按端口 `model` 派发");
+    assert_eq!(out, "摘要");
+    assert_eq!(compress.calls(), 1, "打了一次摘要模型，次数就是 1");
+
+    let facts = store.range(Seq::new(0));
+    assert_eq!(
+        facts.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        vec!["request", "sent", "response"]
+    );
+    for e in &facts {
+        assert_eq!(
+            e.payload["via"],
+            json!("compress/summary"),
+            "{} 这一格丢了身份",
+            e.kind
+        );
+    }
+    // 逻辑 id 带**幕锚**与请求轮：`model-{turn}-d{drive}-z{round}-{attempt}`。
+    assert_eq!(
+        payload_of(&store, "request")["id"],
+        json!("model-3-d9-z0-0")
+    );
+    // 内部往返不带工具 ⇒ 应答格的 `calls` 是空数组（`open-tools` 展开出零笔子债）。
+    assert_eq!(payload_of(&store, "response")["calls"], json!([]));
+}
+
+#[tokio::test]
+async fn the_correction_retry_is_a_separate_call_and_a_failure_still_has_its_cell() {
+    // 压缩可能打两次模型（快照校验不过时纠正重试）：两笔账，两个逻辑 id。
+    // 并成一笔会让「三格 = 一次模型往返」失真，判据侧数不出真实调用次数。
+    let store = Arc::new(boot());
+    let compress = Compress::new(store.clone(), 3, 2, 9, 0, 0);
+    compress
+        .summary(|| async { Ok::<_, String>("第一次") })
+        .await
+        .unwrap();
+    let second = compress
+        .summary(|| async { Err::<String, _>("网关 500") })
+        .await;
+    assert!(second.is_err(), "执行体失败要原样交回");
+
+    assert_eq!(compress.calls(), 2, "两次摘要往返就是两笔账");
+    let facts = store.range(Seq::new(0));
+    let ids: Vec<&str> = facts
+        .iter()
+        .filter(|e| e.kind == "request")
+        .map(|e| e.payload["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["model-3-d9-z0-0", "model-3-d9-z0-1"]);
+    // 失败那笔也有带身份的 `failed` 格：压缩失败不收束这一轮（它是优化项），
+    // 但那次往返**发生过**——账上必须有它（ADR-122 决策 5）。
+    let failed = facts
+        .iter()
+        .find(|e| e.kind == "failed")
+        .expect("失败的摘要往返必须留下 `failed` 格");
+    assert_eq!(failed.payload["via"], json!("compress/summary"));
+    assert_eq!(failed.payload["id"], json!("model-3-d9-z0-1"));
 }

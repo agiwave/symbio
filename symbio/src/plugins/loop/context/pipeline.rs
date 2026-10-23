@@ -18,12 +18,19 @@ use crate::symbio_core::{
     PluginError, RemoveNodesRequest, ReplaceAllRequest,
 };
 
+use super::super::port::Compress;
+
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
 ///
 /// `force` 为 `super::should_start_compression` 的公开契约（跳过阈值）。
 /// 自动路径恒为 `false`（自动压缩必须走阈值）；`true` 只由**用户主动重试**
 /// （`retry_compaction`）传入——此时同时**绕过熔断**：熔断约束的是"每轮自动白等
 /// 一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住。
+///
+/// `compress` = 摘要请求的**入账面**（ADR-122 决策 2）：有它 ⇒ 摘要那次模型往返
+/// 走端口 `model`（三格带 `via`）；`None` ⇒ 轮外路径（用户主动重试，见
+/// [`retry_compaction`]），那一侧没有轮可挂，本次不入账。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
@@ -31,6 +38,7 @@ pub(crate) async fn auto_compress_process(
     abort: &ExecAbortSignal,
     overhead_tokens: usize,
     force: bool,
+    compress: Option<&Compress>,
 ) -> Result<Option<usize>, CompressionFailure> {
     let effective_context_limit = orchestrator.context_limit as usize;
 
@@ -74,6 +82,7 @@ pub(crate) async fn auto_compress_process(
         "auto",
         if force { "retry" } else { "threshold" },
         force,
+        compress,
     )
     .await;
     match post_tokens {
@@ -179,6 +188,8 @@ async fn compress_snapshot_inner(
     log_tag: &str,
     // 与包装层 begin/finish 同一个 id：摘要增量因此落到**同一个**节点上
     node_id: &str,
+    // 摘要请求的入账面（`None` = 轮外路径，不入账）。
+    compress: Option<&Compress>,
 ) -> Result<Option<usize>, CompressionFailure> {
     // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
@@ -255,6 +266,7 @@ async fn compress_snapshot_inner(
         abort,
         // 摘要增量实时落到压缩节点上（节点 id 与 begin/finish 同源，见包装层）
         node_id,
+        compress,
     )
     .await
     {
@@ -313,6 +325,7 @@ async fn compress_snapshot_inner(
             &llm_short_id(),
             abort,
             node_id,
+            compress,
         )
         .await;
         if let Ok(s) = retry {
@@ -496,6 +509,8 @@ async fn compress_with_snapshot_core(
     trigger: &'static str,
     // `true` = 用户主动重试：session 侧的 `begin` 据此绕过熔断。
     force: bool,
+    // 摘要请求的入账面（`None` = 轮外路径，不入账）。
+    compress: Option<&Compress>,
 ) -> Result<Option<usize>, CompressionFailure> {
     // 压缩节点的 id 在**包装层**生成：内层只管压缩逻辑。
     let node_id = llm_short_id();
@@ -540,6 +555,7 @@ async fn compress_with_snapshot_core(
         keep_messages,
         log_tag,
         &node_id,
+        compress,
     )
     .await;
 
@@ -720,6 +736,9 @@ pub(crate) async fn retry_compaction(
         overhead_tokens,
         // force = true：跳过阈值判定并绕过熔断（用户主动重试）
         true,
+        // 轮外路径：这一压没有轮可挂（唤醒请求不进 turn 循环），摘要那次模型往返
+        // **不入账**。它是 J8 口径上唯一的已知缺口，登记在 T-254。
+        None,
     )
     .await;
 
@@ -822,6 +841,8 @@ async fn send_compression_request(
     // 压缩节点 id：摘要正文的逐帧增量会**改道**到这个节点上实时可见
     // （[`compression_delta_gate`]）。
     node_id: &str,
+    // 摘要请求的入账面（`None` = 轮外路径，不入账）。
+    compress: Option<&Compress>,
 ) -> Result<ChatNode, PluginError> {
     // 压缩是**内部 LLM 请求**，不是对话轮次：其流式事件（Turn 起始 / 思考 / 正文 delta）
     // 绝不能以**自有身份**进入对话流——否则前端会多出一个永远停在"正在思考…"的
@@ -859,14 +880,21 @@ async fn send_compression_request(
         messages.iter().map(|m| m.content.as_ref().map(|c| c.to_text().len()).unwrap_or(0)).sum::<usize>()
     );
 
-    let result = run_compression_llm(
-        orchestrator,
-        system_prompt,
-        messages,
-        root_id,
-        &ExecEnv::new(sink.clone(), abort.clone()),
-    )
-    .await;
+    // 请求环境只造一次：闭包要借用它（`&ExecEnv` 不能指向临时值）。
+    let env = ExecEnv::new(sink.clone(), abort.clone());
+    let result = match compress {
+        // 有入账面 ⇒ 这一次模型往返走端口 `model`（三格带 `via = "compress/summary"`，
+        // ADR-122 决策 2）。协议事实由端口层落，插件侧只交出「这次往返长什么样」。
+        Some(c) => c
+            .summary(|| run_compression_llm(orchestrator, system_prompt, messages, root_id, &env))
+            .await
+            .map_err(|e| match e {
+                super::super::port::DispatchError::Actor(err) => err,
+                other => PluginError::InternalError(format!("压缩摘要的端口记账失败：{other}")),
+            }),
+        // 轮外路径（用户主动重试）：没有轮可挂 ⇒ 本次不入账。
+        None => run_compression_llm(orchestrator, system_prompt, messages, root_id, &env).await,
+    };
 
     match &result {
         Ok(msg) => {

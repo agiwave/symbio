@@ -24,40 +24,38 @@
  * | J4 | 收束格（`chat.assistant.final`）的 `reason` 非空 | PL-016 §6 结局必须有名 |
  * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | PL-016 §4 溯源不悬空 |
  * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | T-239（装载期硬拒的实测对账） |
- * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测有两种口径——`observed`（读 WAL）与 `logMarker`（读 CLI 日志，只能整轮判，见 `judgeLogPaths`） | PL-017 判据 2 全量口径 + [T-238] |
- * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数（整轮） | PL-016 §0「没有别的调度代码」 |
+ * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | PL-017 判据 2 全量口径 + [T-238] |
+ * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数（整轮）。`--strict` 下没给日志即判红 | PL-016 §0「没有别的调度代码」 |
  *
  * ## 观测口径为什么必须是「这次调用打过模型」，不是「判决来自模型」
  *
- * `turn.stage{decide}` 的 `source` 记的是判决的**来源**（规则 / 模型 / 兜底），不是有没有
- * 调用：模型调了而应答不可解析 ⇒ `Escalate{unclassified}` ⇒ `source=fallback`，这次调用在
- * 事实层零痕迹。拿它当观测会同时假红（豁免额减不平、J8 数不拢）和假绿（把「模型没答上」
- * 读成「没找模型」）。所以 `classify` 这条路径改读日志里插件自己打的那一行。
+ * `turn.stage{decide}` 的 `source` 记的是判决的**来源**（规则 / 模型 / 兜底），不是
+ * 有没有调用：模型调了而应答不可解析 ⇒ `Escalate{unclassified}` ⇒ `source=fallback`，
+ * 这次调用在事实层零痕迹。拿它当观测会同时假红（豁免额减不平、J8 数不拢）和假绿
+ * （把「模型没答上」读成「没找模型」）。
+ *
+ * 所以观测落在同一格的**另一个字段**上：`model_calls`（这次判决打了几次模型）。
+ * 它由**派发那一步**数出来（闭包里数，不是靠返回值推断），因此「派发被拒（执行体
+ * 压根没跑）= 0」与「跑完但落格失败 = 1」分得开。
  *
  * ## J7/J8 为什么需要一张**豁免表**，以及它为什么不会变成长期的绿灯
  *
- * `classify` 的模型调用发生在**插件内部**：编排层在调用之前无法知道这次会不会打模型
- * （规则表命中 ⇒ 零往返），而 `sent` 的语义是「已经派出去了」——调用前补一笔
- * `request/sent` 就是把没发生的往返记成发生了，日志从此数不出模型调用。
- * 把它接进环需要一次契约裁决，登记在 [T-247]（`next` · 期限见该任务）。
+ * 豁免表是**临时桥**：某条模型路径还没进环时，先在这里记一笔「已知未入账」，带上
+ * 任务号与期限，J8 的等式就暂时平得了。两条路径（判决 / 措辞）都进环之后，表是
+ * **空的**——空表才是常态，豁免只许减不许加。三条机制保证它减得干净：
  *
- * 压缩摘要有模型调用时同样未入账，但它在事实层**没有观测**（`turn.stage{compress}`
- * 记的是「这一步跑过」，不是「打了模型」），J7 判不到它——J8 判得到：多出来的那次
- * HTTP 调用减不平 ⇒ 红。
- *
- * 豁免表**只许减不许加**由三条机制保证：① 每条豁免必须带任务号与期限，期限过了就红；
- * ② `--strict` 下「有条目却无观测」也红（已进环就该删）；③ 差额一旦超过豁免额，J8 红。
+ * ① 每条豁免必须带任务号与期限，期限过了就红；
+ * ② `--strict` 下「有条目却无观测」也红（已进环就该删）；
+ * ③ 差额一旦超过豁免额，J8 红。
  *
  * 用法：
  *   node scripts/obligation-ring-accept.mjs --homedir=.symbio --session=verify-ring-3 \
  *        [--session=verify-ring-2] [--cli-log=<file>] [--strict]
  * 退出码：0 = 全项通过；1 = 有失效；2 = 输入读不出（会话目录 / WAL 缺失 / JSON 不可解析）。
  *
- * ⚠️ **`--cli-log` 那份日志必须是带 `-v` 的 CLI 实测产物**。`classify/decide` 的观测是
- * 一行 `plugin_debug!`（`decide.rs:146`），不带 `-v` 时整份日志里没有它 ⇒ 豁免额判成 0
- * ⇒ J8 把「分类真的打了模型」读成「一条没人记账的模型路径」而判红。那是假红（实测
- * 2026-10-23：不带 `-v` 报 `HTTP 6 ≠ 入账 4 + 豁免 0`，带 `-v` 同一套动作报
- * `HTTP 7 = 入账 5 + 豁免 2` 全项通过），但假红与真红在终端上长得一样，所以写在这里。
+ * ⚠️ `--cli-log` 那份日志必须是**一次 CLI 实测的产物**，且它的跨度 = 所列会话的跨度
+ * （多会话时 J8 只能整轮判）。`[LLM] 请求发起` 是 **INFO** 级 ⇒ 不带 `-v` 也有；
+ * 少了它 J8 数不出真实 HTTP 调用数，只能报「未判」——`--strict` 下那判红。
  */
 
 import fs from 'node:fs'
@@ -91,6 +89,9 @@ const DECLARED_PORTS = ['turn', 'model', 'tool']
  *  - 只有三格没有观测 ⇒ 一次没人发起的往返（不会发生，但形状上成立）；
  *  - 只有观测没有三格 ⇒ **一条绕开债环的模型调用**——[T-238] 登记的正是这一形态。
  *
+ * `observed` 返回**权重**（这一格代表几次模型往返），求和即得观测次数。权重大于 1
+ * 是真实情形：`turn.stage{decide}` 一格里记着这一轮判决打了几次模型。
+ *
  * `exemption` 非空 = 这条路径**已知未入账**，豁免带任务号与期限（**只许减不许加**，
  * 见文件头）。期限过了、或观测从此消失（说明已进环）却没删条目，J7 都判红。
  */
@@ -100,27 +101,45 @@ const MODEL_PATHS = [
     port: 'model',
     // `Answered{from_context}` 的含义是「答案已在对话里」⇒ 措辞必须由模型组织出来
     // （`Verdict::needs_wording_generation` 是同一条规则的唯一实现，两侧共用）。
-    observed: (f) => f.kind === 'turn.stage' && f.payload?.stage === 'decide' && f.payload?.reason === 'from_context',
+    // 这条理由码只由**模型**产出（规则表只有寒暄 / 谢谢 / 确认 / 空话四档），所以
+    // 「见过一次 `from_context`」= 「措辞产线打过一次模型」。
+    observed: (f) =>
+      f.kind === 'turn.stage' &&
+      f.payload?.stage === 'decide' &&
+      f.payload?.reason === 'from_context'
+        ? 1
+        : 0,
     exemption: null,
     why: '短路轮的答话组织：编排层发起的那一次模型往返（T-238）',
   },
   {
     via: 'classify/decide',
     port: 'model',
-    // 判决往返的观测**读不出 WAL**：`turn.stage{decide}` 记的是判决的**来源**
-    // （`rule` / `model` / `fallback` / `absent`，见 `stage_events::source_of`），不是
-    // 「有没有打过模型」。模型调了而应答不可解析 ⇒ 落 `Escalate{unclassified}` ⇒
-    // `source=fallback`——这一次调用在事实层不留任何痕迹。用它判观测会把「模型调了但
-    // 答案没用上」读成「没调」，豁免额减不平、J8 假红。
-    // 所以这条路径改读 CLI 日志：`classify` 每次取模型服务都打一行（插件内部的第一手
-    // 证据）。代价是日志切不出会话归属 ⇒ 日志口径的路径整轮判（见 `judgeLogPaths`）。
-    logMarker: '[Classify] 分类使用模型',
-    exemption: {
-      task: 'T-247',
-      until: '2026-11-05',
-      why: '判决往返在 classify 插件内部发起：编排层在调用前不知道规则表会不会命中，而 `sent` 的语义是「已派出」，调用前补记等于把没发生的往返记成发生了',
-    },
+    // 判决往返的观测读**次数**，不读**来源**：`turn.stage{decide}.source` 记的是判决
+    // 的来源（`rule` / `model` / `fallback` / `absent`），模型调了而应答不可解析 ⇒
+    // 落 `Escalate{unclassified}` ⇒ `source=fallback`——那次调用在事实层不留痕迹。
+    // `model_calls` 才是「这次判决打了几次模型」这个数（派发那一步数出来的），
+    // 它与三格组数一一对应：规则短路 = 0 格 0 次。
+    observed: (f) =>
+      f.kind === 'turn.stage' && f.payload?.stage === 'decide'
+        ? (f.payload?.model_calls ?? 0)
+        : 0,
+    exemption: null,
     why: '判决自身的那一次分类调用',
+  },
+  {
+    via: 'compress/summary',
+    port: 'model',
+    // 自动语义压缩的摘要请求，可能**两笔**（快照校验不过时有一次纠正重试）——
+    // 所以观测读的是 `turn.stage{compress}.model_calls`（派发那一步数出来的），
+    // 而不是「见过一次 compress 格」：一格代表 0..2 次往返。
+    // 续写幕会重跑压缩，那格按幕锚各落一份，数不会被幂等键吞掉。
+    observed: (f) =>
+      f.kind === 'turn.stage' && f.payload?.stage === 'compress'
+        ? (f.payload?.model_calls ?? 0)
+        : 0,
+    exemption: null,
+    why: '语义压缩的摘要往返（含纠正重试）',
   },
 ]
 
@@ -208,35 +227,11 @@ function comparePath(p, observations, groups, strict, note) {
 function judgePaths(events, rounds, strict, note) {
   let unaccounted = 0
   for (const p of MODEL_PATHS) {
-    if (p.logMarker) continue // 日志口径的路径整轮判（judgeLogPaths）
     const groups = [...rounds.values()].filter((g) =>
       g.some((f) => f.kind === 'request' && f.payload?.via === p.via && f.payload?.port === p.port),
     ).length
-    unaccounted += comparePath(p, events.filter((e) => p.observed(e)).length, groups, strict, note)
-  }
-  return unaccounted
-}
-
-/**
- * J7（日志口径）：`logMarker` 的路径只能在整轮实测上判——CLI 日志一行不带会话号，
- * 切不出归属（多会话时把日志计数按会话摊开就是编数）。
- *
- * 三格侧照旧逐会话数（事实层分得清），所以这条判的是「这一轮日志里的调用」对
- * 「这几场会话里的入账」。
- */
-function judgeLogPaths(logLines, sessions, strict, note) {
-  let unaccounted = 0
-  for (const p of MODEL_PATHS) {
-    if (!p.logMarker) continue
-    const observations = logLines.filter((l) => l.includes(p.logMarker)).length
-    const groups = sessions.reduce(
-      (n, s) =>
-        n +
-        [...s.rounds.values()].filter((g) =>
-          g.some((f) => f.kind === 'request' && f.payload?.via === p.via && f.payload?.port === p.port),
-        ).length,
-      0,
-    )
+    // 观测次数 = 各格的权重之和（权重大于 1 的情形见 `MODEL_PATHS` 的文档）。
+    const observations = events.reduce((n, e) => n + (p.observed(e) || 0), 0)
     unaccounted += comparePath(p, observations, groups, strict, note)
   }
   return unaccounted
@@ -349,31 +344,31 @@ for (const sid of args.sessions) {
 }
 for (const s of summary) console.log(dim(`    ${s}`))
 
-// J7 的日志口径与 J8 都只能**整轮**判：一次 `--cli-log` 覆盖所列全部会话，而日志行内没有
-// 会话号——把计数按会话摊开就是编数。文件头的输入约定（日志跨度 = 所列会话的跨度）在这里兑现。
+// J8 只能**整轮**判：一次 `--cli-log` 覆盖所列全部会话，而日志行内没有会话号——
+// 把计数按会话摊开就是编数。文件头的输入约定（日志跨度 = 所列会话的跨度）在这里兑现。
 if (logLines) {
   const whole = []
-  const unaccountedLog = judgeLogPaths(logLines, judged, args.strict, (m) => whole.push(m))
   const http = countHttp(logLines)
   const sentModel = judged.reduce((n, r) => n + r.sentModel, 0)
-  const exempted = judged.reduce((n, r) => n + r.unaccounted, 0) + unaccountedLog
+  const exempted = judged.reduce((n, r) => n + r.unaccounted, 0)
   const expect = sentModel + exempted
   if (http !== expect) {
     whole.push(`J8 真实模型调用 ${http} 次 ≠ 入账 ${sentModel} + 豁免未入账 ${exempted} = ${expect}（差额 = 一条没人记账的模型路径）`)
   }
   console.log(dim(`    整轮：HTTP ${http} / sent(model) ${sentModel} / 豁免未入账 ${exempted}`))
   if (whole.length === 0) {
-    console.log(green('✓ 整轮：J7（日志口径）+ J8 通过'))
+    console.log(green('✓ 整轮：J8 通过'))
   } else {
     totalProblems += whole.length
     for (const p of whole) console.log(red(`    ${p}`))
   }
-} else if (args.strict && MODEL_PATHS.some((p) => p.logMarker)) {
-  // strict 的意义是「不判等于放行」：日志口径的路径没有日志就没判过，不能报成全过。
-  console.log(red('✗ --strict：有路径的观测只能读 CLI 日志，却没给 --cli-log——J7 日志口径与 J8 未判'))
+} else if (args.strict) {
+  // strict 的意义是「不判等于放行」：J8 要数真实发生的模型 HTTP 调用，那只在 CLI
+  // 日志里——没给日志就是没判过，不能报成全过。
+  console.log(red('✗ --strict：没给 --cli-log——J8（账实相符）未判'))
   totalProblems += 1
 } else {
-  console.log(dim('    J7 日志口径与 J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
+  console.log(dim('    J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
 }
 
 console.log(totalProblems === 0 ? green('义务环实测判定：全项通过') : red(`义务环实测判定：${totalProblems} 项失效`))

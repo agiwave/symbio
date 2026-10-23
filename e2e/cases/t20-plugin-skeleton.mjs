@@ -38,7 +38,8 @@ import './_selfrun.mjs';
 // 因此任何要调模型的产线在这里都取不到模型服务。这不是缺陷，恰好让断言**确定**：
 //
 // - `classify/decide`：规则命中 ⇒ 判决出来了（连模型都没有 ⇒ 这条路上没碰模型）；
-//   规则未命中 ⇒ 兜底 `Escalate`（失败方向是"照旧进工具循环"，绝不是 `Answered`）；
+//   规则未命中 ⇒ `needs_model` 计划（往返由编排层经引擎 `model` 端口派发，ADR-122
+//   决策 2；兜底 `Escalate` 归编排层在派发失败后落，绝不是 `Answered`）；
 // - `compose/wording`：模板产线照常出文本；**生成产线取不到模型 ⇒ 落变体兜底**；
 //   `Report` 走**填表**产线（事实随 `snapshot` 带来）⇒ 同样零往返、同样拿得到完整句子。
 //
@@ -204,15 +205,28 @@ export default defineCase(
         200,
         `classify/decide 应可达（${JSON.stringify(decided.body)?.slice(0, 300)}）`,
       );
-      assertEq(decided.body?.data?.verdict, 'answered', '规则命中 ⇒ Answered');
-      assertEq(decided.body?.data?.reason, 'greeting', '问候的理由码');
+      // 出参是 `DecideOutcome`（ADR-122 决策 2）：`decided{verdict}` 或 `needs_model{plan}`。
+      assertEq(decided.body?.data?.outcome, 'decided', '规则命中 ⇒ 判完了（零模型往返）');
+      assertEq(decided.body?.data?.verdict?.verdict, 'answered', '规则命中 ⇒ Answered');
+      assertEq(decided.body?.data?.verdict?.reason, 'greeting', '问候的理由码');
 
       const undecided = await cli.invoke('classify/decide', {
         session_id: SID,
         utterance: '我们刚才聊了什么',
       });
-      assertEq(undecided.body?.data?.verdict, 'escalate', '判不出来 ⇒ 兜底 Escalate');
-      assertEq(undecided.body?.data?.reason, 'unclassified', '兜底理由码');
+      // 规则未命中 ⇒ 给**计划**（编排层经引擎 `model` 端口派发）；兜底 `Escalate`
+      // 归编排层在派发失败后落，路由这一侧不再替它判。
+      assertEq(undecided.body?.data?.outcome, 'needs_model', '规则未命中 ⇒ 待跑的模型往返');
+      assert(
+        typeof undecided.body?.data?.plan?.system_prompt === 'string' &&
+          undecided.body?.data?.plan?.system_prompt.length > 0,
+        '计划带系统提示词',
+      );
+      assert(
+        Array.isArray(undecided.body?.data?.plan?.messages) &&
+          undecided.body?.data?.plan?.messages.length > 0,
+        '计划带消息',
+      );
 
       /** 调一次 `compose/wording` 并取出答话文本（出参形状见 `schemas::dialog::WordingReply`） */
       const compose = async (verdict, context = [], snapshot = null) => {

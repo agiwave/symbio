@@ -45,6 +45,8 @@
 //! （那需要一个定时器源，而时间只在事件上推进）。
 
 use std::fmt;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::symbio_core::ring::{self, PortDecl};
 use crate::symbio_core::{
@@ -60,6 +62,13 @@ pub(crate) struct Call {
     pub(crate) port: &'static str,
     pub(crate) id: String,
     pub(crate) attempt: u64,
+    /// 这笔往返的**身份**（`via`）：它是「这一轮自己的」还是一条**内部**往返。
+    ///
+    /// 缺席 = 这一轮自己的模型往返（ADR-122 决策 2）。请求 / 已发 / 应答 / 失败
+    /// 四格都从**这一处**取它：身份写在四个地方就要写对四次，而漏一次的后果是
+    /// 判据侧把内部往返读成「这一轮答完了」（提前收束）或「这一轮没答成」
+    /// （永不收束）。
+    pub(crate) via: Option<String>,
 }
 
 impl Call {
@@ -68,7 +77,29 @@ impl Call {
             port,
             id: id.into(),
             attempt,
+            via: None,
         }
+    }
+
+    /// 一笔**内部**往返（判决 / 措辞 / 摘要）：带身份。
+    pub(crate) fn with_via(
+        port: &'static str,
+        id: impl Into<String>,
+        attempt: u64,
+        via: &str,
+    ) -> Self {
+        Self {
+            port,
+            id: id.into(),
+            attempt,
+            via: Some(via.to_string()),
+        }
+    }
+
+    /// 带上一个**可能有**的身份（租约看护从请求格里取回来的那种）。
+    pub(crate) fn with_via_opt(mut self, via: Option<String>) -> Self {
+        self.via = via;
+        self
     }
 
     /// 尝试级事实的事件 id（`(port, id, attempt)` 的形状）。
@@ -146,6 +177,8 @@ where
 ///
 /// **不把 `extra` 并进 `sent`**：派发事实的载荷是端口声明 + 尝试号，判定输入
 /// 属于「请求」这一半；同一条事实写两遍输入会让两个写方各说一套。
+///
+/// 身份（`via`）由 [`Call`] 自带，四格同源——见 [`Call::via`]。
 pub(crate) fn announce_with<S>(
     store: &S,
     call: &Call,
@@ -166,6 +199,7 @@ where
             dst.insert(key.clone(), value.clone());
         }
     }
+    with_via(&mut payload, call.via.as_deref());
     append(
         store,
         Event::pending(
@@ -209,6 +243,9 @@ where
 /// 模型端口的应答要携带本次交回的工具调用（`calls`，ADR-117）：创建行
 /// `open-tools` 的集合展开读的就是它。载荷只能由**跑完执行体之后**才知道，
 /// 所以以闭包形式传入，而不是让调用点先跑一遍再补写（那会变成第二个写方）。
+///
+/// 身份（`via`）不在这条参数里：它由 [`Call`] 自带，请求 / 已发 / 应答 / 失败
+/// 四格同源（ADR-122 决策 2）。
 pub(crate) async fn dispatch_with<S, T, E, F, Fut, W, X>(
     store: &S,
     ports: &[PortDecl],
@@ -245,7 +282,7 @@ where
         }
         Err(e) => {
             // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
-            let _ = failed(store, call, turn, produced_by, &why(&e));
+            let _ = failed_with(store, call, turn, produced_by, &why(&e));
             Err(DispatchError::Actor(e))
         }
     }
@@ -287,15 +324,19 @@ where
         // 协议事实是断言类（`turn × asserted`）：I2 要求带溯源。
         // 溯源 = 本轮用户格（“这次调用是为这一轮发的”）。
         .with_produced_by(produced_by)
-        .with_payload(serde_json::json!({
-            "port": call.port,
-            "id": call.id,
-            "attempt": call.attempt,
-            // 派发那一刻约定的租约：`stale_sent` 视图算「卡了多久」要用它，
-            // 而视图读不到代码里的 `PortDecl`（入参只有事实与 `now`）。
-            "lease_ms": decl.lease_ms,
-            "attempt_cap": decl.max_attempts,
-        })),
+        .with_payload({
+            let mut payload = serde_json::json!({
+                "port": call.port,
+                "id": call.id,
+                "attempt": call.attempt,
+                // 派发那一刻约定的租约：`stale_sent` 视图算「卡了多久」要用它，
+                // 而视图读不到代码里的 `PortDecl`（入参只有事实与 `now`）。
+                "lease_ms": decl.lease_ms,
+                "attempt_cap": decl.max_attempts,
+            });
+            with_via(&mut payload, call.via.as_deref());
+            payload
+        }),
     )
     .map_err(DispatchError::Store)
 }
@@ -337,6 +378,7 @@ where
             dst.insert(key.clone(), value.clone());
         }
     }
+    with_via(&mut payload, call.via.as_deref());
     append(
         store,
         Event::pending(
@@ -363,6 +405,30 @@ pub(crate) fn failed<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    failed_with(store, call, turn, produced_by, why)
+}
+
+/// 与 [`failed`] 同一条 `failed`，身份（`via`）由 [`Call`] 自带。
+///
+/// `via` 是「这笔往返是谁的」（ADR-122 决策 2）：失败也要说得出它属于**这一轮
+/// 自己**的模型往返，还是一条内部往返（判决 / 措辞 / 摘要）。少了它，判据侧读到
+/// 一条内部往返的失败会以为「这一轮模型没答成」⇒ 提前收束。
+pub(crate) fn failed_with<S>(
+    store: &S,
+    call: &Call,
+    turn: u64,
+    produced_by: u64,
+    why: &str,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let mut payload = serde_json::json!({
+        "port": call.port,
+        "id": call.id,
+        "why": why,
+    });
+    with_via(&mut payload, call.via.as_deref());
     append(
         store,
         Event::pending(
@@ -374,11 +440,7 @@ where
             "system",
         )
         .with_produced_by(produced_by)
-        .with_payload(serde_json::json!({
-            "port": call.port,
-            "id": call.id,
-            "why": why,
-        })),
+        .with_payload(payload),
     )
 }
 
@@ -432,9 +494,10 @@ where
         let Some((attempt, exhausted)) = stale_state(frozen, facts, now, &port, &id) else {
             continue;
         };
-        let call = Call::new(decl.port, id.clone(), attempt);
+        let call =
+            Call::new(decl.port, id.clone(), attempt).with_via_opt(via_of(facts, &port, &id));
         if exhausted {
-            failed(store, &call, turn, produced_by, "lease_expired")?;
+            failed_with(store, &call, turn, produced_by, "lease_expired")?;
             out.push(Reaped::Killed { id, attempt });
             continue;
         }
@@ -456,14 +519,18 @@ where
                 "lease_keeper",
             )
             .with_produced_by(produced_by)
-            .with_payload(serde_json::json!({
-                "port": call.port,
-                "id": call.id,
-                "attempt": call.attempt,
-            })),
+            .with_payload({
+                let mut payload = serde_json::json!({
+                    "port": call.port,
+                    "id": call.id,
+                    "attempt": call.attempt,
+                });
+                with_via(&mut payload, call.via.as_deref());
+                payload
+            }),
         )?;
-        let next = Call::new(decl.port, id.clone(), attempt + 1);
-        announce(store, &next, turn, produced_by)?;
+        let next = Call::new(decl.port, id.clone(), attempt + 1).with_via_opt(call.via.clone());
+        announce_with(store, &next, turn, produced_by, serde_json::Value::Null)?;
         out.push(Reaped::Retried { id, attempt });
     }
     Ok(out)
@@ -475,6 +542,37 @@ fn key_of(key: &ring::Key, field: &str) -> Option<String> {
         .iter()
         .find(|(k, _)| k == field)
         .map(|(_, v)| v.clone())
+}
+
+/// 从事实切片里取出某笔逻辑调用的身份（`via`）。
+///
+/// 身份写在**它自己的请求**上（[`announce_with`] 并进去的那一格），因此读得到它
+/// 的唯一地方也是那条 `request`。找不到 ⇒ 这笔账没有身份（这一轮自己的模型
+/// 往返），返回 `None` 而不是猜一个值——猜出来的身份会让收束侧把它当成内部
+/// 往返 ⇒ 这一轮永远收不了（ADR-122 决策 2）。
+fn via_of(facts: &[Event], port: &str, id: &str) -> Option<String> {
+    facts
+        .iter()
+        .filter(|e| e.kind == EVENT_REQUEST)
+        .find(|e| {
+            e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+                && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)
+        })
+        .and_then(|e| e.payload.get("via").and_then(|v| v.as_str()))
+        .map(str::to_string)
+}
+
+/// 把一笔账的身份（`via`）并进载荷。
+///
+/// **缺席即不带键**：读侧按「键在不在」判「这一轮自己的 / 内部往返」，写成
+/// `null` 会把两者的区别落在读侧的容错上——读侧一改，两类往返就分不开了。
+fn with_via(payload: &mut serde_json::Value, via: Option<&str>) {
+    if let (Some(dst), Some(via)) = (payload.as_object_mut(), via) {
+        dst.insert(
+            "via".to_string(),
+            serde_json::Value::String(via.to_string()),
+        );
+    }
 }
 
 /// 同 `(port, id)` 的卡住实例的 `(attempt, exhausted)`。
@@ -558,20 +656,38 @@ impl Round<'_> {
 }
 
 /// 记账并跑一次内部请求（见 [`Round`]）。
-pub(crate) async fn round_trip<S, T, F, Fut>(
+///
+/// ## 失败也入账
+///
+/// `run` 返回 `Err` ⇒ 落一条带 `via` 的 `failed`（ADR-122 决策 2）。身份随失败一起
+/// 走，是判据侧把「内部往返失败」与「这一轮自己的模型往返失败」分开的唯一依据：
+/// 后者会让整轮收束，前者不退化成收束（判决没打出来 ⇒ 进工具循环）。
+///
+/// ## 应答格带 `calls: []`
+///
+/// 内部往返不带工具（ADR-122 决策 5）：应答格里 `calls` 是**空数组**，不是缺席。
+/// 「缺席即空集合」是展开侧的读法，但写侧留一个空数组，判据侧不必猜「这个字段
+/// 是不是漏了」。
+pub(crate) async fn round_trip<S, T, E, F, Fut>(
     store: &S,
     round: Round<'_>,
     run: F,
-) -> Result<T, DispatchError<std::convert::Infallible>>
+) -> Result<T, DispatchError<E>>
 where
     S: Store<Event = Event> + ?Sized,
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = T>,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: fmt::Debug,
 {
-    let call = Call::new("model", round.id(), 1);
-    let via = serde_json::json!({ "via": round.via });
-    announce_with(store, &call, round.turn, round.produced_by, via.clone())
-        .map_err(DispatchError::Store)?;
+    let call = Call::with_via("model", round.id(), 1, round.via);
+    announce_with(
+        store,
+        &call,
+        round.turn,
+        round.produced_by,
+        serde_json::Value::Null,
+    )
+    .map_err(DispatchError::Store)?;
     // 派发前切片必须是**刚写完 `request`** 的那一份：行欠不欠看它。
     let facts = store.range(crate::symbio_core::Seq::new(0));
     let owed = super::loop_rows::owes("dispatch-model", &facts, round.turn, round.now);
@@ -584,12 +700,105 @@ where
             produced_by: round.produced_by,
             owed,
         },
-        || async move { Ok(run().await) },
-        |never| match *never {},
-        move |_| via,
+        || async move { run().await },
+        |e| format!("{e:?}"),
+        // 应答格带 `calls: []`（内部往返不带工具，ADR-122 决策 5）；身份（`via`）
+        // 由 [`Call`] 自带，四格同源。
+        |_| serde_json::json!({ "calls": [] }),
     )
     .await
 }
+
+/// 压缩摘要的**入账面**：一次压缩产线里的模型往返（ADR-122 决策 2）。
+///
+/// ## 为什么不是 [`Round`] 一笔
+///
+/// 压缩可能**打不止一次**模型：快照校验不过时有一次纠正重试。两次往返是**两笔账**
+/// （两个逻辑 id、两组三格）——并成一笔会让「三格 = 一次模型往返」这个等式失真，
+/// 判据侧数不出真实调用次数。
+///
+/// ## 计数为什么由闭包数
+///
+/// 「派发被拒（执行体压根没跑）= 0」与「跑完但落格失败 = 1」分得开的唯一办法是
+/// 在**跑之前**加一——与 [`classify`](self::classify) 的口径同源。
+pub(crate) struct Compress {
+    store: Arc<dyn Store<Event = Event>>,
+    turn: u64,
+    produced_by: u64,
+    drive_seq: u64,
+    now: i64,
+    /// 本请求轮：压缩按轮号计「本轮一次」（`turn.request_round`）。
+    round: usize,
+    /// 第几次摘要往返（纠正重试是第 1 次）——它进逻辑 id，两笔账因此不撞。
+    attempt: AtomicU32,
+    /// 实际打了几次模型。
+    calls: AtomicU64,
+}
+
+impl Compress {
+    /// 造一个入版面。
+    ///
+    /// `drive_seq` 是本幕的锚：逻辑 id 必须带它，否则续写幕会与首幕撞成同一笔账
+    /// （与 [`Round`] 同一条理由）。
+    pub(crate) fn new(
+        store: Arc<dyn Store<Event = Event>>,
+        turn: u64,
+        produced_by: u64,
+        drive_seq: u64,
+        now: i64,
+        round: usize,
+    ) -> Self {
+        Self {
+            store,
+            turn,
+            produced_by,
+            drive_seq,
+            now,
+            round,
+            attempt: AtomicU32::new(0),
+            calls: AtomicU64::new(0),
+        }
+    }
+
+    /// 一次摘要往返：落三格（`via = "compress/summary"`），跑 `run`。
+    ///
+    /// 失败也入账（`failed` 格带 `via`）：压缩失败不收束这一轮（压缩是优化项），
+    /// 但那次往返**发生过**，账上必须有它——ADR-122 决策 5 的「退化应答照样有应答格」
+    /// 在这里落成「失败也有失败格」。
+    pub(crate) async fn summary<T, E, F, Fut>(&self, run: F) -> Result<T, DispatchError<E>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+        E: fmt::Debug,
+    {
+        let attempt = self.attempt.fetch_add(1, Ordering::SeqCst);
+        let step = format!("z{}-{attempt}", self.round);
+        let round = Round {
+            turn: self.turn,
+            produced_by: self.produced_by,
+            drive_seq: self.drive_seq,
+            now: self.now,
+            step: &step,
+            via: "compress/summary",
+        };
+        let calls = &self.calls;
+        round_trip(self.store.as_ref(), round, || async move {
+            // 计数在**跑之前**加一：派发被拒时闭包压根没跑 ⇒ 0。
+            calls.fetch_add(1, Ordering::SeqCst);
+            run().await
+        })
+        .await
+    }
+
+    /// 这一轮压缩打了几次模型（落进 `turn.stage{compress}.model_calls`）。
+    pub(crate) fn calls(&self) -> u64 {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+/// 判决往返的派发点（ADR-122 决策 2 / 4）——住在端口层，因为这一段的**全部**
+/// 内容就是「一次模型往返怎么入账」。
+pub(crate) mod classify;
 
 #[cfg(test)]
 #[path = "port.test.rs"]

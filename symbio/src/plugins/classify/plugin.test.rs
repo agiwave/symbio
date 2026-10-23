@@ -2,21 +2,25 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! ## 本文件覆盖的是「不依赖模型」的那一半
+//! ## 本文件覆盖的是「插件这一侧」的契约
 //!
-//! 除 `traverse_registers_no_tool_rows` 那条（它要挂**真的**注册表来数工具行）之外，
-//! 测试上下文**不带 `CAPABILITY_VISITOR`**——这正是「没有可用的模型服务」的真实
-//! 形态。于是这里能钉住两条最重要的行为，且**不需要任何 mock**：
+//! ADR-122 决策 2 之后，判决路由的出参**不是判决**，而是 [`DecideOutcome`]：
+//! **判决**或**待跑的计划**。于是本文件钉住的是三条：
 //!
-//! 1. 规则命中时，**没有模型也能给出判决**（= 零 LLM 往返的等价证明：连模型都没有，
-//!    判决照样出来了，说明这条路上根本没碰模型）；
-//! 2. 规则未命中时，兜底方向是 `Escalate`（= 今天的行为），**绝不是 `Answered`**。
+//! 1. 规则表命中 ⇒ `Decided{Answered}`，**零模型往返**（上下文里连模型服务都没有）；
+//! 2. 规则表未命中 ⇒ `NeedsModel{plan}`——**不是**判决：「判不判得出来」与
+//!    「要不要打模型」在调用前是**两件事**，要不要派发由编排层决定；
+//! 3. 没有用户发言 ⇒ `Decided{Escalate{unclassified}}`，绝不 `Answered`。
+//!
+//! 「没有模型服务 ⇒ `Escalate`」这条兜底**搬到了编排层**（`chat_loop/decide.rs`）：
+//! 插件侧不再打模型 ⇒ 它没有「打不打得到模型」这个知识。
 //!
 //! 走真实模型的路径（快速档分类请求）由 e2e 覆盖，见 `e2e/cases/t21-classify.mjs`。
 
 use super::*;
 use crate::symbio_core::{
-    PluginSimpleRequest, REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS,
+    DecideOutcome, DecisionPlan, ParseVerdictRequest, PluginSimpleRequest, REASON_ACK,
+    REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_THANKS,
 };
 
 /// 造一个插件实例。
@@ -31,7 +35,10 @@ fn plugin(config: ClassifyConfig) -> Arc<ClassifyPlugin> {
 }
 
 /// 带路由路径 + 契约载荷的请求上下文（与容器转发的形状一致；**不带**能力访问器）
-fn ctx(path: &str, payload: Option<DecideRequest>) -> Arc<dyn PluginInvokeRequest> {
+fn ctx<T: Clone + Send + Sync + 'static>(
+    path: &str,
+    payload: Option<T>,
+) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(PATH, path.to_string());
     if let Some(p) = payload {
@@ -40,11 +47,23 @@ fn ctx(path: &str, payload: Option<DecideRequest>) -> Arc<dyn PluginInvokeReques
     Arc::new(req)
 }
 
+/// 不带载荷的请求上下文（缺载荷的路径用它）
+fn bare_ctx(path: &str) -> Arc<dyn PluginInvokeRequest> {
+    ctx::<Vec<u8>>(path, None)
+}
+
 fn request(utterance: Option<&str>) -> DecideRequest {
     DecideRequest {
         session_id: "s1".to_string(),
         utterance: utterance.map(str::to_string),
         context: Vec::new(),
+    }
+}
+
+fn parse_request(text: &str) -> ParseVerdictRequest {
+    ParseVerdictRequest {
+        session_id: "s1".to_string(),
+        text: text.to_string(),
     }
 }
 
@@ -59,12 +78,21 @@ fn data_of(p: PluginPayload) -> serde_json::Value {
 }
 
 /// 判一次并回读契约类型
-async fn decide(plugin: Arc<ClassifyPlugin>, utterance: Option<&str>) -> Verdict {
+async fn decide(plugin: Arc<ClassifyPlugin>, utterance: Option<&str>) -> DecideOutcome {
     let p = plugin
         .route(ctx("decide", Some(request(utterance))))
         .await
         .expect("decide 必须成功");
-    serde_json::from_value(data_of(p)).expect("判决必须能反序列化回契约类型")
+    serde_json::from_value(data_of(p)).expect("出参必须能反序列化回契约类型")
+}
+
+/// 解析一次并回读判决
+async fn parse(plugin: Arc<ClassifyPlugin>, text: &str) -> Verdict {
+    let p = plugin
+        .route(ctx("parse", Some(parse_request(text))))
+        .await
+        .expect("parse 必须成功");
+    serde_json::from_value(data_of(p)).expect("解析结果必须能反序列化回判决")
 }
 
 fn answered(reason: &str) -> Verdict {
@@ -79,11 +107,10 @@ fn escalated(reason: &str) -> Verdict {
     }
 }
 
-/// **S2 的核心判据**：规则命中 ⇒ 判决出来了，而上下文里连模型服务都没有。
+/// 规则表命中的判据：**判决已经出来了**，而上下文里连模型服务都没有。
 ///
-/// 「零 LLM 往返」的可检验形式正是这一条：如果规则短路之外还有一次模型调用，
-/// 这个测试会拿到 `Escalate{unclassified}`（因为没有 provider 可解析），而不是
-/// `Answered`。
+/// 「零 LLM 往返」的可检验形式正是这一条：如果命中之后还有一次模型调用，
+/// 这个测试会拿到 `NeedsModel`（因为没有 provider 可解析），而不是 `Decided`。
 #[tokio::test]
 async fn rule_hits_without_any_model_service() {
     let plugin = plugin(ClassifyConfig::default());
@@ -95,50 +122,115 @@ async fn rule_hits_without_any_model_service() {
     ] {
         assert_eq!(
             decide(plugin.clone(), Some(utterance)).await,
-            answered(reason),
+            DecideOutcome::Decided {
+                verdict: answered(reason)
+            },
             "「{utterance}」应被规则表直接判决"
         );
     }
 }
 
-/// 规则未命中且**没有模型服务** ⇒ 落 `Escalate`（= 今天的行为），不是 `Answered`。
+/// 规则表未命中 ⇒ 交出的是**计划**，不是判决。
 ///
-/// 这条是失败方向的守卫：`Answered` 会让「判不出来」表现成**用户什么都收不到**。
+/// 判据刻意是「没有判决」：插件侧不再打模型，于是「判不判得出来」与「要不要打
+/// 模型」在调用前分成两件事——后者归编排层。少给一个计划，编排层就没有那次往返
+/// 可派发；多给一个判决，编排层会以为「判完了」，那一次模型往返就被吞掉。
 #[tokio::test]
-async fn rule_miss_without_model_service_escalates() {
+async fn rule_miss_hands_over_a_plan_instead_of_a_verdict() {
     let plugin = plugin(ClassifyConfig::default());
-    assert_eq!(
-        decide(plugin, Some("我们刚才聊了什么")).await,
-        escalated(REASON_UNCLASSIFIED)
+    let outcome = decide(plugin, Some("我们刚才聊了什么")).await;
+    let DecideOutcome::NeedsModel { plan } = outcome else {
+        panic!("规则表未命中时应当交出计划，实得 {outcome:?}");
+    };
+    assert_plan_is_usable(&plan, "我们刚才聊了什么");
+}
+
+/// 计划是**数据**：编排层拿到它不必懂分类，只需照着打。
+///
+/// 三件东西缺一，编排层就得反过来猜——而「猜」正是 ADR-122 否掉的候选 ②。
+fn assert_plan_is_usable(plan: &DecisionPlan, utterance: &str) {
+    assert!(
+        !plan.system_prompt.trim().is_empty(),
+        "计划必须带系统提示词，否则编排层无从知道这次往返该怎么打"
+    );
+    assert!(
+        plan.messages.iter().any(|m| m.text == utterance),
+        "计划的消息里必须带着本轮这句话：{plan:?}"
+    );
+    assert!(
+        plan.messages.last().map(|m| m.role.as_str()) == Some("user"),
+        "本轮这句话必须是最后一条（分类只看最后一句）"
     );
 }
 
-/// 没有用户发言（后台触发的判定）：无事可判 ⇒ 同一条兜底方向
+/// 没有用户发言（后台触发的判定）：无事可判 ⇒ 直接给判决，且**绝不** `Answered`。
+///
+/// 它是**零往返**的一种（连计划都不给）——判不出来时 `Answered` 会让「用户什么都
+/// 收不到」这件事静默发生。
 #[tokio::test]
 async fn absent_utterance_escalates() {
     let plugin = plugin(ClassifyConfig::default());
-    assert_eq!(decide(plugin, None).await, escalated(REASON_UNCLASSIFIED));
+    assert_eq!(
+        decide(plugin, None).await,
+        DecideOutcome::Decided {
+            verdict: escalated(REASON_UNCLASSIFIED)
+        }
+    );
 }
 
 /// 平凡值 `rule_shortcut = false`：**同一句话**不再被规则表短路。
 ///
 /// 判据刻意选「同一句话、两种配置」——这样断言抓的是配置的效果本身，
-/// 而不是「某句话恰好被判成什么」。没有模型服务时它落 `Escalate{unclassified}`，
-/// 与开关打开时的 `Answered{greeting}` 形成对照。
+/// 而不是「某句话恰好被判成什么」。没有模型服务时它交出计划（编排层去派发），
+/// 与开关打开时的 `Decided{Answered}` 形成对照。
 #[tokio::test]
 async fn rule_shortcut_off_disables_the_table() {
     let on = plugin(ClassifyConfig::default());
-    assert_eq!(decide(on, Some("你好")).await, answered(REASON_GREETING));
+    assert_eq!(
+        decide(on, Some("你好")).await,
+        DecideOutcome::Decided {
+            verdict: answered(REASON_GREETING)
+        }
+    );
 
     let off = plugin(ClassifyConfig {
         rule_shortcut: false,
         ..Default::default()
     });
-    assert_eq!(
-        decide(off, Some("你好")).await,
-        escalated(REASON_UNCLASSIFIED),
-        "关掉规则短路后，问候不该再被规则表判成 Answered"
+    assert!(
+        matches!(
+            decide(off, Some("你好")).await,
+            DecideOutcome::NeedsModel { .. }
+        ),
+        "关掉规则短路后，问候不该再被规则表判成判决"
     );
+}
+
+/// 出参是**带判别键的枚举**：编排层据此分派，不解析文本。
+#[tokio::test]
+async fn the_outcome_serializes_as_a_tagged_enum() {
+    let json = serde_json::to_value(DecideOutcome::Decided {
+        verdict: answered(REASON_GREETING),
+    })
+    .unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "outcome": "decided",
+            "verdict": { "verdict": "answered", "reason": REASON_GREETING }
+        })
+    );
+
+    let json = serde_json::to_value(DecideOutcome::NeedsModel {
+        plan: DecisionPlan {
+            system_prompt: "p".to_string(),
+            messages: Vec::new(),
+            model_id: None,
+        },
+    })
+    .unwrap();
+    assert_eq!(json["outcome"], serde_json::json!("needs_model"));
+    assert_eq!(json["plan"]["system_prompt"], serde_json::json!("p"));
 }
 
 /// 判决是**枚举**：序列化形态带 `verdict` 判别键（编排层据此分派，不解析文本）
@@ -157,12 +249,43 @@ async fn verdict_serializes_as_tagged_enum() {
     );
 }
 
+/// 解析路由：把分类器的自由文本变成闭集判决。
+///
+/// 词表是**本插件**的内部知识，所以解析也留在本插件——编排层只认枚举，不认那四个词。
+#[tokio::test]
+async fn the_parse_route_turns_a_word_into_a_verdict() {
+    let plugin = plugin(ClassifyConfig::default());
+    assert_eq!(
+        parse(plugin.clone(), "direct").await,
+        answered(REASON_FROM_CONTEXT)
+    );
+    assert_eq!(
+        parse(plugin.clone(), "work").await,
+        escalated(REASON_NEEDS_WORK)
+    );
+    // 多说几句也能救回来：词表里最早出现的那个词算数。
+    assert_eq!(
+        parse(plugin.clone(), "我觉得应该是 work 吧").await,
+        escalated(REASON_NEEDS_WORK)
+    );
+}
+
+/// 解析不成 ⇒ 「判不出来」，方向是 `Escalate`（绝不 `Answered`）。
+#[tokio::test]
+async fn an_unparsable_reply_falls_back_to_escalate() {
+    let plugin = plugin(ClassifyConfig::default());
+    assert_eq!(
+        parse(plugin, "这段话里没有那四个词").await,
+        escalated(REASON_UNCLASSIFIED)
+    );
+}
+
 /// 契约缺载荷必须报错，而不是静默给一个默认判决——
 /// 静默默认会让「忘了传请求」表现成「判决说不用干活」。
 #[tokio::test]
 async fn decide_without_payload_fails() {
     let r = plugin(ClassifyConfig::default())
-        .route(ctx("decide", None))
+        .route(bare_ctx("decide"))
         .await;
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
 }
@@ -178,14 +301,19 @@ async fn legacy_payload_without_new_fields_still_parses() {
         .route(Arc::new(req))
         .await
         .expect("decide 必须成功");
-    let v: Verdict = serde_json::from_value(data_of(p)).unwrap();
-    assert_eq!(v, answered(REASON_GREETING));
+    let outcome: DecideOutcome = serde_json::from_value(data_of(p)).unwrap();
+    assert_eq!(
+        outcome,
+        DecideOutcome::Decided {
+            verdict: answered(REASON_GREETING)
+        }
+    );
 }
 
 #[tokio::test]
 async fn unknown_subcommand_is_not_found() {
     let r = plugin(ClassifyConfig::default())
-        .route(ctx("bogus", None))
+        .route(bare_ctx("bogus"))
         .await;
     assert!(matches!(r, Err(PluginError::NotFound(_))));
 }

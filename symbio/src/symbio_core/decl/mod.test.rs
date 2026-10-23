@@ -136,10 +136,11 @@ fn builtin_loads_and_freezes() {
     // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
     // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5；
     // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6；
-    // 步 5c 加 `closeable`（收束行的前件扩到「模型没答成」）⇒ 升到 7。
+    // 步 5c 加 `closeable`（收束行的前件扩到「模型没答成」）⇒ 升到 7；
+    // T-247 步 1 把口径收窄到「这一轮自己的模型往返」（内部往返带 `via`）⇒ 升到 8。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 7);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 8);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);

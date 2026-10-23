@@ -388,7 +388,12 @@ impl Frozen {
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
 // 名字住在 `event/mod.rs` 的事件名字表（T-224 起），并登记在 `CELLS` 上。
-const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt"];
+//
+// `via` 是**这一次往返是谁的**（ADR-122 决策 2）：这一轮自己的模型往返**不带**
+// 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
+// 内部往返的应答 `calls` 为空（它不带工具），若混进「本轮最近一次模型应答」的口径，
+// 一条判决往返就会被读成「这一轮答完了」。
+const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via"];
 
 /// **引擎独占的格子**（§3.4 第 5 条「决策者伪造 `response`」那一档的名单）。
 ///
@@ -405,7 +410,7 @@ const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, E
 // 它是**创建行** `open-tools` 的展开源：一个 `response(port=model)` 的 `calls`
 // 数组逐元素开债，元素键与随后的 `request(port=tool)` 同 id。`response` 的其它
 // 端口（`turn` / `tool`）不带这个字段——缺席即空集合，不开债。
-const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls"];
+const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls", "via"];
 
 // `sent` 多两块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）。
 //
@@ -445,12 +450,15 @@ const BUILTIN_FACTS: &[FactDecl] = &[
     },
     // `failed` 关的是**逻辑 id**（所有尝试），所以没有 `attempt`——与协议表一致：
     // 失败不是「某一次尝试失败」，是这笔调用不再重试。
+    //
+    // `via` 与 `request` / `response` 同形：失败也要说得出「这是谁的往返」——
+    // 内部往返失败**不**让这一轮收束（它不是「模型没答成」）。
     FactDecl {
         name: EVENT_FAILED,
         port: Some("port"),
         key: &["id"],
         expand: &[],
-        fields: &["port", "id", "why"],
+        fields: &["port", "id", "why", "via"],
     },
     // 尝试级否定（T-223）：租约看护者落的「这一次作废、换一次」。
     // 与 `failed` 的边界：`failed` 关**逻辑 id**（不再重试），`retry` 只关一次尝试。
@@ -514,12 +522,24 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         fields: &["text", "status"],
     },
     // 阶段事实：`result` 是这一步的结论（召回命中 / 续写种类，T-225）。
+    //
+    // `model_calls` 是**这一步打了几次模型**（ADR-122 决策 4 / 5）：`source` 记的是
+    // 判决的**来源**，读不出「有没有打过模型」（模型调了而应答不可解析 ⇒
+    // `source=fallback`）。这一格是那次模型往返在事实层唯一的**数**——判据侧
+    // 拿它对账「观测 ⇔ 三格」。
     FactDecl {
         name: "turn.stage",
         port: None,
         key: &[],
         expand: &[],
-        fields: &["stage", "round", "source", "reason", "result"],
+        fields: &[
+            "stage",
+            "round",
+            "source",
+            "reason",
+            "result",
+            "model_calls",
+        ],
     },
     // 用户格：`meta` 是可选的补充元数据（`prepare.rs` 只在非空时写）。
     //
@@ -725,6 +745,10 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
 /// （T-244 步 5b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
 /// v6 给它补了请求面（见该格的注释）：恢复幕的唤醒请求也在「有活没干完」之列。
+///
+/// v8（T-247 / ADR-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
+/// 只看**这一轮自己的**模型往返（`via` 缺席的那些）——内部往返（判决 / 措辞 / 摘要）
+/// 的应答 `calls` 为空，混进来会让一条判决往返被读成「这一轮答完了」。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -784,12 +808,17 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     });
     // 本幕最近一条 `response(port=model)`：收束格（`calls` 空）与工具格
     // （`calls` 非空且未关完）共用同一次选取，口径只在这里。
+    //
+    // **只取这一轮自己的模型往返**（`via` 缺席的那些，ADR-122 决策 2）：判决 / 措辞 /
+    // 摘要那些内部往返的应答 `calls` 为空（它们不带工具），混进来会让一条判决往返
+    // 被读成「这一轮答完了」⇒ 收束行提前开账。
     let model_calls = events
         .iter()
         .filter(|e| {
             e.turn == turn
                 && e.kind == EVENT_RESPONSE
                 && str_field(e, "port") == Some("model")
+                && str_field(e, "via").is_none()
                 && after_anchor(e, anchor_seq)
         })
         .max_by_key(|e| seq_of(e))
@@ -815,12 +844,17 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 崩溃恢复时租约看护会在**本幕锚之后**落一条 `failed(port=model)`——它收的是
     // 上一世那笔卡住的调用，而那笔的 `request` 在锚之前。少了这条，恢复幕一进门
     // 就会判「该收束了」，把「重跑一次模型往返」读成「这一轮已经答不上来了」。
+    //
+    // `via` 缺席的那些才是「这一轮自己的模型往返」（ADR-122 决策 2）：内部往返失败
+    // （判决没打出来）退化成「判不出来 ⇒ 进工具循环」，**不是**「模型没答成 ⇒
+    // 收束」——后者会让一条判决失败把整轮收掉。
     let model_outcome_failed = events
         .iter()
         .filter(|e| {
             e.turn == turn
                 && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                 && str_field(e, "port") == Some("model")
+                && str_field(e, "via").is_none()
                 && after_anchor(e, anchor_seq)
         })
         .max_by_key(|e| seq_of(e))
@@ -830,6 +864,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                     r.turn == turn
                         && r.kind == EVENT_REQUEST
                         && str_field(r, "port") == Some("model")
+                        && str_field(r, "via").is_none()
                         && after_anchor(r, anchor_seq)
                         && str_field(r, "id") == str_field(e, "id")
                 })
@@ -1100,9 +1135,12 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // v6 → v7 加 `closeable`：收束行的前件从「答完了」扩到「答完了 **或** 模型没答成」
     // ——后者的读面是 `failed` 的 `port`（`failed(port=model)`）与 `request` 的
     // `port` / `id`（判「本幕派发过」），v4 / v5 起就已在读面里，故读面不变。
+    // v7 → v8：口径收窄到「这一轮自己的模型往返」——`request` / `response` / `failed`
+    // 三个协议名的 `via` 字段进读面（ADR-122 决策 2）。内部往返（判决 / 措辞 /
+    // 摘要）带 `via`，这一轮自己的不带；不带的那批才是「答完了 / 没答成」的判据。
     ViewDecl {
         name: "turn_head",
-        ver: 7,
+        ver: 8,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1113,10 +1151,13 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("session.config", "is_persistent"),
             (EVENT_REQUEST, "port"),
             (EVENT_REQUEST, "id"),
+            (EVENT_REQUEST, "via"),
             (EVENT_RESPONSE, "port"),
             (EVENT_RESPONSE, "calls"),
+            (EVENT_RESPONSE, "via"),
             (EVENT_FAILED, "port"),
             (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "via"),
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
         ],

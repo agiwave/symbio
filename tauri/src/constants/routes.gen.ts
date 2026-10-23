@@ -22,6 +22,7 @@
 // ==================== classify ====================
 
 export const ROUTE_CLASSIFY_DECIDE = 'classify/decide'
+export const ROUTE_CLASSIFY_PARSE = 'classify/parse'
 
 // ==================== compose ====================
 

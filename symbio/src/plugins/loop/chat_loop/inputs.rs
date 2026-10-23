@@ -6,6 +6,7 @@
 
 use crate::symbio_core::CapabilityMeta;
 
+use super::super::port::Compress;
 use super::super::stage_events::{StageFact, StageName};
 use super::*;
 
@@ -348,6 +349,19 @@ async fn run_compress(
     turn: &mut TurnState,
     overhead_tokens: usize,
 ) {
+    // 入账面：摘要那次模型往返走端口 `model`（ADR-122 决策 2）——三格由端口层落，
+    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话），压缩照旧跑，
+    // 只是那一次不在账上。
+    let compress = context.session.facts().map(|store| {
+        Compress::new(
+            store,
+            turn.turn_no,
+            turn.user_seq,
+            turn.drive_seq,
+            turn.now_ms,
+            turn.request_round,
+        )
+    });
     match auto_compress_process(
         orchestrator,
         context,
@@ -355,6 +369,7 @@ async fn run_compress(
         &turn.abort,
         overhead_tokens,
         false,
+        compress.as_ref(),
     )
     .await
     {
@@ -376,7 +391,15 @@ async fn run_compress(
     }
     // 「已做」= 本请求轮进过产线，不是「压成了」：水位未过 / 内核失败时
     // 下一轮仍会再试（判据按 `request_round` 计），同一轮内不重复调用。
-    turn.mark_stage(StageFact::ran(StageName::Compress, turn.request_round));
+    //
+    // `model_calls` 是这一压打了几次模型（摘要 + 纠正重试）：它是那次往返在事实层
+    // 唯一的数，判据侧拿它对账「观测 ⇔ 三格」。同一性带上本幕的锚——续写幕会重跑
+    // 压缩（恢复后事实源变了），不带上就撞首幕的幂等键，这一格连同它的数一起不落。
+    turn.mark_stage(StageFact::compress(
+        turn.request_round,
+        compress.as_ref().map(|c| c.calls()).unwrap_or(0),
+        turn.drive_seq,
+    ));
 }
 
 #[cfg(test)]

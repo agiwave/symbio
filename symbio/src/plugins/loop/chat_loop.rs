@@ -777,15 +777,20 @@ async fn run_turn_head(
         // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
         // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式
         // 会让不可变借用活到整个 `if let` 体（Rust 2021 的临时值规则）。
-        let verdict = decide_turn(orchestrator, ctx, context, utterance).await;
+        let decision = decide_turn(orchestrator, ctx, context, turn, utterance).await;
         // 判决事实 + 「已做」同一格：`reason` / `source` 是这次走了哪条路的
         // 唯一事实面记录，`done` 是下一问问表时不再重判的依据。落格在
         // `turn_exec`（写者令牌在那边），这里只产草稿。
+        //
+        // `model_calls` 是这次判决打了几次模型（ADR-122 决策 4）：它是那次往返
+        // 在事实层唯一的**数**——判据侧拿它对账「观测 ⇔ 三格」（`source` 读不出
+        // 「有没有打过模型」：模型调了而应答不可解析时 `source` 落 `fallback`）。
         turn.mark_stage(super::stage_events::StageFact::classify(
             turn.request_round,
-            verdict.as_ref(),
+            decision.verdict.as_ref(),
+            decision.model_calls,
         ));
-        if let Some(verdict) = verdict {
+        if let Some(verdict) = decision.verdict {
             // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是"这一轮怎么办"，
             // 而 `RunSnapshot` 说的是"干到哪一步"——只有 `Report` 读它，
             // 而 `Report` 不在轮首产生（见轮边界汇报回调）。
