@@ -13,7 +13,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { BASELINE, cargoTestRatchet } from './_shared.mjs'
-import { cliBinaryState } from '../cli-binary.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -196,19 +195,22 @@ export default {
     // - `58-e2e` 的用例只等这份产物；原先构建在批后串行——改 Rust 的那一轮，
     //   一整遍 release 编译直接加在总墙钟上。放进泳道尾部，它与其他泳道的
     //   墙钟重叠，且沿用本泳道的 `.cargo-lock` 串行序（不新增跨泳道争用）。
-    // - `when` 只在**指纹不新鲜**时起跑：新鲜时是一条 ~10ms 的内容指纹比对，
-    //   不启动 cargo（判据同 `58-e2e`，两处共用 `cli-binary.mjs` 的构建戳）。
-    // - CI 跳过：e2e job（`--only=e2e`）自备构建；把 release 加进 backend job
-    //   只会让那条 job 白多一遍编译。`58-e2e` 仍保留同一任务，`--only=e2e` /
-    //   `--skip=backend` 的路线照旧自足。
-    tasks.push({
-      label: 'cli: release 二进制（指纹过期 ⇒ 批内重建）',
-      cmd: process.execPath,
-      args: [path.join(scriptDir, '..', 'cli-binary.mjs')],
-      cwd: repoRoot,
-      when: () => !ctx.ci && !cliBinaryState(repoRoot).fresh,
-      skipNote: '构建戳新鲜（无需重建）',
-    })
+    // - **无条件执行**，判「要不要重建」的是 `cli-binary.mjs` 的内容指纹，不是这里的
+    //   `when`（判据同 `58-e2e`，两处共用同一条命令与同一份构建戳）。新鲜时它只是一次
+    //   ~10ms 的指纹比对、不启动 cargo——而**这是一次通过，不是未判定**：这一项的判据是
+    //   「本轮用的产物对得上源码」，不需要重建恰恰说明它成立。用 `when` 把它记成 ⊘
+    //   会让每一轮绿灯都挂着一项「未判定」，而天天看见的红点/灰点最后就是没人看。
+    // - CI 跳过（整项不进名单，而不是记一条 ⊘）：e2e job（`--only=e2e`）自备构建；
+    //   把 release 加进 backend job 只会让那条 job 白多一遍编译。`58-e2e` 仍保留同一
+    //   任务，`--only=e2e` / `--skip=backend` 的路线照旧自足。
+    if (!ctx.ci) {
+      tasks.push({
+        label: 'cli: release 二进制（指纹过期 ⇒ 批内重建）',
+        cmd: process.execPath,
+        args: [path.join(scriptDir, '..', 'cli-binary.mjs')],
+        cwd: repoRoot,
+      })
+    }
 
     if (ctx.profile) {
       // 仅构建后端（symbio + cli），壳的发布构建由 release.yml 的 tauri-action 负责。

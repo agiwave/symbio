@@ -413,14 +413,19 @@ test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mo
   const dir = path.join(repoRoot, 'scripts', 'gate.d')
   const be = await import(pathToFileURL(path.join(dir, '10-backend.mjs')).href)
   const tasks = be.default.tasks({ ci: false })
+  const cliTask = tasks.find((t) => String(t.label).includes('cli: release'))
+  assert.ok(cliTask, 'backend 泳道必须带 cli release 重建任务（不启动 cargo 也要在列）')
+  // 「不需要重建」是**通过**，不是未判定：这一项的判据是「本轮用的产物对得上源码」，
+  // 指纹新鲜恰好说明它成立。写成 `when` 条件项会让每一轮绿灯都挂着一个 ⊘，
+  // 而天天看见的灰点最后就是没人看。要不要重建由 `cli-binary.mjs` 的内容指纹回答。
   assert.ok(
-    tasks.some((t) => String(t.label).includes('cli: release')),
-    'backend 泳道必须带 cli release 重建任务（`when` 判新鲜度，不启动 cargo 也要在列）',
+    !cliTask.when && !cliTask.skipNote,
+    'cli release 这项不许是条件项（`when` / `skipNote` ⇒ 新鲜时记未判定）',
   )
   const ciTasks = be.default.tasks({ ci: true })
   assert.ok(
-    ciTasks.every((t) => !String(t.label).includes('cli: release') || (t.when && t.when({ ci: true }) === false)),
-    'CI 的 backend job 不该付 release 构建——e2e job 自备（`--only=e2e`）',
+    !ciTasks.some((t) => String(t.label).includes('cli: release')),
+    'CI 的 backend job 不该付 release 构建——e2e job 自备（`--only=e2e`）；不进名单，也不留一条 ⊘',
   )
   const fw = await import(pathToFileURL(path.join(dir, '06-facts-write.mjs')).href)
   // 链的顺序由导出的 `STEPS` 自述（它同时是 `autoChain` 的 `steps`——**判的就是跑的那份**，
