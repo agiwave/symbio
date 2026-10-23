@@ -1530,11 +1530,13 @@ fn the_overlap_report_on_the_production_table() {
         .collect();
     // `turn_head` 自 T-244 步 5 起多读两类格（`has_final` 的前件：模型响应的
     // `calls` + 两条收束格），步 5b 又加了 `failed`（`tools_open` 的另一种终局），
-    // 凡是共用这个幕头的相交对，名单就一起变宽——这正是第 4 条要「点名而不只报非空」的理由。
+    // 步 5d 再给 `tools_open` 补了请求面（`request`），凡是共用这个幕头的相交对，
+    // 名单就一起变宽——这正是第 4 条要「点名而不只报非空」的理由。
     let head: &[&str] = &[
         "chat.assistant.fallback",
         "chat.assistant.final",
         "failed",
+        "request",
         "response",
         "session.config",
         "turn.stage",

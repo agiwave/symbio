@@ -668,7 +668,23 @@ fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
 ///
 /// 幕锚是「本次执行从哪开始」的唯一定义：同一轮号会被续写幕复用，按轮扫全史
 /// 会把首幕的阶段误判成「已做」。
+///
+/// 轮号跟着**最新幕锚**走，而不是取切片里最大的轮号：恢复一条被后续轮次归档
+/// 的旧轮时，切片从旧轮首条事件一直延伸到今天，最大轮号指向新轮——旧轮的恢复幕
+/// 在表头里根本看不见（这正是 `resume_anchor` 旁路存在的原因，T-244 步 5d）。
+/// 恢复幕的 `turn.stage{stage:"resume"}` 是开演时刚落的，`ts` 比任何既有轮次都新，
+/// 按 `(ts, seq)` 取最后一条幕锚即可让表头回到被续写的那一轮。
+///
+/// 没有幕锚的切片（测试夹具 / 只有配置事实）退回「最大轮号」——幕锚缺席时
+/// 没有更诚实的轮号可给。
 fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
+    if let Some(anchor) = events
+        .iter()
+        .filter(|e| is_drive_anchor(e))
+        .max_by_key(|e| (e.ts, seq_of(e)))
+    {
+        return Some((anchor.turn, Some(anchor)));
+    }
     const HEAD_KINDS: &[&str] = &[
         "user.message",
         "turn.stage",
@@ -681,11 +697,7 @@ fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
         .filter(|e| HEAD_KINDS.contains(&e.kind.as_str()))
         .map(|e| e.turn)
         .max()?;
-    let anchor = events
-        .iter()
-        .filter(|e| e.turn == turn && is_drive_anchor(e))
-        .max_by_key(|e| (e.ts, seq_of(e)));
-    Some((turn, anchor))
+    Some((turn, None))
 }
 
 fn is_drive_anchor(e: &Event) -> bool {
@@ -703,7 +715,8 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
     e.seq.is_some_and(|s| s.value() >= anchor_seq)
 }
 
-/// 轮头（T-244 步 5 升到 v5）：五个策略行的开账条件全在这一格里，收束行与执行行也是。
+/// 轮头（T-244 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
+/// 收束行与执行行也是。
 ///
 /// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
 /// 召回阶段的结论，`resumed` 区分续写幕与用户新发言。
@@ -711,6 +724,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// v5 加一格 `tools_open`：本幕最近一条模型应答交回了工具调用、且其中至少一笔
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
 /// （T-244 步 5b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
+/// v6 给它补了请求面（见该格的注释）：恢复幕的唤醒请求也在「有活没干完」之列。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -792,19 +806,41 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     // 工具批还开着（T-244 步 5b）：交回的调用里至少有一笔没被 `response` / `failed`
     // （同 `port=tool` 同 id）关掉。两格互斥（`calls` 空 vs 非空），所以执行行只在
     // 「有活没干完」的时候让位。
-    let tools_open = !closed
-        && model_calls.is_some_and(|calls| {
-            calls.iter().any(|c| {
-                let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                !events.iter().any(|e| {
+    //
+    // v6（T-244 步 5d）再加一条**请求面**的判据：清点的是**本轮**（不是本幕）里
+    // 落过、却还没有终局的 `request(port=tool)`。恢复幕交回的那一笔就靠它：模型
+    // 响应是首幕的（本幕没有新的模型应答），旧批次也早已关账，唯一的「开着」是
+    // 唤醒请求本身——不看请求面，执行行会在派发之前抢先跑一次模型往返。
+    //
+    // 判据按请求的 `seq` 取「之后有没有终局」，不按幕锚：唤醒请求落在幕锚
+    // **之前**（恢复幕的锚是 `begin_drive` 才落的那条阶段事实）。
+    let request_open = !closed
+        && events.iter().any(|req| {
+            req.turn == turn
+                && req.kind == EVENT_REQUEST
+                && str_field(req, "port") == Some("tool")
+                && !events.iter().any(|e| {
                     e.turn == turn
                         && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
                         && str_field(e, "port") == Some("tool")
-                        && str_field(e, "id") == Some(id)
-                        && after_anchor(e, anchor_seq)
+                        && str_field(e, "id") == str_field(req, "id")
+                        && seq_of(e) > seq_of(req)
                 })
-            })
         });
+    let tools_open = !closed
+        && (request_open
+            || model_calls.is_some_and(|calls| {
+                calls.iter().any(|c| {
+                    let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    !events.iter().any(|e| {
+                        e.turn == turn
+                            && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
+                            && str_field(e, "port") == Some("tool")
+                            && str_field(e, "id") == Some(id)
+                            && after_anchor(e, anchor_seq)
+                    })
+                })
+            }));
     serde_json::json!({
         "turn": turn,
         "round": round,
@@ -1017,17 +1053,18 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: stale_sent,
     },
-    // 轮头（T-244 步 5 升到 v5）：五个策略行的开账条件 + `close-turn` / `execute-turn`
-    // 的开账条件。
+    // 轮头（T-244 步 5 升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
+    // `close-turn` / `execute-turn` 的开账条件。
     //
     // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，
     // 因此读面要连收束格与模型响应的 `calls` 一起声明——视图声明的字段名是装载期
     // 的孤儿事实判据（`OrphanFact`）的输入，声明与算法不一致就是给表少报一条边。
     // v4 → v5 加 `tools_open`：它读 `failed` 的 `port` / `id`（工具批的另一种终局），
     // 其余读面不变。
+    // v5 → v6 给 `tools_open` 补请求面：它读 `request(port=tool)` 的 `port` / `id`。
     ViewDecl {
         name: "turn_head",
-        ver: 5,
+        ver: 6,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1036,6 +1073,8 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("session.config", "classify_enabled"),
             ("session.config", "auto_compress"),
             ("session.config", "is_persistent"),
+            (EVENT_REQUEST, "port"),
+            (EVENT_REQUEST, "id"),
             (EVENT_RESPONSE, "port"),
             (EVENT_RESPONSE, "calls"),
             (EVENT_FAILED, "port"),

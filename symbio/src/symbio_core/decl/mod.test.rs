@@ -134,10 +134,11 @@ fn builtin_loads_and_freezes() {
     // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
     // T-223 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
     // T-244 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
-    // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5。
+    // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5；
+    // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 5);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 6);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
@@ -815,6 +816,84 @@ fn turn_head_tools_open_ignores_closures_from_an_earlier_drive() {
         turn_head(&events, 0)["tools_open"],
         json!(true),
         "锚点之前的应答属于首幕"
+    );
+}
+
+#[test]
+fn turn_head_follows_a_resume_anchor_back_to_an_archived_turn() {
+    // 恢复一条被后续轮次归档的旧轮：切片从旧轮首条事件延伸到今天，最大轮号指向
+    // 新轮。表头必须跟着**最新幕锚**（恢复幕的 `turn.stage`）回到旧轮——
+    // 否则收束 / 执行两行看的是新轮，旧轮的恢复永远无债可还（T-244 步 5d 退役
+    // `resume_anchor` 旁路的前提）。
+    let events = vec![
+        ev_at(1, "user.message", json!({"text": "旧轮", "id": "u-1"}), 10),
+        model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
+        ev_at(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1 }),
+            30,
+        ),
+        ev_at(2, "user.message", json!({"text": "新轮", "id": "u-2"}), 100),
+        ev_at(
+            1,
+            "turn.stage",
+            json!({ "stage": "resume", "round": 0, "result": "approve" }),
+            200,
+        ),
+    ];
+    let head = turn_head(&events, 0);
+    assert_eq!(head["turn"], json!(1), "表头回到被续写的旧轮");
+    assert_eq!(head["resumed"], json!(true));
+    assert_eq!(
+        head["has_utterance"],
+        json!(false),
+        "续写幕没有新发言（与恢复前同一条判据）"
+    );
+}
+
+#[test]
+fn turn_head_tools_open_on_an_unanswered_wake_request() {
+    // 恢复幕交回的那一笔：模型响应是首幕的（本幕没有新的模型应答），旧批次也
+    // 早已关账——唯一「开着」的是唤醒请求本身。请求落在幕锚之前，按幕锚判会漏，
+    // 故判据按请求的 seq 取「之后有没有终局」。
+    let mut events = vec![
+        ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 10),
+        model_response(1, "m-1", json!([{"port": "tool", "id": "c-1"}])),
+        ev_at(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1, "needs_user_action": true }),
+            30,
+        ),
+        ev_at(
+            1,
+            EVENT_REQUEST,
+            json!({ "port": "tool", "id": "w-1", "attempt": 1, "intent": "execute" }),
+            40,
+        ),
+        ev_at(
+            1,
+            "turn.stage",
+            json!({ "stage": "resume", "round": 0, "result": "approve" }),
+            50,
+        ),
+    ];
+    assert_eq!(
+        turn_head(&events, 0)["tools_open"],
+        json!(true),
+        "唤醒请求还没有终局 ⇒ 执行行让位给派发行"
+    );
+    events.push(ev_at(
+        1,
+        EVENT_RESPONSE,
+        json!({ "port": "tool", "id": "w-1", "attempt": 1 }),
+        60,
+    ));
+    assert_eq!(
+        turn_head(&events, 0)["tools_open"],
+        json!(false),
+        "唤醒请求关账后执行行才开"
     );
 }
 
