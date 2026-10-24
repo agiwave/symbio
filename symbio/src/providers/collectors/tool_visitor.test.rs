@@ -8,11 +8,10 @@ use super::*;
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{
-    capability_configurables, capability_model_active, capability_model_resolve, capability_mount,
-    capability_mounts, capability_option_fields, capability_prompts, capability_vdfs_root,
-    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, DetailField, ExecEnv,
-    ModelProvider, PluginError, VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult,
+    capability_configurables, capability_model_active, capability_model_resolve,
+    capability_option_fields, capability_prompts, capability_vdfs_root, Capability, CapabilityMeta,
+    CapabilityRow, CapabilityRowKind, DetailField, ExecEnv, ModelProvider, PluginError,
+    VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -344,7 +343,7 @@ async fn tool_list_of_another_kind_is_empty() {
     assert!(mgr.list(CapabilityRowKind::Model).await.is_empty());
 }
 
-// ==================== 挂载族（AR-025 4d：挂载点与根同表，按根位区分） ====================
+// ==================== 挂载族（这一族今天只有根一形） ====================
 
 /// 可辨认的 VDFS 桧：`dispatch(Read)` 回自己的标签（身份 = 内容）。
 struct StubMount(&'static str);
@@ -375,33 +374,21 @@ async fn mount_label(provider: &Arc<dyn VdfsProvider>) -> String {
         .expect("桩的 Read 必须带正文")
 }
 
-/// 挂载点与根进**同一张表**：三个读函数是同一张表的三个视图——
-/// 挂载点按名可查、根只按根位找（行名是保留值不对外），根**不在**挂载点清单里。
+/// 挂载族只剩**根一形**：`mount` 与按名查挂载点的读口都已删，`mount_root` 是唯一入口。
+///
+/// 判据是「没有第二个入口」而不是「入口少了一个」：除了根，往里塞别的东西根本
+/// 写不出来——所以这里连「挂载点清单为空」这样的断言都不需要，那个读口不存在。
 #[tokio::test]
-async fn mount_family_is_three_views_of_one_table() {
+async fn root_is_the_only_mount_shape() {
     let mgr = DefaultToolVisitor::new();
-    mgr.put(CapabilityRow::mount("memory", Arc::new(StubMount("记忆"))))
-        .await;
     mgr.put(CapabilityRow::mount_root(Arc::new(StubMount("系统根"))))
         .await;
 
-    // 挂载点清单：只有挂载点，服务者单槽不冒充「一个挂载点」
-    assert_eq!(
-        capability_mounts(&mgr)
-            .await
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect::<Vec<_>>(),
-        vec!["memory".to_string()]
-    );
-    // 按名查挂载点拿得到；根按根位找（内容 = 系统根那份）
-    assert!(capability_mount(&mgr, "memory").await.is_some());
     let root = capability_vdfs_root(&mgr).await.expect("根已在表里");
     assert_eq!(mount_label(&root).await, "系统根");
 }
 
-/// 再登记一个根 = **单槽移交**（同一保留行名后写者胜，旧根不留痕）：
-/// 清单不因二次登记长出尾巴，根位上的永远只有一份。
+/// 再登记一个根 = **单槽移交**（同一保留行名后写者胜，旧根不留痕）。
 #[tokio::test]
 async fn root_re_registration_is_a_single_slot_handover() {
     let mgr = DefaultToolVisitor::new();
@@ -412,10 +399,6 @@ async fn root_re_registration_is_a_single_slot_handover() {
 
     let root = capability_vdfs_root(&mgr).await.expect("根应在槽位里");
     assert_eq!(mount_label(&root).await, "新根");
-    assert!(
-        capability_mounts(&mgr).await.is_empty(),
-        "退位的根不得留在挂载点清单里"
-    );
 }
 
 // ==================== 选项 / 可配置两族（AR-025 4e：两个专服单族 trait 退场） ====================

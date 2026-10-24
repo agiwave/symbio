@@ -5,9 +5,9 @@
 use super::*;
 
 use crate::symbio_core::{
-    capability_model_active, capability_model_resolve, capability_mount, capability_prompts,
-    capability_vdfs_root, CapabilityRow, CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent,
-    VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
+    CapabilityRow, CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent, VdfsContext,
+    VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -217,7 +217,7 @@ async fn sub_agent_model_registration_is_discarded() {
     );
 }
 
-/// **多槽转发**：工具 / 系统提示词 / VDFS 挂载点**确实**带前缀并进内层。
+/// **多槽转发**：工具 / 系统提示词**确实**带前缀并进内层。
 ///
 /// 与上面两条是一对：缺了它，「代理什么都不转发」也能让那两条通过。
 #[tokio::test]
@@ -232,12 +232,6 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
         .put(CapabilityRow::prompt(
             "persona",
             "你是评审子智能体".to_string(),
-        ))
-        .await;
-    scoped
-        .put(CapabilityRow::mount(
-            "work",
-            Arc::new(LabeledRoot("子 Agent 工作区")),
         ))
         .await;
 
@@ -256,15 +250,6 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
             .iter()
             .any(|(k, v)| k == "agent/reviewer/persona" && v == "你是评审子智能体"),
         "子 Agent 的提示词段应带作用域前缀进内层：{prompts:?}"
-    );
-    // VDFS 挂载点：同前缀，且**内容**是子 Agent 那一份（不是内层被覆盖）
-    let mount = capability_mount(&*inner, "agent/reviewer/work")
-        .await
-        .expect("子 Agent 的挂载点应带前缀进内层");
-    assert_eq!(label_of(&mount).await, "子 Agent 工作区");
-    assert!(
-        capability_mount(&*inner, "work").await.is_none(),
-        "挂载点走前缀而非覆盖——系统侧的 work 不能被盖掉"
     );
 }
 

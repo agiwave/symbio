@@ -53,7 +53,7 @@ impl: done
  │ composite 组合 │ │ PhysicalFs（磁盘） │
  │ 视图 │ │ 工作目录相对地址 │
  └───────┬───────┘ └───────────────────┘
- │ put(CapabilityRow::mount(实例名, provider)) ← 容器派生（LLM 链路）
+ │ put(CapabilityRow::mount_root(provider)) ← 容器自身视图：根位（LLM 链路）
  ┌───────────────┬─────────────┼─────────────┬───────────────┐
  plugin_manager provider session provider model provider …（各模块自持）
 ```
@@ -146,8 +146,8 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 - trait 上**没有** `mount` / `category` / `root` 之类的成员——provider
  既不管理也不提供自己的地址；
 - 子目录名由**使用方**给出，provider 不参与：系统链路取容器实例表的挂载名（约定 =
- 插件名，`PLUGIN_*` 常量）；LLM 链路由容器用**同一个实例名**派生挂载行
- （`put(CapabilityRow::mount(实例名, provider))`）。命名因此只有一个来源；
+ 插件名，`PLUGIN_*` 常量）；LLM 链路只登记**根位**（`put(CapabilityRow::mount_root(provider))`），
+ 子目录名不进行表——它在组合视图里已经有一个名字，行表不再复述一份；
 - provider 的方法只接收**自身子树内的相对路径**（`""` = 自身目录）；
  全路径 `<子目录>/<rel…>` 由使用方（容器）拼接与回填；
 - 子目录节点由容器合成（`dir_node`：携带子 provider 的自述与访问位），
@@ -165,17 +165,17 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 - **系统 / 前端链路**：容器 override core trait `Plugin::get_vfs_provider`（默认 `None`）
  返回 `self.vdfs`——这是该链路的**唯一**查询接口，**不经** `Registry`、不驱动 `traverse`。
-- **LLM 链路**：容器在同一次收集广播里写根行（`mount_root`），并为每个
- `get_vfs_provider` 返回 `Some` 的子插件派生挂载行（`mount`），供 `vdfs_*` 工具取根。
+- **LLM 链路**：容器在同一次收集广播里写**根位**（`mount_root`），`vdfs_*` 工具据此
+ 取根；子目录不进表——它在组合视图里出不出现，由下面那同一个判据决定。
 
-**单源**：挂载行不是子插件自己注册的，而是容器从 `get_vfs_provider` **派生**的——
-与系统链路用同一个判据。插件少接一条链路的形态（漏 `put` 但实现了 trait，或反之）
-因此不可能出现。
+**单源**：两条链路问的都是同一个 trait（`get_vfs_provider`），容器不另存一份子目录
+清单。插件少接一条链路的形态（漏登记但实现了 trait，或反之）因此不可能出现。
 
 拓扑角色划分：
 
 - **容器**（`composite`）＝ 唯一持有拓扑：系统链路经 `child.get_vfs_provider`
- 逐子插件查询聚合出「包含子目录列表的 provider」；LLM 链路登记根行并由同一判据派生各挂载行；
+ 逐子插件查询聚合出「包含子目录列表的 provider」；LLM 链路只登记根行，子目录同样由
+ 这个判据在视图里算出；
 - **门面**（`UnifiedFs`）＝ 只认地址前缀：`<根>` → 虚拟层（容器视图），其余 → 物理层；
 - **访问层**（`vdfs` 插件）＝ 拆信封 + 取 `UnifiedFs` + 转发；
 - **provider**（各插件）＝ 只认自身子树内相对路径。
@@ -470,23 +470,19 @@ core 不暴露**）；操作闭集见 [当前事实表](../004-ref/006-当前事
 > - **LLM 链路**经 `Registry`（`traverse` 广播中注册 / 查询）；
 > - **系统 / 前端链路**经 core trait `Plugin::get_vfs_provider`（直接查询，**不**走 `Registry`、不驱动 `traverse`）。
 
-**LLM 链路**——写口是 `Registry::put` 上的挂载行 / 根行，读口是三个自由函数：
+**LLM 链路**——写口是 `Registry::put` 上的根行，读口是一个自由函数：
 
 ```rust
-// 目录名 = 容器实例表的挂载名（约定 = 插件名）；由容器派生，provider 与插件都不自行命名
-visitor.put(CapabilityRow::mount(dir, provider)).await; // 挂载点入表（容器按子插件视图派生）
 visitor.put(CapabilityRow::mount_root(provider)).await; // 容器自身视图：根位（单槽）
-capability_mount(visitor, dir).await // 按目录名查挂载点
-capability_mounts(visitor).await // 挂载点清单（不含根）
 capability_vdfs_root(visitor).await // 取 <根> 服务者（无注册 ⇒ None）
 ```
 
-> 消费现状（写清楚，防误判）：当前 `vdfs_*` 工具取根**只消费根位**
-> （`capability_vdfs_root` → `UnifiedFs` 整棵组合视图）；**按名注册的挂载清单**
-> （`capability_mounts` / `capability_mount`）暂无生产消费方——它是 **LLM
-> 可控挂载机制的预留面**（子智能体经 `SubAgentVisitor` 在此加 `agent/<id>/`
-> 作用域前缀；将来按作用域 / 白名单裁剪 LLM 可见资源时，消费方接在这组接口上）。
-> **不是死代码，不要删除。**
+> **这一族只有根一形，是裁决而不是欠账**（[DE-015-义务环](015-义务环.md) `D-144`）。
+> 「哪个目录由谁提供」由组合视图（`CompositeVdfs`）与 `Plugin::get_vfs_provider` 现场
+> 算出，两者按同一判据回答；再往行表里存一份按名的挂载行，就是同一事实的第三份复述，
+> 且要靠收集期那次广播维持同步。按可见域裁剪也不落在这一层——裁剪是地址解析的事
+> （`hidden` 在分发层过滤、`resolve` 决定可寻址范围），把清单做集合减法会把「看不见」
+> 与「没装」抹成同一件事。
 
 **系统 / 前端链路**——core trait `Plugin`（默认 `None`，资源插件返回 `Some(self)`）：
 
@@ -495,11 +491,10 @@ capability_vdfs_root(visitor).await // 取 <根> 服务者（无注册 ⇒ None�
 fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>>;
 ```
 
-**LLM 链路**：容器在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，为每个
-`get_vfs_provider` 返回 `Some` 的子插件**派生**挂载行（目录名 = 实例表挂载名）——
-插件自己不注册。**系统链路**：资源插件在 `impl Plugin for X` 直接 `return Some(self)`，
+**LLM 链路**：容器在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里登记自己的根行，
+子目录不进表。**系统链路**：资源插件在 `impl Plugin for X` 直接 `return Some(self)`，
 容器 `children_of` 与前端 `resolve_fs` 取视图时直接调 `.get_vfs_provider`。
-两条通道因此共用**同一个事实来源**：插件只回答「我有没有视图」，位置与登记都由容器给。
+两条通道因此共用**同一个事实来源**：插件只回答「我有没有视图」，位置由容器给。
 
 ### 6.2 根登记（容器 → 系统）
 
@@ -535,9 +530,9 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 **系统链路与 LLM 链路是两条独立的发现通道**，不共用同一次遍历广播：
 
 - **LLM 链路**：会话编排方 `collect_capabilities` 广播 `traverse(TRAVERSE_AVAILABLE_TOOLS)`
- → 容器经根行（`mount_root`）登记 `<根>` 服务者、并按 `get_vfs_provider` 为子插件
- **派生**挂载行（`mount`）→ `tool_ctx` 携带该访问器 → `vdfs_*` 工具经
- `capability_vdfs_root` 取根，交给 `UnifiedFs`。
+ → 容器经根行（`mount_root`）登记 `<根>` 服务者 → `tool_ctx` 携带该访问器 → `vdfs_*`
+ 工具经 `capability_vdfs_root` 取根，交给 `UnifiedFs`。子目录不在这一步登记：
+ 它们由 `UnifiedFs` 背后的组合视图现场列出。
 - **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` / `agent` 插件拿到父插件
  （`Arc<dyn Plugin>`）后直接调 `parent.get_vfs_provider` 取根，不广播、不依赖
  `CAPABILITY_VISITOR`（`resolve_fs` 在 `ctx` 无能力管理器时即走此通道）。
@@ -555,8 +550,8 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
  见 `agent/host/vdfs.rs::list_at` 与 `composite/vdfs.rs` 的
  `container_leaves_item_addresses_untouched`（同一条契约）。
 
-`Plugin::get_vfs_provider` 默认 `None`；`capability_mount`（按目录名
-取、供 LLM 工具）与它是**两套不同接口**，互不替代。两条链路因此经过**同一个
+`Plugin::get_vfs_provider` 默认 `None`；`capability_vdfs_root`（取根位、供 LLM 工具）
+与它是**两套不同接口**，互不替代。两条链路因此经过**同一个
 `UnifiedFs`**（不变量 5）——不存在第二处地址规则。取不到根（无组合容器）时虚拟层
 降级为**空目录**（`EmptyVdfs`）：`<根>` 可列出但无内容，具体路径 `NotFound`；物理层
 与它无关，照常可用。于是「系统没有资源」与「资源为空」表现一致，前端与 LLM 都不必特判。
@@ -717,8 +712,8 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
  不可新建。见 [D-030](009-VDFS规范.md "DE-009-VDFS规范")）。
  - **不提供、也不假设自己的位置**（§2.4）。
 2. 接好**唯一的发现判据**：override `Plugin::get_vfs_provider` 返回 `Some(self)`
- （默认 `None`）。容器会为返回 `Some` 的子插件在同一次能力广播里**派生**挂载行
- （目录名 = 实例表挂载名），插件不自行 `put`（§6.1）。
+ （默认 `None`）。容器在组合视图里按这同一个判据把它列成父目录下的一个子目录
+ （目录名 = 实例表挂载名）——插件不自行命名、也不自行 `put`（§6.1）。
 3. 校验写在 `write` 里；呈现需求放在节点的 `ext` + `schema`。
 
 **零改动面**：访问层、门面（`UnifiedFs`）、物理层、容器（`composite`）、前端
@@ -737,8 +732,8 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 1. 子容器实现 `VdfsProvider`（可以直接就是另一个 `CompositeVdfs`——composite
  嵌套 composite 时它同样只是普通 provider，没有任何根的概念）；
 2. 子容器在 `impl Plugin` 中 override `get_vfs_provider` 返回 `Some(self.vdfs.clone)`——
- 系统链路与 LLM 链路由容器按这同一个判据取视图 / 派生挂载行（成为父容器下的一个
- 子目录）；或者由装配决定把它登记成根行 `put(CapabilityRow::mount_root(视图))`
+ 系统链路与 LLM 链路由容器按这同一个判据取视图（成为父容器下的一个子目录）；
+ 或者由装配决定把它登记成根行 `put(CapabilityRow::mount_root(视图))`
  （挂载族根位）。
 
 两种挂法都由既有机制支持；**composite 的代码对二者完全无感**——这正是
@@ -763,8 +758,8 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
  `VDFS_OPS`）**不得**上浮到 core；宿主专有类型与状态一律经 `VdfsContext` 注入。
 - provider **不得**提供或假设自己的位置（trait 上无 `mount` / `category` / root
  概念），只接收自身子树内的相对路径。
-- 子目录名**只**由容器实例表的挂载名给出——系统链路直接用它，LLM 链路由容器用
- 同一个名字派生挂载行；**不得**出现第二处命名来源（插件自定义挂载名即第二处）。
+- 子目录名**只**由容器实例表的挂载名给出——两条链路用同一个名字，且都从实例表取；
+ **不得**出现第二处命名来源（插件自定义挂载名即第二处）。
 - **地址规则只归门面**：`<根>` 前缀判别与两半分流只允许出现在 `UnifiedFs`。
 - **拓扑只归容器**：访问层与门面不得持有子目录表、不得解析虚拟路径首段。
 - **composite 不得出现根级别概念**：能否服务 `<根>` 只由装配（根行 `mount_root` 的

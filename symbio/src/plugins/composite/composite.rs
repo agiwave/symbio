@@ -175,8 +175,9 @@ impl Plugin for Composite {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         // 能力收集是唯一一次「容器知道每个子插件是谁、又能问它要视图」的时机：
-        // 根行与各子插件的挂载行都在这里派生，插件自己不再 `put` 挂载行——
-        // 「谁能提供资源」的事实只由 `Plugin::get_vfs_provider` 回答一次。
+        // 根行在这里登记（子插件的挂载行不再派生——「哪个目录由谁提供」的真相是
+        // 本容器聚合出的组合视图 `self.vdfs` 与 `Plugin::get_vfs_provider`，
+        // 行表只是第三份复述，已删，见 `capability/mount.rs` 的模块文档）。
         let collecting = ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS);
         let visitor = collecting.then(|| ctx.get(CAPABILITY_VISITOR)).flatten();
 
@@ -203,16 +204,6 @@ impl Plugin for Composite {
             // 收集是广播：不参与的插件回答 `NotFound`，那不是失败。判据与理由在
             // `broadcast_collect` 里，两处收集共用同一份，避免各写一半。
             broadcast_collect(plugin.clone(), req_ctx, &name).await;
-
-            // 挂载行 = 子插件「交得出视图」这件事的**派生**：与系统链路的
-            // `children_of` 用同一个判据（`get_vfs_provider().is_some()`），
-            // 目录名 = 实例表挂载名。先广播再问，是因为个别插件
-            // （如 `mcp`）在收集期才完成加载。
-            if let Some(visitor) = visitor.as_ref() {
-                if let Some(provider) = plugin.get_vfs_provider() {
-                    visitor.put(CapabilityRow::mount(&name, provider)).await;
-                }
-            }
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

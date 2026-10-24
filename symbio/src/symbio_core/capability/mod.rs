@@ -27,7 +27,7 @@ pub use configurable::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
 };
 pub use model::{capability_model_active, capability_model_resolve};
-pub use mount::{capability_mount, capability_mounts, capability_vdfs_root};
+pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
 pub use prompt::capability_prompts;
 pub use row::{CapabilityRow, CapabilityRowKind};
@@ -373,10 +373,9 @@ pub trait Registry: Send + Sync + 'static {
     // 这些自由函数。道理（写入语义与不变量如何从签名搬进结构与行词汇）各见
     // `capability/model.rs` 与 `capability/prompt.rs`。
 
-    // 挂载族（5 方法，4d）也已改走表：挂载点与根都是行（根是带根位的保留行名行），
-    // 写入是行上的 `put`，读取是 `capability_vdfs_root` / `capability_mounts` /
-    // `capability_mount` 这些自由函数——理由（根为什么单槽、挂载清单是预留机制）
-    // 见 `capability/mount.rs`。
+    // 挂载族也只有根这一形了：根是带根位的保留行名行，写入是行上的 `put`，
+    // 读取是 `capability_vdfs_root` 这个自由函数——理由（根为什么单槽、非根的挂载行
+    // 为什么删掉）见 `capability/mount.rs`。
 }
 
 #[cfg(test)]

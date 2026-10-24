@@ -303,10 +303,12 @@ async fn top_level_container_falls_back_to_declared_root() {
 
 // ==================== 挂载行由容器派生 ====================
 //
-// 「谁能提供 VDFS 资源」只有一个答案：`Plugin::get_vfs_provider`。容器在收集广播里
-// 按同一个判据为子插件派生挂载行——插件自己不再 `put`，漏接一处不再可能静默。
+// 「谁能提供 VDFS 资源」只有一个答案：`Plugin::get_vfs_provider`。容器的组合视图
+// 按这一个判据决定哪些子插件在资源树里占一格——插件自己不必 `put` 任何东西，
+// 漏接一处不再可能静默。行表那份复述已经删掉（见 `capability/mount.rs` 的模块
+// 文档），所以下面钉的是**视图本身**，不再经行表中转。
 
-/// 只有视图、`traverse` 什么都不注册的插件：挂载行仍须出现
+/// 只有视图、`traverse` 什么都不注册的插件：资源树里仍须有它这一格
 struct SilentView;
 
 #[async_trait::async_trait]
@@ -344,9 +346,9 @@ impl Plugin for SilentView {
     }
 }
 
-/// 挂载行的来源是 `get_vfs_provider`，不是插件自己在 `traverse` 里注册
+/// 资源树的成员由 `get_vfs_provider` 单条判据决定，不是插件在 `traverse` 里自己报
 #[tokio::test]
-async fn mount_rows_are_derived_from_providers() {
+async fn resource_tree_membership_is_derived_from_providers() {
     let composite = composite_of(vec![
         ("silent", Arc::new(SilentView) as Arc<dyn Plugin>),
         ("plain", Probe::new() as Arc<dyn Plugin>),
@@ -355,21 +357,20 @@ async fn mount_rows_are_derived_from_providers() {
     assert_eq!(
         mounts,
         vec!["silent".to_string()],
-        "有视图 ⇔ 有挂载行；没视图的插件不占一格"
+        "有视图 ⇔ 资源树里占一格；没视图的插件不占一格"
     );
 
-    let visitor = collect_at(&composite, TRAVERSE_AVAILABLE_TOOLS).await;
-    let rows = capability_mounts(&*visitor).await;
-    let Some((_, provider)) = rows.iter().find(|(name, _)| name == "silent") else {
-        panic!("silent 的挂载行应在表里");
-    };
+    // 那一格背后正是子插件交出的 provider：往目录上发一次 List 就落到它身上
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
     assert!(
         provider
-            .clone()
-            .dispatch(&vdfs_context(&host()), "", VdfsRequest::List {})
+            .dispatch(&vdfs_context(&host()), "silent", VdfsRequest::List {})
             .await
             .is_ok(),
-        "挂载行指向的正是子插件交出的那个 provider"
+        "silent 那一格可寻址，且应答来自它自己的视图"
     );
 }
 
@@ -383,8 +384,8 @@ async fn mount_rows_are_derived_from_providers() {
 
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_mounts, capability_option_fields, vdfs_context, CapabilityRowKind, PluginStopReason,
-    Registry, VdfsContent, VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE,
+    capability_option_fields, vdfs_context, CapabilityRowKind, PluginStopReason, Registry,
+    VdfsContent, VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::path::{Path, PathBuf};
@@ -440,11 +441,17 @@ async fn tool_names(composite: &Arc<Composite>) -> Vec<String> {
     names
 }
 
+/// 资源树的成员名（= 暴露了 VDFS 的已挂载子插件）。
+///
+/// 判据与 `CompositeVdfs::children_of` 同源：`Plugin::get_vfs_provider` 有视图才算
+/// 一格。这里不去 `dispatch(List)` 取——根列表会按 `hidden` 过滤，而判据要的是
+/// 「装没装出这一格」，与「界面上显不显示」是两件事（`loop` 就是隐藏的）。
 async fn mount_names(composite: &Arc<Composite>) -> Vec<String> {
-    let visitor = collect_at(composite, TRAVERSE_AVAILABLE_TOOLS).await;
-    let mut names: Vec<String> = capability_mounts(&*visitor)
-        .await
+    let mut names: Vec<String> = composite
+        .registry
+        .snapshot()
         .into_iter()
+        .filter(|(_, p)| p.clone().get_vfs_provider().is_some())
         .map(|(name, _)| name)
         .collect();
     names.sort();

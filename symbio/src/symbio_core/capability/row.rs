@@ -94,9 +94,9 @@ pub enum CapabilityRowPayload {
     /// VDFS 挂载点：一个 provider。
     ///
     /// `active` 是**根位**（单槽）：置位的行是「服务 `<根>` 这棵子树的那一个」。
-    /// 挂载点与根同为「目录名 → provider」的映射，差别只在根**不可能由调用方命名**
-    /// （它不是某个插件的目录），故同族同载荷、以位相区分——又一条「生效位长在行上」
-    /// 的例子，见 [`CapabilityRow::mount_root`]。
+    /// 这个族今天只有根一形（非根的挂载行已删——它们写得进去、读不出来，见
+    /// `capability/mount.rs` 的模块文档），但根位留着：单槽移交走的是 `put` 里
+    /// 「新生效行先降旧行」那一段，与模型族同一条规则，不另立一套。
     Mount {
         provider: Arc<dyn VdfsProvider>,
         active: bool,
@@ -181,17 +181,6 @@ impl CapabilityRow {
         Self {
             name,
             payload: CapabilityRowPayload::Configurable(Box::new(item)),
-        }
-    }
-
-    /// 挂载点行：名字 = **使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）。
-    pub fn mount(name: &str, provider: Arc<dyn VdfsProvider>) -> Self {
-        Self {
-            name: name.to_string(),
-            payload: CapabilityRowPayload::Mount {
-                provider,
-                active: false,
-            },
         }
     }
 

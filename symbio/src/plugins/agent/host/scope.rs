@@ -16,8 +16,10 @@
 //!
 //! | 注册项 | 形态 | 理由 |
 //! |---|---|---|
-//! | 系统提示词段 / VDFS 挂载点 | `agent/<id>/<name>` | 只作键 / 目录名，`/` 可读且天然分层 |
+//! | 系统提示词段 | `agent/<id>/<段名>` | 只作键，`/` 可读且天然分层 |
 //! | 工具 | `agent_<safe_id>_<name>` | 工具名进模型的 function-calling 协议，多数厂商只接受 `[A-Za-z0-9_-]` |
+//!
+//! VDFS 挂载族不在表里：它只剩根一形，而根**丢弃**（单槽归系统 Agent）。
 //!
 //! ## 单槽位 / 系统级注册不转发
 //!
@@ -29,9 +31,6 @@
 //! 模型族的丢弃写在 [`Registry::put`] 上（按行的族别判），因为 4b 之后
 //! 模型服务**不再是另一套方法**：model 插件逐行 `put` 写入，作用域这一层拦在同一个
 //! 入口上——写入口只有一个，作用域规则也就只有一处（见 `capability/model.rs`）。
-//!
-//! 同理，VDFS 挂载点走前缀而非覆盖：VDFS 是用户浏览 / 编辑面，子 Agent 的 `work`
-//! 若盖掉系统的 `work`，用户就改不到工作区记忆了——那是回归。
 
 use crate::symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, ExecEnv, PluginError,
@@ -56,7 +55,7 @@ impl SubAgentVisitor {
         }
     }
 
-    /// 提示词段 / VDFS 挂载点的名字：`agent/<id>/<name>`
+    /// 提示词段的名字：`agent/<id>/<段名>`
     fn seg(&self, name: &str) -> String {
         format!("agent/{}/{}", self.agent_id, name)
     }
@@ -137,21 +136,15 @@ impl Registry for SubAgentVisitor {
                 .await;
             return;
         }
-        // 挂载族（4d）：挂载点走**目录名前缀**（`agent/<id>/<目录名>`），根**丢弃**
-        // （子 Agent 的容器会把自己登记成根——转发它等于劫持整个 `<根>`）。
-        if let Some(provider) = row.vdfs() {
-            if row.active() {
-                crate::plugin_debug!(
-                    "agent",
-                    "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
-                    self.agent_id
-                );
-                return;
-            }
-            let name = self.seg(row.name());
-            self.inner
-                .put(CapabilityRow::mount(&name, Arc::clone(provider)))
-                .await;
+        // 挂载族（4d）：只剩根一形，而且**丢弃**（子 Agent 的容器会把自己登记成根——
+        // 转发它等于劫持整个 `<根>`）。非根的挂载行已不存在（见 `capability/mount.rs`），
+        // 所以这里不再有「加目录名前缀」那一支。
+        if row.vdfs().is_some() {
+            crate::plugin_debug!(
+                "agent",
+                "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
+                self.agent_id
+            );
             return;
         }
         // 选项行与可配置声明行**原样透传**（4e）：这两族走独立的广播通道
