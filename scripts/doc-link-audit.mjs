@@ -178,7 +178,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-016 D-017
+// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-016 D-017 D-018 D-019
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -743,6 +743,47 @@ function checkAnchor(fromRel, absFile, rawFrag, toLabel) {
   badAnchors.push({ from: fromRel, to: toLabel, frag: rawFrag })
 }
 
+
+// ==================== D-018：方括号里有路径、却没有目标地址 ====================
+/**
+ * 为什么需要它：`[|docs/007-task/048.md]` 这类形状（漏了 `(目标)`、或锚文本前多一个 `|`）
+ * 在 D-001 眼里**根本不是链接**——`LINK` 正则要 `](`，于是它连「失效」都算不上，静默跳过。
+ * 一个指向已删文档的悬空引用就这样躺了几个月，三条判据（D-001 / D-006 / D-010）一起报 0。
+ *
+ * 判据故意窄：方括号内容剥掉前导 `|` 与空白后**以仓内目录开头**才算（`docs/`、`scripts/`
+ * 等六个根，或 `../` / `./` 前缀）。这样 `[D-102]`、`[[DE-090 §4.1]]`、`[文字]`
+ * 这类正常括号不误报——它们不可能是「丢了地址的路径链接」。
+ */
+const REPO_PATH_HEAD = /^(?:\.{1,2}\/)?(?:docs|scripts|symbio|tauri|cli|e2e|examples)\//
+const BRACKET = /\[([^\[\]]+)\](?!\()/g
+const malformedLinks = []
+let malformedChecked = 0
+
+function scanMalformedBrackets(file, rel, text) {
+  const lines = text.split('\n')
+  let fence = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*(```|~~~)/.test(line)) {
+      fence = !fence
+      continue
+    }
+    if (fence) continue
+    const code = codeRanges(line)
+    for (const m of line.matchAll(BRACKET)) {
+      if (inCode(code, m.index)) continue
+      // `[[编号|标题]]` 是机制接管的双括号引用（RF 族），不是「丢了地址的链接」——
+      // 内层方括号的左右各有一个 `[` / `]` 时跳过。判据只认**单**方括号。
+      if (line[m.index - 1] === '[' || line[m.index + m[0].length] === ']') continue
+      const body = m[1].trim().replace(/^\|+/, '').trim()
+      if (!body.includes('/')) continue
+      if (!REPO_PATH_HEAD.test(body)) continue
+      malformedChecked += 1
+      malformedLinks.push({ from: rel, line: i + 1, body })
+    }
+  }
+}
+
 function check(file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) {
@@ -750,6 +791,7 @@ function check(file) {
     return
   }
   const text = fs.readFileSync(file, 'utf8')
+  scanMalformedBrackets(file, rel, text)
   for (const m of text.matchAll(LINK)) {
     const raw = stripTitle(m[1])
     if (raw.startsWith('#')) {
@@ -790,6 +832,18 @@ for (const rel of ROOTS) {
 for (const rel of ROOT_FILES) {
   const file = path.join(repoRoot, rel)
   if (fs.existsSync(file)) check(file)
+}
+
+// ---- D-018：方括号里有路径、却没有目标地址 ----
+console.log(`D-018 畸形链接：判定 ${malformedChecked} 条，命中 ${malformedLinks.length} 条`)
+for (const { from, line, body } of malformedLinks) {
+  console.log(`  ✗ ${from}:${line}  [${body}]  方括号里有仓内路径但没有目标地址`)
+}
+if (malformedLinks.length > 0) {
+  console.log('\n提示：`[文字](目标)` 少了 `(目标)` 时 D-001 连「失效」都算不上——它不是链接。')
+  console.log('      这类形状多为手写时漏了地址、或锚文本前多一个 `|`。处置：补上正确目标，')
+  console.log('      或删掉这个括号（要指「为什么这样设计」，指设计文档的 `### D-NNN`）。')
+  console.log('      本条**不给豁免**：方括号里有仓内路径却没有地址，只有「写错了」一种解释。')
 }
 
 // ---- D-002 / D-003 / D-004：活跃文档的三条体检 ----
@@ -971,6 +1025,8 @@ function srcDualRoot(fromFile, t) {
 
 const srcLinkBad = []
 const srcTickBad = []
+/** D-019：目标剥离标题后仍有空白（标题引号残缺 / 路径含空格），解析不出即红 */
+const srcD019Bad = []
 let srcLinksChecked = 0
 let srcTicksChecked = 0
 
@@ -992,7 +1048,15 @@ function scanSourceComments() {
         const hash = raw.indexOf('#')
         const target = (hash >= 0 ? raw.slice(0, hash) : raw).trim()
         // 只判「像个路径」的目标：含 `/`（`[文字](目标)` 这类占位词判不了相对谁）
-        if (isExternal(target) || target === '' || !target.includes('/') || /\s/.test(target)) continue
+        if (isExternal(target) || target === '' || !target.includes('/')) continue
+        // D-019：目标里还有空白 ⇒ 解析不出「相对谁」。成因只有两种：标题引号残缺
+        // （`(...md ")`，`stripTitle` 收不掉）或路径本身含空格。**不静默跳过**——
+        // 静默跳过正是这条盲区的形状：一句带 `../../` 前缀的注释指向已删文档，
+        // D-006 只认反引号、D-010 又被空白挡在门外，于是三条判据一起报 0。
+        if (/\s/.test(target)) {
+          srcD019Bad.push({ rel, line: i + 1, target })
+          continue
+        }
         srcLinksChecked += 1
         const abs = srcDualRoot(file, target)
         if (!abs) {
@@ -1193,6 +1257,10 @@ console.log(
 )
 for (const { rel, line, target } of srcLinkBad) console.log(`  ✗ ${rel}:${line}  [链接](${target})  不存在`)
 for (const { rel, line, target } of srcTickBad) console.log(`  ✗ ${rel}:${line}  \`${target}\`  不存在`)
+for (const { rel, line, target } of srcD019Bad) {
+  console.log(`  ✗ ${rel}:${line}  [链接](${target})  目标里有空白，解析不出相对地址（D-019）`)
+}
+console.log(`D-019 注释链接的目标形态：判定 ${srcLinksChecked} 条，目标带空白 ${srcD019Bad.length} 条`)
 if (srcLinkBad.length > 0 || srcTickBad.length > 0) {
   console.log('\n提示：源码注释里的入链此前无人看（D-001 只读 .md），文档搬家后整批静默失效。处置：')
   console.log('      · 指向**已登记文档**的链接地址不用手改——门禁 gen-doc-refs 会按编号自动接管重算（RF-004），')
@@ -1213,6 +1281,8 @@ process.exit(
     machinePaths.length > 0 ||
     srcLinkBad.length > 0 ||
     srcTickBad.length > 0 ||
+    srcD019Bad.length > 0 ||
+    malformedLinks.length > 0 ||
     taskRefs.length > 0
     ? 1
     : 0

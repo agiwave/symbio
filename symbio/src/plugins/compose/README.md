@@ -86,7 +86,7 @@ compose(verdict)
 | `model` | 缺席 | **缺席** | 用**会话选定的**模型 |
 | `instruction` | 缺席 | **缺席** | 用内置 `INSTRUCTION` |
 
-「要不要用它」仍是调用方的事（`SessionConfig::reply_enabled`）；这两个键管的是**怎么用它**，
+「要不要用它」仍是调用方的事（会话侧的措辞策略，不在这里判）；这两个键管的是**怎么用它**，
 与调用方无关。
 
 **`model` 填的是 provider 条目的 id**（`<根>/model/<id>/`），不是模型名——**温度是条目的参数**

@@ -245,7 +245,7 @@ await api.invoke('vdfs/action',
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
 它把出厂形状与被 [D-048a](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
-形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/004-ref/PROMPT_AB.md`（生成物）——
+形状变换归 `e2e/ab/flatten.mjs`，读数由脚本打到 `tmp/prompt-ab/`（**一次性读数，不入库**）——
 本处只留指路，不复述。
 
 ## 门控接入

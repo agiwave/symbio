@@ -534,3 +534,37 @@ test('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /D-014 不适用/)
 })
+
+// ── D-020：`类型::成员` 的后半段必须在**那个类型**的定义体里 ──────────────
+// 现场：设计文档写着 `Verdict::Unmanned`，可 `Unmanned` 只是同期另一个枚举的变体
+// （轮态那边），`Verdict` 的定义体里从来没有过。D-005 只问「这个名字全仓出现过没有」，
+// 于是同一个名字在错的类型上照样绿灯——**改名后最典型的腐烂形态**。
+const TYPES = {
+  'symbio/src/lib.rs': [
+    'pub struct Verdict { pub ok: bool }',
+    'pub enum Gap { Unmanned, Filled }',
+    'pub trait Cap { fn execute(&self); }',
+    'impl Verdict { pub fn finish(&self) {} }',
+    'pub fn from() -> String { String::from("x") }',
+  ].join('\n'),
+}
+
+test('D-020 成员记在别的类型上 ⇒ 红（D-005 只问「全仓出现过没有」）', () => {
+  const r = audit({ ...TYPES, 'README.md': '结算产出 `Verdict::Unmanned`。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-020 README\.md:1/)
+  assert.match(r.stdout, /Verdict::Unmanned/)
+})
+
+test('D-020 字段 / impl 方法 / trait 方法都算「定义体里有」⇒ 通过（exit 0）', () => {
+  const r = audit({
+    ...TYPES,
+    'README.md': '读 `Verdict::ok`，调 `Verdict::finish`，能力面 `Cap::execute`。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-020 外部类型不判（仓内没有定义体可比，`String::from` 不是它能核对的）', () => {
+  const r = audit({ ...TYPES, 'README.md': '转换走 `String::from`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})

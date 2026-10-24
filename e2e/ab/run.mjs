@@ -31,7 +31,7 @@
 //     node e2e/ab/run.mjs --provider=LMStudio [--corpus=<file>] [--tasks=id1,id2]
 //                         [--repeat=1] [--temperature=0] [--json=<out>] [--dry-run]
 // `--dry-run` 只打印两臂的请求体形状与字节数，**一个请求都不发**（不花任何预算）。
-// 报告默认写 `docs/004-ref/PROMPT_AB.md`（生成物，唯一写者是本脚本）。
+// 报告写 `tmp/prompt-ab/`（一次性读数，**不入库**：它是一次实验的快照，不是项目的现状）。
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +42,7 @@ import { flattenRequest, parseFlatCalls, parseNativeMarkupCalls, hasNativeMarkup
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const REPORT_PATH = join(REPO, 'docs', 'ref', 'PROMPT_AB.md');
+const REPORT_PATH = join(REPO, 'tmp', 'prompt-ab', 'PROMPT_AB.md');
 
 function arg(name, dflt = undefined) {
   const hit = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));

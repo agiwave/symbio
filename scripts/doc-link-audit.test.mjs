@@ -670,6 +670,61 @@ test('D-013：docs/archive/ 历史归档不判（同整体豁免）', () => {
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── D-018：方括号里有仓内路径、却没有目标地址 ────────────────────────────
+// 现场：`scripts/gen-verify-facts.mjs` 的注释里写着 `[|docs/007-task/048.md]`，
+// 那个文档早就删了。D-001 要 `](` 才算链接，D-006 只认反引号，D-010 只扫源码注释
+// ⇒ 三条判据一起报 0，一个指向已删文档的悬空引用躺了几个月。这组用例钉住它会红。
+test('D-018：`[|docs/…]` 这类丢了地址的路径链接 → 失败（D-001 眼里它不是链接）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 [|docs/007-task/048.md] 的处理过程。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-018 畸形链接/)
+  assert.match(r.stdout, /docs\/a\.md:3/)
+  assert.match(r.stdout, /docs\/007-task\/048\.md/)
+})
+
+test('D-018：`[[编号|标题]]` 双括号引用不误报（机制接管，不是丢了地址）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 [[DE-090|能力阶梯]] 与 [[DE-090 §4.1]]。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-018：方括号里没有仓内路径的一律不判（`[D-102]` / `[文字]` 不可能是丢地址）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 [D-102] 与 [文字] 与 `[docs/nope.md]`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// ── D-019：注释链接的目标里带空白（标题引号残缺 / 路径含空格）────────────
+// 现场：一句 `[设计](…/007-task/128-….md ")` —— 标题的收尾引号丢了。`stripTitle`
+// 收不掉它，而旧实现把「目标里有空白」当成「判不了」静默跳过，于是 D-001 / D-006 /
+// D-010 一起报 0。**判不了就已经是错**：相对地址里不可能有空白。
+test('D-019：源码注释里标题引号残缺 → 失败（不再静默跳过）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'symbio/src/x.rs': '// 见 [设计](../../docs/nope.md "某标题)\nfn f() {}\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-019 注释链接的目标形态/)
+  assert.match(r.stdout, /symbio\/src\/x\.rs:1/)
+  assert.match(r.stdout, /nope\.md/)
+})
+
+test('D-019：标题完整 → 通过（剥掉标题后按相对地址判存在性）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'symbio/src/x.rs': '// 见 [设计](../../docs/a.md "某标题")\nfn f() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-019：路径本身含空格（真有其目录）仍判——相对地址里的空白解析不出「相对谁」', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'docs/my dir/b.md': '# B\n',
+    'symbio/src/x.rs': '// 见 [B](../../docs/my dir/b.md)\nfn f() {}\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-019/)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

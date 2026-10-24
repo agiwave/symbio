@@ -74,7 +74,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-005 D-009 D-011 D-012 D-014
+// @codes D-005 D-009 D-011 D-012 D-014 D-020
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative } from 'node:path'
@@ -162,7 +162,7 @@ const isFrontend = (n) => /\.(ts|vue|js)$/.test(n)
 const isTool = (n) => /\.mjs$/.test(n) && !/\.test\.mjs$/.test(n)
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
-console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009 / D-011 / D-012 / D-014） ---')
+console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009 / D-011 / D-012 / D-014 / D-020） ---')
 
 const mdFiles = existsSync(REPO_ROOT) ? collectMd(REPO_ROOT).sort() : []
 if (mdFiles.length === 0) {
@@ -190,6 +190,57 @@ const families = new Map()
 function indexRust (text) {
   for (const m of text.matchAll(identRe)) idents.add(m[0])
 }
+
+// ── D-020 的语料：类型 → **定义体里**的成员名（struct 字段 / enum 变体 / impl 方法）──
+//
+// 为什么不用 `idents` 顶上：那是「整仓文本里出现过」，而 D-005 自己就是这样被绕过去的——
+// 注释里写一句「该字段恒空」，字段名就永远「存在」。核对面必须是**定义体**。
+/** 类型名 → 定义体里出现过的成员名 */
+const typeMembers = new Map()
+function addMembers(type, body) {
+  let set = typeMembers.get(type)
+  if (!set) typeMembers.set(type, (set = new Set()))
+  for (const m of body.matchAll(identRe)) set.add(m[0])
+}
+/** 从 `{` 起配平花括号，返回体内文本（配不上 ⇒ 到文件尾） */
+function braceBody(text, open) {
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}') {
+      depth--
+      if (depth === 0) return text.slice(open + 1, i)
+    }
+  }
+  return text.slice(open + 1)
+}
+/** 抓定义体：`struct X {…}` / `enum X {…}` / `union X {…}` / `impl X {…}`（含泛型与 trait impl） */
+function indexTypeMembers(text) {
+  // 定义体：字段 / 变体
+  for (const m of text.matchAll(/\b(?:struct|enum|union)\s+([A-Za-z_]\w*)[^;{]*\{/g)) {
+    addMembers(m[1], braceBody(text, m.index + m[0].length - 1))
+  }
+  // trait 体：`Capability::execute` 这类指认落在**能力面**上，方法签名就写在 trait 里
+  for (const m of text.matchAll(/\btrait\s+([A-Za-z_]\w*)[^;{]*\{/g)) {
+    addMembers(m[1], braceBody(text, m.index + m[0].length - 1))
+  }
+  // impl 体：方法。`impl Trait for Type` 的成员对**两侧都成立**——调用点写
+  // `Type::method` 时指的是实现，写 `Trait::method` 时指的是契约，两种都在这里出现。
+  for (const m of text.matchAll(/\bimpl\s*(?:<[^>{]*>)?\s*([A-Za-z_][\w:<>,'&\s]*?)\s*\{/g)) {
+    const head = m[1].trim()
+    const body = braceBody(text, m.index + m[0].length - 1)
+    const forAt = head.split(/\s+for\s+/)
+    if (forAt.length === 2) {
+      for (const side of forAt) {
+        const name = side.trim().split(/[<:]/)[0].trim()
+        if (/^[A-Za-z_]\w*$/.test(name)) addMembers(name, body)
+      }
+    } else {
+      const name = head.split(/[<:]/)[0].trim()
+      if (/^[A-Za-z_]\w*$/.test(name)) addMembers(name, body)
+    }
+  }
+}
 /** 工具脚本只回答「这个名字在本仓写过没有」，**不开命名空间**：脚本里的临时常量前缀
  *  （`OUT_REL`）会把 cargo / CI 的环境变量族（`OUT_DIR`）当成「本仓在用」拉进闸门，
  *  而那正是同族闸要挡在门外的一类。 */
@@ -208,6 +259,7 @@ function indexCrossStack (raw) {
 for (const f of rsFiles) {
   const text = readFileSync(f, 'utf8')
   indexRust(text)
+  indexTypeMembers(text)
   indexCrossStack(text)
 }
 for (const f of feFiles) indexCrossStack(readFileSync(f, 'utf8'))
@@ -526,8 +578,10 @@ for (const rel of mdFiles) {
     if (/^#{2,6}\s+D-\d{3}[a-z]?\b/.test(line)) inDecision = true
     else if (/^#{1,2}\s/.test(line)) inDecision = false
     if (inDecision) return
-    const allow = line.match(ALLOW_RE)
-    if (allow && allow[1].trim()) return // 承认通道：理由非空
+    // 承认通道：理由非空才生效。作用域是**本行或前一行**（与 D-006 / D-010 同一条约定）——
+    // 表格行里塞进 HTML 注释会把这一行写花，机制不该逼人为了豁免去破坏排版。
+    const allow = line.match(ALLOW_RE) ?? (i > 0 ? lines[i - 1].match(ALLOW_RE) : null)
+    if (allow && allow[1].trim()) return
     if (HISTORY_RE.test(line)) return // 这行说的是历史
     const tickRe = /`([^`\n]+)`/g
     let m
@@ -552,6 +606,11 @@ for (const rel of mdFiles) {
       const sym = segs[segs.length - 1]
       if (!idents.has(sym)) {
         report(rel, i + 1, 'D-005', `指认的符号在 Rust 源码中不存在：\`${inner}\`——符号改名了，还是路径写错？`)
+      } else if (segs.length === 2 && /^[A-Z]/.test(segs[0]) && typeMembers.has(segs[0]) && !typeMembers.get(segs[0]).has(sym)) {
+        // D-020：类型在本仓有定义体，而第二段不在那个定义体里。
+        // 只判「仓内定义过的类型」——`String::from` 这类外部类型没有定义体可比，不判。
+        report(rel, i + 1, 'D-020',
+          `指认的字段/方法不在 \`${segs[0]}\` 的定义体里：\`${inner}\`——字段删了、改名了，还是记在了别的类型上？`)
       } else {
         refs++
       }

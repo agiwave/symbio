@@ -137,7 +137,6 @@ D-004 判**措辞标记**而不判**叙事**（`曾经` / `已改为` / `修订�
 | 配置项 | [RE-001-CONFIGURATION](004-ref/001-CONFIGURATION.md) | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./004-ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
 | 出厂 prompt 的**形状基线** | [ref/PROMPT_SHAPE.md](./004-ref/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径在 [DE-102](../symbio/src/plugins/session/docs/102-core-loop.md "DE-102-core-loop") |
-| 结构化 vs 拍平的**模型侧对照读数** | [ref/PROMPT_AB.md](./004-ref/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs` |
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [design/005-协议规范.md](003-design/005-协议规范.md "DE-005-协议规范") | — |
 | 系统拓扑（谁挂在谁下面） | [design/004-系统地图.md](003-design/004-系统地图.md "DE-004-系统地图") | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [design/003-数据流与调用链.md](003-design/003-数据流与调用链.md "DE-003-数据流与调用链") | — |
@@ -195,7 +194,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | `docs/001-goal/` | 三个大目标（产品 / 技术 / 工程）与可度量判据 |
 | `docs/002-scene/` | 角色、情境与用户判据 |
 | `docs/003-design/` | **设计**：系统级 0xx（架构 / 机制 / 协议 / 目标形态）+ `verify/`（随设计的可编译验证程序） |
-| `docs/004-ref/` | 权威参考页（含生成物 GATE_CODES / PROMPT_SHAPE / PROMPT_AB / CURRENT） |
+| `docs/004-ref/` | 权威参考页（含生成物 GATE_CODES / PROMPT_SHAPE / CURRENT） |
 | `docs/005-spec/` | 规范条文与判据（每条一个单文档，`## 规范` + `## 判据`） |
 | `docs/006-guide/` | 上手 / 插件开发 / 排障 |
 | `docs/007-task/` | 在办任务（过程类；完成后由提交者删除，`git log` 保留） |

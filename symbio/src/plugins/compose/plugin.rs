@@ -70,7 +70,7 @@ pub struct ComposePlugin {
 impl ComposePlugin {
     /// 工厂方法（满足 `submit_object_creator!` 协议）
     ///
-    /// **不读"要不要用本插件"**：那归调用方（`SessionConfig::reply_enabled`）。
+    /// **不读"要不要用本插件"**：那归调用方（会话侧的措辞策略）。
     /// 这里读的是本插件**自己**的两件事：模型与指令段。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_COMPOSE);
