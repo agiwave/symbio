@@ -46,6 +46,7 @@ import {
   vdfsSessionAddr,
 } from '@/schemas/vdfs'
 import { ChatNode as SessionMessage } from '../schemas/chat_node'
+import { readingSectionOf } from '../schemas/reading'
 import * as SessionList from '../schemas/session_list'
 import type { SessionMetadata } from '../schemas/session_meta'
 
@@ -103,6 +104,8 @@ export async function listSessions(
         metadata: v.metadata ?? {},
         // 选项定义随节点下发（`node.schema`）；清单一次取全，面板零回读
         schema: v.schema,
+        // 上下文水位同样是节点属性：收成方言的一格读数（结构判据见 `readingSectionOf`）
+        context_watermark: readingSectionOf(v.context_watermark),
       }
     })
 }

@@ -5,9 +5,13 @@
 //! 1. **逐字对上旧前端的呈现**——搬口径不改行为，行序、单位、词表都与前端删掉的那四条一致；
 //! 2. **缺数字就少一行，绝不补 0**——「水位已降到 0」是最坏的一种谎报；
 //! 3. **呈现只在出口出现**——没有数字的节点不占 `stats` 格（`skip_serializing` 因此有效）。
+//!
+//! 同一族纪律还管着会话级的**上下文水位**（`attributes.context_watermark`）：
+//! 四个 token 数是事实（住在最近一轮骨架的 `meta.context`），怎么说、比率怎么除
+//! 只在本文件出现一次。
 
-use super::{format_tokens, notice_stats_of, present_message, trigger_label};
-use crate::symbio_core::{chat_node as cm, ReadingSection};
+use super::{context_reading_of, format_tokens, notice_stats_of, present_message, trigger_label};
+use crate::symbio_core::{chat_node as cm, ReadingSection, ReadingTone};
 use serde_json::json;
 
 /// 一条压缩节点（形状 = 折叠叶；压缩的数字住在 `meta`，owner 是
@@ -142,4 +146,117 @@ fn an_unknown_trigger_word_shows_itself_rather_than_a_stale_label() {
     assert_eq!(trigger_label("retry"), "手动重试");
     // 协议加了新档位而词表没跟上时，界面上看得见（原样透出）而不是被旧词盖住。
     assert_eq!(trigger_label("brand_new"), "brand_new");
+}
+
+// ==================== 会话级上下文水位（attributes.context_watermark） ====================
+
+/// 逐行读回（与 [`labels`] 同族——水位这一格与消息上的 `stats` **是同一个方言**，
+/// 所以连读法都不需要第二个实现）。
+fn water_rows(section: &Option<ReadingSection>) -> Vec<(String, String)> {
+    section
+        .as_ref()
+        .map(|s| {
+            s.rows
+                .iter()
+                .map(|r| (r.label.clone(), r.value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 交付出口的**线上形状**（前端读的就是这个）。
+fn wire(section: &Option<ReadingSection>) -> serde_json::Value {
+    serde_json::to_value(section).unwrap_or_default()
+}
+
+#[test]
+fn the_watermark_reads_used_against_limit_and_marks_the_auto_line() {
+    let got = context_reading_of(&json!({
+        "content_tokens": 42_000,
+        "request_tokens": 45_000,
+        "limit_tokens": 128_000,
+        "compress_tokens": 89_600,
+    }));
+    assert_eq!(
+        water_rows(&got),
+        vec![
+            ("已用".to_string(), "45k / 128k".to_string()),
+            ("自动整理".to_string(), "89.6k".to_string()),
+        ]
+    );
+    // 请求级开销单独说出来：换一批工具定义也会挪水位，那不该看起来像历史变长了。
+    assert_eq!(
+        got.as_ref().unwrap().rows[0].hint.as_deref(),
+        Some("本轮请求开头的估算（内容 42k + 请求级 3k）")
+    );
+    assert_eq!(got.as_ref().unwrap().rows[1].tone, ReadingTone::Normal);
+    // 比率在这里除完（前端不再除第二次）。
+    let bar = got.as_ref().unwrap().bar.as_ref().expect("有分母就该有条");
+    assert!(bar.level.unwrap() < 0.36);
+    assert!((bar.marks[0] - 0.7).abs() < 0.001);
+
+    // 线上形状就是宿主方言：`rows` + `bar{level,marks,tone}`，**没有**为水位自造的键。
+    // 自造键（`used_ratio` / `compress_ratio` 那一类）会把业务名写进渲染器——
+    // 换一个产者就得改前端，那正是 `present/reading` 模块文档立起来要挡的事。
+    let v = wire(&got);
+    assert_eq!(
+        v["bar"],
+        json!({ "level": bar.level, "marks": bar.marks, "tone": "normal" })
+    );
+    assert_eq!(v["rows"].as_array().unwrap().len(), 2);
+    for invented in ["used_ratio", "compress_ratio", "watermark", "percent"] {
+        assert!(v.get(invented).is_none(), "方言之外多了自造键 {invented}");
+    }
+    // 分区没有标题：这条读数自己就是那一句，再配一个「上下文水位」是排版噪声。
+    assert!(v.get("title").is_none());
+}
+
+#[test]
+fn crossing_the_auto_line_is_the_producers_call_not_the_frontends() {
+    let got = context_reading_of(&json!({
+        "request_tokens": 96_000,
+        "limit_tokens": 128_000,
+        "compress_tokens": 89_600,
+    }));
+    // 行与条**同时**转色：语气由产者判一次，渲染器不解析值的语义再决定颜色。
+    assert_eq!(got.as_ref().unwrap().rows[1].tone, ReadingTone::Warn);
+    assert_eq!(
+        got.as_ref().unwrap().bar.as_ref().unwrap().tone,
+        ReadingTone::Warn
+    );
+}
+
+#[test]
+fn a_missing_number_loses_its_row_instead_of_becoming_zero() {
+    // 没有上限 ⇒ 「已用」报绝对值，而条**没有分母可画**：整格 `bar` 不出现，
+    // 而不是画一条宽度 0 的条冒充「水位是 0」。
+    let got = context_reading_of(&json!({ "request_tokens": 45_000 }));
+    assert_eq!(
+        water_rows(&got),
+        vec![("已用".to_string(), "45k".to_string())]
+    );
+    assert!(got.as_ref().unwrap().bar.is_none());
+
+    // 一个数都没有 ⇒ 整条读数不存在（前端因此不渲染水位条）。
+    assert!(context_reading_of(&json!({})).is_none());
+    // `limit` 为 0 不能变成除零：那一格按「没有上限」处置。
+    let got = context_reading_of(&json!({ "request_tokens": 1_000, "limit_tokens": 0 }));
+    assert_eq!(
+        water_rows(&got),
+        vec![("已用".to_string(), "1k".to_string())]
+    );
+    assert!(got.as_ref().unwrap().bar.is_none());
+}
+
+#[test]
+fn over_the_limit_the_bar_is_full_but_the_text_stays_the_measured_number() {
+    // 真实失败形态（输入超限）：条形截到满，文本仍报实测的 150k——
+    // 把数也截成 128k 就是把失败读成正常。
+    let got = context_reading_of(&json!({
+        "request_tokens": 150_000,
+        "limit_tokens": 128_000,
+        "compress_tokens": 89_600,
+    }));
+    assert_eq!(water_rows(&got)[0].1, "150k / 128k");
+    assert_eq!(got.as_ref().unwrap().bar.as_ref().unwrap().level, Some(1.0));
 }

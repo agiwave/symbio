@@ -64,6 +64,23 @@ describe('ChatComposer：装配', () => {
     expect(w.find('textarea').exists()).toBe(true)
     expect(optionBar(w).exists()).toBe(true)
   })
+
+  // 水位条排在输入框**上方**：它说的是「这一轮开头有多满」，读它的时机是
+  // 「我要不要发这一句」，所以必须在提交手势之前出现在视野里。
+  // 装配传的是方言（`ReadingSection`），不是「水位」这个业务形状——见 prop 的说明。
+  it('读数在输入框之上（有数才出现）', () => {
+    const meter = {
+      rows: [{ label: '已用', value: '45k / 128k' }],
+      bar: { level: 0.35, marks: [0.7] },
+    }
+    const w = mount(ChatComposer, { props: { meter } })
+    expect(w.find('.reading-meter').exists()).toBe(true)
+    const nodes = w.element.querySelectorAll('.reading-meter, textarea')
+    expect(nodes[0].className).toContain('reading-meter')
+
+    // 草稿态（会话还没落盘）没有读数可比 ⇒ 不出现，而不是出现一条空条
+    expect(mount(ChatComposer).find('.reading-meter').exists()).toBe(false)
+  })
 })
 
 describe('ChatComposer：sessionId 两种模式', () => {

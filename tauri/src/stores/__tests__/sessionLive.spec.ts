@@ -53,6 +53,28 @@ describe('listItemPatchOf：会话节点 → 清单条目就地补丁', () => {
     const out = listItemPatchOf({ title: '' }, item({ id: 's1', metadata: { title: '旧' } }), 'active')
     expect(out.metadata).toEqual({ title: '旧' })
   })
+
+  // 水位与标题/计数同路（都来自 `session_node`），但**保留旧值**的理由不一样：
+  // 一次运行态帧只带变化了的属性，把「这帧没带水位」读成「本会话没有水位」，
+  // 输入区那条水位条会在一次标题更新后凭空消失。
+  it('context_watermark 随节点收敛；这帧没带 → 保留上一次读数', () => {
+    const prev = item({
+      id: 's1',
+      context_watermark: { rows: [{ label: '已用', value: '45k / 128k' }], bar: { level: 0.35 } },
+    })
+    const next = { rows: [{ label: '已用', value: '77k / 128k' }], bar: { level: 0.6 } }
+
+    expect(listItemPatchOf({ title: '', context_watermark: next }, prev, 'active').context_watermark)
+      .toEqual(next)
+
+    expect(listItemPatchOf({ title: '改名了' }, prev, 'active').context_watermark).toEqual(
+      prev.context_watermark,
+    )
+    // 畸形载荷（`rows` 不是数组）同样落回旧值，而不是把一个对象当水位存进去
+    expect(
+      listItemPatchOf({ context_watermark: { rows: '坏' } }, prev, 'active').context_watermark,
+    ).toEqual(prev.context_watermark)
+  })
 })
 
 describe('liveStatusPatchOf：运行态镜像', () => {

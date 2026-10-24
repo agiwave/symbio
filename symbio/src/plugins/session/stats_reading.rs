@@ -18,8 +18,8 @@
 //! 而两边都自称是 SLO。
 
 use crate::symbio_core::{
-    chat_node as cm, fallback_rate, slo_report, Event, ReadingPanel, ReadingRow, ReadingSection,
-    ReadingTone, VisScope,
+    chat_node as cm, fallback_rate, slo_report, Event, ReadingBar, ReadingPanel, ReadingRow,
+    ReadingSection, ReadingTone, VisScope,
 };
 
 use super::stats::SessionStats;
@@ -187,6 +187,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
                 },
             })
             .collect(),
+        bar: None,
     };
 
     // 断点列：事实条数 / 事实源在不在，再加一行种类分布。
@@ -237,6 +238,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     let continuity = ReadingSection {
         title: Some("事实源".into()),
         rows: continuity_rows,
+        bar: None,
     };
 
     // 不变量：违规清单为空 ⇒ 一句「全绿」；非空 ⇒ 一条一行、语气需留意。
@@ -260,6 +262,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
                 ReadingTone::Warn
             },
         }],
+        bar: None,
     };
 
     // 技能：开关与已编译数并排——两种「零技能」靠这一行分辨（关着 = 配置选择，
@@ -280,6 +283,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
             }),
             tone: ReadingTone::Normal,
         }],
+        bar: None,
     };
 
     // 承诺：一条一行读的是清单，面板只报「几条约、几条约没守住」——违约必须
@@ -309,6 +313,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
                 ReadingTone::Normal
             },
         }],
+        bar: None,
     };
 
     ReadingPanel {
@@ -425,7 +430,112 @@ pub(crate) fn notice_stats_of(m: &cm::ChatNode) -> Option<ReadingSection> {
         return None;
     }
     // 分区不给标题：节点自己已经有 `title`（「上下文压缩」），再来一个标题是排版噪声。
-    Some(ReadingSection { title: None, rows })
+    Some(ReadingSection {
+        title: None,
+        rows,
+        bar: None,
+    })
+}
+
+/// 会话级**上下文水位**读数（挂会话节点 `attributes.context_watermark`）。
+///
+/// 入参是 `SessionSummary::context` —— 最近一轮 Turn 骨架 `meta.context` 的原样投影
+/// （四个绝对 token 数，写方 `plugins/loop/context.rs::context_watermark`）。本函数是
+/// 这些数**变成话**的唯一一处，与 [`notice_stats_of`] 同一条纪律：
+///
+/// - 单位与精度只在这里定（[`format_tokens`] 全仓唯一）；
+/// - 产出的是宿主方言的一个 [`ReadingSection`]（行 + 可选 [`ReadingBar`]），**不是**一个
+///   自造形状：几何住在 `bar` 这一格里，渲染器只认「填到这儿 / 在这儿画根线」，
+///   不认「已用」「上限」任何一个词（换一个产者——成本、记忆——前端零改动）；
+/// - 除法只在这里做：比率由出口算好，前端再除一次就是第二套口径，改系数时
+///   只有一半界面跟着变；
+/// - 缺数绝不出行、绝不补 0：存量会话（水位落地之前跑的）没有 `meta.context`，
+///   那时本函数收不到入参（`Option::None`），属性整条不出现，前端因此不渲染水位条。
+///   「上下文是空的」与「这一轮没记录水位」是两件事，不许在界面上混成一件。
+pub(crate) fn context_reading_of(wm: &serde_json::Value) -> Option<ReadingSection> {
+    let num = |key: &str| wm.get(key).and_then(|v| v.as_u64());
+    let content = num("content_tokens");
+    let request = num("request_tokens");
+    let limit = num("limit_tokens");
+    let compress = num("compress_tokens");
+
+    let mut rows: Vec<ReadingRow> = Vec::new();
+    let mut level: Option<f64> = None;
+    let mut marks: Vec<f64> = Vec::new();
+    let mut tone = ReadingTone::Normal;
+
+    // 「已用」一行带上下限：水位条要表达的是「离顶还有多远」，只报分子等于让用户
+    // 自己找一个他看不见的分母。
+    match (request, limit) {
+        (Some(used), Some(cap)) if cap > 0 => {
+            level = Some(ratio(used, cap));
+            // 请求级开销 = 两者之差：把它单独说出来，用户才知道「历史没长、
+            // 但换一批工具定义也会把水位推上去」这件事长什么样。
+            let hint = match content {
+                Some(body) => format!(
+                    "本轮请求开头的估算（内容 {} + 请求级 {}）",
+                    format_tokens(body),
+                    format_tokens(used.saturating_sub(body))
+                ),
+                None => "本轮请求开头的估算，含 system prompt 与工具定义".to_string(),
+            };
+            rows.push(ReadingRow {
+                label: "已用".into(),
+                value: format!("{} / {}", format_tokens(used), format_tokens(cap)),
+                hint: Some(hint),
+                tone: ReadingTone::Normal,
+            });
+        }
+        (Some(used), _) => rows.push(row("已用", format_tokens(used))),
+        (None, Some(cap)) => rows.push(row("上限", format_tokens(cap))),
+        (None, None) => {}
+    }
+
+    // 参考线与说明它的那一行**一起下发**：`marks` 里那根线是什么，只有紧跟着这行字
+    // 说得清——对应关系住在产者，渲染器不参与命名。
+    if let (Some(used), Some(at), Some(cap)) = (request, compress, limit) {
+        if cap > 0 {
+            marks.push(ratio(at, cap));
+            // 语气由产者判（越线 = 需留意），渲染器不解析值的语义再决定颜色。
+            tone = if used >= at {
+                ReadingTone::Warn
+            } else {
+                ReadingTone::Normal
+            };
+            rows.push(ReadingRow {
+                label: "自动整理".into(),
+                value: format_tokens(at),
+                hint: Some("越过这条线后端会自动整理历史（无需你操作）".into()),
+                tone,
+            });
+        }
+    }
+
+    if rows.is_empty() {
+        return None;
+    }
+    // 分区不给标题：这条读数自己就是那一句（再配一个「上下文水位」标题是排版噪声）。
+    // 没有分母也没有参考线 ⇒ `bar` 整格不出现：渲染器照常把行排完，但**不画一条
+    // 宽度 0 的条**冒充「水位是 0」——缺数与读数是两件事。
+    let bar = if level.is_none() && marks.is_empty() {
+        None
+    } else {
+        Some(ReadingBar { level, marks, tone })
+    };
+    Some(ReadingSection {
+        title: None,
+        rows,
+        bar,
+    })
+}
+
+/// 条形几何：分子 / 分母，**截到 1.0**。
+///
+/// 截顶是因为这条线只画「离顶还有多远」：请求超出上限是真实的失败形态
+/// （`InputOverLimit`），但把条形画成 130% 只会让界面溢出，而那件事已经有
+/// 失败节点与告警在说。文本值不截——`已用` 那一行报的始终是实测的数。
+fn ratio(part: u64, whole: u64) -> f64 {
+    (part as f64 / whole as f64).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

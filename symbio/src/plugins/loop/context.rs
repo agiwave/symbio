@@ -225,6 +225,51 @@ pub async fn estimate_request_overhead(
     estimate_overhead_with_tools(system_prompt, &tools)
 }
 
+/// 自动压缩阈值（token）——**唯一出处**。
+///
+/// 触发判定（[`should_start_compression`]）与交给前端的读数都从这里取：系数只在
+/// 本模块出现一次，下游「自己乘一遍 0.7」就是第二套口径，而它会在改系数那天
+/// 静默失真。
+fn compression_threshold_tokens(context_limit: usize) -> usize {
+    (context_limit as f64 * COMPRESSION_TOKEN_THRESHOLD) as usize
+}
+
+/// 本轮请求开头的**上下文水位**——四个绝对 token 数，进 Turn 骨架节点的
+/// `meta.context`（载荷键的读方是 session 的 `stats_reading::context_reading_of`）。
+///
+/// ## 为什么是「本轮请求开头」而不是「此刻」
+///
+/// 水位是**请求级事实**：它是「这一体发出去时有多大」的一次测量，只在轮开头算
+/// （`prepare_turn_inputs` 的 ②③④）。轮内工具结果不断长进来，中途没有一个时刻
+/// 存在「当前水位」这个数——造一个每几秒重估一次的数会把估算成本请进读路径，
+/// 而它自报的精度并不会更高。
+///
+/// ## 四个数都是**绝对值**，一个比率都不带
+///
+/// `request / limit` 这种除法留给出口：出口只除一次（`format_tokens` 同一个函数里），
+/// 而前端拿到比率又会再印一遍文案，两处各自排版必然漂移。系数也不写死在前端——
+/// 它跟着 `compress_tokens` 这一个数走，改 0.7 不需要动前端。
+///
+/// ⚠️ **估算，不是实测**：`CalibratedTokenizer` 的启发式 × provider 用量反馈校准，
+/// 与真实计费 token 有偏差。所以读数该说的是「够不够、离自动整理还差多少」，
+/// 不是「花了多少」——后者归成本台账（`cost_ledger`）。
+pub fn context_watermark(
+    messages: &[ChatNode],
+    overhead_tokens: usize,
+    context_limit: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        // 内容水位：会话消息本身（不含请求级开销）。与压缩快照的 `post_tokens`
+        // 同一个口径，迟滞判定用的就是它。
+        "content_tokens": estimate_context_tokens(messages, 0) as u64,
+        // 请求水位：内容 + system prompt + 全部工具 schema——真正发给模型的那一体积，
+        // 与阈值相比的是它（见 `should_start_compression`）。
+        "request_tokens": estimate_context_tokens(messages, overhead_tokens) as u64,
+        "limit_tokens": context_limit as u64,
+        "compress_tokens": compression_threshold_tokens(context_limit) as u64,
+    })
+}
+
 /// 检查是否需要压缩，返回是否应该开始压缩。
 ///
 /// `overhead_tokens`：system prompt + 工具定义等请求级固定开销，必须计入。
@@ -242,7 +287,7 @@ pub fn should_start_compression(
         return true;
     }
     let current = estimate_context_tokens(messages, overhead_tokens);
-    let threshold = (context_limit as f64 * COMPRESSION_TOKEN_THRESHOLD) as usize;
+    let threshold = compression_threshold_tokens(context_limit);
 
     if current < threshold {
         return false;

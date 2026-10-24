@@ -126,6 +126,7 @@ pub(crate) struct TurnInputs {
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
 /// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，见 [`apply_compaction`]）
 /// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩的唯一响应点）
+///    - 3′. 紧随压缩：取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
@@ -152,14 +153,25 @@ pub(crate) async fn prepare_turn_inputs(
     // ── ③ 压缩（收口 ③：自动语义压缩，唯一响应点）───────────────────────────
     apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
 
+    // ── ③′ 取本轮的上下文水位（压缩**之后**：量的是这一轮真正发出去的那一体）──
+    // 只在这里算一次，随 ④ 的骨架挂进 `meta.context`；判据是「一个请求级事实挂在
+    // 它所属的那一轮上」，不是「前端要轮询」。取不到也不算异常：没有水位
+    // ⇒ 前端不渲染水位条，而不是补一个 0。
+    let watermark = context::context_watermark(
+        &context.messages,
+        overhead_tokens,
+        orchestrator.context_limit as usize,
+    );
+
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
     // 续写幕复用原 Turn 根（d）：那个骨架在本轮首幕已经发过，再发一次
     // 只会让同一个 id 重生一条「流式中」的根，把已完成的卡打回运行态。
+    // 续写幕也就不再补水位——首幕那条 `meta.context` 是这一轮的唯一水位读数。
     let root_id: String = match turn.resume_root.take() {
         Some(root) => root,
         None => {
             let root = llm_short_id();
-            emit_streaming_start(sink, &root, Some(turn.request_round)).await;
+            emit_streaming_start(sink, &root, Some(turn.request_round), Some(watermark)).await;
             root
         }
     };

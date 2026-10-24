@@ -147,6 +147,31 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
     await expect(listSessions()).resolves.toEqual([])
   })
 
+  // 上下文水位是**后端在交付出口排好的读数**（`stats_reading.rs::context_reading_of`），
+  // 形状就是宿主方言的一格 `ReadingSection`（行 + 可选 `bar` 几何）——前端不认业务键，
+  // 只按结构收口（`readingSectionOf`）。
+  // 这条钉的是「键名一漂就静默没有水位条」：侧栏看不到水位不会被当成 bug 报上来。
+  it('context_watermark 收成方言的一格读数；畸形载荷收成缺省（不抛错）', async () => {
+    const reading = {
+      rows: [{ label: '已用', value: '45k / 128k' }],
+      bar: { level: 0.35, marks: [0.7], tone: 'normal' },
+    }
+    mockList([
+      sessionItem({ context_watermark: reading }),
+      sessionItem({ name: 'no-wm' }),
+      sessionItem({ name: 'broken', context_watermark: { rows: '不是数组', bar: { level: 0.5 } } }),
+      sessionItem({ name: 'also-broken', context_watermark: '一个字符串' }),
+    ])
+
+    const out = await listSessions()
+
+    expect(out[0].context_watermark).toEqual(reading)
+    // 行才是这一格的必填项：`rows` 不成形就整条作废，**不留**一个「有条没字」的半截读数
+    expect(out[1].context_watermark).toBeUndefined()
+    expect(out[2].context_watermark).toBeUndefined()
+    expect(out[3].context_watermark).toBeUndefined()
+  })
+
   // 有界列表是**可选能力**：不传参时请求形状必须与从前逐字节一致。
   // 曾经 `listSessions()` 默认就带 `{ limit: 100 }`，既有断言（上面那条
   // toHaveBeenCalledWith(path)）因此失败——这条把这个契约钉死。

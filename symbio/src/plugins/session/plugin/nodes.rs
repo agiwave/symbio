@@ -110,8 +110,8 @@ impl SessionRuntime {
 /// 存储层保存时算好的**投影**（`SessionSummary::of`），呈现口径因此单点。
 ///
 /// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
-/// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
-/// `vdfs/list` 一次取全。
+/// `meta_tags`，以及 `context_watermark` 那一格读数）——它们是**场景数据**，
+/// VDFS 只透传；会话清单由此可直接用 `vdfs/list` 一次取全。
 ///
 /// 运行态由 [`SessionRuntime`] 投影：`status` 是运行态本身，`outcome` / `error`
 /// 是它的两个场景属性（消费者据此选提示音音色、渲染会话级错误条）。
@@ -141,6 +141,19 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> VdfsNode 
     }
     if let Some(warning) = &rt.warning {
         let _ = n.attributes.insert("warning".to_string(), json!(warning));
+    }
+    // 上下文水位（**读数在这里现算**，存的只是四个 token 数）：前端的水位条因此
+    // 与消息上的 `stats` 行同一个口径、同一个渲染器，自己不做一次除法。
+    // 没有水位 = 整条属性不出现（「还没记录过」与「水位是 0」是两件事）。
+    if let Some(wm) = s.context.as_ref() {
+        if let Some(reading) = super::super::stats_reading::context_reading_of(wm) {
+            // 序列化在这里不可能失败（行 + 比率都是自有类型）。真失败了说明方言被改坏，
+            // 那由 `stats_reading.test.rs` / `nodes.test.rs` 断言，不在交付路径上炸进程：
+            // 少这一格属性的后果就是前端整条不渲染，与「还没记录过」同一个诚实形状。
+            if let Ok(value) = serde_json::to_value(reading) {
+                let _ = n.attributes.insert("context_watermark".to_string(), value);
+            }
+        }
     }
     n
 }

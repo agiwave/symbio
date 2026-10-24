@@ -430,6 +430,11 @@ const STRUCT_SETS = [
     ts: { file: READING_TS, interface: 'ReadingSection' },
   },
   {
+    what: '读数条形几何（[D-137]：会话上下文水位复用的通用几何槽，渲染器只认 level/marks/tone）',
+    rust: { file: READING_RS, struct: 'ReadingBar' },
+    ts: { file: READING_TS, interface: 'ReadingBar' },
+  },
+  {
     what: '读数面板（[T-202]）',
     rust: { file: READING_RS, struct: 'ReadingPanel' },
     ts: { file: READING_TS, interface: 'ReadingPanel' },

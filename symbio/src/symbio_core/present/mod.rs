@@ -28,4 +28,4 @@ pub use detail::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
-pub use reading::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+pub use reading::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};

@@ -110,6 +110,70 @@ fn session_node_projects_runtime_state() {
     );
 }
 
+/// 会话节点的**上下文水位**属性：事实是骨架上的四个数，属性上是出口现排的读数。
+///
+/// 钉两条：
+/// 1. 存的是数据（`SessionSummary::context` = 最近一轮骨架的 `meta.context`），
+///    属性里出现的是**宿主方言的一格读数**（排好的行 + 已除好的 `bar` 几何）——
+///    前端拿到就渲染，不认业务词也不再除第二次；
+/// 2. 没跑过一轮 / 存量会话没有水位 ⇒ 整条属性不出现（不是 0，也不是空对象）。
+#[test]
+fn session_node_publishes_the_context_watermark_reading() {
+    let mut s = Session::new("abc");
+    // 一轮骨架（写方 = loop 的 `emit_streaming_start`）+ 它的子节点（不带水位）
+    s.messages.push(cm::ChatNode {
+        id: "turn1".into(),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        meta: Some(json!({
+            "turn": 1,
+            "context": {
+                "content_tokens": 42_000,
+                "request_tokens": 45_000,
+                "limit_tokens": 128_000,
+                "compress_tokens": 89_600,
+            }
+        })),
+        ..Default::default()
+    });
+    s.messages.push(cm::ChatNode {
+        id: "body1".into(),
+        parent_id: Some("turn1".into()),
+        msg_type: Some(cm::NodeKind::Body),
+        content: Some(cm::MessageContent::Text("好的".into())),
+        ..Default::default()
+    });
+
+    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    let wm = node
+        .attributes
+        .get("context_watermark")
+        .expect("带水位的会话必须发布这一格属性");
+    assert_eq!(wm["rows"][0]["label"], "已用");
+    assert_eq!(wm["rows"][0]["value"], "45k / 128k");
+    assert_eq!(wm["rows"][1]["value"], "89.6k");
+    // 比率由出口除好，装在方言的 `bar` 格里：前端只把它当条形几何用。
+    assert!(wm["bar"]["level"].as_f64().unwrap() < 0.36);
+    assert!((wm["bar"]["marks"][0].as_f64().unwrap() - 0.7).abs() < 0.001);
+
+    // 子节点不带 `meta.context` ⇒ 扫描取到的仍是骨架那一格（不是最后一个节点）
+    assert_eq!(
+        SessionSummary::of(&s).context,
+        Some(json!({
+            "content_tokens": 42_000,
+            "request_tokens": 45_000,
+            "limit_tokens": 128_000,
+            "compress_tokens": 89_600,
+        }))
+    );
+
+    // 没有水位的历史 ⇒ 属性整条不存在
+    let empty = session_node(
+        &SessionSummary::of(&Session::new("abc")),
+        &SessionRuntime::idle(None),
+    );
+    assert_eq!(empty.attributes.get("context_watermark"), None);
+}
+
 /// 会话内部寻址（S6/S16）：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
 /// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]` / `<id>/_run/<op>`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。

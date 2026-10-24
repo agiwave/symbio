@@ -12,6 +12,7 @@
  */
 
 import { isWorkingStatus, type SessionOutcome } from '@/schemas/vdfs'
+import { readingSectionOf } from '@/schemas/reading'
 import { isBlankContentNode, isInProgressMessage } from './sessionTranscript'
 import type { ChatNode } from '@/schemas/chat_node'
 import type { SessionListItem } from '@/services/session'
@@ -84,7 +85,7 @@ export interface SessionRuntime {
  * 场景扩展字段（flatten 到顶层），不在 `VdfsNode` 的声明键里，只有索引签名能取到。
  */
 export function listItemPatchOf(
-  node: { title?: unknown; updated_at?: number; message_count?: unknown },
+  node: { title?: unknown; updated_at?: number; message_count?: unknown; context_watermark?: unknown },
   cur: SessionListItem,
   status: string | undefined,
 ): SessionListItem {
@@ -95,6 +96,9 @@ export function listItemPatchOf(
     updated_at: node.updated_at ?? cur.updated_at,
     message_count: typeof node.message_count === 'number' ? node.message_count : cur.message_count,
     metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
+    // 水位随运行态帧一起到位（一轮收束 = 一次水位更新）；节点没带就保留上一次的值，
+    // 把它当「没有水位」会让侧栏那条水位条在一次标题更新后凭空消失。
+    context_watermark: readingSectionOf(node.context_watermark) ?? cur.context_watermark,
   }
 }
 

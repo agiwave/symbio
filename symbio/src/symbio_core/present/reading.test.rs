@@ -60,6 +60,7 @@ fn accessors_count_nested_rows_and_spot_warnings() {
                     hint: None,
                     tone: ReadingTone::Normal,
                 }],
+                bar: None,
             },
             ReadingSection {
                 title: None,
@@ -77,6 +78,7 @@ fn accessors_count_nested_rows_and_spot_warnings() {
                         tone: ReadingTone::Normal,
                     },
                 ],
+                bar: None,
             },
         ],
     };

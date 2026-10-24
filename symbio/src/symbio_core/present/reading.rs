@@ -11,7 +11,9 @@
 //!
 //! ## 形状里没有任何业务语义
 //!
-//! 分区 / 行 / 标签 / 值 / 口径提示——不含「会话」「档位」「兜底」任何一个词。
+//! 分区 / 行 / 标签 / 值 / 口径提示 / 条形几何——不含「会话」「水位」「档位」「兜底」
+//! 任何一个词。产者要说「到这条线就该接手」，就下发一根参考线，而不是让渲染器
+//! 去猜哪一个是分母。
 //! 一期只有 `session/stats` 一个产者，但换一个产者（成本、记忆、任何只读路由）
 //! 前端**零改动**。这是它与「给 stats 写一个专用组件」的分界。
 //!
@@ -58,15 +60,42 @@ pub struct ReadingRow {
     pub tone: ReadingTone,
 }
 
+/// 一条**几何呈现**（分区可选的一格）：填充位置 + 若干参考线位置。
+///
+/// 里面全是产者**已经除好的 0..1 比率**，不是留给渲染器再除一次的分子分母——
+/// 除法一旦有两处，改系数就只有一半界面跟着变（表现为「界面上还没到线，后端
+/// 已经动手」）。
+///
+/// ## 它是呈现提示，不是新事实
+///
+/// 不认这一格的渲染器照常只排 [`ReadingSection::rows`]，条与参考线**不出现**。
+/// 渲染器因此不需要认识「水位」「成本」任何一个词——它只画「填到这儿」和
+/// 「在这儿画一根线」；每根线**是什么**由同分区的某一行说明，对应关系住在产者。
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ReadingBar {
+    /// 填充到的位置。缺省 = 没有分母，条不表态（画成空，而不是补一个数）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<f64>,
+    /// 参考线位置（零到多条，按产者给的顺序画）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<f64>,
+    /// 语气（缺省 = 平常）：越线与否只有拿着数的产者知道，渲染器不解析值的语义。
+    #[serde(default)]
+    pub tone: ReadingTone,
+}
+
 /// 一个分区：标题可选，行必填。
 ///
 /// 标题可选是因为存在「不该有标题的扁平读数」——为一个三行的面板硬造
 /// 「概要」二字的分区标题，是排版噪声不是信息。
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ReadingSection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub rows: Vec<ReadingRow>,
+    /// 条形几何（可选）——见 [`ReadingBar`]。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bar: Option<ReadingBar>,
 }
 
 /// 一份读数面板：标题 + 若干分区。
@@ -74,7 +103,7 @@ pub struct ReadingSection {
 /// **空 sections 是合法值**（「没有可报的」），不是错误——前端渲染空态，
 /// 不渲染错误。这与 `has_wal = false` 时各列为「有据的零」是同一条判定：
 /// 没有数与读不到是两件事，形状必须分得开。
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ReadingPanel {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

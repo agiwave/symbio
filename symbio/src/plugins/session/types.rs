@@ -95,6 +95,14 @@ pub struct SessionSummary {
     pub message_count: usize,
     pub summary: Option<String>,
     pub meta_tags: Vec<String>,
+    /// 最近一轮的**上下文水位**（[`latest_context_watermark`] 的原样投影，四个 token 数）。
+    ///
+    /// 与 `summary` / `meta_tags` 同一族：`save` 时算好、随元数据落盘，清单因此
+    /// 不必读消息。存量文件没有这一格 ⇒ `None`（`#[serde(default)]`）。
+    /// 这里存的是**数据**；它怎么说（单位、语气、比率）在交付出口现算
+    /// （`stats_reading::context_reading_of`），呈现不是事实。
+    #[serde(default)]
+    pub context: Option<serde_json::Value>,
 }
 
 impl SessionSummary {
@@ -109,8 +117,26 @@ impl SessionSummary {
             message_count: s.messages.len(),
             summary: derive_session_summary(&s.messages),
             meta_tags: session_meta_tags(&s.metadata, s.messages.len()),
+            context: latest_context_watermark(&s.messages),
         }
     }
+}
+
+/// 最近一轮的上下文水位 = 从尾部往前**第一条**带 `meta.context` 的节点载荷。
+///
+/// 写方是 loop 的 `emit_streaming_start`（一轮一条 Turn 骨架，轮开头取一次数），
+/// 所以「最后一条带水位的节点」就是**最近一次真实发出去的请求**的那一体积。
+///
+/// 只认对象形态：`None` 表示「这个会话还没记录过水位」（存量会话 / 还没跑过一轮），
+/// 而不是「水位是 0」——下游因此整条不出现这一格，前端不渲染水位条。
+pub fn latest_context_watermark(messages: &[ChatNode]) -> Option<serde_json::Value> {
+    messages.iter().rev().find_map(|m| {
+        m.meta
+            .as_ref()
+            .and_then(|meta| meta.get("context"))
+            .filter(|v| v.is_object())
+            .cloned()
+    })
 }
 
 /// 会话数据

@@ -94,7 +94,7 @@ pub(crate) use projection::conation::ConationView;
 pub(crate) use projection::span::{span, SpanView};
 // 读数面板方言（P4）：后端下发描述、前端零业务知识渲染。同族——消费方在两个
 // 前端（Tauri + CLI），都必须经根路径拿类型，不能深引 `schemas` 域目录。
-pub use present::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+pub use present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 pub use projection::transcript::transcript;
 // 结构化 prompt 消息（D-048a）：core 的**最小结构化出口**——角色、正文、
 // `tool_call_id`、`tool_calls`。线格式（`ChatNode`）由 adapter 边界翻译，

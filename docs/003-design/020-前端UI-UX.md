@@ -42,7 +42,6 @@ impl: partial
 | 会话多开 | 单 `activeId`，切会话靠重挂载；真多标签未做 | §3 P1-4（高档）、§5 边界 |
 | 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
 | 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
-| 上下文水位 | 输入区不显示「已用 / 上限 / 压缩阈值」，压缩只有后端入口 | §3 P2-1 |
 | 本会话动过哪些文件 | `<根>/session/<id>/workdir` 未进聊天界面，没有「变更」面板 | §3 P2-2 |
 | 工具授权 | 只有「同意 / 拒绝」两键，没有「本会话放行」分级 | §3 P2-3 |
 | 用量与成本 | 零用量面：会话与模型条目都不显示 token 累计 | §3 P2-4 |
@@ -170,8 +169,9 @@ impl: partial
 
 ### P2 — 信任与可控（建议第三批，差异化）
 
-- **P2-1 上下文水位可见**：输入框上方一条细水位条（已用 / 上限 / 压缩阈值），
- 临近阈值给「压缩」入口 —— 复用已有的 `context_compact`。后端已暴露该工具，前端零可见性。
+- **P2-1 上下文水位可见** ✅ 已落地（见 §11）—— 输入区上方一条细水位条：本轮请求开头的估算 / 上限 / 自动整理线，
+ 条上的刻度就是「后端会在这里接手」的那条线。**不给「压缩」入口**：手动重试只由失败压缩节点下发，
+ 一条健康的水位线后面没有可点的东西（裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README")）。
 - **P2-2 本会话动过哪些文件**：`<根>/session/<id>/workdir` 已存在但未进聊天界面。
  加一个可折叠「变更」面板，diff 复用 `CodeEditor.vue`。这是 Agent 类产品的核心 UX。
 - **P2-3 工具授权分级**：`UserPromptNode.vue` 有 approve/reject 但无「本次会话放行」→ 高频打扰。
@@ -240,9 +240,9 @@ impl: partial
 | P3（两小项） | 骨架屏替代「加载中…」文字；消息节点头键盘可达 | `components/common/SkeletonBlock.vue`、`VdfsCardSkeleton.vue`；`NodeShell.vue` 的 `role="button"` + 键位 |
 
 **明确仍未做**（提案状态不变）：P1-4 的高档（真多标签）、
-P2-1 上下文水位、P2-3 授权分级、P2-4 用量成本、P2-5 分支切换。
-（P0-2 引导、P1-1 命令面板、P1-2 快捷键体系、P1-3a 历史 DOM 上限**已落地**，
-事实只写在 §10 一处——已实现项同时挂在「未做」清单和「已实现」表上，
+P2-3 授权分级、P2-4 用量成本、P2-5 分支切换。
+（P0-2 引导、P1-1 命令面板、P1-2 快捷键体系、P1-3a 历史 DOM 上限**已落地**（§10），
+第三批的 P2-1 上下文水位**已落地**（§11）——已实现项同时挂在「未做」清单和「已实现」表上，
 两处各说一遍就必然漂移。
 Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不做，见 §3 P1-2 / P1-3。）
 
@@ -412,3 +412,34 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
  换算与还原只有 `useChatScroll` 一处实现（贴底判定读的是同一个数——分两处写就会出现
  「界面上算在底部、存下来却按不在底部还原」）。它与**窗口条数**成对：窗口决定 DOM 里有
  多少内容，位置决定落在这段内容的哪一处，只还原其一会落到窗口顶部。
+
+---
+
+## 11. 已实现：信任面（第三批，进行中）
+
+| 内容 | 实现落点 |
+|---|---|
+| P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
+
+**本节的判据**：
+
+1. **一条属性的实时性来自「交付出口共用」，不是来自轮询**。水位经 `session_node` 出来，而
+   `vdfs/stat` / `vdfs/list` / 运行态帧三条路径共用这一个构造点 ⇒ 前端在**已经有**的那次回包里
+   收到它（`listItemPatchOf` 就地补丁），零新增请求。反过来说，为「实时」加一条 `stat` 专用回读
+   会把热路径请进来，而它买到的东西这个构造点已经白送。
+2. **呈现所需的换算住在交付出口，不住在组件**。条的填充与参考线是后端除好的 0..1 比率，
+   组件只做 `× 100` 这个 ratio→% 的单位换算；阈值系数由同一个函数同时喂压缩触发与出口读数。
+   前端一旦自己写 `used > 0.7 * limit`，界面上的刻度就和后端的动手时机成了两笔账，漂了表现为
+   「还没到刻度，历史已经变短」。同族纪律：[D-111](../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")。
+3. **新能力优先复用既有方言，落不进去就扩方言，不自造形状**（[DE-019 前端机制化](019-前端机制化.md "DE-019-前端机制化")的直接应用）。
+   这条线**不写成 `{ used_ratio, compress_ratio }` 两个业务键**：业务键让渲染器认识「已用」与
+   「压缩线」，换一个产者（成本、记忆）就得改前端，而这正是 `present/reading` 的模块文档立起来
+   要挡的事。落不进去的那一格因此**扩方言**：`ReadingBar { level, marks, tone }` 是一个通用几何槽，
+   里面没有一个主题词，`marks` 支持任意多条参考线，不认它的渲染器照常只排行（几何是呈现提示，不是新事实）。
+   跨栈镜像同步登记这一对（`protocol-mirror-audit` D 组），漂移即红。
+4. **缺数就整条不出现**。这一格缺省的含义是「本会话还没记录水位」（存量会话 / 一轮没跑完），
+   补 0 会把它读成「上下文是空的」；同理后端一侧缺一个数字就少一行、没有分母就不发 `bar`，
+   绝不为凑齐四行编一个数（见 `stats_reading.test.rs`）。
+5. **不给这条线配「压缩」按钮**。提案原文写着「复用已有的 `context_compact`」，那句话随
+   [D-072](../../symbio/src/plugins/session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README") 一起过期：自动整理由后端判，手动重试只由**失败的压缩节点**下发，一条健康的水位线
+   后面没有任何可点的东西。入口不补齐不是缺口——把不存在的能力画成按钮，用户按下才发现界面在骗他。

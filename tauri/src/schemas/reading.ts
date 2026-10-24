@@ -36,10 +36,28 @@ export interface ReadingRow {
   tone?: ReadingTone
 }
 
+/**
+ * 一条**几何呈现**（分区的可选一格）：填充位置 + 若干参考线位置。
+ *
+ * 全是产者**已经除好的 0..1 比率**——渲染器只做 `ratio → %` 的单位换算，不除第二次
+ * （除法有两处，改系数就只有一半界面跟着变）。每根线**是什么**由同分区的某一行说明，
+ * 对应关系住在产者：这里不出现「水位」「阈值」「预算」任何一个业务词。
+ */
+export interface ReadingBar {
+  /** 填充到的位置（缺省 = 没有分母，条不表态，而不是补一个 0） */
+  level?: number
+  /** 参考线位置（零到多条，按产者给的顺序画） */
+  marks?: number[]
+  /** 语气（缺省 = normal）：着色由产者判，渲染器不解析值的语义 */
+  tone?: ReadingTone
+}
+
 /** 一个分区（标题可选）。 */
 export interface ReadingSection {
   title?: string
   rows: ReadingRow[]
+  /** 条形几何（可选）——不认它的渲染器照常只排行 */
+  bar?: ReadingBar
 }
 
 /** 一份读数面板。空 sections 是合法值（「没有可报的」），前端渲染空态而非错误。 */
@@ -52,6 +70,20 @@ export interface ReadingPanel {
 /** 分区里的行总数（含嵌套）；空面板 = 0。 */
 export function panelRowCount(panel: ReadingPanel): number {
   return (panel.sections ?? []).reduce((n, s) => n + s.rows.length, 0)
+}
+
+/**
+ * 边界收口：把**任意来源**的一个 `unknown`（节点属性 / 响应字段）收成可用的一格读数，
+ * 认不出形状就 `undefined`。
+ *
+ * 只认**结构**（`rows` 是数组），不认业务词：产者多一行少一行都不需要改这里，
+ * 而一个畸形载荷（`rows` 不是数组）在这里就被挡掉，不会到渲染时才炸。
+ */
+export function readingSectionOf(raw: unknown): ReadingSection | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const v = raw as Record<string, any>
+  if (!Array.isArray(v.rows)) return undefined
+  return v as ReadingSection
 }
 
 /** 有没有「需留意」的行——前端据此决定标题处的提示点，不解析值的语义。 */

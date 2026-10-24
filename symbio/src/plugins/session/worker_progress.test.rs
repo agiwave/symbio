@@ -264,6 +264,7 @@ fn sub(id: &str, title: &str, message_count: usize) -> SessionSummary {
         message_count,
         summary: None,
         meta_tags: Vec::new(),
+        context: None,
     }
 }
 

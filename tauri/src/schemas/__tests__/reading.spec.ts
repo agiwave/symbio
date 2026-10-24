@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { panelHasWarn, panelRowCount, type ReadingPanel } from '../reading'
+import { panelHasWarn, panelRowCount, readingSectionOf, type ReadingPanel } from '../reading'
 
 /**
  * reading 方言的判据。
@@ -57,5 +57,27 @@ describe('panelHasWarn', () => {
 
   it('空面板 ⇒ 假', () => {
     expect(panelHasWarn({ title: 't' })).toBe(false)
+  })
+})
+
+describe('readingSectionOf：任意来源的一格读数在边界收成可用形状', () => {
+  it('认结构不认业务词：行 + 可选 `bar` 原样收下来', () => {
+    const raw = { rows: [{ label: '已用', value: '45k / 128k' }], bar: { level: 0.35, marks: [0.7] } }
+    expect(readingSectionOf(raw)).toEqual(raw)
+  })
+
+  it('产者多一行少一行、换一个主题都照收（本判据不为「水位」而写）', () => {
+    expect(readingSectionOf({ rows: [{ label: '成本', value: '$3' }] })).toEqual({
+      rows: [{ label: '成本', value: '$3' }],
+    })
+  })
+
+  // 收口只有一条判据：`rows` 是不是数组。畸形载荷在这里就挡掉，而不是到渲染时才炸。
+  it('`rows` 不成形 ⇒ undefined（不留「有条没字」的半截读数）', () => {
+    expect(readingSectionOf(undefined)).toBeUndefined()
+    expect(readingSectionOf(null)).toBeUndefined()
+    expect(readingSectionOf('一个字符串')).toBeUndefined()
+    expect(readingSectionOf({ bar: { level: 0.5 } })).toBeUndefined()
+    expect(readingSectionOf({ rows: '不是数组', bar: { level: 0.5 } })).toBeUndefined()
   })
 })

@@ -1,8 +1,9 @@
 <!--
-  ChatComposer — 会话输入区的**唯一装配**（输入框 + 选项行）
+  ChatComposer — 会话输入区的**唯一装配**（水位 + 输入框 + 选项行）
 
-  输入区在任何地方都是这两件一起出现，且顺序、叠加关系固定：
+  输入区在任何地方都是这几件一起出现，且顺序、叠加关系固定：
 
+    ReadingMeter    一格读数（后端方言；缺数整条不渲染）
     ChatInputArea   文本 / 图片 / 发送键
     ChatOptionBar   级联选项行（工作目录 / 智能体 / 模型 / 模式 / 风险等级…）
 
@@ -41,6 +42,7 @@
 -->
 <template>
   <div class="chat-composer">
+    <ReadingMeter :section="meter" />
     <ChatInputArea
       ref="inputRef"
       v-model="text"
@@ -63,8 +65,10 @@
 import { ref } from 'vue'
 import ChatInputArea from './ChatInputArea.vue'
 import ChatOptionBar from './ChatOptionBar.vue'
+import ReadingMeter from '../common/ReadingMeter.vue'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
+import type { ReadingSection } from '@/schemas/reading'
 
 withDefaults(
   defineProps<{
@@ -84,6 +88,15 @@ withDefaults(
     values?: Record<string, unknown> | null
     /** 条件求值的额外键（节点 `attributes`，如 `message_count`） */
     scope?: Record<string, unknown> | null
+    /**
+     * 输入区上方的**一格读数**（宿主方言 `ReadingSection`；会话场景下就是节点属性
+     * `context_watermark`，内容说的是上下文水位）。
+     *
+     * 同样**随节点下发、不在这里回读**：调用方手上有那个会话的清单项就有它。
+     * 类型是**方言而不是「水位」**——本组件不认识它说的是上下文，只认识「这儿能排
+     * 一行读数 + 一根条」；换一个产者（成本、记忆）本装配零改动。
+     */
+    meter?: ReadingSection
     /** 挂载即聚焦输入框 */
     autofocus?: boolean
   }>(),
@@ -93,6 +106,7 @@ withDefaults(
     definition: null,
     values: null,
     scope: null,
+    meter: undefined,
     autofocus: false,
   }
 )

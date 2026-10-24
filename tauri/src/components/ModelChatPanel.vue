@@ -86,7 +86,7 @@
       </section>
     </div>
 
-    <!-- 输入控制区域：输入框 + 选项行由 ChatComposer 唯一装配（不再在此各拼一半） -->
+    <!-- 输入控制区域：水位 + 输入框 + 选项行由 ChatComposer 唯一装配（不再在此各拼一半） -->
     <div class="chat-controls">
       <ChatComposer
         ref="composerRef"
@@ -97,6 +97,7 @@
         :definition="optionDefinition"
         :values="optionValues"
         :scope="optionScope"
+        :meter="optionItem?.context_watermark"
         @submit="handleSendOrAbort"
       />
     </div>
@@ -275,7 +276,8 @@ const sessionsStore = useSessionsStore()
 // 本面板与会话树**解耦**（只有 `sessionId`），拿不到会话节点；而选项的**定义**
 // 随节点下发（`node.schema`）。两端在 store 的会话清单里相遇：清单来自
 // `<根>/session` 的 `vdfs/list`，每项都带着自己的 `schema` 与 `metadata`
-// （见 `services/session.listSessions`）。于是这里零额外请求就能拿全三样东西。
+// （见 `services/session.listSessions`）。于是这里零额外请求就能拿全三样东西
+// —— 上下文水位同理（`context_watermark` 也是那一项的节点属性），共用 `optionItem`。
 const optionItem = computed(() => sessionsStore.list.find((s) => s.id === props.sessionId) ?? null)
 
 /** 选项定义（后端产出，前端不解释内容） */
@@ -577,7 +579,10 @@ watch(sessionError, (now) => {
   overflow-y: auto;
   /* 关掉浏览器的滚动锚定：它会在上方内容插入时自己挪 `scrollTop`，而展开更早的轮次
      时面板**已经**按高度差补过一次（`handleShowEarlier`）。两层各补一次就是补两倍，
-     表现为「点一下往下窜一大截」。滚动位置由本面板一处负责。 */
+     表现为「点一下往下窜一大截」。滚动位置由本面板一处负责。
+     代价说清：其余「上方高度变了」的情形也不再由浏览器兜底——但会话流里剩下的那些
+     变化都是**用户自己点的**（展开一张卡片：卡片在它正看着的位置之下，卡片本身不动），
+     而流式增长恒在**尾部**（窗口保证最新一条总在 DOM 里），不在视口上方。 */
   overflow-anchor: none;
   padding: 1rem;
   display: flex;

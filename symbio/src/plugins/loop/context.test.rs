@@ -180,6 +180,56 @@ fn test_should_start_compression_hysteresis() {
     assert!(should_start_compression(&msgs, threshold_limit, true, 0));
 }
 
+/// 水位读数与触发判定**同源**：交出去的那四个数，必须正是压缩那一格用来比的数。
+///
+/// 这条判据防的是「读数与判据分家」：读数若走另一条算式（漏了 overhead、或自己乘
+/// 了一个别处的系数），界面显示「还有余量」而内核正在压缩——用户看到的和发生的
+/// 是两件事，且两边都不报错。
+#[test]
+fn the_published_watermark_is_the_same_number_the_trigger_compares() {
+    let msgs = vec![user_msg(&"中文字符填充".repeat(80)), assistant_msg("好的")];
+    let overhead = 1_234;
+    let limit = 128_000;
+
+    let wm = context_watermark(&msgs, overhead, limit);
+    let num = |k: &str| wm[k].as_u64().unwrap();
+
+    assert_eq!(
+        num("content_tokens"),
+        estimate_context_tokens(&msgs, 0) as u64
+    );
+    assert_eq!(
+        num("request_tokens"),
+        estimate_context_tokens(&msgs, overhead) as u64,
+        "请求水位 = 内容 + 请求级开销（与 `should_start_compression` 比的同一个数）"
+    );
+    assert_eq!(num("limit_tokens"), limit as u64);
+    assert_eq!(
+        num("compress_tokens"),
+        compression_threshold_tokens(limit) as u64
+    );
+
+    // 同一个阈值系数只有一个出处：读数里那条线，正好是判据翻线的那一处。
+    // 这批消息里没有压缩快照 ⇒ 迟滞不参与，判定就是「水位 vs 那条线」。
+    let used = num("request_tokens") as usize;
+    assert!(
+        should_start_compression(&msgs, used, false, overhead),
+        "读数说已越线（0.7 × {used} < {used}），判据也必须认为该压"
+    );
+    assert!(
+        !should_start_compression(&msgs, used * 2, false, overhead),
+        "读数说还有余量（0.7 × {} > {used}），判据不许另说一套",
+        used * 2
+    );
+}
+
+#[test]
+fn the_threshold_uses_the_producers_coefficient_once() {
+    // 70% 只在 `compression_threshold_tokens` 出现一次；读数与判据都从它取。
+    assert_eq!(compression_threshold_tokens(1_000), 700);
+    assert_eq!(compression_threshold_tokens(0), 0);
+}
+
 /// 诉求3：压缩模板只走 system role，请求消息只携带待压缩对话
 /// （prepare_compression / build_compression_request 均不得内嵌模板）。
 #[test]

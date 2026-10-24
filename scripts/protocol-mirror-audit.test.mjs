@@ -333,19 +333,21 @@ const SESSION_META_TS_SRC = [
   tsArray('SESSION_MODES', "'auto'", "'interactive'"),
 ].join('\n')
 
-/** 后端 present/reading.rs：读数方言的 3 个结构体 + 1 个闭集 */
+/** 后端 present/reading.rs：读数方言的 4 个结构体 + 1 个闭集 */
 const READING_RS_SRC = [
   rsStruct('ReadingRow', 'label', 'value', 'hint', 'tone'),
-  rsStruct('ReadingSection', 'title', 'rows'),
+  rsStruct('ReadingSection', 'title', 'rows', 'bar'),
+  rsStruct('ReadingBar', 'level', 'marks', 'tone'),
   rsStruct('ReadingPanel', 'title', 'subtitle', 'sections'),
   '',
   rsEnum('ReadingTone', ['Normal', 'Warn'], 'lowercase'),
 ].join('\n')
 
-/** 前端 schemas/reading.ts：读数方言的镜像侧（3 个接口 + 1 张词表） */
+/** 前端 schemas/reading.ts：读数方言的镜像侧（4 个接口 + 1 张词表） */
 const READING_TS_SRC = [
   tsIface('ReadingRow', 'label', 'value', 'hint', 'tone'),
-  tsIface('ReadingSection', 'title', 'rows'),
+  tsIface('ReadingSection', 'title', 'rows', 'bar'),
+  tsIface('ReadingBar', 'level', 'marks', 'tone'),
   tsIface('ReadingPanel', 'title', 'subtitle', 'sections'),
   '',
   tsArray('READING_TONES', "'normal'", "'warn'"),
@@ -520,7 +522,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 28 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 29 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
   )
 })
 

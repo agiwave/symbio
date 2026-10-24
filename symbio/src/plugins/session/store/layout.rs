@@ -89,6 +89,10 @@ pub(super) struct SessionMetaFile {
     summary: Option<String>,
     #[serde(default)]
     meta_tags: Vec<String>,
+    /// 最近一轮的上下文水位（清单投影之一，`save` 时随其余字段一起落盘）。
+    /// 后加的字段 ⇒ 存量文件里没有，`#[serde(default)]` 读成 `None`。
+    #[serde(default)]
+    context: Option<serde_json::Value>,
     /// 旧布局把消息内联在这里。新布局**不写**该字段；读的时候仍要认，
     /// 否则存量会话会读成空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -106,6 +110,7 @@ impl SessionMetaFile {
             message_count: s.message_count,
             summary: s.summary.clone(),
             meta_tags: s.meta_tags.clone(),
+            context: s.context.clone(),
             messages: None,
         }
     }
@@ -149,6 +154,7 @@ impl SessionMetaFile {
             message_count: self.message_count,
             summary: self.summary,
             meta_tags: self.meta_tags,
+            context: self.context,
         }
     }
 }

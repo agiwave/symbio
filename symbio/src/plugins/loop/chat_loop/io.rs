@@ -80,8 +80,24 @@ pub(crate) async fn persist_messages(
     }
 }
 
-pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, turn: Option<usize>) {
-    let meta = turn.map(|t| serde_json::json!({"turn": t}));
+/// 发本轮的 Turn 骨架（流式占位）。
+///
+/// `watermark` = 本轮请求开头取到的上下文水位（[`super::super::context::context_watermark`]），
+/// 挂在骨架的 `meta.context` 上：骨架是**这一轮在转写里的化身**，「这一轮发出去时
+/// 上下文有多大」是它的一条事实，不另找格子（也不另开一条会话级写口）。
+/// 读方是 session 的交付出口（`stats_reading::context_reading_of`），前端只投影。
+pub(crate) async fn emit_streaming_start(
+    sink: &ExecEventSink,
+    root_id: &str,
+    turn: Option<usize>,
+    watermark: Option<serde_json::Value>,
+) {
+    let meta = match (turn, watermark) {
+        (Some(t), Some(w)) => Some(serde_json::json!({ "turn": t, "context": w })),
+        (Some(t), None) => Some(serde_json::json!({ "turn": t })),
+        (None, Some(w)) => Some(serde_json::json!({ "context": w })),
+        (None, None) => None,
+    };
     // 骨架（一整轮响应）节点无正文：身份 + 状态一帧到位。
     sink.emit(
         ChatNode {
