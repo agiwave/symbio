@@ -389,18 +389,7 @@ function resetFields() {
   display: flex;
   gap: var(--space-2);
 }
-.text-input {
-  flex: 1;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  background: var(--surface-overlay);
-  color: var(--text-primary);
-  outline: none;
-  transition: border-color var(--motion-fast) var(--motion-ease);
-}
-.text-input:focus { border-color: var(--accent); }
+/* .text-input 不再持副本：共享定义见 src/styles/controls.css（按本处的实际渲染取值） */
 .hint {
   font-size: var(--font-size-xs);
   color: var(--text-secondary);

@@ -949,24 +949,7 @@ watch(
   pointer-events: none;
 }
 
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.625rem;
-  height: 1.625rem;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  color: var(--text-secondary);
-  transition: all var(--motion-fast) var(--motion-ease);
-  flex-shrink: 0;
-}
-.icon-btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
+/* .icon-btn 不再持副本：共享定义见 src/styles/controls.css（flex-shrink 已并入那一份） */
 
 /* Toggle */
 .toggle {

@@ -69,21 +69,10 @@ const router = createRouter({
         // :dir 可选 = `<根>` 之下的相对路径（可多级，如 /vdfs/session/<id>/workdir），
         // 深链与「浏览内部」push 出来的地址页都由本路由承接。
         { path: 'vdfs/:dir(.*)*', name: 'vdfs', component: VdfsView },
-        // 旧地址的兼容 redirect（书签 / 深链）：指向同名挂载的 VDFS 页。
-        // 机制与沿革见 ../../../docs/003-design/009-VDFS规范.md，此处只保留 URL 字面量。
-        {
-          path: 'entities/:types?',
-          redirect: (to) => {
-            const first = String(to.params.types ?? '').split(',')[0]
-            return first && first !== 'all' ? `/vdfs/${first}` : '/vdfs'
-          },
-        },
-        // 同理：各专项页面的旧地址一律指向 `/vdfs/<挂载名>`（挂载名与 kind 同名）
-        { path: 'model-providers', redirect: () => '/vdfs/model' },
-        { path: 'mcp', redirect: () => '/vdfs/mcp' },
-        { path: 'skill', redirect: () => '/vdfs/skill' },
-        { path: 'agent', redirect: () => '/vdfs/agent' },
-        { path: 'settings', redirect: () => '/vdfs/plugin_manager' },
+        // 旧地址（`entities/:types` / `model-providers` / `mcp` / `skill` / `agent` / `settings`）
+        // 的兼容 redirect 已删：本仓未发布，那些地址只存在于开发机的书签里（`SP-008`：
+        // 不为既有数据留兼容）。它们今天落到下面的兜底——回首页，由守卫接手落点——
+        // 而不是 404 白屏，所以删掉不改变任何**代码可达**的行为。
         // 兜底：**不认识的首段一律回首页**。
         //
         // 为什么必须有它（而不是让它 404）：打包后的 Tauri webview 从自定义协议

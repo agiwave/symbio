@@ -1,6 +1,6 @@
 /**
  * 角色折叠的判据钉死（`messageRoleOf` / `normalizePrincipal` /
- * `roleOfPrincipal`）——镜像后端 `ChatNode::node_role()` 与 `Principal::from_legacy`。
+ * `roleOfPrincipal`）——镜像后端 `ChatNode::node_role()` 的折叠与 `Principal` 的命名空间表。
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -13,7 +13,7 @@ import {
   roleOfPrincipal,
 } from '@/schemas/chat_node'
 
-describe('normalizePrincipal 的工具命名空间表（与 Rust from_legacy 同一张表）', () => {
+describe('normalizePrincipal 的命名空间表（与 Rust 的 namespace 派生逐段对齐）', () => {
   it('合成地址三段都读回 tool 族', () => {
     for (const id of ['legacy/todo_write', 'mcp/mockserv/echo', 'agent/run']) {
       expect(normalizePrincipal(id)?.kind).toBe('tool')
@@ -57,10 +57,16 @@ describe('messageRoleOf：主体为先、残留格兜底（D-147）', () => {
     expect(messageRoleOf({ role: CHAT_ROLE_SYSTEM })).toBe(CHAT_ROLE_SYSTEM)
   })
 
-  it('历史裸字符串主体同样折叠（读侧别名一路通吃）', () => {
-    expect(messageRoleOf({ principal: 'user' })).toBe(CHAT_ROLE_USER)
-    expect(messageRoleOf({ principal: 'agent:main' })).toBe(CHAT_ROLE_ASSISTANT)
-    expect(messageRoleOf({ principal: 'tool:vdfs_write' })).toBe(CHAT_ROLE_TOOL)
+  it('地址字符串仍能归一（只是不再收旧形态）：`<ns>/<name>` 由 namespace 派族', () => {
+    expect(roleOfPrincipal('person/local')).toBe(CHAT_ROLE_USER)
+    expect(roleOfPrincipal('session/main')).toBe(CHAT_ROLE_ASSISTANT)
+    expect(roleOfPrincipal('vdfs/write')).toBe(CHAT_ROLE_TOOL)
+    expect(roleOfPrincipal('system/compactor')).toBe(CHAT_ROLE_SYSTEM)
+  })
+
+  it('旧形态字符串不再归一（SP-008：不为旧数据写迁移分支）', () => {
+    expect(normalizePrincipal('agent:main')).toBeUndefined()
+    expect(normalizePrincipal('user')).toBeUndefined()
   })
 
   it('两格皆无 ⇒ 缺省助手（未标身份的写方按模型产出一族呈现）', () => {

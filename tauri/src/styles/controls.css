@@ -4,8 +4,9 @@
  * 目的：收敛各组件 scoped <style> 中反复复制粘贴的通用控件样式
  * （.icon-btn / .text-input），做到一次定义、处处复用。
  *
- * 兼容性：存量组件仍持有同名 scoped 副本（`.icon-btn[data-v-x]` 特异性更高），
- * 其视觉不受本文件影响；新组件应直接使用此处定义，不再复制粘贴。
+ * 口径：**共享定义就是唯一的一份**——组件不再持同名 scoped 副本。两个类的取值按
+ * 「原副本的实际渲染」定（`.icon-btn` 的 `flex-shrink: 0`、`.text-input` 的内边距与
+ * 背景都来自副本），所以删副本这一步**不改视觉**；将来要调外观，改这里一处。
  *
  * 注：`.action-btn` / `.action-btn.secondary` 曾在这里定义，唯一生产者是
  * VdfsWorkbench 手写的提示态按钮。提示态改用 `DetailShell`（动作行由
@@ -26,6 +27,8 @@
   cursor: pointer;
   color: var(--text-secondary);
   transition: all var(--motion-fast) var(--motion-ease);
+  /* 方形控件不该在挤压的 header 里被压扁——压扁的是图标，不是按钮 */
+  flex-shrink: 0;
 }
 .icon-btn:hover:not(:disabled) {
   background: var(--surface-hover);
@@ -41,17 +44,18 @@
 
 /* 单行文本输入 */
 .text-input {
+  flex: 1;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   font-size: var(--font-size-base);
-  background: var(--surface-sunken);
+  background: var(--surface-overlay);
   color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--motion-fast) var(--motion-ease);
 }
 .text-input:focus {
-  outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle-bg);
 }
 
 /* ==================== 三栏工作台侧边栏（Workbench 侧栏与宿主注入件共用） ==================== */

@@ -90,8 +90,9 @@ export const NODE_KIND_LABELS: Record<string, string> = {
 /**
  * 状态 → 文案。
  *
- * `active` 是**旧数据别名**（历史上「已结束」与「未标注」都被映射成它），
- * 保留映射仅为兼容已落库的历史节点，新节点不会再出现该取值。
+ * 只收**今天写得出**的状态词：`ChatNode.status` 的闭集就是下面这七个（后端
+ * `NodeStatus`），`active` 那类旧词没有任何生产写方——按 `SP-008`（不做历史数据兼容）
+ * 读侧不再为它留别名（缺文案时 `messageStatusLabel` 原样返回，不会崩、也不会误标成别的状态）。
  */
 export const NODE_STATUS_LABELS: Record<string, string> = {
   [NODE_STATUS_PENDING]: '排队中',
@@ -101,8 +102,6 @@ export const NODE_STATUS_LABELS: Record<string, string> = {
   [NODE_STATUS_ABORTED]: '已中止',
   [NODE_STATUS_FAILED]: '失败',
   [NODE_STATUS_REMOVED]: '已删除',
-  /** 旧数据别名，见上方说明 */
-  active: '正常',
 }
 
 /** 角色文案（未登记 → 原样返回） */

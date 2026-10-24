@@ -777,27 +777,34 @@ describe('principal 前缀 → 身份呈现（[T-148] 独立表）', () => {
     expect(principalPresentationOf(null)).toBeUndefined()
   })
 
-  it('历史裸字符串 principal 归一后进表（"user"→person/local，"agent:main"→session/main）', () => {
-    expect(principalNamespace('user')).toBe('person')
-    expect(principalNamespace('agent:main')).toBe('session')
-    expect(principalPresentationOf('user')?.label).toBe('用户')
-    expect(principalPresentationOf('agent:main')?.tone).toBe('agent')
+  it('地址字符串进表（"person/local"→用户，"session/main"→agent）', () => {
+    expect(principalNamespace('person/local')).toBe('person')
+    expect(principalNamespace('session/main')).toBe('session')
+    expect(principalPresentationOf('person/local')?.label).toBe('用户')
+    expect(principalPresentationOf('session/main')?.tone).toBe('agent')
   })
 
   it('facetsOf 带上 principal 呈现（表被消费，非死数据）', () => {
     const f = facetsOf({
       id: 'tc',
       type: NODE_KIND_SKELETON,
-      principal: 'vdfs/write',
+      principal: { kind: 'tool', id: 'vdfs/write' },
     })
     expect(f.principal?.label).toBe('文件工具')
     // 无 principal 的节点（存量 / 未接线）：呈现缺席，不是报错
     expect(facetsOf({ id: 'x' }).principal).toBeUndefined()
   })
 
-  it('nodePrincipal 归一历史字符串为结构体', () => {
-    expect(nodePrincipal({ principal: 'agent:main' })).toEqual({ kind: 'agent', id: 'session/main' })
+  it('nodePrincipal 归一地址字符串为结构体，旧形态不再归一', () => {
+    expect(nodePrincipal({ principal: { kind: 'agent', id: 'session/main' } })).toEqual({
+      kind: 'agent',
+      id: 'session/main',
+    })
     expect(nodePrincipal({ principal: undefined })).toBeUndefined()
+    // 旧形态没有任何生产来源（SP-008）：解不出族就当「尚未标身份」
+    expect(
+      nodePrincipal({ principal: 'agent:main' as unknown as { kind: 'agent'; id: string } }),
+    ).toBeUndefined()
   })
 })
 

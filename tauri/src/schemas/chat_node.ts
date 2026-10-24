@@ -62,42 +62,26 @@ export function normalizePrincipal(value: Principal | string | undefined | null)
   if (value === undefined || value === null) return undefined
   if (typeof value === 'object') return value
   const s = value
-  // 新形态 `<ns>/<name>`——按 namespace 派生 kind。
+  // 只解析**地址字符串** `<ns>/<name>`——kind 由 namespace 派生。
+  //
+  // 旧形态（`agent:main` / `tool:vdfs_write` / 裸 `user`）不再归一：那些是 `ChatNode.principal`
+  // 的历史取值，字段收窄成结构体之后没有任何生产来源（`SP-008`：不为旧数据写迁移分支）。
+  // 后端的 `Principal::from_legacy` 仍认旧形态，但它服务的是另一件事——`ActorSpec.principal`
+  // 里的 actor 名（`agent:researcher-01` 这类），不是本字段的兼容层。
   const slash = s.indexOf('/')
-  if (slash > 0) {
-    const ns = s.slice(0, slash)
-    const kind: PrincipalKind =
-      ns === 'person'
-        ? PRINCIPAL_KIND_PERSON
-        : ns === 'system'
-          ? PRINCIPAL_KIND_SYSTEM
-          : // 工具命名空间：vdfs/web/local 是插件归属，mcp/agent/legacy 是后端
-            // `Principal::tool_principal` 合成的地址段——与 Rust `from_legacy` 同一张表。
-            ns === 'vdfs' || ns === 'web' || ns === 'local' || ns === 'mcp' || ns === 'agent' || ns === 'legacy'
-            ? PRINCIPAL_KIND_TOOL
-            : PRINCIPAL_KIND_AGENT
-    return { kind, id: s }
-  }
-  // 旧形态 `<kind>:<name>`（D-069 v1）。
-  const colon = s.indexOf(':')
-  if (colon > 0) {
-    const kindWord = s.slice(0, colon)
-    const name = s.slice(colon + 1)
-    switch (kindWord) {
-      case 'person':
-        return { kind: PRINCIPAL_KIND_PERSON, id: s }
-      case 'tool':
-        return { kind: PRINCIPAL_KIND_TOOL, id: `legacy/${name}` }
-      case 'system':
-        return { kind: PRINCIPAL_KIND_SYSTEM, id: s }
-      default:
-        // agent:xxx → session/xxx（本机部署的 agent 都住 session 命名空间）。
-        return { kind: PRINCIPAL_KIND_AGENT, id: `session/${name}` }
-    }
-  }
-  // 裸 `user` ⇒ Person + `person/local`；其余裸名一律按 agent 挂 session 下。
-  if (s === 'user') return { kind: PRINCIPAL_KIND_PERSON, id: 'person/local' }
-  return { kind: PRINCIPAL_KIND_AGENT, id: `session/${s}` }
+  if (slash <= 0) return undefined
+  const ns = s.slice(0, slash)
+  const kind: PrincipalKind =
+    ns === 'person'
+      ? PRINCIPAL_KIND_PERSON
+      : ns === 'system'
+        ? PRINCIPAL_KIND_SYSTEM
+        : // 工具命名空间：vdfs/web/local 是插件归属，mcp/agent/legacy 是后端
+          // `Principal::tool_principal` 合成的地址段——与 Rust 命名空间表逐段对齐。
+          ns === 'vdfs' || ns === 'web' || ns === 'local' || ns === 'mcp' || ns === 'agent' || ns === 'legacy'
+          ? PRINCIPAL_KIND_TOOL
+          : PRINCIPAL_KIND_AGENT
+  return { kind, id: s }
 }
 
 /** 取主体**可路由地址**（`<ns>/<name>`），历史字符串形态一并归一。 */
@@ -434,15 +418,16 @@ export interface ChatNode {
    * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
    * `title` 是显示名。写侧构造即定型，序列化只出对象形态。
    *
-   * 类型仍与 `string` 联合，是为了**读侧兼容**历史 `messages.json` 里遗留的裸字符串
-   * （`"agent:main"` / `"user"`）——`normalizePrincipal` 是唯一入口，消费方一律通过它拿
-   * 结构体形态；等历史数据一次性迁移完成后可收窄（`scripts/protocol-mirror-audit.mjs` D 组
-   * 只比字段名，不比类型形态）。
+   * 类型只收结构体：历史 `messages.json` 里遗留的裸字符串（`"agent:main"` / `"user"`）
+   * 按 `SP-008`（不做历史数据兼容）不再归一——那类节点落到「尚未标身份」，可见域判据
+   * 把它当可见、角色按 `role` 格折，与「没接线的写方」同一条路径，不会因为少一次迁移
+   * 而消失或报错。字符串仍能进 `normalizePrincipal`：**地址字符串是合法入参**
+   * （`person/local` 这类常量、以及只拿到 id 的调用点），不是兼容层。
    *
    * `undefined` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
    * 缺身份是「还没接线」，不是「不让人看」。
    */
-  principal?: Principal | string;
+  principal?: Principal;
   /**
    * 形态词：**闭集五值 `NodeKind`**（[D-070 §决策 3]）——前端唯一分派轴。
    *
