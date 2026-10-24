@@ -281,3 +281,69 @@ fn a_second_new_drive_gets_the_next_turn_number() {
         "第二次开轮落 u-1，不撞 u-0"
     );
 }
+
+// ── 收租窗口的边界（DE-015 §2.6 第 7 条的边界段）────────────────────────
+//
+// 看护只看快照尾部 `LEASE_WINDOW` 条（`lease_tail`）。窗口外的未回 `sent` 被切掉，
+// 因此不会被判死、只能由 `waiting` 行挂着——这是常量选值的**边界**，不是安全保证。
+// 断言切点与长度，不抄数字：窗口值变，这两条跟着变；切点写反（取头部 / 少切一条）
+// 立刻红。
+
+/// 超窗时只留最新的一批：最早的那条被切掉，其余原样保序。
+#[test]
+fn the_lease_window_keeps_only_the_newest_facts() {
+    let facts = Arc::new(EventStore::new());
+    let total = super::LEASE_WINDOW + 1;
+    for i in 0..total {
+        facts
+            .append(Event::pending(
+                format!("f-{i}"),
+                EVENT_TURN_STAGE,
+                Entity::Turn,
+                Verb::Asserted,
+                0,
+                "system",
+            ))
+            .expect("落格");
+    }
+    let all = facts.range(Seq::new(0));
+    assert_eq!(all.len(), total, "夹具自己先超窗一条");
+
+    let tail = super::lease_tail(&all);
+    assert_eq!(tail.len(), super::LEASE_WINDOW, "窗口只留最新的一批");
+    assert_eq!(
+        tail.first().map(|e| e.event_id.as_str()),
+        all.get(1).map(|e| e.event_id.as_str()),
+        "切掉的是最早的那一条（下标 0），窗口从下标 1 起"
+    );
+    assert_eq!(
+        tail.last().map(|e| e.event_id.as_str()),
+        all.last().map(|e| e.event_id.as_str()),
+        "最新的一条一定在窗口里（否则看护看不到刚发生的事）"
+    );
+}
+
+/// 不超窗时窗口 = 全量（没有多余的截断，也没有越界 panic）。
+#[test]
+fn a_short_snapshot_is_handed_over_whole() {
+    let facts = Arc::new(EventStore::new());
+    for i in 0..8 {
+        facts
+            .append(Event::pending(
+                format!("s-{i}"),
+                EVENT_TURN_STAGE,
+                Entity::Turn,
+                Verb::Asserted,
+                0,
+                "system",
+            ))
+            .expect("落格");
+    }
+    let all = facts.range(Seq::new(0));
+    assert_eq!(
+        super::lease_tail(&all).len(),
+        all.len(),
+        "短快照整份交出（`saturating_sub` 不许把它切成空）"
+    );
+    assert!(super::lease_tail(&[]).is_empty(), "空快照不 panic");
+}

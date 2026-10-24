@@ -29,6 +29,17 @@ use super::super::stage_events::{self, StageFact};
 /// 就会拒绝求值，所以调用方自己先切（分层而不是让视图静默算不出来）。
 const LEASE_WINDOW: usize = 4096;
 
+/// 收租窗口的切片：快照的**尾部** [`LEASE_WINDOW`] 条。
+///
+/// 单独成函数是为了让「窗口边界」成为**被断言的行为**而不是散在 `begin_drive` 里
+/// 的一段切片表达式（`drive.test.rs` 直接喂一份超窗夹具断言切点）。窗口外的未回
+/// `sent` 不会被看护看到，只能由 `waiting` 行挂着——这是常量选值的边界，不是安全
+/// 保证，失效条件写在 [DE-015 §2.6](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")
+/// 的第 7 条边界段里。
+fn lease_tail(snapshot: &[crate::symbio_core::Event]) -> &[crate::symbio_core::Event] {
+    &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..]
+}
+
 /// 本幕的身份与输入。
 pub(crate) struct Drive {
     pub(crate) turn_no: u64,
@@ -180,7 +191,7 @@ pub(crate) fn begin_drive(
     // 属于它们自己那一轮，与刚落的唤醒格无关；切在开幕前也让 `anchor` 仍是上一世
     // 的最后一条。
     {
-        let tail = &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..];
+        let tail = lease_tail(&snapshot);
         let stale_turn = tail.last().map(|e| e.turn).unwrap_or(0);
         let anchor = tail
             .last()

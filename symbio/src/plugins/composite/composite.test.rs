@@ -921,3 +921,219 @@ async fn an_inflight_turn_converges_after_loop_is_disabled() {
         .expect("收尾不该失败");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ==================== 可独立卸载：DE-002 §4 的架构面判据 ====================
+//
+// `DE-002 §4` 把「一个能力一个插件、可卸载（没有它系统仍完整）」列进架构面，
+// `DE-090 §1.1` 步 6 是它的验证判据。上面两条用例钉的是**停用**（`set_enabled`），
+// 这里钉**卸载**（`Delete` 落在插件目录自身）——两者都是「从装配表里摘出去」，
+// 但卸载连目录都没了，是更强的那一半。
+//
+// 判据的形状：卸载一侧 ⇒ 另一侧**照常**（存储四条通道全绿、行照旧）；
+// 缺席一侧 ⇒ **显式拒绝**（错误形状要断言到种类，不许只断言「不崩溃」）。
+
+/// 卸载一个**非必需**插件：注册表摘实例 + 停一次 + 删目录。
+#[tokio::test]
+async fn uninstalling_the_driver_leaves_storage_intact_and_refuses_the_start_address() {
+    let sid = "guard-loop-uninstalled";
+    let (root, _registry, composite) = mount_session_and_loop("loop-uninstall");
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+    create_guard_session(&composite, sid).await;
+
+    // `Delete` 落在挂载点目录自身 = 卸载这个插件（不是删它内部某一项）
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            "loop",
+            VdfsRequest::Delete { recursive: true },
+        )
+        .await
+        .expect("loop 不是必需插件，卸载应当成功");
+    assert!(
+        !root.join("loop").exists(),
+        "卸载之后插件目录不该还在——目录存在与否就是它装没装的唯一凭据"
+    );
+    assert!(
+        !mount_names(&composite).await.contains(&"loop".to_string()),
+        "卸载后下一轮收集里不该再有 loop 的挂载行"
+    );
+
+    // 缺席被**显式拒绝**：起始地址 NotFound，而不是静默空转
+    let err = provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("loop/{sid}"),
+            VdfsRequest::Action {
+                action: LOOP_RUN_TURN.to_string(),
+                payload: Some(serde_json::json!({})),
+            },
+        )
+        .await
+        .expect_err("卸载 loop 后起始地址必须不可达");
+    assert!(
+        matches!(err, VdfsError::NotFound(_)),
+        "卸载 loop ⇒ 起始地址 NotFound，实际 {err:?}"
+    );
+
+    // 系统仍完整：存储侧四条通道照常（与停用那条用例同一组断言）
+    match provider
+        .dispatch(&vdfs_context(&host()), "session", VdfsRequest::List {})
+        .await
+        .expect("会话清单照常")
+    {
+        VdfsResponse::List(items) => assert!(
+            items.iter().any(|i| i.node.name == sid),
+            "新建的会话仍在清单里"
+        ),
+        _ => panic!("vdfs/list 未返回清单"),
+    }
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}"),
+            VdfsRequest::Stat,
+        )
+        .await
+        .expect("会话 stat 照常");
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}/message"),
+            VdfsRequest::List {},
+        )
+        .await
+        .expect("读转写照常");
+    provider
+        .dispatch(
+            &vdfs_context(&host()),
+            &format!("session/{sid}/inbox"),
+            VdfsRequest::Write {
+                content: VdfsContent::text("loop 卸载之后这条照发"),
+            },
+        )
+        .await
+        .expect("收件箱写臂照常（它不认识 loop 在不在装配里）");
+
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 卸载 `session` 的那一半：驱动器装得上，但**一轮都起不来**——缺的是派发令牌。
+///
+/// 装配期 loop 不依赖 session（`LoopPlugin::build` 没有要装配的东西），所以「卸载
+/// session ⇒ loop 装载被拒绝」**不是**今天的形状；真正成立的是：loop 的唯一入口
+/// 只接受会话派发，没有 session 就没有令牌，请求被 `Forbidden` 挡住。
+#[tokio::test]
+async fn without_session_the_driver_is_mounted_but_refuses_every_turn() {
+    let root = guard_root("loop-orphan");
+    put_plugin_dir(&root, "loop", "loop");
+    let registry = Arc::new(PluginRegistry::with_instances(
+        plugin_map(Vec::new()),
+        root.clone(),
+        Vec::new(),
+    ));
+    registry.mount_all();
+    assert_eq!(
+        registry.snapshot().len(),
+        1,
+        "loop 没有装配期依赖，孤身也能构造出来（这正是「它不是必需插件」的形状）"
+    );
+    let composite = Arc::new(Composite::with_registry(Arc::clone(&registry)));
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+
+    // 会话面整个消失：没有 session 的挂载行，也没有 session 目录可寻址
+    assert!(
+        !mount_names(&composite)
+            .await
+            .contains(&"session".to_string()),
+        "没有 session 插件就没有会话能力行"
+    );
+    let err = provider
+        .dispatch(&vdfs_context(&host()), "session", VdfsRequest::List {})
+        .await
+        .expect_err("没有 session 插件时会话目录不可寻址");
+    assert!(
+        matches!(err, VdfsError::NotFound(_)),
+        "会话语义整片缺席 ⇒ NotFound，实际 {err:?}"
+    );
+
+    // 驱动器自己的入口还在，但**显式拒绝**：错误种类是 Forbidden，
+    // 不是「跑了个空轮」也不是 NotFound（会被误读成「没装」）。
+    let err = provider
+        .dispatch(
+            &vdfs_context(&host()),
+            "loop/any-session",
+            VdfsRequest::Action {
+                action: LOOP_RUN_TURN.to_string(),
+                payload: Some(serde_json::json!({})),
+            },
+        )
+        .await
+        .expect_err("没有会话派发就必须拒绝");
+    match &err {
+        VdfsError::Forbidden(msg) => assert!(
+            msg.contains("只接受会话派发"),
+            "拒绝的理由要指名缺什么（令牌），实际：{msg}"
+        ),
+        other => panic!("错的错误形状：应当是 Forbidden，实际 {other:?}"),
+    }
+
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 反向用例：**必需**插件卸不掉（可以停用）——「可卸载」不是「什么都能删」。
+#[tokio::test]
+async fn uninstalling_a_required_plugin_is_refused_and_the_directory_survives() {
+    let root = guard_root("required");
+    put_plugin_dir(&root, "session", "session");
+    put_plugin_dir(&root, "loop", "loop");
+    let registry = Arc::new(PluginRegistry::with_instances(
+        plugin_map(Vec::new()),
+        root.clone(),
+        vec!["session".to_string()],
+    ));
+    registry.mount_all();
+    assert_eq!(registry.snapshot().len(), 2, "两个工厂都构造出来了");
+    let composite = Arc::new(Composite::with_registry(Arc::clone(&registry)));
+    let provider = composite
+        .clone()
+        .get_vfs_provider()
+        .expect("容器有组合视图");
+
+    let err = provider
+        .dispatch(
+            &vdfs_context(&host()),
+            "session",
+            VdfsRequest::Delete { recursive: true },
+        )
+        .await
+        .expect_err("必需插件必须拒绝卸载");
+    match &err {
+        VdfsError::Invalid(msg) => assert!(
+            msg.message.contains("必需插件"),
+            "拒绝的理由要说明它是必需的，实际：{msg:?}"
+        ),
+        other => panic!("错的错误形状：应当是 Invalid，实际 {other:?}"),
+    }
+    assert!(
+        root.join("session").exists(),
+        "拒绝之后目录必须还在（否则拒绝只是句空话）"
+    );
+    assert_eq!(registry.snapshot().len(), 2, "装配表一项都没少");
+
+    Plugin::stop(composite.clone(), PluginStopReason::Shutdown)
+        .await
+        .expect("收尾不该失败");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -952,6 +952,8 @@ pub(crate) async fn drive_steps(
         // 运行期写入封闭（DE-015 §3.4 第 5 条的那一半，D-123 决策 2）：领域格必须
         // 在这个执行体登记过的名单里，协议五格豁免（引擎写，见 `Next::writes_closed`）。
         // 越界不静默、不 panic：落一条带理由的停机格，让它在事实面显形（同 `no_progress`）。
+        // **这是事后判，不是前置闸**（契约条文见 DE-015 §2.6 的写封闭段）：越界那条已经
+        // 入账、不回滚——判据是「发生了必被看见且本轮停止」，不是「不可能发生」。
         if let Some(offender) = ledger
             .iter()
             .map(|e| e.kind.as_str())

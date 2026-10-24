@@ -703,3 +703,56 @@ async fn the_correction_retry_is_a_separate_call_and_a_failure_still_has_its_cel
     assert_eq!(failed.payload["via"], json!("compress/summary"));
     assert_eq!(failed.payload["id"], json!("model-3-d9-z0-1"));
 }
+
+// ── 窗口边界：看护只看见递给它的那批（DE-015 §2.6 第 7 条的边界段）──────
+
+/// 收租窗口是**切片**，不是 `reap` 内部的过滤：切点由调用方
+/// （`chat_loop::drive` 的 `lease_tail`）按 `LEASE_WINDOW` 决定。
+///
+/// 这条用例把后果钉住——窗口外那笔陈旧 `sent` **不被判死**，账仍开着，
+/// 由 `waiting` 行挂着；同一笔放进视野则到期即判死。两半合起来才说明
+/// 「窗口外靠 `waiting`」是真的降级路径，不是一句猜测。
+#[test]
+fn reap_only_sees_the_facts_it_is_handed() {
+    let store = boot();
+    // 第一笔 = 窗口外的陈旧派发；后面两笔是把它挤出窗口的「新事实」。
+    stranded(&store, "turn-9-r0", 1, 1_000, 1, false);
+    for (i, kind) in ["turn.stage", "turn.stage"].iter().enumerate() {
+        store
+            .append(
+                Event::pending(
+                    format!("filler-{i}"),
+                    *kind,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    1,
+                    "system",
+                )
+                .with_ts(2_000),
+            )
+            .unwrap();
+    }
+    let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
+    let all = store.range(Seq::new(0));
+
+    // 切片不含第一笔 ⇒ 那笔过期账看不到，什么都不收（不静默当它死了：`sent` 还在）。
+    let out = reap(&store, &frozen, PORTS, &all[1..], 1, 1, 10_000).unwrap();
+    assert!(out.is_empty(), "窗口外的陈旧 `sent` 不该被收：{out:?}");
+    assert_eq!(
+        kinds(&store),
+        vec!["sent", "turn.stage", "turn.stage"],
+        "收租不动账：没有 `failed` 也没有 `retry`"
+    );
+
+    // 同一笔放进视野 ⇒ 到期即判死（`turn` 端口 `max_attempts = 1`）。
+    let out = reap(&store, &frozen, PORTS, &all, 1, 1, 10_000).unwrap();
+    assert_eq!(
+        out,
+        vec![Reaped::Killed {
+            id: "turn-9-r0".into(),
+            attempt: 1,
+        }],
+        "窗口内看到它就必须收"
+    );
+    assert_eq!(payload_of(&store, "failed")["why"], json!("lease_expired"));
+}
