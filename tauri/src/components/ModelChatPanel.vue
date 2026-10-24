@@ -105,6 +105,7 @@ import {
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
+import { useHotkeys } from '@/composables/useHotkeys'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
@@ -198,6 +199,21 @@ provide(RESUME_KEY, (payload: ResumePayload) => {
 
 const { isLoading } = chat
 const messageTree = chat.messageTree
+
+// Esc 停止生成。绑定声明在这里而不是外壳里，因为「这一轮还在跑吗」是本组件
+// 经 `useChatConnection` 才有的状态；全局表只负责判键与让路。
+// `allowInInput` 是那条守卫必须的例外：要按停止的时候，焦点正落在输入框里。
+useHotkeys('model-chat-panel', [
+  {
+    id: 'abort',
+    keys: 'esc',
+    group: '会话',
+    label: '停止生成',
+    allowInInput: true,
+    when: () => isLoading.value,
+    run: () => chat.abort(),
+  },
+])
 
 // 全局 store 引用：错误状态兜底 / 消息计数
 const sessionsStore = useSessionsStore()

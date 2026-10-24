@@ -1,23 +1,27 @@
 /**
- * VdfsWorkbench — **新建入口与动作转发**单测（happy-dom）
+ * VdfsWorkbench — 控件行为单测（happy-dom）
  *
- * 只测两件事：
+ * 这台控件是三栏工作台的**唯一**实现，所以本文件测的是它的分工，不是某个类型：
  *
- * - **「新建」按钮**：节点声明了可接受类型（`new_type`）时可见，点一下**直接
+ * - **「新建」入口**：节点声明了可接受类型（`new_type`）时按钮可见，点一下**直接
  *   进入该类型的详情页**。没有「选方式」这一步——整包导入是详情页上的一条动作，
- * 不是第二种新建入口（见 D-029）。这条约定曾经由一整个提示态状态机承担，
- *   现在退化成一个无参调用，正因如此更值得钉住：它很容易被"顺手"加回去。
+ *   不是第二种新建入口（见 D-029）。它很容易只剩一个无参调用后被"顺手"加回一跳，
+ *   所以值得钉住。
  * - **动作转发**：渲染器上抛的动作按**载荷形状**分流——带 `File` 的走
  *   `runPackAction`（如「导入整包」），其余走 `runAction`（如「导出」）。
  *   控件不认识任何具体动作名，所以这条分流必须由断言钉住，否则「导入」会
  *   悄悄退化成一条不带载荷的动作、或者前端又开始按动作名分支。
+ * - **自动草稿 / 空态即引导 / 中栏收起 / 筛选**：都取「节点自述」为判据，
+ *   新增一类资源前端零改动。
+ * - **键盘**（`Ctrl+数字` 切类别、`↑↓` 移动焦点）：绑定声明在控件里，
+ *   判键与让路的机制在 `useHotkeys`（那里另有单测）。
  *
  * 环境说明：`useVdfs` 被整体替换为可控桩（它经 `services/vdfs` 出站），
  * 渲染器登记表也被挡掉（那会把整条会话渲染链连同 Tauri 通道拉进来）。
  */
 
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref, shallowRef, type Ref } from 'vue'
 
@@ -38,6 +42,7 @@ vi.mock('@/registry/vdfsRenderers', () => ({}))
 
 import VdfsWorkbench from '../VdfsWorkbench.vue'
 import DetailShell from '../DetailShell.vue'
+import { dispatchHotkeys } from '@/composables/useHotkeys'
 import { registerVdfsRenderer } from '@/registry/vdfsTypes'
 import type { DetailAction, VdfsNewType, VdfsNode } from '@/schemas/vdfs'
 
@@ -92,6 +97,8 @@ function installStub(
     cwd?: string
     /** 当前目录**节点**；`new_type.ext = session` 时控件会声明「当前空间」 */
     cwdNode?: VdfsNode | null
+    /** 左栏类别（挂载层的目录名，按顺序）——键盘「切到第 N 个类别」的判据取自这里 */
+    nav?: string[]
   } = {}
 ) {
   const selectedNode = ref<VdfsNode | null>(opts.selected ?? null)
@@ -112,7 +119,10 @@ function installStub(
     )
   })
   hoisted.stub = {
-    navItems: computed(() => []),
+    // 左栏类别：与真实现同源（`useVdfs.navItems` = 挂载层的目录节点，顺序即后端顺序）
+    navItems: computed(() => (opts.nav ?? []).map((name) => ({ key: name, label: name, icon: null, active: false }))),
+    // 挂载层 vs 目录层：本文件的键盘用例走「在挂载层按数字切类别」，即就地 selectDir
+    atMountLevel: computed(() => false),
     selectDir: vi.fn(),
     selectedName: ref<string | null>(null),
     cwd,
@@ -543,5 +553,97 @@ describe('VdfsWorkbench 空态即引导', () => {
 
     expect(w.find('.empty-action.primary').exists()).toBe(false)
     expect(w.text()).toContain('该目录由系统管理')
+  })
+})
+
+/**
+ * 键盘：三条绑定**声明在本控件**（机制与守卫在 `useHotkeys`，那里另有单测）。
+ *
+ * 本文件钉的是控件这一层的分工：
+ *
+ * - `Ctrl+数字` 切的是**左栏顺序**的第 N 个类别，且数字超出类别数时**不吞键**
+ *   ——`Ctrl+9` 是浏览器自己的「跳到最后一个标签页」，被一条空转的死键吃掉
+ *   比没有这条键更糟；
+ * - ↑↓ 只**移动焦点**、不改变选中：浏览与决定是两件事（`Enter` 才开详情）；
+ * - ↑↓ 的 `when` 判据是「焦点在这份列表里」，不是「本页是 VDFS 页」——
+ *   焦点在详情栏或聊天输入框时抢走方向键会直接破坏滚动与输入。
+ *
+ * ⚠️ 必须 `attachTo: document.body`：焦点判据读的是 `document.activeElement`，
+ * 而脱离文档的元素拿不到焦点（VTU 默认挂在游离节点上，那样这三条全测不到）。
+ * ⚠️ 必须 `unmount`：登记表是模块级单例，注销走 `onScopeDispose`。
+ */
+describe('VdfsWorkbench 键盘', () => {
+  let w: VueWrapper | null = null
+
+  function mountAttached(opts: Parameters<typeof installStub>[0] = {}) {
+    installStub(opts)
+    w = mount(VdfsWorkbench, { props: { addr: '@vfs' }, attachTo: document.body })
+    return w
+  }
+
+  /** 打一次键并交给派发（真实页面里那一刀是 MainLayout 挂在 window 上的监听器） */
+  function pressKey(over: KeyboardEventInit) {
+    const evt = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...over })
+    document.body.dispatchEvent(evt)
+    return { consumed: dispatchHotkeys(evt), prevented: evt.defaultPrevented }
+  }
+
+  const cards = () => Array.from(document.querySelectorAll<HTMLElement>('.vdfs-card'))
+
+  afterEach(() => {
+    w?.unmount()
+    w = null
+    document.body.replaceChildren()
+  })
+
+  it('Ctrl+数字 ⇒ 按左栏顺序切到第 N 个类别', () => {
+    const mounted = mountAttached({ nav: ['session', 'model', 'skill'] })
+    expect(mounted.findAll('.nav-btn').map((b) => b.attributes('aria-label'))).toEqual([
+      'session',
+      'model',
+      'skill',
+    ])
+
+    expect(pressKey({ key: '2', ctrlKey: true })).toEqual({ consumed: true, prevented: true })
+    expect(hoisted.stub.selectDir).toHaveBeenCalledWith('model')
+  })
+
+  it('★ 数字超出类别数 ⇒ 不吞键（那个组合还给浏览器，不是变成一条什么都不做的死键）', () => {
+    mountAttached({ nav: ['session', 'model', 'skill'] })
+
+    expect(pressKey({ key: '9', ctrlKey: true })).toEqual({ consumed: false, prevented: false })
+    expect(hoisted.stub.selectDir).not.toHaveBeenCalled()
+  })
+
+  it('↑↓ 只移动焦点、不改选中', () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b'), makeNode('c')] })
+    cards()[0].focus()
+
+    expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
+    expect(document.activeElement).toBe(cards()[1])
+
+    expect(pressKey({ key: 'ArrowUp' }).consumed).toBe(true)
+    expect(document.activeElement).toBe(cards()[0])
+
+    expect(hoisted.stub.select).not.toHaveBeenCalled()
+  })
+
+  it('到顶/到底停住：不绕回（长列表里绕回会把人甩到看不见的位置）', () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b')] })
+    cards()[1].focus()
+
+    expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
+    expect(document.activeElement).toBe(cards()[1])
+  })
+
+  it('★ 焦点不在列表里 ⇒ ↑↓ 还给页面（详情栏与聊天输入的滚动不被抢走）', () => {
+    const mounted = mountAttached({ items: [makeNode('a'), makeNode('b')] })
+    const outside = document.createElement('input')
+    document.body.appendChild(outside)
+    outside.focus()
+
+    expect(pressKey({ key: 'ArrowDown' })).toEqual({ consumed: false, prevented: false })
+    expect(document.activeElement).toBe(outside)
+    expect(mounted.exists()).toBe(true)
   })
 })

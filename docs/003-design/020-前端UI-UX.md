@@ -4,7 +4,7 @@ id: DE-020-前端UI-UX
 title: 前端 UI/UX
 status: active
 created: 2026-09-28
-impl: planned
+impl: partial
 ---
 
 # 前端 UI/UX
@@ -21,42 +21,40 @@ impl: planned
 架构侧「一切皆 VDFS」已经做到极致：一台控件（`VdfsWorkbench`）承载全部资源类型，
 新增一类资源前端零开发。这是真实优势，不是问题。
 
-**代价是产品侧心智优先级的缺失**：打开应用是一个**资源浏览器**，不是一个 **AI 工作台**。
-会话——用户真正的目的地——只占 56px 图标条中的一格，与 `model` / `mcp` / `skill` /
-`agent` / `plugin_manager` 完全平级。
+**代价在产品的目标形态上**：界面的默认形状是**资源浏览器**，而会话——用户真正的
+目的地——在 56px 图标条里与 `model` / `mcp` / `skill` / `agent` / `plugin_manager`
+平级。抵达面（落点、引导、空态、命令面板）已按这条主线补齐，见 §7 与 §10；
+现在剩下的重心在**效率**与**信任**两层。
 
-因此本规划的主线只有一条：**在不破坏 VDFS 统一机制的前提下，把「对话」重新放回主位**。
-其余改进是这条主线的效率与信任配套。
+本规划的主线只有一条：**在不破坏 VDFS 统一机制的前提下，把「对话」放在主位**。
 
 ---
 
-## 1. 现状盘点（事实，带证据）
+## 1. 差距盘点（只列**仍成立**的）
 
-| 面 | 现状 | 证据 |
+> 结构与规模事实（路由数 / 组件面 / VDFS op / 测试数）的 owner 是
+> [当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表")，本文不复制——
+> 那种数字每次改动都会旧一截，写在这里就是第二真相。
+> 本节只回答「离目标形态还差什么」；**已实现的项在 §7 / §10，不在这里出现**。
+
+| 面 | 还差什么 | 对应提案 |
 |---|---|---|
-| 路由 | 9 条 route，**真实组件仅 2 个**（`MainLayout` / `VdfsView`），其余为旧地址 redirect | `CURRENT.md §5.2`、`tauri/src/router/index.ts` |
-| 布局 | 三栏：56px 图标 rail（挂载点由后端下发）+ 中栏列表（260px）+ 右栏详情 | `components/common/Workbench.vue` |
-| 着陆页 | `/` → `/vdfs` = 绑 `<根>`，即资源根目录 | `router/index.ts:11` |
-| 会话 | 无独立组件；就是 `<根>/session` 下的通用 `VdfsCard`，点中 → 右栏 `ChatMainPanel` | `VdfsWorkbench.vue:58-72` |
-| 多开 | 单 `activeId`，切换靠 `:key` 重挂载 → 滚动位置 / 输入草稿 / 折叠态全丢 | `ChatMainPanel.vue:95-99` |
-| 导航持久化 | **无**。刷新回 `/vdfs`。仅 `symbio.appearance`、systemLocation 持久化 | `stores/appearance.ts` |
-| 流式 | 自研插件长连接（非 SSE），单连接 + 指数退避重连；48ms 攒批 + rAF 合并 + 子树签名缓存 | `services/eventBus.ts`、`stores/sessionTranscriptSync.ts:101` |
-| 停止 | 发送键与停止键**同一按钮**，靠 `isLoading && !modelValue.trim` 区分 | `chat/ChatInputArea.vue:40-53` |
-| 编辑重发 | 有编辑，**无「编辑后重发」**；删用户消息才回填输入框 | `ModelChatPanel.vue:343-389` |
-| 分支 | 消息是 `parent_id` 树，`MessageChildren.vue` 只递归渲染，**无候选切换 UI** | `message/MessageChildren.vue` |
-| 虚拟列表 | **0 处**（全仓 grep `virtual` 为空），长会话全量 DOM | — |
-| 搜索 | `useVdfs` 无 search/query/sort。而后端 `vdfs/search` 已在前端 13 op 中 → **已建成未接线** | `CURRENT.md §3.2`、`composables/useVdfs.ts` |
-| 快捷键 | 仅 Enter 发送 / Shift+Enter 换行 / Ctrl+S / ESC（modal 焦点陷阱） | grep `keydown` 全仓 10 处 |
-| 拖拽 / 右键 / 批量 | 均无（grep `drag` / `contextmenu` = 0） | — |
-| 加载态 | 纯文字「加载中…」；骨架屏仅 `TurnPending.vue` 一处 | `Workbench.vue:76`、`VdfsWorkbench.vue:125` |
-| 断连 | 自动重连 + resync 全量重读，**无全局连接状态指示**（仅 `HomedirEntry` 一个红点） | `services/eventBus.ts:184,420` |
-| 引导 | **无 onboarding**。仅空态 `EmptyWorkdirState.vue`。配模型这一步只在 README 里说 | `README.md:37` |
-| 视觉 | 零 UI 库，手写；`styles/tokens.css` 245 行语义 token，light/dark 两套，4pt 间距基准 | `styles/tokens.css` |
-| 无障碍 | `aria-` 共 19 处 / 10 文件；消息节点头是 `div + @click`，**键盘不可达** | `message/NodeShell.vue:20` |
-| 测试 | vitest + happy-dom，19 个 spec；**前端无 e2e** | `tauri/src/**/__tests__` |
+| 会话多开 | 单 `activeId`，切会话靠重挂载；真多标签未做 | §3 P1-4（高档）、§5 边界 |
+| 长会话渲染 | 无虚拟化：消息 DOM 随条数线性增长 | §3 P1-3 |
+| 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
+| 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
+| 上下文水位 | 输入区不显示「已用 / 上限 / 压缩阈值」，压缩只有后端入口 | §3 P2-1 |
+| 本会话动过哪些文件 | `<根>/session/<id>/workdir` 未进聊天界面，没有「变更」面板 | §3 P2-2 |
+| 工具授权 | 只有「同意 / 拒绝」两键，没有「本会话放行」分级 | §3 P2-3 |
+| 用量与成本 | 零用量面：会话与模型条目都不显示 token 累计 | §3 P2-4 |
+| 分支 | 消息是 `parent_id` 树，重试会产生分支，界面无候选切换 | §3 P2-5 |
+| 消息操作 | 有编辑，无「编辑后重发」，无悬浮操作条 | §3 P3 |
+| 命令动作 | 面板只做**跳转**；「切模型 / 切工作区 / 跳设置」要的是**执行**，未接 | §3 P1-1 |
+| 无障碍 | 消息节点与卡片已键盘可达，其余交互仍以点击为中心 | §3 P3 |
 
-**已建成但前端未消费的后端能力**（高性价比，优先接）：`vdfs/search`、消息 `parent_id`
-分支树、`<根>/session/<id>/workdir` 会话工作区。上下文压缩**已接线**（`tauri/src/components/message/CompressionNode.vue`）；
+**已建成但前端未消费的后端能力**：`vdfs/search`（命令面板取的是 `tree`，理由见
+§10 判据 5）、消息 `parent_id` 分支树、`<根>/session/<id>/workdir` 会话工作区。
+上下文压缩**已接线**（`tauri/src/components/message/CompressionNode.vue`）；
 未消费的是压缩节点与压缩后快照随节点下发的 `meta`——缺口清单与改进方向见
 `tauri/docs/111-INTERACTION.md` 附录（不在此复述）。
 
@@ -64,10 +62,11 @@ impl: planned
 
 ## 2. 三层问题
 
-- **L1 抵达成本** — 新用户走不到第一次成功对话。冷启动要 3 次点击才见输入框；
- 没配模型时界面零提示。这是唯一的**流失漏斗**。
-- **L2 效率天花板** — 重度用户被鼠标锁死（无搜索 / 无快捷键 / 无多开），
- 且长会话性能会随消息数线性塌方（无虚拟化）。
+- **L1 抵达成本** — 新用户走不到第一次成功对话：看不到输入框、没配模型时界面零提示。
+ 这是唯一的**流失漏斗**，也是 P0 那一批的全部理由（现状见 §10：落点恒为会话目录、
+ 首启引导、空态即引导）。
+- **L2 效率天花板** — 键与列表之间仍有断层：多开没有（切会话即重挂载）、
+ 列表没有拖拽 / 右键 / 批量，且长会话性能随消息数线性塌方（无虚拟化）。
 - **L3 信任与可控** — 看不见 Agent 干了什么、看不见上下文水位、看不见花了多少。
  Agent 类产品的护城河恰在这一层。
 
@@ -133,10 +132,17 @@ impl: planned
  找不到作为目录的资源条目；理由与代价见 §10 判据 5。「切模型 / 切工作区 / 跳设置」
  这三类动作没进第一版（它们需要的是**执行**而不是跳转），仍属提案。
 
-**P1-2 键盘快捷键体系**
+**P1-2 键盘快捷键体系** ✅ 已实现（见 §10）
 - 补齐：Cmd+K 面板、Cmd+N 新会话、↑↓ 列表移动、Cmd+1..9 切类别、**Esc 停止生成**
- （现在停止只能点按钮）、Cmd+B 折叠中栏、Cmd+/ 速查。
-- 落点：新建 `composables/useHotkeys.ts`（表驱动）+ `MainLayout.vue` 全局层
+ （现在停止只能点按钮）、Cmd+/ 速查。
+- 落点：新建 `composables/useHotkeys.ts`（表驱动，**机制唯一实现**）+ 绑定就地声明
+ （`MainLayout.vue` 全局层 / `VdfsWorkbench.vue` 列表与类别 / `ModelChatPanel.vue` 停止）
+ + 新建 `components/common/HotkeySheet.vue`（速查表**渲染登记表**，不是第二份清单）
+- ⚠ **Cmd+B 折叠中栏不做**（本条是有名有姓的裁决，不是漏项）：中栏的显隐由内容决定
+ （`Workbench.vue` 的 `showList`——列表为空且右栏铺着草稿时整栏收起），没有任何
+ 「用户按一下就折叠、并记住这个选择」的形态。要做折叠得先有一个**把手**：一条窄条，
+ 点击即展开、快捷键只是它的别名。判据是反对「唯一出口是快捷键」——一个只靠组合键
+ 存在的 UI 面，用户在速查表之外没有任何办法发现它。窄条属于布局演进，不在本批。
 
 **P1-3 长会话渲染** ⚠ 风险中
 - 分两档，**先做低成本档**：
@@ -146,10 +152,11 @@ impl: planned
  `ModelChatPanel.vue:398` 的 rAF 合并、`useChatConnection.ts:218` 子树签名缓存。
  流式 + 虚拟 + 粘底是经典难点，建议独立技术验证。
 
-**P1-4 多开 / 状态保持**
-- 低档（推荐先做，成本小收益大）：`{滚动位置, 输入草稿, 折叠态}` 按 sessionId 存 store，切回还原。
+**P1-4 多开 / 状态保持** ◐ 低档已落地（见 §10），高档仍是提案
+- 低档（推荐先做，成本小收益大）：`{滚动位置, 输入草稿}` 按 sessionId 存 store，切回还原
+ ——已落地；**折叠态未纳入**（消息节点的折叠由各 `NodeShell` 自持，没有按会话的键）。
 - 高档（后议）：真多标签 + keep-alive。与 `sessionSpace` 全局单例冲突，需先评估。
-- 落点：`stores/sessions.ts`、`ChatMainPanel.vue:95-99` 的 `:key` 策略
+- 落点：`stores/sessionUiState.ts`、`ChatMainPanel.vue` 的 `:key` 策略
 
 **P1-5 导航态持久化** — 与 P0-1 合并做。
 
@@ -220,14 +227,15 @@ impl: planned
 |---|---|---|
 | （用户点名） | 详情页「进入下一级」入口**恒在最右**、图标改为「进入」形 | 位置由 `mergeDetailActions`（`schemas/vdfs-form.ts`）统一重排；图标在 `registry/vdfsIcons.ts`；左间距在 `VdfsActions.vue` |
 | P2-2（部分） | 列表筛选（当前目录内，纯投影） | `useVdfs.ts` 的 `filteredItems` / `filterEmpty` / `filterTruncated` + `VdfsWorkbench.vue` 输入与空态 |
-| P1-5 / P0-1（部分） | 导航态持久化（浏览器地址级，根不记） | `stores/nav.ts` + `router/index.ts` 默认重定向 + `MainLayout.vue` |
+| P1-5 / P0-1 | 导航态**就是浏览器地址**：刷新与深链都按地址重建，冷启动恒落会话目录（不做「回到上次位置」，理由见 P0-1 那条「为什么不做」） | `router/index.ts::coldStartPath`、`services/vdfsScheme.ts::ensureSessionMountDir`、`schemas/vdfsAddress.ts` |
 | P0-3（部分） | 空候选给出可执行去向（不深链具体目录） | `ChatOptionBar.vue` |
 | P3（两小项） | 骨架屏替代「加载中…」文字；消息节点头键盘可达 | `components/common/SkeletonBlock.vue`、`VdfsCardSkeleton.vue`；`NodeShell.vue` 的 `role="button"` + 键位 |
 
-**明确仍未做**（提案状态不变）：P1-2 快捷键体系、P1-3 长会话渲染、P1-4 多开、
+**明确仍未做**（提案状态不变）：P1-3 长会话渲染、P1-4 的高档（真多标签）、
 P2-1 上下文水位、P2-3 授权分级、P2-4 用量成本、P2-5 分支切换。
-（P0-2 引导与 P1-1 命令面板**已落地**，事实只写在 §10 一处——已实现项同时挂在
-「未做」清单和「已实现」表上，两处各说一遍就必然漂移。）
+（P0-2 引导、P1-1 命令面板、P1-2 快捷键体系**已落地**，事实只写在 §10 一处——
+已实现项同时挂在「未做」清单和「已实现」表上，两处各说一遍就必然漂移。
+Cmd+B 折叠中栏**不是漏项**，是被裁决不做，见 §3 P1-2。）
 
 **落地时确立的两条判据**（后续同类改动沿用）：
 
@@ -337,6 +345,7 @@ P2-1 上下文水位、P2-3 授权分级、P2-4 用量成本、P2-5 分支切换
 | 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |
 | 会话级 UI 状态保持：输入草稿与滚动位置按会话记忆（切走再切回不丢） | `stores/sessionUiState.ts` + `components/ModelChatPanel.vue` |
 | P1-1 命令面板（Cmd/Ctrl+K）：一次 `vdfs/tree` 取「类别 + 条目」两层，本地筛词、按类别分组、Enter 直达地址页；空词给「新建 ⟨类别⟩」动作 | `utils/palette.ts`（候选计算）+ `components/common/CommandPalette.vue` + `services/vdfs.ts` 的 `treeVdfs` + `MainLayout.vue` 的全局键 |
+| P1-2 快捷键体系：`mod+k` 面板、`mod+n` 新会话、`mod+/` 速查、`mod+1..9` 切类别、`↑↓` 列表移动、`Esc` 停止生成——机制一份、绑定就地声明、速查表渲染登记表 | `composables/useHotkeys.ts`（判键 + 三条守卫 + 派发 + `formatHotkey`）+ 三处绑定（`MainLayout.vue` / `components/vdfs/VdfsWorkbench.vue` / `ModelChatPanel.vue`）+ `components/common/HotkeySheet.vue`；每条绑定各有用例（机制、速查表、外壳、工作台、会话面板五处 spec） |
 
 **本节的判据**：
 
@@ -368,3 +377,16 @@ P2-1 上下文水位、P2-3 授权分级、P2-4 用量成本、P2-5 分支切换
  工作台进入带 `new_type` 的目录且当前没选中任何项时会自动铺好一张草稿
  （`VdfsWorkbench` 的 `autoDraftDone`），所以「新建会话」的动作目标就是 `<根>/session`。
  做出两条长得不同的入口，等于把同一件事在界面上写两遍——而第二遍没有第二份实现撑着。
+7. **快捷键的形状与「一台控件承载全部类型」是同一条纪律的两半：机制一份、绑定就地声明**。
+ 判键（`mod` 的平台差、大写锁定、必须按 Shift 才出得来键面的那几键、修饰组合恰好相等）
+ 与三条守卫只有一处实现，`when` / `run` 住在**状态所在的那个组件**：面板显隐在外壳、
+ 列表移动在工作台、这一轮跑没跑在会话面板。反例是外壳为每个页面维护一张「本页有哪些键」
+ ——页面控件卸载后那张表就是假的。登记表随挂载注销（`onScopeDispose`），
+ 于是速查表**只能**描述在场的 UI：`HotkeySheet` 渲染 `hotkeyTable()`、每次打开重读一遍，
+ 键位与说明因此不可能与绑定漂移（写死的对照表会在下一次改绑时变成假账）。
+8. **一条键的三种「让路」各挡住一种静默失效**，写错的表现为「按了没反应」，不报错：
+ **打字优先**只管裸键——带 `mod` 的组合是打不出来的字，一并让路会把命令面板挡在它的
+ 头号使用场景（正写着消息）之外；**模态让路**（`.modal-mask`，与 `BaseModal` 的类名契约）
+ 挡的是「一次 Esc 同时关掉确认框并中止会话」；**`when` 不成立 ⇒ 不吞键**挡的是死键——
+ `Ctrl+7` 在类别只有三个时必须原样留给浏览器（那是切标签页），被一条什么都不做的绑定
+ 吃掉比没有这条绑定更糟。

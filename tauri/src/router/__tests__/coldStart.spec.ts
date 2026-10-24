@@ -51,7 +51,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const ROUTER_RELOAD_TIMEOUT = 30_000
 
 const hoisted = vi.hoisted(() => ({
-  ensureSessionMountDir: vi.fn(async () => '/symbio-root/session'),
+  ensureSessionMountDir: vi.fn(async () => '@vfs/session'),
   loggerInfo: vi.fn(),
 }))
 
@@ -69,6 +69,11 @@ vi.mock('@/utils/logger', () => ({
 /** 每次取一份**全新**的 router（守卫挂在实例上，复用会串状态） */
 async function freshRouter() {
   vi.resetModules()
+  // 落点的地址换算走的是**真实现**（`vdfsBrowserPathOf`），而它读运行期根锚点。
+  // 生产里引导在挂载之前（`main.ts` 顶层 await），这里必须先把根登记上——
+  // 未引导时判不出虚拟，任何地址都只能兜底回 `/vdfs`（那正是它该做的）。
+  const { setVdfsRoot } = await import('@/schemas/vdfsRoot')
+  setVdfsRoot('@vfs')
   const mod = await import('../index')
   return mod.default
 }
@@ -77,7 +82,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   localStorage.clear()
   hoisted.ensureSessionMountDir.mockReset()
-  hoisted.ensureSessionMountDir.mockResolvedValue('/symbio-root/session')
+  hoisted.ensureSessionMountDir.mockResolvedValue('@vfs/session')
   hoisted.loggerInfo.mockClear()
 })
 
@@ -89,6 +94,22 @@ describe('冷启动落点', () => {
 
     expect(router.currentRoute.value.path).toBe('/vdfs/session')
     expect(hoisted.ensureSessionMountDir).toHaveBeenCalled()
+  }, ROUTER_RELOAD_TIMEOUT)
+
+  /**
+   * ★ 「不硬编码段名」的验收：把挂载目录换成另一个段名，落点必须跟着走。
+   *
+   * 只断言 `=== '/vdfs/session'` 的第一条用例证明不了这件事——夹具与断言写的是
+   * 同一个词，把落点改回字面量 `/vdfs/session` 它照样绿。这条换掉段名，字面量
+   * 实现立刻红。
+   */
+  it('挂载段名换了 ⇒ 落点跟着换（不是把 "session" 写死在落点里）', async () => {
+    hoisted.ensureSessionMountDir.mockResolvedValue('@vfs/chat')
+    const router = await freshRouter()
+    await router.push('/')
+    await router.isReady()
+
+    expect(router.currentRoute.value.path).toBe('/vdfs/chat')
   }, ROUTER_RELOAD_TIMEOUT)
 
   /**

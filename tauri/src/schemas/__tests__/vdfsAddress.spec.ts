@@ -10,14 +10,14 @@
  * 1. `:dir(.*)*` 的三种形态（多级数组 / 单级字符串 / 缺省空串）都能收口成
  *    「相对路径」，**空段不产生空路径段**（`['session','']` ≠ `<根>/session/`）。
  * 2. 非虚拟地址**一律兜底 `/vdfs`**：拼错的地址会静默打开一个空页面，
- *    宁可回首页也不能拼进 URL。前缀陷阱（`<根>XXX`）同样落到兜底。
+ *    宁可回首页也不能拼进 URL。前缀陷阱（`<根>XXX`）与根未引导同样落到兜底。
  * 3. 深页面判定只看 `/vdfs/` 前缀：`/vdfs` 是首页（左上角无按钮），
  *    `/vdfs/<something>` 才是 push 出来的地址页（左上角显示返回键）。
  */
 
 import { describe, expect, it } from 'vitest'
 import { isVdfsDeepPage, vdfsAddrOf, vdfsBrowserPathOf, VDFS_HOME_PATH } from '../vdfsAddress'
-import { setVdfsRoot } from '../vdfsRoot'
+import { setVdfsRoot, resetVdfsRoot } from '../vdfsRoot'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 const ROOT = '@vfs'
@@ -74,6 +74,25 @@ describe('vdfsBrowserPathOf — 数据地址 → 浏览器地址', () => {
   it('前缀陷阱：根名加后缀不算在根之下', () => {
     expect(vdfsBrowserPathOf('@vfssomething')).toBe('/vdfs')
     expect(vdfsBrowserPathOf('@vfs2/session')).toBe('/vdfs')
+  })
+
+  /**
+   * ★ 根**未引导**（`vdfsRoot()` 为空串）时的退化。
+   *
+   * 此时前缀判据 `${root}/` 正好是 `/`，而 `/` 开头是**浏览器地址自己的形状**：
+   * 不挡住就会把 `/symbio-root/session` 这类地址当成虚拟地址接成
+   * `/vdfs/symbio-root/session`——一个打不开的空页面，且没有任何报错。
+   * 「已换算过的地址」被二次换算正是它的来源（冷启动落点就吃过这个亏）。
+   */
+  it('根未引导 ⇒ 一律兜底首页（判不出虚拟就不是虚拟）', () => {
+    resetVdfsRoot()
+    try {
+      expect(vdfsBrowserPathOf('/symbio-root/session')).toBe('/vdfs')
+      expect(vdfsBrowserPathOf('@vfs/session')).toBe('/vdfs')
+      expect(vdfsBrowserPathOf('session')).toBe('/vdfs')
+    } finally {
+      setVdfsRoot(ROOT)
+    }
   })
 
   it('往返一致：地址 → 路径 → 地址', () => {

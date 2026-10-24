@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
 import VdfsView from '../views/VdfsView.vue'
 import { ensureSessionMountDir } from '../services/vdfsScheme'
+import { VDFS_HOME_PATH, vdfsBrowserPathOf } from '../schemas/vdfsAddress'
 import { logger } from '../utils/logger'
 
 const MODULE_TAG = 'router'
@@ -42,14 +43,12 @@ const MODULE_TAG = 'router'
  */
 async function coldStartPath(): Promise<string> {
   try {
-    const mountDir = await ensureSessionMountDir()
-    // 挂载目录是**数据地址**（`<根>/session`），浏览器地址要去掉根锚点前缀。
-    // `vdfsRoot()` 返回的锚点带前后斜杠，故按段裁掉第一段。
-    const segs = mountDir.split('/').filter(Boolean)
-    return segs.length > 1 ? `/vdfs/${segs.slice(1).join('/')}` : '/vdfs'
+    // 挂载目录是**数据地址**（`<根>/session`），浏览器地址换算只有
+    // `vdfsBrowserPathOf` 一处实现——这里曾自己按段裁根锚点，那是第二份实现。
+    return vdfsBrowserPathOf(await ensureSessionMountDir())
   } catch (e) {
     logger.info(MODULE_TAG, 'cold start: session mount unresolved, falling back to /vdfs', e)
-    return '/vdfs'
+    return VDFS_HOME_PATH
   }
 }
 

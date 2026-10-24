@@ -87,7 +87,13 @@
         </button>
       </div>
 
-      <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
+      <div
+        ref="listRef"
+        class="vdfs-list"
+        role="listbox"
+        aria-label="资源列表"
+        @scroll.passive="onListScroll"
+      >
         <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
              （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
         <VdfsCard
@@ -191,10 +197,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
 import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
+import { useHotkeys } from '@/composables/useHotkeys'
 import { useVdfs } from '@/composables/useVdfs'
 import { getVdfsRenderer, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
@@ -371,6 +378,69 @@ function onListScroll(e: Event) {
   if (!el) return
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) void loadMore()
 }
+
+// ==================== 键盘（绑定声明在这里，机制在 useHotkeys） ====================
+
+const listRef = ref<HTMLElement | null>(null)
+
+/**
+ * 焦点是否落在这份列表里。
+ *
+ * ↑↓ 是**列表局部的键**，不是全局的：焦点在详情栏、在聊天输入框时把它抢走会直接
+ * 破坏滚动/输入。判据因此是「焦点在本控件的列表容器内」，而不是「本页是 VDFS 页」。
+ */
+function listHasFocus(): boolean {
+  const active = document.activeElement
+  return Boolean(active && listRef.value?.contains(active))
+}
+
+/**
+ * 焦点在卡片之间移动（不改变选中）。
+ *
+ * 只挪焦点、不开详情，是 listbox 的常规分工：移动是浏览，`Enter` 才是决定
+ * （卡片自己已绑 `keydown.enter` → 选中）。焦点越界时**停住**不绕回：长列表里
+ * 绕回会把人甩到看不见的位置，比多按一次键更糟。
+ */
+function moveCardFocus(step: number) {
+  const cards = Array.from(listRef.value?.querySelectorAll<HTMLElement>('.vdfs-card') ?? [])
+  if (cards.length === 0) return
+  const active = document.activeElement as HTMLElement | null
+  const at = active ? cards.indexOf(active) : -1
+  // 焦点在容器本身（不在任何卡片上）⇒ 从这一头进场
+  const next = at < 0 ? (step > 0 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, at + step))
+  cards[next].focus()
+}
+
+useHotkeys('vdfs-workbench', [
+  {
+    id: 'rail-category',
+    keys: 'mod+digit',
+    group: '导航',
+    label: '切到第 N 个类别（左栏顺序）',
+    // 第 N 个类别不存在 ⇒ 这个数字还给浏览器（Ctrl+7 是切标签页）
+    when: (e) => Number(e.key) >= 1 && Number(e.key) <= navItems.value.length,
+    run: (e) => {
+      const it = navItems.value[Number(e.key) - 1]
+      if (it) onRailSelect(it.key)
+    },
+  },
+  {
+    id: 'list-down',
+    keys: 'down',
+    group: '资源列表',
+    label: '下一条',
+    when: listHasFocus,
+    run: () => moveCardFocus(1),
+  },
+  {
+    id: 'list-up',
+    keys: 'up',
+    group: '资源列表',
+    label: '上一条',
+    when: listHasFocus,
+    run: () => moveCardFocus(-1),
+  },
+])
 
 /**
  * 详情「浏览内部」/ open-container：钻入容器目录的数据地址

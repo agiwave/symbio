@@ -48,10 +48,14 @@ export function vdfsAddrOf(rel: string | string[] | undefined | null): string {
  * 数据地址 → 浏览器地址。
  *
  * ⚠️ 非虚拟地址兜底 `/vdfs`：宁可回首页，也不把外来地址拼进 URL。
+ * ⚠️ 根**未引导**时同样兜底：此时前缀判据退化成「以 `/` 开头」，而那正是
+ *    **浏览器地址**自己的形状——外来地址会被当成虚拟地址接出去，得到一个
+ *    谁也打不开的空页面。判不出虚拟就不是虚拟。
  */
 export function vdfsBrowserPathOf(addr: string): string {
   const root = vdfsRoot()
   const a = (addr ?? '').trim()
+  if (!root) return VDFS_HOME_PATH
   if (a === root) return VDFS_HOME_PATH
   if (a.startsWith(`${root}/`)) return `${VDFS_HOME_PATH}/${a.slice(root.length + 1)}`
   return VDFS_HOME_PATH

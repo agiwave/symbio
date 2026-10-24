@@ -19,20 +19,25 @@
     <!-- 首启引导（全 App 仅渲染一次；可见性由自己的 store 决定，
          且只在「该做的事还没做」时自动弹——见 stores/onboarding） -->
     <Onboarding />
-    <!-- 全局命令面板（Cmd/Ctrl+K）：显隐只由下面这个全局键决定，不放进任何 store
-         ——面板是本壳的职责（本文件是唯一持有它的人），SECOND source of truth 无益 -->
+    <!-- 全局命令面板（Cmd/Ctrl+K）：显隐只由快捷键表决定，不放进任何 store
+         ——面板是本壳的职责（本文件是唯一持有它的人），第二份真相无益 -->
     <CommandPalette :visible="paletteOpen" @close="paletteOpen = false" />
+    <!-- 快捷键速查（Cmd+/）：内容直接读登记表，所以它永远不会和真实键位不一致 -->
+    <HotkeySheet :visible="sheetOpen" @close="sheetOpen = false" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterView } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
 import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
 import { startSessionInboxSync, registerInboxMount } from '@/stores/sessionInboxSync'
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
+import { ensureSessionMountDir } from '@/services/vdfsScheme'
+import { dispatchHotkeys, useHotkeys } from '@/composables/useHotkeys'
+import { vdfsBrowserPathOf } from '@/schemas/vdfsAddress'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -40,25 +45,67 @@ import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
 import Onboarding from '@/components/common/Onboarding.vue'
 import CommandPalette from '@/components/common/CommandPalette.vue'
+import HotkeySheet from '@/components/common/HotkeySheet.vue'
 
+const router = useRouter()
 const sessions = useSessionsStore()
 
 /**
- * 命令面板的显隐（全 App 唯一一份）。
+ * 全局浮层的显隐（全 App 唯一一份）。
  *
- * 键盘口径沿用仓内既有那一条（`CodeEditor` 的 Ctrl+S）：`(ctrlKey || metaKey)`——
- * mac 上是 ⌘K、Windows/Linux 上是 Ctrl+K，一条判断覆盖两个平台。
+ * 不进任何 store：本文件是唯一持有它们的人，第二份真相无益。关闭一律走
+ * `BaseModal` 自己的 `Esc` / 点遮罩——快捷键在模态里让路（守卫 2），所以
+ * 「再按一次关掉」这条路**不存在**，写了也是一条永不命中的死分支。
  */
 const paletteOpen = ref(false)
+const sheetOpen = ref(false)
 
-function onGlobalKeydown(e: KeyboardEvent) {
-  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
-  // 按**字符**而不是物理键位（`e.code`）判：非美式布局用户的肌肉记忆跟着字母走
-  if (e.key.toLowerCase() !== 'k') return
-  // 拦下浏览器默认（Chrome 的 Ctrl+K = 聚焦地址栏搜索）
-  e.preventDefault()
-  paletteOpen.value = !paletteOpen.value
-}
+/**
+ * 会话类别目录（**认出来的**，不是写死的 `/vdfs/session`）。
+ *
+ * 段名由后端 provider 决定；`ensureSessionMountDir` 是「某个类别挂在哪」的唯一实现。
+ * 认不出时 `sessionDir` 留空 ⇒ Cmd+N 的 `when` 不成立 ⇒ 那个组合键原样还给浏览器，
+ * 而不是变成一条什么都不做的死键。
+ */
+const sessionDir = ref('')
+
+/**
+ * 这张表是**快捷键的唯一登记处**，也是速查面板的唯一信源。
+ *
+ * 只有跨页面的动作挂在这里；页面局部的键（列表 ↑↓、类别数字）由拥有那份状态的
+ * 控件自己登记（`VdfsWorkbench`），停止生成由聊天面板登记（`ModelChatPanel`）。
+ * 判键、守卫、派发的机制全在 `composables/useHotkeys.ts`，这里只声明「按了做什么」。
+ */
+useHotkeys('main-layout', [
+  {
+    id: 'palette',
+    keys: 'mod+k',
+    group: '全局',
+    label: '打开命令面板（全库直达）',
+    run: () => {
+      paletteOpen.value = true
+    },
+  },
+  {
+    id: 'hotkey-sheet',
+    keys: 'mod+/',
+    group: '全局',
+    label: '看快捷键速查',
+    run: () => {
+      sheetOpen.value = true
+    },
+  },
+  {
+    id: 'new-session',
+    // 与命令面板的「新建会话」同一个目的地：会话类别目录。进入带 `new_type` 的
+    // 目录且未选中任何项时，工作台会自动铺一张草稿（`VdfsWorkbench` 的 autoDraft）。
+    keys: 'mod+n',
+    group: '会话',
+    label: '新建会话',
+    when: () => Boolean(sessionDir.value),
+    run: () => void router.push(vdfsBrowserPathOf(sessionDir.value)),
+  },
+])
 
 /**
  * 当前空间的会话挂载目录一变，就向三个实时消费端各登记一次。
@@ -154,13 +201,19 @@ onMounted(async () => {
   // 不阻塞任何启动流程——它只是浮层，数据侧照旧自己拉。
   void useOnboardingStore().maybeOpen()
 
-  // 全局键：命令面板（Cmd/Ctrl+K）。挂在这里而不是某个页面里，是因为面板是
-  // **跨页面**的——在会话页、在模型页、在子空间里都该按得出来。
-  window.addEventListener('keydown', onGlobalKeydown)
+  // Cmd+N 的前提（会话类别在哪）在这里认一次；认不出就留空，那条键让给浏览器。
+  ensureSessionMountDir()
+    .then((dir) => {
+      sessionDir.value = dir
+    })
+    .catch((e) => logger.info('MainLayout', 'Cmd+N 未启用：会话挂载点没认出来', e))
 })
 
+// 全局键监听：装在 setup 里、拆在 unmount，与上面那张表的注册期**同宽**
+// （`useHotkeys` 走 onScopeDispose，作用域一结束绑定就消失）。
+window.addEventListener('keydown', dispatchHotkeys)
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('keydown', dispatchHotkeys)
 })
 </script>
 
