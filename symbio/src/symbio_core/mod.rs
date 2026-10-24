@@ -6,6 +6,11 @@
 mod actors;
 mod adapters;
 mod assembly;
+// **Agent 包的权限声明与它的执行方**（DE-011 §5.3 / D-153）：写侧只有 agent 插件
+// （它扫描 Agent 目录），读侧是一堆互不相认的宿主工具（web 三工具 / vdfs 九工具），
+// 插件之间互相不可见 ⇒ 声明形状与判据必须作共享设施住 core（与 `capability::error`
+// 同一条归属规则）。
+mod agent;
 // **本机授权表**（谁持有什么能力 + 可见域）——与下面 `governance` 的机制同住一棵模块树：
 // 表与判定分家的唯一坏处是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
 // 表整块是架构元素，故保留 `authz` 命名空间、`pub(crate)` 开给全 crate（不进对外公开面，
@@ -126,6 +131,20 @@ pub use view::Budget;
 // 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
 // `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
 pub use actors::{ActorSpec, Pattern};
+// ── Agent 权限声明（DE-011 §5.3 / D-153）──────────────────────────────────
+//
+// 消费方三个：agent 插件（写侧，解析 manifest 发布作用域）、session 的能力收集
+// 管线（建槽 + 把槽挂回轮 ctx）、web / vdfs 两族工具（读侧判定）。跨插件且互不
+// 相认 ⇒ `pub use` 出根（C-002 禁深引域目录）。
+//
+// 出根的只有这五个：glob 的匹配与合法性不出根（经 `AgentPermissions` 的
+// `path_allowed` / `check_globs` 两个方法给出），「发布」也不出根（
+// `AgentScope::publish` 方法）——单消费方的自由函数不占根出口（C-003），
+// 判据与写协议随类型走，不各占一个名字。
+//
+// `AgentScope` 带目录根（文件闸要判物理路径），不可序列化 ⇒ `WIRE = false`，
+// 与 `CAPABILITY_ERRORS` 同一条理由。
+pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 // 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
 // （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
 // `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，

@@ -6,9 +6,19 @@
 //!
 //! 未知字段**一律忽略**（§5.1 向前兼容），解析因此用 `#[serde(default)]` 而非
 //! `deny_unknown_fields`。
+//!
+//! ## `permissions` 现在是**执行面**（D-153）
+//!
+//! 四个字段（`network` / `fs.read` / `fs.write` / `limits`）同批有执行方：
+//! 出站域名在 `web` 三工具发请求前判、glob 在 `vdfs` 路径入口判、限额在装载期判。
+//! 语义是 **grant（列了才能用，空清单即拒）**，不是「上限」——判据与边界见
+//! [`crate::symbio_core::agent`] 模块文档。字段名因此从 `declared_permissions`
+//! 改回 `permissions`（D-140 的两态之名：没有执行方时叫 declared，有了就叫本名）。
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+use crate::symbio_core::AgentPermissions;
 
 /// 本宿主支持的协议主版本（`requires.spec: "^2"` 的判定基准，§10）
 pub const SPEC_MAJOR: u64 = 2;
@@ -42,18 +52,23 @@ pub struct AgentManifest {
     #[serde(skip_serializing_if = "Requires::is_empty")]
     pub requires: Requires,
 
-    /// **声明性质**的权限清单（§5.3）：包作者与宿主之间的沟通面，**不是安全边界**。
+    /// 权限声明（§5.3）——**有执行方**：网络域名在 `web` 三工具出站前判、
+    /// 文件 glob 在 `vdfs` 路径入口判、资源限额在装载期判。
     ///
-    /// 运行期没有任何一处代码读它——四个字段（`fs` / `network` / `limits`）都没有
-    /// 执行方。字段名因此回到「它到底是什么」：`declared_permissions`。
-    /// 宿主侧真正的边界是授权表（[D-099](../../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）
-    /// 与审批闸（[D-068](../../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-068-审批闸门住在能力注册的收口点defaulttoolvisitorregister判据一份入口两处 "DE-008-能力注册表与能力坐标系")）；
-    /// 为什么不在这里补执行方、以及补的时候要满足什么，见
-    /// [D-102](../../../../../docs/003-design/011-Agent目录规范.md#d-102-agent-权限声明当前无执行方字段改回声明性质补齐须四字段同批 "DE-011-Agent目录规范")。
+    /// 语义是 **grant**：列了才能用，空清单即一律拒（与授权表同一条 fail-closed
+    /// 纪律）。`glob` 相对 Agent 目录根判定（§4.3），只管**这个包自己的目录**。
+    /// 完整判据、被否候选与「哪些面不在守」（shell / MCP / 模型往返）见
+    /// [`crate::symbio_core::agent`] 与
+    /// [D-153](../../../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")。
     ///
-    /// **线格式不变**（`permissions`）：改名的是 Rust 侧语义，不是 Agent 包的公开键。
-    #[serde(rename = "permissions", skip_serializing_if = "Permissions::is_empty")]
-    pub declared_permissions: Permissions,
+    /// **线格式不变**（`permissions`）：它一直是 Agent 包的公开键；Rust 侧曾按
+    /// 「没有执行方」改名 `declared_permissions`（D-102），执行面落地后改回本名
+    /// （D-140 的两态之名）。
+    #[serde(
+        rename = "permissions",
+        skip_serializing_if = "AgentPermissions::is_empty"
+    )]
+    pub permissions: AgentPermissions,
 }
 
 /// **版本匹配判定（接入门槛，§10）**
@@ -87,82 +102,6 @@ impl Requires {
     }
 }
 
-/// 权限声明
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Permissions {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub host_apis: Vec<String>,
-    #[serde(skip_serializing_if = "NetworkPerms::is_empty")]
-    pub network: NetworkPerms,
-    #[serde(skip_serializing_if = "FsPerms::is_empty")]
-    pub fs: FsPerms,
-    #[serde(skip_serializing_if = "Limits::is_empty")]
-    pub limits: Limits,
-}
-
-impl Permissions {
-    fn is_empty(&self) -> bool {
-        self.host_apis.is_empty()
-            && self.network.is_empty()
-            && self.fs.is_empty()
-            && self.limits.is_empty()
-    }
-}
-
-/// 网络权限：出网域名白名单
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct NetworkPerms {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub domains: Vec<String>,
-}
-
-impl NetworkPerms {
-    fn is_empty(&self) -> bool {
-        self.domains.is_empty()
-    }
-}
-
-/// 文件系统权限：Agent 目录内的 glob 范围
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct FsPerms {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub read: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub write: Vec<String>,
-}
-
-impl FsPerms {
-    fn is_empty(&self) -> bool {
-        self.read.is_empty() && self.write.is_empty()
-    }
-}
-
-/// 运行限额
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Limits {
-    pub max_tools: usize,
-    pub max_prompt_bytes: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_tools: 32,
-            max_prompt_bytes: 65_536,
-        }
-    }
-}
-
-impl Limits {
-    fn is_empty(&self) -> bool {
-        false
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 读取与校验
 // ═══════════════════════════════════════════════════════════════════════════
@@ -187,7 +126,14 @@ pub fn load(dir: &Path) -> Option<AgentManifest> {
 /// **加载期校验（§10）**。返回 `Err` 即拒绝接入，错误信息写明双侧版本。
 ///
 /// 校验项：`spec` 必须是 `agent-dir/v2`；`id` 合字符集；`requires.spec` 与宿主
-/// 主版本匹配。缺失 / 不合规则一律拒绝——**不静默降级为无人格的通用助手**。
+/// 主版本匹配；`permissions.fs` 的 glob 合法（§5.1：不得含 `..`）。缺失 / 不合规则
+/// 一律拒绝——**不静默降级为无人格的通用助手**。
+///
+/// glob 为什么在装载期判：它现在是**执行面**的输入（`vdfs` 路径入口照它放行），
+/// 一个含 `..` 的 glob 会让整份读 / 写清单失去意义（`../..` + `**` = 整个磁盘）。
+/// 装载期拒，而不是运行期逐次拒——后者要把同一个判据抄进每一个调用点。
+/// 判据本身住 [`AgentPermissions::check_globs`]（core，与 glob 匹配同源），
+/// 本函数是它在 manifest 侧的调用点。
 pub fn validate(m: &AgentManifest) -> Result<(), String> {
     if m.spec != super::plugin::SPEC_V2 {
         return Err(format!(
@@ -219,6 +165,7 @@ pub fn validate(m: &AgentManifest) -> Result<(), String> {
             }
         ));
     }
+    m.permissions.check_globs()?;
     Ok(())
 }
 

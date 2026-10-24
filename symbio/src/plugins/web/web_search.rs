@@ -1,5 +1,6 @@
 //! Web 搜索工具 - 实现 Tool trait
 
+use super::net_guard::{agent_network_allowed, extract_host};
 use super::web_config::WebConfig;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
@@ -47,7 +48,11 @@ impl WebSearchTool {
         }
     }
 
-    async fn execute_inner(&self, args: &Value) -> PluginInvokeResponse<Value> {
+    async fn execute_inner(
+        &self,
+        args: &Value,
+        agent_scope: Option<&crate::symbio_core::AgentScope>,
+    ) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -79,6 +84,23 @@ impl WebSearchTool {
                 cfg.serper_api_key.clone(),
             )
         };
+
+        // ── 第三道闸：出站主机须在 Agent 声明的域名白名单里（D-153）──
+        //
+        // 上游主机 = 「走哪家」×「有没有配 `search_api_base`」，三者都在上面这一块
+        // 里定下来了，所以在分支**之前**算一次、判一次——三个分支各判一遍会得到
+        // 三份同形代码，而漏一个分支就是「同一个 Agent，Tavily 能搜、Serper 不能」。
+        // 数据照样经这个主机出境（查询内容 + API key），所以它和 `web_fetch` 的
+        // 模型自选主机同案，不因「主机由宿主配置决定」而豁免。
+        let official = if tavily_api_key.is_some() {
+            TAVILY_OFFICIAL_BASE
+        } else if serper_api_key.is_some() {
+            SERPER_OFFICIAL_BASE
+        } else {
+            DUCKDUCKGO_OFFICIAL_BASE
+        };
+        let upstream = format!("{}/search", upstream_base(&base, official));
+        agent_network_allowed(&extract_host(&upstream)?, agent_scope)?;
 
         // 优先使用 Tavily
         if let Some(api_key) = tavily_api_key
@@ -403,9 +425,10 @@ impl Capability for WebSearchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let data = self.execute_inner(&args).await?;
+        let scope = crate::symbio_core::agent_perms_of(ctx.as_ref());
+        let data = self.execute_inner(&args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

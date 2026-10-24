@@ -5,9 +5,11 @@
 use super::*;
 
 use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::AgentScope;
 use crate::symbio_core::{CapabilityRow, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
 use crate::symbio_core::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
 use async_trait::async_trait;
+use serde_json::json;
 use std::sync::Mutex;
 
 /// 记录收到地址的虚拟层替身（各操作全部直通，便于断言门面转出来的内部口径）
@@ -233,4 +235,183 @@ async fn missing_root_degrades_to_empty_virtual_layer() {
     let vdfs = ToolVdfs::new(visitor);
     let items = vdfs.list(&ctx(), ".vdfsv2").await.unwrap();
     assert!(items.is_empty(), "无容器 = 无资源类别，但仍是一棵合法的树");
+}
+
+// ── Agent 权限路径闸（D-153）──────────────────────────────────────────────
+//
+// 判据落在 `ToolVdfs` 这一个入口上（九个工具共用），所以反向用例也只需要一条：
+// **越界必拒，且请求根本没有到 provider**（`seen` 空）——后者是「零副作用」的
+// 可观测形状：闸门在派发之前，不是拦在落盘那一刻。
+
+/// 带权限作用域的请求上下文（agent 插件发布的那一份的直接等价物）。
+fn agent_ctx(
+    id: &str,
+    root: &std::path::Path,
+    perms: serde_json::Value,
+) -> Arc<dyn PluginInvokeRequest> {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let scope = AgentScope {
+        id: id.to_string(),
+        root: root.to_path_buf(),
+        permissions: serde_json::from_value(perms).expect("声明可解析"),
+    };
+    ctx.set(
+        crate::symbio_core::AGENT_PERMS,
+        std::sync::Arc::new(std::sync::OnceLock::from(scope)),
+    );
+    ctx
+}
+
+/// 自己包里的路径按 glob 判：清单外的一律拒，且**不触达**虚拟层。
+#[tokio::test]
+async fn a_path_outside_the_declared_globs_never_reaches_the_provider() {
+    let rec = Rec::new();
+    let vdfs = tool_with_root(rec.clone()).await;
+    let ctx = agent_ctx(
+        "reviewer",
+        std::path::Path::new("/nowhere/agent/reviewer"),
+        json!({ "fs": { "read": ["assets/**"] } }),
+    );
+
+    // 清单内：放行
+    vdfs.read(&ctx, ".vdfsv2/agent/reviewer/assets/icon.svg")
+        .await
+        .unwrap();
+    // 清单外：拒。人格文件与根本身（条目概览）都不在 `assets/**` 里。
+    for bad in [
+        ".vdfsv2/agent/reviewer/AGENTS.md",
+        ".vdfsv2/agent/reviewer", // 根本身（条目概览）也要读权限
+    ] {
+        let err = vdfs.read(&ctx, bad).await.unwrap_err();
+        assert!(
+            matches!(err, VdfsError::Forbidden(_)),
+            "{bad} 应为拒绝（实际: {err:?}）"
+        );
+        assert!(
+            err.to_string().contains("fs.read"),
+            "拒绝理由须点名是哪个清单：{err}"
+        );
+    }
+    // **别人的包**不归本声明管（没有谁的 manifest 能描述别人的树）：照常放行。
+    // 这是作用域边界，不是漏洞——把它写进用例，免得下一个人以为是漏判。
+    vdfs.read(&ctx, ".vdfsv2/agent/other/AGENTS.md")
+        .await
+        .unwrap();
+    assert_eq!(
+        rec.seen(),
+        vec!["agent/reviewer/assets/icon.svg", "agent/other/AGENTS.md"],
+        "被拒的请求一个都没到 provider 那儿（零副作用）"
+    );
+}
+
+/// 读与写是两份清单：能读不代表能写（人格文件可读不可写是这个字段的典型形状）。
+#[tokio::test]
+async fn read_and_write_lists_are_judged_separately() {
+    let rec = Rec::new();
+    let vdfs = tool_with_root(rec.clone()).await;
+    let ctx = agent_ctx(
+        "reviewer",
+        std::path::Path::new("/nowhere/agent/reviewer"),
+        json!({ "fs": { "read": ["**"], "write": ["memory/**"] } }),
+    );
+
+    vdfs.read(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md")
+        .await
+        .unwrap();
+    let err = vdfs
+        .write(
+            &ctx,
+            ".vdfsv2/agent/reviewer/AGENTS.md",
+            &VdfsContent::text("改写我"),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("fs.write"), "{err}");
+    // 写清单内：放行（子智能体改自己的记忆是声明出来的能力，不是漏洞）。
+    vdfs.write(
+        &ctx,
+        ".vdfsv2/agent/reviewer/memory/AGENTS.md",
+        &VdfsContent::text("新记忆"),
+    )
+    .await
+    .unwrap();
+    // edit / delete / mkdir 都走写侧（`edit` 先读后写，两关都要过）。
+    assert!(vdfs
+        .edit(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md", "a", "b")
+        .await
+        .is_err());
+    assert!(vdfs
+        .delete(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md", false)
+        .await
+        .is_err());
+    assert!(vdfs
+        .mkdir(&ctx, ".vdfsv2/agent/reviewer/skill")
+        .await
+        .is_err());
+    assert_eq!(
+        rec.seen(),
+        vec![
+            "agent/reviewer/AGENTS.md",       // 读（读清单放行）
+            "agent/reviewer/memory/AGENTS.md", // 写（写清单放行）
+        ],
+        "写侧三次调用只有清单内那次到了 provider；edit 连它的 read 都没发生——         闸门在派发之前，不在落盘那一刻"
+    );
+}
+
+/// 空清单 = 一个授权都没要：自己包里**任何**路径都拒（fail-closed）。
+#[tokio::test]
+async fn an_empty_fs_list_denies_the_whole_package() {
+    let rec = Rec::new();
+    let vdfs = tool_with_root(rec.clone()).await;
+    let ctx = agent_ctx(
+        "reviewer",
+        std::path::Path::new("/nowhere/agent/reviewer"),
+        json!({}),
+    );
+    assert!(vdfs
+        .read(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md")
+        .await
+        .is_err());
+    assert!(rec.seen().is_empty(), "一个都没放行");
+}
+
+/// 没有选中 Agent（宿主态）⇒ 闸门恒过：没有 manifest 可声明。
+/// 与「选中了但声明为空 ⇒ 全拒」是两件事，这条用例钉住这个区别。
+#[tokio::test]
+async fn no_agent_scope_means_host_mode() {
+    let rec = Rec::new();
+    let vdfs = tool_with_root(rec.clone()).await;
+    vdfs.read(&ctx(), ".vdfsv2/agent/reviewer/AGENTS.md")
+        .await
+        .unwrap();
+    assert_eq!(rec.seen(), vec!["agent/reviewer/AGENTS.md"]);
+}
+
+/// 换成**物理绝对路径**必须同案：模型从概览的 `dir` 属性看得见真实目录，
+/// 「绕过虚拟地址直读磁盘」不能成为一条旁路。
+#[tokio::test]
+async fn a_physical_path_into_the_package_is_judged_too() {
+    let dir = std::env::temp_dir().join(format!("symbio-perms-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("memory")).unwrap();
+    std::fs::write(dir.join("AGENTS.md"), "人格").unwrap();
+    std::fs::write(dir.join("memory/AGENTS.md"), "记忆").unwrap();
+
+    let rec = Rec::new();
+    let vdfs = tool_with_root(rec.clone()).await;
+    let ctx = agent_ctx("reviewer", &dir, json!({ "fs": { "read": ["memory/**"] } }));
+    // 物理层要求 workdir（`call_params` 透传）：闸门判的是绝对路径，但放行后的
+    // 派发照样走物理通道，不能不給。
+    ctx.set(WORKDIR, dir.to_string_lossy().into_owned());
+    // 绝对路径落在包里：清单外 ⇒ 拒（`AGENTS.md` 不在 `memory/**` 里）。
+    let abs = dir.join("AGENTS.md");
+    assert!(vdfs.read(&ctx, &abs.to_string_lossy()).await.is_err());
+    // 清单内 ⇒ 过（`memory/AGENTS.md`）。
+    vdfs.read(&ctx, &dir.join("memory/AGENTS.md").to_string_lossy())
+        .await
+        .unwrap();
+    // 目录外的绝对路径不归它管：闸门放行，物理层照常读（它确实存在）。
+    let outside = std::env::temp_dir().join(format!("symbio-outside-{}.txt", std::process::id()));
+    std::fs::write(&outside, "包外").unwrap();
+    vdfs.read(&ctx, &outside.to_string_lossy()).await.unwrap();
+    let _ = std::fs::remove_file(&outside);
 }

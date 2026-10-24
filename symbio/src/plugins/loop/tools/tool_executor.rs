@@ -307,6 +307,11 @@ pub async fn execute_tool_async(
     tool_ctx.set(crate::symbio_core::WORKDIR, workdir);
     tool_ctx.set(crate::symbio_core::AGENT_ID, agent_id);
     tool_ctx.set(crate::symbio_core::SESSION_ID, session_id);
+    // `AGENT_PERMS`（D-153 的权限作用域）**不在这里显式设**：`fork()` 已把它从轮
+    // ctx 复制过来（收集期由 agent 插件发布、`collect_capabilities` 挂回），而
+    // 「缺席」与「空作用域」必须原样区分——前者是宿主态（无 manifest 可声明），
+    // 后者是被发布过的空声明。上面三行显式重设是因为它们要把 `None` 归一成空串，
+    // 这一行没有那种需求。
     tool_ctx.set(crate::symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
     // 流式工具（如 shell）据此 id 广播增量帧：与 result_msg_id 占位节点同 id，
     // 前端按 role=tool 全量替换合并；最终哨兵帧被捕获为工具结果。

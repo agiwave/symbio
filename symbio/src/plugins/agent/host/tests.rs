@@ -340,6 +340,164 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
     );
 }
 
+/// `permissions.limits` 两字段的装载期反向用例（D-153：限额是**装载期**判据，
+/// 超限即整轮拒载，不是运行时截断）。
+///
+/// 两条判据落在收集期错误通道（与 §10 门槛同一条路）：`max_prompt_bytes` 在转发
+/// **之前**判（人格文件现成，越界即拒，此时连作用域都没发布）；`max_tools` 只能在
+/// 子树遍历**之后**判（工具数只有遍历完才知道），所以作用域已发布——但整轮随
+/// 收集期错误中止，注册进来的行随轮丢弃，等价于拒载。
+#[tokio::test]
+async fn declared_limits_reject_the_agent_at_load_time() {
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("heavy");
+    std::fs::create_dir_all(&sub).unwrap();
+    // 声明一个 AGENTS.md 必然超过的提示词上限（现写 60+ 字节）
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"heavy\"\nname: \"重\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n\
+         permissions:\n  limits:\n    max_prompt_bytes: 16\n    max_tools: 32\n",
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("AGENTS.md"),
+        "你是重智能体：这句话的长度远远超过自己声明的十六字节上限。",
+    )
+    .unwrap();
+    // 一个技能：让子树真的贡献工具（第二条限额判据的读数来源）
+    let skill_dir = sub.join("skill").join("demo");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: demo\ndescription: 演示技能\n---\n\n# 演示\n",
+    )
+    .unwrap();
+
+    let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
+        &agent_root,
+        PLUGIN_ID_AGENT,
+    )));
+    let (ctx, manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("heavy"));
+
+    plugin
+        .clone()
+        .traverse(String::new(), ctx.clone())
+        .await
+        .unwrap();
+
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
+    assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
+    assert!(
+        errors[0].message.contains("拒绝接入") && errors[0].message.contains("max_prompt_bytes"),
+        "错误应点名提示词限额: {:?}",
+        errors[0]
+    );
+    // 先判限额、后发布作用域：这一轮被拒时作用域**不得**已发布
+    //（否则下游会拿着一个「已被拒」的授权当放行依据）
+    assert!(
+        ctx.get(crate::symbio_core::AGENT_PERMS).is_none(),
+        "提示词限额不过时不得发布作用域"
+    );
+    // 子树工具没有意义地注册进来（整轮将被丢弃），但技能段也不得注入人格
+    let names: Vec<String> = capability_prompts(&*manager)
+        .await
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert!(
+        !names.iter().any(|n| n.starts_with("agent/heavy/")),
+        "被拒的 Agent 不得贡献任何前缀能力: {names:?}"
+    );
+}
+
+/// `max_tools` 超限：遍历完才知道数，判据落在同一趟收集的末尾——整轮拒载。
+#[tokio::test]
+async fn declared_tool_limit_rejects_after_the_subtree_is_counted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("toolheavy");
+    std::fs::create_dir_all(&sub).unwrap();
+    // 工具上限 0：只要子树贡献了**任何**工具就越界（默认值是 32，这里显式收紧）
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"toolheavy\"\nname: \"多\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n\
+         permissions:\n  limits:\n    max_tools: 0\n",
+    )
+    .unwrap();
+    std::fs::write(sub.join("AGENTS.md"), "你是多工具智能体。").unwrap();
+    let skill_dir = sub.join("skill").join("demo");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: demo\ndescription: 演示技能\n---\n\n# 演示\n",
+    )
+    .unwrap();
+
+    let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
+        &agent_root,
+        PLUGIN_ID_AGENT,
+    )));
+    let (ctx, manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("toolheavy"));
+
+    plugin
+        .clone()
+        .traverse(String::new(), ctx.clone())
+        .await
+        .unwrap();
+
+    // 先证明子树**真的贡献了工具**（否则「超限」可能是空树造成的假象）
+    let contributed = tool_metas_of(&manager).await;
+    assert!(
+        contributed
+            .iter()
+            .any(|c| c.name.starts_with("agent_toolheavy_")),
+        "子树应先贡献带前缀的工具，实际：{:?}",
+        contributed.iter().map(|c| &c.name).collect::<Vec<_>>()
+    );
+
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
+    assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
+    assert!(
+        errors[0].message.contains("拒绝接入") && errors[0].message.contains("max_tools"),
+        "错误应点名工具数限额: {:?}",
+        errors[0]
+    );
+    // 作用域在转发前就已发布（顺序设计：限额不过 ⇒ 整轮拒载，注册随轮丢弃），
+    // 所以这里**不断言**槽为空——只断言整轮走的是错误通道。
+}
+
+/// 限额**达标**时静默通过（反向用例的对照：判据不是恒拒）。
+#[tokio::test]
+async fn declared_limits_that_are_met_let_the_agent_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("light");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"light\"\nname: \"轻\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n\
+         permissions:\n  limits:\n    max_prompt_bytes: 65536\n    max_tools: 32\n",
+    )
+    .unwrap();
+    std::fs::write(sub.join("AGENTS.md"), "你是轻智能体。").unwrap();
+
+    let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
+        &agent_root,
+        PLUGIN_ID_AGENT,
+    )));
+    let (ctx, _manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("light"));
+
+    plugin
+        .clone()
+        .traverse(String::new(), ctx.clone())
+        .await
+        .unwrap();
+
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
+    assert!(errors.is_empty(), "限额达标不应有收集期错误: {errors:?}");
+}
+
 /// 钻进 v2 子智能体根（`agent/<id>`）应**穿过挂载点**列出子 composite 的根视图，
 /// 因此与父（系统）根完全一致——只显示可见插件，`root_hidden` 的配置型挂载点
 /// （gateway/web/telegram/local/work）不出现在侧边栏。这正是「父只显示可见、

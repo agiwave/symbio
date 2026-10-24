@@ -45,6 +45,9 @@ pub struct SubAgentVisitor {
     inner: Arc<dyn Registry>,
     /// 智能体 id（目录名）
     agent_id: String,
+    /// 本作用域登记进来的**工具数**（`max_tools` 限额的读数，见
+    /// [`Self::tool_count`]）。只数工具行——提示词段 / 选项行不是「工具」。
+    tools: std::sync::atomic::AtomicUsize,
 }
 
 impl SubAgentVisitor {
@@ -52,7 +55,13 @@ impl SubAgentVisitor {
         Self {
             inner,
             agent_id: agent_id.into(),
+            tools: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// 本作用域贡献的工具数（装载期 `max_tools` 判据的读数）。
+    pub fn tool_count(&self) -> usize {
+        self.tools.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 提示词段的名字：`agent/<id>/<段名>`
@@ -162,6 +171,8 @@ impl Registry for SubAgentVisitor {
             return;
         };
         let name = self.tool(&cap.name());
+        self.tools
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.inner
             .put(CapabilityRow::tool(
                 Arc::new(PrefixedCapability { inner: cap, name }) as Arc<dyn Capability>,

@@ -46,6 +46,7 @@
 
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
+use crate::symbio_core::AgentScope;
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
@@ -65,6 +66,13 @@ use std::sync::Arc;
 /// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既
 /// 列不出来也挂不上（见 [`super::store::AgentDirStore::load_record`]）。
 pub(crate) const SPEC_V2: &str = "agent-dir/v2";
+
+/// 人格文件名（规范 §6：`AGENTS.md` 承载「它是谁」与「它记得什么」）。
+///
+/// 子树里的 `memory` 实例按同一个名字读它，但**两边不同源**：这是规范约定的
+/// 文件名（包结构的一部分），不是跨插件契约——插件之间不互相 import
+/// （`plugins/mod.rs` 架构原则），各持一份字面量正是那条原则的代价，可接受。
+const AGENTS_MD: &str = "AGENTS.md";
 
 /// Agent 插件主结构（宿主接入层）。
 pub struct AgentPlugin {
@@ -169,10 +177,65 @@ impl AgentPlugin {
         Some(tree)
     }
 
+    /// 解析选中 Agent 的**权限作用域**（manifest → 运行期事实）。
+    ///
+    /// 这是全仓唯一能把 `agent_id` 变成一份声明的地方（目录由本插件持有），
+    /// 所以发布也发生在这里（D-153）：读侧是一堆互不相认的宿主工具
+    /// （`web` / `vdfs`），它们只认 ctx 上的共享槽。
+    ///
+    /// 与 [`Self::sub_agent`] 各读一次 manifest：那边要的是插件树（带缓存），
+    /// 这边要的是声明（每轮一次，轻）。合成一个返回值会逼 `vdfs` 的
+    /// `sub_vfs`（它只要树）也背上声明，那是给一个不需要的消费方加耦合。
+    pub(crate) fn scope_of(&self, id: &str) -> Option<AgentScope> {
+        let record = AgentDirStore::new(self.dir().dir()).get(id)?;
+        Some(AgentScope {
+            id: record.manifest.id.clone(),
+            root: record.dir.clone(),
+            permissions: record.manifest.permissions.clone(),
+        })
+    }
+
+    /// 装载期限额判定之一（`max_prompt_bytes`，**超限即拒载，不是运行时截断**）。
+    ///
+    /// 返回 `Err(reason)` = 拒绝接入，理由直接进收集期错误桶（与 §10 门槛同一条
+    /// 通道：整轮中止并明确报错，不静默降级）。
+    ///
+    /// 判的是包作者**自己声明的上限**——人格文件（`AGENTS.md`，规范 §6）超了它
+    /// 自己写的数，这个包自相矛盾；接进来只会在注入时才发现，那时已经晚了。
+    pub(crate) fn check_prompt_limit(&self, scope: &AgentScope) -> Result<(), String> {
+        let bytes = std::fs::metadata(scope.root.join(AGENTS_MD))
+            .map(|m| m.len() as usize)
+            .unwrap_or(0);
+        if scope.permissions.prompt_bytes_ok(bytes) {
+            return Ok(());
+        }
+        Err(format!(
+            "{AGENTS_MD} 有 {bytes} 字节，超过 manifest 声明的 permissions.limits.max_prompt_bytes（{}）",
+            scope.permissions.limits.max_prompt_bytes
+        ))
+    }
+
+    /// 装载期限额判定之二（`max_tools`）：子树遍历完才能数（工具由子树里的
+    /// 插件各自注册），所以判据落在**同一趟收集的末尾**——没有更早的时刻知道
+    /// 这个数。超限时整轮随收集期错误中止，注册进来的行随轮丢弃，等价于拒载。
+    pub(crate) fn check_tool_limit(&self, scope: &AgentScope, count: usize) -> Result<(), String> {
+        if scope.permissions.tools_ok(count) {
+            return Ok(());
+        }
+        Err(format!(
+            "贡献了 {count} 个工具，超过 manifest 声明的 permissions.limits.max_tools（{}）",
+            scope.permissions.limits.max_tools
+        ))
+    }
+
     /// 把能力收集转发进子 Agent 的插件树
     ///
     /// 注册经 [`super::scope::SubAgentVisitor`] 代理（加来源前缀），因此与系统树的
     /// 同名注册**不冲突**，两份都生效——并集，且结果与遍历顺序无关。
+    ///
+    /// 返回值 = 本作用域贡献的**工具数**（`max_tools` 限额的读数；提示词段 /
+    /// 选项行不计数）。拿计数不放便条：`Registry` trait 上没有「按作用域问行数」
+    /// 的口，而代理层正是唯一知道「哪些行是本作用域」的那一层。
     ///
     /// ## 跨作用域必须改写上下文（与系统链路的 `VDFS_PARENT_ADDR` 同理）
     ///
@@ -201,7 +264,7 @@ impl AgentPlugin {
         id: &str,
         ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn Registry>,
-    ) {
+    ) -> usize {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
         // 清空而非继承：父作用域的选中 id 由**父**的 store 解析；带进来只会被本层的
@@ -212,13 +275,18 @@ impl AgentPlugin {
             VDFS_PARENT_ADDR,
             descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), id),
         );
-        let scoped: Arc<dyn Registry> =
+        // 具体类型的 Arc 与 trait object 的 Arc **同指一个对象**：ctx 里放后者
+        // （消费方只认 trait），遍历完读前者的计数——不引入 downcast，也不必给
+        // `Registry` 加一个「按作用域问行数」的口。
+        let scoped: Arc<super::scope::SubAgentVisitor> =
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
-        sub.set(CAPABILITY_VISITOR, scoped.clone());
+        let scoped_dyn: Arc<dyn Registry> = Arc::clone(&scoped) as Arc<dyn Registry>;
+        sub.set(CAPABILITY_VISITOR, scoped_dyn);
 
         if let Err(e) = tree.clone().traverse(String::new(), sub).await {
             crate::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
         }
+        scoped.tool_count()
     }
 
     pub fn metadata() -> PluginMeta {
@@ -368,8 +436,40 @@ impl Plugin for AgentPlugin {
             match self.sub_agent(&agent_id, &ctx).await {
                 // 子 Agent 是一棵 composite 插件树，能力经代理层并集进来
                 Some(tree) => {
-                    self.forward_to_sub_agent(&tree, &agent_id, &ctx, &tool_visitor)
-                        .await
+                    // 权限作用域：**先判限额、再发布、再转发**。顺序是设计过的——
+                    // 限额不过 ⇒ 整轮拒载，此时还没有任何工具被放行；发布必须早于
+                    // 转发，子树里若有插件在收集期就要读作用域（今天没有，但顺序
+                    // 不该依赖「今天没有」）。
+                    let Some(scope) = self.scope_of(&agent_id) else {
+                        capability_report_error(
+                            &ctx,
+                            PLUGIN_ID_AGENT,
+                            format!("智能体 `{agent_id}` 拒绝接入：manifest 不可解析"),
+                        )
+                        .await;
+                        return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+                    };
+                    if let Err(reason) = self.check_prompt_limit(&scope) {
+                        capability_report_error(
+                            &ctx,
+                            PLUGIN_ID_AGENT,
+                            format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
+                        )
+                        .await;
+                        return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+                    }
+                    scope.publish(&ctx);
+                    let contributed = self
+                        .forward_to_sub_agent(&tree, &agent_id, &ctx, &tool_visitor)
+                        .await;
+                    if let Err(reason) = self.check_tool_limit(&scope, contributed) {
+                        capability_report_error(
+                            &ctx,
+                            PLUGIN_ID_AGENT,
+                            format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
+                        )
+                        .await;
+                    }
                 }
                 // §10：不匹配必须拒绝接入，且不得静默降级为「无人格的通用助手」。
                 // 走到这里说明目录没有可接入的 manifest，错误信息写明双侧版本。

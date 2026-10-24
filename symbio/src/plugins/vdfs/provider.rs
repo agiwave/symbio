@@ -7,12 +7,17 @@
 //! vdfs_* 工具 ──▶ ToolVdfs（取根 + 透传 workdir）──▶ UnifiedFs ──▶ 虚拟层 / 物理层
 //! ```
 //!
-//! ## 本层只做两件事
+//! ## 本层只做三件事
 //!
 //! 1. **取虚拟层根**：从持有的 `Registry` 里取容器注册的组合根
 //!    （[`host::root_of`]），与前端链路取到的是**同一个根**；
 //! 2. **透传调用级参数**：把请求 ctx 的运行时状态（workdir）翻译成 provider 的
-//!    约定键（[`call_params`]），两条链路共用同一份翻译。
+//!    约定键（[`call_params`]），两条链路共用同一份翻译；
+//! 3. **Agent 权限路径闸**（[`Self::entry`]）：地址落在**当前 Agent 自己的包**里时，
+//!    按它 manifest 声明的 `fs.read` / `fs.write` glob 判（D-153）。
+//!
+//! 第 3 条是九个工具**共用**的执行面：判据放在这一个入口上，而不是每个工具各抄
+//! 一遍——漏一个工具就是「列得出、读不到」的同形事故（本模块文档里记着那次）。
 //!
 //! 地址规则、两半分流、路径回填、根守卫**全部在 [`UnifiedFs`] 一处**，
 //! 本文件不再重复实现——这也是它最需要的收敛：不在这里做的
@@ -21,7 +26,7 @@
 //!
 //! `host::root_of`
 
-use super::fs::UnifiedFs;
+use super::fs::{UnifiedFs, VDFS_ADDR_ROOT};
 use super::host::call_params;
 use super::protocol::{VdfsEditResponse, VdfsSearchResult};
 use crate::symbio_core::vdfs_context;
@@ -97,11 +102,48 @@ impl ToolVdfs {
         Self { visitor }
     }
 
+    /// **路径闸**（D-153）：地址落在当前 Agent 自己的包里时，按它的 glob 判。
+    ///
+    /// 判据三句话：
+    /// - 没有选中 Agent（宿主态）⇒ 恒过——没有 manifest 可声明；
+    /// - 地址不在自己包里（别人的包 / 用户工作目录）⇒ 恒过——不归本声明管；
+    /// - 在自己包里 ⇒ 按 `fs.read` / `fs.write` 判，**空清单即拒**。
+    ///
+    /// `..` 不在这里单独判：`normalize_addr` 已全局拒穿（地址规则的第一道），
+    /// manifest 里的 glob 含 `..` 在装载期就拒了（`manifest::validate`）。
+    fn ensure_allowed(
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        path: &str,
+        write: bool,
+    ) -> VdfsResult<()> {
+        let Some(scope) = crate::symbio_core::agent_perms_of(ctx.as_ref()) else {
+            return Ok(());
+        };
+        let Ok(addr) = super::fs::normalize_addr(path) else {
+            // 地址本身不合法：交给下游出一致的错，不在这里抢先报第二种错。
+            return Ok(());
+        };
+        if scope.path_allowed_addr(VDFS_ADDR_ROOT, &addr, write) {
+            return Ok(());
+        }
+        Err(VdfsError::Forbidden(format!(
+            "智能体 `{}` 的 permissions.fs.{} 未覆盖 `{addr}`（glob 相对 Agent 目录根，空清单 = 无授权）",
+            scope.id,
+            if write { "write" } else { "read" },
+        )))
+    }
+
     /// 本次调用的统一文件系统（虚拟层根来自容器注册，物理层是磁盘）
-    async fn fs(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> (DynVdfsProvider, VdfsContext) {
+    async fn entry(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        path: &str,
+        write: bool,
+    ) -> VdfsResult<(DynVdfsProvider, VdfsContext)> {
+        Self::ensure_allowed(ctx, path, write)?;
         let root = super::host::root_of(&self.visitor).await;
         let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(root));
-        (fs, vdfs_context(ctx).with_params(call_params(ctx)))
+        Ok((fs, vdfs_context(ctx).with_params(call_params(ctx))))
     }
 
     /// 列出目录的直接子节点（**条目** = 地址 + 节点）
@@ -110,7 +152,7 @@ impl ToolVdfs {
         ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
     ) -> VdfsResult<Vec<VdfsItem>> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, false).await?;
         fs.dispatch(&vctx, path, VdfsRequest::List {})
             .await?
             .into_list()
@@ -123,7 +165,7 @@ impl ToolVdfs {
         ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
     ) -> VdfsResult<VdfsNode> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, false).await?;
         fs.dispatch(&vctx, path, VdfsRequest::Stat)
             .await?
             .into_stat()
@@ -136,7 +178,7 @@ impl ToolVdfs {
         ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
     ) -> VdfsResult<VdfsContent> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, false).await?;
         fs.dispatch(&vctx, path, VdfsRequest::Read)
             .await?
             .into_read()
@@ -150,7 +192,7 @@ impl ToolVdfs {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, true).await?;
         audit_outside_workdir(ctx, &vctx, "write", path);
         fs.dispatch(
             &vctx,
@@ -171,7 +213,7 @@ impl ToolVdfs {
         path: &str,
         recursive: bool,
     ) -> VdfsResult<()> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, true).await?;
         audit_outside_workdir(ctx, &vctx, "delete", path);
         fs.dispatch(&vctx, path, VdfsRequest::Delete { recursive })
             .await?
@@ -181,7 +223,7 @@ impl ToolVdfs {
 
     /// 新建目录
     pub async fn mkdir(&self, ctx: &Arc<dyn PluginInvokeRequest>, path: &str) -> VdfsResult<()> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, true).await?;
         audit_outside_workdir(ctx, &vctx, "mkdir", path);
         fs.dispatch(&vctx, path, VdfsRequest::Mkdir)
             .await?
@@ -198,7 +240,7 @@ impl ToolVdfs {
         old_string: &str,
         new_string: &str,
     ) -> VdfsResult<VdfsEditResponse> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, true).await?;
         audit_outside_workdir(ctx, &vctx, "edit", path);
         super::host::edit_via(&fs, &vctx, path, old_string, new_string).await
     }
@@ -211,7 +253,7 @@ impl ToolVdfs {
         path: &str,
         pattern: &str,
     ) -> VdfsResult<VdfsSearchResult> {
-        let (fs, vctx) = self.fs(ctx).await;
+        let (fs, vctx) = self.entry(ctx, path, false).await?;
         super::host::search_via(&fs, &vctx, path, pattern).await
     }
 }

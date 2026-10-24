@@ -76,6 +76,11 @@ pub async fn collect_capabilities(
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     traverse_ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager.clone());
     capability_init_error_bucket(&traverse_ctx);
+    // Agent 权限作用域槽（D-153）：agent 插件在 traverse 里发布（它是唯一能把
+    // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
+    // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
+    // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
+    crate::symbio_core::agent_perms_init_slot(&traverse_ctx);
 
     if let Err(e) = parent
         .clone()
@@ -93,6 +98,11 @@ pub async fn collect_capabilities(
     // （`fork()` 会拷贝 extensions 快照，子 ctx 后续的写入不会自动回流）
     if let Some(bucket) = traverse_ctx.get(CAPABILITY_ERRORS) {
         ctx.set(CAPABILITY_ERRORS, bucket);
+    }
+    // 权限作用域同理（同一个 Arc，不复制内容）：没有发布 = 本会话没选中 Agent，
+    // 工具侧按宿主态处理。
+    if let Some(slot) = traverse_ctx.get(crate::symbio_core::AGENT_PERMS) {
+        ctx.set(crate::symbio_core::AGENT_PERMS, slot);
     }
 
     manager

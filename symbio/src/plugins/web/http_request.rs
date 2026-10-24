@@ -1,6 +1,6 @@
 //! HTTP 请求工具 - 实现 Tool trait
 
-use super::net_guard::{extract_host, is_private_or_local_host};
+use super::net_guard::{agent_network_allowed, extract_host, is_private_or_local_host};
 use super::web_config::WebConfig;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
@@ -33,7 +33,11 @@ impl HttpRequestTool {
         }
     }
 
-    async fn execute_inner(&self, args: &Value) -> PluginInvokeResponse<Value> {
+    async fn execute_inner(
+        &self,
+        args: &Value,
+        agent_scope: Option<&crate::symbio_core::AgentScope>,
+    ) -> PluginInvokeResponse<Value> {
         let url = args
             .get("url")
             .and_then(|v| v.as_str())
@@ -49,6 +53,11 @@ impl HttpRequestTool {
 
         // 验证 URL
         let validated_url = Self::validate_url(url, &allowed_domains)?;
+
+        // Agent 声明的出站白名单（第三道闸，D-153）。放在宿主白名单**之后**：
+        // 两个清单取交集——宿主说「这些站能去」、Agent 说「这些站我要去」，
+        // 少任何一票都不发。
+        agent_network_allowed(&extract_host(&validated_url)?, agent_scope)?;
 
         // 验证方法
         let http_method = self.validate_method(method)?;
@@ -247,9 +256,10 @@ impl Capability for HttpRequestTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let data = self.execute_inner(&args).await?;
+        let scope = crate::symbio_core::agent_perms_of(ctx.as_ref());
+        let data = self.execute_inner(&args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

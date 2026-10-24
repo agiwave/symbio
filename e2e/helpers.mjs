@@ -827,13 +827,19 @@ export async function resumeSession(cli, sid, targetId, action, payload = {}, me
  *   就是 agent 目录，因此它会给本空间的会话注入这一段）；
  * - `model/<id>/provider.json`——子树的 `model` 插件读**自己的目录**，
  *   「子智能体有自己的模型服务」因此不是声明，而是必须落在这个包里的事实。
+ *
+ * `permissions`：可选的 `permissions:` YAML 块原文（块内缩进由调用方给足，
+ * 从 `permissions:` 那一行开始）。不给 = 清单里没有权限段 = **零授权**
+ * （D-153 的 grant 语义：空清单即拒）——多数用例要的就是这个形状，
+ * 少数要验「声明了真放行」的用例才显式给块。
  */
-export function makeAgentDir(homedir, { id, name = id, persona = '', providerId, providerPort }) {
+export function makeAgentDir(homedir, { id, name = id, persona = '', providerId, providerPort, permissions = null }) {
   const dir = join(homedir, 'agent', id);
   mkdirSync(dir, { recursive: true });
+  const permBlock = permissions ? `${permissions}\n` : '';
   writeFileSync(
     join(dir, 'manifest.yaml'),
-    `spec: "agent-dir/v2"\nid: "${id}"\nname: "${name}"\nversion: "1.0.0"\nrequires:\n  spec: "^2"\n`,
+    `spec: "agent-dir/v2"\nid: "${id}"\nname: "${name}"\nversion: "1.0.0"\nrequires:\n  spec: "^2"\n${permBlock}`,
   );
   writeFileSync(join(dir, 'AGENTS.md'), persona);
   const pdir = join(dir, 'model', providerId);

@@ -1,6 +1,6 @@
 //! Web 获取工具 - 实现 Tool trait
 
-use super::net_guard::{extract_host, is_private_or_local_host};
+use super::net_guard::{agent_network_allowed, extract_host, is_private_or_local_host};
 use super::web_config::WebConfig;
 use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
@@ -22,7 +22,11 @@ impl WebFetchTool {
         Self { config }
     }
 
-    async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
+    async fn execute_inner(
+        &self,
+        args: Value,
+        agent_scope: Option<&crate::symbio_core::AgentScope>,
+    ) -> Result<Value, PluginError> {
         let url = args
             .get("url")
             .and_then(|v| v.as_str())
@@ -48,6 +52,10 @@ impl WebFetchTool {
                 "阻止本地/私有主机: {host}"
             )));
         }
+
+        // Agent 声明的出站白名单（第三道闸，D-153）——在**发请求之前**判，
+        // 拒绝时连接尚未建立，靶子侧零痕迹。
+        agent_network_allowed(&host, agent_scope)?;
 
         // 创建客户端
         let client = reqwest::Client::builder()
@@ -144,9 +152,10 @@ impl Capability for WebFetchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let result = self.execute_inner(args).await?;
+        let scope = crate::symbio_core::agent_perms_of(ctx.as_ref());
+        let result = self.execute_inner(args, scope.as_ref()).await?;
         Ok(serde_json::to_value(&result)?)
     }
 }

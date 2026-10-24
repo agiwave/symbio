@@ -165,7 +165,20 @@ export const BASELINE = {
   // 新增 2 条（2148 → 2150）：读史窗口落地（`D-151`）——`the_history_window_keeps_only_the_newest_facts`
   // （切法是留最新、切点在下标 0、刚好一窗不切）与 `memories_older_than_the_window_wait_for_a_later_round`
   // （窗外更旧的记忆本轮不压缩，反向：同样四条放回窗口里立刻合并）。
-  rustTests: 2150,
+  // 新增 31 条（2150 → 2181）：Agent 权限四字段执行面落地（`D-153`）——
+  // ① `symbio_core/agent/tests.rs` 17 条：glob 段语义（`*` 不跨段 / `**` 跨段 /
+  //   `?` 单字符 / 空路径只被 `**` 与 `.` 命中）、空清单即拒、读 / 写两清单独立判、
+  //   域名标签边界（`evil-example.com` 不中 `*.example.com`）、limits 缺省值恒判、
+  //   作用域只管自己的包（兄弟目录 `<root>-evil` 不算里面）、虚拟与物理两种路径形态同案、
+  //   ctx 共享槽经 fork 往返、重复发布被忽略、无槽 = 宿主态；
+  // ② `manifest.test.rs` 3 条：空 `permissions` 块合法且等于零授权、越包 glob 装载期拒、
+  //   `host_apis` 往返不丢（改名 `declared_permissions` → `permissions` 那条是重命名，0 净增）；
+  // ③ `web/net_guard.test.rs` 3 条：宿主态恒过、空清单恒拒、清单内放行 / 清单外拒；
+  // ④ `vdfs/provider.test.rs` 5 条：越界必拒且 provider 零收到、读 / 写两清单分别判、
+  //   空清单全拒、无 scope = 宿主态、物理绝对路径同案；
+  // ⑤ `agent/host/tests.rs` 3 条：`max_prompt_bytes` 超限即拒且作用域未发布、
+  //   `max_tools` 遍历后才判（子树真贡献了工具才超）、限额达标静默放行。
+  rustTests: 2181,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
@@ -179,7 +192,8 @@ export const BASELINE = {
   // `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: S04 调度者与租约的同一增量在 CI 口径下修一格（1437→1443），逐条归属见上方 `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: 读史窗口的同一增量在 CI 口径下修一格（1443→1445），逐条归属见上方 `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 1445,
+  // baseline-allow ciRustTestsTotal: Agent 权限四字段执行面的同一增量在 CI 口径下修一格（1445→1476）——31 条判据全落在 symbio lib 目标（`symbio_core/agent/tests.rs` 与四个 `*.test.rs`），`--workspace` 求和同样 +31。逐条归属见上方 `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 1476,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -195,7 +209,7 @@ export const BASELINE = {
   verifyNegatives: 4,
   // baseline-allow e2eCases: 批 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // 增 t76（召回可见域）。
-  e2eCases: 80,
+  e2eCases: 81,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，

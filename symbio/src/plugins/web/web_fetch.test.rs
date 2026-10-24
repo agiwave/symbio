@@ -27,7 +27,7 @@ async fn private_and_local_targets_are_rejected_before_any_request() {
         "http://db.internal/",
     ] {
         let err = t
-            .execute_inner(json!({ "url": bad }))
+            .execute_inner(json!({ "url": bad }), None)
             .await
             .expect_err(&format!("应拒绝：{bad}"));
         assert!(
@@ -43,7 +43,7 @@ async fn invalid_scheme_is_rejected() {
     let t = tool();
     for bad in ["ftp://example.com", "file:///etc/passwd"] {
         let err = t
-            .execute_inner(json!({ "url": bad }))
+            .execute_inner(json!({ "url": bad }), None)
             .await
             .expect_err(&format!("应拒绝：{bad}"));
         assert!(err.to_string().contains("只支持 HTTP/HTTPS"));
