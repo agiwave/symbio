@@ -6,7 +6,7 @@ status: todo
 created: 2026-10-24
 track: impl
 prio: later
-deps: [T-301-DE014决策锚点归位]
+deps: []
 parent: T-299-冗余清偿批
 where: symbio/src/symbio_core/chat/ · scripts/grep-audit.mjs · docs/003-design/001-核心架构.md
 exit: '一条 `### D-NNN` 写明：末档形态（`role` 退出 wire 后读写两侧各剩什么——读侧 `node_role()` 的折叠是不是唯一读者、写侧入口 `with_role` / `set_legacy_role` 收敛到哪几个调用点）、退役分档（按模块或按入口，每档给出可判的完成形状）、以及与 D-069 / D-079 的关系（`principal.kind` 是权威，`role` 是遗留投影）；清偿第一批落地后 `grep-audit` 的 S-014 基线由 146 下调到**实测值**并在基线注释里写明档位；新代码新增直写仍红（棘轮只降不升不变）。'

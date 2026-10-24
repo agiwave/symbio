@@ -1030,3 +1030,47 @@ test('本仓当前登记自洽，且每类 kind 都读到了条目', () => {
     'SP-001 必须在（RG-011 的对账对象）',
   )
 })
+
+test('RG-033：退场档只剩锚点与指向——正文超预算即红，active 的长文与只剩锚点的退场档都绿', () => {
+  // 240 行正文 = 远超「裁决锚点 + 指向」的量；判据只看行数，不看它写了什么
+  const longBody = (title) => `# ${title}\n\n` + Array.from({ length: 240 }, (_, i) => `第 ${i} 行正文。`).join('\n') + '\n'
+
+  const over = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      status: 'retired',
+      reason: '目标形状并入 DE-002，锚点保留原址作为宿主',
+      body: longBody('标题 A'),
+    }),
+  })
+  expectOnly(errsOf(over), /RG-033 退场档正文 \d+ 行，超过 200 行预算/)
+  // 错误信息要把两条去处说全，否则第一次真用只会看到「超预算」而不知道删到哪
+  assert.match(errsOf(over)[0], /裁决锚点与指向/)
+  assert.match(errsOf(over)[0], /reason/)
+
+  // 反向一：同一份长正文，`active` 不判——预算只约束退场档（在位文档本来就要承载设计）
+  const active = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      body: longBody('标题 A'),
+    }),
+  })
+  assert.deepEqual(errsOf(active), [], 'active 文档不受退场预算约束')
+
+  // 反向二：退场但只剩锚点与指向 ⇒ 绿（这正是 D-145 的终态形状）
+  const short = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
+      kind: 'design',
+      id: 'DE-001-a',
+      title: '标题 A',
+      status: 'retired',
+      reason: '目标形状并入 DE-002，锚点保留原址作为宿主',
+      body: '# 标题 A\n\n> 已退场，只留裁决锚点。\n',
+    }),
+  })
+  assert.deepEqual(errsOf(short), [], '几十行的退场档不判')
+})

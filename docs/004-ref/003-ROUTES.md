@@ -129,7 +129,7 @@ lists: [route-contracts=owner]
 > **停用 `loop` ⇒ 该地址 `NotFound`、不再开新轮**；在飞的轮持有交付包与端口的 `Arc`，
 > 存活期长于插件实例，会在有限时间内收敛（守卫用例见
 > [`composite.test.rs`](../../symbio/src/plugins/composite/composite.test.rs)）。
-> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[D-086](../003-design/014-单环一表.md "DE-014-单环一表") §8）。
+> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[D-086](../003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表")）。
 
 ---
 

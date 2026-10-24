@@ -48,7 +48,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031 RG-032
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031 RG-032 RG-033
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -66,6 +66,15 @@ export const COMMON_REQUIRED = ['kind', 'id', 'title', 'status', 'created']
  *   （子任务的前置是别的任务，同时它是大任务的一部分），互不替代。
  */
 export const COMMON_OPTIONAL = ['deps', 'parent', 'lists', 'projection']
+
+/**
+ * 退场档文档的正文预算（行，RG-033 / D-145）：几十行足够写「裁决锚点 + 指向」。
+ *
+ * 为什么按行数而不是按小节名判：小节名是自由文本，判不出「这段是设计还是指向」；
+ * 行数是**它在承载多少东西**的代理，且不因改写措辞而失效。历史正文的正确去处是
+ * `git log` 与 `docs/archive/`，不是一份标着「不再算数」却仍可照抄的文档。
+ */
+const RETIRED_MAX_BODY_LINES = 200
 
 /**
  * `lists` 的 role 词表（RG-026 封闭）：**只有 `owner`——我维护这份清单**。
@@ -1050,6 +1059,24 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
             '（`impl` 档位 / `### D-NNN`），再删掉这个文件；若有条目的 `deps` 指向它，' +
             '同一提交里把那条边摘掉（RG-006：已闭环的编号不再是前置）',
         )
+      }
+    }
+    // RG-033：**退场档只剩锚点与指向**——退场文档的正文不得再承载设计（D-145）。
+    // 判据的形状：退场是「这篇不再算数」，历史在 `git log` 与 `docs/archive/`；一份
+    // 退场文档若还揣着几百行目标设计，读者会照它施工，而它已经不作数了——「retired」
+    // 于是只剩一个标签。预算按行数判：留下的是裁决锚点与指向，几十行足够。
+    // 文档类的 `retired` 是在位归档（编号 = 路径、被引用着），与 RG-031 的「收口即删」不重合。
+    {
+      const retired = cfg.retiredStates ?? []
+      if (retired.includes(meta.status)) {
+        const lines = e.body.split('\n').length
+        if (lines > RETIRED_MAX_BODY_LINES) {
+          out.push(
+            `${e.rel}：RG-033 退场档正文 ${lines} 行，超过 ${RETIRED_MAX_BODY_LINES} 行预算` +
+              '——退场文档只留裁决锚点与指向：目标设计段删除、结论已并入谁写进 `reason`；' +
+              '历史归 `git log` 与 `docs/archive/`（D-145）',
+          )
+        }
       }
     }
     // RG-032：**锚必须可核对**——字段里指到 `.gitignore` 覆盖的路径即红。

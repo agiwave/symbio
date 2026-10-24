@@ -5,7 +5,7 @@
  * ## 它守什么
  *
  * 「单文档 + 元信息 + 自动汇总」这套顶层机制的**全部强制力**都在这里（判据码
- * RG-001…RG-032，逐条语义与消息住 `registry-lib`，登记表见 `docs/004-ref/GATE_CODES.md`）：
+ * RG-001…RG-033，逐条语义与消息住 `registry-lib`，登记表见 `docs/004-ref/GATE_CODES.md`）：
  *
  *   - **RG-001** front-matter 可解析（受限 YAML 子集），未知 / 重复字段按 kind 判；
  *   - **RG-002** 必填字段非空（kind 只来自 front-matter，目录不参与判定）；
@@ -53,6 +53,10 @@
  *   - **RG-032** **锚必须可核对**：`evidence` / `where` / `exit` 里的仓内路径若被
  *     `.gitignore` 覆盖（`tmp` / `logs` / `.workbuddy-ai` 一类），报错并指名命中的规则——
  *     这类地址清一次临时目录就没了，写进判据等于把证据押在不进 git 的地方。
+ *   - **RG-033** **退场档只剩锚点与指向**：`retired` 文档的正文超过预算行数即红——
+ *     退场是「这篇不再算数」，历史归 `git log` 与 `docs/archive/`；留着一份几百行的
+ *     目标设计，读者会照它施工。被引用的裁决因此靠「宿主身份」活下来（`reason` 写明
+ *     目标形状并入何处 / 锚点为何留此），不靠把它硬留在 `active` 档（D-145）。
  *
  * ## 失效形态
  *
@@ -106,7 +110,7 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-032） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-033） ---']
   const docsDir = path.join(root, 'docs')
   const { entries, projections, kinds, errors, notes, missing } = loadEntries(root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }
