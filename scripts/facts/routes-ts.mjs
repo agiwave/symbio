@@ -53,8 +53,20 @@ const HEADER = `/**
  *
  * 命名与后端 \`symbio_core/plugin/route.rs\` 同构：\`ROUTE_\` + 地址大写（\`/\` → \`_\`），
  * 同名同值，跨栈检索只需一个标识符。
+ *
+ * ## 未用常量为什么留着（契约面，不是生成器偷懒）
+ *
+ * 本文件是前后端路由的**全量镜像**：前端当前只调用其中一部分，其余是契约的另一半。
+ * 删掉它们不会让系统更干净——只会让「前端第一次要用某条地址」时必须先手写字符串，
+ * 而那正是这份生成物要消灭的东西。\`dead-code-audit\` 的 R-003 按下一行的文件头声明
+ * 承认本文件的未用导出：**口径写在生成器里**，所以重新生成不会把这句话冲掉。
  */
 `;
+
+/** R-003 文件头承认（契约面）。改口径要同时改上面那段说明——两处必须说同一句话 */
+const WAIVER =
+  '// dead-code-allow R-003: 前后端路由契约的全量镜像——未用常量是契约的另一半，删掉它们等于让前端第一次用某条地址时必须手写字符串（owner: scripts/facts/routes-ts.mjs 生成，route() 的 match 臂是唯一注册处）';
+
 
 /** 按首段（插件目录名）分组——常量表是用来**查**的，分组即索引 */
 function groupByPrefix(routes) {
@@ -69,7 +81,7 @@ function groupByPrefix(routes) {
 
 /** 纯函数：路由清单 → 文件内容。导出给回归测试（测试不应触发写盘） */
 export function render(routes) {
-  const L = [HEADER];
+  const L = [HEADER, WAIVER, ""];
   for (const [prefix, group] of groupByPrefix(routes)) {
     L.push(`// ==================== ${prefix} ====================`);
     L.push("");

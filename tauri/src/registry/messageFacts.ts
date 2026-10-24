@@ -310,24 +310,16 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
 // 枚举字面量（`facets.role === 'user'`、`c.type === 'skeleton'`）——每个组件都
 // 得 `import` 一份枚举值，「什么算 user/骨架」的口径散在视图层。收进注册表后：
 // **组件只问谓词，不再持有枚举字面量**，判据改了只动这里（与 exit 判据 3、
-// 「加呈现变体不改组件」同一纪律）。facets 版读判定入参，node 版读原始节点
-// （经 `messageRoleOf` / `messageTypeOf` 同一归一，供父扫子节点用）。
+// 「加呈现变体不改组件」同一纪律）。
+//
+// 只留**真有消费方**的谓词：`isSkeletonFacet` / `isUserNode` / `isSkeletonNode` 曾经
+// 在这里「备用」，全仓零引用——没有消费方也没有 owner 的谓词不是契约，是第三态，
+// 已删（`dead-code-audit` 的 R-003 现在会拦这种形态）。要用时再加，那时它就有了第一个
+// 调用点，加的成本与删的成本一样低。
 
 /** 该 facet 是用户发言（`role = user`）。 */
 export const isUserFacet = (f: Pick<MessageFacets, 'role'>): boolean =>
   f.role === CHAT_ROLE_USER
-
-/** 该 facet 是容器骨架（`type = skeleton`，一整轮或一次工具调用同构）。 */
-export const isSkeletonFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
-  f.type === NODE_KIND_SKELETON
-
-/** 原始节点是否用户发言（role 格先、principal.kind 兜底同一折叠）。 */
-export const isUserNode = (n: Pick<ChatNode, 'role' | 'principal'>): boolean =>
-  messageRoleOf(n) === CHAT_ROLE_USER
-
-/** 原始节点折叠后是否容器骨架（父扫子节点、区分「过程段」用）。 */
-export const isSkeletonNode = (n: Pick<ChatNode, 'type'>): boolean =>
-  messageTypeOf(n) === NODE_KIND_SKELETON
 
 // ==================== 后端 `meta` 字段 → UI 语义 ====================
 //
@@ -488,9 +480,7 @@ export function messageRetryTargetOf(
   return { action: RESUME_ACTION_RETRY_SUBTREE, targetId: node.parent_id || node.id }
 }
 
-/** 后端失败类别：可补充参数（其余类别只能原样重试） */
-export const MESSAGE_FAILURE_KIND_ERROR = 'error'
-/** 后端失败类别：本批剩余调用被跳过，实际未执行（见后端 `not_executed_result`） */
+// 后端失败类别：本批剩余调用被跳过，实际未执行（见后端 `not_executed_result`）
 export const MESSAGE_FAILURE_KIND_NOT_EXECUTED = 'not_executed'
 /** 后端失败类别：中止收口（用户终止，工具未跑完） */
 export const MESSAGE_FAILURE_KIND_ABORTED = 'aborted'

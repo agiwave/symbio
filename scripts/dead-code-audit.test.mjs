@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 //   <root>/symbio/src/*.rs                    （Rust 侧被检对象）
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
-function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec = null } = {}) {
+function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec = null, ts = {} } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dead-code-audit-'))
   try {
     fs.mkdirSync(path.join(root, 'tauri/src'), { recursive: true })
@@ -23,7 +23,16 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec
       path.join(root, 'tauri/index.html'),
       '<script type="module" src="/src/main.ts"></script>\n',
     )
-    fs.writeFileSync(path.join(root, 'tauri/src/main.ts'), 'export const app = 1\n')
+    // 前端夹具：`ts` 里每份文件都从 `main.ts` 静态 import 一次，好让它们进**可达集**
+    // （L1 依赖图只扫可达文件——没被 import 的文件根本不会进 R-003 的判定面）。
+    const imports = Object.keys(ts).map((name) => `import './${name}'`)
+    fs.writeFileSync(
+      path.join(root, 'tauri/src/main.ts'),
+      [...imports, 'const app = 1', 'console.log(app)'].join('\n') + '\n',
+    )
+    for (const [name, src] of Object.entries(ts)) {
+      fs.writeFileSync(path.join(root, 'tauri/src', name), src)
+    }
     fs.mkdirSync(path.join(root, 'symbio/src'), { recursive: true })
     for (const [name, src] of Object.entries(rustFiles)) {
       const text = waiver === null ? src : src.replace('WAIVER', waiver)
@@ -237,4 +246,63 @@ test('R-002 ③ 没有台账的仓库不判这一条（fixture 不误伤）', ()
   const r = audit({ 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 契约名先于接线\nfn c() {}\n' })
   assert.equal(r.status, 0, '无规则源 ⇒ 退回只判理由与棘轮')
   assert.doesNotMatch(r.stdout, /各清偿批待摘/)
+})
+
+// ================= R-003：前端未用导出必须二态 =================
+//
+// 这一条把「说不清该不该用」的导出（既不删也不承认）从降级提示升成判定。
+// 三个用例分别钉：未承认 ⇒ 红；文件头承认（契约面）⇒ 绿；空理由 ⇒ 仍红（承认不成立）。
+// 第三个最重要——给了「写一行注释就过关」的口子，就必须同时钉住那条注释要有内容。
+
+test('R-003 fires on an unused export with no acknowledgment', () => {
+  const r = audit(
+    {},
+    { ts: { 'dead.ts': 'export const NOBODY_CALLS_ME = 1\nexport const USED = 2\nconsole.log(USED)\n' } },
+  )
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /R-003/)
+  assert.match(r.stdout, /dead\.ts :: NOBODY_CALLS_ME/)
+  assert.doesNotMatch(r.stdout, /dead\.ts :: USED/, '有人用的那个不报（判据不误伤）')
+})
+
+test('R-003 accepts a file-header acknowledgment with a reason (契约面)', () => {
+  const r = audit(
+    {},
+    {
+      ts: {
+        'routes.gen.ts':
+          '// dead-code-allow R-003: 前后端路由契约的全量镜像，未用常量是契约的另一半\nexport const ROUTE_UNUSED = "x/y"\n',
+      },
+    },
+  )
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /全部已承认/)
+})
+
+test('R-003 waiver needs a non-empty reason（写了标记不等于承认）', () => {
+  const r = audit(
+    {},
+    {
+      ts: {
+        'routes.gen.ts': '// dead-code-allow R-003:\nexport const ROUTE_UNUSED = "x/y"\n',
+      },
+    },
+  )
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /R-003/)
+  assert.match(r.stdout, /ROUTE_UNUSED/)
+})
+
+test('R-003 承认是**文件作用域**：同文件里新出现的未用导出一并被承认（生成物才有这个待遇）', () => {
+  const r = audit(
+    {},
+    {
+      ts: {
+        'routes.gen.ts':
+          '// dead-code-allow R-003: 契约面全量镜像\nexport const A = 1\nexport const B = 2\n',
+      },
+    },
+  )
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /2 个导出全库无人用，全部已承认/)
 })

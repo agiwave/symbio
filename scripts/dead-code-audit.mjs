@@ -10,6 +10,9 @@
  *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
  *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_core/mod.rs` 一句
  *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
+ *  L6 前端 **R-003（判定型）**：未被任何文件引用的导出必须二态——删掉，或整份文件
+ *     声明为契约面（文件头 `// dead-code-allow R-003: <理由>`）。「说不清该不该用」
+ *     不许留在第三态。
  *  L5 Rust 侧 **R-002（判定型）**：`#[allow(dead_code)]` 承认标记必须带
  *     `// dead-code-allow R-002: <非空理由>`，且数量走棘轮只许降——
  *     收窄根导出（`core-export-audit` C-003）之后，只被测试引用的冻结契约名
@@ -32,7 +35,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns R 死代码
-// @codes R-001 R-002
+// @codes R-001 R-002 R-003
 
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, extname, basename } from 'node:path'
@@ -163,8 +166,9 @@ if (suspicious.length) {
 // ## 已知边界（写清楚，免得把绿灯当证明）
 //
 // 按**标识符文本**判，不是 AST。因此「经 barrel 再导出后由别处使用」仍可能命中
-// （`export * from './x'` 里不出现名字）——这类要靠人看一眼，故仍标**降级提示**：
-// 打印个数，`--verbose` 才出明细（否则每次门禁刷几十行噪音，而噪音会教人忽略它）。
+// （`export * from './x'` 里不出现名字）——这类是**误报**，处置方式不是喂豁免而是
+// 让消费方直接 `import` 那个模块（barrel 的 `export *` 只是转发，名字确实没出现在别处）。
+// 判据见下面的 R-003。
 console.log(`\n【导出级检查】`)
 
 /**
@@ -181,11 +185,42 @@ function waiverOf(code, name) {
     if (!decl.test(lines[i])) continue
     for (const j of [i, i - 1]) {
       if (j < 0) continue
-      const m = lines[j].match(/\/\/\s*dead-code-allow\s+R-\d+\s*:\s*(.+?)\s*$/)
+      // ⚠️ 空白用 `[ \t]` 而不是 `\s`：`\s` 含换行，理由为空时正则会把**下一行**
+      // 当成理由吃掉（实测：`// dead-code-allow R-003:` 单独一行 + 下一行是导出声明，
+      // 于是空理由被判成「已承认」）——豁免判空这条就静默失效了。
+      const m = lines[j].match(/\/\/[ \t]*dead-code-allow[ \t]+R-\d+[ \t]*:[ \t]*(.+?)[ \t]*$/)
       if (m) return m[1]
     }
   }
   return null
+}
+
+// ── R-003：前端未用导出必须**二态**（删掉，或整份文件声明为契约面）──
+//
+// ## 为什么要把它从「降级提示」升成判定
+//
+// 上面那段读数是 21 条路由常量里 15 条无人用、4 个谓词无人用——但它们既不删也不承认，
+// 于是「该不该有人用」没人说得清。这不是没人用的代码，是**说不清该不该用的代码**，
+// 而后者更坏：读报告的人只能猜。
+//
+// ## 两种终态，没有第三种
+//
+// - **删**：没有消费方、也没有「契约另一半」的辩护（组件谓词就属这一类）；
+// - **承认**：整份文件是契约面（全量镜像），未用导出是契约的另一半——写在那份文件的
+//   文件头：`// dead-code-allow R-003: <理由>`。语法与声明级 `R-001` 同一条，只是
+//   作用域是**整个文件**（生成物逐条标注只会让 69 行的文件长出一倍的注释）。
+//
+// 作用域放大是有意的：只有「这份文件的完整就是契约」时才该用它，而那种文件通常是
+// 生成物——生成器负责不让它漂，所以「新加一条未用导出」不会成为漏网。
+
+/**
+ * 文件级承认（R-003）：整份文件是契约面。理由不可为空（空理由视为未承认，
+ * 与 R-001 / R-002 同一条约定）。
+ */
+function fileWaiverOf(code) {
+  // 同 `waiverOf` 的空白坑：`[ \t]` 不含换行，空理由不会吃到下一行。
+  const m = code.match(/^[ \t]*\/\/[ \t]*dead-code-allow[ \t]+R-003[ \t]*:[ \t]*(.+?)[ \t]*$/m)
+  return m && m[1] ? m[1] : null
 }
 
 const unusedList = []
@@ -201,6 +236,7 @@ for (const f of reachable) {
   ]
   if (!names.length) continue
   const dir = rel(f)
+  const fileWide = fileWaiverOf(code)
   for (const n of names) {
     const re = new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`)
     // 别的文件用过 ⇒ 活；否则再看**定义文件自己**用过没（声明行本身算 1 次）
@@ -210,18 +246,28 @@ for (const f of reachable) {
     // 判据会静默失效、89 条一条都筛不掉，而输出看起来毫无异常。
     const selfOcc = (code.match(new RegExp(re.source, 'g')) ?? []).length
     if (selfOcc > 1) continue
-    unusedList.push({ dir, name: n, waiver: waiverOf(code, n) })
+    unusedList.push({ dir, name: n, waiver: waiverOf(code, n) ?? fileWide, fileWide })
   }
 }
 const unusedExports = unusedList.length
+// R-003 判定面：**没有**任何承认的未用导出才是违规。文件级承认与声明级承认等价——
+// 二者都说了「为什么留」，缺的正是这句话（而不是缺一行注释）。
+const unusedUnwaived = unusedList.filter((u) => !u.waiver)
 if (VERBOSE) {
   for (const u of unusedList) {
-    console.log(`  ${u.dir} :: ${u.name}${u.waiver ? `（已承认保留：${u.waiver}）` : ''}`)
+    const why = u.fileWide && u.waiver ? `文件头承认（R-003）：${u.waiver}` : u.waiver ? `已承认保留：${u.waiver}` : '**未承认**'
+    console.log(`  ${u.dir} :: ${u.name}（${why}）`)
+  }
+}
+if (unusedUnwaived.length) {
+  for (const u of unusedUnwaived) {
+    console.log(`  R-003 ${u.dir} :: ${u.name} —— 既没消费方也没承认：删掉，或在文件头写 \`// dead-code-allow R-003: <理由>\`（契约面才配这条）`)
   }
 } else if (unusedExports) {
-  console.log(`  ${unusedExports} 个导出**全库无人用**（含定义文件自身；降级提示，不判失败；--verbose 看明细）`)
+  console.log(`  ${unusedExports} 个导出全库无人用，全部已承认（文件头或声明处写了理由）`)
+} else {
+  console.log('  （无全库无人用的导出）')
 }
-if (!unusedExports) console.log('  （无全库无人用的导出）')
 
 // ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
 //
@@ -466,4 +512,13 @@ if (!r002NoReason.length && !r002BadPlan.length && !r002OverRatchet) {
 
 const lines = dead.reduce((n, f) => n + lineCount(f), 0)
 console.log(`\n合计可移除：${dead.length} 文件 / ${lines} 行`)
-process.exit(dead.length || rustUnused.length || r002NoReason.length || r002BadPlan.length || r002OverRatchet ? 1 : 0)
+process.exit(
+  dead.length ||
+    rustUnused.length ||
+    r002NoReason.length ||
+    r002BadPlan.length ||
+    r002OverRatchet ||
+    unusedUnwaived.length
+    ? 1
+    : 0,
+)
