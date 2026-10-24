@@ -9,9 +9,11 @@
  * 钉住：
  * 1. 阈值 50px 是**严格小于**：距底正好 50 不算在底部（否则边界上会来回抖）。
  * 2. `scrollToBottom` 落到 `scrollTop = scrollHeight`（不是 0，也不是 clientHeight）。
- * 3. 容器尚未挂载（`null`）时三个函数都**不抛**，也不改变状态——组件首帧
+ * 3. 容器尚未挂载（`null`）时各函数都**不抛**，也不改变状态——组件首帧
  *    （ref 还是 null）就会走到这条。
  * 4. `smartScroll` 只在底部才真的滚；不在底部时它是**空操作**（不是滚到顶部）。
+ * 5. 位置的记忆与还原都走**离底距离**这一条换算（`gapFromBottom` / `scrollToGap`），
+ *    贴底判定读的是同一个数。
  */
 
 // @vitest-environment happy-dom
@@ -113,5 +115,57 @@ describe('useChatScroll — 滚动动作', () => {
     handleScroll()
     smartScroll()
     expect(el.scrollTop).toBe(1000)
+  })
+})
+
+/**
+ * 「离底多远」是滚动位置**唯一可记忆的表示**（`scrollTop` 在渲染窗口下没有稳定含义，
+ * 见本文件模块头与 `stores/sessionUiState`）。这两条把换算钉成一份实现：
+ * 贴底判定与还原必须读同一个数，否则会出现「界面上算在底部、存下来却按不在底部还原」。
+ */
+describe('useChatScroll — 离底距离（记忆与还原）', () => {
+  it('gapFromBottom 与阈值判定同源：同一个位置，两个读法一致', () => {
+    const el = container(1000, 400, 100) // 离底 500
+    const { gapFromBottom, handleScroll, isUserAtBottom } = useChatScroll(ref(el))
+    expect(gapFromBottom()).toBe(500)
+    handleScroll()
+    expect(isUserAtBottom.value).toBe(false)
+    el.scrollTop = 599 // 1000-599-400 = 1，离底 1
+    expect(gapFromBottom()).toBe(1)
+    handleScroll()
+    expect(isUserAtBottom.value).toBe(true)
+  })
+
+  it('容器未挂载时给 null（那不是「离底 0」——存下来会凭空造一条在底部的记录）', () => {
+    const { gapFromBottom } = useChatScroll(ref(null))
+    expect(gapFromBottom()).toBeNull()
+  })
+
+  it('scrollToGap 回到离底同样远处', () => {
+    const el = container(1000, 400, 0)
+    const { scrollToGap, gapFromBottom } = useChatScroll(ref(el))
+    scrollToGap(250)
+    expect(el.scrollTop).toBe(350) // 1000-400-250
+    expect(gapFromBottom()).toBe(250)
+  })
+
+  it('记下的位置比现有内容还靠上 ⇒ 落到能到的最上处，不抛也不越界', () => {
+    // 会话被截断 / 消息被删之后再切回来：内容比离开时短是常态
+    const el = container(600, 400, 0)
+    const { scrollToGap } = useChatScroll(ref(el))
+    scrollToGap(5000)
+    expect(el.scrollTop).toBe(0)
+  })
+
+  it('scrollToGap(0) 即贴底（与 scrollToBottom 落在同一处）', () => {
+    const el = container(1000, 400, 10)
+    const { scrollToGap } = useChatScroll(ref(el))
+    scrollToGap(0)
+    expect(el.scrollTop).toBe(600) // 1000-400
+  })
+
+  it('容器未挂载时 scrollToGap 是空操作（不抛）', () => {
+    const { scrollToGap } = useChatScroll(ref(null))
+    expect(() => scrollToGap(120)).not.toThrow()
   })
 })

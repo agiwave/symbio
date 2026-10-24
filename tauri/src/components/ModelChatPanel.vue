@@ -29,8 +29,20 @@
             <p class="empty-hint">输入消息后按 Enter 发送，Shift+Enter 换行</p>
           </div>
 
+          <!-- 渲染窗口的**显式入口**：更早的轮次没铺出来时，这里给一条按钮。
+
+               为什么不自动续拉（滚到顶就加载）：那样「往上翻」会变成一场无限加载，
+               用户不知道有没有头；一条按钮同时回答「还有更早的」和「还剩多少条」。
+               条数说的是**根节点**（一轮响应的根），不是消息条数——窗口按根切，
+               判据见 `composables/useTranscriptWindow`。 -->
+          <div v-if="hiddenCount > 0" class="earlier-row">
+            <button class="earlier-btn" type="button" @click="handleShowEarlier">
+              显示更早的消息（还有 {{ hiddenCount }} 条）
+            </button>
+          </div>
+
           <MessageNode
-            v-for="node in messageTree"
+            v-for="node in renderedRoots"
             :key="node.id"
             :node="node"
             :depth="0"
@@ -95,6 +107,7 @@
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
 import { useChatConnection, RESUME_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
+import { useTranscriptWindow, TRANSCRIPT_WINDOW_INITIAL } from '@/composables/useTranscriptWindow'
 import {
   type ChatNode,
   type MessageContent,
@@ -165,19 +178,22 @@ const attachedImages = ref<ImageAttachment[]>([])
 const editing = ref<{ id: string; content: string; isJson: boolean } | null>(null)
 
 // --- Composables ---
-const { scrollToBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
+const { scrollToBottom, scrollToGap, gapFromBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
 
 /**
  * 滚动事件：先按 `useChatScroll` 的规则重算「是否贴底」，再把位置记进
  * **按会话**的 UI 状态（切回时还原）。
+ *
+ * 记的是**离底的距离**而不是 `scrollTop`——本面板的 DOM 起点会随渲染窗口变，
+ * 从顶部量的数在下次挂载对不上同一条消息（换算只有一份实现：`gapFromBottom`）。
  *
  * 两个职责合成一个 handler，是因为 DOM 上只能挂一个 `@scroll`；拆成两个监听
  * 只会让「哪次滚动被记下」变得不确定。
  */
 function onScroll() {
   handleScroll()
-  const top = messagesRef.value?.scrollTop
-  if (typeof top === 'number') uiState.setScrollTop(props.sessionId, top)
+  const gap = gapFromBottom()
+  if (gap !== null) uiState.setScrollGap(props.sessionId, gap)
 }
 
 const chat = useChatConnection({
@@ -199,6 +215,42 @@ provide(RESUME_KEY, (payload: ResumePayload) => {
 
 const { isLoading } = chat
 const messageTree = chat.messageTree
+
+/**
+ * 渲染窗口：首屏只铺最近的若干条根节点，更早的按需展开。
+ *
+ * 转写是整份装载的（权威副本在存储），本窗口**不改数据**、只改这一帧交出去多少
+ * 棵子树；为什么按根节点切、为什么起点只往左移都在 `useTranscriptWindow` 的模块头。
+ * 上次的条数按会话还原——它与离底的距离是一对，只还原位置不还原窗口，
+ * 往上翻过的位置会因为内容不够而落到窗口顶部。
+ */
+const transcriptWindow = useTranscriptWindow(
+  messageTree,
+  uiState.windowSizeOf(props.sessionId) ?? TRANSCRIPT_WINDOW_INITIAL,
+)
+const { renderedRoots, hiddenCount } = transcriptWindow
+
+/**
+ * 展开更早的轮次，并**把视线留在原来那一屏上**。
+ *
+ * 往上铺内容等于在视口上方插入高度，浏览器仍按原 `scrollTop` 显示——于是内容整体
+ * 下移、用户看到的东西被推走。补上这次插入的高度差（`新高度 - 旧高度`）才是
+ * 「接着往下看」。差量在展开**前**量、在 DOM 更新**后**补，顺序不可颠倒。
+ *
+ * 一条都没铺出来（已经到顶）时不动滚动位置：那次补偿挪的是凭空的高度 0，
+ * 表现就是「按钮还在，点一下界面抖一下」。
+ */
+async function handleShowEarlier() {
+  const el = messagesRef.value
+  const beforeHeight = el?.scrollHeight ?? 0
+  const beforeTop = el?.scrollTop ?? 0
+  const added = transcriptWindow.showEarlier()
+  if (added === 0) return
+  uiState.setWindowSize(props.sessionId, transcriptWindow.renderedCount.value)
+  await nextTick()
+  if (!el) return
+  el.scrollTop = beforeTop + (el.scrollHeight - beforeHeight)
+}
 
 // Esc 停止生成。绑定声明在这里而不是外壳里，因为「这一轮还在跑吗」是本组件
 // 经 `useChatConnection` 才有的状态；全局表只负责判键与让路。
@@ -316,17 +368,16 @@ const optionScope = computed<Record<string, unknown>>(() => ({
 
   // --- 方法 ---
 onMounted(() => {
-  // 还原上次的阅读位置：有记录就回到那里（并重算「是否贴底」——否则下一次
-  // 流式追加会把它拽回底部），无记录才贴底。
-  const savedTop = uiState.scrollTopOf(props.sessionId)
+  // 还原上次的阅读位置：有记录就回到「离底同样远」的地方（并重算「是否贴底」——否则
+  // 下一次流式追加会把它拽回底部），无记录才贴底。
+  const savedGap = uiState.scrollGapOf(props.sessionId)
   nextTick(() => {
-    if (savedTop == null) {
+    if (savedGap == null) {
       scrollToBottom()
       return
     }
-    const el = messagesRef.value
-    if (!el) return
-    el.scrollTop = savedTop
+    if (!messagesRef.value) return
+    scrollToGap(savedGap)
     handleScroll()
   })
 
@@ -524,6 +575,10 @@ watch(sessionError, (now) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 关掉浏览器的滚动锚定：它会在上方内容插入时自己挪 `scrollTop`，而展开更早的轮次
+     时面板**已经**按高度差补过一次（`handleShowEarlier`）。两层各补一次就是补两倍，
+     表现为「点一下往下窜一大截」。滚动位置由本面板一处负责。 */
+  overflow-anchor: none;
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -543,6 +598,27 @@ watch(sessionError, (now) => {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* 「显示更早的消息」——渲染窗口的收尾入口，形状与中栏列表的 `.more-btn` 同款胶囊。
+   位置在流的**最上方**而不是 sticky：想往上翻的人本来就会滚到这里，
+   而钉在顶部等于常年盖住第一条消息，还会把「往上还有多少」变成一条常驻横幅。 */
+.earlier-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0 0.5rem;
+}
+.earlier-btn {
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.earlier-btn:hover {
+  background: var(--surface-hover);
 }
 
 .empty-chat p {

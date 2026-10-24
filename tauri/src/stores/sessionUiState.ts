@@ -13,7 +13,8 @@
  *
  * ## 边界（写清楚，避免它长成第二个消息缓存）
  *
- * - 只放**纯 UI 状态**：不进后端、不参与任何判据、不参与渲染顺序；
+ * - 只放**纯 UI 状态**：不进后端、不参与任何判据、不参与消息的顺序与内容。
+ *   渲染窗口条数也在其列——它只决定「这次挂载从哪一条开始铺」，不决定铺什么；
  * - **不缓存消息**：消息的权威来源仍是 VDFS 变更 → `stores/sessions`，这里多一份
  *   就是第二个真相；
  * - **附件（图片）刻意不在其列**：`ImageAttachment.thumbnailUrl` 是 object URL，
@@ -34,8 +35,10 @@ import { ref } from 'vue'
 export const useSessionUiStateStore = defineStore('sessionUiState', () => {
   /** sessionId → 输入框草稿（无记录 = 空串，不存空串） */
   const drafts = ref<Record<string, string>>({})
-  /** sessionId → 消息区滚动位置（无记录 = 从未滚动过，由调用方决定贴底还是还原） */
-  const scrollTops = ref<Record<string, number>>({})
+  /** sessionId → 消息区**离底距离**（像素；无记录 = 从未滚动过） */
+  const scrollGaps = ref<Record<string, number>>({})
+  /** sessionId → 渲染窗口铺出来的根节点条数（无记录 = 用首屏默认值） */
+  const windowSizes = ref<Record<string, number>>({})
 
   /** 该会话的输入草稿（无记录 ⇒ 空串） */
   function draftOf(sessionId: string): string {
@@ -57,33 +60,60 @@ export const useSessionUiStateStore = defineStore('sessionUiState', () => {
     drafts.value = next
   }
 
-  /** 该会话的滚动位置；`null` = 没有记录（调用方按「贴底」处理） */
-  function scrollTopOf(sessionId: string): number | null {
-    const v = scrollTops.value[sessionId]
+  /**
+   * 该会话的阅读位置 = **离底多少像素**；`null` = 没有记录（调用方按「贴底」处理）。
+   *
+   * 记的不是 `scrollTop`：会话流的尾部在长，而渲染层还有一道窗口（只铺最近若干条
+   * 根节点），于是「从顶部量」在这两件事上都对不上——同一条消息，隔一次挂载换算了
+   * 起点就不再是那个数字。离底距离的两个端点都稳定（最新的一条恒在 DOM 里）。
+   * 表示本身只有一份实现：`composables/useChatScroll` 的 `gapFromBottom`。
+   */
+  function scrollGapOf(sessionId: string): number | null {
+    const v = scrollGaps.value[sessionId]
     return typeof v === 'number' && Number.isFinite(v) ? v : null
   }
 
-  /** 记一次滚动位置（非有限值一律忽略——那是布局中间态，不是用户位置） */
-  function setScrollTop(sessionId: string, top: number): void {
-    if (!sessionId || !Number.isFinite(top)) return
-    if (scrollTops.value[sessionId] === top) return
-    scrollTops.value = { ...scrollTops.value, [sessionId]: top }
+  /** 记一次阅读位置（非有限值一律忽略——那是布局中间态，不是用户位置） */
+  function setScrollGap(sessionId: string, gap: number): void {
+    if (!sessionId || !Number.isFinite(gap)) return
+    if (scrollGaps.value[sessionId] === gap) return
+    scrollGaps.value = { ...scrollGaps.value, [sessionId]: gap }
+  }
+
+  /**
+   * 该会话上次的渲染窗口条数；`null` = 没有记录（调用方用首屏默认值）。
+   *
+   * 它与离底距离是**一对**：窗口决定 DOM 里有多少内容，位置决定落在这段内容的哪一处。
+   * 只还原位置不还原窗口，往上翻过的位置会因为内容不够而落到窗口顶部。
+   */
+  function windowSizeOf(sessionId: string): number | null {
+    const v = windowSizes.value[sessionId]
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+  }
+
+  /** 记一次渲染窗口条数（与记录值相同则不写——滚动是高频事件） */
+  function setWindowSize(sessionId: string, size: number): void {
+    if (!sessionId || !Number.isFinite(size) || size <= 0) return
+    if (windowSizes.value[sessionId] === size) return
+    windowSizes.value = { ...windowSizes.value, [sessionId]: size }
   }
 
   /** 丢弃某会话的 UI 状态（会话被删除时调用，避免按会话数无限增长） */
   function forget(sessionId: string): void {
     if (!sessionId) return
-    if (sessionId in drafts.value) {
-      const d = { ...drafts.value }
-      delete d[sessionId]
-      drafts.value = d
+    const drop = <T>(map: Record<string, T>): Record<string, T> | null => {
+      if (!(sessionId in map)) return null
+      const next = { ...map }
+      delete next[sessionId]
+      return next
     }
-    if (sessionId in scrollTops.value) {
-      const s = { ...scrollTops.value }
-      delete s[sessionId]
-      scrollTops.value = s
-    }
+    const nextDrafts = drop(drafts.value)
+    if (nextDrafts) drafts.value = nextDrafts
+    const nextGaps = drop(scrollGaps.value)
+    if (nextGaps) scrollGaps.value = nextGaps
+    const nextWindows = drop(windowSizes.value)
+    if (nextWindows) windowSizes.value = nextWindows
   }
 
-  return { draftOf, setDraft, scrollTopOf, setScrollTop, forget }
+  return { draftOf, setDraft, scrollGapOf, setScrollGap, windowSizeOf, setWindowSize, forget }
 })
