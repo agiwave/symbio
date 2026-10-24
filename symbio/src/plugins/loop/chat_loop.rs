@@ -589,6 +589,9 @@ pub async fn run_chat_loop(
                 produced_by: turn.user_seq,
                 row: "dispatch-turn",
                 now: turn.now_ms,
+                // 整轮往返等在当前 future 里；崩溃后恢复走新的一幕（新 id），
+                // 重试旧 id 只会留下一条没人接的 `request`。
+                awaited: false,
             },
             || {
                 super::turn_exec::execute_turn(super::turn_exec::ExecTurn {

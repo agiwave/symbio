@@ -133,13 +133,15 @@ fn builtin_loads_and_freezes() {
     // `ver` 是口径的显式版本： 给 `turn_head` 加幕锚 / 技能命中时升到 3，
     // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
     // 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
+    // D-138 把 `failed` 收窄到同一次尝试，`in_flight` / `stale_sent` 的读面
+    // 各多声明它的 `attempt` ⇒ 升到 3 / 2；
     // 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
     // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5；
     // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6；
     // 步 5c 加 `closeable`（收束行的前件扩到「模型没答成」）⇒ 升到 7；
     // 步 1 把口径收窄到「这一轮自己的模型往返」（内部往返带 `via`）⇒ 升到 8。
-    assert_eq!(frozen.view("in_flight").unwrap().ver, 2);
-    assert_eq!(frozen.view("stale_sent").unwrap().ver, 1);
+    assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
+    assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
     assert_eq!(frozen.view("turn_head").unwrap().ver, 8);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
@@ -353,7 +355,8 @@ fn in_flight_holds_sent_until_response_or_failure() {
         ev(
             2,
             EVENT_FAILED,
-            json!({"port": "turn", "id": "c", "why": "boom"}),
+            // `failed` 关的是这一次尝试（D-138）：载荷带 `attempt`。
+            json!({"port": "turn", "id": "c", "attempt": 2, "why": "boom"}),
         ),
     ];
     assert_eq!(
@@ -474,7 +477,8 @@ fn stale_sent_only_sees_calls_nobody_closed() {
         ev_at(
             1,
             EVENT_FAILED,
-            json!({"port": "turn", "id": "dead", "why": "x"}),
+            // `failed` 关的是这一次尝试（D-138）：载荷带 `attempt`。
+            json!({"port": "turn", "id": "dead", "attempt": 1, "why": "x"}),
             1,
         ),
         sent_at("retried", 1, 1000, 3, 0),

@@ -80,6 +80,53 @@ fn wired(names: &[&str]) -> Vec<Decl> {
         .collect()
 }
 
+/// 去掉一个模式键里的 `attempt`：退回 D-138 之前的逻辑键 `(port, id)`。
+fn without_attempt(key: &'static [&'static str]) -> &'static [&'static str] {
+    Box::leak(
+        key.iter()
+            .copied()
+            .filter(|k| *k != "attempt")
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
+/// 把整张表的 `owes` / `until` / `unless` 键退回逻辑 `(port, id)`。
+///
+/// 只给**反向自检**用：同一组事实在旧键口径下必须不成立，否则「重试重新开账」
+/// 这条断言可能只是恒真，而不是键粒度带来的差别。
+fn logical_keys(rows: &[Decl]) -> Vec<Decl> {
+    let pattern = |p: &Pattern| Pattern {
+        source: p.source,
+        key: without_attempt(p.key),
+        eq: p.eq,
+    };
+    rows.iter()
+        .map(|d| Decl {
+            name: d.name,
+            prio: d.prio,
+            by: d.by,
+            tier: d.tier,
+            expand: d.expand,
+            owes: pattern(&d.owes),
+            until: Box::leak(
+                d.until
+                    .iter()
+                    .map(pattern)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            ),
+            unless: Box::leak(
+                d.unless
+                    .iter()
+                    .map(pattern)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            ),
+        })
+        .collect()
+}
+
 /// 全部策略关掉的配置。
 fn plain() -> Value {
     json!({
@@ -785,7 +832,7 @@ fn a_failure_closes_both_the_dispatch_and_the_wait() {
         ev(
             1,
             crate::symbio_core::EVENT_FAILED,
-            json!({ "port": "turn", "id": "t-1", "why": "boom" }),
+            json!({ "port": "turn", "id": "t-1", "attempt": 1, "why": "boom" }),
         ),
     ];
     assert!(!owes("dispatch-turn", &events, 0));
@@ -994,7 +1041,7 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
         ev(
             1,
             crate::symbio_core::EVENT_FAILED,
-            json!({ "port": "model", "id": "m-1", "why": "boom" }),
+            json!({ "port": "model", "id": "m-1", "attempt": 1, "why": "boom" }),
         ),
     ];
     assert!(!owes("dispatch-model", &events, 0));
@@ -1111,6 +1158,7 @@ fn tool_granted(id: &str) -> Event {
             "key": id,
             "port": "tool",
             "id": id,
+            "attempt": 1,
             "tool": "read_file",
             "risk": "low",
             "deferred": false,
@@ -1126,6 +1174,7 @@ fn tool_denied(id: &str) -> Event {
             "key": id,
             "port": "tool",
             "id": id,
+            "attempt": 1,
             "tool": "write_file",
             "kind": "tool",
             "reason": "denied",
@@ -1188,7 +1237,7 @@ fn a_denied_tool_call_owes_a_close_only() {
     closed.push(ev(
         1,
         crate::symbio_core::EVENT_FAILED,
-        json!({ "port": "tool", "id": "c-1", "why": "denied" }),
+        json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "denied" }),
     ));
     assert!(!owes("deny-tools", &closed, 0), "`failed` 关掉这一笔");
 
@@ -1228,7 +1277,7 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         e.push(ev(
             1,
             crate::symbio_core::EVENT_FAILED,
-            json!({ "port": "tool", "id": "c-1", "why": "not_executed" }),
+            json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "not_executed" }),
         ));
         e
     };
@@ -1236,17 +1285,14 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
     assert!(!owes("await-tools", &failed, 0));
 }
 
-/// 判据 1：**先把现状钉成用例**（裁决之前也得有人钉住它）。
+/// 判据 1：重试写出的 `request{attempt+1}` **重新打开**授权与派发两行（D-138）。
 ///
-/// 租约到顶重试落的是**同一 `(port, id)`** 的 `retry{attempt:1}` + `request{attempt:2}`
-/// （`port.rs` 的 `reap`），而三行工具债的键是 `(port, id)`、不含 `attempt`
-/// （理由记在 `loop_rows.rs` 的键口径注释：`failed` 要能一次关掉所有尝试）
-/// ⇒ 上一 attempt 的 `granted` 已经把授权行的门关上，第二次尝试的那笔 `request`
-/// 在行表里**不欠任何东西**：没有任何执行体会判它、派它。
-/// 「抬 `max_attempts` 的前置是键口径，不是把派发行接回执行体」——那条订正的全部根据
-/// 就是这一段切片。
+/// 三行工具债的键取 `(port, id, attempt)`：上一 attempt 的 `granted` / `sent`
+/// 只关它自己那一次。若键退回逻辑 `(port, id)`，第二次尝试的 `request`
+/// 会被上一 attempt 的出口提前关掉——没有任何执行体会判它、派它，
+/// 「永不派发的 request」正是 PL-016 §2.3 禁止的形态。
 #[test]
-fn a_retried_request_is_invisible_to_the_row_table() {
+fn a_retried_request_reopens_authorization_and_dispatch() {
     let id = "c-1";
     let mut sliced = vec![
         tool_request(id),
@@ -1273,31 +1319,60 @@ fn a_retried_request_is_invisible_to_the_row_table() {
         ),
     ];
     assert!(
-        !owes("authorize-tool", &sliced, 0),
-        "第二次尝试的 `request` 不开新账：键 `(port, id)` 已被上一 attempt 的 `granted` 关掉"
+        owes("authorize-tool", &sliced, 0),
+        "第二次尝试还没判 ⇒ 授权行重新开账"
     );
     assert!(
         !owes("dispatch-tools", &sliced, 0),
-        "也就没有任何执行体会派它（PL-016 §2.3 禁止的「永不派发的 request」）"
+        "第二次尝试还没放行 ⇒ 派发行不成立（fail-closed）"
     );
 
-    // 派发侧同一件事，而且要能红：未接线的行 `blocked`，`drive` 谁都不选，
-    // 那样这条断言只是空转——所以把两行接到真实动作上再验「取不到这笔账」。
     let f = frozen();
     let rows = wired(&["authorize-tool", "dispatch-tools"]);
     assert_eq!(
         drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
-        None,
-        "接回执行体也派不动重试出来的那一笔 ⇒ 抬 max_attempts 的前置在键上（T-252）"
+        Some("authorize-tool"),
+        "派发器选中重试出来的那一笔：它先欠一次授权"
     );
 
-    // 反向自检：红点必须落在「`granted` 提前关门」这一格，而不是键本身写错——
-    // 同一组事实里去掉那一格，第二次尝试的 `request` 就重新开账。
-    sliced.retain(|e| e.kind != crate::symbio_core::EVENT_AUTHZ_GRANTED);
+    // 第二次尝试放行之后，派发行接着欠；上一 attempt 的 `sent` 不能替它关门。
+    sliced.push(ev(
+        1,
+        crate::symbio_core::EVENT_AUTHZ_GRANTED,
+        json!({
+            "key": id,
+            "port": "tool",
+            "id": id,
+            "attempt": 2,
+            "tool": "read_file",
+            "risk": "low",
+            "deferred": false,
+        }),
+    ));
+    assert!(!owes("authorize-tool", &sliced, 0));
+    assert!(
+        owes("dispatch-tools", &sliced, 0),
+        "第二次尝试已放行 ⇒ 欠一次派发"
+    );
     assert_eq!(
         drive(&rows, &f, &sliced, 0).map(|d| d.decl.name),
-        Some("authorize-tool"),
-        "没有上一 attempt 的出口格时派发器就选中它 ⇒ 隐形来自键的口径，不是模式拼错"
+        Some("dispatch-tools"),
+        "派发器选中第二次尝试的派发"
+    );
+
+    // 反向自检：把整张表的键退回逻辑 `(port, id)`，同一组事实里第二次尝试的
+    // `request` 就**不再开账**——红点落在键的口径上，而不是模式拼错。
+    //
+    // 反向表不走 `load`：全表退回逻辑键会撞上装载期检查（键形状变宽的行对
+    // 重新相交 ⇒ 依赖成环），那是旧口径的病理，不是本用例的对象。`owed` 对
+    // `frozen` 只取事实声明，行来自参数——所以直接用生产冻结表配反向行表。
+    let logical = logical_keys(&rows);
+    let reopened = owed(&logical, &frozen(), &sliced, 0)
+        .iter()
+        .any(|d| d.decl.name == "authorize-tool");
+    assert!(
+        !reopened,
+        "键退回 (port, id) 时上一 attempt 的 granted 会提前关门 ⇒ 重试出来的 request 永不派发"
     );
 }
 
@@ -1356,7 +1431,7 @@ fn an_aborted_tool_closes_the_await_with_its_own_reason() {
         ev(
             1,
             crate::symbio_core::EVENT_FAILED,
-            json!({ "port": "tool", "id": "c-1", "why": "aborted" }),
+            json!({ "port": "tool", "id": "c-1", "attempt": 1, "why": "aborted" }),
         ),
     ];
     assert!(!owes("dispatch-tools", &events, 0));
@@ -1773,8 +1848,10 @@ fn the_overlap_report_on_the_production_table() {
             // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
             // 谁先还得由前件（`has_final`）与 `prio` 决——报告不知道这些。
             ("close-turn", "execute-turn", head),
-            // 租约看护读 `stale_sent`，它与创建行 / 三行 await 的前件折出同一批协议格。
-            ("open-tools", "lease", &["response"]),
+            // 租约看护读 `stale_sent`，它与三行 await 的前件折出同一批协议格。
+            // `open-tools` 不再与 `lease` 相交（D-138）：创建行的 `response` 是
+            // 逻辑键（它开的是 N 笔调用，不是某一次尝试），租约行的出口格收窄到
+            // `(port, id, attempt)`——键形状不同，装载期不再报这一对。
             ("await-turn", "lease", &["sent"]),
             ("await-model", "lease", &["sent"]),
             ("await-tools", "lease", &["sent"]),

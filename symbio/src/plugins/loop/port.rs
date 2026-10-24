@@ -31,9 +31,13 @@
 //!
 //! ## 幂等键
 //!
-//! `sent` / `response` / `retry` 的键是 `(port, id, attempt)`，`failed` 的键是
-//! `(port, id)`（它关的是**逻辑 id**——所有尝试）。事件 id 按同一形状拼出，
-//! 重复派发撞上 `AppendError::Duplicate` 即「这一格已经落过了」，不算失败。
+//! **五条协议事实的键都是 `(port, id, attempt)`**（D-138）：`failed` 也收窄到
+//! 这一次尝试，「这笔调用不再重试」由「没有后继 `request`」表达。事件 id 按同一
+//! 形状拼出，重复派发撞上 `AppendError::Duplicate` 即「这一格已经落过了」，不算失败。
+//!
+//! 行层因此能按尝试开账：重试写出的 `request{attempt+1}` 会重新打开
+//! `dispatch-<port>` / `await-<port>` / `authorize-tool` / `dispatch-tools`，而不是
+//! 被上一 attempt 的出口格提前关掉。
 //!
 //! ## 租约看护为什么在「开一幕」时跑
 //!
@@ -53,7 +57,7 @@ use std::sync::Arc;
 use crate::symbio_core::ring::{self, PortDecl};
 use crate::symbio_core::{
     AppendError, Entity, Event, Frozen, Store, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY,
+    EVENT_RETRY, EVENT_SENT,
 };
 
 /// 一笔端口调用：端口名 + 逻辑 id + 尝试号。
@@ -104,14 +108,9 @@ impl Call {
         self
     }
 
-    /// 尝试级事实的事件 id（`(port, id, attempt)` 的形状）。
+    /// 协议事实的事件 id（`(port, id, attempt)` 的形状）。
     fn attempt_key(&self, kind: &str) -> String {
         format!("{kind}-{}-{}-{}", self.port, self.id, self.attempt)
-    }
-
-    /// 逻辑级事实的事件 id（`(port, id)` 的形状）。
-    fn call_key(&self, kind: &str) -> String {
-        format!("{kind}-{}-{}", self.port, self.id)
     }
 }
 
@@ -135,6 +134,12 @@ pub(crate) struct Dispatch<'a> {
     pub(crate) row: &'a str,
     /// 读账的 `now`（与 [`super::loop_rows::owes`] 同形；派发行模式本身不读时间）。
     pub(crate) now: i64,
+    /// 这次尝试**有没有活着的等待方**（D-138）。
+    ///
+    /// 只有调用点知道答案：普通工具批次把结果等在当前草稿里，进程一死等待方就没了；
+    /// 唤醒调用能由 `wake_batch` 从事实重建，所以它算「有人等」。租约看护只对
+    /// `true` 的尝试重试——给没人等的调用写重试，只会造出一条永不派发的 `request`。
+    pub(crate) awaited: bool,
 }
 
 impl Dispatch<'_> {
@@ -354,6 +359,8 @@ where
                 // 而视图读不到代码里的 `PortDecl`（入参只有事实与 `now`）。
                 "lease_ms": decl.lease_ms,
                 "attempt_cap": decl.max_attempts,
+                // 这一次尝试有没有等待方：租约看护据此决定「重试」还是「判死」。
+                "awaited": plan.awaited,
             });
             with_via(&mut payload, call.via.as_deref());
             payload
@@ -415,7 +422,11 @@ where
     )
 }
 
-/// 落 `failed`：这笔调用不再重试（关**逻辑 id**，所有尝试）。
+/// 落 `failed`：**这一次尝试**失败（D-138）。
+///
+/// 「这笔调用不再重试」不再由键的粒度表达：没有后继 `request`，就没有下一次尝试。
+/// 逻辑级读者（`open-tools` / `deny-tools` / `turn_head`）仍按 `(port, id)` 读它，
+/// 因为模式只取自己声明的键字段。
 pub(crate) fn failed<S>(
     store: &S,
     call: &Call,
@@ -447,13 +458,14 @@ where
     let mut payload = serde_json::json!({
         "port": call.port,
         "id": call.id,
+        "attempt": call.attempt,
         "why": why,
     });
     with_via(&mut payload, call.via.as_deref());
     append(
         store,
         Event::pending(
-            call.call_key(EVENT_FAILED),
+            call.attempt_key(EVENT_FAILED),
             EVENT_FAILED,
             Entity::Turn,
             Verb::Asserted,
@@ -476,7 +488,15 @@ pub(crate) enum Reaped {
 
 /// **租约看护**：把 `sent` 之后超时无应答的调用重试或判死（判据 7）。
 ///
-/// 重试那一侧今天走不到（真表 `max_attempts` 全为 1），理由见下方 `retry` 分支。
+/// 重试的两个前提（D-138）：
+///
+/// 1. 这次尝试**有活着的等待方**（`sent.awaited`）——否则重试只会造出一条永远
+///    没人派发的 `request`；
+/// 2. 还没到 `max_attempts`（`stale_sent.exhausted` 为假）。
+///
+/// 两个前提缺一就判死（落 `failed{why:"lease_expired"}`），与旧行为逐字相同：
+/// 普通批次调用 `awaited = false`、真表里没有等待方的端口 `max_attempts = 1`，
+/// 都走这条平凡路径。
 ///
 /// 输入只有事实切片、端口声明与 `now`——不给内存状态，所以「崩溃后重放」与
 /// 「正常跑」走同一条路（判据 4 的另一半：`in_flight` 从日志重建）。
@@ -508,27 +528,53 @@ where
         let Some(id) = key_of(&debt.key, "id") else {
             continue;
         };
+        let Some(attempt) = key_of(&debt.key, "attempt").and_then(|v| v.parse().ok()) else {
+            continue;
+        };
         let Some(decl) = ring::port_of(ports, &port) else {
             continue;
         };
-        // 这一笔目前卡在第几次尝试：取 `stale_sent` 里同 `(port, id)` 的那条实例。
-        let Some((attempt, exhausted)) = stale_state(frozen, facts, now, &port, &id) else {
+        // 这一笔目前卡在第几次尝试：取 `stale_sent` 里同 `(port, id, attempt)` 的实例。
+        let Some(exhausted) = stale_state(frozen, facts, now, &port, &id, attempt) else {
             continue;
         };
-        let call =
-            Call::new(decl.port, id.clone(), attempt).with_via_opt(via_of(facts, &port, &id));
-        if exhausted {
+        // 身份写在它自己的 `request` 上；重试写出的下一笔必须**逐字段继承**它，
+        // 否则唤醒调用的 `resume` / `tool` / `args` 会在重试链上丢掉。
+        let request = request_of(facts, &port, &id, attempt);
+        let via = request
+            .and_then(|e| e.payload.get("via").and_then(|v| v.as_str()))
+            .map(str::to_string);
+        let call = Call::new(decl.port, id.clone(), attempt).with_via_opt(via);
+        if exhausted || !sent_awaited(facts, &port, &id, attempt) {
             failed_with(store, &call, turn, produced_by, "lease_expired")?;
             out.push(Reaped::Killed { id, attempt });
             continue;
         }
-        // 作废这次尝试，并立刻举起下一次。这条支路今天**不可达**：三行派发债的
-        // 键是 `(port, id)`（不含 `attempt`，见 `loop_rows.rs` 的键口径注释），
-        // 上一 attempt 的出口格已经把那一行关掉 ⇒ 这笔 `request{attempt+1}` 在行表里
-        // 不欠任何东西，没有任何执行体会派它。裁决是 出口 ②：**重试通道未启用**，
-        // 真表 `max_attempts` 全为 1 ⇒ 到顶即判死（用例
-        // `no_port_in_the_real_table_retries_today` 钉着取值，DE-015 §2.6 契约 7 钉着条文）。
-        // 抬上限的前置是让重试出来的那笔进债键：键含 attempt，或给 retry 单开一行。
+        // 作废这次尝试，并立刻举起下一次。**先写下一笔 `request`、再写 `retry`**：
+        // 两步之间崩溃时，下一次 `reap` 会看到 `request{attempt+1}` 已存在，只补
+        // `retry{attempt}`——旧尝试因此不会被重复作废，新尝试也不会丢。
+        let next = Call::new(decl.port, id.clone(), attempt + 1).with_via_opt(call.via.clone());
+        if request_of(facts, &port, &id, attempt + 1).is_none() {
+            let mut payload = request
+                .map(|e| e.payload.clone())
+                .unwrap_or_else(|| serde_json::json!({ "port": port, "id": id }));
+            payload["port"] = serde_json::json!(port);
+            payload["id"] = serde_json::json!(id);
+            payload["attempt"] = serde_json::json!(attempt + 1);
+            append(
+                store,
+                Event::pending(
+                    next.attempt_key(EVENT_REQUEST),
+                    EVENT_REQUEST,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    turn,
+                    "system",
+                )
+                .with_produced_by(produced_by)
+                .with_payload(payload),
+            )?;
+        }
         append(
             store,
             Event::pending(
@@ -550,8 +596,6 @@ where
                 payload
             }),
         )?;
-        let next = Call::new(decl.port, id.clone(), attempt + 1).with_via_opt(call.via.clone());
-        announce_with(store, &next, turn, produced_by, serde_json::Value::Null)?;
         out.push(Reaped::Retried { id, attempt });
     }
     Ok(out)
@@ -565,22 +609,25 @@ fn key_of(key: &ring::Key, field: &str) -> Option<String> {
         .map(|(_, v)| v.clone())
 }
 
-/// 从事实切片里取出某笔逻辑调用的身份（`via`）。
-///
-/// 身份写在**它自己的请求**上（[`announce_with`] 并进去的那一格），因此读得到它
-/// 的唯一地方也是那条 `request`。找不到 ⇒ 这笔账没有身份（这一轮自己的模型
-/// 往返），返回 `None` 而不是猜一个值——猜出来的身份会让收束侧把它当成内部
-/// 往返 ⇒ 这一轮永远收不了（D-122 决策 2）。
-fn via_of(facts: &[Event], port: &str, id: &str) -> Option<String> {
-    facts
-        .iter()
-        .filter(|e| e.kind == EVENT_REQUEST)
-        .find(|e| {
-            e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
-                && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)
-        })
-        .and_then(|e| e.payload.get("via").and_then(|v| v.as_str()))
-        .map(str::to_string)
+/// 同 `(port, id, attempt)` 的 `request` 事实。
+fn request_of<'a>(facts: &'a [Event], port: &str, id: &str, attempt: u64) -> Option<&'a Event> {
+    facts.iter().find(|e| {
+        e.kind == EVENT_REQUEST
+            && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+            && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)
+            && e.payload.get("attempt").and_then(|v| v.as_u64()) == Some(attempt)
+    })
+}
+
+/// 这次尝试有没有活着的等待方。旧日志没有这个字段 ⇒ `false`（按旧行为判死）。
+fn sent_awaited(facts: &[Event], port: &str, id: &str, attempt: u64) -> bool {
+    facts.iter().any(|e| {
+        e.kind == EVENT_SENT
+            && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+            && e.payload.get("id").and_then(|v| v.as_str()) == Some(id)
+            && e.payload.get("attempt").and_then(|v| v.as_u64()) == Some(attempt)
+            && e.payload.get("awaited").and_then(|v| v.as_bool()) == Some(true)
+    })
 }
 
 /// 把一笔账的身份（`via`）并进载荷。
@@ -596,28 +643,29 @@ fn with_via(payload: &mut serde_json::Value, via: Option<&str>) {
     }
 }
 
-/// 同 `(port, id)` 的卡住实例的 `(attempt, exhausted)`。
+/// 同 `(port, id, attempt)` 的卡住实例到没到顶。
 fn stale_state(
     frozen: &Frozen,
     facts: &[Event],
     now: i64,
     port: &str,
     id: &str,
-) -> Option<(u64, bool)> {
+    attempt: u64,
+) -> Option<bool> {
     let value = frozen.eval("stale_sent", facts, now)?;
     value.as_array()?.iter().find_map(|v| {
         let same = v.get("port").and_then(|x| x.as_str()) == Some(port)
             && v.get("id").and_then(|x| x.as_str()) == Some(id)
+            && v.get("attempt").and_then(|x| x.as_u64()) == Some(attempt)
             && v.get("stale").and_then(|x| x.as_bool()) == Some(true);
         if !same {
             return None;
         }
-        Some((
-            v.get("attempt").and_then(|x| x.as_u64()).unwrap_or(0),
+        Some(
             v.get("exhausted")
                 .and_then(|x| x.as_bool())
                 .unwrap_or(false),
-        ))
+        )
     })
 }
 
@@ -720,6 +768,8 @@ where
             produced_by: round.produced_by,
             row: "dispatch-model",
             now: round.now,
+            // 内部往返等在当前 future 里：进程一死等待方就没了，不能重试。
+            awaited: false,
         },
         || async move { run().await },
         |e| format!("{e:?}"),

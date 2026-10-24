@@ -51,7 +51,14 @@ fn grant(store: &EventStore, call: &Call) {
             "authorizer",
         )
         .with_produced_by(7)
-        .with_payload(json!({ "key": call.id, "port": "tool", "id": call.id })),
+        .with_payload(json!({
+            "key": call.id,
+            "port": "tool",
+            "id": call.id,
+            // 授权级联与派发关同一**次尝试**（D-138）：载荷带 `attempt`，
+            // 缺了它 `authorize-tool` / `dispatch-tools` 的三元组键取不到实例。
+            "attempt": call.attempt
+        })),
     )
     .unwrap();
 }
@@ -74,6 +81,7 @@ async fn dispatch_writes_before_and_the_answer_itself() {
             produced_by: 7,
             row: "dispatch-turn",
             now: 0,
+            awaited: false,
         },
         || async { Ok("答完了") },
         |_: &()| unreachable!("成功路径不该问 why"),
@@ -142,6 +150,7 @@ async fn begin_and_succeed_can_bracket_a_whole_batch() {
                 produced_by: 7,
                 row: "dispatch-tools",
                 now: 0,
+                awaited: false,
             },
         )
         .unwrap();
@@ -191,6 +200,7 @@ async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
             produced_by: 7,
             row: "dispatch-turn",
             now: 0,
+            awaited: false,
         },
         || async { Err("模型超时") },
         |e: &&'static str| format!("failed: {e}"),
@@ -225,6 +235,7 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
             produced_by: 7,
             row: "dispatch-turn",
             now: 0,
+            awaited: false,
         },
         move || {
             let flag = flag.clone();
@@ -269,6 +280,7 @@ async fn an_undeclared_port_is_named_not_defaulted() {
             // 端口都没有声明，行名只是占位：`NoPort` 在读账之前判。
             row: "dispatch-ghost",
             now: 0,
+            awaited: false,
         },
         || async { Ok(()) },
         |_: &()| "unreachable".into(),
@@ -293,6 +305,7 @@ async fn dispatching_twice_does_not_double_the_facts() {
             produced_by: 7,
             row: "dispatch-turn",
             now: 0,
+            awaited: false,
         },
         || async { Ok(()) },
         |_: &()| "unreachable".into(),
@@ -308,6 +321,7 @@ async fn dispatching_twice_does_not_double_the_facts() {
             produced_by: 7,
             row: "dispatch-turn",
             now: 0,
+            awaited: false,
         },
         || async { Ok(()) },
         |_: &()| "不该派发".into(),
@@ -343,7 +357,7 @@ fn a_repeated_fact_write_collapses_on_its_idempotency_key() {
 // ── 租约 ────────────────────────────────────────────────────────────────
 
 /// 一条只发未答的派发事实（`sent` 之后进程死掉的样子）。
-fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64) {
+fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64, awaited: bool) {
     store
         .append(
             Event::pending(
@@ -361,6 +375,9 @@ fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64)
                 "attempt": attempt,
                 "lease_ms": lease_ms,
                 "attempt_cap": cap,
+                // 重试的两个前提之一（D-138）：只有「有活着的等待方」的尝试
+                // 才会被租约看护重试，其余到期即判死。
+                "awaited": awaited,
             })),
         )
         .unwrap();
@@ -371,7 +388,7 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
     // 判据 7（判死一侧）：`turn` 的 `max_attempts = 1` ⇒ 到期即判死。
     // 重试只会留下一条永不派发的 `request`——等它的 future 随进程一起没了。
     let store = boot();
-    stranded(&store, "turn-9-r0", 1, 1_000, 1);
+    stranded(&store, "turn-9-r0", 1, 1_000, 1, false);
     let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     // 还没到期：不欠、不动。
@@ -418,13 +435,15 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
 
 #[test]
 fn the_lease_retries_while_the_port_has_attempts_left() {
-    // 判据 7（重试一侧）：有活着的等待方的端口（`max_attempts > 1`）重试，
-    // 落 `retry{attempt}` + `request{attempt+1}`；旧尝试由 `retry` 收清。
+    // 判据 7（重试一侧，D-138）：重试的两个前提——`sent.awaited`（有活着的等待方）
+    // 与 `attempt < attempt_cap`——都成立时，落 `retry{attempt}` + `request{attempt+1}`，
+    // 旧尝试由 `retry` 收清。
     //
     // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
     // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
-    // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里它不可达，
-    // 因为重试通道未启用（出口 ②，见下一条用例）。
+    // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里 `turn`
+    // 的上限是 1 且普通批次的等待方随进程消失，这条路径由 `tool` 端口的唤醒批次
+    // （等待方能由 `wake_batch` 从事实重建）走。
     let retrying: Vec<PortDecl> = PORTS
         .iter()
         .map(|p| PortDecl {
@@ -439,7 +458,14 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     let store = boot();
     // 在途格的租约 / 尝试上限与判定用的 `now` 都从**同一份真表**推出来：
     // 换端口声明不必再改这里的数字，改了数字也不会让用例假绿。
-    stranded(&store, "turn-9-r0", 1, turn.lease_ms, turn.max_attempts);
+    stranded(
+        &store,
+        "turn-9-r0",
+        1,
+        turn.lease_ms,
+        turn.max_attempts,
+        true,
+    );
     let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     let out = reap(
@@ -459,23 +485,30 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
             attempt: 1,
         }]
     );
-    assert_eq!(kinds(&store), vec!["sent", "retry", "request"]);
+    assert_eq!(kinds(&store), vec!["sent", "request", "retry"]);
+    // 写序是故意的（D-138 落地注释）：先写下一笔 `request`、再写 `retry`——两步
+    // 之间崩溃时，下一次 `reap` 看到 `request{attempt+1}` 已存在，只补 `retry`，
+    // 旧尝试不会被重复作废，新尝试也不会丢。
     assert_eq!(payload_of(&store, "retry")["attempt"], json!(1));
     assert_eq!(payload_of(&store, "request")["attempt"], json!(2));
 }
 
 #[test]
-fn no_port_in_the_real_table_retries_today() {
-    // 上面那条用例改写的只有 `max_attempts` 一格，这里钉住**真表此刻的取值**：
-    // 三端口全为 1 ⇒ 生产里 `reap` 的重试分支不可达，到顶即判死（DE-015 §2.3）。
-    // 这是「重试通道未启用」的机制侧一半（条文的另一半由 PTS-006 钉住）。抬上限
-    // 不是顺手能做的事：行层债键是 `(port, id)`，上一 attempt 的出口格已经把那行
-    // 关掉 ⇒ 重试出来的 `request` 不欠任何一行，没有执行体会派它。
-    // 这一条转红 = 有人抬了上限，那时重试出来的那笔必须已经有行会选中它。
+fn only_the_tool_port_has_headroom_and_only_for_rebuildable_waiters() {
+    // 真表此刻的取值（D-138）：`turn` / `model` 的上限是 1——它们的等待方
+    // （轮内同步等待）随进程消失，重试只会留下永不派发的 `request`，到顶即判死；
+    // `tool` 是 2 = 首次 + 一次重试，且**逐次尝试是否真能重试由 `sent.awaited` 决定**
+    // （普通批次 `awaited = false` 仍判死；唤醒批次能由 `wake_batch` 从事实重建
+    // ⇒ `awaited = true` ⇒ 可重试一次）。
+    //
+    // 「重试出来的 request 有行会派它」不再靠这句注释担保：行层债键已含
+    // `attempt`（D-138），`a_retried_request_reopens_authorization_and_dispatch`
+    // 在行层钉住「第二次尝试重新欠授权与派发」。
     let caps: Vec<(&str, u64)> = PORTS.iter().map(|p| (p.port, p.max_attempts)).collect();
-    assert!(
-        caps.iter().all(|(_, n)| *n == 1),
-        "有端口抬了 `max_attempts`：{caps:?}（先确认重试出来的 `request` 有执行体会派它）"
+    assert_eq!(
+        caps,
+        vec![("turn", 1), ("model", 1), ("tool", 2)],
+        "端口上限漂了：抬 `turn` / `model` 前先回答「等待方是谁」，抬 `tool` 到 3 前先回答「还需要哪种等待方形态」"
     );
 }
 

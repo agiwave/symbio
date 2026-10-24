@@ -311,8 +311,8 @@ impl Next {
 /// 派发」变成一句谎。到顶即判死（`failed{why:"lease_expired"}`），恢复走
 /// resume 幕（新的逻辑 id，旧那笔作为「没回来」留在日志里）。
 ///
-/// `retry` 因此是**有活着的等待方**的端口才用的机制（DE-015 的 `tool`：
-/// 它的内环还在，看护者重试后由同一幕接着 await）。
+/// `retry` 因此只给**有活着的等待方**的尝试用（D-138）。上限是端口级的天花板，
+/// 逐次尝试是否真能重试由 `sent.awaited` 决定（见 [`super::port::reap`]）。
 ///
 /// ## `model` 端口
 ///
@@ -344,14 +344,22 @@ pub(crate) static PORTS: &[PortDecl] = &[
     // 工具批次里的**单次调用**。一次模型响应可带 N 个调用 ⇒
     // 同一批写 N 条 `request`，各自一个 id。
     //
-    // 租约与尝试上限同 `turn` / `model`：执行在轮内同步等待，进程重启后等这笔
-    // 应答的 future 已不在；重试只会留下永不派发的 `request`。工具恢复仍走
-    // `resume` 幕（新 `drive_seq` ⇒ 新 id），与步 4 的唤醒事实是同一件事的两面。
+    // ## 为什么上限是 2，而普通批次仍然不重试
+    //
+    // 上限是端口级的天花板，**不是**「每个调用都会重试」的承诺（D-138）。工具端口
+    // 里有两类尝试：
+    //
+    // - 普通批次调用：结果等在当前草稿里，进程重启后等待方随草稿消失 ⇒
+    //   `sent.awaited = false` ⇒ 到顶/到期即判死，恢复走 `resume` 幕（新 id）；
+    // - 唤醒调用：`wake_batch` 能从事实重建那一笔（`resume` / `tool` / `args` 都在
+    //   `request` 载荷里）⇒ `awaited = true` ⇒ 租约看护可以重试一次。
+    //
+    // 上限 2 = 首次 + 一次重试；再抬就需要新的等待方形态，而不是改数字。
     PortDecl {
         port: "tool",
         before: EVENT_SENT,
         lease_ms: 600_000,
-        max_attempts: 1,
+        max_attempts: 2,
         // 一次模型响应可带 N 个工具调用：同批子债允许并发，
         // 具体哪几条同时在途仍由风险档决定（`dispatch/parallel.rs`）。
         concurrent: true,
@@ -379,12 +387,14 @@ pub(crate) static ROWS: &[Decl] = &[
     // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tools` 不欠——两种状态在
     // 匹配上可分，正是判据 8b 要的那条区分。全程没有否定原子。
     //
-    // ## 为什么两行的 `key` 都是 `(port, id)`
+    // ## 为什么两行的 `key` 都是 `(port, id, attempt)`
     //
     // `authorize-tool` 的出口是 `authz.granted` / `authz.denied`，`dispatch-tools`
-    // 的出口是 `sent` / `failed`：它们必须与协议事实关同一笔逻辑调用。`authz.denied`
-    // 的**收束格拒绝**那条载荷只有 `key`（目标格名），没有 `port` / `id`——按
-    // `(port, id)` 绑定自然取不到实例，不会误关一笔工具授权。
+    // 的出口是 `sent` / `failed`：它们必须与协议事实关同一**次尝试**（D-138）。
+    // 逻辑键会让上一 attempt 的出口把行提前关掉，重试出来的 `request{attempt+1}`
+    // 就再也欠不动授权与派发。`authz.denied` 的**收束格拒绝**那条载荷只有 `key`
+    // （目标格名），没有 `port` / `id` / `attempt`——按三元组绑定自然取不到实例，
+    // 不会误关一笔工具授权。
     Decl {
         name: "authorize-tool",
         // 的口径：判在派发之前。0 是这一环里最早的一档。
@@ -395,18 +405,18 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("tool"))],
         },
         until: &[
             Pattern {
                 source: EVENT_AUTHZ_GRANTED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
             Pattern {
                 source: EVENT_AUTHZ_DENIED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
         ],
@@ -625,9 +635,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 第三行（租约）**每端口不写**——一个 `lease` 行管所有端口，它按
     // `stale_sent` 的实例而不是按端口开账。
     //
-    // 键取 **逻辑 id**（`(port, id)`）而不是 `(port, id, attempt)`：`failed`
-    // 关的是逻辑 id（所有尝试），带 attempt 的键永远匹配不上它。尝试级口径
-    // 归视图（`in_flight` / `stale_sent`），行层是逻辑账。
+    // 键取 **`(port, id, attempt)`**（D-138）：重试写出的 `request{attempt+1}`
+    // 必须重新打开派发行；逻辑键会让上一 attempt 的 `sent` 把它提前关掉。
     Decl {
         name: "dispatch-turn",
         prio: 65,
@@ -638,18 +647,18 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("turn"))],
         },
         until: &[
             Pattern {
                 source: EVENT_SENT,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("turn"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("turn"))],
             },
         ],
@@ -660,7 +669,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返，它在
     // `turn` 执行体内部发起（D-115 决策 5：没有第二个调度器）。
     //
-    // 键仍取逻辑 id：一次模型调用 = 一个 id，重试另计尝试号。
+    // 键同样取 `(port, id, attempt)`（D-138）：逻辑 id 在一次调用的各次尝试间不变，
+    // 尝试号随重试 +1；按逻辑键开账会让上一 attempt 的 `sent` 把重试后的请求提前关掉。
     //
     // ## 端口粒度为什么是「一次模型往返」而不是「一次工具批次」
     //
@@ -678,18 +688,18 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_REQUEST,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("model"))],
         },
         until: &[
             Pattern {
                 source: EVENT_SENT,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("model"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("model"))],
             },
         ],
@@ -741,18 +751,18 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_AUTHZ_GRANTED,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("tool"))],
         },
         until: &[
             Pattern {
                 source: EVENT_SENT,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
         ],
@@ -764,8 +774,8 @@ pub(crate) static ROWS: &[Decl] = &[
     // 收尾」说成债务：出口与派发行同一格，动作也是同一个派发执行体（混合批次里
     // 那一笔由 68 顺带关掉，本行随后自然不欠）。
     //
-    // 键取 `(port, id)` 与 `authz.denied` 同形；不带 `port` 的收束格拒绝
-    // （`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。
+    // 键取 `(port, id, attempt)` 与 `authz.denied` 同形（D-138）；不带 `port`
+    // 的收束格拒绝（`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。
     Decl {
         name: "deny-tools",
         prio: 69,
@@ -774,18 +784,22 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_AUTHZ_DENIED,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("tool"))],
         },
         until: &[Pattern {
             source: EVENT_FAILED,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("tool"))],
         }],
         unless: &[],
     },
     // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
     // 永不选中），但它让「在等」与「没事」可区分（DE-015 §2.3）。
+    //
+    // 键取 `(port, id, attempt)`（D-138）：`sent` / `response` / `failed` / `retry`
+    // 都是同一次尝试的事实；按逻辑键开账时，上一 attempt 的应答会把这笔重试后的
+    // 等待提前关掉。
     Decl {
         name: "await-turn",
         prio: 70,
@@ -794,23 +808,23 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_SENT,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("turn"))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("turn"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("turn"))],
             },
             Pattern {
                 source: EVENT_RETRY,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("turn"))],
             },
         ],
@@ -825,29 +839,32 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_SENT,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("model"))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("model"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("model"))],
             },
             Pattern {
                 source: EVENT_RETRY,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("model"))],
             },
         ],
         unless: &[],
     },
     // 一批 N 笔，一笔一条 `sent`；`await-tools` 与其它端口的 await 同形。
+    //
+    // 键取 `(port, id, attempt)`：重试后新 attempt 的 `sent` 要重新开一笔等待，
+    // 而不是被旧 attempt 的应答关掉（D-138）。
     Decl {
         name: "await-tools",
         prio: 72,
@@ -856,23 +873,23 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: EVENT_SENT,
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("tool"))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
             Pattern {
                 source: EVENT_RETRY,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[("port", Lit::Str("tool"))],
             },
         ],
@@ -882,6 +899,10 @@ pub(crate) static ROWS: &[Decl] = &[
     //
     // 开账条件是 `stale_sent.stale`（视图把 `now` 与 `lease_ms` 折成布尔），
     // 所以时间不进欠账公式。
+    //
+    // 键取 `(port, id, attempt)`：一笔调用可能卡在重试链的某一环上，
+    // 看护者要能分别说出「第几次尝试卡住了」（D-138）；逻辑键会让旧尝试的
+    // `retry` 把新尝试的卡住一并关掉。
     //
     // ## 为什么没有 `unless: attempt ≥ max_attempts`
     //
@@ -899,23 +920,23 @@ pub(crate) static ROWS: &[Decl] = &[
         expand: None,
         owes: Pattern {
             source: "stale_sent",
-            key: &["port", "id"],
+            key: &["port", "id", "attempt"],
             eq: &[("stale", Lit::Bool(true))],
         },
         until: &[
             Pattern {
                 source: EVENT_RESPONSE,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[],
             },
             Pattern {
                 source: EVENT_FAILED,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[],
             },
             Pattern {
                 source: EVENT_RETRY,
-                key: &["port", "id"],
+                key: &["port", "id", "attempt"],
                 eq: &[],
             },
         ],

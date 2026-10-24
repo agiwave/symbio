@@ -412,7 +412,8 @@ const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, E
 // 端口（`turn` / `tool`）不带这个字段——缺席即空集合，不开债。
 const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls", "via"];
 
-// `sent` 多两块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）。
+// `sent` 多三块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）与
+// **这次尝试有没有活着的等待方**（`awaited`）。
 //
 // ## 为什么租约参数在事实上而不只在 `PortDecl` 里
 //
@@ -424,7 +425,19 @@ const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls", "via"];
 // 租约是**派发那一刻**的约定（“这次出去，N 毫秒没应答就算卡住”），写进 `sent`
 // 就不必再按 `(port,id,attempt)` 与 `request` 做一次连接。且它同时是回放的
 // 必要信息：端口参数未来改了，历史调用的租约仍是当时那个（不是「今天这个」）。
-const SENT_FIELDS: &[&str] = &["port", "id", "attempt", "lease_ms", "attempt_cap"];
+//
+// `awaited` 是**逐次尝试**的属性，不是端口属性：同一个端口里，普通批次调用
+// 崩溃后没有等待方（草稿随进程消失），唤醒调用却能由 `wake_batch` 从事实重建。
+// 租约看护只对 `awaited = true` 的那几次尝试重试——否则会造出一条永远没人派发的
+// `request`（D-138）。
+const SENT_FIELDS: &[&str] = &[
+    "port",
+    "id",
+    "attempt",
+    "lease_ms",
+    "attempt_cap",
+    "awaited",
+];
 
 const BUILTIN_FACTS: &[FactDecl] = &[
     FactDecl {
@@ -448,20 +461,25 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         expand: &["calls"],
         fields: RESPONSE_FIELDS,
     },
-    // `failed` 关的是**逻辑 id**（所有尝试），所以没有 `attempt`——与协议表一致：
-    // 失败不是「某一次尝试失败」，是这笔调用不再重试。
+    // `failed` 与其它协议格同形，**带 `attempt`**（D-138）：它关的是「这一次尝试
+    // 失败」；「这笔调用不再重试」由「没有后继 `request`」表达，不由键的粒度表达。
+    //
+    // 这样 `dispatch-<port>` / `await-<port>` / `lease` 才能按 `(port, id, attempt)`
+    // 与它同键收口；`open-tools` / `deny-tools` 仍按 `(port, id)` 读它（模式只取
+    // 自己声明的键字段，多出来的 `attempt` 不影响逻辑级读者）。
     //
     // `via` 与 `request` / `response` 同形：失败也要说得出「这是谁的往返」——
     // 内部往返失败**不**让这一轮收束（它不是「模型没答成」）。
     FactDecl {
         name: EVENT_FAILED,
         port: Some("port"),
-        key: &["id"],
+        key: &["id", "attempt"],
         expand: &[],
-        fields: &["port", "id", "why", "via"],
+        fields: &["port", "id", "attempt", "why", "via"],
     },
     // 尝试级否定：租约看护者落的「这一次作废、换一次」。
-    // 与 `failed` 的边界：`failed` 关**逻辑 id**（不再重试），`retry` 只关一次尝试。
+    // 与 `failed` 的边界：`failed` 是一次尝试的终局，`retry` 是「这次不算数」；
+    // 两者都只关同一次尝试（D-138）。
     FactDecl {
         name: EVENT_RETRY,
         port: Some("port"),
@@ -582,23 +600,29 @@ const BUILTIN_FACTS: &[FactDecl] = &[
     // （`invariants::declared_budget_ms`）。按判据 7 的口径它是业务事实，
     // 名字与写方都照旧，只是不进控制面声明集。
     // 拒绝事实：`key` 是「主体 × 能力 × 资源」的编码。
+    //
+    // `attempt` 是**工具端口拒绝**的尝试号（D-138）：`authorize-tool` / `deny-tools`
+    // 按 `(port, id, attempt)` 收口。收束路径那条只带 `key` 的拒绝没有端口三字段，
+    // 按任何端口键都取不到实例——它本来就不该关一笔工具授权。
     FactDecl {
         name: "authz.denied",
         port: None,
         key: &["key"],
         expand: &[],
-        fields: &["key", "port", "id", "tool", "kind", "reason", "detail"],
+        fields: &[
+            "key", "port", "id", "attempt", "tool", "kind", "reason", "detail",
+        ],
     },
     // 放行事实（/ DE-015 §4.2）：授权级联的正向一半。
     //
-    // 键取 `(port, id)` 而不是 `key`：级联的派发行要与 `sent` / `failed` 关同一
-    // 逻辑调用，而协议事实的键是二元组；`key` 只是给人看的同一 id 副本。
+    // 键取 `(port, id, attempt)`：级联的派发行要与 `sent` / `failed` 关同一
+    // **次尝试**（D-138）；`key` 只是给人看的同一 id 副本。
     FactDecl {
         name: "authz.granted",
         port: None,
-        key: &["port", "id"],
+        key: &["port", "id", "attempt"],
         expand: &[],
-        fields: &["key", "port", "id", "tool", "risk", "deferred"],
+        fields: &["key", "port", "id", "attempt", "tool", "risk", "deferred"],
     },
 ];
 
@@ -617,26 +641,23 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
     )
 }
 
-/// **在途**协议调用的唯一口径：`sent` 中没有被 `response`（同 id + attempt）
-/// 或 `failed`（同逻辑 id）或 `retry`（同 id + attempt）关掉的。
+/// **在途**协议调用的唯一口径：`sent` 中没有被 `response` / `failed` / `retry`
+/// （同 id + attempt）关掉的。
 ///
 /// 两个视图（`in_flight` / `stale_sent`）共用它，而不是各写一遍关账规则：
 /// 「什么算在途」只能有一处口径，否则两个视图会在某个角落说不同的话。
+///
+/// 三个出口都只关**同一次尝试**（D-138）：`failed` 不再按逻辑 id 一次关掉所有
+/// 尝试。重试链上旧的尝试已经由 `retry` 关掉，不会留下「没人收的旧在途」。
 fn open_calls(events: &[Event]) -> Vec<&Event> {
     let mut open: Vec<&Event> = Vec::new();
     for e in events {
         match e.kind.as_str() {
             EVENT_SENT => open.push(e),
-            // 一次尝试被应答 / 被作废：只关那一次。
-            EVENT_RESPONSE | EVENT_RETRY => {
+            EVENT_RESPONSE | EVENT_RETRY | EVENT_FAILED => {
                 let id = str_field(e, "id");
                 let attempt = u64_field(e, "attempt");
                 open.retain(|s| !(str_field(s, "id") == id && u64_field(s, "attempt") == attempt));
-            }
-            // 失败关的是**逻辑 id**（所有尝试）：这笔调用不再重试。
-            EVENT_FAILED => {
-                let id = str_field(e, "id");
-                open.retain(|s| str_field(s, "id") != id);
             }
             _ => {}
         }
@@ -1080,14 +1101,15 @@ fn is_report_anchor(e: &Event) -> bool {
 }
 
 const BUILTIN_VIEWS: &[ViewDecl] = &[
-    // 在途 = `sent` 中没有对应 `response`（同 id + attempt）、`failed`（同 id）
-    // 或 `retry`（同 id + attempt）的那些。
+    // 在途 = `sent` 中没有对应 `response` / `failed` / `retry`
+    // （三者都是同 id + attempt）的那些。
     //
     // v2：加入 `retry` 一侧。没有它，被作废的那次尝试会永远留在「在途」里
     // ——而它已经不会再回来了。
+    // v3：`failed` 也收窄到同一次尝试（D-138）；读面因此要多声明它的 `attempt`。
     ViewDecl {
         name: "in_flight",
-        ver: 2,
+        ver: 3,
         reads: &[
             (EVENT_SENT, "id"),
             (EVENT_SENT, "port"),
@@ -1095,6 +1117,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_RESPONSE, "id"),
             (EVENT_RESPONSE, "attempt"),
             (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "attempt"),
             (EVENT_RETRY, "id"),
             (EVENT_RETRY, "attempt"),
         ],
@@ -1107,7 +1130,10 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // （与 `report_due.due` 同一条纪律）。
     ViewDecl {
         name: "stale_sent",
-        ver: 1,
+        // v2：`failed` 的关账口径收窄到同一次尝试（D-138），读面多声明它的
+        // `attempt`；`awaited` 不在这里折——它不是「卡住」的一部分，由看护者
+        // 从 `sent` 事实上读。
+        ver: 2,
         reads: &[
             (EVENT_SENT, "id"),
             (EVENT_SENT, "port"),
@@ -1117,6 +1143,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_RESPONSE, "id"),
             (EVENT_RESPONSE, "attempt"),
             (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "attempt"),
             (EVENT_RETRY, "id"),
             (EVENT_RETRY, "attempt"),
         ],

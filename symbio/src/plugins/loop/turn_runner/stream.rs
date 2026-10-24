@@ -82,6 +82,8 @@ where
             produced_by: run.user_seq,
             row: "dispatch-model",
             now: run.now_ms(),
+            // 这次往返等在当前 drive 的 future 里：进程一死等待方就没了。
+            awaited: false,
         },
         || llm.generate_turn(tok, messages, tools, sink.clone()),
         |e: &AdapterError| e.to_string(),

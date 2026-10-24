@@ -1780,6 +1780,8 @@ mod tool_round_tests {
                     "key": id,
                     "port": "tool",
                     "id": id,
+                    // 与生产同键（D-138）：授权关同一**次尝试**。
+                    "attempt": call.call.attempt,
                     "tool": call.name,
                     "risk": "unknown",
                     "deferred": true,
@@ -1805,6 +1807,7 @@ mod tool_round_tests {
                     produced_by,
                     row: "dispatch-tools",
                     now: 0,
+                    awaited: call.wake.is_some(),
                 },
             )
             .is_ok()
@@ -1953,6 +1956,8 @@ mod tool_round_tests {
                         "key": id,
                         "port": "tool",
                         "id": id,
+                        // 与生产同键（D-138）：授权关同一**次尝试**。
+                        "attempt": call.call.attempt,
                         "tool": call.name,
                         "risk": "unknown",
                         "deferred": true,
@@ -1980,6 +1985,7 @@ mod tool_round_tests {
                         produced_by: self.user_seq,
                         row: "dispatch-tools",
                         now: 0,
+                        awaited: call.wake.is_some(),
                     },
                 )
                 .is_ok()
@@ -2058,6 +2064,8 @@ mod tool_round_tests {
                         "key": id,
                         "port": "tool",
                         "id": id,
+                        // 与生产同键（D-138）：拒绝也关同一**次尝试**。
+                        "attempt": call.call.attempt,
                         "tool": call.name,
                         "kind": "tool",
                         "reason": "denied",

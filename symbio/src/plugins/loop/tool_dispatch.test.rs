@@ -111,6 +111,7 @@ fn opened(store: &EventStore, id: &str) -> ToolPortCall {
             produced_by: USER_SEQ,
             row: "dispatch-tools",
             now: 0,
+            awaited: call.wake.is_some(),
         },
     )
     .expect("sent 落格");
@@ -149,7 +150,8 @@ fn an_aborted_call_closes_as_failed_not_as_an_answer() {
 
     assert_eq!(
         payload_of(&store, "failed"),
-        json!({"port": "tool", "id": "tool-1-d1-b0-c0", "why": ABORTED}),
+        // `attempt` 与其它协议格同形（D-138）：`failed` 关的是这一次尝试。
+        json!({"port": "tool", "id": "tool-1-d1-b0-c0", "attempt": 1, "why": ABORTED}),
         "中止的成因要写在协议事实上，事后不必靠猜"
     );
     assert!(

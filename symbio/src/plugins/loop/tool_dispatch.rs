@@ -625,6 +625,9 @@ impl ToolPort {
                     produced_by: self.user_seq,
                     row: "dispatch-tools",
                     now,
+                    // 唤醒调用能由 `wake_batch` 从事实重建（有活着的等待方）；
+                    // 普通批次把结果等在当前草稿里，进程一死就没人接了。
+                    awaited: call.wake.is_some(),
                 },
             ) {
                 Ok(()) => call.sent = true,
@@ -767,8 +770,13 @@ impl ToolPort {
         let attempt = payload.get("attempt").and_then(|v| v.as_u64()).unwrap_or(1);
         let intent = WakeIntent::from_payload(payload)?;
         let authz = facts.iter().find_map(|e| {
+            // 授权事实按**同一次尝试**取（D-138）：重试后的 attempt 2 不能复用
+            // attempt 1 的放行，否则 `dispatch-tools` 的新账永远不欠。
+            // 旧日志里的授权没有 `attempt`：只对首次尝试按缺席兼容。
+            let authz_attempt = e.payload.get("attempt").and_then(|v| v.as_u64());
             let same = e.payload.get("port").and_then(|v| v.as_str()) == Some("tool")
-                && e.payload.get("id").and_then(|v| v.as_str()) == Some(id.as_str());
+                && e.payload.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
+                && (authz_attempt == Some(attempt) || (authz_attempt.is_none() && attempt == 1));
             if !same {
                 return None;
             }
@@ -1192,8 +1200,9 @@ fn granted_event(
     deferred: bool,
 ) -> Event {
     let id = &call.id;
+    let attempt = call.attempt;
     Event::pending(
-        format!("grant-{turn}-{id}"),
+        format!("grant-{turn}-{id}-{attempt}"),
         EVENT_AUTHZ_GRANTED,
         Entity::Turn,
         Verb::Asserted,
@@ -1205,6 +1214,7 @@ fn granted_event(
         "key": id,
         "port": "tool",
         "id": id,
+        "attempt": attempt,
         "tool": tool,
         "risk": risk,
         "deferred": deferred,
@@ -1213,8 +1223,9 @@ fn granted_event(
 
 fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why: &str) -> Event {
     let id = &call.id;
+    let attempt = call.attempt;
     Event::pending(
-        format!("deny-tool-{turn}-{id}"),
+        format!("deny-tool-{turn}-{id}-{attempt}"),
         EVENT_AUTHZ_DENIED,
         Entity::Turn,
         Verb::Asserted,
@@ -1226,6 +1237,7 @@ fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why:
         "key": id,
         "port": "tool",
         "id": id,
+        "attempt": attempt,
         "tool": tool,
         "kind": "tool",
         "reason": crate::symbio_core::ClosureReason::Denied.as_str(),
