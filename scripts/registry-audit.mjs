@@ -5,7 +5,7 @@
  * ## 它守什么
  *
  * 「单文档 + 元信息 + 自动汇总」这套顶层机制的**全部强制力**都在这里（判据码
- * RG-001…RG-031，逐条语义与消息住 `registry-lib`，登记表见 `docs/004-ref/GATE_CODES.md`）：
+ * RG-001…RG-032，逐条语义与消息住 `registry-lib`，登记表见 `docs/004-ref/GATE_CODES.md`）：
  *
  *   - **RG-001** front-matter 可解析（受限 YAML 子集），未知 / 重复字段按 kind 判；
  *   - **RG-002** 必填字段非空（kind 只来自 front-matter，目录不参与判定）；
@@ -50,6 +50,9 @@
  *   - **RG-031** **收口即删**：kind 把 `closedStatus` 也写进退场档 ⇒ 闭环是**过渡档**，
  *     这种 kind 的条目一进退场档，文件必须已经删掉——结论先落进设计文档（`impl` 档位 /
  *     `### D-NNN`），任务只留 git 历史。文档类的 `retired` 是在位归档，与它不重合。
+ *   - **RG-032** **锚必须可核对**：`evidence` / `where` / `exit` 里的仓内路径若被
+ *     `.gitignore` 覆盖（`tmp` / `logs` / `.workbuddy-ai` 一类），报错并指名命中的规则——
+ *     这类地址清一次临时目录就没了，写进判据等于把证据押在不进 git 的地方。
  *
  * ## 失效形态
  *
@@ -103,7 +106,7 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-031） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-032） ---']
   const docsDir = path.join(root, 'docs')
   const { entries, projections, kinds, errors, notes, missing } = loadEntries(root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }

@@ -45,7 +45,7 @@ lists: [gate-codes=owner]
 | **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 契约 7 的重试限定） | `scripts/port-surface-audit.mjs` | PTS-001–006 | `PTS-007` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
-| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–031 | `RG-032` |
+| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–032 | `RG-033` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–005 | `SC-006` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
@@ -197,6 +197,7 @@ lists: [gate-codes=owner]
 | **RG-029** | `scripts/registry-lib.mjs` |
 | **RG-030** | `scripts/registry-lib.mjs` |
 | **RG-031** | `scripts/registry-lib.mjs` |
+| **RG-032** | `scripts/registry-lib.mjs` |
 | **S-001** | `scripts/grep-audit.mjs` |
 | **S-002** | `scripts/grep-audit.mjs` |
 | **S-003** | `scripts/grep-audit.mjs` |

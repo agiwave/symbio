@@ -24,7 +24,7 @@
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/06-facts-write.mjs` 的生成链），
  *      不存在第二处手抄；
  *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
- *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-031），
+ *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-032），
  *      违规即红，范围读不出 exit 2。
  *
  * ## 受限 YAML 子集（front-matter）
@@ -48,7 +48,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031 RG-032
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -598,6 +598,93 @@ export function firstH1(body) {
  * @returns {{entries: Array, errors: string[], notes: string[], missing: boolean}}
  *          `missing` = 扫不到任何 md（范围读不出，RG-010 走 exit 2）
  */
+// `.gitignore` 的最小读法（RG-032 的输入面）。
+//
+// 本仓的忽略规则只有两种形状：**目录前缀**（临时目录、模型缓存目录、会话工作区一类）
+// 与**文件名模式**（日志后缀、环境文件、OS 元数据），外加「任意深度」前缀。
+// 这里就只实现这两种——**取反（`!`）与更复杂的 glob 报「形状不支持」**，
+// 不静默放行：判据的失效形态正是「看不懂于是当合规」。
+//
+export function compileIgnoreRules(text) {
+  const rules = []
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('!')) {
+      rules.push({ raw: line, unsupported: true })
+      continue
+    }
+    const dirOnly = line.endsWith('/')
+    const body = dirOnly ? line.slice(0, -1) : line
+    const depthAny = body.startsWith('**/')
+    const glob = depthAny ? body.slice(3) : body
+    let src = ''
+    for (const c of glob) {
+      if (c === '*') src += '[^/]*'
+      else if ('\\^$.|?+()[]{}'.includes(c)) src += `\\${c}`
+      else src += c
+    }
+    rules.push({ raw: line, dirOnly, re: new RegExp(`^${src}$`), depthAny })
+  }
+  return rules
+}
+
+/** 读仓根的 `.gitignore`（不存在 ⇒ 空规则集：不判）。 */
+export function loadIgnoreRules(root) {
+  const p = path.join(root, '.gitignore')
+  try {
+    return compileIgnoreRules(fs.readFileSync(p, 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * `rel` 是否被某条规则覆盖；命中返回**规则原文**（错误信息要指名是哪一条，
+ * 否则读的人只能自己拿路径去 `.gitignore` 里猜）。
+ *
+ * 目录规则对「路径的每一段前缀」逐一试（`tmp/` 命中 `tmp/a/b.md`）；
+ * 无斜杠的模式对 basename 试（`*.log` 命中 `logs/gate-3.log`）；
+ * `**\/` 前缀的模式同样按前缀试（`**\/.cache/` 命中 `a/b/.cache/` 的 `a/b/.cache` 段）。
+ */
+export function ignoredBy(rules, rel) {
+  const segs = rel.split('/').filter(Boolean)
+  for (const r of rules) {
+    if (r.unsupported) continue
+    if (r.dirOnly) {
+      for (let i = 1; i <= segs.length; i++) {
+        if (r.re.test(segs.slice(0, i).join('/'))) return r.raw
+      }
+      // `**\/` 前缀的目录规则对**任一段**也成立（`**\/.cache/` 命中 `a/b/.cache/`）
+      if (r.depthAny && segs.some((s) => r.re.test(s))) return r.raw
+      continue
+    }
+    if (r.re.test(rel)) return r.raw
+    if (!r.raw.includes('/') && r.re.test(segs[segs.length - 1] ?? '')) return r.raw
+  }
+  return null
+}
+
+/**
+ * 从一段字段文本里取「仓根相对路径」候选。
+ *
+ * 字段是散文（`evidence` / `where` / `exit` 都是），所以按分隔符切词再看形状：
+ * 含 `/`、不以 `/` 或 `~` 或协议头开头、字符集是路径字符（允许中文——本仓的文档名
+ * 就是中文）。行号后缀（`wal.rs:194-222`）与尾部标点切掉。绝对路径不判：它不是仓内的锚。
+ */
+export function pathsInAnchor(text) {
+  const out = new Set()
+  const tokens = String(text).split(/[\s·、，,；;（）()《》「」『』“”"'`]+/)
+  for (let t of tokens) {
+    t = t.replace(/[。：:）)】\]]+$/, '').replace(/:[\d#-]+$/, '')
+    if (!t.includes('/')) continue
+    if (t.startsWith('/') || t.startsWith('~') || /^[a-zA-Z]+:\/\//.test(t)) continue
+    if (!/^[\w.@\-/\u4e00-\u9fa5]+$/.test(t)) continue
+    out.add(t.replace(/\/+$/, ''))
+  }
+  return [...out]
+}
+
 export function loadEntries(root) {
   const errors = []
   const notes = []
@@ -753,8 +840,12 @@ function cmpPrio(byIdEntry) {
  * 全量校验。返回**纯文本**一行一条的违规（颜色由 CLI 上），
  * 空数组 = 零违规。`root` 用于 RG-012 的存在性判定；`kinds` 由 `loadKinds` 装载。
  */
+/** RG-032 判的字段：三个「锚」（`reason` / `title` 是散文，不判）。 */
+const ANCHOR_FIELDS = ['evidence', 'where', 'exit']
+
 export function auditEntries(entries, root, projections = [], kinds = {}) {
   const out = []
+  const ignoreRules = loadIgnoreRules(root)
   const byId = new Map()
   const entryIdReK = entryIdRe(kinds)
 
@@ -960,6 +1051,23 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
             '（`impl` 档位 / `### D-NNN`），再删掉这个文件；若有条目的 `deps` 指向它，' +
             '同一提交里把那条边摘掉（RG-006：已闭环的编号不再是前置）',
         )
+      }
+    }
+    // RG-032：**锚必须可核对**——字段里指到 `.gitignore` 覆盖的路径即红。
+    // 与本条并行的 RG-012 判「`exit` 指的文件此刻在不在」，判的是「下一次提交还能不能核对」：
+    // `tmp/` 下的报告、`logs/` 里的门禁日志清一次就没了，写进 `evidence` 等于把证据
+    // 押在一个不进 git 的地址上（本仓实际发生过：一篇 done 任务的证据目录已不存在）。
+    // 只判 `evidence` / `where` / `exit` 三个字段——它们是「锚」，`reason` 是散文。
+    for (const f of ANCHOR_FIELDS) {
+      if (typeof meta[f] !== 'string') continue
+      for (const p of pathsInAnchor(meta[f])) {
+        const hit = ignoredBy(ignoreRules, p)
+        if (hit) {
+          out.push(
+            `${e.rel}：RG-032 \`${f}\` 指到被忽略的路径 \`${p}\`（命中 .gitignore 的 \`${hit}\`）` +
+              '——判据的锚必须能被下一次提交核对：结论进设计条目，原始材料随提交入库或明说「不留」',
+          )
+        }
       }
     }
     // RG-012 判据指认的文件必须存在（落点 `where` 不判——落点可以尚不存在）

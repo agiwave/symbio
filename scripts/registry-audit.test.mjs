@@ -856,6 +856,54 @@ test('RG-031：闭环档的任务文件必须已删——done / wont 都红，�
   assert.deepEqual(errsOf(retiredDoc), [], '文档类 retired ⇒ 在位归档，不删文件')
 })
 
+test('RG-032：锚不许落在 .gitignore 覆盖的路径上——三类各红一次，真锚绿', () => {
+  // 夹具仓自带 `.gitignore`（`caseRoot` 不写，这里第一个用例补上；后续用例共用同一份形状）
+  const gi = ['tmp/', 'logs/', '.workbuddy*/', '*.log'].join('\n')
+  // 键以 `/` 开头 = 仓根相对——`.gitignore` 必须在**仓根**，否则 `loadIgnoreRules` 读不到
+  const withIgnore = (files) => caseRoot({ '/.gitignore': gi, ...files })
+
+  // 反向三条：目录前缀 / 别的目录前缀 / 通配前缀
+  const inTmp = withIgnore({
+    'task/001.md': taskDoc('T-001', { status: 'done', evidence: '实测见 tmp/verify-2026-10-24/01.md 的全项通过' }),
+  })
+  // `evidence` 只在闭环档合法，而 RG-031 判的就是闭环档文件不许留——夹具里两者必然同时红，
+  // 故这一格走 `errsOfOpen`（滤掉 RG-031），RG-032 的那一条照旧要出现。
+  expectOnly(errsOfOpen(inTmp), /RG-032 `evidence` 指到被忽略的路径 `tmp\/verify-2026-10-24\/01\.md`（命中 .gitignore 的 `tmp\/`）/)
+
+  const inLogs = withIgnore({
+    'task/001.md': taskDoc('T-001', { where: 'logs/gate-3.log · docs/007-task/' }),
+  })
+  expectOnly(errsOf(inLogs), /RG-032 `where` 指到被忽略的路径 `logs\/gate-3\.log`（命中 .gitignore 的 `logs\/`）/)
+
+  const inWorkbuddy = withIgnore({
+    'task/001.md': taskDoc('T-001', { exit: '`.workbuddy-ai/gate-logs/` 下留最近的日志即可' }),
+  })
+  expectOnly(errsOf(inWorkbuddy), /RG-032 `exit` 指到被忽略的路径 `\.workbuddy-ai\/gate-logs`（命中 .gitignore 的 `\.workbuddy\*\/`）/)
+
+  // 正向两条：`docs/` 与 `scripts/` 下的真锚不判；`*.log` 按 basename 也命中（后缀规则在工作）
+  const ok = withIgnore({
+    'task/001.md': taskDoc('T-001', {
+      where: 'docs/003-design/015-义务环.md · scripts/registry-audit.mjs',
+      // `exit` 会被 RG-012 判「文件此刻存在」，所以这里指夹具里真有的那一篇；
+      // 版本化路径的正向面由 `where` 承担（RG-012 不判 `where`——落点可以尚不存在）。
+      exit: '见 docs/007-task/README.md 的收口即删节',
+    }),
+  })
+  assert.deepEqual(errsOf(ok), [], '版本化路径 ⇒ 放行（反向）')
+
+  const byExt = withIgnore({
+    // 目录不在忽略名单里，只有 `*.log` 这条**后缀**规则命中——测的是 basename 那一支
+    'task/001.md': taskDoc('T-001', { where: '见 debug/gate-3.log 的收尾行' }),
+  })
+  expectOnly(errsOf(byExt), /命中 .gitignore 的 `\*\.log`/)
+
+  // 不加 `.gitignore` 的夹具仓不判（判据的数据源缺失时不许凭想象判）
+  const noIgnore = caseRoot({
+    'task/001.md': taskDoc('T-001', { where: '见 tmp/x.md' }),
+  })
+  assert.deepEqual(errsOf(noIgnore), [], '没有 .gitignore ⇒ 无可判的规则集')
+})
+
 test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向）', () => {
   const base = caseRoot({
     'docs/archive/old.md': '# 历史快照（无 front-matter）\n',
