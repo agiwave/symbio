@@ -993,12 +993,12 @@ pub const STAGE_DOCS: &[StageDoc] = &[
         file: "038-多主体与对等承诺.md",
         assigns: &[
             ("event.entity", "commitment"),
-            ("principal", "agent:peer-b"),
+            ("principal", "session/peer-b"),
             ("vis_scope", "thread_private"),
             ("projection", "reputation"),
             ("actor.pattern", "translator"),
         ],
-        fallback: ("principal", "agent:main"),
+        fallback: ("principal", "session/main"),
     },
     StageDoc {
         id: "S09",
@@ -1051,7 +1051,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
         assigns: &[
             ("event.entity", "commitment"),
             ("event.verb", "asserted"),
-            ("principal", "agent:market"),
+            ("principal", "session/market"),
             ("vis_scope", "public"),
             ("projection", "reputation"),
         ],
@@ -1134,7 +1134,7 @@ pub const COGNITIVE_DEMANDS: &[CognitiveDemand] = &[
     CognitiveDemand {
         id: "C11",
         name: "跨主体借用他人认知（人 → 智能体）",
-        assignments: &[("principal", "agent:helper"), ("vis_scope", "shared")],
+        assignments: &[("principal", "session/helper"), ("vis_scope", "shared")],
         stage: "S08",
     },
     CognitiveDemand {
