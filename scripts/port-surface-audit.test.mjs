@@ -128,7 +128,7 @@ const PLAN_SRC = `### 2.6 执行契约
 | # | 契约 | 不做的后果 |
 |---|---|---|
 | 6 | 无进展守卫 | 静默停摆 |
-| 7 | 在途请求带租约；到顶即判死，重试通道未启用 | 永久在等 |
+| 7 | 在途请求带租约；重试前提成立时落 retry 并重开下一笔（D-138），否则到顶即判死 | 永久在等 |
 `
 
 /**
@@ -489,10 +489,10 @@ test('PTS-005 行表里的 `source: EVENT_SENT` 不算写点（模式不是账�
   }
 })
 
-// ── ⑦ PTS-006：契约 7 的「重试」必须带「未启用」 ──────────────────────
+// ── ⑦ PTS-006：契约 7 必须引 D-138 且不再写「未启用」 ──────────────────────
 
-test('PTS-006 契约 7 说「重试或判死」却不提未启用 ⇒ 红（条文与机制分叉）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('到顶即判死，重试通道未启用', '重试或判死') })
+test('PTS-006 契约 7 仍写「未启用」⇒ 红（重试已启用，条文与机制分叉）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('（D-138），否则到顶即判死', '（D-138），否则到顶即判死。重试通道未启用') })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
@@ -502,19 +502,20 @@ test('PTS-006 契约 7 说「重试或判死」却不提未启用 ⇒ 红（条�
   }
 })
 
-test('PTS-006 契约 7 把「重试」整词删掉 ⇒ 红（实现的另一路被藏起来）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('到顶即判死，重试通道未启用', '到顶即判死') })
+test('PTS-006 契约 7 不引重试裁决 ⇒ 红（改判据不留决策）', () => {
+  const root = fixture({ plan: PLAN_SRC.replace('（D-138）', '') })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*第 7 行|PTS-006.*不再提「重试」/s)
+    assert.match(r.stderr, /PTS-006.*重试进债键/s)
   } finally {
     cleanup(root)
   }
 })
 
 test('PTS-006 契约表的第 7 行找不到 ⇒ 红（锚点漂了不是没什么可判）', () => {
-  const root = fixture({ plan: PLAN_SRC.replace('| 7 | 在途请求带租约；到顶即判死，重试通道未启用 | 永久在等 |\n', '') })
+  // 锚点漂的形状：第 7 行被改号（变成 8），判据找不到自己那一条。
+  const root = fixture({ plan: PLAN_SRC.replace('| 7 |', '| 8 |') })
   try {
     const r = run(root)
     assert.equal(r.status, 1, r.stdout)
