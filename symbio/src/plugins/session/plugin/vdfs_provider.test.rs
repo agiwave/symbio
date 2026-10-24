@@ -1264,12 +1264,24 @@ async fn expand_skeleton_rejects_malformed_params() {
 
     // 合法边界照旧放行：显式 null 与缺省同义（「不过滤」的线上写法）。
     assert_eq!(
-        expand_skeleton(&p, &id, "s", Some(json!({ "depth": null, "since_seq": null }))).await,
+        expand_skeleton(
+            &p,
+            &id,
+            "s",
+            Some(json!({ "depth": null, "since_seq": null }))
+        )
+        .await,
         ["a"],
         "显式 null = 缺省"
     );
     assert_eq!(
-        expand_skeleton(&p, &id, "s", Some(json!({ "depth": "all", "since_seq": 2 }))).await,
+        expand_skeleton(
+            &p,
+            &id,
+            "s",
+            Some(json!({ "depth": "all", "since_seq": 2 }))
+        )
+        .await,
         Vec::<String>::new(),
         "depth=all + since_seq=2 ⇒ seq>2 无节点（a 的 seq 恰为 2，被过滤）"
     );

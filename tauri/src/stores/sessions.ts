@@ -1316,6 +1316,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     setInboxItems,
     refreshInbox,
     hydrateFromHistory,
+    // 批量移除（后端 `chat/delete_message` 的 `deleted_ids`；折叠骨架本地释放
+    // 也走它——同一处「按 id 摘掉一批」的语义，不为惰性重取再开一条写路径）
+    removeMessages,
     removeFrom,
     // 运行模式（auto / interactive）：写入统一走会话选项栏（metadata 补丁），
     // store 只提供读取 + 本地镜射，避免第二条写入路径。
