@@ -1209,6 +1209,72 @@ async fn expand_skeleton_returns_the_subtree_on_demand() {
     );
 }
 
+/// `expand_skeleton` 的非法入参（判据 1）：depth / since_seq 给了但不合法 ⇒
+/// 错误码，不静默按缺省处理。静默忽略的后果是「以为只要直接子」实际拿到整棵
+/// 子树，而调用方从回执里看不出来。
+#[tokio::test]
+async fn expand_skeleton_rejects_malformed_params() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-expand-bad");
+    seed_nodes(
+        &p,
+        &id,
+        vec![
+            cm::ChatNode {
+                id: "s".into(),
+                msg_type: Some(cm::NodeKind::Skeleton),
+                seq: Some(1),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "a".into(),
+                parent_id: Some("s".into()),
+                seq: Some(2),
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+
+    for (payload, why) in [
+        (json!({ "depth": "2" }), "depth 只接受 \"1\"|\"all\""),
+        (json!({ "depth": 1 }), "depth 必须是字符串（数字 1 也不认）"),
+        (json!({ "depth": true }), "depth 不接受布尔"),
+        (json!({ "since_seq": "3" }), "since_seq 必须是整数"),
+        (json!({ "since_seq": 1.5 }), "since_seq 不接受小数"),
+        (json!({ "since_seq": [] }), "since_seq 不接受数组"),
+        (json!("expand_skeleton"), "载荷必须是 JSON 对象"),
+    ] {
+        let err = p
+            .dispatch(
+                &vctx(),
+                &message_path(&id, "s"),
+                VdfsRequest::Action {
+                    action: VDFS_ACTION_EXPAND_SKELETON.to_string(),
+                    payload: Some(payload.clone()),
+                },
+            )
+            .await
+            .expect_err(&format!("应拒绝：{why}"));
+        assert!(
+            matches!(err, VdfsError::Invalid(_)),
+            "{why}：错误码须为 invalid，实得 {err:?}"
+        );
+    }
+
+    // 合法边界照旧放行：显式 null 与缺省同义（「不过滤」的线上写法）。
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "depth": null, "since_seq": null }))).await,
+        ["a"],
+        "显式 null = 缺省"
+    );
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "depth": "all", "since_seq": 2 }))).await,
+        Vec::<String>::new(),
+        "depth=all + since_seq=2 ⇒ seq>2 无节点（a 的 seq 恰为 2，被过滤）"
+    );
+}
+
 // ==================== dispatch 请求形态（测试辅助） ====================
 
 const LIST: VdfsRequest = VdfsRequest::List {};

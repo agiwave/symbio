@@ -59,6 +59,8 @@ const hoisted = vi.hoisted(() => {
     store: {} as Record<string, unknown>,
     /** useReleasedSkeletonsStore 的桩：本文件只关心 expandSkeleton 会摘除释放标记 */
     released: {} as Record<string, unknown>,
+    /** logger 的桩（判据 5 的告警断言走它） */
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   }
 })
 
@@ -76,10 +78,13 @@ vi.mock('@/services/vdfsScheme', () => ({
   })),
 }))
 vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.store }))
-vi.mock('@/stores/skeletonLazy', () => ({ useReleasedSkeletonsStore: () => hoisted.released }))
-vi.mock('@/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}))
+// 纯函数（subtreeOf / statsOf / forgetSession）保持真实实现——断言要的就是
+// 它们的真实产物；被桩掉的只有 store（useReleasedSkeletonsStore）。
+vi.mock('@/stores/skeletonLazy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/skeletonLazy')>()
+  return { ...actual, useReleasedSkeletonsStore: () => hoisted.released }
+})
+vi.mock('@/utils/logger', () => ({ logger: hoisted.logger }))
 
 import { useChatConnection, type UseChatConnectionOptions } from '../useChatConnection'
 
@@ -89,6 +94,7 @@ function makeStore(over: Record<string, unknown> = {}) {
     isSessionWorking: vi.fn(() => false),
     applyTranscriptMessage: vi.fn(),
     applyTranscriptMessages: vi.fn(),
+    removeMessages: vi.fn(),
     putStatus: vi.fn(),
     setSessionError: vi.fn(),
     setSessionStatus: vi.fn(),
@@ -115,6 +121,8 @@ beforeEach(() => {
   hoisted.actions.length = 0
   hoisted.writeVdfs.mockReset()
   hoisted.runVdfsAction.mockReset()
+  hoisted.logger.warn.mockReset()
+  hoisted.logger.error.mockReset()
   hoisted.writeVdfs.mockImplementation(async (path: string, text: string, opts?: unknown) => {
     hoisted.writes.push({ path, text, opts })
     return { created: true }
@@ -535,5 +543,101 @@ describe('expandSkeleton — 折叠骨架按需重取（[T-150] 只读）', () =
     hoisted.runVdfsAction.mockRejectedValueOnce(new Error('IPC 断了'))
     const c = conn()
     await expect(c.expandSkeleton('t1')).resolves.toBeUndefined()
+  })
+
+  it('判据 5（反向）：取回 0 条而账本记着 N>0 ⇒ 保持释放态 + 告警', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'expand_skeleton',
+      ok: true,
+      message: 'ok',
+      data: { session_id: 's1', root: 't1', nodes: [] },
+    })
+    hoisted.released.summaryOf = vi.fn(() => ({ count: 3, byType: { body: 3 }, running: 0 }))
+    const c = conn()
+    await c.expandSkeleton('t1')
+    // 不装回（本来也没有节点）、**不摘标记**——保持折叠态，用户可重试
+    expect(hoisted.store.applyTranscriptMessages).not.toHaveBeenCalled()
+    expect(hoisted.released.markExpanded).not.toHaveBeenCalled()
+    expect(hoisted.logger.warn).toHaveBeenCalledWith(
+      'useChatConnection',
+      expect.stringContaining('取回 0 条，但账本记着 3 条'),
+    )
+  })
+
+  it('取回 0 条而账本计数也是 0 ⇒ 正常的「本来就没子节点」，照常摘标记', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'expand_skeleton',
+      ok: true,
+      message: 'ok',
+      data: { session_id: 's1', root: 't1', nodes: [] },
+    })
+    hoisted.released.summaryOf = vi.fn(() => ({ count: 0, byType: {}, running: 0 }))
+    const c = conn()
+    await c.expandSkeleton('t1')
+    expect(hoisted.released.markExpanded).toHaveBeenCalledWith('s1', 't1')
+  })
+})
+
+describe('skeletonLazy — 折叠释放 / 展开重取（[] 前端半写侧）', () => {
+  /** 一棵已完成骨架带两个后代（一个流式中） */
+  const flat = (): ChatNode[] => [
+    { id: 'skel', type: NODE_KIND_SKELETON, status: 'completed', seq: 1 },
+    { id: 'c1', parent_id: 'skel', type: NODE_KIND_BODY, status: 'completed', seq: 2 },
+    { id: 'c2', parent_id: 'skel', type: NODE_KIND_BODY, status: NODE_STATUS_STREAMING, seq: 3 },
+  ]
+
+  it('收起已终态骨架 ⇒ 摘掉后代（留 root）、账本记 stats', () => {
+    hoisted.store = makeStore({ getSessionMessages: vi.fn(() => flat()) })
+    const c = conn()
+    c.skeletonLazy.onCollapse('skel', false)
+    expect(hoisted.store.removeMessages).toHaveBeenCalledWith('s1', ['c1', 'c2'])
+    expect(hoisted.released.markReleased).toHaveBeenCalledWith('s1', 'skel', {
+      count: 2,
+      byType: { body: 2 },
+      running: 1,
+    })
+  })
+
+  it('流式 / 待审批中的骨架**不释放**（不丢流式态）', () => {
+    for (const status of [NODE_STATUS_STREAMING, NODE_STATUS_WAITING_USER_ACTION]) {
+      hoisted.store = makeStore({
+        getSessionMessages: vi.fn(() => [
+          { id: 'skel', type: NODE_KIND_SKELETON, status, seq: 1 },
+          { id: 'c1', parent_id: 'skel', type: NODE_KIND_BODY, seq: 2 },
+        ]),
+      })
+      conn().skeletonLazy.onCollapse('skel', false)
+      expect(hoisted.store.removeMessages).not.toHaveBeenCalled()
+      expect(hoisted.released.markReleased).not.toHaveBeenCalled()
+    }
+  })
+
+  it('无后代的骨架收起 ⇒ 不入账（没什么可释放）', () => {
+    hoisted.store = makeStore({
+      getSessionMessages: vi.fn(() => [{ id: 'skel', type: NODE_KIND_SKELETON, seq: 1 }]),
+    })
+    conn().skeletonLazy.onCollapse('skel', false)
+    expect(hoisted.released.markReleased).not.toHaveBeenCalled()
+  })
+
+  it('展开时账本说释放着 ⇒ 触发按需重取；未释放 ⇒ 不发请求', async () => {
+    hoisted.released.isReleased = vi.fn((_sid: string, mid: string) => mid === 'skel')
+    const c = conn()
+    c.skeletonLazy.onCollapse('skel', true)
+    await vi.waitFor(() => expect(hoisted.runVdfsAction).toHaveBeenCalledTimes(1))
+    expect(hoisted.runVdfsAction.mock.calls[0][1]).toBe('expand_skeleton')
+
+    hoisted.runVdfsAction.mockClear()
+    c.skeletonLazy.onCollapse('other', true)
+    await Promise.resolve()
+    expect(hoisted.runVdfsAction).not.toHaveBeenCalled()
+  })
+
+  it('isReleased / summaryOf 按本会话 id 问账本（组件不持会话 id）', () => {
+    const c = conn()
+    c.skeletonLazy.isReleased('skel')
+    expect(hoisted.released.isReleased).toHaveBeenCalledWith('s1', 'skel')
+    c.skeletonLazy.summaryOf('skel')
+    expect(hoisted.released.summaryOf).toHaveBeenCalledWith('s1', 'skel')
   })
 })

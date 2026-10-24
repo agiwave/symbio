@@ -12,13 +12,15 @@
  *   `ChatNode` 线格式**——它是纯前端状态，写进 wire 会被 `protocol-mirror-audit` D 组
  *   判红（前后端字段名一比对就多一个）。
  *
- * 摘要（释放时有多少子节点）也存这张表：折叠态要显示「N 项」却已不持有那些节点，
- * 本地结算的计数是唯一来源（后端没有 `NodeStats` producer，见 文档 150-ii）。
+ * 摘要（释放时有多少子节点、什么类型、还在跑几个）也存这张表：折叠态要显示
+ * 「N 项」却已不持有那些节点，本地结算的计数是唯一来源（后端没有 `NodeStats`
+ * producer，见 文档 150-ii）。
  */
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ChatNode } from '@/schemas/chat_node'
+import { isStreamingStatus } from '@/registry/messageFacts'
 
 const STORAGE_KEY = 'symbio.releasedSkeletons'
 
@@ -26,6 +28,27 @@ const STORAGE_KEY = 'symbio.releasedSkeletons'
 export interface ReleasedSummary {
   /** 释放时该骨架有多少后代节点 */
   count: number
+  /** 类型分布（`NodeKind` → 条数）——折叠态要显示「什么类型」 */
+  byType: Record<string, number>
+  /** 其中仍在流式的条数——「还在跑几个」 */
+  running: number
+}
+
+/**
+ * 释放时记下的摘要（判据 4 的数据源）：多少条 / 什么类型 / 还在跑几个。
+ *
+ * 纯函数：入参就是那棵被摘掉的子树，不读 store——「账本里记的数与实际摘掉
+ * 的节点对得上」因此可直接单测。
+ */
+export function statsOf(subtree: ChatNode[]): ReleasedSummary {
+  const byType: Record<string, number> = {}
+  let running = 0
+  for (const n of subtree) {
+    const t = n.type ?? 'unknown'
+    byType[t] = (byType[t] ?? 0) + 1
+    if (isStreamingStatus(n.status)) running += 1
+  }
+  return { count: subtree.length, byType, running }
 }
 
 /** 账本形态：`会话 id → 骨架 id → 摘要`。 */
@@ -136,16 +159,26 @@ export const useReleasedSkeletonsStore = defineStore('releasedSkeletons', () => 
     return ledger.value[sessionId]?.[mid]
   }
 
-  /** 记一次释放（携带本地结算的后代数）。 */
-  function markReleased(sessionId: string, mid: string, count: number): void {
+  /** 记一次释放（携带本地结算的摘要：条数 / 类型分布 / 流式中条数）。 */
+  function markReleased(sessionId: string, mid: string, stats: ReleasedSummary): void {
     const bySid = ledger.value[sessionId] ?? {}
-    bySid[mid] = { count }
+    bySid[mid] = stats
     ledger.value = { ...ledger.value, [sessionId]: bySid }
     persist()
   }
 
   /** 记一次展开重取（从账本摘除该骨架）。 */
   function markExpanded(sessionId: string, mid: string): void {
+    forget(sessionId, mid)
+  }
+
+  /**
+   * 从账本摘除**一条**（不区分原因：展开了 / 骨架已不在 / 会话被截断）。
+   *
+   * `markExpanded` 是它的语义别名（展开重取）；「骨架已不在」的清偿也走它——
+   * 账本只回答「这个骨架现在释不释放」，不回答「为什么」。
+   */
+  function forget(sessionId: string, mid: string): void {
     const bySid = ledger.value[sessionId]
     if (!bySid || bySid[mid] == null) return
     const rest = { ...bySid }
@@ -154,5 +187,20 @@ export const useReleasedSkeletonsStore = defineStore('releasedSkeletons', () => 
     persist()
   }
 
-  return { ledger, isReleased, summaryOf, markReleased, markExpanded }
+  /**
+   * 清偿一个会话的整段账本（会话被删除 / 重载后骨架已不在时调用）。
+   *
+   * 不清偿的后果是账本随会话数单调增长：localStorage 里躺着无数再也不会
+   * 被展开的骨架条目，而 `isReleased` 对它们恒真——下一次同 id 复用
+   * （新建会话撞上旧 id）会把新骨架误判成「已释放」。
+   */
+  function forgetSession(sessionId: string): void {
+    if (ledger.value[sessionId] == null) return
+    const next = { ...ledger.value }
+    delete next[sessionId]
+    ledger.value = next
+    persist()
+  }
+
+  return { ledger, isReleased, summaryOf, markReleased, markExpanded, forget, forgetSession }
 })

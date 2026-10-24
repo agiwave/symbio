@@ -168,15 +168,11 @@ impl SessionPlugin {
                     // `ResumeAction` 反序列化，`"expand_skeleton"` 不在词表里会掉进
                     // `NotImplemented`。
                     (Some(mid), VDFS_ACTION_EXPAND_SKELETON, payload) => {
+                        // 入参校验先行（判据 1）：非法 depth / since_seq 有错误码，
+                        // 不静默按缺省处理——静默忽略会让「以为只要直接子」的调用方
+                        // 实际拿到整棵树，而他无从知道。
+                        let (depth, since_seq) = expand_params(payload)?;
                         let msgs = self.transcript_of(id).await?;
-                        let p = payload.cloned().unwrap_or(Value::Null);
-                        let obj = p.as_object();
-                        let depth = obj
-                            .and_then(|o| o.get("depth"))
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
-                        let since_seq =
-                            obj.and_then(|o| o.get("since_seq")).and_then(Value::as_i64);
                         // 骨架不存在 ⇒ 空子树（只读动作，「没有」就是空，不是错误）。
                         let subtree = subtree_nodes(&msgs, mid, depth.as_deref(), since_seq);
                         Ok(VdfsResponse::Action(VdfsActionResult {
@@ -276,4 +272,47 @@ impl SessionPlugin {
             _ => Err(VdfsError::NotImplemented),
         }
     }
+}
+
+/// `expand_skeleton` 的入参校验（判据 1：入参与 DE-019 §6 一致，非法值有错误码）。
+///
+/// `depth` 只接受 `"1"` / `"all"`（缺省 = `all`）；`since_seq` 只接受整数
+/// （seq 水位）。**给了但不合法 ⇒ 报错**：静默按缺省处理会让「以为只要直接子」
+/// 的调用方实际拿到整棵树，而他从回执里看不出来——错误必须像 `truncate`
+/// 的锚点缺失一样当场给。
+///
+/// 显式 `null` 与缺省同义（「不过滤」的线上写法），不算非法。
+fn expand_params(payload: Option<&Value>) -> VdfsResult<(Option<String>, Option<i64>)> {
+    let (depth, since_seq) = match payload {
+        None | Some(Value::Null) => (None, None),
+        Some(Value::Object(obj)) => {
+            let depth = match obj.get("depth") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) if s == "1" || s == "all" => Some(s.clone()),
+                Some(other) => {
+                    return Err(VdfsError::invalid(format!(
+                        "expand_skeleton 的 depth 只接受 \"1\" | \"all\"（缺省 all），实得：{other}"
+                    )));
+                }
+            };
+            let since_seq = match obj.get("since_seq") {
+                None | Some(Value::Null) => None,
+                Some(v) => match v.as_i64() {
+                    Some(n) => Some(n),
+                    None => {
+                        return Err(VdfsError::invalid(format!(
+                            "expand_skeleton 的 since_seq 只接受整数（seq 水位），实得：{v}"
+                        )));
+                    }
+                },
+            };
+            (depth, since_seq)
+        }
+        Some(other) => {
+            return Err(VdfsError::invalid(format!(
+                "expand_skeleton 的载荷需要 JSON 对象（{{depth?, since_seq?}}），实得：{other}"
+            )));
+        }
+    };
+    Ok((depth, since_seq))
 }

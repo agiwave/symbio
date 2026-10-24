@@ -4,7 +4,7 @@ import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_node'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
-import { useReleasedSkeletonsStore } from '@/stores/skeletonLazy'
+import { useReleasedSkeletonsStore, subtreeOf, statsOf, type ReleasedSummary } from '@/stores/skeletonLazy'
 import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
 import {
   VDFS_ACTION_ABORT,
@@ -90,7 +90,30 @@ export interface UseChatConnectionReturn {
   resume: (payload: ResumePayload) => void
   /** 按需重取一个已折叠释放骨架的子树（[] 只读动作） */
   expandSkeleton: (mid: string, depth?: '1' | 'all') => Promise<void>
+  /** 骨架惰性重取面（[] 前端半）：供下游组件经 `SKELETON_LAZY_KEY` 注入使用 */
+  skeletonLazy: SkeletonLazySurface
 }
+
+/**
+ * 骨架惰性重取面（[] 前端半）——下游组件（`SkeletonNode`）经注入拿它，
+ * 不经 props 逐层透传：折叠开关在 `NodeShell`（所有渲染器共用的外壳），
+ * 而「释放 / 重取」只有骨架渲染器需要，两者的相遇点在组件树深层。
+ *
+ * 三个方法都以 `mid` 为键、**不持会话 id**：会话 id 由 composable 闭包持有
+ * （`options.sessionId`）——组件树里再传一份会话 id 就会出现「两个来源」
+ * （与 `RESUME_KEY` 的 `targetSessionId` 只用于跨会话路由同一条理由）。
+ */
+export interface SkeletonLazySurface {
+  /** 折叠态变化：收起 ⇒ 本地释放子树并记账；展开 ⇒ 已释放的按需重取 */
+  onCollapse: (mid: string, open: boolean) => void
+  /** 该骨架当前是否处于「已释放」态（折叠 chip 的显示判据） */
+  isReleased: (mid: string) => boolean
+  /** 释放时记下的摘要（多少条 / 什么类型 / 还在跑几个） */
+  summaryOf: (mid: string) => ReleasedSummary | undefined
+}
+
+/** 「骨架惰性重取」注入键（symbol + `InjectionKey`：键名是类型的一部分） */
+export const SKELETON_LAZY_KEY: InjectionKey<SkeletonLazySurface> = Symbol('chat-skeleton-lazy')
 
 /**
  * 多会话无状态 chat connection（v2 — 无 store 写入版）
@@ -596,11 +619,18 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   /**
    * 按需重取一个已折叠释放的骨架的子树（[] 前端读侧）。
    *
-   * 折叠时本地把骨架的后代从转写里摘掉、只在账本留一个计数；用户重新展开时，向
+   * 折叠时本地把骨架的后代从转写里摘掉、只在账本留一份摘要；用户重新展开时，向
    * 后端那条 message 地址发一次 `expand_skeleton` 动作拿回子树窄帧，走**唯一落地口**
    * `applyTranscriptMessages` 装回转写，再从账本摘掉「已释放」标记。
    *
    * 这是只读动作：不碰运行态、不改 seq，与 `resume` 的写侧动作划清界限。
+   *
+   * ## 判据 5（反向）：取回 0 条而账本记着 N>0 ⇒ 保持释放态
+   *
+   * 「重取接口返回空而 stats 非零」是**数据不一致**（子树被别处截断 / 后端丢了），
+   * 不是「这骨架本来就没子节点」——后者的账本计数也是 0。此时静默 `markExpanded`
+   * 会把「N 项」变成「0 项」而无人知晓，故拒绝摘标记：保持折叠态，用户可重试，
+   * 告警进日志。单测钉住这条（见 `useChatConnection.spec.ts` 的反向例）。
    */
   async function expandSkeleton(mid: string, depth: '1' | 'all' = 'all') {
     const sid = options.sessionId
@@ -615,6 +645,15 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       )
       const nodes = (resp.data as { nodes?: ChatNode[] } | undefined)?.nodes
       if (resp.ok && Array.isArray(nodes)) {
+        const summary = released.summaryOf(sid, mid)
+        if (nodes.length === 0 && (summary?.count ?? 0) > 0) {
+          logger.warn(
+            'useChatConnection',
+            `[${sid}] expand_skeleton 取回 0 条，但账本记着 ${summary!.count} 条` +
+              '——数据可能已被截断，保持折叠态（可重试）',
+          )
+          return
+        }
         store.applyTranscriptMessages(sid, nodes)
         released.markExpanded(sid, mid)
       } else {
@@ -623,6 +662,37 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to expand skeleton:', err)
     }
+  }
+
+  /**
+   * 骨架折叠态变化（[] 前端半的写侧入口，`SkeletonNode` 经注入调它）。
+   *
+   * - **收起** ⇒ 本地释放：把该骨架的后代从转写摘掉（`removeMessages`，与截断
+   *   同一条 store 出口），账本记一份摘要（条数 / 类型分布 / 流式中条数）。
+   *   **流式或待审批中的骨架不释放**——在途增量会经落地口把节点带回来，账本与
+   *   界面当场分叉（「不丢流式态」；判据用 `isInProgressMessage`，与发送侧的
+   *   「已有在途节点」判定同源）。
+   * - **展开** ⇒ 账本说它释放着才按需重取（本地本来就有 ⇒ 什么都不做）。
+   */
+  function onSkeletonCollapse(mid: string, open: boolean) {
+    const sid = options.sessionId
+    if (open) {
+      if (released.isReleased(sid, mid)) void expandSkeleton(mid)
+      return
+    }
+    const flat = store.getSessionMessages(sid)
+    const node = flat.find((n) => n.id === mid)
+    if (!node || isInProgressMessage(node)) return
+    const subtree = subtreeOf(flat, mid, 'all')
+    if (subtree.length === 0) return
+    store.removeMessages(sid, subtree.map((n) => n.id))
+    released.markReleased(sid, mid, statsOf(subtree))
+  }
+
+  const skeletonLazy: SkeletonLazySurface = {
+    onCollapse: onSkeletonCollapse,
+    isReleased: (mid) => released.isReleased(options.sessionId, mid),
+    summaryOf: (mid) => released.summaryOf(options.sessionId, mid),
   }
 
   return {
@@ -635,5 +705,6 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     removeMessage,
     resume,
     expandSkeleton,
+    skeletonLazy,
   }
 }

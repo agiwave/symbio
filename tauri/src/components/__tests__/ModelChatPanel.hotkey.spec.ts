@@ -30,6 +30,8 @@ interface ChatStub {
   removeMessage: Mock
   resume: Mock
   expandSkeleton: Mock
+  /** 骨架惰性重取面：面板把它 provide 给下游（本文件判的是热键，给个不炸的桩） */
+  skeletonLazy: { onCollapse: Mock; isReleased: Mock; summaryOf: Mock }
 }
 
 const hoisted = vi.hoisted(() => ({ chat: null as ChatStub | null }))
@@ -48,8 +50,14 @@ vi.mock('@/composables/useChatConnection', async () => {
     removeMessage: vi.fn(),
     resume: vi.fn(),
     expandSkeleton: vi.fn(),
+    skeletonLazy: { onCollapse: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn(() => undefined) },
   }
-  return { RESUME_KEY: Symbol('resume'), useChatConnection: () => hoisted.chat }
+  // 两个注入键都要回：面板 provide 它们，缺一个就是挂载期炸「Invalid vnode type」
+  return {
+    RESUME_KEY: Symbol('resume'),
+    SKELETON_LAZY_KEY: Symbol('chat-skeleton-lazy'),
+    useChatConnection: () => hoisted.chat,
+  }
 })
 
 import ModelChatPanel from '../ModelChatPanel.vue'

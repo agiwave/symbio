@@ -104,6 +104,13 @@ const emit = defineEmits<{
   retry: [messageId: string]
   delete: [messageId: string]
   edit: [messageId: string]
+  /**
+   * 折叠态**变化**（不含初值）：骨架渲染器据此本地释放 / 按需重取子树
+   * （[] 惰性重取，`SKELETON_LAZY_KEY`）。发在 shell 这一层是因为折叠态住在这里
+   * （`effectiveOpen`）；哪些渲染器要理会它，由它们自己绑 `@collapse`——其余
+   * 形态（正文 / 折叠叶）没有子树可释放，忽略即可。
+   */
+  collapse: [open: boolean]
 }>()
 
 // 压缩后的历史记忆虽是 `user` 角色（后端为了让对话以 user 开头），但它是**系统产出的
@@ -136,6 +143,11 @@ const userOpen = ref(true)
 const effectiveOpen = computed(() =>
   effectiveOpenOf(props.facets, props.depth ?? 0, userToggled.value, userOpen.value),
 )
+
+// 折叠态变化 ⇒ 通知渲染器（骨架：释放 / 重取子树）。watch 而不是只在 `toggle()`
+// 里发：`effectiveOpen` 也会被**状态迁移**间接改变（待审批 ⇒ 默认展开），那条路径
+// 同样要让骨架知道。`immediate` 刻意不开——初值不是「变化」，且首帧时子树还没装配。
+watch(effectiveOpen, (open) => emit('collapse', open))
 
 function toggle() {
   // 基于「当前实际展示态」取反，而非固定初始值：否则默认收起节点首次点击会从

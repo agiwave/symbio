@@ -12,10 +12,14 @@
   2. **首条正文**：自身 `content` 非空（典型是工具参数 JSON）→ 高亮代码块；
   3. **子流**：`MessageChildren` 递归（`parent-type = skeleton`）——助手正文 / 思考折叠叶 /
      工具返回 / 子过程段都从这里长出去，深一层仍是同一个 SkeletonNode（分形复用）；
-  4. **无响应兜底**：父骨架自述「这次没跑」却没有任何子节点时把话讲明白（历史数据用）；
-  5. **交代条**：失败 / 中止 → `MessageErrorBox` + 重试（动词由后端 `actions` 决定，
+  4. **无响应兜底**：父骨架自述「这次没跑」却没有任何子节点时把话讲明白（历史数据用；
+     **已释放态不出这条**——子节点是被本地摘掉的，不是「这次没跑」）；
+  5. **折叠释放摘要**（[] 惰性重取）：后代已本地释放 ⇒ 一行 chip（多少条 / 什么类型 /
+     还在跑几个），展开时经 `expand_skeleton` 按需重取（折叠态变化经 `NodeShell` 的
+     `@collapse` 转给注入面，实现住 `useChatConnection`）；
+  6. **交代条**：失败 / 中止 → `MessageErrorBox` + 重试（动词由后端 `actions` 决定，
      经 `messageRetryTargetOf` 在面板侧分派，本组件只发 `retry` 事件）；
-  6. **补充参数**：`actions` 含 `supply` 时给一个就地补参数重跑的表单（纯数据判据）。
+  7. **补充参数**：`actions` 含 `supply` 时给一个就地补参数重跑的表单（纯数据判据）。
 
   层级只靠「缩进 + 左侧引导竖线」表达（见 `NodeShell.nested`），纵向间隔全由 `--msg-gap` 驱动。
 -->
@@ -27,6 +31,7 @@
     @retry="emit('retry', $event)"
     @delete="emit('delete', $event)"
     @edit="emit('edit', $event)"
+    @collapse="onCollapse"
   >
     <div class="skeleton-body">
       <!-- ① 等待骨架：streaming 且无真实子（合成的 typing 占位不算真实子） -->
@@ -47,10 +52,18 @@
         @edit="emit('edit', $event)"
       />
 
-      <!-- ④ 无响应兜底：历史数据 / 不守不变量的写入方 -->
-      <div v-if="missingResultNote" class="skeleton-missing">
+      <!-- ④ 无响应兜底：历史数据 / 不守不变量的写入方。
+           已释放态不出这条——子节点是被本地摘掉的，不是「这次没跑」。 -->
+      <div v-if="!isReleased && missingResultNote" class="skeleton-missing">
         <span class="sm-icon">↩</span>
         <span class="sm-text">{{ missingResultNote }}</span>
+      </div>
+
+      <!-- ⑤ 折叠释放摘要（[] 惰性重取）：后代已在本地释放，只留计数与类型分布——
+           展开时经 expand_skeleton 按需重取（走注入面，见 onCollapse）。 -->
+      <div v-if="isReleased && releasedSummary" class="skeleton-released">
+        <span class="sr-icon">🗇</span>
+        <span class="sr-text">{{ releasedChip }}</span>
       </div>
 
       <!-- ⑤ 组级交代条：失败 / 中止都给重试入口 -->
@@ -90,7 +103,7 @@ import {
   isUnsettledNodeStatus,
   type ChatNode,
 } from '@/schemas/chat_node'
-import { RESUME_KEY } from '@/composables/useChatConnection'
+import { RESUME_KEY, SKELETON_LAZY_KEY } from '@/composables/useChatConnection'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
   agentNameOf,
@@ -99,6 +112,7 @@ import {
   isFailedStatus,
   isStreamingStatus,
   messageParentSessionId,
+  messageTypeLabel,
   messageTypeOf,
   missingResultNoteOf,
   type MessageFacets,
@@ -122,6 +136,40 @@ const emit = defineEmits<{
 
 /** 会话恢复入口（由面板提供）：supply / 子会话路由都走它 */
 const resume = inject(RESUME_KEY)
+
+/**
+ * 骨架惰性重取面（由面板提供）：折叠态变化转发给它——释放 / 重取的实现住在
+ * `useChatConnection`（它持有会话 id 与转写 store），本组件只当「折叠态变了」
+ * 的传声筒。缺注入（组件单测直接挂载）时退化为无操作：chip 不显示、折叠
+ * 不释放——界面照常可用，只是没有惰性重取。
+ */
+const skeletonLazy = inject(SKELETON_LAZY_KEY, null)
+
+function onCollapse(open: boolean) {
+  skeletonLazy?.onCollapse(props.node.id, open)
+}
+
+/** 本骨架的后代是否已被本地释放（折叠 chip 的显示判据） */
+const isReleased = computed(() => skeletonLazy?.isReleased(props.node.id) ?? false)
+const releasedSummary = computed(() => skeletonLazy?.summaryOf(props.node.id))
+
+/**
+ * 折叠 chip 文案：多少条 / 什么类型 / 还在跑几个（判据 4）。
+ *
+ * 类型分布经 `messageTypeLabel` 翻成人话（`skeleton` ⇒ 「组合」）——线格式词
+ * 不直接摆给用户看。「还在跑」只在非零时出现：全零还写一栏等于公报噪音。
+ */
+const releasedChip = computed(() => {
+  const s = releasedSummary.value
+  if (!s) return ''
+  const parts = [`已折叠释放 ${s.count} 项`]
+  const types = Object.entries(s.byType)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `${messageTypeLabel(t)} ${n}`)
+  if (types.length) parts.push(types.join(' · '))
+  if (s.running > 0) parts.push(`还在跑 ${s.running} 个`)
+  return parts.join(' · ')
+})
 
 const agentName = computed(() => agentNameOf(props.node, props.facets.subSession))
 
@@ -194,6 +242,21 @@ function submitSupply() {
   gap: 0.35rem;
   font-size: 0.78rem;
   color: var(--text-muted);
+}
+
+/* ── 折叠释放摘要（[] 惰性重取）── */
+.skeleton-released {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.sr-icon {
+  flex-shrink: 0;
+}
+.sr-text {
+  word-break: break-word;
 }
 .sm-icon {
   flex-shrink: 0;

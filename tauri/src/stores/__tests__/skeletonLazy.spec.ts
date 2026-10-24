@@ -18,6 +18,7 @@ import {
   subtreeOf,
   releaseSkeleton,
   mergeReleased,
+  statsOf,
   useReleasedSkeletonsStore,
 } from '../skeletonLazy'
 
@@ -34,6 +35,14 @@ function dictOf(...nodes: ChatNode[]): Record<string, ChatNode> {
   for (const n of nodes) out[n.id] = n
   return out
 }
+
+/** 一棵 root ─ a / b(streaming) ─ b1 的样本树：statsOf 与账本用例共用。 */
+const tree: ChatNode[] = [
+  { id: 'root', type: 'skeleton', status: 'completed' },
+  { id: 'a', parent_id: 'root', type: 'body', status: 'completed' },
+  { id: 'b', parent_id: 'root', type: 'skeleton', status: 'streaming' },
+  { id: 'b1', parent_id: 'b', type: 'notice', status: 'completed' },
+]
 
 describe('subtreeOf（前端子树算子，镜像后端 subtree_nodes）', () => {
   // root ─ a ─ a1
@@ -83,6 +92,28 @@ describe('释放 → 重取 往返', () => {
   })
 })
 
+describe('statsOf（折叠 chip 的数据源：多少条 / 什么类型 / 还在跑几个）', () => {
+  it('按类型计数、running 只数流式中', () => {
+    expect(statsOf(tree.slice(1))).toEqual({
+      count: 3,
+      byType: { body: 1, skeleton: 1, notice: 1 },
+      running: 1,
+    })
+  })
+
+  it('空子树 ⇒ 全零（不是 undefined）', () => {
+    expect(statsOf([])).toEqual({ count: 0, byType: {}, running: 0 })
+  })
+
+  it('缺 type 的节点归 unknown（不猜形态）', () => {
+    expect(statsOf([{ id: 'x' }])).toEqual({
+      count: 1,
+      byType: { unknown: 1 },
+      running: 0,
+    })
+  })
+})
+
 describe('useReleasedSkeletonsStore（localStorage 账本）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -95,19 +126,23 @@ describe('useReleasedSkeletonsStore（localStorage 账本）', () => {
     expect(store.summaryOf('s1', 'root')).toBeUndefined()
   })
 
-  it('markReleased 记入账本并持久化', () => {
+  it('markReleased 记入账本并持久化（摘要带 stats）', () => {
     const store = useReleasedSkeletonsStore()
-    store.markReleased('s1', 'root', 3)
+    store.markReleased('s1', 'root', statsOf(tree.slice(1)))
     expect(store.isReleased('s1', 'root')).toBe(true)
-    expect(store.summaryOf('s1', 'root')).toEqual({ count: 3 })
+    expect(store.summaryOf('s1', 'root')).toEqual({
+      count: 3,
+      byType: { body: 1, skeleton: 1, notice: 1 },
+      running: 1,
+    })
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({
-      s1: { root: { count: 3 } },
+      s1: { root: { count: 3, byType: { body: 1, skeleton: 1, notice: 1 }, running: 1 } },
     })
   })
 
   it('markExpanded 从账本摘除并持久化', () => {
     const store = useReleasedSkeletonsStore()
-    store.markReleased('s1', 'root', 3)
+    store.markReleased('s1', 'root', statsOf(tree.slice(1)))
     store.markExpanded('s1', 'root')
     expect(store.isReleased('s1', 'root')).toBe(false)
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({ s1: {} })
@@ -115,16 +150,32 @@ describe('useReleasedSkeletonsStore（localStorage 账本）', () => {
 
   it('新实例从 localStorage 恢复被释放的骨架（跨刷新保留）', () => {
     const store = useReleasedSkeletonsStore()
-    store.markReleased('s1', 'root', 5)
-    store.markReleased('s1', 'other', 2)
+    store.markReleased('s1', 'root', statsOf(tree.slice(1)))
+    store.markReleased('s1', 'other', statsOf(tree.slice(1, 2)))
     store.markExpanded('s1', 'other')
 
     // 模拟刷新：换新 Pinia 实例，setup 重跑 → loadLedger 读回 localStorage
     setActivePinia(createPinia())
     const reloaded = useReleasedSkeletonsStore()
     expect(reloaded.isReleased('s1', 'root')).toBe(true)
-    expect(reloaded.summaryOf('s1', 'root')).toEqual({ count: 5 })
+    expect(reloaded.summaryOf('s1', 'root')).toEqual({
+      count: 3,
+      byType: { body: 1, skeleton: 1, notice: 1 },
+      running: 1,
+    })
     expect(reloaded.isReleased('s1', 'other')).toBe(false)
+  })
+
+  it('forgetSession 清偿整段（会话删除 / 骨架已不在）', () => {
+    const store = useReleasedSkeletonsStore()
+    store.markReleased('s1', 'root', statsOf(tree.slice(1)))
+    store.markReleased('s2', 'root', statsOf(tree.slice(1)))
+    store.forgetSession('s1')
+    expect(store.isReleased('s1', 'root')).toBe(false)
+    expect(store.isReleased('s2', 'root')).toBe(true)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({
+      s2: { root: { count: 3, byType: { body: 1, skeleton: 1, notice: 1 }, running: 1 } },
+    })
   })
 
   it('账本里损坏的 JSON 退化为空，不抛', () => {

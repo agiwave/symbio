@@ -35,6 +35,8 @@ interface ChatStub {
   removeMessage: Mock
   resume: Mock
   expandSkeleton: Mock
+  /** 骨架惰性重取面：面板把它 provide 给下游（本文件不判它，给个不炸的桩） */
+  skeletonLazy: { onCollapse: Mock; isReleased: Mock; summaryOf: Mock }
 }
 
 interface ScrollStub {
@@ -65,8 +67,14 @@ vi.mock('@/composables/useChatConnection', async () => {
     removeMessage: vi.fn(),
     resume: vi.fn(),
     expandSkeleton: vi.fn(),
+    skeletonLazy: { onCollapse: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn(() => undefined) },
   }
-  return { RESUME_KEY: Symbol('resume'), useChatConnection: () => hoisted.chat }
+  // 两个注入键都要回：面板 provide 它们，缺一个就是「Invalid vnode type」级的挂载失败
+  return {
+    RESUME_KEY: Symbol('resume'),
+    SKELETON_LAZY_KEY: Symbol('chat-skeleton-lazy'),
+    useChatConnection: () => hoisted.chat,
+  }
 })
 
 vi.mock('@/composables/useChatScroll', async () => {

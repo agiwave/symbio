@@ -14,6 +14,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
+import { SKELETON_LAZY_KEY, type SkeletonLazySurface } from '@/composables/useChatConnection'
+import type { ReleasedSummary } from '@/stores/skeletonLazy'
 import type { ChatNode } from '@/schemas/chat_node'
 
 /**
@@ -475,5 +477,86 @@ describe('MessageNode：节点头键盘可达性', () => {
     const before = w.find('.node-body').exists()
     await w.find('.node-act').trigger('click')
     expect(w.find('.node-body').exists()).toBe(before)
+  })
+})
+
+/**
+ * 已折叠释放的骨架（[] 惰性重取 · 判据 4）：后代被本地摘掉后，界面必须
+ * 1. 给一行**摘要 chip**（多少条 / 什么类型 / 还在跑几个）——否则折叠态看起来
+ *    像「这一轮空了」，用户无法判断里面有过什么、还能不能等；
+ * 2. **抑制**「无响应兜底」——子节点是被本地释放的，不是「这次没跑」；
+ * 3. 把**折叠态变化**经注入面转给 `useChatConnection`（释放 / 重取的实现在那边）。
+ *
+ * 夹具取一个「有请求、无响应」自述的骨架（`meta.failure_kind = not_executed`）：
+ * 未释放时它按兜底渲染，释放后兜底必须让位给 chip——同一份节点数据，两种可见形态。
+ */
+describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4）', () => {
+  /** 「有请求、无响应」自述 + 无子节点：未释放时兜底该出，释放后必须让位 */
+  const noResultSkeleton = () =>
+    msg({ id: 'skel', type: 'skeleton', status: 'completed', meta: { failure_kind: 'not_executed' }, children: [] })
+
+  function lazyStub(over: { isReleased?: boolean; summary?: ReleasedSummary } = {}) {
+    return {
+      onCollapse: vi.fn(),
+      isReleased: vi.fn(() => over.isReleased ?? false),
+      summaryOf: vi.fn(() => over.summary),
+    } satisfies SkeletonLazySurface
+  }
+
+  function mountLazy(node: ChatNode, lazy: ReturnType<typeof lazyStub>) {
+    return mount(MessageNode, {
+      props: { node },
+      global: { provide: { resume: vi.fn(), [SKELETON_LAZY_KEY]: lazy } },
+    })
+  }
+
+  it('已释放 → 折叠释放摘要 chip：多少条 / 什么类型 / 还在跑几个', () => {
+    const w = mountLazy(
+      noResultSkeleton(),
+      lazyStub({ isReleased: true, summary: { count: 3, byType: { body: 2, skeleton: 1 }, running: 1 } }),
+    )
+    const chip = w.find('.skeleton-released')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('已折叠释放 3 项')
+    // 类型分布经 messageTypeLabel 翻成人话（body ⇒ 正文、skeleton ⇒ 组合），不摆线格式词
+    expect(chip.text()).toContain('正文 2')
+    expect(chip.text()).toContain('组合 1')
+    expect(chip.text()).toContain('还在跑 1 个')
+  })
+
+  it('已释放 ⇒ 抑制「无响应兜底」（子节点是被本地摘掉的，不是「这次没跑」）', () => {
+    const w = mountLazy(
+      noResultSkeleton(),
+      lazyStub({ isReleased: true, summary: { count: 1, byType: { body: 1 }, running: 0 } }),
+    )
+    expect(w.find('.skeleton-missing').exists()).toBe(false)
+  })
+
+  it('对照：未释放 ⇒ 兜底照出（「未执行」自述），且不出现释放 chip', () => {
+    const w = mountLazy(noResultSkeleton(), lazyStub())
+    expect(w.find('.skeleton-missing').exists()).toBe(true)
+    expect(w.find('.skeleton-missing').text()).toContain('未执行')
+    expect(w.find('.skeleton-released').exists()).toBe(false)
+  })
+
+  it('释放但无摘要（count=0 的空子树）⇒ 既不出 chip 也不编兜底', () => {
+    const w = mountLazy(noResultSkeleton(), lazyStub({ isReleased: true, summary: undefined }))
+    expect(w.find('.skeleton-released').exists()).toBe(false)
+    expect(w.find('.skeleton-missing').exists()).toBe(false)
+  })
+
+  it('折叠态变化经注入面转发（收起 ⇒ onCollapse(mid, false)，供释放记账）', async () => {
+    const lazy = lazyStub({ isReleased: true, summary: { count: 2, byType: { body: 2 }, running: 0 } })
+    const w = mountLazy(noResultSkeleton(), lazy)
+    // 骨架默认展开（整轮 = 对话主体）；点头收起 ⇒ 折叠态变化要送到惰性重取面
+    await w.find('.node-head').trigger('click')
+    expect(lazy.onCollapse).toHaveBeenCalledWith('skel', false)
+  })
+
+  it('缺注入面（单测直挂 / 旧面板）⇒ 界面照常：无 chip、无兜底抑制、折叠不炸', () => {
+    const w = mountNode(noResultSkeleton())
+    // 无 SKELETON_LAZY_KEY：isReleased 恒 false ⇒ 走未释放路径（兜底照出）
+    expect(w.find('.skeleton-missing').exists()).toBe(true)
+    expect(w.find('.skeleton-released').exists()).toBe(false)
   })
 })

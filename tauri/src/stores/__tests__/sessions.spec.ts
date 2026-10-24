@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
+import { statsOf, useReleasedSkeletonsStore } from '../skeletonLazy'
 
 /**
  * 会话清单的订阅由 `startSessionNodeSync(store)` 建立（store 自己不挂监听器）；
@@ -813,5 +814,78 @@ describe('sessions store — 会话运行态（节点视图帧）', () => {
     store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
 
     expect(store.getSessionStatus(SID).activity).toBe('正在思考…')
+  })
+})
+
+/**
+ * 惰性重取账本的回放（[] 前端半，`hydrateFromHistory` 的那一段）。
+ *
+ * 覆盖「跨刷新保留」的**后半句**：全量快照会把本地已释放的骨架子树带回来
+ * （后端从不知道前端释放过），账本说它折叠着就得再摘一次——否则刷新后
+ * 子树全须重新长出来，折叠 chip 的计数与实际持有对不上。
+ * 顺带钉两条清偿：骨架已不在 ⇒ 摘条目；会话删除 ⇒ 摘整段。
+ */
+describe('sessions store — 惰性重取账本回放', () => {
+  const SID = 's1'
+  const LEDGER_KEY = 'symbio.releasedSkeletons'
+  const tree = [
+    { id: 'skel', type: 'skeleton', status: 'completed', seq: 1 },
+    { id: 'a', parent_id: 'skel', type: 'body', status: 'completed', seq: 2 },
+    { id: 'b', parent_id: 'a', type: 'notice', status: 'completed', seq: 3 },
+    { id: 'keep', type: 'body', status: 'completed', seq: 4 },
+  ]
+  const ids = (store: ReturnType<typeof useSessionsStore>) =>
+    store.getSessionMessages(SID).map((m) => m.id)
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    sessionApi.listSessions.mockResolvedValue([])
+  })
+
+  it('账本说释放着 ⇒ 水合后再摘一次子树（root 与无关节点保留，条目不动）', () => {
+    const store = useSessionsStore()
+    const released = useReleasedSkeletonsStore()
+    released.markReleased(SID, 'skel', statsOf(tree.slice(1) as never))
+
+    store.hydrateFromHistory(SID, tree as never)
+
+    expect(ids(store)).toEqual(['skel', 'keep'])
+    // 条目**不摘**：下次水合（切走再切回）还要摘
+    expect(released.isReleased(SID, 'skel')).toBe(true)
+  })
+
+  it('未释放的骨架不受回放影响（子树整棵留在 store）', () => {
+    const store = useSessionsStore()
+    store.hydrateFromHistory(SID, tree as never)
+    expect(ids(store)).toEqual(['skel', 'a', 'b', 'keep'])
+  })
+
+  it('骨架已不在快照里 ⇒ 清偿条目（被截断的账不留在 localStorage）', () => {
+    const store = useSessionsStore()
+    const released = useReleasedSkeletonsStore()
+    released.markReleased(SID, 'skel', statsOf(tree.slice(1) as never))
+    released.markReleased(SID, 'still-here', statsOf([]))
+
+    store.hydrateFromHistory(SID, [
+      { id: 'still-here', type: 'skeleton', status: 'completed', seq: 1 },
+      { id: 'x', parent_id: 'still-here', type: 'body', status: 'completed', seq: 2 },
+    ] as never)
+
+    expect(released.isReleased(SID, 'skel')).toBe(false)
+    expect(released.isReleased(SID, 'still-here')).toBe(true)
+    // 只清「骨架已不在」的那条；仍在的条目原样保留
+    expect(Object.keys(JSON.parse(localStorage.getItem(LEDGER_KEY)!).s1)).toEqual(['still-here'])
+  })
+
+  it('dropSessionState 同批清偿账本（会话删除后条目永驻只会误判同 id 新会话）', () => {
+    const store = useSessionsStore()
+    const released = useReleasedSkeletonsStore()
+    released.markReleased(SID, 'skel', statsOf(tree.slice(1) as never))
+
+    store.dropSessionState(SID)
+
+    expect(released.isReleased(SID, 'skel')).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LEDGER_KEY)!)).toEqual({})
   })
 })

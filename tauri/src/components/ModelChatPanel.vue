@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
-import { useChatConnection, RESUME_KEY, type ResumePayload } from '@/composables/useChatConnection'
+import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { useTranscriptWindow, TRANSCRIPT_WINDOW_INITIAL } from '@/composables/useTranscriptWindow'
 import {
@@ -213,6 +213,11 @@ const chat = useChatConnection({
 provide(RESUME_KEY, (payload: ResumePayload) => {
   chat.resume(payload)
 })
+
+// 骨架惰性重取面（[] 前端半）：折叠态变化 → 释放 / 重取子树。与 RESUME_KEY 同一条
+// 理由用注入而非 props——相遇点（NodeShell 的折叠开关）在组件树深层，而「哪个会话」
+// 只有这里的 useChatConnection 闭包知道。
+provide(SKELETON_LAZY_KEY, chat.skeletonLazy)
 
 const { isLoading } = chat
 const messageTree = chat.messageTree

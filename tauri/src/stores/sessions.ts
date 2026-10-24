@@ -89,6 +89,9 @@ import {
   sortTranscript,
   truncateIdsFrom,
 } from './sessionTranscript'
+// 骨架惰性重取账本（[] 前端半）：水合时回放「已释放」——全量快照会把被本地
+// 摘掉的子树带回来，账本说它折叠着就得再摘一次（「跨刷新保留」的后半句）。
+import { useReleasedSkeletonsStore, subtreeOf } from './skeletonLazy'
 // wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
 // 从此只可能是呈现词表，下游（渲染 / 判定）不再接触 wire 词。
 import { messageTypeOf } from '@/registry/messageTypes'
@@ -499,6 +502,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     const inext = { ...inboxItems.value }
     delete inext[sessionId]
     inboxItems.value = inext
+    // 惰性重取账本同批清偿：会话没了，它的「已释放骨架」条目永远等不到展开——
+    // 留着只会在同 id 复用时把新骨架误判成已释放。
+    useReleasedSkeletonsStore().forgetSession(sessionId)
   }
 
   /**
@@ -506,12 +512,34 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * 合并规则（保留谁 / 丢弃谁 / `seq` 怎么分配）全部在
    * `sessionTranscript.hydrateTranscript` —— 那是「快照 vs 在途节点」的唯一判据实现。
+   *
+   * ## 惰性重取账本在这里回放（[] 前端半）
+   *
+   * 全量快照会把**本地已释放**的骨架子树一并带回来（后端从不知道前端释放过）。
+   * 账本（localStorage）说某骨架折叠着，就在合并后再摘一次它的子树——否则
+   * 「跨刷新保留」只留在 localStorage 里，界面上的子树却全须重新长出来，
+   * 折叠 chip 的计数也与实际持有对不上。顺带清偿**骨架已不在**的条目：
+   * 会话被截断 / 删除后那些条目永远不会再被展开，留着只会让账本单调增长，
+   * 并在同 id 复用时把新骨架误判成「已释放」。
    */
   function hydrateFromHistory(sessionId: string, messages: ChatNode[]) {
     const { map, waitingApproval, lastSeq } = hydrateTranscript(
       messages,
       sessionMessages.value[sessionId] || {},
     )
+    const released = useReleasedSkeletonsStore()
+    const byMid = released.ledger[sessionId]
+    if (byMid) {
+      const values = Object.values(map)
+      for (const mid of Object.keys(byMid)) {
+        if (map[mid] == null) {
+          // 骨架自身已不在（被截断 / 换过 id）⇒ 清偿该条目
+          released.forget(sessionId, mid)
+          continue
+        }
+        for (const n of subtreeOf(values, mid, 'all')) delete map[n.id]
+      }
+    }
 
     commitMessages({ ...sessionMessages.value, [sessionId]: map })
     // 续接游标取"已分配 seq 的最大值"，保证下一轮 nextSeq 严格递增。
