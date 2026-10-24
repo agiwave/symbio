@@ -167,6 +167,16 @@ function errsOf(base) {
   return [...errors, ...auditEntries(entries, base, [], REPO_KINDS)]
 }
 
+/**
+ * 闭环档夹具专用：**滤掉 RG-031**。
+ *
+ * 若干判据（RG-007 的 `done` 分支、RG-008 的「前置已闭环」、RG-025 的「父已退场」）
+ * 的前提就是「存在一条闭环条目」，而 RG-031 判的正是这个前提本身（闭环即删）。
+ * 两者在夹具里必然同时成立；断言其它判据时把 RG-031 滤掉，RG-031 自己的用例单独钉它。
+ * **不许**在真仓用这个口子——它只活在测试里，生产判定一条不少。
+ */
+const errsOfOpen = (base) => errsOf(base).filter((e) => !/RG-031/.test(e))
+
 /** 只允许这一条错（其余夹具必须干净，否则测不出"这一条判据在工作"）。 */
 function expectOnly(errs, re) {
   assert.equal(errs.length, 1, `期望只有一条违规，实得：\n${errs.join('\n')}`)
@@ -308,7 +318,7 @@ test('RG-008：doing 要求前置已闭环；前置 done 则放行（反向）',
     'task/001.md': taskDoc('T-001', { status: 'doing', deps: ['T-002'] }),
     'task/002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
   })
-  assert.deepEqual(errsOf(ok), [], '前置已闭环 ⇒ 开工不判')
+  assert.deepEqual(errsOfOpen(ok), [], '前置已闭环 ⇒ 开工不判')
 })
 
 test('RG-008：依赖机制全部 kind 同一套——文档类的 active 同样要求前置已闭环', () => {
@@ -330,7 +340,7 @@ test('RG-008：依赖机制全部 kind 同一套——文档类的 active 同样
     'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', deps: ['T-002'] }),
     'task/002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
   })
-  assert.deepEqual(errsOf(okTask), [], '前置 task 已 done ⇒ 放行')
+  assert.deepEqual(errsOfOpen(okTask), [], '前置 task 已 done ⇒ 放行')
 
   // design 与其他文档类同构：active 要求前置已闭环
   const blockedDesign = caseRoot({
@@ -460,7 +470,7 @@ test('RG-025：父子状态档位单调——子 doing 父 todo / 父 done 子 d
     'task/050.md': taskDoc('T-050', { status: 'done', evidence: 'abc' }),
     'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
   })
-  expectOnly(errsOf(r2), /RG-025 父条目 `T-050` status=done（退场档）要求子条目同处退场档/)
+  expectOnly(errsOfOpen(r2), /RG-025 父条目 `T-050` status=done（退场档）要求子条目同处退场档/)
 
   // 反向：中间组合合法——分解允许部分未动、允许中途砍子项
   const notStarted = caseRoot({
@@ -472,7 +482,7 @@ test('RG-025：父子状态档位单调——子 doing 父 todo / 父 done 子 d
     'task/050.md': taskDoc('T-050', { status: 'doing' }),
     'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'wont', reason: '不需要了' }),
   })
-  assert.deepEqual(errsOf(cut), [], '子 wont 父 doing ⇒ 放行（中途砍子项）')
+  assert.deepEqual(errsOfOpen(cut), [], '子 wont 父 doing ⇒ 放行（中途砍子项）')
   const same = caseRoot({
     'task/050.md': taskDoc('T-050', { status: 'doing' }),
     'task/051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
@@ -679,13 +689,13 @@ test('RG-015（design）：取代链方向属于**取代者**——旧条 retire
 // ================= 状态矩阵（RG-007） =================
 test('RG-007：done 必须有 evidence、不得留 signal；wont / retired 必须有 reason', () => {
   const noEvidence = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done' }) })
-  expectOnly(errsOf(noEvidence), /RG-007 status=done 必须填 `evidence`/)
+  expectOnly(errsOfOpen(noEvidence), /RG-007 status=done 必须填 `evidence`/)
 
   const withSignal = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done', evidence: 'abc', signal: '快照' }) })
-  expectOnly(errsOf(withSignal), /RG-007 status=done 不得带 `signal`/)
+  expectOnly(errsOfOpen(withSignal), /RG-007 status=done 不得带 `signal`/)
 
   const noReason = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'wont' }) })
-  expectOnly(errsOf(noReason), /RG-007 status=wont 必须填 `reason`/)
+  expectOnly(errsOfOpen(noReason), /RG-007 status=wont 必须填 `reason`/)
 
   const retiredNoReason = caseRoot({ 'spec/002.md': specDoc('SP-002', { status: 'retired' }) })
   expectOnly(errsOf(retiredNoReason), /RG-007 status=retired 必须填 `reason`/)
@@ -819,6 +829,31 @@ test('RG-021：title 必须逐字等于正文首个 H1；缺 H1 或不对账即�
   // 反向：代码围栏里的 `# ` 不算 H1（第一行 H1 才是 title 的来源）
   const fenced = caseRoot({ 'docs/004-ref/x.md': docDoc('docs/004-ref/x.md', { kind: 'ref', title: '标题 A', body: '```\n# 不是标题\n```\n\n# 标题 A\n' }) })
   assert.deepEqual(errsOf(fenced), [], '围栏内的 # 不算 H1 ⇒ 放行（反向）')
+})
+
+test('RG-031：闭环档的任务文件必须已删——done / wont 都红，文档类的 retired 是在位归档（反向）', () => {
+  const done = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done', evidence: '结论落 DE-001 的 D-001' }) })
+  expectOnly(errsOf(done), /RG-031 收口即删/)
+
+  const wont = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'wont', reason: '不做' }) })
+  expectOnly(errsOf(wont), /RG-031 收口即删/)
+
+  // 错误信息必须把「先落结论、再摘 deps 边」说全——否则第一次真用就会被 RG-006 卡死
+  assert.match(errsOf(done)[0], /落进设计文档/)
+  assert.match(errsOf(done)[0], /deps/)
+
+  // 正向：没有闭环条目 ⇒ 绿
+  const open = caseRoot({
+    'task/001.md': taskDoc('T-001'),
+    'task/002.md': taskDoc('T-002', { status: 'doing' }),
+  })
+  assert.deepEqual(errsOf(open), [], '只有 todo / doing ⇒ 不判')
+
+  // 反向（判据不点名 kind）：文档类的 retired 是**在位归档**——编号 = 路径、被别的文档引用着
+  const retiredDoc = caseRoot({
+    'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', { kind: 'design', id: 'DE-001-a', status: 'retired', reason: '被取代' }),
+  })
+  assert.deepEqual(errsOf(retiredDoc), [], '文档类 retired ⇒ 在位归档，不删文件')
 })
 
 test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向）', () => {

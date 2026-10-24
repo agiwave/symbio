@@ -24,7 +24,7 @@
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/06-facts-write.mjs` 的生成链），
  *      不存在第二处手抄；
  *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
- *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-025），
+ *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-031），
  *      违规即红，范围读不出 exit 2。
  *
  * ## 受限 YAML 子集（front-matter）
@@ -48,7 +48,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029 RG-030 RG-031
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -944,6 +944,21 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
       } else if (h1 !== meta.title) {
         out.push(
           `${e.rel}：RG-021 title=${JSON.stringify(meta.title)} 与正文首个 H1 ${JSON.stringify(h1)} 不一致——title 逐字等于 H1`,
+        )
+      }
+    }
+    // RG-031：**收口即删**——闭环档文件必须已经消失。
+    // 判据的形状不点名任何 kind：某 kind 把 `closedStatus` 也写进退场档（`retiredStates`），
+    // 就说明它把「闭环」当**过渡档**而不是归档档，这种 kind 的条目一旦进退场档，
+    // 文件就该被删（任务 kind：`closedStatus: done` ∩ `retiredStates: [done, wont]`）。
+    // 文档类的 `retired` 是在位归档（编号 = 路径、被引用着），与它不重合，故不误报。
+    {
+      const retired = cfg.retiredStates ?? []
+      if (cfg.closedStatus && retired.includes(cfg.closedStatus) && retired.includes(meta.status)) {
+        out.push(
+          `${e.rel}：RG-031 收口即删——\`${meta.status}\` 是过渡档：结论先落进设计文档` +
+            '（`impl` 档位 / `### D-NNN`），再删掉这个文件；若有条目的 `deps` 指向它，' +
+            '同一提交里把那条边摘掉（RG-006：已闭环的编号不再是前置）',
         )
       }
     }
