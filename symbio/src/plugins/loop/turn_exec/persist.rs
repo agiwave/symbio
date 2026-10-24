@@ -142,17 +142,22 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来。所以答话交给运行器
 /// （`TurnInput::final_reply`），收束格仍由它落。
 ///
-/// ## 与 [`super::execute_turn`] 的两处刻意差异
+/// ## 与 [`super::execute_turn`] 的差异
 ///
-/// 1. **不写派生事实**：`record_learning` / `record_derived` 一律不调——`Answered` 轮没有
-///    工具交换、没有模型参与，`finish_turn` 直接收尾，没有派生副作用可记。
+/// 1. **承诺 / 任务表 / 熔断不写**：那三族的事实来源是工具交换（派活、就绪集、
+///    失败），`Answered` 轮一次工具都不调，没有可记的东西。
+///    但**记忆不在此列**：编码的是「这一轮用户说了什么、智能体答了什么」，与
+///    有没有工具交换无关。跳过它就是答话轮记忆静默丢失（实测：默认配置下
+///    「记住我的幸运数字」由 `classify` 判成答话 ⇒ WAL 里没有 `memory.encoded`，
+///    下一个会话当然想不起来）。因此这里与 [`persist_turn`] 一样调
+///    `record_learning`——见 DE-036「记忆编码是轮级派生，不依附驱动循环」。
 /// 2. **不上线 UI 帧**：答话节点已由 `apply_verdict` 推进 `context.messages`
 ///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
 ///    [`SilentDeltas`]；再发一次就是同一条答话重复上屏。
 ///
-/// ## `llm` / `tok` 是 `run_with_tools` 的端口，不是本路的依赖
+/// ## `llm` / `tok` 是 `drive_steps` 的端口，不是本路的依赖
 ///
-/// 短路发生在**用到它们之前**（`TurnRunner::run_with_tools` 步骤 1b）——这一轮一次模型
+/// 短路发生在**用到它们之前**（`turn_exec::drive_steps` 步骤 1b）——这一轮一次模型
 /// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
 ///
@@ -170,7 +175,13 @@ pub(crate) async fn execute_final_reply_turn(
     turn_no: u64,
     user_seq: u64,
     drive_seq: u64,
+    // 本轮用户发言：记忆编码的**内容**（`record_learning` 步 11）。答话轮同样
+    // 是「用户说了什么」的一轮，不传它就只能记下判断、丢掉经验。
+    user_text: &str,
     reply: &str,
+    // 生成 `reply` 的那次措辞往返的实测耗时（`WordingReply.cost_ms`）。它是本
+    // 轮唯一的模型往返代价，落进收束格的 `cost_ms`；模板 / 无往返产线给 0。
+    reply_cost_ms: u64,
     // 答话**对话面节点**的身份与标记（`id` / `reason` / `exclude_from_context`）：
     // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；必须随
     // 事实入格（WAL 为唯一事实源，见 `TurnInput::dialog`）。
@@ -230,6 +241,7 @@ pub(crate) async fn execute_final_reply_turn(
         stages,
         inject: None,
         final_reply: Some(reply.to_string()),
+        final_cost_ms: reply_cost_ms,
         // 答话**对话面节点**的身份与标记：收束格据它复刻那条根级节点。答话轮没有
         // 流式过程 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
         // 事件 id 复刻），取数口按有无思考事实决定挂不挂（见下方 `nodes`）。
@@ -256,7 +268,7 @@ pub(crate) async fn execute_final_reply_turn(
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
         abort: Some(abort),
     };
-    drive_steps(
+    let outcome = drive_steps(
         store.as_ref(),
         &llm,
         &tok,
@@ -268,5 +280,32 @@ pub(crate) async fn execute_final_reply_turn(
     )
     .await
     .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
+    // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────
+    //
+    // 三个跳过条件与 `classify_turn` 逐条对齐：中止 / 收束被授权拒绝 ⇒ 本轮
+    // 没有定稿产出，派生事实全不写；兜底 ⇒ 只写用户经验（判断与技能编译都不写，
+    // 失败的路不该被固化成记忆）。**没有工具交换不构成跳过条件**——记忆是轮级
+    // 派生，不是工具副产物。
+    if !outcome.aborted && !outcome.closure_denied {
+        let principal = crate::symbio_core::request_principal(ctx.as_ref());
+        let response = (!outcome.fell_back).then_some(reply);
+        super::super::derived_facts::record_learning(
+            session.session_id(),
+            store.as_ref(),
+            &store.range(Seq::new(0)),
+            turn_no,
+            user_seq,
+            user_text,
+            &principal,
+            &format!("t{turn_no}"),
+            response,
+            // 答话轮不建召回视图：分类器判 `direct` 的前提就是「现有对话里答得出」，
+            // 这一轮没有检索往返，也就没有 `memory.recalled` 可记。
+            None,
+            &[],
+            session.skill_compile_enabled(),
+            crate::symbio_core::clock_now_ms(),
+        );
+    }
     Ok(())
 }

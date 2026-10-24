@@ -156,14 +156,13 @@ function hasDecisionAnchor(id) {
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
  * 也必须是 `35-baseline` 那条提取函数认的键名；任何一边单改都会红。
  */
-// core-shape-allow methods: D-062 —— WalStore 唯一写入口对事件类型是泛型的（Store::Event: EventEnvelope），泛型触达信封自身 ts 的唯一通道就是 trait 成员（与 assign_seq 同纪律），下沉回十余处构造点即 D-062 明确否决的方案
 // core-shape-allow defaults: D-062 —— 无时刻概念的信封须「保持原样」，默认 no-op 体就是它的平凡值（README §3 的 J2）；去掉默认体反而让每个实现方手写同一个空函数，公共面更宽
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 16, methods: 56, defaults: 18 }
+  : { traits: 15, methods: 55, defaults: 18 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

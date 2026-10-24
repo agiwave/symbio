@@ -507,7 +507,7 @@ pub async fn run_chat_loop(
         // 投影里看不到用户说过什么）。D-052 决策 1 要求「一轮的产出无论完成 / 失败 /
         // 被中断 / 悬在等待用户，都入格」，决策 2 要求终止以**状态**入账。
         //
-        // 检查点已**下沉**到 `turn_runner::run_with_tools` 的 1c 步：用户格已落、
+        // 检查点已**下沉**到 `turn_exec::drive_steps` 的 1c 步：用户格已落、
         // 第一个 LLM 请求未发，已中止则落**中止收束格**（`chat.assistant.final` +
         // `status: "aborted"` + `terminated`）。因此：
         //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
@@ -865,7 +865,11 @@ async fn run_turn_head(
                     turn.turn_no,
                     turn.user_seq,
                     turn.drive_seq,
+                    utterance,
                     &reply,
+                    // 这次措辞往返的实测耗时：答话轮唯一的模型调用在这条产线里，
+                    // 不带给运行器，收束格就恒记 0（成本台账整类漏记）。
+                    composed.as_ref().map(|r| r.cost_ms).unwrap_or(0),
                     dialog,
                     // 生成这次答话的思考事实：措辞产线是这条轮次里唯一一次
                     // 真实模型推理，不入格则 `Reason` 节点从未存在。

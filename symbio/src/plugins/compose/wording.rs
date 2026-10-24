@@ -107,8 +107,10 @@ pub(crate) async fn generate(
         .await
     {
         Ok(turn) => {
-            // cost_ms 与对话轮同一条实测口径（adapter 边界）；内部请求不写事件，
-            // 因此它进日志而不是成本台账（台账的唯一输入仍是落格事件，D-044）。
+            // cost_ms 与对话轮同一条实测口径（adapter 边界）。内部请求本身不写事件，
+            // 但这次往返的耗时随 `WordingReply.cost_ms` 交回 `session`，由它落进
+            // 本轮收束格的 `cost_ms`——台账仍只读落格事件（D-044），不会因为
+            // 「请求是静默的」就少记一整类轮次的成本。
             crate::plugin_debug!(
                 "compose",
                 "[Compose] 答话往返完成（cost_ms={}）",
@@ -124,6 +126,7 @@ pub(crate) async fn generate(
                 text,
                 reasoning_id,
                 reasoning,
+                cost_ms: turn.cost_ms,
             })
         }
         Err(e) => {

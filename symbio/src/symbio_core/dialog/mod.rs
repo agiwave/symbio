@@ -275,7 +275,7 @@ pub struct ComposeRequest {
 /// （`reasoning` / `reasoning_id`）此前在措辞插件内部就被丢弃——收束格只入格了
 /// 答话文本，`Reason` 节点对普通答话轮从未存在过（AMD MiMo 实测 2026-10-13，
 /// 接上字段兼容修复后流层明明收到了推理分片）。模板产线没有模型往返，
-/// 两个字段恒 `None`。
+/// 两个推理字段恒 `None`、`cost_ms` 恒 `0`。
 ///
 /// 字段全部 `Option` + `default`：模板路径的反序列化不需要协作。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,6 +288,14 @@ pub struct WordingReply {
     /// 思考子节点 id（与 `reasoning` 同源；`None` = 没有思考）。
     #[serde(default)]
     pub reasoning_id: Option<String>,
+    /// 这次措辞往返在 adapter 边界的**实测耗时**（毫秒；模板路径为 `0`）。
+    ///
+    /// 它是**收束格的 `cost_ms` 来源**：`Answered` 轮不进驱动循环，收束格由
+    /// `execute_final_reply_turn` 就地落——这一次措辞调用是该轮唯一的模型往返，
+    /// 不把它带回来，`chat.assistant.final` 就恒记 `0`，熔断与 SLO 的台账里
+    /// 这一整类轮次的成本凭空消失。
+    #[serde(default)]
+    pub cost_ms: u64,
 }
 
 #[cfg(test)]

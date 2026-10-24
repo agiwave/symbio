@@ -136,6 +136,12 @@ pub trait Store: Send + Sync {
 ///
 /// `RwLock` 串行化写入 ⇒ append 内「查重 → 赋 seq → 落库」是原子区间，
 /// 单调性与无跳号由构造直接成立，不靠约定。
+///
+/// **不执行 I1/I2/I3**：三条不变量判的是事实**之间**的关系（同轮至多一条 final /
+/// 声明必须有更早的 `produced_by` / 开过的轮必须收束），需要轮号索引与溯源解析。
+/// 执行方是持久化实现的唯一写入口 `WalStore::gate`；本类型只服务测试与 S0 基线。
+/// 生产权威恒为持久化实现——把本类型当生产权威的路径必须先换掉，而不是给它补一套闸门
+/// （[D-134](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 pub struct MemoryStore<E: EventEnvelope> {
     inner: RwLock<MemoryInner<E>>,
 }

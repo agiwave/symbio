@@ -109,6 +109,114 @@ fn test_extension_suffix_risk_normalization() {
     );
 }
 
+/// 跨平台破坏性命令必须判 High——旧表只有 Unix 词，Windows 上 `del` / `rd` /
+/// `taskkill` 全被判 Low，于是自动模式绕过审批直接执行（实测 a09）。
+#[test]
+fn test_windows_destructive_commands_are_high_risk() {
+    let p = policy();
+    for cmd in [
+        "del approval-target.txt",
+        "erase /q x",
+        "rd /s /q build",
+        "rmdir /s build",
+        "format D:",
+        "diskpart /s script.txt",
+        "reg delete HKCU\\Software\\x /f",
+        "taskkill /F /IM node.exe",
+        "Remove-Item -Recurse -Force x",
+        "icacls x /grant Everyone:F",
+    ] {
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CapabilityRiskLevel::High,
+            "破坏性命令必须判 High：{cmd}"
+        );
+    }
+    // 关键判据：High > 默认阈值 Medium ⇒ 自动模式必须拒绝（无人可审批）。
+    assert!(CapabilityRiskLevel::High.requires_approval(CapabilityRiskLevel::Medium, false));
+    let guarded = strict();
+    assert!(
+        guarded
+            .validate_command_execution("del x", false, CapabilityRiskLevel::Medium)
+            .is_err(),
+        "未批准的删除命令必须被拦"
+    );
+}
+
+/// 未知命令 fail-closed：没见过 ≠ 安全。
+#[test]
+fn test_unknown_command_is_high_risk() {
+    let p = policy();
+    for cmd in [
+        "some-unknown-tool --danger",
+        "custom.exe --run",
+        "frobnicate x",
+    ] {
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CapabilityRiskLevel::High,
+            "未知命令必须按最高档处理：{cmd}"
+        );
+    }
+}
+
+/// 解释器能执行任意代码——只收 `cmd` / `powershell` 会漏掉其余入口。
+#[test]
+fn test_code_runners_are_high_risk() {
+    let p = policy();
+    for cmd in [
+        "sh -c 'anything'",
+        "bash -lc 'anything'",
+        "node -e 'require(\"fs\").rmSync(\"x\")'",
+        "python -c 'print(1)'",
+        "xargs rm -rf",
+        "cmd /C del x",
+        "pwsh -c Get-Process",
+    ] {
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CapabilityRiskLevel::High,
+            "解释器必须判 High：{cmd}"
+        );
+    }
+}
+
+/// 只读命令保持 Low——fail-closed 不能把日常查看也打成审批。
+#[test]
+fn test_read_only_commands_stay_low() {
+    let p = policy();
+    for cmd in [
+        "git status",
+        "git log --grep='a|b'",
+        "ls -la",
+        "dir /b",
+        "find . -name '*.rs'",
+        "where git",
+        "rg TODO",
+        "cat README.md",
+    ] {
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CapabilityRiskLevel::Low,
+            "只读命令不应要审批：{cmd}"
+        );
+    }
+}
+
+/// git 的 `-c` 可以定义 `!sh` 别名执行任意命令，不能因为「首词是 git」放行。
+#[test]
+fn test_git_alias_cannot_bypass() {
+    let p = policy();
+    assert_eq!(
+        p.command_risk_level("git -c alias.x=!sh -c x"),
+        CapabilityRiskLevel::High
+    );
+    assert_eq!(
+        p.command_risk_level("git -C repo status"),
+        CapabilityRiskLevel::Low
+    );
+}
+
 #[test]
 fn test_command_substitution_is_rejected() {
     let p = policy();

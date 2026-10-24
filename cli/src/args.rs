@@ -92,6 +92,7 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
   /session <ID>           切换/续接会话
   /provider <ID>          切换 Provider（default = 系统默认）
   /workdir <路径>         切换工作目录
+  /stats                  查看当前会话读数
   /exit, /quit            退出
 
 输出约定:

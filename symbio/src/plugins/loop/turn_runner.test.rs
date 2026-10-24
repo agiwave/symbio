@@ -82,6 +82,7 @@ impl TurnRunner {
                 prefix: None,
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
                 final_reply: None,
+                final_cost_ms: 0,
                 turn_root_id: String::new(),
                 dialog: None,
                 opening_text: None,
@@ -332,6 +333,7 @@ mod turn_runner_tests {
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -605,6 +607,7 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -655,6 +658,7 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -715,6 +719,7 @@ mod turn_runner_tests {
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -805,6 +810,7 @@ mod turn_runner_tests {
                     actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: Some("我先看一下。".into()),
@@ -845,6 +851,7 @@ mod turn_runner_tests {
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
+            final_cost_ms: 0,
             turn_root_id: "r-1".into(),
             dialog: None,
             opening_text: None,
@@ -1146,6 +1153,7 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -1195,6 +1203,7 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -2127,6 +2136,7 @@ mod tool_round_tests {
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
+            final_cost_ms: 0,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,
@@ -2159,12 +2169,17 @@ mod tool_round_tests {
         let prompts = llm.prompts.clone();
         let mut i = input(&store);
         i.final_reply = Some("北京今天晴。".into());
+        i.final_cost_ms = 1234;
         let out = TurnRunner
             .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
             .await
             .unwrap();
         assert_eq!(out.text, "北京今天晴。", "答话就是这一轮的输出");
         assert!(!out.fell_back, "定稿答话不是兜底");
+        assert_eq!(
+            out.cost_ms, 1234,
+            "措辞往返的实测耗时随结局返回（台账 / 读数的输入）"
+        );
         assert!(
             prompts.lock().unwrap().is_empty(),
             "定稿答话轮一次模型请求都不该发"
@@ -2178,6 +2193,10 @@ mod tool_round_tests {
             ev[2].produced_by,
             ev[0].seq.map(|s| s.value()),
             "I2：收束格的溯源必须指向本轮用户格"
+        );
+        assert_eq!(
+            ev[2].cost_ms, 1234,
+            "收束格带这次措辞往返的实测 cost_ms（不是恒 0）"
         );
     }
 
@@ -3009,6 +3028,7 @@ mod tool_round_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -4425,6 +4445,7 @@ mod actor_ledger_tests {
             actor: ActorSpec::trivial("session/main"),
             prefix: None,
             final_reply: None,
+            final_cost_ms: 0,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,

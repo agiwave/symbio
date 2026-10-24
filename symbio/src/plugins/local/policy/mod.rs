@@ -126,12 +126,228 @@ fn normalize_base_command(base_cmd: &str) -> &str {
     }
 }
 
-/// 命令包装器：真实命令藏在**参数里的脚本**中，白名单看不见内层。
+/// 代码执行器：真实命令藏在**参数里的脚本 / 表达式**中，白名单看不见内层。
 ///
 /// 它们**保留在白名单**（Windows 下模型确实要靠它跑命令，砍掉能力是过度反应），
 /// 但风险固定为 [`CapabilityRiskLevel::High`]——默认 Medium 阈值下必须用户审批，
 /// 用户显式开到 High 阈值即代表自担风险。
-const SHELL_WRAPPERS: [&str; 3] = ["powershell", "pwsh", "cmd"];
+///
+/// 列表按**能力**而非「名字眼熟」收录：凡是能执行任意代码的解释器、shell、
+/// 批量执行器都算。只收 `cmd` / `powershell` 会漏掉 `sh -c`、`node -e`、
+/// `python -c`、`xargs` 等同样能跑任意命令的入口。
+const CODE_RUNNERS: &[&str] = &[
+    // shell / 包装器
+    "powershell",
+    "pwsh",
+    "cmd",
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "ksh",
+    "csh",
+    "tcsh",
+    "wsl",
+    "runas",
+    "start",
+    "env",
+    "nohup",
+    "xargs",
+    "eval",
+    "source",
+    // 语言解释器
+    "node",
+    "nodejs",
+    "deno",
+    "bun",
+    "python",
+    "python3",
+    "py",
+    "perl",
+    "ruby",
+    "php",
+    "lua",
+    "rscript",
+    "julia",
+    "java",
+    "javaw",
+    "awk",
+    "gawk",
+    "mawk",
+];
+
+/// 只读命令：不写文件、不改系统状态、不执行任意代码。
+///
+/// **这是唯一能判 `Low` 的集合**。不在集合里的命令一律按 [`CapabilityRiskLevel::High`]
+/// 处理（见 `segment_risk_level` 的 fail-closed 注释）——「没见过 = 安全」正是
+/// 审批闸门被绕过的原因：`del` / `rd` / `taskkill` 在 Windows 上都是系统自带命令，
+/// 却因为不在旧的 Unix 风险表里被判成 `Low`，于是自动模式直接执行。
+const READ_ONLY_COMMANDS: &[&str] = &[
+    "ls",
+    "dir",
+    "pwd",
+    "cd",
+    "echo",
+    "cat",
+    "type",
+    "more",
+    "less",
+    "head",
+    "tail",
+    "wc",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "ag",
+    "fd",
+    "find",
+    "where",
+    "which",
+    "whoami",
+    "hostname",
+    "date",
+    "printenv",
+    "set",
+    "ver",
+    "uname",
+    "systeminfo",
+    "tree",
+    "stat",
+    "file",
+    "du",
+    "df",
+    "ps",
+    "tasklist",
+    "netstat",
+    "ipconfig",
+    "ifconfig",
+    "ping",
+    "nslookup",
+    "dig",
+    "tracert",
+    "traceroute",
+    "diff",
+    "cmp",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "nl",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "md5sum",
+    "sha1sum",
+    "sha256sum",
+    "true",
+    "false",
+    "test",
+];
+
+/// 系统性破坏 / 不可逆命令（内建命令与系统管理入口）。
+///
+/// 与 `CODE_RUNNERS` 分开：这些命令的**首个词本身就是动作**，不需要靠参数里的脚本
+/// 才能造成后果。跨平台收录——风险表按命令名而不是按 host OS 分支，Windows 命令在
+/// Unix 上不存在时多判一档无害，漏判则是一条真实的绕过路径。
+const DESTRUCTIVE_COMMANDS: &[&str] = &[
+    // 删除 / 覆盖
+    "rm",
+    "rmdir",
+    "rd",
+    "del",
+    "erase",
+    "deltree",
+    "unlink",
+    "shred",
+    "truncate",
+    "wipe",
+    "dd",
+    // 权限 / 属主
+    "chmod",
+    "chown",
+    "chgrp",
+    "setfacl",
+    "icacls",
+    "takeown",
+    "cacls",
+    // 磁盘 / 分区 / 文件系统
+    "mkfs",
+    "mke2fs",
+    "fdisk",
+    "parted",
+    "diskpart",
+    "format",
+    "mount",
+    "umount",
+    "cipher",
+    "vssadmin",
+    "bcdedit",
+    // 进程 / 电源
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "logoff",
+    "kill",
+    "killall",
+    "pkill",
+    "taskkill",
+    "tskill",
+    "systemctl",
+    "service",
+    "launchctl",
+    // 账户 / 注册表 / 计划任务 / 网络配置
+    "reg",
+    "regedit",
+    "regedt32",
+    "sc",
+    "net",
+    "netsh",
+    "schtasks",
+    "at",
+    "wmic",
+    "runas",
+    "sudo",
+    "su",
+    "doas",
+    // 外发 / 远程执行（数据外带与远程通道）
+    "curl",
+    "wget",
+    "ftp",
+    "scp",
+    "ssh",
+    "nc",
+    "ncat",
+    "socat",
+    "docker",
+    "podman",
+    "kubectl",
+    "helm",
+    // PowerShell 动词（包装器之外的直达形态）
+    "remove-item",
+    "ri",
+    "clear-content",
+    "clc",
+    "set-executionpolicy",
+    "invoke-expression",
+    "iex",
+    "start-process",
+    "stop-process",
+    "stop-computer",
+    "restart-computer",
+    "format-volume",
+    "clear-disk",
+    "remove-partition",
+];
+
+/// 有副作用但可回滚的命令：写入 / 移动 / 建立链接。
+const WRITE_COMMANDS: &[&str] = &[
+    "touch", "mkdir", "md", "mv", "move", "cp", "copy", "xcopy", "robocopy", "ren", "rename", "ln",
+    "link", "mklink", "tee", "sed", "rsync", "install",
+];
 
 /// 把命令行按**引号外的**命令分隔符切成子命令；遇不可枚举的构造则报错。
 ///
@@ -290,40 +506,88 @@ impl SecurityPolicy {
         }
     }
 
-    /// 单个子命令的风险等级（比首词 + 危险模式扫描）
+    /// 单个子命令的风险等级（比首词 + 危险模式扫描）。
+    ///
+    /// **fail-closed**：只有 [`READ_ONLY_COMMANDS`] 与已知只读的 `git` 子命令判
+    /// `Low`；解释器判 `High`；破坏性命令判 `High`；写入判 `Medium`；**其余一律
+    /// `High`**。最后一条是安全边界——「未知 = Low」会让任何未收录的系统命令
+    /// （`del` / `rd` / `format` / `taskkill`）在自动模式下免审批执行，而审批闸门
+    /// 正是本项目声明的安全边界（[D-101](../../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     fn segment_risk_level(&self, segment: &str) -> CapabilityRiskLevel {
         let command_lower = segment.to_lowercase();
         let base_cmd = command_lower.split_whitespace().next().unwrap_or("");
         let base_cmd = normalize_base_command(base_cmd);
-        // 命令包装器：内层脚本对白名单不可见 ⇒ 一律高风险（默认阈值下需审批）
-        if SHELL_WRAPPERS.contains(&base_cmd) {
-            return CapabilityRiskLevel::High;
-        }
-        let high_risk = [
-            "rm", "sudo", "su", "chmod", "chown", "shutdown", "reboot", "mkfs", "dd", "mount",
-            "umount", "curl", "wget",
+
+        // 危险模式优先：即使首词是只读命令，参数里也可能藏着执行 / 删除。
+        let high_risk_patterns = [
+            "rm -rf /",
+            "rm -fr /",
+            "mkfs",
+            "dd if=",
+            "sudo",
+            "git reset --hard",
+            "git clean -",
+            "find -delete",
+            "-exec ",
+            "-execdir ",
+            "remove-item",
+            "invoke-expression",
+            "set-executionpolicy",
+            "| sh",
+            "| bash",
+            "| powershell",
+            "| cmd",
         ];
-        if high_risk.contains(&base_cmd) {
+        if high_risk_patterns
+            .iter()
+            .any(|pattern| command_lower.contains(pattern))
+        {
             return CapabilityRiskLevel::High;
         }
-        let high_risk_patterns = ["rm -rf /", "rm -fr /", "mkfs", "dd if=", "sudo"];
-        for pattern in &high_risk_patterns {
-            if command_lower.contains(pattern) {
-                return CapabilityRiskLevel::High;
-            }
+
+        if CODE_RUNNERS.contains(&base_cmd) || DESTRUCTIVE_COMMANDS.contains(&base_cmd) {
+            return CapabilityRiskLevel::High;
         }
-        let medium_risk = ["touch", "mkdir", "mv", "cp", "ln"];
-        if medium_risk.contains(&base_cmd) {
+        if WRITE_COMMANDS.contains(&base_cmd) {
             return CapabilityRiskLevel::Medium;
         }
         if base_cmd == "git" {
-            let git_ops = ["commit", "push", "reset", "clean", "rebase", "merge"];
+            // `git -c alias.x='!sh'` 能把任意命令挂到别名上；`-C` 只切目录，
+            // 两者都以 `-` 开头，必须分开判。
+            // 大小写敏感：`git -c` 是配置注入，`git -C` 只是切目录。
+            let second_raw = segment.split_whitespace().nth(1).unwrap_or("");
+            if second_raw == "-c" {
+                return CapabilityRiskLevel::High;
+            }
             let second = command_lower.split_whitespace().nth(1).unwrap_or("");
+            // `git reset --hard` / `git clean -` 已由上面的模式拦成 High；
+            // 其余写操作按「可回滚的写入」处理，只读子命令仍是 Low。
+            let git_ops = [
+                "commit",
+                "push",
+                "merge",
+                "rebase",
+                "cherry-pick",
+                "revert",
+                "checkout",
+                "restore",
+                "switch",
+                "stash",
+                "apply",
+                "am",
+                "reset",
+                "clean",
+            ];
             if git_ops.contains(&second) {
                 return CapabilityRiskLevel::Medium;
             }
+            return CapabilityRiskLevel::Low;
         }
-        CapabilityRiskLevel::Low
+        if READ_ONLY_COMMANDS.contains(&base_cmd) {
+            return CapabilityRiskLevel::Low;
+        }
+        // 没见过 = 不知道会做什么 = 最高档，交给审批闸门。
+        CapabilityRiskLevel::High
     }
 
     pub fn validate_command_execution(

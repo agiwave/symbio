@@ -235,6 +235,7 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                 // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
                 // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
                 final_reply: None,
+                final_cost_ms: 0,
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
                 // 对话面开场白（`Escalate` 首响）：由 `chat_loop::apply_verdict`

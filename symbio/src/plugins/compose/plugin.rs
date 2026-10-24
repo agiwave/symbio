@@ -115,6 +115,7 @@ impl ComposePlugin {
                 text: progress_text(&req.snapshot),
                 reasoning: None,
                 reasoning_id: None,
+                cost_ms: 0,
             };
         }
         if req.verdict.needs_wording_generation() {
@@ -129,6 +130,7 @@ impl ComposePlugin {
             text: template_for(&req.verdict).unwrap_or_default(),
             reasoning: None,
             reasoning_id: None,
+            cost_ms: 0,
         }
     }
 }

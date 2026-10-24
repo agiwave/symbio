@@ -190,3 +190,7 @@ impl Capability for TodoWriteTool {
         Ok(serde_json::to_value(&data)?)
     }
 }
+
+#[cfg(test)]
+#[path = "todo_write.test.rs"]
+mod tests;

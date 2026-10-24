@@ -129,6 +129,7 @@ where
         actor,
         prefix,
         final_reply,
+        final_cost_ms,
         dialog,
         opening_text,
         opening_dialog,
@@ -226,7 +227,7 @@ where
                 turn,
                 user_seq,
                 "compose returned empty",
-                0,
+                final_cost_ms,
                 produced,
                 artifacts_landed,
             )
@@ -251,7 +252,7 @@ where
             return Ok(PreparedFlow::Done(TurnOutcome {
                 turn,
                 text: reply.to_string(),
-                cost_ms: 0,
+                cost_ms: final_cost_ms,
                 usage: None,
                 fell_back: false,
                 aborted: false,
@@ -270,7 +271,7 @@ where
                 &actor.principal,
             )
             .with_produced_by(user_seq)
-            .with_cost_ms(0)
+            .with_cost_ms(final_cost_ms)
             .with_payload(with_dialog(
                 with_reason(
                     with_status(produced, "completed"),
@@ -282,7 +283,7 @@ where
         return Ok(PreparedFlow::Done(TurnOutcome {
             turn,
             text: reply.to_string(),
-            cost_ms: 0,
+            cost_ms: final_cost_ms,
             usage: None,
             fell_back: false,
             aborted: false,

@@ -22,7 +22,7 @@
 //! 两条边界，缺一条都会静默走错：
 //! - **只对新开轮**：续写轮不新开用户格（调用方直给原轮的 `user_seq`），而反射档的
 //!   落格形状就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
-//! - **开关默认关**：关着时候选集恒空，本轮照常走 `run_with_tools`。
+//! - **开关默认关**：关着时候选集恒空，本轮照常走 `drive_steps`。
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
 //! 该值随主体走、并由 `execute_turn` 以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
@@ -666,7 +666,7 @@ pub(crate) struct ExecTurn<'a> {
     /// 走**反射档**（[`TurnRunner::run_reflex`]），一次模型调用都不发生。
     ///
     /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能）——
-    /// 那时本轮照常走 `run_with_tools`。填充点唯一：
+    /// 那时本轮照常走 `drive_steps`。填充点唯一：
     /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
     pub skill_hits: &'a [super::skill_events::SkillLlmHit],
     /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
