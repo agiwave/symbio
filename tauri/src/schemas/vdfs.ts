@@ -31,6 +31,8 @@ export * from './vdfs-form'
 // 控制面路由（`home/*` / `event_bus/*` / `gateway/*`）不在此列，
 // 它们在 `constants/routes.gen.ts`——那份由后端路由注册表生成，不是手写登记处。
 export const VDFS_LIST = 'vdfs/list'
+/** 树状遍历（递归；节点的 `t` 位控制可遍历性） */
+export const VDFS_TREE = 'vdfs/tree'
 export const VDFS_STAT = 'vdfs/stat'
 export const VDFS_READ = 'vdfs/read'
 export const VDFS_WRITE = 'vdfs/write'
@@ -400,6 +402,24 @@ export interface VdfsListResponse {
   node: VdfsNode
   /** 条目（地址 + 节点） */
   items: VdfsItem[]
+}
+
+/**
+ * 树遍历回执（`vdfs/tree`）——**扁平**条目列表，层级由每条的 `path` 表达。
+ *
+ * 截断三件套（`truncated` / `pending` / `message`）是后端刻意的自证设计：一次遍历
+ * 没走完时**点名的目录**要交回调用方，否则消费者只能照名字猜子路径。前端把
+ * `truncated` 原样呈现给用户，不自己判「够不够多」。
+ */
+export interface VdfsTreeResponse {
+  /** 条目（地址 + 节点，扁平） */
+  nodes: VdfsItem[]
+  /** 是否因深度 / 数量上限被截断 */
+  truncated: boolean
+  /** 因配额耗尽而没能展开的目录（截断时才非空） */
+  pending?: string[]
+  /** 自解释说明（截断时给出规模 + 续查指引） */
+  message?: string
 }
 
 /**

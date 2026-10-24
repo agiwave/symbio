@@ -6,6 +6,7 @@
 
   - 路由出口（RouterView）；
   - 全局浮动消息浮层（Toast，状态来自 useToast 单例，全 App 仅渲染一次）；
+  - 全局命令面板（Cmd/Ctrl+K，显隐只有本文件持有；键盘是全 App 的，面板也是）；
   - 全局初始化：VDFS 转写同步 + 工作区恢复（须先于页面挂载）。
 -->
 <template>
@@ -18,11 +19,14 @@
     <!-- 首启引导（全 App 仅渲染一次；可见性由自己的 store 决定，
          且只在「该做的事还没做」时自动弹——见 stores/onboarding） -->
     <Onboarding />
+    <!-- 全局命令面板（Cmd/Ctrl+K）：显隐只由下面这个全局键决定，不放进任何 store
+         ——面板是本壳的职责（本文件是唯一持有它的人），SECOND source of truth 无益 -->
+    <CommandPalette :visible="paletteOpen" @close="paletteOpen = false" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
 import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
@@ -35,8 +39,26 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
 import Onboarding from '@/components/common/Onboarding.vue'
+import CommandPalette from '@/components/common/CommandPalette.vue'
 
 const sessions = useSessionsStore()
+
+/**
+ * 命令面板的显隐（全 App 唯一一份）。
+ *
+ * 键盘口径沿用仓内既有那一条（`CodeEditor` 的 Ctrl+S）：`(ctrlKey || metaKey)`——
+ * mac 上是 ⌘K、Windows/Linux 上是 Ctrl+K，一条判断覆盖两个平台。
+ */
+const paletteOpen = ref(false)
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+  // 按**字符**而不是物理键位（`e.code`）判：非美式布局用户的肌肉记忆跟着字母走
+  if (e.key.toLowerCase() !== 'k') return
+  // 拦下浏览器默认（Chrome 的 Ctrl+K = 聚焦地址栏搜索）
+  e.preventDefault()
+  paletteOpen.value = !paletteOpen.value
+}
 
 /**
  * 当前空间的会话挂载目录一变，就向三个实时消费端各登记一次。
@@ -131,6 +153,14 @@ onMounted(async () => {
   // 首启引导：**只在「该做的事还没做」时自动弹**（判据见 stores/onboarding），
   // 不阻塞任何启动流程——它只是浮层，数据侧照旧自己拉。
   void useOnboardingStore().maybeOpen()
+
+  // 全局键：命令面板（Cmd/Ctrl+K）。挂在这里而不是某个页面里，是因为面板是
+  // **跨页面**的——在会话页、在模型页、在子空间里都该按得出来。
+  window.addEventListener('keydown', onGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
 

@@ -1,5 +1,5 @@
 /**
- * 回读的**理由**（闭集）——三个回读动词（`listVdfs` / `statVdfs` / `readVdfs`）的
+ * 回读的**理由**（闭集）——四个回读动词（`listVdfs` / `treeVdfs` / `statVdfs` / `readVdfs`）的
  * 必填首参，随请求进 `metadata.origin`，由 Tauri 侧的 `Start routing` 留痕打出。
  *
  * ## 为什么要有它
@@ -41,6 +41,8 @@ export const READBACK_REASON = {
   LIST_REFRESH: 'list-refresh',
   /** **用户动作**：VDFS 浏览器的导航 / 分页 / 选中 / 手动刷新 */
   VDFS_BROWSER: 'vdfs-browser',
+  /** **命令面板**：面板打开时取一次全库候选（`vdfs/tree`），筛词在本地做、不再发请求 */
+  PALETTE_SEARCH: 'palette-search',
   /** **整份转写重读**：打开会话时取历史（与实时面无关） */
   TRANSCRIPT_LOAD: 'transcript-load',
 } as const

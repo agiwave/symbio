@@ -19,6 +19,7 @@ import {
   VDFS_READ,
   VDFS_ROOT_OP,
   VDFS_STAT,
+  VDFS_TREE,
   VDFS_UNWATCH,
   VDFS_WATCH,
   VDFS_WRITE,
@@ -26,6 +27,7 @@ import {
   type VdfsContent,
   type VdfsListResponse,
   type VdfsNode,
+  type VdfsTreeResponse,
   type VdfsWriteResponse,
 } from '../schemas/vdfs'
 import { setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
@@ -108,6 +110,34 @@ export async function listVdfs(
     async () => (await callReadback<VdfsListResponse>(reason, VDFS_LIST, payload)) ?? empty(),
     empty,
     { tag: 'vdfs-service', what: `listVdfs(${path}) failed` }
+  )
+}
+
+/**
+ * 树状遍历（**一次请求拿一整棵子树的扁平条目**）。
+ *
+ * 命令面板用它而不是 `vdfs/search`：后者的匹配对象只有**文件**（`host::search_via`
+ * 显式跳过目录节点），而资源条目（会话 / 模型 / 智能体……）在这个地址空间里就是
+ * 目录——用文件搜索去找它们必然一无所获。`tree` 交回的正是「地址 + 自述」，
+ * 层级由每条的 `path` 表达，前端不需要认识任何拓扑。
+ *
+ * `depth` / `limit` 只在给了字段时才发出（与 `listVdfs` 的窗口参数同一条理由：
+ * 多写一个 `undefined` 键会改变请求体形状）。缺省由后端定（深度 3 / 500 个节点），
+ * 被截断时 `truncated` + `pending` 会说出来，调用方**不要**把「没返回」读成「不存在」。
+ */
+export async function treeVdfs(
+  reason: ReadbackReason,
+  path = vdfsRoot(),
+  opts?: { depth?: number; limit?: number }
+): Promise<VdfsTreeResponse> {
+  const payload: Record<string, unknown> = { path }
+  if (opts?.depth !== undefined) payload.depth = opts.depth
+  if (opts?.limit !== undefined) payload.limit = opts.limit
+  const empty = (): VdfsTreeResponse => ({ nodes: [], truncated: false })
+  return withFallback(
+    async () => (await callReadback<VdfsTreeResponse>(reason, VDFS_TREE, payload)) ?? empty(),
+    empty,
+    { tag: 'vdfs-service', what: `treeVdfs(${path}) failed` }
   )
 }
 
