@@ -578,6 +578,12 @@ fn config_definition() -> DetailDefinition {
                         "发言字符数达到此值即启动 worker（0 = 关闭这一层）",
                         json!(d.worker_min_chars),
                     ),
+                    unbounded_number(
+                        "task_cap",
+                        "并发任务容量",
+                        "一轮最多派几笔活（就绪集容量）。1 = 串行 FIFO；0 与 1 同义",
+                        json!(d.task_cap),
+                    ),
                 ],
             },
             DetailSection {

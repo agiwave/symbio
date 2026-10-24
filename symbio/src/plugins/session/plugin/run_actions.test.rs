@@ -110,6 +110,7 @@ fn turn_spec(session_id: &str, persistent: bool) -> TurnSpec {
             worker_force_prefix: String::new(),
             worker_keywords: String::new(),
             worker_min_chars: 0,
+            task_cap: crate::symbio_core::TASK_CAP,
         },
     }
 }

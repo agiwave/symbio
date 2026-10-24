@@ -339,6 +339,19 @@ pub struct SessionConfig {
     /// 改造在 149-ii 接线。
     #[serde(default = "default_presentation_tree")]
     pub presentation_tree: String,
+    /// 调度容量（`readyset` 的 `cap`）：**同时**是「一轮最多派几笔活」。
+    ///
+    /// ## 它是 `cap` 的写方
+    ///
+    /// [DE-034](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4 的平凡值是
+    /// `cap = 1`：调度器、租约、仲裁的逻辑**一行不改**，系统退化为串行 FIFO。
+    /// 这个数不是行常量、也不是调度器自己的字段——它是**会话**的旋钮，因为「同时
+    /// 能推进几件事」是这台机器上这个会话的配置。
+    ///
+    /// `0` 与 `1` 同义（容量为零的调度器不是「更保守」，是「永不动」）：
+    /// 读侧按 `cap.max(1)` 归一，不把「写错一个数」变成「系统停摆」。
+    #[serde(default = "default_task_cap")]
+    pub task_cap: usize,
 }
 
 // ── Q1 判据的出厂值：单一真源 ─────────────────────────────────────────
@@ -361,6 +374,13 @@ pub fn default_worker_keywords() -> String {
 }
 pub fn default_worker_min_chars() -> usize {
     MIN_CHARS
+}
+
+/// 出厂值：调度容量（平凡值 = 串行 FIFO）。
+pub(crate) const TASK_CAP: usize = crate::symbio_core::TASK_CAP;
+
+pub fn default_task_cap() -> usize {
+    TASK_CAP
 }
 
 pub fn default_presentation_tree() -> String {
@@ -502,6 +522,7 @@ impl Default for SessionConfig {
             worker_keywords: default_worker_keywords(),
             worker_min_chars: default_worker_min_chars(),
             presentation_tree: default_presentation_tree(),
+            task_cap: default_task_cap(),
         }
     }
 }

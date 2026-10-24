@@ -284,6 +284,75 @@ pub(crate) fn write(
     Ok(())
 }
 
+/// 调度（S04 §3，`D-139` 裁决 3）：就绪集 → `task.ready` / `task.assigned`。
+///
+/// ## 谁写、凭什么写
+///
+/// 写方是**调度者**（`actors::schedule::ScheduleDecider`），不是本模块：本模块只做
+/// 「把事实交给 store」这一件与其余任务事实相同的事。资格由写侧闸判
+/// （`ActorSpec::can_assign_work`，缺 `assign.work` ⇒ 零事实，fail-closed）。
+///
+/// ## 为什么在轮末调
+///
+/// 调度的输入是**本轮刚写完的任务表**：模型在这一轮声明了任务（`task.opened`），
+/// 轮末才有东西可派。调用点排在 [`write`] 之后、且**重新取一次史**——拿旧切片算，
+/// 这一轮新开的格不在候选集里（`derived_facts::record_schedule` 的调用点注释）。
+///
+/// ## 事件号
+///
+/// `{id_prefix}-s{n}`：`id_prefix` 由调用方给（`t{turn}-s`），一次调度一个序列。
+/// 与任务表写方的 `v2t-{anchor}` 前缀不同源，因此同一轮内两批事实的幂等键不撞。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn schedule(
+    store: &dyn Store<Event = Event>,
+    snapshot: &[Event],
+    cap: usize,
+    owner: &str,
+    turn: u64,
+    produced_by: u64,
+    id_prefix: &str,
+    now: i64,
+) -> Result<(), String> {
+    use crate::symbio_core::{ScheduleDecider, SCHEDULE_BUDGET_MS};
+
+    let spec = ScheduleDecider::spec();
+    let started = crate::symbio_core::clock_now_ms();
+    let view = crate::symbio_core::readyset(cap).read_all(snapshot).value;
+    let facts = ScheduleDecider.decide(&spec, &view, snapshot, owner, now);
+    // 预算（`I3` 的反射档）：**算完再判**——能拦的只有落格这一半。超预算就一笔都
+    // 不落，而不是落一半：半批租约没人认账（下一轮它们既不在候选集里、也没人持有）。
+    let elapsed = crate::symbio_core::clock_now_ms() - started;
+    if elapsed > SCHEDULE_BUDGET_MS as i64 {
+        crate::plugin_warn!(
+            "session",
+            "[task] 调度超预算（{elapsed}ms > {SCHEDULE_BUDGET_MS}ms）⇒ 本轮不派活"
+        );
+        return Ok(());
+    }
+    for (n, fact) in facts.into_iter().enumerate() {
+        let verb = if fact.kind == crate::symbio_core::EVENT_TASK_READY {
+            Verb::Progressed
+        } else {
+            Verb::Asserted
+        };
+        store
+            .append(
+                Event::pending(
+                    format!("{id_prefix}-{n}"),
+                    fact.kind,
+                    Entity::Task,
+                    verb,
+                    turn,
+                    &spec.principal,
+                )
+                .with_produced_by(produced_by)
+                .with_payload(fact.payload),
+            )
+            .map_err(|err| format!("调度事实入格失败：{err:?}"))?;
+    }
+    Ok(())
+}
+
 /// 调度段（S7 步 17）：就绪任务集渲染成一段提示，请求视图**置顶**注入。
 ///
 /// 只读不写（与 `memory_events::recall_view` 同款的只读视图），因此：
@@ -294,8 +363,8 @@ pub(crate) fn write(
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 ///
 /// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
-pub(crate) fn prompt_section(snapshot: &[Event]) -> Option<String> {
-    let ready = crate::symbio_core::readyset()
+pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
+    let ready = crate::symbio_core::readyset(cap)
         .read_all(snapshot)
         .value
         .ready;

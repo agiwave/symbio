@@ -50,6 +50,7 @@ fn read_path(
         viewer,
         principal,
         false,
+        crate::symbio_core::TASK_CAP,
     )
 }
 
@@ -845,7 +846,7 @@ fn stats_recompute_equals_direct_apply() {
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     let rs = serde_json::to_value(
-        crate::symbio_core::readyset()
+        crate::symbio_core::readyset(crate::symbio_core::TASK_CAP)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )
@@ -1474,7 +1475,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
-        crate::symbio_core::readyset()
+        crate::symbio_core::readyset(crate::symbio_core::TASK_CAP)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )
@@ -1490,7 +1491,10 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
         &root,
     )
     .expect("读数");
-    assert_eq!(denied.readyset, serde_json::json!({ "ready": [] }));
+    assert_eq!(
+        denied.readyset,
+        serde_json::json!({ "ready": [], "cap": crate::symbio_core::TASK_CAP })
+    );
     assert_eq!(denied.invariants, serde_json::json!([]));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
@@ -1584,6 +1588,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
             viewer,
             crate::symbio_core::PRINCIPAL_MAIN,
             enabled,
+            crate::symbio_core::TASK_CAP,
         )
         .expect("读数")
     };

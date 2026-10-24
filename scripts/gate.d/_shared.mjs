@@ -158,7 +158,11 @@ export const BASELINE = {
   // 新增 1 条（2126 → 2127）：`port.test.rs::a_repeated_fact_write_collapses_on_its_idempotency_key`
   // ——D-136 之后「重复派发」被行拦下（`dispatch-*` 的 `sent` 出口已关），幂等键那条
   // 判据换由同一形状的**重复落格**直接钉（`request` 同 id、`response` 同 `(port,id,attempt)`）。
-  rustTests: 2142,
+  // 新增 6 条（2142 → 2148）：S04 调度者与租约落地（`D-139`）——`cap` 是参数不是结构
+  // （cap=1 串行 / cap=4 放开 / 0 与 1 同义）、活租约退出候选集且到点即回、调度者规格
+  // （Decider / 80ms / 持 `assign.work`）、100 次注入只发一笔租约、到期判死并重派、
+  // 缺 `assign.work` 零事实。
+  rustTests: 2148,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
@@ -170,7 +174,8 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 批 步 5d 的同一净删 3 条在 CI 口径下的折算（1436→1433）——
   // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
   // `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 1437,
+  // baseline-allow ciRustTestsTotal: S04 调度者与租约的同一增量在 CI 口径下修一格（1437→1443），逐条归属见上方 `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 1443,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

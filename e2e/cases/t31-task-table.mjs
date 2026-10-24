@@ -94,7 +94,10 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 任务表挂在轮末收束的 `derived_facts::record_derived` 上（与 t30 同款）。
-        session: { ...DIALOG_FACE_OFF },      },
+        // `task_cap: 3`：本用例要看见**两个**候选（t1 与 t3）——平凡值 `1` 会把就绪集
+        // 截成一笔（串行 FIFO），那条「依赖关系真的穿到读侧」的判据就看不见了。
+        session: { ...DIALOG_FACE_OFF, task_cap: 3 },
+      },
     });
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
@@ -214,10 +217,16 @@ export default defineCase(
           `被拒读也应是 200 + 空读数（实际: ${JSON.stringify(denied.body)}）`,
         );
         assert(denied.body?.data?.has_wal, '有源但不给你看——与「没有源」要能分辨');
+        const deniedReady = denied.body?.data?.readyset ?? {};
         assertEq(
-          denied.body?.data?.readyset,
-          { ready: [] },
+          deniedReady.ready,
+          [],
           '无读权限 ⇒ 就绪集为空表（形态与「确实没有就绪任务」一致，值域由 has_wal 分）',
+        );
+        assertEq(
+          deniedReady.cap,
+          3,
+          '`cap` 是会话配置值，不随可见域变——它说的是「这台机器允许几笔」，不是事实',
         );
       } finally {
         api.stop();

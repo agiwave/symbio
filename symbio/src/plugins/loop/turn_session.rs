@@ -78,6 +78,11 @@ impl LoopSession {
         self.spec.settings.skill_fast_path
     }
 
+    /// 调度容量（`readyset` 的 `cap`）：写方是会话配置，读方是调度者与调度段。
+    pub(crate) fn task_cap(&self) -> usize {
+        self.spec.settings.task_cap
+    }
+
     /// 工具结果存档目录（session 在派发前按会话子目录算好）。
     pub(crate) fn tool_archive_dir(&self) -> &Path {
         &self.spec.tool_archive_dir

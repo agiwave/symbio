@@ -283,6 +283,10 @@ pub(crate) fn read(
     viewer: Option<&str>,
     session_principal: &str,
     skill_compile_enabled: bool,
+    // 调度容量（本会话配置 `task_cap`）：就绪集列按**同一个** `cap` 取，
+    // 与调度段 / 调度者同源——三处各取一个数，就会读出「调度派了 1 笔，
+    // 统计说候选有 5 笔」这种看不出谁错的差。
+    task_cap: usize,
 ) -> Result<SessionStats, PluginError> {
     let has_wal = snapshot.is_some();
     // 完整史（归档段 + 未取代的那段）：`snapshot` 由存储层按 `range(0)` 口径交值。
@@ -379,8 +383,12 @@ pub(crate) fn read(
 
     // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    let readyset = serde_json::to_value(crate::symbio_core::readyset().read_all(&snapshot).value)
-        .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
+    let readyset = serde_json::to_value(
+        crate::symbio_core::readyset(task_cap)
+            .read_all(&snapshot)
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
     // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
@@ -520,7 +528,10 @@ impl SessionPlugin {
         };
         // 技能编译开关是部署配置（不在这份事实源里）：与已编译数并读，才分得清
         // 「关着」与「开着但没编译过」两种零。
-        let skill_compile_enabled = self.config.read().await.skill_compile_enabled;
+        let (skill_compile_enabled, task_cap) = {
+            let cfg = self.config.read().await;
+            (cfg.skill_compile_enabled, cfg.task_cap)
+        };
         let stats = read(
             &sid,
             snapshot,
@@ -528,6 +539,7 @@ impl SessionPlugin {
             viewer.as_deref(),
             &session_principal,
             skill_compile_enabled,
+            task_cap,
         )?;
         Ok(PluginPayload::new(&stats))
     }

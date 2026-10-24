@@ -285,7 +285,8 @@ async fn run_recall(
     );
     // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
     // 召回同一条口径（同一轮内集合不漂移）。
-    turn.ready_section = super::super::task_events::prompt_section(&facts);
+    turn.ready_section =
+        super::super::task_events::prompt_section(&facts, context.session.task_cap());
     // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
     // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；

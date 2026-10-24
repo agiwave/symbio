@@ -80,13 +80,12 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 12 · 🟡 doing 1 · done 0 · wont 0（共 13）
+**计数**：☐ todo 11 · 🟡 doing 1 · done 0 · wont 0（共 12）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-273-S04调度器与租约落地` | S04 调度器与租约落地——`task.ready` / `task.assigned` / `readyset:cap` / TTL 同批（D-064 重开） | now | impl | — |
 | `T-274-记忆召回参数族与预算读方` | 记忆召回参数族——`layer` / `spread` / `decay` / `density` 各要先有值写方；巩固者预算接真读方 | next | impl | — |
 | `T-275-语义记忆接线` | 语义记忆接线——`memory.encoded` 的 `vec` 写方与 `recall` 的语义维（D-110 前置兑现） | next | impl | — |
 | `T-278-Agent权限四字段执行` | Agent 权限四字段执行面——network / fs.read / fs.write / limits 同批接入（D-102 重开） | next | impl | — |
@@ -110,8 +109,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 分解关系只写在 `parent` 字段（子条目指向父条目、同 kind；编号平铺不体现层级——层级是投影不是身份）。
 同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。
 
-- [`T-272-设计实现总收口批`](272-设计实现总收口批.md) 设计实现总收口批（sprint）：判据面归位、能力缺口逐阶收口与读数补建（doing） · 子项 todo 10
-  - [`T-273-S04调度器与租约落地`](273-S04调度器与租约落地.md) S04 调度器与租约落地——`task.ready` / `task.assigned` / `readyset:cap` / TTL 同批（D-064 重开）（todo）
+- [`T-272-设计实现总收口批`](272-设计实现总收口批.md) 设计实现总收口批（sprint）：判据面归位、能力缺口逐阶收口与读数补建（doing） · 子项 todo 9
   - [`T-274-记忆召回参数族与预算读方`](274-记忆召回参数族与预算读方.md) 记忆召回参数族——`layer` / `spread` / `decay` / `density` 各要先有值写方；巩固者预算接真读方（todo）
   - [`T-275-语义记忆接线`](275-语义记忆接线.md) 语义记忆接线——`memory.encoded` 的 `vec` 写方与 `recall` 的语义维（D-110 前置兑现）（todo）
   - [`T-278-Agent权限四字段执行`](278-Agent权限四字段执行.md) Agent 权限四字段执行面——network / fs.read / fs.write / limits 同批接入（D-102 重开）（todo）

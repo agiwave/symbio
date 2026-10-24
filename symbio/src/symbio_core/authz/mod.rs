@@ -255,6 +255,23 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name
 /// 一遍字面量，迟早漂移成「裁决收回 A、闸门判 B」。
 pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 
+/// **调度者**的身份（[roadmap/S04 §3](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约")，
+/// `D-139` 裁决 3 落地）。
+///
+/// 只持 `assign.work`：调度的权威动作是**发放**（把一笔就绪任务交出去并附租约），
+/// 与市场行 / 自主行 / 规划行同一条纪律——角色出现必须自带窄行，窄行是唯一入口
+/// （D-099）。不持 `reply.*`（不冒充用户对话）、不持 `define.work`（不立任务）：
+/// 「谁来派」与「派什么」是两件事，混在一行会让调度者顺手扩权成规划者。
+///
+/// 模式由 [`crate::symbio_core::Pattern::for_principal`] 派生为 `Decider`
+/// （无发言权、无产物能力 ⇒ 规则驱动），与 S04 §3 的 ActorSpec 行 `pattern: decider`
+/// 一致；预算 80ms（反射档）由 `actors::schedule::ScheduleDecider::spec` 给出。
+///
+/// 注意它**不取代** `session/main` 上的 `assign.work`：那一格是淘汰回路的管辖对象
+/// （「谁还在被授予派活权」，见 `derived_facts::record_elimination`），两者是**同一能力
+/// 的两个用途**——一个是「有资格派」，一个是「派这个动作由谁执行」。
+pub(crate) const PRINCIPAL_SCHEDULER: &str = "scheduler/main";
+
 /// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
 /// （[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")
 /// 「规划者 ▸ `define.work`」， 落地其读方）。
@@ -377,6 +394,15 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
         PRINCIPAL_VERIFIER,
         &[CAP_ASSERT_VERIFICATION],
+        VisScope::ThreadPrivate,
+    ),
+    // 调度者行（S04 §3，`D-139` 裁决 3）：**只持 `assign.work`**——与市场 / 仲裁 /
+    // 守门 / 工人 / 规划 / 验证六行同一条纪律（角色出现必须自带窄行）。它写
+    // `task.ready` / `task.assigned` 的资格就来自这一格（`ActorSpec::can_assign_work`
+    // 读规格自己身上的能力集，构造来源是本行）。
+    (
+        PRINCIPAL_SCHEDULER,
+        &[CAP_ASSIGN_WORK],
         VisScope::ThreadPrivate,
     ),
     // 三族工具主体行（D-069 §决策 2 工具响应主体， 落地）：工具的权威动作是

@@ -63,7 +63,16 @@ pub struct TurnSettings {
     pub worker_force_prefix: String,
     pub worker_keywords: String,
     pub worker_min_chars: usize,
+    /// 调度容量（`readyset` 的 `cap`）：就绪集最多这么多笔。
+    ///
+    /// 写方是**会话配置**（`PLUGIN.yml` 的 `task_cap`），不是行常量——并发度是参数
+    /// 不是结构（[DE-034](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4）。
+    /// 平凡值 `1`：调度器、租约、仲裁的逻辑一行不改，系统退化为串行 FIFO。
+    pub task_cap: usize,
 }
+
+/// 出厂值：调度容量（平凡值 = 串行）。
+pub const TASK_CAP: usize = 1;
 
 /// 出厂值：worker 显式前缀。
 pub const WORKER_FORCE_PREFIX: &str = "/work ";

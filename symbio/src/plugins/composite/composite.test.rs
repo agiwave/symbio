@@ -674,6 +674,7 @@ fn guard_turn_spec(sid: &str, root: &Path) -> TurnSpec {
             worker_force_prefix: String::new(),
             worker_keywords: String::new(),
             worker_min_chars: 0,
+            task_cap: crate::symbio_core::TASK_CAP,
         },
     }
 }

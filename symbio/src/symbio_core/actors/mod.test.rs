@@ -1490,14 +1490,14 @@ fn readyset_contains_only_dependency_closed_tasks() {
     open_task(&store, "c", &["b"], "session/main");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
 
-    let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
+    let rs = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(rs.value.ready.len(), 1, "只有 a 就绪：{:?}", rs.value.ready);
     assert_eq!(rs.value.ready[0].task_id, "a");
 
     // a 终态 → 就绪集挪到 b；链式推进，调度器零内部状态。
     assert_task(&store, "a", "session/verifier");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
+    let rs = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(
         rs.value
             .ready
@@ -1508,7 +1508,7 @@ fn readyset_contains_only_dependency_closed_tasks() {
     );
 
     // N1：双跑逐字节一致。
-    let again = readyset().apply(&snapshot, 9_999, Budget::generous());
+    let again = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(rs.value, again.value);
 }
 
@@ -1536,7 +1536,9 @@ fn rework_creates_new_node_instead_of_rollback() {
     open_task(&store, "a-r1", &[], "session/planner");
 
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+    let rs = readyset(usize::MAX)
+        .apply(&snapshot, 9_999, Budget::generous())
+        .value;
     let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
     assert!(ids.contains(&"a-r1"), "返工节点就绪：{ids:?}");
     assert!(
@@ -1547,7 +1549,9 @@ fn rework_creates_new_node_instead_of_rollback() {
     // 返工节点过验 → b 的依赖由终态的 a-r1 之外仍卡住（a 未终态）→ b 不就绪。
     assert_task(&store, "a-r1", "session/verifier");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+    let rs = readyset(usize::MAX)
+        .apply(&snapshot, 9_999, Budget::generous())
+        .value;
     let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
     assert!(
         !ids.contains(&"b"),
@@ -1617,7 +1621,9 @@ fn n_step_chain_terminates_within_rework_bound() {
     // 全链推进：一次就绪一个，终态后下一个就绪（终止性前提 1/3 由 store 与 C14 保证）。
     for i in 0..n {
         let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-        let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+        let rs = readyset(usize::MAX)
+            .apply(&snapshot, 9_999, Budget::generous())
+            .value;
         assert_eq!(
             rs.ready.len(),
             1,
@@ -1642,7 +1648,7 @@ fn n_step_chain_terminates_within_rework_bound() {
     }
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
-        readyset()
+        readyset(usize::MAX)
             .apply(&snapshot, 9_999, Budget::generous())
             .value
             .ready
@@ -1758,7 +1764,7 @@ fn interruption_after_final_is_queued_not_preempted() {
 fn suspended_task_leaves_readyset_and_restores() {
     let store = EventStore::new();
     running_task(&store, "t1");
-    let before = readyset().apply(
+    let before = readyset(usize::MAX).apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         9_999,
         Budget::generous(),
@@ -1771,7 +1777,7 @@ fn suspended_task_leaves_readyset_and_restores() {
         .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
         .unwrap();
     let events = store.range(crate::symbio_core::event::Seq::new(0));
-    let suspended = readyset().apply(&events, 9_999, Budget::generous());
+    let suspended = readyset(usize::MAX).apply(&events, 9_999, Budget::generous());
     assert!(
         suspended.value.ready.is_empty(),
         "挂起期间不得二次调度（S07 §6 验收 2）"
@@ -1779,7 +1785,7 @@ fn suspended_task_leaves_readyset_and_restores() {
 
     // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
     // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（04 §2.2）。
-    let at_t = readyset().apply(&events, 1_000, Budget::generous());
+    let at_t = readyset(usize::MAX).apply(&events, 1_000, Budget::generous());
     assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
 
     // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
@@ -1796,7 +1802,7 @@ fn suspended_task_leaves_readyset_and_restores() {
             .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
         .unwrap();
-    let restored = readyset().apply(
+    let restored = readyset(usize::MAX).apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         9_999,
         Budget::generous(),
@@ -2488,4 +2494,194 @@ fn latency_tier_name_round_trip() {
     }
     assert_eq!(LatencyTier::from_name("gpu"), None);
     assert_eq!(LatencyTier::from_name(""), None);
+}
+
+// ── S04：调度者与租约（`D-139` 裁决 1–3 的判据面）──────────────────────
+
+use crate::symbio_core::event::{EVENT_TASK_ASSIGNED, EVENT_TASK_READY};
+
+/// 落一条 `task.assigned`（租约）——只在测试里手写，生产写方是调度者。
+fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
+    store
+        .append(
+            Event::pending(
+                format!("as-{id}-{until_ms}"),
+                EVENT_TASK_ASSIGNED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                "scheduler/main",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({
+                "task_id": id,
+                "owner": owner,
+                "lease_ms": until_ms,
+                "until_ms": until_ms,
+            })),
+        )
+        .expect("租约入格");
+}
+
+/// `cap` 是参数不是结构：`cap=1` 退化为串行，`cap=4` 用同一套逻辑放开四条。
+#[test]
+fn the_ready_set_capacity_is_a_parameter_not_a_structure() {
+    let store = EventStore::new();
+    for id in ["a", "b", "c", "d"] {
+        open_task(&store, id, &[], "session/planner");
+    }
+    let snap = store.range(crate::symbio_core::event::Seq::new(0));
+
+    let one = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
+    assert_eq!(one.ready.len(), 1, "cap=1 ⇒ 候选集只给一笔（串行 FIFO）");
+    assert_eq!(one.cap, 1);
+    assert_eq!(one.ready[0].task_id, "a", "先开的先派");
+
+    let four = readyset(4).apply(&snap, 9_999, Budget::generous()).value;
+    assert_eq!(
+        four.ready
+            .iter()
+            .map(|t| t.task_id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "c", "d"],
+        "cap=4 ⇒ 同一套判据放开四条"
+    );
+
+    // 0 与 1 同义（容量为零不是「更保守」，是「永不动」）。
+    assert_eq!(
+        readyset(0)
+            .apply(&snap, 9_999, Budget::generous())
+            .value
+            .ready
+            .len(),
+        1
+    );
+}
+
+/// 活租约让任务离开候选集；到点即回（**判死的事实**由调度者补落，投影只认时间戳）。
+#[test]
+fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "session/planner");
+    assign_task(&store, "a", "session/main", 1_000);
+    let snap = store.range(crate::symbio_core::event::Seq::new(0));
+
+    assert!(
+        readyset(1)
+            .apply(&snap, 999, Budget::generous())
+            .value
+            .ready
+            .is_empty(),
+        "租约未到期 ⇒ 被派出去的活不再进候选（不重复派）"
+    );
+    assert_eq!(
+        readyset(1)
+            .apply(&snap, 1_000, Budget::generous())
+            .value
+            .ready
+            .len(),
+        1,
+        "到点即回候选集"
+    );
+}
+
+/// 调度者是 `Decider` / 80ms / 根作用域，且**持 `assign.work`**（授权表那一行）。
+#[test]
+fn the_scheduler_spec_is_a_decider_with_assign_work() {
+    let spec = ScheduleDecider::spec();
+    assert_eq!(spec.pattern, Pattern::Decider);
+    assert_eq!(spec.budget_ms, 80, "反射档");
+    assert_eq!(spec.scope, Scope::Root);
+    assert!(spec.can_assign_work(), "调度者行持 assign.work");
+}
+
+/// 100 次注入同一笔就绪任务 ⇒ 只发一笔租约（抢同一份活有仲裁）。
+#[test]
+fn a_hundred_injections_yield_exactly_one_lease() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "session/planner");
+    let spec = ScheduleDecider::spec();
+
+    let mut assigned = 0usize;
+    let mut ready_facts = 0usize;
+    let mut now = 1_000i64;
+    for _ in 0..100 {
+        let snap = store.range(crate::symbio_core::event::Seq::new(0));
+        let view = readyset(1).apply(&snap, now, Budget::generous()).value;
+        let facts = ScheduleDecider.decide(&spec, &view, &snap, "session/main", now);
+        for f in &facts {
+            if f.kind == EVENT_TASK_ASSIGNED {
+                assigned += 1;
+            }
+            if f.kind == EVENT_TASK_READY {
+                ready_facts += 1;
+            }
+        }
+        for (n, f) in facts.into_iter().enumerate() {
+            let verb = if f.kind == EVENT_TASK_READY {
+                Verb::Progressed
+            } else {
+                Verb::Asserted
+            };
+            store
+                .append(
+                    Event::pending(
+                        format!("s-{now}-{n}"),
+                        f.kind,
+                        Entity::Task,
+                        verb,
+                        0,
+                        "scheduler/main",
+                    )
+                    .with_produced_by(0)
+                    .with_payload(f.payload),
+                )
+                .expect("调度事实入格");
+        }
+        now += 10;
+    }
+    assert_eq!(assigned, 1, "同一笔活被注入 100 次，只发一笔租约");
+    assert_eq!(ready_facts, 1, "就绪事实同一周期只落一次（不刷屏）");
+}
+
+/// 租约到期 ⇒ 调度者**判死并补落** `task.ready{reason: lease_expired}`，然后重派。
+#[test]
+fn an_expired_lease_is_judged_dead_and_reassigned() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "session/planner");
+    assign_task(&store, "a", "session/main", 1_000);
+    let spec = ScheduleDecider::spec();
+    let snap = store.range(crate::symbio_core::event::Seq::new(0));
+
+    // 到点：候选集回来了，调度者先判死、再发放。
+    let view = readyset(1).apply(&snap, 1_000, Budget::generous()).value;
+    let facts = ScheduleDecider.decide(&spec, &view, &snap, "session/main", 1_000);
+    let death = facts
+        .iter()
+        .find(|f| f.kind == EVENT_TASK_READY)
+        .expect("到期未判死 ⇒ 回放里它只是「突然又能派了」");
+    assert_eq!(death.payload["reason"], "lease_expired");
+    assert_eq!(death.payload["expired_owner"], "session/main");
+    assert!(
+        facts.iter().any(|f| f.kind == EVENT_TASK_ASSIGNED),
+        "判死之后同一轮重派"
+    );
+}
+
+/// 写侧闸：没有 `assign.work` 的主体**一条事实都不写**（fail-closed）。
+#[test]
+fn a_spec_without_assign_work_writes_nothing() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "session/planner");
+    let snap = store.range(crate::symbio_core::event::Seq::new(0));
+    let view = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
+
+    // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
+    let speaker = ActorSpec::trivial("session/worker");
+    assert!(
+        ScheduleDecider
+            .decide(&speaker, &view, &snap, "session/main", 9_999)
+            .is_empty(),
+        "缺 assign.work ⇒ 零事实（没有资格的调度不留痕）"
+    );
 }

@@ -139,8 +139,8 @@ pub use actors::{ActorSpec, Pattern};
 // 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
-    GateDecision, IntentGate, Preemption, PreemptionDecider, Scope, SkillCompiler, SkillRoute,
-    SkillRouter, SKILL_TAG,
+    GateDecision, IntentGate, Preemption, PreemptionDecider, ScheduleDecider, Scope, SkillCompiler,
+    SkillRoute, SkillRouter, SCHEDULE_BUDGET_MS, SKILL_TAG,
 };
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
@@ -158,9 +158,9 @@ pub(crate) use actors::{
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")。
 #[allow(unused_imports)]
 pub(crate) use event::{
-    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
-    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
+    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY,
+    EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以走 `pub(crate)` 而不是根公开面（C-003 数 `pub use`）。
@@ -363,7 +363,7 @@ pub(crate) use turn::dispatch::{
     run_ops, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
     CompressionFinishRequest, CompressionOutcome, ConsolidateRequest, EditFrame, EditNodesRequest,
     RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, TurnReport, TurnSettings, TurnSpec,
-    TurnStatus, LOOP_RUN_TURN, TURN_DISPATCH, WORKER_FORCE_PREFIX, WORKER_KEYWORDS,
+    TurnStatus, LOOP_RUN_TURN, TASK_CAP, TURN_DISPATCH, WORKER_FORCE_PREFIX, WORKER_KEYWORDS,
     WORKER_MIN_CHARS,
 };
 pub(crate) use turn::facts::{

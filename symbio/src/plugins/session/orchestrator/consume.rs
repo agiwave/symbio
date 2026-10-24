@@ -313,6 +313,7 @@ impl TurnLauncher {
                 worker_force_prefix: cfg.worker_force_prefix.clone(),
                 worker_keywords: cfg.worker_keywords.clone(),
                 worker_min_chars: cfg.worker_min_chars,
+                task_cap: cfg.task_cap,
             },
         };
         // 事实轨端口：临时会话 ⇒ `None`（驱动器沿用「无事实源 ⇒ 不落派生事实」）。

@@ -585,10 +585,13 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
-// 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`。
+// 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`
+// （`task.ready` 也落 `progressed`，`task.assigned` 也落 `asserted`——两格是
+// 调度者的判断与发放，不新增动词）。
 //
 // 写方 = `plugins/session/task_events`（会话任务清单 `todo_write` 的转写，
-// 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）。
+// 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）；`task.ready` /
+// `task.assigned` 的写方是调度者（`actors::schedule`，S04 `D-139`）。
 
 /// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。
 pub const EVENT_TASK_OPENED: &str = "task.opened";
@@ -603,6 +606,28 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
+/// 就绪判定：调度者把一笔任务**判成可就绪**。载荷 `{ task_id, reason? }`。
+/// 落在 `task × progressed`。
+///
+/// ## 为什么就绪要有事实形态
+///
+/// 就绪集本身是纯投影（`projection::readyset`），但投影只回答「现在算出来是什么」，
+/// 回答不了「调度者算过、看过、没派」——只落输出（`task.assigned`）时，回放分不开
+/// 「算过但没派」与「压根没算」，调度行为因此不可审计（`D-139` 裁决 1）。
+///
+/// `reason` 只在**非首次**就绪时有值（今天只有一种：`lease_expired`——上一笔租约
+/// 到期未兑现，任务放回就绪池；见 [`EVENT_TASK_ASSIGNED`]）。
+pub const EVENT_TASK_READY: &str = "task.ready";
+/// 发放：调度者把一笔就绪任务派给一个持有者，并附**租约**。载荷
+/// `{ task_id, owner, lease_ms, until_ms }`。落在 `task × asserted`。
+///
+/// ## 唯一写方
+///
+/// 只有调度者写它（`actors::schedule::ScheduleDecider`），且写侧闸读
+/// `assign.work`（`ActorSpec::can_assign_work`）——没有该能力的主体零事件
+/// （fail-closed）。租约不是锁原语：持有状态由投影从这格事件算出，到期由
+/// 调度者判死（见 [`EVENT_TASK_READY`] 的 `lease_expired`）。
+pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
 // ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")、
 //    [roadmap/S09 §3](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）────

@@ -406,7 +406,7 @@ fn turn_facts(final_first: bool) -> Vec<crate::symbio_core::Event> {
 /// 当前就绪的任务 id（`readyset` = 模型唯一的调度候选来源）。
 fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
     let snapshot = read_wal(p, sid);
-    crate::symbio_core::readyset()
+    crate::symbio_core::readyset(usize::MAX)
         .apply(&snapshot, i64::MAX, crate::symbio_core::Budget::generous())
         .value
         .ready

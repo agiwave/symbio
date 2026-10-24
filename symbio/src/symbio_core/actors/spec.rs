@@ -135,6 +135,17 @@ impl ActorSpec {
         self.holds(crate::symbio_core::governance::Capability::AssertVerification.name())
     }
 
+    /// 写侧判定（S04 **调度者**）：本规格能否落发放事实（`task.ready` /
+    /// `task.assigned`）。
+    ///
+    /// 第五个能力读方，与收束两臂 / 判意图 / 盖章同一条纪律：`assign.work` 是调度者的
+    /// **全部**权威（S04 §3 的 ActorSpec 行只持它），写点读规格而不回头查表。
+    /// 缺它 ⇒ 调度者一条事实都不写（fail-closed）——没有资格的调度不该留下「我派过」
+    /// 的痕迹。
+    pub fn can_assign_work(&self) -> bool {
+        self.holds(crate::symbio_core::governance::Capability::AssignWork.name())
+    }
+
     /// 能力集是否含该名。名字对错由**构造期**兜住（`from_names` 认不出即拒绝整体
     /// 构造）——读侧照单全收，不把拼写问题变成第二处判定。
     fn holds(&self, name: &str) -> bool {

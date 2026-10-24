@@ -107,8 +107,9 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 对话面三项按 `DIALOG_FACE_OFF` 钉死。
-        session: { ...DIALOG_FACE_OFF },
+        // 对话面三项按 `DIALOG_FACE_OFF` 钉死；`task_cap: 3` 让两条无依赖任务
+        // 同批进候选（平凡值 `1` 会截成一笔，就绪集就只剩第一笔）。
+        session: { ...DIALOG_FACE_OFF, task_cap: 3 },
       },
     });
     // 子智能体目录：`agent_run` 的落点（t30 同款）。

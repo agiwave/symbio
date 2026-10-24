@@ -63,6 +63,21 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &derived.tasks,
         &derived.breaks,
     );
+    // 调度（S04 §3，`D-139` 裁决 4）：**必须排在任务表落格之后**，且**重新取史**
+    // ——调度的输入是本轮刚开的格；拿 `all`（轮初那份）算，这一轮新开的任务要等到
+    // 下一轮才进候选集，第一轮因此永远派不出东西。
+    let scheduled = store.range(Seq::new(0));
+    super::super::derived_facts::record_schedule(
+        session.session_id(),
+        store.as_ref(),
+        &scheduled,
+        session.task_cap(),
+        &principal,
+        turn_no,
+        user_seq,
+        &format!("t{turn_no}-s"),
+        crate::symbio_core::clock_now_ms(),
+    );
     // 淘汰回路（S13 §3，）：**必须排在承诺落格之后**——它读的声誉投影
     // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
     // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。

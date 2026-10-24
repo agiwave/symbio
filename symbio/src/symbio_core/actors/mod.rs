@@ -33,6 +33,7 @@ mod conation;
 mod control;
 mod reasoner;
 mod recall;
+mod schedule;
 mod skill;
 mod spec;
 
@@ -44,6 +45,7 @@ pub use self::control::{
 };
 pub use self::reasoner::render_messages;
 pub use self::recall::recalled_event;
+pub use self::schedule::{ScheduleDecider, SCHEDULE_BUDGET_MS};
 pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter, SKILL_TAG};
 pub use self::spec::{ActorSpec, Pattern, Scope};
 

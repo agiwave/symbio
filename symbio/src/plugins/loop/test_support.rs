@@ -178,6 +178,7 @@ pub(crate) fn default_settings() -> TurnSettings {
         worker_force_prefix: WORKER_FORCE_PREFIX.to_string(),
         worker_keywords: WORKER_KEYWORDS.join(","),
         worker_min_chars: WORKER_MIN_CHARS,
+        task_cap: crate::symbio_core::TASK_CAP,
     }
 }
 

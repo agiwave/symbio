@@ -147,14 +147,14 @@ fn readyset_lists_dependency_closed_tasks_only() {
     );
 
     let snapshot = store.range(Seq::new(0));
-    let ready = readyset()
+    let ready = readyset(usize::MAX)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value
         .ready;
     let ids: Vec<&str> = ready.iter().map(|t| t.task_id.as_str()).collect();
     assert_eq!(ids, vec!["t1", "t3"], "t2 依赖 t1（未终态）⇒ 不就绪");
 
-    let section = prompt_section(&snapshot).expect("有就绪任务 ⇒ 有调度段");
+    let section = prompt_section(&snapshot, usize::MAX).expect("有就绪任务 ⇒ 有调度段");
     assert!(section.contains("t1") && section.contains("t3"));
     assert!(
         !section.contains("t2"),
@@ -182,7 +182,7 @@ fn a_dependency_cycle_is_flagged_and_yields_an_empty_readyset() {
         violations.iter().any(|v| v.why.contains("依赖环")),
         "成环必须被断言抓到：{violations:?}"
     );
-    let ready = readyset()
+    let ready = readyset(usize::MAX)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value
         .ready;
@@ -364,7 +364,10 @@ fn exceeding_the_rework_bound_is_flagged() {
 /// 而不是发一个空占位给模型。
 #[test]
 fn prompt_section_is_absent_when_nothing_is_ready() {
-    assert!(prompt_section(&[]).is_none(), "没有事实源 ⇒ 无段落");
+    assert!(
+        prompt_section(&[], usize::MAX).is_none(),
+        "没有事实源 ⇒ 无段落"
+    );
 
     // 只有已终态的任务 ⇒ 就绪集空 ⇒ 同样无段落。
     let done = EventStore::new();
@@ -374,7 +377,7 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
         &[decl(vec![item("t1", "甲", &[], TaskStatus::Completed)])],
     );
     assert!(
-        prompt_section(&done.range(Seq::new(0))).is_none(),
+        prompt_section(&done.range(Seq::new(0)), usize::MAX).is_none(),
         "全终态 ⇒ 无候选 ⇒ 不给模型一段空调度"
     );
 }
@@ -419,7 +422,8 @@ fn a_ready_task_survives_the_snapshot_boundary() {
         )
         .expect("快照入格");
 
-    let section = prompt_section(&store.range(Seq::new(0))).expect("压缩不缩小就绪集 ⇒ 仍有调度段");
+    let section = prompt_section(&store.range(Seq::new(0)), usize::MAX)
+        .expect("压缩不缩小就绪集 ⇒ 仍有调度段");
     assert!(
         section.contains("t1"),
         "压缩前开的那条任务必须在候选集里：{section}"
