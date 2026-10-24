@@ -13,7 +13,7 @@
 use crate::symbio_core::TurnToolCallInfo;
 
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
     Event, PluginInvokeRequestExt, Store,
 };
 use crate::symbio_core::{
@@ -208,8 +208,9 @@ pub(super) fn build_user_prompt_message(
     ChatNode {
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
-        role: Some(NodeRole::Tool),
         // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
+        // 身份只写这一份——`role` 那格不再跟着写（D-147：主体在场时折叠读主体，
+        // 第二份写了也不生效，只会在改写时留下「名实不符」的机会）。
         principal: Some(crate::symbio_core::principal::Principal::tool_principal(
             tool_name,
         )),

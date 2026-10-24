@@ -1131,7 +1131,8 @@ impl SessionDispatchPort {
         let result = ChatNode {
             id: result_id.clone(),
             parent_id: Some(call_id.clone()),
-            role: Some(NodeRole::Tool),
+            // 身份只写主体这一份（D-147）：工具结果的族由 `tool_principal` 折出，
+            // 再写一遍 `role` 是两个表达说同一件事。
             principal: Some(crate::symbio_core::principal::Principal::tool_principal(
                 &name,
             )),

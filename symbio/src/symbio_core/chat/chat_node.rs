@@ -250,10 +250,18 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
-    /// **存量只读格**：`role` 已退出 wire（`skip_serializing` ⇒
-    /// 写方不再发、读侧折叠按 `principal.kind` 走），这一格只为**存量数据**保留：
-    /// 历史 `messages.json` / 容器正文里带 `"role"` 的节点反序列化进来后，
-    /// [`Self::node_role`] 仍按「格先 kind 后」折叠——与前端 `messageRoleOf` 同一判据。
+    /// **构造期 kind 通道 + 存量反序列化落点**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-退成构造期通道 "DE-001-核心架构")）——它不是身份的第二份表达：
+    /// 身份的唯一权威是 [`Self::principal`]，读侧折叠 [`Self::node_role`] 也以主体为先，
+    /// 这一格只在**主体缺席**时兜底。
+    ///
+    /// 三者让这一格今天还不能删，各有各的判据：
+    /// - **构造期**：`llm_build_text_node` 这类构造函数手上只有「谁是说话的一方」的族，
+    ///   拿不到可路由地址（地址由会话侧在落库点 `attributed` 补）；声明族就是这一格
+    ///   唯一还能干的事。
+    /// - **wire**：流式帧在落库前就发出去了（`io.rs` 的骨架帧），主体还没有、族必须有——
+    ///   所以本格是 `skip_serializing_if`（`Some` 时**照发**），不是 `skip_serializing`。
+    ///   写成后者会让构造期的帧在前端丢掉族，只能靠「缺省即助手」盖过去（工具帧当场被盖错）。
+    /// - **存量**：历史 `messages.json` 里带 `"role"` 的节点，反序列化后就落在这里。
     ///
     /// 为什么不是私有字段：`ChatNode { .., ..Default::default() }` 的**函数式更新
     /// 语法要求每个字段可见**（E0451），私有化会把全仓数百个不碰 `role` 的构造点
@@ -611,46 +619,58 @@ impl ChatNode {
         self
     }
 
-    /// 归属折叠判据：`role` 的**唯一读入口**。
+    /// 归属折叠判据：**唯一读入口**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-退成构造期通道 "DE-001-核心架构") 的落点）。
     ///
-    /// 共存阶段的优先级是「残留格优先、`principal.kind` 兜底」：今天仍有构造点只写
-    /// `role` 不写 `principal`（子会话转播改写 `role=Tool` 这类），kind 折叠一旦
-    /// **优先**就会静默改变它们的读侧分派——所以这里按「写过的不动，没写的从主体折」。
-    /// 字段退役（d-iii 末档）后本函数收敛成纯 `principal.kind` 折叠：
-    /// Person→User、Agent→Assistant、Tool→Tool、System→System（两域一一对应）。
+    /// 优先级是「**主体在先、存量格兜底**」：`principal.kind` 是身份的权威，
+    /// `role` 只在主体缺席时才有话事权（尚未标身份的构造期节点、历史数据）。
+    /// 反过来（存量格优先）会把权威字段降成「优先级字段」，代价是每一处**改写**
+    /// 都得写两格、还得记住顺序——`attributed` 之后两格各说一套的半改状态没有任何
+    /// 东西会变红，`visible_to` 按主体判、分派按 `role` 判，同一节点两个身份。
+    ///
+    /// 主体缺席时不再有 kind 兜底以外的来源：两者皆无 ⇒ `None`（未标身份的写方，
+    /// 缺省语义留在调用侧，由各视图自行折叠成「助手」）。
     pub fn node_role(&self) -> Option<NodeRole> {
         use crate::symbio_core::principal::PrincipalKind;
-        if self.role.is_some() {
-            return self.role.clone();
+        if let Some(kind) = self.principal.as_ref().map(|p| p.kind) {
+            return Some(match kind {
+                PrincipalKind::Person => NodeRole::User,
+                PrincipalKind::Agent => NodeRole::Assistant,
+                PrincipalKind::Tool => NodeRole::Tool,
+                PrincipalKind::System => NodeRole::System,
+            });
         }
-        Some(match self.principal.as_ref()?.kind {
-            PrincipalKind::Person => NodeRole::User,
-            PrincipalKind::Agent => NodeRole::Assistant,
-            PrincipalKind::Tool => NodeRole::Tool,
-            PrincipalKind::System => NodeRole::System,
-        })
+        self.role.clone()
     }
 
-    /// **过渡入口**：写存量只读格 `role`。
+    /// **过渡入口**：写构造期 kind 通道 `role`。
     ///
-    /// 语义上等价于直写字段，存在的理由是**可搜寻性**：写存量格的调用点全部
+    /// 语义上等价于直写字段，存在的理由是**可搜寻性**：写这一格的调用点全部
     /// 冠以 `with_role` / `set_legacy_role`，下一档清零时一处 grep 就是完整清单
     /// （直写 `node.role = ...` 与字段初始化会淹没在同名读写里）。只给
     /// 「身份还没迁到 `principal` 的现存写方」用；每个调用点都是待清零的债务，
     /// 新增调用需要理由（棘轮：`scripts/grep-audit.mjs` S-014）。
+    ///
+    /// **不要用它改写已标身份的节点**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-退成构造期通道 "DE-001-核心架构")）：
+    /// 主体在场时折叠读的是主体，这一格写了也不生效——那会的不是「两份一致」，
+    /// 而是「名实不符的半改」（`visible_to` 按旧主体判、分派按新 `role` 判）。
+    /// 改写身份只有一个写法：写 [`Self::principal`]。
     pub fn with_role(mut self, role: NodeRole) -> Self {
         self.role = Some(role);
         self
     }
 
-    /// [`Self::with_role`] 的 `&mut` 形态（同批过渡入口）：就地改写存量格，
-    /// 供补丁应用 / 帧合并这类拿不到所有权的调用点用。
+    /// [`Self::with_role`] 的 `&mut` 形态（同批过渡入口）：就地改写构造期 kind 通道，
+    /// 供补丁应用 / 帧合并这类拿不到所有权的调用点用。约束与它一致：**只写还没标身份的节点**。
     pub fn set_legacy_role(&mut self, role: NodeRole) {
         self.role = Some(role);
     }
 
     /// 存量只读格的读法（仅 `attributed` 与 attrs 逆投影这类**读边界**用；
     /// 一般分派一律走 [`Self::node_role`]）。
+    ///
+    /// 与 [`Self::node_role`] 的区别是它**不看主体**：主体在场时这一格可能是空
+    /// （构造期给它的是「还没标身份」，折叠读的却是主体）。所以它只回答
+    /// 「这一格上写了什么」，不回答「这个节点是谁」。
     pub fn legacy_role(&self) -> Option<NodeRole> {
         self.role.clone()
     }

@@ -51,7 +51,7 @@ fn failed_session_carries_its_error() {
 // ── 帧构造：两种身份形状各一个入口 ──────────────────────────────────
 
 /// **存量形状**的帧：身份只写 `role` 那一格（子会话回读出来的节点正是这一形状，
-/// `node_role()` 走「残留格优先」那条读法）。
+/// `node_role()` 在主体缺席时按这一格兜底——D-147 之后主体才是先手）。
 ///
 /// 本文件的判据有一半读的就是这一格（过滤折角色、改写顺序），换成 `principal` 就测不到；
 /// 所以把它集中成**一个**构造点，S-014 的那笔债也只长这一格。
@@ -237,7 +237,7 @@ fn removal_and_user_frames_take_their_own_paths() {
 
 // ── 节点改写：锚定 / 角色 / 主体，以及它们之间的顺序 ──────────────────
 
-/// 顶层助手正文 = 本工具的响应：锚到 ToolCall 之下、角色改成 `Tool`、主体跟着改。
+/// 顶层助手正文 = 本工具的响应：锚到 ToolCall 之下、族改成 `Tool`、主体跟着改。
 #[test]
 fn relabel_anchors_top_level_assistant_as_tool_response() {
     let mut node = legacy_frame("m-1", NodeRole::Assistant);
@@ -250,11 +250,11 @@ fn relabel_anchors_top_level_assistant_as_tool_response() {
         "顶层挂到本工具调用之下"
     );
     assert_eq!(
-        node.legacy_role(),
+        node.node_role(),
         Some(NodeRole::Tool),
-        "分型结构 ToolCall(Assistant) → Turn(Tool)，且 flatten 的 find_tool_result 认的是 role"
+        "分型结构 ToolCall(Assistant) → Turn(Tool)，且 flatten 的 find_tool_result 认的是折叠后的族"
     );
-    let principal = node.principal.expect("主体改写跟到角色改写之后");
+    let principal = node.principal.expect("主体就是身份的那一份写");
     assert_eq!(principal.kind, PrincipalKind::Tool);
     assert_eq!(
         principal.id, "agent/run",
@@ -267,14 +267,14 @@ fn relabel_anchors_top_level_assistant_as_tool_response() {
     );
 }
 
-/// **顺序依赖（本批要点名的判据）**：主体改写必须排在角色改写之后。
+/// **身份只有一份写**（D-147）：改写主体后折叠当场读回 `Tool`，不再往 `role` 格补
+/// 第二份——旧版本两格都写、且**顺序写反就会让 `role` 格永远补不上**（折叠读的是
+/// 残留格，先写主体的话第二次读已是 `Tool`，改写分支当场跳过）。
 ///
-/// `node_role()` 的读法是「残留 `role` 格优先、`principal.kind` 兜底」。反序写的话，
-/// `role` 为空、族靠主体折出 `Assistant` 的节点在第二次读时就已经是 `Tool`，
-/// 于是 `role` 格**永远不会被写**——表现是这张工具响应卡在前端与 flatten 两侧都认不出类型，
-/// 而单元面上看代码顺序却「像是对的」。所以这里用这种节点专门钉住。
+/// 这条用例钉住的是「顺序不再是判据」：起始节点只有主体（族靠主体折出）、
+/// 改写后 `role` 格仍是空，而折叠结果已经是 `Tool`。
 #[test]
-fn relabel_rewrites_legacy_role_before_principal() {
+fn relabel_writes_only_the_principal_and_folds_to_tool() {
     let mut folded = principal_frame("m-2", PrincipalKind::Agent, "sub-agent");
     assert_eq!(
         folded.node_role(),
@@ -284,8 +284,13 @@ fn relabel_rewrites_legacy_role_before_principal() {
     relabel_for_parent(&mut folded, "call-9");
     assert_eq!(
         folded.legacy_role(),
+        None,
+        "改写不碰残留格——补第二份才有「顺序写反就永远补不上」那个坑"
+    );
+    assert_eq!(
+        folded.node_role(),
         Some(NodeRole::Tool),
-        "主体改写若排在角色改写之前，这一格会留 None——顺序判据就断在这"
+        "折叠以主体为先：改完主体就当场是 Tool，与写入顺序无关"
     );
     assert_eq!(
         folded.principal.as_ref().map(|p| p.kind),

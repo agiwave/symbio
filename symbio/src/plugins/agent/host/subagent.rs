@@ -1004,22 +1004,21 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// 转播桥语义之三：**节点改写**——把子会话的节点改成父视图的形状。
 ///
 /// 只做顶层节点（`parent_id = None`）：子会话内部已有的父子结构原样带过来。
-/// 顶层助手正文挂到本工具调用之下，角色改成 `Tool`（工具响应）而非 `Assistant`，
+/// 顶层助手正文挂到本工具调用之下，族改成 `Tool`（工具响应）而非 `Assistant`，
 /// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
 /// `find_tool_result` 正确识别。
 ///
-/// **顺序依赖（主体改写必须排在角色改写之后）**：`node_role()` 的读法是「残留 `role`
-/// 格优先、`principal.kind` 兜底」（共存阶段）。先写主体的话，靠主体折出
-/// `Assistant` 的那种节点（`role` 空、`principal.kind = Agent`）在读第二次就已经是
-/// `Tool`，于是角色格**永远不会被写**——这张卡的前端与 flatten 都只能从主体猜类型，
-/// 而 `find_tool_result` 认的是 `role`。判据钉在 `relabel_..._rewrites_principal_folded`。
+/// **身份只有一份写**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-退成构造期通道 "DE-001-核心架构")）：`node_role()`
+/// 以 `principal.kind` 为先，所以这里改完主体，折叠当场就读回 `Tool`——
+/// 不需要再往 `role` 格补一份，也就不存在「主体改写必须排在角色改写之后」这种
+/// 顺序纪律。两格都写时，顺序写反就会让 `role` 格永远补不上
+/// （表现是前端与 flatten 都认不出这张卡的类型），那段纪律随第二份写一起消失。
 fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
     if message.parent_id.is_some() {
         return;
     }
     message.parent_id = Some(tool_call_id.to_string());
     if message.node_role() == Some(NodeRole::Assistant) {
-        message.set_legacy_role(NodeRole::Tool);
         // 改写到哪一格就跟到哪一格：这张卡现在是 **agent_run 工具的响应**，族归
         // 工具自己——带着子会话 agent 主体的转播节点会被 `visible_to` 当作第三方私有。
         message.principal = Some(crate::symbio_core::principal::Principal::tool_principal(

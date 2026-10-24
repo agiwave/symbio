@@ -30,10 +30,13 @@ describe('normalizePrincipal 的工具命名空间表（与 Rust from_legacy 同
   })
 })
 
-describe('messageRoleOf：格先 kind 后（共存阶段判据）', () => {
-  it('role 格在场时优先——即便 principal 是别的族', () => {
-    expect(messageRoleOf({ role: CHAT_ROLE_TOOL, principal: { kind: 'agent', id: 'session/main' } })).toBe(
+describe('messageRoleOf：主体为先、残留格兜底（D-147）', () => {
+  it('主体在场时优先——即便 role 格说别的（两个来源说不同的话，权威只有一个）', () => {
+    expect(messageRoleOf({ role: CHAT_ROLE_ASSISTANT, principal: { kind: 'tool', id: 'vdfs/write' } })).toBe(
       CHAT_ROLE_TOOL,
+    )
+    expect(messageRoleOf({ role: CHAT_ROLE_TOOL, principal: { kind: 'agent', id: 'session/main' } })).toBe(
+      CHAT_ROLE_ASSISTANT,
     )
   })
 
@@ -46,6 +49,12 @@ describe('messageRoleOf：格先 kind 后（共存阶段判据）', () => {
     expect(messageRoleOf({ principal: { kind: 'system', id: 'system/compactor' } })).toBe(
       CHAT_ROLE_SYSTEM,
     )
+  })
+
+  it('主体缺席时残留格兜底：构造期帧（还没标地址）与历史数据都靠这一条', () => {
+    expect(messageRoleOf({ role: CHAT_ROLE_USER })).toBe(CHAT_ROLE_USER)
+    expect(messageRoleOf({ role: CHAT_ROLE_TOOL })).toBe(CHAT_ROLE_TOOL)
+    expect(messageRoleOf({ role: CHAT_ROLE_SYSTEM })).toBe(CHAT_ROLE_SYSTEM)
   })
 
   it('历史裸字符串主体同样折叠（读侧别名一路通吃）', () => {

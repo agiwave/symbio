@@ -4,6 +4,10 @@
 //! `tools/tool_executor.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
+// `NodeRole` 是**测试自己**要的：生产侧写身份只写 `principal`（D-147），
+// `role` 那一格只在「构造期还没标身份的节点」与存量夹具里出现，
+// `use super::*` 因此带不过来。
+use crate::symbio_core::chat_node::NodeRole;
 use crate::symbio_core::PluginSimpleRequest;
 // `TaskStatus` 是**测试自己**要的：它只出现在断言里，父模块的签名用不到它，
 // 因此 `use super::*` 带不过来（记录类型自 6b-① 起住 core 词汇表）。
@@ -908,7 +912,11 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     );
     assert_eq!(msg.msg_type, Some(NodeKind::Interaction));
     assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
-    assert_eq!(msg.role, Some(NodeRole::Tool));
+    assert_eq!(
+        msg.node_role(),
+        Some(NodeRole::Tool),
+        "族从主体折出（身份只有主体这一份写，D-147）"
+    );
     // 交互卡也是工具的结果：主体归工具一族，工具名随行入格
     assert_eq!(
         msg.principal.as_ref().map(|p| p.id.as_str()),
@@ -1789,9 +1797,9 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
     // ── 事件批序：每条调用的 Streaming 帧先于它自己的结果帧，结果帧按调用顺序 ──
     let frames = frames.lock().unwrap().clone();
     let result_idx = |tc: &str| {
-        frames
-            .iter()
-            .position(|f| f.role == Some(NodeRole::Tool) && f.parent_id.as_deref() == Some(tc))
+        frames.iter().position(|f| {
+            f.node_role() == Some(NodeRole::Tool) && f.parent_id.as_deref() == Some(tc)
+        })
     };
     let running_idx = |tc: &str| {
         frames

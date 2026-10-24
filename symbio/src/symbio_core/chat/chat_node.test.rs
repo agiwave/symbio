@@ -430,3 +430,55 @@ fn derived_actions_from_shape_status_meta() {
     .with_derived_presentation();
     assert!(has(&ask_q, ResumeAction::Answer));
 }
+
+/// 折叠以**主体为先**（D-147）：两格都在且说不同的话时，主体是权威。
+///
+/// 这条判据的意义不在「取哪一个」，而在**只有一个来源**：反过来让残留格优先，
+/// 每一处身份改写都得写两格、还得记住顺序——`attributed` 之后两格各说一套的
+/// 「半改」状态没有任何东西会变红（`visible_to` 按主体判、分派按 `role` 判）。
+#[test]
+fn the_principal_wins_when_both_identity_cells_disagree() {
+    // 夹具走**wire 形态**（两格都在的节点只能是反序列化出来的：构造侧现在只写一份），
+    // 顺带证明判据作用在真实入参形状上，而不只是内存里手搭的结构体。
+    let node: ChatNode = serde_json::from_value(serde_json::json!({
+        "id": "m-1",
+        "role": "assistant",
+        "principal": { "kind": "tool", "id": "vdfs/write" },
+    }))
+    .expect("带两格的历史节点必须还能读进来");
+    assert_eq!(
+        node.node_role(),
+        Some(NodeRole::Tool),
+        "主体说 Tool，就是 Tool"
+    );
+    assert_eq!(
+        node.legacy_role(),
+        Some(NodeRole::Assistant),
+        "残留格原样留着，只是不作判据"
+    );
+}
+
+/// 主体缺席时残留格兜底：构造期节点（还没标地址）与历史数据都靠这一条。
+///
+/// 两者皆无 ⇒ `None`——缺省语义（当助手）留在调用侧，不在折叠里替调用方做主。
+#[test]
+fn the_legacy_cell_still_carries_the_kind_when_no_principal_exists() {
+    for (role, expect) in [
+        (NodeRole::User, NodeRole::User),
+        (NodeRole::Assistant, NodeRole::Assistant),
+        (NodeRole::Tool, NodeRole::Tool),
+        (NodeRole::System, NodeRole::System),
+    ] {
+        let node = ChatNode {
+            id: "m-2".into(),
+            role: Some(role),
+            ..Default::default()
+        };
+        assert_eq!(node.node_role(), Some(expect));
+    }
+    let bare = ChatNode {
+        id: "m-3".into(),
+        ..Default::default()
+    };
+    assert_eq!(bare.node_role(), None, "两格皆无 ⇒ None，不在这里补缺省");
+}

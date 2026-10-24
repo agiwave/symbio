@@ -155,13 +155,16 @@ export function roleOfPrincipal(
 /**
  * 节点角色的**唯一折叠点**（镜像后端 `ChatNode::node_role`）。
  *
- * 共存阶段优先级「残留 `role` 格在先、`principal.kind` 兜底」；`role` 字段退役
- * （末档）后删首行即收敛成纯 kind 折叠。缺省仍是助手——未标身份的写方按模型
- * 产出一族呈现（今天的流式帧形状，语义不变）。住在契约层（而非 registry）：
- * 纯逻辑层（`sessionTranscript`）也要用它，判据不许有第二份。
+ * 优先级「`principal.kind` 在先、残留 `role` 格兜底」——主体是身份的权威，
+ * `role` 只在主体缺席时说话（构造期还没标地址的流式帧、历史数据）。反过来让
+ * 残留格优先的话，身份改写就得两格都写，而两格说不同的话时没有任何东西会红：
+ * 可见域按主体判、分派按 `role` 判，同一个节点两个身份。
+ *
+ * 缺省仍是助手——未标身份的写方按模型产出一族呈现（今天的流式帧形状，语义不变）。
+ * 住在契约层（而非 registry）：纯逻辑层（`sessionTranscript`）也要用它，判据不许有第二份。
  */
 export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatRole {
-  return (node.role as ChatRole) ?? roleOfPrincipal(node.principal) ?? CHAT_ROLE_ASSISTANT
+  return roleOfPrincipal(node.principal) ?? (node.role as ChatRole) ?? CHAT_ROLE_ASSISTANT
 }
 
 // ==================== 消息形态 ====================

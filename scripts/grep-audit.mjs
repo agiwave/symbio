@@ -664,9 +664,10 @@ console.log()
 
 // ── S-014: ChatNode `role`（存量格）的直写只许降 ───────────────────────
 //
-// d-iii：`role` 已退出 wire（`skip_serializing_if`），身份的权威是
-// `principal.kind`——读侧一律经 `node_role()` / `legacy_role()` 折叠（与前端
-// `messageRoleOf` 同一判据），写侧的每一处直写都是待清零的存量债务。
+// d-iii / D-147：身份的权威是 `principal.kind`——读侧一律经 `node_role()` 折叠
+// （与前端 `messageRoleOf` 同一判据：**主体在先、残留格兜底**），写侧的每一处 `role`
+// 直写都是待清零的存量债务。它今天还剩的唯一合法用途是「构造期声明族、地址由落库点
+// `attributed` 补」，所以棘轮数的不是「错」，而是**退役还没走完的格数**。
 //
 // 为什么不是字段私有：`ChatNode { .., ..Default::default() }` 的**函数式更新语法
 // 要求每个字段可见**（E0451）——私有化会把全仓数百个不碰 `role` 的构造点一起炸掉。
@@ -699,9 +700,15 @@ const S014_WRITE_RE =
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
 // 151 → 146（d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
+// 146 → 143（D-147 档 1）：三处**真双写**清零——`tool_executor::build_user_prompt_message` /
+// `tool_dispatch` 的工具结果 / `subagent::relabel_for_parent` 原本同处既写 `principal`
+// 又写 `role`。折序改成「主体在先、残留格兜底」之后（D-147），第二份写不再有任何读者：
+// 它既不影响折叠，也不是 `attributed` 的输入，却给了「顺带写反就静默改写失败」的机会。
+// **为什么只降 3 不是 146**：剩下 143 处的性质是「构造期声明族、地址由落库点补」，
+// 这一档要动构造函数签名与测试夹具，归 D-147 的档 2 / 档 3。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
-  : 146
+  : 143
 {
   let s014 = 0
   const s014List = []
