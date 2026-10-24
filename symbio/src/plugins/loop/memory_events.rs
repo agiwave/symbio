@@ -113,6 +113,39 @@ pub(crate) const RECALL_SCAN_QUOTA: u64 = 500;
 /// 注入段抬头——e2e 与单测都以它为锚。
 pub(crate) const RECALL_SECTION_HEAD: &str = "【长期记忆】";
 
+/// **轮末写方读史的窗口**（条）：一份快照的尾部 N 条。
+///
+/// 两个轮末写方各有一处**全史聚合读**——巩固的召回扫描（本模块 [`consolidate`]）与
+/// 编译的校准聚合（`super::skill_events::compile`）。它们读的都是「最近发生过什么」：
+/// 巩固从活集里挑最旧两条，校准按技能聚合历史观测——**窗外更旧的条目不会让结论换方向**，
+/// 只会让这一轮少看一段历史。所以窗口封的是「一轮收尾最多读多久的史」，
+/// 与 WAL 总长解耦；这与 `chat_loop::drive` 的 `LEASE_WINDOW` 同一个形态、同一个理由
+/// （一轮的收尾不该与 WAL 总长成正比）。
+///
+/// ## 它是护栏，不是旋钮
+///
+/// 值不由用户调——没有配置项，也没有参数面。它的作用只在一个时刻可见：**超窗**。
+/// 超窗时两处各留一条读数（`plugin_debug`：看了多少 / 全史多少 / 这一轮少了什么），
+/// 平时不出现。所以它不是「恒空旋钮」（写不出值的开关），
+/// 而是「有边界、且边界生效时说得出来」的护栏。
+///
+/// ## 窗口是常量，不是保证
+///
+/// 窗外的事实这一轮看不见：极长会话里，比窗口更旧的记忆这一轮不参与巩固（它仍在
+/// 召回视图里，只是这一轮不会被压缩）。这是**选值的边界**，不是安全边际——
+/// 与 DE-015 §2.6 第 7 条同一条纪律：常量表达的是「通常够」，不是「一定够」。
+pub(crate) const HISTORY_WINDOW: usize = 4096;
+
+/// 快照尾部 [`HISTORY_WINDOW`] 条，以及「是不是切过」。
+///
+/// 单独成函数，让「窗口边界」成为**被断言的行为**而不是散在调用点里的一段切片表达式
+/// （与 `chat_loop::drive::lease_tail` 同一个理由）：切点写反（取头部 / 少切一条）
+/// 立刻有用例红。切过 = `true` ⇒ 调用方留读数（见 [`HISTORY_WINDOW`]）。
+pub(crate) fn history_window(snapshot: &[Event]) -> (&[Event], bool) {
+    let start = snapshot.len().saturating_sub(HISTORY_WINDOW);
+    (&snapshot[start..], start > 0)
+}
+
 /// 降级标注的措辞：
 /// 只在**有部分结果**时追加到注入段抬头之后。空结果走整段省略（`prompt_section` 返回
 /// `None`，不印空壳），两者合起来才是 S06 §6 验收 2「不允许空且不标降级」的读侧出口——
@@ -463,18 +496,35 @@ fn origin_texts(snapshot: &[Event], sources: &[(u64, &str)]) -> Vec<String> {
 
 /// 写入顺序是设计过的：**先写合并产物、后写两条 `memory.forgotten`**——后者失败
 /// ⇒ 视图里多一条重复（无害），前者失败 ⇒ 源记忆还在。反过来会丢记忆。
+///
+/// 读史分两层：**聚合扫**只扫快照尾部 [`HISTORY_WINDOW`] 条（护栏，超窗留读数），
+/// **按 seq 点查**仍走全史（代数 / 可见域 / 最初一代溯源）——那几处是「取一条具体事实」，
+/// 与总长无关，且溯源链恰恰需要窗外的最初一代。
 pub(crate) fn consolidate(
     store: &dyn Store<Event = Event>,
     snapshot: &[Event],
     turn: u64,
     now: i64,
 ) -> Result<Vec<(&'static str, u64)>, String> {
+    // 扫描面 = 快照尾部 `HISTORY_WINDOW` 条（护栏，不是旋钮——见常量的文档）。
+    // **点查仍走全史**（`generation_of` / `scope_of` / `origin_texts`）：它们按 seq
+    // 找一条具体的事实，代价 O(1) 条、与总长无关，且窗外那几条恰恰是溯源链要的
+    // 最初一代——窗口只封「聚合扫」，不封「按 seq 取一条」。
+    let (scan, truncated) = history_window(snapshot);
+    if truncated {
+        crate::plugin_debug!(
+            "session",
+            "[memory] 巩固只扫尾部 {} 条事实（全史 {} 条）：窗外更旧的记忆本轮不参与压缩",
+            scan.len(),
+            snapshot.len()
+        );
+    }
     let mut merged: Vec<(&'static str, u64)> = Vec::new();
     for &tag in CONSOLIDABLE_TAGS.iter() {
         // `query = None`：巩固要的是「最旧两条」——纯 ts 降序（平凡值），混合打分
         // 会把最旧的顶下去，巩固从此推不动代数。
         let view = recall(PRINCIPAL_USER, Some(tag.to_string()), None)
-            .read_all(snapshot)
+            .read_all(scan)
             .value;
         if view.entries.len() < CONSOLIDATE_MIN_ENTRIES {
             continue;

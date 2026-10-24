@@ -1293,3 +1293,100 @@ fn merge_keeps_numbers_intact_and_counts_loss_as_fidelity() {
         "丢了一整条来源 ⇒ 保真度必然低于下界（实际 {fidelity}）"
     );
 }
+
+// ── 读史窗口（轮末写方的护栏）──────────────────────────────────────────────
+//
+// 巩固与编译各有一处「全史聚合读」。它们封在同一个窗口上：尾部 `HISTORY_WINDOW`
+// 条 + 超窗时一条读数。两条用例各钉一半：**切法**（留最新、切点在下标 0）与
+// **行为**（窗外更旧的记忆本轮不压缩），后者带反向——同样的四条放到窗口里
+// 立刻合并，证明空结果来自窗口而不是夹具坏了。
+
+/// 切法：超窗只留最新的一批，切的点在下标 `len - N`；刚好一窗不切。
+#[test]
+fn the_history_window_keeps_only_the_newest_facts() {
+    let store = EventStore::new();
+    let total = super::HISTORY_WINDOW + 1;
+    for i in 0..total {
+        store
+            .append(Event::pending(
+                format!("f-{i}"),
+                "turn.stage",
+                Entity::Turn,
+                Verb::Asserted,
+                0,
+                PRINCIPAL_USER,
+            ))
+            .expect("落格");
+    }
+    let all = store.range(Seq::new(0));
+    assert_eq!(all.len(), total, "夹具自己先超窗一条");
+
+    let (window, cut) = super::history_window(&all);
+    assert!(cut, "超窗一条 ⇒ 切过");
+    assert_eq!(window.len(), super::HISTORY_WINDOW, "只留最新的一批");
+    assert_eq!(
+        window.first().map(|e| e.event_id.as_str()),
+        all.get(1).map(|e| e.event_id.as_str()),
+        "切掉的是最早的那一条（下标 0），窗口从下标 1 起"
+    );
+
+    // 刚好一窗：原样给出，且**不算切过**（读数只在真的少看时出现）。
+    let (whole, cut) = super::history_window(&all[1..]);
+    assert!(!cut, "刚好一窗 ⇒ 没切");
+    assert_eq!(whole.len(), super::HISTORY_WINDOW);
+    assert_eq!(
+        whole.first().map(|e| e.event_id.as_str()),
+        all.get(1).map(|e| e.event_id.as_str())
+    );
+}
+
+/// 行为：比窗口更旧的记忆**本轮不压缩**（它仍在召回视图里，只是这一轮不动它）。
+///
+/// 这是窗口这个护栏的**后果**，写成用例是为了它不变成静默改语义：读数
+/// （`plugin_debug` 里「看了多少 / 全史多少」）与这条行为是同一条判据的两面。
+#[test]
+fn memories_older_than_the_window_wait_for_a_later_round() {
+    let store = EventStore::new();
+    for (i, text) in ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
+        .iter()
+        .enumerate()
+    {
+        seed_encoded(&store, &format!("e{i}"), text, 1000 + i as i64);
+    }
+    // 把四条记忆推出窗口：续写一整窗无关事实（长会话的 WAL 就是这个形状）。
+    for i in 0..super::HISTORY_WINDOW {
+        store
+            .append(Event::pending(
+                format!("pad-{i}"),
+                "turn.stage",
+                Entity::Turn,
+                Verb::Asserted,
+                0,
+                PRINCIPAL_USER,
+            ))
+            .expect("落格");
+    }
+    let snap = store.range(Seq::new(0));
+    assert!(
+        snap.len() > super::HISTORY_WINDOW,
+        "夹具先超窗：{} 条",
+        snap.len()
+    );
+    assert!(
+        consolidate(&store, &snap, 7, 5000)
+            .expect("巩固不失败")
+            .is_empty(),
+        "四条记忆都在窗外 ⇒ 本轮不压缩（不是当它们不存在，是不在这一轮动它们）"
+    );
+
+    // 反向：同样四条放回窗口里 ⇒ 立刻合并。空结果来自窗口，不是夹具坏了。
+    let four = mem_events(&store);
+    assert_eq!(four.len(), CONSOLIDATE_MIN_ENTRIES, "四条都还在日志里");
+    assert_eq!(
+        consolidate(&store, &four, 7, 5000)
+            .expect("巩固不失败")
+            .len(),
+        1,
+        "窗口覆盖到它们时 ⇒ 照常合并最旧两条"
+    );
+}

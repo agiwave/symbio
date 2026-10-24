@@ -162,7 +162,10 @@ export const BASELINE = {
   // （cap=1 串行 / cap=4 放开 / 0 与 1 同义）、活租约退出候选集且到点即回、调度者规格
   // （Decider / 80ms / 持 `assign.work`）、100 次注入只发一笔租约、到期判死并重派、
   // 缺 `assign.work` 零事实。
-  rustTests: 2148,
+  // 新增 2 条（2148 → 2150）：读史窗口落地（`D-151`）——`the_history_window_keeps_only_the_newest_facts`
+  // （切法是留最新、切点在下标 0、刚好一窗不切）与 `memories_older_than_the_window_wait_for_a_later_round`
+  // （窗外更旧的记忆本轮不压缩，反向：同样四条放回窗口里立刻合并）。
+  rustTests: 2150,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
@@ -175,7 +178,8 @@ export const BASELINE = {
   // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
   // `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: S04 调度者与租约的同一增量在 CI 口径下修一格（1437→1443），逐条归属见上方 `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 1443,
+  // baseline-allow ciRustTestsTotal: 读史窗口的同一增量在 CI 口径下修一格（1443→1445），逐条归属见上方 `rustTests` 的注。非侵蚀。
+  ciRustTestsTotal: 1445,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
