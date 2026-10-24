@@ -3,34 +3,31 @@
 # `cargo fmt --all -- --check` 作为门禁：rustfmt 遇到 CRLF 会**逐文件**报
 # "Incorrect newline style" 并以非零码退出，使 fmt 门禁形同失效。
 #
-# 历史提交中 `.rs` 混有 CRLF（其余 `.ts` / `.vue` / `.md` 均已为 LF），
-# 导致同一份代码在 Windows（autocrlf 开）与 CI（Linux）上结论不一致。
-# 此处显式锁定 `.rs` 的检出与入库行尾，避免再次漂移。
-*.rs text eol=lf
-
-# 2026-09-30：把同一约定扩展到其余文本类型。起因是一次真实事故：`.md` 未经
-# `.gitattributes` 声明，在 `core.autocrlf=true` 的 Windows 上以 CRLF **入库**，
-# 一次只改 65 行的文档提交在 diff 里显示成 1265 行整文件重写——diff 因此不可
-# 审阅（本仓 BR3 明确把"diff 不可审阅"列为风险）。
+# ## 为什么是「一行默认」而不是一张类型清单
 #
-# 为什么必须显式写而不是靠 autocrlf：autocrlf 只保证**检出**方向（LF → 工作树
-# CRLF），**入库**方向的归一化依赖 git 对"该文件是文本"的判定，一旦某条路径
-# （编辑器直写、`git add` 与提交的时序、工具链自己的写入）绕过它，blob 里就是
-# CRLF，而 diff 不会提示原因——只能靠人肉发现整文件重写。
+# 这里原先按类型逐条声明（`*.rs`、`*.md`、`*.mjs`、`*.ts`、`*.vue`、`*.tsv`、
+# `scripts/git-hooks/*`）。清单的失效形态是**新类型进来没人加**：`*.tsx`、`*.yml`、
+# `*.json`、`LICENSE`、`*.toml` 都在清单之外，行尾于是从「被规定」退回「看谁先写」，
+# 而没有任何判据会红。2026-10-24 实测：70 个文本文件没有行尾声明，98 个工作树文件是
+# CRLF，`git diff` 一个字符都不显示（attr 在 diff 时把工作树 CRLF 归一化掉了）。
 #
-# 下面四类在仓库里**全部已是 LF**，因此本条不产生任何一次性重排（blob 不变），
-# 只是把既有事实写成机制。`eol=lf` 同时规定工作树用 LF：与 rustfmt 的要求一致。
-*.md text eol=lf
-*.mjs text eol=lf
-*.ts text eol=lf
-*.vue text eol=lf
-# 验证器的真实日志夹具（`docs/004-plan/verify/fixtures/*.tsv`）：按行按 tab 解析，
-# 行尾一旦换成 CRLF，diff 里就是整文件重写，而「哪条事件变了」恰好是这份夹具的
-# 全部信息量。与上面四类同理，只是被读的方式不同。
-*.tsv text eol=lf
+# 受害的是**读取侧**：`route-facts.routeArmDocs` 按 `^…$` 锚定行尾抽注释，CRLF 上整段
+# 抽不到，能力矩阵的职责静默变成 `—`，错报落在下游「表里没写」——守卫红了，报的却是
+# 另一件事。行尾属于**输入的前提**：前提只能有一处判据（这条默认），不能由 N 个解析器
+# 各自补 `\r?` 兜住（补齐了也没人复核，下一个新写的解析器照样踩）。
+#
+# `text=auto` 让 git 自己判二进制（前 8KB 有 NUL 即不碰），比人工列白名单可靠：
+# 二进制文件没有「行尾」这个概念，给它写规则只会逼人写豁免。
+* text=auto eol=lf
 
-# git 钩子是**会被 sh 执行的脚本**，不是文本。Git for Windows 自带的 sh 能吃 CRLF，
-# 但没理由依赖它：钩子一旦因行尾没跑起来，失效形态是「什么都不拦」——与没有钩子
-# 完全同形，且不会有任何提示（同类教训见 `CONTRIBUTING.md` 的「只装本机钩子是不够的」）。
-# 入库本就是 LF，本条只把**检出方向**也钉成 LF，零重排。
-scripts/git-hooks/* text eol=lf
+# 判据：`node scripts/eol-audit.mjs`（EOL-001 工作树 / EOL-002 声明 / EOL-003 入库）。
+# 本条默认声明覆盖了原先逐条写的那几类，其中两类各有一段缘由，记在这里免得日后
+# 有人以为它们可以从默认里删掉：
+#
+# - `*.tsv`（`docs/003-design/verify/fixtures/`）：验证器日志夹具按行按 tab 解析，
+#   行尾一旦换成 CRLF，diff 里就是整文件重写，而「哪条事件变了」恰好是这份夹具的
+#   全部信息量。
+# - `scripts/git-hooks/*`：钩子是**会被 sh 执行的脚本**，不是文本。Git for Windows
+#   自带的 sh 能吃 CRLF，但没理由依赖它——钩子一旦因行尾没跑起来，失效形态是
+#   「什么都不拦」，与没有钩子完全同形，且不会有任何提示（同类教训见
+#   `CONTRIBUTING.md` 的「只装本机钩子是不够的」）。

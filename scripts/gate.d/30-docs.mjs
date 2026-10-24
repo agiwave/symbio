@@ -19,6 +19,14 @@ export const GUARDS = [
   'protocol-mirror-audit',
   'style-audit',
   'doc-link-audit',
+  // `eol-audit`（EOL-001…003）判**行尾三面一致**：attr 声明 lf 的文件工作树不得带 `\r`、
+  // 文本文件必须有 `eol` 声明、入库 blob 不得带 `\r`（D-142）。
+  // 它守的不是"格式偏好"，是**判据的输入前提**：工作树 CRLF 不显示在任何 diff 里
+  // （attr 在 diff 时归一化掉了），受害的是按行读它的解析器——`^…$` 锚定行尾的正则
+  // 在 CRLF 上整段抽不到，而错报会落在下游。2026-10-24 的现场正是这个形状：
+  // `route-facts.routeArmDocs` 抽不到路由臂上方的 `///`，能力矩阵的职责静默变 `—`，
+  // `facts` 测试报的是「表里没写」。守卫红了，报的却是另一件事。
+  'eol-audit',
   'test-layout-audit',
   'dead-code-audit',
   // `core-naming-audit` 把 `symbio_core/README.md` §1.2 的**域前缀对照表**当作规则源
