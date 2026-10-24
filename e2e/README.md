@@ -148,7 +148,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
  （`updated_at = now`）。所以：拿**被测会话**当 REPL 会话，会把你手工构造的会话状态
  （如回拨的 `updated_at`）抹掉。心跳/调度类用例要用**中立会话 id**。
 3. **后台调度器有 tick，别用墙上时钟空等**。心跳调度器 15s 一 tick（
- `heartbeat/mod.rs::HEARTBEAT_TICK_SECS`），且首次 tick 被跳过；触发还要等空闲满
+ `heartbeat/scheduler.rs::TICK_SECS`），且首次 tick 被跳过；触发还要等空闲满
  `interval_seconds + 抖动(0–30s)`。两招压时间：把 `updated_at` **回拨**（把「已空闲很久」
  这个前置条件直接摆好）＋ 让 `interval_seconds > 一个 tick`（保证观测窗内**恰好一次**
  触发，否则判据会随 tick 数漂移）。参考 `t36`。

@@ -378,7 +378,7 @@ D-048 把「`full` 让工具结果从 `role=tool` 降级成 user 消息里的纯
 
 ### D-049 WAL 是会话唯一事实源，SessionStore 降为缓存——轨 S 的起点
 
-D-048 把出厂档位翻到 `full` 后，写侧已经换成 WAL 原生记账（`v2_exec` 落格、`session/stats` 读格），但读侧大面积仍在读 `SessionStore`： | 读者 | 读什么 | 位置 | |---|---|---| | `transcript_of` | `session.messages` ∪ 在途缓冲 | `plugin/vdfs_provider.rs:911` | | `sessi…
+D-048 把出厂档位翻到 `full` 后，写侧已经换成 WAL 原生记账（`v2_exec` 落格、`session/stats` 读格），但读侧大面积仍在读 `SessionStore`： | 读者 | 读什么 | 位置 | |---|---|---| | `transcript_of` | `session.messages` ∪ 在途缓冲 | `plugin/vdfs_provider.rs:127` | | `sessi…
 
 ### D-051 v1 执行档与 V2Mode 旋钮退役——v2 是唯一执行路径
 

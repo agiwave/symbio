@@ -262,7 +262,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | 内容 | 实现落点 |
 |---|---|
 | 会话头部的「进入下一级」移到**最右** | `ChatMainPanel.vue`：动作区移到最后一位并加左分隔线（`.header-actions`）。**注意**：第一批的改动只覆盖了 `VdfsActions` 内部排序，而会话头部的动作区在 `ChatMainPanel` 自己的 DOM 顺序里排在按钮之前——位置由**两处**共同决定 |
-| 「清空历史」整体下线（前后端） | 前端：`ChatMainPanel.vue` 按钮/对话框/handler、`stores/sessions.clearMessages`、`services/session.clearMessages`；后端：`vdfs_provider.rs` 转写区段的 `(None, CLEAR)` 分支、`commands.rs::clear_messages`。`VDFS_ACTION_CLEAR` 本人保留（收件箱仍在用） |
+| 「清空历史」整体下线（前后端） | 前端：`ChatMainPanel.vue` 按钮/对话框/handler、`stores/sessions.clearMessages`、`services/session.clearMessages`；后端：`vdfs_provider.rs` 转写区段的 `(None, CLEAR)` 分支、`commands.rs` 的 `clear_messages`（已随路由一起删除）。`VDFS_ACTION_CLEAR` 本人保留（收件箱仍在用） |
 | 会话内部导航图标语义化 | 后端 `workdir/mod.rs` 补 `KIND_SUB_SESSIONS` / `KIND_WORKDIR`（协议词）；前端 `registry/vdfsIcons.ts` 登记 `messages` / `inbox` / `subsession` / `dir` 四张独立图标 |
 
 **第二批确立的判据**：

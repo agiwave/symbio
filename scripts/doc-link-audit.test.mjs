@@ -139,6 +139,69 @@ test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档�
   assert.match(r.stdout, /豁免/)
 })
 
+// ── D-017：证据锚点的文件必须存在 ──────────────────────────────────────
+// 这组用例钉住两件事：① 文件/符号/行号三层都会红；② 合法缩写（带路径段的缩写、同名文件多解）
+// 不误报。判据存在的理由：D-006 只判含 `/` 的 `.md` 路径、D-005 只验 `::` 末段，
+// `v2_memory.rs:340` 两边都不管，文件退役后**门禁全绿而证据全假**。
+const TEN_LINES = Array.from({ length: 20 }, (_, i) => `// line ${i + 1}`).join('\n') + '\npub fn real_symbol() {}\n'
+
+test('D-017：锚点指到的文件在仓内存在 → 通过', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `foo.rs:12` 与 `foo.rs::real_symbol`。\n',
+    'symbio/src/foo.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /D-017 证据锚点：判定 2 条，失效 0 篇/)
+})
+
+test('D-017：文件已改名 → 失败（反面：这正是它要抓的静默悬空）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `gone.rs:3`。\n',
+    'symbio/src/foo.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /gone\.rs:3/)
+})
+
+test('D-017：`:行` 超过文件行数 → 失败（文件被拆分/截短）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `foo.rs:999`。\n',
+    'symbio/src/foo.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 1, r.stdout)
+})
+
+test('D-017：`::符号` 不在该文件里 → 失败（用例改名后旧名字不再成立）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `foo.rs::renamed_symbol`。\n',
+    'symbio/src/foo.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 1, r.stdout)
+})
+
+test('D-017：带路径段的缩写按后缀解析 → 通过（`chat_loop/x.rs` 是全路径的合法缩写）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `chat_loop/inputs.rs:3`。\n',
+    'symbio/src/plugins/loop/chat_loop/inputs.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-017：同名文件多解时任一满足即通过（`mod.rs` 满天飞）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n判据 `mod.rs:18`。\n',
+    'symbio/src/a/mod.rs': '// 1\n// 2\n// 3\n',
+    'symbio/src/b/mod.rs': TEN_LINES,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-017：行内豁免必须带理由（写在上一行也生效）', () => {
+  const waived = '<!-- doc-link-allow D-017: 记的是已删除的符号，仓里必然没有 -->\n判据 `gone.rs::removed`。\n'
+  assert.equal(audit({ 'docs/a.md': `# A\n\n${waived}` }).status, 0)
+  assert.equal(audit({ 'docs/a.md': '# A\n\n<!-- doc-link-allow D-017:   -->\n判据 `gone.rs::removed`。\n' }).status, 1)
+})
+
 // ── D-002：过程文档必须归档 ────────────────────────────────────────────
 // 归档是动作，能保持住的才是机制。这组用例钉住「它真的会红」——包括**豁免必须有理由**，
 // 否则加一行注释就能把规则绕成橡皮图章。

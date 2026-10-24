@@ -25,7 +25,7 @@ lists: [gate-codes=owner]
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
-| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016 | `D-017` |
+| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–017 | `D-018` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–013 | `E-014` |
@@ -82,6 +82,7 @@ lists: [gate-codes=owner]
 | **D-013** | `scripts/doc-link-audit.mjs` |
 | **D-014** | `scripts/doc-symbol-audit.mjs` |
 | **D-016** | `scripts/doc-link-audit.mjs` |
+| **D-017** | `scripts/doc-link-audit.mjs` |
 | **DC-001** | `scripts/doc-count-audit.mjs` |
 | **DC-002** | `scripts/doc-count-audit.mjs` |
 | **DC-003** | `scripts/doc-count-audit.mjs` |

@@ -21,6 +21,10 @@
  *   D-016 过程文档引用：非 task 文档与源码注释里不得出现 `T-NNN` 编号。task 是唯一允许
  *     保留过程信息的 kind，且**收口即删**（结论先进设计文档、再删文件）——引用它等于引用一个
  *     随时会消失的东西。要指「为什么这样设计」，指设计文档的 `### D-NNN`。
+ *   D-017 证据锚点：反引号里的**裸文件名 + 位置**（`file.rs:340` / `file.rs::symbol`）
+ *     必须指得到：同名文件在仓内存在、`:行` 不超过文件行数、`::符号` 是该文件的整词。
+ *     这三层是 D-006（只判含 `/` 的路径）与 D-005（只验 `::` 末段）共同的盲区——
+ *     `v2_memory.rs:340` 两边都不管，文件退役后**门禁全绿而证据全假**。
  *
  *   D-013 本机绝对路径：正文里的**盘符路径**（`X:\…` / `X:/…`）只对写它的那台机器成立。
  *     仓库会被克隆到任何目录，读者照抄必然落空（或落到自己的同名目录上）——判定形态，
@@ -174,7 +178,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-016
+// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013 D-016 D-017
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -447,6 +451,133 @@ function backtickHits(file, text, limit = 8) {
 }
 
 /** 递归 docs/ 下的 .md（目录不存在 ⇒ 空数组） */
+// ==================== D-017：证据锚点的文件必须存在 ====================
+
+/**
+ * 「证据锚点」= 反引号里 **裸文件名 + 位置**：`file.rs:340` 或 `file.rs::symbol`。
+ *
+ * 它不是普通指路（那种有 `/`，归 D-006），而是正文里「这条声称在代码的哪一行」的**证据**。
+ * 两类守卫此前都看不见它：D-006 只判含 `/` 的路径（无斜杠的相对谁说不清，见其理由），
+ * D-005 只验 `::` 的**最后一段**（`v2_memory::consolidate` 的 `consolidate` 在别处存在，
+ * 于是模块名整体失效也照样通过）。实测 2026-10-24：23 个锚点指向不存在的文件（39 处），
+ * 全部来自 `v2_*` 前缀退役与 `authz.rs` → `authz/mod.rs` 一次搬家——
+ * **设计文档的「今天实现到哪」由此失去可核查性**，而门禁全绿。
+ *
+ * 判据分三层（逐层放宽，任一候选文件满足即通过）：
+ *  · 文件名存在：仓内至少有一个同名文件（同名多解很常见——`mod.rs` / `memory_events.rs`）；
+ *  · `:行` 不超过该文件行数：文件被拆分 / 截短后旧行号会悬空；
+ *  · `::符号` 必须是该文件里出现过的整词：用例改名后旧名字不再成立。
+ *
+ * **为什么只判这三层**：行号在文件内部会随编辑漂移，逐字判「第 N 行还是不是那句话」
+ * 会让每一处上方插入都变红，最后只能被豁免喂死——那是本仓反复记下的失败形态。
+ * 判的是「文档指的文件/名字还在不在」：文件没了，后面的话一句都不成立。
+ *
+ * 豁免与 D-006 同形（行内 / 全文首行）：缩写与示意在字面上不可分。
+ */
+const EVIDENCE_ANCHOR = /`([A-Za-z0-9_][A-Za-z0-9_./-]*?\.(?:rs|ts|vue|mjs|js|toml|ya?ml|json))(::[A-Za-z0-9_]+|:[0-9]+)`/g
+const EVIDENCE_WAIVER_RE = /<!--\s*doc-link-allow\s+D-017\s*:\s*(\S.*?)\s*-->/g
+/** 建索引时跳过的目录名：构建产物 / 依赖 / 版本库 / 临时目录（`tmp/` 是忽略区，存不存在不可复现） */
+const EVIDENCE_SKIP_DIRS = new Set([...SKIP_DIRS, '.workbuddy-ai', 'vendor', 'tmp', '.symbio'])
+const evidenceIndex = new Map()
+const evidencePaths = []
+const evidenceLineCache = new Map()
+let evidenceIndexBuilt = false
+let evidenceChecked = 0
+
+function evidenceIndexOnce() {
+  if (evidenceIndexBuilt) return
+  evidenceIndexBuilt = true
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const abs = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (!EVIDENCE_SKIP_DIRS.has(entry.name)) walk(abs)
+        continue
+      }
+      const list = evidenceIndex.get(entry.name) ?? []
+      list.push(abs)
+      evidenceIndex.set(entry.name, list)
+      evidencePaths.push(abs.split(path.sep).join('/'))
+    }
+  }
+  walk(repoRoot)
+}
+
+function evidenceWaivedLine(lines, i) {
+  if (EVIDENCE_WAIVER_RE.test(lines[i])) return true
+  return i > 0 && EVIDENCE_WAIVER_RE.test(lines[i - 1])
+}
+
+function evidenceWaivedWhole(text) {
+  for (const line of text.split('\n').slice(0, DOCTYPE_HEAD_LINES)) {
+    if (line.trim() === '') continue
+    return EVIDENCE_WAIVER_RE.test(line)
+  }
+  return false
+}
+
+function lineCountOf(file) {
+  if (!evidenceLineCache.has(file)) {
+    evidenceLineCache.set(file, fs.readFileSync(file, 'utf8').split('\n').length)
+  }
+  return evidenceLineCache.get(file)
+}
+
+/** 整词存在（不把 `clear_messages` 当成 `clear_messages_v2` 的命中） */
+function containsWord(text, word) {
+  let from = 0
+  for (;;) {
+    const at = text.indexOf(word, from)
+    if (at < 0) return false
+    const before = at === 0 ? '' : text[at - 1]
+    const after = text[at + word.length] ?? ''
+    if (!/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after)) return true
+    from = at + 1
+  }
+}
+
+function evidenceAnchorResolves(fromFile, base, tail) {
+  evidenceIndexOnce()
+  let candidates
+  if (base.includes('/')) {
+    // 带路径段：先按「相对本文件 / 相对仓库根」精确判，再按后缀匹配收缩写
+    // （`chat_loop/inputs.rs` 是全路径的合法缩写，本仓两种写法都在用）。
+    const direct = [path.resolve(path.dirname(fromFile), base), path.resolve(repoRoot, base)].filter((p) =>
+      fs.existsSync(p),
+    )
+    candidates = direct.length > 0 ? direct : evidencePaths.filter((p) => p.endsWith('/' + base))
+  } else {
+    candidates = evidenceIndex.get(base) ?? []
+  }
+  if (candidates.length === 0) return false
+  if (tail.startsWith('::')) {
+    const symbol = tail.slice(2)
+    return candidates.some((c) => containsWord(fs.readFileSync(c, 'utf8'), symbol))
+  }
+  const n = Number(tail.slice(1))
+  return candidates.some((c) => lineCountOf(c) >= n)
+}
+
+function evidenceAnchorHits(file, text, limit = 8) {
+  const hits = []
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length && hits.length < limit; i++) {
+    if (evidenceWaivedLine(lines, i)) continue
+    for (const m of lines[i].matchAll(EVIDENCE_ANCHOR)) {
+      const base = m[1]
+      evidenceChecked += 1
+      if (!evidenceAnchorResolves(file, base, m[2])) hits.push({ line: i + 1, target: m[0] })
+    }
+  }
+  return hits
+}
+
 // ==================== D-008：裸风险编号必须是定义或限定引用 ====================
 
 /**
@@ -704,6 +835,7 @@ const misplaced = []
 const oversized = []
 const historical = []
 const backtickBad = []
+const evidenceBad = []
 const bareRisk = []
 const machinePaths = []
 let docsScanned = 0
@@ -788,6 +920,12 @@ function scanBody (file) {
     const dead = backtickHits(file, body)
     for (const h of dead) h.line += offset
     if (dead.length > 0) backtickBad.push({ rel, dead })
+  }
+
+  if (!evidenceWaivedWhole(body)) {
+    const dead = evidenceAnchorHits(file, body)
+    for (const h of dead) h.line += offset
+    if (dead.length > 0) evidenceBad.push({ rel, hits: dead })
   }
 
   const bare = riskIdHits(body)
@@ -978,6 +1116,19 @@ if (bareRisk.length > 0) {
   console.log('      本条**不给豁免**：判定的是编号的形态，不是语义。')
 }
 
+// ---- D-017：证据锚点的文件必须存在 ----
+console.log(`D-017 证据锚点：判定 ${evidenceChecked} 条，失效 ${evidenceBad.length} 篇`)
+for (const { rel, hits } of evidenceBad) {
+  for (const h of hits) console.log(`  ✗ ${rel}:${h.line}  ${h.target}  指不到`)
+}
+if (evidenceBad.length > 0) {
+  console.log('\n提示：反引号里的裸文件名 + `:行` / `::符号` 是正文的**证据锚点**，不是泛指。')
+  console.log('      文件改名 / 拆分后锚点会静默悬空——D-006 只判含 `/` 的路径，D-005 只验 `::` 末段。')
+  console.log('      处置：· 文件已改名 / 搬进目录 ⇒ 改成当前名字（或含路径的形态，交给 D-006 判）；')
+  console.log('            · `::符号` 已改名 ⇒ 指到真实用例 / 函数名；')
+  console.log('            · 确属示意 / 历史叙述 ⇒ 写 `doc-link-allow D-017: 理由`（本行或前一行）。')
+}
+
 // ---- D-013：本机绝对路径 ----
 console.log(`D-013 本机绝对路径：命中 ${machinePaths.length} 篇`)
 for (const { rel, hits } of machinePaths) {
@@ -1056,6 +1207,7 @@ process.exit(
     oversized.length > 0 ||
     historical.length > 0 ||
     backtickBad.length > 0 ||
+    evidenceBad.length > 0 ||
     badAnchors.length > 0 ||
     bareRisk.length > 0 ||
     machinePaths.length > 0 ||
