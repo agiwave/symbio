@@ -1,13 +1,13 @@
 ---
 kind: design
 id: DE-020-前端UI-UX
-title: 前端 UI/UX 设计
+title: 前端 UI/UX
 status: active
 created: 2026-09-28
 impl: planned
 ---
 
-# 前端 UI/UX 设计
+# 前端 UI/UX
 
 > 本文回答「**还能怎么提升**」——目标形态，不是现状。
 > 「现在是什么」看 [当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表")（自动生成，唯一权威）；

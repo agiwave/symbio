@@ -1,13 +1,13 @@
 ---
 kind: design
 id: DE-009-VDFS规范
-title: VDFS —— 虚拟动态文件系统规范
+title: VDFS 虚拟动态文件系统规范
 status: active
 created: 2026-09-13
 impl: done
 ---
 
-# VDFS —— 虚拟动态文件系统规范
+# VDFS 虚拟动态文件系统规范
 
 纯接口 + 统一文件系统 + 容器拓扑。
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）

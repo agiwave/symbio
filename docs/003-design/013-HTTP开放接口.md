@@ -1,18 +1,18 @@
 ---
 kind: design
 id: DE-013-HTTP开放接口
-title: HTTP(S) 开放接口插件设计
+title: HTTP 开放接口
 status: active
 created: 2026-09-06
 impl: done
 ---
 
-# HTTP(S) 开放接口插件设计
+# HTTP 开放接口
 
 > 目标：在 App 运行期间对外提供一套纯 HTTP/WebSocket 接口，让第三方应用像前端一样访问和控制整个应用。
 > 接口服务本身作为**一个普通插件**纳入现有插件体系，配置/开启/关闭**复用现有设置页机制**，前端零改动。
 
-- 现状：已实现（`gateway` 插件）。现行端点清单见 [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [数据流与调用链（DATA_FLOW）](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
+- 现状：已实现（`gateway` 插件）。现行端点清单见 [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [数据流与调用链](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
 - 关联：[协议规范](005-协议规范.md "DE-005-协议规范")（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
 
 ---

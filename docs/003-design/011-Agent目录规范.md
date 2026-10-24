@@ -1,14 +1,14 @@
 ---
 kind: design
 id: DE-011-Agent目录规范
-title: Agent 目录规范 v2
+title: Agent 目录规范
 status: active
 created: 2026-09-17
 lists: [agent-dir-fields=owner]
 impl: partial
 ---
 
-# Agent 目录规范 v2
+# Agent 目录规范
 
 > 协议标识：`agent-dir/v2`。Agent 在系统中的位置与装配形态见
 > [DE-001 §12.3](001-核心架构.md "DE-001-核心架构")；本文只定义目录协议本身。
