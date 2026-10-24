@@ -892,7 +892,22 @@ pub(crate) async fn drive_steps(
             Some(next) => next,
             // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
             // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
-            None => return session.exhausted(store, llm, "no_progress").await,
+            //
+            // **但「只剩 blocked 行」有两种处境，理由必须分开**（D-126）：有一笔已
+            // 派出未收清的往返（`await-<port>` 开着）时，这一轮不是「没事」，是
+            // 「在等」。混成一个值会让「这一轮为什么停」在事实面上不可判，而恢复
+            // 路径恰恰要认这一种——进程在等应答时被打断，重启后 `lease` 判死的前提
+            // 是当时确实记成了「在等」。`detail` 是只给人读的自由文本（`reason` 才是
+            // 闭集），故这里只加取值、不动闭集。
+            None => {
+                let detail = if super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
+                {
+                    "waiting"
+                } else {
+                    "no_progress"
+                };
+                return session.exhausted(store, llm, detail).await;
+            }
         };
         crate::plugin_debug!(
             "session",

@@ -151,7 +151,11 @@ export const BASELINE = {
   // `interactive_break_leaves_result_for_skipped_calls` 断言（状态 Completed / 无 error /
   // `meta.failure_kind = not_executed`）。
   // 新增 4 条（唤醒路径：落格 / 读侧 / 拒绝 / 关账后读不回）。
-  rustTests: 2108,
+  // 新增 5 条（2108 → 2113）：`await-*` 行「在等」与「没事」的可观测后果两形状用例
+  // （D-126，`waiting_means_a_sent_request_without_a_terminal` 与对偶形状那条）+
+  // 判据 7 / 8 / 12 三条机制判据的可执行证据（空表试金石 / 任意前缀 / 输入闭包，
+  // 各经一次变异验证确认能红——`stale_sent` 恒假即红）。
+  rustTests: 2113,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。

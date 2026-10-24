@@ -13,6 +13,7 @@ import './_selfrun.mjs';
 // |---|---|
 // | 心跳**真的被定时器驱动**（不是只在测试里被调用） | 真进程里跑够一个 tick，转写里长出心跳提示词那一轮 |
 // | 闸门**真的在链上**（不是摆设） | 就绪集（`session/stats.readyset`）：过闸 ⇒ 那条长任务在其中；拒收 ⇒ 就绪集里没有它 |
+// | 「它有多主动」**读得出来**（SC-012 判据 3） | 主动性列（`session/stats.conation`）：过闸 ⇒ 一条带 `task_id` 的意图；拒收 ⇒ 那条目标不在列里 |
 //
 // ## 为什么必须端到端（单测证不了的两件事）
 //
@@ -377,6 +378,49 @@ export default defineCase(
       assert(
         !JSON.stringify(broadReady).includes(PROMPT_BROAD),
         `拒收的目标不得出现在就绪集里（实际: ${JSON.stringify(broadReady)}）`,
+      );
+
+      // ── 「它有多主动」读得出来（SC-012 判据 3）────────────────────────
+      //
+      // `session/stats.conation` 列（主动性外部效标）在生产里早就有，但在本条用例
+      // 之前**没有任何 e2e 断言读过它**——读数口已定义而不被读，与没有读数口在
+      // 用户侧是同一件事。本用例已经把 `conation_enabled` 打开、并真的跑出了
+      // 一条过闸的自主意图，正是读这一列的地方。
+      //
+      // 列的口径（`stats.rs::conation` 的注记）：**分子与分母同出一列**——
+      // 每条意图带 `task_id`，非空 = 已升格（分子），null = 只表达未升格（分母侧）。
+      // 所以判据不是「拒收的 goal 不在列里」（它**在**，只是没升格），而是
+      // **同一个 goal 在两列里分成两种形态**：过闸 ⇒ 带 task_id；拒收 ⇒ task_id 为 null。
+      // 后者正是这一列能回答「它有多主动」的原因：只有分母没有分子，读数是 0 而不是缺席。
+      const okConation = (await statsOf(SID_OK))?.conation ?? null;
+      const okIntents = okConation?.intents ?? [];
+      assert(
+        okIntents.length >= 1,
+        `过闸会话的主动性列应记下至少一条意图（实际: ${JSON.stringify(okConation)}）`,
+      );
+      assert(
+        okIntents.every((it) => typeof it.task_id === 'string' && it.task_id.length > 0),
+        `该会话的意图都应已升格（task_id 非空；实际: ${JSON.stringify(okIntents)}）`,
+      );
+      assert(
+        okIntents.some((it) => String(it.goal ?? '').includes(PROMPT_OK)),
+        `意图的 goal 应是过闸那条短提示词（实际: ${JSON.stringify(okIntents)}）`,
+      );
+      const broadConation = (await statsOf(SID_BROAD))?.conation ?? null;
+      const broadIntents = broadConation?.intents ?? [];
+      const broadOnGoal = broadIntents.filter((it) => String(it.goal ?? '').includes(PROMPT_BROAD));
+      assert(
+        broadOnGoal.length >= 1,
+        `拒收侧也**表达过**意图（分母侧要留痕，否则「主动程度」没有分母；实际: ${JSON.stringify(broadConation)}）`,
+      );
+      assert(
+        broadOnGoal.every((it) => it.task_id === null || it.task_id === undefined),
+        `被闸门拒收的意图不得升格（task_id 必须为空；实际: ${JSON.stringify(broadOnGoal)}）`,
+      );
+      assertEq(
+        broadConation?.adoption_rate,
+        0,
+        `拒收侧的主动采纳率必须是 0（分子为 0 而分母非空——这一列因此读得出「想过但没做成」；实际: ${JSON.stringify(broadConation)}）`,
       );
     } finally {
       cli.stop();

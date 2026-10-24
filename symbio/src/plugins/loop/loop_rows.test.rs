@@ -1,4 +1,4 @@
-//! 行表的判据（判据 7 / 10）。
+//! 行表的判据（判据 7 / 8 / 10 / 12）。
 //!
 //! 每个用例都从同一份日志切片出发，只改**一个**条件：只验「全满足时命中」在
 //! 「恒返回 true」的实现下也通过。接线之后旧 `LoopState` 已不存在，这里对的是
@@ -807,6 +807,124 @@ fn the_lease_row_opens_only_after_the_deadline() {
         json!({ "port": "turn", "id": "t-1", "attempt": 1 }),
     ));
     assert!(!owes("lease", &answered, 100_000));
+}
+
+// ── 「在等」与「没事」的区分（D-126）────────────────────────────
+
+/// `waiting` 只认「开账条件 = `sent`」的账——即「已派出、应答还没回来」。
+///
+/// 反例同样是判据的一半：`lease` 的账**不算**在等（它开在 `stale_sent` 这个视图上，
+/// 说的是「卡太久了」而不是「还在路上」），未接线的策略行也不算（那是「没人做」，
+/// 不是「在等」）。三条一起才说明这个理由不是「有 blocked 债」的同义词。
+#[test]
+fn waiting_means_a_sent_request_without_a_terminal() {
+    // 空日志：没事可做，不是在等。
+    assert!(!super::waiting(&[], 1, 0));
+    // 只落了 `request`：欠一次派发，不是「已派出」。
+    assert!(!super::waiting(&[request("t-1", 1)], 1, 0));
+    // `sent` 落了、终态没落 ⇒ 在等。
+    let out = vec![request("t-1", 1), sent("t-1", 1, 1_000, 1, 0)];
+    assert!(super::waiting(&out, 1, 0));
+    // 租约到期也仍然「在等」——那笔往返还在路上，只是卡住了。
+    assert!(super::waiting(&out, 1, 100_000));
+    // 终态落了 ⇒ 不在等。
+    for terminal in [
+        crate::symbio_core::EVENT_RESPONSE,
+        crate::symbio_core::EVENT_FAILED,
+    ] {
+        let mut done = out.clone();
+        done.push(ev(
+            1,
+            terminal,
+            json!({ "port": "turn", "id": "t-1", "attempt": 1 }),
+        ));
+        assert!(
+            !super::waiting(&done, 1, 0),
+            "{terminal} 落了之后不该还说「在等」"
+        );
+    }
+}
+
+/// `await-<port>` 是 Wait 折叠的**声明位**，不是装饰行——形状上必须与同端口的
+/// `dispatch-*` 行互补（D-126）。四条一起才叫对偶：
+///
+/// 1. `by = None`：一旦接上执行体，它就成了同一笔账的**第二个派发器**；
+/// 2. 开账条件 = 某条 `dispatch-*` 的**出口**（`sent`，同端口同键）——这是
+///    「它记的正是派发行关掉的那一笔」的唯一写法；
+/// 3. 出口 = 端口的终态（`response` / `failed`）加 `retry`，且落在同一端口上；
+/// 4. 反向：每条 `dispatch-*` 都有对应的 `await-*`——新增端口不能「只派不等」。
+///
+/// 为什么是**用例**而不是装载期检查：夹具刻意只写一行（`ring.test.rs` 的
+/// `await-x` 用例就是在验单行形状），装载期强制对偶会把「最小夹具」判成非法；
+/// 而 `ROWS` 是 `&'static` 常量，对它跑用例与在装载期判**等价**，且不向夹具收税。
+#[test]
+fn every_await_row_is_the_dual_of_its_dispatch_row() {
+    /// 同一笔账：同源、同键、同端口约束。
+    fn same_binding(a: &Pattern, b: &Pattern) -> bool {
+        a.source == b.source && a.key == b.key && a.eq == b.eq
+    }
+    /// 同一端口（键与等值约束相同，源可以不同）。
+    fn same_port(a: &Pattern, b: &Pattern) -> bool {
+        a.key == b.key && a.eq == b.eq
+    }
+
+    let mut waits = 0;
+    for row in ROWS {
+        let Some(stem) = row.name.strip_prefix("await-") else {
+            continue;
+        };
+        waits += 1;
+        assert!(
+            row.by.is_none(),
+            "`{}` 是 Wait 的折叠，接上执行体就成了第二个派发器",
+            row.name
+        );
+
+        let dual = format!("dispatch-{stem}");
+        let dispatch = ROWS
+            .iter()
+            .find(|d| d.name == dual.as_str())
+            .unwrap_or_else(|| panic!("`{}` 没有对偶行 `{dual}`：等的东西没人派", row.name));
+        assert!(
+            dispatch.until.iter().any(|p| same_binding(p, &row.owes)),
+            "`{}` 的开账条件必须等于 `{dual}` 的某个出口（`sent`）",
+            row.name
+        );
+
+        for exit in row.until {
+            assert!(
+                matches!(
+                    exit.source,
+                    crate::symbio_core::EVENT_RESPONSE
+                        | crate::symbio_core::EVENT_FAILED
+                        | crate::symbio_core::EVENT_RETRY
+                ),
+                "`{}` 的出口 `{}` 不是往返的终态（只认 response / failed / retry）",
+                row.name,
+                exit.source
+            );
+            assert!(
+                same_port(exit, &row.owes),
+                "`{}` 的出口 `{}` 落在别的端口上——收的不是同一笔账",
+                row.name,
+                exit.source
+            );
+        }
+    }
+    assert!(waits > 0, "一行 `await-*` 都没有 ⇒ 这条判据什么都没判");
+
+    // 反向：派发过的端口都必须有等待位。
+    for row in ROWS {
+        let Some(stem) = row.name.strip_prefix("dispatch-") else {
+            continue;
+        };
+        let wait = format!("await-{stem}");
+        assert!(
+            ROWS.iter().any(|d| d.name == wait.as_str()),
+            "`{}` 没有 `{wait}`：派出去的这笔账没人记「在等」",
+            row.name
+        );
+    }
 }
 
 #[test]
@@ -1671,4 +1789,276 @@ fn every_declared_port_has_its_answer_exits() {
     // 真表上的第 5 条端口侧：`load` 的 `Ok` 已经包含这一格（检查的出口只有一个），
     // 这里再点名单问一次——它防的是「三个端口的应答出口没人还」这种静默。
     assert!(crate::symbio_core::ring::check_ports(ROWS, &frozen(), PORTS).is_empty());
+}
+
+// ── 三条机制判据的可执行证据（判据 12 / 7 / 8）────────────────────
+//
+// 三条都是「机制声称已落地、此前只有 grep 与口径描述」的判据。它们各自治一种
+// 静默失效，合起来才是「回放可重建」的完整形状：
+//
+//   12 输入闭包——结论只随四个显式参数动，不随真实时间动；
+//    7 空表试金石——一页行表都不剩时求解器交空账，不 panic 也不造账；
+//    8 任意前缀——日志停在任一格都还是一页说得通的账（拆批 / 崩溃恢复的前提）。
+
+/// 判据 12：`owed` 的输入闭包 = `(rows, frozen, events, now)`，**没有第五样**。
+///
+/// 设计原文（§2.5 / §6 判据 12）：「只读事实、视图、事件时间戳；不读配置、墙钟、
+/// 内存缓存」，验收口径「同一事实切片两次求值逐字相同」。本条把这条口径落成
+/// **能红**的形状：
+///
+/// 1. 取一份「租约**没**到期」的切片（`now = 999`，租约线在 1000）；
+/// 2. 让真实时间真的过去（睡 20ms，跨过一个时钟 tick）；
+/// 3. 同一份切片、同一个 `now` 再求值一次，逐字相同。
+///
+/// 为什么这个选材能红：若实现把 `now` 参数当摆设、偷偷读墙钟（`SystemTime::now`，
+/// 量级是纪元毫秒），第二次求值读到的就是天文数字，`lease` 行当场从「不欠」翻成
+/// 「欠」——两份渲染就不同。选在租约线**之下**是关键：线之上时墙钟与参数给出
+/// 同一答案（都到期），用例恒绿，那等于没判。`ring.rs` 全文 grep `SystemTime` /
+/// `Instant::now` 零出现，与本条用例各据一半。
+///
+/// 反面对照（后半）：把显式参数从 999 挪到 1000，结论必须翻。两条合起来才说明
+/// 时间**只**从参数进函数——否则一个压根不读时间的恒真实现也能过前半。
+#[test]
+fn owed_has_no_input_beyond_its_four_arguments() {
+    let events = vec![sent("t-1", 1, 1_000, 1, 0)];
+    let f = frozen();
+    let before = owed(ROWS, &f, &events, 999);
+    assert!(
+        !before.is_empty(),
+        "空账上的「逐字相同」是恒真断言，这条必须先看住非空"
+    );
+    assert!(
+        before.iter().all(|d| d.decl.name != "lease"),
+        "用例前提：now = 999 在租约线（ts 0 + 1000）之下"
+    );
+
+    // 让真实时间过去：读一次墙钟就会是不同的值。
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let after = owed(ROWS, &f, &events, 999);
+    assert_eq!(
+        format!("{before:?}"),
+        format!("{after:?}"),
+        "同一事实切片、同一个 now，隔了真实时间再求值，必须逐字相同"
+    );
+
+    // 反面对照：时间确实从第四个参数进来。
+    let at_deadline = owed(ROWS, &f, &events, 1_000);
+    assert!(
+        at_deadline.iter().any(|d| d.decl.name == "lease"),
+        "now = 1000 时租约行开账 ⇒ 判据捧的不是一个不读时间的实现"
+    );
+}
+
+/// 判据 7：清空整张表 ⇒ 系统仍完整（`owed = ∅` ⇒ 永不前进）。
+///
+/// 这是「零新增机制键」的底线试金石：一页行表都不剩时，求解器必须交出空账，
+/// 而不是 panic、也不是凭声明表里的名字造一笔债出来。跑的是 `owed(&[], …)`——
+/// 清空的是**行表**（`ROWS`），声明表照旧（`Frozen` 是事实 / 视图 / 端口的冻结，
+/// 不属于行表；空行表时它根本不会被解引用）。
+///
+/// 两层一起才叫完整：装载期 `load(&[])` **拒绝启动**（端口没有应答出口、声明的
+/// 事实全是孤儿），运行期 `owed(&[])` 退化成 ∅。前者在开幕前拦，后者是万一绕过去
+/// 之后的兜底——「永不前进」不是「起不来」，是起了也不动。
+#[test]
+fn an_empty_row_table_owes_nothing_and_never_panics() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", plain()),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let f = frozen();
+    assert!(
+        !owed(ROWS, &f, &events, 0).is_empty(),
+        "用例前提：真表在这份日志上有账（否则「空表 ⇒ ∅」是恒真断言）"
+    );
+
+    // 一页行表都不剩。
+    assert!(owed(&[], &f, &events, 0).is_empty());
+    assert!(
+        drive(&[], &f, &events, 0).is_none(),
+        "没有可还的债 ⇒ 派发器谁都不选"
+    );
+
+    // 装载期那一层：空行表开不了幕。
+    assert!(
+        super::load(&[]).is_err(),
+        "空行表必须拒绝装载，而不是开一个不动的幕"
+    );
+}
+
+/// 一份 27 格的会话日志，形状照一次真实 CLI 实测（过 `--strict` 验收的长会话）：
+/// 第一轮开幕即派发、随后崩溃只留下两笔 `sent`；第二轮重启，先判死上一世的两笔，
+/// 再重跑，走完一次模型往返与一次工具往返。
+///
+/// 第一轮那两笔 `sent` 的 ts 回拨到租约线之前很久（实测里崩溃重启留下的就是这种
+/// 形状）——所以重启后它们**必判死**，这正是截断测试要的「终局格落在后面」。
+fn twenty_seven_cells() -> Vec<Event> {
+    let stale = 1_000; // 第一轮两笔 sent 的 ts：远在租约线之前
+    vec![
+        // 第一轮：开幕、派发，然后没了（10 格）。
+        ev(0, "user.message", json!({"text": "第一轮", "id": "u-0"})),
+        ev(0, "session.config", plain()),
+        ev(0, "turn.stage", json!({"stage": "round", "round": 0})),
+        request("turn-0-d0-r0", 1),
+        sent("turn-0-d0-r0", 1, 600_000, 1, stale),
+        ev(
+            0,
+            "turn.stage",
+            json!({"stage": "compress", "round": 0, "model_calls": 0}),
+        ),
+        ev(
+            0,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "miss"}),
+        ),
+        ev(
+            0,
+            "turn.dispatch",
+            json!({"budget_ms": 60000, "principal": "session/main", "tier": "deep"}),
+        ),
+        model_request("model-0-d0-s0"),
+        ev_at(
+            0,
+            crate::symbio_core::EVENT_SENT,
+            json!({
+                "port": "model", "id": "model-0-d0-s0", "attempt": 1,
+                "lease_ms": 600_000, "attempt_cap": 1,
+            }),
+            stale,
+        ),
+        // 第二轮：重启，先判死，再重跑（17 格）。
+        ev(
+            1,
+            "user.message",
+            json!({"text": "第二轮（重启后）", "id": "u-1"}),
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({
+                "port": "turn", "id": "turn-0-d0-r0", "attempt": 1, "why": "lease_expired",
+            }),
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_FAILED,
+            json!({
+                "port": "model", "id": "model-0-d0-s0", "attempt": 1, "why": "lease_expired",
+            }),
+        ),
+        ev(1, "session.config", plain()),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        request("turn-1-d10-r0", 1),
+        sent("turn-1-d10-r0", 1, 600_000, 1, 1_500_000),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "compress", "round": 0, "model_calls": 0}),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "miss"}),
+        ),
+        ev(
+            1,
+            "turn.dispatch",
+            json!({"budget_ms": 60000, "principal": "session/main", "tier": "deep"}),
+        ),
+        model_request("model-1-d10-s0"),
+        ev_at(
+            1,
+            crate::symbio_core::EVENT_SENT,
+            json!({
+                "port": "model", "id": "model-1-d10-s0", "attempt": 1,
+                "lease_ms": 600_000, "attempt_cap": 1,
+            }),
+            1_500_100,
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({
+                "port": "model", "id": "model-1-d10-s0", "attempt": 1,
+                "calls": [{ "port": "tool", "id": "tool-1-d10-call-a", "name": "read_file", "arguments": {} }],
+            }),
+        ),
+        tool_request("tool-1-d10-call-a"),
+        tool_granted("tool-1-d10-call-a"),
+        ev_at(
+            1,
+            crate::symbio_core::EVENT_SENT,
+            json!({
+                "port": "tool", "id": "tool-1-d10-call-a", "attempt": 1,
+                "lease_ms": 600_000, "attempt_cap": 1,
+            }),
+            1_500_200,
+        ),
+        ev(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "tool-1-d10-call-a", "attempt": 1 }),
+        ),
+    ]
+}
+
+/// 判据 8：事实的任意前缀都合法（拆批 / 崩溃恢复的前提）。
+///
+/// 做法：对 27 格会话逐前缀截断重放，每一段都要求满足三样——
+///
+/// 1. **求值有定义**：不 panic（崩溃恢复时日志停在哪一格是不确定的）；
+/// 2. **每一段都确定**：同一段再求值一次逐字相同（回放可重建落到每个截断点上）；
+/// 3. **追加一格无害事实，账一页都不许动**：`turn.dispatch` 不在控制面声明集里
+///    （它的读方是审计投影，见 `declared_facts_all_have_a_row_home`），所以它是
+///    可证明无害的那一格。视图若偷看全 log / 数格数 / 拿「最后一条」当锚，就会红。
+///
+/// 再加一条**截断敏感性**——这条判据真正的牙：前缀停在判死之前，第一轮两笔
+/// 「派出未答」的账必须在（恢复才有东西可做）；前缀走到判死之后，它们必须没
+/// （判死真的落了账）。`open_calls` 按切片顺序扫，所以偷看后面格的实现会在
+/// 前半被提前关掉——那崩溃恢复就成了一句假话。
+#[test]
+fn every_prefix_of_a_session_log_is_a_legal_ledger() {
+    let events = twenty_seven_cells();
+    assert_eq!(events.len(), 27, "这份夹具就是那份 27 格会话");
+    let f = frozen();
+    let now = 2_000_000; // 远在第一轮那两笔的租约线之外
+    assert!(
+        f.fact("turn.dispatch").is_none(),
+        "用例前提：dispatch 不在控制面声明集里（它才是可证明无害的那一格）"
+    );
+
+    for k in 0..=events.len() {
+        let slice = &events[..k];
+        let once = owed(ROWS, &f, slice, now);
+        assert_eq!(
+            format!("{once:?}"),
+            format!("{:?}", owed(ROWS, &f, slice, now)),
+            "第 {k} 格：同一段重放两次不一致"
+        );
+        let mut grown = slice.to_vec();
+        grown.push(ev(
+            k as u64,
+            "turn.dispatch",
+            json!({"budget_ms": 60000, "principal": "session/main", "tier": "deep"}),
+        ));
+        assert_eq!(
+            format!("{once:?}"),
+            format!("{:?}", owed(ROWS, &f, &grown, now)),
+            "第 {k} 格：追加一格无害事实改了账 ⇒ 视图在偷看截断点之外的东西"
+        );
+    }
+
+    // 空切片 ⇒ 空账：没有事实就没有实例（判据 7 的事实侧）。
+    assert!(owed(ROWS, &f, &[], now).is_empty());
+
+    // 截断敏感性：崩溃那一刻与判死之后。
+    let crashed = &events[..10];
+    for row in ["await-turn", "await-model", "lease"] {
+        assert!(owes(row, crashed, now), "崩溃前缀上 `{row}` 必须欠着");
+    }
+    let reaped = &events[..13];
+    for row in ["await-turn", "await-model", "lease"] {
+        assert!(!owes(row, reaped, now), "判死之后 `{row}` 必须收掉");
+    }
 }

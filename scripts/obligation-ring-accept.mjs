@@ -10,8 +10,10 @@
  *
  * ## 输入 = 一份 CLI 实测产物，不是构造的夹具
  *
- * 读 `<homedir>/session/<sid>/v2-events.wal`（事实层唯一真相）。`--cli-log` 可选：
- * 给了它才能判 J8（账实相符），因为它要数**真实发生的模型 HTTP 调用**——这件事
+ * 读 `<homedir>/session/<sid>/v2-events.wal`（事实层唯一真相）**及其归档段**
+ * （`transcripts/wal-archive/`，`archive_before` 搬走的前缀；见 `readSessionEvents`）。
+ * 只读 live 会把每一段被归档的历史判成悬空引用——会话一长就满屏假红。`--cli-log` 可选：
+ * 给了它才能判 J8 / J9（账实相符与具名归因），因为它们要数**真实发生的模型 HTTP 调用**——这件事
  * 在 WAL 里原理上不可见（一次没入账的调用恰好不会留下任何格）。
  *
  * ## 判据（逐条，编号即输出编号）
@@ -25,7 +27,8 @@
  * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq | DE-015 §4 溯源不悬空 |
  * | J6 | 孤名 = 0：`request` 的 `port` 必须在端口声明集里 | （装载期硬拒的实测对账） |
  * | J7 | 模型往返的**观测 ⇔ 三格**双向对账（`MODEL_PATHS` 逐条）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起。观测一律读事实层（WAL） | DE-015 判据 2 全量口径 + [] |
- * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数（整轮）。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
+ * | J8 | 给了 `--cli-log` 时：真实模型 HTTP 调用数 == `sent(port=model)` 数 + J7 判出的豁免未入账数 + J9 的**具名项**（轮外重试）。`--strict` 下没给日志即判红 | DE-015 §0「没有别的调度代码」 |
+ * | J9 | 具名项不许超编：`[Compress] 压缩 LLM 请求开始` 数 − `sent(via=compress/summary)` 数 **≤** `[Wake] RetryCompaction` 数。多出来的 = 一条新长出的静默路径；负数 = 账比日志多 | DE-015 §5.2 / D-131（轮外重试不入账的**机器可判**边界） |
  *
  * ## 观测口径为什么必须是「这次调用打过模型」，不是「判决来自模型」
  *
@@ -55,7 +58,7 @@
  *
  * ⚠️ `--cli-log` 那份日志必须是**一次 CLI 实测的产物**，且它的跨度 = 所列会话的跨度
  * （多会话时 J8 只能整轮判）。`[LLM] 请求发起` 是 **INFO** 级 ⇒ 不带 `-v` 也有；
- * 少了它 J8 数不出真实 HTTP 调用数，只能报「未判」——`--strict` 下那判红。
+ * 少了它 J8 / J9 数不出真实 HTTP 调用数，只能报「未判」——`--strict` 下那判红。
  */
 
 import fs from 'node:fs'
@@ -63,7 +66,7 @@ import path from 'node:path'
 import { green, red, dim } from './color.mjs'
 
 // 判据码命名空间：本脚本不占 `GATE_CODES.md` 的编号空间（它不是门禁步骤，
-// 判据编号 J1…J8 只在本文件与任务 evidence 里被引用）。
+// 判据编号 J1…J9 只在本文件与任务 evidence 里被引用）。
 
 /** 五个协议事实名（DE-015 §4：事实名是闭集，端口是载荷）。 */
 const PROTOCOL = new Set(['request', 'sent', 'response', 'failed'])
@@ -164,19 +167,55 @@ function parseArgs(argv) {
   return out
 }
 
-/** 读一份 WAL（每行一个 JSON 事件）。读不出 ⇒ 抛错，由调用方转成退出码 2。 */
-function readWal(file) {
-  const text = fs.readFileSync(file, 'utf8')
+/** 读一份 WAL（每行一个 JSON 事件）。撕裂尾行停止重放——与 `store/wal.rs::replay` 同口径。 */
+function replayFile(file) {
   const events = []
-  for (const [i, line] of text.split('\n').entries()) {
+  if (!fs.existsSync(file)) return events
+  const text = fs.readFileSync(file, 'utf8')
+  for (const line of text.split('\n')) {
     const t = line.trim()
     if (!t) continue
     try {
       events.push(JSON.parse(t))
     } catch (e) {
-      throw new Error(`${file} 第 ${i + 1} 行不是合法 JSON: ${e.message}`)
+      // 撕裂尾行：后面的内容一律不可信（崩溃安全留的半行），到此为止。
+      break
     }
   }
+  return events
+}
+
+/**
+ * 读一次会话的**全部事实**：归档段（按段名首号升序）+ live 段。
+ *
+ * 为什么不能只读 live：`consolidate` 落格成功后调 `WalStore::archive_before`，把
+ * `seq < 快照号` 的前缀整段搬进 `<会话目录>/transcripts/wal-archive/v2-events.wal.<first>-<last>`
+ * （`store/wal.rs::archive_events`）。只读 live 的读者会把每一段被归档的历史判成
+ * 「produced_by 悬空」「本轮没有输入格」——长会话实测里 20 轮之后 live 只剩 12 格，
+ * 连报 16 项假红，而真正的结论（压缩真发生、摘要往返入了账）全在归档段里。
+ *
+ * 读法与写侧逐字对齐：段名 `<wal 文件名>.<first>-<last>`，`first` 既是段内首号也是
+ * 排序键；逐段重放后按 `first` 升序拼接，live 接在后面，**不重排**。目录不存在 /
+ * 某段读不开 ⇒ 当作没有（与 Rust 侧「读不开就是没有」同一口径）。
+ */
+function readSessionEvents(walFile) {
+  const events = []
+  const dir = path.join(path.dirname(walFile), 'transcripts', 'wal-archive')
+  const prefix = `${path.basename(walFile)}.`
+  if (fs.existsSync(dir)) {
+    const segments = []
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!ent.isFile()) continue
+      const rest = ent.name.startsWith(prefix) ? ent.name.slice(prefix.length) : null
+      if (rest === null) continue
+      const first = Number(rest.split('-')[0])
+      if (!Number.isInteger(first)) continue
+      segments.push([first, ent.name])
+    }
+    segments.sort((a, b) => a[0] - b[0])
+    for (const [, name] of segments) events.push(...replayFile(path.join(dir, name)))
+  }
+  events.push(...replayFile(walFile))
   return events
 }
 
@@ -240,12 +279,7 @@ function judgePaths(events, rounds, strict, note) {
 function judgeSession(homedir, sid, strict) {
   const wal = path.join(homedir, 'session', sid, 'v2-events.wal')
   if (!fs.existsSync(wal)) return { fatal: `读不到 WAL: ${wal}` }
-  let events
-  try {
-    events = readWal(wal)
-  } catch (e) {
-    return { fatal: e.message }
-  }
+  const events = readSessionEvents(wal)
   if (events.length === 0) return { fatal: `${wal} 是空的` }
 
   const rounds = groupRounds(events)
@@ -318,6 +352,28 @@ function countHttp(logLines) {
   return logLines.filter((l) => l.includes('[LLM] 请求发起')).length
 }
 
+/**
+ * 数**用户主动重试压缩**的次数（J8 的具名项 / J9 的上界）。
+ *
+ * 这一行由 `pipeline.rs::retry_compaction` 在找到压缩节点之后立刻打——它是这条路径
+ * 在日志上**唯一**的具名痕迹（WAL 里没有：轮外往返按定义不入账）。所以「具名」不是
+ * 靠一张表，而是靠**这一行在代码里的位置**：删掉它，J9 立刻判「差额没人解释」。
+ */
+function countOutOfTurn(logLines) {
+  return logLines.filter((l) => l.includes('[Wake] RetryCompaction')).length
+}
+
+/**
+ * 数**真的打到模型的压缩摘要**次数（J9 的左边）。
+ *
+ * `compress_with_snapshot_core` 在调模型之前打这一行，**两个分支都打**（轮内自动
+ * 压缩与轮外重试）——所以它是「这一次摘要往返发生过」的完整观测，而 WAL 里的
+ * `sent(via=compress/summary)` 只是**入账了的那部分**。两者的差就是本判据要说的那件事。
+ */
+function countCompressStarts(logLines) {
+  return logLines.filter((l) => l.includes('[Compress] 压缩 LLM 请求开始')).length
+}
+
 const args = parseArgs(process.argv.slice(2))
 let logLines = null
 if (args.cliLog) {
@@ -357,24 +413,83 @@ if (logLines) {
   const http = countHttp(logLines)
   const sentModel = judged.reduce((n, r) => n + r.sentModel, 0)
   const exempted = judged.reduce((n, r) => n + r.unaccounted, 0)
-  const expect = sentModel + exempted
+
+  // **具名项**（D-131）：用户主动重试压缩时那一笔摘要往返没有轮可挂 ⇒ 不入账。
+  // 它不进 `MODEL_PATHS` 的豁免表（那张表只许减不许加），而是从日志里**数出来**：
+  // `[Compress] 压缩 LLM 请求开始` 两个分支都打，而 WAL 里只有入账了的那部分有三格，
+  // 两者之差 = 真的发生过却没入账的摘要往返数。
+  const compressStarts = countCompressStarts(logLines)
+  const sentSummary = judged.reduce(
+    (n, r) =>
+      n +
+      r.events.filter(
+        (e) => e.kind === 'sent' && e.payload?.port === 'model' && e.payload?.via === 'compress/summary',
+      ).length,
+    0,
+  )
+  const unaccountedSummary = compressStarts - sentSummary
+  const outOfTurn = countOutOfTurn(logLines)
+
+  // J8 的等式里多这一项之后，「差额」才有一个**具名**的解释对象；而这一项自己要被
+  // J9 判「不超编」——两半合起来才是「这一笔没入账，且它只能是那一条路径」。
+  const expect = sentModel + exempted + unaccountedSummary
   if (http !== expect) {
-    whole.push(`J8 真实模型调用 ${http} 次 ≠ 入账 ${sentModel} + 豁免未入账 ${exempted} = ${expect}（差额 = 一条没人记账的模型路径）`)
+    whole.push(
+      `J8 真实模型调用 ${http} 次 ≠ 入账 ${sentModel} + 豁免未入账 ${exempted} + 未入账摘要 ${unaccountedSummary} = ${expect}（差额 = 一条没人记账的模型路径）`,
+    )
   }
-  console.log(dim(`    整轮：HTTP ${http} / sent(model) ${sentModel} / 豁免未入账 ${exempted}`))
+  console.log(
+    dim(
+      `    整轮：HTTP ${http} / sent(model) ${sentModel} / 豁免未入账 ${exempted} / 未入账摘要 ${unaccountedSummary}`,
+    ),
+  )
   if (whole.length === 0) {
     console.log(green('✓ 整轮：J8 通过'))
   } else {
     totalProblems += whole.length
     for (const p of whole) console.log(red(`    ${p}`))
   }
+
+  // ── J9：具名项不许超编（DE-015 §5.2 / D-131）──────────────────────
+  //
+  // J8 只说明「差额 = 未入账的摘要往返」，它没说这些摘要往返**从哪来**。J9 补这一半：
+  // 每一次真的打到模型却没入账的摘要，都必须由一次**用户主动重试**解释。两个方向都判：
+  //  - `unaccountedSummary > outOfTurn` ⇒ 有一条**没被点名**的未入账往返（新长出的静默路径）；
+  //  - `unaccountedSummary < 0` ⇒ 三格比日志里的摘要请求还多（日志缺行，或有人拿
+  //    `via=compress/summary` 记了不是摘要的往返）。
+  //
+  // 为什么不用 WAL 判这条边界：轮外那一笔**在事实层零痕迹**——这正是本判据要说的那件事。
+  console.log(
+    dim(
+      `    整轮：摘要请求 ${compressStarts} / 入账三格 ${sentSummary} / 未入账 ${unaccountedSummary} / 轮外重试 ${outOfTurn}`,
+    ),
+  )
+  if (unaccountedSummary > outOfTurn) {
+    totalProblems += 1
+    console.log(
+      red(
+        `    J9 未入账的摘要往返 ${unaccountedSummary} 次 > 轮外重试 ${outOfTurn} 次——` +
+          `差额只能由「用户主动重试压缩」解释，多出来的是**新长出的静默路径**`,
+      ),
+    )
+  } else if (unaccountedSummary < 0) {
+    totalProblems += 1
+    console.log(
+      red(
+        `    J9 入账三格 ${sentSummary} > 摘要请求 ${compressStarts}——账上比日志里多，` +
+          '要么日志缺行，要么有人拿 via=compress/summary 记了不是摘要的往返',
+      ),
+    )
+  } else {
+    console.log(green('✓ 整轮：J9 通过（未入账的摘要往返全部由具名重试解释）'))
+  }
 } else if (args.strict) {
-  // strict 的意义是「不判等于放行」：J8 要数真实发生的模型 HTTP 调用，那只在 CLI
+  // strict 的意义是「不判等于放行」：J8 / J9 要数真实发生的模型 HTTP 调用，那只在 CLI
   // 日志里——没给日志就是没判过，不能报成全过。
-  console.log(red('✗ --strict：没给 --cli-log——J8（账实相符）未判'))
+  console.log(red('✗ --strict：没给 --cli-log——J8 / J9（账实相符）未判'))
   totalProblems += 1
 } else {
-  console.log(dim('    J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
+  console.log(dim('    J8 / J9 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
 }
 
 console.log(totalProblems === 0 ? green('义务环实测判定：全项通过') : red(`义务环实测判定：${totalProblems} 项失效`))

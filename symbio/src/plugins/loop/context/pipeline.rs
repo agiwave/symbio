@@ -693,6 +693,15 @@ pub(crate) async fn retry_compaction(
         )));
     }
 
+    // 这条日志是**具名归因**，不是进度提示：轮外摘要往返不入账（DE-015 §5.2 / D-131），
+    // 而「不入账」这件事必须能被数出来、并且**只能**由用户主动重试解释。
+    // `obligation-ring-accept` 的 J9 就按这一行与 `[Compress] 压缩 LLM 请求开始` 的
+    // 差额对账：少了它，差额就只是一句「不知道去哪了」。
+    crate::plugin_info!(
+        "session",
+        "[Wake] RetryCompaction: 轮外压缩重试（target={target_id}）——这一次摘要往返没有轮可挂，不入账"
+    );
+
     // 删除旧失败节点必须针对**原始列表**（`get_messages`）：失败节点在
     // `get_context_messages` 的过滤里本就看不见（它会滤掉 Failed 消息），
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。

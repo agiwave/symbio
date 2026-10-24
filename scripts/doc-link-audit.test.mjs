@@ -196,35 +196,42 @@ test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () =>
   assert.equal(audit({ 'docs/003-design/late.md': late }).status, 1)
 })
 
-// ── D-003：行数预算（活跃文档 ≤ 800 行）────────────────────────────────
-// 钉住三件事：**会红**、**边界准确**（800 通过 / 801 失败）、**豁免只有 archive**。
+// ── D-003：行数预算（活跃文档 ≤ MAX_DOC_LINES 行）────────────────────
+// 钉住三件事：**会红**、**边界准确**（上限通过 / 上限+1 失败）、**豁免只有 archive**。
+//
+// 上限从**被测脚本里读**，不在测试里写第二份：这个数调过（800 → 1000，理由记在
+// `doc-link-audit.mjs` 的 D-003 立法段），夹具写死旧值就会出现「脚本放行了、测试还按
+// 旧数判红」——那是在罚一个已经改对的决定。
+const LIMIT = Number(
+  fs.readFileSync(script, 'utf8').match(/const MAX_DOC_LINES = (\d+)/)[1],
+)
 const longDoc = (lines) => `# 长文档\n${'正文\n'.repeat(lines - 1)}`
 
-test('D-003：801 行 → 失败（并报出超限行数）', () => {
-  const r = audit({ 'docs/big.md': longDoc(801) })
+test(`D-003：${LIMIT + 1} 行 → 失败（并报出超限行数）`, () => {
+  const r = audit({ 'docs/big.md': longDoc(LIMIT + 1) })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /D-003/)
   assert.match(r.stdout, /docs\/big\.md/)
 })
 
-test('D-003：恰好 800 行 → 通过（上限是「不超过」）', () => {
-  assert.equal(audit({ 'docs/exact.md': longDoc(800) }).status, 0)
+test(`D-003：恰好 ${LIMIT} 行 → 通过（上限是「不超过」）`, () => {
+  assert.equal(audit({ 'docs/exact.md': longDoc(LIMIT) }).status, 0)
 })
 
 test('D-003：模块文档同样判（不只扫 docs/）', () => {
-  const r = audit({ 'symbio/src/plugins/foo/docs/big.md': longDoc(900) })
+  const r = audit({ 'symbio/src/plugins/foo/docs/big.md': longDoc(LIMIT + 100) })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /symbio\/src\/plugins\/foo\/docs\/big\.md/)
 })
 
 test('D-003：根目录散落 md 同样判（README / CONTRIBUTING 也会臃肿）', () => {
-  const r = audit({ 'CONTRIBUTING.md': longDoc(900) })
+  const r = audit({ 'CONTRIBUTING.md': longDoc(LIMIT + 100) })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /CONTRIBUTING\.md/)
 })
 
 test('D-003：examples/ 不判（是示例包内容，不是项目文档）', () => {
-  assert.equal(audit({ 'examples/pkg/docs/big.md': longDoc(900) }).status, 0)
+  assert.equal(audit({ 'examples/pkg/docs/big.md': longDoc(LIMIT + 100) }).status, 0)
 })
 
 test('D-003：docs/archive/ 不判（归档记录当时形态，改写等于篡改历史）', () => {
