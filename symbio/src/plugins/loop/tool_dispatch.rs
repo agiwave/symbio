@@ -606,47 +606,49 @@ impl ToolPort {
     ///
     /// 执行层由调用方跑（`SessionDispatchPort::dispatch`）——`sent` 的语义是
     /// 「已交给执行层」，所以它必须先于执行。
+    ///
+    /// 派发行欠不欠由引擎现读（D-136）：这里只交出授权行与读账的 `now`，
+    /// 引擎回 [`port::DispatchError::NotOwed`] 就是「没有这笔账」，如实落 `failed`。
     pub(crate) fn begin_calls(&self, calls: &mut [ToolPortCall]) {
         if !calls.iter().any(|c| c.granted) {
             return;
         }
         let facts = self.facts.range(Seq::new(0));
-        let owed = loop_rows::owes("dispatch-tools", &facts, self.turn, self.now_ms(&facts));
+        let now = self.now_ms(&facts);
         for call in calls.iter_mut().filter(|c| c.granted) {
-            if !owed {
-                crate::plugin_warn!(
-                    "session",
-                    "[Tool] 派发行不欠（turn={} / {}），不落 sent",
-                    self.turn,
-                    call.model_id
-                );
-                let _ = port::failed(
-                    self.facts.as_ref(),
-                    &call.call,
-                    self.turn,
-                    self.user_seq,
-                    "dispatch_row_not_owed",
-                );
-                continue;
-            }
-            if let Err(e) = port::begin(
+            match port::begin(
                 self.facts.as_ref(),
                 loop_rows::PORTS,
                 port::Dispatch {
                     call: &call.call,
                     turn: self.turn,
                     produced_by: self.user_seq,
-                    owed,
+                    row: "dispatch-tools",
+                    now,
                 },
             ) {
-                crate::plugin_warn!(
+                Ok(()) => call.sent = true,
+                Err(port::DispatchError::NotOwed(row)) => {
+                    crate::plugin_warn!(
+                        "session",
+                        "[Tool] 派发行 `{row}` 不欠（turn={} / {}），不落 sent",
+                        self.turn,
+                        call.model_id
+                    );
+                    let _ = port::failed(
+                        self.facts.as_ref(),
+                        &call.call,
+                        self.turn,
+                        self.user_seq,
+                        "dispatch_row_not_owed",
+                    );
+                }
+                Err(e) => crate::plugin_warn!(
                     "session",
                     "[Tool] 工具 sent 未落格（turn={} / {}）：{e:?}",
                     self.turn,
                     call.model_id
-                );
-            } else {
-                call.sent = true;
+                ),
             }
         }
     }

@@ -34,6 +34,28 @@ fn payload_of(store: &EventStore, kind: &str) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
+/// 一笔放行的前提事实 `authz.granted(port=tool)`。
+///
+/// 引擎在落 `sent` **之前**自己读授权行（D-136），而 `dispatch-tools` 的开账条件
+/// 就是这条事实——工具端口的用例必须有它，否则派发会被拒。谁写它、载荷长什么
+/// 样归 `tool_dispatch.test.rs` 的写方用例；这里只补前提。
+fn grant(store: &EventStore, call: &Call) {
+    append(
+        store,
+        Event::pending(
+            format!("grant-1-{}", call.id),
+            crate::symbio_core::EVENT_AUTHZ_GRANTED,
+            Entity::Turn,
+            Verb::Asserted,
+            1,
+            "authorizer",
+        )
+        .with_produced_by(7)
+        .with_payload(json!({ "key": call.id, "port": "tool", "id": call.id })),
+    )
+    .unwrap();
+}
+
 // ── 谁写哪一条 ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -50,7 +72,8 @@ async fn dispatch_writes_before_and_the_answer_itself() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            owed: true,
+            row: "dispatch-turn",
+            now: 0,
         },
         || async { Ok("答完了") },
         |_: &()| unreachable!("成功路径不该问 why"),
@@ -107,6 +130,7 @@ async fn begin_and_succeed_can_bracket_a_whole_batch() {
     let b = Call::new("tool", "tool-1-d1-b0-c1", 1);
     for call in [&a, &b] {
         announce(&store, call, 1, 7).unwrap();
+        grant(&store, call);
     }
     for call in [&a, &b] {
         begin(
@@ -116,18 +140,38 @@ async fn begin_and_succeed_can_bracket_a_whole_batch() {
                 call,
                 turn: 1,
                 produced_by: 7,
-                owed: true,
+                row: "dispatch-tools",
+                now: 0,
             },
         )
         .unwrap();
     }
-    assert_eq!(kinds(&store), vec!["request", "request", "sent", "sent"]);
+    assert_eq!(
+        kinds(&store),
+        vec![
+            "request",
+            "authz.granted",
+            "request",
+            "authz.granted",
+            "sent",
+            "sent"
+        ]
+    );
 
     succeed(&store, &a, 1, 7).unwrap();
     succeed(&store, &b, 1, 7).unwrap();
     assert_eq!(
         kinds(&store),
-        vec!["request", "request", "sent", "sent", "response", "response"]
+        vec![
+            "request",
+            "authz.granted",
+            "request",
+            "authz.granted",
+            "sent",
+            "sent",
+            "response",
+            "response"
+        ]
     );
 }
 
@@ -145,7 +189,8 @@ async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            owed: true,
+            row: "dispatch-turn",
+            now: 0,
         },
         || async { Err("模型超时") },
         |e: &&'static str| format!("failed: {e}"),
@@ -164,6 +209,8 @@ async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
 async fn a_row_that_is_not_owed_never_reaches_the_actor() {
     // 行不欠 ⇒ 拒绝派发。这不是防御式编程：`request` 没落成 / 行表装载失败
     // 都会从这里显形，而不是让一次没人承认的调用静默跑完。
+    //
+    // 这里**只**不写 `request`：结论由引擎现读（D-136），调用点给的只有行名。
     let store = boot();
     let call = Call::new("turn", "turn-1-r0", 1);
     let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -176,7 +223,8 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            owed: false,
+            row: "dispatch-turn",
+            now: 0,
         },
         move || {
             let flag = flag.clone();
@@ -189,7 +237,13 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
     )
     .await;
 
-    assert!(matches!(res, Err(DispatchError::NotOwed(_))));
+    match res {
+        Err(DispatchError::NotOwed(row)) => assert_eq!(
+            row, "dispatch-turn",
+            "拒派要说得出是哪一行不欠（行名由调用点声明、引擎读出）"
+        ),
+        other => panic!("没有账的调用不该派发：{other:?}"),
+    }
     assert!(
         !ran.load(std::sync::atomic::Ordering::SeqCst),
         "没有账的调用不许发出"
@@ -212,7 +266,9 @@ async fn an_undeclared_port_is_named_not_defaulted() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            owed: true,
+            // 端口都没有声明，行名只是占位：`NoPort` 在读账之前判。
+            row: "dispatch-ghost",
+            now: 0,
         },
         || async { Ok(()) },
         |_: &()| "unreachable".into(),
@@ -223,27 +279,65 @@ async fn an_undeclared_port_is_named_not_defaulted() {
 
 #[tokio::test]
 async fn dispatching_twice_does_not_double_the_facts() {
-    // 判据 6：幂等键 `(port, id, attempt)`（`failed` 是逻辑 id）。重复派发不重落。
+    // 判据 6 的第一半：一笔账只还得一次。第一次派发落完 `sent`，`dispatch-turn`
+    // 就不再欠——第二次连执行体都不会跑（D-136：结论由引擎现读，调用点不重复主张）。
     let store = boot();
     let call = Call::new("turn", "turn-1-r0", 1);
     announce(&store, &call, 1, 7).unwrap();
-    for _ in 0..2 {
-        let out: Result<(), DispatchError<()>> = dispatch(
-            &store,
-            PORTS,
-            Dispatch {
-                call: &call,
-                turn: 1,
-                produced_by: 7,
-                owed: true,
-            },
-            || async { Ok(()) },
-            |_: &()| "unreachable".into(),
-        )
-        .await;
-        out.expect("第二次派发只该撞幂等键");
-    }
+    let out: Result<(), DispatchError<()>> = dispatch(
+        &store,
+        PORTS,
+        Dispatch {
+            call: &call,
+            turn: 1,
+            produced_by: 7,
+            row: "dispatch-turn",
+            now: 0,
+        },
+        || async { Ok(()) },
+        |_: &()| "unreachable".into(),
+    )
+    .await;
+    out.expect("第一次派发");
+    let second: Result<(), DispatchError<()>> = dispatch(
+        &store,
+        PORTS,
+        Dispatch {
+            call: &call,
+            turn: 1,
+            produced_by: 7,
+            row: "dispatch-turn",
+            now: 0,
+        },
+        || async { Ok(()) },
+        |_: &()| "不该派发".into(),
+    )
+    .await;
+    assert!(
+        matches!(second, Err(DispatchError::NotOwed(_))),
+        "已还过的账不该被派第二次：{second:?}"
+    );
     assert_eq!(kinds(&store), vec!["request", "sent", "response"]);
+}
+
+#[test]
+fn a_repeated_fact_write_collapses_on_its_idempotency_key() {
+    // 判据 6 的第二半：幂等键 `(port, id, attempt)`（`failed` 是逻辑 id）。
+    // 行**仍然欠**时重复写同一格，引擎吞掉 `Duplicate` 而不是多落一格——
+    // 「同一个动作被跑两次」与「账上出现两条」是两件事，得分别钉住。
+    let store = boot();
+    let call = Call::new("turn", "turn-1-r0", 1);
+    announce(&store, &call, 1, 7).unwrap();
+    announce(&store, &call, 1, 7).unwrap();
+    assert_eq!(kinds(&store), vec!["request"], "重复的 `request` 不重落");
+
+    succeed(&store, &call, 1, 7).unwrap();
+    succeed(&store, &call, 1, 7).unwrap();
+    assert_eq!(
+        kinds(&store),
+        vec!["request", "response"],
+        "重复的应答撞 `(port, id, attempt)`，不重落"
+    );
 }
 
 // ── 租约 ────────────────────────────────────────────────────────────────

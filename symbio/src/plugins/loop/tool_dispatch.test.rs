@@ -87,12 +87,21 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
     }
 }
 
-/// 已开账、已放行、已派发的一笔调用：`request` + `sent` 都经引擎原语落过。
+/// 已开账、已放行、已派发的一笔调用：`request` + `authz.granted` + `sent` 都落过。
 ///
 /// 两个旗标在这里直接补齐——本函数服务**关账**用例，「派出后欠一次应答」是前提
 /// 不是被测点；派发这一步真的换债由场景一那条用例对。
+///
+/// 前提要用**生产的写方**落（`granted_event`）：引擎派发前自己读 `dispatch-tools`
+/// 这一行（D-136），而它只认 `authz.granted`——少这一条事实，`sent` 就落不下来。
 fn opened(store: &EventStore, id: &str) -> ToolPortCall {
     let mut call = requested(store, id);
+    super::append_authz(
+        store,
+        super::granted_event(TURN, USER_SEQ, &call.call, "shell", "unknown", true),
+    )
+    .expect("granted 落格");
+    call.granted = true;
     port::begin(
         store,
         loop_rows::PORTS,
@@ -100,11 +109,11 @@ fn opened(store: &EventStore, id: &str) -> ToolPortCall {
             call: &call.call,
             turn: TURN,
             produced_by: USER_SEQ,
-            owed: true,
+            row: "dispatch-tools",
+            now: 0,
         },
     )
     .expect("sent 落格");
-    call.granted = true;
     call.sent = true;
     call
 }

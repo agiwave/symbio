@@ -70,11 +70,9 @@ where
     let round = call.id.clone();
     super::super::port::announce(store, &call, run.turn, run.user_seq)
         .map_err(ModelCallError::Store)?;
-    // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
-    let facts = store.range(Seq::new(0));
-    let owed = super::super::loop_rows::owes("dispatch-model", &facts, run.turn, run.now_ms());
     // 应答载荷带上本次交回的工具调用（D-117）：创建行 `open-tools` 的集合
     // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
+    // 行欠不欠由引擎现读（D-136）：这里只交出「授权这次派发的行」与读账的 now。
     let out = super::super::port::dispatch_with(
         store,
         super::super::loop_rows::PORTS,
@@ -82,7 +80,8 @@ where
             call: &call,
             turn: run.turn,
             produced_by: run.user_seq,
-            owed,
+            row: "dispatch-model",
+            now: run.now_ms(),
         },
         || llm.generate_turn(tok, messages, tools, sink.clone()),
         |e: &AdapterError| e.to_string(),

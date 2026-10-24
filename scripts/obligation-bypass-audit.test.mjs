@@ -6,10 +6,13 @@
  * 全是**静默变绿**——数字算错、算宽、算不到，报出来都是「通过」，所以逐条钉：
  *
  *   ① **算得对**：调用点计数、多行调用抓得到行名、基线下方要给提示；
- *   ② **不算多**：`fn owes(` 定义行、`*.test.rs`、`drive_steps` 函数体、注释里的
- *      `owes(` 都不得进计数。**这四类每一条都会把基线喂松**，而松了的棘轮等于没有；
+ *   ② **不算多**：`fn owes(` 定义行、`*.test.rs`、`drive_steps` 函数体、引擎的现读
+ *      点 `row_owed`、注释里的 `owes(` 都不得进计数。**这几类每一条都会把基线喂松**，
+ *      而松了的棘轮等于没有；
  *   ③ **行名只在 `ROWS` 里找**：同一文件的 `ACTORS` / 端口声明也写 `name: "…"`，
  *      整文件抓会让一个**不是行**的名字满足 OB-003（用例用执行体名 `courier` 钉它）；
+ *      旁路直调与 `Dispatch { row: "…" }` 的字面点名都要核——后者是引擎现读的输入，
+ *      点错一行等于那一格永远派不出去；
  *   ④ **读不出即失败**：没有 `.rs`、没有 `ROWS` 都必须 exit 2，不退化成
  *      「没什么可判 ⇒ 通过」。
  *
@@ -121,6 +124,34 @@ test('注释里的 `owes(` 不算调用点', () => {
   })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /2\/2 处/)
+})
+
+test('引擎的现读点 `row_owed` 不算旁路（它是派发本体的一半，行名另有核对）', () => {
+  // D-136：派发前问表只剩这一处，它问的行名来自调用点声明的 `Dispatch { row }`。
+  // 把它算进旁路会让基线虚高一格，而那一格正是「谁都能再加一处」的余量。
+  const r = audit({
+    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
+    'symbio/src/plugins/loop/port.rs':
+      'impl Dispatch<\'_> {\n    fn row_owed<S>(&self, store: &S) -> bool {\n        let _ = super::loop_rows::owes(self.row, &[], 0, 0);\n    }\n}\n',
+  })
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /2\/2 处/)
+})
+
+test('OB-003 也核 `Dispatch { row: "…" }` 的字面点名（点错 ⇒ 那一格永不派发）', () => {
+  const r = audit({
+    'symbio/src/plugins/loop/a.rs':
+      caller(['alpha', 'beta']) +
+      'fn round() {\n    let _ = Dispatch {\n        row: "gamma",\n    };\n}\n',
+  })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /OB-003 .*派发点名 `row: "gamma"`/)
+  // 点名合法时不报，也不进旁路计数
+  const ok = audit({
+    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']) + 'fn round() {\n    let _ = Dispatch { row: "beta" };\n}\n',
+  })
+  assert.equal(ok.status, 0, out(ok))
+  assert.match(out(ok), /2\/2 处/)
 })
 
 test('OB-003 点名不存在的行 ⇒ 红（`owes` 恒 false ⇒ 这段旁路永不执行）', () => {

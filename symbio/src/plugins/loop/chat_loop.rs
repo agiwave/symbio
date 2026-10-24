@@ -578,9 +578,8 @@ pub async fn run_chat_loop(
             )
             .await;
         }
-        // 派发前的事实切片必须是**刚写完 `request` 的那一份**：行欠不欠看它。
-        turn.facts = store.range(crate::symbio_core::Seq::new(0));
-        let owed = super::loop_rows::owes("dispatch-turn", &turn.facts, turn.turn_no, turn.now_ms);
+        // 派发前的事实切片必须是**刚写完 `request`** 的那一份：行欠不欠由引擎现读
+        // （`Dispatch::row_owed`），这里只声明这一笔站在 `dispatch-turn` 上。
         let out = match super::port::dispatch(
             store.as_ref(),
             super::loop_rows::PORTS,
@@ -588,7 +587,8 @@ pub async fn run_chat_loop(
                 call: &call,
                 turn: turn.turn_no,
                 produced_by: turn.user_seq,
-                owed,
+                row: "dispatch-turn",
+                now: turn.now_ms,
             },
             || {
                 super::turn_exec::execute_turn(super::turn_exec::ExecTurn {

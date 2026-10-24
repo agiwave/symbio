@@ -23,9 +23,11 @@
 //!
 //! ## 派发前先问表
 //!
-//! [`dispatch`] 收一张「这一行还欠不欠」的断言而不是自己去算：调用点刚写完
-//! `request`，只有它手里有新鲜的事实切片。不欠 ⇒ [`DispatchError::NotOwed`]，
-//! 而不是让一次「没人承认的调用」静默跑完——那正是这张表存在的理由。
+//! [`dispatch`] 在落 `sent` **之前**自己读一次行表：调用点交出的只有「授权这次派发
+//! 的行名」与读账用的 `now`，不交结论。让它交结论等于给每个调用点一次自己算的机会
+//! ——切片问旧了、行名写错了，都不会有人发现（D-136）。不欠 ⇒
+//! [`DispatchError::NotOwed`]，而不是让一次「没人承认的调用」静默跑完——那正是这张
+//! 表存在的理由。
 //!
 //! ## 幂等键
 //!
@@ -113,10 +115,13 @@ impl Call {
     }
 }
 
-/// 一次派发的**上下文**：这笔账属于哪一轮、溯源到哪一格、行还欠不欠。
+/// 一次派发的**上下文**：这笔账属于哪一轮、溯源到哪一格、由哪一行授权。
 ///
-/// 打包不是为了少写参数，而是因为它们四个一起构成「这一次派发是哪一笔账」；
+/// 打包不是为了少写参数，而是因为它们一起构成「这一次派发是哪一笔账」；
 /// 分开传时调用点很容易把 `turn` 与 `produced_by` 写反（两者都是 `u64`）。
+///
+/// **不传「还欠不欠」的布尔值**：那等于让每个调用点自己问一次表，问旧了或问错了
+/// 都没有人发现。行名是声明，欠不欠由引擎在落派发事实前现读（D-136）。
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Dispatch<'a> {
     pub(crate) call: &'a Call,
@@ -124,8 +129,23 @@ pub(crate) struct Dispatch<'a> {
     pub(crate) turn: u64,
     /// 溯源：本轮用户格的 `seq`（I2 要求断言类事实带 `produced_by`）。
     pub(crate) produced_by: u64,
-    /// 调用点刚问过的结论：`dispatch-<port>` 行还欠不欠。
-    pub(crate) owed: bool,
+    /// 授权这次派发的行（`dispatch-<port>` 两行模板之一）。
+    ///
+    /// 行名与「还欠不欠」必须同源：调用点只声明自己站在哪一行上，结论由引擎读。
+    pub(crate) row: &'a str,
+    /// 读账的 `now`（与 [`super::loop_rows::owes`] 同形；派发行模式本身不读时间）。
+    pub(crate) now: i64,
+}
+
+impl Dispatch<'_> {
+    /// 这一行此刻还欠不欠——**唯一的现读点**。
+    fn row_owed<S>(&self, store: &S) -> bool
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        let facts = store.range(crate::symbio_core::Seq::new(0));
+        super::loop_rows::owes(self.row, &facts, self.turn, self.now)
+    }
 }
 
 /// 派发失败：事实没落成 / 执行体自己失败 / 行不欠 / 没有这个端口的声明。
@@ -215,13 +235,13 @@ where
     )
 }
 
-/// 引擎派发：落 `before` → 跑执行体 → 落应答或失败。
+/// 引擎派发：读行 → 落 `before` → 跑执行体 → 落应答或失败。
 ///
 /// `before` 取自 [`PortDecl::before`]（不是写死的 `sent`）：端口的协议事实由声明
 /// 决定，加一个端口只加一条 `PortDecl`。
 ///
-/// `owed` 是调用点刚问过的结论（`dispatch-<port>` 行还欠不欠）。不欠 ⇒ 立刻返回
-/// [`DispatchError::NotOwed`]，**执行体不会被跑**——没有账的调用不许发出。
+/// 行不欠 ⇒ 立刻返回 [`DispatchError::NotOwed`]，**执行体不会被跑**——没有账的
+/// 调用不许发出。这个结论由 [`Dispatch::row_owed`] 现读，不由调用方传入。
 pub(crate) async fn dispatch<S, T, E, F, Fut, W>(
     store: &S,
     ports: &[PortDecl],
@@ -292,7 +312,7 @@ where
 ///
 /// 与 [`dispatch`] 拆开是为了「先派发 N 笔、再等整批」的形态（DE-015 §3.3 的
 /// 工具批次）：每笔子调用各自落一条 `sent`，执行体在整批 `sent` 之后才跑。
-/// 记账仍然是引擎的一半——调用点只交出「这一行还欠不欠」的事实结论。
+/// 记账仍然是引擎的一半——调用点只声明「这笔调用站的是哪一行」。
 pub(crate) fn begin<S>(
     store: &S,
     ports: &[PortDecl],
@@ -305,11 +325,12 @@ where
         call,
         turn,
         produced_by,
-        owed,
+        row,
+        ..
     } = plan;
     let decl = ring::port_of(ports, call.port).ok_or(DispatchError::NoPort(call.port))?;
-    if !owed {
-        return Err(DispatchError::NotOwed(format!("dispatch-{}", call.port)));
+    if !plan.row_owed(store) {
+        return Err(DispatchError::NotOwed(row.to_string()));
     }
     append(
         store,
@@ -688,9 +709,8 @@ where
         serde_json::Value::Null,
     )
     .map_err(DispatchError::Store)?;
-    // 派发前切片必须是**刚写完 `request`** 的那一份：行欠不欠看它。
-    let facts = store.range(crate::symbio_core::Seq::new(0));
-    let owed = super::loop_rows::owes("dispatch-model", &facts, round.turn, round.now);
+    // 派发前切片必须是**刚写完 `request`** 的那一份：行欠不欠看它。结论由引擎现读
+    // （`Dispatch::row_owed`），调用点只声明站在 `dispatch-model` 这一行上。
     dispatch_with(
         store,
         super::loop_rows::PORTS,
@@ -698,7 +718,8 @@ where
             call: &call,
             turn: round.turn,
             produced_by: round.produced_by,
-            owed,
+            row: "dispatch-model",
+            now: round.now,
         },
         || async move { run().await },
         |e| format!("{e:?}"),

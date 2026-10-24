@@ -1789,7 +1789,7 @@ mod tool_round_tests {
         }
     }
 
-    /// 替身逐条落 `sent`（`port::begin` 同时问行表「还欠不欠」）。
+    /// 替身逐条落 `sent`（`port::begin` 派发前自己读 `dispatch-tools` 这一行）。
     fn begin_batch(
         store: &dyn Store<Event = Event>,
         calls: &mut [ToolPortCall],
@@ -1803,7 +1803,8 @@ mod tool_round_tests {
                     call: &call.call,
                     turn: turn_no,
                     produced_by,
-                    owed: true,
+                    row: "dispatch-tools",
+                    now: 0,
                 },
             )
             .is_ok()
@@ -1977,7 +1978,8 @@ mod tool_round_tests {
                         call: &call.call,
                         turn: self.turn,
                         produced_by: self.user_seq,
-                        owed: true,
+                        row: "dispatch-tools",
+                        now: 0,
                     },
                 )
                 .is_ok()

@@ -8,7 +8,7 @@
  * |---|---|---|
  * | OB-001 | `owes()` 的**直调点数** ≤ `BYPASS_BASELINE` | 派发面变宽：又长出一条绕开 `drive` 的路 |
  * | OB-002 | 直调点数**低于**基线时提示同步下调 | 余量白留：棘轮松着，下一次「多一处」不会红 |
- * | OB-003 | 每处直调点的**行名**必须是 `ROWS` 里真实存在的行 | 点名不存在的行 ⇒ `owes` 恒 `false` ⇒ 这段旁路代码**永不执行** |
+ * | OB-003 | 每处直调点**与 `Dispatch { row: "…" }` 点名的行**必须是 `ROWS` 里真实存在的行 | 点名不存在的行 ⇒ `owes` 恒 `false` ⇒ 这段旁路代码**永不执行**、那一格**永不派发** |
  *
  * 计数口径写在 `BYPASS_BASELINE` 那一行旁边，**不写在设计文档正文里**——正文会漂，
  * 基线不会。DE-015 §5.3 只写口径与「归零」这个定义。
@@ -16,8 +16,9 @@
  * ## 为什么需要它（2026-10-23 推敲的结论）
  *
  * DE-015 §0 声称「控制面收敛为债环，`drive` 是唯一派发器」。实测：`drive()` 是**通用**
- * 派发器（`next` → `ring::drive`，任何 `by` 能解析的行都派得动），但有 12 处**直调
- * `owes()` 再用旁路代码执行**（10 行）——那些账在到不了派发器之前就被关掉。这不是
+ * 派发器（`next` → `ring::drive`，任何 `by` 能解析的行都派得动），但另有一批**直调
+ * `owes()` 再用旁路代码执行**的点（现行计数看 `BYPASS_BASELINE`，清单看 `--verbose`）
+ * ——那些账在到不了派发器之前就被关掉。这不是
  * bug——DE-015 §8 自己叫它
  * 「旁路收编」，是已知过渡态。真正的病是**它没有数字**，于是三句话都无从执行：
  *
@@ -29,7 +30,7 @@
  *
  * ## 为什么是棘轮，不是立刻收编
  *
- * 12 处旁路各自依赖不同的上下文（有的在流式回调里、有的在工具批次里、有的在唤醒路径上），
+ * 旁路各自依赖不同的上下文（有的在流式回调里、有的在工具批次里、有的在唤醒路径上），
  * 一次性搬进 `drive` 是一次跨文件重构，风险远大于收益。而计数棘轮**立刻**给了 E5 一个
  * 可执行的形式，并且把「收口完成」定义成**计数归零**——一个可以被逐步逼近的目标，
  * 而不是一句口号。每收编一处，`BYPASS_BASELINE` 减一；减到 0 那天，这条判据就从
@@ -74,15 +75,17 @@ const VERBOSE = process.argv.includes('--verbose')
 /**
  * 旁路直调 `owes()` 的点数上限（**只许降**）。
  *
- * 口径：`owes(` 的**调用点**，排除三处——`fn owes(` 的定义行、`*.test.rs`、
- * 以及 `drive_steps` 函数体（那里问债不是旁路，它就是派发器本体）。
+ * 口径：`owes(` 的**调用点**，排除四处——`fn owes(` 的定义行、`*.test.rs`、
+ * `drive_steps` 函数体（那里问债不是旁路，它就是派发器本体），以及引擎的现读点
+ * `Dispatch::row_owed`（D-136：派发前问表收敛到这一处，行名由 `Dispatch` 字面量
+ * 声明、由下面那半边 OB-003 核对）。
  *
  * 每收编一处，这个数字减一；归零那天 DE-015 §5.3 的「收口完成」就成立了。
  * 放宽它需要 `35-baseline` 的 `obligation-bypass` 那一格留痕——本脚本不给自己开后门。
  */
 const BYPASS_BASELINE = process.env.OBLIGATION_BYPASS_BASELINE
   ? Number(process.env.OBLIGATION_BYPASS_BASELINE)
-  : 12
+  : 8
 
 const SKIP_DIRS = new Set([
   'target',
@@ -150,6 +153,31 @@ function driveStepsSpan(text) {
   return [m.index, matchBrace(text, open) + 1]
 }
 
+/**
+ * 引擎的现读点（`Dispatch::row_owed`）函数体区间——同 `drive_steps` 一条理由。
+ *
+ * D-136 之后「派发前问表」只剩这一处，它问的行名来自 `Dispatch` 字面量（声明），
+ * 不是调用点自己算出来的布尔值。把它算成旁路会让基线虚高，而它又不是任何一处
+ * 「绕开 `drive` 的旁路代码」。它的行名改由下面那半边 OB-003 核对。
+ */
+function engineReadSpan(text) {
+  const m = /fn\s+row_owed\b/.exec(text)
+  if (!m) return null
+  const open = text.indexOf('{', m.index)
+  if (open < 0) return null
+  return [m.index, matchBrace(text, open) + 1]
+}
+
+/** `Dispatch { row: "…" }` 的字面点名（引擎现读的行名从这里来，也要真实存在） */
+function declaredRowNames(lines) {
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = /\brow:\s*"([^"]*)"/.exec(lines[i])
+    if (m) out.push({ line: i + 1, row: m[1], src: lines[i].trim().slice(0, 90) })
+  }
+  return out
+}
+
 console.log('--- obligation-bypass-audit: 派发面（OB-001…003） ---')
 
 const files = rustFiles()
@@ -167,12 +195,13 @@ if (!rows || rows.size === 0) {
 
 /** 直调点：`owes(` 的调用（定义行不算），带行名 */
 const sites = []
+const named = []
 let definitionLines = 0
 for (const file of files) {
   const raw = fs.readFileSync(file, 'utf8')
   const lines = blankComments(raw)
   const text = lines.join('\n')
-  const span = driveStepsSpan(text)
+  const spans = [driveStepsSpan(text), engineReadSpan(text)].filter(Boolean)
   let offset = 0
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -183,7 +212,7 @@ for (const file of files) {
           definitionLines++
           continue
         }
-        if (span && at >= span[0] && at < span[1]) continue
+        if (spans.some(([start, end]) => at >= start && at < end)) continue
         // 行名 = 实参里第一个字符串字面量（多行调用也要抓到）
         const tail = text.slice(at, at + 300)
         const lit = /"([^"]*)"/.exec(tail)
@@ -197,10 +226,22 @@ for (const file of files) {
     }
     offset += line.length + 1
   }
+  for (const n of declaredRowNames(lines)) named.push({ ...n, file })
 }
 
 // ── OB-003：行名必须存在 ────────────────────────────────────────────
 let errors = 0
+const check = (rel, line, row, src, why) => {
+  if (rows.has(row)) return
+  errors++
+  console.log(
+    red(
+      `[ERROR] OB-003 ${rel}:${line} ${why}而 \`ROWS\` 里没有这一行 ⇒ ` +
+        `恒 false（编译、测试、门禁全绿，账却永远不开或永远不派）`,
+    ),
+  )
+  console.log(`       ${src}`)
+}
 for (const s of sites) {
   const rel = path.relative(ROOT, s.file).replace(/\\/g, '/')
   if (!s.row) {
@@ -211,15 +252,12 @@ for (const s of sites) {
     console.log(`       ${s.src}`)
     continue
   }
-  if (rows.has(s.row)) continue
-  errors++
-  console.log(
-    red(
-      `[ERROR] OB-003 ${rel}:${s.line} 直调 \`owes("${s.row}")\` 而 \`ROWS\` 里没有这一行 ⇒ ` +
-        `\`owes\` 恒 false，这段旁路代码永不执行（编译、测试、门禁全绿）`,
-    ),
-  )
-  console.log(`       ${s.src}`)
+  check(rel, s.line, s.row, s.src, `直调 \`owes("${s.row}")\``)
+}
+// 引擎现读的行名来自 `Dispatch { row: "…" }` 字面量（D-136）：点错一行，
+// 那一格就永远派不出去——与旁路点错行是同一个失效形状，用同一半边判据核。
+for (const n of named) {
+  check(path.relative(ROOT, n.file).replace(/\\/g, '/'), n.line, n.row, n.src, `派发点名 \`row: "${n.row}"\``)
 }
 
 // ── OB-001 / OB-002：计数棘轮 ───────────────────────────────────────
