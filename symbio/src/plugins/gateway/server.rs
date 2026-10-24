@@ -8,6 +8,7 @@
 //! |--------------------------|--------------------------------|-------------------------------------|
 //! | `route_v2`               | `POST /api/v1/invoke`           | `PluginMessageWire` → `PluginPayloadWire` |
 //! | `listen("route/{id}")`   | `WS /api/v1/ws`（首帧=`PluginMessageWire`） | `PluginFrame`（双向）         |
+//! | `event_bus/subscribe`    | `GET /api/v1/events`（SSE，只读） | `PluginFrame::Data` 的信封     |
 //! | —                        | `GET /api/v1/health`           | `{"ok":true}`                        |
 //!
 //! 因此**没有引入任何新协议**：第三方或另一个 Symbio 实例拿到的能力，在 worker
@@ -21,8 +22,10 @@
 //! （与 `route_v2` 的请求体完全相同），服务端据此分派；若后端返回会话通道，
 //! 此后该连接双向转发 `PluginFrame`，结束（或断开）即 EOF。
 //!
-//! 之所以用 WS 而非 SSE：前端 `connectPlugin`（会话/流式）需要双向通道，WS 天然映射
-//! Tauri 的 invoke + event 模型，且首帧即 `PluginMessageWire`，与 `route_v2` 完全对称。
+//! 之所以主通道用 WS 而非 SSE：前端 `connectPlugin`（会话/流式）需要双向通道，WS
+//! 天然映射 Tauri 的 invoke + event 模型，且首帧即 `PluginMessageWire`，与 `route_v2`
+//! 完全对称。SSE 只做**单向只读**的实时面（`GET /api/v1/events`），价值在 `curl -N`
+//! 即可调试；它不新增信源也不改帧形状，只是把同一个总线信封换一种传输。
 //!
 //! ## 边界加固
 //!
@@ -31,14 +34,15 @@
 //!   自定义头）。续订只回选 `symbio.v1`，**不回显 `bearer.*`**——回显等于把令牌写进
 //!   响应头，代理与日志都会记下。语义与理由见 AR-008 §5.2。
 //! - **连接上限**：`inbound_max_connections` 个配额，到顶后不再 `accept`（背压交给
-//!   内核队列），而不是先收下再排队。
+//!   内核队列），而不是先收下再排队。HTTP 一次调用、WS 与 SSE 的每条长连接各占一个。
 //! - **重放防护**：`POST /api/v1/invoke` 的 `Idempotency-Key` 在 TTL 内重复即 409，
 //!   不缓存首次结果（拒绝重放，见 AR-008 §5.1.1）。
 
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
-    Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, SymbioKey, TRACE_ID,
+    EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
+    PluginSimpleRequest, SymbioKey, PATH, ROUTE_EVENT_BUS_SUBSCRIBE, TRACE_ID,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -76,6 +80,10 @@ const IDEMPOTENCY_CAPACITY: usize = 4096;
 
 /// 幂等键长度上限（超过它的键没有正当用途；1–200 是常见代理的保守值）。
 const MAX_IDEMPOTENCY_KEY_BYTES: usize = 200;
+
+/// SSE 心跳间隔：长时间零字节的响应会被代理 / 内核判死（SSE 没有 WS 的 ping 帧），
+/// 空闲期用注释行保活——注释行不触发 `EventSource` 的任何回调。
+const SSE_HEARTBEAT: Duration = Duration::from_secs(15);
 
 /// 连接上限的合法范围（与设置页 number 控件一致）。
 ///
@@ -481,6 +489,40 @@ async fn handle_conn(
         return;
     }
 
+    // 实时面（只读）：GET /api/v1/events
+    if req.method == "GET" && req.path.starts_with("/api/v1/events") {
+        if !check_auth(&token, &req) {
+            let _ = stream
+                .write_all(&http_response(
+                    401,
+                    "Unauthorized",
+                    "",
+                    b"unauthorized",
+                    &cors_headers(),
+                ))
+                .await;
+            return;
+        }
+        // 只读模式不开放实时面：它是**长连接广播**，一次订阅覆盖该作用域内全部
+        // 会话的在途内容（含尚未落库的增量），与「逐个地址去读」的只读口径不同。
+        // 同一条取舍见 `config.rs::is_readonly_allowed` 的模块注释。
+        if readonly {
+            let b = "{\"error\":\"只读模式下不开放实时订阅\"}";
+            let _ = stream
+                .write_all(&http_response(
+                    403,
+                    "Forbidden",
+                    "application/json",
+                    b.as_bytes(),
+                    &cors_headers(),
+                ))
+                .await;
+            return;
+        }
+        handle_sse(stream, router, cancel).await;
+        return;
+    }
+
     // 一次性调用：POST /api/v1/invoke
     if req.method == "POST" && req.path.starts_with("/api/v1/invoke") {
         if !check_auth(&token, &req) {
@@ -756,13 +798,23 @@ async fn dispatch_once(
             // 保留 `Arc` 而不是每帧 `(*v).clone()`：后者是整棵 JSON 树的深拷贝，
             // 在一个「只关心最后一帧」的循环里付 N 次深拷贝毫无意义。
             let mut last: Option<Arc<Value>> = None;
+            let mut failed = None;
             loop {
                 match tokio::time::timeout(Duration::from_secs(30), chan.rx.recv()).await {
                     Ok(Some(PluginFrame::Data(v))) => last = Some(v),
-                    Ok(Some(PluginFrame::Error(m, _))) => return Err(m),
+                    Ok(Some(PluginFrame::Error(m, _))) => {
+                        failed = Some(m);
+                        break;
+                    }
                     Ok(None) => break,
                     Err(_) => break,
                 }
+            }
+            // 一次性调用把流「用掉」了，但**订阅本身**还挂在总线全局表里；
+            // 不取消令牌，`event_bus` 的清理任务永远不会反注册。
+            chan.cancel_token.cancel();
+            if let Some(message) = failed {
+                return Err(message);
             }
             let value = match last {
                 // 独占时直接解包（零拷贝）；仍被别处持有才退化为深拷贝。
@@ -783,6 +835,150 @@ fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
         msg.payload.clone(),
         msg.metadata.as_object(),
     ))
+}
+
+// ==================== SSE 实时面 ====================
+
+/// 一条总线信封 → 一条 SSE 事件。
+///
+/// 信封**原样**过（`{kind, session_id, data}`）：SSE 是 `event_bus/subscribe` 的
+/// 只读包装，不重新解释 `kind`——消费方按信封里的 `kind` 自行分派，与 WS 客户端
+/// 看到的是同一份数据。不写 `event:` 行：带了具名事件后，`EventSource.onmessage`
+/// 不再触发，默认用法反而看不全。
+fn sse_data_line(value: &Value) -> Vec<u8> {
+    let text = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    let mut out = Vec::with_capacity(text.len() + 8);
+    // 紧凑序列化不含换行；分行写是防御性口径——将来若改 pretty 输出，
+    // 裸换行会把一条事件提前截断，而 SSE 允许同一条事件带多行 `data:`。
+    for line in text.lines() {
+        out.extend_from_slice(b"data: ");
+        out.extend_from_slice(line.as_bytes());
+        out.push(b'\n');
+    }
+    out.push(b'\n');
+    out
+}
+
+/// `GET /api/v1/events`：订阅总线并把帧逐条写成 SSE。
+///
+/// ## 它只是传输，不是第二个信源
+///
+/// 订阅拿到的与 WS 完全相同的帧；**要收到会话流仍需另走 `vdfs/watch`**
+/// （总线只是广播口，见 DE-013 §5.3）。本端点不登记 watch，也不按 `kind` 过滤。
+///
+/// ## 断线必须主动取消订阅
+///
+/// `event_bus` 的清理任务在 `PluginChannel::cancel_token` 上等待反注册；只 drop
+/// 通道不会触发它（令牌 drop 不等于 cancel）。不主动取消就会留下幽灵订阅者：
+/// 广播继续往一条没人读的通道里写，最终只能靠 resync 空转。
+///
+/// ## 断线为什么读半边
+///
+/// SSE 是**只写**通道：客户端不发任何东西，因此「对端已断开」只有两种时刻可见——
+/// 下一次写失败，或读到 EOF。只靠写（心跳）意味着断开后要空挂一整个心跳周期；
+/// 这里同时 select 读半边，FIN 一到就收口（与 WS 的读循环同一判据）。
+async fn handle_sse(stream: TcpStream, router: Arc<dyn Plugin>, cancel: CancellationToken) {
+    let (mut read_half, mut write_half) = stream.into_split();
+    let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
+    if let Err(e) = ctx.set_payload(EventBusSubscribeRequest {}) {
+        let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
+        let _ = write_half
+            .write_all(&http_response(
+                500,
+                "Internal Server Error",
+                "application/json",
+                &b,
+                &cors_headers(),
+            ))
+            .await;
+        return;
+    }
+    let mut chan = match Arc::clone(&router).route(ctx).await {
+        Ok(PluginPayload::Session(c)) => c,
+        Ok(_) => {
+            let b = "{\"error\":\"event_bus/subscribe 返回了非会话载荷\"}";
+            let _ = write_half
+                .write_all(&http_response(
+                    500,
+                    "Internal Server Error",
+                    "application/json",
+                    b.as_bytes(),
+                    &cors_headers(),
+                ))
+                .await;
+            return;
+        }
+        Err(e) => {
+            let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
+            let _ = write_half
+                .write_all(&http_response(
+                    500,
+                    "Internal Server Error",
+                    "application/json",
+                    &b,
+                    &cors_headers(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    // SSE 没有 `Content-Length`（响应体是无限长的事件流），因此不走
+    // `http_response`；`Connection: keep-alive` 与 `X-Accel-Buffering: no`
+    // 分别挡住「HTTP/1.1 默认长连接」与 nginx 一类反向代理的响应缓冲。
+    let head = "HTTP/1.1 200 OK\r\n\
+                Content-Type: text/event-stream\r\n\
+                Cache-Control: no-cache\r\n\
+                X-Accel-Buffering: no\r\n\
+                Access-Control-Allow-Origin: *\r\n\
+                Connection: keep-alive\r\n\r\n";
+    if write_half.write_all(head.as_bytes()).await.is_err() {
+        chan.cancel_token.cancel();
+        return;
+    }
+    if write_half.flush().await.is_err() {
+        chan.cancel_token.cancel();
+        return;
+    }
+
+    // 客户端在 SSE 上发来的字节没有语义（请求体已读完），读到的内容一律丢弃；
+    // 这里要的只是 EOF / 错误。
+    let mut scratch = [0u8; 256];
+    loop {
+        let frame = tokio::select! {
+            _ = cancel.cancelled() => break,
+            r = read_half.read(&mut scratch) => {
+                match r {
+                    Ok(0) | Err(_) => break,
+                    // 客户端发了点什么：与本流无关，继续等事件。
+                    Ok(_) => continue,
+                }
+            }
+            r = tokio::time::timeout(SSE_HEARTBEAT, chan.rx.recv()) => r,
+        };
+        let chunk = match frame {
+            // 空闲：注释行保活。写失败 = 对端已走，下一轮 select 也会看到取消 / EOF，
+            // 但这里直接收口更省一次往返。
+            Err(_elapsed) => b": ping\n\n".to_vec(),
+            Ok(Some(PluginFrame::Data(v))) => sse_data_line(&v),
+            Ok(Some(PluginFrame::Error(message, _))) => {
+                let payload = serde_json::json!({ "error": message });
+                // 终局：错误帧发完就结束这次订阅，写不出去也没有后续动作可做。
+                let _ = write_half.write_all(&sse_data_line(&payload)).await; // grep-audit-allow S-002-bonus: 终局写，失败即对端已走
+                break;
+            }
+            // 发布方已关闭：没有更多事件，正常结束。
+            Ok(None) => break,
+        };
+        if write_half.write_all(&chunk).await.is_err() || write_half.flush().await.is_err() {
+            break;
+        }
+    }
+
+    // 先摘订阅再关连接：反注册不依赖 TCP 的 FIN 时序。
+    chan.cancel_token.cancel();
+    let _ = write_half.shutdown().await; // grep-audit-allow S-002-bonus: 关闭写半边是收尾动作，失败即对端已走
 }
 
 // ==================== WebSocket ====================
@@ -873,6 +1069,7 @@ async fn handle_ws(
         .and_then(classify_payload);
     match delivery {
         Ok(PayloadDelivery::Stream(chan)) => {
+            let channel_token = chan.cancel_token.clone();
             let (tx, mut rx) = (chan.tx, chan.rx);
             // 单任务 select：后端帧 → WS；WS 帧 → 后端（含 ping/pong、close）
             loop {
@@ -904,6 +1101,8 @@ async fn handle_ws(
                     }
                 }
             }
+            // 与 SSE 同一条理由：连接结束不等于订阅结束，令牌不取消就留下幽灵订阅者。
+            channel_token.cancel();
             ws_close(&mut write_half).await;
         }
         Ok(PayloadDelivery::Once(value)) => {

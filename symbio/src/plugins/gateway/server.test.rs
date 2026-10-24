@@ -430,3 +430,144 @@ async fn stop_closes_the_listener_and_refuses_new_connections() {
         "停用后监听仍然接受连接——accept 循环没有被收口"
     );
 }
+
+// ---- SSE 实时面（`GET /api/v1/events`） ----
+
+/// 只对 `event_bus/subscribe` 应答的订阅路由：发一条信封后关闭通道。
+///
+/// 用**真实通道**而不是 mock 流：SSE 处理器的职责就是「路由拿到 Session 后逐帧转发」，
+/// 换成假流就等于把这段接线测掉了。`mine` 在返回时 drop，帧已入缓冲，
+/// 对端因此读到一条帧、随后 EOF——正好是一条最短的订阅生命周期。
+struct OneFrameRouter;
+
+#[async_trait::async_trait]
+impl Plugin for OneFrameRouter {
+    fn meta(&self) -> crate::symbio_core::PluginMeta {
+        crate::symbio_core::PluginMeta::new("one-frame-router", "one")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
+        let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
+        if path != crate::symbio_core::ROUTE_EVENT_BUS_SUBSCRIBE {
+            return Err(crate::symbio_core::PluginError::NotFound(path));
+        }
+        let (peer, mine) = crate::symbio_core::PluginChannel::pair(4);
+        mine.tx
+            .send(crate::symbio_core::PluginFrame::data(serde_json::json!({
+                "type": "bus_event",
+                "data": {"kind": "system", "session_id": null, "data": {"event": "connected"}},
+            })))
+            .await
+            .map_err(|e| crate::symbio_core::PluginError::InternalError(e.to_string()))?;
+        Ok(crate::symbio_core::PluginPayload::Session(peer))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
+        Ok(crate::symbio_core::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
+    }
+}
+
+async fn start_sse_gateway(readonly: bool, token: &str) -> (ServerHandle, std::net::SocketAddr) {
+    let cfg = GatewayConfig {
+        inbound_enabled: true,
+        inbound_protocol: "http".into(),
+        inbound_bind: "127.0.0.1".into(),
+        inbound_port: 0,
+        inbound_token: token.to_string(),
+        inbound_readonly: readonly,
+        ..Default::default()
+    };
+    let handle = start(&cfg, Arc::new(OneFrameRouter))
+        .await
+        .expect("回环 + 端口 0 应能启动")
+        .expect("enabled + http 必须返回句柄");
+    let addr = handle.local_addr();
+    (handle, addr)
+}
+
+async fn get_once(addr: std::net::SocketAddr, request: &str) -> String {
+    let mut stream = TcpStream::connect(addr).await.expect("应能连接网关");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("写入请求");
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut buf))
+        .await
+        .expect("响应应在超时前结束（关闭通道 / Content-Length）")
+        .expect("读取响应");
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// 一条信封 = 一条 SSE 事件：`data:` 行原样承载 JSON，空行结束事件。
+#[test]
+fn sse_data_line_keeps_one_event_per_envelope() {
+    let line = sse_data_line(&serde_json::json!({
+        "type": "bus_event",
+        "data": {"kind": "vdfs", "session_id": null, "data": {"path": "/x"}},
+    }));
+    let text = String::from_utf8(line).expect("SSE 输出应是 UTF-8");
+    assert!(
+        text.starts_with("data: "),
+        "事件必须以 data: 行承载：{text}"
+    );
+    assert!(text.ends_with("\n\n"), "事件必须以空行结束：{text:?}");
+    let json: Value =
+        serde_json::from_str(text.trim_start_matches("data: ").trim_end()).expect("应能解回 JSON");
+    assert_eq!(
+        json["data"]["kind"], "vdfs",
+        "信封必须原样过，不重新解释 kind"
+    );
+}
+
+/// 端点真的把总线帧送到 HTTP 边界：状态行 + SSE 内容类型 + 信封正文。
+#[tokio::test]
+async fn sse_endpoint_streams_the_bus_envelope_verbatim() {
+    let (handle, addr) = start_sse_gateway(false, "").await;
+    let text = get_once(addr, "GET /api/v1/events HTTP/1.1\r\nHost: probe\r\n\r\n").await;
+    assert!(text.starts_with("HTTP/1.1 200 OK\r\n"), "{text}");
+    assert!(
+        text.contains("Content-Type: text/event-stream"),
+        "SSE 必须用 text/event-stream：{text}"
+    );
+    assert!(text.contains("data: "), "应下发总线信封：{text}");
+    assert!(
+        text.contains(r#""event":"connected""#),
+        "应原样下发 event_bus 的 connected 信封：{text}"
+    );
+    stop(handle);
+}
+
+/// 只读模式不开放实时面：长连接广播会把可读范围扩到全部在途内容。
+#[tokio::test]
+async fn sse_endpoint_is_forbidden_in_readonly_mode() {
+    let (handle, addr) = start_sse_gateway(true, "").await;
+    let text = get_once(addr, "GET /api/v1/events HTTP/1.1\r\nHost: probe\r\n\r\n").await;
+    assert!(text.starts_with("HTTP/1.1 403 Forbidden"), "{text}");
+    assert!(text.contains("只读模式下不开放实时订阅"), "{text}");
+    stop(handle);
+}
+
+/// 令牌规则与 invoke 同一收起：配了令牌就必须带对，否则 401。
+#[tokio::test]
+async fn sse_endpoint_requires_the_configured_bearer_token() {
+    let (handle, addr) = start_sse_gateway(false, "s3cret").await;
+    let denied = get_once(addr, "GET /api/v1/events HTTP/1.1\r\nHost: probe\r\n\r\n").await;
+    assert!(denied.starts_with("HTTP/1.1 401 Unauthorized"), "{denied}");
+    let allowed = get_once(
+        addr,
+        "GET /api/v1/events HTTP/1.1\r\nHost: probe\r\nAuthorization: Bearer s3cret\r\n\r\n",
+    )
+    .await;
+    assert!(allowed.starts_with("HTTP/1.1 200 OK"), "{allowed}");
+    stop(handle);
+}

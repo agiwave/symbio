@@ -230,9 +230,9 @@ mcp_servers:
 
 ## Gateway 插件
 
-HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树。三类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，此后双向 `PluginFrame`）、`GET /api/v1/health`。
+HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树。四类端点：`POST /api/v1/invoke`（对齐 `route_v2`）、`WS /api/v1/ws`（首帧即请求体，此后双向 `PluginFrame`）、`GET /api/v1/events`（SSE，`event_bus/subscribe` 的只读包装，信封原样、仍需另走 `vdfs/watch`）、`GET /api/v1/health`。
 
-令牌只走 `Authorization: Bearer`；浏览器 WS 经 `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（握手只回选 `symbio.v1`）。查询串令牌不被接受。`POST /api/v1/invoke` 可带 `Idempotency-Key`：分派前登记，TTL 内重复回 409，失败释放（语义见 [DE-013](../003-design/013-HTTP开放接口.md "DE-013-HTTP开放接口") §5.1.1）。
+令牌只走 `Authorization: Bearer`；浏览器 WS 经 `Sec-WebSocket-Protocol: symbio.v1, bearer.<token>` 携带（握手只回选 `symbio.v1`）。查询串令牌不被接受。`POST /api/v1/invoke` 可带 `Idempotency-Key`：分派前登记，TTL 内重复回 409，失败释放（语义见 [DE-013](../003-design/013-HTTP开放接口.md "DE-013-HTTP开放接口") §5.1.1）；SSE 在只读模式下拒绝（§5.5）。
 
 ### 作为插件的路由
 

@@ -155,7 +155,7 @@ export const BASELINE = {
   // （D-126，`waiting_means_a_sent_request_without_a_terminal` 与对偶形状那条）+
   // 判据 7 / 8 / 12 三条机制判据的可执行证据（空表试金石 / 任意前缀 / 输入闭包，
   // 各经一次变异验证确认能红——`stale_sent` 恒假即红）。
-  rustTests: 2122,
+  rustTests: 2126,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
@@ -180,7 +180,7 @@ export const BASELINE = {
   verifyNegatives: 4,
   // baseline-allow e2eCases: 批 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // 增 t76（召回可见域）。
-  e2eCases: 79,
+  e2eCases: 80,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，

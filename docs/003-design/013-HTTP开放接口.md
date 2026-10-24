@@ -56,7 +56,7 @@ symbio/src/plugins/gateway/
 ├── mod.rs // 插件职责与"只搬运行李"的设计说明
 ├── plugin.rs // GatewayPlugin：Plugin trait + 生命周期 + 配置文档声明
 ├── config.rs // GatewayConfig（扁平 inbound_* 键）+ 只读白名单
-└── server.rs // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/health
+└── server.rs // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/events、/api/v1/health
 ```
 
 - 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（`symbio_core/plugin/ids.rs`）。
@@ -105,9 +105,10 @@ symbio/src/plugins/gateway/
 
 ## 5. 接口设计
 
-统一前缀 `/api/v1`。设了 `inbound_token` 时 HTTP 与 WS 都走
+统一前缀 `/api/v1`。设了 `inbound_token` 时 HTTP、WS 与 SSE 都走
 `Authorization: Bearer <token>`（WS 浏览器客户端走 `Sec-WebSocket-Protocol: bearer.<token>`，
-见 §5.2）；令牌为空表示不校验（仅允许回环绑定，见 §6）。**令牌不进查询串**——
+见 §5.2；浏览器 `EventSource` 不能自定义头，故 SSE 面向非浏览器客户端，见 §5.5）。
+令牌为空表示不校验（仅允许回环绑定，见 §6）。**令牌不进查询串**——
 查询串会进访问日志、代理记录与 `Referer`。
 
 ### 5.1 一次性调用（HTTP）
@@ -238,10 +239,35 @@ Authorization: Bearer <token>
 GET /api/v1/health → { "ok": true }
 ```
 
-### 5.5 预留通道（未实现）
+### 5.5 SSE 实时面（只读）
 
-- **SSE**：`GET /api/v1/events`（`text/event-stream`）= `event_bus/subscribe` 的只读包装。
- 价值在 `curl -N` 即可调试，无需 WS 客户端；**WebSocket 仍是主通道**。
+```
+GET /api/v1/events
+Authorization: Bearer <token>
+→ 200 text/event-stream
+data: {"type":"bus_event","data":{"kind":"vdfs","session_id":null,"data":{"path":"<根>/session/<id>/…"}}}
+
+data: {"type":"bus_event","data":{"kind":"system","session_id":null,"data":{"event":"connected","connection_id":"…"}}}
+```
+
+= `event_bus/subscribe` 的**只读包装**，不新增信源、不新增帧形状：
+
+- 每条 `data:` 承载**总线信封原样**（`{type:"bus_event", data:{kind, session_id, data}}`），
+  `kind` 由消费方自行分派；WS 客户端看到的是同一份东西，只是外层多包一层
+  `{"Data": …}`。不写 `event:` 具名事件——那会让 `EventSource.onmessage` 收不到。
+- **要收到会话流仍需 `vdfs/watch`**（见 §5.3）：总线只是广播口，本端点不登记 watch、
+  也不按 `kind` 过滤。
+- 鉴权与 HTTP 同一规则（`Authorization`，**不接受查询串令牌**）。浏览器 `EventSource`
+  不能自定义头，因此浏览器仍走 WS 子协议携带令牌；SSE 面向 `curl -N` / SDK 调试。
+- **只读模式拒绝**（`403`）：它是长连接广播，一次订阅覆盖作用域内全部会话的在途内容
+  （含尚未落库的增量），与「逐个地址去读」的只读口径不同（同一条取舍见 §6 与
+  [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")）。
+- 空闲期每 15s 发一行注释 `: ping` 保活；连接断开（读到 FIN 或写失败）即取消订阅令牌，
+  总线侧的反注册任务随之摘除订阅者——**不留幽灵订阅**。
+- 连接上限与 WS 同一配额（`inbound_max_connections` 计一条存活连接）。
+
+### 5.6 预留通道（未实现）
+
 - **manifest**：`GET /api/v1/manifest` → 路由清单（见 §7）。
 - 运行状态（订阅者数、是否在监听）经 `gateway/status` 路由取，不在 health 里。
 
@@ -258,15 +284,15 @@ GET /api/v1/health → { "ok": true }
  （浏览器 WS 走 `Sec-WebSocket-Protocol: bearer.<token>`，见 §5.2）；**不接受查询串令牌**；
  置空即不校验（仅回环允许）。
 - **连接上限**（`inbound_max_connections`，缺省 64）：同时存活的连接数上限，HTTP 一次调用
- 占一个、WS 一条连接从握手活到关闭。到顶时新连接留在内核 accept 队列里等（**背压优先于
+ 占一个、WS 与 SSE 各占一条从握手活到关闭的连接。到顶时新连接留在内核 accept 队列里等（**背压优先于
  报错**：拒绝本身也需要一条连接），已有连接不受影响。配置变更经写配置后的重启监听生效。
 - **重放防护**：`/api/v1/invoke` 的 `Idempotency-Key`（语义与边界见 §5.1.1）。
 - CORS：响应头固定 `Access-Control-Allow-Origin: *`（`OPTIONS` 预检直接放行），
  跨域隔离依赖 token 与绑定地址，不靠 Origin 白名单。
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
  （清单见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")），其余 403/拒绝；
- `gateway/*` 一律拒绝，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝
- （配置含 `inbound_token` 等凭据）。
+ `gateway/*` 一律拒绝，`GET /api/v1/events` 也拒绝（长连接广播），且 `vdfs/read`
+ 只要落在任何插件的 `PLUGIN.yml` 上就拒绝（配置含 `inbound_token` 等凭据）。
 - 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`vdfs/write|delete` 归为
  `danger`）：**预留**，现行只有只读白名单一层。home 的臂不在任何分级里——它经入站
  根本走不到（§4.1）。
