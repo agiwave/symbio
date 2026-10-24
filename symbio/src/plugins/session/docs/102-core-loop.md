@@ -9,6 +9,11 @@ impl: done
 
 # 会话核心循环（LLM × 工具）
 
+> **目标形状**见 [DE-001 §4.3 / §4.4](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
+> 与 [DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")；
+> 迁移路径见 [DE-090](../../../../../docs/003-design/090-过渡方案.md "DE-090-过渡方案")。
+> 本文只写**当前实现**，不复述目标裁决。
+>
 > 范围：主循环本体住在 `symbio/src/plugins/loop/`（驱动器插件）；一轮的**装配与收尾**
 > 留在 `symbio/src/plugins/session/orchestrator/`（存储与生命周期）。
 > 本文只回答一个问题：**主循环的结构是什么**。「压缩策略有哪些」见 [`../README.md`](../README.md "symbio/src/plugins/session/README")（五大压缩策略）；节点状态与流见 [`./018-node-state-streaming.md`](105-node-state-streaming.md "DE-105-node-state-streaming")。

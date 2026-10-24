@@ -1,15 +1,15 @@
 ---
 kind: design
 id: DE-103-turn-runner-steps
-title: 016 · `run_with_tools` 的 Step 施工图（DE-014 步骤 1）
+title: `run_with_tools` 的 Step 施工图（DE-090 §1 步骤 1）
 status: active
 created: 2026-10-17
 impl: done
 ---
 
-# 016 · `run_with_tools` 的 Step 施工图（DE-014 步骤 1）
+# `run_with_tools` 的 Step 施工图（DE-090 §1 步骤 1）
 
-> **这份文档的存在理由**：DE-014 §5 步骤 1 要把 `turn_runner.rs` 的 768 行单函数
+> **这份文档的存在理由**：[DE-090 §1](../../../../../docs/003-design/090-过渡方案.md "DE-090-过渡方案") 步骤 1 要把 `turn_runner.rs` 的 768 行单函数
 > （`run_with_tools`，696–1463）收敛成 Step 循环。没有这张映射表，300 行熔断线被突破的
 > 原因**不是抽象错了，是缺图**——施工者会在函数里现场发明边界。表在这里，边界就是给定的。
 
