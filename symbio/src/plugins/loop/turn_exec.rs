@@ -738,8 +738,8 @@ pub(crate) struct TurnStep<'a> {
 /// 它是执行体与派发器之间唯一的失败通道：从此扩展失败种类**只能靠加变体**，而每加
 /// 一个变体都要回答「派发器为它落哪条事实」——`String` 版失败会把这件事藏进文本。
 ///
-/// 今天只有一元：动作面只会因落格失败（`AppendError`）而失败。这不是凑形状，
-/// 是「除落格外，执行体还没有别的失败形态」这件事的类型化表达。
+/// 两档各自的答案写在**两个派发器**里（D-159：一台 host 一个派发点）：轮内是
+/// `drive_steps`，轮首是 `head_exec::drive_head`。
 ///
 /// 为什么不进 `symbio_core`：机制层既不产它也不读它（`ring::drive` 只裁决欠不欠，
 /// `run` 的指针按 D-119 本来就留在部署层），放进 core 就是一个**单消费方导出**，
@@ -749,6 +749,14 @@ pub(crate) struct TurnStep<'a> {
 pub(crate) enum ActorError {
     /// 落格失败（幂等键撞了、写侧闸不过、存储出错）。
     Append(AppendError),
+    /// 动作要读的那一侧没交出它要的东西（会话端口的一次读失败）。
+    ///
+    /// 「派发器为它落哪条事实」的答案按 host 分：**轮内今天产不出这一档**——模型与
+    /// 工具往返的失败都经端口落成 `failed(port=…)`，由账本判，不经返回值；**轮首**的
+    /// 读失败发生在幕锚之后、任何请求格之前，端口面上没有一笔账可关，因此交回编排层
+    /// 走 `finish_turn(TurnExit::Failed)` 的兜底格既有路径（与换成动作通道之前逐字
+    /// 同行为）。
+    Read(crate::symbio_core::PluginError),
 }
 
 /// 动作的返回：`Ok(())` = 这一步做完了（本轮是否收束由派发器读账本判），`Err` = 失败。
@@ -759,6 +767,9 @@ pub(crate) enum ActorError {
 ///
 /// `+ Send` 不是装饰：插件的 `dispatch` 未来要交回线程池，派发器在它里面 await
 /// 这个动作。
+///
+/// 这一条返回通道**两台 host 共用**（D-159）：轮首的执行体借走的是另一片可变状态，
+/// 但「这一步做完了 / 失败了」与「产出不由返回值交回」是同一句话。
 pub(crate) type StepFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ActorError>> + Send + 'a>>;
 
@@ -768,6 +779,10 @@ pub(crate) type StepFuture<'a> =
 /// 借用只有一条寿命：`TurnStep` 的端口字段全是 `Arc`，唯一借来的东西是本轮草稿
 /// （派发器持有的 `TurnSession`）。这就是 §2.3 草图里 `'static` 换不来的那条——
 /// 草稿必须被借走，动作就不能是 `'static`（D-119）。
+///
+/// 这里借走的是**轮内**那片状态（本轮草稿 + 七个端口）；轮首那片（本轮状态 + 会话
+/// 上下文 + 请求句柄）的动作是同形状的另一个类型，见 [`super::head_exec::HeadAction`]
+/// ——两台 host 的差别只在借什么，不在怎么选债（D-159 裁决 1）。
 pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 
 /// `execute` 执行体：跑**一次**模型往返。
@@ -877,9 +892,12 @@ pub(crate) async fn drive_steps(
     tools: &[CapabilityMeta],
     dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
     actors: &'static [super::loop_rows::ActorEntry],
-) -> Result<TurnOutcome, AppendError> {
+) -> Result<TurnOutcome, ActorError> {
     let step_sink = sink.clone();
-    let mut session = match TurnRunner::begin(store, llm, input, sink).await? {
+    let mut session = match TurnRunner::begin(store, llm, input, sink)
+        .await
+        .map_err(ActorError::Append)?
+    {
         TurnSessionBegin::Done(outcome) => return Ok(outcome),
         TurnSessionBegin::Run(session) => session,
     };
@@ -906,7 +924,10 @@ pub(crate) async fn drive_steps(
                 } else {
                     "no_progress"
                 };
-                return session.exhausted(store, llm, detail).await;
+                return session
+                    .exhausted(store, llm, detail)
+                    .await
+                    .map_err(ActorError::Append);
             }
         };
         crate::plugin_debug!(
@@ -922,7 +943,10 @@ pub(crate) async fn drive_steps(
                 "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
                 session.turn()
             );
-            return session.exhausted(store, llm, "step_limit").await;
+            return session
+                .exhausted(store, llm, "step_limit")
+                .await
+                .map_err(ActorError::Append);
         }
         let head = store.head();
         {
@@ -938,9 +962,12 @@ pub(crate) async fn drive_steps(
             // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（D-123 决策 5）。
             match (next.action)(&mut step).await {
                 Ok(()) => {}
-                // 一元枚举：动作面今天只会因落格失败，原样交回调用方（与换通道之前
-                // 逐字同行为）。加变体时要在这里回答「派发器为它落哪条事实」。
-                Err(ActorError::Append(e)) => return Err(e),
+                // 落格失败原样交回调用方（与换通道之前逐字同行为）。
+                Err(ActorError::Append(e)) => return Err(ActorError::Append(e)),
+                // 轮内的读**都在端口面上**（模型 / 工具往返的失败落成 `failed(port=…)`，
+                // 由账本判），所以今天没有一条轮内动作会走到这里；接住它是为了「加变体
+                // 必须在这里回答一次」这件事留在派发器，而不是编译不过才发现。
+                Err(ActorError::Read(e)) => return Err(ActorError::Read(e)),
             }
         }
         // **账本**（D-123 决策 1）：这一次动作的**实际写入** = 日志尾段（动作前的
@@ -967,7 +994,10 @@ pub(crate) async fn drive_steps(
                 next.row,
                 session.turn()
             );
-            return session.exhausted(store, llm, "undeclared-write").await;
+            return session
+                .exhausted(store, llm, "undeclared-write")
+                .await
+                .map_err(ActorError::Append);
         }
         // **收束判断读账本**（D-123 决策 5）：本轮收不收工由日志说，不由执行体说。
         // 产出是收束那一步寄存进草稿的（`prepare::Prepared::settled`），派发器取走交回调用方。
@@ -983,7 +1013,10 @@ pub(crate) async fn drive_steps(
                     next.row,
                     session.turn()
                 );
-                return session.exhausted(store, llm, "unrecorded-outcome").await;
+                return session
+                    .exhausted(store, llm, "unrecorded-outcome")
+                    .await
+                    .map_err(ActorError::Append);
             };
             return Ok(outcome);
         }
@@ -991,7 +1024,10 @@ pub(crate) async fn drive_steps(
         // 落 `exhausted{no_progress}` 而不是空转到步数上界。判据 14 的夹具走的就是这条
         // 分支（空动作注册在同一个 `by` 上 ⇒ 不接线就红，见 判据 4）。
         if ledger.is_empty() {
-            return session.exhausted(store, llm, "no_progress").await;
+            return session
+                .exhausted(store, llm, "no_progress")
+                .await
+                .map_err(ActorError::Append);
         }
     }
 }

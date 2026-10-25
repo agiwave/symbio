@@ -406,7 +406,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// ## 声明侧的格子（同一个类型，不分两套）
 ///
 /// 五张注册表（fact / view / actor / port / row）经 `Builder` 进表后，
-/// 「装载期检查」只有一个出口、也就只有一个错误类型：下面这十格查的是**声明自己**
+/// 「装载期检查」只有一个出口、也就只有一个错误类型：下面这十一格查的是**声明自己**
 /// （重名、撞名、引用不存在的名字、字段没声明、执行体声明了引擎独占的格），
 /// 由 `seal()` 在跑上面七道之前先报。分成两个类型只会让「拒绝启动」出现两次。
 ///
@@ -416,6 +416,8 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::NameCollision`]：事实名与视图名撞名——它们共用一个名字空间（视图是合成事实）；
 /// - [`Gap::UnknownFact`] / [`Gap::UndeclaredField`]：视图 `reads` 引用了未声明的事实 /
 ///   该事实没有这个字段；
+/// - [`Gap::EvidenceNotRead`]：视图的 `evidence` 写了 `reads` 之外的名字——那条边
+///   会从依赖图里**静默消失**（第 1 条按证据集配图），比多一条假边更坏；
 /// - [`Gap::FactFieldUndeclared`]：事实自己的 `port` / `key` / `expand` 引用了不在
 ///   `fields` 里的字段；
 /// - [`Gap::UnknownReadView`]：执行体 `reads` 引用了未声明的视图——运行期静默返回空；
@@ -503,6 +505,10 @@ pub(crate) enum Gap {
         fact: &'static str,
         field: &'static str,
     },
+    EvidenceNotRead {
+        view: &'static str,
+        fact: &'static str,
+    },
     FactFieldUndeclared {
         fact: &'static str,
         field: &'static str,
@@ -525,6 +531,21 @@ pub(crate) enum Gap {
 fn fact_names_of(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
     match frozen.view(source) {
         Some(view) => view.reads.iter().map(|(f, _)| *f).collect(),
+        None => vec![source],
+    }
+}
+
+/// 一个模式源展开成**替它收口的事实名**：事实源仍是它自己，视图源只取它的
+/// `evidence`（输出证据集），不取 `reads` 全集。
+///
+/// 只有依赖图（§3.4 第 1 条）用它。差别在锚点：`turn_closed` 读 `turn.stage` 只为
+/// 折出幕锚，那一格谁都没替它关门——按 `reads` 建边会把「帮我算」读成「替我收」，
+/// 于是共写 `turn.stage` 一族的行两两互等成假环（判据见 DE-015 的 D-160）。
+/// 第 6 条仍按 [`fact_names_of`]：它判的是执行体**有没有能力**写到落在自己出口线
+/// 上的格，保守一档只多不少。
+fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
+    match frozen.view(source) {
+        Some(view) => view.evidence.to_vec(),
         None => vec![source],
     }
 }
@@ -678,12 +699,12 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
     gaps
 }
 
-/// §3.4 第 1 条：「谁还清谁」的保守依赖图不许有环。
+/// §3.4 第 1 条：「谁还清谁」的依赖图不许有环。
 ///
 /// 边 `a → b` 的意思：`b` 的执行体声明写的某个**事实名**出现在 `a` 的出口（`until ∪
-/// unless`，视图按 `reads` 展开到事实）里——`a` 还不还得看 `b` 跑不跑。环 ⇒ 每一笔
-/// 都在等环里的另一笔先被派发，而「被派发」要求它此刻就开着：类型级互相等待，
-/// 运行期一步都走不动（这不是「慢」，是死锁）。
+/// unless`，视图按 `evidence` 展开到事实——只作锚点的读面不算关门方，见 [`exit_fact_names`]）
+/// 里——`a` 还不还得看 `b` 跑不跑。环 ⇒ 每一笔都在等环里的另一笔先被派发，而「被派发」
+/// 要求它此刻就开着：类型级互相等待，运行期一步都走不动（这不是「慢」，是死锁）。
 ///
 /// 两处刻意保守：
 ///
@@ -708,12 +729,12 @@ enum Visit {
     Done,
 }
 
-/// 这一行靠哪些**事实**关掉（视图展开到它的 `reads`，与第 6 条同一算法）。
+/// 这一行靠哪些**事实**关掉（视图只取它的 `evidence`，与第 6 条同一算法但读面不同）。
 fn exit_facts(decl: &Decl, frozen: &Frozen) -> Vec<&'static str> {
     decl.until
         .iter()
         .chain(decl.unless)
-        .flat_map(|p| fact_names_of(p.source, frozen))
+        .flat_map(|p| exit_fact_names(p.source, frozen))
         .collect()
 }
 

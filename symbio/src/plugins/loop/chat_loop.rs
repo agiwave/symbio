@@ -54,7 +54,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::drive::begin_drive;
-pub(crate) use self::inputs::prepare_turn_inputs;
+pub(crate) use self::inputs::{prepare_turn_inputs, run_recall};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,

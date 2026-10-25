@@ -11,6 +11,8 @@
 mod chat_loop;
 mod context;
 mod derived_facts;
+// 轮首 host 的执行体与派发点（DE-015 的 D-159）：与 `turn_exec` 同形状，借的面不同。
+mod head_exec;
 // 义务环的行表：控制面经 `owes` 问表，判据在数据里。
 mod loop_rows;
 mod memory_events;

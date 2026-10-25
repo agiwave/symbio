@@ -98,11 +98,12 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                     &actor,
                     &h.content,
                     bridge.clone(),
-                    // 阶段事实已由装配段落格（反射行要读 `skill_hit`，它必须
-                    // 先成事实才能被认领）；这里不再重落。
+                    // 阶段事实已在各自的落格点入日志（判决 / 压缩 = 装配段，召回 =
+                    // 轮首执行体）；这里不再重落。
                     &[],
                 )
                 .await
+                .map_err(ActorError::Append)
         }
         // ── 深度档：完整推理（与接线前逐字同路）─────────────────────────────
         None => {

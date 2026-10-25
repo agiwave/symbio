@@ -9,10 +9,11 @@
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
 //! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
 
+use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
 use crate::symbio_core::{
-    ActorSpec, AppendError, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter,
-    SilentDeltas, Store, Verb, EVENT_USER_MESSAGE,
+    ActorSpec, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas, Store,
+    Verb, EVENT_USER_MESSAGE,
 };
 
 /// 测试侧先落用户格：生产里由 `chat_loop::drive` 在任何判决之前落，
@@ -59,7 +60,7 @@ impl TurnRunner {
         turn: u64,
         text: &str,
         tier: LatencyTier,
-    ) -> Result<TurnOutcome, AppendError>
+    ) -> Result<TurnOutcome, ActorError>
     where
         S: Store<Event = Event>,
     {
@@ -108,7 +109,7 @@ impl TurnRunner {
         tok: &FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
-    ) -> Result<TurnOutcome, AppendError> {
+    ) -> Result<TurnOutcome, ActorError> {
         self.run_with_tools(store, llm, tok, input, sink, &[], None)
             .await
     }
@@ -127,7 +128,7 @@ impl TurnRunner {
         sink: std::sync::Arc<dyn DeltaSink>,
         tools: &[crate::symbio_core::CapabilityMeta],
         dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
-    ) -> Result<TurnOutcome, AppendError> {
+    ) -> Result<TurnOutcome, ActorError> {
         self.drive_with_actors(
             store,
             llm,
@@ -157,7 +158,7 @@ impl TurnRunner {
         tools: &[crate::symbio_core::CapabilityMeta],
         dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
         actors: &'static [super::super::loop_rows::ActorEntry],
-    ) -> Result<TurnOutcome, AppendError> {
+    ) -> Result<TurnOutcome, ActorError> {
         super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch, actors)
             .await
     }
@@ -168,9 +169,9 @@ impl TurnRunner {
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::symbio_core::{
-        check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, LatencyTier,
-        Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer, EVENT_ASSISTANT_FALLBACK,
-        EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        check_all, cost_ledger, fallback_rate, transcript, AppendError, Budget, Event, EventStore,
+        LatencyTier, Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer,
+        EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
@@ -348,7 +349,7 @@ mod turn_runner_tests {
         assert!(err.is_err(), "事件 id 撞车必须被 Store 幂等键拒绝");
         assert!(matches!(
             err,
-            Err(crate::symbio_core::AppendError::Duplicate)
+            Err(super::ActorError::Append(AppendError::Duplicate))
         ));
     }
 

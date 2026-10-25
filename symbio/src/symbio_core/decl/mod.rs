@@ -106,6 +106,17 @@ pub(crate) struct ViewDecl {
     pub(crate) ver: u32,
     /// 读的 `(事实名, 字段名)`。这是「字段都在声明里」那条检查的输入。
     pub(crate) reads: &'static [(&'static str, &'static str)],
+    /// **输出证据集**：本视图的输出是哪些事实名的证据。装载期查它 ⊆ `reads` 的事实名。
+    ///
+    /// 与 `reads` 分别是两件事：`reads` 回答「它读什么」（第 3 / 7 条的输入，为定位
+    /// 窗口而读也算消费），`evidence` 回答「它替谁关门」。视图名常出现在行的 `until`
+    /// 里，而依赖图（§3.4 第 1 条）把出口展开成事实名时**只能按 `evidence`**——按
+    /// `reads` 全集展开会把「帮我算幕锚」当成「替我收口」，共写一族事实的每一行互相
+    /// 连成假环，装载直接红（判据与被否的形状见 DE-015 的 D-160）。
+    ///
+    /// 例：`turn_closed` 读 `user.message` / `turn.stage` 是为了折出幕锚，它的输出
+    /// 只证据两格收束格 ⇒ `evidence = [chat.assistant.final, chat.assistant.fallback]`。
+    pub(crate) evidence: &'static [&'static str],
     /// 扫描成本上界（事件条数）。`owed` 每轮求值，成本必须有上界。
     pub(crate) cost: u32,
     /// 求值函数：**只有事实切片与时间戳**——没有写口、没有别的视图、没有时钟。
@@ -287,6 +298,14 @@ impl Builder {
                         field,
                     }),
                     Some(_) => {}
+                }
+            }
+            // 输出证据集必须是读面子集（DE-015 的 D-160）。反过来的漏网更坏：
+            // `evidence` 里写一个没读的名字，依赖图就少一条边，而**装载是绿的**——
+            // 假环至少红得看得见，静默少边只在真死锁那天显形。
+            for fact in v.evidence {
+                if !v.reads.iter().any(|(f, _)| f == fact) {
+                    gaps.push(Gap::EvidenceNotRead { view: v.name, fact });
                 }
             }
         }
@@ -1121,6 +1140,8 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_RETRY, "id"),
             (EVENT_RETRY, "attempt"),
         ],
+        // 输出的每一格就是「还开着的 `sent`」，四个协议名都在输出口上出现。
+        evidence: &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY],
         cost: 4096,
         eval: in_flight,
     },
@@ -1147,6 +1168,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_RETRY, "id"),
             (EVENT_RETRY, "attempt"),
         ],
+        evidence: &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY],
         cost: 4096,
         eval: stale_sent,
     },
@@ -1188,6 +1210,18 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
         ],
+        // 表头是「本轮开账条件的全部输入」：每个读面的事实名都在输出里出现一次
+        // （有没有发言 / 判过没有 / 召回过没有 / 答完没有…），故证据集 = 读面全集。
+        evidence: &[
+            "user.message",
+            "turn.stage",
+            "session.config",
+            EVENT_REQUEST,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
+            "chat.assistant.final",
+            "chat.assistant.fallback",
+        ],
         cost: 4096,
         eval: turn_head,
     },
@@ -1200,6 +1234,9 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("turn.stage", "stage"),
             ("turn.stage", "round"),
         ],
+        // 输出就是「本幕落下的阶段格」；`user.message` 只用来定位幕锚，
+        // 它出现与否不关这一行收口（假边的来源，见 DE-015 的 D-160）。
+        evidence: &["turn.stage"],
         cost: 4096,
         eval: turn_stages,
     },
@@ -1213,6 +1250,9 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
         ],
+        // 两条收束格才是「本幕收束了」的证据；`user.message` / `turn.stage` 只用来
+        // 找幕锚——按读面全集配图，任何写 `turn.stage` 的执行体都成了执行行的关门方。
+        evidence: &["chat.assistant.final", "chat.assistant.fallback"],
         cost: 4096,
         eval: turn_closed,
     },
@@ -1239,6 +1279,19 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("turn.supplemented", "text"),
             ("turn.stage", "stage"),
         ],
+        // 开账侧的视图：输出的每个字段都由这些格里的一格决定（静默起点、配额、
+        // 本幕汇报数），证据集取读面全集。它从不作行的出口，配图用不到这一格。
+        evidence: &[
+            "session.config",
+            "chat.assistant.reported",
+            "chat.assistant.opening",
+            "chat.assistant.final",
+            "chat.assistant.fallback",
+            "chat.assistant.progress",
+            "user.message",
+            "turn.supplemented",
+            "turn.stage",
+        ],
         cost: 4096,
         eval: report_due,
     },
@@ -1256,6 +1309,9 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("chat.assistant.fallback", "text"),
             ("chat.assistant.progress", "status"),
         ],
+        // 出口侧只认汇报格：其余读面算的是「这条汇报关的是哪一段静默」的区间起点，
+        // 它们出现得再多，也不会让某一笔汇报债关门。
+        evidence: &["chat.assistant.reported"],
         cost: 4096,
         eval: reported_anchors,
     },

@@ -79,6 +79,7 @@ fn declare(actors: &[ActorDecl]) -> Builder {
         name: "v",
         ver: 1,
         reads: &[("f", "id")],
+        evidence: &["f"],
         cost: 64,
         eval: ready_view,
     });
@@ -86,6 +87,7 @@ fn declare(actors: &[ActorDecl]) -> Builder {
         name: "v_list",
         ver: 1,
         reads: &[("f", "id")],
+        evidence: &["f"],
         cost: 64,
         eval: list_view,
     });
@@ -930,6 +932,84 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
             .iter()
             .any(|g| matches!(g, Gap::DependencyCycle { .. })),
         "自环不是互相等待：{gaps:?}"
+    );
+}
+
+// ── 出口视图的配图口径（第 1 条 · D-160）─────────────────────────────────
+
+/// 夹具的两个执行体：`one` 写视图**证据**里那一格，`two` 只写视图**读面**里的那一格。
+const WRITER_G: ActorDecl = ActorDecl {
+    name: "one",
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &["g"],
+};
+const WRITER_F: ActorDecl = ActorDecl {
+    name: "two",
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &["f"],
+};
+
+/// 「`r_a` 的出口是一个视图」那两份行：行形状固定，只有视图的 `evidence` 随用例变。
+fn exit_view_rows() -> Vec<Decl> {
+    vec![
+        row(
+            "r_a",
+            10,
+            Some("one"),
+            pattern("h", &["id"], &[]),
+            &[pattern("v_exit", &["id"], &[])],
+            &[],
+        ),
+        row(
+            "r_b",
+            20,
+            Some("two"),
+            pattern("h", &["id"], &[]),
+            &[pattern("f", &["id"], &[]), pattern("g", &["id"], &[])],
+            &[],
+        ),
+    ]
+}
+
+fn freeze_exit_view(evidence: &'static [&'static str]) -> Result<Arc<Frozen>, Vec<Gap>> {
+    let mut b = declare(&[WRITER_G, WRITER_F]);
+    b.view(ViewDecl {
+        name: "v_exit",
+        ver: 1,
+        // 读面两格：`g` 折锚点、`f` 定值；出口只由 `evidence` 决定（下两条用例的变量）。
+        reads: &[("f", "id"), ("g", "id")],
+        evidence,
+        cost: 64,
+        eval: ready_view,
+    });
+    for r in exit_view_rows() {
+        b.row(r);
+    }
+    b.seal()
+}
+
+/// 出口视图**只帮我算**的那一格，在依赖图上不是收口方（D-160）：图无环、装载绿。
+///
+/// 按 `reads` 全集配图会多出一条 `r_a → r_b`，与本来就有的 `r_b → r_a` 连成**假环**——
+/// 那是 D-160 落地前产线上 29 条环用例一起红的形状（共写 `turn.stage` 一族的行两两互等）。
+#[test]
+fn an_anchor_read_on_an_exit_view_adds_no_edge() {
+    assert_eq!(freeze_exit_view(&["g"]).err().unwrap_or_default(), vec![]);
+}
+
+/// 同两份行、同一个视图，只把 `evidence` 扩成读面全集 ⇒ 环立刻出现。
+///
+/// 这条是上一条的**反向自检**：上一条通过可能只是因为夹具压根不成环。收口方是
+/// 「输出证据」而不是「读过」，改的只有 `evidence` 一个字段——图的变化只能由它解释。
+#[test]
+fn the_full_read_set_as_evidence_is_the_cycle_that_was_missing() {
+    assert_eq!(
+        freeze_exit_view(&["f", "g"]).err().unwrap_or_default(),
+        vec![Gap::DependencyCycle {
+            cycle: vec!["r_a", "r_b", "r_a"]
+        }]
     );
 }
 

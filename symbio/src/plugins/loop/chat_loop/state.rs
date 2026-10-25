@@ -235,7 +235,9 @@ pub(crate) struct TurnState {
     /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
     /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
     pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
-    /// 已执行但**尚未落格**的阶段草稿——随本轮入参交给运行器（写者令牌在那边）。
+    /// 已执行但**尚未落格**的阶段草稿（判决 / 压缩）——随本轮入参交给运行器
+    /// （写者令牌在那边）。已在环上的行（`policy.recall`，D-159）不走这里：它的
+    /// 执行体自己落出口那一格，否则派发点在下一问读不到「做过」。
     ///
     /// 走工具循环的一轮里，它由 [`super::super::turn_exec`] 的装配段先落
     /// （反射档要读 `skill_hit`，那必须在问表之前成为事实）；定稿答话轮不经装配段，

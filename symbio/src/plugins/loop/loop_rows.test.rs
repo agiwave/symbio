@@ -569,14 +569,15 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
             "`{name}` 没有执行体 ⇒ 那三处直问不是护栏，是它唯一的派发点"
         );
     }
-    // 五条策略行正相反：它们至今没有执行体，所以那五处直问**就是**派发点（调度旁路，
-    // 归零对象）。这一格是 `D-158` 记的那笔账的当前形状，接回时它会红——那是预期的红。
+    // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
+    // 归零对象）。`policy.recall` 已由轮首派发点接管（D-159 第一批），不再在这笔账里。
+    // 这一格是 `D-158` 记的那笔账的当前形状，接回下一行时它会红——那是预期的红。
     let unwired: Vec<&str> = ROWS
         .iter()
         .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
         .map(|d| d.name)
         .collect();
-    assert_eq!(unwired.len(), 5, "未接线的策略行清单变了（`D-158` 的台账）");
+    assert_eq!(unwired.len(), 4, "未接线的策略行清单变了（`D-158` 的台账）");
 }
 
 #[test]
@@ -1810,6 +1811,98 @@ fn next_hands_back_the_action_itself() {
     assert!(std::ptr::fn_addr_eq(next.action, run));
 }
 
+/// 轮首 host 的欠账由**轮首**派发点选中，交出的动作是轮首绑定表里那一条（D-159 第一批）。
+#[test]
+fn next_head_selects_the_recall_row_at_turn_head() {
+    let ready = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": false, "is_persistent": true}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let next = super::next_head(&ready, 1, 0, super::HEAD_ACTORS).expect("轮首欠一次召回准备");
+    assert_eq!(next.row, "policy.recall");
+    assert_eq!(next.by, super::RECALL);
+    let run: super::super::head_exec::HeadAction = super::super::head_exec::run_recall;
+    assert!(std::ptr::fn_addr_eq(next.action, run));
+    // 出口那一格在它自己的名单里：执行体不落它 ⇒ 派发点读不到「做过」（下条钉这个）。
+    assert!(next.writes_closed("turn.stage"));
+}
+
+/// 召回格落地 ⇒ 轮首派发点收工：环**只靠执行体自己落格**推进。
+///
+/// 这条是 D-159 把「草稿交运行器落」那处寄存去掉的全部理由。出口格若寄在 `TurnState`
+/// 里等步骤 4 才进日志，本幕的第二次选债照样读到 `recall_done = false` ⇒ 同一笔债
+/// 再还一遍（派发点在轮首一步都走不动）。
+#[test]
+fn next_head_is_none_once_the_recall_cell_lands() {
+    let mut done = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": false, "is_persistent": true}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "miss"}),
+        ),
+    ];
+    assert!(super::next_head(&done, 1, 0, super::HEAD_ACTORS).is_none());
+    // 反向自检：出口格那一格是关门的原因——去掉它就重新欠账。
+    done.remove(3);
+    assert!(super::next_head(&done, 1, 0, super::HEAD_ACTORS).is_some());
+}
+
+/// **行子集由绑定表派生**（D-159 裁决 2）：轮内派发点选不到轮首的行，反之亦然。
+///
+/// 为什么不能给派发点整张 `ROWS`：`prio` 是**全局**序，`policy.recall`（40）比
+/// `execute-turn`（60）小 ⇒ 整张表会让轮内派发点选中一行动作住在另一张表上的债，
+/// 它只能报「表脱节」停住——两台 host 排在后面的债一起饿死。下面第 1 段钉的就是这个
+/// 反例：整张表的求解结果确实是 `policy.recall`，所以裁决 2 不是偏好，是必需的。
+#[test]
+fn each_shard_only_sees_the_rows_its_binding_table_names() {
+    let f = frozen();
+    let ready = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": false, "is_persistent": true}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let whole = crate::symbio_core::ring::drive(ROWS, &f, &ready, 0).expect("整张表有可还债");
+    assert_eq!(
+        whole.decl.name, "policy.recall",
+        "整张表的最小债是轮首那一行 ⇒ 派发点不收整张表"
+    );
+
+    let turn_rows = super::host_rows(&f, &super::actor_names(super::ACTORS));
+    assert!(
+        turn_rows.iter().any(|d| d.name == "execute-turn")
+            && turn_rows.iter().all(|d| d.name != "policy.recall"),
+        "轮内子集里出现了轮首的行：{:?}",
+        turn_rows.iter().map(|d| d.name).collect::<Vec<_>>()
+    );
+    let head_rows = super::host_rows(&f, &super::head_actor_names(super::HEAD_ACTORS));
+    assert_eq!(
+        head_rows.iter().map(|d| d.name).collect::<Vec<_>>(),
+        vec!["policy.recall"],
+        "轮首子集就是它的绑定表点名的行——多一条就是跨 host 抢债"
+    );
+
+    // 生产派发点各自的答案：同一个求解器，两份行子集。
+    let next = super::next(&ready, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
+    assert_eq!(next.row, "execute-turn");
+    assert_eq!(next.by, super::EXECUTE);
+}
+
 /// 行表与绑定表同批冻结：两个方向都不许多——每个 `by` 查得到动作，
 /// 每个注册过的执行体也有行指向它。这正是装载期 `UnmannedRow` / `OrphanActor`
 /// 在产线上兑现出来的形状，这里对着真表再验一次。
@@ -1820,7 +1913,8 @@ fn the_row_table_and_the_binding_table_agree() {
     for d in ROWS {
         let Some(by) = d.by else { continue };
         assert!(
-            super::entry_of(by, super::ACTORS).is_some(),
+            super::entry_of(by, super::ACTORS).is_some()
+                || super::head_entry_of(by, super::HEAD_ACTORS).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );

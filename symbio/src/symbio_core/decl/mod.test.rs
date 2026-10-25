@@ -209,6 +209,7 @@ fn view_cannot_read_an_undeclared_field() {
         name: "probe",
         ver: 1,
         reads: &[(EVENT_REQUEST, "attmpt")],
+        evidence: &[EVENT_REQUEST],
         cost: 1,
         eval: in_flight,
     });
@@ -229,6 +230,7 @@ fn view_cannot_read_an_undeclared_fact() {
         name: "probe",
         ver: 1,
         reads: &[("ghost", "id")],
+        evidence: &[],
         cost: 1,
         eval: in_flight,
     });
@@ -237,6 +239,38 @@ fn view_cannot_read_an_undeclared_fact() {
         vec![Gap::UnknownFact {
             view: "probe",
             fact: "ghost",
+        }]
+    );
+}
+
+/// D-160：`evidence` 只能引用这个视图**读过**的事实——「它替谁关门」是「它读什么」的子集。
+///
+/// 这条包含关系拦的是**静默**的那一半：`evidence` 里写一个没读过的名字，依赖图就少
+/// 一条边而装载照绿。假环至少红得看得见，少边要到真死锁那天才显形，所以只能在声明期拦。
+#[test]
+fn evidence_must_be_a_fact_the_view_reads() {
+    let mut b = Builder::new();
+    b.fact(FactDecl {
+        name: EVENT_REQUEST,
+        port: Some("port"),
+        key: &["id"],
+        expand: &[],
+        fields: &["port", "id"],
+    });
+    b.row(cover(EVENT_REQUEST, None));
+    b.view(ViewDecl {
+        name: "probe",
+        ver: 1,
+        reads: &[(EVENT_REQUEST, "id")],
+        evidence: &[EVENT_SENT],
+        cost: 1,
+        eval: in_flight,
+    });
+    assert_eq!(
+        gaps_of(b),
+        vec![Gap::EvidenceNotRead {
+            view: "probe",
+            fact: EVENT_SENT
         }]
     );
 }
@@ -276,6 +310,7 @@ fn fact_and_view_share_one_name_space() {
         name: EVENT_REQUEST,
         ver: 1,
         reads: &[(EVENT_REQUEST, "id")],
+        evidence: &[EVENT_REQUEST],
         cost: 1,
         eval: in_flight,
     });
@@ -308,6 +343,7 @@ fn eval_respects_declared_cost() {
         name: "probe",
         ver: 1,
         reads: &[(EVENT_SENT, "id")],
+        evidence: &[EVENT_SENT],
         cost: 1,
         eval: in_flight,
     });

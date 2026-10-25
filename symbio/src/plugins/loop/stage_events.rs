@@ -7,10 +7,15 @@
 //! 「这一步做完没有」若没有来源，外环 `drive` 的第二次迭代就会再执行一遍
 //! （答话重复、召回重复、压缩反复调用 no-op）——D-107 §3 的整条推理。
 //!
-//! 本模块把「已做」落成事实：阶段执行点产出一份 [`StageFact`] 草稿，持写者令牌的
-//! 一方（[`super::turn_exec`] 的装配段 / 运行器的 [`super::turn_runner::prepare_turn`]）
-//! 在用户格之后把它落成 `turn.stage`。下一问问表时 `done` 从它来——`turn_head`
-//! 视图按幕锚折叠这些格，不是从第二份内存簿记（DE-014 §2 禁第二份状态）。
+//! 本模块把「已做」落成事实：产出有两种落法，按**那一行接回环上没有**分——
+//!
+//! - 接回环上的行（`policy.recall`，D-159 第一批）：执行体自己落。派发点重读日志
+//!   才看得见这一行关账，寄存草稿会让环在同一次调用里再选同一笔债。
+//! - 还没接回的行（`policy.classify` / `policy.compress`）：阶段执行点产出 [`StageFact`]
+//!   草稿寄存在 `TurnState::stages_pending`，由持写者令牌的一方（[`super::turn_exec`]
+//!   的装配段 / 运行器的 [`super::turn_runner::prepare_turn`]）在用户格之后落格。
+//!   下一问问表读 `turn_head` 视图按幕锚折叠它，不是从第二份内存簿记（DE-014 §2 禁
+//!   第二份状态）。
 //!
 //! ## 判决事实为什么也在这里
 //!
@@ -220,6 +225,19 @@ impl StageFact {
     pub(crate) fn compress(round: usize, model_calls: u64, drive_seq: u64) -> Self {
         let mut fact = Self::ran(StageName::Compress, round);
         fact.model_calls = model_calls;
+        fact.identity = Some(drive_seq.to_string());
+        fact
+    }
+
+    /// 召回格：本幕的技能命中与否（`result` = `hit` / `miss`）。
+    ///
+    /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::compress`] 同一条理由：召回在
+    /// 续写幕会重跑（恢复后事实源变了，本轮视图应当重取），只按 `(turn, round, stage)`
+    /// 记就撞首幕那一格 ⇒ 本幕的 `result` **不落**。而这一行的收口与 `policy.reflex`
+    /// 的 `skill_hit` 都只读**本幕锚之后**的那一格（`turn_stages` / `turn_head` 按幕锚
+    /// 折叠）：撞掉的不是载荷，是判据本身。
+    pub(crate) fn recall(round: usize, drive_seq: u64, result: &str) -> Self {
+        let mut fact = Self::ran(StageName::Recall, round).with_result(result);
         fact.identity = Some(drive_seq.to_string());
         fact
     }

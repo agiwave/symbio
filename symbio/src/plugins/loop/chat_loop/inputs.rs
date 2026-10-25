@@ -7,7 +7,7 @@
 use crate::symbio_core::CapabilityMeta;
 
 use super::super::port::Compress;
-use super::super::stage_events::{StageFact, StageName};
+use super::super::stage_events::StageFact;
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -186,11 +186,17 @@ pub(crate) async fn prepare_turn_inputs(
     // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
     // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录 ∧ 未做过」。
     // 三件事（记忆 / 技能 / 任务段）共用一个阶段——它们共前提、共时机。
-    // `done` = 本次执行里这一步已经做过（`turn.stage` 的 `recall` 格，按幕锚折叠）。
-    // 续写幕从空开始 ⇒ 照常重跑（恢复后事实源变了，本轮视图应当重取）。
-    if super::super::loop_rows::owes("policy.recall", &turn.facts, turn.turn_no, turn.now_ms) {
-        run_recall(ctx, context, turn).await?;
-    }
+    // 「欠不欠」与「谁来跑」都不在这里：这一句是**轮首派发点**，它向求解器要
+    // 本 host 行子集里最小的一笔可还债。此刻子集里只有 `recall`，于是与逐行点问
+    // 等价；后续批次把判决 / 压缩 / 反射接回同一台 host，它们的先后由行的 `prio`
+    // 表达，本文件不再多问一次表（D-159）。
+    super::super::head_exec::drive_head(ctx, context, turn)
+        .await
+        .map_err(|e| {
+            TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
+                "轮首派发失败：{e:?}"
+            )))
+        })?;
     let recall_section = turn
         .recall_view
         .as_ref()
@@ -257,15 +263,29 @@ pub(crate) async fn prepare_turn_inputs(
     })
 }
 
-/// 轮首准备格的执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
+/// `recall` 执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
 ///
-/// 调用点只问「这一格欠不欠」；执行体留在本层——它的入参是 `TurnState` /
-/// `SessionContext` 这类私有上下文，不是行本身（D-107）。
-async fn run_recall(
+/// 它是**轮首 host**（[`super::super::head_exec`]）绑定表里的动作，入参由派发点
+/// 借出：请求句柄 + 事实源 + 会话上下文 + 本轮状态。此前调用点自己问表
+/// （`owes("policy.recall", …)`）再直接调本函数——那笔账在表上、动作在表外，
+/// 是 DE-090 §3 的**调度旁路**；D-159 把它接回环上。
+///
+/// ## 出口那一格在这里落，不寄存草稿
+///
+/// 派发点在两次动作之间重读日志，而 `turn_stages` 视图只折叠**已落**的 `turn.stage`
+/// 格。草稿（`TurnState::stages_pending`）要等到步骤 4 的装配段才进日志，于是寄存
+/// 形态下本幕的第二次选债照样读到「没做过」⇒ 环走不动。落格能力此刻就在本层
+/// （与 `begin_drive` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
+///
+/// `result` 记技能命中与否——义务环的 `has_match` 与反射行的 `skill_hit` 都只从
+/// 日志读（输入闭包）。同一性缀本幕锚（`drive_seq`）：续写幕照常重跑召回，撞首幕
+/// 的幂等键会让那一格的载荷不落、结论在事实面消失（规则见 `stage_events` 模块文档）。
+pub(crate) async fn run_recall(
     ctx: &Arc<dyn PluginInvokeRequest>,
+    store: &dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>,
     context: &SessionContext,
     turn: &mut TurnState,
-) -> Result<(), TurnExit> {
+) -> Result<(), super::super::turn_exec::ActorError> {
     // `query` = 本轮用户发言（混合打分的语义维）——与 `turn_exec`
     // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
@@ -286,7 +306,7 @@ async fn run_recall(
                 (),
             )
             .await
-            .map_err(TurnExit::Failed)?,
+            .map_err(super::super::turn_exec::ActorError::Read)?,
         recall_query.as_deref(),
         &recall_viewer,
     );
@@ -315,19 +335,24 @@ async fn run_recall(
     let fast_armed = context.session.skill_fast_path();
     turn.skill_route = routing.obs;
     turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
-    // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，
-    // 落格交给运行器（写者令牌在 `turn_exec`）。`result` 记技能命中与否——
-    // 义务环的 `has_match` 只从日志读（输入闭包）。
+    // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地
+    // 入日志（见本函数文档）。`result` 记技能命中与否——义务环的 `has_match` 只从
+    // 日志读（输入闭包）。
     let hit = last_user_text(context).as_deref().is_some_and(|text| {
         super::super::skill_events::take_match(&turn.skill_hits, text).is_some()
     });
-    turn.mark_stage(
-        StageFact::ran(StageName::Recall, turn.request_round).with_result(if hit {
-            "hit"
-        } else {
-            "miss"
-        }),
-    );
+    super::super::stage_events::land(
+        store,
+        turn.turn_no,
+        turn.user_seq,
+        &crate::symbio_core::request_principal(ctx.as_ref()),
+        &[StageFact::recall(
+            turn.request_round,
+            turn.drive_seq,
+            if hit { "hit" } else { "miss" },
+        )],
+    )
+    .map_err(super::super::turn_exec::ActorError::Append)?;
     Ok(())
 }
 

@@ -65,7 +65,8 @@ use crate::symbio_core::{
 };
 
 /// 这张表里**接了线的执行体**：`execute`（整轮执行体）、`close`（收束）、
-/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）。
+/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、`recall`（轮首准备，
+/// D-159 第一批——它住在另一台 host 的绑定表里，名字面上与其它没有区别）。
 ///
 /// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
@@ -91,6 +92,12 @@ const OPENER: &str = "opener";
 const AUTHORIZER: &str = "authorizer";
 /// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
 const COURIER: &str = "courier";
+/// 轮首准备执行体（D-159 第一批）：`policy.recall` 行选中的动作。
+///
+/// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
+/// （[`super::head_exec::HeadStep`]），不是轮内那张草稿。`by` 面上两台 host 没有区别——
+/// 「这行归谁跑」照旧只写在行上，host 由绑定表回答（D-159 裁决 1）。
+const RECALL: &str = "recall";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -176,6 +183,20 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
     ],
 };
 
+/// 轮首准备执行体的声明（D-159 第一批）。
+///
+/// 名单只有 `turn.stage` 一格：召回这一步的**出口**就是那一格（`stage:"recall"`
+/// 带 `result`），装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。
+/// 它的三份产物（记忆视图 / 调度段 / 技能命中）寄存在本轮状态里交编排层取——
+/// 执行体不交回产出（D-123 决策 5 在轮首照用，D-159 裁决 4）。
+const ACTOR_RECALL: ActorDecl = ActorDecl {
+    name: RECALL,
+    // 事实投影的纯读 + 一次技能路由判定，不调模型：与行同档（更慢就装载红）。
+    mode: LatencyTier::Reflex,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
@@ -253,9 +274,72 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     },
 ];
 
+/// **轮首 host** 的执行体绑定表（D-159）：形状与 [`ACTORS`] 逐字相同，差别只在动作
+/// 借走的那片状态（[`super::head_exec::HeadStep`] = 本轮状态 + 会话上下文 + 请求句柄，
+/// 不是轮内那张草稿）。
+///
+/// 一台 host 一张表，**行不复制**：这张表的名字集合就是「轮首派发点该看哪些行」，
+/// 行子集由它派生（[`host_rows`]）——`Decl` 上不加 `host` 字段，否则「谁跑它」与
+/// 「它归谁」有两处 owner，可以互相矛盾而装载照绿（D-159 裁决 1）。
+///
+/// 这张表同样按入参交给派发点（D-123 决策 4 的形状）：夹具要在同名 `by` 上换手法时
+/// 传另一张表，不必改生产。
+pub(crate) struct HeadEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::head_exec::HeadAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[HeadEntry {
+    decl: ACTOR_RECALL,
+    run: super::head_exec::run_recall,
+    transitional: &[],
+}];
+
+/// `by` → **轮首**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn head_entry_of(by: &'static str, actors: &'static [HeadEntry]) -> Option<&'static HeadEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
+/// 一台 host 的**行子集**：`by` 落在它绑定表里的那些行（D-159 裁决 2）。
+///
+/// 为什么不向 `ring::drive` 传整张行表：`prio` 是**全局**序，整张表会让别的 host 的
+/// 低 `prio` 债被本派发点选中——而本派发点的绑定表里没有那一条，`next` 只能报
+/// 「表脱节」并停住，别的 host 排在后面的债永远轮不到。那是两台 host 互相卡死，
+/// 不是双轨。子集派生自绑定表 ⇒ 「这行归我跑」只有一个读法，`ROWS` 本身一个字不动。
+///
+/// 未接线的行（`by: None`）不在任何一台 host 的子集里：它照旧由外层代码直问
+/// `owes`（调度旁路，归零对象），而 [`owes`] 读的是**整张**冻结表，两者互不影响。
+fn host_rows(frozen: &Frozen, names: &[&'static str]) -> Vec<Decl> {
+    frozen
+        .rows()
+        .iter()
+        .filter(|d| d.by.is_some_and(|by| names.contains(&by)))
+        .cloned()
+        .collect()
+}
+
+/// 绑定表的名字集合（[`host_rows`] 的入参）。
+fn actor_names(actors: &[ActorEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
+/// 轮首绑定表的名字集合。
+fn head_actor_names(actors: &[HeadEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
+///
+/// **两台 host 并成一集**（D-159 裁决 3）：装载面仍然是一张表——七道检查判的是
+/// 「名字有没有人认领、认领的人走不走得到出口」，与执行体借走哪片可变状态无关。
+/// 分开注册会冻出两份 `Frozen`，行表就有了两个真源。
 pub(crate) fn actor_decls() -> Vec<ActorDecl> {
-    ACTORS.iter().map(|e| e.decl).collect()
+    ACTORS
+        .iter()
+        .map(|e| e.decl)
+        .chain(HEAD_ACTORS.iter().map(|e| e.decl))
+        .collect()
 }
 
 /// `by` → 绑定表里的那一条。`None` = 表里没有这个名字（装载期的 `UnmannedRow` 已拦，
@@ -290,7 +374,7 @@ const PROTOCOL_CELLS: &[&str] = &[
 ///
 /// 装载期只能查声明面（名字存在、不与引擎独占的格相撞），「执行体实际只写它声明过的
 /// 领域格」只能拿**实际写入**对账——而实际写入的唯一可信取法是日志尾段（决策 1）。
-impl Next {
+impl<A> Next<A> {
     /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
     /// （引擎写）、`decl.writes`（执行体声明）、`transitional`（过渡豁免）。
     /// 对不上就是越界，派发器不静默。
@@ -507,8 +591,9 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.recall",
         prio: 40,
-        // 未接线：召回落在 `inputs` 段按 `owes` 点问执行；与 `recall` 执行体同批接回。
-        by: None,
+        // 轮首 host 的执行体（D-159 第一批）：派发点在 `chat_loop::inputs` 的轮首锚，
+        // 出口那一格由执行体自己落——它不交回产出，但「已做」这件事照旧只写在日志上。
+        by: Some(RECALL),
         // 事实投影的纯读 + 技能路由，不调模型。
         tier: LatencyTier::Reflex,
         expand: None,
@@ -1123,7 +1208,11 @@ pub(crate) fn waiting(events: &[Event], turn: u64, now: i64) -> bool {
 /// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠、
 /// 跑什么」。[`next`] 是 `turn_exec::drive_steps` 的唯一选债依据（D-118 决策 1–2）——
 /// 派发器不按行名 / 端口名 / 业务语义分支，只调 `Next.action` 这**一个**动作。
-pub(crate) struct Next {
+///
+/// 参数 `A` 是**这台 host 的动作类型**（D-159）：轮内是 `turn_exec::Action`，轮首是
+/// `head_exec::HeadAction`。选债、同源绑定、对账名单这三件事两台 host 完全一样，
+/// 所以只有一个 `Next`，不是两个形状。
+pub(crate) struct Next<A> {
     /// 行名（日志与停机理由用）。
     pub(crate) row: &'static str,
     /// 执行体名。`drive` 已滤掉 `by: None`，这里必有值。
@@ -1131,7 +1220,7 @@ pub(crate) struct Next {
     /// 债键的人读形状（日志用）。
     pub(crate) key: String,
     /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
-    pub(crate) action: super::turn_exec::Action,
+    pub(crate) action: A,
     /// 同一个动作的**声明面**：它登记过会写哪些领域格。
     ///
     /// 派发器拿账本（日志尾段）对它对账（[`Next::writes_closed`]）。放在 `Next` 上而不是
@@ -1155,19 +1244,53 @@ pub(crate) struct Next {
 /// `actors` 是派发器手里的那张绑定表（生产 = [`ACTORS`]，D-123 决策 4）：行表决定
 /// 「谁欠什么」，这张表决定「这个名字跑哪个动作、它登记写哪些格」，读账本对账用的
 /// 名单也来自同一处。
+///
+/// 送给求解器的是**由这张表派生的行子集**（[`host_rows`]，D-159 裁决 2）：求解器
+/// 字节一字未动，变的只是每个派发点看得到哪些行。
 pub(crate) fn next(
     events: &[Event],
     turn: u64,
     now: i64,
     actors: &'static [ActorEntry],
-) -> Option<Next> {
+) -> Option<Next<super::turn_exec::Action>> {
     let frozen = frozen()?;
-    let debt =
-        crate::symbio_core::ring::drive(frozen.rows(), &frozen, turn_slice(events, turn), now)?;
-    trace(&frozen, &debt);
-    // 选债面与动作同源：`by` 有声明 ⇔ 绑定表有这一条（两者一起构造），
-    // 查不到就是表被改坏——按「没有可还的债」显形，不猜动作、也不猜它的写入名单。
-    let Some(entry) = debt.decl.by.and_then(|by| entry_of(by, actors)) else {
+    let rows = host_rows(&frozen, &actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**轮首**那一台（D-159）：同一个求解器、同一份对账名单，只是绑定表与
+/// 动作类型换了一张。
+pub(crate) fn next_head(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [HeadEntry],
+) -> Option<Next<super::head_exec::HeadAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &head_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        head_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// 两台的选债半边共用这一段：求最小可还债 → 按 `by` 一次查全（动作 + 声明名单 +
+/// 过渡豁免）→ 折成 [`Next`]。
+///
+/// 查不到动作就按「没有可还的债」显形并出声（不猜动作、也不猜它写了什么）：那是
+/// 行表与绑定表被改坏的形状，不是第四种可还性。
+fn pick<A>(
+    frozen: &Frozen,
+    rows: &[Decl],
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    bind: impl Fn(&'static str) -> Option<(A, &'static [&'static str], &'static [&'static str])>,
+) -> Option<Next<A>> {
+    let debt = crate::symbio_core::ring::drive(rows, frozen, turn_slice(events, turn), now)?;
+    trace(frozen, &debt);
+    let Some((action, writes, tolerated)) = debt.decl.by.and_then(bind) else {
         crate::plugin_warn!(
             "session",
             "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",
@@ -1178,11 +1301,11 @@ pub(crate) fn next(
     };
     Some(Next {
         row: debt.decl.name,
-        by: entry.decl.name,
+        by: debt.decl.by?,
         key: debt.key.trace(),
-        action: entry.run,
-        writes: entry.decl.writes,
-        tolerated: entry.transitional,
+        action,
+        writes,
+        tolerated,
     })
 }
 
