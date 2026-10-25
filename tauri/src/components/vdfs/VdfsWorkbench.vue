@@ -203,7 +203,7 @@ import VdfsCard from '@/components/common/VdfsCard.vue'
 import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useVdfs } from '@/composables/useVdfs'
-import { getVdfsRenderer, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
+import { getVdfsRenderer, isFormRenderer, isSessionExt, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
 // 列表卡片的呈现映射（状态点 / 文案 / 徽标 / 标签 / 图标）
@@ -215,7 +215,6 @@ import {
   cardTagsOf,
 } from '@/registry/vdfsCards'
 import {
-  VDFS_EXT_SESSION,
   isVdfsDir,
   isVdfsDraft,
   vdfsJoin,
@@ -295,7 +294,7 @@ const {
 // （`Session.vue` 传 `node.path` → `store.selectSession` 解析）。
 const sessionsStore = useSessionsStore()
 watch(
-  () => (cwdNode.value?.new_type?.ext === VDFS_EXT_SESSION ? cwd.value : ''),
+  () => (isSessionExt(cwdNode.value?.new_type?.ext) ? cwd.value : ''),
   (dir) => {
     if (dir) sessionsStore.setSessionSpace(dir)
   },
@@ -486,13 +485,13 @@ const rendererComp = computed(() => {
 /** 渲染器数据：form → 字段值对象；文本类（含 message 的正文）→ 文本；其余 → 不传 */
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
-  if (r === 'form') return formData.value
+  if (isFormRenderer(r)) return formData.value
   if (isTextualRenderer(r)) return nodeText.value
   return null
 })
 
 function onSave(payload: unknown) {
-  if (renderer.value === 'form') void saveFields((payload ?? {}) as Record<string, unknown>)
+  if (isFormRenderer(renderer.value)) void saveFields((payload ?? {}) as Record<string, unknown>)
   else void saveText()
 }
 

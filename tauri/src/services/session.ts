@@ -40,11 +40,10 @@ import { READBACK_REASON } from './readback'
 import { ensureSessionMountDir, ensureSessionScheme } from './vdfsScheme'
 import {
   VDFS_ACTION_TRUNCATE,
-  VDFS_EXT_SESSION,
-  vdfsExtOf,
   vdfsMessageAddr,
   vdfsSessionAddr,
 } from '@/schemas/vdfs'
+import { isSessionNode } from '@/registry/vdfsTypes'
 import { ChatNode as SessionMessage } from '../schemas/chat_node'
 import { readingSectionOf } from '../schemas/reading'
 import * as SessionList from '../schemas/session_list'
@@ -90,7 +89,7 @@ export async function listSessions(
       ? await listVdfs(READBACK_REASON.LIST_REFRESH, path)
       : await listVdfs(READBACK_REASON.LIST_REFRESH, path, { limit })
   return (resp.items || [])
-    .filter((n) => vdfsExtOf(n) === VDFS_EXT_SESSION)
+    .filter(isSessionNode)
     .map((n) => {
       const v = n as Record<string, any>
       return {

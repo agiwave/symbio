@@ -26,13 +26,12 @@ import {
   CHAT_ROLE_ASSISTANT,
   NODE_STATUS_STREAMING,
   NODE_STATUS_WAITING_USER_ACTION,
-  NODE_KIND_BODY,
-  NODE_KIND_NOTICE,
   nodeKindOf,
   messageRoleOf,
   messageTextOf,
   type ChatNode,
 } from '@/schemas/chat_node'
+import { isContentKind } from '@/registry/messageTypes'
 
 /** 缩略卡预览的最大字符数（超出截断并加省略号） */
 export const PREVIEW_MAX = 60
@@ -180,7 +179,7 @@ export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
  */
 export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boolean {
   const t = nodeKindOf(msg.type)
-  if (t !== NODE_KIND_BODY && t !== NODE_KIND_NOTICE) return false
+  if (!isContentKind(t)) return false
   // 取值走契约层的唯一实现（多模态内容 → 纯文本）
   return messageTextOf(msg.content).trim().length === 0
 }

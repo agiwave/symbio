@@ -53,6 +53,8 @@ import {
 import {
   isAbortedStatus,
   isFailedStatus,
+  isNoticeKind,
+  isSkeletonKind,
   isStreamingStatus,
   isWaitingStatus,
   type MessageFacets,
@@ -350,8 +352,8 @@ export function messageHeadModifier(f: MessageFacets): MessageHeadModifier {
     user: f.role === CHAT_ROLE_USER,
     sub: f.subSession,
     // 头部色调钩子按形态给：容器格与折叠叶各一色——纯形状，不认业务名
-    skeleton: f.type === NODE_KIND_SKELETON,
-    notice: f.type === NODE_KIND_NOTICE,
+    skeleton: isSkeletonKind(f.type),
+    notice: isNoticeKind(f.type),
     // 标题呼吸动效：凡是「正在进行、内容尚未成形」的行（折叠叶思考 / 容器运行中）
     thinking:
       Boolean(p.thinkingWhenRunning || p.runningAction) && isStreamingStatus(f.status),
@@ -500,7 +502,7 @@ export type MessageRenderer =
  * 5. 未登记取值 → `fallback`（新类型上线时旧前端仍能显示内容）。
  */
 export function messageRendererKey(f: MessageFacets): MessageRenderer {
-  if (f.type === NODE_KIND_SKELETON) return 'skeleton'
+  if (isSkeletonKind(f.type)) return 'skeleton'
   if (f.compacted) return 'notice'
   if (f.role === CHAT_ROLE_USER) return 'body'
   return presentationOf(f.type).renderer

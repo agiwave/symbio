@@ -34,6 +34,8 @@ lists: [gate-codes=owner]
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–005 | `GW-006` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
+| **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
+| **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–010 | `M-011` |
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
@@ -49,6 +51,7 @@ lists: [gate-codes=owner]
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–005 | `SC-006` |
+| **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **V** | core 分域 | `scripts/core-vocab-audit.mjs` | V-001–002 | `V-003` |
@@ -126,6 +129,11 @@ lists: [gate-codes=owner]
 | **IM-002** | `scripts/internal-model-audit.mjs` |
 | **IM-003** | `scripts/internal-model-audit.mjs` |
 | **IM-004** | `scripts/internal-model-audit.mjs` |
+| **INJ-001** | `scripts/injection-matrix-audit.mjs` |
+| **INJ-002** | `scripts/injection-matrix-audit.mjs` |
+| **INJ-003** | `scripts/injection-matrix-audit.mjs` |
+| **KB-001** | `scripts/kind-branch-audit.mjs` |
+| **KB-002** | `scripts/kind-branch-audit.mjs` |
 | **LWF-001** | `scripts/list-write-fact-audit.mjs` |
 | **LWF-002** | `scripts/list-write-fact-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
@@ -227,6 +235,9 @@ lists: [gate-codes=owner]
 | **SC-003** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-004** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-005** | `scripts/plugin-special-case-audit.mjs` |
+| **SPC-001** | `scripts/spec-coverage-audit.mjs` |
+| **SPC-002** | `scripts/spec-coverage-audit.mjs` |
+| **SPC-003** | `scripts/spec-coverage-audit.mjs` |
 | **SX-001** | `scripts/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/slo-exit-audit.mjs` |

@@ -69,8 +69,8 @@ board.columns: [scope]
 | `SP-022` | 验证纪律 1——每条声称对应一条可执行断言 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-023` | 验证纪律 2——断言的输入不得包含结论 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/_shared.mjs` | — | — |
 | `SP-024` | 验证纪律 3——每条断言配反向用例（改输入，结论必须变） | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-025` | 验证纪律 4——声称「编译期强制」必须附一段已知编译不过的代码 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | 人工 | — | — |
-| `SP-026` | 验证纪律 5——编译期反例必须写在外部模块里 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | 人工 | — | — |
+| `SP-025` | 验证纪律 4——声称「编译期强制」必须附一段已知编译不过的代码 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
+| `SP-026` | 验证纪律 5——编译期反例必须写在外部模块里 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-027` | C-003 根出口单消费方豁免账本（5 条） | scripts/core-export-audit.mjs 的 WAIVERS 账本（ActorSpec / turnstate / SloLatencyView / FallbackRateView / mutations_latest_snapshot） | `scripts/core-export-audit.mjs` | — | — |
 | `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/doc-link-audit.mjs` | — | — |
 | `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/dead-code-audit.mjs` | — | — |

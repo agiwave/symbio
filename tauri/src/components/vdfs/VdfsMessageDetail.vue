@@ -59,8 +59,13 @@
 import { computed } from 'vue'
 import DetailShell from './DetailShell.vue'
 import type { VdfsRendererProps } from './rendererContract'
-import { NODE_KIND_BODY, nodeKindOf } from '@/schemas/chat_node'
-import { messageRoleLabel, messageStatusLabel, messageTypeLabel } from '@/registry/messageTypes'
+import { nodeKindOf } from '@/schemas/chat_node'
+import {
+  isBodyKind,
+  messageRoleLabel,
+  messageStatusLabel,
+  messageTypeLabel,
+} from '@/registry/messageTypes'
 
 const props = defineProps<VdfsRendererProps>()
 
@@ -84,7 +89,7 @@ const typeText = computed(() => {
   const t = props.node.type
   if (typeof t !== 'string') return ''
   const kind = nodeKindOf(t)
-  if (kind === NODE_KIND_BODY) return ''
+  if (isBodyKind(kind)) return ''
   return messageTypeLabel(kind)
 })
 

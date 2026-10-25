@@ -76,12 +76,8 @@ import { statVdfs, readVdfs } from '@/services/vdfs'
 import { READBACK_REASON, type ReadbackReason } from '@/services/readback'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
-import {
-  NODE_STATUS_REMOVED,
-  NODE_KIND_SKELETON,
-  nodeKindOf,
-  type ChatNode,
-} from '@/schemas/chat_node'
+import { NODE_STATUS_REMOVED, nodeKindOf, type ChatNode } from '@/schemas/chat_node'
+import { isSkeletonKind } from '@/registry/messageTypes'
 import { logger } from '@/utils/logger'
 
 /**
@@ -240,7 +236,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   const folded = typeof v.type === 'string' ? nodeKindOf(v.type) : undefined
 
   // 容器节点（`skeleton`）的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
-  if (folded === NODE_KIND_SKELETON) {
+  if (folded && isSkeletonKind(folded)) {
     try {
       const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
@@ -439,7 +435,7 @@ export function handleVdfsChange(change: VdfsChange): void {
   // 判据是**节点形态**，不是帧的形状——同一形状的状态帧落在正文叶上时，
   // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
   // 一对 `vdfs/stat` + `vdfs/read` 的成因（骨架根节点的首帧就是「无正文」）。
-  if (nodeKindOf(msg.type) === NODE_KIND_SKELETON) {
+  if (isSkeletonKind(nodeKindOf(msg.type))) {
     sink.applyTranscriptMessages(sid, [msg])
     return
   }

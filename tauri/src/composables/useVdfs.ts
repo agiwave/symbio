@@ -77,6 +77,7 @@ import {
 } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
+  isFormRenderer,
   isTextualRenderer,
   rendererReadsNodeText,
   resolveVdfsRenderer,
@@ -543,7 +544,7 @@ export function useVdfs(opts: UseVdfsOptions) {
         return
       }
       const text = content.text ?? ''
-      if (r === 'form') {
+      if (isFormRenderer(r)) {
         try {
           formData.value = text.trim() ? (JSON.parse(text) as Record<string, unknown>) : {}
         } catch (err) {

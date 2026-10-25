@@ -64,6 +64,41 @@ function coreShapeCells(text) {
   return cells
 }
 
+/** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
+ *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
+ *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
+function kindBranchCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*framework:\s*(\d+),\s*registry:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
+  if (m) {
+    cells.set('framework', Number(m[1]))
+    cells.set('registry', Number(m[2]))
+  }
+  return cells
+}
+
+/** `scripts/spec-coverage-audit.mjs` 的 `BASELINE`：两格债务（人工判据存量 / 无执行方）。 */
+function specCoverageCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*manual:\s*(\d+),\s*missing:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
+  if (m) {
+    cells.set('manual', Number(m[1]))
+    cells.set('missing', Number(m[2]))
+  }
+  return cells
+}
+
+/** `scripts/injection-matrix-audit.mjs` 的 `BASELINE`：未归属格 / 已登记缺口格。 */
+function injectionMatrixCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*unassigned:\s*(\d+),\s*deferred:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
+  if (m) {
+    cells.set('unassigned', Number(m[1]))
+    cells.set('deferred', Number(m[2]))
+  }
+  return cells
+}
+
 /** `scripts/dead-code-audit.mjs` 的 `R002_BASELINE`：默认值是三元尾部的那个字面量。
  *  注意三元问号那一侧是 `? Number(…)` 而**不是** `: Number(…)`——写成后者会永远取不到
  *  格，于是这一项在日志里显示成「跳过」，看上去无害，实则这条棘轮**已经没人守了**。 */
@@ -166,6 +201,39 @@ const RATCHETS = [
     waivers: waiverReader('core-shape-allow'),
     envVar: 'CORE_SHAPE_BASELINE',
     label: 'core 公共形状三格（trait 数 / 成员数 / 默认体数，只许降）',
+  },
+  {
+    // 前端 kind 分支两格：框架层目标 0（只许降），机制层是判据与映射表的存量。
+    // 放宽的**资格**由 `kind-branch-audit` 的 KB-001 判（超过基线即红），本条只判
+    // 「数字有没有比上一版更松」——两半合起来才是「框架真的零分支」。
+    id: 'kind-branch',
+    file: 'scripts/kind-branch-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: kindBranchCells,
+    waivers: waiverReader('kind-branch-allow'),
+    envVar: 'KIND_BRANCH_BASELINE',
+    label: '前端 kind 分支（框架层 / 机制层，只许降）',
+  },
+  {
+    // 规范执行方覆盖：`manual` 是「无机器判据」的合法存量，`missing` 是违规存量（目标 0）。
+    id: 'spec-coverage',
+    file: 'scripts/spec-coverage-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: specCoverageCells,
+    waivers: waiverReader('spec-coverage-allow'),
+    envVar: 'SPEC_COVERAGE_BASELINE',
+    label: '规范执行方覆盖（人工判据存量 / 无执行方，只许降）',
+  },
+  {
+    // 异常注入矩阵：`unassigned` 是没归属的格（目标 0），`deferred` 是已登记缺口的格。
+    // 缺口只能被补成用例而减少；把 `deferred` 改大等于把「暂不测」变成新常态。
+    id: 'injection-matrix',
+    file: 'scripts/injection-matrix-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: injectionMatrixCells,
+    waivers: waiverReader('injection-allow'),
+    envVar: 'INJECTION_MATRIX_BASELINE',
+    label: '异常注入矩阵（未归属格 / 已登记缺口，只许降）',
   },
   {
     id: 'dead-code',

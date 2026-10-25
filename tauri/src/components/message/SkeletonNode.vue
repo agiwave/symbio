@@ -99,7 +99,6 @@
 import { computed, inject, ref } from 'vue'
 import {
   RESUME_ACTION_SUPPLY,
-  NODE_KIND_TYPING,
   isUnsettledNodeStatus,
   type ChatNode,
 } from '@/schemas/chat_node'
@@ -111,6 +110,7 @@ import {
   isAbortedStatus,
   isFailedStatus,
   isStreamingStatus,
+  isTypingKind,
   messageParentSessionId,
   messageTypeLabel,
   messageTypeOf,
@@ -175,7 +175,7 @@ const agentName = computed(() => agentNameOf(props.node, props.facets.subSession
 
 /** 真实子节点：剔掉合成的 typing 占位（它是派生节点、不是内容） */
 const realChildren = computed<ChatNode[]>(() =>
-  (props.node.children || []).filter((c) => messageTypeOf(c) !== NODE_KIND_TYPING),
+  (props.node.children || []).filter((c) => !isTypingKind(messageTypeOf(c))),
 )
 
 const isFailed = computed(() => isFailedStatus(props.facets.status))

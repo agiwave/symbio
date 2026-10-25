@@ -54,6 +54,7 @@ import {
   vdfsJoin,
   type VdfsSessionScheme,
 } from '@/schemas/vdfs'
+import { isInboxSeg, isMessagesSeg, isSessionNode } from '@/registry/vdfsTypes'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 
@@ -168,14 +169,14 @@ export async function ensureVdfsSessionScheme(): Promise<VdfsSessionScheme> {
  */
 async function resolveSegs(mountDir: string): Promise<{ messagesSeg: string; inboxSeg: string }> {
   const sessions = (await listVdfs(READBACK_REASON.BOOTSTRAP, mountDir)).items ?? []
-  const first = sessions.find((n) => n.ext === VDFS_EXT_SESSION)
+  const first = sessions.find(isSessionNode)
   if (!first) {
     throw new Error(`集合段未解析：${mountDir} 下没有任何会话可供推导`)
   }
   const sessionPath = fullAddr(mountDir, first)
   const children = (await listVdfs(READBACK_REASON.BOOTSTRAP, sessionPath)).items ?? []
-  const messages = children.find((n) => n.kind === VDFS_KIND_MESSAGES)
-  const inbox = children.find((n) => n.kind === VDFS_KIND_INBOX)
+  const messages = children.find(isMessagesSeg)
+  const inbox = children.find(isInboxSeg)
   if (!messages) {
     throw new Error(`转写段未找到：${sessionPath} 下没有 kind=${VDFS_KIND_MESSAGES} 的子节点`)
   }

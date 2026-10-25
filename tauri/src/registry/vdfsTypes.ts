@@ -16,6 +16,8 @@ import {
   VDFS_EXT_MESSAGE,
   VDFS_EXT_SESSION,
   VDFS_EXT_TEXT,
+  VDFS_KIND_INBOX,
+  VDFS_KIND_MESSAGES,
   isVdfsDir,
   vdfsExtOf,
   type VdfsNode,
@@ -68,6 +70,31 @@ export function isTextualRenderer(r: VdfsRenderer): boolean {
   return TEXTUAL_RENDERERS.has(r)
 }
 
+/** 表单渲染器：字段值从正文 parse，保存走 `saveFields` 而不是整篇 `saveText`。 */
+export function isFormRenderer(r: VdfsRenderer): boolean {
+  return r === 'form'
+}
+
+/** 节点的项级类型是不是会话（ext 判据的唯一出处，框架层只问这个谓词）。 */
+export function isSessionExt(ext: string | null | undefined): boolean {
+  return ext === VDFS_EXT_SESSION
+}
+
+/** 该节点是不是一个会话（列表筛选 / 挂载点认领共用同一判据）。 */
+export function isSessionNode(node: VdfsNode): boolean {
+  return isSessionExt(vdfsExtOf(node))
+}
+
+/** 会话内部的转写段（按 `kind` 认，不按展示段名）。 */
+export function isMessagesSeg(node: { kind?: string }): boolean {
+  return node.kind === VDFS_KIND_MESSAGES
+}
+
+/** 会话内部的收件箱段（同上）。 */
+export function isInboxSeg(node: { kind?: string }): boolean {
+  return node.kind === VDFS_KIND_INBOX
+}
+
 /**
  * 该渲染器需要**读一次节点正文**才谈得上呈现。
  *
@@ -76,7 +103,7 @@ export function isTextualRenderer(r: VdfsRenderer): boolean {
  * `appearance` / `about` / `fallback`）各有自己的数据来源，替它们读正文是白读。
  */
 export function rendererReadsNodeText(r: VdfsRenderer): boolean {
-  return r === 'form' || isTextualRenderer(r)
+  return isFormRenderer(r) || isTextualRenderer(r)
 }
 
 /** 扩展名 → 渲染器（**唯一的硬编码表**，纯 UI 约定） */

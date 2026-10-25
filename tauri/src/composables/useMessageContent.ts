@@ -12,9 +12,6 @@
 import { computed, type ComputedRef } from 'vue'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
 import {
-  NODE_KIND_BODY,
-  NODE_KIND_NOTICE,
-  NODE_KIND_SKELETON,
   nodeKindOf,
   messageTextOf,
   type ChatNode,
@@ -23,7 +20,9 @@ import {
 import {
   MESSAGE_FAILURE_NOTE,
   MESSAGE_PREVIEW_MAX,
+  isContentKind,
   isFailedStatus,
+  isSkeletonKind,
   messagePreviewFollowsLiveEdge,
   type MessageFacets,
 } from '@/registry/messageTypes'
@@ -158,7 +157,7 @@ export function messageSummaryPreviewOf(
     // 容器骨架优先取首个「正文叶」子节点的内容——容器自身通常没有正文。
     // 正文叶 = body / notice（思考与正文同格取内容，不认业务名）。
     const first = (node.children || []).find(
-      (c) => nodeKindOf(c.type) === NODE_KIND_BODY || nodeKindOf(c.type) === NODE_KIND_NOTICE,
+      (c) => isContentKind(nodeKindOf(c.type)),
     )
     source = messageTextOf(first?.content) || messageTextOf(node.content)
   } else {
@@ -204,7 +203,7 @@ export function useMessageContent(
     const f = getFacets()
     return messageSummaryPreviewOf(
       getNode(),
-      f.type === NODE_KIND_SKELETON,
+      isSkeletonKind(f.type),
       messagePreviewFollowsLiveEdge(f),
     )
   })

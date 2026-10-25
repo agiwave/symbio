@@ -36,7 +36,9 @@ import {
   CHAT_ROLE_USER,
   messageRoleOf,
   NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
   NODE_KIND_SKELETON,
+  NODE_KIND_TYPING,
   NODE_STATUS_ABORTED,
   NODE_STATUS_COMPLETED,
   NODE_STATUS_FAILED,
@@ -86,6 +88,21 @@ export { messageRoleOf }
 export function messageTypeOf(node: Pick<ChatNode, 'type'>): NodeKind {
   return nodeKindOf(node.type)
 }
+
+/**
+ * 形态谓词：五格形状的**唯一判据**。
+ *
+ * 框架层（组件 / store / service / composable）只问「是不是这个形状」，
+ * 不再自己写 `type === NODE_KIND_*`——分派轴住在 registry，框架零类型分支
+ * （判据见 `scripts/kind-branch-audit.mjs`）。
+ */
+export const isSkeletonKind = (kind: NodeKind): boolean => kind === NODE_KIND_SKELETON
+export const isTypingKind = (kind: NodeKind): boolean => kind === NODE_KIND_TYPING
+export const isBodyKind = (kind: NodeKind): boolean => kind === NODE_KIND_BODY
+export const isNoticeKind = (kind: NodeKind): boolean => kind === NODE_KIND_NOTICE
+/** 正文叶：`body` / `notice` 是唯二把 `content` 当正文呈现的形态。 */
+export const isContentKind = (kind: NodeKind): boolean =>
+  kind === NODE_KIND_BODY || kind === NODE_KIND_NOTICE
 
 /** 节点的状态（缺省 = 已结束） */
 export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
