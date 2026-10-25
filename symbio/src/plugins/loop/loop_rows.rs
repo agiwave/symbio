@@ -639,8 +639,9 @@ fn entry_of(by: &'static str, actors: &'static [ActorEntry]) -> Option<&'static 
 /// 它们由引擎写（`port.rs` 那一个文件，PTS-005 钉着），因此**不该**出现在任何
 /// `ActorDecl::writes` 里——装载期 [`crate::symbio_core::decl`] 的
 /// `ENGINE_ONLY_CELLS` 检查拦的就是「执行体声明了引擎独占的格」。运行期读账本时
-/// 它们当然在：粗端口期 `port::dispatch` 就在执行体内部跑（DE-015 §7.2 承认的过渡
-/// 形状），端口行接回派发器之后写点位置变、豁免名单不变。
+/// 它们当然在：派发的本体住在 `port` 里，执行体的动作调它（`relay` → `dispatch_full`，
+/// `courier` / `turn_relay` → `dispatch`），四格因此落在动作窗口内——写点在执行体里，
+/// 写方仍是引擎，两句话不冲突。
 const PROTOCOL_CELLS: &[&str] = &[
     EVENT_REQUEST,
     EVENT_SENT,

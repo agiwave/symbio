@@ -57,9 +57,9 @@ use super::turn_exec::{ActorError, ExecTurnResult, StepFuture, TurnExecExit};
 /// 一次外环动作需要的**全部**环境。
 ///
 /// 两个环步之间的交接件是 [`StageStep::call`]：宣布那一步放进去，派出那一步取走。
-/// [`StageStep::outcome`] 是反方向的交接件——派出跑完的结果（含失败）放在这里，
-/// 由环外的编排层消费：执行体不交回产出（D-123 决策 5），但它**产出**的东西必须
-/// 留一个不靠返回值的去处。
+/// [`StageStep::interrupted`] 是反方向的交接件——派出没跑成（中止 / 失败）时放在这里，
+/// 由环外的编排层消费：执行体不交回产出（D-123 决策 5），但「这一幕没跑完」这件事
+/// 必须留一个不靠返回值的去处。
 pub(crate) struct StageStep<'a> {
     pub(crate) orchestrator: &'a ChatOrchestrator,
     /// 编排器的共享句柄：批次边界的能力口（[`super::chat_loop::report_port`]）要它。

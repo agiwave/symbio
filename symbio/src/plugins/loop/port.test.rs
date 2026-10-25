@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::super::loop_rows::{load, PORTS, ROWS};
 use super::*;
-use crate::symbio_core::ring::PortDecl;
+use crate::symbio_core::ring::{owed, PortDecl};
 use crate::symbio_core::{EventStore, Seq};
 
 fn boot() -> EventStore {
@@ -755,4 +755,227 @@ fn reap_only_sees_the_facts_it_is_handed() {
         "窗口内看到它就必须收"
     );
     assert_eq!(payload_of(&store, "failed")["why"], json!("lease_expired"));
+}
+
+// ── 重放的粒度是「一次调用」（判据 ③）────────────────────────────────
+//
+// 粗端口的过渡形状留下的那句「崩溃恢复只能按整轮重放」，说的是**没有事实**可依：
+// 一轮的内存草稿一死，重启只能从头再跑一遍。端口接净之后这句话不再成立——
+// 每一笔调用的身份 `(port, id, attempt)` 都在日志里，已经回来的那几笔的 `response`
+// 也在，于是「谁还欠着」与「卡住的那笔怎么办」都是事实的函数。`reap` 的输入里
+// **没有内存状态**（不看 `in_flight`，只看切片），所以用例里「杀掉再重放」就等于
+// 「把同一份日志再喂一遍」——这不是模拟，是同一条代码路径。
+
+/// 落一条 `request`：`extra` 是端口特有的字段（工具的 `tool` / `risk` 等）。
+fn request_cell(store: &EventStore, port: &str, id: &str, extra: serde_json::Value) {
+    let mut payload = json!({ "port": port, "id": id, "attempt": 1 });
+    if let (Some(obj), Some(extra)) = (payload.as_object_mut(), extra.as_object()) {
+        for (k, v) in extra {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+    append(
+        store,
+        Event::pending(
+            format!("{port}-{id}-request"),
+            "request",
+            Entity::Turn,
+            Verb::Asserted,
+            1,
+            "executor",
+        )
+        .with_produced_by(7)
+        .with_payload(payload),
+    )
+    .unwrap();
+}
+
+/// 授权级联夹在 `request` 与 `sent` 之间：没有它，工具那两行永远不开账。
+fn granted_cell(store: &EventStore, id: &str) {
+    append(
+        store,
+        Event::pending(
+            format!("tool-{id}-granted"),
+            crate::symbio_core::EVENT_AUTHZ_GRANTED,
+            Entity::Turn,
+            Verb::Asserted,
+            1,
+            "authorizer",
+        )
+        .with_produced_by(7)
+        .with_payload(json!({
+            "key": id,
+            "port": "tool",
+            "id": id,
+            "attempt": 1,
+            "tool": "read_file",
+            "risk": "low",
+            "deferred": false,
+        })),
+    )
+    .unwrap();
+}
+
+/// 引擎在跑执行体**之前**落的那一格（判据 2：写方不变）。
+fn sent_cell(store: &EventStore, port: &str, id: &str) {
+    append(
+        store,
+        Event::pending(
+            format!("{port}-{id}-sent"),
+            "sent",
+            Entity::Turn,
+            Verb::Asserted,
+            1,
+            "system",
+        )
+        .with_ts(0)
+        .with_payload(json!({
+            "port": port,
+            "id": id,
+            "attempt": 1,
+            "lease_ms": 600_000,
+            "attempt_cap": 1,
+            "awaited": false,
+        })),
+    )
+    .unwrap();
+}
+
+fn response_cell(store: &EventStore, port: &str, id: &str, calls: serde_json::Value) {
+    append(
+        store,
+        Event::pending(
+            format!("{port}-{id}-response"),
+            "response",
+            Entity::Turn,
+            Verb::Asserted,
+            1,
+            "executor",
+        )
+        .with_ts(1_000)
+        .with_payload(json!({
+            "port": port,
+            "id": id,
+            "attempt": 1,
+            "calls": calls,
+        })),
+    )
+    .unwrap();
+}
+
+/// 判据 ③：**重放只补那一笔**。
+///
+/// 现场摆的是一轮跑了三分之二的日志：幕的往返派出去了、第一次模型往返回来了
+/// （带两个工具调用）、那两个工具跑完了、第二次模型往返派出去了而应答没回来。
+/// 三件事一起才叫判据：
+///
+/// 1. **表这一侧**：重放时已经还过的债一条都不重新开账——`dispatch-model` 不该
+///    再欠（两笔都有 `sent`）、工具那三行也不该再欠（两笔都有 `response`）；
+/// 2. **看护这一侧**：`reap` 只对「派出去了、没回来」的两笔下判决，一笔是幕自己
+///    那一笔，一笔是第二次往返；
+/// 3. **不动账那一侧**：判死只写它自己那一格，没回来的两笔之外一个 `failed`
+///    都不多、一条 `retry` 都不写。
+///
+/// 第 2 条同时钉住「粗端口的粒度在哪」：幕自己那一笔就是**一整轮**，它在日志上
+/// 与模型往返同形（`request` / `sent` / `response`），所以恢复能逐笔判而不是整轮重跑。
+#[test]
+fn a_replay_makes_up_only_the_call_that_never_came_back() {
+    let store = boot();
+    // 幕的往返：派出去了，`response` 没有——这一轮没跑完就死了。
+    request_cell(&store, "turn", "turn-1-d3-r0", serde_json::Value::Null);
+    sent_cell(&store, "turn", "turn-1-d3-r0");
+
+    // 第一次模型往返：回来了，还带回两个工具调用。
+    request_cell(&store, "model", "model-1-d3-r0", json!({ "via": "turn" }));
+    sent_cell(&store, "model", "model-1-d3-r0");
+    response_cell(
+        &store,
+        "model",
+        "model-1-d3-r0",
+        json!([
+            { "port": "tool", "id": "call-a", "name": "read_file", "arguments": {} },
+            { "port": "tool", "id": "call-b", "name": "read_file", "arguments": {} },
+        ]),
+    );
+
+    // 那一批工具：放行、派出、回来了。
+    for id in ["call-a", "call-b"] {
+        request_cell(
+            &store,
+            "tool",
+            id,
+            json!({
+                "tool": "read_file",
+                "risk": "low",
+                "threshold": "medium",
+                "approved": false,
+                "deferred": false,
+            }),
+        );
+        granted_cell(&store, id);
+        sent_cell(&store, "tool", id);
+        response_cell(&store, "tool", id, json!([]));
+    }
+
+    // 第二次模型往返：派出去了，应答没回来。
+    request_cell(&store, "model", "model-1-d3-r1", json!({ "via": "turn" }));
+    sent_cell(&store, "model", "model-1-d3-r1");
+
+    let frozen = load(ROWS).expect("真表装载：重放读的表 = 会话开幕用的那张");
+    let facts = store.range(Seq::new(0));
+    // 重启之后时钟必然走过租约（时间只在事件上推进），所以 `now` 取租约之后。
+    let now = 700_000;
+
+    // 一、表这一侧：还过的债不重开。
+    let debts = owed(ROWS, &frozen, &facts, now);
+    for paid in [
+        "dispatch-model",
+        "open-tools",
+        "authorize-tool",
+        "dispatch-tools",
+        "await-tools",
+    ] {
+        assert!(
+            !debts.iter().any(|d| d.decl.name == paid),
+            "重放不该让 `{paid}` 重新开账——那一笔早还过了：{:?}",
+            debts
+                .iter()
+                .map(|d| (d.decl.name, d.key.trace()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // 二、看护这一侧：只判这两笔。
+    let out = reap(&store, &frozen, PORTS, &facts, 1, 7, now).unwrap();
+    assert_eq!(
+        out,
+        vec![
+            Reaped::Killed {
+                id: "turn-1-d3-r0".into(),
+                attempt: 1,
+            },
+            Reaped::Killed {
+                id: "model-1-d3-r1".into(),
+                attempt: 1,
+            },
+        ],
+        "只有这两笔没人接：第一次往返与两个工具调用早就答过了"
+    );
+
+    // 三、不动账：判死只落它自己那一格，其余一笔不碰。
+    let failed: Vec<String> = store
+        .range(Seq::new(0))
+        .iter()
+        .filter(|e| e.kind == "failed")
+        .map(|e| e.payload["id"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        failed,
+        vec!["turn-1-d3-r0", "model-1-d3-r1"],
+        "多一个 `failed` 就是把已经回来的那笔又判了一次死"
+    );
+    assert!(
+        !kinds(&store).iter().any(|k| k == "retry"),
+        "`turn` / `model` 的 `max_attempts = 1`：到期即判死，不写 `retry`"
+    );
 }
