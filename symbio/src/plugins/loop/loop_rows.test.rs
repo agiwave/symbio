@@ -430,7 +430,154 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     assert!(owes("policy.report", &resumed, 5_000));
 }
 
+// ── 五条策略行的两侧证据（生产形状 / 生产符号）──────────────────────────
+
+/// 五条策略行的「不是装饰」证据：**开账用生产的落格形状，关账用生产的符号**。
+///
+/// 为什么单独立一条，而不是靠上面那些逐行用例：那些钉的是判据语义（什么条件欠、
+/// 什么条件不欠），事件种类与 `stage` 值全是手写字面量。把 `StageName::Decide` 的
+/// 人读名改掉，它们照样绿——而行表里写死的 `"decide"` 会从「关得上」变成
+/// **「永远关不上」**：`policy.classify` 每轮重跑一遍判决，日志上却一个红字都没有。
+/// 这五行现在都是 `by: None`（派发只发生在五处点问），**没有派发器替它们兜这个漂移**
+/// ——`drive` 选不到未接线的行，也就不会在装载期之后任何一个环节发现它。
+///
+/// 分工说清楚：本用例只验「行读的那张视图真能由生产形状开、由生产符号关」；
+/// 点问那五处的**行为**（先问后做、不欠就不做）归 e2e，不在这里。
+#[test]
+fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
+    use super::super::stage_events::{StageFact, StageName};
+    use crate::symbio_core::{
+        EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED,
+        EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
+    };
+
+    // 生产侧的三条来源，逐条对齐：
+    //  - 用户格与配置格的**种类**与 id 形状：`chat_loop/drive.rs` 的 `u-{turn}` /
+    //    `cfg-{turn}-{drive_seq}`；配置载荷的键集就是 `plain()` 那一份（视图按键取值，
+    //    键名漂了 ⇒ 视图取不到 ⇒ 行恒不欠，策略静默停摆）。
+    //  - 阶段格的**载荷**由 `StageFact::payload()` 给出、`stage` 值由 `StageName::name()`
+    //    给出：这里一律不写字面量，行表能不能关账就只取决于生产那两处是不是同一个名字。
+    let user = || ev(1, EVENT_USER_MESSAGE, json!({ "text": "hi", "id": "u-1" }));
+    // 生产那份配置载荷（`plain()` 给全键集 = 关掉的会话），只覆盖用例关心的那一个开关。
+    let with_flags = |flags: Value| {
+        let mut payload = plain();
+        for (k, v) in flags.as_object().expect("配置格是对象") {
+            payload[k.clone()] = v.clone();
+        }
+        payload
+    };
+    let config = |flags: Value| ev(1, EVENT_SESSION_CONFIG, with_flags(flags));
+    // 阶段格的载荷由 `StageFact::payload()` 给出（`stage_events::land_with_seqs` 落的
+    // 就是这一份），`stage` 值由 `StageName::name()` 给出——这里不写字面量。
+    let stage = |fact: StageFact| ev(1, EVENT_TURN_STAGE, fact.payload());
+    let round = || stage(StageFact::request_round(0, "1"));
+
+    // `policy.classify`：轮首 + 开关开 + 有发言 ⇒ 欠；`StageName::Decide` 落格 ⇒ 关。
+    let mut head = vec![user(), config(json!({"classify_enabled": true})), round()];
+    assert!(owes("policy.classify", &head, 0));
+    head.push(stage(StageFact::ran(StageName::Decide, 0)));
+    assert!(!owes("policy.classify", &head, 0));
+
+    // `policy.compress`：同一张视图（`turn_head`）的另一组键；出口是 `StageName::Compress`。
+    let mut compress = vec![user(), config(json!({"auto_compress": true})), round()];
+    assert!(owes("policy.compress", &compress, 0));
+    compress.push(stage(StageFact::compress(0, 1, 1)));
+    assert!(!owes("policy.compress", &compress, 0));
+
+    // `policy.recall`：持久会话才欠；出口是 `StageName::Recall`。
+    let mut recall = vec![user(), config(json!({"is_persistent": true})), round()];
+    assert!(owes("policy.recall", &recall, 0));
+    recall.push(stage(StageFact::ran(StageName::Recall, 0)));
+    assert!(!owes("policy.recall", &recall, 0));
+
+    // `policy.reflex`：开账读的是**召回那格的 `result`**（`with_result` 是生产写它的唯一入口），
+    // 出口 `turn_closed` 视图读的两格种类都用常量（`final` / `fallback`）。
+    let mut reflex = vec![
+        user(),
+        config(json!({"is_persistent": true})),
+        round(),
+        stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
+    ];
+    assert!(owes("policy.reflex", &reflex, 0));
+    reflex.push(ev(1, EVENT_ASSISTANT_FINAL, json!({ "text": "答完了" })));
+    assert!(!owes("policy.reflex", &reflex, 0));
+    let mut fell_back = vec![
+        user(),
+        config(json!({"is_persistent": true})),
+        round(),
+        stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
+    ];
+    fell_back.push(ev(1, EVENT_ASSISTANT_FALLBACK, json!({ "text": "兜底" })));
+    assert!(!owes("policy.reflex", &fell_back, 0));
+
+    // `policy.report`：另一张视图（`report_due`，按静默时长与配额折）。出口格
+    // `chat.assistant.reported` 用常量种类 + 生产 id 形状 `rp-{turn}-{no}`。
+    let report_cfg = {
+        let mut payload = with_flags(json!({}));
+        payload["progress_enabled"] = json!(true);
+        payload["progress_interval_ms"] = json!(1000);
+        payload["progress_max_per_turn"] = json!(2);
+        payload
+    };
+    let due = vec![
+        ev_at(1, EVENT_SESSION_CONFIG, report_cfg.clone(), 10),
+        ev_at(
+            1,
+            EVENT_USER_MESSAGE,
+            json!({ "text": "hi", "id": "u-1" }),
+            20,
+        ),
+    ];
+    assert!(owes("policy.report", &due, 60_000));
+    let mut spoke = due.clone();
+    spoke.push(ev_at(
+        1,
+        EVENT_ASSISTANT_REPORTED,
+        json!({ "text": "先报一句" }),
+        60_000,
+    ));
+    assert!(!owes("policy.report", &spoke, 60_000));
+
+    // 反向自检：把 `stage` 的值换成**任何别的**字符串，行就再也关不上——
+    // 上面那条断言不是恒真，它确实在读生产那一个名字。
+    let mut drifted = vec![user(), config(json!({"classify_enabled": true})), round()];
+    drifted.push(ev(
+        1,
+        EVENT_TURN_STAGE,
+        json!({ "stage": "classify", "round": 0 }),
+    ));
+    assert!(owes("policy.classify", &drifted, 0));
+}
+
 // ── 全局裁决序 / 临时执行行 ──────────────────────────────────────────────
+
+/// 承认在册的三处幂等点问（`obligation-precheck OB-004`），点名的两行**必须接了执行体**。
+///
+/// 这是 OB-004 在 Rust 侧的同一条事实，读的是 `static ROWS` 本体而不是文本：判据脚本
+/// 按正则读 `by: Some(`，形状一改就可能读不到（而它读不到就等于放行）；这条不会。
+/// 它钉的是承认的**前提**——「动手前复核」只在有人动手时才成立：`by = None` 的行的
+/// 唯一派发点就是那处直问，把它写成护栏是给调度旁路洗白。
+#[test]
+fn the_rows_guarded_by_admitted_prechecks_have_executors() {
+    for name in ["open-tools", "authorize-tool"] {
+        let decl = ROWS
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("承认在册点名的行 `{name}` 不在 `ROWS` 里"));
+        assert!(
+            decl.by.is_some(),
+            "`{name}` 没有执行体 ⇒ 那三处直问不是护栏，是它唯一的派发点"
+        );
+    }
+    // 五条策略行正相反：它们至今没有执行体，所以那五处直问**就是**派发点（调度旁路，
+    // 归零对象）。这一格是 `D-158` 记的那笔账的当前形状，接回时它会红——那是预期的红。
+    let unwired: Vec<&str> = ROWS
+        .iter()
+        .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
+        .map(|d| d.name)
+        .collect();
+    assert_eq!(unwired.len(), 5, "未接线的策略行清单变了（`D-158` 的台账）");
+}
 
 #[test]
 fn execute_row_closes_on_turn_closed() {

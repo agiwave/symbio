@@ -41,7 +41,7 @@ lists: [gate-codes=owner]
 | **ME** | 机制强制等级清单 | `scripts/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
-| **OB** | 义务环派发面（旁路直调计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–003 | `OB-004` |
+| **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–003 | `PP-004` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
@@ -161,6 +161,7 @@ lists: [gate-codes=owner]
 | **OB-001** | `scripts/obligation-bypass-audit.mjs` |
 | **OB-002** | `scripts/obligation-bypass-audit.mjs` |
 | **OB-003** | `scripts/obligation-bypass-audit.mjs` |
+| **OB-004** | `scripts/obligation-bypass-audit.mjs` |
 | **PN-001** | `scripts/panic-audit.mjs` |
 | **PN-002** | `scripts/panic-audit.mjs` |
 | **PN-003** | `scripts/panic-audit.mjs` |

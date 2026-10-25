@@ -121,13 +121,25 @@ function legacyRoleCells(text) {
 }
 
 /** `scripts/obligation-bypass-audit.mjs` 的 `BYPASS_BASELINE`（OB-001）：同构的三元形状，
- *  一格——旁路直调 `owes()` 的点数上限（只许降）。它是「收口完成 = 计数归零」这条定义
- *  的**唯一持有者**：设计文档正文只写口径，数字住这里，所以放宽它就等于放宽那个定义。 */
+ *  一格——**调度旁路**（未承认的直调 `owes()`）点数上限（只许降）。它是「收口完成 = 调度
+ *  旁路归零」这条定义的**唯一持有者**：设计文档正文只写口径，数字住这里，所以放宽它就
+ *  等于放宽那个定义。 */
 function obligationBypassCells(text) {
   const cells = new Map()
   const norm = text.replace(/\r\n/g, '\n')
   const m = /\?\s*Number\(process\.env\.OBLIGATION_BYPASS_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
   if (m) cells.set('OB-001', Number(m[1]))
+  return cells
+}
+
+/** 同一脚本的 `PRECHECK_BASELINE`（OB-004）：**幂等点问**（执行体动手前的复核）上限。
+ *  它不是归零对象，但也不许随手加——每加一处就等于开一条不用过外环收编的逃生通道，
+ *  所以它单独一格、单独一条 env、单独一个豁免标记。 */
+function obligationPrecheckCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.OBLIGATION_PRECHECK_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('OB-004', Number(m[1]))
   return cells
 }
 
@@ -259,14 +271,26 @@ const RATCHETS = [
   {
     // 旁路直调 `owes()` 的点数。DE-015 §5.3 把「收口完成」定义成**这个数归零**，
     // 而定义要成立，那个数就不能被悄悄改大——「改一个数字」看起来像维护，实际是在
-    // 取消一条已经写进设计的定义。
+    // 取消一条已经写进设计的定义。`D-158` 之后这里只数**调度旁路**：动手前复核另立一格。
     id: 'obligation-bypass',
     file: 'scripts/obligation-bypass-audit.mjs',
     dir: 'ceiling',
     cellsOf: obligationBypassCells,
     waivers: waiverReader('obligation-bypass-allow'),
     envVar: 'OBLIGATION_BYPASS_BASELINE',
-    label: '旁路直调 `owes()` 的点数（只许降，归零 = 派发面收口完成）',
+    label: '调度旁路（未承认的直调 `owes()`）点数（只许降，归零 = 派发面收口完成）',
+  },
+  {
+    // 幂等点问（OB-004 承认在册的直问）的存量。它不归零，但也不许随手加：每一处都要
+    // 就地理由 + 点名的行确实接了执行体，而那件事由 `obligation-bypass-audit` 自己判；
+    // 这一格只管「在册的护栏有没有变多」。
+    id: 'obligation-precheck',
+    file: 'scripts/obligation-bypass-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: obligationPrecheckCells,
+    waivers: waiverReader('obligation-precheck-allow'),
+    envVar: 'OBLIGATION_PRECHECK_BASELINE',
+    label: '幂等点问（执行体动手前复核）存量（只许降，但不以归零为目标）',
   },
   {
     id: 'coverage',

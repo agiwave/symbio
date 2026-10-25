@@ -408,6 +408,7 @@ impl ToolPort {
         // 按旧路径继续派发，不能因为升级把在飞的会话卡死。带 `calls` 的应答
         // 则必须由创建行先开账——它不欠就说明这一批已经落过 `request`。
         let has_calls = latest.is_some_and(|e| e.payload.get("calls").is_some());
+        // obligation-precheck OB-004: 执行体（OPENER）动手前的复核——同一批被 resume / 重放第二次带进来时，创建行已由 `until` 关掉，早退避免重复落 `request`（不是第二套调度：这里不选行、不排行，只问本行还欠不欠）
         if has_calls && !loop_rows::owes("open-tools", &facts, self.turn, self.now_ms(&facts)) {
             crate::plugin_warn!(
                 "session",
@@ -538,6 +539,7 @@ impl ToolPort {
     /// 授权动作的实体（策略由调用方读出，resume 路径复用同一份）。
     fn authorize_calls(&self, policy: &ToolPortPolicy, calls: &mut [ToolPortCall]) {
         let facts = self.facts.range(Seq::new(0));
+        // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——批内授权与策略变更后的续跑共用这份实体，第二次进入时授权行已落事实、不再欠，早退避免重复判放行
         if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
             crate::plugin_warn!(
                 "session",
@@ -825,6 +827,7 @@ impl ToolPort {
     /// 再按阈值拒一次会让审批卡永远点不动。
     pub(crate) fn authorize_wake(&self, calls: &mut [ToolPortCall]) {
         let facts = self.facts.range(Seq::new(0));
+        // obligation-precheck OB-004: 执行体（AUTHORIZER）动手前的复核——唤醒路径与批内授权是两个入口进同一次判定，行已不欠说明这轮的放行落过事实，早退避免重复写授权格
         if !loop_rows::owes("authorize-tool", &facts, self.turn, self.now_ms(&facts)) {
             crate::plugin_warn!(
                 "session",
