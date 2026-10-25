@@ -451,13 +451,16 @@ impl Plugin for SessionPlugin {
             // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
             // 纯计算、零副作用——既不落盘也不碰消息。
             "stats" => return self.handle_stats(ctx).await,
+            // 读数：本会话改过哪些文件（D-169：`artifact.added` 的一条投影，不是新事实族）。
+            // 同样是纯计算、零副作用。
+            "changes" => return self.handle_changes(ctx).await,
             // 本表只留「不是数据 CRUD」的路由：会话与消息的增删改查**全部**经 VDFS
             // 地址完成（`vdfs/list|read|write|action|delete`）。在路由上再开一条数据面
             // 入口 = 同一能力的第二份实现，两条实现会各自漂移——判据与逐条退役记录见
             // 设计文档（`stream` 见
             // 设计文档；选项三条见
             // 设计文档）。
-            // 剩下的都不是 CRUD：前三条是**编排 / 控制 / 读数**。
+            // 剩下的都是**只读读数**（会话与消息的增删改查全在 VDFS 地址面）。
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

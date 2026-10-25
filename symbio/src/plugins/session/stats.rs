@@ -8,7 +8,7 @@
 //!
 //! ## 两个文件的分工（判据：这一段错了谁会红）
 //!
-//! - 本文件：**出口形状与取数**——`TierRow` / `SessionStats` / `StatsRequest` 这些
+//! - 本文件：**出口形状与取数**——`TierRow` / `SessionStats` / `ViewerRequest` 这些
 //!   契约字段，以及「读哪些会话、快照怎么来」的取数与路由。它出错，红的是
 //!   **读不到 / 字段缺**；
 //! - [`stats_reading`]：**读数装配**——把投影值排成每一格（可见域、承诺列、实例级
@@ -57,7 +57,7 @@ use crate::symbio_core::{
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{
-    commitments_reading, content_scope_of, fleet_reading, panel_of, usage_section,
+    commitments_reading, content_scope_of, fleet_reading, panel_of, usage_section, ViewerRequest,
 };
 
 /// 一个档位的一行读数：时延列与兜底列并排（同一档位的两类收益同处一行）。
@@ -282,19 +282,6 @@ pub(crate) struct SessionStats {
     /// 一列（其余各列只读一个文件）。今天没有生产调用方（P4 登记），接进前端时应
     /// 连同这一条成本一起考虑——要么按需取（单独一条路），要么增量缓存。
     pub fleet: serde_json::Value,
-}
-
-/// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
-///
-/// `principal` 是读方身份（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 读侧）：
-/// 声明了才判可见域，没声明就不判定。**这里的选择权只在读方，可见域与属主
-/// 不在载荷里**——请求方自己声明「我能看到什么」等于给自己授权（governance 模块
-/// 文档点名的那条捷径），本字段只回答「我是谁」。
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-pub(crate) struct StatsRequest {
-    /// 读方身份；缺席 / `null` ⇒ 不判定。
-    #[serde(default)]
-    pub principal: Option<String>,
 }
 
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列。
@@ -551,7 +538,7 @@ impl SessionPlugin {
         let viewer: Option<String> = match ctx.payload::<serde_json::Value>()? {
             serde_json::Value::Null => None,
             v => {
-                serde_json::from_value::<StatsRequest>(v)
+                serde_json::from_value::<ViewerRequest>(v)
                     .map_err(|e| {
                         PluginError::ValidationError(format!("session/stats 载荷不合法：{e}"))
                     })?

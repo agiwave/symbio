@@ -24,6 +24,18 @@ use crate::symbio_core::{
 
 use super::stats::SessionStats;
 
+/// 读侧出口的**读方身份声明**：`session/stats` 与 `session/changes` 同一份载荷形状。
+///
+/// 全部可选——不传 = 本机默认。`principal` 只回答「我是谁」；**可见域与属主不在
+/// 载荷里**（请求方自己声明「我能看到什么」等于给自己授权）。声明了却读不出身份
+/// ⇒ 出口拒绝（fail-closed），判据落在各出口的解析处。
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+pub(super) struct ViewerRequest {
+    /// 读方身份；缺席 / `null` ⇒ 不判定。
+    #[serde(default)]
+    pub principal: Option<String>,
+}
+
 /// 本会话事实源的**内容侧可见域**（②）：记忆载荷 `vis_scope` 的最宽取值。
 ///
 /// 为什么取最宽而不是逐条判：读侧闸是**整列**判据（四列 / 声誉 / 就绪 / 转写

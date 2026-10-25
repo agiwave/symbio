@@ -2,6 +2,7 @@
 
 mod active;
 mod capabilities;
+mod changes;
 mod chat_session;
 mod commands;
 pub(crate) mod config;

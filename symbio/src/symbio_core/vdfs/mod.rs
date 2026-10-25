@@ -91,7 +91,9 @@ pub use provider::{DynVdfsProvider, VdfsProvider};
 pub use request::{VdfsActionResult, VdfsRequest, VdfsResponse, VdfsWriteResponse};
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
-pub(crate) use address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+pub(crate) use address::{
+    absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl,
+};
 // 路径守卫（`..` 段判定 / 前缀段比较）——shell 工具与 VDFS 物理层共用的同一条规则
 pub use address::{vdfs_has_parent_segment, vdfs_path_within};
 

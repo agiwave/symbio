@@ -254,6 +254,10 @@ pub static SPECS: &[ToolSpec] = &[
                 };
                 Ok(serde_json::json!({
                     "success": true,
+                    "path": req.path,
+                    // 无操作（`old_string == new_string`）在结果里是结构化的：
+                    // 读侧据此跳过，不必匹配 `message` 的中文措辞。
+                    "replaced": data.replaced,
                     "message": message,
                 }))
             })

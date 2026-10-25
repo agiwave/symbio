@@ -34,6 +34,7 @@ lists: [route-contracts=owner]
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；core 常量 `ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
+| `session/changes` | 前端（变更面板，待接） | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影，D-169）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数、不拼地址 |
 | `session/stats` | 前端（`services/sessionStats.ts`）/ CLI（`client.rs`） | `SessionStats` | 只读读数；不得另写统计口径（DE-016 §4 复算判据） |
 | `skill/execute` | 仓内无调用方 | `SkillResponse` | 载荷 `{name, args}`，返回技能定义正文 |
 | `telegram/get_updates` | 外部客户端（gateway 原样转发） | 更新数组 | 长轮询 |
@@ -88,7 +89,7 @@ lists: [route-contracts=owner]
 
 ## Session 插件
 
-唯一静态路由 `session/stats`（契约见上表）。**会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上。
+两条只读静态路由：`session/stats` 与 `session/changes`（契约见上表）。**会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上。
 
 > **会话级操作已并入 VDFS（专用路由不再存在）**：列会话清单 · 读整份转写 · 新建会话（id 由后端生成）· 新建 / 打开**具名**会话（id 由调用方给）· 删除会话 · 改 metadata / 标题 ·改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** ·清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**——地址清单与各自职责见 [RE-006 §2.3](006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") 与 [AR-022](../../symbio/src/plugins/session/docs/109-vdfs-session-messages.md "DE-109-vdfs-session-messages")。
 >
@@ -98,6 +99,8 @@ lists: [route-contracts=owner]
 >
 > `stats` 的读数只能调已有的投影、不得另写一份统计口径
 > （[DE-016](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §4 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
+> `changes` 同理：只调 core 的 `workdir_changes`，不在出口再判「哪些工具算写」——
+> 实现见 [`symbio/src/plugins/session/changes.rs`](../../symbio/src/plugins/session/changes.rs)。
 >
 > 读侧闸（[DE-001](../003-design/001-核心架构.md "DE-001-核心架构") §7）：**不声明 `principal` = 本机默认读数**；声明了才按 `can_see` 判可见域（`thread_private` 缺省，C10）——属主全量、**非属主读数为空**（含矩阵内主体；`has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨）。载荷只回答「我是谁」，不接受声明「能看到什么」——那等于给自己授权。可见域**只判一次**：四列、不变量、声誉、就绪集与转写列共用同一个答案，读不出时声誉是**整列**`{}`（不是零值条目）——全有全无，免得「没人立过约」与「不给你看」同形；就绪集与转写列跟四列同形（空切片 ⇒ `{ready: []}` / `{entries: []}`）——「没有就绪任务 / 没有对话」与「不给你看」由 `has_wal` 与列的上下游分辨。
 

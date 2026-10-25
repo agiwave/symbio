@@ -177,8 +177,10 @@ impl: partial
 - **P2-1 上下文水位可见** ✅ 已落地（见 §11）—— 输入区上方一条细水位条：本轮请求开头的估算 / 上限 / 自动整理线，
  条上的刻度就是「后端会在这里接手」的那条线。**不给「压缩」入口**：手动重试只由失败压缩节点下发，
  一条健康的水位线后面没有可点的东西（裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README")）。
-- **P2-2 本会话动过哪些文件**：`<根>/session/<id>/workdir` 已存在但未进聊天界面。
- 加一个可折叠「变更」面板，diff 复用 `CodeEditor.vue`。这是 Agent 类产品的核心 UX。
+- **P2-2 本会话动过哪些文件** ✅ 后端已落地（见 §11）—— 可折叠「变更」面板：行 = 路径 + 动作
+  + 轮号，点开经既有 VDFS 树打开**当前**文件（预览复用 `VdfsTextDetail` / `CodeEditor.vue`）。
+  **不做 diff**：变更账记的是「谁在哪一轮改过这个路径」，`artifact.added` 不带写入前全文，
+  没有旧内容就没有 diff 可画；把它画出来必然是在编旧内容（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")）。
 - **P2-3 工具授权分级**：`UserPromptNode.vue` 有 approve/reject 但无「本次会话放行」→ 高频打扰。
  按危险度分级（shell / 写文件 / 删文件）+ 三档授权（每次问 / 本会话放行 / 永久放行）。
 - **P2-4 用量与成本**：多供应商 LLM 却零用量可。会话头 / 模型条目显示累计 token；
@@ -427,6 +429,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
 | P2-3 授权分级（前两档）：确认卡三键——批准本次 / 本会话放行 / 拒绝。「本会话放行」把会话阈值抬到本次调用的风险档，**同档及以下从此不再问**；卡上没有风险档时不出这一键（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::requires_approval`（`risk > threshold`），阈值来自 `ctx[RISK_LEVEL]`（会话 metadata 的 `risk_level` 经 `resolve_session_params` 落进 ctx）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` 钉住「抬一档 ⇒ 不再问、方向可复算」；前端：`components/message/InteractionNode.vue`（第三键；档位校验走 `isSessionRiskLevel`，不在组件里手写词表）+ `ALLOW_FOR_SESSION_KEY`（注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降，已是该档就不写）+ `schemas/session_meta.ts`（`riskRankOf`，档位序取自词表数组）。**零新事实**：`authz.granted` 仍由「批准本次」写，抬阈值只改会话 metadata 的一个字段 |
 | P2-4 用量（token 那一半）：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，单位走 `format_tokens` 全仓唯一实现）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
+| P2-2 变更账（后端）：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数、不拼地址 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
 
 **本节的判据**：
 
@@ -468,7 +471,7 @@ P2-2 / P2-3 / P2-4 / P2-5 四项**不是同一档工作量**。照着 §3 的提
 
 | 项 | 今天的事实 | 缺的那一样 | 谁先动 |
 |---|---|---|---|
-| P2-2 变更面板 | `<根>/session/<id>/workdir/<rel>` 是一棵 VDFS 树（`list` / `read` / `write` / `delete` 四口齐），文件改动只有**实时面**（`VdfsChange` 走事件总线，进程退出即消失） | 「本会话**动过**哪些文件」要一条可回读、可归因的记录。实时面的帧既不留档也不带写者，进程一退就没了 | 后端先补 |
+| P2-2 变更面板 | 后端已落地（§11）：`session/changes` 从 `artifact.added` 折出本会话改过的文件，行是呈现就绪的 `{path, address, op, label, turn, changes}`；打开文件走既有 VDFS 树 + `VdfsTextDetail` / `CodeEditor.vue` | 前端那一批：可折叠面板 + 空态 + 组件用例。**不做 diff**——没有写入前全文，画 diff 必须编旧内容 | 前端（后端已补） |
 | P2-3 授权分级 | 两档已落地（§11）：`authorize-tool` 拿这一次调用的 `risk` 与会话阈值 `threshold` 比一次，出口是 `authz.granted` / `authz.denied`；阈值住在会话元数据里，「本会话放行」= 抬它 | 第三档「永久放行」**没有落点**——跨会话的授权清单不存在：今天没有任何地方能记「这个工具在所有会话里都免问」，也没有任何回读方 | 前两档已落；第三档需先裁「清单住哪、谁写、读方是谁」 |
 | P2-4 用量成本 | `response{port=model}` 带 `usage`（实测 token）；`session/stats.tokens` 与 `usage`（会话头那一格）都从它算，读数面板与会话头共用 `usage_section` 一个装配；`session/stats.cost` 仍是**时延**台账（事件的 `cost_ms` 按写方累计），不是钱 | 钱要先有价格，而 `model` 今天**没有价格字段**——按名字猜价格是给「换了个端点就全错」埋伏笔 | 用量已落地（含会话头）；成本待后端补价格 |
 | P2-5 分支切换 | `RetrySubtree` 的动作是**删掉失败轮再按普通新轮重来**（`chat_loop/wake.rs` 的 `WakeOutcome::NewTurn`） | 分支要成对出现：旧轮保留 + 「当前是哪一支」可判。今天两者都没有——`parent_id` 树是真的，但树上没有第二个孩子 | 后端先补（且要先裁「重试 = 替换还是分支」） |

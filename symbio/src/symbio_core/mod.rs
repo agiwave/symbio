@@ -98,6 +98,11 @@ pub(crate) use projection::conation::ConationView;
 // `SpanSummary` 不另起别名：`merge` 的返回类型随调用走，消费方不需要点它的名字
 // （要断言它内部形状的测试走 `projection::span::` 完整路径）。
 pub(crate) use projection::span::{span, SpanView};
+// 工作目录的变更账（D-169）：`artifact.added` 的一条纯投影，单消费方
+// （`plugins/session/changes.rs`）。走 `pub(crate)`——C-002 仍要求经根路径取用，
+// 而 C-003 的公开面不因一条新投影变宽。`FileChange` 不点名：行类型随返回值流动
+// （出口只读字段、再排成自己的行）。
+pub(crate) use projection::changes::{workdir_changes, FileOp};
 // 读数面板方言（P4）：后端下发描述、前端零业务知识渲染。同族——消费方在两个
 // 前端（Tauri + CLI），都必须经根路径拿类型，不能深引 `schemas` 域目录。
 pub use present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
