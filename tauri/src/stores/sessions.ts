@@ -58,6 +58,9 @@ import {
   type SessionMetadata
 } from '@/services/session'
 import { writeVdfs, runVdfsAction, listVdfs } from '@/services/vdfs'
+// 档位序取自契约层（`SESSION_RISK_LEVELS` 的顺序即「从松到严」）——本 store
+// 只做比较，不重新声明档位。
+import { riskRankOf } from '@/schemas/session_meta'
 import {
   VDFS_ACTION_ABORT,
   VDFS_STATUS_WORKING,
@@ -607,9 +610,65 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  // ---- 计算属性 ----
-  const activeListItem = computed(() => list.value.find(s => s.id === activeId.value) || null)
   /**
+   * 会话 metadata 的**唯一写入实现**（后端 `vdfs/write` 浅合并 + 本地镜射）。
+   *
+   * ## 为什么从选项栏下沉到这里
+   *
+   * 写口此前只有 `useSessionOptionBar.save` 一处，于是「改会话 metadata」被绑在
+   * **选项栏这个 UI 机制**上：任何在会话层面改一个字段的动作（例如「本会话放行」
+   * 把风险阈值抬一档）都得先拿到选项栏实例，否则只能自己再写一遍 `updateSession`
+   * + 本地镜射——那就是第二份实现，而两份之后迟早分叉（「选项栏改生效、别的入口
+   * 改不生效」这类只在一条路径上出现的行为差异，恰好没有测试会覆盖）。
+   *
+   * 层次因此调平：本函数是**写**（浅合并的唯一前端实现），`useSessionOptionBar`
+   * 是「字段值 + 草稿缓冲 + 禁用态」的语义层，两者之上不再有第三条路。
+   *
+   * ## 先写后镜射
+   *
+   * 顺序不可颠倒：先镜射后写会造成「界面已经变了、后端没变」，而那条歧义要等
+   * 用户下次操作（或重启）才暴露。写失败直接抛出，由调用方决定怎么提示。
+   */
+  async function patchSessionMetadata(
+    id: string,
+    patch: Record<string, unknown>
+  ): Promise<void> {
+    await updateSession(id, patch as SessionMetadata)
+    applySessionMetadataPatch(id, patch)
+  }
+
+  /**
+   * 「本会话放行」：把会话的执行阈值抬到 `level`（**只抬不降**）。
+   *
+   * ## 为什么抬阈值就够，不必新增一条授权事实
+   *
+   * 阈值的语义是「比它更危险才问」（后端 `CapabilityRiskLevel::requires_approval`），
+   * 它本来就住在会话 metadata 里、由后端解析成 `ctx[RISK_LEVEL]` 交给授权级联。
+   * 因此「这个会话里同档的调用别再问了」= 抬一次阈值，**不新增任何事实**：
+   * 这一次调用的 `authz.granted` 仍由用户对它的批准写。
+   *
+   * 粒度的代价要说清：抬档放过的是**整档**（含同档别的工具），不是「这一个
+   * 工具」。这是「按危险度分级」本来的粒度；按工具免问需要一份授权清单，
+   * 那是第三档「永久放行」的前件，不存在于今天。
+   *
+   * ## 只抬不降
+   *
+   * 本动作的用途是**减少打扰**；降阈值（更严格）是用户在选项栏里的显式选择，
+   * 不该由一次批准顺手做掉。已经是该档或更宽时直接返回、**不写**——一次无意义
+   * 的 metadata 写会广播一次资源变更，让会话清单白重拉一遍。
+   */
+  async function raiseSessionRiskLevel(
+    id: string,
+    level: SessionRiskLevel
+  ): Promise<SessionRiskLevel> {
+    const cur = getSessionRiskLevel(id)
+    if (riskRankOf(level) <= riskRankOf(cur)) return cur
+    await patchSessionMetadata(id, { risk_level: level })
+    return level
+  }
+
+  // ---- 计算属性 ----
+  const activeListItem = computed(() => list.value.find(s => s.id === activeId.value) || null)  /**
    * 当前会话的**完整地址**（`<挂载目录>/<id>`）——输入与读取的唯一落点。
    *
    * 会话在前端的身份是地址而不是裸 id（两个空间里可以有同名 id）。`activeId`
@@ -1329,9 +1388,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 这条不变式又散回调用方。
     createSessionWithFirstMessage,
     consumePendingFirstMessage,
-    // 执行风险等级（low / medium / high）
+    // 执行风险等级（low / medium / high）：读取 + 「本会话放行」抬阈值
     getSessionRiskLevel,
-    // 会话选项栏：metadata 浅合并的本地镜射（后端写通道为 `vdfs/write`）
+    raiseSessionRiskLevel,
+    // 会话 metadata 补丁的**唯一写入实现**（后端 `vdfs/write` + 本地镜射；
+    // 选项栏与「本会话放行」都走它）
+    patchSessionMetadata,
+    // 会话选项栏：metadata 浅合并的本地镜射（供 `patchSessionMetadata` 与
+    // 需要「只镜射不写」的少数调用方使用）
     applySessionMetadataPatch
   }
 })

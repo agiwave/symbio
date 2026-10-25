@@ -11,10 +11,16 @@
  * 本文件因此直接用**折后的五值**构造节点，逐格锁定可见渲染结果（含未登记类型兜底到 body）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
-import { SKELETON_LAZY_KEY, type SkeletonLazySurface } from '@/composables/useChatConnection'
+import {
+  ALLOW_FOR_SESSION_KEY,
+  RESUME_KEY,
+  SKELETON_LAZY_KEY,
+  type ResumePayload,
+  type SkeletonLazySurface,
+} from '@/composables/useChatConnection'
 import type { ReleasedSummary } from '@/stores/skeletonLazy'
 import type { ChatNode } from '@/schemas/chat_node'
 
@@ -562,5 +568,127 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
     // 无 SKELETON_LAZY_KEY：isReleased 恒 false ⇒ 走未释放路径（兜底照出）
     expect(w.find('.skeleton-missing').exists()).toBe(true)
     expect(w.find('.skeleton-released').exists()).toBe(false)
+  })
+})
+
+/**
+ * 工具确认卡的三档 —— 批准本次 / 本会话放行 / 拒绝。
+ *
+ * 「本会话放行」与「批准执行」写的是**两笔不同的事实**：前者改会话的执行阈值
+ * （同档及以下从此不问），后者只批这一次。所以这里钉的不是「按钮在哪」，而是
+ * 两件事：点错按钮不会顺手改另一件事实，点「本会话放行」时两笔的**顺序**也对。
+ */
+describe('MessageNode：工具确认的三档', () => {
+  /** 一张带风险档的工具确认卡（父骨架 + 一个 waiting 的 interaction 子节点） */
+  function confirmTree(risk?: string): ChatNode {
+    return msg({
+      id: 'tc1',
+      type: 'skeleton',
+      title: 'shell',
+      status: 'waiting_user_action',
+      content: '{}',
+      children: [
+        msg({
+          id: 'up1',
+          type: 'interaction',
+          status: 'waiting_user_action',
+          meta: {
+            prompt: {
+              kind: 'confirm',
+              tool_name: 'shell',
+              description: '删除文件',
+              ...(risk ? { risk_level: risk } : {}),
+            },
+          },
+          parent_id: 'tc1',
+        }),
+      ],
+    })
+  }
+
+  /**
+   * 挂载并接上两个注入口，返回「谁先被调到」的调用序列。
+   *
+   * 序列是判据的一部分：抬阈值必须先落定，恢复载荷里的 `risk_level` 才读得到
+   * 新档（`useChatConnection.resume` 从 store 取值）——反过来的话本次恢复仍按旧
+   * 阈值判，用户会看到「刚点了放行又弹一次」。
+   */
+  function mountWithPorts(node: ChatNode) {
+    const calls: string[] = []
+    const resumed: ResumePayload[] = []
+    const allowed: string[] = []
+    const w = mount(MessageNode, {
+      props: { node },
+      global: {
+        provide: {
+          [RESUME_KEY]: (p: ResumePayload) => {
+            calls.push(`resume:${p.action}`)
+            resumed.push(p)
+          },
+          [ALLOW_FOR_SESSION_KEY]: async (risk: string) => {
+            // 真实实现是一次后端写（必然跨微任务）。这里显式让出一拍，
+            // 否则「先抬阈值再批准」这条顺序在没有 await 时也会碰巧成立。
+            await Promise.resolve()
+            calls.push(`allow:${risk}`)
+            allowed.push(risk)
+          },
+        },
+      },
+    })
+    return { w, calls, resumed, allowed }
+  }
+
+  it('带风险档的确认卡给出第三档；不带档位时没有这一键', () => {
+    const withRisk = mountWithPorts(confirmTree('high')).w
+    expect(withRisk.find('button.up-allow-session').text()).toBe('本会话放行')
+
+    const bare = mountWithPorts(confirmTree()).w
+    expect(bare.find('button.up-allow-session').exists()).toBe(false)
+    // 另外两键照旧
+    expect(bare.find('button.up-approve').exists()).toBe(true)
+    expect(bare.find('button.up-reject').exists()).toBe(true)
+  })
+
+  it('「本会话放行」= 先抬到这一档，再批准本次', async () => {
+    const { w, calls, resumed, allowed } = mountWithPorts(confirmTree('high'))
+
+    await w.find('button.up-allow-session').trigger('click')
+    await flushPromises()
+
+    expect(allowed).toEqual(['high'])
+    expect(resumed.map((p) => p.action)).toEqual(['approve'])
+    expect(calls).toEqual(['allow:high', 'resume:approve'])
+    // 恢复锚点仍是父骨架（批准打在工具调用上，不是 interactive 节点自己）
+    expect(resumed[0].targetId).toBe('tc1')
+  })
+
+  it('「批准执行」不顺手抬阈值：两笔事实各走各的入口', async () => {
+    const { w, calls, allowed } = mountWithPorts(confirmTree('high'))
+
+    await w.find('button.up-approve').trigger('click')
+    await flushPromises()
+
+    expect(allowed).toEqual([])
+    expect(calls).toEqual(['resume:approve'])
+  })
+
+  it('抬阈值失败仍批准本次：一次写失败不该把用户挡在门外', async () => {
+    const resumed: ResumePayload[] = []
+    const w = mount(MessageNode, {
+      props: { node: confirmTree('high') },
+      global: {
+        provide: {
+          [RESUME_KEY]: (p: ResumePayload) => resumed.push(p),
+          [ALLOW_FOR_SESSION_KEY]: async () => {
+            throw new Error('boom')
+          },
+        },
+      },
+    })
+
+    await w.find('button.up-allow-session').trigger('click')
+    await flushPromises()
+
+    expect(resumed.map((p) => p.action)).toEqual(['approve'])
   })
 })

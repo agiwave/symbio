@@ -21,6 +21,7 @@ import {
   type VdfsSessionScheme,
 } from '@/schemas/vdfs'
 import { isWaitingStatus, synthesizeTypingChildren } from '@/registry/messageTypes'
+import type { SessionRiskLevel } from '@/schemas/session_meta'
 
 export interface UseChatConnectionOptions {
   /** 会话 id（地址末段）：store 里所有以会话为键的状态都用它 */
@@ -114,6 +115,30 @@ export interface SkeletonLazySurface {
 
 /** 「骨架惰性重取」注入键（symbol + `InjectionKey`：键名是类型的一部分） */
 export const SKELETON_LAZY_KEY: InjectionKey<SkeletonLazySurface> = Symbol('chat-skeleton-lazy')
+
+/**
+ * 「本会话放行」注入键 —— 把本会话的执行阈值抬到这次调用的风险档。
+ *
+ * ## 为什么是一个独立动作，而不是 `RESUME_KEY` 的一个参数
+ *
+ * 两者写的是**两笔不同的事实**：`resume(approve)` 记的是「用户批了**这一次**」
+ * （`authz.granted`，一次调用一笔），本动作记的是「这个会话的阈值从此是这一档」
+ * （会话 metadata 的一个字段）。合成一个参数会让「点了批准」隐式携带「以后
+ * 别问」——用户在审批卡上看不出这两件事被绑在一起。
+ *
+ * ## 为什么参数只有档位、没有会话 id
+ *
+ * 「本会话」由提供方闭包持有（与 `SkeletonLazySurface` 不持会话 id 同一条理由）：
+ * 渲染器在消息树的任意深度，再传一份会话 id 就出现「两个来源」，而其中一个会是
+ * 子会话 id——那正好是「抬错了会话」的成因。
+ *
+ * ## 为什么叫「放行」而不是「设阈值」
+ *
+ * 它只抬不降（`stores/sessions.raiseSessionRiskLevel`）：降阈值是用户在选项栏里
+ * 的显式选择，不是一次批准该顺手做掉的事。
+ */
+export const ALLOW_FOR_SESSION_KEY: InjectionKey<(risk: SessionRiskLevel) => Promise<void>> =
+  Symbol('chat-allow-for-session')
 
 /**
  * 多会话无状态 chat connection（v2 — 无 store 写入版）

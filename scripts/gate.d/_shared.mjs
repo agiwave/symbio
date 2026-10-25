@@ -178,7 +178,7 @@ export const BASELINE = {
   //   空清单全拒、无 scope = 宿主态、物理绝对路径同案；
   // ⑤ `agent/host/tests.rs` 3 条：`max_prompt_bytes` 超限即拒且作用域未发布、
   //   `max_tools` 遍历后才判（子树真贡献了工具才超）、限额达标静默放行。
-  rustTests: 2218,
+  rustTests: 2219,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
@@ -207,7 +207,7 @@ export const BASELINE = {
   // `skeletonLazy.spec.ts` 钉本地释放与按需重取的折叠状态，`MessageNode` / 会话 store 补
   // 重取路径的渲染与竞态断言。不是补回覆盖。
   vitestFiles: 68,
-  vitestTests: 1024,
+  vitestTests: 1032,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 批 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

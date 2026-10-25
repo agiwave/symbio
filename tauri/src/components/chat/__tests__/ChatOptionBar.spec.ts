@@ -25,15 +25,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const hoisted = vi.hoisted(() => ({
-  updateSession: vi.fn(async () => {}),
+  updateSession: vi.fn(async (_id: string, _patch: Record<string, unknown>) => {}),
   pickNative: vi.fn(async () => null as string | null),
   applySessionMetadataPatch: vi.fn(),
 }))
 
 vi.mock('@/services/session', () => ({ updateSession: hoisted.updateSession }))
 vi.mock('@/services/nativePick', () => ({ pickNative: hoisted.pickNative }))
+// store 只出「会话 metadata 的唯一写入实现」一个动作（`patchSessionMetadata`
+// = 后端写 + 本地镜射）。这里按它的真实两步复刻，使既有断言仍能分别看见
+// 「写了什么」与「镜射了什么」——组件本身只该知道「保存一次」。
 vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: () => ({ applySessionMetadataPatch: hoisted.applySessionMetadataPatch }),
+  useSessionsStore: () => ({
+    patchSessionMetadata: async (id: string, patch: Record<string, unknown>) => {
+      await hoisted.updateSession(id, patch)
+      hoisted.applySessionMetadataPatch(id, patch)
+    },
+  }),
 }))
 
 import ChatOptionBar from '../ChatOptionBar.vue'

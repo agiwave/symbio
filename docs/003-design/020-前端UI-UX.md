@@ -43,8 +43,8 @@ impl: partial
 | 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
 | 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
 | 本会话动过哪些文件 | `<根>/session/<id>/workdir` 未进聊天界面，没有「变更」面板 | §3 P2-2 |
-| 工具授权 | 只有「同意 / 拒绝」两键，没有「本会话放行」分级 | §3 P2-3 |
-| 用量与成本 | 零用量面：会话与模型条目都不显示 token 累计 | §3 P2-4 |
+| 工具授权 | 「每次问 / 本会话放行」两档已在确认卡上（§11）；第三档「永久放行」没有落点——跨会话的授权清单不存在 | §3 P2-3 |
+| 用量与成本 | 用量（token）已在读数面板里；**钱**还没有——`model` 没有价格字段，`session/stats.cost` 记的是时延不是钱 | §3 P2-4 |
 | 分支 | 消息是 `parent_id` 树，但**重试是替换式**（删掉失败轮、按普通新轮重来），日志上因此不产生第二支——界面没有候选可切 | §3 P2-5 |
 | 消息操作 | 有编辑，无「编辑后重发」，无悬浮操作条 | §3 P3 |
 | 命令动作 | 面板只做**跳转**；「切模型 / 切工作区 / 跳设置」要的是**执行**，未接 | §3 P1-1 |
@@ -56,8 +56,9 @@ impl: partial
 未消费的是压缩节点与压缩后快照随节点下发的 `meta`——缺口清单与改进方向见
 `tauri/docs/111-INTERACTION.md` 附录（不在此复述）。
 
-**「后端有能力、前端没消费」与「后端也没有」是两件事**：本表逐行说的都是前者，
-后者（信任面那三项的前件）单独列在 [§11 的前件表](#还没做的三项前件是什么)——
+**「后端有能力、前端没消费」与「后端也没有」是两件事**：本表逐行说的基本都是前者
+（例外是信任面那几行，它们缺的后端事实已在 §11 的前件表里点名），后者单独列在
+[§11 的前件表](#还没做的三项前件是什么)——
 混在一起会让「补个组件」与「先补一条事实」看起来是同一档工作量。
 
 ---
@@ -424,6 +425,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | 内容 | 实现落点 |
 |---|---|
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
+| P2-3 授权分级（前两档）：确认卡三键——批准本次 / 本会话放行 / 拒绝。「本会话放行」把会话阈值抬到本次调用的风险档，**同档及以下从此不再问**；卡上没有风险档时不出这一键（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::requires_approval`（`risk > threshold`），阈值来自 `ctx[RISK_LEVEL]`（会话 metadata 的 `risk_level` 经 `resolve_session_params` 落进 ctx）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` 钉住「抬一档 ⇒ 不再问、方向可复算」；前端：`components/message/InteractionNode.vue`（第三键；档位校验走 `isSessionRiskLevel`，不在组件里手写词表）+ `ALLOW_FOR_SESSION_KEY`（注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降，已是该档就不写）+ `schemas/session_meta.ts`（`riskRankOf`，档位序取自词表数组）。**零新事实**：`authz.granted` 仍由「批准本次」写，抬阈值只改会话 metadata 的一个字段 |
 | P2-4 用量（token 那一半）：读数的「用量」段给输入 / 输出 / 合计，多主体时才逐条摊开；一次实测都没有就**整段不出现** | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 → `stats_reading.rs::usage_section`（面板那一段，单位走 `format_tokens` 全仓唯一实现）。**前端零改动**：读数面板本来就是按后端下发的 `panel` 排版（`ReadingPanel.vue`） |
 
 **本节的判据**：
@@ -448,6 +450,14 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 5. **不给这条线配「压缩」按钮**。提案原文写着「复用已有的 `context_compact`」，那句话随
    [D-072](../../symbio/src/plugins/session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README") 一起过期：自动整理由后端判，手动重试只由**失败的压缩节点**下发，一条健康的水位线
    后面没有任何可点的东西。入口不补齐不是缺口——把不存在的能力画成按钮，用户按下才发现界面在骗他。
+6. **「批这一次」与「以后别再问」是两笔事实，界面不许把它们合成一个按钮**。`approve` 落的是
+   `authz.granted`（一次调用一笔，随轮次进出日志）；「本会话放行」改的是**会话 metadata 的一个
+   字段**（阈值），而阈值是「比它更危险才问」的那条线。做成「批准」加一个「以后别再问」复选框，
+   后果是用户以为自己只批了一次、实际放开了整档工具——两笔事实的生命周期完全不同，界面上的
+   粒度必须跟着分开。粒度也决定了它的边界：抬阈值按**风险档**放（同档别的工具一起免问），
+   **按工具**免问需要一份跨会话授权清单，那是第三档「永久放行」缺的东西（见下文前件表）。
+   顺序上「先抬阈值、再批准」不可颠倒：恢复载荷里的 `risk_level` 取自会话状态，抬晚了这一轮
+   仍按旧阈值判，表现是「刚点了放行又弹一次」（组件用例钉的就是这条顺序）。
 
 ### 还没做的三项：前件是什么
 
@@ -458,7 +468,7 @@ P2-2 / P2-3 / P2-4 / P2-5 四项**不是同一档工作量**。照着 §3 的提
 | 项 | 今天的事实 | 缺的那一样 | 谁先动 |
 |---|---|---|---|
 | P2-2 变更面板 | `<根>/session/<id>/workdir/<rel>` 是一棵 VDFS 树（`list` / `read` / `write` / `delete` 四口齐），文件改动只有**实时面**（`VdfsChange` 走事件总线，进程退出即消失） | 「本会话**动过**哪些文件」要一条可回读、可归因的记录。实时面的帧既不留档也不带写者，进程一退就没了 | 后端先补 |
-| P2-3 授权分级 | `authorize-tool` 拿这一次调用的 `risk` 与会话阈值 `threshold` 比一次，出口是 `authz.granted` / `authz.denied`；会话阈值本来就住在会话元数据里 | 「本会话放行」= 抬会话阈值，**零新事实**，今天就能落；「永久放行」没有任何落点——跨会话的授权清单不存在 | 两档可做，第三档需先裁 |
+| P2-3 授权分级 | 两档已落地（§11）：`authorize-tool` 拿这一次调用的 `risk` 与会话阈值 `threshold` 比一次，出口是 `authz.granted` / `authz.denied`；阈值住在会话元数据里，「本会话放行」= 抬它 | 第三档「永久放行」**没有落点**——跨会话的授权清单不存在：今天没有任何地方能记「这个工具在所有会话里都免问」，也没有任何回读方 | 前两档已落；第三档需先裁「清单住哪、谁写、读方是谁」 |
 | P2-4 用量成本 | `response{port=model}` 带 `usage`（实测 token），`session/stats.tokens` 与读数的「用量」段都从它算；`session/stats.cost` 仍是**时延**台账（事件的 `cost_ms` 按写方累计），不是钱 | 钱要先有价格，而 `model` 今天**没有价格字段**——按名字猜价格是给「换了个端点就全错」埋伏笔 | 用量已落地；成本待后端补价格 |
 | P2-5 分支切换 | `RetrySubtree` 的动作是**删掉失败轮再按普通新轮重来**（`chat_loop/wake.rs` 的 `WakeOutcome::NewTurn`） | 分支要成对出现：旧轮保留 + 「当前是哪一支」可判。今天两者都没有——`parent_id` 树是真的，但树上没有第二个孩子 | 后端先补（且要先裁「重试 = 替换还是分支」） |
 

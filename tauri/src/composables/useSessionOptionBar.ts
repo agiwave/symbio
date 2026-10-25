@@ -21,16 +21,15 @@
  * ## 为什么保存后要做本地镜射
  *
  * 后端写入后确实会广播 `vdfs` 变更，但那条链路是**防抖重拉清单**（800ms），
- * 让按钮上的当前值等一个往返才更新是可见的迟钝。故写成功后把同一份补丁
- * 镜射进会话 store（`applySessionMetadataPatch`，与后端浅合并语义一致），
- * 后端事件随后幂等收敛。
+ * 让按钮上的当前值等一个往返才更新是可见的迟钝。镜射因此不能省——但它不在
+ * 本文件：写与镜射是同一次动作的两个半步，一起住在 store 的
+ * `patchSessionMetadata` 里（会话 metadata 的唯一写实现，「本会话放行」抬阈值
+ * 也走那一条），后端事件随后幂等收敛。
  */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import { updateSession } from '@/services/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
-import type { SessionMetadata } from '@/schemas/session_meta'
 import type { DetailDefinition, DetailField } from '@/schemas/vdfs'
 
 export interface UseSessionOptionBar {
@@ -74,8 +73,10 @@ export function useSessionOptionBar(opts: {
     const sid = opts.sessionId()!.trim()
     busy.value = true
     try {
-      await updateSession(sid, patch as SessionMetadata)
-      store.applySessionMetadataPatch(sid, patch)
+      // 写入（`vdfs/write` 浅合并）与本地镜射都在 store 的同一个动作里——
+      // 那里是会话 metadata 的**唯一写实现**，「本会话放行」抬阈值也走它。
+      // 本函数只负责「字段值 / 草稿态 / 禁用态」这层语义。
+      await store.patchSessionMetadata(sid, patch)
     } catch (e) {
       logger.error('useSessionOptionBar', `选项「${key}」保存失败`, e)
       throw e

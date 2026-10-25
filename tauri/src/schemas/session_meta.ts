@@ -37,6 +37,30 @@ export const SESSION_RISK_LEVELS = ['low', 'medium', 'high'] as const
 export type SessionRiskLevel = (typeof SESSION_RISK_LEVELS)[number]
 
 /**
+ * 运行期取值判定：`unknown` → `SessionRiskLevel`。
+ *
+ * `metadata` 是 `Record<string, any>`、审批卡的 `risk_level` 是后端产出的裸字符串，
+ * 两者都没有类型兜底。判定**必须问词表**：手写一份 `x === 'low' || x === 'high'`
+ * 就等于把枚举抄第二遍，多一档时静默把它判成非法（既不报错也不生效）。
+ */
+export function isSessionRiskLevel(v: unknown): v is SessionRiskLevel {
+  return typeof v === 'string' && (SESSION_RISK_LEVELS as readonly string[]).includes(v)
+}
+
+/**
+ * 档位序（越大越宽）：`low` = 什么都问，`high` = 什么都不问。
+ *
+ * 与后端 `CapabilityRiskLevel` 的 `Ord` 同向（`Low < Medium < High`）：判据是
+ * `risk > threshold ⇒ 需要审批`，所以**阈值越高越宽松**。
+ *
+ * 顺序取自词表数组本身——数组是「从松到严排列的档位表」，不是无序集合。
+ * 谁要重排它，就是在改这里的行为。
+ */
+export function riskRankOf(level: SessionRiskLevel): number {
+  return SESSION_RISK_LEVELS.indexOf(level)
+}
+
+/**
  * 运行模式（`metadata.mode`）：`auto` = 无人值守，`interactive` = 会话流内可交互。
  *
  * 后端目前**没有**对应的 Rust 枚举（`metadata.mode` 就是字符串），故它暂不是

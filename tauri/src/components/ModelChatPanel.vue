@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
-import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, type ResumePayload } from '@/composables/useChatConnection'
+import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, ALLOW_FOR_SESSION_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { useTranscriptWindow, TRANSCRIPT_WINDOW_INITIAL } from '@/composables/useTranscriptWindow'
 import {
@@ -119,6 +119,7 @@ import {
 } from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
+import type { SessionRiskLevel } from '@/schemas/session_meta'
 import { logger } from '@/utils/logger'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useSessionsStore } from '@/stores/sessions'
@@ -220,6 +221,7 @@ provide(RESUME_KEY, (payload: ResumePayload) => {
 // 只有这里的 useChatConnection 闭包知道。
 provide(SKELETON_LAZY_KEY, chat.skeletonLazy)
 
+
 const { isLoading } = chat
 const messageTree = chat.messageTree
 
@@ -276,6 +278,15 @@ useHotkeys('model-chat-panel', [
 
 // 全局 store 引用：错误状态兜底 / 消息计数
 const sessionsStore = useSessionsStore()
+
+// 「本会话放行」：审批卡上的另一档（与「批准执行」并列）。它只做一件事——把
+// **本会话**的执行阈值抬到这次调用的风险档，与 `resume(approve)` 是两笔独立的
+// 事实（见 `ALLOW_FOR_SESSION_KEY` 的文档）。会话 id 取自 props：本面板就是
+// 「一个会话的视图」，不让渲染器传 id——那会出现「两个来源」，而错的那一个
+// 恰好是子会话 id。
+provide(ALLOW_FOR_SESSION_KEY, async (risk: SessionRiskLevel) => {
+  await sessionsStore.raiseSessionRiskLevel(props.sessionId, risk)
+})
 
 // --- 会话选项栏的三个入参（定义 / 值 / 条件作用域） ---
 //

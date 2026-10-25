@@ -259,11 +259,73 @@ fn a_denied_or_unsent_call_lands_nothing() {
 /// 授权动作的策略：会话没设 `RISK_LEVEL` ⇒ 阈值走默认（与 `ToolPortPolicy::read`
 /// 缺席时同一条），能力表为空（route-only 工具按 deferred 放行）。
 fn policy() -> ToolPortPolicy {
+    policy_at(CapabilityRiskLevel::default())
+}
+
+/// 同一个策略、指定会话阈值——「本会话放行」唯一改变的**就是这一个字段**。
+fn policy_at(threshold: CapabilityRiskLevel) -> ToolPortPolicy {
     ToolPortPolicy {
         known: Vec::new(),
-        threshold: CapabilityRiskLevel::default(),
+        threshold,
         mode: String::new(),
     }
+}
+
+/// 会话阈值决定「问不问」：同一次调用，阈值抬到它这一档就不再开审批卡。
+///
+/// 对着「本会话放行」这条用户动作的**全部后果**：它不新增任何授权事实，只是把
+/// 会话阈值抬到本次调用的风险档（前端写 `session.metadata.risk_level`，后端
+/// `resolve_session_params` 把它落成 `ctx[RISK_LEVEL]`）。所以判据落在写侧——
+/// 同一个 `risk` 在两份策略下结论相反，且方向可复算。
+///
+/// 三格一起钉，是因为单看「抬档后放行」这一格，一个**恒放行**的实现也能过：
+/// - 默认档（Medium）下 High 调用要问一次；
+/// - 抬到 High 后同档放行，且放行事实带的是调用自己的风险档；
+/// - 抬档不影响基线：Medium 阈值下的 Medium 调用本来就放行（抬档只减少提问，
+///   不是「一旦抬过就永远不问」）。
+#[test]
+fn the_session_threshold_decides_whether_a_call_is_asked_about() {
+    // ① 默认阈值（Medium）：High 调用 ⇒ 问一次。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-s1-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::High);
+
+    port.authorize_calls(&policy(), &mut calls);
+
+    assert!(!calls[0].granted, "High 高于默认阈值 ⇒ 不放行");
+    assert_eq!(calls[0].deny_why, Some("needs_approval"));
+    assert_eq!(
+        payload_of(&store, EVENT_AUTHZ_DENIED)["detail"],
+        json!("needs_approval"),
+        "拒绝原因进载荷（`detail`）：审批卡靠它区分「要你批」与「不许做」"
+    );
+
+    // ② 阈值抬到 High（= 用户点了「本会话放行」）：同一次调用直接放行。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-s2-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::High);
+
+    port.authorize_calls(&policy_at(CapabilityRiskLevel::High), &mut calls);
+
+    assert!(calls[0].granted, "阈值抬到这一档 ⇒ 不再问");
+    assert_eq!(calls[0].deny_why, None);
+    assert_eq!(
+        payload_of(&store, EVENT_AUTHZ_GRANTED)["risk"],
+        json!("high"),
+        "放行事实记的是**调用自己的**风险档，不是阈值"
+    );
+
+    // ③ 基线不变：Medium 阈值下 Medium 调用本来就放行。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-s3-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::Medium);
+
+    port.authorize_calls(&policy(), &mut calls);
+
+    assert!(calls[0].granted, "不比阈值更危险 ⇒ 不问");
 }
 
 /// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tools` 就

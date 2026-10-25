@@ -49,6 +49,8 @@ const vdfsApi = vi.hoisted(() => ({
 const sessionApi = vi.hoisted(() => ({
   listSessions: vi.fn(async () => []),
   deleteMessage: vi.fn(),
+  /** 会话 metadata 的后端写口（`services/session.updateSession`） */
+  updateSession: vi.fn(async () => {}),
   /**
    * 读整份转写（门面 `services/session.readSessionTranscript`）。
    *
@@ -64,7 +66,7 @@ const sessionApi = vi.hoisted(() => ({
 vi.mock('@/services/session', () => ({
   listSessions: sessionApi.listSessions,
   deleteSession: vi.fn(),
-  updateSession: vi.fn(),
+  updateSession: sessionApi.updateSession,
   readSessionTranscript: sessionApi.readSessionTranscript,
   deleteMessage: sessionApi.deleteMessage,
   updateMessage: vi.fn(),
@@ -887,5 +889,65 @@ describe('sessions store — 惰性重取账本回放', () => {
 
     expect(released.isReleased(SID, 'skel')).toBe(false)
     expect(JSON.parse(localStorage.getItem(LEDGER_KEY)!)).toEqual({})
+  })
+})
+
+/**
+ * 「本会话放行」——把会话的执行阈值抬一档。
+ *
+ * 这条动作**不新增任何授权事实**：`authz.granted` 仍由用户对那一次调用的批准写，
+ * 它只改会话 metadata 里的一个字段（后端 `resolve_session_params` 把它落成
+ * `ctx[RISK_LEVEL]`）。所以判据全落在「写了什么 / 什么时候不写 / 写失败怎么办」
+ * 三件事上。
+ */
+describe('sessions store —「本会话放行」只抬阈值', () => {
+  const SID = 's1'
+  let store: ReturnType<typeof useSessionsStore>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sessionApi.updateSession.mockClear()
+    store = useSessionsStore()
+    store.list.push({
+      id: SID,
+      message_count: 0,
+      updated_at: 0,
+      status: 'active',
+      metadata: { risk_level: 'medium' },
+    } as never)
+  })
+
+  it('抬到本次调用的风险档：一次 metadata 写 + 本地镜射', async () => {
+    expect(await store.raiseSessionRiskLevel(SID, 'high')).toBe('high')
+
+    expect(sessionApi.updateSession).toHaveBeenCalledWith(SID, { risk_level: 'high' })
+    // 镜射进 store 的两处：清单项的 metadata（后端视角）与回填后的选择 map（UI 视角）
+    expect(store.list[0].metadata?.risk_level).toBe('high')
+    expect(store.getSessionRiskLevel(SID)).toBe('high')
+  })
+
+  it('已经是该档 ⇒ 不写（一次无意义的写会广播一次资源变更、白重拉清单）', async () => {
+    await store.raiseSessionRiskLevel(SID, 'high')
+    sessionApi.updateSession.mockClear()
+
+    expect(await store.raiseSessionRiskLevel(SID, 'high')).toBe('high')
+    expect(sessionApi.updateSession).not.toHaveBeenCalled()
+  })
+
+  it('只抬不降：更严的一档不写，返回当前实际档位', async () => {
+    await store.raiseSessionRiskLevel(SID, 'high')
+    sessionApi.updateSession.mockClear()
+
+    expect(await store.raiseSessionRiskLevel(SID, 'low')).toBe('high')
+    expect(sessionApi.updateSession).not.toHaveBeenCalled()
+    expect(store.getSessionRiskLevel(SID)).toBe('high')
+  })
+
+  it('写失败不镜射：不会留下「界面已经改了、后端没改」的半截状态', async () => {
+    sessionApi.updateSession.mockRejectedValueOnce(new Error('boom'))
+
+    await expect(store.raiseSessionRiskLevel(SID, 'high')).rejects.toThrow('boom')
+    expect(store.getSessionRiskLevel(SID)).toBe('medium')
+    expect(store.list[0].metadata?.risk_level).toBe('medium')
   })
 })
