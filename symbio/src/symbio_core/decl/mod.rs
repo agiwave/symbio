@@ -837,6 +837,20 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             && after_anchor(e, anchor_seq)
             && str_field(e, "result") == Some("hit")
     });
+    // 本幕是否已走快路作答（D-163）：`policy.reflex` 的出口只有这一格
+    // （`stage:"reflex"`，`result` 是命中的技能 id）。收束行据此在**零模型往返**
+    // 的轮上开账——快路不落 `response(port=model)`，`has_final` 折不出来。
+    //
+    // `result:"miss"` 不算「已答」：那是执行体在命中集为空时用来关账的结局
+    // （正常不可达，开账条件与命中判定同源），这一轮该照常进模型往返。
+    let reflex_answered = events.iter().any(|e| {
+        e.turn == turn
+            && e.kind == "turn.stage"
+            && str_field(e, "stage") == Some("reflex")
+            && u64_field(e, "round") == Some(round)
+            && after_anchor(e, anchor_seq)
+            && str_field(e, "result").is_some_and(|r| r != "miss")
+    });
     // 本幕的判决是否把这一轮判成「不用再发请求」（D-162 裁决 1）。
     //
     // 折叠口径与 `stage_since` 逐字相同（同幕、同轮、幕锚之后），只是多比一格
@@ -922,9 +936,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                         && str_field(r, "id") == str_field(e, "id")
                 })
         });
-    // 该不该收束：`has_final`（答完了）∨ 模型没答成（不会再有应答）。两条都要求
-    // 本幕未收束——收束过就不欠了。
-    let closeable = !closed && (has_final || model_outcome_failed);
+    // 该不该收束：`has_final`（答完了）∨ 模型没答成（不会再有应答）∨ 快路已作答
+    // （零往返，D-163）。三条都要求本幕未收束——收束过就不欠了。
+    let closeable = !closed && (has_final || model_outcome_failed || reflex_answered);
     // 工具批还开着（b）：交回的调用里至少有一笔没被 `response` / `failed`
     // （同 `port=tool` 同 id）关掉。两格互斥（`calls` 空 vs 非空），所以执行行只在
     // 「有活没干完」的时候让位。
@@ -977,6 +991,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "is_persistent": flag("is_persistent"),
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
+        "reflex_answered": reflex_answered,
         "has_final": has_final,
         "closeable": closeable,
         "tools_open": tools_open,
@@ -1233,9 +1248,11 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // 因此不再开压缩 / 召回的账。判据只能落在**同一个视图的一格**上：`owed` 把
     // `unless` 的键与债键逐字比对，跨键的 `unless` 是静默不命中（§3.4 第 2 条）。
     // 读面不变——`turn.stage` 的 `result` 自 v2（技能命中折在召回格里）就在里面。
+    // v9 → v10 加 `reflex_answered`（D-163）：快路的出口折成这一格，收束行因此在
+    // **零模型往返**的轮上也开得出账（`has_final` 折不出没有应答的轮）。读面不变。
     ViewDecl {
         name: "turn_head",
-        ver: 9,
+        ver: 10,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),

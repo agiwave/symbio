@@ -7,7 +7,7 @@
 //! 另附 `run` / `run_streaming` 两个**测试专用**入口：生产一律走
 //! `TurnRunner::run_with_tools`（`turn_exec` 自己构造 `ActorSpec`），无工具轮的简单路径
 //! 只有本文件的用例用得到 ⇒ 按「测试消费的代码住测试模块」就地定义（`impl` 复用调用点的
-//! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools` / `run_reflex`）。
+//! `.run(…)` 写法），**不占生产文件的表面**（生产面只留 `run_with_tools`）。
 
 use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
@@ -84,6 +84,7 @@ impl TurnRunner {
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
                 final_reply: None,
                 final_cost_ms: 0,
+                reflex: None,
                 turn_root_id: String::new(),
                 dialog: None,
                 opening_text: None,
@@ -334,6 +335,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -607,6 +609,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -657,6 +660,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -717,6 +721,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -807,6 +812,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: Some("我先看一下。".into()),
@@ -847,6 +853,7 @@ mod turn_runner_tests {
             prefix: None,
             final_reply: None,
             final_cost_ms: 0,
+            reflex: None,
             turn_root_id: "r-1".into(),
             dialog: None,
             opening_text: None,
@@ -1148,6 +1155,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -1197,6 +1205,7 @@ mod turn_runner_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -2139,6 +2148,7 @@ mod tool_round_tests {
             prefix: None,
             final_reply: None,
             final_cost_ms: 0,
+            reflex: None,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,
@@ -3030,6 +3040,7 @@ mod tool_round_tests {
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
+                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -3844,59 +3855,91 @@ mod tool_round_tests {
     }
 }
 
-// ── 反射档（`run_reflex`，S11 快路的执行半边）────────────────────────────────
+// ── 快路收束（`PendingClose::Reflex`，D-163）────────────────────────────────
 //
-// 判据分列（一个规则一个判定方）：
-// - **落格**：`u-{turn}` / `f-{turn}` 与 [`TurnRunner::run_with_tools`] 同一份纪律
-//   （收束溯源指向开轮格、`cost_ms` 随事件入账）——本模块只读事实源；
-// - **档位**：开轮格载荷的 `tier` 由**令牌类型**给出（`RuleOnly` ⇒ `reflex`），
-//   不是调用方填的字符串；
+// **选中**那一半在轮首 host（`policy.reflex` 的出口格由 `loop_rows` / `turn_exec` 的
+// 用例覆盖）；这里只钉**收束**：正文直落 `final`、`model` 记 `reflex`、经 sink 上线、
+// `cost_ms` 入账。三条判据分列：
+// - **落格**：载荷与模型应答同一形状，`produced_by` 指向开轮格；
+// - **零往返**：`execute-turn` 的前件排除已作答的快路轮，桩模型一次都不该被调到；
 // - **产物上线**：正文经 `sink` 到出口（不上线，收束节点在前端建不起来）。
 
 mod reflex_turn_tests {
     use std::sync::{Arc, Mutex};
 
-    use super::super::TurnRunner;
+    use super::super::super::stage_events::{land, StageFact};
+    use super::super::{TurnInput, TurnRunner};
     use crate::symbio_core::{
         check_all, unresolved_turns, ActorSpec, DeltaSink, Entity, EventStore, LatencyTier, Seq,
-        Store, TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        Store, StubLlmAdapter, TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
+        EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
     };
 
-    /// 收集口：按序记增量（反射产物上线的判据）。
+    /// 收集口：按序记增量（快路产物上线的判据）。
     struct CollectingDeltas(Mutex<Vec<String>>);
 
     impl DeltaSink for CollectingDeltas {
         fn on_delta(&self, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
-        // 反射档不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
+        // 快路不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
         fn on_reasoning(&self, _text: &str) {}
         fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_node::ChatNode) {}
     }
 
-    /// 正向：反射档一轮**只落两格**（开轮 + 收束），收束溯源指向开轮格、
-    /// `cost_ms` 在反射档预算内、开轮格声明 `reflex`、产物经 `sink` 上线。
+    /// 正向：快路已作答的轮**只落开轮 / 阶段 / 派发 / 收束**，收束溯源指向开轮格，
+    /// 收束档位 `reflex`、耗时入账、正文经 sink 上线；桩模型一次都没被调到。
     #[tokio::test]
-    async fn reflex_turn_lands_open_and_close_with_reflex_tier() {
+    async fn reflex_answer_closes_with_reflex_payload_and_zero_model_round() {
         let store = EventStore::new();
-        let tok = TokenIssuer::issue_reflex();
+        let tok = TokenIssuer::issue_deep();
         let actor = ActorSpec::trivial("session/main");
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(&store, 0, "把周报整理成摘要");
 
+        // 轮首 host 的出口格：`policy.reflex` 已选中（收束行的前件就是它）。
+        land(
+            &store,
+            0,
+            user_seq,
+            "session/main",
+            &[StageFact::reflex(0, user_seq, "weekly-report")],
+        )
+        .expect("阶段格必须落得下");
+
+        // 桩只在**不该发生**的模型往返里失败：它若失败，说明收束行没抢到第一笔债。
+        let llm = StubLlmAdapter::always_fail("快路轮不该发模型请求");
         let out = TurnRunner
-            .run_reflex(
+            .run_streaming(
                 &store,
+                &llm,
                 &tok,
-                0,
-                user_seq,
-                user_seq,
-                &actor,
-                "先列要点；再合并同类项。",
+                TurnInput {
+                    turn: 0,
+                    user_seq,
+                    drive_seq: user_seq,
+                    tier: LatencyTier::Reflex,
+                    window_turns: None,
+                    inject: None,
+                    actor: actor.clone(),
+                    prefix: None,
+                    final_reply: None,
+                    final_cost_ms: 0,
+                    // 快路正文（由轮首 host 寄进本轮状态的那一份）。
+                    reflex: Some(super::super::ReflexAnswer {
+                        text: "先列要点；再合并同类项。".to_string(),
+                    }),
+                    turn_root_id: String::new(),
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
+                    nodes: None,
+                    abort: None,
+                },
                 got.clone() as Arc<dyn DeltaSink>,
             )
             .await
-            .expect("反射档必答（不生成也要有产物）");
+            .expect("快路必答（不生成也要有产物）");
 
         assert_eq!(out.text, "先列要点；再合并同类项。");
         assert!(!out.fell_back && !out.aborted && !out.awaits_user);
@@ -3911,46 +3954,46 @@ mod reflex_turn_tests {
             snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
             vec![
                 EVENT_USER_MESSAGE,
-                crate::symbio_core::EVENT_TURN_DISPATCH,
+                EVENT_TURN_STAGE,
+                EVENT_TURN_DISPATCH,
                 EVENT_ASSISTANT_FINAL
             ],
-            "反射档落开轮 / 派发 / 收束三格（没有产物格——它没跑工具）：{snapshot:?}"
+            "快路轮落开轮 / 阶段 / 派发 / 收束四格（没有产物格，也没有模型往返）：{snapshot:?}"
         );
         let open = &snapshot[0];
         assert_eq!(open.entity, Entity::Turn);
         assert_eq!(open.verb, Verb::Opened);
         assert_eq!(
             open.payload["text"], "把周报整理成摘要",
-            "开轮格记的是**用户说的**，不是反射产物"
+            "开轮格记的是**用户说的**，不是快路产物"
         );
-        let dispatch = &snapshot[1];
+        let dispatch = &snapshot[2];
         assert_eq!(
             dispatch.payload["tier"], "reflex",
-            "档位由令牌类型给出（RuleOnly ⇒ reflex），不是调用方填的字符串。\
-             T-225：档位另立派发格——用户格先于判决落，那时档位还没定"
+            "档位由**选中的那条行**给出（`loop_rows::tier`），不是调用方填的字符串"
         );
         assert_eq!(
             dispatch.payload["budget_ms"], actor.budget_ms,
             "派发格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
              ActorSpec.budget_ms 由此有真读方——此断言即写侧的存在证明"
         );
-        let close = &snapshot[2];
+        let close = &snapshot[3];
         assert_eq!(close.verb, Verb::Closed);
         assert_eq!(close.turn, 0);
         assert_eq!(close.payload["text"], "先列要点；再合并同类项。");
         assert_eq!(
             close.payload["model"], "reflex",
-            "反射档没有模型：载荷的 `model` 记产者，空着会让命中轮与普通轮无从区分"
+            "快路没有模型：载荷的 `model` 记产者，空着会让命中轮与普通轮无从区分"
         );
         assert_eq!(close.cost_ms, out.cost_ms, "实测耗时随事件入账");
         assert_eq!(
             close.produced_by,
-            Some(0),
-            "收束溯源指向开轮格（I2；开轮格是网格第一格，seq = 0）"
+            Some(user_seq),
+            "收束溯源指向开轮格（I2）"
         );
         assert_eq!(
             close.actor, "session/main",
-            "收束格的 actor 取本轮主体（与 run_with_tools 同一处取值）"
+            "收束格的 actor 取本轮主体（与模型应答同一处取值）"
         );
 
         assert_eq!(
@@ -4445,6 +4488,7 @@ mod actor_ledger_tests {
             prefix: None,
             final_reply: None,
             final_cost_ms: 0,
+            reflex: None,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,

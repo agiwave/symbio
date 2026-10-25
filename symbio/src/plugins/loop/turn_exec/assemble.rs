@@ -44,7 +44,8 @@ pub(crate) struct Assembled<'a> {
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) bridge: Arc<UiBridge>,
     pub(crate) emitter: tokio::task::JoinHandle<()>,
-    pub(crate) hit: Option<&'a super::super::skill_events::SkillLlmHit>,
+    /// 本幕快路已作答的技能正文（`Some` ⇒ 本轮零模型往返，D-163）。
+    pub(crate) reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
     pub(crate) tier: LatencyTier,
     pub(crate) actor: ActorSpec,
     pub(crate) principal: String,
@@ -73,7 +74,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         report,
         supplemental_no,
         skill_obs,
-        skill_hits,
+        reflex,
         prefix,
         consolidation,
         opening_text,
@@ -192,34 +193,20 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         }
     });
 
-    // 本轮是否走**反射档**（S11 快路）：命中一条已编译技能 ⇒ 以技能正文收束、
-    // 一次模型调用都不发生。两关缺一不可：
+    // 本轮档位的来源是**轮首已经选中快路**这件事本身（D-163）：`policy.reflex`
+    // 的执行体在轮首 host 落了出口格（`turn.stage{stage:"reflex"}`）并把正文寄进
+    // 本轮状态，`ExecTurn::reflex` 是那件事的携带面。本段不再问表「要不要走快路」，
+    // 也不重复匹配——判据（逐字命中 ∧ 只对新开轮）与档位是同一条声明上的两个字段
+    // （DE-014 §4 机制 2），这一侧只消费结果。
     //
-    // - **逐字命中**（`take_match`：判据是数据，更宽的匹配接进来时改的是它）；
-    // - **只对新开轮**：唤醒幕（审批 / 问答恢复）**不新开用户格**（调用方直给原轮的
-    //   `user_seq`），而反射档的落格形状就是新开一轮（`u-{turn}`）⇒ 唤醒幕走它会撞幂等键
-    //   （`AppendError::Duplicate` → Failed 出口），既完不成收束、也把本轮变成错误。
-    //   语义上同样说不通：唤醒要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
-    //   故唤醒幕一律不走快路（判定根本不算，不是算了再丢）。
-    // 先做**一次**匹配，再问表"这一格要不要走快路"。判据在 `loop_rows` 的
-    // `policy.reflex`（`!resumed ∧ skill_hit`）——两个输入都是事实（幕锚与召回
-    // 阶段落下的 `result`），本处不再递交内存布尔。`hit` 是行命中之后才取用的
-    // 执行体输入，表不接触它。
-    let matched = super::super::skill_events::take_match(skill_hits, user_text);
-    let slice = store.range(crate::symbio_core::Seq::new(0));
-    let (hit, tier) = if super::super::loop_rows::owes(
-        "policy.reflex",
-        &slice,
-        turn_no,
-        super::super::loop_rows::wake_now_ms(&slice, drive_seq),
-    ) {
-        (matched, super::super::loop_rows::tier("policy.reflex"))
+    // 档位由**命中的那条行**携带（`loop_rows::tier`），不由本处按「有没有正文」
+    // 反推：判据已在轮首问过表，这里只把那条行的 tier 取出来。
+    let tier = if reflex.is_some() {
+        super::super::loop_rows::tier("policy.reflex")
     } else {
-        (None, LatencyTier::Deep)
+        LatencyTier::Deep
     };
 
-    // 档位由**命中的那条行**携带（`loop_rows::tier`），不由本处按「有没有命中」
-    // 反推：判据与档位是同一条声明上的两个字段（DE-014 §4 机制 2）。
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
     // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
     //
@@ -294,7 +281,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         collected,
         bridge,
         emitter,
-        hit,
+        reflex,
         tier,
         actor,
         principal,

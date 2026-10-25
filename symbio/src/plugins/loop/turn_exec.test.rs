@@ -184,7 +184,7 @@ fn exec_base<'a>(
         recalled: None,
         skill_obs: &[],
         // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
-        skill_hits: &[],
+        reflex: None,
         // 请求级前缀：测试不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
@@ -341,7 +341,7 @@ async fn supplements_become_facts_visible_next_turn() {
         }],
         recalled: None,
         skill_obs: &[],
-        skill_hits: &[],
+        reflex: None,
         prefix: None,
         consolidation: None,
         supplements: Some(supplements),
@@ -938,7 +938,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         }],
         recalled: None,
         skill_obs: &[],
-        skill_hits: &[],
+        reflex: None,
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
@@ -1143,7 +1143,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         }],
         recalled: None,
         skill_obs: &[],
-        skill_hits: &[],
+        reflex: None,
         prefix: None,
         consolidation: None,
         supplements: None,
@@ -1374,7 +1374,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         tools: std::slice::from_ref(&tool_meta),
         recalled: None,
         skill_obs: &[],
-        skill_hits: &[],
+        reflex: None,
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
@@ -1419,10 +1419,10 @@ async fn full_turn_lands_derived_commitment_facts() {
     assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
 }
 
-// ==================== 反射档（S11 快路的执行半边）====================
+// ==================== 快路（S11）的收束半边 ====================
 
-/// 命中一条已编译技能 ⇒ 本轮**一次模型都不调**，以技能正文收束；开轮格声明
-/// `reflex`，收束格 `cost_ms` 在反射档预算内。
+/// 轮首 host 已选中快路（出口格落了）⇒ 本轮**一次模型都不调**，以技能正文收束；
+/// 派发格声明 `reflex`，收束格 `cost_ms` 在反射档预算内。
 ///
 /// ## 判据只有一个，就是"没调模型"
 ///
@@ -1431,27 +1431,20 @@ async fn full_turn_lands_derived_commitment_facts() {
 /// 其余三条（`tier = reflex` / `model = reflex` / `cost_ms` 在预算内）钉的是**埋点**：
 /// 没有它们，"跳过"发生了却无从观测。
 ///
-/// ## 为什么"只对新开轮"这条边界要在这里立
+/// ## 选中的那一半在别处
 ///
-/// 续写轮的 `user_text` 仍是原轮那句发言（用户没再说话）——若不禁，同一句话命中技能
-/// 时反射档会去新开一个 `u-{turn}` 格，而该轮的用户格**已经在网格里**（等待轮落的）
-/// ⇒ 撞幂等键（`AppendError::Duplicate` → Failed 出口），本轮既完不成收束、又变成一次
-/// 报错。语义上同样说不通：续写要跑的是刚被批准的那次工具，不是拿技能顶掉它。
-/// 该边界由 `loop_rows` 的 `policy.reflex` 行判（`owes` 里 `resumed = false`），
-/// 故此处钉住：续写幕时即便命中集非空，也照走完整推理（模型被调用）。
+/// 判定（逐字命中 ∧ 只对新开轮）是 `policy.reflex` 那一行的 `owes`，执行体在轮首
+/// host 落 `stage:"reflex"` 并把正文寄进本轮状态（D-163）；本用例从**那个事实**
+/// 出发，钉的是收束：`turn_head.reflex_answered` 让 `close-turn` 成为第一笔债，
+/// `execute-turn` 不欠 ⇒ 模型一次不被调。
 #[tokio::test]
-async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
+async fn a_reflex_answer_closes_without_any_model_call() {
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
 
     // `trigger` 与 `tool_free_req` 的 `user_text`（"你好"）逐字相同 ⇒ 命中。
-    let hits = [super::super::skill_events::SkillLlmHit {
-        skill_id: "sk-1".into(),
-        trigger: "你好".into(),
-        content: "先列要点；再合并同类项。".into(),
-    }];
     let mut req = tool_free_req(
         &fx,
         Arc::new(provider),
@@ -1460,22 +1453,25 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
         0,
         "你好",
     );
-    req.skill_hits = &hits;
-    // 生产侧由 `run_recall` 执行体先落这一格（出口那一格当场入日志）：快路行的
-    // `skill_hit` 只从事实读。
+    // 生产侧由 `run_reflex` 执行体落这一格（出口那一格当场入日志）。
     super::super::stage_events::land(
         fx.facts.as_ref(),
         0,
         req.user_seq,
         "system",
-        &[super::super::stage_events::StageFact::recall(
+        &[super::super::stage_events::StageFact::reflex(
             0,
             req.user_seq,
-            "hit",
+            "sk-1",
         )],
     )
-    .expect("召回阶段事实落格");
-    let res = execute_turn(req).await.expect("反射档执行成功");
+    .expect("快路出口格落格");
+    // 正文由轮首 host 寄进本轮状态（同一执行体的另一半产出）。
+    let answer = super::super::turn_runner::ReflexAnswer {
+        text: "先列要点；再合并同类项。".to_string(),
+    };
+    req.reflex = Some(&answer);
+    let res = execute_turn(req).await.expect("快路执行成功");
 
     assert_eq!(
         res.output.text, "先列要点；再合并同类项。",
@@ -1527,22 +1523,18 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-/// 反向（边界）：命中集非空但本幕是**唤醒幕** ⇒ 一律走完整推理，技能不得顶掉
-/// 刚被批准的那次工具。
+/// 反向（边界）：本幕是**唤醒幕** ⇒ `policy.reflex` 不开账，技能不得顶掉刚被
+/// 批准的那次工具。
 ///
-/// 唤醒幕的身份是**事实**（d 之后不再由入参携带）：`turn.stage{stage:"resume"}`
-/// 是本幕的锚，`turn_head` 据此判 `resumed` ⇒ `policy.reflex` 那行不成立 ⇒ 快路不走。
-#[tokio::test]
-async fn a_skill_hit_never_takes_over_a_resumed_turn() {
-    let fx = setup_full();
-    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
-    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
-    let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
-
-    // 唤醒幕的前提是「本轮已开未收束」（`last_open_turn` 要能找到它）——先手工开一轮。
-    // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉执行链的判据。
-    let user_seq = fx
-        .facts
+/// 唤醒幕的身份是**事实**（`turn.stage{stage:"resume"}`），`turn_head` 据此判
+/// `resumed` ⇒ 该行的 `owes` 不成立。判据在**行表**上，不在执行链里——所以这里
+/// 直接问表，并在旁边立一个**没有恢复阶段**的对照，证明"不开账"不是因为永不
+/// 开账（否则这条判据会在任何一行上恒过）。
+#[test]
+fn a_skill_hit_never_takes_over_a_resumed_turn() {
+    // 事实轨以值注入（`EventStore`）：本用例不碰会话存储布局，只钉行表的判据。
+    let store = EventStore::new();
+    let user_seq = store
         .append(
             Event::pending(
                 "u-0",
@@ -1560,7 +1552,7 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
     // 本幕锚 = 恢复阶段事实（`chat_loop::begin_drive` 在生产里落它）：它把幕锚从
     // 用户格挪到这一条 ⇒ `turn_head.resumed = true`。
     super::super::stage_events::land_with_seqs(
-        fx.facts.as_ref(),
+        &store,
         0,
         user_seq,
         "system",
@@ -1570,31 +1562,54 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
     )
     .expect("恢复阶段事实落格");
 
-    let hits = [super::super::skill_events::SkillLlmHit {
-        skill_id: "sk-1".into(),
-        trigger: "你好".into(),
-        content: "先列要点；再合并同类项。".into(),
-    }];
-    let mut req = open_turn_req(
-        &fx,
-        Arc::new(provider),
-        &sink,
-        crate::symbio_core::ExecAbortSignal::new(),
+    // `skill_hit` 由召回阶段格折出（本幕确实命中了技能）。
+    super::super::stage_events::land(
+        &store,
         0,
         user_seq,
-    );
-    req.skill_hits = &hits;
+        "system",
+        &[super::super::stage_events::StageFact::recall(
+            0, user_seq, "hit",
+        )],
+    )
+    .expect("召回阶段事实落格");
 
-    let res = execute_turn(req).await.expect("续写轮执行成功");
-    assert_eq!(
-        res.output.text, "秋天好",
-        "续写轮走完整推理（模型作答），技能正文不得顶替它"
+    let slice = store.range(Seq::new(0));
+    assert!(
+        !super::super::loop_rows::owes("policy.reflex", &slice, 0, 0),
+        "唤醒幕（resumed）不开快路的账：{slice:?}"
     );
-    assert_eq!(
-        prompts.lock().unwrap().len(),
-        1,
-        "续写轮照常请求模型：{:?}",
-        prompts.lock().unwrap()
+
+    // 对照：同一份事实去掉恢复阶段就必须开账——否则上一条判据恒过。
+    let fresh = EventStore::new();
+    let fresh_seq = fresh
+        .append(
+            Event::pending(
+                "u-0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": "你好", "tier": "deep" })),
+        )
+        .expect("开轮格")
+        .value();
+    super::super::stage_events::land(
+        &fresh,
+        0,
+        fresh_seq,
+        "system",
+        &[super::super::stage_events::StageFact::recall(
+            0, fresh_seq, "hit",
+        )],
+    )
+    .expect("召回阶段事实落格");
+    let slice = fresh.range(Seq::new(0));
+    assert!(
+        super::super::loop_rows::owes("policy.reflex", &slice, 0, 0),
+        "没有恢复阶段 ⇒ 快路开账：{slice:?}"
     );
 }
 

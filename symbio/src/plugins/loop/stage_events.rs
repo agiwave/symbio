@@ -87,13 +87,17 @@ impl VerdictSource {
 /// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（事实侧多出这两格，
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
-/// `policy.report` / `policy.reflex` 不在这里：汇报的到期由 `report_due` 视图
-/// 算，快路由 `recall` 的 `result` 判——两者都没有「这一步做过没有」要记。
+/// `policy.report` 不在这里：汇报的到期由 `report_due` 视图算，没有「这一步
+/// 做过没有」要记。快路（`policy.reflex`）在这里：`reflex` 是它的出口格
+/// （见 [`StageName::Reflex`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageName {
     Decide,
     Compress,
     Recall,
+    /// 反射档这一轮已作答（`result` = 命中的技能 id）。它是 `policy.reflex`
+    /// 的出口，也是 `turn_head.reflex_answered` 的唯一来源。
+    Reflex,
     /// 这一轮是恢复幕（`result` = `retry` / `approve` / `reject` / `supply` /
     /// `answer`；`retry_subtree` 按新轮处理，不落本格）。
     Resume,
@@ -107,6 +111,7 @@ impl StageName {
             Self::Decide => "decide",
             Self::Compress => "compress",
             Self::Recall => "recall",
+            Self::Reflex => "reflex",
             Self::Resume => "resume",
             Self::Round => "round",
         }
@@ -236,6 +241,20 @@ impl StageFact {
     /// 折叠）：撞掉的不是载荷，是判据本身。
     pub(crate) fn recall(round: usize, drive_seq: u64, result: &str) -> Self {
         let mut fact = Self::ran(StageName::Recall, round).with_result(result);
+        fact.identity = Some(drive_seq.to_string());
+        fact
+    }
+
+    /// 反射档格：这一轮由技能正文直接作答（`result` = 命中的技能 id）。
+    ///
+    /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::recall`] 同一条理由：快路
+    /// 只在**新开轮**成立（`policy.reflex` 的 `resumed = false`），续写幕不会重跑；
+    /// 但同一轮若因事实源补落重放，撞格取回首幕才是对的语义。
+    ///
+    /// 这一格是 `policy.reflex` 的**出口**：执行体只落「已答」，收束格由
+    /// `close-turn` 统一落（D-163）。
+    pub(crate) fn reflex(round: usize, drive_seq: u64, skill_id: &str) -> Self {
+        let mut fact = Self::ran(StageName::Reflex, round).with_result(skill_id);
         fact.identity = Some(drive_seq.to_string());
         fact
     }

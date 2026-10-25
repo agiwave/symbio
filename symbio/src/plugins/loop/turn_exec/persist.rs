@@ -253,6 +253,8 @@ pub(crate) async fn execute_final_reply_turn(
         inject: None,
         final_reply: Some(reply.to_string()),
         final_cost_ms: reply_cost_ms,
+        // 定稿答话轮不是快路（快路的正文由轮首 host 寄存、走驱动循环收束）。
+        reflex: None,
         // 答话**对话面节点**的身份与标记：收束格据它复刻那条根级节点。答话轮没有
         // 流式过程 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
         // 事件 id 复刻），取数口按有无思考事实决定挂不挂（见下方 `nodes`）。

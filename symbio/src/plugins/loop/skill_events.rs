@@ -16,11 +16,11 @@
 //!   技能从本轮召回视图里**摘掉**——低置信的套路不该被当成可用事实摆在模型面前。
 //! - **快路的作用点是执行**：`SkillFastPath` 命中时本轮**不调模型**，直接以技能正文
 //!   收束（S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」、§6.2「命中后
-//!   `cost_ms` 显著低于未命中路径」）。执行侧由 core 的
-//!   `TurnRunner::run_reflex` 承担——
-//!   它**没有 `llm` 形参**，因此"反射档调模型"在类型上写不出来
-//!   （`verify/latency_gate.rs::assemble(Reflex)` 的落地形态）。本模块只做**命中判定**
-//!   与候选集的装配：`route` 判出可用技能，`take_match` 判本轮发言命中哪一条。
+//!   `cost_ms` 显著低于未命中路径」）。执行侧由轮首 host 的
+//!   `chat_loop::run_reflex` 承担——它只落「已答」那一格并把正文寄进本轮状态，
+//!   零模型往返在**类型上**就写不出一次调用（`verify/latency_gate.rs::assemble(Reflex)`
+//!   的落地形态）。本模块只做**命中判定**与候选集的装配：`route` 判出可用技能，
+//!   `take_match` 判本轮发言命中哪一条。
 //! - **观测不加新格子**（S11 §3）：每次判定落一条 `memory.recalled`，载荷只带数据
 //!   `{ skill_id, fallback }`（`calibration` 模块文档定的观测面）。**没有这条观测，
 //!   回退永远不会发生**——零使用时 `confidence()` 按 1.0 算，技能再错也一直被用

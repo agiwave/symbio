@@ -1,8 +1,8 @@
 //! 阶段② 调用——`execute_turn` 四段之二（· B2，DE-021 §5 动作 B2）。
 //!
-//! 两档取其一：反射档经 [`TurnRunner::run_reflex`]（零模型调用），深度档装配
-//! [`TurnInput`]（含轮内注入闭包）后经 `SessionDispatchPort`
-//! 走 [`TurnRunner::run_with_tools`]（内环由 [`super::drive_steps`] 驱动）。产 [`Running`] 交阶段③ [`super::outcome`]。
+//! 本模块只走一条路：装配 [`TurnInput`]（含轮内注入闭包，快路正文随
+//! `reflex` 进来）后经 `SessionDispatchPort` 走 [`TurnRunner::run_with_tools`]
+//! （内环由 [`super::drive_steps`] 驱动）。产 [`Running`] 交阶段③ [`super::outcome`]。
 //!
 //! **纯结构拆分契约**：[`call_model`] 体内自 `turn_exec.rs` 的 `execute_turn`
 //! 第二段逐字搬移；[`supplement_into_request`] 同批搬入（它是注入闭包的落格半程，
@@ -55,6 +55,7 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         recalled,
         skill_obs,
         prefix,
+        reflex,
         opening_text,
         opening_dialog,
         presentation_tree,
@@ -65,45 +66,15 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         collected,
         bridge,
         emitter,
-        hit,
         tier,
         actor,
         principal,
         to,
     } = a;
-    let mut produced = Vec::new();
-    // 工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）——只有工具轮（深度档）才有，
-    // 反射档与无工具轮保持默认空值。轮末随收束落格（写方 = `derived_facts::record_derived`，
-    // 见下方）。
-    let mut derived = super::super::tool_dispatch::DerivedFacts::default();
-    let outcome = match &hit {
-        // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
-        // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
-        // 这正是 `docs/003-design/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
-        // （反射档装不进 LLM 字段），而不是"装配了模型但约定不调它"。
-        Some(h) => {
-            crate::plugin_info!(
-                "session",
-                "[turn-exec] 技能快路命中（skill_id={}），本轮不调模型",
-                h.skill_id
-            );
-            let tok = TokenIssuer::issue_reflex();
-            TurnRunner
-                .run_reflex(
-                    store.as_ref(),
-                    &tok,
-                    turn_no,
-                    user_seq,
-                    drive_seq,
-                    &actor,
-                    &h.content,
-                    bridge.clone(),
-                )
-                .await
-                .map_err(ActorError::Append)
-        }
-        // ── 深度档：完整推理（与接线前逐字同路）─────────────────────────────
-        None => {
+    // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：`policy.reflex`
+    // 是轮首 host 的一行，它的出口格（`stage:"reflex"`）与正文（`reflex`）随本轮
+    // 状态到这里；本侧只把正文交给收束动作，不自己落 `final`（D-163）。
+    let (outcome, produced, derived) = {
             let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, abort.clone());
             let tok = TokenIssuer::issue_deep();
             let input = TurnInput {
@@ -111,6 +82,8 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 user_seq,
                 drive_seq,
                 tier,
+                // 快路正文：`Some` ⇒ 本幕已在轮首作答，收束动作直落正文（零往返）。
+                reflex: reflex.cloned(),
                 window_turns: Some(window_turns),
                 actor: actor.clone(),
                 prefix,
@@ -300,13 +273,12 @@ inject: injector(supplements, report).map(|(drain, report)| {
             )
             .await;
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
-            produced = dispatcher.take_produced();
+            let produced = dispatcher.take_produced();
             // 收束派生事实出参同样先取走（承诺 / 任务表 / 熔断）——轮末随收束落格。
-            derived = dispatcher.take_derived();
+            let derived = dispatcher.take_derived();
             drop(dispatcher);
-            r
+            r.map(|r| (r, produced, derived))
         }
-    }
     .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
     Ok(Running {
         session,

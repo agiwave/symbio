@@ -371,6 +371,60 @@ pub(crate) async fn run_recall(
     Ok(())
 }
 
+/// 快路格的执行体（`policy.reflex`，轮首 host）：命中即作答，**零模型往返**。
+///
+/// ## 它只落「已答」，不落收束
+///
+/// 出口格是 `turn.stage{stage:"reflex"}`（`result` = 命中的技能 id），正文在这里
+/// 寄进本轮状态（[`TurnState::head_reflex`]）：收束格 `chat.assistant.final` 由
+/// `close-turn` 的执行体落——两个执行体写同一批格会让依赖图成环（D-163）。
+/// 收束行据此在零往返的轮上开账（`turn_head.reflex_answered`）。
+///
+/// ## 开账条件与命中判定同源
+///
+/// 本行动作只在 `turn_head.skill_hit` 成立时被选中，而那一格来自 [`run_recall`]
+/// 对同一份 `skill_hits` / 用户发言的 `take_match`。因此这里命中为空是**不可达**的；
+/// 真出现了也只落 `result:"miss"` 把账关掉，不拿空正文冒充作答（那一轮照常进模型往返）。
+pub(crate) async fn run_reflex(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    store: &dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>,
+    context: &SessionContext,
+    turn: &mut TurnState,
+) -> Result<(), super::super::turn_exec::ActorError> {
+    let text = last_user_text(context);
+    let hit = text
+        .as_deref()
+        .and_then(|t| super::super::skill_events::take_match(&turn.skill_hits, t));
+    let result = match hit {
+        Some(h) => {
+            crate::plugin_info!(
+                "session",
+                "[Loop] 技能命中，走反射档（skill={}，turn={}）",
+                h.skill_id,
+                turn.turn_no
+            );
+            turn.head_reflex = Some(super::super::turn_runner::ReflexAnswer {
+                text: h.content.clone(),
+            });
+            h.skill_id.clone()
+        }
+        None => "miss".to_string(),
+    };
+    super::super::stage_events::land(
+        store,
+        turn.turn_no,
+        turn.user_seq,
+        &crate::symbio_core::request_principal(ctx.as_ref()),
+        &[StageFact::reflex(
+            turn.request_round,
+            turn.drive_seq,
+            &result,
+        )],
+    )
+    .map_err(super::super::turn_exec::ActorError::Append)?;
+    Ok(())
+}
+
 /// 压缩格的执行体（`policy.compress`，轮首 host）：进一次压缩产线并**自己落**「已做」。
 ///
 /// ## 它是执行体，不是点问

@@ -44,7 +44,6 @@ mod batch;
 mod boundary;
 mod facts;
 mod prepare;
-mod reflex;
 mod settle;
 mod stream;
 
@@ -209,6 +208,13 @@ pub struct TurnInput {
     /// `ProviderLlmAdapter::generate_turn` 实测 → `WordingReply.cost_ms` →
     /// 此处 → `chat.assistant.final.cost_ms`。
     pub final_cost_ms: u64,
+    /// **本幕快路已作答的技能正文**（D-163）。
+    ///
+    /// `Some` ⇒ 本轮**一次模型往返都不发**：收束行照常开账（`turn_head.reflex_answered`
+    /// 由快路执行体的出口格折出），收束动作把这段正文落成 `chat.assistant.final`
+    /// （`model = "reflex"`）。与 [`Self::final_reply`] 的区别只在产者：那个是判决
+    /// 判成的定稿答话（不进驱动循环），这个是技能命中的快路（照进驱动循环）。
+    pub reflex: Option<ReflexAnswer>,
     /// 定稿答话**对话面节点**的身份与标记（仅 `final_reply` 有值时消费）。
     ///
     /// ## 为什么答话要带这三样，而不是只有正文
@@ -247,6 +253,17 @@ pub struct TurnInput {
     /// 状态。闭包把「取此刻的节点事实」留给唯一知道它的那一侧（与
     /// [`Self::inject`] 同形态的理由：core 不认识桥）。
     pub nodes: Option<NodeFactsFn>,
+}
+
+/// 快路命中的技能正文（见 [`TurnInput::reflex`]）。
+///
+/// 正文是**本轮状态**里的寄存物，不进事实网格：它唯一的去处是收束格
+/// `chat.assistant.final` 的 `text`（与模型应答同一格同一字段）。技能 id 只进
+/// 快路执行体的出口格（`turn.stage{stage:"reflex"}` 的 `result`）——两件事各有 owner。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflexAnswer {
+    /// 技能正文（命中即以此作答）。
+    pub text: String,
 }
 
 /// 定稿答话**对话面节点**的身份与标记（见 [`TurnInput::dialog`]）。
@@ -558,11 +575,12 @@ impl TurnSession {
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
+        sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
     ) -> Result<(), crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        self.run.settled = stream::close_round(&mut self.run, store, llm).await?;
+        self.run.settled = stream::close_round(&mut self.run, store, llm, sink).await?;
         Ok(())
     }
 

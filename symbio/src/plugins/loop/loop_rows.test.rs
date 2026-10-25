@@ -338,10 +338,18 @@ fn reflex_row_owes_on_a_recall_hit_outside_resume() {
     resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 0})));
     assert!(!owes("policy.reflex", &resumed, 0));
 
-    // 收束后关账。
+    // 出口是快路自己的阶段格（D-163）：正文归收束格，快路只关自己这一笔账。
+    let mut answered = hit.clone();
+    answered.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
+    ));
+    assert!(!owes("policy.reflex", &answered, 0));
+    // 收束本身**不是**这一行的出口：只落 final、没落快路格 ⇒ 仍欠（那一轮照常进模型往返）。
     let mut closed = hit.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
-    assert!(!owes("policy.reflex", &closed, 0));
+    assert!(owes("policy.reflex", &closed, 0));
 }
 
 #[test]
@@ -503,17 +511,15 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
 /// 什么条件不欠），事件种类与 `stage` 值全是手写字面量。把 `StageName::Decide` 的
 /// 人读名改掉，它们照样绿——而行表里写死的 `"decide"` 会从「关得上」变成
 /// **「永远关不上」**：`policy.classify` 每轮重跑一遍判决，日志上却一个红字都没有。
-/// 这五行现在都是 `by: None`（派发只发生在五处点问），**没有派发器替它们兜这个漂移**
-/// ——`drive` 选不到未接线的行，也就不会在装载期之后任何一个环节发现它。
+/// 生产符号与行表的字面量是两份数据，只有本用例把它们逐字对上。
 ///
 /// 分工说清楚：本用例只验「行读的那张视图真能由生产形状开、由生产符号关」；
-/// 点问那五处的**行为**（先问后做、不欠就不做）归 e2e，不在这里。
+/// 派发那一侧的行为（选中哪一行、交出哪个执行体）归各 host 的派发用例，不在这里。
 #[test]
 fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     use super::super::stage_events::{StageFact, StageName};
     use crate::symbio_core::{
-        EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED,
-        EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
+        EVENT_ASSISTANT_REPORTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
     };
 
     // 生产侧的三条来源，逐条对齐：
@@ -556,7 +562,7 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     assert!(!owes("policy.recall", &recall, 0));
 
     // `policy.reflex`：开账读的是**召回那格的 `result`**（`with_result` 是生产写它的唯一入口），
-    // 出口 `turn_closed` 视图读的两格种类都用常量（`final` / `fallback`）。
+    // 出口是快路自己的阶段格 `StageName::Reflex`（D-164：正文归收束格，不在这里）。
     let mut reflex = vec![
         user(),
         config(json!({"is_persistent": true})),
@@ -564,16 +570,17 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
         stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
     ];
     assert!(owes("policy.reflex", &reflex, 0));
-    reflex.push(ev(1, EVENT_ASSISTANT_FINAL, json!({ "text": "答完了" })));
+    reflex.push(stage(StageFact::reflex(0, 1, "sk-1")));
     assert!(!owes("policy.reflex", &reflex, 0));
-    let mut fell_back = vec![
+    // 没有答完的轮上，收束行也不该被快路「替」成已答：`result:"miss"` 只关账、不开收束。
+    let mut missed = vec![
         user(),
         config(json!({"is_persistent": true})),
         round(),
         stage(StageFact::ran(StageName::Recall, 0).with_result("hit")),
     ];
-    fell_back.push(ev(1, EVENT_ASSISTANT_FALLBACK, json!({ "text": "兜底" })));
-    assert!(!owes("policy.reflex", &fell_back, 0));
+    missed.push(stage(StageFact::reflex(0, 1, "miss")));
+    assert!(!owes("policy.reflex", &missed, 0));
 
     // `policy.report`：另一张视图（`report_due`，按静默时长与配额折）。出口格
     // `chat.assistant.reported` 用常量种类 + 生产 id 形状 `rp-{turn}-{no}`。
@@ -647,19 +654,18 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
         );
     }
     // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
-    // 归零对象）。轮首那三条（`policy.classify` / `policy.compress` / `policy.recall`）
-    // 已由轮首派发点接管（D-159），`policy.report` 由批次边界派发点接管（D-163），
-    // 都不再在这笔账里。
-    // 这一格是 `D-158` 记的那笔账的当前形状，接回最后一行时会红——那是预期的红。
+    // 归零对象）。轮首那四行（`policy.classify` / `policy.compress` / `policy.recall` /
+    // `policy.reflex`）已由轮首派发点接管（D-159 / D-163），`policy.report` 由批次
+    // 边界派发点接管（D-163），都不再在这笔账里。
+    // 这一格是 `D-158` 记的那笔账的**归零点**：再接回一行就是倒退（旁路读数 0/1）。
     let unwired: Vec<&str> = ROWS
         .iter()
         .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
         .map(|d| d.name)
         .collect();
-    assert_eq!(
-        unwired,
-        vec!["policy.reflex"],
-        "未接线的策略行清单变了（`D-158` 的台账）"
+    assert!(
+        unwired.is_empty(),
+        "未接线的策略行必须清空（`D-158` 的台账）：{unwired:?}"
     );
 }
 
@@ -680,6 +686,18 @@ fn execute_row_closes_on_turn_closed() {
         drive(ROWS, &frozen(), &closed, 0).is_none(),
         "收束后无账可还"
     );
+
+    // 快路已作答（D-163）：`execute-turn` 的前件排除它 ⇒ 第一笔债就是收束。
+    // 零模型往返因此是**表上的**判据，不靠 55 < 60 的优先级巧合。
+    let mut reflex = open.clone();
+    reflex.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
+    ));
+    let picked = drive(ROWS, &frozen(), &reflex, 0).expect("快路空出的那笔账是收束");
+    assert_eq!(picked.decl.name, "close-turn");
+    assert_eq!(picked.decl.by, Some("close"));
 }
 
 /// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进轮内驱动**。
@@ -2129,7 +2147,12 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
     let head_rows = super::host_rows(&f, &super::head_actor_names(super::HEAD_ACTORS));
     assert_eq!(
         head_rows.iter().map(|d| d.name).collect::<Vec<_>>(),
-        vec!["policy.classify", "policy.compress", "policy.recall"],
+        vec![
+            "policy.classify",
+            "policy.compress",
+            "policy.recall",
+            "policy.reflex"
+        ],
         "轮首子集就是它的绑定表点名的行——多一条就是跨 host 抢债"
     );
     let report_rows = super::host_rows(&f, &super::report_actor_names(super::REPORT_ACTORS));
@@ -2321,16 +2344,17 @@ fn the_overlap_report_on_the_production_table() {
     assert_eq!(
         rendered,
         vec![
-            // 三行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
+            // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
+            ("policy.classify", "policy.reflex", head),
             ("policy.compress", "policy.recall", head),
-            // 反射快路 / 收束 / 整轮执行同键 `(turn)`：`skill_hit` 与 `resumed` 互斥由
-            // 视图折，装载期只报「可能」。
-            ("policy.reflex", "close-turn", head),
-            ("policy.reflex", "execute-turn", head),
+            ("policy.compress", "policy.reflex", head),
+            ("policy.recall", "policy.reflex", head),
             // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
-            // 谁先还得由前件（`has_final`）与 `prio` 决——报告不知道这些。
+            // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
+            // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与
+            // 收束 / 执行两行的 `(turn)` 不同，装载期不再报这两对。
             ("close-turn", "execute-turn", head),
             // 租约看护读 `stale_sent`，它与三行 await 的前件折出同一批协议格。
             // `open-tools` 不再与 `lease` 相交（D-138）：创建行的 `response` 是

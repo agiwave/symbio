@@ -251,7 +251,7 @@ pub use adapters::{
 // 目录（C-002）⇒ 以 `pub(crate)` 出根：只在本 crate 内可见、不进对外公开面（C-003 只数
 // `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
 // 锚点，另以根 `pub use` 出，见上。）
-pub(crate) use adapters::{AdapterError, FullModel, RuleOnly};
+pub(crate) use adapters::{AdapterError, FullModel};
 // 零 LLM 桩只在测试构建里存在（README §1.2 adapters 行）——`cfg(test)` 出根给下沉后的测试用。
 #[cfg(test)]
 pub(crate) use adapters::StubLlmAdapter;

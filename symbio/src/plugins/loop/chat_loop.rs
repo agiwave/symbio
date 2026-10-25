@@ -54,7 +54,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::drive::begin_drive;
-pub(crate) use self::inputs::{prepare_turn_inputs, run_compress, run_recall};
+pub(crate) use self::inputs::{prepare_turn_inputs, run_compress, run_recall, run_reflex};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
@@ -492,9 +492,9 @@ pub async fn run_chat_loop(
                     // （它们的写方是 `derived_facts::record_learning`，见其文档）。
                     recalled: turn.recall_view.as_ref(),
                     skill_obs: &turn.skill_route,
-                    // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
-                    // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
-                    skill_hits: &turn.skill_hits,
+                    // 快路正文（S11 执行半边）：`Some` ⇒ 轮首 host 已选中
+                    // `policy.reflex` 并落了出口格，本轮不调模型（D-163）。
+                    reflex: turn.head_reflex.as_ref(),
                     // 请求级前缀 = 请求级注入段的三段（见 request_view_prefix）。
                     prefix: request_view_prefix(&inputs.request_sections),
                     // 压缩的寄存位（S2.7-b2）：`None` = 本轮没压过（常态）。

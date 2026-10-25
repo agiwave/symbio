@@ -271,6 +271,7 @@ pub(crate) async fn close_round<S>(
     run: &mut Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
+    sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
 ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -303,7 +304,93 @@ where
         } => land_aborted(run, store, cost_ms, produced, &text)
             .await
             .map(Some),
+        PendingClose::Reflex { text } => land_reflex(run, store, &text, &sink).await.map(Some),
     }
+}
+
+/// 快路的收束（D-163）：技能正文**直落** `chat.assistant.final`，并上桥。
+///
+/// 与模型应答的收束同一份纪律：正文先经 `sink` 上线（否则前端建不出正文节点），
+/// 写侧闸不允许就说「不入格」并落否定事实，返回 `closure_denied`。载荷的
+/// `model` 记 `reflex`——这一轮没有模型，但「这段话是谁产的」仍要可观测。
+async fn land_reflex<S>(
+    run: &Prepared,
+    store: &S,
+    text: &str,
+    sink: &std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    sink.on_delta(text);
+    let cost_ms = run.started.elapsed().as_millis() as u64;
+    if let Err(why) = closure_gate(&run.actor, ClosureKind::Speech) {
+        deny(
+            store,
+            &run.actor,
+            run.turn,
+            run.user_seq,
+            ClosureKind::Speech,
+            EVENT_ASSISTANT_FINAL,
+            &why,
+        );
+        crate::plugin_warn!(
+            "actors",
+            "[v2] 快路收束被授权拒绝（{why}），本轮不入格（turn={}）",
+            run.turn
+        );
+        return Ok(TurnOutcome {
+            turn: run.turn,
+            text: text.to_string(),
+            cost_ms,
+            usage: None,
+            fell_back: false,
+            aborted: false,
+            awaits_user: false,
+            closure_denied: true,
+            finish: crate::symbio_core::ModelFinishReason::Stop,
+        });
+    }
+    store.append(
+        Event::pending(
+            format!("f-{}", run.turn),
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            run.turn,
+            &run.actor.principal,
+        )
+        .with_produced_by(run.user_seq)
+        .with_cost_ms(cost_ms)
+        // 与深度档同一个产出形状（`produced_payload`）+ 状态字段：快路无模型、
+        // 无流式节点，`turn_id` 记空串（重建侧按事件 id 稳定合成）、取数口不挂。
+        .with_payload(with_reason(
+            with_status(
+                produced_payload(
+                    text,
+                    LatencyTier::Reflex.name(),
+                    "",
+                    &StreamNodeFacts::default(),
+                    &[],
+                    &[],
+                ),
+                "completed",
+            ),
+            crate::symbio_core::ClosureReason::Completed,
+        )),
+    )?;
+    Ok(TurnOutcome {
+        turn: run.turn,
+        text: text.to_string(),
+        cost_ms,
+        usage: None,
+        fell_back: false,
+        aborted: false,
+        awaits_user: false,
+        closure_denied: false,
+        // 快路没有模型轮，长度戳判据对它无意义（技能正文一次写完）。
+        finish: crate::symbio_core::ModelFinishReason::Stop,
+    })
 }
 
 /// 阶段②b-1：创建（`open-tools` 行的动作， 步 5b）。

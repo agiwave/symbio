@@ -116,7 +116,7 @@ const VERBOSE = process.argv.includes('--verbose')
  */
 const BYPASS_BASELINE = process.env.OBLIGATION_BYPASS_BASELINE
   ? Number(process.env.OBLIGATION_BYPASS_BASELINE)
-  : 1
+  : 0
 
 /**
  * **幂等点问**上限（**只许降**）：执行体动手前复核「本行还欠不欠」的那几处。

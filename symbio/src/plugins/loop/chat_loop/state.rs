@@ -241,6 +241,12 @@ pub(crate) struct TurnState {
     /// 存在这里：执行体不交回产出（D-123 决策 5），而收束格要由**派发点**在两个动作
     /// 之间落——只有派发点知道判决是否已经问完。`None` = 本轮照常进工具循环。
     pub(crate) head_answer: Option<super::super::chat_loop::AnsweredTurn>,
+    /// **本幕快路命中的技能正文**（`policy.reflex` 执行体的产出，D-163）。
+    ///
+    /// 执行体在轮首落「已答」阶段格（出口），把正文寄存在这里：收束格由
+    /// `close-turn` 的执行体落——只有它知道收束该在什么时候发生，正文则只有
+    /// 快路执行体算得出。`None` = 本幕没走快路。
+    pub(crate) head_reflex: Option<super::super::turn_runner::ReflexAnswer>,
     /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
     ///
     /// 由准备段（`prepare_turn_inputs` 的 ①②）算出后写在这里，供压缩行的执行体

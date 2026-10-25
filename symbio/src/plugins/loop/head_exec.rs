@@ -2,10 +2,10 @@
 //!
 //! ## 这一台 host 管的是哪几步
 //!
-//! 一轮的固定七步里，「判决 / 压缩 / 召回」三步的账在行表上、动作也在这台的绑定表里：
-//! 派发点向求解器要本 host 行子集里最小的一笔可还债，行按 `by` 落进哪张绑定表就住哪台
-//! host（D-159）。**账在表上、动作在表外**是 DE-090 §3 的调度旁路，本模块的形状就是要它
-//! 不出现。选债仍然只有 `ring::drive` 一个求解器。
+//! 一轮的固定七步里，「判决 / 压缩 / 召回 / 快路」四步的账在行表上、动作也在这台的
+//! 绑定表里：派发点向求解器要本 host 行子集里最小的一笔可还债，行按 `by` 落进哪张
+//! 绑定表就住哪台 host（D-159）。**账在表上、动作在表外**是 DE-090 §3 的调度旁路，
+//! 本模块的形状就是要它不出现。选债仍然只有 `ring::drive` 一个求解器。
 //!
 //! ## host 是借用面，不是新的机制词
 //!
@@ -102,6 +102,24 @@ pub(crate) fn run_compress<'a>(step: &'a mut HeadStep<'a>) -> StepFuture<'a> {
             turn,
         } = step;
         super::chat_loop::run_compress(orchestrator, ctx, store, context, turn).await
+    })
+}
+
+/// `reflex` 执行体：`policy.reflex` 行选中的动作（D-163）。
+///
+/// 动作本体留在它的领域层（[`super::chat_loop::run_reflex`]）：命中判定与正文寄存
+/// 在编排层，出口那一格（`turn.stage{stage:"reflex"}`）当场入日志。本函数只把它
+/// 指到名字上。收束格由轮内的 `close` 执行体落——这一台 host 不写它。
+pub(crate) fn run_reflex<'a>(step: &'a mut HeadStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        let HeadStep {
+            ctx,
+            store,
+            context,
+            turn,
+            ..
+        } = step;
+        super::chat_loop::run_reflex(ctx, &***store, context, turn).await
     })
 }
 

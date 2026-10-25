@@ -44,6 +44,9 @@ pub(crate) enum PendingClose {
         produced: serde_json::Value,
         text: String,
     },
+    /// 快路作答：技能正文（D-163）。这一轮**没有模型往返**，收束动作把正文
+    /// 直接落成 `chat.assistant.final`（`model = "reflex"`），并上桥。
+    Reflex { text: String },
 }
 
 /// 一次工具循环的**在途状态**（阶段①产出，阶段②③④读取/推进）。
@@ -130,6 +133,7 @@ where
         prefix,
         final_reply,
         final_cost_ms,
+        reflex,
         dialog,
         opening_text,
         opening_dialog,
@@ -376,7 +380,9 @@ where
         pending_model: None,
         pending_round: None,
         pending_calls: None,
-        closing: None,
+        // 快路：正文寄到收束动作（D-163）。零模型往返，驱动环的第一个债就是
+        // `close-turn`（55 < 60）——本段照常备好派发格与 prompt，只是不发请求。
+        closing: reflex.map(|r| PendingClose::Reflex { text: r.text }),
         settled: None,
     })))
 }

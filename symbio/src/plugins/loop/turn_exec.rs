@@ -11,13 +11,16 @@
 //! [`super::tool_dispatch::ToolDispatch`] 三动作契约接入——**分发是插件侧的实现细节，
 //! 不是第二条执行链**。
 //!
-//! ## 反射档（S11 快路）：第三条路，也是唯一不调模型的一条
+//! ## 反射档（S11 快路）：唯一不调模型的一条
 //!
-//! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走
-//! [`TurnRunner::run_reflex`]——以技能正文收束，**一次模型调用都不发生**。
+//! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走快路——
+//! 以技能正文收束，**一次模型调用都不发生**。**选中**发生在轮首 host
+//! （`policy.reflex` 行，出口格 `turn.stage{stage:"reflex"}`）；本模块只消费那次
+//! 选中的结果：正文随 [`ExecTurn::reflex`] 进来，由 `close-turn` 的执行体落成
+//! 同一格 `chat.assistant.final`（D-163）。
 //! 它不是"又一条执行链"：产物落的是**同一轮的三格**（`u-{turn}` / `turn.dispatch` /
 //! `f-{turn}`），收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；
-//! 变的只是**生成那一格**由谁产出（反射档没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
+//! 变的只是**生成那一格**由谁产出（快路这一轮没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
 //!
 //! 两条边界，缺一条都会静默走错：
 //! - **只对新开轮**：续写轮不新开用户格（调用方直给原轮的 `user_seq`），而反射档的
@@ -660,13 +663,12 @@ pub(crate) struct ExecTurn<'a> {
     /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
     /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
     pub skill_obs: &'a [(String, bool)],
-    /// 本轮**可用**的技能集（S11 快路的候选）：本轮发言逐字命中其中一条 ⇒ 本轮
-    /// 走**反射档**（[`TurnRunner::run_reflex`]），一次模型调用都不发生。
+    /// **本幕快路已作答的技能正文**（[`super::turn_runner::ReflexAnswer`]）。
     ///
-    /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能）——
-    /// 那时本轮照常走 `drive_steps`。填充点唯一：
-    /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
-    pub skill_hits: &'a [super::skill_events::SkillLlmHit],
+    /// `Some` ⇒ 本轮**一次模型往返都不发**：`policy.reflex` 行已在轮首落过出口格
+    /// （`turn.stage{stage:"reflex"}`），这里只把正文带到收束动作
+    /// （`close-turn` 落 `chat.assistant.final`，D-163）。`None` 是常态。
+    pub reflex: Option<&'a super::turn_runner::ReflexAnswer>,
     /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
     /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
     /// （见 `TurnInput::prefix`）。
@@ -846,7 +848,7 @@ pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .close(step.store, step.llm)
+            .close(step.store, step.llm, step.sink.clone())
             .await
             .map_err(ActorError::Append)
     })

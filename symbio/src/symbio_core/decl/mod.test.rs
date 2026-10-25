@@ -132,12 +132,12 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v9：`answered`（本幕判决判成了答话轮，D-162 裁决 1）是它最新的一格，
-    // 而 `has_final` / `closeable` / `tools_open` 的读面自 v8 起只看
-    // 「这一轮自己的模型往返」（内部往返带 `via`，D-122 决策 2）。
+    // `turn_head` 到 v10：`reflex_answered`（本幕快路已作答，D-163）是它最新的一格，
+    // 而 `answered`（D-162 裁决 1）与 `has_final` / `closeable` / `tools_open` 的读面自
+    // v8 起只看「这一轮自己的模型往返」（内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 9);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 10);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 4);
@@ -585,11 +585,36 @@ fn turn_head_reads_round_and_done_from_facts() {
             "skill_hit": true,
             // 判决那格的 `result` 缺席（旧夹具只记了「判过」）⇒ 不是答话轮。
             "answered": false,
+            // 本幕没走快路 ⇒ 收束行不因它开账。
+            "reflex_answered": false,
             "has_final": false,
             "closeable": false,
             "tools_open": false
         })
     );
+
+    // 快路已作答（D-163）：出口格把 `reflex_answered` 折真 ⇒ 收束行在**零模型往返**
+    // 的轮上也开得出账（`has_final` 折不出没有应答的轮）。
+    let mut reflex = events.clone();
+    reflex.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
+    ));
+    let head = turn_head(&reflex, 0);
+    assert_eq!(head["reflex_answered"], json!(true));
+    assert_eq!(head["closeable"], json!(true));
+
+    // `result:"miss"` 只关快路自己那一笔账，不算「已答」：那一轮照常进模型往返。
+    let mut missed = events.clone();
+    missed.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "reflex", "round": 0, "result": "miss"}),
+    ));
+    let head = turn_head(&missed, 0);
+    assert_eq!(head["reflex_answered"], json!(false));
+    assert_eq!(head["closeable"], json!(false));
 
     // 下一轮的事实出现后，轮头跟着走；`done` 只认**本幕**的阶段格。
     let events = vec![

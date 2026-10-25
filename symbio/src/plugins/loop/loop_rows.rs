@@ -113,6 +113,12 @@ const COMPRESS: &str = "compress";
 /// 名字与旧行 `effects.classify` 的那个能力名同源：这一行跑的是「问一次 `classify`
 /// 并**执行**它判成的枚举」，判决本身住在能力插件里，执行体只做编排与入账。
 const CLASSIFY: &str = "classify";
+/// 快路执行体（D-163）：`policy.reflex` 行选中的动作。
+///
+/// 它只落「反射档已答」那一格，并把技能正文寄进本轮状态；收束格由
+/// [`ACTOR_CLOSE`] 统一落——两个执行体都写 `final` 会让依赖图成环
+/// （`reflex → close → execute → reflex`，DE-015 §3.4 第 1 条）。
+const REFLEX: &str = "reflex";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -184,7 +190,8 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
 /// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
 /// 与 `execute → close`），表装不上（DE-015 §3.4 第 1 条）——所以收束格只能归一个执行体。
 /// 它**不**覆盖轮首准备的 1b 分支（定稿答话轮）：那一轮一次模型往返都不发，收束格由
-/// `turn_runner/prepare.rs` 就地落（缺口与归属见 ）。
+/// `turn_runner/prepare.rs` 就地落（缺口与归属见 ）。快路（技能命中）同样零往返，
+/// 但它进驱动循环：`policy.reflex` 只落「已答」，收束格仍归这一格（D-163）。
 ///
 /// 两条收束格都在它名下：`chat.assistant.final`（答完了 / 中止）与
 /// `chat.assistant.fallback`（模型没答成 / 空答）。独占不是洁癖，是装载期的硬约束：
@@ -240,6 +247,19 @@ const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
     name: CLASSIFY,
     // 判决可能落到模型，但不生成：快速档（与行的 `tier` 同值，更慢就装载红）。
     mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 快路执行体的声明（D-163）。
+///
+/// 名单只有 `turn.stage` 一格：快路的**出口**就是 `stage:"reflex"` 那一格，
+/// 装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。技能正文随本轮
+/// 状态交给收束动作，**不进**事实网格（正文属于收束格的载荷，D-163）。
+const ACTOR_REFLEX: ActorDecl = ActorDecl {
+    name: REFLEX,
+    // 技能命中即出话、零模型往返：反射档（与行同档，更慢就装载红）。
+    mode: LatencyTier::Reflex,
     reads: &[],
     writes: &[EVENT_TURN_STAGE],
 };
@@ -367,6 +387,11 @@ pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[
     HeadEntry {
         decl: ACTOR_RECALL,
         run: super::head_exec::run_recall,
+        transitional: &[],
+    },
+    HeadEntry {
+        decl: ACTOR_REFLEX,
+        run: super::head_exec::run_reflex,
         transitional: &[],
     },
 ];
@@ -736,26 +761,29 @@ pub(crate) static ROWS: &[Decl] = &[
     //
     // 续写幕不走快路（落格形状会撞幂等键）；`skill_hit` 来自本幕召回阶段的
     // `result`，所以「命中」这件事第一次有了事实形态。
+    //
+    // 出口是 `reflex` 阶段格（D-163）：执行体只落「已答」并把技能正文寄进本轮
+    // 状态，收束格由 `close-turn` 统一落——快路自身再写 `final` 会让依赖图成环。
+    // 收束行据此在**零模型往返**的轮上也能开出账（`turn_head.reflex_answered`）。
     Decl {
         name: "policy.reflex",
         prio: 50,
-        // 未接线：快路在装配段命中即收束（它不调模型）；与 `reflex` 执行体同批接回。
-        by: None,
+        by: Some(REFLEX),
         // 快路就是「不调模型」：反射档是它的定义。
         tier: LatencyTier::Reflex,
         expand: None,
         owes: Pattern {
             source: "turn_head",
-            key: &["turn"],
+            key: &["turn", "round"],
             eq: &[
                 ("resumed", Lit::Bool(false)),
                 ("skill_hit", Lit::Bool(true)),
             ],
         },
         until: &[Pattern {
-            source: "turn_closed",
-            key: &["turn"],
-            eq: &[],
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("reflex"))],
         }],
         unless: &[],
     },
@@ -822,6 +850,10 @@ pub(crate) static ROWS: &[Decl] = &[
     // `tools_open = false`（b）：模型交回了工具调用、其中还有没关账的，
     // 这一步就让位——否则它每次都比创建 / 授权 / 派发（67 / 68 / 69）先生效，
     // 工具批永远等不到人跑（下一轮模型往返会带着没有结果的交换再次出发）。
+    //
+    // `reflex_answered = false`（D-163）：快路已作答的轮**没有要答的东西**，本行不欠。
+    // 这条前件替代了「按优先级让 close 先跑」的时序约定——零模型往返因此是行表上的
+    // 判据，不是两个数字（55 / 60）碰巧凑出来的次序。
     Decl {
         name: "execute-turn",
         prio: 60,
@@ -831,7 +863,10 @@ pub(crate) static ROWS: &[Decl] = &[
         owes: Pattern {
             source: "turn_head",
             key: &["turn"],
-            eq: &[("tools_open", Lit::Bool(false))],
+            eq: &[
+                ("tools_open", Lit::Bool(false)),
+                ("reflex_answered", Lit::Bool(false)),
+            ],
         },
         until: &[Pattern {
             source: "turn_closed",
