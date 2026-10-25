@@ -73,7 +73,22 @@ where
     // 应答载荷带上本次交回的工具调用（D-117）：创建行 `open-tools` 的集合
     // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
     // 行欠不欠由引擎现读（D-136）：这里只交出「授权这次派发的行」与读账的 now。
-    let out = super::super::port::dispatch_with(
+    //
+    // 应答与失败**同带这一轮的产出字段**（`output_fields`）：半截正文 / 思考在
+    // 中止之后仍是事实，而它们只能在执行体返回之后从桥上取——所以两条闭包各取一次。
+    let nodes_ok = run.nodes.clone();
+    let nodes_failed = run.nodes.clone();
+    let principal = run.actor.principal.clone();
+    let turn_root_id = run.turn_root_id.clone();
+    // 产出事实的**寄存槽**：桥的一次读只换一份读数，而这条事实要写进
+    // `response` / `failed` 载荷，又要落到草稿的 `last_output_facts` /
+    // `last_answer_id`。两处各取一次就变成两次读数，取数口的消费方（测试的
+    // 计数式假桥）会因此看到两倍的消耗——槽位让「读一次、存一次、两处共用」。
+    let output_slot: std::sync::Arc<std::sync::Mutex<Option<(StreamNodeFacts, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let slot_ok = output_slot.clone();
+    let slot_failed = output_slot.clone();
+    let out = super::super::port::dispatch_full(
         store,
         super::super::loop_rows::PORTS,
         super::super::port::Dispatch {
@@ -88,6 +103,13 @@ where
         || llm.generate_turn(tok, messages, tools, sink.clone()),
         |e: &AdapterError| e.to_string(),
         |rt| {
+            // 这一次往返的桥读数——**唯一**一次。
+            let facts = node_facts(&nodes_ok);
+            let mut fields = output_fields(&call.id, &turn_root_id, &principal, &facts, Some(rt));
+            let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
+            // 锁内只有一次赋值 ⇒ 中毒不可能发生；仍按数据照常取回（不让取数口成为 panic 面）。
+            *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+            // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
             let calls: Vec<serde_json::Value> = rt
                 .tool_calls
                 .iter()
@@ -107,10 +129,45 @@ where
                     })
                 })
                 .collect();
-            serde_json::json!({ "calls": calls })
+            fields["calls"] = serde_json::Value::Array(calls);
+            fields
+        },
+        |e: &AdapterError| {
+            let facts = node_facts(&nodes_failed);
+            let mut fields = output_fields(&call.id, &turn_root_id, &principal, &facts, None);
+            let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
+            *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+            // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
+            // 与「适配器报错」——那条区分只在这一格。
+            fields["status"] = serde_json::Value::String(
+                if matches!(e, AdapterError::Aborted) {
+                    "aborted"
+                } else {
+                    "failed"
+                }
+                .to_string(),
+            );
+            fields
         },
     );
-    match out.await {
+    let result = out.await;
+    // 这一轮的模型输出事实（应答 / 失败）已经落格 ⇒ 它的逻辑 id 归本轮 `responses`
+    // 与 `last_answer_id`：收束 / 进展格只说「结局」，正文由这条事实回溯。
+    //
+    // 只认 `Actor` 失败：存储失败与控制面失败都**没有**落输出事实，把它们的 id
+    // 记进 `responses` 会让读侧查一个不存在的正文。
+    let has_output =
+        result.is_ok() || matches!(&result, Err(super::super::port::DispatchError::Actor(_)));
+    if has_output {
+        run.responses.push(call.id.clone());
+        if let Some((facts, answer_id)) =
+            output_slot.lock().unwrap_or_else(|e| e.into_inner()).take()
+        {
+            run.last_output_facts = facts;
+            run.last_answer_id = answer_id;
+        }
+    }
+    match result {
         Ok(rt) => Ok(rt),
         Err(super::super::port::DispatchError::Actor(AdapterError::Aborted)) => {
             Err(ModelCallError::Aborted)
@@ -209,7 +266,9 @@ where
     run.step += 1;
     // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
     // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
-    let round_facts = node_facts(&run.nodes);
+    //
+    // 取数已经发生在应答载荷那一侧（`call_model` 的寄存槽）：桥只读一次。
+    let round_facts = run.last_output_facts.clone();
 
     // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**：
     //     `close-turn` 行的前件（`turn.closeable`）此刻已经在日志上，派发器下一步
@@ -232,16 +291,14 @@ where
     //     分发通道）。
     if !has_dispatch {
         let cost = run.started.elapsed().as_millis() as u64;
-        // 调用本身是事实：没有分发通道也要记「请求过什么」。
-        run.all_tool_calls
-            .extend(rt.tool_calls.iter().map(|tc| tool_fact_of(tc, None)));
+        // 这一轮没有可派的工具批：正文归刚才那条 `response` 事实，这里只记结局。
         let produced = produced_payload(
-            &rt.text,
+            "",
             llm.model_id(),
             &run.turn_root_id,
-            &round_facts,
-            &run.all_tool_calls,
-            &run.rounds,
+            None,
+            &run.last_answer_id,
+            &run.responses,
         );
         return settle::append_fallback(
             store,
@@ -258,7 +315,6 @@ where
     }
 
     run.pending_model = Some(rt);
-    run.pending_round = Some(round_facts);
     Ok(ModelRound::Tools)
 }
 
@@ -362,16 +418,16 @@ where
         )
         .with_produced_by(run.user_seq)
         .with_cost_ms(cost_ms)
-        // 与深度档同一个产出形状（`produced_payload`）+ 状态字段：快路无模型、
-        // 无流式节点，`turn_id` 记空串（重建侧按事件 id 稳定合成）、取数口不挂。
+        // 与深度档同一个产出形状（`produced_payload`）+ 状态字段：快路无模型往返、
+        // 无流式节点，正文只能随收束格入格；`turn_id` 记空串（重建侧按事件 id 稳定合成）。
         .with_payload(with_reason(
             with_status(
                 produced_payload(
                     text,
                     LatencyTier::Reflex.name(),
                     "",
-                    &StreamNodeFacts::default(),
-                    &[],
+                    None,
+                    &answer_id_of(text, "", &StreamNodeFacts::default(), ""),
                     &[],
                 ),
                 "completed",
@@ -439,20 +495,16 @@ pub(crate) async fn dispatch_round(
     llm: &dyn LlmAdapter,
     dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
 ) -> Result<Option<TurnOutcome>, crate::symbio_core::AppendError> {
-    // 三格齐 ⇒ 正常批次；三格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
-    // 只缺一两格是草稿错位，不拿唤醒兜底掩盖它。
-    let normal = match (
-        run.pending_model.take(),
-        run.pending_round.take(),
-        run.pending_calls.take(),
-    ) {
-        (Some(rt), Some(round_facts), Some(calls)) => Some((rt, Some(round_facts), calls)),
+    // 两格齐 ⇒ 正常批次；两格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
+    // 只缺一格是草稿错位，不拿唤醒兜底掩盖它。
+    let normal = match (run.pending_model.take(), run.pending_calls.take()) {
+        (Some(rt), Some(calls)) => Some((rt, calls)),
         _ => None,
     };
-    let (rt, round_facts, mut calls) = match normal {
+    let (rt, mut calls) = match normal {
         Some(parts) => parts,
         None => match dispatch.wake(store).await {
-            Some(batch) => (batch.turn, None, batch.calls),
+            Some(batch) => (batch.turn, batch.calls),
             // 没有寄存、也没有唤醒请求 = 引擎没有可派的工具批；不空转。
             None => return Ok(None),
         },
@@ -460,20 +512,34 @@ pub(crate) async fn dispatch_round(
     let outcomes = dispatch.dispatch(store, &rt, &mut calls).await;
 
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
-    batch::land_artifacts(run, store, &rt, &outcomes, round_facts.as_ref()).await?;
+    batch::land_artifacts(run, store, &outcomes).await?;
 
     // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
     //     说过的话照样是事实，等待是状态），不收束轮次。
     if outcomes.iter().any(|o| o.needs_user_action) {
-        let empty = StreamNodeFacts::default();
-        let produced = produced_payload(
-            &rt.text,
-            llm.model_id(),
-            &run.turn_root_id,
-            round_facts.as_ref().unwrap_or(&empty),
-            &run.all_tool_calls,
-            &run.rounds,
-        );
+        // 模型轮：正文归那一轮的 `response` 事实（`responses` 回溯得到），这里只
+        // 记结局。唤醒幕（草稿里没有模型往返）没有可回溯的事实，正文取唤醒批自带的。
+        let produced = if run.responses.is_empty() {
+            let facts = StreamNodeFacts::default();
+            let answer_id = answer_id_of(&rt.text, "", &facts, &run.turn_root_id);
+            produced_payload(
+                &rt.text,
+                llm.model_id(),
+                &run.turn_root_id,
+                None,
+                &answer_id,
+                &run.responses,
+            )
+        } else {
+            produced_payload(
+                "",
+                llm.model_id(),
+                &run.turn_root_id,
+                None,
+                &run.last_answer_id,
+                &run.responses,
+            )
+        };
         // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
         // 模式）：等待轮可能已落过进展格，从 0 起会撞幂等键。
         let progress_no = run
@@ -509,10 +575,6 @@ pub(crate) async fn dispatch_round(
     }
 
     // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
-    // 唤醒幕没有模型往返（`round_facts` 为 `None`）：它本来就没有节点事实可累加。
-    if let Some(round_facts) = round_facts {
-        run.rounds.push(round_facts);
-    }
     run.exchange
         .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
     run.tool_round += 1;
@@ -545,13 +607,14 @@ where
         // 正文与思考**都**空 + 无工具调用 = 模型什么也没答。这是**失败**：
         // 落成 final 会把「没答」记成「答了空话」。
         let cost = run.started.elapsed().as_millis() as u64;
+        // 空答的正文 / 思考都归这一轮的 `response` 事实，收束格只记结局。
         let produced = produced_payload(
-            &answer,
+            "",
             llm.model_id(),
             &run.turn_root_id,
-            round_facts,
-            &run.all_tool_calls,
-            &run.rounds,
+            None,
+            &run.last_answer_id,
+            &run.responses,
         );
         return settle::append_fallback(
             store,
@@ -601,12 +664,12 @@ where
         });
     }
     let produced = produced_payload(
-        &answer,
+        "",
         llm.model_id(),
         &run.turn_root_id,
-        round_facts,
-        &run.all_tool_calls,
-        &run.rounds,
+        None,
+        &run.last_answer_id,
+        &run.responses,
     );
     store.append(
         Event::pending(
@@ -644,15 +707,17 @@ where
 /// 载荷与落格分开：收束格只由 `close` 执行体写，中止那一步只负责把结局寄存下来。
 fn aborted_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value, String) {
     let cost_ms = run.started.elapsed().as_millis() as u64;
-    let facts = node_facts(&run.nodes);
-    let text = facts.text.clone().unwrap_or_default();
+    // 半截正文取自那一轮的寄存读数——桥已在 `failed` 载荷那一侧读过一次，
+    // 这里不再重读（重读会拿到同一份，只让取数口多算一次）。
+    let text = run.last_output_facts.text.clone().unwrap_or_default();
+    // 半截正文 / 思考已随 `failed(port=model)` 入格（`output_fields`），收束格只记结局。
     let produced = produced_payload(
-        &text,
+        "",
         llm.model_id(),
         &run.turn_root_id,
-        &facts,
-        &run.all_tool_calls,
-        &run.rounds,
+        None,
+        &run.last_answer_id,
+        &run.responses,
     );
     (cost_ms, produced, text)
 }
@@ -730,17 +795,17 @@ where
 
 /// 3b 兜底的**载荷**（c）：失败前已产出的半截产出与实测耗时。
 ///
-/// 失败前已产出的半截正文 / 思考照样进载荷（它们是事实，不因失败就不记）。
+/// 失败前已产出的半截正文 / 思考已随 `failed(port=model)` 入格（`output_fields`）；
+/// 兜底格的正文是 `detail`（人话），这里只记结局。
 fn failed_payload(run: &Prepared, llm: &dyn LlmAdapter) -> (u64, serde_json::Value) {
     let cost_ms = run.started.elapsed().as_millis() as u64;
-    let facts = node_facts(&run.nodes);
     let produced = produced_payload(
-        &facts.text.clone().unwrap_or_default(),
+        "",
         llm.model_id(),
         &run.turn_root_id,
-        &facts,
-        &run.all_tool_calls,
-        &run.rounds,
+        None,
+        &run.last_answer_id,
+        &run.responses,
     );
     (cost_ms, produced)
 }

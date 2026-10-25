@@ -36,7 +36,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::event::{
-    Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
+    Entity, Event, Verb, EVENT_FAILED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_RESPONSE,
+    EVENT_SESSION_CONSOLIDATED,
 };
 
 use serde::{Deserialize, Serialize};
@@ -283,6 +284,88 @@ fn meta_flag(m: &ChatNode, key: &str) -> bool {
         .and_then(|v| v.get(key))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+/// 本次会话**模型输出事实**的索引：一次模型往返的逻辑 id → 它「说了什么」。
+///
+/// ## 为什么需要索引
+///
+/// 收束 / 进展 / 兜底格只存**轮级结局**（`answer_id` + `responses`），正文归那一次
+/// `response` / `failed` 事实。转写与 prompt 复核都要把正文折回来；两处各扫一遍
+/// 必然漂移，所以索引只建一次、两处共用（与 [`MessageMutations`] 同一条理由）。
+///
+/// ## 只认本轮自己的往返
+///
+/// 端口 `model`、**无 `via`**：内部往返（措辞 / 裁判 / 摘要）不是这一轮对读者说的话，
+/// 它们的 `response` 同样带正文，但绝不能顶替本轮答案。
+#[derive(Debug, Default)]
+pub struct OutputIndex {
+    /// 逻辑 id（`model-<turn>-d<drive>-s<step>`）→ (answer 正文, answer 节点 id)。
+    by_call: HashMap<String, (String, String)>,
+}
+
+impl OutputIndex {
+    /// 扫一遍事件切片建索引（纯函数：同一份切片恒得同一份索引）。
+    pub fn collect(events: &[Event]) -> Self {
+        let mut by_call = HashMap::new();
+        for e in events {
+            if !matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED) {
+                continue;
+            }
+            if e.payload.get("port").and_then(|v| v.as_str()) != Some("model") {
+                continue;
+            }
+            if e.payload.get("via").is_some() {
+                continue;
+            }
+            let Some(id) = e.payload.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let field = |k: &str| {
+                e.payload
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            by_call.insert(id.to_string(), (field("answer"), field("answer_id")));
+        }
+        Self { by_call }
+    }
+
+    /// 一条**收束 / 进展**事实「说了什么」：对话面 → 载荷正文（无模型轮）→
+    /// 按 `responses` 倒序取最后一条往返的正文。
+    ///
+    /// 兜底格不在这里：它的正文是 `detail`（失败的人话），由调用方自己读。
+    pub fn produced_text(&self, e: &Event) -> String {
+        if let Some(dialog) = e.payload.get("dialog") {
+            if let Some(text) = dialog
+                .get("text")
+                .and_then(|v| v.as_str())
+                .filter(|t| !t.is_empty())
+            {
+                return text.to_string();
+            }
+        }
+        let direct = e
+            .payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if !direct.trim().is_empty() {
+            return direct.to_string();
+        }
+        let Some(ids) = e.payload.get("responses").and_then(|v| v.as_array()) else {
+            return String::new();
+        };
+        ids.iter()
+            .rev()
+            .filter_map(|v| v.as_str())
+            .filter_map(|id| self.by_call.get(id))
+            .map(|(answer, _)| answer.clone())
+            .next()
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

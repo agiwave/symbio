@@ -12,17 +12,22 @@ pub(crate) fn node_facts(nodes: &Option<NodeFactsFn>) -> StreamNodeFacts {
 
 /// 产出部分的载荷（收束 / 进展 / 兜底格共用的形状）。
 ///
-/// 一处定义的理由：三种格子记的是**同一批产出事实**（末轮正文 / 思考 / 本轮全部
-/// 工具调用 / 工具轮的中途产出），差别只在状态字段——形状写三遍必然漂移，而重建
-/// 只按一个形状读。半截正文 / 半截思考照原样进 `text` / `reasoning` / `rounds`：
-/// **它们是事实**，不因「没说完」就不记。
+/// 只存**轮级结局**：这一轮「说了什么」的节点身份（`answer_id`）与本轮全部模型
+/// 输出事实的逻辑 id（`responses`）。正文 / 思考属于**那一次模型往返**自己的
+/// `response` / `failed` 事实，不在这里复述——两处各存一份，改一处就要动两处，
+/// 而漂的时候两边都是合法拼写。重建按 `responses` 把正文节点折回来。
+///
+/// `text` / `text_id` 只给**没有模型往返**的轮次（快路 / 定稿答话 / 配置缺口）：
+/// 那些轮次的正文没有一条 `response` 事实可挂。模型轮写空串——`text` 键仍然
+/// **始终存在**（`turnstate::settled` 按「有没有这个键」判收束，缺键会被读成
+/// 「什么都没发生」）。
 pub(crate) fn produced_payload(
     text: &str,
     model: &str,
     turn_root_id: &str,
-    facts: &StreamNodeFacts,
-    tool_calls: &[ToolCallFact],
-    rounds: &[StreamNodeFacts],
+    text_id: Option<&str>,
+    answer_id: &str,
+    responses: &[String],
 ) -> serde_json::Value {
     serde_json::json!({
         "text": text,
@@ -30,65 +35,82 @@ pub(crate) fn produced_payload(
         "model": model,
         // 节点结构入格：重建按这批 id 复刻落库形状（载荷补全）。
         "turn_id": turn_root_id,
-        "text_id": facts.text_id,
-        "reasoning_id": facts.reasoning_id,
-        "reasoning": facts.reasoning,
-        "tool_calls": tool_calls_payload(tool_calls),
-        "rounds": rounds_payload(rounds),
+        "text_id": text_id,
+        "answer_id": answer_id,
+        "responses": responses,
     })
 }
 
-/// `tool_calls` 载荷条目（形状见 [`ToolCallFact`]）。
-pub(crate) fn tool_calls_payload(calls: &[ToolCallFact]) -> Vec<serde_json::Value> {
-    calls
-        .iter()
-        .map(|c| {
-            serde_json::json!({
-                "id": c.id,
-                "name": c.name,
-                "args": c.args,
-                "wire_id": c.wire_id,
-                "result_id": c.result_id,
-            })
-        })
-        .collect()
+/// 这一轮「说了什么」的节点身份（`answer_id`）——写侧与读侧共用一条判据。
+///
+/// `answer` 是这一轮交付给读者的那句话：有工具调用的轮次是正文，收束轮是
+/// [`final_answer`] 折出的那段。`reasoning` 必须与被写进事实的那份**同一个**：
+/// reasoning-only 时正文与思考是同一段，节点归 reasoning id（判据在
+/// [`crate::symbio_core::event_output_text_node_id`]）。
+pub(crate) fn answer_id_of(
+    answer: &str,
+    reasoning: &str,
+    facts: &StreamNodeFacts,
+    turn_root_id: &str,
+) -> String {
+    crate::symbio_core::event_output_text_node_id(
+        answer,
+        reasoning,
+        facts.text_id.as_deref(),
+        facts.reasoning_id.as_deref(),
+        Some(turn_root_id),
+    )
 }
 
-/// `rounds` 载荷条目：工具轮的**中途产出**（每轮正文 / 思考 + 节点 id）。
-pub(crate) fn rounds_payload(rounds: &[StreamNodeFacts]) -> Vec<serde_json::Value> {
-    rounds
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "text_id": r.text_id,
-                "text": r.text,
-                "reasoning_id": r.reasoning_id,
-                "reasoning": r.reasoning,
-            })
-        })
-        .collect()
-}
-
-/// 一次工具调用 → 事实条目（结果配不上的记 `result_id: None`）。
-pub(crate) fn tool_fact_of(
-    tc: &crate::symbio_core::TurnToolCallInfo,
-    outcome: Option<&super::super::tool_dispatch::DispatchOutcome>,
-) -> ToolCallFact {
-    ToolCallFact {
-        id: outcome
-            .map(|o| o.call_id.clone())
-            .or_else(|| tc.id.clone())
-            .unwrap_or_default(),
-        name: tc.name.clone().unwrap_or_default(),
-        args: crate::symbio_core::node_build::tool_call_args_text(tc),
-        wire_id: outcome
-            .map(|o| o.wire_id.clone())
-            .or_else(|| tc.wire_id.clone())
-            .unwrap_or_default(),
-        result_id: outcome
-            .map(|o| o.result_id.clone())
-            .filter(|s| !s.is_empty()),
-    }
+/// 一次模型往返写进 `response` / `failed` 的**产出字段**（这一轮说了什么、想了什么）。
+///
+/// 桥给了节点 id 就用桥的；没给（无桥的调用方）就按这次调用的逻辑 id **合成**——
+/// 合成结果随事实入格，因此它同样是"事实的一部分"，读侧不必再猜一遍。
+/// `answer_id` 也在这里一次算定：写侧（应答 / 失败）与读侧（重建的节点 / 转写的
+/// 正文）必须对同一个答案得出同一个身份。
+pub(crate) fn output_fields(
+    call_id: &str,
+    turn_root_id: &str,
+    principal: &str,
+    facts: &StreamNodeFacts,
+    rt: Option<&crate::symbio_core::LlmTurn>,
+) -> serde_json::Value {
+    let text = facts.text.clone().unwrap_or_default();
+    let reasoning = facts.reasoning.clone().unwrap_or_default();
+    let text_id = facts
+        .text_id
+        .clone()
+        .or_else(|| (!text.trim().is_empty()).then(|| format!("{call_id}-text")));
+    let reasoning_id = facts
+        .reasoning_id
+        .clone()
+        .or_else(|| (!reasoning.trim().is_empty()).then(|| format!("{call_id}-reasoning")));
+    // 失败轮没有 `rt`：失败前已产出的半截正文就是这一轮说的话（`answer` = 半截正文）。
+    let answer = match rt {
+        Some(rt) if !rt.tool_calls.is_empty() => rt.text.clone(),
+        Some(rt) => final_answer(rt, facts),
+        None => text.clone(),
+    };
+    let answer_id = crate::symbio_core::event_output_text_node_id(
+        &answer,
+        &reasoning,
+        text_id.as_deref(),
+        reasoning_id.as_deref(),
+        Some(turn_root_id),
+    );
+    serde_json::json!({
+        "turn_id": turn_root_id,
+        "text": text,
+        "text_id": text_id,
+        "reasoning": reasoning,
+        "reasoning_id": reasoning_id,
+        "answer": answer,
+        "answer_id": answer_id,
+        "truncated": rt.map(|rt| rt.finish.is_length()).unwrap_or(false),
+        // 引擎写这条协议事实，但正文属于**这一轮的执行主体**：重建节点按它定角色
+        // （事件自身的 `actor` 是「谁写的」，这里是「内容是谁的」）。
+        "principal": principal,
+    })
 }
 
 /// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
@@ -146,17 +168,43 @@ pub(crate) fn reason_of_finish(
 ///
 /// 缺席（`None` = 这一轮不是答话轮）⇒ 载荷原样返回：普通收束格的重建路径不受影响，
 /// 「有对话面节点」因此是一个**由载荷显式声明**的事实，不靠重建去猜。
+///
+/// 有对话面时顶层 `text` **移进** `dialog.text`：内容归那条对话面节点所有
+/// （重建按 `dialog_node` 复刻它，不复述一份到 Turn 子节点）。顶层 `text` 键保留为
+/// 空串——`turnstate::settled` 按「键存在」判收束（见 [`produced_payload`]）。
+/// `answer_id` 同步覆写成 `dialog.id`：三处读侧（重建 / 转写 / 复核）都按它认节点。
 pub(crate) fn with_dialog(
     mut produced: serde_json::Value,
     dialog: Option<&DialogFacts>,
 ) -> serde_json::Value {
     if let Some(d) = dialog {
+        let text = produced
+            .get("text")
+            .cloned()
+            .unwrap_or(serde_json::Value::String(String::new()));
+        produced["text"] = serde_json::Value::String(String::new());
         produced["dialog"] = serde_json::json!({
             "id": d.id,
             "reason": d.reason,
             "exclude_from_context": d.exclude_from_context,
+            "text": text,
         });
+        produced["answer_id"] = serde_json::Value::String(d.id.clone());
     }
+    produced
+}
+
+/// 给**没有模型往返**的轮次补思考事实（定稿答话的措辞轮）。
+///
+/// 模型轮的思考属于那一次 `response` 事实，不在这里复述；但措辞轮的那段思考
+/// 没有可挂的模型事实（它经 `via` 记为内部往返，重建的轮次节点臂按「无 `via`」
+/// 只认本轮自己那一次），所以它随收束格入格。
+pub(crate) fn with_reasoning(
+    mut produced: serde_json::Value,
+    facts: &StreamNodeFacts,
+) -> serde_json::Value {
+    produced["reasoning_id"] = serde_json::json!(facts.reasoning_id);
+    produced["reasoning"] = serde_json::json!(facts.reasoning);
     produced
 }
 

@@ -847,18 +847,37 @@ pub fn event_payload_node_id(e: &Event, key: &str) -> String {
 ///
 /// 判据与落库侧**逐字相同**（同一段文本比较），因为它就是同一个问题的答案。
 pub fn event_produced_text_node_id(e: &Event) -> String {
-    let text = payload_str(e, "text").unwrap_or_default();
-    let reasoning = payload_str(e, "reasoning").unwrap_or_default();
+    event_output_text_node_id(
+        payload_str(e, "text").as_deref().unwrap_or_default(),
+        payload_str(e, "reasoning").as_deref().unwrap_or_default(),
+        payload_str(e, "text_id").as_deref(),
+        payload_str(e, "reasoning_id").as_deref(),
+        payload_str(e, "turn_id").as_deref(),
+    )
+}
+
+/// [`event_produced_text_node_id`] 的**字段版**：同一条规则，供写侧在落格前算好后写进
+/// `answer_id`（模型调用的事实自带它那一轮的正文身份）。
+///
+/// 写侧与读侧共用这一份实现：两处各算一遍的后果是静默的——`response` 记的 `answer_id`
+/// 与收束格/转写行算出来的值不同，表现就是「编辑定位不上那条正文」。
+pub fn event_output_text_node_id(
+    text: &str,
+    reasoning: &str,
+    text_id: Option<&str>,
+    reasoning_id: Option<&str>,
+    turn_id: Option<&str>,
+) -> String {
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
     let id = if reasoning_only {
-        payload_str(e, "reasoning_id").or_else(|| payload_str(e, "text_id"))
+        reasoning_id.or(text_id)
     } else {
-        payload_str(e, "text_id")
+        text_id
     };
-    id.unwrap_or_else(|| {
+    id.map(str::to_string).unwrap_or_else(|| {
         // 载荷连 `turn_id` 都没有（答话轮 / 反射档：没有流式节点）⇒ 与落库侧同一条
         // 回退：正文子节点的名字由 Turn 根派生。
-        format!("{}-text", payload_str(e, "turn_id").unwrap_or_default())
+        format!("{}-text", turn_id.unwrap_or_default())
     })
 }
 
@@ -880,9 +899,9 @@ pub fn event_tool_result_node_id(e: &Event) -> String {
 ///
 /// ## 只给「内容节点」，不给全部节点
 ///
-/// 收束格一次承载 `[Turn 根, Reasoning 子, Text 子, rounds…]` 一串节点，这里只回
-/// **正文子节点**（对话里那一句就是它）。对话读侧（转写行 / prompt 复核）只需要它；
-/// 节点树（`rebuild`）要的是全部，所以它自己按节点逐个取。
+/// 一次模型往返的正文与思考是两个节点（`response` / `failed` 各自承载），收束格只
+/// **引用**其中正文那个的身份（`answer_id`）。对话读侧（转写行 / prompt 复核）只需要
+/// 它；节点树（`rebuild`）要的是全部，所以它自己按节点逐个取。
 pub fn event_node_of(e: &Event) -> Option<String> {
     match (e.entity, e.verb, e.kind.as_str()) {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some(event_payload_node_id(e, "id")),
@@ -899,7 +918,7 @@ pub fn event_node_of(e: &Event) -> Option<String> {
             Entity::Turn,
             Verb::Closed | Verb::Progressed,
             EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK | EVENT_ASSISTANT_PROGRESS,
-        ) => Some(event_produced_text_node_id(e)),
+        ) => Some(payload_str(e, "answer_id").unwrap_or_else(|| event_produced_text_node_id(e))),
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => {
             Some(event_tool_result_node_id(e))
         }

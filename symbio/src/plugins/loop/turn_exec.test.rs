@@ -743,7 +743,16 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
-    assert_eq!(snap[1].payload["text"], "秋天好", "final 落的是聚合全文");
+    assert_eq!(snap[1].payload["text"], "", "final 只存结局");
+    let output = all
+        .iter()
+        .rev()
+        .find(|e| e.kind == "response" && e.payload["port"] == "model")
+        .expect("模型应答在");
+    assert_eq!(
+        output.payload["answer"], "秋天好",
+        "聚合全文归那一次模型往返"
+    );
     assert!(snap[1].produced_by.is_some(), "final 溯源指向用户格");
 }
 
@@ -874,7 +883,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
         "推理单独成节点（不是拼进正文）：{partial:?}"
     );
 
-    // ② 入格：收束格载荷里那半句话与半截思考照原样可查。
+    // ② 入格：半截正文 / 思考归那一次模型往返（`failed`），收束格只引用结局。
     let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
@@ -887,11 +896,16 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
         cell.payload["terminated"]["at"].as_i64().is_some(),
         "半截产出停在哪里由 `terminated.at` 说，原因不再在 terminated 里写第二份"
     );
-    assert_eq!(cell.payload["text"], "让我想想这个名词", "半截正文入格");
+    let output = all
+        .iter()
+        .find(|e| e.kind == "failed" && e.payload["port"] == "model")
+        .expect("模型失败格在");
+    assert_eq!(output.payload["text"], "让我想想这个名词", "半截正文入格");
     assert_eq!(
-        cell.payload["reasoning"], "这个名词需要先定义。",
+        output.payload["reasoning"], "这个名词需要先定义。",
         "半截思考入格（reasoning 在网格里查得到）"
     );
+    assert_eq!(cell.payload["answer_id"], output.payload["answer_id"]);
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 

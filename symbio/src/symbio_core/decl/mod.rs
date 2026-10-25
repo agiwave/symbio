@@ -424,12 +424,30 @@ const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via"];
 /// （§2.3）。
 const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY];
 
-// `response` 比请求多一个集合字段：模型应答带回来的工具调用（D-117）。
+// `response` 比请求多两类字段：
 //
-// 它是**创建行** `open-tools` 的展开源：一个 `response(port=model)` 的 `calls`
-// 数组逐元素开债，元素键与随后的 `request(port=tool)` 同 id。`response` 的其它
-// 端口（`turn` / `tool`）不带这个字段——缺席即空集合，不开债。
-const RESPONSE_FIELDS: &[&str] = &["port", "id", "attempt", "calls", "via"];
+// 1. **交回的工具调用**（D-117）：创建行 `open-tools` 的展开源——一个
+//    `response(port=model)` 的 `calls` 数组逐元素开债，元素键与随后的
+//    `request(port=tool)` 同 id。其它端口的应答不带这个字段（缺席即空集合）。
+// 2. **这一轮说了什么**（见 `OUTPUT_FIELDS`）：正文 / 思考与它们的节点身份。
+//    收束 / 进展 / 兜底格只引用 `answer_id`，正文归这条事实自己——重建按它在
+//    **应答落格的位置**折出节点，顺序才是实时的「思考→卡片→思考→卡片」。
+const RESPONSE_FIELDS: &[&str] = &[
+    "port",
+    "id",
+    "attempt",
+    "calls",
+    "via",
+    "turn_id",
+    "text",
+    "text_id",
+    "reasoning",
+    "reasoning_id",
+    "answer",
+    "answer_id",
+    "truncated",
+    "principal",
+];
 
 // `sent` 多三块：**派发时约定的租约**（`lease_ms` / `attempt_cap`）与
 // **这次尝试有没有活着的等待方**（`awaited`）。
@@ -494,7 +512,23 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: Some("port"),
         key: &["id", "attempt"],
         expand: &[],
-        fields: &["port", "id", "attempt", "why", "via"],
+        fields: &[
+            "port",
+            "id",
+            "attempt",
+            "why",
+            "via",
+            "status",
+            "turn_id",
+            "text",
+            "text_id",
+            "reasoning",
+            "reasoning_id",
+            "answer",
+            "answer_id",
+            "truncated",
+            "principal",
+        ],
     },
     // 尝试级否定：租约看护者落的「这一次作废、换一次」。
     // 与 `failed` 的边界：`failed` 是一次尝试的终局，`retry` 是「这次不算数」；
@@ -507,6 +541,11 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         fields: PROTOCOL_FIELDS,
     },
     // 收束格：字段来自 `turn_runner::produced_payload` + 的 `status` / `reason` / `terminated`。
+    //
+    // 正文不在这里（模型轮写空串）：它归那一次 `response(port=model)`，这里只有
+    // 轮级结局——`answer_id`（这一轮说了什么的节点身份）与 `responses`（本轮全部
+    // 模型输出的逻辑 id）。`text` / `text_id` 只给**没有模型往返**的轮次（快路 /
+    // 定稿答话）；`reasoning` 同理（措辞轮的那段思考没有可挂的模型事实）。
     FactDecl {
         name: "chat.assistant.final",
         port: None,
@@ -517,10 +556,10 @@ const BUILTIN_FACTS: &[FactDecl] = &[
             "model",
             "turn_id",
             "text_id",
+            "answer_id",
+            "responses",
             "reasoning_id",
             "reasoning",
-            "tool_calls",
-            "rounds",
             "status",
             "reason",
             "terminated",
@@ -533,7 +572,19 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: None,
         key: &[],
         expand: &[],
-        fields: &["text", "status", "reason", "detail"],
+        fields: &[
+            "text",
+            "model",
+            "turn_id",
+            "text_id",
+            "answer_id",
+            "responses",
+            "reasoning_id",
+            "reasoning",
+            "status",
+            "reason",
+            "detail",
+        ],
     },
     FactDecl {
         name: "chat.assistant.reported",

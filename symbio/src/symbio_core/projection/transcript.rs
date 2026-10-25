@@ -30,11 +30,10 @@
 //! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
 
 use super::super::event::{
-    event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
-    Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    event_node_of, event_payload_node_id, event_tool_result_node_id, Entity, Event, Verb,
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::Projection;
 use crate::symbio_core::chat_node::ChatNode;
@@ -45,7 +44,7 @@ use serde::{Deserialize, Serialize};
 // `transcript` 折叠与 `prompt_fidelity` 复核共用同一份「一条消息被读作什么」——
 // 投影 A 不读投影 B（L2）：mutations 不含 `Projection::new`，是可共享的读侧普通函数
 // （`projection-purity.mjs` 静态守：产投影的文件不得导入产投影的兄弟模块）。
-use super::mutations::{snapshot_entries, TranscriptEntry};
+use super::mutations::{snapshot_entries, OutputIndex, TranscriptEntry};
 
 /// 转写视图：按事件顺序（append-only ⇒ 时间序）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -254,10 +253,13 @@ pub fn transcript() -> Projection<TranscriptView> {
         // 首次」）；这里必须对齐那一步。
         //
         // 判据**只作用在换基边界上**（事实事件 ↔ 快照载荷之间），不在事实事件彼此之间：
-        // 兜底 / 汇报那几格的节点身份是按 `turn_id` 派生的合成 id（见
-        // [`crate::symbio_core::event_produced_text_node_id`]），同一轮里两条不同事件可能
-        // 撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的节点——把它们去重就是另一种
-        // 分叉。播种集合只装基线里那份，正是这个边界。
+        // 同一轮里两条不同事件可能撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的
+        // 节点——把它们去重就是另一种分叉。播种集合只装基线里那份，正是这个边界。
+        //
+        // 收束 / 进展格的内容节点身份取载荷 `answer_id`（引擎在落格前算定，与重建同源），
+        // 缺失时按 `turn_id` 派生合成 id（见
+        // [`crate::symbio_core::event_produced_text_node_id`]）。
+        let produced_node = |e: &Event| event_node_of(e).unwrap_or_default();
         let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
             if mutations.is_removed(&node) {
                 return;
@@ -280,6 +282,9 @@ pub fn transcript() -> Projection<TranscriptView> {
             push(entry, node, true);
         }
 
+        // 收束 / 进展格的正文不在这两条事实里：它们只说结局，正文归那一次模型往返
+        // （索引扫全量，快照之前的往返也要在里面——一轮可能跨压缩点）。
+        let outputs = OutputIndex::collect(events);
         for e in &events[start..] {
             if e.ts > now {
                 continue;
@@ -305,18 +310,18 @@ pub fn transcript() -> Projection<TranscriptView> {
                     );
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
-                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = outputs.produced_text(e);
                     // 空正文的收束格不进转写：空行不是对话内容（空正文跳过，
                     // 与补充 / 汇报两条臂同一判据）。
                     if !text.trim().is_empty() {
                         push(
                             TranscriptEntry {
                                 role: "assistant".into(),
-                                text: text.to_string(),
+                                text,
                                 tool: None,
                                 exclude_from_context: false,
                             },
-                            event_produced_text_node_id(e),
+                            produced_node(e),
                             false,
                         );
                     }
@@ -326,16 +331,16 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // 等待是事实的**状态**（载荷 `status: "pending"`），不是另一种事实：
                 // kind 仍是对话事实网格里的进展格，这里照常投影。
                 (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
-                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = outputs.produced_text(e);
                     if !text.trim().is_empty() {
                         push(
                             TranscriptEntry {
                                 role: "assistant".into(),
-                                text: text.to_string(),
+                                text,
                                 tool: None,
                                 exclude_from_context: false,
                             },
-                            event_produced_text_node_id(e),
+                            produced_node(e),
                             false,
                         );
                     }
@@ -356,7 +361,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             tool: None,
                             exclude_from_context: false,
                         },
-                        event_produced_text_node_id(e),
+                        produced_node(e),
                         false,
                     );
                 }

@@ -577,6 +577,99 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
     assert_eq!(got[2].text, "说到一半", "半截正文照入格（ADR-052）");
 }
 
+// ── ④′ 一次模型往返的产出（`response` / `failed`）──────────────────────
+
+/// 一条模型端口的协议事实（`response` / `failed` 走同一形状）。
+fn model_output_event(kind: &str, id: &str, ts: i64, payload: serde_json::Value) -> Event {
+    Event::pending(id, kind, Entity::Turn, Verb::Asserted, 1, "system")
+        .with_ts(ts)
+        .with_produced_by(1)
+        .with_payload(payload)
+}
+
+/// 应答格里**答复**那一次（无工具调用）的正文落在 `response` 的位置，节点身份
+/// 取载荷 `text_id`（不是收束格的 `answer_id` 再造一份）。
+#[test]
+fn response_answer_lands_as_a_child_at_its_own_position() {
+    let events = vec![
+        user_event("u-node", "问"),
+        model_output_event(
+            crate::symbio_core::EVENT_RESPONSE,
+            "response-model-m-1",
+            1_500,
+            serde_json::json!({
+                "port": "model", "id": "model-1", "attempt": 1,
+                "turn_id": "T1", "text_id": "T1-text", "text": "答",
+                "answer": "答", "answer_id": "T1-text", "calls": [],
+                "principal": "session/main",
+            }),
+        ),
+    ];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 2, "用户 + 正文（没有额外骨架）：{got:?}");
+    assert_eq!(got[1].id, "T1-text");
+    assert_eq!(got[1].parent.as_deref(), Some("T1"));
+    assert_eq!(got[1].ty, NodeForm::Body);
+    assert_eq!(got[1].text, "答");
+}
+
+/// **fail-closed 的呈现面**：发言被闸门拒绝的那一轮，答复（无工具调用的往返）
+/// 不产节点；工具轮的中途产出照常（它属已经准许的循环）。
+///
+/// 正文仍在网格里（`response` 事实是模型产出的记录），但从未获准进入对话——
+/// 少了这条判据，拒答的那句话会经应答格的重建重新出现在消息列表里。
+#[test]
+fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
+    let denied = Event::pending(
+        "deny-1-speech",
+        crate::symbio_core::EVENT_AUTHZ_DENIED,
+        Entity::Turn,
+        Verb::Asserted,
+        1,
+        "session/peer-b",
+    )
+    .with_ts(3_000)
+    .with_payload(serde_json::json!({
+        "key": EVENT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
+    }));
+    let events = vec![
+        user_event("u-node", "委托出去"),
+        // 工具轮：有 `calls` ⇒ 中途正文照常产节点。
+        model_output_event(
+            crate::symbio_core::EVENT_RESPONSE,
+            "response-model-1",
+            1_500,
+            serde_json::json!({
+                "port": "model", "id": "model-1", "attempt": 1,
+                "turn_id": "T1", "text_id": "T1-t0", "text": "让我调用工具",
+                "answer": "让我调用工具", "answer_id": "T1-t0",
+                "calls": [{ "port": "tool", "id": "c-1", "name": "agent_run", "arguments": {} }],
+                "principal": "session/peer-b",
+            }),
+        ),
+        // 答复轮：无 `calls` ⇒ 被拒后不产节点。
+        model_output_event(
+            crate::symbio_core::EVENT_RESPONSE,
+            "response-model-2",
+            2_000,
+            serde_json::json!({
+                "port": "model", "id": "model-2", "attempt": 1,
+                "turn_id": "T1", "text_id": "T1-t1", "text": "汇总正文",
+                "answer": "汇总正文", "answer_id": "T1-t1", "calls": [],
+                "principal": "session/peer-b",
+            }),
+        ),
+        denied,
+    ];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 2, "用户 + 工具轮中途正文：{got:?}");
+    assert_eq!(got[1].id, "T1-t0");
+    assert!(
+        !got.iter().any(|s| s.text.contains("汇总正文")),
+        "被拒的答复不得出现在重建面：{got:?}"
+    );
+}
+
 /// 正文用 `MessageContent::Text` 承载（不是 `Parts`）——重建给的是纯文本形态，
 /// 与落库侧一致。
 #[test]

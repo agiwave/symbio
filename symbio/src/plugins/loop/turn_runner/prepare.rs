@@ -71,8 +71,22 @@ pub(crate) struct Prepared {
     pub(crate) cost_ms: u64,
     pub(crate) artifact_no: u64,
     pub(crate) artifacts_landed: u64,
-    pub(crate) all_tool_calls: Vec<ToolCallFact>,
-    pub(crate) rounds: Vec<StreamNodeFacts>,
+    /// 本轮已经落格的**模型输出事实**的逻辑 id（`response` / `failed`，不含内部 `via`）。
+    ///
+    /// 收束 / 进展 / 兜底格只存**轮级结局**：正文 / 思考归那一次往返自己的事实，
+    /// 这里记的是「本轮有哪些往返」——重建与转写按它把正文折回来。
+    pub(crate) responses: Vec<String>,
+    /// 最近一次模型往返的**产出事实**（正文 / 思考与节点 id），由应答 / 失败载荷
+    /// 那一侧**取一次**之后寄存。
+    ///
+    /// 取数口是桥的只读快照，但它的读数是「这一次往返的固定形状」——每轮多读一次
+    /// 只会读到同一份，却让取数口的消费方（测试的计数式假桥）多算一次。
+    pub(crate) last_output_facts: StreamNodeFacts,
+    /// 最近一次模型往返「说了什么」的节点身份（`answer_id`）。
+    ///
+    /// 收束 / 进展格要写它，而它必须与那一次 `response` 事实里算出的**同一个**
+    /// ——由 `output_fields` 一次算定后带过来，读侧不再自己推。
+    pub(crate) last_answer_id: String,
     pub(crate) full_snapshot: Vec<Event>,
     pub(crate) inject: Option<RoundInjector>,
     pub(crate) nodes: Option<NodeFactsFn>,
@@ -81,8 +95,6 @@ pub(crate) struct Prepared {
     /// 放在 `Prepared` 而不是新开一份状态：它和消息 / 节点 / 成本同属**本轮草稿**，
     /// 引擎不读它；拆步只是把「一次 `step` 做两件事」拆成两个可分别调用的动作。
     pub(crate) pending_model: Option<LlmTurn>,
-    /// 与 [`Self::pending_model`] 同一次模型往返的流式节点事实（工具落格要用）。
-    pub(crate) pending_round: Option<StreamNodeFacts>,
     /// 创建动作开出的端口账（b）：创建 → 授权 → 派发三个动作之间**唯一**
     /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
     /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
@@ -219,7 +231,23 @@ where
     // 使用的本轮往返（`rt`），硬接只能靠外形猜前件，零往返的同类轮会因此多打一次模型。
     if let Some(reply) = final_reply.as_deref() {
         let facts = node_facts(&nodes);
-        let produced = produced_payload(reply, "", &turn_root_id, &facts, &[], &[]);
+        // 零往返轮：正文与思考都只能随收束格入格（没有可挂的 `response` 事实）。
+        let produced = with_reasoning(
+            produced_payload(
+                reply,
+                "",
+                &turn_root_id,
+                facts.text_id.as_deref(),
+                &answer_id_of(
+                    reply,
+                    facts.reasoning.as_deref().unwrap_or_default(),
+                    &facts,
+                    &turn_root_id,
+                ),
+                &[],
+            ),
+            &facts,
+        );
         if reply.trim().is_empty() {
             return settle::append_fallback(
                 store,
@@ -341,8 +369,9 @@ where
         .iter()
         .filter(|e| e.turn == turn && e.kind == crate::symbio_core::EVENT_ARTIFACT_ADDED)
         .count() as u64;
-    let all_tool_calls: Vec<ToolCallFact> = Vec::new();
-    let rounds: Vec<StreamNodeFacts> = Vec::new();
+    let responses: Vec<String> = Vec::new();
+    let last_output_facts = StreamNodeFacts::default();
+    let last_answer_id = String::new();
 
     // 唤醒幕（审批 / 问答恢复）**不在这里续写交换**：用户动作落成唤醒请求
     // （`chat_loop::wake`），授权与派发由行表承担，工具交换由派发动作自己产生
@@ -372,13 +401,13 @@ where
         cost_ms,
         artifact_no,
         artifacts_landed,
-        all_tool_calls,
-        rounds,
+        responses,
+        last_output_facts,
+        last_answer_id,
         full_snapshot,
         inject,
         nodes,
         pending_model: None,
-        pending_round: None,
         pending_calls: None,
         // 快路：正文寄到收束动作（D-163）。零模型往返，驱动环的第一个债就是
         // `close-turn`（55 < 60）——本段照常备好派发格与 prompt，只是不发请求。

@@ -59,6 +59,7 @@ use super::super::event::{
     EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
+use super::mutations::OutputIndex;
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
 /// 不该让「内容相同」的报告变成另一种类型。
@@ -94,7 +95,7 @@ pub enum PromptGap {
 ///
 /// **唯一真源**：事件 kind 的集合只在这里列一次。投影若漏了某个 kind，本函数是第一个
 /// 知道的——而不是等 prompt 里少了东西才从症状往回猜。
-fn expected_role(e: &Event) -> Option<&'static str> {
+fn expected_role(e: &Event, outputs: &OutputIndex) -> Option<&'static str> {
     match (e.entity, e.verb, e.kind.as_str()) {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some("user"),
         // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user。
@@ -105,11 +106,11 @@ fn expected_role(e: &Event) -> Option<&'static str> {
         (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => Some("user"),
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
             // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
-            (!payload_text(e).trim().is_empty()).then_some("assistant")
+            (!payload_text(e, outputs).trim().is_empty()).then_some("assistant")
         }
         // 进展格（等待用户）：同样投影成 assistant 行；空正文照跳。
         (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
-            (!payload_text(e).trim().is_empty()).then_some("assistant")
+            (!payload_text(e, outputs).trim().is_empty()).then_some("assistant")
         }
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => Some("assistant"),
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => Some("tool"),
@@ -164,17 +165,26 @@ fn is_snapshot(e: &Event) -> bool {
 
 /// 事件载荷里该进 prompt 的正文（与 `transcript` 投影**同一取法**——两处各写一遍必然漂移，
 /// 所以这里只做「有没有」，正文比对交给 `SourceRef` 的坐标）。
-fn payload_text(e: &Event) -> &str {
+///
+/// 收束 / 进展格的正文**不在载荷里**（它们只存结局）：正文归那一次模型往返，按
+/// [`OutputIndex`] 折回——与转写用同一份索引、同一条判据。
+fn payload_text(e: &Event, outputs: &OutputIndex) -> String {
     match e.kind.as_str() {
         EVENT_ASSISTANT_FALLBACK => e
             .payload
             .get("detail")
             .and_then(|v| v.as_str())
-            .unwrap_or(""),
-        k if k == EVENT_ARTIFACT_ADDED => {
-            e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("")
+            .unwrap_or_default()
+            .to_string(),
+        k if k == EVENT_ASSISTANT_FINAL || k == EVENT_ASSISTANT_PROGRESS => {
+            outputs.produced_text(e)
         }
-        _ => e.payload.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+        _ => e
+            .payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
     }
 }
 
@@ -333,6 +343,9 @@ pub fn verify(
     // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
     // 连自己的列表都已被取代。见模块文档「第四类」。
     let snapshot = super::mutations::mutations_latest_snapshot(events);
+    // 模型输出索引（与 `transcript` **共用同一份**）：收束 / 进展格的正文归那一次
+    // 模型往返，见 `payload_text`。扫全量事件——一轮可能跨压缩点。
+    let outputs = super::mutations::OutputIndex::collect(events);
     // 快照基线**已经占住**的节点身份。复核与投影 `transcript` 共用同一条「换基边界不
     // 重复」纪律（见那里的文档）：本轮的用户发言既原文躺在快照载荷尾部、又在快照之后
     // 作为开场格落了一事实，于是它会被**两条来源各认领一次**——第一次用掉请求包里那
@@ -413,7 +426,7 @@ pub fn verify(
         // None（它在投影里，但它不是对话内容）。
         if excluded_from_prompt(e) {
             rep.checked_events += 1;
-            let text = payload_text(e);
+            let text = payload_text(e, &outputs);
             if messages.iter().any(|m| m.text == text) {
                 rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
                     kind: e.kind.as_str().to_string(),
@@ -422,7 +435,7 @@ pub fn verify(
             }
             continue;
         }
-        let Some(expected) = expected_role(e) else {
+        let Some(expected) = expected_role(e, &outputs) else {
             continue;
         };
         rep.checked_events += 1;
@@ -446,7 +459,7 @@ pub fn verify(
             .unwrap_or_else(|| expected.to_string());
         let text: String = match edited.and_then(|ed| ed.text.clone()) {
             Some(t) => t,
-            None => payload_text(e).to_string(),
+            None => payload_text(e, &outputs),
         };
         claim(
             &mut rep,

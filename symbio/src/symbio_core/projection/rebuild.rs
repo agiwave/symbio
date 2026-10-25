@@ -78,7 +78,9 @@ use std::collections::HashSet;
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
-use crate::symbio_core::event::{event_produced_text_node_id, event_tool_result_node_id};
+use crate::symbio_core::event::{
+    event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_RESPONSE,
+};
 use crate::symbio_core::{
     event_payload_node_id, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
@@ -178,6 +180,20 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
     let mut seq = RebuildSeq(0);
+    // 发言被写侧闸拒的轮（`authz.denied{key: chat.assistant.final}`）。
+    //
+    // 这些轮的那次**答复**（无工具调用的往返）是模型产出的**事实**，但它从未获准
+    // 进入对话——fail-closed 的呈现面要求它不出现在消息列表里。判据是跨事件的
+    // （拒绝格排在应答格之后），所以先收索引、再折（与变更格同一纪律）。
+    // 工具轮的中途正文不受影响：它们属已经准许的循环，不是被拒的那句话。
+    let denied_speech: HashSet<u64> = events
+        .iter()
+        .filter(|e| {
+            e.kind == crate::symbio_core::EVENT_AUTHZ_DENIED
+                && e.payload.get("key").and_then(|v| v.as_str()) == Some(EVENT_ASSISTANT_FINAL)
+        })
+        .map(|e| e.turn)
+        .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
     let (start, snapshot_messages) = match crate::symbio_core::mutations_latest_snapshot(events) {
@@ -215,7 +231,7 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
             }
             _ => {}
         }
-        for mut m in nodes_of(e) {
+        for mut m in nodes_of(e, &denied_speech) {
             // 同 id 只认首次：同一批调用在两个载荷里各记一次（收束的 `tool_calls[]`
             // 是**引用**，结果正文归 `artifact.added`）。丢后者不丢信息——先到的那条
             // 已经带着结果节点 id。
@@ -279,17 +295,27 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 }
 
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
-fn nodes_of(e: &Event) -> Vec<ChatNode> {
+///
+/// `denied_speech` 是本切片里发言被拒的轮号（见 [`rebuild`] 的索引）。
+fn nodes_of(e: &Event, denied_speech: &HashSet<u64>) -> Vec<ChatNode> {
     match (e.entity, e.verb, e.kind.as_str()) {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => vec![user_node(e)],
         (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => vec![supplement_node(e)],
         // 收束 / 进展 / 兜底：三种格子共用一份产出形状（`produced_payload`），
-        // 差别只在 `status`——它们是**同一批产出事实**的三种状态。
+        // 差别只在 `status`。它们只记**轮级结局**，正文 / 思考归对应的一次模型往返
+        // （下一臂）——所以这里只出骨架（与无模型轮自己的正文）。
         (
             Entity::Turn,
             Verb::Closed | Verb::Progressed,
             EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK | EVENT_ASSISTANT_PROGRESS,
         ) => produced_nodes(e),
+        // 一次模型往返的产出（`response` / `failed`，端口 `model`、无 `via`）：
+        // 正文 / 思考节点落在**应答落格的位置**，顺序因此是实时的
+        // 「思考→卡片→思考→卡片」。内部往返（措辞 / 裁判 / 摘要）不是这一轮对
+        // 读者说的话，一个节点都不发。
+        (Entity::Turn, Verb::Asserted, EVENT_RESPONSE | EVENT_FAILED) => {
+            output_nodes(e, denied_speech.contains(&e.turn))
+        }
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
         // 对话面开场白（`Escalate` 首响）：与汇报同形（根级 / 带
@@ -448,7 +474,13 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             .get("exclude_from_context")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let text = text_of(e, "text");
+        // 正文归对话面节点自己（`with_dialog` 把顶层 `text` 移进 `dialog.text`）；
+        // 顶层那份只作旧事件容错。
+        let text = dialog
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| text_of(e, "text"));
         let mut node = dialog_node(text.as_str(), reason, exclude, &actor_principal(e));
         // id 由载荷给（缺则按事件 id 稳定合成——旧事件容错，与 `user_node` 同口径）。
         node.id = if id.is_empty() {
@@ -608,6 +640,66 @@ fn push_round_nodes(
         m.status = Some(status.clone());
         nodes.push(m);
     }
+}
+
+/// 一次模型往返（`response` / `failed`）→ 最多两个子节点（Reasoning / Text）。
+///
+/// 载荷自带这一轮的产出身份（`output_fields` 在落格前算定）：
+/// - 有工具调用 ⇒ 正文取 `text`（思考另有节点）；
+/// - 没有工具调用 ⇒ 正文取 `answer`（收束轮折出的那段）。
+///
+/// 只有**本轮自己的**往返（端口 `model`、无 `via`）产节点：内部往返（措辞 / 裁判 /
+/// 摘要）的 `response` 同样带正文，但那些话不是这一轮对读者说的。
+/// 状态取载荷 `status`（`failed` 的停法）——`response` 没有该键 ⇒ `Completed`。
+///
+/// `speech_denied`：这一轮的发言被写侧闸拒 ⇒ **答复那一次**（无工具调用）不产节点。
+/// 正文与思考仍是网格里的事实，但从未获准进入对话（fail-closed）；工具轮的中途产出
+/// 不受影响——它们属于已经准许的循环。
+fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
+    if e.payload.get("port").and_then(|v| v.as_str()) != Some("model") {
+        return Vec::new();
+    }
+    if e.payload.get("via").is_some() {
+        return Vec::new();
+    }
+    let Some(turn_id) = str_of(e, "turn_id") else {
+        return Vec::new();
+    };
+    let principal = str_of(e, "principal")
+        .map(|p| Principal::from_legacy(&p))
+        .unwrap_or_else(|| actor_principal(e));
+    // 一次 `failed` 没有 `calls`：与「这次往返没有请求工具」同一条判据。
+    let calls_empty = e
+        .payload
+        .get("calls")
+        .and_then(|v| v.as_array())
+        .map(|a| a.is_empty())
+        .unwrap_or(true);
+    // 被拒的答复：不产节点（见本函数的 `speech_denied` 段）。
+    if speech_denied && calls_empty {
+        return Vec::new();
+    }
+    let mut round = serde_json::Map::new();
+    for key in ["text_id", "reasoning_id", "reasoning"] {
+        if let Some(value) = e.payload.get(key) {
+            round.insert(key.to_string(), value.clone());
+        }
+    }
+    let content = if calls_empty { "answer" } else { "text" };
+    if let Some(value) = e.payload.get(content) {
+        round.insert("text".to_string(), value.clone());
+    }
+    let mut nodes = Vec::new();
+    push_round_nodes(
+        &mut nodes,
+        &turn_id,
+        0,
+        &serde_json::Value::Object(round),
+        &status_of(e),
+        e.ts,
+        &principal,
+    );
+    nodes
 }
 
 /// 工具格（`artifact × asserted`）→ `[本轮中途产出子（可选）, ToolCall 子, 结果子]`。

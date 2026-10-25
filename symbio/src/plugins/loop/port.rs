@@ -286,6 +286,35 @@ where
     W: FnOnce(&E) -> String,
     X: FnOnce(&T) -> serde_json::Value,
 {
+    dispatch_full(store, ports, plan, run, why, extra, |_| {
+        serde_json::Value::Null
+    })
+    .await
+}
+
+/// 与 [`dispatch_with`] 同一条派发，但**失败载荷**也由调用点补字段。
+///
+/// 应答载荷与失败载荷是两条事实的两个写方，但**同一批内容**：模型端口的半截
+/// 正文 / 思考必须随失败一起入格（否则中止之后那段话只活在内存里），而它们只能
+/// 在**执行体返回之后**从流式桥取。`fail_extra` 就是那半个闭包；不关心失败载荷的
+/// 端口走 [`dispatch_with`] 传 `|_| Null`。
+pub(crate) async fn dispatch_full<S, T, E, F, Fut, W, X, Y>(
+    store: &S,
+    ports: &[PortDecl],
+    plan: Dispatch<'_>,
+    run: F,
+    why: W,
+    extra: X,
+    fail_extra: Y,
+) -> Result<T, DispatchError<E>>
+where
+    S: Store<Event = Event> + ?Sized,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    W: FnOnce(&E) -> String,
+    X: FnOnce(&T) -> serde_json::Value,
+    Y: FnOnce(&E) -> serde_json::Value,
+{
     let Dispatch {
         call,
         turn,
@@ -307,7 +336,7 @@ where
         }
         Err(e) => {
             // 失败也要留痕：写不进去不掩盖执行体自己的错误（它更有信息量）。
-            let _ = failed_with(store, call, turn, produced_by, &why(&e));
+            let _ = failed_with_extra(store, call, turn, produced_by, &why(&e), fail_extra(&e));
             Err(DispatchError::Actor(e))
         }
     }
@@ -455,12 +484,33 @@ pub(crate) fn failed_with<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    failed_with_extra(store, call, turn, produced_by, why, serde_json::Value::Null)
+}
+
+/// 与 [`failed_with`] 同一条 `failed`，但允许并进**失败载荷**（模型端口已产出的
+/// 半截正文 / 思考，见 [`dispatch_full`]）。
+pub(crate) fn failed_with_extra<S>(
+    store: &S,
+    call: &Call,
+    turn: u64,
+    produced_by: u64,
+    why: &str,
+    extra: serde_json::Value,
+) -> Result<(), AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
     let mut payload = serde_json::json!({
         "port": call.port,
         "id": call.id,
         "attempt": call.attempt,
         "why": why,
     });
+    if let (Some(dst), Some(src)) = (payload.as_object_mut(), extra.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
     with_via(&mut payload, call.via.as_deref());
     append(
         store,

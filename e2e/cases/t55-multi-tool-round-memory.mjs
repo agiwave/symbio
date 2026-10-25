@@ -68,6 +68,11 @@ const ECHO_A = '第一轮回显内容';
 const ECHO_B = '第二轮回显内容';
 /** 第 1 轮的中途正文：跨轮累加后仍要在第三次请求里看得见（清空 = 模型丢掉自己的计划） */
 const ROUND1_TEXT = '先读第一个。';
+/** 第 2 轮的中途正文（重开 WAL 重建时它也要落在自己的位置上） */
+const ROUND2_TEXT = '再读第二个。';
+/** 两轮的思考：重建面的 Reason 节点，必须挂在该轮正文之下、卡片之前 */
+const ROUND1_REASONING = '第一轮想一想：先读第一个。';
+const ROUND2_REASONING = '第二轮想一想：再读第二个。';
 /** 末轮只有思考、没有正文——收束答案应当是这段思考 */
 const REASONING_ANSWER = '两轮都读到了，可以收束。';
 
@@ -81,6 +86,7 @@ export default defineCase(
         match: '连读两次',
         once: true,
         content: ROUND1_TEXT,
+        reasoning: [ROUND1_REASONING],
         toolCalls: [{ id: 'tc-1', name: 'mcp__mockserv__echo', arguments: { text: ECHO_A } }],
       },
       // 第 2 次请求（末条是 tool 结果 ⇒ `afterTool` 池）：再调一次**同名**工具。
@@ -89,6 +95,8 @@ export default defineCase(
         id: 'round2',
         afterTool: true,
         once: true,
+        content: ROUND2_TEXT,
+        reasoning: [ROUND2_REASONING],
         toolCalls: [{ id: 'tc-2', name: 'mcp__mockserv__echo', arguments: { text: ECHO_B } }],
       },
       // 第 3 次请求：不再请求工具，且**只给思考不给正文**（真实 reasoning 模型的形态）。
@@ -210,6 +218,57 @@ export default defineCase(
         );
         const toolCalls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
         assertEq(toolCalls.length, 2, '两次调用应有两张工具卡（同 id 被归并 ⇒ 只剩一张）');
+
+        // ── 证据 ④：重开 WAL 后的**树序** = 每轮「思考 → 正文 → 卡片」交替，答案在最后 ──
+        //
+        // 正文与思考现在住在**应答格**（一次模型往返一条事实），节点身份由它自己的
+        // `text_id` / `reasoning_id` 给出、位置由它自己的 `ts` 给出。判据必须落在
+        // **读完 WAL 重建的那棵树**上：若正文仍从收束格折回来，两轮的正文会挤到
+        // 末尾（卡片后）而不是各自卡片之前——账面上「都有」，顺序错了。
+        const idx = (pred, what) => {
+          const i = msgs.findIndex(pred);
+          assert(
+            i >= 0,
+            `找不到${what}：${msgs
+              .map((m) => `${m.type}:${JSON.stringify(m.content ?? '').slice(0, 30)}`)
+              .join(' | ')}`,
+          );
+          return i;
+        };
+        const text1 = idx(
+          (m) => msgTypeOf(m) === 'text' && (m.content ?? '') === ROUND1_TEXT,
+          '第 1 轮正文',
+        );
+        const reason1 = idx(
+          (m) => msgTypeOf(m) === 'reasoning' && (m.content ?? '') === ROUND1_REASONING,
+          '第 1 轮思考',
+        );
+        const card1 = idx(
+          (m) => msgTypeOf(m) === 'tool_call' && JSON.stringify(m.content ?? '').includes(ECHO_A),
+          '第 1 轮工具卡',
+        );
+        const text2 = idx(
+          (m) => msgTypeOf(m) === 'text' && (m.content ?? '') === ROUND2_TEXT,
+          '第 2 轮正文',
+        );
+        const reason2 = idx(
+          (m) => msgTypeOf(m) === 'reasoning' && (m.content ?? '') === ROUND2_REASONING,
+          '第 2 轮思考',
+        );
+        const card2 = idx(
+          (m) => msgTypeOf(m) === 'tool_call' && JSON.stringify(m.content ?? '').includes(ECHO_B),
+          '第 2 轮工具卡',
+        );
+        const answerAt = idx(
+          (m) => msgTypeOf(m) === 'text' && (m.content ?? '') === REASONING_ANSWER,
+          '末轮答案',
+        );
+        assert(reason1 < text1, `第 1 轮：思考应在正文之前（实际 ${reason1} / ${text1}）`);
+        assert(text1 < card1, `第 1 轮：正文应在卡片之前（实际 ${text1} / ${card1}）`);
+        assert(card1 < reason2, `第 2 轮思考应在第 1 张卡片之后（实际 ${card1} / ${reason2}）`);
+        assert(reason2 < text2, `第 2 轮：思考应在正文之前（实际 ${reason2} / ${text2}）`);
+        assert(text2 < card2, `第 2 轮：正文应在卡片之前（实际 ${text2} / ${card2}）`);
+        assert(card2 < answerAt, `末轮答案应在两张卡片之后（实际 ${card2} / ${answerAt}）`);
       } finally {
         api.stop();
       }

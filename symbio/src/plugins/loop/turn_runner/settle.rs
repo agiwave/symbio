@@ -209,8 +209,8 @@ where
         "",
         llm.model_id(),
         turn_root_id,
-        &StreamNodeFacts::default(),
-        &[],
+        None,
+        &answer_id_of("", "", &StreamNodeFacts::default(), turn_root_id),
         &[],
     );
     store.append(

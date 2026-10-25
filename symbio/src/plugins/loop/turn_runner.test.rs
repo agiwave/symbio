@@ -988,15 +988,26 @@ mod turn_runner_tests {
             .iter()
             .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
             .expect("收束格在");
+        let output = snapshot
+            .iter()
+            .find(|e| e.kind == crate::symbio_core::EVENT_FAILED)
+            .expect("失败格在");
+        // 半截正文属于**那一次模型往返**（`failed`），收束格只引用它的节点身份。
         assert_eq!(
-            cell.payload["text"], "让我想想这个名词的含义……",
+            output.payload["text"], "让我想想这个名词的含义……",
             "半截正文照原样入格（不因没说完就不记）"
         );
         assert_eq!(
-            cell.payload["text_id"], "n-text",
+            output.payload["text_id"], "n-text",
             "节点身份入格（重建复刻同一节点）"
         );
-        assert_eq!(cell.payload["turn_id"], "r-1", "本轮 Turn 根 id 入格");
+        assert_eq!(output.payload["turn_id"], "r-1", "本轮 Turn 根 id 入格");
+        assert_eq!(output.payload["status"], "aborted", "停法随失败入格");
+        assert_eq!(
+            cell.payload["answer_id"], "n-text",
+            "收束格引用同一次往返的正文身份"
+        );
+        assert_eq!(cell.payload["text"], "", "收束格不复制正文");
         assert_eq!(cell.payload["status"], "aborted");
 
         // 重建侧：网格投影出的历史里那半句仍在（判据原文说的「重建的历史」）。
@@ -1046,15 +1057,15 @@ mod turn_runner_tests {
             .unwrap();
 
         let snapshot = store.range(Seq::new(0));
-        let cell = snapshot
+        let output = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
-            .expect("收束格在");
+            .find(|e| e.kind == crate::symbio_core::EVENT_FAILED)
+            .expect("失败格在");
         assert_eq!(
-            cell.payload["reasoning"], "这个名词需要先定义。",
+            output.payload["reasoning"], "这个名词需要先定义。",
             "半截思考照原样入格"
         );
-        assert_eq!(cell.payload["reasoning_id"], "n-rea", "推理节点身份入格");
+        assert_eq!(output.payload["reasoning_id"], "n-rea", "推理节点身份入格");
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -2608,7 +2619,17 @@ mod tool_round_tests {
             .iter()
             .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
             .expect("收束格在");
-        assert_eq!(cell.payload["text"], "读到了。");
+        let output = snapshot
+            .iter()
+            .rev()
+            .find(|e| e.kind == crate::symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .expect("末轮应答在");
+        assert_eq!(
+            output.payload["answer"], "读到了。",
+            "正文归那一次模型往返，收束格只存结局"
+        );
+        assert_eq!(cell.payload["answer_id"], output.payload["answer_id"]);
+        assert_eq!(cell.payload["text"], "", "收束格不复制正文");
     }
 
     /// 一批**全被拒**的调用：`dispatch-tools` 不欠（没有 `granted`），收尾归
@@ -2759,9 +2780,19 @@ mod tool_round_tests {
         assert_eq!(progress.verb, Verb::Progressed);
         assert_eq!(progress.payload["status"], "pending", "等待是状态字段");
         assert_eq!(
-            progress.payload["text"], "我先查一下。",
+            progress.payload["text"], "",
+            "进展格不复制正文（正文归那一次模型往返）"
+        );
+        let output = snapshot
+            .iter()
+            .rev()
+            .find(|e| e.kind == crate::symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .expect("本轮应答在");
+        assert_eq!(
+            output.payload["answer"], "我先查一下。",
             "等待前说过的话照样是事实"
         );
+        assert_eq!(progress.payload["answer_id"], output.payload["answer_id"]);
         assert_eq!(
             progress.produced_by,
             Some(0),
@@ -3074,7 +3105,16 @@ mod tool_round_tests {
             .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
             .expect("收束格在");
         assert_eq!(cell.turn, 0, "收束格记在原轮号上");
-        assert_eq!(cell.payload["text"], "批准后已完成。");
+        let output = snapshot
+            .iter()
+            .rev()
+            .find(|e| e.kind == crate::symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .expect("唤醒幕的应答在");
+        assert_eq!(
+            output.payload["answer"], "批准后已完成。",
+            "正文归唤醒幕这一次模型往返"
+        );
+        assert_eq!(cell.payload["text"], "", "收束格只存结局");
         assert_eq!(
             cell.produced_by,
             Some(user_seq),
@@ -3386,41 +3426,43 @@ mod tool_round_tests {
             ],
             "两轮产物 + 一轮收束（外加派发格、三次模型往返与两个工具批的协议事实）：{snapshot:?}"
         );
-        // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
+        // 每轮的中途产出挂在**该轮自己的模型应答事实**上（顺序锚）。
         //
-        // 这些思考本来就记在收束格的 `rounds[]` 里，内容一个字节都不少；挂在产物格上
-        // 争的是**位置**：重建按格的发射顺序发号，只挂收束格就让十几个思考块排到全部
-        // 工具卡片之后（实测症状见 `rebuild.test.rs` 的 `round_output_rides_…`）。
-        let arts: Vec<_> = snapshot
+        // 重建按格的发射顺序发号，中途产出必须落在**应答落格的位置**：只挂收束格会
+        // 让十几个思考块排到全部工具卡片之后（实测症状见 `rebuild.test.rs` 的
+        // `round_output_rides_…`）；复制一份到收束格则是两个 owner。
+        let outputs: Vec<_> = snapshot
             .iter()
-            .filter(|e| e.kind == EVENT_ARTIFACT_ADDED)
+            .filter(|e| {
+                e.kind == crate::symbio_core::EVENT_RESPONSE && e.payload["port"] == "model"
+            })
             .collect();
+        assert_eq!(outputs.len(), 3, "三次模型往返各一条应答事实");
         assert_eq!(
-            arts[0].payload["round"]["reasoning_id"],
+            outputs[0].payload["reasoning_id"],
             serde_json::json!("R-r0"),
             "第一轮的思考挂在第一轮：{:#?}",
-            arts[0].payload
+            outputs[0].payload
         );
         assert_eq!(
-            arts[1].payload["round"]["reasoning_id"],
+            outputs[1].payload["reasoning_id"],
             serde_json::json!("R-r1"),
             "第二轮的思考挂在第二轮（同一份载荷挪到别的轮即错位）"
         );
         assert_eq!(
-            arts[0].payload["round"]["text_id"],
+            outputs[0].payload["text_id"],
             serde_json::json!("T-r0"),
             "中途正文与思考同格同轮，id 一起带上——重建照 id 复刻，不发新身份"
         );
-        assert_eq!(
+        assert!(
             snapshot
                 .iter()
                 .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
                 .expect("收束格在")
-                .payload["rounds"]
-                .as_array()
-                .map(|a| a.len()),
-            Some(2),
-            "收束格仍记全轮的中途产出（老会话只有这一份，删了就丢；同 id 只认首次，不双份）"
+                .payload
+                .get("rounds")
+                .is_none(),
+            "收束格不复制中途产出（正文归各次往返，一个事实一个 owner）"
         );
         assert!(
             check_all(&snapshot).is_empty(),
@@ -3521,8 +3563,17 @@ mod tool_round_tests {
             last.kind, EVENT_ASSISTANT_FINAL,
             "收束格而不是兜底格——落兜底格等于把「答了（以思考的形式）」记成「没答」"
         );
-        assert_eq!(last.payload["text"], "想清楚了：答案是 42。");
+        assert_eq!(last.payload["text"], "", "收束格只存结局");
         assert_eq!(last.payload["status"], "completed");
+        let output = snapshot
+            .iter()
+            .rev()
+            .find(|e| e.kind == crate::symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
+            .expect("末轮应答在");
+        assert_eq!(
+            output.payload["answer"], "想清楚了：答案是 42。",
+            "那段思考就是回答（`answer` 由 `final_answer` 折出）"
+        );
     }
 
     #[tokio::test]

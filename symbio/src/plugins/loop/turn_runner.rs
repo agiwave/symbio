@@ -284,8 +284,8 @@ pub struct DialogFacts {
 
 /// 流式期已分配的节点事实（见 [`TurnInput::nodes`]）。
 ///
-/// 四个字段一起取：收束 / 进展载荷要的是「这一轮的正文 / 推理节点是哪两个、两段正文
-/// 是什么」——拆成四个回调只会让取值点变四处。
+/// 四个字段一起取：一次模型往返的产出字段（`output_fields`）要的是「这一轮的正文 /
+/// 推理节点是哪两个、两段正文是什么」——拆成四个回调只会让取值点变四处。
 #[derive(Clone, Default)]
 pub struct StreamNodeFacts {
     /// 正文子节点 id（`TurnOutput::response_text_child_id` 同源）。
@@ -301,26 +301,6 @@ pub struct StreamNodeFacts {
 /// 「取此刻的流式节点事实」的取数口（见 [`TurnInput::nodes`]）。
 /// 与 [`RoundInjector`] 同一条「闭包而不是 trait」的判据：一个取值动作不立 trait。
 pub type NodeFactsFn = std::sync::Arc<dyn Fn() -> StreamNodeFacts + Send + Sync>;
-
-/// 一次工具调用的事实形状（收束 / 进展载荷的 `tool_calls` 条目）。
-///
-/// `result_id` 是**引用**而不是结果正文：工具结果正文归 `artifact.added`（一个事实
-/// 一个 owner），这里只记「结果落在哪个节点」。配不上结果的调用记 `None`——不静默
-/// 补空串（空串读出来是「结果节点 id 是空的」，而事实是「还没有结果」）。
-#[derive(Debug, Clone)]
-pub struct ToolCallFact {
-    /// ToolCall 节点 id（`llm_build_tool_call_nodes` 的同源 id）。
-    pub id: String,
-    /// 工具名（LLM 可见名）。
-    pub name: String,
-    /// 定稿参数文本（JSON 文本 / 解析失败的残破原文，与
-    /// [`crate::symbio_core::node_build::tool_call_args_text`] 同一取法）。
-    pub args: String,
-    /// provider wire id（`tool_call_id` 字段——节点身份的一部分）。
-    pub wire_id: String,
-    /// 结果子节点 id（`None` = 尚无结果：无分发通道 / 等待用户 / 恢复路）。
-    pub result_id: Option<String>,
-}
 
 /// 「下一轮要加哪些消息」的取数口（见 [`TurnInput::inject`]）。
 ///
@@ -679,14 +659,14 @@ where
     S: Store<Event = Event> + ?Sized,
 {
     let cost = run.started.elapsed().as_millis() as u64;
-    let facts = facts::node_facts(&run.nodes);
+    // 半截产出已随最后一轮的模型输出事实入格；兜底格的正文是 `detail`，这里只记结局。
     let produced = facts::produced_payload(
-        &facts.text.clone().unwrap_or_default(),
+        "",
         llm.model_id(),
         &run.turn_root_id,
-        &facts,
-        &run.all_tool_calls,
-        &run.rounds,
+        None,
+        &run.last_answer_id,
+        &run.responses,
     );
     settle::append_exhausted(
         store,
