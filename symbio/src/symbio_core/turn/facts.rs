@@ -11,12 +11,12 @@
 //! |---|---|---|
 //! | [`Delegation`] | `tools/tool_executor`（`note_delegation` 的出参元素） | `derived_facts::record_derived` 落 `commitment.*` |
 //! | [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] | 同上（`note_tasks` 的出参元素） | `task_events` 投影 `task.*` |
-//! | [`ReportDraft`] | `round_hook`（轮边界汇报回调的返回） | `rebuild::reported_node` 回放汇报格 |
+//! | [`ReportDraft`] | `report_exec`（批次边界汇报执行体的产物） | `rebuild::reported_node` 回放汇报格 |
 //!
 //! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
 //! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::symbio_core::node_build`]
 //! 的同一构造器）；记账判据（`note_*` 的门与 `records_delegation_promise` 声明位）与
-//! 回调机制（`RoundHookFn`）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
+//! 派发机制（行表 / 绑定表 / 执行体）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
 
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::event::Event;
@@ -98,10 +98,10 @@ pub enum TaskStatus {
 
 /// 一句汇报的草稿：文本 + 它据以生成的运行现状。
 ///
-/// 写侧由轮边界汇报口（`round_hook`）产出，读侧由重建引擎（`rebuild`）从
-/// `turn × asserted` 事件载荷**重建同一格**——两头都经 [`Self::to_message`] 这一个
-/// 构造，复抄形状的代价是已知的：上一版落库侧抄漏 `msg_type`，节点落了库却
-/// 不成形状。两份真源不可能，因为内容由同一个草稿生成（见 `round_hook` 模块头）。
+/// 写侧由批次边界的汇报执行体（`loop::report_exec`）产出，读侧由重建引擎
+/// （`rebuild`）从 `turn × asserted` 事件载荷**重建同一格**——两头都经
+/// [`Self::to_message`] 这一个构造，复抄形状的代价是已知的：上一版落库侧抄漏
+/// `msg_type`，节点落了库却不成形状。两份真源不可能，因为内容由同一个草稿生成。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportDraft {
     /// 汇报正文（compose 的模板产线，零 LLM 往返）。

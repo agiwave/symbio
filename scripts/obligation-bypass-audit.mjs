@@ -18,7 +18,7 @@
  *
  * | 类 | 判据 | 动作 |
  * |---|---|---|
- * | **调度旁路** | 点名的行 `by = None`（表里没人跑它）且该处**没有**承认标记 | 归零对象；今天 5 处（五条 `policy.*`） |
+ * | **调度旁路** | 点名的行 `by = None`（表里没人跑它）且该处**没有**承认标记 | 归零对象；今天 1 处（`policy.reflex`） |
  * | **幂等点问** | 执行体（`by = Some`）动手前复核「本行还欠不欠」——并发 / 重放下第二次进入同一动作时的护栏 | **保留**，显式登记；今天 3 处 |
  *
  * ⚠ **调度旁路的归零前件是「外环收编」**（[DE-090-过渡方案](../docs/003-design/090-过渡方案.md)
@@ -116,7 +116,7 @@ const VERBOSE = process.argv.includes('--verbose')
  */
 const BYPASS_BASELINE = process.env.OBLIGATION_BYPASS_BASELINE
   ? Number(process.env.OBLIGATION_BYPASS_BASELINE)
-  : 2
+  : 1
 
 /**
  * **幂等点问**上限（**只许降**）：执行体动手前复核「本行还欠不欠」的那几处。

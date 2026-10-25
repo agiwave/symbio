@@ -11,7 +11,7 @@
 //!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
 //!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 轮首派发点 + 请求视图（唯一收集点）
-//!   步骤4 execute_turn         ← LLM 调用 + 工具轮 + **轮边界汇报回调**（`on_round`）
+//!   步骤4 execute_turn         ← LLM 调用 + 工具轮 + **批次边界的汇报派发点**
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
 //!   步骤6 close_turn           ← 落库 + 流向判定（子树在此收敛）
 //!   步骤7 finalize_turn_root   ← 封根 Turn（组合节点终态跟随子树）
@@ -62,93 +62,45 @@ pub(crate) use self::state::{
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
-/// 轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `turn_exec`。
+/// 批次边界汇报（缺口 4）的**能力口**：只产措辞，不判定、不落格、不数批次。
 ///
-/// ## 为什么返回**草稿**而不是 `()`
+/// ## 为什么这里是这个形状（D-163）
 ///
-/// 落格要 `EventWalStore`，而开着它的是 `turn_exec`。交回一个 `()` 就等于让本函数
-/// 「说完了就算记下了」，而这两件事不是同一件事（汇报的对话面节点落进
-/// `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。交回草稿
-/// 让「谁落格」这件事留在有 store 的那一侧。
+/// 「这一段静默该不该说」已经全在行 `policy.report` 与 `report_due` v4 的 `due` 里
+/// ——开关 / 静默时长 / 配额 / **工具轮数**四格都由本幕已落的事实折出。所以这里
+/// 不再问 `owes`、也不再自己数批次边界（那个 `AtomicUsize` 与返回草稿的
+/// `RoundHookFn` 因此退场）：编排层只剩一件本侧才能做的事——**问 compose 要一句话**
+/// （编排器、请求句柄、轮首会话视图都在这一侧）。
 ///
-/// ## 判定只读日志：静默与配额都从事实来
+/// ## `now_ms` 为什么不在这里
 ///
-/// 旧 `RoundProgress` 自己持静默时钟与配额计数，是同一份事实的第二来源。
-/// 起两者都由 `report_due` 视图从**本幕已落的事实**算：
-///
-/// - 静默锚 = 最近一次用户看得见的动静（用户格 / 补充格 / 任何助手文本）；
-/// - 配额 = 本幕锚之后的汇报格数。
-///
-/// `now_ms` 由开幕交下来（本幕唤醒事实的 `ts`，判据 12）：静默长度是「本幕的现在」
-/// 减那条事实，两个读数都在日志里。回调因此没有入参——抽干时落的补充格已经把
-/// 静默锚前移，再递一个「抽到的时刻」只是在判决路径上多留一个墙钟读数。
-///
-/// ## 轮次前提留在触发点
-///
-/// 日志里没有「当前工具轮数」这一格（`tool_rounds` 只在说出口之后才有），所以
-/// 「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」由本函数自己数批次边界；`min_rounds`
-/// 仍由视图交出（不在这里读配置）。
+/// 它随 `ExecTurn` 一路下去（`ReportPort::now_ms`）：派发点与执行体用的是**同一个**
+/// 「本幕的现在」（唤醒事实的 `ts`，判据 12），两个读数从两个地方取就是两条时钟。
 ///
 /// ## 会话视图：只给**轮首**那一份
 ///
-/// compose 的 `ComposeRequest` 带一段会话视图，而轮边界上
-/// `context.messages` 里**只有轮首那一批**（工具轮的消息由 `turn_exec` 在轮末才
-/// 交回来）。所以本函数传的快照与那一刻 `context.messages` 的内容**逐字相同**，
-/// 不是近似。代价是它不含本轮工具节点——仓内的 `progress_text` 不读这一段
-/// （只用 `snapshot`），而要让仓外 compose 插件也拿到它就得再造一条把工具消息
-/// 实时送回来的通路，为一个字段不值得。真要那一条时该一起做，别在这里打补丁。
-pub(crate) fn round_report_hook(
-    orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
+/// compose 的 `ComposeRequest` 带一段会话视图，而批次边界上 `context.messages` 里
+/// **只有轮首那一批**（工具轮的消息由 `turn_exec` 在轮末才交回来）。所以这里传的
+/// 快照与那一刻 `context.messages` 的内容**逐字相同**，不是近似。代价是它不含本轮
+/// 工具节点——仓内的 `progress_text` 不读这一段（只用 `snapshot`），而要让仓外
+/// compose 插件也拿到它就得再造一条把工具消息实时送回来的通路，为一个字段不值得。
+/// 真要那一条时该一起做，别在这里打补丁。
+pub(crate) fn report_port(
+    orchestrator: Arc<ChatOrchestrator>,
     ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
     conversation: Vec<ChatNode>,
-    store: Arc<dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>>,
-    turn_no: u64,
     now_ms: i64,
-) -> super::turn_exec::RoundHookFn {
-    let rounds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    Arc::new(move || {
+) -> super::report_exec::ReportPort {
+    let text: super::report_exec::ReportTextFn = Arc::new(move |snapshot: RunSnapshot| {
         let orchestrator = orchestrator.clone();
         let ctx = ctx.clone();
         let conversation = conversation.clone();
-        let store = store.clone();
-        let rounds = rounds.clone();
         Box::pin(async move {
-            // 一个批次边界 = 一次「已完成一轮」。
-            let tool_rounds = rounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            let events = store.range(crate::symbio_core::Seq::new(0));
-            let view = super::loop_rows::view("report_due", &events, turn_no, now_ms)?;
-            // 轮次前提（见 `loop_rows` 模块头）：日志里没有这一格，归触发点。
-            let min_rounds = view.get("min_rounds").and_then(|v| v.as_u64()).unwrap_or(0);
-            if (tool_rounds as u64) < min_rounds.max(1) {
-                return None;
-            }
-            if !super::loop_rows::owes("policy.report", &events, turn_no, now_ms) {
-                return None;
-            }
-            let quiet_ms = view.get("quiet_ms").and_then(|v| v.as_i64()).unwrap_or(0);
-            let snapshot = RunSnapshot {
-                tool_rounds,
-                quiet_ms,
-            };
-            let Some(text) = super::chat_loop::compose::report_text(
-                &orchestrator,
-                &ctx,
-                &conversation,
-                &snapshot,
-            )
-            .await
-            else {
-                // 拿不到措辞 ⇒ 没说话，也**不消耗配额**（下一个轮边界还会再试）——
-                // 与 `apply_verdict` 降级而不失效同一条方向。
-                return None;
-            };
-            Some(super::round_hook::ReportDraft {
-                text,
-                tool_rounds,
-                quiet_ms,
-            })
+            super::chat_loop::compose::report_text(&orchestrator, &ctx, &conversation, &snapshot)
+                .await
         })
-    })
+    });
+    super::report_exec::ReportPort { now_ms, text }
 }
 
 /// 把请求级注入段**三段**拼成一段前缀（v2 运行器的 prompt 入口）。
@@ -400,7 +352,7 @@ pub async fn run_chat_loop(
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
         // v2 下永不成立；裁决见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
-        // 视图从日志里读它（回调不再有时刻入参，见 `round_hook::RoundHookFn`）。
+        // 视图从日志里读它（汇报的触发点不再有时刻入参，见 `report_exec`）。
         plugin_info!(
             "session",
             "[Turn] 第 {} 次请求开始 (msgs={})",
@@ -578,16 +530,15 @@ pub async fn run_chat_loop(
                         }) as super::turn_exec::SupplementFn
                     }),
                     supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                    // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
-                    // 本函数手里），**落格**在 `turn_exec`（store 在那边）。判定读日志，
-                    // 所以回调也拿一份事实源句柄（同一实例，按引用分发）。
-                    on_round: context.session.facts().map(|store| {
-                        round_report_hook(
+                    // 批次边界汇报（缺口 4）的能力口：**只产措辞**——判定与落格
+                    // 都不在这里（见 `report_port` 的文档与 D-163）。`None` = compose
+                    // 产线关着，批次边界就不装派发点（关掉的开关不该在日志里
+                    // 每批边界留一串「有账没人还」）。
+                    report: orchestrator.compose_enabled.then(|| {
+                        report_port(
                             orchestrator_arc.clone(),
                             ctx.clone(),
                             context.messages.clone(),
-                            store,
-                            turn.turn_no,
                             turn.now_ms,
                         )
                     }),

@@ -4,8 +4,8 @@
 //! 「恒返回 true」的实现下也通过。接线之后旧 `LoopState` 已不存在，这里对的是
 //! 声明本身——每一行的 `owes` / `until` 与它读的视图字段。
 //!
-//! 汇报的 `round > 0 ∧ 工具轮数 ≥ min_rounds` 是触发点的前提（日志里没有当前
-//! 工具轮数那一格），本文件对的是「静默 + 配额」这一段；执行行是 的临时形态。
+//! 汇报的「静默 + 配额 + 工具轮数」三条全在 `report_due` v4 的 `due` 里
+//! （D-163 把轮数前提从触发点折进了视图），本文件对的就是那三格。
 
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -346,6 +346,21 @@ fn reflex_row_owes_on_a_recall_hit_outside_resume() {
 
 #[test]
 fn report_row_owes_on_a_quiet_interval_with_quota_left() {
+    // 本幕跑完过一批工具（带 `calls` 的模型应答 = 一轮）：轮数前提（`D-163`：
+    // 口径 v4 折进 `due`）靠它满足。
+    let worked_round = || {
+        ev_at(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({
+                "port": "model",
+                "id": "m-1",
+                "attempt": 1,
+                "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
+            }),
+            30,
+        )
+    };
     let quiet = vec![
         ev_at(
             1,
@@ -359,11 +374,44 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
             10,
         ),
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
+        worked_round(),
     ];
     assert!(owes("policy.report", &quiet, 60_000));
 
     // 静默不够久。
     assert!(!owes("policy.report", &quiet, 500));
+
+    // 轮数不够：同一段静默、配额也在，但本幕一批工具都没跑完 ⇒ 不说。
+    // 这条是 v4 折进来的那一格（旧实现由触发点自己数批次边界）。
+    let lazy = vec![
+        ev_at(
+            1,
+            "session.config",
+            json!({
+                "progress_enabled": true,
+                "progress_interval_ms": 1000,
+                "progress_min_rounds": 0,
+                "progress_max_per_turn": 2,
+            }),
+            10,
+        ),
+        ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
+    ];
+    assert!(!owes("policy.report", &lazy, 60_000));
+    // 反向：把门槛提到两轮，同样只跑了一轮 ⇒ 不够。
+    let mut two_rounds = quiet.clone();
+    two_rounds[0] = ev_at(
+        1,
+        "session.config",
+        json!({
+            "progress_enabled": true,
+            "progress_interval_ms": 1000,
+            "progress_min_rounds": 2,
+            "progress_max_per_turn": 2,
+        }),
+        10,
+    );
+    assert!(!owes("policy.report", &two_rounds, 60_000));
 
     // 刚说过一句：静默锚前移到那句。
     let mut spoke = quiet.clone();
@@ -391,7 +439,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
     ));
     assert!(!owes("policy.report", &exhausted, 60_000));
 
-    // 开关关掉。
+    // 开关关掉（其余三条全成立）。
     let off = vec![
         ev_at(
             1,
@@ -405,6 +453,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
             10,
         ),
         ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
+        worked_round(),
     ];
     assert!(!owes("policy.report", &off, 60_000));
 
@@ -426,6 +475,22 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
             "progress_max_per_turn": 2,
         }),
         3_001,
+    ));
+    // 轮数也随幕重新开账：首幕那一轮不算本幕的（锚之前）。
+    assert!(
+        !owes("policy.report", &resumed, 5_000),
+        "续写幕还没跑完自己的第一批工具 ⇒ 不算进度"
+    );
+    resumed.push(ev_at(
+        1,
+        crate::symbio_core::EVENT_RESPONSE,
+        json!({
+            "port": "model",
+            "id": "m-2",
+            "attempt": 1,
+            "calls": [{ "port": "tool", "id": "tool-1-d1-c1", "name": "read_file", "arguments": {} }],
+        }),
+        3_100,
     ));
     assert!(owes("policy.report", &resumed, 5_000));
 }
@@ -527,6 +592,18 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
             json!({ "text": "hi", "id": "u-1" }),
             20,
         ),
+        // 本幕跑完过一批工具（`calls` 非空的模型应答）：轮数前提在 v4 的 `due` 里。
+        ev_at(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({
+                "port": "model",
+                "id": "m-1",
+                "attempt": 1,
+                "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
+            }),
+            30,
+        ),
     ];
     assert!(owes("policy.report", &due, 60_000));
     let mut spoke = due.clone();
@@ -571,14 +648,19 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
     }
     // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
     // 归零对象）。轮首那三条（`policy.classify` / `policy.compress` / `policy.recall`）
-    // 已由轮首派发点接管（D-159），不再在这笔账里。
-    // 这一格是 `D-158` 记的那笔账的当前形状，接回下一行时它会红——那是预期的红。
+    // 已由轮首派发点接管（D-159），`policy.report` 由批次边界派发点接管（D-163），
+    // 都不再在这笔账里。
+    // 这一格是 `D-158` 记的那笔账的当前形状，接回最后一行时会红——那是预期的红。
     let unwired: Vec<&str> = ROWS
         .iter()
         .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
         .map(|d| d.name)
         .collect();
-    assert_eq!(unwired.len(), 2, "未接线的策略行清单变了（`D-158` 的台账）");
+    assert_eq!(
+        unwired,
+        vec!["policy.reflex"],
+        "未接线的策略行清单变了（`D-158` 的台账）"
+    );
 }
 
 #[test]
@@ -1839,6 +1921,58 @@ fn next_head_selects_the_recall_row_at_turn_head() {
 /// 这一条同时钉住 D-160 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
 /// `…{stage=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
 /// （装载期那条 `cycle` 就是它的影子），轮首这两笔债谁也还不掉。
+/// 批次边界那一台的派发点：到期时选中 `policy.report` 并交出轮中执行体，
+/// 说过之后同一段静默就不再是它（`reported_anchors` 把账关掉）。
+#[test]
+fn next_report_selects_the_report_row_only_while_the_interval_is_due() {
+    let quiet = vec![
+        ev_at(
+            1,
+            "session.config",
+            json!({
+                "progress_enabled": true,
+                "progress_interval_ms": 1000,
+                "progress_min_rounds": 0,
+                "progress_max_per_turn": 2,
+            }),
+            10,
+        ),
+        ev_at(1, "user.message", json!({"text": "hi", "id": "u-1"}), 20),
+        ev_at(
+            1,
+            crate::symbio_core::EVENT_RESPONSE,
+            json!({
+                "port": "model",
+                "id": "m-1",
+                "attempt": 1,
+                "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
+            }),
+            30,
+        ),
+    ];
+    let next = super::next_report(&quiet, 1, 60_000, super::REPORT_ACTORS)
+        .expect("静默到期且跑过一批工具 ⇒ 欠一次汇报");
+    assert_eq!(next.row, "policy.report");
+    assert_eq!(next.by, super::REPORT);
+    let run: super::super::report_exec::ReportAction = super::super::report_exec::run_report;
+    assert!(std::ptr::fn_addr_eq(next.action, run));
+    // 出口那一格在它自己的名单里：执行体不落它 ⇒ 派发点读不到「做过」。
+    assert!(next.writes_closed("chat.assistant.reported"));
+
+    // 说过了：静默锚前移到那句，同一段静默只关一次账。
+    let mut spoke = quiet.clone();
+    spoke.push(ev_at(
+        1,
+        "chat.assistant.reported",
+        json!({"text": "先报一句"}),
+        60_000,
+    ));
+    assert!(
+        super::next_report(&spoke, 1, 60_000, super::REPORT_ACTORS).is_none(),
+        "刚说过一句 ⇒ 这一台此刻不欠"
+    );
+}
+
 #[test]
 fn head_sweep_runs_compress_before_recall() {
     let ready = vec![
@@ -1998,6 +2132,12 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
         vec!["policy.classify", "policy.compress", "policy.recall"],
         "轮首子集就是它的绑定表点名的行——多一条就是跨 host 抢债"
     );
+    let report_rows = super::host_rows(&f, &super::report_actor_names(super::REPORT_ACTORS));
+    assert_eq!(
+        report_rows.iter().map(|d| d.name).collect::<Vec<_>>(),
+        vec!["policy.report"],
+        "批次边界子集只有汇报那一行"
+    );
 
     // 生产派发点各自的答案：同一个求解器，两份行子集。
     let next = super::next(&ready, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
@@ -2016,7 +2156,8 @@ fn the_row_table_and_the_binding_table_agree() {
         let Some(by) = d.by else { continue };
         assert!(
             super::entry_of(by, super::ACTORS).is_some()
-                || super::head_entry_of(by, super::HEAD_ACTORS).is_some(),
+                || super::head_entry_of(by, super::HEAD_ACTORS).is_some()
+                || super::report_entry_of(by, super::REPORT_ACTORS).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );

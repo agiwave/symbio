@@ -11,7 +11,7 @@
 //! ```text
 //! 0 authorize-tool─ 授权级联：一笔工具请求先判「放行 / 拒绝」
 //! 10 classify      ── 轮首判决（本幕 round=0 且有发言）
-//! 20 report        ── 中途汇报（一段静默到期，未用完配额）
+//! 20 report        ── 中途汇报（静默到期 ∧ 配额未满 ∧ 跑过一轮工具）
 //! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
 //! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
 //! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
@@ -31,12 +31,12 @@
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`prio` 是跨行
 //! 可比的**全局**序，不是格内序（判据 10）。
 //!
-//! ## 一行**不在表里**的条件（写在这里，不写在事后）
+//! ## 汇报的轮次前提也在表里
 //!
-//! **汇报的轮次前提**：`轮数 > 0 ∧ 轮数 ≥ progress_min_rounds`。日志里没有
-//! 「当前工具轮数」这一格（`chat.assistant.reported.tool_rounds` 只在说出口之后
-//! 才有），所以它归触发点——`round_report_hook` 自己数批次边界，表判「静默够久
-//! ∧ 配额未满」。`report_due` 视图把 `min_rounds` 一并交出，触发点因此也不用读配置。
+//! 「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」是 `report_due` v4 的 `due` 的一格
+//! （[D-163]）：本幕完成了几轮工具调用 = 本幕落了几条带 `calls` 的
+//! `response(port=model)`——日志上现成，不需要触发点在内存里数。于是这一行与其它
+//! 行同形，派发点只选债。
 //!
 //! ## 查询口：事实是输入，`now` 也是输入
 //!
@@ -66,8 +66,8 @@ use crate::symbio_core::{
 
 /// 这张表里**接了线的执行体**：`execute`（整轮执行体）、`close`（收束）、
 /// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、轮首那三条
-/// `classify` / `compress` / `recall`（D-159——它们住在另一台 host 的绑定表里，
-/// 名字面上与其它没有区别）。
+/// `classify` / `compress` / `recall`（D-159）与批次边界那一条 `report`（D-163）
+/// ——它们住在另两台 host 的绑定表里，名字面上与其它没有区别。
 ///
 /// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
@@ -99,6 +99,13 @@ const COURIER: &str = "courier";
 /// （[`super::head_exec::HeadStep`]），不是轮内那张草稿。`by` 面上两台 host 没有区别——
 /// 「这行归谁跑」照旧只写在行上，host 由绑定表回答（D-159 裁决 1）。
 const RECALL: &str = "recall";
+/// 批次边界执行体（D-163）：`policy.report` 行选中的动作。
+///
+/// 它是**第三台 host** 上的名字：动作借走的是批次边界那一侧的落格与上线面
+/// （`store` + 实时桥 + 落库镜像），不是轮首那台的本轮状态，也不是轮内那台的草稿。
+/// `by` 面上三台 host 没有区别——「这行归谁跑」照旧只写在行上，host 由绑定表
+/// 回答（D-159 裁决 1），派发点由**谁手里有那片状态**决定。
+const REPORT: &str = "report";
 /// 轮首压缩执行体（D-159）：`policy.compress` 行选中的动作。
 const COMPRESS: &str = "compress";
 /// 轮首判决执行体（D-159）：`policy.classify` 行选中的动作。
@@ -158,6 +165,11 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     // 派发本身不调模型（模型在执行层之外）。
     mode: LatencyTier::Fast,
     reads: &[],
+    // 汇报格为什么在这张名单上：批次边界（2f）就在本执行体的动作窗口里
+    // （`turn_runner::stream::dispatch_round` 的 2e/2f），而那一刻的派发点（D-163）
+    // 会在窗口内落一条 `chat.assistant.reported`。运行期写封闭按**动作窗口**归属
+    // （D-123 决策 1：尾段就是这一次动作的实际写入），所以这一格必须在这里声明——
+    // 它不是「派发体写的」，而是「派发体窗口里落的」，两句话在账本上是同一件事。
     writes: &[
         EVENT_ARTIFACT_ADDED,
         EVENT_ASSISTANT_PROGRESS,
@@ -230,6 +242,22 @@ const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
     mode: LatencyTier::Fast,
     reads: &[],
     writes: &[EVENT_TURN_STAGE],
+};
+
+/// 批次边界执行体的声明（D-163）。
+///
+/// 名单只有 `chat.assistant.reported` 一格：汇报这一步的出口就是那条汇报事实
+/// （`reported_anchors` 视图按它逐段关账）。汇报的对话面节点随本轮的落库镜像
+/// 一起走（`persist_messages`），**不进**事实网格——两件事各有写方。
+const ACTOR_REPORT: ActorDecl = ActorDecl {
+    name: REPORT,
+    // 模板产线，零模型往返：与行同档（反射档，更慢就装载红）。
+    mode: LatencyTier::Reflex,
+    // 这一格同时也是 `ACTOR_COURIER` 的：批次边界的派发点建在轮内派发体的动作
+    // 窗口里（见那张表上的注释），所以两边的名单都得容得下它——装载期不禁止两个
+    // 执行体声明同一格，运行期按**当前动作窗口**判，两边各说自己的那一面。
+    reads: &[],
+    writes: &[EVENT_ASSISTANT_REPORTED],
 };
 
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
@@ -343,6 +371,33 @@ pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[
     },
 ];
 
+/// **批次边界 host** 的执行体绑定表（D-163）：形状与 [`HEAD_ACTORS`] 逐字相同，
+/// 差别只在动作借走的那片状态（[`super::report_exec::ReportStep`] = 事实源 +
+/// 汇报能力口 + 落格与上线面）。
+///
+/// 一台 host 一张表，行不复制、行子集由名字派生（[`host_rows`]）——理由与
+/// [`HEAD_ACTORS`] 逐字相同，不重复。这一台只有一行（汇报），但表仍然是一张表：
+/// 将来「批次边界上还有别的账」时加一条就够，派发点不用改形。
+pub(crate) struct ReportEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::report_exec::ReportAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static REPORT_ACTORS: &[ReportEntry] = &[ReportEntry {
+    decl: ACTOR_REPORT,
+    run: super::report_exec::run_report,
+    transitional: &[],
+}];
+
+/// `by` → **批次边界**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn report_entry_of(
+    by: &'static str,
+    actors: &'static [ReportEntry],
+) -> Option<&'static ReportEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
 /// `by` → **轮首**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
 fn head_entry_of(by: &'static str, actors: &'static [HeadEntry]) -> Option<&'static HeadEntry> {
     actors.iter().find(|e| e.decl.name == by)
@@ -376,6 +431,11 @@ fn head_actor_names(actors: &[HeadEntry]) -> Vec<&'static str> {
     actors.iter().map(|e| e.decl.name).collect()
 }
 
+/// 批次边界绑定表的名字集合。
+fn report_actor_names(actors: &[ReportEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
 ///
 /// **两台 host 并成一集**（D-159 裁决 3）：装载面仍然是一张表——七道检查判的是
@@ -386,6 +446,7 @@ pub(crate) fn actor_decls() -> Vec<ActorDecl> {
         .iter()
         .map(|e| e.decl)
         .chain(HEAD_ACTORS.iter().map(|e| e.decl))
+        .chain(REPORT_ACTORS.iter().map(|e| e.decl))
         .collect()
 }
 
@@ -594,8 +655,11 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.report",
         prio: 20,
-        // 未接线：触发点在 `round_report_hook`（它自己数批次边界）；与 `report` 执行体同批接回。
-        by: None,
+        // 批次边界 host 的执行体（D-163）：派发点是 `turn_exec` 的轮内注入口
+        // （每跑完一批工具一次），而「该不该说」全由 `report_due` v4 判——
+        // 静默 / 配额 / 轮数三格都在那个视图的输出里（D-159 裁决 4 的分片：
+        // 一块可变状态一个派发点，这一块是「这句话落到哪」）。
+        by: Some(REPORT),
         // 模板产线，零模型往返。
         tier: LatencyTier::Reflex,
         expand: None,
@@ -1312,6 +1376,25 @@ pub(crate) fn next(
     let rows = host_rows(&frozen, &actor_names(actors));
     pick(&frozen, &rows, events, turn, now, |by| {
         entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**批次边界**那一台（D-163）：同一个求解器、同一份对账名单，只是绑定表与
+/// 动作类型换了一张。
+///
+/// 这一台的派发点在轮内注入口：每跑完一批工具问一次，问的仍然是**本 host 的行子集**
+/// （只有 `policy.report` 一行）。整张行表在这里同样不能传——`drive_head` 那条理由
+/// 逐字适用（别的 host 的债会被本派发点选中而绑不上动作）。
+pub(crate) fn next_report(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [ReportEntry],
+) -> Option<Next<super::report_exec::ReportAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &report_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        report_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
     })
 }
 

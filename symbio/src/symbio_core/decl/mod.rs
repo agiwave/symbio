@@ -56,7 +56,7 @@
 //! `attempt_cap`）与三个出口，`turn_head` 读 `user.message` / `turn.stage` /
 //! `session.config`，`turn_stages` 与 `turn_closed` 读本幕锚之后的阶段 / 收束格，
 //! `report_due` 读助手文本五格 / `turn.supplemented` / `turn.stage`（恢复幕）/
-//! `session.config` + `now`。
+//! `session.config` / 本幕的模型应答（折工具轮数）+ `now`。
 //!
 //! ## 生产接线
 //!
@@ -1034,9 +1034,12 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
 ///
 /// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
 /// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
-/// `min_rounds` 与 `quiet_ms` 一起交给触发点：工具轮数不在日志里（当前轮次只在
-/// 收束后才计数），所以「够不够轮」由持有轮次计数的一方判；表里这一行判的是
-/// 「静默够久 ∧ 配额未满」。
+///
+/// `due` 的四条都由这份日志折出（v4）：开关 / 静默够久 / 配额未满 / **轮数够**。
+/// 最后一条此前留在触发点（`round_report_hook` 自己数批次边界），因为当时的
+/// 计数是内存里的 `AtomicUsize`；而「本幕完成了几轮工具调用」在日志上就是本幕
+/// 落了几条**带 `calls` 的 `response(port=model)`**——一条批次边界 = 一次带工具
+/// 调用的模型往返。折进视图之后，这一行在派发点上与其它行同形：判据只有数据。
 fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let Some((turn, drive_anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -1072,7 +1075,29 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         .filter(|e| e.turn == turn && is_report_anchor(e))
         .max_by_key(|e| (e.ts, seq_of(e)));
     let quiet_ms = anchor.map(|e| (now - e.ts).max(0)).unwrap_or(0);
-    let due = enabled && quiet_ms >= interval_ms && reports < quota;
+    // 本幕**已完成几轮工具调用** = 幕锚之后带 `calls` 的模型应答条数。
+    //
+    // 口径与 `turn_head` 的 `model_calls` 同源：只看这一轮自己的往返（`via` 缺席），
+    // 内部往返（判决 / 措辞 / 摘要）不带工具、也不该把「够不够轮」凑满。
+    // `calls` 为空 / 取不到的应答不算一轮——那是答话或形状不明，不是「干过活」。
+    let tool_rounds = events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && e.kind == EVENT_RESPONSE
+                && str_field(e, "port") == Some("model")
+                && str_field(e, "via").is_none()
+                && after_anchor(e, drive_seq)
+                && e.payload
+                    .get("calls")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|calls| !calls.is_empty())
+        })
+        .count() as u64;
+    // 轮数前提照旧是「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」：`max(1)` 就是
+    // 「> 0」那一半——一轮都没跑完时汇报的是「还没开始」，那不是进度。
+    let due =
+        enabled && quiet_ms >= interval_ms && reports < quota && tool_rounds >= min_rounds.max(1);
     serde_json::json!({
         "turn": turn,
         // 静默区间的身份 = 区间起点那一格的 seq。汇报事实落格后，本视图的锚
@@ -1080,6 +1105,9 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         "anchor": anchor.map(seq_of).unwrap_or(0),
         "due": due,
         "quiet_ms": quiet_ms,
+        // 本幕已完成的工具轮数：汇报句的「已经完成 N 轮」读它（同一份读数，
+        // 不再由触发点自己数）。
+        "tool_rounds": tool_rounds,
         "min_rounds": min_rounds,
         "reports": reports,
         "quota": quota,
@@ -1280,9 +1308,15 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // v2 起输出 `anchor`（静默起点的 seq）：汇报行以 `(turn, anchor)` 标识一段
     // 静默区间，`reported_anchors` 逐条关账。v3 把 `quiet_ms` / `min_rounds`
     // 一并交给触发点——它们不再从进程配置里读，判定输入只剩事实与 `now`。
+    //
+    // v4 把**轮数前提**收进 `due`：`tool_rounds`（本幕带 `calls` 的模型应答数）
+    // 与 `min_rounds` 的比较此前留在触发点（它自己数批次边界），于是这一行是
+    // 「表判一半、代码判一半」；折进来之后派发点只剩选债。读面因此多声明
+    // `response` 的 `port` / `via` / `calls` 三格（口径与 `turn_head` 同一条：
+    // 只看这一轮自己的往返）。
     ViewDecl {
         name: "report_due",
-        ver: 3,
+        ver: 4,
         reads: &[
             ("session.config", "progress_enabled"),
             ("session.config", "progress_interval_ms"),
@@ -1296,9 +1330,13 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("user.message", "text"),
             ("turn.supplemented", "text"),
             ("turn.stage", "stage"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "via"),
+            (EVENT_RESPONSE, "calls"),
         ],
         // 开账侧的视图：输出的每个字段都由这些格里的一格决定（静默起点、配额、
-        // 本幕汇报数），证据集取读面全集。它从不作行的出口，配图用不到这一格。
+        // 本幕汇报数、本幕工具轮数），证据集取读面全集。它从不作行的出口，
+        // 配图用不到这一格。
         evidence: &[
             "session.config",
             "chat.assistant.reported",
@@ -1309,6 +1347,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             "user.message",
             "turn.supplemented",
             "turn.stage",
+            EVENT_RESPONSE,
         ],
         cost: 4096,
         eval: report_due,

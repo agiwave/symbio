@@ -50,7 +50,7 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         window_turns,
         tools,
         supplements,
-        on_round,
+        report,
         supplemental_no,
         recalled,
         skill_obs,
@@ -120,7 +120,7 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
                 // `InboxItem` 都在 `plugins/session`），而落格也不需要 core 参与：
                 // 本函数自己就开着 `store`。
-inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain, report)| {
+inject: injector(supplements, report).map(|(drain, report)| {
                     let store = store.clone();
                     let actor = actor.clone();
                     // 折进的消息往收集器 push（末尾随 `ExecTurnResult` 回灌进落库镜像）。
@@ -167,64 +167,47 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                                 &supplemental_no,
                             );
 
-                            // 轮边界汇报（缺口 4）：判定与措辞在 chat_loop 那边（它有编排器），
-                            // **落格在这里**（本函数开着 store）。所以回调交回来的是一份
-                            // **草稿**，不是已落的事实——落格这一半不外包出去。
+                            // 批次边界的**派发点**（D-163）：这一刻「跑完了一批工具」
+                            // 交给引擎，该不该说由行 `policy.report` 自己判——静默 /
+                            // 配额 / 轮数三格都在 `report_due` v4 的输出里。本侧不再
+                            // 问一句「欠不欠」，也不再自己数批次（旧的 `AtomicUsize`
+                            // 与 `RoundHookFn` 就这样退的场）。
                             //
-                            // 「先抽干、后汇报」仍是顺序纪律，但归零静默时钟的信号不再是
-                            // 一个时刻入参：上面那次抽干已经把补充格落进日志，
-                            // `report_due` 视图读的就是它（判据 12）。
-                            if let Some(report) = report {
-                                // **落格即上线**（另一半）：这句话的设计目的就是「本轮还要
-                                // 跑很久，先报一句」，只落格不下发就等于把它压到轮末、把目的抵消。
-                                // 节点由 `to_message()` **现造一次**，id 同写进落格载荷——重建侧
-                                // （`rebuild::reported_node` 走 `event_payload_node_id`）读的就是它，
-                                // 于是实时面与重建面是同一个身份，轮末落库镜像再送一次时按 id 合并，
-                                // 不多一张卡（与 `op-*` 那条开场白同纪律）。
-                                if let Some(draft) = report().await {
-                                    match anchor {
-                                        Some(anchor) => {
-                                            let no = supplemental_no.fetch_add(
-                                                1,
-                                                std::sync::atomic::Ordering::Relaxed,
+                            // 「先抽干、后汇报」仍是顺序纪律：上面那次抽干已经把补充格
+                            // 落进日志，静默锥随之前移（判据 12）。
+                            // 汇报的**落格与上线面**（D-163）就在这个闭包里：事实源
+                            // （store）、实时桥（`live`）、落库镜像（`sink_msgs`）与
+                            // 序号游标。三台 host 各自手里有自己那片，这里恰好是批次边界。
+                            if let Some(port) = report.as_ref() {
+                                match anchor {
+                                    Some(anchor) => {
+                                        let landing = super::super::report_exec::ReportLanding {
+                                            collected: sink_msgs.clone(),
+                                            live: live.clone(),
+                                            no: supplemental_no.clone(),
+                                        };
+                                        if let Err(e) = super::super::report_exec::drive_report(
+                                            store.as_ref(),
+                                            turn_no,
+                                            port,
+                                            anchor,
+                                            &actor.principal,
+                                            &landing,
+                                        )
+                                        .await
+                                        {
+                                            // 汇报落格失败不升级成整轮失败（与定稿答话轮同一条
+                                            // 口径）：用户已经少听了一句，不该再多一个错误。
+                                            crate::plugin_warn!(
+                                                "session",
+                                                "[Turn] 汇报派发失败（本轮继续，账仍开着）: {e:?}"
                                             );
-                                            let node = draft.to_message(
-                                                &crate::symbio_core::principal::Principal::from_legacy(
-                                                    &actor.principal,
-                                                ),
-                                            );
-                                            if let Err(e) = store.append(
-                                                crate::symbio_core::Event::pending(
-                                                    format!("rp-{turn_no}-{no}"),
-                                                    crate::symbio_core::EVENT_ASSISTANT_REPORTED,
-                                                    crate::symbio_core::Entity::Turn,
-                                                    crate::symbio_core::Verb::Asserted,
-                                                    turn_no,
-                                                    &actor.principal,
-                                                )
-                                                .with_produced_by(anchor)
-                                                .with_payload(serde_json::json!({
-                                                    "text": draft.text,
-                                                    "tool_rounds": draft.tool_rounds,
-                                                    "quiet_ms": draft.quiet_ms,
-                                                    "id": node.id.clone(),
-                                                })),
-                                            ) {
-                                                crate::plugin_warn!(
-                                                    "session",
-                                                    "[Turn] 汇报落格失败（仍回灌落库镜像，下一轮起模型看不见）: {e:?}"
-                                                );
-                                            }
-                                            if let Ok(mut sink) = sink_msgs.lock() {
-                                                sink.push(node.clone());
-                                            }
-                                            live.on_tool_frame(&node);
                                         }
-                                        None => crate::plugin_warn!(
-                                            "session",
-                                            "[Turn] 汇报无溯源锚点，本轮丢弃（I2：断言类事件必须带溯源）"
-                                        ),
                                     }
+                                    None => crate::plugin_warn!(
+                                        "session",
+                                        "[Turn] 批次边界没有溯源锚点，本批不派发汇报（I2：断言类事件必须带溯源）"
+                                    ),
                                 }
                             }
 
@@ -347,6 +330,23 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
 }
 
 /// 一轮的执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
+/// 轮边界注入的两个可选口打成一个闭包（`None` = 两个都没装）。
+///
+/// 与退役的 `round_hook::round_hook` 同一件事，只是第二个口从「回答要不要说」的
+/// 回调换成了「产一句什么话」的能力包（D-163）：判定已经归行表，这一侧只提供时机
+/// 与能力。写成两个 `map` 嵌套会得到四种组合，其中「两个都没有」本来就该退化成
+/// `None`——挂一个永远返回空的闭包只会让 core 每轮白问一次。
+fn injector(
+    supplements: Option<SupplementFn>,
+    report: Option<super::super::report_exec::ReportPort>,
+) -> Option<(SupplementFn, Option<super::super::report_exec::ReportPort>)> {
+    if supplements.is_none() && report.is_none() {
+        return None;
+    }
+    let drain: SupplementFn = supplements.unwrap_or_else(|| Arc::new(|| Box::pin(async { None })));
+    Some((drain, report))
+}
+
 /// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。
 ///
 /// 为什么抽出来：闭包在 P3c 里已经 90 行，且一半是「抽干 / 落格 / 造节点」的直线代码。

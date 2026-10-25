@@ -140,7 +140,7 @@ fn builtin_loads_and_freezes() {
     assert_eq!(frozen.view("turn_head").unwrap().ver, 9);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
-    assert_eq!(frozen.view("report_due").unwrap().ver, 3);
+    assert_eq!(frozen.view("report_due").unwrap().ver, 4);
     assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }
 
@@ -1068,13 +1068,29 @@ fn cfg(interval: i64, quota: u64) -> Value {
     })
 }
 
+/// 本幕跑完过一批工具：一条带 `calls` 的模型应答就是一轮（v4 的轮数前提读它）。
+fn worked(at: i64) -> Event {
+    ev_at(
+        1,
+        EVENT_RESPONSE,
+        json!({
+            "port": "model",
+            "id": "m-1",
+            "attempt": 1,
+            "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
+        }),
+        at,
+    )
+}
+
 #[test]
 fn report_due_needs_log_and_now_only() {
     let events = vec![
         ev_at(1, "session.config", cfg(1000, 2), 10),
         ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        worked(30),
     ];
-    // 静默 1500ms > 1000ms，配额未用完 ⇒ 到期。
+    // 静默 1500ms > 1000ms，配额未用完，已跑完一批工具 ⇒ 到期。
     assert_eq!(
         report_due(&events, 1520),
         json!({
@@ -1082,6 +1098,7 @@ fn report_due_needs_log_and_now_only() {
             "anchor": seq(&events[1]),
             "due": true,
             "quiet_ms": 1500,
+            "tool_rounds": 1,
             "min_rounds": 0,
             "reports": 0,
             "quota": 2
@@ -1095,11 +1112,16 @@ fn report_due_needs_log_and_now_only() {
             "anchor": seq(&events[1]),
             "due": false,
             "quiet_ms": 980,
+            "tool_rounds": 1,
             "min_rounds": 0,
             "reports": 0,
             "quota": 2
         })
     );
+    // 一轮工具都没跑完（同一段静默、同一配额）⇒ 不说：那是「还没开始」，不是进度。
+    let lazy = &events[..2];
+    assert_eq!(report_due(lazy, 1520)["due"], json!(false));
+    assert_eq!(report_due(lazy, 1520)["tool_rounds"], json!(0));
 }
 
 #[test]
@@ -1107,6 +1129,7 @@ fn report_due_resets_quiet_on_assistant_speech() {
     let events = vec![
         ev_at(1, "session.config", cfg(1000, 2), 10),
         ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        worked(40),
         ev_at(
             1,
             "chat.assistant.reported",
@@ -1119,9 +1142,10 @@ fn report_due_resets_quiet_on_assistant_speech() {
         report_due(&events, 1100),
         json!({
             "turn": 1,
-            "anchor": seq(&events[2]),
+            "anchor": seq(&events[3]),
             "due": false,
             "quiet_ms": 200,
+            "tool_rounds": 1,
             "min_rounds": 0,
             "reports": 1,
             "quota": 2
@@ -1155,6 +1179,8 @@ fn reported_anchors_close_one_quiet_interval_each() {
         ev_at(1, "user.message", json!({"text": "hi"}), 20),
         ev_at(1, "chat.assistant.reported", json!({"text": "一"}), 900),
         ev_at(1, "chat.assistant.reported", json!({"text": "二"}), 1900),
+        // 第二段之后又跑完一批工具：第三段到期时轮数前提也成立。
+        worked(2_500),
     ];
     assert_eq!(
         reported_anchors(&events, 0),
@@ -1168,6 +1194,7 @@ fn reported_anchors_close_one_quiet_interval_each() {
     assert_eq!(due["anchor"], json!(seq(&events[3])));
     assert_eq!(due["due"], json!(true));
     assert_eq!(due["reports"], json!(2));
+    assert_eq!(due["tool_rounds"], json!(1));
 }
 
 #[test]
@@ -1219,9 +1246,12 @@ fn report_due_quota_is_per_drive() {
             9_000,
         ),
         ev_at(1, "session.config", cfg(1000, 1), 9_001),
+        // 续写幕自己也跑完一批工具：轮数同样随幕重新开账。
+        worked(9_500),
     ];
     let due = report_due(&events, 10_500);
     assert_eq!(due["reports"], json!(0));
+    assert_eq!(due["tool_rounds"], json!(1));
     assert_eq!(due["due"], json!(true));
 }
 
@@ -1243,6 +1273,7 @@ fn views_are_pure_same_slice_same_now_same_value() {
             json!({"stage": "recall", "round": 0, "result": "hit"}),
             30,
         ),
+        worked(40),
     ];
     assert_eq!(report_due(&events, 5_000), report_due(&events, 5_000));
     assert_eq!(turn_head(&events, 5_000), turn_head(&events, 5_000));

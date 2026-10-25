@@ -21,7 +21,8 @@ mod plugin;
 // 端口的执行半边：协议事实的唯一写方 + 租约看护。
 mod port;
 mod provider;
-mod round_hook;
+// 批次边界 host 的执行体与派发点（DE-015 的 D-163）：轮中汇报住这一台。
+mod report_exec;
 mod session_port;
 mod skill_events;
 mod stage_events;

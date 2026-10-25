@@ -592,13 +592,6 @@ pub(crate) type SupplementFn = Arc<
         + Sync,
 >;
 
-/// 轮边界回调（缺口 4）：工具循环每跑完一轮问一次「要不要说点什么」。
-///
-/// 由 `chat_loop` 提供——它有编排器与 compose，判定与措辞都在那边；本函数只负责
-/// **把它交回来的草稿落格**（这里开着 `EventWalStore`）。类型定义与理由见
-/// `round_hook.rs`。
-pub(crate) use super::round_hook::RoundHookFn;
-
 pub(crate) struct ExecTurn<'a> {
     /// 会话窄句柄（交付包 + 动作面端口；不持有会话存储实现）。
     pub session: &'a LoopSession,
@@ -643,11 +636,16 @@ pub(crate) struct ExecTurn<'a> {
     ///
     /// 类型定义在插件侧（core 不参与这套，见 `TurnInput::inject`）。
     pub supplements: Option<SupplementFn>,
-    /// 轮边界汇报（缺口 4）：`None` = 不汇报（`progress_enabled = false`，或未挂 compose）。
+    /// 轮边界汇报（缺口 4）的**能力口**：`None` = 这一轮的 compose 产线关着
+    /// （`compose_enabled = false`），批次边界就不装派发点。
     ///
     /// 与 [`Self::supplements`] **共用同一个挂点**（`TurnInput::inject`）：core 只知道
-    /// 「一轮跑完了，问一次」。分成两个口就得让 core 记两件它不需要知道的事。
-    pub on_round: Option<RoundHookFn>,
+    /// 「一轮跑完了，问一次」——它不认得「汇报」这个业务词。
+    ///
+    /// 交下来的是**能力**（产一句什么话）而不是决定（要不要说）：后者已在行表里
+    /// （`policy.report` + `report_due` v4）。落格与上线在本侧，编排器与 compose
+    /// 在那一侧——两边各管一半（D-163）。
+    pub report: Option<super::report_exec::ReportPort>,
     /// 本轮**轮内注入事件**的序号游标（事件 id `s-{turn}-{no}` / `rp-{turn}-{no}`
     /// 的那一段）。
     ///
@@ -698,7 +696,7 @@ pub(crate) struct ExecTurn<'a> {
     /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
-    /// `progress`——汇报走 `on_round`/`EVENT_ASSISTANT_REPORTED`）。落格在
+    /// `progress`——汇报走 `policy.report` 行 /`EVENT_ASSISTANT_REPORTED`）。落格在
     /// [`execute_turn`] 里做（本插件唯一持写者令牌处），运行器据它落
     /// `chat.assistant.opening` 格。`None` = 本轮没有开场白（常态）。
     pub opening_text: Option<&'a str>,

@@ -18,7 +18,7 @@
 //!
 //! | 符号 | 消费方 |
 //! |---|---|
-//! | [`dialog_node`] | [`crate::symbio_core::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `round_hook`）· `chat_loop/compose` 的判决落地 |
+//! | [`dialog_node`] | [`crate::symbio_core::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`）· `chat_loop/compose` 的判决落地 |
 //! | [`llm_build_text_node`] / [`llm_build_tool_call_nodes`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 留守 `message_build::llm_build_assistant_messages` · `tool_dispatch` · `tool_executor` · `rebuild` |
 //! | [`PresentationTree`] / [`detach_if_flat`] / [`flatten_whole_tree`] / [`turn_root_of`] | 留守 `config`（解析）· `chat_session/read` · `plugin/nodes` · 驱动器 `chat_loop/io` · `orchestrator/failure` · `resume` |
 //!

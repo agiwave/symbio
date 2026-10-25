@@ -190,7 +190,7 @@ fn exec_base<'a>(
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
-        on_round: None,
+        report: None,
         // 开场白：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
         opening_text: None,
         opening_dialog: None,
@@ -214,6 +214,36 @@ fn seed_user(fx: &Fixture, turn: u64, text: &str) -> u64 {
         )
         .expect("用户格入格")
         .value()
+}
+
+/// 生产形状的配置格（`chat_loop/drive.rs` 的 `begin_drive` 落的那一份）。
+///
+/// 本文件的用例大多直调 `execute_turn`，绕过了开幕那一步；只要有一行读
+/// `session.config`（如 `report_due` 的开头），配置格就得自己落——否则那个开关
+/// 恒为 false，行永远不开账，用例会红在一个与它想验的东西无关的地方。
+fn seed_config(fx: &Fixture, turn: u64, user_seq: u64) {
+    fx.facts
+        .append(
+            Event::pending(
+                format!("cfg-{turn}-{user_seq}"),
+                crate::symbio_core::EVENT_SESSION_CONFIG,
+                Entity::Turn,
+                Verb::Asserted,
+                turn,
+                "system",
+            )
+            .with_produced_by(user_seq)
+            .with_payload(serde_json::json!({
+                "classify_enabled": false,
+                "auto_compress": false,
+                "progress_enabled": true,
+                "progress_interval_ms": 0,
+                "progress_min_rounds": 0,
+                "progress_max_per_turn": 2,
+                "is_persistent": true,
+            })),
+        )
+        .expect("配置格入格");
 }
 
 /// 帧收集口（测试的 ExecEventSink 出口）。
@@ -316,7 +346,7 @@ async fn supplements_become_facts_visible_next_turn() {
         consolidation: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
-        on_round: None,
+        report: None,
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
@@ -617,10 +647,28 @@ fn setup_full() -> Fixture {
 /// 同 [`setup_full`]，另可开技能编译——步 22 的**编译**半边要它才动
 /// （观测半边不需要，`memory.recalled` 与开关无关）。
 fn setup_full_with(skill_compile: bool) -> Fixture {
+    setup_with_settings(move |settings| settings.skill_compile_enabled = skill_compile)
+}
+
+/// 汇报那条产线的夹具：阈值配到「第一个批次边界就到期」。
+///
+/// `interval = 0` 让静默时长恒成立、`min_rounds = 0` 让轮数门槛只剩「> 0」
+/// （即至少跑完一批工具）——本夹具要验的是**派发点接回了行表**，不是时长分档。
+fn setup_with_reports() -> Fixture {
+    setup_with_settings(|settings| {
+        settings.progress_enabled = true;
+        settings.progress_interval_ms = 0;
+        settings.progress_min_rounds = 0;
+        settings.progress_max_per_turn = 2;
+    })
+}
+
+/// 同 [`setup_full`]，另可按需改本轮配置快照。
+fn setup_with_settings(tune: impl FnOnce(&mut crate::symbio_core::TurnSettings)) -> Fixture {
     let facts = Arc::new(EventStore::new());
     let port = Arc::new(FakeSessionPort::new(Vec::new()).with_facts(facts.clone()));
     let mut settings = default_settings();
-    settings.skill_compile_enabled = skill_compile;
+    tune(&mut settings);
     let spec = turn_spec(
         "turn_exec_test",
         std::env::temp_dir().join("symbio-test/tool-archives"),
@@ -896,7 +944,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
-        on_round: None,
+        report: None,
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
@@ -1047,40 +1095,30 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 /// 与实时面就是两个身份）。
 #[tokio::test]
 async fn round_report_reaches_the_live_surface_before_turn_end() {
-    let fx = setup_full();
+    // 汇报这条产线要 **行表真的开账**（`policy.report` 欠不欠由 `report_due` v4
+    // 判），所以夹具把三个阈值配到「第一个批次边界就到期」，不靠手造一个「该报了」
+    // 的返回值——那正是退役的 `RoundHookFn` 掊着的判定。
+    let fx = setup_with_reports();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
-    // 只报一次：`RoundHookFn` 每跑完一轮工具都会被问一次，第二轮起返回 `None`。
-    let fired = Arc::new(Mutex::new(false));
-    let on_round = {
-        let fired = fired.clone();
-        Arc::new(move || {
-            let fired = fired.clone();
-            Box::pin(async move {
-                let mut once = fired.lock().unwrap();
-                if *once {
-                    return None;
-                }
-                *once = true;
-                Some(super::super::round_hook::ReportDraft {
-                    text: "已经完成 1 轮工具调用，还在继续。".into(),
-                    tool_rounds: 1,
-                    quiet_ms: 45_000,
-                })
-            })
-                as std::pin::Pin<
-                    Box<
-                        dyn std::future::Future<
-                                Output = Option<super::super::round_hook::ReportDraft>,
-                            > + Send,
-                    >,
-                >
-        }) as super::RoundHookFn
-    };
+    // 措辞能力口：只产一句话（判定与落格都不在这里，D-163）。配额 2 让两个批次
+    // 边界都能报，但本用例的编排只有一批工具，故只报一次。
+    let text: super::super::report_exec::ReportTextFn = Arc::new(|_snapshot| {
+        Box::pin(async { Some("已经完成 1 轮工具调用，还在继续。".to_string()) })
+    });
 
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
+    seed_config(&fx, 0, user_seq);
+    // 本幕的「现在」= 已落事实里最新那条的时刻（静默读数的另一端）。间隔配成 0，
+    // 所以这个值不影响到期判定，但它得是真读数，不能是编的一个数。
+    let now_ms = fx
+        .facts
+        .range(Seq::new(0))
+        .last()
+        .map(|e| e.ts)
+        .unwrap_or(0);
     let res = execute_turn(ExecTurn {
         turn_no: 0,
         user_seq,
@@ -1110,7 +1148,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
-        on_round: Some(on_round),
+        report: Some(super::super::report_exec::ReportPort { now_ms, text }),
         opening_text: None,
         opening_dialog: None,
         presentation_tree: crate::symbio_core::node_build::PresentationTree::Grouped,
@@ -1342,7 +1380,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
-        on_round: None,
+        report: None,
         // 开场白：本夹具不产生。
         opening_text: None,
         opening_dialog: None,

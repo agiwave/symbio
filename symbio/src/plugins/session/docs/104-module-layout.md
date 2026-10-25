@@ -82,7 +82,7 @@ impl: done
 |---|---|---|
 | 入口 | `plugin.rs` · `provider.rs` · `mod.rs` | 插件的唯一入口：`loop/<sid>` 的 `Action("run_turn")`（授权三条见 `plugin.rs` 模块文档）。**没有 `route` 臂、没有能力行、没有常驻任务**——它贡献 1 条 Mount 行，停用即 `NotFound` |
 | 跨墙面 | `session_port.rs` · `turn_session.rs` | 数据面经 `TurnDispatch`（`TurnSpec` 纯值 + 闭族对象）；会话侧读写只走地址面 `session/<sid>/_run/<op>`（`SessionPort`），不 import 会话模块（E-009 / E-013） |
-| 主循环 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,compose,delegate,drive}.rs` · `loop_rows.rs` · `head_exec.rs` · `stage_events.rs` · `turn_runner.rs` · `turn_exec.rs` · `round_hook.rs` | 环骨架、状态与契约、输入准备、**行表**、轮首 host 的绑定表与派发点、阶段事实、执行引擎与轮边界产物。`loop_rows.rs` 每行 = `Decl` 数据（`owes` / `until` / `unless` + 全局 `prio`）；行注册在**自己 host 的绑定表**上（D-159），派发点向 `ring::drive` 传由该表派生的行子集，结论由引擎现读；声明与视图在 `symbio_core::decl`（DE-015） |
+| 主循环 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,compose,delegate,drive}.rs` · `loop_rows.rs` · `head_exec.rs` · `report_exec.rs` · `stage_events.rs` · `turn_runner.rs` · `turn_exec.rs` | 环骨架、状态与契约、输入准备、**行表**、轮首 host 的绑定表与派发点、批次边界 host 的绑定表与派发点、阶段事实、执行引擎与批次边界产物。`loop_rows.rs` 每行 = `Decl` 数据（`owes` / `until` / `unless` + 全局 `prio`）；行注册在**自己 host 的绑定表**上（D-159），派发点向 `ring::drive` 传由该表派生的行子集，结论由引擎现读；声明与视图在 `symbio_core::decl`（DE-015） |
 | 上下文与请求 | `context.rs` + `context/{pipeline,view,prompt}.rs` · `message_build.rs` · `tokenizer.rs` · `model_chat.rs` | 压缩 / 注入 / 请求视图、助手轮装配、Token 估算与头尾切分、Model 推理请求协议 |
 | 工具与分派 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` · `tool_dispatch.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档 |
 | 事实与记忆 | `derived_facts.rs` · `memory_events.rs` · `skill_events.rs` · `task_events.rs` · `resume.rs` | 轮末派生事实（承诺 / 任务表 / 熔断 + 记忆三段 + 技能观测）经会话动作面落格；恢复与历史重写 |
@@ -122,8 +122,8 @@ impl: done
 
 | core 落点 | 装什么 | 取用方（留守 / 驱动器） |
 |---|---|---|
-| `symbio_core::schemas::session::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `round_hook` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
-| `symbio_core::schemas::session::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `round_hook` |
+| `symbio_core::schemas::session::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `detach_if_flat` / `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `report_exec` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
+| `symbio_core::schemas::session::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `report_exec` |
 | `symbio_core::text::merge_kernel` | 巩固合并的**纯计算内核**（截断 / 分句 / 合并 + 保真度，只依赖 `std`，verify 程序以 `#[path]` 共有同一份源码） | 驱动器 `memory_events`（续一条原名短路径，调用点不动）· `skill_events` |
 | `symbio_core::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | 驱动器 `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline`；留守 `stats` |
 
