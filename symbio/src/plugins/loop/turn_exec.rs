@@ -779,22 +779,40 @@ pub(crate) type StepFuture<'a> =
 /// ——两台 host 的差别只在借什么，不在怎么选债（D-159 裁决 1）。
 pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 
-/// `execute` 执行体：跑**一次**模型往返。
+/// `execute` 执行体：**宣布**一次模型往返（`request(port=model)`）。
+///
+/// 派出归 [`run_model`]（`dispatch-model` 行的 `relay` 执行体，D-166）：
+/// 「这一笔该谁跑」由行表选债决定，不由这段代码顺手调一次往返决定。两个动作之间
+/// 唯一的交接件是草稿里的 `pending_round`。
 ///
 /// 工具批的三笔债（创建 / 授权 / 派发）已各自成行（b），不再在这个
 /// 执行体里按草稿分支：[`super::turn_exec::run_open`] / `run_authorize` /
-/// `run_dispatch` 各由自己的行选中。本函数只做一件事——模型的下一步。
+/// `run_dispatch` 各由自己的行选中。
 ///
 /// 收束**不归这里**：应答落地后 `close-turn`（55）比这一行（60）先被选中，入格
 /// 归 `close` 执行体。审批 / 问答恢复也不再旁路收束（d）：唤醒请求进
 /// 行表之后，恢复幕与普通幕走同一组行。
 ///
-/// 步数在这里**记**（口径 = 模型往返次数，与拆分前「一步 = 一轮往返」同），
-/// 上界判断在派发器——停机判据不搬进执行体（D-118 决策 7）。
+/// 步数在 [`TurnSession::announce_model`] 里**记**（口径 = 模型往返次数，
+/// 与拆分前「一步 = 一轮往返」同），上界判断在派发器——停机判据不搬进执行体
+/// （D-118 决策 7）。
 pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
-        let append = |e: AppendError| ActorError::Append(e);
-        step.session.record_model_step();
+        step.session
+            .announce_model(step.store)
+            .await
+            .map_err(ActorError::Append)
+    })
+}
+
+/// `relay` 执行体（D-166）：`dispatch-model` 行选中的动作——把**已宣布**的那一次
+/// 模型往返发出去，并把结局归位。
+///
+/// 它不判断「该不该发」：那一半由行表的债说（`request` 开着才轮得到它）；
+/// 它也不判断「这一轮结束没有」：结局寄存进草稿，收束归 `close` 执行体
+/// （D-123 决策 5）。
+pub(crate) fn run_model<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
         step.session
             .model(
                 step.store,
@@ -805,7 +823,7 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
                 step.dispatch.is_some(),
             )
             .await
-            .map_err(append)
+            .map_err(ActorError::Append)
     })
 }
 

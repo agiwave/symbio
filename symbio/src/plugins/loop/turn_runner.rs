@@ -499,26 +499,41 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
-    /// 记一次模型往返（执行体自己知道这一步有没有调模型）。
+    /// 记一次模型往返（**只给夹具**：生产路径的步数在 [`Self::announce_model`] 里记）。
     ///
-    /// 只数**模型往返**：工具批次不额外消耗步数，与拆分前「一步 = 一轮往返」同口径。
-    /// 上界判断不在这里——停机判据归派发器（D-118 决策 7），它读
-    /// [`Self::over_step_limit`]。
+    /// 派发器的「无进展」与「步数上界」两条守卫要靠它造出可控的步数序列：夹具在同一
+    /// 个 `by` 上换动作时，那一步不落格，只能自己把步数推上去（否则永不返回）。
+    #[cfg(test)]
     pub(crate) fn record_model_step(&mut self) {
         self.steps += 1;
     }
-
     /// 模型往返步数是否已到上界（派发器每步前问一次，到顶即 `exhausted{step_limit}`）。
     pub(crate) fn over_step_limit(&self) -> bool {
         self.steps >= MAX_STEPS_PER_DRIVE
+    }
+
+    /// 宣布**一次**模型往返（`execute-turn` 行的动作，D-166）：落 `request(port=model)`。
+    ///
+    /// 派出归 [`Self::model`]（`dispatch-model` 行）——两个环步之间唯一的交接件是
+    /// 草稿里的 [`prepare::Prepared::pending_round`]。步数**不在这里**记：口径是
+    /// 「真打了几次模型」，而宣布之后那一笔可能压根没派出（上一世遗留的请求由
+    /// [`Self::model`] 判死，那次不算一步）。
+    pub(crate) async fn announce_model<S>(
+        &mut self,
+        store: &S,
+    ) -> Result<(), crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        stream::announce_round(&mut self.run, store).await
     }
 
     /// 跑**一次模型往返**：请求了工具就把应答留在草稿里等 [`Self::tools`]；
     /// 该收束了（答完了 / 模型没答成 / 中止）就把**结局**留给 `close-turn`。
     ///
     /// 只有一条路就地收口：**控制面**失败（模型往返压根没派发）——它在日志上没有
-    /// 模型的终局事实，收束行开不出账，兜底格只能由这一步落（`execute` 执行体的
-    /// 过渡豁免，见 `loop_rows::ACTORS`）。
+    /// 模型的终局事实，收束行开不出账，兜底格只能由这一步落（`relay` 执行体的
+    /// 名单上有它，D-166）。
     ///
     /// 它**不交回**产出（D-123 决策 5）：「本轮结束了没有」由派发器读账本判，
     /// 执行体只写自己那一半事实。
@@ -534,12 +549,20 @@ impl TurnSession {
     where
         S: Store<Event = Event> + ?Sized,
     {
+        // 步数 = **真打出去的模型往返次数**：没有交接件的那一笔（上一世遗留）不算一步。
+        if self.run.pending_round.is_some() {
+            self.steps += 1;
+        }
         match stream::model_round(&mut self.run, store, llm, tok, sink, tools, has_dispatch).await?
         {
             stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
             stream::ModelRound::Tools => {}
             // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
             stream::ModelRound::Close => {}
+            // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
+            stream::ModelRound::NoPending => {
+                stream::kill_dangling_round(store)?;
+            }
         }
         Ok(())
     }

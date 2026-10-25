@@ -4625,3 +4625,90 @@ mod actor_ledger_tests {
         );
     }
 }
+
+// ── 宣布与派出之间被杀的那一笔（D-166）─────────────────────────────────
+//
+// 两个环步之间没有 `sent`，所以租约看护看不见它（`stale_sent` 只按派出之后卡住的
+// 那些开账）。没人管它就会一直开着：新的一幕照旧把它选出来，而等它的 future 早就
+// 没了。这条用例钉的是「判死」这一半——不判死，那一笔会永远占着 `dispatch-model`。
+mod dangling_round_tests {
+    use crate::symbio_core::{Entity, Event, Seq, Store, Verb};
+
+    /// 一笔**已宣布、没派出**的请求：`kill_dangling_round` 给它落 `failed`。
+    #[tokio::test]
+    async fn an_undispatched_request_is_killed_with_its_own_identity() {
+        let store = crate::symbio_core::EventStore::new();
+        store
+            .append(
+                Event::pending(
+                    "request-model-m-1-1",
+                    crate::symbio_core::EVENT_REQUEST,
+                    Entity::Turn,
+                    Verb::Asserted,
+                    3,
+                    "system",
+                )
+                .with_produced_by(7)
+                .with_payload(serde_json::json!({
+                    "port": "model",
+                    "id": "model-3-d5-s0",
+                    "attempt": 1,
+                })),
+            )
+            .expect("夹具落请求");
+
+        let killed = super::super::stream::kill_dangling_round(&store).expect("判死不失败");
+        assert!(killed, "有一笔开着的请求 ⇒ 必须判死");
+
+        let facts = store.range(Seq::new(0));
+        let failed = facts
+            .iter()
+            .find(|e| e.kind == crate::symbio_core::EVENT_FAILED)
+            .expect("判死要落 failed");
+        assert_eq!(failed.payload["id"], "model-3-d5-s0", "身份随原请求走");
+        assert_eq!(failed.payload["attempt"], 1);
+        assert_eq!(failed.payload["why"], "no_pending_round");
+        assert_eq!(failed.turn, 3, "判死落在**那一笔**所属的轮上，不是当前轮");
+        assert_eq!(failed.produced_by, Some(7), "溯源随原请求走");
+
+        // 第二遍没有可判的：不能重复落 `failed`（幂等键会撞，但更该什么都不写）。
+        assert!(
+            !super::super::stream::kill_dangling_round(&store).expect("再判一次"),
+            "已经关掉的那笔不再算开着"
+        );
+    }
+
+    /// 派出过的请求**不**归它管：`sent` 之后的失败由租约看护 / 适配器落。
+    #[tokio::test]
+    async fn a_dispatched_request_is_left_to_the_lease_keeper() {
+        let store = crate::symbio_core::EventStore::new();
+        for (kind, payload) in [
+            (
+                crate::symbio_core::EVENT_REQUEST,
+                serde_json::json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
+            ),
+            (
+                crate::symbio_core::EVENT_SENT,
+                serde_json::json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
+            ),
+        ] {
+            store
+                .append(
+                    Event::pending(
+                        format!("{kind}-fixture"),
+                        kind,
+                        Entity::Turn,
+                        Verb::Asserted,
+                        1,
+                        "system",
+                    )
+                    .with_payload(payload),
+                )
+                .expect("夹具落格");
+        }
+        assert!(
+            !super::super::stream::kill_dangling_round(&store).expect("不该失败"),
+            "派出过的请求有等待方，判死是租约看护的活"
+        );
+    }
+}

@@ -132,12 +132,14 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v10：`reflex_answered`（本幕快路已作答，D-163）是它最新的一格，
-    // 而 `answered`（D-162 裁决 1）与 `has_final` / `closeable` / `tools_open` 的读面自
-    // v8 起只看「这一轮自己的模型往返」（内部往返带 `via`，D-122 决策 2）。
+    // `turn_head` 到 v11：`model_open`（D-166，本幕已宣布、没派出的模型往返）是最新的
+    // 一格，执行行的让位据此从「`prio` 碰巧排对」变成事实前件；
+    // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
+    // `closeable` / `tools_open` 的读面自 v8 起只看「这一轮自己的模型往返」
+    // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 10);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 11);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 4);
@@ -589,7 +591,9 @@ fn turn_head_reads_round_and_done_from_facts() {
             "reflex_answered": false,
             "has_final": false,
             "closeable": false,
-            "tools_open": false
+            "tools_open": false,
+            // D-166：本幕没有「已宣布、没派出」的模型往返。
+            "model_open": false
         })
     );
 
@@ -1362,4 +1366,67 @@ fn the_request_cell_belongs_to_the_decider() {
     });
     b.row(cover(EVENT_REQUEST, Some("decider")));
     assert_eq!(gaps_of(b), vec![]);
+}
+
+/// D-166：`model_open` 只认「本幕已宣布、还没派出」的那一笔。
+///
+/// 三档各一条：没宣布 ⇒ 假；宣布未派 ⇒ 真；派出之后 ⇒ 假（账变成「等应答」的）。
+/// 第四条是身份面：带 `via` 的内部往返（判决 / 措辞 / 摘要）不占这一格——它们由
+/// 各自的调用点等在自己的 future 里，不归轮内派发行。
+#[test]
+fn turn_head_model_open_until_the_round_is_dispatched() {
+    let base = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert_eq!(turn_head(&base, 0)["model_open"], json!(false));
+
+    let mut announced = base.clone();
+    announced.push(ev(
+        1,
+        EVENT_REQUEST,
+        json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
+    ));
+    assert_eq!(
+        turn_head(&announced, 0)["model_open"],
+        json!(true),
+        "宣布之后那一笔还开着 ⇒ 派发行该被选中"
+    );
+
+    let mut dispatched = announced.clone();
+    dispatched.push(ev(
+        1,
+        EVENT_SENT,
+        json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
+    ));
+    assert_eq!(
+        turn_head(&dispatched, 0)["model_open"],
+        json!(false),
+        "派出之后账变成 `await-model`，本行的让位理由消失"
+    );
+
+    // 另一个 attempt 的 `sent` 关不掉这一笔（键是 `(port, id, attempt)`）。
+    let mut other_attempt = announced.clone();
+    other_attempt.push(ev(
+        1,
+        EVENT_SENT,
+        json!({"port": "model", "id": "model-1-d0-s0", "attempt": 2}),
+    ));
+    assert_eq!(
+        turn_head(&other_attempt, 0)["model_open"],
+        json!(true),
+        "按 attempt 对键：重试的 `sent` 不能把上一笔请求提前关掉"
+    );
+
+    let mut internal = base.clone();
+    internal.push(ev(
+        1,
+        EVENT_REQUEST,
+        json!({"port": "model", "id": "model-z0", "attempt": 1, "via": "compress/summary"}),
+    ));
+    assert_eq!(
+        turn_head(&internal, 0)["model_open"],
+        json!(false),
+        "内部往返带 `via`，不属于「本幕要派发的那一轮」"
+    );
 }

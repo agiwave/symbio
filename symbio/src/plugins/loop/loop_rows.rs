@@ -93,6 +93,13 @@ const OPENER: &str = "opener";
 const AUTHORIZER: &str = "authorizer";
 /// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
 const COURIER: &str = "courier";
+/// 中转执行体（D-166）：`dispatch-model` 行选中的动作——跑一次**已宣布**的模型往返。
+///
+/// 与 [`COURIER`] 分开是 D-118 决策 1–2 的直接后果：一个 `by` 一个动作，而两件事
+/// 不是同一件——`courier` 派发的是**一批**工具调用（批尾统一关账、落等待格与轮内
+/// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
+/// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
+const RELAY: &str = "relay";
 /// 轮首准备执行体（D-159）：`policy.recall` 行选中的动作。
 ///
 /// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
@@ -184,9 +191,33 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     ],
 };
 
+/// 中转执行体（D-166）：`dispatch-model` 行选中的动作——把**已宣布**的那一次模型
+/// 往返发出去，并把它的结局归位。
+///
+/// ## 为什么它写得出兜底格
+///
+/// 名单里那两格只在**控制面失败**时落：模型往返派不出去（行不欠 / 端口没声明）或
+/// 模型要了工具而本轮没有分发通道。两条路在日志上都没有模型的终局事实
+/// （`failed(port=model)` 落不下来）⇒ 收束行开不出账 ⇒ 兜底格只能由**手上拿着这一笔
+/// 往返的那一方**就地落。D-166 之前那一方是 `execute`（走它的过渡豁免，因为它的出口
+/// 与 `close` 的出口同族 ⇒ 声明就是一条假环）；写方搬到这里之后，本行的出口是引擎
+/// 独占的 `sent` / `failed`，与 `close` 的出口不同族，于是**声明得了**——过渡豁免
+/// 随之清空（`ACTORS` 上不再有任何一条）。
+///
+/// ## 它不交回产出
+///
+/// 结局寄存在本轮草稿（`closing` / `pending_model`），由 `close-turn` / `open-tools`
+/// 两行各自的执行体取走——执行体不判断「本轮结束了没有」（D-123 决策 5）。
+const ACTOR_RELAY: ActorDecl = ActorDecl {
+    name: RELAY,
+    // 一次模型往返本身就是深度档的活。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_ASSISTANT_FALLBACK, EVENT_AUTHZ_DENIED],
+};
+
 /// 收束执行体（步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
 /// 模型往返的**结局**落成收束格。
-///
 /// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
 /// 与 `execute → close`），表装不上（DE-015 §3.4 第 1 条）——所以收束格只能归一个执行体。
 /// 它**不**覆盖轮首准备的 1b 分支（定稿答话轮）：那一轮一次模型往返都不发，收束格由
@@ -290,23 +321,17 @@ const ACTOR_REPORT: ActorDecl = ActorDecl {
 /// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
 ///
 /// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
-/// 声明不了不是遗漏，是装载期会红：把收束格写进 `execute` 的名单，`close-turn` 的出口格
-/// 就同时是两个执行体的出口格 ⇒
-/// `Gap::DependencyCycle`（注①）。
+/// 声明不了不是遗漏，是装载期会红：把收束格写进一个出口与 `close` 同族的执行体名单，
+/// `close-turn` 的出口格就同时是两个执行体的出口格 ⇒ `Gap::DependencyCycle`（注①）。
 /// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
 /// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
 /// 而不是将错就错地放宽名单。
 ///
-/// 删除条件：收束格**全部**归 `close` 执行体之后。步 5c 已把中止轮与适配器失败两条
-/// 挪进收束动作，剩下的是两条控制面失败（见 [`ACTOR_EXECUTE`] 那条表项的注释）——
-/// 它们在生产里不可达，仍留豁免；真要让它们也走收束动作，得先给「模型往返压根没派发」
-/// 与「工具批开不出来」各立一个日志事实（视图折不出这两条：折出来的判据分不开
-/// 「开不出来」与「还没开」）。
-///
-/// 这条豁免的留与重开条件写在
-/// [D-148](../../../../docs/003-design/015-义务环.md#d-148-transitional-豁免是结构事实不是兼容层留并把重开条件写成可观测的一条 "DE-015-义务环")：
-/// 它不是兼容层，而是「声明面表达不了的一次写出」；能触发它退役的信号只有一个——端口记账层
-/// 开始为「请求构造失败」落 `failed(port=model)`。
+/// **今天这张表上一条都没有**（D-166）：唯一那条（`execute` 写兜底格）随模型往返的
+/// 派发搬到了 [`ACTOR_RELAY`]——它的出口是引擎独占的 `sent` / `failed`，与 `close`
+/// 的出口不同族，那两格因此**声明得了**。这一格保留为空列表而不是删字段：它是装载期
+/// 的判据面（「声明不了的一次写出」必须有名有姓地登记），删掉它等于下次有人需要时
+/// 只能偷偷放宽 `decl.writes`。
 ///
 /// 这张表是**派发器的入参**（[`super::turn_exec::drive_steps`] 的 `actors`，D-123
 /// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
@@ -322,18 +347,9 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_EXECUTE,
         run: super::turn_exec::run_execute,
-        // 两条**控制面**失败就地落的兜底格：模型往返派不出去（行不欠 / 端口没声明）
-        // 与工具批开不出来（模型要了工具而本轮没有分发通道）。这两条路在日志上
-        // **没有**模型的终局事实（`failed(port=model)` 落不下来）⇒ 收束行开不出账
-        // ⇒ 那两格只能由 `execute` 写。声明不了不是遗漏：写进 `decl.writes` 会让
-        // `close-turn` 的出口格被两个执行体写 ⇒ 依赖图成环，装载红。
-        //
-        // 两条在生产里都不可达（`turn_exec` 的模型调用点恒带分发通道；行表装载失败
-        // 时整幕开不起来），只有单测走得到——故留一条**有名有姓**的豁免，而不是
-        // 把收束格的名额还给 `execute`。重开条件只有一条可观测的信号：端口记账层开始
-        // 为「请求构造失败」落 `failed(port=model)` 时，兜底写与这条豁免一起删
-        // （[D-148](../../../../docs/003-design/015-义务环.md#d-148-transitional-豁免是结构事实不是兼容层留并把重开条件写成可观测的一条 "DE-015-义务环")）。
-        transitional: &[EVENT_ASSISTANT_FALLBACK],
+        // 豁免已清空（D-166）：那两格兜底写随模型往返的派发搬到了 [`ACTOR_RELAY`]，
+        // 而它的出口与 `close` 不同族 ⇒ 声明得了，不必再借豁免。
+        transitional: &[],
     },
     ActorEntry {
         decl: ACTOR_CLOSE,
@@ -353,6 +369,11 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_COURIER,
         run: super::turn_exec::run_dispatch,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_RELAY,
+        run: super::turn_exec::run_model,
         transitional: &[],
     },
 ];
@@ -854,6 +875,10 @@ pub(crate) static ROWS: &[Decl] = &[
     // `reflex_answered = false`（D-163）：快路已作答的轮**没有要答的东西**，本行不欠。
     // 这条前件替代了「按优先级让 close 先跑」的时序约定——零模型往返因此是行表上的
     // 判据，不是两个数字（55 / 60）碰巧凑出来的次序。
+    //
+    // `model_open = false`（D-166）：本行只**宣布**一次往返（落 `request(port=model)`），
+    // 派出归 `dispatch-model`。宣布之后那笔账还开着，本行必须让位——否则 `prio` 60
+    // 会压过 66 再宣布一笔，同一幕两条请求并存，「一次模型往返」这个粒度当场失真。
     Decl {
         name: "execute-turn",
         prio: 60,
@@ -866,6 +891,7 @@ pub(crate) static ROWS: &[Decl] = &[
             eq: &[
                 ("tools_open", Lit::Bool(false)),
                 ("reflex_answered", Lit::Bool(false)),
+                ("model_open", Lit::Bool(false)),
             ],
         },
         until: &[Pattern {
@@ -912,8 +938,7 @@ pub(crate) static ROWS: &[Decl] = &[
     },
     // ── 端口 `model` 的两行──────────────────────────
     //
-    // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返，它在
-    // `turn` 执行体内部发起（D-115 决策 5：没有第二个调度器）。
+    // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返。
     //
     // 键同样取 `(port, id, attempt)`（D-138）：逻辑 id 在一次调用的各次尝试间不变，
     // 尝试号随重试 +1；按逻辑键开账会让上一 attempt 的 `sent` 把重试后的请求提前关掉。
@@ -924,12 +949,22 @@ pub(crate) static ROWS: &[Decl] = &[
     // 的可恢复单位：崩溃后重放到「上一次模型请求」即可，不必重放整轮。工具批次
     // 在它**外面**（一个模型响应可带多个工具调用），所以工具端口的 `expand` 是
     // 下一层的事（DE-015 步 3）。
+    //
+    // ## 谁宣布、谁派出（D-166）
+    //
+    // `execute-turn`（60）宣布这一笔（落 `request`），由本行的 [`RELAY`] 执行体
+    // 跑出 `sent` + `response` / `failed`。两个时刻分开的理由不是「拆得好看」：
+    // 宣布之后那一笔在日志上是一笔**开着**的债，派发由选债触发（不是执行体内部
+    // 顺手调一次往返），所以「这一笔该谁跑」在事实面上可判、在崩溃后可接。
+    //
+    // 与 `dispatch-tools` 不共用一个执行体名：一个 `by` 一个动作（D-118 决策 1–2），
+    // 而 `courier` 的动作派发的是**一批**（批尾关账、落等待格与轮内注入），
+    // 与「跑一次往返」不是同一件事——共名会让动作只能按行名分支。
     Decl {
         name: "dispatch-model",
         prio: 66,
-        // 未接线：引擎面在 `port::round_trip`（落 `sent` + 跑一次往返），调用点还在执行体内。
-        by: None,
-        // 派发本身不调模型（模型在执行体里）。
+        by: Some(RELAY),
+        // 派发本身不调模型（模型在 [`ACTOR_RELAY`] 的动作里，协议格仍由引擎写）。
         tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {

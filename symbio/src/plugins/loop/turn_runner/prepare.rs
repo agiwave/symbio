@@ -95,6 +95,12 @@ pub(crate) struct Prepared {
     /// 放在 `Prepared` 而不是新开一份状态：它和消息 / 节点 / 成本同属**本轮草稿**，
     /// 引擎不读它；拆步只是把「一次 `step` 做两件事」拆成两个可分别调用的动作。
     pub(crate) pending_model: Option<LlmTurn>,
+    /// 已**宣布**、还没派出的那一次模型往返（D-166）。
+    ///
+    /// 与 [`Prepared::pending_model`] 不是一回事：那一格是「应答已落、工具批还没派」，
+    /// 这一格是「请求已落、模型还没打」。两格之间的那一步（`dispatch-model` 行）由
+    /// 另一个执行体跑，所以交接件只能放在草稿里——它就是那两个动作之间唯一的凭据。
+    pub(crate) pending_round: Option<super::super::port::Call>,
     /// 创建动作开出的端口账（b）：创建 → 授权 → 派发三个动作之间**唯一**
     /// 的交接件。放在草稿里而不是各自重开：`ToolPortCall` 的 `granted` / `sent` /
     /// `deny_why` 是三个动作依次写入的同一份判定结果，分两次构造就会各说一套。
@@ -408,6 +414,7 @@ where
         inject,
         nodes,
         pending_model: None,
+        pending_round: None,
         pending_calls: None,
         // 快路：正文寄到收束动作（D-163）。零模型往返，驱动环的第一个债就是
         // `close-turn`（55 < 60）——本段照常备好派发格与 prompt，只是不发请求。

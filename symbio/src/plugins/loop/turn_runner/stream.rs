@@ -48,6 +48,10 @@ enum ModelCallError {
 /// （`open_calls`：`response` / `retry` 关同 id + attempt，`failed` 关同逻辑 id）
 /// ——也就是说，**id 必须跨端口唯一**，否则一个端口的失败会关掉另一个端口的账。
 /// 以端口名开头是最省心的做法：`turn-…` 与 `model-…` 天然不撞。
+// 八个入参是「七个端口 + 这一笔的身份」：前七个各是一个不同的端口（草稿 / 事实源 /
+// 适配器 / 令牌 / 消息 / 工具清单 / 流式出口），第八个是**这一笔往返的键**——它在
+// 宣布那一步就定了（D-166），所以不能在这里重新生成。
+#[allow(clippy::too_many_arguments)]
 async fn call_model<S>(
     run: &mut Prepared,
     store: &S,
@@ -56,20 +60,16 @@ async fn call_model<S>(
     messages: &[crate::symbio_core::PromptMessage],
     tools: &[crate::symbio_core::CapabilityMeta],
     sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
+    call: &super::super::port::Call,
 ) -> Result<crate::symbio_core::LlmTurn, ModelCallError>
 where
     S: Store<Event = Event> + ?Sized,
 {
-    let call = super::super::port::Call::new(
-        "model",
-        format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
-        1,
-    );
     let turn = run.turn;
     let drive = run.drive_seq;
     let round = call.id.clone();
-    super::super::port::announce(store, &call, run.turn, run.user_seq)
-        .map_err(ModelCallError::Store)?;
+    // `request` 已经由 [`announce_round`] 落过（宣布与派出是两个环步，D-166）；
+    // 这里从 `sent` 起：派发前格由 `PortDecl::before` 决定，跑完落 `response`。
     // 应答载荷带上本次交回的工具调用（D-117）：创建行 `open-tools` 的集合
     // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
     // 行欠不欠由引擎现读（D-136）：这里只交出「授权这次派发的行」与读账的 now。
@@ -92,7 +92,7 @@ where
         store,
         super::super::loop_rows::PORTS,
         super::super::port::Dispatch {
-            call: &call,
+            call,
             turn: run.turn,
             produced_by: run.user_seq,
             row: "dispatch-model",
@@ -189,15 +189,108 @@ pub(crate) enum ModelRound {
     /// 本轮该收束了；**结局**寄存在 [`Prepared::closing`]，落格归 `close-turn`
     /// 行的执行体（/ 步 5c）。
     ///
-    /// 三种收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
+    /// 三次收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
     /// 但**都是「这一轮该收了」**，而收束格只由 `close` 执行体写。
     Close,
+    /// 这一笔不是本幕宣布的（草稿里没有交接件）：上一段生命在宣布与派出之间结束，
+    /// 请求留在日志上没人接。调用方据此把它判死（[`kill_dangling_round`]）。
+    NoPending,
+}
+
+/// 阶段②a-0：为**下一次**模型往返开账（`request(port=model)`），把这一笔留在草稿里。
+///
+/// 派发不在这里（D-166）：「宣布」与「派出」是两个环步。宣布之后那笔账在日志上是
+/// **开着的**（`dispatch-model` 行因它而欠），派出由 [`model_round`] 在另一个动作里
+/// 做——这样「这一笔该谁跑」在事实面上可判，而不由某段代码顺手调一次往返决定。
+///
+/// 逻辑 id 的取法与 [`call_model`] 的头注同源（端口名开头 + 幕锚 + 步号）：步号在
+/// 派出之后才 +1，所以一次往返只有一条 `request`，第二次不会撞上第一次的幂等键。
+pub(crate) async fn announce_round<S>(
+    run: &mut Prepared,
+    store: &S,
+) -> Result<(), crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let call = super::super::port::Call::new(
+        "model",
+        format!("model-{}-d{}-s{}", run.turn, run.drive_seq, run.step),
+        1,
+    );
+    super::super::port::announce(store, &call, run.turn, run.user_seq)?;
+    run.pending_round = Some(call);
+    Ok(())
+}
+
+/// 把一笔**没有等待方**的模型请求判死（`failed`，`why = "no_pending_round"`）。
+///
+/// ## 什么时候会有这种请求
+///
+/// 上一段生命在「宣布」与「派出」之间被杀：两步之间还没有 `sent`，租约看护看不见
+/// 它（`stale_sent` 只看派出之后卡住的那些），于是它作为一笔开着的债留在日志里，
+/// 新的一幕照旧会把它选出来。等它的 future 已经没了，重试也没有对象——判死是唯一
+/// 如实的处置（与 [`super::super::port::reap`] 对 `awaited = false` 的口径同源：
+/// 没人等的调用不留着占账）。
+///
+/// 取**最老**的一笔：与 `ring::owed` 的遍历序一致，判死之后下一问问表就轮到下一笔。
+pub(crate) fn kill_dangling_round<S>(store: &S) -> Result<bool, crate::symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let facts = store.range(crate::symbio_core::Seq::new(0));
+    let open = facts.iter().find(|r| {
+        r.kind == crate::symbio_core::EVENT_REQUEST
+            && r.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+            && r.payload.get("via").is_none()
+            && !facts.iter().any(|e| {
+                matches!(
+                    e.kind.as_str(),
+                    crate::symbio_core::EVENT_SENT | crate::symbio_core::EVENT_FAILED
+                ) && e.payload.get("port").and_then(|v| v.as_str()) == Some("model")
+                    && e.payload.get("id") == r.payload.get("id")
+                    && e.payload.get("attempt") == r.payload.get("attempt")
+            })
+    });
+    let Some(request) = open else {
+        return Ok(false);
+    };
+    let Some(id) = request.payload.get("id").and_then(|v| v.as_str()) else {
+        return Ok(false);
+    };
+    let attempt = request
+        .payload
+        .get("attempt")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    let call = super::super::port::Call::new("model", id, attempt).with_via_opt(
+        request
+            .payload
+            .get("via")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+    );
+    super::super::port::failed_with(
+        store,
+        &call,
+        request.turn,
+        request.produced_by.unwrap_or(request.turn),
+        "no_pending_round",
+    )?;
+    crate::plugin_warn!(
+        "session",
+        "[Loop] 模型请求 `{}` 没有等待方（上一段生命在宣布与派出之间结束）——判死",
+        call.id
+    );
+    Ok(true)
 }
 
 /// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
 ///
 /// 与 [`dispatch_round`] 拆开是 的第一步：引擎要能分别选中「模型往返」与
 /// 「工具批次」两笔债，执行体就不能再把它们揉在一次调用里。
+///
+/// 宣布归 [`announce_round`]（`execute-turn` 行的动作），本函数只跑**已宣布**的
+/// 那一笔：`pending_round` 是两步之间唯一的交接件（D-166）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn model_round<S>(
     run: &mut Prepared,
@@ -211,6 +304,11 @@ pub(crate) async fn model_round<S>(
 where
     S: Store<Event = Event> + ?Sized,
 {
+    // 没有交接件 ⇒ 这一笔不是本幕宣布的（上一世的遗留）。判死由调用方做
+    // （[`kill_dangling_round`]）：那里看得见日志，这里只看得到草稿。
+    let Some(call) = run.pending_round.take() else {
+        return Ok(ModelRound::NoPending);
+    };
     // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
     let mut messages = run.base_messages.clone();
     messages.extend(run.exchange.iter().cloned());
@@ -219,7 +317,7 @@ where
     //
     // 这一次模型往返是**端口 `model` 的一次调用**：协议事实
     // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
-    let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone()).await {
+    let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone(), &call).await {
         Ok(rt) => rt,
         // 中止：收束格（`status: "aborted"`）由收束动作落，这里只寄存结局。
         Err(ModelCallError::Aborted) => {

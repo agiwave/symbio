@@ -1298,6 +1298,35 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
     assert!(!owes("await-model", &events, 0));
 }
 
+/// D-166：宣布之后、派出之前，执行行让位给派发行。
+///
+/// 两个数字（60 / 66）本身**不是**判据——`prio` 一改次序就变，而「这一步有没有活
+/// 可干」是事实问题。让位由 `turn_head.model_open` 说；派出之后（`sent` 落了）
+/// 执行行重新开账，模型才能接着说下一句。
+#[test]
+fn the_execute_row_steps_aside_while_a_round_is_undispatched() {
+    let mut head = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    // 幕开着、没有工具批、没走快路 ⇒ 执行行欠；派发行不欠（没有请求）。
+    assert!(owes("execute-turn", &head, 0));
+    assert!(!owes("dispatch-model", &head, 0));
+
+    // 宣布之后：派发行欠，执行行让位（否则它会再宣布一笔，同一幕两条请求并存）。
+    head.push(model_request("m-1"));
+    assert!(owes("dispatch-model", &head, 0));
+    assert!(
+        !owes("execute-turn", &head, 0),
+        "请求已宣布、还没派出 ⇒ 执行行不许再宣布下一笔"
+    );
+
+    // 派出之后：派发行的账变成「等应答」，执行行的让位理由消失。
+    head.push(model_sent("m-1"));
+    assert!(!owes("dispatch-model", &head, 0));
+    assert!(owes("execute-turn", &head, 0), "派出之后执行行重新开账");
+}
+
 #[test]
 fn the_model_rows_do_not_disturb_the_turn_rows() {
     // 两个端口的行**互不串账**：一条 `turn` 的 `request` 不让 `model` 的派发行开账。
@@ -2206,7 +2235,12 @@ fn the_transitional_exemptions_are_pinned() {
         .map(|e| (e.decl.name, e.transitional))
         .filter(|(_, list)| !list.is_empty())
         .collect();
-    let expected: Vec<(&str, &[&str])> = vec![(super::EXECUTE, &["chat.assistant.fallback"])];
+    // 名单**空**（D-166）：唯一一条豁免是 `execute` 写的兜底格，而那一笔随「模型往返
+    // 的派发」搬到了 `relay`——它的出口是引擎独占的 `sent` / `failed`，与 `close` 的
+    // 出口不同族，于是那两格**声明得了**（`ACTOR_RELAY.writes`），不再需要豁免。
+    // 从「一条豁免」到「零条」也是判据的一半：豁免只许随写方搬走而消失，不许为了
+    // 让读数好看而新增。
+    let expected: Vec<(&str, &[&str])> = Vec::new();
     assert_eq!(actual, expected, "过渡豁免名单变了——先补裁决，再改这条用例");
 }
 
@@ -2225,8 +2259,12 @@ fn writes_closed_admits_declared_protocol_and_exempted_only() {
     assert!(next.writes_closed("turn.dispatch"));
     // 协议五格：引擎写，本来就不许出现在 `writes` 里（装载期 `ENGINE_ONLY_CELLS` 拦）。
     assert!(next.writes_closed("response"));
-    // 过渡豁免：确实写得出、装载期声明不了的那一格。
-    assert!(next.writes_closed("chat.assistant.fallback"));
+    // 收束格里的兜底那一格**不**在 `execute` 的名单上（D-166）：它随模型往返的派发
+    // 搬到了 `relay`——`execute` 只宣布请求，写兜底的时机不在它的动作窗口里。
+    assert!(
+        !next.writes_closed("chat.assistant.fallback"),
+        "兜底格由 relay 写（D-166），execute 的窗口里没有这一笔"
+    );
     // 收束格归 `close` 执行体（步 5c）⇒ `execute` 写它就是越界。
     assert!(
         !next.writes_closed("chat.assistant.final"),
@@ -2329,14 +2367,16 @@ fn the_overlap_report_on_the_production_table() {
         .collect();
     // `turn_head` 自 步 5 起多读两类格（`has_final` 的前件：模型响应的
     // `calls` + 两条收束格），步 5b 又加了 `failed`（`tools_open` 的另一种终局），
-    // 步 5d 再给 `tools_open` 补了请求面（`request`），凡是共用这个幕头的相交对，
-    // 名单就一起变宽——这正是第 4 条要「点名而不只报非空」的理由。
+    // 步 5d 再给 `tools_open` 补了请求面（`request`），v11 又给 `model_open` 补了
+    // 派发前格（`sent`，判「这一笔派出去了没有」）——凡是共用这个幕头的相交对，
+    // 名单就一起变宽，这正是第 4 条要「点名而不只报非空」的理由。
     let head: &[&str] = &[
         "chat.assistant.fallback",
         "chat.assistant.final",
         "failed",
         "request",
         "response",
+        "sent",
         "session.config",
         "turn.stage",
         "user.message",

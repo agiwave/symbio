@@ -840,6 +840,9 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// v8（/ D-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
 /// 只看**这一轮自己的**模型往返（`via` 缺席的那些）——内部往返（判决 / 措辞 / 摘要）
 /// 的应答 `calls` 为空，混进来会让一条判决往返被读成「这一轮答完了」。
+///
+/// v11（D-166）加 `model_open`：本幕已宣布、还没派出的模型往返。执行行与派发行
+/// 因此按**事实**分工，而不是靠 `prio` 60 < 66 碰巧排对。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -1014,6 +1017,30 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
                         && seq_of(e) > seq_of(req)
                 })
         });
+    // 本幕有没有一笔**已宣布、还没派出**的模型往返（D-166）。
+    //
+    // 口径与派发行同源：同一 `(port, id, attempt)` 没有 `sent` / `failed` ⇒ 那笔账
+    // 还开着。执行行要它——一次模型往返的「宣布」与「派出」是两个环步，宣布之后
+    // 派发行（66）还没轮到，执行行（60）按 `prio` 会抢先再宣布一笔；同一幕两条
+    // `request(port=model)` 并存，模型就不再有「一次往返」这个粒度。
+    //
+    // 收窄按幕锚（`after_anchor`）：续写幕复用轮号，首幕那笔已关闭的请求不算「本幕
+    // 还开着」；上一世遗留、本幕没宣布过的请求也不该把本幕的执行行堵住（它由派发
+    // 行自己判死，见 `turn_exec::run_model`）。
+    let model_open = events.iter().any(|req| {
+        req.turn == turn
+            && req.kind == EVENT_REQUEST
+            && str_field(req, "port") == Some("model")
+            && str_field(req, "via").is_none()
+            && after_anchor(req, anchor_seq)
+            && !events.iter().any(|e| {
+                e.turn == turn
+                    && matches!(e.kind.as_str(), EVENT_SENT | EVENT_FAILED)
+                    && str_field(e, "port") == Some("model")
+                    && str_field(e, "id") == str_field(req, "id")
+                    && u64_field(e, "attempt") == u64_field(req, "attempt")
+            })
+    });
     let tools_open = !closed
         && (request_open
             || model_calls.is_some_and(|calls| {
@@ -1046,6 +1073,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "has_final": has_final,
         "closeable": closeable,
         "tools_open": tools_open,
+        "model_open": model_open,
     })
 }
 
@@ -1301,9 +1329,12 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // 读面不变——`turn.stage` 的 `result` 自 v2（技能命中折在召回格里）就在里面。
     // v9 → v10 加 `reflex_answered`（D-163）：快路的出口折成这一格，收束行因此在
     // **零模型往返**的轮上也开得出账（`has_final` 折不出没有应答的轮）。读面不变。
+    // v10 → v11 加 `model_open`（D-166）：模型端口的「已宣布、没派出」折成一格，
+    // 执行行据此让位给派发行。读面补 `request` / `failed` 的 `attempt` 与 `sent` 的
+    // `port` / `id` / `attempt`——判「这笔账关没关」要与派发行同一组键对。
     ViewDecl {
         name: "turn_head",
-        ver: 10,
+        ver: 11,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1314,12 +1345,17 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             ("session.config", "is_persistent"),
             (EVENT_REQUEST, "port"),
             (EVENT_REQUEST, "id"),
+            (EVENT_REQUEST, "attempt"),
             (EVENT_REQUEST, "via"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "attempt"),
             (EVENT_RESPONSE, "port"),
             (EVENT_RESPONSE, "calls"),
             (EVENT_RESPONSE, "via"),
             (EVENT_FAILED, "port"),
             (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "attempt"),
             (EVENT_FAILED, "via"),
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
@@ -1331,6 +1367,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             "turn.stage",
             "session.config",
             EVENT_REQUEST,
+            EVENT_SENT,
             EVENT_RESPONSE,
             EVENT_FAILED,
             "chat.assistant.final",
