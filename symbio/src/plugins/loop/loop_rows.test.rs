@@ -670,6 +670,115 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
     );
 }
 
+/// 幕间判据（D-168 裁决 4）：还开不开下一幕，由**收束格的 `reason`** 说。
+///
+/// 这一格此前是 `close_turn` 的返回值（`TurnFlow`），由 `chat_loop` 的 `match` 决定
+/// ——那是主循环体里最后一个「按步骤号决定下一步」的判定点。改成读事实之后，判据只剩
+/// 「`exhausted` ∧ 轮次没到上限」两条，两条都能在日志上验。
+#[test]
+fn the_next_stage_is_read_from_the_closure_reason() {
+    // 幕锚 = 用户格，本幕轮次 = `round`。
+    let base = |closure: Option<&str>, round: u64| {
+        let mut events = vec![
+            ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+            ev(1, "turn.stage", json!({"stage": "round", "round": round})),
+        ];
+        if let Some(reason) = closure {
+            events.push(ev(
+                1,
+                "chat.assistant.final",
+                json!({"text": "答完了", "reason": reason}),
+            ));
+        }
+        events
+    };
+
+    // 被输出上限掐断、轮次还没到上限 ⇒ 再开一幕，轮次取 `round + 1`。
+    assert_eq!(
+        super::next_stage_round(&base(Some("exhausted"), 0), 1, 0),
+        Some(1)
+    );
+    assert_eq!(
+        super::next_stage_round(&base(Some("exhausted"), 2), 1, 0),
+        Some(3)
+    );
+    // 到了上限 ⇒ 收工。方向是「宁可少发一次」：多续一次就是多一次模型往返。
+    assert_eq!(
+        super::next_stage_round(&base(Some("exhausted"), super::MAX_STAGE_ROUNDS), 1, 0),
+        None
+    );
+    // 自然说完 ⇒ 收工。
+    assert_eq!(
+        super::next_stage_round(&base(Some("completed"), 0), 1, 0),
+        None
+    );
+    // 还没收束 ⇒ 收工（这一幕照样往前走，但走的是环，不是「再开一幕」）。
+    assert_eq!(super::next_stage_round(&base(None, 0), 1, 0), None);
+
+    // `round` 读的是**本幕**那一格（续写幕复用轮号，首幕的轮次格不能算进来）。
+    // 幕序：首幕（轮次 0，截断收束）→ 续写幕（锚是 `resume` 格）→ 它的轮次格 → 收束。
+    let mut resumed = base(Some("exhausted"), 0);
+    resumed.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "resume", "round": 1, "result": "retry"}),
+    ));
+    resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 1})));
+    resumed.push(ev(
+        1,
+        "chat.assistant.final",
+        json!({"text": "又答完了", "reason": "exhausted"}),
+    ));
+    assert_eq!(super::next_stage_round(&resumed, 1, 0), Some(2));
+
+    // 续写幕还没落自己的轮次格 ⇒ `round` 折成 0（锚之后的默认值），**不许**读成
+    // 首幕那个 0 之后再被首幕的收束格带着走。
+    let mut bare = base(Some("exhausted"), 0);
+    bare.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "resume", "round": 1, "result": "retry"}),
+    ));
+    bare.push(ev(
+        1,
+        "chat.assistant.final",
+        json!({"text": "又答完了", "reason": "exhausted"}),
+    ));
+    assert_eq!(super::next_stage_round(&bare, 1, 0), Some(1));
+}
+
+/// 「本幕派出过没有」读的是派发格自己落的终局（`turn_round.done`），不是返回值。
+///
+/// 外环停下来之后要靠它把「没派出去」与「派出了但没关」分开——两者都不许安静地收场，
+/// 但要查的地方不同（前者查行表前件，后者查收束行为什么没开账）。
+#[test]
+fn the_stage_knows_whether_it_dispatched() {
+    let base = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert!(!super::stage_dispatched(&base, 1, 0), "还没宣布，更没派出");
+
+    let mut announced = base.clone();
+    announced.push(ev(
+        1,
+        "request",
+        json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1}),
+    ));
+    assert!(
+        !super::stage_dispatched(&announced, 1, 0),
+        "宣布了不算派出：`request` 只是「欠一笔往返」"
+    );
+
+    let mut done = announced.clone();
+    done.push(ev(
+        1,
+        "response",
+        json!({"port": "turn", "id": "turn-1-d0-r0"}),
+    ));
+    assert!(super::stage_dispatched(&done, 1, 0));
+}
+
 #[test]
 fn the_outer_ring_announces_before_it_dispatches() {
     // 幕首三格：用户格（幕锚）+ 配置 + 轮次格。

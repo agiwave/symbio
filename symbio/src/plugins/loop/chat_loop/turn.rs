@@ -1,12 +1,11 @@
-//! **单轮收尾**：推理产物并入上下文 → 落库 → 流向判定。
+//! **单幕收尾**：推理产物并入上下文 → 定格 → 落库。
 //!
-//! `close_turn` 是"单轮里发生了什么"的唯一实现；它的出口只有
-//! [`TurnFlow`]，**不做终态收尾**（那是 `finish_turn` 的职责）。
+//! 本模块的三样都是 [`super::stage_exec`] 里派出那一环步的**产出处理**（D-168
+//! 裁决 5 / 6）：它们不是债（没有独立前件），随产出它们的那一环步走。
+//! **流向不在这里**：幕停下之后是收工还是再开一幕，由事实说（`turn_head.closure`），
+//! 不由任何返回值说（裁决 4）。
 
 use super::*;
-
-/// 输出被 max_tokens 截断时的**自动续写**上限。
-const MAX_CONTINUE_ROUNDS: u32 = 3;
 
 /// 推理收尾：定格 assistant 子节点状态 → 校准 token 估算 → 把本轮产出并入上下文。
 ///
@@ -58,11 +57,26 @@ pub(crate) async fn settle_reasoning(
     finish
 }
 
-/// 本轮收尾阶段：截断续写 / 落库 / 流向判定。
+/// 本幕的**落库**（写投影，D-168 裁决 6）：截断告警 + 增量落库。
 ///
 /// **不承担终态收尾**：`fire_stop_hook` 与最终 `persist_messages` 由 [`finish_turn`]
-/// 统一执行（本函数返回 `Finish` 前会把 [`TurnState::last_saved`] 推进到最新，
-/// 使 `finish_turn` 的落库成为 no-op）。
+/// 统一执行（本函数返回前会把 [`TurnState::last_saved`] 推进到最新，使 `finish_turn`
+/// 的落库成为 no-op）。
+///
+/// ## 为什么它不在表上
+///
+/// 输入是内存镜像、输出是存储写入，两头都不是事实 ⇒ 没有 `until` 可写，重复执行是
+/// no-op。写投影不是债（与流式帧、UI 推送同类）——把它抬成债只会得到「一条永远
+/// 可以再加一次的账」。它「跟着收束走」：收束格一落，增量落库就是它唯一的后果。
+///
+/// ## 截断告警说的是一件事实
+///
+/// 「已自动续写 N 次仍超出」只在**不再续写**时说出来。续不续的判据是幕间那一份
+/// （[`super::super::loop_rows::next_stage_round`]）：`closure == exhausted` ∧ 本幕
+/// 轮次未到 [`super::super::loop_rows::MAX_STAGE_ROUNDS`]。本函数手里的
+/// `turn.request_round` 就是本幕开账时落下的 `turn.stage{stage:"round"}` 值
+/// （`begin_drive` 落的，`turn_head.round` 读的也是它）——两个读法同一个数，
+/// 上界那一条因此共用 [`super::super::loop_rows::has_next_round`]。
 ///
 /// ## 工具执行与主动压缩拦截不在这里（已随 DE-014 步骤 5 退役）
 ///
@@ -72,12 +86,12 @@ pub(crate) async fn settle_reasoning(
 /// 随外壳删除（[DE-014 步骤 5a](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")，
 /// 其中 `context_compact` 那一条链的裁决见 [D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README")）；
 /// 真实时序见 `turn_exec` / `turn_runner` 的模块文档。
-pub(crate) async fn close_turn(
+pub(crate) async fn persist_turn(
     sink: &ExecEventSink,
     context: &mut SessionContext,
     turn: &mut TurnState,
     finish: ModelFinishReason,
-) -> TurnFlow {
+) {
     // 本轮无工具调用（既定事实：工具在 execute_turn 内跑完，回到这里只可能是纯答话）。
     // 「工具参数被截断」不在此处处理：那条路径由 `tools/tool_executor.rs` 的
     // `parse_error` 分支承担（拒绝执行 + 以协议错误回报模型），比这里补一句
@@ -85,25 +99,22 @@ pub(crate) async fn close_turn(
     if finish.is_length() {
         // 纯文本被 max_tokens 截断 → 自动续写：
         // 已产出的（截断）文本已作为 assistant 消息进入上下文，下一轮请求时模型会
-        // 自然从断点继续。最多续写 MAX_CONTINUE_ROUNDS 次，避免失控死循环。
-        if turn.continuation_count < MAX_CONTINUE_ROUNDS {
-            turn.continuation_count += 1;
+        // 自然从断点继续。
+        if super::super::loop_rows::has_next_round(turn.request_round as u64) {
             plugin_info!(
                 "session",
                 "[Turn] finish=Length，自动续写 ({}/{})",
-                turn.continuation_count,
-                MAX_CONTINUE_ROUNDS
+                turn.request_round + 1,
+                super::super::loop_rows::MAX_STAGE_ROUNDS
             );
-            persist_messages(context, turn.last_saved, sink).await;
-            turn.last_saved = context.messages.len();
-            return TurnFlow::NextTurn;
+        } else {
+            // 续写次数耗尽：明确告知，绝不静默结束（会话级告警状态，随下一轮请求清除）。
+            sink.warn(Some(format!(
+                "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
+                super::super::loop_rows::MAX_STAGE_ROUNDS
+            )))
+            .await;
         }
-        // 续写次数耗尽：明确告知，绝不静默结束（会话级告警状态，随下一轮请求清除）。
-        sink.warn(Some(format!(
-            "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
-            MAX_CONTINUE_ROUNDS
-        )))
-        .await;
     }
     plugin_info!(
         "session",
@@ -112,7 +123,6 @@ pub(crate) async fn close_turn(
     );
     persist_messages(context, turn.last_saved, sink).await;
     turn.last_saved = context.messages.len();
-    TurnFlow::Finish(TurnExit::Completed)
 }
 
 /// 用 provider 返回的真实用量滚动校准 token 估算。

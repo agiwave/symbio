@@ -136,8 +136,9 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v12：`prepared`（D-168 裁决 3，本幕落过 `inputs` 阶段格没有）
-    // 是最新的一格，`prepare-turn` 行的前件读它；
+    // `turn_head` 到 v13：`closure`（D-168 裁决 4，本幕最近一条收束格的 `reason`）
+    // 是最新的一格，幕间判据读它决定「还开不开下一幕」；v12 的 `prepared`
+    // （D-168 裁决 3，本幕落过 `inputs` 阶段格没有）是 `prepare-turn` 的前件；
     // v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
     // 从「`prio` 碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
@@ -145,7 +146,7 @@ fn builtin_loads_and_freezes() {
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 12);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 13);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 4);
@@ -597,6 +598,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "reflex_answered": false,
             // D-168：本幕还没落 `inputs` 阶段格 ⇒ 准备行欠。
             "prepared": false,
+            // D-168 裁决 4：本幕未收束 ⇒ 没有「为什么停下」这一格。
+            "closure": serde_json::Value::Null,
             "has_final": false,
             "closeable": false,
             "tools_open": false,
@@ -643,6 +646,44 @@ fn turn_head_reads_round_and_done_from_facts() {
     assert_eq!(head["has_utterance"], json!(true));
     assert_eq!(head["classify_done"], json!(false));
     assert_eq!(head["recall_done"], json!(false));
+}
+
+/// 幕间判据的**唯一数据面**（D-168 裁决 4）：`closure` 折的是本幕最近一条收束格的
+/// `reason` 一格，不是任何执行体的返回值。
+#[test]
+fn turn_head_folds_the_closure_reason_of_the_current_stage() {
+    let base = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    // 未收束 ⇒ `null`。「还没停」与「停下了但没记原因」是两件事，这里只表达前者。
+    assert_eq!(turn_head(&base, 0)["closure"], Value::Null);
+
+    let closed = |reason: &str| {
+        let mut events = base.clone();
+        events.push(ev(
+            1,
+            "chat.assistant.final",
+            json!({"text": "hi", "reason": reason}),
+        ));
+        events
+    };
+    // 被输出上限掐断 ⇒ 幕间判据（`next_stage_round`）据它再开一幕。
+    assert_eq!(
+        turn_head(&closed("exhausted"), 0)["closure"],
+        json!("exhausted")
+    );
+    // 自然说完 ⇒ 收工。
+    assert_eq!(
+        turn_head(&closed("completed"), 0)["closure"],
+        json!("completed")
+    );
+
+    // 收束格没有 `reason` 的日志（本轮之前写的）：折成 `null` ⇒ 判据读成「不再开
+    // 下一幕」。宁可少续写一次，也不拿一个来路不明的形状去再发一次请求。
+    let mut bare = base.clone();
+    bare.push(ev(1, "chat.assistant.final", json!({"text": "hi"})));
+    assert_eq!(turn_head(&bare, 0)["closure"], Value::Null);
 }
 
 #[test]

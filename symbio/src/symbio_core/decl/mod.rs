@@ -844,6 +844,12 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// v11（D-166）加 `model_open`：本幕已宣布、还没派出的模型往返。执行行与派发行
 /// 因此按**事实**分工，而不是靠 `prio` 60 < 66 碰巧排对。
 ///
+/// v12（D-168 裁决 3）加 `prepared`：本幕落过 `inputs` 阶段格没有，`prepare-turn`
+/// 行的前件。
+///
+/// v13（D-168 裁决 4）加 `closure`：本幕最近一条收束格的 `reason`。它是「还开不开
+/// 下一幕」的唯一数据面——流向不再由 `close_turn` 的返回值决定。口径与 `closed`
+/// 逐字同源（同一条格、同一个幕锚），因此**读面不变**。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -928,6 +934,33 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             )
             && after_anchor(e, anchor_seq)
     });
+    // 本幕**为什么**停下（v13 / D-168 裁决 4）：本幕最近一条收束格的 `reason` 一格
+    // （`ClosureReason` 的线格式）。未收束 ⇒ `null`。
+    //
+    // 这是「还开不开下一幕」的**唯一数据面**。流向此前是 `close_turn` 的返回值
+    // （`TurnFlow`），由编排层 `match` 决定「再发一次请求」还是收工——那是按步骤号
+    // 决定的判定点，而它在日志上早就有一条事实（收束格的 `reason`）：截断续写的
+    // 幕与自然说完的幕在事实面上本就不同（`exhausted` / `completed`）。
+    //
+    // 取**最近一条**而不是「任意一条」：收束格一条就够（收束之后不再落），但
+    // 兜底格与收束格可以先后出现（中止路径先兜底、收束行随后关门），口径统一
+    // 按 seq 取末条。
+    let closure = closed
+        .then(|| {
+            events
+                .iter()
+                .filter(|e| {
+                    e.turn == turn
+                        && matches!(
+                            e.kind.as_str(),
+                            "chat.assistant.final" | "chat.assistant.fallback"
+                        )
+                        && after_anchor(e, anchor_seq)
+                })
+                .max_by_key(|e| seq_of(e))
+                .and_then(|e| str_field(e, "reason"))
+        })
+        .flatten();
     // 本幕最近一条 `response(port=model)`：收束格（`calls` 空）与工具格
     // （`calls` 非空且未关完）共用同一次选取，口径只在这里。
     //
@@ -1074,6 +1107,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         // 本幕的请求输入已备好（D-168 裁决 3）：`prepare-turn` 行的出口折在这里。
         // 读者只有准备行自己（`prepared: false` = 这一幕还欠一次准备）。
         "prepared": stage_since("inputs"),
+        // 本幕的收束原因（D-168 裁决 4）：`exhausted` / `completed` / `null`（未收束）。
+        // 读者只有幕间判据（`loop_rows::next_stage_round`）——「还开不开下一幕」。
+        "closure": closure,
         "has_final": has_final,
         "closeable": closeable,
         "tools_open": tools_open,
@@ -1381,9 +1417,13 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // v10 → v11 加 `model_open`（D-166）：模型端口的「已宣布、没派出」折成一格，
     // 执行行据此让位给派发行。读面补 `request` / `failed` 的 `attempt` 与 `sent` 的
     // `port` / `id` / `attempt`——判「这笔账关没关」要与派发行同一组键对。
+    // v11 → v12 加 `prepared`（D-168 裁决 3）：读的是 `turn.stage` 的 `stage` / `round`，
+    // v2 起就在读面里，故读面不变。
+    // v12 → v13 加 `closure`（D-168 裁决 4）：读面补收束两格的 `reason`——这一格是
+    // 「为什么停下」的原始事实，折进视图之后「还开不开下一幕」不再靠返回值。
     ViewDecl {
         name: "turn_head",
-        ver: 12,
+        ver: 13,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1408,6 +1448,8 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
             (EVENT_FAILED, "via"),
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
+            ("chat.assistant.final", "reason"),
+            ("chat.assistant.fallback", "reason"),
         ],
         // 表头是「本轮开账条件的全部输入」：每个读面的事实名都在输出里出现一次
         // （有没有发言 / 判过没有 / 召回过没有 / 答完没有…），故证据集 = 读面全集。

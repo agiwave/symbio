@@ -147,7 +147,7 @@ impl TurnRequest {
 /// 轮次状态：请求作用域内的可变状态。
 ///
 /// 收口前这些量散落在 `run_chat_loop` 的循环作用域里，并以 6 个 `&mut` 参数逐个
-/// 穿进 `close_turn`；现在收成一个结构体，主循环与阶段函数共享同一份状态。
+/// 穿进收尾函数；现在收成一个结构体，主循环与阶段函数共享同一份状态。
 #[derive(Default)]
 pub(crate) struct TurnState {
     /// 用户中止信号（`provider.execute_turn` 与工具执行共享同一份）。
@@ -155,8 +155,13 @@ pub(crate) struct TurnState {
     /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
     /// 现在是 [`ExecAbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
     pub(crate) abort: ExecAbortSignal,
-    /// 本轮**已发出的 LLM 请求数**。唯一写方是主循环的 `TurnFlow::NextTurn` 分支
-    /// （长度截断后的自动续写），所以它一次请求加一格，绝大多数轮就是 0 或 1。
+    /// 本轮**已发出的 LLM 请求数**，也就是「这是第几幕」（D-168 裁决 1）。
+    ///
+    /// 唯一写方是主循环的**幕间**那一步，而它的取值来自事实
+    /// （`loop_rows::next_stage_round` 读 `turn_head.round` 给出下一幕的轮次）——
+    /// 不是一份自己往上加的计数。续写次数因此不再需要独立的内存量
+    /// （`continuation_count` 已随 D-168 裁决 4 退场），一次请求加一格，
+    /// 绝大多数轮就是 0 或 1。
     ///
     /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_exec::drive_steps` 的环体里
     /// 一批批跑完，那里有唯一的真实计数（`tool_round`）；本层一次请求就是一个整体，
@@ -166,8 +171,6 @@ pub(crate) struct TurnState {
     /// 那条病灶与它三个读方各自的去处见
     /// [D-074](../../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")。
     pub(crate) request_round: usize,
-    /// 长度截断自动续写次数（跨轮累加）
-    pub(crate) continuation_count: u32,
     /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
     pub(crate) last_saved: usize,
     /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
@@ -443,7 +446,7 @@ impl ChatOrchestrator {
                 llm_emit_message(sink, node).await;
             }
             // 根 Turn 的终态**不在此发出**：Turn 是组合节点（仅分组，无正文），
-            // 终态必须晚于子树——而本轮的 ToolCall 要到 `close_turn` 里才执行完。
+            // 终态必须晚于子树——而本轮的 ToolCall 要到派出那一环步里才执行完。
             // 唯一发射点是 `run_chat_loop` 的 `finalize_turn_root`（本轮收尾点）。
             return;
         }
@@ -523,11 +526,11 @@ impl ChatOrchestrator {
         //
         // LLM 流结束只说明「模型这一轮说完了」，不说明「这一轮结束了」：Turn 是
         // **组合节点**（仅分组、无正文），它的终态必须**跟随子树**——而本轮的
-        // ToolCall 此时连执行都还没开始（执行在 `close_turn` 内，含整个执行窗口）。
+        // ToolCall 此时连执行都还没开始（执行在 v2 运行器内部，含整个执行窗口）。
         // 若在此标 `Completed`，树上就会出现"容器已完成、其中的工具调用仍在运行"
         // 这种自相矛盾的形状（实测抓包 seq 5 早于 seq 6–8 即此）。
         //
-        // 唯一的发射点是 `run_chat_loop` 在 `close_turn` 返回之后的
+        // 唯一的发射点是派出那一环步在 `persist_turn` 之后调用的
         // [`finalize_turn_root`]：那一刻子树才真正收敛，且发出的正是**即将落库的
         // 那条节点**——live 与 storage 按同一取值收敛。
     }

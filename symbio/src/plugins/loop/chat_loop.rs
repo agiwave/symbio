@@ -7,24 +7,27 @@
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
 //! loop
 //!   步骤1 加载上下文
-//!   步骤2 gate_turn            ← 退出条件（唯一判定点）
-//!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
-//!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
-//!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 轮首派发点 + 请求视图（唯一收集点）
-//!   步骤4 execute_turn         ← LLM 调用 + 工具轮 + **批次边界的汇报派发点**
-//!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
-//!   步骤6 close_turn           ← 落库 + 流向判定（子树在此收敛）
-//!   步骤7 finalize_turn_root   ← 封根 Turn（组合节点终态跟随子树）
+//!   步骤2 gate_turn          ← 退出条件（唯一判定点）
+//!   步骤3 begin_drive        ← 开一幕：唤醒格 → 收租 → 配置 → 幕锚 → 轮次格
+//!   步骤4 drive_stage        ← 幕内的不动点（选债 → 还债，D-168）
+//!                              三笔账：prepare-turn → announce-turn → dispatch-turn
+//!                              派出那一环步顺带把产出收好（定格 / 落库 / 封根）
+//!   步骤5 next_stage_round   ← 幕间：还开不开下一幕（读事实，不读返回值）
 //! end loop
 //! 后步骤 无（循环只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
+//!
+//! 主循环体里**没有按步骤编号的判定点**（D-168 的接回读数）：第 4 步是一次
+//! `ring::drive` 派发点，第 5 步是一次事实读。七步里剩下的三段各自有归属——
+//! 准备 / 收束 / 收尾两段进了行表或进了派发那一环步（D-168 裁决 3 / 5），
+//! 落库是写投影（裁决 6），唤醒是交换点（裁决 7）。
 //!
 //! 子模块分工：
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`decide`]   轮首判决：经容器 `route` 调 `classify/decide`，把判决回读成枚举
 //! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/wording`，把措辞写进转写
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
-//! - [`turn`]     单轮收尾：推理并入 → 落库 → 流向判定
+//! - [`turn`]     单幕收尾（产出处理）：推理并入 → 落库（`persist_turn`）
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
 //!
 //! 压缩流水线（自动语义压缩与用户重试共用内核）归
@@ -60,7 +63,10 @@ pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
     TurnState,
 };
-pub(crate) use self::turn::{close_turn, settle_reasoning};
+pub(crate) use self::turn::{persist_turn, settle_reasoning};
+// 派发那一环步的产出处理要用它（镜像并入是落库的前一步）：`stage_exec` 是兄弟模块，
+// 拿不到 `mod wake` 的私有面，所以从这里再导一条。
+pub(crate) use self::wake::merge_runner_messages;
 
 /// 批次边界汇报（缺口 4）的**能力口**：只产措辞，不判定、不落格、不数批次。
 ///
@@ -390,7 +396,7 @@ pub async fn run_chat_loop(
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
         //
-        // ── 步骤 4：`turn` 端口往返（外环：宣布 → 派出两个环步，D-168）─────────
+        // ── 步骤 4：幕内的不动点（宣布 → 派出 → 收好产出，D-168）───────────────
         //
         // 「这一幕欠一次 `turn` 调用」是**事实**，不是一次函数调用：`announce-turn`
         // 落 `request{port:turn}`、`dispatch-turn` 跑出 `sent` + `response` /
@@ -399,14 +405,9 @@ pub async fn run_chat_loop(
         // 日志上开着，派发行能把它判死（`port::kill_dangling`），而不是无声地留在
         // 那里让下一幕以为「已经派过了」。
         //
-        // 逻辑 id 含**幕锚**（`drive_seq`）：续写幕复用同一轮号且 `request_round`
-        // 从 0 重来——只带轮号与往返号会与首幕撞成同一个 `id`，而首幕已经有过
-        // `sent`，幂等键命中之后派发行不欠，整轮会在派发处被拒。
-        //
-        // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该
-        // 落一次，而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。
-        // 压缩的寄存位**不在环之前取**：压缩是准备段跑的（`policy.compress`），
-        // 在环之前 `take` 只会取到空值。取它的地方在派发那一环步（`run_dispatch_turn`）。
+        // 派出去之后的四件产出处理（镜像并入 / 定格 / 落库 / 封根）也在那一环步里
+        // （D-168 裁决 5 / 6）：它们不是债，跟着产出它们的那一环步走。主循环体因此
+        // 只问一件事——**这一幕跑完了没有**。
         let staged = match super::stage_exec::drive_stage(super::stage_exec::StageDrive {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,
@@ -436,105 +437,27 @@ pub async fn run_chat_loop(
             }
             Ok(staged) => staged,
         };
-        // 本幕在准备段就收束了（判决判成「就此答话」）：那一幕既没有输入也没有往返，
-        // 收束格与压缩寄存都已在准备段落完，收尾走同一条出口。
-        let Some(inputs) = staged.inputs else {
+        // 幕没跑完（中止 / 失败 / 产出处理失败）：这一轮到此为止，结局原样上抛。
+        if let Some(exit) = staged.interrupted {
+            return finish_turn(&context, &sink, &turn, exit).await;
+        }
+
+        // ── 幕间：还开不开下一幕（D-168 裁决 4）────────────────────────────────
+        //
+        // 判据是**事实**，不是上面那个返回值：本幕收束格的 `reason` 是 `exhausted`
+        // （被输出上限掐断）且本幕轮次没到上限 ⇒ 再开一幕，轮次取 `round + 1`；
+        // 其余一律收工。改用事实之后，`TurnFlow` 那个「按步骤号决定下一步」的判定点
+        // 整个消失了——判据 2 的最后一格就是它。
+        //
+        // 轮次也从事实里读：`round` 是 `begin_drive` 落在本幕的那一格
+        // （`turn.stage{stage:"round"}`），续写次数因此不再需要一份独立的内存计数
+        // （`TurnState::continuation_count` 已随之退场）。
+        let Some(round) =
+            super::loop_rows::next_stage_round(&turn.facts, turn.turn_no, turn.now_ms)
+        else {
             return finish_turn(&context, &sink, &turn, TurnExit::Completed).await;
         };
-        let out = match staged.result {
-            // 环上一笔都没派出：三笔账都该在，却一笔没选中，说明行表装载失败或本幕
-            // 已经没有可还的债。不给它一个「安静地不跑」的出口——那正是协议事实要
-            // 堵的失败形态（与 `NotOwed` 同一条理由）。
-            None => {
-                return finish_turn(
-                    &context,
-                    &sink,
-                    &turn,
-                    TurnExit::Failed(crate::symbio_core::PluginError::InternalError(
-                        "端口 `turn` 的往返没有派出（外环没有选中 `dispatch-turn`）".into(),
-                    )),
-                )
-                .await;
-            }
-            Some(Ok(res)) => {
-                // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
-                // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
-                // 不并入就只看得见、不落库（重启即丢）。
-                //
-                // 按 id 并入而不是整段 extend：续写幕的调用卡已经在历史里，新结果
-                // 还要替换旧结果子节点（见 `wake::merge_runner_messages`）。
-                let session = context.session.clone();
-                if let Err(e) = super::chat_loop::wake::merge_runner_messages(
-                    &session,
-                    &mut context,
-                    &mut turn,
-                    res.messages,
-                )
-                .await
-                {
-                    return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
-                }
-                res.output
-            }
-            Some(Err(super::port::DispatchError::Actor(
-                super::turn_exec::TurnExecExit::Aborted(partial),
-            ))) => {
-                // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
-                // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
-                // （正文 / 思考 / 工具节点）随出口一路带到 `persist_failure`
-                // 并入格——它们是事实，不因没说完就不记。
-                return finish_turn(&context, &sink, &turn, TurnExit::Aborted(partial)).await;
-            }
-            Some(Err(super::port::DispatchError::Actor(
-                super::turn_exec::TurnExecExit::Failed(e),
-            ))) => {
-                plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
-                return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
-            }
-            // 记账面的失败（行不欠 / 事实落不进去 / 端口没声明）：不给它一个
-            // 「安静地不跑」的出口——那正是协议事实要堵的失败形态。
-            Some(Err(other)) => {
-                plugin_warn!("session", "[Session] 端口 `turn` 派发失败: {other:?}");
-                return finish_turn(
-                    &context,
-                    &sink,
-                    &turn,
-                    TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
-                        "端口 `turn` 派发失败：{other:?}"
-                    ))),
-                )
-                .await;
-            }
-        };
-
-        if turn.abort.is_aborted() {
-            // 与 `TurnExecExit::Aborted` 分支同理：请求结束后才置位的 abort 标志
-            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → `Aborted` + error +
-            // 可重试，会话结局 `aborted`）。仅 send_request 之后的 abort 冒泡；
-            // turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把成功的
-            // Turn 误回滚为失败。本轮已完整产出（`res.messages` 已并入镜像并随
-            // `persist_messages` 落库），没有半截要补 ⇒ `partial` 空。
-            return finish_turn(&context, &sink, &turn, TurnExit::Aborted(Vec::new())).await;
-        }
-
-        // ── 步骤 5：推理收尾（定稿内容子节点 → 校准估算 → 并入上下文）────────
-        let finish =
-            settle_reasoning(orchestrator, &mut context, &sink, &inputs.root_id, out).await;
-
-        // ── 步骤 6：本轮结算 + 下一步判定（子树在此收敛）────────────────────
-        let flow = close_turn(&sink, &mut context, &mut turn, finish).await;
-
-        // ── 步骤 7：封根 Turn（子树收敛之后，全流程唯一一处）──────────────────
-        // Turn 是组合节点，终态必须跟随子树；`close_turn` 归来即子树收敛
-        // （ToolCall 已由执行方定格、结果子节点已就位）。发出的就是**即将落库的
-        // 那条节点**，因此实时帧与存储按同一取值收敛。详见 [`finalize_turn_root`]。
-        finalize_turn_root(&sink, &context, &inputs.root_id).await;
-
-        match flow {
-            // 续写：本轮还要再发一次请求，计数在这里加（**唯一**写方）。
-            TurnFlow::NextTurn => turn.request_round += 1,
-            TurnFlow::Finish(exit) => return finish_turn(&context, &sink, &turn, exit).await,
-        }
+        turn.request_round = round as usize;
     }
 }
 
@@ -814,15 +737,6 @@ pub(crate) async fn land_answered_turn(
     }
 }
 
-/// `run_chat_loop` 单轮的流向。
-///
-/// - `Finish`：本轮即请求终态，携带退出原因（收尾由 [`finish_turn`] 统一执行）
-/// - `NextTurn`：工具轮结束，进入下一轮 LLM 请求
-pub(crate) enum TurnFlow {
-    Finish(TurnExit),
-    NextTurn,
-}
-
 /// 主循环顶部的**唯一闸门**：退出条件。
 ///
 /// 收口前，循环顶部与推理前后散落 4 处 `if abort_flag { ... return }`（其中两处
@@ -875,7 +789,7 @@ fn gate_turn(turn: &TurnState) -> Gate {
 /// 因此仍由生命周期保证，而不是由两侧各记一次。
 ///
 /// `persist_messages` 在锚点已对齐时是 no-op（切片为空即返回），因此所有出口都可以
-/// 无条件调用——不会重复落库：`close_turn` 与压缩流程每次落库后都会同步推进
+/// 无条件调用——不会重复落库：`persist_turn` 与压缩流程每次落库后都会同步推进
 /// [`TurnState::last_saved`]。
 async fn finish_turn(
     context: &SessionContext,

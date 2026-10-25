@@ -26,13 +26,12 @@ use async_trait::async_trait;
 
 use super::super::chat_loop::drive::begin_drive;
 use super::super::chat_loop::inputs::TurnInputs;
-use super::super::chat_loop::state::{SessionContext, TurnRequest, TurnState};
+use super::super::chat_loop::state::{SessionContext, TurnExit, TurnRequest, TurnState};
 use super::super::chat_loop::AnsweredTurn;
 use super::super::loop_rows::PORTS;
-use super::super::port::{self, Call, Dispatch, DispatchError};
+use super::super::port::{self, Call, Dispatch};
 use super::super::stage_events::{land, StageFact, StageName};
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
-use super::super::turn_exec::{ExecTurnResult, TurnExecExit};
 use super::{
     drive_stage, run_announce_turn, run_dispatch_turn, run_prepare_turn, StageDrive, StageStep,
 };
@@ -43,6 +42,7 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginSimpleRequest, Seq, Store, TurnOutput, EVENT_FAILED,
     EVENT_REQUEST, EVENT_SENT,
 };
+use crate::symbio_core::{Entity, Verb, EVENT_ASSISTANT_FINAL};
 
 // ── 夹具 ────────────────────────────────────────────────────────────────
 
@@ -170,12 +170,12 @@ impl Harness {
         begin_drive(&self.context, &mut self.turn, &self.req, None).expect("新轮开得了");
     }
 
-    /// 组一台 host：三个交接件（输入 / 待派请求 / 结局）由调用方持有。
+    /// 组一台 host：三个交接件（输入 / 待派请求 / 中断）由调用方持有。
     fn step<'a>(
         &'a mut self,
         ready: &'a mut Option<TurnInputs>,
         call: &'a mut Option<Call>,
-        outcome: &'a mut Option<Result<ExecTurnResult, DispatchError<TurnExecExit>>>,
+        interrupted: &'a mut Option<TurnExit>,
     ) -> StageStep<'a> {
         StageStep {
             orchestrator: &self.orchestrator,
@@ -189,7 +189,7 @@ impl Harness {
             user_text: "你好",
             inputs: ready,
             call,
-            outcome,
+            interrupted,
         }
     }
 }
@@ -221,10 +221,10 @@ async fn prepare_lands_the_inputs_stage_and_hands_the_inputs_over() {
     h.open();
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
 
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_prepare_turn(&mut step).await.expect("准备落得了格");
     }
 
@@ -237,7 +237,7 @@ async fn prepare_lands_the_inputs_stage_and_hands_the_inputs_over() {
     let inputs = ready.expect("输入是这一环步的交接件");
     assert!(!inputs.root_id.is_empty(), "根骨架已分配");
     assert!(call.is_none(), "准备不宣布任何请求");
-    assert!(outcome.is_none(), "准备不产出幕的结局");
+    assert!(interrupted.is_none(), "准备不产出幕的结局");
 }
 
 /// 定稿答话轮：准备段就地收束 ⇒ 落 `result:"closed"`、**不**交输入。
@@ -263,10 +263,10 @@ async fn prepare_lands_closed_when_the_turn_answers_in_place() {
     });
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
 
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_prepare_turn(&mut step).await.expect("收束不是失败");
     }
 
@@ -289,10 +289,10 @@ async fn announce_lands_a_turn_request_keyed_by_the_stage_anchor() {
     h.open();
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
 
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_announce_turn(&mut step).await.expect("宣布落得了格");
     }
 
@@ -317,7 +317,7 @@ async fn announce_lands_a_turn_request_keyed_by_the_stage_anchor() {
     let handed = call.expect("宣布的产物是那两个环步之间的交接件");
     assert_eq!(handed.port, "turn");
     assert_eq!(handed.id, format!("turn-0-d{}-r0", h.turn.drive_seq));
-    assert!(outcome.is_none(), "宣布不产出幕的结局");
+    assert!(interrupted.is_none(), "宣布不产出幕的结局");
 }
 
 /// 同一轮的**两幕**不撞号：幕锚不同 ⇒ 逻辑 id 不同 ⇒ 两条 `request` 都在。
@@ -331,10 +331,10 @@ async fn two_stages_of_one_turn_do_not_collide_on_the_logical_id() {
     h.open();
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
 
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_announce_turn(&mut step)
             .await
             .expect("首幕宣布落得了格");
@@ -345,7 +345,7 @@ async fn two_stages_of_one_turn_do_not_collide_on_the_logical_id() {
     h.turn.request_round = 0;
     h.turn.drive_seq += 100;
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_announce_turn(&mut step)
             .await
             .expect("续写幕宣布落得了格");
@@ -376,9 +376,9 @@ async fn a_dispatch_without_a_handover_kills_the_dangling_request() {
 
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_dispatch_turn(&mut step)
             .await
             .expect("判死不算执行体失败");
@@ -393,7 +393,7 @@ async fn a_dispatch_without_a_handover_kills_the_dangling_request() {
         !all.iter().any(|e| e.kind == EVENT_SENT),
         "判死不是派出——一条 `sent` 都不该有"
     );
-    assert!(outcome.is_none(), "没派出去就没有幕的结局");
+    assert!(interrupted.is_none(), "没派出去就没有幕的结局");
 }
 
 /// 有请求、却没有输入那一半 ⇒ 也判死（发一条空请求比不派更坏）。
@@ -406,9 +406,9 @@ async fn a_dispatch_without_inputs_kills_the_request_instead_of_firing_it() {
 
     let mut ready = None;
     let mut call = Some(announced);
-    let mut outcome = None;
+    let mut interrupted = None;
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_dispatch_turn(&mut step)
             .await
             .expect("判死不算执行体失败");
@@ -422,7 +422,7 @@ async fn a_dispatch_without_inputs_kills_the_request_instead_of_firing_it() {
         !all.iter().any(|e| e.kind == EVENT_SENT),
         "一条空请求都没发"
     );
-    assert!(outcome.is_none());
+    assert!(interrupted.is_none());
 }
 
 /// 没有交接件、也没有遗留请求 ⇒ 一格不写（判死是**有对象才动**）。
@@ -434,9 +434,9 @@ async fn a_dispatch_without_a_handover_and_nothing_dangling_writes_nothing() {
 
     let mut ready = None;
     let mut call = None;
-    let mut outcome = None;
+    let mut interrupted = None;
     {
-        let mut step = h.step(&mut ready, &mut call, &mut outcome);
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
         run_dispatch_turn(&mut step)
             .await
             .expect("无事可做也是成功");
@@ -447,7 +447,7 @@ async fn a_dispatch_without_a_handover_and_nothing_dangling_writes_nothing() {
         before,
         "没有对象可判死时不许造账"
     );
-    assert!(outcome.is_none());
+    assert!(interrupted.is_none());
 }
 
 // ── 停机：不欠账就一格不动 ───────────────────────────────────────────────
@@ -486,6 +486,22 @@ async fn drive_stage_stops_when_the_stage_owes_nothing() {
     )
     .expect("派出入格");
     port::succeed(&*h.store, &call, h.turn.turn_no, h.turn.user_seq).expect("应答入格");
+    // 收束格：一幕的终点。外环的停机判据读它（`stage_closed`），而没有它的「三笔账
+    // 走完」只是半幕——环停下来之后本函数会按事实判一次「幕关了没有」。
+    h.store
+        .append(
+            Event::pending(
+                "final-0",
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                h.turn.turn_no,
+                "assistant",
+            )
+            .with_produced_by(h.turn.user_seq)
+            .with_payload(serde_json::json!({"text": "答完了", "reason": "completed"})),
+        )
+        .expect("收束格入格");
     let before = h.facts.range(Seq::new(0)).len();
 
     let out = drive_stage(StageDrive {
@@ -501,8 +517,10 @@ async fn drive_stage_stops_when_the_stage_owes_nothing() {
     .await
     .expect("不欠账不是错误");
 
-    assert!(out.inputs.is_none(), "这一遍没有再准备一次");
-    assert!(out.result.is_none(), "本幕没有新结局");
+    assert!(
+        out.interrupted.is_none(),
+        "本幕跑完了：没有中断、也没有再准备一次"
+    );
     assert_eq!(
         h.facts.range(Seq::new(0)).len(),
         before,

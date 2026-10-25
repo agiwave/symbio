@@ -406,7 +406,8 @@ pub struct TurnOutcome {
     /// 掐断」只能看末轮。反射档 / 兜底 / 中止没有末轮 ⇒ 恒 `Stop`（缺省）。
     ///
     /// 唯一消费方是 [`super::chat_loop::settle_reasoning`]：`is_length()` 打长度戳，
-    /// [`super::chat_loop::close_turn`] 在同判据上触发自动续写（`MAX_CONTINUE_ROUNDS`）。
+    /// [`super::loop_rows::next_stage_round`] 在同一判据上给出下一幕的轮次
+    /// （上界 [`super::loop_rows::MAX_STAGE_ROUNDS`]，D-168 裁决 4）。
     /// 这一格**不得**经 `TurnOutput { ..Default::default() }` 重建：那会恒填 Stop，
     /// 长度截断与自动续写因此不可达。
     pub finish: crate::symbio_core::ModelFinishReason,

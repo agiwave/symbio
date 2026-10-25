@@ -19,7 +19,18 @@
 //! |---|---|---|
 //! | 准备 | `prepare-turn` | 产出本幕的 [`TurnInputs`]，放进 [`StageStep::inputs`] |
 //! | 宣布 | `announce-turn` | 产出那一笔 `Call`，放进 [`StageStep::call`] |
-//! | 派出 | `dispatch-turn` | 取走前两样，产出幕的结局，放进 [`StageStep::outcome`] |
+//! | 派出 | `dispatch-turn` | 取走前两样，跑出幕的结局，并**就地收好产出** |
+//!
+//! ## 派出这一环步同时是「产出处理」
+//!
+//! `settle_reasoning`（定格助手子节点 → 校准 → 并入上下文）与 `finalize_turn_root`
+//! （封根）此前是 `chat_loop` 的两段直线代码，D-168 裁决 5 裁它们**不进表**——
+//! 输入是 `TurnOutput` 与内存镜像，不是日志事实，没有独立前件。既然它们不是债，
+//! 就该跟着**产出它们的那一环步**走：派出的动作是「派一次往返**并把它收好**」，
+//! 收不好的那一刻它就是一次失败的中断，而不是一件留在表外等人来擦的事。
+//!
+//! 落库（`persist_turn`）同理但理由不同（裁决 6）：它是**写投影**，不在表上，却
+//! 必须「跟着收束走」——收束格一落，增量落库就是它唯一的后果。
 //!
 //! ## host 是借用面
 //!
@@ -39,7 +50,7 @@ use std::sync::Arc;
 use crate::symbio_core::{Event, PluginInvokeRequest, Seq, Store};
 
 use super::chat_loop::inputs::TurnInputs;
-use super::chat_loop::state::{ChatOrchestrator, SessionContext, TurnState};
+use super::chat_loop::state::{ChatOrchestrator, SessionContext, TurnExit, TurnState};
 use super::port::{Call, DispatchError};
 use super::turn_exec::{ActorError, ExecTurnResult, StepFuture, TurnExecExit};
 
@@ -61,7 +72,8 @@ pub(crate) struct StageStep<'a> {
     /// 请求级配置快照（`prepare_turn_inputs` 的入参之一）。
     pub(crate) req: &'a super::chat_loop::state::TurnRequest,
     /// 本幕已备好的输入（`prepare_turn_inputs` 的产物）——**两个环步之间的交接件**，
-    /// 与 [`StageStep::call`] 同一层意思：准备放进去，派出取走。
+    /// 与 [`StageStep::call`] 同一层意思：准备放进去，派出取走。取走它的那一环步同时
+    /// 是它的**终点**：收尾两段（产出处理）在那一环步里跑完，`root_id` 的寿命就到那里。
     ///
     /// 它不在 `TurnState` 里：它的寿命就是这一幕（产出 → 消费 → 收尾读一次
     /// `root_id`），而 `TurnState` 是整轮的容器。把它抬进去等于让「一次只用一次的
@@ -71,8 +83,11 @@ pub(crate) struct StageStep<'a> {
     pub(crate) user_text: &'a str,
     /// 两个环步之间的交接件：已宣布、还没派出的那一笔。
     pub(crate) call: &'a mut Option<Call>,
-    /// 派出的结果（成功 / 中止 / 失败），由编排层在环之后取。
-    pub(crate) outcome: &'a mut Option<Result<ExecTurnResult, DispatchError<TurnExecExit>>>,
+    /// 本幕的**中断**（中止 / 失败）：`Some` ⇒ 这一幕没跑完，编排层走 [`TurnExit`]。
+    ///
+    /// 它只装「没跑完」，不装流向（D-168 裁决 4）：幕跑完之后是收工还是再开一幕，
+    /// 由事实说（`turn_head.closure`），不由这里说。
+    pub(crate) interrupted: &'a mut Option<TurnExit>,
 }
 
 /// 外环绑定表里的动作类型（与前两台同形状，借的面不同）。
@@ -165,11 +180,18 @@ pub(crate) fn run_announce_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
     })
 }
 
-/// `dispatch-turn`：跑一次**已宣布**的 `turn` 往返（一整幕）。
+/// `dispatch-turn`：跑一次**已宣布**的 `turn` 往返（一整幕），并把它**收好**。
 ///
 /// 没有交接件（上一段生命在宣布与派出之间结束，或本任务接管前留下的遗留请求）⇒
 /// 不跑，把最老的那一笔判死（[`super::port::kill_dangling`]）：等它的 future 已经
 /// 没了，重试也没有对象。**不按幕锚收窄**——遗留请求恰恰落在本幕锚之前。
+///
+/// ## 收好的那几件事
+///
+/// 派发跑完（`Ok`）之后就地做完，不再交回编排层（D-168 裁决 5 / 6）：
+/// 镜像并入 → 中止复查 → 定格（`settle_reasoning`）→ 落库（`persist_turn`）→ 封根
+/// （`finalize_turn_root`）。次序与搬到这一层之前**逐字不变**：`finalize_turn_root`
+/// 必须晚于定格（Turn 是组合节点，终态跟随子树），而落库是收束的写投影。
 pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         let Some(call) = step.call.take() else {
@@ -195,7 +217,7 @@ pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
         // （e2e t8 / t11 / t45 抓到的正是这一条）。
         let consolidation = step.context.consolidated.take();
         // 字段逐个借出去（三样 `&mut` 按字段重借，互不重叠）：`dispatch` 的闭包会把
-        // 那几份借用**移进** future，之后再碰 `step` 就借不动了——只有 `outcome`
+        // 那几份借用**移进** future，之后再碰 `step` 就借不动了——只有 `interrupted`
         // 需要活着，所以它单独借、单独写回。
         let parts = TurnParts {
             orchestrator: step.orchestrator,
@@ -230,12 +252,81 @@ pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
             },
         )
         .await;
-        // 放回槽里：收尾两段（`settle_reasoning` / `finalize_turn_root`）要读
-        // `root_id`，而它们在环之外（D-168 裁决 5：那是本环步的产出处理）。
-        *step.inputs = Some(inputs);
-        *step.outcome = Some(outcome);
+        match outcome {
+            // 派出去了：产出处理在环步里做完，`root_id` 的寿命到这里结束——输入不必
+            // 再放回槽里（放回去只会给「幕外还有谁要读它」留一个不存在的读者）。
+            Ok(res) => settle_dispatched(step, &inputs.root_id, res).await?,
+            // 没派成：这一笔的结局变成**本幕的中断**。三种停法的分野原样保留
+            // （中止 ≠ 失败，记账面的失败另有一句），只是汇成一个出口。
+            Err(e) => *step.interrupted = Some(interrupt_of(e)),
+        }
         Ok(())
     })
+}
+
+/// 派发失败的**出口**：一条 `DispatchError` 折成编排层要的那一个 [`TurnExit`]。
+///
+/// 三分法是原有的，逐条都有理由：
+/// - 中止：在途 Turn 交消费循环落库为 `aborted`（**不是** `failed`——中止不是错误），
+///   半截产出随 `partial` 一路带到 `persist_failure` 并入格；
+/// - 执行失败：原样上抛，走 `Failed` 出口；
+/// - 记账面的失败（行不欠 / 事实落不进去 / 端口没声明）：不给它一个「安静地不跑」的
+///   出口——那正是协议事实要堵的失败形态。
+fn interrupt_of(e: DispatchError<TurnExecExit>) -> TurnExit {
+    match e {
+        DispatchError::Actor(TurnExecExit::Aborted(partial)) => TurnExit::Aborted(partial),
+        DispatchError::Actor(TurnExecExit::Failed(e)) => TurnExit::Failed(e),
+        other => {
+            crate::plugin_warn!("session", "[Session] 端口 `turn` 派发失败: {other:?}");
+            TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
+                "端口 `turn` 派发失败：{other:?}"
+            )))
+        }
+    }
+}
+
+/// 派出去那一幕的**产出处理**（D-168 裁决 5 / 6）。
+///
+/// 四件事的次序与本函数成形之前逐字一致（`chat_loop` 的步骤 1c-7）：
+///
+/// 1. 镜像并入：v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）并进
+///    落库权威镜像——`persist_messages` 只写这份的尾部增量，不并入就只看得见、
+///    不落库（重启即丢）。按 id 并入而不是整段 extend：续写幕的调用卡已经在历史里，
+///    新结果还要替换旧结果子节点（见 `wake::merge_runner_messages`）。
+/// 2. 中止复查：请求结束后才置位的 abort 同样向上冒泡。本轮已完整产出（镜像已并入、
+///    随落库写入），没有半截要补 ⇒ `partial` 空。
+/// 3. 定格 + 落库：`settle_reasoning` 之后 `persist_turn` 落增量，并把
+///    [`TurnState::last_saved`] 推到最新（`finish_turn` 的落库因此是 no-op）。
+/// 4. 封根：子树收敛之后全流程**唯一**一处发 Turn 的终态帧。
+async fn settle_dispatched(
+    step: &mut StageStep<'_>,
+    root_id: &str,
+    res: ExecTurnResult,
+) -> Result<(), ActorError> {
+    let session = step.context.session.clone();
+    super::chat_loop::merge_runner_messages(
+        &session,
+        &mut *step.context,
+        &mut *step.turn,
+        res.messages,
+    )
+    .await
+    .map_err(ActorError::Read)?;
+    if step.turn.abort.is_aborted() {
+        *step.interrupted = Some(TurnExit::Aborted(Vec::new()));
+        return Ok(());
+    }
+    let finish = super::chat_loop::settle_reasoning(
+        step.orchestrator,
+        &mut *step.context,
+        step.sink,
+        root_id,
+        res.output,
+    )
+    .await;
+    super::chat_loop::persist_turn(step.sink, &mut *step.context, &mut *step.turn, finish).await;
+    super::chat_loop::finalize_turn_root(step.sink, &*step.context, root_id).await;
+    Ok(())
 }
 
 /// 一次 `turn` 往返本体要借的**八样**（[`StageStep`] 去掉两个交接件之后的投影）。
@@ -368,17 +459,17 @@ pub(crate) struct StageDrive<'a> {
     pub(crate) user_text: &'a str,
 }
 
-/// 外环跑完一幕之后交回编排层的那两样。
+/// 外环跑完一幕之后交回编排层的东西。
 ///
-/// 两样都是**产物**，不是判断：`inputs` 是本幕备好的请求输入（收尾两段要它的
-/// `root_id`），`result` 是那一幕的结局。`inputs = None` 只有一个来源——准备段
-/// 发现本幕已经收束（定稿答话轮），那一幕没有输入，也没有往返。
+/// **只有一件事：这一幕跑完了没有**。跑完（`None`）= 幕已收束，产出处理已做完；
+/// 没跑完（`Some(exit)`）= 中止 / 失败，编排层照旧走 `finish_turn`。
 ///
-/// 为什么交回而不是寄存进 `TurnState`：这两样的寿命就是这一幕。寄存进轮级容器，
-/// 就等于让「一次只用一次的中间值」活到整轮结束（D-168 的诚实划界 2）。
+/// 流向**不在这里**（D-168 裁决 4）：幕跑完之后是收工还是再开一幕，读的是事实
+/// （`turn_head.closure` + 本幕轮次），不是任何返回值。这一条就是判据 2 的最后一格
+/// ——「按步骤号决定下一步」的那个判定点，随这一格一起从主循环体里消失了。
 pub(crate) struct StageOutcome {
-    pub(crate) inputs: Option<TurnInputs>,
-    pub(crate) result: Option<Result<ExecTurnResult, DispatchError<TurnExecExit>>>,
+    /// 本幕的**中断**：`Some` ⇒ 这一幕没跑完（中止 / 失败 / 产出处理失败）。
+    pub(crate) interrupted: Option<TurnExit>,
 }
 
 /// 外环派发点：每步向求解器要**本 host 行子集**里最小的一笔可还债，跑它的执行体，
@@ -391,6 +482,14 @@ pub(crate) struct StageOutcome {
 ///    会为一个**已经答完的轮**宣布一次往返（它在事实面上与「还没派出」同形：两者都
 ///    没有 `response(port=turn)`）。
 /// 2. **选不到可还的债** ⇒ 停，与轮首那台同形：不拿假成功收场。
+///
+/// ## 停下之后还要判一次「派出去过没有」
+///
+/// 两条判据都不保证幕收过：真的没有可还的债、而幕还开着，可能是表上少了点什么
+/// （前件互锁 / 装载失败），也可能是一轮合法的中途停点（工具批悬在等用户审批时本幕
+/// 本来就还开着）。分开这两种的判据只有一条，且在事实面上：`turn_round.done`——
+/// 本幕**派出过**一次 `turn` 往返没有。派出去过，结局就是幕自己的事；一次都没派出去
+/// 而环停了，就是一笔账都没还，「安静地不跑」正是协议事实要堵的失败形态。
 pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, ActorError> {
     let StageDrive {
         orchestrator,
@@ -404,13 +503,16 @@ pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, A
     } = drive;
     let Some(store) = context.session.facts() else {
         return Ok(StageOutcome {
-            inputs: None,
-            result: None,
+            interrupted: Some(TurnExit::Failed(
+                crate::symbio_core::PluginError::InternalError(
+                    "外环需要持久会话（临时会话无事实源）".into(),
+                ),
+            )),
         });
     };
     let mut call: Option<Call> = None;
     let mut inputs: Option<TurnInputs> = None;
-    let mut outcome = None;
+    let mut interrupted: Option<TurnExit> = None;
     loop {
         let facts = store.range(Seq::new(0));
         if super::loop_rows::stage_closed(&facts, turn.turn_no, turn.now_ms) {
@@ -445,7 +547,7 @@ pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, A
                 user_text,
                 inputs: &mut inputs,
                 call: &mut call,
-                outcome: &mut outcome,
+                interrupted: &mut interrupted,
             };
             if let Err(e) = (next.action)(&mut step).await {
                 crate::plugin_warn!(
@@ -472,10 +574,26 @@ pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, A
         // 派发点重读切片：下一问问表读的是**刚落的那一格**。
         turn.facts = store.range(Seq::new(0));
     }
-    Ok(StageOutcome {
-        inputs,
-        result: outcome,
-    })
+    // 幕间判据读的是最新切片（可能是环上一次刷新之后的，也可能一条都没落）。
+    turn.facts = store.range(Seq::new(0));
+    if interrupted.is_none()
+        && !super::loop_rows::stage_closed(&turn.facts, turn.turn_no, turn.now_ms)
+        && !super::loop_rows::stage_dispatched(&turn.facts, turn.turn_no, turn.now_ms)
+    {
+        // 环停了、幕还开着、而且**一次都没派出去**：这一幕一笔账都没还。
+        // 「安静地不跑」正是协议事实要堵的失败形态，与 `NotOwed` 同一条理由。
+        //
+        // 派出过的那一幕不在这里判：它的结局是**幕自己的事**——收束格落下就是答完了，
+        // 工具批悬在等用户审批（`WaitingUserAction`）时本幕本来就还开着，而那不是
+        // 失败，是一轮合法的中途停点（D-052 决策 1 的「悬在等待用户」那一档）。
+        interrupted = Some(TurnExit::Failed(
+            crate::symbio_core::PluginError::InternalError(format!(
+                "端口 `turn` 的往返没有派出（外环没有选中 `dispatch-turn`，turn={}）",
+                turn.turn_no
+            )),
+        ));
+    }
+    Ok(StageOutcome { interrupted })
 }
 
 #[cfg(test)]

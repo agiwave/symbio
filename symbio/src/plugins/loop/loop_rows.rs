@@ -1577,6 +1577,76 @@ pub(crate) fn stage_closed(events: &[Event], turn: u64, now: i64) -> bool {
         .unwrap_or(false)
 }
 
+/// 一段连续幕的上限：被输出上限掐断之后，最多再开几幕。
+///
+/// 它此前是 `chat_loop::turn` 里的 `MAX_CONTINUE_ROUNDS` 与
+/// `TurnState::continuation_count` 那一对内存计数（「跨轮累加的次数」）。判据搬进
+/// 事实面之后（D-168 裁决 4），上界留在**迭代器**这一层：视图只给事实（`round` /
+/// `closure`），「够不够了」是幕间判据自己的事——把它写进视图等于让一份投影替调用方
+/// 定策略，而视图的输出是回放要解释的口径，不是可调的旋钮。
+pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
+
+/// 本幕轮次**还有没有下一次**（`round` = 本幕的 `turn.stage{stage:"round"}` 值）。
+///
+/// 上界判据只此一处：[`next_stage_round`] 用它定「还开不开下一幕」，
+/// `chat_loop::turn::persist_turn` 用它定「截断告警该说自动续写还是该说已耗尽」。
+/// 两处读的是同一个数——本幕的轮次由 `begin_drive` 落成事实、由 `turn_head` 折成
+/// 一格、由 `TurnState::request_round` 拿着用，三处同一个值（不是三份计数）。
+pub(crate) fn has_next_round(round: u64) -> bool {
+    round < MAX_STAGE_ROUNDS
+}
+
+/// 幕间判据：本幕停下之后**还开不开下一幕**——开的话，下一幕的轮次是多少。
+///
+/// `None` = 收工；`Some(round)` = 再开一幕，轮次取 `round`。
+///
+/// ## 它读的是事实，不是返回值
+///
+/// 这是 D-168 裁决 4 的落点。流向此前是 `close_turn` 返回的 `TurnFlow`，由
+/// `chat_loop` 的 `match` 决定「再发一次请求」还是收工——那是**按步骤号决定的判定点**
+/// （判据 2 的最后一条）。而这件事在日志上早就有事实：截断续写的幕与自然说完的幕，
+/// 收束格的 `reason` 本来就不同（`exhausted` / `completed`）。于是判据只剩读一格。
+///
+/// ## 轮次从事实里读，不从内存里数
+///
+/// `round` 是本幕开账时落下的 `turn.stage{stage:"round"}` 那一格的值，也就是本幕
+/// 是「第几次请求」。续写次数因此不再需要一份独立的计数：`round + 1` 就是下一幕的
+/// 轮次，上界比对的是同一个数。`TurnState::continuation_count` 随之退场。
+///
+/// ## 「续写」与「收工」的分野只有 `exhausted`
+///
+/// 别的停法（`completed` / 兜底 / 中止 / 没有 `reason` 的旧日志）一律收工。方向是
+/// **宁可少发一次**：拿一个来路不明的形状去再发一次请求，等于把一次「本来就该停了」
+/// 的轮拖成两次模型往返。
+pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<u64> {
+    let frozen = frozen()?;
+    let head = frozen.eval("turn_head", turn_slice(events, turn), now)?;
+    let exhausted = head.get("closure").and_then(|v| v.as_str())
+        == Some(crate::symbio_core::ClosureReason::Exhausted.as_str());
+    if !exhausted {
+        return None;
+    }
+    let round = head.get("round").and_then(|v| v.as_u64())?;
+    has_next_round(round).then(|| round + 1)
+}
+
+/// 本幕**真的派出过**一次 `turn` 往返没有（`turn_round.done`）。
+///
+/// 外环停下来之后要靠它把两种处境分开：**一次都没派出去**（表上真的没有可还的债，
+/// 行表装载失败 / 前件全被别的债挡住）与**派出去了**（各笔账都还了，幕之后的结局是
+/// 幕自己的事——收束格落下是答完了，工具批悬在等用户审批时本幕本来就还开着）。
+/// 前者不许安静地收场，后者不许被当成失败。判据在事实面上（派发格自己落的
+/// `sent` / `failed`），不在派发点的返回值上。
+pub(crate) fn stage_dispatched(events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    frozen
+        .eval("turn_round", turn_slice(events, turn), now)
+        .and_then(|v| v.get("done").and_then(|d| d.as_bool()))
+        .unwrap_or(false)
+}
+
 /// 这一刻环上有没有**已派出、未收清**的账——「在等」的可观测形态。
 ///
 /// 与 [`owes`] 的分工：`owes` 按**行名**问，本函数按**形状**问——开账条件是

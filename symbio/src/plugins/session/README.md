@@ -135,7 +135,7 @@ session:
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
  （`plugins/model/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
- * 长度截断（`finish = Length`）后的自动续写有 `MAX_CONTINUE_ROUNDS = 3`
+ * 长度截断（`finish = Length`）后的自动续写有 `loop_rows::MAX_STAGE_ROUNDS = 3`
  （[`../loop/chat_loop/turn.rs`](../loop/chat_loop/turn.rs)），它数的是**续写次数**，不是工具轮数。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
  （[`../loop/turn_runner.rs`](../loop/turn_runner.rs)，步骤序列与批次边界见

@@ -24,20 +24,27 @@ impl: done
 
 ## 0. 一句话结论
 
-主循环 = **前步骤**（请求解析 → 开会话 → `TurnState` → resume）+ **loop**（7 步）+
-**唯一收尾点 `finish_turn`**。循环只能由 `return finish_turn(...)` 离开，没有旁路出口。
-第 4 步把整轮交给 v2 运行器（`turn_exec::execute_turn`）——**工具循环在运行器内部**，
-不在 `close_turn` 里（见 §4.1）。
+主循环 = **前步骤**（请求解析 → 开会话 → `TurnState` → resume）+ **幕的迭代器**
+（装载 → 闸门 → 开一幕）+ **幕内的不动点**（外环 host 选债 → 还债）+ **唯一收尾点
+`finish_turn`**。循环只能由 `return finish_turn(...)` 离开，没有旁路出口。
 
-四个收口点 + 一个状态容器（§2）：
+**幕**（一次请求）之内欠三笔账，由外环派发点 `stage_exec::drive_stage` 按行表还，
+派发点不认步骤号：`prepare-turn`（备输入）→ `announce-turn`（宣布一笔 `turn` 往返）
+→ `dispatch-turn`（派出，**并就地收好产出**——镜像并入 / 定格 / 落库 / 封根都在那一
+环步里）。**「还开不开下一幕」读事实**（`turn_head.closure`），不由任何返回值决定
+（[DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-168 裁决 4）。
+工具循环在 v2 运行器内部（`turn_exec::execute_turn`），不在外环里（见 §4.1）。
+
+五个收口点 + 一个状态容器（§2）：
 
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
 | `gate_turn` | 退出条件（只剩中止边界），见 §2.1 | 判定点唯一 |
-| `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
+| `prepare_turn_inputs`（行 `prepare-turn`） | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
 | `run_compress`（行 `policy.compress` 的执行体） | 水位响应（70% 阈值触发的语义压缩）：判定与执行同处这一执行体，由轮首派发点选中（[DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-159） | 响应点唯一 |
+| `stage_exec::drive_stage` | 幕内三笔账的派发点（`ring::drive` 的调用处之一，另一处是轮首 `drive_head`），见 §1.2 | 幕内选债唯一 |
 | `finish_turn` | 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
-| `TurnState` | 跨轮可变状态（请求轮次 / 续写次数 / 落库锚点 / 静默时钟种子 / 中止信号） | 状态容器唯一 |
+| `TurnState` | 跨幕可变状态（请求轮次 / 落库锚点 / 静默时钟种子 / 中止信号 / 读侧产物） | 状态容器唯一 |
 
 ---
 
@@ -55,9 +62,11 @@ impl: done
  取 TURN_DISPATCH（授权三条）→ LoopSession + ChatOrchestrator；sink / abort 随交付包传入 → await ③
  结局序列化为 TurnReport 交回；session 侧 select! 看门狗 / 接管三臂在 ①
 ③ 循环层 run_chat_loop + gate_turn / finish_turn loop: chat_loop.rs
+ + begin_drive（开一幕：唤醒格 → 收租 → 配置 → 幕锚 → 轮次格）chat_loop/drive.rs
+ + stage_exec::drive_stage（外环派发点：幕内三笔账）stage_exec.rs
  + prepare_turn_inputs / run_compress chat_loop/inputs.rs
  + drive_head（轮首派发点）head_exec.rs
- + settle_reasoning / close_turn chat_loop/turn.rs
+ + settle_reasoning / persist_turn chat_loop/turn.rs
  + auto_compress_process / retry_compaction / compress_with_snapshot_core context/pipeline.rs
  + 会话侧读写经动作面 session_port.rs
 ④ 单轮执行层 turn_exec::execute_turn turn_exec.rs
@@ -67,10 +76,11 @@ impl: done
 ```
 
 **职责边界**：③ 不持有终态落库职责——终态唯一落库点在 session 收尾（② 的消费循环与
-`transcript/publish.rs`）。④ 只负责**这一轮**的事实与产物，不决定会话接下来跑不跑（③ 的 `TurnFlow`）。
+`transcript/publish.rs`）。④ 只负责**这一轮**的事实与产物，不决定会话接下来跑不跑
+（那一格由 ③ 读 `turn_head.closure` 折出，D-168 裁决 4）。
 后步骤**不存在**：循环只能由 `return` 离开，所有出口都经 `finish_turn`。
 
-### 1.2 主循环七步
+### 1.2 主循环：幕的迭代器 + 幕内的不动点
 
 **前步骤**（循环之前）
 
@@ -81,29 +91,36 @@ impl: done
 | P3 | `TurnState` 初始化（含 `abort: ExecAbortSignal`）+ `SessionContext` 构造 |
 | P4 | **resume 处理**（`process_resume`）→ `Continue` / `Done` / `Err`，`Done`/`Err` 经 `finish_turn` 提前收尾 |
 
-**循环体**（7 步）
+**循环体**（幕的迭代器 + 幕内的不动点）
 
-| # | 步骤 | 内容 | 职责 |
+| # | 动作 | 内容 | 层次 |
 |---|---|---|---|
-| 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
-| 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
-| 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回三行在此被 `drive` 选中并跑掉，收口 ③）+ 判成答话的一轮就地收束（`TurnExit::Completed`，不发请求）+ `build_request_view`（收口 ②） | 准备 + 派发 |
-| 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `SessionDispatchPort` 三动作分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
-| 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
-| 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
-| 7 | `finalize_turn_root` | 封根 Turn——子树收敛之后发出**即将落库的那条节点** | 收尾 |
+| 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 幕间 |
+| 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 幕间 |
+| 3 | `begin_drive` | **开一幕**：唤醒格（用户格 / 恢复格）→ 收租 → 配置 → 本幕锚 → 轮次格 | 幕间（迭代器） |
+| 4 | `stage_exec::drive_stage` | **幕内的不动点**：选债 → 还债，直到本幕不再欠账 | 幕内 |
+| 5 | `loop_rows::next_stage_round` | **还开不开下一幕**：读 `turn_head.closure` + 本幕轮次 | 幕间（迭代器） |
 
-**`close_turn` 的分支**
+第 4 步里欠的**三笔账**（行名即债名；派发点不认步骤号，只认行表）：
 
-| 条件 | 动作 | 返回 |
+| 环步 | 行 | 做什么 |
 |---|---|---|
-| `finish == length` 且续写未耗尽 | 截断文本已在上下文里，下一轮自然续写（≤ `MAX_CONTINUE_ROUNDS`）；增量落库 | `NextTurn` |
-| `finish == length` 且续写耗尽 | 会话级告警（提高单次输出预算 / 缩小任务范围），绝不静默结束 | `Finish(Completed)` |
-| 其余 | 增量落库 | `Finish(Completed)` |
+| 准备 | `prepare-turn` | `prepare_turn_inputs`：提示词 + 工具 + `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回 / 快路在此被 `drive` 选中）+ `build_request_view`。判成答话的一轮**在这里就地收束**（出口 `result:"closed"`，这一幕没有输入也没有往返） |
+| 宣布 | `announce-turn` | 落 `request{port:turn}`——「这一幕欠一次往返」是**事实**，不是一次函数调用 |
+| 派出 | `dispatch-turn` | 跑 `turn_exec::execute_turn`（整轮交给 v2 运行器：事实原生入格、工具经 `SessionDispatchPort` 三动作分发、中止检查点在运行器内部），**并就地收好产出**：镜像并入 → 中止复查 → `settle_reasoning`（定稿 + 校准 + 并入上下文）→ `persist_turn`（增量落库）→ `finalize_turn_root`（封根，全流程唯一一处） |
+
+**`persist_turn` 的分支**（落库是**写投影**，不是债——D-168 裁决 6）
+
+| 条件 | 动作 |
+|---|---|
+| `finish == length` 且本幕轮次未到 `MAX_STAGE_ROUNDS` | 截断文本已在上下文里，下一幕自然续写（轮次由事实给出，见第 5 步）；增量落库 |
+| `finish == length` 且轮次已到上限 | 会话级告警（提高单次输出预算 / 缩小任务范围），绝不静默结束；增量落库 |
+| 其余 | 增量落库 |
 
 > **这里没有工具执行，也没有压缩拦截**：工具跑在 `execute_turn` 内部（§4.1），
-> 回到 `close_turn` 时本轮工具早已产出结果；水位响应在轮首派发点选中的 `policy.compress`（第 3 步）。
-> `close_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
+> 回到派出那一环步时本轮工具早已产出结果；水位响应在轮首派发点选中的
+> `policy.compress`（准备段）。
+> `persist_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
 
 ### 1.3 职责边界（收口依据）
 
@@ -116,8 +133,10 @@ impl: done
  汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **「不完整不唤醒」由运行器环体守住**：一个批次的结果全部接进 `exchange` 之后才发
  下一次请求（§4.1），不在闸门里判在途工具。
-- **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort` 分发）；
- `close_turn` 只做「本轮结算 + 下一步判定」，不承担工具执行（见 §4.1）。
+- **工具执行**归派出那一环步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort`
+ 分发）；`persist_turn` 只做「增量落库 + 截断告警」，不承担工具执行（见 §4.1）。
+- **流向不由返回值决定**（D-168 裁决 4）：幕停下之后是收工还是再开一幕，读的是收束格的
+ `reason`（`turn_head.closure`）与本幕轮次。执行体交回的只有一件事——「这一幕跑完了没有」。
 
 ---
 
@@ -263,8 +282,9 @@ async fn finish_turn(
 ```rust
 struct TurnState {
  abort: ExecAbortSignal, // 用户中止信号（推理与工具共享同一份）
- request_round: usize, // 本轮已发出的 LLM 请求数——⚠️ **不是**工具轮数（见 §4.1）
- continuation_count: u32, // 长度截断自动续写次数（跨轮累加）
+ request_round: usize, // 本次运行已发出的 LLM 请求数 = 「这是第几幕」
+ // ——由幕间判据从事实里给出（`loop_rows::next_stage_round`），
+ // 不是自己往上加的计数；⚠️ **不是**工具轮数（见 §4.1）
  last_saved: usize, // 增量落库锚点
  last_user_facing_at: i64, // 对话线上最近一次动静（轮内时钟的种子）
  // 其余 7 格是本轮的读侧产物：input_utterance / recall_view / skill_route / skill_hits /
@@ -272,7 +292,7 @@ struct TurnState {
 }
 ```
 
-`close_turn` 的入参因此是 `(sink, context, turn, finish)`——它不需要编排器与请求快照，
+`persist_turn` 的入参因此是 `(sink, context, turn, finish)`——它不需要编排器与请求快照，
 只读本轮的 `ModelFinishReason`。
 
 ---
@@ -322,42 +342,34 @@ pub async fn run_chat_loop(
  return finish_turn(…, exit).await;
  }
 
- // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
- // 系统提示词 + 工具在同一函数内、同一时刻收集（同一 `Registry`）；
- // 派生 overhead（一轮一次）；轮首派发点（判决 + 压缩 + 召回）与视图重建亦在其内。
- let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &sink,
- &mut turn, &turn_req).await {
- Ok(v) => v,
+ // 步骤 3 · 开一幕（迭代器。幕号 / 幕锚 / 轮次都在这一处定下，后续阶段不再各数一遍）
+ // 唤醒格（用户格 / 恢复格）+ 收租 + 当轮配置 + 本幕锚 + 轮次格先于任何判决入格。
+ let drive = match begin_drive(&context, &mut turn, &turn_req, next_drive_resume.take()) {
+ Ok(d) => d,
  Err(exit) => return finish_turn(orch, &context, &sink, &turn, exit).await,
  };
 
- // 步骤 4 · 推理 + 工具（整轮交给 v2 运行器；中止检查点在运行器内部）
- // ExecTurn 收齐：会话 / provider / 父插件 / 目录 / 提示词 / 中止 / 根 id / 出口 /
- // 用户文本与节点 id / 窗口 / 工具 / 恢复锚点 / 记忆与技能 / 前缀 / 压缩 / 注入。
- let out = match super::turn_exec::execute_turn(super::turn_exec::ExecTurn { … }).await {
- Ok(res) => { context.messages.extend(res.messages); res.output } // 工具轮产物并入镜像
- Err(TurnExecExit::Aborted(partial)) =>
- return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(partial)).await,
- Err(TurnExecExit::Failed(e)) =>
- return finish_turn(orch, &context, &sink, &turn, TurnExit::Failed(e)).await,
+ // 步骤 4 · 幕内的不动点（选债 → 还债，直到本幕不再欠账）
+ // 三笔账都在这一个派发点里：prepare-turn → announce-turn → dispatch-turn。
+ // 派出那一环步顺带把产出收好（镜像并入 → 定格 → 落库 → 封根），所以这里返回的
+ // 只有一件事：这一幕跑完了没有。
+ let staged = match stage_exec::drive_stage(stage_exec::StageDrive { … }).await {
+ Err(ActorError::Read(e)) => return finish_turn(…, TurnExit::Failed(e)).await,
+ Err(e) => return finish_turn(…, TurnExit::Failed(内部错误(f"{e:?}"))).await,
+ Ok(staged) => staged,
  };
- if turn.abort.is_aborted {
- return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(vec![])).await;
+ if let Some(exit) = staged.interrupted {
+ return finish_turn(orch, &context, &sink, &turn, exit).await;
  }
 
- // 步骤 5 · 推理收尾（定格子节点 → 校准估算 → 并入上下文）
- let finish = settle_reasoning(orch, &mut context, &sink, &inputs.root_id, out).await;
-
- // 步骤 6 · 本轮结算 + 下一步判定（收口 ④）
- let flow = close_turn(&sink, &mut context, &mut turn, finish).await;
-
- // 步骤 7 · 封根 Turn（子树收敛之后，全流程唯一一处）
- finalize_turn_root(&sink, &context, &inputs.root_id).await;
-
- match flow {
- TurnFlow::NextTurn => {}
- TurnFlow::Finish(exit) => return finish_turn(orch, &context, &sink, &turn, exit).await,
- }
+ // 步骤 5 · 幕间：还开不开下一幕（判据是**事实**，不是返回值）
+ // 收束格的 `reason == exhausted`（被输出上限掐断）∧ 本幕轮次没到上限 ⇒ 再开一幕，
+ // 轮次取 `round + 1`；其余一律收工。`TurnFlow` 那个「按步骤号决定下一步」的判定点
+ // 由此整个消失（D-168 裁决 4）。
+ let Some(round) = loop_rows::next_stage_round(&turn.facts, turn.turn_no, turn.now_ms) else {
+ return finish_turn(orch, &context, &sink, &turn, TurnExit::Completed).await;
+ };
+ turn.request_round = round as usize;
  }
  // ── 后步骤 ──────────────────────────────────────────────────────────
  // 无：循环只能由 return 离开，所有出口都经 finish_turn（唯一收尾点）。
@@ -370,7 +382,7 @@ pub async fn run_chat_loop(
 
 ### 4.1 当前执行模型：运行器内部的串行工具循环
 
-工具在 **`execute_turn` 内部**执行，不在 `close_turn` 里：
+工具在 **`execute_turn` 内部**执行，不在 `persist_turn` 里：
 
 ```text
 execute_turn
@@ -399,9 +411,9 @@ execute_turn
 恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；
 fade 判定归 该批）。
 
-`close_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
+`persist_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [DE-014 步骤 5](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 删除；
-`close_turn` 只读 `ModelFinishReason`，工具的真实执行点只有上面那条循环。
+`persist_turn` 只读 `ModelFinishReason`，工具的真实执行点只有上面那条循环。
 
 ### 4.2 必须保留的语义
 

@@ -433,7 +433,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 
 | 层 | 位置 |
 |---|---|
-| `chat_loop.rs` | `close_turn` 返回之后调用 `finalize_turn_root` —— 全流程**唯一**一处 |
+| `stage_exec.rs` | 派出那一环步在 `persist_turn` 之后调用 `finalize_turn_root` —— 全流程**唯一**一处 |
 | `chat_loop/io.rs` | `finalize_turn_root`：从权威转写取那条节点 → 改状态 → 广播 |
 
 若它在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，就会比子树早整整一个
@@ -553,7 +553,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
  按父节点自述的 `meta.failure_kind` 给出），服务于缺结果的历史数据，
  不是本不变量的替代（§5.3.1）。
 26. **组合节点的终态跟随子树**：`turn` / `tool_call` 的终态不得早于它的子树。
- ToolCall 由执行方定格（#11）；根 Turn 由 `finalize_turn_root` 在 `close_turn`
+ ToolCall 由执行方定格（#11）；根 Turn 由 `finalize_turn_root` 在 `persist_turn`
  返回之后定格，**全流程唯一一处**（§5.3.2）。它**不得**在
  `finalize_assistant_turn`（LLM 流结束那一刻）发出——那会比子树早一整个执行窗口。
  发出的节点与 `persist_messages` 落库的是**同一份**，因此实时帧与存储按同一

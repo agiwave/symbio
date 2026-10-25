@@ -68,7 +68,7 @@ async fn record_protocol_failure(
     // - id 合法但 name/参数非法：ToolCallDelta 已广播过完整节点（在权威转写里），
     //   取副本应用终态；
     // - id 本身缺失（兜底 llm_short_id）：不存在任何父节点——构造**完整**的 ToolCall
-    //   终态节点（name/参数为 None 是诚实表达），`close_turn` 会把它补进转写并
+    //   终态节点（name/参数为 None 是诚实表达），收束那一格会把它补进转写并
     //   落库，结果子节点因此有真实的父节点，不再悬空。
     let parent_update = match context_messages.iter().find(|m| m.id == tool_call_id) {
         Some(p) => {

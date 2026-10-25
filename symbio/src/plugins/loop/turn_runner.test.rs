@@ -2899,7 +2899,8 @@ mod tool_round_tests {
     ///
     /// 唯一消费方是 `chat_loop/turn.rs`：`settle_reasoning` 用 `finish.is_length()` 给
     /// 本轮正文节点打 `meta.finish_reason = "length"`（前端「继续」按钮 + 回溯），
-    /// `close_turn` 在同判据上触发 `MAX_CONTINUE_ROUNDS` 自动续写。此前 `turn_exec.rs`
+    /// `persist_turn` 与幕间判据（`loop_rows::next_stage_round`）在同判据上触发自动续写
+    /// （上界 `MAX_STAGE_ROUNDS`）。此前 `turn_exec.rs`
     /// 用 `TurnOutput { ..Default::default() }` 重建时把 `finish` 静默填成 Stop，
     /// 两条判据在 v2 执行路径都读不到 Length ⇒ 被 `max_tokens` 掐断的半截正文既无标记
     /// 也不续写，界面上表现为「对话突然结束」。
