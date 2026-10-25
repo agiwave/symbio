@@ -340,7 +340,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
 /// 钱的折算要价格 × 用量，而 `model` 今天没有价格字段。界面写死一个单价等于替
 /// 用户拍一个他没同意过的价（同一条判据的另一面）。价格从配置来的时候，这里加
 /// 一行即可——数据已经在 `tokens` 列里。
-fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
+pub(super) fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
     let t = &stats.tokens;
     let calls = t.get("calls").and_then(|v| v.as_u64()).unwrap_or(0);
     if calls == 0 {

@@ -20,7 +20,7 @@
 
 import { callPlugin } from './plugin'
 import { ROUTE_SESSION_STATS } from '@/constants/routes.gen'
-import type { ReadingPanel } from '@/schemas/reading'
+import type { ReadingPanel, ReadingSection } from '@/schemas/reading'
 
 /** 读方身份声明：不传 = 本机默认（署主全量读数）。 */
 export interface SessionStatsRequest {
@@ -29,14 +29,23 @@ export interface SessionStatsRequest {
 
 /** `session/stats` 的响应（后端 `SessionStats` 的镜像）。
  *
- *  只读路由，故这里**只声明前端会用的两族字段**：`panel`（人读的描述）与
- *  `has_wal`（「这个会话跑过没有」——它决定空态文案，而空态是组件层的事）。
+ *  只读路由，故这里**只声明前端会用的三族字段**：`panel`（人读的全部描述）、
+ *  `usage`（会话头那一格，与 `panel` 里「用量」那段同一次装配）与 `has_wal`
+ *  （「这个会话跑过没有」——它决定空态文案，而空态是组件层的事）。
  *  其余各列（tiers / cost / fleet …）不在本文件镜像：没有消费方就不写第二份
  *  形状（schema-audit 的「未被使用」判据盯的正是这个）。 */
 export interface SessionStats {
   session_id: string
   has_wal: boolean
   panel: ReadingPanel
+  /**
+   * 会话头那一格读数（后端 `stats.rs` 的 `usage`）：一次实测都没有时**整个键不出现**。
+   *
+   * 为什么不从 `panel.sections` 里按标题挑「用量」那一节：方言里的 `ReadingSection`
+   * 只有 `title` 没有身份字段，按中文标签定位等于把标签变成跨栈的键——改一个字，
+   * 头上就静默少一格。让产者把要的那一格单独交出来，前端一个字符串都不用认。
+   */
+  usage?: ReadingSection
 }
 
 /**

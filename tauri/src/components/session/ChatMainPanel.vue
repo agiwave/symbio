@@ -18,6 +18,10 @@
           <h2 class="session-name">{{ store.activeTitle }}</h2>
           <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
         </template>
+        <!-- 会话头的用量读数：**一格**，由后端在交付出口排好（`session/stats.usage`）。
+             这里不写任何标签 / 单位 / 换算——`ReadingMeter` 与抽屉里的面板是同一个
+             方言的两个渲染器，改口径只改后端。缺数（一次实测都没有）整格不出现。 -->
+        <ReadingMeter class="header-meter" :section="stats?.usage" />
       </div>
       <div class="header-right">
         <button class="header-btn" title="重命名" @click="startRename">
@@ -129,6 +133,7 @@ import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
 import ReadingPanel from '@/components/common/ReadingPanel.vue'
+import ReadingMeter from '@/components/common/ReadingMeter.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 import { readSessionStats, type SessionStats } from '@/services/sessionStats'
@@ -321,19 +326,36 @@ async function loadStats() {
 /** 抽屉自己的代次守卫（与消息加载分开：两条往返互不打断计数）。 */
 const panelGuard = useGenerationGuard()
 
-// 打开就读一次（抽屉无内容时）。**不自动轮询**：读数是「看一眼」的东西，
-// 常驻轮询会给每次打开都带来一整套实例级扫描（`fleet` 列的成本，见 stats.rs）。
+// 会话头的用量格也要这份读数，于是它从「抽屉的东西」变成「这个面板的东西」：
+// 切会话时读一次（下面那个 watch），一轮跑完再读一次。
+//
+// **仍然不轮询**：读一次要一整套投影（`fleet` 列是部署级扫描，见 `stats.rs`），
+// 按时间轮询等于把成本乘上秒数。这里只在**事实变了**的两个时刻读——换了会话、
+// 这一轮从跑到不跑。中间用户没做任何事的时候，界面上的数不该变。
 watch(panelOpen, (open) => {
-  if (open) void loadStats()
+  // 打开抽屉时若已经有这一份就不再读：会话头已经拉过，重复读只是白花代价。
+  if (open && !stats.value) void loadStats()
 })
 
-// 切会话 ⇒ 抽屉内容作废（下一次打开会重读）。不做「当前会话变了就自动重读」：
-// 抽屉关着时的读取是白花代价，而用户下一次打开本来就会读到新的。
+// 切会话 ⇒ 抽屉内容与头上的读数一起作废，并立刻为**新会话**读一次（头上的读数
+// 是常驻的，不能等用户点开抽屉才出现）。代次守卫负责把先发后到的旧响应丢掉。
+// `immediate`：从路由恢复会话时 `activeId` 在挂载前就有值，等不到「变化」。
 watch(
   () => store.activeId,
   () => {
     stats.value = null
     statsError.value = null
+    void loadStats()
+  },
+  { immediate: true }
+)
+
+// 一轮跑完（working → 不 working）⇒ 重读一次：这一轮新落的 `response` 里有实测用量，
+// 头上的累计值正是「跑完一轮」才该变的东西。
+watch(
+  () => store.isActiveWorking,
+  (now, was) => {
+    if (was && !now) void loadStats()
   }
 )
 </script>
@@ -379,6 +401,15 @@ watch(
 .status-working {
   font-size: 0.75rem;
   color: #22c55e;
+}
+
+/* 会话头的用量格：占位随内容收缩，标题被压缩时它是**最后**让位的
+   （标题是导航信息，用量是这一眼的读数——`flex-shrink: 0` 让它不被挤没）。 */
+.header-meter {
+  flex-shrink: 0;
+  /* `ReadingMeter` 的默认内边距是给输入区那条线用的（底部留白），头部居中排，
+     两端都不该多出空白。 */
+  padding: 0;
 }
 
 /* 内联重命名的输入框（替换标题位；宽度与 .session-name 一致，避免布局跳动） */

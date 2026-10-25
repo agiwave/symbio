@@ -56,7 +56,9 @@ use crate::symbio_core::{
 };
 
 use super::plugin::SessionPlugin;
-use super::stats_reading::{commitments_reading, content_scope_of, fleet_reading, panel_of};
+use super::stats_reading::{
+    commitments_reading, content_scope_of, fleet_reading, panel_of, usage_section,
+};
 
 /// 一个档位的一行读数：时延列与兜底列并排（同一档位的两类收益同处一行）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -227,6 +229,22 @@ pub(crate) struct SessionStats {
     /// 另一种说法。两者由同一个源算出，且判据 `panel_matches_the_columns_it_describes`
     /// 钉住「不脱节」——否则就是两份真相。
     pub panel: crate::symbio_core::ReadingPanel,
+    /// 用量那**一格**的读数（`ReadingSection`）：给「地方只有一条、但必须在眼前」的
+    /// 位置用（会话头），与 [`Self::panel`] 里那一段**同一次装配**
+    /// （`stats_reading::usage_section` 的唯一实现，两处调同一个函数，不是两份口径）。
+    ///
+    /// ## 为什么不与 `panel` 合并成一个字段
+    ///
+    /// 两个消费方要的量不同：抽屉要**全部**分区（时延 / 断点 / 不变量……），会话头
+    /// 只要**一行**。让前端从 `panel.sections` 里按标题文本挑「用量」那一节，等于把
+    /// 中文标签变成跨栈的定位键——改一个字，前端就静默少一格（方言里
+    /// [`ReadingSection`] 没有身份字段，只有标题）。故产者直接把要的那一格交出来，
+    /// 前端一个字符串都不用认。
+    ///
+    /// `None` = 一次实测都没有（`calls == 0`）⇒ 前端整格不渲染，不画一条空读数
+    /// （与 `context_watermark` 缺数整条不出现同一条纪律）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::symbio_core::ReadingSection>,
     /// 技能编译开关（部署配置 `skill_compile_enabled`，**不是**本会话的事实）。
     ///
     /// 与 [`Self::compiled_skills`] 并读才分辨得出两种「零技能」：`false` = 关着
@@ -494,9 +512,14 @@ pub(crate) fn read(
         skill_compile_enabled,
         compiled_skills,
         panel: ReadingPanel::default(),
+        usage: None,
     };
+    // 会话头那一格与面板里的「用量」段同源：两处都调 `usage_section` 这**一个**函数，
+    // 入参是同一份 `reading`。分别算两次是纯函数，不产生第二份口径。
+    let usage = usage_section(&reading);
     Ok(SessionStats {
         panel: panel_of(&reading),
+        usage,
         ..reading
     })
 }

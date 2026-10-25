@@ -426,7 +426,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 |---|---|
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
 | P2-3 授权分级（前两档）：确认卡三键——批准本次 / 本会话放行 / 拒绝。「本会话放行」把会话阈值抬到本次调用的风险档，**同档及以下从此不再问**；卡上没有风险档时不出这一键（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::requires_approval`（`risk > threshold`），阈值来自 `ctx[RISK_LEVEL]`（会话 metadata 的 `risk_level` 经 `resolve_session_params` 落进 ctx）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` 钉住「抬一档 ⇒ 不再问、方向可复算」；前端：`components/message/InteractionNode.vue`（第三键；档位校验走 `isSessionRiskLevel`，不在组件里手写词表）+ `ALLOW_FOR_SESSION_KEY`（注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降，已是该档就不写）+ `schemas/session_meta.ts`（`riskRankOf`，档位序取自词表数组）。**零新事实**：`authz.granted` 仍由「批准本次」写，抬阈值只改会话 metadata 的一个字段 |
-| P2-4 用量（token 那一半）：读数的「用量」段给输入 / 输出 / 合计，多主体时才逐条摊开；一次实测都没有就**整段不出现** | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 → `stats_reading.rs::usage_section`（面板那一段，单位走 `format_tokens` 全仓唯一实现）。**前端零改动**：读数面板本来就是按后端下发的 `panel` 排版（`ReadingPanel.vue`） |
+| P2-4 用量（token 那一半）：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，单位走 `format_tokens` 全仓唯一实现）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
 
 **本节的判据**：
 
@@ -446,7 +446,8 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
    跨栈镜像同步登记这一对（`protocol-mirror-audit` D 组），漂移即红。
 4. **缺数就整条不出现**。这一格缺省的含义是「本会话还没记录水位」（存量会话 / 一轮没跑完），
    补 0 会把它读成「上下文是空的」；同理后端一侧缺一个数字就少一行、没有分母就不发 `bar`，
-   绝不为凑齐四行编一个数（见 `stats_reading.test.rs`）。
+   绝不为凑齐四行编一个数（见 `stats_reading.test.rs`）。会话头那一格是同一条判据的另一面：
+   一次实测都没有 ⇒ 后端连那个键都不发，头上就什么都不画（不是一条空条、不是「0 token」）。
 5. **不给这条线配「压缩」按钮**。提案原文写着「复用已有的 `context_compact`」，那句话随
    [D-072](../../symbio/src/plugins/session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README") 一起过期：自动整理由后端判，手动重试只由**失败的压缩节点**下发，一条健康的水位线
    后面没有任何可点的东西。入口不补齐不是缺口——把不存在的能力画成按钮，用户按下才发现界面在骗他。
@@ -469,7 +470,7 @@ P2-2 / P2-3 / P2-4 / P2-5 四项**不是同一档工作量**。照着 §3 的提
 |---|---|---|---|
 | P2-2 变更面板 | `<根>/session/<id>/workdir/<rel>` 是一棵 VDFS 树（`list` / `read` / `write` / `delete` 四口齐），文件改动只有**实时面**（`VdfsChange` 走事件总线，进程退出即消失） | 「本会话**动过**哪些文件」要一条可回读、可归因的记录。实时面的帧既不留档也不带写者，进程一退就没了 | 后端先补 |
 | P2-3 授权分级 | 两档已落地（§11）：`authorize-tool` 拿这一次调用的 `risk` 与会话阈值 `threshold` 比一次，出口是 `authz.granted` / `authz.denied`；阈值住在会话元数据里，「本会话放行」= 抬它 | 第三档「永久放行」**没有落点**——跨会话的授权清单不存在：今天没有任何地方能记「这个工具在所有会话里都免问」，也没有任何回读方 | 前两档已落；第三档需先裁「清单住哪、谁写、读方是谁」 |
-| P2-4 用量成本 | `response{port=model}` 带 `usage`（实测 token），`session/stats.tokens` 与读数的「用量」段都从它算；`session/stats.cost` 仍是**时延**台账（事件的 `cost_ms` 按写方累计），不是钱 | 钱要先有价格，而 `model` 今天**没有价格字段**——按名字猜价格是给「换了个端点就全错」埋伏笔 | 用量已落地；成本待后端补价格 |
+| P2-4 用量成本 | `response{port=model}` 带 `usage`（实测 token）；`session/stats.tokens` 与 `usage`（会话头那一格）都从它算，读数面板与会话头共用 `usage_section` 一个装配；`session/stats.cost` 仍是**时延**台账（事件的 `cost_ms` 按写方累计），不是钱 | 钱要先有价格，而 `model` 今天**没有价格字段**——按名字猜价格是给「换了个端点就全错」埋伏笔 | 用量已落地（含会话头）；成本待后端补价格 |
 | P2-5 分支切换 | `RetrySubtree` 的动作是**删掉失败轮再按普通新轮重来**（`chat_loop/wake.rs` 的 `WakeOutcome::NewTurn`） | 分支要成对出现：旧轮保留 + 「当前是哪一支」可判。今天两者都没有——`parent_id` 树是真的，但树上没有第二个孩子 | 后端先补（且要先裁「重试 = 替换还是分支」） |
 
 **这张表的用法**：一行的「谁先动」是后端时，前端那一批的判据里必须先有一条
@@ -485,5 +486,12 @@ P2-2 / P2-3 / P2-4 / P2-5 四项**不是同一档工作量**。照着 §3 的提
 来自 `LlmTurn.usage`（一次往返一次测量），钱的折算要价格 × 用量，而价格是**配置**不是
 常量（用户可以换供应商、指向自建端点）。两者都经 `present/reading` 的方言下发，
 前端零口径（§11 判据 2 / 3）；把「每 1k token 多少钱」写进组件，等于让界面替用户
-拍一个他没同意过的价。**前半已经落地**（§11 的用量表）：`usage` 随 `response` 入格 →
-`token_ledger` 投影 → `session/stats.tokens` → 读数的「用量」段，前端一个字符都不用改。
+拍一个他没同意过的价。**token 那一半已经完整落地**（§11 的用量行）：`usage` 随
+`response` 入格 → `token_ledger` 投影 → `session/stats.tokens` 列与 `usage` 一格 →
+抽屉里的面板段 + 会话头常驻那一格。
+
+**会话头那一格为什么单独下发、而不是让前端从 `panel` 里挑**：方言里的 `ReadingSection`
+只有 `title` 没有身份字段，按中文标签定位等于把标签变成跨栈的键——改一个字，头上就
+静默少一格（而界面少一格不报错）。让产者多交一格（`session/stats.usage`，与面板那一段
+调同一个 `usage_section`），前端一个字符串都不用认。这一格**不是**对 `panel` 的复制：
+两个消费方要的量不同（抽屉要全部分区，头上只要一行）。

@@ -1824,6 +1824,15 @@ fn the_usage_column_counts_only_measured_responses() {
         "1500 + 200 走 format_tokens 的唯一实现"
     );
 
+    // 会话头那一格与这一段是**同一次装配**（两处调 `usage_section` 一个函数）：
+    // 行必须逐行相等。差一行就是两份口径，而两份口径漂了没人会红——
+    // 界面上只是「抽屉里四个数、头上一个数」，两边都自称是同一个会话的用量。
+    assert_eq!(
+        got.usage.as_ref().map(|s| &s.rows),
+        Some(&usage.rows),
+        "会话头的用量格必须与面板里那一段同源"
+    );
+
     // 反向：一条带用量的都不给 ⇒ 整段不出现。
     let none = wal_with(
         "token-none",
@@ -1839,5 +1848,9 @@ fn the_usage_column_counts_only_measured_responses() {
             .any(|s| s.title.as_deref() == Some("用量")),
         "一次都没测到就不该有这一段：{:?}",
         bare.panel.sections
+    );
+    assert!(
+        bare.usage.is_none(),
+        "缺数时会话头那一格整格不出现，而不是画一条全零的读数"
     );
 }
