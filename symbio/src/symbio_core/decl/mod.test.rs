@@ -136,14 +136,16 @@ fn builtin_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v11：`model_open`（D-166，本幕已宣布、没派出的模型往返）是最新的
-    // 一格，执行行的让位据此从「`prio` 碰巧排对」变成事实前件；
+    // `turn_head` 到 v12：`prepared`（D-168 裁决 3，本幕落过 `inputs` 阶段格没有）
+    // 是最新的一格，`prepare-turn` 行的前件读它；
+    // v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
+    // 从「`prio` 碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
     // `closeable` / `tools_open` 的读面自 v8 起只看「这一轮自己的模型往返」
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 11);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 12);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 4);
@@ -593,6 +595,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "answered": false,
             // 本幕没走快路 ⇒ 收束行不因它开账。
             "reflex_answered": false,
+            // D-168：本幕还没落 `inputs` 阶段格 ⇒ 准备行欠。
+            "prepared": false,
             "has_final": false,
             "closeable": false,
             "tools_open": false,

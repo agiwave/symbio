@@ -13,6 +13,14 @@
 //! 它至少有三个可判的后果：派发行会选中它、[`super::port::kill_dangling`] 会判死它、
 //! 下一幕不会因为一条没人接的请求而以为「已经派过了」。
 //!
+//! ## 三个环步（D-168 的接回顺序）
+//!
+//! | 环步 | 行 | 交接件 |
+//! |---|---|---|
+//! | 准备 | `prepare-turn` | 产出本幕的 [`TurnInputs`]，放进 [`StageStep::inputs`] |
+//! | 宣布 | `announce-turn` | 产出那一笔 `Call`，放进 [`StageStep::call`] |
+//! | 派出 | `dispatch-turn` | 取走前两样，产出幕的结局，放进 [`StageStep::outcome`] |
+//!
 //! ## host 是借用面
 //!
 //! [`StageStep`] 借走编排器 + 会话上下文 + 本轮状态 + **本幕已备好的输入**
@@ -50,15 +58,17 @@ pub(crate) struct StageStep<'a> {
     pub(crate) sink: &'a crate::symbio_core::ExecEventSink,
     pub(crate) context: &'a mut SessionContext,
     pub(crate) turn: &'a mut TurnState,
-    /// 本幕已备好的输入（`prepare_turn_inputs` 的产物）。
+    /// 请求级配置快照（`prepare_turn_inputs` 的入参之一）。
+    pub(crate) req: &'a super::chat_loop::state::TurnRequest,
+    /// 本幕已备好的输入（`prepare_turn_inputs` 的产物）——**两个环步之间的交接件**，
+    /// 与 [`StageStep::call`] 同一层意思：准备放进去，派出取走。
     ///
-    /// 它不在 `TurnState` 里：准备段在同一幕的环之前跑完，产物按借用进这台 host
-    /// 就够了。搬进状态等于把一份只用一次的中间值升成轮级字段。
-    pub(crate) inputs: &'a TurnInputs,
+    /// 它不在 `TurnState` 里：它的寿命就是这一幕（产出 → 消费 → 收尾读一次
+    /// `root_id`），而 `TurnState` 是整轮的容器。把它抬进去等于让「一次只用一次的
+    /// 中间值」拥有轮级寿命——D-168 的诚实划界 2 说的正是这件事还没做完。
+    pub(crate) inputs: &'a mut Option<TurnInputs>,
     /// 本轮用户发言（`execute_turn` 的技能命中判定与轮末学习用它）。
     pub(crate) user_text: &'a str,
-    /// 本幕的压缩寄存位（`Some` = 这一幕压过一次，交给执行体落 `session.consolidated`）。
-    pub(crate) consolidation: Option<&'a [crate::symbio_core::chat_node::ChatNode]>,
     /// 两个环步之间的交接件：已宣布、还没派出的那一笔。
     pub(crate) call: &'a mut Option<Call>,
     /// 派出的结果（成功 / 中止 / 失败），由编排层在环之后取。
@@ -67,6 +77,70 @@ pub(crate) struct StageStep<'a> {
 
 /// 外环绑定表里的动作类型（与前两台同形状，借的面不同）。
 pub(crate) type StageAction = for<'a> fn(&'a mut StageStep<'a>) -> StepFuture<'a>;
+
+/// `prepare-turn`：为本幕备好一次请求的输入（D-168 裁决 3）。
+///
+/// 本体就是 [`super::chat_loop::inputs::prepare_turn_inputs`]——它是提示词 / 工具 /
+/// 请求视图的**唯一收集点**（收口 ②），而在它的末尾起着轮首那台 host（判决 / 压缩 /
+/// 召回 / 快路）。搬到环上之后这些一件都没变，变的是「做完了」这件事有了事实形态：
+/// 动作落 `turn.stage{stage:"inputs"}`，下一问问表读的就是那一格。
+///
+/// ## 两种结局都要落格
+///
+/// - `Ok(inputs)` ⇒ `result: "ready"`，输入放进交接件；
+/// - `Err(TurnExit::Completed)` ⇒ 本幕在准备段就收束了（判决判成「就此答话」，收束格
+///   由 `land_answered_turn` 落），`result: "closed"`。这一档**没有**输入，也不该有往返。
+///
+/// 只落 `ready` 的话，收束的那一幕在事实面上与「还没准备」同形——派发点会重来一遍，
+/// 而第二遍已经没有寄存的那体答话，于是它照常返回输入、照常派出一次往返：一个已经
+/// 答完的轮会再答一次。
+pub(crate) fn run_prepare_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        let prepared = super::chat_loop::inputs::prepare_turn_inputs(
+            step.orchestrator,
+            step.ctx,
+            &mut *step.context,
+            step.sink,
+            &mut *step.turn,
+            step.req,
+        )
+        .await;
+        let round = step.turn.request_round;
+        let (result, inputs) = match prepared {
+            Ok(inputs) => ("ready", Some(inputs)),
+            Err(super::chat_loop::state::TurnExit::Completed) => ("closed", None),
+            // 轮首读失败（会话端口的一次读失败）：端口面上没有一笔账可关，交回编排层
+            // 走 `finish_turn(Failed)` 的既有路径（`ActorError::Read` 的文档）。
+            Err(super::chat_loop::state::TurnExit::Failed(e)) => {
+                return Err(ActorError::Read(e));
+            }
+            // 其余出口不该从准备段冒出来：它们各有自己的入口（中止在轮内 1c、
+            // 边界中止在闸门、恢复完成在循环之前）。硬造一格只会把「怎么到这里
+            // 的」这条信息抹掉。
+            Err(other) => {
+                return Err(ActorError::Read(
+                    crate::symbio_core::PluginError::InternalError(format!(
+                        "准备段返回了不属于它的出口：{other:?}"
+                    )),
+                ));
+            }
+        };
+        super::stage_events::land(
+            &**step.store,
+            step.turn.turn_no,
+            step.turn.user_seq,
+            &crate::symbio_core::request_principal(step.ctx.as_ref()),
+            &[super::stage_events::StageFact::inputs(
+                round,
+                step.turn.drive_seq,
+                result,
+            )],
+        )
+        .map_err(ActorError::Append)?;
+        *step.inputs = inputs;
+        Ok(())
+    })
+}
 
 /// `announce-turn`：宣布本幕的 `turn` 往返（落 `request(port=turn)`），把这一笔留在
 /// 交接件里。
@@ -103,6 +177,23 @@ pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
                 .map_err(ActorError::Append)?;
             return Ok(());
         };
+        // 输入是本幕的另一个交接件（准备那一环步放的）。没有它就没有「要发什么」——
+        // 与没有宣布那一笔同一种处境：这一环步跑不了，把请求判死而不是发一条空请求。
+        let Some(inputs) = step.inputs.take() else {
+            crate::plugin_warn!(
+                "session",
+                "[Loop] 本幕没有备好的输入，`turn` 往返不派出（turn={}）",
+                step.turn.turn_no
+            );
+            super::port::kill_dangling(&**step.store, "turn", "no_prepared_inputs")
+                .map_err(ActorError::Append)?;
+            return Ok(());
+        };
+        // 压缩的寄存位**在这一刻取走**（S2.7-b2）：`take` 而不是 `clone`——同一份
+        // 快照只该落一次。位置也必须在环里：压缩是**准备段**跑的（`policy.compress`
+        // 由轮首那台 host 选中），在环之前取会取到空值，压缩事实于是静默消失
+        // （e2e t8 / t11 / t45 抓到的正是这一条）。
+        let consolidation = step.context.consolidated.take();
         // 字段逐个借出去（三样 `&mut` 按字段重借，互不重叠）：`dispatch` 的闭包会把
         // 那几份借用**移进** future，之后再碰 `step` 就借不动了——只有 `outcome`
         // 需要活着，所以它单独借、单独写回。
@@ -113,9 +204,9 @@ pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
             sink: step.sink,
             context: &mut *step.context,
             turn: &mut *step.turn,
-            inputs: step.inputs,
+            inputs: &inputs,
             user_text: step.user_text,
-            consolidation: step.consolidation,
+            consolidation: consolidation.as_deref(),
         };
         let outcome = super::port::dispatch(
             &**step.store,
@@ -139,6 +230,9 @@ pub(crate) fn run_dispatch_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'
             },
         )
         .await;
+        // 放回槽里：收尾两段（`settle_reasoning` / `finalize_turn_root`）要读
+        // `root_id`，而它们在环之外（D-168 裁决 5：那是本环步的产出处理）。
+        *step.inputs = Some(inputs);
         *step.outcome = Some(outcome);
         Ok(())
     })
@@ -268,20 +362,36 @@ pub(crate) struct StageDrive<'a> {
     pub(crate) sink: &'a crate::symbio_core::ExecEventSink,
     pub(crate) context: &'a mut SessionContext,
     pub(crate) turn: &'a mut TurnState,
-    pub(crate) inputs: &'a TurnInputs,
+    /// 请求级配置快照（准备段要它：显式系统提示词与 `auto_compress` 都在里面）。
+    pub(crate) req: &'a super::chat_loop::state::TurnRequest,
     /// 本轮用户发言（`execute_turn` 的技能命中判定与轮末学习用它）。
     pub(crate) user_text: &'a str,
-    /// 本幕的压缩寄存位（`Some` = 这一幕压过一次）。
-    pub(crate) consolidation: Option<&'a [crate::symbio_core::chat_node::ChatNode]>,
+}
+
+/// 外环跑完一幕之后交回编排层的那两样。
+///
+/// 两样都是**产物**，不是判断：`inputs` 是本幕备好的请求输入（收尾两段要它的
+/// `root_id`），`result` 是那一幕的结局。`inputs = None` 只有一个来源——准备段
+/// 发现本幕已经收束（定稿答话轮），那一幕没有输入，也没有往返。
+///
+/// 为什么交回而不是寄存进 `TurnState`：这两样的寿命就是这一幕。寄存进轮级容器，
+/// 就等于让「一次只用一次的中间值」活到整轮结束（D-168 的诚实划界 2）。
+pub(crate) struct StageOutcome {
+    pub(crate) inputs: Option<TurnInputs>,
+    pub(crate) result: Option<Result<ExecTurnResult, DispatchError<TurnExecExit>>>,
 }
 
 /// 外环派发点：每步向求解器要**本 host 行子集**里最小的一笔可还债，跑它的执行体，
-/// 直到这一台不再欠账（宣布 → 派出两笔都关掉，或本幕收束）。
+/// 直到这一台不再欠账（准备 / 宣布 / 派出三笔都关掉，或本幕收束）。
 ///
-/// 停机判据与轮首那台同形：选不到可还的债就返回，不拿假成功收场。
-pub(crate) async fn drive_stage(
-    drive: StageDrive<'_>,
-) -> Result<Option<Result<ExecTurnResult, DispatchError<TurnExecExit>>>, ActorError> {
+/// ## 两条停机判据，都是「读事实」
+///
+/// 1. **本幕已收束** ⇒ 立刻停。这是 D-168 裁决 2 的幕间判据：`next_stage_owed` 问的是
+///    「这一幕还有账吗」，而收束格落下之后答案恒为否——留着不停，`announce-turn`
+///    会为一个**已经答完的轮**宣布一次往返（它在事实面上与「还没派出」同形：两者都
+///    没有 `response(port=turn)`）。
+/// 2. **选不到可还的债** ⇒ 停，与轮首那台同形：不拿假成功收场。
+pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, ActorError> {
     let StageDrive {
         orchestrator,
         orchestrator_arc,
@@ -289,17 +399,23 @@ pub(crate) async fn drive_stage(
         sink,
         context,
         turn,
-        inputs,
+        req,
         user_text,
-        consolidation,
     } = drive;
     let Some(store) = context.session.facts() else {
-        return Ok(None);
+        return Ok(StageOutcome {
+            inputs: None,
+            result: None,
+        });
     };
     let mut call: Option<Call> = None;
+    let mut inputs: Option<TurnInputs> = None;
     let mut outcome = None;
     loop {
         let facts = store.range(Seq::new(0));
+        if super::loop_rows::stage_closed(&facts, turn.turn_no, turn.now_ms) {
+            break;
+        }
         let Some(next) = super::loop_rows::next_stage(
             &facts,
             turn.turn_no,
@@ -325,9 +441,9 @@ pub(crate) async fn drive_stage(
                 sink,
                 context,
                 turn,
-                inputs,
+                req,
                 user_text,
-                consolidation,
+                inputs: &mut inputs,
                 call: &mut call,
                 outcome: &mut outcome,
             };
@@ -356,7 +472,10 @@ pub(crate) async fn drive_stage(
         // 派发点重读切片：下一问问表读的是**刚落的那一格**。
         turn.facts = store.range(Seq::new(0));
     }
-    Ok(outcome)
+    Ok(StageOutcome {
+        inputs,
+        result: outcome,
+    })
 }
 
 #[cfg(test)]

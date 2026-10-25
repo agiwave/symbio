@@ -1071,6 +1071,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
         "reflex_answered": reflex_answered,
+        // 本幕的请求输入已备好（D-168 裁决 3）：`prepare-turn` 行的出口折在这里。
+        // 读者只有准备行自己（`prepared: false` = 这一幕还欠一次准备）。
+        "prepared": stage_since("inputs"),
         "has_final": has_final,
         "closeable": closeable,
         "tools_open": tools_open,
@@ -1380,7 +1383,7 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // `port` / `id` / `attempt`——判「这笔账关没关」要与派发行同一组键对。
     ViewDecl {
         name: "turn_head",
-        ver: 11,
+        ver: 12,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),

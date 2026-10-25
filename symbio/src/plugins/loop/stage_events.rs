@@ -103,6 +103,13 @@ pub(crate) enum StageName {
     Resume,
     /// 第几次请求——`round` 的**事实形态**。引擎在每次请求前落。
     Round,
+    /// 本幕的请求输入已备好（D-168 裁决 3）：`prepare-turn` 行的出口。
+    ///
+    /// `result` 两档：`ready` = 输入就绪、这一幕还欠一次往返；`closed` = 准备段
+    /// 走完时本幕已经收束（定稿答话轮）——那一幕**没有**输入，也没有往返。
+    /// 两档都要落：只落 `ready` 的话，收束的那一幕在事实面上与「还没准备」同形，
+    /// 环会重来一遍。
+    Inputs,
 }
 
 impl StageName {
@@ -114,6 +121,7 @@ impl StageName {
             Self::Reflex => "reflex",
             Self::Resume => "resume",
             Self::Round => "round",
+            Self::Inputs => "inputs",
         }
     }
 }
@@ -255,6 +263,19 @@ impl StageFact {
     /// `close-turn` 统一落（D-163）。
     pub(crate) fn reflex(round: usize, drive_seq: u64, skill_id: &str) -> Self {
         let mut fact = Self::ran(StageName::Reflex, round).with_result(skill_id);
+        fact.identity = Some(drive_seq.to_string());
+        fact
+    }
+
+    /// 本幕的请求输入已备好（D-168 裁决 3）：`prepare-turn` 行的出口。
+    ///
+    /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::recall`] 同一条理由，但这里
+    /// 更硬：续写幕复用轮号与请求轮次，`(turn, round, stage)` 三元组会与首幕
+    /// **撞成同一格**，而 `land` 把 `Duplicate` 当成功吞掉 ⇒ 续写幕的准备「做完了」
+    /// 这件事根本不进日志，派发点读到的仍是「没准备」，环在那一幕一步都走不动
+    /// （e2e t27 抓到的正是这一条：`prepare 落了零格`）。
+    pub(crate) fn inputs(round: usize, drive_seq: u64, result: &str) -> Self {
+        let mut fact = Self::ran(StageName::Inputs, round).with_result(result);
         fact.identity = Some(drive_seq.to_string());
         fact
     }

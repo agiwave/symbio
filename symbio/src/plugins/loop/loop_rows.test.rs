@@ -680,15 +680,27 @@ fn the_outer_ring_announces_before_it_dispatches() {
     ];
     let call = json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1});
 
-    // 第一笔债是**宣布**（57），不是派出：外环的两行是「宣布 → 派出」两个环步
-    // （D-168 与 D-166 同形）。这一格以前是 `execute-turn` 直接抢到，因为
-    // 「一幕欠一次往返」那时还不落成事实。
-    let picked = super::next_stage(&open, 1, 0, super::STAGE_ACTORS).expect("幕首欠一次宣布");
+    // 第一笔债是**准备**（56）：一幕先备输入，才谈得上宣布与派出（D-168 裁决 3）。
+    let picked = super::next_stage(&open, 1, 0, super::STAGE_ACTORS).expect("幕首欠一次准备");
+    assert_eq!(picked.row, "prepare-turn");
+    assert_eq!(picked.by, super::PREPARE);
+
+    // 输入备好之后，第二笔债是**宣布**（57），不是派出：外环的「宣布 → 派出」是
+    // 两个环步（D-168 与 D-166 同形）。这一格以前是 `execute-turn` 直接抢到，
+    // 因为「一幕欠一次往返」那时还不落成事实。
+    let mut prepared = open.clone();
+    prepared.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "inputs", "round": 0, "result": "ready"}),
+    ));
+    let picked =
+        super::next_stage(&prepared, 1, 0, super::STAGE_ACTORS).expect("备好输入之后欠一次宣布");
     assert_eq!(picked.row, "announce-turn");
     assert_eq!(picked.by, super::ANNOUNCE);
 
     // 宣布之后：那笔账在日志上开着，轮到派发行。
-    let mut announced = open.clone();
+    let mut announced = prepared.clone();
     announced.push(ev(1, "request", call.clone()));
     let picked = super::next_stage(&announced, 1, 0, super::STAGE_ACTORS).expect("宣布之后欠派出");
     assert_eq!(picked.row, "dispatch-turn");
@@ -859,6 +871,8 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
+            // 外环的准备行（D-168 裁决 3）：一幕先备输入（56），再谈宣布（57）。
+            "prepare-turn",
             // 外环的宣布行（D-168）：同一点上比执行行更靠前（57 < 60），
             // 因为「一幕欠一次 `turn` 往返」的第一步是宣布它。
             "announce-turn",
@@ -893,7 +907,8 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Reflex,
             // 收束入格不调模型：反射档。
             crate::symbio_core::LatencyTier::Reflex,
-            // 宣布只是一笔入格（`request`），不调模型；派出才进深度档。
+            // 准备与宣布都只入格不调模型（模型在它们内部的 host 里）；派出才进深度档。
+            crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
@@ -2452,12 +2467,20 @@ fn the_overlap_report_on_the_production_table() {
         rendered,
         vec![
             // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
+            //
+            // 准备行（D-168 裁决 3）也读幕头（`prepared` 那一格折在 `turn_head` 上），
+            // 因此它与这四行各成一对：读面相同、前件不同（`prepared` vs 各行的开关与
+            // 结论格）。它们今天由 `prio`（10/30/40/50 < 56）决出，报告不知道这些。
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
             ("policy.classify", "policy.reflex", head),
+            ("policy.classify", "prepare-turn", head),
             ("policy.compress", "policy.recall", head),
             ("policy.compress", "policy.reflex", head),
+            ("policy.compress", "prepare-turn", head),
             ("policy.recall", "policy.reflex", head),
+            ("policy.recall", "prepare-turn", head),
+            ("policy.reflex", "prepare-turn", head),
             // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
             // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
             // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与

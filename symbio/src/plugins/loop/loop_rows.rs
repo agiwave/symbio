@@ -100,6 +100,12 @@ const COURIER: &str = "courier";
 /// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
 /// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
 const RELAY: &str = "relay";
+/// 外环的**准备**执行体（D-168 裁决 3）：`prepare-turn` 行选中的动作——为本幕备好
+/// 一次请求的输入（提示词 / 工具 / 请求视图），出口是阶段格 `inputs`。
+///
+/// 与 [`ANNOUNCE`] 分开：准备与宣布是两笔账（先有输入，才谈得上宣布这一次往返），
+/// 共名会让动作只能按行名分支（D-118 决策 1–2）。
+const PREPARE: &str = "prepare";
 /// 外环的**宣布**执行体（D-168）：`announce-turn` 行选中的动作——落 `request(port=turn)`。
 ///
 /// 与 [`EXECUTE`] 分开：`execute-turn` 宣布的是**模型**往返（一次），这一条宣布的是
@@ -159,6 +165,33 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
         EVENT_SESSION_CONSOLIDATED,
         EVENT_AUTHZ_DENIED,
     ],
+};
+
+/// 外环准备执行体的声明（D-168 裁决 3）：跑完一幕的输入准备，出口是阶段格。
+///
+/// ## 名单为什么只有一格
+///
+/// 它自己的动作直接落的是 `turn.stage{stage:"inputs"}`。定稿答话轮那一档还落了
+/// `chat.assistant.final`（`land_answered_turn` → `execute_final_reply_turn`），
+/// 但那一格**不在这里声明**：声明了本行就是收束格的写者之一，而 `execute-turn` 的
+/// 出口正是 `turn_closed`（收束 / 兜底两格折出来的）⇒ 装载器当场报
+/// `DependencyCycle ["prepare-turn", "execute-turn", "prepare-turn"]`
+/// 与 `["close-turn", "prepare-turn", "execute-turn", "close-turn"]`（第一次装载时
+/// 实得）。收束格在声明面上的 owner 仍是 `close`（[`ACTOR_CLOSE`]），准备段那一档
+/// 是**同一条领域动作的另一处调用**——名单按「谁拥有这一格」配，不按「谁在窗口里
+/// 碰到它」配（D-160 的同一条纪律）。
+///
+/// ## 名单里为什么没有轮首那四行写的格
+///
+/// 准备段在末尾起了**轮首那台 host**（判决 / 压缩 / 召回 / 快路）。那四格由那四条行
+/// 的执行体各自声明——名单的 owner 在行上（D-160 的同一条纪律），本声明不抄一遍。
+const ACTOR_PREPARE: ActorDecl = ActorDecl {
+    name: PREPARE,
+    // 准备段里会问一次模型（判决 / 措辞），所以是深度档；**动作本身**不碰模型调用，
+    // 那是轮首那几行的事——这条差别由行上的 `tier` 表达（见 `prepare-turn`）。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
 };
 
 /// 外环宣布执行体的声明（D-168）：只落 `request`，不调模型、不跑工具。
@@ -500,6 +533,11 @@ pub(crate) struct StageEntry {
 }
 
 pub(crate) static STAGE_ACTORS: &[StageEntry] = &[
+    StageEntry {
+        decl: ACTOR_PREPARE,
+        run: super::stage_exec::run_prepare_turn,
+        transitional: &[],
+    },
     StageEntry {
         decl: ACTOR_ANNOUNCE,
         run: super::stage_exec::run_announce_turn,
@@ -946,6 +984,36 @@ pub(crate) static ROWS: &[Decl] = &[
                 eq: &[],
             },
         ],
+        unless: &[],
+    },
+    // ── 准备（D-168 裁决 3）────────────────────────────────────────────
+    //
+    // 「本幕还欠一次请求的输入」是一笔独立的账。它此前是 `chat_loop` 步骤 3 的
+    // 一次函数调用：`prepare_turn_inputs` 的 `Ok` 就是「做完了」这件事的全部形态，
+    // 崩在它之后、派发之前，日志上看不出这一幕准备到哪一步。
+    //
+    // 前件取 `turn_head.prepared`（本幕落过 `inputs` 阶段格没有），出口取
+    // `turn_stages` 的 `stage:"inputs"`：与 `policy.*` 四行**同一对形状**——键都是
+    // `(turn, round)`，判别都在 `stage` 这一格上。这不是巧合：它们问的是同一件事
+    // （「这一幕的这一步做过没有」），只是那四步在幕首那台 host、这一步在外环。
+    Decl {
+        name: "prepare-turn",
+        prio: 56,
+        by: Some(PREPARE),
+        // 准备段自己只收集（提示词 / 工具 / 请求视图），模型调用在它内部那台 host
+        // 的行上——与 `dispatch-turn` 同一条取值：本行动作不调模型，快速档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[("prepared", Lit::Bool(false))],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("inputs"))],
+        }],
         unless: &[],
     },
     Decl {
@@ -1484,6 +1552,29 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
         trace(&frozen, debt);
     }
     debt.is_some()
+}
+
+/// 本幕是否已经收束（收束 / 兜底格已在幕锚之后落过）。
+///
+/// 外环的**幕间**停机判据（D-168 裁决 2）：`chat_loop` 的迭代器在每一轮之外问一次，
+/// 外环的派发点在每一步之前问一次。两个问题同一个答案——「这一幕还有账吗」。
+///
+/// ## 为什么它不在行表上
+///
+/// 「本幕已收束」若写成一行的前件，那一行就得**以收束格为出口**（与 `close-turn`
+/// 同一批格），而收束格的写者正是 `close-turn` 的执行体：两条行各写一格 ⇒ 依赖图
+/// 成环（DE-015 §3.4 第 1 条）。它也不是一笔债——收束之后没有任何东西要还，
+/// 它是「环该停了」这句话在事实面（`turn_closed` 视图）上的形态。
+///
+/// 与 [`waiting`] 同一层：都读冻结表里已声明的视图，不新增机制词。
+pub(crate) fn stage_closed(events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    frozen
+        .eval("turn_closed", turn_slice(events, turn), now)
+        .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+        .unwrap_or(false)
 }
 
 /// 这一刻环上有没有**已派出、未收清**的账——「在等」的可观测形态。

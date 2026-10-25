@@ -54,7 +54,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::drive::begin_drive;
-pub(crate) use self::inputs::{prepare_turn_inputs, run_compress, run_recall, run_reflex};
+pub(crate) use self::inputs::{run_compress, run_recall, run_reflex};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
@@ -360,25 +360,13 @@ pub async fn run_chat_loop(
             context.messages.len()
         );
 
-        // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
-        // 系统提示词与工具在同一函数内、同一时刻收集（同一个 Registry），
-        // 并由此派生请求级开销与请求视图；该函数末尾还有**轮首派发点**——压缩的水位响应
-        // 是行 `policy.compress` 的执行体，由 `ring::drive` 在这里选中（D-159）。
-        let inputs = match prepare_turn_inputs(
-            orchestrator,
-            &ctx,
-            &mut context,
-            &sink,
-            &mut turn,
-            &turn_req,
-        )
-        .await
-        {
-            Ok(inputs) => inputs,
-            Err(exit) => {
-                return finish_turn(&context, &sink, &turn, exit).await;
-            }
-        };
+        // ── 步骤 3：本轮输入准备（收口 ②）——**已归外环**（D-168 裁决 3）──────
+        //
+        // 收口 ② 本身没变：提示词 / 工具 / 请求视图仍由 `prepare_turn_inputs` 一处
+        // 收集，末尾仍起轮首那台 host（判决 / 压缩 / 召回 / 快路）。变的是它在环上的
+        // 位置——它现在是 `prepare-turn` 行（prio 56），由下面的派发点向求解器要，
+        // 不再是本文件里按步骤编号的一次调用。崩在准备与派出之间，「这一幕准备到
+        // 哪一步」在日志上可判（`turn.stage{stage:"inputs"}`）。
 
         // **不要在这里拦中止**（/ D-052）：在此处 `return
         // TurnExit::Aborted(Vec::new())` 会让运行器从不落 `user.message`，中止
@@ -417,20 +405,24 @@ pub async fn run_chat_loop(
         //
         // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该
         // 落一次，而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。
-        let consolidation = context.consolidated.take();
-        let out = match super::stage_exec::drive_stage(super::stage_exec::StageDrive {
+        // 压缩的寄存位**不在环之前取**：压缩是准备段跑的（`policy.compress`），
+        // 在环之前 `take` 只会取到空值。取它的地方在派发那一环步（`run_dispatch_turn`）。
+        let staged = match super::stage_exec::drive_stage(super::stage_exec::StageDrive {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,
             ctx: &ctx,
             sink: &sink,
             context: &mut context,
             turn: &mut turn,
-            inputs: &inputs,
+            req: &turn_req,
             user_text: drive.user_text.as_str(),
-            consolidation: consolidation.as_deref(),
         })
         .await
         {
+            // 读失败（轮首那台的会话端口读不出来）：原样上抛，走它的兜底格路径。
+            Err(super::turn_exec::ActorError::Read(e)) => {
+                return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
+            }
             Err(e) => {
                 return finish_turn(
                     &context,
@@ -442,21 +434,29 @@ pub async fn run_chat_loop(
                 )
                 .await;
             }
-            // 环上一笔都没派出：宣布行没被选中，说明行表装载失败或本幕已经没有
-            // 可还的债。不给它一个「安静地不跑」的出口——那正是协议事实要堵的
-            // 失败形态（与 `NotOwed` 同一条理由）。
-            Ok(None) => {
+            Ok(staged) => staged,
+        };
+        // 本幕在准备段就收束了（判决判成「就此答话」）：那一幕既没有输入也没有往返，
+        // 收束格与压缩寄存都已在准备段落完，收尾走同一条出口。
+        let Some(inputs) = staged.inputs else {
+            return finish_turn(&context, &sink, &turn, TurnExit::Completed).await;
+        };
+        let out = match staged.result {
+            // 环上一笔都没派出：三笔账都该在，却一笔没选中，说明行表装载失败或本幕
+            // 已经没有可还的债。不给它一个「安静地不跑」的出口——那正是协议事实要
+            // 堵的失败形态（与 `NotOwed` 同一条理由）。
+            None => {
                 return finish_turn(
                     &context,
                     &sink,
                     &turn,
                     TurnExit::Failed(crate::symbio_core::PluginError::InternalError(
-                        "端口 `turn` 的往返没有派出（外环没有选中 `announce-turn`）".into(),
+                        "端口 `turn` 的往返没有派出（外环没有选中 `dispatch-turn`）".into(),
                     )),
                 )
                 .await;
             }
-            Ok(Some(Ok(res))) => {
+            Some(Ok(res)) => {
                 // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
                 // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
                 // 不并入就只看得见、不落库（重启即丢）。
@@ -476,24 +476,24 @@ pub async fn run_chat_loop(
                 }
                 res.output
             }
-            Ok(Some(Err(super::port::DispatchError::Actor(
+            Some(Err(super::port::DispatchError::Actor(
                 super::turn_exec::TurnExecExit::Aborted(partial),
-            )))) => {
+            ))) => {
                 // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
                 // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
                 // （正文 / 思考 / 工具节点）随出口一路带到 `persist_failure`
                 // 并入格——它们是事实，不因没说完就不记。
                 return finish_turn(&context, &sink, &turn, TurnExit::Aborted(partial)).await;
             }
-            Ok(Some(Err(super::port::DispatchError::Actor(
+            Some(Err(super::port::DispatchError::Actor(
                 super::turn_exec::TurnExecExit::Failed(e),
-            )))) => {
+            ))) => {
                 plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
             // 记账面的失败（行不欠 / 事实落不进去 / 端口没声明）：不给它一个
             // 「安静地不跑」的出口——那正是协议事实要堵的失败形态。
-            Ok(Some(Err(other))) => {
+            Some(Err(other)) => {
                 plugin_warn!("session", "[Session] 端口 `turn` 派发失败: {other:?}");
                 return finish_turn(
                     &context,
