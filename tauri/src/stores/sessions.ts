@@ -315,7 +315,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
 
-  // 兼容旧 API：返回 messages 数组形式（按 seq 排序；缺失 seq 时回退 timestamp）
+  /** 当前主 API：返回 messages 数组形式（按 seq 排序；缺失 seq 时回退 timestamp）。
+   *  转写树由调用方按 `parent_id` 组装；本函数只做「字典 → 有序列表」这一次投影。 */
   function getSessionMessages(id: string): ChatNode[] {
     return sortTranscript(Object.values(sessionMessages.value[id] || {}))
   }

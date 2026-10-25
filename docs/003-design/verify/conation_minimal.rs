@@ -250,8 +250,8 @@ fn main() {
 
     let policy_on = ConationPolicy { enabled: true, max_goal_len: 32 };
     // 授权是闸内的一道真判据：只有持 `define.work` 的主体能把候选升格。
-    let grants = Grants { holders: &["agent:autonomous"] };
-    let task = IntentGate::approve(&mut intent, &policy_on, &grants, "agent:autonomous").unwrap();
+    let grants = Grants { holders: &["session/autonomous"] };
+    let task = IntentGate::approve(&mut intent, &policy_on, &grants, "session/autonomous").unwrap();
     println!("  过闸后：approved = {}，产出任务 = {:?}", intent.is_approved(), task);
     assert!(intent.is_approved(), "过闸后必须标记为已批准");
     assert_eq!(task.source_seq(), 1, "任务必须记得它来自哪条欲事件（可溯源）");
@@ -260,13 +260,13 @@ fn main() {
     // 所以阈值设成 6，一个 8 字的目标就超宽了（真实系统里应换成意图粒度判定）。
     let mut broad = CandidateIntent::from_event(&ev).unwrap();
     broad.goal = "全面提升用户生活质量与幸福感"; // 14 字，远超 max_goal_len
-    let r = IntentGate::approve(&mut broad, &policy_on, &grants, "agent:autonomous");
+    let r = IntentGate::approve(&mut broad, &policy_on, &grants, "session/autonomous");
     println!("  过宽目标 → {:?}", r);
     assert!(r.is_err(), "过于宽泛的'想要'不得自动升格为任务");
 
     // 授权反向：开关打开，但不持 define.work 的主体升格被拒
     let mut worker = CandidateIntent::from_event(&ev).unwrap();
-    let denied = IntentGate::approve(&mut worker, &policy_on, &grants, "agent:worker");
+    let denied = IntentGate::approve(&mut worker, &policy_on, &grants, "session/worker");
     println!("  不持 define.work 的主体 → {:?}", denied);
     assert_eq!(denied, Err("unauthorized: define.work"), "授权是闸里的一道真判据");
     assert!(!worker.is_approved(), "被拒的候选不得变成已批准");
@@ -283,7 +283,7 @@ fn main() {
     println!("  平凡值 enabled = {}", policy_off.enabled);
     assert!(!policy_off.enabled, "J2：『欲』的平凡值必须是 false");
     let mut intent2 = CandidateIntent::from_event(&ev).unwrap();
-    let r2 = IntentGate::approve(&mut intent2, &policy_off, &grants, "agent:autonomous");
+    let r2 = IntentGate::approve(&mut intent2, &policy_off, &grants, "session/autonomous");
     println!("  关闭欲后 approve → {:?}", r2);
     assert!(r2.is_err(), "关闭『欲』后不得有任何自主任务产生");
     // 关键：关闭后系统仍**完整运行**——事实源照常读写，投影照常工作

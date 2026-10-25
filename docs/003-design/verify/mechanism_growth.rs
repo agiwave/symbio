@@ -56,7 +56,7 @@ fn scenarios() -> Vec<Scenario> {
         Scenario { name: "S8 多主体隔离", assignments: vec![
             ("event.entity", "task"), ("event.verb", "progressed"),
             ("actor.pattern", "decider"), ("actor.capability", "assign.work"),
-            ("vis_scope", "thread_private"), ("principal", "agent:researcher-01")] },
+            ("vis_scope", "thread_private"), ("principal", "session/researcher-01")] },
         Scenario { name: "S9 长期记忆检索", assignments: vec![
             ("event.entity", "memory"), ("event.verb", "asserted"),
             ("actor.pattern", "translator"), ("actor.capability", "produce.artifact"),
@@ -69,7 +69,7 @@ fn scenarios() -> Vec<Scenario> {
             ("actor.pattern", "decider"), ("actor.capability", "reply"), ("actor.budget_ms", "80")] },
         Scenario { name: "S12 对等承诺", assignments: vec![
             ("event.entity", "commitment"), ("event.verb", "asserted"),
-            ("actor.pattern", "translator"), ("actor.capability", "produce.artifact"), ("principal", "agent:peer-b")] },
+            ("actor.pattern", "translator"), ("actor.capability", "produce.artifact"), ("principal", "session/peer-b")] },
         Scenario { name: "S13 声誉与信任", assignments: vec![
             ("event.entity", "commitment"), ("event.verb", "asserted"),
             ("actor.pattern", "translator"), ("projection", "reputation")] },
