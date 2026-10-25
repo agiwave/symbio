@@ -35,6 +35,7 @@
       :mechanism-actions="mechanismActions"
       :mechanism-busy="mechanismBusy"
       @action="onAction"
+      @open-node="(addr: string) => emit('open-node', addr)"
     />
   </div>
 
@@ -89,6 +90,8 @@ const emit = defineEmits<{
   (e: 'delete'): void
   /** 机制约定：请求进入节点内部（VDFS 下 `enter(node.path)`；payload.kind 指定子类别） */
   (e: 'open-container', kind: string): void
+  /** 机制约定：请求打开另一个 VDFS 节点（如变更行指向的文件）；由页面层决定呈现 */
+  (e: 'open-node', addr: string): void
 }>()
 
 const store = useSessionsStore()

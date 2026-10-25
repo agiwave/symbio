@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   listVdfs: vi.fn(),
   readVdfs: vi.fn(),
   writeVdfs: vi.fn(),
+  statVdfs: vi.fn(),
   subscribeVdfsChanged: vi.fn(),
   // 动作通道：草稿上的「导入整包」要走它（载荷编码 + 目标地址在下面两条用例里钉住）
   runVdfsAction: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/services/vdfs', () => ({
   listVdfs: mocks.listVdfs,
   readVdfs: mocks.readVdfs,
   writeVdfs: mocks.writeVdfs,
+  statVdfs: mocks.statVdfs,
   runVdfsAction: mocks.runVdfsAction,
   arrayBufferToBase64: mocks.arrayBufferToBase64,
   // 以下未被本用例触达，仅为满足模块导入
@@ -106,12 +108,12 @@ function listReturns(items: VdfsNode[]) {
  * `addr` 传 `Ref` 是为了**换地址**的用例：换绑定地址（切侧边栏 / push 新地址页）
  * 是同一份数据逻辑内部的迁徙，不是重新挂载，必须能原地改它才测得出来。
  */
-function mountHost(addr: string | Ref<string>) {
+function mountHost(addr: string | Ref<string>, select?: Ref<string | null>) {
   let api!: ReturnType<typeof useVdfs>
   const addrRef = typeof addr === 'string' ? ref(addr) : addr
   const Host = defineComponent({
     setup() {
-      api = useVdfs({ addr: addrRef })
+      api = useVdfs({ addr: addrRef, select })
       return () => null
     },
   })
@@ -906,5 +908,142 @@ describe('useVdfs 列表检索入口（服务端声明 `search`）', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/**
+ * 深链选中（路由 `?select=<末段名>`）：打开文件的唯一形态 =「父目录 + 选中项」。
+ *
+ * 三条判据都不是「选中了没有」这么简单：
+ *
+ * 1. **当前目录定在绑定地址自身**——三栏的缺省是「选第一个子目录」，不钉住的话
+ *    文件所在的那一层根本不在中栏里；
+ * 2. **只应用一次**——刷新收敛（重同步 / 轮末）不得把用户随后自己选的目录抢回深链
+ *    目标；
+ * 3. **不在有界列表里也要能选中**——打开旧会话里一个很早之前的文件时，那一项
+ *    可能落在更早的页里；按地址 `stat` 一次比「先加载到它」便宜得多。
+ */
+describe('useVdfs 深链选中（`?select=`：父目录 + 选中项）', () => {
+  const WORKDIR = `@vfs/session/abc/workdir`
+  const DOCS = `${WORKDIR}/docs`
+
+  function subdir(name: string): VdfsNode {
+    return {
+      path: `${WORKDIR}/${name}`,
+      name,
+      title: name,
+      kind: 'dir',
+      status: 'active',
+      access: 'l',
+    }
+  }
+
+  function file(name: string): VdfsNode {
+    return {
+      path: `${WORKDIR}/${name}`,
+      name,
+      title: name,
+      kind: 'file',
+      status: 'active',
+      access: 'r',
+      ext: 'text',
+    }
+  }
+
+  /** 按**被请求的地址**回答（导航层与内容层共用同一个入口，不能按调用次序排） */
+  function serves(map: Record<string, VdfsNode[]>) {
+    mocks.listVdfs.mockImplementation(async (pathOrReason: string, maybePath?: string) => {
+      const path = maybePath ?? pathOrReason
+      return {
+        path,
+        node: { path, name: path.split('/').pop() ?? '', kind: 'dir', access: 'l' },
+        items: map[path] ?? [],
+      }
+    })
+  }
+
+  it('★ 当前目录定在绑定地址自身，并选中深链指向的文件', async () => {
+    serves({ [WORKDIR]: [subdir('docs'), file('README.md')], [DOCS]: [] })
+
+    const select = ref<string | null>('README.md')
+    const { api, wrapper } = mountHost(WORKDIR, select)
+    await settle()
+
+    expect(api.cwd.value, '不得被「缺省第一个子目录」抢走').toBe(WORKDIR)
+    expect(api.selectedNode.value?.path).toBe(`${WORKDIR}/README.md`)
+    expect(
+      api.navItems.value.some((i) => i.active),
+      '当前目录就是绑定地址自身 ⇒ 左栏没有高亮项',
+    ).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('目标不在本页（有界列表 / 很早的文件）⇒ 按地址 stat 一次，仍选中它', async () => {
+    serves({ [WORKDIR]: [subdir('docs')], [DOCS]: [] })
+    mocks.statVdfs.mockResolvedValue(file('old.md'))
+
+    const select = ref<string | null>('old.md')
+    const { api, wrapper } = mountHost(WORKDIR, select)
+    await settle()
+    await settle()
+
+    expect(mocks.statVdfs).toHaveBeenCalledWith(READBACK_REASON.VDFS_BROWSER, `${WORKDIR}/old.md`)
+    expect(api.selectedNode.value?.path).toBe(`${WORKDIR}/old.md`)
+
+    wrapper.unmount()
+  })
+
+  it('形状不对的选中项（带分隔符 / 上跳）一律当作没选中，落到目录页', async () => {
+    serves({ [WORKDIR]: [subdir('docs')], [DOCS]: [] })
+
+    const select = ref<string | null>('../etc/passwd')
+    const { api, wrapper } = mountHost(WORKDIR, select)
+    await settle()
+
+    expect(api.cwd.value).toBe(DOCS)
+    expect(api.selectedNode.value).toBeNull()
+    expect(mocks.statVdfs, '不拿一个能拼出界外地址的字符串去读').not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('用户点了左栏 ⇒ 离开到达态；之后的重载不把路由里的选中项重放回来', async () => {
+    serves({ [WORKDIR]: [subdir('docs'), file('README.md')], [DOCS]: [] })
+
+    const select = ref<string | null>('README.md')
+    const { api, wrapper } = mountHost(WORKDIR, select)
+    await settle()
+    expect(api.selectedNode.value?.path).toBe(`${WORKDIR}/README.md`)
+
+    await api.selectDir('docs')
+    expect(api.cwd.value).toBe(DOCS)
+
+    await api.reload()
+    expect(api.cwd.value, '用户的选择比路由里那次到达更能代表他现在想看的东西').toBe(DOCS)
+    expect(api.selectedNode.value).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('只有选中项变（地址没变）⇒ 重新落位，但不重换订阅', async () => {
+    serves({
+      [WORKDIR]: [subdir('docs'), file('README.md'), file('CHANGELOG.md')],
+      [DOCS]: [],
+    })
+
+    const select = ref<string | null>('README.md')
+    const { api, wrapper } = mountHost(WORKDIR, select)
+    await settle()
+    expect(mocks.subscribeVdfsChanged).toHaveBeenCalledTimes(1)
+
+    select.value = 'CHANGELOG.md'
+    await settle()
+
+    expect(api.cwd.value).toBe(WORKDIR)
+    expect(api.selectedNode.value?.path).toBe(`${WORKDIR}/CHANGELOG.md`)
+    expect(mocks.subscribeVdfsChanged, '地址没变 ⇒ 订阅范围没变').toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
   })
 })

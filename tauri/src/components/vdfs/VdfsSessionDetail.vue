@@ -30,6 +30,7 @@
     @created="(id) => $emit('created', id)"
     @delete="$emit('delete')"
     @open-container="$emit('browse')"
+    @open-node="(addr: string) => $emit('open-node', addr)"
   />
 </template>
 
@@ -47,6 +48,8 @@ defineEmits<{
   (e: 'delete'): void
   /** 进入会话内部（子会话 / 工作目录树）——由页面层 `browseInto(节点路径)` 完成 */
   (e: 'browse'): void
+  /** 打开会话内部的一个具体节点（如变更行指向的文件）——由页面层决定呈现 */
+  (e: 'open-node', addr: string): void
   (e: 'save', payload: unknown): void
 }>()
 

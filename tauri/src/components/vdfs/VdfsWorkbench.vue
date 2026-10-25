@@ -181,6 +181,7 @@
         @action="onAction"
         @created="onCreated"
         @browse="browseInto"
+        @open-node="onOpenNode"
       />
 
       <!-- 详情加载中：骨架按"标题 + 若干字段行"的形状占位，与表单详情同构，
@@ -217,7 +218,9 @@ import {
 import {
   isVdfsDir,
   isVdfsDraft,
+  vdfsBase,
   vdfsJoin,
+  vdfsParent,
   type VdfsItem,
 } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
@@ -226,11 +229,24 @@ import { useSessionsStore } from '@/stores/sessions'
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
   addr: string
+  /**
+   * 到达后要顺带选中的**末段名**（`addr` 的直接子项；如 `?select=main.rs`）。
+   *
+   * 「打开文件」没有独立地址页，只有「父目录 + 选中项」这一种形态；本控件不认识
+   * 名字的含义，选中后仍走同一条详情通道（渲染器按 ext 决定）。
+   */
+  select?: string | null
 }>()
 
 const emit = defineEmits<{
-  /** 钻入某目录的数据地址（点中栏目录 / 详情「浏览内部」）；呈现方式由宿主决定 */
-  (e: 'open', addr: string): void
+  /**
+   * 打开一个数据地址；`select` = 该目录下要顺带选中的末段名（可选）。
+   *
+   * 钻入目录（点中栏目录 / 详情「浏览内部」）只给 `addr`；打开**文件**没有自己的
+   * 地址页（三栏的右栏才是详情），于是给「父目录 + `select`」，宿主据此 push
+   * 一个「父目录地址页 + 选中项」。
+   */
+  (e: 'open', addr: string, select?: string): void
 }>()
 
 const {
@@ -276,7 +292,10 @@ const {
   creatableType,
   canCreate,
   draftSeq,
-} = useVdfs({ addr: computed(() => props.addr) })
+} = useVdfs({
+  addr: computed(() => props.addr),
+  select: computed(() => props.select ?? null),
+})
 
 // ==================== 当前空间声明 ====================
 //
@@ -450,6 +469,18 @@ function browseInto() {
   const n = selectedNode.value
   if (!n) return
   emit('open', n.path)
+}
+
+/**
+ * 详情请求打开**另一个节点**（如会话变更面板里的一行）。
+ *
+ * 文件没有自己的地址页：三栏的右栏才是详情，所以「打开文件」= 打开它所在的
+ * 父目录页 + 顺带选中它。拆分用地址代数（`vdfsParent` / `vdfsBase`），本控件
+ * 仍然不认识路径里任何一段的含义。
+ */
+function onOpenNode(addr: string) {
+  if (!addr) return
+  emit('open', vdfsParent(addr), vdfsBase(addr))
 }
 
 // ==================== 详情装配 ====================

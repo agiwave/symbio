@@ -34,26 +34,26 @@ fn rows_are_presentation_ready() {
         ]),
         None,
     );
-    assert!(got.has_wal);
+    assert!(got.has_wal && got.readable);
     assert_eq!(got.rows.len(), 2);
-    // 最近改过的在前；地址直接可读。
+    // 最近改过的在前；地址相对会话容器，拼上会话地址即可读。
     assert_eq!(got.rows[0].path, "docs/a.md");
-    assert_eq!(got.rows[0].address, "s1/workdir/docs/a.md");
+    assert_eq!(got.rows[0].address, "workdir/docs/a.md");
     assert_eq!(got.rows[0].op, "write");
     assert_eq!(got.rows[0].label, "写入");
     assert_eq!(got.rows[0].turn, 3);
     assert_eq!(got.rows[0].changes, 1);
-    assert_eq!(got.rows[1].address, "s1/workdir/src/lib.rs");
+    assert_eq!(got.rows[1].address, "workdir/src/lib.rs");
 }
 
 /// 没有事实源与「有源但没改过」是两件事：`has_wal` 分辨它们。
 #[test]
 fn no_facts_is_an_evidenced_empty() {
     let missing = read_changes("s1", None, None);
-    assert!(!missing.has_wal && missing.rows.is_empty());
+    assert!(!missing.has_wal && missing.readable && missing.rows.is_empty());
 
     let untouched = read_changes("s1", Some(Vec::new()), None);
-    assert!(untouched.has_wal && untouched.rows.is_empty());
+    assert!(untouched.has_wal && untouched.readable && untouched.rows.is_empty());
 }
 
 /// 读侧闸与 `session/stats` 同一道：看不到内容 ⇒ 空清单，不是「没改过」。
@@ -65,5 +65,6 @@ fn reader_without_access_gets_an_empty_ledger() {
         Some(PRINCIPAL_MAIN),
     );
     assert!(got.has_wal, "有源这一格照报");
+    assert!(!got.readable, "不给看要自己说出来，不能只给一张空表");
     assert!(got.rows.is_empty(), "不给看 ⇒ 一条都不给");
 }

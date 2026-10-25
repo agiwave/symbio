@@ -53,6 +53,7 @@ import {
   listVdfs,
   readVdfs,
   runVdfsAction,
+  statVdfs,
   writeVdfs,
 } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
@@ -104,11 +105,20 @@ const VDFS_PAGE_SIZE = 100
 export interface UseVdfsOptions {
   /** 绑定的数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
   addr: Ref<string>
+  /**
+   * 到达后要顺带选中的**末段名**（`addr` 的直接子项；对应路由 `?select=`）。
+   *
+   * 「打开文件」没有独立地址页（详情在右栏），只有「父目录 + 选中项」一种形态。
+   * 有值时当前目录**定在 `addr` 自身**——否则三栏的缺省会落到第一个子目录，
+   * 文件所在的那一层反而看不到。用户随后自己点左栏/列表即离开这个定住态。
+   */
+  select?: Ref<string | null>
 }
 
 export function useVdfs(opts: UseVdfsOptions) {
   const { showToast } = useToast()
   const addr = opts.addr
+  const selectName = opts.select ?? ref<string | null>(null)
 
   // ==================== 左栏导航 ====================
   /**
@@ -144,9 +154,25 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 选中的左栏子目录名；null = `addr` 无子目录（中栏显示 `addr` 自身内容） */
   const selectedName = ref<string | null>(null)
 
-  /** 当前目录全路径 = 绑定地址 + 选中的子目录 */
+  /**
+   * 深链（`select`）把当前目录**定在 `addr` 自身**。
+   *
+   * 三栏的缺省是「选第一个子目录」——打开文件时那样会落到兄弟目录，文件所在的
+   * 这一层反而看不到。定住只是一次性的到达态：用户点左栏 / 点目录即解除
+   * （见 `selectDir`；换地址或路由选中项变化时由 `applyFocusIfChanged` 重算）。
+   */
+  const pinnedAtAddr = ref(false)
+
+  /** 待选中的末段名；应用一次即清（后续刷新不得把用户的选择抢回去） */
+  const pendingSelect = ref<string | null>(null)
+
+  /** 当前目录全路径 = 绑定地址 + 选中的子目录（深链时 = 绑定地址本身） */
   const cwd = computed(() =>
-    selectedName.value ? vdfsJoin(addr.value, selectedName.value) : addr.value
+    pinnedAtAddr.value
+      ? addr.value
+      : selectedName.value
+        ? vdfsJoin(addr.value, selectedName.value)
+        : addr.value
   )
 
   /**
@@ -266,6 +292,12 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 挂载层：左栏是类别清单，点击 = 换类别页（宿主 push），当前目录恒为绑定地址
     // 本身，因此没有「选中的子目录」可落位。
     if (atMountLevel.value) return false
+    // 深链定住了当前目录（打开某个文件）：不让「缺省第一个子目录」把落点抢走。
+    // 左栏照常刷新，只是没有高亮项——当前目录就是 `addr` 自身。
+    if (pinnedAtAddr.value) {
+      selectedName.value = null
+      return false
+    }
     const names = resp.items.filter(isVdfsDir).map((n) => n.name)
     const want = selectedMemo.get(addr.value)
     const next = want && names.includes(want) ? want : (names[0] ?? null)
@@ -278,12 +310,69 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   /**
-   * 整体重载（绑定地址变化 / 宿主要求）：落位左栏选中 + 刷新当前目录。
+   * 路由带来的选中项（`?select=`）归一化：只接受**一个直接子项名**。
+   *
+   * 带分隔符 / 上跳 / 空值的形状一律视为「没有选中项」——宁可落到目录页，
+   * 也不拿一个能拼出界外地址的字符串去做 join。
+   */
+  function focusNameOf(raw: string | null): string | null {
+    const name = (raw ?? '').trim()
+    if (!name || name === '.' || name === '..') return null
+    if (name.includes('/') || name.includes('\\')) return null
+    return name
+  }
+
+  /**
+   * 已应用过的「地址 + 选中项」。
+   *
+   * 只在两者之一真的变了时重新应用：订阅重同步 / 刷新收敛会走 `reload()`，
+   * 若每次都重放路由里的选中项，用户刚点开的另一个文件会被悄悄抢回去。
+   */
+  let appliedFocusKey: string | null = null
+
+  /** 把当前路由的选中项落到内存态（定住当前目录 + 记下待选项）；未变化则不动。 */
+  function applyFocusIfChanged() {
+    const name = focusNameOf(selectName.value)
+    const key = `${addr.value}\u0000${name ?? ''}`
+    if (key === appliedFocusKey) return
+    appliedFocusKey = key
+    pinnedAtAddr.value = Boolean(name)
+    pendingSelect.value = name
+    if (name) selectedName.value = null
+  }
+
+  /**
+   * 列表回来之后选中深链指向的那一项。
+   *
+   * 先在本页条目里找；不在（有界列表只取最新一页 / 刚被删）就按地址 `stat`
+   * 一次——不清空目标，让右栏给出「读不到」或真正的详情。目标已不在当前目录
+   * 之下（期间用户换了目录）则放弃。
+   */
+  async function settleSelect() {
+    const name = pendingSelect.value
+    if (!name) return
+    pendingSelect.value = null
+    const target = vdfsJoin(addr.value, name)
+    if (vdfsParent(target) !== cwd.value) return
+    const found = items.value.find((n) => n.path === target)
+    if (found) {
+      void select(found)
+      return
+    }
+    const node = await statVdfs(READBACK_REASON.VDFS_BROWSER, target)
+    if (!node || vdfsParent(target) !== cwd.value) return
+    void select({ ...node, path: target })
+  }
+
+  /**
+   * 整体重载（绑定地址 / 路由选中项变化 / 宿主要求）：落位左栏选中 + 刷新当前目录。
    * 选中落位变化时 refreshNav 已就地刷新，无需重复。
    */
   async function reload() {
+    applyFocusIfChanged()
     if (await refreshNav()) return
     await refresh()
+    await settleSelect()
   }
 
   /**
@@ -294,9 +383,12 @@ export function useVdfs(opts: UseVdfsOptions) {
    */
   async function selectDir(name: string) {
     if (atMountLevel.value) return
-    if (name === selectedName.value) return
+    if (name === selectedName.value && !pinnedAtAddr.value) return
     const n = navDirs.value.find((x) => x.name === name && isVdfsDir(x))
     if (!n) return
+    // 用户自己点左栏 = 离开深链的到达态（之后按缺省/记忆落位，不再定在 addr 上）
+    pinnedAtAddr.value = false
+    pendingSelect.value = null
     selectedName.value = name
     selectedMemo.set(addr.value, name)
     clearSelection()
@@ -925,16 +1017,19 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 所有（它内部跳过根），本层不再复述。
   let releaseChanges: (() => void) | null = null
 
-  // 绑定地址变化 = 换了一个数据地址：换订阅 + 整体重载（左栏、选中、当前目录）
+  // 绑定地址变化 = 换了一个数据地址：换订阅 + 整体重载（左栏、选中、当前目录）。
+  // 深链末段名（`select`）变化不换订阅（地址没变），但同样要重载一次以重放焦点。
   watch(
-    addr,
-    () => {
-      releaseChanges?.()
-      releaseChanges = subscribeVdfsChanged({ prefix: addr.value }, onChange, () =>
-        // 重同步：后端通道曾满，本端可能漏了增删改。整份重载本地址（含左栏与当前目录）
-        // ——本页是通用资源浏览器，没有比「按绑定地址重读」更权威的收敛方式。
-        void reload()
-      )
+    [addr, selectName],
+    ([next], [prev]) => {
+      if (next !== prev) {
+        releaseChanges?.()
+        releaseChanges = subscribeVdfsChanged({ prefix: next }, onChange, () =>
+          // 重同步：后端通道曾满，本端可能漏了增删改。整份重载本地址（含左栏与当前目录）
+          // ——本页是通用资源浏览器，没有比「按绑定地址重读」更权威的收敛方式。
+          void reload()
+        )
+      }
       void reload()
     },
     { immediate: true }

@@ -30,6 +30,22 @@
             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
           </svg>
         </button>
+        <!-- 变更抽屉开关：本会话改过哪些文件（只读投影的出口）。点行打开的是
+             **当前**文件——经既有 VDFS 树，不新建专属页面、不画 diff。 -->
+        <button
+          class="header-btn"
+          :class="{ 'is-active': changesOpen }"
+          title="变更"
+          :disabled="!hasActive"
+          @click="changesOpen = !changesOpen"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="17" x2="13" y2="17" />
+          </svg>
+        </button>
         <!-- 读数抽屉开关（P4）：按钮只声明「打开」，面板里显示什么由后端下发的
              描述决定——这里不出现任何读数语义。 -->
         <button
@@ -122,6 +138,28 @@
         <ReadingPanel v-else-if="stats" :panel="stats.panel" />
       </div>
     </aside>
+
+    <!-- 变更抽屉：与读数抽屉同一个容器形态、同一时刻只开一个（`drawer` 是唯一状态）。
+         行由后端排好（路径 / 动作词 / 轮号 / 次数），本文件只做开关、代次守卫与
+         错误上浮；点行把「会话地址 + 后端给的相对地址」拼成目标地址交给页面层
+         （渲染器不导航，见 VdfsWorkbench 的 open-node 约定）。 -->
+    <aside v-if="changesOpen && hasActive" class="reading-drawer">
+      <header class="drawer-head">
+        <span class="drawer-title">变更</span>
+        <div class="drawer-actions">
+          <button class="drawer-btn" :disabled="changesLoading" title="重新读取" @click="loadChanges">
+            {{ changesLoading ? '读取中…' : '刷新' }}
+          </button>
+          <button class="drawer-btn" title="关闭" @click="changesOpen = false">✕</button>
+        </div>
+      </header>
+
+      <div class="drawer-body">
+        <p v-if="changesError" class="drawer-error">{{ changesError }}</p>
+        <p v-else-if="changesLoading && !changes" class="drawer-loading">正在读取变更…</p>
+        <SessionChangesList v-else-if="changes" :changes="changes" @open="openChange" />
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -134,9 +172,15 @@ import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
 import ReadingPanel from '@/components/common/ReadingPanel.vue'
 import ReadingMeter from '@/components/common/ReadingMeter.vue'
+import SessionChangesList from './SessionChangesList.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
-import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
+import { mergeDetailActions, vdfsJoin, type DetailAction } from '@/schemas/vdfs'
 import { readSessionStats, type SessionStats } from '@/services/sessionStats'
+import {
+  readSessionChanges,
+  type ChangeRow,
+  type SessionChanges,
+} from '@/services/sessionChanges'
 
 const props = defineProps<{
   /** 会话自有动作（如「进入下一级」），由 Session ← VdfsSessionDetail 从节点定义投影 */
@@ -152,6 +196,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 动作上抛（Session 分发到页面层机制通道：delete / open-container） */
   (e: 'action', action: DetailAction): void
+  /** 打开一个 VDFS 节点（变更行指向的文件）；呈现方式由页面层决定 */
+  (e: 'open-node', addr: string): void
 }>()
 
 /** 动作区 = 自有 + 机制（去重合并、位置与忙态/禁用对齐由机制唯一实现） */
@@ -292,10 +338,31 @@ async function submitRename() {
 // 读数显示在新会话的抽屉里，而两个文件看起来都正常（数字不报错）。
 // 与消息加载同一个守卫机制（`useGenerationGuard`），不另写一套。
 
-const panelOpen = ref(false)
+// 两个抽屉共用右侧同一块位置，因此「开着的是哪一个」是**一份状态**而不是两个
+// 布尔——两个布尔会出现两个抽屉同时滑出、互相盖住，而界面看起来仍然"正常"。
+type PanelDrawer = 'reading' | 'changes'
+const drawer = ref<PanelDrawer | null>(null)
+const panelOpen = computed({
+  get: () => drawer.value === 'reading',
+  set: (open: boolean) => {
+    drawer.value = open ? 'reading' : null
+  },
+})
+const changesOpen = computed({
+  get: () => drawer.value === 'changes',
+  set: (open: boolean) => {
+    drawer.value = open ? 'changes' : null
+  },
+})
 const stats = ref<SessionStats | null>(null)
 const statsLoading = ref(false)
 const statsError = ref<string | null>(null)
+
+// 变更清单与读数并列（同一份面板的两个抽屉）。声明在这一段而不是文件末尾：会话切换
+// 的 watch 是 `immediate`，在 setup 期间就会写它们——晚于它声明会落进暂时性死区。
+const changes = ref<SessionChanges | null>(null)
+const changesLoading = ref(false)
+const changesError = ref<string | null>(null)
 
 /**
  * 读当前会话的读数。
@@ -346,18 +413,71 @@ watch(
     stats.value = null
     statsError.value = null
     void loadStats()
+    // 变更清单同理：旧会话的行不能留在新会话的抽屉里。面板开着才读——关着时
+    // 没有消费方，提前读只是白花一次投影。
+    changes.value = null
+    changesError.value = null
+    if (changesOpen.value) void loadChanges()
   },
   { immediate: true }
 )
 
 // 一轮跑完（working → 不 working）⇒ 重读一次：这一轮新落的 `response` 里有实测用量，
-// 头上的累计值正是「跑完一轮」才该变的东西。
+// 头上的累计值正是「跑完一轮」才该变的东西。变更清单同理——这一轮新落的
+// `artifact.added` 正是它要回答的东西。
 watch(
   () => store.isActiveWorking,
   (now, was) => {
-    if (was && !now) void loadStats()
+    if (!was || now) return
+    void loadStats()
+    if (changesOpen.value) void loadChanges()
   }
 )
+
+// ── 变更抽屉 ────────────────────────────────────────────────────────────
+//
+// 行怎么排、哪些工具算写、空态是哪一种，全部由后端定（`SessionChangesList`
+// 只是排版器）。本文件负责：开关、代次守卫、错误上浮，以及把「相对地址」交给
+// 页面层——渲染器不导航（点行上抛 `open-node`，由三栏控件决定 push）。
+
+/** 变更清单自己的代次守卫（与读数、消息加载各不相干，互不打断计数）。 */
+const changesGuard = useGenerationGuard()
+
+watch(changesOpen, (open) => {
+  // 打开时若已经有这一份就不再读：刷新按钮与轮末重读负责更新。
+  if (open && !changes.value) void loadChanges()
+})
+
+/** 读当前会话的变更清单；失败不静默（空表会被读成「没改过」）。 */
+async function loadChanges() {
+  const id = store.activeId
+  if (!id) return
+  const rev = changesGuard.advance()
+  changesLoading.value = true
+  changesError.value = null
+  try {
+    const got = await readSessionChanges(id)
+    if (changesGuard.revision() !== rev) return
+    changes.value = got
+  } catch (e) {
+    if (changesGuard.revision() !== rev) return
+    changesError.value = e instanceof Error ? e.message : String(e || '读取变更失败')
+    logger.error('ChatMainPanel', `readSessionChanges(${id}) failed`, e)
+  } finally {
+    if (changesGuard.revision() === rev) changesLoading.value = false
+  }
+}
+
+/**
+ * 打开一行指向的文件：会话地址 + 后端给的相对地址 = 完整数据地址。
+ *
+ * 拼合走地址代数（`vdfsJoin`），本文件不认识 `workdir` 这个段名——它由后端随行
+ * 下发。目标是一个**文件**；怎么把文件打开成页面（父目录 + 选中项）由页面层决定。
+ */
+function openChange(row: ChangeRow) {
+  if (!store.activeAddr) return
+  emit('open-node', vdfsJoin(store.activeAddr, row.address))
+}
 </script>
 
 <style scoped>

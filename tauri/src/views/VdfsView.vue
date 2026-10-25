@@ -31,7 +31,7 @@
     由同一个 VdfsView 承接；返回键逐级回到出发点。
 -->
 <template>
-  <VdfsWorkbench :key="reloadKey" :addr="addr" @open="onOpen">
+  <VdfsWorkbench :key="reloadKey" :addr="addr" :select="focus" @open="onOpen">
     <template #rail-header>
       <!--
         页面**最左上角**这一格只在深页面有主人：返回键；首页**整个空出来**——
@@ -77,12 +77,28 @@ const router = useRouter()
 const addr = computed(() => vdfsAddrOf(route.params.dir as string | string[] | undefined))
 
 /**
- * 控件请求钻入某目录的数据地址：push 对应的浏览器地址（新地址页，
- * 同一个 VdfsView + 同一个控件承接；返回键回 push 来源页）。
+ * 到达后要顺带选中的**末段名**（`?select=`）。
+ *
+ * 文件没有自己的地址页（详情在三栏的右栏），所以「打开文件」的地址形态是
+ * 「父目录 + `?select=<文件名>`」。只接受字符串；数组 / 缺省一律视为不选——
+ * 形状不对时宁可落到目录页，也不猜。
  */
-function onOpen(target: string) {
+const focus = computed(() => {
+  const s = route.query.select
+  return typeof s === 'string' && s.trim() ? s : null
+})
+
+/**
+ * 控件请求打开某地址：push 对应的浏览器地址（新地址页，同一个 VdfsView +
+ * 同一个控件承接；返回键回 push 来源页）。
+ *
+ * 带 `select` 时（打开文件）也把选中项写进 URL——刷新/返回后仍是同一个视图；
+ * 路径与选中项都相同则不 push（避免同一地点在历史里叠两条）。
+ */
+function onOpen(target: string, select?: string) {
   const path = vdfsBrowserPathOf(target)
-  if (path !== route.path) void router.push(path)
+  if (path === route.path && (select ?? null) === focus.value) return
+  void router.push({ path, query: select ? { select } : {} })
 }
 
 // ==================== 返回键（非首页地址页，左上角） ====================

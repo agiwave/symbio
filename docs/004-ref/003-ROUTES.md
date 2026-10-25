@@ -34,7 +34,7 @@ lists: [route-contracts=owner]
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；core 常量 `ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
-| `session/changes` | 前端（变更面板，待接） | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影，D-169）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数、不拼地址 |
+| `session/changes` | 前端（`services/sessionChanges.ts`，会话头「变更」抽屉）/ e2e | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影，D-169）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数；`address` 是**相对会话容器**的 `workdir/<path>`（与会话地址拼成完整地址）；`has_wal` / `readable` 把「没跑过」「不给看」「没改过」分成三种空 |
 | `session/stats` | 前端（`services/sessionStats.ts`）/ CLI（`client.rs`） | `SessionStats` | 只读读数；不得另写统计口径（DE-016 §4 复算判据） |
 | `skill/execute` | 仓内无调用方 | `SkillResponse` | 载荷 `{name, args}`，返回技能定义正文 |
 | `telegram/get_updates` | 外部客户端（gateway 原样转发） | 更新数组 | 长轮询 |

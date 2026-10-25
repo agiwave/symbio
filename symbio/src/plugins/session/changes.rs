@@ -9,10 +9,15 @@
 //!
 //! ## 为什么行是呈现就绪的
 //!
-//! 前端需要的三件事在这里一次给全：`address`（`<sid>/workdir/<path>`，直接喂
-//! `vdfs/read`）、`label`（展示文案）、`op`（判别词，给样式 / 测试用，**不是**
-//! 让前端自己翻译成文案）。让前端认识 `vdfs_write` / `vdfs_edit` 这些名字，
-//! 等于把「哪些工具算写」在两端各放一份判据，迟早分叉——前端只认这份描述。
+//! 前端需要的三件事在这里一次给全：`address`（**相对会话容器**的地址
+//! `workdir/<path>`，与会话自己的地址拼成完整数据地址）、`label`（展示文案）、
+//! `op`（判别词，给样式 / 测试用，**不是**让前端自己翻译成文案）。让前端认识
+//! `vdfs_write` / `vdfs_edit` 这些名字，等于把「哪些工具算写」在两端各放一份
+//! 判据，迟早分叉——前端只认这份描述。
+//!
+//! 为什么不带会话 id：会话挂在哪个空间（根 / 子智能体子树）只有**调用方**的
+//! 地址知道（`<挂载目录>/<id>` 是前端已有的身份），出口只该给「会话内部的那一段」，
+//! 拼完整地址是地址代数的事，不是再抄一遍 id。
 //!
 //! ## 边界
 //!
@@ -23,7 +28,7 @@
 //! ## 读侧闸
 //!
 //! 与 `session/stats` 同一道：声明了读方身份且看不到本会话内容 ⇒ **空清单**
-//! （`has_wal: true` + 空行 = 有源但不给你看，不是「没改过」）。
+//! （`readable: false` + 空行 = 有源但不给你看，不是「没改过」）。
 //!
 //! [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
@@ -45,7 +50,7 @@ use super::workdir::SEG_WORKDIR;
 pub(crate) struct ChangeRow {
     /// 工作目录内的相对路径（`/` 分隔）。
     pub path: String,
-    /// 可直接交给 `vdfs/read` 的会话地址。
+    /// **相对会话容器**的 VDFS 地址（`workdir/<path>`）；与会话地址拼成完整地址。
     pub address: String,
     /// 判别词（`write` / `edit` / `delete` / `mkdir`）。
     pub op: &'static str,
@@ -63,6 +68,8 @@ pub(crate) struct SessionChanges {
     pub session_id: String,
     /// 事实源在不在；`false` = 这个会话还没跑过一轮（有据的空，不是错误）。
     pub has_wal: bool,
+    /// 读方有权看这份清单。`false` + 空行 = 有源但不给看，与「没改过」分开。
+    pub readable: bool,
     pub rows: Vec<ChangeRow>,
 }
 
@@ -84,7 +91,7 @@ pub(crate) fn read_changes(
             .value
             .into_iter()
             .map(|c| ChangeRow {
-                address: format!("{session_id}/{SEG_WORKDIR}/{}", c.path),
+                address: format!("{SEG_WORKDIR}/{}", c.path),
                 path: c.path,
                 op: c.op.as_str(),
                 label: op_label(c.op),
@@ -98,6 +105,7 @@ pub(crate) fn read_changes(
     SessionChanges {
         session_id: session_id.to_string(),
         has_wal,
+        readable: may_read,
         rows,
     }
 }
