@@ -935,6 +935,139 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
     );
 }
 
+// ── 依赖图的边按**出口格**配（第 1 条 · D-161）────────────────────────────
+
+/// 同一族事实的**不同档**不成边（正例）。
+///
+/// 一格名字可以有好几档（`turn.stage` 的判决 / 召回 / 压缩各写自己那一档）。只按
+/// 事实名配边就把「同族」读成「同格」：两行都出口在这一族上 ⇒ 互相等待 ⇒ 装载红，
+/// 而运行期谁都不等谁。这一条钉的就是那次红（接回压缩行时撞上的 `cycle`）。
+#[test]
+fn same_family_different_cell_is_not_an_edge() {
+    const ONE: ActorDecl = ActorDecl {
+        name: "one",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g"],
+    };
+    const TWO: ActorDecl = ActorDecl {
+        name: "two",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g"],
+    };
+    let rows = [
+        row(
+            "r1",
+            10,
+            Some("one"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[("x", Lit::Str("a"))])],
+            &[],
+        ),
+        row(
+            "r2",
+            20,
+            Some("two"),
+            pattern("f", &["id"], &[]),
+            &[pattern("g", &["id"], &[("x", Lit::Str("b"))])],
+            &[],
+        ),
+    ];
+    let gaps = seal_gaps(&rows, &[ONE, TWO]);
+    assert!(
+        !gaps
+            .iter()
+            .any(|g| matches!(g, Gap::DependencyCycle { .. })),
+        "同族不同档不该互等：{gaps:?}"
+    );
+}
+
+/// 相容的两半各自都要成边（反向用例，防上面那条把口子开过头）。
+///
+/// - 两边写的是**同一档**（判别条件逐字段相同）⇒ 可能是同一格 ⇒ 照旧互等；
+/// - `other` 的出口**不共这一族**事实 ⇒ 声明说不出它落在哪一格 ⇒ 保守成边。
+///
+/// 漏一条真边会让运行期出现「两行都开着、彼此等对方先落格」的空转，而装载面全绿——
+/// 收窄不放松：判据必须把这两条都判红。
+#[test]
+fn same_cell_or_uncovered_family_still_makes_an_edge() {
+    const ONE: ActorDecl = ActorDecl {
+        name: "one",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    const TWO: ActorDecl = ActorDecl {
+        name: "two",
+        mode: LatencyTier::Deep,
+        reads: &[],
+        writes: &["g", "h"],
+    };
+    // 同一格：两边出口都含 `g{x=a}`（另带 `h` 只为把夹具的三个事实都覆盖到）。
+    let same_cell = [
+        row(
+            "r1",
+            10,
+            Some("one"),
+            pattern("f", &["id"], &[]),
+            &[
+                pattern("g", &["id"], &[("x", Lit::Str("a"))]),
+                pattern("h", &["id"], &[]),
+            ],
+            &[],
+        ),
+        row(
+            "r2",
+            20,
+            Some("two"),
+            pattern("f", &["id"], &[]),
+            &[
+                pattern("g", &["id"], &[("x", Lit::Str("a"))]),
+                pattern("h", &["id"], &[]),
+            ],
+            &[],
+        ),
+    ];
+    assert_eq!(
+        seal_gaps(&same_cell, &[ONE, TWO]),
+        vec![Gap::DependencyCycle {
+            cycle: vec!["r1", "r2", "r1"]
+        }],
+        "同一格就是同一笔账，两边互等必须红"
+    );
+    // 不共这一族：`r2` 的出口只有 `h`，`g{x=a}` 那一格它照样可能落（多写的格在声明面
+    // 没有档位）⇒ 保守成边；反向 `r1` 的出口含 `h` ⇒ 也成边。
+    let uncovered = [
+        row(
+            "r1",
+            10,
+            Some("one"),
+            pattern("f", &["id"], &[]),
+            &[
+                pattern("g", &["id"], &[("x", Lit::Str("a"))]),
+                pattern("h", &["id"], &[]),
+            ],
+            &[],
+        ),
+        row(
+            "r2",
+            20,
+            Some("two"),
+            pattern("f", &["id"], &[]),
+            &[pattern("h", &["id"], &[])],
+            &[],
+        ),
+    ];
+    assert_eq!(
+        seal_gaps(&uncovered, &[ONE, TWO]),
+        vec![Gap::DependencyCycle {
+            cycle: vec!["r1", "r2", "r1"]
+        }],
+        "出口不共这一族时不设防：漏边比多一条假边坏得多"
+    );
+}
+
 // ── 出口视图的配图口径（第 1 条 · D-160）─────────────────────────────────
 
 /// 夹具的两个执行体：`one` 写视图**证据**里那一格，`two` 只写视图**读面**里的那一格。

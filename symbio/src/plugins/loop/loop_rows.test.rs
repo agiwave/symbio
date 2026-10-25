@@ -570,14 +570,15 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
         );
     }
     // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
-    // 归零对象）。`policy.recall` 已由轮首派发点接管（D-159 第一批），不再在这笔账里。
+    // 归零对象）。`policy.recall`、`policy.compress` 已由轮首派发点接管（D-159 第一、
+    // 二批），不再在这笔账里。
     // 这一格是 `D-158` 记的那笔账的当前形状，接回下一行时它会红——那是预期的红。
     let unwired: Vec<&str> = ROWS
         .iter()
         .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
         .map(|d| d.name)
         .collect();
-    assert_eq!(unwired.len(), 4, "未接线的策略行清单变了（`D-158` 的台账）");
+    assert_eq!(unwired.len(), 3, "未接线的策略行清单变了（`D-158` 的台账）");
 }
 
 #[test]
@@ -1832,6 +1833,54 @@ fn next_head_selects_the_recall_row_at_turn_head() {
     assert!(next.writes_closed("turn.stage"));
 }
 
+/// 轮首两台债的**序**与**档位**：压缩（prio 30）先于召回（40），而两者的出口同族不同档。
+///
+/// 这一条同时钉住 D-161 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
+/// `…{stage=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
+/// （装载期那条 `cycle` 就是它的影子），收编第二批走不下去。
+#[test]
+fn head_sweep_runs_compress_before_recall() {
+    let ready = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": false, "auto_compress": true, "is_persistent": true}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let next = super::next_head(&ready, 1, 0, super::HEAD_ACTORS).expect("水位过了就欠一次压缩");
+    assert_eq!(
+        next.row, "policy.compress",
+        "同幕两笔债按 `prio` 排，不由派发点行序排"
+    );
+    assert_eq!(next.by, super::COMPRESS);
+    let run: super::super::head_exec::HeadAction = super::super::head_exec::run_compress;
+    assert!(std::ptr::fn_addr_eq(next.action, run));
+
+    // 压缩格落地 ⇒ 压缩行关掉，召回行照旧欠：同族不同档互不关账。
+    let mut after_compress = ready.clone();
+    after_compress.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "compress", "round": 0}),
+    ));
+    let next = super::next_head(&after_compress, 1, 0, super::HEAD_ACTORS)
+        .expect("压缩还完，本轮仍欠一次召回");
+    assert_eq!(next.row, "policy.recall");
+
+    // 反向：只有召回格时压缩行仍开着。
+    let mut after_recall = ready.clone();
+    after_recall.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "recall", "round": 0, "result": "miss"}),
+    ));
+    let next = super::next_head(&after_recall, 1, 0, super::HEAD_ACTORS)
+        .expect("召回不落压缩那一档，压缩仍欠");
+    assert_eq!(next.row, "policy.compress");
+}
+
 /// 召回格落地 ⇒ 轮首派发点收工：环**只靠执行体自己落格**推进。
 ///
 /// 这条是 D-159 把「草稿交运行器落」那处寄存去掉的全部理由。出口格若寄在 `TurnState`
@@ -1893,7 +1942,7 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
     let head_rows = super::host_rows(&f, &super::head_actor_names(super::HEAD_ACTORS));
     assert_eq!(
         head_rows.iter().map(|d| d.name).collect::<Vec<_>>(),
-        vec!["policy.recall"],
+        vec!["policy.compress", "policy.recall"],
         "轮首子集就是它的绑定表点名的行——多一条就是跨 host 抢债"
     );
 

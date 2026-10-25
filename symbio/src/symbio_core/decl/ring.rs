@@ -703,8 +703,14 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
 ///
 /// 边 `a → b` 的意思：`b` 的执行体声明写的某个**事实名**出现在 `a` 的出口（`until ∪
 /// unless`，视图按 `evidence` 展开到事实——只作锚点的读面不算关门方，见 [`exit_fact_names`]）
-/// 里——`a` 还不还得看 `b` 跑不跑。环 ⇒ 每一笔都在等环里的另一笔先被派发，而「被派发」
-/// 要求它此刻就开着：类型级互相等待，运行期一步都走不动（这不是「慢」，是死锁）。
+/// 里，**而且两边可能是同一格**——`a` 还不还得看 `b` 跑不跑。环 ⇒ 每一笔都在等环里的
+/// 另一笔先被派发，而「被派发」要求它此刻就开着：类型级互相等待，运行期一步都走不动
+/// （这不是「慢」，是死锁）。
+///
+/// 一格事实可以有好几档（`turn.stage` 的判决 / 召回 / 压缩各写自己那一档），只按
+/// 事实名配边会把「同族」读成「同格」，于是共写一族的行两两互等——判据见
+/// DE-015 的 [D-161](../../../../docs/003-design/015-义务环.md#d-161-依赖图的边按出口格配同族不同档不成边 "DE-015-义务环")；
+/// 那一格的身份从两边的出口模式读，不新增声明字段。
 ///
 /// 两处刻意保守：
 ///
@@ -712,6 +718,8 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
 ///   它不构成等待；把自环算进环会让每一张真表都红。
 /// - `by = None` 的行没有出边。它的出口由插件代码落，不由某个行执行体跑；这张图
 ///   只画「行等行」，不去猜代码里写了什么。
+/// - 两边的出口**不共这一族事实**时不设防（见 [`writes_that_cell`] 的 `None` 分支）：
+///   那条执行体多写的格落在哪一档，声明面说不出 ⇒ 照旧成边。
 fn check_dependency_graph(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
     let mut gaps = Vec::new();
     let mut state = vec![Visit::New; rows.len()];
@@ -729,18 +737,45 @@ enum Visit {
     Done,
 }
 
-/// 这一行靠哪些**事实**关掉（视图只取它的 `evidence`，与第 6 条同一算法但读面不同）。
-fn exit_facts(decl: &Decl, frozen: &Frozen) -> Vec<&'static str> {
+/// 这一行的出口**格**：`(事实名, 那一格的判别条件)`。
+///
+/// 名字按 [`exit_fact_names`] 展开（`evidence`），条件就是出口模式自己的 `eq`——
+/// 一格 `turn.stage` 说的从来不是「这一族」，而是「这一档」（`stage = compress`）。
+/// 第 1 条配边要比的正是这一对（DE-015 的 D-161）。
+fn exit_cells<'d>(decl: &'d Decl, frozen: &Frozen) -> Vec<(&'static str, &'d Pattern)> {
     decl.until
         .iter()
         .chain(decl.unless)
-        .flat_map(|p| exit_fact_names(p.source, frozen))
+        .flat_map(|p| {
+            exit_fact_names(p.source, frozen)
+                .into_iter()
+                .map(move |f| (f, p))
+        })
         .collect()
+}
+
+/// `other` 的执行体写这一族事实时，落的**可能**就是 `at` 那一格吗。
+///
+/// 执行体多写哪些格不在声明面上（`ActorDecl.writes` 只有事实名），它替自己那一行
+/// 关的却是具体的一格——装载期第 6 条判的正是「执行体走不走得到自己那一格」。于是
+/// 这一格的身份从它自己那行的出口读：两边的判别条件相容 ⇒ 可能是同一格 ⇒ 成边；
+/// 同一字段写着两个不同字面量 ⇒ 两格 ⇒ 不成边。
+///
+/// `other` 的出口里没有这一族事实时**照旧成边**（保守）：它写这一族是给别的东西落
+/// 的，没有声明能说清落在哪一格。收窄不放松——漏一条真边比多一条假边坏得多。
+fn writes_that_cell(frozen: &Frozen, other: &Decl, fact: &str, at_exit: &Pattern) -> bool {
+    match exit_cells(other, frozen)
+        .into_iter()
+        .find(|(f, _)| *f == fact)
+    {
+        Some((_, theirs)) => eq_compatible(at_exit, theirs),
+        None => true,
+    }
 }
 
 /// `at` 的出边：哪些**别的**行的执行体会写到它的出口。
 fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
-    let exits = exit_facts(&rows[at], frozen);
+    let exits = exit_cells(&rows[at], frozen);
     rows.iter()
         .enumerate()
         .filter(|(i, _)| *i != at)
@@ -748,7 +783,11 @@ fn producers_of(rows: &[Decl], frozen: &Frozen, at: usize) -> Vec<usize> {
             other
                 .by
                 .and_then(|name| frozen.actor(name))
-                .is_some_and(|actor| exits.iter().any(|f| actor.writes.contains(f)))
+                .is_some_and(|actor| {
+                    exits.iter().any(|(f, p)| {
+                        actor.writes.contains(f) && writes_that_cell(frozen, other, f, p)
+                    })
+                })
         })
         .map(|(i, _)| i)
         .collect()

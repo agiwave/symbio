@@ -98,6 +98,8 @@ const COURIER: &str = "courier";
 /// （[`super::head_exec::HeadStep`]），不是轮内那张草稿。`by` 面上两台 host 没有区别——
 /// 「这行归谁跑」照旧只写在行上，host 由绑定表回答（D-159 裁决 1）。
 const RECALL: &str = "recall";
+/// 轮首压缩执行体（D-159 第二批）：`policy.compress` 行选中的动作。
+const COMPRESS: &str = "compress";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -197,6 +199,19 @@ const ACTOR_RECALL: ActorDecl = ActorDecl {
     writes: &[EVENT_TURN_STAGE],
 };
 
+/// 轮首压缩执行体的声明（D-159 第二批）。
+///
+/// 名单同样只有 `turn.stage`：摘要那一次模型往返的三格（`request` / `sent` /
+/// `failed`，`port=model`）由**端口记账层**落，属协议格，不在执行体的名单里
+/// （D-122 决策 2；运行期对账按 `PROTOCOL_CELLS` 豁免同一件事）。
+const ACTOR_COMPRESS: ActorDecl = ActorDecl {
+    name: COMPRESS,
+    // 语义压缩调模型：与行同档（深度）。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
@@ -290,11 +305,18 @@ pub(crate) struct HeadEntry {
     pub(crate) transitional: &'static [&'static str],
 }
 
-pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[HeadEntry {
-    decl: ACTOR_RECALL,
-    run: super::head_exec::run_recall,
-    transitional: &[],
-}];
+pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[
+    HeadEntry {
+        decl: ACTOR_COMPRESS,
+        run: super::head_exec::run_compress,
+        transitional: &[],
+    },
+    HeadEntry {
+        decl: ACTOR_RECALL,
+        run: super::head_exec::run_recall,
+        transitional: &[],
+    },
+];
 
 /// `by` → **轮首**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
 fn head_entry_of(by: &'static str, actors: &'static [HeadEntry]) -> Option<&'static HeadEntry> {
@@ -567,8 +589,9 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.compress",
         prio: 30,
-        // 未接线：压缩在 `assemble` 段按 `owes` 点问执行；与 `compress` 执行体同批接回。
-        by: None,
+        // 轮首 host 的执行体（D-159 第二批）：派发点在 `chat_loop::inputs` 的准备段
+        // ①② 之后——水位要的那份请求级开销寄存进本轮状态，产线本身不动。
+        by: Some(COMPRESS),
         // 语义压缩调模型：深度档。
         tier: LatencyTier::Deep,
         expand: None,

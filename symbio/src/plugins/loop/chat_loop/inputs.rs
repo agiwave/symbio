@@ -1,8 +1,10 @@
-//! 一次 LLM 请求的**输入准备**与**压缩响应点**（收口 ②③）。
+//! 一次 LLM 请求的**输入准备**（收口 ②）与轮首派发点所在的这一段编排。
 //!
 //! - [`resolve_system_prompt`]：系统提示词唯一真源
-//! - [`prepare_turn_inputs`]：提示词 + 工具 + 压缩 + 请求视图的唯一收集点
-//! - [`apply_compaction`]：上下文水位的唯一响应点（自动语义压缩）
+//! - [`prepare_turn_inputs`]：提示词 + 工具 + 请求视图的唯一收集点，轮首派发点（
+//!   [`super::super::head_exec::drive_head`]）在它的 ①② 之后
+//! - [`run_compress`]：`policy.compress` 行的执行体（上下文水位的响应，收口 ③ 的
+//!   判定与产线住在这里，**被选中才跑**）
 
 use crate::symbio_core::CapabilityMeta;
 
@@ -124,12 +126,13 @@ pub(crate) struct TurnInputs {
 /// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 D-047 新增）
 ///
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
-/// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，见 [`apply_compaction`]）
-/// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩的唯一响应点）
-///    - 3′. 紧随压缩：取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
+/// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，寄存进本轮状态）
+/// 3. **轮首派发点**（[`super::super::head_exec::drive_head`]）：本 host 绑定表里
+///    最小的一笔可还债——此刻是压缩（`policy.compress`，收口 ③ 的响应点住在它的
+///    执行体里）与召回（`policy.recall`），先后由 `prio` 表达，不由本文件的行序表达
+///    - 3′. 紧随派发点：取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
-/// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
-///    工具轮取一次，后续工具轮复用同一份视图）
+/// 5. 长期记忆召回产物的**取用点**（三份产物由 3 的执行体寄存进本轮状态）
 /// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
 ///    ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
 /// 7. 请求视图重建（`build_request_view` 唯一入口）
@@ -146,12 +149,23 @@ pub(crate) async fn prepare_turn_inputs(
 
     let tools = crate::symbio_core::tool_metas(ctx).await;
 
-    // ── ② 请求级固定开销：一轮只算一次，供下方压缩共用
+    // ── ② 请求级固定开销：一轮只算一次，寄存进本轮状态供压缩行读水位
     //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
     let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
+    turn.request_overhead = overhead_tokens;
 
-    // ── ③ 压缩（收口 ③：自动语义压缩，唯一响应点）───────────────────────────
-    apply_compaction(orchestrator, ctx, context, turn, overhead_tokens).await?;
+    // ── ③ 轮首派发点（D-159）：本 host 的绑定表欠什么就跑什么 ─────────────────
+    // 此刻子集里是 `policy.compress`（30）与 `policy.recall`（40）——先后由行的
+    // `prio` 表达，本文件不再问一次表。位置在 ② 之后、③′④ 之前，是这两行的
+    // 前件同时成立的最早一处：压缩要 ①② 折算出的开销，而水位与流式骨架必须在
+    // 压缩**之后**（未过水位就不该量、压不动也不该留半截 Turn 根）。
+    super::super::head_exec::drive_head(orchestrator, ctx, context, turn)
+        .await
+        .map_err(|e| {
+            TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
+                "轮首派发失败：{e:?}"
+            )))
+        })?;
 
     // ── ③′ 取本轮的上下文水位（压缩**之后**：量的是这一轮真正发出去的那一体）──
     // 只在这里算一次，随 ④ 的骨架挂进 `meta.context`；判据是「一个请求级事实挂在
@@ -183,20 +197,9 @@ pub(crate) async fn prepare_turn_inputs(
         }
     };
 
-    // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
-    // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录 ∧ 未做过」。
-    // 三件事（记忆 / 技能 / 任务段）共用一个阶段——它们共前提、共时机。
-    // 「欠不欠」与「谁来跑」都不在这里：这一句是**轮首派发点**，它向求解器要
-    // 本 host 行子集里最小的一笔可还债。此刻子集里只有 `recall`，于是与逐行点问
-    // 等价；后续批次把判决 / 压缩 / 反射接回同一台 host，它们的先后由行的 `prio`
-    // 表达，本文件不再多问一次表（D-159）。
-    super::super::head_exec::drive_head(ctx, context, turn)
-        .await
-        .map_err(|e| {
-            TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
-                "轮首派发失败：{e:?}"
-            )))
-        })?;
+    // ── ⑤ 长期记忆召回三份产物的取用点 ──────────────────────────────────────
+    // 判据与执行都在轮首派发点那一台 host 上（`policy.recall`，D-159）：这里只读它
+    // 寄存进本轮状态的产物。
     let recall_section = turn
         .recall_view
         .as_ref()
@@ -356,65 +359,54 @@ pub(crate) async fn run_recall(
     Ok(())
 }
 
-/// 收口 ③：上下文水位的**唯一响应点**——自动语义压缩只在这里判定与执行。
+/// 压缩格的执行体（`policy.compress`，轮首 host）：进一次压缩产线并**自己落**「已做」。
 ///
-/// ## 顺序不可交换（收口前由主循环体的行序隐含保证，现在由本函数内部保证）
+/// ## 它是执行体，不是点问
 ///
-/// 按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），压缩结果直接
-/// 决定后续请求视图的水位。55% 水位提醒（nudge）已随 `context_compact` 一并退役
+/// 此前外层代码在收口 ③ 里 `owes("policy.compress", …)` 点问一次再调本函数——账在
+/// 表上、动作在表外（DE-090 §3 的**调度旁路**）。现在「欠不欠」由轮首派发点向求解器
+/// 要，本函数只在被选中时跑；出口那一格当场入日志（与 [`run_recall`] 同一条理由：
+/// 寄存草稿会让派发点在本幕的第二次选债照样读到「没做过」）。
+///
+/// ## 顺序仍在产线里，不在调用点
+///
+/// 水位阈值读 [`TurnState::request_overhead`]（准备段 ①② 算出后寄存的那个数）。
+/// 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行；失败**不失败
+/// 整轮**——压缩是优化项，理由见函数体内的注释。
+///
+/// 55% 水位提醒（nudge）已随 `context_compact` 一并退役
 /// （[D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
-/// 一条指向空处的指令。
-///
-/// 将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估是否恢复提醒——
-/// 不再回 v1 的 `close_turn` 拦截形态。
-pub(crate) async fn apply_compaction(
+/// 一条指向空处的指令。将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估
+/// 是否恢复提醒——不再回 v1 的 `close_turn` 拦截形态。
+pub(crate) async fn run_compress(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
+    store: &Arc<dyn crate::symbio_core::Store<Event = crate::symbio_core::Event>>,
     context: &mut SessionContext,
     turn: &mut TurnState,
-    overhead_tokens: usize,
-) -> Result<(), TurnExit> {
-    // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
-    // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
+) -> Result<(), super::super::turn_exec::ActorError> {
     // `done` 的口径是**本请求轮**：内核每轮重新取水位（未过水位返回 `Ok(None)`），
     // 下一轮照常再试；但同一幕内不重复进产线（D-107 判据 2）。
-    if super::super::loop_rows::owes("policy.compress", &turn.facts, turn.turn_no, turn.now_ms) {
-        run_compress(orchestrator, ctx, context, turn, overhead_tokens).await;
-    }
-    Ok(())
-}
-
-/// 压缩格的执行体（`policy.compress`）：进一次压缩产线并落「已做」。
-///
-/// 失败**不失败整轮**——压缩是优化项，理由见函数体内的注释。
-async fn run_compress(
-    orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    context: &mut SessionContext,
-    turn: &mut TurnState,
-    overhead_tokens: usize,
-) {
+    //
     // 入账面：摘要那次模型往返走端口 `model`（D-122 决策 2）——三格由端口层落，
-    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话），压缩照旧跑，
-    // 只是那一次不在账上。
-    let compress = context.session.facts().map(|store| {
-        Compress::new(
-            store,
-            turn.turn_no,
-            turn.user_seq,
-            turn.drive_seq,
-            turn.now_ms,
-            turn.request_round,
-        )
-    });
+    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话），派发点整台跳过，
+    // 本函数因此只在有事实源时跑。
+    let compress = Compress::new(
+        store.clone(),
+        turn.turn_no,
+        turn.user_seq,
+        turn.drive_seq,
+        turn.now_ms,
+        turn.request_round,
+    );
     match auto_compress_process(
         orchestrator,
         context,
         ctx,
         &turn.abort,
-        overhead_tokens,
+        turn.request_overhead,
         false,
-        compress.as_ref(),
+        Some(&compress),
     )
     .await
     {
@@ -440,11 +432,19 @@ async fn run_compress(
     // `model_calls` 是这一压打了几次模型（摘要 + 纠正重试）：它是那次往返在事实层
     // 唯一的数，判据侧拿它对账「观测 ⇔ 三格」。同一性带上本幕的锚——续写幕会重跑
     // 压缩（恢复后事实源变了），不带上就撞首幕的幂等键，这一格连同它的数一起不落。
-    turn.mark_stage(StageFact::compress(
-        turn.request_round,
-        compress.as_ref().map(|c| c.calls()).unwrap_or(0),
-        turn.drive_seq,
-    ));
+    super::super::stage_events::land(
+        store.as_ref(),
+        turn.turn_no,
+        turn.user_seq,
+        &crate::symbio_core::request_principal(ctx.as_ref()),
+        &[StageFact::compress(
+            turn.request_round,
+            compress.calls(),
+            turn.drive_seq,
+        )],
+    )
+    .map_err(super::super::turn_exec::ActorError::Append)?;
+    Ok(())
 }
 
 #[cfg(test)]

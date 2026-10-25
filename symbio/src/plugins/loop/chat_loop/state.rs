@@ -235,14 +235,20 @@ pub(crate) struct TurnState {
     /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
     /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
     pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
-    /// 已执行但**尚未落格**的阶段草稿（判决 / 压缩）——随本轮入参交给运行器
-    /// （写者令牌在那边）。已在环上的行（`policy.recall`，D-159）不走这里：它的
-    /// 执行体自己落出口那一格，否则派发点在下一问读不到「做过」。
+    /// 已执行但**尚未落格**的阶段草稿（判决）——随本轮入参交给运行器
+    /// （写者令牌在那边）。已在环上的行（`policy.recall` / `policy.compress`，D-159）
+    /// 不走这里：它们的执行体自己落出口那一格，否则派发点在下一问读不到「做过」。
     ///
     /// 走工具循环的一轮里，它由 [`super::super::turn_exec`] 的装配段先落
     /// （反射档要读 `skill_hit`，那必须在问表之前成为事实）；定稿答话轮不经装配段，
     /// 由运行器落（见 `execute_final_reply_turn`）。
     pub(crate) stages_pending: Vec<super::super::stage_events::StageFact>,
+    /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
+    ///
+    /// 由准备段（`prepare_turn_inputs` 的 ①②）算出后写在这里，供压缩行的执行体
+    /// 判水位——寄存一个数，而不是把「收集提示词与工具」搬进执行体（那是收口 ②
+    /// 的唯一收集点，拆两处就出现两个时机）。0 = 本轮还没收集过（压缩行不会被选中）。
+    pub(crate) request_overhead: usize,
     /// 本次执行的轮号（新轮 = WAL 内既有用户格计数；续写幕 = 被续写轮号）。
     ///
     /// 由开轮块（`chat_loop` 步骤 2a）在**任何判决之前**定下：用户格先落，

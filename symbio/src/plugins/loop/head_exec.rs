@@ -25,20 +25,29 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::{Event, PluginError, PluginInvokeRequest, Seq, Store};
+use crate::symbio_core::{Event, PluginInvokeRequest, Seq, Store};
 
-use super::chat_loop::state::{SessionContext, TurnState};
+use super::chat_loop::state::{ChatOrchestrator, SessionContext, TurnState};
 use super::turn_exec::{ActorError, StepFuture};
 
-/// 一次轮首执行体动作需要的**全部**环境：本轮状态 + 会话上下文 + 请求句柄 + 事实源。
+/// 一次轮首执行体动作需要的**全部**环境：编排器 + 请求句柄 + 事实源 + 会话上下文 +
+/// 本轮状态。
 ///
 /// 与 [`super::turn_exec::TurnStep`] 同样是派发器与执行体之间唯一的界面：执行体拿得到
 /// 它们，拿不到「下一笔债是什么」的选择权（D-118 决策 4 在轮首照用）。
+///
+/// 会话上下文是 `&mut`：压缩改写 `context.messages`（就地折叠历史）。轮首这三行
+/// （判决 / 压缩 / 召回）里只有压缩要写它，但借用面按**这台 host 借走什么**声明，
+/// 不按「这一批恰好谁用到」声明——否则接下一行时又要改形状。
 pub(crate) struct HeadStep<'a> {
+    pub(crate) orchestrator: &'a ChatOrchestrator,
     pub(crate) ctx: &'a Arc<dyn PluginInvokeRequest>,
     /// 本轮的**事实源**：执行体落自己那一行出口的地方，派发器读账本的地方。
-    pub(crate) store: &'a dyn Store<Event = Event>,
-    pub(crate) context: &'a SessionContext,
+    ///
+    /// 交 `Arc` 而不是 `&dyn Store`：压缩那一步的入账面（[`super::port::Compress`]）
+    /// 持有一份句柄随摘要往返走，派发器与执行体拿同一个句柄才是同一个事实源。
+    pub(crate) store: &'a Arc<dyn Store<Event = Event>>,
+    pub(crate) context: &'a mut SessionContext,
     pub(crate) turn: &'a mut TurnState,
 }
 
@@ -56,8 +65,27 @@ pub(crate) fn run_recall<'a>(step: &'a mut HeadStep<'a>) -> StepFuture<'a> {
             store,
             context,
             turn,
+            ..
         } = step;
-        super::chat_loop::run_recall(ctx, *store, context, turn).await
+        super::chat_loop::run_recall(ctx, &***store, context, turn).await
+    })
+}
+
+/// `compress` 执行体：`policy.compress` 行选中的动作。
+///
+/// 本体同样留在它的领域层（[`super::chat_loop::run_compress`]，压缩流水线的唯一入口
+/// 在 `context::pipeline`）。水位要的那份请求级开销读 [`HeadStep::turn`] 的
+/// `request_overhead`——它由准备段的 ①② 写进本轮状态。
+pub(crate) fn run_compress<'a>(step: &'a mut HeadStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        let HeadStep {
+            orchestrator,
+            ctx,
+            store,
+            context,
+            turn,
+        } = step;
+        super::chat_loop::run_compress(orchestrator, ctx, store, context, turn).await
     })
 }
 
@@ -76,16 +104,19 @@ pub(crate) fn run_recall<'a>(step: &'a mut HeadStep<'a>) -> StepFuture<'a> {
 /// - 空账本在轮内是 `exhausted{no_progress}`，在轮首是**必须停**：出口没落格 ⇒ 同一笔
 ///   债再次被选中 ⇒ 空转。停驱加告警，就是「这一行的执行体写了零格」的显形。
 pub(crate) async fn drive_head(
+    orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    context: &SessionContext,
+    context: &mut SessionContext,
     turn: &mut TurnState,
 ) -> Result<(), ActorError> {
     loop {
-        let store = context.session.facts().ok_or_else(|| {
-            ActorError::Read(PluginError::InternalError(
-                "轮首派发需要持久会话（出口格无处可落）".into(),
-            ))
-        })?;
+        // **临时会话整台跳过**：轮首这几行的出口格只能落在事实源上，没有事实源就没有
+        // 账可对——派发点读到「没做过」却永远关不了账。跳过而不是判红：这一支在 v2 路径
+        // 上到得了的地方只有 `begin_drive` 之前的段（开轮块已把无事实源的幕判成失败），
+        // 而这里不许把一个优化项的缺账升级成整轮失败。
+        let Some(store) = context.session.facts() else {
+            return Ok(());
+        };
         let facts = store.range(Seq::new(0));
         let Some(next) = super::loop_rows::next_head(
             &facts,
@@ -105,8 +136,9 @@ pub(crate) async fn drive_head(
         let head = store.head();
         {
             let mut step = HeadStep {
+                orchestrator,
                 ctx,
-                store: store.as_ref(),
+                store: &store,
                 context,
                 turn,
             };

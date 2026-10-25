@@ -34,8 +34,8 @@ impl: done
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
 | `gate_turn` | 退出条件（只剩中止边界），见 §2.1 | 判定点唯一 |
-| `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + 压缩 + 请求视图 | 准备点唯一 |
-| `apply_compaction` | 水位响应（70% 阈值触发的语义压缩） | 响应点唯一 |
+| `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
+| `run_compress`（行 `policy.compress` 的执行体） | 水位响应（70% 阈值触发的语义压缩）：判定与执行同处这一执行体，由轮首派发点选中（[DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-159） | 响应点唯一 |
 | `finish_turn` | 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
 | `TurnState` | 跨轮可变状态（请求轮次 / 续写次数 / 落库锚点 / 静默时钟种子 / 中止信号） | 状态容器唯一 |
 
@@ -55,7 +55,8 @@ impl: done
  取 TURN_DISPATCH（授权三条）→ LoopSession + ChatOrchestrator；sink / abort 随交付包传入 → await ③
  结局序列化为 TurnReport 交回；session 侧 select! 看门狗 / 接管三臂在 ①
 ③ 循环层 run_chat_loop + gate_turn / finish_turn loop: chat_loop.rs
- + prepare_turn_inputs / apply_compaction chat_loop/inputs.rs
+ + prepare_turn_inputs / run_compress chat_loop/inputs.rs
+ + drive_head（轮首派发点）head_exec.rs
  + settle_reasoning / close_turn chat_loop/turn.rs
  + auto_compress_process / retry_compaction / compress_with_snapshot_core context/pipeline.rs
  + 会话侧读写经动作面 session_port.rs
@@ -86,7 +87,7 @@ impl: done
 |---|---|---|---|
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
 | 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
-| 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
+| 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + **轮首派发点**（压缩 / 召回两行在此被 `drive` 选中并跑掉，收口 ③）+ `build_request_view`（收口 ②） | 准备 + 派发 |
 | 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `SessionDispatchPort` 三动作分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
 | 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
@@ -101,14 +102,15 @@ impl: done
 | 其余 | 增量落库 | `Finish(Completed)` |
 
 > **这里没有工具执行，也没有压缩拦截**：工具跑在 `execute_turn` 内部（§4.1），
-> 回到 `close_turn` 时本轮工具早已产出结果；水位响应在 `apply_compaction`（第 3 步）。
+> 回到 `close_turn` 时本轮工具早已产出结果；水位响应在轮首派发点选中的 `policy.compress`（第 3 步）。
 > `close_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
 
 ### 1.3 职责边界（收口依据）
 
 - **收尾三件套**（增量落库 / Stop 钩子 / 返回语义）只在 `finish_turn` 出现一次；
  每个出口只负责构造 `TurnExit`。
-- **压缩判定与执行**同处 `apply_compaction`，顺序由函数内代码行序保证；
+- **压缩判定与执行**同处一个执行体（`run_compress` = 行 `policy.compress`）；它与召回的先后由
+ `prio` 表达，不由派发点的代码行序保证（[DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")）；
  内核 `compress_with_snapshot_core` 是唯一实现。
 - **提示词与工具**必须同机制、同时机收集：两者都经 `Registry`（收集口）注册、经 `traverse`
  汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
@@ -193,29 +195,30 @@ async fn prepare_turn_inputs(
 visitor 注册表），因此「每轮动态可调」是净收益：人格与工具集始终反映**当轮**注册表，
 中途新增的能力（如 MCP 新连上服务端）下一轮即可。
 
-### 2.3 收口 ③：压缩 → `apply_compaction`
+### 2.3 收口 ③：压缩 → 行 `policy.compress` 的执行体
 
 ```rust
-/// 收口 ③：上下文水位的**唯一响应点**——判定与执行同处一地。
-async fn apply_compaction(
+/// 收口 ③：上下文水位的**唯一响应点**——判定与执行同处这一执行体。
+pub(crate) async fn run_compress(
  orchestrator: &ChatOrchestrator,
  ctx: &Arc<dyn PluginInvokeRequest>,
+ store: &Arc<dyn Store<Event = Event>>, // 出口那一格由它自己落
  context: &mut SessionContext,
  turn: &mut TurnState,
- req: &TurnRequest,
- overhead_tokens: usize,
-) -> Result<, TurnExit> {
+) -> Result<(), ActorError> {
  // ① 阈值触发的语义压缩（70%；就地改写 context.messages 并推进落库锚点）
  …
 }
 ```
 
-**判定与执行同处一地**：水位判定与压缩执行都在「请求前」这一步，压缩之后水位即变，
-下一轮按新水位判。
+**判定与执行同处一地**：水位判定与压缩执行都在这一个执行体里，压缩之后水位即变，下一轮按新
+水位判。**「什么时候轮到它」也不再是代码行序**：它与召回同住轮首 host，由 `ring::drive` 按
+`prio` 选（压缩 30 先于召回 40），出口那一格（`turn.stage{stage=compress}`）由执行体自己落
+（形状与理由见 [DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")）。
 
 **收口后的分工**：
 
-- **水位响应** → 唯一入口 `apply_compaction`；
+- **水位响应** → 唯一执行体 `run_compress`（行 `policy.compress`，由轮首派发点选中）；
 - **执行内核** → `compress_with_snapshot_core`（唯一实现）；
 - **收益护栏** → `context::has_compaction_payoff`（门槛语义只有这一个出处）；
 - **「何时压」是一个入口两种触发**：阈值自动（`threshold`）与用户点失败节点重试
@@ -321,7 +324,7 @@ pub async fn run_chat_loop(
 
  // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
  // 系统提示词 + 工具在同一函数内、同一时刻收集（同一 `Registry`）；
- // 派生 overhead（一轮一次）；压缩（apply_compaction）与视图重建亦在其内。
+ // 派生 overhead（一轮一次）；轮首派发点（压缩 + 召回）与视图重建亦在其内。
  let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &sink,
  &mut turn, &turn_req).await {
  Ok(v) => v,

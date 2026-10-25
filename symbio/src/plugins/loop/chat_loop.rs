@@ -10,7 +10,7 @@
 //!   步骤2 gate_turn            ← 退出条件（唯一判定点）
 //!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
 //!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
-//!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
+//!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 轮首派发点 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用 + 工具轮 + **轮边界汇报回调**（`on_round`）
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
 //!   步骤6 close_turn           ← 落库 + 流向判定（子树在此收敛）
@@ -54,7 +54,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::drive::begin_drive;
-pub(crate) use self::inputs::{prepare_turn_inputs, run_recall};
+pub(crate) use self::inputs::{prepare_turn_inputs, run_compress, run_recall};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{
     request_actor_spec, request_source_principal, Gate, SessionContext, TurnExit, TurnRequest,
@@ -484,7 +484,8 @@ pub async fn run_chat_loop(
 
         // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
         // 系统提示词与工具在同一函数内、同一时刻收集（同一个 Registry），
-        // 并由此派生请求级开销与请求视图；压缩的水位响应（`apply_compaction`）也收口在该函数内。
+        // 并由此派生请求级开销与请求视图；该函数末尾还有**轮首派发点**——压缩的水位响应
+        // 是行 `policy.compress` 的执行体，由 `ring::drive` 在这里选中（D-159）。
         let inputs = match prepare_turn_inputs(
             orchestrator,
             &ctx,
