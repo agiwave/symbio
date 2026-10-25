@@ -8,10 +8,21 @@
 use super::*;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn node(role: NodeRole, text: &str) -> ChatNode {
     ChatNode {
         id: llm_short_id(),
-        role: Some(role),
+        principal: Some(principal_for(role)),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }

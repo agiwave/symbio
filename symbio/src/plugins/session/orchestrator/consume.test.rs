@@ -11,6 +11,17 @@ use crate::plugins::session::plugin::{SessionPlugin, OUTCOME_ABORTED};
 use crate::plugins::session::types::Session;
 use crate::symbio_core::PluginDir;
 use crate::symbio_core::VdfsChangeSubscriptions;
+
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatNode) {
     state.transcript.lock().await.apply(message);
@@ -52,7 +63,7 @@ fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode 
     cm::ChatNode {
         id: id.into(),
         parent_id: parent.map(|p| p.into()),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         msg_type: Some(cm::NodeKind::Body),
         status: Some(status),
         ..Default::default()

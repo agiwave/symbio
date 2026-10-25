@@ -91,6 +91,7 @@ pub(crate) async fn emit_streaming_start(
     root_id: &str,
     turn: Option<usize>,
     watermark: Option<serde_json::Value>,
+    principal: &crate::symbio_core::principal::Principal,
 ) {
     let meta = match (turn, watermark) {
         (Some(t), Some(w)) => Some(serde_json::json!({ "turn": t, "context": w })),
@@ -102,9 +103,9 @@ pub(crate) async fn emit_streaming_start(
     sink.emit(
         ChatNode {
             id: root_id.to_string(),
-            // 骨架是根级节点，与 User 互为兄弟（请求/响应由 NodeRole 区分）
+            // 骨架是根级节点，与 User 互为兄弟（身份由主体一栏给出）
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             status: Some(NodeStatus::Streaming),
             meta,

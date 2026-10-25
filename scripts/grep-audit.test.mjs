@@ -638,7 +638,7 @@ test('S-014 fixture 树不比棘轮：扫描根不是真实仓库 ⇒ 跳过', (
   const src = 'fn n() -> ChatNode {\n    ChatNode { role: Some(NodeRole::Assistant), ..Default::default() }\n}\n'
   const r = roleAudit(src, 1)
   assert.equal(r.status, 0, r.stdout)
-  // 临时树里 `symbio/src` 只躺着一个 fixture，存量恒 0/1——与 166 的差是「树不对」，
+  // 临时树里 `symbio/src` 只躺着一个 fixture，存量恒 0/1——它与基线的差是「树不对」，
   // 不是「该收紧」。据此判红会让守卫自己的回归测试变成噪音。
   assert.match(r.stdout, /S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比/)
 })
@@ -660,14 +660,12 @@ test('S-014 存量降了却不挪基线同样判红（棘轮只许留痕地下�
   assert.match(r.stdout, /S-014 基线该收紧：存量 role 格直写 \d+ 处 < 基线 9999/)
 })
 
-test('S-014 数的是直写形状：字段初始化 / 赋值 / get_or_insert / 两个过渡入口', () => {
+test('S-014 数的是直写形状：字段初始化 / 赋值 / get_or_insert', () => {
   const shapes = [
     'role: Some(NodeRole::Assistant),',
     'role: Some(cm::NodeRole::Tool),',
     'node.role = Some(NodeRole::User);',
     'node.role.get_or_insert(NodeRole::Assistant);',
-    'let x = node.with_role(role);',
-    'msg.set_legacy_role(role);',
   ]
   const src = shapes.map((s) => `fn f() {\n    ${s}\n}\n`).join('')
   const r = roleAudit(src, shapes.length)

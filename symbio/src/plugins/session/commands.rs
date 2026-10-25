@@ -279,7 +279,8 @@ impl SessionPlugin {
         };
 
         if let Some(role) = patch.legacy_role() {
-            existing.set_legacy_role(role);
+            // grep-audit-allow S-014: 读边界——补丁来自客户端，可能仍按存量形态带 role；这里只承接它，不产生新身份。
+            existing.role = Some(role);
         }
         if let Some(t) = &patch.msg_type {
             existing.msg_type = Some(*t);

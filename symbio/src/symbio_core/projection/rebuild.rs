@@ -76,8 +76,7 @@
 use std::collections::HashSet;
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
-    CHAT_STYLE_TAG_RUN,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
 use crate::symbio_core::event::{event_produced_text_node_id, event_tool_result_node_id};
 use crate::symbio_core::{
@@ -93,6 +92,20 @@ use crate::symbio_core::facts::ReportDraft;
 use crate::symbio_core::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
+use crate::symbio_core::principal::Principal;
+
+/// 事件主体 → 节点身份：重建与写侧**同一条**派生（[`Principal::from_legacy`]）。
+///
+/// 助手一侧的节点（骨架 / 正文 / 思考 / 对话面）由本会话主体说，写侧落库时补的
+/// 也是 `from_legacy(session_principal)`——两处同派生才认得出是同一个人。
+fn actor_principal(e: &Event) -> Principal {
+    Principal::from_legacy(&e.actor)
+}
+
+/// 用户一侧（发言 / 补充）：写侧 `attributed` 判 `NodeRole::User` ⇒ `person/local`。
+fn user_principal() -> Principal {
+    Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER)
+}
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
 /// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
@@ -309,7 +322,7 @@ fn nodes_of(e: &Event) -> Vec<ChatNode> {
 fn user_node(e: &Event) -> ChatNode {
     ChatNode {
         id: event_payload_node_id(e, "id"),
-        role: Some(NodeRole::User),
+        principal: Some(user_principal()),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：必须随用户格
@@ -341,7 +354,7 @@ fn supplement_node(e: &Event) -> ChatNode {
         .unwrap_or_else(|| serde_json::json!([]));
     ChatNode {
         id: event_payload_node_id(e, "id"),
-        role: Some(NodeRole::User),
+        principal: Some(user_principal()),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         meta: Some(serde_json::json!({
             META_SUPPLEMENT: true,
@@ -378,7 +391,7 @@ fn reported_node(e: &Event) -> ChatNode {
             .and_then(|v| v.as_i64())
             .unwrap_or(0),
     };
-    let mut m = draft.to_message();
+    let mut m = draft.to_message(&actor_principal(e));
     m.id = event_payload_node_id(e, "id");
     m.timestamp = Some(e.ts);
     m
@@ -404,7 +417,12 @@ fn opening_node(e: &Event) -> ChatNode {
         .get("exclude_from_context")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let mut node = dialog_node(text_of(e, "text").as_str(), reason, exclude);
+    let mut node = dialog_node(
+        text_of(e, "text").as_str(),
+        reason,
+        exclude,
+        &actor_principal(e),
+    );
     node.id = event_payload_node_id(e, "id");
     node.timestamp = Some(e.ts);
     node
@@ -431,7 +449,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let text = text_of(e, "text");
-        let mut node = dialog_node(text.as_str(), reason, exclude);
+        let mut node = dialog_node(text.as_str(), reason, exclude, &actor_principal(e));
         // id 由载荷给（缺则按事件 id 稳定合成——旧事件容错，与 `user_node` 同口径）。
         node.id = if id.is_empty() {
             e.event_id.clone()
@@ -454,7 +472,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         let reasoning_node = ChatNode {
             id: reasoning_id,
             parent_id: Some(node.id.clone()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(actor_principal(e)),
             msg_type: Some(NodeKind::Notice),
             content: Some(MessageContent::Text(reasoning)),
             status: Some(status_of(e)),
@@ -467,6 +485,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();
     };
+    let principal = actor_principal(e);
     let status = status_of(e);
     let text = text_of(e, "text");
     let reasoning = text_of(e, "reasoning");
@@ -490,7 +509,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     nodes.push(
         ChatNode {
             id: turn_id.clone(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             status: Some(status.clone()),
             error: why.clone(),
@@ -509,7 +528,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             ChatNode {
                 id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{turn_id}-reasoning")),
                 parent_id: Some(turn_id.clone()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning)),
                 status: Some(status.clone()),
@@ -525,7 +544,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         // 那条分支）——它与落库侧同源，`message.edited` 才定位得到这条节点。
         let child_id = event_produced_text_node_id(e);
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
-        let mut m = llm_build_text_node(&turn_id, &text, None, child_id);
+        let mut m = llm_build_text_node(&turn_id, &text, None, child_id, &principal);
         m.timestamp = Some(e.ts);
         m.status = Some(status.clone());
         nodes.push(m);
@@ -535,7 +554,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 它们与末轮产出同为 Turn 根的子节点（`tool_dispatch` 把中途正文定格在同一个根下）。
     if let Some(rounds) = e.payload.get("rounds").and_then(|v| v.as_array()) {
         for (i, r) in rounds.iter().enumerate() {
-            push_round_nodes(&mut nodes, &turn_id, i, r, &status, e.ts);
+            push_round_nodes(&mut nodes, &turn_id, i, r, &status, e.ts, &principal);
         }
     }
 
@@ -550,6 +569,7 @@ fn push_round_nodes(
     r: &serde_json::Value,
     status: &NodeStatus,
     ts: i64,
+    principal: &Principal,
 ) {
     let get = |k: &str| {
         r.get(k)
@@ -566,7 +586,7 @@ fn push_round_nodes(
             ChatNode {
                 id: get("reasoning_id").unwrap_or_else(|| format!("{turn_id}-r{i}")),
                 parent_id: Some(turn_id.to_string()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning)),
                 status: Some(status.clone()),
@@ -583,7 +603,7 @@ fn push_round_nodes(
             get("text_id")
         }
         .unwrap_or_else(|| format!("{turn_id}-t{i}"));
-        let mut m = llm_build_text_node(turn_id, &text, None, id);
+        let mut m = llm_build_text_node(turn_id, &text, None, id, principal);
         m.timestamp = Some(ts);
         m.status = Some(status.clone());
         nodes.push(m);
@@ -607,7 +627,15 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     let mut nodes = match e.payload.get("round") {
         Some(round) if round.is_object() => {
             let mut v = Vec::new();
-            push_round_nodes(&mut v, &turn_id, 0, round, &NodeStatus::Completed, e.ts);
+            push_round_nodes(
+                &mut v,
+                &turn_id,
+                0,
+                round,
+                &NodeStatus::Completed,
+                e.ts,
+                &actor_principal(e),
+            );
             v
         }
         _ => Vec::new(),
@@ -626,6 +654,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         Some(tool.clone()),
         text_of(e, "args"),
         str_of(e, "wire_id"),
+        &actor_principal(e),
     );
     call.timestamp = Some(e.ts);
     call.status = Some(NodeStatus::Completed);
@@ -677,7 +706,6 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         ChatNode {
             id: result_id,
             parent_id: Some(call_id.clone()),
-            role: Some(NodeRole::Tool),
             principal: tool_principal,
             msg_type: Some(NodeKind::Interaction),
             content: Some(MessageContent::Text(text_of(e, "text"))),

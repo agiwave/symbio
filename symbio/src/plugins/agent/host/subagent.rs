@@ -258,14 +258,14 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // ── 子会话 id + 续跑请求 + 首条消息（三者按调用形态确定）──
         // 三种调用形态：审批恢复（session_id + target_id）/ 续会话（仅
         // session_id，LLM 携带上次结果的子会话 id 继续对话）/ 新建（都省略）。
-        let user_message = || {
-            ChatNode {
-                id: uuid::Uuid::new_v4().as_simple().to_string(),
-                msg_type: Some(NodeKind::Body),
-                content: Some(MessageContent::Text(req.prompt.clone())),
-                ..Default::default()
-            }
-            .with_role(NodeRole::User)
+        let user_message = || ChatNode {
+            id: uuid::Uuid::new_v4().as_simple().to_string(),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                crate::symbio_core::PRINCIPAL_USER,
+            )),
+            msg_type: Some(NodeKind::Body),
+            content: Some(MessageContent::Text(req.prompt.clone())),
+            ..Default::default()
         };
         let (child_session_id, resume_req, first_message): (
             String,
@@ -1008,7 +1008,7 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
 /// `find_tool_result` 正确识别。
 ///
-/// **身份只有一份写**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-退成构造期通道 "DE-001-核心架构")）：`node_role()`
+/// **身份只有一份写**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）：`node_role()`
 /// 以 `principal.kind` 为先，所以这里改完主体，折叠当场就读回 `Tool`——
 /// 不需要再往 `role` 格补一份，也就不存在「主体改写必须排在角色改写之后」这种
 /// 顺序纪律。两格都写时，顺序写反就会让 `role` 格永远补不上

@@ -33,7 +33,7 @@ pub(crate) async fn settle_reasoning(
     // 用 provider 返回的真实用量滚动校准 token 估算。
     feedback_estimate(usage, &out);
 
-    let mut new_msgs = out.into_messages(root_id);
+    let mut new_msgs = out.into_messages(root_id, &orchestrator.session.principal());
     // 建树策略（[]）：flat 下本轮响应骨架的直接子节点升根 + 打 turn_root 记号，
     // 与流式层（`finalize_assistant_turn`）逐字同规则，保证 live↔存储↔WAL 三视图一致。
     for n in new_msgs.iter_mut() {

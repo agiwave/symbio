@@ -18,6 +18,17 @@ use crate::symbio_core::{
     PluginSimpleRequest, Scope, Store as _, TurnOutput, TurnSettings, TurnSpec, VdfsChange,
     VdfsChangeSink, VdfsProvider, Verb, TURN_DISPATCH,
 };
+
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -199,7 +210,7 @@ fn unit(resp: VdfsResponse) {
 fn msg(id: &str, role: cm::NodeRole, text: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.to_string(),
-        role: Some(role),
+        principal: Some(principal_for(role)),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(text.to_string())),
         status: Some(cm::NodeStatus::Completed),

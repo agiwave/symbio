@@ -10,8 +10,7 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
-    CHAT_STYLE_TAG_TOOL,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_TOOL,
 };
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
@@ -631,7 +630,9 @@ async fn dispatch_protocol_event(
                     ChatNode {
                         id: out.response_text_child_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(NodeRole::Assistant),
+                        // 身份不在这里：模型只产出正文，主体由落库点 `attributed`
+                        // / 重建面按会话主体补（D-147）。流式帧无 `role`，前端折叠
+                        // 缺省即助手——这正是本帧的语义。
                         msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.text.clone())),
                         status: Some(NodeStatus::Streaming),
@@ -656,7 +657,6 @@ async fn dispatch_protocol_event(
                     ChatNode {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Notice),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Streaming),
@@ -713,7 +713,6 @@ async fn dispatch_protocol_event(
                     ChatNode {
                         id: tc_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Skeleton),
                         content: Some(MessageContent::Text(full_args)),
                         status: Some(NodeStatus::Streaming),

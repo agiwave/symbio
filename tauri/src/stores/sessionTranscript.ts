@@ -52,8 +52,8 @@ export function sortTranscript(messages: ChatNode[]): ChatNode[] {
  * 非 assistant、或取不到任何文本时返回 `null`——调用方据此**不改动**预览
  * （而不是把预览清空：一条工具调用不该把上一句正文的预览抹掉）。
  */
-export function previewOf(msg: Pick<ChatNode, 'role' | 'principal' | 'content'>): string | null {
-  // 角色判据走契约层唯一折叠点——`role` 格退役后它是纯 kind 折叠。
+export function previewOf(msg: Pick<ChatNode, 'principal' | 'content'>): string | null {
+  // 角色判据走契约层唯一折叠点——身份只在 `principal` 上。
   if (messageRoleOf(msg) !== CHAT_ROLE_ASSISTANT) return null
   // 取值走契约层的唯一实现（`messageTextOf`）：本模块是纯逻辑层，
   // 不在这里再写一份多模态形状的判定。

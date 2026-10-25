@@ -104,6 +104,8 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 定稿答话轮不经本段（`execute_final_reply_turn`），仍由运行器落；同一格
     // 重落会撞幂等键，`land` 按「已做过」吸收。
     let principal = crate::symbio_core::request_principal(ctx.as_ref());
+    // 节点身份的同一份主体：流式帧与落库副本必须说同一个人（D-147）。
+    let session_principal = crate::symbio_core::principal::Principal::from_legacy(&principal);
     super::super::stage_events::land(store.as_ref(), turn_no, user_seq, &principal, &stages)
         .map_err(|e| {
             TurnExecExit::Failed(PluginError::InternalError(format!(
@@ -136,6 +138,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     });
     let emit_sink = sink.clone();
     let root_id_owned = root_id.to_string();
+    let principal_owned = session_principal.clone();
     let emitter = tokio::spawn(async move {
         while let Some(frame) = tx.pop().await {
             let message = match frame {
@@ -148,7 +151,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
                     let mut node = kind.shape(ChatNode {
                         id,
                         parent_id: Some(parent),
-                        role: Some(NodeRole::Assistant),
+                        principal: Some(principal_owned.clone()),
                         msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(text)),
                         status: Some(NodeStatus::Streaming),
@@ -175,7 +178,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
                     let mut node = kind.shape(ChatNode {
                         id,
                         parent_id: Some(parent),
-                        role: Some(NodeRole::Assistant),
+                        principal: Some(principal_owned.clone()),
                         msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(text)),
                         status: Some(NodeStatus::Completed),

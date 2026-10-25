@@ -35,7 +35,7 @@ use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP}
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},
     failure_kind, fire_hook, llm_emit_message, llm_emit_state, llm_short_id, Event,
     ExecAbortSignal, ExecEventSink, HookEvent, Plugin, PluginInvokeRequest, PluginInvokeRequestExt,
     Seq, Store, TurnToolCallInfo,

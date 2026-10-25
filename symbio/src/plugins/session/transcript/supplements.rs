@@ -67,7 +67,9 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         // （`useChatConnection.ts`：后端沿用调用方给的 id，前端按 id 合并）。
         id: items[0].id.clone(),
         parent_id: None,
-        role: Some(cm::NodeRole::User),
+        principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+            crate::symbio_core::PRINCIPAL_USER,
+        )),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(merge_content(items)),
         status: Some(cm::NodeStatus::Completed),

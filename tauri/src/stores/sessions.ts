@@ -401,9 +401,8 @@ export const useSessionsStore = defineStore('sessions', () => {
 
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
-        if (message.role != null) node.role = message.role
-        // 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
-        // 分派的唯一承载点，流式窄帧不带、终态权威帧带——合并规则两边通用。
+        // 主体同「有则覆盖」：身份的唯一承载点是 `principal.kind`（`role` 已退出
+        // wire），流式窄帧不带、终态权威帧带——合并规则两边通用。
         if (message.principal != null) node.principal = message.principal
         if (message.type != null) node.type = messageTypeOf(message)
         // `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。

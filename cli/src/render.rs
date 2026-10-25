@@ -208,6 +208,7 @@ impl Renderer {
             // `role` 已退出 wire：这里折的是「残留格 + principal.kind」
             // 两格的读法（`node_role`），工具/用户帧的抑制判据因此照旧成立。
             if let Some(r) = message.node_role() {
+                // grep-audit-allow S-014: 读边界——CLI 本地快照，合并帧的折叠结果，不产生新身份。
                 merged.role = Some(r);
             }
             if message.msg_type.is_some() {

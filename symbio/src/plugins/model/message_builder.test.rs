@@ -20,13 +20,25 @@ use crate::symbio_core::chat_node::{NodeKind, NodeStatus};
 
 const TURN_ID: &str = "turn-0001";
 
+/// 身份写 `principal`（D-147）：本文件的树模仿**落库面**（见文件头），
+/// `role` 只是反序列化落点，不是写侧的身份来源。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 本地构造一棵落库树（Turn 根 + 传入的子节点），形状同
 /// `llm_build_assistant_messages` 的产物——形状契约见文件头说明。
 fn turn_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
     let mut msgs = vec![ChatNode {
         id: TURN_ID.to_string(),
         parent_id: None,
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "run"})),
         content: None,
@@ -43,7 +55,7 @@ fn child(id: &str, ty: NodeKind, text: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         parent_id: Some(TURN_ID.to_string()),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(ty),
         content: Some(MessageContent::Text(text.into())),
         status: Some(NodeStatus::Completed),
@@ -62,7 +74,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
     let turn = ChatNode {
         id: TURN_ID.to_string(),
         parent_id: None,
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "run"})),
         status: Some(NodeStatus::Completed),
@@ -72,7 +84,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
     let tc = ChatNode {
         id: "tc-1".to_string(),
         parent_id: Some(TURN_ID.to_string()),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "echo"})),
         content: Some(MessageContent::Text(
@@ -157,7 +169,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
             ChatNode {
                 id: turn_id.into(),
                 parent_id: None,
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
                 meta: Some(serde_json::json!({"style_tag": "run"})),
                 content: None,
@@ -168,7 +180,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
             ChatNode {
                 id: format!("{turn_id}-reason"),
                 parent_id: Some(turn_id.into()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Notice),
                 meta: Some(serde_json::json!({"style_tag": "reasoning"})),
                 content: Some(MessageContent::Text(reasoning.into())),
@@ -179,7 +191,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
             ChatNode {
                 id: format!("{turn_id}-text"),
                 parent_id: Some(turn_id.into()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(reply.into())),
                 status: Some(NodeStatus::Completed),
@@ -192,7 +204,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
     let mut msgs = vec![ChatNode {
         id: "u1".into(),
         parent_id: None,
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("开始".into())),
         status: Some(NodeStatus::Completed),
@@ -246,7 +258,7 @@ fn orphan_tool_result_is_dropped() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hello".into())),
             status: Some(NodeStatus::Completed),
@@ -256,7 +268,7 @@ fn orphan_tool_result_is_dropped() {
         ChatNode {
             id: turn_id.into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -267,7 +279,7 @@ fn orphan_tool_result_is_dropped() {
         ChatNode {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("ok".into())),
             status: Some(NodeStatus::Completed),
@@ -278,7 +290,7 @@ fn orphan_tool_result_is_dropped() {
         ChatNode {
             id: "orphan-tool".into(),
             parent_id: Some(dead_tc_id.into()),
-            role: Some(NodeRole::Tool),
+            principal: Some(principal_for(NodeRole::Tool)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("stale result".into())),
             status: Some(NodeStatus::Completed),
@@ -305,7 +317,7 @@ fn linked_tool_result_is_retained() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("read?".into())),
             status: Some(NodeStatus::Completed),
@@ -315,7 +327,7 @@ fn linked_tool_result_is_retained() {
         ChatNode {
             id: turn_id.into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -326,7 +338,7 @@ fn linked_tool_result_is_retained() {
         ChatNode {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("let me read".into())),
             status: Some(NodeStatus::Completed),
@@ -336,7 +348,7 @@ fn linked_tool_result_is_retained() {
         ChatNode {
             id: tc_id.into(),
             parent_id: Some(turn_id.into()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "read_file"})),
             content: Some(MessageContent::Text("{}".into())),
@@ -347,7 +359,7 @@ fn linked_tool_result_is_retained() {
         ChatNode {
             id: "res1".into(),
             parent_id: Some(tc_id.into()),
-            role: Some(NodeRole::Tool),
+            principal: Some(principal_for(NodeRole::Tool)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("file content".into())),
             status: Some(NodeStatus::Completed),
@@ -370,7 +382,7 @@ fn empty_assistant_turn_is_dropped() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hi".into())),
             status: Some(NodeStatus::Completed),
@@ -380,7 +392,7 @@ fn empty_assistant_turn_is_dropped() {
         ChatNode {
             id: "turn-empty".into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -458,7 +470,7 @@ fn failed_turn_visible_with_interrupt_note() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("讲讲并发".into())),
             status: Some(NodeStatus::Completed),
@@ -468,7 +480,7 @@ fn failed_turn_visible_with_interrupt_note() {
         ChatNode {
             id: "turn-x".into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -480,7 +492,7 @@ fn failed_turn_visible_with_interrupt_note() {
         ChatNode {
             id: "turn-x-text".into(),
             parent_id: Some("turn-x".into()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("Go 的 channel 是…".into())),
             status: Some(NodeStatus::Completed),
@@ -490,7 +502,7 @@ fn failed_turn_visible_with_interrupt_note() {
         ChatNode {
             id: "u2".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("换个思路".into())),
             status: Some(NodeStatus::Completed),
@@ -522,7 +534,7 @@ fn failed_turn_without_children_survives_with_note() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hi".into())),
             status: Some(NodeStatus::Completed),
@@ -532,7 +544,7 @@ fn failed_turn_without_children_survives_with_note() {
         ChatNode {
             id: "turn-empty".into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -557,7 +569,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
         ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("跑下测试".into())),
             status: Some(NodeStatus::Completed),
@@ -567,7 +579,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
         ChatNode {
             id: "turn-tc".into(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
@@ -579,7 +591,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
         ChatNode {
             id: "tc-x".into(),
             parent_id: Some("turn-tc".into()),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "run_tests"})),
             content: Some(MessageContent::Text("{}".into())),
@@ -619,7 +631,7 @@ fn failed_tool_result_sets_success_false() {
             ChatNode {
                 id: turn_id.into(),
                 parent_id: None,
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
                 meta: Some(serde_json::json!({"style_tag": "run"})),
                 content: None,
@@ -630,7 +642,7 @@ fn failed_tool_result_sets_success_false() {
             ChatNode {
                 id: tc_id.into(),
                 parent_id: Some(turn_id.into()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
                 meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "read_file"})),
                 content: Some(MessageContent::Text("{}".into())),
@@ -641,7 +653,7 @@ fn failed_tool_result_sets_success_false() {
             ChatNode {
                 id: res_id.into(),
                 parent_id: Some(tc_id.into()),
-                role: Some(NodeRole::Tool),
+                principal: Some(principal_for(NodeRole::Tool)),
                 msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text("result".into())),
                 status: Some(if failed {
@@ -686,14 +698,14 @@ fn compression_nodes_are_excluded_from_request_view() {
     let msgs = vec![
         ChatNode {
             id: "u1".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("问题".into())),
             ..Default::default()
         },
         ChatNode {
             id: "c1".into(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Notice),
             meta: Some(serde_json::json!({"style_tag": "compression"})),
             content: Some(MessageContent::Text("已压缩上下文（12 → 4 条）".into())),
@@ -720,14 +732,14 @@ fn nodes_marked_exclude_from_context_are_dropped() {
     let msgs = vec![
         ChatNode {
             id: "u1".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
         ChatNode {
             id: "f1".into(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
             status: Some(NodeStatus::Completed),
@@ -748,14 +760,14 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
     let msgs = vec![
         ChatNode {
             id: "u1".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
         ChatNode {
             id: "f1".into(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
             status: Some(NodeStatus::Completed),
@@ -764,7 +776,7 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
         },
         ChatNode {
             id: "f2".into(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("显式 false 也不剔除".into())),
             status: Some(NodeStatus::Completed),
@@ -795,8 +807,7 @@ fn cell(
     ChatNode {
         id: id.to_string(),
         parent_id: parent.map(str::to_string),
-        // grep-audit-allow S-014: 请求视图的夹具要能摆出 role 格与 principal 两种身份来源，而 node_role() 的第一条读法就是存量 role 格——直写点收敛成这一个构造器，新增用例不再各自写格
-        role: Some(role),
+        principal: Some(principal_for(role)),
         msg_type: Some(kind),
         meta: (!style.is_empty()).then(|| serde_json::json!({ "style_tag": style })),
         content: (!text.is_empty()).then(|| MessageContent::Text(text.to_string())),

@@ -15,6 +15,17 @@ use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{PluginSimpleRequest, Seq};
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn plugin() -> Arc<SessionPlugin> {
     Arc::new(SessionPlugin::new(
         None,
@@ -25,7 +36,7 @@ fn plugin() -> Arc<SessionPlugin> {
 
 fn user_message(text: &str) -> cm::ChatNode {
     cm::ChatNode {
-        role: Some(cm::NodeRole::User),
+        principal: Some(principal_for(cm::NodeRole::User)),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(text.to_string())),
         ..Default::default()

@@ -18,7 +18,12 @@
 use super::*;
 // `dialog_node` 本体已归 core，本文件因此不再经 `compose.rs` 的导入面拿到形状词表——
 // 测试自己引（短名，不写全限定路径：S-014 的 role 直写棘轮按短名形状计数）。
-use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeRole};
+use crate::symbio_core::chat_node::{MessageContent, NodeKind};
+
+/// 落库面的主体：本文件模仿落库/投影面，身份写 `principal`（D-147）。
+fn assistant_principal() -> crate::symbio_core::principal::Principal {
+    crate::symbio_core::principal::Principal::from_legacy("session/main")
+}
 
 /// 取 `meta` 里某个键（`meta` 缺席时算没有这个键）。
 fn meta_key(node: &ChatNode, key: &str) -> Option<serde_json::Value> {
@@ -37,7 +42,7 @@ fn meta_key(node: &ChatNode, key: &str) -> Option<serde_json::Value> {
 ///   `compose` 不知道上一轮说过什么（措辞会重复或断裂），前端「对话」面板也看不到它。
 #[test]
 fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
-    let node = dialog_node("好，我来处理。", "needs_work", true);
+    let node = dialog_node("好，我来处理。", "needs_work", true, &assistant_principal());
 
     assert!(
         node.parent_id.is_none(),
@@ -62,7 +67,7 @@ fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
 fn a_turn_child_text_is_on_the_conversation_line() {
     let child = ChatNode {
         parent_id: Some("turn-1".to_string()),
-        role: Some(NodeRole::Assistant),
+        principal: Some(assistant_principal()),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("回复正文".to_string())),
         ..Default::default()
@@ -93,6 +98,7 @@ fn report_node_is_excluded_and_on_the_conversation_line() {
         "已经完成 3 轮工具调用，用时约 2 分钟，还在继续。",
         REASON_PROGRESS,
         true,
+        &assistant_principal(),
     );
 
     assert_eq!(meta_key(&node, "surface"), Some(serde_json::json!("reply")));

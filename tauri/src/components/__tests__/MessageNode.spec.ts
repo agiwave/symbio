@@ -24,8 +24,12 @@ import type { ChatNode } from '@/schemas/chat_node'
  * 分派轴即 `NodeKind` 五值，故 `type` 直接取折后形态；入参容忍 `string` 只为
  * 「未登记类型」那一条用例（`brand_new_type`）保留其兜底验证。
  */
+const AS_PERSON = { kind: 'person', id: 'person/local' } as const
+const AS_AGENT = { kind: 'agent', id: 'session/main' } as const
+const AS_TOOL = { kind: 'tool', id: 'vdfs/write' } as const
+
 function msg(p: Partial<Omit<ChatNode, 'type'>> & { id: string; type?: string }): ChatNode {
-  return { role: 'assistant', type: 'body', content: '', status: 'completed', ...p } as unknown as ChatNode
+  return { principal: AS_AGENT, type: 'body', content: '', status: 'completed', ...p } as unknown as ChatNode
 }
 
 function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
@@ -209,11 +213,11 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
         title: 'shell',
         status: 'completed',
         content: '{"cmd":"ls"}',
-        children: [msg({ id: 'res1', type: 'body', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc1' })],
+        children: [msg({ id: 'res1', type: 'body', principal: AS_TOOL, status: 'completed', content: '"ok"', parent_id: 'tc1' })],
       }),
     )
     expect(w.find('.skeleton-pending').exists()).toBe(false)
-    // 结果子节点是 `role=tool` 的 body：分派钩子只会出现五值
+    // 结果子节点是工具一族的 body：分派钩子只会出现五值
     expect(w.findAll('.type-body').length).toBeGreaterThan(0)
     expect(w.text()).toContain('"ok"')
   })
@@ -363,7 +367,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 读数行）', ()
 
 describe('MessageNode：正文格（body）与兜底', () => {
   it('用户消息走右对齐气泡，头部是「你」', () => {
-    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'body', content: '你好' }))
+    const w = mountNode(msg({ id: 'u1', principal: AS_PERSON, type: 'body', content: '你好' }))
     expect(w.find('.user-bubble').exists()).toBe(true)
     expect(w.find('.node-head').text()).toContain('你')
     expect(w.find('.user-bubble').text()).toContain('你好')
@@ -379,7 +383,7 @@ describe('MessageNode：正文格（body）与兜底', () => {
 })
 
 /**
- * 压缩后的**历史记忆**（`meta.compacted`）：它是 `role = user` 的消息（后端为让对话以
+ * 压缩后的**历史记忆**（`meta.compacted`）：它挂在人一族的主体上（后端为让对话以
  * user 开头），但它是系统产出的记忆，不是用户说的话——分派器把它路由到折叠叶（notice），
  * 而非右对齐的用户气泡。这里钉住四个可见后果：标题 / 对齐 / 默认收起 / 不给悬停操作。
  */
@@ -387,7 +391,7 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
   const memory = (extra: Partial<ChatNode> = {}) =>
     msg({
       id: 'mem1',
-      role: 'user',
+      principal: AS_PERSON,
       status: 'completed',
       content: '[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n要点一\n要点二',
       meta: { compacted: true },

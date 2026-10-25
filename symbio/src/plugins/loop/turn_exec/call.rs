@@ -192,7 +192,11 @@ inject: super::super::round_hook::round_hook(supplements, on_round).map(|(drain,
                                                 1,
                                                 std::sync::atomic::Ordering::Relaxed,
                                             );
-                                            let node = draft.to_message();
+                                            let node = draft.to_message(
+                                                &crate::symbio_core::principal::Principal::from_legacy(
+                                                    &actor.principal,
+                                                ),
+                                            );
                                             if let Err(e) = store.append(
                                                 crate::symbio_core::Event::pending(
                                                     format!("rp-{turn_no}-{no}"),
@@ -421,7 +425,9 @@ pub(crate) fn supplement_into_request(
     let msg = ChatNode {
         // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
         id: drained.id.clone(),
-        role: Some(NodeRole::User),
+        principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+            crate::symbio_core::PRINCIPAL_USER,
+        )),
         content: Some(MessageContent::Text(text.clone())),
         meta: Some(serde_json::json!({
             crate::symbio_core::META_SUPPLEMENT: true,

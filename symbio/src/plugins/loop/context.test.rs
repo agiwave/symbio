@@ -7,10 +7,21 @@
 use super::*;
 use crate::symbio_core::chat_node::MessageContent;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn user_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -20,7 +31,7 @@ fn user_msg(text: &str) -> ChatNode {
 fn assistant_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -30,7 +41,7 @@ fn assistant_msg(text: &str) -> ChatNode {
 fn tool_call_msg() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_read".to_string()})),
         content: Some(MessageContent::Text(r#"{"path":"a.rs"}"#.to_string())),
@@ -41,7 +52,7 @@ fn tool_call_msg() -> ChatNode {
 fn tool_result_msg() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::Tool),
+        principal: Some(principal_for(NodeRole::Tool)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("file content".to_string())),
         ..Default::default()
@@ -81,7 +92,7 @@ fn test_split_point_never_full_compress_on_assistant_tail() {
         split > 0 && split < msgs.len(),
         "不得全量压缩, split={split}"
     );
-    assert_eq!(msgs[split].role, Some(NodeRole::User));
+    assert_eq!(msgs[split].node_role(), Some(NodeRole::User));
 }
 
 #[test]

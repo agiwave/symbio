@@ -290,6 +290,70 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
     assert_eq!(m.tool_name(), Some("new"));
 }
 
+/// 存量 `role` 属性在逆投影时**折成主体**（[D-147]）：属性表没有 `principal` 的节点
+/// 读到后同样只有一份身份，显式 `principal` 优先。
+#[test]
+fn message_of_node_folds_legacy_role_into_principal() {
+    use crate::symbio_core::principal::PrincipalKind;
+
+    let m = message_of_node(
+        &vdfs_with_attrs("j", serde_json::json!({"role": "user"})),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        m.principal.as_ref().map(|p| p.id.as_str()),
+        Some("person/local"),
+        "人说的话归 person/local"
+    );
+
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "k",
+            serde_json::json!({"role": "tool", "tool_name": "vdfs_write"}),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        m.principal.as_ref().map(|p| p.kind),
+        Some(PrincipalKind::Tool)
+    );
+    assert_eq!(
+        m.principal.as_ref().map(|p| p.id.as_str()),
+        Some("vdfs/write"),
+        "工具结果归工具自己（地址由工具名合成）"
+    );
+
+    let m = message_of_node(
+        &vdfs_with_attrs("l", serde_json::json!({"role": "assistant"})),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        m.principal.as_ref().map(|p| p.id.as_str()),
+        Some("session/main"),
+        "其余归本机主智能体"
+    );
+
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "m",
+            serde_json::json!({
+                "role": "user",
+                "principal": {"kind": "agent", "id": "session/sub-1"}
+            }),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        m.principal.as_ref().map(|p| p.id.as_str()),
+        Some("session/sub-1"),
+        "属性表带显式主体时原样认下"
+    );
+}
+
 /// 呈现派生：title/icon 从**形状**现算，且只在前后端交互面调用。
 ///
 /// 钉住三件事——(1) 每类形状算出什么；(2) `run` 骨架标题是智能体名（上下文相关），
@@ -471,6 +535,7 @@ fn the_legacy_cell_still_carries_the_kind_when_no_principal_exists() {
     ] {
         let node = ChatNode {
             id: "m-2".into(),
+            // grep-audit-allow S-014: 本用例的判据就是「主体缺席时残留格兜底」，必须真的摆出那一格
             role: Some(role),
             ..Default::default()
         };

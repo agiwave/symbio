@@ -171,7 +171,14 @@ pub(crate) async fn prepare_turn_inputs(
         Some(root) => root,
         None => {
             let root = llm_short_id();
-            emit_streaming_start(sink, &root, Some(turn.request_round), Some(watermark)).await;
+            emit_streaming_start(
+                sink,
+                &root,
+                Some(turn.request_round),
+                Some(watermark),
+                &orchestrator.session.principal(),
+            )
+            .await;
             root
         }
     };

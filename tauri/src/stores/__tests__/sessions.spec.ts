@@ -338,12 +338,12 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
   /** 一段线性转写：u1 → t1 → a1 → u2 → t2 → a2（`seq` 即顺序，与后端同源） */
   function seed(store: ReturnType<typeof useSessionsStore>) {
     store.hydrateFromHistory(SID, [
-      { id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题一' },
+      { id: 'u1', principal: { kind: 'person', id: 'person/local' }, type: 'body', seq: 1, content: '问题一' },
       { id: 't1', type: 'skeleton', seq: 2 },
-      { id: 'a1', role: 'assistant', type: 'body', seq: 3, content: '回答一' },
-      { id: 'u2', role: 'user', type: 'body', seq: 4, content: '问题二' },
+      { id: 'a1', principal: { kind: 'agent', id: 'session/main' }, type: 'body', seq: 3, content: '回答一' },
+      { id: 'u2', principal: { kind: 'person', id: 'person/local' }, type: 'body', seq: 4, content: '问题二' },
       { id: 't2', type: 'skeleton', seq: 5 },
-      { id: 'a2', role: 'assistant', type: 'body', seq: 6, content: '回答二' },
+      { id: 'a2', principal: { kind: 'agent', id: 'session/main' }, type: 'body', seq: 6, content: '回答二' },
     ] as never)
   }
 
@@ -463,7 +463,7 @@ describe('sessions store — 历史水合是快照直载', () => {
   it('快照即权威：本地不在快照里的节点不保留（在途节点由增量通道继续收敛）', async () => {
     const store = useSessionsStore()
     store.hydrateFromHistory(SID, [
-      { id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题' },
+      { id: 'u1', principal: { kind: 'person', id: 'person/local' }, type: 'body', seq: 1, content: '问题' },
     ] as never)
     store.applyTranscriptMessage(SID, {
       id: 'skel-live',
@@ -472,7 +472,7 @@ describe('sessions store — 历史水合是快照直载', () => {
       content: '半截',
     } as never)
 
-    snapshot([{ id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题' }])
+    snapshot([{ id: 'u1', principal: { kind: 'person', id: 'person/local' }, type: 'body', seq: 1, content: '问题' }])
     await store.loadMessages(SID)
 
     expect(ids(store)).toEqual(['u1'])
@@ -594,7 +594,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
     // 用户发送：本地游标发号 7（此刻存储还没落库）
     store.applyTranscriptMessage(SID, {
       id: 'u1',
-      role: 'user',
+      principal: { kind: 'person', id: 'person/local' },
       type: 'body',
       status: 'completed',
       content: '问题',
@@ -608,7 +608,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
     // 存储回包：权威号是 4（截断 / 压缩后存储重排过号）⇒ 就地覆盖本地号
     store.applyTranscriptMessage(SID, {
       id: 'u1',
-      role: 'user',
+      principal: { kind: 'person', id: 'person/local' },
       type: 'body',
       seq: 4,
       status: 'completed',
@@ -681,7 +681,7 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
 
     store.applyTranscriptMessage(SID, {
       id: 'a1',
-      role: 'assistant',
+      principal: { kind: 'agent', id: 'session/main' },
       type: 'body',
       content: '回答',
     } as never)

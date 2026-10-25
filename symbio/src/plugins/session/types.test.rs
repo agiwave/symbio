@@ -6,11 +6,28 @@
 use super::*;
 use serde_json::json;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(
+    role: crate::symbio_core::chat_node::NodeRole,
+) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        crate::symbio_core::chat_node::NodeRole::User => {
+            Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER)
+        }
+        crate::symbio_core::chat_node::NodeRole::Assistant => {
+            Principal::from_legacy("session/main")
+        }
+        crate::symbio_core::chat_node::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        crate::symbio_core::chat_node::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn user_msg(text: &str) -> ChatNode {
     use crate::symbio_core::chat_node as cm;
     ChatNode {
         id: "m1".into(),
-        role: Some(cm::NodeRole::User),
+        principal: Some(principal_for(cm::NodeRole::User)),
         content: Some(cm::MessageContent::Text(text.into())),
         ..Default::default()
     }
@@ -39,7 +56,7 @@ fn derive_title_skips_empty_and_non_user() {
     use crate::symbio_core::chat_node as cm;
     let empty = ChatNode {
         id: "m0".into(),
-        role: Some(cm::NodeRole::User),
+        principal: Some(principal_for(cm::NodeRole::User)),
         content: Some(cm::MessageContent::Text("   \n  ".into())),
         ..Default::default()
     };
@@ -60,7 +77,7 @@ fn assistant_msg(text: &str) -> ChatNode {
     use crate::symbio_core::chat_node as cm;
     ChatNode {
         id: "a1".into(),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         content: Some(cm::MessageContent::Text(text.into())),
         ..Default::default()
     }
@@ -89,7 +106,7 @@ fn summary_skips_textless_assistant_messages() {
     // 纯工具调用 / 推理消息没有正文：继续往前找最近一条**有文本**的回复
     let tool_only = ChatNode {
         id: "t1".into(),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         content: None,
         ..Default::default()
     };

@@ -243,6 +243,7 @@ impl LlmAdapter for ProviderLlmAdapter {
     ///
     /// ```text
     /// // 反例——整段 prompt 拍成一条 user 消息：
+    // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
     /// let message = ChatNode { role: Some(NodeRole::User), content: …(prompt) };
     /// execute_turn(self.system_prompt(), &[message], tools, …)
     /// ```
@@ -345,6 +346,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                     let root_id = llm_short_id();
                     let root = ChatNode {
                         id: root_id.clone(),
+                        // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
                         role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Skeleton),
                         content: Some(MessageContent::Text(m.text.clone())),
@@ -357,6 +359,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                             ChatNode {
                                 id: llm_short_id(),
                                 parent_id: Some(root_id.clone()),
+                                // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
                                 role: Some(NodeRole::Assistant),
                                 msg_type: Some(NodeKind::Skeleton),
                                 // 参数走 content（展平时从这里 re-parse）——规范化
@@ -399,6 +402,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                                 .iter()
                                 .find(|n| n.tool_call_id == r.tool_call_id)
                                 .map(|n| n.id.clone()),
+                            // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
                             role: Some(NodeRole::Tool),
                             msg_type: Some(NodeKind::Body),
                             content: Some(MessageContent::Text(r.text.clone())),
@@ -461,6 +465,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                     if !already_nested && !declared_here {
                         wire.push(ChatNode {
                             id: llm_short_id(),
+                            // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
                             role: Some(NodeRole::Assistant),
                             content: Some(MessageContent::Text(format!(
                                 "（此前调用工具 {} 的结果）{}",
@@ -475,6 +480,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                 _ => {
                     wire.push(ChatNode {
                         id: llm_short_id(),
+                        // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
                         role: Some(match m.role.as_str() {
                             "assistant" => NodeRole::Assistant,
                             "tool" => NodeRole::Tool,

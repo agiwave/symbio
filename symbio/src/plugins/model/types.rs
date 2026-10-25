@@ -59,6 +59,7 @@ impl From<NativeMessage> for ChatNode {
                 msg.id
             },
             parent_id: None,
+            // grep-audit-allow S-014: 读边界——`NativeMessage` 是协议侧形状，角色由它给出；节点身份由落库点补。
             role: Some(msg.role),
             // 谁说的不由模型侧决定（它只回正文与角色）：`None` = 未标身份，
             // 落库时由 `persist_messages` 按角色补齐（会话主体 / 人）。

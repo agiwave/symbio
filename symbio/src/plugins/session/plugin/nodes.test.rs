@@ -7,6 +7,17 @@ use crate::symbio_core::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WOR
 // 目录树场景模块的区段常量（`SEG_SUB_SESSIONS` / `SEG_WORKDIR`）
 use crate::plugins::session::workdir;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库/投递面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 消息节点序列化后 `node.name` 必须仍是**节点 id**。
 ///
 /// 钉住一次真实事故：attributes 的工具名原先用 `name` 作键，与 `VdfsNode`
@@ -19,7 +30,7 @@ use crate::plugins::session::workdir;
 fn message_node_serialized_name_is_node_id_not_tool_name() {
     let m = cm::ChatNode {
         id: "nodeid123".into(),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         msg_type: Some(cm::NodeKind::Body),
         status: Some(cm::NodeStatus::Streaming),
         content: Some(cm::MessageContent::Text("你好".into())),
@@ -275,8 +286,8 @@ fn vdfs_internal_path_parsing() {
 fn parse_inbox_message_distinguishes_shape_by_first_char() {
     // 纯文本：整段就是正文，角色 / 类型 / 状态都是"待发用户消息"
     let m = parse_inbox_message("帮我看一下这个 bug").unwrap();
+    assert_eq!(m.node_role(), Some(cm::NodeRole::User));
     assert_eq!(m.content.unwrap().to_text(), "帮我看一下这个 bug");
-    assert_eq!(m.role, Some(cm::NodeRole::User));
     assert_eq!(m.msg_type, Some(cm::NodeKind::Body));
     assert_eq!(m.status, Some(cm::NodeStatus::Completed));
 
@@ -301,7 +312,7 @@ fn inbox_item_node_reuses_message_shape() {
         id: "i1".into(),
         message: cm::ChatNode {
             id: "i1".into(),
-            role: Some(cm::NodeRole::User),
+            principal: Some(principal_for(cm::NodeRole::User)),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text("待发的这句话".into())),
             status: Some(cm::NodeStatus::Completed),
@@ -409,7 +420,7 @@ fn vdfs_internal_dirs_conditional() {
 fn vdfs_message_node_splits_text_and_structure() {
     let mut m = cm::ChatNode {
         id: "m1".into(),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text("你好，世界".into())),
         status: Some(cm::NodeStatus::Completed),
@@ -435,7 +446,18 @@ fn vdfs_message_node_splits_text_and_structure() {
     m.status = Some(cm::NodeStatus::Completed);
     // 结构字段全在 attributes 里（VDFS 只透传）
     assert_eq!(n.attributes.get("seq"), Some(&json!(7)));
-    assert_eq!(n.attributes.get("role"), Some(&json!("assistant")));
+    assert_eq!(
+        n.attributes.get("role"),
+        None,
+        "`role` 已退出 wire：身份只在 `principal` 上"
+    );
+    assert_eq!(
+        n.attributes
+            .get("principal")
+            .and_then(|p| p.get("id"))
+            .and_then(|id| id.as_str()),
+        Some("session/main")
+    );
     assert_eq!(n.attributes.get("type"), Some(&json!("body")));
 
     // 正文即内容；流式追加的正是它

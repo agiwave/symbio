@@ -5,7 +5,7 @@
 //! 它不报错、不告警，前端只是把工具卡片渲染成一条普通正文。所以这里逐条钉
 //! **结构**而不是内容：
 //!
-//! 1. 每条事实落到**该落的位置**（id / parent_id / type / role 四件套）；
+//! 1. 每条事实落到**该落的位置**（id / parent_id / type / 身份 四件套）；
 //! 2. 同一批调用在两个载荷里各记一次时**不重复建卡**；
 //! 3. 同输入 ⇒ 逐字同输出（纯函数，N1）；
 //! 4. 载荷没记身份的格子**合成 id 必须稳定**（否则每次重开都多一批新节点）。
@@ -18,6 +18,18 @@ use crate::symbio_core::{
     EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
+/// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
+/// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 一条事件的**可断言摘要**——`ChatNode` 没有 `PartialEq`（它是增量帧的形状，
 /// 逐字段比较才有意义），所以判据比的是这四件套 + 正文 + 状态。
 ///
@@ -29,7 +41,7 @@ struct Shape {
     id: String,
     parent: Option<String>,
     ty: NodeForm,
-    role: Option<NodeRole>,
+    identity: Option<NodeRole>,
     text: String,
     status: Option<NodeStatus>,
 }
@@ -76,7 +88,7 @@ fn shape(m: &crate::symbio_core::chat_node::ChatNode) -> Shape {
         id: m.id.clone(),
         parent: m.parent_id.clone(),
         ty: form_of(m),
-        role: m.role.clone(),
+        identity: m.node_role(),
         text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
         status: m.status.clone(),
     }
@@ -141,7 +153,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
                 id: "u-node".into(),
                 parent: None,
                 ty: NodeForm::Body,
-                role: Some(NodeRole::User),
+                identity: Some(NodeRole::User),
                 text: "问 A".into(),
                 // 落库的用户消息**没有** status（调用方 `..Default::default()`）——
                 // 重建不得补（补了就是两个身份，前端按 status 参与合并键）。
@@ -151,7 +163,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
                 id: "T1".into(),
                 parent: None,
                 ty: NodeForm::Run,
-                role: Some(NodeRole::Assistant),
+                identity: Some(NodeRole::Assistant),
                 text: String::new(),
                 status: Some(NodeStatus::Completed),
             },
@@ -159,7 +171,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
                 id: "T1-reason".into(),
                 parent: Some("T1".into()),
                 ty: NodeForm::Reasoning,
-                role: Some(NodeRole::Assistant),
+                identity: Some(NodeRole::Assistant),
                 text: "想了一下".into(),
                 status: Some(NodeStatus::Completed),
             },
@@ -167,7 +179,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
                 id: "T1-text".into(),
                 parent: Some("T1".into()),
                 ty: NodeForm::Body,
-                role: Some(NodeRole::Assistant),
+                identity: Some(NodeRole::Assistant),
                 text: "答 A".into(),
                 status: Some(NodeStatus::Completed),
             },
@@ -355,12 +367,12 @@ fn artifact_builds_call_and_result_under_the_call() {
     assert_eq!(got[1].id, "T-016");
     assert_eq!(got[1].parent, Some("T1".into()));
     assert_eq!(got[1].ty, NodeForm::Tool);
-    assert_eq!(got[1].role, Some(NodeRole::Assistant));
+    assert_eq!(got[1].identity, Some(NodeRole::Assistant));
     assert_eq!(got[1].text, "{\"path\":\"a.md\"}");
     // 结果卡：role=Tool，挂在**调用**下（不是 Turn 根）
     assert_eq!(got[2].id, "C1-res");
     assert_eq!(got[2].parent, Some("T-016".into()));
-    assert_eq!(got[2].role, Some(NodeRole::Tool));
+    assert_eq!(got[2].identity, Some(NodeRole::Tool));
     assert_eq!(got[2].text, "文件内容");
     assert_eq!(got[2].status, Some(NodeStatus::Completed));
 }
@@ -427,7 +439,7 @@ fn supplement_gets_a_stable_synthetic_id() {
     let b = shapes(&rebuild(&[ev]));
     assert_eq!(a, b, "同一条事件每次重建必须得同一个 id");
     assert_eq!(a[0].id, "s-1-0", "载荷缺 id 时合成 id 取事件 id");
-    assert_eq!(a[0].role, Some(NodeRole::User));
+    assert_eq!(a[0].identity, Some(NodeRole::User));
     assert_eq!(a[0].text, "插一句");
 }
 
@@ -538,7 +550,7 @@ fn reported_mirrors_the_persisted_shape() {
     let msgs = rebuild(std::slice::from_ref(&ev));
     let m = &msgs[0];
     assert_eq!(m.id, "rp-1-0", "载荷缺 id ⇒ 合成 id 取事件 id");
-    assert_eq!(m.role, Some(NodeRole::Assistant));
+    assert_eq!(m.node_role(), Some(NodeRole::Assistant));
     assert_eq!(form_of(m), NodeForm::Body);
     assert_eq!(m.status, Some(NodeStatus::Completed));
     assert_eq!(m.timestamp, Some(3_000), "时间戳覆写为事件自身的 ts");
@@ -619,7 +631,7 @@ fn an_edit_replaces_the_node_in_place() {
         })),
         edited_event(crate::symbio_core::chat_node::ChatNode {
             id: "u-node".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("改过的问题".into())),
             timestamp: Some(1_500),
@@ -632,7 +644,7 @@ fn an_edit_replaces_the_node_in_place() {
     assert_eq!(got.len(), 3, "编辑**不新增节点**：{got:?}");
     assert_eq!(got[0].id, "u-node", "位置不变（还是第一条）");
     assert_eq!(got[0].text, "改过的问题", "内容换成新的");
-    assert_eq!(got[0].role, Some(NodeRole::User));
+    assert_eq!(got[0].identity, Some(NodeRole::User));
     // 位置锚：编辑前后 `seq` 逐字相同（号不重发）。
     assert_eq!(
         msgs[0].seq,
@@ -687,7 +699,7 @@ fn an_edit_for_an_unknown_node_adds_nothing() {
         user_event("u-node", "问"),
         edited_event(crate::symbio_core::chat_node::ChatNode {
             id: "ghost".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("谁都不是".into())),
             ..Default::default()
         }),
@@ -711,7 +723,7 @@ fn rebuild_with_mutations_is_deterministic() {
         })),
         edited_event(crate::symbio_core::chat_node::ChatNode {
             id: "u-node".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("改过".into())),
             ..Default::default()
         }),
@@ -768,7 +780,7 @@ fn snapshot_event(msgs: Vec<crate::symbio_core::chat_node::ChatNode>) -> Event {
 fn text_msg(id: &str, role: NodeRole, text: &str) -> crate::symbio_core::chat_node::ChatNode {
     crate::symbio_core::chat_node::ChatNode {
         id: id.into(),
-        role: Some(role),
+        principal: Some(principal_for(role)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         ..Default::default()
@@ -869,7 +881,7 @@ fn mutations_after_the_snapshot_still_fold() {
         ]),
         edited_event(crate::symbio_core::chat_node::ChatNode {
             id: "u-keep".into(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             content: Some(MessageContent::Text("保留的问题（改过）".into())),
             ..Default::default()
         }),
@@ -927,7 +939,7 @@ fn added_event(msgs: Vec<crate::symbio_core::chat_node::ChatNode>) -> Event {
 fn an_added_event_births_the_payload_nodes_verbatim() {
     let record = crate::symbio_core::chat_node::ChatNode {
         id: "compact-record".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("〔本轮已压缩〕".into())),
         // 故意**不带** status：重建不得替它补（补了就是两个身份）。
@@ -950,7 +962,7 @@ fn an_added_event_births_the_payload_nodes_verbatim() {
 fn a_second_birth_for_a_known_id_does_not_duplicate() {
     let record = crate::symbio_core::chat_node::ChatNode {
         id: "u-node".into(),
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("重复出生".into())),
         ..Default::default()

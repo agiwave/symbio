@@ -517,7 +517,12 @@ async fn run_compression_begin(
     // 主动压缩工具）绕过熔断——用户已经表达了意图，不必再替他省。
     let skipped = !force && emitter.should_skip().await;
     if !skipped {
-        emitter.begin(&node_id).await;
+        emitter
+            .begin(
+                &node_id,
+                &crate::symbio_core::principal::Principal::from_legacy(&dispatch.spec.principal),
+            )
+            .await;
     }
     action_data(
         op,
@@ -551,6 +556,7 @@ async fn run_compression_finish(
             &finish.text,
             finish.failure_kind.as_deref(),
             finish.stats,
+            &crate::symbio_core::principal::Principal::from_legacy(&dispatch.spec.principal),
         )
         .await;
     // 记录节点落库 + 回包：压缩是会话里真实发生的一步，必须留下记录

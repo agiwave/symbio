@@ -24,7 +24,7 @@ function messageNode(partial: Partial<VdfsItem> = {}): VdfsItem {
     status: 'streaming',
     access: 'r',
     ext: 'message',
-    role: 'assistant',
+    principal: { kind: 'agent', id: 'session/main' },
     type: 'text',
     seq: 7,
     ...partial,
@@ -48,9 +48,19 @@ describe('VdfsMessageDetail（转写列表项的只读视图）', () => {
 
     // 旧业务词 `tool_call` 经 `nodeKindOf` 折叠到 `skeleton`，视图按折叠后的形态显示中文标签
     const tool = mount(VdfsMessageDetail, {
-      props: { node: messageNode({ type: 'tool_call', role: 'assistant' }), data: '' },
+      props: { node: messageNode({ type: 'tool_call' }), data: '' },
     })
     expect(tool.find('.type').text()).toBe('组合')
+  })
+
+  it('存量节点没有 principal 时，旧的 `attributes.role` 仍是读边界兜底', () => {
+    const legacy = mount(VdfsMessageDetail, {
+      props: {
+        node: messageNode({ principal: undefined, role: 'user' }),
+        data: '旧消息',
+      },
+    })
+    expect(legacy.find('.role').text()).toBe('用户')
   })
 
   it('失败消息把错误原因显示出来（错误是状态，也是这条消息的终态）', () => {

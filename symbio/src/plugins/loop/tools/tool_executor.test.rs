@@ -28,6 +28,17 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{EventStore, LatencyTier};
 
+/// 夹具模仿的是**落库/转写面**：身份写 `principal`（D-147），`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
 }
@@ -208,7 +219,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
-    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].node_role(), Some(NodeRole::Tool));
     assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     assert!(
         msgs[0]
@@ -335,7 +346,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
-    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].node_role(), Some(NodeRole::Tool));
     assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-broken"));
     let text = msgs[0]
@@ -533,7 +544,7 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
     ids.iter()
         .map(|id| ChatNode {
             id: (*id).into(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_list"})),
             status: Some(NodeStatus::Streaming),
@@ -598,7 +609,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         "未执行的调用同样必须有结果子节点，否则前端卡片有请求、无响应"
     );
     for m in &msgs {
-        assert_eq!(m.role, Some(NodeRole::Tool));
+        assert_eq!(m.node_role(), Some(NodeRole::Tool));
         assert_eq!(m.status, Some(NodeStatus::Completed));
         assert!(
             m.content
@@ -612,7 +623,11 @@ async fn aborted_batch_terminates_every_tool_call() {
     for (u, id) in updates.iter().zip(["tc1", "tc2"]) {
         // 完整快照语义：id / role / type 保留，终态字段如实应用
         assert_eq!(u.id, id, "快照必须对应它自己的调用");
-        assert_eq!(u.role, Some(NodeRole::Assistant), "完整快照保留节点身份");
+        assert_eq!(
+            u.node_role(),
+            Some(NodeRole::Assistant),
+            "完整快照保留节点身份"
+        );
         assert!(u.is_tool_call(), "快照必须保持工具骨架形态");
         assert_eq!(u.status, Some(NodeStatus::Completed));
         assert_eq!(
@@ -669,7 +684,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     .await;
 
     assert_eq!(msgs.len(), 1, "丢弃调用必须有结果子节点（S20.1 不变量）");
-    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].node_role(), Some(NodeRole::Tool));
     assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     let text = msgs[0]
         .content
@@ -1165,7 +1180,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     // 终态定稿要从这份权威转写取副本——不给它，`emit_parent_finalized` 会判协议违例。
     let parent = ChatNode {
         id: "tc-gate".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_list"})),
         status: Some(NodeStatus::Streaming),
@@ -1438,7 +1453,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
     let abort = ExecAbortSignal::new();
     let parent = ChatNode {
         id: "tc-task".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
         status: Some(NodeStatus::Streaming),
@@ -1510,7 +1525,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
     let abort = ExecAbortSignal::new();
     let parent = ChatNode {
         id: "tc-task2".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
         status: Some(NodeStatus::Streaming),

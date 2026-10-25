@@ -25,7 +25,7 @@
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},
     clock_now_ms, llm_short_id, TurnToolCallInfo,
 };
 
@@ -41,7 +41,15 @@ pub const SURFACE_REPLY: &str = "reply";
 /// `exclude_from_context`：`Answered` 的答话为 `false`（它进请求包——它就是这一轮的
 /// 答复），`Escalate` 的首响为 `true`（界面开场白，不进请求包）。判据见
 /// `compose` 侧的判决文档。
-pub fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatNode {
+///
+/// `principal` 是**这条发言是谁说的**（D-147：身份只写一份）。对话面文本恒由
+/// 本会话主体产出，调用方从请求上下文取 [`crate::symbio_core::request_principal`]。
+pub fn dialog_node(
+    text: &str,
+    reason: &str,
+    exclude_from_context: bool,
+    principal: &Principal,
+) -> ChatNode {
     let mut meta = serde_json::json!({
         "surface": SURFACE_REPLY,
         "reason": reason,
@@ -53,7 +61,7 @@ pub fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> Chat
         id: llm_short_id(),
         // 根级：与用户消息互为兄弟（对话线），不是某个 Turn 的子节点
         parent_id: None,
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal.clone()),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         status: Some(NodeStatus::Completed),
@@ -74,11 +82,12 @@ pub fn llm_build_text_node(
     content: &str,
     rid: Option<String>,
     id: String,
+    principal: &Principal,
 ) -> ChatNode {
     ChatNode {
         id,
         parent_id: Some(parent_id.to_string()),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal.clone()),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.into())),
         status: Some(NodeStatus::Completed),
@@ -100,6 +109,7 @@ pub fn llm_build_text_node(
 pub fn llm_build_tool_call_nodes(
     parent_id: &str,
     tool_calls: &[TurnToolCallInfo],
+    principal: &Principal,
 ) -> Vec<ChatNode> {
     tool_calls
         .iter()
@@ -111,6 +121,7 @@ pub fn llm_build_tool_call_nodes(
                 tc.name.clone(),
                 tool_call_args_text(tc),
                 tc.wire_id.clone(),
+                principal,
             )
         })
         .collect()
@@ -139,11 +150,12 @@ pub fn llm_build_tool_call_node(
     name: Option<String>,
     args_text: String,
     wire_id: Option<String>,
+    principal: &Principal,
 ) -> ChatNode {
     ChatNode {
         id,
         parent_id: Some(parent_id.to_string()),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal.clone()),
         msg_type: Some(NodeKind::Skeleton),
         content: Some(MessageContent::Text(args_text)),
         status: Some(NodeStatus::Completed),
@@ -184,8 +196,14 @@ pub fn llm_build_tool_message(
     ChatNode {
         id: msg_id.unwrap_or_else(llm_short_id),
         parent_id: Some(tool_call_id.into()),
-        role: Some(NodeRole::Tool),
-        principal: tool_name.map(Principal::tool_principal),
+        // 结果节点归**工具自己**一族：名字未知（协议级失败）时仍是「一条工具结果」，
+        // 用 `legacy/unknown` 这个可路由的兜底地址承载族——不能退回会话主体，
+        // 否则同一张卡片会按「助手说的话」呈现（D-147：身份只写一份）。
+        principal: Some(
+            tool_name
+                .map(Principal::tool_principal)
+                .unwrap_or_else(|| Principal::tool_principal("unknown")),
+        ),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.into())),
         status: Some(if success {

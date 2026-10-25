@@ -141,7 +141,13 @@ pub(crate) fn trigger_message(
     let now = clock_now_ms();
     cm::ChatNode {
         id: format!("hb_{}_{}", session_id, now),
-        role: Some(cm::NodeRole::User),
+        // 心跳以「人」的身份入会话：它触发的是同一轮对话（provider 侧必须是 user
+        // 请求），不是会话主体的自说自话。主体地址沿用 `person/local`——这是
+        // 落库点 `attributed` 对 user 形的既有归属，换新地址只会让同一类消息
+        // 在存量与新写之间分成两个主体。
+        principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+            crate::symbio_core::PRINCIPAL_USER,
+        )),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(hb.prompt.clone())),
         status: Some(cm::NodeStatus::Completed),

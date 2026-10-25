@@ -419,7 +419,9 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let body = raw.trim();
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
-            role: Some(cm::NodeRole::User),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                crate::symbio_core::PRINCIPAL_USER,
+            )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::NodeStatus::Completed),
@@ -444,9 +446,13 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let mut message: cm::ChatNode = serde_json::from_value(value).map_err(|e| {
         VdfsError::invalid(format!("收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"))
     })?;
-    // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
-    if message.legacy_role().is_none() {
-        message.set_legacy_role(cm::NodeRole::User);
+    // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）。
+    // 身份缺省是 `person/local`（写体没标身份 = 这是一条用户发言）；写体里带
+    // `principal` 或存量 `role` 的，按它自己声明的形状走。
+    if message.principal.is_none() && message.legacy_role().is_none() {
+        message.principal = Some(crate::symbio_core::principal::Principal::from_legacy(
+            crate::symbio_core::PRINCIPAL_USER,
+        ));
     }
     message.msg_type.get_or_insert(cm::NodeKind::Body);
     message.status = Some(cm::NodeStatus::Completed);
@@ -707,7 +713,9 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
     n.updated_at = m.timestamp;
     n.description = message_preview(m);
     for (k, v) in [
-        ("role", json!(m.legacy_role())),
+        // 身份只写 `principal`（D-147）：`role` 已退出 wire（[`ChatNode`] 上
+        // `skip_serializing`），属性表不再补第二份。`message_of_node` 仍认这条
+        // 老属性，服务的是尚未重写的存量节点。
         ("type", json!(m.msg_type)),
         // 工具名等**结构字段**：进程内消费者（子会话转播 / CLI）靠它还原消息，
         // 节点标题里虽也带工具名，但那是展示文案，不可当数据读。

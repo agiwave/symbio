@@ -39,6 +39,10 @@ vi.mock('@/utils/logger', () => ({
 
 const SID = 's1'
 
+const AS_PERSON = { kind: 'person', id: 'person/local' } as const
+const AS_AGENT = { kind: 'agent', id: 'session/main' } as const
+const AS_TOOL = { kind: 'tool', id: 'vdfs/write' } as const
+
 /**
  * 驱动一帧：直接走 store 的落地口。
  *
@@ -54,7 +58,7 @@ function feed(message: Omit<ChatNode, 'type'> & { type?: string }): void {
 
 /** 根级骨架：会话流的根（`type = skeleton`、无父），与后端首帧 / finalize 同构 */
 function rootSkeleton(id: string, status: ChatNode['status'] = 'streaming'): ChatNode {
-  return { id, role: 'assistant', type: 'skeleton', status } as unknown as ChatNode
+  return { id, principal: AS_AGENT, type: 'skeleton', status } as unknown as ChatNode
 }
 /** 折叠叶（`type = notice`）：思考 / 压缩这类折叠内容同在这一格 */
 function noticeLeaf(
@@ -63,7 +67,7 @@ function noticeLeaf(
   content: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'notice', status, content } as unknown as ChatNode
+  return { id, parent_id: parent, principal: AS_AGENT, type: 'notice', status, content } as unknown as ChatNode
 }
 /** 正文叶（`type = body`）：助手正文 / 用户消息 / 工具结果同在这一格 */
 function bodyLeaf(
@@ -72,7 +76,7 @@ function bodyLeaf(
   content: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'body', status, content } as unknown as ChatNode
+  return { id, parent_id: parent, principal: AS_AGENT, type: 'body', status, content } as unknown as ChatNode
 }
 /** 工具子骨架（`type = skeleton`、挂在父下）：工具名经 `title` 数据下发，参数住自身 content */
 function toolSkeleton(
@@ -83,7 +87,7 @@ function toolSkeleton(
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
   // [] 呈现意图来自后端数据：工具名经 `title` 下发，前端不再从 `meta.tool_name` 现推。
-  return { id, parent_id: parent, role: 'assistant', type: 'skeleton', title: name, status, content: args } as unknown as ChatNode
+  return { id, parent_id: parent, principal: AS_AGENT, type: 'skeleton', title: name, status, content: args } as unknown as ChatNode
 }
 /**
  * 状态帧：只带身份 + 状态，**不带正文**（与后端 `llm_state_frame` 同构）。
@@ -166,7 +170,7 @@ describe('流式端到端：根级骨架 / 折叠叶在多轮工具场景的可�
     feed(tc1)
 
     // ── 工具结果 + 根级骨架 1 完成（后端 finalize 顺序：先子节点后根）──
-    feed({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'body', status: 'completed', content: '"ok"' })
+    feed({ id: 'res1', parent_id: 'tc1', principal: AS_TOOL, type: 'body', status: 'completed', content: '"ok"' })
     feed(settled(tc1))
     feed(settled(t1))
 
@@ -288,11 +292,11 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   it('父容器（根级骨架）已有子节点时，子节点的增量必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    feed({ id: 'T1', role: 'assistant', type: 'skeleton', status: 'streaming' })
+    feed({ id: 'T1', principal: AS_AGENT, type: 'skeleton', status: 'streaming' })
     feed({
         id: 'X1',
         parent_id: 'T1',
-        role: 'assistant',
+        principal: AS_AGENT,
         type: 'body',
         status: 'streaming',
         content: '正文开头',
@@ -313,11 +317,11 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   it('折叠叶（notice）是独立节点，其增量同样必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    feed({ id: 'T1', role: 'assistant', type: 'skeleton', status: 'streaming' })
+    feed({ id: 'T1', principal: AS_AGENT, type: 'skeleton', status: 'streaming' })
     feed({
         id: 'R1',
         parent_id: 'T1',
-        role: 'assistant',
+        principal: AS_AGENT,
         type: 'notice',
         status: 'streaming',
         content: '第一段思考',
@@ -333,11 +337,11 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   it('子节点终态（状态迁移）必须立刻反映，不等祖先的结构变化', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    feed({ id: 'T1', role: 'assistant', type: 'skeleton', status: 'streaming' })
+    feed({ id: 'T1', principal: AS_AGENT, type: 'skeleton', status: 'streaming' })
     feed({
         id: 'R1',
         parent_id: 'T1',
-        role: 'assistant',
+        principal: AS_AGENT,
         type: 'notice',
         status: 'streaming',
         content: '思考内容',
@@ -395,7 +399,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
 
   it('工具骨架在首帧即出现，参数增量进展开态正文（不等执行完）', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    feed({ id: 'U1', role: 'user', type: 'body', content: '调用工具' })
+    feed({ id: 'U1', principal: AS_PERSON, type: 'body', content: '调用工具' })
     feed(rootSkeleton('T1'))
     await nextTick()
     expect(w.findAll('.skeleton-pending').length, '尚无子节点 → 等待骨架').toBe(1)
@@ -432,7 +436,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
     feed({
         id: 'TC1',
         parent_id: 'T1',
-        role: 'assistant',
+        principal: AS_AGENT,
         type: 'skeleton',
         status: 'streaming',
         meta: { started_at: Date.now() - 5000, tool_name: 'read_file' },

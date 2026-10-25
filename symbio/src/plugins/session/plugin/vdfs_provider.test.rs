@@ -905,7 +905,9 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .enumerate()
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
-            role: Some(cm::NodeRole::User),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                crate::symbio_core::PRINCIPAL_USER,
+            )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text((*t).to_string())),
             seq: Some(i as i64),

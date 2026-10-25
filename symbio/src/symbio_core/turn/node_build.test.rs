@@ -12,7 +12,12 @@
 //!   零改动、flat 只脱本轮直接子节点、夹在工具卡内的子会话骨架绝不折叠。
 
 use super::*;
-use crate::symbio_core::chat_node::{CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+use crate::symbio_core::chat_node::{NodeRole, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+
+/// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`（D-147）。
+fn assistant_principal() -> crate::symbio_core::principal::Principal {
+    crate::symbio_core::principal::Principal::from_legacy("session/main")
+}
 
 // ── 对话面节点形状（dialog_node，原 compose.test.rs）────────────────────
 
@@ -28,9 +33,14 @@ fn meta_key(node: &ChatNode, key: &str) -> Option<serde_json::Value> {
 /// 不报错，只是长得不对。
 #[test]
 fn dialog_node_is_a_completed_assistant_text_node() {
-    let node = dialog_node("你好，我在。", "greeting", false);
+    let node = dialog_node("你好，我在。", "greeting", false, &assistant_principal());
 
-    assert_eq!(node.role, Some(NodeRole::Assistant));
+    assert_eq!(node.node_role(), Some(NodeRole::Assistant));
+    assert_eq!(
+        node.principal.as_ref().map(|p| p.id.as_str()),
+        Some("session/main"),
+        "落库/流式面写主体，不写残留 role 格"
+    );
     assert_eq!(node.msg_type, Some(NodeKind::Body));
     assert_eq!(node.status, Some(NodeStatus::Completed));
     assert_eq!(
@@ -47,7 +57,7 @@ fn dialog_node_is_a_completed_assistant_text_node() {
 /// 取值。两者在今天等价，但前者让"这个键只有一种含义"成立——见下一条断言。
 #[test]
 fn answered_answer_is_not_excluded_from_context() {
-    let node = dialog_node("你好，我在。", "greeting", false);
+    let node = dialog_node("你好，我在。", "greeting", false, &assistant_principal());
 
     assert_eq!(meta_key(&node, "surface"), Some(serde_json::json!("reply")));
     assert_eq!(
@@ -65,7 +75,7 @@ fn answered_answer_is_not_excluded_from_context() {
 /// 是哪个节点引起的。
 #[test]
 fn escalate_opening_is_excluded_from_context() {
-    let node = dialog_node("好，我来处理。", "needs_work", true);
+    let node = dialog_node("好，我来处理。", "needs_work", true, &assistant_principal());
 
     assert_eq!(meta_key(&node, "surface"), Some(serde_json::json!("reply")));
     assert_eq!(
@@ -79,8 +89,8 @@ fn escalate_opening_is_excluded_from_context() {
 /// `exclude_from_context`——本条与上两条一起说明"它们没有合并"。
 #[test]
 fn the_two_markers_are_independent() {
-    let answered = dialog_node("你好，我在。", "greeting", false);
-    let escalated = dialog_node("好，我来处理。", "needs_work", true);
+    let answered = dialog_node("你好，我在。", "greeting", false, &assistant_principal());
+    let escalated = dialog_node("好，我来处理。", "needs_work", true, &assistant_principal());
 
     assert_eq!(
         meta_key(&answered, "surface"),
@@ -101,7 +111,7 @@ fn the_two_markers_are_independent() {
 #[test]
 fn reason_code_is_carried_verbatim() {
     for reason in ["greeting", "from_context", "某个本仓还没定义的理由码"] {
-        let node = dialog_node("话", reason, false);
+        let node = dialog_node("话", reason, false, &assistant_principal());
         assert_eq!(
             meta_key(&node, "reason"),
             Some(serde_json::json!(reason)),
@@ -117,7 +127,7 @@ fn reason_code_is_carried_verbatim() {
 #[test]
 fn text_is_written_verbatim() {
     let raw = "  前面有空格，后面也有。  ";
-    let node = dialog_node(raw, "ack", false);
+    let node = dialog_node(raw, "ack", false, &assistant_principal());
 
     assert_eq!(
         node.content.as_ref().map(|c| c.to_text()).as_deref(),
@@ -138,8 +148,8 @@ fn surface_literal_is_the_wire_contract() {
 /// 转写会按 id 收敛成一条（后写的覆盖先写的），用户只看到一句话。
 #[test]
 fn each_node_gets_its_own_id() {
-    let a = dialog_node("一", "greeting", false);
-    let b = dialog_node("二", "greeting", false);
+    let a = dialog_node("一", "greeting", false, &assistant_principal());
+    let b = dialog_node("二", "greeting", false, &assistant_principal());
 
     assert_ne!(a.id, b.id, "两个节点不能共用 id");
 }

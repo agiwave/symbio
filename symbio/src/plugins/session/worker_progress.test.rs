@@ -12,10 +12,21 @@
 //! 裁决一第 4 条：进展的类型与读法归本模块）。
 
 use super::{progress_from_facts, progress_of, STEPS_MAX, STEP_MAX_CHARS};
+
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
 use crate::plugins::session::store::{EventWalStore, SessionStore};
 use crate::plugins::session::types::{Session, SessionSummary};
 use crate::symbio_core::chat_node as cm;
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeStatus};
 use crate::symbio_core::{
     Entity, Event, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,
@@ -96,14 +107,14 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
         // 落库镜像：user + assistant（Completed）——与上面两格同一批事实
         msgs.push(ChatNode {
             id: format!("m-u-{tag}-{t}"),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(cm::NodeRole::User)),
             content: Some(MessageContent::Text((*u).to_string())),
             status: Some(NodeStatus::Completed),
             ..Default::default()
         });
         msgs.push(ChatNode {
             id: format!("m-a-{tag}-{t}"),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(cm::NodeRole::Assistant)),
             content: Some(MessageContent::Text(a.unwrap_or("impl 失败").to_string())),
             status: Some(NodeStatus::Completed),
             ..Default::default()
@@ -244,7 +255,7 @@ fn empty_placeholder_nodes_produce_no_steps() {
 fn wmsg(id: &str, role: cm::NodeRole, status: Option<cm::NodeStatus>, text: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.to_string(),
-        role: Some(role),
+        principal: Some(principal_for(role)),
         msg_type: Some(cm::NodeKind::Body),
         status,
         content: Some(cm::MessageContent::Text(text.to_string())),
@@ -327,7 +338,7 @@ fn steps_skip_empty_nodes_and_user_prompts() {
     };
     let empty = cm::ChatNode {
         id: "3".to_string(),
-        role: Some(cm::NodeRole::Assistant),
+        principal: Some(principal_for(cm::NodeRole::Assistant)),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(String::new())),
         ..Default::default()

@@ -85,7 +85,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
     is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,

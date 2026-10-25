@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::{
@@ -1036,6 +1036,13 @@ impl SessionDispatchPort {
         }
     }
 
+    /// 本会话主体：节点诞生时写死的主体身份（D-147 档 2）。
+    fn principal(&self) -> crate::symbio_core::principal::Principal {
+        crate::symbio_core::principal::Principal::from_legacy(
+            &crate::symbio_core::request_principal(self.ctx.as_ref()),
+        )
+    }
+
     /// 取走本轮产生的消息（调用方在桥释放前取）。
     pub(crate) fn take_produced(&self) -> Vec<ChatNode> {
         std::mem::take(&mut self.produced.lock().unwrap())
@@ -1091,7 +1098,8 @@ impl SessionDispatchPort {
             NodeStatus::Failed
         };
 
-        let mut call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
+        let principal = self.principal();
+        let mut call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls, &principal);
         for node in call_nodes.iter_mut() {
             detach_if_flat(node, &self.root_id, self.presentation_tree);
             node.status = Some(final_status.clone());
@@ -1315,7 +1323,8 @@ impl ToolDispatch for SessionDispatchPort {
         // 工具卡片会跑到正文之前。
         self.bridge.flush().await;
         if let Some(node_id) = text_node {
-            let mut msg = llm_build_text_node(&self.root_id, &turn.text, None, node_id);
+            let mut msg =
+                llm_build_text_node(&self.root_id, &turn.text, None, node_id, &self.principal());
             detach_if_flat(&mut msg, &self.root_id, self.presentation_tree);
             // 状态帧：正文已由增量帧传过，重发正文会与队列里的增量打架。
             llm_emit_state(&self.sink, msg.clone()).await;
@@ -1325,7 +1334,7 @@ impl ToolDispatch for SessionDispatchPort {
             let mut msg = ChatNode {
                 id: node_id,
                 parent_id: Some(self.root_id.clone()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(self.principal()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(text)),
                 status: Some(NodeStatus::Completed),
@@ -1340,7 +1349,8 @@ impl ToolDispatch for SessionDispatchPort {
 
         // ② 工具调用节点：这条路径没有流式工具帧，由本处补建。
         //    先以 `Streaming` 广播（工具还没跑，卡片应显示运行中），落库副本用终态。
-        let mut call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
+        let mut call_nodes =
+            llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls, &self.principal());
         // 就地 detach：下面三处用同一份 `call_nodes`——广播帧、传给执行器作父查询源
         // （`process_tool_calls_async` 从它 clone 出运行态/终态帧，继承 detach 后的
         // parent_id），以及落库副本。一处收口，live↔存储自动锁步。

@@ -323,14 +323,15 @@ async fn save_leaves_no_temp_file_behind() {
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
 fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
-    use crate::symbio_core::chat_node::{MessageContent, NodeRole};
+    use crate::symbio_core::chat_node::MessageContent;
+    use crate::symbio_core::principal::Principal;
     ChatNode {
         id: format!("m{}", text.len()),
-        role: Some(if role_is_user {
-            NodeRole::User
+        principal: Some(Principal::from_legacy(if role_is_user {
+            crate::symbio_core::PRINCIPAL_USER
         } else {
-            NodeRole::Assistant
-        }),
+            "session/main"
+        })),
         content: Some(MessageContent::Text(text.into())),
         ..Default::default()
     }

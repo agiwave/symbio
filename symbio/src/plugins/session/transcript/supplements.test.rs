@@ -15,7 +15,9 @@ fn item(id: &str, text: &str) -> InboxItem {
         id: id.to_string(),
         message: cm::ChatNode {
             id: id.to_string(),
-            role: Some(cm::NodeRole::User),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                crate::symbio_core::PRINCIPAL_USER,
+            )),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(text.to_string())),
             status: Some(cm::NodeStatus::Completed),
@@ -69,7 +71,7 @@ fn many_are_joined_in_order_with_blank_line() {
         merged.content.as_ref().map(|c| c.to_text()).unwrap(),
         "第一句\n\n第二句\n\n第三句"
     );
-    assert_eq!(merged.role, Some(cm::NodeRole::User));
+    assert_eq!(merged.node_role(), Some(cm::NodeRole::User));
     assert_eq!(merged.msg_type, Some(cm::NodeKind::Body));
     assert_eq!(merged.status, Some(cm::NodeStatus::Completed));
     assert_eq!(merged.parent_id, None, "顶层：折进的补充与用户直接发言同形");

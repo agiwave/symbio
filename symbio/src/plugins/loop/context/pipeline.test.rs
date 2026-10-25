@@ -5,6 +5,17 @@
 
 use super::*;
 
+/// 流式帧的复制面：`assemble` 的发射任务给每帧写会话主体（D-147），夹具照此声明。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 // ==================== 压缩失败的可诊断性 ====================
 //
 // 回归动机：实测会话 `09d74431` 的两条 failed 压缩节点 `meta` / `error` 全空，
@@ -123,7 +134,7 @@ fn stats_omit_after_tokens_when_there_is_no_such_number() {
 fn turn_skeleton_frame(root_id: &str) -> ChatNode {
     ChatNode {
         id: root_id.into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "run"})),
         status: Some(NodeStatus::Streaming),
@@ -135,7 +146,7 @@ fn turn_skeleton_frame(root_id: &str) -> ChatNode {
 fn snapshot_frame(child: &str, text: &str) -> ChatNode {
     ChatNode {
         id: child.into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         status: Some(NodeStatus::Streaming),

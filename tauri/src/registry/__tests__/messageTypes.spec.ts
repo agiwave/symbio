@@ -368,13 +368,26 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     expect(f.responseText).toBe(false)
   })
 
-  it('子会话过程段 = role=tool 的骨架', () => {
-    expect(facetsOf({ id: 't', type: NODE_KIND_SKELETON, role: CHAT_ROLE_TOOL }).subSession).toBe(true)
-    expect(facetsOf({ id: 't', type: NODE_KIND_SKELETON, role: CHAT_ROLE_ASSISTANT }).subSession).toBe(false)
+  it('子会话过程段 = 工具一族的骨架', () => {
+    expect(
+      facetsOf({ id: 't', type: NODE_KIND_SKELETON, principal: { kind: 'tool', id: 'agent/run' } })
+        .subSession,
+    ).toBe(true)
+    expect(
+      facetsOf({
+        id: 't',
+        type: NODE_KIND_SKELETON,
+        principal: { kind: 'agent', id: 'session/main' },
+      }).subSession,
+    ).toBe(false)
   })
 
   it('工具返回必须限定父节点是骨架（否则子会话内部文本会被误判）', () => {
-    const node = { id: 'r', type: NODE_KIND_BODY, role: CHAT_ROLE_TOOL } as const
+    const node = {
+      id: 'r',
+      type: NODE_KIND_BODY,
+      principal: { kind: 'tool', id: 'vdfs/write' },
+    } as const
     expect(facetsOf(node, NODE_KIND_SKELETON).toolResult).toBe(true)
     expect(facetsOf(node, NODE_KIND_BODY).toolResult).toBe(false)
     expect(facetsOf(node, undefined).toolResult).toBe(false)
@@ -811,15 +824,15 @@ describe('principal 前缀 → 身份呈现（[T-148] 独立表）', () => {
 /**
  * 压缩后的**历史记忆**（`meta.compacted`）。
  *
- * 它是一条 `role = user` 的消息——后端为了让对话以 user 开头而这么写。因此这段的
+ * 它是一条挂在人一族主体上的消息——后端为了让对话以 user 开头而这么写。因此这段的
  * 每一条断言防的都是同一件事：**它不许被当成用户说的话**（右对齐气泡、「你」、
  * 悬停可编辑/删除）。判据是后端打的 `meta.compacted`，不是正文长什么样，也不是业务名。
  */
 describe('压缩后的历史记忆：不是「你说的那句话」', () => {
-  /** 后端那条记忆节点的形状：role=user、正文以内部标记开头、带 meta 标记，形态是折叠叶 */
+  /** 后端那条记忆节点的形状：principal=person、正文以内部标记开头、带 meta 标记，形态是折叠叶 */
   const memory = {
     id: 'm1',
-    role: CHAT_ROLE_USER,
+    principal: { kind: 'person' as const, id: 'person/local' },
     type: NODE_KIND_NOTICE,
     status: NODE_STATUS_COMPLETED,
     content: '[CONTEXT SNAPSHOT — 压缩的历史记忆]\n…',

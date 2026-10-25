@@ -13,7 +13,7 @@
 
 use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::plugins::session::store::EventWalStore;
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
 use crate::symbio_core::{
     Entity, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
 };
@@ -83,7 +83,9 @@ fn read_facts(dir: &std::path::Path) -> Vec<crate::symbio_core::Event> {
 fn patched_user(id: &str, text: &str) -> ChatNode {
     ChatNode {
         id: id.into(),
-        role: Some(NodeRole::User),
+        principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+            crate::symbio_core::PRINCIPAL_USER,
+        )),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(1_500),
@@ -738,7 +740,7 @@ fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
         edited(
             &open_wal(&dir),
             &sid_of(&dir),
-            &patched_msg("u-1", "流式累积的一段", NodeRole::Assistant, None, 1_500),
+            &patched_msg("u-1", "流式累积的一段", Some("session/main"), 1_500),
         ),
         "助手正文编辑",
     );
@@ -764,7 +766,7 @@ fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
         edited(
             &open_wal(&dir),
             &sid_of(&dir),
-            &patched_msg("u-1", "找不到文件", NodeRole::Tool, None, 1_700),
+            &patched_msg("u-1", "找不到文件", Some("session/main"), 1_700),
         ),
         "工具结果编辑",
     );
@@ -787,7 +789,12 @@ fn only_a_user_message_is_attributed_to_the_user() {
         edited(
             &open_wal(&dir),
             &sid_of(&dir),
-            &patched_msg("u-1", "改过的问题", NodeRole::User, None, 1_600),
+            &patched_msg(
+                "u-1",
+                "改过的问题",
+                Some(crate::symbio_core::PRINCIPAL_USER),
+                1_600,
+            ),
         ),
         "用户消息编辑",
     );
@@ -805,19 +812,13 @@ fn only_a_user_message_is_attributed_to_the_user() {
 /// 消息自带 `principal` 时**认它**——转播进来的别的会话/子智能体不能被本会话覆盖
 /// （`plugin::attributed` 的同一条纪律，写侧不许例外）。
 #[test]
-fn an_explicit_principal_wins_over_the_role() {
+fn an_explicit_principal_is_not_rewritten_to_the_session() {
     let (dir, _) = seeded_dir("actor-relayed");
     assert_landed(
         edited(
             &open_wal(&dir),
             &sid_of(&dir),
-            &patched_msg(
-                "u-1",
-                "别人说的话",
-                NodeRole::Assistant,
-                Some("session/sub-1".into()),
-                1_800,
-            ),
+            &patched_msg("u-1", "别人说的话", Some("session/sub-1"), 1_800),
         ),
         "转播消息编辑",
     );
@@ -828,26 +829,19 @@ fn an_explicit_principal_wins_over_the_role() {
         .expect("编辑事实");
     assert_eq!(
         edit.actor, "session/sub-1",
-        "自带主体优先于按 role 派生——不许串主体"
+        "自带主体优先于本会话兜底——不许串主体"
     );
 
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 造一条待编辑的消息（role / principal / 时刻都由用例指定）。
+/// 造一条待编辑的消息（身份 / 时刻由用例指定）。
 /// `principal` 用**遗留字符串**入参，测试内部一次性折成 `Principal` 结构体——
 /// 让用例继续用可读的字面量（`"session/sub-1"`）而不必到处写 `Principal::from_legacy`。
-fn patched_msg(
-    id: &str,
-    text: &str,
-    role: NodeRole,
-    principal: Option<String>,
-    ts: i64,
-) -> ChatNode {
+fn patched_msg(id: &str, text: &str, principal: Option<&str>, ts: i64) -> ChatNode {
     ChatNode {
         id: id.into(),
-        role: Some(role),
-        principal: principal.map(|s| crate::symbio_core::principal::Principal::from_legacy(&s)),
+        principal: principal.map(crate::symbio_core::principal::Principal::from_legacy),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),
@@ -863,7 +857,7 @@ fn the_messages_own_timestamp_wins() {
         edited(
             &open_wal(&dir),
             &sid_of(&dir),
-            &patched_msg("u-1", "带时刻", NodeRole::Assistant, None, 1_234_567),
+            &patched_msg("u-1", "带时刻", Some("session/main"), 1_234_567),
         ),
         "带时刻的编辑",
     );
@@ -885,7 +879,7 @@ fn the_messages_own_timestamp_wins() {
 #[test]
 fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
     let (dir, _) = seeded_dir("ts-missing");
-    let mut m = patched_msg("u-1", "没填时刻", NodeRole::Assistant, None, 0);
+    let mut m = patched_msg("u-1", "没填时刻", None, 0);
     m.timestamp = Some(0); // 上游把「没填」写成 0，一并兜住
     m.principal = None;
     assert_landed(edited(&open_wal(&dir), &sid_of(&dir), &m), "缺时刻的编辑");

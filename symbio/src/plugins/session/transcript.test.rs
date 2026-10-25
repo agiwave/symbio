@@ -14,11 +14,22 @@ use super::*;
 use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use std::sync::Mutex;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 一条带正文的完整消息（`content` = 整条替换）。
 fn text_msg(id: &str, status: NodeStatus, text: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.to_string(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         status: Some(status),
         content: Some(MessageContent::Text(text.to_string())),

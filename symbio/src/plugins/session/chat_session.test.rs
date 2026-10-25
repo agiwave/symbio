@@ -14,11 +14,22 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 构造带 `archive_path` meta 的 Tool 消息（模拟 L0 守卫落库后的形态）。
 fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
-        role: Some(NodeRole::Tool),
+        principal: Some(principal_for(NodeRole::Tool)),
         msg_type: Some(NodeKind::Skeleton),
         content: Some(MessageContent::Text("已存档".to_string())),
         meta: Some(serde_json::json!({"style_tag": "run", "archive_path": archive_path})),
@@ -30,7 +41,7 @@ fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatNode {
 fn plain_msg(id: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("hello".to_string())),
         ..Default::default()
@@ -208,14 +219,14 @@ fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
     vec![
         ChatNode {
             id: user_id.to_string(),
-            role: Some(NodeRole::User),
+            principal: Some(principal_for(NodeRole::User)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(format!("q-{}", user_id))),
             ..Default::default()
         },
         ChatNode {
             id: tc_id.to_string(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             parent_id: Some(user_id.to_string()),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/sh"})),
@@ -223,7 +234,7 @@ fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
         },
         ChatNode {
             id: tool_id.to_string(),
-            role: Some(NodeRole::Tool),
+            principal: Some(principal_for(NodeRole::Tool)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "run"})),
             parent_id: Some(tc_id.to_string()),

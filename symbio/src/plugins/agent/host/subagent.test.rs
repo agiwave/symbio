@@ -61,7 +61,7 @@ fn legacy_frame(id: &str, role: NodeRole) -> ChatNode {
         ..Default::default()
     };
     // grep-audit-allow S-014: 判据对象就是存量 role 格（node_role() 的这条读法），全文件集中在这一处写
-    node.set_legacy_role(role);
+    node.role = Some(role);
     node
 }
 

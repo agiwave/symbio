@@ -69,7 +69,8 @@ function messageNode(over: Partial<VdfsNode> & Record<string, unknown>): VdfsNod
   return {
     path: `${MSG}/m1`, name: 'm1', title: '', kind: '', access: 'r', ext: 'message',
     status: 'streaming', updated_at: 1000,
-    role: 'assistant', type: 'text', parent_id: 'T1', seq: 7,
+    principal: { kind: 'agent', id: 'session/main' },
+    type: 'text', parent_id: 'T1', seq: 7,
     ...over,
   } as VdfsNode
 }
@@ -191,12 +192,12 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
 
     // 骨架根节点的首帧：后端写死「组合节点无正文」
     // ⇒ 帧里没有 `content`，形状与「状态帧」逐字相同。但它**不是**「本端缺基线」：
-    // 身份（role / type / meta）已在载荷里，而正文从来不存在——回读只会拿到一份
+    // 身份（principal / type / meta）已在载荷里，而正文从来不存在——回读只会拿到一份
     // 帧里已有的 JSON 视图。这一对 `stat` + `read` 曾**每轮会话**白跑一次。
     dispatch!(
       frame('s1', 'T1', {
         id: 'T1',
-        role: 'assistant',
+        principal: { kind: 'agent', id: 'session/main' },
         type: NODE_KIND_SKELETON,
         status: 'streaming',
         meta: { turn: 0 },

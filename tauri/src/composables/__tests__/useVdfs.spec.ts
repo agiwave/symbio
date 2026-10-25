@@ -85,7 +85,7 @@ function msgNode(id: string, title = id): VdfsNode {
     status: 'streaming',
     access: 'r',
     ext: VDFS_EXT_MESSAGE,
-    role: 'assistant',
+    principal: { kind: 'agent', id: 'session/main' },
     type: 'text',
     seq: 1,
   }

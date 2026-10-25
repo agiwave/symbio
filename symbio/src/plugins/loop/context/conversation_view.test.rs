@@ -18,6 +18,17 @@ use crate::symbio_core::chat_node::{
     CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn msg(
     id: &str,
     role: NodeRole,
@@ -28,7 +39,7 @@ fn msg(
     ChatNode {
         id: id.to_string(),
         parent_id: parent.map(str::to_string),
-        role: Some(role),
+        principal: Some(principal_for(role)),
         msg_type: ty,
         content: Some(MessageContent::Text(text.to_string())),
         status: Some(NodeStatus::Completed),

@@ -127,6 +127,7 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
     // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
     // （`produced`）同走这条通道——中止出口不再回灌 `ExecTurnResult`，不带上就没了。
     if outcome.aborted {
+        let session_principal = crate::symbio_core::principal::Principal::from_legacy(&principal);
         let mut partial = produced;
         if !child_text.is_empty() {
             let mut n = crate::symbio_core::node_build::llm_build_text_node(
@@ -134,6 +135,7 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
                 &child_text,
                 None,
                 child_id,
+                &session_principal,
             );
             crate::symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
             partial.push(n);
@@ -142,7 +144,7 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
             let mut n = ChatNode {
                 id: reasoning_child_id,
                 parent_id: Some(root_id.to_string()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(session_principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 content: Some(MessageContent::Text(reasoning_text.clone())),
                 status: Some(NodeStatus::Completed),

@@ -270,7 +270,8 @@ impl Transcript {
             node.parent_id = msg.parent_id.clone();
         }
         if let Some(r) = msg.legacy_role() {
-            node.set_legacy_role(r);
+            // grep-audit-allow S-014: 读边界——帧可能仍按存量形态带 role；主体在场时折叠以主体为先。
+            node.role = Some(r);
         }
         if msg.principal.is_some() {
             node.principal = msg.principal.clone();

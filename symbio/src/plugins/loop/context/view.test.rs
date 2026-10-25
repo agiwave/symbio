@@ -41,7 +41,7 @@ fn memory_section_is_prepended() {
         None,
     );
     assert_eq!(sections.len(), 1);
-    assert_eq!(sections[0].role, Some(NodeRole::User));
+    assert_eq!(sections[0].node_role(), Some(NodeRole::User));
     assert_eq!(kind_of(&sections[0]).as_deref(), Some("recall_context"));
     assert!(text_of(&sections[0]).contains("我叫 Kestrel"));
 }
@@ -112,7 +112,7 @@ fn every_section_carries_its_kind() {
     assert!(sections.iter().all(|s| kind_of(s).is_some()));
     assert!(sections
         .iter()
-        .all(|s| s.role == Some(NodeRole::User) && s.status.is_some()));
+        .all(|s| s.node_role() == Some(NodeRole::User) && s.status.is_some()));
 }
 
 /// **次序由调用方声明**：数组怎么排，产出的节点就怎么排。

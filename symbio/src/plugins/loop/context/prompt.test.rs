@@ -5,10 +5,21 @@
 
 use super::*;
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 fn user_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -18,7 +29,7 @@ fn user_msg(text: &str) -> ChatNode {
 fn assistant_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()

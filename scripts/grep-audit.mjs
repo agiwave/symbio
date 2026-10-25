@@ -674,8 +674,8 @@ console.log()
 // 机制的爆炸半径大于收益，所以约束从「编译期」退到「棘轮」：存量总数钉在基线上，
 // **只许降不许升**；降了要同步下调基线（`35-baseline` 守这个数不被放松）。
 //
-// 命中形状（连过渡入口一起计数——`with_role` 的可搜寻性靠基线兜底，否则新写方
-// 绕开直写去调入口，债务会换个名字继续长）：
+// 命中形状只剩两种（过渡入口 `with_role` / `set_legacy_role` 已随 D-147 档 3 删除，
+// 全仓零命中；它们若复活，字段直写这一形态也拦不住，故由「零出现」的 grep 守）：
 //   · `role: Some(NodeRole::…)` / `role: Some(cm::NodeRole::…)`（字段初始化）
 //   · `.role = Some(…)` / `.role.get_or_insert(…)`（直写）
 //   · `with_role(…)` / `set_legacy_role(…)`（命名过渡入口）
@@ -696,7 +696,7 @@ const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 // 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
 const S014_IS_REPO = path.resolve(S014_BASE) === path.resolve(repoRoot)
 const S014_WRITE_RE =
-  /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
+  /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
 // 151 → 146（d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
@@ -704,11 +704,13 @@ const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9
 // `tool_dispatch` 的工具结果 / `subagent::relabel_for_parent` 原本同处既写 `principal`
 // 又写 `role`。折序改成「主体在先、残留格兜底」之后（D-147），第二份写不再有任何读者：
 // 它既不影响折叠，也不是 `attributed` 的输入，却给了「顺带写反就静默改写失败」的机会。
-// **为什么只降 3 不是 146**：剩下 143 处的性质是「构造期声明族、地址由落库点补」，
-// 这一档要动构造函数签名与测试夹具，归 D-147 的档 2 / 档 3。
+// 143 → 0（D-147 档 2 / 档 3）：构造点全部改收主体，测试夹具按「模仿哪个面」归位；
+// 剩下的只有**读边界**（协议形状 / 客户端补丁 / 帧合并 / CLI 快照）与两条**存量格读法**
+// 用例，它们各自带豁免注明理由。清零之后这条棘轮数的就是「新增直写」：任何一处新写
+// 都即红，不必再靠单调下调来追债。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
-  : 143
+  : 0
 {
   let s014 = 0
   const s014List = []

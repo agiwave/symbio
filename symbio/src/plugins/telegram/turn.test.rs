@@ -12,6 +12,17 @@ use crate::symbio_core::{EVENT_BUS_KIND_SYSTEM, EVENT_BUS_RESYNC_MARKER_TYPE};
 const SID: &str = "chat-1";
 const SESSION_ADDR: &str = "root/session/chat-1";
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**会话广播面**的帧，`role` 只是读侧残留格。
+fn principal_for(role: NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        NodeRole::Assistant => Principal::from_legacy("session/main"),
+        NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 一条变更（带载荷），地址与正文由参数给。
 fn change(path: &str, data: Value) -> VdfsChange {
     VdfsChange::with_data(path, data)
@@ -21,7 +32,7 @@ fn change(path: &str, data: Value) -> VdfsChange {
 fn assistant(id: &str, status: NodeStatus, content: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.to_string())),
         status: Some(status),
@@ -110,7 +121,7 @@ fn full_frame_replaces_and_delta_appends() {
     // 纯增量：追加
     acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         delta: Some("，世界".into()),
         status: Some(NodeStatus::Streaming),
@@ -127,7 +138,7 @@ fn status_only_frame_does_not_clobber_text() {
     acc.apply(assistant("m1", NodeStatus::Streaming, "已经攒好的正文"));
     acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         status: Some(NodeStatus::Completed),
         ..Default::default()
@@ -141,7 +152,7 @@ fn removed_message_drops_out_of_the_accumulator() {
     acc.apply(assistant("m1", NodeStatus::Completed, "会被删掉"));
     acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         status: Some(NodeStatus::Removed),
         ..Default::default()
     });
@@ -172,7 +183,7 @@ fn reasoning_and_user_messages_never_enter_the_reply() {
     let mut acc = Accumulator::default();
     acc.apply(ChatNode {
         id: "r1".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Notice),
         meta: Some(serde_json::json!({"style_tag": "reasoning"})),
         content: Some(MessageContent::Text("思考过程".into())),
@@ -181,7 +192,7 @@ fn reasoning_and_user_messages_never_enter_the_reply() {
     });
     acc.apply(ChatNode {
         id: "u1".into(),
-        role: Some(NodeRole::User),
+        principal: Some(principal_for(NodeRole::User)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("用户说的话".into())),
         status: Some(NodeStatus::Completed),
@@ -197,7 +208,7 @@ fn delta_for_an_unknown_identity_still_accumulates() {
     assert!(!acc.known("m1"));
     acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(NodeRole::Assistant),
+        principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Body),
         delta: Some("半截".into()),
         status: Some(NodeStatus::Streaming),

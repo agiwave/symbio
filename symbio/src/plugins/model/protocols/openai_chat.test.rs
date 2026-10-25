@@ -163,13 +163,17 @@ fn prepared_request_carries_exactly_one_system_message() {
     let msgs = vec![
         crate::symbio_core::chat_node::ChatNode {
             id: "s1".to_string(),
-            role: Some(NodeRole::System),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                "system/local",
+            )),
             content: Some(MessageContent::Text("记忆段".to_string())),
             ..Default::default()
         },
         crate::symbio_core::chat_node::ChatNode {
             id: "u1".to_string(),
-            role: Some(NodeRole::User),
+            principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                crate::symbio_core::PRINCIPAL_USER,
+            )),
             content: Some(MessageContent::Text("问".to_string())),
             ..Default::default()
         },

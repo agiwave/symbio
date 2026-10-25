@@ -75,7 +75,9 @@ pub fn build_request_sections(sections: &[(SectionKind, Option<&str>)]) -> Vec<C
             let text = (*text)?;
             Some(ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(NodeRole::User),
+                principal: Some(crate::symbio_core::principal::Principal::from_legacy(
+                    crate::symbio_core::PRINCIPAL_USER,
+                )),
                 msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(text.to_string())),
                 status: Some(NodeStatus::Completed),

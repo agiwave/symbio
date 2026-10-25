@@ -46,6 +46,7 @@ async fn record_protocol_failure(
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
     context_messages: &[ChatNode],
+    principal: &crate::symbio_core::principal::Principal,
 ) {
     let result_msg_id = uuid::Uuid::new_v4().to_string();
     let mut tool_msg = llm_build_tool_message(
@@ -84,7 +85,7 @@ async fn record_protocol_failure(
         }
         None => ChatNode {
             id: tool_call_id.to_string(),
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             status: Some(NodeStatus::Completed),
             error: Some(error_text.to_string()),
@@ -395,6 +396,7 @@ async fn emit_terminal(
     delegations: &mut Vec<Delegation>,
     decls: &ToolDecls,
     breaks: &mut Vec<&'static str>,
+    principal: &crate::symbio_core::principal::Principal,
 ) {
     match terminal {
         PreTerminal::ProtocolFailure { id, text, promise } => {
@@ -405,6 +407,7 @@ async fn emit_terminal(
                 tool_messages,
                 parent_updates,
                 context_messages,
+                principal,
             )
             .await;
             if let Some((id, name, args)) = promise {
@@ -819,6 +822,10 @@ pub(crate) async fn run_batch(
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
     let mut tool_messages = Vec::new();
     let mut parent_updates: Vec<ChatNode> = Vec::new();
+    // 本会话主体：协议失败兜底建出的 ToolCall 父节点也归它（结果子节点归工具自己）。
+    let principal = crate::symbio_core::principal::Principal::from_legacy(
+        &crate::symbio_core::request_principal(ctx.as_ref()),
+    );
     // 阶段①的读数按本段原变量名接线——判据结构因此与拆分前一致。
     let mode = readings.mode.as_str();
     let gate_started = readings.gate_started;
@@ -897,6 +904,7 @@ pub(crate) async fn run_batch(
                         delegations,
                         decls,
                         breaks,
+                        &principal,
                     )
                     .await;
                     i += 1;

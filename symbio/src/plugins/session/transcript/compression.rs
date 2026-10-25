@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use super::super::active::ActiveSessionState;
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
 };
 
 /// 把「正在压缩」作为**消息节点**呈现的发射器（压缩期 UI 的唯一出口）。
@@ -56,12 +56,16 @@ impl CompressionEmitter {
     /// 进在途图是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
     /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
     /// 都没有」，又变回最初那个"卡死"观感。
-    pub(crate) async fn begin(&self, node_id: &str) {
+    pub(crate) async fn begin(
+        &self,
+        node_id: &str,
+        principal: &crate::symbio_core::principal::Principal,
+    ) {
         // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
         self.state.transcript.lock().await.apply(
             ChatNode {
                 id: node_id.to_string(),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Notice),
                 status: Some(NodeStatus::Streaming),
                 content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
@@ -89,13 +93,14 @@ impl CompressionEmitter {
         text: &str,
         failure_kind: Option<&str>,
         stats: Option<serde_json::Value>,
+        principal: &crate::symbio_core::principal::Principal,
     ) -> ChatNode {
         let node = {
             let mut tr = self.state.transcript.lock().await;
             let mut node = tr.get(node_id).unwrap_or_else(|| {
                 ChatNode {
                     id: node_id.to_string(),
-                    role: Some(NodeRole::Assistant),
+                    principal: Some(principal.clone()),
                     msg_type: Some(NodeKind::Notice),
                     ..Default::default()
                 }

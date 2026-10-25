@@ -124,9 +124,12 @@ pub(crate) async fn apply_verdict(
                 );
                 return (VerdictEffect::Silent, None);
             };
-            context
-                .messages
-                .push(dialog_node(&reply.text, reason, false));
+            context.messages.push(dialog_node(
+                &reply.text,
+                reason,
+                false,
+                &orchestrator.session.principal(),
+            ));
             // 思考事实随答话交给调用方：`Answered` 收束格是**事实层**里这条
             // 模型往回的唯一去处（见 `execute_final_reply_turn` 的入参）。
             (VerdictEffect::Finish, Some(reply))
@@ -143,9 +146,12 @@ pub(crate) async fn apply_verdict(
             // 首响：拿不到就只是少一句开场白，本轮照旧干活。
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
                 Some(reply) => {
-                    context
-                        .messages
-                        .push(dialog_node(&reply.text, reason, true));
+                    context.messages.push(dialog_node(
+                        &reply.text,
+                        reason,
+                        true,
+                        &orchestrator.session.principal(),
+                    ));
                     (VerdictEffect::Spoke, None)
                 }
                 None => (VerdictEffect::Silent, None),
@@ -156,9 +162,12 @@ pub(crate) async fn apply_verdict(
         Verdict::Report => {
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
                 Some(reply) => {
-                    context
-                        .messages
-                        .push(dialog_node(&reply.text, REASON_PROGRESS, true));
+                    context.messages.push(dialog_node(
+                        &reply.text,
+                        REASON_PROGRESS,
+                        true,
+                        &orchestrator.session.principal(),
+                    ));
                     (VerdictEffect::Spoke, None)
                 }
                 None => (VerdictEffect::Silent, None),

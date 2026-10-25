@@ -23,8 +23,12 @@ import {
   type ChatNode,
 } from '@/schemas/chat_node'
 
+const AS_PERSON = { kind: 'person', id: 'person/local' } as const
+const AS_AGENT = { kind: 'agent', id: 'session/main' } as const
+const AS_TOOL = { kind: 'tool', id: 'vdfs/write' } as const
+
 function msg(p: Partial<ChatNode> & { id: string }): ChatNode {
-  return { role: 'assistant', type: NODE_KIND_BODY, status: 'completed', ...p }
+  return { principal: AS_AGENT, type: NODE_KIND_BODY, status: 'completed', ...p }
 }
 
 describe('sortTranscript：seq 是唯一权威顺序锚点', () => {
@@ -47,15 +51,15 @@ describe('sortTranscript：seq 是唯一权威顺序锚点', () => {
 
 describe('previewOf：缩略卡预览', () => {
   it('只取 assistant 的文本；用户消息 / 工具返回不参与', () => {
-    expect(previewOf({ role: 'assistant', content: '正文' })).toBe('正文')
-    expect(previewOf({ role: 'user', content: '用户说的' })).toBeNull()
-    expect(previewOf({ role: 'tool', content: '结果' })).toBeNull()
+    expect(previewOf({ principal: AS_AGENT, content: '正文' })).toBe('正文')
+    expect(previewOf({ principal: AS_PERSON, content: '用户说的' })).toBeNull()
+    expect(previewOf({ principal: AS_TOOL, content: '结果' })).toBeNull()
   })
 
   it('多模态内容只拼 text 分片（图片段不产生预览）', () => {
     expect(
       previewOf({
-        role: 'assistant',
+        principal: AS_AGENT,
         content: [
           { type: 'text', text: '看这张' },
           { type: 'image_url', image_url: { url: 'data:x' } },
@@ -64,18 +68,18 @@ describe('previewOf：缩略卡预览', () => {
     ).toBe('看这张')
     // 只有图片、没有文本 → 无预览（不能把空串当成"预览为空"写进去）
     expect(
-      previewOf({ role: 'assistant', content: [{ type: 'image_url', image_url: { url: 'x' } }] }),
+      previewOf({ principal: AS_AGENT, content: [{ type: 'image_url', image_url: { url: 'x' } }] }),
     ).toBeNull()
   })
 
   it('超长截断并加省略号；空内容返回 null', () => {
     const long = 'x'.repeat(PREVIEW_MAX + 20)
-    const out = previewOf({ role: 'assistant', content: long })
+    const out = previewOf({ principal: AS_AGENT, content: long })
     expect(out).not.toBeNull()
     expect(out!.length).toBe(PREVIEW_MAX + 1)
     expect(out!.endsWith('…')).toBe(true)
-    expect(previewOf({ role: 'assistant', content: '' })).toBeNull()
-    expect(previewOf({ role: 'assistant' })).toBeNull()
+    expect(previewOf({ principal: AS_AGENT, content: '' })).toBeNull()
+    expect(previewOf({ principal: AS_AGENT })).toBeNull()
   })
 })
 
@@ -94,7 +98,7 @@ describe('appendContent：帧携带 `delta` 时的唯一内容落点', () => {
     // 回归：`mergeMessagePatch` 曾把 `role=tool` 判为"流式帧全量重发"因而整条替换。
     // 后端透传子会话的 `delta`（逐片响应），前端于是只剩最后一片——
     // 表现为"工具卡片有请求、响应是空的"。语义只由帧字段给出，不看角色。
-    const out = appendContent(msg({ id: 'r', role: 'tool', content: '共有 ' }), '10 个文件')
+    const out = appendContent(msg({ id: 'r', principal: AS_TOOL, content: '共有 ' }), '10 个文件')
     expect(out.content).toBe('共有 10 个文件')
   })
 

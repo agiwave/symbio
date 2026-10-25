@@ -27,8 +27,7 @@
 //! 由本文件的测试锁定（见 `message_build.test.rs` 里的用例 A / A2 / B / C / D）。
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
-    CHAT_STYLE_TAG_RUN,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
 use crate::symbio_core::node_build::{llm_build_text_node, llm_build_tool_call_nodes};
 use crate::symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};
@@ -77,6 +76,7 @@ pub fn llm_build_assistant_messages(
     rid: Option<String>,
     reasoning: Option<String>,
     child_ids: TurnStreamChildIds,
+    principal: &crate::symbio_core::principal::Principal,
 ) -> Vec<ChatNode> {
     let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
@@ -87,7 +87,7 @@ pub fn llm_build_assistant_messages(
         ChatNode {
             id: id.to_string(),
             parent_id: None,
-            role: Some(NodeRole::Assistant),
+            principal: Some(principal.clone()),
             msg_type: Some(NodeKind::Skeleton),
             content: None,
             status: Some(NodeStatus::Completed),
@@ -112,7 +112,7 @@ pub fn llm_build_assistant_messages(
                 ChatNode {
                     id: child_ids.reasoning.clone().unwrap_or_else(llm_short_id),
                     parent_id: Some(id.to_string()),
-                    role: Some(NodeRole::Assistant),
+                    principal: Some(principal.clone()),
                     msg_type: Some(NodeKind::Notice),
                     content: Some(MessageContent::Text(r)),
                     status: Some(NodeStatus::Completed),
@@ -143,11 +143,12 @@ pub fn llm_build_assistant_messages(
             content,
             rid,
             text_child_id.unwrap_or_else(llm_short_id),
+            principal,
         ));
     }
 
     // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    msgs.extend(llm_build_tool_call_nodes(id, tool_calls));
+    msgs.extend(llm_build_tool_call_nodes(id, tool_calls, principal));
 
     msgs
 }
@@ -172,7 +173,11 @@ impl TurnOutput {
     }
 
     /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
-    pub fn into_messages(self, root_id: &str) -> Vec<ChatNode> {
+    pub fn into_messages(
+        self,
+        root_id: &str,
+        principal: &crate::symbio_core::principal::Principal,
+    ) -> Vec<ChatNode> {
         let effective = self.effective_text().to_owned();
         let reasoning = if self.reasoning.is_empty() {
             None
@@ -191,6 +196,7 @@ impl TurnOutput {
                 text: Some(self.response_text_child_id),
                 reasoning: Some(self.reasoning_child_id),
             },
+            principal,
         )
     }
 }

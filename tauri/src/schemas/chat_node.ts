@@ -37,6 +37,12 @@ export const PRINCIPAL_KINDS = [
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number]
 
 /**
+ * 本机会话属主的**主体地址**——后端 `PRINCIPAL_USER` 的镜像（`person/local`
+ * 由 namespace 派 Person 一族）。用户发言没有别的地址可给；构造时直接写它。
+ */
+export const PRINCIPAL_USER = 'person/local'
+
+/**
  * **主体地址**——后端 `symbio_core::principal::Principal` 的镜像（[D-069 §决策 1]）。
  *
  * 三个字段正交：`kind` 是一族、`id` 是可路由地址 `<namespace>/<name>`（找到 / 调用 / 查看
@@ -139,16 +145,13 @@ export function roleOfPrincipal(
 /**
  * 节点角色的**唯一折叠点**（镜像后端 `ChatNode::node_role`）。
  *
- * 优先级「`principal.kind` 在先、残留 `role` 格兜底」——主体是身份的权威，
- * `role` 只在主体缺席时说话（构造期还没标地址的流式帧、历史数据）。反过来让
- * 残留格优先的话，身份改写就得两格都写，而两格说不同的话时没有任何东西会红：
- * 可见域按主体判、分派按 `role` 判，同一个节点两个身份。
- *
- * 缺省仍是助手——未标身份的写方按模型产出一族呈现（今天的流式帧形状，语义不变）。
+ * 身份的唯一来源是 `principal.kind`——`role` 已退出 wire（后端
+ * `#[serde(skip_serializing)]`），前端不再持有第二份身份。缺省是助手：未标身份的
+ * 写方按模型产出一族呈现（今天的流式帧形状，语义不变）。
  * 住在契约层（而非 registry）：纯逻辑层（`sessionTranscript`）也要用它，判据不许有第二份。
  */
-export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatRole {
-  return roleOfPrincipal(node.principal) ?? (node.role as ChatRole) ?? CHAT_ROLE_ASSISTANT
+export function messageRoleOf(node: Pick<ChatNode, 'principal'>): ChatRole {
+  return roleOfPrincipal(node.principal) ?? CHAT_ROLE_ASSISTANT
 }
 
 // ==================== 消息形态 ====================
@@ -410,7 +413,6 @@ export interface ChatNode {
   parent_id?: string;
   /** 树形展开：前端按 `parent_id` 组装的父引用（后端只给扁平列表） */
   parent?: ChatNode;
-  role?: ChatRole;
   /**
    * **这条发言是谁说的**（跨栈身份字段，后端 `ChatNode.principal` 的镜像）。
    *
@@ -418,9 +420,12 @@ export interface ChatNode {
    * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
    * `title` 是显示名。写侧构造即定型，序列化只出对象形态。
    *
+   * 身份**只有这一份**（[D-147]）：后端的 `role` 已改 `skip_serializing`，wire 上不再
+   * 出现；存量快照里的 `role` 由后端 `message_of_node` 在读边界折成本结构体。
+   *
    * 类型只收结构体：历史 `messages.json` 里遗留的裸字符串（`"agent:main"` / `"user"`）
    * 按 `SP-008`（不做历史数据兼容）不再归一——那类节点落到「尚未标身份」，可见域判据
-   * 把它当可见、角色按 `role` 格折，与「没接线的写方」同一条路径，不会因为少一次迁移
+   * 把它当可见、角色按缺省（助手）折，与「没接线的写方」同一条路径，不会因为少一次迁移
    * 而消失或报错。字符串仍能进 `normalizePrincipal`：**地址字符串是合法入参**
    * （`person/local` 这类常量、以及只拿到 id 的调用点），不是兼容层。
    *

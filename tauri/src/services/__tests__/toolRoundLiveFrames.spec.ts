@@ -57,6 +57,8 @@ import {
 const SID = 'sess1'
 const TURN = 'turn1'
 const REASON = 'reason1'
+const AS_AGENT = { kind: 'agent', id: 'session/main' } as const
+const AS_TOOL = { kind: 'tool', id: 'vdfs/write' } as const
 const TC = 'tc1' // 工具子骨架节点 id（accumulator 的 node_id，8 字符 llm_short_id 形态）
 const RESULT = 'r1' // 结果子节点 id（uuid）
 
@@ -72,12 +74,12 @@ beforeEach(() => {
 describe('工具轮实时帧序列 → store 终态', () => {
   it('结果子节点落 store、工具子骨架父节点终态 completed', () => {
     // ── 1. 根级骨架（emit_streaming_start：streaming + meta.turn）──
-    feed({ id: TURN, role: 'assistant', type: NODE_KIND_SKELETON, status: 'streaming', meta: { turn: 0 } })
+    feed({ id: TURN, principal: AS_AGENT, type: NODE_KIND_SKELETON, status: 'streaming', meta: { turn: 0 } })
 
     // ── 2. 折叠叶首帧（身份 + 首段正文）──
     feed({
       id: REASON,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_NOTICE,
       parent_id: TURN,
       status: 'streaming',
@@ -91,7 +93,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 4. 工具子骨架首帧（身份字段 + 首个参数片段）──
     feed({
       id: TC,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_SKELETON,
       parent_id: TURN,
       meta: { tool_name: 'local/read' },
@@ -105,7 +107,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 6. 折叠叶终态（finalize：状态帧，不带正文）──
     feed({
       id: REASON,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_NOTICE,
       parent_id: TURN,
       status: 'completed',
@@ -114,7 +116,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 7. 工具子骨架进入执行（emit_tool_running：状态帧 + meta）──
     feed({
       id: TC,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_SKELETON,
       parent_id: TURN,
       status: 'streaming',
@@ -124,7 +126,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 8. 结果子节点（process_tool_calls_async；非流式工具一次给全）──
     feed({
       id: RESULT,
-      role: 'tool',
+      principal: AS_TOOL,
       type: NODE_KIND_BODY,
       parent_id: TC,
       status: 'completed',
@@ -134,7 +136,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 9. 工具子骨架终态（emit_parent_finalized：状态帧 + 结果 meta）──
     feed({
       id: TC,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_SKELETON,
       parent_id: TURN,
       status: 'completed',
@@ -146,7 +148,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // 一个执行窗口——容器"已完成"而其中的工具调用仍在运行。现在移到 `close_turn`
     // 归来之后；发出的即 `llm_build_assistant_messages` 构建的那条（pending 落库的
     // 同一份），因此不带流式占位期的 `meta.turn`。
-    feed({ id: TURN, role: 'assistant', type: NODE_KIND_SKELETON, status: 'completed' })
+    feed({ id: TURN, principal: AS_AGENT, type: NODE_KIND_SKELETON, status: 'completed' })
 
     const store = useSessionsStore()
     const msgs = store.getSessionMessages(SID)
@@ -160,7 +162,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     expect(tc!.content, '工具子骨架参数必须由 delta 拼出完整 JSON').toBe('{"path":"a.md"}')
     expect(result, '结果子节点必须落 store（症状：一直缺失）').toBeTruthy()
     expect(result!.parent_id).toBe(TC)
-    expect(result!.role).toBe('tool')
+    expect(result!.principal?.kind).toBe('tool')
     expect(result!.status).toBe('completed')
     expect(reason!.content, '状态帧不得吞掉已累积的正文').toBe('第一段思考，继续思考。')
   })
@@ -169,7 +171,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // 工具子骨架已成形（调用子智能体的工具）
     feed({
       id: TC,
-      role: 'assistant',
+      principal: AS_AGENT,
       type: NODE_KIND_SKELETON,
       parent_id: TURN,
       meta: { tool_name: 'agent/run' },
@@ -178,7 +180,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     })
 
     // 子会话顶层节点：`tool_executor` 把 parent 锚定到工具子骨架、role 归 tool 后转发
-    feed({ id: RESULT, role: 'tool', type: NODE_KIND_SKELETON, parent_id: TC, status: 'streaming' })
+    feed({ id: RESULT, principal: AS_TOOL, type: NODE_KIND_SKELETON, parent_id: TC, status: 'streaming' })
 
     // 响应逐片到达（后端透传子会话的 `delta`，不是全量重发）
     feed({ id: RESULT, delta: '分析中' })
@@ -204,7 +206,7 @@ describe('合帧落到 store：一批只推一次版本号', () => {
     const v0 = store.transcriptVersion
 
     store.applyTranscriptMessages(SID, [
-      { id: 'm1', role: 'assistant', type: NODE_KIND_BODY, content: 'a' },
+      { id: 'm1', principal: AS_AGENT, type: NODE_KIND_BODY, content: 'a' },
       { id: 'm1', delta: 'b' },
       { id: 'm1', delta: 'c' },
     ])
@@ -217,7 +219,7 @@ describe('合帧落到 store：一批只推一次版本号', () => {
     const store = useSessionsStore()
     const v0 = store.transcriptVersion
 
-    store.applyTranscriptMessage(SID, { id: 'x1', role: 'assistant', type: NODE_KIND_BODY, content: 'hi' })
+    store.applyTranscriptMessage(SID, { id: 'x1', principal: AS_AGENT, type: NODE_KIND_BODY, content: 'hi' })
     expect(store.transcriptVersion).toBe(v0 + 1)
     expect(store.getSessionMessages(SID).find((m) => m.id === 'x1')?.content).toBe('hi')
   })

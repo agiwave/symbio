@@ -177,7 +177,7 @@ impl ReportDraft {
     /// 为什么**不复抄** `dialog_node` 的构造：构造只有一份，漂移才不可能；
     /// `SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在各自判定点那侧，
     /// 由函数签名（`reason: &str`）承担跨模块契约。
-    pub fn to_message(&self) -> ChatNode {
-        dialog_node(&self.text, "progress", true)
+    pub fn to_message(&self, principal: &crate::symbio_core::principal::Principal) -> ChatNode {
+        dialog_node(&self.text, "progress", true, principal)
     }
 }

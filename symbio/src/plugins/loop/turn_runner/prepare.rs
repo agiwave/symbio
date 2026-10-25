@@ -200,6 +200,7 @@ where
                 opening,
                 &dialog.reason,
                 dialog.exclude_from_context,
+                &crate::symbio_core::principal::Principal::from_legacy(&actor.principal),
             );
             node.id = dialog.id.clone();
             sink.on_tool_frame(&node);

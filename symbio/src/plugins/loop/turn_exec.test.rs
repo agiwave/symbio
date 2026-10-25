@@ -29,6 +29,18 @@ use crate::symbio_core::{
 use super::super::session_port::SessionPort;
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
 
+/// 身份写 `principal`（D-147）：夹具模仿的是**桥之后**的节点面（生产里
+/// `assemble` 的发射任务把会话主体写进每一帧），`role` 只是反序列化落点。
+fn principal_for(role: cm::NodeRole) -> crate::symbio_core::principal::Principal {
+    use crate::symbio_core::principal::Principal;
+    match role {
+        cm::NodeRole::User => Principal::from_legacy(crate::symbio_core::PRINCIPAL_USER),
+        cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
+        cm::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
+        cm::NodeRole::System => Principal::from_legacy("system/local"),
+    }
+}
+
 /// 测试请求上下文（工具轮才需要能力注册表；无工具轮一个空信封足够）。
 fn test_ctx() -> Arc<dyn crate::symbio_core::PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
@@ -454,11 +466,9 @@ impl ModelProvider for FaithfulProvider {
         let received: Vec<(String, String)> = messages
             .iter()
             .map(|m| {
-                // `role` 是 `Option<NodeRole>`：`Debug` 会打成 `Some(user)`，
-                // 而断言要的是 `user`。所以 `unwrap_or` 之后再小写——**不要**对
-                // 整个 `Option` 做 `to_lowercase`，那会留下 `some(...)` 包装。
-                let role =
-                    format!("{:?}", m.role.as_ref().unwrap_or(&Default::default())).to_lowercase();
+                // 身份走折叠读法（主体在先、残留格兜底）；`Debug` 会打成 `user`，
+                // 断言要的就是这个裸词。
+                let role = format!("{:?}", m.node_role().unwrap_or_default()).to_lowercase();
                 let text = m.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
                 (role, text)
             })
@@ -479,7 +489,7 @@ impl ModelProvider for FaithfulProvider {
                         cm::ChatNode {
                             id: "n-rea".into(),
                             parent_id: Some("r-1".into()),
-                            role: Some(cm::NodeRole::Assistant),
+                            principal: Some(principal_for(cm::NodeRole::Assistant)),
                             msg_type: Some(cm::NodeKind::Notice),
                             content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
                             status: Some(cm::NodeStatus::Streaming),
@@ -492,7 +502,7 @@ impl ModelProvider for FaithfulProvider {
                     .emit(cm::ChatNode {
                         id: "n-half".into(),
                         parent_id: Some("r-1".into()),
-                        role: Some(cm::NodeRole::Assistant),
+                        principal: Some(principal_for(cm::NodeRole::Assistant)),
                         msg_type: Some(cm::NodeKind::Body),
                         content: Some(cm::MessageContent::Text("让我想想这个名词".into())),
                         status: Some(cm::NodeStatus::Streaming),
@@ -510,7 +520,7 @@ impl ModelProvider for FaithfulProvider {
                         .emit(cm::ChatNode {
                             id: "n-tool".into(),
                             parent_id: Some("r-1".into()),
-                            role: Some(cm::NodeRole::Assistant),
+                            principal: Some(principal_for(cm::NodeRole::Assistant)),
                             msg_type: Some(cm::NodeKind::Body),
                             content: Some(cm::MessageContent::Text("我先查一下。".into())),
                             status: Some(cm::NodeStatus::Streaming),
@@ -538,7 +548,7 @@ impl ModelProvider for FaithfulProvider {
                         .emit(cm::ChatNode {
                             id: "n-agent".into(),
                             parent_id: Some("r-1".into()),
-                            role: Some(cm::NodeRole::Assistant),
+                            principal: Some(principal_for(cm::NodeRole::Assistant)),
                             msg_type: Some(cm::NodeKind::Body),
                             content: Some(cm::MessageContent::Text("我来委托。".into())),
                             status: Some(cm::NodeStatus::Streaming),
@@ -569,7 +579,7 @@ impl ModelProvider for FaithfulProvider {
             .emit(cm::ChatNode {
                 id: "n-1".into(),
                 parent_id: Some("r-1".into()),
-                role: Some(cm::NodeRole::Assistant),
+                principal: Some(principal_for(cm::NodeRole::Assistant)),
                 msg_type: Some(cm::NodeKind::Body),
                 content: Some(cm::MessageContent::Text("秋".into())),
                 status: Some(cm::NodeStatus::Streaming),
@@ -967,13 +977,13 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     );
     let tool_result = &res.messages[2];
     assert_eq!(tool_result.parent_id.as_deref(), Some("tc-1"));
-    assert_eq!(tool_result.role, Some(cm::NodeRole::Tool));
+    assert_eq!(tool_result.node_role(), Some(cm::NodeRole::Tool));
 
     // ── UI 帧：中途正文被**定格**（不是永远流式中），工具节点与结果都在 ────
     let got = frames.0.lock().unwrap();
     let text_frames: Vec<_> = got
         .iter()
-        .filter(|m| m.is_text() && m.role == Some(cm::NodeRole::Assistant))
+        .filter(|m| m.is_text() && m.node_role() == Some(cm::NodeRole::Assistant))
         .collect();
     assert!(
         text_frames
@@ -987,7 +997,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     );
     assert!(
         got.iter()
-            .any(|m| m.role == Some(cm::NodeRole::Tool)
+            .any(|m| m.node_role() == Some(cm::NodeRole::Tool)
                 && matches!(&m.content, Some(cm::MessageContent::Text(t)) if t.contains("No parent plugin"))),
         "工具结果节点必须广播给前端：{got:?}"
     );
@@ -1850,7 +1860,7 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
     ids.iter()
         .map(|id| cm::ChatNode {
             id: (*id).to_string(),
-            role: Some(cm::NodeRole::User),
+            principal: Some(principal_for(cm::NodeRole::User)),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(format!(
                 "[CONTEXT SNAPSHOT]\n{id}"

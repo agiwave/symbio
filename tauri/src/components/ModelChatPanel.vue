@@ -113,7 +113,8 @@ import {
   type ChatNode,
   type MessageContent,
   type ContentPart,
-  type ChatRole,
+  PRINCIPAL_KIND_PERSON,
+  PRINCIPAL_USER,
   messageTextOf,
 } from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
@@ -366,7 +367,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
     if (!lastUser) return
     const retryMsg: ChatNode = {
       id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
-      role: CHAT_ROLE_USER,
+      principal: { kind: PRINCIPAL_KIND_PERSON, id: PRINCIPAL_USER },
       content: lastUser.content,
       timestamp: Date.now(),
     }
@@ -438,7 +439,6 @@ function handleSend() {
 
   const userMessage = {
     id: crypto.randomUUID(),
-    role: 'user' as const,
     content,
     timestamp: Date.now()
   }
@@ -453,7 +453,7 @@ function handleSend() {
 
   const chatMessage: ChatNode = {
     id: userMessage.id,
-    role: userMessage.role as ChatRole,
+    principal: { kind: PRINCIPAL_KIND_PERSON, id: PRINCIPAL_USER },
     content: userMessage.content,
     timestamp: userMessage.timestamp
   }

@@ -59,7 +59,8 @@
 import { computed } from 'vue'
 import DetailShell from './DetailShell.vue'
 import type { VdfsRendererProps } from './rendererContract'
-import { nodeKindOf } from '@/schemas/chat_node'
+import { nodeKindOf, roleOfPrincipal } from '@/schemas/chat_node'
+import type { Principal } from '@/schemas/chat_node'
 import {
   isBodyKind,
   messageRoleLabel,
@@ -77,8 +78,15 @@ defineEmits<{
 /** 正文（由 `useVdfs` 的一次 `vdfs/read` 填充；本视图不做增量拼接） */
 const body = computed(() => (typeof props.data === 'string' ? props.data : ''))
 
-/** `attributes.role`（VDFS 只透传，渲染器自行取用） */
-const roleKey = computed(() => String(props.node.role ?? 'unknown'))
+/**
+ * 身份：`attributes.principal` 是唯一的 wire 来源；存量节点还带旧的
+ * `attributes.role`，由这里在读边界兜底（判据仍走契约层的 `roleOfPrincipal`）。
+ */
+const roleKey = computed(() => {
+  const fromPrincipal = roleOfPrincipal(props.node.principal as Principal | string | undefined)
+  if (fromPrincipal) return fromPrincipal
+  return typeof props.node.role === 'string' ? props.node.role : 'unknown'
+})
 
 // 文案一律查 `registry/messageTypes`——那是消息词表的**唯一来源**。
 // 本组件不再自带 ROLE_TEXT / TYPE_TEXT / STATUS_TEXT 副本（曾经是三份实现之一）。

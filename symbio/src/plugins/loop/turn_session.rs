@@ -53,6 +53,12 @@ impl LoopSession {
         &self.spec.session_id
     }
 
+    /// 本会话主体（`TurnSpec.principal` 的读口）——消息构造点写 `principal` 的
+    /// 唯一地址来源（D-147：身份只写一份）。
+    pub(crate) fn principal(&self) -> crate::symbio_core::principal::Principal {
+        crate::symbio_core::principal::Principal::from_legacy(&self.spec.principal)
+    }
+
     /// 作用域（子会话 ⇒ `Child(父主体)`，顶层 ⇒ `Root`；session 从元数据预计算）。
     pub(crate) fn scope(&self) -> Scope {
         self.spec.scope.clone()

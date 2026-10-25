@@ -382,6 +382,7 @@ impl ChatOrchestrator {
         out: &TurnOutput,
         sink: &ExecEventSink,
     ) {
+        let principal = self.session.principal();
         if out.is_reasoning_only() {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
             //
@@ -403,7 +404,7 @@ impl ChatOrchestrator {
                 let mut node = ChatNode {
                     id: out.reasoning_child_id.clone(),
                     parent_id: Some(root_id.into()),
-                    role: Some(NodeRole::Assistant),
+                    principal: Some(principal.clone()),
                     msg_type: Some(NodeKind::Body),
                     // **换形态要带清除格**：s3 起思考节点的呈现身份住在 `meta.style_tag`，
                     // 帧的合入是「有则覆盖」——不带 meta = 旧 tag 留在消费方快照里，
@@ -427,7 +428,7 @@ impl ChatOrchestrator {
                 let mut node = ChatNode {
                     id: resp_id,
                     parent_id: Some(root_id.into()),
-                    role: Some(NodeRole::Assistant),
+                    principal: Some(principal.clone()),
                     msg_type: Some(NodeKind::Body),
                     content: Some(MessageContent::Text(out.reasoning.clone())),
                     status: Some(NodeStatus::Completed),
@@ -455,7 +456,7 @@ impl ChatOrchestrator {
             let mut finalized = ChatNode {
                 id: out.reasoning_child_id.clone(),
                 parent_id: Some(root_id.into()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Body),
                 // 与上面 reasoning-only 分支同一纪律：答案取自思考时要把 tag 清除格
                 // 说完整（`with_style_tag` 在未覆盖形态下重新打回 reasoning，两分支
@@ -487,7 +488,7 @@ impl ChatOrchestrator {
             let mut node = ChatNode {
                 id: out.response_text_child_id.clone(),
                 parent_id: Some(root_id.into()),
-                role: Some(NodeRole::Assistant),
+                principal: Some(principal.clone()),
                 msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(out.text.clone())),
                 status: Some(NodeStatus::Completed),

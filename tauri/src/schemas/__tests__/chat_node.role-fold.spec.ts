@@ -30,17 +30,8 @@ describe('normalizePrincipal 的命名空间表（与 Rust 的 namespace 派生�
   })
 })
 
-describe('messageRoleOf：主体为先、残留格兜底（D-147）', () => {
-  it('主体在场时优先——即便 role 格说别的（两个来源说不同的话，权威只有一个）', () => {
-    expect(messageRoleOf({ role: CHAT_ROLE_ASSISTANT, principal: { kind: 'tool', id: 'vdfs/write' } })).toBe(
-      CHAT_ROLE_TOOL,
-    )
-    expect(messageRoleOf({ role: CHAT_ROLE_TOOL, principal: { kind: 'agent', id: 'session/main' } })).toBe(
-      CHAT_ROLE_ASSISTANT,
-    )
-  })
-
-  it('role 缺席按 principal.kind 折叠：四族一一对应', () => {
+describe('messageRoleOf：身份只折叠主体（D-147）', () => {
+  it('principal.kind 四族一一对应', () => {
     expect(messageRoleOf({ principal: { kind: 'person', id: 'person/local' } })).toBe(CHAT_ROLE_USER)
     expect(messageRoleOf({ principal: { kind: 'agent', id: 'session/main' } })).toBe(
       CHAT_ROLE_ASSISTANT,
@@ -49,12 +40,6 @@ describe('messageRoleOf：主体为先、残留格兜底（D-147）', () => {
     expect(messageRoleOf({ principal: { kind: 'system', id: 'system/compactor' } })).toBe(
       CHAT_ROLE_SYSTEM,
     )
-  })
-
-  it('主体缺席时残留格兜底：构造期帧（还没标地址）与历史数据都靠这一条', () => {
-    expect(messageRoleOf({ role: CHAT_ROLE_USER })).toBe(CHAT_ROLE_USER)
-    expect(messageRoleOf({ role: CHAT_ROLE_TOOL })).toBe(CHAT_ROLE_TOOL)
-    expect(messageRoleOf({ role: CHAT_ROLE_SYSTEM })).toBe(CHAT_ROLE_SYSTEM)
   })
 
   it('地址字符串仍能归一（只是不再收旧形态）：`<ns>/<name>` 由 namespace 派族', () => {
@@ -69,8 +54,14 @@ describe('messageRoleOf：主体为先、残留格兜底（D-147）', () => {
     expect(normalizePrincipal('user')).toBeUndefined()
   })
 
-  it('两格皆无 ⇒ 缺省助手（未标身份的写方按模型产出一族呈现）', () => {
+  it('无主体 ⇒ 缺省助手（未标身份的写方按模型产出一族呈现）', () => {
     expect(messageRoleOf({})).toBe(CHAT_ROLE_ASSISTANT)
+  })
+
+  it('`role` 不再是身份来源：载荷里混入旧字段也不影响折叠', () => {
+    expect(
+      messageRoleOf({ principal: { kind: 'tool', id: 'vdfs/write' }, role: 'user' } as never),
+    ).toBe(CHAT_ROLE_TOOL)
   })
 })
 

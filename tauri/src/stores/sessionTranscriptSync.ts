@@ -255,9 +255,8 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   }
 
   const out: ChatNode = { id: node.name }
-  if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
-  // attrs.principal 是后端 `message_node` 一直写的那格——照折进来，
-  // role 退役后它就是 `messageRoleOf` 的兜底来源（对象/历史字符串都由 normalize 吃下）。
+  // 身份只有 `attrs.principal` 一份：后端 `message_node` 不再写 `role`，
+  // 存量节点的 `role` 属性已由 `message_of_node` 在读边界折进主体。
   if (v.principal != null) out.principal = v.principal as ChatNode['principal']
   if (folded) out.type = folded
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id

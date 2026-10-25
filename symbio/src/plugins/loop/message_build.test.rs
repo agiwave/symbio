@@ -15,9 +15,14 @@
 //! 用例见 `plugins/session/temporal.test.rs`。
 
 use super::*;
-use crate::symbio_core::chat_node::CHAT_STYLE_TAG_TOOL;
+use crate::symbio_core::chat_node::{NodeRole, CHAT_STYLE_TAG_TOOL};
 
 const TURN_ID: &str = "turn-0001";
+
+/// 落库面的主体：本文件的节点模仿**落库形状**，身份因此写 `principal`（D-147）。
+fn assistant_principal() -> crate::symbio_core::principal::Principal {
+    crate::symbio_core::principal::Principal::from_legacy("session/main")
+}
 
 fn out(text: &str, reasoning: &str) -> TurnOutput {
     TurnOutput {
@@ -94,7 +99,7 @@ fn effective_text_falls_back_to_reasoning_only_when_reasoning_only() {
 #[test]
 fn into_messages_reasoning_only_has_no_duplicate_content() {
     let reasoning = "让我想想这个问题的关键点。";
-    let msgs = out("", reasoning).into_messages("turn-x");
+    let msgs = out("", reasoning).into_messages("turn-x", &assistant_principal());
 
     assert_eq!(msgs.len(), 2, "应为 Turn + 单个 Text 子节点");
     assert_run_skeleton(&msgs[0]);
@@ -117,7 +122,7 @@ fn into_messages_reasoning_only_has_no_duplicate_content() {
 
 #[test]
 fn into_messages_reasoning_with_reply_keeps_two_children() {
-    let msgs = out("这是回复", "这是思考").into_messages("turn-y");
+    let msgs = out("这是回复", "这是思考").into_messages("turn-y", &assistant_principal());
     assert_eq!(msgs.len(), 3);
     assert_eq!(msgs.iter().filter(|m| m.is_reasoning()).count(), 1);
     assert_eq!(msgs.iter().filter(|m| m.is_text()).count(), 1);
@@ -132,7 +137,7 @@ fn into_messages_reasoning_with_reply_keeps_two_children() {
 fn into_messages_carries_tool_calls_from_the_result_field() {
     let mut o = out("", "");
     o.tool_calls.push(tool_call("vdfs_list"));
-    let msgs = o.into_messages("turn-z");
+    let msgs = o.into_messages("turn-z", &assistant_principal());
 
     let calls: Vec<_> = msgs.iter().filter(|m| m.is_tool_call()).collect();
     assert_eq!(calls.len(), 1);
@@ -165,6 +170,7 @@ fn reasoning_only_writes_single_text_child_without_reasoning_node() {
         None,
         Some(reasoning.into()),
         TurnStreamChildIds::default(),
+        &assistant_principal(),
     );
 
     // 恰好 2 个节点：Turn(根) + 1 个 Text 子节点
@@ -202,6 +208,7 @@ fn reasoning_only_ignores_surrounding_whitespace() {
         None,
         Some(reasoning.into()),
         TurnStreamChildIds::default(),
+        &assistant_principal(),
     );
 
     assert_eq!(msgs.len(), 2);
@@ -219,6 +226,7 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
         Some("resp-1".into()),
         Some("思考过程".into()),
         TurnStreamChildIds::default(),
+        &assistant_principal(),
     );
 
     // 骨架 + 推理 + 正文
@@ -247,7 +255,12 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     assert_eq!(text_child.msg_type, Some(NodeKind::Body));
     assert_eq!(text_child.style_tag(), None, "正文不带呈现变体");
     assert_eq!(text_child.response_id.as_deref(), Some("resp-1"));
-    assert_eq!(text_child.role, Some(NodeRole::Assistant));
+    assert_eq!(text_child.node_role(), Some(NodeRole::Assistant));
+    assert_eq!(
+        text_child.principal.as_ref().map(|p| p.id.as_str()),
+        Some("session/main"),
+        "落库面写主体，不写残留 role 格"
+    );
     assert_eq!(text_child.status, Some(NodeStatus::Completed));
 }
 
@@ -261,6 +274,7 @@ fn plain_text_reply_has_no_reasoning_child() {
         None,
         None,
         TurnStreamChildIds::default(),
+        &assistant_principal(),
     );
     assert_eq!(msgs.len(), 2);
     assert_eq!(count_children(&msgs, ChatNode::is_reasoning), 0);
@@ -279,6 +293,7 @@ fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
         None,
         Some("要先读文件".into()),
         TurnStreamChildIds::default(),
+        &assistant_principal(),
     );
 
     // Turn + Reasoning + ToolCall
@@ -311,6 +326,7 @@ fn persisted_children_reuse_streaming_child_ids() {
             text: Some("stream-text-id".into()),
             reasoning: Some("stream-reason-id".into()),
         },
+        &assistant_principal(),
     );
 
     let text_child = msgs
@@ -341,6 +357,7 @@ fn reasoning_only_reuses_reasoning_stream_id() {
             text: None,
             reasoning: Some("stream-reason-id".into()),
         },
+        &assistant_principal(),
     );
 
     let text_child = msgs

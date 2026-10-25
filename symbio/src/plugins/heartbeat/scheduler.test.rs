@@ -155,7 +155,7 @@ fn trigger_message_carries_both_meta_slices() {
     };
     let m = trigger_message("s-7", &hb, 4_321);
 
-    assert_eq!(m.role, Some(cm::NodeRole::User));
+    assert_eq!(m.node_role(), Some(cm::NodeRole::User));
     assert_eq!(
         m.content.as_ref().map(|c| c.to_text()),
         Some("检查待办".to_string())
