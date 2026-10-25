@@ -102,15 +102,6 @@ pub struct TurnInput {
     ///
     /// `None` = 调用方不提供信号（单测 / 无中止语义的路径），行为与接线前逐字一致。
     pub abort: Option<crate::symbio_core::ExecAbortSignal>,
-    /// **本轮已执行的一次性阶段**（`turn.stage` 草稿，D-107 判据 2）。
-    ///
-    /// 由编排层在阶段执行点产出（判决 / 召回 / 压缩），运行器在**用户格之后**、
-    /// 开场白与收束之前落格——断言类事件必须带溯源锚点（I2），而那只有落完用户格
-    /// 才有。续写幕重跑同一轮时撞幂等键，`stage_events::land` 按「已做过」吸收。
-    ///
-    /// 空表是常态（没有一次性阶段执行过）；它不是 `Option`——「没有阶段」与
-    /// 「有阶段但清单为空」在这里是同一件事。
-    pub stages: Vec<super::stage_events::StageFact>,
     /// 本轮装配进哪一时延档（调度决定是数据，D-044）。
     pub tier: LatencyTier,
     /// 对话窗口（最近的 turn 数，**含当前轮**）；`None` = 全量。
@@ -356,7 +347,6 @@ impl std::fmt::Debug for TurnInput {
             .field("window_turns", &self.window_turns)
             .field("actor", &self.actor)
             .field("prefix", &self.prefix)
-            .field("stages", &self.stages)
             .field("final_reply", &self.final_reply)
             .field("final_cost_ms", &self.final_cost_ms)
             .field("dialog", &self.dialog)

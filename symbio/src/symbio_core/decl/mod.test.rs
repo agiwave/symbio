@@ -130,19 +130,14 @@ fn builtin_loads_and_freezes() {
     }
     assert_eq!(frozen.fact("chat.assistant.final").unwrap().port, None);
 
-    // `ver` 是口径的显式版本： 给 `turn_head` 加幕锚 / 技能命中时升到 3，
-    // `report_due` 加 `quiet_ms` / `min_rounds` 时升到 3（静默区间身份是 v2）；
-    // 把 `retry` 加进 `in_flight` 的关账一侧 ⇒ 升到 2；
-    // D-138 把 `failed` 收窄到同一次尝试，`in_flight` / `stale_sent` 的读面
-    // 各多声明它的 `attempt` ⇒ 升到 3 / 2；
-    // 步 5 给 `turn_head` 加 `has_final`（收束行的前件）⇒ 升到 4；
-    // 步 5b 加 `tools_open`（执行行给工具批让位）⇒ 升到 5；
-    // 步 5d 给 `tools_open` 补请求面（恢复幕的唤醒请求）⇒ 升到 6；
-    // 步 5c 加 `closeable`（收束行的前件扩到「模型没答成」）⇒ 升到 7；
-    // 步 1 把口径收窄到「这一轮自己的模型往返」（内部往返带 `via`）⇒ 升到 8。
+    // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
+    // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
+    // `turn_head` 到 v9：`answered`（本幕判决判成了答话轮，D-162 裁决 1）是它最新的一格，
+    // 而 `has_final` / `closeable` / `tools_open` 的读面自 v8 起只看
+    // 「这一轮自己的模型往返」（内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 8);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 9);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 3);
@@ -588,6 +583,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "is_persistent": true,
             "recall_done": true,
             "skill_hit": true,
+            // 判决那格的 `result` 缺席（旧夹具只记了「判过」）⇒ 不是答话轮。
+            "answered": false,
             "has_final": false,
             "closeable": false,
             "tools_open": false
@@ -609,6 +606,43 @@ fn turn_head_reads_round_and_done_from_facts() {
     assert_eq!(head["has_utterance"], json!(true));
     assert_eq!(head["classify_done"], json!(false));
     assert_eq!(head["recall_done"], json!(false));
+}
+
+#[test]
+fn turn_head_answers_only_the_drive_the_verdict_landed_in() {
+    // `answered` 折的是判决那格 `result == "answered"`（D-162 裁决 1）：压缩与召回的
+    // 前件读它，所以它必须是**这一格**——判成「继续走」的 `proceed` 不许开成答话轮。
+    let decide = |result: &str| {
+        vec![
+            ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+            ev(1, "session.config", flags(true, true, true)),
+            ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+            ev(
+                1,
+                "turn.stage",
+                json!({"stage": "decide", "round": 0, "result": result}),
+            ),
+        ]
+    };
+    assert_eq!(turn_head(&decide("proceed"), 0)["answered"], json!(false));
+    assert_eq!(turn_head(&decide("answered"), 0)["answered"], json!(true));
+    // 没有判决格 ⇒ 恒 `false`：卸载 `classify` 时压缩与召回照旧开账。
+    let no_verdict = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", flags(true, true, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    assert_eq!(turn_head(&no_verdict, 0)["answered"], json!(false));
+
+    // 续写幕重跑判决：首幕判成答话不算到本幕头上（折叠按幕锚，同 `classify_done`）。
+    let mut resumed = decide("answered");
+    resumed.push(ev(
+        1,
+        "turn.stage",
+        json!({"stage": "resume", "round": 0, "result": "approve"}),
+    ));
+    resumed.push(ev(1, "turn.stage", json!({"stage": "round", "round": 0})));
+    assert_eq!(turn_head(&resumed, 0)["answered"], json!(false));
 }
 
 #[test]

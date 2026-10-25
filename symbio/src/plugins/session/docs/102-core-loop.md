@@ -87,7 +87,7 @@ impl: done
 |---|---|---|---|
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
 | 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
-| 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + **轮首派发点**（压缩 / 召回两行在此被 `drive` 选中并跑掉，收口 ③）+ `build_request_view`（收口 ②） | 准备 + 派发 |
+| 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回三行在此被 `drive` 选中并跑掉，收口 ③）+ 判成答话的一轮就地收束（`TurnExit::Completed`，不发请求）+ `build_request_view`（收口 ②） | 准备 + 派发 |
 | 4 | `turn_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `SessionDispatchPort` 三动作分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
 | 6 | `close_turn` | 截断续写 / 增量落库 / 流向判定（收口 ④ 的判定分支） | 收尾 + 判定 |
@@ -212,8 +212,8 @@ pub(crate) async fn run_compress(
 ```
 
 **判定与执行同处一地**：水位判定与压缩执行都在这一个执行体里，压缩之后水位即变，下一轮按新
-水位判。**「什么时候轮到它」也不再是代码行序**：它与召回同住轮首 host，由 `ring::drive` 按
-`prio` 选（压缩 30 先于召回 40），出口那一格（`turn.stage{stage=compress}`）由执行体自己落
+水位判。**「什么时候轮到它」也不再是代码行序**：它与判决、召回同住轮首 host，由 `ring::drive` 按
+`prio` 选（判决 10 → 压缩 30 → 召回 40），出口那一格（`turn.stage{stage=compress}`）由执行体自己落
 （形状与理由见 [DE-015](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")）。
 
 **收口后的分工**：
@@ -324,7 +324,7 @@ pub async fn run_chat_loop(
 
  // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
  // 系统提示词 + 工具在同一函数内、同一时刻收集（同一 `Registry`）；
- // 派生 overhead（一轮一次）；轮首派发点（压缩 + 召回）与视图重建亦在其内。
+ // 派生 overhead（一轮一次）；轮首派发点（判决 + 压缩 + 召回）与视图重建亦在其内。
  let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &sink,
  &mut turn, &turn_req).await {
  Ok(v) => v,

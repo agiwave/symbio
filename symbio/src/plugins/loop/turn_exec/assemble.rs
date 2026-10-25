@@ -76,7 +76,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         skill_hits,
         prefix,
         consolidation,
-        stages,
         opening_text,
         opening_dialog,
         presentation_tree,
@@ -97,22 +96,11 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         crate::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
 
-    // 一次性阶段的**草稿**（判决 / 压缩）：**先落格、再问表**。反射行读的是
-    // `turn_head.skill_hit`——它来自召回执行体自己落的格（D-159：那一行已在环上），
-    // 本段落的是仍未接回的那几步；它们若还停在草稿里，视图看不见，快路永远不会
-    // 被认领。写者令牌此刻在本段手里（`store`），落格与装配同一时刻。
-    //
-    // 定稿答话轮不经本段（`execute_final_reply_turn`），仍由运行器落；同一格
-    // 重落会撞幂等键，`land` 按「已做过」吸收。
+    // 一次性阶段**不在这里落**：环上的每一行（判决 / 召回 / 压缩）由它自己的执行体
+    // 当场入日志（D-159 裁决 4）——装配段不是任何一行的出口。
     let principal = crate::symbio_core::request_principal(ctx.as_ref());
     // 节点身份的同一份主体：流式帧与落库副本必须说同一个人（D-147）。
     let session_principal = crate::symbio_core::principal::Principal::from_legacy(&principal);
-    super::super::stage_events::land(store.as_ref(), turn_no, user_seq, &principal, &stages)
-        .map_err(|e| {
-            TurnExecExit::Failed(PluginError::InternalError(format!(
-                "一次性阶段事实落格失败：{e:?}"
-            )))
-        })?;
 
     // 轮号与溯源锚由编排层在判决之前定下：用户格先落，这里只收三个
     // seq，不再从切片反推。

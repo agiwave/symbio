@@ -837,6 +837,19 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             && after_anchor(e, anchor_seq)
             && str_field(e, "result") == Some("hit")
     });
+    // 本幕的判决是否把这一轮判成「不用再发请求」（D-162 裁决 1）。
+    //
+    // 折叠口径与 `stage_since` 逐字相同（同幕、同轮、幕锚之后），只是多比一格
+    // `result`：判决那一步的**结论**说的就是「这一轮往下走还是就此答话」。
+    // 压缩与召回的前件读它——定稿答话轮不进驱动循环（§5.1），这两行因此不该开账。
+    let answered = events.iter().any(|e| {
+        e.turn == turn
+            && e.kind == "turn.stage"
+            && str_field(e, "stage") == Some("decide")
+            && u64_field(e, "round") == Some(round)
+            && after_anchor(e, anchor_seq)
+            && str_field(e, "result") == Some("answered")
+    });
     // 本幕是否已收束（与 [`turn_closed`] 同一判法：幕锚之后出现过收束格）。
     let closed = events.iter().any(|e| {
         e.turn == turn
@@ -958,6 +971,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "resumed": resumed,
         "classify_enabled": flag("classify_enabled"),
         "classify_done": stage_since("decide"),
+        "answered": answered,
         "auto_compress": flag("auto_compress"),
         "compress_done": stage_since("compress"),
         "is_persistent": flag("is_persistent"),
@@ -1187,9 +1201,13 @@ const BUILTIN_VIEWS: &[ViewDecl] = &[
     // v7 → v8：口径收窄到「这一轮自己的模型往返」——`request` / `response` / `failed`
     // 三个协议名的 `via` 字段进读面（D-122 决策 2）。内部往返（判决 / 措辞 /
     // 摘要）带 `via`，这一轮自己的不带；不带的那批才是「答完了 / 没答成」的判据。
+    // v8 → v9 加 `answered`（D-162 裁决 1）：判决那一步的结论折成这一格，定稿答话轮
+    // 因此不再开压缩 / 召回的账。判据只能落在**同一个视图的一格**上：`owed` 把
+    // `unless` 的键与债键逐字比对，跨键的 `unless` 是静默不命中（§3.4 第 2 条）。
+    // 读面不变——`turn.stage` 的 `result` 自 v2（技能命中折在召回格里）就在里面。
     ViewDecl {
         name: "turn_head",
-        ver: 8,
+        ver: 9,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),

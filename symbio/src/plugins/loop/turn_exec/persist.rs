@@ -176,8 +176,8 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
 ///
-/// 形参宽（`consolidation` 是 S2.7-b2 加的，`stages` 是 加的，三个 seq 是
-/// 加的）：与 [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
+/// 形参宽（`consolidation` 与三个 seq 都是这一轮的**事实端口**）：与
+/// [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
 /// 一个宽签名，收成结构体只会把同一次调用拆成两处。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
@@ -209,9 +209,6 @@ pub(crate) async fn execute_final_reply_turn(
     // 答话轮在步骤 2 就短路收尾，**不进** [`super::execute_turn`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
     consolidation: Option<&[ChatNode]>,
-    // 本轮已执行的一次性阶段（判决事实 + 「已做」，D-107 判据 2）。答话轮同样
-    // 不进 [`super::execute_turn`]，判决草稿由本入口随 `TurnInput` 递进运行器。
-    stages: Vec<super::super::stage_events::StageFact>,
 ) -> Result<(), PluginError> {
     // 事实源：与 [`super::execute_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
     let store = session.facts().ok_or_else(|| {
@@ -253,7 +250,6 @@ pub(crate) async fn execute_final_reply_turn(
         window_turns: None,
         actor,
         prefix: None,
-        stages,
         inject: None,
         final_reply: Some(reply.to_string()),
         final_cost_ms: reply_cost_ms,

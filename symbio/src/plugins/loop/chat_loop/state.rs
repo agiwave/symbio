@@ -225,7 +225,7 @@ pub(crate) struct TurnState {
     pub(crate) ready_section: Option<String>,
     /// 本轮**对话面开场白**正文：`Escalate` 首响。
     ///
-    /// 由步骤 2b 的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`
+    /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`
     /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
     /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
     /// `None` = 本轮没有开场白（常态）。
@@ -235,14 +235,12 @@ pub(crate) struct TurnState {
     /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
     /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
     pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
-    /// 已执行但**尚未落格**的阶段草稿（判决）——随本轮入参交给运行器
-    /// （写者令牌在那边）。已在环上的行（`policy.recall` / `policy.compress`，D-159）
-    /// 不走这里：它们的执行体自己落出口那一格，否则派发点在下一问读不到「做过」。
+    /// **本幕判决判成的定稿答话**（`policy.classify` 执行体的产出，D-162 裁决 3）。
     ///
-    /// 走工具循环的一轮里，它由 [`super::super::turn_exec`] 的装配段先落
-    /// （反射档要读 `skill_hit`，那必须在问表之前成为事实）；定稿答话轮不经装配段，
-    /// 由运行器落（见 `execute_final_reply_turn`）。
-    pub(crate) stages_pending: Vec<super::super::stage_events::StageFact>,
+    /// 判决执行体在轮首把这一轮判成「不用再发请求」时，把答话正文连同对话面事实寄
+    /// 存在这里：执行体不交回产出（D-123 决策 5），而收束格要由**派发点**在两个动作
+    /// 之间落——只有派发点知道判决是否已经问完。`None` = 本轮照常进工具循环。
+    pub(crate) head_answer: Option<super::super::chat_loop::AnsweredTurn>,
     /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
     ///
     /// 由准备段（`prepare_turn_inputs` 的 ①②）算出后写在这里，供压缩行的执行体
@@ -281,13 +279,6 @@ pub(crate) struct TurnState {
     /// 重建面（只按 `artifact.added` 复刻新结果）与实时面因此各说一套。删除放在
     /// 派发**成功之后**（`chat_loop` 的并入处），派发失败时旧卡仍在。
     pub(crate) resume_old_child: Option<String>,
-}
-
-impl TurnState {
-    /// 记一次阶段执行（草稿交运行器落格；问表经视图读事实）。
-    pub(crate) fn mark_stage(&mut self, fact: super::super::stage_events::StageFact) {
-        self.stages_pending.push(fact);
-    }
 }
 
 /// 主循环的唯一退出原因。

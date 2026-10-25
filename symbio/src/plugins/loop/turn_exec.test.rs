@@ -188,7 +188,6 @@ fn exec_base<'a>(
         // 请求级前缀：测试不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
-        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         on_round: None,
@@ -315,7 +314,6 @@ async fn supplements_become_facts_visible_next_turn() {
         skill_hits: &[],
         prefix: None,
         consolidation: None,
-        stages: Vec::new(),
         supplements: Some(supplements),
         supplemental_no: Default::default(),
         on_round: None,
@@ -896,7 +894,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
-        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         on_round: None,
@@ -1111,7 +1108,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         skill_hits: &[],
         prefix: None,
         consolidation: None,
-        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         on_round: Some(on_round),
@@ -1344,7 +1340,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
         consolidation: None,
-        stages: Vec::new(),
         supplements: None,
         supplemental_no: Default::default(),
         on_round: None,
@@ -1428,12 +1423,20 @@ async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
         "你好",
     );
     req.skill_hits = &hits;
-    // 生产侧由 `run_recall` 先落这一格：快路行的 `skill_hit` 只从事实读。
-    req.stages = vec![super::super::stage_events::StageFact::ran(
-        super::super::stage_events::StageName::Recall,
+    // 生产侧由 `run_recall` 执行体先落这一格（出口那一格当场入日志）：快路行的
+    // `skill_hit` 只从事实读。
+    super::super::stage_events::land(
+        fx.facts.as_ref(),
         0,
+        req.user_seq,
+        "system",
+        &[super::super::stage_events::StageFact::recall(
+            0,
+            req.user_seq,
+            "hit",
+        )],
     )
-    .with_result("hit")];
+    .expect("召回阶段事实落格");
     let res = execute_turn(req).await.expect("反射档执行成功");
 
     assert_eq!(

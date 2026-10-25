@@ -570,15 +570,15 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
         );
     }
     // 剩下的策略行正相反：它们没有执行体，所以那几处直问**就是**派发点（调度旁路，
-    // 归零对象）。`policy.recall`、`policy.compress` 已由轮首派发点接管（D-159 第一、
-    // 二批），不再在这笔账里。
+    // 归零对象）。轮首那三条（`policy.classify` / `policy.compress` / `policy.recall`）
+    // 已由轮首派发点接管（D-159），不再在这笔账里。
     // 这一格是 `D-158` 记的那笔账的当前形状，接回下一行时它会红——那是预期的红。
     let unwired: Vec<&str> = ROWS
         .iter()
         .filter(|d| d.name.starts_with("policy.") && d.by.is_none())
         .map(|d| d.name)
         .collect();
-    assert_eq!(unwired.len(), 3, "未接线的策略行清单变了（`D-158` 的台账）");
+    assert_eq!(unwired.len(), 2, "未接线的策略行清单变了（`D-158` 的台账）");
 }
 
 #[test]
@@ -600,12 +600,13 @@ fn execute_row_closes_on_turn_closed() {
     );
 }
 
-/// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进驱动**。
+/// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进轮内驱动**。
 ///
-/// 这条不对称是 [D-125](../../../../docs/003-design/015-义务环.md#d-125-定稿答话轮不进环环覆盖的是欠着的往返草稿的收束格由轮首准备就地落 "DE-015-义务环") 决策 4 点名要写下来的：
+/// 这条不对称是 [D-125](../../../../docs/003-design/015-义务环.md#d-125-定稿答话轮不进轮内驱动循环环覆盖的是欠着的往返收束格由轮首准备就地落 "DE-015-义务环") 点名要写下来的：
 /// 措辞往返的 `response(port=model)` 带 `calls: []` ⇒ `turn.has_final` 成立 ⇒ 收束行的前件
-/// **成立**。但那一轮的答话是 `compose` 在轮首之前备好的（草稿），运行器一看 `final_reply`
-/// 非空就在轮首准备里收束、`PreparedFlow::Done` 返回——驱动循环压根没起来，**表没被问**。
+/// **成立**。但那一轮的答话是 `compose` 在轮首之前备好的，轮首 host 跑完判决（`answered`
+/// 那一格）就在准备段里收束、`TurnExit::Completed` 返回——轮内驱动循环压根没起来，
+/// `close-turn` **没被问**。
 ///
 /// 为什么要钉一条「表说该派发、实际上不问」的用例：只看表的人会得出「它应该被派发」，
 /// 然后去追一个不存在的 bug（第一版判断就是这么来的）。把不对称钉在用例里，
@@ -1812,7 +1813,7 @@ fn next_hands_back_the_action_itself() {
     assert!(std::ptr::fn_addr_eq(next.action, run));
 }
 
-/// 轮首 host 的欠账由**轮首**派发点选中，交出的动作是轮首绑定表里那一条（D-159 第一批）。
+/// 轮首 host 的欠账由**轮首**派发点选中，交出的动作是轮首绑定表里那一条（D-159）。
 #[test]
 fn next_head_selects_the_recall_row_at_turn_head() {
     let ready = vec![
@@ -1835,9 +1836,9 @@ fn next_head_selects_the_recall_row_at_turn_head() {
 
 /// 轮首两台债的**序**与**档位**：压缩（prio 30）先于召回（40），而两者的出口同族不同档。
 ///
-/// 这一条同时钉住 D-161 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
+/// 这一条同时钉住 D-160 的运行期那一半：`turn.stage{stage=compress}` 关不了召回行，
 /// `…{stage=recall}` 也关不了压缩行——若出口按事实名配图，两行会互相当对方的关门方
-/// （装载期那条 `cycle` 就是它的影子），收编第二批走不下去。
+/// （装载期那条 `cycle` 就是它的影子），轮首这两笔债谁也还不掉。
 #[test]
 fn head_sweep_runs_compress_before_recall() {
     let ready = vec![
@@ -1879,6 +1880,58 @@ fn head_sweep_runs_compress_before_recall() {
     let next = super::next_head(&after_recall, 1, 0, super::HEAD_ACTORS)
         .expect("召回不落压缩那一档，压缩仍欠");
     assert_eq!(next.row, "policy.compress");
+}
+
+/// 判决判成「就此答话」的一轮：压缩与召回**都不开账**（[D-162] 裁决 1）。
+///
+/// 定稿答话轮压根不进驱动循环（DE-015 §5.1 / D-125），这两行的债在这一轮没有还的人。
+/// 前件钉在 `turn_head` 的同一格上，不是跨键的 `unless`——`owed` 把 `unless` 的键与债
+/// 键**逐字**比对，跨键时它是静默不命中（§3.4 第 2 条），表就照绿而产品照跑。
+#[test]
+fn an_answered_verdict_opens_neither_compress_nor_recall() {
+    // 判决格由闭包**当场造**：`ev` 的 seq 取自全局计数，先造出来的格子会落在用户格
+    // 之前，而 `turn_head` 的阶段折叠只认幕锚之后的那一格。
+    let head = |result: &str| {
+        vec![
+            ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+            ev(
+                1,
+                "session.config",
+                json!({"classify_enabled": true, "auto_compress": true, "is_persistent": true}),
+            ),
+            ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+            ev(
+                1,
+                "turn.stage",
+                json!({"stage": "decide", "round": 0, "result": result}),
+            ),
+        ]
+    };
+    for row in ["policy.compress", "policy.recall"] {
+        assert!(
+            !owes(row, &head("answered"), 0),
+            "`{row}` 在判成答话的一轮开了账"
+        );
+    }
+
+    // 判成「继续走」⇒ 两行照旧开账（前件只挡答话轮，不挡常态轮）。
+    for row in ["policy.compress", "policy.recall"] {
+        assert!(owes(row, &head("proceed"), 0));
+    }
+
+    // 没有判决格（卸载 `classify`）⇒ 同样开账：`answered` 折不出来的默认值是 `false`。
+    let undecided = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(
+            1,
+            "session.config",
+            json!({"classify_enabled": false, "auto_compress": true, "is_persistent": true}),
+        ),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    for row in ["policy.compress", "policy.recall"] {
+        assert!(owes(row, &undecided, 0), "`{row}` 在没判过的一轮不开账");
+    }
 }
 
 /// 召回格落地 ⇒ 轮首派发点收工：环**只靠执行体自己落格**推进。
@@ -1942,7 +1995,7 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
     let head_rows = super::host_rows(&f, &super::head_actor_names(super::HEAD_ACTORS));
     assert_eq!(
         head_rows.iter().map(|d| d.name).collect::<Vec<_>>(),
-        vec!["policy.compress", "policy.recall"],
+        vec!["policy.classify", "policy.compress", "policy.recall"],
         "轮首子集就是它的绑定表点名的行——多一条就是跨 host 抢债"
     );
 

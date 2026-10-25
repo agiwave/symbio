@@ -40,9 +40,9 @@ impl TurnRunner {
     ///
     /// ## 为什么参数多到要 `allow`
     ///
-    /// 九个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 用户格锚 / 幕号 /
-    /// 主体 / 产物 / 出口 / 阶段事实），与 [`Self::run_with_tools`] 同款理由：打包成
-    /// 一个结构体只是把"九个端口"改名叫"一个结构体 + 九个字段"，调用方仍要逐个填。
+    /// 每个参数**各自是一个不同的端口**（事实源 / 令牌 / 轮号 / 用户格锚 / 幕号 /
+    /// 主体 / 产物 / 出口），与 [`Self::run_with_tools`] 同款理由：打包成
+    /// 一个结构体只是把"八个端口"改名叫"一个结构体 + 八个字段"，调用方仍要逐个填。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_reflex<S>(
         &self,
@@ -54,15 +54,13 @@ impl TurnRunner {
         actor: &ActorSpec,
         text: &str,
         sink: std::sync::Arc<dyn crate::symbio_core::DeltaSink>,
-        stages: &[super::super::stage_events::StageFact],
     ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
         let started = std::time::Instant::now();
-        // 一次性阶段（判决 / 召回 / 压缩）：反射档不经过 `prepare_turn`，但同样在
-        // 用户格之后落（I2 的溯源锚）；此处的 `done` 同样让本轮后续不再问这些格。
-        super::super::stage_events::land(store, turn, user_seq, &actor.principal, stages)?;
+        // 一次性阶段（判决 / 召回 / 压缩）**不在这里落**：环上的每一行由它自己的
+        // 执行体当场入日志（D-159 裁决 4），反射档拿不到也不该拿草稿。
         // 派发档：用户格先于判决落 ⇒ 档位另立一格，幂等键带幕号。
         store.append(
             Event::pending(

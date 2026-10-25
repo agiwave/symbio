@@ -3,8 +3,8 @@
 //! ## 一行只写「什么时候欠、什么算还」
 //!
 //! 判据全部是数据：`owes` / `until` / `unless` 三个模式，`prio` 是**全局**裁决序
-//! （`(prio, name, key)` 升序）。执行体只拿到一笔 `Debt`，
-//! 不再读任何请求作用域状态——旧 `LoopState` 的五个变体在这里对应五个视图读到的事实。
+//! （`(prio, name, key)` 升序）。执行体只拿到一笔 `Debt`，不读任何请求作用域状态——
+//! 「什么时候欠」对应的是一份视图读出的事实，不是内存里的阶段枚举。
 //!
 //! ## 五条策略行的前后关系
 //!
@@ -28,8 +28,8 @@
 //! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
 //! ```
 //!
-//! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。旧表的
-//! `prio` 只是格内序，这里第一次跨行可比（判据 10）。
+//! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`prio` 是跨行
+//! 可比的**全局**序，不是格内序（判据 10）。
 //!
 //! ## 一行**不在表里**的条件（写在这里，不写在事后）
 //!
@@ -65,8 +65,9 @@ use crate::symbio_core::{
 };
 
 /// 这张表里**接了线的执行体**：`execute`（整轮执行体）、`close`（收束）、
-/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、`recall`（轮首准备，
-/// D-159 第一批——它住在另一台 host 的绑定表里，名字面上与其它没有区别）。
+/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、轮首那三条
+/// `classify` / `compress` / `recall`（D-159——它们住在另一台 host 的绑定表里，
+/// 名字面上与其它没有区别）。
 ///
 /// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
 /// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
@@ -92,14 +93,19 @@ const OPENER: &str = "opener";
 const AUTHORIZER: &str = "authorizer";
 /// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
 const COURIER: &str = "courier";
-/// 轮首准备执行体（D-159 第一批）：`policy.recall` 行选中的动作。
+/// 轮首准备执行体（D-159）：`policy.recall` 行选中的动作。
 ///
 /// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
 /// （[`super::head_exec::HeadStep`]），不是轮内那张草稿。`by` 面上两台 host 没有区别——
 /// 「这行归谁跑」照旧只写在行上，host 由绑定表回答（D-159 裁决 1）。
 const RECALL: &str = "recall";
-/// 轮首压缩执行体（D-159 第二批）：`policy.compress` 行选中的动作。
+/// 轮首压缩执行体（D-159）：`policy.compress` 行选中的动作。
 const COMPRESS: &str = "compress";
+/// 轮首判决执行体（D-159）：`policy.classify` 行选中的动作。
+///
+/// 名字与旧行 `effects.classify` 的那个能力名同源：这一行跑的是「问一次 `classify`
+/// 并**执行**它判成的枚举」，判决本身住在能力插件里，执行体只做编排与入账。
+const CLASSIFY: &str = "classify";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -185,7 +191,7 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
     ],
 };
 
-/// 轮首准备执行体的声明（D-159 第一批）。
+/// 轮首准备执行体的声明（D-159）。
 ///
 /// 名单只有 `turn.stage` 一格：召回这一步的**出口**就是那一格（`stage:"recall"`
 /// 带 `result`），装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。
@@ -199,7 +205,7 @@ const ACTOR_RECALL: ActorDecl = ActorDecl {
     writes: &[EVENT_TURN_STAGE],
 };
 
-/// 轮首压缩执行体的声明（D-159 第二批）。
+/// 轮首压缩执行体的声明（D-159）。
 ///
 /// 名单同样只有 `turn.stage`：摘要那一次模型往返的三格（`request` / `sent` /
 /// `failed`，`port=model`）由**端口记账层**落，属协议格，不在执行体的名单里
@@ -208,6 +214,20 @@ const ACTOR_COMPRESS: ActorDecl = ActorDecl {
     name: COMPRESS,
     // 语义压缩调模型：与行同档（深度）。
     mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 轮首判决执行体的声明（D-159 / D-162）。
+///
+/// 名单同样只有 `turn.stage`：判决那一步的**出口**就是 `stage:"decide"` 那一格
+/// （带 `result`，它是 `turn_head` 折出 `answered` 的唯一来源）。措辞那次内部往返
+/// 的三格（`request` / `sent` / `response`，`via=compose/wording`）由端口记账层落，
+/// 属协议格，不在执行体名单里（同 [`ACTOR_COMPRESS`]）。
+const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
+    name: CLASSIFY,
+    // 判决可能落到模型，但不生成：快速档（与行的 `tier` 同值，更慢就装载红）。
+    mode: LatencyTier::Fast,
     reads: &[],
     writes: &[EVENT_TURN_STAGE],
 };
@@ -306,6 +326,11 @@ pub(crate) struct HeadEntry {
 }
 
 pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[
+    HeadEntry {
+        decl: ACTOR_CLASSIFY,
+        run: super::head_exec::run_classify,
+        transitional: &[],
+    },
     HeadEntry {
         decl: ACTOR_COMPRESS,
         run: super::head_exec::run_compress,
@@ -539,8 +564,9 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.classify",
         prio: 10,
-        // 未接线：判决由 `chat_loop` 按 `owes` 点问自己执行；与 `decide` 执行体同批接回。
-        by: None,
+        // 轮首 host 的执行体（D-159）：派发点与压缩 / 召回同一处，`prio` 10
+        // 让它排在两条之前——它落的 `result` 正是那两条的前件（[D-162] 裁决 1）。
+        by: Some(CLASSIFY),
         // 判决可能落到模型，但不生成：快速档（与旧行 `effects.tier` 同值）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -589,7 +615,7 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.compress",
         prio: 30,
-        // 轮首 host 的执行体（D-159 第二批）：派发点在 `chat_loop::inputs` 的准备段
+        // 轮首 host 的执行体（D-159）：派发点在 `chat_loop::inputs` 的准备段
         // ①② 之后——水位要的那份请求级开销寄存进本轮状态，产线本身不动。
         by: Some(COMPRESS),
         // 语义压缩调模型：深度档。
@@ -601,6 +627,10 @@ pub(crate) static ROWS: &[Decl] = &[
             eq: &[
                 ("auto_compress", Lit::Bool(true)),
                 ("compress_done", Lit::Bool(false)),
+                // 判决判成「就此答话」的一轮不进驱动循环（§5.1 / [D-162] 裁决 1）：
+                // 压缩与召回都不该开账。同一视图的一格，不是跨键的 `unless`——后者
+                // 与债键逐字比对，跨键时静默不命中（§3.4 第 2 条）。
+                ("answered", Lit::Bool(false)),
             ],
         },
         until: &[Pattern {
@@ -614,7 +644,7 @@ pub(crate) static ROWS: &[Decl] = &[
     Decl {
         name: "policy.recall",
         prio: 40,
-        // 轮首 host 的执行体（D-159 第一批）：派发点在 `chat_loop::inputs` 的轮首锚，
+        // 轮首 host 的执行体（D-159）：派发点在 `chat_loop::inputs` 的轮首锚，
         // 出口那一格由执行体自己落——它不交回产出，但「已做」这件事照旧只写在日志上。
         by: Some(RECALL),
         // 事实投影的纯读 + 技能路由，不调模型。
@@ -627,6 +657,8 @@ pub(crate) static ROWS: &[Decl] = &[
                 ("round", Lit::Uint(0)),
                 ("is_persistent", Lit::Bool(true)),
                 ("recall_done", Lit::Bool(false)),
+                // 同 [`policy.compress`] 的那一条：定稿答话轮不进驱动循环。
+                ("answered", Lit::Bool(false)),
             ],
         },
         until: &[Pattern {

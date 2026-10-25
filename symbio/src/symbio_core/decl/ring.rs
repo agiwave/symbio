@@ -709,7 +709,7 @@ pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
 ///
 /// 一格事实可以有好几档（`turn.stage` 的判决 / 召回 / 压缩各写自己那一档），只按
 /// 事实名配边会把「同族」读成「同格」，于是共写一族的行两两互等——判据见
-/// DE-015 的 [D-161](../../../../docs/003-design/015-义务环.md#d-161-依赖图的边按出口格配同族不同档不成边 "DE-015-义务环")；
+/// DE-015 的 [D-160](../../../../docs/003-design/015-义务环.md#d-160-依赖图的边按出口格配视图按输出证据集展开同族不同档不成边 "DE-015-义务环")；
 /// 那一格的身份从两边的出口模式读，不新增声明字段。
 ///
 /// 两处刻意保守：
@@ -741,7 +741,7 @@ enum Visit {
 ///
 /// 名字按 [`exit_fact_names`] 展开（`evidence`），条件就是出口模式自己的 `eq`——
 /// 一格 `turn.stage` 说的从来不是「这一族」，而是「这一档」（`stage = compress`）。
-/// 第 1 条配边要比的正是这一对（DE-015 的 D-161）。
+/// 第 1 条配边要比的正是这一对（DE-015 的 D-160）。
 fn exit_cells<'d>(decl: &'d Decl, frozen: &Frozen) -> Vec<(&'static str, &'d Pattern)> {
     decl.until
         .iter()

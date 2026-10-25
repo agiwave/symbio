@@ -89,7 +89,6 @@ impl TurnRunner {
                 opening_text: None,
                 opening_dialog: None,
                 nodes: None,
-                stages: Vec::new(),
                 // 无中止语义的路径：`None` ⇒ 1c 的检查是空操作。
                 abort: None,
             },
@@ -340,7 +339,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
@@ -614,7 +612,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
@@ -665,7 +662,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
@@ -726,7 +722,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
@@ -821,7 +816,6 @@ mod turn_runner_tests {
                         exclude_from_context: true,
                     }),
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
@@ -858,7 +852,6 @@ mod turn_runner_tests {
             opening_text: None,
             opening_dialog: None,
             nodes: Some(nodes),
-            stages: Vec::new(),
             // 无中止语义：本夹具走 `AdapterError::Aborted`（模型中途返回），
             // 不测 1c 的闸门空隙。
             abort: None,
@@ -1160,7 +1153,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
@@ -1210,7 +1202,6 @@ mod turn_runner_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
@@ -2153,7 +2144,6 @@ mod tool_round_tests {
             opening_text: None,
             opening_dialog: None,
             nodes: None,
-            stages: Vec::new(),
             abort: None,
         }
     }
@@ -3045,7 +3035,6 @@ mod tool_round_tests {
                     opening_text: None,
                     opening_dialog: None,
                     nodes: None,
-                    stages: Vec::new(),
                     abort: None,
                 },
                 Arc::new(SilentDeltas),
@@ -3905,7 +3894,6 @@ mod reflex_turn_tests {
                 &actor,
                 "先列要点；再合并同类项。",
                 got.clone() as Arc<dyn DeltaSink>,
-                &[],
             )
             .await
             .expect("反射档必答（不生成也要有产物）");
@@ -4462,7 +4450,6 @@ mod actor_ledger_tests {
             opening_text: None,
             opening_dialog: None,
             nodes: None,
-            stages: Vec::new(),
             abort: None,
         }
     }

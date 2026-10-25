@@ -695,12 +695,6 @@ pub(crate) struct ExecTurn<'a> {
     ///
     /// `SessionContext::consolidated`
     pub consolidation: Option<&'a [ChatNode]>,
-    /// 本轮**已执行的一次性阶段**（`turn.stage` 草稿，D-107 判据 2）。
-    ///
-    /// 由 `chat_loop` 在阶段执行点产出（判决 / 召回 / 压缩），落格在运行器——
-    /// 用户格之后（I2 要求断言类事件带溯源）。两档都要落：深度档经
-    /// [`super::turn_runner::TurnInput::stages`]，反射档经 `run_reflex` 的入参。
-    pub stages: Vec<super::stage_events::StageFact>,
     /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非

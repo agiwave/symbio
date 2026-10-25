@@ -98,9 +98,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                     &actor,
                     &h.content,
                     bridge.clone(),
-                    // 阶段事实已在各自的落格点入日志（判决 / 压缩 = 装配段，召回 =
-                    // 轮首执行体）；这里不再重落。
-                    &[],
                 )
                 .await
                 .map_err(ActorError::Append)
@@ -117,8 +114,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 window_turns: Some(window_turns),
                 actor: actor.clone(),
                 prefix,
-                // 一次性阶段已由装配段落格（I2 的溯源锚那时已在）：运行器不再重落。
-                stages: Vec::new(),
                 // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
                 //
                 // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。
