@@ -147,6 +147,10 @@ fn field_check_covers_shape_and_range() {
     assert!(field("hosts", "list").check(&json!(["a"])).is_none());
     assert!(field("hosts", "list").check(&json!("a")).is_some());
     assert!(field("env", "map").check(&json!({ "K": "V" })).is_none());
+    assert!(
+        field("env", "map").check(&json!({ "K": 1 })).is_some(),
+        "值必须是字符串：`KEY=VALUE` 的编辑形态与下游读取都按字符串通信"
+    );
     assert!(field("env", "map").check(&json!([])).is_some());
     assert!(field("dir", "path").check(&json!("/tmp")).is_none());
     assert!(field("dir", "path").check(&json!(1)).is_some());

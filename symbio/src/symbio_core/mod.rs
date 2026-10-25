@@ -412,9 +412,9 @@ pub use capability::{
     capability_init_error_bucket, capability_invoke, capability_model_active,
     capability_model_resolve, capability_option_fields, capability_prompts,
     capability_report_error, capability_resolve, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel,
-    CapabilityRow, CapabilityRowKind, Registry, CAPABILITY_ERRORS, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    capability_vdfs_root, ApprovalBasis, ApprovalGrants, Capability, CapabilityCategory,
+    CapabilityMeta, CapabilityRiskLevel, CapabilityRow, CapabilityRowKind, Registry,
+    CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
@@ -448,9 +448,9 @@ pub(crate) use creator::{ObjectConstructor, Submit};
 // 只剩机制（`SymbioKey` trait）与值类型为通用词汇（String / Value / Vec<String>）的键——
 // 值类型属某域的键已随值搬去该域（exec / plugin / capability，D-095 根因一）。
 pub use keys::{
-    SymbioKey, AGENT_ID, CONTENT, ID, MODE, NAME, PATH, PROVIDER_ID, REQUIRED_PLUGINS,
-    RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID, TRACE_ID,
-    VDFS_PARENT_ADDR, WORKDIR,
+    SymbioKey, AGENT_ID, APPROVAL_GRANTS, CONTENT, ID, MODE, NAME, PATH, PROVIDER_ID,
+    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID,
+    TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
 
 // ==================== 装配策略 ====================

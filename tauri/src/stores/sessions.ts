@@ -642,14 +642,15 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 为什么抬阈值就够，不必新增一条授权事实
    *
-   * 阈值的语义是「比它更危险才问」（后端 `CapabilityRiskLevel::requires_approval`），
+   * 阈值的语义是「比它更危险才问」（后端 `CapabilityRiskLevel::approval_basis`），
    * 它本来就住在会话 metadata 里、由后端解析成 `ctx[RISK_LEVEL]` 交给授权级联。
    * 因此「这个会话里同档的调用别再问了」= 抬一次阈值，**不新增任何事实**：
    * 这一次调用的 `authz.granted` 仍由用户对它的批准写。
    *
    * 粒度的代价要说清：抬档放过的是**整档**（含同档别的工具），不是「这一个
-   * 工具」。这是「按危险度分级」本来的粒度；按工具免问需要一份授权清单，
-   * 那是第三档「永久放行」的前件，不存在于今天。
+   * 工具」。按工具免问是另一档动作（审批卡上的「永久放行」，写会话插件全局配置的
+   * `approval_grants`，走 `session/grant`），两者的作用域与撤销方式都不同——
+   * 这里只做**本会话**这一格。
    *
    * ## 只抬不降
    *

@@ -7,6 +7,7 @@ mod chat_session;
 mod commands;
 pub(crate) mod config;
 mod convergence;
+mod grants;
 mod memory;
 pub(crate) mod message_events;
 mod options;

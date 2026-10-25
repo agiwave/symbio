@@ -1758,6 +1758,7 @@ mod tool_round_tests {
                     model_id: tc.id.clone().unwrap_or_default(),
                     call,
                     name: tc.name.clone().unwrap_or_default(),
+                    canonical: None,
                     risk: None,
                     approved: false,
                     invalid: false,

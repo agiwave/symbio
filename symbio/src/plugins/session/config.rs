@@ -20,6 +20,7 @@
 //! 搬迁不改 serde：字段名仍是 `PLUGIN.yml` 里的键，`#[serde(default)]` 仍在，
 //! 未知键仍被静默忽略。存量配置文件**无需迁移**。
 
+use crate::symbio_core::ApprovalGrants;
 use serde::{Deserialize, Serialize};
 
 // 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
@@ -352,6 +353,20 @@ pub struct SessionConfig {
     /// 读侧按 `cap.max(1)` 归一，不把「写错一个数」变成「系统停摆」。
     #[serde(default = "default_task_cap")]
     pub task_cap: usize,
+    /// 跨会话的工具授权清单（审批卡第三档「永久放行」）：能力名 → 允许的最高风险档。
+    ///
+    /// ## 为什么住会话插件的全局配置
+    ///
+    /// 跨会话是它的定义（「永久」），所以不能进会话 metadata；而它与会话阈值
+    /// （`ctx[RISK_LEVEL]`）是同一件策略的两级（按工具 / 按会话），本插件已经是
+    /// 唯一注入执行阈值的地方，由同一个解析点落进 ctx 才不会出现两处口径
+    /// （D-170 决策 2）。
+    ///
+    /// 写入口是控制路由 `session/grant`（只抬不降）；撤销就是删掉这里的一行
+    /// ——没有第二套撤销动作。认不出的档位 / 空工具名在读侧逐条丢弃（fail-closed，
+    /// 见 [`ApprovalGrants`]）。
+    #[serde(default)]
+    pub approval_grants: ApprovalGrants,
 }
 
 // ── Q1 判据的出厂值：单一真源 ─────────────────────────────────────────
@@ -523,6 +538,7 @@ impl Default for SessionConfig {
             worker_min_chars: default_worker_min_chars(),
             presentation_tree: default_presentation_tree(),
             task_cap: default_task_cap(),
+            approval_grants: ApprovalGrants::default(),
         }
     }
 }

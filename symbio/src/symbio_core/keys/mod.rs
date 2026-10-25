@@ -145,6 +145,9 @@ define_string_key!(ModeKey, MODE, "mode");
 define_string_key!(ProviderIdKey, PROVIDER_ID, "provider_id");
 // 会话执行风险等级阈值：low / medium / high（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
 define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
+// 跨会话工具授权清单（JSON：能力名 → 允许的最高风险档）：与会话阈值同一份配置解析点
+// 落进 ctx，审批闸门与授权级联都读它（D-170）。
+define_string_key!(ApprovalGrantsKey, APPROVAL_GRANTS, "approval_grants");
 
 // 常用业务属性 Key
 define_string_key!(IdKey, ID, "id");

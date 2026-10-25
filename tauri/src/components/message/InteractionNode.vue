@@ -3,14 +3,16 @@
 
   两种子形态由数据契约判别键 `kind` 分派（`schemas/message_prompt.ts`）：
   · `question`：一个或多个问题，可单选 / 多选，含约定选项 `Other`（勾选后自由输入）；
-  · `confirm` ：工具名 + 风险等级 + 参数 + 描述，三键——批准本次 / 本会话放行 / 拒绝。
+  · `confirm` ：工具名 + 风险等级 + 参数 + 描述，四键——批准本次 / 本会话放行 /
+               永久放行 / 拒绝。
 
-  三键为什么是三个平级按钮，而不是「批准」加一个「以后别再问」的复选框：
+  四键为什么是四个平级按钮，而不是「批准」加一个「以后别再问」的复选框：
   `approve` 记的是「用户批了**这一次**」（`authz.granted`，一次调用一笔）；
-  「本会话放行」改的是**会话的执行阈值**（同档及以下的工具从此不再问）。两笔
-  事实的生命周期不同，做成复选框就把「以后别再问」藏在一次批准里——用户点的是
-  「批准」，后果却是「这一档以后都不问了」。第三档「永久放行」没有落点（跨会话
-  的授权清单不存在），故界面上只有这两档 + 拒绝。
+  「本会话放行」改的是**会话的执行阈值**（同档及以下的工具在本会话里从此不再问）；
+  「永久放行」改的是**该工具的授权上限**（会话插件的全局配置 `approval_grants`，
+  跨会话生效，撤销靠删掉那一行）。三笔事实的生命周期分别是「一次调用 / 一个会话 /
+  一份部署」，做成复选框就把后两档藏在一次批准里——用户点的是「批准」，后果却是
+  「以后都别再问」。分档也决定了误点的代价：越宽的档，按钮的视觉重量越轻。
 
   **已回答态**（`status` 不再是 `waiting_user_action`）不再隐藏表单，而是整体降透明度
   并禁用控件：用户事后回看会话时，仍能看到自己当初选了什么。
@@ -18,7 +20,8 @@
   提交都经 `RESUME_KEY` 注入的动作打到**父骨架**（`parent_id`）——提问与确认都是
   某个工具调用的一部分，锚点必须是父容器骨架而不是本节点自身。子会话里的提问还要
   带上 `parent_session_id`，否则恢复会打到父会话。「本会话放行」另走
-  `ALLOW_FOR_SESSION_KEY`：它改的是会话阈值，不是这条消息的恢复。
+  `ALLOW_FOR_SESSION_KEY`，「永久放行」另走 `ALLOW_FOREVER_KEY`：它们改的是
+  阈值与授权清单，不是这条消息的恢复。
 -->
 <template>
   <NodeShell
@@ -114,6 +117,16 @@
           >
             {{ isAnswered ? '已处理' : '本会话放行' }}
           </button>
+          <!-- 「永久放行」抬的是**这个工具**的授权上限（全局配置 `approval_grants`）。
+               它比「本会话放行」更宽（跨会话），因此视觉重量更轻；撤销在设置页。 -->
+          <button
+            v-if="confirmRisk"
+            class="up-allow-forever"
+            :disabled="isAnswered"
+            @click="submitAllowForever"
+          >
+            {{ isAnswered ? '已处理' : '永久放行' }}
+          </button>
           <button class="up-reject" :disabled="isAnswered" @click="submitConfirm(false)">
             {{ isAnswered ? '已处理' : '拒绝' }}
           </button>
@@ -137,7 +150,7 @@ import {
   type MessagePromptAnswer,
   type MessagePromptQuestion,
 } from '@/schemas/message_prompt'
-import { RESUME_KEY, ALLOW_FOR_SESSION_KEY } from '@/composables/useChatConnection'
+import { RESUME_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY } from '@/composables/useChatConnection'
 import { isSessionRiskLevel, type SessionRiskLevel } from '@/schemas/session_meta'
 import {
   isWaitingStatus,
@@ -160,8 +173,10 @@ const emit = defineEmits<{
 }>()
 
 const resume = inject(RESUME_KEY)
-/** 「本会话放行」（审批卡第三档）；无人提供时按「没有这一档」处理 */
+/** 「本会话放行」（审批卡第二档）；无人提供时按「没有这一档」处理 */
 const allowForSession = inject(ALLOW_FOR_SESSION_KEY, null)
+/** 「永久放行」（审批卡第三档）；同样可缺席（嵌入式只读视图） */
+const allowForever = inject(ALLOW_FOREVER_KEY, null)
 
 const prompt = computed(() => promptOf(props.node))
 const questionPrompt = computed(() =>
@@ -170,8 +185,10 @@ const questionPrompt = computed(() =>
 const confirmPrompt = computed(() => (prompt.value?.kind === 'confirm' ? prompt.value : null))
 
 /**
- * 本次调用可读的风险档（审批卡第三档的出现条件）。
+ * 本次调用可读的风险档（「本会话放行」/「永久放行」两档的出现条件）。
  *
+ * 两档都要一个**可抬到的档位**：没有档位就没有「抬到哪一档」可言（未声明风险的
+ * 工具按 Medium 兜底，那种情况下抬档没有可读的因果）。
  * 校验走契约层的词表（`isSessionRiskLevel`）而不是在组件里手写三个字面量：
  * `risk_level` 是后端产出的裸字符串，多一档时手写的判定会静默把它判成非法——
  * 表现是「这一档的审批卡少一个按钮」，没有任何东西会红。
@@ -245,6 +262,30 @@ async function submitAllowForSession() {
       await allowForSession(risk)
     } catch {
       // 抬阈值失败不拦本次批准（理由见函数文档）
+    }
+  }
+  submitConfirm(true)
+}
+
+/**
+ * 「永久放行」= 先把**这个工具**的上限抬到本次风险档，再批准这一次。
+ *
+ * 与会话放行同一条两步纪律、同一个顺序理由：抬上限必须在恢复之前落定，否则后端的
+ * 授权级联读到的还是旧上限。区别只在作用域——这一格跨会话生效，并按 `tool`
+ * 记名（`prompt.tool_name` 是能力名，后端 `session/grant` 直接拿它当键，前端不翻译）。
+ *
+ * 抬上限失败**不拦批准**：本次批准是用户此刻的明确意图，不该被一次配置写失败
+ * 挡住；后果只是「以后不再问」没生效。
+ */
+async function submitAllowForever() {
+  const risk = confirmRisk.value
+  const tool = confirmPrompt.value?.tool_name
+  if (!risk || !tool) return
+  if (allowForever) {
+    try {
+      await allowForever(tool, risk)
+    } catch {
+      // 抬上限失败不拦本次批准（理由见函数文档）
     }
   }
   submitConfirm(true)
@@ -402,6 +443,7 @@ function submitQuestions() {
 }
 .up-approve,
 .up-allow-session,
+.up-allow-forever,
 .up-reject {
   flex: 1;
   padding: 0.35rem;
@@ -414,15 +456,19 @@ function submitQuestions() {
   background: var(--success-solid);
   color: var(--text-on-accent);
 }
-/* 「本会话放行」比「批准执行」弱一档：它放开的是一整档风险，比批一次更宽，
-   不该和主按钮抢同一种视觉重量（也避免误点成「以后都别再问」）。 */
-.up-allow-session {
+/* 「本会话放行」与「永久放行」都比「批准执行」弱一档：它们放开的是一整档 / 一个
+   工具的长期免问，比批一次更宽，不该和主按钮抢同一种视觉重量（也避免误点）。
+   两档之间不再分视觉层级：它们的作用域不同（会话 / 跨会话），不是一个比另一个
+   「更危险」的简单序——把宽度压成灰度只会诱导用户点那个看起来更轻的。 */
+.up-allow-session,
+.up-allow-forever {
   background: var(--color-option-bg);
   border-color: var(--color-option-border);
   color: var(--text-primary);
 }
 .up-approve:disabled,
 .up-allow-session:disabled,
+.up-allow-forever:disabled,
 .up-reject:disabled {
   cursor: default;
   opacity: 0.7;

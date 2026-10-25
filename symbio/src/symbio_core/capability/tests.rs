@@ -123,3 +123,61 @@ fn from_name_falls_back_to_medium_on_unknown() {
         );
     }
 }
+
+/// 严格解析只认线格式的三个词——写授权清单时一个笔误必须被**拒绝**，
+/// 不能被静默折成 `Medium` 后写进「永久放行」。
+#[test]
+fn parse_is_strict_where_from_name_defaults() {
+    for level in [
+        CapabilityRiskLevel::Low,
+        CapabilityRiskLevel::Medium,
+        CapabilityRiskLevel::High,
+    ] {
+        assert_eq!(CapabilityRiskLevel::parse(level.as_str()), Some(level));
+        assert_eq!(
+            level.as_str(),
+            serde_json::to_value(level).unwrap().as_str().unwrap()
+        );
+    }
+    for raw in ["", "critical", "HIGH", "low ", "0"] {
+        assert_eq!(CapabilityRiskLevel::parse(raw), None, "{raw:?}");
+        assert_eq!(
+            CapabilityRiskLevel::from_name(raw),
+            CapabilityRiskLevel::Medium
+        );
+    }
+}
+
+/// 三档审批的**同一条判据**：依据各就各位，优先级 approved > threshold > grant。
+#[test]
+fn approval_basis_covers_the_three_tiers_in_order() {
+    use CapabilityRiskLevel::{High, Low, Medium};
+
+    // 第 1 档：这一次已批准——哪怕远高于阈值与上限。
+    assert_eq!(
+        High.approval_basis(Medium, true, None),
+        Some(ApprovalBasis::Approved)
+    );
+    // 第 2 档：不高于会话阈值。
+    assert_eq!(
+        Medium.approval_basis(Medium, false, None),
+        Some(ApprovalBasis::Threshold)
+    );
+    assert_eq!(
+        Low.approval_basis(Medium, false, None),
+        Some(ApprovalBasis::Threshold)
+    );
+    // 第 3 档：高于阈值但落在该工具的永久上限内。
+    assert_eq!(
+        High.approval_basis(Medium, false, Some(High)),
+        Some(ApprovalBasis::Grant)
+    );
+    // 依据优先级：同时满足阈值与上限时，记的是更宽的那条线（会话阈值）。
+    assert_eq!(
+        Medium.approval_basis(Medium, false, Some(High)),
+        Some(ApprovalBasis::Threshold)
+    );
+    // 三档都不成立 ⇒ 需要审批。
+    assert_eq!(High.approval_basis(Medium, false, Some(Medium)), None);
+    assert_eq!(High.approval_basis(Medium, false, None), None);
+}

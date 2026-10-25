@@ -130,6 +130,13 @@ impl TurnLauncher {
             .unwrap_or_else(|| "medium".to_string());
         ctx.set(RISK_LEVEL, risk_level.clone());
 
+        // 永久放行清单与会话阈值是同一件策略的两级（按工具 / 按会话），从同一个
+        // 配置解析点落进 ctx（D-170 决策 2）：执行闸门与授权级联因此读同一份值。
+        ctx.set(
+            APPROVAL_GRANTS,
+            self.config.read().await.approval_grants.to_json(),
+        );
+
         let provider_id = req
             .provider_id
             .as_ref()

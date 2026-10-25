@@ -34,8 +34,8 @@ use super::loop_rows;
 use super::port;
 use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
 use crate::symbio_core::{
-    CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
-    EVENT_REQUEST, EVENT_SENT,
+    ApprovalGrants, CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_DENIED,
+    EVENT_AUTHZ_GRANTED, EVENT_REQUEST, EVENT_SENT,
 };
 
 /// 一轮的账：turn=1、溯源到用户格 seq=7、幕锚填占位 0（这三笔工具债不读时间视图）。
@@ -76,6 +76,7 @@ fn requested(store: &EventStore, id: &str) -> ToolPortCall {
         model_id: format!("call-{id}"),
         call,
         name: "shell".into(),
+        canonical: None,
         // `risk = None` ⇒ 注册表里没有可判的能力（route-only），授权按 deferred 放行。
         risk: None,
         approved: false,
@@ -98,7 +99,18 @@ fn opened(store: &EventStore, id: &str) -> ToolPortCall {
     let mut call = requested(store, id);
     super::append_authz(
         store,
-        super::granted_event(TURN, USER_SEQ, &call.call, "shell", "unknown", true),
+        super::granted_event(
+            TURN,
+            USER_SEQ,
+            &call.call,
+            "shell",
+            super::GrantFacts {
+                risk: "unknown",
+                deferred: true,
+                basis: None,
+                grant: None,
+            },
+        ),
     )
     .expect("granted 落格");
     call.granted = true;
@@ -268,6 +280,7 @@ fn policy_at(threshold: CapabilityRiskLevel) -> ToolPortPolicy {
         known: Vec::new(),
         threshold,
         mode: String::new(),
+        grants: ApprovalGrants::default(),
     }
 }
 
@@ -316,6 +329,11 @@ fn the_session_threshold_decides_whether_a_call_is_asked_about() {
         json!("high"),
         "放行事实记的是**调用自己的**风险档，不是阈值"
     );
+    assert_eq!(
+        payload_of(&store, EVENT_AUTHZ_GRANTED)["basis"],
+        json!("threshold"),
+        "放行依据要可读：同一条事实里 agent 才分得清「阈值内」与「工具授权」"
+    );
 
     // ③ 基线不变：Medium 阈值下 Medium 调用本来就放行。
     let store = Arc::new(EventStore::new());
@@ -326,6 +344,65 @@ fn the_session_threshold_decides_whether_a_call_is_asked_about() {
     port.authorize_calls(&policy(), &mut calls);
 
     assert!(calls[0].granted, "不比阈值更危险 ⇒ 不问");
+}
+
+/// **第三档「永久放行」**：按工具的授权上限放行，且只对该工具生效。
+///
+/// 与上一格的分工：会话阈值是**全局**的一刀切，工具授权是**逐工具**的上限。
+/// 两格都要钉，因为一个「把 grant 当成第二个阈值」的实现能过前半格——它会让
+/// 另一个工具同档调用也悄悄放行。
+#[test]
+fn a_per_tool_grant_authorizes_only_that_tool() {
+    let mut granted = policy();
+    granted.grants.raise("shell", CapabilityRiskLevel::High);
+
+    // ① 被授权的工具：High > Medium 阈值，但 ≤ 工具上限 ⇒ 放行。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-g1-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::High);
+    calls[0].canonical = Some("shell".into());
+
+    port.authorize_calls(&granted, &mut calls);
+
+    assert!(calls[0].granted, "上限覆盖本次风险档 ⇒ 不问");
+    let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
+    assert_eq!(payload["basis"], json!("grant"), "依据是工具授权，不是阈值");
+    assert_eq!(
+        payload["grant"],
+        json!("high"),
+        "事实里带上生效的那一格上限"
+    );
+
+    // ② 同档的另一个工具：授权只管自己那一行，仍然要审批。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-g2-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::High);
+    calls[0].canonical = Some("shell_other".into());
+
+    port.authorize_calls(&granted, &mut calls);
+
+    assert!(!calls[0].granted, "别的工具不继承这一行授权");
+    assert_eq!(calls[0].deny_why, Some("needs_approval"));
+
+    // ③ 这次调用显式带 `approved` ⇒ 依据是 approved，授权字段不入格
+    //    （两档都可能成立时，事实记**最直接的那个理由**）。
+    let store = Arc::new(EventStore::new());
+    let port = tool_port(&store);
+    let mut calls = [requested(&store, "tool-g3-tc-1-1")];
+    calls[0].risk = Some(CapabilityRiskLevel::High);
+    calls[0].canonical = Some("shell".into());
+    calls[0].approved = true;
+
+    port.authorize_calls(&granted, &mut calls);
+
+    let payload = payload_of(&store, EVENT_AUTHZ_GRANTED);
+    assert_eq!(payload["basis"], json!("approved"));
+    assert!(
+        payload.get("grant").is_none(),
+        "没用到工具上限时不该写下这一格：{payload}"
+    );
 }
 
 /// **场景一（审批唤醒）**：`authz.granted(port=tool)` 一落，`dispatch-tools` 就

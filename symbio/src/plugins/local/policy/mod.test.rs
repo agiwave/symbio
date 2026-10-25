@@ -133,7 +133,10 @@ fn test_windows_destructive_commands_are_high_risk() {
         );
     }
     // 关键判据：High > 默认阈值 Medium ⇒ 自动模式必须拒绝（无人可审批）。
-    assert!(CapabilityRiskLevel::High.requires_approval(CapabilityRiskLevel::Medium, false));
+    assert_eq!(
+        CapabilityRiskLevel::High.approval_basis(CapabilityRiskLevel::Medium, false, None),
+        None
+    );
     let guarded = strict();
     assert!(
         guarded

@@ -1,6 +1,7 @@
 mod collect;
 mod configurable;
 mod error;
+mod grants;
 mod model;
 mod mount;
 mod option;
@@ -26,6 +27,7 @@ pub use error::{
 pub use configurable::{
     capability_announce_configurable, capability_configurables, capability_entry_of,
 };
+pub use grants::ApprovalGrants;
 pub use model::{capability_model_active, capability_model_resolve};
 pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
@@ -169,6 +171,21 @@ pub enum CapabilityRiskLevel {
 }
 
 impl CapabilityRiskLevel {
+    /// 严格解析：只认 [`Self::as_str`] 的那三个词，其余一律 `None`。
+    ///
+    /// 与 [`Self::from_name`] 的分工是**用途**，不是宽严：
+    /// - 读会话阈值 / 线格式时用 [`Self::from_name`]——认不出要退回默认档（宁可多问）；
+    /// - 写授权清单 / 接收一条控制路由的入参时用本方法——认不出就**拒绝**，不能把
+    ///   一个笔误静默折成 `Medium` 后写进「永久放行」。
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
     /// 从字面量解析 —— **本档位字符串的唯一解析点**。
     ///
     /// 未识别的值按 [`Self::default`] 兜底（`Medium`），与「未声明风险的工具」同一条
@@ -179,25 +196,72 @@ impl CapabilityRiskLevel {
     /// 参数级风险判定）。加一档 `Critical` 要改两处，漏一处就静默降级成 `Medium`——
     /// 那是**放宽安全约束**的静默失效，不是缺个功能。现在两处都问这里。
     pub fn from_name(name: &str) -> Self {
-        match name {
-            "low" => Self::Low,
-            "high" => Self::High,
-            // 含 "medium" 与一切未识别的值。
-            _ => Self::Medium,
+        Self::parse(name).unwrap_or_default()
+    }
+
+    /// 线格式（与 serde 的 `snake_case` 同一套词）——**文案的唯一产出点**。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
         }
     }
 
-    /// 审批判定的**唯一比较**：本次风险高于会话阈值且用户没批过 ⇒ 需要审批。
+    /// 审批判定的**唯一判据**：返回放行的依据，`None` ⇒ 需要审批。
     ///
-    /// 为什么把它放在类型上，而不是分别写在「执行闸门」与「授权级联的记录方」：
-    /// 两处各写一遍 `risk > threshold && !approved`，改一处漏一处时两边都合法、
-    /// 没有任何东西会红；而这是**放宽安全约束**方向的静默失效。方法只有一个实现，
-    /// 两个调用点（`providers/collectors/approval.rs` 与 `plugins/loop`）都问它。
+    /// 三个依据与审批卡的三档一一对应（D-170）：
+    /// 1. `approved` ⇒ 这一次已由用户批准（`Approved`）；
+    /// 2. `risk ≤ threshold` ⇒ 不高于本会话阈值（`Threshold`）；
+    /// 3. `risk ≤ grant` ⇒ 不高于该工具的永久放行上限（`Grant`）。
     ///
-    /// 注意：它只回答「要不要审批」，不回答审批卡的形状；`mode = auto` 与交互模式
-    /// 的差异（友好错误 vs 待用户动作卡）仍由执行闸门决定。
-    pub fn requires_approval(self, threshold: Self, approved: bool) -> bool {
-        self > threshold && !approved
+    /// 为什么放在类型上、且返回「依据」而不只是布尔：执行闸门
+    /// （`providers/collectors/approval.rs`）与授权级联的记录方（`plugins/loop`）
+    /// 必须用同一份判据；两处各写一遍「或」，放宽安全约束的一侧漏改没有任何东西会
+    /// 红。记录方还需要依据本身——不加它，事后无法从日志分辨「这次为什么没问」，
+    /// 而三档的全部差别正是这个「为什么」。
+    ///
+    /// 注意：它只回答「要不要审批 / 凭什么放行」，不回答审批卡的形状；
+    /// `mode = auto` 与交互模式的差异（友好错误 vs 待用户动作卡）仍由执行闸门决定。
+    pub fn approval_basis(
+        self,
+        threshold: Self,
+        approved: bool,
+        grant: Option<Self>,
+    ) -> Option<ApprovalBasis> {
+        if approved {
+            Some(ApprovalBasis::Approved)
+        } else if self <= threshold {
+            Some(ApprovalBasis::Threshold)
+        } else if grant.is_some_and(|ceiling| self <= ceiling) {
+            Some(ApprovalBasis::Grant)
+        } else {
+            None
+        }
+    }
+}
+
+/// 一次放行的依据（[`CapabilityRiskLevel::approval_basis`] 的返回）。
+///
+/// 词表即 `authz.granted` 载荷里的 `basis`：三档审批的差别全在这一个词上。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalBasis {
+    /// 用户批准了**这一次**（审批卡「批准执行」/ 唤醒动作）。
+    Approved,
+    /// 本次风险不高于会话执行阈值（「本会话放行」抬的就是阈值）。
+    Threshold,
+    /// 本次风险不高于该工具的永久放行上限（「永久放行」）。
+    Grant,
+}
+
+impl ApprovalBasis {
+    /// 线格式（`authz.granted` 载荷的 `basis`）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Threshold => "threshold",
+            Self::Grant => "grant",
+        }
     }
 }
 

@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
-import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, ALLOW_FOR_SESSION_KEY, type ResumePayload } from '@/composables/useChatConnection'
+import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { useTranscriptWindow, TRANSCRIPT_WINDOW_INITIAL } from '@/composables/useTranscriptWindow'
 import {
@@ -123,6 +123,7 @@ import type { SessionRiskLevel } from '@/schemas/session_meta'
 import { logger } from '@/utils/logger'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useSessionsStore } from '@/stores/sessions'
+import { grantToolForever } from '@/services/sessionGrant'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
 import { CHAT_ROLE_USER } from '@/schemas/chat_node'
@@ -286,6 +287,13 @@ const sessionsStore = useSessionsStore()
 // 恰好是子会话 id。
 provide(ALLOW_FOR_SESSION_KEY, async (risk: SessionRiskLevel) => {
   await sessionsStore.raiseSessionRiskLevel(props.sessionId, risk)
+})
+
+// 「永久放行」：把某个工具的授权上限抬到这次的风险档（跨会话生效，存在会话插件的
+// 全局配置里）。与上一档的分工见 `ALLOW_FOREVER_KEY` 的文档：一个改本会话的阈值，
+// 一个改这份部署的授权清单。`tool` 是能力名，由审批卡原样回传。
+provide(ALLOW_FOREVER_KEY, async (tool: string, risk: SessionRiskLevel) => {
+  await grantToolForever(props.sessionId, tool, risk)
 })
 
 // --- 会话选项栏的三个入参（定义 / 值 / 条件作用域） ---

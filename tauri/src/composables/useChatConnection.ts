@@ -141,6 +141,29 @@ export const ALLOW_FOR_SESSION_KEY: InjectionKey<(risk: SessionRiskLevel) => Pro
   Symbol('chat-allow-for-session')
 
 /**
+ * 「永久放行」注入键 —— 把某个工具的授权上限抬到这次调用的风险档（跨会话生效）。
+ *
+ * ## 为什么不是 `ALLOW_FOR_SESSION_KEY` 的另一种粒度
+ *
+ * 两者写的是**不同作用域的不同格**：本会话放行改会话 metadata 的 `risk_level`
+ * （整档、只在这个会话里有效）；永久放行改会话插件的**全局配置文档**
+ * （`approval_grants`：工具名 → 上限，跨会话生效，撤销 = 在设置页删掉那一行）。
+ * 合成一个动作会让「这一次点击」的作用域变成一个参数，而用户看不出边界。
+ *
+ * ## 参数是 `(tool, risk)`
+ *
+ * `tool` 是能力名（canonical name）——审批卡上的 `prompt.tool_name` 就是它
+ * （后端 `approval_gate` 从 `CapabilityMeta.name` 产出），渲染器原样回传即可，
+ * 不在前端做任何名字翻译。`risk` 是这次调用的风险档：上限抬到它，同档及以下
+ * 从此不问；更高的档仍会审批。
+ *
+ * 会话 id 依旧由提供方闭包持有（与 `ALLOW_FOR_SESSION_KEY` 同一条理由）。
+ */
+export const ALLOW_FOREVER_KEY: InjectionKey<
+  (tool: string, risk: SessionRiskLevel) => Promise<void>
+> = Symbol('chat-allow-forever')
+
+/**
  * 多会话无状态 chat connection（v2 — 无 store 写入版）
  *
  * ## 设计（重要变化）

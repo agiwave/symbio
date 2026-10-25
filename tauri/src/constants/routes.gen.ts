@@ -62,6 +62,7 @@ export const ROUTE_HOOK_REGISTER = 'hook/register'
 // ==================== session ====================
 
 export const ROUTE_SESSION_CHANGES = 'session/changes'
+export const ROUTE_SESSION_GRANT = 'session/grant'
 export const ROUTE_SESSION_STATS = 'session/stats'
 
 // ==================== skill ====================

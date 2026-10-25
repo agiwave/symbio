@@ -388,6 +388,15 @@ impl DetailField {
         Self::base(key, label, "list", description)
     }
 
+    /// 键值映射字段（编辑态每行 `KEY=VALUE`；存储为字符串 → 字符串的对象，
+    /// 校验见 `validate` 的 "map" 分支）
+    pub fn map(key: &str, label: &str, description: &str, default: serde_json::Value) -> Self {
+        Self {
+            default: Some(default),
+            ..Self::base(key, label, "map", description)
+        }
+    }
+
     /// 下拉字段（静态候选）
     pub fn select(key: &str, label: &str, options: Vec<DetailOption>, default: &str) -> Self {
         Self {
@@ -515,7 +524,16 @@ impl DetailField {
                 None
             }
             "list" => (!v.is_array()).then(|| "必须是字符串数组".to_string()),
-            "map" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
+            "map" => {
+                // 值是字符串是 `map` 的**类型事实**（文档：字符串键值对）。只判
+                // 「是不是对象」会让一张 `{K: 7}` 通过校验、再在消费方反序列化时
+                // 静默丢掉，错误离写入点越远越难定位。
+                match v.as_object() {
+                    Some(obj) if obj.values().all(|x| x.is_string()) => None,
+                    Some(_) => Some("值必须是字符串".to_string()),
+                    None => Some("必须是键值对象".to_string()),
+                }
+            }
             // 结构化子对象：形状由子定义逐字段校验（见 [`DetailDefinition::validate`]）
             "form" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
             "text" | "password" | "textarea" | "datalist" | "path" => {

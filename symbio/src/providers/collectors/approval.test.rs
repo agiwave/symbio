@@ -2,7 +2,8 @@
 //!
 //! 覆盖 的两处形状：
 //! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、`approved: true` 放行、
-//!    `mode=auto` 走 `PERMISSION_DENIED`（无人可授权时**不产卡**），其余产卡。
+//!    逐工具的永久放行上限、`mode=auto` 走 `PERMISSION_DENIED`（无人可授权时
+//!    **不产卡**），其余产卡。
 //! 2. **注册面投影 [`ApprovalGate`]**——`meta` / `name` / `risk_for` 原样透传；
 //!    `execute` 只在闸门放行时才落到内层。这条是 vdfs / web / mcp / skill 都受益的
 //!    那条唯一路径（`DefaultToolVisitor::put`）。
@@ -179,6 +180,44 @@ fn dynamic_risk_from_risk_for_is_what_gate_uses() {
     assert_eq!(
         payload["failure_kind"].as_str(),
         Some(failure_kind::NEEDS_APPROVAL)
+    );
+}
+
+/// **第三档「永久放行」**：该工具的授权上限放行，且只对该工具生效。
+///
+/// 与会话阈值两格对照：阈值是全局的，授权是逐工具的——一个把授权当成
+/// 第二个全局阈值的实现能过前半格，却会让另一个工具同档调用也放行。
+#[test]
+fn per_tool_grant_ceiling_allows_only_that_tool() {
+    let c = ctx();
+    c.set(APPROVAL_GRANTS, json!({"shell": "high"}).to_string());
+
+    let shell = StubTool::new("shell", CapabilityRiskLevel::High);
+    assert!(
+        approval_gate(&c, &*shell, &json!({})).unwrap().is_none(),
+        "本次风险 ≤ 该工具上限 ⇒ 放行"
+    );
+
+    let other = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    assert!(
+        approval_gate(&c, &*other, &json!({})).unwrap().is_some(),
+        "授权只管自己那一格，别的工具不继承"
+    );
+}
+
+/// 上限低于本次风险 ⇒ 仍然审批：授权是上限，不是「这个工具从此不问」。
+#[test]
+fn grant_ceiling_below_the_call_risk_still_asks() {
+    let tool = StubTool::new("shell", CapabilityRiskLevel::High);
+    let c = ctx();
+    c.set(APPROVAL_GRANTS, json!({"shell": "medium"}).to_string());
+    let payload = approval_gate(&c, &*tool, &json!({"command": "rm -rf /"}))
+        .unwrap()
+        .expect("High > 上限 Medium ⇒ 仍要审批");
+    assert_eq!(
+        payload["prompt"]["risk_level"].as_str(),
+        Some("high"),
+        "卡上的风险档是调用自己的（前端据此决定「永久放行」抬到哪一档）"
     );
 }
 

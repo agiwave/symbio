@@ -42,7 +42,7 @@ impl: partial
 | 会话多开 | 单 `activeId`，切会话靠重挂载；真多标签未做 | §3 P1-4（高档）、§5 边界 |
 | 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
 | 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
-| 工具授权 | 「每次问 / 本会话放行」两档已在确认卡上（§11）；第三档「永久放行」没有落点——跨会话的授权清单不存在 | §3 P2-3 |
+| 工具授权 | 「每次问 / 本会话放行 / 永久放行」三档已在确认卡上（§11）；永久放行是逐工具的风险上限，清单住会话插件全局配置 | §3 P2-3 |
 | 用量与成本 | 用量（token）已在读数面板里；**钱**还没有——`model` 没有价格字段，`session/stats.cost` 记的是时延不是钱 | §3 P2-4 |
 | 分支 | 消息是 `parent_id` 树，但**重试是替换式**（删掉失败轮、按普通新轮重来），日志上因此不产生第二支——界面没有候选可切 | §3 P2-5 |
 | 消息操作 | 有编辑，无「编辑后重发」，无悬浮操作条 | §3 P3 |
@@ -181,8 +181,9 @@ impl: partial
   [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5）。
   **不做 diff**：变更账记的是「谁在哪一轮改过这个路径」，`artifact.added` 不带写入前全文，
   没有旧内容就没有 diff 可画；把它画出来必然是在编旧内容（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")）。
-- **P2-3 工具授权分级**：`UserPromptNode.vue` 有 approve/reject 但无「本次会话放行」→ 高频打扰。
- 按危险度分级（shell / 写文件 / 删文件）+ 三档授权（每次问 / 本会话放行 / 永久放行）。
+- **P2-3 工具授权分级** ✅ 已落地（见 §11）—— 确认卡三档放行：批准本次 / 本会话放行（抬会话阈值）/
+ 永久放行（抬该工具上限，跨会话生效，撤销在设置页删行）；按危险度分级（shell / 写文件 / 删文件）。
+  裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系")。
 - **P2-4 用量与成本**：多供应商 LLM 却零用量可。会话头 / 模型条目显示累计 token；
  成本折算依赖 `model` 插件是否已有价格字段（**若无，需后端先补**）。
 - **P2-5 分支切换 UI**：`parent_id` 树已建，重试已产生分支但用户看不。
@@ -427,7 +428,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | 内容 | 实现落点 |
 |---|---|
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
-| P2-3 授权分级（前两档）：确认卡三键——批准本次 / 本会话放行 / 拒绝。「本会话放行」把会话阈值抬到本次调用的风险档，**同档及以下从此不再问**；卡上没有风险档时不出这一键（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::requires_approval`（`risk > threshold`），阈值来自 `ctx[RISK_LEVEL]`（会话 metadata 的 `risk_level` 经 `resolve_session_params` 落进 ctx）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` 钉住「抬一档 ⇒ 不再问、方向可复算」；前端：`components/message/InteractionNode.vue`（第三键；档位校验走 `isSessionRiskLevel`，不在组件里手写词表）+ `ALLOW_FOR_SESSION_KEY`（注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降，已是该档就不写）+ `schemas/session_meta.ts`（`riskRankOf`，档位序取自词表数组）。**零新事实**：`authz.granted` 仍由「批准本次」写，抬阈值只改会话 metadata 的一个字段 |
+| P2-3 授权分级（三档）：确认卡四键——批准本次 / 本会话放行 / 永久放行 / 拒绝。本会话放行把**会话阈值**抬到本次调用的风险档（同档及以下在本会话里不再问）；永久放行把**该工具的上限**抬到本次风险档（跨会话生效，高于上限仍审批）；卡上没有风险档时两档都不出现（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::approval_basis(risk, threshold, approved, grant)`（三档依次为 approved / threshold / grant）——执行闸门与授权级联的记录方问同一个函数；阈值来自 `ctx[RISK_LEVEL]`，工具清单来自 `ctx[APPROVAL_GRANTS]`（`SessionConfig.approval_grants` 经 `resolve_session_params` 落进 ctx）；放行事实 `authz.granted` 带 `basis` 与 `grant`；写入口 `session/grant`（只抬不降，经 `PluginConfigFile::apply` 的唯一写路径）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` / `a_per_tool_grant_authorizes_only_that_tool` 钉住两档的边界。前端：`components/message/InteractionNode.vue`（四键；档位校验走 `isSessionRiskLevel`）+ `ALLOW_FOR_SESSION_KEY` / `ALLOW_FOREVER_KEY`（两个注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降）+ `services/sessionGrant.ts` + `schemas/session_meta.ts`（`riskRankOf`）。裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系") |
 | P2-4 用量（token 那一半）：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，单位走 `format_tokens` 全仓唯一实现）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
 | P2-2 变更账：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数；会话头的「变更」抽屉点行打开**当前**文件 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；`address` 是相对会话容器的 `workdir/<path>`，`has_wal` / `readable` 把三种空分开；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。前端：`services/sessionChanges.ts`（原样透传）→ `components/session/SessionChangesList.vue`（纯排版器，三种空各一句话）→ `ChatMainPanel.vue` 的抽屉（与读数共用一个抽屉位；开关 / 代次守卫 / 错误上浮）；点行上抛 `open-node`，经 `Session` → `VdfsSessionDetail` → `VdfsWorkbench`（拆父目录 + 末段名）→ `VdfsView` push `?select=`，由 `useVdfs` 落位（当前目录定在绑定地址自身；不在本页则 `stat` 一次），见 [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
 

@@ -52,11 +52,12 @@ vi.mock('@/composables/useChatConnection', async () => {
     expandSkeleton: vi.fn(),
     skeletonLazy: { onCollapse: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn(() => undefined) },
   }
-  // 三个注入键都要回：面板 provide 它们，缺一个就是挂载期炸「Invalid vnode type」
+  // 四个注入键都要回：面板 provide 它们，缺一个就是挂载期炸「Invalid vnode type」
   return {
     RESUME_KEY: Symbol('resume'),
     SKELETON_LAZY_KEY: Symbol('chat-skeleton-lazy'),
     ALLOW_FOR_SESSION_KEY: Symbol('chat-allow-for-session'),
+    ALLOW_FOREVER_KEY: Symbol('chat-allow-forever'),
     useChatConnection: () => hoisted.chat,
   }
 })

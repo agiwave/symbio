@@ -31,8 +31,8 @@ use crate::plugin_debug;
 use crate::symbio_core::chat_request;
 use crate::symbio_core::{
     capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE,
-    PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    APPROVAL_GRANTS, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use crate::symbio_core::{chat_node as cm, session_chat};
 pub(crate) use runner::TurnLauncher;

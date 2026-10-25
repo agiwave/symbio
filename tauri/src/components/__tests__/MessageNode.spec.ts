@@ -16,6 +16,7 @@ import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
 import {
   ALLOW_FOR_SESSION_KEY,
+  ALLOW_FOREVER_KEY,
   RESUME_KEY,
   SKELETON_LAZY_KEY,
   type ResumePayload,
@@ -572,13 +573,15 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
 })
 
 /**
- * 工具确认卡的三档 —— 批准本次 / 本会话放行 / 拒绝。
+ * 工具确认卡的四档 —— 批准本次 / 本会话放行 / 永久放行 / 拒绝。
  *
- * 「本会话放行」与「批准执行」写的是**两笔不同的事实**：前者改会话的执行阈值
- * （同档及以下从此不问），后者只批这一次。所以这里钉的不是「按钮在哪」，而是
- * 两件事：点错按钮不会顺手改另一件事实，点「本会话放行」时两笔的**顺序**也对。
+ * 三档「放行」写的是**三笔不同的事实**：批准只批这一次（`authz.granted`）；
+ * 本会话放行改会话的执行阈值（同档及以下在本会话里从此不问）；永久放行改
+ * 该工具的授权上限（全局配置 `approval_grants`，跨会话生效）。所以这里钉的不是
+ * 「按钮在哪」，而是三件事：点错按钮不会顺手改另一件事实，点两档放行时两笔的
+ * **顺序**也对（先改策略、再批准本次）。
  */
-describe('MessageNode：工具确认的三档', () => {
+describe('MessageNode：工具确认的四档', () => {
   /** 一张带风险档的工具确认卡（父骨架 + 一个 waiting 的 interaction 子节点） */
   function confirmTree(risk?: string): ChatNode {
     return msg({
@@ -607,16 +610,17 @@ describe('MessageNode：工具确认的三档', () => {
   }
 
   /**
-   * 挂载并接上两个注入口，返回「谁先被调到」的调用序列。
+   * 挂载并接上三个注入口，返回「谁先被调到」的调用序列。
    *
-   * 序列是判据的一部分：抬阈值必须先落定，恢复载荷里的 `risk_level` 才读得到
-   * 新档（`useChatConnection.resume` 从 store 取值）——反过来的话本次恢复仍按旧
-   * 阈值判，用户会看到「刚点了放行又弹一次」。
+   * 序列是判据的一部分：策略（阈值 / 工具上限）必须先落定，恢复载荷里的
+   * `risk_level` / 授权清单才读得到新值——反过来的话本次恢复仍按旧策略判，
+   * 用户会看到「刚点了放行又弹一次」。
    */
   function mountWithPorts(node: ChatNode) {
     const calls: string[] = []
     const resumed: ResumePayload[] = []
     const allowed: string[] = []
+    const granted: string[] = []
     const w = mount(MessageNode, {
       props: { node },
       global: {
@@ -632,18 +636,25 @@ describe('MessageNode：工具确认的三档', () => {
             calls.push(`allow:${risk}`)
             allowed.push(risk)
           },
+          [ALLOW_FOREVER_KEY]: async (tool: string, risk: string) => {
+            await Promise.resolve()
+            calls.push(`grant:${tool}:${risk}`)
+            granted.push(`${tool}:${risk}`)
+          },
         },
       },
     })
-    return { w, calls, resumed, allowed }
+    return { w, calls, resumed, allowed, granted }
   }
 
-  it('带风险档的确认卡给出第三档；不带档位时没有这一键', () => {
+  it('带风险档的确认卡给出两档放行；不带档位时两键都不出现', () => {
     const withRisk = mountWithPorts(confirmTree('high')).w
     expect(withRisk.find('button.up-allow-session').text()).toBe('本会话放行')
+    expect(withRisk.find('button.up-allow-forever').text()).toBe('永久放行')
 
     const bare = mountWithPorts(confirmTree()).w
     expect(bare.find('button.up-allow-session').exists()).toBe(false)
+    expect(bare.find('button.up-allow-forever').exists()).toBe(false)
     // 另外两键照旧
     expect(bare.find('button.up-approve').exists()).toBe(true)
     expect(bare.find('button.up-reject').exists()).toBe(true)
@@ -662,13 +673,26 @@ describe('MessageNode：工具确认的三档', () => {
     expect(resumed[0].targetId).toBe('tc1')
   })
 
-  it('「批准执行」不顺手抬阈值：两笔事实各走各的入口', async () => {
-    const { w, calls, allowed } = mountWithPorts(confirmTree('high'))
+  it('「永久放行」= 先把该工具的上限抬到这一档，再批准本次', async () => {
+    const { w, calls, resumed, granted } = mountWithPorts(confirmTree('high'))
+
+    await w.find('button.up-allow-forever').trigger('click')
+    await flushPromises()
+
+    expect(granted).toEqual(['shell:high'])
+    expect(resumed.map((p) => p.action)).toEqual(['approve'])
+    expect(calls).toEqual(['grant:shell:high', 'resume:approve'])
+    expect(resumed[0].targetId).toBe('tc1')
+  })
+
+  it('「批准执行」不顺手抬阈值或写授权：三笔事实各走各的入口', async () => {
+    const { w, calls, allowed, granted } = mountWithPorts(confirmTree('high'))
 
     await w.find('button.up-approve').trigger('click')
     await flushPromises()
 
     expect(allowed).toEqual([])
+    expect(granted).toEqual([])
     expect(calls).toEqual(['resume:approve'])
   })
 
@@ -687,6 +711,26 @@ describe('MessageNode：工具确认的三档', () => {
     })
 
     await w.find('button.up-allow-session').trigger('click')
+    await flushPromises()
+
+    expect(resumed.map((p) => p.action)).toEqual(['approve'])
+  })
+
+  it('写授权失败仍批准本次：同一纪律，永久放行不是批准的闸门', async () => {
+    const resumed: ResumePayload[] = []
+    const w = mount(MessageNode, {
+      props: { node: confirmTree('high') },
+      global: {
+        provide: {
+          [RESUME_KEY]: (p: ResumePayload) => resumed.push(p),
+          [ALLOW_FOREVER_KEY]: async () => {
+            throw new Error('boom')
+          },
+        },
+      },
+    })
+
+    await w.find('button.up-allow-forever').trigger('click')
     await flushPromises()
 
     expect(resumed.map((p) => p.action)).toEqual(['approve'])

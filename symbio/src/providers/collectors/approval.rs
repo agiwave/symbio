@@ -2,10 +2,11 @@
 //!
 //! ## 为什么住在这里
 //!
-//! 闸门判的是「工具自声明的风险 vs 会话阈值」，两个量都**在能力自己身上与请求信封上**：
-//! [`Capability::risk_for`] 由工具回答，`ctx[RISK_LEVEL]` / `ctx[MODE]` 由信封给出。
-//! 判据是纯比较（`tool_risk > threshold`），不吃任何插件的私有状态，因此**能**也**该**
-//! 住到收集器这一层——它是所有能力注册的收口点，把闸门搬到这里，`vdfs` / `web` /
+//! 闸门判的是「工具自声明的风险 vs 会话阈值 / 工具授权上限」，两个量都**在能力自己
+//! 身上与请求信封上**：[`Capability::risk_for`] 由工具回答，`ctx[RISK_LEVEL]` /
+//! `ctx[APPROVAL_GRANTS]` / `ctx[MODE]` 由信封给出。判据是纯比较
+//! （[`CapabilityRiskLevel::approval_basis`]），不吃任何插件的私有状态，因此**能**也
+//! **该**住到收集器这一层——它是所有能力注册的收口点，把闸门搬到这里，`vdfs` / `web` /
 //! `mcp` / `skill` 的裸注册也一并过闸。此前闸门长在 `local` 插件自己的注册循环上
 //! （`SecureToolWrapper`），结果就是「风险是宣传语、执行无人读」：`vdfs_delete` 声明
 //! `risk=High`，实测直接删（见 处理过程）。
@@ -19,8 +20,8 @@
 //! 装饰器只是它的注册面投影。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, MODE, RISK_LEVEL,
+    ApprovalGrants, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, APPROVAL_GRANTS, MODE, RISK_LEVEL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -36,19 +37,30 @@ pub(crate) fn threshold_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> Capabili
         .unwrap_or_default()
 }
 
-// 审批判定的**唯一比较**住在 `CapabilityRiskLevel::requires_approval`：
-// 需要审批 ⇔ 本次风险高于会话阈值且用户没批过。
+/// 从 `ctx[APPROVAL_GRANTS]` 读跨会话的永久放行清单；缺席 = 空清单。
+///
+/// 与会话阈值同一份配置解析点落进 ctx（D-170 决策 2）：清单与阈值是同一件策略的
+/// 两级（按工具 / 按会话），各从一处读才不会出现「阈值取这边、清单取那边」。
+pub(crate) fn grants_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> ApprovalGrants {
+    ctx.get(APPROVAL_GRANTS)
+        .map(|s| ApprovalGrants::parse(&s))
+        .unwrap_or_default()
+}
+
+// 审批判定的**唯一判据**住在 `CapabilityRiskLevel::approval_basis`：返回放行依据
+// （本次批准 / 会话阈值 / 工具上限），`None` 才需要审批。
 //
 // 为什么比较不写在这里：授权级联的记录方（`tool_dispatch` 的工具端口）与真正
-// 执行闸门（`approval_gate`）必须用同一份判据；两处各写一遍 `risk > threshold`，
+// 执行闸门（`approval_gate`）必须用同一份判据；两处各写一遍「risk > threshold」，
 // 改一处漏一处时两边都合法、没有任何东西会红。**判定位置不变**：执行闸门仍是
 // 唯一放行点，记录方只决定「这笔账是否已经可以派发」。
 
 /// 审批闸门的**唯一**判定：需要审批 ⇒ `Ok(Some(载荷))`；放行 ⇒ `Ok(None)`。
 ///
-/// 三条放行条件，任一成立即过：
-/// - `risk_for(args) ≤ threshold`（工具本次不比会话更危险）；
+/// 三条放行条件，任一成立即过（[`CapabilityRiskLevel::approval_basis`]）：
 /// - 参数带 `approved: true`（用户已在审批卡上批过）；
+/// - `risk_for(args) ≤ threshold`（工具本次不比会话更危险）；
+/// - `risk_for(args) ≤ grant`（该工具有永久放行上限，且本次风险不超过它）。
 ///
 /// 需要审批时，`mode=auto` ⇒ `PERMISSION_DENIED` 友好错误（无人值守，不产卡），
 /// 其余（含 `interactive` 与未设置）⇒ `NEEDS_APPROVAL` 载荷交编排层建 user_prompt 节点。
@@ -66,7 +78,12 @@ pub fn approval_gate(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let threshold = threshold_from_ctx(ctx);
-    let needs = tool_risk.requires_approval(threshold, is_approved);
+    // 清单按**能力名**（canonical name）记：`meta.name` 就是注册名，线上名只是它
+    // 的协议投影（D-170 决策 4）。
+    let grant = grants_from_ctx(ctx).ceiling(&meta.name);
+    let needs = tool_risk
+        .approval_basis(threshold, is_approved, grant)
+        .is_none();
 
     if !needs {
         return Ok(None);
@@ -94,7 +111,7 @@ fn confirm_prompt_payload(
     risk_level: CapabilityRiskLevel,
     mode: &str,
 ) -> Value {
-    let risk_str = format!("{risk_level:?}").to_lowercase();
+    let risk_str = risk_level.as_str();
     if mode == "auto" {
         return json!({
             "error": format!(

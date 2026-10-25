@@ -47,10 +47,11 @@ use crate::symbio_core::chat_node::{
 };
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
 use crate::symbio_core::{
-    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, CapabilityRiskLevel, Entity,
-    Event, ExecAbortSignal, ExecEventSink, LlmTurn, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt, Seq, Store, Verb, CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED,
-    EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE, RISK_LEVEL,
+    capability_resolve, llm_emit_message, llm_emit_state, tool_metas, ApprovalBasis,
+    ApprovalGrants, CapabilityRiskLevel, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn,
+    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store, Verb, APPROVAL_GRANTS,
+    CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE, MODE, RISK_LEVEL,
 };
 
 use super::loop_rows;
@@ -98,6 +99,11 @@ pub(crate) struct ToolPortCall {
     pub(crate) call: port::Call,
     /// 工具名（LLM 可见名；授权事实的载荷要它）。
     pub(crate) name: String,
+    /// 能力名（canonical name）——注册表里认回来的那一个。
+    ///
+    /// 永久放行清单按它记（D-170）：线上名只是协议字符集的投影，把线上名记进清单
+    /// 会让同一个工具因字符集不同而有两份授权。`None` = 注册表里没有可判的能力。
+    pub(crate) canonical: Option<String>,
     /// 这次调用的风险档。`None` = 注册表里没有可判的能力（route-only 工具）。
     pub(crate) risk: Option<CapabilityRiskLevel>,
     /// 参数里显式带了 `approved: true`（已由人工确认过）。
@@ -346,6 +352,8 @@ fn latest_model_response(facts: &[Event], turn: u64, drive: u64) -> Option<&Even
 struct ToolPortPolicy {
     known: Vec<String>,
     threshold: CapabilityRiskLevel,
+    /// 跨会话的永久放行清单（工具 → 上限），与会话阈值同一处解析（D-170）。
+    grants: ApprovalGrants,
     mode: String,
 }
 
@@ -353,15 +361,20 @@ impl ToolPortPolicy {
     async fn read(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let known: Vec<String> = tool_metas(ctx).await.into_iter().map(|m| m.name).collect();
         // 阈值读法与执行闸门同一处口径：`ctx[RISK_LEVEL]`，缺席 = `Medium`。
-        // 比较本身只问 `CapabilityRiskLevel::requires_approval`（唯一实现）。
+        // 放行依据只问 `CapabilityRiskLevel::approval_basis`（唯一实现）。
         let threshold = ctx
             .get(RISK_LEVEL)
             .map(|s| CapabilityRiskLevel::from_name(&s))
+            .unwrap_or_default();
+        let grants = ctx
+            .get(APPROVAL_GRANTS)
+            .map(|s| ApprovalGrants::parse(&s))
             .unwrap_or_default();
         let mode = ctx.get(MODE).unwrap_or_default();
         Self {
             known,
             threshold,
+            grants,
             mode,
         }
     }
@@ -483,11 +496,12 @@ impl ToolPort {
             .get("approved")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let risk = risk_of(ctx, name, args, &policy.known).await;
+        let resolved = risk_of(ctx, name, args, &policy.known).await;
+        let risk = resolved.as_ref().map(|r| r.risk);
         // 注册表里没有能力可判（route-only 工具）⇒ 放行是**交给下游路由闸门**
         // 的延迟判定；不能在这里凭一个猜出来的风险档拒绝它。
         let deferred = risk.is_none();
-        let risk_name = risk.map(risk_label).unwrap_or("unknown");
+        let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
 
         if let Err(e) = port::announce_with(
             self.facts.as_ref(),
@@ -497,7 +511,7 @@ impl ToolPort {
             serde_json::json!({
                 "tool": name,
                 "risk": risk_name,
-                "threshold": risk_label(policy.threshold),
+                "threshold": policy.threshold.as_str(),
                 "approved": approved,
                 "deferred": deferred,
             }),
@@ -513,6 +527,7 @@ impl ToolPort {
             model_id: model_id.to_string(),
             call: call.clone(),
             name: name.to_string(),
+            canonical: resolved.map(|r| r.canonical),
             risk,
             approved,
             invalid: false,
@@ -550,12 +565,35 @@ impl ToolPort {
         }
         for call in calls.iter_mut() {
             // 非法调用先判：它没有可执行的名字 / 参数，风险档再低也不能放行。
-            let granted = !call.invalid
-                && call
-                    .risk
-                    .is_none_or(|risk| !risk.requires_approval(policy.threshold, call.approved));
-            let risk_name = call.risk.map(risk_label).unwrap_or("unknown");
+            //
+            // 放行依据只问 `approval_basis`（与执行闸门同一份判据）：三档分别是
+            // 本次批准 / 会话阈值 / 该工具的永久放行上限。route-only 工具没有可判
+            // 的风险（`None`），放行延迟给下游路由闸门。
+            let (basis, grant) = match call.risk {
+                Some(risk) => {
+                    let grant = call
+                        .canonical
+                        .as_deref()
+                        .and_then(|tool| policy.grants.ceiling(tool));
+                    (
+                        risk.approval_basis(policy.threshold, call.approved, grant),
+                        grant,
+                    )
+                }
+                None => (None, None),
+            };
+            let granted = !call.invalid && (call.risk.is_none() || basis.is_some());
+            let risk_name = call
+                .risk
+                .map(CapabilityRiskLevel::as_str)
+                .unwrap_or("unknown");
             if granted {
+                // `grant` 只记生效的那一次上限：依据是会话阈值时，清单里有没有
+                // 这一条与本次放行无关，写进去会让事后读日志的人以为靠的是它。
+                let applied_grant = match basis {
+                    Some(ApprovalBasis::Grant) => grant,
+                    _ => None,
+                };
                 if let Err(e) = append_authz(
                     self.facts.as_ref(),
                     granted_event(
@@ -563,8 +601,12 @@ impl ToolPort {
                         self.user_seq,
                         &call.call,
                         &call.name,
-                        risk_name,
-                        call.risk.is_none(),
+                        GrantFacts {
+                            risk: risk_name,
+                            deferred: call.risk.is_none(),
+                            basis: basis.map(ApprovalBasis::as_str),
+                            grant: applied_grant,
+                        },
                     ),
                 ) {
                     crate::plugin_warn!(
@@ -806,6 +848,7 @@ impl ToolPort {
                 model_id: target.clone(),
                 call: port::Call::new("tool", id, attempt),
                 name: tool,
+                canonical: None,
                 risk: None,
                 approved: args
                     .get("approved")
@@ -857,8 +900,12 @@ impl ToolPort {
                         self.user_seq,
                         &call.call,
                         &call.name,
-                        "unknown",
-                        true,
+                        GrantFacts {
+                            risk: "unknown",
+                            deferred: true,
+                            basis: Some(ApprovalBasis::Approved.as_str()),
+                            grant: None,
+                        },
                     ),
                 )
             };
@@ -1178,13 +1225,13 @@ impl SessionDispatchPort {
     }
 }
 
-/// 风险档的线格式（与 `CapabilityRiskLevel` 的 serde 字面量同一套词）。
-fn risk_label(risk: CapabilityRiskLevel) -> &'static str {
-    match risk {
-        CapabilityRiskLevel::Low => "low",
-        CapabilityRiskLevel::Medium => "medium",
-        CapabilityRiskLevel::High => "high",
-    }
+/// 一次调用的可判风险：能力名与本次风险档。
+///
+/// 两个值必须一起回来——授权级联既要按风险判放行，又要按**能力名**查永久放行清单；
+/// 只回风险档会让记录方再认一次名字，两次解析就可能给出两个答案。
+struct ToolRisk {
+    canonical: String,
+    risk: CapabilityRiskLevel,
 }
 
 /// 这次调用的风险档。`None` = 注册表里没有可判的能力（route-only 工具）。
@@ -1193,14 +1240,31 @@ async fn risk_of(
     name: &str,
     args: &serde_json::Value,
     known: &[String],
-) -> Option<CapabilityRiskLevel> {
+) -> Option<ToolRisk> {
     let canonical = capability_resolve(name, known.iter().map(String::as_str))?;
     let visitor = ctx.get(CAPABILITY_VISITOR)?;
     let cap = visitor
         .get(canonical)
         .await
         .and_then(|r| r.cap().cloned())?;
-    Some(cap.risk_for(args))
+    Some(ToolRisk {
+        canonical: canonical.to_string(),
+        risk: cap.risk_for(args),
+    })
+}
+
+/// `authz.granted` 里除「哪一笔调用」之外的判定字段。
+///
+/// 打包成一个形状而不是四个位置参数：`risk` / `deferred` / `basis` / `grant` 同属
+/// 「这次凭什么放行」这一件事，散成位置参数时调用点要靠顺序记住谁是谁——顺序错了
+/// 编译器不报错，而载荷里 `basis` 与 `grant` 互换的后果是日志说错放行依据。
+struct GrantFacts<'a> {
+    risk: &'a str,
+    deferred: bool,
+    /// 放行依据（三档）；`None` = 没有依据可记（route-only 工具的延迟判定）。
+    basis: Option<&'a str>,
+    /// 生效的工具上限；仅 `basis = grant` 时有值。
+    grant: Option<CapabilityRiskLevel>,
 }
 
 fn granted_event(
@@ -1208,11 +1272,27 @@ fn granted_event(
     produced_by: u64,
     call: &port::Call,
     tool: &str,
-    risk: &str,
-    deferred: bool,
+    facts: GrantFacts<'_>,
 ) -> Event {
     let id = &call.id;
     let attempt = call.attempt;
+    let mut payload = serde_json::json!({
+        "key": id,
+        "port": "tool",
+        "id": id,
+        "attempt": attempt,
+        "tool": tool,
+        "risk": facts.risk,
+        "deferred": facts.deferred,
+    });
+    // 三档的差别就是这两个字段：`basis` 回答「凭什么没问」，`grant` 只在依据是
+    // 永久放行时出现（生效上限）。route-only 工具没有依据，两个字段就都不出现。
+    if let Some(basis) = facts.basis {
+        payload["basis"] = serde_json::json!(basis);
+    }
+    if let Some(grant) = facts.grant {
+        payload["grant"] = serde_json::json!(grant.as_str());
+    }
     Event::pending(
         format!("grant-{turn}-{id}-{attempt}"),
         EVENT_AUTHZ_GRANTED,
@@ -1222,15 +1302,7 @@ fn granted_event(
         "authorizer",
     )
     .with_produced_by(produced_by)
-    .with_payload(serde_json::json!({
-        "key": id,
-        "port": "tool",
-        "id": id,
-        "attempt": attempt,
-        "tool": tool,
-        "risk": risk,
-        "deferred": deferred,
-    }))
+    .with_payload(payload)
 }
 
 fn denied_event(turn: u64, produced_by: u64, call: &port::Call, tool: &str, why: &str) -> Event {

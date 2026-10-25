@@ -692,7 +692,9 @@ const BUILTIN_FACTS: &[FactDecl] = &[
         port: None,
         key: &["port", "id", "attempt"],
         expand: &[],
-        fields: &["key", "port", "id", "attempt", "tool", "risk", "deferred"],
+        fields: &[
+            "key", "port", "id", "attempt", "tool", "risk", "deferred", "basis", "grant",
+        ],
     },
 ];
 
