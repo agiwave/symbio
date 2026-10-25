@@ -40,11 +40,13 @@ fn lease_tail(snapshot: &[crate::symbio_core::Event]) -> &[crate::symbio_core::E
     &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..]
 }
 
-/// 本幕的身份与输入。
+/// 本幕落成事实之后，编排层**还需要**的那一样东西。
+///
+/// 身份三格（`turn_no` / `user_seq` / `drive_seq`）**不在这里**：它们已经写进
+/// `TurnState`，是同一批值的第二份拷贝。D-168 裁决 1 的同一条理由——「现在是哪一幕」
+/// 只能有一个真源，而它已经在 `TurnState` 里（终态还要改成由事实折出）。
+/// 留在这里的只有用户发言：它不落进任何一格，而 `execute_turn` 要用它判技能命中。
 pub(crate) struct Drive {
-    pub(crate) turn_no: u64,
-    pub(crate) user_seq: u64,
-    pub(crate) drive_seq: u64,
     /// 本轮用户发言（来自最近一条用户消息节点；无用户消息 ⇒ 空串）。
     pub(crate) user_text: String,
 }
@@ -259,12 +261,7 @@ pub(crate) fn begin_drive(
     turn.drive_seq = drive_seq;
     turn.now_ms = now_ms;
     turn.facts = store.range(Seq::new(0));
-    Ok(Drive {
-        turn_no,
-        user_seq,
-        drive_seq,
-        user_text,
-    })
+    Ok(Drive { user_text })
 }
 
 #[cfg(test)]

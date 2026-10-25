@@ -76,9 +76,9 @@ fn a_new_drive_lands_user_config_and_round_before_any_decision() {
 
     let drive = begin_drive(&context, &mut turn, &request(), None).expect("新轮开得了");
 
-    assert_eq!(drive.turn_no, 0);
+    assert_eq!(turn.turn_no, 0);
     assert_eq!(drive.user_text, "你好");
-    assert_eq!(drive.drive_seq, drive.user_seq, "新轮的幕锚就是用户格 seq");
+    assert_eq!(turn.drive_seq, turn.user_seq, "新轮的幕锚就是用户格 seq");
 
     let all = facts.range(Seq::new(0));
     assert_eq!(all[0].kind, EVENT_USER_MESSAGE, "用户格是第一条事实");
@@ -89,10 +89,10 @@ fn a_new_drive_lands_user_config_and_round_before_any_decision() {
     let config = fact(&all, EVENT_SESSION_CONFIG, 0);
     assert_eq!(
         config.event_id,
-        format!("cfg-0-{}", drive.drive_seq),
+        format!("cfg-0-{}", turn.drive_seq),
         "配置格的幂等键带幕号（同一轮可以有多幕）"
     );
-    assert_eq!(config.produced_by, Some(drive.user_seq));
+    assert_eq!(config.produced_by, Some(turn.user_seq));
     assert_eq!(
         config.payload["classify_enabled"], true,
         "配置事实记当轮生效值"
@@ -106,11 +106,11 @@ fn a_new_drive_lands_user_config_and_round_before_any_decision() {
     let round = fact(&all, EVENT_TURN_STAGE, 0);
     assert_eq!(round.payload["stage"], "round");
     assert_eq!(round.payload["round"], 0);
-    assert_eq!(round.produced_by, Some(drive.user_seq));
+    assert_eq!(round.produced_by, Some(turn.user_seq));
 
     assert_eq!(turn.turn_no, 0);
-    assert_eq!(turn.user_seq, drive.user_seq);
-    assert_eq!(turn.drive_seq, drive.drive_seq);
+    assert_eq!(turn.user_seq, turn.user_seq);
+    assert_eq!(turn.drive_seq, turn.drive_seq);
     assert_eq!(turn.facts.len(), all.len(), "本幕读到的事实切片已刷新");
 }
 
@@ -146,14 +146,14 @@ fn the_turn_number_continues_across_a_snapshot() {
         .expect("快照");
 
     let mut turn = TurnState::default();
-    let drive = begin_drive(&context, &mut turn, &request(), None).expect("新轮开得了");
+    begin_drive(&context, &mut turn, &request(), None).expect("新轮开得了");
 
-    assert_eq!(drive.turn_no, 1, "轮号接着水位走");
+    assert_eq!(turn.turn_no, 1, "轮号接着水位走");
     assert!(
         facts
             .range(Seq::new(0))
             .iter()
-            .any(|e| e.event_id == format!("st-1-0-round-{}", drive.drive_seq)),
+            .any(|e| e.event_id == format!("st-1-0-round-{}", turn.drive_seq)),
         "轮次事实的幂等键带幕号"
     );
     assert!(
@@ -181,10 +181,9 @@ fn a_resume_drive_reuses_the_open_turn_without_a_new_user_fact() {
         .expect("等待轮的用户格");
 
     let mut turn = TurnState::default();
-    let drive =
-        begin_drive(&context, &mut turn, &request(), Some("approve")).expect("续写幕开得了");
+    begin_drive(&context, &mut turn, &request(), Some("approve")).expect("续写幕开得了");
 
-    assert_eq!(drive.turn_no, 0, "续写记在原轮上");
+    assert_eq!(turn.turn_no, 0, "续写记在原轮上");
     assert_eq!(
         facts
             .range(Seq::new(0))
@@ -199,15 +198,15 @@ fn a_resume_drive_reuses_the_open_turn_without_a_new_user_fact() {
     let resume = fact(&all, EVENT_TURN_STAGE, 0);
     assert_eq!(resume.payload["stage"], "resume");
     assert_eq!(resume.payload["result"], "approve");
-    assert_eq!(resume.produced_by, Some(drive.user_seq));
+    assert_eq!(resume.produced_by, Some(turn.user_seq));
     assert_eq!(
-        drive.drive_seq,
+        turn.drive_seq,
         resume.seq.map(|s| s.value()).unwrap(),
         "续写幕的锚是恢复事实的 seq（不是原用户格）"
     );
     assert_eq!(
         fact(&all, EVENT_SESSION_CONFIG, 0).event_id,
-        format!("cfg-0-{}", drive.drive_seq),
+        format!("cfg-0-{}", turn.drive_seq),
         "同一轮的配置格按幕区分（续写可能带不同的请求级配置）"
     );
 }
@@ -231,10 +230,12 @@ fn a_second_resume_in_the_same_turn_gets_its_own_anchor() {
         .expect("等待轮的用户格");
 
     let mut turn = TurnState::default();
-    let first = begin_drive(&context, &mut turn, &request(), Some("approve")).expect("第一幕");
-    let second = begin_drive(&context, &mut turn, &request(), Some("answer")).expect("第二幕");
+    begin_drive(&context, &mut turn, &request(), Some("approve")).expect("第一幕");
+    let first_anchor = turn.drive_seq;
+    begin_drive(&context, &mut turn, &request(), Some("answer")).expect("第二幕");
+    let second_anchor = turn.drive_seq;
 
-    assert_ne!(first.drive_seq, second.drive_seq, "两幕的锚不同");
+    assert_ne!(first_anchor, second_anchor, "两幕的锚不同");
     let all = facts.range(Seq::new(0));
     let resumes: Vec<&Event> = all
         .iter()
@@ -249,7 +250,7 @@ fn a_second_resume_in_the_same_turn_gets_its_own_anchor() {
     );
     assert!(
         all.iter()
-            .any(|e| e.event_id == format!("cfg-0-{}", second.drive_seq)),
+            .any(|e| e.event_id == format!("cfg-0-{second_anchor}")),
         "第二幕的配置格用自己的锚"
     );
 }
@@ -273,8 +274,8 @@ fn a_second_new_drive_gets_the_next_turn_number() {
         .expect("先开一轮");
 
     let mut turn = TurnState::default();
-    let drive = begin_drive(&context, &mut turn, &request(), None).expect("第二轮开得了");
-    assert_eq!(drive.turn_no, 1, "轮号接着已有用户格数走");
+    begin_drive(&context, &mut turn, &request(), None).expect("第二轮开得了");
+    assert_eq!(turn.turn_no, 1, "轮号接着已有用户格数走");
     assert_eq!(count_user_messages(&facts.range(Seq::new(0))), 2);
     assert!(
         facts.range(Seq::new(0)).iter().any(|e| e.event_id == "u-1"),

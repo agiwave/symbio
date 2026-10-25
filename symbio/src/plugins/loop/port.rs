@@ -487,6 +487,67 @@ where
     failed_with_extra(store, call, turn, produced_by, why, serde_json::Value::Null)
 }
 
+/// 把一笔**没有等待方**的请求判死（`failed`，`why` 由调用方给）。
+///
+/// ## 什么时候会有这种请求
+///
+/// 上一段生命在「宣布」与「派出」之间被杀：两步之间还没有 `sent`，租约看护看不见
+/// 它（`stale_sent` 只看派出之后卡住的那些），于是它作为一笔开着的债留在日志里，
+/// 新的一幕照旧会把它选出来。等它的 future 已经没了，重试也没有对象——判死是唯一
+/// 如实的处置（与 [`reap`] 对 `awaited = false` 的口径同源：没人等的调用不留着占账）。
+///
+/// ## 为什么按端口取最老的一笔
+///
+/// 与 `ring::owed` 的遍历序一致：判死之后下一问问表就轮到下一笔。**不按幕锚收窄**
+/// ——遗留请求恰恰落在本幕锚之前，按锚收窄会让它既看不见又关不掉，派发行于是永远
+/// 欠着同一笔（D-166 给 `model` 端口立下的那条处置，本条是它的端口无关版本）。
+pub(crate) fn kill_dangling<S>(
+    store: &S,
+    port: &'static str,
+    why: &str,
+) -> Result<bool, AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let facts = store.range(crate::symbio_core::Seq::new(0));
+    let open = facts.iter().find(|r| {
+        r.kind == EVENT_REQUEST
+            && r.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+            && r.payload.get("via").is_none()
+            && !facts.iter().any(|e| {
+                matches!(e.kind.as_str(), EVENT_SENT | EVENT_FAILED)
+                    && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+                    && e.payload.get("id") == r.payload.get("id")
+                    && e.payload.get("attempt") == r.payload.get("attempt")
+            })
+    });
+    let Some(request) = open else {
+        return Ok(false);
+    };
+    let Some(id) = request.payload.get("id").and_then(|v| v.as_str()) else {
+        return Ok(false);
+    };
+    let attempt = request
+        .payload
+        .get("attempt")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    let call = Call::new(port, id, attempt);
+    failed_with(
+        store,
+        &call,
+        request.turn,
+        request.produced_by.unwrap_or(request.turn),
+        why,
+    )?;
+    crate::plugin_warn!(
+        "session",
+        "[Loop] `{port}` 请求 `{}` 没有等待方（上一段生命在宣布与派出之间结束）——判死",
+        call.id
+    );
+    Ok(true)
+}
+
 /// 与 [`failed_with`] 同一条 `failed`，但允许并进**失败载荷**（模型端口已产出的
 /// 半截正文 / 思考，见 [`dispatch_full`]）。
 pub(crate) fn failed_with_extra<S>(

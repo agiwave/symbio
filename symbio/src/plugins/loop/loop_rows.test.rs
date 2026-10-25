@@ -72,9 +72,10 @@ fn wired(names: &[&str]) -> Vec<Decl> {
     ROWS.iter()
         .map(|d| {
             let mut c = copy(d);
-            if names.contains(&c.name) {
-                c.by = Some(super::EXECUTE);
-            }
+            // 点名的接上执行体，**其余的一律断开**：不这样做，任何一行原本 `by`
+            // 非空的（端口派发行、外环的宣布行）都会按自己的 `prio` 抢在前面，
+            // 夹具就成了「全表的最小债」而不是「这几行之间的次序」。
+            c.by = names.contains(&c.name).then_some(super::EXECUTE);
             c
         })
         .collect()
@@ -670,20 +671,71 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
 }
 
 #[test]
+fn the_outer_ring_announces_before_it_dispatches() {
+    // 幕首三格：用户格（幕锚）+ 配置 + 轮次格。
+    let open = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", plain()),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let call = json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1});
+
+    // 第一笔债是**宣布**（57），不是派出：外环的两行是「宣布 → 派出」两个环步
+    // （D-168 与 D-166 同形）。这一格以前是 `execute-turn` 直接抢到，因为
+    // 「一幕欠一次往返」那时还不落成事实。
+    let picked = super::next_stage(&open, 1, 0, super::STAGE_ACTORS).expect("幕首欠一次宣布");
+    assert_eq!(picked.row, "announce-turn");
+    assert_eq!(picked.by, super::ANNOUNCE);
+
+    // 宣布之后：那笔账在日志上开着，轮到派发行。
+    let mut announced = open.clone();
+    announced.push(ev(1, "request", call.clone()));
+    let picked = super::next_stage(&announced, 1, 0, super::STAGE_ACTORS).expect("宣布之后欠派出");
+    assert_eq!(picked.row, "dispatch-turn");
+    assert_eq!(picked.by, super::TURN_RELAY);
+
+    // 派出且答回来：外环这一幕不再欠。轮内那台 host 的账不在这里（它的子集不含
+    // `execute-turn` / `close-turn`，那两行由 `next` 那张表回答）。
+    let mut answered = announced.clone();
+    answered.push(ev(1, "sent", call.clone()));
+    answered.push(ev(1, "response", call.clone()));
+    assert!(
+        super::next_stage(&answered, 1, 0, super::STAGE_ACTORS).is_none(),
+        "往返已有终局，外环这一幕收工"
+    );
+
+    // 派发被判死（中止 / 适配器失败）：宣布行**不许**重新开账。这一格是
+    // `turn_round.done` 存在的全部理由——`failed` 之后本幕没有收束格，
+    // 只看「该不该收束」会让宣布行开一笔又失败、再开一笔。
+    let mut failed = announced.clone();
+    failed.push(ev(
+        1,
+        "failed",
+        json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1, "why": "aborted"}),
+    ));
+    assert!(
+        super::next_stage(&failed, 1, 0, super::STAGE_ACTORS).is_none(),
+        "派发失败之后不许重新宣布一笔"
+    );
+}
+
+#[test]
 fn execute_row_closes_on_turn_closed() {
     let open = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "session.config", plain()),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let picked = drive(ROWS, &frozen(), &open, 0).expect("开着的轮次总是欠一次执行");
-    assert_eq!(picked.decl.name, "execute-turn");
-    assert_eq!(picked.decl.by, Some("execute"));
+    // 问的是**轮内那台 host**（`ACTORS` 子集）：外环的宣布行不在这张表里，
+    // 否则它按 57 < 60 抢在前面——那正是两台 host 各有行子集的理由。
+    let picked = super::next(&open, 1, 0, super::ACTORS).expect("开着的轮次总是欠一次执行");
+    assert_eq!(picked.row, "execute-turn");
+    assert_eq!(picked.by, super::EXECUTE);
 
     let mut closed = open.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "答完了"})));
     assert!(
-        drive(ROWS, &frozen(), &closed, 0).is_none(),
+        super::next(&closed, 1, 0, super::ACTORS).is_none(),
         "收束后无账可还"
     );
 
@@ -695,9 +747,9 @@ fn execute_row_closes_on_turn_closed() {
         "turn.stage",
         json!({"stage": "reflex", "round": 0, "result": "sk-1"}),
     ));
-    let picked = drive(ROWS, &frozen(), &reflex, 0).expect("快路空出的那笔账是收束");
-    assert_eq!(picked.decl.name, "close-turn");
-    assert_eq!(picked.decl.by, Some("close"));
+    let picked = super::next(&reflex, 1, 0, super::ACTORS).expect("快路空出的那笔账是收束");
+    assert_eq!(picked.row, "close-turn");
+    assert_eq!(picked.by, super::CLOSE);
 }
 
 /// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进轮内驱动**。
@@ -807,6 +859,9 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
+            // 外环的宣布行（D-168）：同一点上比执行行更靠前（57 < 60），
+            // 因为「一幕欠一次 `turn` 往返」的第一步是宣布它。
+            "announce-turn",
             "execute-turn",
             // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
             // （ `turn` / 步 2 的 `model` / 步 3 的 `tool`）；
@@ -838,6 +893,8 @@ fn rows_are_stable_and_globally_ordered() {
             crate::symbio_core::LatencyTier::Reflex,
             // 收束入格不调模型：反射档。
             crate::symbio_core::LatencyTier::Reflex,
+            // 宣布只是一笔入格（`request`），不调模型；派出才进深度档。
+            crate::symbio_core::LatencyTier::Fast,
             crate::symbio_core::LatencyTier::Deep,
             // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
             crate::symbio_core::LatencyTier::Fast,
@@ -2209,7 +2266,8 @@ fn the_row_table_and_the_binding_table_agree() {
         assert!(
             super::entry_of(by, super::ACTORS).is_some()
                 || super::head_entry_of(by, super::HEAD_ACTORS).is_some()
-                || super::report_entry_of(by, super::REPORT_ACTORS).is_some(),
+                || super::report_entry_of(by, super::REPORT_ACTORS).is_some()
+                || super::stage_entry_of(by, super::STAGE_ACTORS).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );
@@ -2370,6 +2428,15 @@ fn the_overlap_report_on_the_production_table() {
     // 步 5d 再给 `tools_open` 补了请求面（`request`），v11 又给 `model_open` 补了
     // 派发前格（`sent`，判「这一笔派出去了没有」）——凡是共用这个幕头的相交对，
     // 名单就一起变宽，这正是第 4 条要「点名而不只报非空」的理由。
+    // 外环宣布行那一对：`turn_round` 的读面（幕锚两格 + 协议四族的键）。
+    let turn_round: &[&str] = &[
+        "failed",
+        "request",
+        "response",
+        "sent",
+        "turn.stage",
+        "user.message",
+    ];
     let head: &[&str] = &[
         "chat.assistant.fallback",
         "chat.assistant.final",
@@ -2395,7 +2462,15 @@ fn the_overlap_report_on_the_production_table() {
             // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
             // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与
             // 收束 / 执行两行的 `(turn)` 不同，装载期不再报这两对。
+            //
+            // 外环宣布行（D-168）读的是 `turn_round`：那张视图的读面只含幕锚两格与
+            // 协议四族的键，因此与收束 / 执行两行在「本幕的协议格」这一点上相交。
+            // 名单显形而不是静默——这三对今天由前件与 `prio` 决出（55 < 57 < 60），
+            // 报告只知道它们相交、不知道这些。三对按表里的下标排序，故宣布行那两对
+            // 落在收束 / 执行之间与之后，与名单顺序一致。
+            ("close-turn", "announce-turn", turn_round),
             ("close-turn", "execute-turn", head),
+            ("announce-turn", "execute-turn", turn_round),
             // 租约看护读 `stale_sent`，它与三行 await 的前件折出同一批协议格。
             // `open-tools` 不再与 `lease` 相交（D-138）：创建行的 `response` 是
             // 逻辑键（它开的是 N 笔调用，不是某一次尝试），租约行的出口格收窄到

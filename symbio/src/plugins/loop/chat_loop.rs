@@ -39,7 +39,7 @@ mod compose;
 mod decide;
 pub(crate) mod delegate;
 pub(crate) mod drive;
-mod inputs;
+pub(crate) mod inputs;
 mod io;
 pub(crate) mod state;
 mod turn;
@@ -126,7 +126,7 @@ pub(crate) fn report_port(
 /// 判据**：把「谁先谁后」绑在装配次序上，下次调装配次序就会连带改掉模型看到的优先级。
 ///
 /// 全部为空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而各段皆空是常态）。
-fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
+pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     const ORDER: [context::SectionKind; 3] = [
         context::SectionKind::Recall,
         context::SectionKind::ReadySet,
@@ -395,7 +395,6 @@ pub async fn run_chat_loop(
         // 出口形态不变：运行器回 `aborted`，`turn_exec` 上抛
         // `TurnExecExit::Aborted`，走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
 
-        // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         // 轮次经 v2 运行器（[`super::turn_exec`]）执行——事实原生入格、prompt 从转写出、
         // 流式经 UiBridge 回同一出口、工具轮经三动作契约分发（工具节点与
         // 结果仍写进同一份对话图）；收口（步骤 5-7）与之共享。
@@ -403,162 +402,61 @@ pub async fn run_chat_loop(
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
         //
-        // ## 外面多了一层：端口 `turn`
+        // ── 步骤 4：`turn` 端口往返（外环：宣布 → 派出两个环步，D-168）─────────
         //
-        // 「这一轮欠一次 `turn` 调用」从函数调用变成**事实**：
+        // 「这一幕欠一次 `turn` 调用」是**事实**，不是一次函数调用：`announce-turn`
+        // 落 `request{port:turn}`、`dispatch-turn` 跑出 `sent` + `response` /
+        // `failed`，两步之间唯一的交接件是外环 host 的 `call` 槽。派发因此由
+        // **选债**触发，不由这里顺手调一次往返——崩在两步之间时，那笔请求留在
+        // 日志上开着，派发行能把它判死（`port::kill_dangling`），而不是无声地留在
+        // 那里让下一幕以为「已经派过了」。
         //
-        // 1. 决策者写 `request{port:turn}`（[`super::port::announce`]）；
-        // 2. 问表「`dispatch-turn` 欠不欠」——`request` 没落成或行表装载失败在这里
-        //    显形（而不是让一次没人承认的调用静默跑完）；
-        // 3. 引擎派发：跑执行体**之前**落 `sent`（带租约与尝试上限），`Ok` 落
-        //    `response`、`Err` 落 `failed`。运行器只做活，不写协议事实——它可能
-        //    不产任何事实就返回，而「派出去了」不能依赖它自觉。
+        // 逻辑 id 含**幕锚**（`drive_seq`）：续写幕复用同一轮号且 `request_round`
+        // 从 0 重来——只带轮号与往返号会与首幕撞成同一个 `id`，而首幕已经有过
+        // `sent`，幂等键命中之后派发行不欠，整轮会在派发处被拒。
         //
-        // 逻辑 id 含**请求轮次**：一幕可以有多次往返（auto 续写），每次是一次调用。
-        // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该落一次，
-        // 而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。落格与归档
-        // 由 `execute_turn` 做（唯一持写者令牌之处），这里只负责把「压成了什么」递过去。
+        // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该
+        // 落一次，而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。
         let consolidation = context.consolidated.take();
-        let store = match context.session.facts() {
-            Some(store) => store,
-            // `begin_drive` 已经拦过「临时会话无事实源」，走到这里就是内部错位。
-            None => {
+        let out = match super::stage_exec::drive_stage(super::stage_exec::StageDrive {
+            orchestrator,
+            orchestrator_arc: &orchestrator_arc,
+            ctx: &ctx,
+            sink: &sink,
+            context: &mut context,
+            turn: &mut turn,
+            inputs: &inputs,
+            user_text: drive.user_text.as_str(),
+            consolidation: consolidation.as_deref(),
+        })
+        .await
+        {
+            Err(e) => {
+                return finish_turn(
+                    &context,
+                    &sink,
+                    &turn,
+                    TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
+                        "端口 `turn` 的往返失败：{e:?}"
+                    ))),
+                )
+                .await;
+            }
+            // 环上一笔都没派出：宣布行没被选中，说明行表装载失败或本幕已经没有
+            // 可还的债。不给它一个「安静地不跑」的出口——那正是协议事实要堵的
+            // 失败形态（与 `NotOwed` 同一条理由）。
+            Ok(None) => {
                 return finish_turn(
                     &context,
                     &sink,
                     &turn,
                     TurnExit::Failed(crate::symbio_core::PluginError::InternalError(
-                        "端口 `turn` 需要持久会话（临时会话无事实源）".into(),
+                        "端口 `turn` 的往返没有派出（外环没有选中 `announce-turn`）".into(),
                     )),
                 )
                 .await;
             }
-        };
-        // 逻辑 id 必须带**幕锚**：续写幕（审批 / 问答恢复）复用同一轮号且
-        // `request_round` 从 0 重来——只带轮号与往返号会与首幕撞成同一个
-        // `id`，而首幕已经有过 `sent`；幂等键命中之后 `dispatch-turn` 行不欠，
-        // 整轮会在派发处被拒。幕锚是「这一幕」的唯一标识（与 `turn.stage` 同源）。
-        let call = super::port::Call::new(
-            "turn",
-            format!(
-                "turn-{}-d{}-r{}",
-                turn.turn_no, drive.drive_seq, turn.request_round
-            ),
-            1,
-        );
-        if let Err(e) = super::port::announce(store.as_ref(), &call, turn.turn_no, turn.user_seq) {
-            return finish_turn(
-                &context,
-                &sink,
-                &turn,
-                TurnExit::Failed(crate::symbio_core::PluginError::InternalError(format!(
-                    "端口 `turn` 的 request 落格失败：{e:?}"
-                ))),
-            )
-            .await;
-        }
-        // 派发前的事实切片必须是**刚写完 `request`** 的那一份：行欠不欠由引擎现读
-        // （`Dispatch::row_owed`），这里只声明这一笔站在 `dispatch-turn` 上。
-        let out = match super::port::dispatch(
-            store.as_ref(),
-            super::loop_rows::PORTS,
-            super::port::Dispatch {
-                call: &call,
-                turn: turn.turn_no,
-                produced_by: turn.user_seq,
-                row: "dispatch-turn",
-                now: turn.now_ms,
-                // 整轮往返等在当前 future 里；崩溃后恢复走新的一幕（新 id），
-                // 重试旧 id 只会留下一条没人接的 `request`。
-                awaited: false,
-            },
-            || {
-                super::turn_exec::execute_turn(super::turn_exec::ExecTurn {
-                    session: &context.session,
-                    provider: orchestrator.provider.clone(),
-                    parent: orchestrator.parent.clone(),
-                    ctx: ctx.clone(),
-                    system_prompt: &inputs.system_prompt,
-                    abort: turn.abort.clone(),
-                    root_id: &inputs.root_id,
-                    sink: &sink,
-                    user_text: drive.user_text.as_str(),
-                    turn_no: drive.turn_no,
-                    user_seq: drive.user_seq,
-                    drive_seq: drive.drive_seq,
-                    window_turns: orchestrator.session.context_window(),
-                    tools: &inputs.tools,
-                    // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
-                    // （它们的写方是 `derived_facts::record_learning`，见其文档）。
-                    recalled: turn.recall_view.as_ref(),
-                    skill_obs: &turn.skill_route,
-                    // 快路正文（S11 执行半边）：`Some` ⇒ 轮首 host 已选中
-                    // `policy.reflex` 并落了出口格，本轮不调模型（D-163）。
-                    reflex: turn.head_reflex.as_ref(),
-                    // 请求级前缀 = 请求级注入段的三段（见 request_view_prefix）。
-                    prefix: request_view_prefix(&inputs.request_sections),
-                    // 压缩的寄存位（S2.7-b2）：`None` = 本轮没压过（常态）。
-                    consolidation: consolidation.as_deref(),
-                    // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
-                    // 让「用户中途插话」**折进本轮**。抽干住在 session（队列与配置都在那边），
-                    // 驱动器经端口取——异步，因为动作面是异步的。
-                    supplements: Some({
-                        let session = context.session.clone();
-                        Arc::new(move || {
-                            let session = session.clone();
-                            let fut: std::pin::Pin<
-                                Box<
-                                    dyn std::future::Future<
-                                            Output = Option<crate::symbio_core::DrainedSupplement>,
-                                        > + Send,
-                                >,
-                            > = Box::pin(async move {
-                                let supplements: Option<crate::symbio_core::DrainedSupplement> =
-                                    session
-                                        .run_op(run_ops::TAKE_SUPPLEMENTS, ())
-                                        .await
-                                        .unwrap_or_else(|e| {
-                                            plugin_warn!(
-                                                "session",
-                                                "[Loop] 取出用户补充失败（本轮继续）: {e}"
-                                            );
-                                            None
-                                        });
-                                supplements
-                            });
-                            fut
-                        }) as super::turn_exec::SupplementFn
-                    }),
-                    supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                    // 批次边界汇报（缺口 4）的能力口：**只产措辞**——判定与落格
-                    // 都不在这里（见 `report_port` 的文档与 D-163）。`None` = compose
-                    // 产线关着，批次边界就不装派发点（关掉的开关不该在日志里
-                    // 每批边界留一串「有账没人还」）。
-                    report: orchestrator.compose_enabled.then(|| {
-                        report_port(
-                            orchestrator_arc.clone(),
-                            ctx.clone(),
-                            context.messages.clone(),
-                            turn.now_ms,
-                        )
-                    }),
-                    // 对话面开场白：轮首判决执行体的 `Escalate` 首响。落格在 `turn_exec`
-                    // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
-                    opening_text: turn.opening_text.as_deref(),
-                    opening_dialog: turn.opening_dialog.take(),
-                    presentation_tree: orchestrator.presentation_tree,
-                })
-            },
-            // `failed` 的 `why`：中止与失败是两种停法，闭集（`ClosureReason`）
-            // 管的是轮子，这里管的是这一次调用为什么没成功。
-            |e: &super::turn_exec::TurnExecExit| match e {
-                super::turn_exec::TurnExecExit::Aborted(_) => "aborted".to_string(),
-                super::turn_exec::TurnExecExit::Failed(err) => format!("failed: {err}"),
-            },
-        )
-        .await
-        {
-            Ok(res) => {
+            Ok(Some(Ok(res))) => {
                 // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
                 // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
                 // 不并入就只看得见、不落库（重启即丢）。
@@ -578,22 +476,24 @@ pub async fn run_chat_loop(
                 }
                 res.output
             }
-            Err(super::port::DispatchError::Actor(super::turn_exec::TurnExecExit::Aborted(
-                partial,
-            ))) => {
+            Ok(Some(Err(super::port::DispatchError::Actor(
+                super::turn_exec::TurnExecExit::Aborted(partial),
+            )))) => {
                 // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
                 // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
                 // （正文 / 思考 / 工具节点）随出口一路带到 `persist_failure`
                 // 并入格——它们是事实，不因没说完就不记。
                 return finish_turn(&context, &sink, &turn, TurnExit::Aborted(partial)).await;
             }
-            Err(super::port::DispatchError::Actor(super::turn_exec::TurnExecExit::Failed(e))) => {
+            Ok(Some(Err(super::port::DispatchError::Actor(
+                super::turn_exec::TurnExecExit::Failed(e),
+            )))) => {
                 plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
             // 记账面的失败（行不欠 / 事实落不进去 / 端口没声明）：不给它一个
             // 「安静地不跑」的出口——那正是协议事实要堵的失败形态。
-            Err(other) => {
+            Ok(Some(Err(other))) => {
                 plugin_warn!("session", "[Session] 端口 `turn` 派发失败: {other:?}");
                 return finish_turn(
                     &context,

@@ -100,6 +100,17 @@ const COURIER: &str = "courier";
 /// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
 /// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
 const RELAY: &str = "relay";
+/// 外环的**宣布**执行体（D-168）：`announce-turn` 行选中的动作——落 `request(port=turn)`。
+///
+/// 与 [`EXECUTE`] 分开：`execute-turn` 宣布的是**模型**往返（一次），这一条宣布的是
+/// **本幕的 `turn` 往返**（一幕一次）。两者都是「决策者写 `request`」，但粒度不同
+/// （一幕 vs 一次往返），共名会让动作只能按行名分支（D-118 决策 1–2）。
+const ANNOUNCE: &str = "announce";
+/// 外环的中转执行体（D-168）：`dispatch-turn` 行选中的动作——跑一次**已宣布**的 `turn` 往返。
+///
+/// 与 [`RELAY`] 分开同理由：`relay` 跑的是**一次模型往返**（几分钟的流式），这一条
+/// 跑的是**一整幕**（内部还会起轮内那台 host 的不动点环）。一个 `by` 一个动作。
+const TURN_RELAY: &str = "turn_relay";
 /// 轮首准备执行体（D-159）：`policy.recall` 行选中的动作。
 ///
 /// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
@@ -140,6 +151,46 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     // **收束格不在这里**（c）：`chat.assistant.final` / `chat.assistant.fallback`
     // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
     // `execute → close`），装载红（DE-015 §3.4 第 1 条）。
+    writes: &[
+        EVENT_ASSISTANT_OPENING,
+        EVENT_TURN_STAGE,
+        EVENT_TURN_DISPATCH,
+        EVENT_ARTIFACT_ADDED,
+        EVENT_SESSION_CONSOLIDATED,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// 外环宣布执行体的声明（D-168）：只落 `request`，不调模型、不跑工具。
+///
+/// `request` 也在 [`PROTOCOL_CELLS`] 的豁免里——两件事不冲突：豁免的是「协议格由
+/// 引擎写」，声明的是「这一格确由我写」（与 [`ACTOR_OPENER`] 同一条口径）。
+const ACTOR_ANNOUNCE: ActorDecl = ActorDecl {
+    name: ANNOUNCE,
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_REQUEST],
+};
+
+/// 外环中转执行体的声明（D-168）：跑一整幕。
+///
+/// ## 名单为什么是这几格
+///
+/// 与 [`ACTOR_EXECUTE`] 同一份：`execute_turn` 在轮内那台 host **之外**直接落的就是
+/// 这几格（开场白 / 阶段格 / 派发格 / 产物 / 压缩 / 授权拒绝）。轮内那张绑定表的每
+/// 一行各自声明自己那几格——名单的 owner 在那一行，**不**在这里抄一遍（D-160 的
+/// 同一条纪律：依赖图与对账名单都按行配，不按调用链配）。
+///
+/// ## 外环派发点为什么不做写入封闭
+///
+/// 这一条的动作窗口里嵌着一台**完整的 host**（轮内），它的每一行在自己的派发点已经
+/// 按名单对过账。在这一层再对一次，名单只能是把那张表整个抄过来（两处 owner，改一处
+/// 漂一处）；漏抄的形态是「外面判红、里面判绿」，比不判更难定位。外环因此只做
+/// **零格告警**（动作一格没写 ⇒ 它没干活），名单检查留在轮内那一层。
+const ACTOR_TURN_RELAY: ActorDecl = ActorDecl {
+    name: TURN_RELAY,
+    mode: LatencyTier::Deep,
+    reads: &[],
     writes: &[
         EVENT_ASSISTANT_OPENING,
         EVENT_TURN_STAGE,
@@ -436,6 +487,36 @@ pub(crate) static REPORT_ACTORS: &[ReportEntry] = &[ReportEntry {
     transitional: &[],
 }];
 
+/// **外环 host** 的执行体绑定表（D-168）：形状与前两张逐字相同，差别只在动作借走的
+/// 那片状态（[`super::stage_exec::StageStep`] = 编排器 + 会话上下文 + 本轮状态 +
+/// 本轮已备好的输入）。
+///
+/// 两行：宣布（`announce-turn`）与派出（`dispatch-turn`）。第三张表而不是塞进
+/// [`ACTORS`]，理由与 [`HEAD_ACTORS`] 逐字相同——动作要的东西轮内那张草稿一件都没有。
+pub(crate) struct StageEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::stage_exec::StageAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static STAGE_ACTORS: &[StageEntry] = &[
+    StageEntry {
+        decl: ACTOR_ANNOUNCE,
+        run: super::stage_exec::run_announce_turn,
+        transitional: &[],
+    },
+    StageEntry {
+        decl: ACTOR_TURN_RELAY,
+        run: super::stage_exec::run_dispatch_turn,
+        transitional: &[],
+    },
+];
+
+/// `by` → **外环**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn stage_entry_of(by: &'static str, actors: &'static [StageEntry]) -> Option<&'static StageEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
 /// `by` → **批次边界**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
 fn report_entry_of(
     by: &'static str,
@@ -482,6 +563,11 @@ fn report_actor_names(actors: &[ReportEntry]) -> Vec<&'static str> {
     actors.iter().map(|e| e.decl.name).collect()
 }
 
+/// 外环绑定表的名字集合。
+fn stage_actor_names(actors: &[StageEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
 ///
 /// **两台 host 并成一集**（D-159 裁决 3）：装载面仍然是一张表——七道检查判的是
@@ -493,6 +579,7 @@ pub(crate) fn actor_decls() -> Vec<ActorDecl> {
         .map(|e| e.decl)
         .chain(HEAD_ACTORS.iter().map(|e| e.decl))
         .chain(REPORT_ACTORS.iter().map(|e| e.decl))
+        .chain(STAGE_ACTORS.iter().map(|e| e.decl))
         .collect()
 }
 
@@ -861,6 +948,28 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    Decl {
+        name: "announce-turn",
+        prio: 57,
+        by: Some(ANNOUNCE),
+        // 只落一条 `request`：快速档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_round",
+            key: &["turn"],
+            eq: &[("open", Lit::Bool(false)), ("done", Lit::Bool(false))],
+        },
+        // 出口是「本幕的 `turn` 往返已有终局」，不是「本幕已收束」：派发失败那一笔
+        // 不会落收束格（`execute_turn` 没跑），用 `turn_closed` 关门会让它开着过完
+        // 整个幕、下一圈再宣布一笔。
+        until: &[Pattern {
+            source: "turn_round",
+            key: &["turn"],
+            eq: &[("done", Lit::Bool(true))],
+        }],
+        unless: &[],
+    },
     // ── 执行（决策行）────────────────────────────────────────────────────
     //
     // 只要本幕还开着、且手上没有一批没关掉的工具调用，就欠一次执行。它的**后果**是
@@ -909,11 +1018,22 @@ pub(crate) static ROWS: &[Decl] = &[
     //
     // 键取 **`(port, id, attempt)`**（D-138）：重试写出的 `request{attempt+1}`
     // 必须重新打开派发行；逻辑键会让上一 attempt 的 `sent` 把它提前关掉。
+    //
+    // ## 谁宣布（D-168）
+    //
+    // 宣布归 `announce-turn`（57），派出归本行。**宣布也是一行**，与 `model` 端口
+    // 同一条裁决（D-166）：宣布之后那笔账在日志上开着，派发由选债触发，崩在两步
+    // 之间时派发行能把那笔没有等待方的请求判死（`port::kill_dangling`）。
+    //
+    // 两条前件都不是「该不该收束」：`open = false` 挡住同一幕宣布两笔，
+    // `done = false` 挡住**派发失败之后重新宣布**——那一步不会落收束格
+    // （`execute_turn` 没跑），只看 `closeable` 会永远重来。两格都在 `turn_round`
+    // 上（不并进 `turn_head`：那会把 `request` 拉进出口线，与 `open-tools` 成假环）。
     Decl {
         name: "dispatch-turn",
         prio: 65,
-        // 未接线：`turn` 端口的往返就在整轮执行体里跑，`courier` 执行体随细端口接回。
-        by: None,
+        // 派出一整幕（内部还起轮内那台 host 的不动点环）：`turn_relay`。
+        by: Some(TURN_RELAY),
         // 派发本身不调模型（模型在执行体里）。
         tier: LatencyTier::Fast,
         expand: None,
@@ -1465,6 +1585,25 @@ pub(crate) fn next_report(
     let rows = host_rows(&frozen, &report_actor_names(actors));
     pick(&frozen, &rows, events, turn, now, |by| {
         report_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**外环**那一台（D-168）：一个幕里「这一轮请求还没宣布 / 还没派出」
+/// 那两笔债。
+///
+/// 与另外两台唯一的差别是绑定表与动作类型；行子集仍由名字派生。**幕号由事实给出**
+/// （调用方传的是 `last_open_turn` 折出来的那个），不是「第几次循环」——D-168 裁决 1
+/// 的同一条：`owed` 的输入里只能有一个「现在是哪一幕」。
+pub(crate) fn next_stage(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [StageEntry],
+) -> Option<Next<super::stage_exec::StageAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &stage_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        stage_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
     })
 }
 

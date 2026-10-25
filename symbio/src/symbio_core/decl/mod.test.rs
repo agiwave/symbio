@@ -113,6 +113,10 @@ fn builtin_loads_and_freezes() {
             "turn_head",
             "turn_stages",
             "turn_closed",
+            // 本幕的 `turn` 端口走到哪一步（v1 / D-168）：外环宣布行的唯一前件源，
+            // 单开一张而不并进 `turn_head`——并进会把 `request` 拉进出口线，
+            // 与 `open-tools` 连成假环。
+            "turn_round",
             "report_due",
             "reported_anchors",
         ]
