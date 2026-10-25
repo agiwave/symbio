@@ -50,9 +50,9 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Event,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    ReadingPanel, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, token_ledger,
+    transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginPayload, ReadingPanel, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
 };
 
 use super::plugin::SessionPlugin;
@@ -89,6 +89,25 @@ pub(crate) struct SessionStats {
     pub tiers: Vec<TierRow>,
     /// 成本台账（`cost_ledger` 视图原样序列化）。
     pub cost: serde_json::Value,
+    /// 用量台账（`token_ledger` 视图原样序列化）：`{ by_principal: { <主体>: {
+    /// principal, input, output, measured } }, input, output, calls }`，按主体字典序。
+    ///
+    /// ## 为什么与 [`Self::cost`] 是两列
+    ///
+    /// `cost` 是**时间**（事件的 `cost_ms`，按事件写出方累计），本列是 **token**
+    /// （应答载荷的 `usage`，按内容主体累计）。观察对象与归组键都不同——合成一列
+    /// 会让「花了多久」与「用了多少」互相冒充，而两者没有换算关系。
+    ///
+    /// ## 「没测量」与「测到零」
+    ///
+    /// `calls: 0` + 三个零 = 这份事实源里没有一次带实测用量的应答（provider 没报
+    /// `usage`）；它与「每次都用了 0 个 token」由 `calls` 分辨，不靠补 0 编一个数
+    /// ——与 `context_watermark` 缺数整条不出现是同一条纪律。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ 全零）。
+    /// 钱的折算（价格 × 用量）不在这一列：`model` 今天没有价格字段，而按名字猜价格
+    /// 是给「换了个端点就全错」埋伏笔（[DE-020](../../../../docs/003-design/020-前端UI-UX.md "DE-020-前端UI-UX") §11 的前件表）。
+    pub tokens: serde_json::Value,
     /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
@@ -324,6 +343,9 @@ pub(crate) fn read(
     let latency = slo_report().read_all(&snapshot).value;
     let fallback = fallback_rate().read_all(&snapshot).value;
     let cost = cost_ledger().read_all(&snapshot).value;
+    // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
+    // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
+    let tokens = token_ledger().read_all(&snapshot).value;
     // 校准列（[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：与四列同一份
     // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
     let cal = calibration().read_all(&snapshot).value;
@@ -360,6 +382,8 @@ pub(crate) fn read(
 
     let cost = serde_json::to_value(&cost)
         .map_err(|e| PluginError::InternalError(format!("成本台账序列化失败：{e}")))?;
+    let tokens = serde_json::to_value(&tokens)
+        .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
     let calibration = serde_json::to_value(&cal)
         .map_err(|e| PluginError::InternalError(format!("校准序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
@@ -455,6 +479,7 @@ pub(crate) fn read(
         has_wal,
         tiers,
         cost,
+        tokens,
         calibration,
         checkpoint,
         invariants,

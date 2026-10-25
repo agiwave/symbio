@@ -4713,3 +4713,67 @@ mod dangling_round_tests {
         );
     }
 }
+
+// ── 应答载荷的实测用量（P2-4 的写侧）────────────────────────────────
+
+/// 判据：**「测到了」的唯一记号是 `usage` 这个键在不在**。
+///
+/// 三件事一起才叫判据（读侧 `token_ledger` 的 `measured` 就靠这个记号分辨
+/// 「没测量」与「测到零」）：
+///
+/// 1. 有实测 ⇒ 载荷带 `usage`，两侧各一；
+/// 2. provider 没给（`None`）⇒ 键**不出现**，不是 `usage: null`——后者在收数侧
+///    与「测到 0」同形，而两件事的处置完全不同；
+/// 3. 只报一侧（有的协议只报 `output_tokens`）⇒ 只写那一侧，缺的那侧不补 0；
+/// 4. 失败格（没有 `rt`）不带 usage——失败的那次往返没有实测可报。
+#[test]
+fn the_response_payload_carries_the_measured_usage() {
+    let facts = super::facts::node_facts(&None);
+    let turn = |usage: Option<crate::symbio_core::ModelUsage>| crate::symbio_core::LlmTurn {
+        text: "答".into(),
+        reasoning: String::new(),
+        tool_calls: Vec::new(),
+        finish: crate::symbio_core::ModelFinishReason::Stop,
+        cost_ms: 1,
+        usage,
+    };
+    let fields = |payload: &crate::symbio_core::LlmTurn| {
+        super::facts::output_fields(
+            "model-1-d0-r0",
+            "turn-1",
+            "session/main",
+            &facts,
+            Some(payload),
+        )
+    };
+
+    let both = fields(&turn(Some(crate::symbio_core::ModelUsage {
+        input: Some(1200),
+        output: Some(340),
+    })));
+    assert_eq!(both["usage"]["input"], serde_json::json!(1200));
+    assert_eq!(both["usage"]["output"], serde_json::json!(340));
+
+    // 没给：键不出现（`null` 会被读成「测到 0」）。
+    let none = fields(&turn(None));
+    assert!(
+        none.get("usage").is_none(),
+        "provider 没给就不能写 `usage`：{none}"
+    );
+
+    // 只报一侧。
+    let only = fields(&turn(Some(crate::symbio_core::ModelUsage {
+        input: None,
+        output: Some(7),
+    })));
+    assert_eq!(only["usage"]["output"], serde_json::json!(7));
+    assert!(
+        only["usage"].get("input").is_none(),
+        "缺的那侧不补 0：{only}"
+    );
+
+    // 失败格。
+    let failed =
+        super::facts::output_fields("model-1-d0-r0", "turn-1", "session/main", &facts, None);
+    assert!(failed.get("usage").is_none(), "{failed}");
+}

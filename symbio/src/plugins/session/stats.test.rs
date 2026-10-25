@@ -1736,3 +1736,108 @@ fn transcript_column_surfaces_tool_rows() {
         "非工具行不该带 tool：{entries:?}"
     );
 }
+
+// ── 用量列与面板那一段（P2-4 的后端半边）──────────────────────────────
+
+/// 一条 `response` 事实（端口 / 主题 / 可选实测用量）。
+fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<u64>)>) -> Event {
+    let mut payload = serde_json::json!({
+        "port": port,
+        "id": id,
+        "attempt": 1,
+        "principal": principal,
+    });
+    if let Some((input, output)) = usage {
+        let mut u = serde_json::json!({ "input": input });
+        if let Some(o) = output {
+            u["output"] = serde_json::json!(o);
+        }
+        payload["usage"] = u;
+    }
+    Event::pending(id, "response", Entity::Turn, Verb::Asserted, 0, "system")
+        .with_produced_by(1)
+        .with_payload(payload)
+}
+
+fn wal_with(tag: &str, events: Vec<Event>) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).unwrap();
+    for e in events {
+        store.append(e).unwrap();
+    }
+    wal
+}
+
+/// 判据：**「没测量」与「测到零」不是一件事**。
+///
+/// 三件事一起才叫判据：
+///
+/// 1. 只有带 `usage` 键的 `response{port=model}` 进账——不带用量的应答既不贡献
+///    token，也不进 `calls`（`calls` 数的是「测到过几次」，不是「发了几次请求」）；
+/// 2. 只报了一侧（有的协议只有 `output_tokens`）时另一侧读 0 而不是丢条目；
+/// 3. 一次都没测到 ⇒ 面板上空**没有**「用量」这一段——写一行「输入 0」等于替
+///    provider 编一个它没给的数（与上下文水位缺数整条不出现同一条纪律）。
+#[test]
+fn the_usage_column_counts_only_measured_responses() {
+    let wal = wal_with(
+        "token",
+        vec![
+            resp_event("m-r0", "model", "session/main", Some((1000, Some(200)))),
+            resp_event("m-r1", "model", "sub/worker", Some((500, None))),
+            // provider 没报 `usage`：不进账。
+            resp_event("m-r2", "model", "session/main", None),
+            // 别的端口的应答不带用量：混进来会把「一次往返」算成一次模型调用。
+            resp_event("c-a", "tool", "session/main", None),
+        ],
+    );
+
+    let got = read_at(&wal, crate::symbio_core::PRINCIPAL_MAIN);
+    assert_eq!(got.tokens["calls"], serde_json::json!(2), "{}", got.tokens);
+    assert_eq!(got.tokens["input"], serde_json::json!(1500));
+    assert_eq!(got.tokens["output"], serde_json::json!(200));
+    // 只报一侧的那一笔：另一侧是 0，条目仍在（按主体摊得开）。
+    assert_eq!(
+        got.tokens["by_principal"]["sub/worker"]["output"],
+        serde_json::json!(0)
+    );
+    assert_eq!(
+        got.tokens["by_principal"]["sub/worker"]["measured"],
+        serde_json::json!(1)
+    );
+
+    let usage = got
+        .panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("用量"))
+        .expect("测到过用量就必须有这一段");
+    let total = usage
+        .rows
+        .iter()
+        .find(|r| r.label == "合计")
+        .expect("有合计行");
+    assert_eq!(
+        total.value, "1.7k",
+        "1500 + 200 走 format_tokens 的唯一实现"
+    );
+
+    // 反向：一条带用量的都不给 ⇒ 整段不出现。
+    let none = wal_with(
+        "token-none",
+        vec![resp_event("m-r0", "model", "session/main", None)],
+    );
+    let bare = read_at(&none, crate::symbio_core::PRINCIPAL_MAIN);
+    assert_eq!(bare.tokens["calls"], serde_json::json!(0));
+    assert!(
+        !bare
+            .panel
+            .sections
+            .iter()
+            .any(|s| s.title.as_deref() == Some("用量")),
+        "一次都没测到就不该有这一段：{:?}",
+        bare.panel.sections
+    );
+}

@@ -98,7 +98,7 @@ pub(crate) fn output_fields(
         reasoning_id.as_deref(),
         Some(turn_root_id),
     );
-    serde_json::json!({
+    let mut payload = serde_json::json!({
         "turn_id": turn_root_id,
         "text": text,
         "text_id": text_id,
@@ -110,7 +110,24 @@ pub(crate) fn output_fields(
         // 引擎写这条协议事实，但正文属于**这一轮的执行主体**：重建节点按它定角色
         // （事件自身的 `actor` 是「谁写的」，这里是「内容是谁的」）。
         "principal": principal,
-    })
+    });
+    // 实测用量（provider 给的 `ModelUsage`）：**这一个键是「测到了」的唯一记号**，
+    // 与「用了 0 个 token」是两件事——所以缺席时不写 `usage: null`，而是不写这个键。
+    // 内层同理：只写测到的那一侧（有的协议只报 `output_tokens`）。
+    // 唯一读者是 `token_ledger` 投影（会话读数里的用量列），它按 `measured` 数条数。
+    if let Some(usage) = rt.and_then(|rt| rt.usage.as_ref()) {
+        if usage.input.is_some() || usage.output.is_some() {
+            let mut measured = serde_json::Map::new();
+            if let Some(v) = usage.input {
+                measured.insert("input".into(), serde_json::json!(v));
+            }
+            if let Some(v) = usage.output {
+                measured.insert("output".into(), serde_json::json!(v));
+            }
+            payload["usage"] = serde_json::Value::Object(measured);
+        }
+    }
+    payload
 }
 
 /// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。

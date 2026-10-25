@@ -319,8 +319,81 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: vec![perf, continuity, invariants, skills, commitments],
+        sections: match usage_section(stats) {
+            Some(usage) => vec![perf, usage, continuity, invariants, skills, commitments],
+            None => vec![perf, continuity, invariants, skills, commitments],
+        },
     }
+}
+
+/// 用量那一段（token，不是钱）。
+///
+/// ## 为什么「一次实测都没有」时整段不出现
+///
+/// `calls` 是「带实测用量的应答条数」。为 0 意味着 provider 一次都没报 `usage`
+/// （桩 / 自建端点 / 协议不给），此时写「输入 0 / 输出 0」就是在编一个数——
+/// 与 `context_watermark` 缺数整条不出现、`bar` 没有分母就不发是同一条纪律
+/// （[DE-020](../../../../docs/003-design/020-前端UI-UX.md "DE-020-前端UI-UX") §11 判据 4）。
+///
+/// ## 为什么没有「成本」这一行
+///
+/// 钱的折算要价格 × 用量，而 `model` 今天没有价格字段。界面写死一个单价等于替
+/// 用户拍一个他没同意过的价（同一条判据的另一面）。价格从配置来的时候，这里加
+/// 一行即可——数据已经在 `tokens` 列里。
+fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
+    let t = &stats.tokens;
+    let calls = t.get("calls").and_then(|v| v.as_u64()).unwrap_or(0);
+    if calls == 0 {
+        return None;
+    }
+    let num = |k: &str| t.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let input = num("input");
+    let output = num("output");
+    let mut rows = vec![
+        ReadingRow {
+            label: "输入".into(),
+            value: format_tokens(input),
+            hint: Some(format!("{calls} 次模型往返的实测合计")),
+            tone: ReadingTone::Normal,
+        },
+        ReadingRow {
+            label: "输出".into(),
+            value: format_tokens(output),
+            hint: None,
+            tone: ReadingTone::Normal,
+        },
+        ReadingRow {
+            label: "合计".into(),
+            value: format_tokens(input + output),
+            hint: Some("输入 + 输出；不含缓存命中与思考的单独计价".into()),
+            tone: ReadingTone::Normal,
+        },
+    ];
+    // 多主体（子智能体 / 委派）才逐条摊开；单主体时它上面的合计就是全部。
+    if let Some(by) = t.get("by_principal").and_then(|v| v.as_object()) {
+        if by.len() > 1 {
+            rows.push(ReadingRow {
+                label: "按主体".into(),
+                value: by
+                    .iter()
+                    .take(4)
+                    .map(|(p, e)| {
+                        let i = e.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let o = e.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
+                        format!("{p} {}", format_tokens(i + o))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                hint: Some("按内容的归属主体（不是写方）；本面板只列前 4 个".into()),
+                tone: ReadingTone::Normal,
+            });
+        }
+    }
+    Some(ReadingSection {
+        title: Some("用量".into()),
+        rows,
+        bar: None,
+    })
 }
 
 // ==================== 消息节点的读数（D-111） ====================
