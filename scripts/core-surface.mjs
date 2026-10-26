@@ -389,12 +389,52 @@ export function isSinkCandidate(row, coreConsumers) {
 }
 
 /**
- * 测试文件（命名约定见 `test-layout-audit.mjs`：`X.test.rs` 与 `tests.rs`）。
+ * 测试文件（命名约定见 `test-layout-audit.mjs`：`X.test.rs` 与 `tests.rs`），
+ * 外加**只在测试构建里存在的模块**（`#[cfg(test)] mod test_support;`）。
  *
  * **测试不是架构消费方**——见文件头口径 4。这条判据只有这一处实现，三个审计共用。
  */
 export function isTestFile(file) {
-  return file.endsWith('.test.rs') || path.basename(file) === 'tests.rs'
+  if (file.endsWith('.test.rs') || path.basename(file) === 'tests.rs') return true
+  return isCfgTestOnlyModule(file)
+}
+
+const PARENT_MODULE_CACHE = new Map()
+
+/**
+ * `#[cfg(test)] mod test_support;` 这类模块：文件名不是 `.test.rs`，但它**不参与
+ * 生产构建**。旧口径只看文件名，于是把其中的类型读成生产消费方——`EventStore`
+ * 因此在 C0 工作清单里（唯一「生产」消费方就是 `plugins/loop/test_support.rs`）。
+ *
+ * 判据取自声明方：同名 `mod` 声明紧前（允许空行与单行注释）必须是 `#[cfg(test)]`。
+ */
+function isCfgTestOnlyModule(file) {
+  const stem = path.basename(file, '.rs')
+  const dir = path.dirname(file)
+  let parentText = PARENT_MODULE_CACHE.get(dir)
+  if (parentText === undefined) {
+    parentText = null
+    for (const candidate of [path.join(dir, 'mod.rs'), `${dir}.rs`]) {
+      try {
+        parentText = fs.readFileSync(candidate, 'utf8')
+        break
+      } catch {}
+    }
+    PARENT_MODULE_CACHE.set(dir, parentText)
+  }
+  if (!parentText) return false
+  const lines = parentText.split('\n')
+  const decl = new RegExp(`^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?mod\\s+${stem}\\s*;`)
+  for (let i = 0; i < lines.length; i++) {
+    if (!decl.test(lines[i])) continue
+    for (let j = i - 1; j >= 0 && j >= i - 4; j--) {
+      const line = lines[j].trim()
+      if (!line || line.startsWith('//')) continue
+      return line === '#[cfg(test)]'
+    }
+    return false
+  }
+  return false
 }
 
 /**

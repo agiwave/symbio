@@ -15,9 +15,11 @@ exit: '可选批次：按 owner 搬投影实现与共享类型、把 schedule / 
 
 只有 A/B 稳定后才做，不是前置条件：
 
-- C0：按 owner 搬实现与共享类型（纯机械，不改行为 / 声明）——工作清单就是
-  `node scripts/core-export-audit.mjs --verbose` 的 `[L1]` 段（非内核账本里的单消费方
-  域出口）；`[ S]` 段是内核接缝，**不要**搬（core 内另有生产消费方，搬走当场编译不过）；
+- C0：**已判定无可搬条目**（D-187）：`node scripts/core-export-audit.mjs --verbose`
+  的 `[L1]` 段是**候选报告**——13 条逐条核过，全部命中配对契约 / 单一统计口径或机制
+  状态 / 跨 crate API / 闭集词汇·签名·安全面之一，搬走要先把私有面提成根出口或切出
+  第二份口径，与「纯机械」的前提相反。判据面同批修正：`#[cfg(test)] mod <stem>;`
+  声明的整文件测试模块算测试（`EventStore` 因此不在清单里）。
 - C0.5：`fire_hook` 与 `ROUTE_*` 常量一起搬出 core（D-184）——`fire_hook` 是
   session / loop 共用的机制助手，而 `ROUTE_HOOK_FIRE` 是它唯一的 core 依赖；两者
   分开搬会得到「core 依赖 host」或「core 内藏字面量」两者之一，都是漂移；
@@ -33,3 +35,9 @@ exit: '可选批次：按 owner 搬投影实现与共享类型、把 schedule / 
 - 2026-10-26：接收 B4 的两条 exit（B 阶段结构上不可达，D-186 / T-316 的收口记录）：
   「`core/mod.rs` 手改 = 0」归 C2（随 crate 边界消失），「删除只为可达而存的根导出」归 C0
   （C-002 下根出口是唯一通道，删一条 = 搬实现）。本任务因此与 A/B 父任务解耦，独立成立。
+- 2026-10-26：C0 收口为 **0 条可搬**（D-187）。`[L1]` 的 13 条逐条核过：配对契约
+  （`capability_resolve`）、单一统计口径 / 机制状态（`fallback_rate` / `slo_report` /
+  `check_all` / `creator_ids` / `logger_init`）、跨 crate API（两个 `logger_*`）、
+  闭集词汇·签名·安全面（两个 embedding 项、`EVENT_BUS_KIND_SYSTEM`、
+  `text_truncate_bytes`、`branch_hide_unselected`）。同批修正消费方口径：
+  `#[cfg(test)] mod <stem>;` 声明的整文件测试模块不算生产消费方（`EventStore` 退出清单）。

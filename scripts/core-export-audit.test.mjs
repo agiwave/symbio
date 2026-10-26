@@ -248,6 +248,25 @@ test('C-003 口径：测试文件不算架构消费方（生产 1 + 测试 1 ⇒
   assert.match(r.stderr, /单消费方/)
 })
 
+test('C-003 口径：`#[cfg(test)] mod test_support;` 不算生产消费方', () => {
+  // `test_support.rs` 命名不是 `.test.rs`，旧口径只看文件名 ⇒ 把测试助手读成生产消费方。
+  // 真仓的 `EventStore` 正是这么进了 C0 工作清单（唯一「生产」消费方是 loop 的测试助手）。
+  const fixture = (decl) => ({
+    [CORE_MOD]: 'mod actors;\npub use actors::AlphaThing;\n',
+    [ACTORS_MOD]: 'pub struct AlphaThing;\n',
+    'symbio/src/plugins/alpha/test_support.rs':
+      'use crate::symbio_core::AlphaThing;\npub fn s(_: AlphaThing) {}\n',
+    'symbio/src/plugins/alpha/mod.rs': decl,
+  })
+  const cfgTest = audit(fixture('#[cfg(test)]\nmod test_support;\n'))
+  assert.equal(cfgTest.status, 0, '只在测试构建里存在 ⇒ 合法根出口（仅测试在用）')
+
+  const production = audit(fixture('mod test_support;\n'))
+  assert.equal(production.status, 1, '没有 cfg(test) ⇒ 仍是生产单消费方')
+  assert.match(production.stderr, /单消费方/)
+})
+
+
 test('C-003 口径：core 内另一生产模块也在用 ⇒ 不算下放候选（放行，W1）', () => {
   // 一个符号只跨出 core 到一个插件，但**另一个 core 域**也在用它：下沉到那个插件当场
   // 编译不过（core 不得反向依赖插件）⇒ 它本来就该留根出口，不是「单消费方接缝」。
