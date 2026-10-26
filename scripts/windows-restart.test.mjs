@@ -61,6 +61,18 @@ async function waitFor(fn, timeout = 150000) {
  * 「waitFor timed out」，排查方向被引到"是不是太慢"上，而真因在另一个文件里。
  * **一条只能报"超时"的等待，把"已经失败"和"还没到"说成了同一件事。**
  */
+/**
+ * PID 复用：进程退出后 Windows 可能把这个号发给**另一个**进程——`processIdentity`
+ * 解析成功只证明「这个号上现在有活进程」，不证明「我们起的候选还活着」。候选已退出的
+ * 权威证据是监督器在 `candidate-exit-confirmed` 之前 `await child.finished`（本用例
+ * 另断言了 phase 顺序）；这里补的是一条独立交叉核对：那个 PID 现在跑的**不是**候选 exe。
+ */
+async function assertPidNotRunning(pid, exe) {
+  const now = await processIdentity(pid).catch(() => null);
+  assert.ok(!now || now.exe.toLowerCase() !== exe.toLowerCase(),
+    `pid ${pid} 仍在运行 ${exe}`);
+}
+
 const FAILED_PHASES = new Set(['failed-before-confirmed-stop', 'recovery-failed']);
 function throwIfFailed(status) {
   if (status?.phase && FAILED_PHASES.has(status.phase)) {
@@ -319,7 +331,7 @@ test('Windows restart: independent real processes only', {
     assert.equal(s.events.some(e => e.phase === 'building'), false);
     const phases = s.events.map(e => e.phase);
     assert.ok(phases.indexOf('candidate-exit-confirmed') < phases.indexOf('rollback-window'));
-    await assert.rejects(processIdentity(s.candidatePid), /Command failed/);
+    await assertPidNotRunning(s.candidatePid, s.candidate);
     assert.equal((await processIdentity(s.rollbackPid)).exe.toLowerCase(), oldExe.toLowerCase());
     assert.deepEqual(fs.readFileSync(oldExe), oldBytes);
   }, { ownProject: true });
@@ -343,7 +355,7 @@ test('Windows restart: independent real processes only', {
     fs.writeFileSync(c.cancelFile, 'cancel');
     assert.match((await outcome).message, /Cancelled/);
     const s = f.status(); assert.equal(s.phase, 'rolled-back');
-    await assert.rejects(processIdentity(s.candidatePid), /Command failed/);
+    await assertPidNotRunning(s.candidatePid, s.candidate);
     const phases = s.events.map(e => e.phase);
     assert.ok(phases.indexOf('candidate-exit-confirmed') < phases.indexOf('rollback-window'));
     assert.equal((await processIdentity(s.rollbackPid)).exe.toLowerCase(), oldExe.toLowerCase());
