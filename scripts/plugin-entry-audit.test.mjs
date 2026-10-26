@@ -713,6 +713,196 @@ test('E-009 不误报：测试文件里的注释引用（判定仍只剥注释�
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── E-009 后半（crate 化形态）：依赖边住在 Cargo.toml ─────────────────────
+//
+// 上面 10 条判的都是 `crate::plugins::<兄弟>`——那是**拆 crate 之前**的形态。拆之后
+// 兄弟插件是独立 crate，这个路径不可能存在；能写出违规的唯一动作换成「Cargo.toml 加
+// 一行依赖」。旧实现对清单一无所知 ⇒ 下列用例全部曾经是**全绿通过**的。
+//
+// 每个用例只改清单、不碰源码，正是为了把这件事钉死：守的若是源码，就守不住这条边。
+const manifest = (body) => `[package]\nname = "symbio-plugin-mcp"\n${body}`
+/**
+ * 只有清单、没有 `src/` 的插件目录会让 `route-facts` 的 `collectRs` 直接崩
+ * （它对 `src/` 做 `readdirSync`，不做存在性判断）——那是另一件事，但它会让本节的
+ * 用例以「脚本崩溃」而不是「判据命中」的方式失败，断言因此失去诊断价值。
+ */
+const mcpManifest = (body) => ({
+  'crates/symbio-plugin-mcp/Cargo.toml': manifest(body),
+  'crates/symbio-plugin-mcp/src/lib.rs': '\n',
+})
+const depHit = (line) =>
+  new RegExp(`\\[ERROR\\]\\s+E-009\\s+crates/symbio-plugin-mcp/Cargo\\.toml:${line}`)
+
+test('E-009 命中：清单 [dependencies] 声明兄弟插件', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dependencies]\nsymbio-plugin-web = { path = "../symbio-plugin-web" }\n`,
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
+test('E-009 命中：改名的依赖（`web = { package = "symbio-plugin-web" }`）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dependencies]\nweb = { package = "symbio-plugin-web", path = "../symbio-plugin-web" }\n`,
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
+test('E-009 命中：经 workspace 继承（`{ workspace = true }` 与 `x.workspace = true` 两种写法）', () => {
+  for (const line of [
+    'symbio-plugin-web = { workspace = true }',
+    'symbio-plugin-web.workspace = true',
+  ]) {
+    const r = audit({
+      ...CLEAN,
+      ...mcpManifest(`\n[dependencies]\n${line}\n`),
+    })
+    assert.equal(r.status, 1, `${line}\n${r.stdout}`)
+    assert.match(r.stdout, depHit(5), line)
+  }
+})
+
+test('E-009 命中：开发依赖同样是依赖边', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dev-dependencies]\nsymbio-plugin-web = { path = "../symbio-plugin-web" }\n`,
+    ),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
+test('E-009 命中：`symbio` 宿主门面进了 [dependencies]（它 pub use 全部插件）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(`\n[dependencies]\nsymbio = { path = "../symbio" }\n`),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, depHit(5))
+})
+
+test('E-009 不误报：`symbio` 只在 [dev-dependencies]（22 个插件的真实形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dev-dependencies]\nsymbio = { path = "../symbio" }\n`,
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：清单注释里提到兄弟插件名（composite 的真实形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dev-dependencies]\n# 与 \`symbio-plugin-agent\` 同一处境：这几条用例要一整棵装配树\n` +
+        `symbio = { path = "../symbio" }\n`,
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：依赖 `symbio-plugin-api`（宿主词汇层，不含任何插件实现）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      `\n[dependencies]\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n`,
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：清单里自身的 name 行', () => {
+  const r = audit({ ...CLEAN, ...mcpManifest('') })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 命中源码：`use symbio_plugin_web::…`（crate 化后的唯一 import 形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-mcp/src/caller.rs': 'use symbio_plugin_web::something;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /\[ERROR\]\s+E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/)
+})
+
+test('E-009 不误报：源码注释里的 `symbio_plugin_<兄弟>`（loop 的 session_port 真实形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-mcp/src/caller.rs':
+      '//! E-009 禁止 `use symbio_plugin_session`，于是这一侧只认端口。\npub fn f() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// `include!` 与 `#[path]` 不需要 Cargo 依赖就能把兄弟插件的源码文件搬进本 crate：
+// 清单层与 import 层全绿，零依赖却已经破了。这两条是边角写法，但公理的边界应该画在
+// 「物理上做不到」，而不是「通常没人这么写」。
+test('E-009 命中：`include!` 搬入兄弟插件源码', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-mcp/src/caller.rs':
+      'include!("../../symbio-plugin-web/src/schema.rs");\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/)
+})
+
+test('E-009 命中：`#[path]` 指向兄弟插件源码', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-mcp/src/caller.rs':
+      '#[path = "../../symbio-plugin-web/src/schema.rs"]\nmod web_schema;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/)
+})
+
+test('E-009 不误报：`include!` / `#[path]` 指向本 crate 内的文件', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-mcp/src/caller.rs':
+      'include!("generated.rs");\n#[path = "own/mod.rs"]\nmod own;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// 中转站：Rust 的 extern prelude 只含直接依赖，所以「没声明依赖却拿到类型」本不该发生，
+// 但 `pub use` 是一条合法转发链（mcp → deploy → web）。这条用例守的就是它。
+test('E-009 命中：非插件 crate 转发插件类型（`symbio-testkit` 的 `pub use`）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-testkit/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-testkit\/src\/lib\.rs:1/)
+})
+
+test('E-009 命中：`symbio-plugin-api` 也不得转发插件（它被全部插件依赖，最坏形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-api/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-plugin-api\/src\/lib\.rs:1/)
+})
+
+test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory 链接的载体）', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio/src/lib.rs': 'pub use symbio_plugin_session;\npub use symbio_plugin_web;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── E-010（已迁出）─────────────────────────────────────────────────────
 //
 // 原「消费方不得深引 `symbio_core::<域>::`」连同它在这里的 7 条用例一起迁到了
