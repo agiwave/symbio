@@ -70,6 +70,7 @@ pub const PLUGIN_ID_VDFS: &str = "vdfs";
 pub const PLUGIN_ID_WEB: &str = "web";
 
 /// 子 Agent 子树默认挂载的插件清单（按 `plugin_order` 排序）。
+#[rustfmt::skip]
 pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "event_bus", // 事件总线
@@ -93,6 +94,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
 ];
 
 /// **不可停用的插件**——界面自身的底座（停用其中一个，少的是整个界面）。
+#[rustfmt::skip]
 pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "vdfs", // VDFS 根（单槽归系统 Agent）

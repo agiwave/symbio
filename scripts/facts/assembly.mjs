@@ -141,6 +141,10 @@ function renderAssembly(root) {
     lines.push("");
   }
   lines.push("/// 子 Agent 子树默认挂载的插件清单（按 `plugin_order` 排序）。");
+  // 生成物必须与 `render` 逐字相等（`gen-facts --check`）；`cargo fmt --all` 会给
+  // 数组里的行尾注释补对齐，那会把生成物改成「手改过」的样子。跳过格式化，
+  // 让两侧对同一份文本达成一致。
+  lines.push("#[rustfmt::skip]");
   lines.push("pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[");
   for (const p of mounted) {
     lines.push(`    "${p.id}", // ${p.comment}`);
@@ -148,6 +152,7 @@ function renderAssembly(root) {
   lines.push("];");
   lines.push("");
   lines.push("/// **不可停用的插件**——界面自身的底座（停用其中一个，少的是整个界面）。");
+  lines.push("#[rustfmt::skip]");
   lines.push("pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[");
   for (const p of undisablable) {
     lines.push(`    "${p.id}", // ${p.comment}`);
