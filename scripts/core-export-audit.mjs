@@ -248,18 +248,22 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * 之前的 270→396 那次上调同理：拆 crate 后 `pub(crate) use` 全部升为 `pub use`
  * （跨 crate 必需），符号集实测**新增 127 / 消失 0**，不是公共面膨胀。
  *
+ * 395（2026-10-27，−2）：测试替身外置。`StubLlmAdapter` 与 `trivial_actor_spec` 的
+ * 消费方只有测试面，拆 crate 后 `cfg(test)` 对下游 crate 不生效（只在本 crate 编译
+ * 自己的测试时存在），于是它们一直以 `pub` 常开。搬进 `symbio-testkit`（插件以
+ * dev-dependency 引入）之后 core 的根出口不再为测试面买单——这是**真收窄**，
+ * 不是改口径。
+ *
  * 397（2026-10-27，+1）：`config_mount_dispatch` 出根。`impl_config_mount_vdfs!` 宏
  * 在**别的 crate 里展开** `$crate::…`，域模块 `plugin` 是 `pub(crate)` ⇒ 展开侧
  * `error[E0603]: module plugin is private`（setting / telegram 两个插件同时红）。
  * 宏引用**数不出来消费方**（消费方是宏调用点，源码里没有那条路径），所以唯一合规
  * 写法就是走根平铺。这是「拆 crate 收窄域可见性」漏掉的一处，不是新增共享类型。
  */
-// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）
+// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 397
-
-
+  : 395
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })

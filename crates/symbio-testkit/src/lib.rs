@@ -8,6 +8,14 @@
 //! 它们是**测试夹具**，不是生产声明——`#[cfg(test)]` 保证不进产物；生产声明仍由
 //! `plugins::loop::control_decl` 等 owner 文件交出。
 
+/// 测试替身：`StubLlmAdapter` / [`trivial_actor_spec`]。
+///
+/// 测试替身住**测试设施**：`symbio-core` 的公开面只装「被两处以上生产代码看见」的
+/// 东西，`StubLlmAdapter` / [`trivial_actor_spec`] 只有测试面消费，故归这里。
+pub mod stubs;
+
+pub use stubs::{trivial_actor_spec, StubLlmAdapter};
+
 #[cfg(test)]
 #[path = "lib.test.rs"]
 mod tests;

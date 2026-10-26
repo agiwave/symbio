@@ -44,7 +44,8 @@ pub use self::spec::{
     actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
 };
 // `trivial_actor_spec` 是**测试面**的平凡值构造（ADR-067：生产构造点按真实授权行立规格）。
-pub use self::spec::trivial_actor_spec;
+#[cfg(test)]
+pub(crate) use self::spec::trivial_actor_spec;
 
 // 仅测试面：这些符号在非测试构建里没有跨域消费者（用点就在各自的子模块内），
 // 但 `mod.test.rs` 经 `use super::*` 取用，故只在 `cfg(test)` 出根——与

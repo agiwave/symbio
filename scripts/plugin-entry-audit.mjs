@@ -841,6 +841,11 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // `Scope` 这类跨墙语法与签名类型，没有任何插件实现，也不反向依赖宿主——它是
   // 「内核只装语法、插件声明词汇」的那半边，与 `symbio_core` 同档而非族外实现面。
   'symbio_kernel',
+  // 测试设施（`[dev-dependencies]`，生产构建看不见）：`trivial_actor_spec` 与
+  // `StubLlmAdapter` 原住 `symbio_core` 的常开出口，拆 crate 后 `cfg(test)` 对下游
+  // 不生效，故搬 `symbio-testkit`。它**不含任何插件实现**，也不携带会话状态——
+  // 与 `symbio_providers` 的测试豁免同档，不是族外实现面。
+  'symbio_testkit',
   'serde',
   'serde_json',
   'async_trait',

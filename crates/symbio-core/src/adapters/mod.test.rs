@@ -50,30 +50,3 @@ fn tokens_are_zero_sized() {
     assert_eq!(std::mem::size_of::<FullModel>(), 0);
     assert_eq!(std::mem::size_of::<TokenIssuer>(), 0);
 }
-
-fn one(text: &str) -> Vec<PromptMessage> {
-    vec![PromptMessage {
-        role: "user".into(),
-        text: text.into(),
-        tool_call_id: None,
-        tool: None,
-        tool_calls: None,
-    }]
-}
-
-/// 桩的两种演练形态：确定性成功 / 确定性失败。
-#[tokio::test]
-async fn stub_adapter_succeeds_and_fails_deterministically() {
-    let ok = StubLlmAdapter::succeed("stub-model");
-    let tok = TokenIssuer::issue_deep();
-    let greeting = one("你好");
-    let out = ok.generate(&tok, &greeting).await.expect("成功桩必答");
-    assert!(out.contains("stub-model"), "{}", out);
-
-    let bad = StubLlmAdapter::always_fail("模型不可用");
-    let x = one("x");
-    assert!(
-        matches!(bad.generate(&tok, &x).await, Err(AdapterError::GenerationFailed(m)) if m.contains("不可用")),
-        "失败桩必须确定性失败（演练兜底）"
-    );
-}

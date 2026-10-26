@@ -216,7 +216,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
     assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
     assert_eq!(
-        symbio_core::trivial_actor_spec("session/main").pattern,
+        symbio_testkit::trivial_actor_spec("session/main").pattern,
         Pattern::Decider
     );
 }

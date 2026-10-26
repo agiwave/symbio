@@ -108,6 +108,9 @@ base64 = "0.22.1"
 tempfile = "3.27.0"
 
 [dev-dependencies]
+# 测试替身（`StubLlmAdapter` / `trivial_actor_spec`）—— 原住 core 的常开出口，
+# 拆 crate 后 `#[cfg(test)]` 对下游不可见，故搬 `symbio-testkit`，只以 dev 形态进来。
+symbio-testkit = { path = "../symbio-testkit" }
 tempfile = "3.27.0"
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { version = "1.53.1", features = ["test-util"] }

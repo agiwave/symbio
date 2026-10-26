@@ -334,7 +334,71 @@ fn two_finals_are_caught_by_n3() {
 // 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
 // 真实接线完全一致，只换适配器。
 
-use crate::adapters::{LatencyTier, LlmAdapter as _, StubLlmAdapter, TokenIssuer};
+use crate::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter, TokenIssuer};
+use crate::projection::transcript::PromptMessage;
+
+/// 零 LLM 桩的**本文件版**。
+///
+/// `StubLlmAdapter` 住 `symbio-testkit`（见该 crate 的 `stubs` 模块文档），而 core
+/// **不能**反向依赖测试设施——那会成环。故这里留一份只覆盖本文件三条演练路径的
+/// 最小实现：成功 / 确定性失败 / 注入时延。
+///
+/// 桩自身的判据（确定性）在 `symbio-testkit/src/stubs.test.rs` 守着；本文件只要求
+/// **行为与那份一致**，不重复断言。
+struct MinimalStub {
+    model: &'static str,
+    fail_with: Option<&'static str>,
+    delay_ms: u64,
+}
+
+impl MinimalStub {
+    fn succeed(model: &'static str) -> Self {
+        Self {
+            model,
+            fail_with: None,
+            delay_ms: 0,
+        }
+    }
+    fn always_fail(message: &'static str) -> Self {
+        Self {
+            model: "stub",
+            fail_with: Some(message),
+            delay_ms: 0,
+        }
+    }
+    fn with_delay(model: &'static str, delay_ms: u64) -> Self {
+        Self {
+            model,
+            fail_with: None,
+            delay_ms,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmAdapter for MinimalStub {
+    fn model_id(&self) -> &str {
+        self.model
+    }
+    async fn generate(
+        &self,
+        _tok: &FullModel,
+        messages: &[PromptMessage],
+    ) -> Result<String, AdapterError> {
+        if self.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        }
+        match self.fail_with {
+            Some(msg) => Err(AdapterError::GenerationFailed(msg.to_string())),
+            // 回显末条正文：与 `StubLlmAdapter` 同口径（旧签名是单段文本）。
+            None => Ok(format!(
+                "[{}] {}",
+                self.model,
+                messages.last().map(|m| m.text.as_str()).unwrap_or("")
+            )),
+        }
+    }
+}
 use crate::invariants::{budget_exceeded, unresolved_turns};
 use std::time::Instant;
 
@@ -405,7 +469,7 @@ async fn rehearse_reasoner_turn(
 /// 验收（步骤 5）：接入「真实模型」→ 真实对话 → N1/N3/N5 仍全绿。
 #[tokio::test]
 async fn reasoner_turn_keeps_all_invariants_green() {
-    let llm = StubLlmAdapter::succeed("stub-model");
+    let llm = MinimalStub::succeed("stub-model");
     let (store, outcome) = rehearse_reasoner_turn("写一首关于秋天的诗", &llm).await;
     let reply = outcome.expect("成功桩必答");
     assert!(reply.contains("stub-model"));
@@ -429,7 +493,7 @@ async fn reasoner_turn_keeps_all_invariants_green() {
 /// `rehearse_turn`：应答是彩排内定值，形状一条不少）。
 #[tokio::test]
 async fn reasoner_reply_reads_the_user_message_from_events() {
-    use crate::adapters::{StubLlmAdapter, TokenIssuer};
+    use crate::adapters::TokenIssuer;
 
     let store = EventStore::new();
     store
@@ -446,7 +510,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
         )
         .expect("用户消息必入库");
     let snapshot = store.range(crate::event::Seq::new(0));
-    let llm = StubLlmAdapter::succeed("stub-model");
+    let llm = MinimalStub::succeed("stub-model");
     let reply = llm
         .generate(
             &TokenIssuer::issue_deep(),
@@ -464,7 +528,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
 /// 验收（步骤 6 上半）：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。
 #[tokio::test]
 async fn reasoner_failure_produces_fallback_with_telemetry() {
-    let llm = StubLlmAdapter::always_fail("模型不可用");
+    let llm = MinimalStub::always_fail("模型不可用");
     let (store, outcome) = rehearse_reasoner_turn("任何话", &llm).await;
     assert!(outcome.is_err());
     let snapshot = store.range(crate::event::Seq::new(0));
@@ -493,7 +557,7 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
 #[tokio::test]
 async fn four_tier_budgets_are_measurable() {
     // 注入 120ms 时延：反射档（80ms）超预算，深度档（60s）预算内。
-    let llm = StubLlmAdapter::with_delay("stub-model", 120);
+    let llm = MinimalStub::with_delay("stub-model", 120);
     let (store, _) = rehearse_reasoner_turn("你好", &llm).await;
     let snapshot = store.range(crate::event::Seq::new(0));
     let cost_ms = snapshot.iter().find(|e| e.cost_ms > 0).map(|e| e.cost_ms);

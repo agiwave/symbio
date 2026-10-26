@@ -217,12 +217,14 @@ pub use actors::{
     actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
     actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
 };
-// 平凡值构造只在测试面有消费者（生产构造点按真实授权行立规格，ADR-067）。
-pub use actors::trivial_actor_spec;
 // 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
-// `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
-// （`derived_facts.test.rs` / `turn_exec.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
-// 没有消费者。故只在 `cfg(test)` 出根：出根是给测试用的，不出根不是把它们藏着。
+// `projection::reputation`）走**模块内**路径引用；core 外只有 `loop` 的两条**测试**
+// 按名字断言（`derived_facts.test.rs` / `turn_exec.test.rs`）。
+//
+// **常开 `pub`，不加 `cfg(test)`**：`cfg(test)` 只在本 crate 编译**自己的**测试时生效，
+// 别的 crate 依赖 core 时那个分支根本不存在——属性在这里藏不住任何东西。收回公开面
+// 的办法是把消费方搬走（测试替身搬到 `symbio-testkit` 就是这么做的），不是加属性。
+// 四个名字是承诺域的**事实名**（D-177 的词汇层），留在根出口是可接受的。
 pub use event::{
     EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
     EVENT_COMMITMENT_RELEASED,
@@ -248,8 +250,8 @@ pub use projection::readyset::{readyset, ReadySetView};
 pub use projection::recall::recall;
 pub use projection::reputation::reputation;
 pub use view::RecallView;
-// 检索视图的条目类型只在测试里被 core 外点名（降级用例要直接构造视图）——
-// 同 `unresolved_turns` 形态，`cfg(test)` 出根。
+// 检索视图的条目类型：core 外在 `loop` 的 `memory_events` / `skill_events` **生产代码**
+// 里被逐条读取（把 `RecallView.entries` 转成事件），不是只为测试而出根。
 pub use view::RecallEntry;
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
@@ -272,14 +274,14 @@ pub use adapters::{
 // `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
 // 锚点，另以根 `pub use` 出，见上。）
 pub use adapters::{AdapterError, FullModel};
-// 零 LLM 桩只在测试构建里存在（README §1.2 adapters 行）——`cfg(test)` 出根给下沉后的测试用。
-pub use adapters::StubLlmAdapter;
-// C4 判据（`unresolved_turns`）只在**测试**里经根出口用：生产侧没有任何调用点（`check_all`
-// 在 core 内走域内路径），下沉后的 `turn_runner.test.rs` 是唯一根出口消费者，而 C-002 禁止
-// 它深引 `symbio_core::invariants::…` ⇒ 同 `StubLlmAdapter` 一形态，只在 `cfg(test)` 出根。
+// C4 判据（`unresolved_turns`）：`loop` 的 `turn_exec/assemble.rs` 与 `turn_runner.rs`、
+// `session` 的 `store/wal.rs` 都**在生产路径**上调用它（C-002 禁止它们深引
+// `symbio_core::invariants::…`，故必须经根出口）。这里是真·跨插件消费，不是测试面残留。
 pub use invariants::unresolved_turns;
 // 预算判定（I3）随策略测试搬到插件侧：`check_all` 用固定声明预算，而策略用例要
-// 拧预算参数验证「判定随参数变」——同 `unresolved_turns` 形态，只在测试构建出根。
+// 拧预算参数验证「判定随参数变」。core 外消费方只有 `session` 的
+// `transcript/autonomous.test.rs`，但它属于**判据词汇**（与 `unresolved_turns` 同一族），
+// 拆 crate 后无法用 `cfg(test)` 只对下游可见，故常开 `pub`。
 pub use invariants::budget_exceeded;
 // 事实网格 → prompt 的双向完整性复核（D-048）：下沉后的运行器组装 prompt 时调它。
 pub use projection::prompt_fidelity::verify as verify_prompt_fidelity;
@@ -324,9 +326,13 @@ pub use authz::{
     CAP_DEFINE_WORK, CAP_EXTERNAL_EXECUTION, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN,
     PRINCIPAL_REFLEX, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
 };
-// 只在**测试**里被 core 外点名的行名 / 属主：生产侧没有任何 core 外消费方，
-// 非测试构建里出根就是几处死代码。`cfg(test)` 出根与 `EVENT_COMMITMENT_*` 同形态——
-// 出根是给测试用的，不是把它们藏着。
+// 行名 / 属主。四个名字的消费方**不同类**，别当成一组：
+// - `SESSION_OWNER`：**生产**消费方三处（`loop` 的 `memory_events` / `skill_events`、
+//   `session` 的 `stats`）；
+// - `PRINCIPAL_ARBITER` / `PRINCIPAL_WORKER`：只有 core 外测试点名
+//   （`derived_facts.test.rs` / `autonomous.test.rs`）；
+// - `PRINCIPAL_PEER`：core 内自用。
+// 前两个要真正收回公开面只能搬走消费方；`cfg(test)` 对下游 crate 不生效（见上）。
 pub use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, PRINCIPAL_WORKER, SESSION_OWNER};
 
 // ==================== LLM 契约 ====================

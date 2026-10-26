@@ -12,7 +12,10 @@
 //! 于是「数据在核内、读法在宿主」只能以自由函数表达——判的对象（规格）与构造的来源
 //! （表行）仍是单一链条，只是链条跨了 crate 边界。
 
-use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
+use symbio_kernel::actors::{ActorSpec, Pattern};
+// `Scope` 只被 `trivial_actor_spec`（`cfg(test)`）用到 ⇒ 非测试构建里引它必报 unused。
+#[cfg(test)]
+use symbio_kernel::actors::Scope;
 
 /// 模式判据——`ActorSpec` 生产构造点用的那一支，住在定义域内。
 ///
@@ -51,6 +54,7 @@ pub fn pattern_for_principal(principal: &str) -> Pattern {
 /// 放宽预算、根作用域）。`session/main` 因此持 `reply.*` 能收束，而
 /// `session/autonomous`（只持 `define.work`）照旧无发言权——「自主行为不得冒充
 /// 用户对话」这条不因平凡值而失效。
+#[cfg(test)]
 pub fn trivial_actor_spec(principal: impl Into<String>) -> ActorSpec {
     let principal = principal.into();
     ActorSpec {
