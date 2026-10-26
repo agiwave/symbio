@@ -91,7 +91,7 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 
 /** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['symbio/src', 'symbio_kernel/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。

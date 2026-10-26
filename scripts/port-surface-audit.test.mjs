@@ -22,9 +22,9 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./port-surface-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const EVENT_REL = 'symbio/src/symbio_core/event/mod.rs'
-const DECL_REL = 'symbio/src/symbio_core/decl/mod.rs'
-const SOLVER_REL = 'symbio/src/symbio_core/decl/ring.rs'
+const EVENT_REL = 'symbio_kernel/src/event/mod.rs'
+const DECL_REL = 'symbio_kernel/src/decl/mod.rs'
+const SOLVER_REL = 'symbio_kernel/src/decl/ring.rs'
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 端口表所在文件（脚本按「含 `PortDecl {` 的 .rs」扫取值名单，路径本身不钉死） */
 const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'

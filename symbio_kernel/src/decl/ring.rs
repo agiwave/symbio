@@ -43,8 +43,8 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use super::Frozen;
-use crate::symbio_core::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
-use crate::symbio_core::{Event, LatencyTier};
+use crate::event::{EVENT_FAILED, EVENT_RESPONSE, EVENT_SENT};
+use crate::{Event, LatencyTier};
 
 /// 信封三格：每条事实都带，因此**不**要求写进 `FactDecl.fields`（模块文档 §「模式
 /// 只做等值」）。第 3 条检查对它们放行，其余字段名一律要在声明里。
@@ -52,7 +52,7 @@ const ENVELOPE_FIELDS: &[&str] = &["turn", "seq", "ts"];
 
 /// 模式里的一个字面量。只覆盖 JSON 的三个标量型——键绑定也只认它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Lit {
+pub enum Lit {
     Bool(bool),
     Uint(u64),
     Str(&'static str),
@@ -60,29 +60,29 @@ pub(crate) enum Lit {
 
 /// 一条模式：`source` 上字段等值 + 键绑定。
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Pattern {
+pub struct Pattern {
     /// 事实名或视图名（二者共用一个名字空间，见 [`Frozen`]）。
-    pub(crate) source: &'static str,
+    pub source: &'static str,
     /// 绑定债标识的字段。空切片 ⇒ 这条源至多一笔债（例如按轮收束的格）。
-    pub(crate) key: &'static [&'static str],
+    pub key: &'static [&'static str],
     /// 字段等值约束。
-    pub(crate) eq: &'static [(&'static str, Lit)],
+    pub eq: &'static [(&'static str, Lit)],
 }
 
 /// 义务环的一行。
 #[derive(Debug, Clone)]
-pub(crate) struct Decl {
+pub struct Decl {
     /// 行的身份：日志、冲突报错、对拍都按它指认。
-    pub(crate) name: &'static str,
+    pub name: &'static str,
     /// **全局**裁决顺序：`(prio, name, key)` 升序，先小者胜。
     ///
     /// 与旧表的格内 `prio` 不同：义务环只有一个环、一次取最小，跨行必须可比。
-    pub(crate) prio: u8,
+    pub prio: u8,
     /// 执行体名。`None` ⇒ 恒 blocked、永不选中（「在等」的唯一声明位）。
-    pub(crate) by: Option<&'static str>,
+    pub by: Option<&'static str>,
     /// 这一行动作允许的时延档。
-    pub(crate) tier: LatencyTier,
-    pub(crate) owes: Pattern,
+    pub tier: LatencyTier,
+    pub owes: Pattern,
     /// 集合展开：`Some((list_field, element_key_field))` ⇒ `owes` 实例的
     /// `list_field` 是数组，**逐元素**开一笔债（DE-015 §3.3；`FactDecl.expand`
     /// 是它在事实侧的另一半）。
@@ -93,11 +93,11 @@ pub(crate) struct Decl {
     ///
     /// 只有 `owes` 展开：`until` / `unless` 按键命中，键已经唯一，再展开只会
     /// 把同一笔出口读成多笔。
-    pub(crate) expand: Option<(&'static str, &'static str)>,
+    pub expand: Option<(&'static str, &'static str)>,
     /// 任一命中（同键）即视为还清。
-    pub(crate) until: &'static [Pattern],
+    pub until: &'static [Pattern],
     /// 任一命中（同键）即挂起。
-    pub(crate) unless: &'static [Pattern],
+    pub unless: &'static [Pattern],
 }
 
 /// 一个**端口**的声明：适配器协议里那几项每端口不同、又必须被引擎与
@@ -116,38 +116,38 @@ pub(crate) struct Decl {
 /// 「派发时先落什么、等多久、试几次」。租约看护者与派发适配器都只读这张表，
 /// 不看对方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PortDecl {
+pub struct PortDecl {
     /// 端口名——`request` / `sent` / … 载荷里的 `port` 取值。
-    pub(crate) port: &'static str,
+    pub port: &'static str,
     /// 引擎在运行执行体**之前**落的那个事实名（协议族里的 `sent`）。
     ///
     /// 搬运行者不写它：它的 `run` 可能**不产生事实就返回**，依赖它自觉 ⇒
     /// 派发行永远不还清，而没有任何东西会红（DE-015 §2.3； 判据 2）。
-    pub(crate) before: &'static str,
+    pub before: &'static str,
     /// 租约：`sent` 之后多久没有应答算「卡住」（毫秒）。
-    pub(crate) lease_ms: u64,
+    pub lease_ms: u64,
     /// 最多尝试几次（含首次）。到顶之后租约看护者判死而不是再重试。
-    pub(crate) max_attempts: u64,
+    pub max_attempts: u64,
     /// 同一批次的子债是否允许并发派发（DE-015 §3.3）。
     ///
     /// **声明与策略分开**：这里只说「这个端口允许同批并发」；具体哪几条能同时在途
     /// 仍由执行层的风险档决定（`tools/dispatch/parallel.rs`）。`false` 是硬闸——
     /// 执行层不得以风险档为由绕过它。
-    pub(crate) concurrent: bool,
+    pub concurrent: bool,
 }
 
 /// 按端口名取声明。`None` = 没有这个端口（漏声明，不是默认值）。
-pub(crate) fn port_of<'a>(ports: &'a [PortDecl], name: &str) -> Option<&'a PortDecl> {
+pub fn port_of<'a>(ports: &'a [PortDecl], name: &str) -> Option<&'a PortDecl> {
     ports.iter().find(|p| p.port == name)
 }
 
 /// 一笔债的标识：模式 `key` 字段的 `(名字, 值)` 列表，按声明顺序。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Key(pub(crate) Vec<(String, String)>);
+pub struct Key(pub Vec<(String, String)>);
 
 impl Key {
     /// 人对得上的形状（日志与断言用）。
-    pub(crate) fn trace(&self) -> String {
+    pub fn trace(&self) -> String {
         self.0
             .iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -158,11 +158,11 @@ impl Key {
 
 /// 一笔当前欠着的账。
 #[derive(Debug, Clone)]
-pub(crate) struct Debt<'a> {
-    pub(crate) decl: &'a Decl,
-    pub(crate) key: Key,
+pub struct Debt<'a> {
+    pub decl: &'a Decl,
+    pub key: Key,
     /// `by = None` 或有 `unless` 命中：存在，但引擎不还。
-    pub(crate) blocked: bool,
+    pub blocked: bool,
 }
 
 impl PartialEq for Debt<'_> {
@@ -193,12 +193,7 @@ impl Debt<'_> {
 
 /// 全量欠账：每个 `Decl` × 每个 `owes` 实例，收口（有 `until`/`unless` 同键命中）
 /// 的不返回。`blocked` 的债**照样返回**——「在等」与「没事」必须可区分。
-pub(crate) fn owed<'a>(
-    rows: &'a [Decl],
-    frozen: &Frozen,
-    events: &[Event],
-    now: i64,
-) -> Vec<Debt<'a>> {
+pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -> Vec<Debt<'a>> {
     let mut debts = Vec::new();
     for decl in rows {
         let until = keys_of_all(decl.until, frozen, events, now);
@@ -225,7 +220,7 @@ pub(crate) fn owed<'a>(
 /// 按行点问（`plugins::loop::loop_rows::owes`）仍留给「刚写完 request，这一行
 /// 还欠不欠」的单点断言；**单环驱动**（一次取下一笔、按 `prio` 裁决）是
 /// 调度器唯一的选债口（D-118 决策 1–2）。
-pub(crate) fn drive<'a>(
+pub fn drive<'a>(
     rows: &'a [Decl],
     frozen: &Frozen,
     events: &[Event],
@@ -368,7 +363,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// | 6 | 执行体收口 | [`check_rows`] | `UnmannedRow` / `OrphanActor` / `ActorCannotClose` / `ActorModeTooNarrow` |
 /// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
 ///
-/// 除第 4 条（报告）以外，全部走同一个 `Err`：[`Builder::seal`] 是**唯一**的装载出口，
+/// 除第 4 条（报告）以外，全部走同一个 `Err`：[`crate::decl::Builder::seal`] 是**唯一**的装载出口，
 /// 声明侧与行侧共用下面这一个 [`Gap`] 类型。
 ///
 /// - [`Gap::NoExit`]：这一行没有 `until` / `unless` ⇒ 一旦开账就永远开账；
@@ -423,7 +418,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::UnknownReadView`]：执行体 `reads` 引用了未声明的视图——运行期静默返回空；
 /// - [`Gap::ActorWritesEngineCell`]：执行体将写协议四格里引擎独占的那些格（§2.3）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Gap {
+pub enum Gap {
     NoExit {
         row: &'static str,
     },
@@ -550,7 +545,7 @@ fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
     }
 }
 
-pub(crate) fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
+pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
     let mut gaps = Vec::new();
     let mut names = HashSet::new();
     for decl in rows {
@@ -824,11 +819,11 @@ fn walk(
 
 /// 一对**可能同时开账**的行（§3.4 第 4 条的报告单元）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Overlap {
+pub struct Overlap {
     /// 表内先后，不带裁决意味——谁先被派发由 `(prio, name, key)` 决，这里不判。
-    pub(crate) rows: [&'static str; 2],
+    pub rows: [&'static str; 2],
     /// 两边都当作前件的那些事实名（字典序，一对只列一条）。
-    pub(crate) facts: Vec<&'static str>,
+    pub facts: Vec<&'static str>,
 }
 
 /// 「会不会真的同时命中」是**运行期**的问题（要读日志），静态只能回答「可能」。
@@ -840,7 +835,7 @@ pub(crate) struct Overlap {
 /// 2. `key` 是同一组字段——不同键的两笔债本来不会撞在同一笔上；
 /// 3. `eq` 可满足：同一字段不许有两个不同字面量（`port=tool` 与 `port=model`
 ///    永不同时成立，报出来只会淹没真信号）。
-pub(crate) fn overlaps(rows: &[Decl], frozen: &Frozen) -> Vec<Overlap> {
+pub fn overlaps(rows: &[Decl], frozen: &Frozen) -> Vec<Overlap> {
     let mut out = Vec::new();
     for (i, a) in rows.iter().enumerate() {
         for b in rows[i + 1..].iter() {
@@ -884,7 +879,7 @@ fn eq_compatible(a: &Pattern, b: &Pattern) -> bool {
 ///
 /// **端口字段名从声明读，不写在本文件里**：`ring.rs` 出现端口字段名就是 PTS-002
 /// 判的「引擎读端口」（加端口 = 改引擎）。`FactDecl.port` 是它唯一的声明处。
-pub(crate) fn check_ports(rows: &[Decl], frozen: &Frozen, ports: &[PortDecl]) -> Vec<Gap> {
+pub fn check_ports(rows: &[Decl], frozen: &Frozen, ports: &[PortDecl]) -> Vec<Gap> {
     let mut gaps = Vec::new();
     let port_field = frozen.fact(EVENT_SENT).and_then(|f| f.port);
     for port in ports {

@@ -55,7 +55,8 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive', 'docs'])
-const SRC = path.join('symbio', 'src')
+/** 生产源码根：symbio 与内核 crate（D-188 C2a 后内核不再住 symbio/src）。 */
+const SRC_DIRS = [path.join('symbio', 'src'), path.join('symbio_kernel', 'src')]
 /** 命中形态：与 M6 的 S-012 同一族的「形状」判据，不取词表。
  *  `HIT`（非全局）给 `.test` 用；`HIT_G`（全局）给 `matchAll` 数出现次数用——
  *  带 `g` 的正则做 `.test` 是**有状态**的（`lastIndex` 会留在上一次匹配之后），
@@ -206,13 +207,13 @@ const regExpEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 console.log('--- panic-audit: 健壮性面登记对账（PN-001…003） ---')
 
-const srcDir = path.join(REPO_ROOT, SRC)
-if (!fs.existsSync(srcDir)) {
-  console.log(red(`[ERROR] PN-001 审计范围读不出：${SRC} 不存在（${REPO_ROOT}）`))
+const srcDirs = SRC_DIRS.map((rel) => path.join(REPO_ROOT, rel)).filter((d) => fs.existsSync(d))
+if (srcDirs.length === 0) {
+  console.log(red(`[ERROR] PN-001 审计范围读不出：${SRC_DIRS.join(' / ')} 都不存在（${REPO_ROOT}）`))
   process.exit(2)
 }
 
-const files = collectRs(srcDir)
+const files = srcDirs.flatMap((d) => collectRs(d))
 if (files.length === 0) {
   console.log(red('[ERROR] PN-001 审计范围读不出：一份非测试 .rs 都没收集到'))
   process.exit(2)

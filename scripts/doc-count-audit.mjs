@@ -141,7 +141,7 @@ function verifyProgramCount(root) {
  *  格子数同时是**可观测指标**：门禁每次通过都把 `实体 × 动词 = 格（已填）` 打出来，
  *  「网格在膨胀」这件事因此可被趋势读出，而不是靠谁去数表。 */
 function eventGridParity(root) {
-  const enumsRel = path.join(root, 'symbio', 'src', 'symbio_core', 'event', 'mod.rs')
+  const enumsRel = path.join(root, 'symbio_kernel', 'src', 'event', 'mod.rs')
   const planRel = path.join(root, 'docs', '003-design', '001-核心架构.md')
   if (!fs.existsSync(enumsRel) || !fs.existsSync(planRel)) return null
   const src = fs.readFileSync(enumsRel, 'utf8')
@@ -303,7 +303,7 @@ if (checkAll == null || facts == null || verifyPrograms == null) {
 // 网格两侧的来源在**夹具根**里本就不存在（它们要真实的 core 源码与计划文档）。
 // 因此这里不 exit 2，而是**出声跳过**——静默跳过才是这类守卫最安静的死法。
 if (grid == null) {
-  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio','src','symbio_core','event','mod.rs')} 或 01 §6 表）`)
+  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio_kernel','src','event','mod.rs')} 或 01 §6 表）`)
 }
 const docs = activeDocs(REPO_ROOT)
 const comments = activeComments(REPO_ROOT)

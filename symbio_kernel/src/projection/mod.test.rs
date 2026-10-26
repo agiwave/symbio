@@ -3,9 +3,9 @@
 //! 纯净性本身是**编译期**的（`new` 的泛型约束）；这里守的是二级：确定性可观测。
 
 use super::*;
-use crate::symbio_core::event::{Entity, Event, Verb};
-use crate::symbio_core::store::Store;
-use crate::symbio_core::view::Budget;
+use crate::event::{Entity, Event, Verb};
+use crate::store::Store;
+use crate::view::Budget;
 
 fn ev(id: &str, kind: &str, verb: Verb, turn: u64) -> Event {
     Event::pending(id, kind, Entity::Turn, verb, turn, "main").with_ts(1_000)
@@ -90,11 +90,11 @@ fn over_budget_projection_degrades_instead_of_erroring() {
 #[test]
 fn projection_runs_on_a_snapshot_without_any_store() {
     // 事件向量是普通数据；投影从不接触存储——这正是「签名无 &Store」的可运行证明。
-    let store = crate::symbio_core::store::EventStore::new();
+    let store = crate::store::EventStore::new();
     store
         .append(ev("u0", "user.message", Verb::Opened, 0))
         .expect("首插必成");
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let snapshot = store.range(crate::event::Seq::new(0));
 
     let p = seen_count_projection();
     let v = p.apply(&snapshot, 0, Budget::generous());

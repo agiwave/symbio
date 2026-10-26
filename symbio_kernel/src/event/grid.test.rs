@@ -5,7 +5,7 @@
 
 use super::super::event_node_of;
 use super::*;
-use crate::symbio_core::Event;
+use crate::Event;
 use serde_json::json;
 
 /// 表上事件名的条数 = 名字表里**事件名**常量的条数。

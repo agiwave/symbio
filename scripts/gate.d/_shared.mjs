@@ -178,7 +178,11 @@ export const BASELINE = {
   //   空清单全拒、无 scope = 宿主态、物理绝对路径同案；
   // ⑤ `agent/host/tests.rs` 3 条：`max_prompt_bytes` 超限即拒且作用域未发布、
   //   `max_tools` 遍历后才判（子树真贡献了工具才超）、限额达标静默放行。
-  rustTests: 2305,
+  // baseline-allow rustTests: 净减 64 条（2305→2241）——D-188 C2a 把 `event` / `store` /
+  // `projection::Projection` / `decl` / `LatencyTier` 的实现搬进 `symbio-kernel` crate，它们的
+  // 单元用例随之搬过去（同一批 64 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
+  rustTests: 2241,
+  kernelRustTests: 64,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。

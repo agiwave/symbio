@@ -180,6 +180,7 @@ function analyzePlugin(dirName, ids) {
 function scopeRows() {
   return [
     sharedScopeRow(ROOT, "symbio/src", [".rs"]),
+    sharedScopeRow(ROOT, "symbio_kernel/src", [".rs"]),
     sharedScopeRow(ROOT, "cli/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),

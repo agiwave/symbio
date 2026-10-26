@@ -23,6 +23,7 @@ const backendDir = repoRoot
 // 包名取自各成员 Cargo.toml 的 [package].name。
 const TEST_PKGS = [
   { pkg: 'symbio', baselineName: 'rustTests', baseline: BASELINE.rustTests },
+  { pkg: 'symbio-kernel', baselineName: 'kernelRustTests', baseline: BASELINE.kernelRustTests },
   { pkg: 'symbio-cli', baselineName: 'cliRustTests', baseline: BASELINE.cliRustTests },
   { pkg: 'symbio-tauri', baselineName: 'tauriRustTests', baseline: BASELINE.tauriRustTests },
 ]

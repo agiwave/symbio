@@ -170,6 +170,8 @@ if (CHURN) {
 }
 
 const CORE_REL = 'symbio/src/symbio_core'
+/** 内核 crate（D-188 C2a）：文件集标记住 `lib.rs`，与 core 的 `kernel.rs` 合并判定。 */
+const KERNEL_REL = 'symbio_kernel/src'
 /** 本脚本自己：CS-002 读它源码里的放宽痕迹 */
 const SELF_REL = 'scripts/core-shape-audit.mjs'
 
@@ -301,16 +303,19 @@ function traitShape(body) {
 }
 
 /**
- * 内核文件集：`kernel.rs` 的 `core-kernel-files:` 标记是**唯一声明处**。
+ * 内核文件集：`core-kernel-files:` 标记是**唯一声明处**。
  *
  * 为什么按文件而不是按目录：内核是**语法**的集合，语法声明散在域文件里
  * （`capability/mod.rs` 有 `Capability`/`Registry`，`vdfs/provider.rs` 有 `VdfsProvider`），
  * 按目录划会把整个域的行为也算进内核。文件集只回答「哪几个文件是内核边界」。
  *
+ * C2a 之后标记分居两处：`symbio_core/kernel.rs`（仍在 core 的语法）与
+ * `symbio_kernel/src/lib.rs`（已搬进内核 crate 的子集）。合并后的文件集才是判据范围。
+ *
  * 夹具仓库没有门面 ⇒ 返回 null，退回全 core 口径（夹具只验棘轮本身）。
  */
-function readKernelScope(coreDir) {
-  const file = path.join(coreDir, 'kernel.rs')
+function readKernelScope(dir, fileName) {
+  const file = path.join(dir, fileName)
   if (!fs.existsSync(file)) return null
   const m = fs.readFileSync(file, 'utf8').match(/^[ \t]*\/\/[ \t]*core-kernel-files:[ \t]*(.+)$/m)
   if (!m) return null
@@ -318,7 +323,7 @@ function readKernelScope(coreDir) {
   const abs = new Set()
   const missing = []
   for (const rel of rels) {
-    const p = path.join(coreDir, rel)
+    const p = path.join(dir, rel)
     if (!fs.existsSync(p)) missing.push(rel)
     abs.add(p)
   }
@@ -362,20 +367,41 @@ function measureCoreShape(coreDir, kernelFiles = null) {
   }
 }
 
+/** 合并多个扫描根的 trait 形状（C2a 起内核横跨 core 与 kernel 两个 crate）。 */
+function mergeShapes(parts) {
+  return {
+    rows: parts.flatMap((p) => p.rows),
+    all: parts.flatMap((p) => p.all),
+    values: {
+      traits: parts.reduce((n, p) => n + p.values.traits, 0),
+      methods: parts.reduce((n, p) => n + p.values.methods, 0),
+      defaults: parts.reduce((n, p) => n + p.values.defaults, 0),
+    },
+  }
+}
+
 const coreDir = path.join(ROOT, CORE_REL)
 if (!fs.existsSync(path.join(coreDir, 'mod.rs'))) {
   console.error(red(`✗ 读不出 core 范围：${CORE_REL}/mod.rs 不存在（root=${ROOT}）—— 判据没有输入，宁红不静默`))
   process.exit(1)
 }
-const kernelScope = readKernelScope(coreDir)
-if (kernelScope && kernelScope.missing.length > 0) {
+const kernelDir = path.join(ROOT, KERNEL_REL)
+const scanDirs = [coreDir, ...(fs.existsSync(path.join(kernelDir, 'lib.rs')) ? [kernelDir] : [])]
+const scopes = [
+  readKernelScope(coreDir, 'kernel.rs'),
+  scanDirs.includes(kernelDir) ? readKernelScope(kernelDir, 'lib.rs') : null,
+].filter(Boolean)
+// 没有门面（夹具仓库）⇒ 退回全 core 口径；有门面则只量文件集的并集。
+const kernelAbs = scopes.length > 0 ? new Set(scopes.flatMap((s) => [...s.abs])) : null
+const kernelMissing = scopes.flatMap((s) => s.missing)
+if (kernelMissing.length > 0) {
   report(
     'CS-004',
-    `内核文件集指向不存在的文件：${kernelScope.missing.join(' / ')} —— 门面声明的边界必须可解析，` +
+    `内核文件集指向不存在的文件：${kernelMissing.join(' / ')} —— 门面声明的边界必须可解析，` +
       '否则 CS-001 / CS-004 会在一个缩小了的范围上恒绿（宁红不静默）',
   )
 }
-const shape = measureCoreShape(coreDir, kernelScope?.abs)
+const shape = mergeShapes(scanDirs.map((d) => measureCoreShape(d, kernelAbs)))
 
 // 封闭语法里少一个 trait 不是「收窄成功」，是判据失去输入：宁红不静默。
 // 夹具仓库（没有 plugins/mod.rs）只造一两个 trait 验棘轮本身，不要求凑齐五格。
@@ -471,21 +497,23 @@ const pluginIds = fs.existsSync(pluginsDir)
       .sort()
   : []
 
-/** core 生产侧（剔测试模块 / 注释）的全文；CS-003 / CS-004 的输入。 */
+/** 生产侧（core + kernel，剔测试模块 / 注释）的全文；CS-003 / CS-004 的输入。 */
 const coreTexts = []
-for (const file of walk(coreDir)) {
-  if (!file.endsWith('.rs') || isTestFile(file)) continue
-  const text = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
-  coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text })
+for (const dir of scanDirs) {
+  for (const file of walk(dir)) {
+    if (!file.endsWith('.rs') || isTestFile(file)) continue
+    const text = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
+    coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text })
+  }
 }
 
 /**
- * CS-004 的判定范围：内核文件集（门面 `core-kernel-files:` 标记）。
- * CS-003 仍扫**全部 core**——依赖方向（core 不得认插件实现坐标）不随内核边界变化；
- * 域行为里出现插件 id 字面量不是内核纯度问题，随 C 迁出，只做报告。
+ * CS-004 的判定范围：内核文件集（两处门面的 `core-kernel-files:` 标记并集）。
+ * CS-003 仍扫**全部生产代码**（core + kernel）——依赖方向（不认插件实现坐标）
+ * 不随内核边界变化；域行为里出现插件 id 字面量不是内核纯度问题，随 C 迁出，只做报告。
  */
-const purityTexts = kernelScope
-  ? coreTexts.filter((f) => kernelScope.abs.has(path.join(ROOT, f.rel)))
+const purityTexts = kernelAbs
+  ? coreTexts.filter((f) => kernelAbs.has(path.join(ROOT, f.rel)))
   : coreTexts
 
 

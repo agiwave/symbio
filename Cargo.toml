@@ -9,6 +9,7 @@ resolver = "2"
 members = [
     "cli",
     "symbio",
+    "symbio_kernel",
     "tauri/src-tauri",
 ]
 

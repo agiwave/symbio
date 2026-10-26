@@ -1,0 +1,19 @@
+[package]
+name = "symbio-kernel"
+version = "0.1.14"
+description = "Symbio kernel: the closed syntax shared by the core and its plugins"
+authors = ["Symbio Team"]
+license = "MIT"
+repository = ""
+edition = "2021"
+# 与 symbio / cli 的 MSRV 保持一致（见 symbio/Cargo.toml 的说明）。
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = "1.0.151"

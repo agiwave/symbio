@@ -12,8 +12,10 @@
 //! 下面的 `core-kernel-files:` 标记是 CS-001（形状）与 CS-004（插件 id 字面量）
 //! 的**判定范围**，由 `scripts/core-shape-audit.mjs` 读取。文件集是「声明落在哪个
 //! 文件」而不是「域」：`capability` / `vdfs` 等域仍有大量词汇与行为，只有 trait
-//! 声明那一处算语法。拆 crate（D-183）时按这份清单抽文件。
-// core-kernel-files: event/mod.rs event/grid.rs store/mod.rs projection/mod.rs decl/mod.rs decl/ring.rs actors/spec.rs capability/mod.rs llm/model_provider.rs vdfs/provider.rs
+//! 声明那一处算语法。C2a 已把 `event` / `view` / `store` / `projection::Projection` /
+//! `decl` / `LatencyTier` 搬进 `symbio-kernel` crate（D-188），那部分文件集标记住
+//! `symbio_kernel/src/lib.rs`；本文件只剩仍住 core 的语法声明。
+// core-kernel-files: actors/spec.rs capability/mod.rs llm/model_provider.rs vdfs/provider.rs
 
 // ── Event 信封与 Entity×Verb（DE-023 §5） ──
 pub use super::event::{Entity, Event, EventEnvelope, Seq, Verb};

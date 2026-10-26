@@ -80,16 +80,16 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 1 · 🟡 doing 0 · done 0 · wont 0（共 1）
+**计数**：☐ todo 0 · 🟡 doing 1 · done 0 · wont 0（共 1）
 
 ## 待处理（按依赖顺序）
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-323-C-实现搬迁与-crate-边界` | Phase C（后置、可选）：实现搬迁、actor 策略迁移与 crate 边界 | later | impl | — |
+（无）
 
 ## 进行中
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-323-C-实现搬迁与-crate-边界` | Phase C：实现搬迁、actor 策略迁移与 crate 边界 | now | impl | — |
 
 <!-- registry:summary end -->

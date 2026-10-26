@@ -110,8 +110,8 @@ const ROOT = rootArg
 const PRINT_BASELINE = argv.includes('--print-baseline')
 
 /** 事件名字表（协议名的唯一 owner）与事实声明表 */
-const EVENT_REL = 'symbio/src/symbio_core/event/mod.rs'
-const DECL_REL = 'symbio/src/symbio_core/decl/mod.rs'
+const EVENT_REL = 'symbio_kernel/src/event/mod.rs'
+const DECL_REL = 'symbio_kernel/src/decl/mod.rs'
 /** 基线（判据面之一，见文件头「基线在哪」） */
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 契约 7 的条文所在（PTS-006 的唯一输入：§2.6 契约表的第 7 行） */
@@ -341,7 +341,7 @@ function portValueLiterals() {
 const portValues = portValueLiterals()
 
 const baseline = readBaseline()
-const solverRel = baseline?.solver?.file ?? 'symbio/src/symbio_core/decl/ring.rs'
+const solverRel = baseline?.solver?.file ?? 'symbio_kernel/src/decl/ring.rs'
 const solverText = readText(solverRel)
 
 /**

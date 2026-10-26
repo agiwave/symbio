@@ -4,7 +4,7 @@
 //! 检测不到 = 这条检查是摆设。
 
 use super::*;
-use crate::symbio_core::event::{Entity, Event, EventEnvelope, Verb};
+use crate::event::{Entity, Event, EventEnvelope, Verb};
 
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64) -> Event {
     Event::pending(id, kind, entity, verb, turn, "main")

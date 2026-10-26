@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::super::{ActorDecl, Builder, FactDecl, ViewDecl};
 use super::*;
-use crate::symbio_core::{Entity, Event, LatencyTier, Seq, Verb};
+use crate::{Entity, Event, LatencyTier, Seq, Verb};
 use std::sync::Arc;
 
 fn ev(seq: u64, turn: u64, kind: &str, payload: Value) -> Event {

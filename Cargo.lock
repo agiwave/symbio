@@ -4247,6 +4247,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "shellexpand",
+ "symbio-kernel",
  "tempfile",
  "thiserror 2.0.21",
  "time",
@@ -4271,6 +4272,14 @@ dependencies = [
  "serde_json",
  "symbio",
  "tokio",
+]
+
+[[package]]
+name = "symbio-kernel"
+version = "0.1.14"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

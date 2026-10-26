@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::symbio_core::{Entity, Seq, Verb};
+use crate::{Entity, Seq, Verb};
 
 use super::*;
 

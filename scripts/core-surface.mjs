@@ -347,29 +347,38 @@ const declRe = (name) =>
 const reexportRe = (name) => new RegExp(`^[^\\n]*\\bpub\\s+use\\b[^\\n]*\\b${name}\\b[^\\n]*$`, 'gm')
 
 export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
-  const coreDir = path.join(root, coreRel)
   const names = [...symbols.keys()]
   const out = new Map()
-  for (const file of walk(coreDir)) {
-    if (!file.endsWith('.rs')) continue
-    if (isTestFile(file)) continue
-    const rel = path.relative(coreDir, file).split(path.sep).join('/')
-    const head = rel.includes('/') ? rel.split('/')[0] : null
-    const stem = rel.replace(/\.rs$/, '')
-    const domain = head ?? (stem === 'mod' ? '(root)' : stem)
-    if (domain === '(root)') continue // 口径 2：导出清单不是消费方
-    if (domain === 'kernel') continue // 内核门面（`kernel.rs`）也是导出清单，理由同口径 2
-    const src = stripComments(fs.readFileSync(file, 'utf8'))
-    for (const name of names) {
-      // ⚠️ 排除的是**声明点与导出清单**，不是整个声明域（2026-10-14，见上方口径说明）。
-      // 只滤「声明域」那一行是不够的：域的 `mod.rs` 里 `pub struct X;` 本身就是声明，
-      // 不滤掉的话每个符号都会被自己的声明算成一个 core 消费方 ⇒ 判据恒绿。
-      const body = src
-        .replace(declRe(name), '')
-        .replace(reexportRe(name), '')
-      if (!new RegExp(`\\b${name}\\b`).test(body)) continue
-      if (!out.has(name)) out.set(name, new Set())
-      out.get(name).add(domain)
+  // 内核 crate 也是 core 自己的实现（D-188 C2a）：它内部的跨模块引用同样算
+  // 「另一个 core 生产模块在用」，否则符号搬进 kernel 后会凭空丢掉这个消费方，
+  // 被误判成「单消费方该下沉」。域名加 `kernel/` 前缀，与 core 的域区分开。
+  const scanRoots = [
+    { dir: path.join(root, coreRel), prefix: '' },
+    { dir: path.join(root, 'symbio_kernel', 'src'), prefix: 'kernel/' },
+  ]
+  for (const { dir: scanDir, prefix } of scanRoots) {
+    if (!fs.existsSync(scanDir)) continue
+    for (const file of walk(scanDir)) {
+      if (!file.endsWith('.rs')) continue
+      if (isTestFile(file)) continue
+      const rel = path.relative(scanDir, file).split(path.sep).join('/')
+      const head = rel.includes('/') ? rel.split('/')[0] : null
+      const stem = rel.replace(/\.rs$/, '')
+      const domain = prefix + (head ?? (stem === 'mod' ? '(root)' : stem))
+      if (domain === '(root)' || domain === `${prefix}(root)`) continue // 口径 2：导出清单不是消费方
+      if (domain === 'kernel' || domain === 'kernel/kernel') continue // 内核门面也是导出清单，理由同口径 2
+      const src = stripComments(fs.readFileSync(file, 'utf8'))
+      for (const name of names) {
+        // ⚠️ 排除的是**声明点与导出清单**，不是整个声明域（2026-10-14，见上方口径说明）。
+        // 只滤「声明域」那一行是不够的：域的 `mod.rs` 里 `pub struct X;` 本身就是声明，
+        // 不滤掉的话每个符号都会被自己的声明算成一个 core 消费方 ⇒ 判据恒绿。
+        const body = src
+          .replace(declRe(name), '')
+          .replace(reexportRe(name), '')
+        if (!new RegExp(`\\b${name}\\b`).test(body)) continue
+        if (!out.has(name)) out.set(name, new Set())
+        out.get(name).add(domain)
+      }
     }
   }
   return out
