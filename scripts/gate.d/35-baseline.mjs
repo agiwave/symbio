@@ -110,6 +110,17 @@ function deadCodeCells(text) {
   return cells
 }
 
+/** `scripts/core-export-audit.mjs` 的 `DOMAIN_LEDGER_BASELINE`（C-004）：与 R-002 同构的
+ *  三元形状，一格——**非内核根账本**条目数上限（只许降）。C-003 收窄到内核公共面之后，
+ *  其余根出口只剩这一格冻结它们的增长；放宽它就是让「加共享类型就得改架构」回来。 */
+function domainLedgerCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.CORE_LEDGER_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('C-004', Number(m[1]))
+  return cells
+}
+
 /** `scripts/grep-audit.mjs` 的 `LEGACY_ROLE_WRITE_BASELINE`（S-014）：与 R-002 同构的
  *  三元形状，一格——ChatNode 存量 `role` 格直写的总数上限（只许降）。 */
 function legacyRoleCells(text) {
@@ -201,6 +212,18 @@ const RATCHETS = [
     waivers: waiverReader('core-export-allow'),
     envVar: 'CORE_EXPORT_BASELINE',
     label: 'core 根出口的 0 / 单消费方符号存量（只许降）',
+  },
+  {
+    // C-004：C-003 收窄到内核公共面后，其余根出口不再被判「配不配占出口」；
+    // 它们的存量由这一格冻结（只许降）。放宽 = 让「新增共享类型仍改 core 根出口」
+    // 悄悄回来，所以与 core-export 同一条纪律：必须改一个提交进仓库的数字。
+    id: 'core-ledger',
+    file: 'scripts/core-export-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: domainLedgerCells,
+    waivers: waiverReader('core-export-allow'),
+    envVar: 'CORE_LEDGER_BASELINE',
+    label: '非内核根账本条目数（C-004，只许降）',
   },
   {
     // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由

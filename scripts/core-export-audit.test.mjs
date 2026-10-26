@@ -42,7 +42,7 @@ function rmTree(dir) {
  * 不压基线就测不到 C-003。要测「基线放行」的用例显式传 `baseline: '10:10'`。
  * 豁免账本同理默认注入**空**对象；要测账本行为显式传 `waivers`。
  */
-function audit(files, { baseline = '0:0', waivers } = {}) {
+function audit(files, { baseline = '0:0', waivers, ledger } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-export-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -54,6 +54,7 @@ function audit(files, { baseline = '0:0', waivers } = {}) {
     // 夹具与真仓的**豁免账本**解耦（与 BASELINE 同理：账本是仓库数据，不是守卫逻辑）。
     // 不隔离的话，真仓每登记一条豁免，就会让每个「没有那个符号」的夹具误报「已不在公开面」。
     env.CORE_EXPORT_WAIVERS = waivers ?? '{}'
+    if (ledger !== undefined) env.CORE_LEDGER_BASELINE = String(ledger)
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env,
@@ -216,7 +217,7 @@ test('C-003 豁免账本：有理由放行、空理由红、失效豁免红', ()
 
   const notInSurface = audit(clean(), { waivers: JSON.stringify({ NoSuchSymbol: '不在公开面' }) })
   assert.equal(notInSurface.status, 1, '不在公开面的豁免必须判失效')
-  assert.match(notInSurface.stderr, /已不在公开面/)
+  assert.match(notInSurface.stderr, /已不在(内核)?公共面/)
 })
 
 test('自引用：`PLUGIN_ID_ALPHA` 被同名插件用，不算单消费方', () => {
@@ -370,4 +371,41 @@ test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）
     }),
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+// ==================== C-004：非内核根账本只降不升 ====================
+
+/** A2 之后的形状：根有 `pub use kernel::*`，只有门面里的符号受 C-003 判。 */
+function withKernel(extra = {}) {
+  return {
+    [CORE_MOD]: 'mod actors;\nmod kernel;\npub use actors::DomainThing;\npub use kernel::*;\n',
+    [ACTORS_MOD]: 'pub struct DomainThing;\npub struct CoreThing;\n',
+    'symbio/src/symbio_core/kernel.rs': 'pub use super::actors::{CoreThing};\n',
+    'symbio/src/plugins/a/a.rs': 'use crate::symbio_core::CoreThing;\npub fn f(_: CoreThing) {}\n',
+    'symbio/src/plugins/b/b.rs': 'use crate::symbio_core::CoreThing;\npub fn g(_: CoreThing) {}\n',
+    'symbio/src/plugins/c/c.rs':
+      'use crate::symbio_core::DomainThing;\npub fn h(_: DomainThing) {}\n',
+    ...extra,
+  }
+}
+
+test('C-003 收窄：内核之外的单消费方域出口不再被判（只冻结条数）', () => {
+  // `DomainThing` 只有一个消费方，但它在门面之外 ⇒ C-003 不看它；内核 `CoreThing`
+  // 有两个消费方 ⇒ 判据通过。域账本 1 条，上限给 1。
+  const r = audit(withKernel(), { ledger: 1 })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /非内核根账本 1\/1/)
+})
+
+test('C-004：域账本条目超上限 ⇒ 红（新增共享类型默认插件本地）', () => {
+  const r = audit(withKernel(), { ledger: 0 })
+  assert.equal(r.status, 1, '非内核根出口只许减；要加就得改一个提交进仓库的数字')
+  assert.match(r.stderr, /C-004/)
+  assert.match(r.stderr, /非内核根账本 1 条 > 基线 0/)
+})
+
+test('C-004 不在无门面的夹具上生效（避免用空集冒充判据）', () => {
+  const r = audit(clean(), { ledger: 0 })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.doesNotMatch(r.stdout, /C-004/)
 })

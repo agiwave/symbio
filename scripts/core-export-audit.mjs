@@ -5,16 +5,18 @@
  * ## 它判什么
  *
  * 「symbio_core 的代码全放子目录里，但子目录**不许对外 `pub` 输出**，必须在**根目录
- * 显式输出**；根输出的每一件东西必须被**两个以上模块**使用——没人用的不许存在，
- * 只有一个模块用的必须下沉到那个模块里（只有一个消费方的不算架构元素）。」
+ * 显式输出**；**内核门面**（`kernel.rs`）输出的每一件东西必须被**两个以上模块**使用——
+ * 只有一个模块用的必须下沉到那个模块里。内核之外的根出口是一本**过渡期域账本**：
+ * 它只许减，不许再长。」
  *
- * 三条规则，一一对应：
+ * 四条规则，一一对应：
  *
  * | 规则 | 判什么 | 为什么必须判 |
  * |---|---|---|
  * | C-001 | 根 `mod.rs` 不得有 `pub mod <域>;` | 域目录一旦 `pub mod`，整个子树就是公共面：`core-surface` 枚举的「公开面 = 根重导出」当场失真，外部还能直接深引绕过根 |
  * | C-002 | core 外的**代码**不得出现 `symbio_core::<域>`（含裸 `use crate::symbio_core::<域>;`） | 深引 = 消费方绕过根出口：符号从根导出移除后深引点照样编译通过，公开面变成两套。裸模块导入此前**没有**任何审计在拦（旧 E-010 的正则要求尾 `::`） |
- * | C-003 | 根导出符号的**生产**消费方数必须 ≥2 | D-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动 |
+ * | C-003 | **内核门面**导出的符号，**生产**消费方数必须 ≥2 | D-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动。A2 起判定范围 = `kernel.rs` 的公共面（D-185） |
+ * | C-004 | 非内核根账本的**条目数**只许降 | C-003 收窄后，其余根出口不再被判「配不配占出口」；不加这一格就会留下一段只长不判的真空。新增共享类型默认插件本地（D-182），要占根出口必须显式改数字，而那一步由 `gate.d/35-baseline.mjs` 按基准版本判 |
  *
  * ## 「消费方」的口径（2026-10-09 修正，C-003 的判据输入）
  *
@@ -76,7 +78,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns C core 出口
-// @codes C-001 C-002 C-003
+// @codes C-001 C-002 C-003 C-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -120,10 +122,13 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 显为单消费方 ⇒ 豁免自行失效并被删除（纪律 2：豁免是在补口径的洞，补洞该补
       // 口径，不该把洞登记成永久账目）。
       //
-      // 剩下 3 条（2026-10-26 B2 核验后）：`ActorSpec` / `EVENT_TURN_STAGE` 是**协议
-      // 接缝**（F3 冻结字段集 / 线上事件名），`branch_hide_unselected` 是**节点树接缝**
-      // （`branch_selected` + `subtree_of` 的组合；子树同一性判据的唯一实现在 core，
-      // 搬走要么新增单消费方根出口、要么产生第二份实现——D-173 口径 3 禁止）。
+      // 剩下 1 条（2026-10-26 A2 后）：`ActorSpec` 是**协议接缝**（F3 冻结字段集）。
+      //
+      // `branch_hide_unselected`（节点树接缝）与 `EVENT_TURN_STAGE`（线上事件名）随 C-003
+      // 的判定范围收窄到内核公共面而**移出本帐**：它们不是封闭语法，属域账本，由 C-004
+      // 冻结条数。两条仍是单消费方接缝（子树收法 `node_build::subtree_of` 只有一份；
+      // 事件 kind 名是 WAL / 回放的线上键，不能搬进唯一消费方造成双 owner），C 迁出
+      // session / loop 域时必须一并处置——口径见 DE-023 D-185。
       //
       // 此前的投影类条目已清零：`turnstate` / `SloLatencyView` / `FallbackRateView` /
       // `mutations_latest_snapshot` 经 `isSinkCandidate` 核验**本来就不是单消费方**
@@ -132,19 +137,6 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 会话插件（`plugins/session/token_ledger.rs`），根出口与条目同时退役。
       ActorSpec:
         'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（turn_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
-      // 2026-10-26（D-173）：分支读法的**节点树出口**。它与 `unselected_roots`
-      // （请求包出口，住 core 内部）是同一条判据的两个问法，子树口径 = `parent_id` ∪
-      // `meta.turn_root` 的唯一实现 `node_build::subtree_of` 就在它脚下。
-      branch_hide_unselected:
-        '节点树接缝（分支的「藏」）：它不是一本账的投影，而是 `branch_selected` + `subtree_of` 两个内核机制的组合——**一条支的子树只有一份收法**（`node_build::subtree_of`：`parent_id` ∪ `meta.turn_root`；`flat` 档升根的节点没有 `parent_id`，只按父边收会漏）。core 外唯一生产消费方 = plugins/session/read.rs 的 `get_context_messages`；C-002 禁插件深引 projection 域 ⇒ 必须占根出口。不可下沉：搬进会话插件要么给 `subtree_of` 新增一条单消费方根出口（C-003 判红），要么写第二份子树收法（D-173 口径 3 禁止——呈现与上下文各读一套树，漂的后果是静默的）',
-      // 2026-10-21（段一）：事件 kind 名是**事件网格的命名空间**，README §3
-      // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
-      // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop
-      // 私有行为——它是 WAL / 回放 / 任何读侧的线上数据键，C-002 禁插件深引事件域
-      // ⇒ 只能经根出口。把一条名字搬进唯一消费方会让同一命名空间有两个 owner，
-      // 与「名字单点定义」直接冲突（与 `SOURCE_PRINCIPAL` 同一条判据：协议键不可下沉）。
-      EVENT_TURN_STAGE:
-        '事件 kind 名表住 core 的 event 域（S01 turn/* 全部，名字是数据、单点定义）；当前写读都在 plugins/loop，但它是 WAL / 回放 / 跨插件读侧的线上数据键，C-002 禁插件深引事件域 ⇒ 必须占根出口。下沉到唯一消费方会让同一命名空间分两个 owner。属 README §4 四问的「接缝」，不是「单消费方该下沉」',
     }
 
 /**
@@ -155,7 +147,12 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
  * `dead-code-audit` R-002 逐项承认。
  *
- * `13` 是当前存量上限（自然单消费方 − 已登记豁免）。下列批次不是新增违规，是口径与下沉的记录：
+ * `0/0` 是 **A2 之后**（2026-10-26）的上限：C-003 的判定范围收窄到 `kernel.rs` 门面的
+ * 公共面（14 条封闭语法），其中 0 消费方 0 条、单消费方 0 条（`ActorSpec` 是唯一豁免）。
+ * 此前 13 条单消费方仍是存量，但**移出 C-003**：它们不是封闭语法，属域账本，由 C-004
+ * 冻结条数（279）并在 `--verbose` 的 `[L1]` 里逐条列出——C 迁出对应域时一并消失。
+ *
+ * 下列批次不是新增违规，是口径与下沉的记录：
  * - **口径修正**（2026-10-09）：**测试文件不再算架构消费方**（口径全文见
  *   `core-surface.mjs` 的 `collectConsumers`）——此前「一个模块在生产用、另一个模块的
  *   测试顺手写了一次名字」被读成「两个模块依赖」，遮住了一批真·单消费方符号。
@@ -216,7 +213,19 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 13 }
+  : { zero: 0, one: 0 }
+
+/**
+ * C-004：**非内核根账本**的条目数上限（只许降）。
+ *
+ * A2 起内核的公共面 = `kernel.rs` 门面（DE-023 D-185），C-003 只判这一份；
+ * 其余根出口是**过渡期域账本**——它们随 C 的阶段迁出。冻结条目数是这段过渡期的
+ * 唯一判据：新能力默认插件本地（D-182），不该再往 core 根出口加共享类型；
+ * 要加就把数字改大，而那一步会被 `gate.d/35-baseline.mjs` 按基准版本判红。
+ */
+const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
+  ? Number(process.env.CORE_LEDGER_BASELINE)
+  : 279
 
 
 
@@ -241,7 +250,7 @@ try {
   console.error(red(`✗ ${e.message}`))
   process.exit(1)
 }
-const { coreDir, domains, symbols, modules } = surface
+const { coreDir, domains, symbols, modules, kernelExports } = surface
 
 function* walk(dir) {
   let entries
@@ -300,7 +309,7 @@ for (const r of CODE_ROOTS) {
   }
 }
 
-// ==================== C-003 双消费方 ====================
+// ==================== C-003 双消费方（内核公共面） ====================
 
 // 两份计数，问两个不同的问题（口径全文见 `core-surface.mjs` 的 `collectConsumers`）：
 // - `units`（**不含测试**）：判「算不算架构元素」⇒ 单消费方要下沉；
@@ -322,15 +331,19 @@ const rows = [...symbols.keys()]
   }))
   .sort(byName)
 
+// 判定范围 = `kernel.rs` 门面导出的封闭语法（DE-023 A2 / D-185）。没有门面的夹具仓库
+// 退回全表面口径——否则 C-003 会在一个空集上恒绿，夹具与「判据失效」长得一模一样。
+const judgedRows = kernelExports.size > 0 ? rows.filter((r) => kernelExports.has(r.name)) : rows
+
 const waivedNow = new Set()
 for (const [name, reason] of Object.entries(WAIVERS)) {
   if (!String(reason ?? '').trim()) {
     report('C-003', `豁免账本里 \`${name}\` 的理由为空 —— 空理由不算豁免`)
     continue
   }
-  const row = rows.find((r) => r.name === name)
+  const row = judgedRows.find((r) => r.name === name)
   if (!row) {
-    report('C-003', `豁免账本里的 \`${name}\` 已不在公开面 —— 该条豁免已失效，请删除`)
+    report('C-003', `豁免账本里的 \`${name}\` 已不在内核公共面 —— 该条豁免已失效，请删除`)
     continue
   }
   if (row.units.length >= 2) {
@@ -340,15 +353,20 @@ for (const [name, reason] of Object.entries(WAIVERS)) {
   waivedNow.add(name)
 }
 
-const selfRef = rows.filter((r) => isSelfReference(r))
+const selfRef = judgedRows.filter((r) => isSelfReference(r))
 // 「没人用」按**含测试**的口径：只有别模块的测试在用的符号，收窄它当场把那些测试编译坏
 // （C-002 又不许它们深引）⇒ 它够格占根出口，不进本条。
-const zero = rows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name))
+const zero = judgedRows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name))
 // 「只有测试在用」单列一档：它是**合法的根出口**，但也不是架构元素——既不收窄、不下沉。
-const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
+const testOnly = judgedRows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
 // 「该不该下沉」按**不含测试**的口径：测试依赖的是被测对象，不是长期接口。
-const one = rows.filter((r) => isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name))
-const many = rows.filter((r) => r.units.length >= 2)
+const one = judgedRows.filter((r) => isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name))
+const many = judgedRows.filter((r) => r.units.length >= 2)
+// 内核接缝：core 外只有 1 个生产消费方，但 core 内另有生产模块在用（口径 2）⇒
+// 搬走会依赖反转，它本来就该留根出口。既不算 `one`，也不该被读成「≥2 达标」。
+const seam = judgedRows.filter(
+  (r) => r.units.length === 1 && !isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name),
+)
 
 if (zero.length > BASELINE.zero) {
   report(
@@ -365,6 +383,24 @@ if (one.length > BASELINE.one) {
   )
 }
 
+// ==================== C-004 非内核根账本只降不升 ====================
+//
+// 不在门面里的根出口是过渡期域账本：它们随 C 迁出，期间**只许减**。这一格与 C-003
+// 互补——C-003 判内核符号「配不配占出口」，C-004 判域账本「有没有又长回来」。
+const ledgerRows = rows.filter((r) => !kernelExports.has(r.name))
+const ledgerCount = ledgerRows.length
+// 报告用（不判定）：域账本里仍「没跨出 core」/「单消费方」的条目，是 B4 / C 的下沉候选。
+const ledgerZero = ledgerRows.filter((r) => r.unitsAll.length === 0)
+const ledgerOne = ledgerRows.filter((r) => isSinkCandidate(r, coreConsumers))
+
+if (kernelExports.size > 0 && ledgerCount > DOMAIN_LEDGER_BASELINE) {
+  report(
+    'C-004',
+    `非内核根账本 ${ledgerCount} 条 > 基线 ${DOMAIN_LEDGER_BASELINE} —— 新增共享类型默认插件本地（D-182）；` +
+      `确需占根出口的，先证明消费方 ≥2，并同步本脚本的 DOMAIN_LEDGER_BASELINE（数字要随决策走）`,
+  )
+}
+
 // ==================== 输出 ====================
 
 const ruleLine = (ok, rule, desc) =>
@@ -377,9 +413,24 @@ if (errors.length === 0) {
   ruleLine(
     true,
     'C-003',
-    `双消费方棘轮：0 消费方 ${zero.length}/${BASELINE.zero} · 单消费方 ${one.length}/${BASELINE.one}` +
-      ` · 仅测试在用 ${testOnly.length} · 自引用 ${selfRef.length} · ≥2 ${many.length}`,
+    `双消费方棘轮（内核公共面 ${judgedRows.length} 条）：0 消费方 ${zero.length}/${BASELINE.zero}` +
+      ` · 单消费方 ${one.length}/${BASELINE.one} · 仅测试在用 ${testOnly.length}` +
+      ` · 自引用 ${selfRef.length} · 内核接缝 ${seam.length} · ≥2 ${many.length}`,
   )
+  if (kernelExports.size > 0) {
+    ruleLine(
+      true,
+      'C-004',
+      `非内核根账本 ${ledgerCount}/${DOMAIN_LEDGER_BASELINE}（只许降）` +
+        ` · 其中 0 消费方 ${ledgerZero.length} / 单消费方 ${ledgerOne.length}（B4/C 的下沉候选，报告账）`,
+    )
+    if (ledgerCount < DOMAIN_LEDGER_BASELINE) {
+      console.log(
+        yellow('提示') +
+          `：非内核根账本已降到 ${ledgerCount}，请同步本脚本的 DOMAIN_LEDGER_BASELINE = ${ledgerCount}`,
+      )
+    }
+  }
   if (zero.length < BASELINE.zero || one.length < BASELINE.one) {
     console.log(
       yellow('提示') +
@@ -392,6 +443,11 @@ if (errors.length === 0) {
     for (const r of testOnly)
       console.log(`  [ T] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> 仅测试在用：${r.unitsAll.join(', ')}`)
     for (const r of one) console.log(`  [ 1] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> ${r.units.join(', ')}`)
+    for (const r of seam)
+      console.log(`  [ S] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> ${r.units.join(', ')}（core 内另有生产消费方，不可下沉）`)
+    for (const r of ledgerOne)
+      console.log(`  [L1] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> ${r.units.join(', ')}（域账本）`)
+    for (const r of ledgerZero) console.log(`  [L0] ${(r.domain ?? '?').padEnd(12)} ${r.name}（域账本）`)
   }
   process.exit(0)
 }

@@ -183,6 +183,7 @@ export function collectCoreSurface(root) {
 
   const rootUses = parsePubUses(fs.readFileSync(rootMod, 'utf8'), domains)
   const symbols = new Map()
+  const kernelExports = new Set()
   for (const [name, domain] of rootUses.names) symbols.set(name, domain ?? '(explicit)')
   for (const n of declaredIn(rootMod)) symbols.set(n, '(root)')
 
@@ -195,7 +196,10 @@ export function collectCoreSurface(root) {
     const domMod = fs.existsSync(dirMod) ? dirMod : path.join(coreDir, `${domain}.rs`)
     if (!fs.existsSync(domMod)) continue
     const dom = parsePubUses(fs.readFileSync(domMod, 'utf8'), domains)
-    for (const [n, d] of dom.names) if (!symbols.has(n)) symbols.set(n, d ?? domain)
+    for (const [n, d] of dom.names) {
+      if (!symbols.has(n)) symbols.set(n, d ?? domain)
+      if (domain === 'kernel') kernelExports.add(n) // 封闭语法的公开面（C-003 的唯一判定范围）
+    }
     for (const n of declaredIn(domMod)) symbols.set(n, domain)
   }
 
@@ -211,7 +215,7 @@ export function collectCoreSurface(root) {
     if (modCache.get(domain).has(name)) modules.add(name)
   }
 
-  return { coreRel, coreDir, domains, symbols, modules }
+  return { coreRel, coreDir, domains, symbols, modules, kernelExports }
 }
 
 // ==================== 消费方计数（报告型与判定型共用） ====================
