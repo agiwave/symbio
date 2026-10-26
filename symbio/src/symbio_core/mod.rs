@@ -22,11 +22,9 @@ mod creator;
 // 事实 / 视图声明层：字段清单与视图读法在装载期可查。 起是
 // 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
 pub(crate) mod decl;
-// 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。整模块出根
-// 到 `pub(crate)`（C-003 只数 `pub use`）：避开与 `actors::Pattern` 重名，插件只经根
-// 路径取用（C-002 禁深引域目录）。
-pub(crate) use decl::ring;
-pub(crate) use decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
+// 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，
+// 经 `kernel` 门面以 `pub(crate)` 出根（C-003 只数 `pub use`）：避开与 `actors::Pattern`
+// 重名，插件只经根路径取用（C-002 禁深引域目录）。
 mod dialog;
 mod embedding;
 mod event;
@@ -46,12 +44,23 @@ mod turn;
 mod vdfs;
 mod view;
 
+// ==================== 内核门面（DE-023 A2） ====================
+// 封闭语法只经 `kernel` 汇合口出根：内核只装语法、插件声明词汇（DE-023 D-177）。
+// `kernel` 是私有模块，根用通配重导出把它的公开项平铺出来；声明仍留在各域，
+// 门面只负责「哪些名字算语法」这一件事。判定范围（文件集）写在 `kernel.rs` 的
+// `core-kernel-files:` 标记里，由 `core-shape-audit` 的 CS-001 / CS-004 读取。
+mod kernel;
+pub use kernel::*;
+pub(crate) use kernel::{
+    ring, ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, Scope, ViewDecl, EVENT_FAILED,
+    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+};
+
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{
-    event_output_text_node_id, event_payload_node_id, Entity, Event, EventEnvelope, Seq, Verb,
-    EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
+    event_output_text_node_id, event_payload_node_id, EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
 };
 pub use event::{
     ClosureReason, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
@@ -72,7 +81,6 @@ pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::slo::slo_report;
-pub use projection::Projection;
 // 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
 //
 // **为什么它们必须占根出口而投影函数不必**：`SloLatencyView::merge` /
@@ -119,8 +127,7 @@ pub use projection::transcript::transcript;
 // 测试替身 / 外部适配器都写不出来）。`PromptToolCall` 只被 `actors` 用，留在模块路径。
 pub use projection::transcript::PromptMessage;
 pub use projection::turnstate::{turnstate, TurnState};
-pub use store::{EventStore, Store};
-pub use view::Budget;
+pub use store::EventStore;
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
@@ -131,14 +138,14 @@ pub use view::Budget;
 // 且它们**不是** F1–F6 冻结锚点（F3 冻的是 `ActorSpec` 字段集 + 档位→令牌映射，不是运行器）。
 // 曾登记为 `plan/01 §4` 冻结契约名是**误记**——`plan/01` 全文没有 `TurnRunner` 一词。
 //
-// `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**（`pub use`，
-// 不是 `pub(crate)`）。F3 冻的是**字段集**，它只能住 core；而 core 外
+// `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**
+// （经 `kernel` 门面的 `pub use`，不是 `pub(crate)`）。F3 冻的是**字段集**，它只能住 core；
+// 而 core 外
 // （`plugins/session` 构造 / 读 `principal`）要够得着它、C-002 又禁插件深引域目录
 // ⇒ 必须显式占根出口
 // （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`plugins/session`），属 C-003
 // 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
 // `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
-pub use actors::{ActorSpec, Pattern};
 // ── Agent 权限声明（DE-011 §5.3 / D-153）──────────────────────────────────
 //
 // 消费方三个：agent 插件（写侧，解析 manifest 发布作用域）、session 的能力收集
@@ -166,7 +173,7 @@ pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentSc
 // 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
-    GateDecision, IntentGate, Preemption, PreemptionDecider, ScheduleDecider, Scope, SkillCompiler,
+    GateDecision, IntentGate, Preemption, PreemptionDecider, ScheduleDecider, SkillCompiler,
     SkillRoute, SkillRouter, SCHEDULE_BUDGET_MS, SKILL_TAG,
 };
 // 事件名字表（名字是数据，单点定义）。
@@ -190,8 +197,8 @@ pub(crate) use event::{
     EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
-// 适配器）——都在本 crate 内，所以走 `pub(crate)` 而不是根公开面（C-003 数 `pub use`）。
-pub(crate) use event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
+// 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub(crate)` 出根
+// （C-003 数 `pub use`）。
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
 // 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的
@@ -319,7 +326,7 @@ pub(crate) use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, SESSION_OWNER};
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
 // 行解析契约与协议事件方言只有 model 插件使用，住在 `plugins/model/protocols/`。
-pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
+pub use llm::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 pub use llm::turn::{
     llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,
     TurnToolCallInfo,
@@ -339,8 +346,8 @@ pub use vdfs::{
 // 域类型：节点 / 内容 / 请求响应 / 错误 / 变更
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent,
-    VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
+    VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams, VdfsRequest, VdfsResponse,
+    VdfsResult, VdfsValidationError, VdfsWriteResponse,
 };
 // 契约函数与宿主桥
 pub use vdfs::{
@@ -414,9 +421,9 @@ pub use capability::{
     capability_init_error_bucket, capability_invoke, capability_model_active,
     capability_model_resolve, capability_option_fields, capability_prompts,
     capability_report_error, capability_resolve, capability_take_errors, capability_to_wire,
-    capability_vdfs_root, ApprovalBasis, ApprovalGrants, Capability, CapabilityCategory,
-    CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow, Registry,
-    CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    capability_vdfs_root, ApprovalBasis, ApprovalGrants, CapabilityCategory, CapabilityFamily,
+    CapabilityMeta, CapabilityRiskLevel, CapabilityRow, CAPABILITY_ERRORS, CAPABILITY_VISITOR,
+    CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
 // 内置六族常量（`family::TOOL` … `family::CONFIGURABLE`）：与 `failure_kind` 同理，
 // 它是**模块命名空间**而不是单个符号，故单列一行。

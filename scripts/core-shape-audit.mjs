@@ -12,13 +12,13 @@
  * | CS-001 | `methods` | 上述五 trait 的 `fn` 成员总数（冻结 17） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 2） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
- * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0 | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作 |
- * | CS-004 | —— | core 生产代码里**插件 id 字面量**数只许降（冻结逐文件存量） | **词汇回流**：在 core 写 `"session"` / `"vdfs"` 就是在内核里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
+ * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
+ * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
  *
- * CS-004 是「领域名词 0」这条不变量的**可机判子集**：完整的名词清单要等 A2 划出
- * `kernel/` 子集（谁算词汇取决于内核边界画在哪）。在那之前，能从代码里稳定读出的
- * 名词只有一类——`symbio/src/plugins/` 的目录名（插件 id）——先把它冻结成逐文件
- * 存量，**只许降**。存量为 0 的那些文件才算真正干净；存量非 0 的文件是 A2/B2 的账。
+ * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
+ * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
+ * 词汇，随 C 的阶段迁出，只在汇总行里报数、不设门禁。文件集之外的 `pub trait`
+ * 也不占 CS-001（域 trait 不占格）；`crate::plugins` 引用仍按全 core 判（CS-003）。
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
  * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
@@ -301,15 +301,42 @@ function traitShape(body) {
 }
 
 /**
+ * 内核文件集：`kernel.rs` 的 `core-kernel-files:` 标记是**唯一声明处**。
+ *
+ * 为什么按文件而不是按目录：内核是**语法**的集合，语法声明散在域文件里
+ * （`capability/mod.rs` 有 `Capability`/`Registry`，`vdfs/provider.rs` 有 `VdfsProvider`），
+ * 按目录划会把整个域的行为也算进内核。文件集只回答「哪几个文件是内核边界」。
+ *
+ * 夹具仓库没有门面 ⇒ 返回 null，退回全 core 口径（夹具只验棘轮本身）。
+ */
+function readKernelScope(coreDir) {
+  const file = path.join(coreDir, 'kernel.rs')
+  if (!fs.existsSync(file)) return null
+  const m = fs.readFileSync(file, 'utf8').match(/^[ \t]*\/\/[ \t]*core-kernel-files:[ \t]*(.+)$/m)
+  if (!m) return null
+  const rels = m[1].trim().split(/\s+/).filter(Boolean)
+  const abs = new Set()
+  const missing = []
+  for (const rel of rels) {
+    const p = path.join(coreDir, rel)
+    if (!fs.existsSync(p)) missing.push(rel)
+    abs.add(p)
+  }
+  return { rels, abs, missing }
+}
+
+/**
  * core 生产侧每个 `pub trait` 的形状。
  *
  * 测试文件与 `#[cfg(test)]` 模块都不算——口径与 `core-export-audit` C-003 一致：
  * **测试不是架构消费方**，测试里的 trait 形状也不是长期接口。
+ * 传入内核文件集时只量内核（`kernelScope` 之外的文件是域行为，随 C 迁出）。
  */
-function measureCoreShape(coreDir) {
+function measureCoreShape(coreDir, kernelFiles = null) {
   const all = []
   for (const file of walk(coreDir)) {
     if (!file.endsWith('.rs') || isTestFile(file)) continue
+    if (kernelFiles && !kernelFiles.has(file)) continue
     const txt = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
     for (const m of txt.matchAll(/\bpub\s+trait\s+([A-Za-z0-9_]+)/g)) {
       const open = txt.indexOf('{', m.index)
@@ -340,7 +367,15 @@ if (!fs.existsSync(path.join(coreDir, 'mod.rs'))) {
   console.error(red(`✗ 读不出 core 范围：${CORE_REL}/mod.rs 不存在（root=${ROOT}）—— 判据没有输入，宁红不静默`))
   process.exit(1)
 }
-const shape = measureCoreShape(coreDir)
+const kernelScope = readKernelScope(coreDir)
+if (kernelScope && kernelScope.missing.length > 0) {
+  report(
+    'CS-004',
+    `内核文件集指向不存在的文件：${kernelScope.missing.join(' / ')} —— 门面声明的边界必须可解析，` +
+      '否则 CS-001 / CS-004 会在一个缩小了的范围上恒绿（宁红不静默）',
+  )
+}
+const shape = measureCoreShape(coreDir, kernelScope?.abs)
 
 // 封闭语法里少一个 trait 不是「收窄成功」，是判据失去输入：宁红不静默。
 // 夹具仓库（没有 plugins/mod.rs）只造一两个 trait 验棘轮本身，不要求凑齐五格。
@@ -436,13 +471,23 @@ const pluginIds = fs.existsSync(pluginsDir)
       .sort()
   : []
 
-/** core 生产侧（剔测试模块 / 注释）的全文，两个纯度判据共用同一份口径。 */
+/** core 生产侧（剔测试模块 / 注释）的全文；CS-003 / CS-004 的输入。 */
 const coreTexts = []
 for (const file of walk(coreDir)) {
   if (!file.endsWith('.rs') || isTestFile(file)) continue
   const text = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
   coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text })
 }
+
+/**
+ * CS-004 的判定范围：内核文件集（门面 `core-kernel-files:` 标记）。
+ * CS-003 仍扫**全部 core**——依赖方向（core 不得认插件实现坐标）不随内核边界变化；
+ * 域行为里出现插件 id 字面量不是内核纯度问题，随 C 迁出，只做报告。
+ */
+const purityTexts = kernelScope
+  ? coreTexts.filter((f) => kernelScope.abs.has(path.join(ROOT, f.rel)))
+  : coreTexts
+
 
 // ── CS-003 `crate::plugins` 引用 0 ──
 const pluginRefs = coreTexts.flatMap((f) =>
@@ -465,27 +510,30 @@ if (pluginRefs.length > 0) {
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
  */
 const NOUN_BASELINE = {
-  'symbio/src/symbio_core/actors/skill.rs': 1,
-  'symbio/src/symbio_core/agent/mod.rs': 1,
-  'symbio/src/symbio_core/authz/mod.rs': 14,
-  'symbio/src/symbio_core/capability/family.rs': 1,
-  'symbio/src/symbio_core/chat/principal.rs': 13,
-  'symbio/src/symbio_core/event_bus/mod.rs': 3,
-  'symbio/src/symbio_core/plugin/route.rs': 8,
-  'symbio/src/symbio_core/projection/mutations.rs': 1,
-  'symbio/src/symbio_core/projection/rebuild.rs': 1,
-  'symbio/src/symbio_core/view/mod.rs': 1,
+  // 2026-10-26（DE-023 A2）：判定范围收窄到**内核文件集**（`kernel.rs` 的
+  // `core-kernel-files:` 标记）。此前 10 个文件 44 处是「core = 内核」时代的账；
+  // 内核文件集当前 0 处。域文件（authz / chat / plugin / event_bus / projection …）
+  // 的字面量随 C 迁出，只做报告、不设门禁——它们不是内核词汇（D-177）。
 }
 
 const nounCounts = new Map()
+const purityRels = new Set(purityTexts.map((f) => f.rel))
+let domainNounTotal = 0
 if (hasPlugins && pluginIds.length > 0) {
-  for (const f of coreTexts) {
+  for (const f of purityTexts) {
     let n = 0
     for (const id of pluginIds) {
       const re = new RegExp(`"${id}"|"${id}[:/]`, 'g')
       n += (f.text.match(re) || []).length
     }
     if (n > 0) nounCounts.set(f.rel, n)
+  }
+  for (const f of coreTexts) {
+    if (purityRels.has(f.rel)) continue
+    for (const id of pluginIds) {
+      const re = new RegExp(`"${id}"|"${id}[:/]`, 'g')
+      domainNounTotal += (f.text.match(re) || []).length
+    }
   }
   const ratchetDown = []
   for (const [rel, n] of nounCounts) {
@@ -537,7 +585,8 @@ if (errors.length === 0) {
     true,
     'CS-004',
     pluginIds.length
-      ? `内核纯度：插件 id 字面量 ${nounTotal} 处（冻结 ${Object.values(NOUN_BASELINE).reduce((s, n) => s + n, 0)} 处 / ${Object.keys(NOUN_BASELINE).length} 个文件，只许降）`
+      ? `内核纯度：内核文件集插件 id 字面量 ${nounTotal} 处（冻结 ${Object.values(NOUN_BASELINE).reduce((s, n) => s + n, 0)} 处 / ${Object.keys(NOUN_BASELINE).length} 个文件，只许降）；` +
+        `域文件 ${domainNounTotal} 处（C 迁出账，不设门禁）`
       : '内核纯度：夹具仓库没有插件目录，CS-004 不适用',
   )
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])

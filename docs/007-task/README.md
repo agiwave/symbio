@@ -80,7 +80,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 2 · 🟡 doing 3 · done 0 · wont 0（共 5）
+**计数**：☐ todo 2 · 🟡 doing 2 · done 0 · wont 0（共 4）
 
 ## 待处理（按依赖顺序）
 
@@ -95,7 +95,6 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 |---|---|---|---|---|
 | `T-272-设计实现总收口批` | 设计实现总收口批（sprint）：判据面归位、能力缺口逐阶收口与读数补建 | now | plan | — |
 | `T-316-内核边界与扩展局部性收口` | 内核边界与扩展局部性收口（方案 Phase A–C） | now | plan | — |
-| `T-318-A2-kernel-子集与审计范围` | Phase A2：core 内划 kernel 子集，门禁只对 kernel 生效 | next | impl | — |
 
 ## 分解树
 
@@ -103,8 +102,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。
 
 - [`T-272-设计实现总收口批`](272-设计实现总收口批.md) 设计实现总收口批（sprint）：判据面归位、能力缺口逐阶收口与读数补建（doing）
-- [`T-316-内核边界与扩展局部性收口`](316-内核边界与扩展局部性收口.md) 内核边界与扩展局部性收口（方案 Phase A–C）（doing） · 子项 todo 2 / doing 1
-  - [`T-318-A2-kernel-子集与审计范围`](318-A2-kernel-子集与审计范围.md) Phase A2：core 内划 kernel 子集，门禁只对 kernel 生效（doing）
+- [`T-316-内核边界与扩展局部性收口`](316-内核边界与扩展局部性收口.md) 内核边界与扩展局部性收口（方案 Phase A–C）（doing） · 子项 todo 2
   - [`T-322-B4-根账本与共享类型-owner`](322-B4-根账本与共享类型-owner.md) Phase B4：根账本只降不升，共享类型登记生产者 owner（todo）
   - [`T-323-C-实现搬迁与-crate-边界`](323-C-实现搬迁与-crate-边界.md) Phase C（后置、可选）：实现搬迁、actor 策略迁移与 crate 边界（todo）
 

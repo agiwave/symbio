@@ -41,6 +41,7 @@ function rmTree(dir) {
 
 const CORE_MOD = 'symbio/src/symbio_core/mod.rs'
 const ALPHA = 'symbio/src/symbio_core/alpha/mod.rs'
+const KERNEL = 'symbio/src/symbio_core/kernel.rs'
 /** 一个成员、无默认体的最小夹具 */
 const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
 
@@ -144,6 +145,55 @@ test('反向：测试里的 trait 不算形状（`#[cfg(test)]` 模块与 `*.tes
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+// ==================== 内核文件集（A2：判据只对 kernel 生效） ====================
+
+test('内核文件集：标记之外的同名 trait 不占形状（CS-001 只量内核）', () => {
+  const r = audit(
+    {
+      [CORE_MOD]: 'mod alpha;\nmod beta;\nmod kernel;\n',
+      [ALPHA]: ONE,
+      'symbio/src/symbio_core/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n',
+      [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
+    },
+    { baseline: '1:1:0' },
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('内核文件集指向不存在的文件 ⇒ 红（边界失焦不许静默）', () => {
+  const r = audit(core(ONE, { [KERNEL]: '// core-kernel-files: alpha/mod.rs ghost/mod.rs\n' }), {
+    baseline: '1:1:0',
+  })
+  assert.equal(r.status, 1, '文件集要可解析，否则判据在一个缩小了的范围上恒绿')
+  assert.match(r.stderr, /CS-004/)
+  assert.match(r.stderr, /不存在的文件/)
+})
+
+test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红（报告账）', () => {
+  // `plugins/mod.rs` 存在 ⇒ 五格齐全检查生效，夹具把五个内核 trait 都造出来。
+  const five =
+    ONE +
+    'pub trait Capability {\n    fn c(&self);\n}\n' +
+    'pub trait ModelProvider {\n    fn m(&self);\n}\n' +
+    'pub trait VdfsProvider {\n    fn v(&self);\n}\n' +
+    'pub trait Registry {\n    fn r(&self);\n}\n'
+  const files = {
+    [CORE_MOD]: 'mod alpha;\nmod gamma;\nmod kernel;\n',
+    [ALPHA]: five,
+    'symbio/src/symbio_core/gamma/mod.rs': 'pub const G: &str = "session";\n',
+    [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
+    'symbio/src/plugins/mod.rs': '',
+    'symbio/src/plugins/session/.keep': '',
+  }
+  const ok = audit(files, { baseline: '5:5:0' })
+  assert.equal(ok.status, 0, ok.stderr + ok.stdout)
+
+  const bad = audit({ ...files, [ALPHA]: five + 'pub const A: &str = "session";\n' }, { baseline: '5:5:0' })
+  assert.equal(bad.status, 1, '同一字面量落进内核文件就必须红')
+  assert.match(bad.stderr, /CS-004/)
+  assert.match(bad.stderr, /回流/)
 })
 
 // ==================== CS-002 放宽必须有能打开的决策 ====================

@@ -72,7 +72,10 @@ export function parsePubUses(source, domains) {
   for (const m of stripComments(source).matchAll(/^[ \t]*pub use\s+([^;]+);/gm)) {
     const body = m[1].trim()
     const head = body.split('::')[0].trim()
-    const domain = domains.has(head) ? head : null
+    // `pub use super::<域>::{…}`（门面模块的写法）：域取第二段，而不是 `super`。
+    const second = body.split('::')[1]?.trim()
+    let domain = domains.has(head) ? head : null
+    if (domain === null && head === 'super' && second && domains.has(second)) domain = second
     const brace = body.match(/\{([\s\S]*)\}/)
     if (brace) {
       for (const part of brace[1].split(',')) {
@@ -183,12 +186,16 @@ export function collectCoreSurface(root) {
   for (const [name, domain] of rootUses.names) symbols.set(name, domain ?? '(explicit)')
   for (const n of declaredIn(rootMod)) symbols.set(n, '(root)')
 
-  // 展开通配：`pub use <域>::*` ⇒ 该域 mod.rs 的重导出 + 直接声明（不含私有子模块里的 pub）
+  // 展开通配：`pub use <域>::*` ⇒ 该域 mod.rs 的重导出 + 直接声明（不含私有子模块里的 pub）。
+  // 门面模块也可以写成单文件 `<域>.rs`（`kernel.rs` 就是这种），两种形态都认。
+  // 名字的域以**门面自己 `pub use` 的来源域**为准（`d`）——门面不是域，不能把符号
+  // 的归属改成门面名，否则命名审计/依赖图会丢掉真实 owner。
   for (const domain of rootUses.globs) {
-    const domMod = path.join(coreDir, domain, 'mod.rs')
+    const dirMod = path.join(coreDir, domain, 'mod.rs')
+    const domMod = fs.existsSync(dirMod) ? dirMod : path.join(coreDir, `${domain}.rs`)
     if (!fs.existsSync(domMod)) continue
     const dom = parsePubUses(fs.readFileSync(domMod, 'utf8'), domains)
-    for (const [n] of dom.names) if (!symbols.has(n)) symbols.set(n, domain)
+    for (const [n, d] of dom.names) if (!symbols.has(n)) symbols.set(n, d ?? domain)
     for (const n of declaredIn(domMod)) symbols.set(n, domain)
   }
 
@@ -347,6 +354,7 @@ export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/
     const stem = rel.replace(/\.rs$/, '')
     const domain = head ?? (stem === 'mod' ? '(root)' : stem)
     if (domain === '(root)') continue // 口径 2：导出清单不是消费方
+    if (domain === 'kernel') continue // 内核门面（`kernel.rs`）也是导出清单，理由同口径 2
     const src = stripComments(fs.readFileSync(file, 'utf8'))
     for (const name of names) {
       // ⚠️ 排除的是**声明点与导出清单**，不是整个声明域（2026-10-14，见上方口径说明）。
