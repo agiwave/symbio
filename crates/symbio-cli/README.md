@@ -50,19 +50,19 @@ created: 2026-09-11
 node scripts/build-cli.mjs
 
 # 非交互：单条消息
-./../target/debug/symbio-cli.exe --homedir ~/.symbio -m "用一句话解释什么是分形插件架构"
+target/debug/symbio-cli.exe --homedir ~/.symbio -m "用一句话解释什么是分形插件架构"
 
 # 非交互：管道（脚本友好；stdout 只含模型文本）
-echo "你好" | ./../target/debug/symbio-cli.exe --homedir ~/.symbio
+echo "你好" | target/debug/symbio-cli.exe --homedir ~/.symbio
 
 # 交互：多轮 REPL
-./../target/debug/symbio-cli.exe --homedir ~/.symbio
+target/debug/symbio-cli.exe --homedir ~/.symbio
 
 # 交互：stdin 不是终端时用 --repl 强制进入 REPL（也便于脚本化验证会话）
-printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
+printf '第一轮\n/provider\n/exit\n' | target/debug/symbio-cli.exe --repl
 
 # 心跳守护：驻留并为本目录所有启用心跳的会话触发空闲心跳
-./../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
+target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
 ```
 
 产物：`../target/debug/symbio-cli.exe`（相对 `cli/`；仓库根看就是 `target/debug/…`）。
