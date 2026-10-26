@@ -114,8 +114,9 @@ pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "session/autonomous";
 
 /// 抢占判定者的身份（[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）
-/// ——表里那一行的名字与 `PreemptionDecider` 三个事件（`task.held` /
-/// `task.progressed` / `control.opened`）的 `actor` 是同一个常量。
+/// ——表里那一行的名字与 `plugins/session/transcript/inbox.rs::PreemptionDecider` 三个事件
+/// （`task.held` / `task.progress` / `control.opened`）的 `actor` 是同一个常量。
+/// 策略本体已随 D-190 归 session 插件；常量留在这里，因为它是**本机部署事实**（表与判定同住）。
 ///
 /// 与 [`PRINCIPAL_AUTONOMOUS`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，
 /// 两边迟早漂移到「判的是 A、写的是 B」而没有任何东西会变红。它与自主行同属「少给」一侧：

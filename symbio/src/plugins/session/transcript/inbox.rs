@@ -24,7 +24,7 @@
 //! 1. **FIFO**：同一个会话严格按入队顺序，先到先跑；
 //! 2. **忙则排队，不抢占**：会话正在跑（`is_working`）时只把条目留在队里，等这一轮
 //!    收尾再取下一条——不合并、不中断、不并发；**排队的是插话，不是在跑的任务**：
-//!    忙窗里 core 的抢占判定者（`PreemptionDecider`）会评估当前任务要不要挂起
+//!    忙窗里本模块的抢占判定者（[`PreemptionDecider`]）会评估当前任务要不要挂起
 //!    （S8 第 19 步），结论经 [`super::super::active::PreemptPending`] 跨过忙窗、
 //!    在空闲分支落成事实。挂起 / 恢复**都不开新轮、都不动队列**，所以与「不抢占」
 //!    不冲突（判定顺序见 [04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
@@ -44,8 +44,10 @@ use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, Sess
 use super::supplements;
 use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use crate::symbio_core::{
-    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption, PreemptionDecider,
-    Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_CONTROL_OPENED,
+    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, PRINCIPAL_REFLEX,
+    SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -135,6 +137,182 @@ pub(crate) fn take_inbox_batch_sync(
 
     announce_drained(change_subs, &state.session_id, &batch);
     batch
+}
+
+// ── S07 抢占判定（S8 第 19 步）────────────────────────────────────────────
+//
+// 唯一生产消费方就是本文件的忙窗判定与空闲落格链（D-190）；判定是纯函数，
+// 落格是事件，两者各住一边。
+
+/// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Preemption {
+    /// 当前无在跑任务——插话放行，直接开始新 turn。
+    Proceed,
+    /// 挂起当前任务：`as_of_seq` 是挂起锚 T（恢复 = 以 T 重放投影，零状态迁移）。
+    Suspend { task_id: String, as_of_seq: u64 },
+    /// 排队：任务不可中断 / final 已发出（已发出的发言不可撤回）。
+    Queue,
+    /// 判定超时：**默认「继续」不挂起**——挂起会留下需要恢复的状态，继续不会；
+    /// 两个选择都可能错，错的代价不对称，默认选代价小的（04 §2.1）。
+    TimeoutDefaultContinue,
+}
+
+/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）。
+///
+/// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
+/// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
+/// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（S07 §5，由
+/// grants 表保证：`authz::ROWS` 里 [`PRINCIPAL_REFLEX`] 那一行，判据见
+/// `authz.test.rs::the_reflex_row_is_narrower_than_main`）。
+///
+/// 能力那一半**不在这里硬写**：`capabilities = [judge.intent]` 的权威是授权表，
+/// [`Self::spec`] 从表行取（`production_matrix` ⇒ `grant_names_of`）。两处各写一份能力清单
+/// 必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
+pub struct PreemptionDecider;
+
+impl PreemptionDecider {
+    /// S07 抢占判定者**行**（`ActorSpec` 生产构造点，[] 批②）。
+    ///
+    /// `{ principal: session/reflex, pattern: decider, capabilities: [judge.intent],
+    /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 S07 §3 表逐字相符：
+    /// principal/pattern/capabilities 同源于授权表那一行（[] 落地的
+    /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
+    ///
+    /// 判定者必须有**行**：若 `decide` 被直驱、预算由调用方现算、规格从不构造，就是
+    /// 「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见
+    /// [`Self::decide`]（预算）与本文件的写侧闸（能力，`actor_can_judge_intent`）。
+    pub fn spec(&self) -> ActorSpec {
+        let principal = PRINCIPAL_REFLEX.to_string();
+        ActorSpec {
+            pattern: crate::symbio_core::pattern_for_principal(&principal),
+            capabilities: crate::symbio_core::production_matrix().grant_names_of(&principal),
+            budget_ms: LatencyTier::Reflex.budget_ms(),
+            scope: Scope::Root,
+            principal,
+        }
+    }
+
+    /// 对当前在跑任务的处置判定。
+    ///
+    /// `spec`：判定者**自己的行**（[`Self::spec`]）。预算从它身上读
+    /// （`spec.budget_ms`）——不再是调用方现算一个裸 `u64` 塞进来，
+    /// 「判定者行声明了多少预算」因此是一等数据、有真读方。
+    ///
+    /// `elapsed_ms`：判定者自身耗时（调用方 `Instant` 计时后传入——判定是纯函数，
+    /// 计时留在边界上）。预算内（≤ `budget_ms`）才做实质判定，超时走默认分支。
+    /// 判定顺序（04 §2.1）：无在跑任务 → 放行；final 已发出 → 排队；否则 → 挂起。
+    ///
+    /// 能力（`judge.intent`）**不在本函数判**：它是**写权**，拦在落格那一侧
+    /// （[`SessionPlugin::commit_preemption`] 的写侧闸），与 `decide` 是纯函数判定分开——
+    /// 判定可以算，写控制事实才需要资格。
+    pub fn decide(&self, spec: &ActorSpec, events: &[Event], elapsed_ms: u64) -> Preemption {
+        if elapsed_ms > spec.budget_ms {
+            return Preemption::TimeoutDefaultContinue;
+        }
+        // 在跑任务 = 最新一个 opened 且未终态、未挂起的任务。
+        let mut suspended: Vec<&str> = Vec::new();
+        let mut done: Vec<&str> = Vec::new();
+        let mut running: Option<(&str, u64)> = None;
+        for e in events {
+            let Some(id) = e.payload.get("task_id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if e.entity == Entity::Task {
+                match e.kind.as_str() {
+                    EVENT_TASK_OPENED => {
+                        running = Some((id, e.seq.map(|s| s.value()).unwrap_or(u64::MAX)));
+                    }
+                    EVENT_TASK_ASSERTED => {
+                        done.push(id);
+                        suspended.retain(|x| *x != id);
+                    }
+                    EVENT_TASK_HELD => suspended.push(id),
+                    EVENT_TASK_PROGRESS => {
+                        suspended.retain(|x| *x != id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let Some((task_id, opened_seq)) =
+            running.take_if(|(id, _)| !done.contains(id) && !suspended.contains(id))
+        else {
+            return Preemption::Proceed;
+        };
+        // final 已发出（任务开启后有过收束发言）→ 排队：已发出的发言不可撤回。
+        let final_after_task = events.iter().any(|e| {
+            e.kind == EVENT_ASSISTANT_FINAL
+                && e.seq.map(|s| s.value()).unwrap_or(u64::MAX) > opened_seq
+        });
+        if final_after_task {
+            return Preemption::Queue;
+        }
+        Preemption::Suspend {
+            task_id: task_id.to_string(),
+            as_of_seq: opened_seq,
+        }
+    }
+
+    /// 挂起事件（`task × held`）——挂起就是一条事件，不需要新状态机。
+    ///
+    /// 两个锚各司其职，别混：
+    /// - `source_seq` = **挂起前最后一条已落事实的 seq**（04 §2.2 步 1「记录当前
+    ///   seq 为 T」）——它是幂等键的后半段，因此必须**每次挂起都不同**：同一个任务
+    ///   可以被挂起多次（挂起 → 恢复 → 再挂起），拿任务开格 seq 当锚会让第二次撞
+    ///   `Duplicate` 而**静默丢掉**那次挂起（J3）。
+    ///
+    ///   **不能取 `head`**：`head` 是"下一条的号"，它还不是事实。拿它当
+    ///   `produced_by` 会让落格后那条边指向**自己**（`produced_by == seq`）。
+    ///   I2 只查"有没有边"时这是绿的，`provenance_dangling` 上线后它必须红——
+    ///   调用方因此传 `head - 1`（见 [`SessionPlugin::append_preemption`]）。
+    /// - `as_of_seq` = 任务开格 seq（[`Self::decide`] 给出的 as-of 重放锚，04 §2.2
+    ///   步 5）——它是判据的一部分，随事实一起落盘，不留在内存里。
+    pub fn held_event(&self, task_id: &str, source_seq: u64, as_of_seq: u64) -> Event {
+        Event::pending(
+            format!("held-{task_id}-{source_seq}"),
+            EVENT_TASK_HELD,
+            Entity::Task,
+            Verb::Held,
+            0,
+            PRINCIPAL_REFLEX,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "task_id": task_id, "as_of": as_of_seq }))
+    }
+
+    /// 恢复事件（`task × progressed`）——挂起的逆操作，同样是一条事件。
+    ///
+    /// 与 [`Self::held_event`] 成对：**只挂不收就是永久挂起**（挂起期间任务不进
+    /// `readyset`，而 `readyset` 又是模型唯一的调度候选来源 ⇒ 任务从此再也不被
+    /// 调度，且没有任何一条消息说得出为什么）。故插话轮一结束就由调用方写本条。
+    /// 锚同样取写入时刻的 head：同一任务的第二次挂起要有第二次恢复。
+    pub fn resume_event(&self, task_id: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("res-{task_id}-{source_seq}"),
+            EVENT_TASK_PROGRESS,
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            PRINCIPAL_REFLEX,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "task_id": task_id }))
+    }
+
+    /// 控制事件（`control × opened`）——打断处置的产出事实。
+    pub fn control_event(&self, reason: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("ctrl-{source_seq}"),
+            EVENT_CONTROL_OPENED,
+            Entity::Control,
+            Verb::Opened,
+            0,
+            PRINCIPAL_REFLEX,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "reason": reason }))
+    }
 }
 
 impl SessionPlugin {

@@ -1249,7 +1249,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
 
     // 预算收紧到「已耗 + 申请」之下 ⇒ 熔断；放宽到之上 ⇒ 放行。
     assert_eq!(
-        crate::symbio_core::CircuitBreaker.gate(
+        super::super::CircuitBreaker.gate(
             inputs.authorized,
             inputs.spent_ms,
             inputs.requested_ms,
@@ -1257,13 +1257,13 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             0,
             crate::symbio_core::LatencyTier::Deep.budget_ms(),
         ),
-        crate::symbio_core::GateDecision::Break {
+        super::super::GateDecision::Break {
             reason: "budget-exhausted"
         },
         "预算真的在参与判定（常量判定拿不出这一对相反的结论）"
     );
     assert_eq!(
-        crate::symbio_core::CircuitBreaker.gate(
+        super::super::CircuitBreaker.gate(
             inputs.authorized,
             inputs.spent_ms,
             inputs.requested_ms,
@@ -1271,7 +1271,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             0,
             crate::symbio_core::LatencyTier::Deep.budget_ms(),
         ),
-        crate::symbio_core::GateDecision::Allow
+        super::super::GateDecision::Allow
     );
 }
 

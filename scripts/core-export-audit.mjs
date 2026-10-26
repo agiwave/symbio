@@ -122,7 +122,13 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 显为单消费方 ⇒ 豁免自行失效并被删除（纪律 2：豁免是在补口径的洞，补洞该补
       // 口径，不该把洞登记成永久账目）。
       //
-      // 剩下 1 条（2026-10-26 A2 后）：`ActorSpec` 是**协议接缝**（F3 冻结字段集）。
+      // 内核公共面豁免：**0 条**（2026-10-26 D-190 后）。
+      //
+      // 最后一条 `ActorSpec` 是**协议接缝**（F3 冻结字段集），曾因 core 外唯一生产
+      // 消费方是 `plugins/session` 而豁免；抢占判定随 D-190 搬进
+      // `plugins/session/transcript/inbox.rs` 后，`ActorSpec` 有了第二个生产消费方
+      // （`turn_exec` 构造 + `inbox` 构造判定者行），C-003 的「≥2 消费方」判据自行
+      // 成立 ⇒ 条目按纪律 2 退役，不留空转豁免。
       //
       // `branch_hide_unselected`（节点树接缝）与 `EVENT_TURN_STAGE`（线上事件名）随 C-003
       // 的判定范围收窄到内核公共面而**移出本帐**：它们不是封闭语法，属域账本，由 C-004
@@ -135,8 +141,6 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // （core 自己的投影域在生产使用它们），豁免条目空转，直接删除；`token_ledger`
       // 的唯一生产消费方是 `plugins/session/stats.rs`，按 D-180 连同类型与实现搬进
       // 会话插件（`plugins/session/token_ledger.rs`），根出口与条目同时退役。
-      ActorSpec:
-        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（turn_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
     }
 
 /**
@@ -148,7 +152,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * `dead-code-audit` R-002 逐项承认。
  *
  * `0/0` 是 **A2 之后**（2026-10-26）的上限：C-003 的判定范围收窄到 `kernel.rs` 门面的
- * 公共面（14 条封闭语法），其中 0 消费方 0 条、单消费方 0 条（`ActorSpec` 是唯一豁免）。
+ * 公共面（14 条封闭语法），其中 0 消费方 0 条、单消费方 0 条（D-190 后豁免账本为空）。
  * 此前 13 条单消费方仍是存量，但**移出 C-003**：它们不是封闭语法，属域账本，由 C-004
  * 冻结条数（270）并在 `--verbose` 的 `[L1]` 里逐条列出——C 迁出对应域时一并消失。
  *
@@ -204,8 +208,8 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   （唯一消费方 `stats.rs`），豁免账本 12 → 11，`one` 不变。另核验四条「投影类」豁免
  *   （`turnstate` / `SloLatencyView` / `FallbackRateView` / `mutations_latest_snapshot`）
  *   本就不是 `isSinkCandidate`（core 自己的投影域在生产使用它们），条目空转 ⇒ 删除；
- *   它们从未计入 `one`，基线不动。剩下 `ActorSpec` / `branch_hide_unselected` /
- *   `EVENT_TURN_STAGE` 三条接缝，理由见上。
+ *   它们从未计入 `one`，基线不动。`ActorSpec` 随 D-190 有了第二个生产消费方而退役，
+ *   `branch_hide_unselected` / `EVENT_TURN_STAGE` 两条接缝移出本帐（口径见 D-185）。
  */
 
 const BASELINE = process.env.CORE_EXPORT_BASELINE

@@ -244,3 +244,54 @@ fn blocked_refusal_keeps_hook_wording_and_semantics() {
         Some("被 PreToolUse 钩子拦下：策略不允许")
     );
 }
+
+// ==================== S09 外部执行闸门（纯函数，D-190） ====================
+//
+// 策略实现随 D-190 从 core 迁到本闸门文件；这里钉判定表与「熔断不静默」的
+// 事件形状。整批路径（授权 → 闸门 → 拒止）仍在 `tool_executor.test.rs`。
+
+/// S09 §6 验收 1：未授权 ⇒ `Refuse`（调用方因此零事件；事件面判据在整批路径里）。
+/// 超时**先于**授权判定——判据顺序本身是规格。
+#[test]
+fn circuit_breaker_refuses_unauthorized() {
+    assert_eq!(
+        CircuitBreaker.gate(false, 0, 500, 1_000, 10, 80),
+        GateDecision::Refuse
+    );
+    assert_eq!(
+        CircuitBreaker.gate(false, 0, 500, 1_000, 200, 80),
+        GateDecision::Break {
+            reason: "gate-timeout"
+        }
+    );
+}
+
+/// S09 §6 验收 2 + 4：预算耗尽 / 超时熔断（都必须写事件）；预算放宽 ⇒ 放行。
+#[test]
+fn circuit_breaker_break_table_and_event() {
+    let gate = CircuitBreaker;
+    assert_eq!(
+        gate.gate(true, 900, 500, 1_000, 10, 80),
+        GateDecision::Break {
+            reason: "budget-exhausted"
+        }
+    );
+    assert_eq!(
+        gate.gate(true, 900, 500, 10_000, 10, 80),
+        GateDecision::Allow
+    );
+    assert_eq!(
+        gate.gate(true, 0, 500, 10_000, 200, 80),
+        GateDecision::Break {
+            reason: "gate-timeout"
+        }
+    );
+
+    // 熔断不许静默：`break_event` 必须落在 `control × opened`，载荷带 reason。
+    let ev = gate.break_event("budget-exhausted", 7);
+    assert_eq!(ev.kind, EVENT_CONTROL_OPENED);
+    assert_eq!(ev.entity, Entity::Control);
+    assert_eq!(ev.verb, Verb::Opened);
+    assert_eq!(ev.actor, PRINCIPAL_REFLEX);
+    assert_eq!(ev.payload["reason"], "budget-exhausted");
+}

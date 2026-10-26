@@ -160,20 +160,19 @@ pub use store::EventStore;
 // `AgentScope` 带目录根（文件闸要判物理路径），不可序列化 ⇒ `WIRE = false`，
 // 与 `CAPABILITY_ERRORS` 同一条理由。
 pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
-// 跨域 actor 策略（D-189）：control 的抢占 / 熔断 / 淘汰裁决同时被 `plugins/session`
-// 与 `plugins/loop` 在两个角色里使用，commitment 是写侧成格 / 读侧翻译的配对——两类
-// 都留 core（判据见 D-189）。`SKILL_TAG` 是 loop 写、session 读的共享词汇（D-177）。
-// 单消费方策略（调度 / 技能编译与路由 / 检索 Translator / 自主层与意欲闸门）归 owner
-// 插件，不再经此处出根。
+// 跨域 actor 策略（D-189 / D-190）：`EliminationDecider` 的写侧裁决在 loop 轮末、
+// 读侧翻译（`verdict_grants_changes`）在 session 工具层——配对映射跨两个 owner，
+// 留 core（判据见 D-187 第 1 条 / D-190）。`SKILL_TAG` 是 loop 写、session 读的
+// 共享词汇（D-177）。
+// 单消费方策略（调度 / 技能编译与路由 / 检索 Translator / 自主层与意欲闸门 /
+// 抢占判定 / 外部执行闸门）归 owner 插件，不再经此处出根。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
 // `EliminationDecider`（S13 淘汰回路的裁决侧，）：判定在 core、轮末驱动与
-// 闸门接线都在 `plugins/session`（derived_facts 的轮末步 + 工具执行层的撤销闸），
-// 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
+// 闸门接线都在 `plugins`（derived_facts 的轮末步 + 工具执行层的撤销闸），
+// `pub(crate)` 出根，不进公开面。
 pub(crate) use actors::{commitment_events, commitment_records};
-pub(crate) use actors::{
-    CircuitBreaker, EliminationDecider, GateDecision, Preemption, PreemptionDecider, SKILL_TAG,
-};
+pub(crate) use actors::{EliminationDecider, SKILL_TAG};
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
 // `invariants` 的 `acyclic_deps` / `rework_bounded`）走域内路径，core 外的写方只有
@@ -190,9 +189,10 @@ pub(crate) use actors::{
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")。
 #[allow(unused_imports)]
 pub(crate) use event::{
-    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED,
-    EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY,
-    EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED,
+    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED,
+    EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub(crate)` 出根
@@ -325,7 +325,7 @@ pub(crate) use authz::{
     bind_inheriting, bind_root, content_visible, principal_of, production_matrix,
     request_principal, unbind_session, EffectiveMatrix, CAP_ASSERT_VERIFICATION, CAP_ASSIGN_WORK,
     CAP_DEFINE_WORK, CAP_EXTERNAL_EXECUTION, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN,
-    PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
+    PRINCIPAL_REFLEX, PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
 };
 // 只在**测试**里被 core 外点名的行名 / 属主：生产侧没有任何 core 外消费方，
 // 非测试构建里出根就是几处死代码。`cfg(test)` 出根与 `EVENT_COMMITMENT_*` 同形态——

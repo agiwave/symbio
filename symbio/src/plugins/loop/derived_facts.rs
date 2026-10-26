@@ -125,11 +125,10 @@ pub(crate) fn record_derived(
 
     // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────
     // 与承诺 / 任务**同锚**（`user_seq`）：熔断说的是「这一轮不允许做」，出处同样
-    // 是这一轮的开口。写方住 core 的 `CircuitBreaker`，此处只负责把门推开。
+    // 是这一轮的开口。写方住本插件的闸门判据（`tools::dispatch::gates`，D-190），
+    // 此处只负责把门推开。
     if let Some(&reason) = breaks.first() {
-        if let Err(e) =
-            store.append(crate::symbio_core::CircuitBreaker.break_event(reason, user_seq))
-        {
+        if let Err(e) = store.append(super::tools::CircuitBreaker.break_event(reason, user_seq)) {
             crate::plugin_warn!(
                 "session",
                 "[v2] 熔断事件入格失败（会话 {session_id}）：{e:?}"

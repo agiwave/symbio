@@ -25,6 +25,7 @@
 //! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
 
 use super::*;
+use crate::symbio_core::{Entity, Verb, EVENT_CONTROL_OPENED, PRINCIPAL_REFLEX};
 
 /// 批首一次读齐的全部闸门读数（阶段①的产出；阶段②③只按值消费，不再回读事实源）。
 pub(crate) struct GateReadings {
@@ -297,11 +298,84 @@ pub(crate) const GATES: &[GateRow] = &[
     },
 ];
 
+/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateDecision {
+    /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
+    Refuse,
+    /// 熔断（预算耗尽 / 判定超时）——调用方**必须**写 `task.controlled` 事件
+    /// （载荷 `reason`），不允许静默继续（验收 2）。
+    Break { reason: &'static str },
+    /// 放行执行。
+    Allow,
+}
+
+/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+///
+/// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
+/// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
+///
+/// 唯一生产消费方是本文件的 [`external_execution`] 与 `derived_facts::record_derived`
+/// 的 `break_event`（同属 loop 插件，D-190）。
+pub struct CircuitBreaker;
+
+impl CircuitBreaker {
+    /// 外部执行闸门。
+    ///
+    /// - `authorized`：主体是否持外部执行能力（`ProduceArtifact`，读路径判定）；
+    /// - `spent_ms` / `requested_ms` / `budget_ms`：已耗 / 本次申请 / 总预算；
+    /// - `elapsed_ms`：**判据输入已耗的时长**（从批首开始读事实源到调用点，
+    ///   不是「调用本函数前那几条指令」）；超过 `elapsed_budget_ms` 即熔断
+    ///   （**有事件**的超时，不是静默失效；I3）；
+    /// - `elapsed_budget_ms`：这份输入的时延预算。**由调用方给**，因为它的正确取值
+    ///   取决于输入是什么：纯查表可以用反射档（80ms），而本闸门的输入是**会话事实源
+    ///   的整段重放**（O(事件数)），那是深度档的操作——[] 之前硬编码反射档，
+    ///   于是判据只在「重放不到 80ms」时可达，长会话下反而永远不触发。
+    pub fn gate(
+        &self,
+        authorized: bool,
+        spent_ms: u64,
+        requested_ms: u64,
+        budget_ms: u64,
+        elapsed_ms: u64,
+        elapsed_budget_ms: u64,
+    ) -> GateDecision {
+        if elapsed_ms > elapsed_budget_ms {
+            return GateDecision::Break {
+                reason: "gate-timeout",
+            };
+        }
+        if !authorized {
+            return GateDecision::Refuse;
+        }
+        if spent_ms.saturating_add(requested_ms) > budget_ms {
+            return GateDecision::Break {
+                reason: "budget-exhausted",
+            };
+        }
+        GateDecision::Allow
+    }
+
+    /// 熔断事件（复用 `control/opened` 格，载荷 `reason` 区分打断与熔断）。
+    pub fn break_event(&self, reason: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("cb-{source_seq}"),
+            EVENT_CONTROL_OPENED,
+            Entity::Control,
+            Verb::Opened,
+            0,
+            PRINCIPAL_REFLEX,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "reason": reason }))
+    }
+}
+
 /// 外部执行闸（S8 第 20 步）：授权 + 时延 / 预算。判据紧贴执行窗口之前、
 /// **先于 PreToolUse 钩子**——对一通马上要被拒的调用先跑钩子，等于让拒绝白白
 /// 付一次钩子往返。
 fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
-    let decision = crate::symbio_core::CircuitBreaker.gate(
+    let decision = CircuitBreaker.gate(
         ctx.breaker.authorized,
         ctx.breaker.spent_ms,
         ctx.breaker.requested_ms,
@@ -311,14 +385,14 @@ fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
         crate::symbio_core::LatencyTier::Deep.budget_ms(),
     );
     match decision {
-        crate::symbio_core::GateDecision::Allow => None,
-        crate::symbio_core::GateDecision::Break { reason } => Some(Refusal::new(
+        GateDecision::Allow => None,
+        GateDecision::Break { reason } => Some(Refusal::new(
             "外部执行",
             format!("外部执行闸门熔断（{reason}），本轮工具调用未执行"),
             failure_kind::TOOL_UNAVAILABLE,
             RefusalTrace::Recorded(reason),
         )),
-        crate::symbio_core::GateDecision::Refuse => Some(Refusal::new(
+        GateDecision::Refuse => Some(Refusal::new(
             "外部执行",
             "未持外部执行能力（produce.artifact），本次调用未执行".to_string(),
             failure_kind::PERMISSION_DENIED,

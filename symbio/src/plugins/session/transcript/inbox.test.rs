@@ -659,3 +659,214 @@ async fn pending_work_separates_events_from_retries() {
     assert!(pending.busy.is_empty(), "队空时没有可等的收轮");
     assert!(pending.retry, "未结清的恢复事件必须等重试");
 }
+
+// ==================== S07 抢占判定（纯函数 + 行，D-190） ====================
+//
+// 判定表四类结论、预算读的是**行自己的** `budget_ms`，以及挂起 / 恢复对就绪集的
+// 影响。这些用例随策略实现从 core 迁来（D-190）——判据没变，只是落点归 owner。
+
+use crate::symbio_core::{Budget, EventStore, Pattern, Scope, EVENT_TASK_PROGRESS};
+
+/// 造一个在跑任务（供插话 / 熔断场景使用）。
+fn running_task(store: &EventStore, id: &str) {
+    store
+        .append(
+            Event::pending(
+                format!("o-{id}"),
+                EVENT_TASK_OPENED,
+                Entity::Task,
+                Verb::Opened,
+                0,
+                "session/main",
+            )
+            .with_payload(serde_json::json!({ "task_id": id, "depends_on": [], "goal": "goal" })),
+        )
+        .expect("开任务必入库");
+}
+
+fn facts(store: &EventStore) -> Vec<Event> {
+    store.range(crate::symbio_core::Seq::new(0))
+}
+
+/// S07 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
+#[test]
+fn interruption_within_reflex_budget_produces_control_event() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let d = PreemptionDecider.decide(&PreemptionDecider.spec(), &facts(&store), 10);
+    match d {
+        Preemption::Suspend { task_id, as_of_seq } => {
+            assert_eq!(task_id, "t1");
+            // 挂起就是一条事件 + 一条控制事实（判定者只产控制事件，不发言）。
+            store
+                .append(PreemptionDecider.held_event(&task_id, as_of_seq, as_of_seq))
+                .unwrap();
+            store
+                .append(PreemptionDecider.control_event("interrupt-suspend", as_of_seq))
+                .unwrap();
+            let snapshot = facts(&store);
+            assert!(
+                snapshot.iter().any(|e| e.kind == EVENT_CONTROL_OPENED),
+                "80ms 内必须有 task.controlled"
+            );
+            assert!(
+                crate::symbio_core::check_all(&snapshot).is_empty(),
+                "{:?}",
+                crate::symbio_core::check_all(&snapshot)
+            );
+        }
+        other => panic!("预算内应实质判定，得到 {other:?}"),
+    }
+}
+
+/// S07 §6 验收 4（反向）：同一场景，预算放宽 → 判定结果必须改变（预算参数在生效）。
+#[test]
+fn widening_budget_changes_preemption_outcome() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let snapshot = facts(&store);
+    // 判定耗时 100ms：判定者行（反射档，`spec().budget_ms` = 80）超时 → 默认继续（不挂起）。
+    assert_eq!(
+        PreemptionDecider.decide(&PreemptionDecider.spec(), &snapshot, 100),
+        Preemption::TimeoutDefaultContinue
+    );
+    // 同一份判据数据，只把**行上的预算**放宽到 60000 → 实质判定成立（挂起）。
+    // 断言「`decide` 读的是规格自己的 budget_ms」——不是某个调用方现算的数值。
+    let mut generous = PreemptionDecider.spec();
+    generous.budget_ms = 60_000;
+    assert_eq!(
+        PreemptionDecider.decide(&generous, &snapshot, 100),
+        Preemption::Suspend {
+            task_id: "t1".into(),
+            as_of_seq: 0
+        }
+    );
+}
+
+/// 04 §2.3 边界：final 已发出后到达插话 → 不抢占，排队（已发出的发言不可撤回）。
+#[test]
+fn interruption_after_final_is_queued_not_preempted() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    store
+        .append(
+            Event::pending(
+                "f0",
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                0,
+                "session/main",
+            )
+            .with_produced_by(0),
+        )
+        .unwrap();
+    assert_eq!(
+        PreemptionDecider.decide(&PreemptionDecider.spec(), &facts(&store), 10),
+        Preemption::Queue
+    );
+}
+
+/// S07 §6 验收 2 + 3：挂起期间任务不在 readyset（二次调度 0）；以挂起锚 as-of 重放
+/// 与挂起前一致（恢复零状态迁移）；恢复事件让任务重新就绪。
+#[test]
+fn suspended_task_leaves_readyset_and_restores() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let before =
+        crate::symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
+    assert_eq!(before.value.ready.len(), 1);
+
+    // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
+    let t = store.head().value();
+    store
+        .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
+        .unwrap();
+    let events = facts(&store);
+    let suspended =
+        crate::symbio_core::readyset(usize::MAX).apply(&events, 9_999, Budget::generous());
+    assert!(
+        suspended.value.ready.is_empty(),
+        "挂起期间不得二次调度（S07 §6 验收 2）"
+    );
+
+    // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
+    // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（04 §2.2）。
+    let at_t = crate::symbio_core::readyset(usize::MAX).apply(&events, 1_000, Budget::generous());
+    assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
+
+    // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
+    store
+        .append(
+            Event::pending(
+                "resume-t1",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "session/main",
+            )
+            .with_payload(serde_json::json!({ "task_id": "t1" })),
+        )
+        .unwrap();
+    let restored =
+        crate::symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
+    assert_eq!(restored.value.ready.len(), 1, "恢复后重新进入 readyset");
+    assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
+}
+
+/// S07 §5：判定者的生产行只授予 `judge.intent`——无 `reply.*` 写权（不得直接发言）。
+///
+/// 判据走**生产表**（`production_matrix`），不是自造矩阵：表里少一行 `session/reflex`，
+/// 自造矩阵照样绿。表是权威（D-099）。
+#[test]
+fn preemption_decider_row_grants_only_judge_intent() {
+    let grants = crate::symbio_core::production_matrix().grant_names_of(PRINCIPAL_REFLEX);
+    assert_eq!(
+        grants,
+        vec!["judge.intent".to_string()],
+        "判定者只产控制事件、不得发言（S07 §5 的窄行）"
+    );
+}
+
+/// 批②：S07 判定者**行**——五字段取实 + 能力读方。
+///
+/// 判据分两半：① 行的形状与 S07 §3 表逐字相符（五字段全部取实、非平凡值）；
+/// ② **能力读方**——`can_judge_intent` 读规格**自己身上**的能力集，含反向用例
+/// （清空能力集 ⇒ 写权拒；判定若绕回授权表则这条绿）。
+#[test]
+fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
+    let spec = PreemptionDecider.spec();
+    assert_eq!(
+        spec.principal, PRINCIPAL_REFLEX,
+        "主体名 = 授权表那一行的键"
+    );
+    assert_eq!(spec.pattern, Pattern::Decider, "规则判定，非模型（S07 §3）");
+    assert_eq!(
+        spec.capabilities,
+        vec!["judge.intent".to_string()],
+        "能力取授权表**窄行**（T-081）"
+    );
+    assert_eq!(
+        spec.budget_ms,
+        LatencyTier::Reflex.budget_ms(),
+        "预算 = 反射档 80ms"
+    );
+    assert!(
+        matches!(spec.scope, Scope::Root),
+        "会话驱动的判定都是根作用域"
+    );
+
+    // 能力读方：判定者持 judge.intent ⇒ 可落控制事实（`task.held` / `control`）。
+    assert!(
+        crate::symbio_core::actor_can_judge_intent(&spec),
+        "判定者持 judge.intent ⇒ 写侧闸放行"
+    );
+    // 反向用例：清空能力集 ⇒ 写权拒。判定若绕回授权表，这条会绿（假绿）——它必须红。
+    let mut stripped = PreemptionDecider.spec();
+    stripped.capabilities.clear();
+    assert!(
+        !crate::symbio_core::actor_can_judge_intent(&stripped),
+        "无 judge.intent ⇒ 不得落控制事实（读的是规格自己的集合）"
+    );
+}

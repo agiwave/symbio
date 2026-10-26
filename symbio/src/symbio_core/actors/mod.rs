@@ -13,16 +13,18 @@
 //!
 //! ## 本域只装「必须留在核内」的策略
 //!
-//! 单消费方的策略实现归 owner 插件（D-189）：调度在 `plugins/loop/task_events`、
+//! 单消费方的策略实现归 owner 插件（D-189 / D-190）：调度在 `plugins/loop/task_events`、
 //! 技能编译与路由在 `plugins/loop/skill_events`、检索 Translator 在
-//! `plugins/loop/memory_events`、自主层与意欲闸门在 `plugins/session/transcript/autonomous`。
+//! `plugins/loop/memory_events`、自主层与意欲闸门在 `plugins/session/transcript/autonomous`；
+//! 抢占判定在 `plugins/session/transcript/inbox`、外部执行闸门在
+//! `plugins/loop/tools/dispatch/gates`。
 //!
 //! 留在本域的三类各有判据：
 //!
 //! - `commitment`：写侧成格 / 读侧翻译的**配对契约**（写方在 loop、读方在 session）——
 //!   搬任一侧都要把另一侧切成第二套规则（D-187 第 1 条）；
-//! - `control`：抢占 / 熔断 / 淘汰裁决**跨两个 owner**且角色不同，按 C1 的明文单独论证
-//!   （D-189）；
+//! - `control`：只剩淘汰裁决——写侧在 loop 轮末、读侧翻译（`verdict_grants_changes`）
+//!   在 session 工具层，**真的跨两个 owner**（D-190）；
 //! - `spec`：`ActorSpec` 的数据面在 `symbio_kernel`，读本机部署表的动作（模式派生 /
 //!   能力位判定）留宿主（D-188）。
 //!
@@ -34,9 +36,7 @@ mod skill;
 mod spec;
 
 pub use self::commitment::{commitment_events, commitment_records};
-pub use self::control::{
-    CircuitBreaker, EliminationDecider, GateDecision, Preemption, PreemptionDecider,
-};
+pub use self::control::EliminationDecider;
 pub use self::skill::SKILL_TAG;
 // 数据面随 D-188 C2b 住内核 crate；本域只剩读部署表的自由函数（见 `spec` 模块文档）。
 pub use self::spec::{
