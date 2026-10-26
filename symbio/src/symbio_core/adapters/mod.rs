@@ -22,9 +22,9 @@
 use async_trait::async_trait;
 
 use crate::symbio_core::chat_node::ChatNode;
-use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
+use crate::symbio_core::{ModelSpend, ModelUsage};
 
 // ── 四层时延（[plan/01 §10](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，一等契约） ──
 
@@ -194,6 +194,12 @@ pub struct LlmTurn {
     /// 缺省 `None`：provider 不一定给（协议或桩都不保证有），校准侧本就按
     /// 可选处理——**缺是正常的，断链才是缺陷**。
     pub usage: Option<ModelUsage>,
+    /// 这一次往返的**钱**（价格 × 用量，由实现体在 adapter 边界折好）。
+    ///
+    /// 与 [`Self::usage`] 同族、同一次测量：`None` = 没有价格配置或没有实测用量。
+    /// 唯一消费者是运行器写 `response{port=model}` 的 `spend` 键——投影只累加整数，
+    /// 不在这里或读侧重算价格（见 [`crate::symbio_core::ModelSpend`]）。
+    pub spend: Option<ModelSpend>,
 }
 
 /// 流式增量接收口（[`LlmAdapter::generate_streaming`] 的回调面）。
@@ -322,6 +328,7 @@ pub trait LlmAdapter: Send + Sync {
             finish: ModelFinishReason::Other("unknown".to_string()),
             cost_ms,
             usage: None,
+            spend: None,
         })
     }
 }
@@ -454,6 +461,7 @@ impl LlmAdapter for StubLlmAdapter {
             finish: ModelFinishReason::Other("unknown".to_string()),
             cost_ms: self.delay_ms,
             usage: None,
+            spend: None,
         })
     }
 

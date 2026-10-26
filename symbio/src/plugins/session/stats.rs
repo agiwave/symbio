@@ -50,8 +50,8 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, token_ledger,
-    transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, spend_ledger,
+    token_ledger, transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginPayload, ReadingPanel, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
 };
 
@@ -107,9 +107,30 @@ pub(crate) struct SessionStats {
     /// ——与 `context_watermark` 缺数整条不出现是同一条纪律。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ 全零）。
-    /// 钱的折算（价格 × 用量）不在这一列：`model` 今天没有价格字段，而按名字猜价格
-    /// 是给「换了个端点就全错」埋伏笔（[DE-020](../../../../docs/003-design/020-前端UI-UX.md "DE-020-前端UI-UX") §11 的前件表）。
+    /// 钱的折算（价格 × 用量）不在这一列，它是下一列 [`Self::spend`]——本列只报
+    /// 「用了多少」，「花了多少钱」由价格配置决定（不按模型名猜）。
     pub tokens: serde_json::Value,
+    /// 金额台账（`spend_ledger` 视图原样序列化）：
+    /// `{ by_currency: { <币种>: { currency, amount_nano, charges,
+    /// by_principal: { <主体>: { principal, amount_nano, charges } } } } }`，
+    /// 币种与主体均字典序。
+    ///
+    /// ## 与 [`Self::tokens`] / [`Self::cost`] 是三列
+    ///
+    /// `tokens` 是**用量**（provider 实测），`cost` 是**时间**（`cost_ms`），
+    /// 本列是**钱**（价格 × 用量）。钱由价格折算，而价格是 Provider 配置
+    /// （`ModelProviderConfig.pricing`，每个端点自己填）——所以本列的存在性取决于
+    /// 配置，不是取决于 token 有没有测到：没配价格时它整列是
+    /// `{ by_currency: {} }`（有据的空），token 列照旧有数。
+    ///
+    /// ## 「没定价」与「明确免费」
+    ///
+    /// `by_currency` 为空 = 这份事实源里没有一条带金额的往返（没配价格 / 没测到用量）；
+    /// 某个币种的 `charges > 0` 且 `amount_nano == 0` = 那个 Provider 的单价被显式
+    /// 配成 0。两者不合并，也不靠补零冒充（与 `tokens` 的 `calls` 同一条判据）。
+    ///
+    /// 不同币种**不相加**：金额只在同一币种内可加，汇率不是事实源里的东西。
+    pub spend: serde_json::Value,
     /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
@@ -351,6 +372,9 @@ pub(crate) fn read(
     // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
     // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
     let tokens = token_ledger().read_all(&snapshot).value;
+    // 金额列：同一个切片、同一个 as-of，读应答载荷的 `spend`（价格 × 用量，
+    // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
+    let spend = spend_ledger().read_all(&snapshot).value;
     // 校准列（[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：与四列同一份
     // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
     let cal = calibration().read_all(&snapshot).value;
@@ -389,6 +413,8 @@ pub(crate) fn read(
         .map_err(|e| PluginError::InternalError(format!("成本台账序列化失败：{e}")))?;
     let tokens = serde_json::to_value(&tokens)
         .map_err(|e| PluginError::InternalError(format!("用量台账序列化失败：{e}")))?;
+    let spend = serde_json::to_value(&spend)
+        .map_err(|e| PluginError::InternalError(format!("金额台账序列化失败：{e}")))?;
     let calibration = serde_json::to_value(&cal)
         .map_err(|e| PluginError::InternalError(format!("校准序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
@@ -485,6 +511,7 @@ pub(crate) fn read(
         tiers,
         cost,
         tokens,
+        spend,
         calibration,
         checkpoint,
         invariants,

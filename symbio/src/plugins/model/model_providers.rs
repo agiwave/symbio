@@ -12,6 +12,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::symbio_core::{ModelSpend, ModelUsage};
+
 fn default_enabled() -> bool {
     true
 }
@@ -28,6 +30,59 @@ fn default_provider_name() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
     pub effort: String,
+}
+
+/// Token 单价（每个 Provider 自己的价格，**不按模型名猜**）。
+///
+/// ## 为什么价格是配置，且必须整组出现
+///
+/// 同一个模型名在不同端点 / 套餐下价格可以完全不同（官方 API、代理、自建、
+/// 免费额度）；按名字内置一张价目表，会在用户换端点的那一天静默算错。价格因此
+/// 跟着 Provider 条目走，由用户填。三项同属一个对象：输入价、输出价、币种缺一
+/// 不可——缺币种的金额没有意义，缺一侧的单价会把该侧用量记成免费。
+///
+/// ## 缺省 = 不折算，零 = 明确免费
+///
+/// `ModelProviderConfig.pricing` 缺席 ⇒ 这份配置不产生金额读数（token 照记）；
+/// 三项都填 0 ⇒ 每次往返记一条 `amount_nano: 0` 的账。两者在账本上由
+/// 「有没有这条记录」分辨，不靠补零冒充（与 `usage` 的「没测量 vs 测到零」同源）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelPricing {
+    /// 每 100 万输入 token 的单价（`currency` 计）。
+    pub input_per_million: f64,
+    /// 每 100 万输出 token 的单价（`currency` 计）。
+    pub output_per_million: f64,
+    /// 币种代码（如 `USD` / `CNY`）。只作账本分组标签，不做汇率换算。
+    pub currency: String,
+}
+
+impl ModelPricing {
+    /// 把一次实测用量折成整数纳单位的金额。
+    ///
+    /// `None` = 这一次两侧都没测到（没有可折算的用量）：与「价格没配」是两件事，
+    /// 但两者都不该写一条零账。只测到一侧时另一侧按 0 token 计（不是按未知计）。
+    ///
+    /// 浮点只在**这一处**出现：`token × 单价 / 1e6 × 1e9` 一次算完再四舍五入，
+    /// 落格之后账是整数。配置来自磁盘（外部输入）：负数 / 非有限值按 0 计，
+    /// 不让一笔脏配置产生负账或 `NaN`。
+    pub fn charge(&self, usage: ModelUsage) -> Option<ModelSpend> {
+        if usage.input.is_none() && usage.output.is_none() {
+            return None;
+        }
+        let input = usage.input.unwrap_or(0) as f64;
+        let output = usage.output.unwrap_or(0) as f64;
+        let nano =
+            input * self.input_per_million * 1000.0 + output * self.output_per_million * 1000.0;
+        let amount_nano = if nano.is_finite() && nano > 0.0 {
+            nano.round().min(u64::MAX as f64) as u64
+        } else {
+            0
+        };
+        Some(ModelSpend {
+            amount_nano,
+            currency: self.currency.trim().to_uppercase(),
+        })
+    }
 }
 
 /// 单个 Model Provider 配置
@@ -63,6 +118,9 @@ pub struct ModelProviderConfig {
     #[serde(default = "default_store")]
     pub store: bool,
     pub reasoning: Option<ReasoningConfig>,
+
+    /// Token 单价（可选）。缺席 = 不折算金额；见 [`ModelPricing`] 的「缺省 vs 零」。
+    pub pricing: Option<ModelPricing>,
 
     /// 最小请求间隔（毫秒）；0 表示不限制
     #[serde(default = "default_rate_limit_ms")]
@@ -111,6 +169,7 @@ impl Default for ModelProviderConfig {
             api_protocol: default_api_protocol(),
             store: default_store(),
             reasoning: None,
+            pricing: None,
             rate_limit_ms: default_rate_limit_ms(),
             enabled: default_enabled(),
         }

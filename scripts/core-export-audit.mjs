@@ -135,6 +135,8 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / turn_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
       token_ledger:
         '投影函数：与 cost_ledger / slo_report / fallback_rate 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引 projection 域目录）。core 外唯一生产消费方 = plugins/session/stats.rs 的用量列（`response{port=model}` 载荷的 `usage`）。core 内没有第二个生产模块用它（同域内只有测试），故显为单消费方。不可下沉：下沉等于让「用量」的口径住进会话插件，而它读的是事件载荷的通用形状（任何读侧都该按同一本账报数）',
+      spend_ledger:
+        '投影函数：与 token_ledger / cost_ledger 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引 projection 域目录）。core 外唯一生产消费方 = plugins/session/stats.rs 的金额列（`response{port=model}` 载荷的 `spend`，按币种分桶）。core 内没有第二个生产模块用它（同域内只有测试），故显为单消费方。不可下沉：金额的累计口径（币种不可加、主体摊开）是任何读侧都该共用的一本账，搬进会话插件就等于给第二份实现留门',
       // 2026-10-21（段一）：事件 kind 名是**事件网格的命名空间**，README §3
       // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
       // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop

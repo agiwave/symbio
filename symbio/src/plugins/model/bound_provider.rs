@@ -221,7 +221,15 @@ impl ModelProvider for BoundProvider {
             )
             .await
             {
-                Ok(()) => return Ok(out),
+                Ok(()) => {
+                    // 钱与 token 同一次测量、同一个边界：价格是本 Provider 的配置，
+                    // 用量是 provider 这次实测的数（见 `ModelPricing::charge`）。
+                    // 没有实测用量 ⇒ 没有可折算的金额（`charge` 返回 `None`）。
+                    if let (Some(pricing), Some(usage)) = (&self.cfg.pricing, out.usage) {
+                        out.spend = pricing.charge(usage);
+                    }
+                    return Ok(out);
+                }
                 Err(fail) if fail.transient && stream_attempt < MAX_STREAM_RETRIES => {
                     stream_attempt += 1;
                     plugin_warn!(

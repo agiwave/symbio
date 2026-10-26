@@ -185,6 +185,42 @@ impl ModelPlugin {
         self.dir.save(&cfg).map_err(PluginError::InternalError)
     }
 
+    /// 计价配置的规范化与校验。
+    ///
+    /// 表单的 `form` widget 总会提交一个子对象键，所以「没填」到达这里时是
+    /// `{}`（空币种 + 零单价）。它必须被规范化回 **`None`**——否则「没定价」
+    /// 会在台账里变成一次「明确免费」，两者靠币种是否为空分辨。
+    ///
+    /// 币种非空而单价为零是合法状态（免费端点）：账本记一次 `charges`、金额 0。
+    fn normalize_pricing(provider: &mut ModelProviderConfig) -> Result<(), PluginError> {
+        let Some(mut pricing) = provider.pricing.take() else {
+            return Ok(());
+        };
+        let currency = pricing.currency.trim().to_uppercase();
+        let zero = pricing.input_per_million == 0.0 && pricing.output_per_million == 0.0;
+        if currency.is_empty() {
+            if zero {
+                return Ok(());
+            }
+            return Err(PluginError::ValidationError(
+                "计价填了单价就必须填币种（不填则整笔不记账）".to_string(),
+            ));
+        }
+        for (label, value) in [
+            ("输入单价", pricing.input_per_million),
+            ("输出单价", pricing.output_per_million),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(PluginError::ValidationError(format!(
+                    "{label}必须是非负的有限数"
+                )));
+            }
+        }
+        pricing.currency = currency;
+        provider.pricing = Some(pricing);
+        Ok(())
+    }
+
     /// 验证给定的 Model Provider 配置（不写入状态）
     async fn validate_provider(provider: &ModelProviderConfig) -> Option<String> {
         Self::validate_config(provider).await
@@ -456,6 +492,7 @@ impl ModelPlugin {
                 "Provider 的 provider 字段不能为空".to_string(),
             ));
         }
+        Self::normalize_pricing(&mut provider)?;
 
         // 保存前必须校验连接（manifest 携带 skip_validation=true 时跳过）
         let skip_validation = manifest

@@ -1759,6 +1759,16 @@ fn resp_event(id: &str, port: &str, principal: &str, usage: Option<(u64, Option<
         .with_payload(payload)
 }
 
+/// 一条**带金额**的 `response`（金额写入与用量同一次测量，见 `facts.rs`）。
+fn spend_event(id: &str, principal: &str, currency: &str, amount_nano: u64) -> Event {
+    let mut e = resp_event(id, "model", principal, Some((10, Some(5))));
+    e.payload["spend"] = serde_json::json!({
+        "amount_nano": amount_nano,
+        "currency": currency,
+    });
+    e
+}
+
 fn wal_with(tag: &str, events: Vec<Event>) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("symbio-stats-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -1852,5 +1862,93 @@ fn the_usage_column_counts_only_measured_responses() {
     assert!(
         bare.usage.is_none(),
         "缺数时会话头那一格整格不出现，而不是画一条全零的读数"
+    );
+}
+
+/// 判据：钱是**第三种量**——按币种分桶、桶内按主体摊开；缺席不冒充 0 元。
+///
+/// 1. 同一币种跨主体相加，不同币种各自一桶（币种顺序由 BTreeMap 给）；
+/// 2. 面板一个币种一行（`花费 · USD`），金额由产者格式化到 1e-4；
+/// 3. 会话头那一格与面板那一段仍是**同一次装配**（逐行相等）。
+#[test]
+fn the_spend_column_is_grouped_by_currency_and_principals() {
+    let wal = wal_with(
+        "spend",
+        vec![
+            spend_event("m-r0", "session/main", "usd", 1_500_000),
+            spend_event("m-r1", "sub/worker", "  USD ", 500_000),
+            spend_event("m-r2", "session/main", "CNY", 12_345_000),
+            // 明确免费：币种在、金额 0 —— 进账（charges）但不加数。
+            spend_event("m-r3", "session/main", "CNY", 0),
+        ],
+    );
+
+    let got = read_at(&wal, crate::symbio_core::PRINCIPAL_MAIN);
+    let usd = &got.spend["by_currency"]["USD"];
+    assert_eq!(
+        usd["amount_nano"],
+        serde_json::json!(2_000_000),
+        "{}",
+        got.spend
+    );
+    assert_eq!(usd["charges"], serde_json::json!(2));
+    assert_eq!(
+        usd["by_principal"]["sub/worker"]["amount_nano"],
+        serde_json::json!(500_000)
+    );
+    let cny = &got.spend["by_currency"]["CNY"];
+    assert_eq!(cny["amount_nano"], serde_json::json!(12_345_000));
+    assert_eq!(
+        cny["charges"],
+        serde_json::json!(2),
+        "零金额也是一次带定价的往返"
+    );
+
+    let section = got
+        .panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("用量与花费"))
+        .expect("有钱的行时标题要说出「花费」");
+    let row = |label: &str| {
+        section
+            .rows
+            .iter()
+            .find(|r| r.label == label)
+            .unwrap_or_else(|| panic!("缺少 {label} 行：{:?}", section.rows))
+    };
+    assert_eq!(row("花费 · USD").value, "0.0020");
+    assert_eq!(row("花费 · CNY").value, "0.0123");
+    assert_eq!(
+        got.usage.as_ref().map(|s| &s.rows),
+        Some(&section.rows),
+        "会话头的用量格必须与面板里那一段同源"
+    );
+}
+
+/// 有用量、没定价 ⇒ 只有「用量」三行：不凭空写一行「0 元」，标题也不预告花费。
+#[test]
+fn usage_without_pricing_does_not_report_zero_money() {
+    let wal = wal_with(
+        "spend-none",
+        vec![resp_event(
+            "m-r0",
+            "model",
+            "session/main",
+            Some((1000, Some(200))),
+        )],
+    );
+    let got = read_at(&wal, crate::symbio_core::PRINCIPAL_MAIN);
+    assert_eq!(got.spend["by_currency"], serde_json::json!({}));
+    let section = got
+        .panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("用量"))
+        .expect("没定价不影响 token 那三行");
+    assert!(
+        section.rows.iter().all(|r| !r.label.starts_with("花费")),
+        "没定价就没有金额可报：{:?}",
+        section.rows
     );
 }

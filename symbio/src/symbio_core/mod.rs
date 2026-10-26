@@ -70,6 +70,7 @@ pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::slo::slo_report;
+pub use projection::spend::spend_ledger;
 pub use projection::token::token_ledger;
 // 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
 //
@@ -317,7 +318,7 @@ pub(crate) use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, SESSION_OWNER};
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
 // 行解析契约与协议事件方言只有 model 插件使用，住在 `plugins/model/protocols/`。
-pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
+pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelSpend, ModelUsage};
 pub use llm::turn::{
     llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,
     TurnToolCallInfo,

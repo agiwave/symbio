@@ -92,6 +92,27 @@ pub struct ModelUsage {
     pub output: Option<u32>,
 }
 
+/// 一次模型往返的**钱**（价格 × 实测用量，在 adapter 边界折好）。
+///
+/// ## 为什么是整数纳单位，而不是浮点金额
+///
+/// 金额会一路累加（一本账、一份实例聚合）：浮点相加不满足结合律，同一批事实换个
+/// 扫描顺序就能读出最后一分的差别。整数没有这个问题——投影只做 `u64` 累加，
+/// 同一份切片永远同一本账（N1）。折算时的浮点只出现一次（写事实之前），
+/// 落格之后账是整数。
+///
+/// ## 为什么币种跟着金额走
+///
+/// 价格是**配置**（用户可以换供应商、指向自建端点），币种由配置说，不能在这里
+/// 猜或换算。不同币种的金额没有可加性，账本因此按币种分桶（见 `spend_ledger`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelSpend {
+    /// 金额，单位 1e-9 个货币单位（价格 × token 一次性折算后四舍五入）。
+    pub amount_nano: u64,
+    /// 币种代码（配置原样归一成大写；仅作标签，不换算汇率）。
+    pub currency: String,
+}
+
 /// MODEL Provider —— 唯一模型契约（纯 object-safe trait）
 ///
 /// 会话引擎（session）只依赖本 trait；实现体（model 插件的 `BoundProvider`：

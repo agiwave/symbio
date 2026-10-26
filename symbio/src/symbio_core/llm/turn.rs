@@ -9,7 +9,7 @@
 //! - id 原语 [`llm_short_id`]：消息节点 id 的统一格式（流式累积与落库共用）
 //!
 
-use super::model_provider::{ModelFinishReason, ModelUsage};
+use super::model_provider::{ModelFinishReason, ModelSpend, ModelUsage};
 use crate::symbio_core::chat_node::{ChatNode, NodeStatus};
 use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
@@ -119,4 +119,8 @@ pub struct TurnOutput {
     pub finish: ModelFinishReason,
     /// 用量统计（provider 不一定给，故可选）。用于校准 token 估算器。
     pub usage: Option<ModelUsage>,
+    /// 这一次往返的**钱**（[`ModelSpend`]）：价格 × 实测用量，由实现体在
+    /// adapter 边界折好。`None` = 没有价格配置或没有实测用量——**两种都不写零账**
+    /// （「没定价」与「明确免费」由 `Some(amount_nano: 0)` 分辨）。
+    pub spend: Option<ModelSpend>,
 }

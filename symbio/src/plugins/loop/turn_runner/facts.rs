@@ -127,6 +127,15 @@ pub(crate) fn output_fields(
             payload["usage"] = serde_json::Value::Object(measured);
         }
     }
+    // 这一次往返的**钱**：与 `usage` 同一次测量、同一个边界（价格配置在实现体里，
+    // 投影只认这两个整数/字符串）。**键在不在**区分「没定价」与「明确免费」——
+    // 缺席不写 `spend: null`，`amount_nano: 0` 才是「这次确实没花钱」。
+    if let Some(spend) = rt.and_then(|rt| rt.spend.as_ref()) {
+        payload["spend"] = serde_json::json!({
+            "amount_nano": spend.amount_nano,
+            "currency": spend.currency,
+        });
+    }
     payload
 }
 

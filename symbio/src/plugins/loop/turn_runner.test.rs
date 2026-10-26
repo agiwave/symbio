@@ -1487,6 +1487,7 @@ mod tool_round_tests {
                     input: Some(11),
                     output: Some(22),
                 }),
+                spend: None,
             })
         }
     }
@@ -1544,6 +1545,7 @@ mod tool_round_tests {
                 finish: ModelFinishReason::Stop,
                 cost_ms: 1,
                 usage: None,
+                spend: None,
             })
         }
     }
@@ -1673,6 +1675,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 3,
                     usage: None,
+                    spend: None,
                 })
             } else {
                 Ok(LlmTurn {
@@ -1682,6 +1685,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 4,
                     usage: None,
+                    spend: None,
                 })
             }
         }
@@ -2938,6 +2942,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Length,
                     cost_ms: 3,
                     usage: None,
+                    spend: None,
                 })
             }
         }
@@ -3223,6 +3228,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 },
                 2 => LlmTurn {
                     text: "再读 b。".into(),
@@ -3231,6 +3237,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 },
                 _ => LlmTurn {
                     text: "两个都读到了。".into(),
@@ -3239,6 +3246,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 },
             })
         }
@@ -3520,6 +3528,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 }
             } else {
                 LlmTurn {
@@ -3529,6 +3538,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 }
             })
         }
@@ -3624,6 +3634,7 @@ mod tool_round_tests {
                         finish: ModelFinishReason::Stop,
                         cost_ms: 1,
                         usage: None,
+                        spend: None,
                     }
                 } else {
                     LlmTurn {
@@ -3633,6 +3644,7 @@ mod tool_round_tests {
                         finish: ModelFinishReason::Stop,
                         cost_ms: 1,
                         usage: None,
+                        spend: None,
                     }
                 })
             }
@@ -3718,6 +3730,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 }
             } else {
                 LlmTurn {
@@ -3728,6 +3741,7 @@ mod tool_round_tests {
                     finish: ModelFinishReason::Length,
                     cost_ms: 1,
                     usage: None,
+                    spend: None,
                 }
             })
         }
@@ -3831,6 +3845,7 @@ mod tool_round_tests {
                 finish: ModelFinishReason::Stop,
                 cost_ms: 1,
                 usage: None,
+                spend: None,
             })
         }
     }
@@ -4737,6 +4752,7 @@ fn the_response_payload_carries_the_measured_usage() {
         finish: crate::symbio_core::ModelFinishReason::Stop,
         cost_ms: 1,
         usage,
+        spend: None,
     };
     let fields = |payload: &crate::symbio_core::LlmTurn| {
         super::facts::output_fields(

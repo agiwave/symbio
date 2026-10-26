@@ -531,6 +531,9 @@ impl LlmAdapter for ProviderLlmAdapter {
             cost_ms: started.elapsed().as_millis() as u64,
             // provider 实测用量直通：这是校准反馈链的唯一数据源（见 `LlmTurn::usage`）。
             usage: output.usage,
+            // 钱同一次测量、同一个边界：由 `BoundProvider` 按本 Provider 的价格配置
+            // 折好（见 `LlmTurn::spend`），这里只转发。
+            spend: output.spend,
         })
     }
 }

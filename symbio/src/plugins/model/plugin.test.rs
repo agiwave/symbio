@@ -4,6 +4,8 @@
 //! `plugin.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
+use crate::plugins::model::model_providers::ModelPricing;
+use crate::symbio_core::ModelUsage;
 
 /// 路径末段才是 id：`<根>/model/<id>.model` 与裸 `<id>` 同解
 #[test]
@@ -218,4 +220,122 @@ async fn load_fills_registry_and_mirror_from_its_own_dir() {
     let providers = plugin.providers.read().await;
     assert_eq!(providers.providers.len(), 1);
     assert_eq!(providers.default_provider_id.as_deref(), Some("openai-1"));
+}
+
+// ── 计价（P2-4）：规范化与折算 ─────────────────────────────────────────
+
+/// 表单总会提交 `pricing` 子对象键：空币种 + 零单价必须规范化回「未配置」。
+#[test]
+fn empty_pricing_means_not_configured() {
+    let mut p = sample();
+    p.pricing = Some(ModelPricing {
+        input_per_million: 0.0,
+        output_per_million: 0.0,
+        currency: "  ".into(),
+    });
+    ModelPlugin::normalize_pricing(&mut p).expect("空计价是「没填」，不是错误");
+    assert!(p.pricing.is_none(), "没填不得被记成「明确免费」");
+}
+
+/// 币种去空白并大写：台账按币种分桶，`usd` 与 `USD` 必须是同一个桶。
+#[test]
+fn pricing_currency_is_trimmed_and_uppercased() {
+    let mut p = sample();
+    p.pricing = Some(ModelPricing {
+        input_per_million: 1.5,
+        output_per_million: 6.0,
+        currency: "  usd ".into(),
+    });
+    ModelPlugin::normalize_pricing(&mut p).unwrap();
+    assert_eq!(p.pricing.unwrap().currency, "USD");
+}
+
+/// 填了单价却没有币种：拒绝保存（否则金额没有单位，台账无法分桶）。
+#[test]
+fn pricing_without_currency_is_rejected() {
+    let mut p = sample();
+    p.pricing = Some(ModelPricing {
+        input_per_million: 1.5,
+        output_per_million: 0.0,
+        currency: "".into(),
+    });
+    assert!(ModelPlugin::normalize_pricing(&mut p).is_err());
+}
+
+/// 负单价：拒绝保存。
+#[test]
+fn negative_pricing_is_rejected() {
+    let mut p = sample();
+    p.pricing = Some(ModelPricing {
+        input_per_million: -1.0,
+        output_per_million: 0.0,
+        currency: "USD".into(),
+    });
+    assert!(ModelPlugin::normalize_pricing(&mut p).is_err());
+}
+
+/// 价格 × 用量在 adapter 边界折成整数纳单位（四舍五入，不留浮点尾数）。
+#[test]
+fn charge_folds_price_and_usage_into_nano_units() {
+    let pricing = ModelPricing {
+        input_per_million: 1.5,
+        output_per_million: 6.0,
+        currency: "usd".into(),
+    };
+    // 1000 输入 × 1.5/百万 = 0.0015；500 输出 × 6/百万 = 0.003
+    let spend = pricing
+        .charge(ModelUsage {
+            input: Some(1000),
+            output: Some(500),
+        })
+        .expect("有实测用量就有金额");
+    assert_eq!(spend.amount_nano, 4_500_000);
+    assert_eq!(
+        spend.currency, "USD",
+        "币种在写出时也归一，存量配置不靠规范化"
+    );
+}
+
+/// 只用了一侧也要能折算；两侧都没测到 ⇒ `None`（不写零账）。
+#[test]
+fn charge_needs_at_least_one_measured_side() {
+    let pricing = ModelPricing {
+        input_per_million: 2.0,
+        output_per_million: 10.0,
+        currency: "USD".into(),
+    };
+    assert_eq!(
+        pricing
+            .charge(ModelUsage {
+                input: Some(1_000_000),
+                output: None,
+            })
+            .unwrap()
+            .amount_nano,
+        2_000_000_000,
+        "一百万输入 × 2.0 = 2.0"
+    );
+    assert!(pricing
+        .charge(ModelUsage {
+            input: None,
+            output: None,
+        })
+        .is_none());
+}
+
+/// 币种非空 + 单价为零 = **明确免费**：返回 `Some(0)`，不是 `None`。
+#[test]
+fn zero_price_is_a_measured_zero_not_a_missing_entry() {
+    let pricing = ModelPricing {
+        input_per_million: 0.0,
+        output_per_million: 0.0,
+        currency: "USD".into(),
+    };
+    let spend = pricing
+        .charge(ModelUsage {
+            input: Some(10),
+            output: Some(20),
+        })
+        .expect("明确免费也要记账");
+    assert_eq!(spend.amount_nano, 0);
 }

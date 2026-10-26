@@ -110,6 +110,7 @@ mod recall_score;
 pub mod reputation;
 pub mod slo;
 pub mod span;
+pub mod spend;
 pub mod token;
 pub mod transcript;
 pub mod turns;

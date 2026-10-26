@@ -340,6 +340,58 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     }
 }
 
+/// 计价的**子定义**（`pricing` 字段的结构化子对象）。
+///
+/// 单价是**每个 Provider 自己的配置**：同一个模型换一个端点 / 中转，价格就不一样，
+/// 所以不能按模型名内置一张价目表（DE-020 的 D-171）。币种留空 = 不折算金额——表单总会
+/// 提交一个对象键，`validate_manifest` 把「空币种 + 零单价」规范化回「未配置」，
+/// 不让「没填」冒充「明确免费」。
+fn pricing_definition() -> DetailDefinition {
+    DetailDefinition {
+        binding: "upload".into(),
+        title_from: vec!["currency".into()],
+        title_fallback: Some("计价".into()),
+        sections: vec![DetailSection {
+            title: None,
+            collapsed: false,
+            fields: vec![
+                DetailField {
+                    min: Some(0.0),
+                    step: Some(0.001),
+                    placeholder: Some("0.15".into()),
+                    ..field(
+                        "input_per_million",
+                        "输入单价（每百万 token）",
+                        "按本 Provider 的实际计费填写；不填 = 不折算金额",
+                        "number",
+                    )
+                },
+                DetailField {
+                    min: Some(0.0),
+                    step: Some(0.001),
+                    placeholder: Some("0.60".into()),
+                    ..field(
+                        "output_per_million",
+                        "输出单价（每百万 token）",
+                        "按本 Provider 的实际计费填写",
+                        "number",
+                    )
+                },
+                DetailField {
+                    placeholder: Some("USD / CNY".into()),
+                    ..field(
+                        "currency",
+                        "币种",
+                        "ISO 代码（去空白后大写保存）；不同币种分开记账，不换算汇率",
+                        "text",
+                    )
+                },
+            ],
+        }],
+        ..Default::default()
+    }
+}
+
 /// 新建 Provider 的默认配置字段（VDFS `write { create }` 用）。
 ///
 /// 取**预设首项**——与新建表单「选中第一个预设」的预填**同源**，因此前端新建
@@ -484,6 +536,15 @@ pub fn model_detail_definition() -> DetailDefinition {
                             "请求频率限制（毫秒）",
                             "两次请求之间的最小间隔；0 表示不限制",
                             "number",
+                        )
+                    },
+                    DetailField {
+                        form: Some(Box::new(pricing_definition())),
+                        ..field(
+                            "pricing",
+                            "计价（可选）",
+                            "按本 Provider 的单价折算金额台账；不填 = 不记账（不是 0 元）",
+                            "form",
                         )
                     },
                     DetailField {

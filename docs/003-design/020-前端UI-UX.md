@@ -43,7 +43,6 @@ impl: partial
 | 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
 | 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
 | 工具授权 | 「每次问 / 本会话放行 / 永久放行」三档已在确认卡上（§11）；永久放行是逐工具的风险上限，清单住会话插件全局配置 | §3 P2-3 |
-| 用量与成本 | 用量（token）已在读数面板里；**钱**还没有——`model` 没有价格字段，`session/stats.cost` 记的是时延不是钱 | §3 P2-4 |
 | 分支 | 消息是 `parent_id` 树，但**重试是替换式**（删掉失败轮、按普通新轮重来），日志上因此不产生第二支——界面没有候选可切 | §3 P2-5 |
 | 消息操作 | 有编辑，无「编辑后重发」，无悬浮操作条 | §3 P3 |
 | 命令动作 | 面板只做**跳转**；「切模型 / 切工作区 / 跳设置」要的是**执行**，未接 | §3 P1-1 |
@@ -57,7 +56,7 @@ impl: partial
 
 **「后端有能力、前端没消费」与「后端也没有」是两件事**：本表逐行说的基本都是前者
 （例外是信任面那几行，它们缺的后端事实已在 §11 的前件表里点名），后者单独列在
-[§11 的前件表](#还没做的三项前件是什么)——
+[§11 的前件表](#还没做的一项前件是什么)——
 混在一起会让「补个组件」与「先补一条事实」看起来是同一档工作量。
 
 ---
@@ -184,8 +183,10 @@ impl: partial
 - **P2-3 工具授权分级** ✅ 已落地（见 §11）—— 确认卡三档放行：批准本次 / 本会话放行（抬会话阈值）/
  永久放行（抬该工具上限，跨会话生效，撤销在设置页删行）；按危险度分级（shell / 写文件 / 删文件）。
   裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系")。
-- **P2-4 用量与成本**：多供应商 LLM 却零用量可。会话头 / 模型条目显示累计 token；
- 成本折算依赖 `model` 插件是否已有价格字段（**若无，需后端先补**）。
+- **P2-4 用量与花费** ✅ 已落地（见 §11）—— 会话头常驻一格 + 读数面板「用量」段：输入 / 输出 /
+  合计（多主体才逐条摊开），配了价的 Provider 再**按币种各一行花费**；一次实测都没有就整段不出现。
+  价格住在 Provider 自己的配置里（`pricing`，不是按模型名猜的表），金额在 adapter 边界折好后入格
+  （裁决见 [D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。
 - **P2-5 分支切换 UI**：`parent_id` 树已建，重试已产生分支但用户看不。
  同 parent 多候选时给 `1/2 ‹ ›` 切换器。
 
@@ -429,7 +430,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 |---|---|
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
 | P2-3 授权分级（三档）：确认卡四键——批准本次 / 本会话放行 / 永久放行 / 拒绝。本会话放行把**会话阈值**抬到本次调用的风险档（同档及以下在本会话里不再问）；永久放行把**该工具的上限**抬到本次风险档（跨会话生效，高于上限仍审批）；卡上没有风险档时两档都不出现（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::approval_basis(risk, threshold, approved, grant)`（三档依次为 approved / threshold / grant）——执行闸门与授权级联的记录方问同一个函数；阈值来自 `ctx[RISK_LEVEL]`，工具清单来自 `ctx[APPROVAL_GRANTS]`（`SessionConfig.approval_grants` 经 `resolve_session_params` 落进 ctx）；放行事实 `authz.granted` 带 `basis` 与 `grant`；写入口 `session/grant`（只抬不降，经 `PluginConfigFile::apply` 的唯一写路径）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` / `a_per_tool_grant_authorizes_only_that_tool` 钉住两档的边界。前端：`components/message/InteractionNode.vue`（四键；档位校验走 `isSessionRiskLevel`）+ `ALLOW_FOR_SESSION_KEY` / `ALLOW_FOREVER_KEY`（两个注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降）+ `services/sessionGrant.ts` + `schemas/session_meta.ts`（`riskRankOf`）。裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系") |
-| P2-4 用量（token 那一半）：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 写进 `response{port=model}` 的 `usage` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）→ `session/stats.rs` 的 `tokens` 列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，单位走 `format_tokens` 全仓唯一实现）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
+| P2-4 用量与花费：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**配了价的 Provider 再按币种各一行花费**（标题随之变成「用量与花费」），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现，没配价格就没有花费行 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 与 `LlmTurn.spend` 写进 `response{port=model}` 的 `usage` / `spend` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）与 `projection/spend.rs`（`spend_ledger`：按**币种**分桶、桶内按主体累计纳金额，`charges` 数的是带金额的应答条数）→ `session/stats.rs` 的 `tokens` / `spend` 两列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，token 走 `format_tokens`、金额走 `format_money`，两处单位各全仓唯一实现）。价格来自 `ModelProviderConfig.pricing`（Provider 自己的配置），金额在 adapter 边界折好后入格（[D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
 | P2-2 变更账：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数；会话头的「变更」抽屉点行打开**当前**文件 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；`address` 是相对会话容器的 `workdir/<path>`，`has_wal` / `readable` 把三种空分开；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。前端：`services/sessionChanges.ts`（原样透传）→ `components/session/SessionChangesList.vue`（纯排版器，三种空各一句话）→ `ChatMainPanel.vue` 的抽屉（与读数共用一个抽屉位；开关 / 代次守卫 / 错误上浮）；点行上抛 `open-node`，经 `Session` → `VdfsSessionDetail` → `VdfsWorkbench`（拆父目录 + 末段名）→ `VdfsView` push `?select=`，由 `useVdfs` 落位（当前目录定在绑定地址自身；不在本页则 `stat` 一次），见 [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
 
 **本节的判据**：
@@ -470,16 +471,14 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
    放到别的宿主（预览、嵌入）里就会越权改主人的地址。专属文件页 / 浮层同理——那会绕开
    「一台控件承载全部类型」，等于为一种资源开第二条呈现通道。
 
-### 还没做的三项：前件是什么
+### 还没做的一项：前件是什么
 
-P2-3 / P2-4 / P2-5 三项**不是同一档工作量**。照着 §3 的提案直接开工，
-最可能的结果是画出三个组件，其中三个显示的是编出来的数（P2-2 的前后两半都已落地，
-见 §11）。逐项把「今天已经有的事实」与「缺的那一样」摆在一起：
+P2-5 **不是照着提案就能开工的一项**。照着 §3 直接画组件，最可能的结果是画出一个
+显示着编出来的数的界面（P2-2 的前后两半、P2-3 的三档、P2-4 的用量与花费都已落地，
+见 §11）。把「今天已经有的事实」与「缺的那一样」摆在一起：
 
 | 项 | 今天的事实 | 缺的那一样 | 谁先动 |
 |---|---|---|---|
-| P2-3 授权分级 | 两档已落地（§11）：`authorize-tool` 拿这一次调用的 `risk` 与会话阈值 `threshold` 比一次，出口是 `authz.granted` / `authz.denied`；阈值住在会话元数据里，「本会话放行」= 抬它 | 第三档「永久放行」**没有落点**——跨会话的授权清单不存在：今天没有任何地方能记「这个工具在所有会话里都免问」，也没有任何回读方 | 前两档已落；第三档需先裁「清单住哪、谁写、读方是谁」 |
-| P2-4 用量成本 | `response{port=model}` 带 `usage`（实测 token）；`session/stats.tokens` 与 `usage`（会话头那一格）都从它算，读数面板与会话头共用 `usage_section` 一个装配；`session/stats.cost` 仍是**时延**台账（事件的 `cost_ms` 按写方累计），不是钱 | 钱要先有价格，而 `model` 今天**没有价格字段**——按名字猜价格是给「换了个端点就全错」埋伏笔 | 用量已落地（含会话头）；成本待后端补价格 |
 | P2-5 分支切换 | `RetrySubtree` 的动作是**删掉失败轮再按普通新轮重来**（`chat_loop/wake.rs` 的 `WakeOutcome::NewTurn`） | 分支要成对出现：旧轮保留 + 「当前是哪一支」可判。今天两者都没有——`parent_id` 树是真的，但树上没有第二个孩子 | 后端先补（且要先裁「重试 = 替换还是分支」） |
 
 **这张表的用法**：一行的「谁先动」是后端时，前端那一批的判据里必须先有一条
@@ -490,14 +489,6 @@ P2-3 / P2-4 / P2-5 三项**不是同一档工作量**。照着 §3 的提案直�
 答复节点，「用户此刻看的是哪一支」在事实面上没有答案。所以这不是 UI 顺序问题，是
 **一条裁决**：重试留下的是「并存的两支 + 一个选中态」，还是「替换但留档」。裁决立之前
 不动前端，理由与 §11 判据 5（不把不存在的能力画成按钮）同源。
-
-**P2-4 为什么不是「把 token 显示出来」**：token 与钱是两个读数，口径不同。token 直接
-来自 `LlmTurn.usage`（一次往返一次测量），钱的折算要价格 × 用量，而价格是**配置**不是
-常量（用户可以换供应商、指向自建端点）。两者都经 `present/reading` 的方言下发，
-前端零口径（§11 判据 2 / 3）；把「每 1k token 多少钱」写进组件，等于让界面替用户
-拍一个他没同意过的价。**token 那一半已经完整落地**（§11 的用量行）：`usage` 随
-`response` 入格 → `token_ledger` 投影 → `session/stats.tokens` 列与 `usage` 一格 →
-抽屉里的面板段 + 会话头常驻那一格。
 
 **会话头那一格为什么单独下发、而不是让前端从 `panel` 里挑**：方言里的 `ReadingSection`
 只有 `title` 没有身份字段，按中文标签定位等于把标签变成跨栈的键——改一个字，头上就

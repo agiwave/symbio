@@ -10,7 +10,10 @@
 //! 四个 token 数是事实（住在最近一轮骨架的 `meta.context`），怎么说、比率怎么除
 //! 只在本文件出现一次。
 
-use super::{context_reading_of, format_tokens, notice_stats_of, present_message, trigger_label};
+use super::{
+    context_reading_of, format_money, format_tokens, notice_stats_of, present_message,
+    trigger_label,
+};
 use crate::symbio_core::{chat_node as cm, ReadingSection, ReadingTone};
 use serde_json::json;
 
@@ -136,6 +139,24 @@ fn the_token_unit_is_formatted_in_exactly_one_place() {
         (200_000, "200k"),
     ] {
         assert_eq!(format_tokens(n), want, "{n} 的水位写法");
+    }
+}
+
+#[test]
+fn the_money_unit_is_formatted_in_exactly_one_place() {
+    // 纳单位 → 至少两位、最多四位小数；非零但小于半格写 `<0.0001`（不抹成 0）。
+    for (nano, want) in [
+        (0u64, "0.00"),
+        (49_999, "<0.0001"),
+        (50_000, "0.0001"),
+        (100_000, "0.0001"),
+        (1_000_000, "0.0010"),
+        (10_000_000, "0.01"),
+        (100_000_000, "0.10"),
+        (1_000_000_000, "1.00"),
+        (1_234_567_890, "1.2346"),
+    ] {
+        assert_eq!(format_money(nano), want, "{nano} 纳的金额写法");
     }
 }
 

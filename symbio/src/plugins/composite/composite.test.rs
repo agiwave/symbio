@@ -639,6 +639,7 @@ impl ModelProvider for GatedProvider {
             reasoning_child_id: "n-guard-reason".to_string(),
             finish: Default::default(),
             usage: None,
+            spend: None,
         })
     }
 }

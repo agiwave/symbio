@@ -338,7 +338,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     }
 }
 
-/// 用量那一段（token，不是钱）。
+/// 用量那一段（token + 钱，两者同属「这一次往返测到了什么」）。
 ///
 /// ## 为什么「一次实测都没有」时整段不出现
 ///
@@ -347,62 +347,107 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
 /// 与 `context_watermark` 缺数整条不出现、`bar` 没有分母就不发是同一条纪律
 /// （[DE-020](../../../../docs/003-design/020-前端UI-UX.md "DE-020-前端UI-UX") §11 判据 4）。
 ///
-/// ## 为什么没有「成本」这一行
+/// 钱的行**只在有账时出现**：价格是 Provider 配置，没配就没有金额可报。
+/// 它缺的是「定价」不是「测量」，故不拦着 token 那三行照常出现；反过来
+/// token 缺时也不该凭空出现一行「0 元」。
 ///
-/// 钱的折算要价格 × 用量，而 `model` 今天没有价格字段。界面写死一个单价等于替
-/// 用户拍一个他没同意过的价（同一条判据的另一面）。价格从配置来的时候，这里加
-/// 一行即可——数据已经在 `tokens` 列里。
+/// ## 钱为什么按币种分行
+///
+/// 金额只在同一币种内可加（兑换率不是事实源里的东西）。一个币种一行，
+/// 行数由账本的币种数决定；币种顺序由 `spend_ledger` 的 BTreeMap 给。
 pub(super) fn usage_section(stats: &SessionStats) -> Option<ReadingSection> {
     let t = &stats.tokens;
     let calls = t.get("calls").and_then(|v| v.as_u64()).unwrap_or(0);
-    if calls == 0 {
-        return None;
-    }
-    let num = |k: &str| t.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
-    let input = num("input");
-    let output = num("output");
-    let mut rows = vec![
-        ReadingRow {
+    let mut rows = Vec::new();
+
+    // token 三行只在有实测时出现：`calls == 0` 写「输入 0 / 输出 0」就是编一个数。
+    if calls > 0 {
+        let num = |k: &str| t.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+        let input = num("input");
+        let output = num("output");
+        rows.push(ReadingRow {
             label: "输入".into(),
             value: format_tokens(input),
             hint: Some(format!("{calls} 次模型往返的实测合计")),
             tone: ReadingTone::Normal,
-        },
-        ReadingRow {
+        });
+        rows.push(ReadingRow {
             label: "输出".into(),
             value: format_tokens(output),
             hint: None,
             tone: ReadingTone::Normal,
-        },
-        ReadingRow {
+        });
+        rows.push(ReadingRow {
             label: "合计".into(),
             value: format_tokens(input + output),
             hint: Some("输入 + 输出；不含缓存命中与思考的单独计价".into()),
             tone: ReadingTone::Normal,
-        },
-    ];
-    // 多主体（子智能体 / 委派）才逐条摊开；单主体时它上面的合计就是全部。
-    if let Some(by) = t.get("by_principal").and_then(|v| v.as_object()) {
-        if by.len() > 1 {
+        });
+        // 多主体（子智能体 / 委派）才逐条摊开；单主体时它上面的合计就是全部。
+        if let Some(by) = t.get("by_principal").and_then(|v| v.as_object()) {
+            if by.len() > 1 {
+                rows.push(ReadingRow {
+                    label: "按主体".into(),
+                    value: by
+                        .iter()
+                        .take(4)
+                        .map(|(p, e)| {
+                            let i = e.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let o = e.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
+                            format!("{p} {}", format_tokens(i + o))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    hint: Some("按内容的归属主体（不是写方）；本面板只列前 4 个".into()),
+                    tone: ReadingTone::Normal,
+                });
+            }
+        }
+    }
+
+    // 钱：一个币种一行。`by_currency` 为空 ⇒ 一行都没有（不是「0 元」）；
+    // 币种不合计（没有汇率，跨币种求和是编一个数）。顺序由视图的 BTreeMap 给。
+    let mut has_money = false;
+    if let Some(by_currency) = stats.spend.get("by_currency").and_then(|v| v.as_object()) {
+        for bucket in by_currency.values() {
+            let currency = bucket
+                .get("currency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if currency.is_empty() {
+                continue;
+            }
+            let amount = bucket
+                .get("amount_nano")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let charges = bucket.get("charges").and_then(|v| v.as_u64()).unwrap_or(0);
+            has_money = true;
             rows.push(ReadingRow {
-                label: "按主体".into(),
-                value: by
-                    .iter()
-                    .take(4)
-                    .map(|(p, e)| {
-                        let i = e.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let o = e.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
-                        format!("{p} {}", format_tokens(i + o))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" · "),
-                hint: Some("按内容的归属主体（不是写方）；本面板只列前 4 个".into()),
+                label: format!("花费 · {currency}"),
+                value: format_money(amount),
+                hint: Some(format!(
+                    "{charges} 次带定价的往返合计（单价来自 Provider 配置，不是按模型名猜的）"
+                )),
                 tone: ReadingTone::Normal,
             });
         }
     }
+
+    if rows.is_empty() {
+        return None;
+    }
     Some(ReadingSection {
-        title: Some("用量".into()),
+        // 只有 token 时标题说「用量」；有钱的行才把「花费」也说出来——标题不
+        // 预告没有的行。
+        title: Some(
+            if has_money {
+                "用量与花费"
+            } else {
+                "用量"
+            }
+            .into(),
+        ),
         rows,
         bar: None,
     })
@@ -439,6 +484,35 @@ fn format_tokens(n: u64) -> String {
         format!("{}", (k * 10.0).round() / 10.0)
     };
     format!("{rounded}k")
+}
+
+/// 金额的写法：整数纳单位 → 至少两位小数、最多四位（`0.0123` / `1.20` / `0.00`）。
+///
+/// 与 [`format_tokens`] 同一条纪律：单位与精度只在产者定一次。**纳单位不进界面**——
+/// 那是事实的形状，不是读数的形状；显示到 1e-4 是因为小额往返（一次几百 token
+/// 按每百万计价）常见到 1e-4 量级，再往下一位只会把「这一轮几乎没花钱」写成
+/// 一长串噪声。非零但小于半格时写 `<0.0001`：它既不是零，也不该四舍五入成零
+/// ——与「没定价」由行在不在分辨是同一条「不补数」纪律。
+///
+/// 币种不进本函数：它由行标签说（`花费 · USD`），金额只负责数字本身。
+fn format_money(amount_nano: u64) -> String {
+    if amount_nano == 0 {
+        return "0.00".into();
+    }
+    if amount_nano < 50_000 {
+        return "<0.0001".into();
+    }
+    // 四舍五入到 1e-4 后的整数格数（1e-4 = 100_000 纳）；饱和加法防溢出。
+    let units = amount_nano.saturating_add(50_000) / 100_000;
+    let whole = units / 10_000;
+    let frac = units % 10_000;
+    if frac == 0 {
+        format!("{whole}.00")
+    } else if frac.is_multiple_of(100) {
+        format!("{whole}.{:02}", frac / 100)
+    } else {
+        format!("{whole}.{frac:04}")
+    }
 }
 
 /// 触发来源 → 面向用户的词。
