@@ -30,10 +30,10 @@
 //! 插件侧**不得**自己补写那两格（否则同轮两份记账的假象会回来）。
 
 use crate::symbio_core::{
-    visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
-    LlmTurn, PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
+    actor_can_land_artifact, actor_can_land_speech, visible_to, ActorSpec, AdapterError, Entity,
+    Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, PromptToolCall, Seq, Store, Verb,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
+    EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
 };
 use std::borrow::Cow;
 
@@ -800,10 +800,10 @@ impl ClosureKind {
 /// 都要原因，没人再取「过没过」这个形状。
 fn closure_gate(actor: &ActorSpec, kind: ClosureKind) -> Result<(), String> {
     // 八个收束调用点全在「本轮尚无收束格」的位置，因此发言只问一个 `Capability::Reply`
-    // ——名住 core，规格方法与表谓词共用它（D-103：不按轮次位置分能力）。
+    // ——名住 core，授权读法（`actor_can_*` 自由函数）与表谓词共用它（D-103：不按轮次位置分能力）。
     let own = match kind {
-        ClosureKind::Speech => actor.can_land_speech(),
-        ClosureKind::Artifact => actor.can_land_artifact(),
+        ClosureKind::Speech => actor_can_land_speech(actor),
+        ClosureKind::Artifact => actor_can_land_artifact(actor),
     };
     if !own {
         return Err(format!(

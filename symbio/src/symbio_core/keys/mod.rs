@@ -39,42 +39,7 @@
 //! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见
 //! `symbio_core/README.md` §1.2。
 
-use serde_json::Value;
-
-/// 项目全局通用的 Key 特征
-/// 支持类型安全的值获取与设置
-pub trait SymbioKey {
-    /// 该键对应的值类型
-    type Value: Clone + Send + Sync + 'static;
-
-    /// 本键能否在**进程外**表达（跨进程可传输）
-    ///
-    /// - `true`（缺省）：值可序列化为字符串或 JSON，可进线上 `metadata`；
-    /// - `false`：进程内专用对象（trait object / 闭包 / 弱引用），无字符串形态。
-    ///
-    /// ## 为什么需要它
-    ///
-    /// 从前「这个键能不能跨进程」只能靠 `parse` 是否返回 `None` **倒推**，
-    /// 且那是个约定、不是可枚举的事实——要判断一次调用能否送到进程外插件，
-    /// 得逐个键去读注释。第三方插件体系的**准入判据**必须可机检，故把它提成
-    /// 类型事实：`SymbioKey::WIRE` 可被静态读取、可被守卫脚本核对。
-    ///
-    /// ## 与 `parse → None` 的关系
-    ///
-    /// 两者是**声明与结果**：`WIRE = false` ⇒ `parse` 必返 `None`（无字符串形态）。
-    /// 反向不成立——`parse → None` 不必然是 `WIRE = false`（如 `CONFIG` /
-    /// `PLUGIN_DIR`（住 `plugin` 域）的值可以序列化，只是不做「从字符串恢复」这件事）。
-    const WIRE: bool = true;
-
-    /// 键的唯一名称（用于在 Map 中查找）
-    fn name(&self) -> &'static str;
-
-    /// 从字符串解析值 (用于从请求头等字符串存储中恢复)
-    fn parse(&self, s: &str) -> Option<Self::Value>;
-
-    /// 将值格式化为字符串 (用于存储到请求头等字符串存储中)
-    fn format(&self, v: &Self::Value) -> String;
-}
+pub use symbio_kernel::keys::SymbioKey;
 
 macro_rules! define_string_key {
     // 带承认标记的形态（`dead-code-audit` R-002）：lint 属性**由宏转发**到生成的结构体与
@@ -179,22 +144,7 @@ define_string_key!(
 // 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
 // `symbio_core::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
 // `Option<Weak<dyn Plugin>>`）随值搬去 `symbio_core::plugin`。判据同 D-095 根因一。
-
-// 初始配置 Key (Value)
-pub struct ConfigKey;
-impl SymbioKey for ConfigKey {
-    type Value = Value;
-    fn name(&self) -> &'static str {
-        "config"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, v: &Self::Value) -> String {
-        v.to_string()
-    }
-}
-pub const CONFIG: ConfigKey = ConfigKey;
+// `CONFIG` 与 trait 同行（契约面），已在 `symbio_kernel::keys`。
 
 /// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
 ///

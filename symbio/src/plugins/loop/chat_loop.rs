@@ -194,6 +194,7 @@ use crate::symbio_core::{
 use std::sync::Arc;
 
 use super::context;
+pub(crate) use super::message_build::TurnOutputExt;
 use crate::symbio_core::llm_emit_state;
 use crate::symbio_core::node_build::detach_if_flat;
 

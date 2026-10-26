@@ -153,18 +153,30 @@ pub fn llm_build_assistant_messages(
     msgs
 }
 
-// 单轮产物的**落库视图**（固有实现住本模块，见文件头）
-
-impl TurnOutput {
+/// 单轮产物的**落库视图**——宿主侧扩展（`TurnOutput` 已住内核，固有 impl 不可跨 crate）。
+pub trait TurnOutputExt {
     /// 本轮只有思考、没有独立文本回复，且**没有**工具调用。
     ///
     /// 有工具调用时不算：此时 reasoning 需要作为独立子节点保留。
-    pub fn is_reasoning_only(&self) -> bool {
+    fn is_reasoning_only(&self) -> bool;
+
+    /// 有效正文：reasoning-only 时回退为 reasoning（见 [`Self::is_reasoning_only`]）。
+    fn effective_text(&self) -> &str;
+
+    /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
+    fn into_messages(
+        self,
+        root_id: &str,
+        principal: &crate::symbio_core::principal::Principal,
+    ) -> Vec<ChatNode>;
+}
+
+impl TurnOutputExt for TurnOutput {
+    fn is_reasoning_only(&self) -> bool {
         self.text.trim().is_empty() && !self.reasoning.is_empty() && self.tool_calls.is_empty()
     }
 
-    /// 有效正文：reasoning-only 时回退为 reasoning（见 [`Self::is_reasoning_only`]）。
-    pub fn effective_text(&self) -> &str {
+    fn effective_text(&self) -> &str {
         if self.is_reasoning_only() {
             &self.reasoning
         } else {
@@ -172,8 +184,7 @@ impl TurnOutput {
         }
     }
 
-    /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
-    pub fn into_messages(
+    fn into_messages(
         self,
         root_id: &str,
         principal: &crate::symbio_core::principal::Principal,

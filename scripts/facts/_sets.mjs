@@ -104,7 +104,7 @@ function listOwners(root) {
  * 那条判据永久差一个。
  */
 function rustErrorCodes(root) {
-  const rel = 'symbio/src/symbio_core/plugin/error.rs'
+  const rel = 'symbio_kernel/src/plugin/error.rs'
   const txt = fs.readFileSync(path.join(root, rel), 'utf8')
   // 分组 1 是变体名、分组 2 才是线上字面量——取错组的失效形态很安静：集合里装满
   // `InternalError` 这类**哪儿都不出现**的名字，扫描一份都命中不了，判据恒真。

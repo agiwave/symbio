@@ -11,7 +11,7 @@
 //! 反序列化用例刻意用**手写 JSON 字面量**而不是先序列化再反序列化：后者会
 //! 自动对齐自己的默认值，证不了「外部（前端）按文档写的 JSON 读得进来」。
 
-use crate::symbio_core::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+use crate::present::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 
 #[test]
 fn tone_serializes_as_lowercase_so_the_frontend_literal_matches() {

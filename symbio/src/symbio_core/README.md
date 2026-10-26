@@ -17,6 +17,11 @@ impl: done
 测试不算**（口径与例外见 §4 第 1 问）。
 本文是该目录**命名与结构**的唯一 owner。
 
+封闭语法（五个语法 trait 与签名类型）的实现住 `symbio-kernel` crate（[DE-023 D-188](../../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")），
+本目录以同名私有 shim `pub use symbio_kernel::…` 转出——对外路径 `symbio_core::<符号>` 不变。
+本目录**仍然拥有**不属于封闭语法的部分：共享机制（`event_bus` / `logger`）与读本机部署表的行为
+（`authz` / `governance`、`ActorSpec` 的授权读法自由函数、VDFS 地址拼接）。
+
 > 「不放实现」是**方向**而非字面事实：域里既有纯契约（`vdfs` / `capability` / `llm`
 > 的 trait 面），也有共享实现（`event_bus` 的全局订阅表、`logger` 的进程级闸门）。
 > 判据是「谁依赖它」，不是「它抽象不抽象」——把共享机制硬抽成 trait
@@ -125,9 +130,10 @@ impl: done
 
 **封闭语法另有一个汇合口 [`kernel.rs`](kernel.rs)**（DE-023 A2）：Event 信封 / Entity×Verb /
 `ActorSpec` 五字段 / `Pattern`·`Scope` / 声明容器与 `seal` / 环七步 / 五个封闭语法 trait
-只经它重导出，根用 `pub use kernel::*` 平铺（对外路径不变）。`kernel.rs` 的
-`core-kernel-files:` 标记是 CS-001 / CS-004 的**判定范围**；域行为不进这个文件。
-它**不是域**——没有目录、不进 §1.2 表；拆 crate 时按这份文件集抽文件（DE-023 D-183）。
+只经它重导出，根用 `pub use kernel::*` 平铺（对外路径不变）。封闭语法的实现与
+CS-001 / CS-004 的**判定范围**（`core-kernel-files:` 标记）都在 `symbio_kernel/src/lib.rs`；
+`kernel.rs` 只剩转出。域行为不进这个文件。
+它不是域——没有目录、不进 §1.2 表。
 
 ### 域前缀对照表（全 28 域 —— 新增符号照此取名）
 

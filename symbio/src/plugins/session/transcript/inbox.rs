@@ -474,7 +474,7 @@ impl SessionPlugin {
         // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
         // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
         let spec = PreemptionDecider.spec();
-        if !spec.can_judge_intent() {
+        if !crate::symbio_core::actor_can_judge_intent(&spec) {
             crate::plugin_warn!(
                 "actors",
                 "[preempt] 判定者缺 judge.intent，拒绝落控制事实（principal={}，task={task_id}）",

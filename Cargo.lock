@@ -4278,8 +4278,12 @@ dependencies = [
 name = "symbio-kernel"
 version = "0.1.14"
 dependencies = [
+ "async-trait",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

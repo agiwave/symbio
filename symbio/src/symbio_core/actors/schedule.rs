@@ -20,7 +20,7 @@
 //!
 //! ## 写侧闸：`assign.work`
 //!
-//! 落 `task.assigned` 需要资格。[`ActorSpec::can_assign_work`] 读的是**规格自己身上**的
+//! 落 `task.assigned` 需要资格。[`crate::symbio_core::actor_can_assign_work`] 读的是**规格自己身上**的
 //! 能力集（构造时来自授权表行），与收束两臂 / 判意图 / 盖章四臂同一条纪律：判的对象是
 //! 规格，构造的来源是表行，单一链条。缺该能力 ⇒ **一条事实都不写**（fail-closed）——
 //! 没有资格的调度不该留下「我派过」的痕迹。
@@ -31,7 +31,7 @@
 //! 的活）、不做验收（`task.asserted` 归验证者）。它只回答一个问题：**这一刻该把哪几笔
 //! 活交出去，交给谁，租到什么时候**。
 
-use super::spec::{ActorSpec, Pattern, Scope};
+use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
 use crate::symbio_core::authz::PRINCIPAL_SCHEDULER;
 use crate::symbio_core::projection::readyset::ReadySetView;
@@ -71,7 +71,7 @@ impl ScheduleDecider {
     /// **生产构造点**：调度者的 `ActorSpec`（[`Pattern::Decider`] / 80ms / 根作用域）。
     ///
     /// 能力集从**授权表的行**取（`grant_names_of`），不在这里列名字——与
-    /// [`ActorSpec::trivial`] 同一条口径：「规格说得出自己有什么权」，读的是登记事实。
+    /// [`trivial_actor_spec`](crate::symbio_core::trivial_actor_spec) 同一条口径：「规格说得出自己有什么权」，读的是登记事实。
     pub fn spec() -> ActorSpec {
         ActorSpec {
             capabilities: crate::symbio_core::authz::production_matrix()
@@ -99,7 +99,7 @@ impl ScheduleDecider {
         now: i64,
     ) -> Vec<ScheduleFact> {
         // 写侧闸：没有 `assign.work` ⇒ 什么都不写（fail-closed）。
-        if !spec.can_assign_work() {
+        if !crate::symbio_core::actor_can_assign_work(spec) {
             return Vec::new();
         }
         let mut out = Vec::new();

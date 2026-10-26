@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::symbio_core::PluginFrame;
+use crate::plugin::PluginFrame;
 
 /// 每个变体的错误码经 `to_frame` → `error_code` 往返后保持一致
 /// （分派依据必须是类型化错误码，而非文案字面量）。

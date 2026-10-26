@@ -165,7 +165,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   的一次真实变化；这次把 two 条口径各归其位后回落到 58，不再需要
  *   `core-export-allow one` 那条棘轮格下修豁免）。
  * - ** 合并批**（2026-10-14）降一格 58 → 57：`Pattern::Reasoner` 的派生下沉回
- *   actors 定义域（`Pattern::for_principal`，插件层不再出现主体类型名——NDC-001 同一
+ *   actors 定义域（`pattern_for_principal`，插件层不再出现主体类型名——NDC-001 同一
  *   纪律），`Reasoner` 退出单消费方清单；`SOURCE_PRINCIPAL` 作为线上协议键登记豁免
  *   （跨进程契约，不可下沉，见账本）。
  *

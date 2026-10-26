@@ -721,3 +721,5 @@ impl crate::symbio_core::PluginConfigMount for TelegramPlugin {
 mod tests;
 
 crate::submit_object_creator!(PLUGIN_ID_TELEGRAM, TelegramPlugin::build, dyn Plugin);
+
+crate::impl_config_mount_vdfs!(TelegramPlugin);

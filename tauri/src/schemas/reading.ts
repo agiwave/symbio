@@ -7,7 +7,7 @@
  * 前端因此不出现任何会话/统计语义：这里只认分区、行、标签、值、口径提示与语气。
  * 换一个产者（成本、记忆、任何只读路由）前端零改动。
  *
- * 后端真源：`symbio/src/symbio_core/present/reading.rs`。
+ * 后端真源：`symbio_kernel/src/present/reading.rs`。
  * 跨栈镜像由 `scripts/protocol-mirror-audit.mjs` 的两张登记表看守：结构体在
  * `STRUCT_SETS`（`ReadingRow` / `ReadingSection` / `ReadingPanel`），闭集词表在
  * `ENUM_SETS`（`ReadingTone` ↔ `READING_TONES`）。字段或取值改名 ⇒ 该审计红。

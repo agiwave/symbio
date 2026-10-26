@@ -70,3 +70,19 @@ exit: '可选批次：按 owner 搬投影实现与共享类型、把 schedule / 
   `crate::routes::…` / `crate::hooks::…`。判据面：C-004 非内核账本 279 → 270（9 条随域
   迁出）；E-012 / route-facts / protocol-mirror / routes.gen.ts 的常量源改宿主文件；
   E-013 的 loop 闭族补 `routes` / `hooks` 两个**宿主机制**根（不是兄弟插件实现，D-184）。
+- 2026-10-26：**C2b 已落**。五个封闭语法 trait 及签名类型搬入 `symbio_kernel`：`Capability` /
+  `Registry` / `CapabilityMeta` / `CapabilityRow` / `CapabilityFamily`（`capability/{mod,row,family}`）·
+  `ModelProvider` / `TurnOutput`（`llm/`）· `VdfsProvider` 与 VDFS 全族（`vdfs/`）·
+  `Plugin` / `PluginInvoke*` / `PluginError` / `PluginPayload`（`plugin/`）· `ExecEnv`（`exec/`）·
+  `ChatNode` / `Principal`（`chat/`）· `ReadingSection` / `DetailField`（`present/`）· `SymbioKey`（`keys`）·
+  `ActorSpec` / `Pattern` / `Scope`（`actors`）。core 各域改为同名私有 shim `pub use symbio_kernel::…`，
+  既有 `crate::symbio_core::<域>::…` 与根出口不变。跨 crate 的形态修正：原 `pub(crate)` 项放宽为 `pub`；
+  orphan 规则禁止宿主为内核类型写固有 impl ⇒ 三处改宿主侧扩展（`ChatNodePresentationExt` /
+  `TurnOutputExt` / `ConfigMountDispatch` 自由函数 + `impl_config_mount_vdfs!` 展开宏），
+  `ActorSpec` 的授权读法改 core 自由函数（`pattern_for_principal` / `actor_can_*` / 测试面
+  `trivial_actor_spec`）；`From<VdfsError> for PluginError` 移入 kernel。判据面：文件集标记整份迁到
+  `symbio_kernel/src/lib.rs`，CS-001 / CS-004 判定 kernel crate；CS-004 冻结随类型进内核的
+  14 处宿主词汇（`chat/principal.rs` 13 + `capability/family.rs` 1）；`core-surface` 的子模块识别
+  取 core 与 kernel 的并集；`plugin-entry` 的代码根补 `symbio_kernel/src`；protocol-mirror 的后端
+  真源路径改 kernel。测试基线：`rustTests` 2241 → 2174、`kernelRustTests` 64 → 131（用例随类型迁移，
+  非退役）。门禁 152/152 通过。

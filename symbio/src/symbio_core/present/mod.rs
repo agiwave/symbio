@@ -21,11 +21,4 @@
 //! 反方向不存在：本域只依赖 `vdfs` 的错误载荷形状（字段级校验失败），
 //! 不知道任何表、任何插件。
 
-mod detail;
-mod reading;
-
-pub use detail::{
-    DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
-    DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
-};
-pub use reading::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+pub use symbio_kernel::present::*;

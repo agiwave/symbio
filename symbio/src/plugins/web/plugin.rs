@@ -201,3 +201,5 @@ impl crate::symbio_core::PluginConfigMount for WebPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_ID_WEB, WebPlugin::build, dyn Plugin);
+
+crate::impl_config_mount_vdfs!(WebPlugin);

@@ -1,50 +1,22 @@
-//! VDFS（Virtual Dynamic File System）—— 统一的资源与数据访问层
+//! VDFS（Virtual Dynamic File System）—— 统一的资源与数据访问层（宿主侧）
 //!
 //! 规范：`../../../../docs/003-design/009-VDFS规范.md`。
 //!
 //! ## 模块边界（重要）
 //!
 //! ```text
-//! symbio_core/vdfs/*.rs          纯接口：VdfsProvider trait + 域类型（words / access / node / …）
-//! symbio_core/vdfs/host.rs       symbio 桥：上下文注入 + 错误翻译 + 变更广播
-//! symbio_core/vdfs/address.rs    当前父地址机制：根的静态声明 + 拼接 + 路径守卫
-//! providers/vdfs_service/        存储实现：单文件 / 目录 / 内存三种拓扑
-//! plugins/vdfs/protocol.rs       线路信封：vdfs/* 请求响应 + 协议路径常量
-//! plugins/vdfs/fs.rs             地址规则（根名在这里）+ 两半分流 + 展示口径映射
-//! plugins/vdfs/host.rs           访问层：取「根服务者」+ 翻译操作 + 树遍历 + 事件投递
-//! plugins/composite/vdfs.rs      拓扑：包含子目录列表的 provider（子目录 = 子插件名）
+//! symbio_kernel/src/vdfs/*.rs     纯接口：VdfsProvider trait + 域类型（words / access / node / …）
+//! symbio_core/vdfs/host.rs        symbio 桥：上下文注入 + 错误翻译 + 变更广播
+//! symbio_core/vdfs/address.rs     当前父地址机制：根的静态声明 + 拼接 + 路径守卫
+//! providers/vdfs_service/         存储实现：单文件 / 目录 / 内存三种拓扑
+//! plugins/vdfs/protocol.rs        线路信封：vdfs/* 请求响应 + 协议路径常量
+//! plugins/vdfs/fs.rs              地址规则（根名在这里）+ 两半分流 + 展示口径映射
+//! plugins/vdfs/host.rs            访问层：取「根服务者」+ 翻译操作 + 树遍历 + 事件投递
+//! plugins/composite/vdfs.rs       拓扑：包含子目录列表的 provider（子目录 = 子插件名）
 //! ```
 //!
-//! **core 只暴露纯接口**（[`crate::symbio_core::vdfs`]），线上形状与
-//! 访问层都在 vdfs 插件内部——与 [`crate::symbio_core::llm::model_provider`] 的组织
-//! 方式一致（core = 纯 trait；协议适配在插件）。
-//!
-//! ## 谁拥有拓扑
-//!
-//! 虚拟根之下没有 root 级 provider 的概念——只有一个**恰好包含若干子目录的
-//! provider**（当前是 composite：它的目录内容 = 实现了该接口的子插件名）。容器
-//! 在 `traverse` 里经 `Registry::put` 的根行（`CapabilityRow::mount_root`）
-//! 把自己登记进能力表的根位；vdfs 插件只取这个登记项再转发（`capability_vdfs_root`），因此**拓扑知识
-//! 不在访问层**。composite 可被别的目录包含、子插件也可以是另一个 composite
-//! （嵌套时同样只是普通 provider）——登记进单槽只是装配安排，不是 composite 的
-//! 属性。
-//!
-//! 每个实现了 [`VdfsProvider`] 的插件，以**自己的插件名**成为根下的一级子目录——
-//! 「新增资源 = 新增一个子目录」，访问层与前端都无需改动。
-//!
-//! 同样的道理，**根叫什么也不归 core**：名字是 vdfs 插件的挂载规则，经
-//! [`address::AddrRootDecl`] 静态声明（字面量只在 `plugins/vdfs`）。绝对地址
-//! 由**上下文里的当前父地址**承载：父插件把请求转发给子插件时（route /
-//! traverse 两个转发点），把子上下文里的父地址改成子插件的挂载点
-//! `join(根名, 子插件名)`；子插件需要全局地址的少数协议级场合，经
-//! `address::absolute_addr` 用「上下文父地址 + 相对地址」拼出——不写死、
-//! 不问全局。
-//!
-//! `VdfsProvider`
-//!
-//! 本模块（`vdfs`）是 symbio 侧的**薄桥**：把纯接口接到
-//! `PluginInvokeRequest` / `PluginError` 上，供实现方（如 `plugin_manager` 插件）复用。
-//! 换宿主只需重写这一个文件。
+//! **纯接口已在 `symbio_kernel`**（D-188 C2b），这里只留宿主侧的两项：symbio 桥与
+//! 当前父地址机制。线上形状与访问层都在 vdfs 插件内部。
 //!
 //! ## 四条不变量
 //!
@@ -57,51 +29,19 @@
 //!    绝对地址一律从**上下文里的当前父地址 + 相对地址**拼接
 //!    （`address::absolute_addr`），不得持有根名。
 
-// ---- 纯接口子模块（宿主无关）----
-mod access;
-mod change;
-mod content;
-mod context;
-mod error;
-mod node;
-mod provider;
-mod request;
-mod words;
+pub use symbio_kernel::vdfs::*;
 
 pub mod address;
 pub mod host;
-
-// ---- 纯接口：词表常量 ----
-pub use words::{
-    VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
-    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS,
-    VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TEST, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM, VDFS_EXT_ZIP,
-    VDFS_KIND_DIR, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD,
-    VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
-    VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
-};
-// ---- 纯接口：域类型 ----
-pub use access::VdfsAccess;
-pub use change::{VdfsChange, VdfsChangeSink};
-pub use content::VdfsContent;
-pub use context::{VdfsContext, VdfsParams};
-pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};
-pub use node::{vdfs_derive_ext, VdfsItem, VdfsNewType, VdfsNode};
-pub use provider::{DynVdfsProvider, VdfsProvider};
-pub use request::{VdfsActionResult, VdfsRequest, VdfsResponse, VdfsWriteResponse};
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
 pub(crate) use address::{
     absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl,
 };
-// 路径守卫（`..` 段判定 / 前缀段比较）——shell 工具与 VDFS 物理层共用的同一条规则
-pub use address::{vdfs_has_parent_segment, vdfs_path_within};
+// 路径守卫（`..` 段判定 / 前缀段比较）已随纯接口住内核，经上面的 glob 取用
 
 // ---- symbio 桥 ----
 pub use host::{
     vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
     vdfs_watch_changes, VdfsChangeSubscriptions,
 };
-
-#[cfg(test)]
-mod tests;

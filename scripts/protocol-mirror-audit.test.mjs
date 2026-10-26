@@ -35,13 +35,13 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
-const CHAT_RS = 'symbio/src/symbio_core/chat/chat_node.rs'
+const CHAT_RS = 'symbio_kernel/src/chat/chat_node.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'symbio/src/symbio_core/present/detail.rs'
+const DETAIL_RS = 'symbio_kernel/src/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
+const RISK_LEVEL_RS = 'symbio_kernel/src/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
+const READING_RS = 'symbio_kernel/src/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
@@ -170,19 +170,19 @@ const VDFS_WORDS_RS_SRC = [
  * 夹具按真实文件路径分发。
  */
 const VDFS_TYPES_RS = {
-  'symbio/src/symbio_core/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
-  'symbio/src/symbio_core/vdfs/node.rs': [
+  'symbio_kernel/src/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
+  'symbio_kernel/src/vdfs/node.rs': [
     rsStruct('VdfsNode', 'path', 'name'),
     rsStruct('VdfsItem', 'path'),
     rsStruct('VdfsNewType', 'ext', 'title'),
   ].join('\n'),
-  'symbio/src/symbio_core/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
-  'symbio/src/symbio_core/vdfs/error.rs': [
+  'symbio_kernel/src/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
+  'symbio_kernel/src/vdfs/error.rs': [
     rsStruct('VdfsFieldError', 'field', 'message'),
     rsStruct('VdfsValidationError', 'message', 'fields'),
   ].join('\n'),
-  'symbio/src/symbio_core/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
-  'symbio/src/symbio_core/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
+  'symbio_kernel/src/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
+  'symbio_kernel/src/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
 }
 
 /** 前端 vdfs.ts：只放后端有对应协议词 / 字段的——多放一个就命中「未登记」检查 */
@@ -461,7 +461,7 @@ const HOME_TS_SRC = [
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
-  'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
+  'symbio_kernel/src/vdfs/words.rs': VDFS_WORDS_RS_SRC,
   ...VDFS_TYPES_RS,
   'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
   'symbio/src/routes.rs': ROUTE_RS_SRC,
@@ -540,7 +540,7 @@ test('真实仓库当前状态通过（防本守卫在真仓库上误报）', ()
 
 test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio/src/symbio_core/vdfs/words.rs': [
+    'symbio_kernel/src/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "transcript";',
       'pub const VDFS_EXT_SESSION: &str = "session";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -553,7 +553,7 @@ test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
 
 test('后端改了会话 ext、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio/src/symbio_core/vdfs/words.rs': [
+    'symbio_kernel/src/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "messages";',
       'pub const VDFS_EXT_SESSION: &str = "conversation";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -604,7 +604,7 @@ test('前端把常量改成别名（不再是第二份真相）→ 不红', () =
 })
 
 test('后端常量源文件被删 → 变红（不是静默跳过）', () => {
-  const r = mirror({ 'symbio/src/symbio_core/vdfs/words.rs': null })
+  const r = mirror({ 'symbio_kernel/src/vdfs/words.rs': null })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /后端常量源不存在/)
 })
@@ -750,7 +750,7 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 
 // ==================== D 组：结构体字段 ====================
 
-const VDFS_NODE_RS = 'symbio/src/symbio_core/vdfs/node.rs'
+const VDFS_NODE_RS = 'symbio_kernel/src/vdfs/node.rs'
 
 test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
   const r = mirror({

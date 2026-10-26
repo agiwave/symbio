@@ -184,7 +184,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
 /// 验收 3：`store = memory` 平凡值——重启即丢，但系统仍能完成 S01 闭环。
 #[test]
 fn memory_store_trivial_value_still_completes_the_loop() {
-    use crate::symbio_core::{ActorSpec, EventStore, Pattern, Store as _};
+    use crate::symbio_core::{EventStore, Pattern, Store as _};
 
     // 「重启」= 新进程 = 全新 MemoryStore（事件为空）。
     let store = EventStore::new();
@@ -215,7 +215,10 @@ fn memory_store_trivial_value_still_completes_the_loop() {
     let v = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
-    assert_eq!(ActorSpec::trivial("session/main").pattern, Pattern::Decider);
+    assert_eq!(
+        crate::symbio_core::trivial_actor_spec("session/main").pattern,
+        Pattern::Decider
+    );
 }
 
 /// 验收 4（反向）：故意丢掉最后一条已提交事件 → `head()` 必须不同

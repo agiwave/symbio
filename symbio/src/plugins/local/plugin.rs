@@ -289,3 +289,5 @@ crate::submit_object_creator!(PLUGIN_ID_LOCAL, LocalPlugin::build, dyn Plugin);
 #[cfg(test)]
 #[path = "plugin.test.rs"]
 mod tests;
+
+crate::impl_config_mount_vdfs!(LocalPlugin);

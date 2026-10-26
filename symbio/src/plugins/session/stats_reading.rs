@@ -17,6 +17,7 @@
 //! （贴标签、定单位、挑语气）。同一份事实长出两套口径，读数与投影就会静默漂移，
 //! 而两边都自称是 SLO。
 
+use crate::symbio_core::chat_node::ChatNodePresentationExt;
 use crate::symbio_core::{
     chat_node as cm, fallback_rate, slo_report, Event, ReadingBar, ReadingPanel, ReadingRow,
     ReadingSection, ReadingTone, VisScope,

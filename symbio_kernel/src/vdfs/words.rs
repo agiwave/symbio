@@ -149,7 +149,7 @@ pub const VDFS_ACTION_EXPAND_SKELETON: &str = "expand_skeleton";
 ///
 /// 入参 `{ to: <同一组里另一支的根 id> }`（`meta.branch.candidates` 里的那一个——
 /// 前端不认识组结构，它把后端交回来的 id 原样传回）。它落一条
-/// [`crate::symbio_core::EVENT_BRANCH_SELECTED`]，**不开轮**：这是它与恢复动词
+/// `symbio_core::EVENT_BRANCH_SELECTED`，**不开轮**：这是它与恢复动词
 /// （`retry_subtree` / `approve` / …）的分界——那些是「让这一轮接着走」，这一条只是
 /// 「我刚读的是这一支」。
 ///

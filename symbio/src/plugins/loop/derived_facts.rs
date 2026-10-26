@@ -33,7 +33,9 @@
 //! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
 //! 刚写下的那些。
 
-use crate::symbio_core::{Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED};
+use crate::symbio_core::{
+    actor_can_assert_verification, Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED,
+};
 // 记录类型住 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
 use crate::symbio_core::facts::{Delegation, TaskDeclaration};
@@ -217,7 +219,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
     // 落裁决事实需要仲裁者那一行持 `assert.verification`——缺能力 ⇒ 一条都不写
     // （fail-closed：没有资格的判定不该留下事实）。
     let spec = decider.spec();
-    if !spec.can_assert_verification() {
+    if !actor_can_assert_verification(&spec) {
         crate::plugin_warn!(
             "session",
             "[v2] 仲裁者缺 assert.verification，本轮淘汰判定不落格（turn={turn}）"

@@ -13,6 +13,7 @@ use crate::symbio_core::invariants::check_all;
 use crate::symbio_core::projection::turnstate::turnstate;
 use crate::symbio_core::store::{EventStore, Store};
 use crate::symbio_core::view::Budget;
+use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
 /// 种一条**根事件**（用户发言），返回它的 seq——给"溯源锚"参数用。
 ///
@@ -38,7 +39,7 @@ fn seed_root(store: &EventStore) -> u64 {
 
 #[test]
 fn trivial_spec_is_the_s01_baseline() {
-    let spec = ActorSpec::trivial("session/main");
+    let spec = trivial_actor_spec("session/main");
     assert_eq!(
         spec.pattern,
         Pattern::Decider,
@@ -65,23 +66,26 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
 
     let session = ActorSpec {
         capabilities: production_matrix().grant_names_of(PRINCIPAL_MAIN),
-        ..ActorSpec::trivial(PRINCIPAL_MAIN)
+        ..trivial_actor_spec(PRINCIPAL_MAIN)
     };
-    assert!(session.can_land_speech(), "持 reply ⇒ 发言收束放行");
+    assert!(actor_can_land_speech(&session), "持 reply ⇒ 发言收束放行");
     assert!(
-        session.can_land_artifact(),
+        actor_can_land_artifact(&session),
         "主智能体行含 produce.artifact ⇒ 产物臂同样放行（两臂都持）"
     );
 
     let peer = ActorSpec {
         capabilities: production_matrix().grant_names_of(PRINCIPAL_PEER),
-        ..ActorSpec::trivial(PRINCIPAL_PEER)
+        ..trivial_actor_spec(PRINCIPAL_PEER)
     };
     assert!(
-        !peer.can_land_speech(),
+        !actor_can_land_speech(&peer),
         "对等主体无发言权（ADR-067：两条收束路各问自己那一项）"
     );
-    assert!(peer.can_land_artifact(), "对等主体的权威动作 = 产生产物");
+    assert!(
+        actor_can_land_artifact(&peer),
+        "对等主体的权威动作 = 产生产物"
+    );
 
     // 反向用例：清空能力集 ⇒ 产物臂必拒。判定读的是**这个**集合，
     // 不是绕回授权表——绕回去的话这条必绿。
@@ -90,22 +94,22 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
         ..peer.clone()
     };
     assert!(
-        !stripped.can_land_artifact(),
+        !actor_can_land_artifact(&stripped),
         "清空能力集后产物臂必须拒（证明判定读的是规格自己）"
     );
 
     // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`session/main` 能收束。
     // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
     // （而 S01 §4 要求「平凡值下系统完整运行」）。
-    let baseline = ActorSpec::trivial("session/main");
+    let baseline = trivial_actor_spec("session/main");
     assert!(
-        baseline.can_land_speech() && baseline.can_land_artifact(),
+        actor_can_land_speech(&baseline) && actor_can_land_artifact(&baseline),
         "平凡值权限取实：session/main 两臂都放"
     );
     // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
-    let autonomous = ActorSpec::trivial("session/autonomous");
+    let autonomous = trivial_actor_spec("session/autonomous");
     assert!(
-        !autonomous.can_land_speech(),
+        !actor_can_land_speech(&autonomous),
         "自主主体无发言权（平凡值不豁免窄行：自主行为不得冒充用户对话）"
     );
 }
@@ -129,20 +133,20 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
         let matrix = production_matrix();
         let spec = ActorSpec {
             capabilities: matrix.grant_names_of(p),
-            ..ActorSpec::trivial(p)
+            ..trivial_actor_spec(p)
         };
         assert_eq!(
-            spec.can_land_speech(),
+            actor_can_land_speech(&spec),
             matrix.can_reply(p),
             "{p}: 首条收束两入口必须一致"
         );
         assert_eq!(
-            spec.can_land_speech(),
+            actor_can_land_speech(&spec),
             matrix.can_reply(p),
             "{p}: 追加收束两入口必须一致"
         );
         assert_eq!(
-            spec.can_land_artifact(),
+            actor_can_land_artifact(&spec),
             matrix.can_produce_artifact(p),
             "{p}: 产物臂两入口必须一致"
         );
@@ -1207,7 +1211,7 @@ fn the_arbiter_row_is_the_documented_five_fields() {
     assert_eq!(spec.principal, PRINCIPAL_ARBITER);
     assert_eq!(
         spec.pattern,
-        crate::symbio_core::actors::Pattern::Decider,
+        Pattern::Decider,
         "仲裁者无 reply.* 也无 produce.artifact ⇒ Decider（闭集不变宽）"
     );
     assert_eq!(
@@ -1220,7 +1224,7 @@ fn the_arbiter_row_is_the_documented_five_fields() {
         crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
         "淘汰判定是规则折叠：反射档"
     );
-    assert_eq!(spec.scope, crate::symbio_core::actors::Scope::Root);
+    assert_eq!(spec.scope, Scope::Root);
 }
 
 /// 判定半边：低于阈值才淘汰；**恰好等于阈值不淘汰**（边界值）。
@@ -1872,14 +1876,14 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
 
     // 能力读方：判定者持 judge.intent ⇒ 可落控制事实（`task.held` / `control`）。
     assert!(
-        spec.can_judge_intent(),
+        actor_can_judge_intent(&spec),
         "判定者持 judge.intent ⇒ 写侧闸放行"
     );
     // 反向用例：清空能力集 ⇒ 写权拒。判定若绕回授权表，这条会绿（假绿）——它必须红。
     let mut stripped = PreemptionDecider.spec();
     stripped.capabilities.clear();
     assert!(
-        !stripped.can_judge_intent(),
+        !actor_can_judge_intent(&stripped),
         "无 judge.intent ⇒ 不得落控制事实（读的是规格自己的集合）"
     );
 }
@@ -2592,7 +2596,7 @@ fn the_scheduler_spec_is_a_decider_with_assign_work() {
     assert_eq!(spec.pattern, Pattern::Decider);
     assert_eq!(spec.budget_ms, 80, "反射档");
     assert_eq!(spec.scope, Scope::Root);
-    assert!(spec.can_assign_work(), "调度者行持 assign.work");
+    assert!(actor_can_assign_work(&spec), "调度者行持 assign.work");
 }
 
 /// 100 次注入同一笔就绪任务 ⇒ 只发一笔租约（抢同一份活有仲裁）。
@@ -2677,7 +2681,7 @@ fn a_spec_without_assign_work_writes_nothing() {
     let view = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
 
     // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
-    let speaker = ActorSpec::trivial("session/worker");
+    let speaker = trivial_actor_spec("session/worker");
     assert!(
         ScheduleDecider
             .decide(&speaker, &view, &snap, "session/main", 9_999)

@@ -35,7 +35,7 @@ mod invariants;
 mod keys;
 mod llm;
 mod logger;
-mod plugin;
+pub(crate) mod plugin;
 mod present;
 mod projection;
 mod store;
@@ -219,6 +219,17 @@ pub(crate) use actors::{commitment_events, commitment_records, recalled_event};
 // （`scripts/no-direct-call-audit.mjs`）⇒ 与 `recalled_event` 同一形态，主体仍在 `actors`
 // 内被本函数驱动。生产消费方是 session 的**生产**代码，故不带 `cfg(test)`。
 pub(crate) use actors::render_messages;
+// 主体规格的授权读法（D-188 C2b）：数据面（`ActorSpec` / `Pattern` / `Scope`）住
+// `symbio-kernel`，读法读的是本机**部署表**（`authz` / `governance`），不是语法。
+// 宿主 crate 不能给内核类型写固有 impl（orphan），故以自由函数表达（`actors::spec`）。
+// `pub(crate)` 出根：消费方是本 crate 的插件代码，而 C-002 禁深引域目录。
+pub(crate) use actors::{
+    actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
+    actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
+};
+// 平凡值构造只在测试面有消费者（生产构造点按真实授权行立规格，ADR-067）。
+#[cfg(test)]
+pub(crate) use actors::trivial_actor_spec;
 // 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
 // `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
 // （`derived_facts.test.rs` / `turn_exec.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又

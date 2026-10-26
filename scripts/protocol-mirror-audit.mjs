@@ -93,23 +93,25 @@ const BAD = '✗'
 
 // ==================== A. 常量镜像 ====================
 
-const VDFS_WORDS_RS = 'symbio/src/symbio_core/vdfs/words.rs'
-const VDFS_ACCESS_RS = 'symbio/src/symbio_core/vdfs/access.rs'
-const VDFS_NODE_RS = 'symbio/src/symbio_core/vdfs/node.rs'
-const VDFS_CONTENT_RS = 'symbio/src/symbio_core/vdfs/content.rs'
-const VDFS_ERROR_RS = 'symbio/src/symbio_core/vdfs/error.rs'
-const VDFS_REQUEST_RS = 'symbio/src/symbio_core/vdfs/request.rs'
-const VDFS_CHANGE_RS = 'symbio/src/symbio_core/vdfs/change.rs'
+// D-188 C2b：VDFS 全族、`ChatNode` 与呈现读数随语法住 `symbio-kernel` crate，
+// 这里的后端真源路径跟着搬（前端镜像不变）。
+const VDFS_WORDS_RS = 'symbio_kernel/src/vdfs/words.rs'
+const VDFS_ACCESS_RS = 'symbio_kernel/src/vdfs/access.rs'
+const VDFS_NODE_RS = 'symbio_kernel/src/vdfs/node.rs'
+const VDFS_CONTENT_RS = 'symbio_kernel/src/vdfs/content.rs'
+const VDFS_ERROR_RS = 'symbio_kernel/src/vdfs/error.rs'
+const VDFS_REQUEST_RS = 'symbio_kernel/src/vdfs/request.rs'
+const VDFS_CHANGE_RS = 'symbio_kernel/src/vdfs/change.rs'
 const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
-const CHAT_NODE_RS = 'symbio/src/symbio_core/chat/chat_node.rs'
+const CHAT_NODE_RS = 'symbio_kernel/src/chat/chat_node.rs'
 const CHAT_NODE_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'symbio/src/symbio_core/present/detail.rs'
+const DETAIL_RS = 'symbio_kernel/src/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
+const RISK_LEVEL_RS = 'symbio_kernel/src/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'symbio/src/symbio_core/present/reading.rs'
+const READING_RS = 'symbio_kernel/src/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
 // （四个同名 namespace）。见 [D-112] 决策 2。
@@ -544,7 +546,7 @@ const META_KEYS = [
   },
   {
     key: 'tool_name',
-    owner: 'symbio/src/symbio_core/chat/chat_node.rs',
+    owner: 'symbio_kernel/src/chat/chat_node.rs',
     what: '工具名（顶层 name 退役后的唯一住处）',
   },
   {

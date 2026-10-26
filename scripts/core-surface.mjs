@@ -205,12 +205,20 @@ export function collectCoreSurface(root) {
 
   // 子模块：域 `mod.rs` 里 `mod X;` / `pub mod X {` 声明过的名字。只对**能定位到域**
   // 的符号判——`(root)` / `(explicit)` 没有域，也就没有子模块可查。
+  //
+  // 域实现搬进 `symbio-kernel` 后（D-188），core 的域 `mod.rs` 只剩 `pub use
+  // symbio_kernel::<域>::*;`，`pub mod family;` / `pub mod failure_kind { … }` 的
+  // 声明落在 kernel 侧。只查 core 会把这两个子命名空间读成函数（N-001 假红），
+  // 故两处取并集——与「公开面同口径」是同一条纪律：公开面在哪，判定就在哪。
+  const kernelDir = path.join(root, 'symbio_kernel', 'src')
   const modCache = new Map()
   const modules = new Set()
   for (const [name, domain] of symbols) {
     if (domain === '(root)' || domain === '(explicit)') continue
     if (!modCache.has(domain)) {
-      modCache.set(domain, declaredModules(path.join(coreDir, domain, 'mod.rs')))
+      const found = declaredModules(path.join(coreDir, domain, 'mod.rs'))
+      for (const n of declaredModules(path.join(kernelDir, domain, 'mod.rs'))) found.add(n)
+      modCache.set(domain, found)
     }
     if (modCache.get(domain).has(name)) modules.add(name)
   }

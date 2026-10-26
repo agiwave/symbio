@@ -1,6 +1,6 @@
 //! 内置六族——**跨插件共享的能力行词汇**。
 //!
-//! 族是值（[`CapabilityFamily`](super::CapabilityFamily)），不是内核枚举：新族不必在这里
+//! 族是值（[`CapabilityFamily`]），不是内核枚举：新族不必在这里
 //! 登记。在声明它的插件里写
 //! `const MY_FAMILY: CapabilityFamily = CapabilityFamily::multi("my_family");` 与一个
 //! 载荷类型即可，内核零改动（[D-175](../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。

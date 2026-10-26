@@ -99,37 +99,10 @@ pub(crate) fn absolute_addr(ctx: &Arc<dyn PluginInvokeRequest>, rel: &str) -> St
     join_addr(ctx.get(VDFS_PARENT_ADDR).unwrap_or_default().as_str(), rel)
 }
 
-// ==================== 路径判定（地址契约的唯一实现） ====================
+// ==================== 路径判定 ====================
 //
-// 下面三个函数是**地址规则**的实现，因此归本模块所有：任何按路径段比较、
-// 或需要收敛坐标系的场合都调用它们，不得各写一份。
-//
-// 历史教训：`..` 判定曾按「是否以 `../` 开头」实现，Windows 下
-// `src\..\..\..\Windows` 既不以 `../` 也不以 `..\` 开头，直接绕过守卫；
-// 黑名单前缀曾用裸 `starts_with("/etc")`，把 `/etcfoo` 一并误伤。
-// 两处 bug 同源——**按字符串前缀代替按路径段比较**。
-
-/// 路径中是否含 `..` 段——**两种分隔符都算**。
-///
-/// 只查 `/` 会让 Windows 的 `src\..\..\..\Windows` 绕过守卫；只查带分隔符的
-/// `../` / `..\` 前缀会放过 `a/..`（`..` 收尾）。因此按**段**判定，与分隔符无关。
-pub fn vdfs_has_parent_segment(path: &str) -> bool {
-    path.split(['/', '\\']).any(|seg| seg == "..")
-}
-
-/// `path` 是否落在 `prefix` 之内——相等，或紧随一个分隔符。
-///
-/// 前缀必须按**路径段**比较：裸 `starts_with("/etc")` 会把 `/etcfoo` 误伤。
-pub fn vdfs_path_within(path: &str, prefix: &str) -> bool {
-    let prefix = prefix.trim_end_matches(['/', '\\']);
-    if prefix.is_empty() {
-        return false;
-    }
-    match path.strip_prefix(prefix) {
-        Some(rest) => rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'),
-        None => false,
-    }
-}
+// 两个函数是**纯词汇**，已随 VDFS 纯接口住 `symbio_kernel::vdfs::path`（D-188 C2b）；
+// 这里只做路径与根地址拼接。调用方仍从 `crate::symbio_core::vdfs::*` / 根出口取用。
 
 #[cfg(test)]
 #[path = "address.test.rs"]

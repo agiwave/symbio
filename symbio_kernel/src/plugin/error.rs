@@ -58,7 +58,7 @@ pub enum PluginError {
 /// 三段链路的职责划分：
 /// - 生产侧：[`PluginError::code`] 返回 `PluginErrorCode`（编译器保证变体穷尽）；
 /// - 传输侧：[`PluginError::to_frame`] 写入 `code.as_str()`；
-/// - 消费侧：[`crate::symbio_core::PluginFrame::error_code`] 解析回 `PluginErrorCode`，
+/// - 消费侧：[`crate::plugin::PluginFrame::error_code`] 解析回 `PluginErrorCode`，
 ///   分派逻辑比较枚举值而非字符串。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PluginErrorCode {
@@ -149,8 +149,8 @@ impl PluginError {
     }
 
     /// 将 PluginError 转换为通用的传输帧
-    pub fn to_frame(&self) -> crate::symbio_core::PluginFrame {
-        crate::symbio_core::PluginFrame::Error(
+    pub fn to_frame(&self) -> crate::plugin::PluginFrame {
+        crate::plugin::PluginFrame::Error(
             self.to_string(),
             Some(serde_json::json!({
                 "code": self.code().as_str()
@@ -190,14 +190,14 @@ impl From<serde_json::Error> for PluginError {
 /// 词汇表"（本文件曾有一版 8 个这样的 helper，全仓零使用）。`pub(crate)`
 /// 让编译器继续盯着：一旦没人用了，它会直接报出来。
 #[inline]
-pub(crate) fn lock_read<T>(lock: &std::sync::RwLock<T>) -> RwLockReadGuard<'_, T> {
+pub fn lock_read<T>(lock: &std::sync::RwLock<T>) -> RwLockReadGuard<'_, T> {
     lock.read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// 取写锁；毒化时恢复（理由见 [`lock_read`]）。
 #[inline]
-pub(crate) fn lock_write<T>(lock: &std::sync::RwLock<T>) -> RwLockWriteGuard<'_, T> {
+pub fn lock_write<T>(lock: &std::sync::RwLock<T>) -> RwLockWriteGuard<'_, T> {
     lock.write()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -189,7 +189,7 @@ pub(crate) const PRINCIPAL_WORKER: &str = "session/worker";
 /// 闸后面写 `task.opened` 的就是这一项能力）。不持 `reply.*`：规划者不冒充用户对话。
 ///
 /// 模式派生为 `Pattern::Decider`（无发言权而无产物能力
-/// ⇒ 判据见 `Pattern::for_principal`）——与 S03 §3 的 ActorSpec 行 `pattern: decider`
+/// ⇒ 判据见 [`crate::symbio_core::pattern_for_principal`]）——与 S03 §3 的 ActorSpec 行 `pattern: decider`
 /// 一致：规划步在该阶的规格里是**规则驱动**的（同 `AutonomousInitiator` 先例），
 /// 不是又一个会说话的会话主体。
 pub(crate) const PRINCIPAL_PLANNER: &str = "session/planner";
@@ -263,7 +263,7 @@ pub(crate) const CAP_ASSIGN_WORK: &str = Capability::AssignWork.name();
 /// （D-099）。不持 `reply.*`（不冒充用户对话）、不持 `define.work`（不立任务）：
 /// 「谁来派」与「派什么」是两件事，混在一行会让调度者顺手扩权成规划者。
 ///
-/// 模式由 [`crate::symbio_core::Pattern::for_principal`] 派生为 `Decider`
+/// 模式由 [`crate::symbio_core::pattern_for_principal`] 派生为 `Decider`
 /// （无发言权、无产物能力 ⇒ 规则驱动），与 S04 §3 的 ActorSpec 行 `pattern: decider`
 /// 一致；预算 80ms（反射档）由 `actors::schedule::ScheduleDecider::spec` 给出。
 ///

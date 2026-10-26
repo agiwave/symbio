@@ -39,8 +39,10 @@
 //! `loop_rows`——三处各住各的，见 AR-025 §3。
 
 use super::family;
-use crate::symbio_core::DetailField;
-use crate::symbio_core::{Capability, CapabilityMeta, ModelProvider, VdfsItem, VdfsProvider};
+use crate::capability::{Capability, CapabilityMeta};
+use crate::llm::ModelProvider;
+use crate::present::DetailField;
+use crate::vdfs::{VdfsItem, VdfsProvider};
 use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;

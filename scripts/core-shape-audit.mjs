@@ -538,10 +538,16 @@ if (pluginRefs.length > 0) {
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
  */
 const NOUN_BASELINE = {
-  // 2026-10-26（DE-023 A2）：判定范围收窄到**内核文件集**（`kernel.rs` 的
-  // `core-kernel-files:` 标记）。此前 10 个文件 44 处是「core = 内核」时代的账；
-  // 内核文件集当前 0 处。域文件（authz / chat / plugin / event_bus / projection …）
-  // 的字面量随 C 迁出，只做报告、不设门禁——它们不是内核词汇（D-177）。
+  // 2026-10-26（DE-023 C2b）：判定范围随语法整份迁到 `symbio_kernel/src`（标记在
+  // `symbio_kernel/src/lib.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
+  //  - `chat/principal.rs`：`from_legacy` / `tool_principal` 的工具族前缀表（地址协议
+  //    词汇，13 处）。清它要把这两个解析入口改成宿主侧自由函数（与 `actor_can_*`
+  //    同一形态），见 DE-023 D-188 的 C2b 步；
+  //  - `capability/family.rs`：能力家族 id `"model"` 与插件目录同名（1 处，报的是
+  //    家族词汇而非插件依赖）。
+  // 只许降，整张表的目标仍是空表。
+  'symbio_kernel/src/capability/family.rs': 1,
+  'symbio_kernel/src/chat/principal.rs': 13,
 }
 
 const nounCounts = new Map()

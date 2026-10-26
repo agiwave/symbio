@@ -26,6 +26,8 @@ use std::sync::Arc;
 use crate::symbio_core::chat_node::{ChatNode, NodeKind, NodeRole};
 use crate::symbio_core::PluginInvokeRequest;
 
+pub(crate) use super::message_build::TurnOutputExt;
+
 mod conversation_view;
 mod pipeline;
 mod prompt;

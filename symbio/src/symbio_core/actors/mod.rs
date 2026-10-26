@@ -47,7 +47,14 @@ pub use self::reasoner::render_messages;
 pub use self::recall::recalled_event;
 pub use self::schedule::{ScheduleDecider, SCHEDULE_BUDGET_MS};
 pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter, SKILL_TAG};
-pub use self::spec::{ActorSpec, Pattern, Scope};
+// 数据面随 D-188 C2b 住内核 crate；本域只剩读部署表的自由函数（见 `spec` 模块文档）。
+pub use self::spec::{
+    actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
+    actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
+};
+// `trivial_actor_spec` 是**测试面**的平凡值构造（ADR-067：生产构造点按真实授权行立规格）。
+#[cfg(test)]
+pub use self::spec::trivial_actor_spec;
 
 // 仅测试面：这些符号在非测试构建里没有跨域消费者（用点就在各自的子模块内），
 // 但 `mod.test.rs` 经 `use super::*` 取用，故只在 `cfg(test)` 出根——与
@@ -58,8 +65,6 @@ pub use self::commitment::CommitmentKeeper;
 pub use self::conation::IntentDecision;
 #[cfg(test)]
 pub use self::recall::RecallTranslator;
-// `Scope` 已随 `ActorSpec` / `Pattern` 常驻出根（上文）：`ActorSpec` 的生产构造点
-// （会话插件的 `request_actor_spec`）要以 `Scope::Root` 立规格，不再只是测试面。
 
 #[cfg(test)]
 #[path = "mod.test.rs"]

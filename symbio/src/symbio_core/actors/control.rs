@@ -3,7 +3,7 @@
 use crate::symbio_core::authz::{PRINCIPAL_ARBITER, PRINCIPAL_REFLEX};
 use crate::symbio_core::governance::GrantsChange;
 use crate::symbio_core::projection::reputation::ReputationEntry;
-use crate::symbio_core::{ActorSpec, Event, Pattern, Scope};
+use crate::symbio_core::{pattern_for_principal, ActorSpec, Event, Scope};
 
 /// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,12 +43,12 @@ impl PreemptionDecider {
     /// 判定者必须有**行**：若 `decide` 被直驱、预算由调用方现算、规格从不构造，就是
     /// 「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见
     /// [`Self::decide`]（预算）与 `plugins::session::transcript::inbox` 的写侧闸
-    /// （能力，[`ActorSpec::can_judge_intent`]）。
+    /// （能力，[`actor_can_judge_intent`]）。
     ///
     pub fn spec(&self) -> ActorSpec {
         let principal = PRINCIPAL_REFLEX.to_string();
         ActorSpec {
-            pattern: Pattern::for_principal(&principal),
+            pattern: pattern_for_principal(&principal),
             capabilities: crate::symbio_core::authz::production_matrix().grant_names_of(&principal),
             budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,
@@ -305,13 +305,13 @@ impl EliminationDecider {
     /// `{ principal: session/arbiter, pattern: decider, capabilities: [assert.verification],
     /// budget_ms: 80, scope: root }`——五个字段全部**取实**：principal / capabilities
     /// 同源于授权表那一行（落地的 `PRINCIPAL_ARBITER` 窄行），pattern 按
-    /// [`Pattern::for_principal`] 派生（仲裁者无 `reply.*` 也无 `produce.artifact`
+    /// [`pattern_for_principal`] 派生（仲裁者无 `reply.*` 也无 `produce.artifact`
     /// ⇒ `Decider`，三新角色同一答案——**模式闭集不变宽**，exit ① 的另一半），
     /// budget = 反射档（淘汰判定是规则折叠，毫秒级），scope = root。
     pub fn spec(&self) -> ActorSpec {
         let principal = PRINCIPAL_ARBITER.to_string();
         ActorSpec {
-            pattern: Pattern::for_principal(&principal),
+            pattern: pattern_for_principal(&principal),
             capabilities: crate::symbio_core::authz::production_matrix().grant_names_of(&principal),
             budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
             scope: Scope::Root,

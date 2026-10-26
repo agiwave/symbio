@@ -29,29 +29,9 @@ use crate::symbio_core::{PluginError, PluginInvokeRequest};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// [`VdfsError`] → [`PluginError`]
-///
-/// `Invalid` 的结构化载荷（字段级错误）序列化为 JSON 置于错误文案位，
-/// 宿主前端可解析后逐字段高亮；解析失败则按纯文本展示（向前兼容）。
-impl From<VdfsError> for PluginError {
-    fn from(e: VdfsError) -> Self {
-        match e {
-            VdfsError::NotFound(m) => PluginError::NotFound(m),
-            VdfsError::NotImplemented => PluginError::NotImplemented,
-            VdfsError::Invalid(v) => {
-                let text = serde_json::to_string(&v).unwrap_or_else(|_| v.message.clone());
-                PluginError::ValidationError(text)
-            }
-            VdfsError::Forbidden(m) => PluginError::Forbidden(m),
-            // 宿主错误体系无 Conflict 变体：冲突对使用者同样是「输入不满足前提」，
-            // 归入 ValidationError 以便前端在同一处提示
-            VdfsError::Conflict(m) => PluginError::ValidationError(format!("冲突：{m}")),
-            VdfsError::Internal(m) => PluginError::InternalError(m),
-        }
-    }
-}
-
 /// [`PluginError`] → [`VdfsError`]（provider 调宿主服务后翻译回协议错误）
+///
+/// 反向的 [`From<VdfsError> for PluginError`] 随两个类型住内核（orphan 规则）。
 pub fn vdfs_from_plugin_error(e: PluginError) -> VdfsError {
     match e {
         PluginError::NotFound(m) => VdfsError::NotFound(m),

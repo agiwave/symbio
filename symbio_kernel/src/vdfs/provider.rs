@@ -37,7 +37,7 @@ use super::request::{VdfsRequest, VdfsResponse};
 ///
 /// **provider 不知道自己被挂在哪里**：挂载名由使用方在注册时选定，trait 上没有
 /// 任何与挂载相关的成员；自述（标题 / 描述 / 顺序 / 图标 / 根访问位）由
-/// [`crate::symbio_core::PluginMeta`] 承载（`Plugin::meta()`）。
+/// [`crate::plugin::PluginMeta`] 承载（`Plugin::meta()`）。
 ///
 /// ## 唯一接口
 ///

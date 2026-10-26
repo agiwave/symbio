@@ -109,3 +109,24 @@ impl VdfsError {
         matches!(self, Self::NotImplemented)
     }
 }
+
+/// [`VdfsError`] → [`crate::plugin::PluginError`]
+///
+/// `Invalid` 的结构化载荷（字段级错误）序列化为 JSON 置于错误文案位，
+/// 宿主前端可解析后逐字段高亮；解析失败则按纯文本展示（向前兼容）。
+impl From<VdfsError> for crate::plugin::PluginError {
+    fn from(e: VdfsError) -> Self {
+        use crate::plugin::PluginError;
+        match e {
+            VdfsError::NotFound(m) => PluginError::NotFound(m),
+            VdfsError::NotImplemented => PluginError::NotImplemented,
+            VdfsError::Invalid(v) => {
+                let text = serde_json::to_string(&v).unwrap_or_else(|_| v.message.clone());
+                PluginError::ValidationError(text)
+            }
+            VdfsError::Forbidden(m) => PluginError::Forbidden(m),
+            VdfsError::Conflict(m) => PluginError::ValidationError(format!("冲突：{m}")),
+            VdfsError::Internal(m) => PluginError::InternalError(m),
+        }
+    }
+}

@@ -131,7 +131,7 @@ try {
 
 ## 错误码是闭集
 
-码只有 [`PluginErrorCode`](../../symbio/src/symbio_core/plugin/error.rs) 的 13 个变体这一份真源：
+码只有 [`PluginErrorCode`](../../symbio_kernel/src/plugin/error.rs) 的 13 个变体这一份真源：
 生产侧 `PluginError::code` 给出枚举、传输侧 `to_frame` 写 `as_str`、消费侧
 `PluginFrame::error_code` 解析回枚举后按值分派。
 

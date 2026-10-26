@@ -9,20 +9,19 @@
 //!
 //! ## 内核文件集
 //!
-//! 下面的 `core-kernel-files:` 标记是 CS-001（形状）与 CS-004（插件 id 字面量）
-//! 的**判定范围**，由 `scripts/core-shape-audit.mjs` 读取。文件集是「声明落在哪个
-//! 文件」而不是「域」：`capability` / `vdfs` 等域仍有大量词汇与行为，只有 trait
-//! 声明那一处算语法。C2a 已把 `event` / `view` / `store` / `projection::Projection` /
-//! `decl` / `LatencyTier` 搬进 `symbio-kernel` crate（D-188），那部分文件集标记住
-//! `symbio_kernel/src/lib.rs`；本文件只剩仍住 core 的语法声明。
-// core-kernel-files: actors/spec.rs capability/mod.rs llm/model_provider.rs vdfs/provider.rs
+//! C2b 之后**全部封闭语法**都已住 `symbio-kernel` crate（D-188），本文件只剩转出：
+//! CS-001（形状）与 CS-004（插件 id 字面量）的文件集标记因此整份迁到
+//! `symbio_kernel/src/lib.rs`，这里不再有判定范围。
 
 // ── Event 信封与 Entity×Verb（DE-023 §5） ──
 pub use super::event::{Entity, Event, EventEnvelope, Seq, Verb};
 
 // ── 主体规格五字段与模式闭集 ──
-pub(crate) use super::actors::Scope;
-pub use super::actors::{ActorSpec, Pattern};
+// 数据面住内核 crate；本机的授权读法（平凡值 / 模式派生 / 能力位）是 core 的
+// 自由函数（`trivial_actor_spec` / `pattern_for_principal` / `actor_can_*`），见
+// `actors::spec` —— 部署表不是语法（D-099）。
+pub(crate) use symbio_kernel::actors::Scope;
+pub use symbio_kernel::actors::{ActorSpec, Pattern};
 
 // ── Store / Projection / Budget ──
 pub use super::projection::Projection;

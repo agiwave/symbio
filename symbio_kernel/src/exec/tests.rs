@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::symbio_core::chat_node::ChatNode;
+use crate::chat::ChatNode;
 
 struct RecordingWriter {
     ops: Arc<std::sync::Mutex<Vec<ChatNode>>>,
@@ -81,7 +81,7 @@ async fn sink_filtered_rewrites_and_drops_per_frame() {
     sink.emit(delta("keep", "a")).await; // 放行（改写落点）
     sink.emit(delta("drop", "b")).await; // 吞
     let mut mixed = delta("keep", "c");
-    mixed.status = Some(crate::symbio_core::chat_node::NodeStatus::Completed);
+    mixed.status = Some(crate::chat::NodeStatus::Completed);
     sink.emit(mixed).await; // 带状态 ⇒ 吞
 
     let got = ops.lock().unwrap();

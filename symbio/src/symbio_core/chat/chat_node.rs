@@ -1,505 +1,12 @@
-use serde::{Deserialize, Serialize};
+//! 线格式节点的**类型面**已迁入 `symbio-kernel`；本文件保留宿主侧的转写地址与投影。
+//!
+//! 判据（D-188 C2b）：`ChatNode` 及同文件的值类型是 `ModelProvider` / 能力行的签名类型，
+//! 住内核；`SEG_MESSAGES`、`message_of_node` 与呈现派生依赖宿主地址 / 业务知识，留在这里。
+
+use crate::symbio_core::chat::principal::Principal;
 use serde_json::Value;
 
-use super::principal::Principal;
-use crate::symbio_core::ReadingSection;
-
-/// 消息角色
-///
-/// 请求 / 响应由角色区分（分型结构）：
-/// - 顶层会话：`User`(请求) → `Turn`(`Assistant`，响应)
-/// - 工具调用：`ToolCall`(`Assistant`，请求) → `Turn`(`Tool`，响应)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum NodeRole {
-    #[default]
-    User,
-    Assistant,
-    Tool,
-    System,
-}
-
-/// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`），
-/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]，[]）。这五值是**纯 UI 形状**概念
-/// （展开叶 / 折叠叶 / 容器 / 交互 / 占位），不含任何业务。同 shape 内的业务变体
-/// （run/tool/reasoning/compression…）走 `meta.style_tag`，**只在后端作业务判据**，
-/// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据（[D-070 §决策 2]）。
-///
-/// 消费方按 [`ChatNode`] 上的**后端谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
-/// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按变体名 match——
-/// 变体名 + tag 两维合起来才是业务语义（这二维只活在后端）。
-///
-/// 旧六词（`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` / `compression`）
-/// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
-/// 在 [`message_of_node`] 读边界一次性折叠成新形态 + `style_tag` 注入。
-///
-/// 决策依据：[D-070 §决策 1 / 3]·父批：[]。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum NodeKind {
-    /// 正文叶子：展开显示。业务呈现变体（思考 / 工具响应文本 …）**不在这一格**，
-    /// 靠 `title` / `icon` 数据区分；前端只认「这是一个展开的正文叶子」。
-    #[default]
-    Body,
-    /// 折叠叶子：**默认收起**的内容。`reasoning`（思考）与 `compression`（压缩）与
-    /// 未来 `step_summary` 全在这一格——前端渲染它们**完全一样**（折叠叶 + `title` + `icon`），
-    /// 不需要知道这坨叫思考还是压缩（业务区分只在后端 `style_tag` 注记 + 数据）。
-    Notice,
-    /// 组合骨架 / 容器：递归渲染 `children`。`run`（一整轮）、`tool`（一次工具调用）、
-    /// `sub_agent` 全在这一格——前端一律当容器，不认 tool/turn（[D-070 §决策 1]）。
-    Skeleton,
-    /// 等待用户回应（`ask_user` 提问或工具执行前确认）
-    Interaction,
-    /// 进行中的占位（前端合成，见 []）
-    Typing,
-}
-
-/// **旧 wire 词 → 目标形状 + style_tag**（[D-070 §决策 3 / 6]）。
-///
-/// 消费点是 `message_of_node`：VDFS `attributes.type` 存的是**当时的 wire 词**——历史数据里
-/// 有 `"text"` / `"reasoning"` / `"turn"` / `"tool_call"` / `"user_prompt"` / `"compression"`
-/// 六种旧值；本函数把它们折成新形态并**返回**应写入 `meta.style_tag` 的值（`None` = 不写）。
-/// 新词（`"body"` / `"notice"` / `"skeleton"` / `"interaction"` / `"typing"`）也认。
-///
-/// 旧六值已从 `NodeKind` 删除，但存量数据的旧词**永久**需要本函数折叠——
-/// 删的是枚举变体，不是已落盘的 wire 词。
-pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'static str>)> {
-    Some(match word {
-        // 新词——原样，无 style_tag 需要注入。
-        "body" => (NodeKind::Body, None),
-        "notice" => (NodeKind::Notice, None),
-        "skeleton" => (NodeKind::Skeleton, None),
-        "interaction" => (NodeKind::Interaction, None),
-        "typing" => (NodeKind::Typing, None),
-        // 旧词——折成新形态 + 对应 style_tag。
-        "text" => (NodeKind::Body, None),
-        // [D-070 §决策 3]：reasoning 归 `Notice`（折叠叶），与 compression 同格——
-        // 前端渲染二者完全一样，style_tag 只是后端业务注记。
-        "reasoning" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
-        "turn" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
-        "tool_call" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
-        "user_prompt" => (NodeKind::Interaction, None),
-        "compression" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_COMPRESSION)),
-        _ => return None,
-    })
-}
-
-/// **style_tag 词表**（[D-070 §决策 3]）——同一 shape 下的**后端业务注记**。
-///
-/// [] 起它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
-/// 数据渲染，从不 `switch(style_tag)`。本词表住在 `meta` 里，只服务后端业务判据
-/// （`is_run` / `is_tool_call` / `is_reasoning` / `is_compression`）与 LLM 请求重建。
-/// 后端认识业务天经地义；前端不认。加一个业务变体 = 加一行常量 + 后端填 `title`/`icon`，前端零改动。
-pub const CHAT_STYLE_TAG_REASONING: &str = "reasoning";
-/// `Skeleton` 的一种：一整轮助手响应。
-pub const CHAT_STYLE_TAG_RUN: &str = "run";
-/// `Skeleton` 的一种：一次工具调用。
-pub const CHAT_STYLE_TAG_TOOL: &str = "tool";
-/// `Notice` 的一种：上下文压缩记录。
-pub const CHAT_STYLE_TAG_COMPRESSION: &str = "compression";
-
-/// 消息状态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum NodeStatus {
-    #[default]
-    Pending,
-    Streaming,
-    WaitingUserAction,
-    Completed,
-    /// 用户主动终止。
-    ///
-    /// 它既不是 `Failed`（没有出错，是用户按了停止）也不是 `Completed`（没有跑完，
-    /// 内容是半截的）。二选一都不对：标 `Failed` 会给一个 ⚠ 错误角标，把用户自己的
-    /// 操作渲染成故障；标 `Completed` 是说谎——那一轮根本没跑完。
-    ///
-    /// 语义上它**可重试**：`RetrySubtree` 本就不看状态（只校验节点是骨架），
-    /// 缺的只是前端一个「这个终态可以重试」的判据。
-    Aborted,
-    Failed,
-    /// 节点已被删除（**终态，不可重试**）。
-    ///
-    /// 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成
-    /// 同走一帧。落在此状态的帧在接收端**就地移除**该节点（从本地视图消失），
-    /// 不产生任何「清空重读」。
-    Removed,
-}
-
-impl NodeStatus {
-    /// 状态词——**与 `serde` 的序列化名逐字一致**（由单测锁死）。
-    ///
-    /// ## 为什么需要它
-    ///
-    /// VDFS 节点投影（`plugins/session/plugin/nodes.rs::message_status`）要把状态
-    /// 写进 `VdfsNode.status`，而前端按同一套词读回。若那里手写字符串字面量，
-    /// 枚举改名时就会出现「存储写 `streaming`、节点报 `streaming` 之外的词」
-    /// 这种**编译期看不见**的分叉。
-    ///
-    /// 于是状态词只有一份定义（本函数），投影与序列化都从它派生。
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            NodeStatus::Pending => "pending",
-            NodeStatus::Streaming => "streaming",
-            NodeStatus::WaitingUserAction => "waiting_user_action",
-            NodeStatus::Completed => "completed",
-            NodeStatus::Aborted => "aborted",
-            NodeStatus::Failed => "failed",
-            NodeStatus::Removed => "removed",
-        }
-    }
-
-    /// [`Self::as_str`] 的逆：状态词 → 枚举。未知词返回 `None`。
-    ///
-    /// 存在的理由与 `as_str` 是同一条的另一半：VDFS 变更**不带载荷**（D-025），
-    /// 消费端拿到 `<sid>/message/<mid>` 的 `updated` 后只能回读**节点**
-    /// （`stat`），而节点上承载状态的是那个**词**。把它解析回枚举若在每个消费端
-    /// 各手写一次 match，词表就又有了第二份定义。
-    pub fn of(word: &str) -> Option<Self> {
-        match word {
-            "pending" => Some(NodeStatus::Pending),
-            "streaming" => Some(NodeStatus::Streaming),
-            "waiting_user_action" => Some(NodeStatus::WaitingUserAction),
-            "completed" => Some(NodeStatus::Completed),
-            "aborted" => Some(NodeStatus::Aborted),
-            "failed" => Some(NodeStatus::Failed),
-            "removed" => Some(NodeStatus::Removed),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageUrl {
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ContentPart {
-    Text { text: String },
-    ImageUrl { image_url: ImageUrl },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum MessageContent {
-    Text(String),
-    Parts(Vec<ContentPart>),
-}
-
-impl MessageContent {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            MessageContent::Text(s) => s.is_empty(),
-            MessageContent::Parts(p) => p.is_empty(),
-        }
-    }
-
-    pub fn to_text(&self) -> String {
-        match self {
-            MessageContent::Text(s) => s.clone(),
-            MessageContent::Parts(parts) => parts
-                .iter()
-                .filter_map(|p| match p {
-                    ContentPart::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" "),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.to_text().len()
-    }
-
-    pub fn truncate(&mut self, max_len: usize) {
-        match self {
-            MessageContent::Text(s) => {
-                if s.len() > max_len {
-                    *s = s.chars().take(max_len).collect();
-                }
-            }
-            MessageContent::Parts(_) => {
-                let text = self.to_text();
-                if text.len() > max_len {
-                    let truncated: String = text.chars().take(max_len).collect();
-                    *self = MessageContent::Text(truncated);
-                }
-            }
-        }
-    }
-}
-
-impl Default for MessageContent {
-    fn default() -> Self {
-        MessageContent::Text(String::new())
-    }
-}
-
-/// 聊天消息定义 (所有字段增量可选，通过 id 归并)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ChatNode {
-    pub id: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-
-    /// **存量反序列化落点**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）——
-    /// 不是身份的第二份表达：身份的唯一权威是 [`Self::principal`]，读侧折叠
-    /// [`Self::node_role`] 也以主体为先，这一格只在**主体缺席**时兜底。
-    ///
-    /// 生产写方一律写 [`Self::principal`]：构造函数拿得到主体，落库点 `attributed`
-    /// 再给未标身份的节点补上。这一格今天的读者只剩两类——
-    /// - **存量**：历史 `messages.json` / 旧客户端帧里带 `"role"` 的节点，反序列化后就落在这里；
-    /// - **读边界**：补丁 / 帧合并 / CLI 快照把外来形状折进本地快照的那几处
-    ///   （逐点有 `grep-audit-allow S-014` 注明）。
-    ///
-    /// **wire 上不再出现**：`skip_serializing` 而不是 `skip_serializing_if`——所有会
-    /// 发到前端的构造点都已写主体，族不再需要在线上单独走一格；前端折叠按
-    /// `principal.kind` 判，缺身份时缺省即助手。
-    ///
-    /// 为什么不是私有字段：`ChatNode { .., ..Default::default() }` 的**函数式更新
-    /// 语法要求每个字段可见**（E0451），私有化会把全仓数百个不碰的构造点一起炸掉
-    /// ——机制的爆炸半径大于收益。写侧新增直写由 `scripts/grep-audit.mjs`
-    /// （S-014）棘轮钉住（只许降）。
-    #[serde(skip_serializing)]
-    pub role: Option<NodeRole>,
-
-    /// **这条发言是谁说的**（plan/11 批 1
-    /// ② 的跨栈身份字段）：主体地址（`{kind, id, title?}`，[D-069 §决策 1]）。
-    ///
-    /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
-    /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
-    /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（S08 §4 平凡值要求逐字一致）。
-    ///
-    /// **读侧兼容**（[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
-    /// 裸字符串（`"agent:main"` / `"user"` / `"session/main"`）由 [`Principal::deserialize`]
-    /// 一次性映射成结构体；写侧一律构造 `Principal`，序列化只出对象形态。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub principal: Option<Principal>,
-
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub msg_type: Option<NodeKind>,
-
-    /// ：顶层 `name` 字段**已退役**——工具名是结构细节，住
-    /// `meta.tool_name`（读写唯一入口 [`ChatNode::tool_name`] /
-    /// [`ChatNode::with_tool_name`]）。存量两条路径都在读边界折进来：
-    /// VDFS 属性 `tool_name`（[`message_of_node`]）与容器节点正文 JSON 的
-    /// `name` 键（serde 忽略未知键，靠属性那条兜住）。
-
-    #[serde(skip_serializing)]
-    pub prompt: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<MessageContent>,
-
-    /// 流式**增量**：本帧新到达的那一段正文，追加到接收端该节点正文尾部。
-    ///
-    /// ## 与 `content` 互斥，语义由字段本身给出
-    ///
-    /// 一帧里两者**绝不同时出现**——同帧携带即协议违例，唯一写入点
-    /// （`plugins/session/transcript.rs::Transcript::apply`）报错丢弃。
-    /// 消费端因此永远不必从帧的形状里推断「该拼接还是该替换」：
-    ///
-    /// | 字段 | 语义 | 用在哪 |
-    /// |---|---|---|
-    /// | `delta` | 追加到正文尾部（O(delta) 窄帧） | 流式热路径：正文 / 推理 / 工具参数逐片 |
-    /// | `content` | **整条替换**该节点正文（幂等） | 一次性节点的完整体、存储回执的权威副本、编辑后的新正文 |
-    ///
-    /// ## 为什么不落存储
-    ///
-    /// 增量是**不完整的片段**，不是消息的形态：它只在出方向的帧上存在，
-    /// 存储里只有 `content`（图内累积的正文）。改名的同一份结构因此承载两件事：
-    /// - 帧方向：`delta` 是「这一段」；
-    /// - 存储方向：`content` 是「全部」。
-    ///
-    /// 「delta 永不落盘」不是发射方的自律，而是持久层的不变量——
-    /// `chat_session::write::ensure_durable_states` 在写入点直接拒绝携带 `delta` 的消息。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delta: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<NodeStatus>,
-
-    /// 失败原因（面向用户的可读短消息）。仅当 `status == Failed` 时存在。
-    /// 用于把"会话异常中断/失败"的终态持久化到历史，使切换会话后仍能看到上次错误。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-
-    /// 呈现标题（[D-070 §决策 2 / 3]，[]）：后端在构造节点时填的**面向用户显示文本**
-    /// （思考="思考过程" / 压缩="上下文压缩" / 工具=工具名 / 轮=智能体名）。
-    /// 前端**照数据显示**，不再按业务类型查表生成——这是"前端不懂业务"的落点之一。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-
-    /// 呈现徽标标识（[]）：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
-    /// 映射到 UI 资产表（class→svg 那种映射，不是 `switch(type)`）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-
-    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]，[]）：后端算好「这个节点现在
-    /// 能重试 / 审批 / 补参 / 回答 / 重跑压缩」中的哪几种，随节点下发。前端只做
-    /// 「列表里有 `retry` 就画重试按钮」的**数据渲染**，不再按业务类型（tool/compression/run）
-    /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actions: Option<Vec<ResumeAction>>,
-
-    /// 本节点的**读数片段**（[D-111](../../plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：已由产者排好版的
-    /// 若干行（标签 + 值），前端**逐行排版**、不认任何业务词——压缩「压到哪儿了 / 什么触发的 /
-    /// 压掉几条」这类交代原先由前端读 `meta` 数字自己拼，口径因此住在两端。
-    ///
-    /// ## 为什么是既有形状而不是一个新结构
-    ///
-    /// [`ReadingSection`] 是只读指标读数的宿主方言（`present/reading`），已在两侧镜像并由
-    /// `protocol-mirror-audit` D 组看守；给同一个概念起第二个名字是换名不是机制化
-    /// （D-070 §决策 3 反对的正是这个）。
-    ///
-    /// ## 为什么不落存储
-    ///
-    /// 它由会话的**交付出口**从节点已有的 `meta` 数字现算（`plugins/session/stats_reading.rs`），
-    /// 存储与事件里的节点永不含这一格——与 `title`/`icon`/`actions` 同一条纪律
-    /// （呈现不是事实），改一次文案不必迁移历史，存量会话重新读到就带行。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stats: Option<ReadingSection>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Value>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<i64>,
-
-    /// 会话内**单调自增序号**：消息先后顺序的权威锚点。
-    ///
-    /// ## 为什么不用 `timestamp` 排序
-    ///
-    /// `timestamp` 是"业务时刻"，不是"顺序"。拿它当排序键会有三个硬伤：
-    /// - **并列**：一轮里的 Turn + Reasoning + Text + 多个 ToolCall 常常在同一毫秒内
-    ///   批量落库，`timestamp` 完全相同，排序只能退化成"看数组当前顺序"，
-    ///   而数组顺序本身又可能被上一次错误排序打乱，形成自我强化的错乱；
-    /// - **逆序**：时钟回拨、多进程/多会话写入会让"晚产生"的消息拿到更小的时间戳；
-    /// - **缺失**：流式补丁路径不写 `timestamp`，需要哨兵值（如 `i64::MAX`）兜底，
-    ///   本质是在用魔法值掩盖语义缺失。
-    ///
-    /// `seq` 由会话存储在**写入时**分配（Lamport 计数器：从已有最大 seq 续上），
-    /// 单调递增且永不并列，因此能无损恢复插入顺序，且跨调用、跨进程重启都不回退。
-    ///
-    /// **字段在本层，分配策略不在**：本结构是**跨栈 schema**（前端逐字段镜像），
-    /// 故 `seq` 必须在这里；而「怎么分配、什么时候补号、整表重写时谁让位」是
-    /// 会话存储的实现策略，住在 session 插件的 `chat_session.rs`
-    /// （`max_seq` / `assign_seq`，与两条写入路径 `append_messages` /
-    /// `replace_messages` 同处一文件）。core 只声明**存在一个顺序锚点**，
-    /// 不规定它怎么被算出来。
-    ///
-    /// **进到这一格的号有四套来源**（权威号 / 快照槽位号 / 在途号 / 重建号，另有一个
-    /// 同名但属于事件层的 WAL `Seq`）——谁是分配者、谁何时作废，归一表在
-    /// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3，本处不复述。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seq: Option<i64>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_id: Option<String>,
-
-    /// ToolCall 节点的 **wire id**（LLM provider 返回的 `tool_call_id`）。
-    ///
-    /// ## 为什么节点 id 不能直接用它
-    ///
-    /// 许多 OpenAI 兼容网关**跨轮复用** `call_0` / `call_xxx` 这类短 id。而消息
-    /// id 在三处被当作**唯一键**：VDFS 地址（`<sid>/message/<mid>`）、前端 store
-    /// （按 id 的 map）、消费循环的在途合并。wire id 直接当节点 id 会让下一轮
-    /// 的同 id 工具调用更新到上一轮的老节点（后端 `Vec` 存储不撞，刷新后"自愈"
-    /// ——正是"后端正常、前端显示混乱"的根源）。
-    ///
-    /// 因此 ToolCall 节点 id 在**诞生时**分配（会话内唯一），provider 的原始 id
-    /// 存放在本字段，仅在构建 LLM 请求包时使用（部分协议要求回传原值，如
-    /// OpenAI Responses 的 `call_id` 链）。历史数据无此字段：请求构建回退节点 id。
-    ///
-    /// ## ：**wire 上不存在，只在后端内存里活着**
-    ///
-    /// `#[serde(skip)]` 让它**不进出** `ChatNode` 的序列化形状——前端从不消费它
-    /// （过去只是 copy-through 到 store），LLM 请求构造侧仍走 Rust 结构体字段读取。
-    /// VDFS 属性投影（`plugins/session/plugin/nodes.rs`）与 WAL 事件载荷
-    /// （`turn_runner.rs::artifact.added`）**独立于本字段的 serde 属性**，仍把
-    /// wire id 写进 `attributes.tool_call_id` / 事件 `tool_call_id` 键——那是后端
-    /// 到后端的存储形状，不是前端 wire。[`message_of_node`] 逆投影照原路读回。
-    #[serde(skip)]
-    pub tool_call_id: Option<String>,
-}
-
-/// 会话恢复动作。
-///
-/// 统一覆盖所有"非普通消息"的用户主动操作（与 `session_chat::Request.message` 互斥）：
-/// - `RetrySubtree`：LLM 失败重试（靶子节点那一支**留在树里**，另开新的一支重走 LLM 请求）
-/// - `Retry`：工具执行失败后重试（用原 args）
-/// - `Approve` / `Reject`：confirm 审批的批准/拒绝
-/// - `Supply`：工具执行失败后补充参数重试（合并 args）
-/// - `Answer`：ask_user 提问的答案回填
-/// - `RetryCompaction`：压缩失败重试（删除 Failed 压缩节点，重新执行一次压缩）
-///
-/// 恢复语义：重新执行 → 生成新的响应子节点。工具失败那一类（`Retry` / `Supply` /
-/// `RetryCompaction`）删的是**那一次失败的产物**（重跑会覆盖同一个稳定锚点，留着
-/// 就是两条互相矛盾的结果）；`RetrySubtree` 不删——见它的文档。
-/// 对于工具调用场景，ToolCall 父节点 id 保持不变（稳定锚点），仅状态更新。
-///
-/// 线格式为 `snake_case`（见 `#[serde(rename_all)]`），与前端
-/// `composables/useChatConnection.ts::ResumePayload.action` 的字面量逐字相等——
-/// 这条跨栈契约由 `resume_action_wire_words_are_snake_case` 钉住。
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum ResumeAction {
-    /// LLM 失败重试：以靶子节点为**同一问题的另一支**重走 LLM 请求。
-    ///
-    /// 「删除整棵子树并重跑」，靶子是**任一骨架节点**（[D-070 §决策 1]）——
-    /// 动词不绑某一格业务：一轮响应与一次工具调用都是骨架，都能当靶子。
-    ///
-    /// 那一支**不删**：重跑成功时新旧两支并存为同一分支组（`turn.branch`），
-    /// 默认读新的一支，旧的随时切回去还在（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。删除式重跑的代价是「用户
-    /// 点错了重试，上一次尝试的全部现场没了」——而那次尝试往往正是他要回头看的东西
-    /// （超时？哪个工具挂了？）。
-    RetrySubtree,
-    /// 工具失败重试：删除 Failed 工具结果子节点，重新执行工具（用原 args）
-    Retry,
-    /// 工具审批通过：删除 user_prompt 子节点，重新执行工具（带 approved=true）
-    Approve,
-    /// 工具审批拒绝：删除 user_prompt 子节点，生成拒绝结果子节点
-    Reject,
-    /// 工具补充参数：删除 Failed 工具结果子节点，合并参数后重新执行工具
-    Supply,
-    /// 提问回答：删除 user_prompt 子节点，生成答案结果子节点
-    Answer,
-    /// 压缩失败重试：删除 Failed 压缩节点，重新执行一次上下文压缩。
-    ///
-    /// `target_id` 指向**压缩节点**（`msg_type = Notice` 且 `is_compression()`、`status = Failed`）。
-    /// 语义上属"删除-重建"，与其余恢复动作同款；但**不改动历史**——压缩失败
-    /// 本身从不丢消息（见 `CompressionFailure` 的说明），重试只是再试一次
-    /// LLM 摘要，成功后由快照接替被压缩的那段。
-    RetryCompaction,
-}
-
-/// 会话恢复请求（与 `session_chat::Request.message` 互斥；存在时走 resume 分支）。
-///
-/// 由 session 编排层随请求透传，最终在 session 插件会话循环
-/// （`session/chat_loop.rs:run_chat_loop`）的 turn 循环前由 `session/resume.rs:process_resume` 处理。
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ResumeRequest {
-    /// 目标消息 ID（Failed Turn 或 ToolCall，稳定标识，覆盖式更新锚点）
-    pub target_id: String,
-    pub action: ResumeAction,
-    /// supply 时的补充参数（与原 args 浅合并）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub args: Option<Value>,
-    /// reject 时的拒绝原因
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// answer（ask_user）时的答案对象
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub answer: Option<Value>,
-}
+pub use symbio_kernel::chat::chat_node::*;
 
 // ==================== 转写地址与节点投影 ====================
 //
@@ -626,137 +133,15 @@ fn legacy_principal(role: NodeRole, tool_name: Option<&str>) -> Principal {
         _ => Principal::from_legacy(crate::symbio_core::PRINCIPAL_MAIN),
     }
 }
+/// 呈现派生的**宿主扩展**：形状谓词住内核，`title` / `icon` / `actions` 的翻译是宿主业务知识，
+/// 故以扩展 trait 留在这里。调用点需 `use` 本 trait（与内建方法同形）。
+pub trait ChatNodePresentationExt {
+    /// 从节点**形状 + 状态 + meta**现算面向前端的呈现数据（幂等，不覆盖已有值）。
+    fn with_derived_presentation(self) -> Self;
+}
 
-impl ChatNode {
-    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（替代已退役的
-    /// 顶层 `name` 字段）。值是 LLM 可见工具名（可能是限定形态 `local/todo_write`，
-    /// 也可能裸名，取决于产地）。
-    pub fn tool_name(&self) -> Option<&str> {
-        self.meta
-            .as_ref()
-            .and_then(|m| m.get("tool_name"))
-            .and_then(Value::as_str)
-    }
-
-    /// 写 `meta.tool_name`（链式构造 helper， 构造侧）。`None` 不写
-    /// （缺席=没有，不往 meta 里塞 null）。
-    pub fn with_tool_name(mut self, name: Option<String>) -> Self {
-        let Some(name) = name else { return self };
-        let meta = self
-            .meta
-            .get_or_insert_with(|| Value::Object(serde_json::Map::new()));
-        if let Some(obj) = meta.as_object_mut() {
-            obj.insert("tool_name".to_string(), Value::String(name));
-        }
-        self
-    }
-
-    /// 归属折叠判据：**唯一读入口**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构") 的落点）。
-    ///
-    /// 优先级是「**主体在先、存量格兜底**」：`principal.kind` 是身份的权威，
-    /// `role` 只在主体缺席时才有话事权（历史数据、读边界折进来的外来形状）。
-    /// 反过来（存量格优先）会把权威字段降成「优先级字段」，代价是每一处**改写**
-    /// 都得写两格、还得记住顺序——`attributed` 之后两格各说一套的半改状态没有任何
-    /// 东西会变红，`visible_to` 按主体判、分派按 `role` 判，同一节点两个身份。
-    ///
-    /// 主体缺席时不再有 kind 兜底以外的来源：两者皆无 ⇒ `None`（未标身份的写方，
-    /// 缺省语义留在调用侧，由各视图自行折叠成「助手」）。
-    pub fn node_role(&self) -> Option<NodeRole> {
-        use crate::symbio_core::principal::PrincipalKind;
-        if let Some(kind) = self.principal.as_ref().map(|p| p.kind) {
-            return Some(match kind {
-                PrincipalKind::Person => NodeRole::User,
-                PrincipalKind::Agent => NodeRole::Assistant,
-                PrincipalKind::Tool => NodeRole::Tool,
-                PrincipalKind::System => NodeRole::System,
-            });
-        }
-        self.role.clone()
-    }
-
-    /// 存量只读格的读法（仅 `attributed` 与 attrs 逆投影这类**读边界**用；
-    /// 一般分派一律走 [`Self::node_role`]）。
-    ///
-    /// 与 [`Self::node_role`] 的区别是它**不看主体**：主体在场时这一格可能是空
-    /// （构造期给它的是「还没标身份」，折叠读的却是主体）。所以它只回答
-    /// 「这一格上写了什么」，不回答「这个节点是谁」。
-    pub fn legacy_role(&self) -> Option<NodeRole> {
-        self.role.clone()
-    }
-
-    /// 读 `meta.style_tag`（wire 层的呈现变体词，[D-070 §决策 3]）。
-    pub fn style_tag(&self) -> Option<&str> {
-        self.meta
-            .as_ref()
-            .and_then(|m| m.get("style_tag"))
-            .and_then(Value::as_str)
-    }
-
-    /// 写入 `meta.style_tag`（链式构造 helper， 构造侧）。
-    ///
-    /// `meta` 已有对象则并入该对象；`meta` 是非对象 JSON（不该发生）时原样保留、不注入。
-    pub fn with_style_tag(mut self, tag: &'static str) -> Self {
-        let meta = self
-            .meta
-            .get_or_insert_with(|| Value::Object(serde_json::Map::new()));
-        if let Some(obj) = meta.as_object_mut() {
-            obj.insert("style_tag".to_string(), Value::String(tag.to_string()));
-        }
-        self
-    }
-
-    /// 本节点是不是「一整轮助手响应的骨架」（`Skeleton` + tag `run`）。
-    pub fn is_run(&self) -> bool {
-        self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_RUN)
-    }
-
-    /// 本节点是不是「一次工具调用骨架」（`Skeleton` + tag `tool`）。
-    pub fn is_tool_call(&self) -> bool {
-        self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_TOOL)
-    }
-
-    /// 本节点是不是「推理正文」（`Notice` + tag `reasoning`）。
-    ///
-    /// []：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[DE-019 §3]）——
-    /// 与 compression 同格，靠 `style_tag` 在后端区分。
-    pub fn is_reasoning(&self) -> bool {
-        self.msg_type == Some(NodeKind::Notice)
-            && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
-    }
-
-    /// 本节点是不是「普通正文」（`Body`）。
-    ///
-    /// []：reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
-    pub fn is_text(&self) -> bool {
-        self.msg_type == Some(NodeKind::Body)
-    }
-
-    /// 本节点是不是「压缩记录」（`Notice` 且**不是** reasoning）。
-    ///
-    /// []：`Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
-    /// 会把思考也算成压缩——压缩判据必须显式排除 reasoning。存量无 tag 的裸 `Notice`
-    /// 仍按压缩兜底（历史上 compression 是唯一 Notice 变体）。
-    pub fn is_compression(&self) -> bool {
-        self.msg_type == Some(NodeKind::Notice)
-            && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
-    }
-
-    /// 本节点是不是「等待用户回应的交互」（`Interaction`）。
-    pub fn is_interaction(&self) -> bool {
-        self.msg_type == Some(NodeKind::Interaction)
-    }
-
-    /// **呈现派生**（[D-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
-    /// 前端的呈现数据——`title` / `icon`（头部）与 `actions`（可发起的恢复动作）——**只在
-    /// 前后端交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
-    ///
-    /// 判据即本模块既有谓词 + 节点自身字段（`status` / `meta.recoverable` /
-    /// `meta.failure_kind` / `meta.prompt.kind`）：`actions` 的翻译「哪种节点该给哪个恢复
-    /// 动词」是**业务知识**，正确住在后端；前端拿到的是**数据**，不再按业务类型反推。
-    /// 事件/存储里的节点永不含这些呈现字段。已有值不覆盖（幂等，重复投递安全）。
-    ///
-    /// `run` 骨架标题是智能体名（上下文相关）留 `None` 交呈现层。
-    pub fn with_derived_presentation(mut self) -> Self {
+impl ChatNodePresentationExt for ChatNode {
+    fn with_derived_presentation(mut self) -> Self {
         if self.is_reasoning() {
             self.title.get_or_insert_with(|| "思考过程".to_string());
             self.icon.get_or_insert_with(|| "💭".to_string());
@@ -770,84 +155,78 @@ impl ChatNode {
             }
         }
         // 恢复动作：只在缺失时派生（前端交互面是唯一填充点，事实里永不含 actions）。
-        // 逐条镜像前端 legacy 判据（`messageTypes.ts::canRetry*` / `messageRetryTargetOf`），
-        // 迁移前后行为逐字一致。
         if self.actions.is_none() {
-            self.actions = Self::derive_actions(&self);
+            self.actions = derive_actions(&self);
         }
         self
     }
+}
 
-    /// 从节点自身（形状 + 状态 + meta）派生可用恢复动作；无可给动作 → `None`。
-    fn derive_actions(node: &ChatNode) -> Option<Vec<ResumeAction>> {
-        use NodeStatus::*;
-        let failed = node.status == Some(Failed);
-        let aborted = node.status == Some(Aborted);
-        let waiting = node.status == Some(WaitingUserAction);
-        let acts: Vec<ResumeAction> = if node.is_interaction() {
-            // 交互卡：确认 → 通过/拒绝；提问 → 回答。仅等待回应时给出。
-            match (waiting, node.prompt_kind().as_deref()) {
-                (true, Some("confirm")) => vec![ResumeAction::Approve, ResumeAction::Reject],
-                (true, Some("question")) => vec![ResumeAction::Answer],
-                _ => vec![],
+/// 从节点自身（形状 + 状态 + meta）派生可用恢复动作；无可给动作 → `None`。
+fn derive_actions(node: &ChatNode) -> Option<Vec<ResumeAction>> {
+    use NodeStatus::*;
+    let failed = node.status == Some(Failed);
+    let aborted = node.status == Some(Aborted);
+    let waiting = node.status == Some(WaitingUserAction);
+    let acts: Vec<ResumeAction> = if node.is_interaction() {
+        match (waiting, prompt_kind(node).as_deref()) {
+            (true, Some("confirm")) => vec![ResumeAction::Approve, ResumeAction::Reject],
+            (true, Some("question")) => vec![ResumeAction::Answer],
+            _ => vec![],
+        }
+    } else if node.is_tool_call() {
+        let mut v = Vec::new();
+        if failed && meta_bool(node, "recoverable") {
+            v.push(ResumeAction::Retry);
+            if meta_str(node, "failure_kind").as_deref() == Some("error") {
+                v.push(ResumeAction::Supply);
             }
-        } else if node.is_tool_call() {
-            // 工具失败：可恢复才给重试；失败类别 error（参数残破）再补「补充参数」入口。
-            let mut v = Vec::new();
-            if failed && node.meta_bool("recoverable") {
-                v.push(ResumeAction::Retry);
-                if node.meta_str("failure_kind").as_deref() == Some("error") {
-                    v.push(ResumeAction::Supply);
-                }
-            }
-            v
-        } else if node.is_compression() {
-            // 压缩失败：只给就地重跑（不改历史）。
-            if failed {
-                vec![ResumeAction::RetryCompaction]
-            } else {
-                vec![]
-            }
-        } else if node.is_run() {
-            // 整轮失败/中止：重跑子树（组级错误条挂在轮骨架自身状态上）。
-            if failed || aborted {
-                vec![ResumeAction::RetrySubtree]
-            } else {
-                vec![]
-            }
+        }
+        v
+    } else if node.is_compression() {
+        if failed {
+            vec![ResumeAction::RetryCompaction]
         } else {
             vec![]
-        };
-        (!acts.is_empty()).then_some(acts)
-    }
+        }
+    } else if node.is_run() {
+        if failed || aborted {
+            vec![ResumeAction::RetrySubtree]
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+    (!acts.is_empty()).then_some(acts)
+}
 
-    /// 读 `meta` 顶层字符串字段（缺失 / 非串 → `None`）。
-    fn meta_str(&self, key: &str) -> Option<String> {
-        self.meta
-            .as_ref()
-            .and_then(|m| m.get(key))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    }
+/// 读 `meta` 顶层字符串字段（缺失 / 非串 → `None`）。
+fn meta_str(node: &ChatNode, key: &str) -> Option<String> {
+    node.meta
+        .as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
 
-    /// 读 `meta` 顶层布尔字段（缺失 / 非 bool → `false`）。
-    fn meta_bool(&self, key: &str) -> bool {
-        self.meta
-            .as_ref()
-            .and_then(|m| m.get(key))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    }
+/// 读 `meta` 顶层布尔字段（缺失 / 非 bool → `false`）。
+fn meta_bool(node: &ChatNode, key: &str) -> bool {
+    node.meta
+        .as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
 
-    /// 读 `meta.prompt.kind`（交互子形态：`confirm` / `question`）。
-    fn prompt_kind(&self) -> Option<String> {
-        self.meta
-            .as_ref()
-            .and_then(|m| m.get("prompt"))
-            .and_then(|p| p.get("kind"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    }
+/// 读 `meta.prompt.kind`（交互子形态：`confirm` / `question`）。
+fn prompt_kind(node: &ChatNode) -> Option<String> {
+    node.meta
+        .as_ref()
+        .and_then(|m| m.get("prompt"))
+        .and_then(|p| p.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 #[cfg(test)]

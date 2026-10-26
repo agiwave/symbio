@@ -5,9 +5,11 @@
 //! 经审批闸那一层不被行Vocabulary截断）。
 
 use super::*;
-use crate::symbio_core::{
-    CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest, TurnOutput,
-};
+use crate::capability::{CapabilityMeta, CapabilityRiskLevel};
+use crate::chat::ChatNode;
+use crate::exec::ExecEnv;
+use crate::llm::TurnOutput;
+use crate::plugin::{PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -106,7 +108,7 @@ impl ModelProvider for StubProvider {
     async fn execute_turn(
         &self,
         _system_prompt: &str,
-        _messages: &[crate::symbio_core::chat_node::ChatNode],
+        _messages: &[ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,

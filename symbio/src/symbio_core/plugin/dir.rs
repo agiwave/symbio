@@ -88,8 +88,8 @@ use crate::symbio_core::keys::SymbioKey;
 use crate::symbio_core::vdfs_notify_change;
 use crate::symbio_core::DetailDefinition;
 use crate::symbio_core::{
-    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
+    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
+    VdfsWriteResponse, VDFS_EXT_FORM,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -820,61 +820,81 @@ pub trait PluginConfigMount: Send + Sync + 'static {
 
 /// 见 [`PluginConfigMount`]：四臂骨架的**唯一**实现。
 ///
-/// 这是本仓唯一一处把「配置挂载点」翻译成 VDFS 操作的地方——四个插件共享它，
+/// 这是本仓唯一一处把「配置挂载点」翻译成 VDFS 操作的地方——五个插件共享它，
 /// 因此它们的 `List` / `Stat` / `Read` / `Write` 行为**在构造上不可能漂移**。
-#[async_trait]
-impl<T: PluginConfigMount + ?Sized> VdfsProvider for T {
-    async fn dispatch(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        req: VdfsRequest,
-    ) -> VdfsResult<VdfsResponse> {
-        let file = self.config_file();
-        let not_found = || VdfsError::not_found(format!("未知路径：{path}"));
-        match req {
-            // 挂载根下恒为「一个配置文件」：空路径列它，非空路径无子项
-            VdfsRequest::List { .. } => {
-                if path.is_empty() {
-                    return Ok(VdfsResponse::list(vec![file.node()]));
-                }
-                Err(VdfsError::not_found(format!(
-                    "{}是配置挂载点，没有子项：{path}",
-                    Self::TITLE
-                )))
+///
+/// **为什么不再是 blanket impl**：`VdfsProvider` 已住 `symbio_kernel`（D-188 C2b），
+/// 在宿主 crate 里为 `T: PluginConfigMount` 实现外来 trait 会撞 orphan 规则。
+/// 故改为「一个自由函数 + 一个展开宏」：函数仍是唯一实现，各插件用
+/// [`impl_config_mount_vdfs!`] 声明自己走这条骨架。
+pub async fn config_mount_dispatch<T: PluginConfigMount + ?Sized>(
+    this: &T,
+    path: &str,
+    req: VdfsRequest,
+) -> VdfsResult<VdfsResponse> {
+    let file = this.config_file();
+    let not_found = || VdfsError::not_found(format!("未知路径：{path}"));
+    match req {
+        // 挂载根下恒为「一个配置文件」：空路径列它，非空路径无子项
+        VdfsRequest::List { .. } => {
+            if path.is_empty() {
+                return Ok(VdfsResponse::list(vec![file.node()]));
             }
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            VdfsRequest::Stat => {
-                if path.is_empty() {
-                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
-                        "",
-                        Self::TITLE,
-                        VdfsAccess::LIST,
-                    )));
-                }
-                if path == PLUGIN_FILE {
-                    return Ok(VdfsResponse::Stat(file.node()));
-                }
-                Err(not_found())
-            }
-            VdfsRequest::Read => {
-                if path == PLUGIN_FILE {
-                    return Ok(VdfsResponse::Read(file.read(self.config_slot()).await?));
-                }
-                Err(not_found())
-            }
-            VdfsRequest::Write { content } => {
-                if path == PLUGIN_FILE {
-                    let resp = file.apply(self.config_slot(), &content).await?;
-                    // 副作用在 apply 之后：新配置已进槽 / 已落盘 / 已广播
-                    self.after_write().await;
-                    return Ok(VdfsResponse::Write(resp));
-                }
-                Err(not_found())
-            }
-            _ => Err(not_found()),
+            Err(VdfsError::not_found(format!(
+                "{}是配置挂载点，没有子项：{path}",
+                T::TITLE
+            )))
         }
+        // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+        VdfsRequest::Stat => {
+            if path.is_empty() {
+                return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                    "",
+                    T::TITLE,
+                    VdfsAccess::LIST,
+                )));
+            }
+            if path == PLUGIN_FILE {
+                return Ok(VdfsResponse::Stat(file.node()));
+            }
+            Err(not_found())
+        }
+        VdfsRequest::Read => {
+            if path == PLUGIN_FILE {
+                return Ok(VdfsResponse::Read(file.read(this.config_slot()).await?));
+            }
+            Err(not_found())
+        }
+        VdfsRequest::Write { content } => {
+            if path == PLUGIN_FILE {
+                let resp = file.apply(this.config_slot(), &content).await?;
+                // 副作用在 apply 之后：新配置已进槽 / 已落盘 / 已广播
+                this.after_write().await;
+                return Ok(VdfsResponse::Write(resp));
+            }
+            Err(not_found())
+        }
+        _ => Err(not_found()),
     }
+}
+
+/// 把 [`config_mount_dispatch`] 接到具体插件类型上（`VdfsProvider` 已住内核，
+/// 宿主侧不能再写 blanket impl——orphan 规则，见上）。
+#[macro_export]
+macro_rules! impl_config_mount_vdfs {
+    ($ty:ty) => {
+        #[::async_trait::async_trait]
+        impl $crate::symbio_core::VdfsProvider for $ty {
+            async fn dispatch(
+                &self,
+                _ctx: &$crate::symbio_core::VdfsContext,
+                path: &str,
+                req: $crate::symbio_core::VdfsRequest,
+            ) -> $crate::symbio_core::VdfsResult<$crate::symbio_core::VdfsResponse> {
+                $crate::symbio_core::plugin::config_mount_dispatch(self, path, req).await
+            }
+        }
+    };
 }
 
 /// 值 → 内容（pretty JSON，`mime = application/json`）

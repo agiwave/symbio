@@ -12,8 +12,8 @@
 use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
 use crate::symbio_core::{
-    ActorSpec, DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas, Store,
-    Verb, EVENT_USER_MESSAGE,
+    DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas, Store, Verb,
+    EVENT_USER_MESSAGE,
 };
 
 /// 测试侧先落用户格：生产里由 `chat_loop::drive` 在任何判决之前落，
@@ -78,7 +78,7 @@ impl TurnRunner {
                 // 单请求入口（无工具轮）没有轮内循环 ⇒ 没有注入时机。
                 inject: None,
                 // 平凡值身份（S08 §4：单主体 = 今天的状态）。
-                actor: ActorSpec::trivial("session/main"),
+                actor: crate::symbio_core::trivial_actor_spec("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
                 prefix: None,
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
@@ -331,7 +331,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
@@ -604,7 +604,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -655,7 +655,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -717,7 +717,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
@@ -808,7 +808,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
@@ -848,7 +848,7 @@ mod turn_runner_tests {
             tier: LatencyTier::Deep,
             window_turns: None,
             inject: None,
-            actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+            actor: crate::symbio_core::trivial_actor_spec("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
@@ -1141,7 +1141,6 @@ mod turn_runner_tests {
     #[tokio::test]
     async fn closure_is_withheld_when_the_principal_lacks_the_grant() {
         use crate::symbio_core::unresolved_turns;
-        use crate::symbio_core::ActorSpec;
         use crate::symbio_core::PRINCIPAL_AUTONOMOUS;
 
         // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
@@ -1161,7 +1160,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
+                    actor: crate::symbio_core::trivial_actor_spec(PRINCIPAL_AUTONOMOUS),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -1211,7 +1210,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -2159,7 +2158,7 @@ mod tool_round_tests {
             tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
-            actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+            actor: crate::symbio_core::trivial_actor_spec("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
@@ -3073,7 +3072,7 @@ mod tool_round_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
+                    actor: crate::symbio_core::trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -3938,8 +3937,8 @@ mod reflex_turn_tests {
     use super::super::super::stage_events::{land, StageFact};
     use super::super::{TurnInput, TurnRunner};
     use crate::symbio_core::{
-        check_all, unresolved_turns, ActorSpec, DeltaSink, Entity, EventStore, LatencyTier, Seq,
-        Store, StubLlmAdapter, TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
+        check_all, unresolved_turns, DeltaSink, Entity, EventStore, LatencyTier, Seq, Store,
+        StubLlmAdapter, TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
         EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
     };
 
@@ -3961,7 +3960,7 @@ mod reflex_turn_tests {
     async fn reflex_answer_closes_with_reflex_payload_and_zero_model_round() {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
-        let actor = ActorSpec::trivial("session/main");
+        let actor = crate::symbio_core::trivial_actor_spec("session/main");
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
         let user_seq = super::seed_user(&store, 0, "把周报整理成摘要");
 
@@ -4089,16 +4088,16 @@ mod reflex_turn_tests {
 ///
 mod scope_ceiling_tests {
     use super::super::{closure_gate, ClosureKind};
-    use crate::symbio_core::{ActorSpec, Scope};
+    use crate::symbio_core::Scope;
 
     /// 反向用例：父主体**不持**该能力 ⇒ 收束被拒；把 `scope` 改回 `Root`（接线前的形状）
     /// ⇒ 同一份能力集必须重新放行。改了不变，说明作用域上限没在算。
     #[test]
     fn a_child_cannot_close_what_its_parent_cannot_close() {
         // `user` 在授权表里没有行（能力按「智能体的权威动作种类」划分）⇒ 什么都不持。
-        let mut spec = ActorSpec::trivial("session/main");
+        let mut spec = crate::symbio_core::trivial_actor_spec("session/main");
         assert!(
-            spec.can_land_speech(),
+            crate::symbio_core::actor_can_land_speech(&spec),
             "前提：主智能体自己那一行持 `reply.first`"
         );
 
@@ -4122,11 +4121,11 @@ mod scope_ceiling_tests {
     /// 上限那道闸把它收回来：发言收束被拒，产物收束照常（父主体也持）。
     #[test]
     fn a_narrow_parent_cannot_spawn_a_wider_child() {
-        let mut spec = ActorSpec::trivial("session/main");
+        let mut spec = crate::symbio_core::trivial_actor_spec("session/main");
         spec.scope = Scope::Child(crate::symbio_core::PRINCIPAL_PEER.to_string());
 
         assert!(
-            spec.can_land_speech(),
+            crate::symbio_core::actor_can_land_speech(&spec),
             "前提：子主体自己那一行放行（这正是「放大」的来源）"
         );
         assert!(
@@ -4142,7 +4141,7 @@ mod scope_ceiling_tests {
     /// 正向对照：父主体持同一能力 ⇒ 与 `Root` 逐字同判（平凡值下两臂恒放行）。
     #[test]
     fn a_child_of_an_equally_strong_parent_is_unaffected() {
-        let mut spec = ActorSpec::trivial("session/main");
+        let mut spec = crate::symbio_core::trivial_actor_spec("session/main");
         spec.scope = Scope::Child("session/main".to_string());
         assert!(closure_gate(&spec, ClosureKind::Speech).is_ok());
         assert!(closure_gate(&spec, ClosureKind::Artifact).is_ok());
@@ -4164,9 +4163,9 @@ mod denial_fact_tests {
     /// 造一个「主体自己那一行放行、父主体不放行」的规格——上限那道闸是生产里
     /// 唯一可达的拒绝路径（主体自己的行由部署事实决定，测试里不必伪造矩阵）。
     fn child_of_a_principal_without_reply() -> ActorSpec {
-        let mut spec = ActorSpec::trivial("session/main");
+        let mut spec = crate::symbio_core::trivial_actor_spec("session/main");
         assert!(
-            spec.can_land_speech(),
+            crate::symbio_core::actor_can_land_speech(&spec),
             "前提：主智能体自己那一行持 reply——拒绝必须来自上限那道闸"
         );
         spec.scope = Scope::Child("user".to_string());
@@ -4348,8 +4347,8 @@ mod denial_fact_tests {
     /// 这里用**生产表派生的能力集**对拍：拼错一个字符，两条断言当场红。
     #[test]
     fn denial_names_the_capability_the_gate_judges() {
-        let main = ActorSpec::trivial("session/main");
-        let peer = ActorSpec::trivial(crate::symbio_core::PRINCIPAL_PEER);
+        let main = crate::symbio_core::trivial_actor_spec("session/main");
+        let peer = crate::symbio_core::trivial_actor_spec(crate::symbio_core::PRINCIPAL_PEER);
 
         let speech_cap = ClosureKind::Speech.capability_name();
         let artifact_cap = ClosureKind::Artifact.capability_name();
@@ -4494,8 +4493,8 @@ mod actor_ledger_tests {
     use super::super::super::turn_exec::{ActorError, StepFuture, TurnStep};
     use super::super::{TurnInput, TurnRunner};
     use crate::symbio_core::{
-        check_all, ActorSpec, Entity, Event, EventStore, LatencyTier, Seq, SilentDeltas, Store,
-        TokenIssuer, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED,
+        check_all, Entity, Event, EventStore, LatencyTier, Seq, SilentDeltas, Store, TokenIssuer,
+        Verb, EVENT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED,
     };
 
     /// 写**零格**的手法：只记一次模型往返（步数口径归执行体），不落任何事实。
@@ -4552,7 +4551,7 @@ mod actor_ledger_tests {
             tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
-            actor: ActorSpec::trivial("session/main"),
+            actor: crate::symbio_core::trivial_actor_spec("session/main"),
             prefix: None,
             final_reply: None,
             final_cost_ms: 0,

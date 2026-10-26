@@ -44,8 +44,8 @@ pub(crate) fn request_source_principal(
 /// | 字段 | 取法 |
 /// |---|---|
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
-/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
-/// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
+/// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
+/// | `pattern` | [`pattern_for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 档位（与派发格的 `tier` 同一个事实，调用方传入）。 批①起它有**真读方**：`turn_runner` 以**数值**写入 `turn.dispatch` 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退历史 `user.message` 的 `tier` 映射） |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[]） |
 ///
@@ -55,7 +55,7 @@ pub(crate) fn request_actor_spec(
     tier: crate::symbio_core::LatencyTier,
     scope: crate::symbio_core::Scope,
 ) -> crate::symbio_core::ActorSpec {
-    use crate::symbio_core::{ActorSpec, PluginInvokeRequestExt};
+    use crate::symbio_core::{pattern_for_principal, ActorSpec, PluginInvokeRequestExt};
     let principal = request_principal(ctx);
     // 绑定即登记（[D-100]）：登记的主 owner 是**会话创建点**
     // （`session::commands::session_upsert` 的 create 分支，[]）；这里只在
@@ -75,9 +75,9 @@ pub(crate) fn request_actor_spec(
     let matrix = crate::symbio_core::production_matrix();
     ActorSpec {
         principal: principal.clone(),
-        // 模式判据住在定义域内（[`crate::symbio_core::Pattern::for_principal`]）——
+        // 模式判据住在定义域内（[`crate::symbio_core::pattern_for_principal`]）——
         // 与授权表同源、与主体类型名一起不散出 core 的 actors 域（NDC-001）。
-        pattern: crate::symbio_core::Pattern::for_principal(&principal),
+        pattern: pattern_for_principal(&principal),
         capabilities: matrix.grant_names_of(&principal),
         budget_ms: tier.budget_ms(),
         scope,
