@@ -34,7 +34,8 @@
 //! ## 不在本域的东西
 //!
 //! 本域**只收上下文键**。跨进程 / 跨文件的字面量按「它描述什么」归各自的域——
-//! 插件 id 归 `plugin::ids`，路由地址归 `plugin::route`，遍历端点归 `plugin::traverse`，
+//! 插件 id 归装配方（`symbio/src/assembly.rs`），路由地址归 `plugin::route`，
+//! 遍历端点归 `plugin::traverse`，
 //! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见
 //! `symbio_core/README.md` §1.2。
 

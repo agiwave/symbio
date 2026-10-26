@@ -360,7 +360,7 @@ function discoverPlugins() {
 const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（`plugin/ids.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
+// 常量表：先收全仓（装配方 `assembly.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
@@ -774,8 +774,8 @@ for (const abs of codeFiles) {
 // 或一个新第三方 crate——这些同样会把 loop 钉回仓内实现面。
 //
 // 判据分两半：
-//   ① `crate::<根>` 只许 `symbio_core` 与 crate 根的日志/工厂宏（它们是跨插件共用的
-//      机制词汇，不是某个插件的私有项）；
+//   ① `crate::<根>` 只许 `symbio_core`、装配方的身份表（`assembly`，纯部署名词）与
+//      crate 根的日志/工厂宏（它们是跨插件共用的机制词汇，不是某个插件的私有项）；
 //   ② `use <外部根>::` 只许通用库。清单是**闭集**：新增一个根必须回到 D-083 §4
 //      回答「它代表哪条事实，或哪个方向的世界端口」——答不出即族外。
 //
@@ -786,6 +786,9 @@ for (const abs of codeFiles) {
 const LOOP_DIR = path.join(PLUGINS_DIR, 'loop')
 const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   'symbio_core',
+  // 装配方的部署身份表：插件叫什么、标准树装哪些、哪些不得停用。它没有任何插件实现，
+  // 只是名词；loop 用它自报工厂 id 与拼会话地址，不构成对兄弟插件实现的依赖。
+  'assembly',
   'plugin_debug',
   'plugin_error',
   'plugin_info',

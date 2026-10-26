@@ -3,7 +3,6 @@
 mod dir;
 mod error;
 mod hook;
-mod ids;
 mod response;
 mod route;
 mod transport;
@@ -24,13 +23,6 @@ pub(crate) use hook::HOOK_UNAVAILABLE_MARKER;
 pub use response::{SimpleResponse, SuccessResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API
 pub(crate) use error::{lock_read, lock_write};
-pub use ids::{
-    PLUGIN_ID_AGENT, PLUGIN_ID_CLASSIFY, PLUGIN_ID_COMPOSE, PLUGIN_ID_COMPOSITE,
-    PLUGIN_ID_EVENT_BUS, PLUGIN_ID_GATEWAY, PLUGIN_ID_HEARTBEAT, PLUGIN_ID_HOME, PLUGIN_ID_HOOK,
-    PLUGIN_ID_LOCAL, PLUGIN_ID_LOOP, PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MEMORY,
-    PLUGIN_ID_MODEL, PLUGIN_ID_SESSION, PLUGIN_ID_SETTING, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM,
-    PLUGIN_ID_VDFS, PLUGIN_ID_WEB,
-};
 pub use route::{
     ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE,
     ROUTE_HOOK_FIRE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,

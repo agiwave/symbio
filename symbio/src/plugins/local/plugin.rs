@@ -8,11 +8,12 @@ use super::{
 };
 // 审批闸门的判定住在能力收集器（`DefaultToolVisitor` 那条收口路径的唯一真源）；
 // 本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
+use crate::assembly::PLUGIN_ID_LOCAL;
 use crate::providers::approval_gate;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PLUGIN_ID_LOCAL,
+    PluginPayload,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use async_trait::async_trait;

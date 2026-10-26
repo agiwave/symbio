@@ -53,9 +53,9 @@ function audit(files, { strict = false } = {}) {
   }
 }
 
-/** `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
+/** 装配方与 `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
-  'symbio/src/symbio_core/plugin/ids.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
+  'symbio/src/assembly.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
   'symbio/src/symbio_core/plugin/traverse.rs':
     `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n` +
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
@@ -64,7 +64,8 @@ const CORE = {
 }
 
 /** 一个干净的最小插件：两条静态路由臂 + 只认 `available_tools` 的 traverse */
-const PLUGIN = `use crate::symbio_core::{PluginError, PluginMeta, PATH, PLUGIN_ID_SESSION, TRAVERSE_AVAILABLE_TOOLS};
+const PLUGIN = `use crate::assembly::PLUGIN_ID_SESSION;
+use crate::symbio_core::{PluginError, PluginMeta, PATH, TRAVERSE_AVAILABLE_TOOLS};
 
 pub struct SessionPlugin;
 
@@ -143,9 +144,10 @@ test('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`
 // E-002 的**臂侧**：注册处写错前缀。真实案例 `work/set_workspace`——两条臂长在 home 的
 // `match` 里，`work` 既不是插件也没有目录，只扫引用的那半永远看不见它。
 const HOME_ARMS = (arms) => ({
-  'symbio/src/symbio_core/plugin/ids.rs':
-    `${CORE['symbio/src/symbio_core/plugin/ids.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
-  'symbio/src/plugins/home/plugin.rs': `use crate::symbio_core::{PluginError, PluginMeta, PATH, PLUGIN_ID_HOME};
+  'symbio/src/assembly.rs':
+    `${CORE['symbio/src/assembly.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
+  'symbio/src/plugins/home/plugin.rs': `use crate::assembly::PLUGIN_ID_HOME;
+use crate::symbio_core::{PluginError, PluginMeta, PATH};
 
 pub struct HomePlugin;
 
@@ -171,7 +173,7 @@ test('E-002 臂侧命中：home 的臂前缀不是 `home`（幽灵命名空间 `
     ...HOME_ARMS(`            "work/set_workspace" => Ok(PluginPayload::new(&1)),`),
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-002 .*plugins\/home\/plugin\.rs:13/)
+  assert.match(r.stdout, /E-002 .*plugins\/home\/plugin\.rs:\d+/)
   assert.match(r.stdout, /没有任何调用方能到达/)
 })
 
@@ -192,7 +194,7 @@ test('E-002 臂侧命中：普通插件把臂写成绝对形（`session/update` 
     ),
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-002 .*plugins\/session\/plugin\.rs:14.*绝对形/)
+  assert.match(r.stdout, /E-002 .*plugins\/session\/plugin\.rs:\d+.*绝对形/)
 })
 
 test('E-002 臂侧可豁免：留理由的 `plugin-entry-allow`', () => {

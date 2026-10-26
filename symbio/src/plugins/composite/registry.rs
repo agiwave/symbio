@@ -43,11 +43,11 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use crate::assembly::ASSEMBLY_UNDISABLABLE_PLUGINS;
+use crate::assembly::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 use crate::symbio_core::{
     creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
     PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
-    PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME,
-    PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
+    PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
 use serde_json::Value;
 
@@ -60,7 +60,7 @@ use serde_json::Value;
 ///   子插件，系统里就会出现第二个根。
 ///
 /// 判据：只被本模块消费（`installable` 排除、`install` 拒绝），故按 D-023 的
-/// 依赖方判据从 `symbio_core::plugin::ids` 下沉到**执行它的地方**——规则的 owner
+/// 依赖方判据从装配方的 id 表下沉到**执行它的地方**——规则的 owner
 /// 与实现同处，不再隔着两层。
 const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_ID_HOME, PLUGIN_ID_COMPOSITE];
 use indexmap::IndexMap;

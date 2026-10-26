@@ -22,10 +22,11 @@
 
 use super::homedir::HomedirRegistry;
 use super::schemas::{home_get_homedir, home_get_workspace, home_reload, home_set_workspace};
+use crate::assembly::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 use crate::symbio_core::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
-    PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME, REQUIRED_PLUGINS,
+    REQUIRED_PLUGINS,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::Value;

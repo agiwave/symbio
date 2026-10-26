@@ -72,11 +72,12 @@
 
 use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
+use crate::assembly::PLUGIN_ID_MANAGER;
 use crate::symbio_core::{descend_addr, vdfs_host_ctx};
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
     Plugin, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, Registry,
-    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
+    CONFIGURABLE_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,

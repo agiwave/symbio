@@ -43,10 +43,10 @@
 //!
 //! 文本由 `session` 落库，转写只有一个写入者（D-020）。本插件只返回字符串。
 
+use crate::assembly::PLUGIN_ID_COMPOSE;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
-    PLUGIN_ID_COMPOSE,
 };
 use crate::symbio_core::{ComposeRequest, Verdict, WordingReply};
 use crate::symbio_core::{DetailDefinition, DetailField};

@@ -45,6 +45,7 @@
 //! （子智能体委托）始终注册**。
 
 use crate::assembly::ASSEMBLY_SUB_AGENT_PLUGINS;
+use crate::assembly::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::AgentScope;
@@ -53,8 +54,8 @@ use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
-    CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use crate::symbio_core::{DetailField, DetailOption};
 use async_trait::async_trait;

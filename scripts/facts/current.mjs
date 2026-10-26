@@ -50,10 +50,9 @@ const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
 // 9f49d454 只有用法没有定义，6 处字面量静默上盘——执行方是 facts.test.mjs）。
 // fromDir = 本文件的产物目录（`docs/ref`）。
 const refLink = createRefLink(ROOT, "docs/ref");
-// 插件工厂 id 的 owner 是 `plugin` 域（`symbio_core/plugin/ids.rs`）——它们描述的是
-// 「哪个插件」，不是「哪个键」，故不随 `keys` 域走（见 `symbio_core/README.md` §1.2
-// 的「放置也是同一条规则的一部分」）。
-const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "ids.rs");
+// 插件工厂 id 的 owner 是装配方（`symbio/src/assembly.rs`）——它们描述的是
+// 「哪个插件」，不是「哪个键」，也不属于内核机制（见 `assembly.rs` 模块文档）。
+const IDS_FILE = path.join(ROOT, "symbio", "src", "assembly.rs");
 /**
  * 输出位置：**`docs/004-ref/` 下的一份编号参考文档**。
  *
@@ -81,7 +80,7 @@ function parseConsts(txt, map) {
   return map;
 }
 
-/** ids.rs：`pub const PLUGIN_ID_LOCAL: &str = "local";` → Map 常量名 → 值 */
+/** 装配方的 id 表：`pub const PLUGIN_ID_LOCAL: &str = "local";` → Map 常量名 → 值 */
 function parseIds(txt) {
   const m = new Map();
   for (const mm of txt.matchAll(/pub const (PLUGIN_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {

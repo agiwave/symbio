@@ -11,11 +11,12 @@
 use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
+use crate::assembly::PLUGIN_ID_MODEL;
 use crate::providers::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::{
     capability_report_error, creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, PluginSimpleRequest, PLUGIN_ID_MODEL,
+    PluginMeta, PluginPayload, PluginSimpleRequest,
 };
 use crate::symbio_core::{DetailField, DetailOption};
 use crate::{plugin_error, plugin_info, plugin_warn};

@@ -9,11 +9,11 @@
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::providers::MemoryFile;
 use crate::symbio_core::absolute_addr;
 use crate::symbio_core::{
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PLUGIN_ID_SESSION,
-    VDFS_PARENT_ADDR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
 };
 use std::sync::Arc;
 use tempfile::TempDir;

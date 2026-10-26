@@ -3,13 +3,13 @@
 //! ## 为什么不在 `symbio_core`
 //!
 //! 这里的常量**不是**上下文键（不走 `SymbioKey`、不进任何 `ctx`），**也不是**
-//! 插件 id 或路由地址——它们描述的是**装配方的策略**：一个 composite 子树默认挂
-//! 哪些插件、哪些插件属于「界面底座」因此不许停用。
+//! 路由地址——它们描述的是**装配方的事实**：一棵子树默认挂哪些插件、哪些插件属于
+//! 「界面底座」因此不许停用、每个插件的出厂 id 叫什么。
 //!
 //! 按依赖方判据（[D-023](../../docs/003-design/001-核心架构.md "DE-001-核心架构")）它们
-//! 本来「够格」留在 core（各有两个消费方）。但那条判据回答的是「两个互不相认的插件
+//! 本来「够格」留在 core（各有多个消费方）。但那条判据回答的是「两个互不相认的插件
 //! 要不要共享一处**机制**」；这里要共享的不是机制，而是**宿主决定接哪些插件**。
-//! 装配是宿主的事：插件清单、启停状态与装配结果归装配方持有，容器只经
+//! 装配是宿主的事：插件清单、启停状态、出厂 id 与装配结果归装配方持有，容器只经
 //! [`crate::symbio_core::REQUIRED_PLUGINS`] 接收结果（见 `plugins/composite` 的 README）。
 //! 因此加一个插件不再需要改 `symbio_core`——这是「加插件不改内核」的判据。
 //!
@@ -19,16 +19,18 @@
 //! |---|---|
 //! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | `plugins/home`（系统树）· `plugins/agent`（子 Agent 树） |
 //! | [`ASSEMBLY_UNDISABLABLE_PLUGINS`] | `plugins/composite`（执行停用前查）· `plugins/plugin_manager`（界面置灰） |
+//! | [`PLUGIN_ID_*`](PLUGIN_ID_HOME) | 每个插件自己的工厂注册与 `PluginMeta`；跨插件只经对象注册表按名字查找 |
 //!
 //! 只被**一个**模块依赖的两条已按同判据下沉：系统树的插件清单并入 `plugins/home` 的
 //! `SYSTEM_PLUGINS`（原本只是本清单的纯别名，无第二份字面量），
 //! `SYSTEM_LEVEL_PROVIDERS` → `plugins/composite`。
 //!
-//! ## 与 `plugin::ids` 的分工
+//! ## 与 `plugin::ids` 的分工（该域已整体并入本模块）
 //!
-//! - `plugin::ids`：**单个**对象的注册 id（插件工厂 / 服务）；
-//! - 本模块：**一组**插件的装配策略。两者都以插件名为字面量，但一个是「这个插件叫什么」，
-//!   一个是「这批插件怎么装」——问题不同，owner 也不同。
+//! - 本模块：**部署事实**——插件叫什么（`PLUGIN_ID_*`）、一棵树装哪些、哪些不能关；
+//! - `plugin` 域：**协议面**——`Plugin` trait、信封、`PluginDir`、清单键。
+//!   两者都以插件名为字面量，但一个是「这批插件怎么装」，一个是「插件对象长什么样」——
+//!   问题不同，owner 也不同。
 
 /// 子 Agent 子树挂载的「默认插件」清单 —— 与父（系统）Agent **同构**的机制级常量，
 /// 也是全仓插件清单的**唯一字面量**。
@@ -114,6 +116,89 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
 /// 在执行停用前查它，而不是让每个插件自己声明「我不能被关」。插件的启停状态是
 /// 装配方的事（见 [`crate::symbio_core::PLUGIN_KEY_ENABLED`]），这条规则也该住在同一处。
 pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
-    crate::symbio_core::PLUGIN_ID_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
-    crate::symbio_core::PLUGIN_ID_VDFS,    // 资源访问层：停用它整棵资源树都取不到
+    PLUGIN_ID_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
+    PLUGIN_ID_VDFS,    // 资源访问层：停用它整棵资源树都取不到
 ];
+
+// ============ 插件工厂 id（部署身份） ============
+
+/// 插件工厂 id —— 全局对象注册表里的**插件身份**。
+///
+/// 所有经 `submit_object_creator!` 注册的插件工厂，其 id 字符串在此统一定义为
+/// `&'static str`。收益：
+///
+/// - **单一真相源**：注册侧（宏的第一参）、装配侧（`PluginMeta::new(id, …)`）与
+///   使用侧（`creator_create_object(id, …)`、测试期望）共享同一常量；
+/// - **避免拼写漂移**：漏改 / 错改一处即被 `cargo check` 拦下；
+/// - **IDE 友好**：跳转即可看到完整 id 列表。
+///
+/// ## 命名：`PLUGIN_ID_<工厂名>`
+///
+/// **值**与**标识符**分开：值（`"home"`）是跨进程 / 跨文件的字面量——插件目录名、
+/// `PLUGIN.yml` 的 `plugin_provider`、前端路由前缀都取它，**不能改**；标识符只服务
+/// 编译期，必须让调用点自证归属，故加 `PLUGIN_ID_` 前缀。
+///
+/// ## 为什么住装配方而不是 core
+///
+/// 「一个插件叫什么」是**部署事实**，与「一棵树装哪些插件」同源：两者都由装配方决定，
+/// 内核不认识任何具体插件名。插件自己的 `PLUGIN.yml` 与目录名是运行期同一答案；
+/// 本表是编译期的镜像，由 `plugin-entry-audit` 的 E-001 守着三者一致。
+///
+/// ## 边界
+///
+/// - **LLM 工具名不在这里**：工具名是 `CapabilityMeta.name` 短名，属各插件自己的
+///   实现细节（`agent_run` 在 `plugins/agent/host/subagent.rs`，`vdfs_*` 由
+///   `plugins/vdfs/protocol.rs::VDFS_OPS` 派生），不经全局注册表。
+/// - **model 协议 id 不在这里**：协议 id 是插件内部实现细节，定义在
+///   `plugins/model/protocols/mod.rs`；core 既不暴露 `MODEL_PROTOCOL_*` 常量，
+///   也不定义 `ModelProtocol` trait。
+/// - **嵌入服务 id 不在这里**：它描述的是嵌入服务而非插件，归 `embedding` 域
+///   （`embedding::ids`）。
+/// - **路由地址不在这里**：`<插件目录名>/<子路径>` 是调用路径而非对象身份，
+///   见 `plugin::route`。
+///
+/// Home 插件工厂
+pub const PLUGIN_ID_HOME: &str = "home";
+/// Model 插件工厂
+pub const PLUGIN_ID_MODEL: &str = "model";
+/// Agent 插件工厂
+pub const PLUGIN_ID_AGENT: &str = "agent";
+/// Composite 插件工厂
+pub const PLUGIN_ID_COMPOSITE: &str = "composite";
+/// Web 插件工厂
+pub const PLUGIN_ID_WEB: &str = "web";
+/// Telegram 插件工厂
+pub const PLUGIN_ID_TELEGRAM: &str = "telegram";
+/// Skill 插件工厂
+pub const PLUGIN_ID_SKILL: &str = "skill";
+/// 插件管理插件工厂（智能体全部插件的管理与配置入口）
+pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
+/// Gateway 插件工厂（HTTP / WebSocket 入站网关）
+pub const PLUGIN_ID_GATEWAY: &str = "gateway";
+/// Session 插件工厂
+pub const PLUGIN_ID_SESSION: &str = "session";
+/// Heartbeat 插件工厂（会话空闲心跳：调度循环 + 设置入口）
+pub const PLUGIN_ID_HEARTBEAT: &str = "heartbeat";
+/// Loop 插件工厂（驱动器：一轮的判决 / 工具循环 / 落库视图，经地址面被会话触发）
+pub const PLUGIN_ID_LOOP: &str = "loop";
+/// Classify 插件工厂（对话面：判决这一轮该直接答、还是派给工具循环）
+pub const PLUGIN_ID_CLASSIFY: &str = "classify";
+/// Compose 插件工厂（对话面：措辞——首响 / 答话 / 汇报）
+pub const PLUGIN_ID_COMPOSE: &str = "compose";
+/// MCP 插件工厂
+pub const PLUGIN_ID_MCP: &str = "mcp";
+/// Local 插件工厂
+pub const PLUGIN_ID_LOCAL: &str = "local";
+/// Memory 插件工厂（记忆：智能体自身 + 工作区，两个作用域）
+pub const PLUGIN_ID_MEMORY: &str = "memory";
+/// Setting 插件工厂（智能体自身的信息设置）
+pub const PLUGIN_ID_SETTING: &str = "setting";
+/// Hook 插件工厂
+pub const PLUGIN_ID_HOOK: &str = "hook";
+/// VDFS 插件工厂（虚拟文件系统宿主）
+pub const PLUGIN_ID_VDFS: &str = "vdfs";
+/// Event Bus 插件工厂（统一事件总线）
+pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
+
+// 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
+// `plugins/composite` 一个模块消费，按 D-023 的依赖方判据已下沉到该模块。

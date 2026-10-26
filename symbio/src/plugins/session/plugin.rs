@@ -28,12 +28,13 @@
 use super::chat_session::PersistentChatSession;
 pub use super::config::{PresentationTree, SessionConfig};
 use super::types::{Session, SessionSummary};
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::providers::MemoryFile;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
     plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PluginStopReason, PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
+    PluginStopReason, PLUGIN_FILE, SESSION_ID,
 };
 use crate::symbio_core::{
     DetailDefinition, DetailField, DetailOption, DetailSection, VdfsAccess, VdfsChange,

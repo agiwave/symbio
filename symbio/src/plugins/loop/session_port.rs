@@ -31,9 +31,9 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::symbio_core::{
     run_ops, vdfs_context, Plugin, PluginError, PluginInvokeRequest, VdfsRequest, VdfsResponse,
-    PLUGIN_ID_SESSION,
 };
 
 /// 驱动器对会话动作面的**窄端口**：一个方法，op 词表取 [`run_ops`] 常量。

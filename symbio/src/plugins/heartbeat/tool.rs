@@ -21,10 +21,11 @@
 
 use super::plugin::HeartbeatPlugin;
 use super::setting::HeartbeatConfig;
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::symbio_core::{
     vdfs_context, Capability, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, VdfsContent, VdfsContext, VdfsRequest,
-    VdfsResponse, PLUGIN_ID_SESSION, SESSION_ID,
+    VdfsResponse, SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};

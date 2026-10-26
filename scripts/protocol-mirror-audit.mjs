@@ -182,7 +182,7 @@ const ALIASES = [
   },
   {
     ts: 'VDFS_EXT_MODEL',
-    rust: { file: 'symbio/src/symbio_core/plugin/ids.rs', name: 'PLUGIN_ID_MODEL' },
+    rust: { file: 'symbio/src/assembly.rs', name: 'PLUGIN_ID_MODEL' },
     what: '「模型」类别的挂载点自述（首启引导据此认出「模型配在哪」）',
   },
 ]

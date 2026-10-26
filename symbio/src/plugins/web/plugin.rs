@@ -5,11 +5,12 @@ use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::
 // 审批闸门住在能力注册收口点（`providers/collectors/approval.rs`）；`route` 兜底
 // 拿到的是本插件私藏的裸工具，判定与装饰器共用同一份真源（`http_request`
 // 声明 `High` 却经这条路径直接跑，正是「风险只是宣传语」的第二个洞）。
+use crate::assembly::PLUGIN_ID_WEB;
 use crate::providers::approval_gate;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PLUGIN_ID_WEB,
+    PluginPayload,
 };
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;

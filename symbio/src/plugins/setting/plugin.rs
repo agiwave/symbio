@@ -18,10 +18,11 @@
 
 use super::config::{config_definition, SettingConfig};
 use super::segment;
+use crate::assembly::PLUGIN_ID_SETTING;
 use crate::symbio_core::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginConfigMount, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_SETTING,
+    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;

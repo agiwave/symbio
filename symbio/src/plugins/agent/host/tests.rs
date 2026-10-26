@@ -11,11 +11,12 @@
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
+use crate::assembly::PLUGIN_ID_AGENT;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
     capability_prompts, CapabilityMeta, CapabilityRowKind, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
-    PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use crate::symbio_core::{vdfs_context, VdfsProvider};
 use std::path::Path;
@@ -258,7 +259,8 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 #[tokio::test]
 async fn sub_agent_tree_is_assembled_and_prefixed() {
-    use crate::symbio_core::{PluginDir, PLUGIN_DIR, PLUGIN_ID_AGENT};
+    use crate::assembly::PLUGIN_ID_AGENT;
+    use crate::symbio_core::{PluginDir, PLUGIN_DIR};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -505,7 +507,8 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
 /// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
-    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
+    use crate::assembly::PLUGIN_ID_AGENT;
+    use crate::symbio_core::PluginDir;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -626,8 +629,9 @@ async fn mount_root_lists_only_installed_agents() {
 /// （`<agentdir>/AGENTS.md`）与裸目录同位，分辨不出「绕没绕过挂载点」。
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
+    use crate::assembly::PLUGIN_ID_AGENT;
+    use crate::symbio_core::PluginDir;
     use crate::symbio_core::VdfsError;
-    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -776,7 +780,8 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
 #[tokio::test]
 async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
-    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
+    use crate::assembly::PLUGIN_ID_AGENT;
+    use crate::symbio_core::PluginDir;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");

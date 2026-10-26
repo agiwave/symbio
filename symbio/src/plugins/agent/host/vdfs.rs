@@ -30,8 +30,8 @@
 
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore};
+use crate::assembly::PLUGIN_ID_AGENT;
 use crate::providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
-use crate::symbio_core::PLUGIN_ID_AGENT;
 use crate::symbio_core::{
     descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };

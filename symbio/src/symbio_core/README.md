@@ -42,7 +42,7 @@ impl: done
  | 符号 | 形态 | 例 |
  |---|---|---|
  | 类型 / trait | 域名（PascalCase）+ 语义 | `ExecEventSink` · `VdfsNode` · `PluginDir` · `CapabilityMeta` |
- | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `PLUGIN_ID_HOME` |
+ | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `PLUGIN_KEY_ENABLED` |
  | 函数 / 自由函数 | 域名（snake_case）+ 语义 | `clock_now_ms` · `vdfs_notify_change` · `capability_resolve` · `creator_create_object` |
 
  **函数也要前缀，理由与类型 / 常量完全相同**：本层符号在全仓按根平铺导入（第 4 条），
@@ -69,18 +69,20 @@ impl: done
  - `ChangeSubscriptions` 住在 `vdfs` 却既不姓 `Vdfs` 也不属于任何已登记主题 ⇒
  改名 `VdfsChangeSubscriptions`；
  - `KEY_PROVIDER` 住在 `plugin` 却用着 `keys` 域的前缀 ⇒ 改名 `PLUGIN_KEY_PROVIDER`；<!-- doc-symbol-allow: 历史：改名前的旧名，实名见下一行的 PLUGIN_KEY_PROVIDER -->
- - 插件工厂 id 描述的是「哪个插件」而非「哪个键」⇒ 从 `keys` 搬到 `plugin::ids`，
- 并改名 `PLUGIN_ID_*`；
+ - 插件工厂 id 描述的是「哪个插件」而非「哪个键」⇒ 归**装配方**的 id 表
+ （`symbio/src/assembly.rs`），命名 `PLUGIN_ID_*`——内核不认识具体插件名；
  - 反例：`LOG_LEVEL_INFO` **不**需要冠上 `LOGGER_` 前缀——多出来的那点长度不增加任何信息。
 
  **一域一前缀，且前缀不跨域复用。** 两个域共用同一个前缀就是「一个前缀两种东西」——
- 同一个 `PLUGIN_` 既指插件工厂 id 又指清单键，读的人得先分辨是哪一个。故 `PLUGIN_`
- 只属于 `plugin`（工厂 id 与清单键靠 `PLUGIN_ID_*` / `PLUGIN_KEY_*` 细分段区分），
+ 同一个 `PLUGIN_` 既指清单键又指插件身份，读的人得先分辨是哪一个。故 `PLUGIN_`
+ 只属于 `plugin`（清单键靠 `PLUGIN_KEY_*` 细分段区分）；插件工厂 id 属装配事实，
+ 前缀仍叫 `PLUGIN_ID_*`，但已整体移出内核（见 `assembly` 模块）。
  `KEY_` 不属于 `keys`（该域没有字符串常量，见 §3）。
 
  **放置也是同一条规则的一部分**：符号住哪个域由「它描述什么」决定，不由「谁先用了它」
- 决定。插件 id 归 `plugin::ids`、路由地址归 `plugin::route`、遍历端点归 `plugin::traverse`、
- 嵌入服务 id 归 `embedding::ids`——它们都曾住在 `keys`。**上下文键同理，且判据更细**：
+ 决定。路由地址归 `plugin::route`、遍历端点归 `plugin::traverse`、
+ 嵌入服务 id 归 `embedding::ids`——它们都曾住在 `keys`；插件工厂 id 归**装配方**
+ （`symbio/src/assembly.rs`，部署事实，不进内核）。**上下文键同理，且判据更细**：
  键跟着**值类型**走（键与值同住，[D-095](../../../docs/003-design/005-协议规范.md "DE-005-协议规范")）——
  `keys` 只留机制（`SymbioKey` trait）与值类型为通用词汇（`String` / `Value` /
  `Vec<String>`）的实例；值类型属某个域的，实例搬去那个域（`EVENT_SINK` / `ABORT_SIGNAL`
@@ -151,7 +153,7 @@ impl: done
 | `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**键与值同住**——值类型属某个域的，实例住那个域（执行期两条 → `exec`，插件域两条 → `plugin`，capability 四条 → `capability`，agent 一条 → `agent`，见各行）；本域只留机制（`SymbioKey` trait）与值类型为通用词汇（`String` / `Value` / `Vec<String>`）的实例。**本域不收字符串常量** |
 | `llm` | 子命名空间 `Model*`；契约词 `TurnOutput` · `TurnToolCallInfo` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs`（+ `frames.rs` 的状态帧、`…`）。**`Turn*` 家族前缀属 `turn` 域**：`llm` 的两个 `Turn*` 是**具体契约名**（`TurnOutput` = 一轮模型输出），不是「turn 家族」的一员——它们先于 `turn` 域存在，且改写要跨 `plugins/model` / `plugins/loop` 两侧，收益为零 |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
-| `plugin` | `Plugin` · 契约词 `HookEvent` · `HookOutput` · `SimpleResponse` · `SuccessResponse` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` · `PLUGIN_PARENT` / `PLUGIN_DIR`（两条**键实例**，与值类型同住本域，[D-095](../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 根因一——`PLUGIN_DIR` 的值是 `PluginDir`，`PLUGIN_PARENT` 的值是 `Option<Weak<dyn Plugin>>`）。`HookEvent` / `HookOutput`（`hook.rs`）是插件扩展点的事件词；`SimpleResponse` / `SuccessResponse`（`response.rs`）是路由回体的最小壳——两者都是**插件面**的东西，故由 `schemas` 并入本域 |
+| `plugin` | `Plugin` · 契约词 `HookEvent` · `HookOutput` · `SimpleResponse` · `SuccessResponse` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` · `PLUGIN_PARENT` / `PLUGIN_DIR`（两条**键实例**，与值类型同住本域，[D-095](../../../docs/003-design/005-协议规范.md "DE-005-协议规范") 根因一——`PLUGIN_DIR` 的值是 `PluginDir`，`PLUGIN_PARENT` 的值是 `Option<Weak<dyn Plugin>>`）。插件工厂 id（`PLUGIN_ID_*`）**不在这里**：它是装配方的部署身份。`HookEvent` / `HookOutput`（`hook.rs`）是插件扩展点的事件词；`SimpleResponse` / `SuccessResponse`（`response.rs`）是路由回体的最小壳——两者都是**插件面**的东西，故由 `schemas` 并入本域 |
 | `present` | 子命名空间 `Detail*`（`DetailDefinition` / `DetailField` / `DetailSection` / `DetailAction` / `DetailOption` / `DetailCondition` / `DetailBadge` / `DetailPreset` / `DetailPresetSpec`）· `Reading*`（`ReadingPanel` / `ReadingRow` / `ReadingSection` / `ReadingTone`） | `DETAIL_` | — | [D-087](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：宿主呈现方言——**后端下发描述、前端零业务知识渲染**。两个子命名空间各对应一个文件：`detail`（可编辑详情页）/ `reading`（只读读数面板）。形状里不含任何业务语义（分区 / 字段 / 标签 / 值 / 口径），故换一个产者前端零改动。`capability` 的选项族行载荷是一份 `DetailField`——表单字段本来就是呈现物，依赖方向是 `capability → present`（向下） |
 | `projection` | `Projection`；契约词 `TurnState` · `CheckpointState` · `ConsolidateParams` · `Rejection` · `Reputation*`（`ReputationEntry` / `ReputationView`）· `Ready*`（`ReadySetView` / `ReadyTask`）· `Conation*`（`ConationView` / `ConationIntent`）· `Cost*`（`CostLedgerView` / `CostEntry`）· `Token*`（`TokenLedgerView` / `TokenEntry`）· `Spend*`（`SpendLedgerView` / `CurrencySpend` / `SpendEntry`）· `Calibration*`（`CalibrationView` / `SkillStats`）· `Fallback*`（`FallbackRateView` / `TierStats`）· `Transcript*`（`TranscriptView` / `TranscriptEntry`）· `Slo*`（`SloLatencyView` / `TierLatency`）· `Prompt*`（`PromptMessage` / `PromptToolCall`——**结构化** prompt 出口：角色、正文、`tool_call_id`、`tool_calls`；线格式由 adapter 边界翻译，core 不认识 provider 的 `ChatNode`）· `PromptGap` / `PromptReport`（事实网格 → prompt 的**双向完整性**判据，[D-048](../plugins/model/README.md "symbio/src/plugins/model/README")；它**不是投影**而是投影的复核，所以归本域但不改「纯函数视图」的形态约定：入参事件切片 + 投影产出，出参缺口清单） | — | `consolidate_` · `reputation` · `plain_score` · `readyset` · `conation` · `cost_` · `token_` · `spend_` · `calibration` · `fallback_` · `transcript` · `mutations_` · `slo_` · `checkpoint` · `verify_prompt_fidelity` · `branch_` | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。`TurnState` 是 [plan/DE-001 §8](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") `projection = turnstate` 的产出视图名。见 [D-043](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") |
 | `store` | `Store` / `MemoryStore` / `EventStore`；契约词 `AppendError` | — | — | `Store` trait 冻结（F1）：append / range / head，无 update/delete；`EventStore` 是装 `Event` 信封的便捷别名；`AppendError` 是 [plan/DE-001 §2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 冻结签名的一部分。`range` 的口径是**完整史**（含被压缩快照取代的归档前缀）——本域只有这一条读法。持久化布局（文件格式 / 写者令牌 / 归档段）住使用方插件，不进根出口（[plan/14 §2.2](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 2） |
@@ -212,7 +214,7 @@ impl: done
 | `keys` | **类型安全上下文键**（只有键：trait + 类型 + 实例） | `SymbioKey` 及其实例（`PATH` · `WORKDIR` · `ID` · `NAME` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` · `CAPABILITY_ERRORS` …） | — |
 | `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留**多消费方**共用的符号（唯一例外 `llm_message_frame` 见 D-023） | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `ModelSpend` · `TurnOutput`（`tool_calls` 是**结果形态**，只装结果不装过程；累积过程住 `plugins/model/tool_accumulator.rs`，三个读方法 `is_reasoning_only` / `effective_text` / `into_messages` 住 `plugins/session/message_build.rs`）· `TurnToolCallInfo` · 帧 `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` · id 原语 `llm_short_id` | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |
-| `plugin` | 插件核心契约：trait、信封、错误、目录、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
+| `plugin` | 插件核心契约：trait、信封、错误、目录与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `route` · `transport` · `traverse` |
 | `present` | **宿主呈现方言**：后端下发描述、前端零业务知识渲染。两个面同一族哲学——`detail` 服务可编辑详情页，`reading` 服务只读读数面板 | `DetailDefinition` 家族（字段 / 分区 / 动作 / 预设 / 条件 / 徽标）· `ReadingPanel` 家族（分区 / 行 / 口径 / 色调）· `DETAIL_*` | `detail` · `reading` |
 | `projection` | 纯函数视图（F2）：从事件切片派生一切读数，形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result` | `Projection` · `TurnState` · `CheckpointState` · `ConsolidateParams` · `Rejection` · 视图家族 `Reputation*` / `Ready*` / `Conation*` / `Cost*` / `Token*` / `Spend*` / `Calibration*` / `Fallback*` / `Transcript*` / `Slo*` · 结构化 prompt 出口 `Prompt*` · 双向完整性判据 `PromptGap` / `PromptReport` | — |
 | `store` | 一切事实的**唯一写入口与读取面**（append-only：trait 上不存在 update/delete，F1）；`memory` 是平凡基线，持久化实现住使用方插件 | `Store`（trait）· `MemoryStore` · `EventStore`（便捷别名）· `AppendError` | — |

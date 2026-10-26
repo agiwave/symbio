@@ -52,11 +52,11 @@
 
 use std::sync::Arc;
 
+use crate::assembly::PLUGIN_ID_CLASSIFY;
 use crate::symbio_core::REASON_UNCLASSIFIED;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
-    PLUGIN_ID_CLASSIFY,
 };
 use crate::symbio_core::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
 use crate::symbio_core::{DetailDefinition, DetailField};

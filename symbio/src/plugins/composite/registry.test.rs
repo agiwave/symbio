@@ -8,9 +8,8 @@
 
 use super::*;
 
-use crate::symbio_core::{
-    PluginError, PluginPayload, PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION,
-};
+use crate::assembly::{PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION};
+use crate::symbio_core::{PluginError, PluginPayload};
 use std::path::Path;
 
 /// 一次性临时插件根（目录名带进程号，避免并行测试互相踩）

@@ -1,10 +1,11 @@
 use super::skill_response::assemble_response;
+use crate::assembly::PLUGIN_ID_SKILL;
 use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudget};
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
     plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_SKILL,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;

@@ -23,12 +23,12 @@
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
+use crate::assembly::PLUGIN_ID_MCP;
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::DirVdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, CapabilityRow, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_ID_MCP,
 };
 use async_trait::async_trait;
 use std::sync::Arc;

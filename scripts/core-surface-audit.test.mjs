@@ -104,14 +104,13 @@ test('宏生成的键计入公开面（它们没有 `pub` 关键字）', () => {
   assert.match(out, /^\s*\[\s*1\] keys\s+FooKey\b/m, out)
 })
 
-test('插件 id 常量被它自己的插件用，不算下放候选', () => {
-  // `PLUGIN_ID_ALPHA` 就是 `plugins/alpha` 自己的名字，它用自己天经地义。
-  // 注意形态是 `PLUGIN_ID_<X>` —— 这是「一域一前缀」收口后的名字：插件工厂 id
-  // 住 `plugin` 域，用 `PLUGIN_ID_` 细分前缀，不再与清单键的 `PLUGIN_KEY_` 混用。
+test('id 常量被它的同名 provider 用，不算下放候选', () => {
+  // `EMBEDDING_ALPHA` 就是 `providers/alpha` 自己的名字，它用自己天经地义。
+  // （插件工厂 id 已搬去装配方，内核不再有 `PLUGIN_ID_*`；嵌入服务 id 仍住 core。）
   const out = audit({
-    'symbio/src/symbio_core/mod.rs': 'pub use plugin::*;\n',
-    'symbio/src/symbio_core/plugin/ids.rs': 'pub const PLUGIN_ID_ALPHA: &str = "alpha";\n',
-    'symbio/src/plugins/alpha/x.rs': 'fn f() { let _ = PLUGIN_ID_ALPHA; }\n',
+    'symbio/src/symbio_core/mod.rs': 'pub use embedding::*;\n',
+    'symbio/src/symbio_core/embedding/ids.rs': 'pub const EMBEDDING_ALPHA: &str = "alpha";\n',
+    'symbio/src/providers/alpha/x.rs': 'fn f() { let _ = EMBEDDING_ALPHA; }\n',
   })
-  assert.doesNotMatch(out, /PLUGIN_ID_ALPHA\s+->/, out)
+  assert.doesNotMatch(out, /EMBEDDING_ALPHA\s+->/, out)
 })

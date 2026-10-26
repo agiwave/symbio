@@ -19,11 +19,11 @@
 
 use super::option::{heartbeat_field, ORDER_HEARTBEAT};
 use super::tool::HeartbeatTool;
+use crate::assembly::PLUGIN_ID_HEARTBEAT;
 use crate::symbio_core::{
     CapabilityRow, DynVdfsProvider, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
-    CAPABILITY_VISITOR, OPTION_VISITOR, PATH, PLUGIN_ID_HEARTBEAT, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS,
+    CAPABILITY_VISITOR, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;

@@ -30,9 +30,10 @@
 //! `vdfs/root` 拿到的**地址数据**，两边都不持有名字。
 
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
+use crate::assembly::PLUGIN_ID_VDFS;
 use crate::symbio_core::{
     CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_VDFS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};

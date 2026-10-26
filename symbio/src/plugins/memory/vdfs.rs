@@ -40,7 +40,9 @@
 use super::memory::{self, MEMORY_FILE, PLUGIN_TITLE};
 use super::plugin::MemoryPlugin;
 use super::workspace::{self, MOUNT_FILE as WORKSPACE_FILE, SEGMENT_TITLE as WORKSPACE_LABEL};
+use crate::assembly::PLUGIN_ID_MEMORY;
 use crate::providers::MemoryFile;
+use crate::symbio_core::PLUGIN_FILE;
 use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };
@@ -48,7 +50,6 @@ use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
-use crate::symbio_core::{PLUGIN_FILE, PLUGIN_ID_MEMORY};
 use async_trait::async_trait;
 
 const LABEL: &str = PLUGIN_TITLE;

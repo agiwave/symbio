@@ -23,10 +23,10 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
+use crate::assembly::PLUGIN_ID_LOOP;
 use crate::symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
-    PLUGIN_ID_LOOP,
 };
 
 /// 单环驱动器。

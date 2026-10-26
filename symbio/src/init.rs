@@ -1,6 +1,7 @@
 //! Symbio 初始化模块
 
-use crate::symbio_core::{creator_create_object, Plugin, PLUGIN_ID_HOME};
+use crate::assembly::PLUGIN_ID_HOME;
+use crate::symbio_core::{creator_create_object, Plugin};
 use std::sync::Arc;
 
 pub fn initialize() {

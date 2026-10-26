@@ -59,7 +59,7 @@ symbio/src/plugins/gateway/
 └── server.rs // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/events、/api/v1/health
 ```
 
-- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（`symbio_core/plugin/ids.rs`）。
+- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（装配方 `symbio/src/assembly.rs`）。
 - 配置键、默认值与只读白名单：见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 

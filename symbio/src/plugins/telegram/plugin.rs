@@ -1,11 +1,11 @@
 use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
+use crate::assembly::PLUGIN_ID_TELEGRAM;
 use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
-    PLUGIN_ID_TELEGRAM,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, SuccessResponse};
 use async_trait::async_trait;

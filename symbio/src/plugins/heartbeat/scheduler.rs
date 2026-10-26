@@ -20,11 +20,12 @@
 
 use super::plugin::HeartbeatPlugin;
 use super::setting::HeartbeatConfig;
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     clock_now_ms, vdfs_context, DynVdfsProvider, PluginInvokeRequest, PluginSimpleRequest,
     VdfsContent, VdfsContext, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
-    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY, PLUGIN_ID_SESSION, VDFS_STATUS_WORKING,
+    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY, VDFS_STATUS_WORKING,
 };
 use serde_json::{json, Value};
 use std::collections::hash_map::DefaultHasher;

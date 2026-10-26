@@ -127,7 +127,7 @@ fn session_detail_actions() -> Vec<DetailAction> {
         id: "open-container".to_string(),
         label: "进入下一级".to_string(),
         style: "primary".to_string(),
-        payload: Some(json!({ "kind": crate::symbio_core::PLUGIN_ID_SESSION })),
+        payload: Some(json!({ "kind": crate::assembly::PLUGIN_ID_SESSION })),
         when: Some(DetailCondition {
             key: "is_existing".to_string(),
             equals: Some(json!(true)),

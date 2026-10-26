@@ -383,7 +383,7 @@ impl TurnLauncher {
         };
 
         // 动作体就是整轮 future：loop 在动作里跑完，把结局序列化进动作响应。
-        let loop_path = format!("{}/{}", crate::symbio_core::PLUGIN_ID_LOOP, session_id);
+        let loop_path = format!("{}/{}", crate::assembly::PLUGIN_ID_LOOP, session_id);
         let handle = tokio::spawn(async move {
             let resp = provider_view
                 .dispatch(

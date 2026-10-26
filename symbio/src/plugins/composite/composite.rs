@@ -32,11 +32,12 @@
 
 use super::registry::PluginRegistry;
 use super::vdfs::CompositeVdfs;
+use crate::assembly::PLUGIN_ID_COMPOSITE;
 use crate::symbio_core::descend_addr;
 use crate::symbio_core::{
     lock_read, CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason, VdfsProvider,
-    CAPABILITY_VISITOR, PATH, PLUGIN_ID_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 use std::sync::{Arc, Weak};

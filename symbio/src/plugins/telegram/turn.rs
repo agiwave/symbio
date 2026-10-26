@@ -38,15 +38,16 @@
 //! 三者共有的只是上面那段协议舞步；帧语义各不相同，抽成一份反而要把三种行为
 //! 参数化。因此这里只保留「收 → 攒 → 取最后一条已完成的助手正文」。
 
+use crate::assembly::PLUGIN_ID_SESSION;
 use crate::symbio_core::chat_node::{
     message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES,
 };
 use crate::symbio_core::{
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
     event_bus_vdfs_change_of, Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, PLUGIN_ID_SESSION,
-    ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, VDFS_STATUS_FAILED,
-    VDFS_STATUS_WORKING, WORKDIR,
+    VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, ROUTE_VDFS_ROOT,
+    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+    WORKDIR,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};

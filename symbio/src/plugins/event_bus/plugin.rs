@@ -30,6 +30,7 @@
 //! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
 //! 为空——路由成了恒返回空数组的空壳。
 
+use crate::assembly::PLUGIN_ID_EVENT_BUS;
 use crate::symbio_core::SimpleResponse;
 use crate::symbio_core::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
@@ -37,7 +38,7 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_EVENT_BUS,
+    PluginInvokeResponse, PluginMeta, PluginPayload,
 };
 use async_trait::async_trait;
 use serde_json::json;
