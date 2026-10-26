@@ -1,6 +1,13 @@
 //! 用量台账：`response{port=model}` 自带的 `usage` 按主体累计。
 //!
-//! ## 为什么与 [`super::cost`] 分开
+//! ## 为什么住会话插件（DE-023 D-180）
+//!
+//! 这个视图的**唯一生产消费方**是 `plugins/session/stats.rs` 的用量列。
+//! 按 D-180「视图类型与投影函数跟消费方走」，它不该占内核的根出口——
+//! 内核只提供 [`Projection`] 这个构造器（机制），一本账的口径归读它的插件。
+//! 与 [`super::spend_ledger`] 同一次裁决：单消费方、无协议语义 ⇒ 下沉。
+//!
+//! ## 为什么与 `cost_ledger` 分开
 //!
 //! `cost_ledger` 读的是**事件的 `cost_ms`**（adapter 边界的耗时，按 `actor` 归组），
 //! 它回答「这一轮花了多久」。本投影读的是**载荷里的 `usage`**（provider 实测的
@@ -11,9 +18,9 @@
 //!
 //! ## 为什么它是纯投影而不是一件新事实
 //!
-//! token 的产生点在 adapter 边界（[`crate::symbio_core::ModelUsage`]），
-//! 已经随 `response` 事实入格；再写一条「用量事实」等于同一笔测量存两份。
-//! 所以这里只有累计：同一份切片永远得出同一本账（N1），as-of 与其余投影同口径。
+//! token 的产生点在 adapter 边界，已经随 `response` 事实入格；再写一条「用量事实」
+//! 等于同一笔测量存两份。所以这里只有累计：同一份切片永远得出同一本账（N1），
+//! as-of 与其余投影同口径。
 //!
 //! ## 「没测量」与「测到零」
 //!
@@ -22,8 +29,7 @@
 //! 「本会话没有任何一次实测」读成 `measured: 0` + 三个零，与「每次都是零 token」
 //! 由 `measured` 分辨。补 0 会把前者读成后者。
 
-use super::super::event::Event;
-use super::Projection;
+use crate::symbio_core::{Event, Projection, EVENT_RESPONSE};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -51,21 +57,6 @@ pub struct TokenLedgerView {
     pub calls: u64,
 }
 
-impl TokenLedgerView {
-    /// 某主体的累计（未记账主体 ⇒ 零账，不是错误）。
-    pub fn of(&self, principal: &str) -> TokenEntry {
-        self.by_principal
-            .get(principal)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// 一次往返的总量。**不落第二个数**：它是纯查询，与 `rate()` 那一族同款。
-    pub fn total(&self) -> u64 {
-        self.input + self.output
-    }
-}
-
 /// 用量台账投影：从事件切片累计各主体实测的 token。
 ///
 /// 只认 `response` 且 `payload.port == "model"` 的那一批：`turn` / `tool` 端口的
@@ -77,7 +68,7 @@ pub fn token_ledger() -> Projection<TokenLedgerView> {
         let mut total_out = 0u64;
         let mut calls = 0u64;
         for e in events {
-            if e.ts > now || e.kind != crate::symbio_core::EVENT_RESPONSE {
+            if e.ts > now || e.kind != EVENT_RESPONSE {
                 continue;
             }
             let payload = &e.payload;

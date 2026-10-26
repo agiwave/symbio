@@ -44,6 +44,11 @@
 //! `plugins::loop::control_decl` 声明，经 [`Builder::declare`] 交进来；内核不认识
 //! 那些名字。新增一个视图、一个控制面事实、一处字段，改的是插件文件，不是本模块。
 //!
+//! **owner 就是「谁把这张表交进 `Builder`」**（DE-023 D-178）：`declare` 的第一个
+//! 参数是 owner 标识，`Frozen` 逐条记下 `fact_owner` / `view_owner`。它不是
+//! `FactDecl` / `ViewDecl` 上的字段——声明形状不因登记而变宽，也不存在「声明里的
+//! owner 与装载方不一致」这种可漂的第二事实。
+//!
 //! 插件交进来的声明仍受同一条资格约束：某一行以它为 `owes` / `until` / `unless`，
 //! 或某条**被行用到的**视图读它（DE-015 判据 7）。只在审计 / SLO 投影里读的断言格
 //! 不进控制面表——`turn.dispatch` 是现例：它的读方是
@@ -56,7 +61,7 @@
 //! 仍按声明生效：调用方传入**本轮切片**（不是整份 WAL），一轮的事件数由轮的生命周期
 //! 界定。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::symbio_core::Event;
@@ -158,6 +163,15 @@ pub(crate) struct PluginDeclarations<'a> {
     pub(crate) rows: &'a [Decl],
 }
 
+/// 内核自己交出的声明（协议五格）的 owner 标识。
+///
+/// 与插件 owner（如 `"plugins/loop"`）同处一个命名空间：`Frozen` 的 owner 清单里
+/// 没有第二种来源，问「这一条归谁」永远只有一个答案（DE-023 D-178）。
+pub(crate) const KERNEL_OWNER: &str = "kernel";
+
+/// 本模块用例搭小世界时的 owner（`Builder::empty` 之后的直接 `fact` / `view`）。
+const DIRECT_OWNER: &str = "direct";
+
 /// 装载期的唯一注册口。`seal()` 之后没有可变方法（见 [`Frozen`]）。
 ///
 /// ## 两个口：`declare` 与 `seal`
@@ -179,6 +193,12 @@ pub(crate) struct Builder {
     actors: Vec<ActorDecl>,
     ports: Vec<PortDecl>,
     rows: Vec<Decl>,
+    /// 事实名 → 交表方（DE-023 D-178 的 owner 清单）。
+    fact_owners: HashMap<&'static str, &'static str>,
+    /// 视图名 → 交表方。
+    view_owners: HashMap<&'static str, &'static str>,
+    /// 当前交表方：`new` = 内核；`declare` 期间 = 参数；`empty` = [`DIRECT_OWNER`]。
+    current_owner: &'static str,
 }
 
 impl Builder {
@@ -187,6 +207,7 @@ impl Builder {
     /// 业务事实与全部视图**不在**这里——它们由插件经 [`Builder::declare`] 交进来。
     pub(crate) fn new() -> Self {
         let mut b = Self::empty();
+        b.current_owner = KERNEL_OWNER;
         for &f in PROTOCOL_FACTS {
             b.fact(f);
         }
@@ -195,11 +216,18 @@ impl Builder {
 
     /// 空表：只给本模块用例搭小世界。
     fn empty() -> Self {
-        Self::default()
+        Self {
+            current_owner: DIRECT_OWNER,
+            ..Default::default()
+        }
     }
 
-    /// 一次装入一个插件的全部声明。
-    pub(crate) fn declare(&mut self, p: PluginDeclarations<'_>) {
+    /// 一次装入一个插件的全部声明；`owner` 是**交表方**的标识（DE-023 D-178）。
+    ///
+    /// 同一个 owner 可以分多次交（例如测试夹具先交事实、再交视图），但一个名字只能
+    /// 出现一次——重名由 `seal` 判红，owner 清单因此逐条唯一。
+    pub(crate) fn declare(&mut self, owner: &'static str, p: PluginDeclarations<'_>) {
+        self.current_owner = owner;
         for &f in p.facts {
             self.fact(f);
         }
@@ -218,10 +246,12 @@ impl Builder {
     }
 
     fn fact(&mut self, d: FactDecl) {
+        self.fact_owners.insert(d.name, self.current_owner);
         self.facts.push(d);
     }
 
     fn view(&mut self, d: ViewDecl) {
+        self.view_owners.insert(d.name, self.current_owner);
         self.views.push(d);
     }
 
@@ -336,6 +366,8 @@ impl Builder {
             actors: self.actors,
             ports: self.ports,
             rows: self.rows,
+            fact_owners: self.fact_owners,
+            view_owners: self.view_owners,
             // 报告要到缺口清空才算得（第 4 条读的是**这张**表），检查阶段先留空。
             overlaps: Vec::new(),
         };
@@ -349,12 +381,18 @@ impl Builder {
         // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归 `drive`。
         // 名单随表冻结一次，读侧（装载日志与用例）只问表，不再自己算第二遍。
         let overlaps = overlaps(&frozen.rows, &frozen);
+        // owner 清单与五张表同源（DE-023 D-178）：`fact` / `view` 写入时逐条登记，
+        // 这里钉住「表里有几条，清单就有几条」——不成立只能是注册口被改坏了。
+        assert_eq!(frozen.fact_owners.len(), frozen.facts.len());
+        assert_eq!(frozen.view_owners.len(), frozen.views.len());
         Ok(Arc::new(Frozen {
             facts: frozen.facts,
             views: frozen.views,
             actors: frozen.actors,
             ports: frozen.ports,
             rows: frozen.rows,
+            fact_owners: frozen.fact_owners,
+            view_owners: frozen.view_owners,
             overlaps,
         }))
     }
@@ -373,6 +411,9 @@ pub(crate) struct Frozen {
     actors: Vec<ActorDecl>,
     ports: Vec<PortDecl>,
     rows: Vec<Decl>,
+    /// 事实 / 视图的 owner 清单（DE-023 D-178）：与五张表同源，冻结后只读。
+    fact_owners: HashMap<&'static str, &'static str>,
+    view_owners: HashMap<&'static str, &'static str>,
     /// §3.4 第 4 条的报告（可能同时命中的行对）。**不是缺口**——冻结成功才存在，
     /// 装载入口把它打成人读的日志，用例钉住名单。
     overlaps: Vec<Overlap>,
@@ -402,6 +443,22 @@ impl Frozen {
 
     pub(crate) fn fact(&self, name: &str) -> Option<&FactDecl> {
         self.facts.iter().find(|f| f.name == name)
+    }
+
+    /// 这一条事实归谁：把含它的声明表交进 [`Builder`] 的那个 owner。
+    ///
+    /// `None` 只该出现在「直接往 `Builder` 塞单条的用例小世界」里；生产装载
+    /// （[`Builder::new`] / [`Builder::declare`]）逐条登记，不会缺。查询方是清单用例
+    /// （生产装载不读它——owner 在 `seal` 里以「表长 = 清单长」钉住）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn fact_owner(&self, name: &str) -> Option<&'static str> {
+        self.fact_owners.get(name).copied()
+    }
+
+    /// 这一条视图归谁。口径同 [`Frozen::fact_owner`]。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn view_owner(&self, name: &str) -> Option<&'static str> {
+        self.view_owners.get(name).copied()
     }
 
     pub(crate) fn view(&self, name: &str) -> Option<&ViewDecl> {

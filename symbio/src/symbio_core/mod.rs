@@ -72,7 +72,6 @@ pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::slo::slo_report;
-pub use projection::token::token_ledger;
 pub use projection::Projection;
 // 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
 //

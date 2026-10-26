@@ -6,7 +6,7 @@ status: todo
 created: 2026-10-26
 track: impl
 prio: next
-deps: [T-320-B2-声明-owner-登记与投影豁免清理]
+deps: []
 parent: T-316-内核边界与扩展局部性收口
 where: symbio/src/plugins/ · symbio/src/assembly.rs · scripts/
 exit: '新插件 = 插件目录 + `PLUGIN.yml` + 声明；`PLUGIN_ID_*` / `ROUTE_*` / `ASSEMBLY_*` 由生成器产出（手写文件消失或手改 = 0）；加插件时 `symbio_core` diff 为空。'

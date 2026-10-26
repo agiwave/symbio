@@ -107,8 +107,52 @@ fn kernel_declares_only_the_protocol_cells() {
         ]
     );
     assert!(frozen.views().is_empty(), "内核不声明任何业务视图");
+    assert!(frozen.actors().is_empty(), "内核不声明任何执行体");
     for name in facts {
         assert_eq!(frozen.fact(name).unwrap().port, Some("port"), "{name}");
+        assert_eq!(
+            frozen.fact_owner(name),
+            Some(KERNEL_OWNER),
+            "协议五格归内核，owner 清单不允许出现无名条目"
+        );
+    }
+}
+
+/// `declare` 的第一个参数就是 owner：事实与视图逐条登记，同一张表不产生两个答案。
+#[test]
+fn declare_records_the_owner_of_each_fact_and_view() {
+    let mut b = Builder::new();
+    for name in [
+        EVENT_REQUEST,
+        EVENT_SENT,
+        EVENT_RESPONSE,
+        EVENT_FAILED,
+        EVENT_RETRY,
+    ] {
+        b.row(cover(name, None));
+    }
+    b.declare(
+        "plugins/example",
+        PluginDeclarations {
+            facts: &[],
+            views: Box::leak(
+                vec![probe_view("owned-view", &[(EVENT_REQUEST, "id")])].into_boxed_slice(),
+            ),
+            ports: &[],
+            actors: Vec::new(),
+            rows: &[],
+        },
+    );
+    let frozen = b.seal().expect("owner 登记不改变任何形状判据");
+    assert_eq!(frozen.view_owner("owned-view"), Some("plugins/example"));
+    for name in [
+        EVENT_REQUEST,
+        EVENT_SENT,
+        EVENT_RESPONSE,
+        EVENT_FAILED,
+        EVENT_RETRY,
+    ] {
+        assert_eq!(frozen.fact_owner(name), Some(KERNEL_OWNER), "{name}");
     }
 }
 
@@ -119,7 +163,7 @@ fn kernel_declares_only_the_protocol_cells() {
 /// `&mut Builder` 都造不出来。
 #[test]
 fn the_two_registration_ports_are_the_whole_surface() {
-    let _declare: fn(&mut Builder, PluginDeclarations<'_>) = Builder::declare;
+    let _declare: fn(&mut Builder, &'static str, PluginDeclarations<'_>) = Builder::declare;
     let _seal: fn(Builder) -> Result<Arc<Frozen>, Vec<Gap>> = Builder::seal;
 }
 

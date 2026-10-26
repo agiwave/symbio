@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::{PORTS, ROWS};
+use super::super::control_decl::{FACTS, VIEWS};
+use super::{load, LOOP_OWNER, PORTS, ROWS};
 use crate::symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
 use crate::symbio_core::Frozen;
 use crate::symbio_core::{Entity, Event, Seq, Verb};
@@ -2717,6 +2718,44 @@ fn an_empty_row_table_owes_nothing_and_never_panics() {
         super::load(&[]).is_err(),
         "空行表必须拒绝装载，而不是开一个不动的幕"
     );
+}
+
+/// 声明 owner 清单（DE-023 D-178）：真表装载后，每条控制面事实与视图都能答出
+/// 「谁交进来的」——控制面视图**全部**由 `plugins/loop` 声明，没有一条是无主的。
+#[test]
+fn every_control_plane_declaration_records_its_owner() {
+    let f = load(ROWS).expect("真表必须能冻结");
+    for fact in FACTS {
+        assert_eq!(
+            f.fact_owner(fact.name),
+            Some(LOOP_OWNER),
+            "事实 {} 的 owner 必须是交表方",
+            fact.name
+        );
+    }
+    for view in VIEWS {
+        assert_eq!(
+            f.view_owner(view.name),
+            Some(LOOP_OWNER),
+            "视图 {} 的 owner 必须是交表方",
+            view.name
+        );
+    }
+    // 生产装载里不允许出现「影子声明」：冻结表上的每一条都得有 owner。
+    for fact in f.facts() {
+        assert!(
+            f.fact_owner(fact.name).is_some(),
+            "{} 没有 owner",
+            fact.name
+        );
+    }
+    for view in f.views() {
+        assert!(
+            f.view_owner(view.name).is_some(),
+            "{} 没有 owner",
+            view.name
+        );
+    }
 }
 
 /// 一份 27 格的会话日志，形状照一次真实 CLI 实测（过 `--strict` 验收的长会话）：

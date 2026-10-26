@@ -68,13 +68,16 @@ fn core_table() -> Arc<Frozen> {
     }
     let rows: &'static [Decl] = Box::leak(rows.into_boxed_slice());
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: FACTS,
-        views: VIEWS,
-        ports: &[],
-        actors: Vec::new(),
-        rows,
-    });
+    b.declare(
+        super::super::loop_rows::LOOP_OWNER,
+        PluginDeclarations {
+            facts: FACTS,
+            views: VIEWS,
+            ports: &[],
+            actors: Vec::new(),
+            rows,
+        },
+    );
     b.seal().expect("控制面声明集必须能冻结")
 }
 

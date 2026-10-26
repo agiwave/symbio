@@ -474,7 +474,6 @@ const NOUN_BASELINE = {
   'symbio/src/symbio_core/plugin/route.rs': 8,
   'symbio/src/symbio_core/projection/mutations.rs': 1,
   'symbio/src/symbio_core/projection/rebuild.rs': 1,
-  'symbio/src/symbio_core/projection/token.rs': 1,
   'symbio/src/symbio_core/view/mod.rs': 1,
 }
 

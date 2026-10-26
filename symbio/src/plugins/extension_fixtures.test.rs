@@ -87,13 +87,16 @@ fn eval_ids(events: &[Event], _now: i64) -> Value {
 #[test]
 fn fact_extension_is_owner_local() {
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: facts(&[FIXTURE_FACT]),
-        views: &[],
-        ports: &[],
-        actors: Vec::new(),
-        rows: rows(&[FIXTURE_FACT]),
-    });
+    b.declare(
+        "fixture",
+        PluginDeclarations {
+            facts: facts(&[FIXTURE_FACT]),
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: rows(&[FIXTURE_FACT]),
+        },
+    );
     let frozen = b.seal().expect("新增事实只经声明口接入，内核不认识它");
     assert!(frozen.fact(FIXTURE_FACT).is_some());
     assert_eq!(frozen.facts().len(), 6, "协议五格 + 夹具一格");
@@ -104,23 +107,31 @@ fn fact_extension_is_owner_local() {
 #[test]
 fn view_extension_is_owner_local() {
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: facts(&[FIXTURE_FACT]),
-        views: &[ViewDecl {
-            name: FIXTURE_VIEW,
-            ver: 1,
-            reads: &[(FIXTURE_FACT, "id")],
-            evidence: &[],
-            cost: 1,
-            eval: eval_ids,
-        }],
-        ports: &[],
-        actors: Vec::new(),
-        rows: rows(&[FIXTURE_FACT]),
-    });
+    b.declare(
+        "fixture",
+        PluginDeclarations {
+            facts: facts(&[FIXTURE_FACT]),
+            views: &[ViewDecl {
+                name: FIXTURE_VIEW,
+                ver: 1,
+                reads: &[(FIXTURE_FACT, "id")],
+                evidence: &[],
+                cost: 1,
+                eval: eval_ids,
+            }],
+            ports: &[],
+            actors: Vec::new(),
+            rows: rows(&[FIXTURE_FACT]),
+        },
+    );
     let frozen = b.seal().expect("新增视图只经声明口接入");
     let view = frozen.view(FIXTURE_VIEW).expect("视图在冻结表里");
     assert_eq!(view.ver, 1);
+    assert_eq!(
+        frozen.view_owner(FIXTURE_VIEW),
+        Some("fixture"),
+        "视图的 owner 同样是交表方，不靠声明里多一个字段"
+    );
     assert_eq!((view.eval)(&[], 0), json!([]));
 }
 
@@ -129,22 +140,25 @@ fn view_extension_is_owner_local() {
 #[test]
 fn strategy_extension_is_owner_local() {
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: facts(&[FIXTURE_FACT]),
-        views: &[],
-        ports: &[],
-        actors: vec![ActorDecl {
-            name: "fixture-actor",
-            mode: LatencyTier::Reflex,
-            reads: &[],
-            writes: &[FIXTURE_FACT],
-        }],
-        rows: {
-            let mut out = rows(&[FIXTURE_FACT]).to_vec();
-            out.push(cover(FIXTURE_FACT, Some("fixture-actor")));
-            Box::leak(out.into_boxed_slice())
+    b.declare(
+        "fixture",
+        PluginDeclarations {
+            facts: facts(&[FIXTURE_FACT]),
+            views: &[],
+            ports: &[],
+            actors: vec![ActorDecl {
+                name: "fixture-actor",
+                mode: LatencyTier::Reflex,
+                reads: &[],
+                writes: &[FIXTURE_FACT],
+            }],
+            rows: {
+                let mut out = rows(&[FIXTURE_FACT]).to_vec();
+                out.push(cover(FIXTURE_FACT, Some("fixture-actor")));
+                Box::leak(out.into_boxed_slice())
+            },
         },
-    });
+    );
     let frozen = b.seal().expect("新增策略行 = 一行声明 + 一个执行体");
     assert!(frozen.actor("fixture-actor").is_some());
     assert!(
@@ -161,26 +175,38 @@ fn plugin_extension_is_owner_local() {
     const B_FACT: &str = "fixture.owner_b";
 
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: facts(&[A_FACT]),
-        views: &[],
-        ports: &[],
-        actors: Vec::new(),
-        rows: rows(&[A_FACT]),
-    });
-    b.declare(PluginDeclarations {
-        facts: facts(&[B_FACT]),
-        views: &[],
-        ports: &[],
-        actors: Vec::new(),
-        rows: Box::leak(vec![cover(B_FACT, None)].into_boxed_slice()),
-    });
+    b.declare(
+        "fixture/owner_a",
+        PluginDeclarations {
+            facts: facts(&[A_FACT]),
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: rows(&[A_FACT]),
+        },
+    );
+    b.declare(
+        "fixture/owner_b",
+        PluginDeclarations {
+            facts: facts(&[B_FACT]),
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: Box::leak(vec![cover(B_FACT, None)].into_boxed_slice()),
+        },
+    );
     let frozen = b
         .seal()
         .expect("两个 owner 各自交表即可共装，内核不登记插件名");
     assert!(frozen.fact(A_FACT).is_some());
     assert!(frozen.fact(B_FACT).is_some());
     assert_eq!(frozen.facts().len(), 7, "协议五格 + 两个 owner 各一格");
+    assert_eq!(
+        frozen.fact_owner(A_FACT),
+        Some("fixture/owner_a"),
+        "owner 清单逐条记下交表方，而不是把两个 owner 混成一个"
+    );
+    assert_eq!(frozen.fact_owner(B_FACT), Some("fixture/owner_b"));
 }
 
 // ── 5. 共享类型（插件本地族 + 开放载荷 + 机制构造器）────────────────

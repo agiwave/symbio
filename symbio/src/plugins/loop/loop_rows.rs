@@ -1427,15 +1427,22 @@ pub(crate) static ROWS: &[Decl] = &[
 ///
 /// 执行体声明与绑定项一起交（[`actor_decls`] 就是绑定表的 `decl` 投影），所以装载期
 /// 能看到的名字与派发器跑得动的名字**同源**。
+/// 控制面声明集的 owner（DE-023 D-178）：这张表由 `plugins/loop` 交进装载口，
+/// 事实与视图的 owner 清单因此都指向这里。
+pub(crate) const LOOP_OWNER: &str = "plugins/loop";
+
 pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut b = Builder::new();
-    b.declare(PluginDeclarations {
-        facts: super::control_decl::FACTS,
-        views: super::control_decl::VIEWS,
-        ports: PORTS,
-        actors: actor_decls(),
-        rows,
-    });
+    b.declare(
+        LOOP_OWNER,
+        PluginDeclarations {
+            facts: super::control_decl::FACTS,
+            views: super::control_decl::VIEWS,
+            ports: PORTS,
+            actors: actor_decls(),
+            rows,
+        },
+    );
     b.seal()
 }
 

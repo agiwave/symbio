@@ -120,26 +120,23 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 显为单消费方 ⇒ 豁免自行失效并被删除（纪律 2：豁免是在补口径的洞，补洞该补
       // 口径，不该把洞登记成永久账目）。
       //
-      // 剩下 5 条是**真·单消费方接缝**：core 内确实没有第二个模块（生产）在用，但既
-      // 下沉不了（core 不得反向依赖插件 / 类型行为无处安放），又必须占根出口（C-002
-      // 禁插件深引 core 域目录）。
+      // 剩下 3 条（2026-10-26 B2 核验后）：`ActorSpec` / `EVENT_TURN_STAGE` 是**协议
+      // 接缝**（F3 冻结字段集 / 线上事件名），`branch_hide_unselected` 是**节点树接缝**
+      // （`branch_selected` + `subtree_of` 的组合；子树同一性判据的唯一实现在 core，
+      // 搬走要么新增单消费方根出口、要么产生第二份实现——D-173 口径 3 禁止）。
+      //
+      // 此前的投影类条目已清零：`turnstate` / `SloLatencyView` / `FallbackRateView` /
+      // `mutations_latest_snapshot` 经 `isSinkCandidate` 核验**本来就不是单消费方**
+      // （core 自己的投影域在生产使用它们），豁免条目空转，直接删除；`token_ledger`
+      // 的唯一生产消费方是 `plugins/session/stats.rs`，按 D-180 连同类型与实现搬进
+      // 会话插件（`plugins/session/token_ledger.rs`），根出口与条目同时退役。
       ActorSpec:
         'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（turn_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
-      turnstate:
-        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。core 外唯一生产消费方 = plugins/session/worker_progress（S2 的 in_flight 判据）。core 内没有第二个生产模块用它（同域内只有测试彩排），故显为单消费方',
-      SloLatencyView:
-        'P2 跨会话聚合的视图类型：merge 是类型行为（提成根函数即无主函数），C-002 禁插件深引 ⇒ 类型必须占根。core 内没有第二个生产消费模块（跨会话聚合实现在插件侧），故显为单消费方',
-      FallbackRateView:
-        '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
-      mutations_latest_snapshot:
-        '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / turn_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
-      token_ledger:
-        '投影函数：与 cost_ledger / slo_report / fallback_rate 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引 projection 域目录）。core 外唯一生产消费方 = plugins/session/stats.rs 的用量列（`response{port=model}` 载荷的 `usage`）。core 内没有第二个生产模块用它（同域内只有测试），故显为单消费方。不可下沉：下沉等于让「用量」的口径住进会话插件，而它读的是事件载荷的通用形状（任何读侧都该按同一本账报数）',
       // 2026-10-26（D-173）：分支读法的**节点树出口**。它与 `unselected_roots`
       // （请求包出口，住 core 内部）是同一条判据的两个问法，子树口径 = `parent_id` ∪
       // `meta.turn_root` 的唯一实现 `node_build::subtree_of` 就在它脚下。
       branch_hide_unselected:
-        '投影读侧函数（分支的「藏」）：与 transcript / mutations_latest_snapshot 同族——**一条支的子树只有一份收法**（`node_build::subtree_of`：`parent_id` ∪ `meta.turn_root`；`flat` 档升根的节点没有 `parent_id`，只按父边收会漏）。core 外唯一生产消费方 = plugins/session/read.rs 的 `get_context_messages`；C-002 禁插件深引 projection 域 ⇒ 必须占根出口。不可下沉：下沉等于把「子树同一性」的第二份实现放进会话插件，而它漂的后果是静默的——呈现与上下文各读一套树（判据见 D-173 口径 3）',
+        '节点树接缝（分支的「藏」）：它不是一本账的投影，而是 `branch_selected` + `subtree_of` 两个内核机制的组合——**一条支的子树只有一份收法**（`node_build::subtree_of`：`parent_id` ∪ `meta.turn_root`；`flat` 档升根的节点没有 `parent_id`，只按父边收会漏）。core 外唯一生产消费方 = plugins/session/read.rs 的 `get_context_messages`；C-002 禁插件深引 projection 域 ⇒ 必须占根出口。不可下沉：搬进会话插件要么给 `subtree_of` 新增一条单消费方根出口（C-003 判红），要么写第二份子树收法（D-173 口径 3 禁止——呈现与上下文各读一套树，漂的后果是静默的）',
       // 2026-10-21（段一）：事件 kind 名是**事件网格的命名空间**，README §3
       // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
       // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop
@@ -158,7 +155,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
  * `dead-code-audit` R-002 逐项承认。
  *
- * `58` 是当前存量（自然单消费方 64，其中 6 条登记在 `WAIVERS`），两条来源都不是新增违规：
+ * `13` 是当前存量上限（自然单消费方 − 已登记豁免）。下列批次不是新增违规，是口径与下沉的记录：
  * - **口径修正**（2026-10-09）：**测试文件不再算架构消费方**（口径全文见
  *   `core-surface.mjs` 的 `collectConsumers`）——此前「一个模块在生产用、另一个模块的
  *   测试顺手写了一次名字」被读成「两个模块依赖」，遮住了一批真·单消费方符号。
@@ -205,6 +202,13 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * - **单消费方投影下沉批**（2026-10-26）：`spend_ledger` 的视图类型与实现搬进唯一消费方
  *   `plugins/session`（DE-023 D-180），根出口与豁免条目同时删除——豁免账本 13 → 12。
  *   违规格计数不变（该符号本就在豁免里，不计入 `one`）。
+ *
+ * - **B2 投影豁免清零批**（2026-10-26）：`token_ledger` 同法搬进 `plugins/session`
+ *   （唯一消费方 `stats.rs`），豁免账本 12 → 11，`one` 不变。另核验四条「投影类」豁免
+ *   （`turnstate` / `SloLatencyView` / `FallbackRateView` / `mutations_latest_snapshot`）
+ *   本就不是 `isSinkCandidate`（core 自己的投影域在生产使用它们），条目空转 ⇒ 删除；
+ *   它们从未计入 `one`，基线不动。剩下 `ActorSpec` / `branch_hide_unselected` /
+ *   `EVENT_TURN_STAGE` 三条接缝，理由见上。
  */
 
 const BASELINE = process.env.CORE_EXPORT_BASELINE
