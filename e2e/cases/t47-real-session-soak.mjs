@@ -35,8 +35,8 @@ import './_selfrun.mjs';
 // ## 本负载**没有**压到的：请求视图级的体积上界
 //
 // **那一层不存在**。请求组装期不改写历史正文——三层视图裁剪（内容淡化 / 轮次淡化 /
-// 窗口骨架化）已按 [D-078](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 整族退役，理由是它与「请求体 =
-// 事实网格的纯投影」互斥（[D-048a](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）。v2 唯一的体积界在
+// 窗口骨架化）已按 [D-078](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README") 整族退役，理由是它与「请求体 =
+// 事实网格的纯投影」互斥（[D-048a](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")）。v2 唯一的体积界在
 // **写入时**（L0 单条工具结果守卫，约 8K token/条）与**水位**（压缩 70%），两者都不在
 // 请求视图里，所以本负载的字节量按设计由它们承担，不指望视图再收一道。
 //

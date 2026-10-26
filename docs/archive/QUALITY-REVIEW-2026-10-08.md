@@ -5,7 +5,7 @@
 > §1.5 的 **D3(a)**（10 vs 11 已由 `01:505-511` 解释）。§0 的「没有虚账」结论因此**不成立**。
 > 保留本文件仅为留存对比过程；引用请用合并版。
 
-> **文档类型：一次性分析报告**（owner 是 [`docs/archive/`](../README.md#文档放在哪)：一次性评审 / 体检报告一律归档）。
+> **文档类型：一次性分析报告**（owner 是 [[docs/README|`docs/archive/`]]：一次性评审 / 体检报告一律归档）。
 > **复核对象**：`docs/plan/13-质量改进总纲.md`（下称「13 号」）登记的问题、其现状、遗漏、以及推进可持续性。
 > **复核方式**：逐条读代码 + 跑全量门禁（`node scripts/gate.mjs` → **通过 82/82，全绿**）+ 独立扫描。
 > **基线**：分支 `v2-plan`，HEAD = `cb6ad44`（M10），工作树干净。
@@ -56,10 +56,10 @@
 | # | 文档主张 | 核实结果 | 证据 |
 |---|---|---|---|
 | P1 | 规划缺产品层，出口判据是「git diff 没改 F1–F6」 | ✅ 成立 | `docs/plan/README.md` §0 四行目标全是架构项，无用户/指标列 |
-| P2 | SLO 数字基于 mock，唯一扫描口是 `#[ignore]` | ✅ 成立 | `symbio/src/symbio_core/projection/slo.test.rs:200` `#[ignore = "阶段三扫描口…"]` |
-| P3 | 反射/快路在出厂档位下产生不了样本 | ✅ 成立 | `symbio/src/plugins/session/config.rs:41-46` `#[default] Bridge` |
-| P4 | `session/stats` 八列零消费者 | ✅ 成立 | `tauri/src`、`cli/src` 除生成物 `routes.gen.ts:54` 外无任何引用 |
-| P5 | 召回率无评测集（`vec` 恒空） | ✅ 成立 | `symbio/src/symbio_core/projection/recall.rs:35` 仅 `tag` 过滤 |
+| P2 | SLO 数字基于 mock，唯一扫描口是 `#[ignore]` | ✅ 成立 | `crates/symbio-core/src/projection/slo.test.rs:200` `#[ignore = "阶段三扫描口…"]` |
+| P3 | 反射/快路在出厂档位下产生不了样本 | ✅ 成立 | `crates/symbio-plugin-session/src/config.rs:41-46` `#[default] Bridge` |
+| P4 | `session/stats` 八列零消费者 | ✅ 成立 | `tauri/src`、`crates/symbio-cli/src` 除生成物 `routes.gen.ts:54` 外无任何引用 |
+| P5 | 召回率无评测集（`vec` 恒空） | ✅ 成立 | `crates/symbio-core/src/projection/recall.rs:35` 仅 `tag` 过滤 |
 
 > 注：13 号证据列的部分路径是简写（如 `projection/slo.test.rs` 实为 `symbio_core/projection/slo.test.rs`）。按 13 号自己的约定「判据取文件+符号」，属可接受简写，但**读者按字面找不到文件**，建议补全。
 

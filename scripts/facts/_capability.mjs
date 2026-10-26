@@ -31,7 +31,8 @@ import { matchBrace, stripComments, stripTestModules } from '../rust-scan.mjs'
 import { routeArmDocs, vdfsOps } from '../route-facts.mjs'
 import { UNWIRED_MARKER } from '../route-facts.mjs'
 
-const PLUGINS_DIR_REL = ['symbio', 'src', 'plugins']
+const PLUGINS_DIR_REL = ['crates']
+const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
 
 /** 抽不到时的占位。**空着比编一句强**——见文件头。 */
 export const UNKNOWN = '—'
@@ -47,7 +48,9 @@ export const UNKNOWN = '—'
  */
 export function vdfsAddrRoot() {
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const file = path.resolve(here, '..', '..', ...PLUGINS_DIR_REL, 'vdfs', 'fs.rs')
+  const file = path.resolve(
+    here, '..', '..', ...PLUGINS_DIR_REL, PLUGIN_CRATE_PREFIX + 'vdfs', 'src', 'fs.rs',
+  )
   const src = fs.readFileSync(file, 'utf8')
   const m = src.match(/pub const VDFS_ADDR_ROOT:\s*&str\s*=\s*"([^"]+)"/)
   if (!m) throw new Error('cannot extract VDFS_ADDR_ROOT from plugins/vdfs/fs.rs')
@@ -169,7 +172,14 @@ export function toolFacts(root) {
   const out = new Map()
   let dirs = []
   try {
-    dirs = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory())
+    dirs = fs
+      .readdirSync(base, { withFileTypes: true })
+      .filter(
+        (e) =>
+          e.isDirectory() &&
+          e.name.startsWith(PLUGIN_CRATE_PREFIX) &&
+          e.name !== PLUGIN_CRATE_PREFIX + 'api',
+      )
   } catch {
     return out
   }
@@ -235,8 +245,8 @@ export function toolFacts(root) {
 export function vdfsOpDocs(root) {
   const out = new Map()
   const files = [
-    path.join(root, 'symbio', 'src', 'symbio_core', 'plugin', 'route.rs'),
-    path.join(root, 'symbio', 'src', 'plugins', 'vdfs', 'protocol.rs'),
+    path.join(root, 'crates', 'symbio-core', 'src', 'plugin', 'route.rs'),
+    path.join(root, 'crates', 'symbio-plugin-vdfs', 'src', 'protocol.rs'),
   ]
   for (const file of files) {
     let text

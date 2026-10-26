@@ -176,7 +176,7 @@ export default defineCase(
         provider: PROVIDER_ID,
         session: SID_INTERACTIVE,
         mode: 'interactive',
-        // 会话 metadata 里 CLI 写死 `risk_level: medium`（`cli/src/client.rs:373`）；
+        // 会话 metadata 里 CLI 写死 `risk_level: medium`（`crates/symbio-cli/src/client.rs:373`）；
         // High > Medium ⇒ 必拦。
       });
       assertEq(

@@ -1,0 +1,511 @@
+use super::skill_response::assemble_response;
+use symbio_deploy::PLUGIN_ID_SKILL;
+use crate::loader::{load_skills_from_dirs_with_budget, LoadBudget};
+use crate::skill_tool::SkillExecuteTool;
+use crate::types::{Skill, SkillConfig};
+use symbio_core::{
+    plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    TRAVERSE_AVAILABLE_TOOLS,
+};
+use async_trait::async_trait;
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+pub struct SkillPlugin {
+    config: Arc<RwLock<SkillConfig>>,
+    /// 本插件自己的目录（构造时由父插件经 `PLUGIN_DIR` 告知）
+    dir: PluginDir,
+}
+
+impl SkillPlugin {
+    /// 把 skill_dirs 里的 `{HOMEDIR}` 占位符解析为**本作用域的系统根**
+    ///
+    /// ⚠️ 作用域根**由父插件经 `PLUGIN_DIR` 告知的目录推出**（本插件目录的上一级），
+    /// **不能**读全局 `HomedirRegistry`：子 Agent 里 skill 的挂载点是
+    /// `<agent dir>/skill`，读全局会指向系统级 `<homedir>/skills`——那是**父/系统**的
+    /// 技能目录，与 `load_skills_for_tool` 的「子树自包含」直接相抵。
+    fn resolve_skill_dirs_template(dirs: &mut [String], scope_root: &Path) {
+        let skills_dir = scope_root.join("skills").to_string_lossy().to_string();
+        for d in dirs.iter_mut() {
+            if d.contains("{HOMEDIR}/skills") {
+                *d = d.replace("{HOMEDIR}/skills", &skills_dir);
+            }
+        }
+    }
+
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
+
+        let mut config: SkillConfig = ctx
+            .config()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_else(|| SkillConfig {
+                // 加载路径优先级：
+                // 1. 工作区级别：`.symbio/skills`（项目内）
+                // 2. 本作用域级别：`{HOMEDIR}/skills`（= 本插件目录的上一级下的 skills）
+                // 3. 第三方工具兼容：`.qwen/skills`、`.sixth/skills`、`.qoder/skills`
+                skill_dirs: vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()],
+                // 预算字段使用 SkillConfig::default() 的值
+                ..SkillConfig::default()
+            });
+
+        // 作用域根 = 本插件目录的上一级（`<root>/skill` → `<root>`）。
+        // 与 `PluginDir` 同源：都由父插件告知，不由本插件查全局。
+        let scope_root = dir
+            .dir()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| dir.dir().to_path_buf());
+        Self::resolve_skill_dirs_template(&mut config.skill_dirs, &scope_root);
+
+        Arc::new(SkillPlugin::new(config, dir)) as Arc<dyn Plugin>
+    }
+
+    pub fn new(config: SkillConfig, dir: PluginDir) -> Self {
+        Self {
+            config: Arc::new(RwLock::new(config)),
+            dir,
+        }
+    }
+
+    pub fn metadata() -> PluginMeta {
+        PluginMeta::new("skill", "技能")
+            .with_description("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
+            .with_version("0.2.0")
+            .with_order(4)
+            .with_icon(PLUGIN_ID_SKILL)
+        // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
+        // 见下方 `impl VdfsProvider for SkillPlugin`）——它是挂载点的动态自述，容器
+        // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
+    }
+
+    /// 为 LLM 工具（traverse / execute）加载技能
+    ///
+    /// 保留 exe-path fallback：当 workdir 下找不到任何 skill 时，
+    /// 尝试从可执行文件所在目录向上推算项目根目录，兼顾开发阶段使用场景。
+    async fn load_skills_for_tool(
+        &self,
+        workdir: Option<String>,
+    ) -> Result<Vec<Skill>, PluginError> {
+        let config = self.config.read().await;
+        let workdir_path = workdir
+            .as_ref()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new("."));
+        let budget = LoadBudget {
+            max_skills: config.max_skills,
+            max_body_chars: config.max_body_chars,
+        };
+        // **本插件自己的目录**是第一来源（其后才是配置里的 `skill_dirs`）。
+        // 于是子 Agent 的 skill 实例自包含——技能就放在 `<agent dir>/skill/` 下，
+        // 不需要任何全局配置，复制整个目录即复制这个 Agent 的全部技能。
+        let mut dirs: Vec<String> = Vec::with_capacity(config.skill_dirs.len() + 1);
+        dirs.push(self.dir.dir().to_string_lossy().to_string());
+        dirs.extend(config.skill_dirs.iter().cloned());
+        let mut skills = load_skills_from_dirs_with_budget(&dirs, workdir_path, budget).await?;
+
+        // 如果从工作目录没有加载到技能，尝试从项目根目录加载
+        if skills.is_empty() {
+            let project_root = if let Ok(exe_path) = std::env::current_exe() {
+                exe_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf()
+            } else {
+                Path::new(".").to_path_buf()
+            };
+            let global_skills =
+                load_skills_from_dirs_with_budget(&config.skill_dirs, &project_root, budget)
+                    .await?;
+            skills.extend(global_skills);
+        }
+        Ok(skills)
+    }
+
+    async fn list_skills(&self, workdir: Option<String>) -> Result<Vec<Skill>, PluginError> {
+        self.load_skills_for_tool(workdir).await
+    }
+}
+
+// ==================== VDFS 挂载点（`<根>/skill`） ====================
+//
+// 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
+// 写 / 删 / 动作的语义都在这里表达。
+//
+// 存储走 `providers::DirVdfs`（一个技能 = 一个目录，主文件
+// `SKILL.md`）：条目寻址、原子写、mtime、整包 zip、变更广播都在集中实现里，
+// 本模块只剩 **skill 特有的两件事**——SKILL.md 的摘要解析（frontmatter →
+// 标题/摘要/config）与写前的表单校验。
+
+use symbio_providers::DirVdfs;
+use symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_core::{
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
+    VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
+};
+
+const LABEL: &str = "技能";
+
+/// 技能主文件（Markdown，**必须按纯文本落盘**）
+const MANIFEST: &str = "SKILL.md";
+
+impl SkillPlugin {
+    /// 本插件的磁盘底座（根 = 自己的目录）
+    fn store(&self) -> DirVdfs {
+        store(&self.dir)
+    }
+}
+
+/// 磁盘底座（每次现取，跟随 homedir 切换）
+///
+/// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
+/// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
+fn store(dir: &PluginDir) -> DirVdfs {
+    DirVdfs::at(dir.dir(), PLUGIN_ID_SKILL, MANIFEST).with_label(LABEL)
+}
+
+/// 路径末段 → 条目 id（去掉 `.skill` 呈现扩展名）
+fn id_of(path: &str) -> String {
+    symbio_providers::vdfs_id_of(path, PLUGIN_ID_SKILL)
+}
+
+/// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
+///
+/// 末段非空 ⇒ 名字由使用方给；地址为空 ⇒ **使用方没给名字**（写挂载点目录自身，
+/// 即「点新建 → 在详情页填好 → 保存」），id 由本插件生成。目录自身没有可覆盖的
+/// 目标，所以必须带 `create` 意图（见 [`VdfsRequest::Write`]）。
+fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
+    if !path.trim_matches('/').is_empty() {
+        return Ok(id_of(path));
+    }
+    if !create {
+        return Err(VdfsError::invalid(format!(
+            "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
+        )));
+    }
+    Ok(symbio_providers::vdfs_auto_id(PLUGIN_ID_SKILL))
+}
+
+/// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
+///
+/// 摘要取自 YAML frontmatter（`name` / `description`）；没有 frontmatter 时标题
+/// 就是条目 id、无摘要。主文件缺失（`raw = None`）时降级为以 id 呈现的
+/// 占位条目——列表不得因单个坏条目而少一项或多失败。
+/// 详情定义（JSON 形态）——**唯一出处**：节点 `schema` 与新建类型 `schema` 都读它，
+/// 因此「点新建」的草稿表单与「选中一项」的详情表单是同一张。
+fn detail_definition() -> serde_json::Value {
+    serde_json::to_value(super::detail::skill_detail_definition())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
+    let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
+    n.kind = PLUGIN_ID_SKILL.to_string();
+    n.ext = Some(VDFS_EXT_FORM.to_string());
+    n.schema = Some(detail_definition());
+    n.status = VDFS_STATUS_ACTIVE.to_string();
+    let Some(text) = raw else { return n };
+
+    if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
+        if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
+            n.title = name.to_string();
+        }
+        if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
+            n.description = Some(desc.to_string());
+        }
+    }
+    n
+}
+
+/// 表单 manifest → SKILL.md 全文（写盘前的校验/规范化）。
+///
+/// 强制 BUG-SR6（名称 == 目录 id）与 BUG-SR7（description ≥ 10 字符），
+/// 错误在保存时即给出（而非下次加载时）。zip 上传路径不经过本函数。
+///
+/// 返回**纯文本**而不是 JSON 值：SKILL.md 是 Markdown，必须原样落盘——包成
+/// JSON 字符串会让落盘内容带上引号与转义的 `\n`，读回来 frontmatter 就解析不
+/// 出来了（`DirVdfs::write_json` 因此对本资源禁用）。
+fn validate_manifest(id: &str, manifest: &serde_json::Value) -> Result<String, PluginError> {
+    super::detail::manifest_to_skill_md(id, manifest)
+}
+
+/// `write { create }` 的最小清单。
+///
+/// `manifest_to_skill_md` 要求 `name` 与目录名（id）一致、`description`
+/// 至少 10 字符，故这里给出同名的骨架描述，用户随后在详情里完善。
+fn new_manifest(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": id,
+        "description": format!("{id}：请填写该技能的用途与使用时机（至少 10 字）"),
+    })
+}
+
+#[async_trait]
+impl VdfsProvider for SkillPlugin {
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "{LABEL}是叶子资源，没有子项：{path}"
+                    )));
+                }
+                Ok(VdfsResponse::list(
+                    self.store()
+                        .entries()
+                        .await?
+                        .iter()
+                        .map(|e| node_of(&e.id, e.raw.as_deref()))
+                        .collect::<Vec<VdfsNode>>(),
+                ))
+            }
+            VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填。
+                    //
+                    // 根的自述里带着「可新建类型」：根下可新建**一种**类型（技能）。
+                    // 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 详情
+                    // 定义），因此「点添加」与「选中一项」在交互上没有第二种形态
+                    // ——差别只在草稿没有内容，且此时**多出一条「导入整包」动作**
+                    // （[`VDFS_ACTION_IMPORT`]，见 `detail::skill_detail_definition`）。
+                    // 导入**不是类型里的字段**：类型只说「这类东西落成后长什么样」
+                    // （见 D-029）。
+                    //
+                    // `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后
+                    // 的节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
+                    return Ok(VdfsResponse::Stat(
+                        VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
+                            VdfsNewType::new(PLUGIN_ID_SKILL, LABEL)
+                                .with_description(format!(
+                                    "新建{LABEL}（在详情页里填好，保存时一次写入）"
+                                ))
+                                .with_node_ext(VDFS_EXT_FORM)
+                                .with_schema(detail_definition()),
+                        )),
+                    ));
+                }
+                let e = self.store().entry(&id_of(path)).await?;
+                Ok(VdfsResponse::Stat(node_of(&e.id, e.raw.as_deref())))
+            }
+            // 详情读的是**表单能填的形状**（config JSON），不是 Markdown 原文——
+            // 原文由 `read(<id>/SKILL.md)` 这一真实地址给出（目录型天然支持）。
+            VdfsRequest::Read => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "该路径是目录，不可读取内容：{path}"
+                    )));
+                }
+                let text = self.store().read_text(&id_of(path)).await?;
+                let value = super::detail::skill_md_to_config(&text).unwrap_or_else(|| {
+                    serde_json::json!({ "name": id_of(path), "description": "", "content": text })
+                });
+                let body = serde_json::to_string_pretty(&value)
+                    .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+                Ok(VdfsResponse::Read(
+                    VdfsContent::text(body).with_mime("application/json"),
+                ))
+            }
+            VdfsRequest::Write { content } => {
+                let s = self.store();
+                // 二进制载荷**不再是创建通道**：整包导入已改走详情页动作
+                // （`VDFS_ACTION_IMPORT`，见下面的 `Action` 分支）。这里显式拒绝，
+                // 而不是让它落到文本分支——那会报「manifest 不是合法 JSON」，
+                // 让人以为是内容格式问题，而真正的原因是**用错了通道**。
+                if content.binary {
+                    return Err(VdfsError::invalid(format!(
+                        "{LABEL}不接受二进制写入：整包导入请走 `{VDFS_ACTION_IMPORT}` 动作"
+                    )));
+                }
+                // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
+                // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsRequest::Write`）。
+                let id = resolve_id(path, content.create)?;
+                let text = content.as_text().unwrap_or_default();
+                // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+                // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
+                // 是合法形态，此时落一份最小内容。
+                let manifest = if content.create && text.trim().is_empty() {
+                    new_manifest(&id)
+                } else {
+                    serde_json::from_str::<serde_json::Value>(text)
+                        .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
+                };
+                // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
+                let normalized =
+                    validate_manifest(&id, &manifest).map_err(vdfs_from_plugin_error)?;
+                let created = s.write_text(&id, &normalized).await?;
+                // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
+                // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
+                let generated = path.trim_matches('/').is_empty().then_some(id);
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
+                    name: generated,
+                    created,
+                }))
+            }
+            VdfsRequest::Delete { .. } => {
+                if path.is_empty() {
+                    return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+                }
+                let s = self.store();
+                let id = id_of(path);
+                // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
+                s.entry(&id).await?;
+                s.remove(&id).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Action { action, payload } => {
+                // 「导入」落在**挂载根**上（草稿详情页那条动作就打在根上）：
+                // 条目名由包的文件名推导——使用方给不了名字，也就没有「导到哪个
+                // 名字下」这回事。其余动作（export）都作用在**已有条目**上。
+                if action == VDFS_ACTION_IMPORT {
+                    if !path.trim_matches('/').is_empty() {
+                        return Err(VdfsError::invalid(format!(
+                            "「导入」只对{LABEL}挂载根可用：{path}"
+                        )));
+                    }
+                    let pack = symbio_providers::VdfsUnpack::from_payload(payload.as_ref())
+                        .map_err(|e| VdfsError::invalid(e.0))?;
+                    let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
+                    let name = pack.name_of(PLUGIN_ID_SKILL);
+                    let created = self.store().import_pack(&name, &bytes).await?;
+                    return Ok(VdfsResponse::Action(VdfsActionResult {
+                        action,
+                        ok: true,
+                        message: format!(
+                            "{}{LABEL}「{name}」",
+                            if created { "已导入" } else { "已覆盖" }
+                        ),
+                        data: None,
+                    }));
+                }
+                if action != VDFS_ACTION_EXPORT {
+                    return Err(VdfsError::NotImplemented);
+                }
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "「导出」只对{LABEL}条目可用：{path}"
+                    )));
+                }
+                let id = id_of(path);
+                let pack = self.store().export_pack(&id).await?;
+                let data = serde_json::to_value(&pack)
+                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action: action.clone(),
+                    ok: true,
+                    message: format!("已打包「{}」", pack.filename),
+                    data: Some(data),
+                }))
+            }
+            VdfsRequest::Watch { sink } => {
+                vdfs_watch_changes(PLUGIN_ID_SKILL, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Unwatch => {
+                vdfs_unwatch_changes(PLUGIN_ID_SKILL, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+}
+
+#[async_trait]
+impl Plugin for SkillPlugin {
+    fn meta(&self) -> PluginMeta {
+        Self::metadata()
+    }
+
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_core::VdfsProvider>> {
+        Some(self)
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = path.strip_prefix('/').unwrap_or(&path);
+
+        match path {
+            // 按名称执行一个技能，返回它的定义正文。
+            "execute" => {
+                #[derive(serde::Deserialize, Clone)]
+                struct ExecuteRequest {
+                    name: String,
+                    args: Option<String>,
+                }
+                let req: ExecuteRequest = ctx.payload()?;
+
+                let skills = self
+                    .list_skills(ctx.get(symbio_core::WORKDIR))
+                    .await?;
+                let skill = skills
+                    .into_iter()
+                    .find(|s| s.name == req.name)
+                    .ok_or_else(|| {
+                        PluginError::NotFound(format!("Skill not found: {}", req.name))
+                    })?;
+
+                // 组装（参数提示检查 / 变量替换 / 基目录前缀）与 `read_skill` 同一处：
+                // 两条路径对同一个技能给出同一种答复，不再有「工具侧检查、兜底臂放过」。
+                Ok(PluginPayload::new(&assemble_response(
+                    &skill,
+                    req.args.as_deref(),
+                )?))
+            }
+            _ => {
+                let skills = self
+                    .list_skills(ctx.get(symbio_core::WORKDIR))
+                    .await?;
+                if let Some(skill) = skills.into_iter().find(|s| s.name == path) {
+                    // 名称路由没有 args 入口 ⇒ 声明了 `argument_hint` 的技能在这里
+                    // 与 `skill/execute` 一样返回校验错误，而不是把未替换的模板直接交出去。
+                    return Ok(PluginPayload::new(&assemble_response(&skill, None)?));
+                }
+                Err(PluginError::NotFound(format!("路径不存在: {path}")))
+            }
+        }
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        if sub_path == TRAVERSE_AVAILABLE_TOOLS {
+            let skills = self
+                .list_skills(ctx.get(symbio_core::WORKDIR))
+                .await?;
+
+            if !skills.is_empty() {
+                if let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {
+                    let skill_tool = Arc::new(SkillExecuteTool::new(skills));
+                    tool_visitor.put(CapabilityRow::tool(skill_tool)).await;
+                }
+            }
+        }
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
+symbio_core::submit_object_creator!(PLUGIN_ID_SKILL, SkillPlugin::build, dyn Plugin);
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;

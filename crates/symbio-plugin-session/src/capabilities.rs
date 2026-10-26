@@ -1,0 +1,179 @@
+//! 会话收集器 —— 工具能力与选项字段的 traverse 收集（session 插件内部设施）
+//!
+//! 两个收集器是**同一件事的两半**（`collect_capabilities` 收工具、
+//! `collect_options` 收选项字段），同处本文件；「收集机制」的契约
+//! （`Registry` 收集口三方法与端点字面量）留在 `symbio_core`。
+//!
+//! ## 背景
+//!
+//! 重构前，会话的工具集由 **agent 插件**在 `agent/chat` 路由里独家装配：
+//! session 把 chat 请求整个转交给 agent，agent 再 `parent.traverse` 收工具、
+//! 装 system prompt、最后转交 model。这让 agent 插件成为会话链路上的**特权节点**——
+//! 其它插件（local / web / mcp / skill）都只是 `traverse` 的参与者，唯独 agent 既
+//! 参与 `traverse` 又独占 chat 路由，且 session 必须选出一个 agent 才能对话。
+//!
+//! ## 重构后
+//!
+//! **会话编排权归 session 插件**。`traverse(TRAVERSE_AVAILABLE_TOOLS)` 是唯一且
+//! 统一的工具贡献机制，所有插件（含 agent）在同一机制下按相同契约向会话附加能力：
+//!
+//! ```text
+//! session ──collect_capabilities(parent, ctx)──▶ parent.traverse(available_tools)
+//!                                                  ├─ local   : 文件/搜索/shell
+//!                                                  ├─ web     : 搜索/抓取
+//!                                                  ├─ mcp     : 外部 MCP 工具
+//!                                                  ├─ skill   : 技能
+//!                                                  └─ agent   : 仅当 ctx[AGENT_ID] 存在时贡献
+//!                                                               （身份/认知/子智能体）
+//! ```
+//!
+//! agent 是否贡献工具完全由 `ctx[AGENT_ID]` 决定——**不选择 agent 的会话照常运行**，
+//! 只是没有智能体相关的工具与人格。
+//!
+//! ## 为什么放在 session 插件
+//!
+//! 本管线的唯一驱动方是 session 编排器：子智能体（agent 插件的 `agent_run`）需要
+//! 嵌套会话时，经收件箱地址写入（`vdfs/write <子会话地址>/inbox`）复用本管线，而非由
+//! agent 插件直接调用——管线不再是跨插件共享设施，故从 `symbio_core` 下沉到 session
+//! 插件内部。
+//!
+//! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
+//! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
+
+use symbio_providers::new_registry;
+use symbio_core::{
+    capability_init_error_bucket, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
+    CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+};
+use std::sync::Arc;
+
+/// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
+///
+/// ## 契约
+///
+/// 调用方需在 `ctx` 中预先设置好各插件判定所需的上下文键：
+/// - `WORKDIR`（可选）：工作目录，决定 local / skill / agent 的作用域
+/// - `SESSION_ID`：会话标识
+/// - `AGENT_ID`（**可选**）：选定智能体。缺省时 agent 插件不贡献任何工具
+///
+/// ## 语义
+///
+/// - 每次调用都返回**全新**的 `DefaultToolVisitor`——能力实例可能持有本次请求
+///   相关的状态（人格摘要、智能体列表等），不能跨请求复用。
+/// - `traverse` 失败只记录日志，不中断会话：单个插件故障不应让整个会话不可用。
+/// - 父插件缺失（单插件内嵌场景）时返回空管理器，而非报错。
+pub async fn collect_capabilities(
+    parent: Option<&Arc<dyn Plugin>>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Arc<dyn Registry> {
+    let manager: Arc<dyn Registry> = new_registry();
+
+    let Some(parent) = parent else {
+        return manager;
+    };
+
+    let traverse_ctx = ctx.fork();
+    traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    traverse_ctx.set(symbio_core::CAPABILITY_VISITOR, manager.clone());
+    capability_init_error_bucket(&traverse_ctx);
+    // Agent 权限作用域槽（D-153）：agent 插件在 traverse 里发布（它是唯一能把
+    // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
+    // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
+    // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
+    symbio_core::agent_perms_init_slot(&traverse_ctx);
+
+    if let Err(e) = parent
+        .clone()
+        .traverse(String::new(), traverse_ctx.clone())
+        .await
+    {
+        symbio_core::plugin_warn!(
+            "core",
+            "collect_capabilities: traverse 失败（工具集可能不完整）: {:?}",
+            e
+        );
+    }
+
+    // 把子 ctx 上收集到的错误回写到调用方的 ctx，供编排方判定。
+    // （`fork()` 会拷贝 extensions 快照，子 ctx 后续的写入不会自动回流）
+    if let Some(bucket) = traverse_ctx.get(CAPABILITY_ERRORS) {
+        ctx.set(CAPABILITY_ERRORS, bucket);
+    }
+    // 权限作用域同理（同一个 Arc，不复制内容）：没有发布 = 本会话没选中 Agent，
+    // 工具侧按宿主态处理。
+    if let Some(slot) = traverse_ctx.get(symbio_core::AGENT_PERMS) {
+        ctx.set(symbio_core::AGENT_PERMS, slot);
+    }
+
+    manager
+}
+
+// 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）
+// 见 `symbio_core::CapabilityError`：写侧是任意参与 traverse 的插件，
+// 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
+
+/// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
+///
+/// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
+/// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
+pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn Registry>) {
+    ctx.set(symbio_core::CAPABILITY_VISITOR, manager);
+}
+
+// 读侧助手 `tool_metas` 的实现住 core（[`symbio_core::tool_metas`]）：loop
+// 切出后它也是驱动器的读点，跨插件共用同一条口径（D-086 §7）。
+
+// ==================== 选项收集机制（宿主侧） ====================
+//
+// 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
+// D-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
+// 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
+// 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
+// 故两者同处本文件，不因历史路径而分居。
+//
+// 收集器**实现**（`DefaultToolVisitor`，全表共用）不在这里——它的写入者是全体插件，
+// 不隶属于任何宿主，故住 `symbio_providers::collectors`（见该模块文档的判据）。
+
+/// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
+///
+/// 调用方（选项宿主 = 本插件）需在 `ctx` 中预先设置好各插件判定
+/// 所需的上下文键——通常是**运行期可枚举的数据源**（如 agent 目录、Provider
+/// 表）的定位依据，贡献插件据此算出**候选集**。
+///
+/// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
+/// 定义只声明「有哪些字段与候选」（设计文档
+/// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
+///
+/// 失败降级语义与 `collect_capabilities`（本文件）一致：
+/// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
+pub async fn collect_options(
+    parent: Option<&Arc<dyn Plugin>>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Arc<dyn Registry> {
+    // 4e：选项与能力同表——收集器就是全表共用的 `DefaultToolVisitor`，
+    // 选项行（`CapabilityRow::option`）与工具行同一 `put` / `list`，只是通道独立。
+    // 实例按收集 pass 新建（状态不跨请求），构造点收在 `providers::new_registry`。
+    let visitor: Arc<dyn Registry> = new_registry();
+
+    let Some(parent) = parent else {
+        return visitor;
+    };
+
+    let traverse_ctx = ctx.fork();
+    traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
+    traverse_ctx.set(OPTION_VISITOR, visitor.clone());
+
+    if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx).await {
+        symbio_core::plugin_warn!(
+            "session",
+            "collect_options: traverse 失败（选项集可能不完整）: {:?}",
+            e
+        );
+    }
+
+    visitor
+}
+
+#[cfg(test)]
+#[path = "capabilities.test.rs"]
+mod tests;

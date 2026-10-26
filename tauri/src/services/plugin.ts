@@ -1,4 +1,4 @@
-// Corresponding Backend: symbio_kernel/src/plugin/transport.rs
+// Corresponding Backend: crates/symbio-kernel/src/plugin/transport.rs
 /**
  * Symbio 插件通讯内核 (V2.7 统一路由对称版)
  * 

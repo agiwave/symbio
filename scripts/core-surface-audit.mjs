@@ -32,7 +32,7 @@
  *    跨 crate 消费方。
  * 2. 剥注释后再匹配 —— 这会**漏报字段访问型消费点**（见上面 `TurnToolCallAccumulator`
  *    的例子），所以「0 个消费方」只说明**名字没出现**。
- * 3. 一个文件都不能跳过：`symbio/src/` 直属文件也算消费方。**「数不到」与「真的没人
+ * 3. 一个文件都不能跳过：`crates/crates/` 直属文件也算消费方。**「数不到」与「真的没人
  *    用」是两件事。**
  * 4. 公开面 = 根 `mod.rs` 的重导出，不是「域目录下所有 `pub`」。
  *
@@ -60,7 +60,7 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const CORE_REL = 'symbio/src/symbio_core'
+const CORE_REL = 'crates/symbio-core/src'
 
 let surface
 try {

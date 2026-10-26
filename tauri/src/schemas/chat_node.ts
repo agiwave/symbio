@@ -486,7 +486,7 @@ export interface ChatNode {
    */
   actions?: ResumeAction[];
   /**
-   * 本节点的**读数行**（后端填的呈现数据，[D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：
+   * 本节点的**读数行**（后端填的呈现数据，[D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：
    * 「压缩后水位 44.5k」「压掉 12 条」这类交代由后端排好版逐行下发，前端**只逐行排版**。
    *
    * 为什么这一格在顶层而不是 `meta`：判据是「不查看 `meta` 语义就能消费它」——渲染器

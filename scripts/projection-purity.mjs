@@ -45,7 +45,7 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..')
 
-const PROJ_REL = 'symbio/src/symbio_core/projection'
+const PROJ_REL = 'crates/symbio-core/src/projection'
 const PROJ_DIR = path.join(ROOT, PROJ_REL)
 
 const IMPURITY_TOKENS = [
@@ -130,7 +130,7 @@ for (const f of projFiles) {
 }
 
 // ── PP-003：构造器必须有投影外的生产消费方（或显式豁免） ───────────────
-const outside = loadProduction(path.join(ROOT, 'symbio/src')).filter(
+const outside = loadProduction(path.join(ROOT, 'crates')).filter(
   (f) => !f.rel.startsWith(PROJ_REL + '/'),
 )
 for (const f of producers) {

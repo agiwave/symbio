@@ -8,7 +8,7 @@ import './_selfrun.mjs';
 // 「LLM 单响应工具数超限 → 会话卡住」那组修复有三件套，前两件已有 e2e 锚：
 // 超限丢弃 + 反馈 = [t48](t48-megabatch-feedback.mjs)，断流可见失败 = [t49](t49-stream-drop.mjs)。
 // 第三件——**断流后原样重发的槽位处置**（`tool_accumulator` 的 `touched` 过滤 +
-// `reuse_node_ids` 播种复用，见 `symbio/src/plugins/model/tool_accumulator.rs` 与
+// `reuse_node_ids` 播种复用，见 `crates/symbio-plugin-model/src/tool_accumulator.rs` 与
 // `bound_provider.rs` 的 `MAX_STREAM_RETRIES`）今天只有 `tool_accumulator.test.rs` /
 // `stream.test.rs` 的白盒判据（登记 相应批次）。
 //

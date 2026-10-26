@@ -1,0 +1,1870 @@
+//! 义务环的行表：五条策略行 + 一条执行决策行 + 端口 / 授权级联行（/ ）。
+//!
+//! ## 一行只写「什么时候欠、什么算还」
+//!
+//! 判据全部是数据：`owes` / `until` / `unless` 三个模式，`prio` 是**全局**裁决序
+//! （`(prio, name, key)` 升序）。执行体只拿到一笔 `Debt`，不读任何请求作用域状态——
+//! 「什么时候欠」对应的是一份视图读出的事实，不是内存里的阶段枚举。
+//!
+//! ## 五条策略行的前后关系
+//!
+//! ```text
+//! 0 authorize-tool─ 授权级联：一笔工具请求先判「放行 / 拒绝」
+//! 10 classify      ── 轮首判决（本幕 round=0 且有发言）
+//! 20 report        ── 中途汇报（静默到期 ∧ 配额未满 ∧ 跑过一轮工具）
+//! 30 compress      ── 自动压缩（开关开着且本幕还没压过）
+//! 40 recall        ── 记忆 / 技能 / 任务段（有持久事实源且本幕还没召回）
+//! 50 reflex        ── 技能快路（非续写幕且本幕召回命中）
+//! 55 close-turn ── 收束：本幕最近一次模型应答没有工具调用
+//! 60 execute       ── 执行决策：本幕未收束且手上没有开着的工具批 ⇒ 跑一次模型往返
+//! 65 dispatch-turn ── 端口派发：有 `request` ⇒ 引擎落 `sent` 并跑执行体
+//! 66 dispatch-model─ 端口派发：模型往返（在 `turn` 执行体内部）
+//! 67 open-tools ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
+//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用
+//! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（b）
+//! 70 await-turn    ── 等应答：`by = None`，唯一的「在等」声明位
+//! 71 await-model   ── 等应答（模型端口）
+//! 72 await-tools   ── 等应答（工具端口）
+//! 80 lease         ── 租约看护：`sent` 超时无应答（一个行管所有端口）
+//! ```
+//!
+//! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`prio` 是跨行
+//! 可比的**全局**序，不是格内序（判据 10）。
+//!
+//! ## 汇报的轮次前提也在表里
+//!
+//! 「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」是 `report_due` v4 的 `due` 的一格
+//! （[D-163]）：本幕完成了几轮工具调用 = 本幕落了几条带 `calls` 的
+//! `response(port=model)`——日志上现成，不需要触发点在内存里数。于是这一行与其它
+//! 行同形，派发点只选债。
+//!
+//! ## 查询口：事实是输入，`now` 也是输入
+//!
+//! [`owes`] / [`view`] 只收事实切片、轮号与 `now`——不读配置、不读时钟、不碰内存
+//! 缓存（D-115 决策 1）。切片由 [`turn_slice`] 收窄到本轮：视图声明的扫描成本
+//! 上界针对**一轮**，不是整份 WAL。
+//!
+//! ## 装载期检查
+//!
+//! 首次查询时经 [`load`] 把五张表经 `Builder::declare` 一次交齐并 `seal`，**任何缺口都是
+//! 拒绝**（DE-015 §3.4 末句「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后
+//! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要
+//! 表再干活，拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
+
+use std::sync::{Arc, LazyLock};
+
+use serde_json::Value;
+
+use symbio_core::ring::{owed, Decl, Gap, Lit, Pattern, PortDecl};
+use symbio_core::{
+    ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH, EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
+};
+
+/// 这张表里**接了线的执行体**：`execute`（整轮执行体）、`close`（收束）、
+/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、轮首那三条
+/// `classify` / `compress` / `recall`（D-159）与批次边界那一条 `report`（D-163）
+/// ——它们住在另两台 host 的绑定表里，名字面上与其它没有区别。
+///
+/// `by` 只有两种取值（DE-015 §2.2）：`Some(名字)` ⇒ 引擎跑它，`None` ⇒ 引擎什么都不做。
+/// 「还没接线」不是第三种取值，也不是求解器的第四个过滤条件（D-118 订正 1）——
+/// 未接线的行显式写 `None`，进表、可 diff，接线时把 `Some(名字)` 与
+/// `turn_exec` 里那条 `ActorEntry` 同批改回。
+/// 检查方在装载期：`by = Some(a)` 而 `a` 没有声明 ⇒
+/// `Gap::UnmannedRow` ⇒ 装载红。
+///
+/// 声明本身（DE-015 §2.3）与 `turn_exec::ACTORS` 的
+/// 绑定项一起构造，这里只放静态可查的四样。
+///
+/// `writes` 是这个执行体**直接落格**的领域事实（账本语义：单写者是 store，不是引擎）。
+/// 引擎独占的四格（`sent` / `response` / `failed` / `retry`）不在任何执行体的
+/// `writes` 里；`request` 例外——它是**决策者**写的（§2.3），工具批的决策者就是
+/// `opener`，所以它出现在 [`ACTOR_OPENER`] 的名单里（运行期账本仍把它当协议格豁免，
+/// 两份名单在这一点上不冲突：豁免的是「不必声明」，声明的是「确由我写」）。
+const EXECUTE: &str = "execute";
+/// 收束执行体：把寄存的那一次应答落成收束格。
+const CLOSE: &str = "close";
+/// 创建执行体（b）：模型交回的调用逐条落 `request(port=tool)`。
+const OPENER: &str = "opener";
+/// 授权执行体（b）：对已开账的工具调用落放行 / 拒绝事实。
+const AUTHORIZER: &str = "authorizer";
+/// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
+const COURIER: &str = "courier";
+/// 中转执行体（D-166）：`dispatch-model` 行选中的动作——跑一次**已宣布**的模型往返。
+///
+/// 与 [`COURIER`] 分开是 D-118 决策 1–2 的直接后果：一个 `by` 一个动作，而两件事
+/// 不是同一件——`courier` 派发的是**一批**工具调用（批尾统一关账、落等待格与轮内
+/// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
+/// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
+const RELAY: &str = "relay";
+/// 外环的**准备**执行体（D-168 裁决 3）：`prepare-turn` 行选中的动作——为本幕备好
+/// 一次请求的输入（提示词 / 工具 / 请求视图），出口是阶段格 `inputs`。
+///
+/// 与 [`ANNOUNCE`] 分开：准备与宣布是两笔账（先有输入，才谈得上宣布这一次往返），
+/// 共名会让动作只能按行名分支（D-118 决策 1–2）。
+const PREPARE: &str = "prepare";
+/// 外环的**宣布**执行体（D-168）：`announce-turn` 行选中的动作——落 `request(port=turn)`。
+///
+/// 与 [`EXECUTE`] 分开：`execute-turn` 宣布的是**模型**往返（一次），这一条宣布的是
+/// **本幕的 `turn` 往返**（一幕一次）。两者都是「决策者写 `request`」，但粒度不同
+/// （一幕 vs 一次往返），共名会让动作只能按行名分支（D-118 决策 1–2）。
+const ANNOUNCE: &str = "announce";
+/// 外环的中转执行体（D-168）：`dispatch-turn` 行选中的动作——跑一次**已宣布**的 `turn` 往返。
+///
+/// 与 [`RELAY`] 分开同理由：`relay` 跑的是**一次模型往返**（几分钟的流式），这一条
+/// 跑的是**一整幕**（内部还会起轮内那台 host 的不动点环）。一个 `by` 一个动作。
+const TURN_RELAY: &str = "turn_relay";
+/// 轮首准备执行体（D-159）：`policy.recall` 行选中的动作。
+///
+/// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
+/// （[`super::head_exec::HeadStep`]），不是轮内那张草稿。`by` 面上两台 host 没有区别——
+/// 「这行归谁跑」照旧只写在行上，host 由绑定表回答（D-159 裁决 1）。
+const RECALL: &str = "recall";
+/// 批次边界执行体（D-163）：`policy.report` 行选中的动作。
+///
+/// 它是**第三台 host** 上的名字：动作借走的是批次边界那一侧的落格与上线面
+/// （`store` + 实时桥 + 落库镜像），不是轮首那台的本轮状态，也不是轮内那台的草稿。
+/// `by` 面上三台 host 没有区别——「这行归谁跑」照旧只写在行上，host 由绑定表
+/// 回答（D-159 裁决 1），派发点由**谁手里有那片状态**决定。
+const REPORT: &str = "report";
+/// 轮首压缩执行体（D-159）：`policy.compress` 行选中的动作。
+const COMPRESS: &str = "compress";
+/// 轮首判决执行体（D-159）：`policy.classify` 行选中的动作。
+///
+/// 名字与旧行 `effects.classify` 的那个能力名同源：这一行跑的是「问一次 `classify`
+/// 并**执行**它判成的枚举」，判决本身住在能力插件里，执行体只做编排与入账。
+const CLASSIFY: &str = "classify";
+/// 快路执行体（D-163）：`policy.reflex` 行选中的动作。
+///
+/// 它只落「反射档已答」那一格，并把技能正文寄进本轮状态；收束格由
+/// [`ACTOR_CLOSE`] 统一落——两个执行体都写 `final` 会让依赖图成环
+/// （`reflex → close → execute → reflex`，DE-015 §3.4 第 1 条）。
+const REFLEX: &str = "reflex";
+
+/// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
+///
+/// 对外的用处不止 [`ACTORS`]：判据 2 / 判据 4 的**夹具绑定表**在同一个 `by` 上换动作时，
+/// 照抄的就是这一份声明——名单一改，夹具与生产一起改，不会各拿一份名单。
+pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
+    name: EXECUTE,
+    // 整轮执行体调模型：深度档。
+    mode: LatencyTier::Deep,
+    // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
+    reads: &[],
+    // **收束格不在这里**（c）：`chat.assistant.final` / `chat.assistant.fallback`
+    // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
+    // `execute → close`），装载红（DE-015 §3.4 第 1 条）。
+    writes: &[
+        EVENT_ASSISTANT_OPENING,
+        EVENT_TURN_STAGE,
+        EVENT_TURN_DISPATCH,
+        EVENT_ARTIFACT_ADDED,
+        EVENT_SESSION_CONSOLIDATED,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// 外环准备执行体的声明（D-168 裁决 3）：跑完一幕的输入准备，出口是阶段格。
+///
+/// ## 名单为什么只有一格
+///
+/// 它自己的动作直接落的是 `turn.stage{stage:"inputs"}`。定稿答话轮那一档还落了
+/// `chat.assistant.final`（`land_answered_turn` → `execute_final_reply_turn`），
+/// 但那一格**不在这里声明**：声明了本行就是收束格的写者之一，而 `execute-turn` 的
+/// 出口正是 `turn_closed`（收束 / 兜底两格折出来的）⇒ 装载器当场报
+/// `DependencyCycle ["prepare-turn", "execute-turn", "prepare-turn"]`
+/// 与 `["close-turn", "prepare-turn", "execute-turn", "close-turn"]`（第一次装载时
+/// 实得）。收束格在声明面上的 owner 仍是 `close`（[`ACTOR_CLOSE`]），准备段那一档
+/// 是**同一条领域动作的另一处调用**——名单按「谁拥有这一格」配，不按「谁在窗口里
+/// 碰到它」配（D-160 的同一条纪律）。
+///
+/// ## 名单里为什么没有轮首那四行写的格
+///
+/// 准备段在末尾起了**轮首那台 host**（判决 / 压缩 / 召回 / 快路）。那四格由那四条行
+/// 的执行体各自声明——名单的 owner 在行上（D-160 的同一条纪律），本声明不抄一遍。
+const ACTOR_PREPARE: ActorDecl = ActorDecl {
+    name: PREPARE,
+    // 准备段里会问一次模型（判决 / 措辞），所以是深度档；**动作本身**不碰模型调用，
+    // 那是轮首那几行的事——这条差别由行上的 `tier` 表达（见 `prepare-turn`）。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 外环宣布执行体的声明（D-168）：只落 `request`，不调模型、不跑工具。
+///
+/// `request` 也在 [`PROTOCOL_CELLS`] 的豁免里——两件事不冲突：豁免的是「协议格由
+/// 引擎写」，声明的是「这一格确由我写」（与 [`ACTOR_OPENER`] 同一条口径）。
+const ACTOR_ANNOUNCE: ActorDecl = ActorDecl {
+    name: ANNOUNCE,
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_REQUEST],
+};
+
+/// 外环中转执行体的声明（D-168）：跑一整幕。
+///
+/// ## 名单为什么是这几格
+///
+/// 与 [`ACTOR_EXECUTE`] 同一份：`execute_turn` 在轮内那台 host **之外**直接落的就是
+/// 这几格（开场白 / 阶段格 / 派发格 / 产物 / 压缩 / 授权拒绝）。轮内那张绑定表的每
+/// 一行各自声明自己那几格——名单的 owner 在那一行，**不**在这里抄一遍（D-160 的
+/// 同一条纪律：依赖图与对账名单都按行配，不按调用链配）。
+///
+/// ## 外环派发点为什么不做写入封闭
+///
+/// 这一条的动作窗口里嵌着一台**完整的 host**（轮内），它的每一行在自己的派发点已经
+/// 按名单对过账。在这一层再对一次，名单只能是把那张表整个抄过来（两处 owner，改一处
+/// 漂一处）；漏抄的形态是「外面判红、里面判绿」，比不判更难定位。外环因此只做
+/// **零格告警**（动作一格没写 ⇒ 它没干活），名单检查留在轮内那一层。
+const ACTOR_TURN_RELAY: ActorDecl = ActorDecl {
+    name: TURN_RELAY,
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[
+        EVENT_ASSISTANT_OPENING,
+        EVENT_TURN_STAGE,
+        EVENT_TURN_DISPATCH,
+        EVENT_ARTIFACT_ADDED,
+        EVENT_SESSION_CONSOLIDATED,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// 创建执行体（b）：一个模型响应的 `calls` 逐条落 `request(port=tool)`。
+///
+/// `request` 是**决策者**的事实（§2.3），批次里做这个决定的就是它；`sent` 之后
+/// 的协议格仍只由引擎写。装载期「出口全是引擎格时名单不许空」（D-124）在
+/// `open-tools` 上不走那一档——它的出口里有可声明的 `request`，判交集。
+const ACTOR_OPENER: ActorDecl = ActorDecl {
+    name: OPENER,
+    // 只写请求、不调模型、不跑工具：快速档。
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_REQUEST],
+};
+
+/// 授权执行体（b）：风险档 vs 会话阈值的一次纯比较。
+const ACTOR_AUTHORIZER: ActorDecl = ActorDecl {
+    name: AUTHORIZER,
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_AUTHZ_GRANTED, EVENT_AUTHZ_DENIED],
+};
+
+/// 派发执行体（b）：已放行的落 `sent` 并交给执行层；批尾把每一笔关掉
+/// （应答 / 没跑到 / 被拒），落产物、等待格与轮内注入。
+const ACTOR_COURIER: ActorDecl = ActorDecl {
+    name: COURIER,
+    // 派发本身不调模型（模型在执行层之外）。
+    mode: LatencyTier::Fast,
+    reads: &[],
+    // 汇报格为什么在这张名单上：批次边界（2f）就在本执行体的动作窗口里
+    // （`turn_runner::stream::dispatch_round` 的 2e/2f），而那一刻的派发点（D-163）
+    // 会在窗口内落一条 `chat.assistant.reported`。运行期写封闭按**动作窗口**归属
+    // （D-123 决策 1：尾段就是这一次动作的实际写入），所以这一格必须在这里声明——
+    // 它不是「派发体写的」，而是「派发体窗口里落的」，两句话在账本上是同一件事。
+    writes: &[
+        EVENT_ARTIFACT_ADDED,
+        EVENT_ASSISTANT_PROGRESS,
+        EVENT_ASSISTANT_REPORTED,
+        EVENT_TURN_SUPPLEMENTED,
+    ],
+};
+
+/// 中转执行体（D-166）：`dispatch-model` 行选中的动作——把**已宣布**的那一次模型
+/// 往返发出去，并把它的结局归位。
+///
+/// ## 为什么它写得出兜底格
+///
+/// 名单里那两格只在**控制面失败**时落：模型往返派不出去（行不欠 / 端口没声明）或
+/// 模型要了工具而本轮没有分发通道。两条路在日志上都没有模型的终局事实
+/// （`failed(port=model)` 落不下来）⇒ 收束行开不出账 ⇒ 兜底格只能由**手上拿着这一笔
+/// 往返的那一方**就地落。D-166 之前那一方是 `execute`（走它的过渡豁免，因为它的出口
+/// 与 `close` 的出口同族 ⇒ 声明就是一条假环）；写方搬到这里之后，本行的出口是引擎
+/// 独占的 `sent` / `failed`，与 `close` 的出口不同族，于是**声明得了**——过渡豁免
+/// 随之清空（`ACTORS` 上不再有任何一条）。
+///
+/// ## 它不交回产出
+///
+/// 结局寄存在本轮草稿（`closing` / `pending_model`），由 `close-turn` / `open-tools`
+/// 两行各自的执行体取走——执行体不判断「本轮结束了没有」（D-123 决策 5）。
+const ACTOR_RELAY: ActorDecl = ActorDecl {
+    name: RELAY,
+    // 一次模型往返本身就是深度档的活。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_ASSISTANT_FALLBACK, EVENT_AUTHZ_DENIED],
+};
+
+/// 收束执行体（步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
+/// 模型往返的**结局**落成收束格。
+/// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
+/// 与 `execute → close`），表装不上（DE-015 §3.4 第 1 条）——所以收束格只能归一个执行体。
+/// 它**不**覆盖轮首准备的 1b 分支（定稿答话轮）：那一轮一次模型往返都不发，收束格由
+/// `turn_runner/prepare.rs` 就地落（缺口与归属见 ）。快路（技能命中）同样零往返，
+/// 但它进驱动循环：`policy.reflex` 只落「已答」，收束格仍归这一格（D-163）。
+///
+/// 两条收束格都在它名下：`chat.assistant.final`（答完了 / 中止）与
+/// `chat.assistant.fallback`（模型没答成 / 空答）。独占不是洁癖，是装载期的硬约束：
+/// 两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与 `execute → close`），
+/// 表装不上（DE-015 §3.4 第 1 条）。`authz.denied` 是写侧闸拒那一条路留下的否定事实
+/// （C4），它和收束格同一次动作里落，所以也在名单上。
+const ACTOR_CLOSE: ActorDecl = ActorDecl {
+    name: CLOSE,
+    // 收束就是「把已经拿到手的应答入格」：反射档，不调模型。
+    mode: LatencyTier::Reflex,
+    reads: &[],
+    writes: &[
+        EVENT_ASSISTANT_FINAL,
+        EVENT_ASSISTANT_FALLBACK,
+        EVENT_AUTHZ_DENIED,
+    ],
+};
+
+/// 轮首准备执行体的声明（D-159）。
+///
+/// 名单只有 `turn.stage` 一格：召回这一步的**出口**就是那一格（`stage:"recall"`
+/// 带 `result`），装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。
+/// 它的三份产物（记忆视图 / 调度段 / 技能命中）寄存在本轮状态里交编排层取——
+/// 执行体不交回产出（D-123 决策 5 在轮首照用，D-159 裁决 4）。
+const ACTOR_RECALL: ActorDecl = ActorDecl {
+    name: RECALL,
+    // 事实投影的纯读 + 一次技能路由判定，不调模型：与行同档（更慢就装载红）。
+    mode: LatencyTier::Reflex,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 轮首压缩执行体的声明（D-159）。
+///
+/// 名单同样只有 `turn.stage`：摘要那一次模型往返的三格（`request` / `sent` /
+/// `failed`，`port=model`）由**端口记账层**落，属协议格，不在执行体的名单里
+/// （D-122 决策 2；运行期对账按 `PROTOCOL_CELLS` 豁免同一件事）。
+const ACTOR_COMPRESS: ActorDecl = ActorDecl {
+    name: COMPRESS,
+    // 语义压缩调模型：与行同档（深度）。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 轮首判决执行体的声明（D-159 / D-162）。
+///
+/// 名单同样只有 `turn.stage`：判决那一步的**出口**就是 `stage:"decide"` 那一格
+/// （带 `result`，它是 `turn_head` 折出 `answered` 的唯一来源）。措辞那次内部往返
+/// 的三格（`request` / `sent` / `response`，`via=compose/wording`）由端口记账层落，
+/// 属协议格，不在执行体名单里（同 [`ACTOR_COMPRESS`]）。
+const ACTOR_CLASSIFY: ActorDecl = ActorDecl {
+    name: CLASSIFY,
+    // 判决可能落到模型，但不生成：快速档（与行的 `tier` 同值，更慢就装载红）。
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 快路执行体的声明（D-163）。
+///
+/// 名单只有 `turn.stage` 一格：快路的**出口**就是 `stage:"reflex"` 那一格，
+/// 装载期第 6 条判的正是「执行体走不走得到自己那一行的收口」。技能正文随本轮
+/// 状态交给收束动作，**不进**事实网格（正文属于收束格的载荷，D-163）。
+const ACTOR_REFLEX: ActorDecl = ActorDecl {
+    name: REFLEX,
+    // 技能命中即出话、零模型往返：反射档（与行同档，更慢就装载红）。
+    mode: LatencyTier::Reflex,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE],
+};
+
+/// 批次边界执行体的声明（D-163）。
+///
+/// 名单只有 `chat.assistant.reported` 一格：汇报这一步的出口就是那条汇报事实
+/// （`reported_anchors` 视图按它逐段关账）。汇报的对话面节点随本轮的落库镜像
+/// 一起走（`persist_messages`），**不进**事实网格——两件事各有写方。
+const ACTOR_REPORT: ActorDecl = ActorDecl {
+    name: REPORT,
+    // 模板产线，零模型往返：与行同档（反射档，更慢就装载红）。
+    mode: LatencyTier::Reflex,
+    // 这一格同时也是 `ACTOR_COURIER` 的：批次边界的派发点建在轮内派发体的动作
+    // 窗口里（见那张表上的注释），所以两边的名单都得容得下它——装载期不禁止两个
+    // 执行体声明同一格，运行期按**当前动作窗口**判，两边各说自己的那一面。
+    reads: &[],
+    writes: &[EVENT_ASSISTANT_REPORTED],
+};
+
+/// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
+///
+/// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
+/// 投影，经 `Builder::actor` 入口冻结）与派发器跑得动的动作（[`next`] 查出的
+/// [`Next::action`]）因此不可能一个有一个没有。接线一个执行体 = 在这里加一条 +
+/// 把那一行的 `by` 改回 `Some(名字)`，同一个提交。
+///
+/// 动作住在 [`turn_exec`]（它要本轮草稿与七个端口），这张表只把它指到名字上。
+///
+/// `transitional` 是这条执行体**今天确实写得出、但 `decl.writes` 声明不了**的领域格。
+/// 声明不了不是遗漏，是装载期会红：把收束格写进一个出口与 `close` 同族的执行体名单，
+/// `close-turn` 的出口格就同时是两个执行体的出口格 ⇒ `Gap::DependencyCycle`（注①）。
+/// 账本对账因此需要一个**有名有姓、会自己变红**的过渡豁免：它只在这条表项上生效，且由
+/// `the_transitional_exemptions_are_pinned` 钉死内容——多一条就红，
+/// 而不是将错就错地放宽名单。
+///
+/// **今天这张表上一条都没有**（D-166）：唯一那条（`execute` 写兜底格）随模型往返的
+/// 派发搬到了 [`ACTOR_RELAY`]——它的出口是引擎独占的 `sent` / `failed`，与 `close`
+/// 的出口不同族，那两格因此**声明得了**。这一格保留为空列表而不是删字段：它是装载期
+/// 的判据面（「声明不了的一次写出」必须有名有姓地登记），删掉它等于下次有人需要时
+/// 只能偷偷放宽 `decl.writes`。
+///
+/// 这张表是**派发器的入参**（[`super::turn_exec::drive_steps`] 的 `actors`，D-123
+/// 决策 4）：生产传 [`ACTORS`]，测试在同一张表的形状上注册别的东西。判据 14 那条
+/// 「动作写了零格 ⇒ `exhausted{no_progress}`」的用例就靠这条接缝——没有它只能永远说
+/// 那条分支「按构造不可达」。
+pub(crate) struct ActorEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::turn_exec::Action,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static ACTORS: &[ActorEntry] = &[
+    ActorEntry {
+        decl: ACTOR_EXECUTE,
+        run: super::turn_exec::run_execute,
+        // 豁免已清空（D-166）：那两格兜底写随模型往返的派发搬到了 [`ACTOR_RELAY`]，
+        // 而它的出口与 `close` 不同族 ⇒ 声明得了，不必再借豁免。
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_CLOSE,
+        run: super::turn_exec::run_close,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_OPENER,
+        run: super::turn_exec::run_open,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_AUTHORIZER,
+        run: super::turn_exec::run_authorize,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_COURIER,
+        run: super::turn_exec::run_dispatch,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_RELAY,
+        run: super::turn_exec::run_model,
+        transitional: &[],
+    },
+];
+
+/// **轮首 host** 的执行体绑定表（D-159）：形状与 [`ACTORS`] 逐字相同，差别只在动作
+/// 借走的那片状态（[`super::head_exec::HeadStep`] = 本轮状态 + 会话上下文 + 请求句柄，
+/// 不是轮内那张草稿）。
+///
+/// 一台 host 一张表，**行不复制**：这张表的名字集合就是「轮首派发点该看哪些行」，
+/// 行子集由它派生（[`host_rows`]）——`Decl` 上不加 `host` 字段，否则「谁跑它」与
+/// 「它归谁」有两处 owner，可以互相矛盾而装载照绿（D-159 裁决 1）。
+///
+/// 这张表同样按入参交给派发点（D-123 决策 4 的形状）：夹具要在同名 `by` 上换手法时
+/// 传另一张表，不必改生产。
+pub(crate) struct HeadEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::head_exec::HeadAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static HEAD_ACTORS: &[HeadEntry] = &[
+    HeadEntry {
+        decl: ACTOR_CLASSIFY,
+        run: super::head_exec::run_classify,
+        transitional: &[],
+    },
+    HeadEntry {
+        decl: ACTOR_COMPRESS,
+        run: super::head_exec::run_compress,
+        transitional: &[],
+    },
+    HeadEntry {
+        decl: ACTOR_RECALL,
+        run: super::head_exec::run_recall,
+        transitional: &[],
+    },
+    HeadEntry {
+        decl: ACTOR_REFLEX,
+        run: super::head_exec::run_reflex,
+        transitional: &[],
+    },
+];
+
+/// **批次边界 host** 的执行体绑定表（D-163）：形状与 [`HEAD_ACTORS`] 逐字相同，
+/// 差别只在动作借走的那片状态（[`super::report_exec::ReportStep`] = 事实源 +
+/// 汇报能力口 + 落格与上线面）。
+///
+/// 一台 host 一张表，行不复制、行子集由名字派生（[`host_rows`]）——理由与
+/// [`HEAD_ACTORS`] 逐字相同，不重复。这一台只有一行（汇报），但表仍然是一张表：
+/// 将来「批次边界上还有别的账」时加一条就够，派发点不用改形。
+pub(crate) struct ReportEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::report_exec::ReportAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static REPORT_ACTORS: &[ReportEntry] = &[ReportEntry {
+    decl: ACTOR_REPORT,
+    run: super::report_exec::run_report,
+    transitional: &[],
+}];
+
+/// **外环 host** 的执行体绑定表（D-168）：形状与前两张逐字相同，差别只在动作借走的
+/// 那片状态（[`super::stage_exec::StageStep`] = 编排器 + 会话上下文 + 本轮状态 +
+/// 本轮已备好的输入）。
+///
+/// 两行：宣布（`announce-turn`）与派出（`dispatch-turn`）。第三张表而不是塞进
+/// [`ACTORS`]，理由与 [`HEAD_ACTORS`] 逐字相同——动作要的东西轮内那张草稿一件都没有。
+pub(crate) struct StageEntry {
+    pub(crate) decl: ActorDecl,
+    pub(crate) run: super::stage_exec::StageAction,
+    pub(crate) transitional: &'static [&'static str],
+}
+
+pub(crate) static STAGE_ACTORS: &[StageEntry] = &[
+    StageEntry {
+        decl: ACTOR_PREPARE,
+        run: super::stage_exec::run_prepare_turn,
+        transitional: &[],
+    },
+    StageEntry {
+        decl: ACTOR_ANNOUNCE,
+        run: super::stage_exec::run_announce_turn,
+        transitional: &[],
+    },
+    StageEntry {
+        decl: ACTOR_TURN_RELAY,
+        run: super::stage_exec::run_dispatch_turn,
+        transitional: &[],
+    },
+];
+
+/// `by` → **外环**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn stage_entry_of(by: &'static str, actors: &'static [StageEntry]) -> Option<&'static StageEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
+/// `by` → **批次边界**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn report_entry_of(
+    by: &'static str,
+    actors: &'static [ReportEntry],
+) -> Option<&'static ReportEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
+/// `by` → **轮首**绑定表里的那一条（[`entry_of`] 的同一条纪律：声明与动作一次查全）。
+fn head_entry_of(by: &'static str, actors: &'static [HeadEntry]) -> Option<&'static HeadEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
+/// 一台 host 的**行子集**：`by` 落在它绑定表里的那些行（D-159 裁决 2）。
+///
+/// 为什么不向 `ring::drive` 传整张行表：`prio` 是**全局**序，整张表会让别的 host 的
+/// 低 `prio` 债被本派发点选中——而本派发点的绑定表里没有那一条，`next` 只能报
+/// 「表脱节」并停住，别的 host 排在后面的债永远轮不到。那是两台 host 互相卡死，
+/// 不是双轨。子集派生自绑定表 ⇒ 「这行归我跑」只有一个读法，`ROWS` 本身一个字不动。
+///
+/// 未接线的行（`by: None`）不在任何一台 host 的子集里：它照旧由外层代码直问
+/// `owes`（调度旁路，归零对象），而 [`owes`] 读的是**整张**冻结表，两者互不影响。
+fn host_rows(frozen: &Frozen, names: &[&'static str]) -> Vec<Decl> {
+    frozen
+        .rows()
+        .iter()
+        .filter(|d| d.by.is_some_and(|by| names.contains(&by)))
+        .cloned()
+        .collect()
+}
+
+/// 绑定表的名字集合（[`host_rows`] 的入参）。
+fn actor_names(actors: &[ActorEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
+/// 轮首绑定表的名字集合。
+fn head_actor_names(actors: &[HeadEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
+/// 批次边界绑定表的名字集合。
+fn report_actor_names(actors: &[ReportEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
+/// 外环绑定表的名字集合。
+fn stage_actor_names(actors: &[StageEntry]) -> Vec<&'static str> {
+    actors.iter().map(|e| e.decl.name).collect()
+}
+
+/// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
+///
+/// **两台 host 并成一集**（D-159 裁决 3）：装载面仍然是一张表——七道检查判的是
+/// 「名字有没有人认领、认领的人走不走得到出口」，与执行体借走哪片可变状态无关。
+/// 分开注册会冻出两份 `Frozen`，行表就有了两个真源。
+pub(crate) fn actor_decls() -> Vec<ActorDecl> {
+    ACTORS
+        .iter()
+        .map(|e| e.decl)
+        .chain(HEAD_ACTORS.iter().map(|e| e.decl))
+        .chain(REPORT_ACTORS.iter().map(|e| e.decl))
+        .chain(STAGE_ACTORS.iter().map(|e| e.decl))
+        .collect()
+}
+
+/// `by` → 绑定表里的那一条。`None` = 表里没有这个名字（装载期的 `UnmannedRow` 已拦，
+/// 这里是派发面把「表被改坏」显形，不猜动作、也不猜它写了什么）。
+///
+/// 动作与声明**必须一次查全**：派发器读账本时要豁免的协议五格、以及
+/// 「这个执行体声明过哪些领域格」，都来自同一条 `ActorEntry`。分两次查就是
+/// 给「声明与动作漂移」留缝。
+///
+/// 查的是**传进来的那张表**（D-123 决策 4）：`ACTORS` 是生产表，接缝让夹具能在
+/// 同名 `by` 上注册别的动作。
+fn entry_of(by: &'static str, actors: &'static [ActorEntry]) -> Option<&'static ActorEntry> {
+    actors.iter().find(|e| e.decl.name == by)
+}
+
+/// 协议五格：运行期写入封闭的**豁免名单**。
+///
+/// 它们由引擎写（`port.rs` 那一个文件，PTS-005 钉着），因此**不该**出现在任何
+/// `ActorDecl::writes` 里——装载期 [`symbio_core::decl`] 的
+/// `ENGINE_ONLY_CELLS` 检查拦的就是「执行体声明了引擎独占的格」。运行期读账本时
+/// 它们当然在：派发的本体住在 `port` 里，执行体的动作调它（`relay` → `dispatch_full`，
+/// `courier` / `turn_relay` → `dispatch`），四格因此落在动作窗口内——写点在执行体里，
+/// 写方仍是引擎，两句话不冲突。
+const PROTOCOL_CELLS: &[&str] = &[
+    EVENT_REQUEST,
+    EVENT_SENT,
+    EVENT_RESPONSE,
+    EVENT_FAILED,
+    EVENT_RETRY,
+];
+
+/// [`Next`] 上的运行期对账口（DE-015 §3.4 第 5 条的**运行期那一半**，D-123 决策 2）。
+///
+/// 装载期只能查声明面（名字存在、不与引擎独占的格相撞），「执行体实际只写它声明过的
+/// 领域格」只能拿**实际写入**对账——而实际写入的唯一可信取法是日志尾段（决策 1）。
+impl<A> Next<A> {
+    /// 账本上的这一格收不收得拢：每一格都要**在这张表里对得上一个名字**——协议五格
+    /// （引擎写）、`decl.writes`（执行体声明）、`transitional`（过渡豁免）。
+    /// 对不上就是越界，派发器不静默。
+    pub(crate) fn writes_closed(&self, kind: &str) -> bool {
+        PROTOCOL_CELLS.contains(&kind)
+            || self.writes.contains(&kind)
+            || self.tolerated.contains(&kind)
+    }
+}
+
+/// 端口声明——**加一个端口只加这一条**，不加事实名、不改求解器。
+///
+/// 当前三个端口：`turn`（一轮的一次请求往返）、`model`（一次模型往返， 步 2）、
+/// `tool`（批次里的单次工具调用， 步 3）。
+///
+/// ## 租约与尝试上限怎么定的
+///
+/// `lease_ms` 是「派出去多久没应答算卡住」：`turn` 是一次模型往返，且含工具轮，
+/// 慢的那一头可能是模型排队——太短会把正在进行的一轮误判成卡住（重试会再调一次
+/// 模型，代价真实）。取 10 分钟：既比最慢的可接受往返长，又比「用户已经以为坏了」短。
+///
+/// `max_attempts = 1`——**`turn` 调用不重试**。理由不是成本，是**没人 await**：
+/// 租约到期只发生在进程重启之后（时间只在事件上推进），而等这笔应答的 future
+/// 已经随进程一起没了。重试只会留下一条**永不派发**的 `request`，让「欠一次
+/// 派发」变成一句谎。到顶即判死（`failed{why:"lease_expired"}`），恢复走
+/// resume 幕（新的逻辑 id，旧那笔作为「没回来」留在日志里）。
+///
+/// `retry` 因此只给**有活着的等待方**的尝试用（D-138）。上限是端口级的天花板，
+/// 逐次尝试是否真能重试由 `sent.awaited` 决定（见 [`super::port::reap`]）。
+///
+/// ## `model` 端口
+///
+/// 一次**模型往返**。它在 `turn` 执行体**内部**发起（D-115 决策 5：两者之间
+/// 没有双调度器——`turn` 是普通 `by=Some` 执行体，DE-015 只是把它的内部拆成
+/// 更多行）。
+///
+/// 租约与 `turn` 同量级（慢的那一头同样是模型排队）；`max_attempts = 1` 同理：
+/// 进程重启后等这笔应答的 future 已经不在了，重试只会留下一条永不派发的
+/// `request`。等步 4 的唤醒事实接上（有活着的等待方）时，这个上限才可以 > 1。
+pub(crate) static PORTS: &[PortDecl] = &[
+    PortDecl {
+        port: "turn",
+        // 引擎在跑执行体**之前**落它（判据 2）：搬运者可能不产事实就返回。
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+        // 一轮只有一个 `turn` 调用，没有同批子债。
+        concurrent: false,
+    },
+    PortDecl {
+        port: "model",
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 1,
+        // 一次模型往返是一条调用；同批并发在它下面的工具端口。
+        concurrent: false,
+    },
+    // 工具批次里的**单次调用**。一次模型响应可带 N 个调用 ⇒
+    // 同一批写 N 条 `request`，各自一个 id。
+    //
+    // ## 为什么上限是 2，而普通批次仍然不重试
+    //
+    // 上限是端口级的天花板，**不是**「每个调用都会重试」的承诺（D-138）。工具端口
+    // 里有两类尝试：
+    //
+    // - 普通批次调用：结果等在当前草稿里，进程重启后等待方随草稿消失 ⇒
+    //   `sent.awaited = false` ⇒ 到顶/到期即判死，恢复走 `resume` 幕（新 id）；
+    // - 唤醒调用：`wake_batch` 能从事实重建那一笔（`resume` / `tool` / `args` 都在
+    //   `request` 载荷里）⇒ `awaited = true` ⇒ 租约看护可以重试一次。
+    //
+    // 上限 2 = 首次 + 一次重试；再抬就需要新的等待方形态，而不是改数字。
+    PortDecl {
+        port: "tool",
+        before: EVENT_SENT,
+        lease_ms: 600_000,
+        max_attempts: 2,
+        // 一次模型响应可带 N 个工具调用：同批子债允许并发，
+        // 具体哪几条同时在途仍由风险档决定（`dispatch/parallel.rs`）。
+        concurrent: true,
+    },
+];
+
+/// 内建行表。注册顺序**不参与**裁决——同 `prio` 由 `(name, key)` 决出。
+pub(crate) static ROWS: &[Decl] = &[
+    // ── 授权级联（⇒ 步 3）────────────────────────────────
+    //
+    // 两行，不是一行：
+    //
+    //   authorize-tool   owes: request(port=tool)      until: granted | denied
+    //   dispatch-tools   owes: granted(port=tool)      until: sent | failed
+    //
+    // ## 为什么派发行 `owes` 写 `granted` 而不是 `request ∧ granted`
+    //
+    // `Decl.owes` 是**一个** `Pattern`（单源等值），跨源合取写不出来；要写就得
+    // 改求解器，而求解器的字节是 PTS-003 的判据面（改它必须挂 ADR）。这里用
+    // **蕴含**代替合取：`granted` 只可能由 `authorize-tool` 从一笔 `request`
+    // 派生，所以 `granted ⇒ request` 在数据上成立；`dispatch-tools` 只欠
+    // `granted`，与 `request ∧ granted` 的可达债集合相同。
+    //
+    // 这不是近似：`denied` ⇒ 没有 `granted` ⇒ 派发行**永不**成立（fail-closed），
+    // 而「还没判」⇒ `authorize-tool` 仍开着、`dispatch-tools` 不欠——两种状态在
+    // 匹配上可分，正是判据 8b 要的那条区分。全程没有否定原子。
+    //
+    // ## 为什么两行的 `key` 都是 `(port, id, attempt)`
+    //
+    // `authorize-tool` 的出口是 `authz.granted` / `authz.denied`，`dispatch-tools`
+    // 的出口是 `sent` / `failed`：它们必须与协议事实关同一**次尝试**（D-138）。
+    // 逻辑键会让上一 attempt 的出口把行提前关掉，重试出来的 `request{attempt+1}`
+    // 就再也欠不动授权与派发。`authz.denied` 的**收束格拒绝**那条载荷只有 `key`
+    // （目标格名），没有 `port` / `id` / `attempt`——按三元组绑定自然取不到实例，
+    // 不会误关一笔工具授权。
+    Decl {
+        name: "authorize-tool",
+        // 的口径：判在派发之前。0 是这一环里最早的一档。
+        prio: 0,
+        // 判定是纯比较（风险档 vs 会话阈值），不调模型（b 接线）。
+        by: Some(AUTHORIZER),
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_AUTHZ_GRANTED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_AUTHZ_DENIED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
+    // ── 轮首判决 ─────────────────────────────────────────────────────────
+    Decl {
+        name: "policy.classify",
+        prio: 10,
+        // 轮首 host 的执行体（D-159）：派发点与压缩 / 召回同一处，`prio` 10
+        // 让它排在两条之前——它落的 `result` 正是那两条的前件（[D-162] 裁决 1）。
+        by: Some(CLASSIFY),
+        // 判决可能落到模型，但不生成：快速档（与旧行 `effects.tier` 同值）。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[
+                ("round", Lit::Uint(0)),
+                ("has_utterance", Lit::Bool(true)),
+                ("classify_enabled", Lit::Bool(true)),
+                ("classify_done", Lit::Bool(false)),
+            ],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("decide"))],
+        }],
+        unless: &[],
+    },
+    // ── 中途汇报 ─────────────────────────────────────────────────────────
+    //
+    // 一段静默 = 一个 `(turn, anchor)`。汇报事实落格后静默锚前移，下一段静默
+    // 是另一笔账——配额之内可以汇报多次，逐段关账而不是「一说就全关」。
+    Decl {
+        name: "policy.report",
+        prio: 20,
+        // 批次边界 host 的执行体（D-163）：派发点是 `turn_exec` 的轮内注入口
+        // （每跑完一批工具一次），而「该不该说」全由 `report_due` v4 判——
+        // 静默 / 配额 / 轮数三格都在那个视图的输出里（D-159 裁决 4 的分片：
+        // 一块可变状态一个派发点，这一块是「这句话落到哪」）。
+        by: Some(REPORT),
+        // 模板产线，零模型往返。
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: "report_due",
+            key: &["turn", "anchor"],
+            eq: &[("due", Lit::Bool(true))],
+        },
+        until: &[Pattern {
+            source: "reported_anchors",
+            key: &["turn", "anchor"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    // ── 自动语义压缩 ─────────────────────────────────────────────────────
+    Decl {
+        name: "policy.compress",
+        prio: 30,
+        // 轮首 host 的执行体（D-159）：派发点在 `chat_loop::inputs` 的准备段
+        // ①② 之后——水位要的那份请求级开销寄存进本轮状态，产线本身不动。
+        by: Some(COMPRESS),
+        // 语义压缩调模型：深度档。
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[
+                ("auto_compress", Lit::Bool(true)),
+                ("compress_done", Lit::Bool(false)),
+                // 判决判成「就此答话」的一轮不进驱动循环（§5.1 / [D-162] 裁决 1）：
+                // 压缩与召回都不该开账。同一视图的一格，不是跨键的 `unless`——后者
+                // 与债键逐字比对，跨键时静默不命中（§3.4 第 2 条）。
+                ("answered", Lit::Bool(false)),
+            ],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("compress"))],
+        }],
+        unless: &[],
+    },
+    // ── 轮首准备（记忆 / 技能 / 任务段）─────────────────────────────────
+    Decl {
+        name: "policy.recall",
+        prio: 40,
+        // 轮首 host 的执行体（D-159）：派发点在 `chat_loop::inputs` 的轮首锚，
+        // 出口那一格由执行体自己落——它不交回产出，但「已做」这件事照旧只写在日志上。
+        by: Some(RECALL),
+        // 事实投影的纯读 + 技能路由，不调模型。
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[
+                ("round", Lit::Uint(0)),
+                ("is_persistent", Lit::Bool(true)),
+                ("recall_done", Lit::Bool(false)),
+                // 同 [`policy.compress`] 的那一条：定稿答话轮不进驱动循环。
+                ("answered", Lit::Bool(false)),
+            ],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("recall"))],
+        }],
+        unless: &[],
+    },
+    // ── 反射档（技能快路）────────────────────────────────────────────────
+    //
+    // 续写幕不走快路（落格形状会撞幂等键）；`skill_hit` 来自本幕召回阶段的
+    // `result`，所以「命中」这件事第一次有了事实形态。
+    //
+    // 出口是 `reflex` 阶段格（D-163）：执行体只落「已答」并把技能正文寄进本轮
+    // 状态，收束格由 `close-turn` 统一落——快路自身再写 `final` 会让依赖图成环。
+    // 收束行据此在**零模型往返**的轮上也能开出账（`turn_head.reflex_answered`）。
+    Decl {
+        name: "policy.reflex",
+        prio: 50,
+        by: Some(REFLEX),
+        // 快路就是「不调模型」：反射档是它的定义。
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[
+                ("resumed", Lit::Bool(false)),
+                ("skill_hit", Lit::Bool(true)),
+            ],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("reflex"))],
+        }],
+        unless: &[],
+    },
+    // ── 收束（/ 步 5c）────────────────────────────────────────
+    //
+    // 「这一轮该收束了、还没入格」是一笔独立的账：前件是日志上的 `turn.closeable`
+    // （`has_final`〔本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
+    // D-121 决策 2〕∨「本幕派发过的模型往返以失败收场」），执行体是 [`CLOSE`]——
+    // 方案（DE-015 §3.1）要的就是一个独立的 `closer`，不是整轮执行体里的第四个内部动作。
+    // 它排在 `execute-turn` **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，
+    // 而不是再跑一次模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
+    //
+    // ## 出口是 `final | fallback`（DE-015 §3.1 的字面形状，步 5c 复原）
+    //
+    // 步 5 第一批照抄 §3.1 装不上表：`execute-turn` 与 `close-turn` 共用同一个出口
+    // 事实集时，两个执行体互为对方的出口写方（`execute` 写错误路径的 `fallback`，
+    // `close` 写 `final`），依赖图于是有 `close → execute` 与 `execute → close` 两条边
+    // ——两节点环，装载红。环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是
+    // 字节判据面，改它要挂 ADR。
+    //
+    // 步 5c 断环的方式是**让两个执行体写的格不相交**，不是改判据：收束格
+    // （`final` 与 `fallback`）全部归 `close` 执行体——`execute` 那一步只跑模型往返，
+    // 收束格由 `close-turn` 行的执行体落（中止 / 适配器失败两条路径的收束格因此
+    // 从执行体内部挪到了收束动作里）。断环之后 `close-turn` 没有出边（只有 `close`
+    // 写它的出口，而自环不算），`execute-turn → close-turn` 单独一条边，表装得上。
+    //
+    // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）仍在 `execute` 那一步
+    // 就地落兜底格：它们的模型端口**没有终局事实**（`failed(port=model)` 落不下来）
+    // ⇒ 收束行开不出账 ⇒ 那两格由 `execute` 写，并走它的**过渡豁免**（见
+    // [`ACTOR_EXECUTE`] 的 `transitional`）。
+    Decl {
+        name: "close-turn",
+        prio: 55,
+        by: Some(CLOSE),
+        // 入格不调模型：反射档（比执行体的 `mode` 更慢就装载红，第 6 条的 mode 闸门）。
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn"],
+            eq: &[("closeable", Lit::Bool(true))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_ASSISTANT_FINAL,
+                key: &["turn"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_ASSISTANT_FALLBACK,
+                key: &["turn"],
+                eq: &[],
+            },
+        ],
+        unless: &[],
+    },
+    // ── 准备（D-168 裁决 3）────────────────────────────────────────────
+    //
+    // 「本幕还欠一次请求的输入」是一笔独立的账。它此前是 `chat_loop` 步骤 3 的
+    // 一次函数调用：`prepare_turn_inputs` 的 `Ok` 就是「做完了」这件事的全部形态，
+    // 崩在它之后、派发之前，日志上看不出这一幕准备到哪一步。
+    //
+    // 前件取 `turn_head.prepared`（本幕落过 `inputs` 阶段格没有），出口取
+    // `turn_stages` 的 `stage:"inputs"`：与 `policy.*` 四行**同一对形状**——键都是
+    // `(turn, round)`，判别都在 `stage` 这一格上。这不是巧合：它们问的是同一件事
+    // （「这一幕的这一步做过没有」），只是那四步在幕首那台 host、这一步在外环。
+    Decl {
+        name: "prepare-turn",
+        prio: 56,
+        by: Some(PREPARE),
+        // 准备段自己只收集（提示词 / 工具 / 请求视图），模型调用在它内部那台 host
+        // 的行上——与 `dispatch-turn` 同一条取值：本行动作不调模型，快速档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn", "round"],
+            eq: &[("prepared", Lit::Bool(false))],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("inputs"))],
+        }],
+        unless: &[],
+    },
+    Decl {
+        name: "announce-turn",
+        prio: 57,
+        by: Some(ANNOUNCE),
+        // 只落一条 `request`：快速档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_round",
+            key: &["turn"],
+            eq: &[("open", Lit::Bool(false)), ("done", Lit::Bool(false))],
+        },
+        // 出口是「本幕的 `turn` 往返已有终局」，不是「本幕已收束」：派发失败那一笔
+        // 不会落收束格（`execute_turn` 没跑），用 `turn_closed` 关门会让它开着过完
+        // 整个幕、下一圈再宣布一笔。
+        until: &[Pattern {
+            source: "turn_round",
+            key: &["turn"],
+            eq: &[("done", Lit::Bool(true))],
+        }],
+        unless: &[],
+    },
+    // ── 执行（决策行）────────────────────────────────────────────────────
+    //
+    // 只要本幕还开着、且手上没有一批没关掉的工具调用，就欠一次执行。它的**后果**是
+    // 写一条 `request`（决策者的动作），派发本身归 `dispatch-turn`。没把它并进协议行：
+    // 两者的粒度不同（本幕 vs 一次请求往返）——一幕可以有多次往返（auto 续写），
+    // 而「本幕还欠不欠」只有一个答案。
+    //
+    // `tools_open = false`（b）：模型交回了工具调用、其中还有没关账的，
+    // 这一步就让位——否则它每次都比创建 / 授权 / 派发（67 / 68 / 69）先生效，
+    // 工具批永远等不到人跑（下一轮模型往返会带着没有结果的交换再次出发）。
+    //
+    // `reflex_answered = false`（D-163）：快路已作答的轮**没有要答的东西**，本行不欠。
+    // 这条前件替代了「按优先级让 close 先跑」的时序约定——零模型往返因此是行表上的
+    // 判据，不是两个数字（55 / 60）碰巧凑出来的次序。
+    //
+    // `model_open = false`（D-166）：本行只**宣布**一次往返（落 `request(port=model)`），
+    // 派出归 `dispatch-model`。宣布之后那笔账还开着，本行必须让位——否则 `prio` 60
+    // 会压过 66 再宣布一笔，同一幕两条请求并存，「一次模型往返」这个粒度当场失真。
+    Decl {
+        name: "execute-turn",
+        prio: 60,
+        by: Some(EXECUTE),
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: "turn_head",
+            key: &["turn"],
+            eq: &[
+                ("tools_open", Lit::Bool(false)),
+                ("reflex_answered", Lit::Bool(false)),
+                ("model_open", Lit::Bool(false)),
+            ],
+        },
+        until: &[Pattern {
+            source: "turn_closed",
+            key: &["turn"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+    // ── 端口 `turn` 的两行主模板───────────────────────────
+    //
+    // 每端口固定两行：`dispatch-<port>` 与 `await-<port>`，差异只有 `by`。
+    // 第三行（租约）**每端口不写**——一个 `lease` 行管所有端口，它按
+    // `stale_sent` 的实例而不是按端口开账。
+    //
+    // 键取 **`(port, id, attempt)`**（D-138）：重试写出的 `request{attempt+1}`
+    // 必须重新打开派发行；逻辑键会让上一 attempt 的 `sent` 把它提前关掉。
+    //
+    // ## 谁宣布（D-168）
+    //
+    // 宣布归 `announce-turn`（57），派出归本行。**宣布也是一行**，与 `model` 端口
+    // 同一条裁决（D-166）：宣布之后那笔账在日志上开着，派发由选债触发，崩在两步
+    // 之间时派发行能把那笔没有等待方的请求判死（`port::kill_dangling`）。
+    //
+    // 两条前件都不是「该不该收束」：`open = false` 挡住同一幕宣布两笔，
+    // `done = false` 挡住**派发失败之后重新宣布**——那一步不会落收束格
+    // （`execute_turn` 没跑），只看 `closeable` 会永远重来。两格都在 `turn_round`
+    // 上（不并进 `turn_head`：那会把 `request` 拉进出口线，与 `open-tools` 成假环）。
+    Decl {
+        name: "dispatch-turn",
+        prio: 65,
+        // 派出一整幕（内部还起轮内那台 host 的不动点环）：`turn_relay`。
+        by: Some(TURN_RELAY),
+        // 派发本身不调模型（模型在执行体里）。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("turn"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+        ],
+        unless: &[],
+    },
+    // ── 端口 `model` 的两行──────────────────────────
+    //
+    // 与 `turn` 的两行**同模板**，只差端口取值：模型调用是轮内的一次往返。
+    //
+    // 键同样取 `(port, id, attempt)`（D-138）：逻辑 id 在一次调用的各次尝试间不变，
+    // 尝试号随重试 +1；按逻辑键开账会让上一 attempt 的 `sent` 把重试后的请求提前关掉。
+    //
+    // ## 端口粒度为什么是「一次模型往返」而不是「一次工具批次」
+    //
+    // 模型调用是**最内层**的单次对外调用（它下面没有别的调用了），因此它是最小
+    // 的可恢复单位：崩溃后重放到「上一次模型请求」即可，不必重放整轮。工具批次
+    // 在它**外面**（一个模型响应可带多个工具调用），所以工具端口的 `expand` 是
+    // 下一层的事（DE-015 步 3）。
+    //
+    // ## 谁宣布、谁派出（D-166）
+    //
+    // `execute-turn`（60）宣布这一笔（落 `request`），由本行的 [`RELAY`] 执行体
+    // 跑出 `sent` + `response` / `failed`。两个时刻分开的理由不是「拆得好看」：
+    // 宣布之后那一笔在日志上是一笔**开着**的债，派发由选债触发（不是执行体内部
+    // 顺手调一次往返），所以「这一笔该谁跑」在事实面上可判、在崩溃后可接。
+    //
+    // 与 `dispatch-tools` 不共用一个执行体名：一个 `by` 一个动作（D-118 决策 1–2），
+    // 而 `courier` 的动作派发的是**一批**（批尾关账、落等待格与轮内注入），
+    // 与「跑一次往返」不是同一件事——共名会让动作只能按行名分支。
+    Decl {
+        name: "dispatch-model",
+        prio: 66,
+        by: Some(RELAY),
+        // 派发本身不调模型（模型在 [`ACTOR_RELAY`] 的动作里，协议格仍由引擎写）。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 工具调用的**创建**（D-117）：一个模型响应的 `calls` 集合逐元素开债。
+    //
+    // 与派发行分开：创建行只回答「这次响应里的调用有没有落成 request」，派发行
+    // 才回答「已放行的那一笔有没有 sent」。把两者合成一行会让授权拒绝失去
+    // 作用点——被拒绝的调用同样有模型响应，派发会绕过 `authz.denied`。
+    //
+    // `expand` 只展开 `owes`；`until` 按键命中。元素键 `id` 由模型响应携带
+    // （`tool-{turn}-d{drive}-{模型调用 id}`），与随后的 `request(port=tool)` 同 id。
+    Decl {
+        name: "open-tools",
+        prio: 67,
+        // 创建动作（b）：逐条落 `request(port=tool)`，不调模型、不跑工具。
+        by: Some(OPENER),
+        tier: LatencyTier::Fast,
+        expand: Some(("calls", "id")),
+        owes: Pattern {
+            source: EVENT_RESPONSE,
+            key: &["port", "id"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_REQUEST,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 授权级联的第二行（第一行 `authorize-tool` 在表首）：只对已放行的那笔
+    // 落 `sent`。`granted` 已蕴含 `request`，所以这里不再复写请求前件。
+    Decl {
+        name: "dispatch-tools",
+        prio: 68,
+        // 派发动作（b）：放行的落 `sent` 并交执行层，批尾把每一笔关掉。
+        by: Some(COURIER),
+        // 派发本身不调工具（执行在批次里）。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_AUTHZ_GRANTED,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_SENT,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 被拒的调用也要有人收尾（b）：`authz.denied` 关掉了授权行，但
+    // `dispatch-tools` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
+    // 执行层就永远跑不到，`failed{why}` 也永远不落。这一行把「拒绝之后还必须做一次
+    // 收尾」说成债务：出口与派发行同一格，动作也是同一个派发执行体（混合批次里
+    // 那一笔由 68 顺带关掉，本行随后自然不欠）。
+    //
+    // 键取 `(port, id, attempt)` 与 `authz.denied` 同形（D-138）；不带 `port`
+    // 的收束格拒绝（`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。
+    Decl {
+        name: "deny-tools",
+        prio: 69,
+        by: Some(COURIER),
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_AUTHZ_DENIED,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[Pattern {
+            source: EVENT_FAILED,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("tool"))],
+        }],
+        unless: &[],
+    },
+    // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：对引擎透明（恒 blocked、
+    // 永不选中），但它让「在等」与「没事」可区分（DE-015 §2.3）。
+    //
+    // 键取 `(port, id, attempt)`（D-138）：`sent` / `response` / `failed` / `retry`
+    // 都是同一次尝试的事实；按逻辑键开账时，上一 attempt 的应答会把这笔重试后的
+    // 等待提前关掉。
+    Decl {
+        name: "await-turn",
+        prio: 70,
+        by: None,
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("turn"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("turn"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 「已派出、等应答」——与 `await-turn` 同形：`by: None` 就是 `Wait` 的折叠。
+    Decl {
+        name: "await-model",
+        prio: 71,
+        by: None,
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("model"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("model"))],
+            },
+        ],
+        unless: &[],
+    },
+    // 一批 N 笔，一笔一条 `sent`；`await-tools` 与其它端口的 await 同形。
+    //
+    // 键取 `(port, id, attempt)`：重试后新 attempt 的 `sent` 要重新开一笔等待，
+    // 而不是被旧 attempt 的应答关掉（D-138）。
+    Decl {
+        name: "await-tools",
+        prio: 72,
+        by: None,
+        tier: LatencyTier::Deep,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("tool"))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id", "attempt"],
+                eq: &[("port", Lit::Str("tool"))],
+            },
+        ],
+        unless: &[],
+    },
+    // ── 租约（**每端口不写**，一个行管所有端口）───────────────────
+    //
+    // 开账条件是 `stale_sent.stale`（视图把 `now` 与 `lease_ms` 折成布尔），
+    // 所以时间不进欠账公式。
+    //
+    // 键取 `(port, id, attempt)`：一笔调用可能卡在重试链的某一环上，
+    // 看护者要能分别说出「第几次尝试卡住了」（D-138）；逻辑键会让旧尝试的
+    // `retry` 把新尝试的卡住一并关掉。
+    //
+    // ## 为什么没有 `unless: attempt ≥ max_attempts`
+    //
+    // DE-015 §2.3 的草稿把「尝试到顶」写成 `unless`——那会让行在到顶时挂起，
+    // 而「判死」（落 `failed`）恰恰要在到顶时发生。到顶是**看护者的判断**，不是
+    // 行的出口：行只负责「这笔卡住了，有人要管」，重试还是判死归执行体。
+    Decl {
+        name: "lease",
+        prio: 80,
+        // 未接线：看护者在唤醒路径上自己扫 `stale_sent`，不经派发器选债；与
+        // `lease_keeper` 执行体同批接回。
+        by: None,
+        // 看护本身是记账，不调模型。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "stale_sent",
+            key: &["port", "id", "attempt"],
+            eq: &[("stale", Lit::Bool(true))],
+        },
+        until: &[
+            Pattern {
+                source: EVENT_RESPONSE,
+                key: &["port", "id", "attempt"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_FAILED,
+                key: &["port", "id", "attempt"],
+                eq: &[],
+            },
+            Pattern {
+                source: EVENT_RETRY,
+                key: &["port", "id", "attempt"],
+                eq: &[],
+            },
+        ],
+        unless: &[],
+    },
+];
+
+/// 装载：五张注册表经 DE-015 §3.2 的**六个口**进 `Builder`，`seal` 跑完 §3.4 的七道。
+///
+/// 行切片与端口切片从这里进 `row` / `port` 两个入口——检查跟着表走，不由调用方
+/// 自己想起来再跑一遍：`seal` 是装载的唯一出口。
+///
+/// **任何缺口都是装载失败**——`seal` 一次报全的每一格（声明侧重名 / 撞名 / 视图引用
+/// 未声明的事实或字段 / 执行体声明了引擎独占的格，行侧无出口 / 键不一致 / 未声明源 /
+/// 未声明字段 / 展开键不匹配 / 孤儿事实名 / 无人认领的 `by` / 收不了口的执行体 /
+/// 依赖成环 / 端口没有应答出口）都在同一个 `Vec<Gap>` 里，不降级成告警：一个没人
+/// 消费的事实名就是判据 7 拦的那条「拼错的名字静默永不被消费」，它在装载期就该挡住启动。
+///
+/// 执行体声明与绑定项一起交（[`actor_decls`] 就是绑定表的 `decl` 投影），所以装载期
+/// 能看到的名字与派发器跑得动的名字**同源**。
+/// 控制面声明集的 owner（DE-023 D-178）：这张表由 `plugins/loop` 交进装载口，
+/// 事实与视图的 owner 清单因此都指向这里。
+pub(crate) const LOOP_OWNER: &str = "plugins/loop";
+
+pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
+    let mut b = Builder::new();
+    b.declare(
+        LOOP_OWNER,
+        PluginDeclarations {
+            facts: super::control_decl::FACTS,
+            views: super::control_decl::VIEWS,
+            ports: PORTS,
+            actors: actor_decls(),
+            rows,
+        },
+    );
+    b.seal()
+}
+
+/// 真表装载，并把 §3.4 第 4 条的报告打出来。
+///
+/// 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，谁先派发归 `drive` 的
+/// `(prio, name, key)`。名单随表冻结（[`Frozen::overlaps`]），这里只负责让人看见。
+fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
+    let frozen = load(ROWS)?;
+    let overlapping = frozen.overlaps();
+    if !overlapping.is_empty() {
+        symbio_core::plugin_info!(
+            "session",
+            "[Loop] 相交行对 {} 组（可能同时开账，裁决归 prio）：{}",
+            overlapping.len(),
+            overlapping
+                .iter()
+                .map(|o| format!("{}×{}@{}", o.rows[0], o.rows[1], o.facts.join("+")))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        );
+    }
+    Ok(frozen)
+}
+
+/// 冻结的声明表（进程内唯一）。装载有任何缺口 ⇒ `None`，[`table`] 恒 `Err`。
+///
+/// ## 为什么进程级单例 ≡ 按会话注入
+///
+/// 五张表灌进 `Builder` 的全是 `&'static` 数据（`Decl` / `PortDecl` / `ActorDecl` 的
+/// 每个字段都是 `&'static str` / `&'static [_]` / `Copy`），`seal(self)` 又是**消耗**
+/// `self` 的：同一份程序文本只能冻出同一张表，按会话构造得到的就是这个值。于是
+/// `LazyLock` 不是「一条全局可变注册通道」，而是一个纯函数的记忆化——它的
+/// `Option` 缓存的是**失败**（缺口已逐条进 error 日志），不是可写的状态。
+///
+/// 与按会话注入真正不同的只有**开幕时机**：这里首次查询即装载，失败缓存后每一次开幕
+/// 都带同一个 `Err` 退出（[`table`]），不存在「这一届会话拿到了半张表」。类型面上
+/// `Session` 只持 `Arc<Frozen>`，`Frozen` 没有 `&mut self` 方法、没有内部可变性。
+static FROZEN: LazyLock<Option<Arc<Frozen>>> = LazyLock::new(|| match assemble() {
+    Ok(frozen) => Some(frozen),
+    Err(gaps) => {
+        symbio_core::plugin_error!(
+            "session",
+            "[Loop] 行表装载失败，义务环拒绝启动（开幕带错退出）：{:?}",
+            gaps
+        );
+        None
+    }
+});
+
+/// 冻结的声明表（租约看护者自己也要求它——它不重复装载一份）。
+///
+/// 装载有任何缺口 ⇒ `Err`：调用方（开幕）带着它退出，不存在「表没装好但轮照常跑」
+/// 这种部分成功。
+pub(crate) fn table() -> Result<Arc<Frozen>, symbio_core::PluginError> {
+    frozen().ok_or_else(|| {
+        symbio_core::PluginError::InternalError(
+            "义务环行表装载失败（装载期检查有缺口），本轮拒绝开幕；详见启动日志 [Loop] 行表装载失败".into(),
+        )
+    })
+}
+
+fn frozen() -> Option<Arc<Frozen>> {
+    FROZEN.clone()
+}
+
+/// 本轮的事实切片：视图只扫**一轮**（声明的成本上界针对轮，不针对整份 WAL）。
+///
+/// 轮号单调，因此「本轮第一条事件」就是本轮窗口的起点；续写幕复用轮号时，
+/// 首幕的事件也在切片里，而视图的 `drive_of` 会按**最新幕锚**收窄。
+fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
+    match events.iter().position(|e| e.turn == turn) {
+        Some(start) => &events[start..],
+        None => &[],
+    }
+}
+
+/// 本次 `drive` 的 `now`：**幕锚那条事实的 `ts`**（判据 12，DE-015 §2.1）。
+///
+/// 幕锚 = `drive_seq`：新轮是用户格，续写幕是恢复阶段事实——两者都是**触发本次
+/// drive 的那条事实**。墙钟进入日志的唯一合法通道是落这条事实时 `Store::append`
+/// 补的落格时刻，此后本次 drive 的所有时间条件（静默、租约）都只读它的 `ts`。
+/// 于是同一个日志重放两次，`now` 相同，`owed` 逐字相同；而现取墙钟会让「回放可
+/// 重建」在这些路径上成为假话。
+///
+/// 切片里没有这一条 ⇒ `0`（切片比幕旧，或幕锚填的是占位值）：没有任何时间条件
+/// 可以满足，宁可判「还不该做」也不拿一个来路不明的时刻去凑。
+pub(crate) fn wake_now_ms(events: &[Event], drive_seq: u64) -> i64 {
+    events
+        .iter()
+        .find(|e| e.seq.is_some_and(|s| s.value() == drive_seq))
+        .map(|e| e.ts)
+        .unwrap_or(0)
+}
+
+/// 这一行此刻**欠着**吗（`owes` 命中且未被 `until` 关掉）。
+///
+/// 这是 §2.2 的 `open`，不是 `actionable`：`by = None` 的行照样欠着。「在等」与
+/// 「没事」可区分正是 `by = None` 存在的理由，所以点问口不能把它折掉——调用点
+/// （`port.rs` 的往返、`tool_dispatch` 的三段、`chat_loop` 的策略段）问的都是
+/// 「这笔账在不在」，而「引擎该不该现在去还」只由 [`next`] 回答。
+///
+/// 返回布尔而不是 `Debt`：调用点只决定「这一步
+/// 做不做」。要裁决顺序（同一点多行竞争）时用 `ring::drive`，本函数不代劳。
+pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    let debt = owed(frozen.rows(), &frozen, turn_slice(events, turn), now)
+        .into_iter()
+        .find(|d| d.decl.name == name);
+    if let Some(debt) = &debt {
+        trace(&frozen, debt);
+    }
+    debt.is_some()
+}
+
+/// 本幕是否已经收束（收束 / 兜底格已在幕锚之后落过）。
+///
+/// 外环的**幕间**停机判据（D-168 裁决 2）：`chat_loop` 的迭代器在每一轮之外问一次，
+/// 外环的派发点在每一步之前问一次。两个问题同一个答案——「这一幕还有账吗」。
+///
+/// ## 为什么它不在行表上
+///
+/// 「本幕已收束」若写成一行的前件，那一行就得**以收束格为出口**（与 `close-turn`
+/// 同一批格），而收束格的写者正是 `close-turn` 的执行体：两条行各写一格 ⇒ 依赖图
+/// 成环（DE-015 §3.4 第 1 条）。它也不是一笔债——收束之后没有任何东西要还，
+/// 它是「环该停了」这句话在事实面（`turn_closed` 视图）上的形态。
+///
+/// 与 [`waiting`] 同一层：都读冻结表里已声明的视图，不新增机制词。
+pub(crate) fn stage_closed(events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    frozen
+        .eval("turn_closed", turn_slice(events, turn), now)
+        .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+        .unwrap_or(false)
+}
+
+/// 一段连续幕的上限：被输出上限掐断之后，最多再开几幕。
+///
+/// 它此前是 `chat_loop::turn` 里的 `MAX_CONTINUE_ROUNDS` 与
+/// `TurnState::continuation_count` 那一对内存计数（「跨轮累加的次数」）。判据搬进
+/// 事实面之后（D-168 裁决 4），上界留在**迭代器**这一层：视图只给事实（`round` /
+/// `closure`），「够不够了」是幕间判据自己的事——把它写进视图等于让一份投影替调用方
+/// 定策略，而视图的输出是回放要解释的口径，不是可调的旋钮。
+pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
+
+/// 本幕轮次**还有没有下一次**（`round` = 本幕的 `turn.stage{stage:"round"}` 值）。
+///
+/// 上界判据只此一处：[`next_stage_round`] 用它定「还开不开下一幕」，
+/// `chat_loop::turn::persist_turn` 用它定「截断告警该说自动续写还是该说已耗尽」。
+/// 两处读的是同一个数——本幕的轮次由 `begin_drive` 落成事实、由 `turn_head` 折成
+/// 一格、由 `TurnState::request_round` 拿着用，三处同一个值（不是三份计数）。
+pub(crate) fn has_next_round(round: u64) -> bool {
+    round < MAX_STAGE_ROUNDS
+}
+
+/// 幕间判据：本幕停下之后**还开不开下一幕**——开的话，下一幕的轮次是多少。
+///
+/// `None` = 收工；`Some(round)` = 再开一幕，轮次取 `round`。
+///
+/// ## 它读的是事实，不是返回值
+///
+/// 这是 D-168 裁决 4 的落点。流向此前是 `close_turn` 返回的 `TurnFlow`，由
+/// `chat_loop` 的 `match` 决定「再发一次请求」还是收工——那是**按步骤号决定的判定点**
+/// （判据 2 的最后一条）。而这件事在日志上早就有事实：截断续写的幕与自然说完的幕，
+/// 收束格的 `reason` 本来就不同（`exhausted` / `completed`）。于是判据只剩读一格。
+///
+/// ## 轮次从事实里读，不从内存里数
+///
+/// `round` 是本幕开账时落下的 `turn.stage{stage:"round"}` 那一格的值，也就是本幕
+/// 是「第几次请求」。续写次数因此不再需要一份独立的计数：`round + 1` 就是下一幕的
+/// 轮次，上界比对的是同一个数。`TurnState::continuation_count` 随之退场。
+///
+/// ## 「续写」与「收工」的分野只有 `exhausted`
+///
+/// 别的停法（`completed` / 兜底 / 中止 / 没有 `reason` 的旧日志）一律收工。方向是
+/// **宁可少发一次**：拿一个来路不明的形状去再发一次请求，等于把一次「本来就该停了」
+/// 的轮拖成两次模型往返。
+pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<u64> {
+    let frozen = frozen()?;
+    let head = frozen.eval("turn_head", turn_slice(events, turn), now)?;
+    let exhausted = head.get("closure").and_then(|v| v.as_str())
+        == Some(symbio_core::ClosureReason::Exhausted.as_str());
+    if !exhausted {
+        return None;
+    }
+    let round = head.get("round").and_then(|v| v.as_u64())?;
+    has_next_round(round).then(|| round + 1)
+}
+
+/// 本幕**真的派出过**一次 `turn` 往返没有（`turn_round.done`）。
+///
+/// 外环停下来之后要靠它把两种处境分开：**一次都没派出去**（表上真的没有可还的债，
+/// 行表装载失败 / 前件全被别的债挡住）与**派出去了**（各笔账都还了，幕之后的结局是
+/// 幕自己的事——收束格落下是答完了，工具批悬在等用户审批时本幕本来就还开着）。
+/// 前者不许安静地收场，后者不许被当成失败。判据在事实面上（派发格自己落的
+/// `sent` / `failed`），不在派发点的返回值上。
+pub(crate) fn stage_dispatched(events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    frozen
+        .eval("turn_round", turn_slice(events, turn), now)
+        .and_then(|v| v.get("done").and_then(|d| d.as_bool()))
+        .unwrap_or(false)
+}
+
+/// 这一刻环上有没有**已派出、未收清**的账——「在等」的可观测形态。
+///
+/// 与 [`owes`] 的分工：`owes` 按**行名**问，本函数按**形状**问——开账条件是
+/// `sent` 的那些行（`await-<port>`）。**刻意不按行名前缀匹配**：派发器不认行名
+/// （D-118 决策 1），而「开账条件 = `sent`」正是「一次请求已经派出去、应答还没
+/// 回来」这件事在表上的唯一写法，它不依赖命名约定——改了行的名字，这个判据照样成立。
+///
+/// ## 它存在的理由：`await-*` 行不是装饰行
+///
+/// `drive_steps` 选不到可还债时，有两种**完全不同**的处境：真的没事可做，与有一笔
+/// 往返还在路上。两者在 `owed` 里可分（`blocked`），但停机理由此前一律写
+/// `no_progress`——于是「这一轮为什么停」在事实面上不可区分，而「在等」恰恰是
+/// 恢复路径最需要看见的那一种（进程在等应答时被打断，重启后这笔账要靠 `lease`
+/// 判死，前提是它当时确实被记成「在等」）。
+///
+/// `await-*` 行的**唯一生产读者**就是这里（D-126）：它们由表形状保证「与派发行
+/// 对偶」，由本函数给出可观测后果。两条缺一，它们就退化成行表里的装饰。
+pub(crate) fn waiting(events: &[Event], turn: u64, now: i64) -> bool {
+    let Some(frozen) = frozen() else {
+        return false;
+    };
+    owed(frozen.rows(), &frozen, turn_slice(events, turn), now)
+        .iter()
+        .any(|d| d.blocked && d.decl.owes.source == EVENT_SENT)
+}
+
+/// 引擎的**选债口**：本幕当前最小的一笔可还债，连带它的动作。
+///
+/// 与 [`owes`] 的分工：`owes` 回答「某一行欠不欠」，本类型回答「下一步谁欠、
+/// 跑什么」。[`next`] 是 `turn_exec::drive_steps` 的唯一选债依据（D-118 决策 1–2）——
+/// 派发器不按行名 / 端口名 / 业务语义分支，只调 `Next.action` 这**一个**动作。
+///
+/// 参数 `A` 是**这台 host 的动作类型**（D-159）：轮内是 `turn_exec::Action`，轮首是
+/// `head_exec::HeadAction`。选债、同源绑定、对账名单这三件事两台 host 完全一样，
+/// 所以只有一个 `Next`，不是两个形状。
+pub(crate) struct Next<A> {
+    /// 行名（日志与停机理由用）。
+    pub(crate) row: &'static str,
+    /// 执行体名。`drive` 已滤掉 `by: None`，这里必有值。
+    pub(crate) by: &'static str,
+    /// 债键的人读形状（日志用）。
+    pub(crate) key: String,
+    /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
+    pub(crate) action: A,
+    /// 同一个动作的**声明面**：它登记过会写哪些领域格。
+    ///
+    /// 派发器拿账本（日志尾段）对它对账（[`Next::writes_closed`]）。放在 `Next` 上而不是
+    /// 让派发器再查一次表，是因为「跑哪个动作」与「它写了什么」必须同源——
+    /// 分两次查就能查出两份答案（D-123 决策 2）。
+    pub(crate) writes: &'static [&'static str],
+    /// 这条执行体的**过渡豁免名单**（[`ActorEntry::transitional`] 的同一份，同源）。
+    pub(crate) tolerated: &'static [&'static str],
+}
+
+/// 取最小可还债；没有可还的债 ⇒ `None`（收束 / 装载失败 / 只剩 blocked 行）。
+///
+/// 这是 `ring::drive` 的生产包装：切片只含**本轮**事件（视图成本上界按轮），
+/// 并复用与 [`owes`] 同一份冻结声明表。装载失败返回 `None` 而不是 panic——
+/// 派发器据此停住，不拿半张表继续走。
+///
+/// 可还性只有一个声明位：`owed` 的 `blocked`（`by = None ∨ unless`）。
+/// 「注册表没覆盖的 `by`」不是第四个过滤条件——那种行直接写 `by = None`，
+/// 接回时与它的 `ActorEntry` 同批改（D-118 订正 1）。
+///
+/// `actors` 是派发器手里的那张绑定表（生产 = [`ACTORS`]，D-123 决策 4）：行表决定
+/// 「谁欠什么」，这张表决定「这个名字跑哪个动作、它登记写哪些格」，读账本对账用的
+/// 名单也来自同一处。
+///
+/// 送给求解器的是**由这张表派生的行子集**（[`host_rows`]，D-159 裁决 2）：求解器
+/// 字节一字未动，变的只是每个派发点看得到哪些行。
+pub(crate) fn next(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [ActorEntry],
+) -> Option<Next<super::turn_exec::Action>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**批次边界**那一台（D-163）：同一个求解器、同一份对账名单，只是绑定表与
+/// 动作类型换了一张。
+///
+/// 这一台的派发点在轮内注入口：每跑完一批工具问一次，问的仍然是**本 host 的行子集**
+/// （只有 `policy.report` 一行）。整张行表在这里同样不能传——`drive_head` 那条理由
+/// 逐字适用（别的 host 的债会被本派发点选中而绑不上动作）。
+pub(crate) fn next_report(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [ReportEntry],
+) -> Option<Next<super::report_exec::ReportAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &report_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        report_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**外环**那一台（D-168）：一个幕里「这一轮请求还没宣布 / 还没派出」
+/// 那两笔债。
+///
+/// 与另外两台唯一的差别是绑定表与动作类型；行子集仍由名字派生。**幕号由事实给出**
+/// （调用方传的是 `last_open_turn` 折出来的那个），不是「第几次循环」——D-168 裁决 1
+/// 的同一条：`owed` 的输入里只能有一个「现在是哪一幕」。
+pub(crate) fn next_stage(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [StageEntry],
+) -> Option<Next<super::stage_exec::StageAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &stage_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        stage_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// [`next`] 的**轮首**那一台（D-159）：同一个求解器、同一份对账名单，只是绑定表与
+/// 动作类型换了一张。
+pub(crate) fn next_head(
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    actors: &'static [HeadEntry],
+) -> Option<Next<super::head_exec::HeadAction>> {
+    let frozen = frozen()?;
+    let rows = host_rows(&frozen, &head_actor_names(actors));
+    pick(&frozen, &rows, events, turn, now, |by| {
+        head_entry_of(by, actors).map(|e| (e.run, e.decl.writes, e.transitional))
+    })
+}
+
+/// 两台的选债半边共用这一段：求最小可还债 → 按 `by` 一次查全（动作 + 声明名单 +
+/// 过渡豁免）→ 折成 [`Next`]。
+///
+/// 查不到动作就按「没有可还的债」显形并出声（不猜动作、也不猜它写了什么）：那是
+/// 行表与绑定表被改坏的形状，不是第四种可还性。
+fn pick<A>(
+    frozen: &Frozen,
+    rows: &[Decl],
+    events: &[Event],
+    turn: u64,
+    now: i64,
+    bind: impl Fn(&'static str) -> Option<(A, &'static [&'static str], &'static [&'static str])>,
+) -> Option<Next<A>> {
+    let debt = symbio_core::ring::drive(rows, frozen, turn_slice(events, turn), now)?;
+    trace(frozen, &debt);
+    let Some((action, writes, tolerated)) = debt.decl.by.and_then(bind) else {
+        symbio_core::plugin_warn!(
+            "session",
+            "[Loop] 行表与执行体绑定表脱节（行 {} 的 `by={:?}` 没有动作），本步不派发",
+            debt.decl.name,
+            debt.decl.by
+        );
+        return None;
+    };
+    Some(Next {
+        row: debt.decl.name,
+        by: debt.decl.by?,
+        key: debt.key.trace(),
+        action,
+        writes,
+        tolerated,
+    })
+}
+
+/// 按声明求一个视图值（本轮切片）。未声明 / 扫描超界 ⇒ `None`。
+pub(crate) fn view(name: &str, events: &[Event], turn: u64, now: i64) -> Option<Value> {
+    frozen()?.eval(name, turn_slice(events, turn), now)
+}
+
+/// 这一行携带的档位。未登记 ⇒ 深度档（fail-safe：不静默提速）。
+///
+/// 读的是**冻结表**里的那一行（`frozen.rows()`），不是 `static ROWS`：装载入口用
+/// `static` 灌表，读侧只认表——否则「改了 static 但表没重装」这种漂移就没有出口。
+pub(crate) fn tier(name: &str) -> LatencyTier {
+    frozen()
+        .and_then(|frozen| {
+            frozen
+                .rows()
+                .iter()
+                .find(|d| d.name == name)
+                .map(|d| d.tier)
+        })
+        .unwrap_or(LatencyTier::Deep)
+}
+
+/// 一笔可还的**可观测面**：行 / 债标识 / 档位 / 视图口径。与旧 `Hit::trace` 同一
+/// 目的——「某一步怎么发生了」在日志里要能指认到行与那一笔债，而不只是行名本身。
+///
+/// 视图版本一并记下（`ViewDecl.ver`）：投影读法一变，同一份事实折出的结论就变，
+/// 回放时「这一轮用了哪一版」必须在日志里有答案。
+fn trace(frozen: &Frozen, debt: &symbio_core::ring::Debt<'_>) {
+    let decl = debt.decl;
+    let key = debt.key.trace();
+    let view = frozen.view(decl.owes.source);
+    symbio_core::plugin_debug!(
+        "session",
+        "[Loop] 行 {} 可还（{} / {}ms；债 {}；视图 {} v{}）",
+        decl.name,
+        decl.tier.name(),
+        decl.tier.budget_ms(),
+        if key.is_empty() { "-" } else { key.as_str() },
+        decl.owes.source,
+        view.map(|v| v.ver).unwrap_or(0)
+    );
+}
+
+#[cfg(test)]
+#[path = "loop_rows.test.rs"]
+mod tests;

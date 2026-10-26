@@ -54,11 +54,11 @@ const HOOK_SCHEMA = `pub struct HookEvent { pub kind: String }\n`
 test('顶层再导出名（schemas::X）归属到 X 的定义模块', () => {
   // hook 插件走**顶层名**导入；session 走**子模块路径**导入
   const out = audit({
-    'symbio/src/symbio_core/schemas/mod.rs': SCHEMAS_MOD,
-    'symbio/src/symbio_core/schemas/hook.rs': HOOK_SCHEMA,
-    'symbio/src/plugins/hook/executor.rs': 'use crate::symbio_core::schemas::{HookEvent};\n',
-    'symbio/src/plugins/hook/plugin.rs': 'use crate::symbio_core::schemas::{HookEvent};\n',
-    'symbio/src/plugins/session/tool_executor.rs':
+    'crates/symbio-core/src/schemas/mod.rs': SCHEMAS_MOD,
+    'crates/symbio-core/src/schemas/hook.rs': HOOK_SCHEMA,
+    'crates/symbio-plugin-hook/src/executor.rs': 'use crate::symbio_core::schemas::{HookEvent};\n',
+    'crates/symbio-plugin-hook/src/plugin.rs': 'use crate::symbio_core::schemas::{HookEvent};\n',
+    'crates/symbio-plugin-session/src/tool_executor.rs':
       'use crate::symbio_core::schemas::hook::{HookEvent};\n',
   })
   // hook 有 3 个消费文件 ⇒ 不是下放候选
@@ -71,9 +71,9 @@ test('真的只有一个消费方时，仍如实报为下放候选', () => {
   // 反例守卫：修好「漏算消费方」不能变成「一律不算候选」——
   // 那样这条报告就只剩下「无」，等于没有。
   const out = audit({
-    'symbio/src/symbio_core/schemas/mod.rs': SCHEMAS_MOD,
-    'symbio/src/symbio_core/schemas/hook.rs': HOOK_SCHEMA,
-    'symbio/src/plugins/session/tool_executor.rs':
+    'crates/symbio-core/src/schemas/mod.rs': SCHEMAS_MOD,
+    'crates/symbio-core/src/schemas/hook.rs': HOOK_SCHEMA,
+    'crates/symbio-plugin-session/src/tool_executor.rs':
       'use crate::symbio_core::schemas::hook::{HookEvent};\n',
   })
   assert.match(out, /^\s*hook\s+\[1\]/m, out)
@@ -86,9 +86,9 @@ test('match 臂里的 "Refuse => {" 不被误当成 use 语句（2026-09-30 实�
   // expandUse 在 match 块的花括号上无限递归直接栈爆（RangeError: Invalid string
   // length）——修复后该输入必须正常跑完且 exit 0（报告型恒 0）。
   const out = audit({
-    'symbio/src/symbio_core/schemas/mod.rs': SCHEMAS_MOD,
-    'symbio/src/symbio_core/schemas/hook.rs': HOOK_SCHEMA,
-    'symbio/src/plugins/gate/actor.rs': [
+    'crates/symbio-core/src/schemas/mod.rs': SCHEMAS_MOD,
+    'crates/symbio-core/src/schemas/hook.rs': HOOK_SCHEMA,
+    'crates/crates/plugins/gate/actor.rs': [
       'pub fn f(d: u8) -> u8 {',
       '  match d {',
       '    GateDecision::Refuse => {',

@@ -1022,7 +1022,7 @@ test('本仓当前登记自洽，且每类 kind 都读到了条目', () => {
     '系统级文档必须真的进了 design（在位文档装载口径）',
   )
   assert.ok(
-    entries.some((e) => e.kind === 'design' && e.rel.includes('symbio/src/')),
+    entries.some((e) => e.kind === 'design' && e.rel.includes('crates/crates/')),
     '模块级文档（模块 README / docs）必须在同一机制内',
   )
   assert.ok(

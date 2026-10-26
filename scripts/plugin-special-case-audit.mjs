@@ -65,9 +65,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 
 /** 会话插件：工具执行流程的所在地（SC-001 的扫描根）。 */
-const DEFAULT_SESSION = path.join('symbio', 'src', 'plugins', 'session')
+const DEFAULT_SESSION = path.join('crates', 'symbio-plugin-session', 'src')
 /** 模型协议层（SC-002 / SC-003 / SC-004 的扫描根）。 */
-const DEFAULT_PROTOCOLS = path.join('symbio', 'src', 'plugins', 'model', 'protocols')
+const DEFAULT_PROTOCOLS = path.join('crates', 'symbio-plugin-model', 'src', 'protocols')
 
 /** 档案表文件名：SC-003 的名单来源就是它，它自己不参与扫描。 */
 const PROFILE_FILE = 'profile.rs'

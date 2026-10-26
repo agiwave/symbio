@@ -10,15 +10,15 @@ created: 2026-09-13
 状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）
 关联：
-`symbio/src/symbio_core/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
+`crates/symbio-core/src/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
 + 域类型 + 路径工具**）、
-`symbio/src/symbio_core/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
-`symbio/src/plugins/vdfs/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
-`symbio/src/plugins/vdfs/fs.rs`（**统一文件系统 `UnifiedFs`：`<根>` / 物理地址分流**）、
-`symbio/src/plugins/vdfs/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
-`symbio/src/plugins/vdfs/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
-`symbio/src/plugins/composite/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
-`symbio/src/providers/vdfs_service/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
+`crates/symbio-core/src/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
+`crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
+`crates/symbio-plugin-vdfs/src/fs.rs`（**统一文件系统 `UnifiedFs`：`<根>` / 物理地址分流**）、
+`crates/symbio-plugin-vdfs/src/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
+`crates/symbio-plugin-vdfs/src/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
+`crates/symbio-plugin-composite/src/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
+`crates/symbio-provider-vdfs_service/src/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
 ——单文件 / 目录 / 内存，§11）
 
 > 本文件只写**规范与机制**。具体子目录（会话、模型、设置分区、工作目录……）
@@ -345,7 +345,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 **导入不是「新建类型」的一种**，因此 `VdfsNewType` 里没有它的位置
 （见 [ADR 索引](../010-adr/README.md "DE-000-设计总览") D-029）。动作声明 `pack` 表明「载荷是一个
 本地文件」，使用方据此先取文件再执行；provider 不支持时返回 `NotImplemented`，
-使用方据此不给出入口（详见 [012-vdfs-frontend.md](012-vdfs-frontend.md "DE-010-VDFS前端页面规范") §5）。
+使用方据此不给出入口（详见 [[DE-010-VDFS前端页面规范|012-vdfs-frontend.md]] §5）。
 
 > 目录型资源的**存储层原语**仍接受二进制写入（`vdfs/write { b64 }` = 解包），
 > 但那是对内的原语，不是对外的入口形态——对外只有 `import` 动作一条路。
@@ -386,7 +386,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   字段同处一个文件，但**不参与配置反序列化**（`PluginDir` 读写时自动剥离 / 补回）。
   装配方据此判定「这个目录是不是一个可加载的插件」：文件存在、可解析、且
   `plugin_provider` 指向一个已注册的工厂（见
-  [composite/README.md](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README")）。
+  [composite/README.md](../../crates/symbio-plugin-composite/README.md "crates/symbio-plugin-composite/src/README")）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
   `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
 - **实现只写一次**：`symbio_core::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
@@ -395,7 +395,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
   对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
 - **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见
-  [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README")），但条目
+  [plugin_manager/README.md](../../crates/symbio-plugin-plugin_manager/README.md "crates/symbio-plugin-plugin_manager/src/README")），但条目
   携带的是**它自己的真实地址**（`<插件目录>/PLUGIN.yml`），读写仍走拥有者——同一份
   配置只有一个地址，设置页不代理读写、也不复制一份。
 
@@ -601,7 +601,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 
 前端分层（`schemas/vdfs.ts` → `registry/vdfsTypes.ts` → `registry/vdfsRenderers.ts`）、
 页面与路由（`views/VdfsView.vue`，`/vdfs/:dir(.*)*`）以及「新增一类资源前端零页面
-开发」的完整契约，见 [012-vdfs-frontend.md](012-vdfs-frontend.md "DE-010-VDFS前端页面规范")。
+开发」的完整契约，见 [[DE-010-VDFS前端页面规范|012-vdfs-frontend.md]]。
 
 ## 8. 校验职责
 
@@ -757,7 +757,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 ## 11. 与既有机制的关系
 
 - **本地文件**：磁盘文件系统是 `UnifiedFs` 的**物理层**（`PhysicalFs` + `FsPolicy`，
-  规则见 [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README")）。裸地址（无 `<根>`
+  规则见 [vdfs/README.md](../../crates/symbio-plugin-vdfs/README.md "crates/symbio-plugin-vdfs/src/README")）。裸地址（无 `<根>`
   前缀）**直接**落在物理层，相对路径从工作目录开始；行号分页、`ignore` 过滤、精确
   字符串替换（保持换行符风格）、文件名 Glob 均由访问层组合操作对齐。
 - **三条收集通道**：通道键 `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`
@@ -798,9 +798,9 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 
 | § | 实例 | 它是一份什么 `VdfsProvider` | 机制细节 owner |
 |---|---|---|---|
-| 13.1 | 设置（plugin_manager） | 只读清单：自有分区 + 各插件配置条目 | [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README") |
-| 13.2 | 组合容器（composite） | `CompositeVdfs`——恰好包含若干子目录的 provider | [composite/README.md](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README") |
-| 13.3 | VDFS 插件（vdfs） | 访问层 + 统一文件系统（`UnifiedFs`） | [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README") |
-| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md "symbio/src/plugins/agent/README") 等）；[ADR 索引](../010-adr/README.md "DE-000-设计总览") DE-002 / D-011 |
+| 13.1 | 设置（plugin_manager） | 只读清单：自有分区 + 各插件配置条目 | [plugin_manager/README.md](../../crates/symbio-plugin-plugin_manager/README.md "crates/symbio-plugin-plugin_manager/src/README") |
+| 13.2 | 组合容器（composite） | `CompositeVdfs`——恰好包含若干子目录的 provider | [composite/README.md](../../crates/symbio-plugin-composite/README.md "crates/symbio-plugin-composite/src/README") |
+| 13.3 | VDFS 插件（vdfs） | 访问层 + 统一文件系统（`UnifiedFs`） | [vdfs/README.md](../../crates/symbio-plugin-vdfs/README.md "crates/symbio-plugin-vdfs/src/README") |
+| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../crates/symbio-plugin-agent/README.md "crates/symbio-plugin-agent/src/README") 等）；[ADR 索引](../010-adr/README.md "DE-000-设计总览") DE-002 / D-011 |
 
-> 拓扑见 [005-SYSTEM_MAP.md](005-SYSTEM_MAP.md "DE-004-系统地图")；实例 × 挂载点的权威清单见 [CURRENT.md](../006-ref/006-当前事实表.md "RE-006-当前事实表")。
+> 拓扑见 [[DE-004-系统地图|005-SYSTEM_MAP.md]]；实例 × 挂载点的权威清单见 [CURRENT.md](../006-ref/006-当前事实表.md "RE-006-当前事实表")。

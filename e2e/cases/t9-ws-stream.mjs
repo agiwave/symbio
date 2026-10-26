@@ -100,7 +100,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     //
     // 排除**对话面的界面文本**（开场白 / 轮边界汇报）：它们也是 `text` + `assistant`，
     // 但产生即定格（一帧 `completed`、无增量），且天生不参与流式契约。判据取
-    // `meta.exclude_from_context`——与 `cli/src/render.rs` 的 `is_progress_surface` 同一条，
+    // `meta.exclude_from_context`——与 `crates/symbio-cli/src/render.rs` 的 `is_progress_surface` 同一条，
     // 不按 `surface` 判（答话节点同样带 `surface=reply`，按它判会把答案筛掉）。
     // 不筛的后果不是"多等一会儿"：开场白那一帧先到，`isDone` 会在答案还没开始流时
     // 就返回，于是 ⑦ 取到的"正文首帧"是那句开场白（`completed`，没有 streaming）。

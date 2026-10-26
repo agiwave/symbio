@@ -1,5 +1,5 @@
 /**
- * 事实 · `symbio/src/assembly.generated.rs` —— 编译期装配清单
+ * 事实 · `crates/symbio-deploy/src/lib.rs` —— 编译期装配清单
  *
  * ## 它替掉了什么
  *
@@ -31,8 +31,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const PLUGINS_REL = "symbio/src/plugins";
-const OUT_REL = "symbio/src/assembly.generated.rs";
+const PLUGINS_REL = "crates";
+const PLUGIN_CRATE_PREFIX = "symbio-plugin-";
+const OUT_REL = "crates/symbio-deploy/src/lib.rs";
 
 const WAIVER =
   "// dead-code-allow R-003: 插件 id / 装配清单是部署契约面，未用常量仍须存在（owner: scripts/facts/assembly.mjs 生成，每个插件目录的 PLUGIN.yml 是唯一声明处）";
@@ -61,13 +62,14 @@ function readPlugins(root) {
   const dir = path.join(root, ...PLUGINS_REL.split("/"));
   const ids = fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
+    .filter((e) => e.isDirectory() && e.name.startsWith(PLUGIN_CRATE_PREFIX))
+    .filter((e) => e.name !== "symbio-plugin-api")
+    .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
     .sort();
   if (ids.length === 0) throw new Error(`${PLUGINS_REL} 里一个插件目录都没有——范围读空了`);
   const plugins = [];
   for (const id of ids) {
-    const rel = `${PLUGINS_REL}/${id}/PLUGIN.yml`;
+    const rel = `${PLUGINS_REL}/${PLUGIN_CRATE_PREFIX}${id}/PLUGIN.yml`;
     const abs = path.join(root, ...rel.split("/"));
     if (!fs.existsSync(abs)) {
       throw new Error(`缺少 ${rel}——新插件必须带 PLUGIN.yml（加插件 = 目录 + 声明 + 代码）`);
@@ -127,7 +129,7 @@ function renderAssembly(root) {
   const lines = [];
   lines.push("// 编译期装配清单 —— **由 `scripts/facts/assembly.mjs` 生成，请勿手改**。");
   lines.push("//");
-  lines.push("// 事实源：`symbio/src/plugins/<id>/PLUGIN.yml`。加插件 = 建目录 + 写声明 + 代码，");
+  lines.push("// 事实源：`crates/symbio-plugin-<id>/PLUGIN.yml`。加插件 = 建目录 + 写声明 + 代码，");
   lines.push("// 本文件与 `assembly.rs` 都不需要人改；漂移由 `gen-facts --check` 判红。");
   lines.push(WAIVER);
   lines.push("");

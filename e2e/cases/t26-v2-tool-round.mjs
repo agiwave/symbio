@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 1](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 1](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「mock-llm `toolCalls` → 工具执行 → **`/_requests` 回读**：工具结果进了下一次请求；
 // 网格有 `artifact.added` 且带溯源」。
 //

@@ -6,7 +6,7 @@
  *
  * 「智能体自身的记忆归 `memory`、设置归 `setting`」这类**归属声明**在本仓有三处手写副本
  * （`plugins/agent/README.md`、`host/mod.rs`、`host/plugin.rs` 的模块文档），而它们的
- * 事实来源在别处：清单是装配方（`symbio/src/assembly.rs`）的常量，目录是 `plugins/` 下的文件夹。
+ * 事实来源在别处：清单是装配方（`crates/crates/crates/assembly.rs`）的常量，目录是 `plugins/` 下的文件夹。
  * **没有任何东西会因此变红**——09 报告 D-4/D-9 抓到 README 有 5 处过期描述，其中两处
  * 直接把读者指向不存在的模块（`host/instruction.rs`）与不存在的插件（`work`），
  * 一处把成员资格说反（`vdfs 不在其中`，而清单里就在）。
@@ -64,9 +64,9 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..')
 
 /** 本判据的三份来源（唯一地址，变了改这里）。 */
-export const AGENT_REL = 'symbio/src/plugins/agent'
-export const PLUGINS_REL = 'symbio/src/plugins'
-export const ASSEMBLY_REL = 'symbio/src/assembly.generated.rs'
+export const AGENT_REL = 'crates/symbio-plugin-agent/src'
+export const PLUGINS_REL = 'crates/crates/plugins'
+export const ASSEMBLY_REL = 'crates/symbio-deploy/src/lib.rs'
 /** 子树默认清单的常量名（全仓插件清单的唯一字面量，由各插件目录的 `PLUGIN.yml` 生成）。 */
 export const ASSEMBLY_CONST = 'ASSEMBLY_SUB_AGENT_PLUGINS'
 

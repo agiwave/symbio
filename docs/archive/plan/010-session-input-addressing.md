@@ -11,7 +11,7 @@ created: 2026-09-25
 > **状态：已落 D-031，§5.1–5.4 与 §6.1–6.6 已实施**（实施清单与未落地项见 §8）。
 >
 > 本文回答「会话的**输入**（发消息 / 停止 / 重试审批）应该落在哪」。
-> 「收件箱怎么消费」见 `symbio/src/plugins/session/transcript/inbox.rs` 与 D-026；
+> 「收件箱怎么消费」见 `crates/symbio-plugin-session/src/transcript/inbox.rs` 与 D-026；
 > 「实时面怎么投递」见 D-025 与 `docs/003-design/009-VDFS规范.md` §9。本文不复述它们。
 
 ---
@@ -30,12 +30,12 @@ created: 2026-09-25
 > 两条路由已随 T-077 步②退役（[D-066](../010-adr/066.md)）。本节是问题
 > 发生时的记录：**当时的**入口形状。
 
-- `symbio/src/plugins/session/plugin.rs:436-437` 把两条路由交给 `self`——而 `self`
+- `crates/symbio-plugin-session/src/plugin.rs:436-437` 把两条路由交给 `self`——而 `self`
   是**收到这次 `route` 的那个 `SessionPlugin` 实例**。
 - 会话发言只有**一条**绝对地址 `session/chat/send`（`symbio_core::ROUTE_SESSION_CHAT_SEND`，
   随本步退役，见 §8.2），由**根 composite** 分发 ⇒ 恒为根实例。
 - 子智能体空间有**自己的** `SessionPlugin` 实例（`<根>/agent/<id>/session`），但它
-  **没有路由入口**：`symbio/src/plugins/agent/host/plugin.rs:577-584` 明确
+  **没有路由入口**：`crates/symbio-plugin-agent/src/host/plugin.rs:577-584` 明确
   `NotFound` 并指路 VDFS。`agent/<id>` 只在 agent 插件的 VDFS 视图里作为挂载点存在。
 - 后果：消息进的是**根实例的收件箱**、由根实例消费（`inbox.rs:194`），编排拿到的
   `parent` 是根 composite（`orchestrator/entry.rs:249`）⇒ 人格 / 工具 / 存储全是
@@ -164,7 +164,7 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 | 调用方 | 现在 | 改成 |
 |---|---|---|
 | 前端 | `callPlugin(CHAT_SEND / CHAT_ABORT)` | §6 的地址操作（§6.5，早于本步完成） |
-| `cli/src/client.rs` | `session/chat/send` | `vdfs/write(<根>/session/<sid>/inbox)`（CLI 已会用 `vdfs/write` 建会话） |
+| `crates/symbio-cli/src/client.rs` | `session/chat/send` | `vdfs/write(<根>/session/<sid>/inbox)`（CLI 已会用 `vdfs/write` 建会话） |
 | `plugins/telegram/plugin.rs` | `session/chat/send` | 同上；地址经 `vdfs/root` 拼（与 `agent_run::session_vdfs_addr` 同款） |
 | `session/heartbeat/mod.rs` | 直连 `handle_chat_send_oneoff` | 直连 `enqueue_inbox` |
 | `agent/host/subagent.rs` | `parent.route(SESSION_CHAT_SEND)` | `parent.get_vfs_provider()` 写 `session/<sid>/inbox`（与它自己的 `register_subsession` 同款） |
@@ -283,7 +283,7 @@ resume(p)   → runVdfsAction(<A>/message/<p.targetId>, p.action, {args, reason,
 id**，所以是「换位置」不是「多一条」。
 
 **为什么值得做**：用户消息一旦被消费，后端已发权威帧（落库回包，见
-`symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4），
+`crates/symbio-plugin-session/src/docs/022-vdfs-session-messages.md` §3.4），
 前端本来就能显示——无论发送方是前端、CLI、telegram 还是心跳。唯一看不见的窗口是
 **排队中**；而这个窗口对「不是我发的消息」同样存在。把它补上，多发送方才是真闭合。
 

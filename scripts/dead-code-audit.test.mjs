@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 // 脚本的仓库根由 `--root=` 注入，故这里在临时目录造一棵**最小仓库**：
 //   <root>/tauri/index.html  → /src/main.ts   （前端侧需要一个可达入口，否则
 //   <root>/tauri/src/main.ts                   前端分支会把 fixture 当死代码）
-//   <root>/symbio/src/*.rs                    （Rust 侧被检对象）
+//   <root>/crates/crates/*.rs                    （Rust 侧被检对象）
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
 function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec = null, ts = {} } = {}) {
@@ -33,10 +33,10 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec
     for (const [name, src] of Object.entries(ts)) {
       fs.writeFileSync(path.join(root, 'tauri/src', name), src)
     }
-    fs.mkdirSync(path.join(root, 'symbio/src'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates'), { recursive: true })
     for (const [name, src] of Object.entries(rustFiles)) {
       const text = waiver === null ? src : src.replace('WAIVER', waiver)
-      fs.writeFileSync(path.join(root, 'symbio/src', name), text)
+      fs.writeFileSync(path.join(root, 'crates', name), text)
     }
     // 规则源（后）：批号闭集的 owner 是 `docs/005-spec/015.md`；
     // 04 §3.1 退为迁移期兼容来源。R-002 ③「承认必须挂到计划步」只在规则源存在时判。

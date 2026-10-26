@@ -20,7 +20,7 @@
 
 - **后端**：`symbio/` Rust 核心库 + 6+ 业务插件
 - **前端**：`tauri/` Vue 3 + TypeScript 桌面前端（一等公民）
-- **CLI**：`symbio/src/bin/cli.rs` E2E 命令行
+- **CLI**：`crates/crates/bin/cli.rs` E2E 命令行
 - **插件清单**：`home` / `composite` / `agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `explorer` / `setting` / `hook`
 
 ### 1.2 Agent 插件健康度
@@ -105,7 +105,7 @@
 
 **现状（2026-07-06 重构）**：
 
-- **后端**（`symbio/src/plugins/mcp/`）：承担**配置管理**（`servers/list` / `servers/get` / `servers/set` / `servers/delete`）+ **MCP 客户端 transport**（stdio / http，按需 lazy 加载）
+- **后端**（`crates/symbio-plugin-mcp/src/`）：承担**配置管理**（`servers/list` / `servers/get` / `servers/set` / `servers/delete`）+ **MCP 客户端 transport**（stdio / http，按需 lazy 加载）
 - **前端**（`tauri`）：**仅**负责 MCP Server 的配置管理（CRUD UI），不实现任何 transport
 - **系统工具机制集成**（与 `plugins/web` 对齐）：
   - 每次 `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 时，`McpPlugin` 遍历 `McpConfig.servers` 中 `enabled=true` 的项
@@ -116,7 +116,7 @@
 **模块结构**（后端）：
 
 ```
-symbio/src/plugins/mcp/
+crates/symbio-plugin-mcp/src/
 ├── mod.rs         # 模块注册 + 职责划分文档
 ├── plugin.rs      # McpPlugin：traverse（动态注册）+ route（CRUD + 持久化）
 ├── manager.rs     # McpManager：无状态 transport 路由器
@@ -204,7 +204,7 @@ symbio/src/plugins/mcp/
 
 ### 2.8 P2：前端 Tauri 与 symbio_core 类型同步
 
-**现状**：`tauri/src/schemas/`（部分已迁）与 `symbio/src/symbio_core/schemas/` 之间存在手动同步。
+**现状**：`tauri/src/schemas/`（部分已迁）与 `crates/symbio-core/src/schemas/` 之间存在手动同步。
 
 **待完善**：
 - 评估 ts-rs / specta 等 Rust→TS 类型导出方案
@@ -321,5 +321,5 @@ symbio/src/plugins/mcp/
 
 - `docs/README.md` — 文档中心索引
 - `docs/CHANGELOG.md` — 项目变更日志
-- `symbio/src/plugins/agent/docs/PLAN.md` — Agent 内部待办
+- `crates/symbio-plugin-agent/src/docs/PLAN.md` — Agent 内部待办
 - `docs/development/PLUGIN_DEVELOPMENT_GUIDE.md` — 插件开发实战

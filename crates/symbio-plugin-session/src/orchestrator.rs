@@ -1,0 +1,239 @@
+//! 会话编排器：请求装配 + RAII 守卫 + 消费循环的调度入口。
+//!
+//! 主链路：校验请求 → 预算限流（`rate_limit`）→ 构造 `ChatOrchestrator`（模型配置 /
+//! 父插件钩子 / 协议适配器的 session 侧确定性持有）→ 交付 chat_ctx 并把后续轮次
+//! 委托给 `chat_loop`。
+//!
+//! ## 模块分工
+//!
+//! | 文件 | 职责 |
+//! |---|---|
+//! | 本文件 | 装配 + RAII 守卫（`AbortGuard` / `WorkingGuard`）+ `resolve_required_session_id` |
+//! | [`consolidate`] | 压缩快照入格 + 归档（`session.consolidated` 的唯一落格点） |
+//! | [`consume`] | 消费循环：`fail_before_loop` / `run_chat_loop_task` / `handle_abort` |
+//! | [`entry`] | 一轮执行的装配：`start_turn` + `resolve_session_params` + 会话引擎句柄 / 自动命名 |
+//! | [`failure`] | 失败降级持久化：`persist_failure` + `subtree_of` |
+//! | [`rate_limit`] | 模型服务限流：按 `provider_id` 记「上次发起请求的时间」的最小间隔节流 |
+//! | [`runner`] | 「开跑一轮」端口 `TurnLauncher`：一轮执行所需的宿主切片 |
+//! | [`sink`] | 执行期事件出口（`TranscriptSink`）：直连转写唯一写入点 |
+//! | [`stop`] | Stop 钩子的幂等触发器：一个请求生命周期内恰好触发一次 |
+//!
+//! `impl` 块按职责分块分散在子模块（Rust 允许多个 inherent impl，方法声明顺序无语义）：
+//! 请求装配与消费循环在 [`TurnLauncher`] 上（[`entry`] / [`consume`]），失败收口与广播在
+//! [`Convergence`] 上（[`failure`] + 同插件的 `convergence.rs`，后者不是 `orchestrator`
+//! 的子模块），插件本体只剩**门面**（`get_store` 等
+//! 高扇入访问器）。
+
+use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
+use super::capabilities::{attach_capabilities, collect_capabilities};
+pub(crate) use super::convergence::{Convergence, SessionStateChange};
+use symbio_core::plugin_debug;
+use symbio_core::chat_request;
+use symbio_core::{
+    capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    APPROVAL_GRANTS, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+};
+use symbio_core::{chat_node as cm, session_chat};
+pub(crate) use runner::TurnLauncher;
+use serde_json::json;
+use std::sync::atomic::Ordering;
+pub(crate) use stop::StopSignal;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+/// 解析**必填**会话 id：头 → 请求体 → 报错。
+///
+/// 统一 send/resume/abort/heartbeat_trigger 各入口的重复特判。三档取值：
+/// - `ctx` 头里的 `SESSION_ID`（前端 WS 帧注入，优先级最高）；
+/// - `fallback`（请求体 `req.session_id`，RPC 直连调用方）；
+/// - 空串或历史哨兵 `"default"` 一律视为缺失 → `ValidationError`。
+///
+/// **为什么 `"default"` 必须判非法**：只靠 `unwrap_or("default")` 再自我判定为非法，
+/// 会让 `req.session_id` 永远不可达。理由不是"它是保留 id"，而是它原是缺省占位符——
+/// 拿它当真实会话去 abort / 触发会静默作用于不存在的会话，宁可显式报错。
+/// 每个入口都必须走这一处解析，不许各自 `unwrap_or`。
+pub(crate) fn resolve_required_session_id(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    fallback: Option<&str>,
+) -> Result<String, PluginError> {
+    let raw = ctx
+        .get(SESSION_ID)
+        .or_else(|| fallback.map(|s| s.to_string()));
+    match raw {
+        Some(id) if !id.is_empty() && id != "default" => Ok(id),
+        _ => Err(PluginError::ValidationError("session_id 不能为空".into())),
+    }
+}
+
+/// 中止信号登记守卫：保证 Turn 任务的**任何**出口都会注销登记的中止信号——
+/// 正常路径显式 `disarm`，panic unwind 由 `Drop` 兜底。
+///
+/// ## 为什么需要它
+///
+/// `handle_abort` 以「`abort_signal` 是否为 `None`」作为 chat_loop 子任务是否
+/// 仍在运行的**唯一**判据。历史上这个位置登记的是一个通道 sender，而消费循环有
+/// 两处提前出口（业务错误、1800s 消费超时）写作 `return`，直接跳过了循环之后的
+/// 清理块，留下指向已关闭通道的陈旧 sender——判据从此永久为假：abort 必然空等
+/// 3s 才走兜底复位，且 Abort 帧投进死通道被静默丢弃（前端收不到中止确认）。
+///
+/// 登记与注销收拢进同一对象后，"新增出口忘记清理"不再能静默通过：`Drop` 保证
+/// 至少有一次清理必然发生，也不依赖后续维护者记住"新增出口必须穿过清理块"这条
+/// 隐性契约。与 [`WorkingGuard`] 同型（后者兜 `is_working`）。
+///
+/// ## 注销时一并置位
+///
+/// 注销意味着「发起方不再等待这个 Turn 了」。收口前这条语义由「消费循环 drop 掉
+/// 通道 ⇒ 执行方在 `wait_for_abort_signal` 里读到通道关闭」隐式承担；现在通道不在
+/// 执行期了，改为在注销时**显式** `abort()`——语义不变，意图显形。
+/// （对已结束的 Turn 置位是幂等的空动作。）
+struct AbortGuard {
+    state: Arc<ActiveSessionState>,
+    signal: ExecAbortSignal,
+    /// `false` 表示已清理，Drop 成为 no-op（正常路径走 `disarm` 同步清理，
+    /// 避免多一次 spawn 调度延迟）。
+    armed: bool,
+}
+
+impl AbortGuard {
+    /// 登记中止信号：`handle_abort` 凭此找到在途 Turn。
+    async fn register(state: Arc<ActiveSessionState>, signal: ExecAbortSignal) -> Self {
+        state.inner.write().await.abort_signal = Some(signal.clone());
+        Self {
+            state,
+            signal,
+            armed: true,
+        }
+    }
+
+    async fn disarm(&mut self) {
+        let mut inner = self.state.inner.write().await;
+        inner.abort_signal = None;
+        drop(inner);
+        self.signal.abort();
+        self.armed = false;
+    }
+}
+
+impl Drop for AbortGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // Drop 中不能 await：优先 `try_write` 就地同步清理（写锁持有期极短，
+        // 几乎总能拿到）；确实取不到才退回 detached spawn（与 WorkingGuard 同型）。
+        self.signal.abort();
+        if let Ok(mut inner) = self.state.inner.try_write() {
+            inner.abort_signal = None;
+            return;
+        }
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.inner.write().await.abort_signal = None;
+        });
+    }
+}
+
+/// 工作态守卫：保障 `is_working` 在任何退出路径（包括 panic 崩溃）下都会收敛。
+///
+/// ## 背景
+///
+/// spawn 任务若发生 **panic**，该任务会被 tokio 静默终止，`is_working`
+/// 将永远停留在 `true`，导致前端永久显示"AI 处理中"且无法恢复。
+///
+/// ## 机制
+///
+/// - 在 spawn 任务开始时构造本守卫，`done` 初始为 `false`。
+/// - **正常结束路径**在收尾前把 `done` 置 `true`，使 Drop 成为 no-op
+///   （正常路径已自行 `is_working=false` + 广播 idle）。
+/// - **panic 路径**：Rust unwind 会执行局部变量析构，`Drop` 被调用，
+///   此时 `done==false`，守卫会 spawn 一个 detached 任务：
+///   1. 若该 request_id 仍是当前活跃请求，把 `is_working` 复位；
+///   2. 把仍处 streaming/pending 的 AI 消息标 `Failed` + 错误并持久化；
+///   3. 广播 idle，使前端 UI 状态收敛。
+struct WorkingGuard {
+    state: Arc<ActiveSessionState>,
+    convergence: Convergence,
+    collected: Arc<tokio::sync::Mutex<crate::transcript::Transcript>>,
+    /// 真实会话 id：`persist_failure` 需要它来定位并写入存储。
+    /// 注意：绝不能传 `request_id` 的字符串——那是请求序号（如 "42"），
+    /// 会令 `open_chat_session` 找不到会话而提前返回，导致崩溃失败永不落库。
+    session_id: String,
+    /// 本次请求的 Stop 触发器。
+    ///
+    /// 正常路径下 `run_chat_loop` 的出口已显式 fire 过，此处 Drop 是 no-op；
+    /// panic 路径下它是**唯一**能保证 Stop 送达的机制（chat_loop 的出口代码
+    /// 根本不会执行）。字段声明顺序决定析构顺序：本字段必须在 `done` 之前
+    /// 落地，故放在结构体末尾即可（Drop 中显式调用，不依赖字段析构次序）。
+    stop: Arc<StopSignal>,
+    done: bool,
+}
+
+impl Drop for WorkingGuard {
+    fn drop(&mut self) {
+        // Stop 钩子兜底（幂等）：无论正常/panic/提前 return，本请求生命周期内
+        // 恰好触发一次。放在 `done` 早退之前——正常结束路径同样依赖它兜住
+        // "chat_loop 出口漏调"的情形。
+        self.stop.fire_fallback();
+        if self.done {
+            return;
+        }
+        // panic / 异常退出路径：尽力重置状态并持久化失败，避免前端永久卡死。
+        let state = self.state.clone();
+        let convergence = self.convergence.clone();
+        let collected = self.collected.clone();
+        let session_id = self.session_id.clone();
+        let crash_msg = "会话处理异常中断（后台任务崩溃），请重试".to_string();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                // 仅当本会话仍在进行中时才复位（写点见 `reset_working`：它比
+                // `emit_session_state` 那次复位更早一步，让崩溃收尾期间就已空闲）。
+                // 注：旧的「同 request_id 才复位」检查依赖 ActiveSessionStateInner.request_id，
+                // 字段已重构到 WorkingGuard.request_id（per-request）；
+                // 此处直接靠 `is_working` 兜底：若本会话已被新一轮请求接管，
+                // 持久化失败会自然被 persist_failure 内部的版本检查拦截。
+                state.reset_working().await;
+                // 把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因
+                // （切回会话时能看到上次失败的终态，目标 3）。
+                convergence
+                    .persist_failure(
+                        &session_id,
+                        &collected,
+                        &crash_msg,
+                        cm::NodeStatus::Failed,
+                        // 崩溃路径没有半截产出通道（panic 载荷只进日志）——
+                        // 在途半截由镜像子树合并承担。
+                        Vec::new(),
+                    )
+                    .await;
+                // 运行态收敛为「以错误结束」：`status = failed` + `attributes.error`
+                // 随节点视图一并下发，前端因此不需要"事件 + 启发式"就能显示错误条；
+                // 这也就是「崩溃后 UI 立即看到错误」的全部机制（没有第二条 Error 事件）。
+                // 与消费循环的失败支路同一个出口（`broadcast_error_with_idle`），
+                // 不在这里手写一份 `Finished { outcome: failed }`。
+                convergence
+                    .broadcast_error_with_idle(&state, crash_msg)
+                    .await;
+            });
+        }
+    }
+}
+
+// 子模块：两个手柄的 `impl` 块按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。
+/// 压缩快照入格（`consolidate` 动作的执行体，D-086 §4/§6）：事实源归档不在
+/// core `Store` 面内，因此写方必须留在持令牌的 session。
+pub(crate) mod consolidate;
+mod consume;
+mod entry;
+mod failure;
+mod rate_limit;
+mod runner;
+mod sink;
+/// Stop 钩子的幂等触发器：随会话生命周期留在 session（D-086 §6），
+/// 驱动器只交回 `TurnReport.last_message`。
+pub(crate) mod stop;
+
+#[cfg(test)]
+#[path = "orchestrator.test.rs"]
+mod tests;

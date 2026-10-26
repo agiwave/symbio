@@ -104,7 +104,7 @@ function listOwners(root) {
  * 那条判据永久差一个。
  */
 function rustErrorCodes(root) {
-  const rel = 'symbio_kernel/src/plugin/error.rs'
+  const rel = 'crates/symbio-kernel/src/plugin/error.rs'
   const txt = fs.readFileSync(path.join(root, rel), 'utf8')
   // 分组 1 是变体名、分组 2 才是线上字面量——取错组的失效形态很安静：集合里装满
   // `InternalError` 这类**哪儿都不出现**的名字，扫描一份都命中不了，判据恒真。
@@ -205,11 +205,20 @@ export function closedSets(root) {
   const owners = listOwners(root)
   const cap = capabilityFacts(root)
   const routes = new Set()
-  const base = path.join(root, 'symbio', 'src', 'plugins')
+  const base = path.join(root, 'crates')
   // 插件目录**扫出来**而不是写死一份名单：写死的名单会与新增插件分叉，而分叉的
   // 方向是「静默漏判」——新插件的路由不进集合，于是它在别处被复述时判据看不见。
-  for (const p of fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
-    for (const src of pluginSources(path.join(base, p))) {
+  for (const crateDir of fs
+    .readdirSync(base, { withFileTypes: true })
+    .filter(
+      (e) =>
+        e.isDirectory() &&
+        e.name.startsWith('symbio-plugin-') &&
+        e.name !== 'symbio-plugin-api',
+    )
+    .map((e) => e.name)) {
+    const p = crateDir.slice('symbio-plugin-'.length)
+    for (const src of pluginSources(path.join(base, crateDir, 'src'))) {
       for (const a of extractRouteArms(src, p)) routes.add(a)
     }
   }

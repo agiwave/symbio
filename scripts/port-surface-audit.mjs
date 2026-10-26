@@ -110,8 +110,8 @@ const ROOT = rootArg
 const PRINT_BASELINE = argv.includes('--print-baseline')
 
 /** 事件名字表（协议名的唯一 owner）与事实声明表 */
-const EVENT_REL = 'symbio_kernel/src/event/mod.rs'
-const DECL_REL = 'symbio_kernel/src/decl/mod.rs'
+const EVENT_REL = 'crates/symbio-kernel/src/event/mod.rs'
+const DECL_REL = 'crates/symbio-kernel/src/decl/mod.rs'
 /** 基线（判据面之一，见文件头「基线在哪」） */
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 契约 7 的条文所在（PTS-006 的唯一输入：§2.6 契约表的第 7 行） */
@@ -149,7 +149,7 @@ let decisionSet = null
 function decisionExists(id) {
   if (decisionSet === null) {
     decisionSet = new Set()
-    const roots = [path.join(ROOT, 'docs', '003-design'), path.join(ROOT, 'symbio', 'src'), path.join(ROOT, 'cli', 'docs'), path.join(ROOT, 'tauri', 'docs')]
+    const roots = [path.join(ROOT, 'docs', '003-design'), path.join(ROOT, 'crates'), path.join(ROOT, 'cli', 'docs'), path.join(ROOT, 'tauri', 'docs')]
     const walk = (d) => {
       let list
       try {
@@ -334,14 +334,14 @@ function portValueLiterals() {
       }
     }
   }
-  walk(path.join(ROOT, 'symbio', 'src'))
+  walk(path.join(ROOT, 'crates'))
   return out
 }
 
 const portValues = portValueLiterals()
 
 const baseline = readBaseline()
-const solverRel = baseline?.solver?.file ?? 'symbio_kernel/src/decl/ring.rs'
+const solverRel = baseline?.solver?.file ?? 'crates/symbio-kernel/src/decl/ring.rs'
 const solverText = readText(solverRel)
 
 /**
@@ -550,7 +550,7 @@ function protocolWritePoints() {
       }
     }
   }
-  walk(path.join(ROOT, 'symbio', 'src'))
+  walk(path.join(ROOT, 'crates'))
   return hits
 }
 

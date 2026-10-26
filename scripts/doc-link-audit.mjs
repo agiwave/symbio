@@ -48,7 +48,7 @@
  *      判定它们会让守卫满屏误报。
  *
  * **给豁免**（与 D-001 / D-003 的「不给豁免」不同）：本规则是**启发式**——
- *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `symbio/src/plugins/session/docs/102-core-loop.md`）
+ *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `crates/symbio-plugin-session/src/docs/102-core-loop.md`）
  *   与「示意性路径」（`` `.vite/license.md` ``）在文本上与真断链无法区分。
  *   硬判会让作者被迫改写正确的简写，故提供豁免
  *   `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空，同 D-002 / D-004）。
@@ -131,7 +131,7 @@
  *
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
  *   docs/                系统级文档（**archive/ 除外**，见下）
- *   symbio/src/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
+ *   crates/crates/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
  *   tauri/               前端模块文档（README.md + docs/）
  *   cli/                 命令行模块文档（README.md + docs/）
  *   e2e/                 e2e 用例说明（README.md）
@@ -197,7 +197,7 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github', 'examples']
+const ROOTS = ['docs', 'crates', 'tauri', 'cli', 'e2e', '.github', 'examples']
 
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
@@ -230,7 +230,7 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  *
  * 扫描范围覆盖**模块文档**，不只 `docs/`——过程文档同样会沉积在模块目录里：
  * doc-link-allow D-010: 下行引用的是已迁入 archive 的文件当时的路径（叙述历史）
- * `symbio/src/plugins/session/docs/legacy-route-migration.md`（已完成的迁移审计，
+ * `crates/symbio-plugin-session/src/docs/legacy-route-migration.md`（已完成的迁移审计，
  * 每行都是「已删 / 已下线」）就这样在活目录里躺了多轮，每次路由改动都被回改一次。
  * 只扫 `docs/` 时它**永远不会被提示**——这类漏网正是「改一个功能要动十几个文档」的来源之一。
  *
@@ -850,7 +850,7 @@ if (malformedLinks.length > 0) {
 // 扫描范围 = 活文档根（`docs/` + 模块文档 + `e2e` / `.github` 说明 + 根目录散落 md）；
 // `examples/` 是示例包内容，不是项目文档，跳过（同 D-002 一直以来的口径）。
 // 三条规矩**共用同一次读盘**：分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
-const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github']
+const BODY_ROOTS = ['docs', 'crates', 'tauri', 'cli', 'e2e', '.github']
 /**
  * 散文体检不适用于 `docs/007-task/` `docs/005-spec/` `docs/003-design/`：那里的 `.md` 是**登记条目**
  * （不是现行阅读文档）——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，

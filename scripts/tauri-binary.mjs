@@ -158,7 +158,7 @@ function walkFiles(dir, out = []) {
  */
 export function tauriBuildInputs(repoRoot) {
   const files = []
-  for (const sub of ['tauri/src-tauri/src', 'tauri/src-tauri/capabilities', 'symbio/src']) {
+  for (const sub of ['tauri/src-tauri/src', 'tauri/src-tauri/capabilities', 'crates']) {
     files.push(...walkFiles(path.join(repoRoot, sub)))
   }
   for (const rel of [
@@ -166,7 +166,7 @@ export function tauriBuildInputs(repoRoot) {
     'tauri/src-tauri/Cargo.lock',
     'tauri/src-tauri/build.rs',
     'tauri/src-tauri/tauri.conf.json',
-    'symbio/Cargo.toml',
+    'crates/symbio/Cargo.toml',
     'symbio/Cargo.lock',
   ]) {
     const p = path.join(repoRoot, rel)

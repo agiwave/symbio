@@ -49,7 +49,7 @@ function rmTree(dir) {
  * 的测试守；这里只要求「提取接口给得出一个名字」。
  */
 const TOOLS_FIXTURE = {
-  'symbio/src/plugins/fake/tools.rs': [
+  'crates/crates/plugins/fake/tools.rs': [
     'pub fn table() -> Vec<ToolSpec> {',
     '    vec![tool("agent_run", "跑子智能体", schema(), CapabilityRiskLevel::High)]',
     '}',

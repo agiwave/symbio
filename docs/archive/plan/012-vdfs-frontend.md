@@ -13,8 +13,8 @@ created: 2026-09-13
 范围：Symbio 前端的「三栏资源页」——一套 `vdfs/*` 协议驱动全部资源页的呈现
 关联：
 `docs/003-design/009-VDFS规范.md`（**机制规范，权威**：接口、访问位、协议操作、分层）、
-`symbio/src/symbio_core/vdfs/`（纯接口）、
-`symbio/src/plugins/vdfs/protocol.rs`（线路信封）、
+`crates/symbio-core/src/vdfs/`（纯接口）、
+`crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）、
 `tauri/src/schemas/vdfs.ts`（前端数据契约）、
 `tauri/src/composables/useVdfs.ts`（页面逻辑）、
 `tauri/src/views/VdfsView.vue`（页面装配）
@@ -97,7 +97,7 @@ created: 2026-09-13
 **增长**（`updated` + `delta`）；会话运行态是会话节点 `<根>/session/<id>` 的
 `status`（`updated`，无 `delta` ⇒ 回读）。判据与推导见
 [D-025](../010-adr/025.md)
-与 `symbio/src/plugins/session/docs/018-node-state-streaming.md`。
+与 `crates/symbio-plugin-session/src/docs/018-node-state-streaming.md`。
 
 ---
 
@@ -156,7 +156,7 @@ created: 2026-09-13
 ### 4.1 左栏：导航（绑定地址的子目录清单）
 
 - **数据源**：`vdfs/list('<绑定地址>')` 的目录内容——绑定
-  `<根>` 时由访问层**合成**（见 [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README")），
+  `<根>` 时由访问层**合成**（见 [vdfs/README.md](../../crates/symbio-plugin-vdfs/README.md "crates/symbio-plugin-vdfs/src/README")），
   返回普通目录节点集合（`kind = dir`），前端只做形状映射，
   **不消费** `vdfs/providers` 端点（该端点已随 `VdfsMountInfo` 一并删除）。
 - **每一项携带**：`name`（子目录名）、`title`（展示标题）、`icon`（纯 UI 映射）、
@@ -394,7 +394,7 @@ pub struct VdfsNewType {
   多级深链。每个地址是一个**可回退的页面**——「浏览内部」= push 进容器目录地址，不是浮层。
 - **后端**：资源存储只有 `providers/vdfs_service` 的三个 `VdfsProvider` 实现
   （单文件 / 目录 / 内存）；`EntityProvider` / `EntityVdfsAdapter` / `EntityStore` /
-  `StorageService` 一套实体与存储抽象**已不存在**（见 [013-vdfs.md](012-vdfs-frontend.md "DE-010-VDFS前端页面规范") §13.4）。
+  `StorageService` 一套实体与存储抽象**已不存在**（见 [[DE-010-VDFS前端页面规范|013-vdfs.md]] §13.4）。
 
 ---
 

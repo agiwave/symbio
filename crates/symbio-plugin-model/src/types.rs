@@ -1,0 +1,218 @@
+//! MODEL Plugin - Unified type definitions
+
+use serde::{Deserialize, Serialize};
+
+use symbio_core::capability_to_wire;
+pub use symbio_core::chat_node::{ChatNode, ContentPart, MessageContent, NodeRole};
+pub use symbio_core::CapabilityMeta;
+
+/// 工具调用定义
+///
+/// 归属规则：全仓库唯一消费者是 model 插件（message_builder 构造请求包 +
+/// NativeMessage 携带），故定义在本插件内部，core 不承载。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// 原生消息格式（支持 tool calls 和多模态）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NativeMessage {
+    #[serde(default)]
+    pub id: String,
+    pub role: NodeRole,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<MessageContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub timestamp: i64,
+    /// 源自 `ChatNode::seq` 的单调序号，仅用于保序；不参与 API 请求体序列化。
+    #[serde(skip)]
+    pub seq: Option<i64>,
+    /// tool 调用的成功标志：None 视为成功；Some(false) 触发 Anthropic tool_result 的 `is_error=true`
+    ///
+    /// 调用方：`anthropic_messages::prepare_request` 在 tool 消息块根据此字段决定是否设置 `is_error`。
+    #[serde(skip_serializing)]
+    pub success: Option<bool>,
+}
+
+impl From<NativeMessage> for ChatNode {
+    fn from(msg: NativeMessage) -> Self {
+        Self {
+            id: if msg.id.is_empty() {
+                uuid::Uuid::new_v4().to_string()
+            } else {
+                msg.id
+            },
+            parent_id: None,
+            // grep-audit-allow S-014: 读边界——`NativeMessage` 是协议侧形状，角色由它给出；节点身份由落库点补。
+            role: Some(msg.role),
+            // 谁说的不由模型侧决定（它只回正文与角色）：`None` = 未标身份，
+            // 落库时由 `persist_messages` 按角色补齐（会话主体 / 人）。
+            principal: None,
+            msg_type: None,
+
+            content: msg.content,
+            // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
+            delta: None,
+            status: Some(symbio_core::chat_node::NodeStatus::Completed),
+            meta: None,
+            // 读数行只在交付出口的呈现装配里出现，消息本体不带（[D-111]）。
+            stats: None,
+            timestamp: Some(msg.timestamp),
+            seq: msg.seq,
+            response_id: msg.response_id,
+            prompt: msg.prompt,
+            error: None,
+            title: None,
+            icon: None,
+            actions: None,
+            tool_call_id: None,
+        }
+    }
+}
+
+impl From<ChatNode> for NativeMessage {
+    fn from(msg: ChatNode) -> Self {
+        let role = msg.node_role().unwrap_or(NodeRole::User);
+        // For tool result (Tool) messages, parent_id is the tool_call_id
+        let tool_call_id = if role == NodeRole::Tool {
+            msg.parent_id.clone()
+        } else {
+            None
+        };
+        Self {
+            id: msg.id,
+            role,
+            content: msg.content.clone(),
+            tool_call_id,
+            tool_calls: None,
+            reasoning_content: None,
+            response_id: None,
+            prompt: msg.prompt,
+            timestamp: msg.timestamp.unwrap_or(0),
+            seq: msg.seq,
+            success: None,
+        }
+    }
+}
+
+impl NativeMessage {
+    /// 转换为 API 请求格式
+    pub fn to_api_value(&self) -> serde_json::Value {
+        let mut obj = serde_json::Map::new();
+        let role_str = match self.role {
+            NodeRole::Tool => "tool",
+            NodeRole::User => "user",
+            NodeRole::Assistant => "assistant",
+            NodeRole::System => "system",
+        };
+        obj.insert("role".to_string(), serde_json::json!(role_str));
+
+        // 正确处理 content：如果是 Text，直接使用字符串；如果是 Parts，转换为对象数组
+        let content_value = match self.content {
+            Some(ref content) => match content {
+                MessageContent::Text(text) => {
+                    let final_text = if let Some(ref prompt) = self.prompt {
+                        format!("{}\n\n{}", prompt, text)
+                    } else {
+                        text.clone()
+                    };
+                    serde_json::json!(final_text)
+                }
+                MessageContent::Parts(parts) => {
+                    let mut converted_parts: Vec<serde_json::Value> = parts
+                        .iter()
+                        .map(|part| match part {
+                            ContentPart::Text { text } => serde_json::json!(text),
+                            ContentPart::ImageUrl { image_url } => serde_json::json!({
+                                "type": "image_url",
+                                "image_url": image_url
+                            }),
+                        })
+                        .collect();
+
+                    if let Some(ref prompt) = self.prompt {
+                        converted_parts.insert(
+                            0,
+                            serde_json::json!({
+                                "type": "text",
+                                "text": prompt
+                            }),
+                        );
+                    }
+
+                    serde_json::json!(converted_parts)
+                }
+            },
+            None => {
+                if let Some(ref prompt) = self.prompt {
+                    serde_json::json!([{
+                        "type": "text",
+                        "text": prompt
+                    }])
+                } else if self.role == NodeRole::Assistant && self.tool_calls.is_some() {
+                    // 带工具调用的 assistant 消息：content 允许为 null（OpenAI 约定），
+                    // 其余情况一律兜底为空串，避免把 `null` 发到 provider 触发
+                    // "messages[N]: data did not match any variant" 反序列化失败。
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!("")
+                }
+            }
+        };
+        obj.insert("content".to_string(), content_value);
+
+        if let Some(ref reasoning) = self.reasoning_content {
+            obj.insert(
+                "reasoning_content".to_string(),
+                serde_json::json!(reasoning),
+            );
+        }
+
+        if let Some(ref tool_call_id) = self.tool_call_id {
+            obj.insert("tool_call_id".to_string(), serde_json::json!(tool_call_id));
+        }
+
+        if let Some(ref tool_calls) = self.tool_calls {
+            // 工具名转线上形态（`/` `.` 等协议不允许的字符 → `__`，见
+            // `symbio_core::capability::tool_name`）
+            let api_tool_calls: Vec<serde_json::Value> = tool_calls
+                .iter()
+                .map(|tc| {
+                    // arguments 需要转换为字符串，符合 OpenAI API 要求
+                    let args_str = if tc.arguments.is_string() {
+                        tc.arguments.as_str().unwrap_or("{}").to_string()
+                    } else {
+                        tc.arguments.to_string()
+                    };
+                    serde_json::json!({
+                        "id": tc.id,
+                        "type": tc.kind.as_ref().unwrap_or(&"function".to_string()),
+                        "function": {
+                            "name": capability_to_wire(&tc.name),
+                            "arguments": args_str
+                        }
+                    })
+                })
+                .collect();
+            obj.insert("tool_calls".to_string(), serde_json::json!(api_tool_calls));
+        }
+
+        serde_json::Value::Object(obj)
+    }
+}

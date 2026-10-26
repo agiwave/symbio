@@ -1,7 +1,7 @@
 /**
  * VDFS 服务层 —— 统一资源与数据访问的前端入口
  *
- * 与后端对齐：symbio/src/symbio_core/vdfs/host.rs（分发）+ plugins/vdfs（协议入口）
+ * 与后端对齐：crates/symbio-core/src/vdfs/host.rs（分发）+ plugins/vdfs（协议入口）
  * 规范：../../../docs/003-design/009-VDFS规范.md（机制）、../../../docs/003-design/010-VDFS前端页面规范.md（前端页面规范）
  *
  * 设计：本层只做「地址 → 请求」的机械翻译，不含任何资源类型知识。

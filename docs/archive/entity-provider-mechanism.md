@@ -20,10 +20,10 @@
 关联（**均为当时形态**）：
 - [vdfs.md](../design/vdfs.md)（VDFS 机制规范；本文件描述的是它当时 §11 / §13.4 所依赖的实体底座）
 - [vdfs-frontend.md](../design/vdfs-frontend.md)（前端页面规范）
-- `symbio/src/symbio_core/entities.rs` —— trait、注册表、统一操作实现（**已删除**）
-- `symbio/src/symbio_core/schemas/entities.rs` —— 数据结构权威定义（**已收敛为
+- `crates/symbio-core/src/entities.rs` —— trait、注册表、统一操作实现（**已删除**）
+- `crates/symbio-core/src/schemas/entities.rs` —— 数据结构权威定义（**已收敛为
   `DetailDefinition` 表单方言模块**，`EntitySummary` / `EntityExport` 等协议类型删除）
-- `symbio/src/symbio_core/vdfs/entity_adapter.rs` —— `EntityVdfsAdapter`，本机制的**唯一消费者**（**已删除**）
+- `crates/symbio-core/src/vdfs/entity_adapter.rs` —— `EntityVdfsAdapter`，本机制的**唯一消费者**（**已删除**）
 
 > **对外只有一个协议（VDFS）**：`entities/*` 调用协议已于 S11 下线，前端统一实体页
 > 机制已于 S5 收口（前端资源页只有 VDFS 一台，见 [vdfs-frontend.md](../design/vdfs-frontend.md) §7）。

@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./slo-exit-audit.mjs', import.meta.url))
 const PLAN04 = path.join('docs', '003-design', '016-工程落地与验证.md')
-const STATS = path.join('symbio', 'src', 'plugins', 'session', 'stats.rs')
+const STATS = path.join('crates', 'symbio-plugin-session', 'src', 'stats.rs')
 
 /** `stats.rs` 的最小夹具：`SessionStats` 顶层列 + `TierRow` 子列 */
 const STATS_FIXTURE = [

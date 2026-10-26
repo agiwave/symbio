@@ -236,7 +236,7 @@ export const GUARDS = [
   // 空理由单独报 IM-002（写了像登记、实际不算，不显式报出来人会以为登记过），
   // 悬空报 IM-003（代码搬走而标记还在 ⇒ 判据对这一处永久失效）。
   //
-  // IM-004 判**形状**（[D-106](../../symbio/src/plugins/model/README.md "D-106-模型消费端口归一") 决策 2）：登记为
+  // IM-004 判**形状**（[D-106](../../crates/symbio-plugin-model/README.md "D-106-模型消费端口归一") 决策 2）：登记为
   // 内部请求的点 `tools` 必须是 `&[]`，登记为 `IM-001/gate`（闸门本体）的必须**转发**调用方的
   // 工具集。声明腐烂（某处长出工具调用）时变红，而不是烂在文档里。失效形态五种，回归测试各钉一头。
   // 存量两处逐处登记（provider_adapter 的闸门本体 + 压缩摘要这一条已裁决的内部请求）；
@@ -464,7 +464,7 @@ export const TEST_ONLY = [
  *  - `facts/lists-index`：`ref/007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
  *    直接抛错**（一份会说谎的总账比没有总账更坏——它是给人查的，人会信它）；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
- *  - `facts/assembly`：`symbio/src/assembly.generated.rs` 的生成器（插件 id / 子树清单 /
+ *  - `facts/assembly`：`crates/symbio-deploy/src/lib.rs` 的生成器（插件 id / 子树清单 /
  *    不可停用集），事实源是各插件目录的 `PLUGIN.yml`，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
  *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。

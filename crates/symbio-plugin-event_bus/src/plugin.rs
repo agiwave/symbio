@@ -1,0 +1,161 @@
+//! Event Bus 插件
+//!
+//! 本插件做三件事，不多做：
+//! 1. **单连接**：前端只建立一条 `core/event_bus` 长连接，订阅所有帧
+//! 2. **广播**：帧原样投递给每个已注册连接，`{ kind, session_id, data }` 由消费方自己分派
+//! 3. **握手**：新连接拿到一条 `system` 帧（`connected`）
+//!
+//! 发布方在本进程里只有一个：vdfs 宿主的变更投递（`plugins/vdfs/host.rs`，一切资源与
+//! 转写的实时变化都走它）。本插件因此不是「按 `kind` 分流的路由器」——频道闭集、
+//! 无服务端过滤，形状与判据见 `symbio_core::event_bus` 的模块文档。
+//!
+//! ## 用法
+//!
+//! `kind` 取 `symbio_core::event_bus::KIND_*` 常量（消费方按它分发，裸字面量改名不会
+//! 编译失败）：
+//!
+//! ```ignore
+//! // 在 vdfs 宿主中（一切资源的实时变更都走这一条）
+//! EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, change_json);
+//! ```
+//!
+//! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
+//! 本插件仅负责建立订阅连接。
+//!
+//! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
+//! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域的
+//! `kind = "session"` 频道已废除，见 `../../../../docs/003-design/005-协议规范.md` §事件总线频道。
+//!
+//! 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除：它缓冲的是按 `session_id`
+//! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
+//! 为空——路由成了恒返回空数组的空壳。
+
+use symbio_deploy::PLUGIN_ID_EVENT_BUS;
+use symbio_core::SimpleResponse;
+use symbio_core::{
+    event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
+    EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,
+};
+use symbio_core::{
+    Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload,
+};
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::Arc;
+use uuid::Uuid;
+
+/// Event Bus 插件
+pub struct EventBusPlugin;
+
+impl EventBusPlugin {
+    /// 工厂方法（满足 `submit_object_creator!` 协议）
+    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        Arc::new(EventBusPlugin) as Arc<dyn Plugin>
+    }
+
+    pub fn metadata() -> PluginMeta {
+        PluginMeta::new(PLUGIN_ID_EVENT_BUS, "Event Bus")
+            .with_description("统一事件总线：单连接订阅所有插件事件")
+            .with_version("0.1.0")
+    }
+
+    /// 处理订阅请求（connect_v2）
+    ///
+    /// 分配一个 connection_id，建立 PluginChannel，
+    /// 返回 peer_channel 供 transport 通过 mpsc 推送到前端。
+    pub async fn handle_subscribe(
+        _ctx: Arc<dyn PluginInvokeRequest>,
+        _req: EventBusSubscribeRequest,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        // 容量 4096。
+        //
+        // 这条频道承载**全部**实时面：消息正文的逐帧增量（`VdfsChange.delta`，热路径）
+        // 与会话 / 资源变更（低频）共用它。原先的 2048 是「只有资源变更」时的取值，
+        // 承接消息增量后偏小——满了虽不会丢（`try_publish` 会补 resync 指令，
+        // 消费端重读作用域后自愈），但每次 resync 都换来一次整份重读，代价远大于
+        // 多留 2048 个槽位。
+        let (peer, mine) = PluginChannel::pair(4096);
+
+        // 注册到全局表
+        let connection_id = Uuid::new_v4().to_string();
+        event_bus_register_subscriber(connection_id.clone(), mine.tx.clone());
+
+        // 异步清理：mine.rx 结束时自动反注册
+        let conn_id_for_cleanup = connection_id.clone();
+        tokio::spawn(async move {
+            // 只持有 rx，不消费
+            let _rx = mine.rx;
+            // 等待 cancellation / 关闭信号（PluginChannel 的 cancel_token 会被断开时触发）
+            mine.cancel_token.cancelled().await;
+            event_bus_unregister_subscriber(&conn_id_for_cleanup);
+        });
+
+        // 立即推送一个 connected 事件。
+        //
+        // 信封走 `event_bus_build_envelope`（形状的唯一构建入口），不自己拼 `json!`：
+        // 手拼的那份在形状漂移时不会有任何编译错误。
+        let _ = mine
+            .tx
+            .send(PluginFrame::data(event_bus_build_envelope(
+                EVENT_BUS_KIND_SYSTEM,
+                None,
+                json!({
+                    "event": "connected",
+                    "connection_id": connection_id,
+                }),
+            )))
+            .await;
+
+        Ok(PluginPayload::Session(peer))
+    }
+}
+
+#[async_trait]
+impl Plugin for EventBusPlugin {
+    fn meta(&self) -> PluginMeta {
+        Self::metadata()
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        let path = ctx.get(symbio_core::PATH).unwrap_or_default();
+        let path = path.strip_prefix('/').unwrap_or(&path);
+
+        match path {
+            // 建立进程内帧订阅连接（前端实时面与 CLI 都走它收会话帧）。
+            "subscribe" => {
+                let req: EventBusSubscribeRequest = ctx.payload()?;
+                EventBusPlugin::handle_subscribe(ctx, req).await
+            }
+            // 存活探测（回一个 pong 与当前订阅数）。
+            "ping" => {
+                let resp = SimpleResponse::success_with_message(format!(
+                    "pong ({} subscribers)",
+                    EventBus::subscriber_count()
+                ));
+                Ok(PluginPayload::new(&resp))
+            }
+            _ => Err(PluginError::NotFound(format!(
+                "[event_bus] 未知子命令: {}",
+                path
+            ))),
+        }
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
+symbio_core::submit_object_creator!(PLUGIN_ID_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;

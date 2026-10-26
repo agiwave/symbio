@@ -1,0 +1,248 @@
+//! `crates/symbio-core/src/present/detail.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//!
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
+
+use super::*;
+
+use serde_json::json;
+
+fn field(key: &str, widget: &str) -> DetailField {
+    DetailField {
+        key: key.into(),
+        label: key.into(),
+        widget: widget.into(),
+        ..Default::default()
+    }
+}
+
+fn def_of(fields: Vec<DetailField>) -> DetailDefinition {
+    DetailDefinition {
+        sections: vec![DetailSection {
+            title: None,
+            collapsed: false,
+            fields,
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn required_missing_and_blank_are_reported_per_field() {
+    let mut f = field("host", "text");
+    f.required = true;
+    let def = def_of(vec![f]);
+
+    assert_eq!(
+        def.validate(&json!({})).unwrap_err().fields[0].field,
+        "host"
+    );
+    assert_eq!(
+        def.validate(&json!({ "host": "   " })).unwrap_err().fields[0].field,
+        "host"
+    );
+    // `false` / `0` 是有效值，不是「没填」
+    assert!(def.validate(&json!({ "host": "127.0.0.1" })).is_ok());
+}
+
+#[test]
+fn non_object_payload_is_rejected() {
+    assert!(def_of(vec![]).validate(&json!("nope")).is_err());
+}
+
+/// 可选字段的 `null` = 「没填」（serde `Option` 的序列化形态）：
+/// 类型校验必须放行——否则「打开面板 → 什么都没改 → 保存」会把空槽位
+/// （还没配 key 的字段读出来就是 null）拦在门外，表单永远保存不了。
+#[test]
+fn null_for_optional_field_is_treated_as_unfilled() {
+    let def = def_of(vec![field("api_key", "password"), field("note", "text")]);
+
+    // 缺失与显式 null 同罪：都放行
+    assert!(def.validate(&json!({})).is_ok());
+    assert!(def
+        .validate(&json!({ "api_key": null, "note": null }))
+        .is_ok());
+
+    // 但**类型不对的非空值**照旧拦（null 豁免不是类型豁免）
+    assert_eq!(
+        def.validate(&json!({ "api_key": 42 })).unwrap_err().fields[0].field,
+        "api_key"
+    );
+
+    // 必填字段的 null 仍是「必填项不能为空」，不豁免
+    let mut req = field("must", "text");
+    req.required = true;
+    let def_req = def_of(vec![req]);
+    assert_eq!(
+        def_req
+            .validate(&json!({ "must": null }))
+            .unwrap_err()
+            .fields[0]
+            .message,
+        "必填项不能为空"
+    );
+}
+
+/// 隐藏字段（`visible_when` 不成立）与只读展示字段都不参与校验：
+/// 没显示的字段不该拦住提交。
+#[test]
+fn hidden_and_static_fields_are_exempt() {
+    let mut hidden = field("port", "number");
+    hidden.required = true;
+    hidden.visible_when = Some(DetailCondition {
+        key: "enabled".into(),
+        equals: Some(json!(true)),
+        ..Default::default()
+    });
+    let mut ro = field("status", "static");
+    ro.required = true;
+
+    let def = def_of(vec![hidden, ro]);
+
+    // 未启用 → 端口整行不渲染 → 缺失也不算错
+    assert!(def.validate(&json!({ "enabled": false })).is_ok());
+    // 启用 → 端口回归校验
+    assert_eq!(
+        def.validate(&json!({ "enabled": true }))
+            .unwrap_err()
+            .fields[0]
+            .field,
+        "port"
+    );
+}
+
+/// 空条件恒成立（`when` / `visible_when` 缺省即显示）。
+#[test]
+fn empty_condition_always_holds() {
+    assert!(DetailCondition::default().holds(&json!({})));
+}
+
+#[test]
+fn field_check_covers_shape_and_range() {
+    let mut n = field("port", "number");
+    n.min = Some(1.0);
+    n.max = Some(65535.0);
+    assert!(n.check(&json!(80)).is_none());
+    assert!(n.check(&json!(0)).is_some());
+    assert!(n.check(&json!(70000)).is_some());
+    assert!(n.check(&json!("abc")).is_some());
+
+    let mut s = field("proto", "select");
+    s.options = vec![
+        DetailOption {
+            value: "http".into(),
+            label: "HTTP".into(),
+            description: None,
+        },
+        DetailOption {
+            value: "https".into(),
+            label: "HTTPS".into(),
+            description: None,
+        },
+    ];
+    assert!(s.check(&json!("http")).is_none());
+    assert!(s.check(&json!("carrier-pigeon")).is_some());
+
+    assert!(field("flag", "toggle").check(&json!(true)).is_none());
+    assert!(field("flag", "toggle").check(&json!("yes")).is_some());
+    assert!(field("hosts", "list").check(&json!(["a"])).is_none());
+    assert!(field("hosts", "list").check(&json!("a")).is_some());
+    assert!(field("env", "map").check(&json!({ "K": "V" })).is_none());
+    assert!(
+        field("env", "map").check(&json!({ "K": 1 })).is_some(),
+        "值必须是字符串：`KEY=VALUE` 的编辑形态与下游读取都按字符串通信"
+    );
+    assert!(field("env", "map").check(&json!([])).is_some());
+    assert!(field("dir", "path").check(&json!("/tmp")).is_none());
+    assert!(field("dir", "path").check(&json!(1)).is_some());
+    assert!(field("hb", "form").check(&json!({})).is_none());
+    assert!(field("hb", "form").check(&json!("nope")).is_some());
+}
+
+/// 结构化子对象（`widget = "form"`）用子定义**递归**校验，错误字段带父前缀。
+#[test]
+fn nested_form_field_validates_against_sub_definition() {
+    let mut interval = field("interval_seconds", "number");
+    interval.min = Some(10.0);
+    let mut hb = field("heartbeat", "form");
+    hb.form = Some(Box::new(def_of(vec![interval])));
+    let def = def_of(vec![hb]);
+
+    assert!(def
+        .validate(&json!({ "heartbeat": { "interval_seconds": 30 } }))
+        .is_ok());
+    // 错误字段名带父前缀，前端仍能逐字段高亮
+    assert_eq!(
+        def.validate(&json!({ "heartbeat": { "interval_seconds": 1 } }))
+            .unwrap_err()
+            .fields[0]
+            .field,
+        "heartbeat.interval_seconds"
+    );
+}
+
+/// 缺席的约束位**不得**序列化成 `null`（线上的「缺席」= 键不在）。
+///
+/// 这是「条件静默失效」的唯一根因面：渲染器按「键在不在」判约束，`null` 会被
+/// 当成一条约束,并且因 `Boolean(v) !== null` 恒真而**恒假**——动作不出现、字段
+/// 永不显隐、`disabled_when` 永不生效，全程无报错。单侧条件（只有 `equals` 或只有
+/// `truthy`）已实测踩过：会话详情的「进入下一级」(T13 的清单节点) 整条消失。
+#[test]
+fn absent_constraints_do_not_serialize_as_null() {
+    // 只带 equals
+    let only_equals = DetailCondition {
+        key: "is_existing".into(),
+        equals: Some(json!(true)),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&only_equals).unwrap();
+    assert_eq!(v, json!({ "key": "is_existing", "equals": true }), "{v}");
+
+    // 只带 truthy
+    let only_truthy = DetailCondition {
+        key: "message_count".into(),
+        truthy: Some(true),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&only_truthy).unwrap();
+    assert_eq!(v, json!({ "key": "message_count", "truthy": true }), "{v}");
+
+    // 组合条件不带任何叶子约束位（`all` 之外的字段一律不出现）
+    let combo = DetailCondition {
+        all: vec![only_truthy],
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&combo).unwrap();
+    assert!(
+        v.get("equals").is_none() && v.get("not_equals").is_none() && v.get("truthy").is_none(),
+        "组合条件不得带叶子约束位: {v}"
+    );
+
+    // 线上形状可原样读回（`null` 会被当成约束，故也必须能不带这些键反序列化）
+    let back: DetailCondition = serde_json::from_value(json!({"key": "a", "equals": 1})).unwrap();
+    assert_eq!(
+        back,
+        DetailCondition {
+            key: "a".into(),
+            equals: Some(json!(1)),
+            ..Default::default()
+        }
+    );
+}
+
+/// `disabled_when` 成立**不**豁免校验：字段仍然在提交值里（只是用户改不动），
+/// 与 `visible_when` 不成立的「没显示就不该拦提交」是两回事。
+#[test]
+fn disabled_field_is_still_validated() {
+    let mut f = field("port", "number");
+    f.required = true;
+    f.disabled_when = Some(DetailCondition {
+        key: "locked".into(),
+        equals: Some(json!(true)),
+        ..Default::default()
+    });
+    let def = def_of(vec![f]);
+    assert_eq!(
+        def.validate(&json!({ "locked": true })).unwrap_err().fields[0].field,
+        "port"
+    );
+}

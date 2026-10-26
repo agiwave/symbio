@@ -25,7 +25,7 @@ const SCAN_TIMEOUT_MS = budget(await machine(), 'docs::grep-audit 回归测试',
 function audit(source, { waiver = '', strict = false, scope = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-'))
   try {
-    const plugins = path.join(root, 'symbio/src/plugins')
+    const plugins = path.join(root, 'crates/crates/plugins')
     fs.mkdirSync(path.join(plugins, 'other'), { recursive: true })
     fs.writeFileSync(path.join(plugins, 'other/sample.rs'), source.replace('WAIVER', waiver))
     const env = { ...process.env, NO_COLOR: '1' }
@@ -197,7 +197,7 @@ function s010Audit(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s010-'))
   try {
     // 仓库树标记：S-010 以「cwd 下有 symbio/」判定扫描根，缺了会回落到真实仓库
-    fs.mkdirSync(path.join(root, 'symbio', 'src', 'plugins'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates', 'plugins'), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
       const p = path.join(root, rel)
       fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -220,7 +220,7 @@ test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
   for (const [rel, content] of [
     ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
     ['docs/006-guide/x.md', S010_SUSPECT_MD],
-    ['symbio/src/plugins/session/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
+    ['crates/symbio-plugin-session/src/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
   ]) {
     const r = s010Audit({ [rel]: content })
     assert.equal(r.status, 1, rel)
@@ -235,8 +235,8 @@ test('S-010 catches stale and suffixed root spellings too', () => {
 
 test('S-010 stays silent inside the vdfs plugin (the owner)', () => {
   const r = s010Audit({
-    'symbio/src/plugins/vdfs/fs.rs': 'pub const VDFS_ADDR_ROOT: &str = ".vdfsv2";\n',
-    'symbio/src/plugins/vdfs/README.md': '根目录 `.vdfs/session` 说明。\n',
+    'crates/symbio-plugin-vdfs/src/fs.rs': 'pub const VDFS_ADDR_ROOT: &str = ".vdfsv2";\n',
+    'crates/symbio-plugin-vdfs/README.md': '根目录 `.vdfs/session` 说明。\n',
   })
   assert.equal(r.status, 0)
   assert.match(r.stdout, /S-010 通过/)
@@ -247,7 +247,7 @@ test('S-010 exempts historical records (archive)', () => {
   // `docs/CHANGELOG.md` 曾与 archive 并列豁免；该机制已废除（变更历史以 `git log` 为准），
   // 文件也随之删除，故这里只保留 archive 这一条豁免。
   const r = s010Audit({
-    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'crates/symbio-plugin-vdfs/src/fs.rs': '', // 标记：这是一个仓库树
     'docs/archive/old-design.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 0)
@@ -255,7 +255,7 @@ test('S-010 exempts historical records (archive)', () => {
 
 test('S-010 is not fooled by lookalike tokens (browser route / import paths)', () => {
   const r = s010Audit({
-    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'crates/symbio-plugin-vdfs/src/fs.rs': '', // 标记：这是一个仓库树
     'tauri/src/x.ts': [
       "import { vdfsJoin } from '../vdfs'", // 相对导入
       "import { vdfsRoot } from '@/schemas/vdfsRoot'", // 别名导入
@@ -270,7 +270,7 @@ test('S-010 skips runtime data dirs (`.symbio` homedir), not just build output',
   // 正文里引用挂载路径），门禁因**运行期数据**判红——源码一个字节没改。
   // `.symbio/` 是运行期 homedir 且被 `.gitignore` 忽略，不属本规则对象。
   const r = s010Audit({
-    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'crates/symbio-plugin-vdfs/src/fs.rs': '', // 标记：这是一个仓库树
     '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
   })
   assert.equal(r.status, 0, '运行期数据目录不应参与源码审计')
@@ -279,7 +279,7 @@ test('S-010 skips runtime data dirs (`.symbio` homedir), not just build output',
 test('S-010 still fires inside the repo tree when runtime dirs are present', () => {
   // 反例守卫：跳过 `.symbio` 不能顺手把整棵树放过去。
   const r = s010Audit({
-    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'crates/symbio-plugin-vdfs/src/fs.rs': '', // 标记：这是一个仓库树
     '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
     'docs/006-guide/x.md': S010_SUSPECT_MD,
   })
@@ -288,8 +288,8 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
 })
 
 test('S-010 waiver requires a reason (same line or the line above)', () => {
-  // 仓库树标记：symbio/src/plugins（同时是其它规则的扫描范围）
-  const mark = { 'symbio/src/plugins/vdfs/fs.rs': '' }
+  // 仓库树标记：crates/crates/plugins（同时是其它规则的扫描范围）
+  const mark = { 'crates/symbio-plugin-vdfs/src/fs.rs': '' }
   const r1 = s010Audit({ ...mark, 'docs/x.md': `<!-- grep-audit-allow S-010: 历史快照示例 -->\n.vdfs/session\n` })
   assert.equal(r1.status, 0)
   const r2 = s010Audit({ ...mark, 'docs/x.md': `.vdfs/session <!-- grep-audit-allow S-010: 引用旧文 -->\n` })
@@ -302,8 +302,8 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
 // 夹具与 S-010 共用（`s010Audit` 建的就是「cwd 下有 symbio/ 的仓库树」），
 // 落点由文件相对路径决定——S-011 认 `session/turn_runner.rs` 与 `session/turn_exec.rs` 两处。
 const s011Audit = s010Audit
-const S011_RUNNER = 'symbio/src/plugins/session/turn_runner.rs'
-const S011_EXEC = 'symbio/src/plugins/session/turn_exec.rs'
+const S011_RUNNER = 'crates/symbio-plugin-session/src/turn_runner.rs'
+const S011_EXEC = 'crates/symbio-plugin-session/src/turn_exec.rs'
 
 /** 位置正确的形态：2e 结果接进请求 → 2f 补充接进请求 */
 const S011_RUNNER_OK = `fn run() {
@@ -453,7 +453,7 @@ test('S-011 is skipped (not failed) when either file is outside the scope', () =
 // ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────
 // 这批注释没有 owner：「本批未修」的下一批修了，句子就指着已不存在的时间点；
 // 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 无出处批次号）。
-const S012_FILE = 'symbio/src/symbio_core/actors/mod.rs'
+const S012_FILE = 'crates/symbio-core/src/actors/mod.rs'
 
 test('S-012 fires on a batch number with no plan anchor', () => {
   const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })
@@ -487,7 +487,7 @@ test('S-012 does not touch runtime prose about a batch of tool calls', () => {
 })
 
 test('S-012 covers cli and the verify programs, not just symbio', () => {
-  for (const file of ['cli/src/client.rs', 'docs/003-design/verify/scenario_ladder.rs']) {
+  for (const file of ['crates/symbio-cli/src/client.rs', 'docs/003-design/verify/scenario_ladder.rs']) {
     const r = s010Audit({ [file]: '/// 这一格随批 3 补。\n' })
     assert.equal(r.status, 1, `${file} ⇒ ${r.stdout}`)
   }
@@ -522,7 +522,7 @@ test('S-012 finds no batch-relative narration in this repository', () => {
 // 默认遍历序 = 文件系统返回序（NTFS 名字序 / ext4 哈希序）。下游的 `offset` /
 // `head_limit` 分页窗口、`MAX_RESULTS` 与降级路径的 `limit` 截断都切在这个序上，
 // 于是同一查询换平台就换一批行。病灶见 ①（两条分页单测 Linux 红）。
-const S013_FILE = 'symbio/src/plugins/local/walker.rs'
+const S013_FILE = 'crates/symbio-plugin-local/src/walker.rs'
 const S013_UNPINNED = `fn collect(workdir: &Path) -> Vec<PathBuf> {
     let mut builder = WalkBuilder::new(workdir);
     builder.standard_filters(true).require_git(false);
@@ -590,7 +590,7 @@ test('S-013 finds every WalkBuilder construction pinned in this repository', () 
 // ── S-014: ChatNode 存量 `role` 格直写棘轮 ─────────────────────────────
 // 棘轮的三面都要钉住：升即红、降了不挪基线也即红、持平才过——
 // 只钉第一面的话，债务会换个名字继续长（基线永远等于昨天的读数）。
-const S014_FILE = 'symbio/src/plugins/session/sample.rs'
+const S014_FILE = 'crates/symbio-plugin-session/src/sample.rs'
 
 function roleAudit(source, baseline) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s014-'))
@@ -705,7 +705,7 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
 // 规则判的是**零出现**（不是棘轮）：布尔壳 `closure_granted` 复活、或闸被压回
 // 布尔形态，「拒绝」就又是「什么都没写」——日志里与「没跑完」同形，而不会有任何
 // 东西变红。
-const S015_FILE = 'symbio/src/plugins/loop/sample.rs'
+const S015_FILE = 'crates/symbio-plugin-loop/src/sample.rs'
 
 function gateAudit(source, name = S015_FILE) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s015-'))
@@ -759,7 +759,7 @@ test('S-015 不判注释行，测试文件豁免，豁免必须写理由', () =>
   // 测试文件里断言谓词本身不是拒绝路径（判据用例正是它）。
   const inTest = 'fn t() {\n    assert!(!closure_granted(&spec, ClosureKind::Speech));\n}\n'
   assert.equal(
-    gateAudit(inTest, 'symbio/src/plugins/loop/sample.test.rs').status,
+    gateAudit(inTest, 'crates/symbio-plugin-loop/src/sample.test.rs').status,
     0,
     '测试文件豁免',
   )
@@ -788,8 +788,8 @@ test('S-015 真实仓库零处（存量已全部迁完）', () => {
 // 判据盯的是三个构造点文件（`turn_runner.rs` / `facts.rs` / `settle.rs`）：
 // 停机格载荷只从这三处出生。扫整个目录会把 `memory_events` 那个格子的 `why`
 // （没有竞争的 `reason` 字段）一起卷进来——范围错了的规则会教人学会忽略它。
-const S016_TARGET = 'symbio/src/plugins/loop/turn_runner/settle.rs'
-const S016_OTHER_CELL = 'symbio/src/plugins/loop/memory_events.rs'
+const S016_TARGET = 'crates/symbio-plugin-loop/src/turn_runner/settle.rs'
+const S016_OTHER_CELL = 'crates/symbio-plugin-loop/src/memory_events.rs'
 
 function gateAudit16(source, name = S016_TARGET) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s016-'))
@@ -872,7 +872,7 @@ test('S-016 真实仓库零处（两个形状已全部迁完）', () => {
 // （自己写协议事实、自己跑执行体，绕开行表）。旁路退役后唯一入口是**事实**。
 // 放任它回来的代价不是风格问题——恢复路径会绕过行表写事实，于是「这一轮欠了
 // 什么」与「这一轮做了什么」对不上账，而没有任何东西会变红。
-const S017_LOOP = 'symbio/src/plugins/loop'
+const S017_LOOP = 'crates/symbio-plugin-loop/src'
 
 /** 多文件临时树（这条规则要同时看「文件在不在」与「文件里写了什么」）。 */
 function gateAudit17(files) {

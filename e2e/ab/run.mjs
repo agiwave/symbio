@@ -11,7 +11,7 @@
 // --------------
 // system 前缀与 `tools` 数组整体取自一次**真实链路捕获**（`capture-corpus.mjs`：
 // CLI × mock-llm × mock-mcp，出厂 `full` 档，对话面关闭 —— 与
-// [D-057](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 形状基线同一条链路同一个场景名）。
+// [D-057](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README") 形状基线同一条链路同一个场景名）。
 // 题目只替换尾部消息。缺 `--corpus=` 就现场跑一次捕获。
 //
 // 判据（全部机械可读回，口径归 `tasks.mjs`）

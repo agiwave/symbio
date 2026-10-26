@@ -15,7 +15,7 @@
  * - `getHomedirInfo` / `switchHomedir`：homedir 信息与切换
  * - `getWorkspacePath` / `setWorkspacePath`：当前 workdir 与切换
  *
- * 对应后端代码：symbio/src/plugins/home/plugin.rs
+ * 对应后端代码：crates/symbio-plugin-home/src/plugin.rs
  * 对应 schema：`schemas/home.ts`——四条臂的载荷各按后端模块名收在一个同名 namespace
  * 里。本模块**不再自持契约**（此前那三个「本模块私有契约」正是抄本），
  * 字段形状由 `protocol-mirror-audit` D 组逐字段看守。

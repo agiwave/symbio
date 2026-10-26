@@ -68,16 +68,16 @@ function audit(files, { baseline = '0:0', waivers, ledger } = {}) {
   }
 }
 
-const CORE_MOD = 'symbio/src/symbio_core/mod.rs'
-const ACTORS_MOD = 'symbio/src/symbio_core/actors/mod.rs'
+const CORE_MOD = 'crates/symbio-core/src/lib.rs'
+const ACTORS_MOD = 'crates/symbio-core/src/actors/mod.rs'
 
 /** 干净夹具：`mod actors;`（私有）+ 根显式导出 + 两个插件消费 ⇒ ≥2 消费方 */
 function clean(extra = {}) {
   return {
     [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing};\n',
     [ACTORS_MOD]: 'pub struct AlphaThing;\n',
-    'symbio/src/plugins/alpha/a.rs': 'use crate::symbio_core::AlphaThing;\npub fn f(_: AlphaThing) {}\n',
-    'symbio/src/plugins/beta/b.rs': 'use crate::symbio_core::AlphaThing;\npub fn g(_: AlphaThing) {}\n',
+    'crates/crates/plugins/alpha/a.rs': 'use crate::symbio_core::AlphaThing;\npub fn f(_: AlphaThing) {}\n',
+    'crates/crates/plugins/beta/b.rs': 'use crate::symbio_core::AlphaThing;\npub fn g(_: AlphaThing) {}\n',
     ...extra,
   }
 }
@@ -97,7 +97,7 @@ test('根 `pub mod <域>;` → C-001 变红', () => {
 test('deep 引 `symbio_core::<域>::…` → C-002 变红', () => {
   const r = audit(
     clean({
-      'symbio/src/plugins/gamma/g.rs':
+      'crates/crates/plugins/gamma/g.rs':
         'use crate::symbio_core::actors::AlphaThing;\npub fn h(_: AlphaThing) {}\n',
     }),
   )
@@ -108,7 +108,7 @@ test('deep 引 `symbio_core::<域>::…` → C-002 变红', () => {
 
 test('裸模块导入 `use crate::symbio_core::<域>;` → C-002 变红（旧 E-010 漏网的那种）', () => {
   const r = audit(
-    clean({ 'symbio/src/plugins/gamma/g.rs': 'use crate::symbio_core::actors;\npub fn h() {}\n' }),
+    clean({ 'crates/crates/plugins/gamma/g.rs': 'use crate::symbio_core::actors;\npub fn h() {}\n' }),
   )
   assert.equal(r.status, 1, '没有尾 :: 的裸模块导入必须红')
   assert.match(r.stderr, /C-002/)
@@ -116,7 +116,7 @@ test('裸模块导入 `use crate::symbio_core::<域>;` → C-002 变红（旧 E-
 
 test('C-002 覆盖跨 crate（cli）与壳侧（tauri/src-tauri）', () => {
   const cli = audit(
-    clean({ 'cli/src/client.rs': 'use symbio::symbio_core::actors::AlphaThing;\n' }),
+    clean({ 'crates/symbio-cli/src/client.rs': 'use symbio::symbio_core::actors::AlphaThing;\n' }),
   )
   assert.equal(cli.status, 1, 'cli 的深引必须红')
   assert.match(cli.stderr, /C-002/)
@@ -131,9 +131,9 @@ test('C-002 覆盖跨 crate（cli）与壳侧（tauri/src-tauri）', () => {
 test('C-002 不再豁免 `schemas::`（根 `mod schemas;` 已私有化，编译器兜底）', () => {
   const r = audit(
     clean({
-      'symbio/src/symbio_core/schemas/mod.rs': 'pub mod session;\n',
-      'symbio/src/symbio_core/schemas/session/mod.rs': 'pub mod chat_node;\n',
-      'symbio/src/plugins/gamma/g.rs':
+      'crates/symbio-core/src/schemas/mod.rs': 'pub mod session;\n',
+      'crates/symbio-core/src/schemas/session/mod.rs': 'pub mod chat_node;\n',
+      'crates/crates/plugins/gamma/g.rs':
         'use crate::symbio_core::schemas::session::chat_node::ChatNode;\npub fn h() {}\n',
     }),
   )
@@ -144,8 +144,8 @@ test('C-002 不再豁免 `schemas::`（根 `mod schemas;` 已私有化，编译�
 test('注释里提到、core 内部深引 → 放行（不误报）', () => {
   const r = audit(
     clean({
-      'symbio/src/plugins/gamma/g.rs': '// 规则见 symbio_core::actors::AlphaThing 的文档\npub fn h() {}\n',
-      'symbio/src/symbio_core/llm/x.rs':
+      'crates/crates/plugins/gamma/g.rs': '// 规则见 symbio_core::actors::AlphaThing 的文档\npub fn h() {}\n',
+      'crates/symbio-core/src/llm/x.rs':
         '// core 内部：路径照写\nuse crate::symbio_core::actors::AlphaThing;\npub fn y(_: AlphaThing) {}\n',
     }),
   )
@@ -155,7 +155,7 @@ test('注释里提到、core 内部深引 → 放行（不误报）', () => {
 test('行内豁免：非空理由放行，空理由不放行', () => {
   const ok = audit(
     clean({
-      'symbio/src/plugins/gamma/g.rs':
+      'crates/crates/plugins/gamma/g.rs':
         'use crate::symbio_core::actors::AlphaThing; // core-export-allow: 桥接期由本插件持有\npub fn h(_: AlphaThing) {}\n',
     }),
   )
@@ -163,7 +163,7 @@ test('行内豁免：非空理由放行，空理由不放行', () => {
 
   const bad = audit(
     clean({
-      'symbio/src/plugins/gamma/g.rs':
+      'crates/crates/plugins/gamma/g.rs':
         'use crate::symbio_core::actors::AlphaThing; // core-export-allow:\npub fn h(_: AlphaThing) {}\n',
     }),
   )
@@ -183,7 +183,7 @@ test('C-003：0 消费方 / 单消费方 → 变红（棘轮压到 0:0）', () =
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
-      'symbio/src/plugins/alpha/lonely.rs': 'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
+      'crates/crates/plugins/alpha/lonely.rs': 'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
     }),
   )
   assert.equal(one.status, 1, '只有一个模块消费必须红（下沉）')
@@ -225,7 +225,7 @@ test('自引用：`PLUGIN_ID_ALPHA` 被同名插件用，不算单消费方', ()
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, PLUGIN_ID_ALPHA};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub const PLUGIN_ID_ALPHA: &str = "alpha";\n',
-      'symbio/src/plugins/alpha/id.rs': 'pub const ID: &str = PLUGIN_ID_ALPHA;\n',
+      'crates/crates/plugins/alpha/id.rs': 'pub const ID: &str = PLUGIN_ID_ALPHA;\n',
     }),
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
@@ -238,9 +238,9 @@ test('C-003 口径：测试文件不算架构消费方（生产 1 + 测试 1 ⇒
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
-      'symbio/src/plugins/alpha/lonely.rs':
+      'crates/crates/plugins/alpha/lonely.rs':
         'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
-      'symbio/src/plugins/beta/lonely.test.rs':
+      'crates/crates/plugins/beta/lonely.test.rs':
         'use crate::symbio_core::LonelyThing;\n#[test]\nfn t() { let _ = size_of::<LonelyThing>(); }\n',
     }),
   )
@@ -254,9 +254,9 @@ test('C-003 口径：`#[cfg(test)] mod test_support;` 不算生产消费方', ()
   const fixture = (decl) => ({
     [CORE_MOD]: 'mod actors;\npub use actors::AlphaThing;\n',
     [ACTORS_MOD]: 'pub struct AlphaThing;\n',
-    'symbio/src/plugins/alpha/test_support.rs':
+    'crates/crates/plugins/alpha/test_support.rs':
       'use crate::symbio_core::AlphaThing;\npub fn s(_: AlphaThing) {}\n',
-    'symbio/src/plugins/alpha/mod.rs': decl,
+    'crates/crates/plugins/alpha/mod.rs': decl,
   })
   const cfgTest = audit(fixture('#[cfg(test)]\nmod test_support;\n'))
   assert.equal(cfgTest.status, 0, '只在测试构建里存在 ⇒ 合法根出口（仅测试在用）')
@@ -275,9 +275,9 @@ test('C-003 口径：core 内另一生产模块也在用 ⇒ 不算下放候选�
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SharedThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct SharedThing;\n',
-      'symbio/src/plugins/alpha/shared.rs':
+      'crates/crates/plugins/alpha/shared.rs':
         'use crate::symbio_core::SharedThing;\npub fn s(_: SharedThing) {}\n',
-      'symbio/src/symbio_core/projection/p.rs':
+      'crates/symbio-core/src/projection/p.rs':
         'use crate::symbio_core::actors::SharedThing;\npub fn p(_: SharedThing) {}\n',
     }),
   )
@@ -293,9 +293,9 @@ test('C-003 口径：**同域使用也是消费方** ⇒ 不是下放候选（�
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
-      'symbio/src/plugins/alpha/lonely.rs':
+      'crates/crates/plugins/alpha/lonely.rs':
         'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
-      'symbio/src/symbio_core/actors/other.rs':
+      'crates/symbio-core/src/actors/other.rs':
         'use crate::symbio_core::LonelyThing;\npub fn o(_: LonelyThing) {}\n',
     }),
   )
@@ -309,7 +309,7 @@ test('C-003 口径：根 `mod.rs` 的导出清单**不算**消费方（仍判红
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
-      'symbio/src/plugins/alpha/lonely.rs':
+      'crates/crates/plugins/alpha/lonely.rs':
         'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
     }),
   )
@@ -329,12 +329,12 @@ test('C-003 口径：core 内部**用它**（含实现、约束）⇒ 不是下�
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
       // 同域的 `use` 与 `impl` 都在——两者都是依赖
-      'symbio/src/symbio_core/actors/impl_solo.rs':
+      'crates/symbio-core/src/actors/impl_solo.rs':
         'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
       // 泛型约束同样算依赖：`impl<Foo: SoloPort>` 要求 `SoloPort` 存在
-      'symbio/src/symbio_core/actors/bounded.rs':
+      'crates/symbio-core/src/actors/bounded.rs':
         'pub struct Bar;\npub struct X;\nimpl<Foo: SoloPort> Bar for X {}\n',
-      'symbio/src/plugins/alpha/only.rs':
+      'crates/crates/plugins/alpha/only.rs':
         'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
     }),
   )
@@ -349,7 +349,7 @@ test('C-003 口径：同域只有**声明点与导出清单** ⇒ 仍判红（�
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
-      'symbio/src/plugins/alpha/lonely.rs':
+      'crates/crates/plugins/alpha/lonely.rs':
         'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
     }),
   )
@@ -366,9 +366,9 @@ test('C-003 规则 4：唯一消费方是 **core 自己** ⇒ 不是下放候选
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, CoreOnly};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct CoreOnly;\n',
-      'symbio/src/symbio_core/actors/inner.rs':
+      'crates/symbio-core/src/actors/inner.rs':
         'use crate::symbio_core::CoreOnly;\npub fn f(_: CoreOnly) {}\n',
-      'symbio/src/plugins/alpha/uses_other.rs':
+      'crates/crates/plugins/alpha/uses_other.rs':
         'use crate::symbio_core::AlphaThing;\npub fn g(_: AlphaThing) {}\n',
     }),
   )
@@ -385,7 +385,7 @@ test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, TestOnlyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct TestOnlyThing;\n',
-      'symbio/src/plugins/beta/only.test.rs':
+      'crates/crates/plugins/beta/only.test.rs':
         'use crate::symbio_core::TestOnlyThing;\n#[test]\nfn t() { let _ = size_of::<TestOnlyThing>(); }\n',
     }),
   )
@@ -399,10 +399,10 @@ function withKernel(extra = {}) {
   return {
     [CORE_MOD]: 'mod actors;\nmod kernel;\npub use actors::DomainThing;\npub use kernel::*;\n',
     [ACTORS_MOD]: 'pub struct DomainThing;\npub struct CoreThing;\n',
-    'symbio/src/symbio_core/kernel.rs': 'pub use super::actors::{CoreThing};\n',
-    'symbio/src/plugins/a/a.rs': 'use crate::symbio_core::CoreThing;\npub fn f(_: CoreThing) {}\n',
-    'symbio/src/plugins/b/b.rs': 'use crate::symbio_core::CoreThing;\npub fn g(_: CoreThing) {}\n',
-    'symbio/src/plugins/c/c.rs':
+    'crates/symbio-core/src/kernel.rs': 'pub use super::actors::{CoreThing};\n',
+    'crates/crates/plugins/a/a.rs': 'use crate::symbio_core::CoreThing;\npub fn f(_: CoreThing) {}\n',
+    'crates/crates/plugins/b/b.rs': 'use crate::symbio_core::CoreThing;\npub fn g(_: CoreThing) {}\n',
+    'crates/crates/plugins/c/c.rs':
       'use crate::symbio_core::DomainThing;\npub fn h(_: DomainThing) {}\n',
     ...extra,
   }

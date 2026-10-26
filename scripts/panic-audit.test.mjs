@@ -48,7 +48,7 @@ function audit ({ files, regs = {} } = {}) {
   }
 }
 
-const F = 'symbio/src/x.rs'
+const F = 'crates/crates/x.rs'
 const unwrapFn = 'pub fn f(a: Option<u32>) -> u32 {\n    a.unwrap()\n}\n'
 
 // ── ① 提取器不许悄悄失配 ─────────────────────────────────────────────
@@ -94,7 +94,7 @@ test('登记必须写在同一个文件里（不能靠别处一张表蒙混）',
   const r = audit({
     files: {
       [F]: unwrapFn,
-      'symbio/src/y.rs': 'pub fn h() {}\n// panic-allow symbio/src/x.rs::f: 写在别的文件\n',
+      'crates/crates/y.rs': 'pub fn h() {}\n// panic-allow crates/crates/x.rs::f: 写在别的文件\n',
     },
   })
   assert.equal(r.status, 1, r.stdout)
@@ -113,9 +113,9 @@ test('同文件内多个 panic 归并成一个登记项', () => {
 test('不判测试文件（*.test.rs / tests.rs）', () => {
   const r = audit({
     files: {
-      'symbio/src/x.rs': 'pub fn f() {}\n',
-      'symbio/src/x.test.rs': unwrapFn,
-      'symbio/src/tests.rs': unwrapFn,
+      'crates/crates/x.rs': 'pub fn f() {}\n',
+      'crates/crates/x.test.rs': unwrapFn,
+      'crates/crates/tests.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 0, r.stdout)
@@ -152,8 +152,8 @@ test('整文件 #[cfg(test)] 的测试辅助不判（test_support 这类）', ()
 test('父模块里 #[cfg(test)] mod 声明的文件不判（声明与文件分居两处）', () => {
   const r = audit({
     files: {
-      'symbio/src/mod.rs': 'pub fn f() {}\n\n#[cfg(test)]\nmod helper;\n',
-      'symbio/src/helper.rs': unwrapFn,
+      'crates/crates/mod.rs': 'pub fn f() {}\n\n#[cfg(test)]\nmod helper;\n',
+      'crates/crates/helper.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 0, r.stdout)
@@ -163,8 +163,8 @@ test('父模块里 #[cfg(test)] mod 声明的文件不判（声明与文件分�
 test('普通 mod 声明的文件照判（隔离不得误伤生产模块）', () => {
   const r = audit({
     files: {
-      'symbio/src/mod.rs': 'pub fn f() {}\n\nmod helper;\n',
-      'symbio/src/helper.rs': unwrapFn,
+      'crates/crates/mod.rs': 'pub fn f() {}\n\nmod helper;\n',
+      'crates/crates/helper.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 1, r.stdout)

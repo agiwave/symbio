@@ -39,9 +39,9 @@ function rmTree(dir) {
   fs.rmdirSync(dir)
 }
 
-const CORE_MOD = 'symbio/src/symbio_core/mod.rs'
-const ALPHA = 'symbio/src/symbio_core/alpha/mod.rs'
-const KERNEL = 'symbio/src/symbio_core/kernel.rs'
+const CORE_MOD = 'crates/symbio-core/src/lib.rs'
+const ALPHA = 'crates/symbio-core/src/alpha/mod.rs'
+const KERNEL = 'crates/symbio-core/src/kernel.rs'
 /** 一个成员、无默认体的最小夹具 */
 const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
 
@@ -83,7 +83,7 @@ test('形状等于基线 ⇒ 通过', () => {
 
 test('多一个 pub trait（新增接缝）⇒ CS-001 变红', () => {
   const r = audit(
-    core(ONE, { 'symbio/src/symbio_core/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n' }),
+    core(ONE, { 'crates/symbio-core/src/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n' }),
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 1, '接缝变多必须红')
@@ -140,7 +140,7 @@ test('反向：测试里的 trait 不算形状（`#[cfg(test)]` 模块与 `*.tes
     core(
       ONE +
         '\n#[cfg(test)]\nmod tests {\n    pub trait Fake {\n        fn a(&self);\n        fn b(&self);\n    }\n}\n',
-      { 'symbio/src/symbio_core/alpha/inline.test.rs': 'pub trait Ghost {\n    fn x(&self);\n    fn y(&self);\n}\n' },
+      { 'crates/symbio-core/src/alpha/inline.test.rs': 'pub trait Ghost {\n    fn x(&self);\n    fn y(&self);\n}\n' },
     ),
     { baseline: '1:1:0' },
   )
@@ -154,7 +154,7 @@ test('内核文件集：标记之外的同名 trait 不占形状（CS-001 只量
     {
       [CORE_MOD]: 'mod alpha;\nmod beta;\nmod kernel;\n',
       [ALPHA]: ONE,
-      'symbio/src/symbio_core/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n',
+      'crates/symbio-core/src/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n',
       [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
     },
     { baseline: '1:1:0' },
@@ -182,10 +182,10 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
   const files = {
     [CORE_MOD]: 'mod alpha;\nmod gamma;\nmod kernel;\n',
     [ALPHA]: five,
-    'symbio/src/symbio_core/gamma/mod.rs': 'pub const G: &str = "session";\n',
+    'crates/symbio-core/src/gamma/mod.rs': 'pub const G: &str = "session";\n',
     [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
-    'symbio/src/plugins/mod.rs': '',
-    'symbio/src/plugins/session/.keep': '',
+    'crates/crates/plugins/mod.rs': '',
+    'crates/symbio-plugin-session/src/.keep': '',
   }
   const ok = audit(files, { baseline: '5:5:0' })
   assert.equal(ok.status, 0, ok.stderr + ok.stdout)
@@ -221,7 +221,7 @@ test('放宽注释挂着能打开的决策 ⇒ 通过（棘轮不判论证内容
   const r = audit(
     core(ONE, {
       'scripts/core-shape-audit.mjs': '// core-shape-allow methods: D-077 扩到 2 个成员的理由\n',
-      'symbio/src/plugins/heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
+      'crates/symbio-plugin-heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
     }),
     { baseline: '1:2:0' },
   )
@@ -232,7 +232,7 @@ test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当�
   const r = audit(
     core(ONE, {
       'scripts/core-shape-audit.mjs': '// core-shape-allow methodz: D-077 打错了键名\n',
-      'symbio/src/plugins/heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
+      'crates/symbio-plugin-heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
     }),
     { baseline: '1:2:0' },
   )

@@ -45,15 +45,16 @@ import { pluginSources, extractRouteArms, vdfsOps } from "../route-facts.mjs";
 
 // 本文件住 `scripts/facts/`，故仓根要上溯两级（原来在 `scripts/` 下只需一级）。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
+const PLUGINS_DIR = path.join(ROOT, "crates");
+const PLUGIN_CRATE_PREFIX = "symbio-plugin-";
 // 生成物里的编号引用：展开形态与 `gen-doc-refs` 逐字一致（`_lib.mjs` 的病历：
 // 9f49d454 只有用法没有定义，6 处字面量静默上盘——执行方是 facts.test.mjs）。
 // fromDir = 本文件的产物目录（`docs/ref`）。
 const refLink = createRefLink(ROOT, "docs/ref");
-// 插件工厂 id 的 owner 是装配方（`symbio/src/assembly.generated.rs`，由每个插件目录的
+// 插件工厂 id 的 owner 是装配方（`crates/symbio-deploy/src/lib.rs`，由每个插件目录的
 // `PLUGIN.yml` 生成）——它们描述的是「哪个插件」，不是「哪个键」，也不属于内核机制
 // （见 `assembly.rs` 模块文档）。
-const IDS_FILE = path.join(ROOT, "symbio", "src", "assembly.generated.rs");
+const IDS_FILE = path.join(ROOT, "crates", "symbio-deploy", "src", "lib.rs");
 /**
  * 输出位置：**`docs/004-ref/` 下的一份编号参考文档**。
  *
@@ -129,8 +130,11 @@ function extractToolNames(t, consts) {
 const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ModelProvider", "ConfigurableVisitor"];
 
 /** 单个插件的静态事实 */
-function analyzePlugin(dirName, ids) {
-  const dir = path.join(PLUGINS_DIR, dirName);
+function analyzePlugin(crateDirName, ids) {
+  const dirName = crateDirName.startsWith(PLUGIN_CRATE_PREFIX)
+    ? crateDirName.slice(PLUGIN_CRATE_PREFIX.length)
+    : crateDirName;
+  const dir = path.join(PLUGINS_DIR, crateDirName);
   const contents = pluginSources(dir);
   const consts = new Map();
   for (const t of contents) parseConsts(t, consts);
@@ -179,9 +183,9 @@ function analyzePlugin(dirName, ids) {
 
 function scopeRows() {
   return [
-    sharedScopeRow(ROOT, "symbio/src", [".rs"]),
-    sharedScopeRow(ROOT, "symbio_kernel/src", [".rs"]),
-    sharedScopeRow(ROOT, "cli/src", [".rs"]),
+    sharedScopeRow(ROOT, "crates", [".rs"]),
+    sharedScopeRow(ROOT, "crates/symbio-kernel/src", [".rs"]),
+    sharedScopeRow(ROOT, "crates/symbio-cli/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),
   ];
@@ -240,7 +244,7 @@ function tauriViews() {
 /**
  * CLI 面：进程选项 + REPL 内置命令。
  *
- * 权威来源是 `cli/src/args.rs` 的 `HELP` 常量（无子命令树、不依赖 clap）。
+ * 权威来源是 `crates/symbio-cli/src/args.rs` 的 `HELP` 常量（无子命令树、不依赖 clap）。
  * 之所以用提取而非手写清单：手写时我把「交互模式内置命令」当成了不存在的
  * 「子命令」，还漏掉了 `--heartbeat`——事实表里的清单一旦手写就会腐烂。
  */
@@ -278,7 +282,7 @@ function cliSurface() {
  * 是 `/api/v1/invoke`、`/api/v1/health`，是文档腐烂的活案例）。
  */
 function gatewayEndpoints() {
-  const file = path.join(ROOT, "symbio", "src", "plugins", "gateway", "server.rs");
+  const file = path.join(ROOT, "crates", "symbio-plugin-gateway", "src", "server.rs");
   let txt;
   try {
     txt = stripComments(readFileSync(file, "utf8"));
@@ -344,7 +348,8 @@ function headSha() {
 function render() {
   const ids = parseIds(readFileSync(IDS_FILE, "utf8"));
   const pluginDirs = readdirSync(PLUGINS_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && e.name.startsWith(PLUGIN_CRATE_PREFIX))
+    .filter((e) => e.name !== "symbio-plugin-api")
     .map((e) => e.name)
     .sort();
   const plugins = pluginDirs.map((d) => analyzePlugin(d, ids));
@@ -378,7 +383,7 @@ function render() {
   L.push("");
 
   // ── §1 插件总表 ─────────────────────────────────────────────────────
-  L.push("## 1. 插件总表（`symbio/src/plugins/`）");
+  L.push("## 1. 插件总表（`crates/crates/plugins/`）");
   L.push("");
   L.push(
     "| 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |"
@@ -533,9 +538,9 @@ function render() {
       cli.longs
     )}）；交互模式内置命令 ${cli.repl.length} 个（${fmtList(
       cli.repl
-    )}）。无子命令树、不依赖 clap，权威来源是 \`cli/src/args.rs\` 的 \`HELP\`。` +
-      ' 本清单的 owner 是本行：它从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
-      '`cli/README.md` 与 `cli/docs/004-usage.md` 是它的 `view`（只指路，不抄表）。'
+    )}）。无子命令树、不依赖 clap，权威来源是 \`crates/symbio-cli/src/args.rs\` 的 \`HELP\`。` +
+      ' 本清单的 owner 是本行：它从 `crates/symbio-cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
+      '`crates/symbio-cli/README.md` 与 `crates/symbio-cli/docs/004-usage.md` 是它的 `view`（只指路，不抄表）。'
   );
   L.push("");
 

@@ -26,20 +26,20 @@ created: 2026-09-07
 ### 1. 创建目录
 
 ```bash
-mkdir -p symbio/src/plugins/my_plugin
+mkdir -p crates/crates/plugins/my_plugin
 ```
 
 ### 2. 创建 mod.rs
 
 ```rust
-// symbio/src/plugins/my_plugin/mod.rs
+// crates/crates/plugins/my_plugin/mod.rs
 pub mod plugin;
 ```
 
 ### 3. 实现 Plugin Trait
 
 ```rust
-// symbio/src/plugins/my_plugin/plugin.rs
+// crates/crates/plugins/my_plugin/plugin.rs
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -143,7 +143,7 @@ plugin_author: me # 作者
 构造，不是不存在）。`meta` 的另一半（`order` / `icon` / `hidden` / `root_access`）
 是**挂载点呈现**，只在运行期读，不投影——没有挂载点就没有这些属性。
 
-若要随系统启动（`home` 的必需插件清单），把插件名加进 `symbio/src/plugins/home/plugin.rs`
+若要随系统启动（`home` 的必需插件清单），把插件名加进 `crates/symbio-plugin-home/src/plugin.rs`
 的 `SYSTEM_PLUGINS`——**这是唯一的清单点**，且它属于**构造者**（`composite` 是通用容器，
 可以嵌套，因此不内置任何清单）。
 
@@ -184,7 +184,7 @@ async fn route(
 > 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::capability_invoke`
 > 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route` 直连调用照常可用）。
 > 理由与代价见 [D-020](../003-design/001-核心架构.md "DE-001-核心架构")、[D-021](../003-design/001-核心架构.md "DE-001-核心架构") 与
-> [`symbio/src/plugins/session/docs/102-core-loop.md`](../../symbio/src/plugins/session/docs/102-core-loop.md "DE-102-core-loop") §7、§9。
+> [`crates/symbio-plugin-session/src/docs/102-core-loop.md`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "DE-102-core-loop") §7、§9。
 
 ### traverse
 

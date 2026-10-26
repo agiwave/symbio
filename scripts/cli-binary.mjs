@@ -20,7 +20,7 @@
  *
  * mtime 会被 git checkout / 解压 / 复制 / 恢复备份改写，方向还不确定——
  * 既可能假旧（多一次无害的重建），也可能**假新**（把过期产物当最新，正是要防的）。
- * 内容指纹只问一件事：**构建输入变了吗**。代价是哈希 `cli/src` + `symbio/src`
+ * 内容指纹只问一件事：**构建输入变了吗**。代价是哈希 `crates/symbio-cli/src` + `symbio/src`
  * 的全部 `.rs`（本仓 272 文件 / 约 3 MB）与四个清单，约 10 ms —— 每次检查都付得起。
  *
  * 大文件（`include_bytes!` 进来的内嵌资产，如 24 MB 的 `model.onnx`）改用
@@ -152,7 +152,7 @@ function walkFiles(dir, out = []) {
  */
 export function cliBuildInputs(repoRoot) {
   const files = []
-  for (const sub of ['cli/src', 'symbio/src']) {
+  for (const sub of ['crates/symbio-cli/src', 'crates']) {
     files.push(...walkFiles(path.join(repoRoot, sub)))
   }
   for (const rel of [
@@ -161,7 +161,7 @@ export function cliBuildInputs(repoRoot) {
     'cli/Cargo.toml',
     'cli/build.rs',
     'cli/.cargo/config.toml',
-    'symbio/Cargo.toml',
+    'crates/symbio/Cargo.toml',
     'symbio/build.rs',
     'symbio/.cargo/config.toml',
   ]) {

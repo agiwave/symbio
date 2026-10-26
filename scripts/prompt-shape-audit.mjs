@@ -7,7 +7,7 @@
  * 「结构化 prompt 对模型是变好还是变坏」这个问题，在有一份形状基线之前**无法回答**——
  * 连「现在送出去的是什么形状」都没有一个可核对的记录，任何「更有效」的说法都是拍板
  * （[plan/13 终点第 2 条](../docs/archive/13-质量改进总纲.md)、
- * 相应批次、[D-048a](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）。
+ * 相应批次、[D-048a](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")）。
  * 本脚本把那份记录立起来：从**真实链路**（CLI × mock LLM）抓到的请求体里提取形状，
  * 与基线文件逐字段比，改了就红。
  *
@@ -17,7 +17,7 @@
  * | PS-002 | 基线文件缺失或其中的 JSON 块读不出 | 基线退化成「散文里提一句」，于是没有任何东西在判 |
  * | PS-003 | 提取到的请求数为 0 | **假绿灯最坏的一种**：链路没跑通 ⇒ 空形状与空基线「一致」⇒ 报通过 |
  *
- * ## 什么进基线，什么只作观测（口径见 [D-057](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")）
+ * ## 什么进基线，什么只作观测（口径见 [D-057](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")）
  *
  * **形状 = 由装配代码决定的部分**，它进判据：
  * 信封参数、消息序列（`role` + `tool_calls` 条数 + 工具结果是否带 `tool_call_id` +
@@ -79,13 +79,13 @@ const FENCE_RE = /```json:prompt-shape\n([\s\S]*?)\n```/
  * **平台变体工具名 → 规范记号。**
  *
  * 出厂工具面里有一个工具的名字**由宿主平台决定、不由装配决定**：
- * `symbio/src/plugins/local/shell.rs` 的 `get_os_info()` 按 `target_os` 返回 `tool_name`
+ * `crates/symbio-plugin-local/src/shell.rs` 的 `get_os_info()` 按 `target_os` 返回 `tool_name`
  * （Windows = `cmd`、macOS / Linux = `sh`；路由口径见 `docs/004-ref/003-ROUTES.md`）。
  * 把它原样入判据的后果是实测过的：**基线在哪台机器上重生成，CI 就在另一台机器上恒红**，
  * 而报出来的是「形状漂移」，真因是平台（2026-10-13，见
  * 相应批次）。
  *
- * 归一化是**朝 [D-057](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 决策 2 的既有原则靠**：那条写的是
+ * 归一化是**朝 [D-057](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README") 决策 2 的既有原则靠**：那条写的是
  * 「进判据的只有**由装配代码决定**的结构」，而平台决定的取值与「规模由负载决定」同族
  * ——都不该进判据。归一化后判据仍记**顺序、数量与其余名字**，只把平台那一个位置收成记号。
  *
@@ -292,7 +292,7 @@ export function renderBaselineDoc (shape, observations, { capturedAt = '' } = {}
 
 > ⚠️ **生成物，不手改。** 唯一写者是 \`node e2e/cases/t46-prompt-shape-baseline.mjs\`
 > 带 \`PROMPT_SHAPE_UPDATE=1\`；判据由那条用例在门禁里每次复算（改了装配就红），
-> 口径与「什么进基线、什么只作观测」见 [D-057](../../symbio/src/plugins/session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
+> 口径与「什么进基线、什么只作观测」见 [D-057](../../crates/symbio-plugin-session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 \`scripts/prompt-shape-audit.mjs\`。
 
 场景 \`${shape.scenario}\` · 重生成于 ${capturedAt || '（未标时间）'} · 请求数 ${shape.requests.length}
@@ -400,7 +400,7 @@ function main () {
     console.error(
       `\n${yellow('提示')}：形状确实**该**变 ⇒ 跑 \`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs\` 重生成，` +
         `\n      并在改动的那条 ADR / 提交信息里说清「结构上多了什么、代价是多少」。\n` +
-        `      规模列不进判据的原因与口径见 ${dim('symbio/src/plugins/session/README.md')}。`,
+        `      规模列不进判据的原因与口径见 ${dim('crates/symbio-plugin-session/README.md')}。`,
     )
     process.exit(1)
   }

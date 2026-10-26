@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 3](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 3](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「两轮工具轮的会话，第二轮请求包里带第一轮的工具结果」。
 //
 // 为什么必须端到端：单测（`actors/mod.test.rs::transcript_includes_artifact_as_tool_line`）

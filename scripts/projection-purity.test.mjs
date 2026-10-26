@@ -16,11 +16,11 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const script = path.join(scriptDir, 'projection-purity.mjs')
 
-const DIR = 'symbio/src/symbio_core/projection'
+const DIR = 'crates/symbio-core/src/projection'
 const MOD = `${DIR}/mod.rs`
 const RECALL = `${DIR}/recall.rs`
 const REPUTATION = `${DIR}/reputation.rs`
-const CONSUMER = 'symbio/src/plugins/loop/x.rs'
+const CONSUMER = 'crates/symbio-plugin-loop/src/x.rs'
 
 /** 干净夹具：一个产投影 `recall.rs` + 它投影外的生产消费方。`null` ⇒ 删掉该文件。 */
 function repo(extra = {}) {
@@ -137,7 +137,7 @@ test('PP-003 反例：只被测试文件消费不算生产消费方 ⇒ 红', ()
   const r = audited(
     repo({
       [CONSUMER]: null,
-      'symbio/src/plugins/loop/x.test.rs': 'fn f() {\n    let _ = recall();\n}\n',
+      'crates/symbio-plugin-loop/src/x.test.rs': 'fn f() {\n    let _ = recall();\n}\n',
     }),
   )
   assert.equal(r.status, 1, out(r))

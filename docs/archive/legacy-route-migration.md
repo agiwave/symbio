@@ -35,12 +35,12 @@
 | 档 | 路由 | 判定 | 依据 |
 |---|---|---|---|
 | **A ✅已删** | `session/append` | **整条链路死**（路由 + 实现 + schema） | 全仓仅 `plugin.rs:478` 一处引用。实现看似被 `entry.rs:232` 内部调用，但那处是**绕路由的内部调用**（为一次纯数据操作搭 invoke 信封），改直连后实现一并变死——见 §2.1 |
-| **A ✅已删** | `session/open` | **路由 + 实现 + schema 全死** | 路由无调用方；`open_session_handle` 的真实调用方 `entry.rs:291` 是**直连 Rust 方法**。CLI 的通道来自 `event_bus/subscribe`（`cli/src/client.rs:113-121`），**不是** `session/open`——`client.rs:12` 那句注释是过期的 |
+| **A ✅已删** | `session/open` | **路由 + 实现 + schema 全死** | 路由无调用方；`open_session_handle` 的真实调用方 `entry.rs:291` 是**直连 Rust 方法**。CLI 的通道来自 `event_bus/subscribe`（`crates/symbio-cli/src/client.rs:113-121`），**不是** `session/open`——`client.rs:12` 那句注释是过期的 |
 | **B ✅已删** | `session/chat/update_message` | → `vdfs/write(<sid>/message/<mid>)` | 唯一消费方是前端（`stores/sessions.ts:836`）；**纯存储改写，不触发编排** |
 | **B ✅已删** | `session/chat/delete_message` | → `vdfs/action(<sid>/message/<mid>, "truncate")` | 同上（`stores/sessions.ts:816`）；`action` 的返回载荷**能保住 `deleted_ids` 回执** |
 | **B ✅已删** | `session/chat/clear_messages` | → `vdfs/action(<sid>/message, "clear")` | 同上（`stores/sessions.ts:855`）；与截断同走**动作**——同一区段的删除只有一种入口形态（见 §3.3） |
 | **B ✅已删** | `session/get_messages` | → **进程内 VDFS 纯接口探测**（`stat("<挂载名>/<sid>")`） | 唯一消费方 `agent/host/subagent.rs::validate_subsession_exists`。当初判「不改」的两条硬化理由（后端拿不到 root provider / 线路信封留在 vdfs 插件内）**已被现成 API 化解**——见 §3.4.1（2026-09-23） |
-| ~~**B 待定**~~ **已下线** | `session/update` | ~~迁 `vdfs/write` 需先改 CLI~~ **理由已消失** | 唯一消费方 `cli/src/client.rs`。前两轮判「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create，且 CLI 会话 id 会变格式）——**2026-09-23 改判并整条下线**：那条「扩 VDFS create」被证明不是扩张而是**对齐**（会话 provider 是唯一违反「有名字时 id 来自地址」的 provider），于是 `--session <ID>` 语义与 id 格式都**不必动**。见 §3.5 |
+| ~~**B 待定**~~ **已下线** | `session/update` | ~~迁 `vdfs/write` 需先改 CLI~~ **理由已消失** | 唯一消费方 `crates/symbio-cli/src/client.rs`。前两轮判「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create，且 CLI 会话 id 会变格式）——**2026-09-23 改判并整条下线**：那条「扩 VDFS create」被证明不是扩张而是**对齐**（会话 provider 是唯一违反「有名字时 id 来自地址」的 provider），于是 `--session <ID>` 语义与 id 格式都**不必动**。见 §3.5 |
 | **C 保留** | `session/chat/abort` | 不可迁 | 控制信号，不是数据变更 |
 | **C 保留** | `session/heartbeat/trigger` | 不可迁 | 心跳调度入口，不是会话 CRUD |
 | **D 可评估** | `session/chat/send` | **§5 的否决只覆盖 `vdfs/write`，不覆盖 `vdfs/action`** | 见 §4——三条可核对的反证表明它协议层就是触发器 |
@@ -141,15 +141,15 @@ let engine = this_spawn.open_session_handle(Some(sid_spawn.clone())).await;
 
 **句柄交付这条路还在，但它已经不走路由了。** 路由臂是改架构时留下的空壳。
 
-CLI 侧的注释（`cli/src/client.rs:12`）说「需先 `session/open` 拿通道」，**与代码不符**：
+CLI 侧的注释（`crates/symbio-cli/src/client.rs:12`）说「需先 `session/open` 拿通道」，**与代码不符**：
 `start()` 实际是 `route("event_bus/subscribe")` 拿 `PluginPayload::Session(c)`（`client.rs:113-121`）。
-同句也出现在 `cli/docs/architecture.md:32`。两处都是过期描述，**不是消费方**。
+同句也出现在 `crates/symbio-cli/docs/architecture.md:32`。两处都是过期描述，**不是消费方**。
 
 **删除面**：路由臂 + `invoke_open`（`handlers.rs:303`）+ `schemas/session/session_open.rs`
 （全仓仅被 `invoke_open` 引用，见 `schemas/session/mod.rs:8`）。
 `open_session_handle`（`handlers.rs:279`）**保留**——它是 `entry.rs:291` 的真实依赖。
 
-> 顺带修两处过期注释：`cli/src/client.rs:12`、`cli/docs/architecture.md:32`。
+> 顺带修两处过期注释：`crates/symbio-cli/src/client.rs:12`、`crates/symbio-cli/docs/architecture.md:32`。
 
 ---
 
@@ -315,7 +315,7 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 
 `handlers.rs` 写的保留理由是：
 
-> CLI 需要**客户端指定会话 id**（`cli/src/client.rs` 自己 `gen_id` 后 upsert），
+> CLI 需要**客户端指定会话 id**（`crates/symbio-cli/src/client.rs` 自己 `gen_id` 后 upsert），
 > 而 VDFS 新建会话是 provider 生成 id。
 
 核对 CLI 实际用法：`ensure_session` 用 `gen_id("cli")` 生成 id，然后调
@@ -502,7 +502,7 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 | 步 | 内容 | 状态 |
 |---|---|---|
 | S1 | 删 `session/append` 整条链路：`entry.rs` 的绕路由信封调用改成直连引擎（`open_chat_session` + `append_messages`），随之删路由臂 + `invoke_append` + `session_append.rs` | ✅ **已完成** |
-| S2 | 删 `session/open` 路由臂 + `invoke_open` + `session_open.rs`；修 `cli/src/client.rs` 与 `cli/docs/architecture.md` 的过期注释 | ✅ **已完成** |
+| S2 | 删 `session/open` 路由臂 + `invoke_open` + `session_open.rs`；修 `crates/symbio-cli/src/client.rs` 与 `crates/symbio-cli/docs/architecture.md` 的过期注释 | ✅ **已完成** |
 | S3 | `session/get_messages` → VDFS | ❌ **不做**（§3.4：替换路径的耦合比它更重） |
 | S4 | provider 加消息 `write` 分支 → 前端 `updateMessage` 改走 VDFS | ✅ **已完成** |
 | S5 | provider 加消息 `action("truncate")`（返回 `deleted_ids`）→ 前端 `deleteMessage` 改走 VDFS | ✅ **已完成** |
@@ -552,7 +552,7 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 | 后端编排 | `entry.rs` 的信封调用改为 `open_chat_session` + `append_messages` 直连；`orchestrator.rs` 去掉 `session_append` 导入 |
 | 前端服务 | `services/session.ts` 的 `SESSION_ROUTES` 整表 + `callSession` + 三个端点函数（重写为**纯 VDFS 门面**） |
 | 前端 schema | `session_clear_messages.ts` / `session_delete_message.ts` / `session_update_message.ts` |
-| 文档 | `cli/src/client.rs` 与 `cli/docs/architecture.md` 的过期注释；`CURRENT.md` / `ROUTES.md` / `CHANGELOG.md` |
+| 文档 | `crates/symbio-cli/src/client.rs` 与 `crates/symbio-cli/docs/architecture.md` 的过期注释；`CURRENT.md` / `ROUTES.md` / `CHANGELOG.md` |
 | 前端 schema | `schemas/session_clear_messages.ts` / `session_delete_message.ts` / `session_update_message.ts` |
 | 文档 | `docs/reference/ROUTES.md`、`docs/reference/CONFIGURATION.md:203` |
 

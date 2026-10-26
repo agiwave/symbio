@@ -95,27 +95,27 @@ const BAD = '✗'
 
 // D-188 C2b：VDFS 全族、`ChatNode` 与呈现读数随语法住 `symbio-kernel` crate，
 // 这里的后端真源路径跟着搬（前端镜像不变）。
-const VDFS_WORDS_RS = 'symbio_kernel/src/vdfs/words.rs'
-const VDFS_ACCESS_RS = 'symbio_kernel/src/vdfs/access.rs'
-const VDFS_NODE_RS = 'symbio_kernel/src/vdfs/node.rs'
-const VDFS_CONTENT_RS = 'symbio_kernel/src/vdfs/content.rs'
-const VDFS_ERROR_RS = 'symbio_kernel/src/vdfs/error.rs'
-const VDFS_REQUEST_RS = 'symbio_kernel/src/vdfs/request.rs'
-const VDFS_CHANGE_RS = 'symbio_kernel/src/vdfs/change.rs'
-const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
+const VDFS_WORDS_RS = 'crates/symbio-kernel/src/vdfs/words.rs'
+const VDFS_ACCESS_RS = 'crates/symbio-kernel/src/vdfs/access.rs'
+const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
+const VDFS_CONTENT_RS = 'crates/symbio-kernel/src/vdfs/content.rs'
+const VDFS_ERROR_RS = 'crates/symbio-kernel/src/vdfs/error.rs'
+const VDFS_REQUEST_RS = 'crates/symbio-kernel/src/vdfs/request.rs'
+const VDFS_CHANGE_RS = 'crates/symbio-kernel/src/vdfs/change.rs'
+const VDFS_PROTOCOL_RS = 'crates/symbio-plugin-vdfs/src/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
-const CHAT_NODE_RS = 'symbio_kernel/src/chat/chat_node.rs'
+const CHAT_NODE_RS = 'crates/symbio-kernel/src/chat/chat_node.rs'
 const CHAT_NODE_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'symbio_kernel/src/present/detail.rs'
+const DETAIL_RS = 'crates/symbio-kernel/src/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio_kernel/src/capability/mod.rs'
+const RISK_LEVEL_RS = 'crates/symbio-kernel/src/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'symbio_kernel/src/present/reading.rs'
+const READING_RS = 'crates/symbio-kernel/src/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
 // （四个同名 namespace）。见 [D-112] 决策 2。
-const HOME_SCHEMAS_RS = 'symbio/src/plugins/home/schemas.rs'
+const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
 const HOME_TS = 'tauri/src/schemas/home.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
@@ -139,52 +139,52 @@ const TS_CONST_FILES = [VDFS_TS]
 const ALIASES = [
   {
     ts: 'VDFS_ROOT_OP',
-    rust: { file: 'symbio/src/routes.rs', name: 'ROUTE_VDFS_ROOT' },
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_ROOT' },
     what: '进入地址空间：列出虚拟根（不给地址）',
   },
   {
     ts: 'VDFS_WATCH',
-    rust: { file: 'symbio/src/routes.rs', name: 'ROUTE_VDFS_WATCH' },
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_WATCH' },
     what: '订阅某地址的变更（跨插件可见，故常量归宿主的 `routes.rs`）',
   },
   {
     ts: 'VDFS_UNWATCH',
-    rust: { file: 'symbio/src/routes.rs', name: 'ROUTE_VDFS_UNWATCH' },
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_UNWATCH' },
     what: '取消订阅某地址的变更（跨插件可见，故常量归宿主的 `routes.rs`）',
   },
   {
     ts: 'VDFS_EVENT_KIND',
-    rust: { file: 'symbio/src/symbio_core/event_bus/mod.rs', name: 'EVENT_BUS_KIND_VDFS' },
+    rust: { file: 'crates/symbio-core/src/event_bus/mod.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
   },
   {
     ts: 'VDFS_BUS_RESYNC',
-    rust: { file: 'symbio/src/symbio_core/event_bus/mod.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
+    rust: { file: 'crates/symbio-core/src/event_bus/mod.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
     what: '总线背压指令：通道曾满，消费端请重读作用域（不是一条变更）',
   },
   {
     ts: 'VDFS_KIND_MESSAGES',
-    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'KIND_MESSAGES' },
+    rust: { file: 'crates/symbio-plugin-session/src/plugin/words.rs', name: 'KIND_MESSAGES' },
     what: '会话转写列表的场景类型（消费端按它发现转写，不硬编码段名）',
   },
   {
     ts: 'VDFS_KIND_INBOX',
-    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'KIND_INBOX' },
+    rust: { file: 'crates/symbio-plugin-session/src/plugin/words.rs', name: 'KIND_INBOX' },
     what: '会话收件箱的场景类型（待发消息与已发生消息靠它区分）',
   },
   {
     ts: 'VDFS_EXT_SESSION',
-    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'EXT_SESSION' },
+    rust: { file: 'crates/symbio-plugin-session/src/plugin/words.rs', name: 'EXT_SESSION' },
     what: '会话工作区（实时对话流）的呈现扩展名',
   },
   {
     ts: 'VDFS_EXT_MESSAGE',
-    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'EXT_MESSAGE' },
+    rust: { file: 'crates/symbio-plugin-session/src/plugin/words.rs', name: 'EXT_MESSAGE' },
     what: '单条对话消息的呈现扩展名',
   },
   {
     ts: 'VDFS_EXT_MODEL',
-    rust: { file: 'symbio/src/assembly.generated.rs', name: 'PLUGIN_ID_MODEL' },
+    rust: { file: 'crates/symbio-deploy/src/lib.rs', name: 'PLUGIN_ID_MODEL' },
     what: '「模型」类别的挂载点自述（首启引导据此认出「模型配在哪」）',
   },
 ]
@@ -509,64 +509,64 @@ const STRUCT_SETS = [
 const META_KEYS = [
   {
     key: 'compacted',
-    owner: 'symbio/src/plugins/loop/context/pipeline.rs',
+    owner: 'crates/symbio-plugin-loop/src/context/pipeline.rs',
     what: '压缩后的历史记忆标记（渲染成记忆而非用户气泡）',
   },
   {
     // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
     key: 'branch',
-    owner: 'symbio/src/symbio_core/projection/branch.rs',
+    owner: 'crates/symbio-core/src/projection/branch.rs',
     what: '分支标注 {group, candidates, index, total, selected}：这一支在组里的位置与「此刻读哪一支」',
   },
   {
     // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
     key: 'turn_root',
-    owner: 'symbio/src/symbio_core/turn/node_build.rs',
+    owner: 'crates/symbio-core/src/turn/node_build.rs',
     what: '本轮升根节点的轮骨架锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
   },
   {
     key: 'error',
-    owner: 'symbio/src/plugins/loop/tools/dispatch/batch.rs',
+    owner: 'crates/symbio-plugin-loop/src/tools/dispatch/batch.rs',
     what: '失败原因（旧路径的兜底读点；今天的失败文本由本文件写进父节点顶层 `error`）',
   },
   {
     key: 'failure_kind',
-    owner: 'symbio/src/plugins/loop/tools/tool_executor.rs',
+    owner: 'crates/symbio-plugin-loop/src/tools/tool_executor.rs',
     what: '失败类别（决定可恢复动作）',
   },
   {
     key: 'started_at',
-    owner: 'symbio/src/plugins/loop/tools/dispatch/batch.rs',
+    owner: 'crates/symbio-plugin-loop/src/tools/dispatch/batch.rs',
     what: '工具开始执行的时刻（运行时长锚点）',
   },
   {
     key: 'recoverable',
-    owner: 'symbio/src/symbio_core/chat/chat_node.rs',
+    owner: 'crates/symbio-core/src/chat/chat_node.rs',
     what: '该失败可由用户就地重试',
   },
   {
     key: 'tool_name',
-    owner: 'symbio_kernel/src/chat/chat_node.rs',
+    owner: 'crates/symbio-kernel/src/chat/chat_node.rs',
     what: '工具名（顶层 name 退役后的唯一住处）',
   },
   {
     key: 'prompt',
-    owner: 'symbio/src/plugins/loop/tools/tool_executor.rs',
+    owner: 'crates/symbio-plugin-loop/src/tools/tool_executor.rs',
     what: '待用户响应的载荷（提问 / 工具确认）',
   },
   {
     key: 'agent_id',
-    owner: 'symbio/src/plugins/agent/host/subagent.rs',
+    owner: 'crates/symbio-plugin-agent/src/host/subagent.rs',
     what: '子会话所属智能体',
   },
   {
     key: 'heartbeat',
-    owner: 'symbio/src/plugins/heartbeat/scheduler.rs',
+    owner: 'crates/symbio-plugin-heartbeat/src/scheduler.rs',
     what: '系统心跳任务产生的消息',
   },
   {
     key: 'parent_session_id',
-    owner: 'symbio/src/plugins/agent/host/subagent.rs',
+    owner: 'crates/symbio-plugin-agent/src/host/subagent.rs',
     what: '子会话锚点（恢复需路由回子会话）',
   },
   {
@@ -1239,7 +1239,7 @@ console.log()
 console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
 {
   const headers = [
-    ...collectHeaders(walkRs(path.join(REPO, 'symbio', 'src')), HEADER_RE).map((h) => ({ ...h, side: '后端' })),
+    ...collectHeaders(walkRs(path.join(REPO, 'crates')), HEADER_RE).map((h) => ({ ...h, side: '后端' })),
     ...collectHeaders(walk(path.join(REPO, 'tauri', 'src')), BACK_HEADER_RE).map((h) => ({ ...h, side: '前端' })),
   ]
 
@@ -1268,7 +1268,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
  * 一次「顺手往顶层加个 `tool_call_id`」的 PR 就能把纪律抹掉——没有这条守卫，纪律只是口号。
  *
  * 判据（只钉「被 meta 代理」这一种违规，不误伤别处）：
- * - 对字段 `F`，扫 `tauri/src`（`.ts`/`.vue`，排除 `__tests__`）与 `cli/src`（`.rs`）里
+ * - 对字段 `F`，扫 `tauri/src`（`.ts`/`.vue`，排除 `__tests__`）与 `crates/symbio-cli/src`（`.rs`）里
  *   的 `\.F\b` 命中点（含 `?.F` 可选链）；
  * - 命中点若其紧邻前文是 `meta`（`node.meta.F` / `node.meta?.F`）→ 记**间接**，否则记**直接**；
  * - **`直接命中 === 0` 且 `间接命中 >= 1`** ⇒ 该字段只被 `meta` 代理消费 ⇒ 违规（该字段

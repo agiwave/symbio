@@ -48,7 +48,7 @@ function rmTree(dir) {
  */
 function toolsFixture(names) {
   return {
-    'symbio/src/plugins/fake/tools.rs':
+    'crates/crates/plugins/fake/tools.rs':
       [
         'pub fn table() -> Vec<ToolSpec> {',
         '    vec![',

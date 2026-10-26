@@ -57,22 +57,22 @@ const ROOT = rootArg
 /** D-084 §4 的十二个能力文件（DE-014 迁移表「能力自取磁盘」一行；
  *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。 */
 const CAPABILITY_FILES = [
-  'symbio/src/plugins/loop/skill_events.rs',
-  'symbio/src/plugins/loop/task_events.rs',
-  'symbio/src/plugins/loop/memory_events.rs',
-  'symbio/src/plugins/session/worker_progress.rs',
-  'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
-  'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
-  'symbio/src/plugins/session/stats.rs',
-  'symbio/src/symbio_core/projection/rebuild.rs',
-  'symbio/src/plugins/session/transcript/inbox.rs',
-  'symbio/src/plugins/session/transcript/autonomous.rs',
-  'symbio/src/plugins/session/message_events.rs',
-  'symbio/src/plugins/loop/derived_facts.rs',
+  'crates/symbio-plugin-loop/src/skill_events.rs',
+  'crates/symbio-plugin-loop/src/task_events.rs',
+  'crates/symbio-plugin-loop/src/memory_events.rs',
+  'crates/symbio-plugin-session/src/worker_progress.rs',
+  'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',
+  'crates/symbio-plugin-loop/src/tools/tool_executor/elimination.rs',
+  'crates/symbio-plugin-session/src/stats.rs',
+  'crates/symbio-core/src/projection/rebuild.rs',
+  'crates/symbio-plugin-session/src/transcript/inbox.rs',
+  'crates/symbio-plugin-session/src/transcript/autonomous.rs',
+  'crates/symbio-plugin-session/src/message_events.rs',
+  'crates/symbio-plugin-loop/src/derived_facts.rs',
 ]
 
-const STORE_DIR = 'symbio/src/plugins/session/store/'
-const SRC_DIR = 'symbio/src'
+const STORE_DIR = 'crates/symbio-plugin-session/src/store/'
+const SRC_DIR = 'crates'
 
 /** 冻结的判定面：`EventWalStore` 的构造入口（`open*` 是取写者令牌/开只读档的唯一通道）。 */
 const OPEN_TOKENS = ['EventWalStore::open(', 'EventWalStore::open_readonly(']

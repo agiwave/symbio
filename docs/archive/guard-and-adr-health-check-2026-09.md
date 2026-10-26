@@ -110,7 +110,7 @@ CSS 这条反例直接证伪了它。
 
 ### 2.5 一条**不成立的豁免理由**：把"第二份真相"说成"跨栈消费"
 
-`symbio/src/symbio_core/schemas/options.rs:76`：
+`crates/symbio-core/src/schemas/options.rs:76`：
 
 ```rust
 /// Rust 侧暂无动作声明它，**消费方在前端**：`useSessionOptions.ts::PICK_FILE`
@@ -136,7 +136,7 @@ pub const OPTION_PICK_FILE: &str = "file";
 ### 2.6 报告型守卫没有闭环
 
 `schema-audit` 报出两条死项，其中
-`symbio/src/symbio_core/schemas/common.rs:8 :: struct SchemaResponse`
+`crates/symbio-core/src/schemas/common.rs:8 :: struct SchemaResponse`
 实测**全仓零引用**（仅有 `mod.rs` 的一行 `pub use` 再导出），既没被删、也没在任何地方
 登记豁免。它就这么一直挂在报告里——报告型守卫的产出**默认无人处理**，而它被接进门禁的
 方式只有"崩溃即红"，所以这份报告挂多久都不会有人被提醒。

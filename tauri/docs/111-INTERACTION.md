@@ -20,7 +20,7 @@ impl: done
 > | 路由语义与调用方 | `docs/004-ref/003-ROUTES.md` |
 > | VDFS 三栏规范（左栏 / 中栏 / 详情 / 浏览内部） | `docs/003-design/010-VDFS前端页面规范.md` |
 > | 「发言是入队、流式渲染」等前端机制约定 | `tauri/docs/110-FRONTEND.md` |
-> | 会话后端机制（消息词表、压缩分层、变更帧语义） | `symbio/src/plugins/session/README.md` 与 `symbio/src/plugins/session/docs/` |
+> | 会话后端机制（消息词表、压缩分层、变更帧语义） | `crates/symbio-plugin-session/README.md` 与 `crates/symbio-plugin-session/src/docs/` |
 > | 「还能怎么提升」的提案 | `docs/003-design/020-前端UI-UX.md` |
 
 ---

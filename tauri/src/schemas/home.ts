@@ -1,4 +1,4 @@
-// Corresponding Backend: symbio/src/plugins/home/schemas.rs
+// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs
 
 /**
  * home 控制面四条臂的载荷契约。

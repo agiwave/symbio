@@ -39,10 +39,10 @@ const write = (rel, content) => {
   fs.writeFileSync(p, content)
 }
 
-write('cli/src/main.rs', 'fn main() { println!("v1"); }\n')
+write('crates/symbio-cli/src/main.rs', 'fn main() { println!("v1"); }\n')
 write('cli/Cargo.toml', '[package]\nname = "symbio-cli"\nversion = "0.1.0"\n')
-write('symbio/src/lib.rs', 'pub fn f() -> u32 { 1 }\n')
-write('symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.1.0"\n')
+write('crates/crates/crates/lib.rs', 'pub fn f() -> u32 { 1 }\n')
+write('crates/symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.1.0"\n')
 
 after(() => {
   try {
@@ -58,9 +58,9 @@ test('构建输入清单覆盖两个 crate 的源码与清单', () => {
   const rels = cliBuildInputs(root).map((p) => path.relative(root, p).split(path.sep).join('/'))
   assert.deepEqual(rels, [
     'cli/Cargo.toml',
-    'cli/src/main.rs',
-    'symbio/Cargo.toml',
-    'symbio/src/lib.rs',
+    'crates/symbio-cli/src/main.rs',
+    'crates/symbio/Cargo.toml',
+    'crates/crates/crates/lib.rs',
   ])
 })
 
@@ -70,30 +70,30 @@ test('同一份输入 ⇒ 同一个指纹（否则「新鲜」永远判不出来
 
 test('源码改一个字节 ⇒ 指纹变', () => {
   const before = cliBuildFingerprint(root)
-  write('cli/src/main.rs', 'fn main() { println!("v2"); }\n')
+  write('crates/symbio-cli/src/main.rs', 'fn main() { println!("v2"); }\n')
   assert.notEqual(cliBuildFingerprint(root), before, 'CLI 侧源码改动必须让指纹失效')
 })
 
 test('symbio 侧源码改动同样让指纹失效（CLI 复用同一套插件树）', () => {
   const before = cliBuildFingerprint(root)
-  write('symbio/src/lib.rs', 'pub fn f() -> u32 { 2 }\n')
+  write('crates/crates/crates/lib.rs', 'pub fn f() -> u32 { 2 }\n')
   assert.notEqual(cliBuildFingerprint(root), before)
 })
 
 test('新增一个源文件 ⇒ 指纹变', () => {
   const before = cliBuildFingerprint(root)
-  write('symbio/src/plugins/new.rs', 'pub const X: u8 = 1;\n')
+  write('crates/crates/plugins/new.rs', 'pub const X: u8 = 1;\n')
   assert.notEqual(cliBuildFingerprint(root), before)
 })
 
 test('清单（Cargo.toml / Cargo.lock）改动 ⇒ 指纹变', () => {
   const before = cliBuildFingerprint(root)
-  write('symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.2.0"\n')
+  write('crates/symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.2.0"\n')
   assert.notEqual(cliBuildFingerprint(root), before)
 })
 
 test('大文件（内嵌资产）按 (大小, mtime) 判：只改 mtime 也算输入变了', () => {
-  const big = path.join(root, 'symbio/src/asset.bin')
+  const big = path.join(root, 'crates/crates/asset.bin')
   fs.writeFileSync(big, Buffer.alloc(1024 * 1024 + 1, 7))
   const before = cliBuildFingerprint(root)
   fs.utimesSync(big, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'))
@@ -129,7 +129,7 @@ test('戳与当前指纹一致 ⇒ 新鲜', () => {
 })
 
 test('源码再改 ⇒ 已写好的戳立刻失效（这就是它要防的那一刻）', () => {
-  write('cli/src/main.rs', 'fn main() { println!("v3"); }\n')
+  write('crates/symbio-cli/src/main.rs', 'fn main() { println!("v3"); }\n')
   const st = cliBinaryState(root)
   assert.equal(st.fresh, false)
   assert.equal(st.staleReason, '构建输入自上次构建后已改变')

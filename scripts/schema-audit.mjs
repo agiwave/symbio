@@ -48,7 +48,7 @@ function walk(dir, exts, out = []) {
 const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------
-const backendFiles = walk(join(ROOT, 'symbio/src'), ['.rs']);
+const backendFiles = walk(join(ROOT, 'crates'), ['.rs']);
 // ── 后端半边已退役（[D-087](../docs/003-design/001-核心架构.md "D-087")，2026-10-19）──────
 // `symbio_core/schemas/` 已拆成 `chat` / `dialog` / `present` / `turn` 四个域，
 // 本脚本赖以工作的三个前提同时消失：①有一个叫 schemas 的目录可枚举；②引用写成
@@ -57,7 +57,7 @@ const backendFiles = walk(join(ROOT, 'symbio/src'), ['.rs']);
 // （零消费方 0 / 单消费方棘轮）按根出口逐符号判，且带只降基线。两条口径并存就是
 // 「一个事实两个 owner」，它们迟早给出不同答案。故后端半边退役，本脚本只保留
 // **前端镜像面**（`tauri/src/schemas` ⇄ 后端真源）的审计。
-const schemasRoot = join(ROOT, 'symbio/src/symbio_core/schemas');
+const schemasRoot = join(ROOT, 'crates/symbio-core/src/schemas');
 const backendSchemaFiles = existsSync(schemasRoot)
   ? backendFiles.filter((f) => f.startsWith(schemasRoot))
   : [];
@@ -152,7 +152,7 @@ function expandUse(path) {
 
 for (const f of backendFiles) {
   const src = readFileSync(f, 'utf8');
-  const isSchemasMod = rel(f) === 'symbio/src/symbio_core/schemas/mod.rs';
+  const isSchemasMod = rel(f) === 'crates/symbio-core/src/schemas/mod.rs';
 
   // 1) use 语句（含花括号组展开）
   if (!isSchemasMod) {

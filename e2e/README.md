@@ -37,7 +37,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
 ```
 
 **被测二进制不需要你记得重建**：`scripts/cli-binary.mjs` 是这条知识的唯一真相
-（门禁与 e2e 共用）。判据是**内容指纹**——`cli/src` + `symbio/src` 的全部源码与
+（门禁与 e2e 共用）。判据是**内容指纹**——`crates/symbio-cli/src` + `symbio/src` 的全部源码与
 两个 crate 的清单算一个 sha256，构建成功后写成构建戳（`.symbio-cli.build-stamp`，
 与二进制同目录）。使用前比对：戳一致就直接用；不一致就 `cargo build --release`
 （cargo 自己判增量，源码没真变时 0.3 s 结束）再写戳。
@@ -224,7 +224,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs # 失败时输出错误堆栈
 参考 `t37`（转写读列）。注意别让临时改动**遮蔽同名函数**（局部 `let transcript`
 会盖住 `transcript`，那是编译错、不是判据红——改完记得 `grep` 一遍临时标记）。
 
-**恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
+**恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），
 `runCli` / `startLongLivedCli.send` 都**不带** resume。要在 e2e 里驱动恢复（审批 / 回填答案），
 走 **gateway HTTP 边界直发节点动作** `vdfs/action`，动作词取 `ResumeAction` 的线上词形：
 
@@ -243,7 +243,7 @@ await api.invoke('vdfs/action',
 
 `node e2e/ab/run.mjs` 跑的是**真 provider**（本机 `.symbio/model/` 里配好的那一个），CI 上没有
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
-它把出厂形状与被 [D-048a](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 否决的拍平形状，在同一份真实链路
+它把出厂形状与被 [D-048a](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") 否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
 形状变换归 `e2e/ab/flatten.mjs`，读数由脚本打到 `tmp/prompt-ab/`（**一次性读数，不入库**）——
 本处只留指路，不复述。

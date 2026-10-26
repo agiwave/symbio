@@ -12,15 +12,15 @@ impl: done
 纯接口 + 统一文件系统 + 容器拓扑。
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）
 关联：
-`symbio/src/symbio_core/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
+`crates/symbio-core/src/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
 + 域类型 + 路径工具**）、
-`symbio/src/symbio_core/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
-`symbio/src/plugins/vdfs/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
-`symbio/src/plugins/vdfs/fs.rs`（**统一文件系统 `UnifiedFs`：`<根>` / 物理地址分流**）、
-`symbio/src/plugins/vdfs/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
-`symbio/src/plugins/vdfs/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
-`symbio/src/plugins/composite/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
-`symbio/src/providers/vdfs_service/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
+`crates/symbio-core/src/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
+`crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
+`crates/symbio-plugin-vdfs/src/fs.rs`（**统一文件系统 `UnifiedFs`：`<根>` / 物理地址分流**）、
+`crates/symbio-plugin-vdfs/src/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
+`crates/symbio-plugin-vdfs/src/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
+`crates/symbio-plugin-composite/src/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
+`crates/symbio-provider-vdfs_service/src/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
 ——单文件 / 目录 / 内存，见 §2 分层与开放边界）
 
 > 本文件只写**规范与机制**。具体子目录（会话、模型、设置分区、工作目录……）
@@ -393,7 +393,7 @@ size updated_at children binary hidden schema new_type attributes
  字段同处一个文件，但**不参与配置反序列化**（`PluginDir` 读写时自动剥离 / 补回）。
  装配方据此判定「这个目录是不是一个可加载的插件」：文件存在、可解析、且
  `plugin_provider` 指向一个已注册的工厂（见
- [Composite 插件](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README")）。
+ [Composite 插件](../../crates/symbio-plugin-composite/README.md "crates/symbio-plugin-composite/README")）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
  `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
 - **实现只写一次**：`symbio_core::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
@@ -402,7 +402,7 @@ size updated_at children binary hidden schema new_type attributes
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
  对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
 - **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见
- [Plugin_manager 插件（插件管理）](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README")），但条目
+ [Plugin_manager 插件（插件管理）](../../crates/symbio-plugin-plugin_manager/README.md "crates/symbio-plugin-plugin_manager/README")），但条目
  携带的是**它自己的真实地址**（`<插件目录>/PLUGIN.yml`），读写仍走拥有者——同一份
  配置只有一个地址，设置页不代理读写、也不复制一份。
 
@@ -482,7 +482,7 @@ visitor.put(CapabilityRow::mount_root(provider)).await; // 容器自身视图：
 capability_vdfs_root(visitor).await // 取 <根> 服务者（无注册 ⇒ None）
 ```
 
-> **这一族只有根一形，是裁决而不是欠账**（[DE-015-义务环](015-义务环.md) `D-144`）。
+> **这一族只有根一形，是裁决而不是欠账**（[DE-015-义务环](015-义务环.md "DE-015-义务环") `D-144`）。
 > 「哪个目录由谁提供」由组合视图（`CompositeVdfs`）与 `Plugin::get_vfs_provider` 现场
 > 算出，两者按同一判据回答；再往行表里存一份按名的挂载行，就是同一事实的第三份复述，
 > 且要靠收集期那次广播维持同步。按可见域裁剪也不落在这一层——裁剪是地址解析的事

@@ -174,22 +174,22 @@ impl: partial
 
 - **P2-1 上下文水位可见** ✅ 已落地（见 §11）—— 输入区上方一条细水位条：本轮请求开头的估算 / 上限 / 自动整理线，
  条上的刻度就是「后端会在这里接手」的那条线。**不给「压缩」入口**：手动重试只由失败压缩节点下发，
- 一条健康的水位线后面没有可点的东西（裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README")）。
+ 一条健康的水位线后面没有可点的东西（裁决见 [D-137](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README")）。
 - **P2-2 本会话动过哪些文件** ✅ 已落地（见 §11）—— 会话头的「变更」抽屉：行 = 路径 + 动作
   + 轮号 + 次数，点行经既有 VDFS 树打开**当前**文件（父目录页 + `?select=`，见
   [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5）。
   **不做 diff**：变更账记的是「谁在哪一轮改过这个路径」，`artifact.added` 不带写入前全文，
-  没有旧内容就没有 diff 可画；把它画出来必然是在编旧内容（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")）。
+  没有旧内容就没有 diff 可画；把它画出来必然是在编旧内容（裁决见 [D-169](001-核心架构.md "DE-001-核心架构")）。
 - **P2-3 工具授权分级** ✅ 已落地（见 §11）—— 确认卡三档放行：批准本次 / 本会话放行（抬会话阈值）/
  永久放行（抬该工具上限，跨会话生效，撤销在设置页删行）；按危险度分级（shell / 写文件 / 删文件）。
-  裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系")。
+  裁决见 [D-170](008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")。
 - **P2-4 用量与花费** ✅ 已落地（见 §11）—— 会话头常驻一格 + 读数面板「用量」段：输入 / 输出 /
   合计（多主体才逐条摊开），配了价的 Provider 再**按币种各一行花费**；一次实测都没有就整段不出现。
   价格住在 Provider 自己的配置里（`pricing`，不是按模型名猜的表），金额在 adapter 边界折好后入格
-  （裁决见 [D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。
+  （裁决见 [D-171](001-核心架构.md "DE-001-核心架构")）。
 - **P2-5 分支切换** ✅ 已落地（见 §11）—— 带标注的节点头部常驻 `1/2 ‹ ›`，点箭头切「此刻读哪一支」。
  它的前提是一条裁决而不是一个组件：重试此前是**删除式**重跑（日志上不产生第二支，树上没有候选可切），
- 现已裁成「并存几支 + 一个选中态」——读法入格、历史不删（裁决见 [D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构")）。
+ 现已裁成「并存几支 + 一个选中态」——读法入格、历史不删（裁决见 [D-173](001-核心架构.md "DE-001-核心架构")）。
 
 ### P3 — 打磨（第四批）
 
@@ -358,7 +358,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 
 | 内容 | 实现落点 |
 |---|---|
-| 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `symbio/src/plugins/session/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
+| 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `crates/symbio-plugin-session/src/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
 | 挂载层（`<根>` 的直接子节点）的左栏回到**类别清单**——冷启动落点 `/vdfs/session` 的左栏不再为空 | `composables/useVdfs.ts`（`atMountLevel`）+ `components/vdfs/VdfsWorkbench.vue`（`onRailSelect`） |
 | 首启引导：三步（系统目录 → 配模型 → 发第一条消息），可跳过、可从「关于」重开；**只在尚未配好模型时自动弹** | `stores/onboarding.ts` + `components/common/Onboarding.vue` + `MainLayout.vue` + `components/settings/About.vue` |
 | 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |
@@ -429,11 +429,11 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 
 | 内容 | 实现落点 |
 |---|---|
-| P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
-| P2-3 授权分级（三档）：确认卡四键——批准本次 / 本会话放行 / 永久放行 / 拒绝。本会话放行把**会话阈值**抬到本次调用的风险档（同档及以下在本会话里不再问）；永久放行把**该工具的上限**抬到本次风险档（跨会话生效，高于上限仍审批）；卡上没有风险档时两档都不出现（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::approval_basis(risk, threshold, approved, grant)`（三档依次为 approved / threshold / grant）——执行闸门与授权级联的记录方问同一个函数；阈值来自 `ctx[RISK_LEVEL]`，工具清单来自 `ctx[APPROVAL_GRANTS]`（`SessionConfig.approval_grants` 经 `resolve_session_params` 落进 ctx）；放行事实 `authz.granted` 带 `basis` 与 `grant`；写入口 `session/grant`（只抬不降，经 `PluginConfigFile::apply` 的唯一写路径）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` / `a_per_tool_grant_authorizes_only_that_tool` 钉住两档的边界。前端：`components/message/InteractionNode.vue`（四键；档位校验走 `isSessionRiskLevel`）+ `ALLOW_FOR_SESSION_KEY` / `ALLOW_FOREVER_KEY`（两个注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降）+ `services/sessionGrant.ts` + `schemas/session_meta.ts`（`riskRankOf`）。裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系") |
-| P2-4 用量与花费：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**配了价的 Provider 再按币种各一行花费**（标题随之变成「用量与花费」），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现，没配价格就没有花费行 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 与 `LlmTurn.spend` 写进 `response{port=model}` 的 `usage` / `spend` 键（「测到了」的唯一记号：键在不在）→ `plugins/session/token_ledger.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）与 `session/spend_ledger.rs`（`spend_ledger`：按**币种**分桶、桶内按主体累计纳金额，`charges` 数的是带金额的应答条数）→ `session/stats.rs` 的 `tokens` / `spend` 两列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，token 走 `format_tokens`、金额走 `format_money`，两处单位各全仓唯一实现）。价格来自 `ModelProviderConfig.pricing`（Provider 自己的配置），金额在 adapter 边界折好后入格（[D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
-| P2-5 分支切换：重试留下**并存几支 + 一个选中态**。带标注的节点头部常驻 `‹ 1/2 ›`（两端到头置灰而非消失——读数不许随位置改形状）；点箭头只改**读法**，一条历史都不删 | 后端：两条事实 `turn.branch{of,into}`（这一支存在）与 `turn.branch_selected{selected}`（此刻读哪一支），在 `symbio_core/event/grid.rs` 注册为 `(Turn, Asserted)`（I2 因此都带 `produced_by`）→ `symbio_core/projection/branch.rs`（`BranchLedger::fold` 按**成员根节点 id** 并组、两类事实共同写组的 pick 且组内后到胜出；`stamp_branches` 在纯投影 `rebuild` 末尾盖 `meta.branch{group,candidates,index,total,selected}`）→ 写侧 `plugins/loop/stage_exec.rs`（重试准备段落 `turn.branch`，actor 取 `request_principal` 不是字面量）+ `chat_loop.rs::republish_branch_group`（轮次收尾按组重发标注帧——新支的节点要等本轮落盘才进投影）→ 读侧两条路、两条问法：**请求包**在 `projection/transcript.rs` 折叠（未选中支的助手侧条目判 `exclude_from_context`，正文照进转写、切回去还在；`prompt_fidelity` 认同一份折法，否则每次重试报一串假「丢事实」），**节点树**在 `chat_session/read.rs::get_context_messages` 调 `branch_hide_unselected`（只供水位与汇报）；`get_messages` 永远交全树。子树口径 = `parent_id` ∪ `meta.turn_root`，唯一实现 `node_build::subtree_of`→ 入口 `plugin/vdfs_messages.rs` 的 `switch_branch` 臂 + `commands.rs::switch_branch`（落点是成员根自身 `<sid>/message/<mid>`，载荷 `{to}`；非兄弟一律 `Invalid`）。前端：`registry/messageFacts.ts`（`messageBranchOf` / `messageBranchNeighbor` / `messageTurnRoot`——`meta` 键名只在这里出现，M-001）→ `stores/sessionTranscript.ts::dropUnselectedBranches`（纯函数，可见集仍只有 `visibleMessages` 一个答案）→ `composables/useChatConnection.ts::switchBranch` + `SWITCH_BRANCH_KEY`（注入面，与 `RESUME_KEY` 同一条理由）→ `components/message/NodeShell.vue`（渲染器不认「重试 / 分支」这些业务词：后端没盖标注就是不是一支）+ `styles/controls.css` 的 `.node-act.neutral`。裁决见 [D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构")；用例：`projection/branch.test.rs`、`chat_loop.test.rs`（补发）、`vdfs_provider.test.rs`（切换只改读法 / 切到当前不写 / 非兄弟被拒）三处后端，`messageFacts.branch.spec.ts`、`sessionTranscript.spec.ts`、`useChatConnection.spec.ts` 三处前端 |
-| P2-2 变更账：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数；会话头的「变更」抽屉点行打开**当前**文件 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；`address` 是相对会话容器的 `workdir/<path>`，`has_wal` / `readable` 把三种空分开；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。前端：`services/sessionChanges.ts`（原样透传）→ `components/session/SessionChangesList.vue`（纯排版器，三种空各一句话）→ `ChatMainPanel.vue` 的抽屉（与读数共用一个抽屉位；开关 / 代次守卫 / 错误上浮）；点行上抛 `open-node`，经 `Session` → `VdfsSessionDetail` → `VdfsWorkbench`（拆父目录 + 末段名）→ `VdfsView` push `?select=`，由 `useVdfs` 落位（当前目录定在绑定地址自身；不在本页则 `stat` 一次），见 [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
+| P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`crates/symbio-plugin-loop/src/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") |
+| P2-3 授权分级（三档）：确认卡四键——批准本次 / 本会话放行 / 永久放行 / 拒绝。本会话放行把**会话阈值**抬到本次调用的风险档（同档及以下在本会话里不再问）；永久放行把**该工具的上限**抬到本次风险档（跨会话生效，高于上限仍审批）；卡上没有风险档时两档都不出现（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::approval_basis(risk, threshold, approved, grant)`（三档依次为 approved / threshold / grant）——执行闸门与授权级联的记录方问同一个函数；阈值来自 `ctx[RISK_LEVEL]`，工具清单来自 `ctx[APPROVAL_GRANTS]`（`SessionConfig.approval_grants` 经 `resolve_session_params` 落进 ctx）；放行事实 `authz.granted` 带 `basis` 与 `grant`；写入口 `session/grant`（只抬不降，经 `PluginConfigFile::apply` 的唯一写路径）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` / `a_per_tool_grant_authorizes_only_that_tool` 钉住两档的边界。前端：`components/message/InteractionNode.vue`（四键；档位校验走 `isSessionRiskLevel`）+ `ALLOW_FOR_SESSION_KEY` / `ALLOW_FOREVER_KEY`（两个注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降）+ `services/sessionGrant.ts` + `schemas/session_meta.ts`（`riskRankOf`）。裁决见 [D-170](008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") |
+| P2-4 用量与花费：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**配了价的 Provider 再按币种各一行花费**（标题随之变成「用量与花费」），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现，没配价格就没有花费行 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 与 `LlmTurn.spend` 写进 `response{port=model}` 的 `usage` / `spend` 键（「测到了」的唯一记号：键在不在）→ `plugins/session/token_ledger.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）与 `session/spend_ledger.rs`（`spend_ledger`：按**币种**分桶、桶内按主体累计纳金额，`charges` 数的是带金额的应答条数）→ `session/stats.rs` 的 `tokens` / `spend` 两列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，token 走 `format_tokens`、金额走 `format_money`，两处单位各全仓唯一实现）。价格来自 `ModelProviderConfig.pricing`（Provider 自己的配置），金额在 adapter 边界折好后入格（[D-171](001-核心架构.md "DE-001-核心架构")）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
+| P2-5 分支切换：重试留下**并存几支 + 一个选中态**。带标注的节点头部常驻 `‹ 1/2 ›`（两端到头置灰而非消失——读数不许随位置改形状）；点箭头只改**读法**，一条历史都不删 | 后端：两条事实 `turn.branch{of,into}`（这一支存在）与 `turn.branch_selected{selected}`（此刻读哪一支），在 `symbio_core/event/grid.rs` 注册为 `(Turn, Asserted)`（I2 因此都带 `produced_by`）→ `symbio_core/projection/branch.rs`（`BranchLedger::fold` 按**成员根节点 id** 并组、两类事实共同写组的 pick 且组内后到胜出；`stamp_branches` 在纯投影 `rebuild` 末尾盖 `meta.branch{group,candidates,index,total,selected}`）→ 写侧 `plugins/loop/stage_exec.rs`（重试准备段落 `turn.branch`，actor 取 `request_principal` 不是字面量）+ `chat_loop.rs::republish_branch_group`（轮次收尾按组重发标注帧——新支的节点要等本轮落盘才进投影）→ 读侧两条路、两条问法：**请求包**在 `projection/transcript.rs` 折叠（未选中支的助手侧条目判 `exclude_from_context`，正文照进转写、切回去还在；`prompt_fidelity` 认同一份折法，否则每次重试报一串假「丢事实」），**节点树**在 `chat_session/read.rs::get_context_messages` 调 `branch_hide_unselected`（只供水位与汇报）；`get_messages` 永远交全树。子树口径 = `parent_id` ∪ `meta.turn_root`，唯一实现 `node_build::subtree_of`→ 入口 `plugin/vdfs_messages.rs` 的 `switch_branch` 臂 + `commands.rs::switch_branch`（落点是成员根自身 `<sid>/message/<mid>`，载荷 `{to}`；非兄弟一律 `Invalid`）。前端：`registry/messageFacts.ts`（`messageBranchOf` / `messageBranchNeighbor` / `messageTurnRoot`——`meta` 键名只在这里出现，M-001）→ `stores/sessionTranscript.ts::dropUnselectedBranches`（纯函数，可见集仍只有 `visibleMessages` 一个答案）→ `composables/useChatConnection.ts::switchBranch` + `SWITCH_BRANCH_KEY`（注入面，与 `RESUME_KEY` 同一条理由）→ `components/message/NodeShell.vue`（渲染器不认「重试 / 分支」这些业务词：后端没盖标注就是不是一支）+ `styles/controls.css` 的 `.node-act.neutral`。裁决见 [D-173](001-核心架构.md "DE-001-核心架构")；用例：`projection/branch.test.rs`、`chat_loop.test.rs`（补发）、`vdfs_provider.test.rs`（切换只改读法 / 切到当前不写 / 非兄弟被拒）三处后端，`messageFacts.branch.spec.ts`、`sessionTranscript.spec.ts`、`useChatConnection.spec.ts` 三处前端 |
+| P2-2 变更账：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数；会话头的「变更」抽屉点行打开**当前**文件 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；`address` 是相对会话容器的 `workdir/<path>`，`has_wal` / `readable` 把三种空分开；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。前端：`services/sessionChanges.ts`（原样透传）→ `components/session/SessionChangesList.vue`（纯排版器，三种空各一句话）→ `ChatMainPanel.vue` 的抽屉（与读数共用一个抽屉位；开关 / 代次守卫 / 错误上浮）；点行上抛 `open-node`，经 `Session` → `VdfsSessionDetail` → `VdfsWorkbench`（拆父目录 + 末段名）→ `VdfsView` push `?select=`，由 `useVdfs` 落位（当前目录定在绑定地址自身；不在本页则 `stat` 一次），见 [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md "DE-001-核心架构")） |
 
 **本节的判据**：
 
@@ -444,7 +444,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 2. **呈现所需的换算住在交付出口，不住在组件**。条的填充与参考线是后端除好的 0..1 比率，
    组件只做 `× 100` 这个 ratio→% 的单位换算；阈值系数由同一个函数同时喂压缩触发与出口读数。
    前端一旦自己写 `used > 0.7 * limit`，界面上的刻度就和后端的动手时机成了两笔账，漂了表现为
-   「还没到刻度，历史已经变短」。同族纪律：[D-111](../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")。
+   「还没到刻度，历史已经变短」。同族纪律：[D-111](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README")。
 3. **新能力优先复用既有方言，落不进去就扩方言，不自造形状**（[DE-019 前端机制化](019-前端机制化.md "DE-019-前端机制化")的直接应用）。
    这条线**不写成 `{ used_ratio, compress_ratio }` 两个业务键**：业务键让渲染器认识「已用」与
    「压缩线」，换一个产者（成本、记忆）就得改前端，而这正是 `present/reading` 的模块文档立起来
@@ -456,7 +456,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
    绝不为凑齐四行编一个数（见 `stats_reading.test.rs`）。会话头那一格是同一条判据的另一面：
    一次实测都没有 ⇒ 后端连那个键都不发，头上就什么都不画（不是一条空条、不是「0 token」）。
 5. **不给这条线配「压缩」按钮**。提案原文写着「复用已有的 `context_compact`」，那句话随
-   [D-072](../../symbio/src/plugins/session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "symbio/src/plugins/session/README") 一起过期：自动整理由后端判，手动重试只由**失败的压缩节点**下发，一条健康的水位线
+   [D-072](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") 一起过期：自动整理由后端判，手动重试只由**失败的压缩节点**下发，一条健康的水位线
    后面没有任何可点的东西。入口不补齐不是缺口——把不存在的能力画成按钮，用户按下才发现界面在骗他。
 6. **「批这一次」与「以后别再问」是两笔事实，界面不许把它们合成一个按钮**。`approve` 落的是
    `authz.granted`（一次调用一笔，随轮次进出日志）；「本会话放行」改的是**会话 metadata 的一个
@@ -494,14 +494,14 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | 要呈现的东西 | 它的前提是什么 | 前提不在事实面时的后果 |
 |---|---|---|
 | 「几个候选可切换」 | **存在两个候选**。切换器不是「两个按钮」，是「同一 parent 下有两个孩子」 | 界面画出一个永远只有一个选项的切换器，或者更糟：前端自己造第二个候选，用户切过去发现日志里没有它 |
-| 「这次花了多少钱」 | 有一个**折算后的金额**可搬。钱不是实测值，是价格 × 用量 | 前端按模型名猜单价 = 替用户拍一个他没同意过的价（见 §11 P2-4 与 [D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")） |
-| 「本会话改过哪些文件」 | 有一条**带轮归属的写入事实** | 拿 `FsWatcher` 当权威 ⇒ 清单随「有没有打开页面」而变（见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
+| 「这次花了多少钱」 | 有一个**折算后的金额**可搬。钱不是实测值，是价格 × 用量 | 前端按模型名猜单价 = 替用户拍一个他没同意过的价（见 §11 P2-4 与 [D-171](001-核心架构.md "DE-001-核心架构")） |
+| 「本会话改过哪些文件」 | 有一条**带轮归属的写入事实** | 拿 `FsWatcher` 当权威 ⇒ 清单随「有没有打开页面」而变（见 [D-169](001-核心架构.md "DE-001-核心架构")） |
 
 这三行不是别人的经验，是本文自己踩过的三处：**每一条都先被当成「补个组件」提出来**，而真正要补的
 是它脚下的那条事实。三条如今都在事实面有了落点（分别是
-[D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构") /
-[D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构") /
-[D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")，
+[D-173](001-核心架构.md "DE-001-核心架构") /
+[D-171](001-核心架构.md "DE-001-核心架构") /
+[D-169](001-核心架构.md "DE-001-核心架构")，
 实现面见下面的三条 P2 行）。它们留在表里是因为这张表记的是**判据**：再来一条「要呈现 X」，
 先照这三行问一遍 X 的前提是不是事实。
 

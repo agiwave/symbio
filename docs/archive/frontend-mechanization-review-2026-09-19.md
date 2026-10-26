@@ -368,8 +368,8 @@ lint 和覆盖率该有。以上没有一项是「推倒重来」，全是收敛
 
 查证后端后的准确事实（**已更正本文件早期版本的两处错误**）：
 
-- 挂载段名在后端 `symbio/src/symbio_core/ids.rs:40`（`PLUGIN_SESSION = "session"`）；
-  转写段名在 `symbio/src/plugins/session/plugin/nodes.rs:288`（`SEG_MESSAGES = "消息"`）。
+- 挂载段名在后端 `crates/symbio-core/src/ids.rs:40`（`PLUGIN_SESSION = "session"`）；
+  转写段名在 `crates/symbio-plugin-session/src/plugin/nodes.rs:288`（`SEG_MESSAGES = "消息"`）。
 - 早期版本称「消息目录节点的 kind 与 name 同名」——**错误**。`VdfsNode::dir(name,
   title, access)`（`vdfs_provider.rs:516`）的第二个参数是 **title**，kind 恒为
   `VDFS_KIND_DIR`。正确的是 name 与 title 同名，消息目录因此与 `子会话` / `工作目录`

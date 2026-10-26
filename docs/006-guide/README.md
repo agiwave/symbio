@@ -34,14 +34,14 @@ desc: 怎么用——上手 / 贡献 / 排障
 | [`CONTRIBUTING`](../../CONTRIBUTING.md) | Contributing to Symbio |
 | [`GU-001-QUICKSTART_CN`](../../.github/workflows/001-QUICKSTART_CN.md) | 🚀 自动构建指南 |
 | [`GU-002-SECRETS_SETUP`](../../.github/workflows/002-SECRETS_SETUP.md) | GitHub Actions 密钥配置指南 |
-| [`GU-003-building`](../../cli/docs/003-building.md) | 构建 |
-| [`GU-004-usage`](../../cli/docs/004-usage.md) | 用法 |
+| [`GU-003-building`](../../crates/symbio-cli/docs/003-building.md) | 构建 |
+| [`GU-004-usage`](../../crates/symbio-cli/docs/004-usage.md) | 用法 |
 | [`GU-005-PLUGIN_DEVELOPMENT`](005-PLUGIN_DEVELOPMENT.md) | Symbio 插件开发指南 |
 | [`GU-006-QUICK_START`](006-QUICK_START.md) | Symbio 快速上手 |
 | [`GU-007-TROUBLESHOOTING`](007-TROUBLESHOOTING.md) | Symbio 故障排查指南 |
 | [`README`](../../README.md) | Symbio |
-| [`cli/README`](../../cli/README.md) | symbio-cli |
-| [`cli/docs/README`](../../cli/docs/README.md) | symbio-cli 文档中心 |
+| [`crates/symbio-cli/README`](../../crates/symbio-cli/README.md) | symbio-cli |
+| [`crates/symbio-cli/docs/README`](../../crates/symbio-cli/docs/README.md) | symbio-cli 文档中心 |
 | [`docs/README`](../README.md) | Symbio 文档中心 |
 | [`e2e/README`](../../e2e/README.md) | e2e 测试环境（CLI 模式） |
 

@@ -2,7 +2,7 @@
 
 > **文档类型：审计** — 对「架构还能往哪收」的一次系统性勘测。
 > 复核对象：`symbio/src`（55,851 行实现 / 24,815 行测试）、`tauri/src`（20,269 / 10,429）、
-> `cli/src`（1,573）、`scripts/`（13,176，即机制层自身），共 145 个 `.mjs`/`.rs`/`.ts`/`.vue`
+> `crates/symbio-cli/src`（1,573）、`scripts/`（13,176，即机制层自身），共 145 个 `.mjs`/`.rs`/`.ts`/`.vue`
 > 语料的抽样通读与量化。
 > 判据不是「代码写得漂不漂亮」，而是**同一条语义被手写了多少遍**——
 > 重复的每一遍都是未来一个必须同步修改的点。
@@ -186,12 +186,12 @@ impl Capability for XTool {
 **收益**：约 **700 行 → 约 250 行**，且新增一个 VDFS 操作时改一处表项而非新建文件。
 **代价**：`schema` 是 `serde_json::Value`，可继续逐条字面量（schema 本就该显式）。
 
-**可机制化**：`line-budget-audit` 已有 `symbio/src/plugins/vdfs` 基线上限
+**可机制化**：`line-budget-audit` 已有 `crates/symbio-plugin-vdfs/src` 基线上限
 （3087），收敛后可**收紧基线**，棘轮自动锁住不回弹。
 
 ### 3.3 落地记录（2026-09-27）
 
-新增 `symbio/src/plugins/vdfs/tools/spec.rs`，把七个同形工具收成一张表：
+新增 `crates/symbio-plugin-vdfs/src/tools/spec.rs`，把七个同形工具收成一张表：
 
 - [`VdfsTool`] 是所有表项**唯一**的 `Capability` 实现（`meta` 读表、`execute` 透传）；
 - [`ToolSpec`] 承载六个差异点：`name` / `description` / `schema` / `examples` /
@@ -209,14 +209,14 @@ impl Capability for XTool {
 
 | 项 | 变化 |
 |---|---|
-| `symbio/src/plugins/vdfs` 实现行 | 3087 → **3012**（-75） |
+| `crates/symbio-plugin-vdfs/src` 实现行 | 3087 → **3012**（-75） |
 | 删除文件 | `delete.rs` / `edit.rs` / `mkdir.rs` / `search.rs` / `stat.rs` / `tree.rs` / `write.rs`（7 个） |
 | `spec.rs` 新增 | 一张 7 项规格表 + 一份 `Capability` 实现 + 两个回执 helper |
 
 工具名与顺序由既有 `tools_cover_all_ops` 测试锁死（`list, tree, stat, read, edit,
 search, write, delete, mkdir`），重构后 59 项 vdfs 测试全绿、全仓 961 项 lib 测试全绿。
 
-**棘轮**：`line-budget-audit.mjs` 已把 `symbio/src/plugins/vdfs` 基线收紧至 **3012**。
+**棘轮**：`line-budget-audit.mjs` 已把 `crates/symbio-plugin-vdfs/src` 基线收紧至 **3012**。
 
 **与 §2 的差异**：§2 是「消除语义副本」并**新增一条可判定守卫**（E-011）；
 §3 是「消除结构副本」，收益更直接（净减行数），但**没有**对应的新守卫——因为
@@ -304,7 +304,7 @@ search, write, delete, mkdir`），重构后 59 项 vdfs 测试全绿、全仓 9
 | 接入 | 位置 | 规模 | 接线方式 |
 |---|---|---|---|
 | 桌面 | `tauri/src-tauri/src/` | 449 行 / 3 文件 | 3 个 IPC command（`route_v2*`） |
-| CLI | `cli/src/client.rs` | 686 行 | 进程内直连插件树 |
+| CLI | `crates/symbio-cli/src/client.rs` | 686 行 | 进程内直连插件树 |
 | 网关 | `gateway/server.rs` | 794 行 | HTTP / WS → 父级路由 |
 
 `gateway/server.rs`（794）+ `tauri/route_connection.rs`（167）+ `cli/client.rs`（686）
@@ -531,7 +531,7 @@ D-005）。
 `session/docs/core-loop.md`（DATA_FLOW / PROTOCOLS / PLUGIN_DEVELOPMENT）、
 `session/docs/vdfs-session-messages.md`（PROTOCOLS / ROUTES）、
 `plugins/model/README.md`（ROUTES）、`session/README.md`（model/README）——
-一律补成 `symbio/src/plugins/...` 全路径；另 2 处（`frontend-ui-ux-prd.md` /
+一律补成 `crates/crates/plugins/...` 全路径；另 2 处（`frontend-ui-ux-prd.md` /
 `-design.md`）是缺陷记录里的**被引述内容**，加行内豁免。
 
 **机制化**：`doc-link-audit.test.mjs` **新增 9 项**（36 项全过），逐条钉住
@@ -682,7 +682,7 @@ D-005）。
 | 范围 | 实现 | 测试 |
 |---|---|---|
 | `symbio/src` | 224 文件 / 55,851 行 | 127 文件 / 24,815 行 |
-| `cli/src` | 4 文件 / 1,573 行 | 1 文件 / 80 行 |
+| `crates/symbio-cli/src` | 4 文件 / 1,573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | — |
 | `tauri/src` | 94 文件 / 20,269 行 | 49 文件 / 10,429 行 |
 | `scripts/` | — | 13,176 行（含测试） |

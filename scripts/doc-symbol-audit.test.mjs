@@ -44,7 +44,7 @@ function audit (files) {
 
 /** 最小 Rust 语料：两个真实符号（一个带前缀、一个仅字段名）+ 一个常量族 + 一个只在引号里的外部约定名 */
 const RS = {
-  'symbio/src/lib.rs': [
+  'crates/crates/crates/lib.rs': [
     'pub const PLUGIN_PAYLOAD_KEY: &str = "payload";',
     'pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";',
     'pub const WIRE_TOTAL: u32 = 2;',
@@ -263,17 +263,17 @@ const roster = (anchor) => ({
   ].join('\n'),
 })
 /** 锚点指向的文件（最小仓库里真有这个文件，D-011 才验得到「文件存在」之外的部分） */
-const ROSTER_RS = { 'symbio/src/plugins/session/context.rs': 'pub fn ctx_load() {}\n' }
+const ROSTER_RS = { 'crates/symbio-plugin-session/src/context.rs': 'pub fn ctx_load() {}\n' }
 
 test('D-011 锚点指向不存在的符号 ⇒ 红（改一处即红，这是本条的硬要求）', () => {
-  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`symbio/src/plugins/session/context.rs::GONE_FN`') })
+  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`crates/symbio-plugin-session/src/context.rs::GONE_FN`') })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-011 .*锚点符号在 Rust 源码中不存在/)
   assert.match(r.stdout, /GONE_FN/)
 })
 
 test('D-011 锚点指向仓内不存在的文件 ⇒ 红（文件改名了还是从来没落地？）', () => {
-  const r = audit({ ...RS, ...roster('`symbio/src/plugins/session/gone.rs`') })
+  const r = audit({ ...RS, ...roster('`crates/symbio-plugin-session/src/gone.rs`') })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-011 .*文件不在仓内/)
 })
@@ -291,8 +291,8 @@ test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都�
     'docs/003-design/008-能力注册表与能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
-      '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `symbio/src/plugins/session/context.rs` |',
-      '| 语义记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `symbio/src/plugins/session/context.rs::ctx_load` |',
+      '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `crates/symbio-plugin-session/src/context.rs` |',
+      '| 语义记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `crates/symbio-plugin-session/src/context.rs::ctx_load` |',
       '',
     ].join('\n'),
   })
@@ -428,10 +428,10 @@ const PARAMS = {
 
 /** 三个实现文件 + 一个读侧函数文件（§2 的对象） */
 const PROJ_RS = {
-  'symbio/src/symbio_core/projection/readyset.rs': '//! readyset\n',
-  'symbio/src/symbio_core/projection/turnstate.rs': '//! turnstate\n',
-  'symbio/src/symbio_core/projection/conation.rs': '//! conation\n',
-  'symbio/src/symbio_core/projection/span.rs': '//! span 读数口\n',
+  'crates/symbio-core/src/projection/readyset.rs': '//! readyset\n',
+  'crates/symbio-core/src/projection/turnstate.rs': '//! turnstate\n',
+  'crates/symbio-core/src/projection/conation.rs': '//! conation\n',
+  'crates/symbio-core/src/projection/span.rs': '//! span 读数口\n',
 }
 
 /** 映射表：`v` 覆盖 §1 的行，`m` 覆盖 §2 的行 */
@@ -496,7 +496,7 @@ test('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => {
 
 test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', () => {
   const files = fixture()
-  files['symbio/src/symbio_core/projection/legend.rs'] = '//! 未登记的新视图\n'
+  files['crates/symbio-core/src/projection/legend.rs'] = '//! 未登记的新视图\n'
   const r = audit(files)
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-014 .*`projection\/legend\.rs` 没有归属/)
@@ -540,7 +540,7 @@ test('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪
 // （轮态那边），`Verdict` 的定义体里从来没有过。D-005 只问「这个名字全仓出现过没有」，
 // 于是同一个名字在错的类型上照样绿灯——**改名后最典型的腐烂形态**。
 const TYPES = {
-  'symbio/src/lib.rs': [
+  'crates/crates/crates/lib.rs': [
     'pub struct Verdict { pub ok: bool }',
     'pub enum Gap { Unmanned, Filled }',
     'pub trait Cap { fn execute(&self); }',

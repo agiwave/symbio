@@ -33,11 +33,11 @@
 `inventory` 静态表里那 16 个 id。装配方判据是「`has_creator` 命中否」。
 
 **位置**：
-- `symbio/src/symbio_core/creator.rs:20` —— 构造函数是**裸函数指针**
+- `crates/symbio-core/src/creator.rs:20` —— 构造函数是**裸函数指针**
   `fn(Arc<dyn InvokeRequest>) -> Box<dyn Any + Send + Sync>`
-- `symbio/src/symbio_core/creator.rs:35` —— `inventory::collect!(Submit)`（编译期收集）
-- `symbio/src/symbio_core/creator.rs:71` —— `entry.type_id != TypeId::of::<T>()` 严格相等校验
-- `symbio/src/symbio_core/plugin_dir.rs:61` —— 加载判据 = `plugin_provider` 指向**已注册**工厂
+- `crates/symbio-core/src/creator.rs:35` —— `inventory::collect!(Submit)`（编译期收集）
+- `crates/symbio-core/src/creator.rs:71` —— `entry.type_id != TypeId::of::<T>()` 严格相等校验
+- `crates/symbio-core/src/plugin_dir.rs:61` —— 加载判据 = `plugin_provider` 指向**已注册**工厂
 - `docs/architecture/PROTOCOLS.md:249-251` —— 同一判据的文档表述
 
 **为什么是问题**：这不是「少一个注册 API」，而是**把「插件」定义成了「本进程内的一个
@@ -71,9 +71,9 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 → 从实例表移除 → 下次装配不再构造。
 
 **位置**：
-- `symbio/src/symbio_core/plugin.rs:300-364` —— trait 全部方法（`meta` / `route` /
+- `crates/symbio-core/src/plugin.rs:300-364` —— trait 全部方法（`meta` / `route` /
   `traverse` / `get_vfs_provider` / `vdfs_dispatch`）
-- `symbio/src/symbio_core/plugin_dir.rs:108-124` —— `KEY_ENABLED` 注释：
+- `crates/symbio-core/src/plugin_dir.rs:108-124` —— `KEY_ENABLED` 注释：
   「停用的插件**刻意不被构造**（它不该启动任何后台行为）」
 
 **为什么是问题**：进程内插件「被 drop ≈ 停止」之所以成立，靠的是 RAII 兜底——
@@ -99,9 +99,9 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 `SEG_MESSAGES` 常量）。这是全仓**唯一**一处真跨插件引用。
 
 **位置**：
-- 违反点：`symbio/src/plugins/agent/host/subagent.rs:42`
+- 违反点：`crates/symbio-plugin-agent/src/host/subagent.rs:42`
   `use crate::plugins::session::plugin::{message_of_node, SEG_MESSAGES};`
-- 被违反的规则：`symbio/src/plugins/mod.rs:5-14` ——「插件独立原则：所有 plugin
+- 被违反的规则：`crates/crates/plugins/mod.rs:5-14` ——「插件独立原则：所有 plugin
   子模块都是私有，插件之间互相不可见，不能直接相互引用」
 
 **为什么是问题**：`agent` 与 `session` 编译期耦合，二者不能独立替换——`session`
@@ -124,9 +124,9 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 阈值 / 审批要求 / 频次上限），但它**只作用于 `local` 插件自己的工具**。
 
 **位置**：
-- `symbio/src/plugins/local/policy/mod.rs:37-47` —— `SecurityPolicy` 定义
-- `symbio/src/plugins/local/plugin.rs:4,61-68,137,175` —— 只在 local 内部构造与消费
-- `symbio/src/plugins/local/plugin.rs:239` —— `SecurityPolicy::default()` 在 local 构造时
+- `crates/symbio-plugin-local/src/policy/mod.rs:37-47` —— `SecurityPolicy` 定义
+- `crates/symbio-plugin-local/src/plugin.rs:4,61-68,137,175` —— 只在 local 内部构造与消费
+- `crates/symbio-plugin-local/src/plugin.rs:239` —— `SecurityPolicy::default()` 在 local 构造时
 
 **为什么是问题**：这是**一个插件内部怎么安全地执行它自己的工具**，不是
 **宿主怎么约束一个插件**。两者方向相反：
@@ -158,8 +158,8 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 | `keys.rs:180,227` | `SYSTEM_AGENT_PLUGINS` / `SUB_AGENT_PLUGINS`（挂载清单） | **机制级常量**（编译期） |
 | `creator.rs:29-35` | 工厂注册表（有哪些 provider 可用） | 编译期 |
 
-**位置**：`symbio/src/symbio_core/plugin_dir.rs:105-124`；
-`symbio/src/symbio_core/keys.rs:180`、`:227`；`symbio/src/symbio_core/creator.rs:29-35`
+**位置**：`crates/symbio-core/src/plugin_dir.rs:105-124`；
+`crates/symbio-core/src/keys.rs:180`、`:227`；`crates/symbio-core/src/creator.rs:29-35`
 
 **为什么是问题**：没有一处能回答「这个插件依赖什么、需要什么权限、提供什么能力」。
 更具体地说，三个清单之间**没有任何一致性检查**：
@@ -186,8 +186,8 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 但 trait 注释**自承**：「唯一运行期消费方是 `composite/vdfs.rs`」「插件的身份实际
 来自各自的 `PLUGIN.yml`」。
 
-**位置**：`symbio/src/symbio_core/plugin.rs:301-312`（注释本身）；
-`symbio/src/symbio_core/plugin_dir.rs:419-425`（`PluginEntry` 的 `title`/`version`
+**位置**：`crates/symbio-core/src/plugin.rs:301-312`（注释本身）；
+`crates/symbio-core/src/plugin_dir.rs:419-425`（`PluginEntry` 的 `title`/`version`
 「来自 `PluginMeta`，未构造时为空」）
 
 **为什么是问题**：同一事实两个来源，且其中一个是「刻意的但几乎没人用」。后果已经
@@ -219,9 +219,9 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 在 gateway，且都是「拒绝」语义。
 
 **位置**：
-- 定义：`symbio/src/symbio_core/transport.rs:149`
+- 定义：`crates/symbio-core/src/transport.rs:149`
 - 分支：`transport.rs:174`（`get`）、`:184`（`serialize`）、`:195`（`Debug`）——三处都是 Err / 占位
-- 匹配点：`symbio/src/plugins/gateway/server.rs:438`
+- 匹配点：`crates/symbio-plugin-gateway/src/server.rs:438`
   （`Err("该路径返回进程内原生对象，不支持跨传输调用")`）、`:593`（WS 侧同款）
 - 文档：`docs/architecture/PROTOCOLS.md:20,31`、`docs/architecture/OVERVIEW.md:20`
 
@@ -247,9 +247,9 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 在 HTTP 入口与 WS 入口**各写了一遍**。
 
 **位置**：
-- 两套枚举：`symbio/src/symbio_core/transport.rs:142`（`PluginPayload`）、`:245`（`PluginPayloadWire`）
-- 映射一（HTTP）：`symbio/src/plugins/gateway/server.rs:433-460`
-- 映射二（WS）：`symbio/src/plugins/gateway/server.rs:548-606`
+- 两套枚举：`crates/symbio-core/src/transport.rs:142`（`PluginPayload`）、`:245`（`PluginPayloadWire`）
+- 映射一（HTTP）：`crates/symbio-plugin-gateway/src/server.rs:433-460`
+- 映射二（WS）：`crates/symbio-plugin-gateway/src/server.rs:548-606`
 
 **为什么是问题**：同一个映射两份实现 ⇒ 新增 / 删除一个变体要改**三处**
 （枚举 + 两个入口）。漏一处的后果是**不对称**：「HTTP 能调、WS 不能调」这类 bug
@@ -272,7 +272,7 @@ plugin_provider: "ext:weather"    → 外部命名空间（运行期注册的 pr
 **现象**：`SymbioKey` 的 `parse → None` 是「进程内专用」的**唯一**标记，而它是个
 **约定**，不是可枚举的事实。当前 6 个键带这个标记。
 
-**位置**（`symbio/src/symbio_core/keys.rs`）：
+**位置**（`crates/symbio-core/src/keys.rs`）：
 
 | 键 | 行 | Value 类型 |
 |---|---|---|
@@ -305,7 +305,7 @@ trait 分层（`WireKey` / `LocalKey`）。目标：让「线上可表达子集�
 生产侧 `PluginError::code` → 传输侧 `PluginError::to_frame` 写 `code.as_str()`
 → 消费侧 `PluginFrame::error_code` 解析回枚举。分派逻辑比较**枚举值**而非字符串。
 
-**位置**：`symbio/src/symbio_core/error.rs:38-50`
+**位置**：`crates/symbio-core/src/error.rs:38-50`
 
 **为什么列在这里**：**这不是缺陷**。评审要同时给出「可复用的资产」，否则改进方案会
 重复造轮子。这一项的价值是：第三方插件体系**不需要**新建错误分类机制，只需复核
@@ -322,7 +322,7 @@ trait 分层（`WireKey` / `LocalKey`）。目标：让「线上可表达子集�
 **现象**：`gateway` 文档用「native」表示「不跨传输（进程内）」，而
 `PluginPayload::Native` 表示「进程内原生对象」。**同名不同义**。
 
-**位置**：`symbio/src/plugins/gateway/README.md:9`
+**位置**：`crates/symbio-plugin-gateway/README.md:9`
 （「本插件自身接口**恒走 native**」）
 
 **为什么是问题**：P1 删除 `Native` 变体后，这个词在仓库里只剩 gateway 那一处的含义。
@@ -346,8 +346,8 @@ trait 分层（`WireKey` / `LocalKey`）。目标：让「线上可表达子集�
    的 S-009 想拦的形态（裸字面量）；
 3. `PROTOCOLS.md` 仍把它列为标准上下文键。
 
-**位置**：`symbio/src/symbio_core/keys.rs:71-97`；
-`symbio/src/symbio_core/plugin.rs:171`（`let key = "payload";`）、`:208`；
+**位置**：`crates/symbio-core/src/keys.rs:71-97`；
+`crates/symbio-core/src/plugin.rs:171`（`let key = "payload";`）、`:208`；
 `docs/architecture/PROTOCOLS.md:76`
 
 **为什么是问题**：这是「废弃但仍在用」的**悬置状态**——既没删干净，又给了一个
@@ -382,7 +382,7 @@ gateway 都引它；`PayloadKey` / `PAYLOAD` 删除；文档同步。
 **现象**：已有 3 条「宿主拉」的收集通道（能力 / 选项 / 可配置）+ 1 条执行出口，
 各自一个 `ctx` 键、一套 `traverse` 约定、一处容器转发。
 
-**位置**：`symbio/src/symbio_core/keys.rs:259`（`CAPABILITY_VISITOR`）、`:276`
+**位置**：`crates/symbio-core/src/keys.rs:259`（`CAPABILITY_VISITOR`）、`:276`
 （`OPTION_VISITOR`）、`:294`（`CONFIG_VISITOR`）、`:326`（`EVENT_SINK`）；
 `docs/architecture/PROTOCOLS.md:90-118`（traverse 发现流程）
 

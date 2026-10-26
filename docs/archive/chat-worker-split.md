@@ -11,10 +11,10 @@
 > 目标架构与迁移计划见 [plan/README.md](../plan/README.md)，「现在是什么」见
 > [CURRENT.md](../CURRENT.md)。本文不再更新。
 >
-> 前置阅读：[session/docs/core-loop.md](../../symbio/src/plugins/session/docs/core-loop.md)（主循环）、
-> [session/docs/node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md)（实时面）、
-> [session/transcript/inbox.rs](../../symbio/src/plugins/session/transcript/inbox.rs)（输入入口）、
-> [model/message_builder.rs](../../symbio/src/plugins/model/message_builder.rs)（请求视图投影）。
+> 前置阅读：[session/docs/core-loop.md](../../crates/symbio-plugin-session/src/docs/core-loop.md)（主循环）、
+> [session/docs/node-state-streaming.md](../../crates/symbio-plugin-session/src/docs/node-state-streaming.md)（实时面）、
+> [session/transcript/inbox.rs](../../crates/symbio-plugin-session/src/transcript/inbox.rs)（输入入口）、
+> [model/message_builder.rs](../../crates/symbio-plugin-model/src/message_builder.rs)（请求视图投影）。
 
 ---
 
@@ -183,19 +183,19 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 #### 保留策略不同不需要两份存储
 
 读法是每轮计算的（"纯机械、可重放的变换 → 视图层每轮计算，
-存储 = 真实历史"，见 [session/README.md](../../symbio/src/plugins/session/README.md) §3 的决策表），
+存储 = 真实历史"，见 [[crates/symbio-plugin-session/README|session/README.md]] §3 的决策表），
 所以两条线可以有各自的窗口与过滤。既有的存储裁剪（`prune_historical_tool_calls`）
 **只删工具链、保留 User / Assistant 文本骨架**——对话线因此不会被裁剪打洞。
 
 **集合扩展点是现成的**：会话是容器，其下是若干并列集合（`message` / `inbox` / `subsession` /
 `workdir` / `MEMORY.md`），"哪一类集合"由**地址段**回答，机制不认识任何一类集合
-（见 [node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md) §2.1）。
+（见 [node-state-streaming.md](../../crates/symbio-plugin-session/src/docs/node-state-streaming.md) §2.1）。
 若实测证明两条线必须有不同的**写入**规则（而不只是不同的读法），再加一个集合是低成本的
 ——但那是**需要证据**的一步，不是起点。
 
 #### "混乱"的来源是呈现，不是存储
 
-今天的前端把工具卡片**插进对话列表**（[node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md)
+今天的前端把工具卡片**插进对话列表**（[node-state-streaming.md](../../crates/symbio-plugin-session/src/docs/node-state-streaming.md)
 §5.3 的请求 / 过程 / 结果三段式、§7 的折叠行），于是"我说的话"与"机器在干什么"
 混在同一列里。**这个混乱今天就存在**，与 chat 无关；加了 chat 只会让那一列更乱。
 
@@ -345,7 +345,7 @@ chat 产出的**文本**由 session 写进转写（唯一写入者不变）。�
 不是"模型的对话历史"；② `Escalate` 紧跟用户消息，若进请求包，线上会出现连续两条
 `assistant`——Anthropic 一类协议要求交替，会直接 400。
 
-剔除点在 **model 插件**（[message_builder.rs](../../symbio/src/plugins/model/message_builder.rs)
+剔除点在 **model 插件**（[message_builder.rs](../../crates/symbio-plugin-model/src/message_builder.rs)
 的 `flatten_chat_messages`），与 `compression` 节点的处置同层——「给模型的输入按模型的视角投影」
 本来就归它。
 
@@ -394,12 +394,12 @@ meta.supplement_count = n
 ```
 
 **为什么必须合并而不是逐条追加**：**存储裁剪**（`prune_historical_tool_calls` 的 `keep_turns`
-分水岭，见 `symbio/src/plugins/session/chat_session/write.rs`）按 **User 消息计数**。
+分水岭，见 `crates/symbio-plugin-session/src/chat_session/write.rs`）按 **User 消息计数**。
 逐条追加会让 n 条补充吃掉 n 份保留预算，把更早的轮次提前挤出窗口。
 合并成一条，`n` 条补充在计数上**仍是一轮**，与用户心智一致。
 
 > ⚠️ **两处计数口径不同**：存储裁剪按 **User 消息**计数；请求视图窗口
-> （`apply_layered_sliding_window`，`symbio/src/plugins/session/context/window.rs`）
+> （`apply_layered_sliding_window`，`crates/symbio-plugin-session/src/context/window.rs`）
 > 按 **ToolCall** 计数，不受补充条数影响。只有前者需要靠"合并成一条"来守。
 
 补充消息的落点：**顶层**（`parent_id = None`），与普通用户消息同形。已核实
@@ -426,7 +426,7 @@ is_working
 ### 5.2 复用既有的 15s 调度 tick
 
 不新建定时器：`session/heartbeat` 的调度循环本来就在扫"本 store 全部会话 + 判 `is_working`"
-（见 [heartbeat-mechanism.md](../../symbio/src/plugins/session/docs/heartbeat-mechanism.md)）。
+（见 [heartbeat-mechanism.md](../../crates/symbio-plugin-session/src/docs/heartbeat-mechanism.md)）。
 在同一个 tick 上增加一条"该不该汇报"的判定即可。心跳触发的是**一轮**，
 进度汇报只**写一条节点**——两者共用扫描，不共用动作。
 

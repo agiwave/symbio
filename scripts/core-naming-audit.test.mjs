@@ -46,12 +46,12 @@ function readme(table, modifiers = 'Dyn,Default', header = HEADER) {
 /** 造一棵最小仓库：`domains` 是 `{ 域名: mod.rs 内容 }`，根 mod.rs 默认通配重导出各域 */
 function repo({ table, domains = {}, rootMod, modifiers, header }) {
   const files = {
-    'symbio/src/symbio_core/README.md': readme(table, modifiers, header),
-    'symbio/src/symbio_core/mod.rs':
+    'crates/symbio-core/README.md': readme(table, modifiers, header),
+    'crates/symbio-core/src/lib.rs':
       rootMod ?? Object.keys(domains).map((d) => `pub use ${d}::*;\n`).join(''),
   }
   for (const [d, src] of Object.entries(domains)) {
-    files[`symbio/src/symbio_core/${d}/mod.rs`] = src
+    files[`crates/symbio-core/src/${d}/mod.rs`] = src
   }
   return files
 }
@@ -289,7 +289,7 @@ test('反例：README 缺限定词标记 ⇒ 红（绿灯只说明没检查）',
     table: '| `alpha` | `Alpha` | `ALPHA_` | `alpha_` | |',
     domains: { alpha: '' },
   })
-  files['symbio/src/symbio_core/README.md'] =
+  files['crates/symbio-core/README.md'] =
     '# x\n\n### 域前缀对照表（全 1 域）\n\n' +
     `${HEADER}\n|---|---|---|---|---|\n| \`alpha\` | \`Alpha\` | \`ALPHA_\` | \`alpha_\` | |\n`
   const r = audit(files)
@@ -302,7 +302,7 @@ test('反例：README 找不到域前缀对照表 ⇒ 红', () => {
     table: '| `alpha` | `Alpha` | `ALPHA_` | `alpha_` | |',
     domains: { alpha: '' },
   })
-  files['symbio/src/symbio_core/README.md'] =
+  files['crates/symbio-core/README.md'] =
     '# x\n\n<!-- core-naming:modifiers Dyn -->\n\n没有那张表。\n'
   const r = audit(files)
   assert.equal(r.status, 1, out(r))

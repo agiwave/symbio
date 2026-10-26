@@ -21,8 +21,8 @@
  * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_node` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  * | M-008 | 控制面路由名只能取自 `constants/routes.gen.ts`           | 它是后端生成的，手写一份就是抄本 |
- * | M-009 | `cli/src` 不得直读业务 `meta` 字段                      | CLI 的协议读法收口到 `protocol.rs` |
- * | M-010 | 地址 / 协议词常量只能在 `cli/src/protocol.rs` **定义**   | 第二个前端不得有第二份段名    |
+ * | M-009 | `crates/symbio-cli/src` 不得直读业务 `meta` 字段                      | CLI 的协议读法收口到 `protocol.rs` |
+ * | M-010 | 地址 / 协议词常量只能在 `crates/symbio-cli/src/protocol.rs` **定义**   | 第二个前端不得有第二份段名    |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
  * 具体组件），否则「新增一种形态只登记一行」就无从谈起。
@@ -355,12 +355,12 @@ const RULES = {
       '控制面路由名只能取自 constants/routes.gen.ts（后端 route() 臂的生成物）—— 此处不得写死',
   },
   /**
-   * M-009 `cli/src` 不得直读业务 `meta` 字段
+   * M-009 `crates/symbio-cli/src` 不得直读业务 `meta` 字段
    *
    * CLI 是**第二个前端**。同一个后端字段名若在两处各解释一次，改字段时只有一处
    * 会跟着改，另一处静默错读——没有测试会红，只是某个视图少了一行。
    * 协议读法（哪些 `meta` 键存在、某个形状是什么意思）因此收口到
-   * `cli/src/protocol.rs`，判定范围也只排除那一个文件。
+   * `crates/symbio-cli/src/protocol.rs`，判定范围也只排除那一个文件。
    *
    * 判据是**读取**（`.meta.<field>`），不是整体透传：把 `meta` 原样序列化 /
    * 赋值给快照不构成解释。变量别名（`let m = &node.meta; m.get(…)`）抓不到——
@@ -371,10 +371,10 @@ const RULES = {
     severity: 'error',
     test: (c) => c.match(/\.meta\s*\.\s*[A-Za-z_$]/),
     message:
-      'CLI 不得直读后端 meta 字段 —— 协议读法收口到 cli/src/protocol.rs（后端改字段名只改那一处）',
+      'CLI 不得直读后端 meta 字段 —— 协议读法收口到 crates/symbio-cli/src/protocol.rs（后端改字段名只改那一处）',
   },
   /**
-   * M-010 地址 / 协议词常量的**定义权**只在 `cli/src/protocol.rs`
+   * M-010 地址 / 协议词常量的**定义权**只在 `crates/symbio-cli/src/protocol.rs`
    *
    * 与 M-007 同型：使用常量是允许的（导入即可），**再定义**一份就是第二份真相。
    * CLI 的段名是自持副本（session 插件的段名是 `pub(crate)`），正因为它是副本，
@@ -390,7 +390,7 @@ const RULES = {
     severity: 'error',
     test: (c) => c.match(/\b(?:const|static)\s+(?:[A-Z][A-Z0-9_]*_SEG|OUTCOME_[A-Z0-9_]+)\s*:/),
     message:
-      '地址 / 协议词常量的定义权在 cli/src/protocol.rs —— 此处不得再定义一份（导入使用是允许的）',
+      '地址 / 协议词常量的定义权在 crates/symbio-cli/src/protocol.rs —— 此处不得再定义一份（导入使用是允许的）',
   },
 }
 
@@ -475,15 +475,15 @@ auditFiles(
 )
 
 // ── CLI 侧：第二个前端用同一套机制判据 ────────────────────────────────────
-// 范围只有 `cli/src`（实现文件 + 测试）。**测试文件也在范围内**：判据说的是
+// 范围只有 `crates/symbio-cli/src`（实现文件 + 测试）。**测试文件也在范围内**：判据说的是
 // 「知识只有一个定义点」，测试若自带一份字面量，同样是第二份真相。
-console.log('--- M-009: cli/src 不得直读业务 meta 字段 ---')
-console.log('--- M-010: 地址 / 协议词常量只能在 cli/src/protocol.rs 定义 ---')
+console.log('--- M-009: crates/symbio-cli/src 不得直读业务 meta 字段 ---')
+console.log('--- M-010: 地址 / 协议词常量只能在 crates/symbio-cli/src/protocol.rs 定义 ---')
 if (fs.existsSync(CLI_SRC)) {
   const cliFiles = walk(CLI_SRC, isRs).filter(
     (f) => f !== path.join(CLI_SRC, 'protocol.rs'),
   )
-  auditFiles('cli/src（不含 protocol.rs）', cliFiles, [
+  auditFiles('crates/symbio-cli/src（不含 protocol.rs）', cliFiles, [
     RULES.cliMetaField,
     RULES.cliSegmentDef,
   ])

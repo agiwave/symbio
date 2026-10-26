@@ -3,7 +3,7 @@
 > **文档类型：评审记录（点时刻）** — 回答「流模式下前后端链路是什么样、是否合理、是否过长、协议上还有多少空间」。
 > 结论基于对当前 HEAD 的代码通读（`symbio/` + `tauri/` + `tauri/src-tauri/`），不含推测。
 > 现行行为以 `docs/architecture/DATA_FLOW.md`、`docs/architecture/PROTOCOLS.md`、
-> `symbio/src/plugins/session/docs/node-state-streaming.md` 为准；本文只做评估与建议。
+> `crates/symbio-plugin-session/src/docs/node-state-streaming.md` 为准；本文只做评估与建议。
 >
 > ⚠️ **后记（S26 / D-025，2026-09-23）：本文的架构基线已被取消。**
 > 本文把「实时面两条通道」当作问题、并建议把它们**合并**（§4.1 是当时判定的最高价值
@@ -274,7 +274,7 @@ for entry in STREAM_SUBS.iter() {
 >   `event_bus::build_envelope`（后者更进一步——载荷**按所有权**搬入，整条路径零遍历）。
 > - **扇出零深拷贝**：`PluginFrame::Data(Value)` → `PluginFrame::Data(Arc<Value>)`，
 >   `frame.clone()` 变成引用计数自增。代价是 serde 要开 `rc` feature（已开，
->   `symbio/Cargo.toml` 有说明）。
+>   `crates/symbio/Cargo.toml` 有说明）。
 > - **消费端顺带去掉的深拷贝**：原来每个消费者都用
 >   `serde_json::from_value::<T>(x.clone())`，现在统一走 `T::deserialize(x)`（借用
 >   `&Value` 反序列化）。这是**每帧**发生的，不比生产端便宜。
@@ -446,7 +446,7 @@ function updateMessages(sessionId, mutate) {
 **代价与边界**：
 - 资源变更（工作目录文件、agent 目录、skill/mcp 配置…）**不应**并入——它们与某个会话无必然关系，且频率可能很高。合并的**只是会话节点**这一类；
 - 需要给会话状态帧一个会话内 `seq`（现成的 `Transcript::emit` 就在分配）；
-- `agent/host/subagent.rs` 与 `cli/src/client.rs` 两个进程内消费者要同步改（它们已经同时订阅两条通道，改动是收敛而非扩散）。
+- `agent/host/subagent.rs` 与 `crates/symbio-cli/src/client.rs` 两个进程内消费者要同步改（它们已经同时订阅两条通道，改动是收敛而非扩散）。
 
 **若暂不做**：至少把 §4.1 修掉，并把 §4.2 的假设写进不变量清单。
 
@@ -511,7 +511,7 @@ function updateMessages(sessionId, mutate) {
 2. 前端 `stores/sessionNodeSync.ts` 现在从 VDFS 变更取运行态；改为从转写流取，
    等于把「会话清单同步」与「转写同步」两条接线合并——而清单同步还兼职
    资源变更（`created` / `deleted` / 重命名），**不能整条删掉**，只能拆。
-3. `agent/host/subagent.rs` 与 `cli/src/client.rs` 两个进程内消费者要同步改；
+3. `agent/host/subagent.rs` 与 `crates/symbio-cli/src/client.rs` 两个进程内消费者要同步改；
    新帧类型**没有任何现成测试覆盖**（e2e 的 T9/T10/T11 走的是 gateway WS 边界，
    只覆盖消息帧）。
 

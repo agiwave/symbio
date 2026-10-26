@@ -37,7 +37,7 @@
  * 逐条钉住每个分支（含窗口边界）。
  *
  * 用法：
- *   node scripts/list-write-fact-audit.mjs              # 审计 symbio/src/plugins/session
+ *   node scripts/list-write-fact-audit.mjs              # 审计 crates/symbio-plugin-session/src
  *   node scripts/list-write-fact-audit.mjs ROOT=<dir>   # 审计指定目录（回归测试用）
  *
  * 退出码：0 = 通过；1 = 发现违规。
@@ -159,7 +159,7 @@ const rootArg = process.argv.find((a) => a.startsWith('ROOT='))
 const roots = rootArg
   ? [{ dir: path.resolve(rootArg.slice(5)), prefix: '' }]
   : ['session', 'loop'].map((p) => ({
-      dir: path.join(repoRoot, 'symbio', 'src', 'plugins', p),
+      dir: path.join(repoRoot, 'crates', 'symbio-plugin-' + p, 'src'),
       prefix: p,
     }))
 for (const { dir } of roots) {

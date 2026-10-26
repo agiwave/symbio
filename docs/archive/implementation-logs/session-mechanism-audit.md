@@ -2,10 +2,10 @@
 
 > **【归档说明】** 本文档是 **2026-09-16 的机制审计与简化方案（过程产物）**，已于 2026-09-17
 > 移入 `docs/archive/implementation-logs/`。它提出的方案已全部落地（批次 A–D 见 §8，
-> 结构收敛见 [`module-layout.md`](../../../symbio/src/plugins/session/docs/module-layout.md)），
+> 结构收敛见 [`module-layout.md`](../../../crates/symbio-plugin-session/src/docs/module-layout.md)），
 > 已不再驱动任何待做项。session 现行机制见
-> [`session/README.md`](../../../symbio/src/plugins/session/README.md) 与
-> [`session/docs/`](../../../symbio/src/plugins/session/docs/)。本文不再更新。
+> [[crates/symbio-plugin-session/README|`session/README.md`]] 与
+> [`session/docs/`](../../../crates/symbio-plugin-session/src/docs/)。本文不再更新。
 
 > 状态：审计结论（含可执行方案）。本文是 `docs/archive/implementation-logs/session-mechanism-simplification.md`
 > 的后续核查版——那份方案里的部分判断被本次取证推翻或修正，差异见 §6。
@@ -325,7 +325,7 @@ agent 会话引擎"为职责边界，10.7k 行**不算失控**；但其中**约 
 
 ### 8.5 数字核对与更正（对 §7 / §8.3 的修正，2026-09-13 复核）
 
-同一脚本（按 `#[cfg(test)]` 块切分生产/测试行）统计 `symbio/src/plugins/session/**/*.rs`
+同一脚本（按 `#[cfg(test)]` 块切分生产/测试行）统计 `crates/symbio-plugin-session/src/**/*.rs`
 的审计基线与本轮改动后的工作树：
 
 | | 文件数 | 总行 | 生产行 | 测试行 |

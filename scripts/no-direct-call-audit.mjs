@@ -107,7 +107,7 @@ function audit(root) {
 }
 
 const rootArg = process.argv.find((a) => a.startsWith('ROOT='))
-const root = rootArg ? path.resolve(rootArg.slice(5)) : path.join(repoRoot, 'symbio', 'src')
+const root = rootArg ? path.resolve(rootArg.slice(5)) : path.join(repoRoot, 'crates')
 if (!fs.existsSync(root)) {
   console.error(red(`✗ ROOT 不存在：${root}`))
   process.exit(1)

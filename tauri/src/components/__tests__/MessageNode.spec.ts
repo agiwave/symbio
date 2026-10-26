@@ -294,7 +294,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正�
  * 分派器路由与内容形态 —— 分派器只做「按 NodeKind 路由」，渲染形态由各渲染器负责。
  *
  * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带读数行**
- * （`node.stats`，[D-111](../../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）分道——有行走「压缩动作」样式，
+ * （`node.stats`，[D-111](../../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）分道——有行走「压缩动作」样式，
  * 无行走 Markdown。夹具因此只给 `stats` 而不给 `meta` 数字：**本组件不认识那些字段名**，
  * 数字→文案的口径在后端（判据在 `plugins/session/stats_reading.test.rs`）。
  */

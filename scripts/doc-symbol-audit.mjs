@@ -9,7 +9,7 @@
  * 判据：
  *   **D-005**（`module::symbol` 形态）：提取所有 *.md 中反引号包裹、以 `::` 分段且
  *     **每段为标识符**的路径（≥2 段，剥尾部 `()`），取最后一段查它是否以整词出现在
- *     Rust 源码（symbio/src、cli/src、tauri/src-tauri/src）的 .rs 语料里；查不到 ⇒ ERROR。
+ *     Rust 源码（symbio/src、crates/symbio-cli/src、tauri/src-tauri/src）的 .rs 语料里；查不到 ⇒ ERROR。
  *   **D-009**（裸常量名形态）：反引号里的单段全大写名（形如 `ROUTE_SESSION_CHAT_SEND`，
  *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
@@ -91,7 +91,7 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 
 /** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['symbio/src', 'symbio_kernel/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['crates', 'crates/symbio-kernel/src', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。
@@ -359,7 +359,7 @@ function auditRosterAnchors () {
  * 往目录里塞一个未归类模块 ⇒ 各自变红。
  */
 const PARAMS_MD = 'docs/003-design/001-核心架构.md'
-const PROJ_DIR = 'symbio/src/symbio_core/projection'
+const PROJ_DIR = 'crates/symbio-core/src/projection'
 const MAP_MD = 'docs/004-ref/009-投影映射.md'
 
 /** 反引号 token 提取（表格单元格里可能套着 `**` 粗体） */
@@ -556,7 +556,7 @@ function auditCliArtifactPaths () {
 /**
  * 该 md 里命令的**执行目录**：最近的 crate 目录（有 `Cargo.toml` 的那层），没有就是仓库根。
  *
- * 为什么不是「md 自己所在目录」：`cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
+ * 为什么不是「md 自己所在目录」：`crates/symbio-cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
  * 是在 `cli/` 下执行的（文档从 crate 根链接过来），拿 `cli/docs` 当基准会把正确的
  * `./../target/…` 算成 `cli/target/…`——判据自己造的假红。
  */

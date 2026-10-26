@@ -100,9 +100,9 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const CORE_REL = 'symbio/src/symbio_core'
+const CORE_REL = 'crates/symbio-core/src'
 /** 深引扫描范围：与 E-010 的 CODE_ROOTS 同源（壳侧是独立 crate，但同属消费方） */
-const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src', 'tauri/src-tauri/src']
+const CODE_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src', 'tauri/src-tauri/src']
 
 /**
  * C-003 豁免账本：符号 → **非空**理由（README §4 四问）。
@@ -274,7 +274,7 @@ const relOf = (abs) => path.relative(ROOT, abs).split(path.sep).join('/')
 
 // ==================== C-001 根出口唯一 ====================
 
-const rootRaw = fs.readFileSync(path.join(coreDir, 'mod.rs'), 'utf8')
+const rootRaw = fs.readFileSync(path.join(coreDir, 'lib.rs'), 'utf8')
 const rootLines = rootRaw.split(/\r?\n/)
 rootLines.forEach((line, i) => {
   const m = line.match(/^\s*pub\s+mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*[;{]/)

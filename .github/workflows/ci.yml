@@ -192,7 +192,7 @@ jobs:
           node-version: '22'
 
       - name: Install MSRV toolchain
-        # 版本须与 symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 一致
+        # 版本须与 crates/symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 一致
         # （gate.mjs 把 "1.91" 补全为 "1.91.0" 后比对；更新的 patch 证明不了下限）
         run: rustup toolchain install 1.91.0 --profile minimal
 
@@ -379,8 +379,8 @@ jobs:
           fi
           
           # 检查Cargo.toml基本字段
-          if ! grep -q "^name = " symbio/Cargo.toml; then
-            echo "symbio/Cargo.toml 缺少name字段"
+          if ! grep -q "^name = " crates/symbio/Cargo.toml; then
+            echo "crates/symbio/Cargo.toml 缺少name字段"
             exit 1
           fi
           

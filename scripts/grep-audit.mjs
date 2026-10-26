@@ -32,7 +32,7 @@
  *                   唤醒 / 续写只能从事实进环
  *
  * 用法：
- *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
+ *   node scripts/grep-audit.mjs            # 审计 crates/crates/plugins（全部插件）
  *   node scripts/grep-audit.mjs --strict   # 严格模式：warning 也算失败
  *   SCOPE=<dir> node scripts/grep-audit.mjs
  *
@@ -87,8 +87,8 @@ function resolveScope() {
   if (process.env.SCOPE) return path.resolve(cwd, process.env.SCOPE)
   for (const p of [
     path.resolve(cwd, 'src/plugins'),
-    path.resolve(cwd, 'symbio/src/plugins'),
-    path.resolve(repoRoot, 'symbio/src/plugins'),
+    path.resolve(cwd, 'crates/crates/plugins'),
+    path.resolve(repoRoot, 'crates/crates/plugins'),
   ]) {
     if (isDir(p)) return p
   }
@@ -340,7 +340,7 @@ console.log()
 //       **不含**构建产物与运行期数据目录（`.symbio` 等，见 `S010_SKIP_DIRS`）——
 //       审计对象是源码树；运行期数据不在版本控制里，模型往里写什么与规则无关。
 // 豁免（写在规则里，逐条留痕）：
-//   · `symbio/src/plugins/vdfs/**` —— 根名的所有者，字面量只允许在这里；
+//   · `crates/symbio-plugin-vdfs/src/**` —— 根名的所有者，字面量只允许在这里；
 //   · `docs/archive/**` —— 历史记录不改写，
 //     改写等于伪造当时的代码状态；
 //   · 本文件（审计脚本自己要描述这条规则）。
@@ -398,7 +398,7 @@ const s010Self = fileURLToPath(import.meta.url)
 const s010Files = walkS010(S010_ROOT).filter((f) => {
   if (path.resolve(f) === path.resolve(s010Self)) return false
   const rel = path.relative(S010_ROOT, f).split(path.sep).join('/')
-  if (rel.startsWith('symbio/src/plugins/vdfs/')) return false // 所有者
+  if (rel.startsWith('crates/symbio-plugin-vdfs/src/')) return false // 所有者
   if (rel.startsWith('docs/archive/')) return false // 历史
   if (rel.startsWith('cli/target/') || rel.startsWith('tauri/target/')) return false // 构建产物
   return true
@@ -448,7 +448,7 @@ console.log()
 //
 // 豁免：`// grep-audit-allow S-011: 理由`（写在**后一个锚点**那一行，理由不可为空）——
 // 只在"位置确实不对但已确认可接受"时用。
-// 文档侧的定义见 `symbio/src/plugins/classify/README.md` §5 S0 的 C-D2b。
+// 文档侧的定义见 `crates/symbio-plugin-classify/README.md` §5 S0 的 C-D2b。
 console.log('--- S-011: 补充注入点位置检查 ---')
 
 const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
@@ -551,12 +551,12 @@ console.log()
 // 收口不变量），as-of 投影里「这条目标曾经声明过吗」是查询语义。实测把它们列进词表：
 // `本批|待接|尚未接` 在 `symbio/src` 命中 50 处、绝大多数是运行期 prose，`曾经` 命中
 // 59 处含真误报——**一条天天误报的守卫最后只会被人用豁免喂死**（本文件反复写的那条）。
-// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/003-design/verify`），
+// 范围：`.rs` 的注释行（`symbio/src`、`crates/symbio-cli/src`、`tauri/src-tauri/src`、`docs/003-design/verify`），
 // 测试文件同样参与检查（与 S-002 一致）。
 // 豁免：`// grep-audit-allow S-012: 理由`（写在命中行或其紧邻上一行，理由不可为空，同 S-010）。
 console.log('--- S-012: 代码注释里的实施排期指认 ---')
 
-const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const S012_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
 const S012_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
@@ -607,12 +607,12 @@ console.log()
 // 不判，同函数里两个 builder 共用一次 `sort_by` 也判绿。取这个粒度是因为三处既有代码
 // 都是「构造 + 链式配置同作用域」的形状，而一条天天误报的守卫最后只会被人用豁免喂死
 // （本文件反复写的那条）。跨函数传 builder 真出现时，人会看见这条注释。
-// 范围：`.rs` 源码根（同 S-012：`symbio/src`、`cli/src`、`tauri/src-tauri/src`、
+// 范围：`.rs` 源码根（同 S-012：`symbio/src`、`crates/symbio-cli/src`、`tauri/src-tauri/src`、
 // `docs/003-design/verify`），测试文件同样参与。
 // 豁免：`// grep-audit-allow S-013: 理由`（写在构造行或其紧邻上一行，理由不可为空，同 S-010）。
 console.log('--- S-013: WalkBuilder 构造点的遍历序 ---')
 
-const S013_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const S013_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 const S013_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 const S013_WALK_RE = /WalkBuilder::new\s*\(/
 const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
@@ -687,10 +687,10 @@ console.log()
 // 由下面那条「cwd 下有 `symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
 console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
 
-const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const S014_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 // **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
-// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `symbio/src/...` 的几层目录，
+// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `crates/crates/...` 的几层目录，
 // 存量也恒 0——与基线数字的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
 // 0 的 fixture 用例判红，守卫的测试自己成了噪音。判据用 `repoRoot`（脚本自身所在仓库）：
 // 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
@@ -775,7 +775,7 @@ console.log()
 // 「调用行自己带 `if let Err(`」这条判据把那种写法一并挡住（拆行时按上一行同看）。
 console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
 {
-  const S015_ROOTS = ['symbio/src/plugins']
+  const S015_ROOTS = ['crates/crates/plugins']
   const S015_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
   const S015_IS_REPO = path.resolve(S015_BASE) === path.resolve(repoRoot)
   const isComment = (l) => {
@@ -860,9 +860,9 @@ console.log()
 console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---')
 {
   const S016_FILES = [
-    'symbio/src/plugins/loop/turn_runner.rs',
-    'symbio/src/plugins/loop/turn_runner/facts.rs',
-    'symbio/src/plugins/loop/turn_runner/settle.rs',
+    'crates/symbio-plugin-loop/src/turn_runner.rs',
+    'crates/symbio-plugin-loop/src/turn_runner/facts.rs',
+    'crates/symbio-plugin-loop/src/turn_runner/settle.rs',
   ]
   const S016_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
   const S016_IS_REPO = path.resolve(S016_BASE) === path.resolve(repoRoot)
@@ -923,14 +923,14 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
   const S017_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
   const S017_IS_REPO = path.resolve(S017_BASE) === path.resolve(repoRoot)
   const RETIRED_FILES = [
-    'symbio/src/plugins/loop/resume.rs',
-    'symbio/src/plugins/loop/resume.test.rs',
+    'crates/symbio-plugin-loop/src/resume.rs',
+    'crates/symbio-plugin-loop/src/resume.test.rs',
   ]
   // `resumed` 只在执行体那两处判——`loop_rows.rs` 里的 `turn_head.resumed` 是
   // 视图字段名，不是旁路分支。
   const RESUMED_FILES = [
-    'symbio/src/plugins/loop/turn_exec.rs',
-    'symbio/src/plugins/loop/turn_exec',
+    'crates/symbio-plugin-loop/src/turn_exec.rs',
+    'crates/symbio-plugin-loop/src/turn_exec',
   ]
   let s017 = 0
   const s017List = []
@@ -956,7 +956,7 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
     })
   }
   // `resume_anchor`：整个生产树（插件 + core 的视图层）都不许再有这个名字。
-  for (const file of ['symbio/src/plugins', 'symbio/src/symbio_core'].flatMap((r) =>
+  for (const file of ['crates/crates/plugins', 'crates/symbio-core/src'].flatMap((r) =>
     walk(path.join(S017_BASE, r)),
   )) {
     if (path.basename(file).endsWith('.test.rs')) continue

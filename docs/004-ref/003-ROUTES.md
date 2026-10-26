@@ -11,7 +11,7 @@ lists: [route-contracts=owner]
 
 > **文档类型：参考（手写）** — 本文是路由的**机制叙述 + 契约表**。
 >
-> - **地址与一句话职责的唯一表是 [RE-006 §2.3](006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")**（从插件 `route` 的 `match` 臂提取，改代码即变）——本文不列第二张地址表。
+> - **地址与一句话职责的唯一表是 [RE-006 §2.3](006-当前事实表.md "RE-006-当前事实表")**（从插件 `route` 的 `match` 臂提取，改代码即变）——本文不列第二张地址表。
 > - **契约表**（下文）：只放只有人知道的事——调用方 / 返回类型 / 备注，以地址为**键**。键必须是 §2.3 里的静态路由（多一个键判红，见 `scripts/facts.test.mjs`）；可以缺（新路由还没人写契约行）。
 > - 改契约只改本文这张表；改地址 = 改代码（`route` 加 `match` 臂 + 臂上一句职责注释）。
 > - 「仓内无调用方」的口径 = `plugin-entry-audit` 路由表的 `refs=0`（只统计仓内；网关会把外部 `path` 原样转发，故对外 API 天然 `refs=0`——`telegram` 六条即此形态）。
@@ -44,7 +44,7 @@ lists: [route-contracts=owner]
 | `telegram/status` | 外部客户端（gateway 原样转发） | `telegram_status::Response` | 通道运行状态 |
 | `telegram/stop_listener` | 外部客户端（gateway 原样转发） | `{success, message}` | — |
 
-> 运行期动态分发的地址（`local/<工具短名>` / `web/<工具短名>` / `vdfs/<操作>` / 容器挂载名）没有可静态枚举的 `match` 臂，不在本表——各插件节有说明；`vdfs/*` 的逐条定义见 [RE-006 §2.2](006-当前事实表.md#22-vdfs-操作 "RE-006-当前事实表")。
+> 运行期动态分发的地址（`local/<工具短名>` / `web/<工具短名>` / `vdfs/<操作>` / 容器挂载名）没有可静态枚举的 `match` 臂，不在本表——各插件节有说明；`vdfs/*` 的逐条定义见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")。
 
 ## 路由语法
 
@@ -67,7 +67,7 @@ lists: [route-contracts=owner]
 
 ### 资源（VDFS）
 
-资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md#22-vdfs-操作 "RE-006-当前事实表")**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `symbio/src/providers/vdfs_service/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
+资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `crates/symbio-provider-vdfs_service/src/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
 
 ---
 
@@ -83,7 +83,7 @@ lists: [route-contracts=owner]
 
 **本插件无自有协议路由**：agent 目录的访问 / 新建 / 删除 / 导出全部由 VDFS 承担（`<根>/agent/…`）——`vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/`vdfs/delete` / 节点动作 `export`（`vdfs/action`）。故 `route` 直接返回 `NotFound` 并指引到 VDFS。
 
-**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`plugins/agent/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md#21-llm-可见工具 "RE-006-当前事实表") 为准**，本文件不重复登记。
+**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`plugins/agent/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表") 为准**，本文件不重复登记。
 
 ---
 
@@ -91,16 +91,16 @@ lists: [route-contracts=owner]
 
 两条只读静态路由：`session/stats` 与 `session/changes`（契约见上表）。**会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上。
 
-> **会话级操作已并入 VDFS（专用路由不再存在）**：列会话清单 · 读整份转写 · 新建会话（id 由后端生成）· 新建 / 打开**具名**会话（id 由调用方给）· 删除会话 · 改 metadata / 标题 ·改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** ·清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**——地址清单与各自职责见 [RE-006 §2.3](006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") 与 [AR-022](../../symbio/src/plugins/session/docs/109-vdfs-session-messages.md "DE-109-vdfs-session-messages")。
+> **会话级操作已并入 VDFS（专用路由不再存在）**：列会话清单 · 读整份转写 · 新建会话（id 由后端生成）· 新建 / 打开**具名**会话（id 由调用方给）· 删除会话 · 改 metadata / 标题 ·改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** ·清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**——地址清单与各自职责见 [RE-006 §2.3](006-当前事实表.md "RE-006-当前事实表") 与 [AR-022](../../crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md "DE-109-vdfs-session-messages")。
 >
 > **一条用户消息只有一个入口**：往收件箱写一条（不再有「发消息」专用路由），因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。新增消息触发一整轮编排（在空间空闲时由空间自己消费）；而**改写与删除**是普通的 VDFS节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。
 >
 > **运转选项（provider / mode / risk）不在写入面上**：它们的唯一 owner 是会话 metadata（`vdfs/write(<根>/session/<id>, { create: true })` upsert），消费链的回退顺序是「调用级 → 会话 metadata → 默认值」（[D-066](../003-design/012-会话输入与地址.md "DE-012-会话输入与地址")）。恢复的 `mode` / `risk_level` 是这一格的仅有的两个**调用级**字段——恢复本就是「用当时的选项把当时那一轮做完」，与消息写入不是同一层级。
 >
 > `stats` 的读数只能调已有的投影、不得另写一份统计口径
-> （[DE-016](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §4 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
+> （[DE-016](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §4 的复算判据）；实现见 [`crates/symbio-plugin-session/src/stats.rs`](../../crates/symbio-plugin-session/src/stats.rs)。
 > `changes` 同理：只调 core 的 `workdir_changes`，不在出口再判「哪些工具算写」——
-> 实现见 [`symbio/src/plugins/session/changes.rs`](../../symbio/src/plugins/session/changes.rs)。
+> 实现见 [`crates/symbio-plugin-session/src/changes.rs`](../../crates/symbio-plugin-session/src/changes.rs)。
 >
 > 读侧闸（[DE-001](../003-design/001-核心架构.md "DE-001-核心架构") §7）：**不声明 `principal` = 本机默认读数**；声明了才按 `can_see` 判可见域（`thread_private` 缺省，C10）——属主全量、**非属主读数为空**（含矩阵内主体；`has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨）。载荷只回答「我是谁」，不接受声明「能看到什么」——那等于给自己授权。可见域**只判一次**：四列、不变量、声誉、就绪集与转写列共用同一个答案，读不出时声誉是**整列**`{}`（不是零值条目）——全有全无，免得「没人立过约」与「不给你看」同形；就绪集与转写列跟四列同形（空切片 ⇒ `{ready: []}` / `{entries: []}`）——「没有就绪任务 / 没有对话」与「不给你看」由 `has_wal` 与列的上下游分辨。
 
@@ -131,8 +131,8 @@ lists: [route-contracts=owner]
 
 > **停用 `loop` ⇒ 该地址 `NotFound`、不再开新轮**；在飞的轮持有交付包与端口的 `Arc`，
 > 存活期长于插件实例，会在有限时间内收敛（守卫用例见
-> [`composite.test.rs`](../../symbio/src/plugins/composite/composite.test.rs)）。
-> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[D-086](../003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表")）。
+> [`composite.test.rs`](../../crates/symbio-plugin-composite/src/composite.test.rs)）。
+> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[D-086](../003-design/014-单环一表.md "DE-014-单环一表")）。
 
 ---
 
@@ -140,7 +140,7 @@ lists: [route-contracts=owner]
 
 「这一轮该直接回答、还是派给工具循环」——只输出**枚举**，不产出面向用户的文本。唯一路由 `classify/decide`（契约见上表）。
 
-> 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。契约 `DecideRequest` / `Verdict` 见 [`symbio_core::dialog`](../../symbio/src/symbio_core/dialog/mod.rs)。不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（卸载平凡值）。两条产线（规则短路 0 次 LLM / 快速档 1 次静默 LLM）见 [classify 插件的 README](../../symbio/src/plugins/classify/README.md "symbio/src/plugins/classify/README")。
+> 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。契约 `DecideRequest` / `Verdict` 见 [`symbio_core::dialog`](../../crates/symbio-core/src/dialog/mod.rs)。不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（卸载平凡值）。两条产线（规则短路 0 次 LLM / 快速档 1 次静默 LLM）见 [classify 插件的 README](../../crates/symbio-plugin-classify/README.md "crates/symbio-plugin-classify/README")。
 
 ---
 
@@ -148,9 +148,9 @@ lists: [route-contracts=owner]
 
 「首响 / 答话 / 汇报」的措辞——只输出**文本**，不做判决。唯一路由 `compose/wording`（契约见上表）。
 
-> 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。契约 `ComposeRequest` 见 [`symbio_core::dialog`](../../symbio/src/symbio_core/dialog/mod.rs)；其中 `snapshot`（`RunSnapshot`）是 `session` 投影的运行现状，**只有 `Report` 读它**。出参**空串 = 没有对话面文本**（平凡值），调用方据此不写节点。
+> 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。契约 `ComposeRequest` 见 [`symbio_core::dialog`](../../crates/symbio-core/src/dialog/mod.rs)；其中 `snapshot`（`RunSnapshot`）是 `session` 投影的运行现状，**只有 `Report` 读它**。出参**空串 = 没有对话面文本**（平凡值），调用方据此不写节点。
 >
-> 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时**降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗汇报配额（卸载平凡值）。三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见 [compose 插件的 README](../../symbio/src/plugins/compose/README.md "symbio/src/plugins/compose/README")。调用方开关 `SessionConfig::compose_enabled`（`<session 目录>/PLUGIN.yml`）；`Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（判据行 `policy.report` 与 `report_due` 视图见 [`loop_rows.rs`](../../symbio/src/plugins/loop/loop_rows.rs)）——措辞与触发是两件事，各有各的开关。
+> 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时**降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗汇报配额（卸载平凡值）。三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见 [compose 插件的 README](../../crates/symbio-plugin-compose/README.md "crates/symbio-plugin-compose/README")。调用方开关 `SessionConfig::compose_enabled`（`<session 目录>/PLUGIN.yml`）；`Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（判据行 `policy.report` 与 `report_due` 视图见 [`loop_rows.rs`](../../crates/symbio-plugin-loop/src/loop_rows.rs)）——措辞与触发是两件事，各有各的开关。
 
 ---
 
@@ -167,13 +167,13 @@ lists: [route-contracts=owner]
 | `anthropic_messages` | Anthropic | `/v1/messages` |
 | `gemini_api` | Google | `generateContent` |
 
-> 协议适配内化于 `symbio/src/plugins/model/protocols/`，机制见 `symbio/src/plugins/model/README.md`；为什么支持多协议见 [D-004](../../symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")。
+> 协议适配内化于 `crates/symbio-plugin-model/src/protocols/`，机制见 `crates/symbio-plugin-model/README.md`；为什么支持多协议见 [D-004](../../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")。
 
 ---
 
 ## Local 插件
 
-> **路由按工具名动态分发**：`local/<工具短名>`，与 LLM 工具是**同一份集合**（`route` 里 `tool_impls.iter.find(|t| t.name == path)`）——成员清单与风险等级见 [RE-006 §2.1](006-当前事实表.md#21-llm-可见工具 "RE-006-当前事实表")（工具面），本文不列第二遍。`shell` 族工具名按操作系统取（Windows = `cmd`），静态抽取只见占位名。
+> **路由按工具名动态分发**：`local/<工具短名>`，与 LLM 工具是**同一份集合**（`route` 里 `tool_impls.iter.find(|t| t.name == path)`）——成员清单与风险等级见 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表")（工具面），本文不列第二遍。`shell` 族工具名按操作系统取（Windows = `cmd`），静态抽取只见占位名。
 
 > **文件编辑类原生工具已迁入 VDFS 物理层**，由 `vdfs` 插件以`vdfs_read` / `vdfs_write` / `vdfs_edit` / `vdfs_search` 等统一暴露，本插件不再提供。`ask_user` 产 `user_prompt` 节点等用户回答（与工具审批同一套回填机制）；自动模式下不产节点、返回 `tool_unavailable` 让模型自行继续。
 
@@ -185,7 +185,7 @@ lists: [route-contracts=owner]
 
 ## Web 插件
 
-> **路由按工具名动态分发**：`web/<工具短名>`，与 LLM 工具同一份集合（同 `local`）。三个工具（`web_search` / `web_fetch` / `http_request`）的清单与语义见 [RE-006 §2.1](006-当前事实表.md#21-llm-可见工具 "RE-006-当前事实表")。
+> **路由按工具名动态分发**：`web/<工具短名>`，与 LLM 工具同一份集合（同 `local`）。三个工具（`web_search` / `web_fetch` / `http_request`）的清单与语义见 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表")。
 
 ---
 
@@ -243,7 +243,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 > 配置就是 `<根>/gateway/PLUGIN.yml`（扁平键 `inbound_*`）；写入走 `vdfs/write` →`PluginConfigFile::apply` 落盘后，本插件在自己的 `write` 里做副作用（**内部 stop + start 重建监听**）。`gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。
 >
-> 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单（`vdfs/root|list|tree|stat|read|search`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [RE-001-CONFIGURATION](001-CONFIGURATION.md)。
+> 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单（`vdfs/root|list|tree|stat|read|search`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [RE-001-CONFIGURATION](001-CONFIGURATION.md "RE-001-CONFIGURATION")。
 
 ---
 
@@ -285,4 +285,4 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ---
 
-> **维护原则**：新增路由 = 在插件 `route` 加 `match` 臂 + 臂上一句职责注释（地址与职责自动进 [RE-006 §2.3](006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")），契约（调用方 / 返回类型 / 备注）来本文的契约表补一行；删除路由时**只把路径挪进 §退役路由索引**，不在此处写过程叙述。
+> **维护原则**：新增路由 = 在插件 `route` 加 `match` 臂 + 臂上一句职责注释（地址与职责自动进 [RE-006 §2.3](006-当前事实表.md "RE-006-当前事实表")），契约（调用方 / 返回类型 / 备注）来本文的契约表补一行；删除路由时**只把路径挪进 §退役路由索引**，不在此处写过程叙述。

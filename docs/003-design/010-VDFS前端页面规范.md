@@ -14,8 +14,8 @@ deps: [DE-009-VDFS规范]
 范围：Symbio 前端的「三栏资源页」——一套 `vdfs/*` 协议驱动全部资源页的呈现
 关联：
 `docs/003-design/009-VDFS规范.md`（**机制规范，权威**：接口、访问位、协议操作、分层）、
-`symbio/src/symbio_core/vdfs/`（纯接口）、
-`symbio/src/plugins/vdfs/protocol.rs`（线路信封）、
+`crates/symbio-core/src/vdfs/`（纯接口）、
+`crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）、
 `tauri/src/schemas/vdfs.ts`（前端数据契约）、
 `tauri/src/composables/useVdfs.ts`（页面逻辑）、
 `tauri/src/views/VdfsView.vue`（页面装配）
@@ -98,7 +98,7 @@ deps: [DE-009-VDFS规范]
 **增长**（`updated` + `delta`）；会话运行态是会话节点 `<根>/session/<id>` 的
 `status`（`updated`，无 `delta` ⇒ 回读）。判据与推导见
 [D-025](005-协议规范.md "DE-005-协议规范")
-与 `symbio/src/plugins/session/docs/105-node-state-streaming.md`。
+与 `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`。
 
 ---
 
@@ -137,7 +137,7 @@ deps: [DE-009-VDFS规范]
 
 - **前端服务层不做任何地址翻译**：`services/vdfs.ts` 只封装调用，
  没有 `toWirePath` / `toVdfsPath`（后端 `normalize_addr` 不强加前导 `/`，也**不剥掉**
- 调用方带来的那个 `/`——它是操作系统的绝对锚点，见 [D-172](009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
+ 调用方带来的那个 `/`——它是操作系统的绝对锚点，见 [D-172](009-VDFS规范.md "DE-009-VDFS规范")）。
 - 页面逻辑、渲染器、路径代数**只认 `<根>` 口径**。
 - **口径翻译唯一在后端一处**：`<根>/session/x` ↔ 树内 `session/x`
  （`UnifiedFs` 进出两处各一次）。provider 永远只见自己子树内的相对路径。
@@ -157,7 +157,7 @@ deps: [DE-009-VDFS规范]
 ### 4.1 左栏：导航（绑定地址的子目录清单）
 
 - **数据源**：`vdfs/list('<绑定地址>')` 的目录内容——绑定
- `<根>` 时由访问层**合成**（见 [VDFS 插件](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README")），
+ `<根>` 时由访问层**合成**（见 [VDFS 插件](../../crates/symbio-plugin-vdfs/README.md "crates/symbio-plugin-vdfs/README")），
  返回普通目录节点集合（`kind = dir`），前端只做形状映射，
  **不消费** `vdfs/providers` 端点（该端点已随 `VdfsMountInfo` 一并删除）。
 - **每一项携带**：`name`（子目录名）、`title`（展示标题）、`icon`（纯 UI 映射）、

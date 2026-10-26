@@ -1,0 +1,695 @@
+//! Turn 任务的宿主层：`run_chat_loop` 的启动、等待与终态收尾。
+//!
+//! ## 这里只做一件事：管住一个 Turn 任务的生命周期
+//!
+//! 出口是 [`ExecEventSink`]（进程内直连转写唯一写入点），中止是 [`ExecAbortSignal`]，
+//! 因此本模块不消费任何帧：一次 `spawn` → 直接 `await` 它的 `JoinHandle`，
+//! 由 `select!` 三臂决定谁先回来（任务结束 / 1800s 看门狗 / 状态被接管）。
+//!
+//! ## 出口结局与收尾
+//!
+//! | 结局 | 收尾 |
+//! |---|---|
+//! | 任务正常结束 | 清在途转写 → 复位 `is_working` → 广播 idle（`completed`） |
+//! | 任务交回 `TurnReport`（`status = aborted`） | 在途 Turn 落库 `Aborted` → 结局 `aborted` → 走统一收尾 |
+//! | 任务返回 `Err(其他)` | `persist_failure(Failed)` + Error 广播 + idle，**就地 return** |
+//! | 任务 panic / 被取消 | 同上（panic 载荷只进日志，前端只回通用文案） |
+//! | 1800s 无进展（看门狗） | `persist_failure(Failed)` + Error 广播 + idle，**就地 return** |
+//! | 会话状态被外部复位 / 换请求 | 走统一收尾（`completed`） |
+//!
+//! 「就地 return」的两条出口自行完成收尾，因此前端不会收到第二条 idle 事件。
+//!
+//! ⚠️ **事故敏感区**：`StopSignal` 配对语义与「中止不是失败」的结局判定曾出过事故
+//! （189 个 Turn 被误标 Failed），改动前先读 D-018 与相关条目。
+//!
+//! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `start_turn` 调用（在它 spawn 的
+//! 任务体内），故标 `pub(super)`。
+
+use super::sink::TranscriptSink;
+use super::*;
+
+/// 一个 Turn 任务的等待结局。
+enum TurnOutcome {
+    /// 任务结束（含 panic / 被取消）：成功时是驱动器交回的结局值。
+    Finished(Result<Result<symbio_core::TurnReport, PluginError>, tokio::task::JoinError>),
+    /// 看门狗：1800s 内既无结束也无状态变化，判定链路挂死。
+    Watchdog,
+    /// 会话状态被外部复位或请求已更换（新一轮接管），本任务让位。
+    Superseded,
+}
+
+/// 地址面派发的错误映射：`NotFound`（容器里没有 loop 挂载点）保留原语义，
+/// 由调用方走 `fail_before_loop`；其余一律按内部失败。
+fn dispatch_error(e: symbio_core::VdfsError) -> PluginError {
+    match e {
+        symbio_core::VdfsError::NotFound(m) => PluginError::NotFound(m),
+        other => PluginError::InternalError(format!("驱动器派发失败：{other}")),
+    }
+}
+
+/// 等待会话状态被复位或请求被更换（非阻塞轮询）。
+///
+/// 收口前这个判定写在帧循环体内（每收到一帧查一次）；现在没有帧了，改为独立
+/// 定时器臂。200ms 粒度与收口前的实际行为相当——流式期间帧的到达间隔远小于此。
+async fn wait_state_superseded(state: &Arc<ActiveSessionState>, rid: u64) {
+    loop {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if !state.inner.read().await.is_working() || state.request_id.load(Ordering::SeqCst) != rid
+        {
+            return;
+        }
+    }
+}
+
+impl TurnLauncher {
+    /// 进入 chat_loop **之前**就失败的统一收尾（provider 解析 / 能力访问器缺失等）。
+    ///
+    /// 与正常出口一样保证 Working → Stop 严格配对：这里**显式**补发一次 Stop，
+    /// 而不是依赖 `StopSignal::drop` 兜底——兜底路径会打"显式触发点未执行"的
+    /// warn（那是为真正的漏调准备的告警），而本函数是已知的生命周期终点，
+    /// 属于正常语义，不应污染告警通道（session-mechanism-unification.md §4.4）。
+    ///
+    /// 返回 `()`；调用方随后置 `guard.done = true` 并 return。
+    async fn fail_before_loop(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        session_id: &str,
+        collected: &Arc<tokio::sync::Mutex<crate::transcript::Transcript>>,
+        stop: &StopSignal,
+        error: impl Into<String>,
+    ) {
+        let err = error.into();
+        symbio_core::plugin_error!("session", "{}", &err);
+        self.convergence
+            .persist_failure(
+                session_id,
+                collected,
+                &err,
+                cm::NodeStatus::Failed,
+                Vec::new(),
+            )
+            .await;
+        // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
+        stop.fire_text(String::new()).await;
+        self.convergence.broadcast_error_with_idle(state, err).await;
+    }
+
+    /// Turn 任务三条**失败出口**（业务错误 / panic·取消 / 看门狗）的统一收尾。
+    ///
+    /// 这三条支路原是逐字重复的四步，顺序契约只写在注释里；漏一步的后果各不相同
+    /// 且都是静默的，所以把它写进函数体：
+    ///
+    /// 1. `persist_failure` **早于**广播——否则前端先收到 Error、节点却还是在途态；
+    /// 2. `broadcast_error_with_idle` 负责复位 `is_working` + 广播 Error + idle
+    ///    （不复位会让后续 resume 被 `session_busy` 守卫静默拒绝）；
+    /// 3. `guard.done = true`——漏置位则 `WorkingGuard::drop` 再跑一遍崩溃恢复，
+    ///    同一失败被重复落库、前端收到两条 Error；
+    /// 4. `abort_guard.disarm()`——注销中止信号登记，不留到下一轮。
+    ///
+    /// 调用方在本函数返回后**自行 `return`**：保留三条支路「就地 return」的形状，
+    /// 以免下一条新增支路顺着往下走到统一收尾里去（那会再发一条 idle）。
+    async fn teardown_failed_turn(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        session_id: &str,
+        collected: &Arc<tokio::sync::Mutex<crate::transcript::Transcript>>,
+        guard: &mut WorkingGuard,
+        abort_guard: &mut AbortGuard,
+        error: String,
+    ) {
+        self.convergence
+            .persist_failure(
+                session_id,
+                collected,
+                &error,
+                cm::NodeStatus::Failed,
+                Vec::new(),
+            )
+            .await;
+        self.convergence
+            .broadcast_error_with_idle(state, error)
+            .await;
+        guard.done = true;
+        abort_guard.disarm().await;
+    }
+
+    /// 统一的 chat_loop 任务执行器（`handle_chat_message` 与 continuation 共用）。
+    ///
+    /// 职责：
+    /// - 构造 `WorkingGuard`（保障 panic 时 `is_working` 收敛 + 失败持久化）
+    /// - 解析 provider（entry 回退链）→ 限流 → 进程内 spawn `run_chat_loop`
+    /// - 登记中止信号（[`AbortGuard`]）→ 等待 Turn 任务的四种结局之一 → 统一收尾
+    ///
+    /// `chat_ctx` 应已设置好 PATH/SESSION_ID/AGENT_ID/WORKDIR/payload 等所有字段。
+    pub(super) async fn run_chat_loop_task(
+        &self,
+        state: Arc<ActiveSessionState>,
+        chat_ctx: Arc<dyn PluginInvokeRequest>,
+        session_id: String,
+        parent: Arc<dyn Plugin>,
+        provider_id: Option<String>,
+        rid: u64,
+    ) {
+        symbio_core::plugin_info!(
+            "session",
+            "[Session] Turn 任务启动：session={session_id}, rid={rid}, provider={:?}",
+            provider_id
+        );
+        // 会话转写**取自会话状态本身**（不是新建第二份）：VDFS 转写列表的在途
+        // 叠加与实时流读的是同一个 `Transcript`。开始前清空在途图——上一轮的
+        // 收尾已清过一次，这里再清一次是防 panic 残留。
+        let transcript = state.transcript.clone();
+        transcript.lock().await.clear();
+
+        let stop = Arc::new(StopSignal::new(Some(parent.clone()), chat_ctx.fork()));
+
+        // 工作态守卫：保障 panic / 异常退出时 is_working 收敛 + 失败持久化 + Stop 兜底。
+        // 正常结束路径会在收尾前把 `done` 置 true（见块末尾）。
+        let mut guard = WorkingGuard {
+            state: state.clone(),
+            convergence: self.convergence.clone(),
+            collected: transcript.clone(),
+            session_id: session_id.clone(),
+            stop: stop.clone(),
+            done: false,
+        };
+
+        // ── 进程内直连：解析 provider entry → 限流 → spawn run_chat_loop ──
+        // Provider 解析回退链：
+        // 精确 id → is_default → 首个已注册（traverse 仅注册 enabled provider）。
+        let manager = match chat_ctx.get(symbio_core::CAPABILITY_VISITOR) {
+            Some(m) => m,
+            None => {
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &stop,
+                    "CAPABILITY_VISITOR 不可用，无法解析 Model Provider".to_string(),
+                )
+                .await;
+                // 收尾已在本分支自行完成（persist_failure + Stop + Error 广播 + idle）：
+                // 必须置 done=true，否则 WorkingGuard::drop 会再跑一遍崩溃恢复，
+                // 导致同一失败被重复落库、前端收到两条 Error 事件。
+                guard.done = true;
+                return;
+            }
+        };
+        // provider_id 参数仅为错误文案保留：model 插件 traverse 已按
+        // ctx[PROVIDER_ID] > default > 首个 enabled 完成解析并注册唯一生效 Provider，
+        // session 侧直接取用，不重复回退链。
+        let provider = match symbio_core::capability_model_active(&*manager).await {
+            Some(p) => p,
+            None => {
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &stop,
+                    format!("未找到可用的 Model Provider（requested={provider_id:?}）"),
+                )
+                .await;
+                // 收尾已在本分支自行完成：必须置 done=true（理由同上）。
+                guard.done = true;
+                return;
+            }
+        };
+
+        // Provider 级限流（RATE_LIMITER 归属 session 插件，0 表示不限流）
+        super::rate_limit::RATE_LIMITER
+            .wait(provider.provider_id(), provider.rate_limit_ms())
+            .await;
+
+        // 运行时上下文收敛在 provider.effective_context_tokens() 内部完成（服务端
+        // 上报值与用户设置取 min）；此处仅保留降档可见日志。
+        let context_limit = provider.effective_context_tokens().await;
+        if context_limit < provider.max_context_tokens() {
+            symbio_core::plugin_info!(
+                "session",
+                "模型服务上报最大上下文 {context_limit}，低于用户设置 {}，运行时采用较小值",
+                provider.max_context_tokens()
+            );
+        }
+        // ── 本轮交付包（[D-086] §2/§3）：纯值 + 事实轨端口 + 世界端口 ──────
+        //
+        // 出口：进程内直连转写唯一写入点（会话侧持有），随包交给驱动器；
+        // 驱动器的每一次节点变更仍直接落进这张转写（不经「序列化 → 反序列化」）。
+        let sink = ExecEventSink::direct(Arc::new(TranscriptSink::new(
+            self.convergence.clone(),
+            state.clone(),
+        )));
+        // 压缩增量改道用的转写写口：过滤桥在会话侧，驱动器只持 trait object。
+        let writer = super::super::transcript::compression::CompressionEmitter::new(state.clone())
+            .transcript_writer();
+        // 中止：本 Turn 唯一的入方向原语。登记进会话状态后，`handle_abort` 直接
+        // 置位（无帧、无轮询）；守卫注销时一并置位。
+        let abort = ExecAbortSignal::new();
+        let mut abort_guard = AbortGuard::register(state.clone(), abort.clone()).await;
+
+        // 本轮会话引擎：优先复用编排入口已交付的句柄（临时会话的唯一正确来源），
+        // 缺句柄才经 Convergence 重建（持久会话无实例状态，重建等价）。
+        let session = match chat_ctx.get(super::super::chat_session::SESSION_HANDLE) {
+            Some(handle) => {
+                let super::super::chat_session::ChatSessionHandle(session) = &*handle;
+                session.clone()
+            }
+            None => match self
+                .convergence
+                .open_session_handle(Some(session_id.clone()))
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    self.fail_before_loop(
+                        &state,
+                        &session_id,
+                        &transcript,
+                        &stop,
+                        format!("会话引擎句柄构造失败：{e}"),
+                    )
+                    .await;
+                    guard.done = true;
+                    return;
+                }
+            },
+        };
+
+        // 本轮纯值快照：配置标量一次取完（请求生命周期内不变）。
+        let cfg = self.config.read().await.clone();
+        // 子会话 ⇒ `Child(父主体)`、顶层 ⇒ `Root`（同一读法，
+        // 从驱动器搬到会话侧：这是元数据事实，驱动器不再回头读父会话）。
+        let scope = match session.delegating_principal().await {
+            Some(parent) => symbio_core::Scope::Child(parent),
+            None => symbio_core::Scope::Root,
+        };
+        let spec = symbio_core::TurnSpec {
+            session_id: session_id.clone(),
+            tool_archive_dir: super::super::paths::session_subdir(
+                self.dir.dir(),
+                &session_id,
+                super::super::paths::TOOL_ARCHIVES_SUBDIR,
+            ),
+            transcript_archive_dir: super::super::paths::session_subdir(
+                self.dir.dir(),
+                &session_id,
+                super::super::paths::TRANSCRIPTS_SUBDIR,
+            ),
+            principal: symbio_core::request_principal(&*chat_ctx),
+            scope,
+            persistent: session.store_handle().is_persistent(),
+            context_window: session.context_window(),
+            settings: symbio_core::TurnSettings {
+                auto_compress: cfg.auto_compress,
+                classify_enabled: cfg.classify_enabled,
+                compose_enabled: cfg.compose_enabled,
+                opening_enabled: cfg.opening_enabled,
+                progress_enabled: cfg.progress_enabled,
+                progress_interval_ms: cfg.progress_interval_ms,
+                progress_min_rounds: cfg.progress_min_rounds,
+                progress_max_per_turn: cfg.progress_max_per_turn,
+                presentation_tree: cfg.presentation_tree(),
+                skill_compile_enabled: cfg.skill_compile_enabled,
+                skill_fast_path: cfg.skill_fast_path,
+                worker_force_prefix: cfg.worker_force_prefix.clone(),
+                worker_keywords: cfg.worker_keywords.clone(),
+                worker_min_chars: cfg.worker_min_chars,
+                task_cap: cfg.task_cap,
+            },
+        };
+        // 事实轨端口：临时会话 ⇒ `None`（驱动器沿用「无事实源 ⇒ 不落派生事实」）。
+        let facts: Option<Arc<dyn symbio_core::Store<Event = symbio_core::Event>>> =
+            match session.facts() {
+                Ok(Some(store)) => Some(store),
+                Ok(None) => None,
+                Err(e) => {
+                    self.fail_before_loop(
+                        &state,
+                        &session_id,
+                        &transcript,
+                        &stop,
+                        format!("事实源打不开：{e}"),
+                    )
+                    .await;
+                    guard.done = true;
+                    return;
+                }
+            };
+
+        // `UserPromptSubmit` 归会话生命周期（[D-086] §6）：在派发之前触发，
+        // 与搬家前「首轮追加用户消息后立即触发」的时点一致。resume 没有
+        // `single_message` ⇒ 不触发（工具结果不是用户发言）。
+        let hook_prompt = chat_ctx
+            .payload::<chat_request::Request>()
+            .ok()
+            .and_then(|req| req.single_message)
+            .and_then(|m| m.content.as_ref().map(|c| c.to_text()));
+        if let Some(prompt) = hook_prompt {
+            let _ = symbio_plugin_api::hooks::fire_hook(
+                &Some(parent.clone()),
+                symbio_plugin_api::hooks::HookEvent::UserPromptSubmit { prompt },
+                chat_ctx.fork(),
+            )
+            .await;
+        }
+
+        let dispatch = Arc::new(symbio_core::TurnDispatch {
+            spec,
+            facts,
+            sink,
+            writer,
+            abort,
+            provider,
+            parent: Some(parent.clone()),
+            context_limit,
+        });
+        // 令牌挂在**宿主的 fork** 上：线上不可伪造（WIRE=false），且只对本次派发可见。
+        let dispatch_ctx = chat_ctx.fork();
+        dispatch_ctx.set(symbio_core::TURN_DISPATCH, dispatch.clone());
+
+        let provider_view = match parent.get_vfs_provider() {
+            Some(p) => p,
+            None => {
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &stop,
+                    "驱动器不可达（容器未提供 VDFS 面）",
+                )
+                .await;
+                guard.done = true;
+                return;
+            }
+        };
+
+        // 动作体就是整轮 future：loop 在动作里跑完，把结局序列化进动作响应。
+        let loop_path = format!("{}/{}", symbio_deploy::PLUGIN_ID_LOOP, session_id);
+        let handle = tokio::spawn(async move {
+            let resp = provider_view
+                .dispatch(
+                    &symbio_core::vdfs_context(&dispatch_ctx),
+                    &loop_path,
+                    symbio_core::VdfsRequest::Action {
+                        action: symbio_core::LOOP_RUN_TURN.to_string(),
+                        payload: Some(serde_json::json!({})),
+                    },
+                )
+                .await
+                .map_err(dispatch_error)?;
+            let symbio_core::VdfsResponse::Action(result) = resp else {
+                return Err(PluginError::InternalError(format!(
+                    "驱动器动作返回了非动作响应：{loop_path}"
+                )));
+            };
+            if !result.ok {
+                return Err(PluginError::InternalError(format!(
+                    "驱动器动作失败：{}",
+                    result.message
+                )));
+            }
+            let data = result
+                .data
+                .ok_or_else(|| PluginError::InternalError("驱动器动作缺少结局载荷".to_string()))?;
+            serde_json::from_value::<symbio_core::TurnReport>(data)
+                .map_err(|e| PluginError::InternalError(format!("驱动器结局载荷不合法：{e}")))
+        });
+
+        plugin_debug!(
+            "session",
+            "[Consume] Turn 任务已派发（session={session_id}, rid={rid}）"
+        );
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::select! {
+            r = handle => TurnOutcome::Finished(r),
+            // 1800s 无任何进展 → 判定链路挂死（LLM 流挂起且未触发空闲超时等）。
+            // 收口前这条判定挂在 `recv` 超时上；现在挂在任务本身——语义更强：
+            // 不看「有没有帧」，只看「这个 Turn 到底结束了没有」。
+            _ = tokio::time::sleep(Duration::from_secs(1800)) => TurnOutcome::Watchdog,
+            _ = wait_state_superseded(&state, rid) => TurnOutcome::Superseded,
+        };
+
+        // 本 Turn 的**出口结局**：中止与「正常结束」走同一段收尾，因此必须在这里
+        // 记下"是不是中止"，否则收尾会把用户中止报成「正常完成」。
+        // 与 `handle_abort` 共用 `SessionStateChange::aborted()` 这一个构造点——
+        // 两个写者写同一个值，时序竞态因此无害。
+        let mut exit_state = SessionStateChange::completed();
+
+        match outcome {
+            TurnOutcome::Finished(Ok(Ok(report))) => {
+                // Stop 钩子归会话生命周期（[D-086] §6）：驱动器把末条正文交回，
+                // 这里统一触发——「恰好一次」由生命周期保证，不是两侧各记一次。
+                stop.fire_text(report.last_message.unwrap_or_default())
+                    .await;
+                match report.status {
+                    symbio_core::TurnStatus::Completed => {
+                        symbio_core::plugin_info!(
+                            "session",
+                            "[Consume] Turn 任务正常结束（运行时长={}s）",
+                            started.elapsed().as_secs()
+                        );
+                    }
+                    symbio_core::TurnStatus::Aborted => {
+                        // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染
+                        // 错误条与重试入口；但**不收敛为「失败」结局**——中止不是错误：
+                        // 会话节点回 `active` + `outcome = aborted`（由 handle_abort 收口，
+                        // 流式动画随之停止）。
+                        //
+                        // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
+                        // 它们是事实，随 `persist_failure` 收尾入格——
+                        // 用户中断后重建的历史里那半句话还在。
+                        self.convergence
+                            .persist_failure(
+                                &session_id,
+                                &transcript,
+                                "用户手动中止了本次回复",
+                                cm::NodeStatus::Aborted,
+                                report.partial,
+                            )
+                            .await;
+                        exit_state = SessionStateChange::aborted();
+                    }
+                    symbio_core::TurnStatus::Failed => {
+                        // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
+                        // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
+                        // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。
+                        self.teardown_failed_turn(
+                            &state,
+                            &session_id,
+                            &transcript,
+                            &mut guard,
+                            &mut abort_guard,
+                            report
+                                .error
+                                .unwrap_or_else(|| "驱动器报告失败但未给出原因".to_string()),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+            TurnOutcome::Finished(Ok(Err(PluginError::NotFound(msg)))) => {
+                // 容器里没有 loop 挂载点 = 部署形状错误（[D-086] §5）：
+                // 走「进入驱动器之前就失败」的统一收尾。
+                self.fail_before_loop(&state, &session_id, &transcript, &stop, msg)
+                    .await;
+                guard.done = true;
+                abort_guard.disarm().await;
+                return;
+            }
+            TurnOutcome::Finished(Ok(Err(e))) => {
+                symbio_core::plugin_error!(
+                    "session",
+                    "[ChatLoop] 驱动器派发异常退出: {e} (code={})",
+                    e.code()
+                );
+                stop.fire_text(String::new()).await;
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    e.to_string(),
+                )
+                .await;
+                return;
+            }
+            TurnOutcome::Finished(Err(join_err)) => {
+                // join error（含 panic）：面向前端只回通用文案（不泄漏内部细节），
+                // 但**日志侧必须保留 panic 载荷**——`JoinError::to_string()` 含 panic
+                // 消息与 `file:line:col`，是定位的唯一线索；若只依赖 stderr 的
+                // 默认 panic hook，日志文件/结构化日志里将查不到。
+                let detail = join_err.to_string();
+                let msg = if join_err.is_panic() {
+                    symbio_core::plugin_error!(
+                        "session",
+                        "[ChatLoop] chat_loop 任务 panic，已被 join 隔离：{detail}"
+                    );
+                    "服务器内部发生未预期的错误".to_string()
+                } else {
+                    symbio_core::plugin_error!(
+                        "session",
+                        "[ChatLoop] 任务 join 失败（cancelled）：{detail}"
+                    );
+                    format!("Chat loop task failed: {detail}")
+                };
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    msg,
+                )
+                .await;
+                return;
+            }
+            TurnOutcome::Watchdog => {
+                let msg = format!(
+                    "消费循环超时：{} 秒内 Turn 任务未结束，疑似 LLM/工具链路挂死，已强制收尾（在途 Turn 标记为失败）",
+                    1800
+                );
+                symbio_core::plugin_error!("session", "[Consume] {}", &msg);
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    msg,
+                )
+                .await;
+                return;
+            }
+            TurnOutcome::Superseded => {
+                symbio_core::plugin_info!(
+                    "session",
+                    "[Consume] 会话状态已复位或请求已更换（is_working/request_id 变更），Turn 任务让位：运行时长={}s",
+                    started.elapsed().as_secs()
+                );
+            }
+        }
+
+        // 走到这里说明是「正常结束」或「中止后收敛」两条出口之一——两者都还没做过
+        // 状态收敛，统一在此收尾。
+        //
+        // 在途缓冲此刻可以清空：Turn 任务已结束，而 `chat_loop::persist_messages`
+        // 在返回前就已把本轮消息落库——转写的权威副本已经回到存储，继续叠加在途
+        // 副本只会让同一条消息出现两次。
+        transcript.lock().await.clear();
+        // 提前复位 `is_working`（在 `emit_session_state` 之前，理由见该方法的说明）。
+        state.reset_working().await;
+        guard.done = true;
+        abort_guard.disarm().await;
+        // 正常收尾：运行态收敛为「上一轮结束」。结局由 `exit_state` 决定——
+        // 中止出口是 `aborted`（不是 `completed`），与 `handle_abort` 同一构造点。
+        self.convergence
+            .emit_session_state(&state, exit_state)
+            .await;
+    }
+
+    pub async fn handle_abort(&self, state: &Arc<ActiveSessionState>) {
+        // 登记的中止信号即「在途 Turn」：取出克隆后置位（不 take——注销由
+        // `AbortGuard` 负责，`handle_abort` 只负责发出中止意图）。
+        let signal = state.inner.read().await.abort_signal.clone();
+        let registered = signal.is_some();
+        if let Some(sig) = &signal {
+            sig.abort();
+        }
+        symbio_core::plugin_info!(
+            "session",
+            "[Abort] 收到中止请求：中止信号{}（{}）",
+            if registered {
+                "已登记，已置位"
+            } else {
+                "未登记，走 3s 兜底强制收敛"
+            },
+            if registered {
+                "等待 chat_loop 自行退出"
+            } else {
+                "is_working 将被直接复位"
+            }
+        );
+
+        if registered {
+            // 轮询等待中止信号被主动注销（最迟 3s 兜底，避免无限等待）
+            //
+            // 历史：原代码用 20×100ms=2s 硬编码 sleep 等候 AI 子任务退出；
+            // 现在轮询登记是否被清空（见 `AbortGuard::disarm`），更准确反映
+            // 子任务结束时机。3s 是兜底上限：若子任务未收敛，仍能 3s 内强制收敛。
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                if state.inner.read().await.abort_signal.is_none() {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    symbio_core::plugin_warn!("session", "[Abort] 中止信号未在 3s 内注销，强制收敛");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        // 复位与注销**同一个临界区内**完成：中止信号登记是 `handle_abort` 判断
+        // 「在途 Turn 还在不在」的唯一判据，与「已空闲」必须一起可见——拆成两次
+        // 写就会有中间态（已空闲但仍登记着信号 / 已注销却仍显示在跑）。
+        // 这里刻意不走 `reset_working`（那个方法只复位运行态、且是条件写）。
+        state.clear_working_and_abort_signal().await;
+
+        // 节点收口——**中止路径自己的责任**，不能等 chat_loop。
+        //
+        // 上面的 3s 兜底一旦超时，说明 chat_loop 卡在某个不轮询中止信号的 await 里
+        // （非流式工具执行是典型：`route_fut` 是单次 await，最长硬超时 600s）。
+        // 此时 `abort_flag` 永远不置位，chat_loop 也就不会冒泡 `Err(Aborted)`；
+        // 而本函数在下一帧醒来时因 `!is_working` 直接跳过 `persist_failure`。
+        // 于是工具节点停在 `Streaming` 并永远转下去——「终止后还显示运行中」的根因。
+        //
+        // 无论 chat_loop 是否已收口，这里都跑一次：正常收口路径（Turn 任务的
+        // ABORTED 分支）已把节点定稿，本调用因此是幂等的空操作。
+        let converged = self
+            .convergence
+            .converge_inflight(state, &state.request_id_str(), "用户中止")
+            .await;
+
+        // 运行态收敛为「用户中止」。中止**不是**失败：会话节点的 `outcome` 记
+        // `aborted`（提示音据此选音色），而 `status` 回到空闲——用户知道自己按了停止，
+        // 再给一个失败角标只是噪音。
+        //
+        // 顺序有意：节点补丁先于会话状态。前端 `applySessionNode` 在
+        // `working → 非 working` 迁移时会清掉"等待审批"角标与活动文字，因此
+        // 消息节点必须先落地，否则会出现"会话已空闲、节点还在跑"的一帧。
+        symbio_core::plugin_info!(
+            "session",
+            "[Abort] 收口完成：{} 个在途节点定稿为 Completed",
+            converged
+        );
+        self.convergence
+            .emit_session_state(state, SessionStateChange::aborted())
+            .await;
+    }
+
+    /// **中止某会话正在跑的那一轮**——`action(<A>, "abort")` 与 `chat/abort` 共用的
+    /// 唯一实现。
+    ///
+    /// 返回**是否真的中止了一个在途轮次**。`false` = 这个会话此刻没在跑（含「本
+    /// 实例从未跑过它」）：调用方把它翻成一句明确的话，而不是报成功——`chat/abort`
+    /// 最坏的一面就是「无论停没停都回 `aborted`」。
+    pub(crate) async fn abort_turn(&self, session_id: &str) -> bool {
+        // **只查不建**：`get_or_create` 在这里会为一个从未跑过的会话（典型是
+        // 子智能体空间的会话被错投到根实例）造一个永不释放的幽灵状态，而中止
+        // 本身是空操作——调用方拿到"成功"，什么都没停。
+        let Some(state) = self.active_mgr.get(session_id).await else {
+            return false;
+        };
+        if !state.inner.read().await.is_working() {
+            return false;
+        }
+        self.handle_abort(&state).await;
+        true
+    }
+}
+
+#[cfg(test)]
+#[path = "consume.test.rs"]
+mod tests;

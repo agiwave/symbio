@@ -56,7 +56,7 @@ const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(script
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive', 'docs'])
 /** 生产源码根：symbio 与内核 crate（D-188 C2a 后内核不再住 symbio/src）。 */
-const SRC_DIRS = [path.join('symbio', 'src'), path.join('symbio_kernel', 'src')]
+const SRC_DIRS = [path.join('crates'), path.join('crates', 'symbio-kernel', 'src')]
 /** 命中形态：与 M6 的 S-012 同一族的「形状」判据，不取词表。
  *  `HIT`（非全局）给 `.test` 用；`HIT_G`（全局）给 `matchAll` 数出现次数用——
  *  带 `g` 的正则做 `.test` 是**有状态**的（`lastIndex` 会留在上一次匹配之后），

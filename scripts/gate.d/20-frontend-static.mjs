@@ -17,7 +17,7 @@
 // 反过来，批内没有哪个阶段会写本阶段要读的东西（backend 只写 `target/`，docs 只读，
 // baseline 只读 git，msrv 写 `.workbuddy-ai/msrv-target`）。
 //
-// ## 收益（2026-10-09 A/B 实测，两轮都先 `touch symbio/src/lib.rs` 强制重编译）
+// ## 收益（2026-10-09 A/B 实测，两轮都先 `touch crates/crates/crates/lib.rs` 强制重编译）
 //
 //   旧编排（前端整段在批后）  6m19s：backend 4m59s ∥ docs 2m10s ∥ msrv 1m28s
 //                                    → verify 16s → frontend 30s → e2e 29s → facts 1s

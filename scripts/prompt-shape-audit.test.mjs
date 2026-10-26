@@ -303,7 +303,7 @@ test('--write ⇒ 用现场形状重写基线，随后再判即一致', () => {
 
 test('平台变体名单 == shell.rs 声明的 tool_name（第二份名单不许漂移）', () => {
   const src = fs.readFileSync(
-    path.join(repoRoot, 'symbio/src/plugins/local/shell.rs'),
+    path.join(repoRoot, 'crates/symbio-plugin-local/src/shell.rs'),
     'utf8',
   )
   const fn = src.match(/fn get_os_info\(\)[\s\S]*?\n\}/)

@@ -12,7 +12,7 @@ impl: done
 > 目标：在 App 运行期间对外提供一套纯 HTTP/WebSocket 接口，让第三方应用像前端一样访问和控制整个应用。
 > 接口服务本身作为**一个普通插件**纳入现有插件体系，配置/开启/关闭**复用现有设置页机制**，前端零改动。
 
-- 现状：已实现（`gateway` 插件）。现行端点清单见 [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [数据流与调用链](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
+- 现状：已实现（`gateway` 插件）。现行端点清单见 [路由参考](../004-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [数据流与调用链](003-数据流与调用链.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../crates/symbio-plugin-gateway/README.md "crates/symbio-plugin-gateway/README")
 - 关联：[协议规范](005-协议规范.md "DE-005-协议规范")（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
 
 ---
@@ -25,7 +25,7 @@ impl: done
  往收件箱写消息（`vdfs/write <会话地址>/inbox`）是 fire-and-forget，AI 增量走的是
  VDFS 变更（`kind = "vdfs"`）。连上 WS 后**必须订阅总线 + 对会话地址登记 `vdfs/watch`**
  （两步缺一不可）才收得到流（前端也是这么做的）。详见 §5.3。
-3. 全部代码集中在**一个插件目录**（`symbio/src/plugins/gateway/`），其余机制全部复用。
+3. 全部代码集中在**一个插件目录**（`crates/symbio-plugin-gateway/src/`），其余机制全部复用。
 
 ---
 
@@ -52,14 +52,14 @@ impl: done
 ## 3. 插件落点
 
 ```
-symbio/src/plugins/gateway/
+crates/symbio-plugin-gateway/src/
 ├── mod.rs // 插件职责与"只搬运行李"的设计说明
 ├── plugin.rs // GatewayPlugin：Plugin trait + 生命周期 + 配置文档声明
 ├── config.rs // GatewayConfig（扁平 inbound_* 键）+ 只读白名单
 └── server.rs // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/events、/api/v1/health
 ```
 
-- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（装配方 `symbio/src/assembly.rs`）。
+- 插件 id：`PLUGIN_ID_GATEWAY = "gateway"`（装配方 `crates/crates/crates/assembly.rs`）。
 - 配置键、默认值与只读白名单：见 [配置参考](../004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 
@@ -298,7 +298,7 @@ data: {"type":"bus_event","data":{"kind":"system","session_id":null,"data":{"eve
  根本走不到（§4.1）。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
- 依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[D-013](../../symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")）；若要让网关
+ 依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[D-013](../../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）；若要让网关
  自带 HTTPS，需另行设计证书配置面（签发方式 / 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的
  取舍）——那是产品决策，不是依赖问题。
 
@@ -310,7 +310,7 @@ data: {"type":"bus_event","data":{"kind":"system","session_id":null,"data":{"eve
 
 | 做法 | 评价 |
 |---|---|
-| **不做，第三方照前端调用方式拼路径**（现行） | 可接受：路径清单在 [RE-003-ROUTES](../004-ref/003-ROUTES.md) 人工维护 |
+| **不做，第三方照前端调用方式拼路径**（现行） | 可接受：路径清单在 [RE-003-ROUTES](../004-ref/003-ROUTES.md "RE-003-ROUTES") 人工维护 |
 | 给 `Plugin` trait 加可选 `fn manifest(&self) -> Vec<RouteMeta>`（默认空），Composite 递归聚合 | ✅ 最符合项目"机制化"风格：一处定义、自动聚合、前端与新传输层同时受益 |
 | 手写 OpenAPI 分片 | 易与代码漂移 |
 
@@ -350,7 +350,7 @@ curl -H "Authorization: Bearer $T" -H "Idempotency-Key: $(uuidgen)" \
 | 开放接口 = 第三方可执行 shell / 写文件 | **高** | 默认关闭 + 回环绑定 + token + 只读模式（危险分级为预留层） |
 | 插件拿不到转发目标 / reload 后失效 | 中 | 构造期登记 `Weak` 父级（`parent.route`），reload 时网关实例随树重建 |
 | 端口占用 / 重启端口未释放 | 中 | `CancellationToken` + `abort` + 启动失败信息回写到设置页 |
-| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[D-013](../../symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
+| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[D-013](../../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
 | 第三方以为连上 WS 就有 AI 流 | 中 | §5.3 显式设计 + SDK 内置"连接即自动订阅"默认行为 |
 | `chat/send` 无 `is_working` 守卫，多客户端并发互踩 | 低 | 文档声明需自行串行；预留方向：会话租约 |
 | 路由无注册表 → 文档漂移 | 低 | 预留方向：manifest 机制（§7） |

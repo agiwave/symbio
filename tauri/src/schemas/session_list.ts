@@ -38,7 +38,7 @@ export interface SessionListItem {
    * 缺省 = 这个会话还没记录水位（存量会话 / 一轮没跑完），渲染器因此**整条不出现**，
    * 而不是画一条空条——「上下文是空的」与「这里没有数」是两件事。
    *
-   * 真源：`symbio/src/plugins/session/stats_reading.rs::context_reading_of`。
+   * 真源：`crates/symbio-plugin-session/src/stats_reading.rs::context_reading_of`。
    */
   context_watermark?: ReadingSection;
 }

@@ -138,7 +138,7 @@ fn view_recent_ignore_asof(log: &[Ev], _as_of: u64, n: usize) -> Vec<&'static st
 ///
 /// **`used_ms` 与生产侧同一个口径**：`View::used.ms` 说的不是墙钟耗时，而是
 /// 「交给闭包的窗口条数」（1 事件 = 1ms 的扫描记账，见
-/// [`symbio_core/view/mod.rs`](../../../symbio/src/symbio_core/view/mod.rs)）；
+/// [`symbio_core/view/mod.rs`](../../../crates/symbio-core/src/view/mod.rs)）；
 /// 本模型里每跳按 `ms_per_hop` 累计，同样是**扫描记账**而不是实测延迟。
 /// 于是「预算有界」这条判据在两侧讲的是同一件事：used 永不超过声明的预算。
 struct Diffusion { nodes: usize, degraded: bool, used_ms: u64 }

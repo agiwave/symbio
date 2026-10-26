@@ -3,7 +3,7 @@
 > **文档类型：评审（一次性结论，不是规范）**
 > 本文记录对「大模型服务 → 前端」整条流式链路的一次系统评审，含**实测验证**、**发现的问题**
 > 与**优化建议**。规范本身仍以
-> [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
+> [`session/docs/node-state-streaming.md`](../../crates/symbio-plugin-session/src/docs/node-state-streaming.md)
 > 与 `symbio_core/transcript_stream.rs`（**该模块已于 2026-09-23 随 D-025 退役**，
 > 会话实时面迁回 VDFS 变更——现行规范见 [`design/vdfs.md`](./vdfs.md) §9 与
 > `symbio_core/vdfs_provider.rs` 的「变更通知」小节）为准。
@@ -16,7 +16,7 @@
 > `NodeChange` 随后被删除——转写流每帧的载荷直接就是一条 `ChatMessage`（`delta` 追加 /
 > `content` 整条替换 / `status = removed` 删除），会话级告警下沉为 `TranscriptWriter::warn`
 > 独立通道。本文对 `NodeOp` 的论述（§0 结论摘要、§3.2 等）请对照
-> [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
+> [`session/docs/node-state-streaming.md`](../../crates/symbio-plugin-session/src/docs/node-state-streaming.md)
 > §6 阅读；评审结论中被 S24 吸收的部分（如告警下沉）已落地。
 >
 > **后记（S25 / 批次 E）：** 本文 §「问题清单」里关于 `reconcileTranscript` 的几条
@@ -85,7 +85,7 @@
   上游有十几个发射点，但 seq 与内存图只有一个写入者。
 
 **真正"长"的是 ⑦–⑩**：它们全部只为了跨越"进程边界"这一件事，却对**进程内消费者**
-（CLI `cli/src/client.rs`、子智能体转播 `agent/host/subagent.rs`）也照收不误。
+（CLI `crates/symbio-cli/src/client.rs`、子智能体转播 `agent/host/subagent.rs`）也照收不误。
 
 ### 1.2 优化空间（按性价比排序）
 
@@ -250,7 +250,7 @@
 消息流里没有任何"本轮结束"信号（这是 §2.0 批评二的落点）。于是：
 
 - CLI 的 `ask()` 把**会话节点**的 `status` 离开 `working` 当作**唯一**结束判据
-  （`cli/src/client.rs` 注释写得很明确）；
+  （`crates/symbio-cli/src/client.rs` 注释写得很明确）；
 - 前端要判定"某个节点是不是卡在 streaming"，也只能等会话节点报"不忙"，
   再去反查消息表——即 S20.7 §③ 描述的 `reconcileTranscript`。
 

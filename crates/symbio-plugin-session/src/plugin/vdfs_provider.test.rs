@@ -1,0 +1,1529 @@
+//! `plugin/vdfs_provider.rs` 的单元测试（`impl VdfsProvider` 的对外行为）。
+//!
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
+
+use super::*;
+use symbio_core::{
+    VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
+    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM,
+    VDFS_STATUS_ACTIVE,
+};
+// dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
+use symbio_core::VdfsProvider;
+// 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
+// `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
+use crate::plugin::nodes::{message_dir_path, message_path};
+use symbio_core::VdfsChange;
+// 每例独占存储根；guard 在插件之后释放，失败时也会清理。
+fn fixture() -> (tempfile::TempDir, SessionPlugin) {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        symbio_core::PluginDir::at(dir.path(), "session"),
+    );
+    (dir, plugin)
+}
+
+// ==================== VDFS provider ====================
+
+fn vctx() -> VdfsContext {
+    VdfsContext::empty()
+}
+
+/// 带**宿主请求**的上下文：`switch_branch` 的 actor 取自请求主体（写事实要知道是谁写的），
+/// 所以这一条动作不能走 [`vctx`] 那个空上下文。
+fn host_vctx() -> VdfsContext {
+    let req: std::sync::Arc<dyn symbio_core::PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
+    symbio_core::vdfs_context(&req)
+}
+
+/// provider 自描述：**不含挂载名**——挂载名由容器按实例表派生
+/// （见 `composite.rs::traverse` 的 `put(CapabilityRow::mount(实例名, ..))`）
+#[tokio::test]
+async fn vdfs_self_description_has_no_mount() {
+    let (_dir, p) = fixture();
+    let meta = p.meta();
+    assert_eq!(meta.name, "会话");
+    assert_eq!(meta.icon.as_deref(), Some("session"));
+    // 顺序由本插件自述自持（**单一真相源**），
+    // 使 `<根>` 左栏与详情恒等
+    assert_eq!(meta.order, 1);
+    assert_eq!(meta.root_access.flags(), "l");
+    assert!(!meta.root_access.traverse, "会话是叶子，不参与树遍历");
+
+    // 根下可新建「会话」——类型即「新建」入口的唯一依据。
+    // 它不在同步的 `PluginMeta` 上（schema 需运行期汇流），由 provider 在
+    // **根节点自己的自述**里现场给（`Stat("")`——与更深层节点同一条通道，
+    // 见 `VdfsNode::new_type`）。
+    let root = p
+        .dispatch(&vctx(), "", STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .expect("根节点自述");
+    let t = root.new_type.expect("根下可新建会话");
+    assert_eq!(t.ext, EXT_SESSION);
+    assert_eq!(t.title, "会话");
+    // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
+    // 故不声明 `node_ext`：新建会话直接进会话详情页
+    assert!(t.node_ext.is_none());
+
+    // 新建会话是**草稿态**：会话还不存在，没有节点可挂 `schema`，故定义挂在**类型**上
+    // ——选项行在会话创建前就要完整渲染（草稿选择随 `create` 一次写入 metadata）。
+    // 本 fixture 未装配容器 ⇒ 收集不到任何贡献方 ⇒ 字段表为空；但定义本身**不缺席**
+    // （缺席会让前端把「草稿态」误当成「没有选项」）。
+    let schema = t.schema.as_ref().expect("新建类型必须带选项定义");
+    assert_eq!(schema["binding"], serde_json::json!("option"));
+    assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
+}
+
+// 根目录已隔离，id 只需在本例内稳定。
+fn unique_id(tag: &str) -> String {
+    tag.to_owned()
+}
+
+/// 不存在的会话：list / stat 一律 NotFound（不做静默降级）
+#[tokio::test]
+async fn vdfs_list_unknown_session_is_not_found() {
+    let (_dir, p) = fixture();
+    let id = unique_id("no-such-session");
+    assert!(p.dispatch(&vctx(), &id, LIST).await.is_err());
+    assert!(p.dispatch(&vctx(), &id, STAT).await.is_err());
+}
+
+/// `<id>` 的 `stat` 是**目录视图**（只给 `l`），但呈现必须与清单同源。
+///
+/// `status` 是运行态的唯一取值点：变更通知 → 重读 `stat` → `status == working`。
+/// 少了它，前端刚乐观置上的「运行中」会被下一次变更立刻改回空闲。
+#[tokio::test]
+async fn vdfs_stat_session_is_dir_view_with_list_shape() {
+    let (_dir, p) = fixture();
+    let id = unique_id("stat-view");
+    let mut s = Session::new(&id);
+    s.updated_at = 1_700_000_000;
+    p.save_session(&s).await.unwrap();
+
+    let n = p
+        .dispatch(&vctx(), &id, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert_eq!(n.name, id);
+    assert_eq!(n.access.flags(), "l", "目录视图：可列，但不给新建入口");
+    assert!(n.is_dir(), "被当目录访问时的视图");
+
+    // 同源判据：与清单节点逐字段一致（不是另写一份「目录版」形状）
+    let listed = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
+    assert_eq!(n.status, listed.status);
+    assert_eq!(n.ext, listed.ext);
+    assert_eq!(n.updated_at, listed.updated_at);
+    assert_eq!(n.status, VDFS_STATUS_ACTIVE, "空闲是显式状态值，不是空串");
+}
+
+/// 实时：`watch` 登记的 sink 在 `vdfs_notify_change` 时**同步**收到变更；
+/// `unwatch` 按引用计数摘除（严格配对，归零才真正停投）
+#[tokio::test]
+async fn vdfs_watch_forwards_session_changes() {
+    let (_dir, p) = fixture();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
+    let sink: VdfsChangeSink = Arc::new(move |c| {
+        let _ = tx.send(c);
+    });
+
+    p.dispatch(&vctx(), "", VdfsRequest::Watch { sink: sink.clone() })
+        .await
+        .unwrap();
+    p.dispatch(&vctx(), "", VdfsRequest::Watch { sink })
+        .await
+        .unwrap();
+    assert_eq!(p.change_subs.subscriber_count(), 2);
+    assert_eq!(p.change_subs.paths(), vec!["".to_string()]);
+
+    p.notify_change("abc");
+
+    // 投递是同步的，但两条订阅共用一个投递器 ⇒ 恰好一次
+    let got = rx.recv().await.expect("变更应经 watch 投递到 sink");
+    assert_eq!(got.path, "abc");
+    assert!(got.data.is_none(), "资源信号无载荷");
+    assert!(rx.try_recv().is_err(), "同一路径的重复订阅不得收到重复帧");
+
+    p.dispatch(&vctx(), "", UNWATCH).await.unwrap();
+    assert_eq!(
+        p.change_subs.subscriber_count(),
+        1,
+        "取消一位仍有另一位，不得提前停投"
+    );
+    p.dispatch(&vctx(), "", UNWATCH).await.unwrap();
+    assert!(
+        !p.change_subs.has_subscribers(),
+        "unwatch 必须把该路径彻底摘掉"
+    );
+    p.notify_change("abc");
+    assert!(rx.try_recv().is_err(), "无订阅者时不得投递");
+}
+
+// ==================== 配置文档（`<根>/session/PLUGIN.yml`）的 provider 侧 ====================
+//
+// 定义侧的测试（`config_definition` 与 `SessionConfig::default()` 同源）在
+// `plugin.test.rs`；这里只测**经 provider 访问**的行为。
+
+/// 配置文件是 `ext = form` 的可写文档，**但它不在会话清单里**。
+///
+/// 「清单 = 业务列表」：`<根>/session` 下应当只有会话。配置文件进设置菜单走
+/// 的是 CONFIGURABLE_VISITOR 那条通道（`capability_announce_configurable`），不靠清单并列
+/// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
+#[tokio::test]
+async fn config_document_is_reachable_but_not_a_session_list_item() {
+    let (_dir, p) = fixture();
+
+    // 可达：按真实文件名 stat / read
+    let node = p
+        .dispatch(&vctx(), PLUGIN_FILE, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert_eq!(node.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
+    assert_eq!(node.ext.as_deref(), Some(VDFS_EXT_FORM));
+    assert_eq!(node.access.flags(), "rw");
+    assert!(node.schema.is_some(), "定义随节点下发");
+
+    // 不并列：清单里没有它
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    assert!(
+        !items.iter().any(|it| it.node.name == PLUGIN_FILE),
+        "会话清单里只应有会话，配置文件不该出现"
+    );
+
+    // 配置文件不是会话 id：按文件读，不按会话解析
+    assert_eq!(
+        p.dispatch(&vctx(), PLUGIN_FILE, STAT)
+            .await
+            .unwrap()
+            .into_stat()
+            .unwrap()
+            .name,
+        PLUGIN_FILE
+    );
+    let content = p
+        .dispatch(&vctx(), PLUGIN_FILE, READ)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
+    let cfg: SessionConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
+    assert_eq!(cfg.max_messages, SessionConfig::default().max_messages);
+
+    // 文档没有子项，也不可删除
+    assert!(p.dispatch(&vctx(), PLUGIN_FILE, LIST).await.is_err());
+    assert!(p.dispatch(&vctx(), PLUGIN_FILE, DEL).await.is_err());
+}
+
+/// 会话清单里的每一项都带**选项定义**（`schema`）——前端零额外请求即可渲染选项栏
+/// （旧形态要一次 `options/list`）。
+///
+/// 定义与「是哪个会话」无关（值走 `attributes.metadata`），故清单里逐项挂的是
+/// **同一份**；设计文档 §7 已量化这份重复（~2 KB/项）并接受它，换来的正是
+/// 「清单一次取全」。
+#[tokio::test]
+async fn session_list_carries_the_option_definition() {
+    let (_dir, p) = fixture();
+    let created = p
+        .dispatch(
+            &vctx(),
+            "",
+            VdfsRequest::Write {
+                content: VdfsContent::text("").with_create(),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(created.created);
+    // 匿名写（打在目录自身）→ provider 交回**自己生成的名字**；地址由调用方拼
+    let id = created.name.expect("匿名写必须交回新条目的名字");
+
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    let node = items
+        .iter()
+        .find(|it| it.node.name == id)
+        .expect("清单里有这个会话");
+
+    let schema = node.node.schema.as_ref().expect("会话节点必须带选项定义");
+    assert_eq!(schema["binding"], serde_json::json!("option"));
+    assert_eq!(
+        schema["title_fallback"],
+        serde_json::json!("会话选项"),
+        "定义要能自述——它是 `node.schema` 上唯一的呈现契约"
+    );
+    // 本 fixture 未装配容器 ⇒ 收集不到贡献方 ⇒ 字段表为空；生产路径由容器广播出
+    // 工作目录 / 智能体 / Model / 风险 / 模式 / 心跳 六项
+    assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
+
+    // 当前值走 `attributes.metadata`（新形态的值载体）：写一次 metadata，
+    // 清单节点上立刻能看到——「定义 + 值 + 落库」三条通路因此都在 VDFS 上闭环，
+    // 不需要第二套协议（旧形态要 `options/list` + `session/update` 各一条，两条都已退役）
+    p.dispatch(
+        &vctx(),
+        &id,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"risk_level":"high"}}"#),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    let node = items
+        .iter()
+        .find(|it| it.node.name == id)
+        .expect("会话还在");
+    assert_eq!(
+        node.node.attributes["metadata"]["risk_level"],
+        serde_json::json!("high"),
+        "写入的 metadata 必须原样出现在节点 attributes 上"
+    );
+}
+
+// ==================== 新建语义：id 从哪来 ====================
+//
+// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
+// VDFS 的通用规则（`vdfs_service::entry::id_of` 的注释、`VdfsProvider::write`
+// 的「两种目标形态」表）。会话不按名字生 id——
+// 把名字只当标题。2026-09-23 对齐，下面三例把三条契约钉住。
+
+/// 具名新建：**就地创建**，地址末段即会话 id。
+///
+/// 这是 CLI 的「客户端指定会话 id」得以走 `vdfs/write` 的全部依据
+/// （旧 `session/update` 路由唯一的独有能力）。
+#[tokio::test]
+async fn named_create_uses_the_address_as_the_session_id() {
+    let (_dir, p) = fixture();
+    let r = p
+        .dispatch(
+            &vctx(),
+            "cli-abc",
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(r.created, "具名目标不存在 ⇒ 就地创建");
+    assert!(
+        r.name.is_none(),
+        "具名写不回传地址：地址就是使用方写的那一个"
+    );
+
+    let s = p.session_of("cli-abc").await.unwrap();
+    assert_eq!(s.id, "cli-abc");
+    assert_eq!(s.metadata["workdir"], serde_json::json!("/w"));
+    assert!(
+        s.metadata.get("title").is_none(),
+        "名字是**身份**不是标题：把 id 抄成标题会让 `--session cli18f3a2` 污染侧栏"
+    );
+    assert_eq!(s.display_title(), "新对话", "无标题 ⇒ 仍由首条消息派生");
+}
+
+/// 具名目标**已存在** + `create` ⇒ 覆盖（浅合并），**不重复创建**。
+///
+/// 锁的是 `create` 位的定义：「只回答**不存在时**怎么办」。CLI 的 `ensure_session`
+/// 因此是**一次**调用同时覆盖「新建」与「改元数据」——旧路由的 upsert 整条落在这里。
+#[tokio::test]
+async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
+    let (_dir, p) = fixture();
+    let first = p
+        .dispatch(
+            &vctx(),
+            "keep",
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#)
+                    .with_create(),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(first.created);
+
+    let again = p
+        .dispatch(
+            &vctx(),
+            "keep",
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/new"}}"#).with_create(),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(!again.created, "已存在 ⇒ 覆盖，不是再建一个");
+    assert!(again.name.is_none(), "具名写不回传地址");
+
+    let s = p.session_of("keep").await.unwrap();
+    assert_eq!(
+        s.metadata["workdir"],
+        serde_json::json!("/new"),
+        "提供的键被覆盖"
+    );
+    assert_eq!(
+        s.metadata["agent_id"],
+        serde_json::json!("a"),
+        "未提供的键保持不变（浅合并）"
+    );
+    assert_eq!(
+        p.dispatch(&vctx(), "", LIST)
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap()
+            .len(),
+        1,
+        "不该造出第二个会话"
+    );
+}
+
+/// **创建即登记**（[]）：未部署的 agent 身份在会话诞生的那一刻拿到会话面
+/// 缺省行；删除会话时登记随之回收（同寿）。
+///
+/// 判据落在**生产路径**上（VDFS `write` 的 create 分支 → `session_upsert`），
+/// 而不是直接调用 `authz::bind_*`：后者只能证明绑定面本身会写会删，证明不了
+/// 「会话创建真的登记了」。
+#[tokio::test]
+async fn creating_a_session_registers_its_principal_row_and_deleting_it_reclaims_it() {
+    let (_dir, p) = fixture();
+    let sid = "t182-root-created";
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-agent"}}"#).with_create(),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let principal = symbio_core::principal_of(Some("t182-agent"));
+    assert!(
+        symbio_core::production_matrix().can_reply(&principal),
+        "创建即登记：未部署身份拿到会话面缺省行"
+    );
+
+    p.delete_session_internal(sid).await.unwrap();
+    assert!(
+        symbio_core::production_matrix()
+            .grants_of(&principal)
+            .is_empty(),
+        "会话删除 ⇒ 登记行随之回收"
+    );
+}
+
+/// **身份改写换行**（[]）：`vdfs/write` 的 metadata 覆盖分支把 `agent_id`
+/// 换掉时，旧主体的登记随即撤回、新主体即时有行——不等下一轮装配点兜底。
+#[tokio::test]
+async fn rewriting_the_agent_identity_replaces_the_session_binding() {
+    let (_dir, p) = fixture();
+    let sid = "t182-rewrite";
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-rewrite-old"}}"#)
+                .with_create(),
+        },
+    )
+    .await
+    .unwrap();
+    p.dispatch(
+        &vctx(),
+        sid,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"t182-rewrite-new"}}"#),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let old = symbio_core::principal_of(Some("t182-rewrite-old"));
+    let new = symbio_core::principal_of(Some("t182-rewrite-new"));
+    let matrix = symbio_core::production_matrix();
+    assert!(matrix.grants_of(&old).is_empty(), "旧身份的登记随改写撤回");
+    assert!(matrix.can_reply(&new), "新身份即时登记，不必等下一轮");
+    p.delete_session_internal(sid).await.unwrap();
+}
+
+/// **委派子会话在创建时登记父行继承**，且随父会话删除一并回收。
+///
+/// 父 = 已部署的 worker（无发言权、只持产物），子 = 未部署身份 ⇒ 子行 = 父行；
+/// 父删除会连子目录一起删掉，登记面必须按同一棵子树回收。
+#[tokio::test]
+async fn a_delegated_child_is_registered_at_creation_and_reclaimed_with_its_parent() {
+    let (_dir, p) = fixture();
+    let parent = "t182-parent";
+    let child = "t182-child";
+    p.dispatch(
+        &vctx(),
+        parent,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"agent_id":"worker"}}"#).with_create(),
+        },
+    )
+    .await
+    .unwrap();
+    p.dispatch(
+        &vctx(),
+        child,
+        VdfsRequest::Write {
+            content: VdfsContent::text(
+                r#"{"metadata":{"agent_id":"t182-child-agent","parent_session_id":"t182-parent"}}"#,
+            )
+            .with_create(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let child_principal = symbio_core::principal_of(Some("t182-child-agent"));
+    let matrix = symbio_core::production_matrix();
+    assert!(
+        !matrix.can_reply(&child_principal),
+        "委派取交集：worker 无发言权 ⇒ 子也无"
+    );
+    assert!(
+        matrix.can_produce_artifact(&child_principal),
+        "父的产物能力保留在子行里"
+    );
+
+    p.delete_session_internal(parent).await.unwrap();
+    assert!(
+        symbio_core::production_matrix()
+            .grants_of(&child_principal)
+            .is_empty(),
+        "父会话删除（子会话一并删除）⇒ 子登记随子树回收"
+    );
+}
+
+/// 覆盖分支：metadata 浅合并 + 显式 `title` 写进 `metadata.title`。
+///
+/// 合并语义只有这一处（`session/update` 路由已退役，`vdfs/write` 是唯一写入路径），
+/// 分歧在结构上写不出来，因此这里直接断言合并行为本身。
+#[tokio::test]
+async fn write_merges_metadata_shallowly() {
+    let (_dir, p) = fixture();
+    p.dispatch(
+        &vctx(),
+        "s1",
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#)
+                .with_create(),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+    p.dispatch(
+        &vctx(),
+        "s1",
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let s = p.session_of("s1").await.unwrap();
+    assert_eq!(s.metadata["workdir"], serde_json::json!("/new"));
+    assert_eq!(
+        s.metadata["agent_id"],
+        serde_json::json!("keep-me"),
+        "未提到的键保持不变"
+    );
+    assert_eq!(s.metadata["title"], serde_json::json!("改名"));
+    assert_eq!(s.display_title(), "改名");
+}
+
+/// 配置写入：校验先于一切（字段级错误），坏值不会改动内存。
+///
+/// 坏值取**形状**错误（数字字段收到字符串），不取**范围**错误：数值字段刻意不声明
+/// `min` / `max`（边界是策略不是事实，编边界就是造假约束——见
+/// `plugin.rs::config_definition`）。形状错误才是定义恒能判定的那类非法值。
+#[tokio::test]
+async fn config_write_validates_before_applying() {
+    let (_dir, p) = fixture();
+    let before = p.config.read().await.max_messages;
+    let bad = VdfsContent::text(r#"{"max_messages": "不是数字"}"#);
+    match p
+        .dispatch(&vctx(), PLUGIN_FILE, VdfsRequest::Write { content: bad })
+        .await
+    {
+        Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
+        other => panic!("应为字段级校验错误，实得 {other:?}"),
+    }
+    assert_eq!(p.config.read().await.max_messages, before);
+}
+
+// ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
+
+/// 会话记忆是会话内部的一个**可读写文件**：与三个目录并列、`stat` 与 `list` 同源、
+/// 写后读得回、**不可删除**（与 work / agent 的记忆层同一共享实现约定）。
+#[tokio::test]
+async fn memory_is_a_read_write_file_inside_the_session() {
+    let (_dir, p) = fixture();
+    let id = unique_id("memory");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!(
+        "{id}/{}",
+        crate::memory::SESSION_MEMORY_FILE
+    );
+
+    // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
+    let items = p
+        .dispatch(&vctx(), &id, LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    let mem = items
+        .iter()
+        .find(|it| it.node.name == crate::memory::SESSION_MEMORY_FILE)
+        .expect("会话内部应列出记忆文件");
+    assert!(!mem.node.is_dir(), "记忆是文件，不是目录");
+    assert_eq!(
+        mem.node.access.flags(),
+        "rw",
+        "模型与用户共用这一份，可读可写"
+    );
+    assert_eq!(mem.node.kind, PLUGIN_ID_SESSION);
+    assert!(mem.node.description.is_some(), "列表里要能看出它是干什么的");
+
+    // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）
+    let stat = p
+        .dispatch(&vctx(), &path, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert_eq!(stat.name, mem.node.name);
+    assert_eq!(stat.access.flags(), mem.node.access.flags());
+    assert_eq!(stat.size, mem.node.size);
+    assert_eq!(stat.description, mem.node.description);
+
+    // ③ 还没写过 → 空串（「还没写过」是记忆的正常状态，不是错误）
+    assert_eq!(
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("")
+    );
+
+    // ④ 写入 → 读回（写闸门在共享实现，本层不重复实现）
+    let r = p
+        .dispatch(
+            &vctx(),
+            &path,
+            VdfsRequest::Write {
+                content: VdfsContent::text("本会话约定：所有时间用 UTC。"),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(r.created, "首次写入应报 created");
+    assert_eq!(
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("本会话约定：所有时间用 UTC。")
+    );
+    let again = p
+        .dispatch(
+            &vctx(),
+            &path,
+            VdfsRequest::Write {
+                content: VdfsContent::text("改主意了"),
+            },
+        )
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(!again.created, "覆盖写入不是 created");
+
+    // ⑤ 记忆不可删除：要清空就写空内容（一次可读、可审、可撤销的显式动作）
+    assert!(
+        matches!(
+            p.dispatch(&vctx(), &path, DEL).await,
+            Err(VdfsError::Forbidden(_))
+        ),
+        "删除即丢失本会话的长期约定，必须明确拒绝"
+    );
+    assert!(
+        p.dispatch(&vctx(), &path, READ).await.is_ok(),
+        "拒绝删除后内容仍在"
+    );
+
+    // ⑥ 记忆是文件：没有子项；更深层级也不解析
+    assert!(p.dispatch(&vctx(), &path, LIST).await.is_err());
+}
+
+/// 写入闸门取自 `SessionConfig`：配小 → 同一个写入被**拒绝**（而不是截断），
+/// 且被拒绝的写入不得留下半截内容。
+#[tokio::test]
+async fn memory_write_respects_the_configured_gate() {
+    let (_dir, p) = fixture();
+    *p.config.write().await = SessionConfig {
+        memory_max_bytes: 4,
+        ..SessionConfig::default()
+    };
+    let id = unique_id("memory-gate");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!(
+        "{id}/{}",
+        crate::memory::SESSION_MEMORY_FILE
+    );
+
+    assert!(
+        p.dispatch(
+            &vctx(),
+            &path,
+            VdfsRequest::Write {
+                content: VdfsContent::text("12345")
+            }
+        )
+        .await
+        .is_err(),
+        "超出写入上限必须被拒绝"
+    );
+    assert_eq!(
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
+        Some(""),
+        "被拒绝的写入不得留下半截内容"
+    );
+}
+
+/// 不存在的会话：记忆路径一律 NotFound（不为幽灵会话造一份记忆）
+#[tokio::test]
+async fn memory_of_unknown_session_is_not_found() {
+    let (_dir, p) = fixture();
+    let id = unique_id("memory-ghost");
+    let path = format!(
+        "{id}/{}",
+        crate::memory::SESSION_MEMORY_FILE
+    );
+
+    assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
+    assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
+    assert!(p
+        .dispatch(
+            &vctx(),
+            &path,
+            VdfsRequest::Write {
+                content: VdfsContent::text("x")
+            }
+        )
+        .await
+        .is_err());
+}
+
+/// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/MEMORY.md`）
+#[tokio::test]
+async fn memory_write_notifies_subscribers() {
+    let (_dir, p) = fixture();
+    let id = unique_id("memory-notify");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!(
+        "{id}/{}",
+        crate::memory::SESSION_MEMORY_FILE
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
+    let sink: VdfsChangeSink = Arc::new(move |c| {
+        let _ = tx.send(c);
+    });
+    p.dispatch(&vctx(), &id, VdfsRequest::Watch { sink })
+        .await
+        .unwrap();
+
+    p.dispatch(
+        &vctx(),
+        &path,
+        VdfsRequest::Write {
+            content: VdfsContent::text("记一笔"),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
+
+    let got = rx.recv().await.expect("写入应投递一条变更");
+    assert_eq!(
+        got.path,
+        format!(
+            "{id}/{}",
+            crate::memory::SESSION_MEMORY_FILE
+        ),
+        "变更路径与 list 返回的节点地址同源"
+    );
+    assert!(got.data.is_none(), "资源信号无载荷（信封没有操作枚举）");
+}
+
+// ==================== 会话 id 形状 ====================
+
+/// 新建会话的 id 是**短 GUID**（8 位十六进制）。
+///
+/// 会话 id 直接出现在用户视野里——它是 VDFS 目录名（`.symbio/session/<id>`），
+/// 列表与地址栏都要读。此前是 36 字符带连字符的完整 UUID，与项目既有的两处
+/// 短 id 约定（`turn::llm_short_id` / `vdfs_service::entry::auto_id`）不一致。
+///
+/// 这条测试盯的是**形状**：一旦有人改回长 UUID，这里立刻红。
+#[tokio::test]
+async fn new_session_id_is_a_short_guid() {
+    let (_dir, p) = fixture();
+    let content = VdfsContent {
+        create: true,
+        ..VdfsContent::text("{}")
+    };
+    let r = p
+        .dispatch(&vctx(), "", VdfsRequest::Write { content })
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
+    assert!(r.created);
+
+    let id = r.name.expect("匿名写必须交回新条目的名字");
+    assert_eq!(id.len(), 8, "短 GUID 应为 8 位，实得 {id:?}");
+    assert!(
+        id.chars().all(|c| c.is_ascii_hexdigit()),
+        "应为十六进制字符，实得 {id:?}"
+    );
+    assert!(!id.contains('-'), "短 GUID 不带连字符，实得 {id:?}");
+
+    // 生成后确实落了盘：能按这个 id 读回会话
+    assert!(
+        p.get_store().await.unwrap().session_dir(&id).is_some(),
+        "新会话目录应按 id 建出"
+    );
+}
+
+/// 连续新建不会撞 id（碰撞即新建失败，属于用户可见错误）。
+#[tokio::test]
+async fn new_session_ids_are_distinct() {
+    let (_dir, p) = fixture();
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..32 {
+        let r = p
+            .dispatch(
+                &vctx(),
+                "",
+                VdfsRequest::Write {
+                    content: VdfsContent {
+                        create: true,
+                        ..VdfsContent::text("{}")
+                    },
+                },
+            )
+            .await
+            .unwrap()
+            .into_write()
+            .unwrap();
+        let id = r.name.expect("匿名写必须交回新条目的名字");
+        assert!(ids.insert(id.clone()), "id 重复：{id}");
+    }
+    assert_eq!(ids.len(), 32);
+}
+
+// ==================== 转写区段（`<根>/session/<id>/message`）的两个入口 ====================
+//
+// 消息**改写 / 截断**各有 VDFS action（`update_message` /
+// `chat/delete_message`），2026-09-18 迁到 VDFS：
+//
+// | 操作 | 入口 | 落到 VDFS 变更上的形状 |
+// |---|---|---|
+// | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条变更（**不带**载荷 ⇒ 消费端回读） |
+// | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条移除帧 + 回执带被删 id |
+//
+// 「清空历史」（`action(<id>/message, "clear")`）不设第三条：它与「删除会话」
+// 在用户眼里是同一件事的两种做法（都让这一屏变空），留着只会让人在两条重叠的
+// 路径之间犹豫，因此整体下线——转写区段上只剩 `truncate` 这一个集合动词。
+//
+// 消息域的实时面与历史面合流为同一条 `vdfs/watch`（D-025）。断言面是
+// 「投递了几条变更、每条说了什么」（`watch_changes`）：截断一例钉住这正是当前
+// 机制要守的边界（删除**逐条**下发，消费端不必整份重读；什么都没删**一条都不发**）。
+//
+// 本段锁定这两条路径的**对外行为**，并盯住两条不该被打破的边界：
+// `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
+// 表达不了这种集合操作）。
+
+/// 造一个带 N 条消息的会话：id 为 `m0..mN`、`seq` 单调（顺序的唯一权威锚点）。
+///
+/// 切主后（D-049）消息正文的真源是**事实源**，缓存只留元数据：
+/// 先种一条开场事件（给 `message.added` 立溯源锚——空切片上变更事实按口径
+/// 不落格），再落诞生事实。开场事件**不带节点 id**：它只当锚，不该在投影里
+/// 多出一条虚构发言（转写列表 = `m0..mN`）。
+async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
+    let nodes: Vec<cm::ChatNode> = texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| cm::ChatNode {
+            id: format!("m{i}"),
+            principal: Some(symbio_core::principal::Principal::from_legacy(
+                symbio_core::PRINCIPAL_USER,
+            )),
+            msg_type: Some(cm::NodeKind::Body),
+            content: Some(cm::MessageContent::Text((*t).to_string())),
+            seq: Some(i as i64),
+            ..Default::default()
+        })
+        .collect();
+    seed_nodes(p, id, nodes).await;
+}
+
+/// 直接落一棵给定的节点树（可带 `parent_id`）——`expand_skeleton` 之类
+/// 需要父子结构的用例用它；`seed_messages` 是它的扁平特例。
+async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
+    let s = Session::new(id);
+    p.save_session(&s).await.unwrap();
+    let store = p.get_store().await.unwrap();
+    let Some(dir) = store.session_dir(id) else {
+        panic!("会话目录未建出（save_session 应已创建）");
+    };
+    {
+        use symbio_core::Store as _;
+        let payload = match serde_json::to_value(&nodes) {
+            Ok(v) => v,
+            Err(e) => panic!("序列化种子消息失败：{e}"),
+        };
+        let wal = dir.join(crate::paths::V2_WAL_FILE);
+        let fs = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
+        fs.append(
+            symbio_core::Event::pending(
+                "m-add-0",
+                symbio_core::EVENT_MESSAGE_ADDED,
+                symbio_core::Entity::Message,
+                // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
+                symbio_core::Verb::Opened,
+                0,
+                symbio_core::PRINCIPAL_USER,
+            )
+            .with_payload(serde_json::json!({ "messages": payload })),
+        )
+        .expect("种诞生事实失败");
+    }
+}
+
+/// 转写列表里现有哪几条（经 VDFS 的 `消息` 列表，即使用方看到的那一份）。
+async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
+    p.dispatch(&vctx(), &message_dir_path(id), LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()
+        .into_iter()
+        .map(|it| it.node.name)
+        .collect()
+}
+
+/// 在本插件的变更表上挂一个收件盒（收 `VdfsChange`）。
+///
+/// 收的是 **provider 子树内的相对路径**（`<id>/message/<mid>`）——门面补挂载前缀是
+/// 分发层的事，不在这里发生（见 `VdfsChange` 的文档）。
+///
+/// 与「订阅进程级全局总线再过滤」相比有两点，都是**变简单**：
+/// - 订阅表是**本插件实例**的（`SessionPlugin::change_subs`），不是进程级全局表，
+///   因此不必按 `session_id` 过滤——并行用例互不干扰；
+/// - 收的是 `VdfsChange`（`path` + 可选 `data`），不必拆信封，也不必
+///   为「通道满 → resync」准备容量。
+fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsChange>>> {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    p.change_subs.watch(
+        "",
+        std::sync::Arc::new(move |c: VdfsChange| sink.lock().unwrap().push(c)),
+    );
+    seen
+}
+
+/// 种一条 `turn.branch`：`into` 是 `of` 的另一支。
+///
+/// 生产里这一格由 `prepare-turn` 落（见 `loop::stage_exec`：新根的 id 到那一幕才存在），
+/// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
+/// （I2：断言类事件必须带一个存在且不超前的锚）。
+async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
+    use symbio_core::{Entity, Seq, Store as _, Verb, EVENT_TURN_BRANCH};
+    let dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录");
+    let fs = crate::store::EventWalStore::open(
+        dir.join(crate::paths::V2_WAL_FILE),
+    )
+    .expect("打开事实源失败");
+    let anchor = fs
+        .range(Seq::new(0))
+        .last()
+        .and_then(|e| e.seq)
+        .expect("种分支格前事实源已非空");
+    fs.append(
+        symbio_core::Event::pending(
+            format!("branch-{into}"),
+            EVENT_TURN_BRANCH,
+            Entity::Turn,
+            Verb::Asserted,
+            0,
+            symbio_core::PRINCIPAL_USER,
+        )
+        .with_payload(serde_json::json!({ "of": of, "into": into }))
+        .with_produced_by(anchor.value()),
+    )
+    .expect("种分支格失败");
+}
+
+/// 事实源里出现过哪些事件 kind（分支切换的判据是「多了一条什么、没多出一条什么」）。
+async fn fact_kinds(p: &SessionPlugin, id: &str) -> Vec<String> {
+    use symbio_core::{Seq, Store as _};
+    let dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录");
+    crate::store::EventWalStore::open_readonly(
+        dir.join(crate::paths::V2_WAL_FILE),
+    )
+    .expect("只读打开事实源失败")
+    .range(Seq::new(0))
+    .into_iter()
+    .map(|e| e.kind)
+    .collect()
+}
+
+/// 切换分支（`action(<id>/message/<mid>, "switch_branch", {to})`）的回执。
+async fn switch_branch(
+    p: &SessionPlugin,
+    id: &str,
+    mid: &str,
+    payload: Option<Value>,
+) -> Result<VdfsActionResult, VdfsError> {
+    p.dispatch(
+        &host_vctx(),
+        &message_path(id, mid),
+        VdfsRequest::Action {
+            action: VDFS_ACTION_SWITCH_BRANCH.to_string(),
+            payload,
+        },
+    )
+    .await
+    .map(|r| r.into_action().expect("动作请求的回执必是 Action 形态"))
+}
+
+// ── 分支切换（[D-173]）────────────────────────────────────────────────────
+
+/// 切到另一支：**只改读法**。两支都留在转写里、正文一条没动，事实源上多一条
+/// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
+#[tokio::test]
+async fn switch_branch_changes_the_reading_not_the_facts() {
+    use symbio_core::{branch_selected, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_REMOVED};
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-switch");
+    // m0 = 问，m1 = 第一次答，m2 = 重试的那一支
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+
+    let r = switch_branch(&p, &id, "m2", Some(json!({ "to": "m1" })))
+        .await
+        .expect("同组内切换应当生效");
+    assert!(r.ok);
+    assert_eq!(r.data, Some(json!({ "session_id": id, "selected": "m1" })));
+
+    // 呈现读侧：两支**都在**（「看不见」≠「不存在」），只是选中态换了地方
+    let list = p
+        .open_chat_session(&id)
+        .await
+        .unwrap()
+        .get_messages()
+        .await
+        .unwrap();
+    let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
+    assert!(
+        ids.contains(&"m1") && ids.contains(&"m2"),
+        "两支都该留在转写里：{ids:?}"
+    );
+    let m1 = list.iter().find(|m| m.id == "m1").unwrap();
+    let m2 = list.iter().find(|m| m.id == "m2").unwrap();
+    assert!(branch_selected(m1), "选择格说读 m1");
+    assert!(!branch_selected(m2), "另一支降成候选");
+
+    // 模型读侧：同一个问题在请求包里只能有一个答复
+    let ctx = p
+        .open_chat_session(&id)
+        .await
+        .unwrap()
+        .get_context_messages(None)
+        .await
+        .unwrap();
+    let ctx_ids: Vec<&str> = ctx.iter().map(|m| m.id.as_str()).collect();
+    assert!(
+        ctx_ids.contains(&"m1") && !ctx_ids.contains(&"m2"),
+        "未选中支不该进模型：{ctx_ids:?}"
+    );
+
+    // 事实：只多一条选择格。**没有** `message.removed`——换读法不毁事实。
+    let kinds = fact_kinds(&p, &id).await;
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|k| k.as_str() == EVENT_BRANCH_SELECTED)
+            .count(),
+        1,
+        "一次切换一条选择格：{kinds:?}"
+    );
+    assert!(
+        !kinds.iter().any(|k| k.as_str() == EVENT_MESSAGE_REMOVED),
+        "切读法不该毁掉任何一条消息：{kinds:?}"
+    );
+
+    // 实时面：组里每个成员各发一条完整帧（消费端不必整份重读就知道谁上位、谁让位）
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(changes.len(), 2, "两个成员各一条：{changes:?}");
+    for (c, expect) in changes.iter().zip(["m1", "m2"]) {
+        assert_eq!(c.path, message_path(&id, expect));
+        assert_eq!(c.data.as_ref().expect("帧带节点载荷")["id"], expect);
+    }
+}
+
+/// 切到**当前已经在读**的那一支：回执成功、事实源一条不落、转写一条不发。
+///
+/// 「什么都没换」既不是错误，也不该在事实源上长出一格空转的记录——重复点切换器
+/// 是用户的正常动作（网络重试、双击），落两条选择格会把「用户做过几次这个动作」
+/// 写成事实，而这件事没人要读。
+#[tokio::test]
+async fn switch_branch_to_the_current_candidate_writes_nothing() {
+    use symbio_core::EVENT_BRANCH_SELECTED;
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-idem");
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+    let before = fact_kinds(&p, &id).await;
+
+    let r = switch_branch(&p, &id, "m1", Some(json!({ "to": "m2" })))
+        .await
+        .expect("默认就在读最新那支");
+    assert!(r.ok, "已是这一支 ⇒ 成功但什么都不做");
+
+    let after = fact_kinds(&p, &id).await;
+    assert_eq!(after, before, "幂等：重复的选择动作不该多落一格");
+    assert!(
+        !after.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        "本例从头到尾没做过一次**有效**切换：{after:?}"
+    );
+    let changes = seen.lock().unwrap().clone();
+    assert!(changes.is_empty(), "什么都没换 ⇒ 一条变更都不发");
+}
+
+/// 跨组拒绝：`to` 不在同一分支组 ⇒ 报错，列表与事实都不动。
+///
+/// 「跳到另一条历史」是 `truncate` / 重试各自的动作面，本动作不冒充它们；而它一旦
+/// 允许跨组，就会在事实源上盖一条**读不出来**的选择格（重建按组算选中态）。
+#[tokio::test]
+async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
+    use symbio_core::EVENT_BRANCH_SELECTED;
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-reject");
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答", "后一轮"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+
+    for (mid, to, why) in [
+        ("m1", "m3", "同会话但不同组（后一轮不是这一问的另一支）"),
+        ("m1", "nope", "组里从来没有过的 id"),
+        ("m0", "m1", "无分支标注的消息：它没有并列的候选"),
+        ("m1", "", "to 为空串（读作这个字段没记）"),
+    ] {
+        let got = switch_branch(&p, &id, mid, Some(json!({ "to": to }))).await;
+        assert!(
+            matches!(got, Err(VdfsError::Invalid(_))),
+            "{mid}→{to}（{why}）应被拒"
+        );
+    }
+    let kinds = fact_kinds(&p, &id).await;
+    assert!(
+        !kinds.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        "被拒的切换不得落格：{kinds:?}"
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0", "m1", "m2", "m3"],
+        "被拒的切换不得改动列表"
+    );
+    let changes = seen.lock().unwrap().clone();
+    assert!(changes.is_empty(), "被拒的切换不得发出任何变更帧");
+}
+
+/// 截断某条：**它及其之后**全部删除，回执带权威的被删 id 列表。
+#[tokio::test]
+async fn truncate_removes_the_target_and_everything_after() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-truncate");
+    seed_messages(&p, &id, &["一", "二", "三", "四"]).await;
+    let seen = watch_changes(&p);
+
+    let r = p
+        .dispatch(
+            &vctx(),
+            &message_path(&id, "m1"),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TRUNCATE.to_string(),
+                payload: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    assert!(r.ok);
+    assert_eq!(
+        r.data,
+        Some(json!(["m1", "m2", "m3"])),
+        "回执是权威的被删列表"
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0"],
+        "只剩目标之前的那条"
+    );
+
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(changes.len(), 3, "被删的三条各发一条删除帧");
+    for (c, expect) in changes.iter().zip(["m1", "m2", "m3"]) {
+        // 落点是那条消息**节点自身**的地址（`<sid>/message/<mid>`），身份即末段；
+        // 删除语义在 data.status = removed
+        assert_eq!(
+            c.path,
+            message_path(&id, expect),
+            "落点恒为被变更节点自身的地址"
+        );
+        let v = c.data.as_ref().expect("删除帧带 removed 状态载荷");
+        assert_eq!(v["id"], expect, "删除**逐条**下发");
+        assert_eq!(v["status"], "removed");
+    }
+}
+
+/// 截断一个**不存在**的目标：回执是空列表，列表一条不动，且**一条帧都不发**。
+///
+/// 「什么都没删」是**结果**不是错误，也不该在转写上留下痕迹——发一条「从 <mid> 起
+/// 截断」的通知会让消费端从一条并不存在的节点起截断，把整个列表清空。
+#[tokio::test]
+async fn truncate_of_missing_target_changes_nothing() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-truncate-miss");
+    seed_messages(&p, &id, &["一", "二"]).await;
+    let seen = watch_changes(&p);
+
+    let r = p
+        .dispatch(
+            &vctx(),
+            &message_path(&id, "nope"),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TRUNCATE.to_string(),
+                payload: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    assert!(r.ok, "目标不存在是**结果**，不是错误");
+    assert_eq!(r.data, Some(json!([])), "回执是空列表");
+    assert_eq!(transcript_ids(&p, &id).await, vec!["m0", "m1"], "列表未动");
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "什么都没删 ⇒ 一条变更都不发"
+    );
+}
+
+/// 动作不认识、或动作放错地址：`NotImplemented`（消费方据此**不给出入口**），
+/// 而不是「成功但什么都没做」。
+#[tokio::test]
+async fn unknown_or_misplaced_action_is_not_implemented() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-action-unknown");
+    seed_messages(&p, &id, &["一"]).await;
+
+    for (path, action) in [
+        // 动作标识不认识
+        (message_path(&id, "m0"), "explode"),
+        // 动作对、地址不对：`truncate` 落在列表目录上
+        (message_dir_path(&id), VDFS_ACTION_TRUNCATE),
+        // 同上：`switch_branch` 的目标是**一条消息所在的那一组**，列表目录上没有这一组
+        (message_dir_path(&id), VDFS_ACTION_SWITCH_BRANCH),
+    ] {
+        assert!(
+            matches!(
+                p.dispatch(
+                    &vctx(),
+                    &path,
+                    VdfsRequest::Action {
+                        action: action.to_string(),
+                        payload: None
+                    }
+                )
+                .await,
+                Err(VdfsError::NotImplemented)
+            ),
+            "{path} + {action} 应报 NotImplemented"
+        );
+    }
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0"],
+        "未实现的动作不得改动列表"
+    );
+}
+
+/// `expand_skeleton`：按骨架 id 惰性重取其子树（**只读**，不改存储）。
+///
+/// 覆盖 exit 判据「窄帧序列」与「释放 → 重取 → 树一致」的后端那一半：
+/// depth 缺省=all / depth="1" 只直接子 / since_seq 增量 / root 不存在回空 /
+/// 转写列表一条不少（只读动作）。
+/// 展开骨架 `target` 的子树（`expand_skeleton` 动作），回执转成节点 id 列表。
+async fn expand_skeleton(
+    p: &SessionPlugin,
+    id: &str,
+    target: &str,
+    payload: Option<Value>,
+) -> Vec<String> {
+    let r = p
+        .dispatch(
+            &vctx(),
+            &message_path(id, target),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_EXPAND_SKELETON.to_string(),
+                payload,
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    r.data.as_ref().unwrap()["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn expand_skeleton_returns_the_subtree_on_demand() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-expand");
+    seed_nodes(
+        &p,
+        &id,
+        vec![
+            cm::ChatNode {
+                id: "s".into(),
+                msg_type: Some(cm::NodeKind::Skeleton),
+                seq: Some(1),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "a".into(),
+                parent_id: Some("s".into()),
+                seq: Some(2),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "b".into(),
+                parent_id: Some("s".into()),
+                seq: Some(3),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "c".into(),
+                parent_id: Some("b".into()),
+                seq: Some(4),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "other".into(),
+                seq: Some(5),
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+
+    // depth 缺省 = all：整棵后代（a,b,c），不含骨架 s、不含无关的 other
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", None).await,
+        ["a", "b", "c"],
+        "all：整棵后代子树"
+    );
+
+    // depth = "1"：只直接子节点
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "depth": "1" }))).await,
+        ["a", "b"],
+        "depth 1：不下探孙节点"
+    );
+
+    // since_seq = 3：只回 seq>3 的后代（c）；b(seq3) 被过滤，但仍下探它以触及 c
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "since_seq": 3 }))).await,
+        ["c"],
+        "since_seq 增量：只回更新的节点"
+    );
+
+    // 不存在的 root ⇒ 空子树（只读动作，「没有」就是空，不报错）
+    assert_eq!(
+        expand_skeleton(&p, &id, "ghost", None).await,
+        Vec::<String>::new(),
+        "root 不存在 ⇒ 空子树"
+    );
+
+    // **只读**：转写列表一条不少（按 seq 升序）
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["s", "a", "b", "c", "other"],
+        "expand_skeleton 不改存储"
+    );
+}
+
+/// `expand_skeleton` 的非法入参（判据 1）：depth / since_seq 给了但不合法 ⇒
+/// 错误码，不静默按缺省处理。静默忽略的后果是「以为只要直接子」实际拿到整棵
+/// 子树，而调用方从回执里看不出来。
+#[tokio::test]
+async fn expand_skeleton_rejects_malformed_params() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-expand-bad");
+    seed_nodes(
+        &p,
+        &id,
+        vec![
+            cm::ChatNode {
+                id: "s".into(),
+                msg_type: Some(cm::NodeKind::Skeleton),
+                seq: Some(1),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "a".into(),
+                parent_id: Some("s".into()),
+                seq: Some(2),
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+
+    for (payload, why) in [
+        (json!({ "depth": "2" }), "depth 只接受 \"1\"|\"all\""),
+        (json!({ "depth": 1 }), "depth 必须是字符串（数字 1 也不认）"),
+        (json!({ "depth": true }), "depth 不接受布尔"),
+        (json!({ "since_seq": "3" }), "since_seq 必须是整数"),
+        (json!({ "since_seq": 1.5 }), "since_seq 不接受小数"),
+        (json!({ "since_seq": [] }), "since_seq 不接受数组"),
+        (json!("expand_skeleton"), "载荷必须是 JSON 对象"),
+    ] {
+        let err = p
+            .dispatch(
+                &vctx(),
+                &message_path(&id, "s"),
+                VdfsRequest::Action {
+                    action: VDFS_ACTION_EXPAND_SKELETON.to_string(),
+                    payload: Some(payload.clone()),
+                },
+            )
+            .await
+            .expect_err(&format!("应拒绝：{why}"));
+        assert!(
+            matches!(err, VdfsError::Invalid(_)),
+            "{why}：错误码须为 invalid，实得 {err:?}"
+        );
+    }
+
+    // 合法边界照旧放行：显式 null 与缺省同义（「不过滤」的线上写法）。
+    assert_eq!(
+        expand_skeleton(
+            &p,
+            &id,
+            "s",
+            Some(json!({ "depth": null, "since_seq": null }))
+        )
+        .await,
+        ["a"],
+        "显式 null = 缺省"
+    );
+    assert_eq!(
+        expand_skeleton(
+            &p,
+            &id,
+            "s",
+            Some(json!({ "depth": "all", "since_seq": 2 }))
+        )
+        .await,
+        Vec::<String>::new(),
+        "depth=all + since_seq=2 ⇒ seq>2 无节点（a 的 seq 恰为 2，被过滤）"
+    );
+}
+
+// ==================== dispatch 请求形态（测试辅助） ====================
+
+const LIST: VdfsRequest = VdfsRequest::List {};
+const STAT: VdfsRequest = VdfsRequest::Stat;
+const READ: VdfsRequest = VdfsRequest::Read;
+const DEL: VdfsRequest = VdfsRequest::Delete { recursive: false };
+const UNWATCH: VdfsRequest = VdfsRequest::Unwatch;

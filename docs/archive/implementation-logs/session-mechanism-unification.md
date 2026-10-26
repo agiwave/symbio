@@ -2,7 +2,7 @@
 
 > **【归档说明】** 本文档为机制审计与改造提案（含缺陷取证、实施状态、待办分期），属历史实施记录，
 > 移入 `docs/archive/implementation-logs/`，本文不再更新。
-> 现行机制描述见 `symbio/src/plugins/session/README.md` 与 `symbio/src/plugins/session/docs/turn-tool-mechanisms.md`。
+> 现行机制描述见 `crates/symbio-plugin-session/README.md` 与 `crates/symbio-plugin-session/src/docs/turn-tool-mechanisms.md`。
 > 已落地项的变更事实见 `docs/CHANGELOG.md`。
 
 > 取证基线：`plugins/session/`（chat_loop 1553 / orchestrator 1296 / tool_executor 950 /

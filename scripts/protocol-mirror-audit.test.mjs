@@ -35,13 +35,13 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
-const CHAT_RS = 'symbio_kernel/src/chat/chat_node.rs'
+const CHAT_RS = 'crates/symbio-kernel/src/chat/chat_node.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'symbio_kernel/src/present/detail.rs'
+const DETAIL_RS = 'crates/symbio-kernel/src/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio_kernel/src/capability/mod.rs'
+const RISK_LEVEL_RS = 'crates/symbio-kernel/src/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'symbio_kernel/src/present/reading.rs'
+const READING_RS = 'crates/symbio-kernel/src/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
@@ -170,19 +170,19 @@ const VDFS_WORDS_RS_SRC = [
  * 夹具按真实文件路径分发。
  */
 const VDFS_TYPES_RS = {
-  'symbio_kernel/src/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
-  'symbio_kernel/src/vdfs/node.rs': [
+  'crates/symbio-kernel/src/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
+  'crates/symbio-kernel/src/vdfs/node.rs': [
     rsStruct('VdfsNode', 'path', 'name'),
     rsStruct('VdfsItem', 'path'),
     rsStruct('VdfsNewType', 'ext', 'title'),
   ].join('\n'),
-  'symbio_kernel/src/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
-  'symbio_kernel/src/vdfs/error.rs': [
+  'crates/symbio-kernel/src/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
+  'crates/symbio-kernel/src/vdfs/error.rs': [
     rsStruct('VdfsFieldError', 'field', 'message'),
     rsStruct('VdfsValidationError', 'message', 'fields'),
   ].join('\n'),
-  'symbio_kernel/src/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
-  'symbio_kernel/src/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
+  'crates/symbio-kernel/src/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
+  'crates/symbio-kernel/src/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
 }
 
 /** 前端 vdfs.ts：只放后端有对应协议词 / 字段的——多放一个就命中「未登记」检查 */
@@ -369,7 +369,7 @@ const META_READER_TS_SRC = [
  * 不限定时抽取器按名字取文件里**第一个**匹配，四对登记会拿同一个类型比四个接口。
  * 每个模块头带一条 `Corresponding Frontend`（E 组的后端侧）。
  */
-const HOME_SCHEMAS_RS = 'symbio/src/plugins/home/schemas.rs'
+const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
 const HOME_SCHEMAS_RS_SRC = [
   'pub mod home_reload {',
   '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
@@ -420,7 +420,7 @@ const HOME_SCHEMAS_RS_SRC = [
  */
 const HOME_TS = 'tauri/src/schemas/home.ts'
 const HOME_TS_SRC = [
-  '// Corresponding Backend: symbio/src/plugins/home/schemas.rs',
+  '// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs',
   'export namespace home_reload {',
   '  export interface Request {',
   '    homedir?: string',
@@ -461,12 +461,12 @@ const HOME_TS_SRC = [
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
-  'symbio_kernel/src/vdfs/words.rs': VDFS_WORDS_RS_SRC,
+  'crates/symbio-kernel/src/vdfs/words.rs': VDFS_WORDS_RS_SRC,
   ...VDFS_TYPES_RS,
-  'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
-  'symbio/src/routes.rs': ROUTE_RS_SRC,
+  'crates/symbio-plugin-vdfs/src/protocol.rs': PROTOCOL_RS_SRC,
+  'crates/symbio-plugin-api/src/routes.rs': ROUTE_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
-  'symbio/src/symbio_core/event_bus/mod.rs':
+  'crates/symbio-core/src/event_bus/mod.rs':
     '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
@@ -540,7 +540,7 @@ test('真实仓库当前状态通过（防本守卫在真仓库上误报）', ()
 
 test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio_kernel/src/vdfs/words.rs': [
+    'crates/symbio-kernel/src/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "transcript";',
       'pub const VDFS_EXT_SESSION: &str = "session";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -553,7 +553,7 @@ test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
 
 test('后端改了会话 ext、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio_kernel/src/vdfs/words.rs': [
+    'crates/symbio-kernel/src/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "messages";',
       'pub const VDFS_EXT_SESSION: &str = "conversation";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -566,7 +566,7 @@ test('后端改了会话 ext、前端没跟 → 变红', () => {
 
 test('后端改了 op 路由（自动发现，无需登记）→ 变红', () => {
   const r = mirror({
-    'symbio/src/plugins/vdfs/protocol.rs': [
+    'crates/symbio-plugin-vdfs/src/protocol.rs': [
       'pub const VDFS_LIST: &str = "vdfs/ls";',
     ].join('\n'),
   })
@@ -577,7 +577,7 @@ test('后端改了 op 路由（自动发现，无需登记）→ 变红', () => 
 test('后端改了别名目标（`ROUTE_VDFS_ROOT`）→ 变红，且报出别名关系', () => {
   // 别名目标住在宿主的 `routes.rs`（跨插件可见的路由归宿主的地址模块）。
   const r = mirror({
-    'symbio/src/routes.rs': [
+    'crates/symbio-plugin-api/src/routes.rs': [
       'pub const ROUTE_VDFS_ROOT: &str = "vdfs/rooted";',
     ].join('\n'),
   })
@@ -604,7 +604,7 @@ test('前端把常量改成别名（不再是第二份真相）→ 不红', () =
 })
 
 test('后端常量源文件被删 → 变红（不是静默跳过）', () => {
-  const r = mirror({ 'symbio_kernel/src/vdfs/words.rs': null })
+  const r = mirror({ 'crates/symbio-kernel/src/vdfs/words.rs': null })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /后端常量源不存在/)
 })
@@ -750,7 +750,7 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 
 // ==================== D 组：结构体字段 ====================
 
-const VDFS_NODE_RS = 'symbio_kernel/src/vdfs/node.rs'
+const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
 
 test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
   const r = mirror({
@@ -961,7 +961,7 @@ test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变�
 
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
   const r = mirror({
-    'symbio/src/symbio_core/event_bus/mod.rs':
+    'crates/symbio-core/src/event_bus/mod.rs':
       '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 1)
@@ -979,8 +979,8 @@ test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () 
 test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这条会静默）', () => {
   const r = mirror({
     [HOME_TS]: HOME_TS_SRC.replace(
-      '// Corresponding Backend: symbio/src/plugins/home/schemas.rs',
-      '// Corresponding Backend: symbio/src/symbio_core/schemas/home_reload.rs',
+      '// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs',
+      '// Corresponding Backend: crates/symbio-core/src/schemas/home_reload.rs',
     ),
   })
   assert.equal(r.status, 1)
@@ -989,12 +989,12 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
 
 test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
   const r = mirror({
-    'symbio/src/symbio_core/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+    'crates/symbio-core/src/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
     [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
       /^(\s*)\/\/! Corresponding Frontend: .*$\n/gm,
       '',
     ),
-    [HOME_TS]: HOME_TS_SRC.replace('// Corresponding Backend: symbio/src/plugins/home/schemas.rs\n', ''),
+    [HOME_TS]: HOME_TS_SRC.replace('// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs\n', ''),
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /E 组 0 条跨栈导航头/)
@@ -1044,7 +1044,7 @@ test('顶层字段零命中（谁都不读）→ 不红（死字段不归 G 管�
 test('CLI 侧直接消费也算直接（Rust 读法）→ 不红', () => {
   const r = mirror({
     ...chatNodeWith('seq_no'),
-    'cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
+    'crates/symbio-cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })

@@ -11,8 +11,8 @@ created: 2026-09-06
 > 目标：在 App 运行期间对外提供一套纯 HTTP/WebSocket 接口，让第三方应用像前端一样访问和控制整个应用。
 > 接口服务本身作为**一个普通插件**纳入现有插件体系，配置/开启/关闭**复用现有设置页机制**，前端零改动。
 
-- 现状：已实现（`gateway` 插件）。现行端点清单见 [reference/003-ROUTES.md](../006-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [reference/001-CONFIGURATION.md](../006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [architecture/002-DATA_FLOW.md](002-DATA_FLOW.md "DE-003-数据流与调用链")，模块机制见 [gateway 插件 README](../../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README")
-- 关联：[architecture/004-PROTOCOLS.md](004-PROTOCOLS.md "DE-005-协议规范")（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
+- 现状：已实现（`gateway` 插件）。现行端点清单见 [reference/003-ROUTES.md](../006-ref/003-ROUTES.md "RE-003-ROUTES")，配置键见 [reference/001-CONFIGURATION.md](../006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")，调用链见 [[DE-003-数据流与调用链|architecture/002-DATA_FLOW.md]]，模块机制见 [gateway 插件 README](../../crates/symbio-plugin-gateway/README.md "crates/symbio-plugin-gateway/src/README")
+- 关联：[[DE-005-协议规范|architecture/004-PROTOCOLS.md]]（`PluginMessageWire` / `PluginPayloadWire` / `PluginFrame` 线上类型）
 
 ---
 
@@ -24,7 +24,7 @@ created: 2026-09-06
    往收件箱写消息（`vdfs/write <会话地址>/inbox`）是 fire-and-forget，AI 增量走的是
    VDFS 变更（`kind = "vdfs"`）。连上 WS 后**必须订阅总线 + 对会话地址登记 `vdfs/watch`**
    （两步缺一不可）才收得到流（前端也是这么做的）。详见 §5.3。
-3. 全部代码集中在**一个插件目录**（`symbio/src/plugins/gateway/`），其余机制全部复用。
+3. 全部代码集中在**一个插件目录**（`crates/symbio-plugin-gateway/src/`），其余机制全部复用。
 
 ---
 
@@ -44,14 +44,14 @@ created: 2026-09-06
 
 > 依托点**不是** `config/get` / `config/set` 协议、`SETTING_SECTIONS` 分区表或
 > `load_path` / `save_path`——这三样都不存在（配置已回到插件目录）。本设计的结论是
-> **做成插件、复用既有机制、前端零改动**，依托点是 VDFS 的配置文件 + 可配置收集通道，见 [design/013-vdfs.md](012-vdfs-frontend.md "DE-010-VDFS前端页面规范") §3.4 / §13.1。
+> **做成插件、复用既有机制、前端零改动**，依托点是 VDFS 的配置文件 + 可配置收集通道，见 [[DE-010-VDFS前端页面规范|design/013-vdfs.md]] §3.4 / §13.1。
 
 ---
 
 ## 3. 插件落点
 
 ```
-symbio/src/plugins/gateway/
+crates/symbio-plugin-gateway/src/
 ├── mod.rs        // 插件职责与"只搬运行李"的设计说明
 ├── plugin.rs     // GatewayPlugin：Plugin trait + 生命周期 + 配置文档声明
 ├── config.rs     // GatewayConfig（扁平 inbound_* 键）+ 只读白名单

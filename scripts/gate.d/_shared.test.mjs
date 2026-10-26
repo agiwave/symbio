@@ -550,7 +550,7 @@ test('ci.yml：cargo audit 必须在仓库根跑（symbio/ 下没有 Cargo.lock�
 // 本机没有 sh，POSIX 侧只能结构钉（行为由 CI 在 Linux 上钉，WSL sh 已实测两边字节数）。
 test('hook 测试：POSIX 分支必须引用 $1，否则裸 cat 去读被置空的 stdin', () => {
   const src = fs.readFileSync(
-    path.join(repoRoot, 'symbio/src/plugins/hook/executor.test.rs'),
+    path.join(repoRoot, 'crates/symbio-plugin-hook/src/executor.test.rs'),
     'utf8',
   )
   const fn = src.match(/^fn cat_last_arg_command[\s\S]*?^\}/m)
@@ -586,7 +586,7 @@ test('v2 测试的临时目录必须用前先删（pid 复用会把残留 WAL �
       else if (e.name.endsWith('.test.rs')) files.push(p)
     }
   }
-  walk(path.join(repoRoot, 'symbio', 'src'))
+  walk(path.join(repoRoot, 'crates'))
   const targets = files.filter((f) => {
     const s = fs.readFileSync(f, 'utf8')
     return s.includes('process::id()') && (s.includes('EventWalStore::open') || s.includes('V2_WAL_FILE'))

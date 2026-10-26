@@ -530,7 +530,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
       ]),
     ],
     [
-      'symbio/src/plugins/session/README.md',
+      'crates/symbio-plugin-session/README.md',
       new Map([
         [
           'LLM 可见工具',
@@ -540,7 +540,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
       ]),
     ],
     [
-      'symbio/src/plugins/classify/README.md',
+      'crates/symbio-plugin-classify/README.md',
       new Map([
         [
           '配置项',
@@ -551,7 +551,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
       ]),
     ],
     [
-      'symbio/src/plugins/classify/README.md',
+      'crates/symbio-plugin-classify/README.md',
       new Map([
         [
           '配置项',

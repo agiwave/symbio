@@ -22,14 +22,14 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./port-surface-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const EVENT_REL = 'symbio_kernel/src/event/mod.rs'
-const DECL_REL = 'symbio_kernel/src/decl/mod.rs'
-const SOLVER_REL = 'symbio_kernel/src/decl/ring.rs'
+const EVENT_REL = 'crates/symbio-kernel/src/event/mod.rs'
+const DECL_REL = 'crates/symbio-kernel/src/decl/mod.rs'
+const SOLVER_REL = 'crates/symbio-kernel/src/decl/ring.rs'
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 端口表所在文件（脚本按「含 `PortDecl {` 的 .rs」扫取值名单，路径本身不钉死） */
-const PORTS_REL = 'symbio/src/plugins/loop/loop_rows.rs'
+const PORTS_REL = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 /** 协议格写点所在文件（PTS-005 判**写方唯一**，不判这个路径——路径只是夹具的落点） */
-const WRITER_REL = 'symbio/src/plugins/loop/port.rs'
+const WRITER_REL = 'crates/symbio-plugin-loop/src/port.rs'
 /** 契约 7 的条文（PTS-006 的唯一输入） */
 const PLAN_REL = 'docs/003-design/015-义务环.md'
 
@@ -363,7 +363,7 @@ test('PTS-002 端口名单来自扫描而不是文件路径 ⇒ 换一张表也�
     ),
   })
   try {
-    const moved = path.join(root, 'symbio/src/plugins/other/ports.rs')
+    const moved = path.join(root, 'crates/crates/plugins/other/ports.rs')
     fs.mkdirSync(path.dirname(moved), { recursive: true })
     fs.writeFileSync(moved, PORTS_SRC, 'utf8')
     const r = run(root)
@@ -430,9 +430,9 @@ test('PTS-004 基线的理由为空 ⇒ 红', () => {
 test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）', () => {
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'symbio/src/plugins/other'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/crates/plugins/other'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'symbio/src/plugins/other/extra.rs'),
+      path.join(root, 'crates/crates/plugins/other/extra.rs'),
       `pub(crate) fn cheat<S>(store: &S) {\n    let _ = store.append(Event::pending("x", EVENT_FAILED, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
       'utf8',
     )
@@ -447,9 +447,9 @@ test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）'
 test('PTS-005 `before` 那一支也算写点（sent 的名字是变量，不是常量）', () => {
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'symbio/src/plugins/other'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/crates/plugins/other'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'symbio/src/plugins/other/extra.rs'),
+      path.join(root, 'crates/crates/plugins/other/extra.rs'),
       `pub(crate) fn cheat<S>(store: &S, decl: &PortDecl) {\n    let _ = store.append(Event::pending("x", decl.before, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
       'utf8',
     )

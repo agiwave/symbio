@@ -6,12 +6,7 @@
 # （found crate compiled by incompatible version of rustc）/ 全量重编。
 [workspace]
 resolver = "2"
-members = [
-    "cli",
-    "symbio",
-    "symbio_kernel",
-    "tauri/src-tauri",
-]
+members = ["crates/*", "tauri/src-tauri"]
 
 # —— 以下 profile 原散落在成员 crate，workspace 下只有根 manifest 的 profile 生效，
 #    故集中到这里，避免被 cargo 静默忽略（见下方各成员删去的同名块）。 ——

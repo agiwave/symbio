@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 // 拿判决值当断言，等于测一个用户看不到也存不下来的东西；而"零 LLM 请求"
 // 与"没有工具节点"是同一件事的**可观测形式**——它们才是判据。
 // 判决值本身（规则表命中什么、四选一怎么映射）由单测穷举，见
-// `symbio/src/plugins/classify/rules.test.rs` 与 `classify.test.rs`。
+// `crates/symbio-plugin-classify/src/rules.test.rs` 与 `classify.test.rs`。
 //
 // ## 为什么每一条线都要"先取请求基线"
 //

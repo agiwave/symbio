@@ -5,7 +5,7 @@
 //   [`docs/004-ref/PROMPT_SHAPE.md`](../../docs/004-ref/PROMPT_SHAPE.md) 钉住的形状。
 // - 臂 B（拍平 / 被否决的那条路）：删掉 `tools`，工具明细渲染进 system 正文；
 //   `tool_calls` 渲染成正文里的 JSON 行；`role=tool` 的结果并进一条 user 消息的散文。
-//   这正是 [D-048a](../../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") 当年判为退步的那个形态。
+//   这正是 [D-048a](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README") 当年判为退步的那个形态。
 //
 // 拍平是**纯函数**：同样的输入必然同样的输出，两臂除这里以外没有任何差别
 // （同一条 system 前缀、同一份 user 提问、同一个信封）。判据要的「只比形状」就靠这个。

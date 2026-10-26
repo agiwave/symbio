@@ -12,7 +12,7 @@
 
 | 维度 | Tauri 壳 | CLI | 网关 |
 |---|---|---|---|
-| 位置 | `tauri/src-tauri/src/`（449 行 / 3 文件） | `cli/src/client.rs`（686 行） | `symbio/src/plugins/gateway/server.rs`（794 行） |
+| 位置 | `tauri/src-tauri/src/`（449 行 / 3 文件） | `crates/symbio-cli/src/client.rs`（686 行） | `crates/symbio-plugin-gateway/src/server.rs`（794 行） |
 | 持有根 | `AppState.root: Arc<dyn Plugin>` | `SymbioClient.root: Arc<dyn Plugin>` | `parent: Weak<dyn Plugin>` |
 | 请求入口 | 3 个 IPC command：`route_v2` / `route_v2_send` / `route_v2_close` | 无独立入口，`route<T>()` 一个泛型方法 | HTTP 手写路由 + `WS /api/v1/ws` |
 | 信封 | 有（`PluginMessageWire` 进出） | **无**（强类型直传） | 有（`PluginMessageWire` → `PluginPayloadWire`） |
@@ -29,7 +29,7 @@
 ### 候选 A — `wire → 扩展桶上下文`（**真·近逐字重复**，已核实）
 
 - `tauri/src-tauri/src/commands.rs:53-88`
-- `symbio/src/plugins/gateway/server.rs:502-524`
+- `crates/symbio-plugin-gateway/src/server.rs:502-524`
 
 两处语义**完全一致**：`extensions.insert(PLUGIN_PAYLOAD_KEY, Arc::new(payload))`
 + 遍历 `metadata`，`is_str` 存 `Arc<String>`，否则存 `Arc<Value>`，最后构造

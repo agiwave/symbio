@@ -52,7 +52,7 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
 }
 `
 
-const ROWS_PATH = 'symbio/src/plugins/loop/loop_rows.rs'
+const ROWS_PATH = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 
 /** 造一棵最小仓库：`files` 是 相对路径 → 内容（`ROWS_PATH` 默认给一份两行表） */
 function audit(files, { baseline = '2', precheck = '9' } = {}) {
@@ -92,7 +92,7 @@ const marked = (row, { gap = 0, reason = '执行体动手前的复核：重放�
   `fn step() {\n    // obligation-precheck OB-004: ${reason}\n${'    let _ = 0;\n'.repeat(gap)}    let _ = owes("${row}", &[], 0, 0);\n}\n`
 
 test('干净仓：2 处调度旁路 / 基线 2、无承认 ⇒ 通过', () => {
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']) })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']) })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /通过/)
   assert.match(out(r), /调度旁路 2\/2/)
@@ -100,20 +100,20 @@ test('干净仓：2 处调度旁路 / 基线 2、无承认 ⇒ 通过', () => {
 })
 
 test('OB-001 调度旁路超出基线 ⇒ 红，并列出每一处', () => {
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta', 'alpha']) })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta', 'alpha']) })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /OB-001 派发面变宽：调度旁路.*点数 3 > 基线 2/)
   assert.match(out(r), /a\.rs:\d+ {2}alpha/)
 })
 
 test('OB-002 调度旁路低于基线 ⇒ 通过但提示下调（余量不许白留）', () => {
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha']) }, { baseline: '5' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha']) }, { baseline: '5' })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /提示.*调度旁路.*1<5.*BYPASS_BASELINE/)
 })
 
 test('OB-002 幂等点问低于基线也要提示（两格都不许白留余量）', () => {
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': marked('beta') }, { baseline: '0', precheck: '5' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('beta') }, { baseline: '0', precheck: '5' })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /提示.*幂等点问.*1<5.*PRECHECK_BASELINE/)
 })
@@ -122,25 +122,25 @@ test('承认过的点**不进**调度旁路那格：旁路基线 0 也能通过�
   // 一处未承认（`alpha`）+ 一处已承认（`beta`）：`baseline=1` 过、`baseline=0` 必红，
   // 才算证明标记真的改变了归类，而不是只改了打印文字。
   const both = `fn step() {\n    // obligation-precheck OB-004: 执行体动手前的复核\n    let _ = owes("beta", &[], 0, 0);\n    let _ = owes("alpha", &[], 0, 0);\n}\n`
-  const ok = audit({ 'symbio/src/plugins/loop/a.rs': both }, { baseline: '1' })
+  const ok = audit({ 'crates/symbio-plugin-loop/src/a.rs': both }, { baseline: '1' })
   assert.equal(ok.status, 0, out(ok))
   assert.match(out(ok), /调度旁路 1\/1（alpha×1）· 幂等点问 1\/9（beta×1）/)
-  const red = audit({ 'symbio/src/plugins/loop/a.rs': both }, { baseline: '0' })
+  const red = audit({ 'crates/symbio-plugin-loop/src/a.rs': both }, { baseline: '0' })
   assert.equal(red.status, 1, out(red))
   assert.match(out(red), /调度旁路.*点数 1 > 基线 0/)
 })
 
 test('`fn owes(` 定义行不算调用点（13 与 12 的那个 off-by-one）', () => {
   // 行表文件里那份定义若被算进来，计数就天生多一格 ⇒ 棘轮永远松着
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']) })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']) })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /调度旁路 2\/2/)
 })
 
 test('`*.test.rs` 里的断言不算调用点', () => {
   const r = audit({
-    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
-    'symbio/src/plugins/loop/a.test.rs': caller(['alpha', 'alpha', 'alpha', 'beta']),
+    'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
+    'crates/symbio-plugin-loop/src/a.test.rs': caller(['alpha', 'alpha', 'alpha', 'beta']),
   })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /调度旁路 2\/2/)
@@ -148,8 +148,8 @@ test('`*.test.rs` 里的断言不算调用点', () => {
 
 test('`drive_steps` 函数体里的问债不算旁路（它就是派发器本体）', () => {
   const r = audit({
-    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
-    'symbio/src/plugins/loop/turn_exec.rs':
+    'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
+    'crates/symbio-plugin-loop/src/turn_exec.rs':
       'fn drive_steps(rows: &[Decl]) {\n    let _ = owes("alpha", &[], 0, 0);\n    let _ = owes("beta", &[], 0, 0);\n}\n',
   })
   assert.equal(r.status, 0, out(r))
@@ -158,7 +158,7 @@ test('`drive_steps` 函数体里的问债不算旁路（它就是派发器本体
 
 test('注释里的 `owes(` 不算调用点', () => {
   const r = audit({
-    'symbio/src/plugins/loop/a.rs':
+    'crates/symbio-plugin-loop/src/a.rs':
       '// 这里曾经直调 owes("alpha")，收编后改走 drive\n/* owes("beta") */\n' + caller(['alpha', 'beta']),
   })
   assert.equal(r.status, 0, out(r))
@@ -169,8 +169,8 @@ test('引擎的现读点 `row_owed` 不算旁路（它是派发本体的一半�
   // D-136：派发前问表只剩这一处，它问的行名来自调用点声明的 `Dispatch { row }`。
   // 把它算进旁路会让基线虚高一格，而那一格正是「谁都能再加一处」的余量。
   const r = audit({
-    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
-    'symbio/src/plugins/loop/port.rs':
+    'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
+    'crates/symbio-plugin-loop/src/port.rs':
       'impl Dispatch<\'_> {\n    fn row_owed<S>(&self, store: &S) -> bool {\n        let _ = super::loop_rows::owes(self.row, &[], 0, 0);\n    }\n}\n',
   })
   assert.equal(r.status, 0, out(r))
@@ -179,7 +179,7 @@ test('引擎的现读点 `row_owed` 不算旁路（它是派发本体的一半�
 
 test('OB-003 也核 `Dispatch { row: "…" }` 的字面点名（点错 ⇒ 那一格永不派发）', () => {
   const r = audit({
-    'symbio/src/plugins/loop/a.rs':
+    'crates/symbio-plugin-loop/src/a.rs':
       caller(['alpha', 'beta']) +
       'fn round() {\n    let _ = Dispatch {\n        row: "gamma",\n    };\n}\n',
   })
@@ -187,21 +187,21 @@ test('OB-003 也核 `Dispatch { row: "…" }` 的字面点名（点错 ⇒ 那�
   assert.match(out(r), /OB-003 .*派发点名 `row: "gamma"`/)
   // 点名合法时不报，也不进旁路计数
   const ok = audit({
-    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']) + 'fn round() {\n    let _ = Dispatch { row: "beta" };\n}\n',
+    'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']) + 'fn round() {\n    let _ = Dispatch { row: "beta" };\n}\n',
   })
   assert.equal(ok.status, 0, out(ok))
   assert.match(out(ok), /调度旁路 2\/2/)
 })
 
 test('OB-003 点名不存在的行 ⇒ 红（`owes` 恒 false ⇒ 这段旁路永不执行）', () => {
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta', 'gamma']) }, { baseline: '9' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta', 'gamma']) }, { baseline: '9' })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /OB-003 .*owes\("gamma"\).*ROWS.*没有这一行/)
 })
 
 test('OB-003 只认 `ROWS` 块：执行体名 / 端口名不是行名', () => {
   // `courier` 在同一文件的 `ActorDecl { name: "courier" }` 里写着，但它不是一行
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': caller(['alpha', 'courier']) }, { baseline: '9' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'courier']) }, { baseline: '9' })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /OB-003 .*owes\("courier"\)/)
 })
@@ -209,7 +209,7 @@ test('OB-003 只认 `ROWS` 块：执行体名 / 端口名不是行名', () => {
 test('OB-004 洗白：标记贴在 `by = None` 的行上 ⇒ 红（哪怕旁路基线已经放到 0）', () => {
   // 这是拆成两格之后**唯一的新失效面**：给策略行的直问补一句「这是护栏」，
   // `BYPASS_BASELINE` 当场归零而代码一行没动。牙在这一条上。
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': marked('alpha') }, { baseline: '0' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('alpha') }, { baseline: '0' })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /OB-004 .*标记贴在了未接执行体的行 `"alpha"`/)
   assert.match(out(r), /唯一的派发点/)
@@ -220,7 +220,7 @@ test('一句承认只顶一个点：同一标记下的第二处直问仍是调�
   // 而那多半是另一件事（这里两处点的行都接了执行体，红只能来自计数）。
   const r = audit(
     {
-      'symbio/src/plugins/loop/a.rs':
+      'crates/symbio-plugin-loop/src/a.rs':
         'fn step() {\n    // obligation-precheck OB-004: 复核第一处\n    let _ = owes("beta", &[], 0, 0);\n    let _ = owes("beta", &[], 1, 0);\n}\n',
     },
     { baseline: '0' },
@@ -232,7 +232,7 @@ test('一句承认只顶一个点：同一标记下的第二处直问仍是调�
 
 test('OB-004 理由没有内容 ⇒ 红（承认账本不许写成装饰）', () => {
   // 判空口径同 R-002：至少要一个字母 / 数字 / 汉字，一个句号不算理由
-  const r = audit({ 'symbio/src/plugins/loop/a.rs': marked('beta', { reason: '。' }) }, { baseline: '0' })
+  const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('beta', { reason: '。' }) }, { baseline: '0' })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /OB-004 .*承认理由为空/)
 })
@@ -242,8 +242,8 @@ test('OB-004 标记悬空 ⇒ 红（近旁没有直调点的承认不算承认�
   // 也不许悄悄留在仓里充当承认——它下面那段旁路删了，承认必须跟着删。
   const dangling = audit(
     {
-      'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
-      'symbio/src/plugins/loop/b.rs':
+      'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
+      'crates/symbio-plugin-loop/src/b.rs':
         'fn old() {\n    // obligation-precheck OB-004: 这段旁路已经收编进 drive\n    let _ = 1;\n}\n',
     },
     { baseline: '2' },
@@ -252,7 +252,7 @@ test('OB-004 标记悬空 ⇒ 红（近旁没有直调点的承认不算承认�
   assert.match(out(dangling), /OB-004 .*b\.rs:\d+ 承认标记悬空/)
 
   // 窗口内（其上第 3 行）仍然算贴上 ⇒ 钉住「悬空」判的是距离，不是标记本身
-  const inWindow = audit({ 'symbio/src/plugins/loop/a.rs': marked('beta', { gap: 2 }) }, { baseline: '0' })
+  const inWindow = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('beta', { gap: 2 }) }, { baseline: '0' })
   assert.equal(inWindow.status, 0, out(inWindow))
   assert.match(out(inWindow), /幂等点问 1\/9/)
 })
@@ -260,7 +260,7 @@ test('OB-004 标记悬空 ⇒ 红（近旁没有直调点的承认不算承认�
 test('OB-004 幂等点问超出自己的基线 ⇒ 红（护栏不许随手加）', () => {
   const r = audit(
     {
-      'symbio/src/plugins/loop/a.rs':
+      'crates/symbio-plugin-loop/src/a.rs':
         'fn step() {\n    // obligation-precheck OB-004: 复核一\n    let _ = owes("beta", &[], 0, 0);\n    // obligation-precheck OB-004: 复核二\n    let _ = owes("beta", &[], 1, 0);\n}\n',
     },
     { baseline: '0', precheck: '1' },
@@ -271,7 +271,7 @@ test('OB-004 幂等点问超出自己的基线 ⇒ 红（护栏不许随手加�
 
 test('多行调用也能抓到行名', () => {
   const r = audit({
-    'symbio/src/plugins/loop/a.rs':
+    'crates/symbio-plugin-loop/src/a.rs':
       'fn step() {\n    let _ = super::super::loop_rows::owes(\n        "alpha",\n        &[],\n        0,\n        0,\n    );\n}\n',
   }, { baseline: '1' })
   assert.equal(r.status, 0, out(r))
@@ -287,7 +287,7 @@ test('范围读不出（一个 `.rs` 都没有）⇒ exit 2，不退化成通过
 test('行表读不出（`ROWS` 不在）⇒ exit 2，宁红不静默', () => {
   const r = audit({
     [ROWS_PATH]: 'pub(crate) static OTHER: &[Decl] = &[];\n',
-    'symbio/src/plugins/loop/a.rs': caller(['alpha', 'beta']),
+    'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
   })
   assert.equal(r.status, 2, out(r))
   assert.match(out(r), /读不出 `ROWS` 行表/)

@@ -31,7 +31,7 @@
  *    四个名字，两种判决**——差别只在测试里恰好写了哪几个名字，那与「该不该住 core」无关。
  *    ⚠️ 本条是 2026-10-09 补的**口径修正**：此前测试算消费方，棘轮基线（单消费方 61）按
  *    那个口径算；口径一改，基线随之一并重定（见 `core-export-audit.mjs` 的 `BASELINE`）。
- * 5. **`symbio/src/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
+ * 5. **`crates/crates/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
  *    也是消费方**：第一版把它们跳过，于是「只在注册表里被用到」的符号被算成 0——
  *    `PluginErrorCode` / `PluginIdentity` 一族全部假报。**「数不到」与「真的没人用」
  *    是两件事**，归属函数因此**永不返回 null**（见 `core-surface-audit.mjs` 的 `unitOf`）。
@@ -167,11 +167,11 @@ export function kindOf(name) {
  *     必须跳过它们——命名空间不是符号，前缀规则对它不适用（见 `declaredModules`）
  */
 export function collectCoreSurface(root) {
-  const coreRel = 'symbio/src/symbio_core'
+  const coreRel = 'crates/symbio-core/src'
   const coreDir = path.join(root, coreRel)
-  const rootMod = path.join(coreDir, 'mod.rs')
+  const rootMod = path.join(coreDir, 'lib.rs')
   if (!fs.existsSync(rootMod)) {
-    throw new Error(`找不到 ${path.join(coreRel, 'mod.rs')}（root=${root}）`)
+    throw new Error(`找不到 ${path.join(coreRel, 'lib.rs')}（root=${root}）`)
   }
 
   const domains = new Set(
@@ -210,7 +210,7 @@ export function collectCoreSurface(root) {
   // symbio_kernel::<域>::*;`，`pub mod family;` / `pub mod failure_kind { … }` 的
   // 声明落在 kernel 侧。只查 core 会把这两个子命名空间读成函数（N-001 假红），
   // 故两处取并集——与「公开面同口径」是同一条纪律：公开面在哪，判定就在哪。
-  const kernelDir = path.join(root, 'symbio_kernel', 'src')
+  const kernelDir = path.join(root, 'crates', 'symbio-kernel', 'src')
   const modCache = new Map()
   const modules = new Set()
   for (const [name, domain] of symbols) {
@@ -234,7 +234,7 @@ export function collectCoreSurface(root) {
 
 /** 跨 crate 消费方：整个 crate 算一个单位（它们是独立 crate，与插件模块不可比） */
 export const CROSS_CRATE = [
-  { rel: 'cli/src', label: 'cli' },
+  { rel: 'crates/symbio-cli/src', label: 'cli' },
   { rel: 'tauri/src-tauri/src', label: 'tauri-shell' },
 ]
 
@@ -251,7 +251,7 @@ export function unitOf(rel) {
   const m2 = norm.match(/^symbio\/src\/providers\/([^/]+)\//)
   if (m2) return `providers/${m2[1]}`
   if (/^symbio\/src\/plugins\/[^/]+$/.test(norm)) return 'plugins/(registry)'
-  if (norm.startsWith('symbio/src/')) return 'symbio/(crate root)'
+  if (norm.startsWith('crates/crates/')) return 'symbio/(crate root)'
   for (const c of CROSS_CRATE) {
     if (norm.startsWith(c.rel)) return c.label
   }
@@ -354,7 +354,7 @@ const declRe = (name) =>
 /** 该符号所在的 `pub use` **导出清单行**——理由同口径 2：清单会写成命中，但那是清单 */
 const reexportRe = (name) => new RegExp(`^[^\\n]*\\bpub\\s+use\\b[^\\n]*\\b${name}\\b[^\\n]*$`, 'gm')
 
-export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
+export function collectCoreDomainConsumers(root, symbols, coreRel = 'crates/symbio-core/src') {
   const names = [...symbols.keys()]
   const out = new Map()
   // 内核 crate 也是 core 自己的实现（D-188 C2a）：它内部的跨模块引用同样算
@@ -362,7 +362,7 @@ export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/
   // 被误判成「单消费方该下沉」。域名加 `kernel/` 前缀，与 core 的域区分开。
   const scanRoots = [
     { dir: path.join(root, coreRel), prefix: '' },
-    { dir: path.join(root, 'symbio_kernel', 'src'), prefix: 'kernel/' },
+    { dir: path.join(root, 'crates', 'symbio-kernel', 'src'), prefix: 'kernel/' },
   ]
   for (const { dir: scanDir, prefix } of scanRoots) {
     if (!fs.existsSync(scanDir)) continue
@@ -458,7 +458,7 @@ function isCfgTestOnlyModule(file) {
  * 数每个公开符号的消费方单位（`Map<符号, Set<单位>>`）。
  *
  * - core 自身不算消费方（口径：公开面是给 core **外**用的）；
- * - 一个**生产**文件都不能跳过（口径 5）：`symbio/src/` 直属文件也算；
+ * - 一个**生产**文件都不能跳过（口径 5）：`crates/crates/` 直属文件也算；
  * - 宏调用点算消费方（见 `collectMacroBodies`）；
  * - **测试文件默认不算**（口径 4）——`opts.includeTests` 为真时才计入。
  *
@@ -473,12 +473,12 @@ function isCfgTestOnlyModule(file) {
  *
  * 两者混成一个数，就是 `TurnRunner` 长期逃过下沉的机制（见口径 4）。
  */
-export function collectConsumers(root, symbols, coreRel = 'symbio/src/symbio_core', opts = {}) {
+export function collectConsumers(root, symbols, coreRel = 'crates/symbio-core/src', opts = {}) {
   const includeTests = opts.includeTests === true
   const allNames = [...symbols.keys()]
   const macros = collectMacroBodies(root, coreRel, symbols)
   const consumers = new Map()
-  const scanRoots = ['symbio/src', 'cli/src', 'tauri/src-tauri/src'].map((r) => path.join(root, r))
+  const scanRoots = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src'].map((r) => path.join(root, r))
   for (const scanRoot of scanRoots) {
     for (const file of walk(scanRoot)) {
       if (!file.endsWith('.rs')) continue

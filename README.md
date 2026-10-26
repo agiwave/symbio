@@ -96,8 +96,8 @@ symbio/
 | **架构** | [总览](docs/003-design/002-架构总览.md "DE-002-架构总览") · [数据流](docs/003-design/003-数据流与调用链.md "DE-003-数据流与调用链") · [协议](docs/003-design/005-协议规范.md "DE-005-协议规范") · [决策记录](docs/003-design/README.md "DE-000-设计总览") |
 | **参考** | [事实表](docs/004-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | **开发** | [插件开发](docs/006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [文档中心与登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
-| **设计** | [VDFS](docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") · [Agent 目录](docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") · [上下文压缩](symbio/src/plugins/session/docs/101-context-compression-design.md "DE-101-context-compression-design") · [目标架构 v2](docs/003-design/002-架构总览.md "DE-002-架构总览") |
-| **CLI** | [cli/README](cli/README.md "cli/README") · [架构](cli/docs/112-architecture.md "DE-112-architecture") · [构建](cli/docs/003-building.md "GU-003-building") · [用法](cli/docs/004-usage.md "GU-004-usage") |
+| **设计** | [VDFS](docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") · [Agent 目录](docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") · [上下文压缩](crates/symbio-plugin-session/src/docs/101-context-compression-design.md "DE-101-context-compression-design") · [目标架构 v2](docs/003-design/002-架构总览.md "DE-002-架构总览") |
+| **CLI** | [cli/README](crates/symbio-cli/README.md "crates/symbio-cli/README") · [架构](crates/symbio-cli/docs/112-architecture.md "DE-112-architecture") · [构建](crates/symbio-cli/docs/003-building.md "GU-003-building") · [用法](crates/symbio-cli/docs/004-usage.md "GU-004-usage") |
 
 > 每个插件与前端都维护自己的 `README.md`，全部模块的文档地图在[文档中心](docs/README.md "docs/README")。
 > 变更历史 = `git log`（本仓库不另维护变更日志，理由见[贡献指南](CONTRIBUTING.md "CONTRIBUTING")）。

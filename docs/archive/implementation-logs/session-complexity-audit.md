@@ -3,14 +3,14 @@
 > **【归档说明】** 本文档是 **2026-09-12 的一次性复杂度审计（过程产物）**，已于 2026-09-17
 > 移入 `docs/archive/implementation-logs/`。它的接续版本是同目录的
 > [`session-mechanism-audit.md`](session-mechanism-audit.md)；session 现行机制见
-> [`session/README.md`](../../../symbio/src/plugins/session/README.md) 与
-> [`session/docs/`](../../../symbio/src/plugins/session/docs/)。本文不再更新。
+> [[crates/symbio-plugin-session/README|`session/README.md`]] 与
+> [`session/docs/`](../../../crates/symbio-plugin-session/src/docs/)。本文不再更新。
 
 > 日期：2026-09-12（实施记录见 §八）｜ 审计基线 commit：`3ef56fd`
 > ⚠️ **文中 `文件:行号` 是审计当时的快照**：S2/S3（2026-09-16）已把 `chat_loop.rs`、
 > `plugin.rs` 拆成多文件（见 `./module-layout.md`），且 `config_schema` 已改为
 > `config_definition`——行号与部分符号名已漂移，**一律按符号名检索**。
-> 范围：`symbio/src/plugins/session/`（26 文件 / 11,829 行，其中生产代码 9,597 行）
+> 范围：`crates/symbio-plugin-session/src/`（26 文件 / 11,829 行，其中生产代码 9,597 行）
 > 结论先行：session 的复杂度里约 **4 成是上下文工程的必要代价**，另外 **6 成是"同一决策多处声明 + 视图层/存储层职责串线 + 无消费者的配置面"** 造成的可消除冗余。已定位 **4 个真实行为缺陷**（其中 2 个可直接复现）。
 
 ---

@@ -5,7 +5,7 @@
  *
  * 路由的注册处就是各插件 `async fn route()` 体内的 `match` 臂：容器按**插件目录名**
  * 建实例表、剥掉首段再把余下部分塞回 `PATH` 转发（地址规则见
- * `symbio/src/routes.rs` 的模块文档）。所以「臂 + 目录名」就是那条地址的
+ * `crates/symbio-plugin-api/src/routes.rs` 的模块文档）。所以「臂 + 目录名」就是那条地址的
  * 完整真相，**没有别的地方登记它**。
  *
  * 三份判定都要读它：`docs/004-ref/006-当前事实表.md` §1 的路由列、前端常量
@@ -155,19 +155,24 @@ export function extractRouteArms(t, pluginName) {
   return [...out].sort();
 }
 
-/** 插件根目录（`symbio/src/plugins`）下的一层目录名 = 路由前缀 = 实例名 */
+/** 插件根目录（`crates/crates/plugins`）下的一层目录名 = 路由前缀 = 实例名 */
 export function pluginDirs(root) {
-  const base = path.join(root, "symbio", "src", "plugins");
+  const base = path.join(root, "crates");
   return readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
+    .filter(
+      (e) =>
+        e.isDirectory() &&
+        e.name.startsWith("symbio-plugin-") &&
+        e.name !== "symbio-plugin-api",
+    )
+    .map((e) => e.name.slice("symbio-plugin-".length))
     .sort();
 }
 
 /** 单个插件的静态路由（完整地址，已按目录名补前缀） */
 export function pluginRouteArms(root, dirName) {
   const routes = new Set();
-  for (const t of pluginSources(path.join(root, "symbio", "src", "plugins", dirName))) {
+  for (const t of pluginSources(path.join(root, "crates", `symbio-plugin-${dirName}`, "src"))) {
     for (const arm of extractRouteArms(t, dirName)) routes.add(arm);
   }
   return [...routes].sort();
@@ -183,13 +188,13 @@ export function controlPlaneRoutes(root) {
 }
 
 /**
- * `symbio/src/routes.rs` 里的 `ROUTE_*` 声明（名、值、行号）。
+ * `crates/symbio-plugin-api/src/routes.rs` 里的 `ROUTE_*` 声明（名、值、行号）。
  *
  * 行号来自**去注释后**的文本——`stripComments` 保留行结构，所以报出来的位置就是
  * 编辑器里那一行。注释里的示例（``/// `ROUTE_FOO` ``）因此不会被当成声明。
  */
 export function routeConstDecls(root) {
-  const abs = path.join(root, "symbio", "src", "routes.rs");
+  const abs = path.join(root, "crates", "routes.rs");
   if (!existsSync(abs)) return [];
   const out = [];
   const lines = stripComments(readFileSync(abs, "utf8")).split("\n");
@@ -214,7 +219,7 @@ export function routeConstDecls(root) {
  * 守卫，空集合的失效方向是「什么都判红」，不是静默放行。
  */
 export function vdfsOps(root) {
-  const abs = path.join(root, "symbio", "src", "plugins", "vdfs", "protocol.rs");
+  const abs = path.join(root, "crates", "symbio-plugin-vdfs", "src", "protocol.rs");
   if (!existsSync(abs)) return [];
   const consts = new Map(routeConstDecls(root).map((d) => [d.name, d.value]));
   const txt = stripComments(readFileSync(abs, "utf8"));
@@ -246,7 +251,7 @@ export function dispatchableRoutes(root) {
  *
  * ## 为什么是这个形状、而不是 `ROUTE_*` 常量的注释
  *
- * 两种候选里只有这一种覆盖**全部**路由：`symbio/src/routes.rs` 的常量只收
+ * 两种候选里只有这一种覆盖**全部**路由：`crates/symbio-plugin-api/src/routes.rs` 的常量只收
  * 「有真实 Rust 调用方」的路径（该模块明令不收预留常量），而静态路由里大半是
  * **前端专用**的（`home/*`、`telegram/*`、`hook/*`、`skill/*`…）——
  * 它们没有常量，也就不可能有常量上的注释。
@@ -277,14 +282,20 @@ export function dispatchableRoutes(root) {
  */
 export function routeArmDocs(root) {
   const out = new Map();
-  const base = path.join(root, 'symbio', 'src', 'plugins');
+  const base = path.join(root, 'crates');
   if (!existsSync(base)) return out;
-  const dirNames = readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+  const crateDirs = readdirSync(base, { withFileTypes: true })
+    .filter(
+      (e) =>
+        e.isDirectory() &&
+        e.name.startsWith('symbio-plugin-') &&
+        e.name !== 'symbio-plugin-api',
+    )
     .map((e) => e.name)
     .sort();
-  for (const dirName of dirNames) {
-    for (const file of collectRs(path.join(base, dirName))) {
+  for (const crateDir of crateDirs) {
+    const dirName = crateDir.slice('symbio-plugin-'.length);
+    for (const file of collectRs(path.join(base, crateDir, 'src'))) {
       const body = fnBody(readFileSync(file, 'utf8'), 'route');
       if (!body) continue;
       /** 当前连续注释块的第一句（还没成块时 null） */

@@ -15,12 +15,12 @@ created: 2026-09-18
 
 ## 1. 为什么需要这份规则
 
-`Plugin` trait 只有三个方法（`meta` / `route` / `traverse`，签名见 [004-PROTOCOLS.md](004-PROTOCOLS.md "DE-005-协议规范")）。
+`Plugin` trait 只有三个方法（`meta` / `route` / `traverse`，签名见 [[DE-005-协议规范|004-PROTOCOLS.md]]）。
 
 `route` 与 `traverse` 是**全仓仅有的两条**跨插件寻址通道，而它们的地址是**字符串**
 ——字符串不会因为改名而编译失败，只会静默地指向一个不存在的地方。
 HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `match path`，**无静态注册表**」
-（[008-http-api-transport.md](008-http-api-transport.md "DE-013-HTTP开放接口") §7）说的就是这个代价。
+（[[DE-013-HTTP开放接口|008-http-api-transport.md]] §7）说的就是这个代价。
 
 这类错误**没有一个**会让测试变红，全靠人工核对发现。这份文档把规则写清楚，脚本把规则变成可执行的。
 
@@ -133,8 +133,8 @@ E-007 有四条豁免，逐条对应仓里的真实形态：`Weak`（向上引�
 
 - [`docs/004-ref/003-ROUTES.md`](../006-ref/003-ROUTES.md "RE-003-ROUTES") 是**人工维护**的路由清单，
   E-006 就是守它的（`CURRENT.md` 由代码生成，必然一致，不需要守）。
-- [`symbio_core/plugin/route.rs`](../../symbio/src/symbio_core/plugin/route.rs) 的模块文档是
+- [`symbio_core/plugin/route.rs`](../../crates/symbio-core/src/plugin/route.rs) 的模块文档是
   地址规则的**权威表述**，本文 §2 是它的展开。
-- [`008-http-api-transport.md`](008-http-api-transport.md "DE-013-HTTP开放接口") §7 讨论了「给 `Plugin` trait
+- [[DE-013-HTTP开放接口|`008-http-api-transport.md`]] §7 讨论了「给 `Plugin` trait
   加 `manifest()` 自动聚合路由清单」的方案。若将来落地，E-006 的判据会从
   「人工清单」换成「manifest 与代码一致」。

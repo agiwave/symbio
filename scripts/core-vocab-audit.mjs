@@ -74,7 +74,7 @@ function report(code, where, message) {
 
 // ── V-001：schemas 不许回来 ───────────────────────────────────────────────
 
-const schemasDir = path.join(ROOT, 'symbio/src/symbio_core/schemas')
+const schemasDir = path.join(ROOT, 'crates/symbio-core/src/schemas')
 if (fs.existsSync(schemasDir)) {
   report(
     'V-001',

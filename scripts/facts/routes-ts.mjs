@@ -20,7 +20,7 @@
  *
  * ## 命名
  *
- * `ROUTE_` + 地址大写（`/` → `_`），与后端 `symbio/src/routes.rs` 的常量命名
+ * `ROUTE_` + 地址大写（`/` → `_`），与后端 `crates/symbio-plugin-api/src/routes.rs` 的常量命名
  * 规则同构，因此**同名同值**：一条被宿主登记过的地址，两端检索同一个标识符就能命中。
  *
  * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
@@ -51,7 +51,7 @@ const HEADER = `/**
  * - 动态分发的地址（\`local/<工具短名>\`、容器挂载名）：静态提取不到，见
  *   \`docs/004-ref/006-当前事实表.md\` §1 标「（动态）」的那些行。
  *
- * 命名与后端 \`symbio/src/routes.rs\` 同构：\`ROUTE_\` + 地址大写（\`/\` → \`_\`），
+ * 命名与后端 \`crates/symbio-plugin-api/src/routes.rs\` 同构：\`ROUTE_\` + 地址大写（\`/\` → \`_\`），
  * 同名同值，跨栈检索只需一个标识符。
  *
  * ## 未用常量为什么留着（契约面，不是生成器偷懒）

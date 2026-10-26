@@ -85,9 +85,9 @@ node D:/Bing/symbio/scripts/windows-restart-prepare.mjs --config D:/SymbioPrepar
 
 代码依据：
 
-- `symbio/src/plugins/session/heartbeat/mod.rs`：配置在 `Session.metadata.heartbeat`，循环扫描已启用且空闲的会话，15 秒扫描，带错峰与每 tick 上限。
-- `symbio/src/plugins/session/plugin.rs`：有 Tokio runtime 时启动 heartbeat 循环；启动清理会把上次遗留的 `Streaming` 消息标成 `Failed`（“会话因重启中断”），`WaitingUserAction` 保留供用户 resume。
-- `cli/src/main.rs`：`--heartbeat` 模式保持 CLI 存活来承载后端调度器，并非恢复任意已中断调用栈。
+- `crates/symbio-plugin-session/src/heartbeat/mod.rs`：配置在 `Session.metadata.heartbeat`，循环扫描已启用且空闲的会话，15 秒扫描，带错峰与每 tick 上限。
+- `crates/symbio-plugin-session/src/plugin.rs`：有 Tokio runtime 时启动 heartbeat 循环；启动清理会把上次遗留的 `Streaming` 消息标成 `Failed`（“会话因重启中断”），`WaitingUserAction` 保留供用户 resume。
+- `crates/symbio-cli/src/main.rs`：`--heartbeat` 模式保持 CLI 存活来承载后端调度器，并非恢复任意已中断调用栈。
 
 结论：**如果新实例正确加载同一持久会话存储、原任务仍 enabled、运行时/模型配置可用且进程持续存活，调度循环会重新启动，已有 heartbeat 可能继续自动触发。不能保证原回合自动续接，更不保证恰好一次。** 这不是“完全不自动恢复”，也不是“必然无损恢复”。
 

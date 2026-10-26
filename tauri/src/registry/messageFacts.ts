@@ -26,7 +26,7 @@
  * 这也是机制审计（`scripts/mechanism-audit.mjs` M-001）的判定依据：`components/` 下
  * 不允许出现对后端 meta 字段的直接读取。
  *
- * 口径提醒：随 [D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")，「那几个数怎么说」
+ * 口径提醒：随 [D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")，「那几个数怎么说」
  * （压缩水位 / 触发来源 / token 单位）**不在这里**——那是交付出口的读数行 `node.stats`，
  * 本层只留「这条节点是不是压缩产物」这类形状判定。
  */

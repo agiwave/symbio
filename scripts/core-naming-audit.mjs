@@ -92,7 +92,7 @@ const defaultRoot = path.resolve(scriptDir, '..')
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : defaultRoot
 
-const README_REL = 'symbio/src/symbio_core/README.md'
+const README_REL = 'crates/symbio-core/README.md'
 const MODIFIER_MARK = 'core-naming:modifiers'
 
 // ── 规则源：README §1.2 的域前缀对照表 ────────────────────────────────────

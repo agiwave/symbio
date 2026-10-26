@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 编号为什么是 28
 //
-// `t27` 已被 [plan/10 批 2b](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 预留给
+// `t27` 已被 [plan/10 批 2b](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 预留给
 // 「审批与恢复」e2e（要先补 CLI 的恢复入口才写得出），本用例顺延占 `t28`。
 //
 // ## 本用例钉的是什么

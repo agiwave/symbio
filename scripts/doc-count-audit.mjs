@@ -65,7 +65,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive'])
-const INVARIANTS_REL = path.join('symbio', 'src', 'symbio_core', 'invariants', 'mod.rs')
+const INVARIANTS_REL = path.join('crates', 'symbio-core', 'src', 'invariants', 'mod.rs')
 const FACTS_REL = path.join('docs', '003-design', 'verify', 'facts', 'mod.rs')
 
 /** 中文数字 → 数值（本仓文档里的计数一律用汉字，量词是 条 / 项 / 个 / 处 / 格）。 */
@@ -141,7 +141,7 @@ function verifyProgramCount(root) {
  *  格子数同时是**可观测指标**：门禁每次通过都把 `实体 × 动词 = 格（已填）` 打出来，
  *  「网格在膨胀」这件事因此可被趋势读出，而不是靠谁去数表。 */
 function eventGridParity(root) {
-  const enumsRel = path.join(root, 'symbio_kernel', 'src', 'event', 'mod.rs')
+  const enumsRel = path.join(root, 'crates', 'symbio-kernel', 'src', 'event', 'mod.rs')
   const planRel = path.join(root, 'docs', '003-design', '001-核心架构.md')
   if (!fs.existsSync(enumsRel) || !fs.existsSync(planRel)) return null
   const src = fs.readFileSync(enumsRel, 'utf8')
@@ -209,7 +209,7 @@ function activeComments(root) {
       if (ent.name.endsWith('.rs')) out.push(path.join(dir, ent.name))
     }
   }
-  walk(path.join(root, 'symbio', 'src'))
+  walk(path.join(root, 'crates'))
   return out.sort()
 }
 

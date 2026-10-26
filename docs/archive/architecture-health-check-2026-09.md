@@ -139,11 +139,11 @@ $ node scripts/gate.mjs --only=docs,facts         → 14 / 15，失败项 = gen-
 
 ### F-6【P2·文档漂移】本次提交只更新了 3 份文档，其余仍按旧模型叙述
 
-- `symbio/src/plugins/work/README.md:14` 与 `work/mod.rs:14`：仍把挂载点写成
+- `crates/crates/plugins/work/README.md:14` 与 `work/mod.rs:14`：仍把挂载点写成
   `CapabilityVisitor::register_vdfs_provider`（死通道）。
 - `docs/design/vdfs.md:540-543`：称 `RelPath::File`（子路径）**均**经 `sub_agent(id).get_vfs_provider()`
   委托——与 F-1 实测不符（只有 3/6 个操作如此）。
-- `symbio/src/plugins/agent/host/plugin.rs:293`：注释称「子树里没有 `agent` 实例」，而常量与实测
+- `crates/symbio-plugin-agent/src/host/plugin.rs:293`：注释称「子树里没有 `agent` 实例」，而常量与实测
   （`list("reviewer")` 含 `agent`）都相反。
 - `scripts/gate.mjs:94` 注释仍在说 `BundleStore` 的 prompt/skill/mcp 分类扫描。
 

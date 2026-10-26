@@ -1,0 +1,41 @@
+---
+kind: design
+id: crates/symbio-plugin-local/README
+title: Local 插件
+status: active
+created: 2026-09-09
+lists: [local-tools=owner]
+impl: done
+---
+
+# Local 插件
+
+本地工具集：提供宿主机文件系统与命令执行能力，经 `traverse` 向会话贡献工具。
+
+## 工具
+
+清单与逐项说明见 `docs/004-ref/003-ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
+
+<!-- list:local-tools owner -->
+
+| 工具 | 说明 |
+|------|------|
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | 执行 Shell 命令（受工作目录约束）；工具名按操作系统取 |
+| `local/content_search` | 文件内容正则搜索（ripgrep） |
+| `local/todo_write` | 会话级任务清单（id/content/status/priority），支持 merge；返回紧凑确认（count+message），**不回显全量清单**——最新一次调用经 `LastOnly` 保留策略始终完整，避免每轮全量回显的 token 冗余 |
+| `local/codebase_search` | 语义化代码检索（向量相似度，不可用时降级正则） |
+| `local/ask_user` | 向用户提出结构化问题（单问题或 1~4 批量，自动补 `Other`）；返回 `failure_kind = needs_interaction` + `prompt` 载荷（**节点由编排层构造**），等回答；自动模式下降级为 `tool_unavailable` 不阻塞 |
+
+> **文件编辑类能力已迁入 VDFS**：`read`/`edit`/`write`/`delete`/`list`/`search` 统一由 `vdfs` 插件以 `vdfs_read` / `vdfs_edit` / `vdfs_write` / `vdfs_delete` / `vdfs_list` / `vdfs_search` 暴露（详见 `../vdfs/README.md`）。物理文件层由此**不在本插件**：它属 `vdfs` 插件的物理层（`../vdfs/physical.rs`），是同一棵地址空间里不经挂载名的那一半。
+
+## 机制
+
+- **工具贡献**：启动/遍历时经 `traverse` 把上述工具注册为 Capability，session 的 chat_loop 收集后进入模型工具定义。
+- **文件能力**：**不在本插件**——物理文件层属 `vdfs` 插件（`../vdfs/physical.rs`），读/写/编辑/列举/搜索统一经 `vdfs` 插件分发；`local` 在 VDFS 上只挂一份配置文档（`<根>/local/PLUGIN.yml`）。
+- **工作目录**：从 `ctx` 提取 `WORKDIR`，相对路径以此为基准；拒绝越界访问。
+- **结果回传**：工具结果作为 Tool 消息回给 session；超大结果受 session 侧 L0 守卫（8192 tok）与 1MB 物理上限约束。
+
+## 关联
+
+- 工具收集管线：`plugins/session/capabilities.rs`
+- 压缩守卫：`../session/README.md` 策略③ / `crates/symbio-plugin-session/src/docs/101-context-compression-design.md`

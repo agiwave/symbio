@@ -146,7 +146,7 @@ const SKIP_DIRS = new Set([
   'dist',
   'archive',
 ])
-const SCAN_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src']
+const SCAN_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src']
 
 /** 扫 `SCAN_ROOTS` 下的 `.rs`（跳过测试文件与垃圾目录） */
 function rustFiles() {
@@ -276,7 +276,7 @@ if (files.length === 0) {
   process.exit(2)
 }
 
-const rowsFile = path.join(ROOT, 'symbio/src/plugins/loop/loop_rows.rs')
+const rowsFile = path.join(ROOT, 'crates/symbio-plugin-loop/src/loop_rows.rs')
 const rows = declaredRows(rowsFile)
 if (!rows || rows.size === 0) {
   console.log(red('[ERROR] OB-003 读不出 `ROWS` 行表 ⇒ 行名无从核对（判据没有输入，宁红不静默）'))

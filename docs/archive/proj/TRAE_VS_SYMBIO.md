@@ -48,7 +48,7 @@
 | 任务清单 | TodoWrite | 无 | 低 |
 | 子代理（搜索/通用） | Task | agent_run（角色化，更重） | 设计差异 |
 
-> 注：Symbio 代码库内其实已具备相关**底层能力**（embedding 语义检索引擎 `symbio/src/providers/embedding/`，trait 在 `symbio_core::providers::embedding`，skill 插件 `symbio/src/plugins/skill/`，session 压缩 `symbio/src/plugins/session/compress.rs`），但当前"分析架构"这个默认 Agent 的工具面未把它们暴露给 LLM，因此对外表现为缺口。
+> 注：Symbio 代码库内其实已具备相关**底层能力**（embedding 语义检索引擎 `crates/symbio-provider-embedding/src/`，trait 在 `symbio_core::providers::embedding`，skill 插件 `crates/symbio-plugin-skill/src/`，session 压缩 `crates/symbio-plugin-session/src/compress.rs`），但当前"分析架构"这个默认 Agent 的工具面未把它们暴露给 LLM，因此对外表现为缺口。
 
 ---
 
@@ -81,7 +81,7 @@ Symbio 在两条能力线上领先，应作为核心卖点而非简单对标补�
 ## 5. 改进计划（按优先级）
 
 ### P0 — 补齐分析类任务的关键工具面
-1. **暴露语义代码检索**：复用共享 `symbio/src/providers/embedding/` 的 fastembed 实现（trait 在 `symbio_core::providers::embedding`），经 `create_object::<dyn EmbeddingService>("fastembed", ctx)` 对象工厂获取，为"分析架构"Agent 增加 `SearchCodebase` 等价工具（语义检索 + 可选 target_directories 限定）。
+1. **暴露语义代码检索**：复用共享 `crates/symbio-provider-embedding/src/` 的 fastembed 实现（trait 在 `symbio_core::providers::embedding`），经 `create_object::<dyn EmbeddingService>("fastembed", ctx)` 对象工厂获取，为"分析架构"Agent 增加 `SearchCodebase` 等价工具（语义检索 + 可选 target_directories 限定）。
 2. **新增目录列举工具 `LS`**：直接罗列绝对路径下的文件/目录，降低对 glob 的间接依赖。
 3. **提升默认生成预算**：将分析类 Agent 的 `max_tokens` 由 `4096` 调整为弹性策略（简单任务 4096，复杂分析升到 16000，或采用 Trae 式的 adaptive token escalation），避免长架构分析被截断。
 
@@ -105,7 +105,7 @@ Symbio 在两条能力线上领先，应作为核心卖点而非简单对标补�
 - **不要照搬 Trae 单体范式**：Symbio 的 CU 记忆与多 Agent 编排是护城河，改进应"加工具、不加中心化"，保持记忆 + 角色化的去中心架构。
 - **优先复用已有底座**：§2.3 备注中的 embedding/skill/session-compress 均已在代码库存在，P0 多为"暴露接口"而非"从零实现"，性价比最高。
 - **以"分析当前项目架构"为回归用例**：每次工具面/提示词调整后，用同一 prompt 跑对照，验证分析深度与截断率是否接近 Trae。
-- **文档同步**：能力变更需同步更新 `docs/ideas/agi/07-工具能力体系.md` 与 `symbio/src/plugins/agent/docs/`。
+- **文档同步**：能力变更需同步更新 `docs/ideas/agi/07-工具能力体系.md` 与 `crates/symbio-plugin-agent/src/docs/`。
 
 ---
 
@@ -114,18 +114,18 @@ Symbio 在两条能力线上领先，应作为核心卖点而非简单对标补�
 按用户选定的"后端安全补齐"范围，已在 Rust 后端落地以下能力，`cargo check -p symbio` 通过（exit 0）。
 
 ### 7.1 新增 `list_dir` 工具（对应 Trae 的 LS）
-- 新增 [list_dir.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/list_dir.rs)：安全列举目录内容，支持 `path`（缺省为工作区根）与 `ignore`（glob 名称忽略），输出含 `type/size/modified` 的条目数组。
+- 新增 [list_dir.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/list_dir.rs)：安全列举目录内容，支持 `path`（缺省为工作区根）与 `ignore`（glob 名称忽略），输出含 `type/size/modified` 的条目数组。
 - 安全模型复用既有 `SecurityPolicy::is_path_allowed_for_read`，拒绝 `..` 遍历与越界路径，与 `glob_search` 一致。
-- 注册：在 [mod.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/mod.rs) 增加 `mod list_dir;`，在 [plugin.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/plugin.rs) 实例化并经 `SecureToolWrapper` 注册进 `tool_impls`。
+- 注册：在 [mod.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/lib.rs) 增加 `mod list_dir;`，在 [plugin.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/plugin.rs) 实例化并经 `SecureToolWrapper` 注册进 `tool_impls`。
 
 ### 7.2 新增 `todo_write` 工具（对应 Trae 的 TodoWrite）
-- 新增 [todo_write.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/todo_write.rs)：以**会话（session_id）**为作用域维护结构化任务清单（id/content/status/priority），支持 `merge` 按 id 合并与整体替换，返回 Markdown 渲染。
+- 新增 [todo_write.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/todo_write.rs)：以**会话（session_id）**为作用域维护结构化任务清单（id/content/status/priority），支持 `merge` 按 id 合并与整体替换，返回 Markdown 渲染。
 - 存储用 `tokio::sync::OnceCell` 全局 `RwLock<HashMap<session, Vec<Value>>>`（会话级纯内存，不落盘）；session_id 取自工具上下文（由 `model/tool_executor.rs` 注入 `SESSION_ID`）。
 - 注册：同 7.1 加入 `mod.rs` 与 `plugin.rs`。
 
 ### 7.3 提升 `max_tokens` 默认 4096 → 8192（关闭对比中的"截断"短板）
-- 协议回退统一上调：[gemini_api.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/model/protocols/gemini_api.rs)、[anthropic_messages.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/model/protocols/anthropic_messages.rs)（3 处）、[openai_chat.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/model/protocols/openai_chat.rs)、[openai_responses.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/model/protocols/openai_responses.rs)。
-- 配置 schema 默认值同步：[model/plugin.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/model/plugin.rs)（`"default": 8192`）。
+- 协议回退统一上调：[gemini_api.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-model/src/protocols/gemini_api.rs)、[anthropic_messages.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-model/src/protocols/anthropic_messages.rs)（3 处）、[openai_chat.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-model/src/protocols/openai_chat.rs)、[openai_responses.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-model/src/protocols/openai_responses.rs)。
+- 配置 schema 默认值同步：[model/plugin.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-model/src/plugin.rs)（`"default": 8192`）。
 - 注：用户显式配置的 `max_tokens` 仍优先；本次仅抬高未配置时的缺省上限，避免长架构分析被截断。
 
 ### 7.4 已确认不重复实现 / 排除项
@@ -139,20 +139,20 @@ Symbio 在两条能力线上领先，应作为核心卖点而非简单对标补�
 按用户"推进剩余条目（非阻塞生命周期除外）"指示，在 Rust 后端补齐以下能力，复用既有 `SecureToolWrapper` 与 `SecurityPolicy` 门禁，`cargo check -p symbio` 通过（exit 0）。
 
 #### 7.5.1 新增交互三件套（对应 Trae 的 NotifyUser / AskUserQuestion / OpenPreview）
-- 新增 [interaction.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/interaction.rs)：一个文件内实现三个 `Capability`：
+- 新增 [interaction.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/interaction.rs)：一个文件内实现三个 `Capability`：
   - `notify_user`：推送通知（title/content/level：info/warning/success/error），返回 `type:"notification"`。
   - `ask_user`：结构化提问（question/header/multiSelect/options），返回 `type:"user_question"`；完整交互需编排层阻塞等待用户选择。
   - `open_preview`：请求前端预览 URL（完整 `url`，或 `port+path` 自动拼 `http://localhost`）；仅允许 http/https。
 - 后端返回结构化载荷，完整 UI（toast/对话框/浏览器预览）由编排循环与 Tauri 前端接入——后端能力已就绪，前端呈现为后续项。
 
 #### 7.5.2 新增 `get_diagnostics`（对应 Trae 的 GetDiagnostics）
-- 新增 [diagnostics.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/diagnostics.rs)：
+- 新增 [diagnostics.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/diagnostics.rs)：
   - 对 Cargo 项目运行 `cargo check --message-format=json`，解析 `compiler-message` / `compiler-diagnostic` 消息流，提取 `severity/code/message/file/line/column`。
   - 非 Cargo 项目或解析无果时，降级为 ripgrep 扫描 `TODO/FIXME/XXX/HACK/unimplemented!/todo!/unreachable!` 标记。
   - 支持 `path`（范围过滤）、`timeout`（默认 120s，最大 600s）、`mode`(auto/cargo/scan)。
 
 #### 7.5.3 新增 `codebase_search`（对应 Trae 的 SearchCodebase，复用既有 fastembed）
-- 新增 [codebase_search.rs](file:///c:/Bing/agiwave/symbio/symbio/src/plugins/local/codebase_search.rs)：
+- 新增 [codebase_search.rs](file:///c:/Bing/agiwave/symbio/crates/symbio-plugin-local/src/codebase_search.rs)：
   - 复用 `create_object::<dyn EmbeddingService>("fastembed", ctx)` 取得本地 fastembed 服务（遵循插件隔离，仅经名称注册表跨插件获取）。
   - 用 `rg --files`（尊重 .gitignore）列出源码，分块（40 行/步长 20）嵌入，按工作区进程内缓存索引（`rebuild=true` 可强制重建）。
   - 查询嵌入后与所有分块做余弦相似度排序，返回 top-k（`file/start_line/end_line/score/snippet`）。

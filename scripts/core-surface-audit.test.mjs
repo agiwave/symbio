@@ -52,11 +52,11 @@ test('多条 `pub use <域>::*` 都要展开，不能互相覆盖', () => {
   // 反例守卫：这正是开发时踩的坑——三条通配存进同一个 Map 键，只活下来一条。
   const out = audit(
     {
-      'symbio/src/symbio_core/mod.rs': 'pub use alpha::*;\npub use beta::*;\n',
-      'symbio/src/symbio_core/alpha/mod.rs': 'pub struct AlphaThing;\n',
-      'symbio/src/symbio_core/beta/mod.rs': 'pub struct BetaThing;\n',
-      'symbio/src/plugins/p1/a.rs': 'fn f(_: AlphaThing, _: BetaThing) {}\n',
-      'symbio/src/plugins/p2/b.rs': 'fn g(_: AlphaThing) {}\n',
+      'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\npub use beta::*;\n',
+      'crates/symbio-core/src/alpha/mod.rs': 'pub struct AlphaThing;\n',
+      'crates/symbio-core/src/beta/mod.rs': 'pub struct BetaThing;\n',
+      'crates/crates/plugins/p1/a.rs': 'fn f(_: AlphaThing, _: BetaThing) {}\n',
+      'crates/crates/plugins/p2/b.rs': 'fn g(_: AlphaThing) {}\n',
     },
     { verbose: true },
   )
@@ -67,9 +67,9 @@ test('多条 `pub use <域>::*` 都要展开，不能互相覆盖', () => {
 test('`symbio/src` 直属文件也算消费方，不能被跳过', () => {
   // 反例守卫：第一版对不在 `plugins/<名>/` 下的文件返回 null 单位并跳过 ⇒ 假报 0 消费方。
   const out = audit({
-    'symbio/src/symbio_core/mod.rs': 'pub use alpha::*;\n',
-    'symbio/src/symbio_core/alpha/mod.rs': 'pub struct AlphaThing;\n',
-    'symbio/src/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
+    'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\n',
+    'crates/symbio-core/src/alpha/mod.rs': 'pub struct AlphaThing;\n',
+    'crates/crates/crates/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
   })
   assert.match(out, /AlphaThing\s+->\s+symbio\/\(crate root\)/, out)
   assert.doesNotMatch(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+AlphaThing\n/, out)
@@ -78,9 +78,9 @@ test('`symbio/src` 直属文件也算消费方，不能被跳过', () => {
 test('真的零消费方时，仍如实报出来（不能一律放过）', () => {
   // 反例守卫：修「少算消费方」不能变成「一条候选都不报」——那样这份报告就只剩「无」。
   const out = audit({
-    'symbio/src/symbio_core/mod.rs': 'pub use alpha::*;\n',
-    'symbio/src/symbio_core/alpha/mod.rs': 'pub struct UsedThing;\npub struct DeadThing;\n',
-    'symbio/src/plugins/p1/a.rs': 'fn f(_: UsedThing) {}\n',
+    'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\n',
+    'crates/symbio-core/src/alpha/mod.rs': 'pub struct UsedThing;\npub struct DeadThing;\n',
+    'crates/crates/plugins/p1/a.rs': 'fn f(_: UsedThing) {}\n',
   })
   assert.match(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+DeadThing\n/, out)
   assert.doesNotMatch(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+UsedThing\n/, out)
@@ -91,12 +91,12 @@ test('宏生成的键计入公开面（它们没有 `pub` 关键字）', () => {
   // 而它们是消费方最多的一批（真实仓库里 `PATH` 有 17 个消费方）。
   const out = audit(
     {
-      'symbio/src/symbio_core/mod.rs': 'pub use keys::*;\n',
-      'symbio/src/symbio_core/keys/mod.rs':
+      'crates/symbio-core/src/lib.rs': 'pub use keys::*;\n',
+      'crates/symbio-core/src/keys/mod.rs':
         'macro_rules! define_string_key { ($t:ident, $c:ident, $n:expr) => { pub struct $t; pub const $c: $t = $t; }; }\n' +
         'define_string_key!(FooKey, FOO, "foo");\n',
-      'symbio/src/plugins/p1/a.rs': 'fn f(_: FooKey) {}\n',
-      'symbio/src/plugins/p2/b.rs': 'fn g() { let _ = FOO; }\n',
+      'crates/crates/plugins/p1/a.rs': 'fn f(_: FooKey) {}\n',
+      'crates/crates/plugins/p2/b.rs': 'fn g() { let _ = FOO; }\n',
     },
     { verbose: true },
   )
@@ -108,9 +108,9 @@ test('id 常量被它的同名 provider 用，不算下放候选', () => {
   // `EMBEDDING_ALPHA` 就是 `providers/alpha` 自己的名字，它用自己天经地义。
   // （插件工厂 id 已搬去装配方，内核不再有 `PLUGIN_ID_*`；嵌入服务 id 仍住 core。）
   const out = audit({
-    'symbio/src/symbio_core/mod.rs': 'pub use embedding::*;\n',
-    'symbio/src/symbio_core/embedding/ids.rs': 'pub const EMBEDDING_ALPHA: &str = "alpha";\n',
-    'symbio/src/providers/alpha/x.rs': 'fn f() { let _ = EMBEDDING_ALPHA; }\n',
+    'crates/symbio-core/src/lib.rs': 'pub use embedding::*;\n',
+    'crates/symbio-core/src/embedding/ids.rs': 'pub const EMBEDDING_ALPHA: &str = "alpha";\n',
+    'crates/symbio-providers/alpha/x.rs': 'fn f() { let _ = EMBEDDING_ALPHA; }\n',
   })
   assert.doesNotMatch(out, /EMBEDDING_ALPHA\s+->/, out)
 })

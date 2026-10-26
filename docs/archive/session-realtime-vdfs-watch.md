@@ -132,12 +132,12 @@
 
 | 文件 | 改动 |
 |---|---|
-| `symbio/src/plugins/session/transcript.rs` | `Transcript` 增字段 `changes: Arc<vdfs::ChangeSubscriptions>`（`new` 注入）。`emit` 改为：算路径 → 判 `change`（首次见 ⇒ `created`；`status == Removed` ⇒ `deleted`；其余 ⇒ `updated`，带 `delta` 时走 `with_delta`）→ `changes.notify(...)`。`emit_session_state` 改为 `changes.notify(VdfsChange::new(sid, "updated"))`。**删** `publish_frame` / `publish_session_state` 的 import 与调用 |
+| `crates/symbio-plugin-session/src/transcript.rs` | `Transcript` 增字段 `changes: Arc<vdfs::ChangeSubscriptions>`（`new` 注入）。`emit` 改为：算路径 → 判 `change`（首次见 ⇒ `created`；`status == Removed` ⇒ `deleted`；其余 ⇒ `updated`，带 `delta` 时走 `with_delta`）→ `changes.notify(...)`。`emit_session_state` 改为 `changes.notify(VdfsChange::new(sid, "updated"))`。**删** `publish_frame` / `publish_session_state` 的 import 与调用 |
 | `…/session/active.rs`（`ActiveSessionState` 构造处） | 把 `plugin.change_subs.clone()` 传进 `Transcript::new` |
 | `…/session/orchestrator/broadcast.rs` | 运行态出口由「发转写流帧（先取节点视图）」改为「发 VDFS 变更（不带快照）」——**节点视图那一步可以整段删掉** |
 | `…/session/plugin.rs` | 删 `handle_stream_subscribe` 与路由臂 `"stream"`；`session_node_of` 若只服务 stream 则一并删（`list` / `stat` 仍用则保留） |
 | `…/session/plugin/nodes.rs` | 无需改（`ordered` / `overlay_live` 已经按 `seq` 排） |
-| `symbio/src/symbio_core/transcript_stream.rs`（+ `.test.rs`） | **删除** |
+| `crates/symbio-core/src/transcript_stream.rs`（+ `.test.rs`） | **删除** |
 | `…/agent/host/subagent.rs` | 转播桥回到 `event_bus` + `vdfs/watch`；`stream_relay_bridge` 的参数表随之变 |
 | `…/telegram/plugin.rs` | 若订转写流则改订 VDFS 变更 |
 
@@ -158,14 +158,14 @@
 
 | 文件 | 改动 |
 |---|---|
-| `cli/src/client.rs` | 删 `session/stream` 订阅；改 `event_bus/subscribe` + `vdfs/watch(<根>/session/<sid>)`；`Frame` 由 `Transcript` / `Session` / `Resync` 改为 `Node(VdfsChange)` / `Resync`；`stream_frame_of` 换成 `vdfs_change_of` + resync 判定 |
-| `cli/docs/architecture.md`、`cli/src/client.rs` 模块文档 | 按 §1 的六条定稿（本次已改过一次，落地时去掉「即将改写」的标记） |
+| `crates/symbio-cli/src/client.rs` | 删 `session/stream` 订阅；改 `event_bus/subscribe` + `vdfs/watch(<根>/session/<sid>)`；`Frame` 由 `Transcript` / `Session` / `Resync` 改为 `Node(VdfsChange)` / `Resync`；`stream_frame_of` 换成 `vdfs_change_of` + resync 判定 |
+| `crates/symbio-cli/docs/architecture.md`、`crates/symbio-cli/src/client.rs` 模块文档 | 按 §1 的六条定稿（本次已改过一次，落地时去掉「即将改写」的标记） |
 
 ### 4.4 退役与门禁
 
 | 文件 | 改动 |
 |---|---|
-| `symbio/src/plugins/gateway/config.rs` | 撤掉「`session/stream` 未进只读白名单」的说明（对象不再存在） |
+| `crates/symbio-plugin-gateway/src/config.rs` | 撤掉「`session/stream` 未进只读白名单」的说明（对象不再存在） |
 | `scripts/gate.d/_shared.mjs` | `rustTests` / `vitestTests` 基线按实测更新；`test-layout-audit` 的内联天花板随之调整 |
 | `e2e/` | 适配（`session/stream` 的抓包用例改抓 `bus_event`） |
 

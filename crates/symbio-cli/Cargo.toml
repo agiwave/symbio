@@ -1,0 +1,22 @@
+[package]
+name = "symbio-cli"
+version = "0.1.0"
+description = "Symbio CLI 前端（纯 Rust）—— 与 tauri/ 并列的第二种前端形态，支持交互与非交互模式"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[[bin]]
+name = "symbio-cli"
+path = "src/main.rs"
+
+[dependencies]
+# 核心库：进程内直接复用同一套分形插件树，不经过任何 IPC/协议改动。
+symbio = { path = "../symbio" }
+# 版本与 features 刻意与 ../crates/symbio/Cargo.toml 完全一致：
+# 同一份 tokio 单元 → 复用 symbio/target 里已编译好的 rlib，避免重复编译。
+tokio = { version = "1.53.1", features = ["full"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+

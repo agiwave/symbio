@@ -53,7 +53,7 @@
  *
  * ## 地址规则（本脚本的依据）
  *
- * 见 [`symbio/src/routes.rs`](../symbio/src/routes.rs) 的模块文档：
+ * 见 [`crates/symbio-plugin-api/src/routes.rs`](../crates/symbio-plugin-api/src/routes.rs) 的模块文档：
  * 地址只有「绝对地址」与「相对臂」两种形态，前缀是**插件目录名**，
  * 过路由才设 `PATH`，`traverse` 的 `PATH` 只有两个合法值。
  *
@@ -125,7 +125,8 @@ function report(rule, severity, file, line, message) {
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'target', 'docs', 'archive'])
 
 /** 插件目录名：从文件绝对路径取 `plugins/` 下的首段 */
-const pluginDirOf = (abs) => path.relative(PLUGINS_DIR, abs).split(/[/\\]/)[0]
+const pluginDirOf = (abs) =>
+  path.relative(PLUGINS_DIR, abs).split(/[/\\]/)[0].replace(PLUGIN_CRATE_PREFIX, '')
 
 function walk(dir, filter) {
   const out = []
@@ -276,7 +277,10 @@ const DYNAMIC_NAMESPACES = new Set(['local', 'web', 'vdfs', 'composite', 'worker
 const DYNAMIC_DISPATCH = /parse_path\(|\.find\(\|t\| t\.name\(\)|VDFS_OPS/
 
 // ── 插件事实提取 ─────────────────────────────────────────────────────────
-const PLUGINS_DIR = path.join(repoRoot, 'symbio', 'src', 'plugins')
+const PLUGINS_DIR = path.join(repoRoot, 'crates')
+const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
+/** 插件 id -> crate 目录（crates/symbio-plugin-<id>） */
+const crateDirOf = (id) => path.join(PLUGINS_DIR, PLUGIN_CRATE_PREFIX + id)
 
 /**
  * 纯配置挂载点插件（挂载根下只有一份 `PLUGIN.yml`）——E-011 的适用范围。
@@ -289,7 +293,10 @@ const PLUGINS_DIR = path.join(repoRoot, 'symbio', 'src', 'plugins')
 const CONFIG_MOUNT_PLUGINS = new Set(['gateway', 'local', 'telegram', 'web'])
 
 /** 该绝对路径是否落在 `plugins/` 之下（E-007 的适用范围） */
-const isInPluginsDir = (abs) => abs.startsWith(PLUGINS_DIR + path.sep)
+const isInPluginsDir = (abs) =>
+  abs
+    .split(path.sep)
+    .some((seg) => seg.startsWith(PLUGIN_CRATE_PREFIX) && seg !== PLUGIN_CRATE_PREFIX + 'api')
 
 /** 从 `traverse` 体里提取**协议端点**（只可能有两个合法值） */
 function traverseEndpoints(body) {
@@ -304,15 +311,20 @@ function discoverPlugins() {
   try {
     dirs = fs
       .readdirSync(PLUGINS_DIR, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
+      .filter(
+        (e) =>
+          e.isDirectory() &&
+          e.name.startsWith(PLUGIN_CRATE_PREFIX) &&
+          e.name !== PLUGIN_CRATE_PREFIX + 'api',
+      )
+      .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
       .sort()
   } catch {
     return []
   }
   const out = []
   for (const dirName of dirs) {
-    const dir = path.join(PLUGINS_DIR, dirName)
+    const dir = crateDirOf(dirName)
     // 只取**生产** `.rs`：测试替身（`composite/vdfs.rs` 的 `FakeChild`、
     // `vdfs/host.rs` 的 `FakeContainer`）与测试用例里的假路径都不该参与判定。
     // 顺序陷阱：`walk` 先深度再同级，`chat_loop/state.test.rs` 会排在 `plugin.rs`
@@ -366,12 +378,12 @@ const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
 // 被编译进壳**——它引用内核的方式必须和 `symbio/src` 同一套规则（此前它不在任何
 // 扫描范围内，见 `gate.d/10-backend.mjs`）。
-// `symbio_kernel/src` 同样在列：D-188 之后词表常量（`VDFS_STATUS_*` 等）与协议
+// `crates/symbio-kernel/src` 同样在列：D-188 之后词表常量（`VDFS_STATUS_*` 等）与协议
 // 契约住那个 crate，漏掉它会让「文档词表 == 代码词表」判成「代码里没有这套词」。
 const CODE_ROOTS = [
-  'symbio/src',
-  'symbio_kernel/src',
-  'cli/src',
+  'crates',
+  'crates/symbio-kernel/src',
+  'crates/symbio-cli/src',
   'tauri/src',
   'tauri/src-tauri/src',
 ]
@@ -700,7 +712,7 @@ for (const abs of codeFiles) {
 // 两侧都是注册处的事实，与「前缀 = 目录名」这条地址规则同源；`extractRouteArms` 补
 // 前缀时用的是**同一个 home 例外**，故生成物与判据不会分叉。
 for (const dirName of dirNames) {
-  for (const abs of walk(path.join(PLUGINS_DIR, dirName), isProdRs)) {
+  for (const abs of walk(crateDirOf(dirName), isProdRs)) {
     const txt = readCode(abs)
     const span = fnBodySpan(txt, 'route')
     if (!span) continue
@@ -768,7 +780,7 @@ for (const abs of codeFiles) {
         i + 1,
         `\`crate::plugins::${m[1]}\` —— 插件不得直接引用兄弟插件模块（测试代码同样判）；` +
           `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
-          `或经 \`symbio_core\` 的共享契约（见 \`symbio/src/plugins/mod.rs\` 的架构原则）`,
+          `或经 \`symbio_core\` 的共享契约（见 \`crates/crates/plugins/mod.rs\` 的架构原则）`,
       )
     }
   }
@@ -791,7 +803,7 @@ for (const abs of codeFiles) {
 // 拆「loop 可独立卸载」这条判据。唯一测试豁免是 `crate::providers::DefaultToolVisitor`
 // （`providers` 是「被多个插件模块公用」的实现层，测试拿它当工具清单的默认收集器，
 // 不携带会话状态）。生产文件用它是违规。
-const LOOP_DIR = path.join(PLUGINS_DIR, 'loop')
+const LOOP_DIR = crateDirOf('loop')
 const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   'symbio_core',
   // 装配方的部署身份表：插件叫什么、标准树装哪些、哪些不得停用。它没有任何插件实现，
@@ -1052,7 +1064,7 @@ for (const abs of VOCAB_MD_FILES) {
 // 动态命名空间（`local/<工具名>`、容器挂载名）静态提不出臂：那样的值必须**逐行豁免并
 // 写明运行期来源**，而不是给脚本加一张白名单表——表会让 `local/serch` 这种拼错的工具名
 // 一路静默放行，而拼错工具名恰是这类地址最容易犯的错。
-const ROUTE_MODULE = path.join(repoRoot, 'symbio', 'src', 'routes.rs')
+const ROUTE_MODULE = path.join(repoRoot, 'crates', 'symbio-plugin-api', 'src', 'routes.rs')
 {
   const dispatchable = dispatchableRoutes(repoRoot)
   const raw = fs.existsSync(ROUTE_MODULE) ? readLines(ROUTE_MODULE).raw : []

@@ -325,7 +325,7 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 
 | 内容 | 实现落点 |
 |---|---|
-| 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `symbio/src/plugins/session/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
+| 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `crates/symbio-plugin-session/src/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
 | 挂载层（`<根>` 的直接子节点）的左栏回到**类别清单**——冷启动落点 `/vdfs/session` 的左栏不再为空 | `composables/useVdfs.ts`（`atMountLevel`）+ `components/vdfs/VdfsWorkbench.vue`（`onRailSelect`） |
 | 首启引导：三步（系统目录 → 配模型 → 发第一条消息），可跳过、可从「关于」重开；**只在尚未配好模型时自动弹** | `stores/onboarding.ts` + `components/common/Onboarding.vue` + `MainLayout.vue` + `components/settings/About.vue` |
 | 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |

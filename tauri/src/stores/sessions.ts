@@ -20,7 +20,7 @@
  * 由应用外壳（`MainLayout`）显式启动；本 store 只提供状态与收敛动作，
  * 因此可被独立构造与测试。
  *
- * 规范见 `../../../symbio/src/plugins/session/docs/105-node-state-streaming.md`。
+ * 规范见 `../../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`。
  *
  * ## 关键状态
  *
@@ -417,7 +417,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.title != null) node.title = message.title
         if (message.icon != null) node.icon = message.icon
         if (message.actions != null) node.actions = message.actions
-        // 读数行同口径「有则覆盖」（[D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）：它由后端在
+        // 读数行同口径「有则覆盖」（[D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：它由后端在
         // 交付出口现算，压缩那条节点终态帧带来，窄增量帧不带 ⇒ 不覆盖掉已有的一格。
         if (message.stats != null) node.stats = message.stats
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。

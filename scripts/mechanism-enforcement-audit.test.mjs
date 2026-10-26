@@ -15,7 +15,7 @@ function ledger({ rows = [], allows = [], extra = '' } = {}) {
 }
 
 const CLEAN_ROWS = [
-  '`store` | ② | `symbio/src/store.rs` | ok',
+  '`store` | ② | `crates/crates/store.rs` | ok',
   '`I2` | ③ | — | 读侧才有检查',
 ]
 const CLEAN_ALLOWS = ['mechanism-allow I2: T-188 写侧阻断归 T-188']
@@ -25,7 +25,7 @@ function run(text) {
     text,
     mechanisms: mechanismsOf(text),
     codes: new Set(['ME-001', 'TD-001']),
-    resolveAnchor: (token) => token === 'symbio/src/store.rs',
+    resolveAnchor: (token) => token === 'crates/crates/store.rs',
     entries: new Map([
       ['T-188', 'todo'],
       ['T-186', 'done'],
@@ -41,19 +41,19 @@ test('干净清单：机制键齐全、执行方可解析、③ 有期限 ⇒ �
 })
 
 test('ME-001：等级写出词表 ⇒ 红', () => {
-  const r = run(ledger({ rows: ['`store` | 高 | `symbio/src/store.rs` | ok'], allows: [] }))
+  const r = run(ledger({ rows: ['`store` | 高 | `crates/crates/store.rs` | ok'], allows: [] }))
   assert.ok(r.errors.some((e) => e.code === 'ME-001' && /等级/.test(e.message)))
 })
 
 test('ME-001：列数不对 ⇒ 红', () => {
-  const r = run(ledger({ rows: ['`store` | ② | `symbio/src/store.rs`'], allows: [] }))
+  const r = run(ledger({ rows: ['`store` | ② | `crates/crates/store.rs`'], allows: [] }))
   assert.ok(r.errors.some((e) => e.code === 'ME-001' && /列数/.test(e.message)))
 })
 
 test('ME-001：机制键重名 ⇒ 红', () => {
   const r = run(
     ledger({
-      rows: ['`store` | ② | `symbio/src/store.rs` | a', '`store` | ② | `symbio/src/store.rs` | b'],
+      rows: ['`store` | ② | `crates/crates/store.rs` | a', '`store` | ② | `crates/crates/store.rs` | b'],
       allows: [],
     }),
   )
@@ -101,7 +101,7 @@ test('ME-003：判据码不在登记表 ⇒ 红', () => {
 })
 
 test('ME-003：代码锚点解析不出 ⇒ 红', () => {
-  const r = run(ledger({ rows: ['`store` | ② | `symbio/src/missing.rs` | ok'], allows: [] }))
+  const r = run(ledger({ rows: ['`store` | ② | `crates/crates/missing.rs` | ok'], allows: [] }))
   assert.ok(r.errors.some((e) => e.code === 'ME-003' && /missing/.test(e.message)))
 })
 

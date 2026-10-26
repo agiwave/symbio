@@ -185,7 +185,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `DE-002` | SSE 契约的位置条款（契约在 core，字段名在协议层） | 模型与协议 | 契约随流循环下沉迁入 plugins/model/protocols/sse.rs，位置条款失效；取代者：D-022 | — |
 | `DE-002` | 共享 ≠ 契约：判据是依赖方向，含具体逻辑的实现默认住 providers/ | 平台基座 | 判据即 D-023 的准入规则，无独立内容；取代者：D-023 | — |
 | `DE-002` | symbio_core 准入规则的逐条执行（数的是符号不是文件） | 平台基座 | 唯一登记例外 llm_message_frame；取代者：D-023 | — |
-| `DE-002` | v2 事实桥：生产流量经转写进事实源，不等整体切换 | 平台基座 | 转写纪律并入 D-044；桥退役见 D-048；机制见 symbio/src/plugins/session/docs/017-module-layout.md；取代者：D-044 | — |
+| `DE-002` | v2 事实桥：生产流量经转写进事实源，不等整体切换 | 平台基座 | 转写纪律并入 D-044；桥退役见 D-048；机制见 crates/symbio-plugin-session/src/docs/017-module-layout.md；取代者：D-044 | — |
 | `DE-002` | 内部请求（不带工具、不产生对话轮次帧）不受档位闸门约束——三条已登记，classify 的去留归 T-162 | 模型与协议 | 由 D-106 取代：classify / compose 已改经 ProviderLlmAdapter，「内部请求」不再以直调 execute_turn 定义；唯一保留的压缩摘要豁免与内部请求形状由 D-106 重述。 | — |
 
 ## 已回退 / 未落地（withdrawn）

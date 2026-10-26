@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [10 §3 批 2b](../../symbio/src/plugins/session/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
+// [10 §3 批 2b](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "PL-008-工具轮v2化实施方案") 的出口判据原文：
 // 「`confirm` 工具 → 本轮停在等用户 → 回填答案 → 续跑并收束」。
 //
 // 这条判据之所以必须端到端，是因为它要证的三件事**各自只能在一处被看见**：
@@ -32,7 +32,7 @@ import './_selfrun.mjs';
 //
 // ## 恢复入口为什么是 gateway 直发节点动作
 //
-// plan/10 §2.4 的前置原文：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
+// plan/10 §2.4 的前置原文：CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），
 // **没有恢复入口**。批 2b 要补的正是这个入口。这里取该条明确列出的第二种形态——
 // 「e2e 直发」：经 gateway HTTP 边界（与 Tauri 前端同构的 `/api/v1/invoke`）
 // 发一条恢复请求。

@@ -46,9 +46,9 @@
 > （见 `docs/design/vdfs-frontend.md` §7）。文中出现的前端页面/组件名与
 > `entities/*` 路由均作历史说明。
 关联：`docs/design/open-agent-bundle-spec.md`（OAB 标准）、
-`symbio/src/symbio_core/schemas/entities.rs`（协议权威定义，**现已收敛为
+`crates/symbio-core/src/schemas/entities.rs`（协议权威定义，**现已收敛为
 `DetailDefinition` 表单方言模块**）、
-`symbio/src/symbio_core/entities.rs`（注册表与统一分发，**已删除**）
+`crates/symbio-core/src/entities.rs`（注册表与统一分发，**已删除**）
 
 > 本文件只写**规范与机制**。具体实体（会话、模型、设置分区……）如何应用
 > 机制一律属于**范例**（§6），不是机制的组成部分；实例的新增/下线/调整

@@ -229,7 +229,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 ### 8.3 文档与门禁
 
 - `plugins/session/docs/cascading-options-mechanism.md` → **已改名并改写**为
-  [`session-options.md`](../../symbio/src/plugins/session/docs/session-options.md)
+  [`session-options.md`](../../crates/symbio-plugin-session/src/docs/session-options.md)
   （《会话选项 = 会话配置表单》；旧文件名断言了一个已不存在的机制）；
 - `plugins/session/docs/legacy-route-migration.md`：C 档「`options/list` 不可迁」的结论**改判**
   （它可迁，且本轮迁掉）；`§3.5 session/update` 的「前端唯一调用方」消失，需重新评估；
@@ -345,7 +345,7 @@ agent / model 改为**同时**贡献 `DetailField`（新收集器）与 `OptionN
    （它就是会话选项模块），改名只带来 `mod` 声明 / 测试文件 / 文档链接的连锁改动。
    文件名不承载「它曾经有过旧机制」这个信息——那是模块文档与 git 历史的事。
 3. **规范文档改名并改写**：`plugins/session/docs/cascading-options-mechanism.md`
-   → [`session-options.md`](../../symbio/src/plugins/session/docs/session-options.md)
+   → [`session-options.md`](../../crates/symbio-plugin-session/src/docs/session-options.md)
    （旧文件名断言了一个已不存在的机制「级联选项」）。同目录 `README.md` 的登记行同步。
 
 ### S5 · 回归与守卫
@@ -387,7 +387,7 @@ agent / model 改为**同时**贡献 `DetailField`（新收集器）与 `OptionN
 `session/update` 的职责被完全覆盖。删除面：路由臂 / `invoke_update` /
 `SESSION_UPDATE` 常量 / `schemas/session/session_update.rs` / 两处调用点改写。
 完整记录见
-[`legacy-route-migration.md` §3.5](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
+[`legacy-route-migration.md` §3.5](../../crates/symbio-plugin-session/src/docs/legacy-route-migration.md)。
 
 ---
 

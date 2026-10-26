@@ -107,7 +107,7 @@ const ROOT = rootArg
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * `--churn`：最近 N 次非 merge 提交里，`symbio/src/symbio_core/` 的改动占比。
+ * `--churn`：最近 N 次非 merge 提交里，`crates/symbio-core/src/` 的改动占比。
  *
  * **报告，不设门禁**（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") A1）：
  * 单次提交的占比没有阈值可定——修内核 bug 的提交本就该 100% 落在内核；判据是**走向**
@@ -143,7 +143,7 @@ function printChurn(windowSize = 50) {
     if (!m) continue
     const n = (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]))
     total += n
-    if (m[3].startsWith('symbio/src/symbio_core/')) {
+    if (m[3].startsWith('crates/symbio-core/src/')) {
       core += n
       if (!counted) {
         coreCommits += 1
@@ -169,9 +169,9 @@ if (CHURN) {
   process.exit(0)
 }
 
-const CORE_REL = 'symbio/src/symbio_core'
+const CORE_REL = 'crates/symbio-core/src'
 /** 内核 crate（D-188 C2a）：文件集标记住 `lib.rs`，与 core 的 `kernel.rs` 合并判定。 */
-const KERNEL_REL = 'symbio_kernel/src'
+const KERNEL_REL = 'crates/symbio-kernel/src'
 /** 本脚本自己：CS-002 读它源码里的放宽痕迹 */
 const SELF_REL = 'scripts/core-shape-audit.mjs'
 
@@ -185,7 +185,7 @@ function hasDecisionAnchor(id) {
     decisionSet = new Set()
     const roots = [
       path.join(ROOT, 'docs', '003-design'),
-      path.join(ROOT, 'symbio', 'src', 'plugins'),
+      path.join(ROOT, 'crates'),
       path.join(ROOT, 'tauri', 'docs'),
       path.join(ROOT, 'cli', 'docs'),
     ]
@@ -310,7 +310,7 @@ function traitShape(body) {
  * 按目录划会把整个域的行为也算进内核。文件集只回答「哪几个文件是内核边界」。
  *
  * C2a 之后标记分居两处：`symbio_core/kernel.rs`（仍在 core 的语法）与
- * `symbio_kernel/src/lib.rs`（已搬进内核 crate 的子集）。合并后的文件集才是判据范围。
+ * `crates/symbio-kernel/src/lib.rs`（已搬进内核 crate 的子集）。合并后的文件集才是判据范围。
  *
  * 夹具仓库没有门面 ⇒ 返回 null，退回全 core 口径（夹具只验棘轮本身）。
  */
@@ -381,7 +381,7 @@ function mergeShapes(parts) {
 }
 
 const coreDir = path.join(ROOT, CORE_REL)
-if (!fs.existsSync(path.join(coreDir, 'mod.rs'))) {
+if (!fs.existsSync(path.join(coreDir, 'lib.rs'))) {
   console.error(red(`✗ 读不出 core 范围：${CORE_REL}/mod.rs 不存在（root=${ROOT}）—— 判据没有输入，宁红不静默`))
   process.exit(1)
 }
@@ -405,7 +405,7 @@ const shape = mergeShapes(scanDirs.map((d) => measureCoreShape(d, kernelAbs)))
 
 // 封闭语法里少一个 trait 不是「收窄成功」，是判据失去输入：宁红不静默。
 // 夹具仓库（没有 plugins/mod.rs）只造一两个 trait 验棘轮本身，不要求凑齐五格。
-const hasPlugins = fs.existsSync(path.join(ROOT, 'symbio/src/plugins/mod.rs'))
+const hasPlugins = fs.existsSync(false)
 if (hasPlugins) {
   for (const name of KERNEL_TRAITS) {
     if (!shape.rows.some((r) => r.name === name)) {
@@ -487,7 +487,7 @@ if (fs.existsSync(selfPath)) {
  * 插件的**目录名**就是插件 id 的词表来源：新增插件 = 新目录，不需要改本脚本。
  * 目录不存在（夹具仓库）⇒ 词表为空 ⇒ CS-004 不适用（CS-003 照判）。
  */
-const PLUGINS_REL = 'symbio/src/plugins'
+const PLUGINS_REL = 'crates/crates/plugins'
 const pluginsDir = path.join(ROOT, PLUGINS_REL)
 const pluginIds = fs.existsSync(pluginsDir)
   ? fs
@@ -538,16 +538,16 @@ if (pluginRefs.length > 0) {
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
  */
 const NOUN_BASELINE = {
-  // 2026-10-26（DE-023 C2b）：判定范围随语法整份迁到 `symbio_kernel/src`（标记在
-  // `symbio_kernel/src/lib.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
+  // 2026-10-26（DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-kernel/src`（标记在
+  // `crates/symbio-kernel/src/lib.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
   //  - `chat/principal.rs`：`from_legacy` / `tool_principal` 的工具族前缀表（地址协议
   //    词汇，13 处）。清它要把这两个解析入口改成宿主侧自由函数（与 `actor_can_*`
   //    同一形态），见 DE-023 D-188 的 C2b 步；
   //  - `capability/family.rs`：能力家族 id `"model"` 与插件目录同名（1 处，报的是
   //    家族词汇而非插件依赖）。
   // 只许降，整张表的目标仍是空表。
-  'symbio_kernel/src/capability/family.rs': 1,
-  'symbio_kernel/src/chat/principal.rs': 13,
+  'crates/symbio-kernel/src/capability/family.rs': 1,
+  'crates/symbio-kernel/src/chat/principal.rs': 13,
 }
 
 const nounCounts = new Map()

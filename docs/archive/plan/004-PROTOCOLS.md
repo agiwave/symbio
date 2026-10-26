@@ -61,7 +61,7 @@ created: 2026-09-07
 
 > **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议。**
 > 执行层（LLM 单轮 / 工具调用）与宿主层之间的出口 / 入口是 `EventSink` / `AbortSignal`
-> （[D-020](../010-adr/020.md)；机制见 [`symbio/src/plugins/session/docs/015-core-loop.md`](../../symbio/src/plugins/session/docs/015-core-loop.md "DE-102-core-loop") §6）——
+> （[D-020](../010-adr/020.md)；机制见 [`crates/symbio-plugin-session/src/docs/015-core-loop.md`](../../crates/symbio-plugin-session/src/docs/015-core-loop.md "DE-102-core-loop") §6）——
 > 因此**帧里不存在中止帧**。本文件不复述该分离。
 
 ### 通道生命周期
@@ -201,7 +201,7 @@ pub enum PluginPayloadWire {
 3. **终止判据**：会话节点 `status` 离开 `working`（结局在 `attributes.outcome` / `error`），
    它必然排在**本轮全部消息帧之后**（同一 FIFO）。
 
-> 机制与不变量见 [`symbio/src/plugins/session/docs/022-vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/022-vdfs-session-messages.md "DE-109-vdfs-session-messages")；
+> 机制与不变量见 [`crates/symbio-plugin-session/src/docs/022-vdfs-session-messages.md`](../../crates/symbio-plugin-session/src/docs/022-vdfs-session-messages.md "DE-109-vdfs-session-messages")；
 > 旧形态（`PluginPayload::Session(channel)` + `PluginFrame::Data(done)`）已随 D-025 退役。
 
 ---
@@ -209,7 +209,7 @@ pub enum PluginPayloadWire {
 ## 事件总线频道 (`kind`)
 
 AI 增量与资源变更**不随请求返回**，而是经全局事件总线广播：客户端建立连接后另发一帧
-`event_bus/subscribe`（HTTP/WS 入口见 [design/008-http-api-transport.md](008-http-api-transport.md "DE-013-HTTP开放接口") §5.3），
+`event_bus/subscribe`（HTTP/WS 入口见 [[DE-013-HTTP开放接口|design/008-http-api-transport.md]] §5.3），
 之后持续收到 `{ type: "bus_event", data: { kind, session_id, data } }` 帧，**按 `kind` 分派**。
 
 `kind` 的闭集是 `system` / `vdfs` <!-- vocab:EVENT_BUS_KIND_ -->，常量定义在
@@ -220,7 +220,7 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 | `kind` | 发布方 | 消费方 |
 |--------|--------|--------|
 | `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
-| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）、`cli`（`cli/src/client.rs`）、telegram 回合（`plugins/telegram/turn.rs`）、子智能体转播桥（`plugins/agent/host/subagent.rs`）——都按**地址**分派，不依赖事件到达顺序 |
+| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）、`cli`（`crates/symbio-cli/src/client.rs`）、telegram 回合（`plugins/telegram/turn.rs`）、子智能体转播桥（`plugins/agent/host/subagent.rs`）——都按**地址**分派，不依赖事件到达顺序 |
 
 > **帧只有两种，解包入口也只有一个对**：变更由 `event_bus_vdfs_change_of` 解出，
 > **背压重同步指令**（`{ "data": { "type": "resync" } }`，刻意不带 `path`）由
@@ -256,23 +256,23 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 
 | 契约 | 住哪（`symbio_core::`） |
 |---|---|
-| 会话线格式（`ChatNode` 家族 / `Principal` / 两个入口请求） | [`chat/`](../../symbio/src/symbio_core/chat/)——叶子模块 `chat_node` / `principal` / `chat_request` / `session_chat` |
-| 对话面控制契约（`Verdict` / `DecideRequest` / `ComposeRequest` / `WordingReply` / `RunSnapshot`） | [`dialog/`](../../symbio/src/symbio_core/dialog/) |
-| 宿主呈现方言（`Detail*` / `Reading*`） | [`present/`](../../symbio/src/symbio_core/present/)——`detail` / `reading` |
-| 轮次面（`Turn*` / 动作载荷 / 压缩包） | [`turn/`](../../symbio/src/symbio_core/turn/)——`dispatch` / `node_build` / `facts` |
-| 插件扩展点（`HookEvent` / `HookOutput`）与路由回体（`SimpleResponse` / `SuccessResponse`） | [`plugin/`](../../symbio/src/symbio_core/plugin/)——`hook.rs` / `response.rs` |
-| 模型状态帧（`llm_emit_message` 等） | [`llm/`](../../symbio/src/symbio_core/llm/)——`frames.rs` |
-| 事件 → 状态的读侧重放（`rebuild`） | [`projection/`](../../symbio/src/symbio_core/projection/)——`rebuild.rs` |
+| 会话线格式（`ChatNode` 家族 / `Principal` / 两个入口请求） | [`chat/`](../../crates/symbio-core/src/chat/)——叶子模块 `chat_node` / `principal` / `chat_request` / `session_chat` |
+| 对话面控制契约（`Verdict` / `DecideRequest` / `ComposeRequest` / `WordingReply` / `RunSnapshot`） | [`dialog/`](../../crates/symbio-core/src/dialog/) |
+| 宿主呈现方言（`Detail*` / `Reading*`） | [`present/`](../../crates/symbio-core/src/present/)——`detail` / `reading` |
+| 轮次面（`Turn*` / 动作载荷 / 压缩包） | [`turn/`](../../crates/symbio-core/src/turn/)——`dispatch` / `node_build` / `facts` |
+| 插件扩展点（`HookEvent` / `HookOutput`）与路由回体（`SimpleResponse` / `SuccessResponse`） | [`plugin/`](../../crates/symbio-core/src/plugin/)——`hook.rs` / `response.rs` |
+| 模型状态帧（`llm_emit_message` 等） | [`llm/`](../../crates/symbio-core/src/llm/)——`frames.rs` |
+| 事件 → 状态的读侧重放（`rebuild`） | [`projection/`](../../crates/symbio-core/src/projection/)——`rebuild.rs` |
 
 **文件清单以目录为准**，本文不抄一份会漂移的副本。命名与归属的机械判据是
 [`core-naming-audit`](../../scripts/core-naming-audit.mjs)，规则源是
-[内核 README §1.2 的域前缀对照表](../../symbio/src/symbio_core/README.md "symbio/src/symbio_core/README")。
+[内核 README §1.2 的域前缀对照表](../../crates/symbio-core/README.md "crates/symbio-core/src/README")。
 
 两条命名约定：
 
 - 所有结构派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名
   逐字相同，**没有任何 host 侧的 `camelCase` 转换**；
-- 唯一例外是 [`plugins/mcp/types.rs`](../../symbio/src/plugins/mcp/types.rs)：它镜像 MCP 的**外部
+- 唯一例外是 [`plugins/mcp/types.rs`](../../crates/symbio-plugin-mcp/src/types.rs)：它镜像 MCP 的**外部
   规范报文**（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
   显式声明。
 
@@ -300,7 +300,7 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 插件**直接组合具体类型**——`use crate::providers::{DirVdfs, SingleFileVdfs,
 MemoryVdfs}`（`providers` 是唯一出口，子目录私有、不深引）。套一层 `dyn` 工厂只会把一次构造换成一次字符串查表。
 （历史上这里有一个工厂项 `"storage_service"`，随 `StorageService` / `EntityStore`
-一并废除；定位与依赖边界见 [design/013-vdfs.md](012-vdfs-frontend.md "DE-010-VDFS前端页面规范") §11 与 §13.4。）
+一并废除；定位与依赖边界见 [[DE-010-VDFS前端页面规范|design/013-vdfs.md]] §11 与 §13.4。）
 
 ### 容器动态挂载
 
@@ -330,7 +330,7 @@ MemoryVdfs}`（`providers` 是唯一出口，子目录私有、不深引）。�
 （D-032）。
 
 新增插件只需：
-1. 把目录放到 `symbio/src/plugins/` 并实现 `Plugin`
+1. 把目录放到 `crates/crates/plugins/` 并实现 `Plugin`
 2. 调用 `submit_object_creator!` 注册工厂
 3. 若要随系统启动，把插件名加进 `home::SYSTEM_PLUGINS`
 4. 在配置里挂载

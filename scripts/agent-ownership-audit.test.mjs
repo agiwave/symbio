@@ -11,10 +11,10 @@ import { fileURLToPath } from 'node:url'
 // 「没有任何东西会因此变红」的形状，判据写错等于回到没有守卫之前。
 //
 // 仓库根经 `--root=` 注入，故这里在临时目录造一棵最小仓库：
-//   <root>/symbio/src/plugins/<name>/          插件目录（AO-001/003/005/006 的目录事实）
-//   <root>/symbio/src/plugins/agent/README.md  成员资格判词 + 兄弟插件指路
-//   <root>/symbio/src/plugins/agent/host/*.rs  职责表 + 归属表副本 + 真实模块文件
-//   <root>/symbio/src/assembly.generated.rs     装配清单（生成物，判据读它）
+//   <root>/crates/crates/plugins/<name>/          插件目录（AO-001/003/005/006 的目录事实）
+//   <root>/crates/symbio-plugin-agent/README.md  成员资格判词 + 兄弟插件指路
+//   <root>/crates/symbio-plugin-agent/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
+//   <root>/crates/symbio-deploy/src/lib.rs     装配清单（生成物，判据读它）
 const script = fileURLToPath(new URL('./agent-ownership-audit.mjs', import.meta.url))
 
 const BASE_README = [
@@ -62,19 +62,19 @@ const BASE_ASSEMBLY = ['pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[', '  
 function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginDirs = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-ownership-audit-'))
   try {
-    const agentHost = path.join(root, 'symbio/src/plugins/agent/host')
+    const agentHost = path.join(root, 'crates/symbio-plugin-agent/src/host')
     fs.mkdirSync(agentHost, { recursive: true })
     for (const name of ['agent', 'memory', 'setting', ...extraPluginDirs]) {
-      fs.mkdirSync(path.join(root, 'symbio/src/plugins', name), { recursive: true })
+      fs.mkdirSync(path.join(root, 'crates/crates/plugins', name), { recursive: true })
     }
-    fs.writeFileSync(path.join(root, 'symbio/src/plugins/memory/README.md'), '# 记忆插件\n')
-    fs.writeFileSync(path.join(root, 'symbio/src/plugins/agent/README.md'), readme ?? BASE_README)
-    fs.writeFileSync(path.join(root, 'symbio/src/plugins/agent/host/mod.rs'), modRs ?? BASE_MOD_RS)
-    fs.writeFileSync(path.join(root, 'symbio/src/plugins/agent/host/plugin.rs'), pluginRs ?? BASE_PLUGIN_RS)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-memory/README.md'), '# 记忆插件\n')
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/README.md'), readme ?? BASE_README)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/src/host/mod.rs'), modRs ?? BASE_MOD_RS)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/src/host/plugin.rs'), pluginRs ?? BASE_PLUGIN_RS)
     for (const [name, src] of Object.entries(extraHost)) {
       fs.writeFileSync(path.join(agentHost, name), src)
     }
-    const assemblyDir = path.join(root, 'symbio/src')
+    const assemblyDir = path.join(root, 'crates')
     fs.mkdirSync(assemblyDir, { recursive: true })
     fs.writeFileSync(path.join(assemblyDir, 'assembly.generated.rs'), assembly ?? BASE_ASSEMBLY)
 

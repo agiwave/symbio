@@ -17,18 +17,18 @@ const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
 
 /** 与守卫里的清单一致：夹具要让每个文件都存在，否则 FB-002 会先报清单漂移。 */
 const CAPABILITY_FILES = [
-  'symbio/src/plugins/loop/skill_events.rs',
-  'symbio/src/plugins/loop/task_events.rs',
-  'symbio/src/plugins/loop/memory_events.rs',
-  'symbio/src/plugins/session/worker_progress.rs',
-  'symbio/src/plugins/loop/tools/tool_executor/breaker.rs',
-  'symbio/src/plugins/loop/tools/tool_executor/elimination.rs',
-  'symbio/src/plugins/session/stats.rs',
-  'symbio/src/symbio_core/projection/rebuild.rs',
-  'symbio/src/plugins/session/transcript/inbox.rs',
-  'symbio/src/plugins/session/transcript/autonomous.rs',
-  'symbio/src/plugins/session/message_events.rs',
-  'symbio/src/plugins/loop/derived_facts.rs',
+  'crates/symbio-plugin-loop/src/skill_events.rs',
+  'crates/symbio-plugin-loop/src/task_events.rs',
+  'crates/symbio-plugin-loop/src/memory_events.rs',
+  'crates/symbio-plugin-session/src/worker_progress.rs',
+  'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',
+  'crates/symbio-plugin-loop/src/tools/tool_executor/elimination.rs',
+  'crates/symbio-plugin-session/src/stats.rs',
+  'crates/symbio-core/src/projection/rebuild.rs',
+  'crates/symbio-plugin-session/src/transcript/inbox.rs',
+  'crates/symbio-plugin-session/src/transcript/autonomous.rs',
+  'crates/symbio-plugin-session/src/message_events.rs',
+  'crates/symbio-plugin-loop/src/derived_facts.rs',
 ]
 
 /** 一棵最小仓库：十二个能力文件默认是空的，`extra` 覆盖 / 追加其它文件。 */
@@ -63,7 +63,7 @@ const out = (r) => r.stdout + r.stderr
 test('FB-001 反例：生产模块自己 open ⇒ 红', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/session/turn_exec.rs':
+      'crates/symbio-plugin-session/src/turn_exec.rs':
         'fn f() { let _ = EventWalStore::open(p); }\n',
     }),
   )
@@ -75,7 +75,7 @@ test('FB-001 反例：生产模块自己 open ⇒ 红', () => {
 test('FB-001 反例：open_readonly 同样算开档', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/session/stats.rs':
+      'crates/symbio-plugin-session/src/stats.rs':
         'fn f() { let _ = EventWalStore::open_readonly(p); }\n',
     }),
   )
@@ -86,11 +86,11 @@ test('FB-001 反例：open_readonly 同样算开档', () => {
 test('FB-001 正例：存储层与测试夹具可以直接开档', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/session/store/wal.rs':
+      'crates/symbio-plugin-session/src/store/wal.rs':
         'fn f() { let _ = EventWalStore::open(p); }\n',
-      'symbio/src/plugins/session/transcript/inbox.test.rs':
+      'crates/symbio-plugin-session/src/transcript/inbox.test.rs':
         'fn f() { let _ = EventWalStore::open(p); }\n',
-      'symbio/src/plugins/session/store/tests.rs':
+      'crates/symbio-plugin-session/src/store/tests.rs':
         'fn f() { let _ = EventWalStore::open(p); }\n',
     }),
   )
@@ -102,7 +102,7 @@ test('FB-001 正例：存储层与测试夹具可以直接开档', () => {
 test('FB-002 反例：能力文件拼路径 ⇒ 红', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/loop/skill_events.rs':
+      'crates/symbio-plugin-loop/src/skill_events.rs':
         'fn f() { let p = paths::session_dir(root, id).join(V2_WAL_FILE); }\n',
     }),
   )
@@ -114,7 +114,7 @@ test('FB-002 反例：能力文件拼路径 ⇒ 红', () => {
 test('FB-002 正例：词只出现在注释里不算违规', () => {
   const r = audit(
     repo({
-      'symbio/src/plugins/loop/tools/tool_executor/breaker.rs':
+      'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs':
         '//! 历史教训：`open_readonly` 失败曾让台账恒 0。\n/// 路径走 `paths::session_dir`/`V2_WAL_FILE` 的写法已退场。\nfn f() {}\n',
     }),
   )
@@ -123,7 +123,7 @@ test('FB-002 正例：词只出现在注释里不算违规', () => {
 
 test('FB-002 反例：清单里的文件不见了 ⇒ 红（清单与结构漂移）', () => {
   const files = repo()
-  delete files['symbio/src/symbio_core/projection/rebuild.rs']
+  delete files['crates/symbio-core/src/projection/rebuild.rs']
   const r = audit(files)
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /FB-002/, out(r))

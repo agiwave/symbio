@@ -60,7 +60,7 @@ fs.writeFileSync('docs/003-design/verify/fixtures/real-session.tsv',
 
 33 条用例各 ≥2 条同义换述，给 [`recall_eval.rs`](../recall_eval.rs) 出第四个数字：
 同一批池、只把查询换个说法，`dependency = 原述 recall@k − 换述 recall@k`。
-它是 [DE-008 §3.1.1](../../008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")「抽象层级」格的
+它是 [[DE-008-能力注册表与能力坐标系|DE-008 §3.1.1]]「抽象层级」格的
 离线效标，此前那一格写的是「本轴目前只能人工判」。
 
 ### 格式

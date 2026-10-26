@@ -48,7 +48,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
 const PLAN04_REL = path.join('docs', '003-design', '016-工程落地与验证.md')
-const STATS_REL = path.join('symbio', 'src', 'plugins', 'session', 'stats.rs')
+const STATS_REL = path.join('crates', 'symbio-plugin-session', 'src', 'stats.rs')
 
 /** 出口表的表头第一格——用它定位 §1.3 那张表（全文只有一张以此为头的表）。 */
 const TABLE_ANCHOR = '阶'

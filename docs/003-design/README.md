@@ -54,7 +54,7 @@ board.columns: [impl]
 - `01x`–`02x`：系统级专题（Agent 目录、会话输入、HTTP、义务环、模块架构、前端等）。
 - `03x`：能力阶梯——`030` 总览 + `031`–`043` 十三阶，与 `verify/scenario_ladder.rs` 同源。
 - `09x`：过渡与历史——`090` 过渡方案；已退场文档保留原号。
-- `1xx`：组件级设计，就近放在该组件目录内（如 `symbio/src/plugins/session/docs/101-…`）。
+- `1xx`：组件级设计，就近放在该组件目录内（如 `crates/symbio-plugin-session/src/docs/101-…`）。
 - 标题写**主题名**：不加英文别名、不写「施工视图」「对话基线」一类阶段后缀、不重复 `Symbio` 前缀；`title` 逐字等于首个 H1（RG-021）。
 
 ## 怎么读：六个面 + 过渡
@@ -217,43 +217,43 @@ board.columns: [impl]
 | [`DE-042-自主层与长期目标`](042-自主层与长期目标.md) | 自主层与长期目标 | 部分落地 |
 | [`DE-043-多智能体社会`](043-多智能体社会.md) | 多智能体社会 | 部分落地 |
 | [`DE-090-过渡方案`](090-过渡方案.md) | 过渡方案与现状差距 | 部分落地 |
-| [`DE-101-context-compression-design`](../../symbio/src/plugins/session/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
-| [`DE-102-core-loop`](../../symbio/src/plugins/session/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 与代码一致 |
-| [`DE-103-turn-runner-steps`](../../symbio/src/plugins/session/docs/103-turn-runner-steps.md) | `run_with_tools` 的 Step 施工图（DE-090 §1 步骤 1） | 与代码一致 |
-| [`DE-104-module-layout`](../../symbio/src/plugins/session/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
-| [`DE-105-node-state-streaming`](../../symbio/src/plugins/session/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |
-| [`DE-106-perf`](../../symbio/src/plugins/session/docs/106-perf.md) | 会话 / 转写的前端性能设计 | 与代码一致 |
-| [`DE-107-session-options`](../../symbio/src/plugins/session/docs/107-session-options.md) | 会话选项 = 会话配置表单 | 与代码一致 |
-| [`DE-108-turn-tool-mechanisms`](../../symbio/src/plugins/session/docs/108-turn-tool-mechanisms.md) | 工具失败回传与 Turn 终态机制 | 与代码一致 |
-| [`DE-109-vdfs-session-messages`](../../symbio/src/plugins/session/docs/109-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 | 与代码一致 |
+| [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
+| [`DE-102-core-loop`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md) | 会话核心循环（LLM × 工具） | 与代码一致 |
+| [`DE-103-turn-runner-steps`](../../crates/symbio-plugin-session/src/docs/103-turn-runner-steps.md) | `run_with_tools` 的 Step 施工图（DE-090 §1 步骤 1） | 与代码一致 |
+| [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
+| [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |
+| [`DE-106-perf`](../../crates/symbio-plugin-session/src/docs/106-perf.md) | 会话 / 转写的前端性能设计 | 与代码一致 |
+| [`DE-107-session-options`](../../crates/symbio-plugin-session/src/docs/107-session-options.md) | 会话选项 = 会话配置表单 | 与代码一致 |
+| [`DE-108-turn-tool-mechanisms`](../../crates/symbio-plugin-session/src/docs/108-turn-tool-mechanisms.md) | 工具失败回传与 Turn 终态机制 | 与代码一致 |
+| [`DE-109-vdfs-session-messages`](../../crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 | 与代码一致 |
 | [`DE-110-FRONTEND`](../../tauri/docs/110-FRONTEND.md) | 前端架构 | 与代码一致 |
 | [`DE-111-INTERACTION`](../../tauri/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
-| [`DE-112-architecture`](../../cli/docs/112-architecture.md) | 架构 | 与代码一致 |
-| [`DE-113-heartbeat-mechanism`](../../symbio/src/plugins/heartbeat/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
+| [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
+| [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
+| [`crates/symbio-core/README`](../../crates/symbio-core/README.md) | symbio_core —— 内核契约层：命名与结构规范 | 与代码一致 |
+| [`crates/symbio-plugin-agent/README`](../../crates/symbio-plugin-agent/README.md) | Agent 插件 | 与代码一致 |
+| [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
+| [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
+| [`crates/symbio-plugin-composite/README`](../../crates/symbio-plugin-composite/README.md) | Composite 插件 | 与代码一致 |
+| [`crates/symbio-plugin-event_bus/README`](../../crates/symbio-plugin-event_bus/README.md) | Event Bus 插件 | 与代码一致 |
+| [`crates/symbio-plugin-gateway/README`](../../crates/symbio-plugin-gateway/README.md) | Gateway 插件 | 与代码一致 |
+| [`crates/symbio-plugin-heartbeat/README`](../../crates/symbio-plugin-heartbeat/README.md) | Heartbeat 插件（空闲会话的自主开轮调度） | 与代码一致 |
+| [`crates/symbio-plugin-home/README`](../../crates/symbio-plugin-home/README.md) | Home 插件 | 与代码一致 |
+| [`crates/symbio-plugin-hook/README`](../../crates/symbio-plugin-hook/README.md) | Hook 插件 | 与代码一致 |
+| [`crates/symbio-plugin-local/README`](../../crates/symbio-plugin-local/README.md) | Local 插件 | 与代码一致 |
+| [`crates/symbio-plugin-loop/README`](../../crates/symbio-plugin-loop/README.md) | Loop 插件（单环驱动器） | 与代码一致 |
+| [`crates/symbio-plugin-mcp/README`](../../crates/symbio-plugin-mcp/README.md) | MCP 插件 | 与代码一致 |
+| [`crates/symbio-plugin-memory/README`](../../crates/symbio-plugin-memory/README.md) | Memory 插件 | 与代码一致 |
+| [`crates/symbio-plugin-model/README`](../../crates/symbio-plugin-model/README.md) | Model 插件 | 与代码一致 |
+| [`crates/symbio-plugin-plugin_manager/README`](../../crates/symbio-plugin-plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
+| [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
+| [`crates/symbio-plugin-session/src/docs/README`](../../crates/symbio-plugin-session/src/docs/README.md) | Session 插件文档 | 与代码一致 |
+| [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |
+| [`crates/symbio-plugin-skill/README`](../../crates/symbio-plugin-skill/README.md) | Skill 插件 | 与代码一致 |
+| [`crates/symbio-plugin-telegram/README`](../../crates/symbio-plugin-telegram/README.md) | Telegram 插件 | 与代码一致 |
+| [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
+| [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | ''`scripts/facts/` —— 事实生成器目录'' | 与代码一致 |
-| [`symbio/src/plugins/agent/README`](../../symbio/src/plugins/agent/README.md) | Agent 插件 | 与代码一致 |
-| [`symbio/src/plugins/classify/README`](../../symbio/src/plugins/classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
-| [`symbio/src/plugins/compose/README`](../../symbio/src/plugins/compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
-| [`symbio/src/plugins/composite/README`](../../symbio/src/plugins/composite/README.md) | Composite 插件 | 与代码一致 |
-| [`symbio/src/plugins/event_bus/README`](../../symbio/src/plugins/event_bus/README.md) | Event Bus 插件 | 与代码一致 |
-| [`symbio/src/plugins/gateway/README`](../../symbio/src/plugins/gateway/README.md) | Gateway 插件 | 与代码一致 |
-| [`symbio/src/plugins/heartbeat/README`](../../symbio/src/plugins/heartbeat/README.md) | Heartbeat 插件（空闲会话的自主开轮调度） | 与代码一致 |
-| [`symbio/src/plugins/home/README`](../../symbio/src/plugins/home/README.md) | Home 插件 | 与代码一致 |
-| [`symbio/src/plugins/hook/README`](../../symbio/src/plugins/hook/README.md) | Hook 插件 | 与代码一致 |
-| [`symbio/src/plugins/local/README`](../../symbio/src/plugins/local/README.md) | Local 插件 | 与代码一致 |
-| [`symbio/src/plugins/loop/README`](../../symbio/src/plugins/loop/README.md) | Loop 插件（单环驱动器） | 与代码一致 |
-| [`symbio/src/plugins/mcp/README`](../../symbio/src/plugins/mcp/README.md) | MCP 插件 | 与代码一致 |
-| [`symbio/src/plugins/memory/README`](../../symbio/src/plugins/memory/README.md) | Memory 插件 | 与代码一致 |
-| [`symbio/src/plugins/model/README`](../../symbio/src/plugins/model/README.md) | Model 插件 | 与代码一致 |
-| [`symbio/src/plugins/plugin_manager/README`](../../symbio/src/plugins/plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
-| [`symbio/src/plugins/session/README`](../../symbio/src/plugins/session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
-| [`symbio/src/plugins/session/docs/README`](../../symbio/src/plugins/session/docs/README.md) | Session 插件文档 | 与代码一致 |
-| [`symbio/src/plugins/setting/README`](../../symbio/src/plugins/setting/README.md) | Setting 插件 | 与代码一致 |
-| [`symbio/src/plugins/skill/README`](../../symbio/src/plugins/skill/README.md) | Skill 插件 | 与代码一致 |
-| [`symbio/src/plugins/telegram/README`](../../symbio/src/plugins/telegram/README.md) | Telegram 插件 | 与代码一致 |
-| [`symbio/src/plugins/vdfs/README`](../../symbio/src/plugins/vdfs/README.md) | VDFS 插件 | 与代码一致 |
-| [`symbio/src/plugins/web/README`](../../symbio/src/plugins/web/README.md) | Web 插件 | 与代码一致 |
-| [`symbio/src/symbio_core/README`](../../symbio/src/symbio_core/README.md) | symbio_core —— 内核契约层：命名与结构规范 | 与代码一致 |
 | [`tauri/README`](../../tauri/README.md) | Tauri 前端 | 与代码一致 |
 
 ## 草案（draft）

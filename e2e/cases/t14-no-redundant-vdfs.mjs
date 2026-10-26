@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // - `vdfs/read`：消息变更没带正文 ⇒ 消费端只能回读整条消息；
 // - `vdfs/list`：目录条目变更没带清单 ⇒ 消费端只能重列目录。
 //
-// 判据用 CLI 的路由留痕（`SYMBIO_ROUTE_LOG=1`，见 `cli/src/client.rs`）。CLI 与
+// 判据用 CLI 的路由留痕（`SYMBIO_ROUTE_LOG=1`，见 `crates/symbio-cli/src/client.rs`）。CLI 与
 // Tauri 前端消费的是**同一套**变更通道与同一份信封语义（进程内路由 vs IPC，
 // 信封形状相同），所以这里量到的「一轮会话需要多少次回读」对两端都成立。
 //

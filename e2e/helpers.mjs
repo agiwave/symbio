@@ -1,7 +1,7 @@
 // e2e 基座：临时 homedir 夹具、Mock LLM/MCP 进程编排、CLI 运行、会话落盘读取。
 //
 // 设计：
-// - CLI 与后端是**进程内直连**（cli/src/client.rs），单进程即可跑完整链路
+// - CLI 与后端是**进程内直连**（crates/symbio-cli/src/client.rs），单进程即可跑完整链路
 //   （路由 → session 插件 → model 插件 → HTTP → mock LLM；工具 → mcp 插件 → stdio → mock MCP）。
 // - mock 与 CLI 全部走真实边界：HTTP（SSE）、stdio（JSON-RPC）、磁盘（homedir）。
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
@@ -479,7 +479,7 @@ export const SEG_MESSAGES = 'message';
  * 帧数为零，看起来就像"模型没有产出内容"。判据：订阅后跑一轮对话，若一条
  * `vdfs` 帧都没有，就是这里少了一半。
  *
- * 与 CLI（`cli/src/client.rs`）同款：watch 的是**父目录** `<根>/session`，不是
+ * 与 CLI（`crates/symbio-cli/src/client.rs`）同款：watch 的是**父目录** `<根>/session`，不是
  * `<根>/session/<sid>`——订阅一次覆盖全部会话，切会话不必重连；且会话尚不存在时
  * 父目录一定在（`<根>/session/<sid>` 可能还没被创建）。归属由客户端按作用域过滤。
  *
@@ -582,7 +582,7 @@ export async function subscribeSessionRealtime(cli, { sessionId, gatewayPort }) 
  * 这是「边跑边等、等到了再断言」的统一入口：等的是**实时面**（用户如何看到就
  * 如何等），转写 / 读数断言随后走 `cli.invoke`（`vdfs/read` 等生产路由）。
  * REPL 与一次性 CLI 走同一条收件箱地址面（`ask` 写 `<根>/session/<sid>/inbox`，
- * 见 `cli/src/client.rs`），因此会话节点的运行态帧对这条入口一样成立。
+ * 见 `crates/symbio-cli/src/client.rs`），因此会话节点的运行态帧对这条入口一样成立。
  *
  * @param cli `startLongLivedCli` / `startRealtimeSession` 给出的进程句柄
  * @param sub `subscribeSessionRealtime` 给出的实时面句柄
@@ -921,7 +921,7 @@ export function textOf(m) {
  * 断言轮次事实时先按本表筛一遍：用「总数等于几」去断言会把两类混在一起——
  * 派生素化多写一条就假红、少写一条又假绿（t26 / t27 各踩过一次）。
  *
- * 与 `symbio/src/plugins/loop/turn_exec.test.rs::turn_facts` 同一口径；两边分开
+ * 与 `crates/symbio-plugin-loop/src/turn_exec.test.rs::turn_facts` 同一口径；两边分开
  * 是因为 e2e 跑在**独立进程**里，够不着 Rust 测试的语料。
  */
 export const TURN_FACT_KINDS = new Set([
@@ -1012,7 +1012,7 @@ export function assertTranscriptInvariants(messages, label) {
 }
 
 /**
- * 在途号起点（镜像 `symbio/src/plugins/session/transcript.rs::INFLIGHT_SEQ_BASE`）。
+ * 在途号起点（镜像 `crates/symbio-plugin-session/src/transcript.rs::INFLIGHT_SEQ_BASE`）。
  *
  * 号分两段：**在途号**（转写在首次见到节点时分配，起点 1 << 50）与**权威号**
  * （存储在写入时分配，"第几条消息"量级）。在途号永不落库。
@@ -1023,7 +1023,7 @@ export const INFLIGHT_SEQ_BASE = 1 << 50;
  * 断言一个节点流上的 `seq` 是**节点属性**、不是投递序号。
  *
  * `seq` 只在存储写入时分配（见
- * `symbio/src/plugins/session/docs/109-vdfs-session-messages.md` §3.4），而节点是先以
+ * `crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md` §3.4），而节点是先以
  * **在途号**上线的；落库后由一条带存储号的完整帧把它交回权威号——这是**唯一**的
  * 换号时机。因此一条节点流的合法形态只有：
  *

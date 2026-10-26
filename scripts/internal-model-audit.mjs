@@ -20,7 +20,7 @@
  * | IM-001 | 生产代码里 `\.execute_turn\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
  * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
- * | IM-004 | 登记的形状与 [D-106](../symbio/src/plugins/model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
+ * | IM-004 | 登记的形状与 [D-106](../crates/symbio-plugin-model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
  *
  * ## 为什么逐处豁免，不用数字基线
  *
@@ -35,8 +35,8 @@
  * 2. `session/context/pipeline.rs::run_compression_llm` —— 压缩摘要（内部请求）。
  *
  * 2026-10-20 之前还有 classify / compose 两处；相应批次
- * 把它们改经 `ProviderLlmAdapter`，直调点随之消失（[D-106](../symbio/src/plugins/model/README.md "D-106")）。
- * 压缩摘要仍是唯一登记豁免（[D-106](../symbio/src/plugins/model/README.md "D-106") 决策 2 重述了
+ * 把它们改经 `ProviderLlmAdapter`，直调点随之消失（[D-106](../crates/symbio-plugin-model/README.md "D-106")）。
+ * 压缩摘要仍是唯一登记豁免（[D-106](../crates/symbio-plugin-model/README.md "D-106") 决策 2 重述了
  * 「内部请求」的形状）；
  * 本守卫不判它该不该在，只判「在，且有人说过为什么」，外加 IM-004 那一刀**形状**。
  *
@@ -74,7 +74,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 
 /** 扫描根：整个 crate。绕过点可能出现在任何插件，也包括 core（闸门自己就在 core）。 */
-const DEFAULT_SRC = path.join('symbio', 'src')
+const DEFAULT_SRC = path.join('crates')
 
 /**
  * 豁免标记：`// internal-model-allow IM-001: 理由`。

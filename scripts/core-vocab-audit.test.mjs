@@ -52,7 +52,7 @@ function audit(files, { baseline = [] } = {}) {
   }
 }
 
-const CORE = 'symbio/src/symbio_core'
+const CORE = 'crates/symbio-core/src'
 
 /** 两个域、单向依赖 `beta → alpha` 的干净夹具。 */
 function cleanTree() {

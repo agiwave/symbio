@@ -26,14 +26,14 @@ created: 2026-07-20
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
-| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[D-013](symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
+| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[D-013](crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
 
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
 > Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
 > 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
-> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[D-016](symbio/src/plugins/model/README.md "symbio/src/plugins/model/README")）
+> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[D-016](crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）
 > 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
 
 ---
@@ -60,7 +60,7 @@ symbio/
 └── rustfmt.toml · clippy.toml # 位于仓库根
 ```
 
-> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/004-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
+> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/004-ref/006-当前事实表.md "RE-006-当前事实表")（自动生成）。
 
 ---
 
@@ -111,7 +111,7 @@ node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 
 **e2e 的被测二进制同理：不用你记得重建，也不靠文档提醒。** 判据在
 `scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相），是**内容指纹**而非「文件在不在」：
-`cli/src` + `symbio/src` 的全部源码与两个 crate 的清单算一个 sha256，构建成功后写成构建戳；
+`crates/symbio-cli/src` + `symbio/src` 的全部源码与两个 crate 的清单算一个 sha256，构建成功后写成构建戳；
 使用前比对，不一致就先 `cargo build --release`（cargo 自己判增量）再写戳，`--check` 只判不建。
 「文件在就算新鲜」会把一份过期 exe 一直用下去，e2e 因此报出**与眼前源码直接矛盾**的断言失败
 （源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上——改用指纹判据就是为了消掉这个失败模式。
@@ -134,7 +134,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 ⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
 抄了必然漂移。要加检查就改 `gate.mjs`。
 
-同理，**判据码的全表只在 [docs/004-ref/GATE_CODES.md](docs/004-ref/GATE_CODES.md)**
+同理，**判据码的全表只在 [RE-008-判据码登记表](docs/004-ref/GATE_CODES.md)**
 （由各脚本的 `@codes` 声明生成）：文档指认判据码时只写**具体那一条**（如 D-004），
 **不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
 抄了必然漂移。
@@ -210,7 +210,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 ### 文档与注释：各写各的，不互相复述
 
 **同一件事写两处，改一次就要动两处，且两处必然漂移。** 每条事实只有一个 owner——完整分工表在
-[docs/README.md 职责边界表](docs/README.md#文档职责边界一个事实只有一个-owner "docs/README")，本文不复述。
+[docs/README.md 职责边界表](docs/README.md "docs/README")，本文不复述。
 落到注释上只有一条边界：**注释写「读这个文件需要知道的不变量 / 陷阱 / 为什么这么写」，
 文档写「机制与取舍」**，两者互不复述。
 
@@ -288,8 +288,8 @@ mod tests;
 
 新增一个业务插件的最短路径：
 
-1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
-2. 在 `symbio/src/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
+1. 在 `crates/crates/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
+2. 在 `crates/crates/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
 3. 实现 [`Plugin`](docs/003-design/005-协议规范.md "DE-005-协议规范") trait 的 `route` 与 `traverse`；在文件末尾用
  `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
  **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
