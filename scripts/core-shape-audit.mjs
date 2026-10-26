@@ -12,6 +12,13 @@
  * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 56） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 18） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0 | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作 |
+ * | CS-004 | —— | core 生产代码里**插件 id 字面量**数只许降（冻结逐文件存量） | **词汇回流**：在 core 写 `"session"` / `"vdfs"` 就是在内核里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
+ *
+ * CS-004 是「领域名词 0」这条不变量的**可机判子集**：完整的名词清单要等 A2 划出
+ * `kernel/` 子集（谁算词汇取决于内核边界画在哪）。在那之前，能从代码里稳定读出的
+ * 名词只有一类——`symbio/src/plugins/` 的目录名（插件 id）——先把它冻结成逐文件
+ * 存量，**只许降**。存量为 0 的那些文件才算真正干净；存量非 0 的文件是 A2/B2 的账。
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
  * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
@@ -70,6 +77,7 @@
  * ## 用法
  *   node scripts/core-shape-audit.mjs              # 判定
  *   node scripts/core-shape-audit.mjs --verbose    # 逐 trait 形状（成员数 / 其中默认体）
+ *   node scripts/core-shape-audit.mjs --churn      # 只出「近 50 次提交的内核改动占比」报告
  *   node scripts/core-shape-audit.mjs --root=<dir> # 指向别处的仓库（测试用）
  * 退出码：0 = 通过，1 = 违规。
  *
@@ -80,10 +88,11 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002
+// @codes CS-001 CS-002 CS-003 CS-004
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
 import { isTestFile, walk } from './core-surface.mjs'
@@ -91,10 +100,74 @@ import { blankComments, blankTestModules, matchBrace } from './rust-scan.mjs'
 
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
+const CHURN = argv.includes('--churn')
 const rootArg = argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * `--churn`：最近 N 次非 merge 提交里，`symbio/src/symbio_core/` 的改动占比。
+ *
+ * **报告，不设门禁**（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") A1）：
+ * 单次提交的占比没有阈值可定——修内核 bug 的提交本就该 100% 落在内核；判据是**走向**
+ * （扩展类提交占比趋 0）。形状由 CS-001…CS-004 判，走向由本报告看，两者不互相冒充。
+ *
+ * 不落 `CURRENT.md`：那份事实表只收「离线可重生成的代码投影」（`facts/README.md`），
+ * 而 git 历史每次提交都变——写进去会让门禁每轮都「修复 1 个文件」，把漂移判据淹掉。
+ */
+function printChurn(windowSize = 50) {
+  let raw
+  try {
+    raw = execSync(`git log -${windowSize} --no-merges --numstat --format=%x1e`, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    })
+  } catch {
+    console.log(yellow('内核改动占比：`git log` 不可读（浅克隆 / 无 git），本节缺数'))
+    return
+  }
+  let commits = 0
+  let coreCommits = 0
+  let total = 0
+  let core = 0
+  let counted = false
+  for (const line of raw.split('\n')) {
+    if (line.trim() === '\x1e') {
+      commits += 1
+      counted = false
+      continue
+    }
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
+    if (!m) continue
+    const n = (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]))
+    total += n
+    if (m[3].startsWith('symbio/src/symbio_core/')) {
+      core += n
+      if (!counted) {
+        coreCommits += 1
+        counted = true
+      }
+    }
+  }
+  if (commits === 0) {
+    console.log(yellow('内核改动占比：窗口内没有提交，本节缺数'))
+    return
+  }
+  const pct = (a, b) => (b === 0 ? '0.0' : ((a / b) * 100).toFixed(1))
+  console.log(`内核改动占比（最近 ${commits} 次非 merge 提交，报告不设门禁）`)
+  console.log(
+    `  动过内核的提交：${coreCommits} / ${commits}（${pct(coreCommits, commits)}%）`,
+  )
+  console.log(`  内核改动行：${core} / ${total}（${pct(core, total)}%）`)
+  console.log(dim('  判据是走向：扩展类提交的内核占比应逐步趋 0。'))
+}
+
+if (CHURN) {
+  printChurn()
+  process.exit(0)
+}
 
 const CORE_REL = 'symbio/src/symbio_core'
 /** 本脚本自己：CS-002 读它源码里的放宽痕迹 */
@@ -326,7 +399,99 @@ if (fs.existsSync(selfPath)) {
   }
 }
 
-// ==================== 输出 ====================
+// ==================== CS-003 / CS-004 kernel 纯度 ====================
+
+/**
+ * 插件的**目录名**就是插件 id 的词表来源：新增插件 = 新目录，不需要改本脚本。
+ * 目录不存在（夹具仓库）⇒ 词表为空 ⇒ CS-004 不适用（CS-003 照判）。
+ */
+const PLUGINS_REL = 'symbio/src/plugins'
+const pluginsDir = path.join(ROOT, PLUGINS_REL)
+const pluginIds = fs.existsSync(pluginsDir)
+  ? fs
+      .readdirSync(pluginsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+  : []
+
+/** core 生产侧（剔测试模块 / 注释）的全文，两个纯度判据共用同一份口径。 */
+const coreTexts = []
+for (const file of walk(coreDir)) {
+  if (!file.endsWith('.rs') || isTestFile(file)) continue
+  const text = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
+  coreTexts.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), text })
+}
+
+// ── CS-003 `crate::plugins` 引用 0 ──
+const pluginRefs = coreTexts.flatMap((f) =>
+  [...f.text.matchAll(/crate\s*::\s*plugins\b/g)].map(() => f.rel),
+)
+if (pluginRefs.length > 0) {
+  report(
+    'CS-003',
+    `core 生产代码引用了插件实现 ${pluginRefs.length} 处（${[...new Set(pluginRefs)].join(' / ')}）——` +
+      '内核只该经 trait / 声明与插件交互（DE-023 D-179）；注释里提到不算，但代码路径算',
+  )
+}
+
+// ── CS-004 插件 id 字面量只许降 ──
+/**
+ * 逐文件冻结存量（2026-10-26 实测值）。**只许降**：数字变小就同步改这里，
+ * 变大 = 内核又认了一个插件名字。整张表的目标是空表。
+ *
+ * 口径：`"<id>"` / `"<id>:` / `"<id>/` 三种字面量起点，逐个插件目录名匹配；
+ * 测试模块与注释已剥离（测试里按名造插件是对的）。
+ */
+const NOUN_BASELINE = {
+  'symbio/src/symbio_core/actors/skill.rs': 1,
+  'symbio/src/symbio_core/agent/mod.rs': 1,
+  'symbio/src/symbio_core/authz/mod.rs': 14,
+  'symbio/src/symbio_core/capability/family.rs': 1,
+  'symbio/src/symbio_core/chat/principal.rs': 13,
+  'symbio/src/symbio_core/event_bus/mod.rs': 3,
+  'symbio/src/symbio_core/plugin/route.rs': 8,
+  'symbio/src/symbio_core/projection/mutations.rs': 1,
+  'symbio/src/symbio_core/projection/rebuild.rs': 1,
+  'symbio/src/symbio_core/projection/token.rs': 1,
+  'symbio/src/symbio_core/view/mod.rs': 1,
+}
+
+const nounCounts = new Map()
+if (pluginIds.length > 0) {
+  for (const f of coreTexts) {
+    let n = 0
+    for (const id of pluginIds) {
+      const re = new RegExp(`"${id}"|"${id}[:/]`, 'g')
+      n += (f.text.match(re) || []).length
+    }
+    if (n > 0) nounCounts.set(f.rel, n)
+  }
+  const ratchetDown = []
+  for (const [rel, n] of nounCounts) {
+    const cap = NOUN_BASELINE[rel] ?? 0
+    if (n > cap) {
+      report(
+        'CS-004',
+        `插件 id 字面量回流：${rel} 有 ${n} 处 > 冻结 ${cap} —— ` +
+          '词汇（插件 id / 路由 / 装配位）由 owner 声明，内核只 seal（DE-023 D-177 / D-179）',
+      )
+    } else if (n < cap) {
+      ratchetDown.push(`${rel} ${n}<${cap}`)
+    }
+  }
+  for (const rel of Object.keys(NOUN_BASELINE)) {
+    if (!nounCounts.has(rel)) ratchetDown.push(`${rel} 0<${NOUN_BASELINE[rel]}`)
+  }
+  if (ratchetDown.length && errors.length === 0) {
+    console.log(
+      yellow('提示') +
+        `：插件 id 字面量已收到冻结值下方（${ratchetDown.join(' · ')}），` +
+        '请同步本脚本的 NOUN_BASELINE——留着旧数字等于把余量白留给下一次',
+    )
+  }
+}
+
 
 const ruleLine = (ok, rule, desc) =>
   console.log(`${ok ? green('✓') : red('✗')} ${rule}  ${dim(desc)}`)
@@ -345,6 +510,15 @@ if (errors.length === 0) {
     waivers.length
       ? `放宽 ${waivers.length} 格，引用的 ADR 全部能打开：${waivers.map((w) => `${w.key}←${w.reason.match(ADR_REF_RE)?.[0]}`).join('、')}`
       : '没有放宽痕迹（基线就是当前形状）',
+  )
+  const nounTotal = [...nounCounts.values()].reduce((s, n) => s + n, 0)
+  ruleLine(true, 'CS-003', '内核纯度：core 生产代码零 `crate::plugins` 引用')
+  ruleLine(
+    true,
+    'CS-004',
+    pluginIds.length
+      ? `内核纯度：插件 id 字面量 ${nounTotal} 处（冻结 ${Object.values(NOUN_BASELINE).reduce((s, n) => s + n, 0)} 处 / ${Object.keys(NOUN_BASELINE).length} 个文件，只许降）`
+      : '内核纯度：夹具仓库没有插件目录，CS-004 不适用',
   )
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])
   if (under.length) {

@@ -49,3 +49,7 @@ mod skill;
 mod telegram;
 mod vdfs;
 mod web;
+
+// 五类扩展的局部性夹具（DE-023 A1）：测试专用宿主，不进产物。
+#[cfg(test)]
+mod extension_fixtures;

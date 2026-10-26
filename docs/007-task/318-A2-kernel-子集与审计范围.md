@@ -6,7 +6,7 @@ status: todo
 created: 2026-10-26
 track: impl
 prio: next
-deps: [T-317-A1-kernel-纯度与扩展局部性判据]
+deps: []
 parent: T-316-内核边界与扩展局部性收口
 where: symbio/src/symbio_core/ · scripts/core-shape-audit.mjs · scripts/core-export-audit.mjs
 exit: 'core 内出现 `kernel/` 门面，只暴露 DE-023 §5 的语法与少量协议类型；形状与根出口审计范围收窄到 kernel；现有域行为零变化，全量门禁全绿。'
