@@ -119,11 +119,11 @@ async fn option_definition_without_container_degrades_to_empty() {
 /// 而不会有任何编译错误。
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
-    use symbio_providers::DefaultToolVisitor;
     use symbio_core::{
         capability_option_fields, PluginSimpleRequest, Registry, OPTION_VISITOR, PATH,
         TRAVERSE_AVAILABLE_OPTIONS,
     };
+    use symbio_providers::DefaultToolVisitor;
 
     let p = Arc::new(plugin());
     let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();

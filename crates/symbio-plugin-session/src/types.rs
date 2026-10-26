@@ -241,10 +241,7 @@ impl Session {
 pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
     for m in messages.iter().rev() {
-        if !matches!(
-            m.node_role(),
-            Some(symbio_core::chat_node::NodeRole::User)
-        ) {
+        if !matches!(m.node_role(), Some(symbio_core::chat_node::NodeRole::User)) {
             continue;
         }
         let text = match &m.content {

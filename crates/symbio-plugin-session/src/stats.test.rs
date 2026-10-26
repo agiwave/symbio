@@ -1,4 +1,4 @@
-//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+//! `session/stats` 读数口的判据（[plan/12 §4](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 //!
 //! 1. **复算**——出口的读数与直接 `apply` 逐字相等。同一切片、同一个 as-of：
 //!    出口只能调已有的投影，不许另写一份统计（否则两套口径会静默漂移）。
@@ -9,13 +9,13 @@
 
 use super::{fleet_reading, read};
 use crate::store::EventWalStore;
+use std::path::{Path, PathBuf};
 use symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
     EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE, SKILL_TAG,
 };
-use std::path::{Path, PathBuf};
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -301,7 +301,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
 /// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
 ///
 /// 「哪些事实源打得开」由存储层判（`deep_snapshots` 跳过并出声）；本列只对
-/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
+/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
 #[test]
 fn fleet_aggregates_the_snapshots_it_is_given() {
     let (root, _wals) = seed_instance("values", 2);
@@ -787,11 +787,7 @@ fn a_warn_row_appears_when_the_invariants_are_broken() {
     let got = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
     let inv = &got.panel.sections[2];
     let row = &inv.rows[0];
-    assert_eq!(
-        row.tone,
-        symbio_core::ReadingTone::Warn,
-        "违规 ⇒ 需留意"
-    );
+    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "违规 ⇒ 需留意");
     assert!(row.value != "0 条", "且不再显示 0 条：{}", row.value);
     assert!(got.panel.has_warn(), "`has_warn()` 必须为真");
 }
@@ -805,8 +801,8 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
     let root = dir.clone();
 
-    let got = read_path("s1", &wal, None, symbio_core::PRINCIPAL_MAIN, &root)
-        .expect("没有事实源不是错");
+    let got =
+        read_path("s1", &wal, None, symbio_core::PRINCIPAL_MAIN, &root).expect("没有事实源不是错");
     assert!(!got.has_wal, "没有源");
     let row = got.panel.sections[1]
         .rows
@@ -814,11 +810,7 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
         .find(|r| r.label == "事实源在不在")
         .expect("有在不在行");
     assert_eq!(row.value, "不在");
-    assert_eq!(
-        row.tone,
-        symbio_core::ReadingTone::Warn,
-        "没跑过 ⇒ 需留意"
-    );
+    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "没跑过 ⇒ 需留意");
 }
 
 /// 出口读数 == 直接 `apply`（复算：同源，不是「看起来差不多」）。
@@ -903,7 +895,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
     assert_eq!(after.checkpoint["event_count"], 2);
 }
 
-/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
 #[test]
 fn invariants_move_when_the_wal_changes() {
@@ -956,7 +948,7 @@ fn invariants_move_when_the_wal_changes() {
 ///    它们从分母 / 分子 / 样本里抹掉。
 ///
 /// 按布局分叉的第二个读法（只给窗口）因此不是「多一个选择」，而是把布局知识
-/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
+/// 交给每个调用方去挑——挑错还是静默的（[plan/14 §2.2](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
 ///
 /// ## 反向自检
 ///
@@ -1035,7 +1027,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     );
 }
 
-/// 读侧闸（[04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：声明**属主**
+/// 读侧闸（[04 §3.1 批⑥](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：声明**属主**
 /// 身份 ⇒ 与不声明逐字相同——闸的存在不是为了把属主挡在外面。
 #[test]
 fn declaring_the_owner_reads_everything() {
@@ -1070,14 +1062,8 @@ fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     for viewer in ["session/main", "session/ghost"] {
-        let got = read_path(
-            "s1",
-            &wal,
-            Some(viewer),
-            symbio_core::PRINCIPAL_MAIN,
-            &root,
-        )
-        .expect("读数");
+        let got =
+            read_path("s1", &wal, Some(viewer), symbio_core::PRINCIPAL_MAIN, &root).expect("读数");
         assert!(got.has_wal, "{viewer}: 事实源存在，只是不给你看");
         assert!(
             got.tiers.is_empty(),
@@ -1233,7 +1219,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列（[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S6 第 15 步的读侧）：
+/// 声誉列（[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S6 第 15 步的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -1399,11 +1385,7 @@ fn commitments_column_exposes_each_delegation_record() {
         "面板与列对上：{:?}",
         row.value
     );
-    assert_eq!(
-        row.tone,
-        symbio_core::ReadingTone::Warn,
-        "有违约 ⇒ 需留意"
-    );
+    assert_eq!(row.tone, symbio_core::ReadingTone::Warn, "有违约 ⇒ 需留意");
 
     // 无读权限 ⇒ 空形状（四列那一族），不是缺列、也不是零值条目
     let denied = read_path(
@@ -1455,14 +1437,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
             .expect("任务开格");
     }
 
-    let got = read_path(
-        "s-rs",
-        &wal,
-        None,
-        symbio_core::PRINCIPAL_MAIN,
-        &root,
-    )
-    .expect("读数");
+    let got = read_path("s-rs", &wal, None, symbio_core::PRINCIPAL_MAIN, &root).expect("读数");
     assert_eq!(
         got.readyset["ready"].as_array().map(|a| a.len()),
         Some(1),
@@ -1499,7 +1474,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`skill_events::route`
@@ -1634,7 +1609,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 
-/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 转写列（**对话面读侧**，[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///

@@ -8,10 +8,10 @@
 //! 往返契约：[`zip_dir`] 以条目 id 作**唯一顶层目录**，[`extract_pack`] 端
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
 
-use symbio_core::vdfs_has_parent_segment;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
+use symbio_core::vdfs_has_parent_segment;
 
 /// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///

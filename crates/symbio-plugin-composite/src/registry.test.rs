@@ -6,11 +6,15 @@
 //! **真目录**上做：判据的来源就是磁盘，用内存替身去测它等于把被测对象换掉。
 //! 每个用例自建一棵一次性插件根（[`temp_root`]），跑完删掉。
 
+#[allow(unused_imports)]
+// 只为把兄弟插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
+use symbio as _;
+
 use super::*;
 
-use symbio_deploy::{PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION};
-use symbio_core::{PluginError, PluginPayload};
 use std::path::Path;
+use symbio_core::{PluginError, PluginPayload};
+use symbio_deploy::{PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION};
 
 /// 一次性临时插件根（目录名带进程号，避免并行测试互相踩）
 fn temp_root(tag: &str) -> PathBuf {
@@ -383,9 +387,9 @@ impl Plugin for NopPlugin {
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(&Vec::<
-            serde_json::Value,
-        >::new()))
+        Ok(symbio_core::PluginPayload::new(
+            &Vec::<serde_json::Value>::new(),
+        ))
     }
 }
 

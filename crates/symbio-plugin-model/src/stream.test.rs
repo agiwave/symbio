@@ -16,9 +16,9 @@ use super::{
 };
 use crate::protocols::ModelProtocolEvent;
 use crate::tool_accumulator::TurnToolCallAccumulator;
+use std::sync::Mutex;
 use symbio_core::chat_node::ChatNode;
 use symbio_core::{ExecEventSink, ExecTranscriptWriter, TurnOutput};
-use std::sync::Mutex;
 
 /// 录制帧的转写写入器：数「ToolCall 节点」的快照帧用了几个不同 id。
 struct RecordingWriter(pub Mutex<Vec<ChatNode>>);

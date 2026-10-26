@@ -14,9 +14,7 @@
 
 use super::calibration;
 use super::CalibrationView;
-use crate::event::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_RECALLED,
-};
+use crate::event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_RECALLED};
 use crate::view::Budget;
 use crate::{Entity, Event, Verb};
 

@@ -3,11 +3,11 @@
 //!
 //! 记录类型 [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] 不住这里——它们隔着
 //! 驱动器与留守存储两侧都要用，住在 [`symbio_core::facts`]
-//! （[D-082](../../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）。本文件只留
+//! （[D-082](../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）。本文件只留
 //! **判据与门**：哪一次调用算声明、声明里有什么——那是机制，随观察点住插件侧。
 
-use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use serde_json::Value;
+use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 
 /// 任务表出参的**唯一写入点**（见 [`TaskDeclaration`]）：只认**声明了
 /// `owns_task_table` 的工具**（`local/todo_write` 即是； 改了判据的住址，

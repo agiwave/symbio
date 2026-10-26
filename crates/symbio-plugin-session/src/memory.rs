@@ -42,8 +42,8 @@
 //! `ctx[SESSION_ID]` 缺失 / 为空 → 什么都不注入。收集期拿不到会话 id 的广播
 //!（例如设置页的选项收集）不该凭空造一份记忆出来。
 
-use symbio_providers::{MemoryFile, MemorySegmentSpec};
 use std::path::PathBuf;
+use symbio_providers::{MemoryFile, MemorySegmentSpec};
 
 /// 会话记忆文件名 —— `MEMORY.md`（**本插件自己的**约定，不是跨插件契约）。
 ///

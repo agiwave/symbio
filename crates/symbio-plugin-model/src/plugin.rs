@@ -11,19 +11,19 @@
 use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
-use symbio_deploy::PLUGIN_ID_MODEL;
-use symbio_providers::{MemoryVdfs, SingleFileVdfs};
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::{
     capability_report_error, creator_create_object, plugin_dir_from_ctx, CapabilityRow, Plugin,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PluginSimpleRequest,
 };
 use symbio_core::{DetailField, DetailOption};
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_MODEL;
+use symbio_providers::{MemoryVdfs, SingleFileVdfs};
 use tokio::sync::RwLock;
+use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
 
 /// Provider 主文件名（磁盘布局：`<本插件目录>/<id>/provider.json`）
 const MANIFEST: &str = "provider.json";

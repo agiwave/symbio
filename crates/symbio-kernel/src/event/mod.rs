@@ -574,7 +574,7 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 /// 编码：学到的语义内容（`payload: { content, tag, generation, vis_scope }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
 /// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
-/// 承诺（[D-110](../../plugins/memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "crates/symbio-plugin-memory/src/README")；写方 `plugins/loop/memory_events.rs`）。
+/// 承诺（[D-110](../../../symbio-plugin-memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "crates/symbio-plugin-memory/src/README")；写方 `plugins/loop/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
@@ -696,7 +696,7 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 /// 它不是事件名，而是**同一个事实的另一种写法**：写体 `meta.trigger` 声明的是
 /// 「这一轮由系统自己发起」，落进事实源就是 [`EVENT_SYSTEM_TRIGGERED`] 那一格。
 /// 两侧必须同源——`meta` 是自由 JSON，键名拼错编译器管不到，生产方（调度侧）与
-/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 裁决二）。
+/// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 裁决二）。
 ///
 /// 形状：`meta.trigger = { "kind": <EVENT_TRIGGER_KIND_*>, "idle_ms": N }`，
 /// **在写臂就地消费**，不要求它活到转写。

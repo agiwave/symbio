@@ -11,10 +11,10 @@
 //     = note: crate `X` compiled by rustc 1.98.0 ...: ...\deps\libX-<hash>.rmeta
 //             = help: please recompile that crate using this compiler (rustc 1.93.1 ...)
 //
-// 典型触发：`cli/` 与 `symbio/` 是兄弟目录，`../symbio/rust-toolchain.toml`（锁 1.93.1）
-// 管不到 cli/，于是 cli 曾用 default channel（本机 stable = 1.98）构建，把 1.98 的产物
-// 写进了 symbio 共用的 target 目录。（已由根 `rust-toolchain.toml` 根治——合并 workspace 后 cli/ 不再有自己的工具链文件，本脚本
-// 只负责清掉历史污染。）
+// 典型触发：cli 与壳 crate 曾是兄弟目录，`rust-toolchain.toml`（锁 1.93.1）只管壳、
+// 管不到 cli，于是 cli 曾用 default channel（本机 stable = 1.98）构建，把 1.98 的产物
+// 写进了壳共用的 target 目录。（已由根 `rust-toolchain.toml` 根治——合并 workspace 后 cli
+// 不再有自己的工具链文件，本脚本只负责清掉历史污染。）
 //
 // ## 做法：以构建日志为唯一证据
 //

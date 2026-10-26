@@ -11,7 +11,7 @@ created: 2026-09-25
 > **文档类型：Design（设计）** — 让「插件」不再限于编译期内置的 Rust 实现。
 >
 > **边界**：本文只回答「怎么设计」。现状不合理之处的清单与优先级见
-> [archive/plugin-system-review-2026-09.md](../archive/plugin-system-review-2026-09.md)
+> [archive/plugin-system-review-2026-09.md](../../archive/plugin-system-review-2026-09.md)
 > （下文简称「**评审**」，条目号 A1–A6 / P1–P8 均指该文）；单条决策定案后写进
 > [ADR 索引](../010-adr/README.md "DE-000-设计总览")。
 >

@@ -1,4 +1,4 @@
-//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
+//! 技能编译与路由（S9 第 22 步，[roadmap/S11](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
 //!
 //! **技能是事实，不是特殊类型**（S11 §2 / J1）：编译产物就是一条
 //! `memory.encoded{tag:"skill"}`——与普通记忆同格子、同召回、同巩固，读侧
@@ -37,7 +37,7 @@ use symbio_core::{calibration, Event, RecallView, Store, EVENT_MEMORY_ENCODED, S
 
 // ==================== 编译与路由策略（D-189：唯一生产消费方在本文件） ====================
 
-/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
+/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
 ///
 /// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
 /// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
@@ -255,7 +255,7 @@ pub(crate) fn take_match<'a>(hits: &'a [SkillLlmHit], user_text: &str) -> Option
 ///   判不了 ⇒ 原样留在视图里当背景事实，不假装判过；
 /// - **巩固产物判不了**（合并后的条目有新 seq、不再带 `skill_id`）⇒ 同样原样保留。
 ///
-/// `snapshot` 是本会话事实的**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
+/// `snapshot` 是本会话事实的**值**（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
     if !view.entries.iter().any(|e| e.tag == SKILL_TAG) {

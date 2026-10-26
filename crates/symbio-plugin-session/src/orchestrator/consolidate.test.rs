@@ -37,8 +37,7 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
 
 /// 每例独占存储根；WAL 直接开在会话目录下（本组测的就是这一层）。
 fn open_wal(dir: &std::path::Path) -> EventWalStore {
-    EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("打开事实源失败")
+    EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("打开事实源失败")
 }
 
 /// 种一轮完整事实（用户格 + 收束格）——压缩要取代的「历史」。

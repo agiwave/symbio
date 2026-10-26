@@ -93,7 +93,7 @@ impl: done
 > 依赖方向是**规范不是机制**——本仓没有判定它的审计，由评审把持：编排层可以
 > 引用领域层，领域层不得反向引用编排层（`plugin.rs` / `orchestrator/` 即会话侧
 > 编排层；驱动器侧的 `plugin.rs` / `chat_loop.rs` 同理）。跨插件引用规则由
-> [`scripts/plugin-entry-audit.mjs`](../../../../../scripts/plugin-entry-audit.mjs)
+> [`scripts/plugin-entry-audit.mjs`](../../../../scripts/plugin-entry-audit.mjs)
 > 的 **E-009**（不引兄弟插件）与 **E-013**（loop 的 import 根 ⊆ D-083 §4 闭族）
 > 执行；内核深引是 `core-export-audit` 的 **C-002**——原 E-010 已迁走，避免两个脚本
 > 各判一遍（[`009-plugin-route-address.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")
@@ -136,7 +136,7 @@ impl: done
 
 ## 2. 测试布局
 
-两种合法形态，由 [`test-layout-audit.mjs`](../../../../../scripts/test-layout-audit.mjs)
+两种合法形态，由 [`test-layout-audit.mjs`](../../../../scripts/test-layout-audit.mjs)
 判定（接入 `gate.mjs`，棘轮只降不升）：
 
 ```text

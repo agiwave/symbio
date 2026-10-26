@@ -10,9 +10,9 @@
 //! - 挂载点与注入面**同时**交出（只给其一等于没有记忆）。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
-use symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use std::path::Path;
+use symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
+use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文；`workdir` 模拟会话选择的工作区（`None` = 没选工作区），

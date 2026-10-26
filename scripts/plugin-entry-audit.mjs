@@ -98,6 +98,7 @@ import {
   relativeRouteArms,
   routeArmLines,
   routeConstDecls,
+  routeConstPath,
   routeConstName,
 } from './route-facts.mjs'
 
@@ -780,7 +781,7 @@ for (const abs of codeFiles) {
         i + 1,
         `\`crate::plugins::${m[1]}\` —— 插件不得直接引用兄弟插件模块（测试代码同样判）；` +
           `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
-          `或经 \`symbio_core\` 的共享契约（见 \`crates/crates/plugins/mod.rs\` 的架构原则）`,
+          `或经 \`symbio_core\` 的共享契约（见 \`crates/plugins/mod.rs\` 的架构原则）`,
       )
     }
   }
@@ -821,6 +822,17 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   'submit_object_creator',
 ])
 const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
+  // ── crate 化（D-191）把三个「crate 内根」变成了三个**外部 crate**：闭族的成员没变，
+  //    只是写法从 `crate::symbio_core` / `crate::assembly` / `crate::routes` 变成
+  //    `use symbio_core::…` / `use symbio_deploy::…` / `use symbio_plugin_api::…`。
+  //    这里逐个对应列出，而不是「凡 symbio_ 开头都放行」——前缀白名单会让「新增一个
+  //    `symbio-plugin-xxx` 依赖」悄悄落在族内，那正是本条要拦的形态。
+  'symbio_core', // 宿主机制面（原 `crate::symbio_core`）
+  'symbio_deploy', // 装配方的部署身份表（原 `crate::assembly`）
+  'symbio_plugin_api', // 跨插件地址常量与钩子助手（原 `crate::routes` / `crate::hooks`）
+  // 仅测试豁免：`symbio_providers` 是「被多个插件模块公用」的实现层，测试拿它当
+  // 工具清单的默认收集器，不携带会话状态（原 `crate::providers` 的同一条豁免）。
+  'symbio_providers',
   'std',
   'core',
   'alloc',
@@ -1064,7 +1076,7 @@ for (const abs of VOCAB_MD_FILES) {
 // 动态命名空间（`local/<工具名>`、容器挂载名）静态提不出臂：那样的值必须**逐行豁免并
 // 写明运行期来源**，而不是给脚本加一张白名单表——表会让 `local/serch` 这种拼错的工具名
 // 一路静默放行，而拼错工具名恰是这类地址最容易犯的错。
-const ROUTE_MODULE = path.join(repoRoot, 'crates', 'symbio-plugin-api', 'src', 'routes.rs')
+const ROUTE_MODULE = routeConstPath(repoRoot)
 {
   const dispatchable = dispatchableRoutes(repoRoot)
   const raw = fs.existsSync(ROUTE_MODULE) ? readLines(ROUTE_MODULE).raw : []

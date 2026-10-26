@@ -43,15 +43,15 @@
 //!
 //! 文本由 `session` 落库，转写只有一个写入者（D-020）。本插件只返回字符串。
 
-use symbio_deploy::PLUGIN_ID_COMPOSE;
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
 };
 use symbio_core::{ComposeRequest, Verdict, WordingReply};
 use symbio_core::{DetailDefinition, DetailField};
-use async_trait::async_trait;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_COMPOSE;
 
 use super::config::ComposeConfig;
 use super::templates::{progress_text, template_for};

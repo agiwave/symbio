@@ -39,7 +39,7 @@ pub fn is_safe_relative_path(path: &str) -> bool {
 /// 字段与 local 插件的配置文档（`LocalConfig`）一一对应——配置文档是人类入口，
 /// 这里是运行期真源。**默认值即「全放开」是裁决，不是默认没做**：安全边界在审批闸
 /// （工具级风险 + 命令级 `risk_for`），这里管的是用户自己的执行偏好——分层与理由见
-/// [D-101](../../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-101-内置插件的执行策略保留放开默认安全边界在审批闸不在用户偏好 "DE-008-能力注册表与能力坐标系")。
+/// [D-101](../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-101-内置插件的执行策略保留放开默认安全边界在审批闸不在用户偏好 "DE-008-能力注册表与能力坐标系")。
 #[derive(Debug, Clone)]
 pub struct PolicyRules {
     pub autonomy: AutonomyLevel,
@@ -512,7 +512,7 @@ impl SecurityPolicy {
     /// `Low`；解释器判 `High`；破坏性命令判 `High`；写入判 `Medium`；**其余一律
     /// `High`**。最后一条是安全边界——「未知 = Low」会让任何未收录的系统命令
     /// （`del` / `rd` / `format` / `taskkill`）在自动模式下免审批执行，而审批闸门
-    /// 正是本项目声明的安全边界（[D-101](../../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+    /// 正是本项目声明的安全边界（[D-101](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     fn segment_risk_level(&self, segment: &str) -> CapabilityRiskLevel {
         let command_lower = segment.to_lowercase();
         let base_cmd = command_lower.split_whitespace().next().unwrap_or("");

@@ -1,5 +1,5 @@
 //! 阶段①「批首闸门读数」——`process_tool_calls_async` 三段拆分的第一段
-//! （/ [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 判据（「这段错了谁会红」）：闸门判据**只在批首读一次**、整批复用的读数用例红
 //! （`breaker` / `elimination` / `task_table` 的批首读场景与 `tool_executor.test.rs`
@@ -116,9 +116,8 @@ pub(crate) async fn read_batch_gates(
     let decls = ToolDecls::of_metas(&metas);
     let risks = ToolRisks::of_metas(&metas);
     // 端口声明与元数据同一处读数：批内能否并发由 `PortDecl` 说，执行层只消费。
-    let concurrent =
-        symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
-            .is_some_and(|p| p.concurrent);
+    let concurrent = symbio_core::ring::port_of(super::super::super::loop_rows::PORTS, "tool")
+        .is_some_and(|p| p.concurrent);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -298,7 +297,7 @@ pub(crate) const GATES: &[GateRow] = &[
     },
 ];
 
-/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -310,7 +309,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。

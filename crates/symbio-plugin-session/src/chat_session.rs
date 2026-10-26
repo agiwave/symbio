@@ -28,13 +28,13 @@
 
 use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
-use symbio_core::plugin_info;
+use std::collections::HashSet;
+use std::sync::Arc;
 use symbio_core::chat_node as cm;
 use symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use symbio_core::clock_now_ms;
+use symbio_core::plugin_info;
 use symbio_core::{PluginError, SymbioKey};
-use std::collections::HashSet;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 mod read;
@@ -186,9 +186,7 @@ impl PersistentChatSession {
 
     /// 本会话的**事实源句柄**（D-084 §1-B）：会话内写方/读方拿它落格、取切片，
     /// 不再自己拼目录 `open`。临时会话 ⇒ `Ok(None)`；事实源打不开 ⇒ `Err`（真失败）。
-    pub(in crate) fn facts(
-        &self,
-    ) -> Result<Option<Arc<super::store::EventWalStore>>, PluginError> {
+    pub(crate) fn facts(&self) -> Result<Option<Arc<super::store::EventWalStore>>, PluginError> {
         self.store
             .facts(&self.session_id)
             .map_err(PluginError::InternalError)
@@ -196,7 +194,7 @@ impl PersistentChatSession {
 
     /// 存储句柄（D-084 §2 的引擎侧端口）：只许 session 插件内的引擎面持有，
     /// 能力面不得见到 `SessionStore` 类型。
-    pub(in crate) fn store_handle(&self) -> Arc<SessionStore> {
+    pub(crate) fn store_handle(&self) -> Arc<SessionStore> {
         self.store.clone()
     }
 

@@ -6,7 +6,7 @@
 //!
 //! ## 启动点为什么在 `build` 而不是 `start`
 //!
-//! [`Plugin::start`] 是**同步**钩子（[D-033](../../../../docs/003-design/002-架构总览.md#d-033-生命周期钩子start-同步stop-异步停用与卸载各给理由 "DE-002-架构总览")：
+//! [`Plugin::start`] 是**同步**钩子（[D-033](../../../docs/003-design/002-架构总览.md#d-033-生命周期钩子start-同步stop-异步停用与卸载各给理由 "DE-002-架构总览")：
 //! 装配路径整条是同步的），而循环体是 task。session 的常驻任务同在此处
 //! （`plugins/session/plugin.rs` 的 `start_resident_tasks`）——两处都在**构造点**交出句柄，
 //! 「谁来持有句柄」因此只有一个注册点。
@@ -19,16 +19,16 @@
 
 use super::option::{heartbeat_field, ORDER_HEARTBEAT};
 use super::tool::HeartbeatTool;
-use symbio_deploy::PLUGIN_ID_HEARTBEAT;
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use symbio_core::{
     CapabilityRow, DynVdfsProvider, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
     CAPABILITY_VISITOR, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use symbio_deploy::PLUGIN_ID_HEARTBEAT;
 use tokio::sync::RwLock;
 
 /// 停机时等扫描循环退出的上限：超时才 `abort`。

@@ -76,9 +76,7 @@ impl Violation {
 /// 写侧闸门与读侧 [`open_unique_per_turn`] 共用本判据——「什么算开轮」只有一份。
 /// 名字引常量而不是字面量：拼错的字面量在比较里是**恒假**，于是开轮闸静默失效。
 pub fn is_turn_open(e: &Event) -> bool {
-    e.entity == Entity::Turn
-        && e.verb == Verb::Opened
-        && e.kind == crate::event::EVENT_USER_MESSAGE
+    e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == crate::event::EVENT_USER_MESSAGE
 }
 
 /// 这一条是**收束发言**吗（`turn × closed` 的 `chat.assistant.final`）？
@@ -101,8 +99,7 @@ pub fn closes_turn(e: &Event) -> bool {
         && e.verb == Verb::Closed
         && matches!(
             e.kind.as_str(),
-            crate::event::EVENT_ASSISTANT_FINAL
-                | crate::event::EVENT_ASSISTANT_FALLBACK
+            crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
         ))
         || (e.entity == Entity::Artifact
             && e.verb == Verb::Asserted
@@ -121,8 +118,7 @@ pub fn is_stop_fact(e: &Event) -> bool {
         && e.verb == Verb::Closed
         && matches!(
             e.kind.as_str(),
-            crate::event::EVENT_ASSISTANT_FINAL
-                | crate::event::EVENT_ASSISTANT_FALLBACK
+            crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
         ))
         || e.kind == crate::event::EVENT_AUTHZ_DENIED
 }
@@ -250,8 +246,7 @@ fn needs_provenance(e: &Event) -> bool {
             && ((e.verb == Verb::Closed
                 && matches!(
                     e.kind.as_str(),
-                    crate::event::EVENT_ASSISTANT_FINAL
-                        | crate::event::EVENT_ASSISTANT_FALLBACK
+                    crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
                 ))
                 || (e.verb == Verb::Progressed
                     && e.kind == crate::event::EVENT_ASSISTANT_PROGRESS)))
@@ -398,11 +393,8 @@ fn declared_budget_ms(events: &[Event]) -> Option<u64> {
             .filter_map(declared_budget_of)
             .max()
     };
-    widest(
-        crate::event::EVENT_TURN_DISPATCH,
-        Verb::Asserted,
-    )
-    .or_else(|| widest(crate::event::EVENT_USER_MESSAGE, Verb::Opened))
+    widest(crate::event::EVENT_TURN_DISPATCH, Verb::Asserted)
+        .or_else(|| widest(crate::event::EVENT_USER_MESSAGE, Verb::Opened))
 }
 
 /// 一条声明事件的预算：数值优先，档位名回退。
@@ -673,10 +665,7 @@ pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
     // ——verify/termination.rs 的前提 2 用例包含的是同一份内核。
     let replaces: Vec<&str> = events
         .iter()
-        .filter(|e| {
-            e.entity == Entity::Task
-                && e.kind == crate::event::EVENT_TASK_REWORK_CREATED
-        })
+        .filter(|e| e.entity == Entity::Task && e.kind == crate::event::EVENT_TASK_REWORK_CREATED)
         .filter_map(|e| e.payload.get("replaces").and_then(|v| v.as_str()))
         .collect();
     kernel::rework_core(&replaces, max_rework)

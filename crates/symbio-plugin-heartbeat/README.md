@@ -14,7 +14,7 @@ impl: done
 
 「这次开轮是系统自己发起的」在事实源里的样子（触发 / 自检 / 欲 / 闸门四格）与运行参数的推导
 **不在本插件**：那是会话存储所有者的写窗口纪律，住在
-[`../session/transcript/autonomous.rs`](../session/transcript/autonomous.rs)，经会话的收件箱写臂进入
+[`../session/transcript/autonomous.rs`](../symbio-plugin-session/src/transcript/autonomous.rs)，经会话的收件箱写臂进入
 （归属裁决 [D-076](README.md "crates/symbio-plugin-heartbeat/README")）。机制的完整语义与实测节奏见
 [`src/docs/113-heartbeat-mechanism.md`](src/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism")。
 
@@ -46,11 +46,11 @@ impl: done
 
 | 文件 | 职责 |
 |---|---|
-| [`plugin.rs`](plugin.rs) | 插件本体：能力行贡献（Tool + Option 两行）、常驻循环的启动与停机 |
-| [`scheduler.rs`](scheduler.rs) | 扫描循环：tick、错峰、空闲基线（判空闲的算术是纯函数 `due`，逐条可测） |
-| [`setting.rs`](setting.rs) | `Session.metadata.heartbeat` 那块数据的形状（本片写、会话侧透传） |
-| [`tool.rs`](tool.rs) | 模型侧设置入口（`heartbeat` 工具：set / get / cancel，两跳：先读后写补齐部分更新） |
-| [`option.rs`](option.rs) | 会话选项栏那一行的声明（字段 + 子表单定义，保存走前端已在用的 `option` 写通道） |
+| [`plugin.rs`](src/plugin.rs) | 插件本体：能力行贡献（Tool + Option 两行）、常驻循环的启动与停机 |
+| [`scheduler.rs`](src/scheduler.rs) | 扫描循环：tick、错峰、空闲基线（判空闲的算术是纯函数 `due`，逐条可测） |
+| [`setting.rs`](src/setting.rs) | `Session.metadata.heartbeat` 那块数据的形状（本片写、会话侧透传） |
+| [`tool.rs`](src/tool.rs) | 模型侧设置入口（`heartbeat` 工具：set / get / cancel，两跳：先读后写补齐部分更新） |
+| [`option.rs`](src/option.rs) | 会话选项栏那一行的声明（字段 + 子表单定义，保存走前端已在用的 `option` 写通道） |
 
 ## 生命周期
 
@@ -70,8 +70,8 @@ impl: done
 
 停用它 ⇒ 少的是这一个功能，不是整个界面。判据两侧各钉一半（跨插件的判据不许靠 import 兄弟模块，E-009）：
 
-- 本片 [`plugin.test.rs`](plugin.test.rs)：`traverse` put 两行 + 没有第三行 + `stop` ⇒ 句柄已 finished。
-- 容器侧 [`../composite/composite.test.rs`](../composite/composite.test.rs)：经**工厂 id + 真实 `mount_all`**
+- 本片 [`plugin.test.rs`](src/plugin.test.rs)：`traverse` put 两行 + 没有第三行 + `stop` ⇒ 句柄已 finished。
+- 容器侧 [`../composite/composite.test.rs`](../symbio-plugin-composite/src/composite.test.rs)：经**工厂 id + 真实 `mount_all`**
  装配，`set_enabled("heartbeat", false)` ⇒ Tool 行与 Option 行的 `heartbeat` 都不在，会话自有三项与
  `session` 挂载点照旧，`vdfs/list` / `write(session/<id>)` / `write(<id>/inbox)` 三条通道照常。
 

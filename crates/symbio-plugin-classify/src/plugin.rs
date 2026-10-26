@@ -21,7 +21,7 @@
 //! 注册表跑一遍 `traverse`，断言工具行为零，同时断言同一份 ctx 上的配置通道恰好
 //! 收到一行（否则那个零只是「收集器没接上」的同义反复）。
 //!
-//! 为什么需要断言：[D-096](../model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "crates/symbio-plugin-model/src/README") 退役了快速档令牌
+//! 为什么需要断言：[D-096](../../symbio-plugin-model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "crates/symbio-plugin-model/src/README") 退役了快速档令牌
 //! （`ClassifyOnly`），把「快速档不得生成」的强制力从令牌搬到**返回类型**
 //! （`parse_verdict -> Option<Verdict>`，四变体闭集）与这条**工具集判据**上。约束没变弱，
 //! 承重墙换了——靠「本插件恰好没注册能力」这个结构巧合不算强制力。
@@ -52,7 +52,7 @@
 
 use std::sync::Arc;
 
-use symbio_deploy::PLUGIN_ID_CLASSIFY;
+use async_trait::async_trait;
 use symbio_core::REASON_UNCLASSIFIED;
 use symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
@@ -60,7 +60,7 @@ use symbio_core::{
 };
 use symbio_core::{DecideOutcome, DecideRequest, ParseVerdictRequest, Verdict};
 use symbio_core::{DetailDefinition, DetailField};
-use async_trait::async_trait;
+use symbio_deploy::PLUGIN_ID_CLASSIFY;
 
 use super::config::ClassifyConfig;
 use super::decide::{parse_verdict, plan};

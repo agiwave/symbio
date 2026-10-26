@@ -33,7 +33,7 @@
 //!   「插件之间不直接相互引用」。⇒ 归 `providers/`（思路 2）。
 //! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——插件在
 //!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
-//!   [`crate::providers`] 的两种接线方式），**不进** `creator_create_object`。
+//!   `crate::providers` 的两种接线方式），**不进** `creator_create_object`。
 //!   硬抽 trait 只会把一次构造换成一次字符串查表（D-035）。
 //!
 //! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
@@ -97,8 +97,8 @@
 //!
 //! 名字也不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
-use symbio_core::{VdfsAccess, VdfsNode};
 use std::path::{Path, PathBuf};
+use symbio_core::{VdfsAccess, VdfsNode};
 
 /// 注入用正文的产物 —— 「按预算截断」这一步的全部信息。
 ///
@@ -121,7 +121,7 @@ impl MemoryInjection {
     /// 按字节预算截断一份文本，边界回退到最近的 UTF-8 字符位置。
     ///
     /// 按**字节**而非字符计预算：上下文窗口与磁盘都按字节算，按字符计会在多字节
-    /// 文本上系统性低估占用。边界回退复用 [`text_floor_char_boundary`]
+    /// 文本上系统性低估占用。边界回退复用 `text_floor_char_boundary`
     /// （全项目唯一的「安全字节切片」实现，不在此另写一份）。
     ///
     /// `text_floor_char_boundary`
@@ -202,7 +202,7 @@ impl MemoryFile {
     ///
     /// **仅测试**：生产路径不需要它——落位由构造方决定，读写由本类型自己完成。
     /// 三个插件的「落位」用例要断言「文件落在哪」，那是**插件个性**的测试接缝。
-        pub fn path(&self) -> Option<&Path> {
+    pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
@@ -221,12 +221,12 @@ impl MemoryFile {
     ///
     /// **仅测试**：闸门的**效果**（超限拒绝 / 超预算截断）已由本类型的读写路径与
     /// `tests.rs` 覆盖；插件侧的用例用它断言「配置值确实透传进来了」。
-        pub fn write_max_bytes(&self) -> usize {
+    pub fn write_max_bytes(&self) -> usize {
         self.write_max_bytes
     }
 
     /// 注入闸门取值（**仅测试**，同 `write_max_bytes`）
-        pub fn inject_max_bytes(&self) -> usize {
+    pub fn inject_max_bytes(&self) -> usize {
         self.inject_max_bytes
     }
 
@@ -320,7 +320,7 @@ impl MemoryFile {
 
     /// VDFS 节点 —— `list` 与 `stat` **共用同一份形状**，两条链路不会分叉。
     ///
-    /// 节点名取**真实文件名**（[`file_name`]），因此只应在**有作用域**时调用：
+    /// 节点名取**真实文件名**（`file_name`），因此只应在**有作用域**时调用：
     /// 无作用域没有文件，也就没有名字。三个插件的调用点都在 `has_scope()` 之后——
     /// 这里对无作用域退回空名，与 `instruction::host_dir` 对「取不到父目录」的处理
     /// 同一口径：理论上不该发生，但降级比 panic 好。
@@ -398,4 +398,5 @@ pub fn memory_render_segment(
 }
 
 #[cfg(test)]
+#[path = "lib.test.rs"]
 mod tests;

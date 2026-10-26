@@ -49,6 +49,7 @@ pub use self::spec::trivial_actor_spec;
 // 仅测试面：这些符号在非测试构建里没有跨域消费者（用点就在各自的子模块内），
 // 但 `mod.test.rs` 经 `use super::*` 取用，故只在 `cfg(test)` 出根——与
 // `symbio_core/mod.rs` 的 `#[cfg(test)] pub use event::{…}` 同一形态。
+#[cfg(test)]
 pub use self::commitment::CommitmentKeeper;
 
 #[cfg(test)]

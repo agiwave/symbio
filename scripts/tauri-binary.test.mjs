@@ -48,7 +48,7 @@ write('tauri/src-tauri/src/main.rs', 'fn main() { println!("v1"); }\n')
 write('tauri/src-tauri/capabilities/default.json', '{ "identifier": "default" }\n')
 write('tauri/src-tauri/tauri.conf.json', '{ "productName": "symbio" }\n')
 write('tauri/src-tauri/Cargo.toml', '[package]\nname = "symbio-tauri"\nversion = "0.1.0"\n')
-write('crates/crates/crates/lib.rs', 'pub fn f() -> u32 { 1 }\n')
+write('crates/symbio/lib.rs', 'pub fn f() -> u32 { 1 }\n')
 write('crates/symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.1.0"\n')
 
 after(() => {
@@ -65,7 +65,7 @@ test('构建输入清单覆盖壳自身与它挂载的插件树', () => {
   const rels = tauriBuildInputs(root).map((p) => path.relative(root, p).split(path.sep).join('/'))
   assert.deepEqual(rels, [
     'crates/symbio/Cargo.toml',
-    'crates/crates/crates/lib.rs',
+    'crates/symbio/lib.rs',
     'tauri/src-tauri/Cargo.toml',
     'tauri/src-tauri/capabilities/default.json',
     'tauri/src-tauri/src/main.rs',
@@ -87,13 +87,13 @@ test('symbio 侧源码改动同样让指纹失效（整棵插件树被编译进�
   // 这条是**日志溯源**那次事故的直接回归锚点：日志里出现的行来自 `symbio/src`
   // 下的插件，而它们与壳是两份源码、一次构建。
   const before = tauriBuildFingerprint(root)
-  write('crates/crates/crates/lib.rs', 'pub fn f() -> u32 { 2 }\n')
+  write('crates/symbio/lib.rs', 'pub fn f() -> u32 { 2 }\n')
   assert.notEqual(tauriBuildFingerprint(root), before)
 })
 
 test('新增一个插件源文件 ⇒ 指纹变', () => {
   const before = tauriBuildFingerprint(root)
-  write('crates/crates/plugins/new.rs', 'pub const X: u8 = 1;\n')
+  write('crates/plugins/new.rs', 'pub const X: u8 = 1;\n')
   assert.notEqual(tauriBuildFingerprint(root), before)
 })
 
@@ -110,7 +110,7 @@ test('清单（Cargo.toml / Cargo.lock）改动 ⇒ 指纹变', () => {
 })
 
 test('大文件（内嵌资产）按 (大小, mtime) 判：只改 mtime 也算输入变了', () => {
-  const big = path.join(root, 'crates/crates/asset.bin')
+  const big = path.join(root, 'crates/asset.bin')
   fs.writeFileSync(big, Buffer.alloc(1024 * 1024 + 1, 7))
   const before = tauriBuildFingerprint(root)
   fs.utimesSync(big, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'))

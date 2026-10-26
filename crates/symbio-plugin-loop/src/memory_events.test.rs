@@ -1,4 +1,4 @@
-//! 记忆三段验收（S5 步 11–13，[04 §3.1 批⑦](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+//! 记忆三段验收（S5 步 11–13，[04 §3.1 批⑦](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //!
 //! 每段各自的**出口判据**逐条钉住：
 //!
@@ -605,7 +605,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
 /// 技能正文、两条技能被排除式遗忘——**技能静默消失，没有任何报错**。
 ///
 /// 两条技能刻意比四条经验**更旧**：这样"选错了"必然可见（选对时它们根本不在候选里）。
-/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）
+/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")）
 /// 在生产链上唯一可观察的后果——过滤本身的纯函数性质在 core 的 `recall.test.rs` 钉。
 ///
 /// 批④ 把同一条判据**复用**到「判断」标签：[`CONSOLIDABLE_TAGS`] 里两个
@@ -1214,14 +1214,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         .value;
     assert_eq!(view.entries.len(), 1);
 
-    record_recalled(
-        &store,
-        &view,
-        trigger,
-        symbio_core::PRINCIPAL_MAIN,
-        9000,
-    )
-    .expect("入格");
+    record_recalled(&store, &view, trigger, symbio_core::PRINCIPAL_MAIN, 9000).expect("入格");
     let snap = store.range(Seq::new(0));
     let ev = snap
         .iter()
@@ -1241,14 +1234,8 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert!(payload_str(ev, "top").is_some_and(|s| s.contains("记住这条")));
 
     // 幂等：同一锚再落一次仍是 1 条。
-    record_recalled(
-        &store,
-        &view,
-        trigger,
-        symbio_core::PRINCIPAL_MAIN,
-        9001,
-    )
-    .expect("重复调用不失败");
+    record_recalled(&store, &view, trigger, symbio_core::PRINCIPAL_MAIN, 9001)
+        .expect("重复调用不失败");
     assert_eq!(
         store
             .range(Seq::new(0))

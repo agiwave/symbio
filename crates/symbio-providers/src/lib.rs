@@ -1,11 +1,11 @@
 //! 通用服务实现层
 //!
-//! 各可插拔服务的**具体实现**在这里。抽象（trait）在 [`crate::symbio_core::EmbeddingService`]
-//! 与 [`crate::symbio_core::vdfs`]。
+//! 各可插拔服务的**具体实现**在这里。抽象（trait）在 `crate::symbio_core::EmbeddingService`
+//! 与 `crate::symbio_core::vdfs`。
 //!
 //! ## 子模块
 //!
-//! - `embedding`：[`crate::symbio_core::EmbeddingService`] 的实现
+//! - `embedding`：`crate::symbio_core::EmbeddingService` 的实现
 //!   （经工厂 `creator_create_object::<dyn EmbeddingService>(...)` 取用）
 //! - `vdfs_service`：**基于 `VdfsProvider` 接口的集中实现**（单文件 / 目录 / 内存）
 //! - `collectors`：`*Visitor` 三个契约的**内存默认实现**（写入者是全体插件）

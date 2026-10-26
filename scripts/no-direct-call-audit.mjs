@@ -48,9 +48,15 @@ const PRINCIPALS = ['Decider', 'Reasoner', 'RecallTranslator', 'CommitmentKeeper
  * 文件列举——域内按顶层类型拆文件（plan/13 批 C3）不该顺带把定义域收窄成一张会漂的
  * 清单（那正是本守卫最该防的：域内新增一个主体文件就被误报成 NDC-001）。
  */
-const DEFINITION_DIR = 'symbio_core/actors/'
-/** 另外两处合法出口：core 根重导出（`symbio_core/mod.rs`）与测试文件（排演驱动方）。 */
-const ALLOWED_FILES = new Set(['symbio_core/mod.rs'])
+const DEFINITION_DIR = 'symbio-core/src/actors/'
+/**
+ * 另外两处合法出口：
+ *  - core 根重导出（crate 化后是 `lib.rs`，不再是 `mod.rs`）；
+ *  - **主体模式的枚举定义**：`Pattern { Decider, Reasoner, … }` 是封闭语法里的
+ *    变体**声明**，不是对主体类型的指称（D-189 同一条理由，只是那处剥的是
+ *    `Pattern::Decider` 的用法形态，枚举体本身剥不掉）。它随 D-188 C2b 住在内核。
+ */
+const ALLOWED_FILES = new Set(['symbio-core/src/lib.rs', 'symbio-kernel/src/actors.rs'])
 
 /** 主体句柄形态（任何文件都禁止——含定义域内部；泛型与 `::new` 构造两种写法都拦）。 */
 const HANDLE_RE = new RegExp(

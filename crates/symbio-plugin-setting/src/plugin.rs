@@ -18,15 +18,15 @@
 
 use super::config::{config_definition, SettingConfig};
 use super::segment;
-use symbio_deploy::PLUGIN_ID_SETTING;
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginConfigMount, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use async_trait::async_trait;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_SETTING;
 use tokio::sync::RwLock;
 
 /// setting 插件。

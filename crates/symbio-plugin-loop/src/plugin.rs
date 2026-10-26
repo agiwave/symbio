@@ -1,4 +1,4 @@
-//! 单环驱动器插件（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §8）。
+//! 单环驱动器插件（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §8）。
 //!
 //! 本插件**只有一个入口**：`loop/<sid>` 上的 `Action("run_turn")`。动作体就是
 //! 整轮 future（`run_chat_loop`），结局以 `TurnReport`
@@ -23,11 +23,11 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, VdfsContext, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
+use symbio_deploy::PLUGIN_ID_LOOP;
 
 /// 单环驱动器。
 ///

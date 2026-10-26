@@ -48,7 +48,7 @@ function audit ({ files, regs = {} } = {}) {
   }
 }
 
-const F = 'crates/crates/x.rs'
+const F = 'crates/x.rs'
 const unwrapFn = 'pub fn f(a: Option<u32>) -> u32 {\n    a.unwrap()\n}\n'
 
 // ── ① 提取器不许悄悄失配 ─────────────────────────────────────────────
@@ -72,13 +72,13 @@ test('提取器不许把命中数数成 0：注入一处 unwrap 必须被数到'
 test('PN-001 未登记 ⇒ 红', () => {
   const r = audit({ files: { [F]: unwrapFn } })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-001 symbio\/src\/x\.rs::f 有 1 处 panic 面未登记/)
+  assert.match(r.stdout, /PN-001 crates\/x\.rs::f 有 1 处 panic 面未登记/)
 })
 
 test('PN-002 理由为空 ⇒ 红（空理由的登记等于没有登记）', () => {
   const r = audit({ files: { [F]: unwrapFn }, regs: { [F]: [['f', '']] } })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-002 symbio\/src\/x\.rs::f 的登记理由为空/)
+  assert.match(r.stdout, /PN-002 crates\/x\.rs::f 的登记理由为空/)
 })
 
 test('PN-003 登记了而代码里已无对应 panic 面 ⇒ 红（防豁免只增不减）', () => {
@@ -87,18 +87,18 @@ test('PN-003 登记了而代码里已无对应 panic 面 ⇒ 红（防豁免只�
     regs: { [F]: [['g', '理由']] },
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-003 symbio\/src\/x\.rs::g 有登记但代码里已无对应 panic 面/)
+  assert.match(r.stdout, /PN-003 crates\/x\.rs::g 有登记但代码里已无对应 panic 面/)
 })
 
 test('登记必须写在同一个文件里（不能靠别处一张表蒙混）', () => {
   const r = audit({
     files: {
       [F]: unwrapFn,
-      'crates/crates/y.rs': 'pub fn h() {}\n// panic-allow crates/crates/x.rs::f: 写在别的文件\n',
+      'crates/y.rs': 'pub fn h() {}\n// panic-allow crates/x.rs::f: 写在别的文件\n',
     },
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-001 symbio\/src\/x\.rs::f/)
+  assert.match(r.stdout, /PN-001 crates\/x\.rs::f/)
 })
 
 test('同文件内多个 panic 归并成一个登记项', () => {
@@ -113,9 +113,9 @@ test('同文件内多个 panic 归并成一个登记项', () => {
 test('不判测试文件（*.test.rs / tests.rs）', () => {
   const r = audit({
     files: {
-      'crates/crates/x.rs': 'pub fn f() {}\n',
-      'crates/crates/x.test.rs': unwrapFn,
-      'crates/crates/tests.rs': unwrapFn,
+      'crates/x.rs': 'pub fn f() {}\n',
+      'crates/x.test.rs': unwrapFn,
+      'crates/tests.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 0, r.stdout)
@@ -152,8 +152,8 @@ test('整文件 #[cfg(test)] 的测试辅助不判（test_support 这类）', ()
 test('父模块里 #[cfg(test)] mod 声明的文件不判（声明与文件分居两处）', () => {
   const r = audit({
     files: {
-      'crates/crates/mod.rs': 'pub fn f() {}\n\n#[cfg(test)]\nmod helper;\n',
-      'crates/crates/helper.rs': unwrapFn,
+      'crates/mod.rs': 'pub fn f() {}\n\n#[cfg(test)]\nmod helper;\n',
+      'crates/helper.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 0, r.stdout)
@@ -163,12 +163,12 @@ test('父模块里 #[cfg(test)] mod 声明的文件不判（声明与文件分�
 test('普通 mod 声明的文件照判（隔离不得误伤生产模块）', () => {
   const r = audit({
     files: {
-      'crates/crates/mod.rs': 'pub fn f() {}\n\nmod helper;\n',
-      'crates/crates/helper.rs': unwrapFn,
+      'crates/mod.rs': 'pub fn f() {}\n\nmod helper;\n',
+      'crates/helper.rs': unwrapFn,
     },
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-001 symbio\/src\/helper\.rs::f/)
+  assert.match(r.stdout, /PN-001 crates\/helper\.rs::f/)
 })
 
 test('文件级 cfg(test) 之前的普通代码不整篇跳过', () => {
@@ -199,5 +199,5 @@ test('两个 fn 各自的 panic 不许共用一条登记', () => {
   const body = 'pub fn a(x: Option<u32>) -> u32 {\n    x.unwrap()\n}\n\npub fn b(y: Option<u32>) -> u32 {\n    y.unwrap()\n}\n'
   const r = audit({ files: { [F]: body }, regs: { [F]: [['a', '理由']] } })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /PN-001 symbio\/src\/x\.rs::b/)
+  assert.match(r.stdout, /PN-001 crates\/x\.rs::b/)
 })

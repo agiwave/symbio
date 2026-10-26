@@ -41,12 +41,12 @@
 //! 不需要在信封上加概念。
 
 use super::plugin::message_path;
-use symbio_core::chat_node as cm;
-use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
-use {symbio_core::plugin_debug, symbio_core::plugin_error, symbio_core::plugin_info};
 use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use symbio_core::chat_node as cm;
+use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
+use {symbio_core::plugin_debug, symbio_core::plugin_error, symbio_core::plugin_info};
 
 /// 自主触发落格：「这次开轮是系统自己发起的」在事实源里的样子（归属理由见模块头）。
 pub(crate) mod autonomous;
@@ -60,7 +60,7 @@ pub(crate) mod supplements;
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;
 /// 落库回包（§3.4 的唯一落地点）：`append_and_publish` 与它的两条发布通道。
-/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览")
+/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览")
 /// 前置 P3 的第一处归位，理由写在 `publish.rs` 模块头。
 pub(crate) mod publish;
 // 域内共享面：状态机（`impl Transcript`）与本域测试经 `super::*` 取用。
@@ -72,7 +72,7 @@ use self::deliver::{
 // 域内门面：状态帧 / 删除帧的实现已随 D-086 §7 上移 core（loop 也要发），
 // 这里只留 session 侧调用点的短路径别名。
 pub(crate) use self::publish::append_and_publish;
-pub(crate) use symbio_core::llm_state_frame;
+pub use symbio_core::llm_state_frame;
 
 /// **在途号段**：转写侧给「还没落库的消息」发的位置序号（四套序号的归一表见本域
 /// `docs/109-vdfs-session-messages.md` §3.3）。
@@ -586,7 +586,7 @@ impl Transcript {
 ///
 /// 原先住在 `chat_loop/state.rs`（[`super::super::chat_loop::CompressionEmitter::transcript_writer`]
 /// 的私有桥）。桥的全部工作是「锁转写 → apply」，而 `Transcript` 是本域类型——把它的
-/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
+/// `Arc<Mutex<Transcript>>` 抄成**驱动器侧自己的字段**正是 [D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
 /// 裁决一第 3 条禁的形状。桥整体迁进本域，对 core trait 的实现一行不削，只是换住址；
 /// 驱动器侧的 `transcript_writer` 退化为一次 [`compression_writer`] 调用。
 struct TranscriptWriterBridge {

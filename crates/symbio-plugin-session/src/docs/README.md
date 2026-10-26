@@ -36,9 +36,9 @@ impl: done
 | [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
 > **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：
-> [`legacy-route-migration.md`](../../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、
-> [`session-mechanism-audit.md`](../../../../../docs/archive/implementation-logs/session-mechanism-audit.md)（机制审计与简化方案，方案已全部落地）
-> 与 [`session-complexity-audit.md`](../../../../../docs/archive/implementation-logs/session-complexity-audit.md)（更早的复杂度审计）。
+> [`legacy-route-migration.md`](../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、
+> [`session-mechanism-audit.md`](../../../../docs/archive/implementation-logs/session-mechanism-audit.md)（机制审计与简化方案，方案已全部落地）
+> 与 [`session-complexity-audit.md`](../../../../docs/archive/implementation-logs/session-complexity-audit.md)（更早的复杂度审计）。
 > 它们的结论已体现在现行代码与上面各文档里，不再驱动任何待做项——**不随重构回改**。
 
 ## 建议阅读路径

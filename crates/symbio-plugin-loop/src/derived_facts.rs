@@ -36,7 +36,7 @@
 use symbio_core::{
     actor_can_assert_verification, Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED,
 };
-// 记录类型住 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
+// 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
 use symbio_core::facts::{Delegation, TaskDeclaration};
 
@@ -96,9 +96,9 @@ pub(crate) fn record_derived(
     // 的出处」立约；缺省由取值点（`request_source_principal`）落本机用户。
     for d in delegations {
         let cid = format!("v2c-{anchor_id}-{}", d.id);
-        for e in symbio_core::commitment_events(
-            &cid, principal, to, &d.promise, d.ok, &d.why, user_seq,
-        ) {
+        for e in
+            symbio_core::commitment_events(&cid, principal, to, &d.promise, d.ok, &d.why, user_seq)
+        {
             if let Err(e) = store.append(e) {
                 symbio_core::plugin_warn!(
                     "session",
@@ -198,8 +198,8 @@ pub(crate) fn record_schedule(
 /// 恢复必须走**申诉 / 人工复位**（写一条 `change = "restore"` 的同格事件，机制半边
 /// 在 `EliminationDecider::restoration_event` 与撤销回路单测里证过）。本步不造一个
 /// 「假装能自动恢复」的回路；这条缺席已按**边界**登记在
-/// [D-108](../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览")（含重开条件），任务层的缺口账
-/// 在 [](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") §现状 ①。
+/// [D-108](../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览")（含重开条件），任务层的缺口账
+/// 在 [](../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") §现状 ①。
 ///
 /// ## 失败只记日志不冒泡
 ///

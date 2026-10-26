@@ -22,13 +22,13 @@
 //! `plugins::event_bus` 模块。
 
 use crate::{PluginFrame, VdfsChange};
-use {crate::plugin_info, crate::plugin_warn};
 use dashmap::DashMap;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use {crate::plugin_info, crate::plugin_warn};
 
 /// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与已退役的转写流（`session/stream`
 /// ，2026-09-23 随 D-025 一起删）同量级。
@@ -54,7 +54,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 ///
 /// `KIND_SESSION`（会话域专用事件频道）**已废除**：会话状态与
-/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `../../plugins/session/docs/105-node-state-streaming.md`）。
+/// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`）。
 /// 常量留在词表里只会让「再发一条会话事件」看起来仍然合法。
 pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 
@@ -129,7 +129,7 @@ pub fn event_bus_unregister_subscriber(connection_id: &str) {
 ///
 /// 其他插件（vdfs 等）调用静态方法 `publish` 推送事件。会话域的 `kind = "session"`
 /// 频道已废除——会话状态与转写都是 VDFS 节点变更，走 `EVENT_BUS_KIND_VDFS`（见
-/// `../../plugins/session/docs/105-node-state-streaming.md`）。
+/// `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`）。
 pub struct EventBus;
 
 impl EventBus {

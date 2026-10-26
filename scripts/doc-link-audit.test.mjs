@@ -148,7 +148,7 @@ const TEN_LINES = Array.from({ length: 20 }, (_, i) => `// line ${i + 1}`).join(
 test('D-017：锚点指到的文件在仓内存在 → 通过', () => {
   const r = audit({
     'docs/a.md': '# A\n\n判据 `foo.rs:12` 与 `foo.rs::real_symbol`。\n',
-    'crates/crates/foo.rs': TEN_LINES,
+    'crates/foo.rs': TEN_LINES,
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /D-017 证据锚点：判定 2 条，失效 0 篇/)
@@ -157,7 +157,7 @@ test('D-017：锚点指到的文件在仓内存在 → 通过', () => {
 test('D-017：文件已改名 → 失败（反面：这正是它要抓的静默悬空）', () => {
   const r = audit({
     'docs/a.md': '# A\n\n判据 `gone.rs:3`。\n',
-    'crates/crates/foo.rs': TEN_LINES,
+    'crates/foo.rs': TEN_LINES,
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /gone\.rs:3/)
@@ -166,7 +166,7 @@ test('D-017：文件已改名 → 失败（反面：这正是它要抓的静默�
 test('D-017：`:行` 超过文件行数 → 失败（文件被拆分/截短）', () => {
   const r = audit({
     'docs/a.md': '# A\n\n判据 `foo.rs:999`。\n',
-    'crates/crates/foo.rs': TEN_LINES,
+    'crates/foo.rs': TEN_LINES,
   })
   assert.equal(r.status, 1, r.stdout)
 })
@@ -174,7 +174,7 @@ test('D-017：`:行` 超过文件行数 → 失败（文件被拆分/截短）',
 test('D-017：`::符号` 不在该文件里 → 失败（用例改名后旧名字不再成立）', () => {
   const r = audit({
     'docs/a.md': '# A\n\n判据 `foo.rs::renamed_symbol`。\n',
-    'crates/crates/foo.rs': TEN_LINES,
+    'crates/foo.rs': TEN_LINES,
   })
   assert.equal(r.status, 1, r.stdout)
 })
@@ -190,8 +190,8 @@ test('D-017：带路径段的缩写按后缀解析 → 通过（`chat_loop/x.rs`
 test('D-017：同名文件多解时任一满足即通过（`mod.rs` 满天飞）', () => {
   const r = audit({
     'docs/a.md': '# A\n\n判据 `mod.rs:18`。\n',
-    'crates/crates/a/mod.rs': '// 1\n// 2\n// 3\n',
-    'crates/crates/b/mod.rs': TEN_LINES,
+    'crates/a/mod.rs': '// 1\n// 2\n// 3\n',
+    'crates/b/mod.rs': TEN_LINES,
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -215,9 +215,9 @@ test('D-002：评审类文档留在 docs/003-design/ → 失败', () => {
 })
 
 test('D-002：过程文档留在**模块目录**同样失败（只扫 docs/ 会漏掉这一整类）', () => {
-  const r = audit({ 'crates/crates/plugins/foo/docs/migration.md': REVIEW_DOC })
+  const r = audit({ 'crates/symbio-plugin-foo/src/docs/migration.md': REVIEW_DOC })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /symbio\/src\/plugins\/foo\/docs\/migration\.md/)
+  assert.match(r.stdout, /crates\/symbio-plugin-foo\/src\/docs\/migration\.md/)
 })
 
 test('D-002：examples/ 不扫（是示例包内容，不是项目文档）', () => {
@@ -282,9 +282,9 @@ test(`D-003：恰好 ${LIMIT} 行 → 通过（上限是「不超过」）`, () 
 })
 
 test('D-003：模块文档同样判（不只扫 docs/）', () => {
-  const r = audit({ 'crates/crates/plugins/foo/docs/big.md': longDoc(LIMIT + 100) })
+  const r = audit({ 'crates/symbio-plugin-foo/src/docs/big.md': longDoc(LIMIT + 100) })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /symbio\/src\/plugins\/foo\/docs\/big\.md/)
+  assert.match(r.stdout, /crates\/symbio-plugin-foo\/src\/docs\/big\.md/)
 })
 
 test('D-003：根目录散落 md 同样判（README / CONTRIBUTING 也会臃肿）', () => {
@@ -429,7 +429,7 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'crates/crates/plugins/foo/README.md': '# Foo\n\n见 `D-000-架构决策汇总.md`。\n',
+      'crates/symbio-plugin-foo/src/README.md': '# Foo\n\n见 `D-000-架构决策汇总.md`。\n',
       'docs/003-design/README.md': '# 索引\n',
     }).status,
     0,
@@ -565,8 +565,8 @@ test('D-007：重复标题接受 GitHub 的 `-1` 后缀变体（但不超过重�
 
 test('D-007：非 .md 目标的 fragment 不判（`x.rs#L10` 的 L10 不是标题 slug）', () => {
   const r = audit({
-    'crates/crates/crates/lib.rs': 'pub const X: u8 = 1;\n',
-    'docs/README.md': '[源码](../crates/crates/crates/lib.rs#L1)\n',
+    'crates/symbio/lib.rs': 'pub const X: u8 = 1;\n',
+    'docs/README.md': '[源码](../crates/symbio/lib.rs#L1)\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -699,18 +699,18 @@ test('D-018：方括号里没有仓内路径的一律不判（`[D-102]` / `[文�
 test('D-019：源码注释里标题引号残缺 → 失败（不再静默跳过）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'crates/crates/x.rs': '// 见 [设计](../../docs/nope.md "某标题)\nfn f() {}\n',
+    'crates/x.rs': '// 见 [设计](../docs/nope.md "某标题)\nfn f() {}\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-019 注释链接的目标形态/)
-  assert.match(r.stdout, /symbio\/src\/x\.rs:1/)
+  assert.match(r.stdout, /crates\/x\.rs:1/)
   assert.match(r.stdout, /nope\.md/)
 })
 
 test('D-019：标题完整 → 通过（剥掉标题后按相对地址判存在性）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'crates/crates/x.rs': '// 见 [设计](../../docs/a.md "某标题")\nfn f() {}\n',
+    'crates/x.rs': '// 见 [设计](../docs/a.md "某标题")\nfn f() {}\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -719,7 +719,7 @@ test('D-019：路径本身含空格（真有其目录）仍判——相对地址
   const r = audit({
     'docs/a.md': '# A\n',
     'docs/my dir/b.md': '# B\n',
-    'crates/crates/x.rs': '// 见 [B](../../docs/my dir/b.md)\nfn f() {}\n',
+    'crates/x.rs': '// 见 [B](../docs/my dir/b.md)\nfn f() {}\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-019/)

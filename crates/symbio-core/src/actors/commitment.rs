@@ -76,7 +76,7 @@ impl CommitmentKeeper {
 /// 返回**待入格的事件序列**：立约（`opened`）→ 了结（`released` / `broken`）→
 /// 必要时宣告（`asserted`）。写方（`plugins/session` 的轮末收束）只管按序 append，
 /// 「什么时候落格」是它的决定，「怎么把一次立约变成格子」是本域的决定——与
-/// [`recalled_event`] 同一形态。
+/// `recalled_event` 同一形态。
 ///
 /// 违约才宣告：守约无需告知（履行的东西就摆在那里），违约却必须让承诺对象知道
 /// （S08 §5：违约可被观测是 T5 的全部前提）。宣告仍是同一份事实源里的**一格**，
@@ -130,7 +130,7 @@ pub struct CommitmentRecord {
 ///
 /// ## 为什么住在 core 而不是读方
 ///
-/// 与 [`EliminationDecider::verdict_grants_changes`] 同形态——**写侧的成格函数与读侧的
+/// 与 `EliminationDecider::verdict_grants_changes` 同形态——**写侧的成格函数与读侧的
 /// 翻译函数各住一边，两头都不许自己另发明一套配对规则**：配对靠的是载荷 `id`
 /// （[`CommitmentKeeper`] 写进去的），那是本域的形状知识。插件出口只做取数与排版。
 ///
@@ -172,8 +172,7 @@ pub fn commitment_records(events: &[Event]) -> Vec<CommitmentRecord> {
                     anchor_seq: e.produced_by.unwrap_or(0),
                 });
             }
-            crate::event::EVENT_COMMITMENT_RELEASED
-            | crate::event::EVENT_COMMITMENT_BROKEN => {
+            crate::event::EVENT_COMMITMENT_RELEASED | crate::event::EVENT_COMMITMENT_BROKEN => {
                 if let Some(rec) = by_id.get_mut(id) {
                     let broken = e.kind == crate::event::EVENT_COMMITMENT_BROKEN;
                     rec.state = if broken { "broken" } else { "kept" };

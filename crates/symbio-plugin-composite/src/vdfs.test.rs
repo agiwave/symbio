@@ -2,16 +2,20 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
+#[allow(unused_imports)]
+// 只为把兄弟插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
+use symbio as _;
+
 use super::*;
 
-use symbio_providers::DefaultToolVisitor;
+use indexmap::IndexMap;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
 use symbio_core::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
-use indexmap::IndexMap;
-use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use symbio_providers::DefaultToolVisitor;
 
 /// 只暴露一个 `a.txt` 的 provider；目录名 / 顺序 / 隐藏由**假插件的 meta** 决定
 struct LeafProvider;

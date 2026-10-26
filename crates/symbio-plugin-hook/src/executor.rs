@@ -1,5 +1,5 @@
-use symbio_plugin_api::hooks::{HookEvent, HookOutput};
 use std::process::Stdio;
+use symbio_plugin_api::hooks::{HookEvent, HookOutput};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 

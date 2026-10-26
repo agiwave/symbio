@@ -1,8 +1,8 @@
 //! Symbio 初始化模块
 
-use symbio_deploy::PLUGIN_ID_HOME;
-use symbio_core::{creator_create_object, Plugin};
 use std::sync::Arc;
+use symbio_core::{creator_create_object, Plugin};
+use symbio_deploy::PLUGIN_ID_HOME;
 
 pub fn initialize() {
     symbio_core::logger_init();

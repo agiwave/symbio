@@ -401,10 +401,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     let dir = dir_for(tmp.path(), "sess_truth");
     std::fs::create_dir_all(&dir).unwrap();
     {
-        let wal = crate::store::EventWalStore::open(
-            dir.join(crate::paths::V2_WAL_FILE),
-        )
-        .unwrap();
+        let wal = crate::store::EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).unwrap();
         use symbio_core::Store as _;
         wal.append(user_event("e1", "n1", "第一问", 1)).unwrap();
         wal.append(user_event("e2", "n2", "第二问", 2)).unwrap();
@@ -682,7 +679,7 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
 
 /// **现行窗口 = 从最近一份快照起**（含快照本身）；没有快照 ⇒ 整段都是现行。
 ///
-/// 这条钉的是归一的前提（[plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）：
+/// 这条钉的是归一的前提（[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）：
 /// 读口只给**完整史**这一种口径，而「这一轮还开着没收束」这类判据要窗口——窗口由
 /// 消费方按**事实**切（最近一份快照在哪），不是存储层再开一个读法。
 #[test]
@@ -851,8 +848,8 @@ fn lifecycle_event(
     turn: u64,
     payload: serde_json::Value,
 ) -> Event {
-    use symbio_core::{Entity, Event};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use symbio_core::{Entity, Event};
     // 事件 id 幂等（append 重复即 Duplicate）：同一个测试里可能两次开轮。
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -890,10 +887,7 @@ fn close_failed(turn: u64, detail: &str) -> Event {
     )
 }
 
-fn projected(
-    store: &SessionStore,
-    id: &str,
-) -> Option<crate::runtime::RuntimeOutcome> {
+fn projected(store: &SessionStore, id: &str) -> Option<crate::runtime::RuntimeOutcome> {
     store.runtime_facts(id).and_then(|f| f.outcome)
 }
 

@@ -19,12 +19,12 @@
 //! （`approval_gate` 从 `CapabilityMeta.name` 产出），前端原样回传即可。
 
 use super::plugin::SessionPlugin;
+use serde::Deserialize;
+use std::sync::Arc;
 use symbio_core::{
     CapabilityRiskLevel, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginPayload, VdfsContent,
 };
-use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Clone, Deserialize)]
 struct GrantRequest {

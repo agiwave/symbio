@@ -6,12 +6,10 @@ use super::*;
 use crate::net_guard::is_private_or_local_host;
 
 fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
-    HttpRequestTool::new(Arc::new(RwLock::new(
-        crate::web_config::WebConfig {
-            http_allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
-            ..Default::default()
-        },
-    )))
+    HttpRequestTool::new(Arc::new(RwLock::new(crate::web_config::WebConfig {
+        http_allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    })))
 }
 
 fn validate(tool: &HttpRequestTool, url: &str) -> Result<String, PluginError> {

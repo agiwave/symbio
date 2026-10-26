@@ -7,11 +7,11 @@
 //! **挂载名 ≠ 物理名**这条本插件合并后才存在的约定。
 
 use super::*;
+use std::sync::Arc;
 use symbio_core::absolute_addr;
 use symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
 };
-use std::sync::Arc;
 use tempfile::TempDir;
 
 /// 合成父地址：真实值由容器转发时写入上下文，本文件不依赖真实挂载名

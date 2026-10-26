@@ -22,18 +22,18 @@
 
 use super::homedir::HomedirRegistry;
 use super::schemas::{home_get_homedir, home_get_workspace, home_reload, home_set_workspace};
-use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 use symbio_core::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
     REQUIRED_PLUGINS,
 };
-use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 use tokio::sync::RwLock;
+use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
 
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///

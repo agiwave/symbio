@@ -12,13 +12,13 @@
 //! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent 目录的
 //! 路径白名单同风格）。
 
-use symbio_core::PluginError;
-use symbio_core::{VdfsAccess, VdfsNode};
-use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use symbio_core::PluginError;
+use symbio_core::{VdfsAccess, VdfsNode};
+use symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 
 use self::fs_watcher::FsWatcher;
 use super::types::Session;
@@ -68,11 +68,8 @@ pub fn sub_sessions_dir_node() -> symbio_core::VdfsNode {
 
 /// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
 pub fn workdir_dir_node() -> symbio_core::VdfsNode {
-    let mut n = symbio_core::VdfsNode::dir(
-        SEG_WORKDIR,
-        TITLE_WORKDIR,
-        symbio_core::VdfsAccess::LIST,
-    );
+    let mut n =
+        symbio_core::VdfsNode::dir(SEG_WORKDIR, TITLE_WORKDIR, symbio_core::VdfsAccess::LIST);
     n.kind = KIND_WORKDIR.to_string();
     n
 }
@@ -456,7 +453,7 @@ impl WorkdirWatchManager {
         });
     }
 
-    /// 停机时一次性交还全部监听（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1，由 `Plugin::stop` 调用）。
+    /// 停机时一次性交还全部监听（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1，由 `Plugin::stop` 调用）。
     ///
     /// 与 `release_watch` 的区别只有**不等宽限期**：宽限防的是「离开→返回」期间
     /// 迟到的 unwatch 误杀刚重建的订阅，而停机之后不再有重建，晚一步交还就是

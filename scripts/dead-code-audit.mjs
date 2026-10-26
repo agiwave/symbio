@@ -310,8 +310,12 @@ const widen = (dir, exts, sink) => {
     if (exts.some((x) => e.name.endsWith(x))) sink.push(p)
   }
 }
-widen(join(REPO, 'symbio'), ['.rs'], rustSources)
-widen(join(REPO, 'cli'), ['.rs'], rustSources)
+// Rust 侧「整仓」的取范围：D-191 拆 crate 后所有生产 .rs 都在 `crates/` 下
+// （core、内核、插件、provider、cli 各是一个 crate）；`tauri/src-tauri` 是壳侧。
+// 拆分前这里是 symbio/ 与 cli/ 两个根——那两条路径现在都不存在，`widen` 会静默
+// 返回空，于是 R-001 只剩 tauri 一份语料：**语料越小，越容易把活代码判成死代码**，
+// 而它在真仓里表现成「R-001 通过」。
+widen(join(REPO, 'crates'), ['.rs'], rustSources)
 widen(join(REPO, 'tauri', 'src-tauri'), ['.rs'], rustSources)
 // 名字可能被非 Rust 侧提及（路由串常量等），一并纳入「是否被提过」的语料
 widen(join(REPO, 'tauri', 'src'), ['.ts', '.vue'], tsSources)

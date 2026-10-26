@@ -57,7 +57,7 @@ const CORE = 'crates/symbio-core/src'
 /** 两个域、单向依赖 `beta → alpha` 的干净夹具。 */
 function cleanTree() {
   return {
-    [`${CORE}/mod.rs`]: `mod alpha;\nmod beta;\n\npub use alpha::Alpha;\npub use beta::Beta;\n`,
+    [`${CORE}/lib.rs`]: `mod alpha;\nmod beta;\n\npub use alpha::Alpha;\npub use beta::Beta;\n`,
     [`${CORE}/alpha/mod.rs`]: `pub struct Alpha;\n`,
     [`${CORE}/beta/mod.rs`]: `use crate::symbio_core::Alpha;\n\npub struct Beta {\n    _a: Alpha,\n}\n`,
   }

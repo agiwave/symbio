@@ -44,10 +44,10 @@
 //! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
 //! （子智能体委托）始终注册**。
 
-use symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS;
-use symbio_deploy::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
 use crate::host::manifest;
 use crate::host::store::AgentDirStore;
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::AgentScope;
 use symbio_core::VdfsAccess;
 use symbio_core::{
@@ -58,10 +58,10 @@ use symbio_core::{
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use symbio_core::{DetailField, DetailOption};
-use async_trait::async_trait;
-use std::sync::Arc;
+use symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS;
+use symbio_deploy::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
 
-/// 规范标识（见 `../../../../../docs/003-design/011-Agent目录规范.md`）
+/// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
 ///
 /// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec`、且通过 §10 版本门槛时
 /// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既
@@ -477,7 +477,16 @@ impl Plugin for AgentPlugin {
                 None => {
                     let dir = self.dir().dir().join(&agent_id);
                     let reason = match manifest::load(&dir) {
-                        Some(m) => manifest::validate(&m).unwrap_err(),
+                        // ⚠️ 这里**不许** `unwrap_err()`：manifest 合法但没进装配表是
+                        // 一条正常的拒绝理由（目录名与 id 不一致 / 未进装配清单），
+                        // 把它写成 `unwrap_err` 等于「合法清单 ⇒ panic」——实测在
+                        // 子 Agent 用例上直接炸掉（8 条），而不是报一句拒绝原因。
+                        Some(m) => manifest::validate(&m).err().unwrap_or_else(|| {
+                            format!(
+                                "`{}` 的 manifest 合法但没有进入装配表（目录名与 `id` 是否一致？装配清单是否收录？）",
+                                dir.display()
+                            )
+                        }),
                         None => format!(
                             "`{}` 下没有可解析的 manifest.yaml（已尝试 {}）；\
                              本宿主只支持 `agent-dir/v{}`",

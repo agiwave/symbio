@@ -133,11 +133,9 @@ pub(crate) fn run_report<'a>(step: &'a mut ReportStep<'a>) -> StepFuture<'a> {
         let Some(view) = super::loop_rows::view("report_due", &facts, *turn_no, *now_ms) else {
             // 视图读不出来（未声明 / 扫描超界）⇒ 不猜运行现状。交回读失败，
             // 派发点据此停驱并出声（这一笔账仍在日志里开着）。
-            return Err(ActorError::Read(
-                symbio_core::PluginError::InternalError(
-                    "轮中汇报要读 `report_due`，而声明层没交出这个视图".into(),
-                ),
-            ));
+            return Err(ActorError::Read(symbio_core::PluginError::InternalError(
+                "轮中汇报要读 `report_due`，而声明层没交出这个视图".into(),
+            )));
         };
         let quiet_ms = view.get("quiet_ms").and_then(|v| v.as_i64()).unwrap_or(0);
         let tool_rounds = view
@@ -157,9 +155,7 @@ pub(crate) fn run_report<'a>(step: &'a mut ReportStep<'a>) -> StepFuture<'a> {
             tool_rounds,
             quiet_ms,
         };
-        let node = draft.to_message(&symbio_core::principal::Principal::from_legacy(
-            principal,
-        ));
+        let node = draft.to_message(&symbio_core::principal::Principal::from_legacy(principal));
         // 落格：这条事实是「这段静默已经说过了」的唯一凭据（`reported_anchors`
         // 视图按它关账），也是重建侧折出根级对话面节点的唯一来源。
         store

@@ -15,16 +15,16 @@
 //! - [`WakeOutcome::Woken`]：唤醒请求已入格，本次请求是**续写幕**（复用原轮号、
 //!   复用原 Turn 根节点）；
 //! - [`WakeOutcome::NewTurn`]：`RetrySubtree`——按普通新轮重来，被重试的那一支
-//!   **不删**，它成为同一问题的另一个候选（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
+//!   **不删**，它成为同一问题的另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
 //! - [`WakeOutcome::Done`]：`RetryCompaction` 等不产生对话轮次的动作，直接收尾。
 
 use super::ChatOrchestrator;
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::chat_node::{ChatNode, NodeStatus, ResumeAction, ResumeRequest};
 use symbio_core::{llm_short_id, run_ops, RemoveNodesRequest, Seq};
 use symbio_core::{ExecAbortSignal, PluginError, PluginInvokeRequest};
 use {symbio_core::plugin_info, symbio_core::plugin_warn};
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 use super::super::tool_dispatch::{ToolPort, WakeIntent, WakeSpec};
 use super::super::turn_session::LoopSession;
@@ -41,7 +41,7 @@ pub(crate) enum WakeOutcome {
         old_child: Option<String>,
     },
     /// 按普通新轮重来（`RetrySubtree`）：被重试的那一支**不删**，它成为同一问题的
-    /// 另一个候选（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+    /// 另一个候选（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
     NewTurn {
         /// 被重试那一支的 Turn 根节点 id——新支开出来时按它登记「是哪一支的另一版本」
         /// （`turn.branch` 的 `of`）。
@@ -84,12 +84,12 @@ pub(crate) async fn process_wake(
 /// 同一件：「这一次不再读了」（呈现，由选中态说）与「这一次没发生过」（事实，需要
 /// `message.removed` 才成立）。而那次往返确实发生、确实产出过半截答案与真跑过的工具
 /// ——删除等于毁掉一条已经写下的事实，还顺手让「同 parent 多候选」永远没有数据来源
-/// （裁决见 [D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// （裁决见 [D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// 本函数因此只做**校验与交身份**：靶子必须是一条轮骨架（`is_run()`，不看 `status`——
 /// 中止的、失败的、甚至跑完的都可以重来），它的根 id 交给新幕去登记分支
 /// （[`super::super::stage_exec`] 的 `prepare-turn`：那里才有新支的根 id）。
-/// 「藏起来不读」归[分支投影](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
+/// 「藏起来不读」归[分支投影](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
 /// 一处是 [`symbio_core::branch_hide_unselected`]——只有进模型的那条路调它。
 async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOutcome, PluginError> {
     let messages = session

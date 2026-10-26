@@ -1,5 +1,5 @@
-//! 驱动器 → 会话的**动作面端口**（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
-//! 收窄见 [D-094](../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
+//! 驱动器 → 会话的**动作面端口**（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
+//! 收窄见 [D-094](../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 //!
 //! 驱动器切成独立插件后仍要读写**本会话**的转写、事实与压缩状态——那些状态的
 //! owner 全是 session。E-009 禁止 `use symbio_plugin_session`，于是这一侧只认
@@ -8,7 +8,7 @@
 //!
 //! ## 为什么只有一个方法
 //!
-//! 它是一个 `call`（[D-094](../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）：op 名词表与
+//! 它是一个 `call`（[D-094](../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）：op 名词表与
 //! 请求结构体都住 core（**载荷构造仍是编译期类型化的**），回体类型由调用点在
 //! `LoopSession::run_op<T>` 上标注。分派机制不按动作复制——加一个 loop→session
 //! 交互不用在这里加方法；丢的只有回体的编译期检查，而那会红，是响声
@@ -31,10 +31,10 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use symbio_deploy::PLUGIN_ID_SESSION;
 use symbio_core::{
     run_ops, vdfs_context, Plugin, PluginError, PluginInvokeRequest, VdfsRequest, VdfsResponse,
 };
+use symbio_deploy::PLUGIN_ID_SESSION;
 
 /// 驱动器对会话动作面的**窄端口**：一个方法，op 词表取 [`run_ops`] 常量。
 #[async_trait]

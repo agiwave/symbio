@@ -13,12 +13,12 @@
 //! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+};
 
 const MAX_ENTRIES: usize = 2000;
 

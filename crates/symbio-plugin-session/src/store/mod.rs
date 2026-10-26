@@ -18,7 +18,7 @@
 //! 会话的**权威事件流**也住本模块：JSONL 追加、跨进程写者令牌、被压缩取代的前缀
 //! 归档。它实现 core 的 `Store` 端口，而类型本身
 //! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
-//! 不属于机制层（[plan/14 §2.2 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
+//! 不属于机制层（[plan/14 §2.2 推论 2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 //!
 //! ## 三段分工（判据：这一段错了谁会红）
 //!
@@ -40,7 +40,7 @@
 //! 共用的只是**寻址**：根由调用方传入，id→段名取
 //! [`symbio_providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
-//! `../../../../../docs/003-design/009-VDFS规范.md` §13.4（agent 目录是先例）。
+//! `docs/003-design/009-VDFS规范.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
@@ -50,12 +50,12 @@
 use super::runtime::{self, RuntimeFacts};
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::paths;
-use symbio_core::{Event, FleetSnapshot, PluginError, Seq, Store};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+use symbio_core::{Event, FleetSnapshot, PluginError, Seq, Store};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 mod facts;
@@ -65,7 +65,7 @@ mod wal;
 /// 持久化事实源（`Store` 端口的一种实现）。**可见性只到会话插件**：WAL 的布局 /
 /// 锁文件 / 归档段都是「会话怎么落事实」的私有细节，别的插件要拿事实走 core 的
 /// `Store` 端口或会话的地址面，而不是自己开一个 WAL。
-pub(in crate) use wal::EventWalStore;
+pub(crate) use wal::EventWalStore;
 // 布局段的自由函数与两种落盘形状（`layout` 是本模块的孩子，`pub(super)` 到这里可见）。
 use facts::RuntimeFactsCache;
 use layout::*;
@@ -160,8 +160,8 @@ impl SessionStore {
     /// 本存储是否落在磁盘上（临时会话没有根目录）。
     ///
     /// 计划表的「有落盘目录」判据用这个**能力布尔**：调用方要知道的是
-    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
-    pub(in crate) fn is_persistent(&self) -> bool {
+    /// 「有没有事实可读」，不是目录形状（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
+    pub(crate) fn is_persistent(&self) -> bool {
         self.disk().is_some()
     }
 
@@ -406,11 +406,11 @@ impl SessionStore {
 ///
 /// `Store::range` 归一后给的是**完整史**（含被
 /// `archive_before` 移出的前缀，
-/// [plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1），
+/// [plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1），
 /// 本函数服务的是「**上下文 / 进度**该从哪读」这类问题。
 ///
 /// **它不判轮次生命周期**：「已开未收束」必须读完整史
-/// （[D-085](../README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")）——压缩期间等待审批的那一轮
+/// （[D-085](../../README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")）——压缩期间等待审批的那一轮
 /// 会被归档移出本窗口，按窗口找就会把它漏成「找不到未收束的轮次」。
 /// 窗口由**消费方按事实切**，不是存储层的第二种读法——这正是归一的前提：读法只有一种，
 /// 想要窗口就从「最近一份快照落在第几号」自己切。折叠侧的同类判据（消息列表 / 轮次计数）

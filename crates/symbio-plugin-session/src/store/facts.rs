@@ -6,8 +6,8 @@
 //! 会话读不出来 / 整份写坏 / 清单少项）和「条目怎么读写删」（`super`）是三批
 //! 不同的观众；混在一处时，一次布局改动会顺手碰坏投影，反之亦然。
 //!
-//! 三件事的形状（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")、
-//! [D-083 §5.2](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
+//! 三件事的形状（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")、
+//! [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
 //!
 //! - **句柄只发给引擎写点**，且进程内按会话构造一次（「一写者」，见
 //!   `SessionStore::facts` 的文档）；
@@ -41,18 +41,15 @@ impl SessionStore {
     ///
     /// 进程内按会话构造一次并缓存：所有引擎写方共享同一实例，`head` 只有一份、
     /// 内部写锁也只有一把。第二个 `WalStore::open` 不存在——这正是
-    /// [plan/14 §2.2 推论 3](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
+    /// [plan/14 §2.2 推论 3](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
     /// 的「一写者」。跨进程写者令牌仍由 `WalStore` 自己守（旁挂锁文件）。
     ///
     /// **只发给引擎写点**：能力面拿到的是事实的值（读）或待落的值（写），
-    /// 不是这个句柄（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构") §1）。
+    /// 不是这个句柄（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构") §1）。
     ///
     /// `Ok(None)` = 没有事实源（临时会话 / 目录不存在）；`Err` = 目录在、事实源
     /// **打不开**——后者是 的真失败，调用方不得当成「没有事实源」静默跳过。
-    pub(in crate) fn facts(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<Arc<EventWalStore>>, String> {
+    pub(crate) fn facts(&self, session_id: &str) -> Result<Option<Arc<EventWalStore>>, String> {
         let mut cache = self.facts.lock().expect("会话事实源表锁中毒");
         if let Some(store) = cache.get(session_id) {
             return Ok(Some(store.clone()));
@@ -76,7 +73,7 @@ impl SessionStore {
     /// 这是读方的唯一形态：值是 `Vec<Event>`，不是路径、不是句柄。已有写句柄时
     /// 走它（就是本进程刚落的那些格），否则只读打开一次——读方不创建文件、
     /// 不取令牌、不截尾。
-    pub(in crate) fn snapshot(&self, session_id: &str) -> Option<Vec<Event>> {
+    pub(crate) fn snapshot(&self, session_id: &str) -> Option<Vec<Event>> {
         if let Some(store) = self
             .facts
             .lock()
@@ -97,7 +94,7 @@ impl SessionStore {
 
     /// 该会话的**运行态事实投影**（上一轮结局）；临时会话 / 没有 WAL ⇒ `None`。
     ///
-    /// [D-083 §5.2](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：结局在读侧是投影值，
+    /// [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")：结局在读侧是投影值，
     /// 不是第二份状态。这里只交**值**，不交句柄、不交路径；投影函数是纯的
     /// （`runtime::project`），缓存只是「事实没变就不重折」。
     ///
@@ -107,10 +104,7 @@ impl SessionStore {
     ///
     /// 归档不改变 `head` 也不改变完整史（归档段 + live 段仍拼成同一份事实），
     /// 缓存因此不会因归档而失效，也不需要失效。
-    pub(in crate) fn runtime_facts(
-        &self,
-        session_id: &str,
-    ) -> Option<RuntimeFacts> {
+    pub(crate) fn runtime_facts(&self, session_id: &str) -> Option<RuntimeFacts> {
         let writer = self
             .facts
             .lock()
@@ -173,10 +167,7 @@ impl SessionStore {
     ///
     /// `own` = 这份事实源是否调用方自己的会话（按目录名比，同一个根下的两层
     /// 派生可能不同形）——`thread_private` 的收放靠它。
-    pub(in crate) fn recall_snapshots(
-        &self,
-        self_id: &str,
-    ) -> Vec<FleetSnapshot> {
+    pub(crate) fn recall_snapshots(&self, self_id: &str) -> Vec<FleetSnapshot> {
         let Some(base) = self.disk() else {
             return Vec::new();
         };
@@ -241,7 +232,7 @@ impl SessionStore {
     ///
     /// 统计聚合与淘汰覆盖层共用：两者都要求「所有会话」完整，单个事实源打不开
     /// ⇒ 跳过并出声，不因一个坏会话让整列消失。
-    pub(in crate) fn deep_snapshots(&self) -> Vec<Vec<Event>> {
+    pub(crate) fn deep_snapshots(&self) -> Vec<Vec<Event>> {
         let Some(base) = self.disk() else {
             return Vec::new();
         };
@@ -266,9 +257,9 @@ impl SessionStore {
 ///
 /// 超限 ⇒ 不扫并 `plugin_warn` 记一笔——看不见的文件不假装看得见。
 /// 预算属于**读成本策略**，枚举属于存储布局，故两者都住在存储层。
-pub(in crate) const RECALL_MAX_FILES: usize = 16;
-pub(in crate) const RECALL_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-pub(in crate) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const RECALL_MAX_FILES: usize = 16;
+pub(crate) const RECALL_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const RECALL_MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 // ── panic 面登记（PN-001…003）─────────────────────────────────────────
 // 判据与「登记写在代码旁边」的理由见 `store/mod.rs` 末尾同名区块。
 // panic-allow crates/symbio-plugin-session/src/store/facts.rs::facts: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

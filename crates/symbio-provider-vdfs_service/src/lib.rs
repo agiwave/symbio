@@ -20,7 +20,7 @@
 //!
 //! `symbio_core::vdfs` 是**纯接口**（只依赖 std / serde / async_trait，
 //! 可原样抽出为独立 crate）；带 tokio IO 与 homedir 的**实现**属于宿主基础设施，
-//! 归本层。插件经 [`crate::providers`] 的出口取用它们（`DirVdfs` / `SingleFileVdfs` /
+//! 归本层。插件经 `symbio_providers` 的出口取用它们（`DirVdfs` / `SingleFileVdfs` /
 //! `MemoryVdfs`），**不深引**本目录的子模块。
 //!
 //! ## 与「废除实体机制」的关系
@@ -52,5 +52,5 @@ pub use pack::{VdfsPack, VdfsUnpack};
 /// 条目 id / 段名规则：地址解析（`id_of`）与落盘（`safe_segment`）、以及
 /// 「无名字新建条目」的 id 生成（`auto_id`）是**多个插件共用的同一条口径**
 /// ——各插件自己写一份就会出现「同一个 id 在两个插件里被安全化成两种样子」。
-/// 名字太泛（`id_of` 单独读不出归属），故经 [`crate::providers`] 平铺时带 `vdfs_` 前缀。
+/// 名字太泛（`id_of` 单独读不出归属），故经 `symbio_providers` 平铺时带 `vdfs_` 前缀。
 pub use entry::{auto_id, id_of, safe_segment};

@@ -44,12 +44,12 @@ pub mod list;
 pub mod read;
 pub mod spec;
 
-use symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError,
-};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError,
+};
 
 /// 工具链路的封装 provider（地址翻译 + 按挂载名直调，见 `super::super::provider`）
 pub use super::provider::ToolVdfs;
@@ -89,7 +89,7 @@ pub(crate) fn ensure_required(args: &Value, field: &str) -> Result<(), PluginErr
 /// `super::super::physical` 的 `join_target`）。这份文案要说清的是**两件事各自的写法**：
 /// 相对段从工作目录起算（`.` 是工作目录根）、首部的 `/` 是操作系统的绝对锚点
 /// （`/docs` ≠ `docs`）。裁决与后果见
-/// [D-172](../../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
+/// [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
 pub const PATH_DESC: &str =
     "路径（统一文件系统）。磁盘文件有两种写法，**不是同一个位置**：① 相对工作目录——'README.md'、'src/main.rs'、'tmp/note.md' 都落在工作目录之下，工作目录根本身写成 '.'；② 绝对路径——首部的 '/' 是操作系统的绝对锚点，'/docs' 指文件系统根下的 docs（POSIX 的 /docs，Windows 落在工作目录所在盘的根目录下），带盘符的 'D:/tmp/a.txt' 同理。因此 '/docs' 与 'docs' 是两个位置：前者在文件系统根，后者在工作目录里；想把工作目录下的 docs 当成绝对路径交给工具，请写 '.' 再加名字，不要照抄一条外部机器的绝对路径。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/plugin_manager/appearance'）。";
 

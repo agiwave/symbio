@@ -5,12 +5,12 @@
 //! 判据的业务场景（预算 / 淘汰 / 任务表）仍在 `tool_executor.test.rs` 走整批路径。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
+use std::sync::Arc;
 use symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
     Registry,
 };
-use std::sync::Arc;
+use symbio_providers::DefaultToolVisitor;
 
 /// 只带元数据的假工具：注册面怎么读，测试就怎么喂（与 `factory_decls` 同形）。
 struct DeclTool(CapabilityMeta);

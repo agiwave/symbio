@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use symbio_core::{Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt};
 
-/// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
+/// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 ///
 /// 判据在**批首**读一次，随后每个调用点只做一次纯判定：授权表与成本台账都是
 /// 只读的，闸门不该为了拿到自己的判据就把整个事实源重放进工具循环
@@ -19,7 +19,7 @@ use symbio_core::{Event, LatencyTier, PluginInvokeRequest, PluginInvokeRequestEx
 /// | `requested_ms` | 深度档预算 | 工具循环所在档，本轮**申请**这么多 |
 /// | `budget_ms` | 自主层预算 | 会话累计成本**总预算**——四层时延的第四个取值复用为天花板 |
 ///
-/// `budget_ms` 是**初值**不是定值：[04 §1](../../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
+/// `budget_ms` 是**初值**不是定值：[04 §1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
 /// 写明「所有百分比与毫秒数是初值，必须在阶段一埋点后校准」。它长什么样由
 /// 判据表回答，不由调用点回答——所以三个数都收在本结构里，测试可以**只换预算**
 /// 就看见判定翻面（S09 §6.4 反向用例：预算在生效而非常量）。
@@ -40,8 +40,7 @@ impl BreakerInputs {
     /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
     /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
     pub fn of(snapshot: &[Event], ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal =
-            symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref());
+        let principal = symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref());
         let authorized = symbio_core::production_matrix()
             .can_write_name(&principal, symbio_core::CAP_EXTERNAL_EXECUTION);
         Self {

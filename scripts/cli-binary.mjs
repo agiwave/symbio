@@ -71,8 +71,8 @@ const STAMP_NAME = '.symbio-cli.build-stamp'
 export function cliBinaryCandidates(repoRoot, profile = 'release') {
   return [
     path.join(repoRoot, 'target', profile, EXE),
-    path.join(repoRoot, 'symbio', 'target', profile, EXE),
-    path.join(repoRoot, 'cli', 'target', profile, EXE),
+    path.join(repoRoot, 'crates', 'symbio', 'target', profile, EXE),
+    path.join(repoRoot, 'crates', 'symbio-cli', 'target', profile, EXE),
   ]
 }
 
@@ -127,7 +127,18 @@ export function cliBinaryPath(repoRoot, profile = 'release') {
   return cliArtifactPath(repoRoot, profile) ?? cliBinaryCandidates(repoRoot, profile)[0]
 }
 
-/** 递归列出目录下的全部文件（目录不存在 ⇒ 空，不抛） */
+/**
+ * 递归列出目录下的全部文件（目录不存在 ⇒ 空，不抛）。
+ *
+ * 跳过构建产物与依赖目录：本函数现在的扫描根是**整个 `crates/`**，若把
+ * `crates/<成员>/target/` 收进指纹，写构建戳这个动作本身（戳就写在 `target/release/`
+ * 里）会改变指纹 ⇒ 「刚写完戳就不新鲜」，机制自锁。
+ *
+ * 这不是假想的场景：`cliBinaryCandidates` 的过渡期候选之一就是
+ * `crates/symbio/target/release/`，回归测试正是往那里放假二进制。
+ */
+const SKIP_DIRS = new Set(['target', 'node_modules', '.git', 'dist', '.cache'])
+
 function walkFiles(dir, out = []) {
   let entries
   try {
@@ -136,6 +147,7 @@ function walkFiles(dir, out = []) {
     return out
   }
   for (const e of entries) {
+    if (e.isDirectory() && SKIP_DIRS.has(e.name)) continue
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walkFiles(p, out)
     else if (e.isFile()) out.push(p)
@@ -144,29 +156,42 @@ function walkFiles(dir, out = []) {
 }
 
 /**
- * 构建输入清单 = 两个 crate 的源码树 + 四个清单 + 可能存在的 build.rs / .cargo 配置。
+ * 构建输入清单 = `crates/` 整棵树 + 根清单 + 可能存在的 build.rs / .cargo 配置。
  *
  * 用「列目录」而不是「读 Cargo 的依赖图」：依赖图要跑 cargo metadata（几百毫秒且
  * 需要网络语义），而这里只需要**宁可多算**——多纳入一个文件只会多触发一次无害的
  * cargo 增量构建，漏掉一个才会让过期产物蒙混过关。
+ *
+ * ## 为什么只有一个源码根，且必须是 `crates/`
+ *
+ * CLI 复用整棵插件树，所以「CLI 的构建输入」在拆 crate 前是 `cli/src` + `symbio/src`
+ * 两处。拆 crate（D-191）后两者都成了 `crates/` 的成员，若仍写成两个子根
+ * （`crates/symbio-cli/src` + `crates`），**后者包含前者** ⇒ 同一文件收两遍，
+ * 清单里出现重复项（指纹仍然可用，但清单本身不再是一份集合）。
+ *
+ * 故只走一个根，并用 `Set` 去重：清单是**文件集合**这件事由数据结构保证，
+ * 而不是靠调用方小心不要写出包含关系的子根。
  */
 export function cliBuildInputs(repoRoot) {
+  const seen = new Set()
   const files = []
-  for (const sub of ['crates/symbio-cli/src', 'crates']) {
-    files.push(...walkFiles(path.join(repoRoot, sub)))
+  const push = (p) => {
+    const abs = path.resolve(p)
+    if (seen.has(abs)) return
+    seen.add(abs)
+    files.push(abs)
   }
+  for (const p of walkFiles(path.join(repoRoot, 'crates'))) push(p)
   for (const rel of [
     'Cargo.toml',
     'Cargo.lock',
-    'cli/Cargo.toml',
-    'cli/build.rs',
-    'cli/.cargo/config.toml',
-    'crates/symbio/Cargo.toml',
-    'symbio/build.rs',
-    'symbio/.cargo/config.toml',
+    'crates/symbio-cli/build.rs',
+    'crates/symbio-cli/.cargo/config.toml',
+    'crates/symbio/build.rs',
+    'crates/symbio/.cargo/config.toml',
   ]) {
     const p = path.join(repoRoot, rel)
-    if (fs.existsSync(p)) files.push(p)
+    if (fs.existsSync(p)) push(p)
   }
   return files.sort()
 }
@@ -241,14 +266,14 @@ export function ensureCliBinary(repoRoot, { build = true, log = null } = {}) {
   if (!build) {
     throw new Error(
       `CLI release 二进制不可信（${before.staleReason}）：${before.binaryPath}\n` +
-        `请先构建：node scripts/cli-binary.mjs（等价于 cd cli && cargo build --release）`,
+        `请先构建：node scripts/cli-binary.mjs（等价于 cargo build -p symbio-cli --release）`,
     )
   }
 
   if (log) log(`${before.staleReason} ⇒ cargo build --release`)
 
   const r = spawnSync('cargo', ['build', '--release'], {
-    cwd: path.join(repoRoot, 'cli'),
+    cwd: path.join(repoRoot, 'crates', 'symbio-cli'),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })

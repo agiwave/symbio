@@ -405,7 +405,7 @@ execute_turn
 
 **这里数的是请求，不是工具轮。** `TurnState` 上那一格叫 `request_round`（本轮已发出的 LLM 请求数，
 续写时才 +1）；工具轮数从**已落事实**折出：本幕带非空 `calls` 的 `response(port=model)` 条数
-（[`report_due`](../../../symbio_core/decl/mod.rs) v4 的 `tool_rounds`，与本节环体的 `tool_round`
+（[`report_due`](../../../symbio-core/src/decl/mod.rs) v4 的 `tool_rounds`，与本节环体的 `tool_round`
 同一个读数——后者是环内的活计数器，前者的写方就是模型应答本身）。静默时长与配额同样由
 `report_due` 算出，四格一起构成汇报行的 `due`。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
 恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；
@@ -623,7 +623,7 @@ CLI / 前端客户端）；执行期走 `ExecEventSink` 进程内直连，与之
 ### 9.1 形状：`ExecEnv` 具名化
 
 数据面统一之后，**签名**也统一：新增
-[`ExecEnv { sink, abort }`](../../../symbio_core/exec/mod.rs)——「一次带中止的流式执行」
+[`ExecEnv { sink, abort }`](../../../symbio-core/src/exec/mod.rs)——「一次带中止的流式执行」
 的**出 / 入两个方向**，两处共用：
 
 ```text
@@ -668,7 +668,7 @@ payload）⇒ `Value::Null`，仍由工具自己给出「缺少必填参数」�
 
 ### 10.1 形状
 
-新增 [`plugins/model/protocols/sse.rs`](../../model/protocols/sse.rs)：
+新增 [`plugins/model/protocols/sse.rs`](../../../symbio-plugin-model/src/protocols/sse.rs)：
 
 ```text
 trait SseLineParser {
@@ -689,13 +689,13 @@ trait PartialLineExtractor {
 留给下一次 `push`。SSE 分块由 TCP 决定，一个中文字符横跨两块是常态；若用
 `from_utf8_lossy` 各替换出一个 U+FFFD，而完整行给出的是真字符，按前缀截断会吃字。
 
-流循环侧（[`plugins/model/stream.rs`](../../model/stream.rs)）只做：按 `\n` 切行
+流循环侧（[`plugins/model/stream.rs`](../../../symbio-plugin-model/src/stream.rs)）只做：按 `\n` 切行
 → 交给 `parse_line` → 按前缀截断去重（`LineProgress`）→ 尾巴交给提取器。
 
 ### 10.2 协议层：`JsonLineExtractor`
 
 四个协议共用一个**逐字节推进**的 JSON 结构扫描器
-（[`protocols/partial_json.rs`](../../model/protocols/partial_json.rs)）。
+（[`protocols/partial_json.rs`](../../../symbio-plugin-model/src/protocols/partial_json.rs)）。
 它只做两件事：在 JSON 里定位「哪个字符串值」，以及按 JSON 转义规则解码它的增量；
 「那个位置算内容还是推理」由协议实现 `PartialJsonSink` 决定。判据是**键路径全等**
 （数组下标不占位）：

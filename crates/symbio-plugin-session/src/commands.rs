@@ -33,10 +33,10 @@ use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
+use serde_json::{json, Value};
 use symbio_core::chat_node as cm;
 use symbio_core::clock_now_ms;
 use symbio_core::PluginError;
-use serde_json::{json, Value};
 
 use symbio_core::{
     vdfs_from_plugin_error, VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse,
@@ -527,9 +527,8 @@ impl SessionPlugin {
     /// 登记以**会话 id** 为持有人：同一会话换主体只替换这一条（旧行先撤），
     /// 删除会话时整册回收（[`Self::delete_session_internal`]）。
     async fn bind_session_identity(&self, session: &Session) {
-        let principal = symbio_core::principal_of(
-            session.metadata.get("agent_id").and_then(Value::as_str),
-        );
+        let principal =
+            symbio_core::principal_of(session.metadata.get("agent_id").and_then(Value::as_str));
         let Ok(store) = self.get_store().await else {
             return;
         };

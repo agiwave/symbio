@@ -1,18 +1,18 @@
 use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
-use symbio_deploy::PLUGIN_ID_TELEGRAM;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use symbio_core::PluginInvokeRequestExt;
 use symbio_core::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason,
 };
 use symbio_core::{DetailDefinition, DetailField, SuccessResponse};
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_TELEGRAM;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -329,7 +329,7 @@ impl TelegramPlugin {
     /// 启动监听器
     ///
     /// **不接受「注入 LLM 插件」参数**：跨插件调用一律经 `ctx.parent()` 走容器，
-    /// 见 `../../../../docs/003-design/006-插件路由与地址.md`。
+    /// 见 `docs/003-design/006-插件路由与地址.md`。
     ///
     /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
     /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是

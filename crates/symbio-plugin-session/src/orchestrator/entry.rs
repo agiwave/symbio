@@ -340,7 +340,7 @@ impl TurnLauncher {
 
             // 心跳的空闲锚点不在这里维护：切出 `plugins/heartbeat` 后那格是**调度器自己的**
             // 簿记（触发成功才写，见 `plugins/heartbeat/scheduler.rs`），而回合侧推进空闲
-            // 基线靠的是消息落盘刷新的 `updated_at`（[D-077](../../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果 #7）。
+            // 基线靠的是消息落盘刷新的 `updated_at`（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果 #7）。
 
             // 仅 message 分支（非 ping）追加用户消息到存储
             //

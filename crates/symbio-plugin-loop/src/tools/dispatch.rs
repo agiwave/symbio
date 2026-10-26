@@ -1,4 +1,4 @@
-//! `process_tool_calls_async` 的**阶段拆分层**（/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分") B1）。
+//! `process_tool_calls_async` 的**阶段拆分层**（/ [DE-021 §5 动作 B](../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分") B1）。
 //!
 //! 三个巨型函数按**处理阶段**（不按职责）拆分，本层是第一批 `process_tool_calls_async`
 //! （原 714 行单体）的三段落点：
@@ -32,7 +32,8 @@ use super::tool_executor::{
     BreakerInputs, EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
 };
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
-use symbio_plugin_api::hooks::{fire_hook, HookEvent};
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::facts::{Delegation, TaskDeclaration};
 use symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use symbio_core::{
@@ -41,9 +42,8 @@ use symbio_core::{
     ExecEventSink, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
     TurnToolCallInfo,
 };
+use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 pub(crate) use self::gates::GateReadings;
 // 闸门表与拒止骨架：阶段②按 `first_refusal` 判、经 `refuse` 收口。

@@ -11,11 +11,11 @@
 use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::test_dir;
-use symbio_providers::DefaultToolVisitor;
 use symbio_core::{
     capability_prompts, Registry, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR,
 };
+use symbio_providers::DefaultToolVisitor;
 
 /// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
 /// **不读全局 homedir**（那在子智能体里会指错作用域）。
@@ -66,7 +66,7 @@ fn test_session_config_deserialize_ignores_legacy_keys() {
 // ==================== 配置契约一致性（复杂度审计 P0-1 / P1-①）====================
 
 // `max_tool_rounds`（工具轮软上限）整条链已退役：它在 v2 判的是一个恒 0 的计数，
-// 裁决与去处见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")。这里曾有的两条契约测试（0 → None 的翻译、默认值 =
+// 裁决与去处见 [D-074](../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")。这里曾有的两条契约测试（0 → None 的翻译、默认值 =
 // 不限制）随被测对象一起删除，不是覆盖丢失。
 
 // ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
@@ -412,7 +412,7 @@ async fn migrated_session_routes_stay_retired() {
 
 // ==================== 停机：常驻任务必须真的退出 ====================
 
-/// [D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P1 的判据。DE-014 步骤 6 的原判据是「每个插件可独立卸载且系统仍
+/// [D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P1 的判据。DE-014 步骤 6 的原判据是「每个插件可独立卸载且系统仍
 /// 完整」，而 session 当时不满足它的一半：`stop` 是默认 no-op，心跳 loop 与收件箱消费者
 /// 一旦 `tokio::spawn` 就再没有人能取消它们——停用只是从名册里划掉一个名字，线程照跑。
 ///

@@ -133,7 +133,14 @@ export function profileOfBinary(binaryPath) {
   return dir === 'release' ? 'release' : 'debug'
 }
 
-/** 递归列出目录下的全部文件（目录不存在 ⇒ 空，不抛） */
+/**
+ * 递归列出目录下的全部文件（目录不存在 ⇒ 空，不抛）。
+ *
+ * 跳过构建产物与依赖目录：扫描根含整个 `crates/`，而构建戳就写在 `target/` 里，
+ * 收进去会让「写戳」这个动作改变指纹 ⇒ 刚写完就判不新鲜，机制自锁。
+ */
+const SKIP_DIRS = new Set(['target', 'node_modules', '.git', 'dist', '.cache'])
+
 function walkFiles(dir, out = []) {
   let entries
   try {
@@ -142,6 +149,7 @@ function walkFiles(dir, out = []) {
     return out
   }
   for (const e of entries) {
+    if (e.isDirectory() && SKIP_DIRS.has(e.name)) continue
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walkFiles(p, out)
     else if (e.isFile()) out.push(p)
@@ -155,22 +163,33 @@ function walkFiles(dir, out = []) {
  * 用「列目录」而不是「读 Cargo 的依赖图」：依赖图要跑 `cargo metadata`（几百毫秒
  * 且需要网络语义），而这里只需要**宁可多算**——多纳入一个文件只会多触发一次无害的
  * 增量构建，漏掉一个才会让过期产物蒙混过关。
+ *
+ * 清单是**文件集合**，用 `Set` 保证：`crates` 这个扫描根本身就包含成员清单，
+ * 与下面逐条列的 `crates/symbio/Cargo.toml` 重叠，不去重就会出现重复项。
  */
 export function tauriBuildInputs(repoRoot) {
+  const seen = new Set()
   const files = []
+  const push = (p) => {
+    const abs = path.resolve(p)
+    if (seen.has(abs)) return
+    seen.add(abs)
+    files.push(abs)
+  }
   for (const sub of ['tauri/src-tauri/src', 'tauri/src-tauri/capabilities', 'crates']) {
-    files.push(...walkFiles(path.join(repoRoot, sub)))
+    for (const p of walkFiles(path.join(repoRoot, sub))) push(p)
   }
   for (const rel of [
     'tauri/src-tauri/Cargo.toml',
     'tauri/src-tauri/Cargo.lock',
     'tauri/src-tauri/build.rs',
     'tauri/src-tauri/tauri.conf.json',
+    'Cargo.toml',
+    'Cargo.lock',
     'crates/symbio/Cargo.toml',
-    'symbio/Cargo.lock',
   ]) {
     const p = path.join(repoRoot, rel)
-    if (fs.existsSync(p)) files.push(p)
+    if (fs.existsSync(p)) push(p)
   }
   return files.sort()
 }

@@ -134,11 +134,9 @@ pub(crate) fn run_prepare_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a
             // 边界中止在闸门、恢复完成在循环之前）。硬造一格只会把「怎么到这里
             // 的」这条信息抹掉。
             Err(other) => {
-                return Err(ActorError::Read(
-                    symbio_core::PluginError::InternalError(format!(
-                        "准备段返回了不属于它的出口：{other:?}"
-                    )),
-                ));
+                return Err(ActorError::Read(symbio_core::PluginError::InternalError(
+                    format!("准备段返回了不属于它的出口：{other:?}"),
+                )));
             }
         };
         super::stage_events::land(
@@ -153,7 +151,7 @@ pub(crate) fn run_prepare_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a
             )],
         )
         .map_err(ActorError::Append)?;
-        // 重试开出的**新支在这里登记**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+        // 重试开出的**新支在这里登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
         //
         // 为什么是这一格而不是唤醒那一处：`turn.branch` 的 `into` 是**新支的 Turn 根
         // id**，而那个 id 到本幕的输入备好才存在（一幕一个根，`prepare_turn_inputs`
@@ -433,9 +431,8 @@ async fn run_turn(parts: TurnParts<'_>) -> Result<ExecTurnResult, TurnExecExit> 
                 let session = session.clone();
                 let fut: std::pin::Pin<
                     Box<
-                        dyn std::future::Future<
-                                Output = Option<symbio_core::DrainedSupplement>,
-                            > + Send,
+                        dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>>
+                            + Send,
                     >,
                 > = Box::pin(async move {
                     let supplements: Option<symbio_core::DrainedSupplement> = session
@@ -539,11 +536,9 @@ pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, A
     } = drive;
     let Some(store) = context.session.facts() else {
         return Ok(StageOutcome {
-            interrupted: Some(TurnExit::Failed(
-                symbio_core::PluginError::InternalError(
-                    "外环需要持久会话（临时会话无事实源）".into(),
-                ),
-            )),
+            interrupted: Some(TurnExit::Failed(symbio_core::PluginError::InternalError(
+                "外环需要持久会话（临时会话无事实源）".into(),
+            ))),
         });
     };
     let mut call: Option<Call> = None;
@@ -622,12 +617,12 @@ pub(crate) async fn drive_stage(drive: StageDrive<'_>) -> Result<StageOutcome, A
         // 派出过的那一幕不在这里判：它的结局是**幕自己的事**——收束格落下就是答完了，
         // 工具批悬在等用户审批（`WaitingUserAction`）时本幕本来就还开着，而那不是
         // 失败，是一轮合法的中途停点（D-052 决策 1 的「悬在等待用户」那一档）。
-        interrupted = Some(TurnExit::Failed(
-            symbio_core::PluginError::InternalError(format!(
+        interrupted = Some(TurnExit::Failed(symbio_core::PluginError::InternalError(
+            format!(
                 "端口 `turn` 的往返没有派出（外环没有选中 `dispatch-turn`，turn={}）",
                 turn.turn_no
-            )),
-        ));
+            ),
+        )));
     }
     Ok(StageOutcome { interrupted })
 }

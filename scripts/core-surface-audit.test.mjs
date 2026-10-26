@@ -55,8 +55,8 @@ test('多条 `pub use <域>::*` 都要展开，不能互相覆盖', () => {
       'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\npub use beta::*;\n',
       'crates/symbio-core/src/alpha/mod.rs': 'pub struct AlphaThing;\n',
       'crates/symbio-core/src/beta/mod.rs': 'pub struct BetaThing;\n',
-      'crates/crates/plugins/p1/a.rs': 'fn f(_: AlphaThing, _: BetaThing) {}\n',
-      'crates/crates/plugins/p2/b.rs': 'fn g(_: AlphaThing) {}\n',
+      'crates/symbio-plugin-p1/src/a.rs': 'fn f(_: AlphaThing, _: BetaThing) {}\n',
+      'crates/symbio-plugin-p2/src/b.rs': 'fn g(_: AlphaThing) {}\n',
     },
     { verbose: true },
   )
@@ -64,14 +64,16 @@ test('多条 `pub use <域>::*` 都要展开，不能互相覆盖', () => {
   assert.match(out, /^\s*\[\s*1\] beta\s+BetaThing\b/m, out)
 })
 
-test('`symbio/src` 直属文件也算消费方，不能被跳过', () => {
+// D-191 后壳 crate 是 `crates/symbio`：单位取 **crate 名**（`symbio`），不再是
+// `symbio/(crate root)`——后者是「`crates/` 底下统统算一个」时期的兜底标签。
+test('壳 crate 直属文件也算消费方，不能被跳过', () => {
   // 反例守卫：第一版对不在 `plugins/<名>/` 下的文件返回 null 单位并跳过 ⇒ 假报 0 消费方。
   const out = audit({
     'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\n',
     'crates/symbio-core/src/alpha/mod.rs': 'pub struct AlphaThing;\n',
-    'crates/crates/crates/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
+    'crates/symbio/lib.rs': 'use crate::symbio_core::AlphaThing;\n',
   })
-  assert.match(out, /AlphaThing\s+->\s+symbio\/\(crate root\)/, out)
+  assert.match(out, /AlphaThing\s+->\s+symbio/, out)
   assert.doesNotMatch(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+AlphaThing\n/, out)
 })
 
@@ -80,7 +82,7 @@ test('真的零消费方时，仍如实报出来（不能一律放过）', () =>
   const out = audit({
     'crates/symbio-core/src/lib.rs': 'pub use alpha::*;\n',
     'crates/symbio-core/src/alpha/mod.rs': 'pub struct UsedThing;\npub struct DeadThing;\n',
-    'crates/crates/plugins/p1/a.rs': 'fn f(_: UsedThing) {}\n',
+    'crates/symbio-plugin-p1/src/a.rs': 'fn f(_: UsedThing) {}\n',
   })
   assert.match(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+DeadThing\n/, out)
   assert.doesNotMatch(out, /--- 0 个消费方[\s\S]*\n\s*alpha\s+UsedThing\n/, out)
@@ -95,8 +97,8 @@ test('宏生成的键计入公开面（它们没有 `pub` 关键字）', () => {
       'crates/symbio-core/src/keys/mod.rs':
         'macro_rules! define_string_key { ($t:ident, $c:ident, $n:expr) => { pub struct $t; pub const $c: $t = $t; }; }\n' +
         'define_string_key!(FooKey, FOO, "foo");\n',
-      'crates/crates/plugins/p1/a.rs': 'fn f(_: FooKey) {}\n',
-      'crates/crates/plugins/p2/b.rs': 'fn g() { let _ = FOO; }\n',
+      'crates/symbio-plugin-p1/src/a.rs': 'fn f(_: FooKey) {}\n',
+      'crates/symbio-plugin-p2/src/b.rs': 'fn g() { let _ = FOO; }\n',
     },
     { verbose: true },
   )

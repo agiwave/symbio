@@ -256,23 +256,23 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 
 | 契约 | 住哪（`symbio_core::`） |
 |---|---|
-| 会话线格式（`ChatNode` 家族 / `Principal` / 两个入口请求） | [`chat/`](../../crates/symbio-core/src/chat/)——叶子模块 `chat_node` / `principal` / `chat_request` / `session_chat` |
-| 对话面控制契约（`Verdict` / `DecideRequest` / `ComposeRequest` / `WordingReply` / `RunSnapshot`） | [`dialog/`](../../crates/symbio-core/src/dialog/) |
-| 宿主呈现方言（`Detail*` / `Reading*`） | [`present/`](../../crates/symbio-core/src/present/)——`detail` / `reading` |
-| 轮次面（`Turn*` / 动作载荷 / 压缩包） | [`turn/`](../../crates/symbio-core/src/turn/)——`dispatch` / `node_build` / `facts` |
-| 插件扩展点（`HookEvent` / `HookOutput`）与路由回体（`SimpleResponse` / `SuccessResponse`） | [`plugin/`](../../crates/symbio-core/src/plugin/)——`hook.rs` / `response.rs` |
-| 模型状态帧（`llm_emit_message` 等） | [`llm/`](../../crates/symbio-core/src/llm/)——`frames.rs` |
-| 事件 → 状态的读侧重放（`rebuild`） | [`projection/`](../../crates/symbio-core/src/projection/)——`rebuild.rs` |
+| 会话线格式（`ChatNode` 家族 / `Principal` / 两个入口请求） | [`chat/`](../../../crates/symbio-core/src/chat/)——叶子模块 `chat_node` / `principal` / `chat_request` / `session_chat` |
+| 对话面控制契约（`Verdict` / `DecideRequest` / `ComposeRequest` / `WordingReply` / `RunSnapshot`） | [`dialog/`](../../../crates/symbio-core/src/dialog/) |
+| 宿主呈现方言（`Detail*` / `Reading*`） | [`present/`](../../../crates/symbio-core/src/present/)——`detail` / `reading` |
+| 轮次面（`Turn*` / 动作载荷 / 压缩包） | [`turn/`](../../../crates/symbio-core/src/turn/)——`dispatch` / `node_build` / `facts` |
+| 插件扩展点（`HookEvent` / `HookOutput`）与路由回体（`SimpleResponse` / `SuccessResponse`） | [`plugin/`](../../../crates/symbio-core/src/plugin/)——`hook.rs` / `response.rs` |
+| 模型状态帧（`llm_emit_message` 等） | [`llm/`](../../../crates/symbio-core/src/llm/)——`frames.rs` |
+| 事件 → 状态的读侧重放（`rebuild`） | [`projection/`](../../../crates/symbio-core/src/projection/)——`rebuild.rs` |
 
 **文件清单以目录为准**，本文不抄一份会漂移的副本。命名与归属的机械判据是
-[`core-naming-audit`](../../scripts/core-naming-audit.mjs)，规则源是
+[`core-naming-audit`](../../../scripts/core-naming-audit.mjs)，规则源是
 [内核 README §1.2 的域前缀对照表](../../crates/symbio-core/README.md "crates/symbio-core/src/README")。
 
 两条命名约定：
 
 - 所有结构派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名
   逐字相同，**没有任何 host 侧的 `camelCase` 转换**；
-- 唯一例外是 [`plugins/mcp/types.rs`](../../crates/symbio-plugin-mcp/src/types.rs)：它镜像 MCP 的**外部
+- 唯一例外是 [`plugins/mcp/types.rs`](../../../crates/symbio-plugin-mcp/src/types.rs)：它镜像 MCP 的**外部
   规范报文**（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
   显式声明。
 

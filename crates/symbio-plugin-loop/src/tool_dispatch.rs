@@ -734,10 +734,7 @@ impl ToolPort {
     /// `failed{superseded}` 关掉：它的结果永远不会来，而新的一次用户动作是新账。
     /// 不关的话 `turn_head.tools_open` 会看见两笔开着，`departed` 的集合债也永远
     /// 差一个终局。
-    pub(crate) fn land_wake(
-        &self,
-        spec: &WakeSpec<'_>,
-    ) -> Result<(), symbio_core::AppendError> {
+    pub fn land_wake(&self, spec: &WakeSpec<'_>) -> Result<(), symbio_core::AppendError> {
         let facts = self.facts.range(Seq::new(0));
         for stale in facts.iter().filter(|e| {
             e.turn == self.turn && is_wake_request(e) && !wake_terminal(&facts, self.turn, e)
@@ -936,7 +933,7 @@ impl ToolPort {
     /// 「有结果节点」≠「工具回了话」：批尾收口给没跑到的调用补的是**框架的交代**
     /// （一句话占位），它的成因写在 `meta.failure_kind` 上。占位按成因落
     /// `failed{why}` 而不是 `response`——否则中止的调用在日志里说「回来了」，而它
-    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
+    /// 从未执行，`await-tools` 的 `failed` 出口就只剩 resume 一条路（[D-121](../../../docs/003-design/015-义务环.md#d-121-唤醒事实的行语义await-行的收清走协议格审批与补充重新开账 "DE-015-义务环")
     /// 的中止作用、DE-015 判据 6 场景三）。词表与判据同源：[`super::tools`] 门面的
     /// `is_unanswered` / `ABORTED` / `NOT_EXECUTED`。
     pub(crate) fn close_batch(&self, calls: &[ToolPortCall], outcomes: &[DispatchOutcome]) {
@@ -1088,9 +1085,9 @@ impl SessionDispatchPort {
 
     /// 本会话主体：节点诞生时写死的主体身份（D-147 档 2）。
     fn principal(&self) -> symbio_core::principal::Principal {
-        symbio_core::principal::Principal::from_legacy(
-            &symbio_core::request_principal(self.ctx.as_ref()),
-        )
+        symbio_core::principal::Principal::from_legacy(&symbio_core::request_principal(
+            self.ctx.as_ref(),
+        ))
     }
 
     /// 取走本轮产生的消息（调用方在桥释放前取）。
@@ -1191,9 +1188,7 @@ impl SessionDispatchPort {
             parent_id: Some(call_id.clone()),
             // 身份只写主体这一份（D-147）：工具结果的族由 `tool_principal` 折出，
             // 再写一遍 `role` 是两个表达说同一件事。
-            principal: Some(symbio_core::principal::Principal::tool_principal(
-                &name,
-            )),
+            principal: Some(symbio_core::principal::Principal::tool_principal(&name)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(text.clone())),
             status: Some(final_status),

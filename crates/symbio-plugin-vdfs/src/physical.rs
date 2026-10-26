@@ -20,22 +20,22 @@
 //! - `/docs`、`//srv/share/x` = 文件系统绝对（首部 `/` 是锚点，POSIX 根 / Windows 盘根）；
 //! - `<盘符>:/tmp/a.txt` = 带盘符的绝对路径。
 //!
-//! 四条都由 [`Path`] 自己的语义解析，本层不加第二条规则（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
+//! 四条都由 [`Path`] 自己的语义解析，本层不加第二条规则（[D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 //!
 //! ## 安全规则（自持，不经机制）
 //!
 //! 见 [`FsPolicy`]：路径黑名单 + `..` 穿越拒绝 + 符号链接复验，另有读大小 /
 //! 列目录条数上限。这些是**物理层专有**的规则，虚拟层没有对应物。
 
+use async_trait::async_trait;
+use base64::Engine as _;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use symbio_core::{
     vdfs_has_parent_segment, vdfs_path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
 use symbio_core::{VdfsRequest, VdfsResponse};
-use async_trait::async_trait;
-use base64::Engine as _;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 单文件读取上限（10MB）
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
@@ -145,7 +145,7 @@ fn workdir(ctx: &VdfsContext) -> VdfsResult<PathBuf> {
 
 /// 地址 → 真实路径。
 ///
-/// **首部的 `/` 是文件系统的绝对锚点，原样交给 [`Path`]**（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）：
+/// **首部的 `/` 是文件系统的绝对锚点，原样交给 [`Path`]**（[D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）：
 /// `docs` 落在 `{workdir}/docs`，`/docs` 落在文件系统根下的 `docs`。相对段经 [`Path::join`]——它
 /// 自带操作系统语义：POSIX 下 `join("/docs")` 直接替换成 `/docs`，Windows 下
 /// `is_absolute()` 为假但有根，于是带着工作目录的盘符落到 `<盘符>:\docs`。

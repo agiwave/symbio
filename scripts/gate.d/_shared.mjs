@@ -201,7 +201,14 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: S04 调度者与租约的同一增量在 CI 口径下修一格（1437→1443），逐条归属见上方 `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: 读史窗口的同一增量在 CI 口径下修一格（1443→1445），逐条归属见上方 `rustTests` 的注。非侵蚀。
   // baseline-allow ciRustTestsTotal: Agent 权限四字段执行面的同一增量在 CI 口径下修一格（1445→1476）——31 条判据全落在 symbio lib 目标（`symbio_core/agent/tests.rs` 与四个 `*.test.rs`），`--workspace` 求和同样 +31。逐条归属见上方 `rustTests` 的注。非侵蚀。
-  ciRustTestsTotal: 1476,
+  // baseline-allow ciRustTestsTotal: 口径重定（1476 → 2328，D-191 crate 化）——**不是新增用例，
+  // 而是把漏掉的用例接回判据**。拆分前 `cargo test -p symbio` 一个命令跑完 21 插件 + core +
+  // providers 的用例（1476 是那时 `--workspace` 的求和），拆分后同一个命令只跑宿主门面
+  // （实测 `0 passed`），而 `--workspace` 求和变成**全部 33 个 crate**（2328 条）。
+  // 差额 852 条是拆分前就存在、只是从未被"求和口径"覆盖到的插件用例——它们此前以
+  // `-p symbio` 的分包口径被数进 `rustTests`，两个口径各数各的。现在本地与 CI **只留
+  // 一个口径**（`cargo test --workspace` 求和），数字变大是口径合并的结果，非侵蚀。
+  ciRustTestsTotal: 2328,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

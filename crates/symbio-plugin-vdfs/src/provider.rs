@@ -29,14 +29,14 @@
 use super::fs::{UnifiedFs, VDFS_ADDR_ROOT};
 use super::host::call_params;
 use super::protocol::{VdfsEditResponse, VdfsSearchResult};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use symbio_core::vdfs_context;
 use symbio_core::{
     DynVdfsProvider, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsRequest,
     VdfsResult, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
 use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, Registry};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 /// 把路径归一成可做前缀比较的键（大小写、分隔符、Windows `\\?\` 前缀）。
 fn audit_path_key(p: &Path) -> String {

@@ -296,12 +296,10 @@ async fn persist_failure_merges_partial_output() {
     seed_user_message(&store.session_dir(sid).expect("会话目录未建出"));
 
     // 在途镜像：根 Turn + 一条流式半截正文（快照只攒到半句）
-    let transcript = Arc::new(tokio::sync::Mutex::new(
-        crate::transcript::Transcript::new(
-            sid.into(),
-            Arc::new(VdfsChangeSubscriptions::default()),
-        ),
-    ));
+    let transcript = Arc::new(tokio::sync::Mutex::new(crate::transcript::Transcript::new(
+        sid.into(),
+        Arc::new(VdfsChangeSubscriptions::default()),
+    )));
     transcript
         .lock()
         .await

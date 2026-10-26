@@ -12,7 +12,7 @@
 //! | ② SSRF | 回环 / 内网 / 链路本地按 **IP 语义**拒 | [`is_private_or_local_host`] |
 //! | ③ Agent 声明 | 出站主机须在**当前 Agent** 的 `permissions.network.domains` 里 | [`agent_network_allowed`] |
 //!
-//! ③ 是 [D-153](../../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")
+//! ③ 是 [D-153](../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")
 //! 的落地：没有选中 Agent 时它恒过（宿主态，无 manifest 可声明）；选中了而清单为空
 //! ⇒ 一律拒（grant 语义，空清单即没有授权）。
 

@@ -4,12 +4,12 @@
 
 use super::*;
 
+use async_trait::async_trait;
 use symbio_core::{
     capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
     family, CapabilityRow, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
-use async_trait::async_trait;
 
 #[test]
 fn tool_name_uses_protocol_safe_chars() {

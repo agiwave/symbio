@@ -30,8 +30,8 @@
 
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore};
-use symbio_deploy::PLUGIN_ID_AGENT;
-use symbio_providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::{
     descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };
@@ -40,8 +40,8 @@ use symbio_core::{
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use async_trait::async_trait;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_AGENT;
+use symbio_providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
 
 const LABEL: &str = "智能体";
 

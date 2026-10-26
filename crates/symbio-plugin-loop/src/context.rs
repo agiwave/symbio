@@ -13,8 +13,8 @@
 //! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议 |
 //! | [`pipeline`] | 压缩执行流水线：阈值触发的自动压缩与用户重试共用的唯一内核 |
 //!
-//! **对话体不在这里加工**（[D-078](../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README")）：请求里的历史是
-//! 事实网格的纯投影（[D-048a](../session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "crates/symbio-plugin-session/src/README")），请求视图级的
+//! **对话体不在这里加工**（[D-078](../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README")）：请求里的历史是
+//! 事实网格的纯投影（[D-048a](../../symbio-plugin-session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "crates/symbio-plugin-session/src/README")），请求视图级的
 //! 内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已退役。本域对历史的唯一动作是
 //! **换基**（语义压缩写成 `session.consolidated` 一格事实），不是改写视图。
 //!

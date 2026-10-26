@@ -38,21 +38,19 @@
 //! 三者共有的只是上面那段协议舞步；帧语义各不相同，抽成一份反而要把三种行为
 //! 参数化。因此这里只保留「收 → 攒 → 取最后一条已完成的助手正文」。
 
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
-use symbio_core::chat_node::{
-    message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES,
-};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use symbio_core::chat_node::{message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES};
 use symbio_core::{
     event_bus_register_subscriber, event_bus_resync_of, event_bus_unregister_subscriber,
     event_bus_vdfs_change_of, Plugin, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
     VdfsChange, VdfsContent, VdfsNode, EVENT_BUS_KIND_VDFS, PATH, SESSION_ID, VDFS_STATUS_FAILED,
     VDFS_STATUS_WORKING, WORKDIR,
 };
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 use tokio::sync::mpsc;
 
 /// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `TURN_TIMEOUT` 同量级：一轮里

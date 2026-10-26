@@ -222,7 +222,7 @@ pub(crate) async fn prepare_turn_inputs(
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
     // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——
     // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
-    // [D-078](../../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役。
+    // [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役。
     //
     // ── ⑥′ 委派者真源段（D-047）：Q1 判定 + Q2 能力目录 ─────────────────────
     //
@@ -239,10 +239,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
     let workers = context
         .session
-        .run_op::<Vec<symbio_core::WorkerProgress>>(
-            symbio_core::run_ops::WORKER_PROGRESS,
-            (),
-        )
+        .run_op::<Vec<symbio_core::WorkerProgress>>(symbio_core::run_ops::WORKER_PROGRESS, ())
         .await
         .map_err(TurnExit::Failed)?;
     // Q1 的三条判据按**本会话当前配置**取（`worker_*` 三字段），不再读判定模块的
@@ -309,17 +306,14 @@ pub(crate) async fn run_recall(
     // 召回的可见切片按它收放——判断记忆只给自己会话看，共享记忆只
     // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
     let recall_viewer = symbio_core::request_principal(ctx.as_ref());
-    // 事实是**值**（[D-084](../../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
+    // 事实是**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
     // 本会话切片取一次，召回 / 调度段 / 技能路由三个读方共用——同一轮内
     // 它们看到的是同一刻的事实，不各开各的文件。
     let facts = context.session.facts_snapshot();
     turn.recall_view = super::super::memory_events::recall_view(
         context
             .session
-            .run_op::<Vec<symbio_core::FleetSnapshot>>(
-                symbio_core::run_ops::RECALL_SNAPSHOTS,
-                (),
-            )
+            .run_op::<Vec<symbio_core::FleetSnapshot>>(symbio_core::run_ops::RECALL_SNAPSHOTS, ())
             .await
             .map_err(super::super::turn_exec::ActorError::Read)?,
         recall_query.as_deref(),
@@ -329,7 +323,7 @@ pub(crate) async fn run_recall(
     // 召回同一条口径（同一轮内集合不漂移）。
     turn.ready_section =
         super::super::task_events::prompt_section(&facts, context.session.task_cap());
-    // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
     // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
     // 临时会话同「不读不写」——没有事实源就没有技能，无从判。
@@ -439,7 +433,7 @@ pub(crate) async fn run_reflex(
 /// 整轮**——压缩是优化项，理由见函数体内的注释。
 ///
 /// 55% 水位提醒（nudge）已随 `context_compact` 一并退役
-/// （[D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
+/// （[D-072](../../../symbio-plugin-session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）：它存在的唯一理由是引导模型主动调用那个工具，工具没了，提醒就是
 /// 一条指向空处的指令。将来若要恢复「模型主动压」：注册成能力行走 v2 分发，再评估
 /// 是否恢复提醒——不再回 v1 的 `close_turn` 拦截形态。
 pub(crate) async fn run_compress(

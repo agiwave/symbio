@@ -49,8 +49,7 @@ impl ModelProtocol for GeminiProtocol {
         messages: &[symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
-        let flattened_messages =
-            crate::message_builder::flatten_chat_messages(messages);
+        let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
         let mut contents: Vec<Value> = Vec::new();
         for m in &flattened_messages {
             if m.role == NodeRole::System {

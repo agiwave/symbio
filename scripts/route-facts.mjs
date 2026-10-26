@@ -155,7 +155,7 @@ export function extractRouteArms(t, pluginName) {
   return [...out].sort();
 }
 
-/** 插件根目录（`crates/crates/plugins`）下的一层目录名 = 路由前缀 = 实例名 */
+/** 插件 crate（`crates/symbio-plugin-*`，去掉 api）的名字后缀 = 路由前缀 = 实例名 */
 export function pluginDirs(root) {
   const base = path.join(root, "crates");
   return readdirSync(base, { withFileTypes: true })
@@ -188,13 +188,26 @@ export function controlPlaneRoutes(root) {
 }
 
 /**
- * `crates/symbio-plugin-api/src/routes.rs` 里的 `ROUTE_*` 声明（名、值、行号）。
+ * 路由常量的**唯一**定义处。拆 crate（D-191）前它在 `crates/routes.rs`，拆后随
+ * `symbio-plugin-api` 下沉；两处不同步时 `existsSync` 恒假 ⇒ 本函数返回空清单，
+ * E-012 从「每条常量都判」退化成「无可判」，**以绿灯形式静默失效**。
+ * 故路径只在这里写一次，调用方一律引用它。
+ */
+export const ROUTE_CONST_FILE = ["crates", "symbio-plugin-api", "src", "routes.rs"];
+
+/** `ROUTE_CONST_FILE` 的绝对路径（供报错定位用）。 */
+export function routeConstPath(root) {
+  return path.join(root, ...ROUTE_CONST_FILE);
+}
+
+/**
+ * `ROUTE_*` 声明（名、值、行号）。
  *
  * 行号来自**去注释后**的文本——`stripComments` 保留行结构，所以报出来的位置就是
  * 编辑器里那一行。注释里的示例（``/// `ROUTE_FOO` ``）因此不会被当成声明。
  */
 export function routeConstDecls(root) {
-  const abs = path.join(root, "crates", "routes.rs");
+  const abs = routeConstPath(root);
   if (!existsSync(abs)) return [];
   const out = [];
   const lines = stripComments(readFileSync(abs, "utf8")).split("\n");

@@ -5,18 +5,18 @@
 //! 分发给 [`TurnOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
 //! 生命周期日志（请求发起 → 响应头 → 首块 → 首条内容 → 流结束）让卡死可定位到阶段，
 //! 阶段对照表见 [`parse_sse_stream`] 注释。
-use symbio_core::plugin_error;
-use symbio_core::plugin_info;
-use symbio_core::plugin_warn;
 use crate::http::STREAM_IDLE_TIMEOUT;
+use futures::StreamExt;
+use std::collections::HashMap;
 use symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_TOOL,
 };
+use symbio_core::plugin_error;
+use symbio_core::plugin_info;
+use symbio_core::plugin_warn;
 use symbio_core::ModelUsage;
 use symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
 use symbio_core::{ExecAbortSignal, ExecEventSink};
-use futures::StreamExt;
-use std::collections::HashMap;
 
 use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};
 use super::tool_accumulator::TurnToolCallAccumulator;
@@ -703,7 +703,7 @@ async fn dispatch_protocol_event(
             }
 
             // 工具调用骨架节点（`Skeleton` + tag `tool`）：自身 content 即**请求参数**（不设独立的请求子节点，
-            // 见 `../session/docs/105-node-state-streaming.md` §2.2）。两条路径与正文 / 推理
+            // 见 `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md` §2.2）。两条路径与正文 / 推理
             // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增量 → 窄追加（`Append`，O(delta)），接收端尾部拼接。

@@ -17,9 +17,9 @@
 //! `DirVdfs` / `SingleFileVdfs`
 //! 自己身上。
 
-use symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 
 // 注：早先这里有 `category_dir(category)` = `<homedir>/<category>`，按插件名反推
 // 全局落位。homedir 已下沉到 `home` 插件独有，core 不再提供全局根，故删除——
@@ -233,7 +233,9 @@ pub async fn write_entry(
         .await
         .map_err(|e| VdfsError::internal(format!("写入临时文件失败：{e}")))?;
     if let Err(e) = tokio::fs::rename(&tmp_path, &final_path).await {
-        let _ = tokio::fs::remove_file(&tmp_path).await;
+        // 这是**失败路径的清理**：rename 已经失败，临时文件删不掉也不能覆盖掉真正的错因
+        // （下面返回的是 rename 的 e），忽略顺序刻意如此。
+        let _ = tokio::fs::remove_file(&tmp_path).await; // grep-audit-allow S-002-bonus: 失败路径清理，吞掉清理错误才能保住真正的错因
         return Err(VdfsError::internal(format!("落盘失败：{e}")));
     }
     Ok(created)

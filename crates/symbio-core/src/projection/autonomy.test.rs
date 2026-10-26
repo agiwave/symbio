@@ -6,7 +6,9 @@
 
 use super::autonomy;
 use crate::projection::autonomy::AutonomyView;
-use crate::{Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
+use crate::{
+    Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
+};
 
 fn held(id: &str, task: &str, ts: i64) -> Event {
     Event::pending(

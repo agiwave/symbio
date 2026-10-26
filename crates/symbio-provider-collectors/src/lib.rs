@@ -3,7 +3,7 @@
 //! ## 为什么在 `providers/` 而不是 `symbio_core`
 //!
 //! 收集口 **trait** 是契约（住 `symbio_core::capability`）；它的**默认实现**
-//! 是「不存在第二种实现的机制底座」，因此按 [`crate::providers`] 的第二种接线方式
+//! 是「不存在第二种实现的机制底座」，因此按 `crate::providers` 的第二种接线方式
 //! **直接组合具体类型，不套 `dyn` 工厂**——再套一层 `creator_create_object` 只是把一次
 //! 构造换成一次字符串查表（与 `vdfs_service` 同款判断；D-035 决策 1.1「≥2 实现才
 //! provider 化」因此**不适用于这里**）。
@@ -40,8 +40,8 @@ mod tool_visitor;
 pub use approval::approval_gate;
 pub use tool_visitor::DefaultToolVisitor;
 
-use symbio_core::Registry;
 use std::sync::Arc;
+use symbio_core::Registry;
 
 /// 三条收集通道的**共用构造点**（/ 04 报告建议 2）。
 ///
@@ -80,5 +80,5 @@ pub fn new_registry() -> Arc<dyn Registry> {
 }
 
 #[cfg(test)]
-#[path = "mod.test.rs"]
+#[path = "lib.test.rs"]
 mod tests;

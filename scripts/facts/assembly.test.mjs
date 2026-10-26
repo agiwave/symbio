@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import assembly from './assembly.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const GEN_FILE = path.join(REPO, 'crates', 'assembly.generated.rs')
+const GEN_FILE = path.join(REPO, 'crates', 'symbio-deploy', 'src', 'lib.rs')
 
 /**
  * 一棵只有两个插件目录的临时仓库。
@@ -30,7 +30,7 @@ function fixtureRepo(overrides = {}) {
     ...overrides,
   }
   for (const [id, yml] of Object.entries(plugins)) {
-    const dir = path.join(root, 'crates', 'plugins', id)
+    const dir = path.join(root, 'crates', `symbio-plugin-${id}`)
     fs.mkdirSync(dir, { recursive: true })
     if (yml !== null) fs.writeFileSync(path.join(dir, 'PLUGIN.yml'), yml)
   }
@@ -84,7 +84,7 @@ test('plugin_undisablable: true ⇒ 进不可停用集', () => {
 test('缺 PLUGIN.yml ⇒ 抛错（新插件必须带声明）', () => {
   assert.throws(
     () => withRepo({ beta: null }, (root) => render(root)),
-    /缺少 symbio\/src\/plugins\/beta\/PLUGIN\.yml/,
+    /缺少 crates\/symbio-plugin-beta\/PLUGIN\.yml/,
   )
 })
 

@@ -25,8 +25,7 @@ fn seeded_dir(tag: &str) -> (std::path::PathBuf, u64) {
     let dir = std::env::temp_dir().join(format!("symbio-v2msg-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时会话目录");
-    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("打开事实源");
+    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("打开事实源");
     let seq = store
         .append(
             symbio_core::Event::pending(
@@ -70,8 +69,7 @@ fn assert_landed(outcome: AppendOutcome, what: &str) {
 }
 
 fn read_facts(dir: &std::path::Path) -> Vec<symbio_core::Event> {
-    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("重开事实源");
+    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("重开事实源");
     store
         .range(Seq::new(0))
         .into_iter()
@@ -328,8 +326,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
 fn an_edit_while_the_token_is_held_is_parked_not_dropped() {
     let (dir, _user_seq) = seeded_dir("parked");
     // 令牌持有方：它一活着，后来的 `EventWalStore::open` 就拿不到写者令牌。
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
 
     assert!(
         matches!(
@@ -371,8 +368,7 @@ fn an_edit_while_the_token_is_held_is_parked_not_dropped() {
 #[test]
 fn draining_the_park_is_idempotent_across_windows() {
     let (dir, _) = seeded_dir("park-drain-once");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
     assert!(matches!(
         edited(&open_wal(&dir), &sid_of(&dir), &patched_user("u-1", "一次")),
         AppendOutcome::Parked
@@ -407,8 +403,7 @@ fn draining_an_empty_park_is_a_noop() {
         "就地落格",
     );
     let before = read_facts(&dir).len();
-    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("打开事实源");
+    let store = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("打开事实源");
     drain_parked(&store, &sid_of(&dir));
     assert_eq!(read_facts(&dir).len(), before, "空寄存区补落应什么都不做");
     std::fs::remove_dir_all(&dir).ok();
@@ -418,8 +413,7 @@ fn draining_an_empty_park_is_a_noop() {
 #[test]
 fn a_truncate_while_the_token_is_held_is_parked_not_dropped() {
     let (dir, _user_seq) = seeded_dir("parked-remove");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
 
     assert!(matches!(
         removed(&open_wal(&dir), &sid_of(&dir), &["u-1".into(), "T1".into()]),
@@ -453,8 +447,7 @@ fn a_truncate_while_the_token_is_held_is_parked_not_dropped() {
 #[test]
 fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
     let (dir, _first_seq) = seeded_dir("park-anchor");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
 
     // 令牌被占 ⇒ 编辑寄存（此刻锚还没算）。
     // `ghost` 无承载 ⇒ 若此刻算锚会是切片末尾 = 0。
@@ -565,8 +558,7 @@ fn a_parked_change_is_on_disk_and_lands_for_a_fresh_token_holder() {
 #[test]
 fn parked_changes_land_in_park_order() {
     let (dir, _) = seeded_dir("park-order");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
     let second = open_wal(&dir);
 
     assert!(matches!(
@@ -613,8 +605,7 @@ fn parked_changes_land_in_park_order() {
 #[test]
 fn a_staged_half_piece_never_lands_and_is_cleaned_up() {
     let (dir, _) = seeded_dir("park-staged");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
     assert!(matches!(
         edited(
             &open_wal(&dir),
@@ -652,8 +643,7 @@ fn a_staged_half_piece_never_lands_and_is_cleaned_up() {
 #[test]
 fn a_full_park_drops_the_oldest_entry() {
     let (dir, _) = seeded_dir("park-cap");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
 
     // 预置满寄存器：名字全部**早于**真实时钟读数的寄存件（首位字符 `0`）。
     let pending = super::pending_dir(&dir);
@@ -702,8 +692,7 @@ fn a_full_park_drops_the_oldest_entry() {
 #[test]
 fn a_park_that_cannot_be_written_reports_failure() {
     let (dir, _) = seeded_dir("park-fails");
-    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
-        .expect("持令牌打开");
+    let holder = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).expect("持令牌打开");
     // 寄存区目录的父段被一个普通文件占了 ⇒ create_dir_all 必失败。
     std::fs::write(
         dir.join(crate::paths::TRANSCRIPTS_SUBDIR),

@@ -1,8 +1,8 @@
 //! `runtime::project` 的判别表：哪些格改变结局、哪些不改变、最后一条证据胜出。
 
 use super::*;
-use symbio_core::{Entity, Verb};
 use serde_json::json;
+use symbio_core::{Entity, Verb};
 
 /// 一条生命周期事件（`turn` 分桶与投影无关，取 1）。
 fn ev(kind: &str, verb: Verb, payload: serde_json::Value) -> Event {

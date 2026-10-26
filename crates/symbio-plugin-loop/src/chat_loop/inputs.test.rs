@@ -9,8 +9,8 @@
 //! - **全空才兜底**：兜底串只在「显式段与注册段都为空」时出现。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
 use symbio_core::{CapabilityRow, PluginSimpleRequest, Registry};
+use symbio_providers::DefaultToolVisitor;
 
 /// 构造带 CAPABILITY_VISITOR 的上下文，按顺序注册 `prompts`
 async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn PluginInvokeRequest> {

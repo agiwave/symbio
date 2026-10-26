@@ -11,8 +11,8 @@
 //! 把窗口顶出去；断言「正文」的用例则与窗口无关（合帧逐字等价）。
 
 use super::*;
-use symbio_core::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use std::sync::Mutex;
+use symbio_core::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
@@ -605,11 +605,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
 fn session_state_change_lands_on_the_session_leaf() {
     let (mut tr, seen) = transcript();
     tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
-    let node = symbio_core::VdfsNode::file(
-        "s1",
-        "会话",
-        symbio_core::VdfsAccess::READ_WRITE,
-    );
+    let node = symbio_core::VdfsNode::file("s1", "会话", symbio_core::VdfsAccess::READ_WRITE);
     tr.emit_session_state(Some(node));
 
     let d = seen_of(&seen);

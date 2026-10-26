@@ -3,7 +3,7 @@
 //! ## 它读写的是**别人的存储**，走的是地址面
 //!
 //! 切出本插件前它直接持有 `Weak<SessionPlugin>` 并调 `get_or_create_session` /
-//! `save_session`（宿主的私有项，[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") P3 那条
+//! `save_session`（宿主的私有项，[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") P3 那条
 //! 「被切的那片不再 `use super::` 宿主的私有项」要消掉的正是这个）。现在它对会话只说两句话：
 //! `stat(<会话>)` 读旧值、`write(<会话>)` 写 `{metadata:{heartbeat:{…}}}`——浅合并由会话侧
 //! 的写窗口做（`Session::merge_metadata_object` 是 metadata 写入的唯一实现），本文件不复制那份算术。
@@ -21,15 +21,15 @@
 
 use super::plugin::HeartbeatPlugin;
 use super::setting::HeartbeatConfig;
-use symbio_deploy::PLUGIN_ID_SESSION;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::{Arc, Weak};
 use symbio_core::{
     vdfs_context, Capability, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, VdfsContent, VdfsContext, VdfsRequest,
     VdfsResponse, SESSION_ID,
 };
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::sync::{Arc, Weak};
+use symbio_deploy::PLUGIN_ID_SESSION;
 
 /// 心跳间隔下限（秒）：调度器扫描周期 15s + 抖动 0-30s，低于 10s 的间隔
 /// 没有可观测意义，只会制造密集空转。

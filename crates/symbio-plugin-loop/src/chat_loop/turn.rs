@@ -83,8 +83,8 @@ pub(crate) async fn settle_reasoning(
 /// 工具由 v2 运行器在 `turn_exec::execute_turn` 内部经 `SessionDispatchPort` 跑完、
 /// 副作用直落事实。v1 外壳在这里有一段「工具分发 + `context_compact` 拦截」分支，
 /// 其进入条件（`TurnOutput.tool_calls` 非空）在 v2 恒不成立——生产与测试都不可达，
-/// 随外壳删除（[DE-014 步骤 5a](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")，
-/// 其中 `context_compact` 那一条链的裁决见 [D-072](../../session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）；
+/// 随外壳删除（[DE-014 步骤 5a](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")，
+/// 其中 `context_compact` 那一条链的裁决见 [D-072](../../../symbio-plugin-session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）；
 /// 真实时序见 `turn_exec` / `turn_runner` 的模块文档。
 pub(crate) async fn persist_turn(
     sink: &ExecEventSink,

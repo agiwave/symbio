@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 // 脚本的仓库根由 `--root=` 注入，故这里在临时目录造一棵**最小仓库**：
 //   <root>/tauri/index.html  → /src/main.ts   （前端侧需要一个可达入口，否则
 //   <root>/tauri/src/main.ts                   前端分支会把 fixture 当死代码）
-//   <root>/crates/crates/*.rs                    （Rust 侧被检对象）
+//   <root>/crates/*.rs                    （Rust 侧被检对象）
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
 function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec = null, ts = {} } = {}) {

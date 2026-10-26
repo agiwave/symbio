@@ -16,12 +16,12 @@
 //! - **不持有**任何 stdio 进程 / http 连接（按需 lazy 加载）
 
 use crate::schemas::mcp_config::McpServerConfig;
-use symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
-};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
+};
 
 use super::manager::McpManager;
 use super::types::{McpTool, McpToolCallResponse};

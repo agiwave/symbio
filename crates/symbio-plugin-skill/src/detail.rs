@@ -10,9 +10,7 @@
 //! 保存时映射为行业键 `allowedTools`/`disable-model-invocation`）。
 //! BUG-SR6 硬约束（目录名 == frontmatter name）由 `manifest_to_skill_md` 强制。
 
-use symbio_core::{
-    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
-};
+use symbio_core::{DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection};
 
 fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     DetailField {

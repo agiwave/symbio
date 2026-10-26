@@ -20,10 +20,10 @@ import { render } from './routes-ts.mjs'
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const GEN_FILE = path.join(REPO, 'tauri', 'src', 'constants', 'routes.gen.ts')
 
-/** 一棵只有 `demo` 插件的临时仓库（route-facts 读 `<root>/crates/crates/plugins`） */
+/** 一棵只有 `demo` 插件的临时仓库（route-facts 读 `<root>/crates/symbio-plugin-*`） */
 function fixtureRepo(pluginName, routeSource) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routes-ts-fact-'))
-  const dir = path.join(root, 'crates', 'plugins', pluginName)
+  const dir = path.join(root, 'crates', `symbio-plugin-${pluginName}`, 'src')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'plugin.rs'), routeSource)
   return root

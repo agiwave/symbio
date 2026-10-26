@@ -11,7 +11,7 @@ use serde_json::json;
 /// 表上事件名的条数 = 名字表里**事件名**常量的条数。
 ///
 /// `event/mod.rs` 里另有两条 `EVENT_TRIGGER_*` 常量：`meta.trigger` 的**键名**与它的
-/// `kind` 取值（[D-077](../../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）。它们不是事件名，
+/// `kind` 取值（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）。它们不是事件名，
 /// 所以不进这张表——这条断言把「43 个事件名」钉住，将来加名字要同批改这里。
 const DECLARED_EVENT_NAMES: usize = 43;
 

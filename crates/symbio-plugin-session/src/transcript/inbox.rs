@@ -27,7 +27,7 @@
 //!    忙窗里本模块的抢占判定者（[`PreemptionDecider`]）会评估当前任务要不要挂起
 //!    （S8 第 19 步），结论经 [`super::super::active::PreemptPending`] 跨过忙窗、
 //!    在空闲分支落成事实。挂起 / 恢复**都不开新轮、都不动队列**，所以与「不抢占」
-//!    不冲突（判定顺序见 [04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
+//!    不冲突（判定顺序见 [04 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
 //! 3. **机制统一**：顶层会话与子智能体空间共用本模块，没有"子智能体专用分支"。
 //!
 //! ## 为什么是**每插件实例一个**消费者
@@ -42,6 +42,7 @@
 use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
+use std::sync::Arc;
 use symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use symbio_core::{
     ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
@@ -49,7 +50,6 @@ use symbio_core::{
     EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, PRINCIPAL_REFLEX,
     SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
-use std::sync::Arc;
 
 /// 重试退避：**启动失败被放回队首**或**落格失败留着未结清项**时的重试间隔。
 ///
@@ -111,7 +111,7 @@ fn announce_drained(change_subs: &VdfsChangeSubscriptions, session_id: &str, bat
 /// 取一个会话的队首只需要：**上界从哪来**（`config`）、**队列在哪**（`state.inner.inbox`）、
 /// **通知投给谁**（`change_subs`）——插件本身在这一步没有贡献。于是它不住在
 /// `impl SessionPlugin` 上，需要它的一方（`chat_loop::SupplementDrain`）拿的就是这三样，
-/// 而不是整个插件（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）。
+/// 而不是整个插件（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）。
 ///
 /// ## 上界与通知都不另写一份
 ///
@@ -144,7 +144,7 @@ pub(crate) fn take_inbox_batch_sync(
 // 唯一生产消费方就是本文件的忙窗判定与空闲落格链（D-190）；判定是纯函数，
 // 落格是事件，两者各住一边。
 
-/// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+/// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Preemption {
     /// 当前无在跑任务——插话放行，直接开始新 turn。
@@ -158,7 +158,7 @@ pub enum Preemption {
     TimeoutDefaultContinue,
 }
 
-/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）。
+/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")）。
 ///
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
@@ -594,7 +594,7 @@ impl SessionPlugin {
         Ok(Some(anchor))
     }
 
-    /// 忙窗内的抢占判定（S8 第 19 步，[04 §2.1](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+    /// 忙窗内的抢占判定（S8 第 19 步，[04 §2.1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
     ///
     /// 三条边界，少一条这个函数就会变成噪声或变成第二个时延源：
     ///

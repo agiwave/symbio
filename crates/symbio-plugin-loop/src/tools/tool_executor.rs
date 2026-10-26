@@ -12,6 +12,8 @@
 
 use symbio_core::TurnToolCallInfo;
 
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
     Event, PluginInvokeRequestExt, Store,
@@ -20,8 +22,6 @@ use symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
 };
 use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 mod breaker;
 mod decls;
@@ -211,9 +211,7 @@ pub(super) fn build_user_prompt_message(
         // 等待用户的交互卡同样是**工具的结果**：族归工具自己。
         // 身份只写这一份——`role` 那格不再跟着写（D-147：主体在场时折叠读主体，
         // 第二份写了也不生效，只会在改写时留下「名实不符」的机会）。
-        principal: Some(symbio_core::principal::Principal::tool_principal(
-            tool_name,
-        )),
+        principal: Some(symbio_core::principal::Principal::tool_principal(tool_name)),
         msg_type: Some(NodeKind::Interaction),
         content: Some(MessageContent::Text(pending.text.clone())),
         status: Some(NodeStatus::WaitingUserAction),
@@ -350,9 +348,7 @@ pub async fn execute_tool_async(
             // 诚实的 NotFound（文案与机制化之前逐字一致）。
             Box::pin(async move {
                 match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
-                    Some(cap) => {
-                        symbio_core::capability_invoke(cap.as_ref(), tool_ctx2).await
-                    }
+                    Some(cap) => symbio_core::capability_invoke(cap.as_ref(), tool_ctx2).await,
                     None => Err(PluginError::NotFound(format!(
                         "Tool not found: {canonical}"
                     ))),
@@ -397,7 +393,7 @@ pub async fn execute_tool_async(
     //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
-    //      永远停在 `Streaming`（违反 `../../session/docs/105-node-state-streaming.md` §8 #11）；
+    //      永远停在 `Streaming`（违反 `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md` §8 #11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
     // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
     //

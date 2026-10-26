@@ -349,6 +349,12 @@ export const TEST_ONLY = [
   // 子日志、日志已被删）断言预期表现。
   'gate.d/_logs',
   'cli-binary',
+  // `cargo-doc-gate`：`cargo doc` 的**内容指纹闸门**（`10-backend` 那一步就调它）。
+  // 登记成 TEST_ONLY 而不是 GUARDS：它本身不是一个静态审计，判据只有两条方向要钉——
+  // 「输入变了必须变」与「产物 / md 不许影响指纹」。后者尤其不能靠人工小心：
+  // 戳就写在 `target/` 里，把 `target/` 收进指纹会让「刚写完戳就不新鲜」，机制自锁
+  // 成每轮白跑一遍 1m36s，而且**灯是绿的**（只是慢），没人会去查。
+  'cargo-doc-gate',
   'tauri-binary',
   'schema-audit',
   'core-surface-audit',

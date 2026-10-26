@@ -108,6 +108,13 @@ base64 = "0.22.1"
 tempfile = "3.27.0"
 
 [dev-dependencies]
+# 这 8 条 `host::tests` 是**跨插件的装配用例**：它们要的是「一整棵 composite 子树」，
+# 而子树的每个插件各自用一个 `submit_object_creator!` 注册工厂（inventory）。
+# crate 化（D-191）之后，`cargo test -p symbio-plugin-agent` 的测试二进制里只有本 crate，
+# 别的插件工厂一个都不在 ⇒ `creator_create_object` 返回 None，用例报「拒绝接入」。
+# 把宿主门面挂成 dev-dependency：它 `pub use` 全部插件 crate，链接进来就把注册表补齐。
+# dev-依赖成环是 Cargo 允许的（`symbio` → 本 crate 是普通依赖，本 crate → `symbio` 只在测试里）。
+symbio = { path = "../symbio" }
 tempfile = "3.27.0"
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { version = "1.53.1", features = ["test-util"] }

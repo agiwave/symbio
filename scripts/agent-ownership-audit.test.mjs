@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url'
 // 「没有任何东西会因此变红」的形状，判据写错等于回到没有守卫之前。
 //
 // 仓库根经 `--root=` 注入，故这里在临时目录造一棵最小仓库：
-//   <root>/crates/crates/plugins/<name>/          插件目录（AO-001/003/005/006 的目录事实）
+//   <root>/crates/symbio-plugin-<name>/    插件 crate 目录（AO-001/003/005/006 的目录事实；
+//                                          D-191 后一插件一 crate，旧布局是 crates/plugins/<name>）
 //   <root>/crates/symbio-plugin-agent/README.md  成员资格判词 + 兄弟插件指路
 //   <root>/crates/symbio-plugin-agent/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
 //   <root>/crates/symbio-deploy/src/lib.rs     装配清单（生成物，判据读它）
@@ -65,7 +66,7 @@ function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginD
     const agentHost = path.join(root, 'crates/symbio-plugin-agent/src/host')
     fs.mkdirSync(agentHost, { recursive: true })
     for (const name of ['agent', 'memory', 'setting', ...extraPluginDirs]) {
-      fs.mkdirSync(path.join(root, 'crates/crates/plugins', name), { recursive: true })
+      fs.mkdirSync(path.join(root, 'crates', `symbio-plugin-${name}`), { recursive: true })
     }
     fs.writeFileSync(path.join(root, 'crates/symbio-plugin-memory/README.md'), '# 记忆插件\n')
     fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/README.md'), readme ?? BASE_README)
@@ -74,9 +75,9 @@ function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginD
     for (const [name, src] of Object.entries(extraHost)) {
       fs.writeFileSync(path.join(agentHost, name), src)
     }
-    const assemblyDir = path.join(root, 'crates')
+    const assemblyDir = path.join(root, 'crates/symbio-deploy/src')
     fs.mkdirSync(assemblyDir, { recursive: true })
-    fs.writeFileSync(path.join(assemblyDir, 'assembly.generated.rs'), assembly ?? BASE_ASSEMBLY)
+    fs.writeFileSync(path.join(assemblyDir, 'lib.rs'), assembly ?? BASE_ASSEMBLY)
 
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,

@@ -32,7 +32,7 @@
  *                   唤醒 / 续写只能从事实进环
  *
  * 用法：
- *   node scripts/grep-audit.mjs            # 审计 crates/crates/plugins（全部插件）
+ *   node scripts/grep-audit.mjs            # 审计 crates/plugins（全部插件）
  *   node scripts/grep-audit.mjs --strict   # 严格模式：warning 也算失败
  *   SCOPE=<dir> node scripts/grep-audit.mjs
  *
@@ -85,14 +85,26 @@ const isDir = (p) => {
 
 function resolveScope() {
   if (process.env.SCOPE) return path.resolve(cwd, process.env.SCOPE)
-  for (const p of [
-    path.resolve(cwd, 'src/plugins'),
-    path.resolve(cwd, 'crates/crates/plugins'),
-    path.resolve(repoRoot, 'crates/crates/plugins'),
-  ]) {
+  // crate 化（D-191）后插件不再住一个目录：S-002 的扫描面是**整个 workspace 源树**，
+  // 插件与 core 都在 `crates/` 下；夹具仓库没有 `crates/` 时退回旧写法。
+  for (const p of [path.resolve(cwd, 'crates'), path.resolve(cwd, 'src/plugins')]) {
     if (isDir(p)) return p
   }
   return path.resolve(cwd, 'src/plugins')
+}
+
+/**
+ * `cwd` 是不是一棵仓库树（回归测试用 `spawn(cwd=<临时树>)` 注入夹具）。
+ *
+ * S-010 起的每条规则都要在「当前工作树」与「仓库根」之间选一个扫描基准：选错方向不会
+ * 报错，只会**去错的地方找**——夹具造的违规一条也搜不到，用例全红而真仓全绿。
+ *
+ * 标记随 D-191 换过一次：从前是 symbio/（壳目录），拆 crate 后根下再无该目录，
+ * 于是每条规则都恒落到 `repoRoot`。**六条规则各写了一遍同一个判断**，改一处漏五处，
+ * 故抽成这一格；标记必须与 `resolveScope` 同一口径（`crates/` 优先，symbio/ 兼容旧树）。
+ */
+function looksLikeRepoTree(dir) {
+  return isDir(path.resolve(dir, 'crates')) || isDir(path.resolve(dir, 'symbio'))
 }
 
 const scopeAbs = resolveScope()
@@ -116,7 +128,11 @@ function walk(dir) {
   return out
 }
 
-const files = walk(scopeAbs)
+// 生产路径才判：测试文件里 `Mutex::new` + 下一行 `.await` 是常态（锁根本没跨 await 持有），
+// 而 S-002 的 5 行窗口分不出「建锁」与「持锁」——crate 化后扫描面扩到整个 `crates/`，
+// 这条窗口噪声必须先挡住，否则守卫会红在 false positive 上、然后被人豁免到失效。
+const isTestFile = (f) => f.endsWith('.test.rs') || path.basename(f) === 'tests.rs'
+const files = walk(scopeAbs).filter((f) => !isTestFile(f))
 const linesOf = new Map()
 for (const f of files) {
   try {
@@ -371,8 +387,11 @@ const S010_SKIP_DIRS = new Set([
   '.venv',
   'tmp',
 ])
-// 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根
-const S010_ROOT = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+// 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根。
+// 「是不是仓库树」由 `looksLikeRepoTree` 统一判——从前这里各写一份 `isDir(cwd/'symbio')`，
+// D-191 之后根下再无 symbio/，标记恒假 ⇒ 夹具永远落到 `repoRoot`，S-010 的用例测的是
+// **真仓**而不是自己造的树（实测造在 tauri/src/schemas/x.ts 的违规被去真仓里找 ⇒ 全红）。
+const S010_ROOT = looksLikeRepoTree(cwd) ? cwd : repoRoot
 
 function walkS010(dir) {
   const out = []
@@ -398,7 +417,7 @@ const s010Self = fileURLToPath(import.meta.url)
 const s010Files = walkS010(S010_ROOT).filter((f) => {
   if (path.resolve(f) === path.resolve(s010Self)) return false
   const rel = path.relative(S010_ROOT, f).split(path.sep).join('/')
-  if (rel.startsWith('crates/symbio-plugin-vdfs/src/')) return false // 所有者
+  if (rel.startsWith('crates/symbio-plugin-vdfs/')) return false // 所有者（含 README：根名在它的文档里本来就该出现）
   if (rel.startsWith('docs/archive/')) return false // 历史
   if (rel.startsWith('cli/target/') || rel.startsWith('tauri/target/')) return false // 构建产物
   return true
@@ -453,27 +472,33 @@ console.log('--- S-011: 补充注入点位置检查 ---')
 
 const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 
+// 锚点文件只认 `src/<子路径>` 这一段后缀，不写完整路径：D-191 把插件平铺成
+// `crates/symbio-plugin-<id>` 的同时**也改变了归属**（这两个落点从 session 搬到 loop，
+// 并从单文件拆成目录：`turn_runner/stream.rs`、`turn_exec/call.rs`）。写死完整路径的
+// 后果不是报错而是**静默跳过**——`endsWith` 匹配不上 ⇒ 真仓里 S-011 长期以「跳过」的
+// 绿灯存在。锚点形态也随之下沉一层：`run.exchange\n  .extend(…)` 的链式写法让
+// `exchange\.extend\(` 这种紧凑正则匹配不上，故改为只认 `.extend(<目标>` 本身。
 const S011_PAIRS = [
   {
-    file: 'plugins/session/turn_runner.rs',
+    file: 'turn_runner/stream.rs',
     before: {
-      re: /exchange\.extend\(\s*tool_exchange_messages\(/,
+      re: /\.extend\(\s*tool_exchange_messages\(/,
       name: '2e 工具结果接进请求',
     },
     after: {
-      re: /exchange\.extend\(\s*inject\(/,
+      re: /\.extend\(\s*injected\b/,
       name: '2f 轮内补充接进请求',
     },
     why: '补充必须排在工具结果**之后**（插进 `assistant(tool_calls)` 与它的 `tool` 结果之间是协议级 400，且时间序颠倒）',
   },
   {
-    file: 'plugins/session/turn_exec.rs',
+    file: 'turn_exec/call.rs',
     before: {
       re: /supplement_into_request\(/,
       ex: /\bfn\s+supplement_into_request\(/,
       name: '`supplement_into_request` 抽干点',
     },
-    after: { re: /\breport\(/, name: '`report` 汇报判定' },
+    after: { re: /report\.as_ref\(\)/, name: '`report` 汇报派发点' },
     why: '必须先抽干再判定：`supplemented_at`（抽到补充 ⇒ 静默时钟归零）只有抽干之后才知道，反过来等于用户已开口、插件仍按"没人说话"报进度',
   },
 ]
@@ -558,7 +583,7 @@ console.log('--- S-012: 代码注释里的实施排期指认 ---')
 
 const S012_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 /** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
-const S012_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S012_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
 const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
 const S012_BATCH_RE = /批(?:次)?\s*\d/
 const S012_ANCHOR_RE = /plan\/\d+/
@@ -613,7 +638,7 @@ console.log()
 console.log('--- S-013: WalkBuilder 构造点的遍历序 ---')
 
 const S013_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
-const S013_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S013_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
 const S013_WALK_RE = /WalkBuilder::new\s*\(/
 const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
 /** 下一个函数起头：扫到它就把上一个 builder 的作用域关掉 */
@@ -684,13 +709,13 @@ console.log()
 // 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
 // 单测跑在临时 fixture 树里：那里没有真实仓库这么多存量债务，棘轮一比就报「基线该收紧」，
 // 把每条无关用例一起拖红。`LEGACY_ROLE_WRITE_BASELINE` 把基线搬到 fixture 上；扫描根
-// 由下面那条「cwd 下有 `symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
+// 由下面那条「cwd 下有 `crates/symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
 console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
 
 const S014_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
-const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S014_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
 // **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
-// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `crates/crates/...` 的几层目录，
+// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `crates/...` 的几层目录，
 // 存量也恒 0——与基线数字的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
 // 0 的 fixture 用例判红，守卫的测试自己成了噪音。判据用 `repoRoot`（脚本自身所在仓库）：
 // 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
@@ -775,8 +800,8 @@ console.log()
 // 「调用行自己带 `if let Err(`」这条判据把那种写法一并挡住（拆行时按上一行同看）。
 console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
 {
-  const S015_ROOTS = ['crates/crates/plugins']
-  const S015_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S015_ROOTS = ['crates']
+  const S015_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
   const S015_IS_REPO = path.resolve(S015_BASE) === path.resolve(repoRoot)
   const isComment = (l) => {
     const t = l.trimStart()
@@ -796,6 +821,7 @@ console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
   const isGateCall = (l) => /\bclosure_gate\s*\(/.test(l) && !/\bfn\s+closure_gate\b/.test(l)
   const handlesErr = (l) => l.includes('if let Err(')
   let s015 = 0
+  let s015Calls = 0
   const s015List = []
   for (const file of S015_ROOTS.flatMap((r) => walk(path.join(S015_BASE, r)))) {
     // 测试文件豁免：那里断言的是谓词本身，不是拒绝路径。
@@ -817,6 +843,7 @@ console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
         return
       }
       if (!isGateCall(l)) return
+      s015Calls++
       // 拆行写法：`if let Err(why) =` 上一行、调用在下一行 ⇒ 上一行同看。
       if (handlesErr(l)) return
       if (i > 0 && handlesErr(lines[i - 1])) return
@@ -834,7 +861,7 @@ console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
   } else {
     ok(
       S015_IS_REPO
-        ? 'S-015 通过：布尔壳零处、七处闸调用都当场处理 `Err`（全部走 closure_gate + deny）'
+        ? `S-015 通过：布尔壳零处、${s015Calls} 处闸调用都当场处理 \`Err\`（全部走 closure_gate + deny）`
         : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
     )
   }
@@ -864,7 +891,7 @@ console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许�
     'crates/symbio-plugin-loop/src/turn_runner/facts.rs',
     'crates/symbio-plugin-loop/src/turn_runner/settle.rs',
   ]
-  const S016_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S016_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
   const S016_IS_REPO = path.resolve(S016_BASE) === path.resolve(repoRoot)
   // 两种写法都要认：`json!({ "why": .. })`（键后冒号）与 `payload["why"] = ..`
   // （下标赋值）。只认前者会漏掉生产里真正在用的那种。
@@ -920,7 +947,7 @@ console.log()
 //     `loop_rows.rs` 里是视图字段名 `turn_head.resumed`，不在本规则范围内）。
 console.log('--- S-017: 恢复路径不许再有旁路 ---')
 {
-  const S017_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+  const S017_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
   const S017_IS_REPO = path.resolve(S017_BASE) === path.resolve(repoRoot)
   const RETIRED_FILES = [
     'crates/symbio-plugin-loop/src/resume.rs',
@@ -956,7 +983,9 @@ console.log('--- S-017: 恢复路径不许再有旁路 ---')
     })
   }
   // `resume_anchor`：整个生产树（插件 + core 的视图层）都不许再有这个名字。
-  for (const file of ['crates/crates/plugins', 'crates/symbio-core/src'].flatMap((r) =>
+  // 扫描根随 D-191 从 `crates/plugins`（平铺前的插件目录）改成 `crates`：拆分后插件
+  // 各是一个 crate，旧根不存在 ⇒ `walk` 返回空 ⇒ 这条判据只扫 core、插件侧全盲。
+  for (const file of ['crates'].flatMap((r) =>
     walk(path.join(S017_BASE, r)),
   )) {
     if (path.basename(file).endsWith('.test.rs')) continue

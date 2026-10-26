@@ -48,7 +48,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）判的是「主体此刻
+//! **写侧授权闸**（[plan/01 §7](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_gate`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
@@ -587,10 +587,7 @@ impl DeltaSink for UiBridge {
 /// 测试直接给闭包，于是能造「只返回一次」这种形状。
 pub(crate) type SupplementFn = Arc<
     dyn Fn() -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>>
-                    + Send,
-            >,
+            Box<dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>> + Send>,
         > + Send
         + Sync,
 >;

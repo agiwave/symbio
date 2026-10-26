@@ -342,8 +342,7 @@ fn vdfs_internal_dirs_conditional() {
     // 有作用域才有节点名（无作用域 = 没有文件 = 没有名字，共享实现如实返回空名）。
     // 这里按生产路径的形态构造：给一个真实落位，节点名就是它的文件名。
     let memory = || {
-        let path = std::path::PathBuf::from("abc")
-            .join(crate::memory::SESSION_MEMORY_FILE);
+        let path = std::path::PathBuf::from("abc").join(crate::memory::SESSION_MEMORY_FILE);
         symbio_providers::MemoryFile::new(Some(path), 1024, 256).node(
             &symbio_providers::MemoryNodeSpec {
                 title: "会话记忆",
@@ -357,9 +356,7 @@ fn vdfs_internal_dirs_conditional() {
     let without = internal_dirs(false, memory());
     assert_eq!(without.len(), 4);
     assert!(
-        without
-            .iter()
-            .all(|n| n.name != symbio_core::run_ops::SEG),
+        without.iter().all(|n| n.name != symbio_core::run_ops::SEG),
         "内部动作段不是资源，不进清单"
     );
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");

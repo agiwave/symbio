@@ -11,16 +11,20 @@
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
-use symbio_deploy::PLUGIN_ID_AGENT;
-use symbio_providers::DefaultToolVisitor;
+use std::path::Path;
+use std::sync::Arc;
+#[allow(unused_imports)]
+// 只为把全部插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
+use symbio as _;
+
 use symbio_core::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use symbio_core::{vdfs_context, VdfsProvider};
-use std::path::Path;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_AGENT;
+use symbio_providers::DefaultToolVisitor;
 
 /// 收集器的工具元数据（AR-025 4a 后 `list_capability` 收敛为 `list(kind)`）——
 /// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。
@@ -250,7 +254,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 子 Agent 是一棵 composite 插件树（规范 `agent-dir/v2`，
-// `../../../../../docs/003-design/011-Agent目录规范.md`）
+// `docs/003-design/011-Agent目录规范.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
 // 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `memory`
@@ -259,8 +263,8 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 #[tokio::test]
 async fn sub_agent_tree_is_assembled_and_prefixed() {
-    use symbio_deploy::PLUGIN_ID_AGENT;
     use symbio_core::{PluginDir, PLUGIN_DIR};
+    use symbio_deploy::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -507,8 +511,8 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
 /// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
-    use symbio_deploy::PLUGIN_ID_AGENT;
     use symbio_core::PluginDir;
+    use symbio_deploy::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -629,9 +633,9 @@ async fn mount_root_lists_only_installed_agents() {
 /// （`<agentdir>/AGENTS.md`）与裸目录同位，分辨不出「绕没绕过挂载点」。
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
-    use symbio_deploy::PLUGIN_ID_AGENT;
     use symbio_core::PluginDir;
     use symbio_core::VdfsError;
+    use symbio_deploy::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -780,8 +784,8 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
 #[tokio::test]
 async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
-    use symbio_deploy::PLUGIN_ID_AGENT;
     use symbio_core::PluginDir;
+    use symbio_deploy::PLUGIN_ID_AGENT;
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");

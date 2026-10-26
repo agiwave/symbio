@@ -9,8 +9,8 @@
 //!    那条唯一路径（`DefaultToolVisitor::put`）。
 
 use super::*;
-use symbio_core::{failure_kind, ExecAbortSignal, ExecEventSink, PluginSimpleRequest};
 use serde_json::json;
+use symbio_core::{failure_kind, ExecAbortSignal, ExecEventSink, PluginSimpleRequest};
 
 /// 最小可判定的能力桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {

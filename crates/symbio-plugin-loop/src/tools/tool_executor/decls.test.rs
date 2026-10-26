@@ -10,14 +10,14 @@
 //! - **没有 visitor ⇒ 什么都不命中**（缺声明与漏声明同形，e2e 兜行为）。
 
 use super::ToolDecls;
-use symbio_providers::DefaultToolVisitor;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::sync::Arc;
 use symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry,
 };
-use async_trait::async_trait;
-use serde_json::Value;
-use std::sync::Arc;
+use symbio_providers::DefaultToolVisitor;
 
 /// 只带元数据的假工具：注册表怎么读，测试就怎么喂。
 struct FakeTool {

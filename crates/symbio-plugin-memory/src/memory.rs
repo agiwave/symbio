@@ -12,7 +12,7 @@
 //! 智能体自己**的目录——不需要任何新的上下文键，也不需要宿主额外告知。
 //!
 //! 文件名刻意对齐行业惯例（Agent 目录的指令 / 记忆文件，见
-//! `../../../../docs/003-design/011-Agent目录规范.md` §6）：收益是记忆**不属于 symbio**——随
+//! `docs/003-design/011-Agent目录规范.md` §6）：收益是记忆**不属于 symbio**——随
 //! agent 目录整包分发，换个工具照样生效（工作区那份是同一族约定，物理名同为
 //! `AGENTS.md`，但属于工作区作用域，与本层互不干涉）。
 //!
@@ -39,9 +39,9 @@
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
+use std::path::{Path, PathBuf};
 use symbio_deploy::PLUGIN_ID_MEMORY;
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
-use std::path::{Path, PathBuf};
 
 /// 记忆文件名 —— `AGENTS.md`（**本插件自己的**约定，不是跨插件契约）。
 ///

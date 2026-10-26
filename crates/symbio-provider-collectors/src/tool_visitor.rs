@@ -8,11 +8,11 @@
 //! 落在实现层——完整判据见 [`symbio_providers::collectors`] 的模块文档。
 
 use super::approval::ApprovalGate;
-use symbio_core::{CapabilityFamily, CapabilityRow, Registry};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use symbio_core::{CapabilityFamily, CapabilityRow, Registry};
 use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例

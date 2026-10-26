@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `view.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! 对话体的淡化 / 骨架化已按 [D-078](../../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役，
+//! 对话体的淡化 / 骨架化已按 [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役，
 //! 本文件的判据只剩一件事：**三段注入的次序与位置**。
 
 use super::*;
@@ -31,7 +31,7 @@ fn text_of(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
-/// 记忆段置顶（S5 步 12，[04 §3.1 批⑦](../../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+/// 记忆段置顶（S5 步 12，[04 §3.1 批⑦](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 一条 `meta.kind = recall_context` 的消息，正文逐字送达。
 #[test]
 fn memory_section_is_prepended() {

@@ -9,5 +9,5 @@
 //! `plugins::loop::control_decl` 等 owner 文件交出。
 
 #[cfg(test)]
-#[path = "extension_fixtures.test.rs"]
+#[path = "lib.test.rs"]
 mod tests;

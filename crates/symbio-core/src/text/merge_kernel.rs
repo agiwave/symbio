@@ -1,6 +1,6 @@
 //! 巩固合并的**纯计算内核**：截断 / 分句 / 合并 + 保真度。
 //!
-//! 与 [`crate::projection::recall_score`] 同一条纪律：**生产与 verify
+//! 与 `crate::projection::recall_score` 同一条纪律：**生产与 verify
 //! 共有同一份源码**。`docs/003-design/verify/consolidation_fidelity.rs` 以 `#[path]`
 //! 包含本文件——它论证「质量约束（min_fidelity）必须先于形态约束（max_gen）生效」时，
 //! 跑的是生产这条保真度算法本身，不是另写一份临摹件。
@@ -73,11 +73,7 @@ pub fn split_sentences(text: &str) -> Vec<String> {
 /// 保真度 = `basis` 中**确实保留在合并结果里**的句字数 / `basis` 总字数。
 /// 同一件事两份都写了 ⇒ 两份的句子都算保留（去重省的是位置，不是信息）；
 /// 装不下被丢掉的才算失真——那正是 `accept` 的 0.7 下界要拦的东西。
-pub fn merge_with_fidelity(
-    sources: &[&str],
-    basis: &[&str],
-    max_chars: usize,
-) -> (String, f64) {
+pub fn merge_with_fidelity(sources: &[&str], basis: &[&str], max_chars: usize) -> (String, f64) {
     let mut units: Vec<String> = Vec::new();
     for s in sources {
         for unit in split_sentences(s) {

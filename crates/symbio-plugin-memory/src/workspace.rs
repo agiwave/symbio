@@ -49,8 +49,8 @@
 //!
 //! 于是这里不再有第二份「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 use std::path::{Path, PathBuf};
+use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 工作区记忆的**物理**文件名 —— `{workdir}/AGENTS.md`（行业通行约定）。
 ///

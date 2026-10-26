@@ -7,17 +7,13 @@ use super::*;
 use serde_json::json;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(
-    role: symbio_core::chat_node::NodeRole,
-) -> symbio_core::principal::Principal {
+fn principal_for(role: symbio_core::chat_node::NodeRole) -> symbio_core::principal::Principal {
     use symbio_core::principal::Principal;
     match role {
         symbio_core::chat_node::NodeRole::User => {
             Principal::from_legacy(symbio_core::PRINCIPAL_USER)
         }
-        symbio_core::chat_node::NodeRole::Assistant => {
-            Principal::from_legacy("session/main")
-        }
+        symbio_core::chat_node::NodeRole::Assistant => Principal::from_legacy("session/main"),
         symbio_core::chat_node::NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         symbio_core::chat_node::NodeRole::System => Principal::from_legacy("system/local"),
     }

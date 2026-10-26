@@ -10,13 +10,13 @@
 //! 有多份文件、需要浏览条目内部的资源用 `DirVdfs`。
 
 use super::entry;
+use async_trait::async_trait;
+use std::path::PathBuf;
 use symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 use symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };
-use async_trait::async_trait;
-use std::path::PathBuf;
 
 /// 单文件型条目存储（同时是一个可直接注册的 `VdfsProvider`）
 #[derive(Debug, Clone)]

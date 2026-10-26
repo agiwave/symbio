@@ -53,7 +53,7 @@
 //!
 //! ## 为什么寄存区在盘上而不是内存里（项三）
 //!
-//! 触发条件先收窄过一次：[DE-014 §2.2 推论 3](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
+//! 触发条件先收窄过一次：[DE-014 §2.2 推论 3](../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
 //! 的「一写者」落地后（`SessionStore::facts` 按会话缓存**唯一**一个 RW 句柄），
 //! 同进程里第二个 RW 持令牌者的形态**不存在** ⇒ 今天还能拿到 `NotWriter` 的
 //! 只剩**跨进程**这一种。而进程内静态寄存区恰好在这种形态下**永远救不回来**：
@@ -517,9 +517,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg
         .get("principal")
-        .and_then(|v| {
-            serde_json::from_value::<symbio_core::principal::Principal>(v.clone()).ok()
-        })
+        .and_then(|v| serde_json::from_value::<symbio_core::principal::Principal>(v.clone()).ok())
         .map(|p| p.id);
     let actor = principal.unwrap_or_else(|| {
         match msg.get("role").and_then(Value::as_str) {

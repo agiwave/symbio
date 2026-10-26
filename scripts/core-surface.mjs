@@ -31,7 +31,7 @@
  *    四个名字，两种判决**——差别只在测试里恰好写了哪几个名字，那与「该不该住 core」无关。
  *    ⚠️ 本条是 2026-10-09 补的**口径修正**：此前测试算消费方，棘轮基线（单消费方 61）按
  *    那个口径算；口径一改，基线随之一并重定（见 `core-export-audit.mjs` 的 `BASELINE`）。
- * 5. **`crates/crates/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
+ * 5. **`crates/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
  *    也是消费方**：第一版把它们跳过，于是「只在注册表里被用到」的符号被算成 0——
  *    `PluginErrorCode` / `PluginIdentity` 一族全部假报。**「数不到」与「真的没人用」
  *    是两件事**，归属函数因此**永不返回 null**（见 `core-surface-audit.mjs` 的 `unitOf`）。
@@ -63,24 +63,37 @@ export function stripComments(src) {
 /**
  * 从 `pub use …;` 语句里抽名字。
  *
- * 返回 `{ names: Map<名字, 域|null>, globs: string[] }`。`globs` 必须是**数组**——
- * 见文件头口径 2。
+ * 返回 `{ names: Map<名字, 域|null>, globs: string[], heads: Map<名字, 首段> }`。
+ * `globs` 必须是**数组**——见文件头口径 2。
+ *
+ * `heads` 是给**门面**用的（口径 6）：`pub use kernel::{A, B}` 里 `kernel` 不是域目录，
+ * 这两条 `use` 自己说不出归属，得回到 `kernel.rs` 里看它们从哪个域转出来。
  */
 export function parsePubUses(source, domains) {
   const names = new Map()
+  const heads = new Map()
   const globs = []
   for (const m of stripComments(source).matchAll(/^[ \t]*pub use\s+([^;]+);/gm)) {
     const body = m[1].trim()
-    const head = body.split('::')[0].trim()
-    // `pub use super::<域>::{…}`（门面模块的写法）：域取第二段，而不是 `super`。
-    const second = body.split('::')[1]?.trim()
-    let domain = domains.has(head) ? head : null
-    if (domain === null && head === 'super' && second && domains.has(second)) domain = second
+    const segs = body.split('::').map((s) => s.trim())
+    const head = segs[0]
+    // 域取**路径里最后一个域段**：`super::<域>::`（门面模块的写法）与
+    // `symbio_kernel::<域>::`（域实现搬到内核 crate 后的写法）都要认，
+    // 只看首段会让后一种全部落进 `(explicit)`。
+    let domain = null
+    for (const s of segs.slice(0, -1)) {
+      const clean = s.replace(/[{}].*$/, '').trim()
+      if (domains.has(clean)) domain = clean
+    }
+    if (domain === null && domains.has(head)) domain = head
     const brace = body.match(/\{([\s\S]*)\}/)
     if (brace) {
       for (const part of brace[1].split(',')) {
         const name = part.trim().split(/\s+as\s+/).pop().trim()
-        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.set(name, domain)
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+          names.set(name, domain)
+          heads.set(name, head)
+        }
       }
       continue
     }
@@ -89,9 +102,12 @@ export function parsePubUses(source, domains) {
       continue
     }
     const name = body.split('::').pop().trim()
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.set(name, domain)
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      names.set(name, domain)
+      heads.set(name, head)
+    }
   }
-  return { names, globs }
+  return { names, globs, heads }
 }
 
 /**
@@ -184,7 +200,38 @@ export function collectCoreSurface(root) {
   const rootUses = parsePubUses(fs.readFileSync(rootMod, 'utf8'), domains)
   const symbols = new Map()
   const kernelExports = new Set()
-  for (const [name, domain] of rootUses.names) symbols.set(name, domain ?? '(explicit)')
+
+  // 门面单文件模块（`kernel.rs`）的**显式列名**重导出：`pub use kernel::{A, B}` 里
+  // `kernel` 不是域目录，这条 `use` 自己说不出 A/B 属于哪个域。回门面里现查——
+  // 门面只转出、不拥有声明，`pub use super::decl::{…}` 就是它们的真实归属。
+  //
+  // 不这么做的后果不是「少算」，而是**算错**：这些名字落进 `(explicit)`，
+  // 命名审计读成「没有归属域」（N-005），依赖分析读成「无 owner」。
+  // 拆 crate（D-191）把 `pub(crate) use` 升成 `pub use` 后，这类名字一次多了 11 个，
+  // 全是门面这条路径本来就该解析、但只对通配实现了的。
+  const facadeCache = new Map()
+  const facadeUses = (head) => {
+    if (facadeCache.has(head)) return facadeCache.get(head)
+    const f = path.join(coreDir, `${head}.rs`)
+    const u = fs.existsSync(f) ? parsePubUses(fs.readFileSync(f, 'utf8'), domains) : null
+    facadeCache.set(head, u)
+    return u
+  }
+  for (const [name, domain] of rootUses.names) {
+    if (domain) {
+      symbols.set(name, domain)
+      continue
+    }
+    const head = rootUses.heads.get(name)
+    const fu = head ? facadeUses(head) : null
+    const inherited = fu?.names.get(name) ?? null
+    if (inherited) {
+      symbols.set(name, inherited)
+      if (head === 'kernel') kernelExports.add(name)
+      continue
+    }
+    symbols.set(name, '(explicit)')
+  }
   for (const n of declaredIn(rootMod)) symbols.set(n, '(root)')
 
   // 展开通配：`pub use <域>::*` ⇒ 该域 mod.rs 的重导出 + 直接声明（不含私有子模块里的 pub）。
@@ -243,18 +290,31 @@ export const CROSS_CRATE = [
  *
  * 返回 `null` 会让调用方 `continue` 跳过该文件，于是定义在那里的符号被算成
  * 「0 个消费方」——`PluginErrorCode` / `PluginIdentity` 一族就这样被假报过。
+ *
+ * ## `crates/` 那一格的单位是**crate 名**，不是「crates 底下算一个」（2026-10-26 D-191）
+ *
+ * 拆 crate 之前这一格是 `if (norm.startsWith('crates/')) return 'symbio/(crate root)'`
+ * ——那时 `crates/` 只装得下一个壳，兜底成单一是对的。D-191 之后每个插件 / provider 都是
+ * 独立 crate，同一条兜底会把**三十几个 crate 塌成同一个单位**：C-003 的判据是
+ * 「跨 core 的生产消费方 ≥2」，而两个插件现在都被读成 `symbio/(crate root)` ⇒
+ * 任何符号的消费方数**结构上永远 ≤1**，判据于是要么恒红要么被基线掩盖。
+ * 实测夹具（两个插件消费同一符号）因此被判「单消费方 1 个」，是真误判。
+ *
+ * 单位取 crate 名而不是 `plugins/<id>`：D-191 把插件目录平铺成 `crates/symbio-plugin-<id>`，
+ * 「哪个插件在用」这一层信息由 crate 名承载，再合成 `plugins/<id>` 只会多一层易漂移的映射。
  */
 export function unitOf(rel) {
   const norm = rel.split(path.sep).join('/')
+  for (const c of CROSS_CRATE) {
+    if (norm.startsWith(c.rel)) return c.label
+  }
+  const m0 = norm.match(/^crates\/([^/]+)\//)
+  if (m0) return m0[1]
   const m = norm.match(/^symbio\/src\/plugins\/([^/]+)\//)
   if (m) return `plugins/${m[1]}`
   const m2 = norm.match(/^symbio\/src\/providers\/([^/]+)\//)
   if (m2) return `providers/${m2[1]}`
   if (/^symbio\/src\/plugins\/[^/]+$/.test(norm)) return 'plugins/(registry)'
-  if (norm.startsWith('crates/crates/')) return 'symbio/(crate root)'
-  for (const c of CROSS_CRATE) {
-    if (norm.startsWith(c.rel)) return c.label
-  }
   return null
 }
 
@@ -262,12 +322,20 @@ export function unitOf(rel) {
  * 自引用：插件 id 常量（`PLUGIN_ID_<X>`）与嵌入服务 id（`EMBEDDING_<X>`）被
  * **同名插件 / provider** 使用。这是**正常**的——常量就是它自己的名字，不该算
  * 「下放候选」。
+ *
+ * 单位形态随 D-191 变过一次：插件消费方的单位从 `plugins/<slug>` 变成 crate 名
+ * `symbio-plugin-<slug>`，两种都认（旧形态在回归测试的夹具里仍然在用）。
  */
 export function isSelfReference({ name, units }) {
   const m = name.match(/^(?:PLUGIN_ID|EMBEDDING)_([A-Z]+)$/)
   if (!m || units.length !== 1) return false
   const slug = m[1].toLowerCase()
-  return units[0] === `plugins/${slug}` || units[0] === `providers/${slug}`
+  return (
+    units[0] === `plugins/${slug}` ||
+    units[0] === `providers/${slug}` ||
+    units[0] === `symbio-plugin-${slug}` ||
+    units[0] === `symbio-provider-${slug}`
+  )
 }
 
 /**
@@ -458,7 +526,7 @@ function isCfgTestOnlyModule(file) {
  * 数每个公开符号的消费方单位（`Map<符号, Set<单位>>`）。
  *
  * - core 自身不算消费方（口径：公开面是给 core **外**用的）；
- * - 一个**生产**文件都不能跳过（口径 5）：`crates/crates/` 直属文件也算；
+ * - 一个**生产**文件都不能跳过（口径 5）：`crates/` 直属文件也算；
  * - 宏调用点算消费方（见 `collectMacroBodies`）；
  * - **测试文件默认不算**（口径 4）——`opts.includeTests` 为真时才计入。
  *

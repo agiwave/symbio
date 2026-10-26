@@ -11,8 +11,8 @@
 //! - 临时文件不落在用户 workdir 里，且命令跑完即消失。
 
 use super::*;
-use symbio_plugin_api::hooks::HookEvent;
 use std::path::PathBuf;
+use symbio_plugin_api::hooks::HookEvent;
 
 /// 一条把「命令收到的最后一个参数」当文件读出来打到 stdout 的命令。
 ///

@@ -37,7 +37,9 @@
 
 pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use async_trait::async_trait;
+use std::collections::VecDeque;
+use std::sync::Arc;
 use symbio_core::vdfs_context;
 use symbio_core::EVENT_BUS_KIND_VDFS;
 use symbio_core::{
@@ -51,9 +53,7 @@ use symbio_core::{
     Registry, CAPABILITY_VISITOR, WORKDIR,
 };
 use symbio_core::{VdfsRequest, VdfsResponse};
-use async_trait::async_trait;
-use std::collections::VecDeque;
-use std::sync::Arc;
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 
 // 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::EVENT_BUS_KIND_VDFS`
 // （前端 `subscribe({ kind: 'vdfs' })`，见 004-PROTOCOLS.md §事件总线频道）。
@@ -198,7 +198,7 @@ pub fn call_params(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsParams {
 /// 父地址从请求里来，因此这里不需要知道根叫什么。
 ///
 /// **父地址的绝对锚点原样带走**：`/docs` 的子项还是 `/` 打头的地址，不会退化成
-/// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
+/// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 [D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 fn child_path(base: &str, name: &str) -> String {
     symbio_core::join_addr(base, name)
 }
@@ -310,7 +310,7 @@ async fn root(
 ///
 /// 为什么需要它（而不是「有内容就给搜索框」）：一屏能摆下的卡片就十来张，
 /// 少于这个量时用户一眼看完，搜索框不但帮不上忙，还会被读成「可以搜库」——
-/// 而它实际只筛当前这页已加载的条目（见 `../../../../tauri/docs/111-INTERACTION.md` 的
+/// 而它实际只筛当前这页已加载的条目（见 `tauri/docs/111-INTERACTION.md` 的
 /// 「刻意不做」）。
 ///
 /// 阀值住在服务端（而不是各前端），因此网页端 / 桌面端 / CLI 看到的是同一个答案；
@@ -462,9 +462,7 @@ async fn delete(
         },
     )
     .await?;
-    Ok(PluginPayload::new(
-        &symbio_core::SuccessResponse::default(),
-    ))
+    Ok(PluginPayload::new(&symbio_core::SuccessResponse::default()))
 }
 
 async fn mkdir(
@@ -739,9 +737,7 @@ async fn watch(
     } else {
         root.dispatch(vctx, &addr, VdfsRequest::Unwatch).await?;
     }
-    Ok(PluginPayload::new(
-        &symbio_core::SuccessResponse::default(),
-    ))
+    Ok(PluginPayload::new(&symbio_core::SuccessResponse::default()))
 }
 
 /// 树状遍历：访问层统一实现（递归 [`VdfsRequest::List`]）。

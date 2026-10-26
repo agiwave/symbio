@@ -3,8 +3,8 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
 use symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
+use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文

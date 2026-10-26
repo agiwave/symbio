@@ -1,4 +1,4 @@
-//! 压缩节点的发射器：把「正在压缩」作为**消息节点**呈现（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
+//! 压缩节点的发射器：把「正在压缩」作为**消息节点**呈现（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 //!
 //! ## 为什么是消息节点，而不是会话级提示
 //!
@@ -16,7 +16,7 @@
 //! ## 为什么留 session（不随驱动器迁 loop）
 //!
 //! 它持有活跃名册、转写与会话配置的当前值，是 session 状态的一部分；驱动器经
-//! `session/<sid>/_run/compression-*` 动作使用它（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4/§6）。
+//! `session/<sid>/_run/compression-*` 动作使用它（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4/§6）。
 //! 同理，压缩熔断的三个计数器也住在这里的状态上：它们是**会话级**节奏状态。
 
 use std::sync::Arc;
@@ -56,11 +56,7 @@ impl CompressionEmitter {
     /// 进在途图是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
     /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
     /// 都没有」，又变回最初那个"卡死"观感。
-    pub(crate) async fn begin(
-        &self,
-        node_id: &str,
-        principal: &symbio_core::principal::Principal,
-    ) {
+    pub(crate) async fn begin(&self, node_id: &str, principal: &symbio_core::principal::Principal) {
         // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
         self.state.transcript.lock().await.apply(
             ChatNode {

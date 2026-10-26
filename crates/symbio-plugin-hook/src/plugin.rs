@@ -8,16 +8,16 @@
 
 use super::executor::HookExecutor;
 use super::registry::{HookRegistration, HookRegistry};
-use symbio_deploy::PLUGIN_ID_HOOK;
-use symbio_plugin_api::hooks::{HookEvent, HookOutput};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Weak};
 use symbio_core::SimpleResponse;
 use symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PluginStopReason,
 };
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Weak};
+use symbio_deploy::PLUGIN_ID_HOOK;
+use symbio_plugin_api::hooks::{HookEvent, HookOutput};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]

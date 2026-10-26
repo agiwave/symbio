@@ -81,7 +81,7 @@ const { text, rendered } = useMessageContent(
 )
 
 /**
- * 后端排好的**事实行**（`node.stats.rows`，[D-111](../../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
+ * 后端排好的**事实行**（`node.stats.rows`，[D-111](../../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
  *
  * 空数组 = 这个节点没有可报的数，折叠体因此只是一块正文——本组件不问它是什么业务，
  * 也不做数值格式化（单位与精度在产者那一侧定，见 `schemas/reading.ts`）。

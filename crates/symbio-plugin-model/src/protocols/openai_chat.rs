@@ -36,7 +36,7 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 /// ## 为什么要并
 ///
 /// 出厂形状原本是**两条** system：这里 prepend 一条，而消息数组的第一元素按
-/// [D-048a](../../session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "crates/symbio-plugin-session/src/README") 后果节本身就是一条 system（记忆段 /
+/// [D-048a](../../../symbio-plugin-session/README.md#d-048a-v2-的-prompt-形状必须回到结构化消息不把工具结果拍平成纯文本 "crates/symbio-plugin-session/src/README") 后果节本身就是一条 system（记忆段 /
 /// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
 /// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
 /// （门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
@@ -52,10 +52,7 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 ///
 /// 只合 `content` 是**纯文本**的那些段；遇到 Parts（多模态）就停下不再吃——
 /// 拼错比多一条 system 更糟。吃掉 0 条时行为与改前逐字相同。
-fn merge_leading_system(
-    system: &str,
-    msgs: &[crate::types::NativeMessage],
-) -> (String, usize) {
+fn merge_leading_system(system: &str, msgs: &[crate::types::NativeMessage]) -> (String, usize) {
     let mut merged = system.to_string();
     let mut consumed = 0usize;
     for m in msgs {
@@ -113,8 +110,7 @@ impl ModelProtocol for OpenaiChatProtocol {
         messages: &[symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
-        let flattened_messages =
-            crate::message_builder::flatten_chat_messages(messages);
+        let flattened_messages = crate::message_builder::flatten_chat_messages(messages);
         // **出厂只发一条 system**：基础 `system` 与数组最前的 system 前缀段并成一条，
         // 中间空行分段（空行分段是本仓既有的拼接惯例，`NativeMessage::to_api_value`
         // 拼 `prompt` 用的就是它）。

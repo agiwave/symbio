@@ -34,7 +34,7 @@ const LEASE_WINDOW: usize = 4096;
 /// 单独成函数是为了让「窗口边界」成为**被断言的行为**而不是散在 `begin_drive` 里
 /// 的一段切片表达式（`drive.test.rs` 直接喂一份超窗夹具断言切点）。窗口外的未回
 /// `sent` 不会被看护看到，只能由 `waiting` 行挂着——这是常量选值的边界，不是安全
-/// 保证，失效条件写在 [DE-015 §2.6](../../../../../docs/003-design/015-义务环.md "DE-015-义务环")
+/// 保证，失效条件写在 [DE-015 §2.6](../../../../docs/003-design/015-义务环.md "DE-015-义务环")
 /// 的第 7 条边界段里。
 fn lease_tail(snapshot: &[symbio_core::Event]) -> &[symbio_core::Event] {
     &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..]
@@ -143,9 +143,9 @@ pub(crate) fn begin_drive(
                 )],
             )
             .map_err(|e| {
-                super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
-                    format!("恢复阶段事实落格失败：{e:?}"),
-                ))
+                super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
+                    "恢复阶段事实落格失败：{e:?}"
+                )))
             })?;
             let drive_seq = seqs.first().copied().unwrap_or(0);
             (turn_no, user_seq, drive_seq, last_user_message(context).1)

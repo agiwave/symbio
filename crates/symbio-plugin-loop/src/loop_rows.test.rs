@@ -876,7 +876,7 @@ fn execute_row_closes_on_turn_closed() {
 
 /// 定稿答话轮（措辞产线出话）：**表认为该派发 `close-turn`，而产品路径压根不进轮内驱动**。
 ///
-/// 这条不对称是 [D-125](../../../../docs/003-design/015-义务环.md#d-125-定稿答话轮不进轮内驱动循环环覆盖的是欠着的往返收束格由轮首准备就地落 "DE-015-义务环") 点名要写下来的：
+/// 这条不对称是 [D-125](../../../docs/003-design/015-义务环.md#d-125-定稿答话轮不进轮内驱动循环环覆盖的是欠着的往返收束格由轮首准备就地落 "DE-015-义务环") 点名要写下来的：
 /// 措辞往返的 `response(port=model)` 带 `calls: []` ⇒ `turn.has_final` 成立 ⇒ 收束行的前件
 /// **成立**。但那一轮的答话是 `compose` 在轮首之前备好的，轮首 host 跑完判决（`answered`
 /// 那一格）就在准备段里收束、`TurnExit::Completed` 返回——轮内驱动循环压根没起来，
@@ -1307,10 +1307,7 @@ fn waiting_means_a_sent_request_without_a_terminal() {
     // 租约到期也仍然「在等」——那笔往返还在路上，只是卡住了。
     assert!(super::waiting(&out, 1, 100_000));
     // 终态落了 ⇒ 不在等。
-    for terminal in [
-        symbio_core::EVENT_RESPONSE,
-        symbio_core::EVENT_FAILED,
-    ] {
+    for terminal in [symbio_core::EVENT_RESPONSE, symbio_core::EVENT_FAILED] {
         let mut done = out.clone();
         done.push(ev(
             1,
@@ -1870,10 +1867,8 @@ fn a_resumed_tool_call_does_not_need_a_model_response() {
     let events = vec![tool_request(id), tool_granted(id)];
 
     assert!(
-        events
-            .iter()
-            .all(|e| e.kind != symbio_core::EVENT_RESPONSE
-                || e.payload.get("port").and_then(Value::as_str) != Some("model")),
+        events.iter().all(|e| e.kind != symbio_core::EVENT_RESPONSE
+            || e.payload.get("port").and_then(Value::as_str) != Some("model")),
         "用例前提：日志里没有模型响应"
     );
     assert!(!owes("authorize-tool", &events, 0), "已放行 ⇒ 授权行关账");

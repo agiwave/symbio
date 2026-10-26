@@ -404,8 +404,13 @@ if (kernelMissing.length > 0) {
 const shape = mergeShapes(scanDirs.map((d) => measureCoreShape(d, kernelAbs)))
 
 // 封闭语法里少一个 trait 不是「收窄成功」，是判据失去输入：宁红不静默。
-// 夹具仓库（没有 plugins/mod.rs）只造一两个 trait 验棘轮本身，不要求凑齐五格。
-const hasPlugins = fs.existsSync(false)
+// 夹具仓库（没有宿主侧插件域）只造一两个 trait 验棘轮本身，不要求凑齐五格。
+//
+// 标记物取 `symbio-core/src/plugin/`：它是**宿主侧插件域**（目录 / 清单 / 遍历端点），
+// 只有真仓有。D-191 之前标记写成 symbio/src/plugins/mod.rs（壳里的装配清单所在），拆分那次
+// 改动把它替换成了常量 `false`——于是「五格齐全」与 CS-004 的字面量回流**同时静默失效**，
+// 门禁全绿而两条判据没跑。回归测试（CS-004 那条）是唯一抓住它的地方。
+const hasPlugins = fs.existsSync(path.join(ROOT, 'crates/symbio-core/src/plugin/mod.rs'))
 if (hasPlugins) {
   for (const name of KERNEL_TRAITS) {
     if (!shape.rows.some((r) => r.name === name)) {
@@ -484,16 +489,20 @@ if (fs.existsSync(selfPath)) {
 // ==================== CS-003 / CS-004 kernel 纯度 ====================
 
 /**
- * 插件的**目录名**就是插件 id 的词表来源：新增插件 = 新目录，不需要改本脚本。
- * 目录不存在（夹具仓库）⇒ 词表为空 ⇒ CS-004 不适用（CS-003 照判）。
+ * 插件的**目录名**就是插件 id 的词表来源：新增插件 = 新 crate，不需要改本脚本。
+ * 词表为空（夹具仓库）⇒ CS-004 不适用（CS-003 照判）。
+ *
+ * D-191 后插件平铺在 `crates/symbio-plugin-<id>`：id 由 crate 名去前缀反推，
+ * 不再是「`plugins/` 下的目录名」。旧写法 `crates/plugins` 在真仓永不存在 ⇒
+ * 词表恒空 ⇒ CS-004 恒不判（同一类静默失效，见上方 `hasPlugins` 的注）。
  */
-const PLUGINS_REL = 'crates/crates/plugins'
-const pluginsDir = path.join(ROOT, PLUGINS_REL)
+const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
+const pluginsDir = path.join(ROOT, 'crates')
 const pluginIds = fs.existsSync(pluginsDir)
   ? fs
       .readdirSync(pluginsDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
+      .filter((e) => e.isDirectory() && e.name.startsWith(PLUGIN_CRATE_PREFIX))
+      .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
       .sort()
   : []
 

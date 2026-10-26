@@ -61,15 +61,15 @@
 //!    顺带：`tract` 时代为绕开形状推断而写的"符号维 / 固定 seq 双策略"整套兜底
 //!    （`fixed_seq` / `pad_or_truncate`）随之删除——ORT 原生支持动态形状。
 
-use symbio_core::EmbeddingError;
-use symbio_core::EmbeddingService;
-use symbio_core::{PluginInvokeRequest, EMBEDDING_LOCAL, EMBEDDING_NOOP};
 use async_trait::async_trait;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use symbio_core::EmbeddingError;
+use symbio_core::EmbeddingService;
+use symbio_core::{PluginInvokeRequest, EMBEDDING_LOCAL, EMBEDDING_NOOP};
 
 const MODEL_BYTES: &[u8] = include_bytes!("model.onnx");
 const TOKENIZER_BYTES: &[u8] = include_bytes!("tokenizer.json");

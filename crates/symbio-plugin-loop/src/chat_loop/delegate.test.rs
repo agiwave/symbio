@@ -9,9 +9,7 @@
 use super::*;
 // 出厂值的真源在 core（`TurnSettings` 三旋钮与 session 配置面共用同一批常量）——
 // 判定侧测试显式 import，不另持第二份字面量。
-use symbio_core::{
-    CapabilityCategory, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS,
-};
+use symbio_core::{CapabilityCategory, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS};
 
 /// 出厂参数：前缀 `/work `、关键词空集、阈值 0。
 fn factory(text: &str) -> Option<&'static str> {

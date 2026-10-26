@@ -31,7 +31,7 @@ pub(crate) struct ExecTurnResult {
 /// Rust 调用，型在两侧编译期可见；塞进共享词汇再拆箱（无论用不用 `Any`）
 /// 都是给一条不跨墙的数据付跨墙的税（[D-095]）。
 ///
-/// 决策 D-095 见 [D-095](../../../../../docs/003-design/005-协议规范.md#d-095-keys-域环拆解键与值同住aborted-载荷不跨域vdfs_change_of-归-event_bus "D-095")
+/// 决策 D-095 见 [D-095](../../../../docs/003-design/005-协议规范.md#d-095-keys-域环拆解键与值同住aborted-载荷不跨域vdfs_change_of-归-event_bus "D-095")
 #[derive(Debug)]
 pub(crate) enum TurnExecExit {
     /// 用户中止且半截产出已在手（正文 / 思考 / 工具节点）——它们是事实，
@@ -74,7 +74,7 @@ pub(crate) struct Settled<'a> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
-    pub(crate) recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a symbio_core::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) child_id: String,
     pub(crate) reasoning_child_id: String,

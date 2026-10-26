@@ -21,7 +21,7 @@ const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
 /**
  * 在临时目录里搭一棵最小 `tauri/src` 树并跑审计。
  *
- * @param {Record<string, string>} files 相对 `tauri/src`（或以 `cli/` 开头时相对
+ * @param {Record<string, string>} files 相对 `tauri/src`（或以 `crates/symbio-cli/` 开头时相对
  *   `crates/symbio-cli/src`）的路径 → 内容
  * @param {{strict?: boolean}} [opts]
  */

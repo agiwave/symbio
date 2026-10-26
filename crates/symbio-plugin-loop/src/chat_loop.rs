@@ -1,7 +1,7 @@
 //! SESSION 聊天主循环
 //!
 //! 本文件只保留**主循环骨架**，其余按职责拆到子模块
-//! （切分依据见 `../session/docs/104-module-layout.md` §0 五判据与 §1.1 编排层落点）：
+//! （切分依据见 `crates/symbio-plugin-session/src/docs/104-module-layout.md` §0 五判据与 §1.1 编排层落点）：
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
@@ -52,7 +52,7 @@ pub use self::state::ChatOrchestrator;
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
 pub(crate) use self::compose::{apply_verdict, VerdictEffect};
-// 对话面节点构造器已上移 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三），
+// 对话面节点构造器已上移 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三），
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
@@ -179,9 +179,10 @@ pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
 
 pub(crate) use super::context::auto_compress_process;
 
+use std::sync::Arc;
+use symbio_core::chat_request;
 use symbio_core::plugin_info;
 use symbio_core::plugin_warn;
-use symbio_core::chat_request;
 use symbio_core::ModelFinishReason;
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
@@ -191,7 +192,6 @@ use symbio_core::{
     ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginInvokeRequest,
     PluginInvokeRequestExt,
 };
-use std::sync::Arc;
 
 use super::context;
 pub(crate) use super::message_build::TurnOutputExt;
@@ -332,7 +332,7 @@ pub async fn run_chat_loop(
 
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）。
         // `UserPromptSubmit` 钩子**不在这里**：它由 session 在派发本轮之前触发
-        // （[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6——钩子与会话生命周期同侧，
+        // （[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6——钩子与会话生命周期同侧，
         // 驱动器只负责执行）。
         if turn.request_round == 0 {
             if let Some(msg) = single_message.take() {
@@ -368,7 +368,7 @@ pub async fn run_chat_loop(
         // `turn_runner.rs` 的 2f 紧接 2e（本批结果已接进 `exchange`），于是「只有确定
         // 要发下一次请求才抽」与「绝不落在 `assistant(tool_calls)` 与其 `tool` 结果
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
-        // v2 下永不成立；裁决见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
+        // v2 下永不成立；裁决见 [D-074](../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
         // 视图从日志里读它（汇报的触发点不再有时刻入参，见 `report_exec`）。
         plugin_info!(
@@ -761,7 +761,7 @@ pub(crate) async fn land_answered_turn(
 /// 「已派发、尚未产出结果」的工具调用 id 集合，语义是「多个工具调用全部结束后才唤醒
 /// 主循环，不完整不唤醒」。**那个集合（连同判它的分支）已随 v2 移除**：
 /// 工具在 `turn_exec::execute_turn` **内部**跑完（`SessionDispatchPort`
-/// 同步分发、批批接上），没有任何代码路径会往它里面登记 id——它是 [DE-014 步骤 5](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
+/// 同步分发、批批接上），没有任何代码路径会往它里面登记 id——它是 [DE-014 步骤 5](../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
 /// 说的「簿记字段」，一个恒空的集合加一条恒不命中的分支。
 /// 「不完整不唤醒」这条不变量并没有被放弃，它换了承担者：**运行器的环体只在把本批
 /// 结果接进 `exchange` 之后才发下一次请求**（`turn_runner.rs` 2e），
@@ -771,7 +771,7 @@ pub(crate) async fn land_answered_turn(
 ///
 /// 闸门能读的只有本轮的请求数，而**工具轮数在运行器的环体里**（`turn_runner.rs` 的
 /// `tool_round`）。挂在这里判的是一个恒 0 的字段，v2 下永不命中——那条配置项与它的
-/// 退役裁决见 [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
+/// 退役裁决见 [D-074](../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")；将来真要这道上限，位置在 2e（结果接进 `exchange`）与
 /// 2f（轮内注入）之间。
 ///
 /// ⚠️ 顺带记下：**「历史中所有 ToolCall 都有结果子节点」从来不是判据**——
@@ -796,7 +796,7 @@ fn gate_turn(turn: &TurnState) -> Gate {
 /// 收口前，12 个出口各自重写「Stop 钩子 + 落库 + 返回」三件套。现在每个出口只负责
 /// 判定 [`TurnExit`]，收尾动作只在本函数出现一次。
 ///
-/// Stop 钩子**不在这里**（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）：
+/// Stop 钩子**不在这里**（[D-086](../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）：
 /// 它归会话生命周期，session 拿 [`TurnReport::last_message`] 统一触发——「恰好一次」
 /// 因此仍由生命周期保证，而不是由两侧各记一次。
 ///
@@ -811,7 +811,7 @@ async fn finish_turn(
 ) -> TurnReport {
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
     persist_messages(context, turn.last_saved, sink).await;
-    // 分支标注的**实时面**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+    // 分支标注的**实时面**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
     //
     // 标注由**重建**盖章，重建只在读的时候跑；流式帧里没有它 ⇒ 光靠本轮的帧，用户
     // 刷新页面 / 切回会话才看见 `‹ 1/2 ›`。所以本轮落库之后（新支的节点这才进得了投影）

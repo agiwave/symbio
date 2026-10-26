@@ -349,7 +349,7 @@ pub struct ChatNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions: Option<Vec<ResumeAction>>,
 
-    /// 本节点的**读数片段**（[D-111](../../plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：已由产者排好版的
+    /// 本节点的**读数片段**（[D-111](../../../symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：已由产者排好版的
     /// 若干行（标签 + 值），前端**逐行排版**、不认任何业务词——压缩「压到哪儿了 / 什么触发的 /
     /// 压掉几条」这类交代原先由前端读 `meta` 数字自己拼，口径因此住在两端。
     ///
@@ -397,7 +397,7 @@ pub struct ChatNode {
     ///
     /// **进到这一格的号有四套来源**（权威号 / 快照槽位号 / 在途号 / 重建号，另有一个
     /// 同名但属于事件层的 WAL `Seq`）——谁是分配者、谁何时作废，归一表在
-    /// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3，本处不复述。
+    /// `crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md` §3.3，本处不复述。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
 

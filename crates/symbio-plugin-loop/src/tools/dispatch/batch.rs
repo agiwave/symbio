@@ -1,5 +1,5 @@
 //! 阶段②「逐条执行」——`process_tool_calls_async` 三段拆分的第二段
-//! （/ [DE-021 §5 动作 B](../../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
 //! 超限丢弃 → 外部执行闸 → 淘汰闸 → 任务表闸 → Pre 钩子 → 执行 → Post 钩子 → 记账
@@ -119,7 +119,7 @@ async fn record_protocol_failure(
 /// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
 /// 是"还在跑"还是"卡死了"。
 ///
-/// 状态机（`../../../session/docs/105-node-state-streaming.md` §2.3）：
+/// 状态机（`crates/symbio-plugin-session/src/docs/105-node-state-streaming.md` §2.3）：
 /// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
 /// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
 ///
@@ -146,10 +146,7 @@ async fn emit_tool_running(
     running.status = Some(NodeStatus::Streaming);
     let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {
-        obj.insert(
-            "started_at".into(),
-            json!(symbio_core::clock_now_ms()),
-        );
+        obj.insert("started_at".into(), json!(symbio_core::clock_now_ms()));
     }
     running.meta = Some(meta);
     llm_emit_state(sink, running).await;

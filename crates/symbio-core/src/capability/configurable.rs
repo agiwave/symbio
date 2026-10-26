@@ -50,7 +50,10 @@
 //! 声明自带目录名，不存在归属歧义，所以容器可以让所有子插件注册进同一个实例。
 
 use crate::VdfsItem;
-use crate::{family, CapabilityRow, PluginInvokeRequest, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR};
+use crate::{
+    family, CapabilityRow, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
+    CONFIGURABLE_VISITOR,
+};
 use crate::{PluginConfigFile, PLUGIN_FILE};
 use std::sync::Arc;
 

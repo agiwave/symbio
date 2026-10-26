@@ -2,10 +2,10 @@
 //! 不 mock 内部函数），验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
 
 use super::*;
-use symbio_core::{PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
+use symbio_core::{PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest};
 
 /// 记录收到的 Hook 事件（按 `fire_hook` 的 payload 协议解析）。
 #[derive(Default)]

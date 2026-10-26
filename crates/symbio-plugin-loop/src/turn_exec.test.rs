@@ -14,7 +14,6 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
 use symbio_core::chat_node as cm;
 use symbio_core::{
     check_all, run_ops, CapabilityMeta, ConsolidateRequest, Entity, Event, ExecTranscriptWriter,
@@ -25,6 +24,7 @@ use symbio_core::{
     Capability, CapabilityRow, EventStore, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
     CAPABILITY_VISITOR,
 };
+use symbio_providers::DefaultToolVisitor;
 
 use super::super::session_port::SessionPort;
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
@@ -52,9 +52,7 @@ fn test_ctx() -> Arc<dyn symbio_core::PluginInvokeRequest> {
 /// ctx 里没有注册面 = 「没有任何工具声明过任何位」。生产里这个注册面由会话
 /// 插件的能力收集装上（`capabilities.rs`），测试照同一形状喂——`tools` 传什么，
 /// 注册面就是什么，两边不会漂。
-async fn test_ctx_declaring(
-    tools: &[CapabilityMeta],
-) -> Arc<dyn symbio_core::PluginInvokeRequest> {
+async fn test_ctx_declaring(tools: &[CapabilityMeta]) -> Arc<dyn symbio_core::PluginInvokeRequest> {
     let ctx = test_ctx();
     let visitor = Arc::new(DefaultToolVisitor::new());
     for t in tools {
@@ -308,9 +306,8 @@ async fn supplements_become_facts_visible_next_turn() {
             })
                 as std::pin::Pin<
                     Box<
-                        dyn std::future::Future<
-                                Output = Option<symbio_core::DrainedSupplement>,
-                            > + Send,
+                        dyn std::future::Future<Output = Option<symbio_core::DrainedSupplement>>
+                            + Send,
                     >,
                 >
         }) as super::SupplementFn
@@ -361,11 +358,7 @@ async fn supplements_become_facts_visible_next_turn() {
         .iter()
         .find(|e| e.kind == symbio_core::EVENT_TURN_SUPPLEMENTED)
         .unwrap_or_else(|| panic!("补充必须落成事实（否则下一轮就消失——那正是缺口 3）：{snap:?}"));
-    assert_eq!(
-        sup.entity,
-        symbio_core::Entity::Turn,
-        "落在 Turn 实体上"
-    );
+    assert_eq!(sup.entity, symbio_core::Entity::Turn, "落在 Turn 实体上");
     assert_eq!(sup.verb, symbio_core::Verb::Asserted, "断言类动词");
     assert_eq!(
         sup.payload.get("count").and_then(|v| v.as_u64()),
@@ -1259,9 +1252,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 /// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_memory_and_learning_facts() {
-    use symbio_core::{
-        EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED,
-    };
+    use symbio_core::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED};
 
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
@@ -2295,8 +2286,8 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
 /// 「又答了一轮」。
 #[test]
 fn the_ledger_decides_which_cell_ends_the_drive() {
-    use symbio_core::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_SENT};
     use serde_json::Value;
+    use symbio_core::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_SENT};
 
     let cell = |kind: &'static str, entity: Entity, verb: Verb, turn: u64, payload: Value| {
         Event::pending(

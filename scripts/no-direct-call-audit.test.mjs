@@ -56,14 +56,14 @@ function audit(files) {
 const DEFINITION = 'pub struct Reasoner;\n'
 
 test('干净夹具通过', () => {
-  const r = audit({ 'symbio_core/actors/mod.rs': DEFINITION })
+  const r = audit({ 'symbio-core/src/actors/mod.rs': DEFINITION })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('运行时代码引用主体类型 → NDC-001 变红', () => {
   const r = audit({
-    'symbio_core/actors/mod.rs': DEFINITION,
-    'symbio_core/exec/driver.rs': 'use crate::symbio_core::actors::Reasoner;\nlet r: Reasoner = Reasoner;\n',
+    'symbio-core/src/actors/mod.rs': DEFINITION,
+    'symbio-core/src/exec/driver.rs': 'use crate::symbio_core::actors::Reasoner;\nlet r: Reasoner = Reasoner;\n',
   })
   assert.equal(r.status, 1, '运行时代码拿到主体必须红')
   assert.match(r.stderr, /NDC-001/)
@@ -71,8 +71,8 @@ test('运行时代码引用主体类型 → NDC-001 变红', () => {
 
 test('主体互持句柄 Arc<Reasoner> → NDC-002 变红（测试文件也不例外）', () => {
   const r = audit({
-    'symbio_core/actors/mod.rs': 'pub struct Decider { peer: Arc<Reasoner> }\n' + DEFINITION,
-    'symbio_core/actors/mod.test.rs': 'let shared = Arc::new(Reasoner);\n',
+    'symbio-core/src/actors/mod.rs': 'pub struct Decider { peer: Arc<Reasoner> }\n' + DEFINITION,
+    'symbio-core/src/actors/mod.test.rs': 'let shared = Arc::new(Reasoner);\n',
   })
   assert.equal(r.status, 1, '互持句柄必须红（协作只走事件）')
   assert.match(r.stderr, /NDC-002/)
@@ -81,27 +81,27 @@ test('主体互持句柄 Arc<Reasoner> → NDC-002 变红（测试文件也不�
 
 test('定义域 / 根重导出 / 测试引用 + 注释提及 → 放行', () => {
   const r = audit({
-    'symbio_core/actors/mod.rs': DEFINITION,
-    'symbio_core/actors/mod.test.rs': 'let r = Reasoner;\n',
-    'symbio_core/mod.rs': 'pub use actors::Reasoner;\n',
-    'symbio_core/adapters/mod.rs': '//! ② actors 的 Reasoner 是类型边（注释不算耦合）。\n',
+    'symbio-core/src/actors/mod.rs': DEFINITION,
+    'symbio-core/src/actors/mod.test.rs': 'let r = Reasoner;\n',
+    'symbio-core/src/lib.rs': 'pub use actors::Reasoner;\n',
+    'symbio-core/src/adapters/mod.rs': '//! ② actors 的 Reasoner 是类型边（注释不算耦合）。\n',
   })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('定义域是整个 actors 模块树：域内新拆出的文件不被误报', () => {
   const r = audit({
-    'symbio_core/actors/mod.rs': DEFINITION,
-    'symbio_core/actors/reasoner.rs': 'impl Reasoner { fn reply() {} }\n',
-    'symbio_core/actors/commitment.rs': 'pub struct CommitmentKeeper;\n',
+    'symbio-core/src/actors/mod.rs': DEFINITION,
+    'symbio-core/src/actors/reasoner.rs': 'impl Reasoner { fn reply() {} }\n',
+    'symbio-core/src/actors/commitment.rs': 'pub struct CommitmentKeeper;\n',
   })
   assert.equal(r.status, 0, '按顶层类型拆出的域内文件是定义域的一部分：' + r.stderr + r.stdout)
 })
 
 test('定义域**之外**的 actors 相邻文件仍判 NDC-001（目录判据不得漏拦）', () => {
   const r = audit({
-    'symbio_core/actors/mod.rs': DEFINITION,
-    'symbio_core/actors_extra/foo.rs': 'let r = Reasoner;\n',
+    'symbio-core/src/actors/mod.rs': DEFINITION,
+    'symbio-core/src/actors_extra/foo.rs': 'let r = Reasoner;\n',
   })
   assert.equal(r.status, 1, 'actors_extra 不在定义域内，必须红')
   assert.match(r.stderr, /NDC-001/)

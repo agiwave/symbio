@@ -27,7 +27,7 @@ impl: done
 ## 契约
 
 入参 `ComposeRequest`，出参是 `String`（一段面向用户的文本），定义在
-[`symbio_core::dialog`](../../symbio_core/dialog/mod.rs) ——
+[`symbio_core::dialog`](../symbio-core/src/dialog/mod.rs) ——
 契约跨插件（`session` 生产，本插件消费），故落在 core（D-023）。
 
 出参是文本而非枚举，与 `classify` 正好相反：**判决是给编排层执行的，措辞是给人看的。**
@@ -55,9 +55,9 @@ compose(verdict)
 
 | 产线 | 文件 | 判据 |
 |---|---|---|
-| 模板表 | [`templates.rs`](templates.rs) | `greeting` / `thanks` / `ack` / `empty` / `clarify` / `refuse` / `needs_work` / `unclassified` —— 这些句子的**内容**是固定的，模型只会把它们写长 |
-| 生成 | [`wording.rs`](wording.rs) | 只有 `from_context`（「答案已在对话里」）——那段文本只能从对话线**组织**出来，模板给不了 |
-| 填表 | [`templates.rs`](templates.rs) 的 `progress_text` | 只有 `Report` —— 事实（跑了几轮 / 静默多久）已在 `ComposeRequest.snapshot` 里，缺的只是把它说成人话 |
+| 模板表 | [`templates.rs`](src/templates.rs) | `greeting` / `thanks` / `ack` / `empty` / `clarify` / `refuse` / `needs_work` / `unclassified` —— 这些句子的**内容**是固定的，模型只会把它们写长 |
+| 生成 | [`wording.rs`](src/wording.rs) | 只有 `from_context`（「答案已在对话里」）——那段文本只能从对话线**组织**出来，模板给不了 |
+| 填表 | [`templates.rs`](src/templates.rs) 的 `progress_text` | 只有 `Report` —— 事实（跑了几轮 / 静默多久）已在 `ComposeRequest.snapshot` 里，缺的只是把它说成人话 |
 
 **为什么汇报是"填表"而不是"生成"**：它的正文全部来自 `RunSnapshot` 的两个事实，
 措辞是固定的。让模型来写只会多出两样东西——一次**加在用户等待期间**的往返（汇报的
@@ -109,7 +109,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 ## 落点与标记（归 `session`，不归本插件）
 
 本插件只返回字符串；**写到哪、带什么标记**由调用方决定，见
-[`../loop/chat_loop/compose.rs`](../loop/chat_loop/compose.rs)：
+[`../loop/chat_loop/compose.rs`](../symbio-plugin-loop/src/chat_loop/compose.rs)：
 
 | 产物 | 落点 | `meta.surface` | `meta.exclude_from_context` | `meta.reason` |
 |---|---|---|---|---|

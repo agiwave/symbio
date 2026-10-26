@@ -20,14 +20,14 @@
 //!
 //! 协议差异全部被 `ModelProtocol` 钩子吸收，本实现对所有协议通用。
 
+use async_trait::async_trait;
+use std::sync::Arc;
+use symbio_core::chat_node::ChatNode;
 use symbio_core::plugin_error;
 use symbio_core::plugin_info;
 use symbio_core::plugin_warn;
-use symbio_core::chat_node::ChatNode;
 use symbio_core::TurnOutput;
 use symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
-use async_trait::async_trait;
-use std::sync::Arc;
 
 use super::http::{endpoint_label, execute_post_with_abort, PostResult};
 use super::model_providers::ModelProviderConfig;

@@ -3,14 +3,14 @@
 //! 以会话（session_id）为作用域维护一份结构化任务清单，
 //! 帮助 Agent 跟踪复杂多步任务的进度。纯内存状态，不落盘。
 
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
-};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
+};
 use tokio::sync::{OnceCell, RwLock};
 
 /// 会话级任务清单存储：session_id -> 任务数组

@@ -88,7 +88,7 @@ test('match 臂里的 "Refuse => {" 不被误当成 use 语句（2026-09-30 实�
   const out = audit({
     'crates/symbio-core/src/schemas/mod.rs': SCHEMAS_MOD,
     'crates/symbio-core/src/schemas/hook.rs': HOOK_SCHEMA,
-    'crates/crates/plugins/gate/actor.rs': [
+    'crates/symbio-plugin-gate/src/actor.rs': [
       'pub fn f(d: u8) -> u8 {',
       '  match d {',
       '    GateDecision::Refuse => {',

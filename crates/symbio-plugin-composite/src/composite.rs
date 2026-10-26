@@ -32,13 +32,13 @@
 
 use super::registry::PluginRegistry;
 use super::vdfs::CompositeVdfs;
-use symbio_deploy::PLUGIN_ID_COMPOSITE;
 use symbio_core::descend_addr;
 use symbio_core::{
     lock_read, CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason, VdfsProvider,
     CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
+use symbio_deploy::PLUGIN_ID_COMPOSITE;
 
 use std::sync::{Arc, Weak};
 

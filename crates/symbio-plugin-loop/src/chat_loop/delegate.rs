@@ -30,12 +30,12 @@
 //! ## Q3 的读数不住在本模块
 //!
 //! - **Q3（worker 进展）的类型、两种读法与逐子会话编排**已整体搬到
-//!   [`super::super::worker_progress`]（[D-081](../../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
+//!   [`super::super::worker_progress`]（[D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表")
 //!   裁决一第 4 条——进展是「读存储算出来的数」，那条链归存储侧的一个入口；
 //!   本模块是驱动器侧，只消费算好的数）。三处口径与新旧读法的对应见该模块头。
 
-use symbio_core::CapabilityMeta;
 use std::collections::BTreeMap;
+use symbio_core::CapabilityMeta;
 
 use symbio_core::WorkerProgress;
 

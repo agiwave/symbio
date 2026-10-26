@@ -30,13 +30,13 @@
 //! `vdfs/root` 拿到的**地址数据**，两边都不持有名字。
 
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
-use symbio_deploy::PLUGIN_ID_VDFS;
+use std::sync::{Arc, Weak};
 use symbio_core::{
     CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use std::sync::{Arc, Weak};
+use symbio_deploy::PLUGIN_ID_VDFS;
 use tokio::sync::RwLock;
 
 // 根名的静态声明：字面量只在本插件内（fs::VDFS_ADDR_ROOT），编译期随二进制

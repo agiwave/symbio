@@ -9,13 +9,13 @@
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_providers::MemoryFile;
+use std::sync::Arc;
 use symbio_core::absolute_addr;
 use symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
 };
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_providers::MemoryFile;
 use tempfile::TempDir;
 
 /// 测试用会话存储根（只算路径，不落盘）

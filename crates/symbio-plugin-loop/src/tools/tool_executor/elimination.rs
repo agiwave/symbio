@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
-/// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
+/// 淘汰闸门的**判据**（S13 §3，[roadmap/S13 §2](../../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）：
 /// 本会话主体是否已被收回 `assign.work`。
 ///
 /// 与 [`super::breaker::BreakerInputs`] 同一条纪律：判据在**批首**读一次，
@@ -19,7 +19,7 @@ use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 ///
 /// 部署级遍历（全会话、含嵌套子会话、读完整史）因此留在**持有全部事实源的
 /// session**（动作面 `elimination-revoked` 折叠一次）；驱动器只收结论值
-/// （[D-086 §4](../../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")：全量事件过墙是
+/// （[D-086 §4](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")：全量事件过墙是
 /// P6「值注入」的反面）。本结构因此只剩「主体派生 + 结论搬运 + 纯判定」。
 pub struct EliminationInputs {
     /// 判据指向的主体（本会话选定的 agent；消息与日志里要点名）。
@@ -32,8 +32,7 @@ pub struct EliminationInputs {
 impl EliminationInputs {
     /// 批首读一次判据：主体派生 + 搬运 session 折好的撤销结论。
     pub fn of(delegation_revoked: bool, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal =
-            symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref());
+        let principal = symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref());
         Self {
             principal,
             delegation_revoked,

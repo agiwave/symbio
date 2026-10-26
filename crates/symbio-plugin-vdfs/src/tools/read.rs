@@ -7,12 +7,12 @@
 //! 直接透传（已含 `b64` / `mime`，供多模态链路消费）。
 
 use super::{tool, ToolVdfs};
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+};
 
 /// 读文件工具（框架原生 `Capability`）
 pub struct ReadTool {

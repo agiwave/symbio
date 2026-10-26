@@ -131,7 +131,7 @@
  *
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
  *   docs/                系统级文档（**archive/ 除外**，见下）
- *   crates/crates/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
+ *   crates/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
  *   tauri/               前端模块文档（README.md + docs/）
  *   cli/                 命令行模块文档（README.md + docs/）
  *   e2e/                 e2e 用例说明（README.md）
@@ -542,6 +542,23 @@ function containsWord(text, word) {
   }
 }
 
+/**
+ * 证据锚点的**兼容写法**：crate 化（D-191）之后，文档里沿用插件相对路径
+ * （`local/policy/mod.rs`、`plugins/loop/memory_events.rs`）是合理缩写，落点变成
+ * `crates/symbio-plugin-<id>/src/…`。这里只做「同一份文档化事实的另一种写法」的展开，
+ * 不放宽任何判定：展开出来的每个候选仍要精确存在，`::symbol` / `:line` 照旧核对。
+ */
+function evidenceAlternates(base) {
+  const out = new Set()
+  if (base.startsWith('symbio_core/')) {
+    out.add(`crates/symbio-core/src/${base.slice('symbio_core/'.length)}`)
+  }
+  const stripped = base.replace(/^plugins\//, '')
+  const m = /^([a-z_]+)\/(.+)$/.exec(stripped)
+  if (m) out.add(`symbio-plugin-${m[1]}/src/${m[2]}`)
+  return [...out]
+}
+
 function evidenceAnchorResolves(fromFile, base, tail) {
   evidenceIndexOnce()
   let candidates
@@ -551,7 +568,13 @@ function evidenceAnchorResolves(fromFile, base, tail) {
     const direct = [path.resolve(path.dirname(fromFile), base), path.resolve(repoRoot, base)].filter((p) =>
       fs.existsSync(p),
     )
-    candidates = direct.length > 0 ? direct : evidencePaths.filter((p) => p.endsWith('/' + base))
+    const alts = evidenceAlternates(base)
+    candidates =
+      direct.length > 0
+        ? direct
+        : evidencePaths.filter(
+            (p) => p.endsWith('/' + base) || alts.some((a) => p.endsWith('/' + a)),
+          )
   } else {
     candidates = evidenceIndex.get(base) ?? []
   }

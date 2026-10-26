@@ -27,7 +27,7 @@ impl: done
 
 ## 唯一入口
 
-`loop/<sid>` 上的 `Action("run_turn")`（[`provider.rs`](provider.rs)）。授权三条：
+`loop/<sid>` 上的 `Action("run_turn")`（[`provider.rs`](src/provider.rs)）。授权三条：
 
 1. 宿主 ctx 上有 `TURN_DISPATCH`（`WIRE=false` 的进程内键，线上不可伪造）；
 2. `dispatch.spec.session_id == <sid>`（交付包只对本轮会话有效）；
@@ -41,10 +41,10 @@ impl: done
 | 方向 | 通道 | 用途 |
 |---|---|---|
 | session → loop | `loop/<sid>` `run_turn` + `TurnDispatch` | 触发一轮；`TurnSpec` 纯值 + `facts` / `sink` / `writer` / `abort` 等闭族对象 |
-| loop → session | `session/<sid>/_run/<op>`（[`session_port.rs`](session_port.rs)） | 回读历史 / 写转写 / 压缩入格 / 补充取批 / worker 进展 / 恢复等会话侧动作 |
+| loop → session | `session/<sid>/_run/<op>`（[`session_port.rs`](src/session_port.rs)） | 回读历史 / 写转写 / 压缩入格 / 补充取批 / worker 进展 / 恢复等会话侧动作 |
 
 任何第三条连接都要先改 D-086。本插件的 import 根被
-[`E-013`](../../../../scripts/plugin-entry-audit.mjs) 钉在闭族内：只准
+[`E-013`](../../scripts/plugin-entry-audit.mjs) 钉在闭族内：只准
 `crate::symbio_core` + 通用库 + crate 根日志 / 工厂宏，不得引用 `crate::plugins::session`
 或任何兄弟插件。
 
@@ -53,7 +53,7 @@ impl: done
 停用本插件 ⇒ `loop/<sid>` 返回 `NotFound`、不再开新轮；**在飞的轮在有限时间内收敛**
 （动作体已 spawned，持有交付包与端口的 `Arc`，存活期长于插件实例）。存储侧
 `list` / `stat` / 读转写 / 写收件箱照常。守卫用例在
-[`../composite/composite.test.rs`](../composite/composite.test.rs)（真实 `mount_all`
+[`../composite/composite.test.rs`](../symbio-plugin-composite/src/composite.test.rs)（真实 `mount_all`
 + 停用 `loop`）。
 
 ## 模块分工

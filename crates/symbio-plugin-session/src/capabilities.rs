@@ -40,12 +40,12 @@
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
-use symbio_providers::new_registry;
+use std::sync::Arc;
 use symbio_core::{
     capability_init_error_bucket, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
     CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-use std::sync::Arc;
+use symbio_providers::new_registry;
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///

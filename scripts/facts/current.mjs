@@ -383,7 +383,7 @@ function render() {
   L.push("");
 
   // ── §1 插件总表 ─────────────────────────────────────────────────────
-  L.push("## 1. 插件总表（`crates/crates/plugins/`）");
+  L.push("## 1. 插件总表（`crates/plugins/`）");
   L.push("");
   L.push(
     "| 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |"

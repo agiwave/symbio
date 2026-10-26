@@ -13,7 +13,10 @@
 use super::rebuild;
 use crate::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::{Entity, Event, Verb};
-use crate::{EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE};
+use crate::{
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+};
 
 /// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。

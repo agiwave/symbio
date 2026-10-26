@@ -19,14 +19,14 @@ use symbio_core::Store;
 // 已按 阶段拆去 `tools/dispatch/`，父模块顶层不再导入它们——测试自己拿。
 use symbio_core::{failure_kind, Seq};
 // `LatencyTier` 是**测试自己**要的：它只被父模块里的熔断段用到，那段已按域
-// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
+// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../docs/archive/13-质量改进总纲.md)），
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
-use symbio_providers::DefaultToolVisitor;
 use symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
     Registry,
 };
 use symbio_core::{EventStore, LatencyTier};
+use symbio_providers::DefaultToolVisitor;
 
 /// 夹具模仿的是**落库/转写面**：身份写 `principal`（D-147），`role` 只是读侧残留格。
 fn principal_for(role: NodeRole) -> symbio_core::principal::Principal {
@@ -961,10 +961,7 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 
     assert_eq!(p.text, "需要确认：删除文件");
     assert_eq!(p.prompt["tool_name"], json!("agent_run"));
-    assert_eq!(
-        p.failure_kind,
-        symbio_core::failure_kind::NEEDS_APPROVAL
-    );
+    assert_eq!(p.failure_kind, symbio_core::failure_kind::NEEDS_APPROVAL);
     // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
 }
 
@@ -1144,7 +1141,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `derived_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层
@@ -1696,9 +1693,7 @@ fn tool_call_node(id: &str, name: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         // 身份写 `principal`，不写存量 `role` 格（S-014 棘轮）。
-        principal: Some(symbio_core::principal::Principal::tool_principal(
-            name,
-        )),
+        principal: Some(symbio_core::principal::Principal::tool_principal(name)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": name})),
         status: Some(NodeStatus::Streaming),

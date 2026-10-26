@@ -87,7 +87,10 @@
 use crate::keys::SymbioKey;
 use crate::vdfs_notify_change;
 use crate::DetailDefinition;
-use crate::{VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM};
+use crate::{
+    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
+    VdfsWriteResponse, VDFS_EXT_FORM,
+};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -236,10 +239,7 @@ pub const PLUGIN_DIR: PluginDirKey = PluginDirKey;
 /// 或父插件没传），因此这里**不回退**到任何「常规位置」——回退必然读全局
 /// homedir，在子智能体里指错作用域。运行时若需要自己的目录，用插件持有
 /// 的 `self.dir`（构造时经本函数取得），不要拿请求 ctx 再取一次。
-pub fn plugin_dir_from_ctx(
-    ctx: &dyn crate::PluginInvokeRequest,
-    plugin: &str,
-) -> PluginDir {
+pub fn plugin_dir_from_ctx(ctx: &dyn crate::PluginInvokeRequest, plugin: &str) -> PluginDir {
     use crate::PluginInvokeRequestExt;
     match ctx.get(PLUGIN_DIR) {
         Some(dir) => dir,
@@ -823,7 +823,7 @@ pub trait PluginConfigMount: Send + Sync + 'static {
 /// **为什么不再是 blanket impl**：`VdfsProvider` 已住 `symbio_kernel`（D-188 C2b），
 /// 在宿主 crate 里为 `T: PluginConfigMount` 实现外来 trait 会撞 orphan 规则。
 /// 故改为「一个自由函数 + 一个展开宏」：函数仍是唯一实现，各插件用
-/// [`impl_config_mount_vdfs!`] 声明自己走这条骨架。
+/// `impl_config_mount_vdfs!` 声明自己走这条骨架。
 pub async fn config_mount_dispatch<T: PluginConfigMount + ?Sized>(
     this: &T,
     path: &str,
@@ -877,6 +877,18 @@ pub async fn config_mount_dispatch<T: PluginConfigMount + ?Sized>(
 
 /// 把 [`config_mount_dispatch`] 接到具体插件类型上（`VdfsProvider` 已住内核，
 /// 宿主侧不能再写 blanket impl——orphan 规则，见上）。
+///
+/// ## 宏里的路径必须走**根平铺**，不能走 `$crate::<域>::…`
+///
+/// 本宏在**别的 crate 里展开**，展开出来的 `$crate::plugin::config_mount_dispatch`
+/// 要求 `plugin` 模块对那个 crate 可见。域模块是 `pub(crate)`（C-001：根出口唯一），
+/// 于是设置 / telegram 两个插件的 `impl_config_mount_vdfs!` 一起编译失败 ——
+/// `error[E0603]: module \`plugin\` is private`。
+///
+/// 这类引用**grep 不到消费方**：写的是 `$crate::…`，真正用它的地方是宏调用点。
+/// 所以「域模块可以收成 `pub(crate)`」这条判断只在「没有宏引用它」时成立——
+/// 拆 crate 时按文本引用数收窄 `plugin` / `authz` / `decl` / `view` 四个域，
+/// 恰好漏掉了这一处（`plugin` 是唯一被宏引用路径的域）。
 #[macro_export]
 macro_rules! impl_config_mount_vdfs {
     ($ty:ty) => {
@@ -888,7 +900,7 @@ macro_rules! impl_config_mount_vdfs {
                 path: &str,
                 req: $crate::VdfsRequest,
             ) -> $crate::VdfsResult<$crate::VdfsResponse> {
-                $crate::plugin::config_mount_dispatch(self, path, req).await
+                $crate::config_mount_dispatch(self, path, req).await
             }
         }
     };

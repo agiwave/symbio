@@ -28,8 +28,8 @@
 //! 调用各起一条子进程 / 网络请求，机器被自己的工具打满；[`MAX_IN_FLIGHT`] 是最小
 //! 的「有上限」而不是调优参数。
 
-use symbio_core::{CapabilityMeta, CapabilityRiskLevel};
 use std::collections::HashMap;
+use symbio_core::{CapabilityMeta, CapabilityRiskLevel};
 
 /// 一个调用在批内的执行策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

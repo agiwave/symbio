@@ -176,10 +176,7 @@ fn ordinary_frames_do_not_bubble() {
     else {
         panic!()
     };
-    assert_eq!(
-        failure_kind,
-        symbio_core::failure_kind::NEEDS_APPROVAL
-    );
+    assert_eq!(failure_kind, symbio_core::failure_kind::NEEDS_APPROVAL);
     assert_eq!(
         prompt["args"]["agent_id"],
         Value::Null,

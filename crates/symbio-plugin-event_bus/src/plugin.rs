@@ -24,13 +24,15 @@
 //!
 //! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
 //! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域的
-//! `kind = "session"` 频道已废除，见 `../../../../docs/003-design/005-协议规范.md` §事件总线频道。
+//! `kind = "session"` 频道已废除，见 `docs/003-design/005-协议规范.md` §事件总线频道。
 //!
 //! 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除：它缓冲的是按 `session_id`
 //! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
 //! 为空——路由成了恒返回空数组的空壳。
 
-use symbio_deploy::PLUGIN_ID_EVENT_BUS;
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::Arc;
 use symbio_core::SimpleResponse;
 use symbio_core::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
@@ -40,9 +42,7 @@ use symbio_core::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload,
 };
-use async_trait::async_trait;
-use serde_json::json;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_EVENT_BUS;
 use uuid::Uuid;
 
 /// Event Bus 插件

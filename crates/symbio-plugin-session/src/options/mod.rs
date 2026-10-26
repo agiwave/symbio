@@ -37,14 +37,14 @@
 
 use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;
+use serde_json::json;
+use std::sync::Arc;
 use symbio_core::capability_option_fields;
 use symbio_core::PluginInvokeRequest;
 use symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use serde_json::json;
-use std::sync::Arc;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;

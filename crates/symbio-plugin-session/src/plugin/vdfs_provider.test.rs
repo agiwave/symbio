@@ -602,10 +602,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
     let (_dir, p) = fixture();
     let id = unique_id("memory");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!(
-        "{id}/{}",
-        crate::memory::SESSION_MEMORY_FILE
-    );
+    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
 
     // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
     let items = p
@@ -717,10 +714,7 @@ async fn memory_write_respects_the_configured_gate() {
     };
     let id = unique_id("memory-gate");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!(
-        "{id}/{}",
-        crate::memory::SESSION_MEMORY_FILE
-    );
+    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
 
     assert!(
         p.dispatch(
@@ -752,10 +746,7 @@ async fn memory_write_respects_the_configured_gate() {
 async fn memory_of_unknown_session_is_not_found() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-ghost");
-    let path = format!(
-        "{id}/{}",
-        crate::memory::SESSION_MEMORY_FILE
-    );
+    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
 
     assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
     assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
@@ -777,10 +768,7 @@ async fn memory_write_notifies_subscribers() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-notify");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!(
-        "{id}/{}",
-        crate::memory::SESSION_MEMORY_FILE
-    );
+    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
     let sink: VdfsChangeSink = Arc::new(move |c| {
@@ -805,10 +793,7 @@ async fn memory_write_notifies_subscribers() {
     let got = rx.recv().await.expect("写入应投递一条变更");
     assert_eq!(
         got.path,
-        format!(
-            "{id}/{}",
-            crate::memory::SESSION_MEMORY_FILE
-        ),
+        format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE),
         "变更路径与 list 返回的节点地址同源"
     );
     assert!(got.data.is_none(), "资源信号无载荷（信封没有操作枚举）");
@@ -1004,10 +989,8 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
         .unwrap()
         .session_dir(id)
         .expect("会话目录");
-    let fs = crate::store::EventWalStore::open(
-        dir.join(crate::paths::V2_WAL_FILE),
-    )
-    .expect("打开事实源失败");
+    let fs = crate::store::EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
+        .expect("打开事实源失败");
     let anchor = fs
         .range(Seq::new(0))
         .last()
@@ -1037,14 +1020,12 @@ async fn fact_kinds(p: &SessionPlugin, id: &str) -> Vec<String> {
         .unwrap()
         .session_dir(id)
         .expect("会话目录");
-    crate::store::EventWalStore::open_readonly(
-        dir.join(crate::paths::V2_WAL_FILE),
-    )
-    .expect("只读打开事实源失败")
-    .range(Seq::new(0))
-    .into_iter()
-    .map(|e| e.kind)
-    .collect()
+    crate::store::EventWalStore::open_readonly(dir.join(crate::paths::V2_WAL_FILE))
+        .expect("只读打开事实源失败")
+        .range(Seq::new(0))
+        .into_iter()
+        .map(|e| e.kind)
+        .collect()
 }
 
 /// 切换分支（`action(<id>/message/<mid>, "switch_branch", {to})`）的回执。

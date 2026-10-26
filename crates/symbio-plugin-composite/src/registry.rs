@@ -42,14 +42,14 @@
 //! 配置要等重新启用后才能改。这是「停用」的题中之义——**停用是把这个插件连同
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
-use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
-use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
+use serde_json::Value;
 use symbio_core::{
     creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
     PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
     PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
-use serde_json::Value;
+use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
+use symbio_deploy::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 
 /// **系统级插件工厂**：它们的目录就是**系统根本身**，与业务插件**并列**而非包含其中。
 ///
@@ -217,7 +217,10 @@ impl PluginRegistry {
                 }
                 Ok(Some(p)) => p,
                 Err(e) => {
-                    symbio_core::plugin_warn!("composite", "跳过插件目录（配置不符合要求）{name}：{e}");
+                    symbio_core::plugin_warn!(
+                        "composite",
+                        "跳过插件目录（配置不符合要求）{name}：{e}"
+                    );
                     continue;
                 }
             };
@@ -244,7 +247,10 @@ impl PluginRegistry {
             // 停用不是失败，而这里是真的失败：未注册那一类上面已经拦下了，能走到这里的
             // 只剩「产物不是插件」与「构造 panic」，两条都是用户需要知道的事 ⇒ WARN。
             if let Err(e) = self.mount_child(&name, &provider, dir) {
-                symbio_core::plugin_warn!("composite", "跳过构造失败的插件 {name} -> {provider}：{e}");
+                symbio_core::plugin_warn!(
+                    "composite",
+                    "跳过构造失败的插件 {name} -> {provider}：{e}"
+                );
             }
         }
     }
@@ -267,7 +273,11 @@ impl PluginRegistry {
                 symbio_core::plugin_warn!("composite", "插件根不存在：{}", self.root.display());
             }
             Err(e) => {
-                symbio_core::plugin_warn!("composite", "读取插件根失败 {}：{e}", self.root.display())
+                symbio_core::plugin_warn!(
+                    "composite",
+                    "读取插件根失败 {}：{e}",
+                    self.root.display()
+                )
             }
         }
         names.sort();

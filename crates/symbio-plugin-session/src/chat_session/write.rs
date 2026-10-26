@@ -202,7 +202,11 @@ impl PersistentChatSession {
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
             Err(why) => {
-                symbio_core::plugin_error!("session", "[message] 变更未能入格，本次变更未生效：{}", why);
+                symbio_core::plugin_error!(
+                    "session",
+                    "[message] 变更未能入格，本次变更未生效：{}",
+                    why
+                );
                 return Err(PluginError::InternalError(format!(
                     "消息变更未能入格，本次变更未生效：{why}"
                 )));
@@ -248,7 +252,11 @@ impl PersistentChatSession {
                 } => {}
             }
             if let Some(why) = failure {
-                symbio_core::plugin_error!("session", "[message] 变更未能入格，本次变更未生效：{}", why);
+                symbio_core::plugin_error!(
+                    "session",
+                    "[message] 变更未能入格，本次变更未生效：{}",
+                    why
+                );
                 return Err(PluginError::InternalError(format!(
                     "消息变更未能入格，本次变更未生效：{why}"
                 )));

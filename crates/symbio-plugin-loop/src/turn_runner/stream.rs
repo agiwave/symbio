@@ -228,7 +228,7 @@ where
 /// 判据与取法全在 [`super::super::port::kill_dangling`]：这里只把端口名与理由定死。
 /// 端口无关的那一半留在端口面，是因为 `turn` 端口有同一处处置（外环的派发行，
 /// D-168）——两处各写一遍，就会有一条在改口径时被落下。
-pub(crate) fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_core::AppendError>
+pub fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {

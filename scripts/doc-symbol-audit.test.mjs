@@ -44,7 +44,7 @@ function audit (files) {
 
 /** 最小 Rust 语料：两个真实符号（一个带前缀、一个仅字段名）+ 一个常量族 + 一个只在引号里的外部约定名 */
 const RS = {
-  'crates/crates/crates/lib.rs': [
+  'crates/symbio/lib.rs': [
     'pub const PLUGIN_PAYLOAD_KEY: &str = "payload";',
     'pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";',
     'pub const WIRE_TOTAL: u32 = 2;',
@@ -540,7 +540,7 @@ test('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪
 // （轮态那边），`Verdict` 的定义体里从来没有过。D-005 只问「这个名字全仓出现过没有」，
 // 于是同一个名字在错的类型上照样绿灯——**改名后最典型的腐烂形态**。
 const TYPES = {
-  'crates/crates/crates/lib.rs': [
+  'crates/symbio/lib.rs': [
     'pub struct Verdict { pub ok: bool }',
     'pub enum Gap { Unmanned, Filled }',
     'pub trait Cap { fn execute(&self); }',

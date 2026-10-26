@@ -14,13 +14,13 @@
 //! 前端的提问卡与回答回填链路共用。自动模式（`mode == "auto"`）下不产节点，
 //! 返回 `tool_unavailable` 让 LLM 自行继续，避免无人值守时阻塞。
 
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::{
     Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt,
 };
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 const MAX_QUESTIONS: usize = 4;
 const MIN_OPTIONS: usize = 2;

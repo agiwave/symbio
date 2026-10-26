@@ -193,7 +193,7 @@ impl SessionPlugin {
                     //
                     // 落点与 `truncate`/`expand_skeleton` 同一个位置，语义却相反：那两个
                     // 改的是**节点**，这个只改**读法**——落一条 `turn.branch_selected`，
-                    // 不开轮、不产生消息（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+                    // 不开轮、不产生消息（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
                     //
                     // 必须排在下面的恢复 catch-all **之前**：`switch_branch` 不在
                     // `ResumeAction` 的词表里，掉进那一臂会被读成 `NotImplemented`——

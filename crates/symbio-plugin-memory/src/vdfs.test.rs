@@ -3,11 +3,9 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use symbio_core::vdfs_context;
-use symbio_core::{
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
-};
 use std::sync::Arc;
+use symbio_core::vdfs_context;
+use symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
 use tempfile::TempDir;
 
 /// 在某宿主目录下造一个本插件实例（插件目录 = `<宿主目录>/memory`）

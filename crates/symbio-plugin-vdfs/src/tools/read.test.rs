@@ -6,11 +6,11 @@
 //! 结构化字段让消费方退回整包 JSON。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
+use std::sync::Arc;
 use symbio_core::{
     Capability, ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
-use std::sync::Arc;
+use symbio_providers::DefaultToolVisitor;
 
 fn empty_provider() -> Arc<ToolVdfs> {
     Arc::new(ToolVdfs::new(Arc::new(DefaultToolVisitor::new())))

@@ -68,20 +68,15 @@ fn seed_turn(
     (snapshot, user_seq)
 }
 
-/// 代际立约（[04 §3.1 批⑧](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S08 §3「加格子，不加机制」）：
+/// 代际立约（[04 §3.1 批⑧](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S08 §3「加格子，不加机制」）：
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let delegations = [Delegation {
         id: "call-1".to_string(),
         promise: "让 reviewer 复查这段".to_string(),
@@ -150,7 +145,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
 }
 
-/// `to` 是**数据**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")， 的单测判据）：
+/// `to` 是**数据**（[D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")， 的单测判据）：
 /// 来源主体由调用方传入——对等主体向「把消息交进来的那个主体」立约，不再写死
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
@@ -158,13 +153,8 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_PEER,
-        0,
-        "对等主体跑一轮",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
     let delegations = [Delegation {
         id: "call-peer-1".to_string(),
         promise: "把结果交给主智能体".to_string(),
@@ -211,13 +201,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let delegations = [Delegation {
         id: "call-2".to_string(),
         promise: "让 reviewer 复查这段".to_string(),
@@ -262,8 +247,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         .and_then(|v| v.as_str())
         .expect("宣告载荷带原话");
     assert!(
-        statement.contains(symbio_core::PRINCIPAL_USER)
-            && statement.contains("子会话中途失败"),
+        statement.contains(symbio_core::PRINCIPAL_USER) && statement.contains("子会话中途失败"),
         "宣告 = 把这次违约告知承诺对象：{statement}"
     );
     assert_eq!(
@@ -275,7 +259,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
 /// `Break` 的理由落成 `control × opened`，溯源锚是本轮开口；`breaks` 为空 ⇒ 一格都不落。
 ///
-/// 这是 [roadmap/S09 §6](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 的两条
+/// 这是 [roadmap/S09 §6](../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断") 的两条
 /// **相反**验收：验收 1（未授权 ⇒ 拒绝且不产生事件）与验收 2（预算耗尽 ⇒ 必须产出
 /// 熔断事件）。两条必须由**同一个出参**分别触发——有理由就落、没理由就不落；
 /// 「反正都落一条」违反 1，「反正都不落」违反 2。
@@ -283,13 +267,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     // ── 有理由：落格 ────────────────────────────────────────────────────
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "让它跑一遍",
-        7,
-    );
+    let (snapshot, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "让它跑一遍", 7);
     record_derived(
         "derived-test",
         &store,
@@ -420,8 +398,7 @@ fn record_learning_wires_all_three_memory_steps() {
         .value;
     assert!(!view.entries.is_empty(), "还有活记忆可召回");
 
-    let (snapshot, user_seq) =
-        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
+    let (snapshot, user_seq) = seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 4, "第五句", 44);
     record_learning(
         "derived-test",
         &store,
@@ -467,13 +444,8 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let delegations = [Delegation {
         id: "call-1".to_string(),
         promise: "让 reviewer 复查这段".to_string(),
@@ -529,13 +501,8 @@ fn a_kept_delegation_never_eliminates() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let delegations = [Delegation {
         id: "call-1".to_string(),
         promise: "让 reviewer 复查这段".to_string(),
@@ -573,13 +540,8 @@ fn elimination_does_not_write_a_second_verdict() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let delegations = [Delegation {
         id: "call-1".to_string(),
         promise: "让 reviewer 复查这段".to_string(),
@@ -620,13 +582,8 @@ fn a_principal_without_assign_work_is_never_eliminated() {
     use symbio_core::facts::Delegation;
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_PEER,
-        0,
-        "对等主体跑一轮",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
     let delegations = [Delegation {
         id: "call-peer-1".to_string(),
         promise: "把结果交给主智能体".to_string(),
@@ -688,13 +645,8 @@ fn commitment_failure_does_not_block_task_or_breaker() {
     }
 
     let store = EventStore::new();
-    let (snapshot, user_seq) = seed_turn(
-        &store,
-        symbio_core::PRINCIPAL_MAIN,
-        0,
-        "交给子智能体",
-        50,
-    );
+    let (snapshot, user_seq) =
+        seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
     let refusing = CommitmentsRefuse(store);
 
     record_derived(

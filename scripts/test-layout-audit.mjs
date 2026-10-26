@@ -140,9 +140,11 @@ for (const rootSpec of ROOTS) {
   for (const tf of testFiles) {
     const base = path.basename(tf)
     const dir = path.dirname(tf)
+    // crate 根测试模块的宿主：旧布局是 `mod.rs`，crate 化后根文件是 `lib.rs`（D-191）。
     const host =
       base === 'tests.rs'
-        ? path.join(dir, 'mod.rs')
+        ? [path.join(dir, 'mod.rs'), path.join(dir, 'lib.rs')].find((c) => fs.existsSync(c)) ??
+          path.join(dir, 'mod.rs')
         : path.join(dir, base.replace(/\.test\.rs$/, '.rs'))
     if (!fs.existsSync(host)) {
       error(`${rel(tf)} 找不到宿主文件（期望 ${rel(host)}）`)

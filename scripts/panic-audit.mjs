@@ -55,8 +55,11 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive', 'docs'])
-/** 生产源码根：symbio 与内核 crate（D-188 C2a 后内核不再住 symbio/src）。 */
-const SRC_DIRS = [path.join('crates'), path.join('crates', 'symbio-kernel', 'src')]
+/** 生产源码根。D-191 拆 crate 后所有生产 .rs 都在 `crates/<crate>/` 下，一个根即覆盖全部；
+ *  内核 crate 也在其中，**不再单列**——`crates/symbio-kernel/src` 是 `crates` 的子目录，
+ *  并列两项会让内核文件被收集两遍（实测多算 4 个登记项 / 4 处 panic 面，把只减棘轮抬高）。
+ *  收集后再按绝对路径去重，防止将来目录重新嵌套时同一个洞复发。 */
+const SRC_DIRS = [path.join('crates')]
 /** 命中形态：与 M6 的 S-012 同一族的「形状」判据，不取词表。
  *  `HIT`（非全局）给 `.test` 用；`HIT_G`（全局）给 `matchAll` 数出现次数用——
  *  带 `g` 的正则做 `.test` 是**有状态**的（`lastIndex` 会留在上一次匹配之后），
@@ -213,7 +216,8 @@ if (srcDirs.length === 0) {
   process.exit(2)
 }
 
-const files = srcDirs.flatMap((d) => collectRs(d))
+// 去重：多个根若存在嵌套，同一个文件会被收集两遍，panic 面随之翻倍计入棘轮。
+const files = [...new Set(srcDirs.flatMap((d) => collectRs(d)).map((f) => path.resolve(f)))]
 if (files.length === 0) {
   console.log(red('[ERROR] PN-001 审计范围读不出：一份非测试 .rs 都没收集到'))
   process.exit(2)

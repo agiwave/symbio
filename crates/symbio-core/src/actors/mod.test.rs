@@ -122,9 +122,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
 /// 登记行（会话 / 对等 / 抢占判定者）与未登记的 `session/<id>`（表里没有行 ⇒ 全拒）。
 #[test]
 fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
-    use crate::authz::{
-        production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX,
-    };
+    use crate::authz::{production_matrix, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX};
     for p in [
         PRINCIPAL_MAIN,
         PRINCIPAL_PEER,
@@ -367,10 +365,7 @@ async fn rehearse_reasoner_turn(
     let outcome = llm
         .generate(
             &tok,
-            &crate::transcript()
-                .read_all(&snapshot)
-                .value
-                .to_messages(),
+            &crate::transcript().read_all(&snapshot).value.to_messages(),
         )
         .await;
     let cost_ms = started.elapsed().as_millis() as u64;
@@ -455,10 +450,7 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let reply = llm
         .generate(
             &TokenIssuer::issue_deep(),
-            &crate::transcript()
-                .read_all(&snapshot)
-                .value
-                .to_messages(),
+            &crate::transcript().read_all(&snapshot).value.to_messages(),
         )
         .await
         .expect("成功桩必答");
@@ -616,9 +608,7 @@ fn consolidation_does_not_pollute_as_of_view() {
         "遗忘 = 投影不再包含"
     );
 }
-use crate::event::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-};
+use crate::event::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN};
 
 /// 验收 2：检索预算耗尽 → degraded + 部分结果；**不允许空且不标降级**。
 #[test]
@@ -1855,11 +1845,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
         .unwrap();
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let view = crate::fallback_rate().apply(
-        &snapshot,
-        i64::MAX,
-        crate::Budget::generous(),
-    );
+    let view = crate::fallback_rate().apply(&snapshot, i64::MAX, crate::Budget::generous());
 
     let deep = view.value.of("deep");
     assert_eq!((deep.turns, deep.fallbacks), (3, 1));
@@ -1874,11 +1860,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
     assert_eq!(unspec.rate(), 1.0, "未声明档位的兜底必须被看见");
 
     // N1：双跑逐字节一致。
-    let again = crate::fallback_rate().apply(
-        &snapshot,
-        i64::MAX,
-        crate::Budget::generous(),
-    );
+    let again = crate::fallback_rate().apply(&snapshot, i64::MAX, crate::Budget::generous());
     assert_eq!(view.value, again.value);
 }
 

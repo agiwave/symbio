@@ -1,4 +1,4 @@
-//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../../docs/003-design/035-长会话与断点恢复.md "DE-035-长会话与断点恢复")
+//! `wal` 单测 —— S4 两步的出口判据（[roadmap/S05 §6](../../../../docs/003-design/035-长会话与断点恢复.md "DE-035-长会话与断点恢复")
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
@@ -722,7 +722,7 @@ fn reopening_after_archival_sees_only_the_live_tail() {
 /// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
 /// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
 /// 「这条会话压缩过没有」——那是布局泄漏进抽象
-/// （[plan/14 §2.2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
+/// （[plan/14 §2.2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 推论 1）。
 #[test]
 fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);

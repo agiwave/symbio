@@ -43,12 +43,12 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
   （`capability*`）、跨端 schema（`schemas/`）、资源访问契约（`vdfs`）、模型契约
   （`model_provider`）、上下文键（`keys`）等。**准入判据是「依赖方数量」，不是「够不够底层」**
   （[D-023](../010-adr/023.md)）。
-  模块清单见 [`symbio_core/mod.rs`](../../crates/symbio-core/src/mod.rs)。
+  模块清单见 [`symbio_core/mod.rs`](../../../crates/symbio-core/src/lib.rs)。
 - **`plugins/` — 实现层**：所有插件平铺存放，容器与叶子实现同一 `Plugin` trait；
   职责与插件清单见 [`docs/README.md` §模块文档地图](../README.md#模块文档地图 "docs/README")与
   [CURRENT.md](../006-ref/006-当前事实表.md "RE-006-当前事实表") §1（**本文不复制插件表**——手抄一份必然漂移）。
 - **`providers/` — 基础设施层**：嵌入推理与 `vdfs_service`（资源落盘的集中实现）。
-  实现清单见 [`providers/mod.rs`](../../crates/symbio-providers/src/lib.rs)。
+  实现清单见 [`providers/mod.rs`](../../../crates/symbio-providers/src/lib.rs)。
 
 ## 核心 Trait 与路由
 

@@ -583,8 +583,8 @@ mod turn_runner_tests {
     /// 不变量照绿）；无分片的桩走默认降级（一次性全文一帧）。
     #[tokio::test]
     async fn streaming_run_forwards_deltas_and_writes_final() {
-        use symbio_core::DeltaSink;
         use std::sync::{Arc, Mutex};
+        use symbio_core::DeltaSink;
 
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
@@ -683,8 +683,8 @@ mod turn_runner_tests {
     /// 分片数、日志不增」钉住。若将来有人把帧顺手写进日志，条数会多出来，这里先红。
     #[tokio::test]
     async fn streaming_frames_do_not_add_facts() {
-        use symbio_core::DeltaSink;
         use std::sync::{Arc, Mutex};
+        use symbio_core::DeltaSink;
 
         // 非流式：一次全文，一条 final。
         let plain_store = EventStore::new();
@@ -763,8 +763,8 @@ mod turn_runner_tests {
     /// （开场白只剩 deltas，`got.first()` 是正文增量而不是它）。
     #[tokio::test]
     async fn opening_node_reaches_the_live_surface_at_production_time() {
-        use symbio_core::{chat_node::MessageContent, DeltaSink};
         use std::sync::{Arc, Mutex};
+        use symbio_core::{chat_node::MessageContent, DeltaSink};
 
         /// 按序记「实时面上到过的帧」：`(节点 id, 正文)`，增量记为空 id。
         #[derive(Default)]
@@ -1123,7 +1123,7 @@ mod turn_runner_tests {
         assert_eq!(deep.rate(), 0.0);
     }
 
-    /// 写侧闸（[04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+    /// 写侧闸（[04 §3.1 批⑥](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// 主体不持 `reply.first` ⇒ 收束格**不落**——该轮留在未收束态（C4 报得出），
     /// 但用户的答案仍回给调用方。
     ///
@@ -1314,8 +1314,7 @@ mod tool_round_tests {
         let answers: Vec<String> = model
             .iter()
             .filter(|e| {
-                e.kind == symbio_core::EVENT_RESPONSE
-                    || e.kind == symbio_core::EVENT_FAILED
+                e.kind == symbio_core::EVENT_RESPONSE || e.kind == symbio_core::EVENT_FAILED
             })
             .map(|e| id_of(e))
             .collect();
@@ -3442,9 +3441,7 @@ mod tool_round_tests {
         // `round_output_rides_…`）；复制一份到收束格则是两个 owner。
         let outputs: Vec<_> = snapshot
             .iter()
-            .filter(|e| {
-                e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model"
-            })
+            .filter(|e| e.kind == symbio_core::EVENT_RESPONSE && e.payload["port"] == "model")
             .collect();
         assert_eq!(outputs.len(), 3, "三次模型往返各一条应答事实");
         assert_eq!(
@@ -3849,7 +3846,7 @@ mod tool_round_tests {
         }
     }
 
-    /// 步数上界（[D-115](../../../../docs/003-design/015-义务环.md#d-115-义务环的输入闭包与执行契约owed-只读事实视图事件时间执行体异步可失败端口分两级 "DE-015-义务环") 决策 3）：
+    /// 步数上界（[D-115](../../../docs/003-design/015-义务环.md#d-115-义务环的输入闭包与执行契约owed-只读事实视图事件时间执行体异步可失败端口分两级 "DE-015-义务环") 决策 3）：
     /// 一个**永远**要工具的适配器不会把这一轮拖死，而是在上界处收束为
     /// `exhausted{step_limit}`。
     ///
@@ -4319,14 +4316,8 @@ mod denial_fact_tests {
         let user_seq = seed_user_turn(&store, 1);
         let spec = child_of_a_principal_without_reply();
         for (kind, key) in [
-            (
-                ClosureKind::Speech,
-                symbio_core::EVENT_ASSISTANT_FINAL,
-            ),
-            (
-                ClosureKind::Artifact,
-                symbio_core::EVENT_ARTIFACT_ADDED,
-            ),
+            (ClosureKind::Speech, symbio_core::EVENT_ASSISTANT_FINAL),
+            (ClosureKind::Artifact, symbio_core::EVENT_ARTIFACT_ADDED),
         ] {
             deny(&store, &spec, 1, user_seq, kind, key, "拒");
         }
@@ -4373,7 +4364,7 @@ mod denial_fact_tests {
 //
 // 这两个函数是 768 行环体里**唯一可脱离 store / sink 单测**的部分：决策只看
 // 「有没有工具调用 + 有没有分发通道」，答话取值只看「正文 / 截断 / 两处思考」。
-// 钉住它们，步骤 1 剩下的就只是执行段搬家（见 `../session/docs/103-turn-runner-steps.md`）。
+// 钉住它们，步骤 1 剩下的就只是执行段搬家（见 `crates/symbio-plugin-session/src/docs/103-turn-runner-steps.md`）。
 
 mod round_decision_tests {
     use super::super::{classify_round, final_answer, RoundDecision, StreamNodeFacts};

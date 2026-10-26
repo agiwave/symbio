@@ -363,7 +363,7 @@ test('PTS-002 端口名单来自扫描而不是文件路径 ⇒ 换一张表也�
     ),
   })
   try {
-    const moved = path.join(root, 'crates/crates/plugins/other/ports.rs')
+    const moved = path.join(root, 'crates/symbio-plugin-other/src/ports.rs')
     fs.mkdirSync(path.dirname(moved), { recursive: true })
     fs.writeFileSync(moved, PORTS_SRC, 'utf8')
     const r = run(root)
@@ -430,9 +430,9 @@ test('PTS-004 基线的理由为空 ⇒ 红', () => {
 test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）', () => {
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'crates/crates/plugins/other'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/symbio-plugin-other/src'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'crates/crates/plugins/other/extra.rs'),
+      path.join(root, 'crates/symbio-plugin-other/src/extra.rs'),
       `pub(crate) fn cheat<S>(store: &S) {\n    let _ = store.append(Event::pending("x", EVENT_FAILED, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
       'utf8',
     )
@@ -447,9 +447,9 @@ test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）'
 test('PTS-005 `before` 那一支也算写点（sent 的名字是变量，不是常量）', () => {
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'crates/crates/plugins/other'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/symbio-plugin-other/src'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'crates/crates/plugins/other/extra.rs'),
+      path.join(root, 'crates/symbio-plugin-other/src/extra.rs'),
       `pub(crate) fn cheat<S>(store: &S, decl: &PortDecl) {\n    let _ = store.append(Event::pending("x", decl.before, Entity::Turn, Verb::Asserted, 1, "system"));\n}\n`,
       'utf8',
     )

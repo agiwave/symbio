@@ -38,6 +38,4 @@ pub use super::llm::model_provider::ModelProvider;
 pub use super::vdfs::VdfsProvider;
 
 // ── 协议五格的事件名（环七步的输入面） ──
-pub use super::event::{
-    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-};
+pub use super::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};

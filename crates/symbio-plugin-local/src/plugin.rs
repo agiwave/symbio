@@ -8,17 +8,17 @@ use super::{
 };
 // 审批闸门的判定住在能力收集器（`DefaultToolVisitor` 那条收口路径的唯一真源）；
 // 本插件的 `route` 兜底也调它——两条路径**判定只有一份**。
-use symbio_deploy::PLUGIN_ID_LOCAL;
-use symbio_providers::approval_gate;
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::{Arc, Weak};
 use symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload,
 };
 use symbio_core::{DetailDefinition, DetailField, DetailOption};
-use async_trait::async_trait;
-use serde_json::json;
-use std::sync::{Arc, Weak};
+use symbio_deploy::PLUGIN_ID_LOCAL;
+use symbio_providers::approval_gate;
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================

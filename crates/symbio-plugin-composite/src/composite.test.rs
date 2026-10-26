@@ -2,11 +2,15 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
+#[allow(unused_imports)]
+// 只为把兄弟插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
+use symbio as _;
+
 use super::*;
 
-use symbio_core::PluginSimpleRequest;
 use indexmap::IndexMap;
 use std::sync::{Mutex, RwLock};
+use symbio_core::PluginSimpleRequest;
 
 ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
 type PluginInvokeResponse = symbio_core::PluginInvokeResponse<PluginPayload>;
@@ -382,13 +386,13 @@ async fn resource_tree_membership_is_derived_from_providers() {
 // 这里钉的是**容器侧**：经**工厂 id + 真实 `mount_all`** 装配，不 import 兄弟模块
 // （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
 
-use symbio_providers::DefaultToolVisitor;
+use std::path::{Path, PathBuf};
 use symbio_core::{
     capability_option_fields, family, vdfs_context, PluginStopReason, Registry, VdfsContent,
     VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use std::path::{Path, PathBuf};
+use symbio_providers::DefaultToolVisitor;
 
 /// 一次性插件根：判据的来源是磁盘（装配位写在 `PLUGIN.yml`），不能拿内存替身测
 fn guard_root(tag: &str) -> PathBuf {

@@ -22,7 +22,7 @@ impl: done
 ## 契约
 
 入参 `DecideRequest`、出参 `Verdict`，都在
-[`symbio_core::dialog`](../../symbio_core/dialog/mod.rs) ——
+[`symbio_core::dialog`](../symbio-core/src/dialog/mod.rs) ——
 契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（D-023）。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；
@@ -45,8 +45,8 @@ decide(utterance)
 
 | 产线 | 文件 | 判据 |
 |---|---|---|
-| 反射档规则表 | [`rules.rs`](rules.rs) | **归一化后逐字全等**——包含匹配会把「你好，帮我读一下 README」判成问候，从而**静默吞掉真实请求** |
-| 快速档分类 | [`decide.rs`](decide.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent` |
+| 反射档规则表 | [`rules.rs`](src/rules.rs) | **归一化后逐字全等**——包含匹配会把「你好，帮我读一下 README」判成问候，从而**静默吞掉真实请求** |
+| 快速档分类 | [`decide.rs`](src/decide.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent` |
 
 **顺序是判据的一部分**：先规则、后分类。反过来，规则短路省下的那次往返会被分类请求吃掉。
 

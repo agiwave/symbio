@@ -37,12 +37,12 @@
 //! 非文本片段（如图片），就按顺序把所有片段拼成 `Parts`，不把图片丢掉。
 
 use super::super::active::{ActiveSessionState, InboxItem};
+use std::sync::Arc;
 use symbio_core::chat_node as cm;
 use symbio_core::VdfsChangeSubscriptions;
-use std::sync::Arc;
 
 /// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
-pub(crate) use symbio_core::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
+pub use symbio_core::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
 
 /// 合并 n 条补充时正文之间的连接符。
 ///
@@ -126,9 +126,9 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
 
 /// 抽干结果（类型已随 D-086 §7 上移 core：loop 的补充注入与 session 的抽干口
 /// 都要命名它；这里只留 session 侧的短路径别名）。
-pub(crate) use symbio_core::DrainedSupplement;
+pub use symbio_core::DrainedSupplement;
 
-/// 「取批 + 合并 + 成形」的**同步单一入口**（[D-081](../../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三）。
+/// 「取批 + 合并 + 成形」的**同步单一入口**（[D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三）。
 ///
 /// 补充消息的**到达**归存储（队列与变更通知都在本域），驱动器只掌握**要的时机**
 /// （工具循环的批次边界）——于是这三步整体住在本域，`chat_loop::SupplementDrain`
@@ -179,7 +179,7 @@ pub(crate) fn take_supplement_batch_sync(
     })
 }
 
-/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
+/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 ///
 /// ## 为什么住 session 而不随驱动器迁走
 ///
@@ -189,7 +189,7 @@ pub(crate) fn take_supplement_batch_sync(
 /// ## 它只做一件事
 ///
 /// 委托本域的单一入口 [`take_supplement_batch_sync`]（取批 + 合并 + 成形三步整体
-/// 住在本域，见 [D-081](../../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三），
+/// 住在本域，见 [D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决三），
 /// **不在驱动器侧自拼步骤、不写任何地址、不落格、不落库**：抽干发生在工具循环的
 /// **批次边界**，落格与「进下一次请求」都在 loop 的 `turn_exec.rs` 的
 /// `supplement_into_request`（由 `turn_runner.rs` 的 2f 触发）。

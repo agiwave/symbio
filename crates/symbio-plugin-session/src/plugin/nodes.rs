@@ -467,8 +467,8 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 /// 声明的**词汇**是共享的（写方 [`symbio_plugin_heartbeat`] 与读方本写臂分属两个插件，
 /// 故键名与 kind 住在 core 的 `event` 域）；声明的**后果**是存储所有者的写窗口纪律
 /// （先把事实源那四格落进，落成了才入队）。两者都在这条写臂上收口，见
-/// [D-076](../../heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") #4 与
-/// [D-077](../../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段。
+/// [D-076](../../../symbio-plugin-heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") #4 与
+/// [D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段。
 ///
 /// ## 不认识的 `kind` 报 `Invalid`，而不是当没看见
 ///
@@ -547,7 +547,7 @@ pub(crate) enum VdfsSessionPath<'a> {
     SubSession { id: &'a str, sub: &'a str },
     /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
-    /// `<id>/_run/<op>`：loop→session 的内部动作（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
+    /// `<id>/_run/<op>`：loop→session 的内部动作（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
     ///
     /// **不是资源**：不出现在 `list` 里，只接受 `Action`；op 闭集与授权判据
     /// 都住在 `plugin/run_actions.rs`。
@@ -835,7 +835,7 @@ pub(crate) fn session_content(
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
     // 呈现派生：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
-    // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
+    // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
     let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();
     let payload = json!({
         "id": session.id,

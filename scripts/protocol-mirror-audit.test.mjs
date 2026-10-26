@@ -971,9 +971,12 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /✓ 后端 symbio\/src\/symbio_core\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  assert.match(r.stdout, /✓ 后端 crates\/symbio-core\/src\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
   // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
-  assert.match(r.stdout, /✓ 前端 tauri\/src\/schemas\/home\.ts:1 → symbio\/src\/plugins\/home\/schemas\.rs/)
+  assert.match(
+    r.stdout,
+    /✓ 前端 tauri\/src\/schemas\/home\.ts:1 → crates\/symbio-plugin-home\/src\/schemas\.rs/,
+  )
 })
 
 test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这条会静默）', () => {

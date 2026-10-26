@@ -135,7 +135,7 @@ impl SessionPlugin {
         symbio_core::node_build::flatten_whole_tree(&mut messages, mode);
         // 呈现派生：列表是前端读到的另一条交互出口（直播走 `Transcript::publish`，
         // 历史/切回走这里）。存储与事件里的节点不含 title/icon 也不含读数行，
-        // 交付前按形状统一算出（读数口径见 [D-111](../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
+        // 交付前按形状统一算出（读数口径见 [D-111](../../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
         Ok(messages.into_iter().map(present_message).collect())
     }
 

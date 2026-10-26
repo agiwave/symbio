@@ -12,9 +12,7 @@
 //! 于是「数据在核内、读法在宿主」只能以自由函数表达——判的对象（规格）与构造的来源
 //! （表行）仍是单一链条，只是链条跨了 crate 边界。
 
-#[cfg(test)]
-use symbio_kernel::actors::Scope;
-use symbio_kernel::actors::{ActorSpec, Pattern};
+use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
 /// 模式判据——`ActorSpec` 生产构造点用的那一支，住在定义域内。
 ///
@@ -59,7 +57,7 @@ pub fn trivial_actor_spec(principal: impl Into<String>) -> ActorSpec {
         capabilities: crate::authz::production_matrix().grant_names_of(&principal),
         pattern: Pattern::Decider,
         budget_ms: 60_000,
-        scope: crate::Scope::Root,
+        scope: Scope::Root,
         principal,
     }
 }
@@ -82,10 +80,7 @@ pub fn actor_can_land_speech(spec: &ActorSpec) -> bool {
 /// 与 [`actor_can_land_speech`] 并列而**不是**它的分支（D-067）：对等主体只持
 /// `produce.artifact` ⇒ 发言臂拒、产物臂放，它因此能收束为一件产物。
 pub fn actor_can_land_artifact(spec: &ActorSpec) -> bool {
-    holds(
-        spec,
-        crate::governance::Capability::ProduceArtifact.name(),
-    )
+    holds(spec, crate::governance::Capability::ProduceArtifact.name())
 }
 
 /// 写侧判定（S07 **抢占判定者**）：本规格能否落控制事实（`task.held` / `control`）。
@@ -96,10 +91,7 @@ pub fn actor_can_land_artifact(spec: &ActorSpec) -> bool {
 /// `authz::ROWS` 那一行保证）。该字段在生产里必须**真被读**：`inbox`
 /// 直驱判定者时若绕开规格、写控制事实也不查 `judge.intent`，这条权威就只是声明。
 pub fn actor_can_judge_intent(spec: &ActorSpec) -> bool {
-    holds(
-        spec,
-        crate::governance::Capability::JudgeIntent.name(),
-    )
+    holds(spec, crate::governance::Capability::JudgeIntent.name())
 }
 
 /// 写侧判定（S13 **仲裁者**）：本规格能否落裁决事实（`verdict.asserted`）。
@@ -124,10 +116,7 @@ pub fn actor_can_assert_verification(spec: &ActorSpec) -> bool {
 /// 缺它 ⇒ 调度者一条事实都不写（fail-closed）——没有资格的调度不该留下「我派过」
 /// 的痕迹。
 pub fn actor_can_assign_work(spec: &ActorSpec) -> bool {
-    holds(
-        spec,
-        crate::governance::Capability::AssignWork.name(),
-    )
+    holds(spec, crate::governance::Capability::AssignWork.name())
 }
 
 /// 能力集是否含该名。名字对错由**构造期**兜住（`from_names` 认不出即拒绝整体

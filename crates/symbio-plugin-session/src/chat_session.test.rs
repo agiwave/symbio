@@ -9,9 +9,9 @@ use super::super::types::Session;
 use super::write::{assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls};
 use super::PersistentChatSession;
 use crate::store::EventWalStore;
-use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use tokio::sync::RwLock;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。

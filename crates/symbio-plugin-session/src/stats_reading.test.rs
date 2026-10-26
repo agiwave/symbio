@@ -14,8 +14,8 @@ use super::{
     context_reading_of, format_money, format_tokens, notice_stats_of, present_message,
     trigger_label,
 };
-use symbio_core::{chat_node as cm, ReadingSection, ReadingTone};
 use serde_json::json;
+use symbio_core::{chat_node as cm, ReadingSection, ReadingTone};
 
 /// 一条压缩节点（形状 = 折叠叶；压缩的数字住在 `meta`，owner 是
 /// `plugins/loop/context/pipeline.rs::compression_stats`）。

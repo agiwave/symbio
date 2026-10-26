@@ -12,11 +12,11 @@
 //! ## 它不是冻结契约（README §1.2 曾把它登记错）
 //!
 //! README §1.2 把它登记为 `plan/01 §4` 的「冻结契约名」，但**那个出处是假的**——
-//! `../../../../docs/003-design/001-核心架构.md` = 0。真正的冻结锚点
-//! （[plan/03 §1](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）是：F1 `Store` 签名 /
+//! `docs/003-design/001-核心架构.md` = 0。真正的冻结锚点
+//! （[plan/03 §1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）是：F1 `Store` 签名 /
 //! F2 `Projection` 构造形状 / **F3 `ActorSpec` 字段集 + 档位→令牌映射** /
 //! F4 三条不变量 / F5 三个封闭集合 / F6 参数表键集。**`TurnRunner` 不在其中**，
-//! 所以这次下沉**不改 F1–F6**，按 [plan/03 §2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
+//! 所以这次下沉**不改 F1–F6**，按 [plan/03 §2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
 //! 的判层不是架构变更。
 //!
 //! ## core 侧留下了什么
@@ -29,13 +29,13 @@
 //! 「一个 turn = 用户格 opened + 至多一条收束 closed」这条不变量由本运行器守着；
 //! 插件侧**不得**自己补写那两格（否则同轮两份记账的假象会回来）。
 
+use std::borrow::Cow;
 use symbio_core::{
     actor_can_land_artifact, actor_can_land_speech, visible_to, ActorSpec, AdapterError, Entity,
     Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, PromptToolCall, Seq, Store, Verb,
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
     EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
 };
-use std::borrow::Cow;
 
 // ── 阶段拆分层（· B3，DE-021 §5 动作 B）──────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
@@ -54,7 +54,7 @@ pub(crate) use self::prepare::{PendingClose, Prepared};
 
 // ── v2 会话运行时：turn 运行器（chat_loop 切换的第一块可复用件）────────
 //
-// 职责把 [plan/04 §2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的单轮流程落成
+// 职责把 [plan/04 §2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的单轮流程落成
 // 一个函数调用：用户消息入格 → [`Reasoner`] 生成（实测耗时）→ final / fallback
 // 落格（I3：失败也必须有输出）。不变量靠构造成立：每轮独立 turn 号（N3）、
 // final 溯源指向本轮用户消息（N5）、实测 cost_ms 随事件入账（D-044）。
@@ -390,7 +390,7 @@ pub struct TurnOutcome {
     /// 不是放弃也不是等待——调用方据此**跳过本轮的派生事实**（承诺 / 任务 / 熔断 /
     /// 记忆全不写）。
     ///
-    /// **落过产物格 ⇒ 不算拒**（[D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：
+    /// **落过产物格 ⇒ 不算拒**（[D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：
     /// 产物收束是另一条收束路（`ClosureKind::Artifact`），它落过格就说明这一轮有话
     /// 说过——典型是只持 `produce.artifact` 的对等主体：发言闸拒它，但它产出的
     /// 工具结果是事实，派生事实照写。
@@ -719,8 +719,8 @@ where
 /// （住轮末收束族）因此永远执行不到。分种类后它能收束为**一件产物**，而它的发言
 /// 资格仍然一项都没有（「没有发言权」与「留不下任何事实」是两件事）。
 ///
-/// 决策 D-065 见 [D-065](../../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
-/// 决策 D-067 见 [D-067](../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "D-067")
+/// 决策 D-065 见 [D-065](../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
+/// 决策 D-067 见 [D-067](../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "D-067")
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClosureKind {
     /// 发言收束：答话 / 兜底 / 中止的那一格。
@@ -756,8 +756,8 @@ impl ClosureKind {
     }
 }
 
-/// 写侧授权闸（[plan/01 §7](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 写侧，
-/// [04 §3.1 批⑥](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：该主体此刻能否写
+/// 写侧授权闸（[plan/01 §7](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 写侧，
+/// [04 §3.1 批⑥](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：该主体此刻能否写
 /// `kind` 所指的那一格。
 ///
 /// ## 为什么判在运行器
@@ -787,7 +787,7 @@ impl ClosureKind {
 /// 主体自己那一行之外还有一道——**委派不放大权威**：`scope = child <parent>` 的
 /// 主体（`agent_run` 派生的子会话）能落的格，其**父主体也必须能落**。
 /// `root` = 独立主体，无上限。语义与取值点见
-/// [ §3.2](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")
+/// [ §3.2](../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")
 /// 与 `chat_loop::state::request_scope`。
 ///
 /// 平凡值下（顶层会话 = `root`，以及主智能体派生的子会话）两道都是恒真——

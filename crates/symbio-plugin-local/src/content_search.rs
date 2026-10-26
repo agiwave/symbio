@@ -5,10 +5,6 @@
 
 use super::policy::SecurityPolicy;
 use super::system::validate_params;
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse,
-};
 use async_trait::async_trait;
 use bstr::ByteSlice;
 use grep::matcher::Matcher;
@@ -20,6 +16,10 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse,
+};
 
 const MAX_RESULTS: usize = 1000;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;

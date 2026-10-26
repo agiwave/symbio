@@ -108,6 +108,11 @@ base64 = "0.22.1"
 tempfile = "3.27.0"
 
 [dev-dependencies]
+# 与 `symbio-plugin-agent` 同一处境：这几条用例要的是**一整棵装配树**，而每个插件的
+# 工厂注册（`inventory`）只存在于它自己的 crate 里。crate 化（D-191）之后单 crate 的
+# 测试二进制里没有兄弟插件的注册 ⇒ 装配返回 None。宿主门面把全部插件 `pub use` 进来，
+# 挂成 dev-dependency 即补齐注册表（dev 成环 Cargo 允许）。
+symbio = { path = "../symbio" }
 tempfile = "3.27.0"
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { version = "1.53.1", features = ["test-util"] }

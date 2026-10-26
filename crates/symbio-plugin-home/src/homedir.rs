@@ -31,9 +31,9 @@
 //!   必须是**进程级全局变量**——它正是整条 `PLUGIN_DIR` 传递链的**起点**。
 //! - 切换 homedir **不会**自动迁移数据（避免误删），由用户在 UI 显式选择。
 
-use symbio_core::plugin_expand_tilde_path;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use symbio_core::plugin_expand_tilde_path;
 use tracing::{info, warn};
 
 /// 默认 homedir

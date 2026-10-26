@@ -23,15 +23,15 @@
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
-use symbio_deploy::PLUGIN_ID_MCP;
 pub use crate::schemas::mcp_config::{McpConfig, McpServerConfig};
-use symbio_providers::DirVdfs;
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, CapabilityRow, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
 };
-use async_trait::async_trait;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_MCP;
+use symbio_providers::DirVdfs;
 use tokio::sync::RwLock;
 use tracing::warn;
 

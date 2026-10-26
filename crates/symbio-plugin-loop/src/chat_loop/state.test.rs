@@ -69,10 +69,7 @@ fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn symbio_core::PluginInvokeRequ
     req.set(symbio_core::AGENT_ID, agent_id.to_string());
     // 绑定登记以会话为持有人（[]）：没有会话 id 就没有登记，未部署主体
     // 会 fail-closed——这组用例要钉的是「规格从登记行取」，所以给一个每例独有的 id。
-    req.set(
-        symbio_core::SESSION_ID,
-        format!("t-state-{agent_id}"),
-    );
+    req.set(symbio_core::SESSION_ID, format!("t-state-{agent_id}"));
     std::sync::Arc::new(req)
 }
 
@@ -140,7 +137,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
 /// 机器判据不在这里（单测拦不住调用点的闸门），在 `e2e/cases/t41-skill-fast-path.mjs`：
 /// 把 pattern 接成分派点 ⇒ 快路永不命中 ⇒ 那条用例的「零模型调用」断言不成立。
 ///
-/// 决策 D-079 见 [D-079](../../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
+/// 决策 D-079 见 [D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
 #[test]
 fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
     use symbio_core::{LatencyTier, Pattern, Scope};

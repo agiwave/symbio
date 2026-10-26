@@ -202,11 +202,7 @@ async fn enqueue_carries_request_params_and_workdir() {
 
 /// 建一个带自定义配置的插件（抽干上界 / 总开关都在配置里）。
 fn plugin_with(config: SessionConfig) -> Arc<SessionPlugin> {
-    Arc::new(SessionPlugin::new(
-        None,
-        config,
-        crate::test_dir(),
-    ))
+    Arc::new(SessionPlugin::new(None, config, crate::test_dir()))
 }
 
 /// 入队 n 条（id 依次 i1..in），返回 id 列表。
@@ -350,8 +346,7 @@ fn preempt_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
 }
 
 fn wal_path(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
-    crate::paths::session_dir(&p.storage_dir(), sid)
-        .join(crate::paths::V2_WAL_FILE)
+    crate::paths::session_dir(&p.storage_dir(), sid).join(crate::paths::V2_WAL_FILE)
 }
 
 /// 往该会话的事实源写一批事实（模拟上一轮的轮末收束入格）。
@@ -773,8 +768,7 @@ fn interruption_after_final_is_queued_not_preempted() {
 fn suspended_task_leaves_readyset_and_restores() {
     let store = EventStore::new();
     running_task(&store, "t1");
-    let before =
-        symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
+    let before = symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
     assert_eq!(before.value.ready.len(), 1);
 
     // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
@@ -783,8 +777,7 @@ fn suspended_task_leaves_readyset_and_restores() {
         .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
         .unwrap();
     let events = facts(&store);
-    let suspended =
-        symbio_core::readyset(usize::MAX).apply(&events, 9_999, Budget::generous());
+    let suspended = symbio_core::readyset(usize::MAX).apply(&events, 9_999, Budget::generous());
     assert!(
         suspended.value.ready.is_empty(),
         "挂起期间不得二次调度（S07 §6 验收 2）"

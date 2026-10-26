@@ -6,7 +6,7 @@
  *
  * 「智能体自身的记忆归 `memory`、设置归 `setting`」这类**归属声明**在本仓有三处手写副本
  * （`plugins/agent/README.md`、`host/mod.rs`、`host/plugin.rs` 的模块文档），而它们的
- * 事实来源在别处：清单是装配方（`crates/crates/crates/assembly.rs`）的常量，目录是 `plugins/` 下的文件夹。
+ * 事实来源在别处：清单是装配方（`crates/symbio-deploy/src/lib.rs`）的常量，目录是 `crates/symbio-plugin-<id>/`。
  * **没有任何东西会因此变红**——09 报告 D-4/D-9 抓到 README 有 5 处过期描述，其中两处
  * 直接把读者指向不存在的模块（`host/instruction.rs`）与不存在的插件（`work`），
  * 一处把成员资格说反（`vdfs 不在其中`，而清单里就在）。
@@ -65,7 +65,9 @@ const REPO_ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path
 
 /** 本判据的三份来源（唯一地址，变了改这里）。 */
 export const AGENT_REL = 'crates/symbio-plugin-agent/src'
-export const PLUGINS_REL = 'crates/crates/plugins'
+export const PLUGINS_REL = 'crates'
+/** 插件 crate 目录前缀：目录名 = 前缀 + 插件 id（D-191 一插件一 crate）。 */
+export const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
 export const ASSEMBLY_REL = 'crates/symbio-deploy/src/lib.rs'
 /** 子树默认清单的常量名（全仓插件清单的唯一字面量，由各插件目录的 `PLUGIN.yml` 生成）。 */
 export const ASSEMBLY_CONST = 'ASSEMBLY_SUB_AGENT_PLUGINS'
@@ -98,7 +100,11 @@ function agentDocs(root) {
   const out = []
   const relOf = (abs) => path.relative(root, abs).split(path.sep).join('/')
   const asLines = (txt) => txt.split(/\r?\n/).map((text, i) => ({ text, line: i + 1 }))
-  const readme = path.join(agentDir, 'README.md')
+  // README 住 **crate 根**，不是 `src/`（D-191 后一插件一 crate：`crates/symbio-plugin-<id>/README.md`）。
+  // 拆分前 AGENT_REL 是 `symbio/src/plugins/agent`，README 正好在它下面；现在
+  // AGENT_REL 指 `crates/symbio-plugin-agent/src`，照旧拼 `src/README.md` 会读不到——
+  // 而读不到的效果是**整份归属语料消失**（AO-002/AO-003/AO-005 全部空转），不是报错。
+  const readme = path.join(path.dirname(agentDir), 'README.md')
   if (fs.existsSync(readme)) out.push({ rel: relOf(readme), lines: asLines(fs.readFileSync(readme, 'utf8')) })
   for (const f of fs.readdirSync(hostDir).filter((n) => n.endsWith('.rs') && !n.endsWith('.test.rs')).sort()) {
     const abs = path.join(hostDir, f)
@@ -114,11 +120,15 @@ function agentDocs(root) {
   return out
 }
 
-/** 真实插件目录名。 */
+/** 真实插件 id（由 `crates/symbio-plugin-<id>/` 目录名反推）。 */
 function pluginDirs(root) {
   const dir = path.join(root, PLUGINS_REL.split('/').join(path.sep))
   if (!fs.existsSync(dir)) return null
-  const names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  const names = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith(PLUGIN_CRATE_PREFIX))
+    .filter((e) => e.name !== PLUGIN_CRATE_PREFIX + 'api')
+    .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
   return names.length ? new Set(names) : null
 }
 
@@ -293,7 +303,15 @@ function checkPathClaims(docs, dirs, root) {
       }
       for (const m of ln.text.matchAll(siblingRe)) {
         if (!dirs.has(m[2])) findings.push(found(doc.rel, ln.line, ln.text, 'AO-005', `指认的兄弟插件 \`${m[2]}\` 没有目录（${m[1]}）`))
-        else if (!fs.existsSync(path.join(root, PLUGINS_REL.split('/').join(path.sep), m[2], 'README.md')))
+        // 兄弟插件的**落盘名**随 D-191 从 `<插件 id>/` 变成 `symbio-plugin-<id>/`：
+        // 文档仍按 id 写（../<插件 id>/README.md，id 是稳定的那层），解析时补前缀。
+        // 若照旧拼 crates/<id>/README.md，每一条兄弟指路都会被判「不存在」——
+        // 而它们全是真的，改文档去迁就解析只会让下一轮再错一次。
+        else if (
+          !fs.existsSync(
+            path.join(root, PLUGINS_REL.split('/').join(path.sep), PLUGIN_CRATE_PREFIX + m[2], 'README.md'),
+          )
+        )
           findings.push(found(doc.rel, ln.line, ln.text, 'AO-005', `${m[1]} 不存在`))
       }
     }

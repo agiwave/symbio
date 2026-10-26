@@ -230,10 +230,10 @@ async fn traverse_contributes_no_tools() {
 /// `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use symbio_providers::DefaultToolVisitor;
     use symbio_core::{
         capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
+    use symbio_providers::DefaultToolVisitor;
 
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);

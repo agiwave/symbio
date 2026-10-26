@@ -21,10 +21,8 @@
 //! `vdfs/write(<会话>)` 的 `{"metadata": {<字段 key>: <值>}}`。本文件因此**不需要**
 //! 任何写代码——它只声明字段。
 
-use symbio_core::{
-    DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
-};
 use serde_json::{json, Value};
+use symbio_core::{DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection};
 
 /// 展示顺序号段：60 = 心跳任务（号段表见文件头）
 pub(crate) const ORDER_HEARTBEAT: i32 = 60;

@@ -12,16 +12,16 @@ mod adapters;
 mod agent;
 // **本机授权表**（谁持有什么能力 + 可见域）——与下面 `governance` 的机制同住一棵模块树：
 // 表与判定分家的唯一坏处是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
-// 表整块是架构元素，故保留 `authz` 命名空间、`pub` 开给全 crate（不进对外公开面，
-// 故 C-003 不数它）：表里写的是部署事实，不是契约。
-pub mod authz;
+// 表整块是架构元素，故保留 `authz` 命名空间、`pub(crate)` 开给全 crate（**不开对外
+// 模块门**，故 C-001 不判、C-003 也不数它）：表里写的是部署事实，不是契约。
+pub(crate) mod authz;
 mod capability;
 mod chat;
 mod clock;
 mod creator;
 // 事实 / 视图声明层：字段清单与视图读法在装载期可查。 起是
 // 义务环的输入面——行表（`plugins::loop::loop_rows`）用 `Frozen::eval` 求视图值。
-pub mod decl;
+pub(crate) mod decl;
 // 义务环：求解在 core（`decl::ring`），行表是部署事实、住插件。它属封闭语法，
 // 经 `kernel` 门面以 `pub` 出根（C-003 只数 `pub use`）：避开与 `actors::Pattern`
 // 重名，插件只经根路径取用（C-002 禁深引域目录）。
@@ -35,7 +35,7 @@ mod invariants;
 mod keys;
 mod llm;
 mod logger;
-pub mod plugin;
+pub(crate) mod plugin;
 mod present;
 mod projection;
 mod store;
@@ -186,7 +186,7 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
 // 生产方（`plugins/heartbeat`）与消费方（`plugins/session` 的收件箱写臂）分属两个
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
-// 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
+// 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
 pub use event::{
     EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED,
@@ -254,7 +254,10 @@ pub use view::RecallEntry;
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。
-pub use view::{principal_namespace, visible_to};
+// `principal_namespace` 只被 `authz`（core 内）取用、core 外零消费方，故走
+// `pub(crate)` 出口——`crate::principal_namespace` 这一写法不变，`authz` 无需改。
+pub(crate) use view::principal_namespace;
+pub use view::visible_to;
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
@@ -435,13 +438,13 @@ pub use capability::family;
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
 pub use capability::failure_kind;
 pub use plugin::{
-    plugin_dir_from_ctx, plugin_expand_tilde_path, Plugin, PluginChannel, PluginConfigFile,
-    PluginConfigMount, PluginDir, PluginEntry, PluginError, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_DIR, PLUGIN_FILE,
-    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS,
+    config_mount_dispatch, plugin_dir_from_ctx, plugin_expand_tilde_path, Plugin, PluginChannel,
+    PluginConfigFile, PluginConfigMount, PluginDir, PluginEntry, PluginError, PluginFrame,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire,
+    PluginMeta, PluginPayload, PluginPayloadWire, PluginSimpleRequest, PluginStopReason,
+    PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 

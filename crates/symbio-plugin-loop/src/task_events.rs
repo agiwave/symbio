@@ -1,4 +1,4 @@
-//! 任务表写方（S7 步 16–18，[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
+//! 任务表写方（S7 步 16–18，[04 §3.1 批⑨](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 //! **会话任务清单 → v2 事实源 → 两个消费方**（读出口 `session/stats` 的 `readyset`
 //! 列 + 交给执行者的调度段）。
 //!
@@ -34,7 +34,7 @@
 //! - **回退出终态 = 返工**：`completed → pending / in_progress` 写
 //!   `task.rework_created` + 一个**新节点**的 `task.opened`（`{id}-r{n}`），
 //!   旧节点仍是终态——返工是新增一条事实，不是回滚
-//!   （[roadmap/S03 §2](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
+//!   （[roadmap/S03 §2](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）。
 //!   这正是 `rework_bounded` 的**生产写方**：不是一条永远空转的断言。
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
@@ -69,7 +69,7 @@ use symbio_core::{
     EVENT_TASK_REWORK_CREATED,
 };
 
-// 记录类型住 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）：
+// 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）：
 // 声明的写方在工具执行层，本文件是读侧投影。
 use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 
@@ -362,15 +362,12 @@ pub(crate) fn schedule(
 /// - 没有事实源 / 读不到 ⇒ `None`——请求里就少一段，不存在「空占位」；
 /// - 就绪集空 ⇒ `None`——依赖没闭合时给模型一个空的候选集只会诱导它瞎猜。
 ///
-/// `snapshot` 是本会话事实的**值**（[D-084](../../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
+/// `snapshot` 是本会话事实的**值**（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 ///
 /// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
 pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
-    let ready = symbio_core::readyset(cap)
-        .read_all(snapshot)
-        .value
-        .ready;
+    let ready = symbio_core::readyset(cap).read_all(snapshot).value.ready;
     if ready.is_empty() {
         return None;
     }
@@ -409,7 +406,7 @@ pub(crate) struct ScheduleFact {
     pub payload: serde_json::Value,
 }
 
-/// 调度者（S04 §3 的 `Decider` 行，[DE-034](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约")）：
+/// 调度者（S04 §3 的 `Decider` 行，[DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约")）：
 /// 就绪集 → 发放 / 到期判死。
 ///
 /// 它是一个 `Decider`，不是组件：输入 `ReadySet` 视图，输出 `task.assigned` 事件；
@@ -443,8 +440,7 @@ impl ScheduleDecider {
     /// 能力集从**授权表的行**取（`grant_names_of`），不在这里列名字。
     pub(crate) fn spec() -> ActorSpec {
         ActorSpec {
-            capabilities: symbio_core::production_matrix()
-                .grant_names_of(PRINCIPAL_SCHEDULER),
+            capabilities: symbio_core::production_matrix().grant_names_of(PRINCIPAL_SCHEDULER),
             pattern: Pattern::Decider,
             budget_ms: SCHEDULE_BUDGET_MS,
             scope: Scope::Root,

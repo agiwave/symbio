@@ -7,11 +7,11 @@
 //! 不认识 `transcripts/wal-archive`。那些是**一种磁盘布局**的细节，而只有会话需要
 //! 这种布局 ⇒ 细节住在使用方。分层判据收成编译边界：core 不再导出本类型，
 //! 任何别的插件想拿 WAL 去自己开一个事实源，**写不出来**（[plan/14 §2.2
-//! 推论 2](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表收敛")）。
+//! 推论 2](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表收敛")）。
 //!
 //! `Store` trait 冻结之后换实现**零接口改动**：调用方把
 //! `EventStore` 换成 `EventWalStore`，其余代码一行不动
-//! （[plan/05 §4](../../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：实现替换不构成架构改动）。
+//! （[plan/05 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：实现替换不构成架构改动）。
 //!
 //! ## 形态
 //!
@@ -77,7 +77,7 @@ use symbio_core::{
     EventEnvelope as _, Seq, Store, StoreInvariant,
 };
 
-/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
+/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
 ///
 /// **信封是具体的 `Event`**：写侧闸门要读 `entity` / `verb` / `turn` / `produced_by`
 /// 才能判 I1 / I2，而泛型参数上只有
@@ -312,9 +312,9 @@ impl WalStore {
     ///
     /// 只给 session 域内用：寄存区要落在**它等着落进的那条 WAL 旁边**，路径由句柄
     /// 自己给出，调用方不必重新派生一遍布局（重新派生 = 第二份布局知识，
-    /// [DE-014 §2.2 推论 1](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
+    /// [DE-014 §2.2 推论 1](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
     /// 要消掉的正是这个）。
-    pub(in crate) fn dir(&self) -> &Path {
+    pub(crate) fn dir(&self) -> &Path {
         self.path.parent().unwrap_or_else(|| Path::new("."))
     }
 

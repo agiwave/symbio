@@ -28,8 +28,11 @@
 use super::chat_session::PersistentChatSession;
 pub use super::config::{PresentationTree, SessionConfig};
 use super::types::{Session, SessionSummary};
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_providers::MemoryFile;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 use symbio_core::session_chat;
 use symbio_core::{
     plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile, PluginDir, PluginError,
@@ -41,11 +44,8 @@ use symbio_core::{
     VdfsChangeSubscriptions,
 };
 use symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_providers::MemoryFile;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 
 /// Session 插件
@@ -66,7 +66,7 @@ pub struct SessionPlugin {
     ///
     /// 存储的 `OnceCell` **住在手柄上**而不是插件上：后台任务里的两个调用方
     /// （`TranscriptSink` / `WorkingGuard`）拿它而不是整个插件
-    /// （[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2），而「卸载后任务还在收尾」
+    /// （[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2），而「卸载后任务还在收尾」
     /// 恰恰需要这份存储比插件活得更久。
     pub(crate) convergence: Convergence,
     /// 「开跑一轮」端口：一个 Turn 从装配到收尾所读的宿主切片（字段与用途见
@@ -75,7 +75,7 @@ pub struct SessionPlugin {
     /// 插件在这里的贡献只是**把同一批 Arc 交出去**：provider 侧的 `dispatch` 只有 `&self`，
     /// 而一轮执行要 `tokio::spawn` 一个自带句柄的任务。那个句柄若是插件本身
     /// （`Arc<SessionPlugin>`），provider 注册、路由、订阅表、监听器与常驻任务册就一起
-    /// 被一个 Turn 钉住（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2 第五处）。
+    /// 被一个 Turn 钉住（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2 第五处）。
     pub(crate) turn: TurnLauncher,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
@@ -91,7 +91,7 @@ pub struct SessionPlugin {
     /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
     /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
     pub(crate) inbox_wake: tokio::sync::Notify,
-    /// 常驻任务的停机位（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：`stop` 置这一格并唤醒
+    /// 常驻任务的停机位（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：`stop` 置这一格并唤醒
     /// [`Self::shutdown_wake`]，两条 loop 在**下一个可取消点**退出——不是中途退出，
     /// 抽干与落格跨 `await`，中途砍断会丢一条用户消息。
     /// 「停用只是从名册里划掉一个名字」就是没有这两格时的形态。
@@ -238,7 +238,7 @@ impl SessionPlugin {
     /// 构造方不因此失败，而「没启动过」在停机侧就是空表，无事可做。
     ///
     /// 心跳扫描循环**不在这里**：它随切片搬进了 `plugins/heartbeat`
-    /// （[D-077](../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），判据不变——每条常驻任务
+    /// （[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），判据不变——每条常驻任务
     /// 都由它的**所有者**在构造点记下句柄。
     pub(crate) fn start_resident_tasks(self: &Arc<Self>) {
         // 「有 runtime 才起任务」与 session 之外的常驻任务同一条判据（裸构造的单测里
@@ -407,7 +407,7 @@ impl Plugin for SessionPlugin {
         Some(self)
     }
 
-    /// 停机（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：两条常驻 loop 与目录监听在这里交出资源。
+    /// 停机（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：两条常驻 loop 与目录监听在这里交出资源。
     ///
     /// 顺序是**先置位并唤醒、再等退出**：loop 体在可取消点看到停机位就自己收尾，本函数
     /// 只等它们把话说完——`drain_inbox_once` 跨 `await`，中途砍断会丢一条已出队的用户消息。
@@ -483,8 +483,7 @@ impl Plugin for SessionPlugin {
         // 选项收集：会话作为选项宿主贡献「自有选项」（工作目录 / 风险等级 /
         // 运行模式）。与其它插件同构——命中 available_options 时才注册，
         // 经统一的 OPTION_VISITOR 收集器汇流。
-        if ctx.get(symbio_core::PATH).unwrap_or_default()
-            == symbio_core::TRAVERSE_AVAILABLE_OPTIONS
+        if ctx.get(symbio_core::PATH).unwrap_or_default() == symbio_core::TRAVERSE_AVAILABLE_OPTIONS
         {
             if let Some(visitor) = ctx.get(symbio_core::OPTION_VISITOR) {
                 for (order, field) in self.session_option_fields() {
@@ -493,7 +492,7 @@ impl Plugin for SessionPlugin {
             }
         }
         // 能力收集（available_tools）：本插件**不再贡献工具**——`heartbeat` 那条随调度
-        // 搬进 `plugins/heartbeat`（[D-077](../heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
+        // 搬进 `plugins/heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
         // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {

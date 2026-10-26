@@ -1,16 +1,16 @@
 use super::skill_response::assemble_response;
-use symbio_deploy::PLUGIN_ID_SKILL;
 use crate::loader::{load_skills_from_dirs_with_budget, LoadBudget};
 use crate::skill_tool::SkillExecuteTool;
 use crate::types::{Skill, SkillConfig};
+use async_trait::async_trait;
+use std::path::Path;
+use std::sync::Arc;
 use symbio_core::{
     plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     TRAVERSE_AVAILABLE_TOOLS,
 };
-use async_trait::async_trait;
-use std::path::Path;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_SKILL;
 use tokio::sync::RwLock;
 
 pub struct SkillPlugin {
@@ -145,13 +145,13 @@ impl SkillPlugin {
 // 本模块只剩 **skill 特有的两件事**——SKILL.md 的摘要解析（frontmatter →
 // 标题/摘要/config）与写前的表单校验。
 
-use symbio_providers::DirVdfs;
 use symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
 use symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
     VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
 };
+use symbio_providers::DirVdfs;
 
 const LABEL: &str = "技能";
 
@@ -451,9 +451,7 @@ impl Plugin for SkillPlugin {
                 }
                 let req: ExecuteRequest = ctx.payload()?;
 
-                let skills = self
-                    .list_skills(ctx.get(symbio_core::WORKDIR))
-                    .await?;
+                let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
                 let skill = skills
                     .into_iter()
                     .find(|s| s.name == req.name)
@@ -469,9 +467,7 @@ impl Plugin for SkillPlugin {
                 )?))
             }
             _ => {
-                let skills = self
-                    .list_skills(ctx.get(symbio_core::WORKDIR))
-                    .await?;
+                let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
                 if let Some(skill) = skills.into_iter().find(|s| s.name == path) {
                     // 名称路由没有 args 入口 ⇒ 声明了 `argument_hint` 的技能在这里
                     // 与 `skill/execute` 一样返回校验错误，而不是把未替换的模板直接交出去。
@@ -489,9 +485,7 @@ impl Plugin for SkillPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(symbio_core::PATH).unwrap_or_default();
         if sub_path == TRAVERSE_AVAILABLE_TOOLS {
-            let skills = self
-                .list_skills(ctx.get(symbio_core::WORKDIR))
-                .await?;
+            let skills = self.list_skills(ctx.get(symbio_core::WORKDIR)).await?;
 
             if !skills.is_empty() {
                 if let Some(tool_visitor) = ctx.get(symbio_core::CAPABILITY_VISITOR) {

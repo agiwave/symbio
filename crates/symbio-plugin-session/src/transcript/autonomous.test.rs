@@ -4,14 +4,14 @@
 
 use super::*;
 use crate::plugin::SessionConfig;
-use symbio_core::{check_all, Entity, Event, Verb, EVENT_USER_MESSAGE};
 use std::sync::Arc;
+use symbio_core::{check_all, Entity, Event, Verb, EVENT_USER_MESSAGE};
 
 // 这一段钉的不是"触发器会不会开跑一轮"（那要真模型，归 e2e），而是**触发先落事实**
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
 // 「欲」永远入格、任务却**只在闸门放行时**才长出来。分开断言是因为三者各自的失效
 // 都不报错：漏了触发 = 自主行为查无此事；漏了自检 = `system` 实体只开不进；
-// 漏了闸门 = 自己写自己的对话（[roadmap/S12 §5](../../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
+// 漏了闸门 = 自己写自己的对话（[roadmap/S12 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
 
 fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");
@@ -27,8 +27,7 @@ fn autonomy_plugin(conation_enabled: bool) -> (tempfile::TempDir, Arc<SessionPlu
 }
 
 fn wal(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
-    crate::paths::session_dir(&p.storage_dir(), sid)
-        .join(crate::paths::V2_WAL_FILE)
+    crate::paths::session_dir(&p.storage_dir(), sid).join(crate::paths::V2_WAL_FILE)
 }
 
 /// 事实源里先放一格：溯源锚指"上一格"，一格都没有就没有可触发的东西。

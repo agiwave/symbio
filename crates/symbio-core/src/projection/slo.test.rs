@@ -4,7 +4,10 @@
 use super::super::fallback::{fallback_rate, FallbackRateView, TierStats};
 use super::slo_report;
 use crate::projection::slo::{SloLatencyView, TierLatency};
-use crate::{cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use crate::{
+    cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
 
 fn user_msg(id: &str, turn: u64, tier: &str) -> Event {
     Event::pending(

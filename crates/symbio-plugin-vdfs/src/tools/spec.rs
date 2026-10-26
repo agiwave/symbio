@@ -28,14 +28,14 @@
 //! 判据是「有没有表装不下的呈现逻辑」，不是「行数够不够少」。
 
 use super::{request_of, tool, ToolVdfs};
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    VdfsItem,
-};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    VdfsItem,
+};
 
 /// 工具的真逻辑签名：`(provider, 已拆好的参数, ctx) -> 回执 JSON`。
 ///

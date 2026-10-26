@@ -43,14 +43,12 @@
 //! 与当前选中项的**动作集**都变了，订阅方据此重拉并重读当前项（前端 `useVdfs` 的既有
 //! 收敛路径），按钮因此不会停在旧状态上。订阅走 [`vdfs_watch_changes`]（本插件是自管变更源）。
 
-use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
-use symbio_deploy::PLUGIN_ID_MANAGER;
+use serde_json::Value;
+use std::sync::Arc;
 use symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
-use symbio_core::{
-    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
-};
+use symbio_core::{DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection};
 use symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CONFIGURABLE_VISITOR, PLUGIN_FILE,
@@ -63,8 +61,8 @@ use symbio_core::{
     VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
-use serde_json::Value;
-use std::sync::Arc;
+use symbio_deploy::ASSEMBLY_UNDISABLABLE_PLUGINS;
+use symbio_deploy::PLUGIN_ID_MANAGER;
 
 /// 自有分区（固定清单）：数据由**前端状态**自持，VDFS 侧无正文。
 ///
@@ -96,7 +94,7 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 ///
 /// ⚠️ **显式声明无状态**（[`VDFS_STATUS_NONE`]）：分区是静态的，没有「运行中 / 就绪」
 /// 可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个绿点——那是个不存在
-/// 的信息（见 `../../../../docs/003-design/010-VDFS前端页面规范.md` §4.2）。
+/// 的信息（见 `docs/003-design/010-VDFS前端页面规范.md` §4.2）。
 ///
 /// `VDFS_STATUS_NONE`
 fn section_node(s: &SectionSpec) -> VdfsNode {

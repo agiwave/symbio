@@ -19,15 +19,6 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 // 根 workspace：所有 cargo 命令都从仓库根发起，靠 `--workspace` 覆盖全部成员。
 const backendDir = repoRoot
 
-// 本地按 crate 分包跑测试以保留各自基线；CI 跑一次全量。
-// 包名取自各成员 Cargo.toml 的 [package].name。
-const TEST_PKGS = [
-  { pkg: 'symbio', baselineName: 'rustTests', baseline: BASELINE.rustTests },
-  { pkg: 'symbio-kernel', baselineName: 'kernelRustTests', baseline: BASELINE.kernelRustTests },
-  { pkg: 'symbio-cli', baselineName: 'cliRustTests', baseline: BASELINE.cliRustTests },
-  { pkg: 'symbio-tauri', baselineName: 'tauriRustTests', baseline: BASELINE.tauriRustTests },
-]
-
 /**
  * 被升为 `-D` 的两条 rustdoc lint —— 各自为什么值得判红，见下方注释。
  * ⚠️ **故意不在名单里的第三类**（`private_intra_doc_links`）也有它的理由，
@@ -71,35 +62,28 @@ export default {
     // 需要「只要类型错误、不要 lint」的快速档时，正确做法是**单独跑** `cargo check`，
     // 而不是把它塞回门禁的必跑链里。
 
-    // 测试：CI 跑一次 `--workspace` 全量（求和**并比对 CI 口径基线**）；本地按 crate 分包比对基线。
-    if (ctx.ci) {
-      tasks.push(
-        cargoTestRatchet(ctx, {
-          label: 'cargo test --workspace（全量）',
-          cwd: backendDir,
-          args: ['test', '--workspace'],
-          // 与下面分包的 `baseline` **不是同一个口径**：`--workspace` 是所有测试目标
-          // 各行求和，分包是各取首个 result 行。不给 `ciBaseline` 会直接判红（见
-          // `cargoTestRatchet`）——那不是麻烦，是让「CI 没有棘轮」这件事不可能再静默发生。
-          ciBaseline: BASELINE.ciRustTestsTotal,
-          ciBaselineName: 'ciRustTestsTotal',
-          baseline: BASELINE.rustTests,
-          baselineName: 'rustTests',
-        }),
-      )
-    } else {
-      for (const { pkg, baselineName, baseline } of TEST_PKGS) {
-        tasks.push(
-          cargoTestRatchet(ctx, {
-            label: `cargo test -p ${pkg}`,
-            cwd: backendDir,
-            args: ['test', '-p', pkg],
-            baseline,
-            baselineName,
-          }),
-        )
-      }
-    }
+        // 测试：**本地与 CI 同一口径** —— 一次 `cargo test --workspace` 求和比对基线。
+    //
+    // 为什么要改（D-191 crate 化之后）：`cargo test -p symbio` 现在只跑宿主门面，
+    // 实测 `0 passed`——21 个插件、core、providers 的用例全在各自 crate 里，分包跑
+    // **一条都跑不到**，而 `rustTests` 基线 2175 守的正是那个空壳。这不是「数字要调」，
+    // 是**守卫指向了不存在的对象**：它会在 0 个用例上一直报「通过数 < 基线」，或者
+    // 更糟——有人把基线改成 0，于是拆分把一个 2000+ 用例的覆盖洞伪装成绿灯。
+    //
+    // 顺带解决两件事：
+    //   · 口径唯一：`--workspace` 的求和就是全部用例，不再有「分包 vs 求和」两套基线；
+    //   · 调用次数：4 次 `cargo test -p …` → 1 次（增量构建下每次启动仍有 ~1s 固定成本）。
+    tasks.push(
+      cargoTestRatchet({ ...ctx, ci: true }, {
+        label: 'cargo test --workspace（全量）',
+        cwd: backendDir,
+        args: ['test', '--workspace'],
+        ciBaseline: BASELINE.ciRustTestsTotal,
+        ciBaselineName: 'ciRustTestsTotal',
+        baseline: BASELINE.rustTests,
+        baselineName: 'rustTests',
+      }),
+    )
 
     tasks.push({
       label: 'cargo clippy --all-targets --workspace -- -D warnings',
@@ -151,7 +135,7 @@ export default {
 //   1. 头一条查的是「这个类型在不在公开签名里」，据此我一度把其中 6 条报成「API 洞、
 //      该 re-export」。**那个定性是错的**：逐项核对后，`AdapterError` / `AppendError`
 //      是**故意** `pub(crate)` 的（`symbio_core/mod.rs` 有整段理由），而仅有的两个跨
-//      crate 消费方 `cli/`（5 个 `.rs`）与 `tauri/`（4 个）对这 13 个名字**命中 0**——
+//      crate 消费方 `crates/symbio-cli/`（5 个 `.rs`）与 `tauri/`（4 个）对这 13 个名字**命中 0**——
 //      消费方全在本 crate 内。为零消费者扩公开面就是 AGENTS.md 说的「为读者根本不
 //      需要的东西扩 API」。
 //   2. 真正的问题是另一件：分诊过程中查出 `Reasoner` 主体带 `reply` / `reply_timed` /
@@ -183,10 +167,26 @@ export default {
     // 单独跑（不想等门禁编排时）：
     //   RUSTDOCFLAGS='-D rustdoc::broken_intra_doc_links -D rustdoc::invalid_rust_codeblocks' `
     //     cargo doc --no-deps --workspace
+    //
+    // ── 拆 crate 之后这两个数字都变了（2026-10-27 复测）────
+    //
+    //   cargo doc --no-deps --workspace → **1m36s**（同一台机器 / 20 核）
+    //   backend 整阶段 → **3m1s**（其中 doc 1m36s、cargo test 1m7s、cli 11s）
+    //   docs 阶段 → 49s
+    //
+    // 原因不是「rmeta 不复用了」，而是 rustdoc **按 crate 跑**：D-191 把树从 1 个
+    // 库 crate 拆成 33 个，这一步就按 crate 数线性放大。连带的结论是本段上面那句
+    // 「并发批墙钟由 docs 决定、doc 的 15.7s 被完全吃掉」**正好反了**：现在是 backend
+    // 3m1s 顶着 docs 49s，doc 直接压在关键路径上。
+    //
+    // 处置：判据留着（断链要在开发者回路里），代价用**内容指纹**摊掉——交给
+    // `scripts/cargo-doc-gate.mjs`：rustdoc 的全部输入（`crates/**` 与
+    // `tauri/src-tauri/src/**` 的 `.rs`、各清单、工具链与 lint 档位）哈希一致
+    // ⇒ 上一轮的通过仍然成立，跳过；不一致 ⇒ 照跑，且**只在成功后落戳**。
     tasks.push({
-      label: 'cargo doc --no-deps --workspace（-D broken_intra_doc_links / invalid_rust_codeblocks）',
-      cmd: 'cargo',
-      args: ['doc', '--no-deps', '--workspace'],
+      label: 'cargo doc --no-deps --workspace（-D broken_intra_doc_links / invalid_rust_codeblocks；输入未变则跳过）',
+      cmd: process.execPath,
+      args: [path.join(scriptDir, '..', 'cargo-doc-gate.mjs')],
       cwd: backendDir,
       env: DOC_LINT_ENV,
     })

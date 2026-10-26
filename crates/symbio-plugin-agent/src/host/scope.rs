@@ -32,13 +32,13 @@
 //! 模型服务**不再是另一套方法**：model 插件逐行 `put` 写入，作用域这一层拦在同一个
 //! 入口上——写入口只有一个，作用域规则也就只有一处（见 `capability/model.rs`）。
 
+use async_trait::async_trait;
+use serde_json::Value;
+use std::sync::Arc;
 use symbio_core::{
     family, Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecEnv, PluginError,
     PluginInvokeRequest, Registry,
 };
-use async_trait::async_trait;
-use serde_json::Value;
-use std::sync::Arc;
 
 /// 子 Agent 插件树的注册代理
 pub struct SubAgentVisitor {

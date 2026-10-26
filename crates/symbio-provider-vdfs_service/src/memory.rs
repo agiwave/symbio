@@ -13,16 +13,16 @@
 //!   `SingleFileVdfs` 灌入，写盘成功后回灌
 //!   ——列表读走内存，落盘走另一型。
 
+use async_trait::async_trait;
+use std::collections::BTreeMap;
+use std::sync::{Arc, RwLock};
 use symbio_core::clock_now_ms;
-use symbio_core::{lock_read, lock_write};
 use symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 use symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
-use async_trait::async_trait;
-use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
+use symbio_kernel::plugin::error::{lock_read, lock_write};
 
 /// 一条内存条目
 #[derive(Debug, Clone)]

@@ -33,17 +33,17 @@
 //! 同一份代码照跑，只是不发增量。
 use super::policy::SecurityPolicy;
 use super::system::{decode_output, validate_params};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use symbio_core::CapabilityRiskLevel;
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
@@ -74,12 +74,8 @@ struct SnapshotTarget {
 impl SnapshotTarget {
     /// 从 ctx 读；任一 id 缺失 ⇒ `None`。
     fn from_ctx(ctx: &dyn PluginInvokeRequest) -> Option<Self> {
-        let msg_id = ctx
-            .get(symbio_core::RESULT_MSG_ID)
-            .unwrap_or_default();
-        let tool_call_id = ctx
-            .get(symbio_core::TOOL_CALL_ID)
-            .unwrap_or_default();
+        let msg_id = ctx.get(symbio_core::RESULT_MSG_ID).unwrap_or_default();
+        let tool_call_id = ctx.get(symbio_core::TOOL_CALL_ID).unwrap_or_default();
         if msg_id.is_empty() || tool_call_id.is_empty() {
             return None;
         }
@@ -438,11 +434,9 @@ where
                                 // 帧要自给自足：这张卡是**本工具的结果流**，
                                 // 族归工具自己（名字就是本插件注册的能力名，见 `meta()`）。
                                 // `role` 格不再手写：`principal.kind` 折叠出同一读法。
-                                principal: Some(
-                                    symbio_core::principal::Principal::tool_principal(
-                                        get_os_info().2,
-                                    ),
-                                ),
+                                principal: Some(symbio_core::principal::Principal::tool_principal(
+                                    get_os_info().2,
+                                )),
                                 msg_type: Some(NodeKind::Body),
                                 status: Some(NodeStatus::Streaming),
                                 content: Some(MessageContent::Text(snapshot.clone())),
@@ -460,11 +454,9 @@ where
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
                             // 与上面 `content` 帧同一身份
-                            principal: Some(
-                                symbio_core::principal::Principal::tool_principal(
-                                    get_os_info().2,
-                                ),
-                            ),
+                            principal: Some(symbio_core::principal::Principal::tool_principal(
+                                get_os_info().2,
+                            )),
                             msg_type: Some(NodeKind::Body),
                             status: Some(NodeStatus::Streaming),
                             delta: Some(delta),

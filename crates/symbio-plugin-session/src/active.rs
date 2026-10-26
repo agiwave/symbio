@@ -1,9 +1,9 @@
-use symbio_core::ExecAbortSignal;
-use symbio_core::VdfsChangeSubscriptions;
-use symbio_core::{chat_node as cm, session_chat};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
+use symbio_core::ExecAbortSignal;
+use symbio_core::VdfsChangeSubscriptions;
+use symbio_core::{chat_node as cm, session_chat};
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use super::plugin::SessionRuntime;
@@ -51,7 +51,7 @@ pub struct InboxItem {
     pub workdir: Option<String>,
 }
 
-/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 ///
 /// 判定与落格必须分开，因为两者要的时刻不同：
 /// - **判定**只能在忙窗（`is_working == true` 且有插话排着）做——那时事实源里只有
@@ -397,7 +397,7 @@ impl ActiveSessionState {
 
 /// 无进程内缓存时的运行态读法：**事实投影**作答。
 ///
-/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
+/// `warning` 不是事实（宿主局部，见 [D-083 §5.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
 /// 由调用方原样带上。
 fn runtime_from_facts(facts: Option<&RuntimeFacts>, warning: Option<String>) -> SessionRuntime {
     match facts.and_then(|f| f.outcome.clone()) {

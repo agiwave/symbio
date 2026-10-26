@@ -1,6 +1,6 @@
-use symbio_plugin_api::hooks::HookOutput;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use symbio_plugin_api::hooks::HookOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookConfigEntry {

@@ -19,13 +19,13 @@
 //! [`approval_gate`] 这个自由函数——**判定只有 [`approval_gate`] 一份**，
 //! 装饰器只是它的注册面投影。
 
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::Arc;
 use symbio_core::{
     ApprovalGrants, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, APPROVAL_GRANTS, MODE, RISK_LEVEL,
 };
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 /// 从 `ctx[RISK_LEVEL]` 读 per-session 阈值；缺席 = `Medium`（新会话的安全默认）。
 ///

@@ -58,7 +58,7 @@ impl Convergence {
     ///
     /// `collected` 是**整个 `run_chat_loop` 调用期间**累积的全部流式消息快照。
     /// 一次调用可以跑几十上百轮工具（v2 没有轮数上限，见
-    /// [D-074](../../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")），因此它往往包含几十上百个
+    /// [D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")），因此它往往包含几十上百个
     /// **早已成功定稿**的历史 Turn——那些轮次的工具早已执行完毕、结果也早已由
     /// Model 插件在每轮结束时落库。
     ///
@@ -160,14 +160,22 @@ impl Convergence {
         let chat_session = match self.open_chat_session(session_id).await {
             Ok(cs) => cs,
             Err(e) => {
-                symbio_core::plugin_error!("session", "persist_failure: open session failed: {}", e);
+                symbio_core::plugin_error!(
+                    "session",
+                    "persist_failure: open session failed: {}",
+                    e
+                );
                 return;
             }
         };
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
-                symbio_core::plugin_error!("session", "persist_failure: get_messages failed: {}", e);
+                symbio_core::plugin_error!(
+                    "session",
+                    "persist_failure: get_messages failed: {}",
+                    e
+                );
                 return;
             }
         };
@@ -372,14 +380,22 @@ impl Convergence {
         let chat_session = match self.open_chat_session(session_id).await {
             Ok(cs) => cs,
             Err(e) => {
-                symbio_core::plugin_error!("session", "converge_inflight: open session failed: {}", e);
+                symbio_core::plugin_error!(
+                    "session",
+                    "converge_inflight: open session failed: {}",
+                    e
+                );
                 return 0;
             }
         };
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
-                symbio_core::plugin_error!("session", "converge_inflight: get_messages failed: {}", e);
+                symbio_core::plugin_error!(
+                    "session",
+                    "converge_inflight: get_messages failed: {}",
+                    e
+                );
                 return 0;
             }
         };

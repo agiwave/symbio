@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::schemas::mcp_config::McpServerConfig;
-use symbio_core::CapabilityCategory;
 use serde_json::json;
+use symbio_core::CapabilityCategory;
 
 fn make_capability(server: &str, tool_name: &str) -> McpToolCapability {
     let tool = McpTool {

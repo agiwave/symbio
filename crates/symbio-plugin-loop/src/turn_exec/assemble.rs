@@ -30,7 +30,7 @@ pub(crate) struct Assembled<'a> {
     pub(crate) supplements: Option<SupplementFn>,
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub(crate) recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a symbio_core::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) prefix: Option<String>,
     pub(crate) opening_text: Option<&'a str>,
@@ -293,7 +293,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
 ///
 /// ## 输入必须是完整史
 ///
-/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[D-085](../../session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")）：
+/// 调用方传 `range(0)`（含归档前缀），**不是**现行窗口（[D-085](../../../symbio-plugin-session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")）：
 /// 压缩快照取代的是消息列表，不是轮次生命周期——等待用户动作的轮在被压缩落格归档后
 /// 仍是「已开未收束」（C4 同样读完整史）。按窗口找会把它漏成「找不到未收束的轮次」
 /// （压缩恰好在它等审批期间落格）。

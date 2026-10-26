@@ -10,7 +10,7 @@ created: 2026-09-18
 
 > **文档类型：Design（设计）** — `Plugin` trait 两个分形入口（`route` / `traverse`）的地址规则。
 >
-> 守卫脚本：[`scripts/plugin-entry-audit.mjs`](../../scripts/plugin-entry-audit.mjs)
+> 守卫脚本：[`scripts/plugin-entry-audit.mjs`](../../../scripts/plugin-entry-audit.mjs)
 > （规则 E-001 ~ E-007，随 `scripts/gate.mjs` 的 docs 阶段运行）。
 
 ## 1. 为什么需要这份规则

@@ -35,9 +35,7 @@ pub mod address;
 pub mod host;
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
-pub use address::{
-    absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl,
-};
+pub use address::{absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl};
 // 路径守卫（`..` 段判定 / 前缀段比较）已随纯接口住内核，经上面的 glob 取用
 
 // ---- symbio 桥 ----

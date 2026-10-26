@@ -72,12 +72,10 @@ fn list_item_keeps_the_wire_shape() {
     let resp = VdfsListResponse {
         path: "/mem".into(),
         node: VdfsNode::dir("mem", "内存", symbio_core::VdfsAccess::LIST),
-        items: vec![VdfsItem::new(VdfsNode::file(
-            "a.txt",
-            "A",
-            symbio_core::VdfsAccess::READ,
-        ))
-        .with_path("mem/a.txt")],
+        items: vec![
+            VdfsItem::new(VdfsNode::file("a.txt", "A", symbio_core::VdfsAccess::READ))
+                .with_path("mem/a.txt"),
+        ],
     };
     let v = serde_json::to_value(&resp).unwrap();
     assert_eq!(v["items"][0]["name"], serde_json::json!("a.txt"));

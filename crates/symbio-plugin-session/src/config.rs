@@ -20,11 +20,11 @@
 //! 搬迁不改 serde：字段名仍是 `PLUGIN.yml` 里的键，`#[serde(default)]` 仍在，
 //! 未知键仍被静默忽略。存量配置文件**无需迁移**。
 
-use symbio_core::ApprovalGrants;
 use serde::{Deserialize, Serialize};
+use symbio_core::ApprovalGrants;
 
-// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
-// 裁决三，[plan/14 步 6](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切片批）：写侧构造
+// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
+// 裁决三，[plan/14 步 6](../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切片批）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
 pub use symbio_core::node_build::PresentationTree;
@@ -226,7 +226,7 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
-    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     ///
     /// ## 它控制什么
     ///
@@ -255,7 +255,7 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
     ///
     /// ## 它控制什么
     ///
@@ -275,10 +275,10 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")
     /// 参数表里的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
-    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
+    /// ⚠️ **与 core 的 `ActorSpec.pattern` 同名不同物**（[D-079](../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "DE-005-协议规范")）：
     /// 那个字段是**主体分类**（由授权谓词派生：持 `reply.*` ⇒ `Reasoner`），从不做分派；
     /// 这里是**逐轮开关**（命中时跳不跳模型）。两者名字撞了，把后者当成分派点会立刻
     /// 把本开关关死——`session/main` 派生 `Reasoner`，接上去快路永不命中。
@@ -344,7 +344,7 @@ pub struct SessionConfig {
     ///
     /// ## 它是 `cap` 的写方
     ///
-    /// [DE-034](../../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4 的平凡值是
+    /// [DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4 的平凡值是
     /// `cap = 1`：调度器、租约、仲裁的逻辑**一行不改**，系统退化为串行 FIFO。
     /// 这个数不是行常量、也不是调度器自己的字段——它是**会话**的旋钮，因为「同时
     /// 能推进几件事」是这台机器上这个会话的配置。
@@ -375,11 +375,11 @@ pub struct SessionConfig {
 // 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
 
 /// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub(crate) const FORCE_PREFIX: &str = symbio_core::WORKER_FORCE_PREFIX;
+pub const FORCE_PREFIX: &str = symbio_core::WORKER_FORCE_PREFIX;
 /// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub(crate) const KEYWORDS: &[&str] = symbio_core::WORKER_KEYWORDS;
+pub const KEYWORDS: &[&str] = symbio_core::WORKER_KEYWORDS;
 /// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub(crate) const MIN_CHARS: usize = symbio_core::WORKER_MIN_CHARS;
+pub const MIN_CHARS: usize = symbio_core::WORKER_MIN_CHARS;
 
 pub fn default_worker_force_prefix() -> String {
     FORCE_PREFIX.to_string()
@@ -392,7 +392,7 @@ pub fn default_worker_min_chars() -> usize {
 }
 
 /// 出厂值：调度容量（平凡值 = 串行 FIFO）。
-pub(crate) const TASK_CAP: usize = symbio_core::TASK_CAP;
+pub const TASK_CAP: usize = symbio_core::TASK_CAP;
 
 pub fn default_task_cap() -> usize {
     TASK_CAP

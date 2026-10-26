@@ -25,7 +25,7 @@
 //!   - 业务模块通过 `creator_create_object::<dyn XXXService>(...)` 获取实例
 //!   - **不**通过 `pub use` 暴露给 crate 外部
 
-mod assembly;
+pub mod assembly;
 pub mod init;
 
 // ── 门面出口 ──────────────────────────────────────────────────────────────
@@ -35,8 +35,8 @@ pub use symbio_deploy;
 
 // 插件 crate 必须**被链接**，否则 `inventory` 里的工厂注册项会被链接器丢掉。
 // `pub use <crate>;` 同时完成两件事：链接 + 门面出口。
-pub use symbio_plugin_api::{hooks, routes};
 pub use symbio_plugin_agent;
+pub use symbio_plugin_api::{hooks, routes};
 pub use symbio_plugin_classify;
 pub use symbio_plugin_compose;
 pub use symbio_plugin_composite;

@@ -8,11 +8,11 @@
 //! 上层（`bound_provider::execute_turn`）负责请求体构建与序列化；本模块
 //! 只管「把字节安全送到端点、把响应安全拿回来」。
 
+use std::sync::OnceLock;
 use symbio_core::plugin_error;
 use symbio_core::plugin_info;
 use symbio_core::plugin_warn;
 use symbio_core::ExecAbortSignal;
-use std::sync::OnceLock;
 
 /// SSE 流空闲超时：两次数据块之间的最大间隔。
 ///

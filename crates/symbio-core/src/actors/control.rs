@@ -129,7 +129,7 @@ impl EliminationDecider {
     /// 已在 [D-108](../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览") 记为**边界**并写明重开
     /// 条件；触发器落地时摘掉这个属性即可，载荷口径不随之改动。
     /// 把它当成「已实现的恢复能力」是本条要拦的读法：形状是真的，写方是缺席的。
-        pub fn restoration_event(&self, subject: &str, why: &str, source_seq: u64) -> Event {
+    pub fn restoration_event(&self, subject: &str, why: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("v-rest-{subject}-{source_seq}"),
             crate::event::EVENT_VERDICT_ASSERTED,
@@ -151,7 +151,7 @@ impl EliminationDecider {
     ///
     /// 淘汰回路的读侧半边：闸门（`plugins/session` 的工具执行层）拿不到裁决者本体，
     /// 它有的是事件切片——本函数就是「切片 → 覆盖层」之间唯一的那步翻译。
-    /// 与 [`commitment_events`] 同形态（写侧的成格函数 / 读侧的翻译函数各住一边）。
+    /// 与 `commitment_events` 同形态（写侧的成格函数 / 读侧的翻译函数各住一边）。
     ///
     /// 认不出的 `change` 值（含缺失）⇒ **跳过该条**：不猜「多半是撤销吧」——
     /// 把笔误读成一次撤销等于把仲裁裁决静默改判，fail-closed 的方向是**不动**。

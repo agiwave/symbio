@@ -172,7 +172,8 @@ test('内核文件集指向不存在的文件 ⇒ 红（边界失焦不许静默
 })
 
 test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红（报告账）', () => {
-  // `plugins/mod.rs` 存在 ⇒ 五格齐全检查生效，夹具把五个内核 trait 都造出来。
+  // 宿主侧插件域（`symbio-core/src/plugin/mod.rs`）存在 ⇒ 五格齐全检查生效，
+  // 夹具把五个内核 trait 都造出来。
   const five =
     ONE +
     'pub trait Capability {\n    fn c(&self);\n}\n' +
@@ -184,7 +185,7 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
     [ALPHA]: five,
     'crates/symbio-core/src/gamma/mod.rs': 'pub const G: &str = "session";\n',
     [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
-    'crates/crates/plugins/mod.rs': '',
+    'crates/symbio-core/src/plugin/mod.rs': '',
     'crates/symbio-plugin-session/src/.keep': '',
   }
   const ok = audit(files, { baseline: '5:5:0' })

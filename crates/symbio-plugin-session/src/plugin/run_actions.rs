@@ -1,5 +1,5 @@
-//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[D-086](../../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
-//! 行表化见 [D-094](../../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
+//! loop→session 的内部动作面：`session/<sid>/_run/<op>`（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4；
+//! 行表化见 [D-094](../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 //!
 //! ## 为什么需要这条面
 //!
@@ -51,6 +51,8 @@ use super::super::transcript::append_and_publish;
 use super::super::transcript::compression::CompressionEmitter;
 use super::super::transcript::supplements::SupplementDrain;
 use super::*;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use symbio_core::{
     llm_message_frame, llm_removed_frame, llm_state_frame, run_ops, vdfs_from_plugin_error,
     vdfs_host_ctx, AddNodesRequest, CompressionBeginReply, CompressionBeginRequest,
@@ -58,8 +60,6 @@ use symbio_core::{
     PluginInvokeRequest, RemoveNodesRequest, ReplaceAllRequest, TurnDispatch, VdfsActionResult,
     VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult, TURN_DISPATCH,
 };
-use serde::de::DeserializeOwned;
-use serde_json::Value;
 use tokio::runtime::RuntimeFlavor;
 
 /// 内部动作的处理函数：收 session 插件（状态的所有者）、宿主 ctx、本轮交付包、
@@ -83,7 +83,7 @@ type RunOpFn = for<'a> fn(
 /// 行表的一行：op 名（[`run_ops`] 词表常量）与它的处理函数。
 ///
 /// **一行一 fn**：「在表内」与「有臂」由构造保证相等，这是本面唯一的
-/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[D-094](../../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
+/// 不变量，也是它敢于删掉 core 手写 `ALL` 的原因（[D-094](../../../../docs/003-design/014-单环一表.md#d-094-内部动作段注册化行表即闭集run_opsall-删除sessionport-收成一个-call "DE-014-单环一表")）。
 struct RunOp {
     op: &'static str,
     run: RunOpFn,
@@ -495,10 +495,7 @@ async fn run_elimination_revoked(
     let overlay = symbio_core::GrantsOverlay::fold(
         symbio_core::EliminationDecider::verdict_grants_changes(&events),
     );
-    let revoked = overlay.is_revoked(
-        &dispatch.spec.principal,
-        symbio_core::CAP_ASSIGN_WORK,
-    );
+    let revoked = overlay.is_revoked(&dispatch.spec.principal, symbio_core::CAP_ASSIGN_WORK);
     action_data(op, format!("assign.work 已收回：{revoked}"), revoked)
 }
 

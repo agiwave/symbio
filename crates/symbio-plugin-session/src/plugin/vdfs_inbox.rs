@@ -105,7 +105,7 @@ impl SessionPlugin {
                 let message = parse_inbox_message(raw)?;
                 // 写体声明了 `meta.trigger` ⇒ 这条写入在说「这是一次自主触发」，
                 // 于是它**先落事实才准入队**：存储所有者的写窗口纪律住在
-                // `transcript/autonomous.rs`（[D-076](../../heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README")），
+                // `transcript/autonomous.rs`（[D-076](../../../symbio-plugin-heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README")），
                 // 识别与判据住在这条臂上。落格没成 ⇒ `Conflict` 且**队列没碰**——
                 // 收件箱是 FIFO，一条永远跑不起来的队首会把后面的用户消息一起堵死。
                 let idle_ms = trigger_declaration(&message)?;

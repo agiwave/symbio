@@ -624,7 +624,10 @@ impl TurnLauncher {
                     break;
                 }
                 if std::time::Instant::now() >= deadline {
-                    symbio_core::plugin_warn!("session", "[Abort] 中止信号未在 3s 内注销，强制收敛");
+                    symbio_core::plugin_warn!(
+                        "session",
+                        "[Abort] 中止信号未在 3s 内注销，强制收敛"
+                    );
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;

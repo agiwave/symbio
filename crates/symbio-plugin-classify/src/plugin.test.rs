@@ -323,18 +323,18 @@ async fn unknown_subcommand_is_not_found() {
 /// 判据刻意数注册表而不是数 `traverse` 的回包：模型能调用的工具来自
 /// `Registry::list(family::TOOL)`（`tool_metas` 读的就是它），回包是 `[]`
 /// 只说明「没往回包里写东西」，注册表为零才说明「没进模型的工具清单」。
-/// 这条是 [D-096](../model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "crates/symbio-plugin-model/src/README") 给「快速档不得生成」
+/// 这条是 [D-096](../../symbio-plugin-model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "crates/symbio-plugin-model/src/README") 给「快速档不得生成」
 /// 配的第三颗牙：原来靠「本插件恰好不注册能力」这个结构巧合，现在是可执行断言。
 ///
 /// 对照项是同一份 ctx 上的 `CONFIGURABLE_VISITOR`：它必须恰好收到 1 行。有这一行，
 /// 上面的 0 才不是「收集器根本没接上」的同义反复。
 #[tokio::test]
 async fn traverse_registers_no_tool_rows() {
-    use symbio_providers::DefaultToolVisitor;
     use symbio_core::{
         capability_configurables, family, PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR,
         CONFIGURABLE_VISITOR,
     };
+    use symbio_providers::DefaultToolVisitor;
 
     let tools: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let configurables: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
@@ -370,10 +370,10 @@ async fn traverse_registers_no_tool_rows() {
 /// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
-    use symbio_providers::DefaultToolVisitor;
     use symbio_core::{
         capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
+    use symbio_providers::DefaultToolVisitor;
 
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);

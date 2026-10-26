@@ -39,17 +39,17 @@
 //!   不缓存首次结果（拒绝重放，见 AR-008 §5.1.1）。
 
 use super::config::{is_readonly_allowed, GatewayConfig};
-use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
-use symbio_core::{
-    EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
-    PluginSimpleRequest, SymbioKey, PATH, TRACE_ID,
-};
 use base64::Engine;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use symbio_core::{
+    EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
+    PluginSimpleRequest, SymbioKey, PATH, TRACE_ID,
+};
+use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -119,7 +119,7 @@ impl ServerHandle {
 
 /// 停止入站服务。
 ///
-/// ## 停用语义（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 补注）
+/// ## 停用语义（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 补注）
 ///
 /// **停止接受新连接 + 关闭已建立的实时通道；已经进入分派的请求让它跑完**。
 /// 三个动作分别是：

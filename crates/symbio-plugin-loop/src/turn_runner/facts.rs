@@ -183,9 +183,7 @@ pub(crate) fn reason_of_finish(
     finish: &symbio_core::ModelFinishReason,
 ) -> symbio_core::ClosureReason {
     match finish {
-        symbio_core::ModelFinishReason::Length => {
-            symbio_core::ClosureReason::Exhausted
-        }
+        symbio_core::ModelFinishReason::Length => symbio_core::ClosureReason::Exhausted,
         _ => symbio_core::ClosureReason::Completed,
     }
 }

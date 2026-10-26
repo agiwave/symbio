@@ -18,7 +18,7 @@ node scripts/build-cli.mjs -- --release # `--` 之后原样透传给 cargo
 cd cli && cargo test # 参数解析单测（4 个用例）
 ```
 
-产物：`../target/debug/symbio-cli.exe`（相对 `cli/`）。**没有第二个 target 目录**——`cli` 是仓库根
+产物：`../../target/debug/symbio-cli.exe`（相对 `cli/`）。**没有第二个 target 目录**——`cli` 是仓库根
 workspace 的成员（根 `Cargo.toml` 的 `members`），cargo 把所有成员的产物写进同一个 `<仓库根>/target/`，
 依赖缓存因此天然共享；构建成功后脚本把这一行原样打印出来。
 

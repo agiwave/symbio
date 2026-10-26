@@ -226,10 +226,38 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * 其余根出口是**过渡期域账本**——它们随 C 的阶段迁出。冻结条目数是这段过渡期的
  * 唯一判据：新能力默认插件本地（D-182），不该再往 core 根出口加共享类型；
  * 要加就把数字改大，而那一步会被 `gate.d/35-baseline.mjs` 按基准版本判红。
+ *
+ * ## 270 → 396 是**口径重定**，不是公共面变宽（2026-10-26，D-191 拆 crate）
+ *
+ * 本审计只数根上的 `pub use`。拆 crate **之前**，core 与插件同住一个 crate，插件写
+ * `crate::symbio_core::<符号>`，那些符号只需要 `pub(crate) use` 就能跨模块可见——
+ * 于是它们**从来没进过这张账**。拆完之后插件住独立 crate，同一条依赖只能写成
+ * `pub use`，一次性全数入账。
+ *
+ * 实测对照（同一个脚本、同一份判据，分别跑拆分支 606505eb 与当前树）：
+ *   · 拆分支：根 `pub use` 270 条（= 本条基线），另有 `pub(crate) use` **121 个符号**；
+ *   · 当前树：`pub use` 396 条，`pub(crate) use` 0 条——那 121 个换了写法，没换依赖。
+ * 符号集 diff 也是这个结论：**新增 127 条、消失 0 条**，新增的正是那批 `pub(crate) use`
+ * （外加 6 条拆过程中新归位的接缝），没有一个是「新能力往根出口塞共享类型」。
+ *
+ * 所以把数字提到 396 并**不给公共面放行**——它只是把旧口径漏掉的那半张账补上。
+ * 真正该降的部分在别处：C-003 的 `unitOf` 曾把 `crates/` 下三十几个 crate 塌成同一个
+ * 消费单位（见 `core-surface.mjs`），修好之后本账里「≥2 个 crate 消费」的有 325 条、
+ * 单消费方 71 条、零消费方 0 条——**那 71 条才是下一批下沉对象**。
+ *
+ * 之前的 270→396 那次上调同理：拆 crate 后 `pub(crate) use` 全部升为 `pub use`
+ * （跨 crate 必需），符号集实测**新增 127 / 消失 0**，不是公共面膨胀。
+ *
+ * 397（2026-10-27，+1）：`config_mount_dispatch` 出根。`impl_config_mount_vdfs!` 宏
+ * 在**别的 crate 里展开** `$crate::…`，域模块 `plugin` 是 `pub(crate)` ⇒ 展开侧
+ * `error[E0603]: module plugin is private`（setting / telegram 两个插件同时红）。
+ * 宏引用**数不出来消费方**（消费方是宏调用点，源码里没有那条路径），所以唯一合规
+ * 写法就是走根平铺。这是「拆 crate 收窄域可见性」漏掉的一处，不是新增共享类型。
  */
+// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 270
+  : 397
 
 
 
@@ -282,9 +310,10 @@ rootLines.forEach((line, i) => {
   if (waived(rootLines, i)) return
   report(
     'C-001',
-    `根 mod.rs 出现 \`pub mod ${m[1]};\` —— 子目录不得对外开模块门；改成 \`mod ${m[1]};\`，` +
+    `根 lib.rs 出现 \`pub mod ${m[1]};\` —— 子目录不得对外开模块门；改成 \`mod ${m[1]};\`` +
+      `（只在 crate 内可见则 \`pub(crate) mod ${m[1]};\`），` +
       `把需要出现在公共面上的东西在根 \`pub use\` 显式列出`,
-    `${CORE_REL}/mod.rs:${i + 1}`,
+    `${CORE_REL}/lib.rs:${i + 1}`,
   )
 })
 
@@ -412,7 +441,7 @@ const ruleLine = (ok, rule, desc) =>
 
 if (errors.length === 0) {
   console.log('\n== core-export-audit ==')
-  ruleLine(true, 'C-001', '根出口唯一：根 mod.rs 无 `pub mod <域>;`')
+  ruleLine(true, 'C-001', '根出口唯一：根 lib.rs 无 `pub mod <域>;`')
   ruleLine(true, 'C-002', `core 外无深引（${domains.size} 个域目录动态取自 core）`)
   ruleLine(
     true,

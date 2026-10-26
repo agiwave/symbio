@@ -557,7 +557,7 @@ function auditCliArtifactPaths () {
  * 该 md 里命令的**执行目录**：最近的 crate 目录（有 `Cargo.toml` 的那层），没有就是仓库根。
  *
  * 为什么不是「md 自己所在目录」：`crates/symbio-cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
- * 是在 `cli/` 下执行的（文档从 crate 根链接过来），拿 `cli/docs` 当基准会把正确的
+ * 是在 `crates/symbio-cli/` 下执行的（文档从 crate 根链接过来），拿该 crate 的 `docs/` 当基准会把正确的
  * `./../target/…` 算成 `cli/target/…`——判据自己造的假红。
  */
 function docBase (rel) {

@@ -13,11 +13,11 @@
 //!    示例却在用 `'/'` 当根），这里把「示例的形式真的能用」变成用例。
 
 use super::*;
-use symbio_providers::DefaultToolVisitor;
+use std::sync::Arc;
 use symbio_core::{
     Capability, ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
-use std::sync::Arc;
+use symbio_providers::DefaultToolVisitor;
 
 fn empty_provider() -> Arc<ToolVdfs> {
     Arc::new(ToolVdfs::new(Arc::new(DefaultToolVisitor::new())))

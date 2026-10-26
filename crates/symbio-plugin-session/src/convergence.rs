@@ -30,8 +30,8 @@ use super::active::ActiveSessionState;
 use super::plugin::session_node;
 use super::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use super::types::SessionSummary;
-use symbio_core::PluginError;
 use std::sync::Arc;
+use symbio_core::PluginError;
 
 /// 会话运行态的一次变化。
 ///
@@ -78,7 +78,7 @@ impl SessionStateChange {
 
 /// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
 ///
-/// ## 为什么是手柄而不是插件（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）
+/// ## 为什么是手柄而不是插件（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）
 ///
 /// 收敛这件事有两个写在**后台任务**里的调用方：执行期出口的告警
 /// （`TranscriptSink::warn`）与崩溃兜底（`WorkingGuard::drop`）。任务比插件活得久
@@ -130,7 +130,7 @@ impl Convergence {
     }
 
     /// 按 session_id 构造会话引擎实例——**三臂的唯一工厂口**
-    /// （[D-081](../../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决一：`PersistentChatSession`
+    /// （[D-081](../../../docs/003-design/014-单环一表.md#d-081-p4驱动器不解存储不把存储内部对象拿回家构造只住在收敛手柄批次-6-分-6a--6b "DE-014-单环一表") 裁决一：`PersistentChatSession`
     /// 的两个构造器在驱动器侧只许经此调用，豁免恰一处 = `chat_loop/io.rs` 的缺句柄回退）。
     ///
     /// - `_t_` 前缀 → 内存 ephemeral 会话；

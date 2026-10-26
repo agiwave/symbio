@@ -120,7 +120,7 @@ test('E-001 命中：meta 首参写成 "sessions" 而目录是 session', () => {
     'crates/symbio-plugin-session/src/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("sessions"'),
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-001 .*plugins\/session\/plugin\.rs/)
+  assert.match(r.stdout, /E-001 .*symbio-plugin-session\/src\/plugin\.rs/)
 })
 
 test('E-001 不误报：首参用常量且与目录名一致', () => {
@@ -173,7 +173,7 @@ test('E-002 臂侧命中：home 的臂前缀不是 `home`（幽灵命名空间 `
     ...HOME_ARMS(`            "work/set_workspace" => Ok(PluginPayload::new(&1)),`),
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-002 .*plugins\/home\/plugin\.rs:\d+/)
+  assert.match(r.stdout, /E-002 .*symbio-plugin-home\/src\/plugin\.rs:\d+/)
   assert.match(r.stdout, /没有任何调用方能到达/)
 })
 
@@ -194,7 +194,7 @@ test('E-002 臂侧命中：普通插件把臂写成绝对形（`session/update` 
     ),
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-002 .*plugins\/session\/plugin\.rs:\d+.*绝对形/)
+  assert.match(r.stdout, /E-002 .*symbio-plugin-session\/src\/plugin\.rs:\d+.*绝对形/)
 })
 
 test('E-002 臂侧可豁免：留理由的 `plugin-entry-allow`', () => {
@@ -382,7 +382,7 @@ test('形态识别：按工具名分发（`.find(|t| t.name()`）判为运行期
 test('形态识别：`route` 恒 Err 判为「恒 NotFound」', () => {
   const r = audit({
     ...CLEAN,
-    'crates/crates/plugins/work/plugin.rs': `impl Plugin for WorkPlugin {
+    'crates/symbio-plugin-work/src/plugin.rs': `impl Plugin for WorkPlugin {
     async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!("work 无自有协议路由")))
     }
@@ -442,7 +442,7 @@ const withField = (field) => ({
 // 断言一律落在**报错行**上，不用裸 `/E-007/`：汇总段那句
 // `✓ E-007  不按值持有兄弟插件` 也含 `E-007`，会把「不误报」的用例喂成假绿。
 // （E-006 的第一版就踩过这个坑。）
-const E007_HIT = /\[ERROR\]\s+E-007\s+symbio\/src\/plugins\/telegram\/plugin\.rs:\d/
+const E007_HIT = /\[ERROR\]\s+E-007\s+crates\/symbio-plugin-telegram\/src\/plugin\.rs:\d/
 
 test('E-007 命中：`Arc<RwLock<Option<Arc<dyn Plugin>>>>` 字段（telegram 的历史形态）', () => {
   const r = audit(withField('llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>,'))
@@ -515,7 +515,7 @@ pub struct FooPlugin {
 `
   const r = audit({ ...CLEAN, 'crates/symbio-plugin-composite/src/composite.rs': src })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /\[ERROR\]\s+E-007\s+symbio\/src\/plugins\/composite\/composite\.rs:\d/)
+  assert.match(r.stdout, /\[ERROR\]\s+E-007\s+crates\/symbio-plugin-composite\/src\/composite\.rs:\d/)
 })
 
 test('E-007 不误报：不在 `plugins/` 之下的同类字段', () => {
@@ -612,7 +612,7 @@ test('E-008 命中：标记的前缀在代码里没有同名常量（前缀写�
 // 真实形态：`plugins/mod.rs` 的架构原则说「插件之间互相不可见」，但 Rust 的私有
 // 可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到 `plugins::web`。当前代码为 0，
 // 但没有任何守卫；这条规则把它钉住。
-const E009_HIT = /\[ERROR\]\s+E-009\s+symbio\/src\/plugins\/mcp\/caller\.rs:\d/
+const E009_HIT = /\[ERROR\]\s+E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:\d/
 
 test('E-009 命中：`plugins/mcp` 里 `use crate::plugins::web::…`', () => {
   const r = audit({
@@ -682,7 +682,7 @@ test('E-009 命中**测试文件**里的跨插件引用', () => {
       '#[test]\nfn t() { use crate::plugins::web::something; }\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-009\s+symbio\/src\/plugins\/mcp\/caller\.test\.rs:2/)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.test\.rs:2/)
 })
 
 test('E-009 命中生产文件里的**内联测试模块**（`blankTestModules` 不是它的豁免口）', () => {
@@ -692,7 +692,7 @@ test('E-009 命中生产文件里的**内联测试模块**（`blankTestModules` 
       '#[cfg(test)]\nmod tests {\n    use crate::plugins::web::something;\n}\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /E-009\s+symbio\/src\/plugins\/mcp\/caller\.rs:3/)
+  assert.match(r.stdout, /E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:3/)
 })
 
 test('E-009 放行对照：测试文件引用**自己**的插件模块仍通过', () => {
@@ -856,7 +856,7 @@ test('E-012 不误报：注释里的示例声明（文档写了一条不存在�
 //
 // D-083 §4 的闭族是枚举白名单；D-086 §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦兄弟插件，拦不住 `crate::providers` / 族外第三方 crate 这类族外根。
-const E013_HIT = /\[ERROR\]\s+E-013\s+symbio\/src\/plugins\/loop\//
+const E013_HIT = /\[ERROR\]\s+E-013\s+crates\/symbio-plugin-loop\/src\//
 
 test('E-013 命中：loop 生产文件 import 了会话模块（E-009 之外的仓内实现面）', () => {
   const r = audit({

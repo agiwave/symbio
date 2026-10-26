@@ -8,10 +8,10 @@
 
 use super::*;
 
-use symbio_core::DetailDefinition;
-use symbio_core::{VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use symbio_core::DetailDefinition;
+use symbio_core::{VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE};
 
 // ==================== 容器替身 ====================
 
@@ -608,11 +608,11 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 
 /// 造一份带可配置声明的请求 ctx（声明通常由容器在广播中收集，这里直接给）
 async fn ctx_with_configs() -> VdfsContext {
-    use symbio_providers::DefaultToolVisitor;
     use symbio_core::{
         capability_entry_of, vdfs_context, CapabilityRow, PluginConfigFile, PluginDir,
         PluginSimpleRequest, Registry, CONFIGURABLE_VISITOR,
     };
+    use symbio_providers::DefaultToolVisitor;
 
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     visitor

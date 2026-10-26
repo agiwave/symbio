@@ -33,7 +33,7 @@
 //!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
 //! ——会话运行态由**会话节点**（`status` + `attributes.outcome` / `.error`）承载
-//! （见 `../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`）。
+//! （见 `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md`）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -390,7 +390,7 @@ impl SymbioClient {
     /// 切换 Provider（下次发送即生效，无需重建连接）。
     ///
     /// 落库推迟到**下一次发送**（`ask` 见 `options_dirty`）：`provider_id` 描述的是
-    /// **会话级事实**（这个会话用哪个 provider，[D-066](../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址")），
+    /// **会话级事实**（这个会话用哪个 provider，[D-066](../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址")），
     /// 它的落点是会话 metadata，不是某条消息的写体。置脏而不是立刻写，是为了让
     /// 「开着 REPL 连续切几次」只落最后一次。
     pub fn switch_provider(&mut self, provider: Option<String>) {
@@ -435,7 +435,7 @@ impl SymbioClient {
 
         // 本端选项自上次落库以来变过，才先把它们落成会话 metadata。
         //
-        // `session/chat/send` 已随输入面双轨退役（[D-066](../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") /
+        // `session/chat/send` 已随输入面双轨退役（[D-066](../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") /
         // 步②），收件箱写入面**不承载运行选项**。从前「随请求携带 provider / mode /
         // risk」的语义因此改走会话 metadata——而 metadata 本就是这三项的**唯一**写入
         // 落点（[D-066] 理由 1：同一件会话级事实有两个 owner 正是双轨期的病）。

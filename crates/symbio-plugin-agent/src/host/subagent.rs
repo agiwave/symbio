@@ -42,8 +42,9 @@
 //! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use symbio_deploy::PLUGIN_ID_SESSION;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
 use symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
@@ -58,9 +59,8 @@ use symbio_core::{
     PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
 use symbio_core::{VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING};
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_SESSION;
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷
@@ -322,7 +322,11 @@ impl symbio_core::Capability for AgentRunCapability {
                 )
                 .await
                 {
-                    symbio_core::plugin_warn!("agent", "登记子会话元数据失败（不影响委托执行）: {}", e);
+                    symbio_core::plugin_warn!(
+                        "agent",
+                        "登记子会话元数据失败（不影响委托执行）: {}",
+                        e
+                    );
                 }
                 (sid, None, Some(user_message()))
             }
@@ -1009,7 +1013,7 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
 /// `find_tool_result` 正确识别。
 ///
-/// **身份只有一份写**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）：`node_role()`
+/// **身份只有一份写**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）：`node_role()`
 /// 以 `principal.kind` 为先，所以这里改完主体，折叠当场就读回 `Tool`——
 /// 不需要再往 `role` 格补一份，也就不存在「主体改写必须排在角色改写之后」这种
 /// 顺序纪律。两格都写时，顺序写反就会让 `role` 格永远补不上
@@ -1022,9 +1026,7 @@ fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
     if message.node_role() == Some(NodeRole::Assistant) {
         // 改写到哪一格就跟到哪一格：这张卡现在是 **agent_run 工具的响应**，族归
         // 工具自己——带着子会话 agent 主体的转播节点会被 `visible_to` 当作第三方私有。
-        message.principal = Some(symbio_core::principal::Principal::tool_principal(
-            NAME,
-        ));
+        message.principal = Some(symbio_core::principal::Principal::tool_principal(NAME));
     }
 }
 

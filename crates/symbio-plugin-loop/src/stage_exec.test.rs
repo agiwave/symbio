@@ -251,7 +251,7 @@ async fn prepare_lands_the_inputs_stage_and_hands_the_inputs_over() {
     assert!(interrupted.is_none(), "准备不产出幕的结局");
 }
 
-/// 重试开出的**新支在准备段登记**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// 重试开出的**新支在准备段登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// 钉三件事，缺一件整套分支就读不对：
 /// - `into` 用的是**这一幕才存在的新根 id**（`retry_of` 只是寄存的旧根，新根要到输入

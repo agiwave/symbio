@@ -81,7 +81,12 @@ use crate::chat_node::{
 use crate::event::{
     event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_RESPONSE,
 };
-use crate::{event_payload_node_id, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE};
+use crate::{
+    event_payload_node_id, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
+    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+};
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
@@ -105,7 +110,7 @@ fn user_principal() -> Principal {
 }
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档
-/// `../../plugins/session/docs/109-vdfs-session-messages.md` §3.3）。
+/// `crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md` §3.3）。
 ///
 /// 它与存储分配的权威号是**两套各自递增的计数器，同写 `ChatNode.seq` 一个字段**——
 /// 所以混用是本模块最容易顺手写出来的错：快照载荷里带的那份号是**存储层**的槽位号
@@ -151,7 +156,7 @@ impl RebuildSeq {
 /// 取代**」：它的载荷就是压缩后的整份消息列表，因此重建从它**开始**——先把它那份列表
 /// 按序收下，再从它的**下标之后**接着折事实。它之前的事件一律不再参与——「被取代」发生在
 /// **折叠侧**，不在读口：切片里带着那段前缀（`range(0)` 给完整史，前缀来自归档段，见
-/// [`crate::plugins::session::store::EventWalStore`]）也照样不参与。
+/// `crate::plugins::session::store::EventWalStore`）也照样不参与。
 ///
 /// 少了这一段，一次压缩在重建面上等于**没发生过**——被压掉的消息会全部复活，
 /// 而压缩的全部意义就是让它们不再进入上下文。
@@ -790,9 +795,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     let tool_principal = if tool.is_empty() {
         None
     } else {
-        Some(crate::principal::Principal::tool_principal(
-            &tool,
-        ))
+        Some(crate::principal::Principal::tool_principal(&tool))
     };
     let mut result = if needs_user_action {
         ChatNode {

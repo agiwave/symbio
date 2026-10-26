@@ -1,6 +1,6 @@
 //! 「开跑一轮」端口：跑完一个 Turn 所需的宿主切片。
 //!
-//! ## 为什么是手柄而不是插件（[D-075](../../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2 第五处）
+//! ## 为什么是手柄而不是插件（[D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2 第五处）
 //!
 //! 一轮执行是 session 里**最长命的后台任务**：`start_turn` 把主体 `tokio::spawn` 出去，
 //! 任务体一路跑到消费循环收尾。而 provider 侧的 `dispatch` 只有 `&self`——要把句柄移进
@@ -35,8 +35,8 @@ use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::*;
-use symbio_core::{PluginDir, VdfsChange, VdfsChangeSubscriptions};
 use std::sync::Weak;
+use symbio_core::{PluginDir, VdfsChange, VdfsChangeSubscriptions};
 use tokio::sync::RwLock;
 
 /// 「开跑一轮」端口（构造与用途见模块文档）。

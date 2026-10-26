@@ -33,7 +33,7 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
       fs.writeFileSync(abs, content)
     }
     write(doc, body)
-    // 源码注释侧的文件集（`crates/crates/**/*.rs` 承载的是同一批数字）
+    // 源码注释侧的文件集（`crates/**/*.rs` 承载的是同一批数字）
     for (const [rel, content] of Object.entries(extra)) write(rel, content)
     // `check_all` 的形状照代码写：第一条是 `let mut all = …`，其余是 `all.extend(…)`
     write(

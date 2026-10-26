@@ -14,7 +14,7 @@
 //!
 //! **判别只有一条**：规范化后的地址是否以根名（[`VDFS_ADDR_ROOT`]）打头。
 //! 是 → 虚拟；否 → 物理。首部的 `/` 是操作系统的绝对锚点，不是可折叠的分隔符——
-//! `docs` 与 `/docs` 是两个位置（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
+//! `docs` 与 `/docs` 是两个位置（[D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 //! 前端协议、LLM 工具两条链路共用这一个 [`UnifiedFs`]，因此翻译只存在于本文件一处，
 //! 页面与工具都不需要知道展示口径与树内口径的差异。
 //!
@@ -50,13 +50,13 @@
 //! 新增一类资源不需要改动这里任何一行。
 
 use super::physical::PhysicalFs;
+use async_trait::async_trait;
+use std::sync::Arc;
 use symbio_core::{
     vdfs_has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
     VdfsItem, VdfsProvider, VdfsResult,
 };
 use symbio_core::{VdfsRequest, VdfsResponse};
-use async_trait::async_trait;
-use std::sync::Arc;
 
 /// 虚拟根目录的字面名字：系统资源统一在此目录之下。
 ///
@@ -87,7 +87,7 @@ enum Half {
 /// 形态各异，统一成「以 `/` 分隔的段序列」即可。唯一的例外是**锚点**：
 /// 首部的 `/` 不是可折叠的分隔符，它是操作系统的绝对锚点，与 `docs` 是两个
 /// 不同的位置，必须原样带到下游。裁决与平台语义见
-/// [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
+/// [D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
 ///
 /// - `""` / `"."` → `""`（工作目录根）
 /// - `".vdfsv2/session/"` → `".vdfsv2/session"`
@@ -135,7 +135,7 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
 ///
 /// `.vdfsv2` 必须**独占首段**：`.vdfsv2foo` 不算虚拟地址（按物理地址处理）。
 /// 锚点地址（`/` 打头）同理永不虚拟——根名前面还有斜杠，`strip_prefix` 必然落空，
-/// 于是走物理分支；这正是 [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范") 要的：`/.vdfsv2/x` 说的是磁盘上的目录，不是系统资源。
+/// 于是走物理分支；这正是 [D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范") 要的：`/.vdfsv2/x` 说的是磁盘上的目录，不是系统资源。
 fn half_of(addr: &str) -> Half {
     match addr.strip_prefix(VDFS_ADDR_ROOT) {
         Some("") => Half::Virtual(String::new()),

@@ -32,8 +32,9 @@
 use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};
 use super::workspace;
-use symbio_deploy::PLUGIN_ID_MEMORY;
-use symbio_providers::MemoryFile;
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::Arc;
 use symbio_core::VdfsAccess;
 use symbio_core::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
@@ -41,9 +42,8 @@ use symbio_core::{
     PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use symbio_core::{DetailDefinition, DetailField};
-use async_trait::async_trait;
-use serde_json::json;
-use std::sync::Arc;
+use symbio_deploy::PLUGIN_ID_MEMORY;
+use symbio_providers::MemoryFile;
 use tokio::sync::RwLock;
 
 /// 配置表单的定义 —— **定义由配置的拥有者产出**，默认值从 [`MemoryConfig::default`]

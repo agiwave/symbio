@@ -142,9 +142,9 @@ impl Plugin for NopRouter {
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(&Vec::<
-            serde_json::Value,
-        >::new()))
+        Ok(symbio_core::PluginPayload::new(
+            &Vec::<serde_json::Value>::new(),
+        ))
     }
 }
 
@@ -470,9 +470,9 @@ impl Plugin for OneFrameRouter {
         _path: String,
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> symbio_core::PluginInvokeResponse<symbio_core::PluginPayload> {
-        Ok(symbio_core::PluginPayload::new(&Vec::<
-            serde_json::Value,
-        >::new()))
+        Ok(symbio_core::PluginPayload::new(
+            &Vec::<serde_json::Value>::new(),
+        ))
     }
 }
 

@@ -154,7 +154,15 @@ const resolveFrom = (fromRel, target) => {
  * 源码扫描根（相对仓库根）。**只收仓库跟踪的源码树**：`docs/` 是 Markdown 的地盘，
  * 根目录散件没有注释形态的入链，`.symbio` / `.workbuddy*` / `tmp` 是本地产物。
  */
-export const SRC_ROOTS = ['symbio', 'tauri', 'cli', 'scripts', 'e2e', 'examples', '.github']
+/**
+ * 源码注释的扫描根。
+ *
+ * D-191 拆 crate 后，生产代码从壳目录 + cli 目录两处变成 `crates/` 下的
+ * 三十几个 crate（core、内核、全部插件、provider、cli 壳各一个）——旧的两个根现在
+ * 都不存在。`walk` 对不存在的目录静默返回空，于是「扫描 0 条注释链接」看上去像
+ * 「没有问题」，实则 D-010 / D-019 只在 tauri 与 scripts 上跑。
+ */
+export const SRC_ROOTS = ['crates', 'tauri', 'scripts', 'e2e', 'examples', '.github']
 
 /** 参与注释扫描的源码扩展名（`.md` 刻意不在：它由文档 pass 与 D-001 管）。 */
 export const SRC_EXT = new Set([

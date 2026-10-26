@@ -131,14 +131,14 @@ session:
 
 * **现状规则**：
  * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
- v2 运行器的环体里跑完（[`../loop/turn_runner.rs`](../loop/turn_runner.rs) 的 2e/2f），**主循环侧看不见第几轮工具**。
+ v2 运行器的环体里跑完（[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs) 的 2e/2f），**主循环侧看不见第几轮工具**。
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
  （`plugins/model/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
  * 长度截断（`finish = Length`）后的自动续写有 `loop_rows::MAX_STAGE_ROUNDS = 3`
- （[`../loop/chat_loop/turn.rs`](../loop/chat_loop/turn.rs)），它数的是**续写次数**，不是工具轮数。
+ （[`../loop/chat_loop/turn.rs`](../symbio-plugin-loop/src/chat_loop/turn.rs)），它数的是**续写次数**，不是工具轮数。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
- （[`../loop/turn_runner.rs`](../loop/turn_runner.rs)，步骤序列与批次边界见
+ （[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs)，步骤序列与批次边界见
  [DE-102-core-loop](src/docs/102-core-loop.md "DE-102-core-loop") §4.1），本轮请求侧只有一个
  「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
  上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
@@ -226,13 +226,13 @@ session:
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [D-078](README.md "crates/symbio-plugin-session/README") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
 * **具体规则**（唯一入口 `build_request_sections`，三段各自独立、非空才插）：
- * **长期记忆召回段 (Recall Context)**：调用方（[`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs)）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+ * **长期记忆召回段 (Recall Context)**：调用方（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
  * **任务调度段 (Ready Set)**：同一时机读一次本会话事实源的就绪任务集（`task_events::prompt_section`），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**不与记忆段争 index 0**：本段先插、记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
- * **委派者真源段 (Delegate Context)**：调用方（[`../loop/chat_loop/delegate.rs`](../loop/chat_loop/delegate.rs) 的 `delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
+ * **委派者真源段 (Delegate Context)**：调用方（[`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **三段的消费形态**：`chat_loop::request_view_prefix` 按 `meta.kind`（不按下标——缺一段时下标全部左移）取出三段，按**记忆 → 调度 → 委派**拼成一条 `system` 前缀消息交给运行器。拼成一条是因为运行器的 prompt 入口只收一段前缀；标 `system` 而不是 `user`，是为了让「本轮用户说了什么」在消息层上没有歧义。
  * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
 * **Rust 实现策略**：
- * 唯一入口为 [`../loop/context/view.rs`](../loop/context/view.rs) 的 `build_request_sections`，由 [`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
+ * 唯一入口为 [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) 的 `build_request_sections`，由 [`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
 
  ```rust
  pub fn build_request_sections(
@@ -249,7 +249,7 @@ session:
  }
  ```
 
- * 调用点参数（[`../loop/chat_loop/inputs.rs`](../loop/chat_loop/inputs.rs)）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 [`../loop/chat_loop/delegate.rs`](../loop/chat_loop/delegate.rs) 的 `delegate_section_with` 就地判定。
+ * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 [`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with` 就地判定。
 
 ---
 
@@ -280,7 +280,7 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 活记忆到 4 条过 `consolidate::accept` 才合并——不另开文件、不经系统提示词、
 不进 VDFS。分工：文件记忆 = 会话自己的约定（人可读写）；事件记忆 = 可检索、
 可巩固、可排除式遗忘的**情景经验**（机器记账）。三段各自的判定方与四条口径见
-[`memory_events.rs`](../loop/memory_events.rs) 模块文档。
+[`memory_events.rs`](../symbio-plugin-loop/src/memory_events.rs) 模块文档。
 
 ### 系统提示词：只有一个注册通道
 
@@ -319,10 +319,10 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session/write.rs` |
-| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[`../loop/turn_runner.rs`](../loop/turn_runner.rs) 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `plugins/model/stream.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（[`../loop/turn_runner.rs`](../symbio-plugin-loop/src/turn_runner.rs) 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `plugins/model/stream.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |
-| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [`../loop/context/view.rs`](../loop/context/view.rs) |
+| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) |
 
 通过这套**五维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 语义压缩层（`auto_compress` 语义合并）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
 
@@ -334,7 +334,7 @@ S5 的**事件记忆**是另一层：`memory_events.rs` 把每轮用户发言编
 
 工具可以返回任意 JSON（`shell` 给 `output`、`vdfs_read` 给 `VdfsContent`、`ask_user` 给 `content` + `prompt`、`todo_write` / `content_search` 同理），而模型只消费**一段文本**。这层「任意形状 → 文本」的压缩是**必要的**，不是失误；失误在于它曾**没有写下来**，加一个工具就得读源码才知道写哪个字段名。
 
-**唯一消费方**：[`tool_executor::extract_result`](../loop/tools/tool_executor.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`tool_executor.test.rs`](../loop/tools/tool_executor.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
+**唯一消费方**：[`tool_executor::extract_result`](../symbio-plugin-loop/src/tools/tool_executor.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`tool_executor.test.rs`](../symbio-plugin-loop/src/tools/tool_executor.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
 
 | 序号 | 判据 | 结果 |
 |---|---|---|

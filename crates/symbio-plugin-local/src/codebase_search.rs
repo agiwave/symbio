@@ -31,12 +31,6 @@
 //! `WalkBuilder` 的 `standard_filters` 会跳过它，`.bin` 也不在 `SOURCE_EXTS` 里，
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
-use symbio_core::EmbeddingService;
-use symbio_core::{
-    creator_create_object, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
-    EMBEDDING_LOCAL,
-};
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
 use grep::searcher::sinks::UTF8 as UTF8Sink;
@@ -46,6 +40,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use symbio_core::EmbeddingService;
+use symbio_core::{
+    creator_create_object, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
+    EMBEDDING_LOCAL,
+};
 
 const CHUNK_LINES: usize = 40;
 const CHUNK_STEP: usize = 20;
@@ -755,7 +755,7 @@ async fn save_to_disk(workdir: &Path, idx: &CodeIndex) -> std::io::Result<()> {
 
 /// 对查询嵌入并与所有分块做余弦相似度排序，返回 top-k
 ///
-/// **平手必须有稳定次级键**（[D-109](../memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")：排序口径的
+/// **平手必须有稳定次级键**（[D-109](../../symbio-plugin-memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")：排序口径的
 /// 共同半边）：分数相等时按相对路径、再按起始行升序，于是「全序 ⇒ 同一个索引 +
 /// 同一个查询 = 同一份 top-k」。缺了这一半，平手块的先后由 `files`/`chunks` 的
 /// 向量顺序决定，而那个顺序是**增量重建的历史**（哪些文件上次被重嵌过）——
