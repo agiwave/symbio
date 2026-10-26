@@ -14,7 +14,7 @@
  *   → `docs/004-ref/006-当前事实表.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
  * - Telegram 用 `SESSION_CHAT`（`"session/chat"`）路由——**该路径不存在**，
  *   session 只认 `chat/send` / `chat/abort`，所以那处调用以前必定落到 `NotFound`；
- * - `symbio_core::plugin::route` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
+ * - `crate::routes` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
  *   零调用方，而 `agent` 的 `route` 恒返回 `NotFound`——它们描述的路由不存在。
  *
  * 三处的共同点是：**没有任何测试会因此变红**。本脚本把它们写成可执行的规则。
@@ -25,7 +25,7 @@
  * |-------|---------------------------------------------------------------|--------|
  * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（D-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
  * | E-002 | 地址的**前缀**必须是插件目录名（或容器前缀 `worker`）——引用侧与注册侧各判一遍 | 抓「幽灵命名空间」：引用侧 `hooks/...` 是写错了前缀的路径；臂侧 `work/set_workspace`（长在 home 的 `match` 里）是**注册**了一条没有目录的名字。home 是根容器、收到未剥离的 `PATH`，故它的臂必须以 `home/` 开头；其余插件只会收到剥掉首段后的尾巴，臂写成绝对形 ⇒ 真实地址是 `<自己的目录>/<臂>`，与写它的人想的那条不是一条 |
- * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::plugin::route` 常量，否则改名不会编译失败 |
+ * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `crate::routes` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
  * | E-006 | **权威清单**（`003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
@@ -53,7 +53,7 @@
  *
  * ## 地址规则（本脚本的依据）
  *
- * 见 [`symbio/src/symbio_core/plugin/route.rs`](../symbio/src/symbio_core/plugin/route.rs) 的模块文档：
+ * 见 [`symbio/src/routes.rs`](../symbio/src/routes.rs) 的模块文档：
  * 地址只有「绝对地址」与「相对臂」两种形态，前缀是**插件目录名**，
  * 过路由才设 `PATH`，`traverse` 的 `PATH` 只有两个合法值。
  *
@@ -360,7 +360,7 @@ function discoverPlugins() {
 const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（装配方 `assembly.generated.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
+// 常量表：先收全仓（装配方 `assembly.generated.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
@@ -547,7 +547,7 @@ for (const abs of codeFiles) {
     const line = txt[i]
     const isConstDef = isRust && CONST_DEF_RE.test(line)
 
-    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 symbio_core::plugin::route 常量）
+    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 crate::routes 常量）
     if (isRust && /\.set\(\s*(?:crate::symbio_core::)?PATH\s*,\s*"/.test(line)) {
       if (!exempted(raw, i, 'E-003')) {
         report(
@@ -555,7 +555,7 @@ for (const abs of codeFiles) {
           'error',
           rel(abs),
           i + 1,
-          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`symbio_core::plugin::route\` 常量` +
+          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`crate::routes\` 常量` +
             `（字面量不会因改名而编译失败）`,
         )
       }
@@ -789,6 +789,11 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   // 装配方的部署身份表：插件叫什么、标准树装哪些、哪些不得停用。它没有任何插件实现，
   // 只是名词；loop 用它自报工厂 id 与拼会话地址，不构成对兄弟插件实现的依赖。
   'assembly',
+  // 宿主机制的词汇面（D-184 随 `fire_hook` + `ROUTE_*` 搬出 core）：
+  // `routes` 是跨插件地址常量、`hooks` 是生命周期钩子助手。它们是**宿主机制**，
+  // 不是某个兄弟插件的实现面——闭族要拦的是后者，故与 `symbio_core` 同档。
+  'routes',
+  'hooks',
   'plugin_debug',
   'plugin_error',
   'plugin_info',
@@ -1021,7 +1026,7 @@ for (const abs of VOCAB_MD_FILES) {
 
 // ── E-012：`ROUTE_*` 常量的**名↔值**逐字同构，且值必须是真实分发目标 ──────
 //
-// 契约的另一半。`plugin/route.rs` 的模块文档长期**声称**这两条由 `core-naming-audit.mjs`
+// 契约的另一半。`routes.rs` 的模块文档长期**声称**这两条由 `core-naming-audit.mjs`
 // 检查，而那个脚本只有 N-001…N-005 的前缀归属规则——声称有守卫的文档比没有守卫更糟。
 //
 // ① 名 ↔ 值：`ROUTE_VDFS_WATCH` 的值必须是 `"vdfs/watch"`。名字是调用方
@@ -1035,7 +1040,7 @@ for (const abs of VOCAB_MD_FILES) {
 // 动态命名空间（`local/<工具名>`、容器挂载名）静态提不出臂：那样的值必须**逐行豁免并
 // 写明运行期来源**，而不是给脚本加一张白名单表——表会让 `local/serch` 这种拼错的工具名
 // 一路静默放行，而拼错工具名恰是这类地址最容易犯的错。
-const ROUTE_MODULE = path.join(repoRoot, 'symbio', 'src', 'symbio_core', 'plugin', 'route.rs')
+const ROUTE_MODULE = path.join(repoRoot, 'symbio', 'src', 'routes.rs')
 {
   const dispatchable = dispatchableRoutes(repoRoot)
   const raw = fs.existsSync(ROUTE_MODULE) ? readLines(ROUTE_MODULE).raw : []

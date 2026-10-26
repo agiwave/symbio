@@ -361,7 +361,8 @@ pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 // ==================== 跨插件契约（分域，D-087） ====================
 // 这里曾是 `schemas/` 一个目录：协议词与宿主方言混装，一个名字说不清「这是什么」。
 // 2026-10-19 按**它描述什么**拆成四个域（`chat` / `dialog` / `present` / `turn`
-// 与两处搬家：`plugin` 的 hook/响应壳、`projection` 的 rebuild）：
+// 与三处搬家：`plugin` 的响应壳、`projection` 的 rebuild、以及后来随 `fire_hook`
+// 迁去宿主的 hook 词与路由常量（D-184））：
 //
 // | 域 | 一句话 | 形态 |
 // |---|---|---|
@@ -373,7 +374,7 @@ pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 // 叶子模块不是「深引豁免」：它们是**主题命名空间**（§1.2 登记），调用点写
 // `symbio_core::node_build::dialog_node` 时仍看得见自己拿的是哪一族的构造器。
 pub use chat::{chat_node, principal, session_chat};
-pub use plugin::{HookEvent, HookOutput, SimpleResponse, SuccessResponse};
+pub use plugin::{SimpleResponse, SuccessResponse};
 pub use present::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
@@ -390,7 +391,6 @@ pub use dialog::{
     REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
 pub(crate) use llm::{llm_emit_state, llm_state_frame};
-pub(crate) use plugin::fire_hook;
 pub(crate) use projection::rebuild::rebuild;
 pub(crate) use projection::turns::count_user_messages;
 pub(crate) use turn::dispatch::{
@@ -437,9 +437,8 @@ pub use plugin::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
     PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_DIR, PLUGIN_FILE,
     PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT, ROUTE_CLASSIFY_DECIDE,
-    ROUTE_CLASSIFY_PARSE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT,
-    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION, PLUGIN_PARENT, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 

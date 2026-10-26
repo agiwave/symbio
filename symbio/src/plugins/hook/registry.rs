@@ -1,4 +1,4 @@
-use crate::symbio_core::HookOutput;
+use crate::hooks::HookOutput;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

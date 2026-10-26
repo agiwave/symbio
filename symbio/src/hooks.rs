@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::symbio_core::plugin::ROUTE_HOOK_FIRE;
+use crate::routes::ROUTE_HOOK_FIRE;
 use crate::symbio_core::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PATH, SESSION_ID};
 
 /// Hook 事件枚举，用于在关键业务节点触发外部通知或拦截
@@ -140,7 +140,7 @@ pub const HOOK_UNAVAILABLE_MARKER: &str = "[hook-unavailable]";
 /// 报错）在函数内部就吞成 `HookOutput::default()`，因此调用点的 `let _ = fire_hook(...)`
 /// **丢的不是错误**（没有错误可丢），只是不需要那份输出。
 ///
-/// [D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6 上移 core：session 在派发前
+/// [D-086](../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6 上移宿主：session 在派发前
 /// 触发 `UserPromptSubmit`，loop 在轮内触发 `PreCompact` / `PreToolUse` / `PostToolUse`，
 /// 两个插件共用这一条路由助手（不是新机制）。
 pub async fn fire_hook(
@@ -225,3 +225,7 @@ impl HookOutput {
         !self.should_proceed || self.block_reason.is_some()
     }
 }
+
+#[cfg(test)]
+#[path = "hooks.test.rs"]
+mod tests;

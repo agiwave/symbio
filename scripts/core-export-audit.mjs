@@ -150,7 +150,7 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  * `0/0` 是 **A2 之后**（2026-10-26）的上限：C-003 的判定范围收窄到 `kernel.rs` 门面的
  * 公共面（14 条封闭语法），其中 0 消费方 0 条、单消费方 0 条（`ActorSpec` 是唯一豁免）。
  * 此前 13 条单消费方仍是存量，但**移出 C-003**：它们不是封闭语法，属域账本，由 C-004
- * 冻结条数（279）并在 `--verbose` 的 `[L1]` 里逐条列出——C 迁出对应域时一并消失。
+ * 冻结条数（270）并在 `--verbose` 的 `[L1]` 里逐条列出——C 迁出对应域时一并消失。
  *
  * 下列批次不是新增违规，是口径与下沉的记录：
  * - **口径修正**（2026-10-09）：**测试文件不再算架构消费方**（口径全文见
@@ -225,7 +225,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  */
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 279
+  : 270
 
 
 

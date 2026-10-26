@@ -148,10 +148,10 @@ const PROTOCOL_RS_SRC = [
 ].join('\n')
 
 /**
- * 跨插件可见的路由常量源（core 的 `plugin/route.rs`）。
+ * 跨插件可见的路由常量源（宿主的 `routes.rs`）。
  *
- * `vdfs/root` / `vdfs/watch` / `vdfs/unwatch` 三个路由**跨插件可见**，故常量归 core
- * 且按「一域一前缀」改名 `ROUTE_VDFS_*`——它们不再住在 vdfs 插件里，前端仍按
+ * `vdfs/root` / `vdfs/watch` / `vdfs/unwatch` 三个路由**跨插件可见**，故常量归宿主的
+ * `routes.rs` 且按「一域一前缀」改名 `ROUTE_VDFS_*`——它们不再住在 vdfs 插件里，前端仍按
  * `VDFS_*` 镜像，因此别名目标指向本文件（见 `protocol-mirror-audit.mjs` 的 `ALIASES`）。
  */
 const ROUTE_RS_SRC = [
@@ -464,7 +464,7 @@ const BASE = {
   'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
   ...VDFS_TYPES_RS,
   'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
-  'symbio/src/symbio_core/plugin/route.rs': ROUTE_RS_SRC,
+  'symbio/src/routes.rs': ROUTE_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
   'symbio/src/symbio_core/event_bus/mod.rs':
     '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
@@ -575,9 +575,9 @@ test('后端改了 op 路由（自动发现，无需登记）→ 变红', () => 
 })
 
 test('后端改了别名目标（`ROUTE_VDFS_ROOT`）→ 变红，且报出别名关系', () => {
-  // 别名目标住在 core 的 `plugin/route.rs`（跨插件可见的路由归 core）。
+  // 别名目标住在宿主的 `routes.rs`（跨插件可见的路由归宿主的地址模块）。
   const r = mirror({
-    'symbio/src/symbio_core/plugin/route.rs': [
+    'symbio/src/routes.rs': [
       'pub const ROUTE_VDFS_ROOT: &str = "vdfs/rooted";',
     ].join('\n'),
   })

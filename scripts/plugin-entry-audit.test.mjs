@@ -59,7 +59,7 @@ const CORE = {
   'symbio/src/symbio_core/plugin/traverse.rs':
     `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n` +
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
-  'symbio/src/symbio_core/plugin/route.rs':
+  'symbio/src/routes.rs':
     `pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";\n`,
 }
 
@@ -782,8 +782,8 @@ test('E-011 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报
 //
 // 只断言 E-012 命中与否、不断言整体退出码：这些 fixture 里只有一两个插件目录，
 // 别的规则（E-002 的首段白名单）会对着同一段文本各判各的，那与本条无关。
-const ROUTE_FILE = 'symbio/src/symbio_core/plugin/route.rs'
-const E012_HIT = /E-012 .*plugin\/route\.rs:\d/
+const ROUTE_FILE = 'symbio/src/routes.rs'
+const E012_HIT = /E-012 .*routes\.rs:\d/
 
 /** 干净 fixture 里 `session` 有 `chat/send` / `update` 两条臂 ⇒ 这两个值是分发目标 */
 test('E-012 不误报：名与值同构、且值就是插件的臂', () => {

@@ -43,6 +43,7 @@
 
 use super::store::AgentDirStore;
 use crate::assembly::PLUGIN_ID_SESSION;
+use crate::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 use crate::symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
@@ -54,8 +55,7 @@ use crate::symbio_core::{
 use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, ROUTE_VDFS_ROOT,
-    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, TOOL_CALL_ID,
+    PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
 use crate::symbio_core::{VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING};
 use serde_json::{json, Value};

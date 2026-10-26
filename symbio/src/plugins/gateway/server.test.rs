@@ -451,7 +451,7 @@ impl Plugin for OneFrameRouter {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
-        if path != crate::symbio_core::ROUTE_EVENT_BUS_SUBSCRIBE {
+        if path != crate::routes::ROUTE_EVENT_BUS_SUBSCRIBE {
             return Err(crate::symbio_core::PluginError::NotFound(path));
         }
         let (peer, mine) = crate::symbio_core::PluginChannel::pair(4);

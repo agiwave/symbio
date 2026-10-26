@@ -39,10 +39,11 @@
 //!   不缓存首次结果（拒绝重放，见 AR-008 §5.1.1）。
 
 use super::config::{is_readonly_allowed, GatewayConfig};
+use crate::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use crate::symbio_core::{
     EventBusSubscribeRequest, Plugin, PluginChannel, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
-    PluginSimpleRequest, SymbioKey, PATH, ROUTE_EVENT_BUS_SUBSCRIBE, TRACE_ID,
+    PluginSimpleRequest, SymbioKey, PATH, TRACE_ID,
 };
 use base64::Engine;
 use serde_json::Value;

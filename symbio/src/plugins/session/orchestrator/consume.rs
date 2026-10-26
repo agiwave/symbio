@@ -344,9 +344,9 @@ impl TurnLauncher {
             .and_then(|req| req.single_message)
             .and_then(|m| m.content.as_ref().map(|c| c.to_text()));
         if let Some(prompt) = hook_prompt {
-            let _ = crate::symbio_core::fire_hook(
+            let _ = crate::hooks::fire_hook(
                 &Some(parent.clone()),
-                crate::symbio_core::HookEvent::UserPromptSubmit { prompt },
+                crate::hooks::HookEvent::UserPromptSubmit { prompt },
                 chat_ctx.fork(),
             )
             .await;

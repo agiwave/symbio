@@ -2,9 +2,7 @@
 
 mod dir;
 mod error;
-mod hook;
 mod response;
-mod route;
 mod transport;
 mod traverse;
 
@@ -15,18 +13,9 @@ pub use dir::{
     PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
-pub(crate) use hook::fire_hook;
-pub use hook::{HookEvent, HookOutput};
-// 标记本身只被「钩子输出」的读者与断言使用；生产消费者拿到的是 `context` 里的字符串。
-#[cfg(test)]
-pub(crate) use hook::HOOK_UNAVAILABLE_MARKER;
 pub use response::{SimpleResponse, SuccessResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API
 pub(crate) use error::{lock_read, lock_write};
-pub use route::{
-    ROUTE_CLASSIFY_DECIDE, ROUTE_CLASSIFY_PARSE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE,
-    ROUTE_HOOK_FIRE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
-};
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };

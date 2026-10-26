@@ -63,3 +63,10 @@ exit: '可选批次：按 owner 搬投影实现与共享类型、把 schedule / 
   `symbio_core/kernel.rs` 与 `symbio_kernel/src/lib.rs` 两处文件集标记，CS-003 扫两个 crate；
   C-003 的 core 内消费方统计把 kernel 也算作 core 自己的实现；其余审计根目录同步
   （doc-count / doc-symbol / port-surface / panic / test-layout / facts）。门禁 152/152 通过。
+- 2026-10-26：**C0.5 已落**。`plugin/route.rs` → `symbio/src/routes.rs`（`pub mod`，cli 跨
+  crate 取 `ROUTE_EVENT_BUS_SUBSCRIBE`）、`plugin/hook.rs` → `symbio/src/hooks.rs`（私有）；
+  `fire_hook` 的三个测试随迁 `symbio/src/hooks.test.rs`。`symbio_core` 根出口与 `plugin`
+  域不再转出 `ROUTE_*` / `HookEvent` / `HookOutput` / `fire_hook`，插件改
+  `crate::routes::…` / `crate::hooks::…`。判据面：C-004 非内核账本 279 → 270（9 条随域
+  迁出）；E-012 / route-facts / protocol-mirror / routes.gen.ts 的常量源改宿主文件；
+  E-013 的 loop 闭族补 `routes` / `hooks` 两个**宿主机制**根（不是兄弟插件实现，D-184）。

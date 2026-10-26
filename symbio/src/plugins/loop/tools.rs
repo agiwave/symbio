@@ -13,7 +13,7 @@
 //!   与归档滚动）。它是**唯一**的体积裁剪点：请求体不再做淡化 / 骨架化改写
 //!   （[D-078](../session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "symbio/src/plugins/session/README")）。
 //!
-//! 生命周期钩子（`fire_hook`）上移 core：session 派发前与 loop 轮内都触发它，
+//! 生命周期钩子（`fire_hook`）住宿主 `crate::hooks`：session 派发前与 loop 轮内都触发它，
 //! 两边共用同一条路由助手（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
 //!
 //! `heartbeat` 工具**不在这里**：它随调度一起切出为 `plugins/heartbeat`

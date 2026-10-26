@@ -44,6 +44,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
+use symbio::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use symbio::symbio_core::chat_node::ChatNode;
 use symbio::symbio_core::{
     event_bus_resync_of, event_bus_vdfs_change_of, EventBusSubscribeRequest, VdfsChange, VdfsNode,
@@ -51,7 +52,7 @@ use symbio::symbio_core::{
 };
 use symbio::symbio_core::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
-    ROUTE_EVENT_BUS_SUBSCRIBE, SESSION_ID, WORKDIR,
+    SESSION_ID, WORKDIR,
 };
 // 读数面板方言（P4）：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
@@ -184,11 +185,8 @@ impl SymbioClient {
         // 「后端没发布」完全一样。这条由 `scripts/plugin-entry-audit.mjs` 的 E-003
         // 判定型守卫强制。
         //
-        // 常量从 `symbio_core` **顶层**导入（`use symbio::symbio_core::ROUTE_EVENT_BUS_SUBSCRIBE`），
-        // 而不是 `symbio_core::plugin::route::…`：`keys` 域自身是私有的（`mod keys;`），
-        // 常量靠 `symbio_core/mod.rs` 的 `pub use keys::*;` 才对外可见。
-        // 这条路径写错过一次，症状是编译期的 E0603（`module 'keys' is private`）——
-        // 好在它是**编译期**失败，不会静默。
+        // 常量从 `symbio::routes` 导入（宿主侧地址模块，DE-023 D-184），
+        // 不再是 `symbio_core` 的根出口——地址常量随 `fire_hook` 一起搬出了内核。
         ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
         ctx.set_payload(EventBusSubscribeRequest {})
             .map_err(|e| format!("构造订阅载荷失败: {e}"))?;

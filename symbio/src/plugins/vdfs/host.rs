@@ -37,6 +37,7 @@
 
 pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
+use crate::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 use crate::symbio_core::vdfs_context;
 use crate::symbio_core::EVENT_BUS_KIND_VDFS;
 use crate::symbio_core::{
@@ -50,7 +51,6 @@ use crate::symbio_core::{
     Registry, CAPABILITY_VISITOR, WORKDIR,
 };
 use crate::symbio_core::{VdfsRequest, VdfsResponse};
-use crate::symbio_core::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;

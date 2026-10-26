@@ -9,7 +9,7 @@
 //!
 //! ⚠️ **三个例外**：`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` **跨插件可见**
 //! （`agent` 拼 Run 根地址、`cli` 订阅 vdfs 频道、前端按它们发请求），因此它们的
-//! 常量**归 core**（`symbio_core::ROUTE_VDFS_*`），本文件只引用、不重复定义——
+//! 常量**归宿主的 `crate::routes`**（`ROUTE_VDFS_*`），本文件只引用、不重复定义——
 //! 同一路由两份常量就是「一个事实两个 owner」，必然漂移。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
@@ -17,16 +17,15 @@
 //!
 //! `VdfsProvider`
 
-use crate::symbio_core::{
-    VdfsContent, VdfsItem, VdfsNode, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
-};
+use crate::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use crate::symbio_core::{VdfsContent, VdfsItem, VdfsNode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ==================== 协议操作路径 ====================
 //
 // 三个跨插件可见的路径（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch`）不在此定义
-// —— 它们归 `symbio_core::ROUTE_VDFS_*`（见模块文档的「三个例外」）。
+// —— 它们住宿主 `crate::routes::ROUTE_VDFS_*`（见模块文档的「三个例外」）。
 
 /// 列目录（一级）
 pub const VDFS_LIST: &str = "vdfs/list";

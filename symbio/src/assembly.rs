@@ -98,7 +98,7 @@
 //! - **嵌入服务 id 不在这里**：它描述的是嵌入服务而非插件，归 `embedding` 域
 //!   （`embedding::ids`）。
 //! - **路由地址不在这里**：`<插件目录名>/<子路径>` 是调用路径而非对象身份，
-//!   见 `plugin::route`。
+//!   见 `crate::routes`。
 
 include!("assembly.generated.rs");
 

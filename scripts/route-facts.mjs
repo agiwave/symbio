@@ -5,7 +5,7 @@
  *
  * 路由的注册处就是各插件 `async fn route()` 体内的 `match` 臂：容器按**插件目录名**
  * 建实例表、剥掉首段再把余下部分塞回 `PATH` 转发（地址规则见
- * `symbio_core/plugin/route.rs` 的模块文档）。所以「臂 + 目录名」就是那条地址的
+ * `symbio/src/routes.rs` 的模块文档）。所以「臂 + 目录名」就是那条地址的
  * 完整真相，**没有别的地方登记它**。
  *
  * 三份判定都要读它：`docs/004-ref/006-当前事实表.md` §1 的路由列、前端常量
@@ -183,13 +183,13 @@ export function controlPlaneRoutes(root) {
 }
 
 /**
- * `symbio_core/plugin/route.rs` 里的 `ROUTE_*` 声明（名、值、行号）。
+ * `symbio/src/routes.rs` 里的 `ROUTE_*` 声明（名、值、行号）。
  *
  * 行号来自**去注释后**的文本——`stripComments` 保留行结构，所以报出来的位置就是
  * 编辑器里那一行。注释里的示例（``/// `ROUTE_FOO` ``）因此不会被当成声明。
  */
 export function routeConstDecls(root) {
-  const abs = path.join(root, "symbio", "src", "symbio_core", "plugin", "route.rs");
+  const abs = path.join(root, "symbio", "src", "routes.rs");
   if (!existsSync(abs)) return [];
   const out = [];
   const lines = stripComments(readFileSync(abs, "utf8")).split("\n");
@@ -246,7 +246,7 @@ export function dispatchableRoutes(root) {
  *
  * ## 为什么是这个形状、而不是 `ROUTE_*` 常量的注释
  *
- * 两种候选里只有这一种覆盖**全部**路由：`symbio_core/plugin/route.rs` 的常量只收
+ * 两种候选里只有这一种覆盖**全部**路由：`symbio/src/routes.rs` 的常量只收
  * 「有真实 Rust 调用方」的路径（该模块明令不收预留常量），而静态路由里大半是
  * **前端专用**的（`home/*`、`telegram/*`、`hook/*`、`skill/*`…）——
  * 它们没有常量，也就不可能有常量上的注释。
@@ -316,7 +316,7 @@ export function routeArmDocs(root) {
 /**
  * 地址 → 常量名：`ROUTE_` + 地址大写（`/` → `_`）。
  *
- * 与 `plugin/route.rs` 的命名规则**逐字同构**（「标识符去掉 `ROUTE_` 前缀后必须
+ * 与 `routes.rs` 的命名规则**逐字同构**（「标识符去掉 `ROUTE_` 前缀后必须
  * 等于值的大写形式」），于是后端手写常量与前端生成常量在**名字**上也对得上——
  * 读代码的人不需要在两栈之间做一次翻译。
  */

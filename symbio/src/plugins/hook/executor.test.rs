@@ -11,7 +11,7 @@
 //! - 临时文件不落在用户 workdir 里，且命令跑完即消失。
 
 use super::*;
-use crate::symbio_core::HookEvent;
+use crate::hooks::HookEvent;
 use std::path::PathBuf;
 
 /// 一条把「命令收到的最后一个参数」当文件读出来打到 stdout 的命令。
@@ -52,7 +52,7 @@ async fn run(command: &str, event: &HookEvent, workdir: &std::path::Path) -> Hoo
 
 /// `execute_single` 把 stdout折叠进 `HookOutput`（能解析 JSON 就当 JSON，否则当
 /// `context`）。测试只依赖「文本被透出」这一件事，不依赖折叠的具体结构。
-fn printed(out: &crate::symbio_core::HookOutput) -> String {
+fn printed(out: &crate::hooks::HookOutput) -> String {
     out.context.clone().unwrap_or_default()
 }
 

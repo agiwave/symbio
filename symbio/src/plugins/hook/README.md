@@ -17,7 +17,7 @@ impl: done
 > （`composite.rs`「目录名 = 实例名」）；`Plugin::meta` 的名字**从不参与路由**。
 >
 > 清单见 `docs/004-ref/003-ROUTES.md` §Hook 插件（**权威**）：`hook/register`、`hook/fire`、`hook/list`；
-> 触发臂是 `fire`（无 `trigger`），调用侧唯一入口是 `symbio_core::ROUTE_HOOK_FIRE`。
+> 触发臂是 `fire`（无 `trigger`），调用侧唯一入口是 `crate::routes::ROUTE_HOOK_FIRE`。
 
 ## 机制
 

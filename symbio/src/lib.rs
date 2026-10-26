@@ -15,6 +15,9 @@
 //! - `assembly`：宿主装配策略（私有）——一棵标准插件树挂哪些插件、哪些插件不许停用。
 //!   它不是机制而是**装配方的数据**，故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS`
 //!   接收装配结果）
+//! - `hooks` / `routes`：宿主侧的机制助手与跨插件地址——两者互相配套，
+//!   `fire_hook` 是地址的唯一 core 外消费方，故一起住宿主（DE-023 D-184）。
+//!   `hooks` 私有；`routes` 公开（同仓 `cli` 是独立 crate，订阅地址要从这里取）
 //! - `providers/`：通用服务基础设施（私有，**不**对外暴露）
 //!   - 各服务的**抽象**在 `symbio_core::embedding`
 //!   - 各服务的**实现**在 `src/providers/`
@@ -23,7 +26,9 @@
 //!   - **不**通过 `pub use` 暴露给 crate 外部
 
 mod assembly;
+mod hooks;
 pub mod init;
 mod plugins;
 mod providers;
+pub mod routes;
 pub mod symbio_core;

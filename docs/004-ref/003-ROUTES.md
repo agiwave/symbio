@@ -31,7 +31,7 @@ lists: [route-contracts=owner]
 | `home/get_workspace` | 前端（`services/home.ts`） | `home_get_workspace::Response` | 只读；读 home 自己的 `work.workdir` 配置段；同样经 gateway 不可达 |
 | `home/reload` | 前端（`services/home.ts`） | `home_reload::Response` | 写操作；切换 homedir（可选）并重建全部子插件 |
 | `home/set_workspace` | 前端（`services/home.ts`） | `home_set_workspace::Response` | 写操作；写入 home 自己的 `work.workdir` 与最近使用列表 |
-| `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；core 常量 `ROUTE_HOOK_FIRE` |
+| `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；宿主常量 `crate::routes::ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
 | `session/changes` | 前端（`services/sessionChanges.ts`，会话头「变更」抽屉）/ e2e | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影，D-169）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数；`address` 是**相对会话容器**的 `workdir/<path>`（与会话地址拼成完整地址）；`has_wal` / `readable` 把「没跑过」「不给看」「没改过」分成三种空 |

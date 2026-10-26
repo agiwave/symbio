@@ -44,7 +44,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// 事件类型（`kind`）词表 —— **发布方一律引本常量，不要写裸字面量**。
 ///
 /// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让消费方
-/// 的分发静默失效（与 `symbio_core::plugin::route` 同一类风险）。发布点曾直接写
+/// 的分发静默失效（与 `crate::routes` 同一类风险）。发布点曾直接写
 /// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
 /// `chat_node.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
@@ -223,7 +223,7 @@ pub fn event_bus_build_envelope(kind: &str, session_id: Option<&str>, data: Valu
 ///
 /// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方在 `cli` 与各插件
 /// ——是**线上字面量**，改名不会编译失败、只会让消费方的判别静默失效，故留在本层（与
-/// `plugin::route` 的地址常量同类，D-023）。
+/// `crate::routes` 的地址常量同类，D-023）。
 ///
 /// **不要按这个常量手写判别**：走 [`event_bus_resync_of`]，它把「信封 + 频道 + 指令类型」
 /// 三步一次做完（漏写判别的那个消费方就是本常量存在的理由）。

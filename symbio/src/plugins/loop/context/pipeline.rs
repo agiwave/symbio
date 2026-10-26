@@ -10,12 +10,13 @@
 use super::*;
 
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
+use crate::hooks::{fire_hook, HookEvent};
 use crate::plugin_warn;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 use crate::symbio_core::{
-    fire_hook, llm_short_id, run_ops, CompressionBeginRequest, CompressionFinishRequest,
-    CompressionOutcome, ConsolidateRequest, ExecAbortSignal, ExecEnv, ExecEventSink, HookEvent,
-    PluginError, RemoveNodesRequest, ReplaceAllRequest,
+    llm_short_id, run_ops, CompressionBeginRequest, CompressionFinishRequest, CompressionOutcome,
+    ConsolidateRequest, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError, RemoveNodesRequest,
+    ReplaceAllRequest,
 };
 
 use super::super::port::Compress;

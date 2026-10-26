@@ -1,9 +1,13 @@
 //! 跨插件调用路径（route path）统一常量
 //!
+//! **住宿主（crate 根），不住 core**（DE-023 D-184）：地址是装配方的词汇，不是封闭语法；
+//! `fire_hook` 是唯一需要这些常量的机制助手，它也在宿主侧（`crate::hooks`）。这样
+//! core 既不依赖插件地址，加插件也不改 core。
+//!
 //! # 地址规则
 //!
 //! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
-//! > [`../../../../docs/003-design/006-插件路由与地址.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")。
+//! > [`../../docs/003-design/006-插件路由与地址.md`](../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")。
 //!
 //! ## 一、地址只有两种形态
 //!
@@ -36,7 +40,8 @@
 //!
 //! `TRAVERSE_AVAILABLE_TOOLS` 与
 //! `TRAVERSE_AVAILABLE_OPTIONS`。
-//! 它们是**协议端点**，不是插件路径，因此不进本模块——住在 [`super::traverse`]。
+//! 它们是**协议端点**，不是插件路径，因此不进本模块——住在 `symbio_core::plugin` 的
+//! `traverse` 子模块。
 //!
 //! # 本模块的职责与边界
 //!
@@ -66,7 +71,6 @@
 //! （后者抓的是登记了一条没人能到达的地址——`AGENT_CHAT` 正是这个形态）。命名规则同时
 //! 也是本模块存在的理由（防止路径漂移）的守卫。
 
-// ============ VDFS 插件 ============
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
@@ -104,7 +108,7 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// hook/fire — 触发命名 hook
 ///
 /// 前缀是**目录名 `hook`**（不是 `PluginMeta` 曾写的 `"hooks"`）。
-/// 唯一调用方 `session/tools/tool_executor.rs::fire_hook`（PreToolUse / Stop 等生命周期点）。
+/// 唯一调用方 `crate::hooks::fire_hook`（PreToolUse / Stop 等生命周期点）。
 ///
 /// ---
 ///

@@ -50,9 +50,9 @@ impl StopSignal {
         if self.fired.swap(true, Ordering::SeqCst) {
             return false;
         }
-        let _ = crate::symbio_core::fire_hook(
+        let _ = crate::hooks::fire_hook(
             &self.parent,
-            crate::symbio_core::HookEvent::Stop { last_message },
+            crate::hooks::HookEvent::Stop { last_message },
             self.ctx.clone(),
         )
         .await;
@@ -82,9 +82,9 @@ impl StopSignal {
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 handle.spawn(async move {
-                    let _ = crate::symbio_core::fire_hook(
+                    let _ = crate::hooks::fire_hook(
                         &parent,
-                        crate::symbio_core::HookEvent::Stop {
+                        crate::hooks::HookEvent::Stop {
                             last_message: String::new(),
                         },
                         ctx,
