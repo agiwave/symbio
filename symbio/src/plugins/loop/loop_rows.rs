@@ -46,7 +46,7 @@
 //!
 //! ## 装载期检查
 //!
-//! 首次查询时经 [`load`] 把五张表灌进 `Builder` 的六个注册口并 `seal`，**任何缺口都是
+//! 首次查询时经 [`load`] 把五张表经 `Builder::declare` 一次交齐并 `seal`，**任何缺口都是
 //! 拒绝**（DE-015 §3.4 末句「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后
 //! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要
 //! 表再干活，拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
@@ -57,11 +57,11 @@ use serde_json::Value;
 
 use crate::symbio_core::ring::{owed, Decl, Gap, Lit, Pattern, PortDecl};
 use crate::symbio_core::{
-    ActorDecl, Builder, Event, Frozen, LatencyTier, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
-    EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
-    EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
+    ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED,
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TURN_DISPATCH, EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
 };
 
 /// 这张表里**接了线的执行体**：`execute`（整轮执行体）、`close`（收束）、
@@ -1428,16 +1428,14 @@ pub(crate) static ROWS: &[Decl] = &[
 /// 执行体声明与绑定项一起交（[`actor_decls`] 就是绑定表的 `decl` 投影），所以装载期
 /// 能看到的名字与派发器跑得动的名字**同源**。
 pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
-    let mut b = Builder::builtin();
-    for decl in actor_decls() {
-        b.actor(decl);
-    }
-    for &p in PORTS {
-        b.port(p);
-    }
-    for r in rows {
-        b.row(r.clone());
-    }
+    let mut b = Builder::new();
+    b.declare(PluginDeclarations {
+        facts: super::control_decl::FACTS,
+        views: super::control_decl::VIEWS,
+        ports: PORTS,
+        actors: actor_decls(),
+        rows,
+    });
     b.seal()
 }
 

@@ -65,7 +65,7 @@ const ACT: ActorDecl = ActorDecl {
 /// 夹具先替它们把归宿补好，那些用例就永远测不到东西。需要一份「只用来求解」的
 /// 表时用 [`decl_world`]，它按事实各补一行。
 fn declare(actors: &[ActorDecl]) -> Builder {
-    let mut b = Builder::new();
+    let mut b = Builder::empty();
     for name in ["f", "g", "h"] {
         b.fact(FactDecl {
             name,
@@ -640,7 +640,7 @@ fn a_port_is_declared_once_and_found_by_name() {
 
 /// 一篮子的**声明集**：`batch` 的 `calls` 声明为可展开字段。
 fn declare_batch() -> Builder {
-    let mut b = Builder::new();
+    let mut b = Builder::empty();
     b.fact(FactDecl {
         name: "batch",
         port: None,
@@ -1234,7 +1234,7 @@ fn rows_that_cannot_collide_are_not_reported() {
 /// 端口的第 5 条不再单点调用 `check_ports`——它和其余六道一样只在 [`Builder::seal`]
 /// 里跑，所以这里断言的缺口来自同一个装载出口（§3.3「检查的出口只有一个」）。
 fn seal_protocol(rows: &[Decl], port: PortDecl) -> Vec<Gap> {
-    let mut b = Builder::new();
+    let mut b = Builder::empty();
     for name in [EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
         b.fact(FactDecl {
             name,

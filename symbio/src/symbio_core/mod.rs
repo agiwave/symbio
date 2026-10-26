@@ -27,7 +27,7 @@ pub(crate) mod decl;
 // 到 `pub(crate)`（C-003 只数 `pub use`）：避开与 `actors::Pattern` 重名，插件只经根
 // 路径取用（C-002 禁深引域目录）。
 pub(crate) use decl::ring;
-pub(crate) use decl::{ActorDecl, Builder, Frozen};
+pub(crate) use decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
 mod dialog;
 mod embedding;
 mod event;
