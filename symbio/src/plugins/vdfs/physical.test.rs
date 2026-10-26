@@ -45,16 +45,38 @@ async fn writes_then_reads_back_relative_address() {
         panic!("应为 Read 响应");
     };
     assert_eq!(c.text.as_deref(), Some("hello"));
-    // 相对与带前导斜杠的写法落在同一位置
-    let VdfsResponse::Read(c) = fs
-        .dispatch(&ctx, "/a.txt", VdfsRequest::Read)
-        .await
-        .unwrap()
-    else {
-        panic!("应为 Read 响应");
-    };
-    assert_eq!(c.text.as_deref(), Some("hello"));
+    // `docs` 与 `/docs` 是两个位置：首部 `/` 是绝对锚点，落点不在工作目录里（D-172）
+    let anchored = fs
+        .dispatch(&ctx, "/symbio-anchor-probe-a7c1.txt", VdfsRequest::Read)
+        .await;
+    assert!(
+        matches!(anchored, Err(VdfsError::NotFound(_))),
+        "锚点地址不该命中工作区里的 a.txt：{anchored:?}"
+    );
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// 地址 → 真实路径的那一条规则：相对段从工作目录起算，`/` 打头交给操作系统解析
+#[test]
+fn leading_slash_is_an_absolute_anchor() {
+    let base = Path::new(if cfg!(windows) {
+        r"C:\work\proj"
+    } else {
+        "/work/proj"
+    });
+    assert_eq!(join_target(base, "docs"), base.join("docs"));
+    let anchored = join_target(base, "/docs");
+    assert!(anchored.has_root());
+    assert!(
+        !anchored.starts_with(base),
+        "锚点地址不该落进工作目录：{anchored:?}"
+    );
+    if cfg!(windows) {
+        assert_eq!(
+            join_target(base, r"D:\tmp\a.txt"),
+            PathBuf::from(r"D:\tmp\a.txt")
+        );
+    }
 }
 
 #[tokio::test]

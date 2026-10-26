@@ -51,7 +51,7 @@ impl Capability for ListTool {
                 },
                 "required": ["path"]
             }),
-            vec!["{\"path\":\"/\"}", "{\"path\":\".vdfsv2\"}", "{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}"],
+            vec!["{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}", "{\"path\":\"src\"}", "{\"path\":\".vdfsv2\"}"],
             CapabilityRiskLevel::Low,
         )
     }
@@ -103,24 +103,35 @@ impl Capability for ListTool {
             }
         }
 
-        // 目录在前、文件在后，各自按名称排序（与原生 dir_list 一致）
+        // 目录在前、文件在后，各自按名称排序（与 provider 的 list 同一口径）。
+        // ⚠️ 判据是 `type` 字符串的字典序的反面：这里**显式比布尔**，不靠
+        // "directory" < "file" 这种字面量巧合——一旦呈现形状改名，排序会静默反向。
+        let is_dir = |e: &Value| e["type"].as_str() == Some("directory");
         entries.sort_by(|a, b| {
-            let ta = a["type"].as_str().unwrap_or("");
-            let tb = b["type"].as_str().unwrap_or("");
-            if ta != tb {
-                return tb.cmp(ta); // directory 优先
-            }
-            let na = a["name"].as_str().unwrap_or("");
-            let nb = b["name"].as_str().unwrap_or("");
-            na.cmp(nb)
+            is_dir(b).cmp(&is_dir(a)).then_with(|| {
+                a["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["name"].as_str().unwrap_or(""))
+            })
         });
 
         let truncated = entries.len() >= MAX_ENTRIES;
-        let shown = if path.is_empty() { "/" } else { path.as_str() };
+        // 工作目录根在回执里印成 `.`——`/` 已经是文件系统的绝对锚点，
+        // 把空地址显示成 `/` 会让模型下一次照着它去列磁盘根（见 D-172）。
+        let shown = if path.is_empty() { "." } else { path.as_str() };
+        // 回执自带账目：条目数按类型分开报。弱模型只会照抄它读到的那一段，
+        // 「28 个条目」写在 message 里它就知道自己该说几个；只给一个总数时，
+        // 它数了前 17 行便宣布其余的「是第二层」（实测会话 cli1a175d1ea440）。
+        let dirs = entries.iter().filter(|e| is_dir(e)).count();
+        let files = entries.len() - dirs;
         let message = if entries.is_empty() {
             format!("目录 '{shown}' 为空或无可列举条目。")
         } else {
-            format!("已列举 {} 个条目。", entries.len())
+            format!(
+                "已列举 {} 个条目（{dirs} 个目录 + {files} 个文件），全部在第一层。",
+                entries.len()
+            )
         };
 
         Ok(json!({
@@ -131,3 +142,7 @@ impl Capability for ListTool {
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "list.test.rs"]
+mod tests;

@@ -20,8 +20,9 @@
 //!
 //! 1. **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；`vdfs_list('.vdfsv2')`
 //!    即可枚举当前可访问的全部类别；
-//! 2. **其余地址 = 物理磁盘**：相对路径从工作目录开始（`README.md`），绝对路径
-//!    直用（`D:/tmp/a.txt`）。
+//! 2. **其余地址 = 物理磁盘**：相对路径从工作目录开始（`README.md`），绝对路径照
+//!    操作系统解析（首部的 `/` 是绝对锚点：`/docs` 是文件系统根下的 docs，
+//!    `<盘符>:/tmp/a.txt` 是那个盘上的文件）——`docs` 与 `/docs` 是两个位置。
 //!
 //! ## provider 从哪来
 //!
@@ -64,7 +65,7 @@ pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
 /// 校验 schema 声明为 `required` 的**字符串**参数确实存在且非空。
 ///
 /// `request_of` 的 `unwrap_or_default` 会把缺失字段吞成空串/空结构——空 path
-/// 落到物理层恰好解析成工作目录根本身，产生「目录不可读：C:\…\」这类与真实
+/// 落到物理层恰好解析成工作目录根本身，产生「'…' 是目录」这类与真实
 /// 原因无关的误导性错误（实测会话 `09d74431`：LLM 在超限上下文下吐出空参数，
 /// `vdfs_read` 收到 `{}` 后一路静默走到物理层才炸）。schema 说了 required，
 /// 执行侧就要兑现它。
@@ -84,9 +85,13 @@ pub(crate) fn ensure_required(args: &Value, field: &str) -> Result<(), PluginErr
 
 /// 统一的路径参数说明（所有工具的 schema 共享同一套语义，避免 LLM 误用）
 ///
-/// 与后端统一地址规则同一口径：`.vdfsv2` 打头 = 系统资源，其余 = 磁盘文件。
+/// 与后端统一地址规则同一口径（实现见 `super::super::fs` 的 `normalize_addr` /
+/// `super::super::physical` 的 `join_target`）。这份文案要说清的是**两件事各自的写法**：
+/// 相对段从工作目录起算（`.` 是工作目录根）、首部的 `/` 是操作系统的绝对锚点
+/// （`/docs` ≠ `docs`）。裁决与后果见
+/// [D-172](../../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
 pub const PATH_DESC: &str =
-    "路径（统一文件系统）。磁盘文件：一律**相对工作目录**，如 'README.md'、'src/main.rs'、'tmp/note.md'；'/' 只是地址分隔符（'/README.md' 与 'README.md' 是同一位置），**不是文件系统根**——把整条绝对路径当地址传（'/home/me/proj/tmp/a.txt' 这类）会落到工作目录下的 'home/me/proj/tmp/a.txt'，凭空多出一棵重复目录树，而工具照常报告成功。只有工作区之外的目标才用带盘符或带根的真实绝对路径，如 'D:/tmp/a.txt'。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/plugin_manager/appearance'）。";
+    "路径（统一文件系统）。磁盘文件有两种写法，**不是同一个位置**：① 相对工作目录——'README.md'、'src/main.rs'、'tmp/note.md' 都落在工作目录之下，工作目录根本身写成 '.'；② 绝对路径——首部的 '/' 是操作系统的绝对锚点，'/docs' 指文件系统根下的 docs（POSIX 的 /docs，Windows 落在工作目录所在盘的根目录下），带盘符的 'D:/tmp/a.txt' 同理。因此 '/docs' 与 'docs' 是两个位置：前者在文件系统根，后者在工作目录里；想把工作目录下的 docs 当成绝对路径交给工具，请写 '.' 再加名字，不要照抄一条外部机器的绝对路径。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/plugin_manager/appearance'）。";
 
 /// 构造工具元数据骨架；子模块在自身 `meta()` 里直接调用，避免重复样板。
 ///

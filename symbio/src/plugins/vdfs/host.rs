@@ -196,13 +196,11 @@ pub fn call_params(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsParams {
 /// 地址是**展示口径**的：`base` 为空即工作目录根，子节点直接是裸名字
 /// （`README.md`）；虚拟根下则是 `<根>/<名字>`。两条链路同一形态——
 /// 父地址从请求里来，因此这里不需要知道根叫什么。
+///
+/// **父地址的绝对锚点原样带走**：`/docs` 的子项还是 `/` 打头的地址，不会退化成
+/// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 fn child_path(base: &str, name: &str) -> String {
-    let base = base.trim_end_matches('/');
-    if base.is_empty() {
-        name.to_string()
-    } else {
-        format!("{base}/{name}")
-    }
+    crate::symbio_core::join_addr(base, name)
 }
 
 /// 条目在**本次列表**里的地址。
@@ -671,11 +669,10 @@ pub(crate) async fn search_via(
                 continue;
             }
         };
-        // 子地址 = 父目录 + 子名（`""` 基目录直接用子名，保持相对形态）；
+        // 子地址 = 父目录 + 子名（父段的绝对锚点随之带走）；
         // provider 显式给了地址的条目（如设置页条目指向别的挂载点）用它给的那个。
-        let parent = dir.trim_end_matches('/').to_string();
         for child in children {
-            let child_addr = item_addr(&parent, &child);
+            let child_addr = item_addr(&dir, &child);
             // 匹配用「相对 base 的地址」，收集用完整地址
             let rel = child_addr
                 .strip_prefix(base_dir.as_str())

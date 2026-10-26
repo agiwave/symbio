@@ -140,11 +140,11 @@ async fn workdir_reaches_the_physical_layer() {
     assert_eq!(c.text.as_deref(), Some("hi"));
     assert!(rec.seen().is_empty(), "物理地址不该出现在虚拟层");
 
-    // 目录根：可列、不可读
-    let items = vdfs.list(&ctx, "/").await.unwrap();
+    // 工作目录根：`.` 可列、不可读（`/` 已经不是它了 —— 见 D-172）
+    let items = vdfs.list(&ctx, ".").await.unwrap();
     assert_eq!(items[0].node.name, "hello.txt");
     assert!(matches!(
-        vdfs.read(&ctx, "/").await.unwrap_err(),
+        vdfs.read(&ctx, ".").await.unwrap_err(),
         VdfsError::Forbidden(_)
     ));
 

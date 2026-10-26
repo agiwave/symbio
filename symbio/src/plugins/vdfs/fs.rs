@@ -7,12 +7,14 @@
 //! <根>/<子目录>/…    某插件子树                       ├─▶ 虚拟层（容器注册的根）
 //!                                                   ─┘
 //! README.md        工作目录相对地址                 ─┐
-//! src/main.rs      同上                              ├─▶ 物理层（磁盘真实文件）
-//! D:/tmp/a.txt     绝对路径                          ─┘
+//! src/main.rs      同上                              │
+//! /docs            文件系统绝对地址（`/` 是锚点）    ├─▶ 物理层（磁盘真实文件）
+//! D:/tmp/a.txt     同上（带盘符的绝对地址）          ─┘
 //! ```
 //!
 //! **判别只有一条**：规范化后的地址是否以根名（[`VDFS_ADDR_ROOT`]）打头。
-//! 是 → 虚拟；否 → 物理。
+//! 是 → 虚拟；否 → 物理。首部的 `/` 是操作系统的绝对锚点，不是可折叠的分隔符——
+//! `docs` 与 `/docs` 是两个位置（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 //! 前端协议、LLM 工具两条链路共用这一个 [`UnifiedFs`]，因此翻译只存在于本文件一处，
 //! 页面与工具都不需要知道展示口径与树内口径的差异。
 //!
@@ -75,18 +77,23 @@ pub const VDFS_ADDR_ROOT: &str = ".vdfsv2";
 enum Half {
     /// 虚拟层：树内相对路径（`""` = 根目录）
     Virtual(String),
-    /// 物理层：工作目录相对地址（`""` = 工作目录根）
+    /// 物理层：`""` = 工作目录根；相对段从工作目录起算；`/` 打头 = 文件系统绝对
     Physical(String),
 }
 
-/// 规范化地址：折叠空段与 `.`、拒绝 `..` 穿越、去掉首部分隔符。
+/// 规范化地址：折叠空段与 `.`、拒绝 `..` 穿越、**保留首部绝对锚点**。
 ///
-/// **不强加前导 `/`**——虚拟地址以 `.vdfsv2` 打头、物理相对地址以名字打头、
-/// 绝对物理地址以盘符打头，三者形态各异，统一成「以 `/` 分隔的段序列」即可。
+/// **不强加前导 `/`**——虚拟地址以 `.vdfsv2` 打头、物理相对地址以名字打头，
+/// 形态各异，统一成「以 `/` 分隔的段序列」即可。唯一的例外是**锚点**：
+/// 首部的 `/` 不是可折叠的分隔符，它是操作系统的绝对锚点，与 `docs` 是两个
+/// 不同的位置，必须原样带到下游。裁决与平台语义见
+/// [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
 ///
-/// - `""` / `"."` / `"/"` → `""`（工作目录根）
+/// - `""` / `"."` → `""`（工作目录根）
 /// - `".vdfsv2/session/"` → `".vdfsv2/session"`
-/// - `"/src/main.rs"` → `"src/main.rs"`（首段分隔符只是分隔，不是文件系统根）
+/// - `"src//main.rs"` → `"src/main.rs"`（段内空折叠）
+/// - `"/docs"` → `"/docs"`（文件系统绝对：POSIX 的 `/docs`、Windows 的 `<工作目录盘符>:\docs`）
+/// - `"//srv/share"` → `"//srv/share"`（UNC 形态的两个斜杠同样是锚点，只认前两个）
 /// - 含 `..` 段 → [`VdfsError::Invalid`]
 pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
     // 第一道：按**段**判 `..`，且两种分隔符都算。
@@ -101,8 +108,13 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
             "VDFS 地址不允许向上穿越：{raw}"
         )));
     }
+    let raw = raw.trim();
+    // 锚点：首部连续的 `/`，最多两个（一个 = 文件系统根，两个 = UNC 形态）。
+    // 第三个及以后的斜杠是冗余分隔，照常折叠——`Path` 自己也这么看。
+    let anchor_len = raw.chars().take_while(|c| *c == '/').count().min(2);
+    let anchor = &raw[..anchor_len];
     let mut segs: Vec<&str> = Vec::new();
-    for seg in raw.trim().split('/') {
+    for seg in raw[anchor_len..].split('/') {
         let seg = seg.trim();
         if seg.is_empty() || seg == "." {
             continue;
@@ -116,12 +128,14 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
         }
         segs.push(seg);
     }
-    Ok(segs.join("/"))
+    Ok(format!("{anchor}{}", segs.join("/")))
 }
 
 /// 规范化地址 → 那一半
 ///
 /// `.vdfsv2` 必须**独占首段**：`.vdfsv2foo` 不算虚拟地址（按物理地址处理）。
+/// 锚点地址（`/` 打头）同理永不虚拟——根名前面还有斜杠，`strip_prefix` 必然落空，
+/// 于是走物理分支；这正是 [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范") 要的：`/.vdfsv2/x` 说的是磁盘上的目录，不是系统资源。
 fn half_of(addr: &str) -> Half {
     match addr.strip_prefix(VDFS_ADDR_ROOT) {
         Some("") => Half::Virtual(String::new()),

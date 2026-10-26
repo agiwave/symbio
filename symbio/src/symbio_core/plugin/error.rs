@@ -7,7 +7,13 @@ use std::sync::{RwLockReadGuard, RwLockWriteGuard};
 /// 插件错误类型
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
-    #[error("插件未找到：{0}")]
+    /// 未找到。**文案不预设「没找到的是插件」**：每个构造点都在载荷里点名了对象
+    /// （「路径不存在: x」「目标智能体 'a' 不存在」「子插件未挂载」），而此前这里硬写的
+    /// 「插件未找到：」前缀让一次**文件路径**拼错读起来像**工具没装**——实跑日志里
+    /// `vdfs_read`/`vdfs_list` 的每一次「无法解析路径 …」都因此顶着这个前缀出现，
+    /// 模型据此判定工具不可用而不是改路径重试（机制面该修的是文案，不是让每个调用点
+    /// 再把自己的载荷改写一遍来对冲前缀）。
+    #[error("未找到：{0}")]
     NotFound(String),
     #[error("插件调用未实现")]
     NotImplemented,

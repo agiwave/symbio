@@ -136,8 +136,8 @@ deps: [DE-009-VDFS规范]
 ```
 
 - **前端服务层不做任何地址翻译**：`services/vdfs.ts` 只封装调用，
- 没有 `toWirePath` / `toVdfsPath`（后端 `normalize_addr` 也已不强加前导 `/`，
- `<根>` 与工作目录相对地址、绝对路径三者形态各异，统一成段序列即可）。
+ 没有 `toWirePath` / `toVdfsPath`（后端 `normalize_addr` 不强加前导 `/`，也**不剥掉**
+ 调用方带来的那个 `/`——它是操作系统的绝对锚点，见 [D-172](009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 - 页面逻辑、渲染器、路径代数**只认 `<根>` 口径**。
 - **口径翻译唯一在后端一处**：`<根>/session/x` ↔ 树内 `session/x`
  （`UnifiedFs` 进出两处各一次）。provider 永远只见自己子树内的相对路径。

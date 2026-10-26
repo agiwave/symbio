@@ -58,14 +58,23 @@ pub(crate) fn declared_addr_root() -> Option<&'static str> {
 /// - `join_addr("@root/session", "abc/MEMORY.md")` → `@root/session/abc/MEMORY.md`
 /// - `join_addr("session", "x")` → `session/x`（父地址本身也可以是相对的）
 /// - `join_addr("", "x")` → `x`（无父可接：原样返回相对地址，见模块文档的降级说明）
+/// - `join_addr("/", "docs")` → `/docs`（**父地址的绝对锚点必须带走**：从 `/docs`
+///   出发的遍历若交出相对子地址，绝对子树就被列成了工作目录下的影子树——见
+///   [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）
 pub(crate) fn join_addr(parent: &str, rel: &str) -> String {
-    let parent = parent.trim().trim_matches('/');
+    let parent = parent.trim();
+    // 首部连续的 `/` 是锚点（最多认两个：一个 = 文件系统根，两个 = UNC 形态），
+    // 与段间分隔符不同——它参与位置判定，不能当作冗余斜杠折叠掉。
+    let anchor_len = parent.chars().take_while(|c| *c == '/').count().min(2);
+    let (anchor, parent_rest) = parent.split_at(anchor_len);
+    let parent_rest = parent_rest.trim_matches('/');
     let rel = rel.trim().trim_matches('/');
-    match (parent.is_empty(), rel.is_empty()) {
+    let body = match (parent_rest.is_empty(), rel.is_empty()) {
         (true, _) => rel.to_string(),
-        (false, true) => parent.to_string(),
-        (false, false) => format!("{parent}/{rel}"),
-    }
+        (false, true) => parent_rest.to_string(),
+        (false, false) => format!("{parent_rest}/{rel}"),
+    };
+    format!("{anchor}{body}")
 }
 
 /// **转发跳的改写规则**：把当前父地址往下一级。

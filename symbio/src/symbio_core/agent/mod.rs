@@ -323,7 +323,8 @@ impl AgentScope {
     ///    属性里看得见真实目录（`agent_dir_info` 把它印在概览里），
     ///    因此这条不是理论上的。
     ///
-    /// `addr` 须已归一（`vdfs::fs::normalize_addr`：无 `..`、无空段、无前导分隔符）。
+    /// `addr` 须已归一（`vdfs::fs::normalize_addr`：无 `..`、无空段；首部的 `/` 是
+    /// **绝对锚点**，会原样保留——POSIX 下它因此落进形态 2）。
     pub fn own_rel(&self, root_name: &str, addr: &str) -> Option<String> {
         // 形态 1：虚拟地址。root_name 由 vdfs 插件经静态声明给出（core 对根名零知识）。
         let base = format!("{root_name}/agent/{}", self.id);

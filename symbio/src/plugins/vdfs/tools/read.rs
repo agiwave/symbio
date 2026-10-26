@@ -30,7 +30,7 @@ impl Capability for ReadTool {
     fn meta(&self) -> CapabilityMeta {
         tool(
             "vdfs_read",
-            "读取文件内容（与原生 read_file 一致：带行号、支持分页）。文本文件返回 content 字段（含行号与 [行 X-Y，共 N 行] 摘要）；二进制文件（如图片）返回 base64 的 b64 字段且 binary=true。目录不可读，请用 vdfs_list。",
+            "读取文件内容（与原生 read_file 一致：带行号、支持分页）。文本文件返回 content 字段（含行号与 [行 X-Y，共 N 行] 摘要）；二进制文件（如图片）返回 base64 的 b64 字段且 binary=true。目录没有正文可读——别换一种地址写法重试，改调 vdfs_list（path 原样可用）。",
             json!({
                 "type": "object",
                 "properties": {

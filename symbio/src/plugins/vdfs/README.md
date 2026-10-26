@@ -24,7 +24,7 @@ impl: done
 | 层 | 地址形态 | 落点 |
 |----|----------|------|
 | 虚拟层 | `.vdfsv2` · `.vdfsv2/<子目录>/…` | 容器注册的各 provider 组合视图 |
-| 物理层 | `README.md`（工作目录相对） · `<盘符>:/tmp/a.txt`（绝对） | 磁盘真实文件（`physical.rs`） |
+| 物理层 | `README.md`（工作目录相对） · `/docs`（文件系统绝对：POSIX 根 / Windows 盘根） · `<盘符>:/tmp/a.txt`（绝对） | 磁盘真实文件（`physical.rs`） |
 
 `.vdfsv2` 下有多少子目录、叫什么，由容器与各 provider 的注册决定——新增一类资源
 不需要改动本插件任何一行。

@@ -304,7 +304,7 @@ pub static SPECS: &[ToolSpec] = &[
                 "required": ["path"]
             })
         },
-        examples: &["{\"path\":\"/\"}", "{\"path\":\"src\",\"depth\":2}"],
+        examples: &["{\"path\":\".\",\"depth\":2}", "{\"path\":\"src\",\"depth\":2}"],
         risk: CapabilityRiskLevel::Low,
         call: |p, args, ctx| {
             Box::pin(async move {
@@ -378,8 +378,9 @@ async fn tree_receipt(
             }
         };
 
-        // 子地址 = 父目录 + 子名（`/` 与 `""` 都视为根，子地址直接用子名）
-        let base = dir.trim_end_matches('/').to_string();
+        // 子地址 = 父目录 + 子名，拼接走全项目那一份规则（`join_addr`）：
+        // 父段带绝对锚点（`/docs`）时子段必须带走，否则遍历交出相对地址、
+        // 把绝对子树读成工作目录下的影子树（见 D-172）
         let mut listed_all = true;
         for mut item in children {
             if out.len() >= count_limit {
@@ -387,11 +388,7 @@ async fn tree_receipt(
                 listed_all = false;
                 break;
             }
-            let child_addr = if base.is_empty() {
-                item.node.name.clone()
-            } else {
-                format!("{base}/{}", item.node.name)
-            };
+            let child_addr = crate::symbio_core::join_addr(&dir, &item.node.name);
             // 访问层通常已按同一规则回填；留空时兜一个，保证每个条目都带地址
             if item.path.is_empty() {
                 item.path = child_addr.clone();

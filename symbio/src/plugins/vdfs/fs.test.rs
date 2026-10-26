@@ -105,18 +105,22 @@ fn fs() -> (UnifiedFs, Arc<V>, Arc<P>) {
 // ==================== 地址代数 ====================
 
 #[test]
-fn addresses_normalize_without_forcing_root_slash() {
+fn addresses_normalize_and_keep_the_absolute_anchor() {
     assert_eq!(normalize_addr("").unwrap(), "");
     assert_eq!(normalize_addr(".").unwrap(), "");
-    assert_eq!(normalize_addr("/").unwrap(), "");
     assert_eq!(normalize_addr("a//b/").unwrap(), "a/b");
     assert_eq!(normalize_addr("./a").unwrap(), "a");
     assert_eq!(
         normalize_addr(".vdfsv2/session/").unwrap(),
         ".vdfsv2/session"
     );
-    assert_eq!(normalize_addr("/src/main.rs").unwrap(), "src/main.rs");
     assert_eq!(normalize_addr("D:/tmp/a.txt").unwrap(), "D:/tmp/a.txt");
+    // 首部的 `/` 是操作系统的绝对锚点，不是可折叠的分隔符（D-172）：
+    // `/docs` 与 `docs` 归一后仍是两个地址，物理层据此落到两个位置。
+    assert_eq!(normalize_addr("/").unwrap(), "/");
+    assert_eq!(normalize_addr("/docs").unwrap(), "/docs");
+    assert_eq!(normalize_addr("/src//main.rs/").unwrap(), "/src/main.rs");
+    assert_eq!(normalize_addr("//srv/share/x").unwrap(), "//srv/share/x");
 }
 
 #[test]
@@ -170,6 +174,12 @@ fn only_exact_first_segment_is_virtual() {
     assert_eq!(
         half_of("README.md"),
         Half::Physical("README.md".to_string())
+    );
+    // 锚点地址永不虚拟：`/.vdfsv2/x` 说的是磁盘上的那个目录
+    assert_eq!(half_of("/docs"), Half::Physical("/docs".to_string()));
+    assert_eq!(
+        half_of("/.vdfsv2/x"),
+        Half::Physical("/.vdfsv2/x".to_string())
     );
 }
 
@@ -228,6 +238,13 @@ async fn bare_address_goes_to_physical_untouched() {
         .unwrap();
     assert_eq!(p2.seen(), vec![""]);
     assert!(v2.seen().is_empty());
+
+    // 锚点地址带着 `/` 交给物理层——门面不替它折叠
+    let (f3, _v3, p3) = fs();
+    f3.dispatch(&VdfsContext::empty(), "/etc/hosts", VdfsRequest::List {})
+        .await
+        .unwrap();
+    assert_eq!(p3.seen(), vec!["/etc/hosts"]);
 }
 
 /// 写入回执**不带地址**，门面因此原样透出

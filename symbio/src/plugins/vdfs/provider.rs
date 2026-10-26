@@ -50,12 +50,15 @@ fn audit_path_key(p: &Path) -> String {
     s
 }
 
-/// 目标是否落在工作目录之外（只有**绝对地址**才可能；相对地址恒在工作目录内）。
+/// 目标是否落在工作目录之外。
+///
+/// 判定先用**物理层那一条解析规则**（[`super::physical::join_target`]）把地址变成真实
+/// 路径，再比前缀——不在这里重算一遍「什么叫绝对」：首部 `/` 是绝对锚点，Windows 下
+/// 它会带着工作目录的盘符落到盘根（`Path::is_absolute()` 对它返回假，照它判就等于漏判）。
 fn outside_workdir(workdir: &str, addr: &str) -> bool {
-    let target = PathBuf::from(addr);
-    target.is_absolute()
-        && !PathBuf::from(audit_path_key(&target))
-            .starts_with(PathBuf::from(audit_path_key(Path::new(workdir))))
+    let base = Path::new(workdir);
+    let target = super::physical::join_target(base, addr);
+    !PathBuf::from(audit_path_key(&target)).starts_with(PathBuf::from(audit_path_key(base)))
 }
 
 /// 工作区外**变更**的审计点：记，不拦。

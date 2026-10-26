@@ -17,7 +17,10 @@
 //!
 //! - `""` / `"."` = 工作目录根；
 //! - `README.md`、`src/main.rs` = 工作目录相对；
-//! - `D:/tmp/a.txt` = 真正的绝对路径直用。
+//! - `/docs`、`//srv/share/x` = 文件系统绝对（首部 `/` 是锚点，POSIX 根 / Windows 盘根）；
+//! - `<盘符>:/tmp/a.txt` = 带盘符的绝对路径。
+//!
+//! 四条都由 [`Path`] 自己的语义解析，本层不加第二条规则（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
 //!
 //! ## 安全规则（自持，不经机制）
 //!
@@ -60,6 +63,10 @@ fn starts_with_normalized(base: &Path, prefix: &Path) -> bool {
 /// 只有两类规则：`forbidden_paths` 黑名单，以及可选的「限定在工作区 /
 /// 白名单根之内」（[`FsPolicy::workspace_only`]，缺省关闭 = 全盘可读，
 /// 仅黑名单兜底）。
+///
+/// 黑名单按**路径段**比，认的正是 `/` 打头与 `~` 打头的形态：`/etc/passwd` 命中
+/// `/etc`、`~/secrets` 命中 `~/…`。绝对锚点地址（见 [`join_target`]）能走到这里，
+/// 所以它是最后一道防线——`workspace_only` 打开时连锚点地址也要落进工作区或白名单根。
 #[derive(Debug, Clone)]
 pub struct FsPolicy {
     /// 是否只允许工作目录与 [`FsPolicy::allowed_roots`] 之内的绝对路径
@@ -138,11 +145,13 @@ fn workdir(ctx: &VdfsContext) -> VdfsResult<PathBuf> {
 
 /// 地址 → 真实路径。
 ///
-/// 首部的 `/` 只是地址分隔符（虚拟根残留、或调用方习惯性带上），**不是**文件系统
-/// 根——统一剥掉，使 `README.md` 与 `/README.md` 落到同一个位置。仅真正的绝对路径
-/// （如 Windows 盘符 `D:/...`）直用。
-fn join_target(base: &Path, rel: &str) -> PathBuf {
-    let rel = rel.trim_start_matches('/');
+/// **首部的 `/` 是文件系统的绝对锚点，原样交给 [`Path`]**（[D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）：
+/// `docs` 落在 `{workdir}/docs`，`/docs` 落在文件系统根下的 `docs`。相对段经 [`Path::join`]——它
+/// 自带操作系统语义：POSIX 下 `join("/docs")` 直接替换成 `/docs`，Windows 下
+/// `is_absolute()` 为假但有根，于是带着工作目录的盘符落到 `<盘符>:\docs`。
+/// 本层不自造第二条规则：**不要在 join 之前 `trim` 掉首部的 `/`**——那等于把绝对锚点
+/// 读成工作目录相对，凭空在 `{workdir}/docs` 造出一棵影子树。
+pub(crate) fn join_target(base: &Path, rel: &str) -> PathBuf {
     let p = Path::new(rel);
     if p.is_absolute() {
         p.to_path_buf()
@@ -220,16 +229,23 @@ impl PhysicalFs {
     }
 
     /// 读路径守卫：黑名单 + 解析符号链接后复验（防链接逃逸）
-    async fn guard_read(&self, base: &Path, target: &Path) -> VdfsResult<PathBuf> {
+    ///
+    /// `addr` 是**调用方交来的地址**，错误文案一律以它为主语：物理路径此前直接出现在
+    /// 文案里（`目录不可读：<工作目录>\docs`），而大模型把这条诊断当成了地址本身——
+    /// 实测会话 cli1a175d2ff0：`vdfs_read {"path":"docs"}` 报「目录不可读」后，下一次
+    /// 调用就是 `vdfs_read {"path":"<那条真实路径>"}`，同一错误再吃一次，连撞三轮才换成
+    /// `vdfs_list`。**能被复制的错误文案必须是可执行的下一步**，不是一个看起来像地址的
+    /// 字符串（物理位置只作上下文放在末尾，并标明它是工作目录）。
+    async fn guard_read(&self, base: &Path, target: &Path, addr: &str) -> VdfsResult<PathBuf> {
         if !self.policy.readable(target, base) {
-            return Err(VdfsError::Forbidden(format!(
-                "路径不允许访问：{}",
-                target.display()
-            )));
+            return Err(VdfsError::Forbidden(format!("路径不允许访问：'{addr}'")));
         }
-        let resolved = tokio::fs::canonicalize(target)
-            .await
-            .map_err(|e| VdfsError::not_found(format!("无法解析路径 {}：{e}", target.display())))?;
+        let resolved = tokio::fs::canonicalize(target).await.map_err(|e| {
+            VdfsError::not_found(
+                format!("路径不存在：'{addr}'（在工作目录 {} 下找）", base.display())
+                    + &format!("：{e}"),
+            )
+        })?;
         if !self.policy.readable(&resolved, base) {
             return Err(VdfsError::Forbidden(format!(
                 "路径解析后超出工作区范围：{}",
@@ -311,11 +327,11 @@ impl PhysicalFs {
     async fn do_list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
-        let resolved = self.guard_read(&base, &target).await?;
+        let resolved = self.guard_read(&base, &target, path).await?;
 
         let mut rd = tokio::fs::read_dir(&resolved)
             .await
-            .map_err(|e| VdfsError::invalid(format!("无法读取目录 {}：{e}", target.display())))?;
+            .map_err(|e| VdfsError::invalid(format!("无法读取目录 '{path}'：{e}")))?;
 
         let mut nodes: Vec<VdfsNode> = Vec::new();
         while let Some(entry) = rd
@@ -354,10 +370,10 @@ impl PhysicalFs {
     async fn do_stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
-        let resolved = self.guard_read(&base, &target).await?;
-        let meta = tokio::fs::metadata(&resolved).await.map_err(|e| {
-            VdfsError::not_found(format!("无法读取元数据 {}：{e}", target.display()))
-        })?;
+        let resolved = self.guard_read(&base, &target, path).await?;
+        let meta = tokio::fs::metadata(&resolved)
+            .await
+            .map_err(|e| VdfsError::not_found(format!("无法读取元数据 '{path}'：{e}")))?;
 
         let name = if path.is_empty() {
             resolved
@@ -383,15 +399,17 @@ impl PhysicalFs {
     async fn do_read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
-        let resolved = self.guard_read(&base, &target).await?;
+        let resolved = self.guard_read(&base, &target, path).await?;
 
         let meta = tokio::fs::metadata(&resolved)
             .await
             .map_err(|e| VdfsError::not_found(format!("无法读取文件元数据：{e}")))?;
         if meta.is_dir() {
+            // 文案里给出**可直接复制的下一次调用**，而不是只说「请用 vdfs_list」：
+            // 实测同一句提示被连撞三次（模型每次改的是**地址写法**，不是**工具**），
+            // 因为提示没有告诉它「地址不用改」。
             return Err(VdfsError::Forbidden(format!(
-                "目录不可读：{}（请用 vdfs_list 列举）",
-                target.display()
+                "'{path}' 是目录，没有正文可读。改调 vdfs_list 列举它的子项，地址原样可用：{{\"path\":\"{path}\"}}"
             )));
         }
         if meta.len() > MAX_FILE_SIZE {
@@ -459,7 +477,7 @@ impl PhysicalFs {
     async fn do_delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
-        let resolved = self.guard_read(&base, &target).await?;
+        let resolved = self.guard_read(&base, &target, path).await?;
 
         if tokio::fs::symlink_metadata(&target)
             .await
