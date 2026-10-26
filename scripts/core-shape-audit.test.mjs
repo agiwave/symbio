@@ -42,7 +42,7 @@ function rmTree(dir) {
 const CORE_MOD = 'symbio/src/symbio_core/mod.rs'
 const ALPHA = 'symbio/src/symbio_core/alpha/mod.rs'
 /** 一个成员、无默认体的最小夹具 */
-const ONE = 'pub trait Alpha {\n    fn one(&self) -> u32;\n}\n'
+const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
 
 /**
  * 建夹具 → 跑审计 → 返回 spawnSync 结果。
@@ -82,7 +82,7 @@ test('形状等于基线 ⇒ 通过', () => {
 
 test('多一个 pub trait（新增接缝）⇒ CS-001 变红', () => {
   const r = audit(
-    core(ONE, { 'symbio/src/symbio_core/beta/mod.rs': 'pub trait Beta {\n    fn b(&self);\n}\n' }),
+    core(ONE, { 'symbio/src/symbio_core/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n' }),
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 1, '接缝变多必须红')
@@ -92,7 +92,7 @@ test('多一个 pub trait（新增接缝）⇒ CS-001 变红', () => {
 
 test('既有 trait 多一个方法（契约变宽）⇒ CS-001 变红，且只有 CS-001 红', () => {
   const r = audit(
-    core('pub trait Alpha {\n    fn one(&self) -> u32;\n    fn two(&self) -> u32;\n}\n'),
+    core('pub trait Store {\n    fn one(&self) -> u32;\n    fn two(&self) -> u32;\n}\n'),
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 1, '成员变多必须红')
@@ -104,7 +104,7 @@ test('必需成员长出默认体（接口上长实现）⇒ 只有 defaults 格
   // methods 不变（1 个成员），变的只有「它带不带体」——这一格必须单独看得见，
   // 否则「把实现塞进接口」就藏在成员数里，正是 C2 那批要钻的形状。
   const r = audit(
-    core('pub trait Alpha {\n    fn one(&self) -> u32 {\n        1\n    }\n}\n'),
+    core('pub trait Store {\n    fn one(&self) -> u32 {\n        1\n    }\n}\n'),
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 1, '默认体变多必须红')
@@ -115,7 +115,7 @@ test('必需成员长出默认体（接口上长实现）⇒ 只有 defaults 格
 test('反向：默认体里的局部 `fn` 不算成员（多数会误报）', () => {
   const r = audit(
     core(
-      'pub trait Alpha {\n    fn one(&self) -> u32 {\n        fn helper() -> u32 { 7 }\n        helper()\n    }\n}\n',
+      'pub trait Store {\n    fn one(&self) -> u32 {\n        fn helper() -> u32 { 7 }\n        helper()\n    }\n}\n',
     ),
     { baseline: '1:1:1' },
   )
@@ -125,7 +125,7 @@ test('反向：默认体里的局部 `fn` 不算成员（多数会误报）', ()
 test('反向：`async fn` / 多行签名的成员照常数到（`->` 的尖括号不能拖歪计数）', () => {
   const r = audit(
     core(
-      'pub trait Alpha {\n    async fn one(&self) -> Result<u32, Err>;\n    async fn two(&self) -> Result<u32, Err> {\n        self.one().await\n    }\n}\n',
+      'pub trait Store {\n    async fn one(&self) -> Result<u32, Err>;\n    async fn two(&self) -> Result<u32, Err> {\n        self.one().await\n    }\n}\n',
     ),
     { baseline: '1:1:0' },
   )

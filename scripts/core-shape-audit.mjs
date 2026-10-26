@@ -4,13 +4,13 @@
  *
  * ## 它判什么
  *
- * 三格棘轮，全部来自 core 生产侧的 `pub trait`：
+ * 三格棘轮，全部来自**内核**（DE-023 A2）的五个封闭语法 trait：
  *
  * | 编号 | 格 | 判什么 | 它拦的是哪一种膨胀 |
  * |---|---|---|---|
- * | CS-001 | `traits` | `pub trait` 声明数（冻结 16） | **新增接缝**：每多一个抽象，就多一处「所有实现方都得知道」的地方 |
- * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 56） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
- * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 18） | **接口上长实现**：行为代码住进架构模块 |
+ * | CS-001 | `traits` | **内核五 trait**（Store / Capability / ModelProvider / VdfsProvider / Registry）的声明数（冻结 5） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
+ * | CS-001 | `methods` | 上述五 trait 的 `fn` 成员总数（冻结 17） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
+ * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 2） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0 | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作 |
  * | CS-004 | —— | core 生产代码里**插件 id 字面量**数只许降（冻结逐文件存量） | **词汇回流**：在 core 写 `"session"` / `"vdfs"` 就是在内核里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
@@ -229,13 +229,17 @@ function hasDecisionAnchor(id) {
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
  * 也必须是 `35-baseline` 那条提取函数认的键名；任何一边单改都会红。
  */
-// core-shape-allow defaults: D-062 —— 无时刻概念的信封须「保持原样」，默认 no-op 体就是它的平凡值（README §3 的 J2）；去掉默认体反而让每个实现方手写同一个空函数，公共面更宽
+// 内核五 trait 是**封闭语法**（DE-023 §1）：它们的形状只许收窄。
+// 其余 trait 是域协议（Plugin / LlmAdapter / DeltaSink / …），随 B2/C 迁出内核，
+// 不占这条棘轮——在那里加成员不等于「内核接缝变宽」。
+const KERNEL_TRAITS = ['Store', 'Capability', 'ModelProvider', 'VdfsProvider', 'Registry']
+
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 15, methods: 55, defaults: 18 }
+  : { traits: 5, methods: 17, defaults: 2 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -303,7 +307,7 @@ function traitShape(body) {
  * **测试不是架构消费方**，测试里的 trait 形状也不是长期接口。
  */
 function measureCoreShape(coreDir) {
-  const rows = []
+  const all = []
   for (const file of walk(coreDir)) {
     if (!file.endsWith('.rs') || isTestFile(file)) continue
     const txt = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
@@ -311,12 +315,18 @@ function measureCoreShape(coreDir) {
       const open = txt.indexOf('{', m.index)
       if (open < 0) continue
       const body = txt.slice(open + 1, matchBrace(txt, open))
-      rows.push({ name: m[1], file: path.relative(ROOT, file).split(path.sep).join('/'), ...traitShape(body) })
+      all.push({
+        name: m[1],
+        file: path.relative(ROOT, file).split(path.sep).join('/'),
+        ...traitShape(body),
+      })
     }
   }
+  const rows = all.filter((r) => KERNEL_TRAITS.includes(r.name))
   rows.sort((a, b) => b.fns - a.fns || a.name.localeCompare(b.name))
   return {
     rows,
+    all,
     values: {
       traits: rows.length,
       methods: rows.reduce((s, r) => s + r.fns, 0),
@@ -331,6 +341,17 @@ if (!fs.existsSync(path.join(coreDir, 'mod.rs'))) {
   process.exit(1)
 }
 const shape = measureCoreShape(coreDir)
+
+// 封闭语法里少一个 trait 不是「收窄成功」，是判据失去输入：宁红不静默。
+// 夹具仓库（没有 plugins/mod.rs）只造一两个 trait 验棘轮本身，不要求凑齐五格。
+const hasPlugins = fs.existsSync(path.join(ROOT, 'symbio/src/plugins/mod.rs'))
+if (hasPlugins) {
+  for (const name of KERNEL_TRAITS) {
+    if (!shape.rows.some((r) => r.name === name)) {
+      report('CS-001', `内核 trait \`${name}\` 读不出来——封闭语法被删/改名，棘轮失去一格输入`)
+    }
+  }
+}
 
 // ==================== CS-001 形状棘轮 ====================
 
@@ -458,7 +479,7 @@ const NOUN_BASELINE = {
 }
 
 const nounCounts = new Map()
-if (pluginIds.length > 0) {
+if (hasPlugins && pluginIds.length > 0) {
   for (const f of coreTexts) {
     let n = 0
     for (const id of pluginIds) {
