@@ -813,6 +813,10 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   'core',
   'alloc',
   'tokio',
+  // 封闭语法 crate（D-188 / D-189）：`symbio_kernel` 只装 `ActorSpec` / `Pattern` /
+  // `Scope` 这类跨墙语法与签名类型，没有任何插件实现，也不反向依赖宿主——它是
+  // 「内核只装语法、插件声明词汇」的那半边，与 `symbio_core` 同档而非族外实现面。
+  'symbio_kernel',
   'serde',
   'serde_json',
   'async_trait',

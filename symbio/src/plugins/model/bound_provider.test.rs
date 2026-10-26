@@ -23,10 +23,17 @@ use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
 use crate::symbio_core::ProviderLlmAdapter;
 use crate::symbio_core::{
-    check_all, cost_ledger, render_messages, turnstate, Budget, Entity, Event, EventStore,
+    check_all, cost_ledger, transcript, turnstate, Budget, Entity, Event, EventStore,
     PromptMessage, Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{LlmAdapter as _, TokenIssuer};
+
+/// 与生产渲染同一口径（`plugins/loop/turn_runner/prepare.rs::render_messages`）：
+/// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此
+/// 直接调同一个投影入口。
+fn render_messages(events: &[Event]) -> Vec<PromptMessage> {
+    transcript().read_all(events).value.to_messages()
+}
 
 /// 走**生产同一条路径**：事件切片 → `render_messages` → `generate_timed`。
 ///

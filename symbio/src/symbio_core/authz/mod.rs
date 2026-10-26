@@ -796,11 +796,10 @@ impl EffectiveMatrix {
         }
     }
 
-    /// 写侧判定：主体是否可以权威地做 `cap`（合流面，fail-closed）。
-    ///
-    /// 生产读方：意图闸门（[`crate::symbio_core::actors::IntentGate::approve`]，
-    /// 升格 = `define.work`）。其余调用点按能力名或收束臂问
-    /// （[`Self::can_write_name`] / [`Self::can_reply`] / [`Self::can_produce_artifact`]）。
+    /// 写侧判定（**按能力枚举**）：生产读方只剩测试——插件侧按能力名问
+    /// （[`Self::can_write_name`]，[`Capability`] 刻意不进根平铺），本入口留给
+    /// 授权表的成对性用例（`authz::mod.test.rs` 核对「同一行两种问法同答案」）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn can_write(&self, principal: &str, cap: Capability) -> bool {
         match self.bound_row(principal) {
             Some(row) => row.contains(&cap),

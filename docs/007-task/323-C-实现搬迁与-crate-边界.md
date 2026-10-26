@@ -86,3 +86,15 @@ exit: '可选批次：按 owner 搬投影实现与共享类型、把 schedule / 
   取 core 与 kernel 的并集；`plugin-entry` 的代码根补 `symbio_kernel/src`；protocol-mirror 的后端
   真源路径改 kernel。测试基线：`rustTests` 2241 → 2174、`kernelRustTests` 64 → 131（用例随类型迁移，
   非退役）。门禁 152/152 通过。
+- 2026-10-26：**C1 已落**（D-189）。逐模块核过生产消费方，按「单消费方 ⇒ 归 owner；配对 /
+  跨域 ⇒ 留核」分派：调度（`ScheduleDecider` / `ScheduleFact` / `SCHEDULE_BUDGET_MS`）→
+  `plugins/loop/task_events`；技能编译与路由 → `plugins/loop/skill_events`（`SKILL_TAG`
+  是 loop 写 / session 读的共享词汇，留核）；检索 Translator（`recalled_event`）→
+  `plugins/loop/memory_events`（无状态的 `RecallTranslator` 类型退役）；自主层与意欲闸门
+  （`AutonomousInitiator` / `IntentGate` / `ConationPolicy` / `ConationCandidate` /
+  `IntentDecision` / `ApprovedIntent`）→ `plugins/session/transcript/autonomous`；
+  `render_messages` → `plugins/loop/turn_runner::prepare`（core 侧只剩测试夹具，删除）。
+  commitment（写侧 / 读侧配对，跨 loop / session）与 control（两个 owner、不同角色）留核，
+  后者按 C1 明文待单独论证。判据面：`actors` 只剩 `commitment` / `control` / `spec` /
+  `SKILL_TAG`；NDC-001 的 `RecallTranslator` 退役；策略用例随实现迁到各 owner 的
+  `.test.rs`，core 只留授权面（自主写入对话为 0）与投影面断言；根账本随出口删除只降。

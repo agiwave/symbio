@@ -363,7 +363,15 @@ async fn rehearse_reasoner_turn(
         .expect("用户消息必入库");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let started = Instant::now();
-    let outcome = llm.generate(&tok, &render_messages(&snapshot)).await;
+    let outcome = llm
+        .generate(
+            &tok,
+            &crate::symbio_core::transcript()
+                .read_all(&snapshot)
+                .value
+                .to_messages(),
+        )
+        .await;
     let cost_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(reply) => {
@@ -444,7 +452,13 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let llm = StubLlmAdapter::succeed("stub-model");
     let reply = llm
-        .generate(&TokenIssuer::issue_deep(), &render_messages(&snapshot))
+        .generate(
+            &TokenIssuer::issue_deep(),
+            &crate::symbio_core::transcript()
+                .read_all(&snapshot)
+                .value
+                .to_messages(),
+        )
         .await
         .expect("成功桩必答");
     assert!(
@@ -507,10 +521,10 @@ async fn four_tier_budgets_are_measurable() {
 
 // ── S5 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 11–13 步）：记忆链路 ──
 //
-// 编码（memory.encoded）→ 检索（recall 投影 + RecallTranslator → memory.recalled）
-// → 巩固 / 遗忘（排除式 + 保真度下界）。S06 §6 四条验收逐条落地。
+// 编码（memory.encoded）→ 检索（recall 投影）→ 巩固 / 遗忘（排除式 + 保真度下界）。
+// 检索事实的写侧随唯一消费方住 `plugins/loop/memory_events`（D-189），验收在那边。
+// S06 §6 四条验收逐条落地。
 
-use crate::symbio_core::event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_RECALLED};
 use crate::symbio_core::projection::consolidate::{accept, ConsolidateParams};
 use crate::symbio_core::projection::recall::recall;
 
@@ -789,9 +803,10 @@ fn memory_event_without_provenance_is_caught() {
     assert!(bad[0].why.contains("记忆"), "{}", bad[0].why);
 }
 
-/// 全链路：检索 Translator 产出 memory.recalled（带溯源），三条不变量仍全绿。
+/// 全链路（读侧投影）：检索产出带溯源的视图，三条不变量仍全绿。
+/// 写侧的 `memory.recalled` 事实随唯一消费方住 `plugins/loop/memory_events`（D-189）。
 #[test]
-fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
+fn recall_projection_is_provenanced_and_invariants_stay_green() {
     let store = EventStore::new();
     // 根事件先落：记忆事件的溯源指向它（`source = 0`），否则那条边指向自己。
     store
@@ -809,66 +824,11 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     let view = recall("session/main", None, None)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
-    let event = RecallTranslator.recalled_event(&view, 0, "session/main");
-    store.append(event).unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert_eq!(view.entries.len(), 1);
     assert!(
         check_all(&snapshot).is_empty(),
         "{:?}",
         check_all(&snapshot)
-    );
-    let recalled = snapshot
-        .iter()
-        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
-        .unwrap();
-    assert_eq!(recalled.payload["found"], 1);
-}
-
-/// 降级也要有**生产读数口**：
-/// `degraded` 从 `memory.recalled` 的载荷读出——不只在投影外壳或提示词里活着。
-/// 反向：不降级的检索不标降级（不谎称）。
-#[test]
-fn recalled_event_records_degradation_instead_of_dropping_it() {
-    let store = EventStore::new();
-    for i in 0..4i64 {
-        encode(
-            &store,
-            &format!("g{i}"),
-            100 + i,
-            &format!("片段 {i}"),
-            "experience",
-            0,
-        );
-    }
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-
-    // 降级视图 = **取值点誊抄外壳之后**的形态（D-105：外壳是唯一的降级事实源，
-    // 誊抄判据在 `recall.test.rs` / `memory_events.test.rs`）。本测试钉的是**下游**：
-    // 视图带着 `degraded` 流动时，`memory.recalled` 不得把它丢掉。
-    let degraded = crate::symbio_core::view::RecallView {
-        entries: vec![crate::symbio_core::view::RecallEntry {
-            seq: 0,
-            ts: 100,
-            content: "片段 0".into(),
-            tag: "experience".into(),
-        }],
-        degraded: true,
-    };
-    let event = RecallTranslator.recalled_event(&degraded, 0, "session/main");
-    assert_eq!(
-        event.payload.get("degraded").and_then(|v| v.as_bool()),
-        Some(true),
-        "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
-    );
-
-    let full = recall("session/main", None, None)
-        .apply(&snapshot, 2_000, Budget::generous())
-        .value;
-    let ok = RecallTranslator.recalled_event(&full, 0, "session/main");
-    assert_eq!(
-        ok.payload.get("degraded").and_then(|v| v.as_bool()),
-        Some(false),
-        "不降级不标降级"
     );
 }
 
@@ -2033,34 +1993,9 @@ fn cost_ledger_accumulates_per_principal() {
 
 // ── S9 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 21–22 步）：自治与学习 ──
 //
-// 21 定时触发 + 自主层 budget_ms（出口判据「自主写入对话 0」，roadmap/S12）；
-// 22 技能编译 + 校准 + 反自动化回退（出口判据「技能溯源 100%」，roadmap/S11）。
-
-use crate::symbio_core::event::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED};
-use crate::symbio_core::projection::calibration::calibration;
-
-/// S12 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
-/// （触发器产出事件，不是旁路——自主行为同样走 I1 单通道 + I2 溯源）。
-#[test]
-fn scheduled_trigger_produces_event_not_side_channel() {
-    let store = EventStore::new();
-    // 本轮**没有新的用户消息**——纯自主场景；但触发必须指得着一条更早的事实：
-    // 生产路径在 `head == 0` 时直接放弃触发（`transcript/autonomous.rs`：
-    // "还没有事实源，本次不触发（无可指的溯源锚）"）。夹具照生产给一个锚。
-    let src = seed_root(&store);
-    let init = AutonomousInitiator;
-    store.append(init.trigger(src)).unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    assert!(
-        snapshot.iter().any(|e| e.kind == EVENT_SYSTEM_TRIGGERED),
-        "自主行为必须以事件形态存在"
-    );
-    assert!(
-        check_all(&snapshot).is_empty(),
-        "{:?}",
-        check_all(&snapshot)
-    );
-}
+// 21 定时触发的**授权面**（出口判据「自主写入对话 0」，roadmap/S12）留在这里；
+// 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
+// `plugins/session/transcript/autonomous` 与 `plugins/loop/skill_events`（D-189）。
 
 /// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///
@@ -2099,263 +2034,12 @@ fn autonomous_actor_cannot_write_to_dialog() {
     );
 }
 
-/// S12 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
-#[test]
-fn long_goal_overrun_is_visible_and_budget_param_is_live() {
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    let init = AutonomousInitiator;
-    store.append(init.trigger(src)).unwrap();
-    store
-        .append(init.open_long_goal("goal-1", "整理全年归档", src))
-        .unwrap();
-    // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
-    store
-        .append(
-            Event::pending(
-                "g1",
-                EVENT_TASK_PROGRESS,
-                Entity::Task,
-                Verb::Progressed,
-                0,
-                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
-            )
-            .with_produced_by(src)
-            .with_cost_ms(90_000_000)
-            .with_payload(serde_json::json!({ "task_id": "goal-1" })),
-        )
-        .unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    // 验收 3：超 86.4M 必须产出兜底（先被看见）。
-    let bad = budget_exceeded(
-        &snapshot,
-        Some(crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms()),
-    );
-    assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
-    // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
-    let ok_event = Event::pending(
-        "g2",
-        EVENT_TASK_PROGRESS,
-        Entity::Task,
-        Verb::Progressed,
-        0,
-        crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
-    )
-    .with_produced_by(src)
-    .with_cost_ms(70_000)
-    .with_payload(serde_json::json!({ "task_id": "goal-1" }));
-    let ok_events = vec![ok_event];
-    assert!(
-        budget_exceeded(&ok_events, Some(86_400_000)).is_empty(),
-        "70M 在自主层预算内"
-    );
-    assert_eq!(
-        budget_exceeded(&ok_events, Some(60_000)).len(),
-        1,
-        "同一耗时，深挖档预算下违规"
-    );
-}
+// S12 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `plugins/session/transcript/autonomous`
+// （D-189）；core 只留授权表结论（见上一条）。
 
-/// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
-/// 无任何自主任务但读侧投影照常（J2 平凡值）。ZST 令牌零开销。
-#[test]
-fn conation_governance_three_rules() {
-    let init = AutonomousInitiator;
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    store.append(init.trigger(src)).unwrap();
-    store.append(init.express_intent("整理归档", src)).unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-
-    // (a) 唯一构造路径读出的候选，approved 恒 false——欲不得直接变成行。
-    let want = snapshot
-        .iter()
-        .find(|e| e.kind == EVENT_CONATION_EXPRESSED)
-        .unwrap();
-    let mut candidate = ConationCandidate::from_event(want).expect("合法欲事件必出候选");
-    assert!(!candidate.is_approved());
-    // approved 字段私有：外部无法伪造 true（error[E0451]，编译期反向用例）。
-
-    // (b) 无溯源的欲 → 构造不出候选（I2 强化）。
-    let bare = Event {
-        produced_by: None,
-        ..Event::pending(
-            "w1",
-            EVENT_CONATION_EXPRESSED,
-            Entity::Conation,
-            Verb::Opened,
-            0,
-            "session/x",
-        )
-    };
-    assert!(
-        ConationCandidate::from_event(&bare).is_none(),
-        "来路不明的意图混不进来"
-    );
-
-    // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
-    let policy_off = ConationPolicy::default();
-    let grants = crate::symbio_core::authz::production_matrix();
-    assert_eq!(
-        IntentGate::evaluate(
-            &candidate,
-            &policy_off,
-            grants,
-            crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS
-        ),
-        IntentDecision::Rejected("conation disabled")
-    );
-    // 打开后：评估通过 → 升格；溯源锚与目标都从 `ApprovedIntent` 读（字段私有）。
-    let policy_on = ConationPolicy {
-        enabled: true,
-        max_goal_len: 200,
-    };
-    let approved = IntentGate::approve(
-        &mut candidate,
-        &policy_on,
-        grants,
-        crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
-    )
-    .expect("合法意图必批");
-    assert!(candidate.is_approved());
-    assert_eq!(approved.goal(), "整理归档");
-    assert_eq!(
-        approved.source_seq(),
-        want.seq.map(|s| s.value()).unwrap_or(0)
-    );
-
-    // (d) 授权是真闸：开关打开，但不持 `define.work` 的主体升格被拒。
-    let mut other = ConationCandidate::from_event(want).expect("同一事件可再造候选");
-    assert_eq!(
-        IntentGate::approve(
-            &mut other,
-            &policy_on,
-            grants,
-            crate::symbio_core::authz::PRINCIPAL_WORKER
-        ),
-        Err("unauthorized: define.work"),
-        "worker 不持 define.work"
-    );
-    assert!(!other.is_approved(), "被拒的候选不得变成已批准");
-}
-
-/// S11 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。
-#[test]
-fn compiled_skill_requires_provenance() {
-    let compiler = SkillCompiler;
-    // 源轨迹：一个成功任务的终态（seq 2）。
-    let skill = compiler.compile("weekly-report", "用户问周报格式", "按模板三段式作答", 2);
-    assert_eq!(skill.produced_by, Some(2), "溯源 100%：指向源轨迹");
-    assert_eq!(skill.payload["tag"], "skill");
-    // 正向：I2 全绿。
-    assert!(
-        crate::symbio_core::invariants::produced_by_coverage(std::slice::from_ref(&skill))
-            .is_empty()
-    );
-    // 验收 4（反向）：把 produced_by 置空 → 断言 1 必须失败。
-    let bare = Event {
-        produced_by: None,
-        ..skill
-    };
-    let bad = crate::symbio_core::invariants::produced_by_coverage(std::slice::from_ref(&bare));
-    assert_eq!(bad.len(), 1, "无溯源的技能必须被看见");
-}
-
-/// S11 §6 验收 2 + 3：命中技能 cost 显著低于完整推理；置信度低于阈值必回退。
-#[test]
-fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
-    let store = EventStore::new();
-    let src = seed_root(&store);
-    let compiler = SkillCompiler;
-    // 编译技能（源轨迹 = 那条更早的事实）。
-    store
-        .append(compiler.compile("weekly-report", "周报", "三段式", src))
-        .unwrap();
-    // 命中：反射档快路（cost 40ms，低两个数量级）。
-    store
-        .append(
-            Event::pending(
-                "h1",
-                EVENT_MEMORY_CALIBRATED,
-                Entity::Memory,
-                Verb::Asserted,
-                0,
-                "session/main",
-            )
-            .with_produced_by(src)
-            .with_cost_ms(40)
-            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": false })),
-        )
-        .unwrap();
-    // 未命中 / 回退：完整推理（cost 5000ms）。
-    store
-        .append(
-            Event::pending(
-                "h2",
-                EVENT_MEMORY_CALIBRATED,
-                Entity::Memory,
-                Verb::Asserted,
-                0,
-                "session/main",
-            )
-            .with_produced_by(src)
-            .with_cost_ms(5_000)
-            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": true })),
-        )
-        .unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-
-    // 验收 2：命中路径 cost 显著低于回退路径（40ms vs 5000ms）。
-    let hit_cost = snapshot
-        .iter()
-        .find(|e| {
-            e.kind == EVENT_MEMORY_CALIBRATED
-                && e.payload.get("fallback") == Some(&serde_json::json!(false))
-        })
-        .map(|e| e.cost_ms)
-        .unwrap();
-    let fallback_cost = snapshot
-        .iter()
-        .find(|e| {
-            e.kind == EVENT_MEMORY_CALIBRATED
-                && e.payload.get("fallback") == Some(&serde_json::json!(true))
-        })
-        .map(|e| e.cost_ms)
-        .unwrap();
-    assert!(
-        hit_cost * 10 < fallback_cost,
-        "技能命中必须显著更便宜：{hit_cost} vs {fallback_cost}"
-    );
-
-    // 校准：1 用 1 回退 ⇒ 置信度 0.5；低于阈值 0.8 ⇒ 必须回退（不得走技能路径）。
-    let cal = calibration().apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(cal.value.of("weekly-report").uses, 2);
-    assert_eq!(cal.value.of("weekly-report").fallbacks, 1);
-    let router = SkillRouter;
-    assert_eq!(
-        router.route(cal.value.of("weekly-report").confidence(), 0.8),
-        SkillRoute::ReasonerFallback { budget_ms: 300 },
-        "校准值持续走低 ⇒ 保留反自动化回退"
-    );
-    // 反向：置信度高于阈值 → 走快路。
-    assert_eq!(
-        router.route(0.95, 0.8),
-        SkillRoute::SkillFastPath { budget_ms: 80 }
-    );
-    // N1：校准双跑一致。
-    assert_eq!(
-        cal.value,
-        calibration()
-            .apply(&snapshot, 9_999, Budget::generous())
-            .value
-    );
-    // 全链路不变量仍绿。
-    assert!(
-        check_all(&snapshot).is_empty(),
-        "{:?}",
-        check_all(&snapshot)
-    );
-}
+// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
+// 无任何自主任务但读侧投影照常（J2 平凡值）。实现与用例随唯一消费方住
+// `plugins/session/transcript/autonomous`（D-189）。
 
 // ── ③ 兜底率投影（SLO §1.2 兜底率列的统计口径）──────────────────────────
 
@@ -2502,7 +2186,7 @@ fn latency_tier_name_round_trip() {
 
 // ── S04：调度者与租约（`D-139` 裁决 1–3 的判据面）──────────────────────
 
-use crate::symbio_core::event::{EVENT_TASK_ASSIGNED, EVENT_TASK_READY};
+use crate::symbio_core::event::EVENT_TASK_ASSIGNED;
 
 /// 落一条 `task.assigned`（租约）——只在测试里手写，生产写方是调度者。
 fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
@@ -2589,103 +2273,5 @@ fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
     );
 }
 
-/// 调度者是 `Decider` / 80ms / 根作用域，且**持 `assign.work`**（授权表那一行）。
-#[test]
-fn the_scheduler_spec_is_a_decider_with_assign_work() {
-    let spec = ScheduleDecider::spec();
-    assert_eq!(spec.pattern, Pattern::Decider);
-    assert_eq!(spec.budget_ms, 80, "反射档");
-    assert_eq!(spec.scope, Scope::Root);
-    assert!(actor_can_assign_work(&spec), "调度者行持 assign.work");
-}
-
-/// 100 次注入同一笔就绪任务 ⇒ 只发一笔租约（抢同一份活有仲裁）。
-#[test]
-fn a_hundred_injections_yield_exactly_one_lease() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/planner");
-    let spec = ScheduleDecider::spec();
-
-    let mut assigned = 0usize;
-    let mut ready_facts = 0usize;
-    let mut now = 1_000i64;
-    for _ in 0..100 {
-        let snap = store.range(crate::symbio_core::event::Seq::new(0));
-        let view = readyset(1).apply(&snap, now, Budget::generous()).value;
-        let facts = ScheduleDecider.decide(&spec, &view, &snap, "session/main", now);
-        for f in &facts {
-            if f.kind == EVENT_TASK_ASSIGNED {
-                assigned += 1;
-            }
-            if f.kind == EVENT_TASK_READY {
-                ready_facts += 1;
-            }
-        }
-        for (n, f) in facts.into_iter().enumerate() {
-            let verb = if f.kind == EVENT_TASK_READY {
-                Verb::Progressed
-            } else {
-                Verb::Asserted
-            };
-            store
-                .append(
-                    Event::pending(
-                        format!("s-{now}-{n}"),
-                        f.kind,
-                        Entity::Task,
-                        verb,
-                        0,
-                        "scheduler/main",
-                    )
-                    .with_produced_by(0)
-                    .with_payload(f.payload),
-                )
-                .expect("调度事实入格");
-        }
-        now += 10;
-    }
-    assert_eq!(assigned, 1, "同一笔活被注入 100 次，只发一笔租约");
-    assert_eq!(ready_facts, 1, "就绪事实同一周期只落一次（不刷屏）");
-}
-
-/// 租约到期 ⇒ 调度者**判死并补落** `task.ready{reason: lease_expired}`，然后重派。
-#[test]
-fn an_expired_lease_is_judged_dead_and_reassigned() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/planner");
-    assign_task(&store, "a", "session/main", 1_000);
-    let spec = ScheduleDecider::spec();
-    let snap = store.range(crate::symbio_core::event::Seq::new(0));
-
-    // 到点：候选集回来了，调度者先判死、再发放。
-    let view = readyset(1).apply(&snap, 1_000, Budget::generous()).value;
-    let facts = ScheduleDecider.decide(&spec, &view, &snap, "session/main", 1_000);
-    let death = facts
-        .iter()
-        .find(|f| f.kind == EVENT_TASK_READY)
-        .expect("到期未判死 ⇒ 回放里它只是「突然又能派了」");
-    assert_eq!(death.payload["reason"], "lease_expired");
-    assert_eq!(death.payload["expired_owner"], "session/main");
-    assert!(
-        facts.iter().any(|f| f.kind == EVENT_TASK_ASSIGNED),
-        "判死之后同一轮重派"
-    );
-}
-
-/// 写侧闸：没有 `assign.work` 的主体**一条事实都不写**（fail-closed）。
-#[test]
-fn a_spec_without_assign_work_writes_nothing() {
-    let store = EventStore::new();
-    open_task(&store, "a", &[], "session/planner");
-    let snap = store.range(crate::symbio_core::event::Seq::new(0));
-    let view = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
-
-    // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
-    let speaker = trivial_actor_spec("session/worker");
-    assert!(
-        ScheduleDecider
-            .decide(&speaker, &view, &snap, "session/main", 9_999)
-            .is_empty(),
-        "缺 assign.work ⇒ 零事实（没有资格的调度不留痕）"
-    );
-}
+// 调度者的策略与租约判据随唯一消费方住 `plugins/loop/task_events`（D-189）；
+// 本文件只留候选集投影的判据（`readyset`）。

@@ -60,9 +60,9 @@ use crate::symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 use crate::symbio_core::FleetSnapshot;
 use crate::symbio_core::PRINCIPAL_USER;
 use crate::symbio_core::{
-    accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, RecallView,
-    Rejection, Seq, Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
-    EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+    accept, recall, Budget, ConsolidateParams, Entity, Event, RecallView, Rejection, Seq, Store,
+    Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
+    EVENT_MEMORY_RECALLED,
 };
 
 // ==================== 常量（口径的数值面，单点定义） ====================
@@ -411,6 +411,48 @@ pub(crate) fn encode(
 }
 
 // ==================== 步 12 · 写方（检索事实） ====================
+
+/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
+/// 读视图 → 一格 `memory.recalled` 事实（D-189：唯一生产消费方在本文件）。
+///
+/// **Translator 不创造信息**：召回内容原样来自 `RecallView`（③ 的投影产出），
+/// 本函数只把「读视图」落成「一条事实」——`memory.recalled` 事件
+/// （`memory × asserted` 格子，带溯源指向触发它的事件）。
+///
+/// 载荷三键 `found` / `top` / `degraded` **全是视图自带的**数据（降级也要有
+/// 生产读数口——只活在投影外壳或提示词里，就没有一条事件说得出「这轮记忆只显示了
+/// 一部分」）。
+///
+/// `trigger_seq`：触发本次检索的事件 seq（溯源锚——I2：断言类必带溯源）。
+pub(crate) fn recalled_event(
+    view: &RecallView,
+    trigger_seq: u64,
+    // 谁在断言「我召回了这些」——会话主体（`memory.recalled` 的 `actor`）。
+    actor: &str,
+) -> Event {
+    let top = view
+        .entries
+        .first()
+        .map(|e| e.content.as_str())
+        .unwrap_or("");
+    Event::pending(
+        format!("recalled-{trigger_seq}"),
+        EVENT_MEMORY_RECALLED,
+        Entity::Memory,
+        Verb::Asserted,
+        0,
+        actor,
+    )
+    .with_produced_by(trigger_seq)
+    .with_payload(serde_json::json!({
+        "found": view.entries.len(),
+        "top": top,
+        // 本次召回是否只给出**部分结果**。
+        // 观测落进事实才有**生产读数口**：降级只活在投影外壳 / 提示词里，就没有
+        // 一条事件说得出「这一轮的记忆只显示了一部分」（静默的两种形态之一）。
+        "degraded": view.degraded,
+    }))
+}
 
 /// 步 12 的写方：本轮检索 → 一条 `memory.recalled`（Translator 出事实，不造信息）。
 ///

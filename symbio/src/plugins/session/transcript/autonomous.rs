@@ -25,9 +25,8 @@ use super::super::plugin::SessionPlugin;
 use crate::plugins::session::store::EventWalStore;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::session_chat;
-use crate::symbio_core::{
-    conation, AutonomousInitiator, ConationCandidate, ConationPolicy, IntentGate, Seq, Store,
-};
+use crate::symbio_core::{conation, Event, Seq, Store};
+use crate::symbio_core::{EffectiveMatrix, PRINCIPAL_AUTONOMOUS};
 
 impl SessionPlugin {
     /// 为一次自主触发**开一轮**：先落事实，落成了才带着服务端推导的运行参数入队。
@@ -306,6 +305,229 @@ fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
         .read_all(&store.range(Seq::new(0)))
         .value
         .is_declared(goal)
+}
+
+// ==================== 自主发起者与意欲闸门（D-189：唯一生产消费方在本文件） ====================
+
+/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）。
+///
+/// 形状 = `pattern: decider`（规则驱动，零 LLM）、能力只 `define.work`、
+/// `budget_ms` = 自主档 [`LatencyTier::Autonomic`]（四层时延的第四个取值——自主层不是
+/// 新架构层，只是同一个参数的第四个取值）。
+///
+/// ## 两处「单点定义」，本类型各引用一次
+///
+/// - **主体名**：`PRINCIPAL_AUTONOMOUS`——表里那一行与这里四个事件的 `actor` 是同一个
+///   常量。名字分两处写，授权表那行就成了一条谁也管不到的死记录（见该常量的文档）。
+/// - **预算**：`LatencyTier::Autonomic`——`86400000` 不在本文件出现第二次。
+///
+/// 能力那一半**不在这里**：`capabilities = [define.work]` 的权威是授权表
+/// （`authz::ROWS` 里 `PRINCIPAL_AUTONOMOUS` 那一行），本类型只负责按那个主体名写事件。
+/// 两处各写一份能力清单必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
+struct AutonomousInitiator;
+
+impl AutonomousInitiator {
+    /// 定时触发：**触发器产出事件，不是旁路**——自主行为同样走 I1 单通道。
+    fn trigger(&self, source_seq: u64) -> Event {
+        Event::pending(
+            format!("sys-{source_seq}"),
+            crate::symbio_core::EVENT_SYSTEM_TRIGGERED,
+            crate::symbio_core::Entity::System,
+            crate::symbio_core::Verb::Opened,
+            0,
+            PRINCIPAL_AUTONOMOUS,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({
+            "kind": crate::symbio_core::EVENT_TRIGGER_KIND_SCHEDULED
+        }))
+    }
+
+    /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。
+    fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("want-{source_seq}"),
+            crate::symbio_core::EVENT_CONATION_EXPRESSED,
+            crate::symbio_core::Entity::Conation,
+            crate::symbio_core::Verb::Opened,
+            0,
+            PRINCIPAL_AUTONOMOUS,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "goal": goal }))
+    }
+
+    /// 把闸门批准的意图落成长目标任务（自主层 `budget_ms` 的完整取值）。
+    fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("o-{task_id}"),
+            crate::symbio_core::EVENT_TASK_OPENED,
+            crate::symbio_core::Entity::Task,
+            crate::symbio_core::Verb::Opened,
+            0,
+            PRINCIPAL_AUTONOMOUS,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({
+            "task_id": task_id,
+            "depends_on": [],
+            "goal": goal,
+            "budget_ms": crate::symbio_core::LatencyTier::Autonomic.budget_ms(),
+        }))
+    }
+
+    /// 健康自检：触发时刻测得的状态入格（`system × progressed`）。
+    ///
+    /// [`Self::trigger`] 说"触发了"，本条说"触发时测得什么"——`system` 实体的两个
+    /// 格子一个开一个进（S12 §2 / [plan/01 §6](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
+    /// 的 `system` 行）。缺了它，健康自检永远没有事实，而"名字是数据、单点定义"
+    /// （D-043）又不允许插件自己拼 `"system.health"` 字面量——写入口只能在这里。
+    ///
+    /// `source_seq` 取触发事实的 seq：自检是**这一次触发**的观测附录，不是独立事件。
+    fn health_event(&self, source_seq: u64, idle_ms: i64) -> Event {
+        Event::pending(
+            format!("health-{source_seq}"),
+            crate::symbio_core::EVENT_SYSTEM_HEALTH,
+            crate::symbio_core::Entity::System,
+            crate::symbio_core::Verb::Progressed,
+            0,
+            PRINCIPAL_AUTONOMOUS,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "idle_ms": idle_ms }))
+    }
+}
+
+/// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
+/// 且仍完整运行；两层开关独立，这是生产环境最需要的开关）。
+#[derive(Debug, Clone)]
+struct ConationPolicy {
+    /// 是否允许「欲」升格为任务。
+    enabled: bool,
+    /// 目标长度上界（过宽的目标 = 不可评估的意图，拒绝）。
+    max_goal_len: usize,
+}
+
+impl Default for ConationPolicy {
+    fn default() -> Self {
+        ConationPolicy {
+            enabled: false,
+            max_goal_len: 200,
+        }
+    }
+}
+
+/// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
+/// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConationCandidate {
+    /// 源事件 seq（溯源锚）。
+    seq: u64,
+    goal: String,
+    /// 私有：只有闸门能把它置真。
+    approved: bool,
+}
+
+impl ConationCandidate {
+    /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
+    fn from_event(e: &Event) -> Option<Self> {
+        if e.kind != crate::symbio_core::EVENT_CONATION_EXPRESSED {
+            return None;
+        }
+        // 来路不明的意图混不进来（I2 强化：无溯源即 None）。
+        e.produced_by?;
+        let goal = e
+            .payload
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Some(ConationCandidate {
+            seq: e.seq.map(|s| s.value()).unwrap_or(u64::MAX),
+            goal,
+            approved: false,
+        })
+    }
+
+    fn is_approved(&self) -> bool {
+        self.approved
+    }
+}
+
+/// 闸门评估结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IntentDecision {
+    Approved,
+    Rejected(&'static str),
+}
+
+/// 经闸门批准后的可执行任务（**只有** [`IntentGate::approve`] 能造出来：字段私有，
+/// 模块外连结构体字面量都写不出——这是 E2「欲不得直接变成行」的编译期兑现）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApprovedIntent {
+    from_seq: u64,
+    goal: String,
+}
+
+impl ApprovedIntent {
+    /// 溯源锚：升格自哪一条 `conation.expressed`。
+    fn source_seq(&self) -> u64 {
+        self.from_seq
+    }
+
+    /// 被批准的目标文本。
+    fn goal(&self) -> &str {
+        &self.goal
+    }
+}
+
+/// 意图闸门：**「欲」与「行」之间唯一的一道门**（02 §2.3 E2）。
+struct IntentGate;
+
+impl IntentGate {
+    /// 评估：关停开关优先，其次授权（升格就是「定义工作」），最后目标宽度。
+    ///
+    /// 授权**不是**一句声明：判据取 [`EffectiveMatrix::can_write`] 那一份
+    /// （`define.work`），与本仓任务表写侧闸同一把尺。预算与时延不在这里判——
+    /// 它们是**执行面**的闸（`CircuitBreaker` 在真动作上判），把意图升格成任务
+    /// 本身不花预算。
+    fn evaluate(
+        candidate: &ConationCandidate,
+        policy: &ConationPolicy,
+        grants: &EffectiveMatrix,
+        principal: &str,
+    ) -> IntentDecision {
+        if !policy.enabled {
+            return IntentDecision::Rejected("conation disabled");
+        }
+        if !grants.can_write_name(principal, crate::symbio_core::CAP_DEFINE_WORK) {
+            return IntentDecision::Rejected("unauthorized: define.work");
+        }
+        if candidate.goal.len() > policy.max_goal_len {
+            return IntentDecision::Rejected("goal too broad");
+        }
+        IntentDecision::Approved
+    }
+
+    /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数
+    /// （`ApprovedIntent` 字段私有，绕过它造不出可执行任务）。
+    fn approve(
+        candidate: &mut ConationCandidate,
+        policy: &ConationPolicy,
+        grants: &EffectiveMatrix,
+        principal: &str,
+    ) -> Result<ApprovedIntent, &'static str> {
+        match Self::evaluate(candidate, policy, grants, principal) {
+            IntentDecision::Approved => {
+                candidate.approved = true;
+                Ok(ApprovedIntent {
+                    from_seq: candidate.seq,
+                    goal: candidate.goal.clone(),
+                })
+            }
+            IntentDecision::Rejected(r) => Err(r),
+        }
+    }
 }
 
 #[cfg(test)]

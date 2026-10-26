@@ -2,11 +2,13 @@
 //! **清单声明 → 事实 → 两个消费方**的每一环都要看得见，且每条口径各配一个反向用例
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
-use super::{prompt_section, write};
+use super::{prompt_section, write, ScheduleDecider};
 use crate::symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
+use crate::symbio_core::PRINCIPAL_SCHEDULER;
 use crate::symbio_core::{
-    check_all, readyset, Budget, Entity, Event, EventStore, Seq, Store, Verb,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    actor_can_assign_work, check_all, readyset, trivial_actor_spec, Budget, Entity, Event,
+    EventStore, Pattern, Scope, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED,
+    EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY,
     EVENT_TASK_REWORK_CREATED,
 };
 
@@ -427,5 +429,150 @@ fn a_ready_task_survives_the_snapshot_boundary() {
     assert!(
         section.contains("t1"),
         "压缩前开的那条任务必须在候选集里：{section}"
+    );
+}
+
+// ── 调度者与租约（D-189：实现随唯一消费方住本插件） ──
+
+/// 开一个任务（载荷 `{ task_id, depends_on, goal }`）——生产写方见本模块 `write`。
+fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
+    store
+        .append(
+            Event::pending(
+                format!("o-{id}"),
+                EVENT_TASK_OPENED,
+                Entity::Task,
+                Verb::Opened,
+                0,
+                actor,
+            )
+            .with_payload(
+                serde_json::json!({ "task_id": id, "depends_on": depends_on, "goal": "goal" }),
+            ),
+        )
+        .expect("开任务必入库");
+}
+
+/// 落一条 `task.assigned`（租约）——只在测试里手写，生产写方是调度者。
+fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
+    store
+        .append(
+            Event::pending(
+                format!("as-{id}-{until_ms}"),
+                EVENT_TASK_ASSIGNED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                PRINCIPAL_SCHEDULER,
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({
+                "task_id": id,
+                "owner": owner,
+                "lease_ms": until_ms,
+                "until_ms": until_ms,
+            })),
+        )
+        .expect("租约入格");
+}
+
+/// 调度者是 `Decider` / 80ms / 根作用域，且**持 `assign.work`**（授权表那一行）。
+#[test]
+fn the_scheduler_spec_is_a_decider_with_assign_work() {
+    let spec = ScheduleDecider::spec();
+    assert_eq!(spec.pattern, Pattern::Decider);
+    assert_eq!(spec.budget_ms, 80, "反射档");
+    assert_eq!(spec.scope, Scope::Root);
+    assert!(actor_can_assign_work(&spec), "调度者行持 assign.work");
+}
+
+/// 100 次注入同一笔就绪任务 ⇒ 只发一笔租约（抢同一份活有仲裁）。
+#[test]
+fn a_hundred_injections_yield_exactly_one_lease() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], PRINCIPAL_SCHEDULER);
+    let spec = ScheduleDecider::spec();
+
+    let mut assigned = 0usize;
+    let mut ready_facts = 0usize;
+    let mut now = 1_000i64;
+    for _ in 0..100 {
+        let snap = store.range(Seq::new(0));
+        let view = readyset(1).apply(&snap, now, Budget::generous()).value;
+        let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, now);
+        for f in &facts {
+            if f.kind == EVENT_TASK_ASSIGNED {
+                assigned += 1;
+            }
+            if f.kind == EVENT_TASK_READY {
+                ready_facts += 1;
+            }
+        }
+        for (n, f) in facts.into_iter().enumerate() {
+            let verb = if f.kind == EVENT_TASK_READY {
+                Verb::Progressed
+            } else {
+                Verb::Asserted
+            };
+            store
+                .append(
+                    Event::pending(
+                        format!("s-{now}-{n}"),
+                        f.kind,
+                        Entity::Task,
+                        verb,
+                        0,
+                        PRINCIPAL_SCHEDULER,
+                    )
+                    .with_produced_by(0)
+                    .with_payload(f.payload),
+                )
+                .expect("调度事实入格");
+        }
+        now += 10;
+    }
+    assert_eq!(assigned, 1, "同一笔活被注入 100 次，只发一笔租约");
+    assert_eq!(ready_facts, 1, "就绪事实同一周期只落一次（不刷屏）");
+}
+
+/// 租约到期 ⇒ 调度者**判死并补落** `task.ready{reason: lease_expired}`，然后重派。
+#[test]
+fn an_expired_lease_is_judged_dead_and_reassigned() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], PRINCIPAL_SCHEDULER);
+    assign_task(&store, "a", PRINCIPAL_SCHEDULER, 1_000);
+    let spec = ScheduleDecider::spec();
+    let snap = store.range(Seq::new(0));
+
+    // 到点：候选集回来了，调度者先判死、再发放。
+    let view = readyset(1).apply(&snap, 1_000, Budget::generous()).value;
+    let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, 1_000);
+    let death = facts
+        .iter()
+        .find(|f| f.kind == EVENT_TASK_READY)
+        .expect("到期未判死 ⇒ 回放里它只是「突然又能派了」");
+    assert_eq!(death.payload["reason"], "lease_expired");
+    assert_eq!(death.payload["expired_owner"], PRINCIPAL_SCHEDULER);
+    assert!(
+        facts.iter().any(|f| f.kind == EVENT_TASK_ASSIGNED),
+        "判死之后同一轮重派"
+    );
+}
+
+/// 写侧闸：没有 `assign.work` 的主体**一条事实都不写**（fail-closed）。
+#[test]
+fn a_spec_without_assign_work_writes_nothing() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], PRINCIPAL_SCHEDULER);
+    let snap = store.range(Seq::new(0));
+    let view = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
+
+    // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
+    let speaker = trivial_actor_spec("session/worker");
+    assert!(
+        ScheduleDecider
+            .decide(&speaker, &view, &snap, PRINCIPAL_SCHEDULER, 9_999)
+            .is_empty(),
+        "缺 assign.work ⇒ 零事实（没有资格的调度不留痕）"
     );
 }

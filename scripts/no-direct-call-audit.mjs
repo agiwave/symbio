@@ -59,6 +59,14 @@ const HANDLE_RE = new RegExp(
 
 const WORD_RES = PRINCIPALS.map((p) => new RegExp(`\\b${p}\\b`))
 
+/**
+ * 封闭语法枚举的变体名不算提及主体：`Pattern::Decider` 是 `symbio-kernel` 的
+ * **语法变体**（`ActorSpec.pattern` 的取值），不是主体类型的指称——语义上它只说
+ * 「按裁决者档位跑」，不产生任何到主体对象的边。把它按主体名判红会把「声明一个
+ * 档位」误读成「持有主体」（D-189）。
+ */
+const SYNTAX_VARIANT_RE = new RegExp(`\\bPattern\\s*::\\s*(?:${PRINCIPALS.join('|')})\\b`, 'g')
+
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
@@ -85,7 +93,9 @@ function audit(root) {
         return
       }
       if (allowed || code.trim() === '') return
-      const hit = WORD_RES.findIndex((re) => re.test(line))
+      // 语法变体（`Pattern::Decider`）先剔掉再查主体名：声明档位不是持有主体。
+      const namesCode = code.replace(SYNTAX_VARIANT_RE, 'Pattern::<variant>')
+      const hit = WORD_RES.findIndex((re) => re.test(namesCode))
       if (hit >= 0) {
         violations.push(
           `NDC-001 ${rel}:${i + 1}  主体类型 ${PRINCIPALS[hit]} 出现在定义域之外（持有即可直连）：${line.trim()}`,

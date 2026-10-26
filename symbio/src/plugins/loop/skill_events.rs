@@ -4,10 +4,10 @@
 //! `memory.encoded{tag:"skill"}`——与普通记忆同格子、同召回、同巩固，读侧
 //! （`RecallView`）根本看不出它特殊。本模块只做三件事：
 //!
-//! | 段 | core 的判定方 | 本模块做什么 |
+//! | 段 | 判定方 | 本模块做什么 |
 //! |---|---|---|
-//! | 编译 | `SkillCompiler::compile`（溯源指向源轨迹，I2） | 本轮成功轨迹 → 技能事件 |
-//! | 路由 | `SkillRouter::route(confidence, threshold)` + `calibration` 投影 | 置信度低于阈值 ⇒ **该技能不进本轮提示词**，高于 ⇒ 进**可用集** |
+//! | 编译 | `SkillCompiler::compile`（本文件；溯源指向源轨迹，I2） | 本轮成功轨迹 → 技能事件 |
+//! | 路由 | `SkillRouter::route(confidence, threshold)`（本文件）+ `calibration` 投影 | 置信度低于阈值 ⇒ **该技能不进本轮提示词**，高于 ⇒ 进**可用集** |
 //! | 命中 | 无（判据是本模块的数据：逐字恒等） | 本轮发言命中可用集里的哪一条 ⇒ 交执行侧以反射档收束 |
 //!
 //! ## 四条口径
@@ -33,10 +33,76 @@
 use std::collections::BTreeMap;
 
 use crate::symbio_core::PRINCIPAL_USER;
-use crate::symbio_core::{
-    calibration, Event, RecallView, SkillCompiler, SkillRoute, SkillRouter, Store,
-    EVENT_MEMORY_ENCODED, SKILL_TAG,
-};
+use crate::symbio_core::{calibration, Event, RecallView, Store, EVENT_MEMORY_ENCODED, SKILL_TAG};
+
+// ==================== 编译与路由策略（D-189：唯一生产消费方在本文件） ====================
+
+/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")）。
+///
+/// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
+/// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
+/// （`produced_by` 指向源轨迹；I2 断言，技能溯源 100%）。
+pub(crate) struct SkillCompiler;
+
+impl SkillCompiler {
+    /// 编译一条技能。`source_seq`：源轨迹（成功任务的终态事件）seq。
+    ///
+    /// 信封里的 `actor` / `turn` 是**占位**（本机主智能体 / `0`）：核心契约只管
+    /// 「这条事件说什么」，记在谁头上、发生在哪一轮由本文件的 [`compile`] 落格前归位。
+    pub(crate) fn compile(
+        &self,
+        skill_id: &str,
+        trigger: &str,
+        response: &str,
+        source_seq: u64,
+    ) -> Event {
+        Event::pending(
+            format!("skill-{skill_id}-{source_seq}"),
+            crate::symbio_core::EVENT_MEMORY_ENCODED,
+            crate::symbio_core::Entity::Memory,
+            crate::symbio_core::Verb::Opened,
+            0,
+            // 占位 actor 一律走常量，不写字面量：`session/xxx` 形态的裸串会被
+            // plugin-entry-audit 的 E-005 当成路由地址查一遍（D-043：名字是数据、
+            // 单点定义）。写方落格前归位。
+            crate::symbio_core::PRINCIPAL_MAIN,
+        )
+        .with_produced_by(source_seq) // 溯源 100%：指向源轨迹
+        .with_payload(serde_json::json!({
+            "content": response,
+            "tag": SKILL_TAG,
+            "skill_id": skill_id,
+            "trigger": trigger,
+        }))
+    }
+}
+
+/// 路由结论：命中技能走快路（`budget_ms = 80`），否则**必须回退**完整推理
+/// （反自动化回退，Beilock & Carr 2001——全自动化在压力下以异常方式失效）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SkillRoute {
+    /// 技能命中：反射档快路。
+    SkillFastPath { budget_ms: u64 },
+    /// 回退完整推理：快速档。
+    ReasonerFallback { budget_ms: u64 },
+}
+
+/// 技能路由者：按校准置信度决定走技能还是回退（校准值低于阈值 ⇒ 不得走技能路径）。
+pub(crate) struct SkillRouter;
+
+impl SkillRouter {
+    pub(crate) fn route(&self, confidence: f64, threshold: f64) -> SkillRoute {
+        if confidence >= threshold {
+            SkillRoute::SkillFastPath {
+                budget_ms: crate::symbio_core::LatencyTier::Reflex.budget_ms(),
+            }
+        } else {
+            SkillRoute::ReasonerFallback {
+                budget_ms: crate::symbio_core::LatencyTier::Fast.budget_ms(),
+            }
+        }
+    }
+}
 
 /// 置信度阈值：低于它 ⇒ 不得走技能路径（S11 §5 反自动化回退）。
 ///

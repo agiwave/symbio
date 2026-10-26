@@ -335,7 +335,7 @@ where
     };
     // 基线：**结构化**消息数组（D-048a）。prefix（请求视图三段）作为最前的
     // 一条独立 system 消息插进去，而不是拼进第一段正文——理由见 `TurnInput::prefix`。
-    let mut base_messages = crate::symbio_core::render_messages(&snapshot);
+    let mut base_messages = render_messages(&snapshot);
     if let Some(p) = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         base_messages.insert(
             0,
@@ -421,4 +421,21 @@ where
         closing: reflex.map(|r| PendingClose::Reflex { text: r.text }),
         settled: None,
     })))
+}
+
+/// prompt 的**结构化渲染入口**（D-048a）：事件切片 → 消息数组。
+///
+/// 渲染是**纯投影**（不碰任何主体状态）：历史来自同一份事实源，不另存副本
+/// （D-044 同族纪律）。进来的切片已由 `facts.rs` 过读侧闸并按轮开窗，这一层
+/// 只回答「怎么把事件变成消息」。
+///
+/// **拍成一段文本**会把 `role: tool` 降级成散文里的纯文本，模型就看不到
+/// 「这是工具结果」、也拿不到 `tool_call_id`——那是已判定的退步，不是排版偏好。
+/// 本轮刚发生的工具交换快照取在它落格**之前**，由调用方就地追加到基线上。
+pub(crate) fn render_messages(events: &[Event]) -> Vec<crate::symbio_core::PromptMessage> {
+    // `read_all` 说的是**口径**（as-of 一切已发生、不设扫描窗口），不是作用域。
+    crate::symbio_core::transcript()
+        .read_all(events)
+        .value
+        .to_messages()
 }

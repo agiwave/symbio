@@ -160,21 +160,19 @@ pub use store::EventStore;
 // `AgentScope` 带目录根（文件闸要判物理路径），不可序列化 ⇒ `WIRE = false`，
 // 与 `CAPABILITY_ERRORS` 同一条理由。
 pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
-// 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
-// （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
-// `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
-// 技能进 `skill_events`）。**必须整对**：闸门与自主层同批成对（否则"自主写入对话"，
-// 04 §3.1），编译与路由同批成对（否则回退永远不会发生——编译不入格就没有
-// `skill_id`、路由不落观测就没有 `fallback`，置信度恒 1.0，S11 §5 静默失效）。
+// 跨域 actor 策略（D-189）：control 的抢占 / 熔断 / 淘汰裁决同时被 `plugins/session`
+// 与 `plugins/loop` 在两个角色里使用，commitment 是写侧成格 / 读侧翻译的配对——两类
+// 都留 core（判据见 D-189）。`SKILL_TAG` 是 loop 写、session 读的共享词汇（D-177）。
+// 单消费方策略（调度 / 技能编译与路由 / 检索 Translator / 自主层与意欲闸门）归 owner
+// 插件，不再经此处出根。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
 // `EliminationDecider`（S13 淘汰回路的裁决侧，）：判定在 core、轮末驱动与
 // 闸门接线都在 `plugins/session`（derived_facts 的轮末步 + 工具执行层的撤销闸），
 // 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
+pub(crate) use actors::{commitment_events, commitment_records};
 pub(crate) use actors::{
-    AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
-    GateDecision, IntentGate, Preemption, PreemptionDecider, ScheduleDecider, SkillCompiler,
-    SkillRoute, SkillRouter, SCHEDULE_BUDGET_MS, SKILL_TAG,
+    CircuitBreaker, EliminationDecider, GateDecision, Preemption, PreemptionDecider, SKILL_TAG,
 };
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
@@ -192,8 +190,8 @@ pub(crate) use actors::{
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")。
 #[allow(unused_imports)]
 pub(crate) use event::{
-    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY,
+    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED,
+    EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY,
     EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
@@ -208,17 +206,9 @@ pub(crate) use event::{
 // **`pub(crate)`** 出根：只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`），
 // 与 `lock_read` / `ObjectConstructor` 同一形态。记忆事件名字表同样只对写方可见——
 // 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
-// `recalled_event` 出根而不是主体类型本身：NDC-001（无直连）禁止定义域之外**提及
-// 主体名**——提及即可持有、持有即可绕过事实源。主体仍在 `actors` 内被本函数驱动。
 // `commitment_records` 是 `commitment_events` 的读侧另一半（切片 → 立约记录）：
 // 配对规则（载荷 `id`）是本域的形状知识，写侧读侧各一份就等于两套账（同
 // `EliminationDecider::verdict_grants_changes`）。记录类型随返回值流动，不出根。
-pub(crate) use actors::{commitment_events, commitment_records, recalled_event};
-// prompt 的结构化渲染出口（`Reasoner::render_messages` 的一跳封装）：运行器下沉
-// `plugins/session` 后要「事件切片 → 消息数组」，但 NDC-001 禁止它在定义域之外提及主体名
-// （`scripts/no-direct-call-audit.mjs`）⇒ 与 `recalled_event` 同一形态，主体仍在 `actors`
-// 内被本函数驱动。生产消费方是 session 的**生产**代码，故不带 `cfg(test)`。
-pub(crate) use actors::render_messages;
 // 主体规格的授权读法（D-188 C2b）：数据面（`ActorSpec` / `Pattern` / `Scope`）住
 // `symbio-kernel`，读法读的是本机**部署表**（`authz` / `governance`），不是语法。
 // 宿主 crate 不能给内核类型写固有 impl（orphan），故以自由函数表达（`actors::spec`）。
@@ -256,10 +246,14 @@ pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
 // `pub(crate)` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
 pub(crate) use projection::conation::conation;
-pub(crate) use projection::readyset::readyset;
+pub(crate) use projection::readyset::{readyset, ReadySetView};
 pub(crate) use projection::recall::recall;
 pub(crate) use projection::reputation::reputation;
 pub(crate) use view::RecallView;
+// 检索视图的条目类型只在测试里被 core 外点名（降级用例要直接构造视图）——
+// 同 `unresolved_turns` 形态，`cfg(test)` 出根。
+#[cfg(test)]
+pub(crate) use view::RecallEntry;
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。
@@ -286,6 +280,10 @@ pub(crate) use adapters::StubLlmAdapter;
 // 它深引 `symbio_core::invariants::…` ⇒ 同 `StubLlmAdapter` 一形态，只在 `cfg(test)` 出根。
 #[cfg(test)]
 pub(crate) use invariants::unresolved_turns;
+// 预算判定（I3）随策略测试搬到插件侧：`check_all` 用固定声明预算，而策略用例要
+// 拧预算参数验证「判定随参数变」——同 `unresolved_turns` 形态，只在测试构建出根。
+#[cfg(test)]
+pub(crate) use invariants::budget_exceeded;
 // 事实网格 → prompt 的双向完整性复核（D-048）：下沉后的运行器组装 prompt 时调它。
 pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。它跨出 core 到
@@ -325,14 +323,15 @@ pub use governance::VisScope;
 // `visible_to` / `recall` 同形态：跨插件可见、不进对外公开面（C-003 只数 `pub use`）。
 pub(crate) use authz::{
     bind_inheriting, bind_root, content_visible, principal_of, production_matrix,
-    request_principal, unbind_session, CAP_ASSERT_VERIFICATION, CAP_ASSIGN_WORK, CAP_DEFINE_WORK,
-    CAP_EXTERNAL_EXECUTION, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN, PRINCIPAL_USER,
+    request_principal, unbind_session, EffectiveMatrix, CAP_ASSERT_VERIFICATION, CAP_ASSIGN_WORK,
+    CAP_DEFINE_WORK, CAP_EXTERNAL_EXECUTION, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN,
+    PRINCIPAL_SCHEDULER, PRINCIPAL_USER,
 };
-// 三个只在**测试**里被 core 外点名的行名 / 属主：生产侧没有任何 core 外消费方，
-// 非测试构建里出根就是三处死代码。`cfg(test)` 出根与 `EVENT_COMMITMENT_*` 同形态——
+// 只在**测试**里被 core 外点名的行名 / 属主：生产侧没有任何 core 外消费方，
+// 非测试构建里出根就是几处死代码。`cfg(test)` 出根与 `EVENT_COMMITMENT_*` 同形态——
 // 出根是给测试用的，不是把它们藏着。
 #[cfg(test)]
-pub(crate) use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, SESSION_OWNER};
+pub(crate) use authz::{PRINCIPAL_ARBITER, PRINCIPAL_PEER, PRINCIPAL_WORKER, SESSION_OWNER};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

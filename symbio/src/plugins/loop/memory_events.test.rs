@@ -1390,3 +1390,111 @@ fn memories_older_than_the_window_wait_for_a_later_round() {
         "窗口覆盖到它们时 ⇒ 照常合并最旧两条"
     );
 }
+
+// ── 检索 Translator（D-189：实现随唯一消费方住本插件） ──
+
+use super::recalled_event;
+use crate::symbio_core::PRINCIPAL_MAIN;
+
+/// 编码一条记忆（带溯源与编码时刻）——与生产写方同一格子。
+fn encode_at(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, source: u64) {
+    store
+        .append(
+            Event::pending(
+                id,
+                EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                PRINCIPAL_MAIN,
+            )
+            .with_produced_by(source)
+            .with_ts(ts)
+            .with_payload(serde_json::json!({ "content": content, "tag": tag })),
+        )
+        .expect("编码必入库");
+}
+
+/// 全链路：检索 Translator 产出 memory.recalled（带溯源），三条不变量仍全绿。
+#[test]
+fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
+    let store = EventStore::new();
+    // 根事件先落：记忆事件的溯源指向它，否则那条边指向自己。
+    store
+        .append(Event::pending(
+            "u0",
+            crate::symbio_core::EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            PRINCIPAL_USER,
+        ))
+        .unwrap();
+    encode_at(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
+    let snapshot = store.range(Seq::new(0));
+    let view = recall(PRINCIPAL_MAIN, None, None)
+        .apply(&snapshot, 2_000, Budget::generous())
+        .value;
+    store
+        .append(recalled_event(&view, 0, PRINCIPAL_MAIN))
+        .unwrap();
+    let snapshot = store.range(Seq::new(0));
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+    let recalled = snapshot
+        .iter()
+        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
+        .unwrap();
+    assert_eq!(recalled.payload["found"], 1);
+}
+
+/// 降级也要有**生产读数口**：
+/// `degraded` 从 `memory.recalled` 的载荷读出——不只在投影外壳或提示词里活着。
+/// 反向：不降级的检索不标降级（不谎称）。
+#[test]
+fn recalled_event_records_degradation_instead_of_dropping_it() {
+    let store = EventStore::new();
+    for i in 0..4i64 {
+        encode_at(
+            &store,
+            &format!("g{i}"),
+            100 + i,
+            &format!("片段 {i}"),
+            "experience",
+            0,
+        );
+    }
+    let snapshot = store.range(Seq::new(0));
+
+    // 降级视图 = **取值点誊抄外壳之后**的形态（D-105：外壳是唯一的降级事实源，
+    // 誊抄判据在 `recall.test.rs` / 本文件）。本测试钉的是**下游**：视图带着
+    // `degraded` 流动时，`memory.recalled` 不得把它丢掉。
+    let degraded = crate::symbio_core::RecallView {
+        entries: vec![crate::symbio_core::RecallEntry {
+            seq: 0,
+            ts: 100,
+            content: "片段 0".into(),
+            tag: "experience".into(),
+        }],
+        degraded: true,
+    };
+    let event = recalled_event(&degraded, 0, PRINCIPAL_MAIN);
+    assert_eq!(
+        event.payload.get("degraded").and_then(|v| v.as_bool()),
+        Some(true),
+        "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
+    );
+
+    let full = recall(PRINCIPAL_MAIN, None, None)
+        .apply(&snapshot, 2_000, Budget::generous())
+        .value;
+    let ok = recalled_event(&full, 0, PRINCIPAL_MAIN);
+    assert_eq!(
+        ok.payload.get("degraded").and_then(|v| v.as_bool()),
+        Some(false),
+        "不降级不标降级"
+    );
+}

@@ -211,3 +211,174 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
     );
     assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
 }
+
+// ==================== 发起者与意欲闸门的单元验收（D-189） ====================
+
+use crate::symbio_core::{
+    budget_exceeded, EventStore, EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED,
+    EVENT_TASK_PROGRESS,
+};
+use crate::symbio_core::{PRINCIPAL_AUTONOMOUS, PRINCIPAL_USER, PRINCIPAL_WORKER};
+
+/// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
+fn seed_root(store: &EventStore) -> u64 {
+    store
+        .append(Event::pending(
+            "u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            PRINCIPAL_USER,
+        ))
+        .expect("根事件入格")
+        .value()
+}
+
+/// S12 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
+/// （触发器产出事件，不是旁路——自主行为同样走 I1 单通道 + I2 溯源）。
+#[test]
+fn scheduled_trigger_produces_event_not_side_channel() {
+    let store = EventStore::new();
+    // 本轮**没有新的用户消息**——纯自主场景；但触发必须指得着一条更早的事实：
+    // 生产路径在 `head == 0` 时直接放弃触发（`transcript/autonomous.rs`：
+    // "还没有事实源，本次不触发（无可指的溯源锚）"）。夹具照生产给一个锚。
+    let src = seed_root(&store);
+    let init = AutonomousInitiator;
+    store.append(init.trigger(src)).unwrap();
+    let snapshot = store.range(Seq::new(0));
+    assert!(
+        snapshot.iter().any(|e| e.kind == EVENT_SYSTEM_TRIGGERED),
+        "自主行为必须以事件形态存在"
+    );
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}
+
+/// S12 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
+#[test]
+fn long_goal_overrun_is_visible_and_budget_param_is_live() {
+    let store = EventStore::new();
+    let src = seed_root(&store);
+    let init = AutonomousInitiator;
+    store.append(init.trigger(src)).unwrap();
+    store
+        .append(init.open_long_goal("goal-1", "整理全年归档", src))
+        .unwrap();
+    // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
+    store
+        .append(
+            Event::pending(
+                "g1",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                PRINCIPAL_AUTONOMOUS,
+            )
+            .with_produced_by(src)
+            .with_cost_ms(90_000_000)
+            .with_payload(serde_json::json!({ "task_id": "goal-1" })),
+        )
+        .unwrap();
+    let snapshot = store.range(Seq::new(0));
+    // 验收 3：超 86.4M 必须产出兜底（先被看见）。
+    let bad = budget_exceeded(
+        &snapshot,
+        Some(crate::symbio_core::LatencyTier::Autonomic.budget_ms()),
+    );
+    assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
+    // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
+    let ok_event = Event::pending(
+        "g2",
+        EVENT_TASK_PROGRESS,
+        Entity::Task,
+        Verb::Progressed,
+        0,
+        PRINCIPAL_AUTONOMOUS,
+    )
+    .with_produced_by(src)
+    .with_cost_ms(70_000)
+    .with_payload(serde_json::json!({ "task_id": "goal-1" }));
+    let ok_events = vec![ok_event];
+    assert!(
+        budget_exceeded(&ok_events, Some(86_400_000)).is_empty(),
+        "70M 在自主层预算内"
+    );
+    assert_eq!(
+        budget_exceeded(&ok_events, Some(60_000)).len(),
+        1,
+        "同一耗时，深挖档预算下违规"
+    );
+}
+
+/// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
+/// 无任何自主任务但读侧投影照常（J2 平凡值）。ZST 令牌零开销。
+#[test]
+fn conation_governance_three_rules() {
+    let init = AutonomousInitiator;
+    let store = EventStore::new();
+    let src = seed_root(&store);
+    store.append(init.trigger(src)).unwrap();
+    store.append(init.express_intent("整理归档", src)).unwrap();
+    let snapshot = store.range(Seq::new(0));
+
+    // (a) 唯一构造路径读出的候选，approved 恒 false——欲不得直接变成行。
+    let want = snapshot
+        .iter()
+        .find(|e| e.kind == EVENT_CONATION_EXPRESSED)
+        .unwrap();
+    let mut candidate = ConationCandidate::from_event(want).expect("合法欲事件必出候选");
+    assert!(!candidate.is_approved());
+    // approved 字段私有：外部无法伪造 true（error[E0451]，编译期反向用例）。
+
+    // (b) 无溯源的欲 → 构造不出候选（I2 强化）。
+    let bare = Event {
+        produced_by: None,
+        ..Event::pending(
+            "w1",
+            EVENT_CONATION_EXPRESSED,
+            Entity::Conation,
+            Verb::Opened,
+            0,
+            PRINCIPAL_USER,
+        )
+    };
+    assert!(
+        ConationCandidate::from_event(&bare).is_none(),
+        "来路不明的意图混不进来"
+    );
+
+    // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
+    let policy_off = ConationPolicy::default();
+    let grants = crate::symbio_core::production_matrix();
+    assert_eq!(
+        IntentGate::evaluate(&candidate, &policy_off, grants, PRINCIPAL_AUTONOMOUS),
+        IntentDecision::Rejected("conation disabled")
+    );
+    // 打开后：评估通过 → 升格；溯源锚与目标都从 `ApprovedIntent` 读（字段私有）。
+    let policy_on = ConationPolicy {
+        enabled: true,
+        max_goal_len: 200,
+    };
+    let approved = IntentGate::approve(&mut candidate, &policy_on, grants, PRINCIPAL_AUTONOMOUS)
+        .expect("合法意图必批");
+    assert!(candidate.is_approved());
+    assert_eq!(approved.goal(), "整理归档");
+    assert_eq!(
+        approved.source_seq(),
+        want.seq.map(|s| s.value()).unwrap_or(0)
+    );
+
+    // (d) 授权是真闸：开关打开，但不持 `define.work` 的主体升格被拒。
+    let mut other = ConationCandidate::from_event(want).expect("同一事件可再造候选");
+    assert_eq!(
+        IntentGate::approve(&mut other, &policy_on, grants, PRINCIPAL_WORKER),
+        Err("unauthorized: define.work"),
+        "worker 不持 define.work"
+    );
+    assert!(!other.is_approved(), "被拒的候选不得变成已批准");
+}

@@ -2,11 +2,12 @@
 //! **编译 → 观测 → 校准 → 回退**的每一环都要看得见，且每条口径各配一个反向用例
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
-use super::{compile, route, take_match, SkillLlmHit};
+use super::{compile, route, take_match, SkillCompiler, SkillLlmHit, SkillRoute, SkillRouter};
 use crate::symbio_core::SKILL_TAG;
 use crate::symbio_core::{
-    check_all, recall, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FINAL,
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    calibration, check_all, recall, Budget, Entity, Event, EventStore, Seq, Store, Verb,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 
@@ -421,5 +422,122 @@ fn the_production_recall_view_sees_the_compiled_skill() {
         routing.hits.len(),
         1,
         "同一次判定还要产出可用集（执行侧靠它装配反射档）"
+    );
+}
+
+// ── 编译与路由单元验收（D-189：实现随唯一消费方住本插件） ──
+
+/// S11 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。
+#[test]
+fn compiled_skill_requires_provenance() {
+    let compiler = SkillCompiler;
+    // 源轨迹：一个成功任务的终态（seq 2）。
+    let skill = compiler.compile("weekly-report", "用户问周报格式", "按模板三段式作答", 2);
+    assert_eq!(skill.produced_by, Some(2), "溯源 100%：指向源轨迹");
+    assert_eq!(skill.payload["tag"], "skill");
+    // 正向：I2 全绿。
+    assert!(crate::symbio_core::provenance_violation(&skill).is_none());
+    // 验收 4（反向）：把 produced_by 置空 → 断言 1 必须失败。
+    let bare = Event {
+        produced_by: None,
+        ..skill
+    };
+    let bad = crate::symbio_core::provenance_violation(&bare).is_some();
+    assert!(bad, "无溯源的技能必须被看见");
+}
+
+/// S11 §6 验收 2 + 3：命中技能 cost 显著低于完整推理；置信度低于阈值必回退。
+#[test]
+fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
+    let store = EventStore::new();
+    let src = seed_turn(&store);
+    let compiler = SkillCompiler;
+    // 编译技能（源轨迹 = 那一轮的开轮格）。
+    store
+        .append(compiler.compile("weekly-report", "周报", "三段式", src))
+        .unwrap();
+    // 命中：反射档快路（cost 40ms，低两个数量级）。
+    store
+        .append(
+            Event::pending(
+                "h1",
+                EVENT_MEMORY_CALIBRATED,
+                Entity::Memory,
+                Verb::Asserted,
+                0,
+                PRINCIPAL_MAIN,
+            )
+            .with_produced_by(src)
+            .with_cost_ms(40)
+            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": false })),
+        )
+        .unwrap();
+    // 未命中 / 回退：完整推理（cost 5000ms）。
+    store
+        .append(
+            Event::pending(
+                "h2",
+                EVENT_MEMORY_CALIBRATED,
+                Entity::Memory,
+                Verb::Asserted,
+                0,
+                PRINCIPAL_MAIN,
+            )
+            .with_produced_by(src)
+            .with_cost_ms(5_000)
+            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": true })),
+        )
+        .unwrap();
+    let snapshot = store.range(Seq::new(0));
+
+    // 验收 2：命中路径 cost 显著低于回退路径（40ms vs 5000ms）。
+    let hit_cost = snapshot
+        .iter()
+        .find(|e| {
+            e.kind == EVENT_MEMORY_CALIBRATED
+                && e.payload.get("fallback") == Some(&serde_json::json!(false))
+        })
+        .map(|e| e.cost_ms)
+        .unwrap();
+    let fallback_cost = snapshot
+        .iter()
+        .find(|e| {
+            e.kind == EVENT_MEMORY_CALIBRATED
+                && e.payload.get("fallback") == Some(&serde_json::json!(true))
+        })
+        .map(|e| e.cost_ms)
+        .unwrap();
+    assert!(
+        hit_cost * 10 < fallback_cost,
+        "技能命中必须显著更便宜：{hit_cost} vs {fallback_cost}"
+    );
+
+    // 校准：1 用 1 回退 ⇒ 置信度 0.5；低于阈值 0.8 ⇒ 必须回退（不得走技能路径）。
+    let cal = calibration().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(cal.value.of("weekly-report").uses, 2);
+    assert_eq!(cal.value.of("weekly-report").fallbacks, 1);
+    let router = SkillRouter;
+    assert_eq!(
+        router.route(cal.value.of("weekly-report").confidence(), 0.8),
+        SkillRoute::ReasonerFallback { budget_ms: 300 },
+        "校准值持续走低 ⇒ 保留反自动化回退"
+    );
+    // 反向：置信度高于阈值 → 走快路。
+    assert_eq!(
+        router.route(0.95, 0.8),
+        SkillRoute::SkillFastPath { budget_ms: 80 }
+    );
+    // N1：校准双跑一致。
+    assert_eq!(
+        cal.value,
+        calibration()
+            .apply(&snapshot, 9_999, Budget::generous())
+            .value
+    );
+    // 全链路不变量仍绿。
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
     );
 }

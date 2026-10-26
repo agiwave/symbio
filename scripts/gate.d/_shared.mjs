@@ -185,7 +185,7 @@ export const BASELINE = {
   // （`ChatNode` / `Principal` / `ExecEnv` / VDFS 全族 / `Plugin` 信封 / `TurnOutput` /
   // `CapabilityMeta` / `ReadingSection`）搬进 `symbio-kernel` crate，它们的单元用例随类型一起
   // 搬过去（同一批 67 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
-  rustTests: 2174,
+  rustTests: 2175,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。

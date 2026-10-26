@@ -11,42 +11,33 @@
 //! 只接收**类型化输入**（事件切片 / `View`），**产出事件**——不持有任何其他模块的
 //! 句柄。「想调用也拿不到对方的句柄」是构造保证，不是约定。
 //!
-//! ## S1 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 3 步：零 LLM 彩排）
+//! ## 本域只装「必须留在核内」的策略
 //!
-//! 闭环彩排跑在 ⑤ `adapters` 的确定性桩上（零 LLM、毫秒级），链路一条不少：
-//! 用户消息入库 → 应答 → final/fallback 入库 → 三查。规则应答的语义由
-//! [`classify`](../../../../docs/archive/06-会话响应性落地.md) 的规则表以更严纪律承接，
-//! 本域只留**模式名**；`Reasoner` / `Translator` 的**产出路径**在 S2 / S5 接入；
-//! `capabilities` 暂为字符串数据（能力名），枚举闭集与 grants 校验归 S3 ⑥
-//! `governance`——本域不抢。
+//! 单消费方的策略实现归 owner 插件（D-189）：调度在 `plugins/loop/task_events`、
+//! 技能编译与路由在 `plugins/loop/skill_events`、检索 Translator 在
+//! `plugins/loop/memory_events`、自主层与意欲闸门在 `plugins/session/transcript/autonomous`。
 //!
-//! ## 名字的两处出处
+//! 留在本域的三类各有判据：
 //!
-//! - `ActorSpec` / `Pattern` / `Scope`：[plan/01 §4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
-//!   的冻结契约名（名字先于模块存在，判据同 `schemas`）；
-//! - [`Pattern::Decider`]：[plan/05 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") S8 的
-//!   反射档判定者——模式名在此，规则应答不在（见上）。
+//! - `commitment`：写侧成格 / 读侧翻译的**配对契约**（写方在 loop、读方在 session）——
+//!   搬任一侧都要把另一侧切成第二套规则（D-187 第 1 条）；
+//! - `control`：抢占 / 熔断 / 淘汰裁决**跨两个 owner**且角色不同，按 C1 的明文单独论证
+//!   （D-189）；
+//! - `spec`：`ActorSpec` 的数据面在 `symbio_kernel`，读本机部署表的动作（模式派生 /
+//!   能力位判定）留宿主（D-188）。
+//!
+//! `SKILL_TAG` 是 loop 写、session 读的共享词汇，按 D-177 / D-182 留在本域。
 
-mod autonomic;
 mod commitment;
-mod conation;
 mod control;
-mod reasoner;
-mod recall;
-mod schedule;
 mod skill;
 mod spec;
 
-pub use self::autonomic::AutonomousInitiator;
 pub use self::commitment::{commitment_events, commitment_records};
-pub use self::conation::{ConationCandidate, ConationPolicy, IntentGate};
 pub use self::control::{
     CircuitBreaker, EliminationDecider, GateDecision, Preemption, PreemptionDecider,
 };
-pub use self::reasoner::render_messages;
-pub use self::recall::recalled_event;
-pub use self::schedule::{ScheduleDecider, SCHEDULE_BUDGET_MS};
-pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter, SKILL_TAG};
+pub use self::skill::SKILL_TAG;
 // 数据面随 D-188 C2b 住内核 crate；本域只剩读部署表的自由函数（见 `spec` 模块文档）。
 pub use self::spec::{
     actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
@@ -61,10 +52,6 @@ pub use self::spec::trivial_actor_spec;
 // `symbio_core/mod.rs` 的 `#[cfg(test)] pub(crate) use event::{…}` 同一形态。
 #[cfg(test)]
 pub use self::commitment::CommitmentKeeper;
-#[cfg(test)]
-pub use self::conation::IntentDecision;
-#[cfg(test)]
-pub use self::recall::RecallTranslator;
 
 #[cfg(test)]
 #[path = "mod.test.rs"]
