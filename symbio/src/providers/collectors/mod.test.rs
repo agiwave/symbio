@@ -7,9 +7,9 @@
 
 use super::*;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    family, Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+    OPTION_VISITOR,
 };
 
 /// 只为「跨键可见」准备的一行：测试只看它进没进表。
@@ -64,7 +64,7 @@ async fn one_registry_on_three_keys_is_one_table() {
         .await;
     for channel in [&option_channel, &configurable_channel] {
         assert_eq!(
-            channel.list(CapabilityRowKind::Tool).await.len(),
+            channel.list(family::TOOL).await.len(),
             1,
             "跨通道读不到刚写入的行 ⇒ 装配挂了不同实例"
         );

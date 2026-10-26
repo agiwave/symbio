@@ -51,7 +51,7 @@
 
 use crate::symbio_core::VdfsItem;
 use crate::symbio_core::{
-    CapabilityRow, CapabilityRowKind, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
+    family, CapabilityRow, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
     CONFIGURABLE_VISITOR,
 };
 use crate::symbio_core::{PluginConfigFile, PLUGIN_FILE};
@@ -62,7 +62,7 @@ use std::sync::Arc;
 /// 同条目名覆盖（行名 = `item.node.name`）是表语义；取不到收集器返回空表。
 pub async fn capability_configurables(visitor: &dyn Registry) -> Vec<VdfsItem> {
     visitor
-        .list(CapabilityRowKind::Configurable)
+        .list(family::CONFIGURABLE)
         .await
         .iter()
         .filter_map(|row| row.configurable_item().cloned())

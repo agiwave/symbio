@@ -16,7 +16,7 @@
 //! 3. **零相关**：不 import、不持有任何兄弟插件（`plugin-entry-audit` 的 E-007 / E-009）。
 //!
 //! 「无工具」不是承诺，是**可执行判据**：模型能调用的工具来自
-//! `Registry::list(CapabilityRowKind::Tool)`（`tool_metas` 读的就是它），而本插件
+//! `Registry::list(family::TOOL)`（`tool_metas` 读的就是它），而本插件
 //! 一个能力行也不写。这条由 `traverse_registers_no_tool_rows` 守——它挂**真的**
 //! 注册表跑一遍 `traverse`，断言工具行为零，同时断言同一份 ctx 上的配置通道恰好
 //! 收到一行（否则那个零只是「收集器没接上」的同义反复）。

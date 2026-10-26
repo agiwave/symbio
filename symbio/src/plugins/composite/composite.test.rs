@@ -384,9 +384,9 @@ async fn resource_tree_membership_is_derived_from_providers() {
 
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_option_fields, vdfs_context, CapabilityRowKind, PluginStopReason, Registry,
-    VdfsContent, VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    capability_option_fields, family, vdfs_context, PluginStopReason, Registry, VdfsContent,
+    VdfsRequest, VdfsResponse, OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::path::{Path, PathBuf};
 
@@ -432,7 +432,7 @@ async fn collect_at(composite: &Arc<Composite>, endpoint: &str) -> Arc<dyn Regis
 async fn tool_names(composite: &Arc<Composite>) -> Vec<String> {
     let visitor = collect_at(composite, TRAVERSE_AVAILABLE_TOOLS).await;
     let mut names: Vec<String> = visitor
-        .list(CapabilityRowKind::Tool)
+        .list(family::TOOL)
         .await
         .into_iter()
         .map(|row| row.name().to_string())

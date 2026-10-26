@@ -31,7 +31,7 @@
 //! 不是再接一张行表；而裁剪本身属于地址解析（`hidden` 过滤 / `resolve` 命中范围），
 //! 不是拿一份清单做集合减法。
 
-use super::{CapabilityRowKind, Registry};
+use super::{family, Registry};
 use crate::symbio_core::VdfsProvider;
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ use std::sync::Arc;
 /// （`plugins/vdfs/host.rs::root_of`），不在这里替它造一个。
 pub async fn capability_vdfs_root(visitor: &dyn Registry) -> Option<Arc<dyn VdfsProvider>> {
     visitor
-        .list(CapabilityRowKind::Mount)
+        .list(family::MOUNT)
         .await
         .into_iter()
         .find(|row| row.active())

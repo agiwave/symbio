@@ -142,7 +142,7 @@ impl: done
 ### 5.1 与能力收集的关系
 
 选项行与能力行自 4e 起住**同一张表**（`Registry` 的 put/get/list，行种类
-`CapabilityRowKind::Option`）；变的只是「行住哪张表」，**广播通道仍各走各的**
+`family::OPTION`）；变的只是「行住哪张表」，**广播通道仍各走各的**
 （选项走 `TRAVERSE_AVAILABLE_OPTIONS`）：
 
 ```
@@ -155,7 +155,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 - 共享的是**收集机制**：traverse 广播、上下文键（`PATH` + `OPTION_VISITOR`）、
  失败降级（父插件缺失返回空收集器；单插件失败仅记日志）。
 - 不复用的是**产物语义**：能力是「可调用对象」，选项是「字段声明」。
- 区分靠表的**行种分族**——`list(CapabilityRowKind::Tool)`（LLM 工具协议）根本
+ 区分靠表的**行种分族**——`list(family::TOOL)`（LLM 工具协议）根本
  看不见选项行，混装的代价在载荷类型上就挡住了。
 - 收集接口：写入是 `Registry::put`（选项行 `CapabilityRow::option(order, field)`），
  读侧是 `capability_option_fields`：按 `key` 去重（后者覆盖、保留先注册槽位），

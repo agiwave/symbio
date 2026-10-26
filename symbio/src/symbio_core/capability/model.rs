@@ -32,7 +32,7 @@
 //! （自主层）：届时加的是目录行上的**优先级位**，与生效位同一条 `put` 规则，
 //! 不在这里长第二条链路。
 
-use super::{CapabilityRowKind, Registry};
+use super::{family, Registry};
 use crate::symbio_core::ModelProvider;
 use std::sync::Arc;
 
@@ -45,7 +45,7 @@ use std::sync::Arc;
 /// 一个别的——静默换模型比没有模型更难查。
 pub async fn capability_model_active(visitor: &dyn Registry) -> Option<Arc<dyn ModelProvider>> {
     visitor
-        .list(CapabilityRowKind::Model)
+        .list(family::MODEL)
         .await
         .into_iter()
         .find(|row| row.active())

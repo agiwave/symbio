@@ -10,8 +10,7 @@
 use super::*;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_option_fields, CapabilityRowKind, Plugin, PluginSimpleRequest, PluginStopReason,
-    Registry,
+    capability_option_fields, family, Plugin, PluginSimpleRequest, PluginStopReason, Registry,
 };
 
 fn plugin() -> Arc<HeartbeatPlugin> {
@@ -39,7 +38,7 @@ async fn traverse_contributes_the_tool_row() {
 
     p.traverse(String::new(), ctx).await.expect("traverse 成功");
 
-    let rows = visitor.list(CapabilityRowKind::Tool).await;
+    let rows = visitor.list(family::TOOL).await;
     assert_eq!(rows.len(), 1, "本插件在工具族恰好贡献一行");
     assert_eq!(rows[0].name(), "heartbeat");
     assert_eq!(rows[0].meta().name, "heartbeat");
@@ -78,17 +77,17 @@ async fn traverse_contributes_nothing_else() {
 
     p.traverse(String::new(), ctx).await.expect("traverse 成功");
 
-    assert_eq!(visitor.list(CapabilityRowKind::Tool).await.len(), 1);
-    for kind in [
-        CapabilityRowKind::Mount,
-        CapabilityRowKind::Model,
-        CapabilityRowKind::Prompt,
-        CapabilityRowKind::Option,
-        CapabilityRowKind::Configurable,
+    assert_eq!(visitor.list(family::TOOL).await.len(), 1);
+    for fam in [
+        family::MOUNT,
+        family::MODEL,
+        family::PROMPT,
+        family::OPTION,
+        family::CONFIGURABLE,
     ] {
         assert!(
-            visitor.list(kind).await.is_empty(),
-            "工具广播里不该出现 {kind:?} 行"
+            visitor.list(fam).await.is_empty(),
+            "工具广播里不该出现 {fam:?} 行"
         );
     }
 }

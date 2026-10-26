@@ -750,7 +750,7 @@ pub fn capability_resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a st
 ```
 
 - 出方向：**一个具名函数**，字符集定义只有一份；入方向：**查注册表**
- （`visitor.list(CapabilityRowKind::Tool)` 工具行的名字集合），不反演。**字面名优先**——`mcp__fs__read` 既可能是
+ （`visitor.list(family::TOOL)` 工具行的名字集合），不反演。**字面名优先**——`mcp__fs__read` 既可能是
  `mcp.fs.read` 的线上形态、也可能本身就是这个名字，只有集合能回答；
 - 解析失败 → **不猜**，按原样交给路由，由它给出诚实的 `NotFound`（反演猜错会调起**另一个工具**）。
  命中判据是「解析成功」而不是「按线上名查表」——带非法字符的名字按线上名永远查不到。

@@ -23,9 +23,7 @@
 use std::sync::Arc;
 
 use crate::symbio_core::keys::SymbioKey;
-use crate::symbio_core::{
-    CapabilityMeta, CapabilityRowKind, PluginInvokeRequest, PluginInvokeRequestExt,
-};
+use crate::symbio_core::{family, CapabilityMeta, PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// 能力收集器 Key —— 第一条收集**通道**（能力 = 可调用对象）
 ///
@@ -93,7 +91,7 @@ pub const CONFIGURABLE_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
 pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMeta> {
     match ctx.get(CAPABILITY_VISITOR) {
         Some(visitor) => visitor
-            .list(CapabilityRowKind::Tool)
+            .list(family::TOOL)
             .await
             .into_iter()
             .map(|row| row.meta())

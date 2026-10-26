@@ -6,8 +6,8 @@ use super::*;
 
 use crate::symbio_core::{
     capability_model_active, capability_model_resolve, capability_prompts, capability_vdfs_root,
-    CapabilityRow, CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent, VdfsContext,
-    VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    family, CapabilityRow, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -209,7 +209,7 @@ async fn sub_agent_model_registration_is_discarded() {
     );
     assert!(
         inner
-            .list(CapabilityRowKind::Model)
+            .list(family::MODEL)
             .await
             .iter()
             .all(|row| row.name() != "child"),

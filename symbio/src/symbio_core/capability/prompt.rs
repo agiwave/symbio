@@ -31,7 +31,7 @@
 //! 消费侧两处（会话装配系统提示词、`compose` 拼自己的提示词）都要「按注册序的全部
 //! 段」；口径在这一处定义，两处各自过滤（空段跳过）是消费侧的判断。
 
-use super::{CapabilityRowKind, Registry};
+use super::{family, Registry};
 
 /// 列出已注册的系统提示词：`(段名, 正文)`，保注册顺序。
 ///
@@ -40,7 +40,7 @@ use super::{CapabilityRowKind, Registry};
 /// 各自都要跳，两处判断一致是因为它们各自都写了那三行，不是因为这里替它们决定）。
 pub async fn capability_prompts(visitor: &dyn Registry) -> Vec<(String, String)> {
     visitor
-        .list(CapabilityRowKind::Prompt)
+        .list(family::PROMPT)
         .await
         .into_iter()
         .filter_map(|row| {

@@ -58,7 +58,7 @@
 //!
 //! 广播通道（`TRAVERSE_AVAILABLE_OPTIONS`，候选来自运行期数据，每会话现算）与
 //! 工具广播分开，产物语义也不同（可展示的**数据节点**，不是可调用对象）；但两者
-//! 已经不需要两个 trait：表按载荷分族，`list(CapabilityRowKind::Option)` 只回选项行，
+//! 已经不需要两个 trait：表按族分列，`list(family::OPTION)` 只回选项行，
 //! 工具协议（`list(Tool)`）根本看不见它们——混装的代价在**载荷类型**上就挡住了，
 //! 不靠分 trait。这也是 AR-025 把两个专服单族 trait 收回同一张表的判据。
 //!
@@ -71,7 +71,7 @@
 //! - 单插件失败只记日志，不中断收集。
 
 use crate::symbio_core::DetailField;
-use crate::symbio_core::{CapabilityRowKind, Registry};
+use crate::symbio_core::{family, Registry};
 
 /// 列出已注册的选项字段：按 `order` 升序稳定排序（同号保持注册顺序），`order` 不下发。
 ///
@@ -79,7 +79,7 @@ use crate::symbio_core::{CapabilityRowKind, Registry};
 /// - 排序是**读侧**的事：`order` 不进产物数组——前端收到的数组序 = 展示序，
 ///   比「前端按 order 再排一次」是更强的保证。
 pub async fn capability_option_fields(visitor: &dyn Registry) -> Vec<DetailField> {
-    let mut rows = visitor.list(CapabilityRowKind::Option).await;
+    let mut rows = visitor.list(family::OPTION).await;
     // 稳定排序：`sort_by_key` 是稳定的，order 相同者保持注册顺序（表序 = 广播序）
     rows.sort_by_key(|row| {
         row.option_entry()

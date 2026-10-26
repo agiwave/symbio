@@ -321,7 +321,7 @@ async fn unknown_subcommand_is_not_found() {
 /// 本插件不注册 `Capability` —— 它在工具的**注册表**里恒为零行。
 ///
 /// 判据刻意数注册表而不是数 `traverse` 的回包：模型能调用的工具来自
-/// `Registry::list(CapabilityRowKind::Tool)`（`tool_metas` 读的就是它），回包是 `[]`
+/// `Registry::list(family::TOOL)`（`tool_metas` 读的就是它），回包是 `[]`
 /// 只说明「没往回包里写东西」，注册表为零才说明「没进模型的工具清单」。
 /// 这条是 [D-096](../model/README.md#d-096-快速档裁-ii-一次受限模型调用classifyonly-令牌闸门显式退役不得生成的强制力搬到返回类型与工具集判据上 "symbio/src/plugins/model/README") 给「快速档不得生成」
 /// 配的第三颗牙：原来靠「本插件恰好不注册能力」这个结构巧合，现在是可执行断言。
@@ -332,8 +332,8 @@ async fn unknown_subcommand_is_not_found() {
 async fn traverse_registers_no_tool_rows() {
     use crate::providers::DefaultToolVisitor;
     use crate::symbio_core::{
-        capability_configurables, CapabilityRowKind, PluginInvokeRequestExt, Registry,
-        CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+        capability_configurables, family, PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR,
+        CONFIGURABLE_VISITOR,
     };
 
     let tools: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
@@ -352,7 +352,7 @@ async fn traverse_registers_no_tool_rows() {
     assert_eq!(data_of(p), serde_json::json!([]));
 
     assert_eq!(
-        tools.list(CapabilityRowKind::Tool).await.len(),
+        tools.list(family::TOOL).await.len(),
         0,
         "classify 不得向工具注册表写任何行——那正是模型工具清单的来源"
     );

@@ -33,7 +33,7 @@
 //! 入口上——写入口只有一个，作用域规则也就只有一处（见 `capability/model.rs`）。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, ExecEnv, PluginError,
+    family, Capability, CapabilityFamily, CapabilityMeta, CapabilityRow, ExecEnv, PluginError,
     PluginInvokeRequest, Registry,
 };
 use async_trait::async_trait;
@@ -128,7 +128,7 @@ impl Registry for SubAgentVisitor {
     async fn put(&self, row: CapabilityRow) {
         // 模型族**整体丢弃**（生效者与目录都归系统 Agent，见模块文档）：
         // 写入方（model 插件的 traverse）逐行 put，规则只需在这一个入口上挡一次。
-        if row.kind() == CapabilityRowKind::Model {
+        if row.family() == family::MODEL {
             crate::plugin_debug!(
                 "agent",
                 "丢弃子 Agent `{}` 的模型服务注册（生效者与目录都归系统 Agent）",
@@ -180,8 +180,8 @@ impl Registry for SubAgentVisitor {
             .await
     }
 
-    async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>> {
-        self.inner.list(kind).await
+    async fn list(&self, family: CapabilityFamily) -> Vec<Arc<CapabilityRow>> {
+        self.inner.list(family).await
     }
 
     async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {

@@ -1,6 +1,7 @@
 mod collect;
 mod configurable;
 mod error;
+pub mod family;
 mod grants;
 mod model;
 mod mount;
@@ -32,7 +33,7 @@ pub use model::{capability_model_active, capability_model_resolve};
 pub use mount::capability_vdfs_root;
 pub use option::capability_option_fields;
 pub use prompt::capability_prompts;
-pub use row::{CapabilityRow, CapabilityRowKind};
+pub use row::{CapabilityFamily, CapabilityRow};
 pub use tool_name::{capability_resolve, capability_to_wire};
 
 use crate::symbio_core::{
@@ -378,11 +379,12 @@ pub mod failure_kind {
 /// 模型 / 提示词 / 挂载又各有一套同形的方法。收敛后全部通道共用同一张表——
 /// 写走 [`Self::put`]，按名读走 [`Self::get`]，按族读走 [`Self::list`]。
 ///
-/// ## 一族一行，族别从载荷派生（落位：Tool → Model → 提示词 / 挂载 / 选项）
+/// ## 一族的身份是值，不是 trait 上的新方法
 ///
-/// 每迁一族只加一个 payload 变体（`capability/row.rs`），**三个方法一个都不变形**——
-/// 这正是十六方法糜烂的反面。族各自的专用词法（模型族的 `capability_model_*`）
-/// 是表之上的自由函数，不回头往 trait 上挂方法。
+/// [`CapabilityFamily`] 携带族名与槽位策略，载荷是开放类型（`capability/row.rs`）；
+/// 加一族**不改本 trait**，也不改内核枚举——这正是十六方法糜烂的反面。族各自的
+/// 专用词法（模型族的 `capability_model_*`）是表之上的自由函数，不回头往 trait
+/// 上挂方法。
 ///
 /// ## 为什么 `invoke` 不在表上
 ///
@@ -429,8 +431,9 @@ pub trait Registry: Send + Sync + 'static {
     /// 按族列行（**取代了 `list_capability`**）。
     ///
     /// 顺序 = 注册顺序（见 trait 文档）。返回的是**行**而不是元数据：元数据经
-    /// [`CapabilityRow::meta`] 现取（三个声明位同样在 meta 上）。
-    async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
+    /// [`CapabilityRow::meta`] 现取（三个声明位同样在 meta 上）。族是值
+    /// （[`CapabilityFamily`]）而不是封闭枚举：新族由声明方给常量，本方法不变。
+    async fn list(&self, family: CapabilityFamily) -> Vec<Arc<CapabilityRow>>;
 
     // 模型族（4 方法，4b）与系统提示词族（2 方法，4c）已改走表：写入是在表的
     // 提示词行 / 模型行上 `put`，读取是 `capability_model_*` / `capability_prompts`

@@ -14,7 +14,7 @@ use super::store::AgentDirStore;
 use crate::assembly::PLUGIN_ID_AGENT;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_prompts, CapabilityMeta, CapabilityRowKind, Plugin, PluginDir, PluginInvokeRequest,
+    capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
@@ -26,7 +26,7 @@ use std::sync::Arc;
 /// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。
 async fn tool_metas_of(manager: &DefaultToolVisitor) -> Vec<CapabilityMeta> {
     manager
-        .list(CapabilityRowKind::Tool)
+        .list(family::TOOL)
         .await
         .into_iter()
         .map(|row| row.meta())
@@ -331,7 +331,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
 
     // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名
     let tools: Vec<String> = manager
-        .list(crate::symbio_core::CapabilityRowKind::Tool)
+        .list(crate::symbio_core::family::TOOL)
         .await
         .into_iter()
         .map(|row| row.name().to_string())

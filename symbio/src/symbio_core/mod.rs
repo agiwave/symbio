@@ -414,9 +414,12 @@ pub use capability::{
     capability_model_resolve, capability_option_fields, capability_prompts,
     capability_report_error, capability_resolve, capability_take_errors, capability_to_wire,
     capability_vdfs_root, ApprovalBasis, ApprovalGrants, Capability, CapabilityCategory,
-    CapabilityMeta, CapabilityRiskLevel, CapabilityRow, CapabilityRowKind, Registry,
+    CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow, Registry,
     CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
 };
+// 内置六族常量（`family::TOOL` … `family::CONFIGURABLE`）：与 `failure_kind` 同理，
+// 它是**模块命名空间**而不是单个符号，故单列一行。
+pub use capability::family;
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
 pub use capability::failure_kind;

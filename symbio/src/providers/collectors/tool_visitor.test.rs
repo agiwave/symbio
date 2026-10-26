@@ -9,9 +9,9 @@ use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{
     capability_configurables, capability_model_active, capability_model_resolve,
-    capability_option_fields, capability_prompts, capability_vdfs_root, Capability, CapabilityMeta,
-    CapabilityRow, CapabilityRowKind, DetailField, ExecEnv, ModelProvider, PluginError,
-    VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    capability_option_fields, capability_prompts, capability_vdfs_root, family, Capability,
+    CapabilityMeta, CapabilityRow, DetailField, ExecEnv, ModelProvider, PluginError, VdfsContent,
+    VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -89,14 +89,14 @@ async fn model_rows_carry_provider_and_active_flag() {
     );
     // 目录按 `provider_id` 索引（行名就是 provider_id），且顺序 = 注册序
     let ids: Vec<String> = mgr
-        .list(CapabilityRowKind::Model)
+        .list(family::MODEL)
         .await
         .into_iter()
         .map(|row| row.name().to_string())
         .collect();
     assert_eq!(ids, ["p1", "p2"]);
     // 模型行**不**混进工具面（`tools` 数组只由 `list(Tool)` 拼）
-    assert!(mgr.list(CapabilityRowKind::Tool).await.is_empty());
+    assert!(mgr.list(family::TOOL).await.is_empty());
 }
 
 /// **空集是一等输入**：一个可用的都没有时，两个取值口都给 `None`（不 panic、不补占位）
@@ -171,7 +171,7 @@ async fn new_active_row_demotes_the_previous_one() {
     register(&mgr, Some("p2"), &["p2"]).await;
 
     let actives: Vec<String> = mgr
-        .list(CapabilityRowKind::Model)
+        .list(family::MODEL)
         .await
         .into_iter()
         .filter(|row| row.active())
@@ -204,11 +204,11 @@ async fn key_space_is_shared_across_kinds() {
     register(&mgr, Some("web/search"), &["web/search"]).await;
 
     assert_eq!(
-        mgr.get("web/search").await.unwrap().kind(),
-        CapabilityRowKind::Model,
+        mgr.get("web/search").await.unwrap().family(),
+        family::MODEL,
         "同名的后写者胜（拿回的是模型行）"
     );
-    assert!(mgr.list(CapabilityRowKind::Tool).await.is_empty());
+    assert!(mgr.list(family::TOOL).await.is_empty());
 }
 
 /// 同名覆盖只改内容、**不改槽位**（顺序 = 首次注册顺序）
@@ -287,7 +287,7 @@ async fn tool_rows_match_the_meta_dump_entry_by_entry() {
     }
 
     let listed: Vec<String> = mgr
-        .list(CapabilityRowKind::Tool)
+        .list(family::TOOL)
         .await
         .into_iter()
         .map(|row| row.meta().name)
@@ -301,7 +301,7 @@ async fn tool_rows_match_the_meta_dump_entry_by_entry() {
             .await
             .unwrap_or_else(|| panic!("{n} 应可按名取到"));
         assert_eq!(row.name(), n);
-        assert_eq!(row.kind(), CapabilityRowKind::Tool);
+        assert_eq!(row.family(), family::TOOL);
     }
 }
 
@@ -316,7 +316,7 @@ async fn tool_put_overwrite_keeps_first_registration_slot() {
     mgr.put(CapabilityRow::tool(decl_tool("web/search"))).await;
 
     let listed: Vec<String> = mgr
-        .list(CapabilityRowKind::Tool)
+        .list(family::TOOL)
         .await
         .into_iter()
         .map(|row| row.name().to_string())
@@ -340,7 +340,7 @@ async fn tool_get_missing_name_is_none() {
 async fn tool_list_of_another_kind_is_empty() {
     let mgr = DefaultToolVisitor::new();
     mgr.put(CapabilityRow::tool(decl_tool("local/shell"))).await;
-    assert!(mgr.list(CapabilityRowKind::Model).await.is_empty());
+    assert!(mgr.list(family::MODEL).await.is_empty());
 }
 
 // ==================== 挂载族（这一族今天只有根一形） ====================
@@ -453,7 +453,7 @@ async fn option_fields_dedupe_by_key_keeping_first_slot() {
     assert_eq!(keys, vec!["workdir", "agent_id"]);
     assert_eq!(list[1].widget, "text", "后者覆盖前者");
     assert!(
-        !mgr.list(CapabilityRowKind::Tool)
+        !mgr.list(family::TOOL)
             .await
             .iter()
             .any(|row| row.name() == "workdir"),

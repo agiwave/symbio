@@ -120,7 +120,7 @@ impl ModelProvider for StubProvider {
 fn a_tool_row_takes_its_name_from_the_capability_self_report() {
     let row = CapabilityRow::tool(stub("local/shell"));
     assert_eq!(row.name(), "local/shell");
-    assert_eq!(row.kind(), CapabilityRowKind::Tool);
+    assert_eq!(row.family(), family::TOOL);
     assert_eq!(row.meta().name, "local/shell");
 }
 
@@ -153,9 +153,42 @@ fn cap_of_a_tool_row_is_the_very_capability_that_was_put_in() {
     );
 }
 
-/// 模型行的名字 = `provider_id()`（表键）；生效位是行的一部分，
-/// 族别从载荷派生——`cap()` 为空而 `provider()` 在，两个写入方（工具 / 模型）
-/// 在同一个名字空间里也不会互相冒充。
+/// 新族在**声明方**定义：一个 [`CapabilityFamily`] 常量 + 自己的载荷类型。
+///
+/// 行词汇只按族过滤、按具体类型下转型——内核没有它的枚举臂，这就是「加一族不改
+/// 内核」的最小证据。
+#[test]
+fn a_family_declared_outside_core_round_trips_its_payload() {
+    struct NotePayload {
+        text: String,
+    }
+    const NOTE: CapabilityFamily = CapabilityFamily::multi("test_note");
+
+    let row = CapabilityRow::new(
+        NOTE,
+        "hello",
+        NotePayload {
+            text: "正文".to_string(),
+        },
+        false,
+    );
+
+    assert_eq!(row.family(), NOTE);
+    assert_eq!(row.family().name(), "test_note");
+    assert!(!row.family().is_single());
+    assert_eq!(
+        row.payload::<NotePayload>().map(|p| p.text.as_str()),
+        Some("正文")
+    );
+    // 读错类型 ⇒ 诚实的 None（不 panic，也不误认成别的族）
+    assert!(row.payload::<String>().is_none());
+    assert!(row.cap().is_none(), "开放载荷不会冒充工具行");
+}
+
+/// 模型行的名字 = `provider_id()`（表键）；生效位是行的一部分。
+///
+/// `cap()` 为空而 `provider()` 在，两个写入方（工具 / 模型）在同一个名字空间里
+/// 也不会互相冒充。
 #[test]
 fn a_model_row_takes_its_name_from_the_provider_id() {
     let row = CapabilityRow::model(
@@ -163,7 +196,7 @@ fn a_model_row_takes_its_name_from_the_provider_id() {
         true,
     );
     assert_eq!(row.name(), "openai");
-    assert_eq!(row.kind(), CapabilityRowKind::Model);
+    assert_eq!(row.family(), family::MODEL);
     assert_eq!(row.provider().expect("模型行").provider_id(), "openai");
     assert!(row.cap().is_none(), "模型行不是可调用能力");
     assert!(row.active(), "带位的行才占生效槽");
