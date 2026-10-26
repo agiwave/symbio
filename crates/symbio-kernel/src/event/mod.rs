@@ -26,6 +26,28 @@ use serde::{Deserialize, Serialize};
 pub mod grid;
 pub use grid::{event_cell, Cell};
 
+/// 一个**事件名**的声明：名字与它在网格上的格位。
+///
+/// 这是事件词汇的登记口（DE-024 D-197）：`Entity` × `Verb` 是封闭语法，**名字不是**。
+/// 加一个事件名 = 在 owner 插件里加一行 `EventDecl`，内核不认识这个名字。
+///
+/// ## 为什么住在 `event` 域而不是 `decl`
+///
+/// 它声明的是「这个名字落在哪一格」——回答的是事件词汇与网格的对应，不是载荷形状。
+/// `decl` 域（`FactDecl` / `ViewDecl` / `ActorDecl`）答的是另一组问题：字段、读法、
+/// 执行体收口。判据 7 的输入是 `FactDecl`，网格的输入是本类型，两者合并会逼其中
+/// 一方说谎（边界分析见 [`crate::decl`]）。
+///
+/// 两表同名不冲突：一条事实若要进环，同时交 `EventDecl` 与 `FactDecl` 即可；`seal`
+/// 只要求**插件声明的事实**都能在事件表上找到同名行（协议五格由内核预置）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventDecl {
+    /// 事件名（线上 `kind` 的字面值）。
+    pub name: &'static str,
+    /// 名字落在哪一格。写闸按它拒绝「自述挪了一格」的事件。
+    pub cell: Cell,
+}
+
 /// 不可伪造的单调序号（[plan/01 §2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// 字段私有：**只有 `Store` 能构造**（`pub` 在 kernel crate 内，等价于拆分前的

@@ -400,15 +400,18 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///
 /// ## 声明侧的格子（同一个类型，不分两套）
 ///
-/// 五张注册表（fact / view / actor / port / row）经 `Builder` 进表后，
+/// 六张注册表（event / fact / view / actor / port / row）经 `Builder` 进表后，
 /// 「装载期检查」只有一个出口、也就只有一个错误类型：下面这十一格查的是**声明自己**
 /// （重名、撞名、引用不存在的名字、字段没声明、执行体声明了引擎独占的格），
 /// 由 `seal()` 在跑上面七道之前先报。分成两个类型只会让「拒绝启动」出现两次。
 ///
-/// - [`Gap::DuplicateFact`] / [`Gap::DuplicateView`] / [`Gap::DuplicateActor`] /
-///   [`Gap::DuplicatePort`]：同一张表里两个同名——按名字查找的地方（`by`、`port` 取值、
-///   视图求值）从此不确定查到的是哪一条；
-/// - [`Gap::NameCollision`]：事实名与视图名撞名——它们共用一个名字空间（视图是合成事实）；
+/// - [`Gap::DuplicateEvent`] / [`Gap::DuplicateFact`] / [`Gap::DuplicateView`] /
+///   [`Gap::DuplicateActor`] / [`Gap::DuplicatePort`]：同一张表里两个同名——按名字查找的
+///   地方（写闸取格位、`by`、`port` 取值、视图求值）从此不确定查到的是哪一条；
+/// - [`Gap::FactWithoutEvent`]：插件声明的事实没有事件行——写闸取不到格位，运行期
+///   只能拒绝或回退到内核表（迁移期回退，见 DE-024 D-199）；
+/// - [`Gap::NameCollision`]：事实名 / 事件名与视图名撞名——它们共用一个名字空间
+///   （视图是合成事实）；
 /// - [`Gap::UnknownFact`] / [`Gap::UndeclaredField`]：视图 `reads` 引用了未声明的事实 /
 ///   该事实没有这个字段；
 /// - [`Gap::EvidenceNotRead`]：视图的 `evidence` 写了 `reads` 之外的名字——那条边
@@ -474,6 +477,14 @@ pub enum Gap {
     },
     PortWithoutAnswerExit {
         port: &'static str,
+        fact: &'static str,
+    },
+    DuplicateEvent {
+        name: &'static str,
+    },
+    /// 插件声明了一条事实，却没有任何事件行给它格位——写闸永远认不出它
+    /// （迁移期 kernel 的 `CELLS` 回退只能救内核已知的名字，救不了新名字）。
+    FactWithoutEvent {
         fact: &'static str,
     },
     DuplicateFact {

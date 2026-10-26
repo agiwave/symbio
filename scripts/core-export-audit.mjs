@@ -271,6 +271,20 @@ const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
   : 396
 
+/**
+ * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。
+ *
+ * 条目总数只说明账本有多长，不说明其中有多少是「只有一处用、本该下沉」的投影。
+ * [DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200
+ * 把这一格列为词汇棘轮的一格：新能力默认插件本地，这一格涨 = 又多了一个
+ * 「只为单点需要而占根出口」的共享符号。
+ *
+ * `CORE_LEDGER_ONE_BASELINE` 只给回归测试用，`35-baseline` 另判覆盖值不得更松。
+ */
+const DOMAIN_ONE_BASELINE = process.env.CORE_LEDGER_ONE_BASELINE
+  ? Number(process.env.CORE_LEDGER_ONE_BASELINE)
+  : 11
+
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })
 
@@ -444,6 +458,15 @@ if (kernelExports.size > 0 && ledgerCount > DOMAIN_LEDGER_BASELINE) {
   )
 }
 
+if (kernelExports.size > 0 && ledgerOne.length > DOMAIN_ONE_BASELINE) {
+  report(
+    'C-004',
+    `域账本单消费方 ${ledgerOne.length} 条 > 基线 ${DOMAIN_ONE_BASELINE} —— ` +
+      `只有一个消费方的投影不是共享类型，下沉到消费方（DE-024 D-200）；` +
+      `确实该占根出口的，先写清第二个消费方或同步 DOMAIN_ONE_BASELINE`,
+  )
+}
+
 // ==================== 输出 ====================
 
 const ruleLine = (ok, rule, desc) =>
@@ -465,7 +488,7 @@ if (errors.length === 0) {
       true,
       'C-004',
       `非内核根账本 ${ledgerCount}/${DOMAIN_LEDGER_BASELINE}（只许降）` +
-        ` · 其中 0 消费方 ${ledgerZero.length} / 单消费方 ${ledgerOne.length}（B4/C 的下沉候选，报告账）`,
+        ` · 其中 0 消费方 ${ledgerZero.length} / 单消费方 ${ledgerOne.length}/${DOMAIN_ONE_BASELINE}（下沉候选，只许降）`,
     )
     if (ledgerCount < DOMAIN_LEDGER_BASELINE) {
       console.log(

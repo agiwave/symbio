@@ -71,6 +71,7 @@ fn core_table() -> Arc<Frozen> {
     b.declare(
         super::super::loop_rows::LOOP_OWNER,
         PluginDeclarations {
+            events: EVENTS,
             facts: FACTS,
             views: VIEWS,
             ports: &[],
@@ -79,6 +80,28 @@ fn core_table() -> Arc<Frozen> {
         },
     );
     b.seal().expect("控制面声明集必须能冻结")
+}
+
+/// 迁移期两份表并存：控制面事件的格位在 `EVENTS` 与内核 `CELLS` 上必须相等。
+/// 本仓用例是 owner 侧的 parity；最后一批业务事件迁出后本用例随 `CELLS` 一起退役。
+#[test]
+fn control_events_match_the_kernel_grid() {
+    for e in EVENTS {
+        assert_eq!(
+            symbio_core::event_cell(e.name),
+            Some(e.cell),
+            "{} 在 owner 声明与 CELLS 上必须同格",
+            e.name
+        );
+    }
+    // 每条控制面事实都必须有事件行（`seal` 的 `FactWithoutEvent` 的直接断言）。
+    for f in FACTS {
+        assert!(
+            EVENTS.iter().any(|e| e.name == f.name),
+            "{} 有字段声明却没有事件行",
+            f.name
+        );
+    }
 }
 
 #[test]

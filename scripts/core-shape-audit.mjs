@@ -14,6 +14,7 @@
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
+ * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格是**迁移存量**，只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -83,12 +84,12 @@
  *
  * 环境变量 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>` **只给回归测试用**（真仓门禁
  * 不设）；它不动任何文件就能把上限放到天边，所以 `gate.d/35-baseline.mjs` 另判一次
- * 「覆盖值不得比默认值更松」。
+ * 「覆盖值不得比默认值更松」。`VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 同理。
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -242,6 +243,26 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
       return { traits, methods, defaults }
     })()
   : { traits: 5, methods: 17, defaults: 2 }
+
+/**
+ * CS-005 词汇棘轮（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200）。
+ *
+ * 两格都是**迁移存量**，只许降：
+ * - `kernelEvents`：内核 `event/mod.rs` 里**业务事件**常量数（值是点分名、且不是协议五格）；
+ * - `cellsRows`：`event/grid.rs` 的 `CELLS` 里业务行数（不含协议五格）。
+ *
+ * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**；这两格的存在只是给尚未迁出
+ * 的旧名字记账。目标不是零（core 投影仍按名字读），而是「新能力不再往里加」。
+ *
+ * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
+ * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
+ */
+const VOCAB_BASELINE = process.env.VOCAB_BASELINE
+  ? (() => {
+      const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
+      return { kernelEvents, cellsRows }
+    })()
+  : { kernelEvents: 40, cellsRows: 38 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -604,6 +625,73 @@ if (hasPlugins && pluginIds.length > 0) {
 }
 
 
+// ── CS-005 业务事件词汇只许降 ──
+//
+// 两张表是**迁移存量**：新事件经 `EventDecl` 进装配表，不在这里加行。扫描按文件存在
+// 与否分三种情况：都在 ⇒ 判；都不在 ⇒ 夹具仓库，不适用；只在一部分 ⇒ 红（判据已失效）。
+const VOCAB_SOURCES = {
+  kernelEvents: 'crates/symbio-kernel/src/event/mod.rs',
+  cellsRows: 'crates/symbio-kernel/src/event/grid.rs',
+}
+const PROTOCOL_EVENT_VALUES = new Set(['request', 'sent', 'response', 'failed', 'retry'])
+const PROTOCOL_EVENT_NAMES = new Set(['REQUEST', 'SENT', 'RESPONSE', 'FAILED', 'RETRY'])
+
+/** 内核 `pub const EVENT_*: &str = "<点分名>";` 里**业务事件**的条数。 */
+function countKernelEvents(abs) {
+  const text = blankComments(fs.readFileSync(abs, 'utf8')).join('\n')
+  return [
+    ...text.matchAll(/pub\s+const\s+EVENT_[A-Z0-9_]+\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]*)"/g),
+  ].filter((m) => m[1].includes('.') && !PROTOCOL_EVENT_VALUES.has(m[1])).length
+}
+
+/** `CELLS` 块里**业务事件**行的条数（协议五格由内核预置，不算）。 */
+function countCellsRows(abs) {
+  const text = blankComments(fs.readFileSync(abs, 'utf8')).join('\n')
+  const start = text.indexOf('const CELLS')
+  if (start < 0) return null
+  const end = text.indexOf('];', start)
+  if (end < 0) return null
+  const block = text.slice(start, end)
+  return [...block.matchAll(/\(\s*EVENT_([A-Z0-9_]+)\s*,/g)].filter(
+    (m) => !PROTOCOL_EVENT_NAMES.has(m[1]),
+  ).length
+}
+
+const vocabPaths = Object.fromEntries(
+  Object.entries(VOCAB_SOURCES).map(([key, rel]) => [key, path.join(ROOT, rel)]),
+)
+const vocabPresent = Object.entries(vocabPaths).filter(([, abs]) => fs.existsSync(abs))
+const vocabCounts = {}
+let vocabApplicable = false
+if (vocabPresent.length === 0) {
+  // 夹具仓库没有内核事件表 ⇒ CS-005 不适用（CS-001…004 照判）。
+} else if (vocabPresent.length < Object.keys(VOCAB_SOURCES).length) {
+  report(
+    'CS-005',
+    `词汇棘轮只找到 ${vocabPresent.map(([k]) => VOCAB_SOURCES[k]).join(' / ')}，` +
+      '另一张表不见了——判据输入缺一半，宁红不静默',
+  )
+} else {
+  vocabApplicable = true
+  vocabCounts.kernelEvents = countKernelEvents(vocabPaths.kernelEvents)
+  const cells = countCellsRows(vocabPaths.cellsRows)
+  if (cells === null) {
+    report('CS-005', '`grid.rs` 里读不出 `CELLS` 块——词汇棘轮的输入没了（形状变了？）')
+  } else {
+    vocabCounts.cellsRows = cells
+  }
+  for (const key of Object.keys(VOCAB_BASELINE)) {
+    if (vocabCounts[key] > VOCAB_BASELINE[key]) {
+      report(
+        'CS-005',
+        `${key} 实测 ${vocabCounts[key]} > 冻结 ${VOCAB_BASELINE[key]} —— ` +
+          '新事件走 `EventDecl` 进装配表，不再往内核这两张手写表加行（DE-024 D-197 / D-200）',
+      )
+    }
+  }
+}
+
+
 const ruleLine = (ok, rule, desc) =>
   console.log(`${ok ? green('✓') : red('✗')} ${rule}  ${dim(desc)}`)
 
@@ -632,6 +720,24 @@ if (errors.length === 0) {
         `域文件 ${domainNounTotal} 处（C 迁出账，不设门禁）`
       : '内核纯度：夹具仓库没有插件目录，CS-004 不适用',
   )
+  if (vocabApplicable) {
+    const vocabLine = Object.keys(VOCAB_BASELINE)
+      .map((k) => `${k} ${vocabCounts[k]}/${VOCAB_BASELINE[k]}`)
+      .join(' · ')
+    ruleLine(true, 'CS-005', `事件词汇棘轮：${vocabLine}（迁移存量，只许降）`)
+    const underVocab = Object.keys(VOCAB_BASELINE).filter(
+      (k) => vocabCounts[k] < VOCAB_BASELINE[k],
+    )
+    if (underVocab.length) {
+      console.log(
+        yellow('提示') +
+          `：词汇已收到冻结值下方（${underVocab.map((k) => `${k} ${vocabCounts[k]}<${VOCAB_BASELINE[k]}`).join(' · ')}），` +
+          '请同步本脚本的 VOCAB_BASELINE',
+      )
+    }
+  } else {
+    ruleLine(true, 'CS-005', '事件词汇棘轮：夹具仓库没有内核事件表，CS-005 不适用')
+  }
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])
   if (under.length) {
     console.log(

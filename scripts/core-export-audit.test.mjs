@@ -42,7 +42,7 @@ function rmTree(dir) {
  * 不压基线就测不到 C-003。要测「基线放行」的用例显式传 `baseline: '10:10'`。
  * 豁免账本同理默认注入**空**对象；要测账本行为显式传 `waivers`。
  */
-function audit(files, { baseline = '0:0', waivers, ledger } = {}) {
+function audit(files, { baseline = '0:0', waivers, ledger, oneBaseline } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-export-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -55,6 +55,7 @@ function audit(files, { baseline = '0:0', waivers, ledger } = {}) {
     // 不隔离的话，真仓每登记一条豁免，就会让每个「没有那个符号」的夹具误报「已不在公开面」。
     env.CORE_EXPORT_WAIVERS = waivers ?? '{}'
     if (ledger !== undefined) env.CORE_LEDGER_BASELINE = String(ledger)
+    if (oneBaseline !== undefined) env.CORE_LEDGER_ONE_BASELINE = String(oneBaseline)
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env,
@@ -427,4 +428,17 @@ test('C-004 不在无门面的夹具上生效（避免用空集冒充判据）',
   const r = audit(clean(), { ledger: 0 })
   assert.equal(r.status, 0, r.stderr + r.stdout)
   assert.doesNotMatch(r.stdout, /C-004/)
+})
+
+test('C-004：域账本单消费方超上限 ⇒ 红（只有一个消费方的投影该下沉）', () => {
+  // `DomainThing` 只有一个插件消费 ⇒ 计入单消费方格；把上限压到 0 即命中。
+  const r = audit(withKernel(), { ledger: 1, oneBaseline: 0 })
+  assert.equal(r.status, 1, '单消费方变多必须红')
+  assert.match(r.stderr, /域账本单消费方 1 条 > 基线 0/)
+})
+
+test('C-004：单消费方等于上限 ⇒ 通过，并报出 N/N', () => {
+  const r = audit(withKernel(), { ledger: 1, oneBaseline: 1 })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /单消费方 1\/1/)
 })

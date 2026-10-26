@@ -69,12 +69,12 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::paths;
 use symbio_core::{
     closes_turn, event_cell, is_turn_final, is_turn_open, provenance_violation, AppendError, Event,
-    EventEnvelope as _, Seq, Store, StoreInvariant,
+    EventEnvelope as _, Frozen, Seq, Store, StoreInvariant,
 };
 
 /// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
@@ -100,6 +100,13 @@ pub struct WalStore {
     /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
     /// 别人的归档因此同样不出现在这里——这不是新增的近似，是同一个近似。
     archived: RwLock<Option<Vec<Event>>>,
+    /// 装配期冻结表（DE-024 D-198 / D-199）：写闸先问它，未命中再回退。
+    ///
+    /// 注入点有两个：生产路径在 [`crate::store::Store::facts`] 打开事实源后挂上
+    /// `symbio_plugin_api::sealed_declarations()`；用例可以用
+    /// [`WalStore::with_declarations`] 挂一张小表。`None` 不表示「没有网格」——
+    /// 写闸仍会问全局装配表，最后回退内核 `CELLS`。
+    declarations: Option<Arc<Frozen>>,
 }
 
 struct WalInner {
@@ -176,12 +183,19 @@ impl WalInner {
     /// I3 的降级不是「静默放过」：它在写入口当场 `plugin_warn!` 出声，读侧
     /// `check_all` 的 `unresolved_turns` 会把同一处
     /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
-    fn gate(&mut self, event: &Event) -> Result<(), AppendError> {
+    fn gate(&mut self, event: &Event, declarations: Option<&Frozen>) -> Result<(), AppendError> {
         // **先判名字与格位是否同源，再判事实之间的关系**：I1 / I2 / I3 的判据全部按
         // `(entity, verb, kind)` 取事实（`is_turn_open` 认的就是这一格）。坐标本身错位时，
         // 后面每条判定的输入都是错位的——所以这一臂排在最前，且它不需要任何索引。
         let given = (event.entity, event.verb);
-        let declared = event_cell(&event.kind);
+        // 先问**本实例挂的装配表**，再问进程装配表（插件经 `submit_declarations!`
+        // 交来的事件行），未命中再回退内核 `CELLS`（迁移期，见 DE-024 D-199）。
+        // 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；
+        // 内核表只认识旧名字。
+        let declared = declarations
+            .and_then(|f| f.event_cell(&event.kind))
+            .or_else(|| symbio_plugin_api::declared_event_cell(&event.kind))
+            .or_else(|| event_cell(&event.kind));
         if declared != Some(given) {
             return Err(AppendError::OffGrid {
                 event_id: event.event_id.clone(),
@@ -412,7 +426,18 @@ impl WalStore {
                 degraded_i3: 0,
             }),
             archived: RwLock::new(None),
+            declarations: None,
         }
+    }
+
+    /// 挂上装配期冻结表（DE-024 D-198）：写闸先问它，未命中再回退。
+    ///
+    /// 生产入口在 [`crate::store::Store::facts`]；用例用一张小表验证「写闸读的是
+    /// 声明，不是内核常量」——本方法因此是 `pub`（`EventWalStore` 本身仍只
+    /// `pub(crate)` 可见）。
+    pub fn with_declarations(mut self, frozen: Arc<Frozen>) -> Self {
+        self.declarations = Some(frozen);
+        self
     }
 
     /// **段归档**：把 `seq < cut` 的事件移入归档段，live 文件从 `cut` 起。
@@ -628,7 +653,7 @@ impl Store for WalStore {
         // （用户输入 / 工具结果 / 收尾落格）没有一条能绕过它。位置在幂等去重之后
         // （同 id 重放仍按 `Duplicate` 回答，不被闸门改判）、赋号与落盘之前
         // （被拒的事件不会消耗 seq，也不会在盘上留下半条）。
-        inner.gate(&event)?;
+        inner.gate(&event, self.declarations.as_deref())?;
         // 先落盘、再提交内存：盘上是唯一权威（崩溃 ⇒ 已落的还在，没落的不算）。
         // 写盘失败 = 不可继续的存储层灾难，直接 panic（不吞错）——静默返回会让
         // 调用方误以为事件已提交，比崩溃更糟的静默失效。

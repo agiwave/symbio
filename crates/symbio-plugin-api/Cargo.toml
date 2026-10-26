@@ -24,6 +24,8 @@ serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full"] }
 async-trait = "0.1.92"
 tracing = "0.1.44"
+# 声明表的链接期收集：与 core 的 `submit_object_creator!` 同一条机制。
+inventory = "0.3.24"
 
 [dev-dependencies]
 tempfile = "3.27.0"

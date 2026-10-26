@@ -64,6 +64,30 @@ function coreShapeCells(text) {
   return cells
 }
 
+/** `scripts/core-shape-audit.mjs` 的 `VOCAB_BASELINE`：同样是三元尾部的对象字面量，两格。
+ *  键序就是 `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 的位置口径。 */
+function vocabCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*kernelEvents:\s*(\d+),\s*cellsRows:\s*(\d+)\s*\}/.exec(
+    text.replace(/\r\n/g, '\n'),
+  )
+  if (m) {
+    cells.set('kernelEvents', Number(m[1]))
+    cells.set('cellsRows', Number(m[2]))
+  }
+  return cells
+}
+
+/** `scripts/plugin-entry-audit.mjs` 的 `ROUTE_BASELINE`（E-014）：与 R-002 同构的三元形状，
+ *  一格——手写 `ROUTE_*` 常量数上限（只许降）。 */
+function routeConstCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.ROUTE_CONST_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('ROUTE', Number(m[1]))
+  return cells
+}
+
 /** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
  *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
  *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
@@ -118,6 +142,16 @@ function domainLedgerCells(text) {
   const norm = text.replace(/\r\n/g, '\n')
   const m = /\?\s*Number\(process\.env\.CORE_LEDGER_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
   if (m) cells.set('C-004', Number(m[1]))
+  return cells
+}
+
+/** `scripts/core-export-audit.mjs` 的 `DOMAIN_ONE_BASELINE`（C-004 的下沉候选格）：
+ *  与 R-002 同构的三元形状，一格——域账本里单消费方条目的上限（只许降）。 */
+function domainLedgerOneCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.CORE_LEDGER_ONE_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('C-004-one', Number(m[1]))
   return cells
 }
 
@@ -226,6 +260,17 @@ const RATCHETS = [
     label: '非内核根账本条目数（C-004，只许降）',
   },
   {
+    // C-004 的下沉候选格：域账本里只有一个消费方的条目。条目总数只说明账本多长，
+    // 这一格说明其中有多少「本该下沉」；涨 = 又多了一个只为单点需要而占根出口的共享符号。
+    id: 'core-ledger-one',
+    file: 'scripts/core-export-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: domainLedgerOneCells,
+    waivers: waiverReader('core-export-allow'),
+    envVar: 'CORE_LEDGER_ONE_BASELINE',
+    label: '域账本单消费方条目数（C-004 下沉候选，只许降）',
+  },
+  {
     // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由
     // `core-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
     // 上一版更松」——两半合起来才是「放宽 = 写一份决策」。
@@ -236,6 +281,29 @@ const RATCHETS = [
     waivers: waiverReader('core-shape-allow'),
     envVar: 'CORE_SHAPE_BASELINE',
     label: 'core 公共形状三格（trait 数 / 成员数 / 默认体数，只许降）',
+  },
+  {
+    // CS-005：内核业务事件常量 / CELLS 业务行。声明化之后这两格是**迁移存量**，
+    // 只许降；放宽 = 让「新事件仍要改内核手写表」悄悄回来，所以必须改一个提交进仓库的数字。
+    id: 'vocab',
+    file: 'scripts/core-shape-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: vocabCells,
+    // 不设豁免标记：收窄自动生效，变宽只能改基线，而改基线会被本条按基准版本抓住。
+    waivers: () => new Map(),
+    envVar: 'VOCAB_BASELINE',
+    label: '内核事件词汇（业务事件常量 / CELLS 业务行，只许降）',
+  },
+  {
+    // E-014：手写 `ROUTE_*` 地址表。声明化之后它是迁移存量，只许降；放宽 = 让
+    // 「加一条跨插件地址要改共享文件」悄悄回来。
+    id: 'route-const',
+    file: 'scripts/plugin-entry-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: routeConstCells,
+    waivers: () => new Map(),
+    envVar: 'ROUTE_CONST_BASELINE',
+    label: '手写 `ROUTE_*` 常量数（只许降）',
   },
   {
     // 前端 kind 分支两格：框架层目标 0（只许降），机制层是判据与映射表的存量。

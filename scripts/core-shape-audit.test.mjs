@@ -51,7 +51,7 @@ const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
  * `baseline` 就是 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>`：夹具只有几个 trait，
  * 不显式给基线就测不到棘轮（真仓的值是 20:72:24）。
  */
-function audit(files, { baseline = '1:1:0' } = {}) {
+function audit(files, { baseline = '1:1:0', vocab } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-shape-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -59,9 +59,11 @@ function audit(files, { baseline = '1:1:0' } = {}) {
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
     }
+    const env = { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline }
+    if (vocab !== undefined) env.VOCAB_BASELINE = vocab
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
-      env: { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline },
+      env,
       encoding: 'utf8',
       timeout: 30_000,
     })
@@ -253,4 +255,69 @@ test('env 覆盖少给一格 ⇒ 红（那一格的判据不能凭空消失）',
   const r = audit(core(ONE), { baseline: '1:1' })
   assert.equal(r.status, 1)
   assert.match(r.stderr, /不是数字/)
+})
+
+// ==================== CS-005 事件词汇棘轮 ====================
+
+const EVENT_MOD = 'crates/symbio-kernel/src/event/mod.rs'
+const GRID = 'crates/symbio-kernel/src/event/grid.rs'
+
+/** 两张手写表的最小夹具：协议五格照真仓写法，业务行由参数给。 */
+function vocab(sources = ['a.one'], cells = ['EVENT_A']) {
+  return {
+    [EVENT_MOD]: [
+      'pub const EVENT_REQUEST: &str = "request";',
+      'pub const EVENT_SENT: &str = "sent";',
+      'pub const EVENT_RESPONSE: &str = "response";',
+      'pub const EVENT_FAILED: &str = "failed";',
+      'pub const EVENT_RETRY: &str = "retry";',
+      'pub const EVENT_TRIGGER_META_KEY: &str = "trigger";',
+      ...sources.map((v, i) => `pub const EVENT_${String.fromCharCode(65 + i)}: &str = "${v}";`),
+    ].join('\n'),
+    [GRID]: [
+      'const CELLS: &[(&str, Cell)] = &[',
+      '    (EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),',
+      '    (EVENT_SENT, (Entity::Turn, Verb::Asserted)),',
+      '    (EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),',
+      '    (EVENT_FAILED, (Entity::Turn, Verb::Asserted)),',
+      '    (EVENT_RETRY, (Entity::Turn, Verb::Asserted)),',
+      ...cells.map((n) => `    (${n}, (Entity::Turn, Verb::Asserted)),`),
+      '];',
+    ].join('\n'),
+  }
+}
+
+test('CS-005：词汇等于基线 ⇒ 通过，且不把协议五格算进业务行', () => {
+  const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-005.*kernelEvents 1\/1.*cellsRows 1\/1/)
+})
+
+test('CS-005：新增一个业务事件常量 ⇒ 红（新事件该走 EventDecl）', () => {
+  const r = audit(core(ONE, vocab(['a.one', 'b.two'])), { baseline: '1:1:0', vocab: '1:1' })
+  assert.equal(r.status, 1, '内核业务事件常量变多必须红')
+  assert.match(r.stderr, /CS-005/)
+  assert.match(r.stderr, /kernelEvents 实测 2 > 冻结 1/)
+})
+
+test('CS-005：CELLS 新增一条业务行 ⇒ 红（写闸不再需要改这张表）', () => {
+  const r = audit(core(ONE, vocab(['a.one', 'b.two'], ['EVENT_A', 'EVENT_B'])), {
+    baseline: '1:1:0',
+    vocab: '1:1',
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /cellsRows 实测 2 > 冻结 1/)
+})
+
+test('CS-005：两张表只在一半 ⇒ 红（判据输入缺一半不许静默）', () => {
+  const onlyEvents = { [EVENT_MOD]: vocab()['crates/symbio-kernel/src/event/mod.rs'] }
+  const r = audit(core(ONE, onlyEvents), { baseline: '1:1:0', vocab: '1:1' })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /缺一半|只找到/)
+})
+
+test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
+  const r = audit(core(ONE, vocab([], [])), { baseline: '1:1:0', vocab: '1:1' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /kernelEvents 0<1/)
 })

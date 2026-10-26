@@ -2,12 +2,14 @@
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
+use symbio_core::ring::{Decl, Pattern};
 use symbio_core::Budget;
 use symbio_core::{check_all, unresolved_turns};
 use symbio_core::{checkpoint, CheckpointState};
 use symbio_core::{
-    transcript, verify_prompt_fidelity, Entity, Event, PromptMessage, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    transcript, verify_prompt_fidelity, Builder, Entity, Event, EventDecl, LatencyTier,
+    PluginDeclarations, PromptMessage, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
+    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_USER_MESSAGE,
 };
 use symbio_core::{turnstate, TurnState};
 
@@ -1261,4 +1263,125 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
     .with_payload(serde_json::json!({ "text": "答" }));
     store.append(ok).expect("同格的名字要能落");
     assert_eq!(store.len(), 1);
+}
+
+/// 写闸读的是**注入的声明表**，不是内核常量：一个内核不认识的名字，只要装配表
+/// 给了格位就能落；同一张表撤掉后，它立刻按「网格之外」被拒。
+///
+/// 这是 DE-024 D-198 / D-199 的端到端判据——只测 `Frozen::event_cell` 会漏掉
+/// 「写闸有没有真的问它」这一格。
+#[test]
+fn injected_declarations_are_the_grid_the_gate_reads() {
+    const FIXTURE: &str = "fixture.wal.event";
+
+    fn protocol_rows() -> &'static [Decl] {
+        let mut out = Vec::new();
+        for name in [
+            EVENT_REQUEST,
+            EVENT_SENT,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
+            EVENT_RETRY,
+        ] {
+            let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
+                source: name,
+                key: &[],
+                eq: &[],
+            }]));
+            out.push(Decl {
+                name,
+                prio: 99,
+                by: None,
+                tier: LatencyTier::Reflex,
+                expand: None,
+                owes: pattern[0],
+                until: pattern,
+                unless: &[],
+            });
+        }
+        Box::leak(out.into_boxed_slice())
+    }
+
+    let mut b = Builder::new();
+    b.declare(
+        "plugins/session-test",
+        PluginDeclarations {
+            events: &[EventDecl {
+                name: FIXTURE,
+                cell: (Entity::Turn, Verb::Progressed),
+            }],
+            facts: &[],
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: protocol_rows(),
+        },
+    );
+    let frozen = b.seal().expect("注入表的协议五格必须有归宿");
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path)
+        .unwrap()
+        .with_declarations(frozen);
+    store
+        .append(Event::pending(
+            "fixture-0",
+            FIXTURE,
+            Entity::Turn,
+            Verb::Progressed,
+            0,
+            "session/main",
+        ))
+        .expect("装配表给了格位，写闸必须放行");
+    assert_eq!(store.len(), 1);
+    let back = store.range(Seq::new(0));
+    assert_eq!(back.len(), 1, "写进去的事件必须能原样读回");
+    assert_eq!(back[0].kind, FIXTURE);
+    assert_eq!(
+        (back[0].entity, back[0].verb),
+        (Entity::Turn, Verb::Progressed)
+    );
+
+    // 第二个方向：名字在表上，但事件自述挪了一格 ⇒ 仍拒，且报出表上的格位。
+    let err = store
+        .append(Event::pending(
+            "fixture-wrong",
+            FIXTURE,
+            Entity::Turn,
+            Verb::Closed,
+            1,
+            "session/main",
+        ))
+        .expect_err("表上住 Turn/Progressed，自述 Turn/Closed 不得入库");
+    assert!(
+        matches!(
+            err,
+            AppendError::OffGrid {
+                declared: Some((Entity::Turn, Verb::Progressed)),
+                given: (Entity::Turn, Verb::Closed),
+                ..
+            }
+        ),
+        "拒错形态：{err:?}"
+    );
+    assert_eq!(store.len(), 1, "被拒的事件不落格");
+
+    // 同一份 WAL 换一个**没有注入**的实例：内核表不认识这个新名字 ⇒ 拒绝。
+    drop(store);
+    let plain = EventWalStore::open(&path).unwrap();
+    let err = plain
+        .append(Event::pending(
+            "fixture-1",
+            FIXTURE,
+            Entity::Turn,
+            Verb::Progressed,
+            1,
+            "session/main",
+        ))
+        .expect_err("内核表不认识的名字不得入库");
+    assert!(
+        matches!(err, AppendError::OffGrid { declared: None, .. }),
+        "拒错形态：{err:?}"
+    );
 }

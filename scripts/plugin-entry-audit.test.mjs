@@ -33,7 +33,7 @@ const DECLARED_RULES = [...fs.readFileSync(script, 'utf8').matchAll(/^ {2}'(E-\d
  * @param {Record<string, string>} files 相对仓库根的路径 → 内容
  * @param {{strict?: boolean}} [opts]
  */
-function audit(files, { strict = false } = {}) {
+function audit(files, { strict = false, routeBaseline } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-entry-audit-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -41,10 +41,12 @@ function audit(files, { strict = false } = {}) {
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
     }
+    const env = { ...process.env, NO_COLOR: '1' }
+    if (routeBaseline !== undefined) env.ROUTE_CONST_BASELINE = String(routeBaseline)
     const result = spawnSync(
       process.execPath,
       [script, `--root=${root}`, ...(strict ? ['--strict'] : [])],
-      { env: { ...process.env, NO_COLOR: '1' }, encoding: 'utf8', timeout: 20000 },
+      { env, encoding: 'utf8', timeout: 20000 },
     )
     assert.ifError(result.error)
     return result
@@ -1130,4 +1132,21 @@ test('E-013 豁免：带理由的 plugin-entry-allow 放行；空理由仍报', 
     'crates/symbio-plugin-loop/src/driver.rs': `// plugin-entry-allow E-013:\n${line}`,
   })
   assert.match(emptyReason.stdout, E013_HIT)
+})
+
+// ── E-014：手写 `ROUTE_*` 只许降 ─────────────────────────────────────────
+const E014_HIT = /E-014 .*routes\.rs.*手写/
+
+test('E-014 命中：手写 ROUTE_* 超过冻结数（新地址该走声明 + 生成）', () => {
+  // CLEAN 的 routes.rs 有 1 条；把冻结数压到 0 ⇒ 多出来的那一条必红。
+  const r = audit(CLEAN, { routeBaseline: 0 })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E014_HIT)
+})
+
+test('E-014 不误报：条数等于冻结数 ⇒ 通过', () => {
+  const r = audit(CLEAN, { routeBaseline: 1 })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E014_HIT)
+  assert.match(r.stdout, /E-014\s+手写 ROUTE_\* 常量只许降/)
 })

@@ -2,12 +2,13 @@
 //!
 //! 控制面事实与视图的口径用例住在它们的 owner 那里
 //! （`plugins::loop::control_decl`）；本文件只测**机制**：内核只声明协议五格，
-//! 插件的五张表经 `Builder::declare` 一次交齐，`seal` 是唯一出口。
+//! 插件的六张表经 `Builder::declare` 一次交齐，`seal` 是唯一出口。
 
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::event::event_cell;
 use crate::{Entity, Seq, Verb};
 
 use super::*;
@@ -118,6 +119,70 @@ fn kernel_declares_only_the_protocol_cells() {
     }
 }
 
+/// 协议五格的事件行与内核网格同源：迁移期两份表并存，必须先钉住它们不相漂。
+#[test]
+fn protocol_events_match_the_kernel_grid() {
+    let mut b = Builder::new();
+    for name in [
+        EVENT_REQUEST,
+        EVENT_SENT,
+        EVENT_RESPONSE,
+        EVENT_FAILED,
+        EVENT_RETRY,
+    ] {
+        b.row(cover(name, None));
+    }
+    let frozen = b.seal().expect("协议五格必须能冻结");
+    for e in PROTOCOL_EVENTS {
+        assert_eq!(
+            event_cell(e.name),
+            Some(e.cell),
+            "{} 在 CELLS 与协议事件行上必须同格",
+            e.name
+        );
+        assert_eq!(frozen.event_cell(e.name), Some(e.cell));
+        assert_eq!(
+            frozen.event_owner(e.name),
+            Some(KERNEL_OWNER),
+            "协议五格归内核"
+        );
+    }
+}
+
+/// 插件声明的事实必须在事件表上有格位：否则写闸只能拒绝，且缺口在装载期就该红。
+#[test]
+fn a_plugin_fact_without_an_event_is_a_gap() {
+    const NAME: &str = "fixture.no_event";
+    let facts: &'static [FactDecl] = Box::leak(
+        vec![FactDecl {
+            name: NAME,
+            port: None,
+            key: &[],
+            expand: &[],
+            fields: &["id"],
+        }]
+        .into_boxed_slice(),
+    );
+    let rows: &'static [Decl] = Box::leak(vec![cover(NAME, None)].into_boxed_slice());
+    let mut b = Builder::new();
+    b.declare(
+        "plugins/fixture",
+        PluginDeclarations {
+            events: &[],
+            facts,
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows,
+        },
+    );
+    let gaps = gaps_of(b);
+    assert!(
+        gaps.contains(&Gap::FactWithoutEvent { fact: NAME }),
+        "{gaps:?}"
+    );
+}
+
 /// `declare` 的第一个参数就是 owner：事实与视图逐条登记，同一张表不产生两个答案。
 #[test]
 fn declare_records_the_owner_of_each_fact_and_view() {
@@ -134,6 +199,7 @@ fn declare_records_the_owner_of_each_fact_and_view() {
     b.declare(
         "plugins/example",
         PluginDeclarations {
+            events: &[],
             facts: &[],
             views: Box::leak(
                 vec![probe_view("owned-view", &[(EVENT_REQUEST, "id")])].into_boxed_slice(),
@@ -156,7 +222,7 @@ fn declare_records_the_owner_of_each_fact_and_view() {
     }
 }
 
-/// §3.2 的扩展面只有两个口：`declare` 交五张表，`seal` 消耗 Builder。
+/// §3.2 的扩展面只有两个口：`declare` 交六张表，`seal` 消耗 Builder。
 ///
 /// 断言取的是**方法指针**——类型必须逐字对上：`declare` 借 `&mut self`，`seal`
 /// 收 `self`。后者是「运行期不能注册」真正落地的那一格：冻结之后连一个

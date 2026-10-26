@@ -2,14 +2,19 @@
 //!
 //! 判据不是「代码好看」，而是「**内核零 diff**」：这些名字（`fixture.*`）只出现在
 //! 本文件与内核的声明类型里——内核不认识它们，`seal` 只做形状检查。
+//!
+//! 本文件只到**声明面**（`declare` → `seal` → 冻结表里查得到）。写闸那一半必须
+//! 有真实的 append / 读回，故端到端夹具住在拥有写门的 `symbio-plugin-session`
+//! （`injected_declarations_are_the_grid_the_gate_reads`）：那里同时钉正反两向——
+//! 表上放行并读回、表上但自述挪格被拒、不在表上被拒（DE-024 D-200）。
 
 use serde_json::{json, Value};
 
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::{
-    ActorDecl, Builder, CapabilityFamily, CapabilityRow, Event, FactDecl, LatencyTier,
-    PluginDeclarations, Projection, ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
-    EVENT_RETRY, EVENT_SENT,
+    ActorDecl, Builder, CapabilityFamily, CapabilityRow, Entity, Event, EventDecl, FactDecl,
+    LatencyTier, PluginDeclarations, Projection, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
 const FIXTURE_FACT: &str = "fixture.fact";
@@ -74,6 +79,21 @@ fn facts(names: &[&'static str]) -> &'static [FactDecl] {
     )
 }
 
+/// 夹具事件行：声明一个事实就得给它一个格位（`seal` 的 `FactWithoutEvent`）。
+/// 格位取什么不影响本文件的判据——它只证明「名字 + 格位」经声明口接入。
+fn events(names: &[&'static str]) -> &'static [EventDecl] {
+    Box::leak(
+        names
+            .iter()
+            .map(|name| EventDecl {
+                name,
+                cell: (Entity::Turn, Verb::Asserted),
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
 /// 视图求值函数：只拿事实切片与时间戳（F2 的纯净形状）。
 fn eval_ids(events: &[Event], _now: i64) -> Value {
     json!(events
@@ -90,6 +110,7 @@ fn fact_extension_is_owner_local() {
     b.declare(
         "fixture",
         PluginDeclarations {
+            events: events(&[FIXTURE_FACT]),
             facts: facts(&[FIXTURE_FACT]),
             views: &[],
             ports: &[],
@@ -110,6 +131,7 @@ fn view_extension_is_owner_local() {
     b.declare(
         "fixture",
         PluginDeclarations {
+            events: events(&[FIXTURE_FACT]),
             facts: facts(&[FIXTURE_FACT]),
             views: &[ViewDecl {
                 name: FIXTURE_VIEW,
@@ -143,6 +165,7 @@ fn strategy_extension_is_owner_local() {
     b.declare(
         "fixture",
         PluginDeclarations {
+            events: events(&[FIXTURE_FACT]),
             facts: facts(&[FIXTURE_FACT]),
             views: &[],
             ports: &[],
@@ -178,6 +201,7 @@ fn plugin_extension_is_owner_local() {
     b.declare(
         "fixture/owner_a",
         PluginDeclarations {
+            events: events(&[A_FACT]),
             facts: facts(&[A_FACT]),
             views: &[],
             ports: &[],
@@ -188,6 +212,7 @@ fn plugin_extension_is_owner_local() {
     b.declare(
         "fixture/owner_b",
         PluginDeclarations {
+            events: events(&[B_FACT]),
             facts: facts(&[B_FACT]),
             views: &[],
             ports: &[],

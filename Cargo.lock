@@ -4256,6 +4256,7 @@ name = "symbio-plugin-api"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "inventory",
  "serde",
  "serde_json",
  "symbio-core",

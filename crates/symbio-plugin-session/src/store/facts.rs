@@ -60,10 +60,15 @@ impl SessionStore {
         let wal = dir.join(paths::V2_WAL_FILE);
         // 持锁 open：两个并发 `facts` 若各自 open，后插入者可能是不持令牌的
         // 降级实例，把先前的写者顶掉（跨进程锁是进程级独占，不是句柄级）。
-        let store = Arc::new(
-            EventWalStore::open(&wal)
-                .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?,
-        );
+        let mut store = EventWalStore::open(&wal)
+            .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))?;
+        // 写闸先问装配期冻结表（DE-024 D-198）。装载失败不阻断事实源打开——
+        // 写闸仍会回退内核表（已知名字照常），而义务环的装载口会带着同一份缺口
+        // 拒绝开幕（`plugins/loop`）；这里再抛一次只会让会话连读都打不开。
+        if let Ok(frozen) = symbio_plugin_api::sealed_declarations() {
+            store = store.with_declarations(frozen);
+        }
+        let store = Arc::new(store);
         cache.insert(session_id.to_string(), store.clone());
         Ok(Some(store))
     }

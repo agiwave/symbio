@@ -112,7 +112,7 @@ fn home(fact: &'static str) -> Decl {
     }
 }
 
-/// **装载只有一个出口**（DE-015 §3.3）：五张表灌进六个注册口，`seal` 跑完全部
+/// **装载只有一个出口**（DE-015 §3.3）：六张表灌进注册口，`seal` 跑完全部
 /// 检查。所以反向用例断言的是这个 `Err`，正例断言 `Ok`——不再有「先冻结、再自己想
 /// 起来跑一遍行检查」这种两段式。
 fn freeze(rows: &[Decl], actors: &[ActorDecl]) -> Result<Arc<Frozen>, Vec<Gap>> {

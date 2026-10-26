@@ -46,7 +46,7 @@
 //!
 //! ## 装载期检查
 //!
-//! 首次查询时经 [`load`] 把五张表经 `Builder::declare` 一次交齐并 `seal`，**任何缺口都是
+//! 首次查询时经 [`load`] 把六张表经 `Builder::declare` 一次交齐并 `seal`，**任何缺口都是
 //! 拒绝**（DE-015 §3.4 末句「装载失败即拒绝启动，不许部分成功」）：缺口逐条记 error 后
 //! 装载返回 `None`，[`table`] 随之恒 `Err`。开幕（`chat_loop::drive::begin_drive`）先要
 //! 表再干活，拿不到表就带着错误退出——不存在「半张表继续跑」的形态。
@@ -1414,7 +1414,7 @@ pub(crate) static ROWS: &[Decl] = &[
     },
 ];
 
-/// 装载：五张注册表经 DE-015 §3.2 的**六个口**进 `Builder`，`seal` 跑完 §3.4 的七道。
+/// 装载：六张注册表经 DE-015 §3.2 的注册口进 `Builder`，`seal` 跑完全部装载期检查。
 ///
 /// 行切片与端口切片从这里进 `row` / `port` 两个入口——检查跟着表走，不由调用方
 /// 自己想起来再跑一遍：`seal` 是装载的唯一出口。
@@ -1433,17 +1433,30 @@ pub(crate) const LOOP_OWNER: &str = "plugins/loop";
 
 pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut b = Builder::new();
-    b.declare(
-        LOOP_OWNER,
-        PluginDeclarations {
-            facts: super::control_decl::FACTS,
-            views: super::control_decl::VIEWS,
-            ports: PORTS,
-            actors: actor_decls(),
-            rows,
-        },
-    );
+    b.declare(LOOP_OWNER, declarations(rows));
     b.seal()
+}
+
+/// 本插件交给装配口的完整声明（DE-024 D-198）。`load` 与链接期提交共用这一份，
+/// 避免「私有单例」与「装配表」两份形状各写一遍。
+pub(crate) fn declarations<'a>(rows: &'a [Decl]) -> PluginDeclarations<'a> {
+    PluginDeclarations {
+        events: super::control_decl::EVENTS,
+        facts: super::control_decl::FACTS,
+        views: super::control_decl::VIEWS,
+        ports: PORTS,
+        actors: actor_decls(),
+        rows,
+    }
+}
+
+// 装配口的提交：宿主链接本 crate 即生效，不需要谁记得调用一次。
+// 装配方（`symbio_plugin_api::sealed_declarations`）按 owner 排序后逐个 `declare`，
+// 本插件不认识也不依赖任何兄弟插件。
+symbio_plugin_api::submit_declarations!(LOOP_OWNER, submitted_declarations);
+
+fn submitted_declarations() -> PluginDeclarations<'static> {
+    declarations(ROWS)
 }
 
 /// 真表装载，并把 §3.4 第 4 条的报告打出来。
@@ -1451,7 +1464,16 @@ pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
 /// 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，谁先派发归 `drive` 的
 /// `(prio, name, key)`。名单随表冻结（[`Frozen::overlaps`]），这里只负责让人看见。
 fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
-    let frozen = load(ROWS)?;
+    // 装配期冻结表（DE-024 D-198）：本插件经 `submit_declarations!` 交表，兄弟插件
+    // 的事实 / 事件也在这张表里。只剩「链接期提交没生效」这一种情况会得到缺行表
+    // （例如某个测试二进制用链接器参数裁掉了未引用的提交段）——此时退回本插件
+    // 自己的 `load(ROWS)`，行为与迁移前一致；生产装配不走这条退路。
+    let frozen = symbio_plugin_api::sealed_declarations()?;
+    let frozen = if frozen.rows().is_empty() || frozen.actors().is_empty() {
+        load(ROWS)?
+    } else {
+        frozen
+    };
     let overlapping = frozen.overlaps();
     if !overlapping.is_empty() {
         symbio_core::plugin_info!(
@@ -1472,7 +1494,7 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
 ///
 /// ## 为什么进程级单例 ≡ 按会话注入
 ///
-/// 五张表灌进 `Builder` 的全是 `&'static` 数据（`Decl` / `PortDecl` / `ActorDecl` 的
+/// 六张表灌进 `Builder` 的全是 `&'static` 数据（`Decl` / `PortDecl` / `ActorDecl` 的
 /// 每个字段都是 `&'static str` / `&'static [_]` / `Copy`），`seal(self)` 又是**消耗**
 /// `self` 的：同一份程序文本只能冻出同一张表，按会话构造得到的就是这个值。于是
 /// `LazyLock` 不是「一条全局可变注册通道」，而是一个纯函数的记忆化——它的

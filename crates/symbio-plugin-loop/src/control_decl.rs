@@ -9,8 +9,59 @@
 //! 装载机制的所在。
 
 use symbio_core::{
-    Event, FactDecl, ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    Entity, Event, EventDecl, FactDecl, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
+
+/// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
+/// 由本插件声明。迁移期与 `event::grid::CELLS` 的同名行并存，parity 用例钉住两边相等；
+/// 最后一批业务事件迁出后 `CELLS` 只剩协议五格。
+pub(crate) const EVENTS: &[EventDecl] = &[
+    EventDecl {
+        name: "chat.assistant.final",
+        cell: (Entity::Turn, Verb::Closed),
+    },
+    EventDecl {
+        name: "chat.assistant.fallback",
+        cell: (Entity::Turn, Verb::Closed),
+    },
+    EventDecl {
+        name: "chat.assistant.reported",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "chat.assistant.opening",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "chat.assistant.progress",
+        cell: (Entity::Turn, Verb::Progressed),
+    },
+    EventDecl {
+        name: "turn.stage",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "user.message",
+        cell: (Entity::Turn, Verb::Opened),
+    },
+    EventDecl {
+        name: "turn.supplemented",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "session.config",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "authz.denied",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: "authz.granted",
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+];
 
 pub(crate) const FACTS: &[FactDecl] = &[
     // 收束格：字段来自 `turn_runner::produced_payload` + 的 `status` / `reason` / `terminated`。

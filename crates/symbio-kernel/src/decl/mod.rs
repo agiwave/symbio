@@ -22,8 +22,14 @@
 //!
 //! ## 与 `event::grid` 的分工
 //!
-//! `CELLS` 管「名字落在哪个格子」，`FactDecl` 管「名字有哪些字段」。两者并存，
+//! [`EventDecl`] 管「名字落在哪个格子」，[`FactDecl`] 管「名字有哪些字段」。两者并存，
 //! 不互相推导：格子是实体 × 动词，字段是载荷形状，合并会逼其中一方说谎。
+//! 一条事实可以同时出现在两张表里（义务环要它的字段，网格要它的格位），但**两张表的
+//! 登记口分开**：事实未必进环，进环的事实才需要字段声明。
+//!
+//! `event::grid::CELLS` 仍是内核协议五格的格位来源；业务事件的格位自 [`EventDecl`]
+//! 起改由 owner 插件声明（DE-024 D-197）。两条来源在迁移期并存，写闸先问冻结表、
+//! 再回退 `CELLS`（D-199）；回退随最后一批事件迁出而删除。
 //!
 //! ## `port` 是载荷字段，不是信封字段
 //!
@@ -64,7 +70,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::event::Event;
+use crate::event::{Cell, Entity, Event, EventDecl, Verb};
 use crate::LatencyTier;
 // 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
@@ -80,7 +86,7 @@ use ring::{check_ports, check_rows, overlaps, Decl, Gap, Overlap, PortDecl};
 /// 必须出现在 `fields` 里（`seal` 检查）。空切片 = 这一维不存在，不是「以后再说」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FactDecl {
-    /// 网格名（与 `CELLS` 上的行同名；此处不判格位）。
+    /// 事实名。若它是事件，同名格位登记在 [`EventDecl`] 上；此处只管载荷形状。
     pub name: &'static str,
     /// 载荷里承载端口的字段名。只有协议族有端口；`None` = 这条事实与端口无关。
     pub port: Option<&'static str>,
@@ -148,12 +154,14 @@ pub struct ActorDecl {
     pub writes: &'static [&'static str],
 }
 
-/// 一个插件交出的全部声明：五张表一次交齐。
+/// 一个插件交出的全部声明：六张表一次交齐。
 ///
 /// 这是插件与内核之间**唯一**的扩展口（[`Builder::declare`]）。声明住在插件里，
 /// 内核只负责聚合、校验、冻结。`actors` 是 `Vec` 而不是静态切片：执行体的 `run`
 /// 绑定住在插件自己的绑定表里，装载期只投影出静态可查的四样（D-119）。
 pub struct PluginDeclarations<'a> {
+    /// 事件名 → 格位。业务事件与协议事件都在这里；加名字不动内核。
+    pub events: &'static [EventDecl],
     pub facts: &'static [FactDecl],
     pub views: &'static [ViewDecl],
     pub ports: &'static [PortDecl],
@@ -174,9 +182,9 @@ const DIRECT_OWNER: &str = "direct";
 ///
 /// ## 两个口：`declare` 与 `seal`
 ///
-/// 插件只经 [`Builder::declare`] 交五张表；内核在 [`Builder::new`] 里只预置自己的
+/// 插件只经 [`Builder::declare`] 交六张表；内核在 [`Builder::new`] 里只预置自己的
 /// 协议五格。填表原语是私有的：它们只服务于 `seal` 的内部实现与本模块用例，
-/// 不对插件开放——否则「一个插件一次交齐」的缝会被五条零散调用绕开。
+/// 不对插件开放——否则「一个插件一次交齐」的缝会被几条零散调用绕开。
 ///
 /// ## 检查的出口只有一个
 ///
@@ -186,11 +194,14 @@ const DIRECT_OWNER: &str = "direct";
 /// 行还没查」这种部分成功。
 #[derive(Debug, Default)]
 pub struct Builder {
+    events: Vec<EventDecl>,
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
     actors: Vec<ActorDecl>,
     ports: Vec<PortDecl>,
     rows: Vec<Decl>,
+    /// 事件名 → 交表方。
+    event_owners: HashMap<&'static str, &'static str>,
     /// 事实名 → 交表方（DE-023 D-178 的 owner 清单）。
     fact_owners: HashMap<&'static str, &'static str>,
     /// 视图名 → 交表方。
@@ -206,6 +217,9 @@ impl Builder {
     pub fn new() -> Self {
         let mut b = Self::empty();
         b.current_owner = KERNEL_OWNER;
+        for &e in PROTOCOL_EVENTS {
+            b.event(e);
+        }
         for &f in PROTOCOL_FACTS {
             b.fact(f);
         }
@@ -226,6 +240,9 @@ impl Builder {
     /// 出现一次——重名由 `seal` 判红，owner 清单因此逐条唯一。
     pub fn declare(&mut self, owner: &'static str, p: PluginDeclarations<'_>) {
         self.current_owner = owner;
+        for &e in p.events {
+            self.event(e);
+        }
         for &f in p.facts {
             self.fact(f);
         }
@@ -241,6 +258,11 @@ impl Builder {
         for row in p.rows {
             self.row(row.clone());
         }
+    }
+
+    fn event(&mut self, d: EventDecl) {
+        self.event_owners.insert(d.name, self.current_owner);
+        self.events.push(d);
     }
 
     fn fact(&mut self, d: FactDecl) {
@@ -269,10 +291,23 @@ impl Builder {
     pub fn seal(self) -> Result<Arc<Frozen>, Vec<Gap>> {
         let mut gaps = Vec::new();
 
+        let mut event_names = HashSet::new();
+        for e in &self.events {
+            if !event_names.insert(e.name) {
+                gaps.push(Gap::DuplicateEvent { name: e.name });
+            }
+        }
         let mut fact_names = HashSet::new();
         for f in &self.facts {
             if !fact_names.insert(f.name) {
                 gaps.push(Gap::DuplicateFact { name: f.name });
+            }
+            // 插件声明的事实必须是事件（协议五格由内核预置，同样在事件表上）。
+            // `Builder::empty` 的「直接小世界」是唯一例外：它只服务本模块用例，
+            // 不经过装配口，也不写任何 WAL——那条缝已经由构造器私有性关住。
+            if self.fact_owners.get(f.name) != Some(&DIRECT_OWNER) && !event_names.contains(f.name)
+            {
+                gaps.push(Gap::FactWithoutEvent { fact: f.name });
             }
         }
         let mut view_names = HashSet::new();
@@ -282,7 +317,7 @@ impl Builder {
             }
         }
         for v in &self.views {
-            if fact_names.contains(v.name) {
+            if fact_names.contains(v.name) || event_names.contains(v.name) {
                 gaps.push(Gap::NameCollision { name: v.name });
             }
         }
@@ -359,11 +394,13 @@ impl Builder {
         }
 
         let frozen = Frozen {
+            events: self.events,
             facts: self.facts,
             views: self.views,
             actors: self.actors,
             ports: self.ports,
             rows: self.rows,
+            event_owners: self.event_owners,
             fact_owners: self.fact_owners,
             view_owners: self.view_owners,
             // 报告要到缺口清空才算得（第 4 条读的是**这张**表），检查阶段先留空。
@@ -379,16 +416,19 @@ impl Builder {
         // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归 `drive`。
         // 名单随表冻结一次，读侧（装载日志与用例）只问表，不再自己算第二遍。
         let overlaps = overlaps(&frozen.rows, &frozen);
-        // owner 清单与五张表同源（DE-023 D-178）：`fact` / `view` 写入时逐条登记，
+        // owner 清单与表同源（DE-023 D-178）：`event` / `fact` / `view` 写入时逐条登记，
         // 这里钉住「表里有几条，清单就有几条」——不成立只能是注册口被改坏了。
+        assert_eq!(frozen.event_owners.len(), frozen.events.len());
         assert_eq!(frozen.fact_owners.len(), frozen.facts.len());
         assert_eq!(frozen.view_owners.len(), frozen.views.len());
         Ok(Arc::new(Frozen {
+            events: frozen.events,
             facts: frozen.facts,
             views: frozen.views,
             actors: frozen.actors,
             ports: frozen.ports,
             rows: frozen.rows,
+            event_owners: frozen.event_owners,
             fact_owners: frozen.fact_owners,
             view_owners: frozen.view_owners,
             overlaps,
@@ -398,18 +438,20 @@ impl Builder {
 
 /// 冻结后的声明表：只有读方法，没有 `&mut self`——运行期注册口在类型上不存在。
 ///
-/// 五张注册表全在这里（事实 / 视图 / 执行体 / 端口 / 行）：读侧（`owed` / `drive` /
-/// 派发适配器 / 租约看护者）拿的切片与这张表同源，插件的 `static` 只是**进表前**的
-/// 数据形状。§3.3 的「三个时点」因此能在代码上指认：编译期收集 ⇒ `Builder` 填五张表
-/// ⇒ `seal` 检查并产出这一个不可变值。
+/// 六张注册表全在这里（事件 / 事实 / 视图 / 执行体 / 端口 / 行）：读侧（`owed` /
+/// `drive` / 派发适配器 / 租约看护者 / 写闸）拿的切片与这张表同源，插件的 `static`
+/// 只是**进表前**的数据形状。§3.3 的「三个时点」因此能在代码上指认：编译期收集 ⇒
+/// `Builder` 填六张表 ⇒ `seal` 检查并产出这一个不可变值。
 #[derive(Debug)]
 pub struct Frozen {
+    events: Vec<EventDecl>,
     facts: Vec<FactDecl>,
     views: Vec<ViewDecl>,
     actors: Vec<ActorDecl>,
     ports: Vec<PortDecl>,
     rows: Vec<Decl>,
-    /// 事实 / 视图的 owner 清单（DE-023 D-178）：与五张表同源，冻结后只读。
+    /// 事件 / 事实 / 视图的 owner 清单（DE-023 D-178）：与六张表同源，冻结后只读。
+    event_owners: HashMap<&'static str, &'static str>,
     fact_owners: HashMap<&'static str, &'static str>,
     view_owners: HashMap<&'static str, &'static str>,
     /// §3.4 第 4 条的报告（可能同时命中的行对）。**不是缺口**——冻结成功才存在，
@@ -418,6 +460,23 @@ pub struct Frozen {
 }
 
 impl Frozen {
+    /// 全部事件名与格位（协议五格 + 各 owner 插件交来的业务事件）。
+    pub fn events(&self) -> &[EventDecl] {
+        &self.events
+    }
+
+    /// 这个名字落在哪一格。`None` = 冻结表里没有它——迁移期写闸随后回退
+    /// `event::grid::CELLS`；回退删除后 `None` 就是「网格之外」（DE-024 D-199）。
+    pub fn event_cell(&self, name: &str) -> Option<Cell> {
+        self.events.iter().find(|e| e.name == name).map(|e| e.cell)
+    }
+
+    /// 这个事件名归谁：把含它的声明表交进 [`Builder`] 的那个 owner。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn event_owner(&self, name: &str) -> Option<&'static str> {
+        self.event_owners.get(name).copied()
+    }
+
     pub fn facts(&self) -> &[FactDecl] {
         &self.facts
     }
@@ -549,6 +608,34 @@ const SENT_FIELDS: &[&str] = &[
     "lease_ms",
     "attempt_cap",
     "awaited",
+];
+
+// 协议五格的事件名与格位。名字常量仍住 `event/mod.rs`（唯一名字表），格位在此
+// 与 `FactDecl` 并列声明——`seal` 因此能判「协议事实都有事件行」。
+//
+// 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。
+// 理由见 `event/grid.rs` 的同名行（迁移完成后那一份成为唯一说明）。
+const PROTOCOL_EVENTS: &[EventDecl] = &[
+    EventDecl {
+        name: EVENT_REQUEST,
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: EVENT_SENT,
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: EVENT_RESPONSE,
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: EVENT_FAILED,
+        cell: (Entity::Turn, Verb::Asserted),
+    },
+    EventDecl {
+        name: EVENT_RETRY,
+        cell: (Entity::Turn, Verb::Asserted),
+    },
 ];
 
 const PROTOCOL_FACTS: &[FactDecl] = &[
