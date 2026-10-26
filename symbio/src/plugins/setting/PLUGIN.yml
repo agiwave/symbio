@@ -1,0 +1,5 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: setting
+plugin_comment: 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
+plugin_assembly: sub_agent
+plugin_order: 190

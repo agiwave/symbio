@@ -66,8 +66,8 @@ const REPO_ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path
 /** 本判据的三份来源（唯一地址，变了改这里）。 */
 export const AGENT_REL = 'symbio/src/plugins/agent'
 export const PLUGINS_REL = 'symbio/src/plugins'
-export const ASSEMBLY_REL = 'symbio/src/assembly.rs'
-/** 子树默认清单的常量名（全仓插件清单的唯一字面量，见 `assembly.rs` 文档）。 */
+export const ASSEMBLY_REL = 'symbio/src/assembly.generated.rs'
+/** 子树默认清单的常量名（全仓插件清单的唯一字面量，由各插件目录的 `PLUGIN.yml` 生成）。 */
 export const ASSEMBLY_CONST = 'ASSEMBLY_SUB_AGENT_PLUGINS'
 
 /** 归属表的表头（三列逐字相等才算这张表；换了列名就不是本脚本认的那条事实）。 */

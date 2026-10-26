@@ -360,7 +360,7 @@ function discoverPlugins() {
 const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（装配方 `assembly.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
+// 常量表：先收全仓（装配方 `assembly.generated.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树

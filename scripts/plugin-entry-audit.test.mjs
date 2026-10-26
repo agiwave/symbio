@@ -55,7 +55,7 @@ function audit(files, { strict = false } = {}) {
 
 /** 装配方与 `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
-  'symbio/src/assembly.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
+  'symbio/src/assembly.generated.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
   'symbio/src/symbio_core/plugin/traverse.rs':
     `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n` +
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
@@ -144,8 +144,8 @@ test('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`
 // E-002 的**臂侧**：注册处写错前缀。真实案例 `work/set_workspace`——两条臂长在 home 的
 // `match` 里，`work` 既不是插件也没有目录，只扫引用的那半永远看不见它。
 const HOME_ARMS = (arms) => ({
-  'symbio/src/assembly.rs':
-    `${CORE['symbio/src/assembly.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
+  'symbio/src/assembly.generated.rs':
+    `${CORE['symbio/src/assembly.generated.rs']}pub const PLUGIN_ID_HOME: &str = "home";\n`,
   'symbio/src/plugins/home/plugin.rs': `use crate::assembly::PLUGIN_ID_HOME;
 use crate::symbio_core::{PluginError, PluginMeta, PATH};
 

@@ -1,0 +1,6 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: plugin_manager
+plugin_comment: 插件管理与配置入口
+plugin_assembly: sub_agent
+plugin_order: 10
+plugin_undisablable: true

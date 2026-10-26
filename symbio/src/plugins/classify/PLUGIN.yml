@@ -1,0 +1,5 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: classify
+plugin_comment: 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
+plugin_assembly: sub_agent
+plugin_order: 60

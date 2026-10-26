@@ -1,0 +1,4 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: home
+plugin_comment: 系统根
+plugin_assembly: none

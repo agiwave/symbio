@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 //   <root>/symbio/src/plugins/<name>/          插件目录（AO-001/003/005/006 的目录事实）
 //   <root>/symbio/src/plugins/agent/README.md  成员资格判词 + 兄弟插件指路
 //   <root>/symbio/src/plugins/agent/host/*.rs  职责表 + 归属表副本 + 真实模块文件
-//   <root>/symbio/src/assembly.rs               装配清单
+//   <root>/symbio/src/assembly.generated.rs     装配清单（生成物，判据读它）
 const script = fileURLToPath(new URL('./agent-ownership-audit.mjs', import.meta.url))
 
 const BASE_README = [
@@ -76,7 +76,7 @@ function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginD
     }
     const assemblyDir = path.join(root, 'symbio/src')
     fs.mkdirSync(assemblyDir, { recursive: true })
-    fs.writeFileSync(path.join(assemblyDir, 'assembly.rs'), assembly ?? BASE_ASSEMBLY)
+    fs.writeFileSync(path.join(assemblyDir, 'assembly.generated.rs'), assembly ?? BASE_ASSEMBLY)
 
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,

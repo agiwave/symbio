@@ -50,9 +50,10 @@ const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
 // 9f49d454 只有用法没有定义，6 处字面量静默上盘——执行方是 facts.test.mjs）。
 // fromDir = 本文件的产物目录（`docs/ref`）。
 const refLink = createRefLink(ROOT, "docs/ref");
-// 插件工厂 id 的 owner 是装配方（`symbio/src/assembly.rs`）——它们描述的是
-// 「哪个插件」，不是「哪个键」，也不属于内核机制（见 `assembly.rs` 模块文档）。
-const IDS_FILE = path.join(ROOT, "symbio", "src", "assembly.rs");
+// 插件工厂 id 的 owner 是装配方（`symbio/src/assembly.generated.rs`，由每个插件目录的
+// `PLUGIN.yml` 生成）——它们描述的是「哪个插件」，不是「哪个键」，也不属于内核机制
+// （见 `assembly.rs` 模块文档）。
+const IDS_FILE = path.join(ROOT, "symbio", "src", "assembly.generated.rs");
 /**
  * 输出位置：**`docs/004-ref/` 下的一份编号参考文档**。
  *

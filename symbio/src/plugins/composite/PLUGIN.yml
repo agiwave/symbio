@@ -1,0 +1,4 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: composite
+plugin_comment: 执行容器
+plugin_assembly: none

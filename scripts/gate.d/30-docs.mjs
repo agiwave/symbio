@@ -394,6 +394,11 @@ export const TEST_ONLY = [
   // 恰恰来自这份生成物——生成物漏了，守卫也跟着漏。反向用例（不是臂的字符串不算路由、
   // 手改生成物必红）因此必须由门禁跑。
   'facts/routes-ts',
+  // `facts/assembly` 是编译期装配清单（`assembly.generated.rs`）的生成器：插件 id /
+  // 子树清单 / 不可停用集全部来自各插件目录的 `PLUGIN.yml`。失效形态同属「静默」——
+  // 漏声明或顺序冲突若被吞掉，生成物照样写成功，运行期才表现为「找不到插件」。
+  // 回归测试对每条校验注入一次（缺声明 / id 不一致 / 顺序重复 / 手改生成物必红）。
+  'facts/assembly',
   // `facts/injection-matrix` 是 RE-012 注入矩阵的生成器：行的归属来自
   // `e2e/injection-matrix.mjs`，渲染必须是纯函数（`stamp: false`，同输入逐字节同输出）。
   // 失效形态同样静默：矩阵少一行 / 某一格被渲染成空串 / 行列数与数据源脱节，
@@ -459,6 +464,8 @@ export const TEST_ONLY = [
  *  - `facts/lists-index`：`ref/007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
  *    直接抛错**（一份会说谎的总账比没有总账更坏——它是给人查的，人会信它）；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/assembly`：`symbio/src/assembly.generated.rs` 的生成器（插件 id / 子树清单 /
+ *    不可停用集），事实源是各插件目录的 `PLUGIN.yml`，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
  *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。
  *  - `registry-lib`：登记机制（plan/14）的共享实现——front-matter 解析、schema 校验
@@ -505,6 +512,7 @@ export const LIBS = [
   'facts/injection-matrix',
   'facts/lists-index',
   'facts/routes-ts',
+  'facts/assembly',
   'gen-doc-refs',
   'line-count',
   'doc-find',

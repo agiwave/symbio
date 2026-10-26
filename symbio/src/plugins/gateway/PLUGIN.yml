@@ -1,0 +1,5 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: gateway
+plugin_comment: 外部 API 网关
+plugin_assembly: sub_agent
+plugin_order: 160

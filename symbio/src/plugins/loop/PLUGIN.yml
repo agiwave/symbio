@@ -1,0 +1,5 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: loop
+plugin_comment: 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
+plugin_assembly: sub_agent
+plugin_order: 40
