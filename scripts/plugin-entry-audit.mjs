@@ -35,7 +35,6 @@
  * | E-013 | `plugins/loop/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super`），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../docs/003-design/001-核心架构.md "D-083") 的闭族通货：`crate::symbio_core` + 通用库 + crate 根日志/工厂宏。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
- * | E-014 | `routes.rs` 的手写 `ROUTE_*` 常量数只许降 | 加一条跨插件地址 = 改一个不属于任何插件的共享文件。声明化（`PLUGIN.yml` → 生成）之后这张手写表是**迁移存量**（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-193 / D-200） |
  *
  * （原 E-010「消费方不得深引 `symbio_core::<域>::`」已迁至
  * [`core-export-audit.mjs`](core-export-audit.mjs) 的 **C-002** 并退役：深引是
@@ -82,7 +81,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
-// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013 E-014
+// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -109,17 +108,6 @@ const defaultRoot = path.resolve(scriptDir, '..')
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 const STRICT = process.argv.includes('--strict')
-
-/**
- * E-014：`routes.rs` 手写 `ROUTE_*` 常量的存量上限（只许降）。
- *
- * 地址应当由 `PLUGIN.yml` 声明并生成（DE-024 D-193）；这张手写表是迁移存量。
- * 新加一条跨插件地址 = 改一个所有插件都依赖、却不属于任何插件的文件，所以只许降。
- * `ROUTE_CONST_BASELINE` 只给回归测试用，`35-baseline` 另判覆盖值不得更松。
- */
-const ROUTE_BASELINE = process.env.ROUTE_CONST_BASELINE
-  ? Number(process.env.ROUTE_CONST_BASELINE)
-  : 8
 
 let errors = 0
 let warnings = 0
@@ -1284,22 +1272,6 @@ const ROUTE_MODULE = routeConstPath(repoRoot)
   }
 }
 
-// ── E-014：手写 `ROUTE_*` 只许降 ────────────────────────────────────────
-//
-// 计数的是**定义**（`routeConstDecls`），不是引用：地址表是共享手写文件这件事本身
-// 才是成本，引用多不多不改变它。夹具仓库没有 `routes.rs` ⇒ 0 条，低于基线，不红。
-const routeConstCount = [...routeConstDecls(repoRoot)].length
-if (routeConstCount > ROUTE_BASELINE) {
-  report(
-    'E-014',
-    'error',
-    rel(ROUTE_MODULE),
-    0,
-    `手写 \`ROUTE_*\` 常量 ${routeConstCount} 条 > 冻结 ${ROUTE_BASELINE} —— ` +
-      '新地址由 `PLUGIN.yml` 声明并生成（DE-024 D-193）；这张表是迁移存量，只许降',
-  )
-}
-
 console.log('')
 console.log(dim('── 路由表（绝对地址 → 消费方）─────────────────────────────────'))
 const KIND_LABEL = {
@@ -1344,7 +1316,6 @@ const ruleNames = {
   'E-011': '配置挂载点不手写 dispatch',
   'E-012': '路由常量名↔值同构且值可分发',
   'E-013': 'loop 驱动器的 import 根 ⊆ 闭族',
-  'E-014': '手写 ROUTE_* 常量只许降',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0

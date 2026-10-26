@@ -3,3 +3,5 @@ plugin_id: event_bus
 plugin_comment: 事件总线
 plugin_assembly: sub_agent
 plugin_order: 20
+# 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
+plugin_routes: subscribe

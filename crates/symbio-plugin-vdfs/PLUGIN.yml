@@ -4,3 +4,5 @@ plugin_comment: VDFS 根（单槽归系统 Agent）
 plugin_assembly: sub_agent
 plugin_order: 170
 plugin_undisablable: true
+# 跨插件地址（相对臂）：生成 crates/symbio-plugin-api/src/routes.rs 的 ROUTE_* 常量
+plugin_routes: root, watch, unwatch

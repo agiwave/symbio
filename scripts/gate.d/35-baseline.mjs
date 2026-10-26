@@ -78,16 +78,6 @@ function vocabCells(text) {
   return cells
 }
 
-/** `scripts/plugin-entry-audit.mjs` 的 `ROUTE_BASELINE`（E-014）：与 R-002 同构的三元形状，
- *  一格——手写 `ROUTE_*` 常量数上限（只许降）。 */
-function routeConstCells(text) {
-  const cells = new Map()
-  const norm = text.replace(/\r\n/g, '\n')
-  const m = /\?\s*Number\(process\.env\.ROUTE_CONST_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
-  if (m) cells.set('ROUTE', Number(m[1]))
-  return cells
-}
-
 /** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
  *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
  *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
@@ -293,17 +283,6 @@ const RATCHETS = [
     waivers: () => new Map(),
     envVar: 'VOCAB_BASELINE',
     label: '内核事件词汇（业务事件常量 / CELLS 业务行，只许降）',
-  },
-  {
-    // E-014：手写 `ROUTE_*` 地址表。声明化之后它是迁移存量，只许降；放宽 = 让
-    // 「加一条跨插件地址要改共享文件」悄悄回来。
-    id: 'route-const',
-    file: 'scripts/plugin-entry-audit.mjs',
-    dir: 'ceiling',
-    cellsOf: routeConstCells,
-    waivers: () => new Map(),
-    envVar: 'ROUTE_CONST_BASELINE',
-    label: '手写 `ROUTE_*` 常量数（只许降）',
   },
   {
     // 前端 kind 分支两格：框架层目标 0（只许降），机制层是判据与映射表的存量。

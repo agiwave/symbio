@@ -221,15 +221,33 @@ export function routeConstDecls(root) {
 }
 
 /**
+ * `VDFS_OPS` 里出现的**标识符**（按声明顺序，`ROUTE_VDFS_*` 与 `VDFS_*` 都可能）。
+ *
+ * 正则若写成 `/\bVDFS_[A-Z_]+\b/`，`ROUTE_VDFS_ROOT` 里的 `VDFS` 前面是 `_`（词字符）、
+ * **没有词边界** ⇒ 匹配不上 ⇒ 三个跨插件操作从清单里静默消失，看起来像
+ * 「操作被删了」而不是「抽取漏了」。
+ *
+ * 返回**名字**而不是值：生成器要判「vdfs 插件的 `VDFS_OPS` 是否引用了
+ * `routeConstName(声明地址)`」，而那个常量正住在待生成的 `routes.rs` 里——
+ * 先把名字解析成值会与本次生成互相依赖（首轮生成时文件还不存在）。
+ *
+ * 协议文件不存在 ⇒ 空集合（那说明这个根里没有 vdfs 插件）。对拿它做**成员判定**的
+ * 守卫，空集合的失效方向是「什么都判红」，不是静默放行。
+ */
+export function vdfsOpIds(root) {
+  const abs = path.join(root, "crates", "symbio-plugin-vdfs", "src", "protocol.rs");
+  if (!existsSync(abs)) return new Set();
+  const txt = stripComments(readFileSync(abs, "utf8"));
+  const block = txt.match(/pub const VDFS_OPS\s*:\s*&\[&str\]\s*=\s*&\[([\s\S]*?)\];/);
+  if (!block) return new Set();
+  return new Set([...block[1].matchAll(/\b((?:ROUTE_)?VDFS_[A-Z0-9_]+)\b/g)].map((m) => m[1]));
+}
+
+/**
  * `VDFS_OPS` 里的操作词，解析回字面量（按声明顺序）。
  *
- * 名字有**两种来源**：`VDFS_*` 定义在协议文件里，`ROUTE_VDFS_*` 跨插件可见、归 core。
- * 正则若写成 `/\bVDFS_[A-Z_]+\b/`，`ROUTE_VDFS_ROOT` 里的 `VDFS` 前面是 `_`（词字符）、
- * **没有词边界** ⇒ 匹配不上 ⇒ 三个操作从清单里静默消失，看起来像「操作被删了」而不是
- * 「抽取漏了」。
- *
- * 协议文件不存在 ⇒ 空清单（那说明这个根里没有 vdfs 插件）。对拿它做**成员判定**的
- * 守卫，空集合的失效方向是「什么都判红」，不是静默放行。
+ * 名字有**两种来源**：`VDFS_*` 定义在协议文件里，`ROUTE_VDFS_*` 跨插件可见、归宿主
+ * `routes.rs`（生成物）。解析时两边都查。
  */
 export function vdfsOps(root) {
   const abs = path.join(root, "crates", "symbio-plugin-vdfs", "src", "protocol.rs");
@@ -239,11 +257,7 @@ export function vdfsOps(root) {
   for (const m of txt.matchAll(/pub const (VDFS_[A-Z0-9_]+)\s*:\s*&\s*(?:'static\s+)?str\s*=\s*"([^"]+)"/g)) {
     consts.set(m[1], m[2]);
   }
-  const block = txt.match(/pub const VDFS_OPS\s*:\s*&\[&str\]\s*=\s*&\[([\s\S]*?)\];/);
-  if (!block) return [];
-  return [...block[1].matchAll(/\b((?:ROUTE_)?VDFS_[A-Z0-9_]+)\b/g)]
-    .map((m) => consts.get(m[1]))
-    .filter(Boolean);
+  return [...vdfsOpIds(root)].map((id) => consts.get(id)).filter(Boolean);
 }
 
 /**

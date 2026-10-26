@@ -413,6 +413,12 @@ export const TEST_ONLY = [
   // 恰恰来自这份生成物——生成物漏了，守卫也跟着漏。反向用例（不是臂的字符串不算路由、
   // 手改生成物必红）因此必须由门禁跑。
   'facts/routes-ts',
+  // `facts/routes-rs` 是 Rust 侧跨插件地址常量的生成器（各插件 `PLUGIN.yml` 的
+  // `plugin_routes` → `crates/symbio-plugin-api/src/routes.rs`）。失效形态同样静默：
+  // 声明了但 `route()` 里没有这条臂 / 两个插件声明同一条 / 生成物被手改——前两者
+  // 若被吞掉就产出一条没人能到达的常量，而编译器只报「未使用」甚至不报。回归测试
+  // 逐条注入这些坏形态（含 vdfs 的 `VDFS_OPS` 注册形态与 home 根容器）。
+  'facts/routes-rs',
   // `facts/assembly` 是编译期装配清单（`assembly.generated.rs`）的生成器：插件 id /
   // 子树清单 / 不可停用集全部来自各插件目录的 `PLUGIN.yml`。失效形态同属「静默」——
   // 漏声明或顺序冲突若被吞掉，生成物照样写成功，运行期才表现为「找不到插件」。
@@ -475,6 +481,9 @@ export const TEST_ONLY = [
  *    由 `06-facts-write` 的生成链 spawn（`60-facts` 跑它的 `--check` 复核末态）；
  *    目录即接线，新增一份事实不需要改门禁；
  *  - `facts/_lib`：上述契约校验 + 幂等落盘 + 溯源行剔除的共享实现；
+ *  - `facts/_plugin-yml`：`PLUGIN.yml` 的唯一读取点（扁平 schema / 插件 id 清单），
+ *    被 `facts/assembly` 与 `facts/routes-rs` 共读——各写一遍「清单长什么样」，
+ *    分叉只会表现为某一份生成器静默读不到新字段；
  *  - `facts/_capability`：`docs/004-ref/006-当前事实表.md` §6 能力矩阵的提取实现（工具描述 /
  *    风险 / 保留策略、VDFS 操作定义、路由职责）。它的失效形态与 `rust-scan` 同族——
  *    **提取写宽或写窄都不报错，只静默少一条**，而「少了哪一条」正是这张表要回答的事；
@@ -483,6 +492,9 @@ export const TEST_ONLY = [
  *  - `facts/lists-index`：`ref/007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
  *    直接抛错**（一份会说谎的总账比没有总账更坏——它是给人查的，人会信它）；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/routes-rs`：`crates/symbio-plugin-api/src/routes.rs` 的生成器（各插件
+ *    `PLUGIN.yml` 的 `plugin_routes` 投影），逐条核对地址真能被 `route()` / `VDFS_OPS`
+ *    分发——声明幽灵地址直接抛错，由 `gen-facts` 调用；
  *  - `facts/assembly`：`crates/symbio-deploy/src/lib.rs` 的生成器（插件 id / 子树清单 /
  *    不可停用集），事实源是各插件目录的 `PLUGIN.yml`，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
@@ -515,6 +527,7 @@ export const LIBS = [
   'route-facts',
   'gen-facts',
   'facts/_lib',
+  'facts/_plugin-yml',
   'facts/_capability',
   // `_sets` 是「封闭集判据」的**成员集合 + owner 声明**（读 front-matter 的
   // `lists: [<id>=owner]`，与 RE-007 同源）。登记成 LIBS：判据在它唯一的消费方
@@ -531,6 +544,7 @@ export const LIBS = [
   'facts/injection-matrix',
   'facts/lists-index',
   'facts/routes-ts',
+  'facts/routes-rs',
   'facts/assembly',
   'gen-doc-refs',
   'line-count',

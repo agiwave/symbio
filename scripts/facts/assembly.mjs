@@ -26,13 +26,11 @@
  * 「按名字查找插件」重新手写字符串。文件头按 R-003 承认这一点，口径写在生成器里。
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { pluginIds, pluginManifestRel, readPluginManifest } from "./_plugin-yml.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const PLUGINS_REL = "crates";
-const PLUGIN_CRATE_PREFIX = "symbio-plugin-";
 const OUT_REL = "crates/symbio-deploy/src/lib.rs";
 
 const WAIVER =
@@ -43,38 +41,11 @@ function constName(id) {
   return `PLUGIN_ID_${id.toUpperCase().replace(/^PLUGIN_/, "")}`;
 }
 
-/** 单行 `key: value` 的 `PLUGIN.yml`（本文件只认这份最小 schema，不引第三方 YAML 解析器） */
-function parseManifest(text, where) {
-  const out = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const m = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (!m) throw new Error(`${where}：读不懂这一行 ${JSON.stringify(raw)}`);
-    const [, key, value] = m;
-    if (key in out) throw new Error(`${where}：\`${key}\` 出现了两次`);
-    out[key] = value.trim();
-  }
-  return out;
-}
-
 function readPlugins(root) {
-  const dir = path.join(root, ...PLUGINS_REL.split("/"));
-  const ids = fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name.startsWith(PLUGIN_CRATE_PREFIX))
-    .filter((e) => e.name !== "symbio-plugin-api")
-    .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
-    .sort();
-  if (ids.length === 0) throw new Error(`${PLUGINS_REL} 里一个插件目录都没有——范围读空了`);
   const plugins = [];
-  for (const id of ids) {
-    const rel = `${PLUGINS_REL}/${PLUGIN_CRATE_PREFIX}${id}/PLUGIN.yml`;
-    const abs = path.join(root, ...rel.split("/"));
-    if (!fs.existsSync(abs)) {
-      throw new Error(`缺少 ${rel}——新插件必须带 PLUGIN.yml（加插件 = 目录 + 声明 + 代码）`);
-    }
-    const m = parseManifest(fs.readFileSync(abs, "utf8"), rel);
+  for (const id of pluginIds(root)) {
+    const rel = pluginManifestRel(id);
+    const m = readPluginManifest(root, id);
     if (m.plugin_id !== id) {
       throw new Error(`${rel}：plugin_id=${JSON.stringify(m.plugin_id)} 与目录名 ${JSON.stringify(id)} 不一致`);
     }
