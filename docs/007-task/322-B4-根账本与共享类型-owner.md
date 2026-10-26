@@ -6,7 +6,7 @@ status: todo
 created: 2026-10-26
 track: impl
 prio: next
-deps: [T-321-B3-装配清单与身份由-manifest-生成]
+deps: []
 parent: T-316-内核边界与扩展局部性收口
 where: symbio/src/symbio_core/mod.rs · docs/004-ref/ · scripts/core-export-audit.mjs
 exit: '`core/mod.rs` 手改 = 0（生成或消除）；只为「跨模块可达」而存的根导出清零；共享类型在 manifest 有「生产者 → 消费方」owner；根账本条目数只降不升。'
