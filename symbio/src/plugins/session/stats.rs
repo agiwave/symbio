@@ -50,10 +50,12 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, spend_ledger,
-    token_ledger, transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, token_ledger,
+    transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginPayload, ReadingPanel, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
 };
+
+use super::spend_ledger::spend_ledger;
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{

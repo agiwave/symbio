@@ -6,7 +6,7 @@ status: todo
 created: 2026-10-26
 track: impl
 prio: next
-deps: [T-319-B1-单消费方投影下沉试点]
+deps: []
 parent: T-316-内核边界与扩展局部性收口
 where: symbio/src/symbio_core/decl/ · symbio/src/plugins/loop/ · scripts/core-export-audit.mjs · docs/
 exit: '核验并补齐：`BUILTIN_*` 的非协议部分为零；7 个控制面视图均为 owner 声明；manifest 逐条记录视图 / 事实 / 类型的 owner；C-003 的投影类豁免清零，存量只降不升。'

@@ -14,6 +14,7 @@ mod options;
 mod orchestrator;
 pub(crate) mod paths;
 pub(crate) mod runtime;
+mod spend_ledger;
 mod stats;
 mod stats_reading;
 mod temporal;

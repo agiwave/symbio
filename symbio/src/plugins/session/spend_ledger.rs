@@ -1,17 +1,24 @@
 //! 金额台账：`response{port=model}` 自带的 `spend` 按**币种**分桶、桶内按主体累计。
 //!
-//! ## 为什么与 [`super::token`] / [`super::cost`] 都是分开的
+//! ## 为什么与 token / cost 都是分开的
 //!
 //! 三者各回答一件事，观察对象不同：
 //!
-//! | 投影 | 读什么 | 回答 |
+//! | 读数 | 读什么 | 回答 |
 //! |---|---|---|
 //! | `cost_ledger` | 事件的 `cost_ms`（按写方） | 这一轮花了多少时间 |
 //! | `token_ledger` | 应答载荷的 `usage`（按内容主） | 用了多少 token |
-//! | `spend_ledger` | 应答载荷的 `spend`（按币种 + 内容主） | 花了多少钱 |
+//! | 本模块 | 应答载荷的 `spend`（按币种 + 内容主） | 花了多少钱 |
 //!
 //! 时间、token、钱三者没有换算关系（价格是配置，不是常量），合成一列就会让
 //! 一个读数冒充另一个。
+//!
+//! ## 为什么住会话插件（[DE-023](../../../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-180）
+//!
+//! 本账只有会话读侧一个消费方，且不携带协议语义：金额的累计口径由**谁在读**决定，
+//! 而不是由内核的语法决定。内核只留 `Projection` 这个纯函数构造器，视图类型与
+//! 实现跟消费方走——第二个读侧出现时按同一份事实各算各的，不靠「core 里有一份
+//! 通用实现」来防止口径漂移（漂移的判据是读数比对，不是文件坐标）。
 //!
 //! ## 为什么按币种分桶
 //!
@@ -26,11 +33,10 @@
 //! 「本会话没有价格配置」读成 `by_currency: {}`，与「每次都是 0 元」由
 //! `charges` 分辨。补 0 会把前者读成后者（与 `token_ledger` 的 `measured` 同源）。
 
-use super::super::event::Event;
-use super::Projection;
-
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use crate::symbio_core::{Event, Projection, EVENT_RESPONSE};
 
 /// 一个主体在一种币种下的累计金额。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -72,7 +78,7 @@ pub fn spend_ledger() -> Projection<SpendLedgerView> {
     Projection::new(|events: &[Event], now| {
         let mut by_currency: BTreeMap<String, CurrencySpend> = BTreeMap::new();
         for e in events {
-            if e.ts > now || e.kind != crate::symbio_core::EVENT_RESPONSE {
+            if e.ts > now || e.kind != EVENT_RESPONSE {
                 continue;
             }
             let payload = &e.payload;
@@ -122,5 +128,5 @@ pub fn spend_ledger() -> Projection<SpendLedgerView> {
 }
 
 #[cfg(test)]
-#[path = "spend.test.rs"]
+#[path = "spend_ledger.test.rs"]
 mod tests;

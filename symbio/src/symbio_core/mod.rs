@@ -63,6 +63,8 @@ pub use event::{
 pub use invariants::{
     check_all, closes_turn, is_stop_fact, is_turn_final, is_turn_open, provenance_violation,
 };
+// 投影的唯一构造器：**机制**，不是某一本账的词汇。视图类型与实现跟消费方插件走
+// （DE-023 D-180），内核只提供「纯函数 + 预算」这个形状；插件经根出口拿它来建自己的投影。
 pub use projection::branch::{branch_candidates, branch_hide_unselected, branch_selected};
 pub use projection::calibration::calibration;
 pub use projection::checkpoint::{checkpoint, CheckpointState};
@@ -70,8 +72,8 @@ pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::slo::slo_report;
-pub use projection::spend::spend_ledger;
 pub use projection::token::token_ledger;
+pub use projection::Projection;
 // 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
 //
 // **为什么它们必须占根出口而投影函数不必**：`SloLatencyView::merge` /
