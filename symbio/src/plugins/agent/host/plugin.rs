@@ -34,7 +34,7 @@
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——宿主替 agent 目录再写一遍技能与 MCP 的解析，两条链必然长期不同步。
 //! 子树因此挂**与父 Agent 同构的默认插件集**（见
-//! [`crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
+//! [`crate::assembly::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
 //! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
 //! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、
 //! `memory`、`setting`）全部与父树一致——UI 资源入口因此对齐。`model` 在子树里有
@@ -44,6 +44,7 @@
 //! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
 //! （子智能体委托）始终注册**。
 
+use crate::assembly::ASSEMBLY_SUB_AGENT_PLUGINS;
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::AgentScope;
@@ -52,9 +53,8 @@ use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
-    ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
-    PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-    VDFS_PARENT_ADDR, WORKDIR,
+    CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use crate::symbio_core::{DetailField, DetailOption};
 use async_trait::async_trait;

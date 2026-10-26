@@ -43,6 +43,7 @@
 //! 与当前选中项的**动作集**都变了，订阅方据此重拉并重读当前项（前端 `useVdfs` 的既有
 //! 收敛路径），按钮因此不会停在旧状态上。订阅走 [`vdfs_watch_changes`]（本插件是自管变更源）。
 
+use crate::assembly::ASSEMBLY_UNDISABLABLE_PLUGINS;
 use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
@@ -51,10 +52,9 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, ASSEMBLY_UNDISABLABLE_PLUGINS,
-    CONFIGURABLE_VISITOR, PLUGIN_FILE, PLUGIN_ID_MANAGER, PLUGIN_KEY_CAN_DISABLE,
-    PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
-    PLUGIN_KEY_VERSION,
+    PluginInvokeResponse, PluginMeta, PluginPayload, CONFIGURABLE_VISITOR, PLUGIN_FILE,
+    PLUGIN_ID_MANAGER, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,

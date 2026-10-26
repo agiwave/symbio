@@ -5,7 +5,6 @@
 // C-001 校验，编译器兜底）。外部只写 `symbio_core::<符号>`，不得写 `symbio_core::<域>::…`。
 mod actors;
 mod adapters;
-mod assembly;
 // **Agent 包的权限声明与它的执行方**（DE-011 §5.3 / D-153）：写侧只有 agent 插件
 // （它扫描 Agent 目录），读侧是一堆互不相认的宿主工具（web 三工具 / vdfs 九工具），
 // 插件之间互相不可见 ⇒ 声明形状与判据必须作共享设施住 core（与 `capability::error`
@@ -454,10 +453,6 @@ pub use keys::{
     REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID,
     TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
-
-// ==================== 装配策略 ====================
-// 「一棵标准插件树挂哪些插件」「哪些插件不许被停用」——不是键、不是 id，见 assembly 模块文档。
-pub use assembly::{ASSEMBLY_SUB_AGENT_PLUGINS, ASSEMBLY_UNDISABLABLE_PLUGINS};
 
 // ==================== 基础设施 / 工具函数 ====================
 pub use clock::clock_now_ms;

@@ -42,11 +42,12 @@
 //! 配置要等重新启用后才能改。这是「停用」的题中之义——**停用是把这个插件连同
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
+use crate::assembly::ASSEMBLY_UNDISABLABLE_PLUGINS;
 use crate::symbio_core::{
     creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
     PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
-    PluginStopReason, ASSEMBLY_UNDISABLABLE_PLUGINS, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE,
-    PLUGIN_ID_HOME, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
+    PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME,
+    PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
 use serde_json::Value;
 

@@ -424,7 +424,6 @@ impl Frozen {
     }
 }
 
-
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
 // 名字住在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
@@ -562,7 +561,6 @@ const PROTOCOL_FACTS: &[FactDecl] = &[
         fields: PROTOCOL_FIELDS,
     },
 ];
-
 
 #[cfg(test)]
 #[path = "mod.test.rs"]

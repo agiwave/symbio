@@ -222,7 +222,7 @@ impl SymbioKey for RequiredPluginsKey {
 pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
 // 注：插件**装配策略**常量（子树清单、不可停用清单）不在本域——它们不是上下文键，
-// 已迁到 `symbio_core::assembly`（见该模块文档的判据说明）。
+// 也不在 core：它们是装配方的数据，见 `crate::assembly`。
 
 // 注：capability 域的四条通道键不在本域——三条收集通道
 // （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型

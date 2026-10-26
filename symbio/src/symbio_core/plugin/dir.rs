@@ -208,7 +208,7 @@ pub const PLUGIN_RESERVED_KEYS: &[&str] = &[
 
 /// 投影键：构造者是否声明为必需（`PluginEntry::required`）——必需即**不可删除**
 pub const PLUGIN_KEY_REQUIRED: &str = "plugin_required";
-/// 投影键：是否允许停用（= 不在 [`crate::symbio_core::ASSEMBLY_UNDISABLABLE_PLUGINS`] 里）
+/// 投影键：是否允许停用（= 不在装配方的 `ASSEMBLY_UNDISABLABLE_PLUGINS` 里）
 pub const PLUGIN_KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
 /// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（D-095 根因一）

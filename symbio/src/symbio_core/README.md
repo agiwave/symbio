@@ -42,7 +42,7 @@ impl: done
  | 符号 | 形态 | 例 |
  |---|---|---|
  | 类型 / trait | 域名（PascalCase）+ 语义 | `ExecEventSink` · `VdfsNode` · `PluginDir` · `CapabilityMeta` |
- | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `ASSEMBLY_SUB_AGENT_PLUGINS` |
+ | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `PLUGIN_ID_HOME` |
  | 函数 / 自由函数 | 域名（snake_case）+ 语义 | `clock_now_ms` · `vdfs_notify_change` · `capability_resolve` · `creator_create_object` |
 
  **函数也要前缀，理由与类型 / 常量完全相同**：本层符号在全仓按根平铺导入（第 4 条），
@@ -132,7 +132,6 @@ impl: done
 
 | 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
 |---|---|---|---|---|
-| `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
 | `authz` | `EffectiveMatrix`（部署表 + 撤销覆盖层的合成结果） | `PRINCIPAL_`（主体 id）· `CAP_`（能力名）· `SESSION_OWNER` | `bind_` · `unbind_` · `principal_` · `content_visible` · `production_matrix` | 本机部署的**授权策略表**（谁持有什么能力 + 哪些能力已被淘汰裁决收回）：表与判定机制同住 `governance` 旁边（[D-099](../../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。整域 `pub(crate)`——表里写的是**部署事实**而不是契约，跨插件可见、不进对外公开面；前缀行只登记归属，不参与根公开面核对 |
 | `decl` | `FactDecl` · `ViewDecl` · `PluginDeclarations` · `Builder` · `Frozen` | — | `declare` · `seal` | 事实 / 视图**声明层**：`FactDecl` 答「这个事实有哪些字段」，`ViewDecl` 答「这个视图读了哪些字段、算一次多少成本」。与 `event::grid` 的 `CELLS` 并存（一个管格位、一个管字段）。内核只声明协议五格；控制面事实与全部视图由 `plugins::loop::control_decl` 声明，经 `Builder::declare` 一次交齐 |
 | `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `FullModel` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` | — | — | `StubLlmAdapter` 是 `#[cfg(test)]` 项（只有测试构建里存在：零 LLM 桩，**没有生产接入位**，故不参与接线清偿）；其余全部是 [plan/DE-018 §3.3](../../../docs/003-design/018-模块架构.md "DE-018-模块架构") 注入策略与 [plan/DE-001 §10](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/003-design/verify/latency_gate.rs)），名字先于模块存在——判据同冻结契约词（§3）。`LlmTurn` 是 [plan/PL-008 §2](../plugins/session/docs/102-core-loop.md "DE-102-core-loop") 的生成端口产物；工具分发契约与结果形状已归 loop 插件本地（[D-118](../../../docs/003-design/015-义务环.md "DE-015-义务环")），不在本域公开面 |
@@ -194,7 +193,6 @@ impl: done
 
 | 域 | 职责 | 关键符号 | 子路径 |
 |---|---|---|---|
-| `assembly` | 装配策略：一棵标准插件树挂哪些插件、哪些插件不许被停用 | `ASSEMBLY_SUB_AGENT_PLUGINS` · `ASSEMBLY_UNDISABLABLE_PLUGINS` | — |
 | `authz` | 本机部署的授权策略表：主体清单与各自的 grants / 可见域，以及淘汰裁决的撤销覆盖层。判定语义复用 `governance`，本域只装「谁」这条部署事实 | `PRINCIPAL_*`（主体 id）· `CAP_*`（能力名）· `SESSION_OWNER` · `production_matrix` · `content_visible` · `EffectiveMatrix`（部署表 `fold` 撤销事实后的合成结果） | — |
 | `adapters` | v2 ⑤ 外部资源的**唯一接缝**：时延闸门 = 依赖注入策略——令牌按档位签发（ZST、私有构造），`LlmAdapter::generate` 只收 `FullModel` ⇒ 反射档在类型上拿不到生成能力（[plan/DE-018 §3.3](../../../docs/003-design/018-模块架构.md "DE-018-模块架构")） | `LatencyTier`（四层预算 80/300/60k/86.4M）· `TokenIssuer` · 令牌 `RuleOnly` / `FullModel`（**两档**：快速档令牌 `ClassifyOnly` / `issue_fast` 已按 [D-096](../plugins/model/README.md "symbio/src/plugins/model/README") 退役——它守的 `Classifier` 端口生产从未存在，「只分类不生成」改由 classify 的返回类型与工具集判据承载）· `LlmAdapter`（`generate` / `generate_streaming`——流式只是帧的形态，收束语义不变）· `AdapterError` · `StubLlmAdapter`（`#[cfg(test)]` 零 LLM 桩：彩排与测试的确定性替身，`succeed_streaming` 分片 / `aborting` 中止）· `ProviderLlmAdapter`（真实实现：`execute_turn` 折进 `LlmAdapter`，帧桥择要转发正文增量）· `DeltaSink` / `SilentDeltas` | — |
 | `actors` | v2 ② 主体：只收类型化输入（事件切片 / `View`）、只产事件（[plan/DE-018 §3.1](../../../docs/003-design/018-模块架构.md "DE-018-模块架构") ② 行）；零 LLM 彩排的应答是彩排内的**定值**（链路形状一条不少），规则语义归 `classify` 规则表，`Reasoner` / `Translator` 归 S2 / S5 | `ActorSpec` · `Pattern`（三模式闭集：`Decider` / `Reasoner` / `Translator`）· `Scope`（root / child） | — |

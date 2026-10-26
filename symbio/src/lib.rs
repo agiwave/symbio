@@ -12,6 +12,9 @@
 //! - `symbio_core/`：核心抽象（Plugin trait、PluginInvokeRequest、schemas、**服务 trait**）
 //!   与**架构元素**——含 `authz`（本机部署的授权策略表：谁持有什么能力 + 可见域），
 //!   表与它校验用的机制（`governance`）同住一处，`pub(crate)` 开给全 crate
+//! - `assembly`：宿主装配策略（私有）——一棵标准插件树挂哪些插件、哪些插件不许停用。
+//!   它不是机制而是**装配方的数据**，故不住 `symbio_core`（core 只经 `REQUIRED_PLUGINS`
+//!   接收装配结果）
 //! - `providers/`：通用服务基础设施（私有，**不**对外暴露）
 //!   - 各服务的**抽象**在 `symbio_core::embedding`
 //!   - 各服务的**实现**在 `src/providers/`
@@ -19,6 +22,7 @@
 //!   - 业务模块通过 `creator_create_object::<dyn XXXService>(...)` 获取实例
 //!   - **不**通过 `pub use` 暴露给 crate 外部
 
+mod assembly;
 pub mod init;
 mod plugins;
 mod providers;

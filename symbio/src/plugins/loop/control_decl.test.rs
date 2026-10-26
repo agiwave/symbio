@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::symbio_core::ring::{Decl, Pattern};
-use crate::symbio_core::{
-    Builder, Entity, Frozen, LatencyTier, PluginDeclarations, Seq, Verb,
-};
+use crate::symbio_core::{Builder, Entity, Frozen, LatencyTier, PluginDeclarations, Seq, Verb};
 
 use super::*;
 
@@ -79,7 +77,6 @@ fn core_table() -> Arc<Frozen> {
     });
     b.seal().expect("控制面声明集必须能冻结")
 }
-
 
 #[test]
 fn control_plane_loads_and_freezes() {
@@ -1241,4 +1238,3 @@ fn turn_head_model_open_until_the_round_is_dispatched() {
         "内部往返带 `via`，不属于「本幕要派发的那一轮」"
     );
 }
-

@@ -125,7 +125,7 @@ export const GUARDS = [
   // 只判**三个封闭名字**是刻意的：给本仓几百个数字都配来源就是写第二份真相。
   'doc-count-audit',
   // `agent-ownership-audit`（AO-001…006）判「**agent 的归属声明与事实来源同源**」：
-  // 模块文档里的归属表 / 职责表 / 子树清单判词 ↔ `symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`
+  // 模块文档里的归属表 / 职责表 / 子树清单判词 ↔ 装配方的 `ASSEMBLY_SUB_AGENT_PLUGINS`
   // ↔ `plugins/` 实际目录 ↔ `host/` 实际模块。这类表此前是三处手写、无人校验，
   // 09 报告一次数出 5 处过期描述（幽灵模块 `host/instruction.rs`、把成员资格说反的
   // `vdfs 不在其中`、指向已并入 memory 的 `work`）——读者照抄就找不到东西，而门禁全绿。
