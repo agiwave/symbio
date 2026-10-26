@@ -243,7 +243,7 @@ C-001），这层内部面只能跟着升为 `pub`，名字却还是内部助手
 | `store` | 一切事实的**唯一写入口与读取面**（append-only：trait 上不存在 update/delete，F1）；`memory` 是平凡基线，持久化实现住使用方插件 | `Store`（trait）· `MemoryStore` · `EventStore`（便捷别名）· `AppendError` | — |
 | `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `text_truncate_bytes` · `text_floor_char_boundary` | — |
 | `turn` | **轮次面**：一次轮次怎么交付（`dispatch`）、怎么按形状造节点（`node_build`）、产出什么记录（`facts`）。同时看见 `llm` 与 `chat`，是两者之上的装配面 | `TurnSpec` / `TurnSettings` / `TurnDispatch` / `TurnReport` / `TurnStatus` · 动作词表 `run_ops` 与载荷（`AddNodesRequest` / `EditFrame` / `ConsolidateRequest` / `Compression*`）· 写侧构造 `llm_build_*` / `dialog_node` / `PresentationTree` · 产物记录 `Delegation` / `TaskDeclaration` / `ReportDraft` | `dispatch` · `node_build` · `facts` |
-| `vdfs` | 统一资源访问契约（规范见 [DE-010-VDFS前端页面规范](../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")） | `VdfsProvider` · `VdfsNode` · `VdfsRequest` / `VdfsResponse` · `VdfsError` · `VdfsChangeSubscriptions` · `VDFS_*` 词表 | `address` · `host` |
+| `vdfs` | 统一资源访问契约（规范见 [DE-010-VDFS前端页面规范](../../docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范")） | `VdfsProvider` · `VdfsNode` · `VdfsRequest` / `VdfsResponse` / `VdfsListResponse` · `VdfsError` · `VdfsChangeSubscriptions` · `VDFS_*` 词表 | `address` · `host` |
 | `view` | 投影产出的**共享类型层**（与 `event` 同理：③ projection 与将来的 ② actors 都只 import 本域） | `View`（`value` / `degraded` / `used`——「可降级」是类型义务）· `Budget` | — |
 
 > `capability` / `chat` / `embedding` / `llm` / `plugin` / `present` / `turn` 的第四列是**协作者视角**的子路径，

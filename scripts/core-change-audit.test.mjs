@@ -35,6 +35,23 @@ test('CC-001 触发：动 kernel 同样算 core', () => {
   assert.match(r.errors[0], /^CC-001/)
 })
 
+// 口径边界：只判源码。内核的 `Cargo.toml` 每轮依赖整理都会变，把它算进来会让这条判据
+// 退化成「每次都填表」；而清单膨胀的后果由 C-002 / C-004 从结果面判。
+test('CC-001 不触发：只改了 core 的清单 / README（没有 `.rs`）', () => {
+  const r = judge(
+    SHA,
+    ['crates/symbio-core/Cargo.toml', 'crates/symbio-core/README.md'],
+    msg(),
+  )
+  assert.deepEqual(r.errors, [])
+})
+
+test('CC-001 触发：清单与源码同批改动，仍按源码算', () => {
+  const r = judge(SHA, ['crates/symbio-core/Cargo.toml', CORE], msg())
+  assert.equal(r.errors.length, 1)
+  assert.match(r.errors[0], /^CC-001/)
+})
+
 test('CC-002 触发：既动插件又动 core，理由里没有决策号', () => {
   const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: 顺手补了个分支\n'))
   assert.equal(r.errors.length, 1)

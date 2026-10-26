@@ -273,3 +273,29 @@ impl VdfsResponse {
         }
     }
 }
+
+// ==================== 列表响应（跨插件契约） ====================
+
+/// `vdfs/list` 的响应；`vdfs/root` 复用同一形状——后者的 `path` 就是**根地址**
+/// （调用方没给地址，由宿主填上它自己挂的那个名字）。
+///
+/// ## 为什么住这里，而不是 `vdfs` 插件
+///
+/// 它有两个 Rust 侧消费方：`vdfs` 插件构造它，`agent` 插件读它的 `path` 拼子会话地址
+/// （`plugin-agent/src/host/subagent.rs::session_vdfs_addr`）。按 E-009，消费方不得
+/// `use symbio_plugin_vdfs`；按 D-196，被两个插件共同需要的类型就属于领域，上移到共享
+/// 类型层。留成插件私有型时，`agent` 只能拿 `Value` + 手写 `"path"` —— 字段名漂移不会
+/// 编译失败，只在子会话订阅时静默报错。
+///
+/// `path` 是本响应**唯一**的地址字段：`vdfs/root` 的调用方无从知道根叫什么；`vdfs/list`
+/// 走同一形状，于是那里它等于回显请求地址（同一份响应形状服务两个操作，不为回显单独
+/// 造一个类型）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VdfsListResponse {
+    /// 被列出目录的全路径（`vdfs/root` 时为虚拟根地址）
+    pub path: String,
+    /// 目录自身节点
+    pub node: VdfsNode,
+    /// 子条目（地址 + 节点，见 [`VdfsItem`]）
+    pub items: Vec<VdfsItem>,
+}

@@ -358,8 +358,8 @@ pub use vdfs::{
 // 域类型：节点 / 内容 / 请求响应 / 错误 / 变更
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent,
-    VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams, VdfsRequest, VdfsResponse,
-    VdfsResult, VdfsValidationError, VdfsWriteResponse,
+    VdfsContext, VdfsError, VdfsItem, VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams,
+    VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
 };
 // 契约函数与宿主桥
 pub use vdfs::{

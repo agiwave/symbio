@@ -95,7 +95,13 @@ const inDirs = (files, dirs) => files.some((f) => dirs.some((d) => f.startsWith(
  */
 export function judge(sha, files, message) {
   const errors = []
-  if (!inDirs(files, CORE_DIRS)) return { sha, errors }
+  // 只对**源码**判 CC-001。`Cargo.toml` / `README.md` 的改动不改变内核的公开面与语义，
+  // 而依赖清单几乎每轮都在变（一次依赖整理就动过 31 份，其中包含 core 的）。把清单算进来，
+  // 每一轮机械整理都要挂一条 `Core-Change:`，这条判据会从「留理由」退化成「每次都填表」，
+  // 贬值速度比它拦住的东西快。清单膨胀的真实后果是内核面变大，那由 C-002（深引）与
+  // C-004（账本条数）从**结果面**判——本条判的是**意图**，两者不该混。
+  const sources = files.filter((f) => f.endsWith('.rs'))
+  if (!inDirs(sources, CORE_DIRS)) return { sha, errors }
 
   const m = message.match(TRAILER_RE)
   const touchesExt = inDirs(files, EXT_DIRS)

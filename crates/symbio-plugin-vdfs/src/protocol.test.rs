@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use symbio_core::VdfsNode;
 
 #[test]
 fn ops_are_unique_and_prefixed() {

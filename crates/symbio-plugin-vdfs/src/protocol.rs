@@ -5,7 +5,9 @@
 //! - **纯接口**（[`VdfsProvider`] trait 与其域类型）在 core：
 //!   `symbio_core::vdfs`——那是 VDFS 的 centerpiece；
 //! - **线路格式**（请求 / 响应信封 + 协议路径常量）在本文件——只有 vdfs 插件
-//!   自己消费，**core 不暴露本文件的任何类型**。
+//!   自己消费，**core 不暴露本文件的任何类型**。唯一例外是 [`VdfsListResponse`]：
+//!   `agent` 也要读它的 `path` 拼子会话地址，按 D-196 它属于领域（两个 Rust 侧消费方），
+//!   归 `symbio_kernel::vdfs`，本文件只 `pub use` 转发。
 //!
 //! ⚠️ **三个例外**：`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` **跨插件可见**
 //! （`agent` 拼 Run 根地址、`cli` 订阅 vdfs 频道、前端按它们发请求），因此它们的
@@ -19,7 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use symbio_core::{VdfsContent, VdfsItem, VdfsNode};
+use symbio_core::{VdfsContent, VdfsItem};
 use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 
 // ==================== 协议操作路径 ====================
@@ -178,21 +180,14 @@ pub struct VdfsSearchRequest {
 
 // ==================== 响应 ====================
 
-/// `vdfs/list` 响应；`vdfs/root` 复用同一形状——后者的 `path` 就是**根地址**
-/// （调用方没给地址，由宿主填上它自己挂的那个名字）。
-///
-/// `path` 是本响应**唯一**的地址字段，它存在的理由只有上面那一条：`vdfs/root`
-/// 的调用方无从知道根叫什么。`vdfs/list` 走同一形状，于是那里它等于回显请求
-/// 地址（同一份响应形状服务两个操作，不为回显单独造一个类型）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VdfsListResponse {
-    /// 被列出目录的全路径（`vdfs/root` 时为虚拟根地址）
-    pub path: String,
-    /// 目录自身节点
-    pub node: VdfsNode,
-    /// 子条目（地址 + 节点，见 [`VdfsItem`]）
-    pub items: Vec<VdfsItem>,
-}
+// `vdfs/list` 与 `vdfs/root` 的响应形状定义在 `symbio_kernel::vdfs`，这里只转发：
+// 它有两个 Rust 侧消费方（本插件构造、`agent` 读 `path`），按 E-009 后者不能
+// `use symbio_plugin_vdfs`，按 D-196 该类型属于领域而不是某个插件。
+//
+// 用行注释而不是 `///`：给 `pub use` 挂文档注释并链接到被转发的项会让 rustdoc 在
+// 链接解析阶段 panic（`no resolutions for a doc link`，rustc 1.91）。语义与字段说明
+// 在 `symbio_kernel::vdfs::VdfsListResponse` 上。
+pub use symbio_kernel::vdfs::VdfsListResponse;
 
 /// `vdfs/tree` 响应（**扁平**条目列表——层级由每个条目的 `path` 表达）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

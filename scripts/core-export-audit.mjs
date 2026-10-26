@@ -259,11 +259,17 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * `error[E0603]: module plugin is private`（setting / telegram 两个插件同时红）。
  * 宏引用**数不出来消费方**（消费方是宏调用点，源码里没有那条路径），所以唯一合规
  * 写法就是走根平铺。这是「拆 crate 收窄域可见性」漏掉的一处，不是新增共享类型。
+ *
+ * 396（2026-10-27，+1）：`VdfsListResponse` 上移。它是 `vdfs/list` 与 `vdfs/root` 的响应
+ * 形状，此前定义在 vdfs 插件内部；`agent` 侧拼子会话地址时只能取 `Value` 再手写
+ * `v.get("path")`——字段名漂移不会编译失败，只在子会话订阅时静默报错。消费方实测 2 个
+ * （vdfs 构造、agent 读），满足 C-003，属 D-196 的「被两个插件共同需要的类型就属于领域」。
+ * 这是**该涨的一次**：它换掉的是一处跨 crate 的字面量耦合，不是新开一个出口。
  */
-// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄
+// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 395
+  : 396
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })

@@ -32,7 +32,9 @@ pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};
 pub use node::{vdfs_derive_ext, VdfsItem, VdfsNewType, VdfsNode};
 pub use path::{vdfs_has_parent_segment, vdfs_path_within};
 pub use provider::{DynVdfsProvider, VdfsProvider};
-pub use request::{VdfsActionResult, VdfsRequest, VdfsResponse, VdfsWriteResponse};
+pub use request::{
+    VdfsActionResult, VdfsListResponse, VdfsRequest, VdfsResponse, VdfsWriteResponse,
+};
 
 #[cfg(test)]
 mod tests;

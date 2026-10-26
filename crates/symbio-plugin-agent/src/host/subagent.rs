@@ -58,7 +58,9 @@ use symbio_core::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
-use symbio_core::{VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING};
+use symbio_core::{
+    VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
+};
 use symbio_deploy::PLUGIN_ID_SESSION;
 use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 
@@ -1095,17 +1097,16 @@ async fn session_vdfs_addr(
         .route(c)
         .await
         .map_err(|e| PluginError::InternalError(format!("vdfs/root 失败: {e}")))?;
-    let v: Value = resp
-        .get::<Value>()
+    let v: VdfsListResponse = resp
+        .get::<VdfsListResponse>()
         .map_err(|e| PluginError::InternalError(format!("vdfs/root 载荷解析失败: {e}")))?;
-    let root = v
-        .get("path")
-        .and_then(Value::as_str)
-        .map(|s| s.trim_end_matches('/'))
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            PluginError::InternalError(format!("vdfs/root 未返回根地址，无法订阅子会话变更: {v}"))
-        })?;
+    let root = v.path.trim_end_matches('/');
+    if root.is_empty() {
+        return Err(PluginError::InternalError(format!(
+            "vdfs/root 未返回根地址，无法订阅子会话变更: {}",
+            v.path
+        )));
+    }
     Ok(format!("{root}/{PLUGIN_ID_SESSION}/{session_id}"))
 }
 
