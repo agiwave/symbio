@@ -425,3 +425,114 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
         "界面文本不得进请求包：模型会以为那是它自己刚说的"
     );
 }
+
+// ── 分支的读法（D-173）──────────────────────────────────────────────────
+//
+// 这一组钉的是「**送给模型的那一份**只有一支」——它是重试唯一的外部可见效果。
+// 标注与选中态本身在 `projection::branch` 的用例里钉，这里只钉折叠之后的**请求包**。
+
+/// 一条 `turn.branch`：`into` 那一支接管读法。
+fn branch(of: &str, into: &str) -> Event {
+    Event::pending(
+        format!("branch-{into}"),
+        crate::symbio_core::EVENT_TURN_BRANCH,
+        Entity::Turn,
+        Verb::Asserted,
+        2,
+        "person/local",
+    )
+    .with_payload(serde_json::json!({ "of": of, "into": into }))
+}
+
+/// 重试之后：旧支的答复**仍在转写里**（切回去还看得见），但**不在请求包里**。
+///
+/// 反面是「重试了但答案一模一样」——那是这条折叠缺失唯一的外部症状，而它不报错：
+/// 事实照常入格、`session/stats` 照常有数，只有模型读到的还是用户刚刚不要的那一份。
+#[test]
+fn the_replaced_branch_stays_out_of_the_request_package() {
+    let events = vec![
+        user(1, "u-1", "问"),
+        assistant(1, "x-1", "甲答复"),
+        branch("t-1", "t-2"),
+        assistant(2, "x-2", "乙答复"),
+    ];
+    let view = transcript()
+        .apply(&events, i64::MAX, Budget::generous())
+        .value;
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("user".to_string(), "问".to_string()),
+            ("assistant".to_string(), "甲答复".to_string()),
+            ("assistant".to_string(), "乙答复".to_string()),
+        ],
+        "两支的正文都留在转写里（隐藏是读法，不是删除）"
+    );
+    let sent: Vec<String> = view.to_messages().into_iter().map(|m| m.text).collect();
+    assert_eq!(
+        sent,
+        vec!["问".to_string(), "乙答复".to_string()],
+        "请求包里只剩当前那一支，而**问句必须留着**——它是两支的共同祖先"
+    );
+}
+
+/// 用户点切换器换回旧支 ⇒ 请求包跟着换：读法由**两类事实共同说**，后到的胜出。
+#[test]
+fn switching_back_moves_the_request_package_back() {
+    let mut events = vec![
+        user(1, "u-1", "问"),
+        assistant(1, "x-1", "甲答复"),
+        branch("t-1", "t-2"),
+        assistant(2, "x-2", "乙答复"),
+    ];
+    events.push(
+        Event::pending(
+            "sel-1",
+            crate::symbio_core::EVENT_BRANCH_SELECTED,
+            Entity::Turn,
+            Verb::Asserted,
+            3,
+            "person/local",
+        )
+        .with_payload(serde_json::json!({ "selected": "t-1" })),
+    );
+    let sent: Vec<String> = transcript()
+        .apply(&events, i64::MAX, Budget::generous())
+        .value
+        .to_messages()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["问".to_string(), "甲答复".to_string()],
+        "切回旧支后模型读的必须是旧支"
+    );
+}
+
+/// 被选中那一支后来被整段截断 ⇒ 退回在世的最后一支，**不许把整组剪空**。
+///
+/// 剪空的后果比读错一支严重：那一轮的问题在请求包里一个答复都没有，模型不知道自己
+/// 上一轮说了什么。
+#[test]
+fn a_truncated_selected_branch_falls_back_instead_of_hiding_everything() {
+    let events = vec![
+        user(1, "u-1", "问"),
+        assistant(1, "x-1", "甲答复"),
+        branch("t-1", "t-2"),
+        assistant(2, "x-2", "乙答复"),
+        removed(&["t-2", "x-2"]),
+    ];
+    let sent: Vec<String> = transcript()
+        .apply(&events, i64::MAX, Budget::generous())
+        .value
+        .to_messages()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["问".to_string(), "甲答复".to_string()],
+        "乙那支已被删掉（条目本身也不在），甲必须照读"
+    );
+}

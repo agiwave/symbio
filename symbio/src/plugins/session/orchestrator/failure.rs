@@ -465,26 +465,11 @@ impl Convergence {
 /// `persist_failure` 用它把「错误降级」的作用域收窄到失败 Turn 及其后代：
 /// 历史轮次的消息不参与合并，避免 session 层拿流式快照去"补写"一份
 /// Model 插件已落库的节点（同一 Turn 下出现两份同内容文本节点的根源）。
+///
+/// 并集口径（`parent_id` 后代 ∪ `meta.turn_root` 记号）不在这里写第二份——它与重试、
+/// 分支隐藏是同一条判据，单点在 [`crate::symbio_core::node_build::subtree_of`]。
 fn subtree_of(messages: &[cm::ChatNode], root: &str) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    ids.insert(root.to_string());
-    let mut queue = vec![root.to_string()];
-    // `flat` 档下本轮响应骨架的直接子节点升了根（`parent_id: None`），靠
-    // `meta.turn_root` 记号认回（与 `resume::process_retry_subtree` 同一条并集）。
-    for m in messages {
-        if crate::symbio_core::node_build::turn_root_of(m) == Some(root) && ids.insert(m.id.clone())
-        {
-            queue.push(m.id.clone());
-        }
-    }
-    while let Some(pid) = queue.pop() {
-        for m in messages {
-            if m.parent_id.as_deref() == Some(pid.as_str()) && ids.insert(m.id.clone()) {
-                queue.push(m.id.clone());
-            }
-        }
-    }
-    ids
+    crate::symbio_core::node_build::subtree_of(messages, root)
 }
 
 #[cfg(test)]

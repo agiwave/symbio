@@ -325,6 +325,33 @@ pub fn turn_root_of(node: &ChatNode) -> Option<&str> {
         .and_then(|v| v.as_str())
 }
 
+/// `root` 在 `messages` 里的**传递闭包子树**（含 `root` 自身）。
+///
+/// 「本轮的工作 = 骨架 ∪ 它的后代」这句话有**三份**消费方：失败降级
+/// （`orchestrator::failure::persist_failure`）、重试（`chat_loop::wake`）、分支隐藏
+/// （`projection::branch::branch_hide_unselected`）。各写一遍的后果是其中一份漏掉
+/// `flat` 档：那一档下本轮响应骨架的直接子节点升了根（`parent_id: None`），只按
+/// `parent_id` 收集够不着它们，于是「删不干净 / 藏不干净」在某一档静默发生。
+/// 记号 `meta.turn_root` 因此与 `parent_id` 一起构成**同一条并集**，这里一次收口。
+pub fn subtree_of(messages: &[ChatNode], root: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    ids.insert(root.to_string());
+    let mut queue = vec![root.to_string()];
+    for m in messages {
+        if turn_root_of(m) == Some(root) && ids.insert(m.id.clone()) {
+            queue.push(m.id.clone());
+        }
+    }
+    while let Some(parent_id) = queue.pop() {
+        for m in messages {
+            if m.parent_id.as_deref() == Some(&parent_id) && ids.insert(m.id.clone()) {
+                queue.push(m.id.clone());
+            }
+        }
+    }
+    ids
+}
+
 /// 把 `turn_root` 合并进已有 meta（不覆盖其它键）。
 fn merge_turn_root(meta: Option<serde_json::Value>, root_id: &str) -> Option<serde_json::Value> {
     let mut m = meta.unwrap_or_else(|| serde_json::json!({}));

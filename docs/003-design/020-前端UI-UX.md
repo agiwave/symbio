@@ -43,7 +43,6 @@ impl: partial
 | 列表操作 | 无拖拽 / 无右键菜单 / 无批量 | §3 P3 |
 | 断连可见性 | 自动重连在跑，但没有全局连接状态面 | §3 P3 |
 | 工具授权 | 「每次问 / 本会话放行 / 永久放行」三档已在确认卡上（§11）；永久放行是逐工具的风险上限，清单住会话插件全局配置 | §3 P2-3 |
-| 分支 | 消息是 `parent_id` 树，但**重试是替换式**（删掉失败轮、按普通新轮重来），日志上因此不产生第二支——界面没有候选可切 | §3 P2-5 |
 | 消息操作 | 有编辑，无「编辑后重发」，无悬浮操作条 | §3 P3 |
 | 命令动作 | 面板只做**跳转**；「切模型 / 切工作区 / 跳设置」要的是**执行**，未接 | §3 P1-1 |
 | 无障碍 | 消息节点与卡片已键盘可达，其余交互仍以点击为中心 | §3 P3 |
@@ -55,8 +54,8 @@ impl: partial
 `tauri/docs/111-INTERACTION.md` 附录（不在此复述）。
 
 **「后端有能力、前端没消费」与「后端也没有」是两件事**：本表逐行说的基本都是前者
-（例外是信任面那几行，它们缺的后端事实已在 §11 的前件表里点名），后者单独列在
-[§11 的前件表](#还没做的一项前件是什么)——
+（例外是信任面那几行，它们缺的后端事实已在 §11 落地），后者单独列在
+[§11 的前件判据](#前件判据什么时候这活不该在前端开工)——
 混在一起会让「补个组件」与「先补一条事实」看起来是同一档工作量。
 
 ---
@@ -187,8 +186,9 @@ impl: partial
   合计（多主体才逐条摊开），配了价的 Provider 再**按币种各一行花费**；一次实测都没有就整段不出现。
   价格住在 Provider 自己的配置里（`pricing`，不是按模型名猜的表），金额在 adapter 边界折好后入格
   （裁决见 [D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。
-- **P2-5 分支切换 UI**：`parent_id` 树已建，重试已产生分支但用户看不。
- 同 parent 多候选时给 `1/2 ‹ ›` 切换器。
+- **P2-5 分支切换** ✅ 已落地（见 §11）—— 带标注的节点头部常驻 `1/2 ‹ ›`，点箭头切「此刻读哪一支」。
+ 它的前提是一条裁决而不是一个组件：重试此前是**删除式**重跑（日志上不产生第二支，树上没有候选可切），
+ 现已裁成「并存几支 + 一个选中态」——读法入格、历史不删（裁决见 [D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构")）。
 
 ### P3 — 打磨（第四批）
 
@@ -431,6 +431,7 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 | P2-1 上下文水位可见：输入区上方一条细水位条，读数**全部来自后端**（前端零口径、零业务词）。一条 = 本轮请求开头的估算 / 上限，参考线 = 自动整理线；缺数整条不出现 | 后端：`symbio/src/plugins/loop/context.rs`（`context_watermark`，与压缩判定同一个阈值函数）→ `chat_loop/inputs.rs` ③′ 测量 → `io.rs::emit_streaming_start` 挂本轮骨架 `meta.context` → `session/types.rs::latest_context_watermark`（会话投影，落 `session.json`）→ `stats_reading.rs::context_reading_of`（出口排版，产出方言 `ReadingSection` + `ReadingBar`）→ `plugin/nodes.rs::session_node` 的 `context_watermark` 属性；前端：`components/common/ReadingMeter.vue`（读数的紧凑渲染器，与 `ReadingPanel.vue` 同一个方言）+ `ChatComposer.vue` 装配 + `schemas/reading.ts`（`bar` 几何槽与 `readingSectionOf` 边界收口）+ `services/session.ts` / `stores/sessionLive.ts`（清单与运行态帧同一条通道）；裁决见 [D-137](../../symbio/src/plugins/session/README.md#d-137-上下文水位挂在轮开头的骨架节点一次测量出口排版前端零口径 "symbio/src/plugins/session/README") |
 | P2-3 授权分级（三档）：确认卡四键——批准本次 / 本会话放行 / 永久放行 / 拒绝。本会话放行把**会话阈值**抬到本次调用的风险档（同档及以下在本会话里不再问）；永久放行把**该工具的上限**抬到本次风险档（跨会话生效，高于上限仍审批）；卡上没有风险档时两档都不出现（没有「抬到哪一档」可言） | 后端：判定只有 `CapabilityRiskLevel::approval_basis(risk, threshold, approved, grant)`（三档依次为 approved / threshold / grant）——执行闸门与授权级联的记录方问同一个函数；阈值来自 `ctx[RISK_LEVEL]`，工具清单来自 `ctx[APPROVAL_GRANTS]`（`SessionConfig.approval_grants` 经 `resolve_session_params` 落进 ctx）；放行事实 `authz.granted` 带 `basis` 与 `grant`；写入口 `session/grant`（只抬不降，经 `PluginConfigFile::apply` 的唯一写路径）——用例 `the_session_threshold_decides_whether_a_call_is_asked_about` / `a_per_tool_grant_authorizes_only_that_tool` 钉住两档的边界。前端：`components/message/InteractionNode.vue`（四键；档位校验走 `isSessionRiskLevel`）+ `ALLOW_FOR_SESSION_KEY` / `ALLOW_FOREVER_KEY`（两个注入面，`ModelChatPanel.vue` 提供，闭包持会话 id）+ `stores/sessions.raiseSessionRiskLevel`（只抬不降）+ `services/sessionGrant.ts` + `schemas/session_meta.ts`（`riskRankOf`）。裁决见 [D-170](008-能力注册表与能力坐标系.md#d-170-第三档永久放行是按工具的风险上限清单住在会话插件的全局配置里 "DE-008-能力注册表与能力坐标系") |
 | P2-4 用量与花费：读数面板的「用量」段给输入 / 输出 / 合计（多主体时才逐条摊开），**配了价的 Provider 再按币种各一行花费**（标题随之变成「用量与花费」），**会话头常驻一格**同一个数；一次实测都没有就整段 / 整格不出现，没配价格就没有花费行 | 后端：`turn_runner/facts.rs::output_fields` 把 `LlmTurn.usage` 与 `LlmTurn.spend` 写进 `response{port=model}` 的 `usage` / `spend` 键（「测到了」的唯一记号：键在不在）→ `symbio_core/projection/token.rs`（`token_ledger`：按内容的 `principal` 累计，`calls` 数的是实测条数）与 `projection/spend.rs`（`spend_ledger`：按**币种**分桶、桶内按主体累计纳金额，`charges` 数的是带金额的应答条数）→ `session/stats.rs` 的 `tokens` / `spend` 两列 + `usage` 字段 → `stats_reading.rs::usage_section`（**唯一装配**：面板那一段与会话头那一格调同一个函数，token 走 `format_tokens`、金额走 `format_money`，两处单位各全仓唯一实现）。价格来自 `ModelProviderConfig.pricing`（Provider 自己的配置），金额在 adapter 边界折好后入格（[D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")）。前端：`components/session/ChatMainPanel.vue` 把 `stats.usage` 交给 `ReadingMeter`（与抽屉里的 `ReadingPanel` 同一方言的两个渲染器，零口径）；读取时机是「切会话 / 一轮跑完」，**不轮询** |
+| P2-5 分支切换：重试留下**并存几支 + 一个选中态**。带标注的节点头部常驻 `‹ 1/2 ›`（两端到头置灰而非消失——读数不许随位置改形状）；点箭头只改**读法**，一条历史都不删 | 后端：两条事实 `turn.branch{of,into}`（这一支存在）与 `turn.branch_selected{selected}`（此刻读哪一支），在 `symbio_core/event/grid.rs` 注册为 `(Turn, Asserted)`（I2 因此都带 `produced_by`）→ `symbio_core/projection/branch.rs`（`BranchLedger::fold` 按**成员根节点 id** 并组、两类事实共同写组的 pick 且组内后到胜出；`stamp_branches` 在纯投影 `rebuild` 末尾盖 `meta.branch{group,candidates,index,total,selected}`）→ 写侧 `plugins/loop/stage_exec.rs`（重试准备段落 `turn.branch`，actor 取 `request_principal` 不是字面量）+ `chat_loop.rs::republish_branch_group`（轮次收尾按组重发标注帧——新支的节点要等本轮落盘才进投影）→ 读侧 `chat_session/read.rs::get_context_messages` 里的 `drop_unselected_branches`（**只有模型上下文藏**，`get_messages` 永远交全树；子树口径 = `parent_id` ∪ `meta.turn_root`，唯一实现 `node_build::subtree_of`）→ 入口 `plugin/vdfs_messages.rs` 的 `switch_branch` 臂 + `commands.rs::switch_branch`（落点是成员根自身 `<sid>/message/<mid>`，载荷 `{to}`；非兄弟一律 `Invalid`）。前端：`registry/messageFacts.ts`（`messageBranchOf` / `messageBranchNeighbor` / `messageTurnRoot`——`meta` 键名只在这里出现，M-001）→ `stores/sessionTranscript.ts::dropUnselectedBranches`（纯函数，可见集仍只有 `visibleMessages` 一个答案）→ `composables/useChatConnection.ts::switchBranch` + `SWITCH_BRANCH_KEY`（注入面，与 `RESUME_KEY` 同一条理由）→ `components/message/NodeShell.vue`（渲染器不认「重试 / 分支」这些业务词：后端没盖标注就是不是一支）+ `styles/controls.css` 的 `.node-act.neutral`。裁决见 [D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构")；用例：`projection/branch.test.rs`、`chat_loop.test.rs`（补发）、`vdfs_provider.test.rs`（切换只改读法 / 切到当前不写 / 非兄弟被拒）三处后端，`messageFacts.branch.spec.ts`、`sessionTranscript.spec.ts`、`useChatConnection.spec.ts` 三处前端 |
 | P2-2 变更账：`session/changes` 给本会话改过的文件——每路径一行（最近在前），行**呈现就绪**（`{path, address, op, label, turn, changes}`），前端不解析工具参数；会话头的「变更」抽屉点行打开**当前**文件 | 后端：`symbio_core/projection/changes.rs`（`workdir_changes`：从 `artifact.added` 折「成功的写族工具调用」，每路径最新一条胜出 + 次数；界外 / 虚拟根下的路径不计；`vdfs_edit` 结果补 `path` / `replaced`，无操作靠字段判而非匹配文案）→ `session/changes.rs`（`read_changes` + 路由；`address` 是相对会话容器的 `workdir/<path>`，`has_wal` / `readable` 把三种空分开；读侧闸与 `session/stats` 同一道）→ `plugin.rs` 的 `"changes"` 臂（前端常量随门禁生成）。前端：`services/sessionChanges.ts`（原样透传）→ `components/session/SessionChangesList.vue`（纯排版器，三种空各一句话）→ `ChatMainPanel.vue` 的抽屉（与读数共用一个抽屉位；开关 / 代次守卫 / 错误上浮）；点行上抛 `open-node`，经 `Session` → `VdfsSessionDetail` → `VdfsWorkbench`（拆父目录 + 末段名）→ `VdfsView` push `?select=`，由 `useVdfs` 落位（当前目录定在绑定地址自身；不在本页则 `stat` 一次），见 [DE-010](010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §4.5。边界：用户编辑器保存 / shell / MCP / 其它进程的写入没有轮归属，留在实时面不入账；**没有写入前全文，因此不做 diff**（裁决见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
 
 **本节的判据**：
@@ -470,25 +471,34 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
    在渲染器里 `useRouter` / 直接 push 看起来只差一行，但它把导航权搬进了详情层：同一个渲染器
    放到别的宿主（预览、嵌入）里就会越权改主人的地址。专属文件页 / 浮层同理——那会绕开
    「一台控件承载全部类型」，等于为一种资源开第二条呈现通道。
+8. **切换分支只改读法，前端不重算「默认读哪一支」**。`switchBranch` 打的是 `switch_branch` 动作
+   （落一条 `turn.branch_selected`），它不删节点、不动运行态、不重挂载会话——所以本地状态里
+   什么都没有被「记住」，重进会话读回来的还是同一条事实。藏的那一份只在**可见集**这一层发生
+   （`dropUnselectedBranches` 是纯函数，`visibleMessages` 仍是唯一答案；`removeMessages`
+   一次都不许调，用例钉的就是这条）。读数全部来自后端盖的 `meta.branch`：形状不齐
+   （`candidates.length !== total`、下标越界）一律读成「不在组里」 ⇒ **宁显示两支，也不静默
+   少一条历史**。前端如果替后端补一个默认（「没标注就读最后一条」），同一个 WAL 就在前后端各有一棵
+   树，而漂的那一边是用户的屏幕。
+9. **「还有另一支」是常驻读数，不是悬停操作**。切换器放在节点头部且不随 hover 出现：它说的不是
+   「这里能点」，而是「这条回答是一组里的第几支」——藏进 hover 就等于没有，用户不会去悬停一条他
+   以为只有一份答案的消息。到头的那一侧按钮**置灰而不是消失**，读数 `1/2` 的形状不随位置变
+   （控件因位置改宽度，整排头部会跟着抖）。
 
-### 还没做的一项：前件是什么
+### 前件判据：什么时候这活不该在前端开工
 
-P2-5 **不是照着提案就能开工的一项**。照着 §3 直接画组件，最可能的结果是画出一个
-显示着编出来的数的界面（P2-2 的前后两半、P2-3 的三档、P2-4 的用量与花费都已落地，
-见 §11）。把「今天已经有的事实」与「缺的那一样」摆在一起：
+一行的「谁先动」是后端时，前端那一批的判据里必须先有一条**后端判据**（一条事实、一列读数或一条
+裁决），否则那一批做完只是把空态画得更好看。**今天这张表是空的**——§1 的每一行都是「后端已有能力、
+前端未消费」或纯界面项；新登记一条差距时先问这题，答案是「事实面上没有」就把它记在这里，别开工画组件。
 
-| 项 | 今天的事实 | 缺的那一样 | 谁先动 |
-|---|---|---|---|
-| P2-5 分支切换 | `RetrySubtree` 的动作是**删掉失败轮再按普通新轮重来**（`chat_loop/wake.rs` 的 `WakeOutcome::NewTurn`） | 分支要成对出现：旧轮保留 + 「当前是哪一支」可判。今天两者都没有——`parent_id` 树是真的，但树上没有第二个孩子 | 后端先补（且要先裁「重试 = 替换还是分支」） |
+| 要呈现的东西 | 它的前提是什么 | 前提不在事实面时的后果 |
+|---|---|---|
+| 「几个候选可切换」 | **存在两个候选**。切换器不是「两个按钮」，是「同一 parent 下有两个孩子」 | 界面画出一个永远只有一个选项的切换器，或者更糟：前端自己造第二个候选，用户切过去发现日志里没有它 |
+| 「这次花了多少钱」 | 有一个**折算后的金额**可搬。钱不是实测值，是价格 × 用量 | 前端按模型名猜单价 = 替用户拍一个他没同意过的价（见 §11 P2-4 与 [D-171](001-核心架构.md#d-171-钱在-adapter-边界折好整数纳单位按币种分桶投影与前端都不算价 "DE-001-核心架构")） |
+| 「本会话改过哪些文件」 | 有一条**带轮归属的写入事实** | 拿 `FsWatcher` 当权威 ⇒ 清单随「有没有打开页面」而变（见 [D-169](001-核心架构.md#d-169-工作目录的变更账是-artifactadded-的一条投影不新立-file-实体 "DE-001-核心架构")） |
 
-**这张表的用法**：一行的「谁先动」是后端时，前端那一批的判据里必须先有一条
-**后端判据**（一条事实、一列读数或一次裁决），否则那一批做完也只是把空态画得更好看。
-
-**P2-5 为什么不是「补个 `‹ ›`」**：切换器的前提是**存在两个候选**。改成保留旧轮之后，
-立刻多出一个问题——节点的重建是纯投影，同一 parent 下两条 `response` 会让重建出两个
-答复节点，「用户此刻看的是哪一支」在事实面上没有答案。所以这不是 UI 顺序问题，是
-**一条裁决**：重试留下的是「并存的两支 + 一个选中态」，还是「替换但留档」。裁决立之前
-不动前端，理由与 §11 判据 5（不把不存在的能力画成按钮）同源。
+这三行不是别人的经验，是本文自己踩过的三处：**每一条都先被当成「补个组件」提出来**，而真正要补的
+是它脚下的那条事实。第一条的裁决已经落地（[D-173](001-核心架构.md#d-173-重试留下的是并存几支--一个选中态读法入格历史不删 "DE-001-核心架构")），
+所以它今天以「已实现」出现在 §11，而不在这张表里。
 
 **会话头那一格为什么单独下发、而不是让前端从 `panel` 里挑**：方言里的 `ReadingSection`
 只有 `title` 没有身份字段，按中文标签定位等于把标签变成跨栈的键——改一个字，头上就

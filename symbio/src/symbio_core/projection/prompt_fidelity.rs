@@ -340,6 +340,10 @@ pub fn verify(
     // 变更格的折叠索引（与 `transcript` **共用同一份**）：编辑过的条目在网格侧
     // 按**新**正文复核，被删掉的从「网格→prompt」跳过。见模块文档「第三类」。
     let mutations = super::mutations::MessageMutations::collect(events);
+    // 未选中支的根 id（与 `transcript` **共用同一份**折法，见 `branch::unselected_roots`）：
+    // 那一支的正文按设计就不在请求包里，与「被删掉」同一处置——不跳过就会每次重试都报
+    // 「丢事实」，而恒红的判据等于没有判据。
+    let hidden_branches = super::branch::unselected_roots(events, |id| mutations.is_removed(id));
     // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
     // 连自己的列表都已被取代。见模块文档「第四类」。
     let snapshot = super::mutations::mutations_latest_snapshot(events);
@@ -452,6 +456,12 @@ pub fn verify(
             if carried.contains(node) {
                 continue;
             }
+        }
+        // 未选中支的正文**按设计不在请求包里**（D-173），与「被删掉」同一处置：不认领、
+        // 不报「丢事实」。判据与投影共用 [`super::branch::unselected_roots`] 那一份折法——
+        // 「模型读的是哪一支」这件事只能有一个答案，而两处各算一遍的分叉是静默的。
+        if super::branch::event_branch_root(e).is_some_and(|root| hidden_branches.contains(root)) {
+            continue;
         }
         let edited = node.as_deref().and_then(|n| mutations.edited(n));
         let role: String = edited

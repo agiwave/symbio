@@ -1,7 +1,7 @@
 //! 会话与消息的**变更入口**（session 域内的写语义）
 //!
-//! 「改写一条消息 / 截断 / 清空 / 新建或覆盖一个会话 / 删除会话」这五件事
-//! ——**它们的实现住在这里**，是「谁能改会话」这个问题的唯一答案。
+//! 「改写一条消息 / 截断 / 清空 / 切换分支 / 新建或覆盖一个会话 / 删除会话」
+//! 这六件事——**它们的实现住在这里**，是「谁能改会话」这个问题的唯一答案。
 //!
 //! ## 它不是什么
 //!
@@ -14,7 +14,7 @@
 //!
 //! ## 为什么领域层里会出现 `impl SessionPlugin`
 //!
-//! 五个方法都是 `SessionPlugin` 的方法（它们要握手头的存储单例、活跃状态表与
+//! 六个方法都是 `SessionPlugin` 的方法（它们要握手头的存储单例、活跃状态表与
 //! 转写出口）。Rust 允许 inherent impl 分散在 crate 内任意模块，本仓一贯如此
 //! （`orchestrator/` / `chat_loop/` / `plugin/vdfs_provider.rs` 都各有自己的块）。
 //! 因此本域**唯一**允许引用汇编层的符号是 `SessionPlugin` **类型本身**：
@@ -395,6 +395,124 @@ impl SessionPlugin {
                 .await;
         }
         Ok(deleted_ids)
+    }
+
+    /// 切换分支（`action(<id>/message/<mid>, "switch_branch", {to})` 的实现）。
+    ///
+    /// 「同一个问题的另一支答复」是**读法**，不是新事实：它不产生消息、不开轮、
+    /// 不动任何一条节点的正文，只在事实源上盖一条「这一组现在读 `to` 这一支」
+    /// （[`EVENT_BRANCH_SELECTED`]）。重建是纯函数，所以这条事实落下之后，
+    /// 「哪一支在当前历史里」从事实里读得出来——不需要某个调用方记得传参数。
+    ///
+    /// ## 边界：只在**同组**内跳
+    ///
+    /// `to` 必须是 `mid` 所在组的候选（判据取自 [`branch_candidates`]，即重建盖好的
+    /// 标注，不是再算一遍组）。跨组不是「换一支读」，是跳到另一条历史——那是
+    /// `truncate` / 重试各自的动作面，本动作不冒充它们。
+    ///
+    /// ## 为什么目标节点必须已经有 `turn.branch` 事实
+    ///
+    /// 那条事实是这一支**存在的记录**，也是本次选择的溯源锚（I2：断言类事件必须
+    /// 带 `produced_by`，且不许悬空）。没有它 = 这一支从未诞生 = 不能选它读。
+    pub(crate) async fn switch_branch(
+        &self,
+        session_id: &str,
+        mid: &str,
+        to: &str,
+        actor: &str,
+    ) -> Result<(), PluginError> {
+        use crate::symbio_core::{
+            branch_candidates, branch_selected, AppendError, Entity, Event, Seq, Store as _, Verb,
+            EVENT_BRANCH_SELECTED, EVENT_TURN_BRANCH,
+        };
+        let chat_session = self.open_chat_session(session_id).await?;
+        let messages = chat_session.get_messages().await?;
+        let target = messages
+            .iter()
+            .find(|m| m.id == mid)
+            .ok_or_else(|| PluginError::NotFound(format!("消息不存在: {mid}")))?;
+        let candidates = branch_candidates(target).ok_or_else(|| {
+            PluginError::ValidationError(format!(
+                "{mid} 不在任何分支组里：它没有并列的候选，也就没有「换一支读」这回事"
+            ))
+        })?;
+        let member = candidates
+            .iter()
+            .find(|c| c.as_str() == to)
+            .ok_or_else(|| {
+                PluginError::ValidationError(format!(
+                "{to} 与 {mid} 不在同一分支组（候选：{candidates:?}）：跨组跳转请用 truncate 或重试"
+            ))
+            })?;
+        // 已经是这一支 ⇒ 什么都不做（幂等）。重复落一条选择格不改任何读法，
+        // 只让事实源长出一格空转的记录。
+        if messages
+            .iter()
+            .any(|m| &m.id == member && branch_selected(m))
+        {
+            return Ok(());
+        }
+
+        let store = chat_session
+            .facts()?
+            .ok_or_else(|| PluginError::NotFound("会话没有事实源".to_string()))?;
+        let snapshot = store.range(Seq::new(0));
+        let carrier = snapshot.iter().find(|e| {
+            e.kind == EVENT_TURN_BRANCH
+                && e.payload.get("into").and_then(Value::as_str) == Some(member.as_str())
+        });
+        // 溯源锚：优先「这一支存在」的那条事实，退化到切片末尾（与
+        // `message_events::provenance` 同一条口径：退化只是把「源自哪条」读粗，
+        // 而不是把这次选择丢掉）。
+        let Some(anchor) = carrier
+            .and_then(|e| e.seq)
+            .or_else(|| snapshot.last().and_then(|e| e.seq))
+            .map(|s| s.value())
+        else {
+            return Err(PluginError::InternalError(
+                "分支选择未能入格：切片里没有可用的溯源锚".to_string(),
+            ));
+        };
+        // 幂等键里的 `n` = 本会话已落的分支格数：同一次选择的重复提交命中
+        // `Duplicate`（按下不表），而「切回去再切回来」是两次不同的动作、各有各的号。
+        let n = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_BRANCH_SELECTED)
+            .count();
+        let event = Event::pending(
+            format!("branch-selected-{member}-{n}"),
+            EVENT_BRANCH_SELECTED,
+            Entity::Turn,
+            Verb::Asserted,
+            carrier.map(|e| e.turn).unwrap_or_default(),
+            actor,
+        )
+        .with_produced_by(anchor)
+        .with_ts(clock_now_ms())
+        .with_payload(json!({ "selected": member }));
+        match store.append(event) {
+            Ok(_) | Err(AppendError::Duplicate) => {}
+            Err(e) => {
+                return Err(PluginError::InternalError(format!(
+                    "分支选择未能入格，本次切换未生效：{e:?}"
+                )))
+            }
+        }
+
+        // 变更：组里**每个成员**的 `meta.branch` 都换了读法（`index` / `selected`
+        // 跟着选中态走）。发一批完整消息帧——**不经 `apply`**：这次动作改的是选择格，
+        // 不是任何一条消息，落 `message.edited` 会给一条没变过的消息开出第二个 owner。
+        // 重新读一遍取**重建盖好章**的那份，交出去的就是下一次整份重读会看到的同一批节点。
+        let stamped = chat_session.get_messages().await?;
+        let frames: Vec<cm::ChatNode> = candidates
+            .iter()
+            .filter_map(|c| stamped.iter().find(|m| m.id == *c))
+            .map(crate::symbio_core::llm_message_frame)
+            .collect();
+        self.active_mgr
+            .transcript_apply_all(session_id, frames)
+            .await;
+        Ok(())
     }
 
     // ==================== 创建即登记（[]） ====================

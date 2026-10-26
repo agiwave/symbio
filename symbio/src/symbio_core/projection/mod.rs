@@ -94,6 +94,7 @@ impl<V: 'static> Projection<V> {
 }
 
 pub mod autonomy;
+pub mod branch;
 pub mod calibration;
 pub mod changes;
 pub mod checkpoint;

@@ -641,3 +641,101 @@ describe('skeletonLazy — 折叠释放 / 展开重取（[] 前端半写侧）',
     expect(hoisted.released.summaryOf).toHaveBeenCalledWith('s1', 'skel')
   })
 })
+
+// ==================== 分支（[D-173] 并存两支 + 一个选中态）====================
+
+/** 一条成员根：`selected` 决定它进不进可见集。 */
+function branchRoot(id: string, candidates: string[], index: number, selected: boolean): ChatNode {
+  return msg({
+    id,
+    seq: index + 1,
+    type: NODE_KIND_SKELETON,
+    content: '',
+    meta: {
+      branch: { group: candidates[0], candidates, index, total: candidates.length, selected },
+    },
+  })
+}
+
+describe('可见集 — 未选中支连同子树不渲染，但一条都没少', () => {
+  /** 交出去的树上**所有**可见 id（根 + 逐层子），排序后好比对。 */
+  const visibleIds = (tree: ChatNode[]): string[] =>
+    tree.flatMap(m => [m.id, ...visibleIds(m.children ?? [])]).sort()
+
+  /** 两支并存：t1（旧，未选中）带一条结果，t2（新，在读）带一条结果。 */
+  function twoBranches(): ChatNode[] {
+    return [
+      msg({ id: 'u1', seq: 0, parent_id: undefined }),
+      branchRoot('t1', ['t1', 't2'], 0, false),
+      msg({ id: 'r1', seq: 2, parent_id: 't1', content: '第一次的答复' }),
+      branchRoot('t2', ['t1', 't2'], 1, true),
+      msg({ id: 'r2', seq: 4, parent_id: 't2', content: '重试的答复' }),
+    ]
+  }
+
+  it('只画在读的那一支（含它的子孙）；共同祖先留着', () => {
+    hoisted.store = makeStore({ getSessionMessages: vi.fn(twoBranches) })
+    expect(visibleIds(conn().messageTree.value)).toEqual(['r2', 't2', 'u1'])
+  })
+
+  it('切过来之后画另一支——**数据一条没少**：藏的是可见集，不是 store', () => {
+    const all = twoBranches()
+    // 后端换的是标注（选择事实落库后重发组内帧），前端只是重算可见集
+    const flipped = all.map(m => {
+      const b = (m.meta as Record<string, any>)?.branch
+      if (!b) return m
+      return { ...m, meta: { ...m.meta, branch: { ...b, selected: m.id === 't1' } } }
+    })
+    hoisted.store = makeStore({ getSessionMessages: vi.fn(() => flipped) })
+    expect(visibleIds(conn().messageTree.value)).toEqual(['r1', 't1', 'u1'])
+    // 「看不见」≠「不存在」：集合本身一条没少，也没有谁被摘掉
+    expect(flipped).toHaveLength(5)
+    expect(hoisted.store.removeMessages).not.toHaveBeenCalled()
+  })
+
+  it('没有分支的会话：可见集与原来一致（收敛排在空壳叶子之前不能改变它）', () => {
+    const flat = [msg({ id: 'u1', seq: 0 }), msg({ id: 't1', seq: 1, parent_id: 'u1' })]
+    hoisted.store = makeStore({ getSessionMessages: vi.fn(() => flat) })
+    expect(visibleIds(conn().messageTree.value)).toEqual(['t1', 'u1'])
+  })
+})
+
+describe('switchBranch — 一个动作，不动运行态', () => {
+  it('落在 `<A>/message/<mid>`，载荷只有 {to}（目标候选 id 原样交回后端）', async () => {
+    await conn().switchBranch('t2', 't1')
+    expect(hoisted.actions).toHaveLength(1)
+    const a = hoisted.actions[0]
+    expect(a.path).toBe(`${ADDR}/message/t2`)
+    expect(a.action).toBe('switch_branch')
+    expect(a.payload).toEqual({ to: 't1' })
+    expect(a.ctx).toEqual({ workdir: '/work', session_id: 's1' })
+  })
+
+  it('不置 working / failed：换个读法不是跑了一轮', async () => {
+    const c = conn()
+    await c.switchBranch('t2', 't1')
+    expect(hoisted.store.putStatus).not.toHaveBeenCalled()
+    expect(hoisted.store.setSessionStatus).not.toHaveBeenCalled()
+    expect(hoisted.store.setSessionError).not.toHaveBeenCalled()
+    expect(c.isLoading.value).toBe(false)
+    // 也不经 `apply`：改的是选择格，不是任何一条消息
+    expect(hoisted.store.applyTranscriptMessage).not.toHaveBeenCalled()
+    expect(hoisted.writes).toHaveLength(0)
+  })
+
+  it('后端说没改成 ⇒ 出声（跨组被拒时界面停在原来那一支，只有这句话能补上差异）', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'switch_branch',
+      ok: false,
+      message: 'm3 与 m1 不在同一分支组',
+    })
+    await conn().switchBranch('m1', 'm3')
+    expect(hoisted.logger.warn).toHaveBeenCalled()
+  })
+
+  it('出站异常不抛出（尽力而为）', async () => {
+    hoisted.runVdfsAction.mockRejectedValueOnce(new Error('IPC 断了'))
+    await expect(conn().switchBranch('t2', 't1')).resolves.toBeUndefined()
+    expect(hoisted.logger.error).toHaveBeenCalled()
+  })
+})

@@ -144,3 +144,19 @@
   background: rgba(239, 68, 68, 0.16);
   color: var(--danger-fg);
 }
+/* 非破坏性微操作（分支切换箭头这类「换个读法」的动作）：悬停不该染成删除的红。
+   红是**危险动作**的颜色，挂在导航控件上会让用户以为点下去会失去什么。 */
+.node-act.neutral:hover {
+  background: rgba(100, 116, 139, 0.18);
+  color: var(--color-chip-fg);
+}
+/* 走到头的箭头：置灰但**保留**（读数 `1/2` 的形状不随位置变），
+   且 hover 不再给反馈——它是 disabled，不是「还没加载出来」。 */
+.node-act:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.node-act:disabled:hover {
+  background: rgba(100, 116, 139, 0.1);
+  color: var(--color-chip-fg);
+}

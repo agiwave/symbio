@@ -394,6 +394,77 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
   return typeof raw === 'string' ? raw : undefined
 }
 
+/**
+ * 建树策略 `flat` 档下，本轮响应骨架的直接子节点**升了根**（`parent_id` 被摘掉），
+ * 靠这个记号认回它属于哪一轮（后端 `node_build::turn_root_of` 的镜像）。
+ *
+ * 前端为什么必须认它：不认的话「这一支的子孙」在 `flat` 档下够不着，切换分支时
+ * 旧支只藏掉了根、子孙全部留在屏幕上——后端为此把子树收集写成单点实现
+ * （`parent_id ∪ turn_root` 一条并集），前端同一条判据不能只按 `parent_id` 走。
+ */
+export function messageTurnRoot(node: Pick<ChatNode, 'meta'>): string | null {
+  const raw = (node.meta as Record<string, unknown> | undefined)?.turn_root
+  return typeof raw === 'string' && raw !== '' ? raw : null
+}
+
+// ==================== 分支组（重试留下的并存两支）====================
+
+/**
+ * 一个节点所在**分支组**的读数（后端 `meta.branch` 的唯一读点）。
+ *
+ * 后端把「同一个问题有几支答复、现在读第几支」折成事实投影盖在成员根节点上
+ * （[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
+ * 这一层把它读成**数据**，组件只问「第几支 / 共几支 / 前后是谁」，
+ * 不认识 `candidates` 里那些 id 的含义——切换动作把目标候选原样交回后端，
+ * 后端按它认人。
+ */
+export interface NodeBranch {
+  /** 组锚 = 第一次尝试的根节点 id（同一组的成员共享它） */
+  group: string
+  /** 组内**存在节点**的成员 id，按转写顺序（旧 → 新） */
+  candidates: string[]
+  /** 自己在 `candidates` 里的下标 */
+  index: number
+  /** = `candidates.length`（后端保证一致；这里不透传，缺标注就是没有分支） */
+  total: number
+  /** 是不是当前读的那一支 */
+  selected: boolean
+}
+
+/**
+ * 读这条节点的分支标注；**没有标注 ⇒ `null`**（它不在任何组里，也就没有切换器）。
+ *
+ * 形状不齐（字段缺失 / 类型不对）同样读成 `null`：宁可少画一个切换器，也不给一个
+ * 点了不知道会切到哪里的控件。
+ */
+export function messageBranchOf(node: Pick<ChatNode, 'meta'>): NodeBranch | null {
+  const raw = (node.meta as Record<string, unknown> | undefined)?.branch
+  if (!raw || typeof raw !== 'object') return null
+  const b = raw as Record<string, unknown>
+  const { group, candidates, index, total, selected } = b
+  if (typeof group !== 'string' || typeof selected !== 'boolean') return null
+  if (typeof index !== 'number' || typeof total !== 'number') return null
+  if (!Array.isArray(candidates) || candidates.length !== total) return null
+  if (!candidates.every((c): c is string => typeof c === 'string')) return null
+  if (index < 0 || index >= total) return null
+  return { group, candidates: candidates as string[], index, total, selected }
+}
+
+/**
+ * 这一组里**相邻的**另一支（`-1` = 更早的尝试，`+1` = 更晚的尝试）；走到头返回 `null`。
+ *
+ * 返回的是**候选 id**，不是下标：调用方拿它直接发切换动作，不必再碰 `candidates`
+ * ——把数组下标运算留在组件里，等于让每个渲染器都重写一遍边界判断。
+ */
+export function messageBranchNeighbor(
+  branch: NodeBranch,
+  direction: -1 | 1,
+): string | null {
+  const next = branch.index + direction
+  if (next < 0 || next >= branch.total) return null
+  return branch.candidates[next] ?? null
+}
+
 // ==================== 消息级业务规则（纯函数） ====================
 //
 // 「这个节点能做什么」原先写在渲染组件的 computed 里，与「怎么画」混在一起。

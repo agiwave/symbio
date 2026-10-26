@@ -511,6 +511,18 @@ const META_KEYS = [
     what: '压缩后的历史记忆标记（渲染成记忆而非用户气泡）',
   },
   {
+    // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
+    key: 'branch',
+    owner: 'symbio/src/symbio_core/projection/branch.rs',
+    what: '分支标注 {group, candidates, index, total, selected}：这一支在组里的位置与「此刻读哪一支」',
+  },
+  {
+    // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
+    key: 'turn_root',
+    owner: 'symbio/src/symbio_core/turn/node_build.rs',
+    what: '本轮升根节点的轮骨架锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
+  },
+  {
     key: 'error',
     owner: 'symbio/src/plugins/loop/tools/dispatch/batch.rs',
     what: '失败原因（旧路径的兜底读点；今天的失败文本由本文件写进父节点顶层 `error`）',

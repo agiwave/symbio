@@ -288,6 +288,19 @@ pub(crate) struct TurnState {
     /// 重建面（只按 `artifact.added` 复刻新结果）与实时面因此各说一套。删除放在
     /// 派发**成功之后**（`chat_loop` 的并入处），派发失败时旧卡仍在。
     pub(crate) resume_old_child: Option<String>,
+    /// `RetrySubtree` 交回来的**被重试那一支的 Turn 根 id**（其余动作为 `None`）。
+    ///
+    /// 它是「这一幕是新支」的唯一记号：`prepare-turn` 备好输入、因而握着新根 id 时，
+    /// 按它落一条 `turn.branch`（`{of, into}`）。旧支当场从「当前读的那一支」降成候选——
+    /// 实时面由收尾补发标注帧（见 [`TurnState::branch_root`]），不必等整份重读。
+    /// 取走（`take()`）即消费：幕间续写的第二幕不再另开一支。
+    pub(crate) retry_of: Option<String>,
+    /// 本轮**开出了新支**时记下新支的根 id（`prepare-turn` 落 `turn.branch` 那一刻填）。
+    ///
+    /// 它是收尾时补发分支标注帧的依据：那一格事实落下时新支的**节点**还不存在（要等本轮
+    /// 产出落库才进得了投影），当场读回来只有一条成员，重建一个字段都不盖（单支不成组）。
+    /// 所以补发不在落格处，在 [`super::finish_turn`]。
+    pub(crate) branch_root: Option<String>,
 }
 
 /// 主循环的唯一退出原因。

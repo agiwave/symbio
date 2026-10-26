@@ -420,3 +420,71 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
         rep.summary()
     );
 }
+
+// ── 分支的读法（D-173）：未选中支**按设计**不在请求包里 ──────────────────
+//
+// 判据与投影必须认同一份折法（`branch::unselected_roots`）。这一节钉的是判据那一侧：
+// 它若自己算一遍读法，重试过的会话就会每次请求报一串「丢事实」——恒红的守卫与没有
+// 守卫等价；而它若跟着投影一起松掉，「旧支泄漏进请求包」就没人看着了。
+
+/// 一条 `turn.branch`：`into` 那一支接管读法。
+fn branch(of: &str, into: &str) -> Event {
+    Event::pending(
+        format!("branch-{into}"),
+        crate::symbio_core::EVENT_TURN_BRANCH,
+        Entity::Turn,
+        Verb::Asserted,
+        2,
+        "person/local",
+    )
+    .with_payload(serde_json::json!({ "of": of, "into": into }))
+}
+
+fn branch_events() -> Vec<Event> {
+    vec![
+        user_turn(1, "问"),
+        assistant_turn(1, "甲答复"),
+        branch("t-1", "t-2"),
+        assistant_turn(2, "乙答复"),
+    ]
+}
+
+/// 重试过的会话：判据必须**绿**（旧支不在请求包是读法，不是丢事实）。
+#[test]
+fn a_replaced_branch_does_not_make_the_judge_red() {
+    let events = branch_events();
+    let msgs = transcript()
+        .apply(&events, i64::MAX, crate::symbio_core::Budget::generous())
+        .value
+        .to_messages();
+    assert_eq!(
+        msgs.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+        vec!["问", "乙答复"],
+        "投影只送当前那一支"
+    );
+    let rep = verify(&events, &msgs, None);
+    assert!(rep.is_complete(), "重试轮必须双向完整：{}", rep.summary());
+}
+
+/// 反向自检：旧支**泄漏**进请求包时判据必须报出来。
+///
+/// 上面那条绿单独不构成证据——判据若跟着投影一起松掉，它会一样绿。泄漏的条目不被
+/// 任何主张认领 ⇒ 报「无出处」，这正是「两个出口对同一段历史给两种读法」那种静默
+/// 退化唯一的外部可见形态。
+#[test]
+fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
+    let events = branch_events();
+    let mut msgs = transcript()
+        .apply(&events, i64::MAX, crate::symbio_core::Budget::generous())
+        .value
+        .to_messages();
+    msgs.insert(1, entry("assistant", "甲答复", None));
+    let rep = verify(&events, &msgs, None);
+    assert!(
+        rep.gaps
+            .iter()
+            .any(|g| matches!(g, Gap::NoSourceInGrid { .. })),
+        "被替换那一支混进请求包时必须报无出处：{}",
+        rep.summary()
+    );
+}

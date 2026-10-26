@@ -4,8 +4,9 @@
 
 use super::*;
 use crate::symbio_core::{
-    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VDFS_ACTION_EXPAND_SKELETON,
-    VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
+    VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
+    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM,
+    VDFS_STATUS_ACTIVE,
 };
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
 use crate::symbio_core::VdfsProvider;
@@ -28,6 +29,14 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 
 fn vctx() -> VdfsContext {
     VdfsContext::empty()
+}
+
+/// 带**宿主请求**的上下文：`switch_branch` 的 actor 取自请求主体（写事实要知道是谁写的），
+/// 所以这一条动作不能走 [`vctx`] 那个空上下文。
+fn host_vctx() -> VdfsContext {
+    let req: std::sync::Arc<dyn crate::symbio_core::PluginInvokeRequest> =
+        std::sync::Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
+    crate::symbio_core::vdfs_context(&req)
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由容器按实例表派生
@@ -982,6 +991,226 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
     seen
 }
 
+/// 种一条 `turn.branch`：`into` 是 `of` 的另一支。
+///
+/// 生产里这一格由 `prepare-turn` 落（见 `loop::stage_exec`：新根的 id 到那一幕才存在），
+/// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
+/// （I2：断言类事件必须带一个存在且不超前的锚）。
+async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
+    use crate::symbio_core::{Entity, Seq, Store as _, Verb, EVENT_TURN_BRANCH};
+    let dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录");
+    let fs = crate::plugins::session::store::EventWalStore::open(
+        dir.join(crate::plugins::session::paths::V2_WAL_FILE),
+    )
+    .expect("打开事实源失败");
+    let anchor = fs
+        .range(Seq::new(0))
+        .last()
+        .and_then(|e| e.seq)
+        .expect("种分支格前事实源已非空");
+    fs.append(
+        crate::symbio_core::Event::pending(
+            format!("branch-{into}"),
+            EVENT_TURN_BRANCH,
+            Entity::Turn,
+            Verb::Asserted,
+            0,
+            crate::symbio_core::PRINCIPAL_USER,
+        )
+        .with_payload(serde_json::json!({ "of": of, "into": into }))
+        .with_produced_by(anchor.value()),
+    )
+    .expect("种分支格失败");
+}
+
+/// 事实源里出现过哪些事件 kind（分支切换的判据是「多了一条什么、没多出一条什么」）。
+async fn fact_kinds(p: &SessionPlugin, id: &str) -> Vec<String> {
+    use crate::symbio_core::{Seq, Store as _};
+    let dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录");
+    crate::plugins::session::store::EventWalStore::open_readonly(
+        dir.join(crate::plugins::session::paths::V2_WAL_FILE),
+    )
+    .expect("只读打开事实源失败")
+    .range(Seq::new(0))
+    .into_iter()
+    .map(|e| e.kind)
+    .collect()
+}
+
+/// 切换分支（`action(<id>/message/<mid>, "switch_branch", {to})`）的回执。
+async fn switch_branch(
+    p: &SessionPlugin,
+    id: &str,
+    mid: &str,
+    payload: Option<Value>,
+) -> Result<VdfsActionResult, VdfsError> {
+    p.dispatch(
+        &host_vctx(),
+        &message_path(id, mid),
+        VdfsRequest::Action {
+            action: VDFS_ACTION_SWITCH_BRANCH.to_string(),
+            payload,
+        },
+    )
+    .await
+    .map(|r| r.into_action().expect("动作请求的回执必是 Action 形态"))
+}
+
+// ── 分支切换（[D-173]）────────────────────────────────────────────────────
+
+/// 切到另一支：**只改读法**。两支都留在转写里、正文一条没动，事实源上多一条
+/// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
+#[tokio::test]
+async fn switch_branch_changes_the_reading_not_the_facts() {
+    use crate::symbio_core::{branch_selected, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_REMOVED};
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-switch");
+    // m0 = 问，m1 = 第一次答，m2 = 重试的那一支
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+
+    let r = switch_branch(&p, &id, "m2", Some(json!({ "to": "m1" })))
+        .await
+        .expect("同组内切换应当生效");
+    assert!(r.ok);
+    assert_eq!(r.data, Some(json!({ "session_id": id, "selected": "m1" })));
+
+    // 呈现读侧：两支**都在**（「看不见」≠「不存在」），只是选中态换了地方
+    let list = p
+        .open_chat_session(&id)
+        .await
+        .unwrap()
+        .get_messages()
+        .await
+        .unwrap();
+    let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
+    assert!(
+        ids.contains(&"m1") && ids.contains(&"m2"),
+        "两支都该留在转写里：{ids:?}"
+    );
+    let m1 = list.iter().find(|m| m.id == "m1").unwrap();
+    let m2 = list.iter().find(|m| m.id == "m2").unwrap();
+    assert!(branch_selected(m1), "选择格说读 m1");
+    assert!(!branch_selected(m2), "另一支降成候选");
+
+    // 模型读侧：同一个问题在请求包里只能有一个答复
+    let ctx = p
+        .open_chat_session(&id)
+        .await
+        .unwrap()
+        .get_context_messages(None)
+        .await
+        .unwrap();
+    let ctx_ids: Vec<&str> = ctx.iter().map(|m| m.id.as_str()).collect();
+    assert!(
+        ctx_ids.contains(&"m1") && !ctx_ids.contains(&"m2"),
+        "未选中支不该进模型：{ctx_ids:?}"
+    );
+
+    // 事实：只多一条选择格。**没有** `message.removed`——换读法不毁事实。
+    let kinds = fact_kinds(&p, &id).await;
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|k| k.as_str() == EVENT_BRANCH_SELECTED)
+            .count(),
+        1,
+        "一次切换一条选择格：{kinds:?}"
+    );
+    assert!(
+        !kinds.iter().any(|k| k.as_str() == EVENT_MESSAGE_REMOVED),
+        "切读法不该毁掉任何一条消息：{kinds:?}"
+    );
+
+    // 实时面：组里每个成员各发一条完整帧（消费端不必整份重读就知道谁上位、谁让位）
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(changes.len(), 2, "两个成员各一条：{changes:?}");
+    for (c, expect) in changes.iter().zip(["m1", "m2"]) {
+        assert_eq!(c.path, message_path(&id, expect));
+        assert_eq!(c.data.as_ref().expect("帧带节点载荷")["id"], expect);
+    }
+}
+
+/// 切到**当前已经在读**的那一支：回执成功、事实源一条不落、转写一条不发。
+///
+/// 「什么都没换」既不是错误，也不该在事实源上长出一格空转的记录——重复点切换器
+/// 是用户的正常动作（网络重试、双击），落两条选择格会把「用户做过几次这个动作」
+/// 写成事实，而这件事没人要读。
+#[tokio::test]
+async fn switch_branch_to_the_current_candidate_writes_nothing() {
+    use crate::symbio_core::EVENT_BRANCH_SELECTED;
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-idem");
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+    let before = fact_kinds(&p, &id).await;
+
+    let r = switch_branch(&p, &id, "m1", Some(json!({ "to": "m2" })))
+        .await
+        .expect("默认就在读最新那支");
+    assert!(r.ok, "已是这一支 ⇒ 成功但什么都不做");
+
+    let after = fact_kinds(&p, &id).await;
+    assert_eq!(after, before, "幂等：重复的选择动作不该多落一格");
+    assert!(
+        !after.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        "本例从头到尾没做过一次**有效**切换：{after:?}"
+    );
+    let changes = seen.lock().unwrap().clone();
+    assert!(changes.is_empty(), "什么都没换 ⇒ 一条变更都不发");
+}
+
+/// 跨组拒绝：`to` 不在同一分支组 ⇒ 报错，列表与事实都不动。
+///
+/// 「跳到另一条历史」是 `truncate` / 重试各自的动作面，本动作不冒充它们；而它一旦
+/// 允许跨组，就会在事实源上盖一条**读不出来**的选择格（重建按组算选中态）。
+#[tokio::test]
+async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
+    use crate::symbio_core::EVENT_BRANCH_SELECTED;
+    let (_dir, p) = fixture();
+    let id = unique_id("branch-reject");
+    seed_messages(&p, &id, &["问", "第一次答", "重试的答", "后一轮"]).await;
+    seed_branch_fact(&p, &id, "m1", "m2").await;
+    let seen = watch_changes(&p);
+
+    for (mid, to, why) in [
+        ("m1", "m3", "同会话但不同组（后一轮不是这一问的另一支）"),
+        ("m1", "nope", "组里从来没有过的 id"),
+        ("m0", "m1", "无分支标注的消息：它没有并列的候选"),
+        ("m1", "", "to 为空串（读作这个字段没记）"),
+    ] {
+        let got = switch_branch(&p, &id, mid, Some(json!({ "to": to }))).await;
+        assert!(
+            matches!(got, Err(VdfsError::Invalid(_))),
+            "{mid}→{to}（{why}）应被拒"
+        );
+    }
+    let kinds = fact_kinds(&p, &id).await;
+    assert!(
+        !kinds.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        "被拒的切换不得落格：{kinds:?}"
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0", "m1", "m2", "m3"],
+        "被拒的切换不得改动列表"
+    );
+    let changes = seen.lock().unwrap().clone();
+    assert!(changes.is_empty(), "被拒的切换不得发出任何变更帧");
+}
+
 /// 截断某条：**它及其之后**全部删除，回执带权威的被删 id 列表。
 #[tokio::test]
 async fn truncate_removes_the_target_and_everything_after() {
@@ -1077,6 +1306,8 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
         (message_path(&id, "m0"), "explode"),
         // 动作对、地址不对：`truncate` 落在列表目录上
         (message_dir_path(&id), VDFS_ACTION_TRUNCATE),
+        // 同上：`switch_branch` 的目标是**一条消息所在的那一组**，列表目录上没有这一组
+        (message_dir_path(&id), VDFS_ACTION_SWITCH_BRANCH),
     ] {
         assert!(
             matches!(

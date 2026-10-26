@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
-import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY, type ResumePayload } from '@/composables/useChatConnection'
+import { useChatConnection, RESUME_KEY, SKELETON_LAZY_KEY, SWITCH_BRANCH_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { useTranscriptWindow, TRANSCRIPT_WINDOW_INITIAL } from '@/composables/useTranscriptWindow'
 import {
@@ -221,6 +221,12 @@ provide(RESUME_KEY, (payload: ResumePayload) => {
 // 理由用注入而非 props——相遇点（NodeShell 的折叠开关）在组件树深层，而「哪个会话」
 // 只有这里的 useChatConnection 闭包知道。
 provide(SKELETON_LAZY_KEY, chat.skeletonLazy)
+
+// 分支切换面：切换器住在 `NodeShell`（所有渲染器共用的外壳），而「哪个会话、哪个地址」
+// 只有这里的 useChatConnection 闭包知道——与 RESUME_KEY / SKELETON_LAZY_KEY 同一条理由。
+provide(SWITCH_BRANCH_KEY, (mid: string, to: string) => {
+  void chat.switchBranch(mid, to)
+})
 
 
 const { isLoading } = chat

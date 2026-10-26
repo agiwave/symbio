@@ -11,7 +11,9 @@
 //!    只带轮号与往返号会撞成同一个 `id`，而首幕已经有过 `sent` ⇒ 派发行不欠、
 //!    整轮在派发处被拒（D-168 裁决 4 的现成后果）；
 //! 5. **没有交接件的派出判死那笔遗留请求**，不是静默地什么也不做；
-//! 6. **无事可还就停**：不欠账的一幕驱动一次不多写一格。
+//! 6. **无事可还就停**：不欠账的一幕驱动一次不多写一格；
+//! 7. **重试的新支在准备段登记**：一条 `turn.branch`（`into` 用这一幕才存在的新根 id），
+//!    且 `retry_of` 取走即消费——续写幕不会再开一支。
 //!
 //! ## 为什么这里不跑一整个幕
 //!
@@ -42,7 +44,7 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginSimpleRequest, Seq, Store, TurnOutput, EVENT_FAILED,
     EVENT_REQUEST, EVENT_SENT,
 };
-use crate::symbio_core::{Entity, Verb, EVENT_ASSISTANT_FINAL};
+use crate::symbio_core::{Entity, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_BRANCH};
 
 // ── 夹具 ────────────────────────────────────────────────────────────────
 
@@ -212,6 +214,15 @@ fn inputs_fact(facts: &[Event]) -> Option<&Event> {
     })
 }
 
+/// 本幕落下的分支格（`turn.branch`）：一次重试一条。
+fn branch_facts(h: &Harness) -> Vec<Event> {
+    h.facts
+        .range(Seq::new(0))
+        .into_iter()
+        .filter(|e| e.kind == EVENT_TURN_BRANCH)
+        .collect()
+}
+
 // ── 准备：落出口、交输入 ─────────────────────────────────────────────────
 
 /// 准备落的是一格 `inputs` 阶段事实，输入经交接件交给下一个环步。
@@ -238,6 +249,57 @@ async fn prepare_lands_the_inputs_stage_and_hands_the_inputs_over() {
     assert!(!inputs.root_id.is_empty(), "根骨架已分配");
     assert!(call.is_none(), "准备不宣布任何请求");
     assert!(interrupted.is_none(), "准备不产出幕的结局");
+}
+
+/// 重试开出的**新支在准备段登记**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+///
+/// 钉三件事，缺一件整套分支就读不对：
+/// - `into` 用的是**这一幕才存在的新根 id**（`retry_of` 只是寄存的旧根，新根要到输入
+///   备好才有；早一格落它就只能按轮号归组，而一幕一个根、幕间续写会让同轮开出多个根）；
+/// - 它是断言类事实 ⇒ 溯源指向本轮用户格（I2，缺了它整条 WAL 重放会被判违规）；
+/// - `take()` 即消费 ⇒ **第二幕不再另开一支**（否则幕间续写会凭空多出一个候选，
+///   用户看到 `2/3` 却只重试过一次）。
+#[tokio::test]
+async fn prepare_lands_one_branch_fact_for_a_retry_and_consumes_the_registration() {
+    let mut h = Harness::new(vec![user_node("m1", "你好")]);
+    h.open();
+    h.turn.retry_of = Some("t-old".to_string());
+
+    let mut ready = None;
+    let mut call = None;
+    let mut interrupted = None;
+    {
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
+        run_prepare_turn(&mut step).await.expect("准备落得了格");
+    }
+    let new_root = ready.take().expect("输入是这一环步的交接件").root_id;
+    assert!(
+        h.turn.retry_of.is_none(),
+        "寄存的旧根被取走：同一幕不会落两条分支格"
+    );
+
+    let landed = branch_facts(&h);
+    assert_eq!(landed.len(), 1, "一次重试只开一支：{landed:?}");
+    let branch = &landed[0];
+    assert_eq!(branch.payload["of"], "t-old");
+    assert_eq!(branch.payload["into"], new_root.as_str());
+    assert_eq!(
+        branch.produced_by,
+        Some(h.turn.user_seq),
+        "分支格是断言类：溯源必须指向本轮用户格"
+    );
+    assert!(!branch.actor.is_empty(), "actor 取本轮主体，不留空");
+
+    // 续写幕：幕锚前进，`retry_of` 已空 ⇒ 事实面上一条分支格都不该再多。
+    h.turn.request_round = 0;
+    h.turn.drive_seq += 100;
+    {
+        let mut step = h.step(&mut ready, &mut call, &mut interrupted);
+        run_prepare_turn(&mut step)
+            .await
+            .expect("续写幕准备落得了格");
+    }
+    assert_eq!(branch_facts(&h).len(), 1, "幕间续写不再开第二支");
 }
 
 /// 定稿答话轮：准备段就地收束 ⇒ 落 `result:"closed"`、**不**交输入。

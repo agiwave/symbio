@@ -35,6 +35,7 @@ interface ChatStub {
   removeMessage: Mock
   resume: Mock
   expandSkeleton: Mock
+  switchBranch: Mock
   /** 骨架惰性重取面：面板把它 provide 给下游（本文件不判它，给个不炸的桩） */
   skeletonLazy: { onCollapse: Mock; isReleased: Mock; summaryOf: Mock }
 }
@@ -67,12 +68,14 @@ vi.mock('@/composables/useChatConnection', async () => {
     removeMessage: vi.fn(),
     resume: vi.fn(),
     expandSkeleton: vi.fn(),
+    switchBranch: vi.fn(),
     skeletonLazy: { onCollapse: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn(() => undefined) },
   }
-  // 四个注入键都要回：面板 provide 它们，缺一个就是「Invalid vnode type」级的挂载失败
+  // 五个注入键都要回：面板 provide 它们，缺一个就是「Invalid vnode type」级的挂载失败
   return {
     RESUME_KEY: Symbol('resume'),
     SKELETON_LAZY_KEY: Symbol('chat-skeleton-lazy'),
+    SWITCH_BRANCH_KEY: Symbol('chat-switch-branch'),
     ALLOW_FOR_SESSION_KEY: Symbol('chat-allow-for-session'),
     ALLOW_FOREVER_KEY: Symbol('chat-allow-forever'),
     useChatConnection: () => hoisted.chat,

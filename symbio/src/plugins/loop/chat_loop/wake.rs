@@ -14,7 +14,8 @@
 //!
 //! - [`WakeOutcome::Woken`]：唤醒请求已入格，本次请求是**续写幕**（复用原轮号、
 //!   复用原 Turn 根节点）；
-//! - [`WakeOutcome::NewTurn`]：`RetrySubtree`——删掉失败轮的消息，按普通新轮重来；
+//! - [`WakeOutcome::NewTurn`]：`RetrySubtree`——按普通新轮重来，被重试的那一支
+//!   **不删**，它成为同一问题的另一个候选（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
 //! - [`WakeOutcome::Done`]：`RetryCompaction` 等不产生对话轮次的动作，直接收尾。
 
 use super::ChatOrchestrator;
@@ -23,7 +24,6 @@ use crate::symbio_core::{llm_short_id, run_ops, RemoveNodesRequest, Seq};
 use crate::symbio_core::{ExecAbortSignal, PluginError, PluginInvokeRequest};
 use crate::{plugin_info, plugin_warn};
 use serde_json::{json, Value};
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::super::tool_dispatch::{ToolPort, WakeIntent, WakeSpec};
@@ -40,8 +40,13 @@ pub(crate) enum WakeOutcome {
         /// 被替换的旧结果子节点：新结果落格后删除，避免同一笔调用出现两条结果。
         old_child: Option<String>,
     },
-    /// 失败轮的消息已删除，按普通新轮重来（`RetrySubtree`）。
-    NewTurn,
+    /// 按普通新轮重来（`RetrySubtree`）：被重试的那一支**不删**，它成为同一问题的
+    /// 另一个候选（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+    NewTurn {
+        /// 被重试那一支的 Turn 根节点 id——新支开出来时按它登记「是哪一支的另一版本」
+        /// （`turn.branch` 的 `of`）。
+        retried_root: String,
+    },
     /// 本请求不产生对话轮次（`RetryCompaction`），直接收尾。
     Done,
 }
@@ -73,11 +78,19 @@ pub(crate) async fn process_wake(
     }
 }
 
-/// `RetrySubtree`：删除失败轮及其全部子孙节点，按普通新轮重来。
+/// `RetrySubtree`：按普通新轮重来，**被重试的那一支留在树里**。
 ///
-/// 删除走 `remove-nodes` 动作面（D-054 决策 2）：删掉的是一棵子树 ⇒ 一次动作落
-/// **一条** `message.removed`。不落格的话，主读路径切到「从 WAL 重建」之后这棵子树
-/// 会整棵复活——重建只看事实，而事实里从未有过「它们没了」这句话。
+/// 这里不做删除（`remove-nodes` + 一条 `message.removed`）。删除会把两件不同的事说成
+/// 同一件：「这一次不再读了」（呈现，由选中态说）与「这一次没发生过」（事实，需要
+/// `message.removed` 才成立）。而那次往返确实发生、确实产出过半截答案与真跑过的工具
+/// ——删除等于毁掉一条已经写下的事实，还顺手让「同 parent 多候选」永远没有数据来源
+/// （裁决见 [D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+///
+/// 本函数因此只做**校验与交身份**：靶子必须是一条轮骨架（`is_run()`，不看 `status`——
+/// 中止的、失败的、甚至跑完的都可以重来），它的根 id 交给新幕去登记分支
+/// （[`super::super::stage_exec`] 的 `prepare-turn`：那里才有新支的根 id）。
+/// 「藏起来不读」归[分支投影](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
+/// 一处是 [`crate::symbio_core::branch_hide_unselected`]——只有进模型的那条路调它。
 async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOutcome, PluginError> {
     let messages = session
         .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
@@ -90,47 +103,10 @@ async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOut
         )));
     }
 
-    // BFS 收集所有子孙节点 id（含 target 自身）。`flat` 档下本轮响应骨架的直接子
-    // 节点已升根（`parent_id: None`），靠 `meta.turn_root` 记号认回——否则它们够
-    // 不着、retry 删不干净、残留下一次重建（与 `failure::subtree_of` 同一条并集）。
-    let mut to_delete: HashSet<String> = HashSet::new();
-    to_delete.insert(target_id.to_string());
-    let mut queue: Vec<String> = vec![target_id.to_string()];
-    for m in &messages {
-        if crate::symbio_core::node_build::turn_root_of(m) == Some(target_id)
-            && to_delete.insert(m.id.clone())
-        {
-            queue.push(m.id.clone());
-        }
-    }
-    while let Some(parent_id) = queue.pop() {
-        for m in &messages {
-            if m.parent_id.as_deref() == Some(&parent_id) && to_delete.insert(m.id.clone()) {
-                queue.push(m.id.clone());
-            }
-        }
-    }
-
-    let deleted: Vec<String> = messages
-        .iter()
-        .filter(|m| to_delete.contains(&m.id))
-        .map(|m| m.id.clone())
-        .collect();
-    session
-        .run_op_unit(
-            run_ops::REMOVE_NODES,
-            RemoveNodesRequest {
-                ids: deleted.clone(),
-            },
-        )
-        .await?;
-
-    plugin_info!(
-        "session",
-        "[Wake] RetrySubtree: deleted {} messages (subtree rooted at {target_id})",
-        deleted.len()
-    );
-    Ok(WakeOutcome::NewTurn)
+    plugin_info!("session", "[Wake] RetrySubtree: {target_id} 另开一支");
+    Ok(WakeOutcome::NewTurn {
+        retried_root: target_id.to_string(),
+    })
 }
 
 /// 工具调用的唤醒：把用户动作落成一笔 `request(port=tool)`。

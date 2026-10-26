@@ -70,7 +70,6 @@ fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
 /// 丢弃"孤儿"消息：`parent_id` 指向本批次里不存在的节点。
 ///
 /// 孤儿来源：
-/// - Failed Turn 被 `resume::process_retry_subtree` 删除时若子节点未一并清理；
 /// - `persist_failure` 把仅存在于内存的流式子节点直接追加进存储；
 /// - `resume::process_tool_resume_action` 只删子节点、父节点已被其它路径清理。
 ///
@@ -136,6 +135,14 @@ impl PersistentChatSession {
         // 因此整树保留即可；中断说明与占位工具结果由请求视图层
         // （flatten_chat_messages / build_request_view）按 status 动态补齐。
         // 下方孤儿过滤退化为安全网（正常路径失败 Turn 整树保留，无孤儿产生）。
+        //
+        // **分支收敛**：重试不再删除失败轮，而是让它与新轮并存为同一组的两支
+        // （[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。呈现读侧
+        // 全树带标注交出去，只有进模型的这一份必须**只保留选中支**——同一个问题
+        // 在请求包里出现两个答复，模型读到的是自己没说过的话。
+        // 未选中支连同它的整棵子树一起丢弃（工具结果、续写幕都在子树里）。
+        let mut messages = messages;
+        crate::symbio_core::branch_hide_unselected(&mut messages);
         // 剔除父节点缺失的孤儿节点（否则会带着不存在的 tool_call_id 进请求包）
         let messages: Vec<ChatNode> = drop_orphan_messages(messages);
         // 对各消息做 content 归一兜底（并跳过 role 为 None 的占位消息），

@@ -363,6 +363,14 @@ export const VDFS_ACTION_ABORT = 'abort'
  */
 export const VDFS_ACTION_EXPAND_SKELETON = 'expand_skeleton'
 /**
+ * 已知动作标识：**切换分支**（后端 `VDFS_ACTION_SWITCH_BRANCH`）——同一问题的另一支
+ * 答复。落点在成员节点自身（`<sid>/message/<mid>`），载荷 `{"to": 候选 id}`。
+ *
+ * 它与恢复动词的分界：那些「让这一轮接着走」（开一次往返），这一条**只换读法**
+ * ——落一条选择事实，不开轮、不产生消息。
+ */
+export const VDFS_ACTION_SWITCH_BRANCH = 'switch_branch'
+/**
  * 已知动作标识：**列出插件注册表**（后端 `VDFS_ACTION_PLUGINS`）——容器根的
  * 自持动词，回包 `data.plugins` 是全部插件的条目（含没有 VDFS 的与已停用的）。
  *

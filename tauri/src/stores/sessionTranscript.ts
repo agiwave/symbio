@@ -16,6 +16,9 @@
  *    本轮根节点上），半截子节点不再各刷一份同样的错误（否则一条错误刷屏到每条半截
  *    消息，正是原始 429 刷屏的根因）。前端只按**节点自身状态**渲染错误，不假设根节点
  *    是哪种形态——一轮响应的根既可能是骨架容器，也可能直接就是一个正文节点。
+ * 5. **分支收敛**（重试留下的并存两支）——未选中那一支**连同整棵子树**不渲染。
+ *    与后端的 `branch_hide_unselected` 同一条判据：只藏根不藏子孙，会把旧支的
+ *    工具结果留在屏幕上跟新支并列；漏认 `meta.turn_root`，`flat` 档下正是这个症状。
  *
  * 这些规则原先只能通过「造一个 Pinia store + 喂一串 patch」间接验证。抽成纯函数后
  * 每条规则都能直接断言（见 `__tests__/sessionTranscript.spec.ts`），
@@ -32,6 +35,7 @@ import {
   type ChatNode,
 } from '@/schemas/chat_node'
 import { isContentKind } from '@/registry/messageTypes'
+import { messageBranchOf, messageTurnRoot } from '@/registry/messageFacts'
 
 /** 缩略卡预览的最大字符数（超出截断并加省略号） */
 export const PREVIEW_MAX = 60
@@ -182,4 +186,56 @@ export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boo
   if (!isContentKind(t)) return false
   // 取值走契约层的唯一实现（多模态内容 → 纯文本）
   return messageTextOf(msg.content).trim().length === 0
+}
+
+/**
+ * 丢掉**未选中那一支**的整棵子树（分支切换的前端半边，与后端
+ * `branch_hide_unselected` 同一条判据）。
+ *
+ * ## 为什么前端也要做一遍
+ *
+ * 后端的呈现读出口**不丢**任何东西：全树带标注交出去，「看不见」与「不存在」是
+ * 分开的两件事——切回去还在，而 `message.removed` 才是真没了。于是「现在读哪一支」
+ * 是**呈现**判定，得有人在前端执行它，否则两支答复并排画在会话流里，用户看到的是
+ * 两条互相矛盾的助手发言。
+ *
+ * ## 子树判据是 `parent_id ∪ meta.turn_root`，不是只看 `parent_id`
+ *
+ * `flat` 档下本轮响应骨架的直接子节点**升了根**（`parent_id` 被摘掉，靠
+ * `meta.turn_root` 记号认回）。只按 `parent_id` 收集，那一档下旧支只剩根节点被藏掉，
+ * 它的工具结果与正文全部留在屏幕上——这条缺陷不报错，只是「切了分支但没换干净」。
+ *
+ * 没有任何分支标注时**原样返回**（同一个数组引用）：绝大多数会话没有并存两支，
+ * 这里不该为它们新建一份列表。
+ */
+export function dropUnselectedBranches(messages: ChatNode[]): ChatNode[] {
+  const hiddenRoots = messages.filter((m) => {
+    const b = messageBranchOf(m)
+    return b !== null && !b.selected
+  })
+  if (hiddenRoots.length === 0) return messages
+
+  // 子边 = `parent_id` 与 `turn_root` 的**并集**（与后端 `node_build::subtree_of` 同源）
+  const children = new Map<string, ChatNode[]>()
+  const link = (pid: string | null | undefined, child: ChatNode) => {
+    if (pid == null || pid === '') return
+    const arr = children.get(pid)
+    if (arr) arr.push(child)
+    else children.set(pid, [child])
+  }
+  for (const n of messages) {
+    link(n.parent_id, n)
+    link(messageTurnRoot(n), n)
+  }
+
+  const gone = new Set<string>()
+  const queue: string[] = hiddenRoots.map((m) => m.id)
+  let guard = messages.length + 1 // 环防御：合法转写是树，不会触顶
+  while (queue.length > 0 && guard-- > 0) {
+    const id = queue.pop()!
+    if (gone.has(id)) continue
+    gone.add(id)
+    for (const child of children.get(id) ?? []) queue.push(child.id)
+  }
+  return messages.filter((m) => !gone.has(m.id))
 }

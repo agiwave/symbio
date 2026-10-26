@@ -4,7 +4,7 @@
   职责边界（只做外壳，不碰内容）：
   - 容器与层级：`.msg` 包装、`type-*` / `status-*` 修饰类、`nested` 缩进与引导竖线；
   - 折叠头部：图标 + 标题 + 心跳标 + 收起态摘要 + 状态标签（含运行中动效与秒数）
-    + 悬停操作（编辑 / 就地重试 / 删除）；
+    + 悬停操作（编辑 / 就地重试 / 删除）+ 分支切换器（同一问题的第几支，常驻）；
   - 折叠交互：默认态与深层级策略查 `registry/messageTypes`，本组件只持有**交互态**；
   - 折叠体：**不关心内容**，由调用方经默认插槽填入（气泡 / Markdown / 工具卡 / 表单…）。
 
@@ -53,6 +53,27 @@
         }}<span v-if="isRunningAction && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
       </span>
       <span v-if="showsLiveBadge" class="node-live">回复中…</span>
+      <!-- 分支切换器：同一个问题的第几支答复。**常驻**而非悬停——「还有另一支」
+           是这条回答的状态，藏进 hover 就等于没有（用户不会去悬停一条他以为
+           只有一份答案的消息）。两端都到头时按钮置灰而不是消失：读数 `1/2`
+           保持稳定，控件不因位置而改变形状。 -->
+      <span v-if="branch" class="node-branch" @click.stop>
+        <button
+          class="node-act neutral"
+          :disabled="!prevBranch"
+          title="上一支"
+          aria-label="上一支答复"
+          @click.stop="switchTo(prevBranch)"
+        >‹</button>
+        <span class="branch-count">{{ branch.index + 1 }}/{{ branch.total }}</span>
+        <button
+          class="node-act neutral"
+          :disabled="!nextBranch"
+          title="下一支"
+          aria-label="下一支答复"
+          @click.stop="switchTo(nextBranch)"
+        >›</button>
+      </span>
       <!-- 悬停 / 键盘聚焦操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
       <span class="node-actions" @click.stop>
         <button v-if="isUser" class="node-act" title="编辑" :aria-label="'编辑'" @click.stop="emit('edit', node.id)">✎</button>
@@ -70,15 +91,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, inject, onScopeDispose, ref, watch } from 'vue'
 import { type ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import { useRunningClock } from '@/composables/useRunningClock'
+import { SWITCH_BRANCH_KEY } from '@/composables/useChatConnection'
 import {
   agentNameOf,
   canRetryTool,
   effectiveOpenOf,
   isUserFacet,
+  messageBranchNeighbor,
+  messageBranchOf,
   messageHeadModifier,
   messageIcon,
   messageIsHeartbeat,
@@ -132,6 +156,25 @@ const headClass = computed(() => messageHeadModifier(props.facets))
 const showsLiveBadge = computed(() => messageShowsLiveBadge(props.facets))
 const isHeartbeat = computed(() => messageIsHeartbeat(props.node))
 const canRetry = computed(() => canRetryTool(props.facets))
+
+// ── 分支切换（重试留下的并存两支）────────────────────────────
+//
+// 数据来源只有后端盖的标注（`meta.branch`，读取集中在 `registry/messageFacts`），
+// 本组件不认识「重试」「分支」这些业务词该在什么状态下出现——后端没盖就是没有。
+// 动作经注入打到 composable：切换器在所有渲染器共用的外壳里，而会话地址与 store
+// 都在那里（与 `RESUME_KEY` 同一条理由）。
+const switchBranch = inject(SWITCH_BRANCH_KEY, null)
+const branch = computed(() => messageBranchOf(props.node))
+const prevBranch = computed(() =>
+  branch.value ? messageBranchNeighbor(branch.value, -1) : null,
+)
+const nextBranch = computed(() =>
+  branch.value ? messageBranchNeighbor(branch.value, 1) : null,
+)
+/** 交回后端的是**候选节点 id**：前端不解它的含义，后端按 id 认人。 */
+function switchTo(to: string | null) {
+  if (to) switchBranch?.(props.node.id, to)
+}
 
 // ── 折叠状态 ───────────────────────────────────────────────
 //
@@ -363,6 +406,21 @@ const runningDuration = computed(() => {
 .msg:hover > .node-head .node-actions,
 .node-head:focus-within .node-actions {
   display: inline-flex;
+}
+/* ── 分支切换器（常驻，非悬停）──
+   读数 `i/n` 夹在两个箭头中间：用户先看见「这是一组里的第几支」，再决定点不点。
+   箭头按钮共用全局微操作类 `.node-act.neutral`（见 `styles/controls.css`）。 */
+.node-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: 0.35rem;
+  flex-shrink: 0;
+}
+.branch-count {
+  font-size: 0.68rem;
+  color: var(--color-chip-fg);
+  font-variant-numeric: tabular-nums;
 }
 .node-tag {
   font-size: 0.68rem;

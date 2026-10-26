@@ -137,6 +137,11 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '投影函数：与 cost_ledger / slo_report / fallback_rate 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引 projection 域目录）。core 外唯一生产消费方 = plugins/session/stats.rs 的用量列（`response{port=model}` 载荷的 `usage`）。core 内没有第二个生产模块用它（同域内只有测试），故显为单消费方。不可下沉：下沉等于让「用量」的口径住进会话插件，而它读的是事件载荷的通用形状（任何读侧都该按同一本账报数）',
       spend_ledger:
         '投影函数：与 token_ledger / cost_ledger 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引 projection 域目录）。core 外唯一生产消费方 = plugins/session/stats.rs 的金额列（`response{port=model}` 载荷的 `spend`，按币种分桶）。core 内没有第二个生产模块用它（同域内只有测试），故显为单消费方。不可下沉：金额的累计口径（币种不可加、主体摊开）是任何读侧都该共用的一本账，搬进会话插件就等于给第二份实现留门',
+      // 2026-10-26（D-173）：分支读法的**节点树出口**。它与 `unselected_roots`
+      // （请求包出口，住 core 内部）是同一条判据的两个问法，子树口径 = `parent_id` ∪
+      // `meta.turn_root` 的唯一实现 `node_build::subtree_of` 就在它脚下。
+      branch_hide_unselected:
+        '投影读侧函数（分支的「藏」）：与 transcript / mutations_latest_snapshot 同族——**一条支的子树只有一份收法**（`node_build::subtree_of`：`parent_id` ∪ `meta.turn_root`；`flat` 档升根的节点没有 `parent_id`，只按父边收会漏）。core 外唯一生产消费方 = plugins/session/read.rs 的 `get_context_messages`；C-002 禁插件深引 projection 域 ⇒ 必须占根出口。不可下沉：下沉等于把「子树同一性」的第二份实现放进会话插件，而它漂的后果是静默的——呈现与上下文各读一套树（判据见 D-173 口径 3）',
       // 2026-10-21（段一）：事件 kind 名是**事件网格的命名空间**，README §3
       // event 域写明「常量 = 事件名字表（名字是数据，单点定义）」。`turn.stage` 与
       // `turn.supplemented` 同表；写读两侧今天都在 plugins/loop，但 kind 名不是 loop

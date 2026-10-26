@@ -202,6 +202,11 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 /// | `message.removed` | 按节点身份**丢条目** |
 /// | `session.consolidated` | **换基**：此前整段历史由载荷里那份列表取代（S2.7-b2） |
 ///
+/// 同一趟折叠还认**分支格**（`turn.branch` / `turn.branch_selected`）：它们改的不是正文
+/// 而是**读法**——不选中那一支的助手侧条目照样进转写（用户切回去还看得见），只是标成
+/// 不进请求包。少了这一段，重试在模型眼里等于没发生：新旧两支的答复同时躺在请求包里，
+/// 而下一轮读的还是被用户刚刚不要的那一份。
+///
 /// ## 换基（压缩快照，S2.7-b2）
 ///
 /// `session.consolidated` 的载荷是**压缩后的整份消息列表**。折叠动作是：先把它
@@ -224,6 +229,19 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 pub fn transcript() -> Projection<TranscriptView> {
     Projection::new(|events: &[Event], now| {
         let mutations = super::mutations::MessageMutations::collect(events);
+        // 未选中支的根 id（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
+        // 同一个问题在请求包里只能有**一支**答复，否则模型读到的是自己没说过的话。
+        // 这里问「还在不在」的证据取变更格（被删的支不在世），而不是「有没有节点」——
+        // 重试那一幕的新支此刻还没有任何节点，而那正是该把旧支挤出请求包的时刻。
+        // 两条问法与共享的挑法见 [`super::branch`] 的模块文档。
+        let hidden_branches =
+            super::branch::unselected_roots(events, |id| mutations.is_removed(id));
+        // 这一条事件属不属于「不被读的那一支」。判据（载荷 `turn_id` = 本轮 Turn 根 id，
+        // 没有这个键的恒不在任何支里 = 各支的共同祖先）住在
+        // [`super::branch::event_branch_root`]，`prompt_fidelity` 复核的是**同一句问话**。
+        let hidden_branch = |e: &Event| {
+            super::branch::event_branch_root(e).is_some_and(|root| hidden_branches.contains(root))
+        };
         let mut entries: Vec<TranscriptEntry> = Vec::new();
 
         // ── 换基：先收下快照那份列表，再从其下标之后接着折（见函数文档）────────
@@ -319,7 +337,9 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 role: "assistant".into(),
                                 text,
                                 tool: None,
-                                exclude_from_context: false,
+                                // 未选中支的正文**进转写、不进请求包**：切回那一支时用户
+                                // 还看得见它，模型却同一时刻只该读一支。
+                                exclude_from_context: hidden_branch(e),
                             },
                             produced_node(e),
                             false,
@@ -338,7 +358,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 role: "assistant".into(),
                                 text,
                                 tool: None,
-                                exclude_from_context: false,
+                                exclude_from_context: hidden_branch(e),
                             },
                             produced_node(e),
                             false,
@@ -359,7 +379,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             role: "assistant".into(),
                             text: detail.to_string(),
                             tool: None,
-                            exclude_from_context: false,
+                            exclude_from_context: hidden_branch(e),
                         },
                         produced_node(e),
                         false,
@@ -437,7 +457,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             role: "tool".into(),
                             text: text.to_string(),
                             tool: Some(tool.to_string()),
-                            exclude_from_context: false,
+                            exclude_from_context: hidden_branch(e),
                         },
                         event_tool_result_node_id(e),
                         false,

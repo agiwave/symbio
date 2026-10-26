@@ -434,14 +434,16 @@ pub struct ChatNode {
 /// 会话恢复动作。
 ///
 /// 统一覆盖所有"非普通消息"的用户主动操作（与 `session_chat::Request.message` 互斥）：
-/// - `RetrySubtree`：LLM 失败重试（删除靶子节点及其所有子孙节点，重新走 LLM 请求）
+/// - `RetrySubtree`：LLM 失败重试（靶子节点那一支**留在树里**，另开新的一支重走 LLM 请求）
 /// - `Retry`：工具执行失败后重试（用原 args）
 /// - `Approve` / `Reject`：confirm 审批的批准/拒绝
 /// - `Supply`：工具执行失败后补充参数重试（合并 args）
 /// - `Answer`：ask_user 提问的答案回填
 /// - `RetryCompaction`：压缩失败重试（删除 Failed 压缩节点，重新执行一次压缩）
 ///
-/// 恢复语义：删除旧消息 → 重新执行 → 生成新的响应子节点。
+/// 恢复语义：重新执行 → 生成新的响应子节点。工具失败那一类（`Retry` / `Supply` /
+/// `RetryCompaction`）删的是**那一次失败的产物**（重跑会覆盖同一个稳定锚点，留着
+/// 就是两条互相矛盾的结果）；`RetrySubtree` 不删——见它的文档。
 /// 对于工具调用场景，ToolCall 父节点 id 保持不变（稳定锚点），仅状态更新。
 ///
 /// 线格式为 `snake_case`（见 `#[serde(rename_all)]`），与前端
@@ -450,10 +452,15 @@ pub struct ChatNode {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ResumeAction {
-    /// LLM 失败重试：删除靶子节点及其所有子孙节点，重新走 LLM 请求。
+    /// LLM 失败重试：以靶子节点为**同一问题的另一支**重走 LLM 请求。
     ///
     /// 「删除整棵子树并重跑」，靶子是**任一骨架节点**（[D-070 §决策 1]）——
     /// 动词不绑某一格业务：一轮响应与一次工具调用都是骨架，都能当靶子。
+    ///
+    /// 那一支**不删**：重跑成功时新旧两支并存为同一分支组（`turn.branch`），
+    /// 默认读新的一支，旧的随时切回去还在（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。删除式重跑的代价是「用户
+    /// 点错了重试，上一次尝试的全部现场没了」——而那次尝试往往正是他要回头看的东西
+    /// （超时？哪个工具挂了？）。
     RetrySubtree,
     /// 工具失败重试：删除 Failed 工具结果子节点，重新执行工具（用原 args）
     Retry,

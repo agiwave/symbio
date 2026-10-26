@@ -47,6 +47,7 @@
 
 use std::sync::Arc;
 
+use crate::plugin_info;
 use crate::symbio_core::{Event, PluginInvokeRequest, Seq, Store};
 
 use super::chat_loop::inputs::TurnInputs;
@@ -152,6 +153,41 @@ pub(crate) fn run_prepare_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a
             )],
         )
         .map_err(ActorError::Append)?;
+        // 重试开出的**新支在这里登记**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+        //
+        // 为什么是这一格而不是唤醒那一处：`turn.branch` 的 `into` 是**新支的 Turn 根
+        // id**，而那个 id 到本幕的输入备好才存在（一幕一个根，`prepare_turn_inputs`
+        // 是它唯一的创建点）。`retry_of` 由 `RetrySubtree` 寄存、`take()` 即消费，
+        // 幕间续写的第二幕因此不会再开一支。
+        //
+        // 旧支不删：它降成「同一问题的另一个候选」，藏与不藏由选中态说（读侧一处
+        // `branch_hide_unselected`，只挡进模型的那条路）。
+        if let (Some(of), Some(inputs)) = (step.turn.retry_of.take(), inputs.as_ref()) {
+            let seq = step
+                .store
+                .append(
+                    crate::symbio_core::Event::pending(
+                        format!("branch-{}", inputs.root_id),
+                        crate::symbio_core::EVENT_TURN_BRANCH,
+                        crate::symbio_core::Entity::Turn,
+                        crate::symbio_core::Verb::Asserted,
+                        step.turn.turn_no,
+                        crate::symbio_core::request_principal(step.ctx.as_ref()),
+                    )
+                    .with_payload(serde_json::json!({ "of": of, "into": inputs.root_id }))
+                    .with_produced_by(step.turn.user_seq),
+                )
+                .map_err(ActorError::Append)?;
+            plugin_info!(
+                "session",
+                "[Branch] 新支 {} 挂到 {} 之下（seq={}）",
+                inputs.root_id,
+                of,
+                seq.value()
+            );
+            // 收尾时按这一格补发组内的标注帧（见 `TurnState::branch_root`）。
+            step.turn.branch_root = Some(inputs.root_id.clone());
+        }
         *step.inputs = inputs;
         Ok(())
     })

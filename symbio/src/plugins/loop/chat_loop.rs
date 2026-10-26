@@ -262,7 +262,7 @@ pub async fn run_chat_loop(
     // ── 会话恢复（resume）：在 turn 循环前把用户动作落成唤醒请求 ─────────────
     //
     // `req.resume` 存在时，本调用是用户的恢复操作：
-    // - `RetrySubtree`：删掉失败轮的消息，按普通新轮重来；
+    // - `RetrySubtree`：按普通新轮重来，被重试那一支不删（成为另一支候选）；
     // - `RetryCompaction`：重跑一次压缩，不进对话轮次；
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：在原轮上落一笔
     //   `request(port=tool)`（载荷带 `resume` 标记）。之后的授权 / 派发由行表
@@ -291,7 +291,11 @@ pub async fn run_chat_loop(
                 turn.resume_old_child = old_child;
                 next_drive_resume = Some(kind);
             }
-            Ok(super::chat_loop::wake::WakeOutcome::NewTurn) => {}
+            Ok(super::chat_loop::wake::WakeOutcome::NewTurn { retried_root }) => {
+                // 新支的根 id 要到 `prepare-turn` 才有（一幕一个根），所以这里只寄存
+                // 「这是哪一支的另一版本」，登记那一格由准备段落。
+                turn.retry_of = Some(retried_root);
+            }
             Ok(super::chat_loop::wake::WakeOutcome::Done) => {
                 return finish_turn(&context, &sink, &turn, TurnExit::ResumeDone).await;
             }
@@ -317,6 +321,13 @@ pub async fn run_chat_loop(
             // 心跳等无上下文场景：从空上下文开始，仅携带本轮新消息。
             Vec::new()
         };
+
+        // 重试那一幕「读新支、不读被替换的那一支」**不在这里做**：这一份 `context.messages`
+        // 是节点树（呈现读侧：两支都在，带 `meta.branch`），喂的是水位、批次边界汇报与
+        // 本幕的输入装配；送给模型的那一体由事实网格投影（`projection::transcript`），
+        // 分支的读法住在那一层——那里才同时看得到刚落地的 `turn.branch` 与「新支还没有
+        // 节点」（判据见 `branch::unselected_roots`）。在轮侧剪这棵树，模型读的那一份
+        // 一个字都不变。
 
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）。
         // `UserPromptSubmit` 钩子**不在这里**：它由 session 在派发本轮之前触发
@@ -799,6 +810,15 @@ async fn finish_turn(
 ) -> TurnReport {
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
     persist_messages(context, turn.last_saved, sink).await;
+    // 分支标注的**实时面**（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+    //
+    // 标注由**重建**盖章，重建只在读的时候跑；流式帧里没有它 ⇒ 光靠本轮的帧，用户
+    // 刷新页面 / 切回会话才看见 `‹ 1/2 ›`。所以本轮落库之后（新支的节点这才进得了投影）
+    // 按已盖章的那一份把**组内每个成员**补发一次：切换器当场出现，两支谁在上谁在下也当场
+    // 分明。落格那一刻做不了这件事——那时组里只有一条现存成员，重建一个字段都不盖。
+    if let Some(into) = turn.branch_root.clone() {
+        republish_branch_group(context, sink, &into).await;
+    }
 
     // Stop 钩子的 `last_message`：取本轮重建视图的末条正文（与旧 `StopSignal::fire`
     // 同一取法）。resume 出口发生在主循环之前、此时尚无消息列表 ⇒ `None`。
@@ -831,6 +851,39 @@ async fn finish_turn(
             partial: Vec::new(),
             last_message,
         },
+    }
+}
+
+/// 按**已盖章的投影**补发一个分支组里每个成员的帧（只读投影 + 发帧，不落任何事实）。
+///
+/// 读的是 `run_ops::MESSAGES`（呈现读侧：两支都在，带 `meta.branch`），不是
+/// `CONTEXT_MESSAGES`（那条会先把未选中支藏掉——拿它补发等于把「藏」当成了「没发生」）。
+/// 发不出去也没什么可修的：`sink` 缺席（内部请求）时本来就是静默出口。
+async fn republish_branch_group(context: &SessionContext, sink: &ExecEventSink, member: &str) {
+    let all = match context
+        .session
+        .run_op::<Vec<ChatNode>>(run_ops::MESSAGES, ())
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            plugin_warn!("session", "[Branch] 补发标注帧前读投影失败：{e}");
+            return;
+        }
+    };
+    let Some(candidates) = all
+        .iter()
+        .find(|m| m.id == member)
+        .and_then(crate::symbio_core::branch_candidates)
+    else {
+        // 组里凑不齐两条现存成员（新支没产出节点就被中止 / 事实没落上）⇒ 没有标注可补，
+        // 也没有切换器可画——不是错误，是这一轮确实没开出第二支。
+        return;
+    };
+    for id in candidates {
+        if let Some(n) = all.iter().find(|m| m.id == id) {
+            sink.emit(crate::symbio_core::llm_message_frame(n)).await;
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     vdfs_from_plugin_error, vdfs_host_ctx, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_TRUNCATE,
+    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
 };
 
 impl SessionPlugin {
@@ -189,6 +189,29 @@ impl SessionPlugin {
                             })),
                         }))
                     }
+                    // ── 分支切换（`switch_branch`，载荷 `{to}`）──
+                    //
+                    // 落点与 `truncate`/`expand_skeleton` 同一个位置，语义却相反：那两个
+                    // 改的是**节点**，这个只改**读法**——落一条 `turn.branch_selected`，
+                    // 不开轮、不产生消息（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+                    //
+                    // 必须排在下面的恢复 catch-all **之前**：`switch_branch` 不在
+                    // `ResumeAction` 的词表里，掉进那一臂会被读成 `NotImplemented`——
+                    // 而「这个动词不存在」是假话，它存在，只是不开轮。
+                    (Some(mid), VDFS_ACTION_SWITCH_BRANCH, payload) => {
+                        let to = switch_branch_target(payload)?;
+                        let host = vdfs_host_ctx(ctx)?;
+                        let actor = crate::symbio_core::request_principal(&*host);
+                        self.switch_branch(id, mid, &to, &actor)
+                            .await
+                            .map_err(vdfs_from_plugin_error)?;
+                        Ok(VdfsResponse::Action(VdfsActionResult {
+                            action: action.clone(),
+                            ok: true,
+                            message: format!("已把 {mid} 所在的分支组切到 {to}"),
+                            data: Some(json!({ "session_id": id, "selected": to })),
+                        }))
+                    }
                     // ── 恢复（retry_subtree / retry / approve / reject / supply /
                     //    answer / retry_compaction）──
                     //
@@ -271,6 +294,38 @@ impl SessionPlugin {
             }
             _ => Err(VdfsError::NotImplemented),
         }
+    }
+}
+
+/// `switch_branch` 的入参校验：载荷必须是 `{"to": "<同组候选 id>"}`。
+///
+/// 与 [`expand_params`] 同一条判据（非法输入有错误码，不静默按缺省处理）：这里
+/// **没有缺省**——「切到哪一支」是这个动作唯一要说的一句话，缺了它就只能猜，
+/// 而猜错的后果是用户的转写换了一条历史，他还看不见区别。
+fn switch_branch_target(payload: Option<&Value>) -> VdfsResult<String> {
+    let obj = match payload {
+        Some(Value::Object(obj)) => obj,
+        Some(other) => {
+            return Err(VdfsError::invalid(format!(
+                "switch_branch 的载荷需要 JSON 对象（{{\"to\": 候选 id}}），实得：{other}"
+            )));
+        }
+        None => {
+            return Err(VdfsError::invalid(
+                "switch_branch 缺少 `to`：切分支必须指明目标候选",
+            ));
+        }
+    };
+    match obj
+        .get("to")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        Some(to) => Ok(to.to_string()),
+        None => Err(VdfsError::invalid(format!(
+            "switch_branch 的 `to` 需要是非空字符串（候选节点 id），实得：{}",
+            obj.get("to").cloned().unwrap_or(Value::Null)
+        ))),
     }
 }
 

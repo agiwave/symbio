@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PREVIEW_MAX,
   appendContent,
+  dropUnselectedBranches,
   hydrateTranscript,
   isInProgressMessage,
   previewOf,
@@ -196,5 +197,81 @@ describe('在途节点判据', () => {
     expect(isInProgressMessage({ status: 'failed' })).toBe(false)
     expect(isInProgressMessage({ status: 'aborted' })).toBe(false)
     expect(isInProgressMessage({})).toBe(false)
+  })
+})
+
+describe('dropUnselectedBranches：未选中支连同整棵子树一起让位（[D-173]）', () => {
+  /** 一条成员根：`selected` 决定它藏不藏。候选由夹具手写（读侧只认长度与下标）。 */
+  const branch = (id: string, candidates: string[], index: number, selected: boolean) =>
+    msg({
+      id,
+      meta: { branch: { group: candidates[0], candidates, index, total: candidates.length, selected } },
+    })
+  const child = (id: string, parent?: string, turnRoot?: string) =>
+    msg({ id, parent_id: parent, meta: turnRoot ? { turn_root: turnRoot } : undefined })
+  const ids = (list: ChatNode[]) => list.map((m) => m.id)
+
+  it('没有分支标注 ⇒ 原样返回**同一个**数组引用（每一次可见消息计算都跑它，不能白复制）', () => {
+    const input = [child('u1'), child('t1', 'u1'), child('r1', 't1')]
+    expect(dropUnselectedBranches(input)).toBe(input)
+  })
+
+  it('藏掉未选中支连同它的子孙；共同祖先留着', () => {
+    const list = [
+      child('u1'),
+      branch('t1', ['t1', 't2'], 0, false),
+      child('r1', 't1'),
+      branch('t2', ['t1', 't2'], 1, true),
+      child('r2', 't2'),
+    ]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['u1', 't2', 'r2'])
+  })
+
+  it('`flat` 档升根的子孙（`parent_id` 为空、靠 `meta.turn_root` 认回）一起藏', () => {
+    // 这一支的工具结果在呈现树里被升成了根：只按 `parent_id` 收子树会把它漏在外面，
+    // 于是模型与界面各读一套——界面少了这一条，模型多读一条矛盾的答复。
+    const list = [
+      child('u1'),
+      branch('t1', ['t1', 't2'], 0, false),
+      child('w1', undefined, 't1'),
+      child('w2', 'w1'),
+      branch('t2', ['t1', 't2'], 1, true),
+      child('v1', undefined, 't2'),
+    ]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['u1', 't2', 'v1'])
+  })
+
+  it('选中态换了 ⇒ 藏的是另一支：判据只来自标注，不在这里重算默认', () => {
+    const list = [
+      branch('t1', ['t1', 't2'], 0, true),
+      branch('t2', ['t1', 't2'], 1, false),
+    ]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['t1'])
+  })
+
+  it('三支时只留被读的那一支', () => {
+    const list = [
+      branch('t1', ['t1', 't2', 't3'], 0, false),
+      branch('t2', ['t1', 't2', 't3'], 1, true),
+      branch('t3', ['t1', 't2', 't3'], 2, false),
+      child('r1', 't1'),
+      child('r2', 't2'),
+      child('r3', 't3'),
+    ]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['t2', 'r2'])
+  })
+
+  it('形状不齐的标注读成「不在组里」⇒ 一条都不藏（宁显示两支，也不静默删掉一条历史）', () => {
+    const list = [
+      msg({ id: 't1', meta: { branch: { group: 't1', candidates: ['t1'], index: 0, total: 2 } } }),
+      msg({ id: 't2', meta: { branch: 'not-an-object' } }),
+    ]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['t1', 't2'])
+  })
+
+  it('子边成环时转得完（脏数据不把渲染卡死）', () => {
+    // 一条自己指认自己是自己子孙的根（parent_id 成环的最小形状）。
+    const list = [{ ...branch('t1', ['t1', 't2'], 0, false), parent_id: 't1' }, branch('t2', ['t1', 't2'], 1, true)]
+    expect(ids(dropUnselectedBranches(list))).toEqual(['t2'])
   })
 })

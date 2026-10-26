@@ -248,6 +248,11 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     if !gone.is_empty() {
         out.retain(|m| !gone.contains(&m.id));
     }
+    // 分支标注（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：重试留下的几支折成成员根节点上的 `meta.branch`。
+    // 在这里做而不是在读口做，是因为**两个读出口必须是同一棵树**（转写列表与会话叶子
+    // 是同一份数据的两个地址）——标注属节点形状，随重建出格一次就够；
+    // 「哪一支当前读」因此对重建的两个消费者同口径，不需要谁记得再调一次。
+    crate::symbio_core::projection::branch::stamp_branches(&mut out, events);
     out
 }
 

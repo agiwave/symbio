@@ -12,8 +12,8 @@ use serde_json::json;
 ///
 /// `event/mod.rs` 里另有两条 `EVENT_TRIGGER_*` 常量：`meta.trigger` 的**键名**与它的
 /// `kind` 取值（[D-077](../../plugins/heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "symbio/src/plugins/heartbeat/README")）。它们不是事件名，
-/// 所以不进这张表——这条断言把「41 个事件名」钉住，将来加名字要同批改这里。
-const DECLARED_EVENT_NAMES: usize = 41;
+/// 所以不进这张表——这条断言把「43 个事件名」钉住，将来加名字要同批改这里。
+const DECLARED_EVENT_NAMES: usize = 43;
 
 #[test]
 fn the_table_is_one_row_per_name_and_covers_every_declared_name() {

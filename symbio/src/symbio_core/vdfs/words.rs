@@ -145,6 +145,19 @@ pub const VDFS_ACTION_ABORT: &str = "abort";
 /// 地址就是它自己），只是它**只读**——不改存储，只回一段子树。
 pub const VDFS_ACTION_EXPAND_SKELETON: &str = "expand_skeleton";
 
+/// 节点动作标识：**切换到另一支候选答复**（写操作，落在当前那一支的 Turn 根上）。
+///
+/// 入参 `{ to: <同一组里另一支的根 id> }`（`meta.branch.candidates` 里的那一个——
+/// 前端不认识组结构，它把后端交回来的 id 原样传回）。它落一条
+/// [`crate::symbio_core::EVENT_BRANCH_SELECTED`]，**不开轮**：这是它与恢复动词
+/// （`retry_subtree` / `approve` / …）的分界——那些是「让这一轮接着走」，这一条只是
+/// 「我刚读的是这一支」。
+///
+/// 落点仍是单条消息自身（与 `truncate` / 恢复同一个位置：「对这条消息做点什么」的
+/// 地址就是它自己）。校验在写侧：`to` 必须是**这条消息所在分支组**的成员，否则
+/// 报错误码——把一个外来 id 接进选择格，等于让任何人改写别人会话的当前视图。
+pub const VDFS_ACTION_SWITCH_BRANCH: &str = "switch_branch";
+
 // ==================== 插件容器的注册表动词 ====================
 //
 // 容器的根地址同时是两个视图的锚点：**资源树**（`List` 只给已挂载、且自己暴露了

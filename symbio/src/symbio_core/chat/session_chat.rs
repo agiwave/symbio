@@ -46,9 +46,10 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_principal: Option<String>,
     /// 会话恢复操作（与 `message` 互斥）。
-    /// 存在时走 resume 分支：删除旧消息 → 重新执行 → 续写 chat_loop。
+    /// 存在时走 resume 分支：重新执行 → 续写 chat_loop（工具类动作会先删掉
+    /// **那一次失败的产物**，重跑覆盖同一个锚点；`RetrySubtree` 不删，见下）。
     /// 支持场景：
-    /// - `RetrySubtree`：LLM 失败重试（删除靶子节点及其子节点，重新走 LLM 请求）
+    /// - `RetrySubtree`：LLM 失败重试（靶子那一支留在树里，另开一支重走 LLM 请求）
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复
     ///   为 None 且 `message` 存在时走正常 send 分支。
     #[serde(default, skip_serializing_if = "Option::is_none")]

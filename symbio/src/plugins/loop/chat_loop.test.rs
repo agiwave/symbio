@@ -10,6 +10,9 @@
 //! 闸门现在只有一条退出条件（中止边界）：「等工具齐」随 v1 外壳的簿记坍缩
 //! （[D-073](../../../../docs/003-design/014-单环一表.md#d-073-turnstate-的轮内簿记与闸门等工具齐一并退场闸门只剩退出条件 "DE-014-单环一表")），「工具轮软上限」随它恒 0 的计数一起退役（[D-074](../../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）——
 //! 工具轮数在这一层不可见，本文件因此**不该**再出现任何按轮次的判定。
+//!
+//! 本文件另有第二段：收尾（[`finish_turn`]）的**分支标注补发**——它同样是主循环骨架的
+//! 一段，判据是「发帧范围」，不是标注内容本身（内容在 `projection::branch` 钉）。
 
 use super::*;
 
@@ -54,4 +57,86 @@ fn abort_wins_over_request_count() {
         gate_turn(&state(2, true)),
         Gate::Exit(TurnExit::AbortedAtBoundary)
     ));
+}
+
+// ── 收尾的分支标注补发（[D-173]）─────────────────────────────────────────
+//
+// 标注本身对不对由 `symbio_core::projection::branch` 的用例钉；本段只钉**发帧范围**：
+// 补发的是**一组**的成员，不是「新支那一条」。少发旧支那条，界面上就是「一支有
+// `‹ ›`、另一支没有」——而切换器要两支都能点才算存在。
+
+use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
+use crate::symbio_core::{EventStore, ExecTranscriptWriter};
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::{Arc, Mutex};
+
+/// 帧口：记下每一条发出去的节点 id。
+#[derive(Default)]
+struct Recorder(Mutex<Vec<String>>);
+
+#[async_trait]
+impl ExecTranscriptWriter for Recorder {
+    async fn apply(&self, m: ChatNode) {
+        self.0.lock().unwrap().push(m.id);
+    }
+}
+
+/// 一条**已盖章**的成员根（盖章形状 = 重建的输出；投影本身在 core 的分支用例里钉）。
+fn member(id: &str, index: usize, selected: bool) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        meta: Some(json!({
+            "branch": {
+                "group": "t1", "candidates": ["t1", "t2"],
+                "index": index, "total": 2, "selected": selected,
+            }
+        })),
+        ..Default::default()
+    }
+}
+
+async fn context_with(messages: Vec<ChatNode>) -> SessionContext {
+    let facts = Arc::new(EventStore::new());
+    let port = Arc::new(FakeSessionPort::new(messages.clone()));
+    let spec = turn_spec(
+        "s-branch",
+        std::env::temp_dir(),
+        std::env::temp_dir(),
+        default_settings(),
+    );
+    let session = Arc::new(loop_session(spec, facts, port));
+    SessionContext {
+        messages,
+        session,
+        consolidated: None,
+    }
+}
+
+/// 新支落库后收尾：组里**两条**成员各发一条帧（旧支的 `selected` 也换了，它得重新出场）。
+#[tokio::test]
+async fn a_retry_turn_end_republishes_every_member_of_the_group() {
+    let rec = Arc::new(Recorder::default());
+    let ctx = context_with(vec![member("t1", 0, false), member("t2", 1, true)]).await;
+    republish_branch_group(&ctx, &ExecEventSink::direct(rec.clone()), "t2").await;
+    assert_eq!(
+        *rec.0.lock().unwrap(),
+        vec!["t1".to_string(), "t2".to_string()],
+        "补发按组内顺序覆盖每一条成员"
+    );
+}
+
+/// 这一轮**没开出组**（新支没产出节点就被中止，或读回来那条没有标注）⇒ 一条都不发。
+///
+/// 反面是「顺手把整份转写重发一遍」：那不是补发标注，是给每个节点开一次无谓的替换。
+#[tokio::test]
+async fn a_branchless_retry_end_republishes_nothing() {
+    let rec = Arc::new(Recorder::default());
+    let plain = ChatNode {
+        id: "t9".to_string(),
+        ..Default::default()
+    };
+    let ctx = context_with(vec![plain]).await;
+    republish_branch_group(&ctx, &ExecEventSink::direct(rec.clone()), "t9").await;
+    assert!(rec.0.lock().unwrap().is_empty(), "无组 ⇒ 不发帧");
 }

@@ -5,11 +5,16 @@ import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { useReleasedSkeletonsStore, subtreeOf, statsOf, type ReleasedSummary } from '@/stores/skeletonLazy'
-import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
+import {
+  dropUnselectedBranches,
+  isBlankContentNode,
+  isInProgressMessage,
+} from '@/stores/sessionTranscript'
 import {
   VDFS_ACTION_ABORT,
   VDFS_ACTION_CLEAR,
   VDFS_ACTION_EXPAND_SKELETON,
+  VDFS_ACTION_SWITCH_BRANCH,
   VDFS_STATUS_ACTIVE,
   VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
@@ -91,9 +96,26 @@ export interface UseChatConnectionReturn {
   resume: (payload: ResumePayload) => void
   /** 按需重取一个已折叠释放骨架的子树（[] 只读动作） */
   expandSkeleton: (mid: string, depth?: '1' | 'all') => Promise<void>
+  /**
+   * 切换分支：把 `mid` 所在分支组改成读 `to` 那一支（`switch_branch` 动作）。
+   *
+   * 两个参数都是**节点 id**：前端不认识它们的业务含义，把后端标注里的候选原样交回，
+   * 后端按 id 认人（同 `expand_skeleton` 只认 `mid` 一条路）。
+   */
+  switchBranch: (mid: string, to: string) => Promise<void>
   /** 骨架惰性重取面（[] 前端半）：供下游组件经 `SKELETON_LAZY_KEY` 注入使用 */
   skeletonLazy: SkeletonLazySurface
 }
+
+/**
+ * 「切换分支」注入键 —— 分支切换器在 `NodeShell`（所有渲染器共用的外壳），
+ * 而动作的落点住在 composable 闭包里（会话地址与 store 都在那儿）。
+ *
+ * 与 `RESUME_KEY` 同一条理由用注入而不用逐层 props：控件在树的任意深度，
+ * 透传要把一个回调穿过若干与本控件无关的容器。
+ */
+export const SWITCH_BRANCH_KEY: InjectionKey<(mid: string, to: string) => void> =
+  Symbol('chat-switch-branch')
 
 /**
  * 骨架惰性重取面（[] 前端半）——下游组件（`SkeletonNode`）经注入拿它，
@@ -352,6 +374,12 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const removed = getRemovedSet()
     const filtered = all.filter(m => !removed.has(m.id))
 
+    // **分支收敛**先做：未选中那一支连同整棵子树不渲染（与后端
+    // `branch_hide_unselected` 同一条判据）。排在「空壳叶子」之前是因为后者按
+    // 「有没有子节点」判定容器——被藏掉的那一支还留在集合里时，它的根会被算成
+    // 有子的容器，两支并排画在会话流里。
+    const pruned = dropUnselectedBranches(filtered)
+
     // 识别「空内容叶子节点」：流模式下后端会先发一个 content 为空（如 "\n\n"）的占位叶子
     // ——落地折叠后就是 `body` / `notice` 格、常夹在容器子流之间。该节点并不持久化，
     // 但前端会短暂收到；渲染时直接过滤掉，避免对话流出现空白块。
@@ -359,7 +387,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 「空内容」判据走 `sessionTranscript.isBlankContentNode`（唯一实现）：
     // 等待骨架的兜底判定也要用它，两处不能各写一份。
     const rawChildren: Record<string, ChatNode[]> = {}
-    filtered.forEach(msg => {
+    pruned.forEach(msg => {
       if (msg.parent_id) {
         if (!rawChildren[msg.parent_id]) rawChildren[msg.parent_id] = []
         rawChildren[msg.parent_id].push(msg)
@@ -371,7 +399,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const isEmptyLeaf = (msg: ChatNode) =>
       !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
-    const visible = filtered.filter(m => !isEmptyLeaf(m))
+    const visible = pruned.filter(m => !isEmptyLeaf(m))
     // Typing 占位（[]）：后端不发，前端按「骨架容器 streaming 且尚无子」合成一条
     // 派生 typing 子节点。合成挂在可见集之后——它随 messageTree 一起建进树，
     // 从不写 store（派生态）；宿主一旦有子或收束，谓词转假、下一帧即消失（即「替换 / 移除」）。
@@ -713,6 +741,35 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   }
 
   /**
+   * 切换分支（`switch_branch`）：把同一问题的另一支答复读成当前这一支。
+   *
+   * 与 `resume` 的分界：**不动运行态**。它不发起任何往返、不开轮，只在后端落一条
+   * 选择事实；回执之后后端下发组内成员的完整帧（`meta.branch` 换了读法），转写经
+   * 唯一落地口更新，可见集自己重算。因此这里既不置 working，也不置 failed——
+   * 把一次「换个读法」报成一次「跑了一轮」是把两件事说成一件。
+   */
+  async function switchBranch(mid: string, to: string) {
+    const sid = options.sessionId
+    const target = await addressingOf(sid)
+    if (!target) return
+    try {
+      const resp = await runVdfsAction(
+        vdfsMessageAddr(target.scheme, sid, mid),
+        VDFS_ACTION_SWITCH_BRANCH,
+        { to },
+        { workdir: store.getSessionWorkdir(sid) ?? '', session_id: sid },
+      )
+      if (!resp.ok) {
+        // 「没改成」必须出声：目标不在同一组 / 消息已被截断，用户点完看到的还是原来那一支，
+        // 界面与后端的差异只有这句话能补上。
+        logger.warn('useChatConnection', `[${sid}] switch_branch 未生效：${resp.message}`)
+      }
+    } catch (err: any) {
+      logger.error('useChatConnection', 'Failed to switch branch:', err)
+    }
+  }
+
+  /**
    * 骨架折叠态变化（[] 前端半的写侧入口，`SkeletonNode` 经注入调它）。
    *
    * - **收起** ⇒ 本地释放：把该骨架的后代从转写摘掉（`removeMessages`，与截断
@@ -753,6 +810,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     removeMessage,
     resume,
     expandSkeleton,
+    switchBranch,
     skeletonLazy,
   }
 }
