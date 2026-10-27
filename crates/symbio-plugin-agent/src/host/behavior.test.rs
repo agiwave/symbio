@@ -17,6 +17,9 @@ fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectC
         user_seq: 42,
         principal: "session/a",
         source: "user",
+        // 立约只看「这次调用发生了什么」，不折叠既有事实：两片历史交空切片。
+        snapshot: &[],
+        applied: &[],
     }
 }
 

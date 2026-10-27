@@ -19,6 +19,8 @@
 //!
 //! - **淘汰闸 / 承诺记账**：线上全名**等值**（`agent_run` 的线上名就是短名本身）。
 //! - **任务表**：线上全名**取末段**比短名（`local/todo_write` ⇒ `todo_write`）。
+//! - **效果端口选实现**（[`ToolDecls::behaviors_of`]）：先等值、再取末段——挂载点
+//!   前缀不改变「这个工具声明了什么」。
 //!
 //! 集合以注册表给出的 `meta.name` 为键——作用域投影（子智能体的改名包装器）只换
 //! 名字、原样透传行为名，所以**闸门跟随工具进入子作用域**：那正是「换个会话绕不
@@ -79,10 +81,20 @@ impl ToolDecls {
     /// 本调用声明的**全部**行为名（原样切片，交效果端口选实现用）。
     ///
     /// 与上面三个谓词同一份元数据：谓词是「某道闸管不管它」，本函数是「它的效果由
-    /// 谁记」。口径取线上全名**等值**——效果端口按注册表的 `meta.name` 选实现，
-    /// 不做末段匹配（末段是任务表闸的历史口径，不是通用规则）。
+    /// 谁记」。
+    ///
+    /// 口径先**等值**、再**取末段**：注册表的键是 `CapabilityMeta.name`（短名），而
+    /// 线上名带挂载点前缀（`local/todo_write`、`agent_scope/todo_write`）——只判等值
+    /// 会让「挂了前缀的工具」在效果端口里静默没有效果（J3 的形态：不是报错，是少
+    /// 记账）。取末段与任务表闸的历史口径同一条，不是为效果端口新开的规则。
+    /// 子作用域的改名（`agent_probe-agent_todo_write`）没有 `/`，走等值那一支。
     pub fn behaviors_of(&self, wire_name: &str) -> &'static [&'static str] {
-        self.declared.get(wire_name.trim()).copied().unwrap_or(&[])
+        let wire = wire_name.trim();
+        if let Some(declared) = self.declared.get(wire) {
+            return declared;
+        }
+        let short = wire.rsplit('/').next().unwrap_or_default();
+        self.declared.get(short).copied().unwrap_or(&[])
     }
 }
 

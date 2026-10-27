@@ -34,6 +34,7 @@
 //! - LLM 工具链路（把工具调用改为对 `UnifiedFs` 的调用）：本插件的 `provider` 模块
 //! - 虚拟层拓扑（容器聚合 + 注册为根）：`plugins/composite/vdfs.rs`
 
+mod behavior;
 mod fs;
 pub mod host;
 mod physical;

@@ -28,13 +28,12 @@ pub(crate) mod parallel;
 pub(crate) mod unfinished;
 
 use super::tool_executor::{
-    build_user_prompt_message, call_signature, execute_tool_async, note_tasks, record_effect,
-    BreakerInputs, EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
+    build_user_prompt_message, call_signature, execute_tool_async, record_effect, BreakerInputs,
+    EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
 };
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::facts::TaskDeclaration;
 use symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},

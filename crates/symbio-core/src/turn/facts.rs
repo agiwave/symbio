@@ -9,8 +9,11 @@
 //!
 //! | 类型 | 写侧（驱动器） | 落/读侧（留守） |
 //! |---|---|---|
-//! | [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] | 同上（`note_tasks` 的出参元素） | `task_events` 投影 `task.*` |
 //! | [`ReportDraft`] | `report_exec`（批次边界汇报执行体的产物） | `rebuild::reported_node` 回放汇报格 |
+//!
+//! 任务表的声明类型**不在这里**：写侧与落侧现在同属 `symbio-plugin-loop`
+//! （效果端口把「哪一次调用算声明」交回 owner，DE-025 D-207），类型随 owner 住
+//! 那个插件——core 的数据面只装真的跨插件的东西。
 //!
 //! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
 //! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::node_build`]
@@ -21,53 +24,6 @@ use crate::chat_node::ChatNode;
 use crate::event::Event;
 use crate::node_build::dialog_node;
 use serde::{Deserialize, Serialize};
-
-/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
-/// 一次**成功**的 `todo_write` 调用所声明的清单状态。
-///
-/// 与承诺的观察点相同（工具执行的唯一入口）。任务表的写方不在工具里：
-/// `local/todo_write` 是插件，够不到会话的 v2 事实源，而分发点是模型工具调用的
-/// **唯一入口**。这里看得见什么，事实源才记得了什么；记的必须是**观察到的声明**，
-/// 不是复述。
-///
-/// 只记声明、不记清单的当前全量：`local/todo_write` 那份清单是纯内存的
-/// （见其模块头），事实源要的是同一份状态的持久化——若在此再算一遍全量，
-/// 两处各算一次就是两套真相。因此**声明里没提到的任务一律不动**
-/// （`merge = true` 的增量语义，以及 `merge = false` 时被整体替换移出清单的项：
-/// 后者在事实源里保持未终态——append-only 不替模型编一条「已验收」的假事实）。
-pub struct TaskDeclaration {
-    /// 本批声明的任务项，顺序与模型给的一致。
-    pub items: Vec<TaskItem>,
-}
-
-/// 一项任务的声明态（一次 `todo_write` 调用里的一项）。
-#[derive(Debug, Clone)]
-pub struct TaskItem {
-    /// 任务 id。**缺席时按 `task_{i+1}` 兜底**，与 `local/todo_write` 的默认同一条
-    /// 格式——两处各写一次是跨插件契约（E-009 禁止 session 直引 local，所以没有
-    /// 共享函数可用）：改名必须两处一起改，否则事实源的 id 会与工具清单对不上，
-    /// 调度段就会念出模型不认识的 id。
-    pub id: String,
-    /// 任务内容（入 `task.opened` 的 `goal`）。
-    pub goal: String,
-    /// 依赖的任务 id。任务图是**数据不是机制**（`-多步任务与返工` §2），
-    /// 声明在清单里，成环 / 悬空由读侧 `acyclic_deps` 报。
-    pub depends_on: Vec<String>,
-    /// 声明状态。
-    pub status: TaskStatus,
-}
-
-/// 任务状态（与 `local/todo_write` 的 `status` 枚举同集）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TaskStatus {
-    /// 未开始。
-    #[default]
-    Pending,
-    /// 进行中。
-    InProgress,
-    /// 已完成（`task.asserted` 的触发态）。
-    Completed,
-}
 
 /// 一句汇报的草稿：文本 + 它据以生成的运行现状。
 ///

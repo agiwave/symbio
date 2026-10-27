@@ -53,6 +53,8 @@ impl Capability for ListTool {
             }),
             vec!["{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}", "{\"path\":\"src\"}", "{\"path\":\".vdfsv2\"}"],
             CapabilityRiskLevel::Low,
+            // 列举不改变工作目录：不声明任何行为。
+            &[],
         )
     }
 

@@ -104,6 +104,7 @@ pub fn tool(
     parameters: serde_json::Value,
     examples: Vec<&str>,
     risk: CapabilityRiskLevel,
+    behaviors: &'static [&'static str],
 ) -> CapabilityMeta {
     CapabilityMeta {
         name: name.to_string(),
@@ -112,9 +113,10 @@ pub fn tool(
         category: Some(CapabilityCategory::Resource),
         examples: Some(examples.into_iter().map(str::to_string).collect()),
         risk: Some(risk),
-        // 行为名：VDFS 工具不参与派活 / 立约 / 任务表三族闸门——
-        // 显式声明空集而不是省略字段：将来给这里加一个行为时要过肉眼。
-        behaviors: &[],
+        // 行为名**显式**给（空集也要写）：`vdfs_write` 一族声明 `file_change`，
+        // 其余工具一个都不声明。省略字段就退化成「默认无行为」，而默认值正是
+        // 「忘了声明」与「确定不要」不可分的那种形状（DE-025 D-210）。
+        behaviors,
     }
 }
 

@@ -1,4 +1,4 @@
-//! v2 派生事实写入——承诺 / 任务表 / 熔断 + 记忆与学习。
+//! v2 派生事实写入——效果（承诺 / 任务表 / 文件变更…）+ 熔断 + 记忆与学习。
 //!
 //! `turn_exec` 在轮末调用本模块的两个写方，把本轮的**派生副作用**落进同一份持久事实源
 //! （<会话目录>/`v2-events.wal`，`paths::V2_WAL_FILE` 单源）。
@@ -7,20 +7,29 @@
 //!
 //! 轮次事实（`u-{turn}` 开口 / 收束格）由 v2 运行器**原生**入格，运行器一处不缺。
 //! 但下面这些运行器**一处都不写**——它们的出参在工具执行层（`EffectInput` /
-//! `TaskDeclaration` / 熔断理由）与读侧（召回视图 / 技能判定），由分发方经
+//! 熔断理由）与读侧（召回视图 / 技能判定），由分发方经
 //! `SessionDispatchPort::take_derived` 交回。不在这里补，代际立约（S08）/ 任务表（S7）/
 //! 熔断（S9 §6 验收 2）/ 长期记忆（S06）/ 技能自我改进（S11）就整体失效。
 //!
+//! ## 效果只有一条通路
+//!
+//! 承诺、任务表、文件变更**都不在本模块**：它们各自是能力包里的一个 `ToolBehavior`
+//! （`symbio-plugin-agent` / `symbio-plugin-loop` / `symbio-plugin-vdfs`），本模块只把
+//! `EffectInput` 补上宿主面、问出草稿、交给唯一写入口。加一个新效果不需要动这里
+//! （DE-025 D-207）。
+//!
 //! ## 锚点由调用方给，锚的**含义**不由调用方定
 //!
-//! `user_seq` 是本轮开口格的 seq，`anchor_id` 是事件号的词干。两条都由 `turn_exec`
-//! 给（`t{turn}` 一族）。
+//! `user_seq` 是本轮开口格的 seq，由 `turn_exec` 给；事件号的词干（`t{turn}`）不在
+//! 这里生成——它是 [`symbio_plugin_api::effects::EffectCall::anchor`] 的活，由行为自己
+//! 取，因为「这笔效果属于哪一轮」是宿主面的一部分（DE-025 D-213）。
 //!
 //! ## 失败口径（两种，不合并）
 //!
-//! - **承诺**：入格失败 ⇒ **上抛** `Err`——承诺是本轮的立约，签了就得算数；
-//! - **任务表 / 熔断 / 记忆三段**：失败只记日志不冒泡（附加事实）。轮次已收束，
+//! - **效果 / 熔断 / 记忆三段**：失败只记日志不冒泡（附加事实）。轮次已收束，
 //!   附加事实失败不该把成功的一轮说成失败。
+//!
+
 //!
 //! ## 落笔顺序是判据，不是排版
 //!
@@ -38,31 +47,27 @@ use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb
 // 校准观测的名字由本插件交出（owner 是写方这一家）：常量住在清单生成物
 // `symbio_plugin_api::events`，经 `control_decl` 转手（DE-024 D-204 / D-205）。
 use crate::control_decl::EVENT_MEMORY_CALIBRATED;
-// 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
-// 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
-use symbio_core::facts::TaskDeclaration;
 use symbio_plugin_api::effects::EffectInput;
 
-/// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
+/// 收束派生事实中的**效果 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
 ///
 /// ## 为什么它与「轮次事实」分开成函数
 ///
 /// 轮次事实（`u-{turn}` 开口 / 收束格）记的是「这一轮说了什么」——由 v2 运行器
-/// 原生记账。但承诺 / 任务表 / 熔断是**本轮的派生事实**：数据来源都在工具执行层
-/// （`EffectInput` / `TaskDeclaration` / 熔断理由），运行器一处都不写。漏调本函数，
+/// 原生记账。但效果与熔断是**本轮的派生事实**：数据来源都在工具执行层
+/// （`EffectInput` / 熔断理由），运行器一处都不写。漏调本函数，
 /// 代际立约（S08）、任务表（S7）、熔断（S9 §6 验收 2）就**静默全丢**
 /// ——与记忆/学习同一个坑（见 [`record_learning`]）。
 ///
 /// ## 锚点由调用方给，锚的**含义**不由调用方定
 ///
-/// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格），`anchor_id` 是
-/// 事件号的**词干**（`t{turn}`，一轮一个号）。两条都由 `turn_exec` 给，但
+/// `user_seq` = 本轮 `user.message` 格的 seq（`u-{turn}` 开口格），由 `turn_exec` 给，
 /// 「溯源锚必须是本轮的开口」这条不变（I2：承诺 / 任务 / 熔断溯源 100%）。
 ///
-/// ## 失败口径（一条，三族共用）
+/// ## 失败口径（一条，两族共用）
 ///
-/// 任一族入格失败 ⇒ **只记日志，不冒泡、不打断其余两族**。轮次已收束，派生事实
-/// 失败不该把成功的一轮说成失败；而三族各自独立，一族写不进去不该连累另外两族的
+/// 任一族入格失败 ⇒ **只记日志，不冒泡、不打断另一族**。轮次已收束，派生事实
+/// 失败不该把成功的一轮说成失败；而两族各自独立，一族写不进去不该连累另一族的
 /// 事实——它们之间没有数据依赖，只是共用一个锚点。
 ///
 /// 此前承诺走的是另一条口径（`Err` 上抛），名义理由是「承诺是本轮的立约，签了就
@@ -84,58 +89,47 @@ pub(crate) fn record_derived(
     user_seq: u64,
     principal: &str,
     to: &str,
-    anchor_id: &str,
     effects: &[EffectInput],
-    tasks: &[TaskDeclaration],
     breaks: &[&'static str],
 ) {
     // ── 效果（DE-025 D-207）──────────────────────────────────────────────
     // 工具执行层交出的是**纯值**（这次调用发生了什么），这里补上宿主面（轮锚 /
-    // 溯源 / 两个主体）再问能力包的行为要草稿，最后经唯一写入口落格。
+    // 溯源 / 两个主体 / 两片只读历史）再问能力包的行为要草稿，最后经唯一写入口落格。
     //
-    // 三件事各自只有一份：**判断**（这次调用算不算立约）在能力包的行为实现里，
-    // **成格形状**（立约 / 了结 / 宣告几格、载荷长什么样）在该判断种类的成格函数里，
-    // **写**在 `Store::append`。本处只负责把三者按顺序接起来——它不认识任何工具名，
-    // 也不认识任何效果名。
+    // 三件事各自只有一份：**判断**（这次调用算不算立约、算不算一次任务声明）在
+    // 能力包的行为实现里，**成格形状**（几格、载荷长什么样）在该判断种类的成格函数
+    // 里，**写**在 `Store::append`。本处只负责把三者按顺序接起来——它不认识任何
+    // 工具名，也不认识任何效果名。
     //
     // `to` = **来源主体**（D-067：从调用点常量变成数据）——本主体向「这条消息
     // 的出处」立约；缺省由取值点（`request_source_principal`）落本机用户。
     //
     // 失败只记日志不冒泡：轮次已收束，派生事实失败不该把成功的一轮说成失败
-    // （与任务表 / 熔断 / 记忆三段同一条口径）。
-    if !effects.is_empty() {
+    // （与熔断 / 记忆三段同一条口径）。
+    //
+    // `applied` 是**本轮已落格的草稿**：同轮的后一个效果要看得见前一个。少了它，
+    // 同一轮里两次 `todo_write` 会各自从轮初快照出发，把第一条刚开的格再开一次。
+    let mut applied: Vec<Event> = Vec::new();
+    for input in effects {
         let env = symbio_plugin_api::effects::EffectEnv {
             turn,
             user_seq,
-            principal: principal.to_string(),
-            source: to.to_string(),
+            principal,
+            source: to,
+            snapshot,
+            applied: &applied,
         };
-        for input in effects {
-            for draft in symbio_plugin_api::apply_effects(&input.call(&env)) {
-                let event_id = draft.key.clone();
-                if let Err(e) = store.append(draft.into_event(turn, principal)) {
-                    symbio_core::plugin_warn!(
-                        "session",
-                        "[v2] 效果入格失败（会话 {session_id}，事件 {event_id}）：{e:?}"
-                    );
-                }
+        for draft in symbio_plugin_api::apply_effects(&input.call(&env)) {
+            let event_id = draft.key.clone();
+            let event = draft.into_event(turn, principal);
+            match store.append(event.clone()) {
+                Ok(_) => applied.push(event),
+                Err(e) => symbio_core::plugin_warn!(
+                    "session",
+                    "[v2] 效果入格失败（会话 {session_id}，事件 {event_id}）：{e:?}"
+                ),
             }
         }
-    }
-
-    // ── 任务表（S7 步 16–18，04 §3.1 批⑨）────────────────────────────────
-    // 与承诺**同锚**（`user_seq`）：任务是「这轮模型说该做什么」，出处是这一轮的
-    // 开口。写方住 `task_events`，此处只负责把门推开——失败只记日志不冒泡。
-    if let Err(why) = super::task_events::write(
-        store,
-        snapshot,
-        tasks,
-        turn,
-        user_seq,
-        principal,
-        &format!("v2t-{anchor_id}"),
-    ) {
-        symbio_core::plugin_warn!("session", "[task] 清单入格失败（会话 {session_id}）：{why}");
     }
 
     // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────

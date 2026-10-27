@@ -25,6 +25,10 @@ impl ToolBehavior for Recorder {
             produced_by: Some(call.user_seq),
         }]
     }
+
+    fn annotate(&self, input: &EffectInput) -> Vec<(&'static str, serde_json::Value)> {
+        vec![("test_tool", serde_json::Value::String(input.tool.clone()))]
+    }
 }
 
 // 提交一条只在本测试二进制里存在的行为实现。
@@ -32,12 +36,15 @@ impl ToolBehavior for Recorder {
 // 判据用**进程内**的提交，不依赖某个真插件被链接：本 crate 的单测里没有别的
 // 插件，`inventory` 里只有这一条——「按声明选、按 owner 序」因此可以精确断言。
 crate::submit_behavior!(Recorder);
-fn env() -> EffectEnv {
+
+fn env() -> EffectEnv<'static> {
     EffectEnv {
         turn: 3,
         user_seq: 42,
-        principal: "session/a".into(),
-        source: "user".into(),
+        principal: "session/a",
+        source: "user",
+        snapshot: &[],
+        applied: &[],
     }
 }
 
@@ -105,4 +112,52 @@ fn handlers_are_sorted_by_owner() {
     let mut sorted = owners.clone();
     sorted.sort_unstable();
     assert_eq!(owners, sorted);
+}
+
+/// 富化与效果走同一套选法：没声明就没有补充字段，声明了才补。
+///
+/// 这条判据把 `annotate` 钉在**声明**上而不是名字上——文件变更那一路能迁出 core，
+/// 靠的就是这一点（D-214）。
+#[test]
+fn annotations_follow_the_declaration() {
+    let undeclared = input(&[]);
+    assert!(annotations(&undeclared).is_empty());
+
+    let declared = input(&[crate::behaviors::TASK_TABLE]);
+    let got = annotations(&declared);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].0, "test_tool");
+    assert_eq!(got[0].1, serde_json::json!("local/todo_write"));
+}
+
+/// 富化只需要「发生了什么」，因此**不**要求宿主面：调用收口就能算（D-214 第 1 条）。
+///
+/// 判据形态：`annotations` 的入参是 `EffectInput`，编译期就交不出 `turn` / `principal`。
+#[test]
+fn annotations_do_not_need_the_host_face() {
+    let i = input(&[crate::behaviors::TASK_TABLE]);
+    // 若富化需要轮锚，这里必须构造 `EffectEnv`——它构造不出来就说明时机确实更早。
+    assert_eq!(annotations(&i).len(), 1);
+}
+
+/// `facts()` 按发生顺序串两片历史：轮初的在前，本轮刚落格的在后。
+///
+/// 这是 D-214 第 2 条的存在理由——同轮两个效果要互相看得见，否则第二条声明会把
+/// 第一条刚开的格再开一次。
+#[test]
+fn facts_chain_snapshot_then_applied() {
+    let old = Event::pending("e1", "test.recorded", Entity::Task, Verb::Asserted, 1, "a");
+    let fresh = Event::pending("e2", "test.recorded", Entity::Task, Verb::Asserted, 3, "a");
+    let snapshot = [old];
+    let applied = [fresh];
+    let env = EffectEnv {
+        turn: 3,
+        user_seq: 42,
+        principal: "session/a",
+        source: "user",
+        snapshot: &snapshot,
+        applied: &applied,
+    };
+    let ids: Vec<&str> = env.facts().map(|e| e.event_id.as_str()).collect();
+    assert_eq!(ids, ["e1", "e2"]);
 }

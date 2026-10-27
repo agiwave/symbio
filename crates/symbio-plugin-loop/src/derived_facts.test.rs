@@ -115,6 +115,19 @@ impl symbio_plugin_api::ToolBehavior for PromiseStub {
 
 symbio_plugin_api::submit_behavior!(PromiseStub);
 
+/// 一次 `todo_write` 的效果输入（任务表的**实现**住本 crate 的 `task_events::TaskTable`）。
+fn task_table(id: &str, todos: serde_json::Value) -> EffectInput {
+    EffectInput {
+        tool: "local/todo_write".to_string(),
+        call_id: id.to_string(),
+        args: serde_json::json!({ "todos": todos }),
+        success: true,
+        result: String::new(),
+        why: String::new(),
+        declared: &[symbio_plugin_api::behaviors::TASK_TABLE],
+    }
+}
+
 /// 一次 `agent_run` 的效果输入（承诺的**实现**住 agent 插件——本 crate 的测试二进制
 /// 以 dev 依赖链接它，见 `Cargo.toml` 的说明；这里只造值，不造实现）。
 fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
@@ -145,9 +158,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
         &effects,
-        &[],
         &[],
     );
 
@@ -220,9 +231,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         user_seq,
         symbio_core::PRINCIPAL_PEER,
         symbio_core::PRINCIPAL_MAIN,
-        "t0",
         &effects,
-        &[],
         &[],
     );
 
@@ -270,9 +279,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
         &effects,
-        &[],
         &[],
     );
 
@@ -333,8 +340,6 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
-        &[],
         &[],
         &["budget-exhausted"],
     );
@@ -371,8 +376,6 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
-        &[],
         &[],
         &[],
     );
@@ -529,9 +532,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
         &effects,
-        &[],
         &[],
     );
 
@@ -583,9 +584,7 @@ fn a_kept_delegation_never_eliminates() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
         &effects,
-        &[],
         &[],
     );
     record_elimination(&store, 0, user_seq);
@@ -622,9 +621,7 @@ fn elimination_does_not_write_a_second_verdict() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
         &effects,
-        &[],
         &[],
     );
     record_elimination(&store, 0, user_seq);
@@ -662,9 +659,7 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         user_seq,
         symbio_core::PRINCIPAL_PEER,
         symbio_core::PRINCIPAL_MAIN,
-        "t0",
         &effects,
-        &[],
         &[],
     );
     record_elimination(&store, 0, user_seq);
@@ -686,11 +681,10 @@ fn a_principal_without_assign_work_is_never_eliminated() {
 /// 的事实一起消失，是 `?` 的副作用，不是设计意图。此前的实现正是这样：承诺段用
 /// `map_err(..)?`，于是第一个 `append` 失败后函数直接返回，任务表与熔断事件都没写。
 ///
-/// 反向守卫：把承诺段改回 `?`，本用例立刻变红（`kind == "task.*"` 与熔断格都找不到）。
+/// 反向守卫：让效果通路的写口对承诺抛错（而不是记日志继续），本用例立刻变红
+/// （`task.*` 与熔断格都找不到）。三族各自独立是 D-207 之后仍然成立的判据。
 #[test]
 fn commitment_failure_does_not_block_task_or_breaker() {
-    use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
-
     /// 拒绝一切 `commitment.*` 事实、其余照常落库的写口。
     struct CommitmentsRefuse(EventStore);
 
@@ -723,16 +717,13 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         user_seq,
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
-        "t0",
-        &[delegation("call-1", "让 reviewer 复查这段", true, "")],
-        &[TaskDeclaration {
-            items: vec![TaskItem {
-                id: "t1".to_string(),
-                goal: "复查上下文收敛".to_string(),
-                depends_on: vec![],
-                status: TaskStatus::default(),
-            }],
-        }],
+        &[
+            delegation("call-1", "让 reviewer 复查这段", true, ""),
+            task_table(
+                "call-2",
+                serde_json::json!([{ "id": "t1", "content": "复查上下文收敛" }]),
+            ),
+        ],
         &["成本超预算"],
     );
 

@@ -27,10 +27,16 @@
 //! 行为名（S1.1 的开放集合）。行为名住 [`crate::behaviors`]，实现住能力包——宿主
 //! 两侧都不认识工具名。
 //!
-//! ## 写口唯一
+//! ## 写口唯一，读口也只读
 //!
 //! 行为只返回 [`FactDraft`]（尚未入库的事件），**不碰 WAL**：`Store::append` 仍在
 //! 宿主的唯一写入口里，写闸（`kind` 与格位一致）照旧在那里校验（I1 不破）。
+//!
+//! 有些效果要**看得见已有事实**才判得出来——「这条任务已经开过没有」「这一格该开
+//! 新节点还是记一次推进」。那类判断不能靠宿主代劳（代劳就等于宿主认识这种效果），
+//! 所以 [`EffectEnv`] 交两片**只读**历史：[`EffectEnv::snapshot`]（调用方交来的那份）
+//! 与 [`EffectEnv::applied`]（本轮已落格的草稿）。后者存在的理由很具体：同一轮里
+//! 两个调用互相看不见时，第二条声明会把第一条刚开的格再开一次。
 
 use serde_json::Value;
 use symbio_core::{Entity, Event, Verb};
@@ -61,20 +67,34 @@ pub struct EffectInput {
     pub declared: &'static [&'static str],
 }
 
-/// 求值一次调用效果所需的**宿主面**：轮锚与两个主体。
+/// 求值一次调用效果所需的**宿主面**：轮锚、两个主体与两片只读历史。
 ///
 /// 与 [`EffectInput`] 分开的理由见模块文档——前者是「发生了什么」，本结构是
-/// 「宿主在哪一刻、以谁的名义记这笔」。
-#[derive(Debug, Clone)]
-pub struct EffectEnv {
+/// 「宿主在哪一刻、以谁的名义、看得见哪些事实」。
+#[derive(Debug, Clone, Copy)]
+pub struct EffectEnv<'a> {
     /// 本轮序号（承诺号 `v2c-t{turn}-…` 的词干来源）。
     pub turn: u64,
     /// 本轮开口格的 seq——派生事实的溯源锚（I2）。
     pub user_seq: u64,
     /// 本会话主体（写事件的 `actor`）。
-    pub principal: String,
+    pub principal: &'a str,
     /// 来源主体（D-067：本主体向「这条消息的出处」立约）。
-    pub source: String,
+    pub source: &'a str,
+    /// 轮初那份事实史（调用方交来的切片）。
+    pub snapshot: &'a [Event],
+    /// 本轮**已落格**的草稿（按落笔顺序）：同轮的后一个效果要看得见前一个。
+    ///
+    /// 空切片是常态（一个效果一轮只有一条）。它的存在只为一件事：让「按历史
+    /// 折叠」的效果在同一个轮次里保持与串行声明相同的判据。
+    pub applied: &'a [Event],
+}
+
+impl EffectEnv<'_> {
+    /// 按发生顺序遍历两片历史：轮初的在前，本轮刚落格的在后。
+    pub fn facts(&self) -> impl Iterator<Item = &Event> {
+        self.snapshot.iter().chain(self.applied.iter())
+    }
 }
 
 /// 一次调用的完整效果输入：工具面 + 宿主面。`after` 拿到的就是它。
@@ -92,6 +112,10 @@ pub struct EffectCall<'a> {
     pub user_seq: u64,
     pub principal: &'a str,
     pub source: &'a str,
+    /// 见 [`EffectEnv::snapshot`]。
+    pub snapshot: &'a [Event],
+    /// 见 [`EffectEnv::applied`]。
+    pub applied: &'a [Event],
 }
 
 impl EffectCall<'_> {
@@ -99,11 +123,16 @@ impl EffectCall<'_> {
     pub fn anchor(&self) -> String {
         format!("t{}", self.turn)
     }
+
+    /// 按发生顺序遍历两片历史（见 [`EffectEnv::facts`]）。
+    pub fn facts(&self) -> impl Iterator<Item = &Event> {
+        self.snapshot.iter().chain(self.applied.iter())
+    }
 }
 
 impl EffectInput {
     /// 补上宿主面，得到 `after` 的入参。
-    pub fn call<'a>(&'a self, env: &'a EffectEnv) -> EffectCall<'a> {
+    pub fn call<'a>(&'a self, env: &'a EffectEnv<'a>) -> EffectCall<'a> {
         EffectCall {
             tool: &self.tool,
             call_id: &self.call_id,
@@ -114,8 +143,10 @@ impl EffectInput {
             declared: self.declared,
             turn: env.turn,
             user_seq: env.user_seq,
-            principal: &env.principal,
-            source: &env.source,
+            principal: env.principal,
+            source: env.source,
+            snapshot: env.snapshot,
+            applied: env.applied,
         }
     }
 }
@@ -186,6 +217,21 @@ pub trait ToolBehavior: Sync {
     fn after(&self, _call: &EffectCall<'_>) -> Vec<FactDraft> {
         Vec::new()
     }
+
+    /// 一次调用对**既有事实**的补充字段（载荷富化）。返回空 = 不补（**默认**）。
+    ///
+    /// 与 [`Self::after`] 的分界是「有没有新格」：`after` 造新事实，本方法只给
+    /// 已经要落的那条事实补字段。今天唯一的用法是工作目录变更账——`artifact.added`
+    /// 早就记下了 `tool` / `args` / `success`（[D-169]），缺的只是「这次写属于哪种
+    /// 动作」，而那个动作是工具自己的身份，不该由读侧按名字猜。
+    ///
+    /// 富化的对象是**产物格**（工具结果那一格），所以键名与取值都进载荷、跟着事实
+    /// 一起走：读侧不再需要认识任何工具名。
+    ///
+    /// [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
+    fn annotate(&self, _input: &EffectInput) -> Vec<(&'static str, Value)> {
+        Vec::new()
+    }
 }
 
 /// 一条行为实现的链接期提交。
@@ -232,6 +278,22 @@ pub fn apply(call: &EffectCall<'_>) -> Vec<FactDraft> {
             continue;
         }
         out.extend(behavior.after(call));
+    }
+    out
+}
+
+/// 求一次调用对**产物格**的补充字段：口径同 [`apply`]（按声明选、按 owner 序）。
+///
+/// 与 [`apply`] 分开的理由是时机不同：本函数只要「发生了什么」（[`EffectInput`]），
+/// 在调用收口时就能算；`apply` 要轮锚与主体，只能在轮末写口算。两件事各有各的
+/// 最早可判时刻，合成一次求值只会把其中一件拖到它不需要的时机。
+pub fn annotations(input: &EffectInput) -> Vec<(&'static str, Value)> {
+    let mut out = Vec::new();
+    for behavior in handlers() {
+        if !input.declared.contains(&behavior.behavior()) {
+            continue;
+        }
+        out.extend(behavior.annotate(input));
     }
     out
 }

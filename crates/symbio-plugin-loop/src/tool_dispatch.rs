@@ -37,6 +37,7 @@
 //! **定格**（`Completed`）并切节点（[`super::turn_exec::UiBridge::finalize_node`]）——
 //! 不定格它永远转「流式中」，不切节点多轮正文会粘成一条。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +46,6 @@ use async_trait::async_trait;
 use symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
-use symbio_core::facts::TaskDeclaration;
 use symbio_core::{
     capability_resolve, llm_emit_message, llm_emit_state, tool_metas, ApprovalBasis,
     ApprovalGrants, CapabilityRiskLevel, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn,
@@ -65,12 +65,15 @@ use symbio_core::node_build::{
     detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes, PresentationTree,
 };
 
-/// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
+/// 工具执行层交回的**收束派生事实**（效果 / 熔断）。
 ///
-/// 三者的数据来源都在工具执行层（`EffectInput` / `TaskDeclaration` / 熔断理由），
-/// 而写方（落格）在轮末——`turn_exec` 调 [`super::derived_facts::record_derived`] 写。
-/// 本结构是那份出参从分发点回到运行器的**唯一通道**：不收集它，这三样就静默全丢
+/// 两者的数据来源都在工具执行层（`EffectInput` / 熔断理由），而写方（落格）在
+/// 轮末——`turn_exec` 调 [`super::derived_facts::record_derived`] 写。本结构是那份
+/// 出参从分发点回到运行器的**唯一通道**：不收集它，这两样就静默全丢
 /// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
+///
+/// 任务表**不在这里**：它是一条效果（`task_events::TaskTable`），走 `effects`
+/// 那一条通路（DE-025 D-207）。
 ///
 /// 形态仿 [`SessionDispatchPort::produced`]：`dispatch` 在 `&self` 上跑，出参却要
 /// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。
@@ -78,8 +81,6 @@ use symbio_core::node_build::{
 pub(crate) struct DerivedFacts {
     /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
     pub(crate) effects: Vec<EffectInput>,
-    /// 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
-    pub(crate) tasks: Vec<TaskDeclaration>,
     /// 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
     pub(crate) breaks: Vec<&'static str>,
 }
@@ -254,6 +255,12 @@ pub struct DispatchOutcome {
     pub args: String,
     /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
     pub result_id: String,
+    /// 能力对**产物格**的补充字段（DE-025 D-207 的富化面）。
+    ///
+    /// 由工具声明的行为交出（今天唯一的生产者是 vdfs 写族的 `file_op`），随
+    /// `artifact.added` 的载荷入格。运行器只负责把它们并进载荷——**不认识任何键名**；
+    /// 读侧（工作目录变更账）认字段不认工具名，所以改一个工具名不影响任何读方。
+    pub annotations: Vec<(&'static str, serde_json::Value)>,
 }
 
 /// 工具派发的**三个动作**（D-118 决策 5）：创建 / 授权 / 派发。
@@ -1214,6 +1221,8 @@ impl SessionDispatchPort {
             wire_id,
             args,
             result_id,
+            // 唤醒路径不跑工具（结果由调用方给），因此没有任何行为参与。
+            annotations: Vec::new(),
         };
         let mut produced = call_nodes;
         produced.push(result);
@@ -1439,12 +1448,10 @@ impl ToolDispatch for SessionDispatchPort {
         // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
-        // 三份收束派生事实出参（承诺 / 任务表 / 熔断）：数据来源在工具执行层，
-        // 写方在轮末——由本分发方收下、`turn_exec` 轮末调
-        // `derived_facts::record_derived` 落格。不收这三份，
-        // 代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
+        // 收束派生事实出参（效果 / 熔断）：数据来源在工具执行层，写方在轮末——
+        // 由本分发方收下、`turn_exec` 轮末调 `derived_facts::record_derived` 落格。
+        // 不收这两份，代际立约 / 任务表 / 文件变更 / 熔断就静默全丢（见 [`DerivedFacts`]）。
         let mut effects: Vec<EffectInput> = Vec::new();
-        let mut tasks: Vec<TaskDeclaration> = Vec::new();
         let mut breaks: Vec<&'static str> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_async(
             turn.tool_calls.clone(),
@@ -1458,8 +1465,6 @@ impl ToolDispatch for SessionDispatchPort {
             self.elimination_revoked,
             // 效果出参（DE-025 D-207）：每次终态调用一条。
             &mut effects,
-            // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
-            &mut tasks,
             // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
             &mut breaks,
         )
@@ -1476,11 +1481,23 @@ impl ToolDispatch for SessionDispatchPort {
         }
         produced.extend(tool_msgs.iter().cloned());
         self.produced.lock().unwrap().extend(produced);
+        // 产物格的富化字段（DE-025 D-207）：按**调用 id** 归户，随 `artifact.added`
+        // 入格。在这里算而不是在运行器里算，是因为「这个工具声明了什么行为」只有
+        // 执行层读过（批首那份元数据），运行器没有注册表也没有 `declared`。
+        let annotations: HashMap<String, Vec<(&'static str, serde_json::Value)>> = effects
+            .iter()
+            .map(|e| {
+                (
+                    e.call_id.clone(),
+                    symbio_plugin_api::effects::annotations(e),
+                )
+            })
+            .filter(|(_, a)| !a.is_empty())
+            .collect();
         // 三份收束派生事实出参收进取件面（`take_derived`）——调用方在桥释放前取走。
         {
             let mut d = self.derived.lock().unwrap();
             d.effects.extend(effects);
-            d.tasks.extend(tasks);
             d.breaks.extend(breaks);
         }
 
@@ -1508,6 +1525,7 @@ impl ToolDispatch for SessionDispatchPort {
                     .chain(parent_updates.iter())
                     .find(|n| n.id == call_id && n.is_tool_call());
                 DispatchOutcome {
+                    annotations: annotations.get(&call_id).cloned().unwrap_or_default(),
                     call_id,
                     name,
                     text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),

@@ -502,7 +502,6 @@ async fn finish_call(
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
-    tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
@@ -520,10 +519,10 @@ async fn finish_call(
     // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
     // resume 那一轮再记）。
     if pending_user_prompt.is_none() {
+        // 效果（承诺 / 任务表 / 文件变更…）**全部**由这一条通路交出去：本处只问
+        // 「这次调用发生了什么」，至于它算不算立约、算不算一次任务声明，由能力包
+        // 自己声明并实现（DE-025 D-207）。宿主不认识任何工具名。
         record_effect(effects, decls, &id, &name, &args, success, &final_res, "");
-        // 任务表声明（批⑨）：同一条「跑完了才判」的口径。`note_tasks` 自己
-        // 过滤工具名与成败，非 `todo_write` / 失败的调用在这里一并被挡掉。
-        note_tasks(tasks, decls, &name, &args, success);
     }
 
     let tool_output = if success {
@@ -688,7 +687,6 @@ async fn flush_one<'a>(
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
-    tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
@@ -722,7 +720,6 @@ async fn flush_one<'a>(
         context_messages,
         tool_archive_dir,
         effects,
-        tasks,
         decls,
         tool_messages,
         parent_updates,
@@ -743,7 +740,6 @@ async fn flush_all<'a>(
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
     effects: &mut Vec<EffectInput>,
-    tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
@@ -760,7 +756,6 @@ async fn flush_all<'a>(
             context_messages,
             tool_archive_dir,
             effects,
-            tasks,
             decls,
             tool_messages,
             parent_updates,
@@ -817,7 +812,6 @@ pub(crate) async fn run_batch(
     tool_archive_dir: &std::path::Path,
     readings: &mut GateReadings,
     effects: &mut Vec<EffectInput>,
-    tasks: &mut Vec<TaskDeclaration>,
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
     let mut tool_messages = Vec::new();
@@ -889,7 +883,6 @@ pub(crate) async fn run_batch(
                         context_messages,
                         tool_archive_dir,
                         effects,
-                        tasks,
                         decls,
                         &mut tool_messages,
                         &mut parent_updates,
@@ -928,7 +921,6 @@ pub(crate) async fn run_batch(
                             context_messages,
                             tool_archive_dir,
                             effects,
-                            tasks,
                             decls,
                             &mut tool_messages,
                             &mut parent_updates,
@@ -955,7 +947,6 @@ pub(crate) async fn run_batch(
                             context_messages,
                             tool_archive_dir,
                             effects,
-                            tasks,
                             decls,
                             &mut tool_messages,
                             &mut parent_updates,
@@ -975,7 +966,6 @@ pub(crate) async fn run_batch(
                                 context_messages,
                                 tool_archive_dir,
                                 effects,
-                                tasks,
                                 decls,
                                 &mut tool_messages,
                                 &mut parent_updates,
@@ -1007,7 +997,6 @@ pub(crate) async fn run_batch(
                 context_messages,
                 tool_archive_dir,
                 effects,
-                tasks,
                 decls,
                 &mut tool_messages,
                 &mut parent_updates,
@@ -1031,7 +1020,6 @@ pub(crate) async fn run_batch(
         context_messages,
         tool_archive_dir,
         effects,
-        tasks,
         decls,
         &mut tool_messages,
         &mut parent_updates,

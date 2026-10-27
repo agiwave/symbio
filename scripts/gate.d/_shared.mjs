@@ -221,7 +221,7 @@ export const BASELINE = {
   // 词汇面」，判据没有丢：格位一致性现在由 `events.rs` 的生成器投影 `EventDecl` 保证，编译期就红。
   // 另两处「按名字点收」的用例（`decl` 的对表用例、`control_events_match_the_kernel_grid`）是**改写**
   // 成新判据，条数不变。非侵蚀。
-  ciRustTestsTotal: 2351,
+  ciRustTestsTotal: 2363,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

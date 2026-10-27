@@ -142,6 +142,33 @@ async fn matching_keeps_the_pre_mechanization_shapes() {
     assert!(!decls.provides_assign_work(""));
 }
 
+/// 效果端口选实现时，**挂载点前缀不改变「这个工具声明了什么」**。
+///
+/// 反向自检：把 `behaviors_of` 改回只判等值 ⇒ 第一、三条断言红。那不是理论风险：
+/// `todo_write` 的线上名一直是 `local/todo_write`，而注册表的键是短名——只判等值
+/// 就等于「任务表效果永远不生效」，且没有任何报错（J3 的静默形态）。
+#[tokio::test]
+async fn behavior_lookup_tolerates_a_mount_prefix() {
+    let ctx = ctx_with(factory_metas()).await;
+    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+
+    assert_eq!(
+        decls.behaviors_of("local/todo_write"),
+        &[symbio_plugin_api::behaviors::TASK_TABLE],
+        "挂了前缀的线上名要解析到同一条声明"
+    );
+    assert_eq!(
+        decls.behaviors_of("todo_write"),
+        &[symbio_plugin_api::behaviors::TASK_TABLE]
+    );
+    assert!(decls.behaviors_of("local/shell").is_empty());
+    assert!(
+        decls.behaviors_of("mcp__srv__todo_write").is_empty(),
+        "MCP 的同名工具不是同一个工具（短名不反演）"
+    );
+    assert!(decls.behaviors_of("").is_empty());
+}
+
 // ==================== 声明随工具进子作用域 ====================
 
 /// 改名投影（子智能体的 `agent_<id>_<工具>`）只换名字、原样透传行为名，

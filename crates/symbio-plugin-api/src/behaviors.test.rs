@@ -2,10 +2,19 @@
 
 use super::*;
 
-/// 三个已知名字各出现一次，且线格式是 `snake_case`。
+/// 已知名字逐个点名：拼错、重复、漏登记都会红。
+///
+/// **不数个数**（DE-025 D-210：不为「声明数 / 变体数」再加计数器）。逐名列出比数字
+/// 多一层信息——加一个行为名必须在这里写一行，等于「我知道我在扩宿主词汇表」，
+/// 而不是「某个计数从 3 变成 4」。
 #[test]
 fn known_names_are_unique_and_snake_case() {
-    assert_eq!(KNOWN.len(), 3);
+    let mut names: Vec<&str> = KNOWN.to_vec();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [ASSIGN_WORK, DELEGATION_PROMISE, FILE_CHANGE, TASK_TABLE,],
+    );
     for name in KNOWN {
         assert!(
             name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),

@@ -60,6 +60,9 @@ pub struct ToolSpec {
     /// 风险等级：这张表里的工具同形但风险不同（`vdfs_read` 只读、`vdfs_write`
     /// 改状态），故风险是**逐工具的差异**之一，不靠默认值隐式决定。
     pub risk: CapabilityRiskLevel,
+    /// 自声明的行为名（DE-025 D-210）。写族四个声明 `file_change`（产物格因此带上
+    /// `file_op`，工作目录变更账按声明折，不按工具名猜）；读 / 统计族声明空集。
+    pub behaviors: &'static [&'static str],
     /// 真逻辑：取参数、调 provider、拼回执
     pub call: ToolCall,
 }
@@ -85,6 +88,7 @@ impl Capability for VdfsTool {
             (self.spec.schema)(),
             self.spec.examples.to_vec(),
             self.spec.risk,
+            self.spec.behaviors,
         )
     }
 
@@ -120,6 +124,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"README.md\"}"],
         risk: CapabilityRiskLevel::Low,
+        behaviors: &[],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -147,6 +152,7 @@ pub static SPECS: &[ToolSpec] = &[
             "{\"path\":\"tmp\",\"recursive\":true}",
         ],
         risk: CapabilityRiskLevel::High,
+        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -174,6 +180,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"docs/notes\"}"],
         risk: CapabilityRiskLevel::Medium,
+        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -203,6 +210,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"notes.md\",\"text\":\"# 标题\\n\"}"],
         risk: CapabilityRiskLevel::Medium,
+        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -239,6 +247,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\"src/main.rs\",\"old_string\":\"fn old()\",\"new_string\":\"fn new()\"}"],
         risk: CapabilityRiskLevel::Medium,
+        behaviors: &[symbio_plugin_api::behaviors::FILE_CHANGE],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -281,6 +290,7 @@ pub static SPECS: &[ToolSpec] = &[
             "{\"pattern\":\"src/**/*.toml\"}",
         ],
         risk: CapabilityRiskLevel::Low,
+        behaviors: &[],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "pattern")?;
@@ -306,6 +316,7 @@ pub static SPECS: &[ToolSpec] = &[
         },
         examples: &["{\"path\":\".\",\"depth\":2}", "{\"path\":\"src\",\"depth\":2}"],
         risk: CapabilityRiskLevel::Low,
+        behaviors: &[],
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;

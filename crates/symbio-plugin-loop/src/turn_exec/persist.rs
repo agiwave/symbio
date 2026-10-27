@@ -58,9 +58,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         user_seq,
         &principal,
         &to,
-        &format!("t{turn_no}"),
         &derived.effects,
-        &derived.tasks,
         &derived.breaks,
     );
     // 调度（S04 §3，`D-139` 裁决 4）：**必须排在任务表落格之后**，且**重新取史**

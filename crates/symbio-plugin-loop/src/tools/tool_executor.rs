@@ -27,16 +27,13 @@ mod breaker;
 mod decls;
 mod effects;
 mod elimination;
-mod task_decl;
 mod task_table;
 
 pub use self::breaker::BreakerInputs;
 pub use self::decls::ToolDecls;
 pub use self::effects::record_effect;
 pub use self::elimination::EliminationInputs;
-pub use self::task_decl::note_tasks;
 pub use self::task_table::TaskTableInputs;
-use symbio_core::facts::TaskDeclaration;
 use symbio_plugin_api::effects::EffectInput;
 
 // 工具结果提取
@@ -549,9 +546,6 @@ pub async fn process_tool_calls_async(
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
     // 再加一个只会逼着每个调用方都写 `let _ = `。
     effects: &mut Vec<EffectInput>,
-    // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态，同一条口径
-    // 交回调用方随收束入格。理由同上——不进返回值。
-    tasks: &mut Vec<TaskDeclaration>,
     // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的**理由**，同一条口径交回
     // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 S09 §6 验收 1
     // 不得产生任何事件，两种拒绝在事件面上必须分得开。
@@ -586,7 +580,6 @@ pub async fn process_tool_calls_async(
         tool_archive_dir,
         &mut readings,
         effects,
-        tasks,
         breaks,
     )
     .await;

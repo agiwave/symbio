@@ -42,6 +42,8 @@ impl Capability for ReadTool {
             }),
             vec!["{\"path\":\"README.md\"}", "{\"path\":\"src/main.rs\",\"limit\":50}"],
             CapabilityRiskLevel::Low,
+            // 读不改变工作目录：不声明任何行为（空集是显式的，见 `tools::tool`）。
+            &[],
         )
     }
 

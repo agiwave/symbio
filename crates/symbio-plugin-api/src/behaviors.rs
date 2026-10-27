@@ -16,6 +16,7 @@
 //! | [`ASSIGN_WORK`] | `assign_work` | 淘汰闸：`assign.work` 被收回时拒止 |
 //! | [`DELEGATION_PROMISE`] | `delegation_promise` | 承诺记账：跨主体立约的出参 |
 //! | [`TASK_TABLE`] | `task_table` | 任务表写侧资格闸与任务声明记账 |
+//! | [`FILE_CHANGE`] | `file_change` | 工作目录变更账：产物格的 `file_op` 富化 |
 //!
 //! 名字是**跨进程的**（工具元数据随插件通道走），改名等于改协议；只在语义真的要
 //! 变的时候改，并在 `DE-025` 留一条决策。
@@ -29,11 +30,18 @@ pub const DELEGATION_PROMISE: &str = "delegation_promise";
 /// 写任务表——任务表写侧资格闸与任务声明记账的管辖对象。
 pub const TASK_TABLE: &str = "task_table";
 
+/// 改工作目录——工作目录变更账的管辖对象（产物格的 `file_op` 富化）。
+///
+/// 它不是一个新格：`artifact.added` 早就记下了这次调用（D-169），本行为只补一句
+/// 「这次写属于哪种动作」。读侧因此不必再按工具名猜，改一个工具名只影响它自己的
+/// 声明。
+pub const FILE_CHANGE: &str = "file_change";
+
 /// 宿主认识的**全部**行为名。
 ///
 /// 只用于两件事：装配期/收集期的显式校验，以及判据脚本的读取面。闸门自己按
 /// 单个常量判，不遍历这张表——「表里有什么」不是判断。
-pub const KNOWN: &[&str] = &[ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE];
+pub const KNOWN: &[&str] = &[ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE, FILE_CHANGE];
 
 /// 这个名字是不是宿主已知的行为。
 ///

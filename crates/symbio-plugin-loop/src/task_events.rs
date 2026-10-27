@@ -38,11 +38,12 @@
 //!   这正是 `rework_bounded` 的**生产写方**：不是一条永远空转的断言。
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
-//!   （I2）。事件号 `{id_prefix}-{n}`：`id_prefix` 由调用方给
-//!   （[`super::derived_facts::record_derived`] 给 `v2t-{anchor_id}`，一轮一个前缀）
-//!   + 本次序号，跨轮不撞幂等键。
-//! - **写方**：写方住收束处——`turn_exec` 轮末调
-//!   [`super::derived_facts::record_derived`]，后者调本模块（同一锚 `user_seq`）。
+//!   （I2）。事件号 `v2t-{轮锚}-{调用 id}-{n}`：轮锚挡跨轮撞键，调用 id 挡同一轮里
+//!   两次声明互撞。
+//! - **写方**：判断与成格都在本模块的 [`TaskTable`]（效果端口的行为实现），落格在
+//!   宿主的唯一写入口——`turn_exec` 轮末调
+//!   [`super::derived_facts::record_derived`]，后者把本轮全部效果草稿交给
+//!   `Store::append`。本模块**不再自己写事实源**：写口唯一（I1）。
 //!   别按「与记忆同一个写方」推断——记忆与学习住
 //!   [`super::derived_facts::record_learning`]，承诺 / 任务表 / 熔断住
 //!   [`super::derived_facts::record_derived`]；写侧授权闸判在运行器
@@ -64,6 +65,8 @@ use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 use symbio_core::ReadySetView;
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Store, Verb};
+use symbio_plugin_api::behaviors;
+use symbio_plugin_api::effects::{EffectCall, FactDraft, ToolBehavior};
 
 // 任务族的名字与格位都在本插件的声明表里（DE-024 D-204 / D-206）：`readyset_for` 在构造期
 // 收 `TASK_VOCAB`，core 的折叠不比对任何一条名字。
@@ -72,9 +75,40 @@ use crate::control_decl::{
     EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
 };
 
-// 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）：
-// 声明的写方在工具执行层，本文件是读侧投影。
-use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
+// ==================== 声明态：任务表的输入形状 ====================
+//
+// 它们住这里而不是 core：写侧（[`TaskTable`]）与落/读侧（本模块的折叠）同属
+// 这一个插件，没有第二个消费方。`todo_write` 只声明行为名，不再交记录类型——
+// 声明随效果端口走（DE-025 D-207 / D-214）。
+
+/// 一项任务的声明态（一次 `todo_write` 调用里的一项）。
+#[derive(Debug, Clone)]
+pub(crate) struct TaskItem {
+    /// 任务 id。**缺席时按 `task_{i+1}` 兜底**，与 `local/todo_write` 的默认同一条
+    /// 格式——两处各写一次是跨插件契约（E-009 禁止本插件直引 local，所以没有
+    /// 共享函数可用）：改名必须两处一起改，否则事实源的 id 会与工具清单对不上，
+    /// 调度段就会念出模型不认识的 id。
+    pub id: String,
+    /// 任务内容（入 `task.opened` 的 `goal`）。
+    pub goal: String,
+    /// 依赖的任务 id。任务图是**数据不是机制**（`-多步任务与返工` §2），
+    /// 声明在清单里，成环 / 悬空由读侧 `acyclic_deps` 报。
+    pub depends_on: Vec<String>,
+    /// 声明状态。
+    pub status: TaskStatus,
+}
+
+/// 任务状态（与 `local/todo_write` 的 `status` 枚举同集）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TaskStatus {
+    /// 未开始。
+    #[default]
+    Pending,
+    /// 进行中。
+    InProgress,
+    /// 已完成（`task.asserted` 的触发态）。
+    Completed,
+}
 
 /// 一次要补进事实源的事件（算完再写：状态推进与写入分开，便于单测断言「该补几条」）。
 struct Emitted {
@@ -127,10 +161,13 @@ fn payload_deps(payload: &serde_json::Value, key: &str) -> Vec<String> {
 /// 携带 `replaces`，所以先登记「节点 id → 清单 id」，此后落在返工节点上的
 /// opened / progressed / asserted 都按这张表归位——否则返工会在表里开出第二个条目，
 /// 同一个清单项被记成两件事。
-fn rebuild(snapshot: &[Event]) -> BTreeMap<String, Entry> {
+///
+/// 收的是**迭代器**而不是切片：判据要看得见两段历史（轮初的快照 + 本轮已落格的
+/// 草稿，见 [`symbio_plugin_api::effects::EffectEnv`]），合成一段要复制整份历史。
+fn rebuild<'a>(events: impl Iterator<Item = &'a Event>) -> BTreeMap<String, Entry> {
     let mut map: BTreeMap<String, Entry> = BTreeMap::new();
     let mut nodes: BTreeMap<String, String> = BTreeMap::new();
-    for e in snapshot {
+    for e in events {
         if e.entity != Entity::Task {
             continue;
         }
@@ -254,43 +291,123 @@ fn step(entry: &mut Entry, list_id: &str, item: &TaskItem) -> Vec<Emitted> {
     out
 }
 
-/// 把本轮的 `todo_write` 声明写进事实源（任务表写方，批⑨；由
-/// [`super::derived_facts::record_derived`] 轮末调用）。
+/// 把一次 `todo_write` 声明折成**待落格**的 `task.*` 草稿。
 ///
 /// - `produced_by` = 本轮 `user.message` 的 seq（溯源锚，I2）；
-/// - `id_prefix` = `v2t-t{turn}`，事件号是 `{id_prefix}-{n}`；
-/// - 失败冒泡给调用方记日志（与记忆三段同款：附加事实失败不算收束失败）。
-pub(crate) fn write(
-    store: &dyn Store<Event = Event>,
-    snapshot: &[Event],
-    decls: &[TaskDeclaration],
-    turn: u64,
-    produced_by: u64,
-    principal: &str,
-    id_prefix: &str,
-) -> Result<(), String> {
-    if decls.is_empty() {
-        return Ok(());
-    }
-    let mut map = rebuild(snapshot);
+/// - 事件号 `v2t-{轮锚}-{调用 id}-{n}`：轮锚保证跨轮不撞，调用 id 保证**同一轮里
+///   两次 `todo_write` 不撞**（各算各的 `n`），`n` 是本次声明内的序号；
+/// - 只产草稿，**不写事实源**：写口仍是宿主的唯一写入口（I1）。
+///
+/// 观察状态从**两段历史**折叠：轮初快照 + 本轮已落格的草稿。少了后者，同一轮里
+/// 第二个 `todo_write` 会把第一个刚开的格再开一次——那是「两条声明各说各的」，
+/// 不是「后一条覆盖前一条」。
+fn drafts(call: &EffectCall<'_>, items: &[TaskItem]) -> Vec<FactDraft> {
+    let mut map = rebuild(call.facts());
+    let mut out = Vec::new();
     let mut n = 0usize;
-    for decl in decls {
-        for item in &decl.items {
-            for e in step(map.entry(item.id.clone()).or_default(), &item.id, item) {
-                let event_id = format!("{id_prefix}-{n}");
-                n += 1;
-                store
-                    .append(
-                        Event::pending(event_id, e.kind, Entity::Task, e.verb, turn, principal)
-                            .with_produced_by(produced_by)
-                            .with_payload(e.payload),
-                    )
-                    .map_err(|err| format!("任务事件入格失败：{err:?}"))?;
-            }
+    for item in items {
+        for e in step(map.entry(item.id.clone()).or_default(), &item.id, item) {
+            out.push(FactDraft {
+                key: format!("v2t-{}-{}-{n}", call.anchor(), call.call_id),
+                kind: e.kind.to_string(),
+                entity: Entity::Task,
+                verb: e.verb,
+                payload: e.payload,
+                produced_by: Some(call.user_seq),
+            });
+            n += 1;
         }
     }
-    Ok(())
+    out
 }
+
+/// 从 `todo_write` 的参数里读出声明项（形状是跨插件契约，见 [`behaviors::TASK_TABLE`]）。
+///
+/// 只认 `todos[]` 里的 `id` / `content` / `status` / `depends_on`：其余字段（`priority`
+/// 之类）是给模型看的提示，不落事实。`content` 为空的项跳过——没有目标的任务开出来
+/// 也只是噪声；`id` 缺席按位次兜底，与工具侧同一格式。
+fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
+    let Some(todos) = args.get("todos").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    todos
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let goal = t
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if goal.is_empty() {
+                return None;
+            }
+            Some(TaskItem {
+                id: t
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("task_{}", i + 1)),
+                goal: goal.to_string(),
+                depends_on: t
+                    .get("depends_on")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                status: match t.get("status").and_then(serde_json::Value::as_str) {
+                    Some("in_progress") => TaskStatus::InProgress,
+                    Some("completed") => TaskStatus::Completed,
+                    _ => TaskStatus::Pending,
+                },
+            })
+        })
+        .collect()
+}
+
+/// 任务表的**效果**：一次成功的 `todo_write` 声明 → `task.*` 草稿（DE-025 D-207）。
+///
+/// ## 为什么实现住这里，而不是工具所在的那个插件
+///
+/// 行为名 [`behaviors::TASK_TABLE`] 的 owner 是**任务词族**的 owner：格位、角色与
+/// 折叠（[`step`] / [`rebuild`] / [`TASK_VOCAB`]）都在本插件。工具那边只声明「我写
+/// 任务表」，不需要也不应该知道 `task.*` 有几格。两侧各自声明，中间没有中心映射表。
+///
+/// ## 参数形状是契约的一部分
+///
+/// 「写任务表」这个名字包含了 `todos[]` 的形状（[`declared_items`]）。换一个工具来
+/// 写任务表，它要交同一个形状——那正是行为名跨进程的意义；而**改名**（`todo_write`
+/// → 别的名字）不影响本模块一个字。
+pub(crate) struct TaskTable;
+
+impl ToolBehavior for TaskTable {
+    fn owner(&self) -> &'static str {
+        // 与 `PLUGIN.yml` 的 `plugin_id` 同一串：owner 序即装配序。
+        "loop"
+    }
+
+    fn behavior(&self) -> &'static str {
+        behaviors::TASK_TABLE
+    }
+
+    fn after(&self, call: &EffectCall<'_>) -> Vec<FactDraft> {
+        // 失败的调用没有声明：`todo_write` 自己会拒掉坏清单，此时「模型声明了什么」
+        // 只是它试过什么，不是清单状态。
+        if !call.success {
+            return Vec::new();
+        }
+        let items = declared_items(call.args);
+        if items.is_empty() {
+            return Vec::new();
+        }
+        drafts(call, &items)
+    }
+}
+
+symbio_plugin_api::submit_behavior!(TaskTable);
 
 /// 调度（S04 §3，`D-139` 裁决 3）：就绪集 → `task.ready` / `task.assigned`。
 ///

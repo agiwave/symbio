@@ -14,14 +14,19 @@
 //!
 //! ## 口径
 //!
-//! - 只认 `success: true` 的写族工具：`vdfs_write` / `vdfs_edit` / `vdfs_delete` /
-//!   `vdfs_mkdir`（读、搜索、统计不是变更）；
+//! - 只认 `success: true` 且**带 `file_op`** 的产物：那个字段由写族工具声明的行为
+//!   交出来（`symbio_plugin_vdfs::behavior::FileChange`，DE-025 D-207），取值是
+//!   [`FileOp::as_str`] 的四个判别词。本模块**不认识任何工具名**——改一个工具名
+//!   不影响这里一行，而新出现的写工具（MCP / shell）只要声明同一个行为就能进账；
 //! - 路径取**定稿参数** `args.path`——工具收到什么就记什么，不去反推结果文本；
 //! - 路径必须落在工作目录内：绝对路径、`..` 逃逸与**虚拟根**（`AddrRootDecl` 声明的
 //!   挂载名，那是资源树不是工作目录）下的路径不计入；
 //! - 同一路径**最新一条胜出**，`changes` 数它被成功改过几次；
-//! - `vdfs_edit` 的 `replaced: 0`（内容已是最新）不算变更：从结果文本里读，
-//!   没有该字段的旧事件按变更计入——「不知道」不等于「没改」。
+//! - `edit` 的 `replaced: 0`（内容已是最新）不算变更：从结果文本里读，
+//!   没有该字段的旧事件按变更计入——「不知道」不等于「没改」；
+//! - 没有 `file_op` 的产物一律不计：这个字段出现之前的存量事件无从判断动作，
+//!   而「按工具名猜」正是本条判据要拆掉的那张表。本账是会话内的**活视图**，
+//!   不是历史归档。
 //!
 //! ## 边界
 //!
@@ -47,13 +52,16 @@ pub enum FileOp {
 }
 
 impl FileOp {
-    /// 工具短名 → 动作。只有写族有动作；其余工具不是变更。
-    fn of_tool(tool: &str) -> Option<Self> {
-        match tool {
-            "vdfs_write" => Some(Self::Write),
-            "vdfs_edit" => Some(Self::Edit),
-            "vdfs_delete" => Some(Self::Delete),
-            "vdfs_mkdir" => Some(Self::Mkdir),
+    /// 线格式判别词 → 动作。不是四个判别词之一 ⇒ 不是变更。
+    ///
+    /// 与 [`Self::as_str`] 是同一份拼写的两个方向：生产方（写族的富化行为）用
+    /// `as_str` 交值，本模块用这个读回来——两处各写一份字面量就会漂移。
+    fn from_wire(op: &str) -> Option<Self> {
+        match op {
+            "write" => Some(Self::Write),
+            "edit" => Some(Self::Edit),
+            "delete" => Some(Self::Delete),
+            "mkdir" => Some(Self::Mkdir),
             _ => None,
         }
     }
@@ -124,7 +132,7 @@ fn change_of(e: &Event) -> Option<(FileOp, String)> {
     if payload.get("success").and_then(|v| v.as_bool()) != Some(true) {
         return None;
     }
-    let op = FileOp::of_tool(payload.get("tool").and_then(|v| v.as_str())?)?;
+    let op = FileOp::from_wire(payload.get("file_op").and_then(|v| v.as_str())?)?;
     // 定稿参数：生产侧是 JSON 文本（`args` 字符串），存量/测试可能直接给对象。
     let args = payload.get("args")?;
     let args = match args {
@@ -139,9 +147,9 @@ fn change_of(e: &Event) -> Option<(FileOp, String)> {
     Some((op, path))
 }
 
-/// `vdfs_edit` 的结果是否「没有替换任何东西」。
+/// 一次 `edit` 的结果是否「没有替换任何东西」。
 ///
-/// 字段来自 `vdfs_edit` 的结果 JSON（`{ success, path, replaced, message }`）。
+/// 字段来自写族 `edit` 的结果 JSON（`{ success, path, replaced, message }`）。
 /// 缺席 = 该事件写在补充字段之前 ⇒ 按变更计入（见模块头「不知道 ≠ 没改」）。
 fn edit_was_noop(payload: &serde_json::Value) -> bool {
     payload

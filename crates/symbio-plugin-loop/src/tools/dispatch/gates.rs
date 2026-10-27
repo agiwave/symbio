@@ -422,7 +422,7 @@ fn elimination(ctx: &GateContext<'_>) -> Option<Refusal> {
 /// 任务表写侧闸（S03 §3，）：只拦声明 `task_table` 行为的工具。
 ///
 /// 出口是**可审计拒绝但不记承诺**：工具没跑，「声明过什么」无从说起
-/// （`note_tasks` 只在跑完后记成功调用）。
+/// （任务表效果只在成功的调用上求值，见 `task_events::TaskTable`）。
 fn task_table(ctx: &GateContext<'_>) -> Option<Refusal> {
     let blocked = ctx.decls.owns_task_table(ctx.name) && !ctx.task_table.may_write;
     if !blocked {

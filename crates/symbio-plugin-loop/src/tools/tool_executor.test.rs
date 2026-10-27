@@ -9,9 +9,9 @@ use super::*;
 // `use super::*` 因此带不过来。
 use symbio_core::chat_node::NodeRole;
 use symbio_core::PluginSimpleRequest;
-// `TaskStatus` 是**测试自己**要的：它只出现在断言里，父模块的签名用不到它，
-// 因此 `use super::*` 带不过来（记录类型自 6b-① 起住 core 词汇表）。
-use symbio_core::facts::TaskStatus;
+// `EffectInput` 是**测试自己**要的：闸门拒止的判据是「连效果输入都不产生」，
+// 而父模块只把它当出参类型（`use super::*` 带不过来）。
+use symbio_plugin_api::effects::EffectInput;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块顶层不导入它——
 // 生产侧的读发生在 `tool_executor/breaker.rs` 子模块里）；`use super::*` 因此带不过来。
 use symbio_core::Store;
@@ -220,7 +220,6 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -275,7 +274,6 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -307,7 +305,6 @@ async fn missing_tool_name_is_recorded_as_failure() {
         &test_dir(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -345,7 +342,6 @@ async fn unparseable_arguments_are_refused_not_executed() {
         &test_dir(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -414,7 +410,6 @@ async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -452,7 +447,6 @@ async fn a_repeat_from_the_transcript_says_so_on_the_result() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -481,7 +475,6 @@ async fn a_different_argument_is_not_a_repeat() {
         &test_dir(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -605,7 +598,6 @@ async fn aborted_batch_terminates_every_tool_call() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -685,7 +677,6 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
         false,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -762,7 +753,6 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         &test_dir(),
         &EventStore::new(),
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -1065,71 +1055,6 @@ async fn record_effect_never_overwrites_an_earlier_judgement() {
     assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
 }
 
-// ==================== note_tasks：任务表出参的唯一写入点（批⑨） ====================
-//
-// 判据三条，各钉一条反向：**短名**匹配（不反演全名、不误吃 MCP 工具）、**只认成功**
-// （失败的调用没改清单）、**id 缺席按位次兜底**（与 local/todo_write 同一条格式——
-// 两处各写一次是跨插件契约，改名必须一起改）。
-
-#[tokio::test]
-async fn note_tasks_records_a_successful_todo_write() {
-    let decls = factory_decls().await;
-    let mut out = Vec::new();
-    let args = json!({
-        "todos": [
-            { "content": "分析架构", "status": "in_progress" },
-            { "id": "t2", "content": "写实现", "status": "completed", "depends_on": ["task_1"] },
-            { "id": "t3", "content": "写文档", "status": "pending" }
-        ],
-        "merge": false
-    });
-    note_tasks(&mut out, &decls, "local/todo_write", &args, true);
-
-    assert_eq!(out.len(), 1, "一次成功调用 = 一条声明");
-    let items = &out[0].items;
-    assert_eq!(items.len(), 3);
-    assert_eq!(items[0].id, "task_1", "id 缺席按位次兜底（与工具同格式）");
-    assert_eq!(items[0].status, TaskStatus::InProgress);
-    assert!(items[0].depends_on.is_empty(), "省略 depends_on ⇒ []");
-    assert_eq!(items[1].status, TaskStatus::Completed);
-    assert_eq!(items[1].depends_on, vec!["task_1".to_string()]);
-    assert_eq!(items[2].status, TaskStatus::Pending);
-    assert_eq!(out[0].items[0].goal, "分析架构");
-}
-
-#[tokio::test]
-async fn note_tasks_ignores_failures_and_other_tools() {
-    let decls = factory_decls().await;
-    let mut out = Vec::new();
-    let args = json!({ "todos": [{ "content": "甲" }] });
-
-    // 失败的调用没改清单 ⇒ 不记（记它等于替工具编一条事实）。
-    note_tasks(&mut out, &decls, "local/todo_write", &args, false);
-    // 别的工具：短名判据只认 todo_write。
-    note_tasks(&mut out, &decls, "local/shell", &args, true);
-    // MCP 的同名工具走 `mcp__srv__todo_write` 线上名，短名判据**不反演** ⇒ 不误吃。
-    note_tasks(&mut out, &decls, "mcp__srv__todo_write", &args, true);
-    // 裸 `todo_write`（无挂载点前缀）同样要认。
-    note_tasks(&mut out, &decls, "todo_write", &args, true);
-
-    assert_eq!(out.len(), 1, "只有成功的 todo_write 被记账");
-}
-
-#[tokio::test]
-async fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
-    let decls = factory_decls().await;
-    let mut out = Vec::new();
-    note_tasks(&mut out, &decls, "local/todo_write", &json!({}), true);
-    note_tasks(
-        &mut out,
-        &decls,
-        "local/todo_write",
-        &json!({ "todos": [{ "content": "" }] }),
-        true,
-    );
-    assert!(out.is_empty(), "缺 todos / 空 content ⇒ 不是一份清单");
-}
-
 // ==================== 外部执行闸门（S8 第 20 步，04 §3.1 批⑩） ====================
 
 /// 带会话 id 的请求上下文。成本台账不再按它定位——事实轨以**值**交给执行层
@@ -1227,7 +1152,6 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         &dir,
         &facts,
         false,
-        &mut Vec::new(),
         &mut Vec::new(),
         &mut breaks,
     )
@@ -1398,7 +1322,6 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         true,
         &mut effects,
         &mut Vec::new(),
-        &mut Vec::new(),
     )
     .await;
 
@@ -1436,7 +1359,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
 //
 // 钉的是**闸门的接线**（判据本身在 `task_table.test.rs`）：`todo_write` 到达执行窗口
 // 之前被拒——`Refused:` 回灌模型、父节点收敛、工具没有执行（没有路由往返）、
-// **不记任务声明**（`note_tasks` 只在跑完后记成功调用）。
+// **不交效果输入**（效果只在跑完后求值，见 DE-025 D-213）。
 //
 // 之后这道闸的判据是**注册面**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
 // 自声明 `owns_task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带
@@ -1491,7 +1414,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         parse_error: None,
         overflow_notice: None,
     }];
-    let mut tasks: Vec<TaskDeclaration> = Vec::new();
+    let mut effects: Vec<EffectInput> = Vec::new();
     let (msgs, updates) = process_tool_calls_async(
         tcs,
         &None,
@@ -1502,8 +1425,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         &dir,
         &EventStore::new(),
         false,
-        &mut Vec::new(),
-        &mut tasks,
+        &mut effects,
         &mut Vec::new(),
     )
     .await;
@@ -1528,8 +1450,8 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         Some(failure_kind::PERMISSION_DENIED),
     );
     assert!(
-        tasks.is_empty(),
-        "工具没跑 ⇒ 不记任务声明（跑了才判，同批⑨口径）"
+        effects.is_empty(),
+        "工具没跑 ⇒ 连效果输入都不产生（跑了才判，DE-025 D-213）"
     );
 
     std::fs::remove_dir_all(&dir).ok();
@@ -1563,7 +1485,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         parse_error: None,
         overflow_notice: None,
     }];
-    let mut tasks: Vec<TaskDeclaration> = Vec::new();
+    let mut effects: Vec<EffectInput> = Vec::new();
     let (msgs, _updates) = process_tool_calls_async(
         tcs,
         &None,
@@ -1574,8 +1496,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         &dir,
         &EventStore::new(),
         false,
-        &mut Vec::new(),
-        &mut tasks,
+        &mut effects,
         &mut Vec::new(),
     )
     .await;
@@ -1791,7 +1712,6 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
         tool_call_node("tc-b", "probe_b"),
     ];
     let mut effects = Vec::new();
-    let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
     let (msgs, updates) = tokio::time::timeout(
@@ -1807,7 +1727,6 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
             &EventStore::new(),
             false,
             &mut effects,
-            &mut tasks,
             &mut breaks,
         ),
     )
@@ -1907,7 +1826,6 @@ async fn side_effect_calls_never_overlap_with_another_call() {
         let sink = ExecEventSink::silent();
         let abort = ExecAbortSignal::new();
         let mut effects = Vec::new();
-        let mut tasks = Vec::new();
         let mut breaks = Vec::new();
         let (msgs, _updates) = process_tool_calls_async(
             calls,
@@ -1920,7 +1838,6 @@ async fn side_effect_calls_never_overlap_with_another_call() {
             &EventStore::new(),
             false,
             &mut effects,
-            &mut tasks,
             &mut breaks,
         )
         .await;
@@ -1961,7 +1878,6 @@ async fn interactive_mode_keeps_the_batch_serial() {
         tool_call_node("tc-i2", "probe_i2"),
     ];
     let mut effects = Vec::new();
-    let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
     let (msgs, _updates) = process_tool_calls_async(
@@ -1975,7 +1891,6 @@ async fn interactive_mode_keeps_the_batch_serial() {
         &EventStore::new(),
         false,
         &mut effects,
-        &mut tasks,
         &mut breaks,
     )
     .await;
@@ -2017,7 +1932,6 @@ async fn abort_reaches_every_in_flight_call() {
         tool_call_node("tc-ab", "probe_abort_b"),
     ];
     let mut effects = Vec::new();
-    let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
     // 等两条都真正开跑再中止——中止发生在启动之前测的是另一条路径。
@@ -2046,7 +1960,6 @@ async fn abort_reaches_every_in_flight_call() {
             &EventStore::new(),
             false,
             &mut effects,
-            &mut tasks,
             &mut breaks,
         ),
     )

@@ -59,21 +59,31 @@ where
                 &actor.principal,
             )
             .with_produced_by(user_seq)
-            .with_payload(serde_json::json!({
-                "tool": outcome.name,
-                "text": outcome.text,
-                "tool_call_id": outcome.call_id,
-                "wire_id": outcome.wire_id,
-                "args": outcome.args,
-                "result_id": outcome.result_id,
-                "success": outcome.ok,
-                // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
-                // `waiting_user_action`），不是普通结果文本。
-                "needs_user_action": outcome.needs_user_action,
-                "prompt": outcome.prompt,
-                "failure_kind": outcome.failure_kind,
-                "turn_id": turn_root_id,
-            })),
+            .with_payload({
+                let mut payload = serde_json::json!({
+                    "tool": outcome.name,
+                    "text": outcome.text,
+                    "tool_call_id": outcome.call_id,
+                    "wire_id": outcome.wire_id,
+                    "args": outcome.args,
+                    "result_id": outcome.result_id,
+                    "success": outcome.ok,
+                    // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
+                    // `waiting_user_action`），不是普通结果文本。
+                    "needs_user_action": outcome.needs_user_action,
+                    "prompt": outcome.prompt,
+                    "failure_kind": outcome.failure_kind,
+                    "turn_id": turn_root_id,
+                });
+                // 能力交出的富化字段（DE-025 D-207）：本处**只合并、不解释**。
+                // 读侧认字段（如 `file_op`）不认工具名，所以这里不需要认识任何键名。
+                if let Some(obj) = payload.as_object_mut() {
+                    for (key, value) in &outcome.annotations {
+                        obj.insert((*key).to_string(), value.clone());
+                    }
+                }
+                payload
+            }),
         )?;
         run.artifact_no += 1;
         run.artifacts_landed += 1;

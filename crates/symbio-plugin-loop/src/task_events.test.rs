@@ -2,14 +2,15 @@
 //! **清单声明 → 事实 → 两个消费方**的每一环都要看得见，且每条口径各配一个反向用例
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
-use super::{prompt_section, write, ScheduleDecider};
+use super::{prompt_section, ScheduleDecider, TaskItem, TaskStatus};
 use crate::control_decl::guard_vocab;
-use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
     actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventStore, Pattern,
     Scope, Seq, Store, Verb,
 };
+use symbio_plugin_api::behaviors;
+use symbio_plugin_api::effects::{EffectEnv, EffectInput};
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use crate::control_decl::{
@@ -27,8 +28,32 @@ fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {
     }
 }
 
-fn decl(items: Vec<TaskItem>) -> TaskDeclaration {
-    TaskDeclaration { items }
+/// 一次声明的清单（= 一次 `todo_write` 调用里的 `todos[]`）。
+struct Decl(Vec<TaskItem>);
+
+fn decl(items: Vec<TaskItem>) -> Decl {
+    Decl(items)
+}
+
+/// 一项声明 → `todo_write` 的参数形状（生产里由工具交出来，测试里由这里拼）。
+fn args_of(items: &[TaskItem]) -> serde_json::Value {
+    serde_json::json!({
+        "todos": items
+            .iter()
+            .map(|i| {
+                serde_json::json!({
+                    "id": i.id,
+                    "content": i.goal,
+                    "status": match i.status {
+                        TaskStatus::Pending => "pending",
+                        TaskStatus::InProgress => "in_progress",
+                        TaskStatus::Completed => "completed",
+                    },
+                    "depends_on": i.depends_on,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
 }
 
 /// 一份**合法**压缩快照里的节点（与 `turn_exec` 落格的形状同构）。
@@ -48,7 +73,11 @@ fn snapshot_node(id: &str) -> symbio_core::chat_node::ChatNode {
 
 /// 一次「收束」级别的写入：取现有切片 → 按当前轮号入格。
 /// `turn` 每调一次递增（与真实桥的行为同形：一轮一格）。
-fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
+///
+/// 走的是**生产那条通路**（DE-025 D-207）：拼一次调用的纯值 → 交效果端口问
+/// 能力包要草稿 → 经唯一写入口落格。测试因此同时钉住两件事：任务的成格判据，
+/// 以及「这条效果确实由 `task_table` 的声明选出来」。
+fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
     // 任务事件的溯源锚 = 本轮用户格。夹具此前写死 `0`：日志从 0 起时那条边
     // 指向**自己**（I2 只查非空所以一直是绿的）。没有根就先种一条，锚点取它。
     let anchor = match store.range(Seq::new(0)).first() {
@@ -65,17 +94,30 @@ fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
             .expect("根事件入格")
             .value(),
     };
+    let items: Vec<TaskItem> = decls.iter().flat_map(|d| d.0.clone()).collect();
+    let input = EffectInput {
+        tool: "local/todo_write".into(),
+        call_id: format!("call-{turn}"),
+        args: args_of(&items),
+        success: true,
+        result: String::new(),
+        why: String::new(),
+        declared: &[behaviors::TASK_TABLE],
+    };
     let snapshot = store.range(Seq::new(0));
-    write(
-        store,
-        &snapshot,
-        decls,
+    let env = EffectEnv {
         turn,
-        anchor,
-        symbio_core::PRINCIPAL_MAIN,
-        &format!("v2t-test-a{turn}"),
-    )
-    .expect("任务事件入格");
+        user_seq: anchor,
+        principal: symbio_core::PRINCIPAL_MAIN,
+        source: symbio_core::PRINCIPAL_USER,
+        snapshot: &snapshot,
+        applied: &[],
+    };
+    for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
+        store
+            .append(draft.into_event(turn, symbio_core::PRINCIPAL_MAIN))
+            .expect("任务事件入格");
+    }
 }
 
 fn kinds(store: &EventStore) -> Vec<String> {
@@ -440,7 +482,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
 
 // ── 调度者与租约（D-189：实现随唯一消费方住本插件） ──
 
-/// 开一个任务（载荷 `{ task_id, depends_on, goal }`）——生产写方见本模块 `write`。
+/// 开一个任务（载荷 `{ task_id, depends_on, goal }`）——生产写方见本模块 `TaskTable`。
 fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
     store
         .append(
@@ -587,4 +629,210 @@ fn a_spec_without_assign_work_writes_nothing() {
             .is_empty(),
         "缺 assign.work ⇒ 零事实（没有资格的调度不留痕）"
     );
+}
+
+// ==================== 效果端口：任务表这条效果自己交出草稿（DE-025 D-207） ====================
+//
+// 判据四条，各钉一条反向：**只认成功的调用**（失败没改清单）、**参数形状容错**
+// （缺 `todos` / 空 `content` 不是一份清单）、**同一轮两次声明互不重开**（`applied`
+// 那片历史的作用——少了它，第二条声明会把第一条刚开的格再开一次）、**幂等键不撞**
+// （同轮两次调用各算各的序号）。
+
+/// 一次调用的效果输入（生产里由 `record_effect` 从注册表元数据抄出 `declared`）。
+fn effect(call_id: &str, args: serde_json::Value, success: bool) -> EffectInput {
+    EffectInput {
+        tool: "local/todo_write".into(),
+        call_id: call_id.into(),
+        args,
+        success,
+        result: String::new(),
+        why: if success {
+            String::new()
+        } else {
+            "被拒".into()
+        },
+        declared: &[behaviors::TASK_TABLE],
+    }
+}
+
+/// 走一次效果端口：拿草稿、落格。返回本次落下的 kind 序列。
+fn apply_effects(
+    store: &EventStore,
+    turn: u64,
+    anchor: u64,
+    inputs: &[EffectInput],
+) -> Vec<String> {
+    let mut applied: Vec<Event> = Vec::new();
+    let mut kinds = Vec::new();
+    for input in inputs {
+        let snapshot = store.range(Seq::new(0));
+        let env = EffectEnv {
+            turn,
+            user_seq: anchor,
+            principal: symbio_core::PRINCIPAL_MAIN,
+            source: symbio_core::PRINCIPAL_USER,
+            snapshot: &snapshot,
+            applied: &applied,
+        };
+        for draft in symbio_plugin_api::effects::apply(&input.call(&env)) {
+            kinds.push(draft.kind.clone());
+            let event = draft.into_event(turn, symbio_core::PRINCIPAL_MAIN);
+            store.append(event.clone()).expect("任务事件入格");
+            applied.push(event);
+        }
+    }
+    kinds
+}
+
+/// 铺一条本轮开口格（效果输入的溯源锚）。
+fn seed_anchor(store: &EventStore) -> u64 {
+    store
+        .append(Event::pending(
+            "u-0",
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            symbio_core::PRINCIPAL_MAIN,
+        ))
+        .expect("根事件入格")
+        .value()
+}
+
+/// 失败的调用不产草稿：`todo_write` 拒掉坏清单时，「模型试过什么」不是清单状态。
+#[test]
+fn a_failed_declaration_yields_no_draft() {
+    let store = EventStore::new();
+    let anchor = seed_anchor(&store);
+    let kinds = apply_effects(
+        &store,
+        0,
+        anchor,
+        &[effect(
+            "call-1",
+            serde_json::json!({ "todos": [{ "content": "甲" }] }),
+            false,
+        )],
+    );
+    assert!(kinds.is_empty(), "失败 ⇒ 没有声明");
+}
+
+/// 参数形状容错：缺 `todos`、`todos` 不是数组、项里 `content` 为空 —— 都不是清单。
+#[test]
+fn payloads_that_cannot_be_a_task_list_yield_no_draft() {
+    let store = EventStore::new();
+    let anchor = seed_anchor(&store);
+    for args in [
+        serde_json::json!({}),
+        serde_json::json!({ "todos": "不是数组" }),
+        serde_json::json!({ "todos": [{ "content": "" }] }),
+        serde_json::json!({ "todos": [] }),
+    ] {
+        let kinds = apply_effects(&store, 0, anchor, &[effect("call-1", args.clone(), true)]);
+        assert!(kinds.is_empty(), "{args} 不是一份清单");
+    }
+}
+
+/// 声明项的读法：`id` 缺席按位次兜底、`status` 三档、`depends_on` 省略即空。
+#[test]
+fn declared_items_follow_the_tool_side_shape() {
+    let store = EventStore::new();
+    let anchor = seed_anchor(&store);
+    let kinds = apply_effects(
+        &store,
+        0,
+        anchor,
+        &[effect(
+            "call-1",
+            serde_json::json!({
+                "todos": [
+                    { "content": "分析架构", "status": "in_progress" },
+                    { "id": "t2", "content": "写实现", "status": "completed", "depends_on": ["task_1"] },
+                    { "id": "t3", "content": "写文档" }
+                ],
+                "merge": false
+            }),
+            true,
+        )],
+    );
+    assert_eq!(
+        kinds,
+        vec![
+            EVENT_TASK_OPENED,
+            EVENT_TASK_PROGRESS,
+            EVENT_TASK_OPENED,
+            EVENT_TASK_ASSERTED,
+            EVENT_TASK_OPENED,
+        ],
+        "t1 开 + 推进、t2 开 + 断言、t3 只开"
+    );
+    let snap = store.range(Seq::new(0));
+    let ids: Vec<&str> = snap
+        .iter()
+        .filter(|e| e.kind == EVENT_TASK_OPENED)
+        .filter_map(|e| e.payload.get("task_id").and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(ids, vec!["task_1", "t2", "t3"], "id 缺席按位次兜底");
+}
+
+/// **同一轮两次声明**：第二条看得见第一条刚落的格，不会把它再开一次。
+///
+/// 反向自检：把 `EffectEnv::applied` 换成空切片 ⇒ 本条红（`task.opened` 出现两次）。
+/// 那不是理论风险——并行工具调用在一轮里叫两次 `todo_write` 是常态。
+#[test]
+fn a_second_declaration_in_the_same_turn_sees_the_first() {
+    let store = EventStore::new();
+    let anchor = seed_anchor(&store);
+    let kinds = apply_effects(
+        &store,
+        0,
+        anchor,
+        &[
+            effect(
+                "call-1",
+                serde_json::json!({ "todos": [{ "id": "t1", "content": "甲", "status": "in_progress" }] }),
+                true,
+            ),
+            effect(
+                "call-2",
+                serde_json::json!({ "todos": [{ "id": "t1", "content": "甲", "status": "completed" }] }),
+                true,
+            ),
+        ],
+    );
+    assert_eq!(
+        kinds,
+        vec![EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_ASSERTED],
+        "第二次声明只补状态推进，不重开格"
+    );
+}
+
+/// 同一轮两次声明的**幂等键不撞**（各算各的序号，调用 id 在号里）。
+#[test]
+fn event_ids_stay_unique_across_two_calls_in_one_turn() {
+    let store = EventStore::new();
+    let anchor = seed_anchor(&store);
+    apply_effects(
+        &store,
+        0,
+        anchor,
+        &[
+            effect(
+                "call-1",
+                serde_json::json!({ "todos": [{ "id": "t1", "content": "甲" }] }),
+                true,
+            ),
+            effect(
+                "call-2",
+                serde_json::json!({ "todos": [{ "id": "t2", "content": "乙" }] }),
+                true,
+            ),
+        ],
+    );
+    let snap = store.range(Seq::new(0));
+    let mut ids: Vec<&str> = snap.iter().map(|e| e.event_id.as_str()).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "幂等键撞了 ⇒ 第二条被存储静默丢掉");
 }

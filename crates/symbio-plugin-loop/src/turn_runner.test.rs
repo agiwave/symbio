@@ -1929,6 +1929,7 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
+                    annotations: Vec::new(),
                 })
                 .collect();
             succeed_batch(store, calls, turn_no, produced_by);
@@ -2043,6 +2044,7 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
+                    annotations: Vec::new(),
                 })
                 .collect();
             // 关账：工具回了话 ⇒ `response`。
@@ -2143,6 +2145,7 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
+                    annotations: Vec::new(),
                 })
                 .collect()
         }
@@ -3323,6 +3326,7 @@ mod tool_round_tests {
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
                     args: symbio_core::node_build::tool_call_args_text(tc),
                     result_id: String::new(),
+                    annotations: Vec::new(),
                 })
                 .collect();
             succeed_batch(store, calls, turn_no, produced_by);

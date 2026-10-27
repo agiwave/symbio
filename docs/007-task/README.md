@@ -80,7 +80,7 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：☐ todo 5 · 🟡 doing 2 · done 0 · wont 0（共 7）
+**计数**：☐ todo 5 · 🟡 doing 1 · done 0 · wont 0（共 6）
 
 ## 待处理（按依赖顺序）
 
@@ -90,22 +90,20 @@ wont 必须有理由（reason）。分解（parent）只在任务之间，跨 ki
 | `T-005` | S1.3 领域扩展位（Entity 的 Domain + CS-009） | next | core | — |
 | `T-006` | S1.4 上下文端口（ContextProvider） | next | loop | — |
 | `T-007` | S1.5 部署事实由清单生成 | next | deploy | — |
-| `T-008` | S1.6 扩展夹具：notes 与零 core diff | next | arch | T-004、T-005、T-006、T-007 |
+| `T-008` | S1.6 扩展夹具：notes 与零 core diff | next | arch | T-005、T-006、T-007 |
 
 ## 进行中
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-001` | S1 能力包与扩展面（SPRINT） | now | arch | — |
-| `T-004` | S1.2 效果端口（ToolBehavior + FactDraft） | now | core | — |
 
 ## 分解树
 
 分解关系只写在 `parent` 字段（子条目指向父条目、同 kind；编号平铺不体现层级——层级是投影不是身份）。
 同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。
 
-- [`T-001`](001.md) S1 能力包与扩展面（SPRINT）（doing） · 子项 todo 5 / doing 1
-  - [`T-004`](004.md) S1.2 效果端口（ToolBehavior + FactDraft）（doing）
+- [`T-001`](001.md) S1 能力包与扩展面（SPRINT）（doing） · 子项 todo 5
   - [`T-005`](005.md) S1.3 领域扩展位（Entity 的 Domain + CS-009）（todo）
   - [`T-006`](006.md) S1.4 上下文端口（ContextProvider）（todo）
   - [`T-007`](007.md) S1.5 部署事实由清单生成（todo）
