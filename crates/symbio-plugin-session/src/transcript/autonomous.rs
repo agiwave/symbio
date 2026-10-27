@@ -363,7 +363,7 @@ impl AutonomousInitiator {
     fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("o-{task_id}"),
-            symbio_core::EVENT_TASK_OPENED,
+            symbio_plugin_api::events::EVENT_TASK_OPENED,
             symbio_core::Entity::Task,
             symbio_core::Verb::Opened,
             0,

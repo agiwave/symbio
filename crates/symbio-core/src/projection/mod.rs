@@ -6,7 +6,6 @@
 
 pub use symbio_kernel::Projection;
 
-pub mod autonomy;
 pub mod branch;
 pub mod calibration;
 pub mod changes;
@@ -21,6 +20,7 @@ pub mod rebuild;
 pub mod reputation;
 pub mod slo;
 pub mod span;
+pub mod task_vocab;
 pub mod transcript;
 pub mod turns;
 pub mod turnstate;

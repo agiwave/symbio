@@ -63,12 +63,14 @@ use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
 use symbio_core::ReadySetView;
 use symbio_core::PRINCIPAL_SCHEDULER;
-use symbio_core::{
-    actor_can_assign_work, Entity, Event, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-};
+use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Store, Verb};
 
-use crate::control_decl::{EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED};
+// 任务族的名字与格位都在本插件的声明表里（DE-024 D-204 / D-206）：`readyset_for` 在构造期
+// 收 `TASK_VOCAB`，core 的折叠不比对任何一条名字。
+use crate::control_decl::{
+    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
+};
 
 // 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 5 组）：
 // 声明的写方在工具执行层，本文件是读侧投影。
@@ -321,7 +323,7 @@ pub(crate) fn schedule(
 ) -> Result<(), String> {
     let spec = ScheduleDecider::spec();
     let started = symbio_core::clock_now_ms();
-    let view = symbio_core::readyset(cap).read_all(snapshot).value;
+    let view = readyset_for(TASK_VOCAB, cap).read_all(snapshot).value;
     let facts = ScheduleDecider.decide(&spec, &view, snapshot, owner, now);
     // 预算（`I3` 的反射档）：**算完再判**——能拦的只有落格这一半。超预算就一笔都
     // 不落，而不是落一半：半批租约没人认账（下一轮它们既不在候选集里、也没人持有）。
@@ -368,7 +370,7 @@ pub(crate) fn schedule(
 ///
 /// 调用方（`chat_loop::inputs`）按 `request_round == 0` 取一次、本轮各工具轮复用。
 pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
-    let ready = symbio_core::readyset(cap).read_all(snapshot).value.ready;
+    let ready = readyset_for(TASK_VOCAB, cap).read_all(snapshot).value.ready;
     if ready.is_empty() {
         return None;
     }

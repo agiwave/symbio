@@ -28,11 +28,16 @@
 //!   选什么打分函数是算法问题，架构不保证（本投影按 `(opened_seq, task_id)`，确定性优先）；
 //! - 环与悬空依赖不在这里判——那是 C14（[`crate::invariants::acyclic_deps`]）
 //!   的职责。
+//!
+//! ## 这一族的五个名字不在 core 里
+//!
+//! 建节点 / 推进 / 挂起 / 终态 / 租约是**算法角色**；它们的拼写由调用方在构造期交进来
+//! （`readyset_for(vocab, cap)`，DE-024 D-206）。
+//! 写方与调度者是 `plugins/loop`，读数还被 `plugins/session` 的 `stats` 消费，所以名字登记进
+//! loop 的清单、由生成物交给 session（D-204）——core 一行都不比对它们。
 
-use super::super::event::{
-    Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS,
-};
+use super::super::event::{Entity, Event};
+use super::task_vocab::{TaskRole, TaskVocab};
 use super::Projection;
 
 use serde::{Deserialize, Serialize};
@@ -67,21 +72,26 @@ struct Lease {
 
 /// `readyset` 投影：从事件序列算出当前就绪的任务（至多 `cap` 笔）。
 ///
-/// - 终态 = `task.asserted`（验收通过才终态——返工节点重开后不算旧任务复活）；
+/// **这一族的五条名字不写在 core 里**（DE-024 D-206）：`readyset_for` 在构造期收一张
+/// [`TaskVocab`]，owner 插件交自家常量，第二个消费方交清单生成物（D-204）。下面每一格
+/// 都用它的**算法角色**称呼（建节点 / 推进 / 挂起 / 终态 / 租约），因为终态与租约落在
+/// 同一格 `Task × Asserted`——按格子或按事件名都说不清这五件事。
+///
+/// - 终态 = `terminal`（验收通过才终态——返工节点重开后不算旧任务复活）；
 /// - `ts > now` 的事件不参与（与其余投影同口径）；
-/// - **挂起排除**（S07 §5 强制点）：`task.held` 的任务不进就绪集——被挂起的任务
-///   被二次调度可能重复执行；恢复（同任务的 `task.progress`）自动解除挂起；
-/// - **活租约排除**（S04）：`task.assigned` 且 `until_ms > now` 的任务不进就绪集；
+/// - **挂起排除**（S07 §5 强制点）：`held` 的任务不进就绪集——被挂起的任务
+///   被二次调度可能重复执行；恢复（同任务的 `progressed`）自动解除挂起；
+/// - **活租约排除**（S04）：`lease` 且 `until_ms > now` 的任务不进就绪集；
 ///   租约到期或任务终态即释放；
 /// - 按 `(opened_seq, task_id)` 升序取前 `cap` 笔（`cap = 0` 按 1 处理）。
 ///
 /// 生产消费方两处（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：读出口
 /// `session/stats` 的 `readyset` 列，与请求装配时交给执行者的**调度段**
-/// （`plugins/session/task_events::prompt_section`）、以及调度者自己
-/// （`actors::schedule`）。三者传同一个 `cap`（写方 = 会话配置），因此「候选集多大」
-/// 只有一处定义。
-pub fn readyset(cap: usize) -> Projection<ReadySetView> {
+/// （`plugins/loop/task_events`）、以及调度者自己。两者传同一个 `cap`（写方 = 会话配置），
+/// 因此「候选集多大」只有一处定义。
+pub fn readyset_for(vocab: TaskVocab<'_>, cap: usize) -> Projection<ReadySetView> {
     let cap = cap.max(1);
+    let vocab = vocab.bind();
     Projection::new(move |events: &[Event], now| {
         // task_id → (opened 事件 seq, depends_on)
         let mut tasks: BTreeMap<&str, (u64, Vec<String>)> = BTreeMap::new();
@@ -95,8 +105,11 @@ pub fn readyset(cap: usize) -> Projection<ReadySetView> {
             let Some(id) = e.payload.get("task_id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            match e.kind.as_str() {
-                EVENT_TASK_OPENED => {
+            let Some(role) = vocab.role(&e.kind) else {
+                continue;
+            };
+            match role {
+                TaskRole::Opened => {
                     let ds = e
                         .payload
                         .get("depends_on")
@@ -110,21 +123,21 @@ pub fn readyset(cap: usize) -> Projection<ReadySetView> {
                         .unwrap_or_default();
                     tasks.insert(id, (e.seq.map(|s| s.value()).unwrap_or(u64::MAX), ds));
                 }
-                EVENT_TASK_ASSERTED => {
+                TaskRole::Terminal => {
                     terminal.insert(id, ());
                     held.remove(id);
                     // 终态之后租约没有意义：那笔活已经交出去了。
                     leases.remove(id);
                 }
-                EVENT_TASK_HELD => {
+                TaskRole::Held => {
                     // 挂起：S07 §5 的强制点——挂起期间不得被二次调度。
                     held.insert(id, ());
                 }
-                EVENT_TASK_PROGRESS => {
+                TaskRole::Progressed => {
                     // 恢复：挂起是一条事件，恢复也是——progressed 自动解除挂起。
                     held.remove(id);
                 }
-                EVENT_TASK_ASSIGNED => {
+                TaskRole::Lease => {
                     // 租约：`until_ms` 是**到期时刻**（绝对时间，ms）。
                     // 缺这一格 = 无期限租约不成立——按「没有租约」处理，
                     // 而不是按「永久持有」：宁可重复派一次，不要永远不派。
@@ -135,7 +148,6 @@ pub fn readyset(cap: usize) -> Projection<ReadySetView> {
                         .unwrap_or(i64::MIN);
                     leases.insert(id, Lease { until_ms });
                 }
-                _ => {}
             }
         }
         let mut ready: Vec<ReadyTask> = tasks

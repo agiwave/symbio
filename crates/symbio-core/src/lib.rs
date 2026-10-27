@@ -99,11 +99,11 @@ pub use projection::slo::SloLatencyView;
 // 新增单消费方的 `pub use` 会撞线）。`pub` 不进对外公开面，同时仍满足
 // C-002（插件不深引 `projection::` 域目录，经根路径取用）。
 //
-// 统计口径仍单点：`SpanView::merge` / `AutonomyView::merge` 是跨会话聚合的唯一答案，
-// 方法留在类型上（谁的数据谁的行为），与上面两个同族。主动性那一族的 `ConationView`
-// 不占这里的出口——它的写方与读方都在 `plugins/session`，判据见
-// [DE-024](../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201。
-pub use projection::autonomy::{autonomy, AutonomyView};
+// 统计口径仍单点：`SpanView::merge` 是跨会话聚合的唯一答案，方法留在类型上
+// （谁的数据谁的行为），与上面两个同族。主动性那一族的 `ConationView` 与自主程度
+// 那一族的 `AutonomyView` 都不占这里的出口——它们的写方与读方都在
+// `plugins/session`，投影因此不是共享类型，判据见
+// [DE-024](../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200 / D-201。
 // `SpanSummary` 不另起别名：`merge` 的返回类型随调用走，消费方不需要点它的名字
 // （要断言它内部形状的测试走 `projection::span::` 完整路径）。
 pub use projection::span::{span, SpanView};
@@ -173,24 +173,19 @@ pub use agent::{agent_perms_init_slot, agent_perms_of, AgentPermissions, AgentSc
 pub use actors::{commitment_events, commitment_records};
 pub use actors::{EliminationDecider, SKILL_TAG};
 // 事件名字表（名字是数据，单点定义）。
-// 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
-// `invariants` 的 `acyclic_deps` / `rework_bounded`）走域内路径，core 外的写方只有
-// `plugins/session/task_events` 按名字落格——**单消费方**，故与记忆事件名字表（下）、
-// `readyset` 出根（同批）同一形态：`pub` 出根（C-003 数 `pub use`），只在本
-// crate 内可见、不进对外公开面。收窄成「下沉到 `plugins/session`」会让写方复述字面量、
-// 制造第二处真相，违反 D-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
-// 名字表的根别名：生产写方走 `event::` 完整路径（`actors/` 各处），此处别名主要
-// 服务测试与插件写方——故非测试构建下允许无引用，不为此造 `pub` 出口。
+//
+// 任务族五格（opened / progressed / held / asserted / assigned）**不在这里**：读它们的
+// 折叠（core 的 `readyset_for`、会话插件的 `autonomy`）在构造期收一张 `TaskVocab`，拼写由调用方交出
+// ——owner 插件交自家常量，第二个消费方交清单生成物（DE-024 D-206 / D-204）。此前这里
+// 写着「core 外的写方只有一个，字典不能在插件里」，那条推论已由 D-204 作废：跨插件共享
+// 的名字有清单登记口，不需要内核或 core 代它们保管。
 //
 // `EVENT_TRIGGER_*` 两条同族：`meta.trigger` 的键名与它的 `kind` 取值。写体标记的
 // 生产方（`plugins/heartbeat`）与消费方（`plugins/session` 的收件箱写臂）分属两个
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
-pub use event::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
-};
+pub use event::{EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY};
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
 // （C-003 数 `pub use`）。
@@ -238,11 +233,14 @@ pub use event::EVENT_VERDICT_ASSERTED;
 // 出根只到 `pub`：C-003 数 `pub use`，单消费方不该占架构公开面。
 pub use event::event_cell;
 pub use projection::consolidate::{accept, ConsolidateParams, Rejection};
-// 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
-// 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
-// `pub` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
-pub use projection::readyset::{readyset, ReadySetView};
+// 就绪集出根：生产消费方是 `plugins/loop` 的调度段与 `plugins/session` 的 `stats`
+// 列（04 §3.1 批⑨）。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
+// 不进对外公开面（C-003 数 `pub use`）。
+// `TaskVocab` 随它一起出根：折叠的词汇面是构造期形参（DE-024 D-206），两个调用方都要
+// 能**命名**这张表才交得出整族的拼写——它不是 core 里的第二份字典，字段全是调用方给的。
+pub use projection::readyset::{readyset_for, ReadySetView};
 pub use projection::reputation::reputation;
+pub use projection::task_vocab::TaskVocab;
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。

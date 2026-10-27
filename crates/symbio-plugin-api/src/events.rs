@@ -33,8 +33,23 @@ pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 
 // ============ task ============
 
+/// task.asserted — owner `symbio-plugin-loop`，格位 `(Task, Asserted)`
+pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
+
+/// task.assigned — owner `symbio-plugin-loop`，格位 `(Task, Asserted)`
+pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
+
 /// task.controlled — owner `symbio-plugin-loop`，格位 `(Control, Opened)`
 pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
+
+/// task.held — owner `symbio-plugin-loop`，格位 `(Task, Held)`
+pub const EVENT_TASK_HELD: &str = "task.held";
+
+/// task.opened — owner `symbio-plugin-loop`，格位 `(Task, Opened)`
+pub const EVENT_TASK_OPENED: &str = "task.opened";
+
+/// task.progress — owner `symbio-plugin-loop`，格位 `(Task, Progressed)`
+pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 
 /// 跨插件共享的事件行（名字 + 格位）——写闸的**共享臂**。
 ///
@@ -45,5 +60,10 @@ pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)), // memory.calibrated ← loop
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
+    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)), // task.asserted ← loop
+    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)), // task.assigned ← loop
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
+    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← loop
+    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← loop
+    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)), // task.progress ← loop
 ];

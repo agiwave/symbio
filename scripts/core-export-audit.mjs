@@ -271,15 +271,29 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * `turn.stage` / `authz.granted` / `memory.recalled` / `task.ready`（loop）与
  * `system.triggered` / `system.health`（session）不再需要 core 根出口。这是**真收窄**：
  * 写下与读取这些名字的插件从自己的声明模块取常量，core 不再替它们持有词汇（D-197）。
+ *
+ * 377→**371**（2026-10-27，D-206）：任务族五格的拼写改由折叠的构造口交出，`EVENT_TASK_*`
+ * 五条随内核常量一起不再出根（−5），`TaskVocab` 出一条（+1）；`autonomy` 投影连同
+ * `AutonomyView` 随**唯一生产消费方**下沉 `plugins/session`（−2）。登记值此前停在 381 而
+ * 实测已是 377——那 4 条是上一批同批退役却没同步的数字（黄提示不是红灯，所以它活了一轮）。
+ *
+ * **`one` 那一格本批涨过又落回 11**，落回的方式值得记一笔：`autonomy()` 改名 `autonomy_for()`
+ * 之后它才**显为**单消费方——此前 `collectCoreDomainConsumers` 按名字匹配，core 里那句
+ * `pub mod autonomy;` 与 `pub use projection::autonomy::…` 都被读成「core 内另有生产消费方」。
+ * 那是口径的盲区（模块声明不是使用），不是符号的属性。处置按 D-200：唯一消费方在哪个插件，
+ * 投影就搬进哪个——**不是**把数字提到 12，也不是给它挂一条豁免。
  */
 // core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）；396→389 是 7 条 owner-local 事件名迁出根出口（D-197）；389→386 是 `conation` 投影随唯一
 // 消费方下沉 plugins/session，`conation` / `ConationView` / `EVENT_CONATION_EXPRESSED`
 // 三条出口一起退役；386→381 是 `recall` 投影随唯一消费方下沉 plugins/loop，`recall` /
 // `RecallView` / `RecallEntry` 三条出口与 `EVENT_MEMORY_CONSOLIDATED` /
-// `EVENT_MEMORY_FORGOTTEN` 两条同批退役（D-201）
+// `EVENT_MEMORY_FORGOTTEN` 两条同批退役（D-201）；登记值此后**停在 381 而实测已是 377**
+// （那 4 条是同批退役却没同步数字的黄提示，不是本批新增）；377→371 是 D-206：任务族五条名字
+// 不再经 core 出根（−5，折叠在构造期收 `TaskVocab`，+1）、`autonomy` 投影随唯一生产消费方
+// 下沉 plugins/session（`autonomy` / `AutonomyView` 两条出口退役，−2）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 381
+  : 371
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。

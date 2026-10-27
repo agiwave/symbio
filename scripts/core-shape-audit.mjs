@@ -291,6 +291,16 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   这一条拆掉的是「core 读者」那一类 16 条名字的**共同**理由：投影留在 core（两个
  *   插件同时消费），但认识名字的不是投影，是交出名字的那一方。
  *
+ * - **D-206 任务族迁出**（同日）：多名字折叠收一张按族的结构体（core 的 `readyset_for(vocab, cap)`
+ *   与会话插件的 `autonomy` 折叠都取 `TaskVocab`，字段按算法角色命名——终态与租约同落
+ *   `Task × Asserted`，按格子命不出五格）。`task.opened` / `task.progress` / `task.held` /
+ *   `task.asserted` / `task.assigned` 五条名字登记进 loop 的 `shared_events`，内核五条常量与
+ *   四行 `CELLS` 同批退役 ⇒ 26/25 → 21/21。「读一个折叠就要交出整族」是这张表的形状带来的：
+ *   session 交出 `TASK_VOCAB` 时，`task.assigned` 那种只有 loop 写的名字也有了真消费方，
+ *   CS-007 因此不必为多名字折叠开一条口径。同一条「消费方分布」判据在这一族给出两个处置：
+ *   `readyset` 被 loop 与 session 同时消费 ⇒ 留 core；`autonomy` 只有 session 读 ⇒ 随消费方
+ *   搬进会话插件（C-004 的 `one` 格因此回到 11，见那份脚本的记录）。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -299,7 +309,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 26, cellsRows: 25 }
+  : { kernelEvents: 21, cellsRows: 21 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

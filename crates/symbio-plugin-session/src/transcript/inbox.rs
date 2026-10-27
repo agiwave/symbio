@@ -46,9 +46,13 @@ use std::sync::Arc;
 use symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use symbio_core::{
     ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_TASK_ASSERTED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, PRINCIPAL_REFLEX, SESSION_ID,
-    SOURCE_PRINCIPAL, WORKDIR,
+    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, PRINCIPAL_REFLEX,
+    SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+};
+// 任务族的名字由 owner 插件（`loop`）的清单登记、由生成物投影到这里（DE-024 D-204 / D-206）：
+// 本插件是这一族的**第二个消费方**——它写挂起与恢复两格，也按名字读就绪。
+use symbio_plugin_api::events::{
+    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
 };
 
 /// 重试退避：**启动失败被放回队首**或**落格失败留着未结清项**时的重试间隔。

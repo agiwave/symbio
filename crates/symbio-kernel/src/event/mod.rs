@@ -619,36 +619,13 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
 // ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）──
 //
-// 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
-// 返工 = 新增一条事件（返工那格的名字随 owner 插件声明），不是修改历史
-// （append-only 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`
-// （`task.ready` / `task.assigned` / `task.rework_created` 同落这两格，名字都不在内核
-// ——写方与读方都在 `plugins/loop`，随 owner 的 `EventDecl` 走，DE-024 D-197 / D-203）。
+// 这一节现在是空的。五格（开任务 / 推进 / 暂挂 / 终态 / 发放）与 `task.ready` /
+// `task.rework_created` 同属一个 owner：写方与调度者都在 `plugins/loop`，`session` 只作为
+// **第二个消费方**读它们——名字因此登记进 owner 清单（`shared_events`，判据 CS-007），
+// 格子与租约纪律随 owner 的 `EventDecl` 走（DE-024 D-204 / D-206）。
 //
-// 写方 = `plugins/session/task_events`（会话任务清单 `todo_write` 的转写，
-// 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）；`task.ready` /
-// `task.assigned` 的写方是调度者（`actors::schedule`，S04 `D-139`）。
-
-/// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。
-pub const EVENT_TASK_OPENED: &str = "task.opened";
-/// 推进：执行中的普通事实。落在 `task × progressed`。
-pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")
-/// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
-/// 落在 `task × held`。
-pub const EVENT_TASK_HELD: &str = "task.held";
-/// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
-pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
-/// 发放：调度者把一笔就绪任务派给一个持有者，并附**租约**。载荷
-/// `{ task_id, owner, lease_ms, until_ms }`。落在 `task × asserted`。
-///
-/// ## 唯一写方
-///
-/// 只有调度者写它（`actors::schedule::ScheduleDecider`），且写侧闸读
-/// `assign.work`（`ActorSpec::can_assign_work`）——没有该能力的主体零事件
-/// （fail-closed）。租约不是锁原语：持有状态由投影从这格事件算出，到期由
-/// 调度者判死（见 `task.ready` 的 `lease_expired`）。
-pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
+// 领域形状留在 roadmap，不在语法里：任务图是事件的 `depends_on` 载荷字段（**数据不是
+// 机制**，C14 判无环）；返工 = 新增一条事件而不是修改历史（append-only 已提供撤销语义）。
 
 // ── 控制格子（`task.controlled`）──
 //

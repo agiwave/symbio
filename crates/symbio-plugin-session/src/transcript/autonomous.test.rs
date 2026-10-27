@@ -228,8 +228,9 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
 
 use crate::declarations::EVENT_CONATION_EXPRESSED;
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
-use symbio_core::{budget_exceeded, EventStore, EVENT_TASK_PROGRESS};
+use symbio_core::{budget_exceeded, EventStore};
 use symbio_core::{PRINCIPAL_AUTONOMOUS, PRINCIPAL_USER, PRINCIPAL_WORKER};
+use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。
 fn seed_root(store: &EventStore) -> u64 {

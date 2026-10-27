@@ -7,12 +7,14 @@ use crate::control_decl::guard_vocab;
 use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
-    actor_can_assign_work, check_all, readyset, Budget, Entity, Event, EventStore, Pattern, Scope,
-    Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventStore, Pattern,
+    Scope, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
 };
 
-use crate::control_decl::{EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED};
+use crate::control_decl::{
+    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, TASK_VOCAB,
+};
 use symbio_testkit::trivial_actor_spec;
 
 fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {
@@ -152,7 +154,7 @@ fn readyset_lists_dependency_closed_tasks_only() {
     );
 
     let snapshot = store.range(Seq::new(0));
-    let ready = readyset(usize::MAX)
+    let ready = readyset_for(TASK_VOCAB, usize::MAX)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value
         .ready;
@@ -187,7 +189,7 @@ fn a_dependency_cycle_is_flagged_and_yields_an_empty_readyset() {
         violations.iter().any(|v| v.why.contains("依赖环")),
         "成环必须被断言抓到：{violations:?}"
     );
-    let ready = readyset(usize::MAX)
+    let ready = readyset_for(TASK_VOCAB, usize::MAX)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value
         .ready;
@@ -501,7 +503,9 @@ fn a_hundred_injections_yield_exactly_one_lease() {
     let mut now = 1_000i64;
     for _ in 0..100 {
         let snap = store.range(Seq::new(0));
-        let view = readyset(1).apply(&snap, now, Budget::generous()).value;
+        let view = readyset_for(TASK_VOCAB, 1)
+            .apply(&snap, now, Budget::generous())
+            .value;
         let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, now);
         for f in &facts {
             if f.kind == EVENT_TASK_ASSIGNED {
@@ -548,7 +552,9 @@ fn an_expired_lease_is_judged_dead_and_reassigned() {
     let snap = store.range(Seq::new(0));
 
     // 到点：候选集回来了，调度者先判死、再发放。
-    let view = readyset(1).apply(&snap, 1_000, Budget::generous()).value;
+    let view = readyset_for(TASK_VOCAB, 1)
+        .apply(&snap, 1_000, Budget::generous())
+        .value;
     let facts = ScheduleDecider.decide(&spec, &view, &snap, PRINCIPAL_SCHEDULER, 1_000);
     let death = facts
         .iter()
@@ -568,7 +574,9 @@ fn a_spec_without_assign_work_writes_nothing() {
     let store = EventStore::new();
     open_task(&store, "a", &[], PRINCIPAL_SCHEDULER);
     let snap = store.range(Seq::new(0));
-    let view = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
+    let view = readyset_for(TASK_VOCAB, 1)
+        .apply(&snap, 9_999, Budget::generous())
+        .value;
 
     // 只持 `produce.artifact` 的工人主体：能产物，不能派活。
     let speaker = trivial_actor_spec("session/worker");

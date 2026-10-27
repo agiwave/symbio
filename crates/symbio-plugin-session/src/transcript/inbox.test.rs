@@ -394,7 +394,7 @@ fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
     .with_produced_by(0);
     let task = Event::pending(
         "t1",
-        symbio_core::EVENT_TASK_OPENED,
+        symbio_plugin_api::events::EVENT_TASK_OPENED,
         Entity::Task,
         Verb::Opened,
         0,
@@ -413,7 +413,7 @@ fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
 /// 当前就绪的任务 id（`readyset` = 模型唯一的调度候选来源）。
 fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
     let snapshot = read_wal(p, sid);
-    symbio_core::readyset(usize::MAX)
+    symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX)
         .apply(&snapshot, i64::MAX, symbio_core::Budget::generous())
         .value
         .ready
@@ -661,7 +661,8 @@ async fn pending_work_separates_events_from_retries() {
 // 判定表四类结论、预算读的是**行自己的** `budget_ms`，以及挂起 / 恢复对就绪集的
 // 影响。这些用例随策略实现从 core 迁来（D-190）——判据没变，只是落点归 owner。
 
-use symbio_core::{Budget, EventStore, Pattern, Scope, EVENT_TASK_PROGRESS};
+use symbio_core::{Budget, EventStore, Pattern, Scope};
+use symbio_plugin_api::events::EVENT_TASK_PROGRESS;
 
 /// 造一个在跑任务（供插话 / 熔断场景使用）。
 fn running_task(store: &EventStore, id: &str) {
@@ -771,7 +772,11 @@ fn interruption_after_final_is_queued_not_preempted() {
 fn suspended_task_leaves_readyset_and_restores() {
     let store = EventStore::new();
     running_task(&store, "t1");
-    let before = symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
+    let before = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
+        &facts(&store),
+        9_999,
+        Budget::generous(),
+    );
     assert_eq!(before.value.ready.len(), 1);
 
     // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
@@ -780,7 +785,11 @@ fn suspended_task_leaves_readyset_and_restores() {
         .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
         .unwrap();
     let events = facts(&store);
-    let suspended = symbio_core::readyset(usize::MAX).apply(&events, 9_999, Budget::generous());
+    let suspended = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
+        &events,
+        9_999,
+        Budget::generous(),
+    );
     assert!(
         suspended.value.ready.is_empty(),
         "挂起期间不得二次调度（S07 §6 验收 2）"
@@ -788,7 +797,11 @@ fn suspended_task_leaves_readyset_and_restores() {
 
     // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
     // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（04 §2.2）。
-    let at_t = symbio_core::readyset(usize::MAX).apply(&events, 1_000, Budget::generous());
+    let at_t = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
+        &events,
+        1_000,
+        Budget::generous(),
+    );
     assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
 
     // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
@@ -805,8 +818,11 @@ fn suspended_task_leaves_readyset_and_restores() {
             .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
         .unwrap();
-    let restored =
-        symbio_core::readyset(usize::MAX).apply(&facts(&store), 9_999, Budget::generous());
+    let restored = symbio_core::readyset_for(crate::declarations::TASK_VOCAB, usize::MAX).apply(
+        &facts(&store),
+        9_999,
+        Budget::generous(),
+    );
     assert_eq!(restored.value.ready.len(), 1, "恢复后重新进入 readyset");
     assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
 }

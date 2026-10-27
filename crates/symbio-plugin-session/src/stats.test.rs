@@ -13,12 +13,15 @@ use std::path::{Path, PathBuf};
 use symbio_core::{
     calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
     Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED,
     EVENT_USER_MESSAGE, SKILL_TAG,
 };
-// 校准观测的名字走清单生成物（写方是 loop，本插件只是第二个消费方，DE-024 D-204 / D-205）。
+// 校准观测与任务族的名字都走清单生成物（写方是 loop，本插件只是第二个消费方，
+// DE-024 D-204 / D-205 / D-206）。
 use symbio_kernel::event::kernel_vocab;
-use symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED;
+use symbio_plugin_api::events::{
+    EVENT_MEMORY_CALIBRATED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+};
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -419,7 +422,7 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .append(
             Event::pending(
                 "task-a",
-                symbio_core::EVENT_TASK_OPENED,
+                EVENT_TASK_OPENED,
                 Entity::Task,
                 Verb::Opened,
                 0,
@@ -602,18 +605,12 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
     };
     // t1 全程自主闭环；t2 被挂起过再闭环 ⇒ 不进分子
     store
-        .append(task_ev(
-            "h-2",
-            symbio_core::EVENT_TASK_HELD,
-            Verb::Held,
-            "t2",
-            100,
-        ))
+        .append(task_ev("h-2", EVENT_TASK_HELD, Verb::Held, "t2", 100))
         .unwrap();
     store
         .append(task_ev(
             "a-1",
-            symbio_core::EVENT_TASK_ASSERTED,
+            EVENT_TASK_ASSERTED,
             Verb::Asserted,
             "t1",
             200,
@@ -622,7 +619,7 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
     store
         .append(task_ev(
             "a-2",
-            symbio_core::EVENT_TASK_ASSERTED,
+            EVENT_TASK_ASSERTED,
             Verb::Asserted,
             "t2",
             300,
@@ -841,7 +838,7 @@ fn stats_recompute_equals_direct_apply() {
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     let rs = serde_json::to_value(
-        symbio_core::readyset(symbio_core::TASK_CAP)
+        symbio_core::readyset_for(crate::declarations::TASK_VOCAB, symbio_core::TASK_CAP)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )
@@ -1453,7 +1450,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
-        symbio_core::readyset(symbio_core::TASK_CAP)
+        symbio_core::readyset_for(crate::declarations::TASK_VOCAB, symbio_core::TASK_CAP)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )

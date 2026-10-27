@@ -50,11 +50,12 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use symbio_core::{
-    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
-    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, ReadingPanel, SESSION_ID, SKILL_TAG,
+    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, readyset_for, slo_report,
+    transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginPayload, ReadingPanel, SESSION_ID, SKILL_TAG,
 };
 
+use super::autonomy::autonomy_for;
 use super::spend_ledger::spend_ledger;
 use super::token_ledger::token_ledger;
 
@@ -448,8 +449,14 @@ pub(crate) fn read(
 
     // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
     // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
-    let readyset = serde_json::to_value(symbio_core::readyset(task_cap).read_all(&snapshot).value)
-        .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
+    // 名字交进投影（DE-024 D-206）：这一族的 owner 是 `loop`，本插件经清单生成物交出
+    // 整族的拼写——不引用兄弟插件（E-009），也不由 core 或内核代答。
+    let readyset = serde_json::to_value(
+        readyset_for(crate::declarations::TASK_VOCAB, task_cap)
+            .read_all(&snapshot)
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
     // 转写列（对话面读侧，[plan/12 批 2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
@@ -478,10 +485,14 @@ pub(crate) fn read(
     let span = serde_json::to_value(symbio_core::span().read_all(&snapshot).value)
         .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
 
-    // 自主程度列（同上）：`autonomy` 投影认 `task.held`（插话抢占 = 外部介入在事实源
-    // 里唯一的痕迹）与 `task.asserted`（闭环）。率是纯查询，此处只落分子分母。
-    let autonomy = serde_json::to_value(symbio_core::autonomy().read_all(&snapshot).value)
-        .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
+    // 自主程度列（同上）：`autonomy` 认挂起格与终态格（插话抢占 = 外部介入在事实源
+    // 里唯一的痕迹；闭环 = 验收通过）。率是纯查询，此处只落分子分母。
+    let autonomy = serde_json::to_value(
+        autonomy_for(crate::declarations::TASK_VOCAB)
+            .read_all(&snapshot)
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
 
     // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
     // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（axes 两族给有据的

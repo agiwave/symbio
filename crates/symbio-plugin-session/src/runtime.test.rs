@@ -253,7 +253,7 @@ fn non_lifecycle_events_do_not_move_the_outcome() {
             json!({ "id": "m-1" }),
         ),
         ev(
-            symbio_core::EVENT_TASK_PROGRESS,
+            symbio_plugin_api::events::EVENT_TASK_PROGRESS,
             Verb::Progressed,
             json!({ "task_id": "t-1" }),
         ),

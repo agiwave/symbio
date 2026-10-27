@@ -1,6 +1,7 @@
 //! Session 插件模块
 
 mod active;
+mod autonomy;
 mod capabilities;
 mod changes;
 mod chat_session;

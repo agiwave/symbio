@@ -4,29 +4,25 @@
 //! progress 不洗掉事实）；未闭环的任务不进分母（没结论的事不得冒充分母）；
 //! as-of 之后的事件一概不见；无闭环任务 ⇒ 有据的零 0.0。
 
-use super::autonomy;
-use crate::projection::autonomy::AutonomyView;
-use crate::{
-    Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
-};
+use super::autonomy_for;
+use crate::autonomy::AutonomyView;
+use crate::declarations::TASK_VOCAB as TASK;
+use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+
+// 任务族五格的拼写就是**生产那一张表**（`crate::declarations::TASK_VOCAB`，DE-024 D-206）：
+// 本插件既是这条读数的消费方，测试交的表与真实链路交的表就是同一份——写死一份夹具只会
+// 让「口径」和「接线」各说各话。
 
 fn held(id: &str, task: &str, ts: i64) -> Event {
-    Event::pending(
-        id,
-        EVENT_TASK_HELD,
-        Entity::Task,
-        Verb::Held,
-        0,
-        "session/reflex",
-    )
-    .with_ts(ts)
-    .with_payload(serde_json::json!({ "task_id": task }))
+    Event::pending(id, TASK.held, Entity::Task, Verb::Held, 0, "session/reflex")
+        .with_ts(ts)
+        .with_payload(serde_json::json!({ "task_id": task }))
 }
 
 fn asserted(id: &str, task: &str, ts: i64) -> Event {
     Event::pending(
         id,
-        EVENT_TASK_ASSERTED,
+        TASK.terminal,
         Entity::Task,
         Verb::Asserted,
         0,
@@ -37,7 +33,7 @@ fn asserted(id: &str, task: &str, ts: i64) -> Event {
 }
 
 fn view(store: &EventStore, now: i64) -> AutonomyView {
-    autonomy()
+    autonomy_for(TASK)
         .apply(&store.range(Seq::new(0)), now, Budget::generous())
         .value
 }
@@ -158,23 +154,16 @@ fn ignores_non_task_events() {
     let store = EventStore::new();
     store
         .append(
-            Event::pending("x1", EVENT_TASK_HELD, Entity::Turn, Verb::Held, 0, "u")
+            Event::pending("x1", TASK.held, Entity::Turn, Verb::Held, 0, "u")
                 .with_ts(100)
                 .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
         .unwrap();
     store
         .append(
-            Event::pending(
-                "x2",
-                EVENT_TASK_ASSERTED,
-                Entity::Task,
-                Verb::Asserted,
-                0,
-                "u",
-            )
-            .with_ts(150)
-            .with_payload(serde_json::json!({ "other": 1 })),
+            Event::pending("x2", TASK.terminal, Entity::Task, Verb::Asserted, 0, "u")
+                .with_ts(150)
+                .with_payload(serde_json::json!({ "other": 1 })),
         )
         .unwrap();
     let v = view(&store, i64::MAX);

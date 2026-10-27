@@ -1175,9 +1175,20 @@ fn elimination_event_keeps_invariants_green() {
 // 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；
 // 18 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
 
-use crate::event::{EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS};
 use crate::invariants::{acyclic_deps, rework_bounded};
-use crate::projection::readyset::readyset;
+use crate::projection::readyset::readyset_for;
+use crate::projection::task_vocab::TaskVocab;
+
+/// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
+/// （`plugins/loop::control_decl` + 清单 `shared_events`），内核表与 core 都不认识它们。
+/// core 的夹具因此自己交一张表给折叠的构造口——与 `REWORK_VOCAB` 同一形状：词汇是数据。
+const TASK: TaskVocab<'static> = TaskVocab {
+    opened: "task.opened",
+    progressed: "task.progress",
+    held: "task.held",
+    terminal: "task.asserted",
+    lease: "task.assigned",
+};
 
 /// `memory.encoded`：名字与格位都在 owner 插件（`plugins/loop` 的 `EventDecl` + 清单
 /// `shared_events`，DE-024 D-204），内核表不认识它。core 的夹具因此自己写这条字面量——
@@ -1201,7 +1212,7 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
         .append(
             Event::pending(
                 format!("o-{id}"),
-                EVENT_TASK_OPENED,
+                TASK.opened,
                 Entity::Task,
                 Verb::Opened,
                 0,
@@ -1220,7 +1231,7 @@ fn assert_task(store: &EventStore, id: &str, actor: &str) {
         .append(
             Event::pending(
                 format!("done-{id}"),
-                EVENT_TASK_ASSERTED,
+                TASK.terminal,
                 Entity::Task,
                 Verb::Asserted,
                 0,
@@ -1310,14 +1321,14 @@ fn readyset_contains_only_dependency_closed_tasks() {
     open_task(&store, "c", &["b"], "session/main");
     let snapshot = store.range(crate::event::Seq::new(0));
 
-    let rs = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
+    let rs = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(rs.value.ready.len(), 1, "只有 a 就绪：{:?}", rs.value.ready);
     assert_eq!(rs.value.ready[0].task_id, "a");
 
     // a 终态 → 就绪集挪到 b；链式推进，调度器零内部状态。
     assert_task(&store, "a", "session/verifier");
     let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
+    let rs = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(
         rs.value
             .ready
@@ -1328,7 +1339,7 @@ fn readyset_contains_only_dependency_closed_tasks() {
     );
 
     // N1：双跑逐字节一致。
-    let again = readyset(usize::MAX).apply(&snapshot, 9_999, Budget::generous());
+    let again = readyset_for(TASK, usize::MAX).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(rs.value, again.value);
 }
 
@@ -1356,7 +1367,7 @@ fn rework_creates_new_node_instead_of_rollback() {
     open_task(&store, "a-r1", &[], "session/planner");
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset(usize::MAX)
+    let rs = readyset_for(TASK, usize::MAX)
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
@@ -1369,7 +1380,7 @@ fn rework_creates_new_node_instead_of_rollback() {
     // 返工节点过验 → b 的依赖由终态的 a-r1 之外仍卡住（a 未终态）→ b 不就绪。
     assert_task(&store, "a-r1", "session/verifier");
     let snapshot = store.range(crate::event::Seq::new(0));
-    let rs = readyset(usize::MAX)
+    let rs = readyset_for(TASK, usize::MAX)
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
@@ -1441,7 +1452,7 @@ fn n_step_chain_terminates_within_rework_bound() {
     // 全链推进：一次就绪一个，终态后下一个就绪（终止性前提 1/3 由 store 与 C14 保证）。
     for i in 0..n {
         let snapshot = store.range(crate::event::Seq::new(0));
-        let rs = readyset(usize::MAX)
+        let rs = readyset_for(TASK, usize::MAX)
             .apply(&snapshot, 9_999, Budget::generous())
             .value;
         assert_eq!(
@@ -1455,7 +1466,7 @@ fn n_step_chain_terminates_within_rework_bound() {
             .append(
                 Event::pending(
                     format!("p-{i}"),
-                    EVENT_TASK_PROGRESS,
+                    TASK.progressed,
                     Entity::Task,
                     Verb::Progressed,
                     0,
@@ -1468,7 +1479,7 @@ fn n_step_chain_terminates_within_rework_bound() {
     }
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        readyset(usize::MAX)
+        readyset_for(TASK, usize::MAX)
             .apply(&snapshot, 9_999, Budget::generous())
             .value
             .ready
@@ -1506,7 +1517,7 @@ fn cost_ledger_accumulates_per_principal() {
         .append(
             Event::pending(
                 "e0",
-                EVENT_TASK_PROGRESS,
+                TASK.progressed,
                 Entity::Task,
                 Verb::Progressed,
                 0,
@@ -1520,7 +1531,7 @@ fn cost_ledger_accumulates_per_principal() {
         .append(
             Event::pending(
                 "e1",
-                EVENT_TASK_PROGRESS,
+                TASK.progressed,
                 Entity::Task,
                 Verb::Progressed,
                 0,
@@ -1534,7 +1545,7 @@ fn cost_ledger_accumulates_per_principal() {
         .append(
             Event::pending(
                 "e2",
-                EVENT_TASK_PROGRESS,
+                TASK.progressed,
                 Entity::Task,
                 Verb::Progressed,
                 0,
@@ -1747,15 +1758,13 @@ fn latency_tier_name_round_trip() {
 
 // ── S04：调度者与租约（`D-139` 裁决 1–3 的判据面）──────────────────────
 
-use crate::event::EVENT_TASK_ASSIGNED;
-
-/// 落一条 `task.assigned`（租约）——只在测试里手写，生产写方是调度者。
+/// 落一条租约（`task.assigned` 的当前拼写由 owner 交出）——只在测试里手写，生产写方是调度者。
 fn assign_task(store: &EventStore, id: &str, owner: &str, until_ms: i64) {
     store
         .append(
             Event::pending(
                 format!("as-{id}-{until_ms}"),
-                EVENT_TASK_ASSIGNED,
+                TASK.lease,
                 Entity::Task,
                 Verb::Asserted,
                 0,
@@ -1781,12 +1790,16 @@ fn the_ready_set_capacity_is_a_parameter_not_a_structure() {
     }
     let snap = store.range(crate::event::Seq::new(0));
 
-    let one = readyset(1).apply(&snap, 9_999, Budget::generous()).value;
+    let one = readyset_for(TASK, 1)
+        .apply(&snap, 9_999, Budget::generous())
+        .value;
     assert_eq!(one.ready.len(), 1, "cap=1 ⇒ 候选集只给一笔（串行 FIFO）");
     assert_eq!(one.cap, 1);
     assert_eq!(one.ready[0].task_id, "a", "先开的先派");
 
-    let four = readyset(4).apply(&snap, 9_999, Budget::generous()).value;
+    let four = readyset_for(TASK, 4)
+        .apply(&snap, 9_999, Budget::generous())
+        .value;
     assert_eq!(
         four.ready
             .iter()
@@ -1798,7 +1811,7 @@ fn the_ready_set_capacity_is_a_parameter_not_a_structure() {
 
     // 0 与 1 同义（容量为零不是「更保守」，是「永不动」）。
     assert_eq!(
-        readyset(0)
+        readyset_for(TASK, 0)
             .apply(&snap, 9_999, Budget::generous())
             .value
             .ready
@@ -1816,7 +1829,7 @@ fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
     let snap = store.range(crate::event::Seq::new(0));
 
     assert!(
-        readyset(1)
+        readyset_for(TASK, 1)
             .apply(&snap, 999, Budget::generous())
             .value
             .ready
@@ -1824,7 +1837,7 @@ fn a_live_lease_leaves_the_ready_set_and_expiry_returns_it() {
         "租约未到期 ⇒ 被派出去的活不再进候选（不重复派）"
     );
     assert_eq!(
-        readyset(1)
+        readyset_for(TASK, 1)
             .apply(&snap, 1_000, Budget::generous())
             .value
             .ready

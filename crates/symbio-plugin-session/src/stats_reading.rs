@@ -116,7 +116,11 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         fb_parts.push(fallback_rate().read_all(snapshot).value);
         con_parts.push(crate::conation::conation().read_all(snapshot).value);
         span_parts.push(symbio_core::span().read_all(snapshot).value);
-        aut_parts.push(symbio_core::autonomy().read_all(snapshot).value);
+        aut_parts.push(
+            crate::autonomy::autonomy_for(crate::declarations::TASK_VOCAB)
+                .read_all(snapshot)
+                .value,
+        );
     }
 
     let latency = symbio_core::SloLatencyView::merge(&lat_parts);
@@ -124,11 +128,12 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
     let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
     // 跨会话合并是**统计口径单点**：分子分母可加、率是同一套算式的再应用。
-    // `span` 的「一个事件的会话不进分母」在 core 判，不在这边挑数据；`conation` 的
-    // 合并住本插件 [`crate::conation`]——它的读写两端都在这里（DE-024 D-201）。
+    // `span` 的「一个事件的会话不进分母」在 core 判，不在这边挑数据；`conation` 与
+    // `autonomy` 的合并住本插件（[`crate::conation`] / [`crate::autonomy`]）——这两条读数的
+    // 读写两端都在这里，投影因此不是共享类型（DE-024 D-200 / D-201）。
     let conation = crate::conation::ConationView::merge(&con_parts);
     let span = symbio_core::SpanView::merge(&span_parts);
-    let autonomy = symbio_core::AutonomyView::merge(&aut_parts);
+    let autonomy = crate::autonomy::AutonomyView::merge(&aut_parts);
 
     serde_json::json!({
         // 交到手里的快照数（打不开的已在存储层跳过并出声）

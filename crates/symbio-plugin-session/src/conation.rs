@@ -42,8 +42,10 @@
 //!   「已声明」——所以本视图只表达「已表达 / 已升格」两态，不假装知道完成与否。
 
 use crate::declarations::EVENT_CONATION_EXPRESSED;
-use symbio_core::{Entity, Event, Projection, EVENT_TASK_OPENED};
+use symbio_core::{Entity, Event, Projection};
+// 名字由 owner 清单登记、生成物投影（DE-024 D-204 / D-206）：本插件只读它认「任务开格」。
 use symbio_kernel::Timestamp;
+use symbio_plugin_api::events::EVENT_TASK_OPENED;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

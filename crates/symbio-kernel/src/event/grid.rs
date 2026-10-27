@@ -48,8 +48,7 @@ use super::{
     EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED,
     EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED, EVENT_FAILED,
     EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TURN_BRANCH,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_BRANCH,
     EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 
@@ -150,10 +149,8 @@ const CELLS: &[EventDecl] = &[
         (Entity::Commitment, Verb::Asserted),
     ),
     // ── 任务（task）──
-    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)),
-    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
-    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
-    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
+    // 内核这一节现在是空的：五格同属 `plugins/loop`（写方与调度者都在那儿），
+    // `session` 作为第二个消费方经清单生成物读它们（DE-024 D-204 / D-206，判据 CS-007）。
     // ── 控制（control）──
     // 打断与熔断共用的那一格（`task.controlled`）随 owner 的声明走：它的写方在两个
     // 插件各一个，名字因此登记进 owner 清单（DE-024 D-204），不在内核表上。

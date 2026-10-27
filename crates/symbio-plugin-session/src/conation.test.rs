@@ -8,9 +8,10 @@
 use super::*;
 use crate::declarations::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED as SYSTEM_TRIGGERED};
 use symbio_core::{
-    Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_TASK_OPENED,
-    PRINCIPAL_AUTONOMOUS as INITIATOR,
+    Budget, Entity, Event, EventStore, Seq, Store, Verb, PRINCIPAL_AUTONOMOUS as INITIATOR,
 };
+// 任务族的名字由 owner 清单登记、生成物投影（DE-024 D-204 / D-206）。
+use symbio_plugin_api::events::EVENT_TASK_OPENED;
 
 /// 溯源锚：真实链路里欲是从一次触发出发的（`system.triggered`）。
 fn seed_trigger(store: &EventStore) -> u64 {

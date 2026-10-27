@@ -1,13 +1,24 @@
-//! `autonomy` 投影（[02 §3.1 外部效标 · 自主程度](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")：
+//! `autonomy` 投影（[02 §3.1 外部效标 · 自主程度](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")：
 //! 「无人干预完成率」的系统内复算口径）。
 //!
 //! 一条任务闭环（`task.asserted`）之前，**是否从未被挂起过**（`task.held`）。
-//! `task.held` 的写方是插话抢占（`session/active`）——它是**外部介入**这个事实在
+//! `task.held` 的写方是插话抢占（[`crate::active`]）——它是**外部介入**这个事实在
 //! 事实源里唯一的痕迹：人或外部条件改变了任务原本的走向。故：
 //!
 //! ```text
 //! 无人干预完成率 = 闭环且全程未 held 的任务数 / 闭环任务数
 //! ```
+//!
+//! ## 为什么住会话插件（[DE-024](../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200 / D-201）
+//!
+//! 判据是消费方分布：这条折叠的**唯一**生产消费方是本插件（[`crate::stats`] 与
+//! [`crate::stats_reading`]），core 里没有第二个模块在生产用它 ⇒ 它不是共享类型，
+//! 占根出口只会让「读数口径」住在没人读的地方。同族的 `readyset` 由 `plugins/loop`
+//! 与本插件**两方**消费，因此留在 core——两条不同的处置来自同一条判据，不是两份口径。
+//!
+//! 词汇仍是 [`symbio_core::TaskVocab`]（D-206）：本折叠只用 `held` 与 `terminal` 两格，
+//! 但收的是整张表——与 core 的 `readyset_for` 拿到的是**同一份**拼写
+//! （`crate::declarations::TASK_VOCAB`），两个折叠不可能各读各的拼写而漂移。
 //!
 //! ## 为什么用「曾 held」而不是「当前 held」
 //!
@@ -30,9 +41,7 @@
 //!   的事）。自主程度与「做得对不对」是两条轴，此处不混。
 
 use serde::{Deserialize, Serialize};
-
-use super::super::event::{Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
-use super::Projection;
+use symbio_core::{Entity, Event, Projection, TaskVocab};
 
 /// 自主程度视图（**可加**：跨会话合并 = 分子分母分别相加）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -71,8 +80,12 @@ impl AutonomyView {
 /// `autonomy` 投影：as-of 口径（`ts > now` 一概不见，与其余投影同）。
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`AutonomyView`]。
-pub fn autonomy() -> Projection<AutonomyView> {
-    Projection::new(|events: &[Event], now| {
+///
+/// `'static` 的词汇表直接进闭包（字段本就是 `&'static str`）：core 那侧的折叠收
+/// `TaskVocab<'_>` 再 `bind()`，是因为它要把借用期抹平；本插件的表是 `const`，没有
+/// 借用期要处理。
+pub(crate) fn autonomy_for(vocab: TaskVocab<'static>) -> Projection<AutonomyView> {
+    Projection::new(move |events: &[Event], now| {
         // 一个任务两种状态：曾挂起 / 已闭环。BTreeMap 只为读取顺序确定（值本身是
         // 计数，顺序不影响结果——但遍历顺序确定 ⇒ 同一输入逐字节同一输出）。
         let mut held: std::collections::BTreeMap<&str, ()> = std::collections::BTreeMap::new();
@@ -84,15 +97,11 @@ pub fn autonomy() -> Projection<AutonomyView> {
             let Some(id) = e.payload.get("task_id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            match e.kind.as_str() {
-                EVENT_TASK_HELD => {
-                    held.insert(id, ());
-                }
-                EVENT_TASK_ASSERTED => {
-                    // 闭环即终态：后面再来的 held 不算（任务已经结束了）
-                    closed.insert(id, ());
-                }
-                _ => {}
+            if e.kind == vocab.held {
+                held.insert(id, ());
+            } else if e.kind == vocab.terminal {
+                // 闭环即终态：后面再来的 held 不算（任务已经结束了）
+                closed.insert(id, ());
             }
         }
         let closed_n = closed.len() as u64;
