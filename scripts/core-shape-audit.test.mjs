@@ -321,3 +321,73 @@ test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
   assert.equal(r.status, 0, r.stderr + r.stdout)
   assert.match(r.stdout, /kernelEvents 0<1/)
 })
+
+// ==================== CS-006 内核业务事件名的消费方证据 ====================
+
+const ALPHA_CRATE = 'crates/symbio-plugin-alpha/src/lib.rs'
+const BETA_CRATE = 'crates/symbio-plugin-beta/src/lib.rs'
+const CORE_BETA = 'crates/symbio-core/src/beta/mod.rs'
+
+test('CS-006：只有一个插件消费、core 已不读 ⇒ 红（这条名字该随 owner 的 EventDecl 走）', () => {
+  const r = audit(
+    core(ONE, { ...vocab(), [ALPHA_CRATE]: 'pub fn k() { let _ = EVENT_A; }\n' }),
+    { baseline: '1:1:0', vocab: '1:1' },
+  )
+  assert.equal(r.status, 1, r.stderr + r.stdout)
+  assert.match(r.stderr, /CS-006/)
+  assert.match(r.stderr, /「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)
+})
+
+test('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件独占，E-009）', () => {
+  const r = audit(
+    core(ONE, {
+      ...vocab(),
+      [ALPHA_CRATE]: 'pub fn k() { EVENT_A }\n',
+      [BETA_CRATE]: 'pub fn j() { "a.one" }\n',
+    }),
+    { baseline: '1:1:0', vocab: '1:1' },
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-006.*1 条全部有据（≥2 crate 消费 1 · core 读者 0）/)
+})
+
+test('CS-006：core 生产代码读它 ⇒ 绿（读写同源，名字跟着那条读者走）', () => {
+  const r = audit(
+    core(ONE, {
+      ...vocab(),
+      [ALPHA_CRATE]: 'pub fn k() { EVENT_A }\n',
+      [CORE_BETA]: 'pub const K: &str = "a.one";\n',
+    }),
+    { baseline: '1:1:0', vocab: '1:1' },
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-006.*core 读者 1/)
+})
+
+test('CS-006：core 里 `pub use` 转手一个名字不算读者 ⇒ 红（出口是账本，不是归属证据）', () => {
+  const r = audit(
+    core(ONE, {
+      ...vocab(),
+      [CORE_MOD]: 'mod alpha;\npub use crate::event::EVENT_A;\n',
+      [ALPHA_CRATE]: 'pub use symbio_kernel::EVENT_A;\n',
+    }),
+    { baseline: '1:1:0', vocab: '1:1' },
+  )
+  assert.equal(r.status, 1, '转手不算读者，否则单消费方的名字永远迁不干净')
+  assert.match(r.stderr, /「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)
+})
+
+test('CS-006：谁都不读的业务名 ⇒ 红（内核表里躺着没人读的名字）', () => {
+  const r = audit(
+    core(ONE, { ...vocab(), [ALPHA_CRATE]: '// 曾经有人读 a.one，现在没有\n' }),
+    { baseline: '1:1:0', vocab: '1:1' },
+  )
+  assert.equal(r.status, 1, r.stderr + r.stdout)
+  assert.match(r.stderr, /「a\.one」在 core 与插件的生产代码里都没有读者/)
+})
+
+test('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默当成已通过', () => {
+  const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-006.*不适用/)
+})

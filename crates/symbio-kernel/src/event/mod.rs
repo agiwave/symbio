@@ -598,6 +598,10 @@ pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 // 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
 // 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
 // 一个更快的判定者决定了对在跑事务的处置。不加新机制，只加一格。
+//
+// 这个名字**不随 owner 迁出**：写方在两个插件各一个（session 的打断处置、loop 的
+// 熔断与拒因），独占它就得让另一边跨墙引用兄弟插件（E-009）——留在内核的理由是消费方
+// 分布，不是「还没搬」（逐名核据的门禁见 DE-024 D-202）。
 
 /// 控制判定产出（打断处置 / 熔断）。载荷 `{ task_id?, reason, ... }`。
 /// 落在 `control × opened`。**抢占判定者只持 JudgeIntent**——无 `reply.*` 写权，

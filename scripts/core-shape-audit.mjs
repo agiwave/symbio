@@ -14,7 +14,8 @@
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
- * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格是**迁移存量**，只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200） |
+ * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；三批迁出之后它剩下的不是待办存量，而是**有据的内核词汇**——逐条的据由 CS-006 判 |
+ * | CS-006 | —— | 每条内核业务事件名都要有消费方证据：≥2 个 crate 生产消费，**或** core 生产代码读它 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是 D-201 判过该迁出的形状。这条把判据逐名落到代码，让「留在内核」变成一个需要证据的状态而不是默认状态 |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -77,7 +78,7 @@
  *
  * ## 用法
  *   node scripts/core-shape-audit.mjs              # 判定
- *   node scripts/core-shape-audit.mjs --verbose    # 逐 trait 形状（成员数 / 其中默认体）
+ *   node scripts/core-shape-audit.mjs --verbose    # 逐 trait 形状 + 逐条内核事件名的消费方
  *   node scripts/core-shape-audit.mjs --churn      # 只出「近 50 次提交的内核改动占比」报告
  *   node scripts/core-shape-audit.mjs --root=<dir> # 指向别处的仓库（测试用）
  * 退出码：0 = 通过，1 = 违规。
@@ -89,7 +90,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004 CS-005
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -247,12 +248,14 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
 /**
  * CS-005 词汇棘轮（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200）。
  *
- * 两格都是**迁移存量**，只许降：
+ * 两格都只许降：
  * - `kernelEvents`：内核 `event/mod.rs` 里**业务事件**常量数（值是点分名、且不是协议五格）；
  * - `cellsRows`：`event/grid.rs` 的 `CELLS` 里业务行数（不含协议五格）。
  *
- * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**；这两格的存在只是给尚未迁出
- * 的旧名字记账。目标不是零（core 投影仍按名字读），而是「新能力不再往里加」。
+ * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的目标不是零：core 的
+ * 判据与投影按名字读事实（读写同源，D-197），只要那条读者还在 core，名字就还在内核。
+ * 三批迁出之后这两格到了一条**有据的下界**——剩余每一条都经 CS-006 核过消费方分布，
+ * 不再欠着「待迁」这笔账（判据见 DE-024 D-201 / D-202）。
  *
  * - **P1c 首批迁出**（2026-10-27）：`session.config` / `turn.stage` / `authz.granted` /
  *   `memory.recalled` / `task.ready`（loop）与 `system.triggered` / `system.health`
@@ -706,6 +709,90 @@ if (vocabPresent.length === 0) {
   }
 }
 
+// ── CS-006 内核业务事件名的消费方证据（DE-024 D-202）──
+//
+// CS-005 数的是条数，条数本身说不出「凭什么还留在这里」。这一格补上那个缺口：
+// 逐条名字核**谁在读**，留在内核只有两种有据的形态——
+//  ① ≥2 个 crate 的生产消费方：名字被一个以上插件写或读，独占它就得让别的插件
+//     跨墙引用兄弟插件（E-009），所以它只能是内核词汇；
+//  ② core 生产代码读它：读写同源（D-197），读者的分布随那条投影/判据，不是名字自己。
+// 落进第三种（恰好一个消费方且 core 不读）就是**待迁存量**：它该随那个 owner 的
+// `EventDecl` 走，本批把它判红，而不是让它躲在 CS-005 的数字里等下一次有人想起来。
+const CONSUMER_CRATE_PREFIXES = ['symbio-plugin-', 'symbio-provider-']
+// `symbio-plugin-api` 是宿主↔插件的共享协议 crate，不是能力持有者：它引用一个名字
+// 不构成「某个插件读它」的证据。
+const NOT_A_CONSUMER_CRATE = new Set(['symbio-plugin-api'])
+
+/** 插件 / provider 各 crate 的生产侧全文（消费方证据的输入；夹具仓库可以为空）。 */
+const consumerTexts = (() => {
+  const out = []
+  if (!fs.existsSync(pluginsDir)) return out
+  for (const ent of fs.readdirSync(pluginsDir, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue
+    if (!CONSUMER_CRATE_PREFIXES.some((p) => ent.name.startsWith(p))) continue
+    if (NOT_A_CONSUMER_CRATE.has(ent.name)) continue
+    for (const file of walk(path.join(pluginsDir, ent.name, 'src'))) {
+      if (!file.endsWith('.rs') || isTestFile(file)) continue
+      out.push({
+        crate: ent.name,
+        text: blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n')),
+      })
+    }
+  }
+  return out
+})()
+
+/**
+ * core 的**读者**全文：`pub use` statements 先剥掉——根出口转手一个名字不等于有人
+ * 读它（那正是 D-201 要区分开的两件事：出口是账本，读者才是归属证据）。内核那两张
+ * 被数的表自己也在生产侧文本里，它们是**名字的登记处**不是读者，一并排除。
+ */
+const DECLARATION_RELS = new Set(Object.values(VOCAB_SOURCES))
+const coreReaderTexts = coreTexts
+  .filter((f) => !DECLARATION_RELS.has(f.rel))
+  .map((f) => ({
+    rel: f.rel,
+    text: f.text.replace(/\bpub\s+use\s+[^;]*;/gs, ''),
+  }))
+
+/** 内核 `event/mod.rs` 里的业务事件（符号 + 线上名字），协议五格不算。 */
+function listKernelBusinessEvents(abs) {
+  const text = blankComments(fs.readFileSync(abs, 'utf8')).join('\n')
+  return [
+    ...text.matchAll(
+      /pub\s+const\s+(EVENT_[A-Z0-9_]+)\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]*)"/g,
+    ),
+  ]
+    .filter((m) => m[2].includes('.') && !PROTOCOL_EVENT_VALUES.has(m[2]))
+    .map((m) => ({ sym: m[1], name: m[2] }))
+}
+
+let vocabEvidence = null
+if (vocabApplicable && consumerTexts.length > 0) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  vocabEvidence = listKernelBusinessEvents(vocabPaths.kernelEvents).map((ev) => {
+    const bySym = new RegExp(`\\b${ev.sym}\\b`)
+    const byName = new RegExp(`"${esc(ev.name)}"`)
+    const hit = (t) => bySym.test(t) || byName.test(t)
+    return {
+      ...ev,
+      coreReaders: coreReaderTexts.filter((f) => hit(f.text)).map((f) => f.rel),
+      consumers: [...new Set(consumerTexts.filter((c) => hit(c.text)).map((c) => c.crate))].sort(),
+    }
+  })
+  for (const ev of vocabEvidence) {
+    if (ev.consumers.length >= 2 || ev.coreReaders.length > 0) continue
+    report(
+      'CS-006',
+      ev.consumers.length === 1
+        ? `「${ev.name}」的唯一生产消费方是 ${ev.consumers[0]}，core 已不再读它 —— ` +
+          '这条名字该随那个 owner 的 `EventDecl` 走（内核常量与 `CELLS` 行同批退役），' +
+          '留在内核就是让 CS-005 的数字替它遮掩（DE-024 D-201 / D-202）'
+        : `「${ev.name}」在 core 与插件的生产代码里都没有读者 —— ` +
+          '内核词汇表里躺着一行没人读的名字：要么删，要么说清它守的是哪条协议',
+    )
+  }
+}
 
 const ruleLine = (ok, rule, desc) =>
   console.log(`${ok ? green('✓') : red('✗')} ${rule}  ${dim(desc)}`)
@@ -739,7 +826,7 @@ if (errors.length === 0) {
     const vocabLine = Object.keys(VOCAB_BASELINE)
       .map((k) => `${k} ${vocabCounts[k]}/${VOCAB_BASELINE[k]}`)
       .join(' · ')
-    ruleLine(true, 'CS-005', `事件词汇棘轮：${vocabLine}（迁移存量，只许降）`)
+    ruleLine(true, 'CS-005', `事件词汇棘轮：${vocabLine}（只许降；每条凭什么留在内核由 CS-006 逐条判）`)
     const underVocab = Object.keys(VOCAB_BASELINE).filter(
       (k) => vocabCounts[k] < VOCAB_BASELINE[k],
     )
@@ -752,6 +839,29 @@ if (errors.length === 0) {
     }
   } else {
     ruleLine(true, 'CS-005', '事件词汇棘轮：夹具仓库没有内核事件表，CS-005 不适用')
+  }
+  if (vocabEvidence) {
+    const byPlugin = vocabEvidence.filter((e) => e.consumers.length >= 2)
+    const byCore = vocabEvidence.filter((e) => e.consumers.length < 2 && e.coreReaders.length > 0)
+    ruleLine(
+      true,
+      'CS-006',
+      `内核业务事件名的消费方证据：${vocabEvidence.length} 条全部有据` +
+        `（≥2 crate 消费 ${byPlugin.length} · core 读者 ${byCore.length}）——` +
+        '新名字进内核词汇表没有通路，只能由 owner 声明',
+    )
+    if (VERBOSE) {
+      for (const ev of vocabEvidence) {
+        const readers = ev.coreReaders.map((rel) => rel.replace(/^crates\/symbio-(core|kernel)\/src\//, ''))
+        console.log(
+          `  ${ev.name.padEnd(24)} | ${(readers.length ? readers.join(' / ') : 'core —').padEnd(46)}| ${ev.consumers.map((c) => c.replace('symbio-', '')).join(' / ') || '—'}`,
+        )
+      }
+    }
+  } else if (vocabApplicable) {
+    ruleLine(true, 'CS-006', '消费方证据：夹具仓库没有插件 crate，CS-006 不适用')
+  } else {
+    ruleLine(true, 'CS-006', '消费方证据：没有内核事件表，CS-006 不适用')
   }
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])
   if (under.length) {
