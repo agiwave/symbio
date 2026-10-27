@@ -1,6 +1,6 @@
 //! 承诺登记者：立约 / 守约 / 违约 / 宣告都是 `commitment` 实体的一格事件（[roadmap/S08](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）。
 
-use crate::Event;
+use crate::{CommitmentVocab, Event};
 
 /// 承诺登记者（S6 第 15 步，[roadmap/S08 §3](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）。
 ///
@@ -8,15 +8,26 @@ use crate::Event;
 /// 是否履行」落成**普通事件**（经 Store，无直连——I1 的直接推论）。
 /// 违约不是异常通道：`broken` 与 `released` 是同一格（`commitment × closed`）
 /// 的两个名字，违约必须带 `why`（可观测，S08 §5）。
-pub struct CommitmentKeeper;
+///
+/// 四个格名由调用方在构造期交进来（`CommitmentVocab`，DE-024 D-203）：本域只留
+/// 「立约 → 了结 → 告知」的形状，拼写归 owner（`plugins/loop` 的清单）。
+#[derive(Debug, Clone, Copy)]
+pub struct CommitmentKeeper {
+    v: CommitmentVocab,
+}
 
 impl CommitmentKeeper {
+    /// 用一张词汇表构造。表是 `Copy` 的纯值，构造不产生第二份状态。
+    pub const fn new(v: CommitmentVocab) -> Self {
+        Self { v }
+    }
+
     /// 立约：`from` 向 `to` 承诺 `promise`。`source_seq` 是触发本次立约的事件
     /// （溯源锚；无触发场景传 0 并由调用方保证可解释）。
     pub fn offer(&self, id: &str, from: &str, to: &str, promise: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-offer-{id}"),
-            crate::event::EVENT_COMMITMENT_OFFERED,
+            self.v.opened,
             crate::event::Entity::Commitment,
             crate::event::Verb::Opened,
             0,
@@ -30,7 +41,7 @@ impl CommitmentKeeper {
     pub fn release(&self, id: &str, from: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
-            crate::event::EVENT_COMMITMENT_RELEASED,
+            self.v.released,
             crate::event::Entity::Commitment,
             crate::event::Verb::Closed,
             0,
@@ -44,7 +55,7 @@ impl CommitmentKeeper {
     pub fn breach(&self, id: &str, from: &str, why: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
-            crate::event::EVENT_COMMITMENT_BROKEN,
+            self.v.broken,
             crate::event::Entity::Commitment,
             crate::event::Verb::Closed,
             0,
@@ -59,7 +70,7 @@ impl CommitmentKeeper {
     pub fn declare(&self, id: &str, from: &str, statement: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-assert-{id}"),
-            crate::event::EVENT_COMMITMENT_ASSERTED,
+            self.v.asserted,
             crate::event::Entity::Commitment,
             crate::event::Verb::Asserted,
             0,
@@ -83,22 +94,27 @@ impl CommitmentKeeper {
 /// 不是新通道（S08 §2「通信 = 没有直连」）。
 ///
 /// 生产侧只准调本函数。
+///
+/// `outcome` 把「守约 / 违约」与「违约的理由」收成**一个**参数：`Err(why)` 只在违约时
+/// 存在，`Ok(())` 时那条 `why` 本来就没有意义（旧形状是两个参数，调用方在守约时得传
+/// 一个空串——空串是「没记」还是「记了空」，读的人分不出来）。
 pub fn commitment_events(
+    v: CommitmentVocab,
     id: &str,
     from: &str,
     to: &str,
     promise: &str,
-    ok: bool,
-    why: &str,
+    outcome: Result<(), &str>,
     source_seq: u64,
 ) -> Vec<Event> {
-    let keeper = CommitmentKeeper;
+    let keeper = CommitmentKeeper::new(v);
     let mut out = vec![keeper.offer(id, from, to, promise, source_seq)];
-    if ok {
-        out.push(keeper.release(id, from, source_seq));
-    } else {
-        out.push(keeper.breach(id, from, why, source_seq));
-        out.push(keeper.declare(id, from, &format!("已告知 {to}：违约——{why}"), source_seq));
+    match outcome {
+        Ok(()) => out.push(keeper.release(id, from, source_seq)),
+        Err(why) => {
+            out.push(keeper.breach(id, from, why, source_seq));
+            out.push(keeper.declare(id, from, &format!("已告知 {to}：违约——{why}"), source_seq));
+        }
     }
     out
 }
@@ -143,7 +159,7 @@ pub struct CommitmentRecord {
 ///   `opened`）时不猜「大概履行了吧」——与 `verdict_grants_changes` 同一条 fail-closed；
 /// - **按 `id` 字典序输出**（`BTreeMap` 折叠）：同一份事实源永远读出同一个清单，
 ///   与 `reputation` / `readyset` 的确定性口径同族（N1 双跑一致）。
-pub fn commitment_records(events: &[Event]) -> Vec<CommitmentRecord> {
+pub fn commitment_records(events: &[Event], v: &CommitmentVocab) -> Vec<CommitmentRecord> {
     let mut by_id: std::collections::BTreeMap<String, CommitmentRecord> =
         std::collections::BTreeMap::new();
     for e in events {
@@ -153,42 +169,38 @@ pub fn commitment_records(events: &[Event]) -> Vec<CommitmentRecord> {
         let Some(id) = e.payload.get("id").and_then(|v| v.as_str()) else {
             continue;
         };
-        match e.kind.as_str() {
-            crate::event::EVENT_COMMITMENT_OFFERED => {
-                let str_of = |k: &str| {
+        // `asserted`：违约的告知，同一条约的第三格——它不改变记录，故不在下面两支里。
+        if e.kind == v.opened {
+            let str_of = |k: &str| {
+                e.payload
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            by_id.entry(id.to_string()).or_insert(CommitmentRecord {
+                id: id.to_string(),
+                from: str_of("from"),
+                to: str_of("to"),
+                promise: str_of("promise"),
+                state: "open",
+                why: String::new(),
+                anchor_seq: e.produced_by.unwrap_or(0),
+            });
+        } else if e.kind == v.released || e.kind == v.broken {
+            if let Some(rec) = by_id.get_mut(id) {
+                let broken = e.kind == v.broken;
+                rec.state = if broken { "broken" } else { "kept" };
+                rec.why = if broken {
                     e.payload
-                        .get(k)
+                        .get("why")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string()
+                } else {
+                    String::new()
                 };
-                by_id.entry(id.to_string()).or_insert(CommitmentRecord {
-                    id: id.to_string(),
-                    from: str_of("from"),
-                    to: str_of("to"),
-                    promise: str_of("promise"),
-                    state: "open",
-                    why: String::new(),
-                    anchor_seq: e.produced_by.unwrap_or(0),
-                });
             }
-            crate::event::EVENT_COMMITMENT_RELEASED | crate::event::EVENT_COMMITMENT_BROKEN => {
-                if let Some(rec) = by_id.get_mut(id) {
-                    let broken = e.kind == crate::event::EVENT_COMMITMENT_BROKEN;
-                    rec.state = if broken { "broken" } else { "kept" };
-                    rec.why = if broken {
-                        e.payload
-                            .get("why")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    } else {
-                        String::new()
-                    };
-                }
-            }
-            // `asserted`：违约的告知，同一条约的第三格。
-            _ => {}
         }
     }
     by_id.into_values().collect()

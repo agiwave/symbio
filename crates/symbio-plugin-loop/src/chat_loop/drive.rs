@@ -18,9 +18,10 @@
 //! 配置读的是**这一轮**的活值，落成事实之后判决只读事实：回放看到的永远是
 //! 「那一轮用的配置」，不是进程此刻的值。
 
-use symbio_core::{count_user_messages, Entity, Seq, Verb, EVENT_USER_MESSAGE};
+use symbio_core::{count_user_messages, Entity, Seq, Verb};
+use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
-use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
+use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 
 use super::super::stage_events::{self, StageFact};
 
@@ -150,7 +151,7 @@ pub(crate) fn begin_drive(
             (turn_no, user_seq, drive_seq, last_user_message(context).1)
         }
         None => {
-            let turn_no = count_user_messages(&snapshot);
+            let turn_no = count_user_messages(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB);
             let (node_id, text, meta) = last_user_message(context);
             let mut payload = serde_json::json!({ "text": text, "id": node_id });
             if let Some(meta) = meta.filter(|m| !m.is_null()) {

@@ -8,8 +8,9 @@
 //! 纯净性由 `Projection::new` 的构造约束保证：
 //! 形参只有 `&[Event]` / `Timestamp`，拿不到 `Store`（F2 一级强制）。
 
-use super::super::event::{Event, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL};
+use super::super::event::Event;
 use super::Projection;
+use crate::ChatVocab;
 
 /// 当前 turn 的状态（[`turnstate`] 投影的产出）。
 ///
@@ -38,30 +39,28 @@ impl TurnState {
 /// `turnstate` 投影：按**入参顺序**扫描事件，取**最后一次**开 turn 后的收束态。
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`TurnState`]——由纯函数扫描保证。
-pub fn turnstate() -> Projection<TurnState> {
-    Projection::new(|events: &[Event], _now| {
+///
+/// 三个名字由调用方在构造期交进来（DE-024 D-203）：`match` 的名字臂换成形参判等，
+/// 因为匹配臂里放不下变量。
+pub fn turnstate(v: ChatVocab) -> Projection<TurnState> {
+    Projection::new(move |events: &[Event], _now| {
         let mut state = TurnState {
             opened: false,
             final_text: None,
             fallback_text: None,
         };
         for e in events {
-            match e.kind.as_str() {
-                crate::event::EVENT_USER_MESSAGE => {
-                    // 新 turn 开启：清空上一轮收束（投影的是**当前** turn，平凡值口径）。
-                    state = TurnState {
-                        opened: true,
-                        final_text: None,
-                        fallback_text: None,
-                    };
-                }
-                EVENT_ASSISTANT_FINAL => {
-                    state.final_text = text_of(e);
-                }
-                EVENT_ASSISTANT_FALLBACK => {
-                    state.fallback_text = text_of(e);
-                }
-                _ => {}
+            if e.kind == v.user_message {
+                // 新 turn 开启：清空上一轮收束（投影的是**当前** turn，平凡值口径）。
+                state = TurnState {
+                    opened: true,
+                    final_text: None,
+                    fallback_text: None,
+                };
+            } else if e.kind == v.final_reply {
+                state.final_text = text_of(e);
+            } else if e.kind == v.fallback {
+                state.fallback_text = text_of(e);
             }
         }
         state

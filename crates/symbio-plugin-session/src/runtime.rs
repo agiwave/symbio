@@ -19,8 +19,9 @@
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use symbio_core::chat_node as cm;
-use symbio_core::{
-    Event, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
+use symbio_core::Event;
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
     EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_USER_MESSAGE,
 };
 
@@ -80,7 +81,7 @@ pub(crate) fn project(events: &[Event]) -> RuntimeFacts {
 fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
     match e.kind.as_str() {
         EVENT_USER_MESSAGE => Some(None),
-        EVENT_ASSISTANT_FINAL => Some(Some(match payload_str(e, "status").as_deref() {
+        EVENT_CHAT_ASSISTANT_FINAL => Some(Some(match payload_str(e, "status").as_deref() {
             Some("aborted") => RuntimeOutcome::Aborted,
             // 收束格的 `failed` 先于兜底格存在时也要认——两格读同一个状态词。
             Some("failed") => RuntimeOutcome::Failed {
@@ -88,11 +89,11 @@ fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
             },
             _ => RuntimeOutcome::Completed,
         })),
-        EVENT_ASSISTANT_FALLBACK => Some(Some(RuntimeOutcome::Failed {
+        EVENT_CHAT_ASSISTANT_FALLBACK => Some(Some(RuntimeOutcome::Failed {
             error: payload_str(e, "detail"),
         })),
         // 等待用户：本轮以 Ok 收尾（恢复续写是下一轮的事），与现网结局一致。
-        EVENT_ASSISTANT_PROGRESS => Some(Some(RuntimeOutcome::Completed)),
+        EVENT_CHAT_ASSISTANT_PROGRESS => Some(Some(RuntimeOutcome::Completed)),
         EVENT_MESSAGE_EDITED => e
             .payload
             .get("message")

@@ -165,7 +165,7 @@ pub(crate) fn run_report<'a>(step: &'a mut ReportStep<'a>) -> StepFuture<'a> {
                         "rp-{turn_no}-{}",
                         landing.no.fetch_add(1, Ordering::Relaxed)
                     ),
-                    symbio_core::EVENT_ASSISTANT_REPORTED,
+                    symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
                     symbio_core::Entity::Turn,
                     symbio_core::Verb::Asserted,
                     *turn_no,

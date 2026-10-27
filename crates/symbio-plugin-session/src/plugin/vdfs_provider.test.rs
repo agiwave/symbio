@@ -931,7 +931,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         fs.append(
             symbio_core::Event::pending(
                 "m-add-0",
-                symbio_core::EVENT_MESSAGE_ADDED,
+                symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
                 symbio_core::Entity::Message,
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
                 symbio_core::Verb::Opened,
@@ -982,7 +982,8 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
 /// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
 /// （I2：断言类事件必须带一个存在且不超前的锚）。
 async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
-    use symbio_core::{Entity, Seq, Store as _, Verb, EVENT_TURN_BRANCH};
+    use symbio_core::{Entity, Seq, Store as _, Verb};
+    use symbio_plugin_api::events::EVENT_TURN_BRANCH;
     let dir = p
         .get_store()
         .await
@@ -1053,7 +1054,8 @@ async fn switch_branch(
 /// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
-    use symbio_core::{branch_selected, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_REMOVED};
+    use symbio_core::branch_selected;
+    use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_TURN_BRANCH_SELECTED};
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
     // m0 = 问，m1 = 第一次答，m2 = 重试的那一支
@@ -1104,7 +1106,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
     assert_eq!(
         kinds
             .iter()
-            .filter(|k| k.as_str() == EVENT_BRANCH_SELECTED)
+            .filter(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED)
             .count(),
         1,
         "一次切换一条选择格：{kinds:?}"
@@ -1130,7 +1132,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
 /// 写成事实，而这件事没人要读。
 #[tokio::test]
 async fn switch_branch_to_the_current_candidate_writes_nothing() {
-    use symbio_core::EVENT_BRANCH_SELECTED;
+    use symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-idem");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
@@ -1146,7 +1148,9 @@ async fn switch_branch_to_the_current_candidate_writes_nothing() {
     let after = fact_kinds(&p, &id).await;
     assert_eq!(after, before, "幂等：重复的选择动作不该多落一格");
     assert!(
-        !after.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        !after
+            .iter()
+            .any(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED),
         "本例从头到尾没做过一次**有效**切换：{after:?}"
     );
     let changes = seen.lock().unwrap().clone();
@@ -1159,7 +1163,7 @@ async fn switch_branch_to_the_current_candidate_writes_nothing() {
 /// 允许跨组，就会在事实源上盖一条**读不出来**的选择格（重建按组算选中态）。
 #[tokio::test]
 async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
-    use symbio_core::EVENT_BRANCH_SELECTED;
+    use symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-reject");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答", "后一轮"]).await;
@@ -1180,7 +1184,9 @@ async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
     }
     let kinds = fact_kinds(&p, &id).await;
     assert!(
-        !kinds.iter().any(|k| k.as_str() == EVENT_BRANCH_SELECTED),
+        !kinds
+            .iter()
+            .any(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED),
         "被拒的切换不得落格：{kinds:?}"
     );
     assert_eq!(

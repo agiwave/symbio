@@ -57,11 +57,14 @@ use serde_json::Value;
 
 use symbio_core::ring::{owed, Decl, Gap, Lit, Pattern, PortDecl};
 use symbio_core::{
-    ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED,
+    ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_FAILED,
+    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+};
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK,
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_OPENING, EVENT_CHAT_ASSISTANT_PROGRESS,
+    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
+    EVENT_TURN_SUPPLEMENTED,
 };
 
 use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
@@ -160,7 +163,7 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
     // `execute → close`），装载红（DE-015 §3.4 第 1 条）。
     writes: &[
-        EVENT_ASSISTANT_OPENING,
+        EVENT_CHAT_ASSISTANT_OPENING,
         EVENT_TURN_STAGE,
         EVENT_TURN_DISPATCH,
         EVENT_ARTIFACT_ADDED,
@@ -227,7 +230,7 @@ const ACTOR_TURN_RELAY: ActorDecl = ActorDecl {
     mode: LatencyTier::Deep,
     reads: &[],
     writes: &[
-        EVENT_ASSISTANT_OPENING,
+        EVENT_CHAT_ASSISTANT_OPENING,
         EVENT_TURN_STAGE,
         EVENT_TURN_DISPATCH,
         EVENT_ARTIFACT_ADDED,
@@ -271,8 +274,8 @@ const ACTOR_COURIER: ActorDecl = ActorDecl {
     // 它不是「派发体写的」，而是「派发体窗口里落的」，两句话在账本上是同一件事。
     writes: &[
         EVENT_ARTIFACT_ADDED,
-        EVENT_ASSISTANT_PROGRESS,
-        EVENT_ASSISTANT_REPORTED,
+        EVENT_CHAT_ASSISTANT_PROGRESS,
+        EVENT_CHAT_ASSISTANT_REPORTED,
         EVENT_TURN_SUPPLEMENTED,
     ],
 };
@@ -299,7 +302,7 @@ const ACTOR_RELAY: ActorDecl = ActorDecl {
     // 一次模型往返本身就是深度档的活。
     mode: LatencyTier::Deep,
     reads: &[],
-    writes: &[EVENT_ASSISTANT_FALLBACK, EVENT_AUTHZ_DENIED],
+    writes: &[EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_AUTHZ_DENIED],
 };
 
 /// 收束执行体（步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
@@ -321,8 +324,8 @@ const ACTOR_CLOSE: ActorDecl = ActorDecl {
     mode: LatencyTier::Reflex,
     reads: &[],
     writes: &[
-        EVENT_ASSISTANT_FINAL,
-        EVENT_ASSISTANT_FALLBACK,
+        EVENT_CHAT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FALLBACK,
         EVENT_AUTHZ_DENIED,
     ],
 };
@@ -394,7 +397,7 @@ const ACTOR_REPORT: ActorDecl = ActorDecl {
     // 窗口里（见那张表上的注释），所以两边的名单都得容得下它——装载期不禁止两个
     // 执行体声明同一格，运行期按**当前动作窗口**判，两边各说自己的那一面。
     reads: &[],
-    writes: &[EVENT_ASSISTANT_REPORTED],
+    writes: &[EVENT_CHAT_ASSISTANT_REPORTED],
 };
 
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
@@ -977,12 +980,12 @@ pub(crate) static ROWS: &[Decl] = &[
         },
         until: &[
             Pattern {
-                source: EVENT_ASSISTANT_FINAL,
+                source: EVENT_CHAT_ASSISTANT_FINAL,
                 key: &["turn"],
                 eq: &[],
             },
             Pattern {
-                source: EVENT_ASSISTANT_FALLBACK,
+                source: EVENT_CHAT_ASSISTANT_FALLBACK,
                 key: &["turn"],
                 eq: &[],
             },

@@ -4,8 +4,9 @@
 //! `range(0)` 的「归档前缀 + live」拼接。驱动器（loop）只负责把压缩结果经端口
 //! 交过来。那一半由 `loop/turn_exec.test.rs` 钉住。
 
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use std::sync::Arc;
-use symbio_kernel::event::kernel_vocab;
+use symbio_plugin_api::vocab;
 
 use super::*;
 use crate::chat_session::PersistentChatSession;
@@ -14,9 +15,9 @@ use crate::store::{current_window, EventWalStore, SessionStore};
 use crate::types::Session;
 use symbio_core::chat_node as cm;
 use symbio_core::principal::{Principal, PrincipalKind};
-use symbio_core::{
-    check_all, count_user_messages, Entity, Event, Seq, Store, Verb, EVENT_ASSISTANT_FINAL,
-    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+use symbio_core::{check_all, count_user_messages, Entity, Event, Seq, Store, Verb};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 
 /// 一份「压缩后的整份消息列表」（判据只关心 id 序列——快照的语义是
@@ -60,7 +61,7 @@ fn seed_turn(store: &EventWalStore, turn: u64) {
         .append(
             Event::pending(
                 format!("f-{turn}"),
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 turn,
@@ -131,9 +132,9 @@ fn a_consolidation_lands_a_snapshot_and_archives_the_prefix() {
         "归档段 {before} 条 + 没被取代的那段——「零回退损失」的可执行形态"
     );
     assert!(
-        check_all(kernel_vocab(), &all).is_empty(),
+        check_all(vocab(), &all).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &all)
+        check_all(vocab(), &all)
     );
 }
 
@@ -261,7 +262,7 @@ fn the_turn_number_continues_across_archival() {
         .expect("快照已落");
     assert_eq!(snapshot.payload["turns"], 1, "快照带走水位：它取代了 1 轮");
     assert_eq!(
-        count_user_messages(&store.range(Seq::new(0))),
+        count_user_messages(&store.range(Seq::new(0)), &CHAT_VOCAB, &MESSAGE_VOCAB),
         1,
         "现行窗口里没有用户格，靠水位才数得出 1"
     );

@@ -17,6 +17,7 @@
 //! （贴标签、定单位、挑语气）。同一份事实长出两套口径，读数与投影就会静默漂移，
 //! 而两边都自称是 SLO。
 
+use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB};
 use symbio_core::chat_node::ChatNodePresentationExt;
 use symbio_core::{
     chat_node as cm, fallback_rate, slo_report, Event, ReadingBar, ReadingPanel, ReadingRow,
@@ -65,7 +66,7 @@ pub(super) fn content_scope_of(snapshot: &[symbio_core::Event]) -> VisScope {
 /// 那一族里，本处不另发明一套）；这里只做**取数与排版**，与 `slo_report` /
 /// `reputation` 各列同一纪律。率的分母判据（已了结数）写在列定义里，不重复第二遍。
 pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
-    let items = symbio_core::commitment_records(snapshot);
+    let items = symbio_core::commitment_records(snapshot, &COMMITMENT_VOCAB);
     let kept = items.iter().filter(|r| r.state == "kept").count();
     let broken = items.iter().filter(|r| r.state == "broken").count();
     let settled = kept + broken;
@@ -112,8 +113,8 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     for snapshot in snapshots {
         // SLO 四列是**累计口径**（S2.7-b2）：被快照取代而移入归档段的前缀也在
         // `range(0)` 里，实例聚合不会**静默**少算。
-        lat_parts.push(slo_report().read_all(snapshot).value);
-        fb_parts.push(fallback_rate().read_all(snapshot).value);
+        lat_parts.push(slo_report(CHAT_VOCAB).read_all(snapshot).value);
+        fb_parts.push(fallback_rate(CHAT_VOCAB).read_all(snapshot).value);
         con_parts.push(crate::conation::conation().read_all(snapshot).value);
         span_parts.push(symbio_core::span().read_all(snapshot).value);
         aut_parts.push(

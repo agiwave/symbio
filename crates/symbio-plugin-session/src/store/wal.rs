@@ -79,20 +79,22 @@ use symbio_core::{
 
 /// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
 ///
-/// 四份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
+/// 三份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
 /// `submit_declarations!` 交来的事件行）→ **跨插件共享表**（各插件清单 `shared_events`
-/// 的生成物，DE-024 D-204）→ 内核 `CELLS`（迁移期最后一臂，D-199）。
-/// 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；共享表答的是
-/// 「这条名字在别人的二进制里也叫这个」；内核表只认识还没登记的老名字。格位与角色
-/// **取自同一张表**——不出现「格位在冻结表、角色在内核表」的两侧各读一半。
+/// 的生成物，DE-024 D-204）。顺序不能反：一个新插件声明了同名事件时，冻结表才是
+/// owner 的陈述；共享表答的是「这条名字在别人的二进制里也叫这个」。格位与角色
+/// **取自同一张表**——不出现「格位在冻结表、角色在另一张表」的两侧各读一半。
+///
+/// ## 第四臂（内核 `CELLS`）已删
+///
+/// 迁移期这里还有一条回退到内核名字表的臂（D-199 的「实例 → 进程 → 内核表」三级）。
+/// D-203 裁决三把内核业务名字归零之后它没有可回退的东西了：**三份表都不认识的名字
+/// 就是网格之外**，闸门答 `OffGrid`。这不是收紧，是把「谁有资格声明一个名字」从
+/// 「内核替所有人记着」改成「只有 owner 记着」。
 struct Vocab<'a> {
     instance: Option<&'a [EventDecl]>,
     process: Option<&'static [EventDecl]>,
 }
-
-/// 回退到内核表只出声一次：名字表归零后这条臂随之删除（D-203 裁决三），
-/// 在那之前它是一次**有名有姓**的降级，不是静默通过。
-static KERNEL_FALLBACK_WARNED: std::sync::Once = std::sync::Once::new();
 
 impl<'a> Vocab<'a> {
     fn of(declarations: Option<&'a Frozen>) -> Self {
@@ -102,7 +104,7 @@ impl<'a> Vocab<'a> {
         }
     }
 
-    /// 第一个认识 `kind` 的表；四份都不认识 ⇒ `None`（网格之外）。
+    /// 第一个认识 `kind` 的表；三份都不认识 ⇒ `None`（网格之外）。
     fn table_for(&self, kind: &str) -> Option<&'a [EventDecl]> {
         let known = |table: &[EventDecl]| table.iter().any(|e| e.name == kind);
         if let Some(table) = self.instance.filter(|t| known(t)) {
@@ -117,17 +119,6 @@ impl<'a> Vocab<'a> {
         let shared: &'a [EventDecl] = symbio_plugin_api::events::SHARED_EVENTS;
         if known(shared) {
             return Some(shared);
-        }
-        let kernel: &'a [EventDecl] = symbio_kernel::event::kernel_vocab();
-        if known(kernel) {
-            KERNEL_FALLBACK_WARNED.call_once(|| {
-                symbio_core::plugin_warn!(
-                    "session",
-                    "[vocab] 事件名 `{kind}` 只在内核 `CELLS` 上有登记——owner 的声明表\
-                     没有它（迁移期回退，DE-024 D-199 / D-203）"
-                );
-            });
-            return Some(kernel);
         }
         None
     }

@@ -39,6 +39,10 @@ pub(crate) mod plugin;
 mod present;
 mod projection;
 mod store;
+// 用例自己交的事件拼写与三张词汇表（DE-024 D-203 / D-205 / D-206）：只在 `cfg(test)`
+// 下存在，不是 core 的词典——生产拼写由各 owner 的清单生成物提供，core 一行都不读。
+#[cfg(test)]
+mod test_fixtures;
 mod text;
 mod turn;
 mod vdfs;
@@ -59,13 +63,9 @@ pub use kernel::{
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{event_output_text_node_id, event_payload_node_id, EVENT_TURN_SUPPLEMENTED};
 pub use event::{
-    ClosureReason, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH,
-    EVENT_USER_MESSAGE,
+    event_answer_node_id, event_output_text_node_id, event_payload_node_id,
+    event_tool_result_node_id, ClosureReason,
 };
 pub use invariants::{
     check_all, closes_turn, is_stop_fact, is_turn_final, is_turn_open, provenance_violation,
@@ -209,29 +209,11 @@ pub use actors::{
     actor_can_assert_verification, actor_can_assign_work, actor_can_judge_intent,
     actor_can_land_artifact, actor_can_land_speech, pattern_for_principal,
 };
-// 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
-// `projection::reputation`）走**模块内**路径引用；core 外只有 `loop` 的两条**测试**
-// 按名字断言（`derived_facts.test.rs` / `turn_exec.test.rs`）。
-//
-// **常开 `pub`，不加 `cfg(test)`**：`cfg(test)` 只在本 crate 编译**自己的**测试时生效，
-// 别的 crate 依赖 core 时那个分支根本不存在——属性在这里藏不住任何东西。收回公开面
-// 的办法是把消费方搬走（测试替身搬到 `symbio-testkit` 就是这么做的），不是加属性。
-// 四个名字是承诺域的**事实名**（D-177 的词汇层），留在根出口是可接受的。
-pub use event::{
-    EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
-    EVENT_COMMITMENT_RELEASED,
-};
-// `memory.calibrated` 不在这里：读侧投影 `calibration_for` 的名字由调用方在构造期交进来
-// （DE-024 D-205），core 一行都不读这条名字；两个消费方各用自己的常量（owner 的
-// `control_decl` 与清单生成物 `symbio_plugin_api::events`，D-204）。
-// 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
-// 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
-// **两个生产消费方**，故走非测试的 `pub` 出根。
-pub use event::EVENT_VERDICT_ASSERTED;
-// 名字表判据出根：唯一生产消费方是会话事实源的写侧闸门（`plugins/session/store/wal`），
-// 它在 core 之外却要判「这个名字落在哪一格」——判据本体必须在 core（名字表是共享契约），
-// 出根只到 `pub`：C-003 数 `pub use`，单消费方不该占架构公开面。
-pub use event::event_cell;
+// 承诺 / 裁决 / 名字表三组**业务事件名**已随 D-203 归零批从内核迁出，因此也不再从这里
+// 出根。它们现在各有 owner：写方在自己的 `EventDecl` 里声明，需要跨插件共享的走清单
+// `shared_events` → 生成物 `symbio_plugin_api::events`（D-204），core 的折叠经三张
+// 词汇表（[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）在构造期收名字
+// （D-205 / D-206）。**core 一行都不读这些拼写**，故没有一条该占根出口。
 pub use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/loop` 的调度段与 `plugins/session` 的 `stats`
 // 列（04 §3.1 批⑨）。与 `reputation` 同一形态：`pub` 出根，只在本 crate 内可见、
@@ -241,6 +223,12 @@ pub use projection::consolidate::{accept, ConsolidateParams, Rejection};
 pub use projection::readyset::{readyset_for, ReadySetView};
 pub use projection::reputation::reputation;
 pub use projection::task_vocab::TaskVocab;
+// 对话面的三张词汇表（DE-024 D-203 归零批）：与 `TaskVocab` 同一条通路——折叠要认的
+// 每一条名字由调用方在构造期交进来。`plugins/loop` 与 `plugins/session` 各持一份常量
+// （owner 的声明与清单生成物），core 一行都不读这些拼写。
+// 按**面**分三张而不是合成一张：`reputation` 只认承诺四条，`changes` 只认产物一条，
+// 让它们收一张 20 字段的表会把耦合面说宽——表的大小应当等于那个算法真正的依赖。
+pub use projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。

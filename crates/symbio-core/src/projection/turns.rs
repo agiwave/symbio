@@ -5,9 +5,11 @@
 //! 压缩之后轮号就会在某一侧倒退（`u-{turn}` 幂等键撞号是**静默**的）。
 
 use crate::event::{Entity, Event, Verb};
-use crate::EVENT_USER_MESSAGE;
+use crate::{ChatVocab, MessageVocab};
 
 /// WAL 内 `user.message` 计数（新开轮的 turn 号；与桥同一口径）。
+///
+/// 名字由调用方在构造期交进来（`v.user_message`，DE-024 D-203）：core 不认拼写。
 ///
 /// ## 为什么必须加上快照水位（S2.7-b2）
 ///
@@ -20,16 +22,14 @@ use crate::EVENT_USER_MESSAGE;
 /// 口径仍是「数 `user.message`」，只是分成「快照之前（读它的 `turns`）」+
 /// 「快照之后（数窗口内事件）」两段相加——套娃压缩因此逐层累加，不会丢也不会重。
 /// 前缀进了切片也不影响结果：折叠从**最近一份快照的下标**起，那段在它之前。
-pub fn count_user_messages(events: &[Event]) -> u64 {
-    let (start, base) = match super::mutations::mutations_latest_snapshot(events) {
+pub fn count_user_messages(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> u64 {
+    let (start, base) = match super::mutations::mutations_latest_snapshot(events, m) {
         Some((i, _)) => (i + 1, consolidated_turns(&events[i])),
         None => (0, 0),
     };
     base + events[start..]
         .iter()
-        .filter(|e| {
-            e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE
-        })
+        .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == c.user_message)
         .count() as u64
 }
 

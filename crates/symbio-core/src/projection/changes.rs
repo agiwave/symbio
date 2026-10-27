@@ -31,8 +31,9 @@
 //!
 //! [D-169]: ../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
-use super::super::event::{Event, EVENT_ARTIFACT_ADDED};
+use super::super::event::Event;
 use super::Projection;
+use crate::MessageVocab;
 
 use std::collections::HashMap;
 
@@ -85,11 +86,11 @@ pub struct FileChange {
 ///
 /// 顺序取「最后一次出现的位置」而不是 `path` 字典序：清单的用途是「刚改了什么」，
 /// 而字典序只回答「字母表里谁在前」。
-pub fn workdir_changes() -> Projection<Vec<FileChange>> {
-    Projection::new(|events: &[Event], now| {
+pub fn workdir_changes(v: MessageVocab) -> Projection<Vec<FileChange>> {
+    Projection::new(move |events: &[Event], now| {
         let mut by_path: HashMap<String, (usize, FileChange)> = HashMap::new();
         for (idx, e) in events.iter().enumerate() {
-            if e.ts > now || e.kind != EVENT_ARTIFACT_ADDED {
+            if e.ts > now || e.kind != v.artifact_added {
                 continue;
             }
             let Some((op, path)) = change_of(e) else {

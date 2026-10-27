@@ -262,7 +262,12 @@ test('env 覆盖少给一格 ⇒ 红（那一格的判据不能凭空消失）',
 const EVENT_MOD = 'crates/symbio-kernel/src/event/mod.rs'
 const GRID = 'crates/symbio-kernel/src/event/grid.rs'
 
-/** 两张手写表的最小夹具：协议五格照真仓写法，业务行由参数给。 */
+/**
+ * 内核事件名表的最小夹具：协议五格照真仓写法，业务行由参数给。
+ *
+ * `cells` 只喂给**回潮用例**——`grid.rs` 已随 D-203 退役，真仓里它不该存在。
+ * 保留这条通路是为了钉住「加回来会红」，不是为了描述现状。
+ */
 function vocab(sources = ['a.one'], cells = ['EVENT_A']) {
   return {
     [EVENT_MOD]: [
@@ -309,17 +314,73 @@ test('CS-005：CELLS 新增一条业务行 ⇒ 红（写闸不再需要改这张
   assert.match(r.stderr, /cellsRows 实测 2 > 冻结 1/)
 })
 
-test('CS-005：两张表只在一半 ⇒ 红（判据输入缺一半不许静默）', () => {
+test('CS-005：grid.rs 已退役 ⇒ cellsRows 0 是目标态，不判「判据输入缺一半」', () => {
   const onlyEvents = { [EVENT_MOD]: vocab()['crates/symbio-kernel/src/event/mod.rs'] }
-  const r = audit(core(ONE, onlyEvents), { baseline: '1:1:0', vocab: '1:1' })
-  assert.equal(r.status, 1)
-  assert.match(r.stderr, /缺一半|只找到/)
+  const r = audit(core(ONE, onlyEvents), { baseline: '1:1:0', vocab: '1:0' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /cellsRows 0\/0/)
+})
+
+test('CS-005：退役的 grid.rs 被加回内核 ⇒ 红（名字重新写进语法就是回潮）', () => {
+  const r = audit(core(ONE, vocab(['a.one'], ['EVENT_A'])), { baseline: '1:1:0', vocab: '1:0' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stderr, /cellsRows 实测 1 > 冻结 0/)
 })
 
 test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
   const r = audit(core(ONE, vocab([], [])), { baseline: '1:1:0', vocab: '1:1' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
   assert.match(r.stdout, /kernelEvents 0<1/)
+})
+
+// ==================== CS-008 core 生产代码零事件名字面量 ====================
+
+const FIXTURES = 'crates/symbio-core/src/test_fixtures.rs'
+const CORE_DELTA = 'crates/symbio-core/src/delta/mod.rs'
+
+/**
+ * CS-008 的输入：内核事件表（含 `Entity` 闭集）+ 一条业务名，**不带** `grid.rs`
+ * （那张表已随 D-203 退役，夹具不该替它续命）。
+ */
+function vocabWithEntity(variants = ['Turn', 'Chat', 'Artifact']) {
+  const files = vocab()
+  delete files[GRID]
+  files[EVENT_MOD] +=
+    '\n' +
+    ['pub enum Entity {', ...variants.map((v) => `    ${v},`), '}'].join('\n') +
+    '\n'
+  return files
+}
+
+test('CS-008：core 生产代码写死事件名 ⇒ 红（表归零不等于名字回不来）', () => {
+  const src = 'pub fn is_final(k: &str) -> bool {\n    k == "chat.assistant.final"\n}\n'
+  const r = audit(core(ONE, { ...vocabWithEntity(), [CORE_DELTA]: src }), {
+    baseline: '1:1:0',
+    vocab: '1:0',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stderr, /CS-008/)
+  assert.match(r.stderr, /chat\.assistant\.final/)
+})
+
+test('CS-008：`#[cfg(test)] mod x;` 声明的夹具文件不算生产代码 ⇒ 不红', () => {
+  const src = 'pub(crate) const EVENT_FINAL: &str = "chat.assistant.final";\n'
+  const lib = 'mod alpha;\n#[cfg(test)]\nmod test_fixtures;\n'
+  const r = audit(core(ONE, { ...vocabWithEntity(), [CORE_MOD]: lib, [FIXTURES]: src }), {
+    baseline: '1:1:0',
+    vocab: '1:0',
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stdout, /CS-008.*剥掉 1 个/)
+})
+
+test('CS-008：首段不在 `Entity` 闭集里的点分串 ⇒ 不红（闸靠闭集收窄，不靠豁免）', () => {
+  const src = 'pub fn f() -> (&\'static str, &\'static str) {\n    ("text.plain", "application/json")\n}\n'
+  const r = audit(core(ONE, { ...vocabWithEntity(), [CORE_BETA]: src }), {
+    baseline: '1:1:0',
+    vocab: '1:0',
+  })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 // ==================== CS-006 内核业务事件名的消费方分布 ====================

@@ -6,6 +6,7 @@
 //! [`EventStore`]交进来。D-094 后端口收窄成一个 `call`，假件同款：按 op
 //! 分派是模拟服务端的份内事（生产侧的那次分派已经消失）。
 
+use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -16,8 +17,9 @@ use symbio_core::{
     count_user_messages, run_ops, AddNodesRequest, CompressionBeginReply, CompressionFinishRequest,
     ConsolidateRequest, EditNodesRequest, Entity, Event, EventStore, PluginError,
     RemoveNodesRequest, ReplaceAllRequest, Scope, Seq, Store, TurnSettings, TurnSpec, Verb,
-    EVENT_SESSION_CONSOLIDATED, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS,
+    WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS,
 };
+use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use super::session_port::SessionPort;
 use super::turn_session::LoopSession;
@@ -99,7 +101,8 @@ impl SessionPort for FakeSessionPort {
                 let ConsolidateRequest { messages } = parse(op, payload)?;
                 self.consolidated.lock().unwrap().push(messages.clone());
                 if let Some(facts) = &self.facts {
-                    let turns = count_user_messages(&facts.range(Seq::new(0)));
+                    let turns =
+                        count_user_messages(&facts.range(Seq::new(0)), &CHAT_VOCAB, &MESSAGE_VOCAB);
                     facts
                         .append(
                             Event::pending(

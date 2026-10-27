@@ -53,12 +53,12 @@ impl ToolBehavior for DelegationPromise {
         };
         let cid = format!("v2c-{}-{}", call.anchor(), call.call_id);
         commitment_events(
+            COMMITMENT_VOCAB,
             &cid,
             call.principal,
             call.source,
             promise,
-            call.success,
-            call.why,
+            if call.success { Ok(()) } else { Err(call.why) },
             call.user_seq,
         )
         .into_iter()
@@ -66,6 +66,19 @@ impl ToolBehavior for DelegationPromise {
         .collect()
     }
 }
+
+/// 承诺面词汇表（DE-024 D-203 / D-206）：本插件写 `commitment.*` 四格里的三格，
+/// 名字的 owner 是 `plugins/loop`（它声明格位与角色），本插件经清单生成物取用
+/// ——E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`。
+///
+/// 表小到只有四个字段，正是它存在的理由：本插件只做「立约 / 履约 / 违约」这一件事，
+/// 不该收到整面发言词汇。
+const COMMITMENT_VOCAB: symbio_core::CommitmentVocab = symbio_core::CommitmentVocab {
+    opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
+    released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
+    broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
+    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+};
 
 symbio_plugin_api::submit_behavior!(DelegationPromise);
 

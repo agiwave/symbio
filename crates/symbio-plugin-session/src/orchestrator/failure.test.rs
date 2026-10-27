@@ -51,7 +51,7 @@ fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
     s.append(
         symbio_core::Event::pending(
             "m-add-0",
-            symbio_core::EVENT_MESSAGE_ADDED,
+            symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
             symbio_core::Entity::Message,
             symbio_core::Verb::Opened,
             0,
@@ -72,7 +72,7 @@ fn seed_user_message(dir: &std::path::Path) {
     s.append(
         symbio_core::Event::pending(
             "u-open",
-            symbio_core::EVENT_USER_MESSAGE,
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
             symbio_core::Entity::Turn,
             symbio_core::Verb::Opened,
             1,

@@ -33,8 +33,11 @@ use std::borrow::Cow;
 use symbio_core::{
     actor_can_land_artifact, actor_can_land_speech, visible_to, ActorSpec, AdapterError, Entity,
     Event, FullModel, LatencyTier, LlmAdapter, LlmTurn, PromptToolCall, Seq, Store, Verb,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
-    EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_DISPATCH,
+};
+use symbio_plugin_api::events::{
+    EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_CHAT_ASSISTANT_OPENING, EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TURN_DISPATCH,
 };
 
 // ── 阶段拆分层（· B3，DE-021 §5 动作 B）──────────────────────────

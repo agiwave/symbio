@@ -63,6 +63,15 @@ const DECL_RE =
  * 拼写上两种都对，只认一种会让生成器对同一形状的声明给出两种答案。
  */
 const CELL_RE = /\(\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Entity::([A-Za-z0-9_]+)\s*,\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*Verb::([A-Z][A-Za-z0-9_]*)\s*\)/
+/**
+ * 声明处的**角色**：`&[FactRole::FinalizesTurn, …]`。
+ *
+ * 角色必须跟着格位一起投影到共享表上。理由是可判的：写闸判 I1「每轮至多一条 final」
+ * 靠的是 `is_turn_final`，而它读的正是 `FactRole::FinalizesTurn`。迁移期内核 `CELLS`
+ * 那第三臂替所有名字答了这一问，那一臂删掉之后，共享表若只投影名字 + 格位，
+ * 「这一轮已经答完了」就会静默失效——闸门不报错，它只是不再拦。
+ */
+const ROLES_RE = /&\s*\[([^\]]*)\]/
 
 /** `shared_events: a.b, c.d` → `["a.b", "c.d"]`；缺键 ⇒ `[]`。 */
 function parseEventList(raw, where) {
@@ -122,8 +131,18 @@ function ownerDeclarations(texts) {
     for (const m of t.matchAll(DECL_RE)) {
       const value = m[1] ?? localConsts.get(m[2]) ?? (m[2] ? m[2].replace(/^EVENT_/, '').toLowerCase().replace(/_/g, '.') : undefined)
       if (!value || cells.has(value)) continue
-      const cell = t.slice(m.index, m.index + 400).match(CELL_RE)
-      cells.set(value, cell ? { entity: cell[1], verb: cell[2] } : null)
+      const window = t.slice(m.index, m.index + 400)
+      const cell = window.match(CELL_RE)
+      if (!cell) {
+        cells.set(value, null)
+        continue
+      }
+      // 角色只从 `with_roles` 的第三实参里取：`new` 形态没有角色这一维。
+      const rolesText = window.slice(cell.index + cell[0].length).match(ROLES_RE)
+      const roles = rolesText
+        ? [...rolesText[1].matchAll(/FactRole::([A-Za-z0-9_]+)/g)].map((r) => r[1])
+        : []
+      cells.set(value, { entity: cell[1], verb: cell[2], roles })
     }
   }
   return cells
@@ -181,7 +200,11 @@ const constOf = (name) => `EVENT_${name.replace(/\./g, '_').toUpperCase()}`
 
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不触发写盘）。 */
 export function render(rows) {
-  const L = [HEADER, '', 'use symbio_core::{Entity, EventDecl, Verb};', '']
+  const needsRoles = rows.some((r) => (r.roles ?? []).length > 0)
+  const coreImports = needsRoles
+    ? 'use symbio_core::{Entity, EventDecl, FactRole, Verb};'
+    : 'use symbio_core::{Entity, EventDecl, Verb};'
+  const L = [HEADER, '', coreImports, '']
   let current = null
   for (const r of rows) {
     const domain = r.name.split('.')[0]
@@ -200,17 +223,25 @@ export function render(rows) {
     L.push('// 当前没有跨插件共享的事件名。owner 在自家 `PLUGIN.yml` 的 `shared_events:` 里登记一行。')
     return `${L.join('\n').replace(/\n+$/, '')}\n`
   }
-  L.push('/// 跨插件共享的事件行（名字 + 格位）——写闸的**共享臂**。')
+  L.push('/// 跨插件共享的事件行（名字 + 格位 + 角色）——写闸的**共享臂**。')
   L.push('///')
-  L.push('/// 每一行的格位来自 owner 自己的 `EventDecl`；角色不在这里（那是 owner 交给守卫的')
-  L.push('/// 陈述，经装配表读）。链接了本 crate 的每个进程都认识这些名字，不必把 owner 插件')
-  L.push('/// 链进同一个二进制——那正是 E-009 禁掉的边（DE-024 D-204）。')
+  L.push('/// 每一行的格位与角色都来自 owner 自己的 `EventDecl`；链接了本 crate 的每个进程')
+  L.push('/// 都认识这些名字，不必把 owner 插件链进同一个二进制——那正是 E-009 禁掉的边')
+  L.push('/// （DE-024 D-204）。')
+  L.push('///')
+  L.push('/// 角色必须一起投影：守卫判「这一轮答完了」「这一轮停了」读的是 `FactRole`，')
+  L.push('/// 只投影名字 + 格位会让那两条判据静默失效（闸门不报错，只是不再拦）。')
   L.push('#[rustfmt::skip]')
   L.push('pub const SHARED_EVENTS: &[EventDecl] = &[')
   for (const r of rows) {
-    L.push(
-      `    EventDecl::new(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb})), // ${r.name} ← ${r.owner}`,
-    )
+    const roles = r.roles ?? []
+    const decl =
+      roles.length > 0
+        ? `EventDecl::with_roles(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb}), &[${roles
+            .map((x) => `FactRole::${x}`)
+            .join(', ')}])`
+        : `EventDecl::new(${constOf(r.name)}, (Entity::${r.entity}, Verb::${r.verb}))`
+    L.push(`    ${decl}, // ${r.name} ← ${r.owner}`)
   }
   L.push('];')
   return `${L.join('\n').replace(/\n+$/, '')}\n`

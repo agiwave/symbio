@@ -520,7 +520,7 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
 #[test]
 fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     use super::super::stage_events::{StageFact, StageName};
-    use symbio_core::{EVENT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE};
+    use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE};
 
     use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
@@ -618,7 +618,7 @@ fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     let mut spoke = due.clone();
     spoke.push(ev_at(
         1,
-        EVENT_ASSISTANT_REPORTED,
+        EVENT_CHAT_ASSISTANT_REPORTED,
         json!({ "text": "先报一句" }),
         60_000,
     ));
@@ -1627,7 +1627,7 @@ fn tool_granted(id: &str) -> Event {
 fn tool_denied(id: &str) -> Event {
     ev(
         1,
-        symbio_core::EVENT_AUTHZ_DENIED,
+        symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
         json!({
             "key": id,
             "port": "tool",
@@ -1702,7 +1702,7 @@ fn a_denied_tool_call_owes_a_close_only() {
     // 收束格的拒绝（不带 `port`）不是端口面的拒绝：按 eq 取不到实例，不误开工具债。
     let closure = vec![ev(
         1,
-        symbio_core::EVENT_AUTHZ_DENIED,
+        symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
         json!({ "kind": "speech", "key": "chat.assistant.final", "detail": "拒" }),
     )];
     assert!(!owes("deny-tools", &closure, 0));
@@ -1922,7 +1922,7 @@ fn a_closure_denial_does_not_close_a_tool_authorization() {
     // `port` / `id`：按 `(port, id)` 绑定取不到实例，不能误关一笔工具授权。
     let closure_denial = ev(
         1,
-        symbio_core::EVENT_AUTHZ_DENIED,
+        symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
         json!({
             "key": "chat.assistant.final",
             "kind": "speech",

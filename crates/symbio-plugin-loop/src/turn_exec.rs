@@ -94,8 +94,11 @@ use symbio_core::{
     is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,
     ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
     LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq,
-    SilentDeltas, Store, TokenIssuer, TurnOutput, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE,
+    SilentDeltas, Store, TokenIssuer, TurnOutput, Verb,
+};
+use symbio_plugin_api::events::{
+    EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
 };
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
@@ -695,7 +698,7 @@ pub(crate) struct ExecTurn<'a> {
     /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
-    /// `progress`——汇报走 `policy.report` 行 /`EVENT_ASSISTANT_REPORTED`）。落格在
+    /// `progress`——汇报走 `policy.report` 行 /`EVENT_CHAT_ASSISTANT_REPORTED`）。落格在
     /// [`execute_turn`] 里做（本插件唯一持写者令牌处），运行器据它落
     /// `chat.assistant.opening` 格。`None` = 本轮没有开场白（常态）。
     pub opening_text: Option<&'a str>,
@@ -1060,7 +1063,7 @@ fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if is_stop_fact(super::control_decl::guard_vocab(), e) {
         return e.kind != EVENT_AUTHZ_DENIED || e.payload.get("port").is_none();
     }
-    e.kind == EVENT_ASSISTANT_PROGRESS
+    e.kind == EVENT_CHAT_ASSISTANT_PROGRESS
         && e.payload.get("status").and_then(|v| v.as_str()) == Some("pending")
 }
 

@@ -46,9 +46,10 @@ use std::sync::Arc;
 use symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use symbio_core::{
     ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, PRINCIPAL_REFLEX,
-    SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    PluginInvokeRequestExt, Scope, Store, Verb, PRINCIPAL_REFLEX, SESSION_ID, SOURCE_PRINCIPAL,
+    WORKDIR,
 };
+use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
 // 任务族的名字由 owner 插件（`loop`）的清单登记、由生成物投影到这里（DE-024 D-204 / D-206）：
 // 本插件是这一族的**第二个消费方**——它写挂起与恢复两格，也按名字读就绪。
 use symbio_plugin_api::events::{
@@ -246,7 +247,7 @@ impl PreemptionDecider {
         };
         // final 已发出（任务开启后有过收束发言）→ 排队：已发出的发言不可撤回。
         let final_after_task = events.iter().any(|e| {
-            e.kind == EVENT_ASSISTANT_FINAL
+            e.kind == EVENT_CHAT_ASSISTANT_FINAL
                 && e.seq.map(|s| s.value()).unwrap_or(u64::MAX) > opened_seq
         });
         if final_after_task {

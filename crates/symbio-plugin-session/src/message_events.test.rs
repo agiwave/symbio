@@ -14,9 +14,8 @@
 use super::{drain_parked, edited, removed, AppendOutcome};
 use crate::store::EventWalStore;
 use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
-use symbio_core::{
-    Entity, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
-};
+use symbio_core::{Entity, Seq, Store, Verb};
+use symbio_plugin_api::events::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE};
 
 /// 造一个临时会话目录 + 一条 `user.message`（承载节点 `u-1`，正是要被改的那条）。
 ///
@@ -270,7 +269,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
 
     let later = symbio_core::Event::pending(
         "a-1",
-        symbio_core::EVENT_ASSISTANT_FINAL,
+        symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         1,

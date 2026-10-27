@@ -2,6 +2,7 @@
 //! 四条验收逐条落地）+ C11 / N2（崩溃恢复后投影 == 崩溃前投影）。
 
 use super::*;
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::Budget;
 use symbio_core::FactRole;
@@ -9,11 +10,14 @@ use symbio_core::{check_all, unresolved_turns};
 use symbio_core::{checkpoint, CheckpointState};
 use symbio_core::{
     transcript, verify_prompt_fidelity, Builder, Entity, Event, EventDecl, LatencyTier,
-    PluginDeclarations, PromptMessage, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
-    EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_USER_MESSAGE,
+    PluginDeclarations, PromptMessage, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
+    EVENT_RETRY, EVENT_SENT,
 };
 use symbio_core::{turnstate, TurnState};
-use symbio_kernel::event::kernel_vocab;
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
+use symbio_plugin_api::vocab;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
@@ -126,7 +130,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         store
             .append(ev(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -146,7 +150,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         store
             .append(ev(
                 "f1",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 1,
@@ -157,13 +161,15 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     // 崩溃前的投影。
     let before_store = EventWalStore::open(&path).unwrap();
     let before = before_store.range(Seq::new(0));
-    let before_turn = turnstate().apply(&before, 0, Budget::generous());
+    let before_turn = turnstate(CHAT_VOCAB).apply(&before, 0, Budget::generous());
     let before_cp = checkpoint().apply(&before, 0, Budget::generous());
 
     // 「重启」：全新实例（同一文件）。
     let after = EventWalStore::open(&path).unwrap();
     let snapshot = after.range(Seq::new(0));
-    let after_turn: TurnState = turnstate().apply(&snapshot, 0, Budget::generous()).value;
+    let after_turn: TurnState = turnstate(CHAT_VOCAB)
+        .apply(&snapshot, 0, Budget::generous())
+        .value;
     let after_cp: CheckpointState = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
 
     assert_eq!(
@@ -176,9 +182,9 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     );
     // 恢复后 seq 仍单调（S05 §5：恢复后 seq 单调的 CI 断言）。
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(vocab(), &snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
     // 断点状态本身也在账上（4 条事实 ⇒ event_count = 4）。
@@ -207,7 +213,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
     store
         .append(ev(
             "f0",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -215,8 +221,8 @@ fn memory_store_trivial_value_still_completes_the_loop() {
         ))
         .unwrap();
     let snapshot = store.range(Seq::new(0));
-    assert!(check_all(kernel_vocab(), &snapshot).is_empty());
-    let v = turnstate().apply(&snapshot, 0, Budget::generous());
+    assert!(check_all(vocab(), &snapshot).is_empty());
+    let v = turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
     assert_eq!(
@@ -427,7 +433,7 @@ fn second_writer_gets_not_the_writer_and_nothing_is_lost() {
     writer
         .append(ev(
             "f0",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -877,7 +883,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     .with_payload(serde_json::json!({ "tool": "vdfs_read", "text": "文件内容：hello" }));
     let assistant = Event::pending(
         "f-0",
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         0,
@@ -903,7 +909,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     let reopened = EventWalStore::open(&wal).expect("reopen");
     let events = reopened.range(Seq::new(0));
 
-    let view = transcript()
+    let view = transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
     let entries: Vec<PromptMessage> = view.to_messages();
@@ -915,7 +921,7 @@ fn an_artifact_round_is_complete_after_reopen() {
         "工具名是事实"
     );
 
-    let rep = verify_prompt_fidelity(&events, &entries, None);
+    let rep = verify_prompt_fidelity(&events, &entries, None, &CHAT_VOCAB, &MESSAGE_VOCAB);
     assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 }
 
@@ -935,7 +941,7 @@ fn an_artifact_round_is_complete_after_reopen() {
 fn final_without_provenance(turn: u64) -> Event {
     Event::pending(
         format!("f-{turn}"),
-        symbio_core::EVENT_ASSISTANT_FINAL,
+        symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         turn,
@@ -1005,7 +1011,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
     store
         .append(ev(
             "f-0",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -1016,7 +1022,7 @@ fn gate_rejects_a_second_final_but_allows_artifact_then_final() {
     let err = store
         .append(ev(
             "f-0-again",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -1102,7 +1108,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
     store
         .append(ev(
             "f-0",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -1112,7 +1118,7 @@ fn gate_degrades_instead_of_blocking_a_new_turn_over_an_open_one() {
     store
         .append(ev(
             "f-1",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             1,
@@ -1152,7 +1158,7 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
         store
             .append(ev(
                 "f-0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -1165,7 +1171,7 @@ fn gate_index_is_rebuilt_from_the_wal_on_reopen() {
     let err = reopened
         .append(ev(
             "f-0-late",
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             0,
@@ -1228,7 +1234,7 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
     let given = (Entity::Turn, Verb::Opened);
     let e = Event::pending(
         "f-0",
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         given.0,
         given.1,
         0,
@@ -1244,7 +1250,7 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
             given,
             ..
         } => {
-            assert_eq!(kind, EVENT_ASSISTANT_FINAL);
+            assert_eq!(kind, EVENT_CHAT_ASSISTANT_FINAL);
             assert_eq!(declared, Some((Entity::Turn, Verb::Closed)));
             assert_eq!(given, (Entity::Turn, Verb::Opened));
         }
@@ -1255,7 +1261,7 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
     // 同一个名字回到表上那一格（带溯源）⇒ 正常入库：拒的是错位，不是这个名字。
     let ok = Event::pending(
         "f-1",
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         1,

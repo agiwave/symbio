@@ -48,7 +48,7 @@ fn seed_user_message(dir: &std::path::Path) {
     s.append(
         symbio_core::Event::pending(
             "u-open",
-            symbio_core::EVENT_USER_MESSAGE,
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
             symbio_core::Entity::Turn,
             symbio_core::Verb::Opened,
             1,

@@ -23,7 +23,7 @@ use super::{
     stamp_branches, unselected_roots, META_BRANCH,
 };
 use crate::chat_node::ChatNode;
-use crate::event::{EVENT_BRANCH_SELECTED, EVENT_TURN_BRANCH};
+use crate::test_fixtures::{CHAT, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
 use crate::{Entity, Event, Verb};
 
 fn node(id: &str) -> ChatNode {
@@ -50,7 +50,7 @@ fn branch(id: &str, of: &str, into: &str) -> Event {
 fn picked(id: &str, selected: &str) -> Event {
     Event::pending(
         format!("branch-selected-{id}"),
-        EVENT_BRANCH_SELECTED,
+        EVENT_TURN_BRANCH_SELECTED,
         Entity::Turn,
         Verb::Asserted,
         1,
@@ -61,7 +61,7 @@ fn picked(id: &str, selected: &str) -> Event {
 
 /// 折叠一批事实后盖章，返回**盖章过**的那份列表。
 fn stamped(nodes: &mut [ChatNode], events: &[Event]) {
-    stamp_branches(nodes, events);
+    stamp_branches(nodes, events, &CHAT);
 }
 
 fn branch_of(n: &ChatNode) -> Option<&serde_json::Value> {
@@ -253,7 +253,7 @@ fn 点名空列表时不动一根() {
 
 /// `live` 用「没被删」那一条证据（投影侧的口径：只有变更格能说什么都不在了）。
 fn alive(events: &[Event]) -> std::collections::HashSet<String> {
-    unselected_roots(events, |_| false)
+    unselected_roots(events, |_| false, &CHAT)
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn 一支都没有时请求包不改一个字() {
 fn 被选中那支整个被删掉时退回在世最后一支而不是删空整组() {
     // 用户把当前读的那一支截断了：读法还指着它，但它已经不在世。此时**必须**退回
     // 在世的最后一支——若照读法剪，整组都进不了请求包，这一轮的问题只剩问句没有答复。
-    let hidden = unselected_roots(&[branch("a", "t1", "t2")], |id| id == "t2");
+    let hidden = unselected_roots(&[branch("a", "t1", "t2")], |id| id == "t2", &CHAT);
     assert!(hidden.is_empty(), "只剩 t1 一支在世 ⇒ 不成组 ⇒ 一支都不剪");
 }
 
@@ -293,7 +293,7 @@ fn 读法与界面盖章对同一批事实给同一个答案() {
     // 走两侧，选中态不许给出两种说法。
     let events = [branch("a", "t1", "t2"), branch("b", "t2", "t3")];
     let mut nodes = vec![node("t1"), node("t2"), node("t3")];
-    stamp_branches(&mut nodes, &events);
+    stamp_branches(&mut nodes, &events, &CHAT);
     let hidden = alive(&events);
     for n in &nodes {
         assert_eq!(

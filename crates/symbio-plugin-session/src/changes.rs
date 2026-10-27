@@ -32,6 +32,7 @@
 //!
 //! [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
+use crate::declarations::MESSAGE_VOCAB;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -86,7 +87,7 @@ pub(crate) fn read_changes(
         Some(principal) => content_visible(content_scope_of(&snapshot), principal),
     };
     let rows = if may_read {
-        workdir_changes()
+        workdir_changes(MESSAGE_VOCAB)
             .read_all(&snapshot)
             .value
             .into_iter()

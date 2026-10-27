@@ -36,6 +36,8 @@ use std::sync::{Arc, OnceLock};
 use symbio_core::ring::Gap;
 use symbio_core::{Builder, Entity, EventDecl, Frozen, PluginDeclarations, Verb};
 
+use crate::events;
+
 /// 一个 owner 交来的声明表。`make` 是**构造器**而不是值：表里有 `Vec`（执行体绑定
 /// 投影），每次装配都要现取一份；静态切片本身仍是 `'static`，不产生运行期注册通道。
 pub struct DeclarationsDecl {
@@ -106,8 +108,8 @@ pub fn sealed_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
 
 /// 判据的**词汇面**（`&[EventDecl]`）：core 的守卫问「这条名字扮演什么角色」时读它。
 ///
-/// 返回 `'static` 是因为表住在进程冻结里；冻结失败 ⇒ `None`，调用方回退内核表
-/// （迁移期口径，DE-024 D-199 / D-203）。
+/// 返回 `'static` 是因为表住在进程冻结里；冻结失败 ⇒ `None`，调用方改用
+/// [`vocab`]（本模块给出的那条**非降级**口径）。
 pub fn declared_vocab() -> Option<&'static [EventDecl]> {
     SEALED
         .get_or_init(seal_once)
@@ -116,14 +118,20 @@ pub fn declared_vocab() -> Option<&'static [EventDecl]> {
         .map(|frozen| frozen.events())
 }
 
-/// 这个名字的格位：先问冻结表，未命中返回 `None`（迁移期由写闸回退 `CELLS`）。
+/// 判据的词汇面，**没有「内核表」这一档**（DE-024 D-203 裁决三）。
 ///
-/// 冻结失败同样返回 `None`——调用方要么回退内核表（已知名字），要么按「网格之外」
-/// 拒绝新名字（fail-closed）。这里**不**把失败降级成 `CELLS` 的静默通过。
+/// 冻结表缺席时用清单生成物 [`events::SHARED_EVENTS`]：它同样是 owner 交的
+/// （`PLUGIN.yml` 的 `shared_events`），只是范围窄——只有跨插件共享的那些名字。
+/// 迁移期那条「回退内核 `CELLS`」已经随内核名字表归零一并删除：内核不再替任何人
+/// 记名字，也就没有可回退的东西。三份表都不认识的名字按「网格之外」处理（fail-closed）。
+pub fn vocab() -> &'static [EventDecl] {
+    declared_vocab().unwrap_or(events::SHARED_EVENTS)
+}
+
+/// 这个名字的格位：先问冻结表，未命中再问清单生成物，都不认识 ⇒ `None`
+/// （调用方按「网格之外」拒绝，fail-closed）。
 pub fn declared_event_cell(name: &str) -> Option<(Entity, Verb)> {
-    declared_vocab()
-        .and_then(|vocab| vocab.iter().find(|e| e.name == name))
-        .map(|e| e.cell)
+    vocab().iter().find(|e| e.name == name).map(|e| e.cell)
 }
 
 #[cfg(test)]

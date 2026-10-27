@@ -7,14 +7,15 @@
 
 use super::*;
 use crate::cost_ledger;
-use crate::event::kernel_vocab;
-use crate::event::{
-    Entity, Event, EventDecl, FactRole, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
-};
+use crate::event::{Entity, Event, EventDecl, FactRole, Verb};
 use crate::invariants::check_all;
 use crate::projection::turnstate::turnstate;
 use crate::store::{EventStore, Store};
+use crate::test_fixtures::EVENTS;
+use crate::test_fixtures::{
+    CHAT, COMMITMENT, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED, MESSAGE,
+};
 use crate::view::Budget;
 use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
 
@@ -183,7 +184,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                 .append(
                     Event::pending(
                         "f0",
-                        EVENT_ASSISTANT_FINAL,
+                        EVENT_CHAT_ASSISTANT_FINAL,
                         Entity::Turn,
                         Verb::Closed,
                         0,
@@ -201,7 +202,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                 .append(
                     Event::pending(
                         "fb0",
-                        EVENT_ASSISTANT_FALLBACK,
+                        EVENT_CHAT_ASSISTANT_FALLBACK,
                         Entity::Turn,
                         Verb::Closed,
                         0,
@@ -224,15 +225,15 @@ fn one_user_message_yields_exactly_one_final() {
     let finals: Vec<_> = store
         .range(crate::event::Seq::new(0))
         .into_iter()
-        .filter(|e| e.kind == EVENT_ASSISTANT_FINAL)
+        .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
         .collect();
     assert_eq!(finals.len(), 1, "发出端点：发言只有一条 final");
     // 三条不变量在整条链路上全绿（含 I2：final 带溯源）。
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
 }
 
@@ -247,14 +248,14 @@ fn forced_failure_produces_fallback_with_provenance() {
     let snapshot = store.range(crate::event::Seq::new(0));
     let fallbacks: Vec<_> = snapshot
         .iter()
-        .filter(|e| e.kind == EVENT_ASSISTANT_FALLBACK)
+        .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
         .collect();
     assert_eq!(fallbacks.len(), 1, "兜底必须产生事件——静默中断 = 违例");
     assert!(fallbacks[0].produced_by.is_some(), "兜底同样可被 I2 审计");
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
 }
 
@@ -263,7 +264,7 @@ fn forced_failure_produces_fallback_with_provenance() {
 fn turnstate_projection_is_deterministic() {
     let (store, _) = rehearse_turn("你好", Some("你好，我能做什么？"));
     let snapshot = store.range(crate::event::Seq::new(0));
-    let p = turnstate();
+    let p = turnstate(CHAT);
     let v1 = p.apply(&snapshot, 1_000, Budget::generous());
     let v2 = p.apply(&snapshot, 1_000, Budget::generous());
     assert_eq!(v1, v2, "N1：同一事件序列 + 同一参数 ⇒ 逐字节相同");
@@ -292,7 +293,7 @@ fn two_finals_are_caught_by_n3() {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -305,7 +306,7 @@ fn two_finals_are_caught_by_n3() {
         .append(
             Event::pending(
                 "f1",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -315,14 +316,14 @@ fn two_finals_are_caught_by_n3() {
         )
         .expect("首插必成");
     let snapshot = store.range(crate::event::Seq::new(0));
-    let violations = check_all(kernel_vocab(), &snapshot);
+    let violations = check_all(EVENTS, &snapshot);
     assert!(
         violations.iter().any(|v| v.why.contains("final")),
         "同一 turn 两条 final 必须被看见：{:?}",
         violations
     );
     // 投影侧的孪生判定也必须不认这个 turn 为「已合法收束」。
-    let v = turnstate().apply(&snapshot, 0, Budget::generous());
+    let v = turnstate(CHAT).apply(&snapshot, 0, Budget::generous());
     assert!(
         !v.value.settled(),
         "settled 的 xor 语义：两条 final ≠ 合法收束"
@@ -431,7 +432,10 @@ async fn rehearse_reasoner_turn(
     let outcome = llm
         .generate(
             &tok,
-            &crate::transcript().read_all(&snapshot).value.to_messages(),
+            &crate::transcript(CHAT, MESSAGE)
+                .read_all(&snapshot)
+                .value
+                .to_messages(),
         )
         .await;
     let cost_ms = started.elapsed().as_millis() as u64;
@@ -441,7 +445,7 @@ async fn rehearse_reasoner_turn(
                 .append(
                     Event::pending(
                         "f0",
-                        EVENT_ASSISTANT_FINAL,
+                        EVENT_CHAT_ASSISTANT_FINAL,
                         Entity::Turn,
                         Verb::Closed,
                         0,
@@ -457,7 +461,7 @@ async fn rehearse_reasoner_turn(
         Err(e) => {
             store
                 .append(
-                    Event::pending("fb0", EVENT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "session/main")
+                    Event::pending("fb0", EVENT_CHAT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "session/main")
                         .with_produced_by(seq.value())
                         .with_cost_ms(cost_ms)
                         .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
@@ -477,13 +481,13 @@ async fn reasoner_turn_keeps_all_invariants_green() {
     assert!(reply.contains("stub-model"));
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
     // turnstate 投影照常工作（N1：双跑一致）。
-    let p = turnstate();
+    let p = turnstate(CHAT);
     let v1 = p.apply(&snapshot, 0, Budget::generous());
     let v2 = p.apply(&snapshot, 0, Budget::generous());
     assert_eq!(v1, v2);
@@ -516,7 +520,10 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
     let reply = llm
         .generate(
             &TokenIssuer::issue_deep(),
-            &crate::transcript().read_all(&snapshot).value.to_messages(),
+            &crate::transcript(CHAT, MESSAGE)
+                .read_all(&snapshot)
+                .value
+                .to_messages(),
         )
         .await
         .expect("成功桩必答");
@@ -536,7 +543,7 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
     let snapshot = store.range(crate::event::Seq::new(0));
     let fb = snapshot
         .iter()
-        .find(|e| e.kind == EVENT_ASSISTANT_FALLBACK)
+        .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
         .expect("兜底必在");
     assert!(fb.produced_by.is_some(), "兜底可被 I2 审计");
     let payload: serde_json::Value = fb.payload.clone();
@@ -545,9 +552,9 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
         "失败原因入载荷（可观测）：{payload}"
     );
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
     assert!(
         unresolved_turns(&snapshot, false).is_empty(),
@@ -751,7 +758,7 @@ fn principals_are_isolated_until_scope_widened() {
 /// 声誉记在承诺方（from）头上。
 #[test]
 fn commitment_lifecycle_feeds_reputation() {
-    let keeper = CommitmentKeeper;
+    let keeper = CommitmentKeeper::new(COMMITMENT);
     let store = EventStore::new();
     let src = seed_root(&store);
     // B 立约两条：一条守约、一条违约；A 立约一条守约。
@@ -779,7 +786,7 @@ fn commitment_lifecycle_feeds_reputation() {
         .unwrap();
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let view = reputation()
+    let view = reputation(COMMITMENT)
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     let b = view.of("session/b");
@@ -791,9 +798,9 @@ fn commitment_lifecycle_feeds_reputation() {
 
     // 全链路不变量仍绿（承诺也是普通事件，永远逃不出审计）。
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
 }
 
@@ -801,7 +808,7 @@ fn commitment_lifecycle_feeds_reputation() {
 /// as-of 锚前的违约不影响当时已算出的声誉。
 #[test]
 fn reputation_double_run_is_identical_and_as_of_safe() {
-    let keeper = CommitmentKeeper;
+    let keeper = CommitmentKeeper::new(COMMITMENT);
     let store = EventStore::new();
     store
         .append(keeper.offer("k1", "session/b", "session/a", "整理周报", 0))
@@ -811,7 +818,7 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
         .unwrap();
     let before = {
         let snapshot = store.range(crate::event::Seq::new(0));
-        reputation()
+        reputation(COMMITMENT)
             .apply(&snapshot, 2_000, Budget::generous())
             .value
     };
@@ -834,11 +841,11 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
         .unwrap();
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let after_as_of = reputation()
+    let after_as_of = reputation(COMMITMENT)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
     assert_eq!(before, after_as_of, "as-of=T 的声誉不受其后追加污染");
-    let now = reputation()
+    let now = reputation(COMMITMENT)
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     assert_eq!(now.of("session/b").score, 0, "违约计入后声誉下降");
@@ -860,36 +867,42 @@ fn commitment_records_pair_by_payload_id() {
     let store = EventStore::new();
     // 守约一条、违约一条、在途一条（id 故意乱序写入，读出必须按 id 字典序）。
     for e in commitment_events(
+        COMMITMENT,
         "v2c-t2-bbb",
         "session/b",
         "agent:reviewer",
         "复查这段",
-        true,
-        "",
+        Ok(()),
         7,
     ) {
         store.append(e).unwrap();
     }
     for e in commitment_events(
+        COMMITMENT,
         "v2c-t1-aaa",
         "session/b",
         "agent:worker",
         "把周报整理完",
-        false,
-        "子智能体没起来",
+        Err("子智能体没起来"),
         4,
     ) {
         store.append(e).unwrap();
     }
     store
-        .append(CommitmentKeeper.offer("v2c-t3-ccc", "session/a", "agent:peer", "评审设计", 9))
+        .append(CommitmentKeeper::new(COMMITMENT).offer(
+            "v2c-t3-ccc",
+            "session/a",
+            "agent:peer",
+            "评审设计",
+            9,
+        ))
         .unwrap();
     // 找不到立约的了结 ⇒ 不猜（这一条不进记录）。
     store
         .append(
             Event::pending(
                 "ghost-close",
-                crate::event::EVENT_COMMITMENT_BROKEN,
+                crate::test_fixtures::EVENT_COMMITMENT_BROKEN,
                 Entity::Commitment,
                 Verb::Closed,
                 0,
@@ -899,7 +912,7 @@ fn commitment_records_pair_by_payload_id() {
         )
         .unwrap();
 
-    let recs = commitment_records(&store.range(crate::event::Seq::new(0)));
+    let recs = commitment_records(&store.range(crate::event::Seq::new(0)), &COMMITMENT);
     assert_eq!(
         recs.iter()
             .map(|r| (r.id.as_str(), r.state))
@@ -924,7 +937,7 @@ fn commitment_records_pair_by_payload_id() {
 // ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会") 断言 2/3/4，）──
 use crate::actors::EliminationDecider;
 use crate::authz::PRINCIPAL_ARBITER;
-use crate::event::{Entity as VEntity, EVENT_VERDICT_ASSERTED};
+use crate::event::Entity as VEntity;
 use crate::governance::{GrantsChange, GrantsOverlay};
 use crate::projection::reputation::{plain_score, ReputationEntry};
 
@@ -941,7 +954,7 @@ fn self_reported_reputation_never_enters_the_projection() {
         .append(
             Event::pending(
                 "k1",
-                crate::event::EVENT_COMMITMENT_OFFERED,
+                crate::test_fixtures::EVENT_COMMITMENT_OPENED,
                 Entity::Commitment,
                 Verb::Opened,
                 0,
@@ -954,7 +967,7 @@ fn self_reported_reputation_never_enters_the_projection() {
         .append(
             Event::pending(
                 "k1c",
-                crate::event::EVENT_COMMITMENT_BROKEN,
+                crate::test_fixtures::EVENT_COMMITMENT_BROKEN,
                 Entity::Commitment,
                 Verb::Closed,
                 0,
@@ -992,7 +1005,7 @@ fn self_reported_reputation_never_enters_the_projection() {
         .unwrap();
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let view = reputation()
+    let view = reputation(COMMITMENT)
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     assert_eq!(
@@ -1068,7 +1081,7 @@ fn should_eliminate_flips_only_below_the_threshold() {
 #[test]
 fn elimination_is_an_auditable_revocable_grants_change() {
     let d = EliminationDecider;
-    let ev = d.elimination_event("session/b", -1, 42);
+    let ev = d.elimination_event(EVENT_VERDICT_ASSERTED, "session/b", -1, 42);
     // ① 格子与作者。
     assert_eq!(ev.kind, EVENT_VERDICT_ASSERTED);
     assert_eq!(ev.entity, VEntity::Verdict);
@@ -1088,7 +1101,12 @@ fn elimination_is_an_auditable_revocable_grants_change() {
     assert!(p["why"].as_str().is_some_and(|w| !w.is_empty()), "人话理由");
 
     // ③ 流水 → 覆盖层：撤销生效、恢复可逆、再收回又生效（last-wins）。
-    let restored = d.restoration_event("session/b", "申诉受理：上游数据延迟有凭证", 77);
+    let restored = d.restoration_event(
+        EVENT_VERDICT_ASSERTED,
+        "session/b",
+        "申诉受理：上游数据延迟有凭证",
+        77,
+    );
     assert_eq!(restored.kind, EVENT_VERDICT_ASSERTED);
     assert_eq!(restored.payload["change"], "restore");
     let changes = EliminationDecider::verdict_grants_changes(&[ev.clone(), restored.clone()]);
@@ -1160,13 +1178,13 @@ fn elimination_event_keeps_invariants_green() {
         ))
         .unwrap();
     store
-        .append(EliminationDecider.elimination_event("session/b", -1, 0))
+        .append(EliminationDecider.elimination_event(EVENT_VERDICT_ASSERTED, "session/b", -1, 0))
         .unwrap();
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
 }
 
@@ -1489,9 +1507,9 @@ fn n_step_chain_terminates_within_rework_bound() {
     assert!(acyclic_deps(&snapshot).is_empty());
     assert!(rework_bounded(REWORK_VOCAB, &snapshot, 1).is_empty());
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(EVENTS, &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(EVENTS, &snapshot)
     );
 }
 
@@ -1644,9 +1662,9 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
             )
             .unwrap();
         let kind = if *turn == 1 {
-            crate::EVENT_ASSISTANT_FALLBACK
+            crate::test_fixtures::EVENT_CHAT_ASSISTANT_FALLBACK
         } else {
-            crate::EVENT_ASSISTANT_FINAL
+            crate::test_fixtures::EVENT_CHAT_ASSISTANT_FINAL
         };
         store
             .append(
@@ -1682,7 +1700,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
             .append(
                 Event::pending(
                     format!("a-reflex-{i}"),
-                    crate::EVENT_ASSISTANT_FINAL,
+                    crate::test_fixtures::EVENT_CHAT_ASSISTANT_FINAL,
                     Entity::Turn,
                     Verb::Closed,
                     turn,
@@ -1710,7 +1728,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
         .append(
             Event::pending(
                 "a-x",
-                crate::EVENT_ASSISTANT_FALLBACK,
+                crate::test_fixtures::EVENT_CHAT_ASSISTANT_FALLBACK,
                 Entity::Turn,
                 Verb::Closed,
                 5,
@@ -1721,7 +1739,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
         .unwrap();
 
     let snapshot = store.range(crate::event::Seq::new(0));
-    let view = crate::fallback_rate().apply(&snapshot, i64::MAX, crate::Budget::generous());
+    let view = crate::fallback_rate(CHAT).apply(&snapshot, i64::MAX, crate::Budget::generous());
 
     let deep = view.value.of("deep");
     assert_eq!((deep.turns, deep.fallbacks), (3, 1));
@@ -1736,7 +1754,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
     assert_eq!(unspec.rate(), 1.0, "未声明档位的兜底必须被看见");
 
     // N1：双跑逐字节一致。
-    let again = crate::fallback_rate().apply(&snapshot, i64::MAX, crate::Budget::generous());
+    let again = crate::fallback_rate(CHAT).apply(&snapshot, i64::MAX, crate::Budget::generous());
     assert_eq!(view.value, again.value);
 }
 

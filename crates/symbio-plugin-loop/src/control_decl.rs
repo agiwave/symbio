@@ -9,8 +9,9 @@
 //! 装载机制的所在。
 
 use symbio_core::{
-    Entity, Event, EventDecl, FactDecl, FactRole, TaskVocab, Verb, ViewDecl, EVENT_FAILED,
-    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_TURN_DISPATCH,
+    ChatVocab, CommitmentVocab, Entity, Event, EventDecl, FactDecl, FactRole, MessageVocab,
+    TaskVocab, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY,
+    EVENT_SENT,
 };
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
@@ -44,6 +45,7 @@ pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 pub(crate) use symbio_plugin_api::events::{
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
     EVENT_TASK_CONTROLLED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TURN_DISPATCH,
 };
 
 /// 本插件交出**任务族**的拼写（DE-024 D-206）：core 的 `readyset_for` 在构造期收这张表，
@@ -55,6 +57,64 @@ pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
     terminal: EVENT_TASK_ASSERTED,
     lease: EVENT_TASK_ASSIGNED,
 };
+
+/// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
+///
+/// core 的折叠在构造期收这三张表。拼写全部取自清单生成物 `symbio_plugin_api::events`
+/// ——本插件是这批名字的 **owner**（`PLUGIN.yml` 的 `shared_events` + 上面 `EVENTS` 的
+/// 格位），但**取用一律走生成物**：同一份拼写若在 owner 里手写一遍、在消费方里生成一遍，
+/// 改名那天就会有一半没跟上。
+///
+/// ## 为什么是三张而不是一张
+///
+/// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`reputation` 只认承诺四条，
+/// `changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽——读代码的人会以为
+/// 声誉折叠与发言格有关，那不是真的（DE-024 D-206 的同一形状）。
+pub(crate) const CHAT_VOCAB: ChatVocab = ChatVocab {
+    user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
+    dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
+    supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
+    branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
+    branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
+    reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
+    opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+    final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+    fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
+    progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
+    denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
+};
+
+/// 消息变更面（5 条）：`mutations` / `changes` / `rebuild` / `transcript` /
+/// `prompt_fidelity` 折的就是这一片。
+pub(crate) const MESSAGE_VOCAB: MessageVocab = MessageVocab {
+    artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
+    message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
+    message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
+    message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
+    consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
+};
+
+/// 承诺面（4 条）：`reputation` 与 `commitment_events` 是它仅有的两个消费方。
+pub(crate) const COMMITMENT_VOCAB: CommitmentVocab = CommitmentVocab {
+    opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
+    released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
+    broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
+    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+};
+
+/// 淘汰裁决事件名（`verdict × asserted`）——**本插件持有**，不进共享清单。
+///
+/// 判定它不进共享表的理由是可判的（CS-007）：除本插件外没有别的插件在**生产代码**里
+/// 引用这条名字。会话插件确实读裁决事实，但它读的是 `verdict_grants_changes` 的**格子**
+/// （`verdict × asserted`），不认拼写（DE-024 D-203「判据读格子与角色、不读名字」）。
+/// 一个只有一个名字消费者的事实，登记进共享表只会让清单说谎。
+///
+/// 单名字走形参不走词汇表：它没有同格的兄弟，收成一张只有一个字段的表只会让调用点
+/// 多一次解引用。
+pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
+
+/// 上面的短名字，给「裁决」这个动作的调用点用（与 `ChatVocab::denied` 的用法同形）。
+pub(crate) const VERDICT: &str = EVENT_VERDICT_ASSERTED;
 
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
 /// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
@@ -155,14 +215,37 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Task, Verb::Asserted),
         &[FactRole::CountsRework],
     ),
+    // ── 对话面补登（DE-024 D-203 归零批）──
+    //
+    // 下面九条此前只有内核 `CELLS` 一行：写方在本插件、读方是 core 的折叠
+    // （`rebuild` / `transcript` / `prompt_fidelity` / `branch` / `changes` /
+    // `reputation` / `actors::commitment`），两个插件都调那些折叠 ⇒ 名字的 owner
+    // 是**写方**（本插件），消费面经清单 `shared_events` 投影
+    // （`symbio_plugin_api::events`，DE-024 D-204）。
+    //
+    // 落格理由逐条取自内核 `CELLS` 的同名行（那一份随本批退役，说明搬到本处）：
+    EventDecl::new("artifact.added", (Entity::Artifact, Verb::Asserted)),
+    // 分支族两支都**不删任何东西**，所以不是 `closed`（那一格是「这一轮的产出定稿」）；
+    // 它们是「关于这一轮的断言」，且靠 `produced_by` 才能被验真（I2 的断言类）。
+    EventDecl::new("turn.branch", (Entity::Turn, Verb::Asserted)),
+    // 淘汰裁决：写方在本插件轮末，读侧翻译在 `session`（两个生产消费方）。
+    EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
+    // 承诺四格：写方是轮末的立约 / 履约步（`derived_facts`）与 `agent` 插件的
+    // 立约效果，两侧都经 core 的成格函数 `commitment_events` 进出，名字由调用方在
+    // 构造期交进去（`ChatVocab`），core 一行都不读它们。
+    EventDecl::new("commitment.opened", (Entity::Commitment, Verb::Opened)),
+    EventDecl::new("commitment.released", (Entity::Commitment, Verb::Closed)),
+    EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
+    EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),
 ];
 
 /// 判据的**词汇面**（DE-024 D-203）：本插件调用 core 守卫时交出去的那张表。
 ///
 /// 取进程装配表——它含本插件 `EVENTS` 的角色声明，也含别的 owner 将来声明的停机 /
-/// 定稿角色；本二进制没装出表时回退内核 `CELLS`（迁移期口径，D-199）。
+/// 定稿角色；本二进制没装出表时用清单生成物（`symbio_plugin_api::vocab`）。内核
+/// `CELLS` 那一档已随名字归零删除（DE-024 D-203 裁决三）：内核不再替任何人记名字。
 pub(crate) fn guard_vocab() -> &'static [EventDecl] {
-    symbio_plugin_api::declared_vocab().unwrap_or_else(symbio_kernel::event::kernel_vocab)
+    symbio_plugin_api::vocab()
 }
 
 pub(crate) const FACTS: &[FactDecl] = &[

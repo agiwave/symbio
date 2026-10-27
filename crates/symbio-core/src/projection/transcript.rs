@@ -29,14 +29,11 @@
 //! 见 [`PromptMessage`]）——与轮内交换（`tool_exchange_messages`）**同一形态**，
 //! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
 
-use super::super::event::{
-    event_node_of, event_payload_node_id, event_tool_result_node_id, Entity, Event, Verb,
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
-};
+use super::super::event::{event_payload_node_id, event_tool_result_node_id, Event};
+use super::vocab::{slot_node_of, slot_of, ChatSlot};
 use super::Projection;
 use crate::chat_node::ChatNode;
+use crate::{ChatVocab, MessageVocab};
 
 use serde::{Deserialize, Serialize};
 
@@ -226,16 +223,16 @@ fn added_messages(e: &Event) -> Vec<ChatNode> {
 ///
 /// 索引本体与 `prompt_fidelity` 的复核**共用同一份**：两个出口因此不可能对同一条
 /// 消息给出两种读法（而那种分叉是静默的）。
-pub fn transcript() -> Projection<TranscriptView> {
-    Projection::new(|events: &[Event], now| {
-        let mutations = super::mutations::MessageMutations::collect(events);
+pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
+    Projection::new(move |events: &[Event], now| {
+        let mutations = super::mutations::MessageMutations::collect(events, &m);
         // 未选中支的根 id（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
         // 同一个问题在请求包里只能有**一支**答复，否则模型读到的是自己没说过的话。
         // 这里问「还在不在」的证据取变更格（被删的支不在世），而不是「有没有节点」——
         // 重试那一幕的新支此刻还没有任何节点，而那正是该把旧支挤出请求包的时刻。
         // 两条问法与共享的挑法见 [`super::branch`] 的模块文档。
         let hidden_branches =
-            super::branch::unselected_roots(events, |id| mutations.is_removed(id));
+            super::branch::unselected_roots(events, |id| mutations.is_removed(id), &c);
         // 这一条事件属不属于「不被读的那一支」。判据（载荷 `turn_id` = 本轮 Turn 根 id，
         // 没有这个键的恒不在任何支里 = 各支的共同祖先）住在
         // [`super::branch::event_branch_root`]，`prompt_fidelity` 复核的是**同一句问话**。
@@ -248,7 +245,7 @@ pub fn transcript() -> Projection<TranscriptView> {
         //
         // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
         // 还没发生，历史就该按压缩**前**的样子读）。
-        let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events) {
+        let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events, &m) {
             Some((i, msgs)) if events[i].ts <= now => (i + 1, msgs),
             _ => (0, Vec::new()),
         };
@@ -277,7 +274,7 @@ pub fn transcript() -> Projection<TranscriptView> {
         // 收束 / 进展格的内容节点身份取载荷 `answer_id`（引擎在落格前算定，与重建同源），
         // 缺失时按 `turn_id` 派生合成 id（见
         // [`crate::event_produced_text_node_id`]）。
-        let produced_node = |e: &Event| event_node_of(e).unwrap_or_default();
+        let produced_node = |e: &Event| slot_node_of(e, &c, &m).unwrap_or_default();
         let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
             if mutations.is_removed(&node) {
                 return;
@@ -307,14 +304,13 @@ pub fn transcript() -> Projection<TranscriptView> {
             if e.ts > now {
                 continue;
             }
-            match (e.entity, e.verb, e.kind.as_str()) {
-                // ── 变更格：**不产条目**——它们改的是既有条目（见函数文档）──────
-                (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED)
-                | (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {}
-                // ── 取代格（压缩快照）：**不产条目**——它的那份列表已在上面换基
-                //    收下（见函数文档「换基」）。在这里再产一次就是同一段历史读两遍。
-                (Entity::Message, Verb::Progressed, EVENT_SESSION_CONSOLIDATED) => {}
-                (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => {
+            match slot_of(e, &c, &m) {
+                // ── 变更格与取代格：**不产条目**——它们改的是既有条目（见函数文档）；
+                //    压缩快照的那份列表已在上面换基收下，再产一次就是同一段历史读两遍。
+                Some(
+                    ChatSlot::MessageEdited | ChatSlot::MessageRemoved | ChatSlot::Consolidated,
+                ) => {}
+                Some(ChatSlot::UserMessage) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     push(
                         TranscriptEntry {
@@ -327,7 +323,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         false,
                     );
                 }
-                (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
+                Some(ChatSlot::FinalReply) => {
                     let text = outputs.produced_text(e);
                     // 空正文的收束格不进转写：空行不是对话内容（空正文跳过，
                     // 与补充 / 汇报两条臂同一判据）。
@@ -350,7 +346,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // 说过的话**（role=assistant）且进请求包（下一轮模型看得见自己在等什么）。
                 // 等待是事实的**状态**（载荷 `status: "pending"`），不是另一种事实：
                 // kind 仍是对话事实网格里的进展格，这里照常投影。
-                (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
+                Some(ChatSlot::Progress) => {
                     let text = outputs.produced_text(e);
                     if !text.trim().is_empty() {
                         push(
@@ -365,7 +361,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         );
                     }
                 }
-                (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => {
+                Some(ChatSlot::Fallback) => {
                     // 兜底那一行给用户看的就是失败原因本身（I3：到点必答——
                     // 失败也是一句话）。它读 `detail`（人话），**不是** `reason`
                     // （闭集）：闭集是给判据与统计的，读给用户的是原文。
@@ -391,7 +387,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // ⚠️ 这条修的是**静默丢失**：补充进了 `context.messages`、会落库、
                 // 会出现在 `messages.json` 里，而 prompt 从事实网格投影 ⇒ 模型看不见。
                 // 落进投影之后它对下一轮可见，且**是这一轮**就该看见（不是下一轮）。
-                (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => {
+                Some(ChatSlot::Supplemented) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
                         push(
@@ -414,7 +410,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                 //
                 // ⚠️ 它与 `chat.assistant.final` **不是**同一格：那格是 N3「每轮至多一条」，
                 // 而一轮可以汇报多次。挤进去会让「一轮一次最终答复」这条不变量失效。
-                (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
+                Some(ChatSlot::Reported) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
                         push(
@@ -433,7 +429,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // ——助手说的界面文本，`exclude_from_context = true`（进转写、
                 // 不进 `to_messages()`）。理由码不同只影响 `meta.reason`，转写这层
                 // 只关心「谁说了一句给人看的话」。
-                (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => {
+                Some(ChatSlot::Opening) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
                         push(
@@ -449,7 +445,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                     }
                 }
                 // 工具结果（`artifact × asserted`）：跨轮可见的「我调用过什么、拿到了什么」。
-                (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => {
+                Some(ChatSlot::ArtifactAdded) => {
                     let tool = e.payload.get("tool").and_then(|v| v.as_str()).unwrap_or("");
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     push(
@@ -468,15 +464,15 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // （「已压缩上下文」那张卡）。
                 //
                 // `exclude_from_context` **恒为 `true`**：本格的节点按定义就是界面文本
-                // （见 `EVENT_MESSAGE_ADDED` 的边界——承载对话内容的节点必须由它自己的
+                // （见诞生格 `message × opened` 的边界——承载对话内容的节点必须由它自己的
                 // 事实落）。让它进请求包会让模型看见一条没有对话语义的记录行。
-                (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED) => {
+                Some(ChatSlot::MessageAdded) => {
                     for (node, mut entry) in snapshot_entries(&added_messages(e)) {
                         entry.exclude_from_context = true;
                         push(entry, node, false);
                     }
                 }
-                _ => {}
+                None => {}
             }
         }
         TranscriptView { entries }

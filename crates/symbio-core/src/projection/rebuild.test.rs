@@ -12,11 +12,11 @@
 
 use super::rebuild;
 use crate::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
-use crate::{Entity, Event, Verb};
-use crate::{
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+use crate::test_fixtures::{
+    CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, MESSAGE,
 };
+use crate::{Entity, Event, Verb};
 
 /// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
@@ -116,7 +116,7 @@ fn user_event(id: &str, text: &str) -> Event {
 fn final_event(payload: serde_json::Value) -> Event {
     Event::pending(
         "f-1",
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         1,
@@ -145,7 +145,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
         })),
     ];
 
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(
         got,
         vec![
@@ -202,7 +202,7 @@ fn reasoning_only_does_not_duplicate_the_paragraph() {
             "status": "completed",
         })),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 3, "user + Turn + 一条 Text，实得 {got:?}");
     assert_eq!(got[2].id, "T1-reason", "reasoning-only 时复用推理子节点 id");
     assert_eq!(got[2].ty, NodeForm::Body);
@@ -220,7 +220,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         user_event("u-node", "问"),
         Event::pending(
             "fb-1",
-            EVENT_ASSISTANT_FALLBACK,
+            EVENT_CHAT_ASSISTANT_FALLBACK,
             Entity::Turn,
             Verb::Closed,
             1,
@@ -245,7 +245,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         })),
     ];
 
-    let got = rebuild(&events);
+    let got = rebuild(&events, &CHAT, &MESSAGE);
     let turn = got
         .iter()
         .find(|m| m.id == "T1")
@@ -311,7 +311,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
         })),
     ];
 
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     let at = |id: &str| got.iter().position(|s| s.id == id);
     let reasoning = at("R0").expect("中途思考随产物格建出节点");
     let card = at("c0").expect("工具卡在");
@@ -361,7 +361,7 @@ fn artifact_builds_call_and_result_under_the_call() {
         })),
     ];
 
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 3);
     // 调用卡：ToolCall，挂在 Turn 根下，正文是**已定稿的参数文本**
     assert_eq!(got[1].id, "T-016");
@@ -402,7 +402,7 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
             "status": "completed",
         })),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     let calls = got.iter().filter(|s| s.id == "T-016").count();
     assert_eq!(calls, 1, "同一张工具卡只能有一份，实得 {calls}");
 }
@@ -417,7 +417,10 @@ fn rebuild_is_deterministic() {
             "text": "答", "turn_id": "T1", "text_id": "t", "status": "completed",
         })),
     ];
-    assert_eq!(shapes(&rebuild(&events)), shapes(&rebuild(&events)));
+    assert_eq!(
+        shapes(&rebuild(&events, &CHAT, &MESSAGE)),
+        shapes(&rebuild(&events, &CHAT, &MESSAGE))
+    );
 }
 
 // ── ④ 载荷没记身份 ⇒ 合成 id 必须稳定 ─────────────────────────────────
@@ -435,8 +438,8 @@ fn supplement_gets_a_stable_synthetic_id() {
     .with_ts(1_200)
     .with_payload(serde_json::json!({ "text": "插一句", "count": 1 }));
 
-    let a = shapes(&rebuild(std::slice::from_ref(&ev)));
-    let b = shapes(&rebuild(&[ev]));
+    let a = shapes(&rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE));
+    let b = shapes(&rebuild(&[ev], &CHAT, &MESSAGE));
     assert_eq!(a, b, "同一条事件每次重建必须得同一个 id");
     assert_eq!(a[0].id, "s-1-0", "载荷缺 id 时合成 id 取事件 id");
     assert_eq!(a[0].identity, Some(NodeRole::User));
@@ -461,7 +464,7 @@ fn supplement_mirrors_the_persisted_shape() {
         "text": "插一句", "count": 2, "id": "inbox-a", "ids": ["inbox-a", "inbox-b"],
     }));
 
-    let msgs = rebuild(std::slice::from_ref(&ev));
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
     let m = &msgs[0];
     assert_eq!(m.id, "inbox-a", "载荷带 id ⇒ 复刻该身份（不合成）");
     assert_eq!(m.msg_type, None, "落库的补充消息没有 msg_type");
@@ -495,7 +498,7 @@ fn final_with_dialog_rebuilds_reasoning_child_from_the_payload() {
         "dialog": { "id": "ans-node", "reason": "from_context", "exclude_from_context": false },
     }));
 
-    let msgs = rebuild(std::slice::from_ref(&ev));
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
     assert_eq!(shapes(&msgs).len(), 2, "答话节点 + 思考子节点");
     let reply = shape(&msgs[0]);
     assert_eq!(reply.id, "ans-node");
@@ -524,7 +527,7 @@ fn final_with_dialog_without_reasoning_stays_single_node() {
         "dialog": { "id": "ans-node", "reason": "thanks", "exclude_from_context": false },
     }));
 
-    let msgs = rebuild(std::slice::from_ref(&ev));
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
     assert_eq!(shapes(&msgs).len(), 1, "没有思考事实就只有答话节点");
     assert_eq!(shape(&msgs[0]).ty, NodeForm::Body);
 }
@@ -536,7 +539,7 @@ fn final_with_dialog_without_reasoning_stays_single_node() {
 fn reported_mirrors_the_persisted_shape() {
     let ev = Event::pending(
         "rp-1-0",
-        EVENT_ASSISTANT_REPORTED,
+        EVENT_CHAT_ASSISTANT_REPORTED,
         Entity::Turn,
         Verb::Asserted,
         1,
@@ -547,7 +550,7 @@ fn reported_mirrors_the_persisted_shape() {
         "text": "还在跑", "tool_rounds": 2, "quiet_ms": 5_000,
     }));
 
-    let msgs = rebuild(std::slice::from_ref(&ev));
+    let msgs = rebuild(std::slice::from_ref(&ev), &CHAT, &MESSAGE);
     let m = &msgs[0];
     assert_eq!(m.id, "rp-1-0", "载荷缺 id ⇒ 合成 id 取事件 id");
     assert_eq!(m.node_role(), Some(NodeRole::Assistant));
@@ -571,7 +574,7 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
             "status": "aborted",
         })),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got[1].status, Some(NodeStatus::Aborted));
     assert_eq!(got[2].status, Some(NodeStatus::Aborted));
     assert_eq!(got[2].text, "说到一半", "半截正文照入格（ADR-052）");
@@ -605,7 +608,7 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
             }),
         ),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 2, "用户 + 正文（没有额外骨架）：{got:?}");
     assert_eq!(got[1].id, "T1-text");
     assert_eq!(got[1].parent.as_deref(), Some("T1"));
@@ -622,7 +625,7 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
 fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     let denied = Event::pending(
         "deny-1-speech",
-        crate::EVENT_AUTHZ_DENIED,
+        crate::test_fixtures::EVENT_AUTHZ_DENIED,
         Entity::Turn,
         Verb::Asserted,
         1,
@@ -630,7 +633,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     )
     .with_ts(3_000)
     .with_payload(serde_json::json!({
-        "key": EVENT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
+        "key": EVENT_CHAT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
     }));
     let events = vec![
         user_event("u-node", "委托出去"),
@@ -661,7 +664,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
         ),
         denied,
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 2, "用户 + 工具轮中途正文：{got:?}");
     assert_eq!(got[1].id, "T1-t0");
     assert!(
@@ -675,7 +678,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
 #[test]
 fn text_content_is_plain_text() {
     let events = vec![user_event("u-node", "问")];
-    let msgs = rebuild(&events);
+    let msgs = rebuild(&events, &CHAT, &MESSAGE);
     assert!(matches!(msgs[0].content, Some(MessageContent::Text(_))));
 }
 
@@ -687,7 +690,7 @@ fn text_content_is_plain_text() {
 fn edited_event(msg: crate::chat_node::ChatNode) -> Event {
     Event::pending(
         "m-edit-0",
-        crate::EVENT_MESSAGE_EDITED,
+        crate::test_fixtures::EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
         0,
@@ -702,7 +705,7 @@ fn edited_event(msg: crate::chat_node::ChatNode) -> Event {
 fn removed_event(ids: &[&str]) -> Event {
     Event::pending(
         "m-del-0",
-        crate::EVENT_MESSAGE_REMOVED,
+        crate::test_fixtures::EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
         0,
@@ -732,7 +735,7 @@ fn an_edit_replaces_the_node_in_place() {
         }),
     ];
 
-    let msgs = rebuild(&events);
+    let msgs = rebuild(&events, &CHAT, &MESSAGE);
     let got = shapes(&msgs);
     assert_eq!(got.len(), 3, "编辑**不新增节点**：{got:?}");
     assert_eq!(got[0].id, "u-node", "位置不变（还是第一条）");
@@ -759,7 +762,7 @@ fn a_removal_drops_the_nodes_and_leaves_seq_gaps() {
         removed_event(&["T1", "T1-text"]),
     ];
 
-    let msgs = rebuild(&events);
+    let msgs = rebuild(&events, &CHAT, &MESSAGE);
     let got = shapes(&msgs);
     assert_eq!(got.len(), 1, "被删的两个节点都要没了：{got:?}");
     assert_eq!(got[0].id, "u-node");
@@ -780,7 +783,7 @@ fn truncating_everything_yields_an_empty_list() {
         })),
         removed_event(&["u-node", "T1", "T1-text"]),
     ];
-    assert!(rebuild(&events).is_empty(), "全删 ⇒ 空");
+    assert!(rebuild(&events, &CHAT, &MESSAGE).is_empty(), "全删 ⇒ 空");
 }
 
 /// 编辑一个**不在切片里**的节点是空操作——不硬插到末尾。
@@ -797,7 +800,7 @@ fn an_edit_for_an_unknown_node_adds_nothing() {
             ..Default::default()
         }),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].id, "u-node");
 }
@@ -822,7 +825,10 @@ fn rebuild_with_mutations_is_deterministic() {
         }),
         removed_event(&["T1-text"]),
     ];
-    assert_eq!(shapes(&rebuild(&events)), shapes(&rebuild(&events)));
+    assert_eq!(
+        shapes(&rebuild(&events, &CHAT, &MESSAGE)),
+        shapes(&rebuild(&events, &CHAT, &MESSAGE))
+    );
 }
 
 /// 坏载荷（不是合法 `ChatNode`）**跳过**，不让整次重建失败。
@@ -834,7 +840,7 @@ fn a_malformed_edit_payload_is_skipped() {
         user_event("u-node", "问"),
         Event::pending(
             "m-edit-9",
-            crate::EVENT_MESSAGE_EDITED,
+            crate::test_fixtures::EVENT_MESSAGE_EDITED,
             Entity::Message,
             Verb::Asserted,
             0,
@@ -842,7 +848,7 @@ fn a_malformed_edit_payload_is_skipped() {
         )
         .with_payload(serde_json::json!({ "message": "我不是一条消息" })),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].text, "问");
 }
@@ -854,7 +860,7 @@ fn a_malformed_edit_payload_is_skipped() {
 fn snapshot_event(msgs: Vec<crate::chat_node::ChatNode>) -> Event {
     Event::pending(
         "snap-0",
-        crate::EVENT_SESSION_CONSOLIDATED,
+        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         0,
@@ -899,7 +905,7 @@ fn a_snapshot_rebases_the_prefix() {
         ]),
         user_event("u-new", "压缩之后的问题"),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -925,7 +931,7 @@ fn only_the_latest_snapshot_rebases() {
             text_msg("u-keep", NodeRole::User, "保留的近轮"),
         ]),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, vec!["snap-b", "u-keep"], "取最近一份快照的列表");
 }
@@ -938,7 +944,7 @@ fn only_the_latest_snapshot_rebases() {
 fn a_malformed_snapshot_payload_is_not_a_snapshot() {
     let broken = Event::pending(
         "snap-x",
-        crate::EVENT_SESSION_CONSOLIDATED,
+        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         0,
@@ -946,7 +952,7 @@ fn a_malformed_snapshot_payload_is_not_a_snapshot() {
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let events = vec![user_event("u-node", "问"), broken];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].id, "u-node");
 }
@@ -956,7 +962,7 @@ fn a_malformed_snapshot_payload_is_not_a_snapshot() {
 #[test]
 fn an_empty_snapshot_list_is_not_a_snapshot() {
     let events = vec![user_event("u-node", "问"), snapshot_event(Vec::new())];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1, "空列表不得抹掉历史");
 }
 
@@ -980,7 +986,7 @@ fn mutations_after_the_snapshot_still_fold() {
         }),
         removed_event(&["u-drop"]),
     ];
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, vec!["snap-root", "u-keep"], "被删的从快照列表里剔除");
     assert_eq!(got[1].text, "保留的问题（改过）", "编辑照常生效");
@@ -999,7 +1005,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
         snapshot_event(vec![snap_msg, text_msg("u-keep", NodeRole::User, "保留")]),
         user_event("u-new", "压缩之后"),
     ];
-    let got = rebuild(&events);
+    let got = rebuild(&events, &CHAT, &MESSAGE);
     let seqs: Vec<i64> = got.iter().filter_map(|m| m.seq).collect();
     assert_eq!(seqs.len(), got.len(), "每条都有号");
     assert_eq!(seqs, vec![1, 2, 3], "从 1 起重发，跨快照边界仍单调");
@@ -1012,7 +1018,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
 fn added_event(msgs: Vec<crate::chat_node::ChatNode>) -> Event {
     Event::pending(
         "m-add-0",
-        crate::EVENT_MESSAGE_ADDED,
+        crate::test_fixtures::EVENT_MESSAGE_ADDED,
         Entity::Message,
         Verb::Opened,
         0,
@@ -1040,7 +1046,7 @@ fn an_added_event_births_the_payload_nodes_verbatim() {
     };
     let events = vec![user_event("u-node", "问"), added_event(vec![record])];
 
-    let msgs = rebuild(&events);
+    let msgs = rebuild(&events, &CHAT, &MESSAGE);
     let got = shapes(&msgs);
     assert_eq!(got.len(), 2, "诞生格产节点（与变更格相反）：{got:?}");
     assert_eq!(got[1].id, "compact-record");
@@ -1062,7 +1068,7 @@ fn a_second_birth_for_a_known_id_does_not_duplicate() {
     };
     let events = vec![user_event("u-node", "首次出生"), added_event(vec![record])];
 
-    let got = shapes(&rebuild(&events));
+    let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 1, "同 id 只认首次：{got:?}");
     assert_eq!(got[0].text, "首次出生", "留下的是先到的那条");
 }

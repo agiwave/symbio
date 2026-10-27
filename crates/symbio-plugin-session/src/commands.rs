@@ -401,7 +401,7 @@ impl SessionPlugin {
     ///
     /// 「同一个问题的另一支答复」是**读法**，不是新事实：它不产生消息、不开轮、
     /// 不动任何一条节点的正文，只在事实源上盖一条「这一组现在读 `to` 这一支」
-    /// （[`EVENT_BRANCH_SELECTED`]）。重建是纯函数，所以这条事实落下之后，
+    /// （[`EVENT_TURN_BRANCH_SELECTED`]）。重建是纯函数，所以这条事实落下之后，
     /// 「哪一支在当前历史里」从事实里读得出来——不需要某个调用方记得传参数。
     ///
     /// ## 边界：只在**同组**内跳
@@ -423,8 +423,8 @@ impl SessionPlugin {
     ) -> Result<(), PluginError> {
         use symbio_core::{
             branch_candidates, branch_selected, AppendError, Entity, Event, Seq, Store as _, Verb,
-            EVENT_BRANCH_SELECTED, EVENT_TURN_BRANCH,
         };
+        use symbio_plugin_api::events::{EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
         let chat_session = self.open_chat_session(session_id).await?;
         let messages = chat_session.get_messages().await?;
         let target = messages
@@ -477,11 +477,11 @@ impl SessionPlugin {
         // `Duplicate`（按下不表），而「切回去再切回来」是两次不同的动作、各有各的号。
         let n = snapshot
             .iter()
-            .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_BRANCH_SELECTED)
+            .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_TURN_BRANCH_SELECTED)
             .count();
         let event = Event::pending(
             format!("branch-selected-{member}-{n}"),
-            EVENT_BRANCH_SELECTED,
+            EVENT_TURN_BRANCH_SELECTED,
             Entity::Turn,
             Verb::Asserted,
             carrier.map(|e| e.turn).unwrap_or_default(),

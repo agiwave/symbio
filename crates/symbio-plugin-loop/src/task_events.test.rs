@@ -8,8 +8,9 @@ use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
     actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventStore, Pattern,
-    Scope, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
+    Scope, Seq, Store, Verb,
 };
+use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use crate::control_decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
@@ -55,7 +56,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[TaskDeclaration]) {
         None => store
             .append(Event::pending(
                 format!("u-{turn}"),
-                symbio_core::EVENT_USER_MESSAGE,
+                symbio_plugin_api::events::EVENT_USER_MESSAGE,
                 Entity::Turn,
                 Verb::Opened,
                 turn,

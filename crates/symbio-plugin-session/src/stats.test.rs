@@ -8,20 +8,23 @@
 //! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零（批⑥）。
 
 use super::{fleet_reading, read};
+use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_core::{
     calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
-    Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED,
-    EVENT_USER_MESSAGE, SKILL_TAG,
+    Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb, SKILL_TAG,
+};
+use symbio_plugin_api::events::{
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
+    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 // 校准观测与任务族的名字都走清单生成物（写方是 loop，本插件只是第二个消费方，
 // DE-024 D-204 / D-205 / D-206）。
-use symbio_kernel::event::kernel_vocab;
 use symbio_plugin_api::events::{
     EVENT_MEMORY_CALIBRATED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
 };
+use symbio_plugin_api::vocab;
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -99,7 +102,7 @@ fn seed(tag: &str) -> PathBuf {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -126,7 +129,7 @@ fn seed(tag: &str) -> PathBuf {
         .append(
             Event::pending(
                 "fb1",
-                EVENT_ASSISTANT_FALLBACK,
+                EVENT_CHAT_ASSISTANT_FALLBACK,
                 Entity::Turn,
                 Verb::Closed,
                 1,
@@ -199,7 +202,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
             .append(
                 Event::pending(
                     format!("f{i}"),
-                    EVENT_ASSISTANT_FINAL,
+                    EVENT_CHAT_ASSISTANT_FINAL,
                     Entity::Turn,
                     Verb::Closed,
                     0,
@@ -825,10 +828,10 @@ fn stats_recompute_equals_direct_apply() {
     // 读方复算：同一份切片、同一个 as-of，四列各自直接 apply。
     let store = EventWalStore::open_readonly(&wal).unwrap();
     let snap = store.range(Seq::new(0));
-    let latency = slo_report()
+    let latency = slo_report(CHAT_VOCAB)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
-    let fallback = fallback_rate()
+    let fallback = fallback_rate(CHAT_VOCAB)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     let cost = cost_ledger()
@@ -908,7 +911,7 @@ fn invariants_move_when_the_wal_changes() {
     let snap = store.range(Seq::new(0));
     assert_eq!(
         clean.invariants,
-        serde_json::to_value(check_all(kernel_vocab(), &snap)).unwrap()
+        serde_json::to_value(check_all(vocab(), &snap)).unwrap()
     );
     assert_eq!(
         clean.invariants,
@@ -1130,7 +1133,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -1237,12 +1240,12 @@ fn reputation_column_reports_own_and_by_principal() {
         .expect("已入格");
     // 一次守约的代际立约（写方 `derived_facts::record_derived` 落的就是这三格）。
     for e in symbio_core::commitment_events(
+        COMMITMENT_VOCAB,
         "c-rep",
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "把这段复查看完",
-        true,
-        "",
+        Ok(()),
         user_seq,
     ) {
         store.append(e).expect("承诺入格");
@@ -1316,12 +1319,12 @@ fn commitments_column_exposes_each_delegation_record() {
         .expect("已入格");
     // 一次违约的委托（写方 `record_derived` 落的正是这三格：立约 + 违约 + 告知）
     for e in symbio_core::commitment_events(
+        COMMITMENT_VOCAB,
         "v2c-t1-run-1",
         symbio_core::PRINCIPAL_MAIN,
         "agent:reviewer",
         "让 reviewer 复查这段",
-        false,
-        "子智能体没起来",
+        Err("子智能体没起来"),
         user_seq,
     ) {
         store.append(e).expect("承诺入格");
@@ -1330,12 +1333,12 @@ fn commitments_column_exposes_each_delegation_record() {
     store
         .append(
             symbio_core::commitment_events(
+                COMMITMENT_VOCAB,
                 "v2c-t2-run-1",
                 symbio_core::PRINCIPAL_MAIN,
                 "agent:worker",
                 "整理周报",
-                true,
-                "",
+                Ok(()),
                 user_seq,
             )[0]
             .clone(),
@@ -1373,9 +1376,9 @@ fn commitments_column_exposes_each_delegation_record() {
     );
     assert_eq!(items[0]["anchor_seq"].as_u64(), Some(user_seq));
     assert!(
-        check_all(kernel_vocab(), &store.range(Seq::new(0))).is_empty(),
+        check_all(vocab(), &store.range(Seq::new(0))).is_empty(),
         "承诺格子不新增违规：{:?}",
-        check_all(kernel_vocab(), &store.range(Seq::new(0)))
+        check_all(vocab(), &store.range(Seq::new(0)))
     );
 
     // 面板那一份（人读的）与列同源：数字直接来自本列，不重算
@@ -1625,7 +1628,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
-        transcript()
+        transcript(CHAT_VOCAB, MESSAGE_VOCAB)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )

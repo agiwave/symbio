@@ -9,9 +9,11 @@ use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 use symbio_core::SKILL_TAG;
 use symbio_core::{
     calibration_for, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+};
 
 use super::super::recall::recall;
 
@@ -40,7 +42,7 @@ fn seed_turn(store: &EventStore) -> u64 {
         .append(
             Event::pending(
                 "v2f-test-a0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,

@@ -15,7 +15,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use symbio_kernel::event::kernel_vocab;
+use symbio_plugin_api::vocab;
 
 use serde_json::json;
 
@@ -25,7 +25,32 @@ use crate::protocols::openai_chat::OpenaiChatProtocol;
 use symbio_core::ProviderLlmAdapter;
 use symbio_core::{
     check_all, cost_ledger, transcript, turnstate, Budget, Entity, Event, EventStore,
-    PromptMessage, Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    PromptMessage, Seq, Store, Verb,
+};
+use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+
+/// 对话面 / 消息面的词汇表（DE-024 D-203 / D-206）：本插件不是这两面任何名字的
+/// owner，只用它们调 core 的转写 / 轮态投影。拼写一律取清单生成物（D-204）。
+const CHAT_VOCAB: symbio_core::ChatVocab = symbio_core::ChatVocab {
+    user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
+    dispatch: symbio_plugin_api::events::EVENT_TURN_DISPATCH,
+    supplemented: symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
+    branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
+    branch_selected: symbio_plugin_api::events::EVENT_TURN_BRANCH_SELECTED,
+    reported: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
+    opening: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+    final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+    fallback: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
+    progress: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS,
+    denied: symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
+};
+
+const MESSAGE_VOCAB: symbio_core::MessageVocab = symbio_core::MessageVocab {
+    artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
+    message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
+    message_edited: symbio_plugin_api::events::EVENT_MESSAGE_EDITED,
+    message_removed: symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
+    consolidated: symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
 };
 use symbio_core::{LlmAdapter as _, TokenIssuer};
 
@@ -33,7 +58,10 @@ use symbio_core::{LlmAdapter as _, TokenIssuer};
 /// 事件切片 → 转写投影 → 消息数组。测试不能引兄弟插件的实现（E-009），故在此
 /// 直接调同一个投影入口。
 fn render_messages(events: &[Event]) -> Vec<PromptMessage> {
-    transcript().read_all(events).value.to_messages()
+    transcript(CHAT_VOCAB, MESSAGE_VOCAB)
+        .read_all(events)
+        .value
+        .to_messages()
 }
 
 /// 走**生产同一条路径**：事件切片 → `render_messages` → `generate_timed`。
@@ -434,7 +462,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,
@@ -447,11 +475,11 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         .unwrap();
     let snapshot = store.range(Seq::new(0));
     assert!(
-        check_all(kernel_vocab(), &snapshot).is_empty(),
+        check_all(vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(kernel_vocab(), &snapshot)
+        check_all(vocab(), &snapshot)
     );
-    let view = turnstate().apply(&snapshot, 0, Budget::generous());
+    let view = turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
     assert!(view.value.settled() && view.value.final_text.is_some());
 
     // 成本台账闭环（G3）：熔断判据「已耗多少」现在读的是**实测值**——

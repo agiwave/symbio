@@ -50,10 +50,10 @@ use symbio_core::{
     capability_resolve, llm_emit_message, llm_emit_state, tool_metas, ApprovalBasis,
     ApprovalGrants, CapabilityRiskLevel, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store, Verb, APPROVAL_GRANTS,
-    CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE,
-    RISK_LEVEL,
+    CAPABILITY_VISITOR, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE, RISK_LEVEL,
 };
 use symbio_plugin_api::effects::EffectInput;
+use symbio_plugin_api::events::EVENT_AUTHZ_DENIED;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 

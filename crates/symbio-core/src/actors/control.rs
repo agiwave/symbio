@@ -97,10 +97,16 @@ impl EliminationDecider {
     /// （收回的能力，恒为 `assign.work`——S13 §2 淘汰行的字面机制）、`change`、
     /// `score` / `threshold`（判据的当时值，审计时要能复算）、`why`（人话理由）。
     /// `source_seq` = 溯源锚（I2：断言类事件必须非空）。
-    pub fn elimination_event(&self, subject: &str, score: i64, source_seq: u64) -> Event {
+    pub fn elimination_event(
+        &self,
+        verdict: &'static str,
+        subject: &str,
+        score: i64,
+        source_seq: u64,
+    ) -> Event {
         Event::pending(
             format!("v-elim-{subject}-{source_seq}"),
-            crate::event::EVENT_VERDICT_ASSERTED,
+            verdict,
             crate::event::Entity::Verdict,
             crate::event::Verb::Asserted,
             0,
@@ -129,10 +135,16 @@ impl EliminationDecider {
     /// 已在 [D-108](../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览") 记为**边界**并写明重开
     /// 条件；触发器落地时摘掉这个属性即可，载荷口径不随之改动。
     /// 把它当成「已实现的恢复能力」是本条要拦的读法：形状是真的，写方是缺席的。
-    pub fn restoration_event(&self, subject: &str, why: &str, source_seq: u64) -> Event {
+    pub fn restoration_event(
+        &self,
+        verdict: &'static str,
+        subject: &str,
+        why: &str,
+        source_seq: u64,
+    ) -> Event {
         Event::pending(
             format!("v-rest-{subject}-{source_seq}"),
-            crate::event::EVENT_VERDICT_ASSERTED,
+            verdict,
             crate::event::Entity::Verdict,
             crate::event::Verb::Asserted,
             0,

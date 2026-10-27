@@ -179,8 +179,9 @@ fn can_reply_reads_the_single_reply_capability() {
 /// 与 S1/S2 彩排链路对接的形状预演：主体对**事件切片**的可见子集为空 ⇒ 越界读取 0。
 #[test]
 fn foreign_principal_reads_nothing_from_a_private_thread() {
-    use crate::event::{Event, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+    use crate::event::Event;
     use crate::store::{EventStore, Store};
+    use crate::test_fixtures::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
     let matrix = PermissionMatrix::new(vec![
         PrincipalPolicy::paired(
@@ -211,7 +212,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 crate::event::Verb::Closed,
                 0,
@@ -235,7 +236,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
         .filter(|e| matrix.can_see("session/main", &e.actor, VisScope::ThreadPrivate))
         .collect();
     assert_eq!(own.len(), 1, "main 可见自己的 final；user 消息归 user");
-    assert_eq!(own[0].kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(own[0].kind, EVENT_CHAT_ASSISTANT_FINAL);
 }
 
 // ── ：可见域的字符串形态（内容侧产地的书写面）─────────────────────

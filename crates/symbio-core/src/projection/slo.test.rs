@@ -4,10 +4,10 @@
 use super::super::fallback::{fallback_rate, FallbackRateView, TierStats};
 use super::slo_report;
 use crate::projection::slo::{SloLatencyView, TierLatency};
-use crate::{
-    cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+use crate::test_fixtures::{
+    CHAT, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
+use crate::{cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb};
 
 fn user_msg(id: &str, turn: u64, tier: &str) -> Event {
     Event::pending(
@@ -24,7 +24,7 @@ fn user_msg(id: &str, turn: u64, tier: &str) -> Event {
 fn final_evt(id: &str, turn: u64, produced: u64, cost_ms: u64) -> Event {
     Event::pending(
         id,
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         turn,
@@ -83,7 +83,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
         .append(
             Event::pending(
                 "fb3",
-                EVENT_ASSISTANT_FALLBACK,
+                EVENT_CHAT_ASSISTANT_FALLBACK,
                 Entity::Turn,
                 Verb::Closed,
                 3,
@@ -96,7 +96,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
         .unwrap();
 
     let snapshot = store.range(Seq::new(0));
-    let view = slo_report()
+    let view = slo_report(CHAT)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
 
@@ -114,7 +114,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
     assert_eq!(view.of("reflect").count(), 0, "空档位 = 空账不是错误");
 
     // N1：双跑逐字节一致。
-    let again = slo_report()
+    let again = slo_report(CHAT)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
     assert_eq!(view, again);
@@ -129,10 +129,10 @@ fn three_slo_columns_share_one_event_slice() {
     store.append(final_evt("f0", 0, s0, 5000)).unwrap();
 
     let snapshot = store.range(Seq::new(0));
-    let latency = slo_report()
+    let latency = slo_report(CHAT)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
-    let fr = fallback_rate()
+    let fr = fallback_rate(CHAT)
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
     let ledger = cost_ledger()

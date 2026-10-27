@@ -46,6 +46,7 @@
 //! 因此不参与嵌套（`list_sub_sessions` 恒空、`session_dir` 恒 `None`）。
 
 use super::*;
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 
 /// `<base>/<safe_id>/`
 ///
@@ -236,7 +237,7 @@ pub(super) fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
     use symbio_core::Store as _;
     let snapshot = store.range(symbio_core::Seq::new(0));
-    Some(symbio_core::rebuild(&snapshot))
+    Some(symbio_core::rebuild(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB))
 }
 
 /// 同步版读 `messages.json`

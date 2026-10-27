@@ -927,7 +927,7 @@ fn seed_fact(dir: &std::path::Path) {
     s.append(
         Event::pending(
             "u-seed",
-            symbio_core::EVENT_USER_MESSAGE,
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
             symbio_core::Entity::Turn,
             symbio_core::Verb::Opened,
             1,

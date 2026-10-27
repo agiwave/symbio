@@ -10,7 +10,7 @@
 
 use super::*;
 use crate::plugin::SessionConfig;
-use symbio_kernel::event::kernel_vocab;
+use symbio_plugin_api::vocab;
 // 夹具自己开档写一轮事实：`use super::*` 带不过来（生产侧读走存储层句柄）。
 use crate::store::EventWalStore;
 use symbio_core::session_chat;
@@ -373,7 +373,8 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<symbio_core::Event> {
 /// 轮末收束的落笔顺序（收束格先落、派生事实后补；04 §2.1 的判据输入，见那里的
 /// 「顺序是判据」注记）。
 fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
-    use symbio_core::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+    use symbio_core::{Entity, Event, Verb};
+    use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
     let user = Event::pending(
         "u1",
@@ -385,7 +386,7 @@ fn turn_facts(final_first: bool) -> Vec<symbio_core::Event> {
     );
     let final_msg = Event::pending(
         "f1",
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         0,
@@ -481,9 +482,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（S07 §5）"
     );
     assert!(
-        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid)).is_empty(),
+        symbio_core::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid))
+        symbio_core::check_all(vocab(), &read_wal(&p, sid))
     );
 
     // ③ 插话轮收尾：**批空 ⇒ 收**。挂起不收就是永久挂起——任务从此再也不进
@@ -500,9 +501,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "恢复之后任务回到就绪集——挂起是临时的"
     );
     assert!(
-        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid)).is_empty(),
+        symbio_core::check_all(vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid))
+        symbio_core::check_all(vocab(), &read_wal(&p, sid))
     );
     assert_eq!(
         state.inner.read().await.preempt,
@@ -709,9 +710,9 @@ fn interruption_within_reflex_budget_produces_control_event() {
                 "80ms 内必须有 task.controlled"
             );
             assert!(
-                symbio_core::check_all(kernel_vocab(), &snapshot).is_empty(),
+                symbio_core::check_all(vocab(), &snapshot).is_empty(),
                 "{:?}",
-                symbio_core::check_all(kernel_vocab(), &snapshot)
+                symbio_core::check_all(vocab(), &snapshot)
             );
         }
         other => panic!("预算内应实质判定，得到 {other:?}"),
@@ -751,7 +752,7 @@ fn interruption_after_final_is_queued_not_preempted() {
         .append(
             Event::pending(
                 "f0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 0,

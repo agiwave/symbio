@@ -14,9 +14,10 @@
 //! 分位数是**读方计算**：视图只携带升序样本（构造即排序，逐字节确定，N1），
 //! `percentile` 是纯查询——投影只报数，SLO 是承诺。
 
-use super::super::event::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL};
+use super::super::event::{Entity, Event, Verb};
 use super::fallback::declared_tier;
 use super::Projection;
+use crate::ChatVocab;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -116,19 +117,18 @@ impl SloLatencyView {
 }
 
 /// `slo_report` 投影：从事件切片统计各档位的实测时延样本（final 的 cost_ms）。
-pub fn slo_report() -> Projection<SloLatencyView> {
-    Projection::new(|events: &[Event], now| {
+pub fn slo_report(v: ChatVocab) -> Projection<SloLatencyView> {
+    Projection::new(move |events: &[Event], now| {
         let mut by_tier: BTreeMap<String, Vec<u64>> = BTreeMap::new();
         for e in events {
             if e.ts > now {
                 continue;
             }
             // 时延样本只收成功收束（final）；fallback 的耗时不是成功响应。
-            if e.entity != Entity::Turn || e.verb != Verb::Closed || e.kind != EVENT_ASSISTANT_FINAL
-            {
+            if e.entity != Entity::Turn || e.verb != Verb::Closed || e.kind != v.final_reply {
                 continue;
             }
-            let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()));
+            let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()), &v);
             by_tier.entry(tier).or_default().push(e.cost_ms);
         }
         let mut view = SloLatencyView::default();

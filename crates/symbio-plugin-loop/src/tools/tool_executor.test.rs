@@ -1186,7 +1186,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         .append(
             symbio_core::Event::pending(
                 "v2f-gate",
-                symbio_core::EVENT_ASSISTANT_FINAL,
+                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
                 symbio_core::Entity::Turn,
                 symbio_core::Verb::Closed,
                 0,
@@ -1317,7 +1317,7 @@ async fn the_ledger_comes_from_the_facts_value() {
         .append(
             symbio_core::Event::pending(
                 "v2f-ledger",
-                symbio_core::EVENT_ASSISTANT_FINAL,
+                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
                 symbio_core::Entity::Turn,
                 symbio_core::Verb::Closed,
                 0,

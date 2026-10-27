@@ -6,7 +6,8 @@
 //! 投影没查）——合成一个文件时，第二种会被第一种的症状盖住。
 
 use super::{mutations_latest_snapshot, MessageMutations};
-use crate::event::{Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
+use crate::event::{Entity, Event, Verb};
+use crate::test_fixtures::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, MESSAGE};
 
 /// 一条 `message.edited`（载荷 = 补丁应用后的整条消息）。
 fn edited(node: &str, role: &str, text: &str) -> Event {
@@ -39,7 +40,10 @@ fn removed(ids: &[&str]) -> Event {
 /// 收得进来：编辑给出新读法，删除给出 id 集合。
 #[test]
 fn collect_reads_both_mutation_payloads() {
-    let m = MessageMutations::collect(&[edited("u-0", "user", "改过的"), removed(&["f-0", "f-1"])]);
+    let m = MessageMutations::collect(
+        &[edited("u-0", "user", "改过的"), removed(&["f-0", "f-1"])],
+        &MESSAGE,
+    );
 
     let ed = m.edited("u-0").expect("编辑必须收得进来");
     assert_eq!(ed.role.as_deref(), Some("user"));
@@ -56,10 +60,13 @@ fn collect_reads_both_mutation_payloads() {
 /// 取决于谁先跑的问题——而那没有任何判据能看见。
 #[test]
 fn the_last_edit_wins() {
-    let m = MessageMutations::collect(&[
-        edited("u-0", "user", "第一版"),
-        edited("u-0", "user", "第二版"),
-    ]);
+    let m = MessageMutations::collect(
+        &[
+            edited("u-0", "user", "第一版"),
+            edited("u-0", "user", "第二版"),
+        ],
+        &MESSAGE,
+    );
     assert_eq!(
         m.edited("u-0").and_then(|e| e.text.clone()).as_deref(),
         Some("第二版")
@@ -100,7 +107,7 @@ fn malformed_payloads_are_skipped_not_fatal() {
     )
     .with_payload(serde_json::json!({ "message": { "id": "", "role": "user" } }));
 
-    let m = MessageMutations::collect(&[no_key, not_object, empty_id]);
+    let m = MessageMutations::collect(&[no_key, not_object, empty_id], &MESSAGE);
     assert!(m.edited("").is_none(), "空 id 不是一条可定位的消息");
     assert!(m.edited("m-edit-x").is_none(), "缺 message 键 ⇒ 不收");
 }
@@ -110,7 +117,7 @@ fn malformed_payloads_are_skipped_not_fatal() {
 fn only_mutation_cells_are_collected() {
     let lookalike = Event::pending(
         "u-0",
-        crate::EVENT_USER_MESSAGE,
+        crate::test_fixtures::EVENT_USER_MESSAGE,
         Entity::Turn,
         Verb::Opened,
         0,
@@ -119,7 +126,7 @@ fn only_mutation_cells_are_collected() {
     .with_payload(
         serde_json::json!({ "message": { "id": "u-0", "role": "user", "content": "x" } }),
     );
-    let m = MessageMutations::collect(&[lookalike]);
+    let m = MessageMutations::collect(&[lookalike], &MESSAGE);
     assert!(
         m.edited("u-0").is_none(),
         "坐标不对 ⇒ 不收（载荷长得像不算）"
@@ -128,7 +135,7 @@ fn only_mutation_cells_are_collected() {
 
 // ── 压缩快照（取代格，S2.7-b2）──────────────────────────────────────
 
-use crate::EVENT_SESSION_CONSOLIDATED;
+use crate::test_fixtures::EVENT_SESSION_CONSOLIDATED;
 
 /// 一条 `session.consolidated`：载荷 `messages` = 压缩后的整份列表。
 fn snapshot(tag: &str, msgs: &[(&str, &str, &str)]) -> Event {
@@ -157,7 +164,7 @@ fn latest_snapshot_picks_the_most_recent_one() {
             &[("s-1", "user", "摘要二"), ("k-0", "assistant", "近轮")],
         ),
     ];
-    let (i, msgs) = mutations_latest_snapshot(&evs).expect("有快照");
+    let (i, msgs) = mutations_latest_snapshot(&evs, &MESSAGE).expect("有快照");
     assert_eq!(i, 1, "取最近一条的**下标**（折方要的是「从哪接着折」）");
     let ids: Vec<&str> = msgs.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["s-1", "k-0"], "载荷里的列表按序收下");
@@ -166,14 +173,14 @@ fn latest_snapshot_picks_the_most_recent_one() {
 /// 平凡值：没有快照事件 ⇒ `None`（整段历史照常折，与接线前逐字一致）。
 #[test]
 fn without_a_snapshot_event_there_is_nothing_to_rebase() {
-    assert!(mutations_latest_snapshot(&[edited("u-0", "user", "改过")]).is_none());
+    assert!(mutations_latest_snapshot(&[edited("u-0", "user", "改过")], &MESSAGE).is_none());
 }
 
 /// **空列表不是一份快照**：压缩恒产出「至少那条摘要消息」，而空数组若被当成有效
 /// 快照，后果是**整段历史被抹掉**——容错方向必须是「少折」而不是「多抹」。
 #[test]
 fn an_empty_snapshot_list_is_not_a_snapshot() {
-    assert!(mutations_latest_snapshot(&[snapshot("a", &[])]).is_none());
+    assert!(mutations_latest_snapshot(&[snapshot("a", &[])], &MESSAGE).is_none());
 }
 
 /// 坏载荷跳过、**继续往前找**：一条坏快照不该把此前有效的那一份一起吃掉。
@@ -189,7 +196,7 @@ fn a_malformed_snapshot_does_not_eat_the_valid_one() {
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let evs = vec![snapshot("a", &[("s-0", "user", "摘要一")]), broken];
-    let (i, msgs) = mutations_latest_snapshot(&evs).expect("前面那份仍然有效");
+    let (i, msgs) = mutations_latest_snapshot(&evs, &MESSAGE).expect("前面那份仍然有效");
     assert_eq!(i, 0);
     assert_eq!(msgs.len(), 1);
 }
@@ -209,5 +216,5 @@ fn the_cell_must_be_message_progressed() {
     .with_payload(serde_json::json!({
         "messages": [{ "id": "s", "role": "user", "content": "x" }]
     }));
-    assert!(mutations_latest_snapshot(&[wrong_cell]).is_none());
+    assert!(mutations_latest_snapshot(&[wrong_cell], &MESSAGE).is_none());
 }

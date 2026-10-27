@@ -38,10 +38,10 @@
 //! 调用方：压缩**已经发生**（消息列表已重写、界面已变短），把它升级成整轮失败等于
 //! 用「记不下来」换「答不出来」——与缺口 4 的汇报落格同一条口径。
 
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use symbio_core::chat_node::ChatNode;
-use symbio_core::{
-    clock_now_ms, count_user_messages, Entity, Event, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
-};
+use symbio_core::{clock_now_ms, count_user_messages, Entity, Event, Seq, Store, Verb};
+use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use super::super::chat_session::PersistentChatSession;
 use super::super::store::EventWalStore;
@@ -56,7 +56,7 @@ pub(crate) fn consolidate_into_wal(
     principal: &str,
 ) -> Option<Seq> {
     let existing = store.range(Seq::new(0));
-    if let Some((_, prev)) = symbio_core::mutations_latest_snapshot(&existing) {
+    if let Some((_, prev)) = symbio_core::mutations_latest_snapshot(&existing, &MESSAGE_VOCAB) {
         if same_message_ids(&prev, messages) {
             return None;
         }
@@ -68,7 +68,7 @@ pub(crate) fn consolidate_into_wal(
     let superseded_last = head.saturating_sub(1);
     // 水位 = 被取代前缀里数得出的轮数（**同一个** `count_user_messages`，故套娃压缩
     // 会逐层累加：上一份快照的 `turns` 已计入它的前缀，本份自然接得上）。
-    let turns = count_user_messages(&existing);
+    let turns = count_user_messages(&existing, &CHAT_VOCAB, &MESSAGE_VOCAB);
     let event = Event::pending(
         format!("v2sc-{superseded_last}"),
         EVENT_SESSION_CONSOLIDATED,

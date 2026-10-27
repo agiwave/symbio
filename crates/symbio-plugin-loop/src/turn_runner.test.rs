@@ -13,8 +13,8 @@ use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
 use symbio_core::{
     DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas, Store, Verb,
-    EVENT_USER_MESSAGE,
 };
+use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_testkit::trivial_actor_spec;
 
 /// 测试侧先落用户格：生产里由 `chat_loop::drive` 在任何判决之前落，
@@ -170,10 +170,13 @@ impl TurnRunner {
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::control_decl::guard_vocab;
+    use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, AppendError, Budget, Event, EventStore,
-        LatencyTier, Seq, SilentDeltas, Store, TokenIssuer, EVENT_ASSISTANT_FALLBACK,
-        EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        LatencyTier, Seq, SilentDeltas, Store, TokenIssuer,
+    };
+    use symbio_plugin_api::events::{
+        EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
@@ -206,13 +209,13 @@ mod turn_runner_tests {
         assert_eq!(ledger.value.of("session/main").spent_ms, out.cost_ms);
 
         // 兜底率：deep 档 1 turn，0 兜底。
-        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         let deep = fr.value.of("deep");
         assert_eq!((deep.turns, deep.fallbacks), (1, 0));
         assert_eq!(deep.rate(), 0.0);
 
         // turnstate：收束且 final 可见。
-        let view = symbio_core::turnstate().apply(&snapshot, 0, Budget::generous());
+        let view = symbio_core::turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
         assert!(view.value.settled() && view.value.final_text.is_some());
     }
 
@@ -243,7 +246,7 @@ mod turn_runner_tests {
         );
 
         // 兜底率：deep 档 1 turn 1 兜底 = 100%（被看见，不是被藏）。
-        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         let deep = fr.value.of("deep");
         assert_eq!((deep.turns, deep.fallbacks), (1, 1));
         assert_eq!(deep.rate(), 1.0);
@@ -415,18 +418,21 @@ mod turn_runner_tests {
             "{:?}",
             check_all(guard_vocab(), &snapshot)
         );
-        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let view =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value.entries.len(), 4, "两轮 × (问+答)");
         assert_eq!(view.value.entries[0].role, "user");
         assert_eq!(view.value.entries[1].role, "assistant");
-        let again = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let again =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value, again.value);
     }
 
     /// fallback 行进转写（assistant / detail）——兜底话术是用户实际看到的回复。
     #[test]
     fn transcript_includes_fallback_as_assistant_line() {
-        use symbio_core::{Entity, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
+        use symbio_core::{Entity, Verb};
+        use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
         let store = EventStore::new();
         store
             .append(
@@ -445,7 +451,7 @@ mod turn_runner_tests {
             .append(
                 Event::pending(
                     "fb-0",
-                    EVENT_ASSISTANT_FALLBACK,
+                    EVENT_CHAT_ASSISTANT_FALLBACK,
                     Entity::Turn,
                     Verb::Closed,
                     0,
@@ -459,7 +465,8 @@ mod turn_runner_tests {
             )
             .unwrap();
         let snapshot = store.range(Seq::new(0));
-        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let view =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value.entries.len(), 2);
         assert_eq!(view.value.entries[1].role, "assistant");
         assert_eq!(view.value.entries[1].text, "上游 402");
@@ -471,8 +478,9 @@ mod turn_runner_tests {
     /// 交换（`tool_exchange_messages`）同形。
     #[test]
     fn transcript_includes_artifact_as_tool_line() {
-        use symbio_core::{
-            Entity, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        use symbio_core::{Entity, Verb};
+        use symbio_plugin_api::events::{
+            EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
         };
         let store = EventStore::new();
         // 轮 0：用户 → 工具结果 → 收束
@@ -509,7 +517,7 @@ mod turn_runner_tests {
             .append(
                 Event::pending(
                     "f-0",
-                    EVENT_ASSISTANT_FINAL,
+                    EVENT_CHAT_ASSISTANT_FINAL,
                     Entity::Turn,
                     Verb::Closed,
                     0,
@@ -535,7 +543,8 @@ mod turn_runner_tests {
             .unwrap();
 
         let snapshot = store.range(Seq::new(0));
-        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let view =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         let entries = &view.value.entries;
         assert_eq!(entries.len(), 4, "四格 → 四行：{entries:?}");
         assert_eq!(entries[0].role, "user");
@@ -638,7 +647,8 @@ mod turn_runner_tests {
             "{:?}",
             check_all(guard_vocab(), &snapshot)
         );
-        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let view =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value.entries[1].text, "你好！", "final 落的是全文");
 
         // 默认降级：无分片桩经 run_streaming = 一帧全文（诚实降级，不是静默）。
@@ -909,12 +919,12 @@ mod turn_runner_tests {
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(
             snapshot[1].kind,
-            symbio_core::EVENT_TURN_DISPATCH,
+            symbio_plugin_api::events::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
         let cell = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
             .expect("中止照落收束格");
         assert_eq!(cell.payload["status"], "aborted", "终止是状态字段");
         assert_eq!(
@@ -989,7 +999,7 @@ mod turn_runner_tests {
         );
         let cell = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
             .expect("收束格在");
         let output = snapshot
             .iter()
@@ -1014,7 +1024,8 @@ mod turn_runner_tests {
         assert_eq!(cell.payload["status"], "aborted");
 
         // 重建侧：网格投影出的历史里那半句仍在（判据原文说的「重建的历史」）。
-        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let view =
+            transcript(CHAT_VOCAB, MESSAGE_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         assert!(
             view.value
                 .entries
@@ -1109,18 +1120,20 @@ mod turn_runner_tests {
         assert!(out.aborted && !out.fell_back, "中止与兜底互斥");
         let snapshot = store.range(Seq::new(0));
         assert!(
-            snapshot.iter().all(|e| e.kind != EVENT_ASSISTANT_FALLBACK),
+            snapshot
+                .iter()
+                .all(|e| e.kind != EVENT_CHAT_ASSISTANT_FALLBACK),
             "中止绝不落兜底格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
                 .iter()
-                .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+                .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
                 .map(|e| e.kind.as_str()),
             Some("chat.assistant.final"),
             "收束 kind 不换"
         );
-        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
         let deep = fr.value.of("deep");
         assert_eq!((deep.turns, deep.fallbacks), (1, 0), "中止不进兜底分子");
         assert_eq!(deep.rate(), 0.0);
@@ -1188,7 +1201,7 @@ mod turn_runner_tests {
         assert!(
             !snapshot
                 .iter()
-                .any(|e| e.kind == symbio_core::EVENT_ASSISTANT_FINAL),
+                .any(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL),
             "缺 reply.first ⇒ 收束格不得入格：{:?}",
             snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>()
         );
@@ -1236,7 +1249,7 @@ mod turn_runner_tests {
         assert!(
             snapshot2
                 .iter()
-                .any(|e| e.kind == symbio_core::EVENT_ASSISTANT_FINAL),
+                .any(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL),
             "持有 reply.first ⇒ final 照落（否则拒绝可能只是「闸全拒」的平凡真）"
         );
     }
@@ -1257,9 +1270,11 @@ mod tool_round_tests {
     use symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
         EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage,
-        Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED,
-        EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
-        EVENT_USER_MESSAGE,
+        Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
+    };
+    use symbio_plugin_api::events::{
+        EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
+        EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
     };
 
     /// 判据：**每一次**模型往返都留下完整的协议事实——
@@ -2074,7 +2089,7 @@ mod tool_round_tests {
                     store,
                     Event::pending(
                         format!("deny-{turn_no}-{id}"),
-                        symbio_core::EVENT_AUTHZ_DENIED,
+                        symbio_plugin_api::events::EVENT_AUTHZ_DENIED,
                         Entity::Turn,
                         Verb::Asserted,
                         turn_no,
@@ -2218,8 +2233,8 @@ mod tool_round_tests {
         let ev = store.range(Seq::new(0));
         assert_eq!(ev.len(), 3, "用户格 + 派发格 + 收束格，一格不多一格不少");
         assert_eq!(ev[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(ev[1].kind, symbio_core::EVENT_TURN_DISPATCH);
-        assert_eq!(ev[2].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(ev[1].kind, symbio_plugin_api::events::EVENT_TURN_DISPATCH);
+        assert_eq!(ev[2].kind, EVENT_CHAT_ASSISTANT_FINAL);
         assert_eq!(
             ev[2].produced_by,
             ev[0].seq.map(|s| s.value()),
@@ -2608,7 +2623,7 @@ mod tool_round_tests {
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(
             snapshot[1].kind,
-            symbio_core::EVENT_TURN_DISPATCH,
+            symbio_plugin_api::events::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
         let artifact = snapshot
@@ -2626,7 +2641,7 @@ mod tool_round_tests {
         );
         let cell = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
             .expect("收束格在");
         let output = snapshot
             .iter()
@@ -2776,14 +2791,17 @@ mod tool_round_tests {
             ],
             "用户格 + 派发格 + 模型端口三格 + 工具批协议格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
-        assert_eq!(snapshot[1].kind, symbio_core::EVENT_TURN_DISPATCH);
+        assert_eq!(
+            snapshot[1].kind,
+            symbio_plugin_api::events::EVENT_TURN_DISPATCH
+        );
         assert!(
             snapshot.iter().any(|e| e.kind == EVENT_ARTIFACT_ADDED),
             "产物格在"
         );
         let progress = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_PROGRESS)
+            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
             .expect("进展格在");
         assert_eq!(progress.entity, Entity::Turn);
         assert_eq!(progress.verb, Verb::Progressed);
@@ -2865,7 +2883,7 @@ mod tool_round_tests {
         assert!(
             snapshot
                 .iter()
-                .any(|e| e.kind == symbio_core::EVENT_ASSISTANT_FALLBACK),
+                .any(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK),
             "兜底格在"
         );
     }
@@ -2974,7 +2992,7 @@ mod tool_round_tests {
         // 「带出之后 chat_loop 干什么」不在运行器职责内。
         let cells = store.range(Seq::new(0));
         assert!(
-            cells.iter().any(|e| e.kind == EVENT_ASSISTANT_FINAL),
+            cells.iter().any(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL),
             "非空正文应落 final 收束格：{cells:?}"
         );
     }
@@ -3021,7 +3039,7 @@ mod tool_round_tests {
         assert!(first.awaits_user, "等待轮必须在结果里可见");
         let mid = store.range(Seq::new(0));
         assert!(
-            !mid.iter().any(|e| e.kind == EVENT_ASSISTANT_FINAL),
+            !mid.iter().any(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL),
             "等待轮不落收束格（收束格留给恢复幕）：{mid:?}"
         );
         let user_seq = mid
@@ -3113,7 +3131,7 @@ mod tool_round_tests {
         // 收束格记在**原轮**上，溯源仍是原轮用户格（I2）——它填上了 C4 的缺口。
         let cell = snapshot
             .iter()
-            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
             .expect("收束格在");
         assert_eq!(cell.turn, 0, "收束格记在原轮号上");
         let output = snapshot
@@ -3134,7 +3152,7 @@ mod tool_round_tests {
         // 唤醒那一笔的结果落成产物格（同在原轮上）。
         let resumed_artifact = snapshot
             .iter()
-            .rfind(|e| e.kind == symbio_core::EVENT_ARTIFACT_ADDED)
+            .rfind(|e| e.kind == symbio_plugin_api::events::EVENT_ARTIFACT_ADDED)
             .expect("唤醒的产物格在");
         assert_eq!(resumed_artifact.payload["tool"], "vdfs_read");
         assert_eq!(resumed_artifact.produced_by, Some(user_seq));
@@ -3414,7 +3432,7 @@ mod tool_round_tests {
             kinds,
             vec![
                 EVENT_USER_MESSAGE,
-                symbio_core::EVENT_TURN_DISPATCH,
+                symbio_plugin_api::events::EVENT_TURN_DISPATCH,
                 // 三次模型往返 = 三组协议事实（request / sent / response）；
                 // 两个工具批各带创建 / 授权 / 派发三笔债的协议格。
                 "request",
@@ -3436,7 +3454,7 @@ mod tool_round_tests {
                 "request",
                 "sent",
                 "response",
-                EVENT_ASSISTANT_FINAL
+                EVENT_CHAT_ASSISTANT_FINAL
             ],
             "两轮产物 + 一轮收束（外加派发格、三次模型往返与两个工具批的协议事实）：{snapshot:?}"
         );
@@ -3469,7 +3487,7 @@ mod tool_round_tests {
         assert!(
             snapshot
                 .iter()
-                .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+                .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL)
                 .expect("收束格在")
                 .payload
                 .get("rounds")
@@ -3574,7 +3592,7 @@ mod tool_round_tests {
         let snapshot = store.range(Seq::new(0));
         let last = snapshot.last().expect("有收束格");
         assert_eq!(
-            last.kind, EVENT_ASSISTANT_FINAL,
+            last.kind, EVENT_CHAT_ASSISTANT_FINAL,
             "收束格而不是兜底格——落兜底格等于把「答了（以思考的形式）」记成「没答」"
         );
         assert_eq!(last.payload["text"], "", "收束格只存结局");
@@ -3674,7 +3692,10 @@ mod tool_round_tests {
         assert!(out.fell_back, "正文与思考**都**空才是没答");
         let snapshot = store.range(Seq::new(0));
         let last = snapshot.last().expect("有兜底格");
-        assert_eq!(last.kind, symbio_core::EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(
+            last.kind,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK
+        );
         assert_eq!(last.payload["detail"], "model returned empty text");
         assert_eq!(
             last.payload["reason"], "fallback",
@@ -3781,7 +3802,7 @@ mod tool_round_tests {
         let last = snapshot.last().expect("有收束格");
         assert_eq!(
             last.kind,
-            symbio_core::EVENT_ASSISTANT_FALLBACK,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
             "落兜底格（失败形状），不是 final——落 final 会把「没写完」记成「答了」"
         );
         assert_eq!(last.payload["status"], "failed");
@@ -3908,7 +3929,7 @@ mod tool_round_tests {
         let last = snapshot.last().expect("有收束格");
         assert_eq!(
             last.kind,
-            symbio_core::EVENT_ASSISTANT_FALLBACK,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FALLBACK,
             "落兜底格（失败形状）——落 final 会把「没说完」记成「答了」"
         );
         assert_eq!(last.payload["status"], "failed");
@@ -3943,7 +3964,10 @@ mod reflex_turn_tests {
     use super::super::{TurnInput, TurnRunner};
     use symbio_core::{
         check_all, unresolved_turns, DeltaSink, Entity, EventStore, LatencyTier, Seq, Store,
-        TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
+        TokenIssuer, Verb,
+    };
+    use symbio_plugin_api::events::{
+        EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
     };
 
     use crate::control_decl::EVENT_TURN_STAGE;
@@ -4029,7 +4053,7 @@ mod reflex_turn_tests {
                 EVENT_USER_MESSAGE,
                 EVENT_TURN_STAGE,
                 EVENT_TURN_DISPATCH,
-                EVENT_ASSISTANT_FINAL
+                EVENT_CHAT_ASSISTANT_FINAL
             ],
             "快路轮落开轮 / 阶段 / 派发 / 收束四格（没有产物格，也没有模型往返）：{snapshot:?}"
         );
@@ -4166,7 +4190,7 @@ mod denial_fact_tests {
     use super::super::{closure_gate, deny, ClosureKind};
     use crate::control_decl::guard_vocab;
     use symbio_core::{check_all, unresolved_turns, ActorSpec, EventStore, Scope, Store};
-    use symbio_core::{EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE};
+    use symbio_plugin_api::events::{EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE};
     use symbio_testkit::trivial_actor_spec;
 
     /// 造一个「主体自己那一行放行、父主体不放行」的规格——上限那道闸是生产里
@@ -4209,7 +4233,7 @@ mod denial_fact_tests {
             1,
             user_seq,
             ClosureKind::Speech,
-            symbio_core::EVENT_ASSISTANT_FINAL,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
 
@@ -4235,7 +4259,7 @@ mod denial_fact_tests {
         );
         assert_eq!(
             d.payload.get("key").and_then(|v| v.as_str()),
-            Some(symbio_core::EVENT_ASSISTANT_FINAL),
+            Some(symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL),
             "拒的是哪一格"
         );
         assert_eq!(
@@ -4274,7 +4298,7 @@ mod denial_fact_tests {
             1,
             user_seq,
             ClosureKind::Speech,
-            symbio_core::EVENT_ASSISTANT_FINAL,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
             "拒",
         );
 
@@ -4309,7 +4333,7 @@ mod denial_fact_tests {
                 1,
                 user_seq,
                 ClosureKind::Artifact,
-                symbio_core::EVENT_ARTIFACT_ADDED,
+                symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
                 "拒",
             );
         }
@@ -4328,8 +4352,14 @@ mod denial_fact_tests {
         let user_seq = seed_user_turn(&store, 1);
         let spec = child_of_a_principal_without_reply();
         for (kind, key) in [
-            (ClosureKind::Speech, symbio_core::EVENT_ASSISTANT_FINAL),
-            (ClosureKind::Artifact, symbio_core::EVENT_ARTIFACT_ADDED),
+            (
+                ClosureKind::Speech,
+                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+            ),
+            (
+                ClosureKind::Artifact,
+                symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
+            ),
         ] {
             deny(&store, &spec, 1, user_seq, kind, key, "拒");
         }
@@ -4499,8 +4529,9 @@ mod actor_ledger_tests {
     use super::super::{TurnInput, TurnRunner};
     use symbio_core::{
         check_all, Entity, Event, EventStore, LatencyTier, Seq, SilentDeltas, Store, TokenIssuer,
-        Verb, EVENT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED,
+        Verb,
     };
+    use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED};
 
     /// 写**零格**的手法：只记一次模型往返（步数口径归执行体），不落任何事实。
     ///
@@ -4596,7 +4627,7 @@ mod actor_ledger_tests {
         assert!(out.fell_back, "什么都没写的收束是失败形状，不是「答完了」");
         let snapshot = store.range(Seq::new(0));
         let last = snapshot.last().expect("有收束格");
-        assert_eq!(last.kind, EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(last.kind, EVENT_CHAT_ASSISTANT_FALLBACK);
         assert_eq!(last.payload["reason"], "exhausted");
         assert_eq!(
             last.payload["detail"], "no_progress",
@@ -4639,7 +4670,7 @@ mod actor_ledger_tests {
             "越界那一格要先真入格，对账才有东西可对：{kinds:?}"
         );
         let last = snapshot.last().expect("有收束格");
-        assert_eq!(last.kind, EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(last.kind, EVENT_CHAT_ASSISTANT_FALLBACK);
         assert_eq!(
             last.payload["detail"], "undeclared-write",
             "名单外即停机；删掉对账这一步，这条用例红在 `no_progress`/静默收束上"

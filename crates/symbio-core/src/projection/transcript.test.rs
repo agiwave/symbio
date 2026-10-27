@@ -6,15 +6,16 @@
 //! 缺口（少了它，一次截断在 prompt 面上等于没发生过）。
 
 use super::transcript;
-use crate::event::{
-    Entity, Event, Verb, EVENT_ASSISTANT_FINAL, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
-    EVENT_USER_MESSAGE,
+use crate::event::{Entity, Event, Verb};
+use crate::test_fixtures::{
+    CHAT, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    EVENT_USER_MESSAGE, MESSAGE,
 };
 use crate::Budget;
 
 /// 投影成 `(role, text)` 序列（折叠关心的就是这两格）。
 fn entries(events: &[Event]) -> Vec<(String, String)> {
-    transcript()
+    transcript(CHAT, MESSAGE)
         .apply(events, i64::MAX, Budget::generous())
         .value
         .entries
@@ -39,7 +40,7 @@ fn user(turn: u64, node: &str, text: &str) -> Event {
 fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
     Event::pending(
         format!("f-{turn}"),
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         turn,
@@ -191,7 +192,7 @@ fn an_edit_for_an_unknown_node_is_a_no_op() {
 fn snapshot(tag: &str, msgs: Vec<serde_json::Value>) -> Event {
     Event::pending(
         format!("snap-{tag}"),
-        crate::EVENT_SESSION_CONSOLIDATED,
+        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         0,
@@ -212,7 +213,7 @@ fn msg(id: &str, role: &str, ty: Option<&str>, text: &str) -> serde_json::Value 
 /// 投影出的**完整条目**（折叠关心的不止 `(role, text)`——工具名与「不进请求包」
 /// 标记也是读侧语义）。
 fn full(events: &[Event]) -> Vec<super::TranscriptEntry> {
-    transcript()
+    transcript(CHAT, MESSAGE)
         .apply(events, i64::MAX, Budget::generous())
         .value
         .entries
@@ -338,7 +339,7 @@ fn only_the_latest_snapshot_counts() {
 fn an_empty_or_malformed_snapshot_does_not_wipe_the_history() {
     let broken = Event::pending(
         "snap-x",
-        crate::EVENT_SESSION_CONSOLIDATED,
+        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         0,
@@ -410,7 +411,7 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
         snapshot("a", vec![msg("s", "user", Some("body"), "摘要"), report]),
         user(2, "u-2", "压缩之后的问"),
     ];
-    let view = transcript()
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
     assert_eq!(
@@ -435,7 +436,7 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::EVENT_TURN_BRANCH,
+        crate::test_fixtures::EVENT_TURN_BRANCH,
         Entity::Turn,
         Verb::Asserted,
         2,
@@ -456,7 +457,7 @@ fn the_replaced_branch_stays_out_of_the_request_package() {
         branch("t-1", "t-2"),
         assistant(2, "x-2", "乙答复"),
     ];
-    let view = transcript()
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
         .value;
     assert_eq!(
@@ -488,7 +489,7 @@ fn switching_back_moves_the_request_package_back() {
     events.push(
         Event::pending(
             "sel-1",
-            crate::EVENT_BRANCH_SELECTED,
+            crate::test_fixtures::EVENT_TURN_BRANCH_SELECTED,
             Entity::Turn,
             Verb::Asserted,
             3,
@@ -496,7 +497,7 @@ fn switching_back_moves_the_request_package_back() {
         )
         .with_payload(serde_json::json!({ "selected": "t-1" })),
     );
-    let sent: Vec<String> = transcript()
+    let sent: Vec<String> = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
         .value
         .to_messages()
@@ -523,7 +524,7 @@ fn a_truncated_selected_branch_falls_back_instead_of_hiding_everything() {
         assistant(2, "x-2", "乙答复"),
         removed(&["t-2", "x-2"]),
     ];
-    let sent: Vec<String> = transcript()
+    let sent: Vec<String> = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, Budget::generous())
         .value
         .to_messages()

@@ -363,7 +363,7 @@ pub(crate) fn supplement_into_request(
     if let Err(e) = store.append(
         symbio_core::Event::pending(
             format!("s-{turn_no}-{no}"),
-            symbio_core::EVENT_TURN_SUPPLEMENTED,
+            symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED,
             symbio_core::Entity::Turn,
             symbio_core::Verb::Asserted,
             turn_no,

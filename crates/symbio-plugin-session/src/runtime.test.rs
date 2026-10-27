@@ -19,7 +19,7 @@ fn opened() -> Event {
 
 fn final_with(status: &str) -> Event {
     ev(
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Verb::Closed,
         json!({ "status": status, "text": "答", "id": "a-1" }),
     )
@@ -27,7 +27,7 @@ fn final_with(status: &str) -> Event {
 
 fn fallback(detail: &str) -> Event {
     ev(
-        EVENT_ASSISTANT_FALLBACK,
+        EVENT_CHAT_ASSISTANT_FALLBACK,
         Verb::Closed,
         json!({ "reason": "fallback", "detail": detail, "text": "兜底", "id": "fb-1" }),
     )
@@ -35,7 +35,7 @@ fn fallback(detail: &str) -> Event {
 
 fn progress() -> Event {
     ev(
-        EVENT_ASSISTANT_PROGRESS,
+        EVENT_CHAT_ASSISTANT_PROGRESS,
         Verb::Progressed,
         json!({ "status": "pending", "id": "p-1" }),
     )
@@ -115,7 +115,7 @@ fn final_aborted_settles_aborted() {
 #[test]
 fn final_failed_carries_the_detail() {
     let e = ev(
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Verb::Closed,
         json!({ "status": "failed", "reason": "fallback", "detail": "工具崩了" }),
     );
@@ -248,7 +248,7 @@ fn the_last_evidence_wins() {
 fn non_lifecycle_events_do_not_move_the_outcome() {
     let noise = [
         ev(
-            symbio_core::EVENT_MESSAGE_REMOVED,
+            symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
             Verb::Closed,
             json!({ "id": "m-1" }),
         ),
@@ -258,7 +258,7 @@ fn non_lifecycle_events_do_not_move_the_outcome() {
             json!({ "task_id": "t-1" }),
         ),
         ev(
-            symbio_core::EVENT_ASSISTANT_REPORTED,
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED,
             Verb::Progressed,
             json!({ "text": "汇报" }),
         ),

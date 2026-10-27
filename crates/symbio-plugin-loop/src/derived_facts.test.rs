@@ -21,13 +21,13 @@ use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
 use symbio_core::{
     check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 use symbio_plugin_api::effects::EffectInput;
+use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
 use super::super::recall::recall;
 use crate::control_decl::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+    COMMITMENT_VOCAB, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 
 /// 播下「本轮开口 + 收束」两格，返回 `(snapshot, user_seq)`。
@@ -59,7 +59,7 @@ fn seed_turn(
         .append(
             Event::pending(
                 format!("f-{turn}"),
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 turn,
@@ -99,12 +99,12 @@ impl symbio_plugin_api::ToolBehavior for PromiseStub {
         };
         let cid = format!("v2c-{}-{}", call.anchor(), call.call_id);
         symbio_core::commitment_events(
+            COMMITMENT_VOCAB,
             &cid,
             call.principal,
             call.source,
             promise,
-            call.success,
-            call.why,
+            if call.success { Ok(()) } else { Err(call.why) },
             call.user_seq,
         )
         .into_iter()
@@ -160,11 +160,11 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
 
     let opened = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_COMMITMENT_OFFERED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_COMMITMENT_OPENED)
         .expect("立约格");
     let released = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_COMMITMENT_RELEASED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED)
         .expect("守约格");
 
     assert_eq!(opened.entity, Entity::Commitment);
@@ -235,7 +235,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
 
     let opened = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_COMMITMENT_OFFERED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_COMMITMENT_OPENED)
         .expect("立约格");
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
@@ -285,7 +285,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
     let broken = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_COMMITMENT_BROKEN)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN)
         .expect("违约收束必须成格");
     assert_eq!(
         broken.payload.get("why").and_then(|v| v.as_str()),
@@ -295,7 +295,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
     let asserted = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_COMMITMENT_ASSERTED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED)
         .expect("违约宣告必须成格");
     assert_eq!(asserted.entity, Entity::Commitment);
     let statement = asserted
@@ -546,7 +546,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     );
     let verdict = snap
         .iter()
-        .find(|e| e.kind == EVENT_VERDICT_ASSERTED)
+        .find(|e| e.kind == crate::control_decl::EVENT_VERDICT_ASSERTED)
         .expect("低于阈值必须落淘汰裁决");
     assert_eq!(verdict.entity, Entity::Verdict);
     assert_eq!(verdict.verb, Verb::Asserted);
@@ -592,7 +592,9 @@ fn a_kept_delegation_never_eliminates() {
 
     let snap = store.range(Seq::new(0));
     assert!(
-        !snap.iter().any(|e| e.kind == EVENT_VERDICT_ASSERTED),
+        !snap
+            .iter()
+            .any(|e| e.kind == crate::control_decl::EVENT_VERDICT_ASSERTED),
         "守约 ⇒ 声誉 +1 ⇒ 一条裁决都不该有"
     );
 }
@@ -632,7 +634,7 @@ fn elimination_does_not_write_a_second_verdict() {
     let snap = store.range(Seq::new(0));
     assert_eq!(
         snap.iter()
-            .filter(|e| e.kind == EVENT_VERDICT_ASSERTED)
+            .filter(|e| e.kind == crate::control_decl::EVENT_VERDICT_ASSERTED)
             .count(),
         1,
         "同一条撤销只落一次格（审计面不缺、幂等键不撞）"
@@ -669,7 +671,9 @@ fn a_principal_without_assign_work_is_never_eliminated() {
 
     let snap = store.range(Seq::new(0));
     assert!(
-        !snap.iter().any(|e| e.kind == EVENT_VERDICT_ASSERTED),
+        !snap
+            .iter()
+            .any(|e| e.kind == crate::control_decl::EVENT_VERDICT_ASSERTED),
         "对等主体不持 assign.work ⇒ 淘汰机制不覆盖它（stage 字面边界）"
     );
 }

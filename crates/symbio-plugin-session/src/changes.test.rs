@@ -4,7 +4,8 @@
 //! `projection/changes.test.rs` 钉死；本文件只判出口这一半——地址 / 文案 / 空账。
 
 use super::read_changes;
-use symbio_core::{Entity, Event, Verb, EVENT_ARTIFACT_ADDED, PRINCIPAL_MAIN};
+use symbio_core::{Entity, Event, Verb, PRINCIPAL_MAIN};
+use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 fn write(id: &str, path: &str, turn: u64) -> Event {
     Event::pending(

@@ -11,9 +11,10 @@
 
 use super::super::transcript::{transcript, PromptMessage};
 use super::{verify, PromptGap as Gap};
-use crate::event::{
-    Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED,
-    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
+use crate::event::{Entity, Event, Verb};
+use crate::test_fixtures::{
+    CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED,
+    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
 
 /// 一条送进模型的消息。
@@ -48,7 +49,7 @@ fn user_turn(turn: u64, text: &str) -> Event {
 fn assistant_turn(turn: u64, text: &str) -> Event {
     Event::pending(
         format!("f-{turn}"),
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         turn,
@@ -109,7 +110,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         entry("assistant", "事实源里没有这句", None), // 无出处
     ];
 
-    let rep = verify(&events, &entries, None);
+    let rep = verify(&events, &entries, None, &CHAT, &MESSAGE);
     assert!(!rep.is_complete(), "判据必须报出缺口（否则它恒绿、无用）");
     assert_eq!(rep.checked_events, 3, "只把投影内的三条计入");
     assert_eq!(rep.checked_entries, 3);
@@ -118,7 +119,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     assert!(
         rep.gaps.iter().any(|g| matches!(
             g,
-            Gap::DroppedFromPrompt { kind, turn: 0 } if kind == EVENT_ASSISTANT_FINAL
+            Gap::DroppedFromPrompt { kind, turn: 0 } if kind == EVENT_CHAT_ASSISTANT_FINAL
         )),
         "必须报出「网格有、prompt 没有」：{}",
         rep.summary()
@@ -143,7 +144,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     let role_bad = {
         let evs = vec![user_turn(0, "问")];
         let msgs = vec![entry("assistant", "问", None)];
-        verify(&evs, &msgs, None)
+        verify(&evs, &msgs, None, &CHAT, &MESSAGE)
     };
     assert!(
         role_bad.gaps.iter().any(|g| matches!(
@@ -160,11 +161,11 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
             entry("user", "问", None),
             entry("assistant", "已经完成 1 轮工具调用", None),
         ];
-        verify(&evs, &msgs, None)
+        verify(&evs, &msgs, None, &CHAT, &MESSAGE)
     };
     assert!(
         leaked.gaps.iter().any(
-            |g| matches!(g, Gap::ExcludedLeakedIntoPrompt { kind, .. } if kind == EVENT_ASSISTANT_REPORTED)
+            |g| matches!(g, Gap::ExcludedLeakedIntoPrompt { kind, .. } if kind == EVENT_CHAT_ASSISTANT_REPORTED)
         ),
         "必须报出「界面文本漏进请求包」：{}",
         leaked.summary()
@@ -175,7 +176,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
 fn report(turn: u64, text: &str) -> Event {
     Event::pending(
         format!("r-{turn}"),
-        EVENT_ASSISTANT_REPORTED,
+        EVENT_CHAT_ASSISTANT_REPORTED,
         Entity::Turn,
         Verb::Asserted,
         turn,
@@ -196,7 +197,7 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
         user_turn(0, "跑个长任务"),
         report(0, "已经完成 1 轮工具调用，用时约 3 秒，还在继续。"),
     ];
-    let view = transcript()
+    let view = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, crate::Budget::generous())
         .value;
 
@@ -216,7 +217,7 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
     );
     assert_eq!(messages[0].role, "user");
 
-    let rep = verify(&events, &messages, None);
+    let rep = verify(&events, &messages, None, &CHAT, &MESSAGE);
     assert!(rep.is_complete(), "汇报轮必须双向完整：{}", rep.summary());
     assert_eq!(rep.checked_events, 2, "汇报也在判据覆盖范围内");
 }
@@ -229,7 +230,7 @@ fn a_single_turn_is_complete() {
         entry("user", "你好", None),
         entry("assistant", "你好呀", None),
     ];
-    let rep = verify(&events, &entries, None);
+    let rep = verify(&events, &entries, None, &CHAT, &MESSAGE);
     assert!(rep.is_complete(), "平凡值必须无假红：{}", rep.summary());
 }
 
@@ -254,7 +255,7 @@ fn mutation_events_are_folded_not_silently_skipped() {
 
     // ① + ② 正确折叠后的那批（转写的产出）：改过的那句在，被删的那句没了。
     let folded = vec![entry("user", "改过的问题", None)];
-    let rep = verify(&events, &folded, None);
+    let rep = verify(&events, &folded, None, &CHAT, &MESSAGE);
     assert_eq!(rep.mutations, 2, "两个变更格都要计入：{}", rep.summary());
     assert!(
         rep.is_complete(),
@@ -264,7 +265,7 @@ fn mutation_events_are_folded_not_silently_skipped() {
 
     // ③a 没折叠：prompt 里还是**旧**正文 ⇒ 网格→prompt 丢事实。
     let unfolded = vec![entry("user", "原始问题", None)];
-    let rep_unfolded = verify(&events, &unfolded, None);
+    let rep_unfolded = verify(&events, &unfolded, None, &CHAT, &MESSAGE);
     assert!(
         rep_unfolded
             .gaps
@@ -280,7 +281,7 @@ fn mutation_events_are_folded_not_silently_skipped() {
         entry("user", "改过的问题", None),
         entry("assistant", "原始回答", None),
     ];
-    let rep_leaked = verify(&events, &leaked, None);
+    let rep_leaked = verify(&events, &leaked, None, &CHAT, &MESSAGE);
     assert!(
         rep_leaked
             .gaps
@@ -330,7 +331,7 @@ fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
         .collect();
     Event::pending(
         "snap-0",
-        crate::EVENT_SESSION_CONSOLIDATED,
+        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         0,
@@ -362,7 +363,7 @@ fn a_compacted_history_is_complete_after_the_snapshot() {
         entry("assistant", "保留的近轮答复", None),
         entry("user", "压缩之后的问题", None),
     ];
-    let rep = verify(&events, &msgs, None);
+    let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(rep.is_complete(), "压缩之后必须双向完整：{}", rep.summary());
     assert_eq!(
         rep.consolidations, 1,
@@ -393,7 +394,7 @@ fn the_user_turn_a_snapshot_carries_claims_only_once() {
         entry("user", "[CONTEXT SNAPSHOT] 摘要", None),
         entry("user", "本轮的发言", None),
     ];
-    let rep = verify(&events, &msgs, None);
+    let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(
         rep.is_complete(),
         "同一条发言两个出处不是两个缺口：{}",
@@ -411,7 +412,7 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
         ("u-1", "user", "保留的近轮"),
     ])];
     let msgs = vec![entry("user", "摘要", None)];
-    let rep = verify(&events, &msgs, None);
+    let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(
         rep.gaps
             .iter()
@@ -431,7 +432,7 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::EVENT_TURN_BRANCH,
+        crate::test_fixtures::EVENT_TURN_BRANCH,
         Entity::Turn,
         Verb::Asserted,
         2,
@@ -453,7 +454,7 @@ fn branch_events() -> Vec<Event> {
 #[test]
 fn a_replaced_branch_does_not_make_the_judge_red() {
     let events = branch_events();
-    let msgs = transcript()
+    let msgs = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, crate::Budget::generous())
         .value
         .to_messages();
@@ -462,7 +463,7 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
         vec!["问", "乙答复"],
         "投影只送当前那一支"
     );
-    let rep = verify(&events, &msgs, None);
+    let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(rep.is_complete(), "重试轮必须双向完整：{}", rep.summary());
 }
 
@@ -474,12 +475,12 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
 #[test]
 fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
     let events = branch_events();
-    let mut msgs = transcript()
+    let mut msgs = transcript(CHAT, MESSAGE)
         .apply(&events, i64::MAX, crate::Budget::generous())
         .value
         .to_messages();
     msgs.insert(1, entry("assistant", "甲答复", None));
-    let rep = verify(&events, &msgs, None);
+    let rep = verify(&events, &msgs, None, &CHAT, &MESSAGE);
     assert!(
         rep.gaps
             .iter()

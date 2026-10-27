@@ -21,7 +21,7 @@ pub mod hooks;
 pub mod routes;
 
 pub use declarations::{
-    assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations,
+    assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,
 };
 pub use effects::{

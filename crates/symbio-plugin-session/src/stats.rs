@@ -45,6 +45,7 @@
 //! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与 `projection/slo.test.rs`
 //! 的扫描口同一口径。
 
+use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -370,8 +371,8 @@ pub(crate) fn read(
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
     // 四列全部来自同一份事件切片（D-044：实测与判据同源）。
-    let latency = slo_report().read_all(&snapshot).value;
-    let fallback = fallback_rate().read_all(&snapshot).value;
+    let latency = slo_report(CHAT_VOCAB).read_all(&snapshot).value;
+    let fallback = fallback_rate(CHAT_VOCAB).read_all(&snapshot).value;
     let cost = cost_ledger().read_all(&snapshot).value;
     // 用量列：与四列同一份切片、同一个 as-of。它读的是应答载荷的 `usage`
     // （`token_ledger` 的模块文档说明为什么不能与 `cost` 合成一列）。
@@ -427,15 +428,17 @@ pub(crate) fn read(
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
     // 不变量清单的词汇面（DE-024 D-203）：判据问「这个名字扮演什么角色」，答案取自
-    // owner 交来的装配表；本二进制没装出表时回退内核表（迁移期口径，D-199）。
-    let vocab =
-        symbio_plugin_api::declared_vocab().unwrap_or_else(symbio_kernel::event::kernel_vocab);
+    // owner 交来的装配表；本二进制没装出表时用清单生成物（`symbio_plugin_api::vocab`），
+    // 内核表那一档已随名字归零删除。
+    let vocab = symbio_plugin_api::vocab();
     let invariants = serde_json::to_value(check_all(vocab, &snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
     // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
     // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
-    let rep = symbio_core::reputation().read_all(&snapshot).value;
+    let rep = symbio_core::reputation(COMMITMENT_VOCAB)
+        .read_all(&snapshot)
+        .value;
     let reputation = if may_read {
         let own = rep.of(session_principal);
         serde_json::json!({ "own": own, "by_principal": rep.by_principal })
@@ -464,8 +467,12 @@ pub(crate) fn read(
     // plan/10 批 3 的工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
     // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
-    let transcript = serde_json::to_value(transcript().read_all(&snapshot).value)
-        .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
+    let transcript = serde_json::to_value(
+        transcript(CHAT_VOCAB, MESSAGE_VOCAB)
+            .read_all(&snapshot)
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
     // 主动性列（02 §3.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
     // `conation.expressed`（欲）与 `task.opened`（升格，溯源认）——「自发发起」的

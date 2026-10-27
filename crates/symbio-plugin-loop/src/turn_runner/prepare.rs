@@ -12,6 +12,7 @@
 //! `PreparedFlow::Done` 里返回，语义与拆分前的 `return` 相同。
 
 use super::*;
+use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
 
 /// 轮首准备的两条出口：继续驱动，或本轮已收口（定稿答话 / 空答兜底 / 中止）。
 pub(crate) enum PreparedFlow {
@@ -198,7 +199,7 @@ where
             store.append(
                 Event::pending(
                     format!("op-{turn}"),
-                    EVENT_ASSISTANT_OPENING,
+                    EVENT_CHAT_ASSISTANT_OPENING,
                     Entity::Turn,
                     Verb::Asserted,
                     turn,
@@ -276,7 +277,7 @@ where
                 turn,
                 user_seq,
                 ClosureKind::Speech,
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 &why,
             );
             symbio_core::plugin_warn!(
@@ -298,7 +299,7 @@ where
         store.append(
             Event::pending(
                 format!("f-{turn}"),
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 turn,
@@ -352,7 +353,13 @@ where
     // 此时抛错只会把「模型看得不全」变成「这一轮直接失败」；而看得不全恰恰是静默的。
     {
         let declared = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty());
-        let rep = symbio_core::verify_prompt_fidelity(&snapshot, &base_messages, declared);
+        let rep = symbio_core::verify_prompt_fidelity(
+            &snapshot,
+            &base_messages,
+            declared,
+            &CHAT_VOCAB,
+            &MESSAGE_VOCAB,
+        );
         if !rep.is_complete() {
             symbio_core::plugin_warn!(
                 "actors",
@@ -373,7 +380,7 @@ where
     // 已有产物数**起编号——等待轮可能已落过产物格，从 0 起会撞幂等键。
     let artifact_no = full_snapshot
         .iter()
-        .filter(|e| e.turn == turn && e.kind == symbio_core::EVENT_ARTIFACT_ADDED)
+        .filter(|e| e.turn == turn && e.kind == symbio_plugin_api::events::EVENT_ARTIFACT_ADDED)
         .count() as u64;
     let responses: Vec<String> = Vec::new();
     let last_output_facts = StreamNodeFacts::default();
@@ -434,7 +441,7 @@ where
 /// 本轮刚发生的工具交换快照取在它落格**之前**，由调用方就地追加到基线上。
 pub(crate) fn render_messages(events: &[Event]) -> Vec<symbio_core::PromptMessage> {
     // `read_all` 说的是**口径**（as-of 一切已发生、不设扫描窗口），不是作用域。
-    symbio_core::transcript()
+    symbio_core::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .read_all(events)
         .value
         .to_messages()

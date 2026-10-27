@@ -45,8 +45,9 @@
 //! 与 `turn_id` / `result_id` 同一条纪律）。
 
 use crate::chat_node::ChatNode;
-use crate::event::{Event, EVENT_BRANCH_SELECTED, EVENT_TURN_BRANCH};
+use crate::event::Event;
 use crate::node_build::subtree_of;
+use crate::ChatVocab;
 
 /// 成员根节点上的分支标注键（`meta.branch`）。
 ///
@@ -114,45 +115,40 @@ impl BranchLedger {
     /// 组锚 = 最早出现的成员 id：`of` 是被重试的那一支，它先入集，所以锚天然是**第一次
     /// 尝试**的根。在已属于某组的成员上再重试时两组并成一组、锚取较早的那个——
     /// 「切回旧支再重试一次」因此不会开出第二个组。
-    fn fold(events: &[Event]) -> Self {
+    fn fold(events: &[Event], v: &ChatVocab) -> Self {
         let mut parent: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut picks: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for e in events {
-            match e.kind.as_str() {
-                EVENT_TURN_BRANCH => {
-                    let (Some(of), Some(into)) = (payload_str(e, "of"), payload_str(e, "into"))
-                    else {
-                        continue;
-                    };
-                    if of == into {
-                        continue;
-                    }
-                    // 各自先入集（没见过同伴时自成一组），再并。
-                    parent.entry(of.clone()).or_insert_with(|| of.clone());
-                    parent.entry(into.clone()).or_insert_with(|| into.clone());
-                    let ra = anchor_of(&mut parent, &of);
-                    let rb = anchor_of(&mut parent, &into);
-                    if ra != rb {
-                        parent.insert(rb.clone(), ra.clone());
-                        // 被并掉的锚不再是锚，它的读法记在锚上才有人读得到；而这一条分支格
-                        // 马上就要在合并后的锚上写下新的读法 ⇒ 旧的那份直接作废。
-                        picks.remove(&rb);
-                    }
-                    picks.insert(anchor_of(&mut parent, &into), into);
+            if e.kind == v.branch {
+                let (Some(of), Some(into)) = (payload_str(e, "of"), payload_str(e, "into")) else {
+                    continue;
+                };
+                if of == into {
+                    continue;
                 }
-                EVENT_BRANCH_SELECTED => {
-                    let Some(sel) = payload_str(e, "selected") else {
-                        continue;
-                    };
-                    if !parent.contains_key(&sel) {
-                        // 选择的是一组里从来没有过的 id（手改的 WAL / 已整段截断）⇒ 不认。
-                        continue;
-                    }
-                    let anchor = anchor_of(&mut parent, &sel);
-                    picks.insert(anchor, sel);
+                // 各自先入集（没见过同伴时自成一组），再并。
+                parent.entry(of.clone()).or_insert_with(|| of.clone());
+                parent.entry(into.clone()).or_insert_with(|| into.clone());
+                let ra = anchor_of(&mut parent, &of);
+                let rb = anchor_of(&mut parent, &into);
+                if ra != rb {
+                    parent.insert(rb.clone(), ra.clone());
+                    // 被并掉的锚不再是锚，它的读法记在锚上才有人读得到；而这一条分支格
+                    // 马上就要在合并后的锚上写下新的读法 ⇒ 旧的那份直接作废。
+                    picks.remove(&rb);
                 }
-                _ => {}
+                picks.insert(anchor_of(&mut parent, &into), into);
+            } else if e.kind == v.branch_selected {
+                let Some(sel) = payload_str(e, "selected") else {
+                    continue;
+                };
+                if !parent.contains_key(&sel) {
+                    // 选择的是一组里从来没有过的 id（手改的 WAL / 已整段截断）⇒ 不认。
+                    continue;
+                }
+                let anchor = anchor_of(&mut parent, &sel);
+                picks.insert(anchor, sel);
             }
         }
         Self { parent, picks }
@@ -189,15 +185,16 @@ struct BranchMark {
 fn marks(
     events: &[Event],
     live: impl Fn(&str) -> bool,
+    v: &ChatVocab,
 ) -> std::collections::HashMap<String, BranchMark> {
-    let ledger = BranchLedger::fold(events);
+    let ledger = BranchLedger::fold(events, v);
     if ledger.is_empty() {
         return std::collections::HashMap::new();
     }
     let mut parent = ledger.parent;
     let mut seen: Vec<String> = Vec::new();
     for e in events {
-        if e.kind != EVENT_TURN_BRANCH {
+        if e.kind != v.branch {
             continue;
         }
         for key in ["of", "into"] {
@@ -248,8 +245,8 @@ fn marks(
 ///
 /// 在世的证据这里是「**有没有对应的节点**」：一支从没产出过根节点就没有可画的东西，
 /// 把它列进 `candidates` 只会多出一个点不动的候选。
-pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event]) {
-    let marks = marks(events, |id| nodes.iter().any(|n| n.id == id));
+pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
+    let marks = marks(events, |id| nodes.iter().any(|n| n.id == id), v);
     if marks.is_empty() {
         return;
     }
@@ -284,8 +281,9 @@ pub fn event_branch_root(e: &Event) -> Option<&str> {
 pub fn unselected_roots(
     events: &[Event],
     removed: impl Fn(&str) -> bool,
+    v: &ChatVocab,
 ) -> std::collections::HashSet<String> {
-    marks(events, |id| !removed(id))
+    marks(events, |id| !removed(id), v)
         .into_iter()
         .filter(|(_, m)| !m.selected)
         .map(|(id, _)| id)

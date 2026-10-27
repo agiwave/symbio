@@ -4,9 +4,9 @@
 //! 合规序列**不报警**（检查不是永远红的状态机）。两组都绿，检查才存在。
 
 use super::*;
-use crate::event::kernel_vocab;
 use crate::event::{Entity, Event, EventEnvelope, Verb};
 use crate::store::{EventStore, Store};
+use crate::test_fixtures::EVENTS;
 use crate::ClosureReason;
 
 /// 造一条 pending 事件（未入库，无 seq）。
@@ -78,7 +78,7 @@ fn one_final_per_turn_passes() {
         pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
         pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
     ]);
-    assert!(final_unique_per_turn(kernel_vocab(), &events).is_empty());
+    assert!(final_unique_per_turn(EVENTS, &events).is_empty());
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn two_finals_in_one_turn_is_detected() {
         // 同一 turn 的第二条 final——转写收敛性被破坏。
         pending("f0b", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
     ]);
-    let bad = final_unique_per_turn(kernel_vocab(), &events);
+    let bad = final_unique_per_turn(EVENTS, &events);
     assert_eq!(bad.len(), 1, "一轮两条 final 必须被看见");
     assert_eq!(bad[0].event_id, "f0b");
     assert!(
@@ -106,7 +106,7 @@ fn closed_tasks_do_not_count_as_final() {
         pending("t0", "task.completed", Entity::Task, Verb::Closed, 0),
         pending("t1", "task.completed", Entity::Task, Verb::Closed, 0),
     ]);
-    assert!(final_unique_per_turn(kernel_vocab(), &events).is_empty());
+    assert!(final_unique_per_turn(EVENTS, &events).is_empty());
 }
 
 // ── C2 对偶：每 turn 至多 1 条开轮（`u-{turn}`）────────────────────────
@@ -359,7 +359,7 @@ fn closure_reason_in_the_closed_set_passes() {
     for r in ClosureReason::ALL {
         let events = vec![closed("f0", "chat.assistant.final", Some(r.as_str()))];
         assert!(
-            closure_reason_closed(kernel_vocab(), &events, true).is_empty(),
+            closure_reason_closed(EVENTS, &events, true).is_empty(),
             "{r:?} 是闭集里的合法取值，不该红"
         );
     }
@@ -368,7 +368,7 @@ fn closure_reason_in_the_closed_set_passes() {
 #[test]
 fn closure_reason_missing_is_reported_when_not_graced() {
     let events = vec![closed("f0", "chat.assistant.final", None)];
-    let strict = closure_reason_closed(kernel_vocab(), &events, false);
+    let strict = closure_reason_closed(EVENTS, &events, false);
     assert_eq!(strict.len(), 1, "严判档：缺 `reason` 必须红");
     assert!(
         strict[0].why.contains("缺 `reason`"),
@@ -376,7 +376,7 @@ fn closure_reason_missing_is_reported_when_not_graced() {
         strict[0].why
     );
     assert!(
-        closure_reason_closed(kernel_vocab(), &events, true).is_empty(),
+        closure_reason_closed(EVENTS, &events, true).is_empty(),
         "读侧宽限档：接线前落库的历史收束格没有 `reason`，首日不假红"
     );
 }
@@ -386,7 +386,7 @@ fn closure_reason_outside_the_closed_set_is_reported_either_way() {
     // 越界**不放宽**：写了一个不在闭集里的值，从来不是历史问题。
     let events = vec![closed("f0", "chat.assistant.final", Some("timeout"))];
     for graced in [true, false] {
-        let bad = closure_reason_closed(kernel_vocab(), &events, graced);
+        let bad = closure_reason_closed(EVENTS, &events, graced);
         assert_eq!(bad.len(), 1, "越界在两种档位下都要红（graced={graced}）");
         assert!(
             bad[0].why.contains("timeout") && bad[0].why.contains("闭集"),
@@ -404,11 +404,11 @@ fn grace_ends_at_the_first_stop_cell_that_carries_a_reason() {
         closed("f1", "chat.assistant.final", Some("completed")),
     ];
     assert!(
-        closure_reason_closed(kernel_vocab(), &events, true).is_empty(),
+        closure_reason_closed(EVENTS, &events, true).is_empty(),
         "分界**之前**的缺口算历史归档，仍要放宽"
     );
     assert_eq!(
-        closure_reason_closed(kernel_vocab(), &events, false).len(),
+        closure_reason_closed(EVENTS, &events, false).len(),
         1,
         "严判档不看分界：历史段的缺口一样报"
     );
@@ -422,7 +422,7 @@ fn a_new_gap_after_the_boundary_is_red_under_the_graced_read() {
         closed("f0", "chat.assistant.final", Some("completed")),
         closed("f1", "chat.assistant.final", None),
     ];
-    let bad = closure_reason_closed(kernel_vocab(), &events, true);
+    let bad = closure_reason_closed(EVENTS, &events, true);
     assert_eq!(
         bad.len(),
         1,
@@ -444,11 +444,11 @@ fn an_all_historical_log_stays_green_under_the_graced_read() {
         closed("f2", "chat.assistant.final", None),
     ];
     assert!(
-        closure_reason_closed(kernel_vocab(), &events, true).is_empty(),
+        closure_reason_closed(EVENTS, &events, true).is_empty(),
         "纯历史存档不该飘红"
     );
     assert_eq!(
-        closure_reason_closed(kernel_vocab(), &events, false).len(),
+        closure_reason_closed(EVENTS, &events, false).len(),
         3,
         "严判档仍逐条报"
     );
@@ -470,7 +470,7 @@ fn closure_reason_covers_both_closure_cells_and_the_denial_fact() {
         ),
     ];
     assert_eq!(
-        closure_reason_closed(kernel_vocab(), &events, false).len(),
+        closure_reason_closed(EVENTS, &events, false).len(),
         3,
         "两种收束格 + 否定事实，缺 `reason` 一个都逃不掉"
     );
@@ -487,7 +487,7 @@ fn closure_reason_denied_on_a_denial_fact_passes() {
         "main",
     )
     .with_payload(serde_json::json!({ "reason": ClosureReason::Denied.as_str() }));
-    assert!(closure_reason_closed(kernel_vocab(), &[e], false).is_empty());
+    assert!(closure_reason_closed(EVENTS, &[e], false).is_empty());
 }
 
 #[test]
@@ -502,7 +502,7 @@ fn non_closure_cells_are_not_asked_for_a_reason() {
         "main",
     )];
     assert!(
-        closure_reason_closed(kernel_vocab(), &events, false).is_empty(),
+        closure_reason_closed(EVENTS, &events, false).is_empty(),
         "进展格不是停机格"
     );
 }
@@ -524,9 +524,9 @@ fn an_artifact_is_settled_but_not_a_stop_so_it_is_not_asked_for_a_reason() {
         ),
     ];
     assert!(
-        closure_reason_closed(kernel_vocab(), &events, false).is_empty(),
+        closure_reason_closed(EVENTS, &events, false).is_empty(),
         "产物格不是停机格：{:?}",
-        closure_reason_closed(kernel_vocab(), &events, false)
+        closure_reason_closed(EVENTS, &events, false)
     );
 }
 
@@ -540,10 +540,7 @@ fn check_all_on_clean_sequence_is_empty() {
         pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
         pending("v0", "classify.verdict", Entity::Verdict, Verb::Asserted, 0).with_produced_by(0),
     ]);
-    assert!(
-        check_all(kernel_vocab(), &events).is_empty(),
-        "合规序列九查全绿"
-    );
+    assert!(check_all(EVENTS, &events).is_empty(), "合规序列九查全绿");
 }
 
 // ── 故障注入用例集（S1 步骤 4：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
@@ -568,9 +565,9 @@ fn fault_timeout_turn_never_settles_is_caught() {
     // 宽限档（`true`）：切片尾部这一轮可能只是**还在生成**——纯函数无从分辨，
     // 放行（读侧口径，见 `check_all`）。两条判据并存，不是谁覆盖谁。
     assert!(
-        check_all(kernel_vocab(), &events).is_empty(),
+        check_all(EVENTS, &events).is_empty(),
         "读侧不该把在途尾轮报成静默中断：{:?}",
-        check_all(kernel_vocab(), &events)
+        check_all(EVENTS, &events)
     );
 }
 
@@ -599,7 +596,7 @@ fn fault_timeout_avoided_by_artifact_event() {
         pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
         pending(
             "a0",
-            crate::EVENT_ARTIFACT_ADDED,
+            crate::test_fixtures::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
             0,
@@ -617,7 +614,7 @@ fn fault_timeout_avoided_by_artifact_event() {
         pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
         pending(
             "a1",
-            crate::EVENT_ARTIFACT_ADDED,
+            crate::test_fixtures::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
             1,
@@ -661,7 +658,7 @@ fn fault_double_final_is_caught_by_check_all() {
         pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
         pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
     ]);
-    let violations = check_all(kernel_vocab(), &events);
+    let violations = check_all(EVENTS, &events);
     assert!(
         violations.iter().any(|v| v.why.contains("final")),
         "{:?}",
@@ -677,7 +674,7 @@ fn fault_double_open_is_caught_by_check_all() {
         pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
         pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
     ]);
-    let violations = check_all(kernel_vocab(), &events);
+    let violations = check_all(EVENTS, &events);
     assert_eq!(violations.len(), 1, "只有开轮这一条红：{violations:?}");
     assert!(violations[0].why.contains("开轮"), "{violations:?}");
 }
@@ -691,11 +688,11 @@ fn fault_missing_provenance_is_caught_by_check_all() {
     };
     let events = stored(vec![bare]);
     assert!(
-        check_all(kernel_vocab(), &events)
+        check_all(EVENTS, &events)
             .iter()
             .any(|v| v.why.contains("溯源")),
         "{:?}",
-        check_all(kernel_vocab(), &events)
+        check_all(EVENTS, &events)
     );
 }
 
@@ -730,11 +727,11 @@ fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {
     assert_eq!(bad.len(), 1, "被后续轮越过的未收束轮必须报");
     assert_eq!(bad[0].event_id, "u0", "违规锚在缺口本身（开轮那条）");
     assert!(
-        check_all(kernel_vocab(), &overtaken)
+        check_all(EVENTS, &overtaken)
             .iter()
             .any(|v| v.why.contains("未收束")),
         "经 check_all 也要红：{:?}",
-        check_all(kernel_vocab(), &overtaken)
+        check_all(EVENTS, &overtaken)
     );
 }
 
@@ -756,16 +753,16 @@ fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
         .with_cost_ms(2_000),
     ]);
     assert_eq!(
-        declared_budget_ms(kernel_vocab(), &declared),
+        declared_budget_ms(EVENTS, &declared),
         Some(80),
         "声明档位 ⇒ 预算 = 该档四层预算表"
     );
     assert!(
-        check_all(kernel_vocab(), &declared)
+        check_all(EVENTS, &declared)
             .iter()
             .any(|v| v.why.contains("超")),
         "读侧必须看见超预算：{:?}",
-        check_all(kernel_vocab(), &declared)
+        check_all(EVENTS, &declared)
     );
 
     // 一档都没声明 ⇒ `None` ⇒ 不判（没有预算就没有"超"）。
@@ -777,11 +774,11 @@ fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
         0,
     )
     .with_cost_ms(9_999_999)]);
-    assert_eq!(declared_budget_ms(kernel_vocab(), &undeclared), None);
+    assert_eq!(declared_budget_ms(EVENTS, &undeclared), None);
     assert!(
-        check_all(kernel_vocab(), &undeclared).is_empty(),
+        check_all(EVENTS, &undeclared).is_empty(),
         "未声明档位的切片首日不该红：{:?}",
-        check_all(kernel_vocab(), &undeclared)
+        check_all(EVENTS, &undeclared)
     );
 }
 
@@ -808,16 +805,16 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
         .with_cost_ms(2_000),
     ]);
     assert_eq!(
-        declared_budget_ms(kernel_vocab(), &numeric_wins),
+        declared_budget_ms(EVENTS, &numeric_wins),
         Some(5_000),
         "载荷带 budget_ms 数值 ⇒ 取数值，不取档位映射"
     );
     assert!(
-        !check_all(kernel_vocab(), &numeric_wins)
+        !check_all(EVENTS, &numeric_wins)
             .iter()
             .any(|v| v.why.contains("超")),
         "数值优先：2000ms 未超 5000ms，不得报：{:?}",
-        check_all(kernel_vocab(), &numeric_wins)
+        check_all(EVENTS, &numeric_wins)
     );
 
     // ② 数值更严时照样红（证明它不是「只取更宽」，而是「数值说了算」）。
@@ -835,16 +832,13 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
         .with_produced_by(0)
         .with_cost_ms(2_000),
     ]);
-    assert_eq!(
-        declared_budget_ms(kernel_vocab(), &numeric_strict),
-        Some(50)
-    );
+    assert_eq!(declared_budget_ms(EVENTS, &numeric_strict), Some(50));
     assert!(
-        check_all(kernel_vocab(), &numeric_strict)
+        check_all(EVENTS, &numeric_strict)
             .iter()
             .any(|v| v.why.contains("超")),
         "数值严于档位时也必须看见超预算：{:?}",
-        check_all(kernel_vocab(), &numeric_strict)
+        check_all(EVENTS, &numeric_strict)
     );
 
     // ③ 缺数值回退档位（向后兼容：接线前落的历史事件 / 旧 WAL）。
@@ -858,7 +852,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     )
     .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" }))]);
     assert_eq!(
-        declared_budget_ms(kernel_vocab(), &tier_fallback),
+        declared_budget_ms(EVENTS, &tier_fallback),
         Some(80),
         "无 budget_ms ⇒ 回退档位映射"
     );
@@ -873,7 +867,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
         "user",
     )
     .with_payload(serde_json::json!({ "text": "问" }))]);
-    assert_eq!(declared_budget_ms(kernel_vocab(), &neither), None);
+    assert_eq!(declared_budget_ms(EVENTS, &neither), None);
 }
 
 // ── D-203：判据读声明，不读名字 ─────────────────────────────────────────
@@ -918,7 +912,7 @@ fn a_final_is_counted_because_it_declares_the_role_not_because_of_its_name() {
     // 同一批事件换一张**不认识这些名字**的表 ⇒ 判据空转（这正是装配口
     // `Gap::UnmannedRole` 与门禁 CS-008 要拦的形状，不是判据自己的错）。
     assert!(
-        final_unique_per_turn(kernel_vocab(), &dup).is_empty(),
+        final_unique_per_turn(EVENTS, &dup).is_empty(),
         "词汇表里没有的名字不扮演任何角色——角色来自表，不是来自猜"
     );
 }

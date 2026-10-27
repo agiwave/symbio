@@ -44,7 +44,8 @@ use symbio_core::{
     PluginError, PluginInvokeRequest, PluginSimpleRequest, Seq, Store, TurnOutput, EVENT_FAILED,
     EVENT_REQUEST, EVENT_SENT,
 };
-use symbio_core::{Entity, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_BRANCH};
+use symbio_core::{Entity, Verb};
+use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_BRANCH};
 
 // ── 夹具 ────────────────────────────────────────────────────────────────
 
@@ -554,7 +555,7 @@ async fn drive_stage_stops_when_the_stage_owes_nothing() {
         .append(
             Event::pending(
                 "final-0",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 h.turn.turn_no,

@@ -4,7 +4,8 @@
 //! 本文件只判 core 这一半：从事实到 `{path, op, turn, changes}`。
 
 use super::{workdir_changes, FileOp};
-use crate::event::{Entity, Event, Verb, EVENT_ARTIFACT_ADDED};
+use crate::event::{Entity, Event, Verb};
+use crate::test_fixtures::{EVENT_ARTIFACT_ADDED, MESSAGE};
 
 /// 一条成功的工具产物（`args` 按生产形状给 JSON 文本）。
 fn ok(id: &str, tool: &str, args: serde_json::Value, turn: u64) -> Event {
@@ -37,7 +38,7 @@ fn artifact(
 }
 
 fn fold(events: &[Event]) -> Vec<(String, FileOp, u64, u64)> {
-    workdir_changes()
+    workdir_changes(MESSAGE)
         .read_all(events)
         .value
         .into_iter()
@@ -240,7 +241,7 @@ fn argument_shapes_are_tolerated() {
 fn future_events_are_skipped() {
     let mut e = ok("a-0", "vdfs_write", serde_json::json!({"path": "t.txt"}), 1);
     e = e.with_ts(100);
-    assert!(workdir_changes()
+    assert!(workdir_changes(MESSAGE)
         .apply(&[e.clone()], 50, crate::Budget::generous())
         .value
         .is_empty());

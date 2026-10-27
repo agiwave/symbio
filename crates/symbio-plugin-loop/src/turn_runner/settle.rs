@@ -109,7 +109,7 @@ where
             turn,
             user_seq,
             ClosureKind::Speech,
-            EVENT_ASSISTANT_FALLBACK,
+            EVENT_CHAT_ASSISTANT_FALLBACK,
             &why,
         );
         symbio_core::plugin_warn!(
@@ -137,7 +137,7 @@ where
     store.append(
         Event::pending(
             format!("fb-{turn}"),
-            EVENT_ASSISTANT_FALLBACK,
+            EVENT_CHAT_ASSISTANT_FALLBACK,
             Entity::Turn,
             Verb::Closed,
             turn,
@@ -185,7 +185,7 @@ where
             turn,
             user_seq,
             ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
         symbio_core::plugin_warn!(
@@ -216,7 +216,7 @@ where
     store.append(
         Event::pending(
             format!("f-{turn}"),
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             turn,

@@ -26,6 +26,7 @@
 //! 并排跑的对账段**：切源之后落库消息即 WAL 重建的那一份，两个源不再独立，对账没有
 //! 对象。
 
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use symbio_core::chat_node as cm;
 use symbio_core::PluginError;
 
@@ -165,7 +166,9 @@ pub fn progress_from_facts(
     fallback_title: &str,
 ) -> WorkerProgress {
     // 不标注类型：视图类型随返回值流动（core 的 projection 域模块私有，C-002）
-    let entries = transcript().read_all(snapshot).value;
+    let entries = transcript(CHAT_VOCAB, MESSAGE_VOCAB)
+        .read_all(snapshot)
+        .value;
 
     // rounds：`user.message` 条数。`transcript` 投影把开轮折成的补充（
     // `turn.supplemented`）也渲染成 role=user——它**是用户说的话**，与
@@ -192,7 +195,7 @@ pub fn progress_from_facts(
     // 不知道「被快照取代」这回事——把归档里的陈轮算进来，一个早已退出上下文的
     // 未收束轮会把 `in_flight` 从 false 翻成 true（`Store::range` 归一后的必动项，
     // 见 `store::current_window`）。上面 `transcript()` 那一头自己从快照起折，不受影响。
-    let state = turnstate()
+    let state = turnstate(CHAT_VOCAB)
         .read_all(super::store::current_window(snapshot))
         .value;
     let in_flight = state.opened && !state.settled();

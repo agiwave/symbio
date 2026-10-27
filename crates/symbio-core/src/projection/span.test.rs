@@ -5,7 +5,8 @@
 
 use super::span;
 use crate::projection::span::{SpanSummary, SpanView};
-use crate::{Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_USER_MESSAGE};
+use crate::test_fixtures::EVENT_USER_MESSAGE;
+use crate::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
 
 fn msg(id: &str, ts: i64) -> Event {
     Event::pending(

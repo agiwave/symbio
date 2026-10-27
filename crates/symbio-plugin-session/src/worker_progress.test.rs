@@ -27,9 +27,9 @@ use crate::store::{EventWalStore, SessionStore};
 use crate::types::{Session, SessionSummary};
 use symbio_core::chat_node as cm;
 use symbio_core::chat_node::{ChatNode, MessageContent, NodeStatus};
-use symbio_core::{
-    Entity, Event, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+use symbio_core::{Entity, Event, Seq, Store, Verb};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 /// 会话事实的**值**（生产侧由 `SessionStore::snapshot` 交回）。
@@ -76,7 +76,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                     .append(
                         Event::pending(
                             format!("f-{tag}-{t}"),
-                            EVENT_ASSISTANT_FINAL,
+                            EVENT_CHAT_ASSISTANT_FINAL,
                             Entity::Turn,
                             Verb::Closed,
                             t,
@@ -92,7 +92,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                     .append(
                         Event::pending(
                             format!("fb-{tag}-{t}"),
-                            EVENT_ASSISTANT_FALLBACK,
+                            EVENT_CHAT_ASSISTANT_FALLBACK,
                             Entity::Turn,
                             Verb::Closed,
                             t,
@@ -229,7 +229,7 @@ fn empty_placeholder_nodes_produce_no_steps() {
         .append(
             Event::pending(
                 "p-empty",
-                EVENT_ASSISTANT_FINAL,
+                EVENT_CHAT_ASSISTANT_FINAL,
                 Entity::Turn,
                 Verb::Closed,
                 // 另一个轮：同一轮的第二条 final 会被写侧闸门拒掉（I1），而本测试要

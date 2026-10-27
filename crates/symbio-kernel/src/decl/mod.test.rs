@@ -8,7 +8,6 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::event::event_cell;
 use crate::{Entity, Seq, Verb};
 
 use super::*;
@@ -134,12 +133,6 @@ fn protocol_events_match_the_kernel_grid() {
     }
     let frozen = b.seal().expect("协议五格必须能冻结");
     for e in PROTOCOL_EVENTS {
-        assert_eq!(
-            event_cell(e.name),
-            Some(e.cell),
-            "{} 在 CELLS 与协议事件行上必须同格",
-            e.name
-        );
         assert_eq!(frozen.event_cell(e.name), Some(e.cell));
         assert_eq!(
             frozen.event_owner(e.name),

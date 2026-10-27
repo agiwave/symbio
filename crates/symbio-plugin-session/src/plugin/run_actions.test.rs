@@ -7,9 +7,18 @@
 //!   订阅表观察（`Transcript::publish` 是消息帧的唯一出口）——两者一起锁住
 //!   「写动作自己发帧」这条契约（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
 
+/// 淘汰裁决事件名（`verdict × asserted`）。
+///
+/// ## 为什么这里直写拼写
+///
+/// owner 是 `plugins/loop`，这条名字**不进共享清单**：除 owner 外没有别的插件在
+/// **生产代码**里引用它（CS-007 的判据）。本插件读裁决事实读的是**格子**
+/// （`verdict_grants_changes`），不认拼写；只有本用例为了造一条「另一个会话的裁决」
+/// 才需要拼出这一格。于是拼写直写在这里。
+const VERDICT: &str = "verdict.asserted";
+
 use super::*;
 use crate::paths;
-use crate::store::EventWalStore;
 use symbio_core::chat_node as cm;
 use symbio_core::node_build::PresentationTree;
 use symbio_core::{
@@ -788,10 +797,7 @@ async fn run_persistent_rebuilds_from_store_without_handle() {
 fn append_to_session(root: &std::path::Path, session_id: &str, event: Event) {
     let dir = paths::session_dir(root, session_id);
     std::fs::create_dir_all(&dir).expect("建会话目录");
-    EventWalStore::open(dir.join(paths::V2_WAL_FILE))
-        .expect("打开 WAL")
-        .append(event)
-        .expect("入格");
+    write_foreign_wal_line(&dir, event);
 }
 
 /// 在 `<root>/<safe(父)>/sessions/<safe(子)>/v2-events.wal` 落一条事件
@@ -802,10 +808,37 @@ fn append_to_sub_session(root: &std::path::Path, parent_sid: &str, child_sid: &s
         .join(paths::SUB_SESSIONS_SUBDIR)
         .join(paths::safe_id(child_sid));
     std::fs::create_dir_all(&dir).expect("建子会话目录");
-    EventWalStore::open(dir.join(paths::V2_WAL_FILE))
-        .expect("打开子会话 WAL")
-        .append(event)
-        .expect("入格");
+    write_foreign_wal_line(&dir, event);
+}
+
+/// 把一条**别家进程写的**事实落进 `dir` 的 WAL（本进程不经过自己的写闸）。
+///
+/// ## 为什么不经闸
+///
+/// 写闸的词汇面回答的是「**本进程**能不能写这个名字」。本用例造的是 `plugins/loop`
+/// 的轮末淘汰步留下的裁决事实——它由**另一个进程**写，走的是那个进程的闸，本进程
+/// 看到的只是盘上多了一行。用例若绕道 `WalStore::append`，就得先在会话插件里替
+/// `verdict.asserted` 伪造一份声明，那既不是真实形态，也会让「谁有资格声明名字」
+/// 这条纪律在测试里先破一次。
+///
+/// 行的形状与 `WalStore::append` 落盘时**逐字相同**：先赋 `seq`（盘上唯一权威的序号），
+/// 再兜底 `ts`，最后一行 JSON。
+fn write_foreign_wal_line(dir: &std::path::Path, mut event: Event) {
+    use symbio_core::EventEnvelope as _;
+    let path = dir.join(paths::V2_WAL_FILE);
+    let head = std::fs::read_to_string(&path)
+        .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count() as u64)
+        .unwrap_or(0);
+    event.assign_seq(symbio_core::Seq::new(head));
+    event.fallback_timestamp(symbio_core::clock_now_ms());
+    let mut line = serde_json::to_vec(&event).expect("事件序列化失败");
+    line.push(b'\n');
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .expect("打开 WAL");
+    std::io::Write::write_all(&mut f, &line).expect("落盘");
 }
 
 /// 以某主体查一次撤销闸（持久会话按 id 从磁盘重建——扫描要看整份部署）。
@@ -828,7 +861,7 @@ async fn run_elimination_revoked_sees_a_verdict_from_another_session() {
     append_to_session(
         &f.plugin.storage_dir(),
         "sess-a",
-        EliminationDecider.elimination_event(symbio_core::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(VERDICT, symbio_core::PRINCIPAL_MAIN, -1, 7),
     );
 
     assert!(revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
@@ -844,7 +877,7 @@ async fn run_elimination_revoked_scans_nested_sub_sessions() {
         &f.plugin.storage_dir(),
         "sess-parent",
         "sess-child",
-        EliminationDecider.elimination_event(symbio_core::PRINCIPAL_MAIN, -1, 7),
+        EliminationDecider.elimination_event(VERDICT, symbio_core::PRINCIPAL_MAIN, -1, 7),
     );
 
     assert!(revoked(&f, symbio_core::PRINCIPAL_MAIN).await);
@@ -861,12 +894,12 @@ async fn run_elimination_revoked_is_flipped_back_by_a_restoration() {
     append_to_session(
         &root,
         "sess-a",
-        EliminationDecider.elimination_event(principal, -1, 7),
+        EliminationDecider.elimination_event(VERDICT, principal, -1, 7),
     );
     append_to_session(
         &root,
         "sess-a",
-        EliminationDecider.restoration_event(principal, "申诉受理：上游延迟有凭证", 9),
+        EliminationDecider.restoration_event(VERDICT, principal, "申诉受理：上游延迟有凭证", 9),
     );
 
     assert!(!revoked(&f, principal).await);
@@ -879,7 +912,7 @@ async fn run_elimination_revoked_hits_only_the_verdict_subject() {
     append_to_session(
         &f.plugin.storage_dir(),
         "sess-a",
-        EliminationDecider.elimination_event("session/ghost", -1, 7),
+        EliminationDecider.elimination_event(VERDICT, "session/ghost", -1, 7),
     );
 
     assert!(!revoked(&f, symbio_core::PRINCIPAL_MAIN).await);

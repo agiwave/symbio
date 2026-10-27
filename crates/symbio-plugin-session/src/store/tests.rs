@@ -340,7 +340,8 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
 /// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
 /// 判据、这边是存储判据，两处构造一致才能判到同一件事）
 fn user_event(eid: &str, node_id: &str, text: &str, turn: u64) -> symbio_core::Event {
-    use symbio_core::{Entity, Event, Verb, EVENT_USER_MESSAGE};
+    use symbio_core::{Entity, Event, Verb};
+    use symbio_plugin_api::events::EVENT_USER_MESSAGE;
     Event::pending(
         eid,
         EVENT_USER_MESSAGE,
@@ -686,8 +687,9 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
 fn current_window_starts_at_the_latest_snapshot() {
     use symbio_core::{
         chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
-        Entity, Event, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+        Entity, Event, Verb,
     };
+    use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
     let user = |id: &str, turn: u64| {
         Event::pending(
             id,
@@ -807,7 +809,8 @@ async fn an_unopenable_fact_source_is_an_error_not_none() {
 /// `snapshot()` 读完整史（含归档前缀），且与写句柄看到的切片一致。
 #[tokio::test]
 async fn snapshot_reads_the_same_full_history_as_the_writer() {
-    use symbio_core::{Entity, Event, Verb, EVENT_USER_MESSAGE};
+    use symbio_core::{Entity, Event, Verb};
+    use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -862,7 +865,7 @@ fn lifecycle_event(
 
 fn open_turn(turn: u64) -> Event {
     lifecycle_event(
-        symbio_core::EVENT_USER_MESSAGE,
+        symbio_plugin_api::events::EVENT_USER_MESSAGE,
         symbio_core::Verb::Opened,
         turn,
         json!({ "text": "问", "id": "u-1" }),
@@ -871,7 +874,7 @@ fn open_turn(turn: u64) -> Event {
 
 fn close_completed(turn: u64) -> Event {
     lifecycle_event(
-        symbio_core::EVENT_ASSISTANT_FINAL,
+        symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         symbio_core::Verb::Closed,
         turn,
         json!({ "status": "completed", "text": "答", "id": "a-1" }),
@@ -880,7 +883,7 @@ fn close_completed(turn: u64) -> Event {
 
 fn close_failed(turn: u64, detail: &str) -> Event {
     lifecycle_event(
-        symbio_core::EVENT_ASSISTANT_FINAL,
+        symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         symbio_core::Verb::Closed,
         turn,
         json!({ "status": "failed", "reason": "fallback", "detail": detail, "text": "答", "id": "a-1" }),

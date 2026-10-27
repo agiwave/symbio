@@ -436,7 +436,7 @@ where
             run.turn,
             run.user_seq,
             ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
         symbio_core::plugin_warn!(
@@ -459,7 +459,7 @@ where
     store.append(
         Event::pending(
             format!("f-{}", run.turn),
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             run.turn,
@@ -594,12 +594,12 @@ pub(crate) async fn dispatch_round(
         let progress_no = run
             .full_snapshot
             .iter()
-            .filter(|e| e.turn == run.turn && e.kind == EVENT_ASSISTANT_PROGRESS)
+            .filter(|e| e.turn == run.turn && e.kind == EVENT_CHAT_ASSISTANT_PROGRESS)
             .count() as u64;
         store.append(
             Event::pending(
                 format!("p-{}-{progress_no}", run.turn),
-                EVENT_ASSISTANT_PROGRESS,
+                EVENT_CHAT_ASSISTANT_PROGRESS,
                 Entity::Turn,
                 Verb::Progressed,
                 run.turn,
@@ -691,7 +691,7 @@ where
             run.turn,
             run.user_seq,
             ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
         symbio_core::plugin_warn!(
@@ -723,7 +723,7 @@ where
     store.append(
         Event::pending(
             format!("f-{}", run.turn),
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             run.turn,
@@ -791,7 +791,7 @@ where
             run.turn,
             run.user_seq,
             ClosureKind::Speech,
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             &why,
         );
         symbio_core::plugin_warn!(
@@ -815,7 +815,7 @@ where
     store.append(
         Event::pending(
             format!("f-{}", run.turn),
-            EVENT_ASSISTANT_FINAL,
+            EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Turn,
             Verb::Closed,
             run.turn,

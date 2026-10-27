@@ -49,7 +49,14 @@ const CONST_OF = (name) => `EVENT_${name.replace(/\./g, '_').toUpperCase()}`
 const errors = []
 const notes = []
 
-/** 内核两张表上的业务名字（`event/mod.rs` 的常量值 + `CELLS` 的行名）。 */
+/**
+ * 内核表上的业务名字（`event/mod.rs` 的常量值 + 若还在的 `CELLS` 行名）。
+ *
+ * `event/mod.rs` 必须在（协议五格住那儿，缺了就是范围读不出）；`grid.rs` 已随
+ * DE-024 D-203 归零批退役，**缺席是目标态**：它不在 ⇒ 没有 `CELLS` 行可数；它若
+ * 回来 ⇒ 照数，下面那条「还挂在 `CELLS` 上」的判据会逐名点红。判据不靠一张已删
+ * 文件的形状活着。
+ */
 function kernelNames(root) {
   const dir = path.join(root, 'crates', 'symbio-kernel', 'src', 'event')
   const read = (name) => {
@@ -67,9 +74,11 @@ function kernelNames(root) {
     consts.set(m[1], m[2])
     if (m[2].includes('.')) values.add(m[2])
   }
-  for (const m of read('grid.rs').matchAll(/EventDecl::(?:with_roles|new)\s*\(\s*(?:"([^"]+)"|([A-Z][A-Z0-9_]*))/g)) {
-    const value = m[1] ?? consts.get(m[2])
-    if (value?.includes('.')) values.add(value)
+  if (fs.existsSync(path.join(dir, 'grid.rs'))) {
+    for (const m of read('grid.rs').matchAll(/EventDecl::(?:with_roles|new)\s*\(\s*(?:"([^"]+)"|([A-Z][A-Z0-9_]*))/g)) {
+      const value = m[1] ?? consts.get(m[2])
+      if (value?.includes('.')) values.add(value)
+    }
   }
   return values
 }

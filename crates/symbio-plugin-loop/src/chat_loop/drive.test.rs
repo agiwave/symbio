@@ -16,12 +16,10 @@ use super::super::state::{SessionContext, TurnRequest, TurnState};
 use super::begin_drive;
 use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
 use symbio_core::principal::{Principal, PrincipalKind};
-use symbio_core::{
-    count_user_messages, Entity, Event, EventStore, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
-    EVENT_USER_MESSAGE,
-};
+use symbio_core::{count_user_messages, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_plugin_api::events::{EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE};
 
-use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
+use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
 
 fn user_node(id: &str, text: &str) -> ChatNode {
     ChatNode {
@@ -278,7 +276,10 @@ fn a_second_new_drive_gets_the_next_turn_number() {
     let mut turn = TurnState::default();
     begin_drive(&context, &mut turn, &request(), None).expect("第二轮开得了");
     assert_eq!(turn.turn_no, 1, "轮号接着已有用户格数走");
-    assert_eq!(count_user_messages(&facts.range(Seq::new(0))), 2);
+    assert_eq!(
+        count_user_messages(&facts.range(Seq::new(0)), &CHAT_VOCAB, &MESSAGE_VOCAB),
+        2
+    );
     assert!(
         facts.range(Seq::new(0)).iter().any(|e| e.event_id == "u-1"),
         "第二次开轮落 u-1，不撞 u-0"

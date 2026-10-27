@@ -213,7 +213,15 @@ export const BASELINE = {
   // `plugins/loop/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
   // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
   // 删的是重复的那一份，不是判据。非侵蚀。
-  ciRustTestsTotal: 2352,
+  // baseline-allow ciRustTestsTotal: S1.0 收口（D-203）净减 1 条（2352→2351）——删的是**已不存在的
+  // 被测对象**：`event/grid.test.rs` 整文件退役（5 条，判的正是被删掉的 `CELLS` 这张手写表：
+  // 协议五格预置、业务行落格、重名即红、格位与 `Entity`/`Verb` 一致、越界即红），
+  // 同一批在 `projection/vocab.test.rs` 新增 4 条（三张表没有两条重名、`slot_of` 认得出十一个发言格、
+  // 消息四格回 `None`、`slot_node_of` 与写侧节点 id 同一个答案）。净 −1 是「一张表换三张按面切分的
+  // 词汇面」，判据没有丢：格位一致性现在由 `events.rs` 的生成器投影 `EventDecl` 保证，编译期就红。
+  // 另两处「按名字点收」的用例（`decl` 的对表用例、`control_events_match_the_kernel_grid`）是**改写**
+  // 成新判据，条数不变。非侵蚀。
+  ciRustTestsTotal: 2351,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

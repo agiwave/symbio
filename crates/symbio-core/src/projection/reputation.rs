@@ -10,10 +10,9 @@
 //! - `commitment` 只记录「立了约、是否违约」，不保证「守约」；
 //! - as-of 语义与 `recall` 同口径：形参 `now` 即锚，未来的收束不影响当前声誉。
 
-use super::super::event::{
-    Entity, Event, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED,
-};
+use super::super::event::{Entity, Event};
 use super::Projection;
+use crate::CommitmentVocab;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -66,7 +65,7 @@ pub fn plain_score(_offered: u64, kept: u64, broken: u64) -> i64 {
 /// - as-of：`ts > now` 的立约 / 收束不参与（与 `recall` 同口径）；
 /// - 配对：收束事件经载荷 `id` 找回立约方（`from` 是立约时的事实，收束时不重抄）；
 /// - 排序：`BTreeMap` 按主体字典序——同一份事件切片永远产出同一张表（N1）。
-pub fn reputation() -> Projection<ReputationView> {
+pub fn reputation(v: CommitmentVocab) -> Projection<ReputationView> {
     Projection::new(move |events: &[Event], now| {
         let mut offered_of: BTreeMap<String, u64> = BTreeMap::new();
         // commitment id → (from, ts)
@@ -83,28 +82,24 @@ pub fn reputation() -> Projection<ReputationView> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            match e.kind.as_str() {
-                EVENT_COMMITMENT_OFFERED => {
-                    let from = e
-                        .payload
-                        .get("from")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    *offered_of.entry(from.clone()).or_insert(0) += 1;
-                    open.insert(id, (from, e.ts));
-                }
-                EVENT_COMMITMENT_RELEASED | EVENT_COMMITMENT_BROKEN => {
-                    if let Some((from, _)) = open.get(&id) {
-                        let from = from.clone();
-                        if e.kind == EVENT_COMMITMENT_BROKEN {
-                            *broken_of.entry(from).or_insert(0) += 1;
-                        } else {
-                            *kept_of.entry(from).or_insert(0) += 1;
-                        }
+            if e.kind == v.opened {
+                let from = e
+                    .payload
+                    .get("from")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                *offered_of.entry(from.clone()).or_insert(0) += 1;
+                open.insert(id, (from, e.ts));
+            } else if e.kind == v.released || e.kind == v.broken {
+                if let Some((from, _)) = open.get(&id) {
+                    let from = from.clone();
+                    if e.kind == v.broken {
+                        *broken_of.entry(from).or_insert(0) += 1;
+                    } else {
+                        *kept_of.entry(from).or_insert(0) += 1;
                     }
                 }
-                _ => {}
             }
         }
         let mut by_principal = BTreeMap::new();

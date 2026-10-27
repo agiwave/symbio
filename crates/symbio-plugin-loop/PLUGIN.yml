@@ -5,4 +5,4 @@ plugin_assembly: sub_agent
 plugin_order: 40
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 control_decl::EVENTS。
-shared_events: memory.calibrated, memory.encoded, task.asserted, task.assigned, task.controlled, task.held, task.opened, task.progress
+shared_events: artifact.added, authz.denied, chat.assistant.fallback, chat.assistant.final, chat.assistant.opening, chat.assistant.progress, chat.assistant.reported, commitment.asserted, commitment.broken, commitment.opened, commitment.released, memory.calibrated, memory.encoded, task.asserted, task.assigned, task.controlled, task.held, task.opened, task.progress, turn.branch, turn.dispatch, turn.supplemented, user.message

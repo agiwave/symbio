@@ -166,7 +166,7 @@ pub(crate) fn run_prepare_turn<'a>(step: &'a mut StageStep<'a>) -> StepFuture<'a
                 .append(
                     symbio_core::Event::pending(
                         format!("branch-{}", inputs.root_id),
-                        symbio_core::EVENT_TURN_BRANCH,
+                        symbio_plugin_api::events::EVENT_TURN_BRANCH,
                         symbio_core::Entity::Turn,
                         symbio_core::Verb::Asserted,
                         step.turn.turn_no,

@@ -321,7 +321,7 @@ pub(crate) fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
             && e.verb == Verb::Closed
             && matches!(
                 e.kind.as_str(),
-                EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK
+                EVENT_CHAT_ASSISTANT_FINAL | EVENT_CHAT_ASSISTANT_FALLBACK
             )
         {
             open.retain(|(turn, _)| *turn != e.turn);

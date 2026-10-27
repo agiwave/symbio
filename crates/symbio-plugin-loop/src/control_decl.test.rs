@@ -82,17 +82,13 @@ fn core_table() -> Arc<Frozen> {
     b.seal().expect("控制面声明集必须能冻结")
 }
 
-/// 迁移期两份表并存：仍在内核 `CELLS` 上的控制面事件，格位必须与 owner 声明相等。
-/// 已迁出的名字（`event_cell` 答 `None`）只认 owner 声明——那才是它的唯一判据。
-/// 最后一批业务事件迁出后本用例随 `CELLS` 一起退役。
+/// 每条控制面事实都必须有事件行（`seal` 的 `FactWithoutEvent` 的直接断言）。
+///
+/// 迁移期这里还有一条「owner 声明与内核 `CELLS` 必须同格」的对表用例——它是
+/// 两份表并存期的临时判据，随 D-203 归零批的内核名字表一起退役：现在**只有**一份
+/// 表（owner 的 `EventDecl`），「两份表说不一致」这个失败模式已经不可能发生。
 #[test]
-fn control_events_match_the_kernel_grid() {
-    for e in EVENTS {
-        if let Some(cell) = symbio_core::event_cell(e.name) {
-            assert_eq!(cell, e.cell, "{} 在 owner 声明与 CELLS 上必须同格", e.name);
-        }
-    }
-    // 每条控制面事实都必须有事件行（`seal` 的 `FactWithoutEvent` 的直接断言）。
+fn every_control_fact_has_an_event_row() {
     for f in FACTS {
         assert!(
             EVENTS.iter().any(|e| e.name == f.name),

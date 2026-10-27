@@ -81,10 +81,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use symbio_core::chat_node::ChatNode;
-use symbio_core::{
-    AppendError, Entity, Event, Seq, Store, Verb, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED,
-};
+use symbio_core::{AppendError, Entity, Event, Seq, Store, Verb};
+use symbio_plugin_api::events::{EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
 
 /// 一条**待寄存**的变更事实（拿不到写者令牌时暂存，由持令牌方补落）。
 ///

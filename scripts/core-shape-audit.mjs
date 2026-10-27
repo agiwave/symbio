@@ -16,6 +16,7 @@
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
  * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
+ * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -90,7 +91,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -309,7 +310,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 21, cellsRows: 21 }
+  : { kernelEvents: 0, cellsRows: 0 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -678,8 +679,11 @@ if (hasPlugins && pluginIds.length > 0) {
 // 与否分三种情况：都在 ⇒ 判；都不在 ⇒ 夹具仓库，不适用；只在一部分 ⇒ 红（判据已失效）。
 const VOCAB_SOURCES = {
   kernelEvents: 'crates/symbio-kernel/src/event/mod.rs',
-  cellsRows: 'crates/symbio-kernel/src/event/grid.rs',
 }
+// `CELLS`（`event/grid.rs`）已随 D-203 归零批退役。它**不该再出现**：文件在 ⇒ 数它的
+// 业务行（基线 0，一行就红）；文件不在 ⇒ `cellsRows = 0`，正是目标值。这样「把表加回来」
+// 与「往表里加一行」都会红，判据不必依赖一张已经删掉的文件的形状。
+const RETIRED_CELLS = 'crates/symbio-kernel/src/event/grid.rs'
 const PROTOCOL_EVENT_VALUES = new Set(['request', 'sent', 'response', 'failed', 'retry'])
 const PROTOCOL_EVENT_NAMES = new Set(['REQUEST', 'SENT', 'RESPONSE', 'FAILED', 'RETRY'])
 
@@ -707,25 +711,23 @@ function countCellsRows(abs) {
 const vocabPaths = Object.fromEntries(
   Object.entries(VOCAB_SOURCES).map(([key, rel]) => [key, path.join(ROOT, rel)]),
 )
-const vocabPresent = Object.entries(vocabPaths).filter(([, abs]) => fs.existsSync(abs))
+const cellsAbs = path.join(ROOT, RETIRED_CELLS)
 const vocabCounts = {}
 let vocabApplicable = false
-if (vocabPresent.length === 0) {
+if (!fs.existsSync(vocabPaths.kernelEvents)) {
   // 夹具仓库没有内核事件表 ⇒ CS-005 不适用（CS-001…004 照判）。
-} else if (vocabPresent.length < Object.keys(VOCAB_SOURCES).length) {
-  report(
-    'CS-005',
-    `词汇棘轮只找到 ${vocabPresent.map(([k]) => VOCAB_SOURCES[k]).join(' / ')}，` +
-      '另一张表不见了——判据输入缺一半，宁红不静默',
-  )
 } else {
   vocabApplicable = true
   vocabCounts.kernelEvents = countKernelEvents(vocabPaths.kernelEvents)
-  const cells = countCellsRows(vocabPaths.cellsRows)
-  if (cells === null) {
-    report('CS-005', '`grid.rs` 里读不出 `CELLS` 块——词汇棘轮的输入没了（形状变了？）')
+  if (fs.existsSync(cellsAbs)) {
+    const cells = countCellsRows(cellsAbs)
+    if (cells === null) {
+      report('CS-005', '`grid.rs` 又出现了，但读不出 `CELLS` 块——形状变了，宁红不静默')
+    } else {
+      vocabCounts.cellsRows = cells
+    }
   } else {
-    vocabCounts.cellsRows = cells
+    vocabCounts.cellsRows = 0
   }
   for (const key of Object.keys(VOCAB_BASELINE)) {
     if (vocabCounts[key] > VOCAB_BASELINE[key]) {
@@ -829,6 +831,93 @@ if (vocabApplicable && consumerTexts.length > 0) {
 const ruleLine = (ok, rule, desc) =>
   console.log(`${ok ? green('✓') : red('✗')} ${rule}  ${dim(desc)}`)
 
+// ── CS-008 core 生产代码零事件名字面量（DE-024 D-203 的翻转）──
+//
+// CS-005 判的是「内核**表**里还有几条业务名」，CS-006 判的是「表上那几条该随谁走」。
+// 两者都以那张表为输入，于是表归零之后它们都**没有输入**了——一个没有输入却常绿的
+// 判据，挡不住下面这条边：
+//
+// ```ignore
+// // 名字没有回到内核表，但回到了 core 的 match 臂里
+// match e.kind.as_str() { "chat.assistant.final" => …, _ => {} }
+// ```
+//
+// 这正是 D-203 要拆掉的那条边（「加一条对话面事件」= 改架构模块）。所以归零批必须
+// 配一条**反向**判据：core / kernel 的**生产代码**里不出现任何事件名字面量。
+//
+// ## 判据形状
+//
+// 只认「首段是 `Entity` 的某个变体（小写）」的点分字符串。理由是这一族可判别：
+// `Entity` 是 F5 冻结的**闭集**，所以 `chat.assistant.final` / `user.message` 的形态
+// 是语法事实，不是猜——`"utf-8"` / `"application/json"` 这类同形的点分串首段不在闭集里，
+// 自动落在闸外（与 D-009 的「同族」闸同一个思路：用闭集收窄，不用豁免兜底）。
+//
+// ## 什么不算生产代码
+//
+// `*.test.rs` 与 `#[cfg(test)] mod x { … }` 由 `coreTexts` 剥掉；`#[cfg(test)] mod x;`
+// 这种**声明式**测试模块（`core/src/test_fixtures.rs`）不在它的处理范围里，本判据
+// 自己解析模块声明把那个文件剔出去——夹具交自己的字面量是合法的，而且正是 D-205 /
+// D-206 要的证据形态（「词汇是数据」：判据不为任何插件改名）。
+const CFG_TEST_DECL_RE = /#\[cfg\(test\)\]\s*mod\s+([A-Za-z0-9_]+)\s*;/g
+
+/** 被 `#[cfg(test)] mod x;` 声明的模块文件（按 Rust 的两种落点解析）。 */
+function cfgTestModuleFiles(dirs) {
+  const out = new Set()
+  for (const dir of dirs) {
+    for (const file of walk(dir)) {
+      if (!file.endsWith('.rs') || isTestFile(file)) continue
+      const text = fs.readFileSync(file, 'utf8')
+      const decls = [...text.matchAll(CFG_TEST_DECL_RE)].map((m) => m[1])
+      if (decls.length === 0) continue
+      const base = /(?:^|[\\/])(?:mod|lib|main)\.rs$/.test(file)
+        ? path.dirname(file)
+        : file.replace(/\.rs$/, '')
+      for (const name of decls) {
+        for (const cand of [path.join(base, `${name}.rs`), path.join(base, name, 'mod.rs')]) {
+          if (fs.existsSync(cand)) out.add(path.relative(ROOT, cand).split(path.sep).join('/'))
+        }
+      }
+    }
+  }
+  return out
+}
+
+/** `Entity` 的变体（小写）——事件名的首段闭集；内核文件不在 ⇒ `null`（不适用）。 */
+function entityNameSet(abs) {
+  if (!abs || !fs.existsSync(abs)) return null
+  const text = blankComments(fs.readFileSync(abs, 'utf8')).join('\n')
+  const m = text.match(/pub\s+enum\s+Entity\s*\{/)
+  if (!m) return null
+  const open = text.indexOf('{', m.index)
+  const body = text.slice(open + 1, matchBrace(text, open))
+  const names = [...body.matchAll(/^\s*([A-Z][A-Za-z0-9_]*)\s*,/gm)].map((x) =>
+    x[1].toLowerCase(),
+  )
+  return names.length ? new Set(names) : null
+}
+
+const entityNames = entityNameSet(vocabPaths.kernelEvents)
+const testOnlyFiles = cfgTestModuleFiles(scanDirs)
+const eventNameHits = []
+if (entityNames) {
+  const litRe = new RegExp(`"((?:${[...entityNames].join('|')})\\.[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*)"`, 'g')
+  for (const f of coreTexts) {
+    if (testOnlyFiles.has(f.rel)) continue
+    for (const m of f.text.matchAll(litRe)) {
+      const line = f.text.slice(0, m.index).split('\n').length
+      eventNameHits.push({ rel: f.rel, line, name: m[1] })
+    }
+  }
+  for (const hit of eventNameHits) {
+    report(
+      'CS-008',
+      `\`${hit.rel}:${hit.line}\` 出现了事件名字面量 \`"${hit.name}"\` —— ` +
+        'core 的折叠按**构造期词汇面**认名字（`ChatVocab` / `MessageVocab` / `CommitmentVocab` / `TaskVocab`），' +
+        '不抄拼写：写死一个字面量等于把「加一条事件要改架构」那条边接回来（DE-024 D-203 / D-205）',
+    )
+  }
+}
+
 const cells = Object.keys(SHAPE_BASELINE)
 const shapeLine = cells
   .map((k) => `${k} ${shape.values[k]}/${SHAPE_BASELINE[k]}`)
@@ -894,6 +983,17 @@ if (errors.length === 0) {
     ruleLine(true, 'CS-006', '消费方证据：夹具仓库没有插件 crate，CS-006 不适用')
   } else {
     ruleLine(true, 'CS-006', '消费方证据：没有内核事件表，CS-006 不适用')
+  }
+  if (entityNames) {
+    ruleLine(
+      true,
+      'CS-008',
+      `core 生产代码零事件名字面量（首段闭集 = \`Entity\` 的 ${entityNames.size} 个变体；` +
+        `剥掉 ${testOnlyFiles.size} 个 \`#[cfg(test)] mod\` 文件）——` +
+        '表归零之后，名字也没有第二条路能回到 core 的 `match` 臂里',
+    )
+  } else {
+    ruleLine(true, 'CS-008', 'core 生产代码零事件名字面量：夹具仓库没有内核事件表，CS-008 不适用')
   }
   const under = cells.filter((k) => shape.values[k] < SHAPE_BASELINE[k])
   if (under.length) {

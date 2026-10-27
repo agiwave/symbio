@@ -18,16 +18,18 @@ use super::*;
 use symbio_core::chat_node as cm;
 use symbio_core::{
     check_all, run_ops, CapabilityMeta, ConsolidateRequest, Entity, Event, ExecTranscriptWriter,
-    Frozen, PluginSimpleRequest, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    Frozen, PluginSimpleRequest, Seq, Store, Verb,
 };
 use symbio_core::{
     Capability, CapabilityRow, EventStore, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
     CAPABILITY_VISITOR,
 };
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
 use symbio_providers::DefaultToolVisitor;
 
-use crate::control_decl::{EVENT_MEMORY_RECALLED, EVENT_SESSION_CONFIG};
+use crate::control_decl::{CHAT_VOCAB, EVENT_MEMORY_RECALLED, EVENT_SESSION_CONFIG, MESSAGE_VOCAB};
 
 use super::super::session_port::SessionPort;
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
@@ -98,10 +100,10 @@ fn turn_facts(e: &Event) -> bool {
     matches!(
         e.kind.as_str(),
         EVENT_USER_MESSAGE
-            | EVENT_ASSISTANT_FINAL
-            | EVENT_ASSISTANT_FALLBACK
-            | symbio_core::EVENT_ASSISTANT_PROGRESS
-            | symbio_core::EVENT_ARTIFACT_ADDED
+            | EVENT_CHAT_ASSISTANT_FINAL
+            | EVENT_CHAT_ASSISTANT_FALLBACK
+            | symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_PROGRESS
+            | symbio_plugin_api::events::EVENT_ARTIFACT_ADDED
     )
 }
 
@@ -359,7 +361,7 @@ async fn supplements_become_facts_visible_next_turn() {
     let snap = fx.facts.range(Seq::new(0));
     let sup = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_TURN_SUPPLEMENTED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_SUPPLEMENTED)
         .unwrap_or_else(|| panic!("补充必须落成事实（否则下一轮就消失——那正是缺口 3）：{snap:?}"));
     assert_eq!(sup.entity, symbio_core::Entity::Turn, "落在 Turn 实体上");
     assert_eq!(sup.verb, symbio_core::Verb::Asserted, "断言类动词");
@@ -370,7 +372,7 @@ async fn supplements_become_facts_visible_next_turn() {
     );
     let user_seq = snap
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_USER_MESSAGE)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_USER_MESSAGE)
         .and_then(|e| e.seq)
         .map(|s| s.value())
         .expect("网格里有用户格");
@@ -394,7 +396,7 @@ async fn supplements_become_facts_visible_next_turn() {
     );
 
     // ── ③ 下一轮可见：从事实轨**整份史**再投影（不拿运行中的内存镜像糊弄） ──
-    let projected = symbio_core::transcript()
+    let projected = symbio_core::transcript(CHAT_VOCAB, MESSAGE_VOCAB)
         .apply(
             &fx.facts.range(Seq::new(0)),
             i64::MAX,
@@ -742,7 +744,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     );
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
-    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL);
     assert_eq!(snap[1].payload["text"], "", "final 只存结局");
     let output = all
         .iter()
@@ -793,7 +795,7 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
         "{:?}",
         check_all(guard_vocab(), &all)
     );
-    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FALLBACK);
+    assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FALLBACK);
     let why = snap[1].payload["detail"].as_str().unwrap_or_default();
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
     assert_eq!(
@@ -832,7 +834,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
-    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
+    assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL, "中止照落收束格");
     assert_eq!(snap[1].payload["status"], "aborted", "终止是状态字段");
     assert_eq!(
         snap[1].payload["reason"], "interrupted",
@@ -896,7 +898,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
     let cell = snap[1];
-    assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(cell.kind, EVENT_CHAT_ASSISTANT_FINAL);
     assert_eq!(cell.payload["status"], "aborted");
     // 停机原因在**顶层** `reason`（闭集），`terminated` 只留时刻。
     assert_eq!(cell.payload["reason"], "interrupted");
@@ -1083,7 +1085,10 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         check_all(guard_vocab(), &all)
     );
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
-    assert_eq!(snap[1].kind, symbio_core::EVENT_ARTIFACT_ADDED);
+    assert_eq!(
+        snap[1].kind,
+        symbio_plugin_api::events::EVENT_ARTIFACT_ADDED
+    );
     assert_eq!(snap[1].entity, Entity::Artifact);
     assert_eq!(snap[1].verb, Verb::Asserted);
     assert_eq!(snap[1].payload["tool"], "vdfs_read");
@@ -1100,7 +1105,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         Some(0),
         "产物格溯源指向本轮用户格（S02 §3 的 produced_by 断言）"
     );
-    assert_eq!(snap[2].kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(snap[2].kind, EVENT_CHAT_ASSISTANT_FINAL);
 }
 
 /// 轮边界汇报「产生即上线」（-轮中对话面节点不入实时面 的另一半）：
@@ -1216,7 +1221,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     let all = fx.facts.range(Seq::new(0));
     let reported = all
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_ASSISTANT_REPORTED)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED)
         .unwrap_or_else(|| panic!("汇报照常落格：{all:?}"));
     let payload_id = reported.payload["id"].as_str().unwrap_or_default();
     assert!(
@@ -1248,7 +1253,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     );
     assert_eq!(
         all.iter()
-            .filter(|e| e.kind == symbio_core::EVENT_ASSISTANT_REPORTED)
+            .filter(|e| e.kind == symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_REPORTED)
             .count(),
         1,
         "只报一次（游标从 0 起 ⇒ 事件 id `rp-{{turn}}-0`）：{all:?}"
@@ -1362,7 +1367,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 /// **反向自检**：把 `tool_dispatch` 里三份出参改回 `&mut Vec::new()`，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_derived_commitment_facts() {
-    use symbio_core::{EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED};
+    use symbio_plugin_api::events::{EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OPENED};
 
     let fx = setup_full();
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
@@ -1431,7 +1436,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 
     let offered = events
         .iter()
-        .find(|e| e.kind == EVENT_COMMITMENT_OFFERED)
+        .find(|e| e.kind == EVENT_COMMITMENT_OPENED)
         .unwrap_or_else(|| panic!("代际立约必须入格（出参通道）：{kinds:?}"));
     assert_eq!(
         offered.payload["promise"], "让 reviewer 复查这段",
@@ -1532,7 +1537,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     let dispatch = all
         .iter()
-        .find(|e| e.kind == symbio_core::EVENT_TURN_DISPATCH && e.turn == 0)
+        .find(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.turn == 0)
         .expect("反射档同样要有派发格（T-225）");
     assert_eq!(
         dispatch.payload["tier"], "reflex",
@@ -1543,7 +1548,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         LatencyTier::Reflex.budget_ms(),
         "预算数值随派发格入格"
     );
-    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(snap[1].kind, EVENT_CHAT_ASSISTANT_FINAL);
     assert_eq!(snap[1].payload["text"], "先列要点；再合并同类项。");
     assert_eq!(
         snap[1].payload["model"], "reflex",
@@ -2024,7 +2029,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
     let all = fx.facts.range(Seq::new(0));
     let snap_at = all
         .iter()
-        .position(|e| e.kind == symbio_core::EVENT_SESSION_CONSOLIDATED)
+        .position(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED)
         .expect("快照应已由会话动作落格");
     let second_user_at = all
         .iter()
@@ -2032,7 +2037,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
         .expect("第二轮的用户格应已落");
     let dispatch_at = all
         .iter()
-        .position(|e| e.kind == symbio_core::EVENT_TURN_DISPATCH && e.turn == 1)
+        .position(|e| e.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH && e.turn == 1)
         .expect("第二轮的派发格应已落");
     assert!(
         second_user_at < snap_at,
@@ -2078,7 +2083,7 @@ fn closure_of(all: &[Event], turn: u64) -> &Event {
             e.turn == turn
                 && matches!(
                     e.kind.as_str(),
-                    EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK
+                    EVENT_CHAT_ASSISTANT_FINAL | EVENT_CHAT_ASSISTANT_FALLBACK
                 )
         })
         .expect("该轮应有收束格")
@@ -2113,7 +2118,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
     let all = fx.facts.range(Seq::new(0));
     let snapshot_at = all
         .iter()
-        .rposition(|e| e.kind == symbio_core::EVENT_SESSION_CONSOLIDATED)
+        .rposition(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED)
         .expect("快照应已落格");
     let u0_at = all
         .iter()
@@ -2200,7 +2205,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     );
     let snapshot_at = all
         .iter()
-        .rposition(|e| e.kind == symbio_core::EVENT_SESSION_CONSOLIDATED)
+        .rposition(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED)
         .expect("快照应已落格");
     let u0_at = all
         .iter()
@@ -2328,7 +2333,8 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
 #[test]
 fn the_ledger_decides_which_cell_ends_the_drive() {
     use serde_json::Value;
-    use symbio_core::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED, EVENT_SENT};
+    use symbio_core::EVENT_SENT;
+    use symbio_plugin_api::events::{EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_DENIED};
 
     let cell = |kind: &'static str, entity: Entity, verb: Verb, turn: u64, payload: Value| {
         Event::pending(
@@ -2345,14 +2351,14 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
 
     // 收束格 / 兜底格：本轮了结。
     assert!(ends(&cell(
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         7,
         Value::Null
     )));
     assert!(ends(&cell(
-        EVENT_ASSISTANT_FALLBACK,
+        EVENT_CHAT_ASSISTANT_FALLBACK,
         Entity::Turn,
         Verb::Closed,
         7,
@@ -2360,7 +2366,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     )));
     // 别的轮的收束格不算本轮的工（切片按轮，但判据自己也得站得住）。
     assert!(!ends(&cell(
-        EVENT_ASSISTANT_FINAL,
+        EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Turn,
         Verb::Closed,
         6,
@@ -2386,7 +2392,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
 
     // 等待用户：不是停机格，但是本轮最后一步。
     assert!(ends(&cell(
-        EVENT_ASSISTANT_PROGRESS,
+        EVENT_CHAT_ASSISTANT_PROGRESS,
         Entity::Turn,
         Verb::Progressed,
         7,
@@ -2394,7 +2400,7 @@ fn the_ledger_decides_which_cell_ends_the_drive() {
     )));
     // 中途汇报 / 开场白那类进展格：轮还在走。
     assert!(!ends(&cell(
-        EVENT_ASSISTANT_PROGRESS,
+        EVENT_CHAT_ASSISTANT_PROGRESS,
         Entity::Turn,
         Verb::Progressed,
         7,

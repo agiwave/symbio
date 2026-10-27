@@ -13,10 +13,9 @@
 //! - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有
 //!   输出（I3），fallback 落在哪档就是哪档的兜底。
 
-use super::super::event::{
-    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
-};
+use super::super::event::{Entity, Event, Verb};
 use super::Projection;
+use crate::ChatVocab;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -103,12 +102,17 @@ impl FallbackRateView {
 ///
 /// 兜底率与时延报告（[`super::slo`]）共用的**唯一判据**——档位归属只在这
 /// 一处定义，两列统计不各自为政。
-pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
+pub(super) fn declared_tier(
+    events: &[Event],
+    turn: u64,
+    before_seq: Option<u64>,
+    v: &ChatVocab,
+) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
     let is_dispatch = |e: &Event| {
         e.entity == Entity::Turn
             && e.verb == Verb::Asserted
-            && e.kind == EVENT_TURN_DISPATCH
+            && e.kind == v.dispatch
             && e.turn == turn
     };
     let dispatch = match before_seq {
@@ -126,7 +130,7 @@ pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>
                     u.entity == Entity::Turn
                         && u.verb == Verb::Opened
                         && u.turn == turn
-                        && u.kind == EVENT_USER_MESSAGE
+                        && u.kind == v.user_message
                         && before(u)
                 })
                 .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
@@ -137,8 +141,8 @@ pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>
 }
 
 /// `fallback_rate` 投影：从事件切片统计各档位的兜底率。
-pub fn fallback_rate() -> Projection<FallbackRateView> {
-    Projection::new(|events: &[Event], now| {
+pub fn fallback_rate(v: ChatVocab) -> Projection<FallbackRateView> {
+    Projection::new(move |events: &[Event], now| {
         let mut by_tier: BTreeMap<String, TierStats> = BTreeMap::new();
         for e in events {
             if e.ts > now {
@@ -149,12 +153,12 @@ pub fn fallback_rate() -> Projection<FallbackRateView> {
             }
             match e.verb {
                 Verb::Opened => {
-                    if e.kind != EVENT_USER_MESSAGE {
+                    if e.kind != v.user_message {
                         continue;
                     }
                     // 档位 = 本轮派发格（历史事件回退开轮格）；缺失/未知进
                     // unspecified（可观测）。分母按整条史取**最早**一幕的派发档。
-                    let tier = declared_tier(events, e.turn, None);
+                    let tier = declared_tier(events, e.turn, None, &v);
                     let st = by_tier.entry(tier.clone()).or_insert_with(|| TierStats {
                         tier,
                         turns: 0,
@@ -163,11 +167,11 @@ pub fn fallback_rate() -> Projection<FallbackRateView> {
                     st.turns += 1;
                 }
                 Verb::Closed => {
-                    if e.kind != EVENT_ASSISTANT_FALLBACK {
+                    if e.kind != v.fallback {
                         continue;
                     }
                     // 兜底落在哪档 = 本轮用户消息声明的档位（turn 号即归属）。
-                    let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()));
+                    let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()), &v);
                     let st = by_tier.entry(tier.clone()).or_insert_with(|| TierStats {
                         tier,
                         turns: 0,

@@ -44,7 +44,10 @@ fn broken_promise_carries_why() {
     let args = json!({ "prompt": "评审这份设计" });
     let drafts = DelegationPromise.after(&call(&args, false, "工具执行失败"));
     assert_eq!(drafts.len(), 3);
-    assert_eq!(drafts[1].kind, symbio_core::EVENT_COMMITMENT_BROKEN);
+    assert_eq!(
+        drafts[1].kind,
+        symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN
+    );
     assert_eq!(drafts[1].payload["why"], "工具执行失败");
     assert_eq!(drafts[2].verb, Verb::Asserted);
 }

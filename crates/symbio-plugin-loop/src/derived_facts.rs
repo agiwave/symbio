@@ -33,6 +33,7 @@
 //! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
 //! 刚写下的那些。
 
+use crate::control_decl::{COMMITMENT_VOCAB, VERDICT};
 use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb};
 // 校准观测的名字由本插件交出（owner 是写方这一家）：常量住在清单生成物
 // `symbio_plugin_api::events`，经 `control_decl` 转手（DE-024 D-204 / D-205）。
@@ -221,7 +222,9 @@ pub(crate) fn record_schedule(
 pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, user_seq: u64) {
     // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
     let snapshot = store.range(Seq::new(0));
-    let view = symbio_core::reputation().read_all(&snapshot).value;
+    let view = symbio_core::reputation(COMMITMENT_VOCAB)
+        .read_all(&snapshot)
+        .value;
     // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的
     // `EliminationDecider::verdict_grants_changes`，单点定义）。
     let overlay = symbio_core::GrantsOverlay::fold(
@@ -254,7 +257,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
         if overlay.is_revoked(principal, symbio_core::CAP_ASSIGN_WORK) {
             continue;
         }
-        let ev = decider.elimination_event(principal, entry.score, user_seq);
+        let ev = decider.elimination_event(VERDICT, principal, entry.score, user_seq);
         if let Err(e) = store.append(ev) {
             symbio_core::plugin_warn!(
                 "session",
@@ -264,7 +267,7 @@ pub(crate) fn record_elimination(store: &dyn Store<Event = Event>, turn: u64, us
             symbio_core::plugin_info!(
                 "session",
                 "[v2] 落格 {}：主体 {principal} 收回 assign.work（声誉分 {} 低于阈值 {}）",
-                symbio_core::EVENT_VERDICT_ASSERTED,
+                crate::control_decl::EVENT_VERDICT_ASSERTED,
                 entry.score,
                 symbio_core::EliminationDecider::THRESHOLD,
             );

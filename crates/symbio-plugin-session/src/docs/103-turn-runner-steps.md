@@ -38,16 +38,16 @@ run_with_tools
 
 | 段 | Step | 判据（纯函数可判） | 落的事实 |
 |---|---|---|---|
-| 1 | `Emit` | 恒真（用户消息先入格） | `u-{turn}` · `EVENT_USER_MESSAGE` · 载荷 `text/tier/budget_ms/id` |
-| 1a | `Emit` | `opening_text` 非空 且 `opening_dialog` 在 | `op-{turn}` · `EVENT_ASSISTANT_OPENING` |
+| 1 | `Emit` | 恒真（用户消息先入格） | `u-{turn}` · `user.message` · 载荷 `text/tier/budget_ms/id` |
+| 1a | `Emit` | `opening_text` 非空 且 `opening_dialog` 在 | `op-{turn}` · `chat.assistant.opening` |
 | 1b | `Emit` → `Halt` | `final_reply` 在（调用方已定稿，模型不参与） | `f-{turn}` · completed / 兜底（空答话） |
 | 1c | `Halt` | `abort.is_aborted` | `f-{turn}` · aborted |
 | loop 头 | `Ask` | 恒真（环的唯一模型调用点） | 无（流式帧走 sink 直通，不进事实） |
 | 2a | `Halt` | `rt.tool_calls.is_empty` | `f-{turn}` · completed（`finish` 随载荷带出） |
 | 2a 空答 | `Emit` → `Halt` | 答话取值为空（含 `finish=length` 的截断） | 兜底格 |
 | 2b | `Emit` → `Halt` | 有工具调用但 `dispatch` 缺 | 兜底格（配置缺口，诚实回报） |
-| 2c | `Emit` × N | 每条 `outcome`（过 `closure_gate(Artifact)` 闸） | `a-{turn}-{n}` · `EVENT_ARTIFACT_ADDED` · 首格带 `round` |
-| 2d | `Emit` → `Halt` | `outcomes.any(needs_user_action)` | `p-{turn}-{n}` · `EVENT_ASSISTANT_PROGRESS` · `status: pending` |
+| 2c | `Emit` × N | 每条 `outcome`（过 `closure_gate(Artifact)` 闸） | `a-{turn}-{n}` · `artifact.added` · 首格带 `round` |
+| 2d | `Emit` → `Halt` | `outcomes.any(needs_user_action)` | `p-{turn}-{n}` · `chat.assistant.progress` · `status: pending` |
 | 2e/2f | （无 Step） | 纯内存状态推进 | 无（`exchange` / `rounds` / `tool_round` 是投影的原料，不是事实） |
 | 3a | `Emit` → `Halt` | `Err(AdapterError::Aborted)` | `f-{turn}` · aborted + `terminated` |
 | 3b | `Emit` → `Halt` | 其他 `Err` | 兜底格 |

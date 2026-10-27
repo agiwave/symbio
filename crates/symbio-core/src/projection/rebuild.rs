@@ -81,12 +81,8 @@ use crate::chat_node::{
 use crate::event::{
     event_produced_text_node_id, event_tool_result_node_id, EVENT_FAILED, EVENT_RESPONSE,
 };
-use crate::{
-    event_payload_node_id, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
-    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
-    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
-};
+use crate::projection::vocab::{slot_of, ChatSlot};
+use crate::{event_payload_node_id, ChatVocab, Entity, Event, MessageVocab, Verb};
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
@@ -169,7 +165,7 @@ impl RebuildSeq {
 /// 号按**发射顺序**发，删节点不回收号：`seq` 是**顺序锚**（谁在谁前面），不是
 /// 条数。补号会让「同一段历史在删一条前后的两次重建里拿到不同的号」，而号是
 /// 前端的排序键——补号的收益（连续）小于它带来的不稳定。
-pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
+pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNode> {
     let mut out: Vec<ChatNode> = Vec::new();
     // 节点 id → 它在 `out` 里的位置。
     //
@@ -189,14 +185,14 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     let denied_speech: HashSet<u64> = events
         .iter()
         .filter(|e| {
-            e.kind == crate::EVENT_AUTHZ_DENIED
-                && e.payload.get("key").and_then(|v| v.as_str()) == Some(EVENT_ASSISTANT_FINAL)
+            e.kind == c.denied
+                && e.payload.get("key").and_then(|v| v.as_str()) == Some(c.final_reply)
         })
         .map(|e| e.turn)
         .collect();
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
-    let (start, snapshot_messages) = match crate::mutations_latest_snapshot(events) {
+    let (start, snapshot_messages) = match crate::mutations_latest_snapshot(events, m) {
         Some((i, msgs)) => (i + 1, msgs),
         None => (0, Vec::new()),
     };
@@ -208,8 +204,8 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     }
 
     for e in &events[start..] {
-        match (e.entity, e.verb, e.kind.as_str()) {
-            (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED) => {
+        if e.entity == Entity::Message {
+            if e.verb == Verb::Asserted && e.kind == m.message_edited {
                 if let Some(m) = edited_node(e) {
                     if let Some(&i) = at.get(&m.id) {
                         // 位置与顺序锚**原样保留**：编辑改的是内容，不是这条在历史里
@@ -225,22 +221,21 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
                 }
                 continue;
             }
-            (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {
+            if e.verb == Verb::Closed && e.kind == m.message_removed {
                 gone.extend(removed_ids(e));
                 continue;
             }
-            _ => {}
         }
-        for mut m in nodes_of(e, &denied_speech) {
+        for mut node in nodes_of(e, &denied_speech, c, m) {
             // 同 id 只认首次：同一批调用在两个载荷里各记一次（收束的 `tool_calls[]`
             // 是**引用**，结果正文归 `artifact.added`）。丢后者不丢信息——先到的那条
             // 已经带着结果节点 id。
-            if gone.contains(&m.id) || at.contains_key(&m.id) {
+            if gone.contains(&node.id) || at.contains_key(&node.id) {
                 continue;
             }
-            seq.assign(&mut m);
-            at.insert(m.id.clone(), out.len());
-            out.push(m);
+            seq.assign(&mut node);
+            at.insert(node.id.clone(), out.len());
+            out.push(node);
         }
     }
 
@@ -252,7 +247,7 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
     // 在这里做而不是在读口做，是因为**两个读出口必须是同一棵树**（转写列表与会话叶子
     // 是同一份数据的两个地址）——标注属节点形状，随重建出格一次就够；
     // 「哪一支当前读」因此对重建的两个消费者同口径，不需要谁记得再调一次。
-    crate::projection::branch::stamp_branches(&mut out, events);
+    crate::projection::branch::stamp_branches(&mut out, events, c);
     out
 }
 
@@ -302,37 +297,52 @@ fn added_nodes(e: &Event) -> Vec<ChatNode> {
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
 ///
 /// `denied_speech` 是本切片里发言被拒的轮号（见 [`rebuild`] 的索引）。
-fn nodes_of(e: &Event, denied_speech: &HashSet<u64>) -> Vec<ChatNode> {
-    match (e.entity, e.verb, e.kind.as_str()) {
-        (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => vec![user_node(e)],
-        (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => vec![supplement_node(e)],
+/// 一条事件 → 它承载的节点（顺序即树内顺序）。
+///
+/// `denied_speech` 是本切片里发言被拒的轮号（见 [`rebuild`] 的索引）。
+///
+/// 分类走 [`slot_of`]（DE-024 D-203）：折叠 `match` 的是**闭集枚举**而不是名字，
+/// 加一条对话面事件时 `match` 不全在编译期就红。协议格（`response` / `failed`）
+/// 不在这张表上——它们是内核语法，名字仍住内核，按常量判。
+fn nodes_of(
+    e: &Event,
+    denied_speech: &HashSet<u64>,
+    c: &ChatVocab,
+    m: &MessageVocab,
+) -> Vec<ChatNode> {
+    // 一次模型往返的产出（`response` / `failed`，端口 `model`、无 `via`）：
+    // 正文 / 思考节点落在**应答落格的位置**，顺序因此是实时的
+    // 「思考→卡片→思考→卡片」。内部往返（措辞 / 裁判 / 摘要）不是这一轮对
+    // 读者说的话，一个节点都不发。
+    if e.entity == Entity::Turn
+        && e.verb == Verb::Asserted
+        && (e.kind == EVENT_RESPONSE || e.kind == EVENT_FAILED)
+    {
+        return output_nodes(e, denied_speech.contains(&e.turn));
+    }
+    match slot_of(e, c, m) {
+        Some(ChatSlot::UserMessage) => vec![user_node(e)],
+        Some(ChatSlot::Supplemented) => vec![supplement_node(e)],
         // 收束 / 进展 / 兜底：三种格子共用一份产出形状（`produced_payload`），
         // 差别只在 `status`。它们只记**轮级结局**，正文 / 思考归对应的一次模型往返
-        // （下一臂）——所以这里只出骨架（与无模型轮自己的正文）。
-        (
-            Entity::Turn,
-            Verb::Closed | Verb::Progressed,
-            EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK | EVENT_ASSISTANT_PROGRESS,
-        ) => produced_nodes(e),
-        // 一次模型往返的产出（`response` / `failed`，端口 `model`、无 `via`）：
-        // 正文 / 思考节点落在**应答落格的位置**，顺序因此是实时的
-        // 「思考→卡片→思考→卡片」。内部往返（措辞 / 裁判 / 摘要）不是这一轮对
-        // 读者说的话，一个节点都不发。
-        (Entity::Turn, Verb::Asserted, EVENT_RESPONSE | EVENT_FAILED) => {
-            output_nodes(e, denied_speech.contains(&e.turn))
-        }
+        // （上一臂）——所以这里只出骨架（与无模型轮自己的正文）。
+        Some(ChatSlot::FinalReply | ChatSlot::Fallback | ChatSlot::Progress) => produced_nodes(e),
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
-        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
+        Some(ChatSlot::Reported) => vec![reported_node(e)],
         // 对话面开场白（`Escalate` 首响）：与汇报同形（根级 / 带
         // `meta.surface = "reply"` / `exclude_from_context`），只有理由码不同。
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
-        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => vec![opening_node(e)],
+        Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
-        (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => artifact_nodes(e),
-        // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的
-        // 一个）。按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
-        (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED) => added_nodes(e),
-        _ => Vec::new(),
+        Some(ChatSlot::ArtifactAdded) => artifact_nodes(e),
+        // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的一个）。
+        // 按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
+        Some(ChatSlot::MessageAdded) => added_nodes(e),
+        // 变更格与取代格在 [`rebuild`] 的循环里已经处理（改 / 删 / 换基），不产新节点。
+        Some(ChatSlot::MessageEdited | ChatSlot::MessageRemoved | ChatSlot::Consolidated) => {
+            Vec::new()
+        }
+        None => Vec::new(),
     }
 }
 

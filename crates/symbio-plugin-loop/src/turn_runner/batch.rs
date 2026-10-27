@@ -39,7 +39,7 @@ where
                     turn,
                     user_seq,
                     ClosureKind::Artifact,
-                    symbio_core::EVENT_ARTIFACT_ADDED,
+                    symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
                     &why,
                 );
                 symbio_core::plugin_warn!(
@@ -52,7 +52,7 @@ where
         store.append(
             Event::pending(
                 format!("a-{turn}-{}", run.artifact_no),
-                symbio_core::EVENT_ARTIFACT_ADDED,
+                symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
                 Entity::Artifact,
                 Verb::Asserted,
                 turn,

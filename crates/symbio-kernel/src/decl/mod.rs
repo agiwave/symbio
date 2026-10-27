@@ -630,11 +630,12 @@ const SENT_FIELDS: &[&str] = &[
     "awaited",
 ];
 
-// 协议五格的事件名与格位。名字常量仍住 `event/mod.rs`（唯一名字表），格位在此
-// 与 `FactDecl` 并列声明——`seal` 因此能判「协议事实都有事件行」。
+// 协议五格的事件名与格位。名字常量仍住 `event/mod.rs`（协议族是内核语法的闭集，
+// DE-024 D-203 裁决三把它留在语法里），格位在此与 `FactDecl` 并列声明——`seal`
+// 因此能判「协议事实都有事件行」。
 //
-// 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。
-// 理由见 `event/grid.rs` 的同名行（迁移完成后那一份成为唯一说明）。
+// 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。业务
+// 事件名已全部由 owner 声明（内核 `CELLS` 归零），本表因此是内核唯一的名字→格位表。
 const PROTOCOL_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
     EventDecl::new(EVENT_SENT, (Entity::Turn, Verb::Asserted)),

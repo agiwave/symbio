@@ -35,10 +35,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::chat_node::{ChatNode, MessageContent, NodeRole};
-use crate::event::{
-    Entity, Event, Verb, EVENT_FAILED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_RESPONSE,
-    EVENT_SESSION_CONSOLIDATED,
-};
+use crate::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
+use crate::MessageVocab;
 
 use serde::{Deserialize, Serialize};
 
@@ -96,16 +94,23 @@ impl MessageMutations {
     ///
     /// 载荷不是合法 `ChatNode`（旧版本写下的 / 手工改过的 WAL）⇒ 跳过那条：
     /// 读侧必须对任意历史事件容错，一条坏载荷不该让整次投影失败。
-    pub fn collect(events: &[Event]) -> Self {
+    ///
+    /// 两个名字由调用方在构造期交进来（`v.message_edited` / `v.message_removed`，
+    /// DE-024 D-203）：`match` 的三目键从「格子 + 名字常量」改成「格子 + 形参」——
+    /// 匹配臂里放不下变量，故拆成 `verb` 的 `match` 加一层名字判等。
+    pub fn collect(events: &[Event], v: &MessageVocab) -> Self {
         let mut edited = HashMap::new();
         let mut removed = HashSet::new();
         for e in events {
-            match (e.entity, e.verb, e.kind.as_str()) {
-                (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED) => {
+            if e.entity != Entity::Message {
+                continue;
+            }
+            match e.verb {
+                Verb::Asserted if e.kind == v.message_edited => {
                     let Some(m) = parse_edited(e) else { continue };
                     edited.insert(m.0, m.1);
                 }
-                (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {
+                Verb::Closed if e.kind == v.message_removed => {
                     removed.extend(ids_of(e));
                 }
                 _ => {}
@@ -179,20 +184,23 @@ fn ids_of(e: &Event) -> Vec<String> {
 /// 载荷不是合法列表（旧版本 / 手工改过的 WAL）⇒ **跳过那条**继续往前找：读侧必须
 /// 对任意历史事件容错，一条坏载荷不该让整次投影失败——但也不该让一个坏快照
 /// 把此前有效的那一份吃掉。
-pub fn mutations_latest_snapshot(events: &[Event]) -> Option<(usize, Vec<ChatNode>)> {
+pub fn mutations_latest_snapshot(
+    events: &[Event],
+    v: &MessageVocab,
+) -> Option<(usize, Vec<ChatNode>)> {
     events
         .iter()
         .enumerate()
         .rev()
-        .find_map(|(i, e)| snapshot_messages(e).map(|msgs| (i, msgs)))
+        .find_map(|(i, e)| snapshot_messages(e, v).map(|msgs| (i, msgs)))
 }
 
 /// `session.consolidated` 的载荷 → 压缩后的整份消息列表。
-fn snapshot_messages(e: &Event) -> Option<Vec<ChatNode>> {
+fn snapshot_messages(e: &Event, v: &MessageVocab) -> Option<Vec<ChatNode>> {
     if !(e.entity == Entity::Message && e.verb == Verb::Progressed) {
         return None;
     }
-    if e.kind != EVENT_SESSION_CONSOLIDATED {
+    if e.kind != v.consolidated {
         return None;
     }
     let arr = e.payload.get("messages")?.as_array()?;

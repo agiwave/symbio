@@ -1439,7 +1439,7 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     store
         .append(Event::pending(
             "u0",
-            symbio_core::EVENT_USER_MESSAGE,
+            symbio_plugin_api::events::EVENT_USER_MESSAGE,
             Entity::Turn,
             Verb::Opened,
             0,

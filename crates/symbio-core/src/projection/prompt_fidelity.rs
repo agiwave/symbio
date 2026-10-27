@@ -53,13 +53,10 @@
 //! 纯函数 + 单测层：不起 CLI、不 mock LLM、不碰 IO。所以它不会被「太重」跳过——这一点
 //! 是本条存在的意义，全量 e2e 反而做不到（每步都要重起进程、跑 42 个用例）。
 
-use super::super::event::{
-    event_node_of, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
-    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
-};
+use super::super::event::Event;
 use super::mutations::OutputIndex;
+use super::vocab::{slot_node_of, slot_of, ChatSlot};
+use crate::{ChatVocab, MessageVocab};
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
 /// 不该让「内容相同」的报告变成另一种类型。
@@ -95,26 +92,39 @@ pub enum PromptGap {
 ///
 /// **唯一真源**：事件 kind 的集合只在这里列一次。投影若漏了某个 kind，本函数是第一个
 /// 知道的——而不是等 prompt 里少了东西才从症状往回猜。
-fn expected_role(e: &Event, outputs: &OutputIndex) -> Option<&'static str> {
-    match (e.entity, e.verb, e.kind.as_str()) {
-        (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some("user"),
+fn expected_role(
+    e: &Event,
+    outputs: &OutputIndex,
+    c: &ChatVocab,
+    m: &MessageVocab,
+) -> Option<&'static str> {
+    match slot_of(e, c, m) {
+        Some(ChatSlot::UserMessage) => Some("user"),
         // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user。
         //
-        // **凡是落进投影的 kind 都必须在这里登记**：漏登记的 kind 在这里返回 None，
+        // **凡是落进投影的 slot 都必须在这里登记**：漏登记的 slot 在这里返回 None，
         // 判据把它当成「不在投影范围内」直接跳过——**补充漏进请求包时判据不会红**。
-        // 判据的覆盖范围必须与投影的实现范围同时长。
-        (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => Some("user"),
-        (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
-            // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
-            (!payload_text(e, outputs).trim().is_empty()).then_some("assistant")
+        // 判据的覆盖范围必须与投影的实现范围同时长（闭集枚举让这条在编译期可查：
+        // `ChatSlot` 加一档，下面的 `match` 就会因为不穷尽而红）。
+        Some(ChatSlot::Supplemented) => Some("user"),
+        // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
+        // 进展格（等待用户）同理：同样投影成 assistant 行；空正文照跳。
+        Some(ChatSlot::FinalReply | ChatSlot::Progress) => {
+            (!payload_text(e, outputs, c).trim().is_empty()).then_some("assistant")
         }
-        // 进展格（等待用户）：同样投影成 assistant 行；空正文照跳。
-        (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
-            (!payload_text(e, outputs).trim().is_empty()).then_some("assistant")
-        }
-        (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => Some("assistant"),
-        (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => Some("tool"),
-        _ => None,
+        Some(ChatSlot::Fallback) => Some("assistant"),
+        Some(ChatSlot::ArtifactAdded) => Some("tool"),
+        // 界面文本（汇报 / 开场白 / 诞生格）由 `excluded_from_prompt` 认领；
+        // 变更格与取代格由 `is_mutation` / `is_snapshot` 认领——它们都不产 entry。
+        Some(
+            ChatSlot::Reported
+            | ChatSlot::Opening
+            | ChatSlot::MessageAdded
+            | ChatSlot::MessageEdited
+            | ChatSlot::MessageRemoved
+            | ChatSlot::Consolidated,
+        )
+        | None => None,
     }
 }
 
@@ -123,17 +133,16 @@ fn expected_role(e: &Event, outputs: &OutputIndex) -> Option<&'static str> {
 /// 与 expected_role 是**互补**的两张表而不是一张表的两种取值：那张回答
 /// 「它该是什么角色」，这张回答「它根本不该出现」。合成一张的话，「不该出现」
 /// 就得靠某个假角色表达，而假角色会一路传到线格式去。
-fn excluded_from_prompt(e: &Event) -> bool {
+fn excluded_from_prompt(e: &Event, c: &ChatVocab, m: &MessageVocab) -> bool {
     matches!(
-        (e.entity, e.verb, e.kind.as_str()),
-        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED)
-            // 对话面开场白：与汇报同为界面文本（`exclude_from_context`），
-            // 按设计不进请求包——漏进去要红。
-            | (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING)
-            // 诞生格（D-054 决策 1）：本格的节点按定义是**界面文本**——只有
-            // 「找不到别的格承载诞生」的节点才落这里（见 `EVENT_MESSAGE_ADDED`
-            // 的边界），而承载对话内容的节点必须由它自己的事实落。
-            | (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED)
+        slot_of(e, c, m),
+        // 汇报与对话面开场白：与汇报同为界面文本（`exclude_from_context`），
+        // 按设计不进请求包——漏进去要红。
+        //
+        // 诞生格（D-054 决策 1）同理：本格的节点按定义是**界面文本**——只有
+        // 「找不到别的格承载诞生」的节点才落这里，而承载对话内容的节点必须由
+        // 它自己的事实落。
+        Some(ChatSlot::Reported | ChatSlot::Opening | ChatSlot::MessageAdded)
     )
 }
 
@@ -143,11 +152,10 @@ fn excluded_from_prompt(e: &Event) -> bool {
 /// 说的是「它不该出现在 prompt 里」，这张说的是「它根本不是一条对话内容，它改的是
 /// 别的东西」——两者的**检查动作相反**（前者要报「出现了」，后者要**跳过**并折叠）。
 /// 合成一个 `matches!` 会让后来的人无从判断该往哪边加。
-fn is_mutation(e: &Event) -> bool {
+fn is_mutation(e: &Event, c: &ChatVocab, m: &MessageVocab) -> bool {
     matches!(
-        (e.entity, e.verb, e.kind.as_str()),
-        (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED)
-            | (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED)
+        slot_of(e, c, m),
+        Some(ChatSlot::MessageEdited | ChatSlot::MessageRemoved)
     )
 }
 
@@ -157,10 +165,8 @@ fn is_mutation(e: &Event) -> bool {
 /// 单列成函数而不是并进 `is_mutation`：那类的检查动作是「跳过并折叠既有条目」，
 /// 这类的动作是「按载荷**新建**一批期望条目」——合成一个 `matches!` 会让后来的人
 /// 无从判断该往哪边加。
-fn is_snapshot(e: &Event) -> bool {
-    e.entity == Entity::Message
-        && e.verb == Verb::Progressed
-        && e.kind == EVENT_SESSION_CONSOLIDATED
+fn is_snapshot(e: &Event, c: &ChatVocab, m: &MessageVocab) -> bool {
+    slot_of(e, c, m) == Some(ChatSlot::Consolidated)
 }
 
 /// 事件载荷里该进 prompt 的正文（与 `transcript` 投影**同一取法**——两处各写一遍必然漂移，
@@ -168,23 +174,21 @@ fn is_snapshot(e: &Event) -> bool {
 ///
 /// 收束 / 进展格的正文**不在载荷里**（它们只存结局）：正文归那一次模型往返，按
 /// [`OutputIndex`] 折回——与转写用同一份索引、同一条判据。
-fn payload_text(e: &Event, outputs: &OutputIndex) -> String {
-    match e.kind.as_str() {
-        EVENT_ASSISTANT_FALLBACK => e
-            .payload
+fn payload_text(e: &Event, outputs: &OutputIndex, c: &ChatVocab) -> String {
+    if e.kind == c.fallback {
+        e.payload
             .get("detail")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
-            .to_string(),
-        k if k == EVENT_ASSISTANT_FINAL || k == EVENT_ASSISTANT_PROGRESS => {
-            outputs.produced_text(e)
-        }
-        _ => e
-            .payload
+            .to_string()
+    } else if e.kind == c.final_reply || e.kind == c.progress {
+        outputs.produced_text(e)
+    } else {
+        e.payload
             .get("text")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
-            .to_string(),
+            .to_string()
     }
 }
 
@@ -331,22 +335,25 @@ fn claim(
     }
 }
 
+/// 名字由调用方在构造期交进来（`c` 对话面 / `m` 消息面，DE-024 D-203）。
 pub fn verify(
     events: &[Event],
     messages: &[crate::PromptMessage],
     declared: Option<&str>,
+    c: &ChatVocab,
+    m: &MessageVocab,
 ) -> PromptReport {
     let mut rep = PromptReport::default();
     // 变更格的折叠索引（与 `transcript` **共用同一份**）：编辑过的条目在网格侧
     // 按**新**正文复核，被删掉的从「网格→prompt」跳过。见模块文档「第三类」。
-    let mutations = super::mutations::MessageMutations::collect(events);
+    let mutations = super::mutations::MessageMutations::collect(events, m);
     // 未选中支的根 id（与 `transcript` **共用同一份**折法，见 `branch::unselected_roots`）：
     // 那一支的正文按设计就不在请求包里，与「被删掉」同一处置——不跳过就会每次重试都报
     // 「丢事实」，而恒红的判据等于没有判据。
-    let hidden_branches = super::branch::unselected_roots(events, |id| mutations.is_removed(id));
+    let hidden_branches = super::branch::unselected_roots(events, |id| mutations.is_removed(id), c);
     // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
     // 连自己的列表都已被取代。见模块文档「第四类」。
-    let snapshot = super::mutations::mutations_latest_snapshot(events);
+    let snapshot = super::mutations::mutations_latest_snapshot(events, m);
     // 模型输出索引（与 `transcript` **共用同一份**）：收束 / 进展格的正文归那一次
     // 模型往返，见 `payload_text`。扫全量事件——一轮可能跨压缩点。
     let outputs = super::mutations::OutputIndex::collect(events);
@@ -379,13 +386,13 @@ pub fn verify(
         // 变更格自己**不产 entry**：它们不是新的对话内容，也不是「按设计不进请求包」
         // 的界面文本。计数单列（`mutations`）——并进 `checked_events` 就看不出
         // 「折叠有没有真的发生」了。
-        if is_mutation(e) {
+        if is_mutation(e, c, m) {
             rep.checked_events += 1;
             rep.mutations += 1;
             continue;
         }
         // 取代格（压缩快照）：**认领**它载荷里那份列表（见模块文档「第四类」）。
-        if is_snapshot(e) {
+        if is_snapshot(e, c, m) {
             rep.checked_events += 1;
             rep.consolidations += 1;
             if let Some((si, msgs)) = snapshot.as_ref() {
@@ -428,9 +435,9 @@ pub fn verify(
         // 这条判据的存在理由与 `declared` 同源：漏进请求包的界面文本会让线上出现
         // 连续两条 assistant，而**没有任何现有判据会红**——`expected_role` 对它返回
         // None（它在投影里，但它不是对话内容）。
-        if excluded_from_prompt(e) {
+        if excluded_from_prompt(e, c, m) {
             rep.checked_events += 1;
-            let text = payload_text(e, &outputs);
+            let text = payload_text(e, &outputs, c);
             if messages.iter().any(|m| m.text == text) {
                 rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
                     kind: e.kind.as_str().to_string(),
@@ -439,13 +446,13 @@ pub fn verify(
             }
             continue;
         }
-        let Some(expected) = expected_role(e, &outputs) else {
+        let Some(expected) = expected_role(e, &outputs, c, m) else {
             continue;
         };
         rep.checked_events += 1;
         // 生效读法：该节点被编辑过 ⇒ 用**新**正文 / 角色；被删掉 ⇒ **跳过**
         // （它本就不该在 prompt 里，若仍在，反方向的 `NoSourceInGrid` 会照出来）。
-        let node = event_node_of(e);
+        let node = slot_node_of(e, c, m);
         if let Some(node) = node.as_deref() {
             if mutations.is_removed(node) {
                 continue;
@@ -469,7 +476,7 @@ pub fn verify(
             .unwrap_or_else(|| expected.to_string());
         let text: String = match edited.and_then(|ed| ed.text.clone()) {
             Some(t) => t,
-            None => payload_text(e, &outputs),
+            None => payload_text(e, &outputs, c),
         };
         claim(
             &mut rep,
