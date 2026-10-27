@@ -105,3 +105,42 @@ fn no_event_name_is_claimed_by_two_fields() {
     seen.dedup();
     assert_eq!(seen.len(), all.len(), "同一条名字占了两处：{all:?}");
 }
+
+/// 领域扩展位在**读侧**也是「不解释」：`Domain × 任意动词` 一律不是对话槽位。
+///
+/// 这条判据钉的是 DE-025 D-209 的另一半。写侧的证据在 `plugins/session` 的写闸
+/// （`a_domain_cell_is_gated_like_any_other_declared_cell`）：owner 声明了就放行。
+/// 读侧的证据在这里：**放行之后 core 也不会因此「懂」这个领域**——它不进对话折叠、
+/// 不产节点、不参与任何核心判据。
+///
+/// 若哪天有人为了「让 notes 也显示在转写上」在这里加一档 `ChatSlot`，那正是
+/// 「加一个领域要改架构」的回流形状；这条用例会红，逼那条改动去走决策。
+#[test]
+fn a_domain_cell_is_never_a_chat_slot() {
+    use super::slot_of;
+    use crate::event::{Entity, Event, Verb};
+
+    for verb in [
+        Verb::Opened,
+        Verb::Progressed,
+        Verb::Held,
+        Verb::Closed,
+        Verb::Asserted,
+    ] {
+        // 名字特意挑成「看起来像对话」的形态：判据认的是 `(entity, verb)` 与词汇面，
+        // 不是名字长得像不像——名字由 owner 声明，core 不认识它。
+        let e = Event::pending(
+            "d-0",
+            "notes.created",
+            Entity::Domain,
+            verb,
+            0,
+            "session/main",
+        );
+        assert_eq!(
+            slot_of(&e, &CHAT, &MESSAGE),
+            None,
+            "Domain × {verb:?} 不该被 core 解释成任何对话槽位"
+        );
+    }
+}

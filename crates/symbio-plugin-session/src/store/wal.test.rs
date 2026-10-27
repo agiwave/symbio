@@ -1459,3 +1459,122 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         "拒错形态：{err:?}"
     );
 }
+
+/// 领域扩展位：`Domain × Verb` 由 owner 的 `EventDecl` 声明，写闸照常校验（DE-025 D-209）。
+///
+/// 这条判据要证明的是**两件事同时成立**：
+///
+/// 1. 写闸对 `Domain` **没有任何特判**——它不因为「这是个不认识的领域」而放行或拒绝，
+///    判据仍是「名字与格位是否同源」。放行的唯一理由是装配表里有那一行。
+/// 2. 格位仍然要逐字对上：声明说 `Domain × Opened`，事件自述 `Domain × Closed` ⇒ 拒。
+///    若闸门对 `Domain` 开了「同实体就放行」的口子，这一臂会静默失效。
+///
+/// 反面对照更重要：**同一个名字**换到没有注入声明的实例上 ⇒ `OffGrid { declared: None }`。
+/// 内核不认识 `Domain` 里的任何领域，这正是「加一个领域不改内核」的写侧证据。
+#[test]
+fn a_domain_cell_is_gated_like_any_other_declared_cell() {
+    /// 一条 `Domain × Opened` 的事实（真实形态见 DE-025 §2.3 的领域扩展位）。
+    const FIXTURE: &str = "fixture.domain.created";
+
+    const FIXTURE_EVENTS: &[EventDecl] = &[EventDecl::new(FIXTURE, (Entity::Domain, Verb::Opened))];
+
+    fn protocol_rows() -> &'static [Decl] {
+        let mut out = Vec::new();
+        for name in [
+            EVENT_REQUEST,
+            EVENT_SENT,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
+            EVENT_RETRY,
+        ] {
+            let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
+                source: name,
+                key: &[],
+                eq: &[],
+            }]));
+            out.push(Decl {
+                name,
+                prio: 99,
+                by: None,
+                tier: LatencyTier::Reflex,
+                expand: None,
+                owes: pattern[0],
+                until: pattern,
+                unless: &[],
+            });
+        }
+        Box::leak(out.into_boxed_slice())
+    }
+
+    let mut b = Builder::new();
+    b.declare(
+        "plugins/domain-test",
+        PluginDeclarations {
+            events: FIXTURE_EVENTS,
+            facts: &[],
+            views: &[],
+            ports: &[],
+            actors: Vec::new(),
+            rows: protocol_rows(),
+        },
+    );
+    let frozen = b.seal().expect("注入表的协议五格必须有归宿");
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let store = EventWalStore::open(&path)
+        .unwrap()
+        .with_declarations(frozen);
+
+    store
+        .append(ev(
+            "domain-0",
+            FIXTURE,
+            Entity::Domain,
+            Verb::Opened,
+            0,
+            "领域事实",
+        ))
+        .expect("装配表给了格位，写闸必须放行——它不认识这个领域，也不需要认识");
+
+    let err = store
+        .append(ev(
+            "domain-1",
+            FIXTURE,
+            Entity::Domain,
+            Verb::Closed,
+            1,
+            "挪了一格",
+        ))
+        .expect_err("声明在 Opened、自述 Closed ⇒ 同源判据照判，不给 Domain 开口子");
+    assert!(
+        matches!(
+            err,
+            AppendError::OffGrid {
+                declared: Some((Entity::Domain, Verb::Opened)),
+                given: (Entity::Domain, Verb::Closed),
+                ..
+            }
+        ),
+        "拒错形态：{err:?}"
+    );
+    assert_eq!(store.len(), 1, "被拒的事件不落格");
+
+    // 反面：没有注入声明的实例上，同一个名字是网格之外的。
+    drop(store);
+    let plain = EventWalStore::open(&path).unwrap();
+    let err = plain
+        .append(Event::pending(
+            "domain-2",
+            FIXTURE,
+            Entity::Domain,
+            Verb::Opened,
+            2,
+            "session/main",
+        ))
+        .expect_err("没有 owner 声明 ⇒ 内核不认识这个领域，必须拒");
+    assert!(
+        matches!(err, AppendError::OffGrid { declared: None, .. }),
+        "拒错形态：{err:?}"
+    );
+}

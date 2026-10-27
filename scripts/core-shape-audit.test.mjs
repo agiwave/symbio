@@ -50,8 +50,10 @@ const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
  *
  * `baseline` 就是 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>`：夹具只有几个 trait，
  * 不显式给基线就测不到棘轮（真仓的值是 20:72:24）。
+ * `data` 是 `CORE_DATA_BASELINE=<structFields>:<enumVariants>`（CS-009），默认 `0:0`——
+ * 绝大多数夹具里没有公共数据面，给 `0:0` 让提示噪音不出现在无关用例里。
  */
-function audit(files, { baseline = '1:1:0', vocab } = {}) {
+function audit(files, { baseline = '1:1:0', vocab, data = '0:0' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-shape-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -59,7 +61,7 @@ function audit(files, { baseline = '1:1:0', vocab } = {}) {
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
     }
-    const env = { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline }
+    const env = { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline, CORE_DATA_BASELINE: data }
     if (vocab !== undefined) env.VOCAB_BASELINE = vocab
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
@@ -240,7 +242,88 @@ test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当�
     { baseline: '1:2:0' },
   )
   assert.equal(r.status, 1)
-  assert.match(r.stderr, /不是形状基线的格/)
+  assert.match(r.stderr, /不是基线的格/)
+})
+
+// ==================== CS-009 数据面棘轮 ====================
+
+/** 一个 2 字段 struct + 一个 2 变体 enum 的最小数据面夹具（合计 2:2）。 */
+const DATA_TWO = 'pub struct Point {\n    pub x: u8,\n    pub y: u8,\n}\n\npub enum Axis {\n    X,\n    Y,\n}\n'
+
+test('数据面等于基线 ⇒ 通过', () => {
+  const r = audit(core(ONE, { 'crates/symbio-core/src/beta/mod.rs': DATA_TWO }), { data: '2:2' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('多一个枚举变体（封闭取值面变宽）⇒ CS-009 变红', () => {
+  const r = audit(
+    core(ONE, {
+      'crates/symbio-core/src/beta/mod.rs': DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n'),
+    }),
+    { data: '2:2' },
+  )
+  assert.equal(r.status, 1, '加一个变体必须红')
+  assert.match(r.stderr, /CS-009/)
+  assert.match(r.stderr, /变体总数.*实测 3 > 基线 2/)
+  assert.doesNotMatch(r.stderr, /字段总数/, '字段没变，不该牵连另一格')
+})
+
+test('多一个结构体字段（公共数据面变宽）⇒ 只有 structFields 格变红', () => {
+  const r = audit(
+    core(ONE, {
+      'crates/symbio-core/src/beta/mod.rs': DATA_TWO.replace('    pub y: u8,\n', '    pub y: u8,\n    pub z: u8,\n'),
+    }),
+    { data: '2:2' },
+  )
+  assert.equal(r.status, 1, '加一个字段必须红')
+  assert.match(r.stderr, /字段总数.*实测 3 > 基线 2/)
+  assert.doesNotMatch(r.stderr, /变体总数/, '变体没变，不该牵连另一格')
+})
+
+test('反向：泛型实参 / 函数指针 / 属性里的逗号不算字段分隔', () => {
+  // 若按「数逗号」实现，这个 struct 会被读成 5 个字段而不是 3 个——棘轮在方向上
+  // 只会多数，但多数会把余量白送出去，等于放宽。
+  const src =
+    'pub struct Wide {\n    pub a: BTreeMap<u8, u8>,\n    pub b: fn(u8, u8) -> u8,\n    pub c: [u8; 2],\n}\n'
+  const r = audit(core(ONE, { 'crates/symbio-core/src/beta/mod.rs': src }), { data: '3:0' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('反向：tuple struct 的位置字段计入，`pub(crate)` 与测试模块不计', () => {
+  const src =
+    'pub struct Pair(u8, u8);\n\npub(crate) struct Hidden {\n    a: u8,\n    b: u8,\n}\n\n#[cfg(test)]\nmod t {\n    pub struct Fake {\n        a: u8,\n    }\n}\n'
+  const r = audit(core(ONE, { 'crates/symbio-core/src/beta/mod.rs': src }), { data: '2:0' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVariants`）', () => {
+  const bumped = DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n')
+  const withoutDecision = audit(core(ONE, { 'crates/symbio-core/src/beta/mod.rs': bumped }), {
+    data: '2:3',
+  })
+  // 没有放宽注释时不该红：数字与基线一致。放宽注释只在「改数字」时才需要解释。
+  assert.equal(withoutDecision.status, 0, withoutDecision.stderr + withoutDecision.stdout)
+
+  const waived = audit(
+    core(ONE, {
+      'crates/symbio-core/src/beta/mod.rs': bumped,
+      'scripts/core-shape-audit.mjs': '// core-shape-allow enumVariants: D-209 领域扩展位的理由\n',
+      'docs/003-design/025-能力包与扩展面.md': '# DE-025\n\n### D-209 领域轴用一个扩展位\n\n理由。\n',
+    }),
+    { data: '2:3' },
+  )
+  assert.equal(waived.status, 0, waived.stderr + waived.stdout)
+  assert.match(waived.stdout, /enumVariants←D-209/)
+
+  const dangling = audit(
+    core(ONE, {
+      'crates/symbio-core/src/beta/mod.rs': bumped,
+      'scripts/core-shape-audit.mjs': '// core-shape-allow enumVariants: D-999 指向不存在的决策\n',
+    }),
+    { data: '2:3' },
+  )
+  assert.equal(dangling.status, 1, '指向打不开的决策 = 空引用')
+  assert.match(dangling.stderr, /D-999.*条目/)
 })
 
 // ==================== 判据自己不能哑火 ====================

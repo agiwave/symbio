@@ -17,6 +17,7 @@
  * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
  * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
+ * | CS-009 | `structFields` / `enumVariants` | core + kernel **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -47,14 +48,18 @@
  * 论证的事；它只保证：让核心形状变宽，必须显式触碰一处基线数字，并留下一条能被人打开的
  * 决策。红不红不由执行者判断。
  *
- * ## 为什么只有这三格（口径边界，别顺手加）
+ * ## 为什么只有这五格（口径边界，别顺手加）
  *
  * - **不判行数**：`08 §3.3` 写着「加了数据 / 加了调用点 / 改了文档，都不是架构改动」，
  *   而契约加字段是数据变化——行棘轮会对它红，那是误报；一个只会误报的守卫最后一定被人
  *   喂豁免喂到失效（本仓为此写过一整节，见 `core-export-audit.mjs` 的 W1 注）。
- * - **不判枚举变体数**：变体**是**形状量（`08 §3.5` 把「`NodeKind` 新取值」列为不新增），
- *   但它与「trait 宽度」不是同一个失效面。要加就单独论证一次，不在本批顺手扩判据面。
  * - **不判 `impl` 数 / 宏**：宏展开的形状静态读不到（`08 §3` 的判据本来也不看这个）。
+ * - **枚举变体与 struct 字段（CS-009）当初明确「不顺手扩」，后来单独论证了一次**：
+ *   原文写的是「变体**是**形状量，但它与 trait 宽度不是同一个失效面。要加就单独论证
+ *   一次，不在本批顺手扩判据面」。DE-025 D-212 就是那次论证——`CapabilityMeta` 的字段、
+ *   `Entity` 的变体都是这样长回来的，而 CS-001 一格都看不见。它因此是**第二组格**
+ *   （`structFields` / `enumVariants`），不与 trait 三格混在一个基线里：两组量的失效面
+ *   不同，混在一起会让「哪一格涨了」在数字里看不出来。
  *
  * ## 与既有判据的分工（一个事实只有一个 owner）
  *
@@ -91,7 +96,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
-// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008
+// @codes CS-001 CS-002 CS-003 CS-004 CS-005 CS-006 CS-008 CS-009
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -312,6 +317,47 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
     })()
   : { kernelEvents: 0, cellsRows: 0 }
 
+/**
+ * CS-009 数据面棘轮（[DE-025](../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-212）。
+ *
+ * 两格都只许降，量的是 core + kernel **生产代码**里的公共数据形状：
+ *
+ * - `structFields`：`pub struct` 的字段总数（含 tuple struct 的位置字段）；
+ * - `enumVariants`：`pub enum` 的变体总数。
+ *
+ * ## 它补的是哪一块盲区
+ *
+ * CS-001 数 trait 数 / 成员数 / 默认体数，**数据面一格都看不见**：给
+ * `CapabilityMeta` 加一个布尔位、给 `Entity` 加一个变体、给 `FactRole` 加一档角色，
+ * 三次都是「内核变宽」，而三次都能全绿通过。D-212 把这条翻过来——加一个变体要动
+ * 基线数字，而动数字要求一条能打开的决策。
+ *
+ * ## 为什么不逐 struct / 逐 enum 设上限
+ *
+ * 逐项上限要求维护一张按名字的表，而那张表本身就是「加一个 struct 要改脚本」的
+ * 又一处中心文件——正是本批要拆的形状。总量两格是**同一件事**的等价判据：任何
+ * 新增都会抬高总数，而任何删除都会降下来（降下来时脚本提示同步基线，余量不白留）。
+ * 逐项清单不进判据，只在 `--verbose` 里出，用来回答「涨的那一个是谁」。
+ *
+ * ## 口径边界（写清楚，免得把绿灯当证明）
+ *
+ * - 只认**完全 public**（`pub struct` / `pub enum`）：`pub(crate)` 不在公共面上；
+ * - 私有模块里的 `pub` 项仍计入——与 CS-001 同一口径（它数 `pub trait` 也不看模块
+ *   可见性），方向上只会多数、不会少数，棘轮安全；
+ * - 字段 / 变体按**顶层逗号**切分：泛型参数、函数指针、属性里的逗号都靠括号深度跳过；
+ * - 测试文件与 `#[cfg(test)]` 模块剔出判据面（夹具不是长期数据面）。
+ *
+ * `CORE_DATA_BASELINE=<structFields>:<enumVariants>` 与另外两条同一条纪律：只给回归
+ * 测试用，`35-baseline` 另判覆盖值不得比默认值更松。
+ */
+// core-shape-allow enumVariants: D-209 领域轴必须有一个扩展位——`Domain` 是一次性架构决策，换的是此后 notes / calendar 这类新领域的零 kernel diff；被否候选（`Entity` 改开放字符串会丢 F5 闭集、塞进 `Memory`/`Task` 会让读侧靠载荷猜）见 DE-025
+const DATA_BASELINE = process.env.CORE_DATA_BASELINE
+  ? (() => {
+      const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
+      return { structFields, enumVariants }
+    })()
+  : { structFields: 565, enumVariants: 245 }
+
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
   methods: '`fn` 成员总数（契约面宽度）',
@@ -449,6 +495,98 @@ function mergeShapes(parts) {
   }
 }
 
+/**
+ * 按**顶层逗号**切分（CS-009 的读法）。
+ *
+ * 逗号在下面几种位置时不是分隔符，全部靠深度跳过：泛型实参 `BTreeMap<K, V>`、
+ * 函数指针 `fn(u8, u8) -> u8`、数组 `[u8; 2]`、字段属性 `#[serde(default, skip)]`。
+ * `->` 里的 `>` 不算尖括号收尾（否则 `fn() -> u8` 之后整个深度的符号会翻负）。
+ */
+function topLevelSegments(body) {
+  const out = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]
+    if (c === '<') depth++
+    else if (c === '>') {
+      if (body[i - 1] !== '-') depth--
+    } else if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') depth--
+    else if (c === ',' && depth === 0) {
+      out.push(body.slice(start, i))
+      start = i + 1
+    }
+  }
+  out.push(body.slice(start))
+  return out.map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * 配对圆括号（tuple struct 的位置字段用）。
+ *
+ * 为什么不复用 `matchBrace`：那个只数花括号——从 `(` 出发会一路跑到**文件里下一个**
+ * `{…}` 的收尾，把整个后续代码都当成字段（实测：`pub struct Pair(u8, u8);` 后面
+ * 还有一个带体的 struct 时，字段数会被读成 3）。
+ */
+function matchParen(txt, openIdx) {
+  let depth = 0
+  for (let p = openIdx; p < txt.length; p++) {
+    const c = txt[p]
+    if (c === '(') depth++
+    else if (c === ')') {
+      depth--
+      if (depth === 0) return p
+    }
+  }
+  return txt.length
+}
+
+/**
+ * core + kernel 生产侧的公共数据形状（CS-009）：逐个 `pub struct` / `pub enum` 量，
+ * 汇总成两格。
+ *
+ * 与 `measureCoreShape` 分开的理由是**判据面不同**：那个只量内核文件集里的 trait，
+ * 这个量两个 crate 的全部公共数据面（`pub(crate)` 不算——它不在公共面上）。合并成
+ * 一个函数会让两组量的范围混在一处，而它们本来就该各自可读。
+ */
+function measureDataSurface(dir) {
+  const rows = []
+  for (const file of walk(dir)) {
+    if (!file.endsWith('.rs') || isTestFile(file)) continue
+    const txt = blankTestModules(blankComments(fs.readFileSync(file, 'utf8')).join('\n'))
+    const rel = path.relative(ROOT, file).split(path.sep).join('/')
+    for (const m of txt.matchAll(/\bpub\s+struct\s+([A-Za-z0-9_]+)/g)) {
+      const open = txt.indexOf('{', m.index)
+      const semi = txt.indexOf(';', m.index)
+      const paren = txt.indexOf('(', m.index)
+      // tuple struct：`pub struct Foo(u8, u8);`——位置字段同样进公共面。
+      if (paren >= 0 && (open < 0 || paren < open) && (semi < 0 || paren < semi)) {
+        const close = matchParen(txt, paren)
+        rows.push({
+          kind: 'struct',
+          name: m[1],
+          n: topLevelSegments(txt.slice(paren + 1, close)).length,
+          file: rel,
+        })
+        continue
+      }
+      // `pub struct Foo;`（单元结构体）与声明到别处的写法：零字段，不计入（读不到体）。
+      if (open < 0 || (semi >= 0 && semi < open)) continue
+      const body = txt.slice(open + 1, matchBrace(txt, open))
+      rows.push({ kind: 'struct', name: m[1], n: topLevelSegments(body).length, file: rel })
+    }
+    for (const m of txt.matchAll(/\bpub\s+enum\s+([A-Za-z0-9_]+)/g)) {
+      const open = txt.indexOf('{', m.index)
+      if (open < 0) continue
+      const body = txt.slice(open + 1, matchBrace(txt, open))
+      rows.push({ kind: 'enum', name: m[1], n: topLevelSegments(body).length, file: rel })
+    }
+  }
+  return rows
+}
+
+
 const coreDir = path.join(ROOT, CORE_REL)
 if (!fs.existsSync(path.join(coreDir, 'lib.rs'))) {
   console.error(red(`✗ 读不出 core 范围：${CORE_REL}/mod.rs 不存在（root=${ROOT}）—— 判据没有输入，宁红不静默`))
@@ -510,6 +648,40 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
   }
 }
 
+// ==================== CS-009 数据面棘轮 ====================
+
+const dataRows = scanDirs.flatMap((d) => measureDataSurface(d))
+const dataValues = {
+  structFields: dataRows.filter((r) => r.kind === 'struct').reduce((s, r) => s + r.n, 0),
+  enumVariants: dataRows.filter((r) => r.kind === 'enum').reduce((s, r) => s + r.n, 0),
+}
+const DATA_CELL_LABEL = {
+  structFields: '`pub struct` 字段总数（公共数据面宽度）',
+  enumVariants: '`pub enum` 变体总数（封闭取值面的宽度）',
+}
+
+for (const [key, cap] of Object.entries(DATA_BASELINE)) {
+  if (!Object.hasOwn(dataValues, key)) {
+    report('CS-009', `基线里有一格 \`${key}\` 不是数据面量（只有 ${Object.keys(dataValues).join(' / ')}）`)
+    continue
+  }
+  if (!Number.isFinite(cap)) {
+    report('CS-009', `基线格 \`${key}\` 不是数字（${cap}）—— 判据读不出即失效，宁红不静默`)
+    continue
+  }
+  const now = dataValues[key]
+  if (now > cap) {
+    report(
+      'CS-009',
+      `内核数据面变宽：${DATA_CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— ` +
+        'core / kernel 的公共数据面只许降。新领域用 `Entity::Domain` 扩展位（DE-025 D-209），' +
+        '新行为用 `CapabilityMeta.behaviors` 开放集合，都不该往内核加变体或字段。' +
+        `确需放宽：先在 \`docs/003-design/\` 立一条决策逐条论证「必需」，再在基线旁写 ` +
+        `core-shape-allow ${key}: D-NNN <理由>。逐项清单：--verbose`,
+    )
+  }
+}
+
 // ==================== CS-002 放宽必须挂得住一条决策 ====================
 
 /**
@@ -525,14 +697,18 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
  */
 const waivers = []
 const selfPath = path.join(ROOT, SELF_REL)
+// 放宽口有两个基线对象（形状三格 + 数据两格），键名不重名；豁免注释只写格名，
+// 因此校验面取并集——`core-shape-allow enumVariants: D-209 …` 与
+// `core-shape-allow methods: D-077 …` 走同一条判定。
+const WAIVABLE_KEYS = [...Object.keys(SHAPE_BASELINE), ...Object.keys(DATA_BASELINE)]
 if (fs.existsSync(selfPath)) {
   const selfText = fs.readFileSync(selfPath, 'utf8').replace(/\r\n/g, '\n')
   for (const m of selfText.matchAll(WAIVER_RE)) {
     const [, key, rawReason] = m
     const reason = rawReason.trim()
     waivers.push({ key, reason })
-    if (!Object.hasOwn(SHAPE_BASELINE, key)) {
-      report('CS-002', `\`core-shape-allow ${key}\` 放宽的不是形状基线的格（只有 ${Object.keys(SHAPE_BASELINE).join(' / ')}）`)
+    if (!WAIVABLE_KEYS.includes(key)) {
+      report('CS-002', `\`core-shape-allow ${key}\` 放宽的不是基线的格（只有 ${WAIVABLE_KEYS.join(' / ')}）`)
       continue
     }
     const refs = [...reason.matchAll(ADR_REF_RE)].map((r) => r[1])
@@ -922,10 +1098,14 @@ const cells = Object.keys(SHAPE_BASELINE)
 const shapeLine = cells
   .map((k) => `${k} ${shape.values[k]}/${SHAPE_BASELINE[k]}`)
   .join(' · ')
+const dataLine = Object.keys(DATA_BASELINE)
+  .map((k) => `${k} ${dataValues[k]}/${DATA_BASELINE[k]}`)
+  .join(' · ')
 
 if (errors.length === 0) {
   console.log('\n== core-shape-audit ==')
   ruleLine(true, 'CS-001', `形状棘轮：${shapeLine}`)
+  ruleLine(true, 'CS-009', `数据面棘轮：${dataLine}（只许降；新领域走 Entity::Domain 扩展位）`)
   ruleLine(
     true,
     'CS-002',
@@ -1003,10 +1183,21 @@ if (errors.length === 0) {
         `请同步本脚本的 SHAPE_BASELINE——留着旧数字等于把余量白留给下一次`,
     )
   }
+  const dataUnder = Object.keys(DATA_BASELINE).filter((k) => dataValues[k] < DATA_BASELINE[k])
+  if (dataUnder.length) {
+    console.log(
+      yellow('提示') +
+        `：数据面已收到基线下方（${dataUnder.map((k) => `${k} ${dataValues[k]}<${DATA_BASELINE[k]}`).join(' · ')}），` +
+        `请同步本脚本的 DATA_BASELINE——留着旧数字等于把余量白留给下一次`,
+    )
+  }
   if (VERBOSE) {
     console.log('  —— pub trait 形状（成员数 / 其中带默认体）')
     for (const r of shape.rows)
       console.log(`  [T] ${r.name.padEnd(26)} ${String(r.fns).padStart(2)}/${String(r.defaults).padEnd(2)} ${r.file}`)
+    console.log('  —— 公共数据面（字段数 / 变体数）')
+    for (const r of [...dataRows].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)))
+      console.log(`  [${r.kind === 'struct' ? 'S' : 'E'}] ${r.name.padEnd(26)} ${String(r.n).padStart(2)} ${r.file}`)
   }
   process.exit(0)
 }

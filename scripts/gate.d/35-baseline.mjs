@@ -78,6 +78,22 @@ function vocabCells(text) {
   return cells
 }
 
+/** `scripts/core-shape-audit.mjs` 的 `DATA_BASELINE`（CS-009）：三元尾部对象，两格。
+ *  键序就是 `CORE_DATA_BASELINE=<structFields>:<enumVariants>` 的位置口径。
+ *  与 `coreShapeCells` 分开读的理由：两组量住同一个文件但失效面不同，混着读会让
+ *  「哪一格涨了」在日志里看不出来。 */
+function coreDataCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*structFields:\s*(\d+),\s*enumVariants:\s*(\d+)\s*\}/.exec(
+    text.replace(/\r\n/g, '\n'),
+  )
+  if (m) {
+    cells.set('structFields', Number(m[1]))
+    cells.set('enumVariants', Number(m[2]))
+  }
+  return cells
+}
+
 /** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
  *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
  *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
@@ -284,6 +300,18 @@ const RATCHETS = [
     waivers: () => new Map(),
     envVar: 'VOCAB_BASELINE',
     label: '内核事件词汇（业务事件常量 / CELLS 业务行，只许降）',
+  },
+  {
+    // CS-009 数据面两格（`pub struct` 字段总数 / `pub enum` 变体总数）。它与 core-shape
+    // 住同一个文件、用同一个豁免标记名，但**是另一组格**：放宽的资格由 CS-002 判，
+    // 本条只判「数字有没有比上一版更松」。
+    id: 'core-data',
+    file: 'scripts/core-shape-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: coreDataCells,
+    waivers: waiverReader('core-shape-allow'),
+    envVar: 'CORE_DATA_BASELINE',
+    label: 'core / kernel 公共数据面两格（struct 字段数 / enum 变体数，只许降）',
   },
   {
     // 前端 kind 分支两格：框架层目标 0（只许降），机制层是判据与映射表的存量。
