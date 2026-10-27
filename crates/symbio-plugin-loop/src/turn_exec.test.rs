@@ -26,6 +26,8 @@ use symbio_core::{
 };
 use symbio_providers::DefaultToolVisitor;
 
+use crate::control_decl::{EVENT_MEMORY_RECALLED, EVENT_SESSION_CONFIG};
+
 use super::super::session_port::SessionPort;
 use super::super::test_support::{default_settings, loop_session, turn_spec, FakeSessionPort};
 
@@ -224,7 +226,7 @@ fn seed_config(fx: &Fixture, turn: u64, user_seq: u64) {
         .append(
             Event::pending(
                 format!("cfg-{turn}-{user_seq}"),
-                symbio_core::EVENT_SESSION_CONFIG,
+                EVENT_SESSION_CONFIG,
                 Entity::Turn,
                 Verb::Asserted,
                 turn,
@@ -1252,7 +1254,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 /// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_memory_and_learning_facts() {
-    use symbio_core::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED};
+    use symbio_core::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED};
 
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::super::control_decl::{FACTS, VIEWS};
+use super::super::control_decl::{EVENT_AUTHZ_GRANTED, FACTS, VIEWS};
 use super::{load, LOOP_OWNER, PORTS, ROWS};
 use symbio_core::ring::{check_rows, drive, owed, Decl, Gap, Pattern};
 use symbio_core::Frozen;
@@ -520,9 +520,9 @@ fn report_row_owes_on_a_quiet_interval_with_quota_left() {
 #[test]
 fn policy_rows_open_on_production_shapes_and_close_on_production_symbols() {
     use super::super::stage_events::{StageFact, StageName};
-    use symbio_core::{
-        EVENT_ASSISTANT_REPORTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
-    };
+    use symbio_core::{EVENT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE};
+
+    use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
     // 生产侧的三条来源，逐条对齐：
     //  - 用户格与配置格的**种类**与 id 形状：`chat_loop/drive.rs` 的 `u-{turn}` /
@@ -1611,7 +1611,7 @@ fn tool_request(id: &str) -> Event {
 fn tool_granted(id: &str) -> Event {
     ev(
         1,
-        symbio_core::EVENT_AUTHZ_GRANTED,
+        EVENT_AUTHZ_GRANTED,
         json!({
             "key": id,
             "port": "tool",
@@ -1796,7 +1796,7 @@ fn a_retried_request_reopens_authorization_and_dispatch() {
     // 第二次尝试放行之后，派发行接着欠；上一 attempt 的 `sent` 不能替它关门。
     sliced.push(ev(
         1,
-        symbio_core::EVENT_AUTHZ_GRANTED,
+        EVENT_AUTHZ_GRANTED,
         json!({
             "key": id,
             "port": "tool",

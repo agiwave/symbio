@@ -22,6 +22,7 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
+use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
 use symbio_core::chat_node as cm;
 use symbio_core::session_chat;
@@ -331,7 +332,7 @@ impl AutonomousInitiator {
     fn trigger(&self, source_seq: u64) -> Event {
         Event::pending(
             format!("sys-{source_seq}"),
-            symbio_core::EVENT_SYSTEM_TRIGGERED,
+            EVENT_SYSTEM_TRIGGERED,
             symbio_core::Entity::System,
             symbio_core::Verb::Opened,
             0,
@@ -387,7 +388,7 @@ impl AutonomousInitiator {
     fn health_event(&self, source_seq: u64, idle_ms: i64) -> Event {
         Event::pending(
             format!("health-{source_seq}"),
-            symbio_core::EVENT_SYSTEM_HEALTH,
+            EVENT_SYSTEM_HEALTH,
             symbio_core::Entity::System,
             symbio_core::Verb::Progressed,
             0,

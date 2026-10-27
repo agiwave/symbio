@@ -20,8 +20,9 @@ use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq,
     Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-    EVENT_MEMORY_RECALLED,
 };
+
+use crate::control_decl::EVENT_MEMORY_RECALLED;
 
 /// 读方只吃值：一份会话的事实切片 + `own` 标记（生产上由会话存储层枚举时判定）。
 fn snap(own: bool, store: &EventStore) -> FleetSnapshot {

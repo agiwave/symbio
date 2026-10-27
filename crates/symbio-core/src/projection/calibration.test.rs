@@ -14,7 +14,7 @@
 
 use super::calibration;
 use super::CalibrationView;
-use crate::event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_RECALLED};
+use crate::event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED};
 use crate::view::Budget;
 use crate::{Entity, Event, Verb};
 
@@ -47,9 +47,11 @@ fn 只统计校准格_同名字段的别的格子不算() {
             serde_json::json!({"skill_id":"sk-1","fallback":false}),
         ),
         // 两个「长得像」的别的格子：一个带同名字段，一个不带
+        // `memory.recalled` 是 loop 插件声明的事件名；core 的夹具按线上名字造，
+        // 不从 owner 借常量（跨插件零依赖）。
         ev(
             2,
-            EVENT_MEMORY_RECALLED,
+            "memory.recalled",
             serde_json::json!({"skill_id":"sk-2","fallback":true}),
         ),
         ev(

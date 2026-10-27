@@ -8,12 +8,13 @@ use super::*;
 use crate::Event;
 use serde_json::json;
 
-/// 表上事件名的条数 = 名字表里**事件名**常量的条数。
+/// 表上事件名的条数 = 内核仍在 `event/mod.rs` 声明的事件名条数（协议五格 + 未迁出的域账本）。
 ///
 /// `event/mod.rs` 里另有两条 `EVENT_TRIGGER_*` 常量：`meta.trigger` 的**键名**与它的
 /// `kind` 取值（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）。它们不是事件名，
-/// 所以不进这张表——这条断言把「43 个事件名」钉住，将来加名字要同批改这里。
-const DECLARED_EVENT_NAMES: usize = 43;
+/// 所以不进这张表。已迁出的名字（owner 的 `EventDecl`）也不在这里——这条断言把内核
+/// 名字表与 `CELLS` 的行数钉在一起。
+const DECLARED_EVENT_NAMES: usize = 37;
 
 #[test]
 fn the_table_is_one_row_per_name_and_covers_every_declared_name() {

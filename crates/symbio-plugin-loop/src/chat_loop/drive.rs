@@ -18,10 +18,9 @@
 //! 配置读的是**这一轮**的活值，落成事实之后判决只读事实：回放看到的永远是
 //! 「那一轮用的配置」，不是进程此刻的值。
 
-use symbio_core::{
-    count_user_messages, Entity, Seq, Verb, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE,
-    EVENT_USER_MESSAGE,
-};
+use symbio_core::{count_user_messages, Entity, Seq, Verb, EVENT_USER_MESSAGE};
+
+use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
 use super::super::stage_events::{self, StageFact};
 

@@ -1251,6 +1251,7 @@ mod tool_round_tests {
         DispatchOutcome, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
+    use crate::control_decl::EVENT_AUTHZ_GRANTED;
     use symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
         EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage,
@@ -1787,7 +1788,7 @@ mod tool_round_tests {
                 store,
                 Event::pending(
                     format!("grant-{turn_no}-{id}"),
-                    symbio_core::EVENT_AUTHZ_GRANTED,
+                    EVENT_AUTHZ_GRANTED,
                     Entity::Turn,
                     Verb::Asserted,
                     turn_no,
@@ -1963,7 +1964,7 @@ mod tool_round_tests {
                     self.store.as_ref(),
                     Event::pending(
                         format!("grant-{}-{}", self.turn, id),
-                        symbio_core::EVENT_AUTHZ_GRANTED,
+                        EVENT_AUTHZ_GRANTED,
                         Entity::Turn,
                         Verb::Asserted,
                         self.turn,
@@ -3939,9 +3940,10 @@ mod reflex_turn_tests {
     use super::super::{TurnInput, TurnRunner};
     use symbio_core::{
         check_all, unresolved_turns, DeltaSink, Entity, EventStore, LatencyTier, Seq, Store,
-        TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH, EVENT_TURN_STAGE,
-        EVENT_USER_MESSAGE,
+        TokenIssuer, Verb, EVENT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
     };
+
+    use crate::control_decl::EVENT_TURN_STAGE;
 
     /// 收集口：按序记增量（快路产物上线的判据）。
     struct CollectingDeltas(Mutex<Vec<String>>);

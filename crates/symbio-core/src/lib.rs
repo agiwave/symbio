@@ -59,15 +59,13 @@ pub use kernel::{
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{
-    event_output_text_node_id, event_payload_node_id, EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED,
-};
+pub use event::{event_output_text_node_id, event_payload_node_id, EVENT_TURN_SUPPLEMENTED};
 pub use event::{
     ClosureReason, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_ADDED,
-    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE,
+    EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH,
+    EVENT_USER_MESSAGE,
 };
 pub use invariants::{
     check_all, closes_turn, is_stop_fact, is_turn_final, is_turn_open, provenance_violation,
@@ -189,10 +187,9 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
 pub use event::{
-    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED,
-    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED, EVENT_TRIGGER_KIND_SCHEDULED,
-    EVENT_TRIGGER_META_KEY,
+    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
+    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
@@ -231,7 +228,7 @@ pub use event::{
 };
 pub use event::{
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
-    EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+    EVENT_MEMORY_FORGOTTEN,
 };
 // 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——

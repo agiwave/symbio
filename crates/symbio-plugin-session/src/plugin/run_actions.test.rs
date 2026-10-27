@@ -750,7 +750,7 @@ async fn run_persistent_rebuilds_from_store_without_handle() {
         .expect("持久会话有事实源")
         .append(Event::pending(
             "anchor",
-            symbio_core::EVENT_SYSTEM_TRIGGERED,
+            crate::declarations::EVENT_SYSTEM_TRIGGERED,
             Entity::System,
             Verb::Opened,
             0,

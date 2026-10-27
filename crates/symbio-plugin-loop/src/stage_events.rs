@@ -43,10 +43,12 @@
 //! 缓存与事实是第二份状态（DE-014 §2）。
 
 use symbio_core::{
-    AppendError, Entity, Event, Store, Verb, Verdict, EVENT_TURN_STAGE, REASON_ACK, REASON_CLARIFY,
-    REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
-    REASON_THANKS, REASON_UNCLASSIFIED,
+    AppendError, Entity, Event, Store, Verb, Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY,
+    REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS,
+    REASON_UNCLASSIFIED,
 };
+
+use crate::control_decl::EVENT_TURN_STAGE;
 
 /// 判决的**来源**：理由码由规则产出、由模型产出、兜底，或根本没有判决。
 ///

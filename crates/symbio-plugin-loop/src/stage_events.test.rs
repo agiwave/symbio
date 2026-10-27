@@ -10,10 +10,12 @@
 
 use super::{done, land, source_of, StageFact, StageName, VerdictFact, VerdictSource};
 use symbio_core::{
-    Entity, EventStore, Seq, Store, Verb, Verdict, EVENT_TURN_STAGE, REASON_ACK, REASON_CLARIFY,
-    REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
-    REASON_THANKS, REASON_UNCLASSIFIED,
+    Entity, EventStore, Seq, Store, Verb, Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY,
+    REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS,
+    REASON_UNCLASSIFIED,
 };
+
+use crate::control_decl::EVENT_TURN_STAGE;
 
 // ── 来源划分：词表每一条都要有归属 ─────────────────────────────────────
 

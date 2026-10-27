@@ -62,8 +62,9 @@ use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
     accept, recall, Budget, ConsolidateParams, Entity, Event, RecallView, Rejection, Seq, Store,
     Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-    EVENT_MEMORY_RECALLED,
 };
+
+use crate::control_decl::EVENT_MEMORY_RECALLED;
 
 // ==================== 常量（口径的数值面，单点定义） ====================
 

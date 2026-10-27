@@ -13,6 +13,8 @@ use super::*;
 use symbio_core::ring::{owed, PortDecl};
 use symbio_core::{EventStore, Seq};
 
+use crate::control_decl::EVENT_AUTHZ_GRANTED;
+
 fn boot() -> EventStore {
     EventStore::new()
 }
@@ -44,7 +46,7 @@ fn grant(store: &EventStore, call: &Call) {
         store,
         Event::pending(
             format!("grant-1-{}", call.id),
-            symbio_core::EVENT_AUTHZ_GRANTED,
+            EVENT_AUTHZ_GRANTED,
             Entity::Turn,
             Verb::Asserted,
             1,
@@ -796,7 +798,7 @@ fn granted_cell(store: &EventStore, id: &str) {
         store,
         Event::pending(
             format!("tool-{id}-granted"),
-            symbio_core::EVENT_AUTHZ_GRANTED,
+            EVENT_AUTHZ_GRANTED,
             Entity::Turn,
             Verb::Asserted,
             1,

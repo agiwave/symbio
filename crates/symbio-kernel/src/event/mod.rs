@@ -73,28 +73,14 @@ pub type Timestamp = i64;
 // ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）────
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
-// 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
-// 「这个名字落在哪个格子」由 [`grid`] 那张表记**一份**数据：下面各常量头上的
-// 「落在 `turn × opened`」是给人的说明，表上的行是判据，写侧闸门按表拒不一致的落格。
-// 加一个名字 = 常量加一条 + 表上加一行（同一批，漏了后者第一次落格就红）。
+// 字符串字面量必然漂移（同 merge_supplements 的单点判据）。
+//
+// **归属（DE-024 D-197）**：这里只留内核自己持有的名字（协议五格与尚未迁出的域账本）。
+// 插件持有的事件名住在它自己的 `EventDecl` 上，格位随名字一起声明，内核不再认识它们。
+// 仍在 [`grid`] 表上的名字以那张表为判据；已迁出的名字以 owner 的声明为判据。
 
 /// 用户发言。落在 `turn × opened`。
 pub const EVENT_USER_MESSAGE: &str = "user.message";
-/// **本轮生效的配置**（载荷 `{ classify_enabled, auto_compress, progress_* , is_persistent }`）。
-/// 落在 `turn × asserted`。
-///
-/// ## 为什么配置也是事实
-///
-/// 判决 / 召回 / 压缩 / 汇报的判据都读配置。若决策现场直接读 `SessionConfig`，同一份
-/// 日志在不同时刻会算出不同的欠账——配置变了，回放看到的是"新配置"而不是"那一轮用的
-/// 配置"。落成事实之后，「哪一轮用了哪份配置」可回放、可 diff。
-///
-/// 与 `turn.stage` 同格：它是「这一轮以什么配置运行」的断言，与阶段事实同族。
-/// **每一幕落一条**（`cfg-{turn}-{drive_seq}`）：配置项里有请求级开关
-/// （`auto_compress`），续写幕的生效值可以与首幕不同；id 带幕号，「哪一幕用了
-/// 哪份配置」才是可回放的。读方按 `(turn, seq <= 判决)` 取最近一条。
-pub const EVENT_SESSION_CONFIG: &str = "session.config";
-
 /// **本轮的派发档**（载荷 `{ tier, budget_ms, principal }`）。落在 `turn × asserted`。
 ///
 /// ## 为什么档位从 `user.message` 里分出来
@@ -166,37 +152,6 @@ pub const EVENT_TURN_BRANCH: &str = "turn.branch";
 /// 组内**最晚**的一条胜出；一条都没有时默认组里最晚出生的那一支（「重试完什么都不点」
 /// 读到的必须是新的一次，否则用户以为重试没发生）。
 pub const EVENT_BRANCH_SELECTED: &str = "turn.branch_selected";
-
-/// **一次性阶段已执行**（载荷 `{ stage, round, source?, reason?, result? }`）。落在 `turn × asserted`。
-///
-/// ## 它解决的是什么（D-107 判据 2）
-///
-/// `policy.classify` / `policy.recall` / `policy.compress` 的判据在一轮内**恒真**
-/// （`round == 0` 直到收轮才变），只有「这一步做完了没有」能让它转假。而这层簿记
-/// 若存在内存里，drive 的第二次迭代会再执行一遍同一步；若存在 `TurnState` 里，
-/// 它就与事实源分叉（DE-014 §2 禁止的第二份状态）。本格是第三选项：**「已做」
-/// 落为事实**，下一问问表时从它投影 `done`。
-///
-/// `stage` 取环的胶囊臂名（`decide` / `recall` / `compress`），与日志里那条命名
-/// 同源；`round` 是第几次请求——压缩与召回的「本轮一次」就是按它计的口径，跨请求
-/// 轮重新可做。`result` 是这一步的结论（`recall` 的 `hit` / `miss`，`resume` 的
-/// `kind`），供 `owed` 只凭事实判断输入。事件 id 是
-/// `st-{turn}-{round}-{stage}-{identity}`：`identity` 是本幕的锚（`drive_seq`），
-/// 续写幕的 `round` 从 0 重来也不会撞首幕的幂等键（见 `stage_events`）。
-///
-/// ## 为什么不是 `verdict.asserted`
-///
-/// `verdict.asserted` 归淘汰 / 授权覆盖层（载荷 `{ subject, capability, change, … }`），
-/// 语义是「主体对能力的断言」。判决事实是**这一轮走了哪条路、为什么**，两者只是
-/// 名字里都有 verdict。
-///
-/// ## 判决事实为什么能与「已做」同格
-///
-/// 两者都是「这一轮这一段发生了什么」，只是载荷不同：`classify` 多带
-/// `reason` + `source`（`rule` / `model` / `fallback` / `absent`），其余阶段只带
-/// 身份。分成两格会让「一次阶段执行」落两条事件、两个幂等键——而它们描述的是
-/// 同一件事。
-pub const EVENT_TURN_STAGE: &str = "turn.stage";
 
 /// **轮边界汇报**（载荷 `{ text, tool_rounds, quiet_ms }`）。落在 `turn × asserted`。
 ///
@@ -380,33 +335,6 @@ pub const EVENT_RETRY: &str = "retry";
 /// 3. **不影响判定**：落不进去也照原样返回拒绝结果——闸门的结论是「不许写」，
 ///    不能因为记账失败就放行。
 pub const EVENT_AUTHZ_DENIED: &str = "authz.denied";
-
-/// **放行事实**：授权级联的正向一半（/ DE-015 §4.2）。
-///
-/// ## 为什么放行也要落一条
-///
-/// 级联的派发行 `owes: authz.granted(id)`——没有这条事实就没有「可以派发」这个
-/// 前件。**「没被拒绝」不能当放行**：日志里没有 `denied` 的原因可能是「还没判」
-/// （拒绝卡在审批上、判定还没跑），两者在匹配上必须可分。负向事实只回答「不许」，
-/// 它回答不了「许了」；把「没说不」当「说了行」就是 fail-open。
-///
-/// ## 载荷
-///
-/// `{ key, port, id, tool, risk, deferred }`：
-/// - `key` = 这次授权的逻辑 id（与 `request` / `sent` 的 `id` 同值）；
-/// - `port` / `id` = 与协议事实同一个二元键，级联行按它关账；
-/// - `tool` = 模型给的线上工具名（审计要能直接读出「放行了哪一个」）；
-/// - `risk` = 判定时的风险档（`low` / `medium` / `high`；未知路由工具为 `unknown`）；
-/// - `deferred` = `true` ⇒ 没有注册表里的能力可判，放行是**交给下游路由闸门**
-///   的延迟判定，不是「这里判过了」。
-///
-/// ## 边界
-///
-/// 1. **不是收束格**（与 `denied` 同格 `turn × asserted`）：一次放行不结束一轮；
-/// 2. **幂等**：键 `grant-{turn}-{id}`，同一笔调用只放行一次；
-/// 3. **判定位置不动**：`PermissionMatrix` / 审批闸门一个字不改——本事实只记录
-///    「这次判定发生在派发之前」，不替代任何一条判定。
-pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ── 停机原因：**一个字段、一个闭集**──
 
@@ -603,11 +531,9 @@ pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`。
 pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-/// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
-pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 /// 校准断言：技能**被用过之后**的一次观测（命中 / 回退），落在 `memory × asserted`。
 ///
-/// ## 为什么它不能继续复用 [`EVENT_MEMORY_RECALLED`]
+/// ## 为什么它不能继续复用 `memory.recalled`
 ///
 /// 复用是 S11 §3 的省格决定，但代价落在**读侧**：校准投影于是只能靠**载荷有没有
 /// `skill_id` + `fallback`** 来认自己的输入——同一张格子被两种语义共用，判别退化成
@@ -660,18 +586,6 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
-/// 就绪判定：调度者把一笔任务**判成可就绪**。载荷 `{ task_id, reason? }`。
-/// 落在 `task × progressed`。
-///
-/// ## 为什么就绪要有事实形态
-///
-/// 就绪集本身是纯投影（`projection::readyset`），但投影只回答「现在算出来是什么」，
-/// 回答不了「调度者算过、看过、没派」——只落输出（`task.assigned`）时，回放分不开
-/// 「算过但没派」与「压根没算」，调度行为因此不可审计（`D-139` 裁决 1）。
-///
-/// `reason` 只在**非首次**就绪时有值（今天只有一种：`lease_expired`——上一笔租约
-/// 到期未兑现，任务放回就绪池；见 [`EVENT_TASK_ASSIGNED`]）。
-pub const EVENT_TASK_READY: &str = "task.ready";
 /// 发放：调度者把一笔就绪任务派给一个持有者，并附**租约**。载荷
 /// `{ task_id, owner, lease_ms, until_ms }`。落在 `task × asserted`。
 ///
@@ -680,7 +594,7 @@ pub const EVENT_TASK_READY: &str = "task.ready";
 /// 只有调度者写它（`actors::schedule::ScheduleDecider`），且写侧闸读
 /// `assign.work`（`ActorSpec::can_assign_work`）——没有该能力的主体零事件
 /// （fail-closed）。租约不是锁原语：持有状态由投影从这格事件算出，到期由
-/// 调度者判死（见 [`EVENT_TASK_READY`] 的 `lease_expired`）。
+/// 调度者判死（见 `task.ready` 的 `lease_expired`）。
 pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
 // ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")、
@@ -701,11 +615,6 @@ pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 // `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
 // 「欲」= `event.entity = conation` 的新取值（02 §2.3 的 E1）。
 
-/// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
-/// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
-pub const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
-/// 健康自检。落在 `system × progressed`。
-pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
 /// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
 /// 落在 `conation × opened`。
@@ -716,14 +625,14 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 /// ## 为什么一个写体的键名住在事件词汇表
 ///
 /// 它不是事件名，而是**同一个事实的另一种写法**：写体 `meta.trigger` 声明的是
-/// 「这一轮由系统自己发起」，落进事实源就是 [`EVENT_SYSTEM_TRIGGERED`] 那一格。
+/// 「这一轮由系统自己发起」，落进事实源就是 `system.triggered` 那一格。
 /// 两侧必须同源——`meta` 是自由 JSON，键名拼错编译器管不到，生产方（调度侧）与
 /// 消费方（存储所有者的写臂）各写一份就是两条漂移的口径（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 裁决二）。
 ///
 /// 形状：`meta.trigger = { "kind": <EVENT_TRIGGER_KIND_*>, "idle_ms": N }`，
 /// **在写臂就地消费**，不要求它活到转写。
 pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
-/// 触发方式的取值：**定时触发**（心跳一族的调度器）。落在 [`EVENT_SYSTEM_TRIGGERED`]
+/// 触发方式的取值：**定时触发**（心跳一族的调度器）。落在 `system.triggered`
 /// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
 pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";
 

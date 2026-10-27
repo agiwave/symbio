@@ -131,10 +131,10 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 成立 ⇒ 条目按纪律 2 退役，不留空转豁免。
       //
       // `branch_hide_unselected`（节点树接缝）与 `EVENT_TURN_STAGE`（线上事件名）随 C-003
-      // 的判定范围收窄到内核公共面而**移出本帐**：它们不是封闭语法，属域账本，由 C-004
-      // 冻结条数。两条仍是单消费方接缝（子树收法 `node_build::subtree_of` 只有一份；
-      // 事件 kind 名是 WAL / 回放的线上键，不能搬进唯一消费方造成双 owner），C 迁出
-      // session / loop 域时必须一并处置——口径见 DE-023 D-185。
+      // 的判定范围收窄到内核公共面而**移出本帐**：它们不是封闭语法，属域账本。
+      // 前者仍是单消费方接缝（子树收法 `node_build::subtree_of` 只有一份），C 迁出
+      // session 域时一并处置；后者已在 P1c 随 owner 声明迁回 `plugins/loop`（D-197），
+      // core 不再出根。口径见 DE-023 D-185。
       //
       // 此前的投影类条目已清零：`turnstate` / `SloLatencyView` / `FallbackRateView` /
       // `mutations_latest_snapshot` 经 `isSinkCandidate` 核验**本来就不是单消费方**
@@ -209,7 +209,8 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   （`turnstate` / `SloLatencyView` / `FallbackRateView` / `mutations_latest_snapshot`）
  *   本就不是 `isSinkCandidate`（core 自己的投影域在生产使用它们），条目空转 ⇒ 删除；
  *   它们从未计入 `one`，基线不动。`ActorSpec` 随 D-190 有了第二个生产消费方而退役，
- *   `branch_hide_unselected` / `EVENT_TURN_STAGE` 两条接缝移出本帐（口径见 D-185）。
+ *   `branch_hide_unselected` / `EVENT_TURN_STAGE` 两条接缝移出本帐（口径见 D-185）；
+ *   `EVENT_TURN_STAGE` 随后在 P1c 随 owner 声明迁出 core 根出口（D-197）。
  */
 
 const BASELINE = process.env.CORE_EXPORT_BASELINE
@@ -265,11 +266,16 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  * `v.get("path")`——字段名漂移不会编译失败，只在子会话订阅时静默报错。消费方实测 2 个
  * （vdfs 构造、agent 读），满足 C-003，属 D-196 的「被两个插件共同需要的类型就属于领域」。
  * 这是**该涨的一次**：它换掉的是一处跨 crate 的字面量耦合，不是新开一个出口。
+ *
+ * 389（2026-10-27，−7）：P1c 首批事件名随 owner 的 `EventDecl` 迁出——`session.config` /
+ * `turn.stage` / `authz.granted` / `memory.recalled` / `task.ready`（loop）与
+ * `system.triggered` / `system.health`（session）不再需要 core 根出口。这是**真收窄**：
+ * 写下与读取这些名字的插件从自己的声明模块取常量，core 不再替它们持有词汇（D-197）。
  */
-// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）
+// core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）；396→389 是 7 条 owner-local 事件名迁出根出口（D-197）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 396
+  : 389
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。

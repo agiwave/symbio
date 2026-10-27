@@ -10,12 +10,22 @@
 
 use symbio_core::{
     Entity, Event, EventDecl, FactDecl, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_TASK_ASSIGNED,
 };
 
+// ── 本插件持有的事件名（DE-024 D-197）──
+//
+// 名字、格位与声明在同一处（`EVENTS`），内核不再为它们保留常量。写方 / 读方都从
+// 这里取名字：跨模块引用不复制字面量，改名只改这一行。
+pub(crate) const EVENT_SESSION_CONFIG: &str = "session.config";
+pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
+pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
+pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
+pub(crate) const EVENT_TASK_READY: &str = "task.ready";
+
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
-/// 由本插件声明。迁移期与 `event::grid::CELLS` 的同名行并存，parity 用例钉住两边相等；
-/// 最后一批业务事件迁出后 `CELLS` 只剩协议五格。
+/// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
+/// 名字判等，最后一批业务事件迁出后 `CELLS` 只剩协议五格。
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl {
         name: "chat.assistant.final",
@@ -38,7 +48,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         cell: (Entity::Turn, Verb::Progressed),
     },
     EventDecl {
-        name: "turn.stage",
+        name: EVENT_TURN_STAGE,
         cell: (Entity::Turn, Verb::Asserted),
     },
     EventDecl {
@@ -50,7 +60,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         cell: (Entity::Turn, Verb::Asserted),
     },
     EventDecl {
-        name: "session.config",
+        name: EVENT_SESSION_CONFIG,
         cell: (Entity::Turn, Verb::Asserted),
     },
     EventDecl {
@@ -58,8 +68,24 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         cell: (Entity::Turn, Verb::Asserted),
     },
     EventDecl {
-        name: "authz.granted",
+        name: EVENT_AUTHZ_GRANTED,
         cell: (Entity::Turn, Verb::Asserted),
+    },
+    // 记忆找回（S5）：行表与事实表已经在用这个名字。
+    EventDecl {
+        name: EVENT_MEMORY_RECALLED,
+        cell: (Entity::Memory, Verb::Asserted),
+    },
+    // 调度者写的两格（D-139）：此前只有内核 `CELLS` 认识 `task.ready`（还没有表行）、
+    // 完全不认识 `task.assigned`，落格只能被写闸拒掉。名字随 owner 声明之后，
+    // 这两个事实才真正可入库。
+    EventDecl {
+        name: EVENT_TASK_READY,
+        cell: (Entity::Task, Verb::Progressed),
+    },
+    EventDecl {
+        name: EVENT_TASK_ASSIGNED,
+        cell: (Entity::Task, Verb::Asserted),
     },
 ];
 
@@ -298,7 +324,7 @@ fn stale_sent(events: &[Event], now: i64) -> serde_json::Value {
 fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
     events
         .iter()
-        .rfind(|e| e.turn == turn && e.kind == symbio_core::EVENT_SESSION_CONFIG)
+        .rfind(|e| e.turn == turn && e.kind == EVENT_SESSION_CONFIG)
 }
 
 /// 当前这一幕的身份：轮号 + 幕锚（最新一条用户格 / 恢复格）。

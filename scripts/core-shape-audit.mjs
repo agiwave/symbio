@@ -254,6 +254,11 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**；这两格的存在只是给尚未迁出
  * 的旧名字记账。目标不是零（core 投影仍按名字读），而是「新能力不再往里加」。
  *
+ * - **P1c 首批迁出**（2026-10-27）：`session.config` / `turn.stage` / `authz.granted` /
+ *   `memory.recalled` / `task.ready`（loop）与 `system.triggered` / `system.health`
+ *   （session）共 7 条名字随 owner 的 `EventDecl` 走，内核常量与 `CELLS` 行同步退役
+ *   ⇒ 40/38 → 33/32。`task.ready` 本来就没有 `CELLS` 行，所以行数只减 6。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -262,7 +267,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 40, cellsRows: 38 }
+  : { kernelEvents: 33, cellsRows: 32 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

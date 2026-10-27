@@ -17,9 +17,11 @@ use super::begin_drive;
 use symbio_core::chat_node::{ChatNode, MessageContent, NodeKind};
 use symbio_core::principal::{Principal, PrincipalKind};
 use symbio_core::{
-    count_user_messages, Entity, Event, EventStore, Seq, Store, Verb, EVENT_SESSION_CONFIG,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_STAGE, EVENT_USER_MESSAGE,
+    count_user_messages, Entity, Event, EventStore, Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED,
+    EVENT_USER_MESSAGE,
 };
+
+use crate::control_decl::{EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
 fn user_node(id: &str, text: &str) -> ChatNode {
     ChatNode {

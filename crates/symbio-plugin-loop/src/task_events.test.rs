@@ -8,8 +8,10 @@ use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
     actor_can_assign_work, check_all, readyset, Budget, Entity, Event, EventStore, Pattern, Scope,
     Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
+    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
 };
+
+use crate::control_decl::EVENT_TASK_READY;
 use symbio_testkit::trivial_actor_spec;
 
 fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {

@@ -21,8 +21,10 @@ use super::{record_derived, record_elimination, record_learning};
 use symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-    EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
+    EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
+
+use crate::control_decl::EVENT_MEMORY_RECALLED;
 
 /// 播下「本轮开口 + 收束」两格，返回 `(snapshot, user_seq)`。
 ///

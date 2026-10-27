@@ -370,7 +370,7 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .append(
             Event::pending(
                 "sys-0",
-                symbio_core::EVENT_SYSTEM_TRIGGERED,
+                crate::declarations::EVENT_SYSTEM_TRIGGERED,
                 Entity::System,
                 Verb::Opened,
                 0,

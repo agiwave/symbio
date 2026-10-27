@@ -45,16 +45,14 @@
 use super::{
     Entity, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_AUTHZ_DENIED, EVENT_AUTHZ_GRANTED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED,
-    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED,
-    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_FAILED, EVENT_MEMORY_CALIBRATED,
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
-    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONFIG, EVENT_SESSION_CONSOLIDATED,
-    EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_TURN_BRANCH,
-    EVENT_TURN_DISPATCH, EVENT_TURN_STAGE, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
-    EVENT_VERDICT_ASSERTED,
+    EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN,
+    EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED, EVENT_CONATION_EXPRESSED,
+    EVENT_CONTROL_OPENED, EVENT_FAILED, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH,
+    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 
 /// 网格上的一个格子：实体（行）× 动词（列）。
@@ -65,11 +63,9 @@ pub type Cell = (Entity, Verb);
 const CELLS: &[(&str, Cell)] = &[
     // ── 对话面（turn）──
     (EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened)),
-    // 配置与派发档都是「这一轮以什么方式运行」的断言，与阶段事实同格。
-    (EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)),
+    // 派发档是「这一轮以什么方式运行」的断言，与阶段事实同格。
     (EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted)),
     (EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)),
-    (EVENT_TURN_STAGE, (Entity::Turn, Verb::Asserted)),
     (EVENT_ASSISTANT_REPORTED, (Entity::Turn, Verb::Asserted)),
     (EVENT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)),
     (EVENT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed)),
@@ -109,8 +105,6 @@ const CELLS: &[(&str, Cell)] = &[
     (EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
     // 否定事实与收束格**不同格**（`asserted` vs `closed`）：被拒的一轮仍然未收束。
     (EVENT_AUTHZ_DENIED, (Entity::Turn, Verb::Asserted)),
-    // 放行事实与否定事实同格：都是「关于这一次授权判定的断言」，不是收束。
-    (EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
     // ── 产物（artifact）──
     (EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)),
     // ── 消息列表的变更（message，D-053 / D-054 的闭集四格）──
@@ -128,7 +122,6 @@ const CELLS: &[(&str, Cell)] = &[
         (Entity::Memory, Verb::Progressed),
     ),
     (EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)),
-    (EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
     (EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
     // ── 承诺（commitment）──
     (EVENT_COMMITMENT_OFFERED, (Entity::Commitment, Verb::Opened)),
@@ -150,8 +143,6 @@ const CELLS: &[(&str, Cell)] = &[
     // ── 控制（control）：打断与熔断共用的一格 ──
     (EVENT_CONTROL_OPENED, (Entity::Control, Verb::Opened)),
     // ── 系统与「欲」（system / conation，自主层不加机制）──
-    (EVENT_SYSTEM_TRIGGERED, (Entity::System, Verb::Opened)),
-    (EVENT_SYSTEM_HEALTH, (Entity::System, Verb::Progressed)),
     (EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)),
     // ── 裁决（verdict）──
     (EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),

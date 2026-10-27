@@ -35,8 +35,10 @@ use super::port;
 use super::{DispatchOutcome, ToolPort, ToolPortCall, ToolPortPolicy, WakeIntent, WakeSpec};
 use symbio_core::{
     ApprovalGrants, CapabilityRiskLevel, Event, EventStore, Seq, Store, EVENT_AUTHZ_DENIED,
-    EVENT_AUTHZ_GRANTED, EVENT_REQUEST, EVENT_SENT,
+    EVENT_REQUEST, EVENT_SENT,
 };
+
+use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
 /// 一轮的账：turn=1、溯源到用户格 seq=7、幕锚填占位 0（这三笔工具债不读时间视图）。
 const TURN: u64 = 1;

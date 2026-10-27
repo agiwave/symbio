@@ -7,9 +7,10 @@
 
 use super::*;
 use crate::authz::PRINCIPAL_AUTONOMOUS as INITIATOR;
-use crate::event::{
-    Entity, Event, Seq, Verb, EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_OPENED,
-};
+use crate::event::{Entity, Event, Seq, Verb, EVENT_CONATION_EXPRESSED, EVENT_TASK_OPENED};
+
+/// `system.triggered` 是 session 插件声明的事件名；core 的夹具按线上名字造。
+const SYSTEM_TRIGGERED: &str = "system.triggered";
 use crate::store::{EventStore, Store};
 use crate::view::Budget;
 
@@ -19,7 +20,7 @@ fn seed_trigger(store: &EventStore) -> u64 {
         .append(
             Event::pending(
                 "sys-0",
-                EVENT_SYSTEM_TRIGGERED,
+                SYSTEM_TRIGGERED,
                 Entity::System,
                 Verb::Opened,
                 0,
