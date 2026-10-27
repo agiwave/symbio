@@ -9,7 +9,6 @@
 //!
 //! | 类型 | 写侧（驱动器） | 落/读侧（留守） |
 //! |---|---|---|
-//! | [`Delegation`] | `tools/tool_executor`（`note_delegation` 的出参元素） | `derived_facts::record_derived` 落 `commitment.*` |
 //! | [`TaskDeclaration`] / [`TaskItem`] / [`TaskStatus`] | 同上（`note_tasks` 的出参元素） | `task_events` 投影 `task.*` |
 //! | [`ReportDraft`] | `report_exec`（批次边界汇报执行体的产物） | `rebuild::reported_node` 回放汇报格 |
 //!
@@ -23,36 +22,10 @@ use crate::event::Event;
 use crate::node_build::dialog_node;
 use serde::{Deserialize, Serialize};
 
-/// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S08 §3）：
-/// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
-/// `derived_facts::record_derived` 落成 `commitment.*` 格。
-///
-/// 只认**声明了 `delegation_promise` 行为的工具**（`agent_run` 即是； 改了
-/// 判据的住址，没改这条语义）——它是**跨主体**的那一次调用：本会话向上游承诺
-/// 「会有另一个智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，
-/// 不是承诺。
-///
-/// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
-/// 谁负责把承诺入格，谁负责开那扇门（轮末收束的 `derived_facts::record_derived`）。
-#[derive(Debug, Clone)]
-pub struct Delegation {
-    /// 承诺号 = 本次调用在**转写里的 ToolCall 节点 id**（`c-offer-<id>` 由此成格）：
-    /// 节点 id 由转写生成、跨轮不撞——模型给的 `tool_call` 编号只在一次响应内唯一，
-    /// 直接拿来当事件号会在下一轮撞幂等键（`record_derived` 落格时还会给事件号
-    /// 加 `v2t-{anchor_id}` 前缀、一轮一个，两层各自挡一种撞法）。
-    pub id: String,
-    /// 承诺内容 = 委托出去的那句话（`agent_run` 的 `prompt` 参数）。
-    pub promise: String,
-    /// 是否履行（`true` ⇒ `commitment.released`，`false` ⇒ `.broken` + `why`）。
-    pub ok: bool,
-    /// 违约原因（`ok = true` 时为空——违约必须带 why，守约不必）。
-    pub why: String,
-}
-
 /// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
 /// 一次**成功**的 `todo_write` 调用所声明的清单状态。
 ///
-/// 与 [`Delegation`] 同一个观察点（工具执行的唯一入口）。任务表的写方不在工具里：
+/// 与承诺的观察点相同（工具执行的唯一入口）。任务表的写方不在工具里：
 /// `local/todo_write` 是插件，够不到会话的 v2 事实源，而分发点是模型工具调用的
 /// **唯一入口**。这里看得见什么，事实源才记得了什么；记的必须是**观察到的声明**，
 /// 不是复述。

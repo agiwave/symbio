@@ -59,7 +59,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
         &principal,
         &to,
         &format!("t{turn_no}"),
-        &derived.delegations,
+        &derived.effects,
         &derived.tasks,
         &derived.breaks,
     );

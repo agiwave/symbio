@@ -295,7 +295,8 @@ async fn prepare_call(
                 raw.chars().count(),
                 if truncated { "，已截断展示" } else { "" }
             ),
-            // 约还没落地就执行不了 = 没履约（`agent_run` 记账见 `note_delegation`）。
+            // 约还没落地就执行不了 = 没履约（承诺的效果由 `record_effect` 交出去，
+            // 实现住能力包，见 `symbio_plugin_api::effects`）。
             promise: Some((id.clone(), name.clone(), tc.arguments.clone())),
             id,
         });
@@ -390,7 +391,7 @@ async fn emit_terminal(
     terminal: PreTerminal,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     breaks: &mut Vec<&'static str>,
     principal: &symbio_core::principal::Principal,
@@ -408,13 +409,14 @@ async fn emit_terminal(
             )
             .await;
             if let Some((id, name, args)) = promise {
-                note_delegation(
-                    delegations,
+                record_effect(
+                    effects,
                     decls,
                     &id,
                     &name,
                     &args,
                     false,
+                    "",
                     "参数 JSON 解析失败，未执行",
                 );
             }
@@ -448,14 +450,15 @@ async fn emit_terminal(
             {
                 parent_updates.push(parent_update);
             }
-            // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
-            note_delegation(
-                delegations,
+            // 没跑 = 没履约（效果输入由 `record_effect` 交出，实现住能力包）。
+            record_effect(
+                effects,
                 decls,
                 &id,
                 &name,
                 &args,
                 false,
+                "",
                 "单响应工具调用数超限，被系统丢弃未执行",
             );
         }
@@ -476,7 +479,7 @@ async fn emit_terminal(
                 refusal,
                 tool_messages,
                 parent_updates,
-                delegations,
+                effects,
                 decls,
                 breaks,
             )
@@ -498,7 +501,7 @@ async fn finish_call(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -517,7 +520,7 @@ async fn finish_call(
     // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
     // resume 那一轮再记）。
     if pending_user_prompt.is_none() {
-        note_delegation(delegations, decls, &id, &name, &args, success, &final_res);
+        record_effect(effects, decls, &id, &name, &args, success, &final_res, "");
         // 任务表声明（批⑨）：同一条「跑完了才判」的口径。`note_tasks` 自己
         // 过滤工具名与成败，非 `todo_write` / 失败的调用在这里一并被挡掉。
         note_tasks(tasks, decls, &name, &args, success);
@@ -684,7 +687,7 @@ async fn flush_one<'a>(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -718,7 +721,7 @@ async fn flush_one<'a>(
         ctx,
         context_messages,
         tool_archive_dir,
-        delegations,
+        effects,
         tasks,
         decls,
         tool_messages,
@@ -739,7 +742,7 @@ async fn flush_all<'a>(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     tasks: &mut Vec<TaskDeclaration>,
     decls: &ToolDecls,
     tool_messages: &mut Vec<ChatNode>,
@@ -756,7 +759,7 @@ async fn flush_all<'a>(
             ctx,
             context_messages,
             tool_archive_dir,
-            delegations,
+            effects,
             tasks,
             decls,
             tool_messages,
@@ -813,7 +816,7 @@ pub(crate) async fn run_batch(
     context_messages: &[ChatNode],
     tool_archive_dir: &std::path::Path,
     readings: &mut GateReadings,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     tasks: &mut Vec<TaskDeclaration>,
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
@@ -885,7 +888,7 @@ pub(crate) async fn run_batch(
                         &ctx,
                         context_messages,
                         tool_archive_dir,
-                        delegations,
+                        effects,
                         tasks,
                         decls,
                         &mut tool_messages,
@@ -898,7 +901,7 @@ pub(crate) async fn run_batch(
                         terminal,
                         &mut tool_messages,
                         &mut parent_updates,
-                        delegations,
+                        effects,
                         decls,
                         breaks,
                         &principal,
@@ -924,7 +927,7 @@ pub(crate) async fn run_batch(
                             &ctx,
                             context_messages,
                             tool_archive_dir,
-                            delegations,
+                            effects,
                             tasks,
                             decls,
                             &mut tool_messages,
@@ -951,7 +954,7 @@ pub(crate) async fn run_batch(
                             &ctx,
                             context_messages,
                             tool_archive_dir,
-                            delegations,
+                            effects,
                             tasks,
                             decls,
                             &mut tool_messages,
@@ -971,7 +974,7 @@ pub(crate) async fn run_batch(
                                 &ctx,
                                 context_messages,
                                 tool_archive_dir,
-                                delegations,
+                                effects,
                                 tasks,
                                 decls,
                                 &mut tool_messages,
@@ -1003,7 +1006,7 @@ pub(crate) async fn run_batch(
                 &ctx,
                 context_messages,
                 tool_archive_dir,
-                delegations,
+                effects,
                 tasks,
                 decls,
                 &mut tool_messages,
@@ -1027,7 +1030,7 @@ pub(crate) async fn run_batch(
         &ctx,
         context_messages,
         tool_archive_dir,
-        delegations,
+        effects,
         tasks,
         decls,
         &mut tool_messages,

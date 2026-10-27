@@ -9,6 +9,7 @@
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
 //! | [`subagent`] | `agent_run`（子智能体委托）能力 |
+//! | [`behavior`] | `agent_run` 的效果（委托 = 跨主体立约），经 `ToolBehavior` 交给写口 |
 //! | [`detail`] | agent 概览 / 详情表单的呈现定义 |
 //! | [`vdfs`] | VDFS 挂载点（`<根>/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
@@ -42,6 +43,7 @@
 //! `<根>/memory/PLUGIN.yml`）。它们的**执行**在共享实现（`providers/memory`），与
 //! work / session 几层同源——本插件不持有任何容量闸门。
 
+mod behavior;
 mod detail;
 pub mod manifest;
 pub mod plugin;

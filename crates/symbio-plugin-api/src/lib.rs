@@ -5,6 +5,7 @@
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
 //! - [`behaviors`]：能力自声明的行为名（内核只装开放集合，不认识名字）
+//! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //!
@@ -14,6 +15,7 @@
 
 pub mod behaviors;
 pub mod declarations;
+pub mod effects;
 pub mod events;
 pub mod hooks;
 pub mod routes;
@@ -21,6 +23,9 @@ pub mod routes;
 pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations,
     DeclarationsDecl,
+};
+pub use effects::{
+    apply as apply_effects, EffectCall, EffectEnv, EffectInput, FactDraft, ToolBehavior,
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;

@@ -43,7 +43,7 @@
 //!   步 22 技能观测与编译；
 //! - [`super::derived_facts::record_derived`]：承诺（`commitment_events`，S08 §3）/
 //!   任务表（`task_events::write`，S7 步 16–18）/ 熔断（`CircuitBreaker::break_event`，
-//!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
+//!   S8 步 20）——三者的数据来源都在工具执行层（`EffectInput` / `TaskDeclaration` /
 //!   熔断理由），由 [`super::tool_dispatch::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
 //! ## 写侧授权闸（判在运行器）

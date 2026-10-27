@@ -40,6 +40,13 @@ impl Capability for FakeTool {
     }
 }
 
+/// 本工具是否声明了「跨主体立约」——效果端口的选实现依据（不再是一道闸）。
+fn promises(decls: &ToolDecls, wire: &str) -> bool {
+    decls
+        .behaviors_of(wire)
+        .contains(&symbio_plugin_api::behaviors::DELEGATION_PROMISE)
+}
+
 /// 按行为名构造一份元数据（其余字段走 `Default`）。
 fn meta(name: &str, assign_work: bool, promise: bool, task_table: bool) -> CapabilityMeta {
     use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE};
@@ -97,16 +104,16 @@ async fn each_family_judges_only_its_own_tool() {
     let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
 
     assert!(decls.provides_assign_work("agent_run"));
-    assert!(decls.records_delegation_promise("agent_run"));
+    assert!(promises(&decls, "agent_run"));
     assert!(!decls.owns_task_table("agent_run"), "派活 ≠ 任务表");
 
     assert!(decls.owns_task_table("local/todo_write"));
     assert!(!decls.provides_assign_work("local/todo_write"));
-    assert!(!decls.records_delegation_promise("local/todo_write"));
+    assert!(!promises(&decls, "local/todo_write"));
 
     assert!(
         !decls.provides_assign_work("local/shell")
-            && !decls.records_delegation_promise("local/shell")
+            && !promises(&decls, "local/shell")
             && !decls.owns_task_table("local/shell"),
         "未声明任何位的工具不在任何闸门管辖内"
     );
@@ -152,7 +159,7 @@ async fn declarations_travel_into_scoped_projection_names() {
     let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
 
     assert!(decls.provides_assign_work("agent_probe-agent_agent_run"));
-    assert!(decls.records_delegation_promise("agent_probe-agent_agent_run"));
+    assert!(promises(&decls, "agent_probe-agent_agent_run"));
     assert!(decls.owns_task_table("agent_probe-agent_todo_write"));
 }
 
@@ -168,6 +175,6 @@ async fn without_a_visitor_nothing_is_in_any_gate() {
     let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
 
     assert!(!decls.provides_assign_work("agent_run"));
-    assert!(!decls.records_delegation_promise("agent_run"));
+    assert!(!promises(&decls, "agent_run"));
     assert!(!decls.owns_task_table("local/todo_write"));
 }

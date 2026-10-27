@@ -213,7 +213,7 @@ export const BASELINE = {
   // `plugins/loop/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
   // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
   // 删的是重复的那一份，不是判据。非侵蚀。
-  ciRustTestsTotal: 2340,
+  ciRustTestsTotal: 2352,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

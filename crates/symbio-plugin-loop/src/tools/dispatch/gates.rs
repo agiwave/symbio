@@ -121,7 +121,7 @@ pub(crate) async fn read_batch_gates(
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
-    // **没跑到的 `agent_run`** 记成没履约的承诺（见 [`note_delegation`]）。
+    // **没跑到的委托**记成没履约的承诺（见 [`record_effect`]）。
     // id 或 name 缺失的不进表：它们走协议失败分支，父节点已入 `parent_updates`。
     let batch_meta: Vec<(String, String, serde_json::Value)> = tool_calls
         .iter()
@@ -473,7 +473,7 @@ pub(crate) async fn refuse(
     refusal: Refusal,
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     decls: &ToolDecls,
     breaks: &mut Vec<&'static str>,
 ) {
@@ -515,11 +515,11 @@ pub(crate) async fn refuse(
         parent_updates.push(parent_update);
     }
 
-    // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）；任务表闸
+    // 没跑 = 没履约（效果输入由 [`record_effect`] 交出，实现住能力包）；任务表闸
     // 明确不记——工具没跑，声明无从说起。
     if refusal.trace.notes_delegation() {
         let why = refusal.note_why.as_deref().unwrap_or(&refusal.reason);
-        note_delegation(delegations, decls, id, name, args, false, why);
+        record_effect(effects, decls, id, name, args, false, "", why);
     }
 }
 

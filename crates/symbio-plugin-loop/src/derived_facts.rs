@@ -6,7 +6,7 @@
 //! ## 为什么这两半是独立于「轮次事实」的
 //!
 //! 轮次事实（`u-{turn}` 开口 / 收束格）由 v2 运行器**原生**入格，运行器一处不缺。
-//! 但下面这些运行器**一处都不写**——它们的出参在工具执行层（`Delegation` /
+//! 但下面这些运行器**一处都不写**——它们的出参在工具执行层（`EffectInput` /
 //! `TaskDeclaration` / 熔断理由）与读侧（召回视图 / 技能判定），由分发方经
 //! `SessionDispatchPort::take_derived` 交回。不在这里补，代际立约（S08）/ 任务表（S7）/
 //! 熔断（S9 §6 验收 2）/ 长期记忆（S06）/ 技能自我改进（S11）就整体失效。
@@ -39,7 +39,8 @@ use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb
 use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 // 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
-use symbio_core::facts::{Delegation, TaskDeclaration};
+use symbio_core::facts::TaskDeclaration;
+use symbio_plugin_api::effects::EffectInput;
 
 /// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
 ///
@@ -47,7 +48,7 @@ use symbio_core::facts::{Delegation, TaskDeclaration};
 ///
 /// 轮次事实（`u-{turn}` 开口 / 收束格）记的是「这一轮说了什么」——由 v2 运行器
 /// 原生记账。但承诺 / 任务表 / 熔断是**本轮的派生事实**：数据来源都在工具执行层
-/// （`Delegation` / `TaskDeclaration` / 熔断理由），运行器一处都不写。漏调本函数，
+/// （`EffectInput` / `TaskDeclaration` / 熔断理由），运行器一处都不写。漏调本函数，
 /// 代际立约（S08）、任务表（S7）、熔断（S9 §6 验收 2）就**静默全丢**
 /// ——与记忆/学习同一个坑（见 [`record_learning`]）。
 ///
@@ -83,28 +84,40 @@ pub(crate) fn record_derived(
     principal: &str,
     to: &str,
     anchor_id: &str,
-    delegations: &[Delegation],
+    effects: &[EffectInput],
     tasks: &[TaskDeclaration],
     breaks: &[&'static str],
 ) {
-    // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────
-    // 本轮代际立约随收束入格：立约与了结**同锚成对**，`check_all` 才看得见它们。
-    // 承诺号带 `{anchor_id}` 前缀：tool_call id 只在一次模型响应内唯一，而 WAL 的
-    // 幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、把整轮
-    // 收束拖失败。
+    // ── 效果（DE-025 D-207）──────────────────────────────────────────────
+    // 工具执行层交出的是**纯值**（这次调用发生了什么），这里补上宿主面（轮锚 /
+    // 溯源 / 两个主体）再问能力包的行为要草稿，最后经唯一写入口落格。
+    //
+    // 三件事各自只有一份：**判断**（这次调用算不算立约）在能力包的行为实现里，
+    // **成格形状**（立约 / 了结 / 宣告几格、载荷长什么样）在该判断种类的成格函数里，
+    // **写**在 `Store::append`。本处只负责把三者按顺序接起来——它不认识任何工具名，
+    // 也不认识任何效果名。
     //
     // `to` = **来源主体**（D-067：从调用点常量变成数据）——本主体向「这条消息
     // 的出处」立约；缺省由取值点（`request_source_principal`）落本机用户。
-    for d in delegations {
-        let cid = format!("v2c-{anchor_id}-{}", d.id);
-        for e in
-            symbio_core::commitment_events(&cid, principal, to, &d.promise, d.ok, &d.why, user_seq)
-        {
-            if let Err(e) = store.append(e) {
-                symbio_core::plugin_warn!(
-                    "session",
-                    "[v2] 承诺事件入格失败（会话 {session_id}，承诺 {cid}）：{e:?}"
-                );
+    //
+    // 失败只记日志不冒泡：轮次已收束，派生事实失败不该把成功的一轮说成失败
+    // （与任务表 / 熔断 / 记忆三段同一条口径）。
+    if !effects.is_empty() {
+        let env = symbio_plugin_api::effects::EffectEnv {
+            turn,
+            user_seq,
+            principal: principal.to_string(),
+            source: to.to_string(),
+        };
+        for input in effects {
+            for draft in symbio_plugin_api::apply_effects(&input.call(&env)) {
+                let event_id = draft.key.clone();
+                if let Err(e) = store.append(draft.into_event(turn, principal)) {
+                    symbio_core::plugin_warn!(
+                        "session",
+                        "[v2] 效果入格失败（会话 {session_id}，事件 {event_id}）：{e:?}"
+                    );
+                }
             }
         }
     }

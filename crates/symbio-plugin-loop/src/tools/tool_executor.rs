@@ -25,18 +25,19 @@ use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_wa
 
 mod breaker;
 mod decls;
-mod delegation;
+mod effects;
 mod elimination;
 mod task_decl;
 mod task_table;
 
 pub use self::breaker::BreakerInputs;
 pub use self::decls::ToolDecls;
-pub use self::delegation::note_delegation;
+pub use self::effects::record_effect;
 pub use self::elimination::EliminationInputs;
 pub use self::task_decl::note_tasks;
 pub use self::task_table::TaskTableInputs;
-use symbio_core::facts::{Delegation, TaskDeclaration};
+use symbio_core::facts::TaskDeclaration;
+use symbio_plugin_api::effects::EffectInput;
 
 // 工具结果提取
 
@@ -543,10 +544,11 @@ pub async fn process_tool_calls_async(
     facts: &dyn Store<Event = Event>,
     // 淘汰闸的部署级判据（session 已折成一个值，见 D-086 §4）。
     elimination_revoked: bool,
-    // 代际立约出参（批⑧）：`agent_run` 的承诺记录，交回调用方随收束入格。
+    // 效果出参（批⑧ 的承诺与后续效果族共用一条通路，DE-025 D-207）：每次终态调用
+    // 交出一条 `EffectInput`，轮末由写口问能力包的行为要草稿并落格。
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
     // 再加一个只会逼着每个调用方都写 `let _ = `。
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
     // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态，同一条口径
     // 交回调用方随收束入格。理由同上——不进返回值。
     tasks: &mut Vec<TaskDeclaration>,
@@ -583,7 +585,7 @@ pub async fn process_tool_calls_async(
         context_messages,
         tool_archive_dir,
         &mut readings,
-        delegations,
+        effects,
         tasks,
         breaks,
     )
@@ -597,7 +599,7 @@ pub async fn process_tool_calls_async(
         context_messages,
         &mut tool_messages,
         &mut parent_updates,
-        delegations,
+        effects,
     )
     .await;
 

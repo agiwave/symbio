@@ -14,7 +14,7 @@
 //!
 //! **纯结构拆分纪律**（DE-021 §5 纪律 2）：三段代码逐字来自拆分前的单体函数体，
 //! 拆分批次内 `if` 条件零变化；段间只传值（[`gates::GateReadings`] 与出参
-//! `delegations` / `tasks` / `breaks`）。
+//! `effects` / `tasks` / `breaks`）。
 //!
 //! 每段一条判据（纪律 3，「这段错了谁会红」）：
 //! - ① 错 ⇒ 闸门判据读数用例红（`breaker` / `elimination` / `task_table` 的批首读场景）；
@@ -28,13 +28,13 @@ pub(crate) mod parallel;
 pub(crate) mod unfinished;
 
 use super::tool_executor::{
-    build_user_prompt_message, call_signature, execute_tool_async, note_delegation, note_tasks,
+    build_user_prompt_message, call_signature, execute_tool_async, note_tasks, record_effect,
     BreakerInputs, EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
 };
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use symbio_core::facts::{Delegation, TaskDeclaration};
+use symbio_core::facts::TaskDeclaration;
 use symbio_core::node_build::{llm_build_tool_message, tool_call_args_text};
 use symbio_core::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL},
@@ -42,6 +42,7 @@ use symbio_core::{
     ExecEventSink, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, Seq, Store,
     TurnToolCallInfo,
 };
+use symbio_plugin_api::effects::EffectInput;
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
 

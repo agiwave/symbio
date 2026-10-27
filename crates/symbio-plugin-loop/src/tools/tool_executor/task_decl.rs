@@ -17,7 +17,7 @@ use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 /// （`local/todo_write`），而 `CapabilityMeta.name` 是短名——不反演字符串、不硬编码前缀。
 ///
 /// `success = false` 不记：失败的调用没有改变清单，记它等于替工具编一条事实
-/// （`note_delegation` 反过来——没履约同样要记，因为「约」本身已经存在；任务不同，
+/// （承诺的效果反过来——没履约同样要记，因为「约」本身已经存在；任务不同，
 /// 清单没被改就是没被改）。
 pub fn note_tasks(
     out: &mut Vec<TaskDeclaration>,

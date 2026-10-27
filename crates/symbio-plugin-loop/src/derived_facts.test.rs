@@ -23,6 +23,7 @@ use symbio_core::{
     check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
+use symbio_plugin_api::effects::EffectInput;
 
 use super::super::recall::recall;
 use crate::control_decl::{
@@ -73,21 +74,69 @@ fn seed_turn(
     (snapshot, user_seq)
 }
 
+// ==================== 测试替身：立约行为 ====================
+//
+// 生产里这条行为住 `symbio-plugin-agent`（DE-025 D-207），但**本 crate 不得依赖
+// 兄弟插件**（E-009：普通依赖与测试代码同判）——`loop` 是驱动器，它的 import 根
+// 是闭族（E-013）。所以本文件的用例用一个**替身**：它只证明「写口按 owner 序把
+// 草稿落格、成对同锚」，不证明 agent 插件的实现对不对（那是
+// `symbio-plugin-agent::host::behavior.test.rs` 的事）。两处各自只有一份判据，
+// 合起来才是完整通路。
+struct PromiseStub;
+
+impl symbio_plugin_api::ToolBehavior for PromiseStub {
+    fn owner(&self) -> &'static str {
+        "tests/promise-stub"
+    }
+
+    fn behavior(&self) -> &'static str {
+        symbio_plugin_api::behaviors::DELEGATION_PROMISE
+    }
+
+    fn after(&self, call: &symbio_plugin_api::EffectCall<'_>) -> Vec<symbio_plugin_api::FactDraft> {
+        let Some(promise) = call.args.get("prompt").and_then(|v| v.as_str()) else {
+            return Vec::new();
+        };
+        let cid = format!("v2c-{}-{}", call.anchor(), call.call_id);
+        symbio_core::commitment_events(
+            &cid,
+            call.principal,
+            call.source,
+            promise,
+            call.success,
+            call.why,
+            call.user_seq,
+        )
+        .into_iter()
+        .map(symbio_plugin_api::FactDraft::from_event)
+        .collect()
+    }
+}
+
+symbio_plugin_api::submit_behavior!(PromiseStub);
+
+/// 一次 `agent_run` 的效果输入（承诺的**实现**住 agent 插件——本 crate 的测试二进制
+/// 以 dev 依赖链接它，见 `Cargo.toml` 的说明；这里只造值，不造实现）。
+fn delegation(id: &str, promise: &str, ok: bool, why: &str) -> EffectInput {
+    EffectInput {
+        tool: "agent_run".to_string(),
+        call_id: id.to_string(),
+        args: serde_json::json!({ "prompt": promise }),
+        success: ok,
+        result: String::new(),
+        why: if ok { String::new() } else { why.to_string() },
+        declared: &[symbio_plugin_api::behaviors::DELEGATION_PROMISE],
+    }
+}
+
 /// 代际立约（[04 §3.1 批⑧](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")，S08 §3「加格子，不加机制」）：
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
-    let delegations = [Delegation {
-        id: "call-1".to_string(),
-        promise: "让 reviewer 复查这段".to_string(),
-        ok: true,
-        why: String::new(),
-    }];
+    let effects = [delegation("call-1", "让 reviewer 复查这段", true, "")];
     record_derived(
         "derived-test",
         &store,
@@ -97,7 +146,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -159,17 +208,10 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
 fn the_commitment_counterparty_is_data_not_a_constant() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
-    let delegations = [Delegation {
-        id: "call-peer-1".to_string(),
-        promise: "把结果交给主智能体".to_string(),
-        ok: true,
-        why: String::new(),
-    }];
+    let effects = [delegation("call-peer-1", "把结果交给主智能体", true, "")];
     record_derived(
         "derived-test",
         &store,
@@ -179,7 +221,7 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
         symbio_core::PRINCIPAL_PEER,
         symbio_core::PRINCIPAL_MAIN,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -211,17 +253,15 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
 /// 宣告仍是同一份事实源里的一格，不是新通道（S08 §2「通信 = 没有直连」）。
 #[test]
 fn breached_delegation_is_declared_to_the_counterparty() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
-    let delegations = [Delegation {
-        id: "call-2".to_string(),
-        promise: "让 reviewer 复查这段".to_string(),
-        ok: false,
-        why: "子会话中途失败".to_string(),
-    }];
+    let effects = [delegation(
+        "call-2",
+        "让 reviewer 复查这段",
+        false,
+        "子会话中途失败",
+    )];
     record_derived(
         "derived-test",
         &store,
@@ -231,7 +271,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -472,17 +512,15 @@ fn record_learning_wires_all_three_memory_steps() {
 /// 而不是被淘汰主体；③ 载荷带 score / threshold，审计方看得见当时值。
 #[test]
 fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
-    let delegations = [Delegation {
-        id: "call-1".to_string(),
-        promise: "让 reviewer 复查这段".to_string(),
-        ok: false,
-        why: "子智能体没接手".to_string(),
-    }];
+    let effects = [delegation(
+        "call-1",
+        "让 reviewer 复查这段",
+        false,
+        "子智能体没接手",
+    )];
     record_derived(
         "derived-test",
         &store,
@@ -492,7 +530,7 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -533,17 +571,10 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
 /// 反向：**守约**的委托 ⇒ 声誉 +1 ⇒ 不淘汰（阈值判据不是恒真）。
 #[test]
 fn a_kept_delegation_never_eliminates() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
-    let delegations = [Delegation {
-        id: "call-1".to_string(),
-        promise: "让 reviewer 复查这段".to_string(),
-        ok: true,
-        why: String::new(),
-    }];
+    let effects = [delegation("call-1", "让 reviewer 复查这段", true, "")];
     record_derived(
         "derived-test",
         &store,
@@ -553,7 +584,7 @@ fn a_kept_delegation_never_eliminates() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -572,17 +603,15 @@ fn a_kept_delegation_never_eliminates() {
 /// 正是要禁的静默失效，故判据必须在写之前就问覆盖层。
 #[test]
 fn elimination_does_not_write_a_second_verdict() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_MAIN, 0, "交给子智能体", 50);
-    let delegations = [Delegation {
-        id: "call-1".to_string(),
-        promise: "让 reviewer 复查这段".to_string(),
-        ok: false,
-        why: "子智能体没接手".to_string(),
-    }];
+    let effects = [delegation(
+        "call-1",
+        "让 reviewer 复查这段",
+        false,
+        "子智能体没接手",
+    )];
     record_derived(
         "derived-test",
         &store,
@@ -592,7 +621,7 @@ fn elimination_does_not_write_a_second_verdict() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -614,17 +643,15 @@ fn elimination_does_not_write_a_second_verdict() {
 /// 对等主体（`agent:peer-b` 类）不在机制内（它没有「派活」这个权威动作可收回）。
 #[test]
 fn a_principal_without_assign_work_is_never_eliminated() {
-    use symbio_core::facts::Delegation;
-
     let store = EventStore::new();
     let (snapshot, user_seq) =
         seed_turn(&store, symbio_core::PRINCIPAL_PEER, 0, "对等主体跑一轮", 50);
-    let delegations = [Delegation {
-        id: "call-peer-1".to_string(),
-        promise: "把结果交给主智能体".to_string(),
-        ok: false,
-        why: "上游没给数据".to_string(),
-    }];
+    let effects = [delegation(
+        "call-peer-1",
+        "把结果交给主智能体",
+        false,
+        "上游没给数据",
+    )];
     record_derived(
         "derived-test",
         &store,
@@ -634,7 +661,7 @@ fn a_principal_without_assign_work_is_never_eliminated() {
         symbio_core::PRINCIPAL_PEER,
         symbio_core::PRINCIPAL_MAIN,
         "t0",
-        &delegations,
+        &effects,
         &[],
         &[],
     );
@@ -658,7 +685,7 @@ fn a_principal_without_assign_work_is_never_eliminated() {
 /// 反向守卫：把承诺段改回 `?`，本用例立刻变红（`kind == "task.*"` 与熔断格都找不到）。
 #[test]
 fn commitment_failure_does_not_block_task_or_breaker() {
-    use symbio_core::facts::{Delegation, TaskDeclaration, TaskItem, TaskStatus};
+    use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 
     /// 拒绝一切 `commitment.*` 事实、其余照常落库的写口。
     struct CommitmentsRefuse(EventStore);
@@ -693,12 +720,7 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         symbio_core::PRINCIPAL_MAIN,
         symbio_core::PRINCIPAL_USER,
         "t0",
-        &[Delegation {
-            id: "call-1".to_string(),
-            promise: "让 reviewer 复查这段".to_string(),
-            ok: true,
-            why: String::new(),
-        }],
+        &[delegation("call-1", "让 reviewer 复查这段", true, "")],
         &[TaskDeclaration {
             items: vec![TaskItem {
                 id: "t1".to_string(),

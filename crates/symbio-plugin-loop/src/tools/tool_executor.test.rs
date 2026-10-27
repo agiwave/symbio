@@ -971,78 +971,97 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
     // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
 }
 
-// ==================== note_delegation：代际立约的唯一观察点 ====================
+// ==================== record_effect：效果出参的唯一观察点 ====================
+//
+// 判据两条：**只有声明过的工具**进效果出参（`agent_run` 声明了立约，`vdfs_read`
+// 没有），**先到先得**（同一次调用在两个分支各记一笔时，先记下的那次更接近事实）。
+// 「这次调用算不算立约」不在这里判——它在 `symbio-plugin-agent` 的行为实现里
+// （`host/behavior.test.rs`），本层只负责把终态交出去。
 
-/// 只有 `agent_run` 立约——别的工具是本会话自办，办没办成是执行结果不是承诺。
+/// 只有声明了行为的工具进效果出参——别的工具是本会话自办，办没办成是执行结果
+/// 不是承诺。
 #[tokio::test]
-async fn note_delegation_ignores_non_delegating_tools() {
+async fn record_effect_ignores_undeclared_tools() {
     let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({ "prompt": "让 reviewer 复查这段", "agent_id": "reviewer" });
 
-    note_delegation(&mut out, &decls, "c1", "vdfs_read", &args, true, "");
-    note_delegation(&mut out, &decls, "c2", "read", &args, true, "");
-    assert!(out.is_empty(), "非 `agent_run` 不产生承诺记录：{out:?}");
+    record_effect(&mut out, &decls, "c1", "vdfs_read", &args, true, "", "");
+    record_effect(&mut out, &decls, "c2", "read", &args, true, "", "");
+    assert!(
+        out.is_empty(),
+        "没声明任何行为的工具不产生效果输入：{out:?}"
+    );
 
-    note_delegation(&mut out, &decls, "c3", "agent_run", &args, true, "");
+    record_effect(&mut out, &decls, "c3", "agent_run", &args, true, "完成", "");
     assert_eq!(out.len(), 1);
     assert_eq!(
-        out[0].id, "c3",
+        out[0].call_id, "c3",
         "承诺号 = 转写里的 ToolCall 节点 id（`c-offer-<id>` 由此成格）"
     );
     assert_eq!(
-        out[0].promise, "让 reviewer 复查这段",
-        "承诺内容取 `prompt` 参数"
+        out[0].args["prompt"],
+        json!("让 reviewer 复查这段"),
+        "参数原样带走：承诺内容由能力包自己从参数里取"
     );
-    assert!(out[0].ok);
+    assert!(out[0].success);
     assert!(out[0].why.is_empty(), "守约不必带 why，违约必须带");
+    assert!(
+        out[0]
+            .declared
+            .contains(&symbio_plugin_api::behaviors::DELEGATION_PROMISE),
+        "声明的行为名原样带过去，写口据此选实现"
+    );
 }
 
 /// **先到先得**：同一次调用可能在两个分支各记一笔（终态广播找不到节点 ⇒ 末尾
 /// 收口会再记一次「未执行」），后到的收口不许把跑成功的改写成没跑。
 #[tokio::test]
-async fn note_delegation_never_overwrites_an_earlier_judgement() {
+async fn record_effect_never_overwrites_an_earlier_judgement() {
     let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({ "prompt": "交给子智能体" });
 
-    note_delegation(&mut out, &decls, "c1", "agent_run", &args, true, "");
-    note_delegation(
+    record_effect(&mut out, &decls, "c1", "agent_run", &args, true, "完成", "");
+    record_effect(
         &mut out,
         &decls,
         "c1",
         "agent_run",
         &args,
         false,
+        "",
         "未执行（中止或同批前序未结束）",
     );
-    assert_eq!(out.len(), 1, "同一承诺只入格一次");
-    assert!(out[0].ok, "先记下的那次更接近事实，收口分支不得覆盖");
+    assert_eq!(out.len(), 1, "同一调用只入出参一次");
+    assert!(out[0].success, "先记下的那次更接近事实，收口分支不得覆盖");
 
-    note_delegation(
+    record_effect(
         &mut out,
         &decls,
         "c1",
         "agent_run",
         &args,
         false,
+        "",
         "被 PreToolUse 钩子拦下",
     );
     assert_eq!(out.len(), 1);
-    assert!(out[0].ok);
+    assert!(out[0].success);
 
     // 没跑到的那一次（一次都没记过）照常入账，且带得出违约原因。
-    note_delegation(
+    record_effect(
         &mut out,
         &decls,
         "c2",
         "agent_run",
         &args,
         false,
+        "",
         "被 PreToolUse 钩子拦下",
     );
     assert_eq!(out.len(), 2);
-    assert!(!out[1].ok);
+    assert!(!out[1].success);
     assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
 }
 
@@ -1318,7 +1337,7 @@ async fn the_ledger_comes_from_the_facts_value() {
 ///
 /// 判据批首读一次（部署级撤销结论由 session 折成一个值），这里钉的是接线：
 /// 声明了 `provides_assign_work` 的 `agent_run` 在 `elimination_revoked=true` 时
-/// 不执行，且「约了却没派成」如实落进承诺出参（`note_delegation` ok=false）。
+/// 不执行，且「约了却没派成」如实落进承诺出参（`record_effect` ok=false）。
 #[tokio::test]
 async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-elimination");
@@ -1366,7 +1385,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         parse_error: None,
         overflow_notice: None,
     }];
-    let mut delegations = Vec::new();
+    let mut effects = Vec::new();
     let (msgs, updates) = process_tool_calls_async(
         tcs,
         &None,
@@ -1377,7 +1396,7 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         &dir,
         &EventStore::new(),
         true,
-        &mut delegations,
+        &mut effects,
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -1402,12 +1421,12 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
             .and_then(|v| v.as_str()),
         Some(failure_kind::PERMISSION_DENIED),
     );
-    assert_eq!(delegations.len(), 1, "拒止同样要记一笔承诺");
-    assert!(!delegations[0].ok, "没派成 = 没履约");
+    assert_eq!(effects.len(), 1, "拒止同样要交一条效果输入");
+    assert!(!effects[0].success, "没派成 = 没履约");
     assert!(
-        delegations[0].why.contains("assign.work 已被淘汰回路收回"),
+        effects[0].why.contains("assign.work 已被淘汰回路收回"),
         "违约理由要写明成因（实际: {}）",
-        delegations[0].why
+        effects[0].why
     );
 
     std::fs::remove_dir_all(&dir).ok();
@@ -1771,7 +1790,7 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
         tool_call_node("tc-a", "probe_a"),
         tool_call_node("tc-b", "probe_b"),
     ];
-    let mut delegations = Vec::new();
+    let mut effects = Vec::new();
     let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
@@ -1787,7 +1806,7 @@ async fn read_only_calls_run_concurrently_and_report_in_call_order() {
             &dir,
             &EventStore::new(),
             false,
-            &mut delegations,
+            &mut effects,
             &mut tasks,
             &mut breaks,
         ),
@@ -1887,7 +1906,7 @@ async fn side_effect_calls_never_overlap_with_another_call() {
         let parent = Some(Arc::new(NopParent) as Arc<dyn Plugin>);
         let sink = ExecEventSink::silent();
         let abort = ExecAbortSignal::new();
-        let mut delegations = Vec::new();
+        let mut effects = Vec::new();
         let mut tasks = Vec::new();
         let mut breaks = Vec::new();
         let (msgs, _updates) = process_tool_calls_async(
@@ -1900,7 +1919,7 @@ async fn side_effect_calls_never_overlap_with_another_call() {
             &dir,
             &EventStore::new(),
             false,
-            &mut delegations,
+            &mut effects,
             &mut tasks,
             &mut breaks,
         )
@@ -1941,7 +1960,7 @@ async fn interactive_mode_keeps_the_batch_serial() {
         tool_call_node("tc-i1", "probe_i1"),
         tool_call_node("tc-i2", "probe_i2"),
     ];
-    let mut delegations = Vec::new();
+    let mut effects = Vec::new();
     let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
@@ -1955,7 +1974,7 @@ async fn interactive_mode_keeps_the_batch_serial() {
         &dir,
         &EventStore::new(),
         false,
-        &mut delegations,
+        &mut effects,
         &mut tasks,
         &mut breaks,
     )
@@ -1997,7 +2016,7 @@ async fn abort_reaches_every_in_flight_call() {
         tool_call_node("tc-aa", "probe_abort_a"),
         tool_call_node("tc-ab", "probe_abort_b"),
     ];
-    let mut delegations = Vec::new();
+    let mut effects = Vec::new();
     let mut tasks = Vec::new();
     let mut breaks = Vec::new();
 
@@ -2026,7 +2045,7 @@ async fn abort_reaches_every_in_flight_call() {
             &dir,
             &EventStore::new(),
             false,
-            &mut delegations,
+            &mut effects,
             &mut tasks,
             &mut breaks,
         ),

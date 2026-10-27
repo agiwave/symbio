@@ -24,20 +24,23 @@
 //! 名字、原样透传行为名，所以**闸门跟随工具进入子作用域**：那正是「换个会话绕不
 //! 开淘汰」要的读法（按字面量等值判，前缀名一个都不命中）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use symbio_core::CapabilityMeta;
 use symbio_plugin_api::behaviors;
 
-/// 三类按名闸门的管辖集合（键 = 注册表里的 `meta.name`）。
+/// 两道按名闸门的管辖集合（键 = 注册表里的 `meta.name`）+ 效果端口的选实现依据。
+///
+/// 承诺那一族**不再在这里**：它的「管不管这次调用」由效果端口按声明判
+/// （[`Self::behaviors_of`]，DE-025 D-207）——宿主不需要为它维护第四个集合。
 #[derive(Debug, Default)]
 pub struct ToolDecls {
     /// 提供 `assign.work`：淘汰闸管辖（`elimination.delegation_revoked` 时拒止）
     assign_work_tools: HashSet<String>,
-    /// 跨主体立约型：承诺记账对象
-    promise_tools: HashSet<String>,
     /// 任务表写入：写侧资格闸与任务声明记账的管辖对象
     task_table_tools: HashSet<String>,
+    /// 线上全名 → 声明的行为名（效果端口的选实现依据，DE-025 §2.1）。
+    declared: HashMap<String, &'static [&'static str]>,
 }
 
 impl ToolDecls {
@@ -53,11 +56,9 @@ impl ToolDecls {
 
     /// 把一份能力元数据的行为位收进集合（键取 `meta.name`）。
     fn absorb(&mut self, meta: &CapabilityMeta) {
+        self.declared.insert(meta.name.clone(), meta.behaviors);
         if meta.declares(behaviors::ASSIGN_WORK) {
             self.assign_work_tools.insert(meta.name.clone());
-        }
-        if meta.declares(behaviors::DELEGATION_PROMISE) {
-            self.promise_tools.insert(meta.name.clone());
         }
         if meta.declares(behaviors::TASK_TABLE) {
             self.task_table_tools.insert(meta.name.clone());
@@ -69,15 +70,19 @@ impl ToolDecls {
         self.assign_work_tools.contains(wire_name.trim())
     }
 
-    /// 本调用是否立约（同上，线上全名等值判据）。
-    pub fn records_delegation_promise(&self, wire_name: &str) -> bool {
-        self.promise_tools.contains(wire_name.trim())
-    }
-
     /// 本调用是否写任务表（线上全名取末段比短名，与机制化之前逐字一致）。
     pub fn owns_task_table(&self, wire_name: &str) -> bool {
         self.task_table_tools
             .contains(wire_name.trim().rsplit('/').next().unwrap_or_default())
+    }
+
+    /// 本调用声明的**全部**行为名（原样切片，交效果端口选实现用）。
+    ///
+    /// 与上面三个谓词同一份元数据：谓词是「某道闸管不管它」，本函数是「它的效果由
+    /// 谁记」。口径取线上全名**等值**——效果端口按注册表的 `meta.name` 选实现，
+    /// 不做末段匹配（末段是任务表闸的历史口径，不是通用规则）。
+    pub fn behaviors_of(&self, wire_name: &str) -> &'static [&'static str] {
+        self.declared.get(wire_name.trim()).copied().unwrap_or(&[])
     }
 }
 

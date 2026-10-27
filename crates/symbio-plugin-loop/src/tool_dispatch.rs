@@ -45,7 +45,7 @@ use async_trait::async_trait;
 use symbio_core::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
-use symbio_core::facts::{Delegation, TaskDeclaration};
+use symbio_core::facts::TaskDeclaration;
 use symbio_core::{
     capability_resolve, llm_emit_message, llm_emit_state, tool_metas, ApprovalBasis,
     ApprovalGrants, CapabilityRiskLevel, Entity, Event, ExecAbortSignal, ExecEventSink, LlmTurn,
@@ -53,6 +53,7 @@ use symbio_core::{
     CAPABILITY_VISITOR, EVENT_AUTHZ_DENIED, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, MODE,
     RISK_LEVEL,
 };
+use symbio_plugin_api::effects::EffectInput;
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
@@ -66,7 +67,7 @@ use symbio_core::node_build::{
 
 /// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
 ///
-/// 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
+/// 三者的数据来源都在工具执行层（`EffectInput` / `TaskDeclaration` / 熔断理由），
 /// 而写方（落格）在轮末——`turn_exec` 调 [`super::derived_facts::record_derived`] 写。
 /// 本结构是那份出参从分发点回到运行器的**唯一通道**：不收集它，这三样就静默全丢
 /// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
@@ -75,8 +76,8 @@ use symbio_core::node_build::{
 /// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。
 #[derive(Default)]
 pub(crate) struct DerivedFacts {
-    /// 代际立约出参（批⑧）：`agent_run` 的承诺记录。
-    pub(crate) delegations: Vec<Delegation>,
+    /// 效果出参（DE-025 D-207）：每次终态调用一条，轮末由写口问能力包要草稿。
+    pub(crate) effects: Vec<EffectInput>,
     /// 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
     pub(crate) tasks: Vec<TaskDeclaration>,
     /// 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
@@ -1442,7 +1443,7 @@ impl ToolDispatch for SessionDispatchPort {
         // 写方在轮末——由本分发方收下、`turn_exec` 轮末调
         // `derived_facts::record_derived` 落格。不收这三份，
         // 代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
-        let mut delegations: Vec<Delegation> = Vec::new();
+        let mut effects: Vec<EffectInput> = Vec::new();
         let mut tasks: Vec<TaskDeclaration> = Vec::new();
         let mut breaks: Vec<&'static str> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_async(
@@ -1455,8 +1456,8 @@ impl ToolDispatch for SessionDispatchPort {
             &self.tool_archive_dir,
             self.facts.as_ref(),
             self.elimination_revoked,
-            // 代际立约出参（批⑧）：`agent_run` 的承诺记录。
-            &mut delegations,
+            // 效果出参（DE-025 D-207）：每次终态调用一条。
+            &mut effects,
             // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
             &mut tasks,
             // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
@@ -1478,7 +1479,7 @@ impl ToolDispatch for SessionDispatchPort {
         // 三份收束派生事实出参收进取件面（`take_derived`）——调用方在桥释放前取走。
         {
             let mut d = self.derived.lock().unwrap();
-            d.delegations.extend(delegations);
+            d.effects.extend(effects);
             d.tasks.extend(tasks);
             d.breaks.extend(breaks);
         }

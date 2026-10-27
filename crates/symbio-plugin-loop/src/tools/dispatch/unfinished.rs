@@ -88,7 +88,7 @@ pub(crate) async fn close_unfinished(
     context_messages: &[ChatNode],
     tool_messages: &mut Vec<ChatNode>,
     parent_updates: &mut Vec<ChatNode>,
-    delegations: &mut Vec<Delegation>,
+    effects: &mut Vec<EffectInput>,
 ) {
     let decls = &readings.decls;
 
@@ -128,13 +128,14 @@ pub(crate) async fn close_unfinished(
         }
         tool_messages.push(result_msg);
         // 没跑到同样是没履约（`agent_run` 的约不能因为"没执行"就查无此约）。
-        note_delegation(
-            delegations,
+        record_effect(
+            effects,
             &decls,
             id,
             name,
             args,
             false,
+            "",
             "未执行（中止或同批前序未结束）",
         );
     }
