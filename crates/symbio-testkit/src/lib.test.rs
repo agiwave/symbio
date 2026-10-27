@@ -85,10 +85,7 @@ fn events(names: &[&'static str]) -> &'static [EventDecl] {
     Box::leak(
         names
             .iter()
-            .map(|name| EventDecl {
-                name,
-                cell: (Entity::Turn, Verb::Asserted),
-            })
+            .map(|name| EventDecl::new(name, (Entity::Turn, Verb::Asserted)))
             .collect::<Vec<_>>()
             .into_boxed_slice(),
     )

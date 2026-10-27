@@ -13,6 +13,7 @@ use super::{
     EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
     MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SCAN_QUOTA, RECALL_SECTION_HEAD,
 };
+use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use symbio_core::merge_kernel::split_sentences;
@@ -212,7 +213,11 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         ev.payload.get("vec").is_none(),
         "载荷里没有 vec 键：恒空的预留键不算承诺（ADR-110），内容只在 content"
     );
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     // 同文去重（判定方 = core 的 `contains_content`）、空白不记。
     assert_eq!(
@@ -262,7 +267,11 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         Some(ENCODE_MAX_CHARS),
         "截断按字符数（不切 UTF-8 字节）"
     );
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 }
 
 /// **去重读的是全史，不是近 N 条窗口**（项二，以判据结案）。
@@ -356,7 +365,11 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
         "记的是智能体自己的结论"
     );
     assert_eq!(ev.produced_by, Some(41), "溯源同指本轮开口格（I2）");
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     // 同文去重跨标签：同一句已被任一标签记过 ⇒ 不写第二条。
     assert_eq!(
@@ -435,7 +448,11 @@ fn encode_payload_carries_the_content_side_vis_scope() {
         Some("shared"),
         "显式给定 shared —— 内容侧产地由此可写"
     );
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     // 空正文不写格：可见域不制造空事实。
     assert_eq!(
@@ -599,7 +616,11 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     assert!(!view.contains_content("周三不排会"), "源记忆被遗忘");
     assert!(view.contains_content("喝水要喝温的"));
     assert!(view.contains_content("周四发周报"));
-    assert!(check_all(&snap2).is_empty(), "{:?}", check_all(&snap2));
+    assert!(
+        check_all(guard_vocab(), &snap2).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap2)
+    );
 }
 
 /// **巩固只合并同标签的记忆**——`recall(.., Some(tag), None)` 的标签过滤是**承重**的。
@@ -716,7 +737,11 @@ fn consolidation_never_merges_across_tags() {
         view.contains_content("先写正向用例") && view.contains_content("先跑一遍再改"),
         "技能必须还在（被遗忘 = 技能静默消失）"
     );
-    assert!(check_all(&snap2).is_empty(), "{:?}", check_all(&snap2));
+    assert!(
+        check_all(guard_vocab(), &snap2).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap2)
+    );
 }
 
 /// 步 13 · 保真度闸：两条都超长的记忆合并不下 ⇒ 丢掉的那一半算失真 ⇒ 低于 0.7
@@ -1249,7 +1274,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         1,
         "同一锚只落一条"
     );
-    assert!(check_all(&store.range(Seq::new(0))).is_empty());
+    assert!(check_all(guard_vocab(), &store.range(Seq::new(0))).is_empty());
 }
 
 // ==================== 合并算法（本模块的算法面） ====================
@@ -1431,9 +1456,9 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
         .unwrap();
     let snapshot = store.range(Seq::new(0));
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(guard_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(guard_vocab(), &snapshot)
     );
     let recalled = snapshot
         .iter()

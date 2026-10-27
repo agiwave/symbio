@@ -5,6 +5,20 @@
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
+//! ## 词汇从哪来：格子优先，角色兜底，名字不出现
+//!
+//! 判据要问「这条事实在判定里算什么」。DE-024 D-203 把它收成三档，按顺序用：
+//!
+//! 1. **格子答得出就不问名字**——`turn × opened` 上的每一条都是开轮，`turn × closed`
+//!    上的每一条都算收束。点名单会让「新名字落进这一格」静默逃过判定。
+//! 2. **同格要分辨两个名字的，问角色**（形参 `vocab: &[EventDecl]`，来自装配期冻结的
+//!    声明表）：定稿发言 vs 兜底、停机 vs 普通断言、预算声明 vs 同格其他、重做轮 vs
+//!    同格其他。四档角色的闭集与「每档必须有人住」的检查在内核侧（`FactRole`）。
+//! 3. **本模块不再持有业务事件名**：core 的判据认的是网格与角色，新能力加名字不改这里。
+//!
+//! 词汇随数据传，不走进程全局：没有装配的进程里（单测与可执行论证程序）全局表是空的，
+//! 判据会在「看不见」的状态下全绿。
+//!
 //! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")；
 //! [`open_unique_per_turn`] 随 plan/11 批 0 补入）
 //!
@@ -17,7 +31,7 @@
 //! | C3 对偶 | I2 无溯源不声明 | 片内溯源边不倒因果、不落空洞 | [`provenance_dangling`] |
 //! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
-//! | C6 | I3 到点必答 | 每条收束格 / `authz.denied` 的 `reason` 在闭集内 | [`closure_reason_closed`] |
+//! | C6 | I3 到点必答 | 每条收束格 / 停机角色的 `reason` 在闭集内 | [`closure_reason_closed`] |
 //! | 终止性前提 3（C14） | 终止性定理 | 任务依赖图**无环**且无悬空依赖 | [`acyclic_deps`] |
 //! | 终止性前提 2 | 终止性定理 | 每任务返工轮数有硬上界（`MAX_REWORK_ROUNDS`） | [`rework_bounded`] |
 //!
@@ -44,7 +58,7 @@
 //! 符号至少有两个 core 外的消费方，而它们只服务读出口一个模块，单模块消费的
 //! 符号该下沉、不该占着架构出口。
 
-use super::event::{Entity, Event, Verb};
+use super::event::{holds_role, Entity, Event, EventDecl, FactRole, Verb};
 
 // 判据内核（std-only）：算法层住 `kernel.rs`，本模块只做「事件切片 ⇒ 内核输入」
 // 的解析。verify/ 下的两个程序 `#[path]` 包含的就是那个文件——判定与生产共用
@@ -71,56 +85,49 @@ impl Violation {
     }
 }
 
-/// 这一条是**开轮**事件吗（`turn × opened` 的 `user.message`）？
+/// 这一条是**开轮**事件吗（`turn × opened` 那一格）？
 ///
 /// 写侧闸门与读侧 [`open_unique_per_turn`] 共用本判据——「什么算开轮」只有一份。
-/// 名字引常量而不是字面量：拼错的字面量在比较里是**恒假**，于是开轮闸静默失效。
+///
+/// **判的是格子，不是名字**（DE-024 D-203）：落在开轮格就是开轮，这是那一格的语义。
+/// 格位之外再比一次名字，拦的就不是「谁开了轮」而是「谁的名字在表上」——新名字落进
+/// 开轮格时开轮闸静默不拦。
 pub fn is_turn_open(e: &Event) -> bool {
-    e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == crate::event::EVENT_USER_MESSAGE
+    e.entity == Entity::Turn && e.verb == Verb::Opened
 }
 
-/// 这一条是**收束发言**吗（`turn × closed` 的 `chat.assistant.final`）？
+/// 这一条是本轮的**定稿发言**吗（收束格上扮演 `finalizes_turn` 角色那一个）？
 ///
-/// 只认 `final`（不认 `fallback`）：[`final_unique_per_turn`] 的判据就是这一格，
-/// 写侧若把 fallback 也算进来，就成了比读侧更严的第二套规则。
-pub fn is_turn_final(e: &Event) -> bool {
+/// 只认定稿（不认兜底）：[`final_unique_per_turn`] 的判据就是这一档，写侧若把 fallback
+/// 也算进来，就成了比读侧更严的第二套规则。同格两个名字要分辨，靠的是 owner 声明里
+/// 的角色而不是这里抄一个名字——角色缺失时装配口报 `Gap::UnmannedRole`，不会空转。
+pub fn is_turn_final(vocab: &[EventDecl], e: &Event) -> bool {
     e.entity == Entity::Turn
         && e.verb == Verb::Closed
-        && e.kind == crate::event::EVENT_ASSISTANT_FINAL
+        && holds_role(vocab, &e.kind, FactRole::FinalizesTurn)
 }
 
 /// 这一条让某一轮**算收束**吗（[`unresolved_turns`] 的口径）？
 ///
-/// 三种形态：发言收束（final / fallback）、产物收束（`artifact.added`，D-067）。
+/// 两种形态：发言收束（`turn × closed`）、产物收束（`artifact × asserted`，D-067）。
 /// 写侧判「新开轮是否越过了未收束的旧轮」必须与读侧同口径，否则会出现
-/// 「写侧说越界、读侧说没事」的两套绿。
+/// 「写侧说越界、读侧说没事」的两套绿。两格整格算数，不看名字（DE-024 D-203）。
 pub fn closes_turn(e: &Event) -> bool {
-    (e.entity == Entity::Turn
-        && e.verb == Verb::Closed
-        && matches!(
-            e.kind.as_str(),
-            crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
-        ))
-        || (e.entity == Entity::Artifact
-            && e.verb == Verb::Asserted
-            && e.kind == crate::event::EVENT_ARTIFACT_ADDED)
+    (e.entity == Entity::Turn && e.verb == Verb::Closed)
+        || (e.entity == Entity::Artifact && e.verb == Verb::Asserted)
 }
 
 /// 这一条是**停机事实**吗（C6 的口径：它得回答「这一轮为什么停」）？
 ///
-/// 两种收束格 + 收束闸的否定事实（被拒不产生收束格，但它同样是一次停）。
+/// 收束格整格算（那上面的每一条都宣称本轮结束了）+ 收束闸的否定事实（`stops_turn`
+/// 角色——被拒不产生收束格，但它同样是一次停）。
 /// **与 [`closes_turn`] 不是一把尺**：后者问「本轮结算了吗」，产物格算结算；
 /// 产物不是停——一工具结果落格后轮还在走，「为什么停」的答案在收束格上
 /// （DE-015 §4.3 判据 10 点名的就是这两种格）。拿结算尺去问停机，
 /// 就会向生产要一个它永远写不出的字段。
-pub fn is_stop_fact(e: &Event) -> bool {
-    (e.entity == Entity::Turn
-        && e.verb == Verb::Closed
-        && matches!(
-            e.kind.as_str(),
-            crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
-        ))
-        || e.kind == crate::event::EVENT_AUTHZ_DENIED
+pub fn is_stop_fact(vocab: &[EventDecl], e: &Event) -> bool {
+    (e.entity == Entity::Turn && e.verb == Verb::Closed)
+        || holds_role(vocab, &e.kind, FactRole::StopsTurn)
 }
 
 /// 单事件的 I2 判据：`Some` = 这条**声明**缺溯源，写侧应拒绝它。
@@ -169,15 +176,15 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
         .collect()
 }
 
-/// C2 / N3（I1）：每 `turn` 至多 1 条 final。
+/// C2 / N3（I1）：每 `turn` 至多 1 条定稿发言。
 ///
-/// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// 「定稿」= 收束格上扮演 `finalizes_turn` 角色那一条（词汇来自 `vocab`，
+/// DE-024 D-203；格位定义见 [plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
-pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
-    // 哪些事件算数（final 的判据）是本模块的解析层；「每 turn 至多一条」
-    // 的判定走 kernel::unique_per_turn_core——verify/invariants.rs
-    // 包含的是同一份内核。
-    let finals = events.iter().filter(|e| is_turn_final(e));
+pub fn final_unique_per_turn(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
+    // 哪些事件算数（定稿的判据）是本模块的解析层；「每 turn 至多一条」
+    // 的判定走 kernel::unique_per_turn_core——可执行论证程序包含的是同一份内核。
+    let finals = events.iter().filter(|e| is_turn_final(vocab, e));
     kernel::unique_per_turn_core(finals.map(|e| (e.turn, e.event_id.as_str())))
         .into_iter()
         .map(|(dup, first, turn)| {
@@ -195,7 +202,7 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
 ///
-/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
+/// 开轮 = 落在 `turn × opened` 那一格（[plan/01 §6](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")），
 /// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
 /// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
 /// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
@@ -215,9 +222,7 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
                 .expect("重复项的 id 必来自本切片");
             Violation::at(
                 e,
-                format!(
-                    "turn {turn} 已有开轮事件（{first}），又出现一条——每 turn 至多 1 条 user.message"
-                ),
+                format!("turn {turn} 已有开轮事件（{first}），又出现一条——每 turn 至多 1 条开轮"),
             )
         })
         .collect()
@@ -237,19 +242,16 @@ pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
     events.iter().filter_map(provenance_violation).collect()
 }
 
-/// I2 的覆盖判据（参照 `docs/003-design/verify/invariants.rs`
-/// 的 `needs_provenance`；S1 扩展收束类，S5 扩展记忆类）。
+/// I2 的覆盖判据（参照验证程序 `invariants.rs` 的 `needs_provenance`；S5 扩展记忆类）。
+///
+/// **整格判，不点名单**（DE-024 D-203）：断言格与记忆类的每一条都要说清「被谁产生」；
+/// 收束格宣称「已经答复」、`turn × progressed` 是用户看得见的动静，两格同样整格要求。
+/// 点名单的形状是「新名字落进这些格 ⇒ 静默不受 I2 约束」——协议族当年的格位选择
+/// 就是在绕这个形状（见 `event/grid.rs` 同段注释），格子判定之后那层绕行不再必要。
 fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
         || e.entity == Entity::Memory
-        || (e.entity == Entity::Turn
-            && ((e.verb == Verb::Closed
-                && matches!(
-                    e.kind.as_str(),
-                    crate::event::EVENT_ASSISTANT_FINAL | crate::event::EVENT_ASSISTANT_FALLBACK
-                ))
-                || (e.verb == Verb::Progressed
-                    && e.kind == crate::event::EVENT_ASSISTANT_PROGRESS)))
+        || (e.entity == Entity::Turn && (e.verb == Verb::Closed || e.verb == Verb::Progressed))
 }
 
 /// I2 的另一半：溯源边**不悬空**。
@@ -358,17 +360,17 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 /// （04 §3.1 批⑨ 的「断言进 CI」）。
 ///
 /// 要严判就绕过本函数直接调 [`unresolved_turns`]（`false`）/ [`budget_exceeded`]。
-pub fn check_all(events: &[Event]) -> Vec<Violation> {
+pub fn check_all(vocab: &[EventDecl], events: &[Event]) -> Vec<Violation> {
     let mut all = seq_monotonic(events);
-    all.extend(final_unique_per_turn(events));
+    all.extend(final_unique_per_turn(vocab, events));
     all.extend(open_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
     all.extend(provenance_dangling(events, true));
     all.extend(unresolved_turns(events, true));
-    all.extend(budget_exceeded(events, declared_budget_ms(events)));
-    all.extend(closure_reason_closed(events, true));
+    all.extend(budget_exceeded(events, declared_budget_ms(vocab, events)));
+    all.extend(closure_reason_closed(vocab, events, true));
     all.extend(acyclic_deps(events));
-    all.extend(rework_bounded(events, MAX_REWORK_ROUNDS));
+    all.extend(rework_bounded(vocab, events, MAX_REWORK_ROUNDS));
     all
 }
 
@@ -381,20 +383,24 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
 ///   缺 `budget_ms` 时回退（接线前落的历史事件 / 旧 WAL）。回退是**向后兼容**，
 ///   不是第二处判定：两种形态都不会被同时读。
 ///
-/// 读**哪个事件**同样有新旧两种：`turn.dispatch`（用户格先于判决落，
-/// 档位另立一格）优先；没有它就回退 `user.message`（历史切片）。同一格内
-/// 数值优先、档位名回退——两条路径读的都是同一条事实的两种形态。
-fn declared_budget_ms(events: &[Event]) -> Option<u64> {
-    let widest = |kind: &str, verb: Verb| {
-        let kind = kind.to_string();
+/// 读**哪个事件**同样有新旧两种形态，但**问的是格子**（DE-024 D-203）：`turn × asserted`
+/// 上的预算声明（派发档另立一格后的现行形态）优先；没有它就回退 `turn × opened`
+/// （历史切片里预算写在开轮载荷上）。两条路径读的都是同一条事实的两种形态，
+/// 而「扮演预算声明」由 owner 的 `declares_budget` 角色说——新增一种预算来源 = 在
+/// owner 的声明里加一档角色，不改这里。
+fn declared_budget_ms(vocab: &[EventDecl], events: &[Event]) -> Option<u64> {
+    let widest = |verb: Verb| {
         events
             .iter()
-            .filter(move |e| e.entity == Entity::Turn && e.verb == verb && e.kind == kind)
+            .filter(|e| {
+                e.entity == Entity::Turn
+                    && e.verb == verb
+                    && holds_role(vocab, &e.kind, FactRole::DeclaresBudget)
+            })
             .filter_map(declared_budget_of)
             .max()
     };
-    widest(crate::event::EVENT_TURN_DISPATCH, Verb::Asserted)
-        .or_else(|| widest(crate::event::EVENT_USER_MESSAGE, Verb::Opened))
+    widest(Verb::Asserted).or_else(|| widest(Verb::Opened))
 }
 
 /// 一条声明事件的预算：数值优先，档位名回退。
@@ -496,18 +502,22 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
 /// 但「整段放宽」是条**没有边界**的宽限：写方从今天起每条都带 `reason`，而一条
 /// 新落的格漏了 `reason`，在整段放宽下永远绿——判据 10 因此在生产里没有执行方
 /// （口径 ③）。宽限的边界改成日志自己说：第一条带 `reason` 的停机格
-/// （收束格或 `authz.denied`）就是分界，**它之前**是历史归档段（放宽），**它之后**
+/// （收束格或 `stops_turn` 角色）就是分界，**它之前**是历史归档段（放宽），**它之后**
 /// 每一条都必须带。这个位置不需要常量、不需要日期——写方一旦开始写 `reason`，
 /// 之后的缺口就不可能再是历史造成的。整条日志一个 `reason` 都没有 ⇒ 分界落在末尾，
 /// 与旧行为逐字等价（纯历史存档不飘红）。
-pub fn closure_reason_closed(events: &[Event], allow_missing: bool) -> Vec<Violation> {
+pub fn closure_reason_closed(
+    vocab: &[EventDecl],
+    events: &[Event],
+    allow_missing: bool,
+) -> Vec<Violation> {
     // 分界下标：第一条带 `reason` 的停机格。严判档把分界放在开头 ⇒ 一段都不放宽；
     // 宽限档找不到分界 ⇒ 放在末尾，整段都算历史归档。
     let boundary = if allow_missing {
         events
             .iter()
             .position(|e| {
-                is_stop_fact(e) && e.payload.get("reason").and_then(|v| v.as_str()).is_some()
+                is_stop_fact(vocab, e) && e.payload.get("reason").and_then(|v| v.as_str()).is_some()
             })
             .unwrap_or(events.len())
     } else {
@@ -516,7 +526,7 @@ pub fn closure_reason_closed(events: &[Event], allow_missing: bool) -> Vec<Viola
     events
         .iter()
         .enumerate()
-        .filter(|(_, e)| is_stop_fact(e))
+        .filter(|(_, e)| is_stop_fact(vocab, e))
         .filter_map(|(idx, e)| {
             let raw = e.payload.get("reason").and_then(|v| v.as_str());
             match raw {
@@ -656,16 +666,17 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 
 /// 终止性前提 2：每个任务的**返工次数有硬上界**。
 ///
-/// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
-/// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
-/// （docs/003-design/verify/termination.rs 前提 2）。
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
-pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
+/// 返工 = 任务格上扮演 `counts_rework` 角色的那条事实（新增一条事实，不是修改历史）；
+/// 同一被返工节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
+/// （终止性论证程序前提 2）。接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
+pub fn rework_bounded(vocab: &[EventDecl], events: &[Event], max_rework: u32) -> Vec<Violation> {
     // 解析层：收出按时间序的 replaces 序列；计数判定走 kernel::rework_core
-    // ——verify/termination.rs 的前提 2 用例包含的是同一份内核。
+    // ——可执行论证程序的前提 2 用例包含的是同一份内核。
+    let is_rework =
+        |e: &Event| e.entity == Entity::Task && holds_role(vocab, &e.kind, FactRole::CountsRework);
     let replaces: Vec<&str> = events
         .iter()
-        .filter(|e| e.entity == Entity::Task && e.kind == crate::event::EVENT_TASK_REWORK_CREATED)
+        .filter(|e| is_rework(e))
         .filter_map(|e| e.payload.get("replaces").and_then(|v| v.as_str()))
         .collect();
     kernel::rework_core(&replaces, max_rework)
@@ -674,8 +685,7 @@ pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
             let e = events
                 .iter()
                 .find(|e| {
-                    e.entity == Entity::Task
-                        && e.kind == crate::event::EVENT_TASK_REWORK_CREATED
+                    is_rework(e)
                         && e.payload.get("replaces").and_then(|v| v.as_str())
                             == Some(target.as_str())
                 })

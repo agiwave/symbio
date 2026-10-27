@@ -18,18 +18,9 @@ pub(crate) const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 pub(crate) const OWNER: &str = "plugins/session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[
-    EventDecl {
-        name: EVENT_SYSTEM_TRIGGERED,
-        cell: (Entity::System, Verb::Opened),
-    },
-    EventDecl {
-        name: EVENT_SYSTEM_HEALTH,
-        cell: (Entity::System, Verb::Progressed),
-    },
-    EventDecl {
-        name: EVENT_CONATION_EXPRESSED,
-        cell: (Entity::Conation, Verb::Opened),
-    },
+    EventDecl::new(EVENT_SYSTEM_TRIGGERED, (Entity::System, Verb::Opened)),
+    EventDecl::new(EVENT_SYSTEM_HEALTH, (Entity::System, Verb::Progressed)),
+    EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)),
 ];
 
 // 装配口的提交：宿主链接本 crate 即生效。装配方按 owner 排序后逐个 `declare`，

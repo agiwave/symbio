@@ -16,6 +16,7 @@ use symbio_core::{
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
     EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE, SKILL_TAG,
 };
+use symbio_kernel::event::kernel_vocab;
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -908,7 +909,7 @@ fn invariants_move_when_the_wal_changes() {
     let snap = store.range(Seq::new(0));
     assert_eq!(
         clean.invariants,
-        serde_json::to_value(check_all(&snap)).unwrap()
+        serde_json::to_value(check_all(kernel_vocab(), &snap)).unwrap()
     );
     assert_eq!(
         clean.invariants,
@@ -1373,9 +1374,9 @@ fn commitments_column_exposes_each_delegation_record() {
     );
     assert_eq!(items[0]["anchor_seq"].as_u64(), Some(user_seq));
     assert!(
-        check_all(&store.range(Seq::new(0))).is_empty(),
+        check_all(kernel_vocab(), &store.range(Seq::new(0))).is_empty(),
         "承诺格子不新增违规：{:?}",
-        check_all(&store.range(Seq::new(0)))
+        check_all(kernel_vocab(), &store.range(Seq::new(0)))
     );
 
     // 面板那一份（人读的）与列同源：数字直接来自本列，不重算

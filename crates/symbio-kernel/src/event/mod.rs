@@ -24,18 +24,70 @@ use serde::{Deserialize, Serialize};
 
 /// 名字 ↔ 格位的表：判据、理由与「为什么不是枚举」都写在它的模块头。
 pub mod grid;
-pub use grid::{event_cell, Cell};
+pub use grid::{event_cell, kernel_vocab, Cell};
 
-/// 一个**事件名**的声明：名字与它在网格上的格位。
+/// 一条事实在**守卫判据**里扮演的角色（DE-024 D-203 裁决二）。
+///
+/// 这四档答的是「core 的判据为什么要看这条事实」，不是「这条事实叫什么」：
+/// 名字是数据、可以很多；语义只有四档，加一档是架构变更（必须论证）。判据经
+/// `Frozen::holds_role` 读它，不再拿名字比字符串——于是「新增一条共享事件名」
+/// 与「改动架构」脱钩（DE-024 D-203）。
+///
+/// **每档都必须有人居住**：装配口逐档查居住（`Frozen::unmanned_roles` ⇒
+/// `Gap::UnmannedRole`），门禁 CS-007 判整仓。少了这条，owner 删掉角色会让对应判据
+/// **静默不判**——判据从「拒绝」变成「看不见」，正是 J3 点名的失效形状。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactRole {
+    /// 本轮的**定稿发言**（同格还有兜底格，它不算定稿：`final_unique_per_turn` 只拦这一档）。
+    FinalizesTurn,
+    /// 回答「这一轮为什么停」的否定事实（收束格之外唯一的一档）。
+    StopsTurn,
+    /// 本轮预算档的声明来源（C5 的读数从这里取）。
+    DeclaresBudget,
+    /// 同一任务的**重做轮**（`rework_bounded` 的计数对象——终止前提）。
+    CountsRework,
+}
+
+impl FactRole {
+    /// 缺口报告里点名用的稳定拼写（与枚举变体一一对应，不参与判定）。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            FactRole::FinalizesTurn => "finalizes_turn",
+            FactRole::StopsTurn => "stops_turn",
+            FactRole::DeclaresBudget => "declares_budget",
+            FactRole::CountsRework => "counts_rework",
+        }
+    }
+
+    /// 闭集全集：`seal` 逐档查居住，新加一档自动进检查面。
+    pub const ALL: &'static [FactRole] = &[
+        FactRole::FinalizesTurn,
+        FactRole::StopsTurn,
+        FactRole::DeclaresBudget,
+        FactRole::CountsRework,
+    ];
+}
+
+/// 名字 ↔ 格位 ↔ 角色：写闸与 core 判据共用的词汇面。
+///
+/// 判据拿到的是**这张表**（`&[EventDecl]`），不是自己抄的一份名字。
+pub fn holds_role(vocab: &[EventDecl], kind: &str, role: FactRole) -> bool {
+    vocab
+        .iter()
+        .find(|e| e.name == kind)
+        .is_some_and(|e| e.roles.contains(&role))
+}
+
+/// 一个**事件名**的声明：名字、它在网格上的格位，以及它在守卫判据里扮演的角色。
 ///
 /// 这是事件词汇的登记口（DE-024 D-197）：`Entity` × `Verb` 是封闭语法，**名字不是**。
 /// 加一个事件名 = 在 owner 插件里加一行 `EventDecl`，内核不认识这个名字。
 ///
 /// ## 为什么住在 `event` 域而不是 `decl`
 ///
-/// 它声明的是「这个名字落在哪一格」——回答的是事件词汇与网格的对应，不是载荷形状。
-/// `decl` 域（`FactDecl` / `ViewDecl` / `ActorDecl`）答的是另一组问题：字段、读法、
-/// 执行体收口。判据 7 的输入是 `FactDecl`，网格的输入是本类型，两者合并会逼其中
+/// 它声明的是「这个名字落在哪一格、扮演什么判据角色」——回答的是事件词汇与网格的对应，
+/// 不是载荷形状。`decl` 域（`FactDecl` / `ViewDecl` / `ActorDecl`）答的是另一组问题：字段、
+/// 读法、执行体收口。判据 7 的输入是 `FactDecl`，网格的输入是本类型，两者合并会逼其中
 /// 一方说谎（边界分析见 [`crate::decl`]）。
 ///
 /// 两表同名不冲突：一条事实若要进环，同时交 `EventDecl` 与 `FactDecl` 即可；`seal`
@@ -46,6 +98,24 @@ pub struct EventDecl {
     pub name: &'static str,
     /// 名字落在哪一格。写闸按它拒绝「自述挪了一格」的事件。
     pub cell: Cell,
+    /// 名字扮演的守卫角色。绝大多数事件不扮演任何角色（`&[]`）。
+    pub roles: &'static [FactRole],
+}
+
+impl EventDecl {
+    /// 只登记格位（不扮演任何判据角色）——绝大多数事件走这个构造器。
+    pub const fn new(name: &'static str, cell: Cell) -> Self {
+        EventDecl {
+            name,
+            cell,
+            roles: &[],
+        }
+    }
+
+    /// 同时登记格位与角色：core 的守卫判据要靠这一行找到它。
+    pub const fn with_roles(name: &'static str, cell: Cell, roles: &'static [FactRole]) -> Self {
+        EventDecl { name, cell, roles }
+    }
 }
 
 /// 不可伪造的单调序号（[plan/01 §2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
@@ -559,10 +629,10 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 // ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）──
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
-// 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
-// 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`
-// （`task.ready` 也落 `progressed`，`task.assigned` 也落 `asserted`——两格是
-// 调度者的判断与发放，不新增动词）。
+// 返工 = 新增一条事件（返工那格的名字随 owner 插件声明），不是修改历史
+// （append-only 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`
+// （`task.ready` / `task.assigned` / `task.rework_created` 同落这两格，名字都不在内核
+// ——写方与读方都在 `plugins/loop`，随 owner 的 `EventDecl` 走，DE-024 D-197 / D-203）。
 //
 // 写方 = `plugins/session/task_events`（会话任务清单 `todo_write` 的转写，
 // 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）；`task.ready` /
@@ -578,9 +648,6 @@ pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 pub const EVENT_TASK_HELD: &str = "task.held";
 /// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
-/// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
-/// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
-pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 发放：调度者把一笔就绪任务派给一个持有者，并附**租约**。载荷
 /// `{ task_id, owner, lease_ms, until_ms }`。落在 `task × asserted`。
 ///

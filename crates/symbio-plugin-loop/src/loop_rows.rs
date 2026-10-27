@@ -1436,7 +1436,21 @@ pub(crate) const LOOP_OWNER: &str = "plugins/loop";
 pub(crate) fn load(rows: &[Decl]) -> Result<Arc<Frozen>, Vec<Gap>> {
     let mut b = Builder::new();
     b.declare(LOOP_OWNER, declarations(rows));
-    b.seal()
+    let frozen = b.seal()?;
+    // **每一档守卫角色都得有人住**（DE-024 D-203）。判据读的是角色，角色来自声明：
+    // owner 删掉一行 `roles` 的表现不是「拒绝」而是「看不见」——守卫从拦人变成空转，
+    // 装载还是全绿。所以钉在装载口，与其余缺口同一个 `Vec<Gap>`，不降级成告警。
+    let unmanned: Vec<Gap> = frozen
+        .unmanned_roles()
+        .into_iter()
+        .map(|role| Gap::UnmannedRole {
+            role: role.as_str(),
+        })
+        .collect();
+    if !unmanned.is_empty() {
+        return Err(unmanned);
+    }
+    Ok(frozen)
 }
 
 /// 本插件交给装配口的完整声明（DE-024 D-198）。`load` 与链接期提交共用这一份，

@@ -7,9 +7,10 @@
 
 use super::*;
 use crate::cost_ledger;
+use crate::event::kernel_vocab;
 use crate::event::{
-    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED,
-    EVENT_USER_MESSAGE,
+    Entity, Event, EventDecl, FactRole, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE,
 };
 use crate::invariants::check_all;
 use crate::projection::turnstate::turnstate;
@@ -229,9 +230,9 @@ fn one_user_message_yields_exactly_one_final() {
     // 三条不变量在整条链路上全绿（含 I2：final 带溯源）。
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 
@@ -251,9 +252,9 @@ fn forced_failure_produces_fallback_with_provenance() {
     assert_eq!(fallbacks.len(), 1, "兜底必须产生事件——静默中断 = 违例");
     assert!(fallbacks[0].produced_by.is_some(), "兜底同样可被 I2 审计");
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 
@@ -314,7 +315,7 @@ fn two_finals_are_caught_by_n3() {
         )
         .expect("首插必成");
     let snapshot = store.range(crate::event::Seq::new(0));
-    let violations = check_all(&snapshot);
+    let violations = check_all(kernel_vocab(), &snapshot);
     assert!(
         violations.iter().any(|v| v.why.contains("final")),
         "同一 turn 两条 final 必须被看见：{:?}",
@@ -476,9 +477,9 @@ async fn reasoner_turn_keeps_all_invariants_green() {
     assert!(reply.contains("stub-model"));
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
     // turnstate 投影照常工作（N1：双跑一致）。
@@ -544,9 +545,9 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
         "失败原因入载荷（可观测）：{payload}"
     );
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
     assert!(
         unresolved_turns(&snapshot, false).is_empty(),
@@ -790,9 +791,9 @@ fn commitment_lifecycle_feeds_reputation() {
 
     // 全链路不变量仍绿（承诺也是普通事件，永远逃不出审计）。
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 
@@ -1163,22 +1164,31 @@ fn elimination_event_keeps_invariants_green() {
         .unwrap();
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 
 // ── S7 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 16–18 步）：任务树与返工 ──
 //
 // 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；
-// 18 返工闭环（rework_created，返工次数有界 = 终止性前提 2）。
+// 18 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
 
-use crate::event::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
-};
+use crate::event::{EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS};
 use crate::invariants::{acyclic_deps, rework_bounded};
 use crate::projection::readyset::readyset;
+
+/// 返工那一格：名字与角色随 owner 插件（`plugins/loop::control_decl`），内核表不认识它。
+///
+/// core 的判据只认角色（DE-024 D-203），所以这里自己声明一行当词汇面——生产环境里
+/// 这张表由 owner 在装配期交来（`Frozen::vocab`）。
+const REWORK: &str = "task.rework_created";
+const REWORK_VOCAB: &[EventDecl] = &[EventDecl::with_roles(
+    REWORK,
+    (Entity::Task, Verb::Asserted),
+    &[FactRole::CountsRework],
+)];
 
 /// 开一个任务（载荷 `{ task_id, depends_on, goal }`）。
 fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
@@ -1328,7 +1338,7 @@ fn rework_creates_new_node_instead_of_rollback() {
         .append(
             Event::pending(
                 "rw-a1",
-                EVENT_TASK_REWORK_CREATED,
+                REWORK,
                 Entity::Task,
                 Verb::Asserted,
                 0,
@@ -1368,7 +1378,7 @@ fn rework_creates_new_node_instead_of_rollback() {
         .append(
             Event::pending(
                 "rw-a2",
-                EVENT_TASK_REWORK_CREATED,
+                REWORK,
                 Entity::Task,
                 Verb::Asserted,
                 0,
@@ -1382,7 +1392,7 @@ fn rework_creates_new_node_instead_of_rollback() {
         .append(
             Event::pending(
                 "rw-a3",
-                EVENT_TASK_REWORK_CREATED,
+                REWORK,
                 Entity::Task,
                 Verb::Asserted,
                 0,
@@ -1394,13 +1404,13 @@ fn rework_creates_new_node_instead_of_rollback() {
         .unwrap();
     let snapshot = store.range(crate::event::Seq::new(0));
     assert!(
-        rework_bounded(&snapshot, 3).is_empty(),
+        rework_bounded(REWORK_VOCAB, &snapshot, 3).is_empty(),
         "3 轮对上界 3 恰好合规"
     );
-    let bad = rework_bounded(&snapshot, 2);
+    let bad = rework_bounded(REWORK_VOCAB, &snapshot, 2);
     assert_eq!(bad.len(), 1, "上界 2 时第 3 轮违规：{bad:?}");
     assert!(bad[0].why.contains("超过上界"), "{}", bad[0].why);
-    let bad = rework_bounded(&snapshot, 1);
+    let bad = rework_bounded(REWORK_VOCAB, &snapshot, 1);
     assert_eq!(bad.len(), 2, "上界 1 时第 2、3 轮都违规：{bad:?}");
 }
 
@@ -1461,11 +1471,11 @@ fn n_step_chain_terminates_within_rework_bound() {
         "全链终态"
     );
     assert!(acyclic_deps(&snapshot).is_empty());
-    assert!(rework_bounded(&snapshot, 1).is_empty());
+    assert!(rework_bounded(REWORK_VOCAB, &snapshot, 1).is_empty());
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 

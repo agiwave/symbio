@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::plugin::SessionConfig;
+use symbio_kernel::event::kernel_vocab;
 // 夹具自己开档写一轮事实：`use super::*` 带不过来（生产侧读走存储层句柄）。
 use crate::store::EventWalStore;
 use symbio_core::session_chat;
@@ -480,9 +481,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（S07 §5）"
     );
     assert!(
-        symbio_core::check_all(&read_wal(&p, sid)).is_empty(),
+        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(&read_wal(&p, sid))
+        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid))
     );
 
     // ③ 插话轮收尾：**批空 ⇒ 收**。挂起不收就是永久挂起——任务从此再也不进
@@ -499,9 +500,9 @@ async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
         "恢复之后任务回到就绪集——挂起是临时的"
     );
     assert!(
-        symbio_core::check_all(&read_wal(&p, sid)).is_empty(),
+        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid)).is_empty(),
         "{:?}",
-        symbio_core::check_all(&read_wal(&p, sid))
+        symbio_core::check_all(kernel_vocab(), &read_wal(&p, sid))
     );
     assert_eq!(
         state.inner.read().await.preempt,
@@ -705,9 +706,9 @@ fn interruption_within_reflex_budget_produces_control_event() {
                 "80ms 内必须有 task.controlled"
             );
             assert!(
-                symbio_core::check_all(&snapshot).is_empty(),
+                symbio_core::check_all(kernel_vocab(), &snapshot).is_empty(),
                 "{:?}",
-                symbio_core::check_all(&snapshot)
+                symbio_core::check_all(kernel_vocab(), &snapshot)
             );
         }
         other => panic!("预算内应实质判定，得到 {other:?}"),

@@ -169,6 +169,7 @@ impl TurnRunner {
 
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
+    use crate::control_decl::guard_vocab;
     use symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, AppendError, Budget, Event, EventStore,
         LatencyTier, Seq, SilentDeltas, Store, TokenIssuer, EVENT_ASSISTANT_FALLBACK,
@@ -195,9 +196,9 @@ mod turn_runner_tests {
 
         let snapshot = store.range(Seq::new(0));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
 
         // 成本台账：实测值入账（agent:main 一笔）。
@@ -236,9 +237,9 @@ mod turn_runner_tests {
 
         let snapshot = store.range(Seq::new(0));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
 
         // 兜底率：deep 档 1 turn 1 兜底 = 100%（被看见，不是被藏）。
@@ -280,9 +281,9 @@ mod turn_runner_tests {
 
         let snapshot = store.range(Seq::new(0));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         assert_eq!(snapshot.len(), 24);
 
@@ -410,9 +411,9 @@ mod turn_runner_tests {
         // 投影联动与 N1。
         let snapshot = store.range(Seq::new(0));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value.entries.len(), 4, "两轮 × (问+答)");
@@ -633,9 +634,9 @@ mod turn_runner_tests {
         assert!(!out.fell_back);
         let snapshot = store.range(Seq::new(0));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(view.value.entries[1].text, "你好！", "final 落的是全文");
@@ -929,9 +930,9 @@ mod turn_runner_tests {
             "终止时刻是时间戳"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         assert!(
             unresolved_turns(&snapshot, false).is_empty(),
@@ -1023,9 +1024,9 @@ mod turn_runner_tests {
             view.value.entries
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 
@@ -1069,9 +1070,9 @@ mod turn_runner_tests {
         );
         assert_eq!(output.payload["reasoning_id"], "n-rea", "推理节点身份入格");
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 
@@ -1244,6 +1245,7 @@ mod turn_runner_tests {
 // ── 工具轮（`run_with_tools`）：产物落格 + 结果回灌 + 等待用户停下 ──────────
 
 mod tool_round_tests {
+    use crate::control_decl::guard_vocab;
     use std::sync::{Arc, Mutex};
     use symbio_testkit::trivial_actor_spec;
 
@@ -2599,9 +2601,9 @@ mod tool_round_tests {
             "{snapshot:?}"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
         assert_eq!(
@@ -2806,9 +2808,9 @@ mod tool_round_tests {
             "进展格溯源指向本轮用户格（I2）"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         // C4 口径（D-067）：落过产物格的轮**不再**被判静默中断——工具结果是说给
         // 用户的话，它就是收束。等待轮的**收束格**仍刻意留给恢复幕（进展格不是
@@ -3137,9 +3139,9 @@ mod tool_round_tests {
         assert_eq!(resumed_artifact.payload["tool"], "vdfs_read");
         assert_eq!(resumed_artifact.produced_by, Some(user_seq));
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         assert!(
             unresolved_turns(&snapshot, false).is_empty(),
@@ -3475,9 +3477,9 @@ mod tool_round_tests {
             "收束格不复制中途产出（正文归各次往返，一个事实一个 owner）"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 
@@ -3797,9 +3799,9 @@ mod tool_round_tests {
             last.payload["detail"]
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 
@@ -3916,9 +3918,9 @@ mod tool_round_tests {
         );
         assert_eq!(last.payload["detail"], "step_limit");
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 }
@@ -3933,6 +3935,7 @@ mod tool_round_tests {
 // - **产物上线**：正文经 `sink` 到出口（不上线，收束节点在前端建不起来）。
 
 mod reflex_turn_tests {
+    use crate::control_decl::guard_vocab;
     use std::sync::{Arc, Mutex};
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
@@ -4072,9 +4075,9 @@ mod reflex_turn_tests {
             "产物必须经 sink 上线——不上线，收束节点在前端建不起来"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
         assert!(
             unresolved_turns(&snapshot, false).is_empty(),
@@ -4161,6 +4164,7 @@ mod scope_ceiling_tests {
 // 四条判据，最后一条是**对拍**：拒绝原因里写的能力名必须真的是表里那一个。
 mod denial_fact_tests {
     use super::super::{closure_gate, deny, ClosureKind};
+    use crate::control_decl::guard_vocab;
     use symbio_core::{check_all, unresolved_turns, ActorSpec, EventStore, Scope, Store};
     use symbio_core::{EVENT_AUTHZ_DENIED, EVENT_USER_MESSAGE};
     use symbio_testkit::trivial_actor_spec;
@@ -4248,9 +4252,9 @@ mod denial_fact_tests {
             "原因要说清是谁缺哪一项：{reason}"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "落一条否定事实不得让不变量变红：{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 
@@ -4486,6 +4490,7 @@ mod round_decision_tests {
 // `execute-turn`，那个 `by` 上换的是别的手法（写零格 / 写名单外）。生产动作既不会写零格
 // 也不会写名单外的格 ⇒ 没有这条接缝，两条判据只能挂在口头。
 mod actor_ledger_tests {
+    use crate::control_decl::guard_vocab;
     use std::sync::Arc;
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
@@ -4598,9 +4603,9 @@ mod actor_ledger_tests {
             "空账本收在 no_progress；删掉派发器的守卫会收在 step_limit——那条分支就是这条用例的红"
         );
         assert!(
-            check_all(&snapshot).is_empty(),
+            check_all(guard_vocab(), &snapshot).is_empty(),
             "{:?}",
-            check_all(&snapshot)
+            check_all(guard_vocab(), &snapshot)
         );
     }
 

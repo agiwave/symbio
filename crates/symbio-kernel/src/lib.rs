@@ -34,5 +34,7 @@ pub mod view;
 
 pub use actors::{ActorSpec, Pattern, Scope};
 pub use adapters::LatencyTier;
-pub use event::{Entity, Event, EventDecl, EventEnvelope, Seq, Timestamp, Verb};
+pub use event::{
+    holds_role, Entity, Event, EventDecl, EventEnvelope, FactRole, Seq, Timestamp, Verb,
+};
 pub use projection::Projection;

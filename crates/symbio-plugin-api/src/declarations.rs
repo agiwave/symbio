@@ -34,7 +34,7 @@
 use std::sync::{Arc, OnceLock};
 
 use symbio_core::ring::Gap;
-use symbio_core::{Builder, Entity, Frozen, PluginDeclarations, Verb};
+use symbio_core::{Builder, Entity, EventDecl, Frozen, PluginDeclarations, Verb};
 
 /// 一个 owner 交来的声明表。`make` 是**构造器**而不是值：表里有 `Vec`（执行体绑定
 /// 投影），每次装配都要现取一份；静态切片本身仍是 `'static`，不产生运行期注册通道。
@@ -78,26 +78,42 @@ pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
     for d in submissions {
         builder.declare(d.owner, (d.make)());
     }
+    // 「每一档守卫角色都有人住」由门禁判仓库（CS-007），不在这里判：本函数也会被
+    // **只链接了部分插件**的用例调到（session 的单测里没有 loop 的声明表），
+    // 那种子集装配报红是假红。
     builder.seal()
 }
 
 /// 进程内冻结一次。`OnceLock` 缓存的是**同一个 `Result`**（成功或全部缺口），
 /// 不是可变注册表——`Frozen` 没有 `&mut self` 方法。
+static SEALED: OnceLock<Result<Arc<Frozen>, Vec<Gap>>> = OnceLock::new();
+
+fn seal_once() -> Result<Arc<Frozen>, Vec<Gap>> {
+    let sealed = assemble_declarations();
+    if let Err(gaps) = &sealed {
+        tracing::error!(
+            target: "symbio::declarations",
+            gaps = ?gaps,
+            "声明表装载失败：写闸与义务环将拒绝使用未冻结的词汇"
+        );
+    }
+    sealed
+}
+
 pub fn sealed_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
-    static SEALED: OnceLock<Result<Arc<Frozen>, Vec<Gap>>> = OnceLock::new();
+    SEALED.get_or_init(seal_once).clone()
+}
+
+/// 判据的**词汇面**（`&[EventDecl]`）：core 的守卫问「这条名字扮演什么角色」时读它。
+///
+/// 返回 `'static` 是因为表住在进程冻结里；冻结失败 ⇒ `None`，调用方回退内核表
+/// （迁移期口径，DE-024 D-199 / D-203）。
+pub fn declared_vocab() -> Option<&'static [EventDecl]> {
     SEALED
-        .get_or_init(|| {
-            let sealed = assemble_declarations();
-            if let Err(gaps) = &sealed {
-                tracing::error!(
-                    target: "symbio::declarations",
-                    gaps = ?gaps,
-                    "声明表装载失败：写闸与义务环将拒绝使用未冻结的词汇"
-                );
-            }
-            sealed
-        })
-        .clone()
+        .get_or_init(seal_once)
+        .as_ref()
+        .ok()
+        .map(|frozen| frozen.events())
 }
 
 /// 这个名字的格位：先问冻结表，未命中返回 `None`（迁移期由写闸回退 `CELLS`）。
@@ -105,9 +121,9 @@ pub fn sealed_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
 /// 冻结失败同样返回 `None`——调用方要么回退内核表（已知名字），要么按「网格之外」
 /// 拒绝新名字（fail-closed）。这里**不**把失败降级成 `CELLS` 的静默通过。
 pub fn declared_event_cell(name: &str) -> Option<(Entity, Verb)> {
-    sealed_declarations()
-        .ok()
-        .and_then(|frozen| frozen.event_cell(name))
+    declared_vocab()
+        .and_then(|vocab| vocab.iter().find(|e| e.name == name))
+        .map(|e| e.cell)
 }
 
 #[cfg(test)]

@@ -14,8 +14,8 @@
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
  * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里插件 id 字面量数只许降 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179） |
- * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；三批迁出之后它剩下的不是待办存量，而是**有据的内核词汇**——逐条的据由 CS-006 判 |
- * | CS-006 | —— | 每条内核业务事件名都要有消费方证据：≥2 个 crate 生产消费，**或** core 生产代码读它 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是 D-201 判过该迁出的形状。这条把判据逐名落到代码，让「留在内核」变成一个需要证据的状态而不是默认状态 |
+ * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
+ * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -252,10 +252,11 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  * - `kernelEvents`：内核 `event/mod.rs` 里**业务事件**常量数（值是点分名、且不是协议五格）；
  * - `cellsRows`：`event/grid.rs` 的 `CELLS` 里业务行数（不含协议五格）。
  *
- * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的目标不是零：core 的
- * 判据与投影按名字读事实（读写同源，D-197），只要那条读者还在 core，名字就还在内核。
- * 三批迁出之后这两格到了一条**有据的下界**——剩余每一条都经 CS-006 核过消费方分布，
- * 不再欠着「待迁」这笔账（判据见 DE-024 D-201 / D-202）。
+ * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的**目标是零**（DE-024 D-203
+ * 裁决三）：内核只该留协议五格，其余每一条业务名字都该随它的 owner 声明。眼下还没归零，
+ * 是因为 core 仍有一条按名字读事实的投影/判据留在原地——那条读者是**待迁存量**，不是
+ * 这条名字的归属证据（把「守卫要读」当成「名字该住内核」的裁决已被 D-203 撤回：守卫读的是
+ * 格位与角色，词汇是数据，随 owner 交来）。逐条名字的出口见 DE-024 的 D-203 迁移路线。
  *
  * - **P1c 首批迁出**（2026-10-27）：`session.config` / `turn.stage` / `authz.granted` /
  *   `memory.recalled` / `task.ready`（loop）与 `system.triggered` / `system.health`
@@ -269,8 +270,13 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  * - **P1c 第三批迁出**（同日）：`recall` 投影（连同 `RecallView` / `RecallEntry` 与排序内核
  *   `recall_score.rs`）下沉 `plugins/loop`——它的读侧全在本插件。`memory.consolidated` /
  *   `memory.forgotten` 自此只有 loop 读，两条内核常量与两行 `CELLS` 同批退役
- *   ⇒ 32/31 → 30/29。`memory.encoded` **留内核**：`plugins/session` 的 `stats` 是它的第二个
- *   生产读方，两个插件同时消费的名字不能被任一插件独占（E-009，判据见 DE-024 D-201）。
+ *   ⇒ 32/31 → 30/29。`memory.encoded` 当时留内核：`plugins/session` 的 `stats` 是它的第二个
+ *   生产读方，两个插件同时消费的名字不能被任一插件独占（E-009）——它的出口是**共享词汇表**
+ *   （D-203 裁决三路线③），不是继续住在内核。
+ *
+ * - **D-203 首批迁出**（同日）：core 的终止性判据 `rework_bounded` 改读 `CountsRework`
+ *   角色之后，`task.rework_created` 的唯一生产消费方只剩 `plugins/loop`（CS-006 逐名点出）
+ *   ⇒ 名字、`EventDecl` 行与 `CELLS` 行同批归 loop ⇒ 30/29 → 29/28。
  *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
@@ -280,7 +286,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 30, cellsRows: 29 }
+  : { kernelEvents: 29, cellsRows: 28 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -709,15 +715,18 @@ if (vocabPresent.length === 0) {
   }
 }
 
-// ── CS-006 内核业务事件名的消费方证据（DE-024 D-202）──
+// ── CS-006 内核业务事件名的消费方分布（DE-024 D-202 / D-203）──
 //
-// CS-005 数的是条数，条数本身说不出「凭什么还留在这里」。这一格补上那个缺口：
-// 逐条名字核**谁在读**，留在内核只有两种有据的形态——
-//  ① ≥2 个 crate 的生产消费方：名字被一个以上插件写或读，独占它就得让别的插件
-//     跨墙引用兄弟插件（E-009），所以它只能是内核词汇；
-//  ② core 生产代码读它：读写同源（D-197），读者的分布随那条投影/判据，不是名字自己。
-// 落进第三种（恰好一个消费方且 core 不读）就是**待迁存量**：它该随那个 owner 的
-// `EventDecl` 走，本批把它判红，而不是让它躲在 CS-005 的数字里等下一次有人想起来。
+// CS-005 数的是条数，条数本身说不出「这一条此刻在谁手里」。这一格补上那个缺口：
+// 逐条名字核**谁在读**，两种分布——
+//  ① ≥2 个 crate 的生产消费方：名字被一个以上插件写或读。它**不能**被单一 owner 独占
+//     （独占就逼别的插件跨墙引用兄弟插件，E-009），所以出口是一条共享词汇表，
+//     不是继续住内核（D-203 裁决三 路线③）；
+//  ② core 生产代码读它：这条**不是**归属证据，是**待迁存量**——名字该随那条读者
+//     一起迁出（读写同源，D-197 说的是「读者与名字同处」，不是「读者住内核」）。
+// 第三种（恰好一个消费方且 core 不读）就是当批可迁的形状：它该随那个 owner 的
+// `EventDecl` 走，本条把它判红。①② 两类都不判红，但只有①是有出口的现状，②是欠账——
+// 逐条的欠账账目见 DE-024 D-203 的迁移路线，CS-005 的归零就是它还账的方式。
 const CONSUMER_CRATE_PREFIXES = ['symbio-plugin-', 'symbio-provider-']
 // `symbio-plugin-api` 是宿主↔插件的共享协议 crate，不是能力持有者：它引用一个名字
 // 不构成「某个插件读它」的证据。
@@ -787,7 +796,7 @@ if (vocabApplicable && consumerTexts.length > 0) {
       ev.consumers.length === 1
         ? `「${ev.name}」的唯一生产消费方是 ${ev.consumers[0]}，core 已不再读它 —— ` +
           '这条名字该随那个 owner 的 `EventDecl` 走（内核常量与 `CELLS` 行同批退役），' +
-          '留在内核就是让 CS-005 的数字替它遮掩（DE-024 D-201 / D-202）'
+          '躲在 CS-005 的数字里就等于把待迁存量说成内核词汇（DE-024 D-201 / D-202 / D-203）'
         : `「${ev.name}」在 core 与插件的生产代码里都没有读者 —— ` +
           '内核词汇表里躺着一行没人读的名字：要么删，要么说清它守的是哪条协议',
     )
@@ -826,7 +835,7 @@ if (errors.length === 0) {
     const vocabLine = Object.keys(VOCAB_BASELINE)
       .map((k) => `${k} ${vocabCounts[k]}/${VOCAB_BASELINE[k]}`)
       .join(' · ')
-    ruleLine(true, 'CS-005', `事件词汇棘轮：${vocabLine}（只许降；每条凭什么留在内核由 CS-006 逐条判）`)
+    ruleLine(true, 'CS-005', `事件词汇棘轮：${vocabLine}（只许降，目标是零；逐条分布见 CS-006）`)
     const underVocab = Object.keys(VOCAB_BASELINE).filter(
       (k) => vocabCounts[k] < VOCAB_BASELINE[k],
     )
@@ -846,8 +855,8 @@ if (errors.length === 0) {
     ruleLine(
       true,
       'CS-006',
-      `内核业务事件名的消费方证据：${vocabEvidence.length} 条全部有据` +
-        `（≥2 crate 消费 ${byPlugin.length} · core 读者 ${byCore.length}）——` +
+      `内核业务事件名的消费方分布：${vocabEvidence.length} 条都不在「单一消费方且 core 不读」这一形态` +
+        `（≥2 crate 消费 ${byPlugin.length}：要一条共享词汇表才迁得走 · core 读者 ${byCore.length}：待迁存量，随各自读者一起迁出）——` +
         '新名字进内核词汇表没有通路，只能由 owner 声明',
     )
     if (VERBOSE) {

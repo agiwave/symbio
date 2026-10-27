@@ -18,6 +18,7 @@
 //!   的那条必须对巩固可见）——那一层端到端看不见。
 
 use super::{record_derived, record_elimination, record_learning};
+use crate::control_decl::guard_vocab;
 use symbio_core::{
     check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
@@ -102,7 +103,11 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
 
     let snap = store.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     let opened = snap
         .iter()
@@ -180,7 +185,11 @@ fn the_commitment_counterparty_is_data_not_a_constant() {
     );
 
     let snap = store.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     let opened = snap
         .iter()
@@ -228,7 +237,11 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     );
 
     let snap = store.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     let broken = snap
         .iter()
@@ -287,7 +300,11 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     );
 
     let snap = store.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
     let brk = snap
         .iter()
         .find(|e| e.entity == Entity::Control && e.verb == Verb::Opened)
@@ -320,7 +337,11 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &[],
     );
     let snap = quiet.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
     assert!(
         !snap.iter().any(|e| e.entity == Entity::Control),
         "没有熔断理由 ⇒ 不产生任何事件（S09 §6 验收 1）"
@@ -433,7 +454,11 @@ fn record_learning_wires_all_three_memory_steps() {
         fifth_user.seq().map(|s| s.value()),
         "溯源锚 = 触发检索的那格用户发言"
     );
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 }
 
 // ── 淘汰回路（S13 §3，）：轮末声誉裁决 ──────────────────────────────
@@ -474,7 +499,11 @@ fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
     record_elimination(&store, 0, user_seq);
 
     let snap = store.range(Seq::new(0));
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
     let verdict = snap
         .iter()
         .find(|e| e.kind == EVENT_VERDICT_ASSERTED)

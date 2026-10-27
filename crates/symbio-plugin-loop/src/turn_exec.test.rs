@@ -11,6 +11,7 @@
 //!    循环收尾入格。中止与失败的差别在**类型上**可见，不靠错误
 //!    文本猜。
 
+use crate::control_decl::guard_vocab;
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -734,7 +735,11 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + final 格：{snap:?}");
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
@@ -783,7 +788,11 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + fallback 格：{snap:?}");
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FALLBACK);
     let why = snap[1].payload["detail"].as_str().unwrap_or_default();
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
@@ -833,7 +842,11 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
         snap[1].payload["terminated"]["at"].as_i64().is_some(),
         "终止时刻入格"
     );
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
 }
 
 /// 事实完整性（判据）：**中止后那半句话还在**——模型说到一半（"让我想想
@@ -901,7 +914,11 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
         "半截思考入格（reasoning 在网格里查得到）"
     );
     assert_eq!(cell.payload["answer_id"], output.payload["answer_id"]);
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
 }
 
 /// 工具轮：一次工具调用 ⇒ 产物落格 + 中途正文定格 + 工具节点成形 +
@@ -1060,7 +1077,11 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     let all = fx.facts.range(Seq::new(0));
     let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 3, "用户格 + 产物格 + final 格：{snap:?}");
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[1].kind, symbio_core::EVENT_ARTIFACT_ADDED);
     assert_eq!(snap[1].entity, Entity::Artifact);
@@ -1423,7 +1444,11 @@ async fn full_turn_lands_derived_commitment_facts() {
         events.iter().any(|e| e.kind == EVENT_COMMITMENT_BROKEN),
         "无宿主 ⇒ 委托失败 ⇒ 违约必须可观测（S08 §5）：{kinds:?}"
     );
-    assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
+    assert!(
+        check_all(guard_vocab(), &events).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &events)
+    );
 }
 
 // ==================== 快路（S11）的收束半边 ====================
@@ -1527,7 +1552,11 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         "命中后耗时必须在反射档预算内（S11 §6.2：命中显著低于未命中）：{}",
         snap[1].cost_ms
     );
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
 }
 
 /// 反向（边界）：本幕是**唤醒幕** ⇒ `policy.reflex` 不开账，技能不得顶掉刚被
@@ -2126,7 +2155,11 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
         1,
         "续写不重开用户格"
     );
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
 }
 
 /// **轮内路**：等待轮之上跑过另一个执行轮，压缩寄存在它自己的执行口落格并
@@ -2199,7 +2232,11 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         Some(user_seq),
         "收束记在等待中的那一轮、溯源仍是归档段里的用户格（I2）"
     );
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(guard_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &all)
+    );
 }
 
 // ==================== 判据 12 的生产形状（口径 ①）====================

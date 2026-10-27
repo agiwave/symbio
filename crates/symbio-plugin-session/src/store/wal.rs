@@ -73,9 +73,71 @@ use std::sync::{Arc, RwLock};
 
 use crate::paths;
 use symbio_core::{
-    closes_turn, event_cell, is_turn_final, is_turn_open, provenance_violation, AppendError, Event,
+    closes_turn, is_turn_final, is_turn_open, provenance_violation, AppendError, Event, EventDecl,
     EventEnvelope as _, Frozen, Seq, Store, StoreInvariant,
 };
+
+/// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
+///
+/// 三份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
+/// `submit_declarations!` 交来的事件行）→ 内核 `CELLS`（迁移期最后一臂，D-199）。
+/// 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；内核表只认识
+/// 旧名字。格位与角色**取自同一张表**——不出现「格位在冻结表、角色在内核表」的两侧各读一半。
+struct Vocab<'a> {
+    instance: Option<&'a [EventDecl]>,
+    process: Option<&'static [EventDecl]>,
+}
+
+/// 回退到内核表只出声一次：名字表归零后这条臂随之删除（D-203 裁决三），
+/// 在那之前它是一次**有名有姓**的降级，不是静默通过。
+static KERNEL_FALLBACK_WARNED: std::sync::Once = std::sync::Once::new();
+
+impl<'a> Vocab<'a> {
+    fn of(declarations: Option<&'a Frozen>) -> Self {
+        Vocab {
+            instance: declarations.map(Frozen::events),
+            process: symbio_plugin_api::declared_vocab(),
+        }
+    }
+
+    /// 第一个认识 `kind` 的表；三份都不认识 ⇒ `None`（网格之外）。
+    fn table_for(&self, kind: &str) -> Option<&'a [EventDecl]> {
+        let known = |table: &[EventDecl]| table.iter().any(|e| e.name == kind);
+        if let Some(table) = self.instance.filter(|t| known(t)) {
+            return Some(table);
+        }
+        if let Some(table) = self.process.filter(|t| known(t)) {
+            return Some(table);
+        }
+        let kernel: &'a [EventDecl] = symbio_kernel::event::kernel_vocab();
+        if known(kernel) {
+            KERNEL_FALLBACK_WARNED.call_once(|| {
+                symbio_core::plugin_warn!(
+                    "session",
+                    "[vocab] 事件名 `{kind}` 只在内核 `CELLS` 上有登记——owner 的声明表\
+                     没有它（迁移期回退，DE-024 D-199 / D-203）"
+                );
+            });
+            return Some(kernel);
+        }
+        None
+    }
+
+    /// 这个名字落在哪一格（与迁移前的三级 `.or_else` 同序、同结论）。
+    fn cell(&self, kind: &str) -> Option<(symbio_core::Entity, symbio_core::Verb)> {
+        self.table_for(kind)
+            .and_then(|table| table.iter().find(|e| e.name == kind))
+            .map(|e| e.cell)
+    }
+
+    /// 定稿发言（I1「每轮至多一条 final」的口径）。
+    fn is_final(&self, e: &Event) -> bool {
+        match self.table_for(&e.kind) {
+            Some(table) => is_turn_final(table, e),
+            None => false,
+        }
+    }
+}
 
 /// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
 ///
@@ -134,22 +196,22 @@ struct WalInner {
 
 impl WalInner {
     /// 把一条事件记进两份索引（重放与入库共用）。
-    fn note(&mut self, event: &Event) {
+    fn note(&mut self, vocab: &Vocab, event: &Event) {
         if is_turn_open(event) {
             self.opened.insert(event.turn);
         }
         if closes_turn(event) {
             self.closed.insert(event.turn);
         }
-        if is_turn_final(event) {
+        if vocab.is_final(event) {
             self.finals.insert(event.turn);
         }
     }
 
     /// 把一段事件（重放结果 / 归档段）整段记进索引。幂等。
-    fn note_all<'a>(&mut self, events: impl IntoIterator<Item = &'a Event>) {
+    fn note_all<'e>(&mut self, vocab: &Vocab, events: impl IntoIterator<Item = &'e Event>) {
         for e in events {
-            self.note(e);
+            self.note(vocab, e);
         }
     }
 
@@ -183,19 +245,13 @@ impl WalInner {
     /// I3 的降级不是「静默放过」：它在写入口当场 `plugin_warn!` 出声，读侧
     /// `check_all` 的 `unresolved_turns` 会把同一处
     /// 缺口报成违规——两条信号指向同一个事实，不存在「日志里有、清单里没有」。
-    fn gate(&mut self, event: &Event, declarations: Option<&Frozen>) -> Result<(), AppendError> {
+    fn gate(&mut self, event: &Event, vocab: &Vocab) -> Result<(), AppendError> {
         // **先判名字与格位是否同源，再判事实之间的关系**：I1 / I2 / I3 的判据全部按
         // `(entity, verb, kind)` 取事实（`is_turn_open` 认的就是这一格）。坐标本身错位时，
         // 后面每条判定的输入都是错位的——所以这一臂排在最前，且它不需要任何索引。
+        // 三份词汇表的取舍顺序见 [`Vocab`]（DE-024 D-199 / D-203）。
         let given = (event.entity, event.verb);
-        // 先问**本实例挂的装配表**，再问进程装配表（插件经 `submit_declarations!`
-        // 交来的事件行），未命中再回退内核 `CELLS`（迁移期，见 DE-024 D-199）。
-        // 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；
-        // 内核表只认识旧名字。
-        let declared = declarations
-            .and_then(|f| f.event_cell(&event.kind))
-            .or_else(|| symbio_plugin_api::declared_event_cell(&event.kind))
-            .or_else(|| event_cell(&event.kind));
+        let declared = vocab.cell(&event.kind);
         if declared != Some(given) {
             return Err(AppendError::OffGrid {
                 event_id: event.event_id.clone(),
@@ -211,7 +267,7 @@ impl WalInner {
                 why: v.why,
             });
         }
-        if is_turn_final(event) && self.finals.contains(&event.turn) {
+        if vocab.is_final(event) && self.finals.contains(&event.turn) {
             return Err(AppendError::Invariant {
                 invariant: StoreInvariant::I1,
                 event_id: event.event_id.clone(),
@@ -227,7 +283,7 @@ impl WalInner {
                     invariant: StoreInvariant::I1,
                     event_id: event.event_id.clone(),
                     why: format!(
-                        "turn {} 已有开轮事件，又出现一条（I1 单通道：每轮至多 1 条 user.message）",
+                        "turn {} 已有开轮事件，又出现一条（I1 单通道：每轮至多 1 条开轮）",
                         event.turn
                     ),
                 });
@@ -398,6 +454,9 @@ impl WalStore {
             .max(events.len() as u64);
         // 闸门索引**从重放结果重建**：重启不是「闸门失忆」的理由——同一份 WAL
         // 重开后，同轮第二条 final 仍要被拒（见 `gate_index_is_rebuilt_from_the_wal_on_reopen`）。
+        // 此刻还没挂实例表（`with_declarations` 在 `build` 之后），词汇面走进程装配表 →
+        // 内核表这两臂；角色与格位在两份表上同源，重建口径与后续写闸因此一致。
+        let vocab = Vocab::of(None::<&Frozen>);
         let opened = events
             .iter()
             .filter(|e| is_turn_open(e))
@@ -410,7 +469,7 @@ impl WalStore {
             .collect();
         let finals = events
             .iter()
-            .filter(|e| is_turn_final(e))
+            .filter(|e| vocab.is_final(e))
             .map(|e| e.turn)
             .collect();
         WalStore {
@@ -619,7 +678,11 @@ impl WalStore {
         *self.archived.write().expect("WalStore 锁中毒") = Some(all.clone());
         // 归档段也是历史：索引必须认它（否则压缩之后「这个轮开过没有」会失忆）。
         // 归档**只增不改**，吸收是幂等的；且本函数不持 `inner` 锁，不会自锁。
-        self.inner.write().expect("WalStore 锁中毒").note_all(&all);
+        let vocab = Vocab::of(self.declarations.as_deref());
+        self.inner
+            .write()
+            .expect("WalStore 锁中毒")
+            .note_all(&vocab, &all);
         all
     }
 
@@ -640,6 +703,7 @@ impl Store for WalStore {
     type Event = symbio_core::Event;
 
     fn append(&self, mut event: Self::Event) -> Result<Seq, AppendError> {
+        let vocab = Vocab::of(self.declarations.as_deref());
         let mut inner = self.inner.write().expect("WalStore 锁中毒");
         // 单写者闸门（跨进程）：非写者一律拒写。这是 I1 在并发下的硬边界——
         // 在此之前这里只有进程内 RwLock，第二个进程会静默地写出重复 seq。
@@ -653,7 +717,7 @@ impl Store for WalStore {
         // （用户输入 / 工具结果 / 收尾落格）没有一条能绕过它。位置在幂等去重之后
         // （同 id 重放仍按 `Duplicate` 回答，不被闸门改判）、赋号与落盘之前
         // （被拒的事件不会消耗 seq，也不会在盘上留下半条）。
-        inner.gate(&event, self.declarations.as_deref())?;
+        inner.gate(&event, &vocab)?;
         // 先落盘、再提交内存：盘上是唯一权威（崩溃 ⇒ 已落的还在，没落的不算）。
         // 写盘失败 = 不可继续的存储层灾难，直接 panic（不吞错）——静默返回会让
         // 调用方误以为事件已提交，比崩溃更糟的静默失效。
@@ -679,7 +743,7 @@ impl Store for WalStore {
             .and_then(|_| file.sync_data())
             .expect("WAL 写入失败（存储层灾难，不可静默）");
         inner.ids.insert(event.event_id().to_string());
-        inner.note(&event);
+        inner.note(&vocab, &event);
         inner.events.push(event);
         inner.head += 1;
         Ok(seq)

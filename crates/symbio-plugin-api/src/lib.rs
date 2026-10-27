@@ -15,7 +15,8 @@ pub mod hooks;
 pub mod routes;
 
 pub use declarations::{
-    assemble_declarations, declared_event_cell, sealed_declarations, DeclarationsDecl,
+    assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations,
+    DeclarationsDecl,
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;

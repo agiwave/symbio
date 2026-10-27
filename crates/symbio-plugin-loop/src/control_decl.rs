@@ -9,8 +9,8 @@
 //! 装载机制的所在。
 
 use symbio_core::{
-    Entity, Event, EventDecl, FactDecl, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_TASK_ASSIGNED,
+    Entity, Event, EventDecl, FactDecl, FactRole, Verb, ViewDecl, EVENT_FAILED, EVENT_REQUEST,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_TASK_ASSIGNED, EVENT_TURN_DISPATCH,
 };
 
 // ── 本插件持有的事件名（DE-024 D-197 / D-201）──
@@ -22,6 +22,13 @@ pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 pub(crate) const EVENT_TASK_READY: &str = "task.ready";
+/// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。落在
+/// `task × asserted`（返工本身是一次质量判定的事实）。
+///
+/// 写方 [`crate::task_events`]，读方是 core 的终止性判据——它经 `CountsRework` 角色
+/// 取这一格，不抄名字（DE-024 D-203），所以这个名字的两个端面都在本插件，随本插件
+/// 声明（D-197 / D-201）。
+pub(crate) const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
 ///
 /// 写方是 `memory_events::consolidate`（过 `accept` 闸门才落格），读方是 [`crate::recall`]
@@ -35,78 +42,72 @@ pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
 /// 名字判等，最后一批业务事件迁出后 `CELLS` 只剩协议五格。
 pub(crate) const EVENTS: &[EventDecl] = &[
-    EventDecl {
-        name: "chat.assistant.final",
-        cell: (Entity::Turn, Verb::Closed),
-    },
-    EventDecl {
-        name: "chat.assistant.fallback",
-        cell: (Entity::Turn, Verb::Closed),
-    },
-    EventDecl {
-        name: "chat.assistant.reported",
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: "chat.assistant.opening",
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: "chat.assistant.progress",
-        cell: (Entity::Turn, Verb::Progressed),
-    },
-    EventDecl {
-        name: EVENT_TURN_STAGE,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: "user.message",
-        cell: (Entity::Turn, Verb::Opened),
-    },
-    EventDecl {
-        name: "turn.supplemented",
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_SESSION_CONFIG,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: "authz.denied",
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_AUTHZ_GRANTED,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
+    // 定稿发言：收束格上两个名字（定稿 / 兜底）里被 `final_unique_per_turn` 数的那一个。
+    // 角色替名字进判据（DE-024 D-203）——删掉这行不会让守卫静默失能，装配口报
+    // `Gap::UnmannedRole`。
+    EventDecl::with_roles(
+        "chat.assistant.final",
+        (Entity::Turn, Verb::Closed),
+        &[FactRole::FinalizesTurn],
+    ),
+    EventDecl::new("chat.assistant.fallback", (Entity::Turn, Verb::Closed)),
+    EventDecl::new("chat.assistant.reported", (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("chat.assistant.opening", (Entity::Turn, Verb::Asserted)),
+    EventDecl::new("chat.assistant.progress", (Entity::Turn, Verb::Progressed)),
+    EventDecl::new(EVENT_TURN_STAGE, (Entity::Turn, Verb::Asserted)),
+    // 开轮：格位本身答得出「这是开轮」；它同时是**历史切片**的预算声明来源
+    // （派发档落格之前的形态），所以带 `declares_budget`。
+    EventDecl::with_roles(
+        "user.message",
+        (Entity::Turn, Verb::Opened),
+        &[FactRole::DeclaresBudget],
+    ),
+    EventDecl::new("turn.supplemented", (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Turn, Verb::Asserted)),
+    // 本轮派发档：现行预算声明（`turn × asserted` 上只有它带这一档角色）。
+    EventDecl::with_roles(
+        EVENT_TURN_DISPATCH,
+        (Entity::Turn, Verb::Asserted),
+        &[FactRole::DeclaresBudget],
+    ),
+    // 被拒不产生收束格，但它回答「这一轮为什么停」——C6 的停机角色。
+    EventDecl::with_roles(
+        "authz.denied",
+        (Entity::Turn, Verb::Asserted),
+        &[FactRole::StopsTurn],
+    ),
+    EventDecl::new(EVENT_AUTHZ_GRANTED, (Entity::Turn, Verb::Asserted)),
     // 记忆找回（S5）：行表与事实表已经在用这个名字。
-    EventDecl {
-        name: EVENT_MEMORY_RECALLED,
-        cell: (Entity::Memory, Verb::Asserted),
-    },
+    EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
     // 巩固与遗忘（S5 的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
     // 都在本插件，随 D-201 从内核 `CELLS` 迁出。`memory.encoded` **不在这里**——
     // `plugins/session` 的 `stats` 也读它，两个插件同时消费的名字不能被一个插件独占。
-    EventDecl {
-        name: EVENT_MEMORY_CONSOLIDATED,
-        cell: (Entity::Memory, Verb::Progressed),
-    },
-    EventDecl {
-        name: EVENT_MEMORY_FORGOTTEN,
-        cell: (Entity::Memory, Verb::Closed),
-    },
+    EventDecl::new(
+        EVENT_MEMORY_CONSOLIDATED,
+        (Entity::Memory, Verb::Progressed),
+    ),
+    EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)),
     // 调度者写的两格（D-139）：此前只有内核 `CELLS` 认识 `task.ready`（还没有表行）、
     // 完全不认识 `task.assigned`，落格只能被写闸拒掉。名字随 owner 声明之后，
     // 这两个事实才真正可入库。
-    EventDecl {
-        name: EVENT_TASK_READY,
-        cell: (Entity::Task, Verb::Progressed),
-    },
-    EventDecl {
-        name: EVENT_TASK_ASSIGNED,
-        cell: (Entity::Task, Verb::Asserted),
-    },
+    EventDecl::new(EVENT_TASK_READY, (Entity::Task, Verb::Progressed)),
+    EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)),
+    // 返工轮：终止前提 2（`rework_bounded`）的计数对象。写方 `task_events`，读方
+    // core 判据经角色取它（DE-024 D-203）。
+    EventDecl::with_roles(
+        EVENT_TASK_REWORK_CREATED,
+        (Entity::Task, Verb::Asserted),
+        &[FactRole::CountsRework],
+    ),
 ];
+
+/// 判据的**词汇面**（DE-024 D-203）：本插件调用 core 守卫时交出去的那张表。
+///
+/// 取进程装配表——它含本插件 `EVENTS` 的角色声明，也含别的 owner 将来声明的停机 /
+/// 定稿角色；本二进制没装出表时回退内核 `CELLS`（迁移期口径，D-199）。
+pub(crate) fn guard_vocab() -> &'static [EventDecl] {
+    symbio_plugin_api::declared_vocab().unwrap_or_else(symbio_kernel::event::kernel_vocab)
+}
 
 pub(crate) const FACTS: &[FactDecl] = &[
     // 收束格：字段来自 `turn_runner::produced_payload` + 的 `status` / `reason` / `terminated`。

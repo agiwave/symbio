@@ -189,8 +189,7 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 #[allow(unused_imports)]
 pub use event::{
     EVENT_CONTROL_OPENED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
-    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根

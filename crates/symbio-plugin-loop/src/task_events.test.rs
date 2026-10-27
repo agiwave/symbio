@@ -3,15 +3,16 @@
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
 use super::{prompt_section, write, ScheduleDecider};
+use crate::control_decl::guard_vocab;
 use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
     actor_can_assign_work, check_all, readyset, Budget, Entity, Event, EventStore, Pattern, Scope,
     Seq, Store, Verb, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
 };
 
-use crate::control_decl::EVENT_TASK_READY;
+use crate::control_decl::{EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED};
 use symbio_testkit::trivial_actor_spec;
 
 fn item(id: &str, goal: &str, deps: &[&str], status: TaskStatus) -> TaskItem {
@@ -130,9 +131,9 @@ fn declaration_lands_opened_progress_and_asserted() {
     );
     assert!(opened.produced_by.is_some(), "断言类事件无溯源即违规（I2）");
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(guard_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(guard_vocab(), &snapshot)
     );
 }
 
@@ -181,7 +182,7 @@ fn a_dependency_cycle_is_flagged_and_yields_an_empty_readyset() {
     );
 
     let snapshot = store.range(Seq::new(0));
-    let violations = check_all(&snapshot);
+    let violations = check_all(guard_vocab(), &snapshot);
     assert!(
         violations.iter().any(|v| v.why.contains("依赖环")),
         "成环必须被断言抓到：{violations:?}"
@@ -208,7 +209,7 @@ fn a_dangling_dependency_is_flagged() {
         )])],
     );
 
-    let violations = check_all(&store.range(Seq::new(0)));
+    let violations = check_all(guard_vocab(), &store.range(Seq::new(0)));
     assert!(
         violations
             .iter()
@@ -318,9 +319,9 @@ fn reopening_a_completed_task_opens_a_rework_node() {
         "返工节点继承依赖"
     );
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(guard_vocab(), &snapshot).is_empty(),
         "一轮返工在界内（`MAX_REWORK_ROUNDS` = 3）：{:?}",
-        check_all(&snapshot)
+        check_all(guard_vocab(), &snapshot)
     );
 }
 
@@ -357,7 +358,7 @@ fn exceeding_the_rework_bound_is_flagged() {
             .count(),
         4
     );
-    let violations = check_all(&snapshot);
+    let violations = check_all(guard_vocab(), &snapshot);
     assert!(
         violations.iter().any(|v| v.why.contains("返工")),
         "返工越过上界必须被断言抓到：{violations:?}"

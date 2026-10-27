@@ -451,6 +451,13 @@ pub enum Gap {
         row: &'static str,
         by: &'static str,
     },
+    /// 一档守卫角色没有任何声明持有（DE-024 D-203）。
+    ///
+    /// 判据读的是角色，角色来自 owner 的 `EventDecl.roles`——owner 删掉它不会报错，
+    /// 只会让那道守卫**从拒绝变成看不见**。装配口因此钉住「每一档都有人住」。
+    UnmannedRole {
+        role: &'static str,
+    },
     OrphanActor {
         actor: &'static str,
     },

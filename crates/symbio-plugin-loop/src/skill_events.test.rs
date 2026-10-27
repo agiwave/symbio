@@ -3,6 +3,7 @@
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 连投影都不跑）。
 
 use super::{compile, route, take_match, SkillCompiler, SkillLlmHit, SkillRoute, SkillRouter};
+use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
 use symbio_core::{
     calibration, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
@@ -169,7 +170,11 @@ fn compile_writes_a_sourced_skill_exactly_once_per_trigger() {
         .and_then(|v| v.as_str())
         .expect("skill_id");
     assert_eq!(skill_id.len(), 16, "skill_id = trigger 的稳定 64 位哈希");
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        check_all(guard_vocab(), &snap).is_empty(),
+        "{:?}",
+        check_all(guard_vocab(), &snap)
+    );
 
     // 反向：同 trigger（含前后空白）不再编译——否则技能随收束次数无界增长。
     let before = snap.len();
@@ -538,8 +543,8 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     );
     // 全链路不变量仍绿。
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(guard_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(guard_vocab(), &snapshot)
     );
 }

@@ -422,7 +422,11 @@ pub(crate) fn read(
         .map_err(|e| PluginError::InternalError(format!("校准序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
-    let invariants = serde_json::to_value(check_all(&snapshot))
+    // 不变量清单的词汇面（DE-024 D-203）：判据问「这个名字扮演什么角色」，答案取自
+    // owner 交来的装配表；本二进制没装出表时回退内核表（迁移期口径，D-199）。
+    let vocab =
+        symbio_plugin_api::declared_vocab().unwrap_or_else(symbio_kernel::event::kernel_vocab);
+    let invariants = serde_json::to_value(check_all(vocab, &snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
     // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。

@@ -1057,7 +1057,7 @@ fn ends_the_drive(e: &Event, turn: u64) -> bool {
     if e.turn != turn {
         return false;
     }
-    if is_stop_fact(e) {
+    if is_stop_fact(super::control_decl::guard_vocab(), e) {
         return e.kind != EVENT_AUTHZ_DENIED || e.payload.get("port").is_none();
     }
     e.kind == EVENT_ASSISTANT_PROGRESS

@@ -14,8 +14,11 @@
 //! `crates/symbio-kernel/src/lib.rs`，这里不再有判定范围。
 
 // ── Event 信封与 Entity×Verb（DE-023 §5） ──
-// `EventDecl`（名字 → 格位）随事件词汇住 `event`：它答的是网格登记，不是载荷形状。
-pub use super::event::{Entity, Event, EventDecl, EventEnvelope, Seq, Verb};
+// `EventDecl`（名字 → 格位 + 判据角色）随事件词汇住 `event`：它答的是网格登记与
+// 角色，不是载荷形状（DE-024 D-203）。
+// 角色问句 `event::holds_role` 不出根：判据的读者全在 core 内（`invariants`），
+// 插件侧的同一问句走 `Frozen::holds_role`（装配表方法），不需要自由函数。
+pub use super::event::{Entity, Event, EventDecl, EventEnvelope, FactRole, Seq, Verb};
 
 // ── 主体规格五字段与模式闭集 ──
 // 数据面住内核 crate；本机的授权读法（平凡值 / 模式派生 / 能力位）是 core 的

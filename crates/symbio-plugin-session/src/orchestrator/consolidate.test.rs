@@ -5,6 +5,7 @@
 //! 交过来。那一半由 `loop/turn_exec.test.rs` 钉住。
 
 use std::sync::Arc;
+use symbio_kernel::event::kernel_vocab;
 
 use super::*;
 use crate::chat_session::PersistentChatSession;
@@ -129,7 +130,11 @@ fn a_consolidation_lands_a_snapshot_and_archives_the_prefix() {
         store.len() as u64 + before,
         "归档段 {before} 条 + 没被取代的那段——「零回退损失」的可执行形态"
     );
-    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+    assert!(
+        check_all(kernel_vocab(), &all).is_empty(),
+        "{:?}",
+        check_all(kernel_vocab(), &all)
+    );
 }
 
 /// 同一份快照**不落第二次**：判据是与完整史里最近一份快照逐 id 比对。

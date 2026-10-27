@@ -147,7 +147,7 @@ impl EliminationDecider {
         }))
     }
 
-    /// `verdict.asserted` 事件流水 → [`GrantsChange`] 序列：**载荷 ↔ 变更的映射**。
+    /// 裁决格（`verdict × asserted`）事件流水 → [`GrantsChange`] 序列：**载荷 ↔ 变更的映射**。
     ///
     /// 淘汰回路的读侧半边：闸门（`plugins/session` 的工具执行层）拿不到裁决者本体，
     /// 它有的是事件切片——本函数就是「切片 → 覆盖层」之间唯一的那步翻译。
@@ -158,7 +158,11 @@ impl EliminationDecider {
     pub fn verdict_grants_changes(events: &[Event]) -> Vec<GrantsChange> {
         let mut out = Vec::new();
         for e in events {
-            if e.kind != crate::event::EVENT_VERDICT_ASSERTED {
+            // 认的是**格子**而不是名字（DE-024 D-203）：裁决格上只有这一族事实，
+            // 落进 `verdict × asserted` 就是裁决者说过的话。
+            if !(e.entity == crate::event::Entity::Verdict
+                && e.verb == crate::event::Verb::Asserted)
+            {
                 continue;
             }
             let Some(subject) = e.payload.get("subject").and_then(|v| v.as_str()) else {

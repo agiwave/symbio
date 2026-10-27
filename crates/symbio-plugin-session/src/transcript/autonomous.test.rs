@@ -6,6 +6,7 @@ use super::*;
 use crate::plugin::SessionConfig;
 use std::sync::Arc;
 use symbio_core::{check_all, Entity, Event, Verb, EVENT_USER_MESSAGE};
+use symbio_kernel::event::kernel_vocab;
 
 // 这一段钉的不是"触发器会不会开跑一轮"（那要真模型，归 e2e），而是**触发先落事实**
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
@@ -109,7 +110,11 @@ async fn trigger_facts_land_in_order_and_the_gate_stays_closed_by_default() {
         Some(&serde_json::json!(9_999))
     );
 
-    assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
+    assert!(
+        check_all(kernel_vocab(), &events).is_empty(),
+        "{:?}",
+        check_all(kernel_vocab(), &events)
+    );
 }
 
 /// 闸门打开后长目标**只开一次**：自主触发按间隔周期性表达同一条欲，
@@ -141,7 +146,11 @@ async fn gate_opens_the_long_goal_exactly_once_per_goal() {
         2,
         "「欲」每次触发照样入格（它是流，不是状态）"
     );
-    assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
+    assert!(
+        check_all(kernel_vocab(), &events).is_empty(),
+        "{:?}",
+        check_all(kernel_vocab(), &events)
+    );
 }
 
 /// 两种不触发各有各的理由，而且**都不动文件**：
@@ -208,7 +217,11 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
         1,
         "欲照样入格——拒绝是可查的结论，不是静默"
     );
-    assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
+    assert!(
+        check_all(kernel_vocab(), &events).is_empty(),
+        "{:?}",
+        check_all(kernel_vocab(), &events)
+    );
 }
 
 // ==================== 发起者与意欲闸门的单元验收（D-189） ====================
@@ -250,9 +263,9 @@ fn scheduled_trigger_produces_event_not_side_channel() {
         "自主行为必须以事件形态存在"
     );
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
 }
 

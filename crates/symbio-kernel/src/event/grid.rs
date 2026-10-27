@@ -43,39 +43,56 @@
 //! 空格是网格**余量**，不是缺口——`plan/01 §6` 明说这张表「是语法的闭集，不是事件的闭集」。
 
 use super::{
-    Entity, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN,
-    EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED, EVENT_CONTROL_OPENED, EVENT_FAILED,
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH,
-    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
+    Entity, EventDecl, FactRole, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
+    EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED,
+    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED,
+    EVENT_CONTROL_OPENED, EVENT_FAILED, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
+    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_REQUEST,
+    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED,
+    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TURN_BRANCH,
+    EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 
 /// 网格上的一个格子：实体（行）× 动词（列）。
 pub type Cell = (Entity, Verb);
 
-/// 名字 → 格位。加名字 = 加一行（数据变化，F5）；段序与
+/// 名字 → 格位（与角色）。加名字 = 加一行（数据变化，F5）；段序与
 /// [`super`] 的名字表一致，一族一段。
-const CELLS: &[(&str, Cell)] = &[
+///
+/// `roles` 那一维是 core 守卫判据的输入面（DE-024 D-203）：判据问「这条事实扮演
+/// 什么角色」，不再自己抄名字。**迁移期的两份表**——owner 插件的 `EventDecl` 与这张
+/// 内核表必须给同一个角色；内核表归零后只剩 owner 那一份，`seal` 的
+/// `Gap::UnmannedRole` 保证每一档角色都有人住。
+const CELLS: &[EventDecl] = &[
     // ── 对话面（turn）──
-    (EVENT_USER_MESSAGE, (Entity::Turn, Verb::Opened)),
+    EventDecl::with_roles(
+        EVENT_USER_MESSAGE,
+        (Entity::Turn, Verb::Opened),
+        &[FactRole::DeclaresBudget],
+    ),
     // 派发档是「这一轮以什么方式运行」的断言，与阶段事实同格。
-    (EVENT_TURN_DISPATCH, (Entity::Turn, Verb::Asserted)),
-    (EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)),
-    (EVENT_ASSISTANT_REPORTED, (Entity::Turn, Verb::Asserted)),
-    (EVENT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)),
-    (EVENT_ASSISTANT_FINAL, (Entity::Turn, Verb::Closed)),
-    (EVENT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)),
-    (EVENT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)),
+    EventDecl::with_roles(
+        EVENT_TURN_DISPATCH,
+        (Entity::Turn, Verb::Asserted),
+        &[FactRole::DeclaresBudget],
+    ),
+    EventDecl::new(EVENT_TURN_SUPPLEMENTED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_ASSISTANT_REPORTED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_ASSISTANT_OPENING, (Entity::Turn, Verb::Asserted)),
+    EventDecl::with_roles(
+        EVENT_ASSISTANT_FINAL,
+        (Entity::Turn, Verb::Closed),
+        &[FactRole::FinalizesTurn],
+    ),
+    EventDecl::new(EVENT_ASSISTANT_FALLBACK, (Entity::Turn, Verb::Closed)),
+    EventDecl::new(EVENT_ASSISTANT_PROGRESS, (Entity::Turn, Verb::Progressed)),
     // 分支族（重试留下的几支与「此刻读哪一支」）：两支都**不删任何东西**，所以它们
     // 不是 `closed`（那一格是「这一轮的产出定稿」）；它们是「关于这一轮的断言」——
     // 与上面配置 / 派发同格。落 `asserted` 的另一半理由是 I2：断言类必须带
     // `produced_by`，而「这一支存在」与「现在读这一支」正是靠溯源才能被验真。
-    (EVENT_TURN_BRANCH, (Entity::Turn, Verb::Asserted)),
-    (EVENT_BRANCH_SELECTED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_BRANCH_SELECTED, (Entity::Turn, Verb::Asserted)),
     // ── 协议族（对外调用，）─────────────────────────────────────────
     //
     // 五个名字**同格同族**：`turn × asserted` = 「关于这一轮的断言」这一格的成员。
@@ -93,62 +110,70 @@ const CELLS: &[(&str, Cell)] = &[
     // - `retry`（这次尝试作废）：租约看护者落的一次尝试级否定断言。
     //
     // **为什么不落 `turn × progressed`**：那一格是**用户看得见**的动静
-    // （`chat.assistant.progress`），协议事实是机器对机器的账；且 `needs_provenance`
-    // 只对 `progressed` 里的 `chat.assistant.progress` 要求溯源——协议事实落那一格
-    // 就会**静默失去 I2 的溯源要求**（断言类才有）。落 `asserted` ⇒ 五条都自动受
-    // 「断言类必须带 `produced_by`」约束。
-    (EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
-    (EVENT_SENT, (Entity::Turn, Verb::Asserted)),
-    (EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),
-    (EVENT_FAILED, (Entity::Turn, Verb::Asserted)),
-    (EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
+    // （`chat.assistant.progress`），协议事实是机器对机器的账。I2 现在按格子判
+    // `progressed`（DE-024 D-203）——落那一格就**必然**要溯源，不再有「静默失去
+    // 溯源要求」这回事；`asserted` 同样整格要求溯源，五条都自动受约束。
+    EventDecl::new(EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_SENT, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_FAILED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
     // 否定事实与收束格**不同格**（`asserted` vs `closed`）：被拒的一轮仍然未收束。
-    (EVENT_AUTHZ_DENIED, (Entity::Turn, Verb::Asserted)),
+    // 它不是收束，但回答「这一轮为什么停」——角色停在这一档上（`StopsTurn`）。
+    EventDecl::with_roles(
+        EVENT_AUTHZ_DENIED,
+        (Entity::Turn, Verb::Asserted),
+        &[FactRole::StopsTurn],
+    ),
     // ── 产物（artifact）──
-    (EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)),
+    EventDecl::new(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)),
     // ── 消息列表的变更（message，D-053 / D-054 的闭集四格）──
-    (EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)),
-    (EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)),
-    (EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)),
-    (
+    EventDecl::new(EVENT_MESSAGE_ADDED, (Entity::Message, Verb::Opened)),
+    EventDecl::new(EVENT_MESSAGE_EDITED, (Entity::Message, Verb::Asserted)),
+    EventDecl::new(EVENT_MESSAGE_REMOVED, (Entity::Message, Verb::Closed)),
+    EventDecl::new(
         EVENT_SESSION_CONSOLIDATED,
         (Entity::Message, Verb::Progressed),
     ),
     // ── 记忆（memory）──
-    (EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    (EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
+    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
+    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
     // ── 承诺（commitment）──
-    (EVENT_COMMITMENT_OFFERED, (Entity::Commitment, Verb::Opened)),
-    (
+    EventDecl::new(EVENT_COMMITMENT_OFFERED, (Entity::Commitment, Verb::Opened)),
+    EventDecl::new(
         EVENT_COMMITMENT_RELEASED,
         (Entity::Commitment, Verb::Closed),
     ),
-    (EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)),
-    (
+    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)),
+    EventDecl::new(
         EVENT_COMMITMENT_ASSERTED,
         (Entity::Commitment, Verb::Asserted),
     ),
     // ── 任务（task）──
-    (EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)),
-    (EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
-    (EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
-    (EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
-    (EVENT_TASK_REWORK_CREATED, (Entity::Task, Verb::Asserted)),
+    EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)),
+    EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
+    EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
+    EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
     // ── 控制（control）：打断与熔断共用的一格 ──
-    (EVENT_CONTROL_OPENED, (Entity::Control, Verb::Opened)),
+    EventDecl::new(EVENT_CONTROL_OPENED, (Entity::Control, Verb::Opened)),
     // ── 裁决（verdict）──
-    (EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
+    EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
 ];
+
+/// 这张表本身——迁移期写闸与判据的**回退词汇面**。
+///
+/// owner 的声明表优先（`Frozen::holds_role` / `event_cell` 先查它）；内核表随
+/// 业务名字逐条迁出而缩小，归零后本函数与那条回退臂一起删除（DE-024 D-203 裁决三）。
+pub fn kernel_vocab() -> &'static [EventDecl] {
+    CELLS
+}
 
 /// 这个名字落在哪个格子（`None` = 名字**不在表上**，即网格之外）。
 ///
 /// 只按**精确拼写**查（大小写、前后缀、近似拼写一律 `None`）——判据要能给写侧闸门
 /// 一个明确的「不在表上」，而不是「大概是指那一个」。
 pub fn event_cell(name: &str) -> Option<Cell> {
-    CELLS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|&(_, cell)| cell)
+    CELLS.iter().find(|e| e.name == name).map(|e| e.cell)
 }
 
 #[cfg(test)]

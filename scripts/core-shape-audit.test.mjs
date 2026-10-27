@@ -322,7 +322,7 @@ test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
   assert.match(r.stdout, /kernelEvents 0<1/)
 })
 
-// ==================== CS-006 内核业务事件名的消费方证据 ====================
+// ==================== CS-006 内核业务事件名的消费方分布 ====================
 
 const ALPHA_CRATE = 'crates/symbio-plugin-alpha/src/lib.rs'
 const BETA_CRATE = 'crates/symbio-plugin-beta/src/lib.rs'
@@ -348,10 +348,10 @@ test('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件�
     { baseline: '1:1:0', vocab: '1:1' },
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-006.*1 条全部有据（≥2 crate 消费 1 · core 读者 0）/)
+  assert.match(r.stdout, /CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/)
 })
 
-test('CS-006：core 生产代码读它 ⇒ 绿（读写同源，名字跟着那条读者走）', () => {
+test('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 D-203）', () => {
   const r = audit(
     core(ONE, {
       ...vocab(),

@@ -4,6 +4,7 @@
 use super::*;
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::Budget;
+use symbio_core::FactRole;
 use symbio_core::{check_all, unresolved_turns};
 use symbio_core::{checkpoint, CheckpointState};
 use symbio_core::{
@@ -12,6 +13,7 @@ use symbio_core::{
     EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_USER_MESSAGE,
 };
 use symbio_core::{turnstate, TurnState};
+use symbio_kernel::event::kernel_vocab;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
@@ -174,9 +176,9 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
     );
     // 恢复后 seq 仍单调（S05 §5：恢复后 seq 单调的 CI 断言）。
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
     // 断点状态本身也在账上（4 条事实 ⇒ event_count = 4）。
@@ -213,7 +215,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
         ))
         .unwrap();
     let snapshot = store.range(Seq::new(0));
-    assert!(check_all(&snapshot).is_empty());
+    assert!(check_all(kernel_vocab(), &snapshot).is_empty());
     let v = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
@@ -1268,11 +1270,26 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
 /// 写闸读的是**注入的声明表**，不是内核常量：一个内核不认识的名字，只要装配表
 /// 给了格位就能落；同一张表撤掉后，它立刻按「网格之外」被拒。
 ///
-/// 这是 DE-024 D-198 / D-199 的端到端判据——只测 `Frozen::event_cell` 会漏掉
-/// 「写闸有没有真的问它」这一格。
+/// 同一条表还给出**角色**：闸门里那条「每轮至多一条 final」数的是声明了
+/// `finalizes_turn` 的名字（DE-024 D-203）——判据的输入随声明走，不随名字走。
+///
+/// 这是 DE-024 D-198 / D-199 / D-203 的端到端判据——只测 `Frozen::event_cell`
+/// 会漏掉「写闸有没有真的问它」这一格。
 #[test]
 fn injected_declarations_are_the_grid_the_gate_reads() {
     const FIXTURE: &str = "fixture.wal.event";
+    /// 收束格上的两个新名字：一个声明了 `finalizes_turn`，一个没声明。
+    const FIXTURE_FINAL: &str = "fixture.wal.final";
+    const FIXTURE_SILENT: &str = "fixture.wal.silent";
+    const FIXTURE_EVENTS: &[EventDecl] = &[
+        EventDecl::new(FIXTURE, (Entity::Turn, Verb::Progressed)),
+        EventDecl::with_roles(
+            FIXTURE_FINAL,
+            (Entity::Turn, Verb::Closed),
+            &[FactRole::FinalizesTurn],
+        ),
+        EventDecl::new(FIXTURE_SILENT, (Entity::Turn, Verb::Closed)),
+    ];
 
     fn protocol_rows() -> &'static [Decl] {
         let mut out = Vec::new();
@@ -1306,10 +1323,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
     b.declare(
         "plugins/session-test",
         PluginDeclarations {
-            events: &[EventDecl {
-                name: FIXTURE,
-                cell: (Entity::Turn, Verb::Progressed),
-            }],
+            events: FIXTURE_EVENTS,
             facts: &[],
             views: &[],
             ports: &[],
@@ -1325,13 +1339,13 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         .unwrap()
         .with_declarations(frozen);
     store
-        .append(Event::pending(
+        .append(ev(
             "fixture-0",
             FIXTURE,
             Entity::Turn,
             Verb::Progressed,
             0,
-            "session/main",
+            "正文",
         ))
         .expect("装配表给了格位，写闸必须放行");
     assert_eq!(store.len(), 1);
@@ -1366,6 +1380,60 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         "拒错形态：{err:?}"
     );
     assert_eq!(store.len(), 1, "被拒的事件不落格");
+
+    // 第二个方向：闸门里那条「每轮至多一条 final」数的是**表上声明了角色的名字**
+    // （DE-024 D-203 裁决二）。这两个名字内核与 core 都不认识，只有这张注入表认识。
+    store
+        .append(ev(
+            "role-1",
+            FIXTURE_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            5,
+            "一",
+        ))
+        .expect("声明了 finalizes_turn 的收束格要能落");
+    let err = store
+        .append(ev(
+            "role-2",
+            FIXTURE_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            5,
+            "二",
+        ))
+        .expect_err("同轮第二条定稿必须被拦");
+    assert!(
+        matches!(
+            err,
+            AppendError::Invariant {
+                invariant: StoreInvariant::I1,
+                ..
+            }
+        ),
+        "角色没进闸门的 final 判据：{err:?}"
+    );
+    // 反面对照：同格、同轮，但表上没给角色 ⇒ 不是定稿，两条都落得（拦法不是整格）。
+    store
+        .append(ev(
+            "silent-1",
+            FIXTURE_SILENT,
+            Entity::Turn,
+            Verb::Closed,
+            6,
+            "一",
+        ))
+        .expect("没扮演角色的收束格不是 final");
+    store
+        .append(ev(
+            "silent-2",
+            FIXTURE_SILENT,
+            Entity::Turn,
+            Verb::Closed,
+            6,
+            "二",
+        ))
+        .expect("同格的第二条也不算 final");
 
     // 同一份 WAL 换一个**没有注入**的实例：内核表不认识这个新名字 ⇒ 拒绝。
     drop(store);

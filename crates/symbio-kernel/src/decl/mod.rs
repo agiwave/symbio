@@ -57,8 +57,8 @@
 //!
 //! 插件交进来的声明仍受同一条资格约束：某一行以它为 `owes` / `until` / `unless`，
 //! 或某条**被行用到的**视图读它（DE-015 判据 7）。只在审计 / SLO 投影里读的断言格
-//! 不进控制面表——`turn.dispatch` 是现例：它的读方是
-//! `invariants::declared_budget_ms`，表里没有一行以它为前件或出口。
+//! 不进控制面表——`turn.dispatch` 是现例：它的读方是 core 的预算判据（按
+//! `declares_budget` 角色读它，DE-024 D-203），表里没有一行以它为前件或出口。
 //!
 //! ## 生产接线
 //!
@@ -70,7 +70,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::event::{Cell, Entity, Event, EventDecl, Verb};
+use crate::event::{Cell, Entity, Event, EventDecl, FactRole, Verb};
 use crate::LatencyTier;
 // 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
 // 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
@@ -460,7 +460,9 @@ pub struct Frozen {
 }
 
 impl Frozen {
-    /// 全部事件名与格位（协议五格 + 各 owner 插件交来的业务事件）。
+    /// 判据的**词汇面**：全部事件名、格位与角色（协议五格 + 各 owner 插件交来的业务事件）。
+    ///
+    /// core 的守卫拿它问「这条名字扮演什么角色」，从此不抄名字（DE-024 D-203）。
     pub fn events(&self) -> &[EventDecl] {
         &self.events
     }
@@ -469,6 +471,24 @@ impl Frozen {
     /// `event::grid::CELLS`；回退删除后 `None` 就是「网格之外」（DE-024 D-199）。
     pub fn event_cell(&self, name: &str) -> Option<Cell> {
         self.events.iter().find(|e| e.name == name).map(|e| e.cell)
+    }
+
+    /// 这个名字在守卫判据里扮演哪个角色。表上没有它 ⇒ `false`（不扮演任何东西）。
+    pub fn holds_role(&self, name: &str, role: FactRole) -> bool {
+        crate::event::holds_role(&self.events, name, role)
+    }
+
+    /// 每一档角色都有人住吗（装配口的整体检查，DE-024 D-203）。
+    ///
+    /// 为什么这条必须存在：判据读角色，而角色来自声明。owner 删掉一行 `roles` 的
+    /// 表现不是「拒绝」而是「看不见」——守卫从拦人变成空转，全绿。这与 J3 点名的
+    /// 静默失效同形，所以它在**冻结时**判，不在运行期判。
+    pub fn unmanned_roles(&self) -> Vec<FactRole> {
+        FactRole::ALL
+            .iter()
+            .copied()
+            .filter(|role| !self.events.iter().any(|e| e.roles.contains(role)))
+            .collect()
     }
 
     /// 这个事件名归谁：把含它的声明表交进 [`Builder`] 的那个 owner。
@@ -616,26 +636,11 @@ const SENT_FIELDS: &[&str] = &[
 // 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。
 // 理由见 `event/grid.rs` 的同名行（迁移完成后那一份成为唯一说明）。
 const PROTOCOL_EVENTS: &[EventDecl] = &[
-    EventDecl {
-        name: EVENT_REQUEST,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_SENT,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_RESPONSE,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_FAILED,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
-    EventDecl {
-        name: EVENT_RETRY,
-        cell: (Entity::Turn, Verb::Asserted),
-    },
+    EventDecl::new(EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_SENT, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_RESPONSE, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_FAILED, (Entity::Turn, Verb::Asserted)),
+    EventDecl::new(EVENT_RETRY, (Entity::Turn, Verb::Asserted)),
 ];
 
 const PROTOCOL_FACTS: &[FactDecl] = &[

@@ -15,6 +15,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
+use symbio_kernel::event::kernel_vocab;
 
 use serde_json::json;
 
@@ -446,9 +447,9 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         .unwrap();
     let snapshot = store.range(Seq::new(0));
     assert!(
-        check_all(&snapshot).is_empty(),
+        check_all(kernel_vocab(), &snapshot).is_empty(),
         "{:?}",
-        check_all(&snapshot)
+        check_all(kernel_vocab(), &snapshot)
     );
     let view = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(view.value.settled() && view.value.final_text.is_some());

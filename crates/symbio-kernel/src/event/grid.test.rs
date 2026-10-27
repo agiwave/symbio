@@ -5,6 +5,7 @@
 
 use super::super::event_node_of;
 use super::*;
+use crate::event::holds_role;
 use crate::Event;
 use serde_json::json;
 
@@ -14,7 +15,7 @@ use serde_json::json;
 /// `kind` 取值（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）。它们不是事件名，
 /// 所以不进这张表。已迁出的名字（owner 的 `EventDecl`）也不在这里——这条断言把内核
 /// 名字表与 `CELLS` 的行数钉在一起。
-const DECLARED_EVENT_NAMES: usize = 34;
+const DECLARED_EVENT_NAMES: usize = 33;
 
 #[test]
 fn the_table_is_one_row_per_name_and_covers_every_declared_name() {
@@ -24,10 +25,11 @@ fn the_table_is_one_row_per_name_and_covers_every_declared_name() {
         "名字表的行数与事件名常量数漂移：加名字要同批加一行（闸门会拒未登记的名字）"
     );
     let mut seen = std::collections::HashSet::new();
-    for (name, _) in CELLS {
+    for decl in CELLS {
         assert!(
-            seen.insert(*name),
-            "一个名字主张了两个格位：{name} —— 一个名字只有一格"
+            seen.insert(decl.name),
+            "一个名字主张了两个格位：{} —— 一个名字只有一格",
+            decl.name
         );
     }
 }
@@ -95,5 +97,71 @@ fn shifted_verb(v: Verb) -> Verb {
         Verb::Asserted => Verb::Progressed,
         Verb::Progressed => Verb::Held,
         Verb::Held => Verb::Opened,
+    }
+}
+
+/// 角色是**表上的数据**，不是判据里抄的名字（DE-024 D-203 裁决二）。
+///
+/// 一张插件自己造的表：两个名字落同一格，只有其中一个扮演「定稿发言」。
+/// 判据按表回答 ⇒ 一个新 owner 声明自己的名字并带上角色，守卫就认它——
+/// 这条用例是「加能力不改架构」的最小可执行证据。
+#[test]
+fn roles_are_data_on_the_table_not_names_in_a_guard() {
+    const VOCAB: &[EventDecl] = &[
+        EventDecl::with_roles(
+            "fixture.finalizes",
+            (Entity::Turn, Verb::Closed),
+            &[FactRole::FinalizesTurn],
+        ),
+        EventDecl::new("fixture.other", (Entity::Turn, Verb::Closed)),
+    ];
+    assert!(
+        holds_role(VOCAB, "fixture.finalizes", FactRole::FinalizesTurn),
+        "声明了角色的名字，守卫必须经表认出来"
+    );
+    assert!(
+        !holds_role(VOCAB, "fixture.other", FactRole::FinalizesTurn),
+        "同格的另一个名字没声明角色，守卫不得替它猜"
+    );
+    // 表上根本没有的名字 ⇒ 不扮演任何东西（不是「默认算一份」）。
+    assert!(!holds_role(VOCAB, "turn.closed", FactRole::FinalizesTurn));
+}
+
+/// 内核表**不再**被要求住满每一档角色（DE-024 D-203）。
+///
+/// 「回退臂要能答出每一档角色，否则落回它的判据空转」这条要求把内核表钉成守卫的
+/// 词汇源，而词汇源是**装配表**：名字随 owner 迁出，这张表上的角色就跟着变少，
+/// 这是迁移的正常形状（最后一批业务名字走完后这张表只剩协议五格，回退臂同批删除）。
+/// 「每一档都有人住」判在装配后的那张表上（`Frozen::unmanned_roles` ⇒
+/// `Gap::UnmannedRole`，装载入口拒绝空转；内核侧的最小可执行证据在
+/// `decl::tests`），不判在迁移存量上。
+#[test]
+fn the_kernel_table_carries_roles_only_for_the_names_it_still_holds() {
+    // 表上的每一行：格位答得出，角色只可能挂在**这一行**的名字上。
+    for decl in kernel_vocab() {
+        for role in FactRole::ALL {
+            if decl.roles.contains(role) {
+                assert!(
+                    holds_role(kernel_vocab(), decl.name, *role),
+                    "{} 上声明了 {role:?}，判据却读不出——表与 `holds_role` 不同源",
+                    decl.name
+                );
+            } else {
+                assert!(
+                    !holds_role(kernel_vocab(), decl.name, *role),
+                    "{} 没声明 {role:?}，判据却替它认下——守卫不得替名字猜角色",
+                    decl.name
+                );
+            }
+        }
+    }
+    // 未迁出的名字里，至少 `FinalizesTurn` 与 `StopsTurn` 还有归宿：装配表缺席时
+    // （纯 session 二进制走回退臂）收束与停机两道守卫不许整体空转。
+    // 这一条随回退臂一起退役。
+    for role in [FactRole::FinalizesTurn, FactRole::StopsTurn] {
+        assert!(
+            kernel_vocab().iter().any(|e| e.roles.contains(&role)),
+            "回退臂上 {role:?} 无人居住：未装配的进程里那道守卫会静默不判"
+        );
     }
 }

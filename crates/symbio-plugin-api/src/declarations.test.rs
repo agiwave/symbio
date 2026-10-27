@@ -40,11 +40,12 @@ fn protocol_rows() -> &'static [Decl] {
 }
 
 fn fixture() -> PluginDeclarations<'static> {
+    const EVENTS: &[EventDecl] = &[EventDecl::new(
+        "fixture.declared",
+        (Entity::Turn, Verb::Asserted),
+    )];
     PluginDeclarations {
-        events: &[EventDecl {
-            name: "fixture.declared",
-            cell: (Entity::Turn, Verb::Asserted),
-        }],
+        events: EVENTS,
         facts: &[],
         views: &[],
         ports: &[],
