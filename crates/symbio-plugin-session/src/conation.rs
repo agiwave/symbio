@@ -1,5 +1,14 @@
-//! `conation` 投影（S12 第 21 步，[roadmap/S12 §3](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")、
-//! [02 §2.3](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+//! `conation` 投影（S12 第 21 步，[roadmap/S12 §3](../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")、
+//! [02 §2.3](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+//!
+//! ## 为什么住会话插件（DE-024 D-201）
+//!
+//! 名字与格位随 owner 走之后，读这些名字的**投影**是同一批词汇的最后一个消费者：
+//! `conation.expressed` 的写方（[`crate::transcript::autonomous`]）与读方（本文件与
+//! `stats`）都在本插件，内核只为一个自己不再读的字段名保留常量没有意义。
+//! 判据是消费方分布——**唯一生产消费方是哪一个插件，投影就搬进哪一个**；
+//! 两个插件同时消费的投影（`readyset` / `branch` / `transcript` …）留在 core，
+//! 它们读的名字因此还是 core 的读侧词汇，逐条等消费方拆开再迁。
 //!
 //! **「欲」的读侧形态**：从事件序列算出「当前表达了哪些欲、各自有没有升格成任务」。
 //! 与 `readyset` 同形——就绪判定是纯函数，这里「欲的升格状态」也是：
@@ -7,7 +16,7 @@
 //!
 //! ## 为什么这是一条**投影**而不是插件里的一次全表扫
 //!
-//! 判定「这条长目标声明过没有」是**投影**，消费方（`plugins/session/transcript/autonomous.rs`）
+//! 判定「这条长目标声明过没有」是**投影**，消费方（`transcript/autonomous.rs`）
 //! 拿的是 `View`，不自己 `range(0).any(…)` 扫事实源——判定与它读的事实同一处
 //! （改口径只动一个文件）。可执行论证
 //! 见 `verify/conation_minimal.rs` 的
@@ -32,8 +41,9 @@
 //! - **「完成」没有独立事件**：今天没有 `conation.fulfilled`，欲一旦升格就一直是
 //!   「已声明」——所以本视图只表达「已表达 / 已升格」两态，不假装知道完成与否。
 
-use super::super::event::{Entity, Event, Timestamp, EVENT_CONATION_EXPRESSED, EVENT_TASK_OPENED};
-use super::Projection;
+use crate::declarations::EVENT_CONATION_EXPRESSED;
+use symbio_core::{Entity, Event, Projection, EVENT_TASK_OPENED};
+use symbio_kernel::Timestamp;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -78,7 +88,7 @@ impl ConationView {
         self.intents.iter().filter(|i| i.task_id.is_some()).count()
     }
 
-    /// **自发发起且被采纳率** = 已升格 / 已表达（[02 §3.1 外部效标 · 主动性](../../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
+    /// **自发发起且被采纳率** = 已升格 / 已表达（[02 §3.1 外部效标 · 主动性](../../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")）。
     ///
     /// 分母含「被否决 / 被忽略」的欲（表达过但没升格——升不了格的欲照常入视图，
     /// 它是事实，见模块头「边界」）。无表达 ⇒ 0.0（**有据的零**：没主动发起过，

@@ -22,12 +22,13 @@
 
 use super::super::active::{InboxItem, PreemptPending};
 use super::super::plugin::SessionPlugin;
+use crate::conation::conation;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 use crate::store::EventWalStore;
 use symbio_core::chat_node as cm;
 use symbio_core::session_chat;
-use symbio_core::{conation, Event, Seq, Store};
 use symbio_core::{EffectiveMatrix, PRINCIPAL_AUTONOMOUS};
+use symbio_core::{Event, Seq, Store};
 
 impl SessionPlugin {
     /// 为一次自主触发**开一轮**：先落事实，落成了才带着服务端推导的运行参数入队。
@@ -291,7 +292,7 @@ impl SessionPlugin {
 /// 是模型唯一的调度候选来源，那就等于用自己刷爆自己的提示词。重新发起是 S03 返工机制
 /// （`{id}-r{n}`）的事，不由触发器每 tick 重开；「欲」本身照样每次入格（它是流，不是状态）。
 ///
-/// 判定住 ③ [`conation`]（core），这里只**消费**——插件不再自己扫事实源拼一个布尔。
+/// 判定住 ③ [`conation`](crate::conation)（本插件），这里只**消费**——插件不再自己扫事实源拼一个布尔。
 // doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义
 /// as-of 取全量读数口径 `read_all`：问的是「这条目标曾经声明过吗」，与 `session/stats`
 /// 的复算同一写法。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
@@ -348,7 +349,7 @@ impl AutonomousInitiator {
     fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("want-{source_seq}"),
-            symbio_core::EVENT_CONATION_EXPRESSED,
+            crate::declarations::EVENT_CONATION_EXPRESSED,
             symbio_core::Entity::Conation,
             symbio_core::Verb::Opened,
             0,
@@ -432,7 +433,7 @@ struct ConationCandidate {
 impl ConationCandidate {
     /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
     fn from_event(e: &Event) -> Option<Self> {
-        if e.kind != symbio_core::EVENT_CONATION_EXPRESSED {
+        if e.kind != crate::declarations::EVENT_CONATION_EXPRESSED {
             return None;
         }
         // 来路不明的意图混不进来（I2 强化：无溯源即 None）。

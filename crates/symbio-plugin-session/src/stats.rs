@@ -460,7 +460,7 @@ pub(crate) fn read(
     //
     // 率与流同列给出：流是**事实**（不截断，见列定义），率是**读数**（纯查询，
     // 与 `tiers` 的 `rate()`、跨会话 `ConationSummary::adoption_rate` 同一套算式）。
-    let conation_view = symbio_core::conation().read_all(&snapshot).value;
+    let conation_view = crate::conation::conation().read_all(&snapshot).value;
     let conation = serde_json::json!({
         "intents": conation_view.intents,
         "adoption_rate": conation_view.adoption_rate(),

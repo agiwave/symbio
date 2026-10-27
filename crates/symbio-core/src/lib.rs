@@ -92,17 +92,18 @@ pub use projection::slo::slo_report;
 // 「顺手导出的内部件」。
 pub use projection::fallback::FallbackRateView;
 pub use projection::slo::SloLatencyView;
-// ── 外部效标三族（02 §3.1：主动性 / 时域跨度 / 自主程度）────────────────────
+// ── 外部效标（02 §3.1：主动性 / 时域跨度 / 自主程度）──────────────────────
 //
 // 投影函数与视图类型都走 **`pub`**：它们的消费方只有 `plugins/session/stats.rs`，
 // 与 core 同 crate——不需要跨出公开面，也就**不该**占根出口（C-003 棘轮只许降，
 // 新增单消费方的 `pub use` 会撞线）。`pub` 不进对外公开面，同时仍满足
 // C-002（插件不深引 `projection::` 域目录，经根路径取用）。
 //
-// 统计口径仍单点：`ConationView::merge` / `SpanView::merge` / `AutonomyView::merge`
-// 是跨会话聚合的唯一答案，方法留在类型上（谁的数据谁的行为），与上面两个同族。
+// 统计口径仍单点：`SpanView::merge` / `AutonomyView::merge` 是跨会话聚合的唯一答案，
+// 方法留在类型上（谁的数据谁的行为），与上面两个同族。主动性那一族的 `ConationView`
+// 不占这里的出口——它的写方与读方都在 `plugins/session`，判据见
+// [DE-024](../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201。
 pub use projection::autonomy::{autonomy, AutonomyView};
-pub use projection::conation::ConationView;
 // `SpanSummary` 不另起别名：`merge` 的返回类型随调用走，消费方不需要点它的名字
 // （要断言它内部形状的测试走 `projection::span::` 完整路径）。
 pub use projection::span::{span, SpanView};
@@ -187,8 +188,8 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
 pub use event::{
-    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    EVENT_CONTROL_OPENED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD,
+    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
     EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
@@ -242,7 +243,6 @@ pub use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
 // `pub` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
-pub use projection::conation::conation;
 pub use projection::readyset::{readyset, ReadySetView};
 pub use projection::recall::recall;
 pub use projection::reputation::reputation;

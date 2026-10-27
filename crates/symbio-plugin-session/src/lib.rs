@@ -5,6 +5,7 @@ mod capabilities;
 mod changes;
 mod chat_session;
 mod commands;
+mod conation;
 pub(crate) mod config;
 mod convergence;
 mod declarations;

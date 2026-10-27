@@ -1,7 +1,7 @@
-//! 会话插件的事件声明（DE-024 D-197）。
+//! 会话插件的事件声明（DE-024 D-197 / D-201）。
 //!
-//! 本插件只拥有 `system.*` 两个名字：定时触发与健康自检。名字、格位与声明同在这里，
-//! 写方与读方都从本模块取名字——内核不再为它们保留常量。
+//! 本插件拥有 `system.*`（定时触发与健康自检）与 `conation.expressed`（欲的表达）：
+//! 名字、格位与声明同在这里，写方与读方都从本模块取名字——内核不再为它们保留常量。
 //!
 //! 事实 / 视图 / 端口 / 行都不在这里：它们不属于本插件的控制面。
 
@@ -12,6 +12,8 @@ use symbio_core::{Entity, EventDecl, PluginDeclarations, Verb};
 pub(crate) const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
 pub(crate) const EVENT_SYSTEM_HEALTH: &str = "system.health";
+/// 「欲」的表达。落在 `conation × opened`——写方与读方（`conation` 投影）都在本插件。
+pub(crate) const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 pub(crate) const OWNER: &str = "plugins/session";
 
@@ -23,6 +25,10 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl {
         name: EVENT_SYSTEM_HEALTH,
         cell: (Entity::System, Verb::Progressed),
+    },
+    EventDecl {
+        name: EVENT_CONATION_EXPRESSED,
+        cell: (Entity::Conation, Verb::Opened),
     },
 ];
 

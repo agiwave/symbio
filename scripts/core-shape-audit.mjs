@@ -259,6 +259,10 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   （session）共 7 条名字随 owner 的 `EventDecl` 走，内核常量与 `CELLS` 行同步退役
  *   ⇒ 40/38 → 33/32。`task.ready` 本来就没有 `CELLS` 行，所以行数只减 6。
  *
+ * - **P1c 第二批迁出**（同日）：`conation.expressed` 的读侧投影（`ConationView`）随**唯一
+ *   生产消费方**下沉 `plugins/session`，core 不再按这个名字读 ⇒ 内核常量与它的 `CELLS` 行
+ *   一起退役 ⇒ 33/32 → 32/31（判据见 DE-024 D-201）。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -267,7 +271,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 33, cellsRows: 32 }
+  : { kernelEvents: 32, cellsRows: 31 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

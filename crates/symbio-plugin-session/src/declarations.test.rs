@@ -3,7 +3,7 @@
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
 //! 插件自己的单元测试二进制**只链接本 crate**：装配表里只有内核协议五格与本插件
-//! 的两个事件，而协议事实的归宿行住在 `plugins/loop`——不在这里，就没有行读它们，
+//! 声明的三个事件，而协议事实的归宿行住在 `plugins/loop`——不在这里，就没有行读它们，
 //! `seal` 判据 7 报 `OrphanFact`，整张表失败（D-198「失败是整体失败」），写闸于是
 //! 回退内核 `CELLS`。`system.*` 已随 D-197 迁出 `CELLS`，回退查不到 ⇒ 写不进去。
 //!
@@ -16,7 +16,7 @@
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::{LatencyTier, PluginDeclarations};
 
-use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use super::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();
@@ -71,7 +71,15 @@ fn owned_events_resolve_through_the_process_assembly() {
         Some((symbio_core::Entity::System, symbio_core::Verb::Progressed))
     );
     assert_eq!(
+        frozen.event_cell(EVENT_CONATION_EXPRESSED),
+        Some((symbio_core::Entity::Conation, symbio_core::Verb::Opened))
+    );
+    assert_eq!(
         frozen.event_owner(EVENT_SYSTEM_TRIGGERED),
+        Some(super::OWNER)
+    );
+    assert_eq!(
+        frozen.event_owner(EVENT_CONATION_EXPRESSED),
         Some(super::OWNER)
     );
 }

@@ -213,8 +213,9 @@ async fn an_over_broad_goal_is_refused_even_with_the_gate_open() {
 
 // ==================== 发起者与意欲闸门的单元验收（D-189） ====================
 
+use crate::declarations::EVENT_CONATION_EXPRESSED;
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
-use symbio_core::{budget_exceeded, EventStore, EVENT_CONATION_EXPRESSED, EVENT_TASK_PROGRESS};
+use symbio_core::{budget_exceeded, EventStore, EVENT_TASK_PROGRESS};
 use symbio_core::{PRINCIPAL_AUTONOMOUS, PRINCIPAL_USER, PRINCIPAL_WORKER};
 
 /// 事实源里先放一格：触发是"从当时的状态出发"的，必须先有可指的锚。

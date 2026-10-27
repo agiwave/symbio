@@ -114,7 +114,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         // `range(0)` 里，实例聚合不会**静默**少算。
         lat_parts.push(slo_report().read_all(snapshot).value);
         fb_parts.push(fallback_rate().read_all(snapshot).value);
-        con_parts.push(symbio_core::conation().read_all(snapshot).value);
+        con_parts.push(crate::conation::conation().read_all(snapshot).value);
         span_parts.push(symbio_core::span().read_all(snapshot).value);
         aut_parts.push(symbio_core::autonomy().read_all(snapshot).value);
     }
@@ -123,9 +123,10 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     let fallback = symbio_core::FallbackRateView::merge(&fb_parts);
     let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
     let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
-    // 两族的跨会话合并都在 core（统计口径单点）：分子分母可加、率是同一套算式的
-    // 再应用；span 的「一个事件的会话不进分母」也在 core 判，不在这边挑数据。
-    let conation = symbio_core::ConationView::merge(&con_parts);
+    // 跨会话合并是**统计口径单点**：分子分母可加、率是同一套算式的再应用。
+    // `span` 的「一个事件的会话不进分母」在 core 判，不在这边挑数据；`conation` 的
+    // 合并住本插件 [`crate::conation`]——它的读写两端都在这里（DE-024 D-201）。
+    let conation = crate::conation::ConationView::merge(&con_parts);
     let span = symbio_core::SpanView::merge(&span_parts);
     let autonomy = symbio_core::AutonomyView::merge(&aut_parts);
 

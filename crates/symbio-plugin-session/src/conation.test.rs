@@ -1,18 +1,16 @@
 //! `conation` 投影的单测。
 //!
-//! 与实现**同级**分文件（`projection/conation.rs` + 同级 `conation.test.rs`，
+//! 与实现**同级**分文件（`conation.rs` + 同级 `conation.test.rs`，
 //! 见 `CONTRIBUTING.md`）。本文件钉四件事：欲的**升格靠溯源认**（不是靠 goal 字符串）、
 //! **as-of** 口径、**无溯源的欲可读但永不升格**（I2 边界）、以及**只声明升格过的那条**
 //! （不误伤同批的别的欲）。
 
 use super::*;
-use crate::authz::PRINCIPAL_AUTONOMOUS as INITIATOR;
-use crate::event::{Entity, Event, Seq, Verb, EVENT_CONATION_EXPRESSED, EVENT_TASK_OPENED};
-
-/// `system.triggered` 是 session 插件声明的事件名；core 的夹具按线上名字造。
-const SYSTEM_TRIGGERED: &str = "system.triggered";
-use crate::store::{EventStore, Store};
-use crate::view::Budget;
+use crate::declarations::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED as SYSTEM_TRIGGERED};
+use symbio_core::{
+    Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_TASK_OPENED,
+    PRINCIPAL_AUTONOMOUS as INITIATOR,
+};
 
 /// 溯源锚：真实链路里欲是从一次触发出发的（`system.triggered`）。
 fn seed_trigger(store: &EventStore) -> u64 {

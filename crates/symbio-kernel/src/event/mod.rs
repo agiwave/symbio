@@ -609,17 +609,6 @@ pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
-// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")）──
-//
-// 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
-// `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
-// 「欲」= `event.entity = conation` 的新取值（02 §2.3 的 E1）。
-
-/// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
-/// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
-/// 落在 `conation × opened`。
-pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
-
 /// 「这是一次自主开轮」在**地址写入体**上的判别键（`ChatNode.meta` 的键名）。
 ///
 /// ## 为什么一个写体的键名住在事件词汇表

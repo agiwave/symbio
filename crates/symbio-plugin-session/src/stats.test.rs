@@ -385,7 +385,7 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .append(
             Event::pending(
                 "want-a",
-                symbio_core::EVENT_CONATION_EXPRESSED,
+                crate::declarations::EVENT_CONATION_EXPRESSED,
                 Entity::Conation,
                 Verb::Opened,
                 0,
@@ -401,7 +401,7 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .append(
             Event::pending(
                 "want-b",
-                symbio_core::EVENT_CONATION_EXPRESSED,
+                crate::declarations::EVENT_CONATION_EXPRESSED,
                 Entity::Conation,
                 Verb::Opened,
                 0,
