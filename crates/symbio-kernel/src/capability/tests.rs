@@ -32,6 +32,27 @@ fn declared_enum_field_serde_roundtrip() {
     assert!(ser.get("risk").is_none());
 }
 
+/// 行为名是宿主内部词汇：`declares` 按整词判，序列化时不进 tools/list JSON。
+///
+/// 这是 D-210 的线格式边界：行为名决定宿主闸门，不是模型看到的工具属性。
+/// 进 wire 会把「哪些行为」变成对外协议，改名就要兼容两代客户端。
+#[test]
+fn behaviors_are_host_vocabulary_not_wire() {
+    let meta = CapabilityMeta {
+        name: "x".into(),
+        behaviors: &["assign_work", "task_table"],
+        ..Default::default()
+    };
+    assert!(meta.declares("assign_work"));
+    assert!(meta.declares("task_table"));
+    assert!(!meta.declares("assign"), "按整词判，不按前缀");
+
+    let v = serde_json::to_value(&meta).unwrap();
+    assert!(v.get("behaviors").is_none(), "行为名不应进入 wire");
+    let back: CapabilityMeta = serde_json::from_value(v).unwrap();
+    assert!(back.behaviors.is_empty(), "旧 JSON 缺键 ⇒ 空集");
+}
+
 /// 未声明风险 ⇒ 生效档是 `Medium`（不是 `Low`）
 ///
 /// 这条是**审批闸门的安全前提**：默认档决定了那些没写 `risk` 的工具（第三方

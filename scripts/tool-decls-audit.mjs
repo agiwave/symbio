@@ -4,9 +4,9 @@
  *
  * ## 它治什么
  *
- * 工具用 `CapabilityMeta` 的三个行为位**自声明**自己归哪几族闸门管：
- * `provides_assign_work`（淘汰闸）/ `records_delegation_promise`（承诺记账）/
- * `owns_task_table`（任务表写侧资格闸）。判定读的是**位**，不认工具名字——
+ * 工具用 `CapabilityMeta.behaviors` 里的行为名**自声明**自己归哪几族闸门管：
+ * `assign_work`（淘汰闸）/ `delegation_promise`（承诺记账）/
+ * `task_table`（任务表写侧资格闸）。判定读的是**名字**，不认工具名——
  * 于是「该声明的工具漏了声明」与「这工具压根不在管辖面」在代码上长得一样，
  * 三道闸对它**静默不命中**（[] 行为位自声明 / [] ③ 声明面 fail-closed）。
  *

@@ -1,10 +1,11 @@
-//! 工具自声明的行为位：执行器**按声明判，不按名字判**。
+//! 工具自声明的行为名：执行器**按声明判，不按名字判**。
 //!
 //! 三处闸门（淘汰闸 / 承诺记账 / 任务表）若各自把工具名字面量抄一遍，
 //! 工具改名时**没有测试会失败**——闸门静默失效（J3 要消灭的形态）。本位把它们
-//! 的管辖对象改成 `CapabilityMeta` 上的
-//! **自声明字段**，与 `risk` / `context_retention` 同一条纪律：工具说「我受这项
-//! 管辖」，闸门只负责读声明。
+//! 的管辖对象改成 `CapabilityMeta.behaviors` 上的**开放集合**（DE-025 D-210），
+//! 与 `risk` / `context_retention` 同一条纪律：工具说「我受这项管辖」，闸门只负责
+//! 读名字。名字本身住 `symbio_plugin_api::behaviors`——本模块不认识工具，也不往
+//! 内核加字段。
 //!
 //! ## 读的时机与来源
 //!
@@ -20,12 +21,13 @@
 //! - **任务表**：线上全名**取末段**比短名（`local/todo_write` ⇒ `todo_write`）。
 //!
 //! 集合以注册表给出的 `meta.name` 为键——作用域投影（子智能体的改名包装器）只换
-//! 名字、原样透传行为位，所以**闸门跟随工具进入子作用域**：那正是「换个会话绕不
+//! 名字、原样透传行为名，所以**闸门跟随工具进入子作用域**：那正是「换个会话绕不
 //! 开淘汰」要的读法（按字面量等值判，前缀名一个都不命中）。
 
 use std::collections::HashSet;
 
 use symbio_core::CapabilityMeta;
+use symbio_plugin_api::behaviors;
 
 /// 三类按名闸门的管辖集合（键 = 注册表里的 `meta.name`）。
 #[derive(Debug, Default)]
@@ -51,13 +53,13 @@ impl ToolDecls {
 
     /// 把一份能力元数据的行为位收进集合（键取 `meta.name`）。
     fn absorb(&mut self, meta: &CapabilityMeta) {
-        if meta.provides_assign_work {
+        if meta.declares(behaviors::ASSIGN_WORK) {
             self.assign_work_tools.insert(meta.name.clone());
         }
-        if meta.records_delegation_promise {
+        if meta.declares(behaviors::DELEGATION_PROMISE) {
             self.promise_tools.insert(meta.name.clone());
         }
-        if meta.owns_task_table {
+        if meta.declares(behaviors::TASK_TABLE) {
             self.task_table_tools.insert(meta.name.clone());
         }
     }

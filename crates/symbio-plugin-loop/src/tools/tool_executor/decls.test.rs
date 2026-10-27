@@ -40,13 +40,21 @@ impl Capability for FakeTool {
     }
 }
 
-/// 按位构造一份元数据（其余字段走 `Default`）。
+/// 按行为名构造一份元数据（其余字段走 `Default`）。
 fn meta(name: &str, assign_work: bool, promise: bool, task_table: bool) -> CapabilityMeta {
+    use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE};
     CapabilityMeta {
         name: name.to_string(),
-        provides_assign_work: assign_work,
-        records_delegation_promise: promise,
-        owns_task_table: task_table,
+        behaviors: match (assign_work, promise, task_table) {
+            (false, false, false) => &[],
+            (true, false, false) => &[ASSIGN_WORK],
+            (false, true, false) => &[DELEGATION_PROMISE],
+            (false, false, true) => &[TASK_TABLE],
+            (true, true, false) => &[ASSIGN_WORK, DELEGATION_PROMISE],
+            (true, false, true) => &[ASSIGN_WORK, TASK_TABLE],
+            (false, true, true) => &[DELEGATION_PROMISE, TASK_TABLE],
+            (true, true, true) => &[ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE],
+        },
         ..Default::default()
     }
 }
@@ -129,7 +137,7 @@ async fn matching_keeps_the_pre_mechanization_shapes() {
 
 // ==================== 声明随工具进子作用域 ====================
 
-/// 改名投影（子智能体的 `agent_<id>_<工具>`）只换名字、原样透传行为位，
+/// 改名投影（子智能体的 `agent_<id>_<工具>`）只换名字、原样透传行为名，
 /// 所以闸门在子作用域**同样命中**——此前按字面量等值判，前缀名一个都不中。
 ///
 /// 这不是扩面的口子，是「闸门跟随工具」的直读：淘汰判据本来就部署级

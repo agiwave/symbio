@@ -8,7 +8,7 @@
 use symbio_core::facts::Delegation;
 
 /// 承诺出参的**唯一写入点**（见 [`Delegation`]）：只有声明了
-/// `records_delegation_promise` 的工具会被记账，且在每个终态分支各记
+/// `delegation_promise` 声明的工具会被记账，且在每个终态分支各记
 /// 一次——没跑到的（协议错 / 被拦 / 批次跳过）同样是**没履约**，记成违约比
 /// "查无此约"诚实（S08 §5：违约可被观测是 T5 的全部前提）。
 pub fn note_delegation(

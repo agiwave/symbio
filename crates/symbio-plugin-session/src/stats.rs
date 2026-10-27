@@ -174,7 +174,7 @@ pub(crate) struct SessionStats {
     ///
     /// ## 这一列把「自述」变成「查得到的事实」
     ///
-    /// `agent_run` 在能力元数据里自声明「我记委托账」（`records_delegation_promise`），
+    /// `agent_run` 在能力元数据里自声明「我记委托账」（`delegation_promise` 行为名），
     /// 声明面由 `tool-decls-audit` 守着（名单封闭），但**声明说得不等于事实落了**——
     /// 判据只能是「这一轮委托过 ⇒ 这里读得出那一条」。写侧（工具执行层 → 轮末
     /// `record_derived`）与读侧（core 的 `commitment_records` 翻译）各钉了一段，中间

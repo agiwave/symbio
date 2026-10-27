@@ -10,7 +10,7 @@ use serde_json::Value;
 use symbio_core::facts::{TaskDeclaration, TaskItem, TaskStatus};
 
 /// 任务表出参的**唯一写入点**（见 [`TaskDeclaration`]）：只认**声明了
-/// `owns_task_table` 的工具**（`local/todo_write` 即是； 改了判据的住址，
+/// `task_table` 行为的工具**（`local/todo_write` 即是； 改了判据的住址，
 /// 没改这条语义）。
 ///
 /// 匹配口径取**短名**（最后一个 `/` 之后的部分）：LLM 可见全名是 `<挂载点>/<短名>`

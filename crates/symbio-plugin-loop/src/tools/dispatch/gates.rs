@@ -400,7 +400,7 @@ fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
     }
 }
 
-/// 淘汰闸（S13 §3，）：只拦声明 `provides_assign_work` 的工具。
+/// 淘汰闸（S13 §3，）：只拦声明 `assign_work` 行为的工具。
 ///
 /// 出口是**可审计拒绝**：`verdict.asserted` 已在事实源里（闸门只是读侧），本层
 /// 不再产事件；结果上的 `Refused: …` 与随收束入格的违约承诺就是它的两面。
@@ -419,7 +419,7 @@ fn elimination(ctx: &GateContext<'_>) -> Option<Refusal> {
     ))
 }
 
-/// 任务表写侧闸（S03 §3，）：只拦声明 `owns_task_table` 的工具。
+/// 任务表写侧闸（S03 §3，）：只拦声明 `task_table` 行为的工具。
 ///
 /// 出口是**可审计拒绝但不记承诺**：工具没跑，「声明过什么」无从说起
 /// （`note_tasks` 只在跑完后记成功调用）。

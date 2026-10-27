@@ -165,10 +165,9 @@ impl Capability for TodoWriteTool {
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),
             ]),
-            // 行为位自声明：任务表写侧资格闸与任务声明记账的管辖对象。
-            // 执行器读这一位判，不认名字——与风险同一条自声明纪律。
-            owns_task_table: true,
-            ..Default::default()
+            // 行为名自声明：任务表写侧资格闸与任务声明记账的管辖对象。
+            // 执行器读这个名字判，不认工具名——与风险同一条自声明纪律。
+            behaviors: &[symbio_plugin_api::behaviors::TASK_TABLE],
         }
     }
 

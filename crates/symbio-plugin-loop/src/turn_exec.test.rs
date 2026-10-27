@@ -1369,7 +1369,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
 
-    // 注册面与模型面同一份元数据：`agent_run` 自声明「派活 + 立约」两位，
+    // 注册面与模型面同一份元数据：`agent_run` 自声明「派活 + 立约」两个行为名，
     // 承诺记账只认声明——与生产（`plugins/agent/host/subagent.rs`）逐字同形。
     let tool_meta = CapabilityMeta {
         name: "agent_run".into(),
@@ -1377,8 +1377,10 @@ async fn full_turn_lands_derived_commitment_facts() {
         input_schema: serde_json::json!({ "type": "object" }),
         category: None,
         examples: None,
-        provides_assign_work: true,
-        records_delegation_promise: true,
+        behaviors: &[
+            symbio_plugin_api::behaviors::ASSIGN_WORK,
+            symbio_plugin_api::behaviors::DELEGATION_PROMISE,
+        ],
         ..Default::default()
     };
 

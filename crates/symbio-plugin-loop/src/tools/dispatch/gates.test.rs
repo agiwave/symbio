@@ -40,8 +40,15 @@ async fn decls_with(entries: &[(&str, bool, bool)]) -> ToolDecls {
         visitor
             .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: (*name).to_string(),
-                provides_assign_work: *assign_work,
-                owns_task_table: *owns_task_table,
+                behaviors: match (*assign_work, *owns_task_table) {
+                    (true, false) => &[symbio_plugin_api::behaviors::ASSIGN_WORK],
+                    (false, true) => &[symbio_plugin_api::behaviors::TASK_TABLE],
+                    (false, false) => &[],
+                    (true, true) => &[
+                        symbio_plugin_api::behaviors::ASSIGN_WORK,
+                        symbio_plugin_api::behaviors::TASK_TABLE,
+                    ],
+                },
                 ..Default::default()
             })) as Arc<dyn Capability>))
             .await;

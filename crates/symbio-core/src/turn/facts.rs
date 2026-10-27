@@ -15,7 +15,7 @@
 //!
 //! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
 //! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::node_build`]
-//! 的同一构造器）；记账判据（`note_*` 的门与 `records_delegation_promise` 声明位）与
+//! 的同一构造器）；记账判据（`note_*` 的门与 `behaviors` 里的 `delegation_promise` 声明）与
 //! 派发机制（行表 / 绑定表 / 执行体）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
 
 use crate::chat_node::ChatNode;
@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
 /// `derived_facts::record_derived` 落成 `commitment.*` 格。
 ///
-/// 只认**声明了 `records_delegation_promise` 的工具**（`agent_run` 即是； 改了
+/// 只认**声明了 `delegation_promise` 行为的工具**（`agent_run` 即是； 改了
 /// 判据的住址，没改这条语义）——它是**跨主体**的那一次调用：本会话向上游承诺
 /// 「会有另一个智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，
 /// 不是承诺。

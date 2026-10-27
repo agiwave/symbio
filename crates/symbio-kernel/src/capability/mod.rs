@@ -73,35 +73,30 @@ pub struct CapabilityMeta {
     /// 取值只能是枚举变体（不接受字符串字面量），编译器强制这一点。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub risk: Option<CapabilityRiskLevel>,
-    /// 本工具是否提供 `assign.work`（派活）——**淘汰闸的管辖对象**（S13 §3，）。
+    /// 本工具声明的**行为名**（能力效果的自声明，DE-025 D-210）。
     ///
-    /// 机制说明：与 `risk` 同一条纪律——**工具自声明**，闸门读这个
-    /// 字段判定，**不硬编码工具名**。`assign.work` 被淘汰回路收回时，
-    /// 执行器据本字段把调用判为淘汰拒止；未声明的工具不在淘汰闸管辖内。作用域
-    /// 投影（子智能体的改名包装）只换名字、原样透传本字段——闸门跟随**工具**，
-    /// 不跟随它在哪个作用域里叫什么。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub provides_assign_work: bool,
-    /// 本工具是否**立约**（跨主体承诺）——承诺出参的记账对象（S08 §3）。
+    /// 与 `risk` 同一条纪律——**工具自声明**，闸门读名字判定，**不硬编码工具名**。
+    /// 已知名字住 `symbio_plugin_api::behaviors`；本类型只装开放集合，不认识任何
+    /// 具体名字，因此加一个行为不再改内核。未声明 ⇒ 空集 ⇒ 所有按行为判的闸门
+    /// 都不命中（与「该声明的工具漏了声明」同形，由声明面/收集期校验兜）。
     ///
-    /// 机制说明：同 `provides_assign_work` 的自声明
-    /// 纪律。承诺记账（`commitment.*` 格）只为声明了本位的工具记；没跑
-    /// 到的一样记违约——「约」本身已经存在。未声明 ⇒ 不记：本主体自办的调用是
-    /// 执行结果，不是承诺。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub records_delegation_promise: bool,
-    /// 本工具是否写**任务表**——任务表写侧资格闸与任务声明记账的管辖对象
-    /// （S03 §3，）。
+    /// 作用域投影（子智能体的改名包装）只换名字、原样透传本集合——闸门跟随
+    /// **工具**，不跟随它在哪个作用域里叫什么。
     ///
-    /// 机制说明：写侧资格（`define.work` / `assert.verification` 二居其一）与任务
-    /// 声明记账都只为声明了本位的工具生效。线上名 `<挂载点>/<短名>` 取
-    /// 末段这个**匹配口径**不变，变的是「谁是管辖对象」——从执行器里的字面量
-    /// 改成工具自己的声明。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub owns_task_table: bool,
+    /// 行为名是宿主内部词汇，不是线格式：它不进 tools/list JSON（`skip`）。
+    /// 旧 JSON 缺键 ⇒ 空集，与未声明同义。
+    #[serde(skip, default)]
+    pub behaviors: &'static [&'static str],
 }
 
 impl CapabilityMeta {
+    /// 本工具是否声明了某个行为（`name` 取 `symbio_plugin_api::behaviors` 的常量）。
+    ///
+    /// 闸门只问这一句，不遍历整张表：`behaviors` 是开放集合，读侧按已知常量判。
+    pub fn declares(&self, name: &str) -> bool {
+        self.behaviors.contains(&name)
+    }
+
     /// 构造带 category 分类的元数据
     pub fn with_category(mut self, kind: CapabilityCategory) -> Self {
         self.category = Some(kind);

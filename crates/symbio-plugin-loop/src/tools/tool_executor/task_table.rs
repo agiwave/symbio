@@ -62,7 +62,7 @@ impl TaskTableInputs {
 }
 
 // 「谁是任务表写入」这个判据不在本文件：它在工具自己的
-// `CapabilityMeta::owns_task_table` 上自声明，执行器经
+// `CapabilityMeta::behaviors` 上自声明（`task_table`），执行器经
 // `ToolDecls` 读声明——把名字抄进闸门的那份副本
 // （`TODO_WRITE_TOOL` / `is_task_table_tool`）随机制化一并退役。
 

@@ -128,8 +128,8 @@ impl: done
 | `symbio_core::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | 驱动器 `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline`；留守 `stats` |
 
 判据与 `types::Session` 一族同一条：**词汇的归属随数据 owner，跨插件者上移**。
-**机制留在原处**——`note_*` 的门与声明位（`records_delegation_promise` /
-`owns_task_table`）、`RoundHookFn` 的回调形态、`llm_build_assistant_messages` 的
+**机制留在原处**——`note_*` 的门与行为声明（`delegation_promise` /
+`task_table`）、`RoundHookFn` 的回调形态、`llm_build_assistant_messages` 的
 一轮装配，都不在词表里。
 
 ---

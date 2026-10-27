@@ -87,9 +87,15 @@ async fn factory_decls() -> ToolDecls {
         visitor
             .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: name.to_string(),
-                provides_assign_work: assign_work,
-                records_delegation_promise: promise,
-                owns_task_table: task_table,
+                behaviors: match (assign_work, promise, task_table) {
+                    (true, true, false) => &[
+                        symbio_plugin_api::behaviors::ASSIGN_WORK,
+                        symbio_plugin_api::behaviors::DELEGATION_PROMISE,
+                    ],
+                    (false, false, true) => &[symbio_plugin_api::behaviors::TASK_TABLE],
+                    (false, false, false) => &[],
+                    other => unreachable!("夹具只喂生产组合：{other:?}"),
+                },
                 ..Default::default()
             })) as Arc<dyn Capability>))
             .await;
@@ -1325,8 +1331,10 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
         visitor
             .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: "agent_run".to_string(),
-                provides_assign_work: true,
-                records_delegation_promise: true,
+                behaviors: &[
+                    symbio_plugin_api::behaviors::ASSIGN_WORK,
+                    symbio_plugin_api::behaviors::DELEGATION_PROMISE,
+                ],
                 ..Default::default()
             })) as Arc<dyn Capability>))
             .await;
@@ -1435,7 +1443,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         visitor
             .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: "todo_write".to_string(),
-                owns_task_table: true,
+                behaviors: &[symbio_plugin_api::behaviors::TASK_TABLE],
                 ..Default::default()
             })) as Arc<dyn Capability>))
             .await;
