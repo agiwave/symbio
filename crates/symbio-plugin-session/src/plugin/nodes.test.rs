@@ -859,3 +859,36 @@ fn subtree_nodes_refetch_reproduces_released_subtree() {
         have.insert(m.id.as_str());
     }
 }
+
+/// **触发声明只判成员资格**（DE-025 D-211）：登记表里的每个 kind 都放行，
+/// 表外的一律拒——写臂不再等值于某一个 kind（那会把别人的部署事实抄进 session）。
+///
+/// 反向用例是这条判据的重点：「拼错的 kind 被当普通用户消息」不会让任何东西变红，
+/// 只会让那一轮不再是自主的（事实源里少那四格）。
+#[test]
+fn a_trigger_declaration_is_judged_by_membership_not_equality() {
+    let with_kind = |kind: &str| cm::ChatNode {
+        meta: Some(serde_json::json!({
+            symbio_core::EVENT_TRIGGER_META_KEY: { "kind": kind, "idle_ms": 4_321_i64 }
+        })),
+        ..Default::default()
+    };
+
+    assert!(
+        !symbio_core::EVENT_TRIGGER_KINDS.is_empty(),
+        "登记表读空了——空表会让所有触发声明被拒（fail-closed，但功能会静默消失）"
+    );
+    for kind in symbio_core::EVENT_TRIGGER_KINDS {
+        assert_eq!(
+            trigger_declaration(&with_kind(kind)).expect("登记过的 kind 必须放行"),
+            Some(4_321),
+            "登记过的 kind {kind:?} 必须放行，并带回 idle_ms"
+        );
+    }
+    for kind in ["scheduled_now", "Scheduled", ""] {
+        assert!(
+            trigger_declaration(&with_kind(kind)).is_err(),
+            "表外的 kind {kind:?} 必须拒——静默降级成普通用户消息不会让任何东西变红"
+        );
+    }
+}

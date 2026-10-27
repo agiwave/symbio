@@ -13,6 +13,22 @@
  * 重复键直接抛错（后写的悄悄覆盖前一条，正是「声明了但没生效」的形态）。
  * 列表值用逗号分隔（`plugin_routes: root, watch`），不是缩进列表——缩进会把
  * 这份 schema 变成需要解析器的那一类。
+ *
+ * 一行一条记录的写法同理：授权行不写成缩进列表，而是每条一个 `principal_<slug>` 键
+ * （`principal_main: session/main|reply+define.work|thread_private`）——键名不参与
+ * 语义，只用来让「一行一个主体」这件事成立，顺序即声明序。
+ *
+ * ## 键 → 生成物
+ *
+ * | 键 | 生成物 |
+ * |---|---|
+ * | `plugin_id` / `plugin_assembly` / `plugin_order` / `plugin_undisablable` | `crates/symbio-deploy/src/lib.rs` |
+ * | `plugin_routes` | `crates/symbio-plugin-api/src/routes.rs` |
+ * | `shared_events` | `crates/symbio-plugin-api/src/events.rs` |
+ * | `principal_<slug>` | `crates/symbio-core/src/authz/rows.gen.rs` |
+ * | `tool_namespace` | `crates/symbio-kernel/src/chat/tool_namespaces.gen.rs` |
+ * | `trigger_kinds` | `crates/symbio-kernel/src/event/trigger_kinds.gen.rs` |
+ * | （目录名本身） | `crates/symbio/Cargo.toml` 与 `crates/symbio/src/lib.rs` 的标记块 |
  */
 
 import fs from "node:fs";

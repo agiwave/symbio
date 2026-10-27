@@ -390,7 +390,17 @@ impl ClosureReason {
 pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
 /// 触发方式的取值：**定时触发**（心跳一族的调度器）。落在 `system.triggered`
 /// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
+///
+/// 这个取值由 `symbio-plugin-heartbeat` 的 `PLUGIN.yml` 的 `trigger_kinds:` 声明，
+/// 登记表见 [`EVENT_TRIGGER_KINDS`]（生成物）：加一种触发方式 = 产出方在自己目录里加一行，
+/// 消费方（session 的写臂）只判成员资格。
 pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";
+
+// 登记过的触发方式（生成物）。写体 `meta.trigger.kind` 只认这里面的取值。
+#[path = "trigger_kinds.gen.rs"]
+mod trigger_kinds_gen;
+
+pub use trigger_kinds_gen::EVENT_TRIGGER_KINDS;
 
 // ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）──
 //

@@ -888,3 +888,50 @@ fn a_deployed_root_keeps_its_own_row() {
         "仲裁者同样保留自己的行"
     );
 }
+
+/// **表与常量一一对应**（DE-025 D-211 / `GEN-002`）。
+///
+/// 表已由各插件的 `PLUGIN.yml` 生成（`rows.gen.rs`），常量留在本模块（它们承载
+/// 「这一行为什么这么窄」的理由）。两侧任何一侧多出来都是错的方向，且**都不会让
+/// 编译失败**：
+///
+/// - 多一条常量 ⇒ 声明了一个没人能引用的主体（清单里漏了它，或行被删了）；
+/// - 多一行 ⇒ 给一个不存在的身份发了权限（常量没了，行还在生效）。
+///
+/// `person/local`（用户）是唯一豁免：它不入能力表（发言不是权威动作种类）。
+#[test]
+fn every_principal_constant_is_a_row_and_every_row_is_a_constant() {
+    let consts = [
+        PRINCIPAL_MAIN,
+        PRINCIPAL_TOOL_VDFS_WRITE,
+        PRINCIPAL_TOOL_WEB_FETCH,
+        PRINCIPAL_TOOL_CONTENT_SEARCH,
+        PRINCIPAL_AUTONOMOUS,
+        PRINCIPAL_REFLEX,
+        PRINCIPAL_PEER,
+        PRINCIPAL_MARKET,
+        PRINCIPAL_ARBITER,
+        PRINCIPAL_GATEKEEPER,
+        PRINCIPAL_WORKER,
+        PRINCIPAL_PLANNER,
+        PRINCIPAL_VERIFIER,
+        PRINCIPAL_SCHEDULER,
+    ];
+    for name in consts {
+        assert_eq!(
+            ROWS.iter().filter(|(p, _, _)| *p == name).count(),
+            1,
+            "{name} 必须恰好有一行（多行 = 权限重复授予，零行 = 声明了却没授权）"
+        );
+    }
+    for (principal, _, _) in ROWS {
+        assert!(
+            consts.contains(principal),
+            "{principal} 在表里有行却没有 PRINCIPAL_* 常量——那一行谁也引用不到"
+        );
+    }
+    assert!(
+        !consts.contains(&PRINCIPAL_USER),
+        "用户不入能力表：它的发言不是「智能体的权威动作种类」"
+    );
+}

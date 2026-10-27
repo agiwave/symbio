@@ -475,6 +475,13 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 /// 「声明了触发但 kind 拼错」若静默降级成一条普通用户消息，那轮工作就**不再是自主的**
 /// ——事实源里少那四格，而没有任何一处会因此变红。`meta` 是自由 JSON，键名拼错编译器
 /// 管不到，所以判据只能写在这里。
+///
+/// ## 认哪些 kind 由**产出方**说了算（DE-025 D-211）
+///
+/// 登记表是 `symbio_core::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
+/// 的投影）。本函数只判**成员资格**：加一种触发方式 = 产出方在自己目录里加一行，
+/// 这条写臂不动。反过来，把这里写成「等值于某一个 kind」就是把别人的部署事实
+/// 抄进 session——每加一种触发方式都要改会话插件。
 pub(crate) fn trigger_declaration(message: &cm::ChatNode) -> VdfsResult<Option<i64>> {
     let Some(trigger) = message
         .meta
@@ -484,10 +491,10 @@ pub(crate) fn trigger_declaration(message: &cm::ChatNode) -> VdfsResult<Option<i
         return Ok(None);
     };
     let kind = trigger.get("kind").and_then(Value::as_str).unwrap_or("");
-    if kind != symbio_core::EVENT_TRIGGER_KIND_SCHEDULED {
+    if !symbio_core::EVENT_TRIGGER_KINDS.contains(&kind) {
         return Err(VdfsError::invalid(format!(
-            "不认识的触发声明 kind：{kind:?}（今天只有 {:?}）",
-            symbio_core::EVENT_TRIGGER_KIND_SCHEDULED
+            "不认识的触发声明 kind：{kind:?}（登记过的：{:?}）",
+            symbio_core::EVENT_TRIGGER_KINDS
         )));
     }
     Ok(Some(

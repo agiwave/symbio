@@ -13,6 +13,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use super::TOOL_NAMESPACES;
+
 /// **主体族**（[D-069 §决策 1]）——四值闭集。
 ///
 /// `role` 已退出协议顶层，`kind` 是主体族的唯一承载点。
@@ -148,11 +150,14 @@ impl Principal {
         } else if let Some(rest) = name.strip_prefix("mcp__") {
             format!("mcp/{}", rest.replace("__", "/"))
         } else if let Some((head, rest)) = name.split_once('_') {
-            match head {
-                "vdfs" | "web" | "local" | "agent" if !rest.is_empty() => {
-                    format!("{head}/{rest}")
-                }
-                _ => format!("legacy/{name}"),
+            // 归属命名空间是**部署事实**（各插件 `PLUGIN.yml` 的 `tool_namespace:`，
+            // 见 `TOOL_NAMESPACES`）：加一个带工具的插件 = 在自己目录里写一行，
+            // 这里的匹配臂不动。`agent` 不在登记表里——它不是插件，是委派工具名的
+            // 合成前缀，与 `mcp` / `legacy` 同属拼接规则的产物。
+            if !rest.is_empty() && (TOOL_NAMESPACES.contains(&head) || head == "agent") {
+                format!("{head}/{rest}")
+            } else {
+                format!("legacy/{name}")
             }
         } else {
             format!("legacy/{name}")
@@ -182,7 +187,8 @@ impl Principal {
                 // 工具命名空间：vdfs / web / local 是插件归属，mcp / agent 是
                 // [`Principal::tool_principal`] 合成的地址形态，legacy 是旧 `tool:x`
                 // 的兜底段——都读回 Tool 族，保证构造⇄字符串往返幂等。
-                "vdfs" | "web" | "local" | "mcp" | "agent" | "legacy" => PrincipalKind::Tool,
+                _ if TOOL_NAMESPACES.contains(&ns) => PrincipalKind::Tool,
+                "mcp" | "agent" | "legacy" => PrincipalKind::Tool,
                 // session 与未识别 namespace 都按 Agent——授权表按 id 精确判，
                 // 未登记 ⇒ fail-closed，kind 猜宽不放大权限面。
                 _ => PrincipalKind::Agent,

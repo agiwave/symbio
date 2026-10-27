@@ -185,7 +185,7 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // 插件，而 `kind` 还被 core 自己的 `system.triggered` 载荷用着——字典因此不能在任一
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
-pub use event::{EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY};
+pub use event::{EVENT_TRIGGER_KINDS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY};
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
 // （C-003 数 `pub use`）。

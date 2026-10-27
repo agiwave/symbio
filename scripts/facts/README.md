@@ -38,6 +38,8 @@ export default {
 |---|---|---|
 | `_lib.mjs` | 描述符校验 / 溯源行 / 落盘与漂移判定 | runner 与 `facts.test.mjs` |
 | `_capability.mjs` | 能力矩阵三张表的提取（工具 / 操作 / 路由 / 插件总表） | `current.mjs`、`_sets.mjs` |
+| `_plugin-yml.mjs` | `PLUGIN.yml` 的唯一读取点（扁平 `key: value` schema） | `assembly` / `routes-rs` / `authz-rows` / `tool-namespaces` / `trigger-kinds` / `plugin-links-*` |
+| `_plugin-links.mjs` | 目录 → 插件链接行，以及标记块的替换原语 | `plugin-links-cargo.mjs`、`plugin-links-rs.mjs` |
 | `_sets.mjs` | 「成员集合 + owner」声明（封闭集判据读的同一份） | `facts.test.mjs` 的跨文档判据 |
 
 `_sets.mjs` 的 owner **不写死路径**：从各文档 front-matter 的 `lists: [<id>=owner]`

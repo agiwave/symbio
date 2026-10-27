@@ -334,102 +334,16 @@ pub const CAP_ASSERT_VERIFICATION: &str = Capability::AssertVerification.name();
 /// 少了这些行会怎样（[D-099](../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范") 起）：**该主体什么
 /// 都做不了**——未登记主体在表里没有行，每个谓词为假（fail-closed）。「忘配窄行」的
 /// 后果是一条**会被看见的拒绝**，不是一次静默超权。
-const ROWS: &[(&str, &[&str], VisScope)] = &[
-    (
-        PRINCIPAL_MAIN,
-        &[
-            Capability::JudgeIntent.name(),
-            Capability::Reply.name(),
-            CAP_DEFINE_WORK,
-            CAP_EXTERNAL_EXECUTION,
-            CAP_ASSIGN_WORK,
-        ],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_AUTONOMOUS,
-        &[CAP_DEFINE_WORK],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_REFLEX,
-        &[Capability::JudgeIntent.name()],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_PEER,
-        &[CAP_EXTERNAL_EXECUTION],
-        VisScope::ThreadPrivate,
-    ),
-    // 组织形态三角色（S13 §3，）：市场派活（公共域）/ 仲裁盖章（公共域）/ 守门判意图（私有）。
-    // 三行都是**单能力独持**——与自主 / 判定 / 对等三行同一条纪律：角色出现必须自带窄行，
-    // 窄行是唯一入口（D-099）。arbiter 持 `assert.verification` 不碰 C15（不持
-    // `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
-    (PRINCIPAL_MARKET, &[CAP_ASSIGN_WORK], VisScope::Public),
-    (
-        PRINCIPAL_ARBITER,
-        &[CAP_ASSERT_VERIFICATION],
-        VisScope::Public,
-    ),
-    (
-        PRINCIPAL_GATEKEEPER,
-        &[Capability::JudgeIntent.name()],
-        VisScope::ThreadPrivate,
-    ),
-    // S02/S03 三角色行（行与执行路径同批）：工人产生产物（树侧委派收束）、
-    // 规划者立任务、验证者独立判定。三行都是**单能力独持**——与自主 / 判定 / 对等 /
-    // 市场 / 仲裁 / 守门六行同一条纪律：角色出现必须自带窄行，窄行是唯一入口
-    // （D-099）。planner 持 `define.work` 不碰 C15（不持 `assert.verification`）；verifier
-    // 持 `assert.verification` 亦不碰 C15（不持 `define.work` / `produce.artifact`，
-    // 构造期双持检查见 `governance`）——「产出者不得自我认证」两边都成立。
-    (
-        PRINCIPAL_WORKER,
-        &[CAP_EXTERNAL_EXECUTION],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_PLANNER,
-        &[CAP_DEFINE_WORK],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_VERIFIER,
-        &[CAP_ASSERT_VERIFICATION],
-        VisScope::ThreadPrivate,
-    ),
-    // 调度者行（S04 §3，`D-139` 裁决 3）：**只持 `assign.work`**——与市场 / 仲裁 /
-    // 守门 / 工人 / 规划 / 验证六行同一条纪律（角色出现必须自带窄行）。它写
-    // `task.ready` / `task.assigned` 的资格就来自这一格（`ActorSpec::can_assign_work`
-    // 读规格自己身上的能力集，构造来源是本行）。
-    (
-        PRINCIPAL_SCHEDULER,
-        &[CAP_ASSIGN_WORK],
-        VisScope::ThreadPrivate,
-    ),
-    // 三族工具主体行（D-069 §决策 2 工具响应主体， 落地）：工具的权威动作是
-    // **产生产物**（`produce.artifact`）——工具响应的正文就是一条 artifact。与
-    // `session/worker` / `session/peer-b` 同款独持（窄的方向相同而角色不同：worker 是
-    // 树侧委派落点、peer 是图侧协作方、tool 是**能力**发言方）。今天写侧闸按会话
-    // 主体判，这三行是**声明性登记**，为 之后 `plugin::attributed` 按 kind=Tool
-    // 补 principal 铺好底。缺这一行不会红——表里没它 ⇒ `production_matrix` 没有它的行
-    // ⇒ `can_produce_artifact(vdfs/write)` fail-closed（D-099）；
-    // 今天的写入点都按 session principal 判，不撞这条。
-    (
-        PRINCIPAL_TOOL_VDFS_WRITE,
-        &[CAP_EXTERNAL_EXECUTION],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_TOOL_WEB_FETCH,
-        &[CAP_EXTERNAL_EXECUTION],
-        VisScope::ThreadPrivate,
-    ),
-    (
-        PRINCIPAL_TOOL_CONTENT_SEARCH,
-        &[CAP_EXTERNAL_EXECUTION],
-        VisScope::ThreadPrivate,
-    ),
-];
+/// **表本身由清单生成**（`rows.gen.rs`，DE-025 D-211 / `GEN-002`）：本段只留理由，
+/// 行与能力住在各插件 `PLUGIN.yml` 的 `principal_*` 里。生成器双向核对「常量 ⇄ 行」
+/// ——多一条常量是声明了没人能引用的主体，多一行是给不存在的身份发权限，两种都抛错。
+///
+/// 加一个主体 = 改**自己插件目录**里的清单 + 在下面立一条常量（后者只为给这一行一个
+/// 名字与理由）；`core` 的其余部分零改动。
+#[path = "rows.gen.rs"]
+mod rows_gen;
+
+use self::rows_gen::ROWS;
 
 static MATRIX: OnceLock<EffectiveMatrix> = OnceLock::new();
 

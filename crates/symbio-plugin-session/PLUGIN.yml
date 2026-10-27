@@ -6,3 +6,18 @@ plugin_order: 30
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 declarations::EVENTS。
 shared_events: message.added, message.edited, message.removed, session.consolidated, turn.branch_selected
+
+# 授权行：`<主体>|<能力名 + 连接>|<可见域>`（scripts/facts/authz-rows.mjs 读取 →
+# crates/symbio-core/src/authz/rows.gen.rs）。能力名的闭集住 governance::Capability。
+# 本插件声明的十个会话主体：主智能体 5 项；其余九行都是**比主智能体窄**的记录
+# （窄行是唯一入口，D-099：未登记主体不派生任何能力）。
+principal_main: session/main|judge.intent+reply+define.work+produce.artifact+assign.work|thread_private
+principal_autonomous: session/autonomous|define.work|thread_private
+principal_reflex: session/reflex|judge.intent|thread_private
+principal_peer: session/peer-b|produce.artifact|thread_private
+principal_market: session/market|assign.work|public
+principal_arbiter: session/arbiter|assert.verification|public
+principal_gatekeeper: session/gatekeeper|judge.intent|thread_private
+principal_worker: session/worker|produce.artifact|thread_private
+principal_planner: session/planner|define.work|thread_private
+principal_verifier: session/verifier|assert.verification|thread_private

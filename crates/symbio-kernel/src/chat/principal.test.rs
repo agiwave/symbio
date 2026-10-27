@@ -164,3 +164,38 @@ fn tool_principal_maps_wire_tool_names() {
     assert_eq!(Principal::tool_principal("").id, "legacy/unknown");
     assert_eq!(Principal::tool_principal("  ").kind, PrincipalKind::Tool);
 }
+
+/// **工具命名空间是部署事实，不是写死的匹配臂**（DE-025 D-211）。
+///
+/// 登记表 `TOOL_NAMESPACES` 由各插件 `PLUGIN.yml` 的 `tool_namespace:` 生成：
+/// 加一个带工具的插件 = 在自己目录里写一行，这里的判据证明那条声明真的生效
+/// ——每个登记过的命名空间都能合成 `<ns>/<tool>`，并读回 Tool 族。
+///
+/// 反向用例（未登记的前缀落 `legacy/`）钉住缺省的方向：漏声明不会静默变成
+/// 一个看似正常但没人能判的地址，而是**看得见**的 `legacy/<name>`。
+#[test]
+fn every_declared_tool_namespace_round_trips() {
+    assert!(
+        !TOOL_NAMESPACES.is_empty(),
+        "登记表读空了——空表会让所有工具主体落 legacy/，与授权表里的行对不上"
+    );
+    for ns in TOOL_NAMESPACES {
+        let p = Principal::tool_principal(&format!("{ns}_do_thing"));
+        assert_eq!(
+            p.id,
+            format!("{ns}/do_thing"),
+            "登记过的命名空间必须合成 <ns>/<tool>"
+        );
+        assert_eq!(p.kind, PrincipalKind::Tool);
+        assert_eq!(
+            Principal::from_legacy(&p.id).kind,
+            PrincipalKind::Tool,
+            "{ns} 必须读回 Tool 族（否则构造⇄字符串往返不幂等）"
+        );
+    }
+    assert_eq!(
+        Principal::tool_principal("unknown_ns_do_thing").id,
+        "legacy/unknown_ns_do_thing",
+        "未声明的插件落 legacy/：缺省要看得见，不能变成一个没人能判的地址"
+    );
+}

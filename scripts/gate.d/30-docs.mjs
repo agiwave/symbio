@@ -437,6 +437,24 @@ export const TEST_ONLY = [
   // 生成物照样「写成功」——读它的人看到一张缺格的矩阵而门禁全绿。回归测试直接对
   // `render` 断言行数、列数、每格文本与描述符契约（同名字的静态审计在 GUARDS 里）。
   'facts/injection-matrix',
+  // `facts/authz-rows` 是授权表（`authz/rows.gen.rs`）的生成器：行来自各插件
+  // `PLUGIN.yml` 的 `principal_*`，能力名从 `governance::Capability` 的声明里抽。
+  // 失效形态是**静默授权**：少一行 = 某主体什么都做不了（会被看见的拒绝），
+  // 多一行 = 给不存在的身份发了权限（不会被看见）。回归测试逐条注入坏形态
+  // （清单读空 / 能力名拼错 / 可见域非法 / 常量与行任一方向对不上 / 真仓漂移）。
+  'facts/authz-rows',
+  // `facts/trigger-kinds` 与 `facts/tool-namespaces` 生成的是**成员集合**：
+  // 触发方式登记表（`session` 写臂只判成员资格）与工具命名空间表（`tool_principal`
+  // 只判成员资格）。两者的最坏失效方向都是**读空**——空表让所有触发声明被拒 /
+  // 让所有工具主体落 `legacy/`，功能静默消失而构建全绿。回归测试第一条就是它。
+  'facts/trigger-kinds',
+  'facts/tool-namespaces',
+  // `facts/plugin-links` 是插件链接行的生成器（`Cargo.toml` 依赖行 + `lib.rs` 的
+  // `pub use`，两份文件各占一个模块、共用 `_plugin-links` 的标记块原语）。它的失效
+  // 形态是本仓最贵的一种静默：漏一行 `pub use` 不报错，只是那个插件的 `inventory`
+  // 注册项被链接器丢掉——插件「装上了」，工具 / 行为 / 上下文 provider 全部不生效。
+  // 回归测试钉住块外字节不变、标记缺失即抛错、真仓生成物与目录逐字一致。
+  'facts/plugin-links',
   // `gen-facts` + `facts/_lib` 是「事实生成」这条机制的执行方：目录遍历、描述符契约
   // 校验、幂等落盘与溯源行剔除。跑它的**回归测试**是因为这类 runner 的坏死方式全是
   // 静默的——目录读不出 / 描述符破损 / `out` 越界 / render 掺时间戳，四种都会让
@@ -558,6 +576,17 @@ export const LIBS = [
   // 清单时的三条抛错（形状非法 / 幽灵名字 / 一条名字两个 owner）由消费方
   // `shared-event-vocab-audit` 转述成人读的一行，故也不进 GUARDS。
   'facts/events-rs',
+  // 部署事实的四个生成器与它们的共享材料（`_plugin-links`）。登记成 LIBS 而不是
+  // GUARDS 的**理由**：它们由 `gen-facts` 调用、生成物漂移由 `gen-facts --check`
+  // 判，本体不是独立门禁步骤；回归测试那几格另在 GUARDS 里（同 `routes-rs` 的两处
+  // 登记）。`_plugin-links` 只提供「目录 → 链接行」与标记块替换原语，被两份链接行
+  // 生成器共用——各写一遍就是两处「块外字节怎么保留」的口径。
+  'facts/_plugin-links',
+  'facts/authz-rows',
+  'facts/plugin-links-cargo',
+  'facts/plugin-links-rs',
+  'facts/tool-namespaces',
+  'facts/trigger-kinds',
   'facts/assembly',
   'gen-doc-refs',
   'line-count',

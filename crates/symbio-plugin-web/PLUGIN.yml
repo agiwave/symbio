@@ -3,3 +3,10 @@ plugin_id: web
 plugin_comment: 网络访问
 plugin_assembly: sub_agent
 plugin_order: 100
+
+# 授权行（同 session 的口径）：工具主体——工具响应的权威动作是**产生产物**。
+principal_tool_fetch: web/fetch|produce.artifact|thread_private
+# 本插件**工具主体**的命名空间（scripts/facts/tool-namespaces.mjs 读取 →
+# crates/symbio-kernel/src/chat/tool_namespaces.gen.rs）。工具名 `<ns>_<tool>` 因此
+# 合成为 `<ns>/<tool>`；未声明的插件，其工具一律落 `legacy/<name>`。
+tool_namespace: web
