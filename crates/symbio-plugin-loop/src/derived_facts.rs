@@ -33,9 +33,10 @@
 //! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
 //! 刚写下的那些。
 
-use symbio_core::{
-    actor_can_assert_verification, Entity, Event, Seq, Store, Verb, EVENT_MEMORY_CALIBRATED,
-};
+use symbio_core::{actor_can_assert_verification, Entity, Event, Seq, Store, Verb};
+// 校准观测的名字由本插件交出（owner 是写方这一家）：常量住在清单生成物
+// `symbio_plugin_api::events`，经 `control_decl` 转手（DE-024 D-204 / D-205）。
+use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 // 记录类型住 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组）：
 // 写侧（`note_*` 的门）随观察点留在工具执行层，读侧与落侧两头都从这里拿。
 use symbio_core::facts::{Delegation, TaskDeclaration};

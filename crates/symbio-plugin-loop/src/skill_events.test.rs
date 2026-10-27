@@ -4,10 +4,12 @@
 
 use super::{compile, route, take_match, SkillCompiler, SkillLlmHit, SkillRoute, SkillRouter};
 use crate::control_decl::guard_vocab;
+// 校准观测的名字来自本插件的声明面（owner 是写方，DE-024 D-204 / D-205）。
+use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 use symbio_core::SKILL_TAG;
 use symbio_core::{
-    calibration, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    calibration_for, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
+    EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 
@@ -523,7 +525,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     );
 
     // 校准：1 用 1 回退 ⇒ 置信度 0.5；低于阈值 0.8 ⇒ 必须回退（不得走技能路径）。
-    let cal = calibration().apply(&snapshot, 9_999, Budget::generous());
+    let cal = calibration_for(EVENT_MEMORY_CALIBRATED).apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(cal.value.of("weekly-report").uses, 2);
     assert_eq!(cal.value.of("weekly-report").fallbacks, 1);
     let router = SkillRouter;
@@ -540,7 +542,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     // N1：校准双跑一致。
     assert_eq!(
         cal.value,
-        calibration()
+        calibration_for(EVENT_MEMORY_CALIBRATED)
             .apply(&snapshot, 9_999, Budget::generous())
             .value
     );

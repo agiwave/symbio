@@ -50,9 +50,9 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Event,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    ReadingPanel, SESSION_ID, SKILL_TAG,
+    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
+    Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload, ReadingPanel, SESSION_ID, SKILL_TAG,
 };
 
 use super::spend_ledger::spend_ledger;
@@ -379,8 +379,11 @@ pub(crate) fn read(
     // 写方在 adapter 边界折好）。它不重算价格——配置改了也只影响之后的事实。
     let spend = spend_ledger().read_all(&snapshot).value;
     // 校准列（[plan/12 批 1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：与四列同一份
-    // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
-    let cal = calibration().read_all(&snapshot).value;
+    // 切片、同一个 as-of。名字交进投影（DE-024 D-205）：写方是 `loop`，本插件经清单
+    // 生成物取它——不引用兄弟插件（E-009），也不由 core 代答。
+    let cal = calibration_for(symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED)
+        .read_all(&snapshot)
+        .value;
     let ck = checkpoint().read_all(&snapshot).value;
 
     // 档位取两列的并集：只开轮没收束的档位（时延列无样本）与只有兜底样本的

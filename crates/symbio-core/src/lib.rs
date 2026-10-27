@@ -73,7 +73,7 @@ pub use invariants::{
 // 投影的唯一构造器：**机制**，不是某一本账的词汇。视图类型与实现跟消费方插件走
 // （DE-023 D-180），内核只提供「纯函数 + 预算」这个形状；插件经根出口拿它来建自己的投影。
 pub use projection::branch::{branch_candidates, branch_hide_unselected, branch_selected};
-pub use projection::calibration::calibration;
+pub use projection::calibration::calibration_for;
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
@@ -226,10 +226,9 @@ pub use event::{
     EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
     EVENT_COMMITMENT_RELEASED,
 };
-// `memory.calibrated` 的读侧投影 `calibration` 住 core（core 按名字读它 ⇒ 随投影一起迁，
-// DE-024 D-201 / D-203）。`memory.encoded` 不在这里：core 一行都不读它，它的两个读方都在
-// 插件侧，名字登记在 owner 清单（`symbio_plugin_api::events`，D-204）。
-pub use event::EVENT_MEMORY_CALIBRATED;
+// `memory.calibrated` 不在这里：读侧投影 `calibration_for` 的名字由调用方在构造期交进来
+// （DE-024 D-205），core 一行都不读这条名字；两个消费方各用自己的常量（owner 的
+// `control_decl` 与清单生成物 `symbio_plugin_api::events`，D-204）。
 // 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
 // **两个生产消费方**，故走非测试的 `pub` 出根。

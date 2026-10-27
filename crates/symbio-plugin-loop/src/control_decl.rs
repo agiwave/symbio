@@ -37,10 +37,13 @@ pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
 pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
-// 跨插件共享的两条名字（DE-024 D-204）：常量的**事实源是本插件清单的 `shared_events:` 行**，
-// 由 `scripts/facts/events-rs.mjs` 投影进 `symbio-plugin-api::events`，读侧（`session` 的
-// `stats` / `inbox`）从这里取名字，而不是内核替它们命名。
-pub(crate) use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_TASK_CONTROLLED};
+// 跨插件共享的三条名字（DE-024 D-204 / D-205）：常量的**事实源是本插件清单的
+// `shared_events:` 行**，由 `scripts/facts/events-rs.mjs` 投影进
+// `symbio-plugin-api::events`，读侧（`session` 的 `stats` / `inbox`，以及它调
+// `calibration_for` 时交进去的那个实参）从这里取名字，而不是内核替它们命名。
+pub(crate) use symbio_plugin_api::events::{
+    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_TASK_CONTROLLED,
+};
 
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
 /// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
@@ -84,8 +87,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 记忆找回（S5）：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
     // 巩固与遗忘（S5 的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
-    // 都在本插件，随 D-201 从内核 `CELLS` 迁出。`memory.encoded` **不在这里**——
-    // `plugins/session` 的 `stats` 也读它，两个插件同时消费的名字不能被一个插件独占。
+    // 都在本插件，随 D-201 从内核 `CELLS` 迁出。同族的 `memory.encoded` / `memory.calibrated`
+    // 走另一条：`session` 也读它们，名字因此登记进本插件清单的 `shared_events`，格位仍由
+    // 本插件交出（DE-024 D-204 / D-205），不回内核。
     EventDecl::new(
         EVENT_MEMORY_CONSOLIDATED,
         (Entity::Memory, Verb::Progressed),
@@ -94,6 +98,18 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 编码进记忆（写方 `memory_events` / `skill_events`，读方还有 `session` 的 `stats`）：
     // 跨插件消费 ⇒ 名字登记进清单、格位由本插件交出（DE-024 D-204）。
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
+    // 校准观测：技能**被用过之后**的一次命中 / 回退记录（`payload: { skill_id, fallback }`）。
+    //
+    // 为什么不能继续复用 `memory.recalled`：那是 S11 §3 的省格决定，代价落在**读侧**——
+    // 校准投影只能靠载荷有没有这两个字段认自己的输入，同一张格子两种语义，判别退化成
+    // 「谁恰好带了这两个字段」，那不是闭集：任何将来带这两个字段的事件都会被算进置信度。
+    // 给它一格后读侧按名字过滤，判别回到闭集；写侧不变（仍是轮末 `derived_facts` 收束族，
+    // **不开第二写通道**——I1）。
+    //
+    // 读侧投影 `symbio_core::calibration_for` 住在 core（loop 的路由阈值与 session 的
+    // 校准列同时消费它），而**名字由调用方在构造期交进来**（DE-024 D-205）：本插件交这个
+    // 常量，`session` 交清单生成物里同名的那条——core 一行都不读它。
+    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
     // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
     // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),

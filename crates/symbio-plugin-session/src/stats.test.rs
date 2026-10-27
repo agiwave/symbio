@@ -11,12 +11,14 @@ use super::{fleet_reading, read};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE, SKILL_TAG,
+    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
+    Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED,
+    EVENT_USER_MESSAGE, SKILL_TAG,
 };
+// 校准观测的名字走清单生成物（写方是 loop，本插件只是第二个消费方，DE-024 D-204 / D-205）。
 use symbio_kernel::event::kernel_vocab;
+use symbio_plugin_api::events::EVENT_MEMORY_CALIBRATED;
 
 /// 一个会话的事实**值**（生产侧由 `SessionStore::snapshot` 交回）。
 fn facts_of(wal: &Path) -> Option<Vec<Event>> {
@@ -1517,7 +1519,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
-        calibration()
+        calibration_for(EVENT_MEMORY_CALIBRATED)
             .apply(&snap, i64::MAX, Budget::generous())
             .value,
     )

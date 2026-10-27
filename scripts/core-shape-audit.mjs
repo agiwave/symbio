@@ -284,6 +284,13 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   `task.controlled`（原 `control.opened`，随 owner 的拼写约定改名）⇒ 内核常量与两行
  *   `CELLS` 同批退役 ⇒ 29/28 → 27/26（判据见 CS-007）。
  *
+ * - **D-205 首批迁出**（同日）：core 的读侧投影不再把业务名字写死在折叠里——
+ *   `calibration()` 改 `calibration_for(calibrated)`，名字由调用方在构造期交进来
+ *   （owner 交自家常量，第二个消费方交清单生成物）。`memory.calibrated` 因此登记进
+ *   loop 的 `shared_events`，内核常量与 `CELLS` 行同批退役 ⇒ 27/26 → 26/25。
+ *   这一条拆掉的是「core 读者」那一类 16 条名字的**共同**理由：投影留在 core（两个
+ *   插件同时消费），但认识名字的不是投影，是交出名字的那一方。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -292,7 +299,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 27, cellsRows: 26 }
+  : { kernelEvents: 26, cellsRows: 25 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

@@ -590,20 +590,16 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）────
-
-/// 校准断言：技能**被用过之后**的一次观测（命中 / 回退），落在 `memory × asserted`。
-///
-/// ## 为什么它不能继续复用 `memory.recalled`
-///
-/// 复用是 S11 §3 的省格决定，但代价落在**读侧**：校准投影于是只能靠**载荷有没有
-/// `skill_id` + `fallback`** 来认自己的输入——同一张格子被两种语义共用，判别退化成
-/// 「谁恰好带了这两个字段」。那不是闭集：**任何将来带这两个字段的事件都会被算进置信度**，
-/// 而唯一的防线是「编译事件恰好不带 `fallback`」（`calibration.rs` 的注释写着
-/// 「编译事件不计」，读起来像判据，其实是巧合）。
-///
-/// 给它一格之后，读侧按 `kind` 过滤，判别回到闭集。写侧不变（仍是轮末 `derived_facts`
-/// 收束族，**不开第二写通道**——I1）。
-pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
+//
+// 校准断言 `memory.calibrated`（`memory × asserted`）不在这里：写方只有 `plugins/loop`
+// 一家，名字与格位由它自己的 `EventDecl` 交出（`control_decl`），读侧投影的名字由调用方
+// 在构造期交进 core（DE-024 D-205 / D-204）。
+//
+// 为什么它不能继续复用 `memory.recalled`：复用是 S11 §3 的省格决定，代价落在**读侧**——
+// 校准投影只能靠载荷有没有 `skill_id` + `fallback` 认自己的输入，同一张格子两种语义，
+// 判别退化成「谁恰好带了这两个字段」，那不是闭集：任何将来带这两个字段的事件都会被算进
+// 置信度。给它一格之后读侧按名字过滤，判别回到闭集；写侧不变（仍是轮末 `derived_facts`
+// 收束族，**不开第二写通道**——I1）。这段理由是**这一格**的，随名字住在 owner 声明旁。
 
 // ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/003-design/038-多主体与对等承诺.md "DE-038-多主体与对等承诺")）──
 //

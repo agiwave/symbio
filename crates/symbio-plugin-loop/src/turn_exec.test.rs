@@ -1275,7 +1275,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 /// **反向自检**：注掉 `turn_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_memory_and_learning_facts() {
-    use symbio_core::EVENT_MEMORY_CALIBRATED;
+    use crate::control_decl::EVENT_MEMORY_CALIBRATED;
 
     let fx = setup_full_with(true);
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));

@@ -33,7 +33,8 @@
 use std::collections::BTreeMap;
 
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{calibration, Event, Store, SKILL_TAG};
+// 校准投影的**名字由本插件交进去**（DE-024 D-205）：机制住 core，词汇住 owner。
+use symbio_core::{calibration_for, Event, Store, SKILL_TAG};
 
 use super::recall::RecallView;
 
@@ -285,7 +286,9 @@ pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
         skill_by_seq.insert(seq, (id.to_string(), trigger.to_string()));
     }
 
-    let cal = calibration().read_all(events).value;
+    let cal = calibration_for(crate::control_decl::EVENT_MEMORY_CALIBRATED)
+        .read_all(events)
+        .value;
     let router = SkillRouter;
     let mut routing = SkillRouting::default();
     let mut drop_seqs = Vec::new();

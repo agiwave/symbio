@@ -5,10 +5,14 @@
 //! 置信度 = 1 − 回退率。低于阈值 ⇒ [`crate::actors::SkillRouter`]
 //! 不得走技能路径（反自动化回退）。
 //!
-//! 观测面：校准断言落**自己的格子** `memory.calibrated`（`payload: { skill_id,
+//! 观测面：校准断言落**自己的格子**（`memory.calibrated`，`payload: { skill_id,
 //! fallback }`）。它曾复用 `memory.recalled`（S11 §3「不加新格子」），代价是读侧
 //! 只能靠载荷字段判别自己的输入——同一张格子两种语义，任何将来带这两个字段的格子
 //! 都会被算进置信度，而当时唯一的防线是「编译事件恰好不带 `fallback`」。
+//!
+//! **这条名字不写在 core 里**（DE-024 D-205）：投影读哪条名字由调用方在构造期交进来
+//! （owner 交自家常量，第二个消费方交清单生成物），core 只留折叠的形状。写方只有
+//! `plugins/loop`，而读数被 loop 与 session 同时消费，所以投影住这儿、名字住清单。
 
 use super::super::event::Event;
 use super::Projection;
@@ -56,14 +60,19 @@ impl CalibrationView {
 }
 
 /// `calibration` 投影：从事件切片统计各技能的置信度。
-pub fn calibration() -> Projection<CalibrationView> {
-    Projection::new(|events: &[Event], now| {
+///
+/// **读哪条名字由调用方在构造期交进来**（DE-024 D-205）：owner 交自家 `EventDecl`
+/// 旁边那个常量，第二个消费方交清单生成物 `symbio_plugin_api::events::…`。core 不
+/// 链接插件也不链接 `plugin-api`，所以这条名字结构上无法由 core 自己提供。
+pub fn calibration_for(calibrated: &str) -> Projection<CalibrationView> {
+    let calibrated = calibrated.to_string();
+    Projection::new(move |events: &[Event], now| {
         let mut by_skill: BTreeMap<String, SkillStats> = BTreeMap::new();
         for e in events {
             if e.ts > now {
                 continue;
             }
-            if e.kind != crate::event::EVENT_MEMORY_CALIBRATED {
+            if e.kind != calibrated {
                 continue;
             }
             let Some(skill_id) = e.payload.get("skill_id").and_then(|v| v.as_str()) else {

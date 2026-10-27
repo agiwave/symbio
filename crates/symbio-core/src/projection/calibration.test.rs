@@ -8,15 +8,18 @@
 //! 一个新格子带了同名字段，置信度就凭空被算歪。
 //!
 //! 所以这里钉三件事：
-//! ① 只有 `memory.calibrated` 的事件进统计（别的格子带同名字段也**不算**）；
+//! ① 只有交进来的那条名字进统计（别的格子带同名字段也**不算**）；
 //! ② 格子对了但字段缺 ⇒ 不参与统计（不是「未回退」）；
 //! ③ 回退率与置信度按已知动作钉死期望值。
 
-use super::calibration;
+use super::calibration_for;
 use super::CalibrationView;
-use crate::event::EVENT_MEMORY_CALIBRATED;
 use crate::view::Budget;
 use crate::{Entity, Event, Verb};
+
+/// 夹具自己交名字（DE-024 D-205）：投影读哪条观测由调用方决定，core 不认识这个名字。
+/// 生产里两个调用方各交自己的常量（owner 的 `control_decl` 与清单生成物）。
+const CALIBRATED: &str = "memory.calibrated";
 
 /// 一条 `memory × asserted` 事件（校准观测就落在这一族）。
 fn ev(id: i64, kind: &str, payload: serde_json::Value) -> Event {
@@ -33,7 +36,7 @@ fn ev(id: i64, kind: &str, payload: serde_json::Value) -> Event {
 }
 
 fn view_of(events: &[Event]) -> CalibrationView {
-    calibration()
+    calibration_for(CALIBRATED)
         .apply(events, i64::MAX, Budget::generous())
         .value
 }
@@ -43,7 +46,7 @@ fn 只统计校准格_同名字段的别的格子不算() {
     let events = vec![
         ev(
             1,
-            EVENT_MEMORY_CALIBRATED,
+            CALIBRATED,
             serde_json::json!({"skill_id":"sk-1","fallback":false}),
         ),
         // 两个「长得像」的别的格子：一个带同名字段，一个不带
@@ -75,14 +78,10 @@ fn 格子对了字段缺_不参与统计而不是记成未回退() {
     let events = vec![
         ev(
             1,
-            EVENT_MEMORY_CALIBRATED,
+            CALIBRATED,
             serde_json::json!({"skill_id":"sk-1","fallback":false}),
         ),
-        ev(
-            2,
-            EVENT_MEMORY_CALIBRATED,
-            serde_json::json!({"skill_id":"sk-1"}),
-        ),
+        ev(2, CALIBRATED, serde_json::json!({"skill_id":"sk-1"})),
     ];
     let v = view_of(&events);
     // 缺字段的那条**不计入**：记成「未回退」会让 uses 涨、fallbacks 不涨，
@@ -96,17 +95,17 @@ fn 回退计数与置信度按已知动作钉死() {
     let events = vec![
         ev(
             1,
-            EVENT_MEMORY_CALIBRATED,
+            CALIBRATED,
             serde_json::json!({"skill_id":"sk-1","fallback":false}),
         ),
         ev(
             2,
-            EVENT_MEMORY_CALIBRATED,
+            CALIBRATED,
             serde_json::json!({"skill_id":"sk-1","fallback":true}),
         ),
         ev(
             3,
-            EVENT_MEMORY_CALIBRATED,
+            CALIBRATED,
             serde_json::json!({"skill_id":"sk-1","fallback":true}),
         ),
     ];
@@ -122,9 +121,11 @@ fn 回退计数与置信度按已知动作钉死() {
 fn as_of_之前不可见() {
     let events = vec![ev(
         5,
-        EVENT_MEMORY_CALIBRATED,
+        CALIBRATED,
         serde_json::json!({"skill_id":"sk-1","fallback":true}),
     )];
-    let v = calibration().apply(&events, 4, Budget::new(0, 0)).value;
+    let v = calibration_for(CALIBRATED)
+        .apply(&events, 4, Budget::new(0, 0))
+        .value;
     assert!(v.by_skill.is_empty(), "as-of 之前的观测不得计入");
 }

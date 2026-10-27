@@ -25,6 +25,9 @@ use symbio_core::{Entity, EventDecl, Verb};
 
 // ============ memory ============
 
+/// memory.calibrated — owner `symbio-plugin-loop`，格位 `(Memory, Asserted)`
+pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
+
 /// memory.encoded — owner `symbio-plugin-loop`，格位 `(Memory, Opened)`
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 
@@ -40,6 +43,7 @@ pub const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 /// 链进同一个二进制——那正是 E-009 禁掉的边（DE-024 D-204）。
 #[rustfmt::skip]
 pub const SHARED_EVENTS: &[EventDecl] = &[
+    EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)), // memory.calibrated ← loop
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← loop
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)), // task.controlled ← loop
 ];
