@@ -23,7 +23,7 @@
 //! | 平凡值 | 混合打分落地把无查询路径也改窄（老调用点行为漂移） |
 
 use super::*;
-use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_MEMORY_ENCODED};
+use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
 
 use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 
@@ -36,7 +36,7 @@ fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) {
         .append(
             Event::pending(
                 id.to_string(),
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -415,7 +415,7 @@ fn memory_of_a_never_appears_in_b_recall() {
         .append(
             Event::pending(
                 "mb",
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,

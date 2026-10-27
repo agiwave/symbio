@@ -33,7 +33,7 @@
 use std::collections::BTreeMap;
 
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{calibration, Event, Store, EVENT_MEMORY_ENCODED, SKILL_TAG};
+use symbio_core::{calibration, Event, Store, SKILL_TAG};
 
 use super::recall::RecallView;
 
@@ -60,7 +60,7 @@ impl SkillCompiler {
     ) -> Event {
         Event::pending(
             format!("skill-{skill_id}-{source_seq}"),
-            symbio_core::EVENT_MEMORY_ENCODED,
+            crate::control_decl::EVENT_MEMORY_ENCODED,
             symbio_core::Entity::Memory,
             symbio_core::Verb::Opened,
             0,
@@ -159,7 +159,7 @@ pub(crate) fn compile(
         return Ok(None);
     }
     if snapshot.iter().any(|e| {
-        e.kind == EVENT_MEMORY_ENCODED
+        e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
             && e.payload.get("tag").and_then(|v| v.as_str()) == Some(SKILL_TAG)
             && e.payload.get("trigger").and_then(|v| v.as_str()) == Some(trigger.as_str())
     }) {
@@ -270,7 +270,7 @@ pub(crate) fn route(snapshot: &[Event], view: &mut RecallView) -> SkillRouting {
     // 它们是**同一条事实**的两个字段，分两趟扫迟早有一趟忘了补。
     let mut skill_by_seq: BTreeMap<u64, (String, String)> = BTreeMap::new();
     for e in events {
-        if e.kind != EVENT_MEMORY_ENCODED
+        if e.kind != crate::control_decl::EVENT_MEMORY_ENCODED
             || e.payload.get("tag").and_then(|v| v.as_str()) != Some(SKILL_TAG)
         {
             continue;

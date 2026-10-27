@@ -59,10 +59,7 @@ use symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
 use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{
-    accept, Budget, ConsolidateParams, Entity, Event, Rejection, Seq, Store, Verb,
-    EVENT_MEMORY_ENCODED,
-};
+use symbio_core::{accept, Budget, ConsolidateParams, Entity, Event, Rejection, Seq, Store, Verb};
 
 use super::recall::{recall, RecallView};
 use crate::control_decl::{
@@ -230,7 +227,8 @@ pub(crate) fn recall_view(
     for snap in snapshots {
         events.extend(snap.events.into_iter().filter(|e| {
             let is_memory = e.entity == Entity::Memory
-                && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED);
+                && (e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
+                    || e.kind == EVENT_MEMORY_CONSOLIDATED);
             !is_memory || memory_visible(e, snap.own, viewer)
         }));
     }
@@ -395,7 +393,7 @@ pub(crate) fn encode(
         .append(
             Event::pending(
                 content.event_id,
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 turn,

@@ -7,8 +7,7 @@ use crate::control_decl::guard_vocab;
 use symbio_core::SKILL_TAG;
 use symbio_core::{
     calibration, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
-    EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 
@@ -137,7 +136,11 @@ fn compile_writes_a_sourced_skill_exactly_once_per_trigger() {
         .iter()
         .find(|e| e.seq.map(|s| s.value()) == Some(seq))
         .expect("技能格");
-    assert_eq!(skill.kind, EVENT_MEMORY_ENCODED, "技能是事实，不是特殊类型");
+    assert_eq!(
+        skill.kind,
+        crate::control_decl::EVENT_MEMORY_ENCODED,
+        "技能是事实，不是特殊类型"
+    );
     assert_eq!(
         skill.payload.get("tag").and_then(|v| v.as_str()),
         Some(SKILL_TAG)

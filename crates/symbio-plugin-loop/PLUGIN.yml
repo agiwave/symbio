@@ -3,3 +3,6 @@ plugin_id: loop
 plugin_comment: 驱动器：一轮的判决 / 工具循环（经地址面被会话触发，随每棵子树分形）
 plugin_assembly: sub_agent
 plugin_order: 40
+# 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
+# crates/symbio-plugin-api/src/events.rs）。格位仍住在 control_decl::EVENTS。
+shared_events: memory.encoded, task.controlled

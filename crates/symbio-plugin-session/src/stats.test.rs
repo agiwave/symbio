@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED,
     EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE, SKILL_TAG,
 };
 use symbio_kernel::event::kernel_vocab;
@@ -1147,7 +1147,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         .append(
             Event::pending(
                 "v2m-shared",
-                symbio_core::EVENT_MEMORY_ENCODED,
+                symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -1587,7 +1587,7 @@ fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
                 .append(
                     Event::pending(
                         id,
-                        EVENT_MEMORY_ENCODED,
+                        symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                         Entity::Memory,
                         Verb::Opened,
                         0,

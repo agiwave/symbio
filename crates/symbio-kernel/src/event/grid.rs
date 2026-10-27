@@ -46,12 +46,12 @@ use super::{
     Entity, EventDecl, FactRole, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
     EVENT_ASSISTANT_REPORTED, EVENT_AUTHZ_DENIED, EVENT_BRANCH_SELECTED, EVENT_COMMITMENT_ASSERTED,
-    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED,
-    EVENT_CONTROL_OPENED, EVENT_FAILED, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
-    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_REQUEST,
-    EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED, EVENT_TASK_ASSERTED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TURN_BRANCH,
-    EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
+    EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED, EVENT_COMMITMENT_RELEASED, EVENT_FAILED,
+    EVENT_MEMORY_CALIBRATED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+    EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_VERDICT_ASSERTED,
 };
 
 /// 网格上的一个格子：实体（行）× 动词（列）。
@@ -136,7 +136,8 @@ const CELLS: &[EventDecl] = &[
         (Entity::Message, Verb::Progressed),
     ),
     // ── 记忆（memory）──
-    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
+    // `memory.encoded` 的格位随 owner 的声明走（`plugins/loop::control_decl` +
+    // 清单 `shared_events`，DE-024 D-204）；这里只剩内核自己还认识的校准断言。
     EventDecl::new(EVENT_MEMORY_CALIBRATED, (Entity::Memory, Verb::Asserted)),
     // ── 承诺（commitment）──
     EventDecl::new(EVENT_COMMITMENT_OFFERED, (Entity::Commitment, Verb::Opened)),
@@ -154,8 +155,9 @@ const CELLS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_PROGRESS, (Entity::Task, Verb::Progressed)),
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
-    // ── 控制（control）：打断与熔断共用的一格 ──
-    EventDecl::new(EVENT_CONTROL_OPENED, (Entity::Control, Verb::Opened)),
+    // ── 控制（control）──
+    // 打断与熔断共用的那一格（`task.controlled`）随 owner 的声明走：它的写方在两个
+    // 插件各一个，名字因此登记进 owner 清单（DE-024 D-204），不在内核表上。
     // ── 裁决（verdict）──
     EventDecl::new(EVENT_VERDICT_ASSERTED, (Entity::Verdict, Verb::Asserted)),
 ];

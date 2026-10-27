@@ -21,7 +21,7 @@ use super::{record_derived, record_elimination, record_learning};
 use crate::control_decl::guard_vocab;
 use symbio_core::{
     check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 
 use super::super::recall::recall;
@@ -387,7 +387,8 @@ fn record_learning_wires_all_three_memory_steps() {
     let snap = store.range(Seq::new(0));
     assert_eq!(
         snap.iter()
-            .filter(|e| e.kind == EVENT_MEMORY_ENCODED && e.event_id.starts_with("v2m-"))
+            .filter(|e| e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
+                && e.event_id.starts_with("v2m-"))
             .count(),
         4,
         "步 11：每轮各编码一条经验"
@@ -396,7 +397,8 @@ fn record_learning_wires_all_three_memory_steps() {
     // 跨标签同文也只记一条（`contains_content` 比的是全部记忆）。
     assert_eq!(
         snap.iter()
-            .filter(|e| e.kind == EVENT_MEMORY_ENCODED && e.event_id.starts_with("v2j-"))
+            .filter(|e| e.kind == crate::control_decl::EVENT_MEMORY_ENCODED
+                && e.event_id.starts_with("v2j-"))
             .count(),
         1,
         "步 11b：判断每轮各编一条，同文去重（四轮同一句 ⇒ 只一条）"
@@ -719,7 +721,7 @@ fn commitment_failure_does_not_block_task_or_breaker() {
         snap.iter().any(|e| e.kind.starts_with("task.")),
         "承诺写失败后任务表被连累了——三族之间没有依赖，不该互相打断"
     );
-    // 熔断格按 `Entity::Control` 认，不按 kind 字符串认：`EVENT_CONTROL_OPENED` 的
+    // 熔断格按 `Entity::Control` 认，不按 kind 字符串认：`crate::control_decl::EVENT_TASK_CONTROLLED` 的
     // 字面量不住公开面（`event` 模块是私有的），而本用例判的是「那一格写没写进去」，
     // 不是它的 kind 拼写。
     assert!(

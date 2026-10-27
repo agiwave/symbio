@@ -61,6 +61,13 @@ export const GUARDS = [
   // （漏数默认体 / 把默认体内的 `fn` 当成成员）⇒ 形状变宽照样绿；② 基线写成大数
   // ⇒ 只进不出，机制退化成装饰。测试用 `CORE_SHAPE_BASELINE=0:0:0` 压到零证明它真的会红。
   'core-shape-audit',
+  // `shared-event-vocab-audit`（CS-007）判跨插件**事件名**的登记口是不是清单：清单上每
+  // 一行必须有 owner 自己的 `EventDecl`（格位）、除 owner 外至少一个插件在生产代码里引用
+  // 它、且内核 `event/mod.rs` / `CELLS` 上不再有它。它补的是 CS-005 只剩数字的那半：那两格
+  // 数「内核还替几个人当字典」，本判据逐名核「走正道的人有没有把内核那一行删掉」。
+  // 失效形态两头都钉：① 共享表收单消费方的名字 ⇒ 退化成预置常量（上一轮刚清掉的腐烂）；
+  // ② 内核留同名行不清 ⇒ 两处 owner，清单正道看起来开了其实没通。夹具测试逐条注入断言红。
+  'shared-event-vocab-audit',
   // `core-change-audit`（CC-001 / CC-002）判**「改插件顺手动内核」有没有留下理由**：
   // 触及 `crates/symbio-core/**` 或 `crates/symbio-kernel/**` 的提交必须带
   // `Core-Change:` 段；若同一提交还动了插件 / provider / testkit，那一段里必须有
@@ -545,6 +552,12 @@ export const LIBS = [
   'facts/lists-index',
   'facts/routes-ts',
   'facts/routes-rs',
+  // `events-rs` 与 `routes-rs` 同一形状：读各插件 `PLUGIN.yml` 的清单行，投影成
+  // `symbio-plugin-api` 里的共享事件名表（DE-024 D-204）。登记成 LIBS：它由 `gen-facts`
+  // 调用、生成物漂移由 `gen-facts --check`（GEN-001）判，本体不是独立门禁步骤；它读不懂
+  // 清单时的三条抛错（形状非法 / 幽灵名字 / 一条名字两个 owner）由消费方
+  // `shared-event-vocab-audit` 转述成人读的一行，故也不进 GUARDS。
+  'facts/events-rs',
   'facts/assembly',
   'gen-doc-refs',
   'line-count',

@@ -52,7 +52,7 @@ use serde::Serialize;
 use symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Event,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    ReadingPanel, EVENT_MEMORY_ENCODED, SESSION_ID, SKILL_TAG,
+    ReadingPanel, SESSION_ID, SKILL_TAG,
 };
 
 use super::spend_ledger::spend_ledger;
@@ -489,7 +489,7 @@ pub(crate) fn read(
     let compiled_skills = snapshot
         .iter()
         .filter(|e| {
-            e.kind == EVENT_MEMORY_ENCODED
+            e.kind == symbio_plugin_api::events::EVENT_MEMORY_ENCODED
                 && e.payload.get("tag").and_then(|v| v.as_str()) == Some(SKILL_TAG)
         })
         .count();

@@ -37,7 +37,7 @@
 
 use super::recall_score::{rank, ScoreEntry};
 use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
-use symbio_core::{Entity, Event, Projection, EVENT_MEMORY_ENCODED};
+use symbio_core::{Entity, Event, Projection};
 
 use symbio_kernel::Timestamp;
 
@@ -118,7 +118,7 @@ pub fn recall(
                 continue;
             }
             match e.kind.as_str() {
-                EVENT_MEMORY_ENCODED | EVENT_MEMORY_CONSOLIDATED => {
+                crate::control_decl::EVENT_MEMORY_ENCODED | EVENT_MEMORY_CONSOLIDATED => {
                     // 巩固产物（压缩后的新记忆）同样可召回——它也是一条记忆，
                     // 只是 generation > 0（01 §9.2）。
                     if e.actor != viewer {

@@ -188,8 +188,8 @@ pub use actors::{EliminationDecider, SKILL_TAG};
 // 插件里（否则另一侧复述字面量），判据见 [D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")。
 #[allow(unused_imports)]
 pub use event::{
-    EVENT_CONTROL_OPENED, EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD,
-    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
 // 协议族的名字：消费方是 `decl`（声明层）与 `plugins::loop`（端口行与端口
 // 适配器）——都在本 crate 内，所以经 `kernel` 门面以 `pub` 出根
@@ -226,13 +226,13 @@ pub use event::{
     EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
     EVENT_COMMITMENT_RELEASED,
 };
-// 记忆事件名：`memory.encoded` 的生产读方**跨两个插件**（`loop` 的记忆/技能事件、
-// `session` 的 `stats`），`memory.calibrated` 的读侧投影 `calibration` 住 core——
-// 两个插件同时消费的名字不能被任一插件独占（E-009），故留在内核词汇表。
-pub use event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED};
+// `memory.calibrated` 的读侧投影 `calibration` 住 core（core 按名字读它 ⇒ 随投影一起迁，
+// DE-024 D-201 / D-203）。`memory.encoded` 不在这里：core 一行都不读它，它的两个读方都在
+// 插件侧，名字登记在 owner 清单（`symbio_plugin_api::events`，D-204）。
+pub use event::EVENT_MEMORY_CALIBRATED;
 // 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
-// **两个生产消费方**，故走非测试的 `pub` 出根（与记忆事件名表同一形态）。
+// **两个生产消费方**，故走非测试的 `pub` 出根。
 pub use event::EVENT_VERDICT_ASSERTED;
 // 名字表判据出根：唯一生产消费方是会话事实源的写侧闸门（`plugins/session/store/wal`），
 // 它在 core 之外却要判「这个名字落在哪一格」——判据本体必须在 core（名字表是共享契约），

@@ -702,7 +702,9 @@ fn interruption_within_reflex_budget_produces_control_event() {
                 .unwrap();
             let snapshot = facts(&store);
             assert!(
-                snapshot.iter().any(|e| e.kind == EVENT_CONTROL_OPENED),
+                snapshot
+                    .iter()
+                    .any(|e| e.kind == symbio_plugin_api::events::EVENT_TASK_CONTROLLED),
                 "80ms 内必须有 task.controlled"
             );
             assert!(

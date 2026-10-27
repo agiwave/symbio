@@ -24,7 +24,7 @@ lists: [gate-codes=owner]
 |---|---|---|---|---|
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–004 | `C-005` |
-| **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–006 | `CS-007` |
+| **CS** | core 形状 | `scripts/core-shape-audit.mjs` · `scripts/shared-event-vocab-audit.mjs` | CS-001–007 | `CS-008` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–014、D-016–020 | `D-021` |
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
@@ -76,6 +76,7 @@ lists: [gate-codes=owner]
 | **CS-004** | `scripts/core-shape-audit.mjs` |
 | **CS-005** | `scripts/core-shape-audit.mjs` |
 | **CS-006** | `scripts/core-shape-audit.mjs` |
+| **CS-007** | `scripts/shared-event-vocab-audit.mjs` |
 | **D-001** | `scripts/doc-link-audit.mjs` |
 | **D-002** | `scripts/doc-link-audit.mjs` |
 | **D-003** | `scripts/doc-link-audit.mjs` |

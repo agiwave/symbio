@@ -20,7 +20,7 @@ use symbio_core::merge_kernel::split_sentences;
 use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
     check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq, Store,
-    Verb, EVENT_MEMORY_ENCODED,
+    Verb,
 };
 
 use super::super::recall::recall;
@@ -81,7 +81,7 @@ fn seed_encoded_as(store: &EventStore, id: &str, content: &str, tag: &str, ts: i
         .append(
             Event::pending(
                 id.to_string(),
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -114,7 +114,7 @@ fn seed_shared(store: &EventStore, id: &str, content: &str, ts: i64) -> u64 {
         .append(
             Event::pending(
                 id.to_string(),
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -186,7 +186,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
 
     let snap = store.range(Seq::new(0));
     let ev = &snap[0];
-    assert_eq!(ev.kind, EVENT_MEMORY_ENCODED);
+    assert_eq!(ev.kind, crate::control_decl::EVENT_MEMORY_ENCODED);
     assert_eq!(ev.entity, Entity::Memory);
     assert_eq!(
         ev.actor, PRINCIPAL_USER,
@@ -353,7 +353,7 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
 
     let snap = store.range(Seq::new(0));
     let ev = &snap[0];
-    assert_eq!(ev.kind, EVENT_MEMORY_ENCODED);
+    assert_eq!(ev.kind, crate::control_decl::EVENT_MEMORY_ENCODED);
     assert_eq!(
         payload_str(ev, "tag"),
         Some(JUDGMENT_TAG),
@@ -485,7 +485,7 @@ fn consolidated_memory_inherits_the_source_vis_scope() {
             .append(
                 Event::pending(
                     format!("sc-{i}"),
-                    EVENT_MEMORY_ENCODED,
+                    crate::control_decl::EVENT_MEMORY_ENCODED,
                     Entity::Memory,
                     Verb::Opened,
                     0,
@@ -1418,7 +1418,7 @@ fn encode_at(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, so
         .append(
             Event::pending(
                 id,
-                EVENT_MEMORY_ENCODED,
+                crate::control_decl::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,

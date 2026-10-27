@@ -46,9 +46,9 @@ use std::sync::Arc;
 use symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use symbio_core::{
     ActorSpec, Entity, Event, LatencyTier, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_CONTROL_OPENED,
-    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, PRINCIPAL_REFLEX,
-    SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    PluginInvokeRequestExt, Scope, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_TASK_ASSERTED,
+    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, PRINCIPAL_REFLEX, SESSION_ID,
+    SOURCE_PRINCIPAL, WORKDIR,
 };
 
 /// 重试退避：**启动失败被放回队首**或**落格失败留着未结清项**时的重试间隔。
@@ -304,7 +304,7 @@ impl PreemptionDecider {
     pub fn control_event(&self, reason: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("ctrl-{source_seq}"),
-            EVENT_CONTROL_OPENED,
+            symbio_plugin_api::events::EVENT_TASK_CONTROLLED,
             Entity::Control,
             Verb::Opened,
             0,

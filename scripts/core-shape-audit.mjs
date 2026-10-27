@@ -278,6 +278,12 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   角色之后，`task.rework_created` 的唯一生产消费方只剩 `plugins/loop`（CS-006 逐名点出）
  *   ⇒ 名字、`EventDecl` 行与 `CELLS` 行同批归 loop ⇒ 30/29 → 29/28。
  *
+ * - **D-204 首批迁出**（同日）：跨插件名字的登记口改到各插件自己的 `PLUGIN.yml`
+ *   （`shared_events:` → 生成 `symbio-plugin-api/src/events.rs`），「两个插件同时消费 ⇒
+ *   只能住内核」这条 E-009 旧推论作废。core 完全不读的两条先走：`memory.encoded` 与
+ *   `task.controlled`（原 `control.opened`，随 owner 的拼写约定改名）⇒ 内核常量与两行
+ *   `CELLS` 同批退役 ⇒ 29/28 → 27/26（判据见 CS-007）。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -286,7 +292,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 29, cellsRows: 28 }
+  : { kernelEvents: 27, cellsRows: 26 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

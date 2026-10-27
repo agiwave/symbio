@@ -10,7 +10,7 @@ use crate::cost_ledger;
 use crate::event::kernel_vocab;
 use crate::event::{
     Entity, Event, EventDecl, FactRole, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE,
+    EVENT_USER_MESSAGE,
 };
 use crate::invariants::check_all;
 use crate::projection::turnstate::turnstate;
@@ -592,7 +592,7 @@ fn encode(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, sourc
         .append(
             Event::pending(
                 id,
-                EVENT_MEMORY_ENCODED,
+                MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -662,7 +662,7 @@ fn memory_event_without_provenance_is_caught() {
         produced_by: None,
         ..Event::pending(
             "m0",
-            EVENT_MEMORY_ENCODED,
+            MEMORY_ENCODED,
             Entity::Memory,
             Verb::Opened,
             0,
@@ -981,7 +981,7 @@ fn self_reported_reputation_never_enters_the_projection() {
         .append(
             Event::pending(
                 "self2",
-                crate::event::EVENT_MEMORY_ENCODED,
+                MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
@@ -1178,6 +1178,11 @@ fn elimination_event_keeps_invariants_green() {
 use crate::event::{EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS};
 use crate::invariants::{acyclic_deps, rework_bounded};
 use crate::projection::readyset::readyset;
+
+/// `memory.encoded`：名字与格位都在 owner 插件（`plugins/loop` 的 `EventDecl` + 清单
+/// `shared_events`，DE-024 D-204），内核表不认识它。core 的夹具因此自己写这条字面量——
+/// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
+const MEMORY_ENCODED: &str = "memory.encoded";
 
 /// 返工那一格：名字与角色随 owner 插件（`plugins/loop::control_decl`），内核表不认识它。
 ///

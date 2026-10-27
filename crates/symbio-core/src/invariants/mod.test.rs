@@ -916,7 +916,7 @@ fn a_final_is_counted_because_it_declares_the_role_not_because_of_its_name() {
     );
 
     // 同一批事件换一张**不认识这些名字**的表 ⇒ 判据空转（这正是装配口
-    // `Gap::UnmannedRole` 与门禁 CS-007 要拦的形状，不是判据自己的错）。
+    // `Gap::UnmannedRole` 与门禁 CS-008 要拦的形状，不是判据自己的错）。
     assert!(
         final_unique_per_turn(kernel_vocab(), &dup).is_empty(),
         "词汇表里没有的名字不扮演任何角色——角色来自表，不是来自猜"

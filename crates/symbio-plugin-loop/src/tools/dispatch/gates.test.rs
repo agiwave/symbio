@@ -289,7 +289,7 @@ fn circuit_breaker_break_table_and_event() {
 
     // 熔断不许静默：`break_event` 必须落在 `control × opened`，载荷带 reason。
     let ev = gate.break_event("budget-exhausted", 7);
-    assert_eq!(ev.kind, EVENT_CONTROL_OPENED);
+    assert_eq!(ev.kind, crate::control_decl::EVENT_TASK_CONTROLLED);
     assert_eq!(ev.entity, Entity::Control);
     assert_eq!(ev.verb, Verb::Opened);
     assert_eq!(ev.actor, PRINCIPAL_REFLEX);

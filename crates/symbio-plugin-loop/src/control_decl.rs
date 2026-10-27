@@ -37,6 +37,10 @@ pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
 pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
+// 跨插件共享的两条名字（DE-024 D-204）：常量的**事实源是本插件清单的 `shared_events:` 行**，
+// 由 `scripts/facts/events-rs.mjs` 投影进 `symbio-plugin-api::events`，读侧（`session` 的
+// `stats` / `inbox`）从这里取名字，而不是内核替它们命名。
+pub(crate) use symbio_plugin_api::events::{EVENT_MEMORY_ENCODED, EVENT_TASK_CONTROLLED};
 
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
 /// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
@@ -87,6 +91,12 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Memory, Verb::Progressed),
     ),
     EventDecl::new(EVENT_MEMORY_FORGOTTEN, (Entity::Memory, Verb::Closed)),
+    // 编码进记忆（写方 `memory_events` / `skill_events`，读方还有 `session` 的 `stats`）：
+    // 跨插件消费 ⇒ 名字登记进清单、格位由本插件交出（DE-024 D-204）。
+    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
+    // 控制面的一格（写方两个插件各一处：工具闸的熔断 / 拒因在本插件，打断处置在
+    // `session` 的 inbox）：owner 是本插件，名字走清单生成，不回内核。
+    EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
     // 调度者写的两格（D-139）：此前只有内核 `CELLS` 认识 `task.ready`（还没有表行）、
     // 完全不认识 `task.assigned`，落格只能被写闸拒掉。名字随 owner 声明之后，
     // 这两个事实才真正可入库。

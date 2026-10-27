@@ -34,7 +34,7 @@ pub use grid::{event_cell, kernel_vocab, Cell};
 /// 与「改动架构」脱钩（DE-024 D-203）。
 ///
 /// **每档都必须有人居住**：装配口逐档查居住（`Frozen::unmanned_roles` ⇒
-/// `Gap::UnmannedRole`），门禁 CS-007 判整仓。少了这条，owner 删掉角色会让对应判据
+/// `Gap::UnmannedRole`），门禁 CS-008 判整仓。少了这条，owner 删掉角色会让对应判据
 /// **静默不判**——判据从「拒绝」变成「看不见」，正是 J3 点名的失效形状。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactRole {
@@ -591,11 +591,6 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）────
 
-/// 编码：学到的语义内容（`payload: { content, tag, generation, vis_scope }`）。
-/// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
-/// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
-/// 承诺（[D-110](../../../symbio-plugin-memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "crates/symbio-plugin-memory/src/README")；写方 `plugins/loop/memory_events.rs`）。
-pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 校准断言：技能**被用过之后**的一次观测（命中 / 回退），落在 `memory × asserted`。
 ///
 /// ## 为什么它不能继续复用 `memory.recalled`
@@ -659,21 +654,12 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 调度者判死（见 `task.ready` 的 `lease_expired`）。
 pub const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
-// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/003-design/037-插话与实时打断.md "DE-037-插话与实时打断")、
-//    [roadmap/S09 §3](../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）────
+// ── 控制格子（`task.controlled`）──
 //
-// 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
-// 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
-// 一个更快的判定者决定了对在跑事务的处置。不加新机制，只加一格。
-//
-// 这个名字**不随 owner 迁出**：写方在两个插件各一个（session 的打断处置、loop 的
-// 熔断与拒因），独占它就得让另一边跨墙引用兄弟插件（E-009）——留在内核的理由是消费方
-// 分布，不是「还没搬」（逐名核据的门禁见 DE-024 D-202）。
-
-/// 控制判定产出（打断处置 / 熔断）。载荷 `{ task_id?, reason, ... }`。
-/// 落在 `control × opened`。**抢占判定者只持 JudgeIntent**——无 `reply.*` 写权，
-/// 判定者不得直接发言（S07 §5）。
-pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
+// 名字不在这里：写方在两个插件各一个（session 的打断处置、loop 的熔断与拒因），
+// 它因此是**跨插件事件名**，登记口是 owner 清单的 `shared_events:` 行
+// （`symbio_plugin_api::events`，判据 CS-007）——内核不为任何业务事件命名
+// （DE-024 D-203 / D-204）。格子语义与写侧纪律随 owner 的 `EventDecl` 走。
 
 /// 「这是一次自主开轮」在**地址写入体**上的判别键（`ChatNode.meta` 的键名）。
 ///

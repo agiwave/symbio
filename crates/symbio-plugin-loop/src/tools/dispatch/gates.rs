@@ -25,7 +25,7 @@
 //! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
 
 use super::*;
-use symbio_core::{Entity, Verb, EVENT_CONTROL_OPENED, PRINCIPAL_REFLEX};
+use symbio_core::{Entity, Verb, PRINCIPAL_REFLEX};
 
 /// 批首一次读齐的全部闸门读数（阶段①的产出；阶段②③只按值消费，不再回读事实源）。
 pub(crate) struct GateReadings {
@@ -359,7 +359,7 @@ impl CircuitBreaker {
     pub fn break_event(&self, reason: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("cb-{source_seq}"),
-            EVENT_CONTROL_OPENED,
+            crate::control_decl::EVENT_TASK_CONTROLLED,
             Entity::Control,
             Verb::Opened,
             0,

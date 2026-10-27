@@ -79,10 +79,12 @@ use symbio_core::{
 
 /// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
 ///
-/// 三份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
-/// `submit_declarations!` 交来的事件行）→ 内核 `CELLS`（迁移期最后一臂，D-199）。
-/// 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；内核表只认识
-/// 旧名字。格位与角色**取自同一张表**——不出现「格位在冻结表、角色在内核表」的两侧各读一半。
+/// 四份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
+/// `submit_declarations!` 交来的事件行）→ **跨插件共享表**（各插件清单 `shared_events`
+/// 的生成物，DE-024 D-204）→ 内核 `CELLS`（迁移期最后一臂，D-199）。
+/// 顺序不能反：一个新插件声明了同名事件时，冻结表才是 owner 的陈述；共享表答的是
+/// 「这条名字在别人的二进制里也叫这个」；内核表只认识还没登记的老名字。格位与角色
+/// **取自同一张表**——不出现「格位在冻结表、角色在内核表」的两侧各读一半。
 struct Vocab<'a> {
     instance: Option<&'a [EventDecl]>,
     process: Option<&'static [EventDecl]>,
@@ -100,7 +102,7 @@ impl<'a> Vocab<'a> {
         }
     }
 
-    /// 第一个认识 `kind` 的表；三份都不认识 ⇒ `None`（网格之外）。
+    /// 第一个认识 `kind` 的表；四份都不认识 ⇒ `None`（网格之外）。
     fn table_for(&self, kind: &str) -> Option<&'a [EventDecl]> {
         let known = |table: &[EventDecl]| table.iter().any(|e| e.name == kind);
         if let Some(table) = self.instance.filter(|t| known(t)) {
@@ -108,6 +110,13 @@ impl<'a> Vocab<'a> {
         }
         if let Some(table) = self.process.filter(|t| known(t)) {
             return Some(table);
+        }
+        // 跨插件共享表：owner 清单 `shared_events` 的生成物（DE-024 D-204）。它不是
+        // 降级——格位来自 owner 自己的 `EventDecl`，只是这个二进制没链那个 owner 插件
+        // （E-009 禁那条边），所以经生成物答题。
+        let shared: &'a [EventDecl] = symbio_plugin_api::events::SHARED_EVENTS;
+        if known(shared) {
+            return Some(shared);
         }
         let kernel: &'a [EventDecl] = symbio_kernel::event::kernel_vocab();
         if known(kernel) {

@@ -129,7 +129,7 @@ async fn sub_session_routes_into_parent_dir() {
 #[test]
 fn recall_snapshots_scans_one_level_deliberately() {
     use symbio_core::Store as _;
-    use symbio_core::{Entity, Event, Verb, EVENT_MEMORY_ENCODED};
+    use symbio_core::{Entity, Event, Verb};
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -139,7 +139,7 @@ fn recall_snapshots_scans_one_level_deliberately() {
         wal.append(
             Event::pending(
                 id,
-                EVENT_MEMORY_ENCODED,
+                symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
                 0,
