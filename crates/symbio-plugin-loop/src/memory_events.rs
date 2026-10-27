@@ -60,11 +60,14 @@ use symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
-    accept, recall, Budget, ConsolidateParams, Entity, Event, RecallView, Rejection, Seq, Store,
-    Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
+    accept, Budget, ConsolidateParams, Entity, Event, Rejection, Seq, Store, Verb,
+    EVENT_MEMORY_ENCODED,
 };
 
-use crate::control_decl::EVENT_MEMORY_RECALLED;
+use super::recall::{recall, RecallView};
+use crate::control_decl::{
+    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+};
 
 // ==================== 常量（口径的数值面，单点定义） ====================
 

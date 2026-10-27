@@ -9,7 +9,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | PP-001 | 产投影文件不得 `use` 导入**产投影的兄弟模块**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `consolidate` / `recall_score`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
+ * | PP-001 | 产投影文件不得 `use` 导入**产投影的兄弟模块**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `consolidate`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
  * | PP-002 | `projection/*.rs` 生产文件禁 `SystemTime::now` / `rand::` / `static mut` / `std::time::Instant` | 隐式全局依赖：时钟、随机数、全局可变状态——确定性（N1）的口径外漏洞 |
  * | PP-003 | 每个 `pub fn X(..) -> Projection<` 构造器必须有 `projection/` 之外的**生产消费方**，或同文件里一行 `// projection-purity-allow <X>: 非空理由` | 死构造器：抽了纯函数视图却没有调用方——「为将来准备」的投机抽象（本仓只认消费方定的契约） |
  *

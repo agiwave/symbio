@@ -1,7 +1,7 @@
 //! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数，
 //! 外加混合打分的语义维判据。
 //!
-//! 对应 [roadmap/S10 §5](../../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入") 的结论：
+//! 对应 [roadmap/S10 §5](../../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入") 的结论：
 //! 「通用性过滤」与 `memory.forgotten` 同构 ⇒ 它必须是**读侧投影参数**、不能是写侧过滤，
 //! 因为只有读侧**可逆**（改参数即可召回，事实从不丢）。`tag` 是该机制**唯一已落地**的实例，
 //! 而且是**承重**的：`memory_events::consolidate` 依赖它（只合并同标签的记忆）。
@@ -23,9 +23,9 @@
 //! | 平凡值 | 混合打分落地把无查询路径也改窄（老调用点行为漂移） |
 
 use super::*;
-use crate::event::{Entity, Event, Seq, Verb, EVENT_MEMORY_ENCODED};
-use crate::store::{EventStore, Store};
-use crate::view::Budget;
+use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_MEMORY_ENCODED};
+
+use crate::control_decl::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN};
 
 /// 记忆属主 = 视图主体（`recall` 只召回自己的，与 `tag` 是两个正交的闸）。
 const VIEWER: &str = "session/main";
@@ -316,4 +316,123 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
     let generous = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::generous());
     assert!(!generous.degraded, "配额充足不标降级");
     assert_eq!(generous.value.entries.len(), snap.len(), "一条不漏");
+}
+
+// ── as-of 与主体隔离（[04 §3.1](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
+// 步 11–13 的验收 1 / 3 / 4）──────────────────────────────────────────────────
+//
+// 这三条钉的是**投影本身**：后台巩固不得污染在途视图（C12）、遗忘是排除而不是删除、
+// `actor == viewer` 的最小隔离（C13）。换预算档、换查询都测不到它们。
+
+/// 追加一对后台事实：巩固产物 + 对 `source`（源记忆的 seq）的排除式遗忘。
+fn consolidate_and_forget(store: &EventStore, source: u64, ts: i64, digest: &str) {
+    store
+        .append(
+            Event::pending(
+                "c0",
+                EVENT_MEMORY_CONSOLIDATED,
+                Entity::Memory,
+                Verb::Progressed,
+                0,
+                VIEWER,
+            )
+            .with_produced_by(source)
+            .with_ts(ts)
+            .with_payload(
+                serde_json::json!({ "content": digest, "generation": 1, "fidelity": 0.9 }),
+            ),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "g0",
+                EVENT_MEMORY_FORGOTTEN,
+                Entity::Memory,
+                Verb::Closed,
+                0,
+                VIEWER,
+            )
+            .with_produced_by(source)
+            .with_ts(ts),
+        )
+        .unwrap();
+}
+
+/// 验收 1 / C12：后台追加 memory.consolidated 后，as-of=T 的视图**逐字节不变**。
+#[test]
+fn consolidation_does_not_pollute_as_of_view() {
+    let store = EventStore::new();
+    encode(&store, "m0", "用户偏好简洁答复", "经验", 1_000);
+    encode(&store, "m1", "项目用 Rust 2021", "经验", 2_000);
+    let p = recall(VIEWER, None, None);
+    let events = || store.range(Seq::new(0));
+    let before = p.apply(&events(), 2_500, Budget::generous());
+    assert_eq!(before.value.entries.len(), 2);
+
+    // 后台巩固（ts 在 as-of 之后）：压缩 m0（seq 0）+ 遗忘它。
+    consolidate_and_forget(&store, 0, 5_000, "压缩摘要");
+
+    let after = p.apply(&events(), 2_500, Budget::generous());
+    assert_eq!(
+        before.value, after.value,
+        "C12：as-of=T 的视图不受后台巩固污染（视图逐字节；`used` 是扫描记账，事件多了消耗自然变，不参与此判据）"
+    );
+    // as-of 挪到巩固之后：新记忆可见、旧记忆已被排除式遗忘（Log 未删，投影不再包含）。
+    let future = p.apply(&events(), 9_999, Budget::generous());
+    assert!(future.value.contains_content("压缩摘要"));
+    assert!(
+        !future.value.contains_content("用户偏好简洁答复"),
+        "遗忘 = 投影不再包含"
+    );
+}
+
+/// 验收 4（反向）：忽略 as-of 的投影实现 → 上一条的第一段断言必须失败（可捕获）。
+#[test]
+fn projection_that_ignores_as_of_would_be_caught() {
+    let store = EventStore::new();
+    encode(&store, "m0", "旧记忆", "经验", 1_000);
+    let before_view =
+        recall(VIEWER, None, None).apply(&store.range(Seq::new(0)), 2_000, Budget::generous());
+    consolidate_and_forget(&store, 0, 5_000, "新摘要");
+    let events = store.range(Seq::new(0));
+    // 一个「忽略 as-of」的错误实现：now=MAX ⇒ 未来事件全部涌入。
+    let broken_view = recall(VIEWER, None, None).apply(&events, i64::MAX, Budget::generous());
+    let correct_view = recall(VIEWER, None, None).apply(&events, 2_000, Budget::generous());
+    assert_ne!(
+        before_view.value, broken_view.value,
+        "忽略 as-of 的实现必然被巩固改变——验收 1 能抓住它"
+    );
+    assert_eq!(before_view.value, correct_view.value, "正确实现不变");
+}
+
+/// 验收 3 / C13：A 的记忆在 B 的 recall 视图中不出现（记忆默认 thread_private）。
+#[test]
+fn memory_of_a_never_appears_in_b_recall() {
+    let store = EventStore::new();
+    encode(&store, "ma", "A 的私有记忆", "经验", 1_000);
+    store
+        .append(
+            Event::pending(
+                "mb",
+                EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                "session/b",
+            )
+            .with_ts(1_100)
+            .with_payload(serde_json::json!({ "content": "B 的记忆", "tag": "经验" })),
+        )
+        .unwrap();
+    let events = || store.range(Seq::new(0));
+    let b_view = recall("session/b", None, None).apply(&events(), 9_999, Budget::generous());
+    assert!(
+        !b_view.value.contains_content("A 的私有记忆"),
+        "跨主体默认不可见（C13）"
+    );
+    assert!(b_view.value.contains_content("B 的记忆"));
+    let a_view = recall(VIEWER, None, None).apply(&events(), 9_999, Budget::generous());
+    assert!(a_view.value.contains_content("A 的私有记忆"));
+    assert!(!a_view.value.contains_content("B 的记忆"));
 }

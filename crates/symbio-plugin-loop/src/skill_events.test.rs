@@ -5,11 +5,13 @@
 use super::{compile, route, take_match, SkillCompiler, SkillLlmHit, SkillRoute, SkillRouter};
 use symbio_core::SKILL_TAG;
 use symbio_core::{
-    calibration, check_all, recall, Budget, Entity, Event, EventStore, Seq, Store, Verb,
+    calibration, check_all, Budget, Entity, Event, EventStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED,
     EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use symbio_core::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+
+use super::super::recall::recall;
 
 /// 一轮的**溯源锚**：`user.message` 开轮 + `assistant.final` 收束——
 /// 技能的 `produced_by` 指向开轮格（I2），`check_all` 才看得见整条链是绿的。
@@ -75,7 +77,7 @@ fn observe(store: &EventStore, n: usize, skill_id: &str, fallback: bool, anchor:
 /// viewer 取**属主**（与生产读方 `memory_events::recall_view` 同一个 viewer）：
 /// `memory × *` 的 actor 是属主、投影按 `actor == viewer` 过滤，两个 viewer
 /// 不一致时单测看得到的东西生产看不到（断链就是这么溜进来的）。
-fn view_of(store: &EventStore) -> symbio_core::RecallView {
+fn view_of(store: &EventStore) -> super::super::recall::RecallView {
     recall(PRINCIPAL_USER, None, None)
         .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
         .value

@@ -295,7 +295,7 @@ pub(crate) fn record_learning(
     principal: &str,
     anchor_id: &str,
     response: Option<&str>,
-    recalled: Option<&symbio_core::RecallView>,
+    recalled: Option<&super::recall::RecallView>,
     skill_obs: &[(String, bool)],
     skill_compile: bool,
     now: i64,

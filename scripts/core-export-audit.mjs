@@ -274,10 +274,12 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
  */
 // core-export-allow C-004: 拆 crate 后 pub(crate) use 全部升为 pub use（跨 crate 必需），270→397 是计数口径补全而非公共面膨胀（符号集实测新增 128 / 消失 0）；其中 +1 是 impl_config_mount_vdfs! 宏必须走根平铺（域模块 pub(crate) 时展开侧 E0603）。此后 397→395 是测试替身外置带来的真收窄；395→396 是 VdfsListResponse 上移（消费方 2，换掉 agent 侧手写的 "path" 字面量，D-196）；396→389 是 7 条 owner-local 事件名迁出根出口（D-197）；389→386 是 `conation` 投影随唯一
 // 消费方下沉 plugins/session，`conation` / `ConationView` / `EVENT_CONATION_EXPRESSED`
-// 三条出口一起退役（D-201）
+// 三条出口一起退役；386→381 是 `recall` 投影随唯一消费方下沉 plugins/loop，`recall` /
+// `RecallView` / `RecallEntry` 三条出口与 `EVENT_MEMORY_CONSOLIDATED` /
+// `EVENT_MEMORY_FORGOTTEN` 两条同批退役（D-201）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 386
+  : 381
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。

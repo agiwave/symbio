@@ -33,7 +33,9 @@
 use std::collections::BTreeMap;
 
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{calibration, Event, RecallView, Store, EVENT_MEMORY_ENCODED, SKILL_TAG};
+use symbio_core::{calibration, Event, Store, EVENT_MEMORY_ENCODED, SKILL_TAG};
+
+use super::recall::RecallView;
 
 // ==================== 编译与路由策略（D-189：唯一生产消费方在本文件） ====================
 

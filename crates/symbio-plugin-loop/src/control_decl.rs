@@ -13,7 +13,7 @@ use symbio_core::{
     EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT, EVENT_TASK_ASSIGNED,
 };
 
-// ── 本插件持有的事件名（DE-024 D-197）──
+// ── 本插件持有的事件名（DE-024 D-197 / D-201）──
 //
 // 名字、格位与声明在同一处（`EVENTS`），内核不再为它们保留常量。写方 / 读方都从
 // 这里取名字：跨模块引用不复制字面量，改名只改这一行。
@@ -22,6 +22,14 @@ pub(crate) const EVENT_TURN_STAGE: &str = "turn.stage";
 pub(crate) const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 pub(crate) const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 pub(crate) const EVENT_TASK_READY: &str = "task.ready";
+/// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
+///
+/// 写方是 `memory_events::consolidate`（过 `accept` 闸门才落格），读方是 [`crate::recall`]
+/// ——两端都在本插件，名字因此随本插件走（D-201）。
+pub(crate) const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
+/// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
+/// 落在 `memory × closed`；`produced_by` 指向被遗忘那条记忆的 seq。
+pub(crate) const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
 /// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
@@ -75,6 +83,17 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl {
         name: EVENT_MEMORY_RECALLED,
         cell: (Entity::Memory, Verb::Asserted),
+    },
+    // 巩固与遗忘（S5 的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
+    // 都在本插件，随 D-201 从内核 `CELLS` 迁出。`memory.encoded` **不在这里**——
+    // `plugins/session` 的 `stats` 也读它，两个插件同时消费的名字不能被一个插件独占。
+    EventDecl {
+        name: EVENT_MEMORY_CONSOLIDATED,
+        cell: (Entity::Memory, Verb::Progressed),
+    },
+    EventDecl {
+        name: EVENT_MEMORY_FORGOTTEN,
+        cell: (Entity::Memory, Verb::Closed),
     },
     // 调度者写的两格（D-139）：此前只有内核 `CELLS` 认识 `task.ready`（还没有表行）、
     // 完全不认识 `task.assigned`，落格只能被写闸拒掉。名字随 owner 声明之后，

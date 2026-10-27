@@ -656,7 +656,7 @@ pub(crate) struct ExecTurn<'a> {
     /// `turn × asserted`，事件 id 前缀已把它们分开；分开两支游标只会多一份要
     /// 同步的状态（那才是真源变两处的形状）。
     pub supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a super::recall::RecallView>,
     /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
     /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
     pub skill_obs: &'a [(String, bool)],

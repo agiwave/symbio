@@ -14,7 +14,7 @@ use serde_json::json;
 /// `kind` 取值（[D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）。它们不是事件名，
 /// 所以不进这张表。已迁出的名字（owner 的 `EventDecl`）也不在这里——这条断言把内核
 /// 名字表与 `CELLS` 的行数钉在一起。
-const DECLARED_EVENT_NAMES: usize = 36;
+const DECLARED_EVENT_NAMES: usize = 34;
 
 #[test]
 fn the_table_is_one_row_per_name_and_covers_every_declared_name() {

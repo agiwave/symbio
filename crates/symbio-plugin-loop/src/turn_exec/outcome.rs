@@ -74,7 +74,7 @@ pub(crate) struct Settled<'a> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
-    pub recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a super::super::recall::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) child_id: String,
     pub(crate) reasoning_child_id: String,

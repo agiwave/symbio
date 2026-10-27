@@ -182,7 +182,7 @@ C-001），这层内部面只能跟着升为 `pub`，名字却还是内部助手
 | `turn` | `Turn*`（`TurnSpec` / `TurnSettings` / `TurnDispatch` / `TurnReport` / `TurnStatus` / `TurnDispatchKey`）· 动作载荷 `AddNodesRequest` · `EditNodesRequest` · `RemoveNodesRequest` · `ReplaceAllRequest` · `ConsolidateRequest` · `Compression*` · `EditFrame` · 跨 crate 内部词 `DrainedSupplement` · `FleetSnapshot` · `WorkerProgress` | `TURN_DISPATCH` · `LOOP_RUN_TURN` · `WORKER_` · `META_SUPPLEMENT` · `TASK_CAP` | `run_ops` · `llm_emit_message` · `llm_message_frame` · `llm_removed_frame` · `llm_short_id` | [D-087](../../docs/003-design/001-核心架构.md "DE-001-核心架构")：轮次面——一次轮次**怎么交付**（`dispatch`）、**怎么造节点**（`node_build`）、**产出什么记录**（`facts`）。它同时看见 `llm`（模型输出）与 `chat`（会话对象），是两者之上的装配面，依赖链 `chat ◄ llm ◄ turn ◄ projection` 无环。`node_build` / `facts` 以叶子模块形态出根（符号走模块路径）；交付包与动作载荷因被 `session` / `loop` 两侧逐字段构造而平铺 |
 | `text` | — | — | `text_` | 只有两个纯函数 |
 | `vdfs` | `Vdfs` · 跨 crate 内部词 `AddrRootDecl` | `VDFS_` | `vdfs_` · `absolute_addr` · `descend_addr` · `join_addr` | 跨 crate 内部词：地址根的声明体，以及三条地址运算（绝对化 / 下降 / 拼接）——挂载写侧、路径闸、四个插件各持一段语义，判据必须单点 |
-| `view` | `View` / `Budget` / `Recall*`（`RecallView` / `RecallEntry`） | — | `visible_to` | 投影产出的共享类型层（F2 后半句）：`View{value, degraded, used}`，`Budget` 是 I3 记账口径。`visible_to` 是可见性判定的**唯一**读法（主体 × 可见范围 → 布尔），写侧与三个读侧出口共用一个判据 |
+| `view` | `View` / `Budget` | — | `visible_to` | 投影产出的共享类型层（F2 后半句）：`View{value, degraded, used}`，`Budget` 是 I3 记账口径。`visible_to` 是可见性判定的**唯一**读法（主体 × 可见范围 → 布尔），写侧与三个读侧出口共用一个判据 |
 
 > **`TurnRunner` / `RoundInjector` 已下沉 `plugins/session`**（2026-10-09）：运行器本体
 > 与工具轮注入口都只有一个生产消费方（session），留在此层即「架构层挂业务钩子」的污染。

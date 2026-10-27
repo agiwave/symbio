@@ -227,10 +227,10 @@ pub use event::{
     EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
     EVENT_COMMITMENT_RELEASED,
 };
-pub use event::{
-    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
-    EVENT_MEMORY_FORGOTTEN,
-};
+// 记忆事件名：`memory.encoded` 的生产读方**跨两个插件**（`loop` 的记忆/技能事件、
+// `session` 的 `stats`），`memory.calibrated` 的读侧投影 `calibration` 住 core——
+// 两个插件同时消费的名字不能被任一插件独占（E-009），故留在内核词汇表。
+pub use event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED};
 // 淘汰裁决事件名（S13 §3，）：生产写方是 `derived_facts` 的轮末淘汰步，读方是
 // 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
 // **两个生产消费方**，故走非测试的 `pub` 出根（与记忆事件名表同一形态）。
@@ -244,12 +244,7 @@ pub use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
 // `pub` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
 pub use projection::readyset::{readyset, ReadySetView};
-pub use projection::recall::recall;
 pub use projection::reputation::reputation;
-pub use view::RecallView;
-// 检索视图的条目类型：core 外在 `loop` 的 `memory_events` / `skill_events` **生产代码**
-// 里被逐条读取（把 `RecallView.entries` 转成事件），不是只为测试而出根。
-pub use view::RecallEntry;
 // 可见域判据与智能体身份前缀：两处共用**同一条**判定——写视图的 `window_by_turn`
 // （core）与写消息过滤的 `context/view`（插件）。两个判定方 = 两套可见域与两种身份
 // 形状，迟早漂移成「判的是 A、写的是 B」。

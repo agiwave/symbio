@@ -18,11 +18,14 @@ use symbio_core::SKILL_TAG;
 use symbio_core::merge_kernel::split_sentences;
 use symbio_core::PRINCIPAL_USER;
 use symbio_core::{
-    check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq,
-    Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
+    check_all, Budget, Entity, Event, EventEnvelope as _, EventStore, FleetSnapshot, Seq, Store,
+    Verb, EVENT_MEMORY_ENCODED,
 };
 
-use crate::control_decl::EVENT_MEMORY_RECALLED;
+use super::super::recall::recall;
+use crate::control_decl::{
+    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+};
 
 /// 读方只吃值：一份会话的事实切片 + `own` 标记（生产上由会话存储层枚举时判定）。
 fn snap(own: bool, store: &EventStore) -> FleetSnapshot {
@@ -1460,8 +1463,8 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
     // 降级视图 = **取值点誊抄外壳之后**的形态（D-105：外壳是唯一的降级事实源，
     // 誊抄判据在 `recall.test.rs` / 本文件）。本测试钉的是**下游**：视图带着
     // `degraded` 流动时，`memory.recalled` 不得把它丢掉。
-    let degraded = symbio_core::RecallView {
-        entries: vec![symbio_core::RecallEntry {
+    let degraded = super::super::recall::RecallView {
+        entries: vec![super::super::recall::RecallEntry {
             seq: 0,
             ts: 100,
             content: "片段 0".into(),

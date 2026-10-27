@@ -9,8 +9,8 @@
 //!
 //! ## 本程序跑的是**生产排序内核**，不是它的临摹件
 //!
-//! 排序经 `#[path]` **包含生产文件**：[`recall_score`]（`crates/symbio-core/src/
-//! projection/recall_score.rs`——`recall` 投影的排序实现）。因此这里出的
+//! 排序经 `#[path]` **包含生产文件**：[`recall_score`]
+//! （`crates/symbio-plugin-loop/src/recall_score.rs`——`recall` 投影的排序实现）。因此这里出的
 //! recall@k 是**生产投影的口径**：查询驱动的内容重叠分降序，
 //! 平手 ts 降序、再平手 seq 降序。
 //!
@@ -85,7 +85,7 @@
 //
 // `#[path]` 指向仓库里的生产文件——**这一行就是「跑的是生产」的全部含义**。
 // 它被 `recall` 投影与召回评测集共同编译：改排序只有一处可改，两边同时变。
-#[path = "../../../crates/symbio-core/src/projection/recall_score.rs"]
+#[path = "../../../crates/symbio-plugin-loop/src/recall_score.rs"]
 mod recall_score;
 
 use recall_score::{rank, ScoreEntry};

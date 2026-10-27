@@ -8,7 +8,8 @@
 use super::*;
 use crate::cost_ledger;
 use crate::event::{
-    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED,
+    EVENT_USER_MESSAGE,
 };
 use crate::invariants::check_all;
 use crate::projection::turnstate::turnstate;
@@ -578,12 +579,11 @@ async fn four_tier_budgets_are_measurable() {
 
 // ── S5 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 11–13 步）：记忆链路 ──
 //
-// 编码（memory.encoded）→ 检索（recall 投影）→ 巩固 / 遗忘（排除式 + 保真度下界）。
-// 检索事实的写侧随唯一消费方住 `plugins/loop/memory_events`（D-189），验收在那边。
-// S06 §6 四条验收逐条落地。
+// 这里留的是**内核侧**的两条判据：编码格子的溯源覆盖（步 11 / I2）与巩固入库前的
+// 保真度闸门（步 13 / N8）。检索那半条链路（`recall` 投影的 as-of、预算降级、主体
+// 隔离）随投影住它的唯一生产消费方（[DE-024](../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201），验收在同侧。
 
 use crate::projection::consolidate::{accept, ConsolidateParams};
-use crate::projection::recall::recall;
 
 /// 编码一条记忆（带溯源与 embedding 载荷）。
 fn encode(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, source: u64) {
@@ -604,193 +604,6 @@ fn encode(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, sourc
         .expect("编码必入库");
 }
 
-/// 验收 1 / C12：后台追加 memory.consolidated 后，as-of=T 的视图**逐字节不变**。
-#[test]
-fn consolidation_does_not_pollute_as_of_view() {
-    let store = EventStore::new();
-    encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
-    encode(&store, "m1", 2_000, "项目用 Rust 2021", "semantic", 0);
-    let p = recall("session/main", None, None);
-    let before = p.apply(
-        &store.range(crate::event::Seq::new(0)),
-        2_500,
-        Budget::generous(),
-    );
-    assert_eq!(before.value.entries.len(), 2);
-
-    // 后台巩固（ts 在 as-of 之后）：压缩 m0（seq 0）+ 遗忘它。
-    store
-        .append(
-            Event::pending(
-                "c0",
-                EVENT_MEMORY_CONSOLIDATED,
-                Entity::Memory,
-                Verb::Progressed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0)
-            .with_ts(5_000)
-            .with_payload(
-                serde_json::json!({ "content": "压缩摘要", "generation": 1, "fidelity": 0.9 }),
-            ),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "g0",
-                EVENT_MEMORY_FORGOTTEN,
-                Entity::Memory,
-                Verb::Closed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0) // 遗忘目标 = m0 的 seq
-            .with_ts(5_000),
-        )
-        .unwrap();
-
-    let after = p.apply(
-        &store.range(crate::event::Seq::new(0)),
-        2_500,
-        Budget::generous(),
-    );
-    assert_eq!(
-        before.value, after.value,
-        "C12：as-of=T 的视图不受后台巩固污染（视图逐字节；`used` 是扫描记账，事件多了消耗自然变，不参与此判据）"
-    );
-    // as-of 挪到巩固之后：新记忆可见、旧记忆已被排除式遗忘（Log 未删，投影不再包含）。
-    let future = p.apply(
-        &store.range(crate::event::Seq::new(0)),
-        9_999,
-        Budget::generous(),
-    );
-    assert!(future.value.contains_content("压缩摘要"));
-    assert!(
-        !future.value.contains_content("用户偏好简洁答复"),
-        "遗忘 = 投影不再包含"
-    );
-}
-use crate::event::{EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN};
-
-/// 验收 2：检索预算耗尽 → degraded + 部分结果；**不允许空且不标降级**。
-#[test]
-fn recall_degrades_with_partial_results_when_budget_exhausted() {
-    let store = EventStore::new();
-    for i in 0..5 {
-        encode(
-            &store,
-            &format!("m{i}"),
-            1_000 + i,
-            &format!("记忆{i}"),
-            "semantic",
-            0,
-        );
-    }
-    let p = recall("session/main", None, None);
-    let tight = p.apply(
-        &store.range(crate::event::Seq::new(0)),
-        9_999,
-        Budget::new(0, 2), // 配额 2 次扫描
-    );
-    assert!(tight.degraded, "预算耗尽必须标降级");
-    assert_eq!(tight.value.entries.len(), 2, "带部分结果，不是空");
-    // 反向：预算充足 → 不降级、全量。
-    let ok = p.apply(
-        &store.range(crate::event::Seq::new(0)),
-        9_999,
-        Budget::generous(),
-    );
-    assert!(!ok.degraded && ok.value.entries.len() == 5);
-}
-
-/// 验收 3 / C13：A 的记忆在 B 的 recall 视图中不出现（记忆默认 thread_private）。
-#[test]
-fn memory_of_a_never_appears_in_b_recall() {
-    let store = EventStore::new();
-    encode(&store, "ma", 1_000, "A 的私有记忆", "semantic", 0);
-    store
-        .append(
-            Event::pending(
-                "mb",
-                EVENT_MEMORY_ENCODED,
-                Entity::Memory,
-                Verb::Opened,
-                0,
-                "session/b",
-            )
-            .with_produced_by(0)
-            .with_ts(1_100)
-            .with_payload(serde_json::json!({ "content": "B 的记忆", "tag": "semantic" })),
-        )
-        .unwrap();
-    let events = || store.range(crate::event::Seq::new(0));
-    let b_view = recall("session/b", None, None).apply(&events(), 9_999, Budget::generous());
-    assert!(
-        !b_view.value.contains_content("A 的私有记忆"),
-        "跨主体默认不可见（C13）"
-    );
-    assert!(b_view.value.contains_content("B 的记忆"));
-    let a_view = recall("session/main", None, None).apply(&events(), 9_999, Budget::generous());
-    assert!(a_view.value.contains_content("A 的私有记忆"));
-    assert!(!a_view.value.contains_content("B 的记忆"));
-}
-
-/// 验收 4（反向）：忽略 as-of 的投影实现 → 断言 1 必须失败（可捕获）。
-#[test]
-fn projection_that_ignores_as_of_would_be_caught() {
-    let store = EventStore::new();
-    encode(&store, "m0", 1_000, "旧记忆", "semantic", 0);
-    let before_view = recall("session/main", None, None).apply(
-        &store.range(crate::event::Seq::new(0)),
-        2_000,
-        Budget::generous(),
-    );
-    // 后台追加 ts=5000 的巩固（压缩 m0 并遗忘之）。
-    store
-        .append(
-            Event::pending(
-                "c0",
-                EVENT_MEMORY_CONSOLIDATED,
-                Entity::Memory,
-                Verb::Progressed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0)
-            .with_ts(5_000)
-            .with_payload(
-                serde_json::json!({ "content": "新摘要", "generation": 1, "fidelity": 0.9 }),
-            ),
-        )
-        .unwrap();
-    store
-        .append(
-            Event::pending(
-                "g0",
-                EVENT_MEMORY_FORGOTTEN,
-                Entity::Memory,
-                Verb::Closed,
-                0,
-                "session/main",
-            )
-            .with_produced_by(0)
-            .with_ts(5_000),
-        )
-        .unwrap();
-    let events = store.range(crate::event::Seq::new(0));
-    // 一个「忽略 as-of」的错误实现：now=MAX ⇒ 未来事件全部涌入。
-    let broken_view =
-        recall("session/main", None, None).apply(&events, i64::MAX, Budget::generous());
-    let correct_view = recall("session/main", None, None).apply(&events, 2_000, Budget::generous());
-    assert_ne!(
-        before_view.value, broken_view.value,
-        "忽略 as-of 的实现必然被巩固改变——断言 1 能抓住它"
-    );
-    assert_eq!(before_view.value, correct_view.value, "正确实现不变");
-}
-
 /// 步骤 13 / N8：保真度下界——失真巩固被拒收，入库的 100% 达标。
 #[test]
 fn consolidation_below_fidelity_floor_never_enters_the_log() {
@@ -805,7 +618,9 @@ fn consolidation_below_fidelity_floor_never_enters_the_log() {
                 .append(
                     Event::pending(
                         format!("c-{gen}-{fidelity}"),
-                        EVENT_MEMORY_CONSOLIDATED,
+                        // `memory.consolidated` 是 loop 插件声明的事件名；core 的夹具
+                        // 按线上名字造，不从 owner 借常量（跨插件零依赖）。
+                        "memory.consolidated",
                         Entity::Memory,
                         Verb::Progressed,
                         0,
@@ -822,7 +637,7 @@ fn consolidation_below_fidelity_floor_never_enters_the_log() {
     let consolidated: Vec<(u32, f64)> = store
         .range(crate::event::Seq::new(0))
         .iter()
-        .filter(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
+        .filter(|e| e.kind == "memory.consolidated")
         .map(|e| {
             (
                 e.payload["generation"].as_u64().unwrap() as u32,
@@ -856,35 +671,6 @@ fn memory_event_without_provenance_is_caught() {
     let bad = crate::invariants::produced_by_coverage(std::slice::from_ref(&bare));
     assert_eq!(bad.len(), 1, "无溯源的记忆必须被看见（溯源覆盖 100%）");
     assert!(bad[0].why.contains("记忆"), "{}", bad[0].why);
-}
-
-/// 全链路（读侧投影）：检索产出带溯源的视图，三条不变量仍全绿。
-/// 写侧的 `memory.recalled` 事实随唯一消费方住 `plugins/loop/memory_events`（D-189）。
-#[test]
-fn recall_projection_is_provenanced_and_invariants_stay_green() {
-    let store = EventStore::new();
-    // 根事件先落：记忆事件的溯源指向它（`source = 0`），否则那条边指向自己。
-    store
-        .append(Event::pending(
-            "u0",
-            EVENT_USER_MESSAGE,
-            Entity::Turn,
-            Verb::Opened,
-            0,
-            "user",
-        ))
-        .unwrap();
-    encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
-    let snapshot = store.range(crate::event::Seq::new(0));
-    let view = recall("session/main", None, None)
-        .apply(&snapshot, 2_000, Budget::generous())
-        .value;
-    assert_eq!(view.entries.len(), 1);
-    assert!(
-        check_all(&snapshot).is_empty(),
-        "{:?}",
-        check_all(&snapshot)
-    );
 }
 
 // ── S6 彩排（[plan/04 §3](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 第 14–15 步）：多主体与对等承诺 ──

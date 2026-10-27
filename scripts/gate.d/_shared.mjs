@@ -208,7 +208,12 @@ export const BASELINE = {
   // 差额 852 条是拆分前就存在、只是从未被"求和口径"覆盖到的插件用例——它们此前以
   // `-p symbio` 的分包口径被数进 `rustTests`，两个口径各数各的。现在本地与 CI **只留
   // 一个口径**（`cargo test --workspace` 求和），数字变大是口径合并的结果，非侵蚀。
-  ciRustTestsTotal: 2334,
+  // baseline-allow ciRustTestsTotal: `recall` 投影迁 loop（D-201）的同一净减 2 条（2334→2332）——
+  // core 的 S5 彩排五条里，as-of 不污染、主体隔离、忽略 as-of 的反向锚三条随投影搬进
+  // `plugins/loop/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
+  // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
+  // 删的是重复的那一份，不是判据。非侵蚀。
+  ciRustTestsTotal: 2332,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

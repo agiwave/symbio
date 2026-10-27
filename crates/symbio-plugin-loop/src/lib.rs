@@ -24,6 +24,10 @@ mod plugin;
 // 端口的执行半边：协议事实的唯一写方 + 租约看护。
 mod port;
 mod provider;
+// 记忆检索的读侧：`recall` 投影与它的排序内核（DE-024 D-201：随唯一生产消费方从 core
+// 的 `projection/` 搬进来——core 不再按 `memory.consolidated` / `memory.forgotten` 读事实）。
+mod recall;
+mod recall_score;
 // 批次边界 host 的执行体与派发点（DE-015 的 D-163）：轮中汇报住这一台。
 mod report_exec;
 mod session_port;

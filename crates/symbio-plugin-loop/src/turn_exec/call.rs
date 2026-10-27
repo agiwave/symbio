@@ -29,7 +29,7 @@ pub(crate) struct Running<'a> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
-    pub recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a super::super::recall::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) root_id: &'a str,
     pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,

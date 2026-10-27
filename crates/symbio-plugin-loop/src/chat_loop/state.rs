@@ -189,7 +189,7 @@ pub(crate) struct TurnState {
     ///
     /// 落 `memory.recalled` 的时机在**轮末收束**（`derived_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
-    pub recall_view: Option<symbio_core::RecallView>,
+    pub recall_view: Option<super::super::recall::RecallView>,
     /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
     ///

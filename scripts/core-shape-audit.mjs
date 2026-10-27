@@ -263,6 +263,12 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *   生产消费方**下沉 `plugins/session`，core 不再按这个名字读 ⇒ 内核常量与它的 `CELLS` 行
  *   一起退役 ⇒ 33/32 → 32/31（判据见 DE-024 D-201）。
  *
+ * - **P1c 第三批迁出**（同日）：`recall` 投影（连同 `RecallView` / `RecallEntry` 与排序内核
+ *   `recall_score.rs`）下沉 `plugins/loop`——它的读侧全在本插件。`memory.consolidated` /
+ *   `memory.forgotten` 自此只有 loop 读，两条内核常量与两行 `CELLS` 同批退役
+ *   ⇒ 32/31 → 30/29。`memory.encoded` **留内核**：`plugins/session` 的 `stats` 是它的第二个
+ *   生产读方，两个插件同时消费的名字不能被任一插件独占（E-009，判据见 DE-024 D-201）。
+ *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
@@ -271,7 +277,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
       const [kernelEvents, cellsRows] = process.env.VOCAB_BASELINE.split(':').map((n) => Number(n))
       return { kernelEvents, cellsRows }
     })()
-  : { kernelEvents: 32, cellsRows: 31 }
+  : { kernelEvents: 30, cellsRows: 29 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

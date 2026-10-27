@@ -526,11 +526,6 @@ pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 /// **载荷里没有 `vec` 键**：向量索引落成时按 `content` 回填，恒空的预留键不算
 /// 承诺（[D-110](../../../symbio-plugin-memory/README.md#d-110-恒空预留键不进事实形状记忆的向量键与它的写方同批落格 "crates/symbio-plugin-memory/src/README")；写方 `plugins/loop/memory_events.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
-/// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
-pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
-/// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
-/// 落在 `memory × closed`。
-pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 校准断言：技能**被用过之后**的一次观测（命中 / 回退），落在 `memory × asserted`。
 ///
 /// ## 为什么它不能继续复用 `memory.recalled`

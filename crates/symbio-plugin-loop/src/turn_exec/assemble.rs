@@ -30,7 +30,7 @@ pub(crate) struct Assembled<'a> {
     pub(crate) supplements: Option<SupplementFn>,
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub recalled: Option<&'a symbio_core::RecallView>,
+    pub recalled: Option<&'a super::super::recall::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) prefix: Option<String>,
     pub(crate) opening_text: Option<&'a str>,
