@@ -4,7 +4,7 @@ use super::{NotesProvider, MAX_NOTES, SLOT};
 use crate::decl::NOTES_CREATED;
 use serde_json::json;
 use symbio_core::{Entity, Event, Verb};
-use symbio_plugin_api::{ContextProvider, ContextRequest};
+use symbio_plugin_api::{Cadence, ContextProvider, ContextRequest};
 
 fn note(id: &str, text: &str) -> Event {
     let mut e = Event::pending(
@@ -28,6 +28,7 @@ fn request<'a>(facts: &'a [Event]) -> ContextRequest<'a> {
         facts,
         recall: None,
         task_cap: 8,
+        live: None,
     }
 }
 
@@ -70,7 +71,7 @@ fn only_the_most_recent_notes_are_kept() {
 #[test]
 fn the_section_is_collected_through_the_port() {
     let facts = [note("e1", "买牛奶")];
-    let sections = symbio_plugin_api::context_sections(&request(&facts));
+    let sections = symbio_plugin_api::context_sections(&request(&facts), Cadence::Turn);
     let own: Vec<_> = sections.iter().filter(|s| s.slot == SLOT).collect();
     assert_eq!(own.len(), 1, "{sections:?}");
 }

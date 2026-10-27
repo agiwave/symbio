@@ -3,6 +3,7 @@
 use super::*;
 use serde_json::json;
 use symbio_core::Verb;
+use symbio_plugin_api::effects::BeforeReadings;
 
 fn call<'a>(args: &'a serde_json::Value, success: bool, why: &'a str) -> EffectCall<'a> {
     EffectCall {
@@ -85,4 +86,56 @@ fn behavior_is_selected_by_declaration() {
     keys.sort();
     keys.dedup();
     assert_eq!(keys, vec!["c-close-v2c-t7-call-9", "c-offer-v2c-t7-call-9"]);
+}
+
+// ── 淘汰回路的前置判断（DE-025 D-219）────────────────────────────────
+
+fn judgement<'a>(
+    args: &'a serde_json::Value,
+    principal: &'a str,
+    revoked: bool,
+) -> BeforeRequest<'a> {
+    BeforeRequest {
+        tool: "agent_run",
+        call_id: "call-9",
+        args,
+        principal,
+        declared: &[behaviors::ASSIGN_WORK],
+        facts: &[],
+        readings: BeforeReadings {
+            assign_work_revoked: revoked,
+        },
+    }
+}
+
+/// 收回 `assign.work` ⇒ 拒：拒因点名主体与成因，出口是可审计拒绝（记违约承诺）。
+#[test]
+fn a_revoked_principal_cannot_delegate() {
+    let args = json!({ "prompt": "做件事" });
+    let req = judgement(&args, "session/worker", true);
+    let BeforeDecision::Refuse(refusal) = DelegationGate.before(&req) else {
+        panic!("已收回 assign.work 的主体必须被拒");
+    };
+    assert_eq!(refusal.gate, "淘汰");
+    assert_eq!(refusal.kind, symbio_core::failure_kind::PERMISSION_DENIED);
+    assert!(refusal.reason.contains("session/worker"), "拒因要点名主体");
+    assert!(
+        refusal.reason.contains("assign.work 已被淘汰回路收回"),
+        "拒因要写明成因（实际: {}）",
+        refusal.reason
+    );
+    assert!(
+        refusal.notes_delegation,
+        "约了没派成同样是事实：违约承诺照记"
+    );
+}
+
+/// 没有生效的撤销 ⇒ 放行：判断只答减法，表是权威。
+#[test]
+fn an_unrevoked_principal_may_delegate() {
+    let args = json!({ "prompt": "做件事" });
+    assert!(matches!(
+        DelegationGate.before(&judgement(&args, "session/worker", false)),
+        BeforeDecision::Allow
+    ));
 }

@@ -1,10 +1,11 @@
-//! 效果端口的判据：按声明选实现、失败不记账、草稿带轮锚与溯源。
+//! 扩展面的判据：按声明选实现、失败不记账、草稿带轮锚与溯源、重复便签在执行前被拒。
 
-use super::NOTE_CAPTURE;
+use super::{NoteCapture, NOTE_CAPTURE};
 use crate::decl::NOTES_CREATED;
 use serde_json::json;
-use symbio_core::{Entity, Verb};
-use symbio_plugin_api::{EffectEnv, EffectInput};
+use symbio_core::{Entity, Event, Verb};
+use symbio_plugin_api::effects::{BeforeDecision, BeforeReadings, BeforeRequest};
+use symbio_plugin_api::{EffectEnv, EffectInput, ToolBehavior};
 
 fn env() -> EffectEnv<'static> {
     EffectEnv {
@@ -66,4 +67,71 @@ fn an_undeclared_tool_does_not_reach_the_behavior() {
     let mut i = input(true, json!({ "text": "买牛奶" }));
     i.declared = &[];
     assert!(symbio_plugin_api::apply_effects(&i.call(&env())).is_empty());
+}
+
+fn judgement(args: &serde_json::Value, facts: &[Event]) -> BeforeDecision {
+    NoteCapture.before(&BeforeRequest {
+        tool: "notes_add",
+        call_id: "call-2",
+        args,
+        principal: "session/a",
+        declared: &[NOTE_CAPTURE],
+        facts,
+        readings: BeforeReadings::default(),
+    })
+}
+
+fn recorded(text: &str) -> Event {
+    Event::pending(
+        "n-t3-call-1",
+        NOTES_CREATED,
+        Entity::Domain,
+        Verb::Opened,
+        3,
+        "session/a",
+    )
+    .with_payload(json!({ "text": text }))
+}
+
+/// 会话里没有这条便签 ⇒ 放行。
+#[test]
+fn a_fresh_note_is_allowed() {
+    let args = json!({ "text": "买牛奶" });
+    assert!(matches!(
+        judgement(&args, &[recorded("交报告")]),
+        BeforeDecision::Allow
+    ));
+}
+
+/// 同一会话已记过同一条（只差首尾空白）⇒ 执行前拒绝，拒因点名重复正文。
+#[test]
+fn a_repeated_note_is_refused_before_execution() {
+    let args = json!({ "text": " 买牛奶 " });
+    let BeforeDecision::Refuse(refusal) = judgement(&args, &[recorded("买牛奶")]) else {
+        panic!("重复便签应在执行前被拒");
+    };
+    assert_eq!(refusal.gate, "便签");
+    assert_eq!(refusal.kind, symbio_core::failure_kind::ERROR);
+    assert!(
+        refusal.reason.contains("买牛奶"),
+        "拒因应带回重复正文: {}",
+        refusal.reason
+    );
+    assert!(refusal.notes_delegation);
+}
+
+/// 别的领域事实不算数：只认本插件自己的 `notes.created`。
+#[test]
+fn a_fact_of_another_kind_does_not_count_as_a_note() {
+    let args = json!({ "text": "买牛奶" });
+    let other = Event::pending(
+        "x-1",
+        "chat.assistant.final",
+        Entity::Turn,
+        Verb::Asserted,
+        3,
+        "session/a",
+    )
+    .with_payload(json!({ "text": "买牛奶" }));
+    assert!(matches!(judgement(&args, &[other]), BeforeDecision::Allow));
 }

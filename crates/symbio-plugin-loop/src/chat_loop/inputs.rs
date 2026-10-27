@@ -8,6 +8,7 @@
 //!   这里，**被选中才跑**）
 
 use symbio_core::CapabilityMeta;
+use symbio_plugin_api::context::{Cadence, DelegateVerdict, LiveInputs};
 
 use super::super::port::Compress;
 use super::super::stage_events::StageFact;
@@ -30,6 +31,32 @@ fn last_user_text(context: &SessionContext) -> Option<String> {
             Some(MessageContent::Text(t)) => Some(t.clone()),
             _ => None,
         })
+}
+
+/// 本轮读侧值包：轮首与请求级两次收集共用同一构造口径。
+///
+/// 两种节奏是**同一请求的两半**（轮首段 / 请求级段），必须看到同一刻的值——各拼
+/// 一份就会漂移成「召回读的是 A、委派读的是 B」。`live` 只在请求级收集时为 `Some`。
+#[allow(clippy::too_many_arguments)]
+fn context_request<'a>(
+    turn: &TurnState,
+    principal: &'a str,
+    query: Option<&'a str>,
+    facts: &'a [symbio_core::Event],
+    recall: Option<&'a symbio_plugin_api::RecallFacts<'a>>,
+    task_cap: usize,
+    live: Option<&'a LiveInputs<'a>>,
+) -> symbio_plugin_api::ContextRequest<'a> {
+    symbio_plugin_api::ContextRequest {
+        turn: turn.turn_no,
+        request_round: u32::try_from(turn.request_round).unwrap_or(u32::MAX),
+        principal,
+        query,
+        facts,
+        recall,
+        task_cap,
+        live,
+    }
 }
 
 /// 系统提示词的唯一真源。
@@ -136,8 +163,8 @@ pub(crate) struct TurnInputs {
 ///    - 3″. 取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
 /// 5. 长期记忆召回产物的**取用点**（三份产物由 3 的执行体寄存进本轮状态）
-/// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
-///    ——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
+/// 6. 请求级上下文段（`Cadence::Request`，D-220）：**在①②把 `tools` 收集成形之后**
+///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
 /// 7. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
@@ -217,20 +244,22 @@ pub(crate) async fn prepare_turn_inputs(
     // 有哪几段**（DE-025 D-215）。
 
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
-    // 追加的读视图：provider 贡献的各段 + 委派者真源。它们不落库、不碰历史——
+    // 追加的读视图：provider 贡献的各段。它们不落库、不碰历史——
     // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
     // [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役。
     //
-    // ── ⑥′ 委派者真源段（D-047）：Q1 判定 + Q2 能力目录 ─────────────────────
+    // ── ⑥′ 请求级上下文段（`Cadence::Request`，DE-025 D-220）────────────────
     //
-    // **位置即约束**：能力目录必须在 ①② 把 `tools` 收集成形**之后**才动笔——收集是
-    // 广播，遍历期取集合必然漏掉还没被访问到的兄弟插件（静默、且漏哪几项次次不同）。
-    // 这里取的是本轮**最终**发给模型的同一份 `tools`（即上面 ① 收下的那一份，
-    // 中间没有任何 push）⇒ 同源，不构成第二份真相。
+    // **位置即约束**：委派段的能力目录要的是 ①② 把 `tools` 收集成形**之后**的产物
+    // ——收集是广播，遍历期取集合必然漏掉尚未访问到的兄弟插件（静默、且漏哪几项
+    // 次次不同）。这里取的是本轮**最终**发给模型的同一份 `tools`（中间没有任何
+    // push）⇒ 同源，不构成第二份真相。
     //
-    // Q1 的输入取 `turn.input_utterance`（循环**前**锚定的 `(消息 id, 正文)`）⇒
-    // 同一请求内不随工具轮变化，判定不漂移；`None` = resume / 心跳这类没有用户新
-    // 发言的请求，判决无从谈起（与判决侧「None 根本不进判决」同一条口径）。
+    // Q1 判定仍在本函数（控制面）：`turn.input_utterance` 是循环**前**锚定的
+    // `(消息 id, 正文)`，同一请求内不随工具轮变化；判定读的是**本会话当前配置**
+    // （`worker_*` 三字段，出厂值真源在 core）。provider 只接到判完的
+    // `DelegateVerdict`——判断闭集（D-208）。
+    //
     // Q3：worker 进展现读磁盘（无子会话 ⇒ 零额外 IO）。整条读链住在
     // `session::worker_progress`（D-081 裁决一第 4 条），驱动器只调这一个入口。
     // 读失败向上传播——静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
@@ -239,33 +268,74 @@ pub(crate) async fn prepare_turn_inputs(
         .run_op::<Vec<symbio_core::WorkerProgress>>(symbio_core::run_ops::WORKER_PROGRESS, ())
         .await
         .map_err(TurnExit::Failed)?;
-    // Q1 的三条判据按**本会话当前配置**取（`worker_*` 三字段），不再读判定模块的
-    // 常量——常量只是出厂值的单一真源，运行时值属于配置面。
     let settings = context.session.settings();
-    let delegate_section = delegate::delegate_section_with(
-        turn.input_utterance.as_ref().map(|(_, text)| text.as_str()),
-        &tools,
-        &workers,
-        delegate::WorkerPolicy {
-            force_prefix: &settings.worker_force_prefix,
-            keywords: &settings.worker_keywords,
-            min_chars: settings.worker_min_chars,
-        },
+    let delegate_verdict = match turn.input_utterance.as_ref().map(|(_, text)| text.as_str()) {
+        Some(text) => {
+            // 关键词存**逗号串**（面板无数组控件），切开即用；空串由
+            // `worker_start_reason` 的「空关键词跳过」处理 ⇒ 空串 = 空集 = 本层关闭。
+            let keywords: Vec<&str> = settings.worker_keywords.split(',').collect();
+            match delegate::worker_start_reason(
+                text,
+                &settings.worker_force_prefix,
+                &keywords,
+                settings.worker_min_chars,
+            ) {
+                Some(reason) => DelegateVerdict::Start { reason },
+                None => DelegateVerdict::Idle,
+            }
+        }
+        None => DelegateVerdict::NotJudged,
+    };
+
+    // 段的**次序**在这里声明（= 模型读到的上下文次序）：轮首段在前、请求级段在后。
+    // 加一段 provider 只需提交一条实现，本数组不动。
+    let facts = context.session.facts_snapshot();
+    let live_lines: Vec<symbio_plugin_api::RecallLine<'_>> = turn
+        .recall_view
+        .as_ref()
+        .map(|view| {
+            view.entries
+                .iter()
+                .map(|e| symbio_plugin_api::RecallLine {
+                    content: &e.content,
+                    tag: &e.tag,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let live_recall = turn
+        .recall_view
+        .as_ref()
+        .map(|view| symbio_plugin_api::RecallFacts {
+            degraded: view.degraded,
+            lines: &live_lines,
+        });
+    let query = last_user_text(context);
+    let principal = symbio_core::request_principal(ctx.as_ref());
+    let live = LiveInputs {
+        tools: &tools,
+        delegate: delegate_verdict,
+        workers: &workers,
+    };
+    let request = context_request(
+        turn,
+        &principal,
+        query.as_deref(),
+        &facts,
+        live_recall.as_ref(),
+        context.session.task_cap(),
+        Some(&live),
     );
-    // 段的**次序**在这里声明（= 模型读到的上下文次序）：provider 按 owner 序在前，
-    // 委派者真源在后。加一段 provider 只需提交一条实现，本数组不动。
-    //
-    // 委派者真源**还不是 provider**：它要本轮收集成形后的 `tools`，而 provider 的入参
-    // 是本轮**已取好的值**（见 `symbio_plugin_api::context` 模块头）。这条边界是判据
-    // 而不是遗漏——把它硬塞进端口会让端口认识「工具清单」这种请求期产物。
     let mut sections: Vec<(&'static str, String)> = turn
         .context_sections
         .iter()
         .map(|s| (s.slot, s.text.clone()))
         .collect();
-    if let Some(text) = delegate_section {
-        sections.push((symbio_plugin_api::context::slots::DELEGATE, text));
-    }
+    sections.extend(
+        symbio_plugin_api::context_sections(&request, Cadence::Request)
+            .into_iter()
+            .map(|s| (s.slot, s.text)),
+    );
     let request_sections = context::build_request_sections(&sections);
 
     Ok(TurnInputs {
@@ -375,16 +445,16 @@ pub(crate) async fn run_recall(
             degraded: view.degraded,
             lines: &recall_lines,
         });
-    let request = symbio_plugin_api::ContextRequest {
-        turn: turn.turn_no,
-        request_round: u32::try_from(turn.request_round).unwrap_or(u32::MAX),
-        principal: &recall_viewer,
-        query: recall_query.as_deref(),
-        facts: &facts,
-        recall: recall_facts.as_ref(),
-        task_cap: context.session.task_cap(),
-    };
-    let sections = symbio_plugin_api::context_sections(&request);
+    let request = context_request(
+        turn,
+        &recall_viewer,
+        recall_query.as_deref(),
+        &facts,
+        recall_facts.as_ref(),
+        context.session.task_cap(),
+        None,
+    );
+    let sections = symbio_plugin_api::context_sections(&request, Cadence::Turn);
     turn.context_sections = sections;
 
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地

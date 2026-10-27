@@ -1,4 +1,5 @@
-//! `agent_run` 的**效果**：一次委托就是一次跨主体立约（DE-025 D-207）。
+//! `agent_run` 的**效果与前置判断**：一次委托就是一次跨主体立约（DE-025 D-207），
+//! 而被收回 `assign.work` 的主体派不活（D-219）。
 //!
 //! ## 为什么它住这里，而不是 `loop` 的工具执行层
 //!
@@ -29,7 +30,9 @@
 
 use symbio_core::commitment_events;
 use symbio_plugin_api::behaviors;
-use symbio_plugin_api::effects::{EffectCall, FactDraft, ToolBehavior};
+use symbio_plugin_api::effects::{
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+};
 
 /// 委托型工具的立约效果。
 pub struct DelegationPromise;
@@ -81,6 +84,47 @@ const COMMITMENT_VOCAB: symbio_core::CommitmentVocab = symbio_core::CommitmentVo
 };
 
 symbio_plugin_api::submit_behavior!(DelegationPromise);
+
+/// 淘汰回路的前置判断：主体被收回 `assign.work` ⇒ 本次委派不执行（S13 §3）。
+///
+/// ## 为什么判断住这里
+///
+/// 「`agent_run` 受淘汰管辖」是**本能力的声明**（`CapabilityMeta.behaviors` 上的
+/// `assign.work`），判断读的也是本能力的语义（派活）。住在宿主时，这段逻辑按工具名
+/// 分支；搬进来之后，宿主只交批首读好的结论（`BeforeRequest`），连 `agent_run` 这个
+/// 名字都不认识（DE-025 D-219）。
+///
+/// ## 出口
+///
+/// 可审计拒绝，**记违约承诺**：这次调用确实约了派活却没派成（S08 §5）。判断本身
+/// 不产事件——`verdict.asserted` 早已在事实源里，本层只是读侧（S13 §3）。
+pub struct DelegationGate;
+
+impl ToolBehavior for DelegationGate {
+    fn owner(&self) -> &'static str {
+        "agent"
+    }
+
+    fn behavior(&self) -> &'static str {
+        behaviors::ASSIGN_WORK
+    }
+
+    fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {
+        if !req.readings.assign_work_revoked {
+            return BeforeDecision::Allow;
+        }
+        BeforeDecision::Refuse(BeforeRefusal::new(
+            "淘汰",
+            format!(
+                "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
+                req.principal
+            ),
+            symbio_core::failure_kind::PERMISSION_DENIED,
+        ))
+    }
+}
+
+symbio_plugin_api::submit_behavior!(DelegationGate);
 
 #[cfg(test)]
 #[path = "behavior.test.rs"]

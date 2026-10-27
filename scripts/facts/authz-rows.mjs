@@ -169,6 +169,9 @@ export function collectPrincipals(root) {
 export function render(rows) {
   const L = [HEADER, ""];
   const names = [...new Set(rows.map((r) => r.name))].sort();
+  // `#[rustfmt::skip]`：这一行会随主体增长而过宽，而生成物必须与 rustfmt **逐字同形**
+  // ——门禁先 fmt 再生成，若这里让 rustfmt 折行，每次跑完门禁工作区都会多一处格式差异。
+  L.push("#[rustfmt::skip]");
   L.push(`use super::{${names.join(", ")}};`);
   L.push("use super::VisScope;");
   L.push("");

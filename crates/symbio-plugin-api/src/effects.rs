@@ -27,6 +27,17 @@
 //! 行为名（S1.1 的开放集合）。行为名住 [`crate::behaviors`]，实现住能力包——宿主
 //! 两侧都不认识工具名。
 //!
+//! ## 前置判断：同一份声明，另一种出口
+//!
+//! [`ToolBehavior::before`] 与 `after` 的**选法相同**（按声明选、按 owner 序），出口不同：
+//! `before` 只回答「这次调用能不能跑」，任一实现拒绝即拒绝（fail-closed，DE-025 D-219）。
+//! 它拿的是调用身份 + 主体 + 控制面批首读好的结论（[`BeforeReadings`]），**没有句柄、
+//! 没有轮锚**：判断发生在执行窗口之前，那时「这一轮」还没有可写的事实。
+//!
+//! `before` **不改写参数**：工具收到的就是模型发出的那一份。要变换入参的工具在自己的
+//! `Capability.execute` 里做——那里才是入参的唯一解释者；执行层改写参数会让转写里记下
+//! 的调用与真正跑的那一次不是同一件事。
+//!
 //! ## 写口唯一，读口也只读
 //!
 //! 行为只返回 [`FactDraft`]（尚未入库的事件），**不碰 WAL**：`Store::append` 仍在
@@ -151,6 +162,85 @@ impl EffectInput {
     }
 }
 
+// ── 前置判断（DE-025 D-219）────────────────────────────────────────────
+
+/// 一次工具的**前置判断输入**：纯值。
+///
+/// 与 [`EffectCall`] 的分界是时机：`before` 在**执行窗口之前**求值，那时轮锚、溯源与
+/// 「本轮已落格的草稿」都还不存在；它要看的是「这次调用以谁的名义、在什么结论下发起」。
+#[derive(Debug, Clone, Copy)]
+pub struct BeforeRequest<'a> {
+    /// 线上全名（`local/todo_write` 这种形态）。
+    pub tool: &'a str,
+    /// 本次调用在转写里的 ToolCall 节点 id。
+    pub call_id: &'a str,
+    /// 定稿参数（模型收到什么就是什么；`before` 无权改写）。
+    pub args: &'a Value,
+    /// 发起这次调用的主体（写事件的 `actor` 与它同一取值点）。
+    pub principal: &'a str,
+    /// 本工具声明的行为名（选实现用，不是给实现读的）。
+    pub declared: &'static [&'static str],
+    /// 本会话的事实切片（只读）：按历史判的前提（「这句话记过没有」）需要它。
+    pub facts: &'a [Event],
+    /// 控制面在批首判好的结论（见 [`BeforeReadings`]）。
+    pub readings: BeforeReadings,
+}
+
+/// 控制面交给前置判断的**读数**——判断的输入开放、判断闭集（D-208）。
+///
+/// 这里只放宿主才能读到的结论：能力实现拿得到自己的声明面与调用参数，却拿不到
+/// 「部署级覆盖层收回了哪些能力」这类跨会话的折叠值。**加一条读数 = 新增一种判断的
+/// 输入，走决策**（DE-025 D-219）——它是插件认识的宿主词汇，不是自由形状。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BeforeReadings {
+    /// 主体的 `assign.work` 是否已被淘汰回路收回（部署级覆盖层 last-wins，宿主批首读一次）。
+    pub assign_work_revoked: bool,
+}
+
+/// 一次拒绝：判断归属的名字 + 回灌模型的拒因 + 退出语义。
+///
+/// 与后置效果不同，拒绝**必须**落到调用结果上——否则模型会看到一次「凭空消失」的
+/// 调用。宿主据此产生结果子节点、收敛父节点，并按 [`Self::notes_delegation`] 决定
+/// 要不要把这次调用记成没履约的承诺。
+#[derive(Debug, Clone)]
+pub struct BeforeRefusal {
+    /// 判断归属的稳定名字（日志 / 测试 / 审计；改名 = 改事实）。
+    pub gate: &'static str,
+    /// 回灌模型的完整拒因。
+    pub reason: String,
+    /// `meta.failure_kind` 的取值（约定字段，控制流不靠猜正文）。
+    pub kind: &'static str,
+    /// 要不要记违约承诺。`true` = 这次调用本来会产出效果，拒止同样是一次没履约；
+    /// `false` = 工具根本没跑，「声明过什么」无从说起（如任务表写侧）。
+    pub notes_delegation: bool,
+}
+
+impl BeforeRefusal {
+    pub fn new(gate: &'static str, reason: impl Into<String>, kind: &'static str) -> Self {
+        Self {
+            gate,
+            reason: reason.into(),
+            kind,
+            notes_delegation: true,
+        }
+    }
+
+    /// 工具没跑 ⇒ 不记违约承诺（只影响记账面，不影响结果正文与父节点终态）。
+    pub fn without_delegation_note(mut self) -> Self {
+        self.notes_delegation = false;
+        self
+    }
+}
+
+/// 一次前置判断的结论。
+#[derive(Debug, Clone)]
+pub enum BeforeDecision {
+    /// 放行：交给下一个行为判，全部放行才执行。
+    Allow,
+    /// 拒绝：整批到这里为止（fail-closed），后面的行为不再被问。
+    Refuse(BeforeRefusal),
+}
+
 /// 一条**待落格**的事实：行为交出的草稿，宿主盖章入库。
 ///
 /// 字段是「宿主不解释的那部分」：`kind` 由 owner 的 `EventDecl` 登记、`payload`
@@ -216,6 +306,14 @@ pub trait ToolBehavior: Sync {
     /// 只产出草稿，**不写事实源**：写口唯一（I1）。
     fn after(&self, _call: &EffectCall<'_>) -> Vec<FactDraft> {
         Vec::new()
+    }
+
+    /// 一次调用**执行之前**的判断。返回 [`BeforeDecision::Allow`] = 不拦（**默认**）。
+    ///
+    /// 与 [`Self::after`] 同一份声明面：工具说「我受这项管辖」，本实现说「我来判这一关」。
+    /// 任一实现拒绝即拒绝（DE-025 D-219）；判断是纯函数——不写事实、不改参数、不取句柄。
+    fn before(&self, _req: &BeforeRequest<'_>) -> BeforeDecision {
+        BeforeDecision::Allow
     }
 
     /// 一次调用对**既有事实**的补充字段（载荷富化）。返回空 = 不补（**默认**）。
@@ -296,6 +394,22 @@ pub fn annotations(input: &EffectInput) -> Vec<(&'static str, Value)> {
         out.extend(behavior.annotate(input));
     }
     out
+}
+
+/// 判一次调用：按 owner 序问「工具声明了这个行为」的实现，**先拒绝者胜**。
+///
+/// fail-closed 的形状就是这一行 `Some` 的早退：任一道判断拒绝，后面的判断不再被问
+/// （它们可能依赖前者放行后的事实），调用也不进执行窗口（DE-025 D-219）。
+pub fn apply_before(req: &BeforeRequest<'_>) -> Option<BeforeRefusal> {
+    for behavior in handlers() {
+        if !req.declared.contains(&behavior.behavior()) {
+            continue;
+        }
+        if let BeforeDecision::Refuse(refusal) = behavior.before(req) {
+            return Some(refusal);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

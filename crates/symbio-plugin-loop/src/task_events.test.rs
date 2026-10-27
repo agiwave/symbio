@@ -2,15 +2,17 @@
 //! **清单声明 → 事实 → 两个消费方**的每一环都要看得见，且每条口径各配一个反向用例
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
-use super::{prompt_section, ScheduleDecider, TaskItem, TaskStatus};
+use super::{prompt_section, ScheduleDecider, TaskItem, TaskStatus, TaskTable};
 use crate::control_decl::guard_vocab;
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{
     actor_can_assign_work, check_all, readyset_for, Budget, Entity, Event, EventStore, Pattern,
-    Scope, Seq, Store, Verb,
+    Scope, Seq, Store, Verb, PRINCIPAL_MAIN,
 };
 use symbio_plugin_api::behaviors;
-use symbio_plugin_api::effects::{EffectEnv, EffectInput};
+use symbio_plugin_api::effects::{
+    BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
+};
 use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED;
 
 use crate::control_decl::{
@@ -835,4 +837,93 @@ fn event_ids_stay_unique_across_two_calls_in_one_turn() {
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), before, "幂等键撞了 ⇒ 第二条被存储静默丢掉");
+}
+
+// ==================== 写侧判断（S03 §3 / DE-025 D-219） ====================
+//
+// 判据住在**本插件的 `TaskTable::before`**：工具声明 `task_table`，宿主把批首读好的
+// 主体交进来，本实现只答「这个主体能不能写」。名字与主体的匹配在 `ToolDecls`
+// （`decls.test.rs`），这里只钉资格本身。
+
+fn judgement<'a>(args: &'a serde_json::Value, principal: &'a str) -> BeforeRequest<'a> {
+    BeforeRequest {
+        tool: "local/todo_write",
+        call_id: "call-1",
+        args,
+        principal,
+        declared: &[behaviors::TASK_TABLE],
+        facts: &[],
+        readings: BeforeReadings::default(),
+    }
+}
+
+/// `define.work` 的三个持有者与 `assert.verification` 的两个持有者都能写任务表。
+///
+/// 立任务（主智能体 / 自主发起者 / 规划者）与独立判定（仲裁者 / 验证者）是任务表上的
+/// 两种权威；两项互不可写（C15），所以「谁能写」必须按**任一**能力判。
+#[test]
+fn role_holders_may_write_the_task_table() {
+    let args = serde_json::json!({});
+    for agent in ["main", "autonomous", "planner", "arbiter", "verifier"] {
+        let principal = symbio_core::principal_of(Some(agent));
+        assert!(
+            matches!(
+                TaskTable.before(&judgement(&args, &principal)),
+                BeforeDecision::Allow
+            ),
+            "主体 `{principal}` 持权威，必须能写任务表"
+        );
+    }
+}
+
+/// 平凡值（无 `AGENT_ID` ⇒ `session/main`）照常放行——生产里的绝对多数会话是这一形态。
+#[test]
+fn the_trivial_session_may_write_the_task_table() {
+    let args = serde_json::json!({});
+    assert!(matches!(
+        TaskTable.before(&judgement(&args, PRINCIPAL_MAIN)),
+        BeforeDecision::Allow
+    ));
+}
+
+/// 纯产出 / 纯派活 / 纯判定主体被拒——C15 的精神在任务表这一层。
+///
+/// 工人与对等体只持 `produce.artifact`（交付物是产物格），市场只持 `assign.work`
+/// （派活 ≠ 立活），守门者与抢占判定者只持 `judge.intent`。今天没有生产路径让这些
+/// 主体调任务表——此判据防的是**未来**：角色行落地后，一个绑 `worker` 的子会话被
+/// 诚实拒止，而不是静默以主智能体资格写下去。
+#[test]
+fn producer_only_principals_are_refused_the_task_table() {
+    let args = serde_json::json!({});
+    for agent in ["worker", "peer-b", "market", "gatekeeper", "reflex"] {
+        let principal = symbio_core::principal_of(Some(agent));
+        let BeforeDecision::Refuse(refusal) = TaskTable.before(&judgement(&args, &principal))
+        else {
+            panic!("主体 `{principal}` 不持权威，必须被拒");
+        };
+        assert_eq!(refusal.gate, "任务表");
+        assert_eq!(refusal.kind, symbio_core::failure_kind::PERMISSION_DENIED);
+        assert!(
+            refusal.reason.contains(&principal)
+                && refusal.reason.contains("define.work / assert.verification"),
+            "拒因要点名主体与缺的资格（实际: {}）",
+            refusal.reason
+        );
+        assert!(
+            !refusal.notes_delegation,
+            "工具没跑 ⇒ 「声明过什么」无从说起，不记承诺"
+        );
+    }
+}
+
+/// 未绑定登记的主体在合流面没有行 ⇒ 拒（[D-099] 未登记 = 拒、[D-100] 绑定登记前
+/// 没有行）。本用例直读合流面、不经过装配点绑定：忘配 / 忘绑的后果是一条会被看见的
+/// 拒绝，不是一次静默超权。
+#[test]
+fn an_unbound_subagent_is_refused_the_task_table() {
+    let args = serde_json::json!({});
+    assert!(matches!(
+        TaskTable.before(&judgement(&args, "session/reviewer")),
+        BeforeDecision::Refuse(_)
+    ));
 }

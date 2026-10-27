@@ -790,8 +790,8 @@ async fn run_persistent_rebuilds_from_store_without_handle() {
 // ==================== 部署级淘汰覆盖层 ====================
 //
 // 扫描范围跟着存储布局走，两半都在 session：`deep_snapshots` 深遍全会话（含
-// 嵌套），折叠判据在 core，动作只交结论值（D-086 §4）。loop 侧只钉值搬运
-// （`loop/tools/tool_executor/elimination.test.rs`）。
+// 嵌套），折叠判据在 core，动作只交结论值（D-086 §4）。值搬运钉在 loop 的
+// `dispatch/gates.test.rs`（主体派生），判断本身在 agent 的 `DelegationGate`。
 
 /// 在 `<root>/<safe(sid)>/v2-events.wal` 落一条事件（平级会话布局）。
 fn append_to_session(root: &std::path::Path, session_id: &str, event: Event) {

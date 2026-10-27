@@ -2,30 +2,41 @@
 //! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 判据（「这段错了谁会红」）：闸门判据**只在批首读一次**、整批复用的读数用例红
-//! （`breaker` / `elimination` / `task_table` 的批首读场景与 `tool_executor.test.rs`
+//! （`breaker` 的批首读场景、`batch_principal` 的派生用例与 `tool_executor.test.rs`
 //! 的闸门组）。读数语句的顺序与拆分前逐字一致——`gate_started` 仍从读判据之前起算。
+//!
+//! ## 宿主闸与声明闸
+//!
+//! 本文件只剩**一道宿主闸**：[`GATES`] 里的外部执行。它判的不是「哪个工具受什么
+//! 管辖」，而是「这通调用能不能开窗」——输入是执行窗口的授权与预算，与工具行为
+//! 无关，因此不挂在声明上（DE-025 D-219）。
+//!
+//! 淘汰与任务表写侧这两道**按能力判**的闸已随 owner 迁出宿主：它们各自是
+//! `ToolBehavior::before`（agent 的 `DelegationGate`、loop 的 `TaskTable`），由
+//! `symbio_plugin_api::effects::apply_before` 按工具**自己声明的行为名**选实现。
+//! 宿主在这里只负责把批首读好的结论交出去（主体 / 控制面撤销值 / 会话事实切片），
+//! 并在 [`Refusal::from_before`] 里把实现的判定映射回拒止骨架。
 
 //! ## 闸门表
 //!
-//! 本文件同时是**三道具名闸门**的唯一登记处：[`GATES`] 一行 = 一个闸名 + 一个纯判据，
-//! 外加该闸可能产出的失败语义。批内执行点只有一个（`batch::run_batch` 的
-//! [`first_refusal`]），于是「现在有几道闸、各自什么出口」读这张表即可；新增一道同步闸
-//! = 加一行 + 一个判据结构，不再往循环体里抄一遍「拒因 → 结果节点 → 父节点收敛 →
-//! 记账 → continue」。
+//! [`GATES`] 一行 = 一个宿主闸名 + 一个纯判据，外加该闸可能产出的失败语义。批内
+//! 执行点只有一个（`batch::prepare_call` 的 [`first_refusal`]），于是「宿主还有几道
+//! 闸、各自什么出口」读这张表即可。
 //!
 //! **出口不对称是表的一列，不是被抹平的差异**（S09 §6）：
 //! - [`RefusalTrace::ZeroEvent`]：拒止**不产事件**（外部执行 `Refuse`，验收 1）；
 //! - [`RefusalTrace::Recorded`]：拒因**入格**，经出参交回随收束落 `task.controlled`
 //!   （外部执行 `Break`，验收 2）；
-//! - [`RefusalTrace::Audited`]：可审计拒绝——拒因进结果、违约承诺照记（淘汰 / PreToolUse）；
-//! - [`RefusalTrace::AuditedNoDelegation`]：可审计拒绝但**不记承诺**（任务表：工具没跑，
-//!   「声明过什么」无从说起）。
+//! - [`RefusalTrace::Audited`]：可审计拒绝——拒因进结果、违约承诺照记（声明闸的默认出口）；
+//! - [`RefusalTrace::AuditedNoDelegation`]：可审计拒绝但**不记承诺**（声明闸显式去掉
+//!   承诺记账时：工具没跑，「声明过什么」无从说起）。
 //!
 //! PreToolUse 钩子仍是异步的，因此不进 [`GATES`] 的同步判据表；它走同一个
 //! [`refuse`] 骨架，并显式声明自己的失败语义（[`Refusal::blocked`]）。
 
 use super::*;
 use symbio_core::{Entity, Verb, PRINCIPAL_REFLEX};
+use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
 
 /// 批首一次读齐的全部闸门读数（阶段①的产出；阶段②③只按值消费，不再回读事实源）。
 pub(crate) struct GateReadings {
@@ -35,12 +46,17 @@ pub(crate) struct GateReadings {
     pub(crate) gate_started: std::time::Instant,
     /// 外部执行闸门判据（S8 第 20 步）。
     pub(crate) breaker: BreakerInputs,
-    /// 淘汰闸门判据（S13 §3，）。
-    pub(crate) elimination: EliminationInputs,
-    /// 任务表写侧闸判据（S03 §3，）。
-    pub(crate) task_table: TaskTableInputs,
     /// 工具自声明的行为位。
     pub(crate) decls: ToolDecls,
+    /// 前置判断的控制面读数：声明闸在批首拿到同一份结论，逐个调用只做纯判定。
+    pub(crate) before: BeforeReadings,
+    /// 本条批的主体：声明闸都按它问（`AGENT_ID` ⇒ 会话族地址）。
+    pub(crate) principal: String,
+    /// 批首的会话事实切片——声明闸读历史用（例如「这条便签是不是记过」）。
+    ///
+    /// 持有到批尾的代价是一份 `Vec<Event>`；换来的是判断只读**值**、不在执行
+    /// 窗口里回放事实源（D-084 的口径）。
+    pub(crate) session_facts: Vec<Event>,
     /// 工具自声明的风险档：批内执行策略的分流依据，与 `decls` 同一份元数据。
     pub(crate) risks: ToolRisks,
     /// `tool` 端口是否声明同批可并发（DE-015 §3.3 / ）。
@@ -51,6 +67,14 @@ pub(crate) struct GateReadings {
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
     /// 同参重复调用台账；阶段②逐条登记，故为可变读数。
     pub(crate) seen_calls: Vec<String>,
+}
+
+/// 本条批的**主体**：声明闸按它问（`AGENT_ID` 的会话族地址，未绑定即 `session/main`）。
+///
+/// 与 `request_principal` 同源：判断与落笔因此指向同一个主体，不会出现「按 A 判、
+/// 以 B 记」的两套主体。
+pub(crate) fn batch_principal(ctx: &Arc<dyn PluginInvokeRequest>) -> String {
+    symbio_core::principal_of(ctx.get(symbio_core::AGENT_ID).as_deref())
 }
 
 /// 上下文里**本批之外**已出现过的工具调用签名（按出现顺序）。
@@ -98,17 +122,17 @@ pub(crate) async fn read_batch_gates(
     // 已经读了多久」。
     // 从前它在 `gate()` 前一刻才起算，`elapsed_ms` 恒为 0，判据永不触发。
     let gate_started = std::time::Instant::now();
-    let session_snapshot = facts.range(Seq::new(0));
-    let breaker = BreakerInputs::of(&session_snapshot, &ctx);
-    // 淘汰闸门的判据同批首读一次（见 [`EliminationInputs`]，S13 §3）：部署级覆盖层
-    // 由 session 折叠成**一个值**（它持有全部会话的事实源）；loop 只收结论。
-    let elimination = EliminationInputs::of(elimination_revoked, &ctx);
-    // 任务表写侧闸的判据同批首读一次（见 `TaskTableInputs`，S03 §3 / ）：
-    // 只问本会话主体那一行——任务表是会话自己的工作跟踪，写它的资格随主体走。
-    let task_table = TaskTableInputs::of(&ctx);
-    // 工具自声明的行为位同批首读一次（见 `ToolDecls`，）：淘汰闸 / 承诺
-    // 记账 / 任务表三族的管辖对象从能力注册表读，不按名字判。没有 visitor ⇒
-    // 三个集合皆空 ⇒ 三道闸都不命中（缺声明与漏声明同形，e2e 兜行为）。
+    let session_facts = facts.range(Seq::new(0));
+    let breaker = BreakerInputs::of(&session_facts, &ctx);
+    // 声明闸的结论同批首读一次：部署级覆盖层由 session 折叠成**一个值**（它持有
+    // 全部会话的事实源），主体从 `AGENT_ID` 派生——loop 只把这些值交给能力包的实现。
+    let before = BeforeReadings {
+        assign_work_revoked: elimination_revoked,
+    };
+    let principal = batch_principal(&ctx);
+    // 工具自声明的行为位同批首读一次（见 `ToolDecls`，）：声明闸的管辖对象与效果
+    // 端口的选实现依据都是它，按工具名判的那份副本因此不再存在。没有 visitor ⇒
+    // 声明为空 ⇒ 声明闸都不命中、效果端口也无事可做（缺声明与漏声明同形，e2e 兜行为）。
     //
     // 同一份元数据还给出**风险档**（执行策略）：登记表只读一次，两个
     // 消费者按值复用——再遍历一遍收集管线等于把批首读数变成两处时延源。
@@ -144,9 +168,10 @@ pub(crate) async fn read_batch_gates(
         mode,
         gate_started,
         breaker,
-        elimination,
-        task_table,
         decls,
+        before,
+        principal,
+        session_facts,
         risks,
         concurrent,
         batch_meta,
@@ -252,16 +277,12 @@ impl Refusal {
     }
 }
 
-/// 一次判据调用需要的全部输入：批首读数（只读）+ 本条调用的工具名。
+/// 一次宿主闸判据需要的全部输入：批首读数（只读）。
 ///
 /// 判据是**纯函数**——不读事实源、不发事件、不记账；副作用全部收在 [`refuse`]。
 pub(crate) struct GateContext<'a> {
     pub(crate) gate_started: std::time::Instant,
     pub(crate) breaker: &'a BreakerInputs,
-    pub(crate) elimination: &'a EliminationInputs,
-    pub(crate) task_table: &'a TaskTableInputs,
-    pub(crate) decls: &'a ToolDecls,
-    pub(crate) name: &'a str,
 }
 
 /// 闸门表的一行：闸名 / 判据 / 本闸可能产出的失败语义。
@@ -275,27 +296,15 @@ pub(crate) struct GateRow {
     pub(crate) traces: &'static [RefusalTraceKind],
 }
 
-/// 三道同步闸的唯一登记表：顺序即判据顺序（先命中者胜）。
+/// 宿主闸的唯一登记表：顺序即判据顺序（先命中者胜）。
 ///
-/// 外部执行闸排第一：它是「这通调用能不能开窗」的总闸，预算 / 授权先于
-/// 淘汰与任务表资格（后两者只对自声明受管辖的工具生效）。
-pub(crate) const GATES: &[GateRow] = &[
-    GateRow {
-        name: "外部执行",
-        decide: external_execution,
-        traces: &[RefusalTraceKind::ZeroEvent, RefusalTraceKind::Recorded],
-    },
-    GateRow {
-        name: "淘汰",
-        decide: elimination,
-        traces: &[RefusalTraceKind::Audited],
-    },
-    GateRow {
-        name: "任务表",
-        decide: task_table,
-        traces: &[RefusalTraceKind::AuditedNoDelegation],
-    },
-];
+/// 外部执行闸是**唯一**留在宿主的同步闸：它问的是「这通调用能不能开窗」（授权 /
+/// 预算 / 时延），不是「哪个工具受什么管辖」——后者是能力包自己的判断，见模块文档。
+pub(crate) const GATES: &[GateRow] = &[GateRow {
+    name: "外部执行",
+    decide: external_execution,
+    traces: &[RefusalTraceKind::ZeroEvent, RefusalTraceKind::Recorded],
+}];
 
 /// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/003-design/039-外部执行与熔断.md "DE-039-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -400,43 +409,27 @@ fn external_execution(ctx: &GateContext<'_>) -> Option<Refusal> {
     }
 }
 
-/// 淘汰闸（S13 §3，）：只拦声明 `assign_work` 行为的工具。
+/// 声明闸的判定 → 拒止骨架。实现的判定只说「拒 / 为什么 / 记不记承诺」，
+/// 骨架要的 `prefix` / 入格理由 / 钩子措辞都由宿主按自己的口径补。
 ///
-/// 出口是**可审计拒绝**：`verdict.asserted` 已在事实源里（闸门只是读侧），本层
-/// 不再产事件；结果上的 `Refused: …` 与随收束入格的违约承诺就是它的两面。
-fn elimination(ctx: &GateContext<'_>) -> Option<Refusal> {
-    if !(ctx.decls.provides_assign_work(ctx.name) && ctx.elimination.delegation_revoked) {
-        return None;
+/// 出口语义由实现自报（`notes_delegation`）：这一位不是宿主对某道闸的特判，而是
+/// 实现对自己这次拒绝**知道多少**的交代——先说「约没见过」的工具，拒了也不该记
+/// 一笔没履约的承诺（DE-025 D-219）。
+impl Refusal {
+    pub(crate) fn from_before(refusal: BeforeRefusal) -> Self {
+        Self {
+            gate: refusal.gate,
+            reason: refusal.reason,
+            prefix: "Refused",
+            kind: refusal.kind,
+            trace: if refusal.notes_delegation {
+                RefusalTrace::Audited
+            } else {
+                RefusalTrace::AuditedNoDelegation
+            },
+            note_why: None,
+        }
     }
-    Some(Refusal::new(
-        "淘汰",
-        format!(
-            "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
-            ctx.elimination.principal
-        ),
-        failure_kind::PERMISSION_DENIED,
-        RefusalTrace::Audited,
-    ))
-}
-
-/// 任务表写侧闸（S03 §3，）：只拦声明 `task_table` 行为的工具。
-///
-/// 出口是**可审计拒绝但不记承诺**：工具没跑，「声明过什么」无从说起
-/// （任务表效果只在成功的调用上求值，见 `task_events::TaskTable`）。
-fn task_table(ctx: &GateContext<'_>) -> Option<Refusal> {
-    let blocked = ctx.decls.owns_task_table(ctx.name) && !ctx.task_table.may_write;
-    if !blocked {
-        return None;
-    }
-    Some(Refusal::new(
-        "任务表",
-        format!(
-            "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
-            ctx.task_table.principal
-        ),
-        failure_kind::PERMISSION_DENIED,
-        RefusalTrace::AuditedNoDelegation,
-    ))
 }
 
 /// 判据的唯一执行点：按 [`GATES`] 顺序问，先命中者胜。

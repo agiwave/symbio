@@ -1,4 +1,4 @@
-//! 两个上下文 provider 的判据：段身份、空返回、以及「渲染不变」。
+//! 三个上下文 provider 的判据：段身份、空返回、节奏，以及「渲染不变」。
 //!
 //! 这一组用例判的是**搬移前后输出一致**：召回段与调度段的排版原先在
 //! `memory_events::prompt_section` / `task_events::prompt_section`，现在由 provider
@@ -6,7 +6,8 @@
 //! 只断言「provider 在什么情况下给段、给的哪一段、次序如何」。
 
 use super::*;
-use symbio_plugin_api::context::{slots, ContextProvider, RecallFacts, RecallLine};
+use symbio_plugin_api::context::{slots, Cadence, RecallFacts, RecallLine};
+use symbio_plugin_api::{ContextProvider, DelegateVerdict, LiveInputs};
 
 fn request<'a>(
     facts: &'a [symbio_core::Event],
@@ -20,6 +21,7 @@ fn request<'a>(
         facts,
         recall,
         task_cap: 8,
+        live: None,
     }
 }
 
@@ -76,21 +78,21 @@ fn readyset_without_ready_tasks_contributes_nothing() {
     assert!(ReadySetProvider.provide(&req).is_empty());
 }
 
-/// 两条 provider 都在 `loop` 名下各提交一次。
+/// 三条 provider 都在 `loop` 名下各提交一次。
 ///
-/// 提交序 = 段序（同一 owner 内 `inventory` 保持提交序，`providers()` 的排序是稳定的）：
-/// 端口化之前段的次序写死在 `build_request_sections` 的数组里，现在是
-/// 「召回那条先提交、调度那条后提交」。**改提交序就是改模型读到的先后**——那是行为
-/// 变化，不是重构，所以这条判据至少要把「各提交了一次」钉住。
+/// 提交序 = 同节奏内的段序（同一 owner 内 `inventory` 保持提交序，`providers()` 的
+/// 排序是稳定的）：端口化之前段的次序写死在 `build_request_sections` 的数组里，
+/// 现在是「召回先提交、调度次之、委派最后」。**改提交序就是改模型读到的先后**——
+/// 那是行为变化，不是重构，所以这条判据至少要把「各提交了一次」钉住。
 #[test]
-fn both_providers_are_submitted_under_loop() {
+fn all_providers_are_submitted_under_loop() {
     let loop_owned = symbio_plugin_api::context_providers()
         .iter()
         .filter(|p| p.owner() == "loop")
         .count();
     assert_eq!(
-        loop_owned, 2,
-        "本插件必须恰好提交两条上下文 provider（召回 + 调度）"
+        loop_owned, 3,
+        "本插件必须恰好提交三条上下文 provider（召回 + 调度 + 委派）"
     );
 }
 
@@ -106,7 +108,7 @@ fn a_collected_request_carries_the_recall_slot() {
         lines: &lines,
     };
     let req = request(&[], Some(&recall));
-    let slots_in_order: Vec<&str> = symbio_plugin_api::context_sections(&req)
+    let slots_in_order: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Turn)
         .iter()
         .map(|s| s.slot)
         .collect();
@@ -114,4 +116,48 @@ fn a_collected_request_carries_the_recall_slot() {
         slots_in_order.contains(&slots::RECALL),
         "召回段没被收集：{slots_in_order:?}"
     );
+}
+
+/// 委派段是**请求级**节奏：轮首收集不问它，工具收集完成后才由 `live` 供给输入。
+#[test]
+fn the_delegate_section_waits_for_the_request_cadence() {
+    let tools = [symbio_core::CapabilityMeta {
+        name: "file_read".to_string(),
+        ..Default::default()
+    }];
+    let live = LiveInputs {
+        tools: &tools,
+        delegate: DelegateVerdict::Start {
+            reason: "explicit_prefix",
+        },
+        workers: &[],
+    };
+    let mut req = request(&[], None);
+    req.live = Some(&live);
+
+    let turn_slots: Vec<&str> = symbio_plugin_api::context_sections(&req, Cadence::Turn)
+        .iter()
+        .map(|s| s.slot)
+        .collect();
+    assert!(
+        !turn_slots.contains(&slots::DELEGATE),
+        "轮首不该产出委派段：{turn_slots:?}"
+    );
+
+    let request_sections = symbio_plugin_api::context_sections(&req, Cadence::Request);
+    assert_eq!(request_sections.len(), 1, "{request_sections:?}");
+    assert_eq!(request_sections[0].slot, slots::DELEGATE);
+    let text = &request_sections[0].text;
+    assert!(text.contains("reason=explicit_prefix"), "{text}");
+    assert!(
+        text.contains("- FileOperation") || text.contains("file_read"),
+        "{text}"
+    );
+}
+
+/// 轮首没有 `live`（例如宿主误以请求级收集轮首值）⇒ 委派段一段都不给，不印空壳。
+#[test]
+fn delegate_without_live_inputs_contributes_nothing() {
+    let req = request(&[], None);
+    assert!(DelegateProvider.provide(&req).is_empty());
 }

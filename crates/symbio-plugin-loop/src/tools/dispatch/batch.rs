@@ -2,9 +2,9 @@
 //! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
-//! 超限丢弃 → 外部执行闸 → 淘汰闸 → 任务表闸 → Pre 钩子 → 执行 → Post 钩子 → 记账
-//! → 结果与父终态广播」。批首读数经 [`GateReadings`] 传入，台账（`seen_calls`）在
-//! 本段逐条登记。
+//! 超限丢弃 → 宿主闸（外部执行）→ 声明闸（能力包自己的 `before`）→ Pre 钩子 →
+//! 执行 → Post 钩子 → 记账 → 结果与父终态广播」。批首读数经 [`GateReadings`] 传入，
+//! 台账（`seen_calls`）在本段逐条登记。
 //!
 //! ## 批内并行
 //!
@@ -26,6 +26,7 @@
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use symbio_plugin_api::effects::BeforeRequest;
 
 use super::*;
 
@@ -216,9 +217,10 @@ async fn prepare_call(
     ctx: Arc<dyn PluginInvokeRequest>,
     gate_started: std::time::Instant,
     breaker: &BreakerInputs,
-    elimination: &EliminationInputs,
-    task_table: &TaskTableInputs,
     decls: &ToolDecls,
+    principal: &str,
+    session_facts: &[Event],
+    before: symbio_plugin_api::effects::BeforeReadings,
     seen_calls: &mut Vec<String>,
 ) -> PreCheck {
     // 工具调用 id 缺失/非法 → 作为工具调用失败处理（不跳过）。
@@ -325,22 +327,14 @@ async fn prepare_call(
         });
     }
 
-    // ── 闸门表：外部执行 / 淘汰 / 任务表，先命中者胜 ────────────
+    // ── 宿主闸：能不能开窗（外部执行） ───────────────────────────────
     //
     // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
     // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
     // 钩子往返（还可能触发钩子自己的副作用）。
-    //
-    // 四道闸的出口判据**不对称**（S09 §6），差异经 `RefusalTrace` 表达：
-    // `Refuse` 零事件、`Break` 入格、淘汰 / 钩子可审计拒绝、任务表不记承诺。
-    // 骨架与差异的唯一实现在 `dispatch::gates`（[`GATES`] 是闸门的登记表）。
     let gate_ctx = GateContext {
         gate_started,
         breaker,
-        elimination,
-        task_table,
-        decls,
-        name: &name,
     };
     if let Some(refusal) = first_refusal(&gate_ctx) {
         return PreCheck::Terminal(PreTerminal::Refused {
@@ -349,6 +343,31 @@ async fn prepare_call(
             args: tc.arguments.clone(),
             result_msg_id,
             refusal,
+        });
+    }
+
+    // ── 声明闸：这个工具自己声明「我受什么管辖」 ─────────────────────
+    //
+    // 淘汰 / 任务表写侧这类**按能力判**的闸不在宿主：它们各自是能力包的
+    // `ToolBehavior::before`，按 `CapabilityMeta.behaviors` 选实现（DE-025 D-219）。
+    // 宿主只交出批首读好的结论——主体、控制面撤销值、会话事实切片——不解释
+    // 「谁该被拒」。
+    let before_req = BeforeRequest {
+        tool: &name,
+        call_id: &id,
+        args: &tc.arguments,
+        principal,
+        declared: decls.behaviors_of(&name),
+        facts: session_facts,
+        readings: before,
+    };
+    if let Some(judged) = symbio_plugin_api::effects::apply_before(&before_req) {
+        return PreCheck::Terminal(PreTerminal::Refused {
+            id,
+            name,
+            args: tc.arguments.clone(),
+            result_msg_id,
+            refusal: Refusal::from_before(judged),
         });
     }
 
@@ -824,9 +843,10 @@ pub(crate) async fn run_batch(
     let mode = readings.mode.as_str();
     let gate_started = readings.gate_started;
     let breaker = &readings.breaker;
-    let elimination = &readings.elimination;
-    let task_table = &readings.task_table;
     let decls = &readings.decls;
+    let judge_principal = readings.principal.as_str();
+    let session_facts = readings.session_facts.as_slice();
+    let before = readings.before;
     let risks = &readings.risks;
     let concurrent = readings.concurrent;
     let seen_calls = &mut readings.seen_calls;
@@ -862,9 +882,10 @@ pub(crate) async fn run_batch(
                 ctx.clone(),
                 gate_started,
                 breaker,
-                elimination,
-                task_table,
                 decls,
+                judge_principal,
+                session_facts,
+                before,
                 seen_calls,
             )
             .await

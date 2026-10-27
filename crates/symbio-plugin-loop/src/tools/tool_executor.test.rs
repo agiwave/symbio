@@ -107,6 +107,67 @@ async fn factory_decls() -> ToolDecls {
     ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
 }
 
+/// 注册面 + 可选的 `AGENT_ID`：声明闸的整批路径用例按需构造。
+async fn ctx_declaring(
+    behaviors: &'static [&'static str],
+    agent_id: Option<&str>,
+) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
+    if let Some(id) = agent_id {
+        req.set(symbio_core::AGENT_ID, id.to_string());
+    }
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    visitor
+        .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
+            name: "todo_write".to_string(),
+            behaviors,
+            ..Default::default()
+        })) as Arc<dyn Capability>))
+        .await;
+    req.set(
+        symbio_core::CAPABILITY_VISITOR,
+        visitor as Arc<dyn Registry>,
+    );
+    Arc::new(req)
+}
+
+// ── 测试用的声明闸 ────────────────────────────────────────────────
+//
+// 淘汰的真实实现住 `symbio-plugin-agent`（`DelegationGate`），而本 crate 的测试
+// 二进制里没有兄弟插件（E-009）。宿主接线的判据因此用一份**同形**的实现：它只按
+// 批首读数拒，语义（可审计拒绝 + 违约承诺）由端口统一，不由本实现决定。
+struct RevokedGate;
+
+impl symbio_plugin_api::effects::ToolBehavior for RevokedGate {
+    fn owner(&self) -> &'static str {
+        "tests/revoked"
+    }
+
+    fn behavior(&self) -> &'static str {
+        symbio_plugin_api::behaviors::ASSIGN_WORK
+    }
+
+    fn before(
+        &self,
+        req: &symbio_plugin_api::effects::BeforeRequest<'_>,
+    ) -> symbio_plugin_api::effects::BeforeDecision {
+        use symbio_plugin_api::effects::{BeforeDecision, BeforeRefusal};
+        if !req.readings.assign_work_revoked {
+            return BeforeDecision::Allow;
+        }
+        BeforeDecision::Refuse(BeforeRefusal::new(
+            "淘汰",
+            format!(
+                "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
+                req.principal
+            ),
+            failure_kind::PERMISSION_DENIED,
+        ))
+    }
+}
+
+symbio_plugin_api::submit_behavior!(RevokedGate);
+
 // ==================== extract_result：判定顺序即约定 ====================
 //
 // 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
@@ -1257,11 +1318,11 @@ async fn the_ledger_comes_from_the_facts_value() {
     );
 }
 
-/// 淘汰闸是**可审计拒绝**：结果回灌 + 父节点收敛 + 违约承诺照记（S13 §3）。
+/// 声明闸是**可审计拒绝**：结果回灌 + 父节点收敛 + 违约承诺照记（S13 §3）。
 ///
-/// 判据批首读一次（部署级撤销结论由 session 折成一个值），这里钉的是接线：
-/// 声明了 `provides_assign_work` 的 `agent_run` 在 `elimination_revoked=true` 时
-/// 不执行，且「约了却没派成」如实落进承诺出参（`record_effect` ok=false）。
+/// 判据住声明闸（真实实现是 agent 的 `DelegationGate`，DE-025 D-219）；这里钉的是
+/// **宿主接线**：工具声明了 `assign_work`、批首读数是「已收回」⇒ 工具不执行，且
+/// 「约了却没派成」如实落进承诺出参（`record_effect` ok=false）。
 #[tokio::test]
 async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-elimination");
@@ -1357,14 +1418,14 @@ async fn revoked_assign_work_is_an_audited_refusal_with_a_breached_promise() {
 
 // ==================== 任务表写侧闸：纯产出主体不立任务（S03 §3，） ====================
 //
-// 钉的是**闸门的接线**（判据本身在 `task_table.test.rs`）：`todo_write` 到达执行窗口
-// 之前被拒——`Refused:` 回灌模型、父节点收敛、工具没有执行（没有路由往返）、
-// **不交效果输入**（效果只在跑完后求值，见 DE-025 D-213）。
+// 钉的是**闸门的接线**（判据本身是 `task_events::TaskTable::before`，见
+// `task_events.test.rs`）：`todo_write` 到达执行窗口之前被拒——`Refused:` 回灌模型、
+// 父节点收敛、工具没有执行（没有路由往返）、**不交效果输入**（效果只在跑完后求值，
+// 见 DE-025 D-213）。
 //
-// 之后这道闸的判据是**注册面**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
-// 自声明 `owns_task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带
-// 一份与生产同形的注册面，否则闸「看不见」这次调用（无声明 = 不命中，由 e2e
-// 兜真实行为）。
+// 之后这道闸的判据是**注册面 + 声明**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
+// 自声明 `task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带一份与
+// 生产同形的注册面，否则闸「看不见」这次调用（无声明 = 不命中，由 e2e 兜真实行为）。
 
 /// 工人主体（只持 `produce.artifact`）调 `todo_write` ⇒ 拒止。
 ///
@@ -1377,24 +1438,8 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建插件目录");
 
-    let worker_ctx = {
-        let req = PluginSimpleRequest::new(None, None);
-        req.set(symbio_core::AGENT_ID, "worker".to_string());
-        // 注册面：`todo_write` 自声明任务表位（生产同形； 后闸问声明）。
-        let visitor = Arc::new(DefaultToolVisitor::new());
-        visitor
-            .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
-                name: "todo_write".to_string(),
-                behaviors: &[symbio_plugin_api::behaviors::TASK_TABLE],
-                ..Default::default()
-            })) as Arc<dyn Capability>))
-            .await;
-        req.set(
-            symbio_core::CAPABILITY_VISITOR,
-            visitor as Arc<dyn Registry>,
-        );
-        Arc::new(req) as Arc<dyn PluginInvokeRequest>
-    };
+    let worker_ctx =
+        ctx_declaring(&[symbio_plugin_api::behaviors::TASK_TABLE], Some("worker")).await;
 
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new();
@@ -1459,8 +1504,9 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
 
 /// 平凡值会话（无 `AGENT_ID` ⇒ `agent:main`，持 `define.work`）**不被本闸拦**。
 ///
-/// 这是「闸不改变现有行为」的反向对照：主会话的 `todo_write` 照常走到路由
-/// （无 parent ⇒ 路由失败是另一回事，结果里不会有任务表闸的 `Refused:`）。
+/// 这是「闸不改变现有行为」的反向对照：注册面照生产同形声明了 `task_table`，
+/// 主会话的 `todo_write` 照常走到路由（无 parent ⇒ 路由失败是另一回事，结果里
+/// 不会有任务表闸的 `Refused:`）。
 #[tokio::test]
 async fn the_trivial_session_is_not_refused_the_task_table() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-task-table-open");
@@ -1491,7 +1537,7 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         &None,
         &sink,
         &abort,
-        test_ctx(),
+        ctx_declaring(&[symbio_plugin_api::behaviors::TASK_TABLE], None).await,
         std::slice::from_ref(&parent),
         &dir,
         &EventStore::new(),

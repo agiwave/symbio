@@ -161,3 +161,84 @@ fn facts_chain_snapshot_then_applied() {
     let ids: Vec<&str> = env.facts().map(|e| e.event_id.as_str()).collect();
     assert_eq!(ids, ["e1", "e2"]);
 }
+
+// ── 前置判断（D-219）────────────────────────────────────────────────
+
+/// 一个只管前置判断的实现：读数里「已收回」⇒ 拒绝；同时验证它**不造格**。
+struct Gatekeeper;
+
+impl ToolBehavior for Gatekeeper {
+    fn owner(&self) -> &'static str {
+        "tests/gatekeeper"
+    }
+
+    fn behavior(&self) -> &'static str {
+        crate::behaviors::NOTE_CAPTURE
+    }
+
+    fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {
+        if !req.readings.assign_work_revoked {
+            return BeforeDecision::Allow;
+        }
+        BeforeDecision::Refuse(
+            BeforeRefusal::new(
+                "测试闸",
+                format!("{} 已被收回", req.principal),
+                "permission_denied",
+            )
+            .without_delegation_note(),
+        )
+    }
+
+    fn after(&self, _call: &EffectCall<'_>) -> Vec<FactDraft> {
+        panic!("前置判断的实现不该在这次判据里被问 after");
+    }
+}
+
+crate::submit_behavior!(Gatekeeper);
+
+fn before_req<'a>(
+    declared: &'static [&'static str],
+    args: &'a Value,
+    facts: &'a [Event],
+    revoked: bool,
+) -> BeforeRequest<'a> {
+    BeforeRequest {
+        tool: "local/notes_add",
+        call_id: "call-9",
+        args,
+        principal: "session/a",
+        declared,
+        facts,
+        readings: BeforeReadings {
+            assign_work_revoked: revoked,
+        },
+    }
+}
+
+/// 没声明就没有判断：宿主不问、实现也不会被调到（「我的这一关由我声明」的负向判据）。
+#[test]
+fn undeclared_tools_are_not_judged() {
+    let args = serde_json::json!({});
+    let req = before_req(&[], &args, &[], true);
+    assert!(apply_before(&req).is_none());
+}
+
+/// 中性读数 ⇒ 放行：判断只在命中自己的条件时拒，不因「表里还有别的实现」而误伤。
+#[test]
+fn neutral_readings_pass() {
+    let args = serde_json::json!({});
+    let req = before_req(&[crate::behaviors::NOTE_CAPTURE], &args, &[], false);
+    assert!(apply_before(&req).is_none());
+}
+
+/// 命中 ⇒ 拒绝：拒因带名字与主体，退出语义由实现自己声明（这里不记承诺）。
+#[test]
+fn a_declared_judgement_refuses_with_its_own_semantics() {
+    let args = serde_json::json!({});
+    let req = before_req(&[crate::behaviors::NOTE_CAPTURE], &args, &[], true);
+    let refusal = apply_before(&req).expect("已收回必须被拒");
+    assert_eq!(refusal.gate, "测试闸");
+    assert_eq!(refusal.reason, "session/a 已被收回");
+    assert!(!refusal.notes_delegation);
+}

@@ -12,7 +12,7 @@
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
  * | FB-001 | 生产 Rust 源码里 `EventWalStore::open` / `open_readonly` 只许出现在 `plugins/session/store/` | 引擎写点绕过 `SessionStore::facts` 自己开档（第二个 `head`、第二把令牌） |
- * | FB-002 | D-084 §4 的十二个能力文件里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
+ * | FB-002 | D-084 §4 的能力文件清单里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
  *
  * ## 为什么判生产文件而不是全仓
  *
@@ -54,15 +54,16 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..')
 
-/** D-084 §4 的十二个能力文件（DE-014 迁移表「能力自取磁盘」一行；
- *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。 */
+/** D-084 §4 的能力文件（DE-014 迁移表「能力自取磁盘」一行；
+ *  6b 成片搬家后驱动器侧的文件住 `plugins/loop/`，`rebuild` 住 core schema）。
+ *  `elimination` 随 D-219 迁入 `symbio-plugin-agent` 的 `before` 实现：它只读
+ *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-loop/src/skill_events.rs',
   'crates/symbio-plugin-loop/src/task_events.rs',
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',
-  'crates/symbio-plugin-loop/src/tools/tool_executor/elimination.rs',
   'crates/symbio-plugin-session/src/stats.rs',
   'crates/symbio-core/src/projection/rebuild.rs',
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
@@ -123,11 +124,11 @@ for (const abs of production) {
   )
 }
 
-// ── FB-002：十二个能力文件里零存储知识 ─────────────────────────────────
+// ── FB-002：能力文件清单里零存储知识 ─────────────────────────────────
 for (const rel of CAPABILITY_FILES) {
   const text = readBlanked(rel)
   if (text === null) {
-    fail(`FB-002 ${rel} 不存在——能力文件清单与仓内结构漂移了（改清单要先改 D-084 §4）`)
+    fail(`FB-002 ${rel} 不存在——能力文件清单与仓内结构漂移了（改清单要先有决策：D-084 / D-219）`)
     continue
   }
   scanTokens(

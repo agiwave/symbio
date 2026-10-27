@@ -31,12 +31,21 @@
 //! 2. provider 因此是纯函数：可单测、不持状态、也不需要让 plugin-api 认识宿主的会话句柄
 //!    （那会变成一条插件 → 宿主的反向依赖）。
 //!
-//! 代价写在这里：**provider 拿不到请求期才产生的东西**（例如本轮工具清单）。那类段
-//! （委派者真源）因此还不是 provider——它依赖收集完成后的 `tools`，而收集是广播，
-//! 遍历期取集合会漏掉尚未访问到的兄弟插件（见 `chat_loop::inputs` 的 ⑥′）。
+//! ## 两种节奏（D-220）
+//!
+//! 段的内容不都在轮首就齐：召回 / 调度只读轮首的读侧值包；委派者真源要的是
+//! **工具清单收集成形之后**的产物（收集是广播，遍历期取集合会漏掉尚未访问到的
+//! 兄弟插件）。因此端口分两种收集节奏：
+//!
+//! - [`Cadence::Turn`]：轮首一次，provider 只读 [`ContextRequest`] 的常驻字段；
+//! - [`Cadence::Request`]：每次模型请求、在工具收集之后，额外带 [`LiveInputs`]。
+//!
+//! 宿主按「轮首段在前、请求级段在后」拼一次请求前缀——两种段在这个数组里的先后
+//! 是判据，不是实现细节。判断（例如 Q1「本轮该不该起 worker」）仍在控制面：
+//! 请求级输入交的是**判完的结论**（[`DelegateVerdict`]），provider 只落笔。
 
 use serde_json::Value;
-use symbio_core::Event;
+use symbio_core::{CapabilityMeta, Event, WorkerProgress};
 
 /// 已知的**段身份**（`meta.kind` 的取值）——宿主词汇，与 [`crate::behaviors`] 同层。
 ///
@@ -50,7 +59,7 @@ pub mod slots {
     pub const RECALL: &str = "recall_context";
     /// 任务调度候选集。
     pub const READYSET: &str = "readyset";
-    /// 委派者真源（D-047）。它还不是 provider，理由见模块文档。
+    /// 委派者真源（D-047）：请求级节奏——要的是收集完成后的工具清单（见 [`super::LiveInputs`]）。
     pub const DELEGATE: &str = "delegate_context";
 
     /// 宿主**当前**认识的段身份。
@@ -97,6 +106,46 @@ pub struct ContextRequest<'a> {
     pub recall: Option<&'a RecallFacts<'a>>,
     /// 任务段的容量上限（控制面的配置投影，不是判据）。与调度无关的来源忽略它。
     pub task_cap: usize,
+    /// 请求级产物（只在 [`Cadence::Request`] 收集时存在；轮首收集为 `None`）。
+    pub live: Option<&'a LiveInputs<'a>>,
+}
+
+/// 段的收集节奏：什么时候收集、能看见哪些请求期产物。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cadence {
+    /// 轮首一次：输入只有 [`ContextRequest`] 的常驻字段。
+    Turn,
+    /// 每次模型请求、工具清单收集成形之后：额外带 [`LiveInputs`]。
+    Request,
+}
+
+/// 请求级（[`Cadence::Request`]）才有的输入：收集完成后的本轮产物。
+///
+/// 这些值在轮首还不存在——工具清单是收集的**产物**（遍历期取集合会漏掉尚未访问
+/// 到的兄弟插件），worker 进展读自存储。宿主在收集完成后一次取齐、按值递入。
+#[derive(Debug, Clone, Copy)]
+pub struct LiveInputs<'a> {
+    /// 本轮最终发给模型的工具清单（收集完成后的快照，与请求体是同一份）。
+    pub tools: &'a [CapabilityMeta],
+    /// 委派判定（Q1）的结论——控制面判完，provider 只落笔。
+    pub delegate: DelegateVerdict<'a>,
+    /// 各 worker 的进展（控制面从存储侧取好的值）。
+    pub workers: &'a [WorkerProgress],
+}
+
+/// 委派判定（Q1）的结论。
+///
+/// 判据（前缀 / 关键词 / 阈值）与配置仍在控制面：provider 拿不到配置面，也不该
+/// 重判（D-208）。三态必须分开——「判了要动」「判了不动」都要落事实（可审计），
+/// 而「压根没判」（无用户新发言）一个字节都不该写。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelegateVerdict<'a> {
+    /// 本次请求没有用户新发言（resume / 心跳），判定无从谈起。
+    NotJudged,
+    /// 已判：应启动 worker，带可审计的理由码。
+    Start { reason: &'a str },
+    /// 已判：未命中任何委派判据。
+    Idle,
 }
 
 /// 一段要注入的文本。
@@ -116,6 +165,12 @@ pub struct ContextSection {
 pub trait ContextProvider: Sync {
     /// 装配顺序的依据：多个 provider 按 owner 字典序执行（DE-025 §3 第 4 条）。
     fn owner(&self) -> &'static str;
+
+    /// 收集节奏（默认轮首）。需要请求期产物的 provider 声明 [`Cadence::Request`]，
+    /// 并从 `req.live` 取用——轮首收集时它是 `None`。
+    fn cadence(&self) -> Cadence {
+        Cadence::Turn
+    }
 
     /// 本请求要注入的段。可以给多段，也可以一段都不给。
     ///
@@ -161,10 +216,14 @@ pub fn providers() -> Vec<&'static dyn ContextProvider> {
 /// 收集一次请求的全部段：按 owner 序、按各 provider 的返回序。
 ///
 /// 顺序确定（DE-025 §3 第 4 条）：段的位置就是模型读到的先后，而它只与 owner 字典序
-/// 有关、与装配次序无关。
-pub fn sections(req: &ContextRequest<'_>) -> Vec<ContextSection> {
+/// 有关、与装配次序无关。`cadence` 只决定**问哪些 provider**——两种节奏的段由宿主
+/// 按调用次序拼成一个数组（轮首段在前、请求级段在后）。
+pub fn sections(req: &ContextRequest<'_>, cadence: Cadence) -> Vec<ContextSection> {
     let mut out = Vec::new();
     for provider in providers() {
+        if provider.cadence() != cadence {
+            continue;
+        }
         out.extend(provider.provide(req));
     }
     out

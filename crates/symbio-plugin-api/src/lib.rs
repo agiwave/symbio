@@ -23,15 +23,17 @@ pub mod hooks;
 pub mod routes;
 
 pub use context::{
-    providers as context_providers, section_meta, sections as context_sections, ContextProvider,
-    ContextRequest, ContextSection, RecallFacts, RecallLine,
+    providers as context_providers, section_meta, sections as context_sections, Cadence,
+    ContextProvider, ContextRequest, ContextSection, DelegateVerdict, LiveInputs, RecallFacts,
+    RecallLine,
 };
 pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,
 };
 pub use effects::{
-    apply as apply_effects, EffectCall, EffectEnv, EffectInput, FactDraft, ToolBehavior,
+    apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
+    BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, ToolBehavior,
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;

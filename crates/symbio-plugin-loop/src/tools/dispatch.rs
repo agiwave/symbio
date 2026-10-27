@@ -3,10 +3,10 @@
 //! 三个巨型函数按**处理阶段**（不按职责）拆分，本层是第一批 `process_tool_calls_async`
 //! （原 714 行单体）的三段落点：
 //!
-//! - [`gates`] —— ① 批首闸门读数：`mode` / 熔断 / 淘汰 / 任务表 / 自声明位 / 本批留底 /
-//!   同参台账，一次读齐给整批复用（产出 [`gates::GateReadings`]）。
-//! - [`batch`] —— ② 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、闸门拒止、
-//!   钩子拦下与正常执行四条出口。
+//! - [`gates`] —— ① 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 /
+//!   本批留底 / 同参台账，一次读齐给整批复用（产出 [`gates::GateReadings`]）。
+//! - [`batch`] —— ② 逐条执行：`for tc in tool_calls` 的顺序流程，含协议失败、宿主闸 /
+//!   声明闸拒止、钩子拦下与正常执行四条出口。
 //! - [`unfinished`] —— ③ 未执行收口：本批没跑到的调用统一补父节点终态与结果子节点。
 //!
 //! 编排入口仍是 `tool_executor::process_tool_calls_async`
@@ -14,10 +14,10 @@
 //!
 //! **纯结构拆分纪律**（DE-021 §5 纪律 2）：三段代码逐字来自拆分前的单体函数体，
 //! 拆分批次内 `if` 条件零变化；段间只传值（[`gates::GateReadings`] 与出参
-//! `effects` / `tasks` / `breaks`）。
+//! `effects` / `breaks`）。
 //!
 //! 每段一条判据（纪律 3，「这段错了谁会红」）：
-//! - ① 错 ⇒ 闸门判据读数用例红（`breaker` / `elimination` / `task_table` 的批首读场景）；
+//! - ① 错 ⇒ 闸门判据读数用例红（`breaker` 的批首读场景、`batch_principal` 的派生用例）；
 //! - ② 错 ⇒ 批内事件与父节点终态用例红（`tool_executor.test.rs` 的
 //!   `process_tool_calls_async` 组：中止、交互 break、闸门拒止、协议失败）；
 //! - ③ 错 ⇒ 未执行收口用例红（`not_executed` / `aborted` 结果子节点与父终态断言）。
@@ -29,7 +29,7 @@ pub(crate) mod unfinished;
 
 use super::tool_executor::{
     build_user_prompt_message, call_signature, execute_tool_async, record_effect, BreakerInputs,
-    EliminationInputs, PendingPrompt, TaskTableInputs, ToolDecls,
+    PendingPrompt, ToolDecls,
 };
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 use serde_json::{json, Value};

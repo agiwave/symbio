@@ -3,7 +3,7 @@
 // 判定型守卫最危险的失效形态是**永远不命中**：规则写错、排除范围写宽、或清单漂移后
 // 静默跳过——三种情况下它都会安静地亮绿灯。所以每条规则都注入真实违规并断言退出码 1；
 // 另外钉住「不是违规」的三件事（存储层可开档、测试夹具可开档、注释里的词不算）。
-// 最后一条跑真实仓库：夹具只能证明规则引擎自洽，证明不了十二个文件与当前结构一致。
+// 最后一条跑真实仓库：夹具只能证明规则引擎自洽，证明不了能力文件清单与当前结构一致。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -22,7 +22,6 @@ const CAPABILITY_FILES = [
   'crates/symbio-plugin-loop/src/memory_events.rs',
   'crates/symbio-plugin-session/src/worker_progress.rs',
   'crates/symbio-plugin-loop/src/tools/tool_executor/breaker.rs',
-  'crates/symbio-plugin-loop/src/tools/tool_executor/elimination.rs',
   'crates/symbio-plugin-session/src/stats.rs',
   'crates/symbio-core/src/projection/rebuild.rs',
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
@@ -31,7 +30,7 @@ const CAPABILITY_FILES = [
   'crates/symbio-plugin-loop/src/derived_facts.rs',
 ]
 
-/** 一棵最小仓库：十二个能力文件默认是空的，`extra` 覆盖 / 追加其它文件。 */
+/** 一棵最小仓库：能力文件清单默认是空的，`extra` 覆盖 / 追加其它文件。 */
 function repo(extra = {}) {
   const files = {}
   for (const rel of CAPABILITY_FILES) files[rel] = '// 空能力文件\n'
@@ -130,9 +129,9 @@ test('FB-002 反例：清单里的文件不见了 ⇒ 红（清单与结构漂�
   assert.match(out(r), /rebuild\.rs/, out(r))
 })
 
-// ── 真实仓库：夹具证明不了十二个文件与当前结构一致 ─────────────────────
+// ── 真实仓库：夹具证明不了能力文件清单与当前结构一致 ─────────────────────
 
-test('真实仓库通过（十二个能力文件与结构一致）', () => {
+test('真实仓库通过（能力文件清单与结构一致）', () => {
   const r = spawnSync(process.execPath, [script], {
     env: { ...process.env, NO_COLOR: '1' },
     encoding: 'utf8',

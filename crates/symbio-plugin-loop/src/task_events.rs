@@ -66,7 +66,9 @@ use symbio_core::ReadySetView;
 use symbio_core::PRINCIPAL_SCHEDULER;
 use symbio_core::{actor_can_assign_work, readyset_for, Entity, Event, Store, Verb};
 use symbio_plugin_api::behaviors;
-use symbio_plugin_api::effects::{EffectCall, FactDraft, ToolBehavior};
+use symbio_plugin_api::effects::{
+    BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
+};
 
 // 任务族的名字与格位都在本插件的声明表里（DE-024 D-204 / D-206）：`readyset_for` 在构造期
 // 收 `TASK_VOCAB`，core 的折叠不比对任何一条名字。
@@ -368,7 +370,8 @@ fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
         .collect()
 }
 
-/// 任务表的**效果**：一次成功的 `todo_write` 声明 → `task.*` 草稿（DE-025 D-207）。
+/// 任务表的**效果与写侧判断**：一次成功的 `todo_write` 声明 → `task.*` 草稿
+/// （DE-025 D-207）；不持权威的主体连写都不许写（S03 §3 / D-219）。
 ///
 /// ## 为什么实现住这里，而不是工具所在的那个插件
 ///
@@ -391,6 +394,36 @@ impl ToolBehavior for TaskTable {
 
     fn behavior(&self) -> &'static str {
         behaviors::TASK_TABLE
+    }
+
+    /// 写侧资格（[roadmap/S03 §3](../../../docs/003-design/033-多步任务与返工.md "DE-033-多步任务与返工")）：
+    /// **立任务（`define.work`）或独立判定（`assert.verification`）二居其一**。
+    ///
+    /// 两项**互不可写**（C15：`PermissionMatrix::new` 拒绝同持）⇒ 没有任何主体能
+    /// 同时「自己立、自己验」——「产出者不得自我认证」在任务表这一层是结构性的。
+    /// 纯产出主体（工人 / 对等体）与纯派活主体（市场）因此写不了任务表：交付物是
+    /// 产物格，立与验归工作权威。
+    ///
+    /// 拒止**不记承诺**：工具没跑，「声明过什么」无从说起。判断不产事件——写资格
+    /// 是执行窗口的资格，不是一项事实。
+    fn before(&self, req: &BeforeRequest<'_>) -> BeforeDecision {
+        let matrix = symbio_core::production_matrix();
+        let may_write = matrix.can_write_name(req.principal, symbio_core::CAP_DEFINE_WORK)
+            || matrix.can_write_name(req.principal, symbio_core::CAP_ASSERT_VERIFICATION);
+        if may_write {
+            return BeforeDecision::Allow;
+        }
+        BeforeDecision::Refuse(
+            BeforeRefusal::new(
+                "任务表",
+                format!(
+                    "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
+                    req.principal
+                ),
+                symbio_core::failure_kind::PERMISSION_DENIED,
+            )
+            .without_delegation_note(),
+        )
     }
 
     fn after(&self, call: &EffectCall<'_>) -> Vec<FactDraft> {

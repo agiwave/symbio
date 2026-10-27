@@ -1,13 +1,13 @@
-//! 工具自声明的行为位——三道闸门的管辖对象从注册表读，不按名字判。
+//! 工具自声明的行为名——声明闸与效果端口共用同一个读法。
 //!
-//! 钉四件事：
+//! 钉三件事：
 //!
-//! - **各族只判自己的工具**（`agent_run` 两位命中、`todo_write` 一位命中、别的
-//!   工具一位都不命中）——机制化前后行为逐格一致的直接判据；
-//! - **匹配口径保持机制化之前**（线上全名等值 / 取末段比短名、trim、空串不命中）；
+//! - **各族只声明自己的工具**（`agent_run` 派活 + 立约、`todo_write` 任务表、别的
+//!   工具一位都不声明）；
+//! - **匹配口径**（线上全名先等值、再取末段；trim；空串与近似名不命中）；
 //! - **声明随工具进子作用域**（改名投影只换名字、原样透传行为位）——闸门跟随
 //!   工具，这是「换个会话绕不开淘汰」要的读法；
-//! - **没有 visitor ⇒ 什么都不命中**（缺声明与漏声明同形，e2e 兜行为）。
+//! - **没有 visitor ⇒ 什么都不声明**（缺声明与漏声明同形，e2e 兜行为）。
 
 use super::ToolDecls;
 use async_trait::async_trait;
@@ -17,6 +17,7 @@ use symbio_core::{
     Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry,
 };
+use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE};
 use symbio_providers::DefaultToolVisitor;
 
 /// 只带元数据的假工具：注册表怎么读，测试就怎么喂。
@@ -40,28 +41,11 @@ impl Capability for FakeTool {
     }
 }
 
-/// 本工具是否声明了「跨主体立约」——效果端口的选实现依据（不再是一道闸）。
-fn promises(decls: &ToolDecls, wire: &str) -> bool {
-    decls
-        .behaviors_of(wire)
-        .contains(&symbio_plugin_api::behaviors::DELEGATION_PROMISE)
-}
-
 /// 按行为名构造一份元数据（其余字段走 `Default`）。
-fn meta(name: &str, assign_work: bool, promise: bool, task_table: bool) -> CapabilityMeta {
-    use symbio_plugin_api::behaviors::{ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE};
+fn meta(name: &str, behaviors: &'static [&'static str]) -> CapabilityMeta {
     CapabilityMeta {
         name: name.to_string(),
-        behaviors: match (assign_work, promise, task_table) {
-            (false, false, false) => &[],
-            (true, false, false) => &[ASSIGN_WORK],
-            (false, true, false) => &[DELEGATION_PROMISE],
-            (false, false, true) => &[TASK_TABLE],
-            (true, true, false) => &[ASSIGN_WORK, DELEGATION_PROMISE],
-            (true, false, true) => &[ASSIGN_WORK, TASK_TABLE],
-            (false, true, true) => &[DELEGATION_PROMISE, TASK_TABLE],
-            (true, true, true) => &[ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE],
-        },
+        behaviors,
         ..Default::default()
     }
 }
@@ -86,122 +70,111 @@ async fn ctx_with(metas: Vec<CapabilityMeta>) -> Arc<dyn PluginInvokeRequest> {
 
 /// 生产三件套的注册面：`agent_run`（派活 + 立约）、`todo_write`（任务表）、一个
 /// 什么都不声明的普通工具（生产里绝大多数工具的形态）。
-fn factory_metas() -> Vec<CapabilityMeta> {
-    vec![
-        meta("agent_run", true, true, false),
-        meta("todo_write", false, false, true),
-        meta("shell", false, false, false),
-    ]
+async fn factory_decls() -> ToolDecls {
+    let ctx = ctx_with(vec![
+        meta("agent_run", &[ASSIGN_WORK, DELEGATION_PROMISE]),
+        meta("todo_write", &[TASK_TABLE]),
+        meta("shell", &[]),
+    ])
+    .await;
+    ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
 }
 
-// ==================== 各族只判自己的工具 ====================
+// ==================== 各族只声明自己的工具 ====================
 
-/// 三族判据互不串门：`agent_run` 命中前两位、`todo_write` 命中第三位、
-/// 未声明的 `shell` 一位都不命中。
+/// 三族声明互不串门：`agent_run` 两位、`todo_write` 一位、未声明的 `shell` 一位都没有。
 #[tokio::test]
-async fn each_family_judges_only_its_own_tool() {
-    let ctx = ctx_with(factory_metas()).await;
-    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+async fn each_family_declares_only_its_own_tool() {
+    let decls = factory_decls().await;
 
-    assert!(decls.provides_assign_work("agent_run"));
-    assert!(promises(&decls, "agent_run"));
-    assert!(!decls.owns_task_table("agent_run"), "派活 ≠ 任务表");
-
-    assert!(decls.owns_task_table("local/todo_write"));
-    assert!(!decls.provides_assign_work("local/todo_write"));
-    assert!(!promises(&decls, "local/todo_write"));
-
+    assert_eq!(
+        decls.behaviors_of("agent_run"),
+        &[ASSIGN_WORK, DELEGATION_PROMISE]
+    );
+    assert_eq!(decls.behaviors_of("local/todo_write"), &[TASK_TABLE]);
     assert!(
-        !decls.provides_assign_work("local/shell")
-            && !promises(&decls, "local/shell")
-            && !decls.owns_task_table("local/shell"),
-        "未声明任何位的工具不在任何闸门管辖内"
+        decls.behaviors_of("local/shell").is_empty(),
+        "未声明任何位的工具不在任何声明闸的管辖内"
     );
 }
 
-// ==================== 匹配口径保持机制化之前 ====================
+// ==================== 匹配口径 ====================
 
-/// 匹配口径逐字保持：线上全名**等值**（派活 / 立约，含 trim）与**取末段比短名**
-/// （任务表，`local/todo_write` ⇒ `todo_write`）。
+/// 线上全名先**等值**（空格不算名字的一部分）、再**取末段**；近似名不认。
 #[tokio::test]
-async fn matching_keeps_the_pre_mechanization_shapes() {
-    let ctx = ctx_with(factory_metas()).await;
-    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+async fn matching_is_equality_then_last_segment() {
+    let decls = factory_decls().await;
 
-    // 等值口径：空格不算名字的一部分，前缀名不是等值命中。
-    assert!(decls.provides_assign_work(" agent_run "));
-    assert!(!decls.provides_assign_work("local/agent_run"));
+    assert_eq!(
+        decls.behaviors_of(" agent_run "),
+        &[ASSIGN_WORK, DELEGATION_PROMISE]
+    );
+    assert_eq!(decls.behaviors_of(" todo_write "), &[TASK_TABLE]);
+    assert_eq!(decls.behaviors_of("local/todo_write"), &[TASK_TABLE]);
+    assert_eq!(decls.behaviors_of("agent_scope/todo_write"), &[TASK_TABLE]);
 
-    // 取末段口径：短名本身与挂载点前缀两种形态都认；近似名不认。
-    assert!(decls.owns_task_table("todo_write"));
-    assert!(decls.owns_task_table("local/todo_write"));
-    assert!(decls.owns_task_table(" agent_scope/todo_write "));
-    assert!(!decls.owns_task_table("todo_writer"));
-    assert!(!decls.owns_task_table("local/todo_writer"));
-    assert!(!decls.owns_task_table(""));
-    assert!(!decls.provides_assign_work(""));
+    assert!(decls.behaviors_of("todo_writer").is_empty());
+    assert!(decls.behaviors_of("local/todo_writer").is_empty());
+    assert!(decls.behaviors_of("").is_empty());
 }
 
-/// 效果端口选实现时，**挂载点前缀不改变「这个工具声明了什么」**。
+/// 选实现时，**挂载点前缀不改变「这个工具声明了什么」**。
 ///
-/// 反向自检：把 `behaviors_of` 改回只判等值 ⇒ 第一、三条断言红。那不是理论风险：
+/// 反向自检：把 `behaviors_of` 改回只判等值 ⇒ 第二条断言红。那不是理论风险：
 /// `todo_write` 的线上名一直是 `local/todo_write`，而注册表的键是短名——只判等值
-/// 就等于「任务表效果永远不生效」，且没有任何报错（J3 的静默形态）。
+/// 就等于「任务表效果永远不生效、写侧闸永远不命中」，且没有任何报错（J3 的静默形态）。
 #[tokio::test]
 async fn behavior_lookup_tolerates_a_mount_prefix() {
-    let ctx = ctx_with(factory_metas()).await;
-    let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
+    let decls = factory_decls().await;
 
-    assert_eq!(
-        decls.behaviors_of("local/todo_write"),
-        &[symbio_plugin_api::behaviors::TASK_TABLE],
-        "挂了前缀的线上名要解析到同一条声明"
-    );
-    assert_eq!(
-        decls.behaviors_of("todo_write"),
-        &[symbio_plugin_api::behaviors::TASK_TABLE]
-    );
-    assert!(decls.behaviors_of("local/shell").is_empty());
+    assert_eq!(decls.behaviors_of("todo_write"), &[TASK_TABLE]);
+    assert_eq!(decls.behaviors_of("local/todo_write"), &[TASK_TABLE]);
     assert!(
         decls.behaviors_of("mcp__srv__todo_write").is_empty(),
         "MCP 的同名工具不是同一个工具（短名不反演）"
     );
-    assert!(decls.behaviors_of("").is_empty());
 }
 
 // ==================== 声明随工具进子作用域 ====================
 
 /// 改名投影（子智能体的 `agent_<id>_<工具>`）只换名字、原样透传行为名，
-/// 所以闸门在子作用域**同样命中**——此前按字面量等值判，前缀名一个都不中。
+/// 所以声明闸在子作用域**同样命中**——此前按字面量等值判，前缀名一个都不中。
 ///
 /// 这不是扩面的口子，是「闸门跟随工具」的直读：淘汰判据本来就部署级
 /// （扫全部会话的 WAL），没有理由在子会话里失明。
 #[tokio::test]
 async fn declarations_travel_into_scoped_projection_names() {
     let ctx = ctx_with(vec![
-        meta("agent_probe-agent_agent_run", true, true, false),
-        meta("agent_probe-agent_todo_write", false, false, true),
+        meta(
+            "agent_probe-agent_agent_run",
+            &[ASSIGN_WORK, DELEGATION_PROMISE],
+        ),
+        meta("agent_probe-agent_todo_write", &[TASK_TABLE]),
     ])
     .await;
     let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
 
-    assert!(decls.provides_assign_work("agent_probe-agent_agent_run"));
-    assert!(promises(&decls, "agent_probe-agent_agent_run"));
-    assert!(decls.owns_task_table("agent_probe-agent_todo_write"));
+    assert_eq!(
+        decls.behaviors_of("agent_probe-agent_agent_run"),
+        &[ASSIGN_WORK, DELEGATION_PROMISE]
+    );
+    assert_eq!(
+        decls.behaviors_of("agent_probe-agent_todo_write"),
+        &[TASK_TABLE]
+    );
 }
 
 // ==================== 没有 visitor ====================
 
-/// 没有 visitor ⇒ 三个集合皆空 ⇒ 三道闸都不命中。
+/// 没有 visitor ⇒ 什么都读不到 ⇒ 没有声明闸命中、也没有效果可记。
 ///
 /// 与「该声明的工具漏了声明」同一形态——都由 e2e 兜行为（T74 的淘汰回路 /
 /// 任务表闸场景）。这里钉的是**不崩**：读不到注册表不是读到一个空世界。
 #[tokio::test]
-async fn without_a_visitor_nothing_is_in_any_gate() {
+async fn without_a_visitor_nothing_is_declared() {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let decls = ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await);
 
-    assert!(!decls.provides_assign_work("agent_run"));
-    assert!(!promises(&decls, "agent_run"));
-    assert!(!decls.owns_task_table("local/todo_write"));
+    assert!(decls.behaviors_of("agent_run").is_empty());
+    assert!(decls.behaviors_of("local/todo_write").is_empty());
 }

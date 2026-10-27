@@ -2,9 +2,9 @@
 //!
 //! 目标形态是**主会话不持有工具**，于是它缺三样外部事实：worker 何时启动、自己有哪些
 //! 能力、进展如何。三问的答案都必须是**可穷举测试的数据**，否则主会话就得重新持有
-//! 工具——那正是「不持有工具」这个目标形态的反面。本模块是**三样**的生产处，
-//! owner 是 `prepare_turn_inputs`：
-//! **能力收集之后**才动笔，产出的段落并进 `build_request_view` 既有的请求视图次序。
+//! 工具——那正是「不持有工具」这个目标形态的反面。本模块是**三样**的生产处：
+//! 判定（Q1）与取值（Q2 / Q3）住 `prepare_turn_inputs`，渲染住
+//! `context::providers::DelegateProvider`（请求级节奏，DE-025 D-220）。
 //!
 //! ## 为什么不做成插件 / 注册表 / 跨插件调用
 //!
@@ -22,10 +22,9 @@
 //! ## 三条判据可配：读本轮配置快照，出厂值真源在 core
 //!
 //! Q1 的三条判据（前缀 / 关键词 / 阈值）由 `TurnSettings` 的 `worker_force_prefix`
-//! / `worker_keywords` / `worker_min_chars` 投影成 [`WorkerPolicy`]；出厂值的**单一
-//! 真源在 core**（`WORKER_FORCE_PREFIX` / `WORKER_KEYWORDS` / `WORKER_MIN_CHARS`，
-//! session 配置面与判定侧共用），本模块**不持第二份字面量**。字段表同步
-//! CONFIGURATION。
+//! / `worker_keywords` / `worker_min_chars` 供值；出厂值的**单一真源在 core**
+//! （`WORKER_FORCE_PREFIX` / `WORKER_KEYWORDS` / `WORKER_MIN_CHARS`，session
+//! 配置面与判定侧共用），本模块**不持第二份字面量**。字段表同步 CONFIGURATION。
 //!
 //! ## Q3 的读数不住在本模块
 //!
@@ -38,15 +37,7 @@ use std::collections::BTreeMap;
 use symbio_core::CapabilityMeta;
 
 use symbio_core::WorkerProgress;
-
-/// Q1 的三条判据（`TurnSettings` 的请求级投影）。
-///
-/// 驱动器不持配置面类型：`TurnSettings` 只交来这三个标量，判定侧按值取用。
-pub(crate) struct WorkerPolicy<'a> {
-    pub force_prefix: &'a str,
-    pub keywords: &'a str,
-    pub min_chars: usize,
-}
+use symbio_plugin_api::context::DelegateVerdict;
 
 // ── Q1：worker 启动条件 ────────────────────────────────────────────────
 
@@ -200,16 +191,16 @@ fn worker_line(p: &WorkerProgress) -> String {
     )
 }
 
-/// Q1 + Q2 + Q3 合成**一条**请求视图段落——`prepare_turn_inputs` 的唯一装配入口。
+/// Q1 + Q2 + Q3 合成**一条**请求视图段落——`DelegateProvider` 的唯一装配入口。
 ///
 /// 为什么合成一条而不是三条：`build_request_view` 每条段落都是一个参数、一个位置，
 /// 三条 ⇒ 三个新位置要与记忆 0 / 就绪 1 的既有次序逐一排位，而三条真源的**出现条件**
-/// 又互不相同（Q1 每轮恒有结论、Q2 视有无能力）。合成一条后只有「整段是否出现」
-/// 一个开关，位置只有一个（index 2），次序判据只有一条。
+/// 又互不相同（Q1 每请求恒定有结论、Q2 视有无能力）。合成一条后只有「整段是否出现」
+/// 一个开关，位置只有一个（请求级段的第一条），次序判据只有一条。
 ///
 /// ## 出现条件
 ///
-/// - `utterance = None`（resume / 心跳等无用户新发言的请求）⇒ Q1 不下结论；
+/// - `verdict = NotJudged`（resume / 心跳等无用户新发言的请求）⇒ Q1 不落笔；
 /// - `tools` 空 ⇒ Q2 整段不出现（给模型一段空目录只会诱导它瞎猜）；
 /// - `workers` 空 ⇒ Q3 一条不写（没开 worker 时不占一个字节）；
 /// - 三者皆空 ⇒ 返回 `None`，视图**一个字节都不多**。
@@ -219,31 +210,22 @@ fn worker_line(p: &WorkerProgress) -> String {
 /// Q1 存在的全部理由是「判定可审计」——只在命中时出声，就无从区分**判了不动**与
 /// **压根没判**（这正是本仓反复钉的「没有观测 = 静默失效」）。故未命中同样落一条
 /// 事实，只是不带理由码：`worker_start_reason` 的 `None` 语义（未命中不回理由）
-/// 由这条文本承载，函数本身不破例。
-///
-/// ## 三条判据按 `policy` 取值
-///
-/// `policy` 的三格是**运行时的当前值**，出厂值只是它们的默认（真源在配置面）。改配置
-/// 即改判定，两者不会各自漂移——判定侧不持第二份默认，生产路径与测试所测是**同一个
-/// 函数体**。
-pub(crate) fn delegate_section_with(
-    utterance: Option<&str>,
+/// 由 [`DelegateVerdict::Idle`] 承载，函数本身不破例。
+pub(crate) fn delegate_section(
+    verdict: DelegateVerdict<'_>,
     tools: &[CapabilityMeta],
     workers: &[WorkerProgress],
-    policy: WorkerPolicy<'_>,
 ) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
-    if let Some(text) = utterance {
-        // 关键词存**逗号串**（面板无数组控件），切开即用；空串由 `worker_start_reason`
-        // 的「空关键词跳过」处理 ⇒ 空串 = 空集 = 本层关闭，与出厂值同一语义。
-        let keywords: Vec<&str> = policy.keywords.split(',').collect();
-        parts.push(
-            match worker_start_reason(text, policy.force_prefix, &keywords, policy.min_chars) {
-                Some(reason) => format!("- 委派判定：本轮应启动 worker（reason={reason}）"),
-                None => "- 委派判定：未启动 worker（未命中任何委派判据）".to_string(),
-            },
-        );
+    match verdict {
+        DelegateVerdict::NotJudged => {}
+        DelegateVerdict::Start { reason } => {
+            parts.push(format!("- 委派判定：本轮应启动 worker（reason={reason}）"));
+        }
+        DelegateVerdict::Idle => {
+            parts.push("- 委派判定：未启动 worker（未命中任何委派判据）".to_string());
+        }
     }
 
     if let Some(digest) = capability_digest(tools) {

@@ -26,14 +26,10 @@ use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_wa
 mod breaker;
 mod decls;
 mod effects;
-mod elimination;
-mod task_table;
 
 pub use self::breaker::BreakerInputs;
 pub use self::decls::ToolDecls;
 pub use self::effects::record_effect;
-pub use self::elimination::EliminationInputs;
-pub use self::task_table::TaskTableInputs;
 use symbio_plugin_api::effects::EffectInput;
 
 // 工具结果提取
@@ -504,7 +500,7 @@ pub async fn execute_tool_async(
 /// 交互模式（interactive）下，若前一个工具产出 user_prompt（待审批/询问）或失败，
 /// 则中止本批剩余工具（用户需逐个处理）；auto 模式不中止，失败结果传 LLM 继续。
 ///
-/// ## 两条不变量（本函数负责保证）
+/// ## 四条不变量（本函数负责保证）
 ///
 /// 1. **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
 ///    调用前广播 `Streaming`（`dispatch::batch::emit_tool_running`），调用后广播终态；未执行的
@@ -519,12 +515,11 @@ pub async fn execute_tool_async(
 /// 3. **外部执行闸门在每个调用点各判一次**（S8 第 20 步）：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
-/// 4. **淘汰闸只拦 `agent_run`**（S13 §3，）：判据同批首读一次
-///    （[`EliminationInputs`]，部署级覆盖层）——被收回 `assign.work` 的主体
-///    派不活；拒因进工具结果，违约随收束如实记账。
-/// 5. **任务表写侧闸只拦 `todo_write`**（S03 §3，）：判据同批首读一次
-///    （[`TaskTableInputs`]）——不持 `define.work` / `assert.verification` 的主体
-///    （纯产出 / 纯派活）写不了任务表；拒因进工具结果，**不产事件、不记任务声明**。
+/// 4. **声明闸由能力包自己判**（DE-025 D-219）：工具在 `CapabilityMeta.behaviors`
+///    上声明「我受哪项管辖」，对应实现从
+///    `ToolBehavior::before` 回答能不能跑（淘汰 / 任务表写侧即此类）。宿主只交批首
+///    读好的结论（主体 / 控制面撤销值 / 会话事实切片），本层不含任何「哪个工具名
+///    受什么管辖」的分支。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<TurnToolCallInfo>,

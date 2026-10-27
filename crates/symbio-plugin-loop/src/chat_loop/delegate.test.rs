@@ -10,29 +10,42 @@ use super::*;
 // 出厂值的真源在 core（`TurnSettings` 三旋钮与 session 配置面共用同一批常量）——
 // 判定侧测试显式 import，不另持第二份字面量。
 use symbio_core::{CapabilityCategory, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS};
+use symbio_plugin_api::context::DelegateVerdict;
 
 /// 出厂参数：前缀 `/work `、关键词空集、阈值 0。
 fn factory(text: &str) -> Option<&'static str> {
     worker_start_reason(text, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS)
 }
 
-/// 出厂**配置**下的委派段：与生产同一个 `delegate_section_with`，只把出厂策略递进去
-/// （判定侧不持第二份默认，故「出厂值」与「测试所测」同路）。
+/// Q1 判定（配置化）：判据 → 判完的结论。生产路径在 `prepare_turn_inputs`，
+/// 测试用同一函数体，避免「测的判定」与「跑的判定」分家。
+fn judge(
+    text: &str,
+    force_prefix: &str,
+    keywords: &str,
+    min_chars: usize,
+) -> DelegateVerdict<'static> {
+    let keywords: Vec<&str> = keywords.split(',').collect();
+    match worker_start_reason(text, force_prefix, &keywords, min_chars) {
+        Some(reason) => DelegateVerdict::Start { reason },
+        None => DelegateVerdict::Idle,
+    }
+}
+
+/// 出厂**配置**下的委派段：判定按出厂三旋钮，渲染与生产同一个 `delegate_section`。
 fn factory_section(
     utterance: Option<&str>,
     tools: &[CapabilityMeta],
     workers: &[WorkerProgress],
 ) -> Option<String> {
-    delegate_section_with(
-        utterance,
-        tools,
-        workers,
-        WorkerPolicy {
-            force_prefix: WORKER_FORCE_PREFIX,
-            keywords: "",
-            min_chars: WORKER_MIN_CHARS,
+    let verdict = match utterance {
+        None => DelegateVerdict::NotJudged,
+        Some(text) => match factory(text) {
+            Some(reason) => DelegateVerdict::Start { reason },
+            None => DelegateVerdict::Idle,
         },
-    )
+    };
+    delegate_section(verdict, tools, workers)
 }
 
 // ── Q1 · 三条旋钮（判据可配：值取自配置面，出厂值只是默认）────────────────
@@ -42,40 +55,37 @@ mod knobs {
     /// 改前缀 ⇒ 判定跟着改，且**出厂前缀此时不再命中**（配置是替换，不是叠加）。
     #[test]
     fn prefix_is_configurable_and_replaces_the_default() {
-        let policy = WorkerPolicy {
-            force_prefix: "#run ",
-            keywords: "",
-            min_chars: WORKER_MIN_CHARS,
-        };
-        let hit = delegate_section_with(Some("#run 重构"), &[], &[], policy).unwrap();
-        assert!(hit.contains("reason=explicit_prefix"), "{hit}");
+        let section =
+            delegate_section(judge("#run 重构", "#run ", "", WORKER_MIN_CHARS), &[], &[]).unwrap();
+        assert!(section.contains("reason=explicit_prefix"), "{section}");
 
-        let policy = WorkerPolicy {
-            force_prefix: "#run ",
-            keywords: "",
-            min_chars: WORKER_MIN_CHARS,
-        };
-        let replaced = delegate_section_with(Some("/work 重构"), &[], &[], policy).unwrap();
+        let replaced =
+            delegate_section(judge("/work 重构", "#run ", "", WORKER_MIN_CHARS), &[], &[]).unwrap();
         assert!(replaced.contains("未命中任何委派判据"), "{replaced}");
     }
 
     /// 关键词与长度阈值同理：出厂是「空集 / 0」两层关闭，配了才开。
     #[test]
     fn keywords_and_min_chars_are_configurable() {
-        let policy = WorkerPolicy {
-            force_prefix: WORKER_FORCE_PREFIX,
-            keywords: "重构",
-            min_chars: WORKER_MIN_CHARS,
-        };
-        let hit = delegate_section_with(Some("帮我把这个重构掉"), &[], &[], policy).unwrap();
-        assert!(hit.contains("reason=keyword_hit"), "{hit}");
+        let section = delegate_section(
+            judge(
+                "帮我把这个重构掉",
+                WORKER_FORCE_PREFIX,
+                "重构",
+                WORKER_MIN_CHARS,
+            ),
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(section.contains("reason=keyword_hit"), "{section}");
 
-        let policy = WorkerPolicy {
-            force_prefix: WORKER_FORCE_PREFIX,
-            keywords: "",
-            min_chars: 4,
-        };
-        let long = delegate_section_with(Some("这句话足够长了吧"), &[], &[], policy).unwrap();
+        let long = delegate_section(
+            judge("这句话足够长了吧", WORKER_FORCE_PREFIX, "", 4),
+            &[],
+            &[],
+        )
+        .unwrap();
         assert!(long.contains("reason=topic_length"), "{long}");
 
         // 出厂值这两层是**关闭**的：同一条消息在默认配置下不命中（否则每条寒暄

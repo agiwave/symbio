@@ -28,12 +28,40 @@ impl ContextProvider for Silent {
     }
 }
 
-// 提交两条只在本测试二进制里存在的行为实现。
+/// 一个只在请求级节奏取值的 provider：证明两种节奏互不串场，且 `live` 真的递到了。
+struct Live;
+
+impl ContextProvider for Live {
+    fn owner(&self) -> &'static str {
+        "tests/live"
+    }
+
+    fn cadence(&self) -> Cadence {
+        Cadence::Request
+    }
+
+    fn provide(&self, req: &ContextRequest<'_>) -> Vec<ContextSection> {
+        let Some(live) = req.live else {
+            return Vec::new();
+        };
+        let reason = match live.delegate {
+            DelegateVerdict::Start { reason } => reason,
+            _ => "none",
+        };
+        vec![ContextSection {
+            slot: slots::DELEGATE,
+            text: format!("tools={} reason={reason}", live.tools.len()),
+        }]
+    }
+}
+
+// 提交三条只在本测试二进制里存在的实现。
 //
-// 判据用**进程内**的提交：本 crate 的单测里没有别的插件，`inventory` 里只有这两条
+// 判据用**进程内**的提交：本 crate 的单测里没有别的插件，`inventory` 里只有这三条
 // ——「按 owner 序」因此可以精确断言。
 crate::submit_context_provider!(Fixed);
 crate::submit_context_provider!(Silent);
+crate::submit_context_provider!(Live);
 
 fn facts() -> Vec<Event> {
     vec![Event::pending(
@@ -55,6 +83,7 @@ fn request<'a>(facts: &'a [Event], recall: Option<&'a RecallFacts<'a>>) -> Conte
         facts,
         recall,
         task_cap: 8,
+        live: None,
     }
 }
 
@@ -73,10 +102,65 @@ fn providers_are_sorted_by_owner() {
 #[test]
 fn a_silent_provider_contributes_nothing() {
     let f = facts();
-    let got = sections(&request(&f, None));
+    let got = sections(&request(&f, None), Cadence::Turn);
     assert_eq!(got.len(), 1, "只有 Fixed 给了一段：{got:?}");
     assert_eq!(got[0].slot, slots::RECALL);
     assert_eq!(got[0].text, "固定一段");
+}
+
+/// 两种节奏互不串场：轮首收集不问请求级 provider，请求级收集也不问轮首 provider。
+#[test]
+fn cadence_selects_which_providers_are_asked() {
+    let f = facts();
+    let live_tools = [];
+    let live = LiveInputs {
+        tools: &live_tools,
+        delegate: DelegateVerdict::Idle,
+        workers: &[],
+    };
+    let mut req = request(&f, None);
+    req.live = Some(&live);
+
+    let turn_slots: Vec<&str> = sections(&req, Cadence::Turn)
+        .iter()
+        .map(|s| s.slot)
+        .collect();
+    assert_eq!(
+        turn_slots,
+        [slots::RECALL],
+        "轮首只该问 Turn 节奏的 provider"
+    );
+
+    let request_sections = sections(&req, Cadence::Request);
+    assert_eq!(
+        request_sections.len(),
+        1,
+        "请求级只该问 Request 节奏的 provider"
+    );
+    assert_eq!(request_sections[0].slot, slots::DELEGATE);
+    assert_eq!(request_sections[0].text, "tools=0 reason=none");
+}
+
+/// 请求期产物按值递入：工具清单、委派结论都是 provider 能直接读的值。
+#[test]
+fn live_inputs_carry_the_collected_values() {
+    let f = facts();
+    let tools = [symbio_core::CapabilityMeta {
+        name: "file_read".to_string(),
+        ..Default::default()
+    }];
+    let live = LiveInputs {
+        tools: &tools,
+        delegate: DelegateVerdict::Start {
+            reason: "explicit_prefix",
+        },
+        workers: &[],
+    };
+    let mut req = request(&f, None);
+    req.live = Some(&live);
+
+    let got = sections(&req, Cadence::Request);
+    assert_eq!(got[0].text, "tools=1 reason=explicit_prefix");
 }
 
 /// 段身份是宿主词汇：`KNOWN` 里的名字互不相同，且都是 `snake_case` 线格式。

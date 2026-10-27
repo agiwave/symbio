@@ -1,64 +1,13 @@
-//! 闸门表与拒止骨架的单元测试。
+//! 宿主闸表、拒止骨架与声明闸映射的单元测试。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。这里钉的是**表本身**：
-//! 闸名稳定且唯一、判据顺序（先命中者胜）、每行只产出自己声明过的失败语义。
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。这里钉的是**宿主闸本身**：
+//! 闸名稳定且唯一、判据纯、每行只产出自己声明过的失败语义；声明闸（能力包的
+//! `before`）到拒止骨架的映射也在这里——**两条出口由实现自报**，映射不猜。
 //! 判据的业务场景（预算 / 淘汰 / 任务表）仍在 `tool_executor.test.rs` 走整批路径。
 
 use super::*;
-use std::sync::Arc;
-use symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
-    Registry,
-};
-use symbio_providers::DefaultToolVisitor;
-
-/// 只带元数据的假工具：注册面怎么读，测试就怎么喂（与 `factory_decls` 同形）。
-struct DeclTool(CapabilityMeta);
-
-#[async_trait::async_trait]
-impl Capability for DeclTool {
-    fn meta(&self) -> CapabilityMeta {
-        self.0.clone()
-    }
-
-    async fn execute(
-        &self,
-        _args: serde_json::Value,
-        _env: &ExecEnv,
-        _ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        Ok(serde_json::Value::Null)
-    }
-}
-
-/// 用注册面构造 `ToolDecls`：(名字, 提供 assign.work, 写任务表)。
-async fn decls_with(entries: &[(&str, bool, bool)]) -> ToolDecls {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_core::PluginSimpleRequest::new(None, None));
-    let visitor = Arc::new(DefaultToolVisitor::new());
-    for (name, assign_work, owns_task_table) in entries {
-        visitor
-            .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
-                name: (*name).to_string(),
-                behaviors: match (*assign_work, *owns_task_table) {
-                    (true, false) => &[symbio_plugin_api::behaviors::ASSIGN_WORK],
-                    (false, true) => &[symbio_plugin_api::behaviors::TASK_TABLE],
-                    (false, false) => &[],
-                    (true, true) => &[
-                        symbio_plugin_api::behaviors::ASSIGN_WORK,
-                        symbio_plugin_api::behaviors::TASK_TABLE,
-                    ],
-                },
-                ..Default::default()
-            })) as Arc<dyn Capability>))
-            .await;
-    }
-    ctx.set(
-        symbio_core::CAPABILITY_VISITOR,
-        visitor as Arc<dyn Registry>,
-    );
-    ToolDecls::of_metas(&symbio_core::tool_metas(&ctx).await)
-}
+use symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_plugin_api::effects::BeforeRefusal;
 
 fn neutral_breaker() -> BreakerInputs {
     BreakerInputs {
@@ -69,34 +18,10 @@ fn neutral_breaker() -> BreakerInputs {
     }
 }
 
-fn neutral_elimination() -> EliminationInputs {
-    EliminationInputs {
-        principal: "agent:main".to_string(),
-        delegation_revoked: false,
-    }
-}
-
-fn neutral_task_table() -> TaskTableInputs {
-    TaskTableInputs {
-        principal: "agent:main".to_string(),
-        may_write: true,
-    }
-}
-
-fn gate_ctx<'a>(
-    breaker: &'a BreakerInputs,
-    elimination: &'a EliminationInputs,
-    task_table: &'a TaskTableInputs,
-    decls: &'a ToolDecls,
-    name: &'a str,
-) -> GateContext<'a> {
+fn gate_ctx(breaker: &BreakerInputs) -> GateContext<'_> {
     GateContext {
         gate_started: std::time::Instant::now(),
         breaker,
-        elimination,
-        task_table,
-        decls,
-        name,
     }
 }
 
@@ -108,25 +33,25 @@ fn row(name: &str) -> &'static GateRow {
 }
 
 /// 闸名是外部可读的事实（日志 / 测试 / 审计），改名就是改事实。
+///
+/// 表里只剩外部执行：淘汰与任务表写侧是**能力包自己的判断**（`before`），
+/// 不在这张宿主表里（DE-025 D-219）。
 #[test]
 fn gate_table_names_are_stable_and_unique() {
     let names: Vec<&str> = GATES.iter().map(|r| r.name).collect();
-    assert_eq!(names, vec!["外部执行", "淘汰", "任务表"]);
+    assert_eq!(names, vec!["外部执行"]);
     let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
     assert_eq!(unique.len(), names.len(), "闸名必须唯一");
 }
 
-/// 中性读数（授权、预算充足、未淘汰、可写任务表、无声明）⇒ 每道闸都放行。
+/// 中性读数（授权、预算充足）⇒ 宿主闸放行。
 ///
 /// 这条同时是判据纯度的底线：判据只在命中自己的条件时拒，不能因为「表里还有
 /// 别的闸」而误伤。
 #[tokio::test]
 async fn neutral_context_passes_every_gate() {
     let breaker = neutral_breaker();
-    let elimination = neutral_elimination();
-    let task_table = neutral_task_table();
-    let decls = ToolDecls::default();
-    let ctx = gate_ctx(&breaker, &elimination, &task_table, &decls, "shell");
+    let ctx = gate_ctx(&breaker);
 
     for gate in GATES {
         assert!(
@@ -145,10 +70,7 @@ async fn external_gate_refuse_is_zero_event() {
         authorized: false,
         ..neutral_breaker()
     };
-    let elimination = neutral_elimination();
-    let task_table = neutral_task_table();
-    let decls = ToolDecls::default();
-    let ctx = gate_ctx(&breaker, &elimination, &task_table, &decls, "vdfs_write");
+    let ctx = gate_ctx(&breaker);
 
     let refusal = first_refusal(&ctx).expect("未授权必须被拒");
     assert_eq!(refusal.gate, "外部执行");
@@ -173,10 +95,7 @@ async fn external_gate_break_carries_the_reason() {
         budget_ms: symbio_core::LatencyTier::Deep.budget_ms() - 1,
         ..neutral_breaker()
     };
-    let elimination = neutral_elimination();
-    let task_table = neutral_task_table();
-    let decls = ToolDecls::default();
-    let ctx = gate_ctx(&breaker, &elimination, &task_table, &decls, "vdfs_write");
+    let ctx = gate_ctx(&breaker);
 
     let refusal = first_refusal(&ctx).expect("预算耗尽必须熔断");
     assert_eq!(refusal.gate, "外部执行");
@@ -190,51 +109,60 @@ async fn external_gate_break_carries_the_reason() {
     assert!(row("外部执行").traces.contains(&refusal.trace.kind()));
 }
 
-/// 先命中者胜：同一个工具同时受淘汰与任务表管辖时，**淘汰先判**。
-///
-/// 顺序不是实现细节——它决定拒因写哪一条、走哪一类记账。表把它变成可断言的事实。
-#[tokio::test]
-async fn first_refusal_follows_the_table_order() {
-    let decls = decls_with(&[("agent_run", true, true)]).await;
-    let breaker = neutral_breaker();
-    let elimination = EliminationInputs {
-        principal: "agent:main".to_string(),
-        delegation_revoked: true,
-    };
-    let task_table = TaskTableInputs {
-        principal: "agent:main".to_string(),
-        may_write: false,
-    };
-    let ctx = gate_ctx(&breaker, &elimination, &task_table, &decls, "agent_run");
-
-    let refusal = first_refusal(&ctx).expect("两道闸都命中");
-    assert_eq!(refusal.gate, "淘汰", "淘汰排在任务表之前");
+/// 声明闸的默认出口是**可审计拒绝**：拒因进结果，违约承诺照记（淘汰即此类）。
+#[test]
+fn from_before_keeps_the_audited_default() {
+    let judged = BeforeRefusal::new(
+        "淘汰",
+        "主体已收回".to_string(),
+        failure_kind::PERMISSION_DENIED,
+    );
+    let refusal = Refusal::from_before(judged);
+    assert_eq!(refusal.gate, "淘汰");
+    assert_eq!(refusal.reason, "主体已收回");
+    assert_eq!(refusal.prefix, "Refused");
+    assert_eq!(refusal.kind, failure_kind::PERMISSION_DENIED);
     assert_eq!(refusal.trace.kind(), RefusalTraceKind::Audited);
+    assert!(refusal.trace.notes_delegation());
 }
 
-/// 任务表闸是**可审计拒绝但不记承诺**：工具没跑，声明无从说起。
-#[tokio::test]
-async fn task_table_gate_is_audited_without_delegation() {
-    let decls = decls_with(&[("todo_write", false, true)]).await;
-    let breaker = neutral_breaker();
-    let elimination = neutral_elimination();
-    let task_table = TaskTableInputs {
-        principal: "agent:main".to_string(),
-        may_write: false,
-    };
-    let ctx = gate_ctx(
-        &breaker,
-        &elimination,
-        &task_table,
-        &decls,
-        "local/todo_write",
-    );
-
-    let refusal = first_refusal(&ctx).expect("任务表闸必须命中");
-    assert_eq!(refusal.gate, "任务表");
+/// 实现显式去掉承诺记账 ⇒ 骨架不记（任务表：工具没跑，声明无从说起）。
+#[test]
+fn from_before_honours_the_implementations_trace() {
+    let judged = BeforeRefusal::new(
+        "任务表",
+        "不持资格".to_string(),
+        failure_kind::PERMISSION_DENIED,
+    )
+    .without_delegation_note();
+    let refusal = Refusal::from_before(judged);
     assert_eq!(refusal.trace.kind(), RefusalTraceKind::AuditedNoDelegation);
     assert!(!refusal.trace.notes_delegation());
-    assert!(row("任务表").traces.contains(&refusal.trace.kind()));
+}
+
+/// 主体派生（原 `EliminationInputs::of` 的那一条判据）：未绑智能体 ⇒ `session/main`；
+/// 裸名归会话一族；带 namespace 的地址原样。
+///
+/// 声明闸与落笔读的是**同一个主体**——派生点因此留在批首读数里，而不是各闸自算。
+#[test]
+fn the_principal_comes_from_the_agent_id() {
+    fn with_agent(agent_id: Option<&str>) -> std::sync::Arc<dyn PluginInvokeRequest> {
+        let req = PluginSimpleRequest::new(None, None);
+        if let Some(id) = agent_id {
+            req.set(symbio_core::AGENT_ID, id.to_string());
+        }
+        std::sync::Arc::new(req)
+    }
+
+    assert_eq!(
+        batch_principal(&with_agent(None)),
+        symbio_core::PRINCIPAL_MAIN
+    );
+    assert_eq!(batch_principal(&with_agent(Some("ghost"))), "session/ghost");
+    assert_eq!(
+        batch_principal(&with_agent(Some("person/local"))),
+        "person/local"
+    );
 }
 
 /// PreToolUse 钩子不进同步表，但共用同一套失败语义：`Blocked:` + `blocked` +
