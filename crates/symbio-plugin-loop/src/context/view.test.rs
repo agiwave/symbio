@@ -4,19 +4,28 @@
 //! `view.rs` 只保留生产代码，测试全部放本文件。
 //!
 //! 对话体的淡化 / 骨架化已按 [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役，
-//! 本文件的判据只剩一件事：**三段注入的次序与位置**。
+//! 本文件的判据只剩一件事：**段的次序与位置**（段从哪来由 provider 决定，
+//! 见 `context/providers.test.rs`）。
 
 use super::*;
+use symbio_plugin_api::context::slots;
+
 /// 三段的简写：`(记忆, 就绪, 委派)` —— 生产调用点（`chat_loop/inputs.rs`）的次序。
 ///
 /// 只为了测试可读；`build_request_sections` 本身收的是数组，次序由调用方声明
 /// （见 `sections_follow_the_callers_order`）。
 fn build(recall: Option<&str>, ready: Option<&str>, delegate: Option<&str>) -> Vec<ChatNode> {
-    build_request_sections(&[
-        (SectionKind::Recall, recall),
-        (SectionKind::ReadySet, ready),
-        (SectionKind::Delegate, delegate),
-    ])
+    let mut sections: Vec<(&'static str, String)> = Vec::new();
+    for (slot, text) in [
+        (slots::RECALL, recall),
+        (slots::READYSET, ready),
+        (slots::DELEGATE, delegate),
+    ] {
+        if let Some(text) = text {
+            sections.push((slot, text.to_string()));
+        }
+    }
+    build_request_sections(&sections)
 }
 
 fn kind_of(m: &ChatNode) -> Option<String> {
@@ -101,9 +110,20 @@ fn empty_sections_produce_nothing() {
     assert!(build(None, None, None).is_empty());
 }
 
+/// 空正文照样产出一个节点：判「空段算不算注入」的只有取值点一处。
+///
+/// 端口化之后 provider 可以交出空串（它只保证「这一段我有」，不保证非空）。
+/// 本函数若也判一次空，同一条判据就有两处出处——改哪一处都能让行为变。
+#[test]
+fn an_empty_body_still_produces_a_node() {
+    let sections = build_request_sections(&[(slots::RECALL, String::new())]);
+    assert_eq!(sections.len(), 1);
+    assert_eq!(text_of(&sections[0]), "");
+}
+
 /// 形状守卫：每条注入段都必须带 `meta.kind`。
 ///
-/// 消费方 `chat_loop::request_view_prefix` **按 kind 取**（不按下标），
+/// 消费方 `chat_loop::request_view_prefix` 按 `meta.kind` 的存在与否决定拼不拼，
 /// 缺了 kind 的段会静默地从请求里消失——注入发生了、模型看不见。
 #[test]
 fn every_section_carries_its_kind() {
@@ -118,39 +138,19 @@ fn every_section_carries_its_kind() {
 /// **次序由调用方声明**：数组怎么排，产出的节点就怎么排。
 ///
 /// 这是本函数从「三段固定入参 + 三次 `insert(0)`」改为「收数组」之后的核心判据——
-/// 此前「记忆在 index 0」靠的是**代码行序**（委派先插 0、就绪再插 0 把它挤到 1、
-/// 记忆最后插 0 恒在最前），读代码要倒着想；现在次序是数据，看得见也测得着。
+/// 此前「记忆在 index 0」靠的是**代码行序**，读代码要倒着想；现在次序是数据。
 ///
 /// 反向守卫同理成立：换一个数组次序就换一个输出次序——若本函数内部又把次序
-/// 排回去了（比如偷偷按 `SectionKind` 的声明序排），这条断言会红。
+/// 排回去了（比如按 `slots::KNOWN` 的登记序排），这条断言会红。
 #[test]
 fn sections_follow_the_callers_order() {
     let reversed = build_request_sections(&[
-        (SectionKind::Delegate, Some("d")),
-        (SectionKind::Recall, Some("m")),
-        (SectionKind::ReadySet, Some("r")),
+        (slots::DELEGATE, "d".to_string()),
+        (slots::RECALL, "m".to_string()),
+        (slots::READYSET, "r".to_string()),
     ]);
     assert_eq!(
         reversed.iter().filter_map(kind_of).collect::<Vec<_>>(),
         vec!["delegate_context", "recall_context", "readyset"]
-    );
-}
-
-/// `SectionKind::name()` 是 `meta.kind` 的**唯一出处**：三个取值互不相同。
-///
-/// 若两个变体映射到同一个字符串，消费方按 kind 取就会取错段——而这是编译期
-/// 拦不住的（两个变体各自合法）。所以它需要一条运行期断言。
-#[test]
-fn section_kinds_have_distinct_names() {
-    let names = [
-        SectionKind::Recall.name(),
-        SectionKind::ReadySet.name(),
-        SectionKind::Delegate.name(),
-    ];
-    let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
-    assert_eq!(
-        unique.len(),
-        names.len(),
-        "两个 SectionKind 映射到同一个 kind：{names:?}"
     );
 }

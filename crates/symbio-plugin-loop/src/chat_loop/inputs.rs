@@ -211,16 +211,13 @@ pub(crate) async fn prepare_turn_inputs(
         }
     };
 
-    // ── ⑤ 长期记忆召回三份产物的取用点 ──────────────────────────────────────
-    // 判据与执行都在轮首派发点那一台 host 上（`policy.recall`，D-159）：这里只读它
-    // 寄存进本轮状态的产物。
-    let recall_section = turn
-        .recall_view
-        .as_ref()
-        .and_then(super::super::memory_events::prompt_section);
+    // ── ⑤ 上下文段（provider 收集的产物）──────────────────────────────────────
+    // 收集在轮首派发点（`policy.recall`，D-159）一次做完：那里把「判完的值」交给
+    // 端口，provider 各自渲染成段。这里只读本轮寄存的那一份——本函数因此**不知道
+    // 有哪几段**（DE-025 D-215）。
 
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
-    // 三段**追加**的读视图：长期记忆 / 就绪任务 / 委派者真源。它们不落库、不碰历史——
+    // 追加的读视图：provider 贡献的各段 + 委派者真源。它们不落库、不碰历史——
     // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
     // [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役。
     //
@@ -255,19 +252,21 @@ pub(crate) async fn prepare_turn_inputs(
             min_chars: settings.worker_min_chars,
         },
     );
-    // 段的**次序**在这里声明（= 模型读到的上下文次序），段的**名字**由 `SectionKind`
-    // 唯一给出。加一段 = 这个数组加一行 + 枚举加一个变体，两处都由编译器逼着补全。
-    let request_sections = context::build_request_sections(&[
-        // 长期记忆：**第一项** ⇒ 落在 index 0（背景事实置顶，见函数文档）。
-        (context::SectionKind::Recall, recall_section.as_deref()),
-        // 调度段（S7 步 16–17，批⑨）：就绪任务集。
-        (
-            context::SectionKind::ReadySet,
-            turn.ready_section.as_deref(),
-        ),
-        // 委派者真源段（D-047）：Q1 判定 + Q2 能力目录。
-        (context::SectionKind::Delegate, delegate_section.as_deref()),
-    ]);
+    // 段的**次序**在这里声明（= 模型读到的上下文次序）：provider 按 owner 序在前，
+    // 委派者真源在后。加一段 provider 只需提交一条实现，本数组不动。
+    //
+    // 委派者真源**还不是 provider**：它要本轮收集成形后的 `tools`，而 provider 的入参
+    // 是本轮**已取好的值**（见 `symbio_plugin_api::context` 模块头）。这条边界是判据
+    // 而不是遗漏——把它硬塞进端口会让端口认识「工具清单」这种请求期产物。
+    let mut sections: Vec<(&'static str, String)> = turn
+        .context_sections
+        .iter()
+        .map(|s| (s.slot, s.text.clone()))
+        .collect();
+    if let Some(text) = delegate_section {
+        sections.push((symbio_plugin_api::context::slots::DELEGATE, text));
+    }
+    let request_sections = context::build_request_sections(&sections);
 
     Ok(TurnInputs {
         root_id,
@@ -319,10 +318,11 @@ pub(crate) async fn run_recall(
         recall_query.as_deref(),
         &recall_viewer,
     );
-    // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
-    // 召回同一条口径（同一轮内集合不漂移）。
-    turn.ready_section =
-        super::super::task_events::prompt_section(&facts, context.session.task_cap());
+    // 调度段的**数据**（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用
+    // ——与召回同一条口径（同一轮内集合不漂移）。
+    //
+    // 这里不再直接渲染：渲染搬进 `context::providers::ReadySetProvider`（DE-025 D-215），
+    // 本函数只把「本轮的事实切片 + 容量」交给端口。于是「有哪几段」不再写在这里。
     // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
     // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
     // 与召回 / 调度段同一条 `request_round == 0` 口径（同一轮内判定不漂移）；
@@ -344,6 +344,49 @@ pub(crate) async fn run_recall(
     let fast_armed = context.session.skill_fast_path();
     turn.skill_route = routing.obs;
     turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
+
+    // ── 上下文段：判断在上面，渲染在端口后面（DE-025 D-208 / D-215）──────────
+    //
+    // 上面几步是**判断**（召回哪些条目、哪些技能过闸），它们住控制面；这里只把判完的
+    // 值交成 `ContextRequest`，由 provider 自己决定「我这一段长什么样」。
+    //
+    // 于是「加一类每轮上下文」= 加一个 provider，本函数一行不动。两段现存贡献
+    // （召回 / 调度）的渲染已搬到 `context::providers`，与端口化之前的输出逐字一致。
+    //
+    // `RecallLine` 借用 `turn.recall_view`：先把段收集进局部量，再写回 `turn`
+    // ——否则「借视图」与「改本轮状态」会撞在同一处。
+    let recall_lines: Vec<symbio_plugin_api::RecallLine<'_>> = turn
+        .recall_view
+        .as_ref()
+        .map(|view| {
+            view.entries
+                .iter()
+                .map(|e| symbio_plugin_api::RecallLine {
+                    content: &e.content,
+                    tag: &e.tag,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let recall_facts = turn
+        .recall_view
+        .as_ref()
+        .map(|view| symbio_plugin_api::RecallFacts {
+            degraded: view.degraded,
+            lines: &recall_lines,
+        });
+    let request = symbio_plugin_api::ContextRequest {
+        turn: turn.turn_no,
+        request_round: u32::try_from(turn.request_round).unwrap_or(u32::MAX),
+        principal: &recall_viewer,
+        query: recall_query.as_deref(),
+        facts: &facts,
+        recall: recall_facts.as_ref(),
+        task_cap: context.session.task_cap(),
+    };
+    let sections = symbio_plugin_api::context_sections(&request);
+    turn.context_sections = sections;
+
     // 「已做」与它的读视图同一时刻产生：下一问问表读它是为了不再做，故必须就地
     // 入日志（见本函数文档）。`result` 记技能命中与否——义务环的 `has_match` 只从
     // 日志读（输入闭包）。

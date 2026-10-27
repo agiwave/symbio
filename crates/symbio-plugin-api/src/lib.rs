@@ -6,6 +6,7 @@
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂）
 //! - [`behaviors`]：能力自声明的行为名（内核只装开放集合，不认识名字）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）
+//! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //!
@@ -14,12 +15,17 @@
 //! 发生，因此插件之间仍然零依赖（DE-024 D-198）。
 
 pub mod behaviors;
+pub mod context;
 pub mod declarations;
 pub mod effects;
 pub mod events;
 pub mod hooks;
 pub mod routes;
 
+pub use context::{
+    providers as context_providers, section_meta, sections as context_sections, ContextProvider,
+    ContextRequest, ContextSection, RecallFacts, RecallLine,
+};
 pub use declarations::{
     assemble_declarations, declared_event_cell, declared_vocab, sealed_declarations, vocab,
     DeclarationsDecl,

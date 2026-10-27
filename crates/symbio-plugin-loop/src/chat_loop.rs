@@ -109,62 +109,58 @@ pub(crate) fn report_port(
     super::report_exec::ReportPort { now_ms, text }
 }
 
-/// 把请求级注入段**三段**拼成一段前缀（v2 运行器的 prompt 入口）。
+/// 把请求级注入段拼成一段前缀（v2 运行器的 prompt 入口）。
 ///
 /// ## 为什么需要它
 ///
-/// 长期记忆召回段 / 就绪任务集段 / 委派者真源段是**独立的消息**
-/// （`build_request_sections` 的产物，三段都置顶、`meta.kind` 可观测、不落库）。
-/// 而 v2 运行器的 prompt 是**一条** user 消息——`ProviderLlmAdapter::generate_turn`
-/// 只收 `TurnInput.text` 与渲染出的基线，那三段若不显式带进来就**静默**从模型眼前
-/// 消失：事实照样入格、`session/stats` 照样有数，只有模型看不见。
+/// provider 贡献的各段与委派者真源段是**独立的消息**（`build_request_sections` 的
+/// 产物，都置顶、`meta.kind` 可观测、不落库）。而 v2 运行器的 prompt 是**一条**
+/// user 消息——`ProviderLlmAdapter::generate_turn` 只收 `TurnInput.text` 与渲染出的
+/// 基线，那些段若不显式带进来就**静默**从模型眼前消失：事实照样入格、
+/// `session/stats` 照样有数，只有模型看不见。
 ///
-/// ## 取法：按 `meta.kind` 取，不按位置
+/// ## 取法：按**视图次序取全部**，不按名字查表（DE-025 D-215）
 ///
-/// 各段的 `kind` 由 [`context::SectionKind::name`] 单点给出。按 `kind` 取而不是按下标
-/// （0 / 1 / 2）——下标是「各段都在场时」的巧合，缺一段时下标全部左移，按下标取会
-/// 取错段或漏段。
+/// 端口化之前这里有一张 `ORDER` 数组按 `kind` 逐个 `find`。那个形状的前提是「段的名字
+/// 有第二处拼写」——而端口化之后**段的名字只有一个出处**（provider 自己），视图里也
+/// 只有段这一类节点，于是「按名字查」既没有要防的错，还会把「加一类上下文」变成改
+/// 这张表。现在改成顺序遍历：**视图次序 = 装配次序 = 模型读到的次序**。
 ///
-/// ## 顺序：按本函数声明的优先级，不按它们在视图里的位置
-///
-/// 请求级前缀是一段文本，模型读到的是先后顺序；这里是「背景 → 调度候选 → 身份目录」
-/// 的**语义优先级**。视图里的位置由装配调用点声明，两者今天恰好一致，但**不是同一条
-/// 判据**：把「谁先谁后」绑在装配次序上，下次调装配次序就会连带改掉模型看到的优先级。
+/// 旧注释说「装配次序与优先级不是同一条判据，故意分开」。端口化之后它们**合并**了，
+/// 这是刻意的：段的先后现在由 provider 的 owner 序决定（DE-025 §3 第 4 条），
+/// 那正是「按声明装配」的意思——分开两处只会在加 provider 时漂。
 ///
 /// 全部为空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而各段皆空是常态）。
 pub(crate) fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
-    const ORDER: [context::SectionKind; 3] = [
-        context::SectionKind::Recall,
-        context::SectionKind::ReadySet,
-        context::SectionKind::Delegate,
-    ];
     // `Vec<String>` 而非 `Vec<&str>`：`to_text()` 按值产出一个 `String`，`trim()`
     // 借的是那个临时值——收 `&str` 会把返回值绑到函数参数上（E0515）。
     let mut parts: Vec<String> = Vec::new();
     let mut kinds: Vec<&str> = Vec::new();
-    for section_kind in ORDER {
-        let kind = section_kind.name();
-        if let Some(text) = view
-            .iter()
-            .find(|m| {
-                m.meta
-                    .as_ref()
-                    .and_then(|v| v.get("kind"))
-                    .and_then(|v| v.as_str())
-                    == Some(kind)
-            })
-            .and_then(|m| m.content.as_ref().map(|c| c.to_text()))
+    for node in view {
+        let Some(kind) = node
+            .meta
+            .as_ref()
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
+        let Some(text) = node
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-        {
-            kinds.push(kind);
-            parts.push(text);
-        }
+        else {
+            continue;
+        };
+        kinds.push(kind);
+        parts.push(text);
     }
     if parts.is_empty() {
         return None;
     }
-    // **每轮都记一次「取到哪几段」**——三段皆空是常态（生产里绝大多数轮次），
+    // **每轮都记一次「取到哪几段」**——各段皆空是常态（生产里绝大多数轮次），
     // 而「记忆段明明有东西却没进 prompt」这类失效**没有任何东西会变红**：事实照样
     // 入格、`session/stats` 照样有数。所以取值点自己出声：段在而模型看不见时，
     // 日志里至少有「取到了却没送出」的对照可查。

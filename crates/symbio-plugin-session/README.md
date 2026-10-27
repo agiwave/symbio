@@ -221,35 +221,34 @@ session:
 
 ### 5. 请求级注入段（`build_request_sections`：长期记忆 / 任务调度 / 委派者真源）
 
-> **目标**：把三段**本轮才成立**的读视图送进请求——长期记忆召回、就绪任务集、委派判定。它们不是会话历史的一部分，因此不落库、每请求现算。
+> **目标**：把**本轮才成立**的读视图送进请求——长期记忆召回、就绪任务集、委派判定。它们不是会话历史的一部分，因此不落库、每请求现算。
 >
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [D-078](README.md "crates/symbio-plugin-session/README") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
-* **具体规则**（唯一入口 `build_request_sections`，三段各自独立、非空才插）：
- * **长期记忆召回段 (Recall Context)**：调用方（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），把排版好的段落（`memory_events::prompt_section`，抬头 `【长期记忆】`）传入；非空时产出一条 `meta.kind = "recall_context"` 的 User 消息。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
- * **任务调度段 (Ready Set)**：同一时机读一次本会话事实源的就绪任务集（`task_events::prompt_section`），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**不与记忆段争 index 0**：本段先插、记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 调度 1，单独存在时各自在 0）。候选集空 ⇒ **整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
- * **委派者真源段 (Delegate Context)**：调用方（[`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落；非空时产出 `meta.kind = "delegate_context"`，最终落在 **index 2**（记忆 0 / 调度 1 / 委派 2）。插入次序是判据的一部分：顺序反了三段的位置全部错位，而段位置是模型读到的上下文次序（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
- * **三段的消费形态**：`chat_loop::request_view_prefix` 按 `meta.kind`（不按下标——缺一段时下标全部左移）取出三段，按**记忆 → 调度 → 委派**拼成一条 `system` 前缀消息交给运行器。拼成一条是因为运行器的 prompt 入口只收一段前缀；标 `system` 而不是 `user`，是为了让「本轮用户说了什么」在消息层上没有歧义。
+* **段的来源是端口，不是本模块的固定列表**（DE-025 D-215）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，`loop` 在轮首收集、按 owner 序拼接。本仓当前提交两条（同以 `owner() == "loop"` 提交，**提交序 = 段序**）：`RecallProvider` 产 `slots::RECALL`、`ReadySetProvider` 产 `slots::READYSET`。加一类每轮上下文 = 加一条 provider，不改 `loop`。
+* **具体规则**（唯一入口 `build_request_sections`，段各自独立、非空才插）：
+ * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档与无目录的临时会话不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
+ * **任务调度段 (Ready Set)**：`ReadySetProvider` 读本轮事实切片 + 控制面给的容量（`task_cap`）调 `task_events::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
+ * **委派者真源段 (Delegate Context)**：调用方（[`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）渲染成段落，追加在 provider 段**之后**，`meta.kind = "delegate_context"`。它**还不是 provider**：要的是本轮收集成形后的 `tools`，而 provider 的入参是本轮**已取好的值**——收集是广播，遍历期取集合会漏掉尚未访问到的兄弟插件。
+ * **段的消费形态**：`chat_loop::request_view_prefix` 顺序取出视图里**全部**带 `meta.kind` 的段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
 * **Rust 实现策略**：
- * 唯一入口为 [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) 的 `build_request_sections`，由 [`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
+ * 唯一入口为 [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
 
  ```rust
- pub fn build_request_sections(
- recall_section: Option<&str>,
- ready_section: Option<&str>,
- delegate_section: Option<&str>,
- ) -> Vec<ChatNode> {
- let mut sections = Vec::new;
- // 插入次序：委派 → 调度 → 记忆。各插 0，最终读作 记忆 0 / 调度 1 / 委派 2。
- if let Some(t) = delegate_section { sections.insert(0, section("delegate_context", t)); }
- if let Some(t) = ready_section { sections.insert(0, section("readyset", t)); }
- if let Some(t) = recall_section { sections.insert(0, section("recall_context", t)); }
+ pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNode> {
  sections
+ .iter()
+ .map(|(slot, text)| ChatNode {
+ meta: Some(section_meta(slot)), // {"kind": slot} —— 拼写只有这一处
+ content: Some(MessageContent::Text(text.clone())),
+ ..Default::default()
+ })
+ .collect
  }
  ```
 
- * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：`recall_section` 由 `TurnState::recall_view`（只在 `request_round == 0` 取一次）现算排版，视图级不落库；`ready_section` 由 `TurnState::ready_section`（同一条 `request_round == 0` 口径）调 `task_events::prompt_section` 现算（**只读**开档、不创建事实源，`off` 档不读）；`delegate_section` 由 [`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with` 就地判定。
+ * 调用点参数（[`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs)）：provider 段取 `TurnState::context_sections`（`run_recall` 里经 `context_sections(&request)` 收集一次，`request_round == 0` 口径；**段数由 provider 决定**，宿主不假设几段），委派段由 [`../loop/chat_loop/delegate.rs`](../symbio-plugin-loop/src/chat_loop/delegate.rs) 的 `delegate_section_with` 就地判定后追加在末尾。
 
 ---
 

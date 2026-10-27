@@ -216,14 +216,17 @@ pub(crate) struct TurnState {
     /// 开关关着时这里是空表，但**判定照常发生**——观测照常落格，那正是
     /// 「只编译、不加速」的观察形态；只是没人拿这一份去装配。
     pub(crate) skill_hits: Vec<super::super::skill_events::SkillLlmHit>,
-    /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
-    /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
+    /// 本轮**已收集的上下文段**（DE-025 D-215）：由 `run_recall` 一次收集、本轮各
+    /// 工具轮复用。
     ///
     /// 与 [`TurnState::recall_view`] 同一条取用口径（`request_round == 0` 取一次、
-    /// 本轮各工具轮复用）：同一轮内任务集不该漂移，也省得每个工具轮都重开一次
-    /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空）就是
-    /// `None`，请求视图里就少一段，不存在"空占位"。
-    pub(crate) ready_section: Option<String>,
+    /// 本轮各工具轮复用）：同一轮内上下文不该漂移，也省得每个工具轮都重跑一遍
+    /// provider。它**只读不写**——某段算不出来（没召回 / 就绪集空）就是没有那一段，
+    /// 请求视图里少一段，不存在「空占位」。
+    ///
+    /// 为什么是「一整份段」而不是逐段一个字段：段的数量由 provider 决定，本轮代码
+    /// 不该知道有哪几段——逐段字段就是「加一类上下文要改 `TurnState`」。
+    pub(crate) context_sections: Vec<symbio_plugin_api::ContextSection>,
     /// 本轮**对话面开场白**正文：`Escalate` 首响。
     ///
     /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`

@@ -288,7 +288,8 @@ struct TurnState {
  last_saved: usize, // 增量落库锚点
  last_user_facing_at: i64, // 对话线上最近一次动静（轮内时钟的种子）
  // 其余 7 格是本轮的读侧产物：input_utterance / recall_view / skill_route / skill_hits /
- // ready_section / opening_text / opening_dialog（`request_round == 0` 时各取一次）
+ // context_sections / opening_text / opening_dialog（`request_round == 0` 时各取一次；
+ // context_sections 的段数由上下文 provider 决定，宿主不假设几段）
 }
 ```
 

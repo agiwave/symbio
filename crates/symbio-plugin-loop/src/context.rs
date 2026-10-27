@@ -1,14 +1,15 @@
 //! 会话上下文治理域（`context`）
 //!
 //! 「发给大模型之前」的全部上下文处理：何时压、从哪切、压完怎么落，以及请求级的
-//! 三段注入（记忆 / 调度 / 委派）。
+//! 注入段（段由 provider 贡献，宿主只按序拼接）。
 //!
 //! ## 模块分工
 //!
 //! | 文件 | 职责 |
 //! |---|---|
 //! | 本文件 | 触发与度量：阈值 / 切分点 / token 估算 / 收益护栏（「何时压、从哪切」） |
-//! | [`view`]     | 请求级注入段：长期记忆 / 就绪任务 / 委派者真源（`build_request_sections` 唯一入口） |
+//! | [`providers`] | 本插件贡献的段：长期记忆召回 / 任务调度候选集（`ContextProvider` 实现） |
+//! | [`view`]     | 段 → 请求节点（`build_request_sections` 唯一入口；不决定有哪几段） |
 //! | [`conversation_view`] | 对话线投影：user 消息 + assistant 文本节点（对话面唯一分界） |
 //! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议 |
 //! | [`pipeline`] | 压缩执行流水线：阈值触发的自动压缩与用户重试共用的唯一内核 |
@@ -31,6 +32,7 @@ pub(crate) use super::message_build::TurnOutputExt;
 mod conversation_view;
 mod pipeline;
 mod prompt;
+mod providers;
 mod view;
 
 // 门面 = 域内唯一对外出口：调用方（`chat_loop` / `resume`）只经 `context::X` 取用，
@@ -41,7 +43,7 @@ pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, extract_snapshot,
     get_compression_prompt, render_snapshot_for_history, COMPRESSION_PROTOCOL_VERSION,
 };
-pub use self::view::{build_request_sections, SectionKind};
+pub use self::view::build_request_sections;
 
 const COMPRESSION_TOKEN_THRESHOLD: f64 = 0.7;
 const COMPRESSION_PRESERVE_THRESHOLD: f64 = 0.3;

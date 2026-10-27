@@ -1121,6 +1121,39 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     );
 }
 
+/// 从 `RecallView` 转出**端口形状**（与 `run_recall` 的转换逐字一致）。
+///
+/// 排版这一步已经搬到上下文 provider（DE-025 D-215），provider 只认识
+/// `symbio_plugin_api::context::RecallFacts`。测试因此也要经过同一次转换——
+/// 顺带钉住「转换只搬字段、不改判据」：`degraded` 与条目的 `content`/`tag` 原样过去。
+struct Facts<'a> {
+    degraded: bool,
+    lines: Vec<symbio_plugin_api::RecallLine<'a>>,
+}
+
+impl<'a> Facts<'a> {
+    fn of(view: &'a super::super::recall::RecallView) -> Self {
+        Self {
+            degraded: view.degraded,
+            lines: view
+                .entries
+                .iter()
+                .map(|e| symbio_plugin_api::RecallLine {
+                    content: &e.content,
+                    tag: &e.tag,
+                })
+                .collect(),
+        }
+    }
+
+    fn view(&self) -> symbio_plugin_api::RecallFacts<'_> {
+        symbio_plugin_api::RecallFacts {
+            degraded: self.degraded,
+            lines: &self.lines,
+        }
+    }
+}
+
 /// 注入段排版：抬头 + 逐条一行、跨会话同文只印一行、空视图不印空壳标题。
 #[test]
 fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
@@ -1137,7 +1170,8 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
         "session/main",
     )
     .expect("有记忆");
-    let section = prompt_section(&view).expect("有条目 ⇒ 有段");
+    let facts = Facts::of(&view);
+    let section = prompt_section(&facts.view()).expect("有条目 ⇒ 有段");
     assert!(
         section.starts_with(RECALL_SECTION_HEAD),
         "抬头是唯一锚点：{section}"
@@ -1161,7 +1195,8 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
     let empty = recall(PRINCIPAL_USER, None, None)
         .apply(&[], i64::MAX, Budget::generous())
         .value;
-    assert!(prompt_section(&empty).is_none());
+    let empty_facts = Facts::of(&empty);
+    assert!(prompt_section(&empty_facts.view()).is_none());
 }
 
 /// 降级标注：
@@ -1191,7 +1226,8 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
         "窗口只交切片头部：部分结果（截尾不截头）"
     );
 
-    let section = prompt_section(&degraded_view).expect("有条目 ⇒ 有段");
+    let degraded_facts = Facts::of(&degraded_view);
+    let section = prompt_section(&degraded_facts.view()).expect("有条目 ⇒ 有段");
     assert!(
         section.contains(RECALL_DEGRADED_NOTE),
         "降级时如实标注（不谎称完整）：{section}"
@@ -1208,7 +1244,8 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
     }
     let full = recall_view(vec![snap(true, &small)], None, "session/main").expect("有记忆");
     assert!(!full.degraded, "反转前提：本视图不降级");
-    let full_section = prompt_section(&full).expect("有条目 ⇒ 有段");
+    let full_facts = Facts::of(&full);
+    let full_section = prompt_section(&full_facts.view()).expect("有条目 ⇒ 有段");
     assert!(
         !full_section.contains(RECALL_DEGRADED_NOTE),
         "不降级不标注：{full_section}"
@@ -1223,8 +1260,9 @@ fn prompt_section_says_degraded_instead_of_pretending_completeness() {
     let mut empty_degraded = degraded_view;
     empty_degraded.entries.clear();
     assert!(empty_degraded.degraded, "判据前提：仍然标着降级");
+    let empty_degraded_facts = Facts::of(&empty_degraded);
     assert!(
-        prompt_section(&empty_degraded).is_none(),
+        prompt_section(&empty_degraded_facts.view()).is_none(),
         "空视图不印「降级的空壳」"
     );
 }

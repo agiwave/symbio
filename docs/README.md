@@ -61,7 +61,7 @@ created: 2026-07-20
 | [[RE-000-参考汇总|ref · 参考]] | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 11 | draft 0 · active 11 · retired 0 | — |
 | [[SP-000-规范汇总|spec · 规范]] | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 32 | draft 0 · active 27 · retired 5 | — |
 | [[GU-000-指南汇总|guide · 指南]] | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
-| [[T-000-任务汇总|task · 任务]] | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 5 | todo 4 · doing 1 · done 0 · wont 0 | 4 条分解边 |
+| [[T-000-任务汇总|task · 任务]] | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 4 | todo 3 · doing 1 · done 0 · wont 0 | 3 条分解边 |
 
 <!-- registry:summary end -->
 
