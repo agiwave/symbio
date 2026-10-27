@@ -17,6 +17,7 @@
 //! | [`DELEGATION_PROMISE`] | `delegation_promise` | 承诺记账：跨主体立约的出参 |
 //! | [`TASK_TABLE`] | `task_table` | 任务表写侧资格闸与任务声明记账 |
 //! | [`FILE_CHANGE`] | `file_change` | 工作目录变更账：产物格的 `file_op` 富化 |
+//! | [`NOTE_CAPTURE`] | `note_capture` | 便签记账（DE-025 `EX-001` 的夹具实例） |
 //!
 //! 名字是**跨进程的**（工具元数据随插件通道走），改名等于改协议；只在语义真的要
 //! 变的时候改，并在 `DE-025` 留一条决策。
@@ -37,11 +38,23 @@ pub const TASK_TABLE: &str = "task_table";
 /// 声明。
 pub const FILE_CHANGE: &str = "file_change";
 
+/// 记一条便签——扩展夹具（DE-025 `EX-001`）的行为实例。
+///
+/// 它不是新的行为**语义**（判断种类仍由宿主给出），只是一个新的实例：能力包声明
+/// 这个名字并注册 handler，`loop` 与内核都不认识 `notes_add`。
+pub const NOTE_CAPTURE: &str = "note_capture";
+
 /// 宿主认识的**全部**行为名。
 ///
 /// 只用于两件事：装配期/收集期的显式校验，以及判据脚本的读取面。闸门自己按
 /// 单个常量判，不遍历这张表——「表里有什么」不是判断。
-pub const KNOWN: &[&str] = &[ASSIGN_WORK, DELEGATION_PROMISE, TASK_TABLE, FILE_CHANGE];
+pub const KNOWN: &[&str] = &[
+    ASSIGN_WORK,
+    DELEGATION_PROMISE,
+    TASK_TABLE,
+    FILE_CHANGE,
+    NOTE_CAPTURE,
+];
 
 /// 这个名字是不是宿主已知的行为。
 ///

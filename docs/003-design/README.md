@@ -174,7 +174,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 77 · draft 0 · retired 1（共 78）
+**计数**：active 78 · draft 0 · retired 1（共 79）
 
 ## 现行设计（active）
 
@@ -247,6 +247,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-mcp/README`](../../crates/symbio-plugin-mcp/README.md) | MCP 插件 | 与代码一致 |
 | [`crates/symbio-plugin-memory/README`](../../crates/symbio-plugin-memory/README.md) | Memory 插件 | 与代码一致 |
 | [`crates/symbio-plugin-model/README`](../../crates/symbio-plugin-model/README.md) | Model 插件 | 与代码一致 |
+| [`crates/symbio-plugin-notes/README`](../../crates/symbio-plugin-notes/README.md) | Notes 插件（扩展夹具） | 与代码一致 |
 | [`crates/symbio-plugin-plugin_manager/README`](../../crates/symbio-plugin-plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
 | [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
 | [`crates/symbio-plugin-session/src/docs/README`](../../crates/symbio-plugin-session/src/docs/README.md) | Session 插件文档 | 与代码一致 |

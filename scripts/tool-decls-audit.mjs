@@ -68,6 +68,7 @@ const DEFAULT_BASELINE = [
   'content_search',
   'heartbeat',
   'http_request',
+  'notes_add',
   'read_skill',
   'todo_write',
   'vdfs_delete',

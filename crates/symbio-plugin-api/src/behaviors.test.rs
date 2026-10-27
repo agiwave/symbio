@@ -13,7 +13,13 @@ fn known_names_are_unique_and_snake_case() {
     names.sort_unstable();
     assert_eq!(
         names,
-        [ASSIGN_WORK, DELEGATION_PROMISE, FILE_CHANGE, TASK_TABLE,],
+        [
+            ASSIGN_WORK,
+            DELEGATION_PROMISE,
+            FILE_CHANGE,
+            NOTE_CAPTURE,
+            TASK_TABLE,
+        ],
     );
     for name in KNOWN {
         assert!(

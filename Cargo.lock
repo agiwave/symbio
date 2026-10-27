@@ -4160,6 +4160,7 @@ dependencies = [
  "symbio-plugin-mcp",
  "symbio-plugin-memory",
  "symbio-plugin-model",
+ "symbio-plugin-notes",
  "symbio-plugin-plugin_manager",
  "symbio-plugin-session",
  "symbio-plugin-setting",
@@ -4537,6 +4538,21 @@ dependencies = [
  "url",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "symbio-plugin-notes"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "symbio-core",
+ "symbio-deploy",
+ "symbio-kernel",
+ "symbio-plugin-api",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

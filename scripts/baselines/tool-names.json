@@ -1,0 +1,9 @@
+{
+  "crates/symbio-plugin-session/src/transcript/autonomous.rs": {
+    "heartbeat": {
+      "count": 1,
+      "adr": "D-076",
+      "reason": "会话写臂按 D-076 #5 读 `heartbeat.include_history` 推导自主轮的运行参数：这里的键是心跳插件的 metadata 命名空间（owner 见 crates/symbio-plugin-heartbeat/src/setting.rs 的文件头），不是按工具名分流；`heartbeat` 与工具同名只是命名巧合。"
+    }
+  }
+}

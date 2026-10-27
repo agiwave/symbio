@@ -52,6 +52,7 @@ pub use symbio_plugin_loop;
 pub use symbio_plugin_mcp;
 pub use symbio_plugin_memory;
 pub use symbio_plugin_model;
+pub use symbio_plugin_notes;
 pub use symbio_plugin_plugin_manager;
 pub use symbio_plugin_session;
 pub use symbio_plugin_setting;

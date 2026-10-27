@@ -132,6 +132,7 @@ export const FACTORY_TOOLS = Object.freeze([
   'content_search',
   'todo_write',
   'heartbeat',
+  'notes_add',
   'vdfs_list',
   'vdfs_tree',
   'vdfs_stat',

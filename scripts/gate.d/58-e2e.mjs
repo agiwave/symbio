@@ -28,7 +28,7 @@ import { latestE2ELogs } from './_logs.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const cliDir = path.join(repoRoot, 'cli')
+const cliDir = path.join(repoRoot, 'crates', 'symbio-cli')
 const e2eDir = path.join(repoRoot, 'e2e')
 const caseFileRe = /^t\d.*\.mjs$/
 

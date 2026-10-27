@@ -50,7 +50,7 @@ lists: [gate-codes=owner]
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–017 | `S-018` |
-| **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–005 | `SC-006` |
+| **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SPC** | 规范执行方覆盖 | `scripts/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
@@ -244,6 +244,7 @@ lists: [gate-codes=owner]
 | **SC-003** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-004** | `scripts/plugin-special-case-audit.mjs` |
 | **SC-005** | `scripts/plugin-special-case-audit.mjs` |
+| **SC-006** | `scripts/plugin-special-case-audit.mjs` |
 | **SPC-001** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-002** | `scripts/spec-coverage-audit.mjs` |
 | **SPC-003** | `scripts/spec-coverage-audit.mjs` |
