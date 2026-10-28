@@ -59,7 +59,9 @@ use symbio_core::merge_kernel::{merge_with_fidelity, truncate_chars};
 
 use symbio_core::FleetSnapshot;
 use symbio_core::PRINCIPAL_USER;
-use symbio_core::{accept, Budget, ConsolidateParams, Entity, Event, Rejection, Seq, Store, Verb};
+use symbio_core::{Budget, Entity, Event, Seq, Store, Verb};
+
+use crate::projections::consolidate::{accept, ConsolidateParams, Rejection};
 
 use super::recall::{recall, RecallView};
 use crate::control_decl::{

@@ -2,10 +2,10 @@
 //!
 //! ## 它是一条投影的出口，不是新事实族（[D-169]）
 //!
-//! 变更账由 `symbio_core::workdir_changes` 从 `artifact.added` 折出（写侧为什么
+//! 变更账由本插件的投影 `projections::changes::workdir_changes` 从 `artifact.added` 折出（写侧为什么
 //! 不该另立 `file.*` 见该投影的模块文档）。本文件只做两件事：**取数**（本会话快照）
 //! 与**排版**（相对路径 → VDFS 地址 + 判别词 + 文案）。它不解析工具参数、不判
-//! 「哪些工具算写」——那些口径只在 core 的投影里。
+//! 「哪些工具算写」——那些口径只在投影里。
 //!
 //! ## 为什么行是呈现就绪的
 //!
@@ -38,9 +38,12 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use symbio_core::{
-    content_visible, workdir_changes, Event, FileOp, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, SESSION_ID,
+    content_visible, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginPayload, SESSION_ID,
 };
+
+use crate::projections::changes::workdir_changes;
+use symbio_plugin_api::effects::FileOp;
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{content_scope_of, ViewerRequest};

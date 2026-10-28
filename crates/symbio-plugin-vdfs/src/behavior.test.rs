@@ -1,8 +1,8 @@
 //! 写族的产物富化：**声明选实现**、**成败定有无**、**名字只在本地**。
 
 use super::FileChange;
-use symbio_core::FileOp;
 use symbio_plugin_api::behaviors;
+use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::effects::{EffectInput, ToolBehavior};
 
 fn input(tool: &str, success: bool) -> EffectInput {

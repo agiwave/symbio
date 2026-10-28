@@ -8,18 +8,12 @@ pub use symbio_kernel::Projection;
 
 pub mod branch;
 pub mod calibration;
-pub mod changes;
-pub mod checkpoint;
-pub mod consolidate;
 pub mod cost;
-pub mod fallback;
 pub mod mutations;
 pub mod prompt_fidelity;
 pub mod readyset;
 pub mod rebuild;
 pub mod reputation;
-pub mod slo;
-pub mod span;
 pub mod task_vocab;
 pub mod transcript;
 pub mod turns;

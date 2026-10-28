@@ -1,11 +1,11 @@
 import './_selfrun.mjs';
-// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，五个扩展面在真实链路上生效。
+// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，六个扩展面在真实链路上生效。
 //
 // ## 这条用例补的是什么
 //
 // T88 证的是「插件的工具随装配位进出」；本用例证的是 DE-025 的**扩展面本身**
 // （EX-001）：一个新能力包不改 core / kernel / loop / session，只靠 plugin-api 的
-// 提交点就能做到——
+// 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**对外可读的视图**六面：
 //
 // | 面 | 提交点 | 本用例的读数 |
 // |---|---|---|
@@ -14,6 +14,7 @@ import './_selfrun.mjs';
 // | 领域事实 | `submit_declarations!`（`Domain × Opened`） | 工具轮结束后事件真的落格 |
 // | 效果 | `submit_behavior!` + `CapabilityMeta.behaviors` | 下一轮上下文里出现那条便签 |
 // | 上下文 | `submit_context_provider!` | 下一轮请求前缀里出现 `最近记下的便签` |
+// | 视图 | `ViewDecl` + `PLUGIN.yml` 的 `shared_views` | `session/stats` 的 `capability_views['notes.recent']` 读到那条便签 |
 //
 // 「事件真的落格」与「上下文真的贡献了」是**同一条读数的两面**：上下文 provider 只读
 // 会话事实切片，它渲染得出来，就说明行为产出的 `notes.created` 已经入格。
@@ -43,7 +44,9 @@ import {
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
+  nextPort,
   runCli,
+  startLongLivedCli,
   waitFor,
   assert,
   assertEq,
@@ -87,10 +90,20 @@ function scenarios() {
   ];
 }
 
-function homedirFor(port, { notesEnabled }) {
+function homedirFor(port, { notesEnabled, gatewayPort }) {
   return makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
+      // 网关拉起才有 `session/stats` 这条**生产路由**可打（第六面的读数走它）。
+      // 与 T28 同一份配置形状：无此段时入站监听不会被拉起。
+      gateway: {
+        inbound_enabled: true,
+        inbound_protocol: 'http',
+        inbound_bind: '127.0.0.1',
+        inbound_port: gatewayPort,
+        inbound_token: '',
+        inbound_readonly: false,
+      },
       session: { ...DIALOG_FACE_OFF },
       // 启用侧不写这一项：缺省即启用（`PluginDir::enabled` 的约定）。
       ...(notesEnabled ? {} : { notes: { plugin_enabled: false } }),
@@ -113,11 +126,12 @@ function requestText(body) {
 }
 
 export default defineCase(
-  'T89 扩展夹具：notes 能力包的工具 / 前置判断 / 领域事实 / 效果 / 上下文只经 plugin-api 接入即生效',
+  'T89 扩展夹具：notes 能力包的工具 / 前置判断 / 领域事实 / 效果 / 上下文 / 视图只经 plugin-api 接入即生效',
   async () => {
     // ── 启用侧：三轮，后两轮读到行为落下的那条事实与前置判断的拒因 ─────
     const llm = await new MockLlm(scenarios()).start();
-    const hd = homedirFor(llm.port, { notesEnabled: true });
+    const GW = nextPort();
+    const hd = homedirFor(llm.port, { notesEnabled: true, gatewayPort: GW });
     try {
       const first = runCli({
         homedir: hd.homedir,
@@ -190,6 +204,41 @@ export default defineCase(
         judged.includes('Refused: 这条便签已经记过'),
         `重复便签应在执行前被拒并回灌模型（实际: ${judged.slice(-800)}）`,
       );
+
+      // ── 第六面：owner 声明的视图被**另一个插件**的读数口按名字读到 ──────
+      // 判据只有一句：`notes.recent` 这一格出现在 `session/stats` 里，值就是 notes
+      // 自己的折叠算出来的那条便签。session 没为便签写过一行——它只遍历清单生成的
+      // 公开表（DE-025 D-221）；走生产路由（gateway → 容器 → 路由）才证得到「装配
+      // 真的把 owner 的 ViewDecl 冻结进了同一张表」。
+      const api = startLongLivedCli({
+        homedir: hd.homedir,
+        workdir: hd.workdir,
+        session: 'e2e-t89',
+        provider: PROVIDER_ID,
+        gatewayPort: GW,
+      });
+      try {
+        await api.waitGatewayReady();
+        const inv = await api.invoke('session/stats', {}, { session_id: 'e2e-t89' });
+        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+        const view = inv.body?.data?.capability_views?.['notes.recent'];
+        assert(view, `能力视图列应有 notes.recent 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`);
+        assertEq(view.status, 'ok', `跨插件读应成功，不是缺席态：${JSON.stringify(view)}`);
+        assertEq(view.owner, 'notes', 'owner 来自清单生成物');
+        assertEq(view.ver, 1, '版本随 owner 的 ViewDecl 走');
+        assertEq(
+          view.value?.count,
+          1,
+          `三轮里只有一条便签落格（第三条被 before 拒）：${JSON.stringify(view.value)}`,
+        );
+        assertEq(
+          view.value?.items?.[0]?.text,
+          NOTE_TEXT,
+          '读到的正文就是行为落下的那条事实（折叠在 owner 手里）',
+        );
+      } finally {
+        api.stop();
+      }
     } finally {
       llm.stop();
       cleanupHomedir(hd);
@@ -200,7 +249,10 @@ export default defineCase(
 
     // ── 停用侧：装配位翻掉后工具面没有它，会话照常跑完 ─────────────────
     const offLlm = await new MockLlm([{ id: 'final', content: '收到。' }]).start();
-    const offHd = homedirFor(offLlm.port, { notesEnabled: false });
+    const offHd = homedirFor(offLlm.port, {
+      notesEnabled: false,
+      gatewayPort: nextPort(),
+    });
     try {
       const r = runCli({
         homedir: offHd.homedir,

@@ -5,6 +5,10 @@
 // 「不是违规」的一侧（共享读侧可导入、词只在注释里、测试文件不扫、投影外有生产
 // 消费方即可、空理由不算豁免），最后跑一次真实仓库——夹具只能证明规则引擎自洽，
 // 证明不了「产投影清单」与当前结构一致。
+//
+// PP-004 / PP-005 是**棘轮**，不是模式匹配：现值来自真实扫描（夹具恒为 1/1），判红
+// 只能靠把基线收紧，所以两格的反例都走 `CORE_PROJECTION_BASELINE`；而「放宽要挂一条
+// 打开得了的决策」这条，判据读本脚本自己的源码，夹具就得连假脚本一起摆进来。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -37,7 +41,7 @@ function repo(extra = {}) {
   return files
 }
 
-function audited(files) {
+function audited(files, env = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'projection-purity-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -46,7 +50,7 @@ function audited(files) {
       fs.writeFileSync(p, content)
     }
     return spawnSync(process.execPath, [script, `--root=${root}`], {
-      env: { ...process.env, NO_COLOR: '1' },
+      env: { ...process.env, NO_COLOR: '1', ...env },
       encoding: 'utf8',
       timeout: 10000,
     })
@@ -164,6 +168,191 @@ test('PP-003 豁免：构造器名挂非空理由 ⇒ 绿；空理由 ⇒ 仍红
   )
   assert.equal(empty.status, 1, out(empty))
   assert.match(out(empty), /PP-003/, out(empty))
+})
+
+// ── PP-004：core 投影面只许降 ──────────────────────────────────────────
+//
+// 夹具只有一张产投影文件、一个构造器 ⇒ 现值恒为 `files 1 / ctors 1`。棘轮判的是
+// 「现值有没有越过基线格」，所以判红只能靠把基线**收紧**（环境变量只给测试用，
+// 真仓门禁不设——`gate.d/35-baseline.mjs` 另判「覆盖值不得比默认值更松」）。
+
+test('PP-004 反例：基线收到 0:0 而实测 1 ⇒ 红，且给出下沉路径', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: '0:0' })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-004/, out(r))
+  assert.match(out(r), /core 产投影文件数变宽：实测 1 > 基线 0/, out(r))
+  assert.match(out(r), /core 投影构造器条数变宽：实测 1 > 基线 0/, out(r))
+  assert.match(out(r), /下沉给那个 owner/, out(r))
+  assert.match(out(r), /symbio_plugin_api::views/, out(r))
+  assert.match(out(r), /D-221/, out(r))
+})
+
+test('PP-004 正例：现值不超过基线 ⇒ 绿（1/1 落在夹具放宽后的格内）', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: '1:1' })
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /PP-004 core files 1\/1 · ctors 1\/1/, out(r))
+})
+
+test('PP-004 现值落在基线下方 ⇒ 绿但出声提醒同步基线', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: '6:6' })
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /已收到基线下方/, out(r))
+  assert.match(out(r), /files 1<6/, out(r))
+})
+
+test('PP-004 基线读不出数字 ⇒ 红（判据没有输入，宁红不静默）', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: 'abc:1' })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-004 基线格 `files` 不是数字/, out(r))
+})
+
+test('PP-004 基线少一格 ⇒ 红：漏掉的那格也是读不出', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: '1' })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-004 基线格 `ctors` 不是数字/, out(r))
+})
+
+// ── PP-005：放宽注释必须挂得住一条真实决策 ─────────────────────────────
+//
+// 判据读本脚本**自己**的源码，夹具里因此要连脚本一起放进来。这里的假脚本只承载注释行：
+// 内容与判据无关，被扫的就是 `projection-purity-allow` 那一行。
+const fakeScript = (...waivers) =>
+  ['#!/usr/bin/env node', '// 夹具用的假脚本：只为了承载放宽注释。', ...waivers, ''].join('\n')
+
+const docsFixture = {
+  'docs/003-design/025-能力包与扩展面.md': '# 能力包与扩展面\n\n### D-221 投影可下沉\n\n正文。\n',
+}
+
+test('PP-005 正例：挂住夹具里真实存在的 `### D-221` ⇒ 绿', () => {
+  const r = audited({
+    ...repo(),
+    ...docsFixture,
+    'scripts/projection-purity.mjs': fakeScript(
+      '// projection-purity-allow files: D-221 夹具里这条豁免本身就是要钉的判据',
+    ),
+  })
+  assert.equal(r.status, 0, out(r))
+})
+
+test('PP-005 反例：放宽的不是投影面的格 ⇒ 红', () => {
+  const r = audited({
+    ...repo(),
+    ...docsFixture,
+    'scripts/projection-purity.mjs': fakeScript(
+      '// projection-purity-allow widgets: D-221 这一格根本不存在',
+    ),
+  })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-005 `projection-purity-allow widgets` 放宽的不是投影面的格/, out(r))
+})
+
+test('PP-005 反例：理由里没有决策编号 ⇒ 红（批次需要 / 顺手都不算）', () => {
+  const r = audited({
+    ...repo(),
+    'scripts/projection-purity.mjs': fakeScript(
+      '// projection-purity-allow files: 这批急着发，先把数字抬上去',
+    ),
+  })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-005 放宽 `files` 的理由里没有决策编号/, out(r))
+})
+
+test('PP-005 反例：编号写了但锚点打不开 ⇒ 红（指向不存在的决策不算豁免）', () => {
+  const r = audited({
+    ...repo(),
+    ...docsFixture,
+    'scripts/projection-purity.mjs': fakeScript(
+      '// projection-purity-allow ctors: D-999 这条决策并不存在',
+    ),
+  })
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-005 放宽 `ctors` 引用了 `D-999`/, out(r))
+})
+
+test('PP-005 夹具没有本脚本 ⇒ 跳过（不误判「豁免全绿」，也不误判红）', () => {
+  const r = audited(repo(), { CORE_PROJECTION_BASELINE: '1:1' })
+  assert.equal(r.status, 0, out(r))
+})
+
+// ── 折叠根不止 core：判据跟着折叠走（D-221）────────────────────────────
+//
+// 下沉之后，`crates/*/src/projections/` 与 core 的 `projection/` 同受 PP-001 / PP-002 /
+// PP-003 判定——否则「把折叠交还 owner」顺带就把这条折叠移出判据；而 PP-004 只数
+// core 那一根，否则棘轮判的会变成「仓库里一共有几条折叠」。
+const SESS_DIR = 'crates/symbio-plugin-session/src/projections'
+const SESS_CONSUMER = 'crates/symbio-plugin-session/src/stats.rs'
+
+test('插件折叠根：产投影兄弟互导 ⇒ PP-001 红', () => {
+  const r = audited(
+    repo({
+      [`${SESS_DIR}/mod.rs`]: 'pub mod fallback;\npub mod slo;\n',
+      [`${SESS_DIR}/fallback.rs`]:
+        'use symbio_core::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+      [`${SESS_DIR}/slo.rs`]:
+        'use super::fallback::declared_tier;\nuse symbio_core::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
+      [SESS_CONSUMER]: 'fn f() {\n    let _ = fallback_rate();\n    let _ = slo_report();\n}\n',
+    }),
+  )
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-001/, out(r))
+  assert.match(out(r), /slo\.rs:1/, out(r))
+  assert.match(out(r), /共享读侧/, out(r))
+})
+
+test('插件折叠根：共享读侧（不产投影）可被兄弟导 ⇒ 绿', () => {
+  const r = audited(
+    repo({
+      [`${SESS_DIR}/mod.rs`]: 'pub mod fallback;\npub mod slo;\npub mod tiers;\n',
+      [`${SESS_DIR}/tiers.rs`]: 'pub(super) fn declared_tier() -> String {\n    String::new()\n}\n',
+      [`${SESS_DIR}/fallback.rs`]:
+        'use symbio_core::Projection;\n\npub fn fallback_rate() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+      [`${SESS_DIR}/slo.rs`]:
+        'use super::tiers::declared_tier;\nuse symbio_core::Projection;\n\npub fn slo_report() -> Projection<u8> {\n    let _ = declared_tier();\n    Projection::new(|| 0)\n}\n',
+      [SESS_CONSUMER]: 'fn f() {\n    let _ = fallback_rate();\n    let _ = slo_report();\n}\n',
+    }),
+  )
+  assert.equal(r.status, 0, out(r))
+})
+
+test('插件折叠根：体内读时钟 ⇒ PP-002 一样红（判据不留在 core）', () => {
+  const r = audited(
+    repo({
+      [`${SESS_DIR}/mod.rs`]: 'pub mod span;\n',
+      [`${SESS_DIR}/span.rs`]:
+        'use symbio_core::Projection;\n\npub fn span() -> Projection<u8> {\n    let t = SystemTime::now();\n    let _ = t;\n    Projection::new(|| 0)\n}\n',
+      [SESS_CONSUMER]: 'fn f() {\n    let _ = span();\n}\n',
+    }),
+  )
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-002/, out(r))
+  assert.match(out(r), /span\.rs:4/, out(r))
+})
+
+test('插件折叠根：死构造器 ⇒ PP-003 一样红（消费方要在折叠目录之外）', () => {
+  const r = audited(
+    repo({
+      [`${SESS_DIR}/mod.rs`]: 'pub mod checkpoint;\n',
+      [`${SESS_DIR}/checkpoint.rs`]:
+        'use symbio_core::Projection;\n\npub fn checkpoint() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+    }),
+  )
+  assert.equal(r.status, 1, out(r))
+  assert.match(out(r), /PP-003/, out(r))
+  assert.match(out(r), /`checkpoint`/, out(r))
+})
+
+test('PP-004 只数 core 那一根：插件多一条折叠不影响棘轮 ⇒ 绿', () => {
+  const r = audited(
+    repo({
+      [`${SESS_DIR}/mod.rs`]: 'pub mod span;\n',
+      [`${SESS_DIR}/span.rs`]:
+        'use symbio_core::Projection;\n\npub fn span() -> Projection<u8> {\n    Projection::new(|| 0)\n}\n',
+      [SESS_CONSUMER]: 'fn f() {\n    let _ = span();\n}\n',
+    }),
+    { CORE_PROJECTION_BASELINE: '1:1' },
+  )
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /PP-004 core files 1\/1 · ctors 1\/1/, out(r))
 })
 
 // ── 排除范围与「读不出」不静默 ─────────────────────────────────────────

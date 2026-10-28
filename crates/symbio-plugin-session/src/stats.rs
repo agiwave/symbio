@@ -1,10 +1,14 @@
 //! `session/stats` —— v2 事实源的**只读读数口**。
 //!
-//! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由 core 的投影算得出，
+//! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由本插件的投影与 core 的
+//! 协议投影算得出，
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
 //! 无法验收、回归也看不见（[plan/12 §2](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）。
 //! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")
 //! 的出口形态②（只读路由）。
+//! 读数今天还多一族**能力视图**：键来自各能力包公开的 `shared_views` 清单、值由
+//! owner 自己的折叠算出，本插件只按名字读、不写任何视图名（DE-025 D-221）——
+//! 一项新能力公开一条视图，这一列就多一格，本文件不动一行。
 //!
 //! ## 两个文件的分工（判据：这一段错了谁会红）
 //!
@@ -20,7 +24,7 @@
 //! ## 三条纪律
 //!
 //! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：
-//!   这两个文件里没有分位数 / 占比 / 累计的算式——口径只活在 core 的投影里，出口
+//!   这两个文件里没有分位数 / 占比 / 累计的算式——口径只活在投影里（本插件 `projections/` 与 core 的协议投影），出口
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
 //!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
 //!   由 core 定（[04 §3.1 批④](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")——本处不复判）。
@@ -29,21 +33,16 @@
 //!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
 //!   （[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
-//! - **不命名 core 的视图类型**：core 的域模块是私有的（C-002：外部只写
-//!   `symbio_core::<符号>`），插件侧因此只出现**根导出的函数名**，类型随返回值
-//!   流动、在出口边界一次性序列化。这里没有 `SloLatencyView` 之类的名字，也
-//!   不需要为类型加根导出。
-//!   ⚠️ **P2 破了一处，理由记在这里**：聚合列要调 `SloLatencyView::merge` /
-//!   `FallbackRateView::merge`——**方法是类型的行为**，提成根函数会让 `merge`
-//!   变成无主函数（谁的数据谁的行为）。故这两个**视图类型**破例占根出口
-//!   （与 `TurnState` / `PromptMessage` 同族：被 core 外消费的类型）。
-//!   投影**函数**仍然不在这里出现名字——`slo_report()` 照旧随返回值流动。
+//! - **不重写视图类型**：会话口径的投影类型（`SloLatencyView` / `FallbackRateView` /
+//!   `SpanView`）住在本插件的 `projections/`——取数与 `merge` 都是本插件的行为，
+//!   类型随返回值流动、在出口边界一次性序列化。core 只留协议自身的投影（转写 /
+//!   轮状态 / 任务词表等），不再为会话读数占根出口（DE-025 D-221）。
 //!
 //! ## as-of 口径
 //!
 //! 本模块的读数一律走 `Projection::read_all`（= `now = i64::MAX` + 全量预算）：WAL 是
-//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与 `projection/slo.test.rs`
-//! 的扫描口同一口径。
+//! **落盘**事实源，文件里每一条都已发生，没有「未来的事件」可滤——与
+//! `projections/slo.test.rs` 的扫描口同一口径。
 
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use std::sync::Arc;
@@ -51,9 +50,13 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use symbio_core::{
-    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, readyset_for, slo_report,
-    transcript, Event, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginPayload, ReadingPanel, SESSION_ID, SKILL_TAG,
+    calibration_for, check_all, cost_ledger, readyset_for, transcript, Event, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, ReadingPanel,
+    SESSION_ID, SKILL_TAG,
+};
+
+use crate::projections::{
+    checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report, span::span,
 };
 
 use super::autonomy::autonomy_for;
@@ -62,7 +65,8 @@ use super::token_ledger::token_ledger;
 
 use super::plugin::SessionPlugin;
 use super::stats_reading::{
-    commitments_reading, content_scope_of, fleet_reading, panel_of, usage_section, ViewerRequest,
+    capability_views, commitments_reading, content_scope_of, fleet_reading, panel_of,
+    usage_section, ViewerRequest,
 };
 
 /// 一个档位的一行读数：时延列与兜底列并排（同一档位的两类收益同处一行）。
@@ -239,6 +243,27 @@ pub(crate) struct SessionStats {
     /// 率是**纯查询**（`AutonomyView::unattended_rate`），不落第二个数——与 `tiers` 的
     /// `rate()` 同款：存分子分母，读时再除。
     pub autonomy: serde_json::Value,
+    /// **能力视图**（DE-025 D-221）：别的插件公开的视图，按名字读出来的原样值。
+    ///
+    /// ## 为什么这一列没有写死的键名
+    ///
+    /// 它是**通用读口**，不是某一项能力的专用列：键 = owner 在 `PLUGIN.yml` 的
+    /// `shared_views` 里公开的名字（`symbio_plugin_api::shared_views()`），值 =
+    /// `{ owner, status: "ok", ver, value }`，或
+    /// `{ owner, status: "unavailable", reason, detail }`。加一条「最近几条便签」
+    /// 只需要能力包自己声明视图并公开名字——本插件不改一行，下一次读数就多一格；
+    /// 读的是 owner 的折叠（`ViewDecl::eval`），本插件不抄它的口径。
+    ///
+    /// ## 四种缺席态各有名字
+    ///
+    /// 未冻结 / 未公开 / 已公开但没实现 / 超预算分别报 `not_sealed` /
+    /// `not_shared` / `unknown` / `over_budget`（词表在 `ViewUnavailable::reason`），
+    /// 不折叠成空值——「没算出来」与「算出来是空」必须分得开（与 `tokens.calls`
+    /// 同一条纪律）。超预算不静默截断：宁可这一格缺席，不给一个看起来正常的旧值。
+    ///
+    /// 归**四列**那一族：与其余各列同一份切片、同一个 as-of；`may_read = false`
+    /// ⇒ 空切片 ⇒ 各视图读到「有据的空」，由 `has_wal` 与缺席态分辨。
+    pub capability_views: serde_json::Value,
     /// **读数面板**（P4：读数的**呈现描述**，前端零业务知识地渲染它）。
     ///
     /// ## 为什么读数也要一份描述
@@ -290,7 +315,7 @@ pub(crate) struct SessionStats {
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
     /// 口径是把本插件目录下**所有**会话的 WAL 各跑一遍四列里的两个投影
-    /// （时延 / 兜底），再交给 core 的 `SloLatencyView::merge` /
+    /// （时延 / 兜底），再交给本插件投影的 `SloLatencyView::merge` /
     /// `FallbackRateView::merge` 合并。分子分母与分位数因此与单会话列**逐字同一套
     /// 口径**（D-044：实测与判据同源），本处不另写一套统计。
     ///
@@ -310,7 +335,9 @@ pub(crate) struct SessionStats {
     pub fleet: serde_json::Value,
 }
 
-/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列。
+/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列，
+/// 再加一列**能力视图**：按各能力包公开的清单逐条经 `symbio_plugin_api::views` 读，
+/// 本插件不写任何视图名（DE-025 D-221）。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
 /// 交回（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：`snapshot` 是本会话
@@ -489,7 +516,7 @@ pub(crate) fn read(
 
     // 时域跨度列（同上）：`span` 投影只读事件信封的 `ts`（入库时间，与 `cost_ms`
     // 同源的实测面），as-of 之后的事件一概不见。
-    let span = serde_json::to_value(symbio_core::span().read_all(&snapshot).value)
+    let span = serde_json::to_value(span().read_all(&snapshot).value)
         .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
 
     // 自主程度列（同上）：`autonomy` 认挂起格与终态格（插话抢占 = 外部介入在事实源
@@ -529,6 +556,11 @@ pub(crate) fn read(
         })
     };
 
+    // 能力视图列（DE-025 D-221）：遍历**公开清单**，逐条经 plugin-api 的读口求值。
+    // 本插件不认识任何具体视图名——名字、版本、成本与求值函数都在 owner 的声明里；
+    // 新能力包公开一条视图，这里就多一格，不动本文件。
+    let capability_views = capability_views(&snapshot);
+
     let reading = SessionStats {
         session_id: session_id.to_string(),
         has_wal,
@@ -547,6 +579,7 @@ pub(crate) fn read(
         span,
         autonomy,
         fleet,
+        capability_views,
         skill_compile_enabled,
         compiled_skills,
         panel: ReadingPanel::default(),

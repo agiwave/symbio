@@ -23,6 +23,9 @@ mod message_build;
 mod plugin;
 // 端口的执行半边：协议事实的唯一写方 + 租约看护。
 mod port;
+// 本插件的投影（原 core 的 consolidate，DE-025 D-221）：唯一读方是
+// `memory_events`，判定跟着调用方走。
+mod projections;
 mod provider;
 // 记忆检索的读侧：`recall` 投影与它的排序内核（DE-024 D-201：随唯一生产消费方从 core
 // 的 `projection/` 搬进来——core 不再按 `memory.consolidated` / `memory.forgotten` 读事实）。

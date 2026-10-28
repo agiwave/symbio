@@ -43,7 +43,7 @@ lists: [gate-codes=owner]
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
-| **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–003 | `PP-004` |
+| **PP** | 投影纯净性 | `scripts/projection-purity.mjs` | PP-001–005 | `PP-006` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 契约 7 的重试限定） | `scripts/port-surface-audit.mjs` | PTS-001–006 | `PTS-007` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–003 | `R-004` |
@@ -176,6 +176,8 @@ lists: [gate-codes=owner]
 | **PP-001** | `scripts/projection-purity.mjs` |
 | **PP-002** | `scripts/projection-purity.mjs` |
 | **PP-003** | `scripts/projection-purity.mjs` |
+| **PP-004** | `scripts/projection-purity.mjs` |
+| **PP-005** | `scripts/projection-purity.mjs` |
 | **PS-001** | `scripts/prompt-shape-audit.mjs` |
 | **PS-002** | `scripts/prompt-shape-audit.mjs` |
 | **PS-003** | `scripts/prompt-shape-audit.mjs` |

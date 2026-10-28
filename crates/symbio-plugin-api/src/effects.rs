@@ -78,6 +78,45 @@ pub struct EffectInput {
     pub declared: &'static [&'static str],
 }
 
+/// 写族工具的四种动作——`file_op` 的线格式判别词（DE-025 D-207）。
+///
+/// 生产方是写族工具的效果（`ToolBehavior::annotate` 交 `as_str`），消费方是变更账
+/// 投影（`from_wire` 读回）。**两边都只依赖本类型**：动作词表是插件间的契约（住
+/// plugin-api），不是某一侧的私有拼写。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOp {
+    Write,
+    Edit,
+    Delete,
+    Mkdir,
+}
+
+impl FileOp {
+    /// 线格式判别词 → 动作。不是四个判别词之一 ⇒ 不是变更。
+    ///
+    /// 与 [`Self::as_str`] 是同一份拼写的两个方向：生产方用 `as_str` 交值，
+    /// 读方用这个读回来——两处各写一份字面量就会漂移。
+    pub fn from_wire(op: &str) -> Option<Self> {
+        match op {
+            "write" => Some(Self::Write),
+            "edit" => Some(Self::Edit),
+            "delete" => Some(Self::Delete),
+            "mkdir" => Some(Self::Mkdir),
+            _ => None,
+        }
+    }
+
+    /// 线格式的判别词——与 `#[serde(rename_all = "snake_case")]` 逐字一致。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Write => "write",
+            Self::Edit => "edit",
+            Self::Delete => "delete",
+            Self::Mkdir => "mkdir",
+        }
+    }
+}
+
 /// 求值一次调用效果所需的**宿主面**：轮锚、两个主体与两片只读历史。
 ///
 /// 与 [`EffectInput`] 分开的理由见模块文档——前者是「发生了什么」，本结构是

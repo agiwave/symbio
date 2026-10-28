@@ -14,7 +14,7 @@ import './_selfrun.mjs';
 // | 读侧闸真的按读方身份收放 | `payload.principal` → `ctx.payload` → `content_visible` |
 //
 // 口径（哪些工具算写、no-op 编辑不计、虚拟根/界外路径排除）已在 core 的
-// `projection/changes.test.rs` 钉死。本用例**不复刻口径**，只对「已知动作」取值：
+// `projections/changes.test.rs` 钉死。本用例**不复刻口径**，只对「已知动作」取值：
 // 写两个文件 + 对其中一个做一次 no-op 编辑 ⇒ 两行、各 1 次、后写的在前。
 //
 // ## 为什么 no-op 编辑并进同一条消息

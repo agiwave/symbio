@@ -20,8 +20,14 @@
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB};
 use symbio_core::chat_node::ChatNodePresentationExt;
 use symbio_core::{
-    chat_node as cm, fallback_rate, slo_report, Event, ReadingBar, ReadingPanel, ReadingRow,
-    ReadingSection, ReadingTone, VisScope,
+    chat_node as cm, Event, ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone,
+    VisScope,
+};
+
+use crate::projections::{
+    fallback::{fallback_rate, FallbackRateView},
+    slo::{slo_report, SloLatencyView},
+    span::{span, SpanView},
 };
 
 use super::stats::SessionStats;
@@ -116,7 +122,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         lat_parts.push(slo_report(CHAT_VOCAB).read_all(snapshot).value);
         fb_parts.push(fallback_rate(CHAT_VOCAB).read_all(snapshot).value);
         con_parts.push(crate::conation::conation().read_all(snapshot).value);
-        span_parts.push(symbio_core::span().read_all(snapshot).value);
+        span_parts.push(span().read_all(snapshot).value);
         aut_parts.push(
             crate::autonomy::autonomy_for(crate::declarations::TASK_VOCAB)
                 .read_all(snapshot)
@@ -124,8 +130,8 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
         );
     }
 
-    let latency = symbio_core::SloLatencyView::merge(&lat_parts);
-    let fallback = symbio_core::FallbackRateView::merge(&fb_parts);
+    let latency = SloLatencyView::merge(&lat_parts);
+    let fallback = FallbackRateView::merge(&fb_parts);
     let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
     let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
     // 跨会话合并是**统计口径单点**：分子分母可加、率是同一套算式的再应用。
@@ -133,7 +139,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
     // `autonomy` 的合并住本插件（[`crate::conation`] / [`crate::autonomy`]）——这两条读数的
     // 读写两端都在这里，投影因此不是共享类型（DE-024 D-200 / D-201）。
     let conation = crate::conation::ConationView::merge(&con_parts);
-    let span = symbio_core::SpanView::merge(&span_parts);
+    let span = SpanView::merge(&span_parts);
     let autonomy = crate::autonomy::AutonomyView::merge(&aut_parts);
 
     serde_json::json!({
@@ -174,6 +180,44 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>]) -> serde_json::Value {
                 "unattended_rate": autonomy.unattended_rate(),
             },
         },
+    })
+}
+
+/// 能力视图列：遍历**公开清单**，逐条经 `symbio_plugin_api::views` 求值（DE-025 D-221）。
+///
+/// ## 为什么这里不认识任何视图名
+///
+/// 名字、版本、扫描成本与折叠都在 owner 的 `ViewDecl` 里；本函数只做「按清单取、
+/// 原样装一格」。于是加一项能力视图 = owner 声明 + `PLUGIN.yml` 公开一行，本文件
+/// 不动——这正是「横向扩展不改架构」在本列上的落点。读不到时给**可诊断的缺席**
+/// （`reason` + `detail`），不给空值冒充读数。
+pub(super) fn capability_views(snapshot: &[Event]) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for shared in symbio_plugin_api::shared_views() {
+        let entry = match symbio_plugin_api::ViewRead::named(shared.name) {
+            Ok(view) => match (view.ver(), view.read_all(snapshot)) {
+                (Ok(ver), Ok(value)) => serde_json::json!({
+                    "owner": shared.owner,
+                    "status": "ok",
+                    "ver": ver,
+                    "value": value,
+                }),
+                (Err(why), _) | (_, Err(why)) => view_unavailable(shared.owner, &why),
+            },
+            Err(why) => view_unavailable(shared.owner, &why),
+        };
+        out.insert(shared.name.to_string(), entry);
+    }
+    serde_json::Value::Object(out)
+}
+
+/// 一格缺席：原因词（稳定拼写）+ 人话细节。两者都要——前者给分支，后者给定位。
+fn view_unavailable(owner: &str, why: &symbio_plugin_api::ViewUnavailable) -> serde_json::Value {
+    serde_json::json!({
+        "owner": owner,
+        "status": "unavailable",
+        "reason": why.reason(),
+        "detail": why.to_string(),
     })
 }
 
@@ -339,11 +383,104 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: match usage_section(stats) {
-            Some(usage) => vec![perf, usage, continuity, invariants, skills, commitments],
-            None => vec![perf, continuity, invariants, skills, commitments],
+        sections: match (usage_section(stats), capability_section(stats)) {
+            (Some(usage), Some(capability)) => {
+                vec![
+                    perf,
+                    usage,
+                    continuity,
+                    invariants,
+                    skills,
+                    commitments,
+                    capability,
+                ]
+            }
+            (Some(usage), None) => vec![perf, usage, continuity, invariants, skills, commitments],
+            (None, Some(capability)) => {
+                vec![
+                    perf,
+                    continuity,
+                    invariants,
+                    skills,
+                    commitments,
+                    capability,
+                ]
+            }
+            (None, None) => vec![perf, continuity, invariants, skills, commitments],
         },
     }
+}
+
+/// 能力视图那一段（DE-025 D-221）：**清单有几条，段里就有几行**。
+///
+/// 一行代表一条公开视图，值只有两类话：「可读 · vN」或「读不出来（原因词）」。
+/// 语义属于 owner，本段不解释载荷——它把完整值留在 `capability_views` 列里，
+/// 这里只把「这一格有没有数」说出来。清单为空 ⇒ 整段不出现（不是「0 条视图」）。
+///
+/// 预览截到 80 个字符并明说截了：面板是概览，全量在那一列——截断在标签上说清楚，
+/// 不让人把省略号后面的内容当成没有。
+fn capability_section(stats: &SessionStats) -> Option<ReadingSection> {
+    let views = stats.capability_views.as_object()?;
+    if views.is_empty() {
+        return None;
+    }
+    let rows = views
+        .iter()
+        .map(|(name, entry)| {
+            let owner = entry.get("owner").and_then(|v| v.as_str()).unwrap_or("");
+            let readable = entry.get("status").and_then(|v| v.as_str()) == Some("ok");
+            let (value, hint, tone) = if readable {
+                let ver = entry.get("ver").and_then(|v| v.as_u64()).unwrap_or(0);
+                (
+                    format!("可读 · v{ver}"),
+                    Some(format!(
+                        "owner `{owner}` 的折叠；全量在 capability_views 列：{}",
+                        preview(&entry["value"])
+                    )),
+                    ReadingTone::Normal,
+                )
+            } else {
+                (
+                    format!(
+                        "读不出来 · {}",
+                        entry
+                            .get("reason")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                    ),
+                    entry
+                        .get("detail")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    ReadingTone::Warn,
+                )
+            };
+            ReadingRow {
+                label: name.clone(),
+                value,
+                hint,
+                tone,
+            }
+        })
+        .collect();
+    Some(ReadingSection {
+        title: Some("能力视图".into()),
+        rows,
+        bar: None,
+    })
+}
+
+/// 一行里的 JSON 预览：紧凑序列化后按**字符**截到 80，并在文案里明说截断了。
+///
+/// 按字符而不是字节：便签正文是中文，按字节切会把一个汉字劈成两半。
+fn preview(value: &serde_json::Value) -> String {
+    const KEEP: usize = 80;
+    let text = value.to_string();
+    let mut out: String = text.chars().take(KEEP).collect();
+    if text.chars().count() > KEEP {
+        out.push_str("…（预览截断）");
+    }
+    out
 }
 
 /// 用量那一段（token + 钱，两者同属「这一次往返测到了什么」）。

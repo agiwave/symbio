@@ -94,6 +94,19 @@ function coreDataCells(text) {
   return cells
 }
 
+/** `scripts/projection-purity.mjs` 的 `PROJ_BASELINE`（PP-004）：三元尾部对象，两格。
+ *  键序就是 `CORE_PROJECTION_BASELINE=<files>:<ctors>` 的位置口径；放宽的**资格**由
+ *  PP-005 判（注释里必须挂一条存在的 `### D-NNN`），本条只判数字有没有比上一版更松。 */
+function coreProjectionCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*files:\s*(\d+),\s*ctors:\s*(\d+)\s*\}/.exec(text.replace(/\r\n/g, '\n'))
+  if (m) {
+    cells.set('files', Number(m[1]))
+    cells.set('ctors', Number(m[2]))
+  }
+  return cells
+}
+
 /** `scripts/kind-branch-audit.mjs` 的 `BRANCH_BASELINE`：三元尾部对象，两格。
  *  `framework` 是「框架层自己认形态」的存量（目标 0），`registry` 是机制层判据与映射表；
  *  两格都只许降。键序就是 `KIND_BRANCH_BASELINE=<framework>:<registry>` 的位置口径。 */
@@ -312,6 +325,18 @@ const RATCHETS = [
     waivers: waiverReader('core-shape-allow'),
     envVar: 'CORE_DATA_BASELINE',
     label: 'core / kernel 公共数据面两格（struct 字段数 / enum 变体数，只许降）',
+  },
+  {
+    // PP-004 core 投影面两格（产投影文件数 / 投影构造器条数）。能力折叠一旦长回
+    // `symbio_core/projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
+    // 放宽的资格由 PP-005 判（必须挂一条存在的决策），本条只判数字有没有比上一版更松。
+    id: 'core-projection',
+    file: 'scripts/projection-purity.mjs',
+    dir: 'ceiling',
+    cellsOf: coreProjectionCells,
+    waivers: waiverReader('projection-purity-allow'),
+    envVar: 'CORE_PROJECTION_BASELINE',
+    label: 'core 投影面两格（产投影文件数 / 构造器条数，只许降）',
   },
   {
     // 前端 kind 分支两格：框架层目标 0（只许降），机制层是判据与映射表的存量。

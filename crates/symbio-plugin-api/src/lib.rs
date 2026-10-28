@@ -9,6 +9,8 @@
 //! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
+//! - [`views`]：声明视图的跨插件读口（按 owner 公开的名字读纯折叠）
+//! - [`view_names`]：`shared_views` 清单生成物（哪些视图公开可读）
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
 //! `declarations` 只依赖 `symbio_core` 的声明容器，不认识任何具体插件；收集在链接期
@@ -21,6 +23,8 @@ pub mod effects;
 pub mod events;
 pub mod hooks;
 pub mod routes;
+pub mod view_names;
+pub mod views;
 
 pub use context::{
     providers as context_providers, section_meta, sections as context_sections, Cadence,
@@ -33,7 +37,12 @@ pub use declarations::{
 };
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
-    BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, ToolBehavior,
+    BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_core` 的 `submit_object_creator!` 同形。
 pub use inventory;
+pub use view_names::SharedViewDecl;
+pub use views::{
+    read_all_from as read_shared_view_all, read_from as read_shared_view, shared as shared_views,
+    ViewRead, ViewUnavailable,
+};

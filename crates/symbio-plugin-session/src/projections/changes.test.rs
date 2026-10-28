@@ -1,16 +1,18 @@
 //! 变更账的折叠判据（[D-169]）：收哪些、谁说话、界外怎么办。
 //!
 //! 折叠的**呈现**（地址、文案）由会话出口自己钉（`plugins/session/changes.test.rs`）——
-//! 本文件只判 core 这一半：从事实到 `{path, op, turn, changes}`。
+//! 本文件只判折叠这一半：从事实到 `{path, op, turn, changes}`。
 //!
 //! 判据的口径是**字段**而不是工具名：`file_op` 由写族工具声明的行为交出
-//! （DE-025 D-207），所以本文件同时钉住「core 不认识任何工具名」这件事——
+//! （DE-025 D-207），所以本文件同时钉住「折叠不认识任何工具名」这件事——
 //! 一个从没见过的工具名带着 `file_op` 照样进账，一个 `vdfs_write` 形状但没有
 //! 那个字段的产物**不**进账。
 
-use super::{workdir_changes, FileOp};
-use crate::event::{Entity, Event, Verb};
-use crate::test_fixtures::{EVENT_ARTIFACT_ADDED, MESSAGE};
+use super::workdir_changes;
+use crate::declarations::MESSAGE_VOCAB as MESSAGE;
+use symbio_core::{Entity, Event, Verb};
+use symbio_plugin_api::effects::FileOp;
+use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 /// 一条成功的写（`args` 按生产形状给 JSON 文本）。
 fn ok(id: &str, op: &str, args: serde_json::Value, turn: u64) -> Event {
@@ -256,7 +258,7 @@ fn paths_outside_the_workdir_are_skipped() {
         })
         .collect();
     // 虚拟根的名字由 vdfs 插件声明，测试**问声明**而不是写死拼法。
-    let root = crate::vdfs::declared_addr_root().expect("vdfs 插件应已声明根名");
+    let root = symbio_core::declared_addr_root().expect("vdfs 插件应已声明根名");
     events.push(ok(
         "a-virtual",
         "write",
@@ -317,7 +319,7 @@ fn future_events_are_skipped() {
     let mut e = ok("a-0", "write", serde_json::json!({"path": "t.txt"}), 1);
     e = e.with_ts(100);
     assert!(workdir_changes(MESSAGE)
-        .apply(&[e.clone()], 50, crate::Budget::generous())
+        .apply(&[e.clone()], 50, symbio_core::Budget::generous())
         .value
         .is_empty());
     assert_eq!(fold(&[e]), vec![("t.txt".into(), FileOp::Write, 1, 1)]);

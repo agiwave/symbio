@@ -1,13 +1,14 @@
 //! `slo_report` 验收——时延列口径（final 实测、按 turn 归档、兜底不混入）；
 //! 末尾附**阶段三扫描口**（opt-in：walk 各会话的 v2 WAL，三投影同源出报告）。
 
-use super::super::fallback::{fallback_rate, FallbackRateView, TierStats};
 use super::slo_report;
-use crate::projection::slo::{SloLatencyView, TierLatency};
-use crate::test_fixtures::{
-    CHAT, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+use super::{SloLatencyView, TierLatency};
+use crate::declarations::CHAT_VOCAB as CHAT;
+use crate::projections::fallback::{fallback_rate, FallbackRateView, TierStats};
+use symbio_core::{cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_plugin_api::events::{
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
-use crate::{cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb};
 
 fn user_msg(id: &str, turn: u64, tier: &str) -> Event {
     Event::pending(

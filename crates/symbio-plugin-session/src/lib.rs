@@ -15,7 +15,10 @@ mod memory;
 pub(crate) mod message_events;
 mod options;
 mod orchestrator;
+// 会话口径的纯折叠（原 core 的 checkpoint / fallback / slo / span / changes，
+// DE-025 D-221）：读方只在本插件，判定跟着调用方走。
 pub(crate) mod paths;
+pub(crate) mod projections;
 pub(crate) mod runtime;
 mod spend_ledger;
 mod stats;

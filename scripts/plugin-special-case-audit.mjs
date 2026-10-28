@@ -73,6 +73,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from './color.mjs'
+import { hasDecisionAnchor as anchorExists } from './decision-anchors.mjs'
 import { blankTestModules } from './rust-scan.mjs'
 import { toolFacts } from './facts/_capability.mjs'
 
@@ -263,51 +264,12 @@ function profileKeys(protocolsRoot) {
   return keys
 }
 
-/** 决策条目是否存在：`### D-NNN` 是设计文档里的条目，不是独立文件。 */
-let decisionSet = null
-function decisionExists(id, docsRoot) {
-  if (decisionSet === null || decisionSet.root !== docsRoot) {
-    const roots = docsRoot
-      ? [docsRoot]
-      : [
-          path.join(repoRoot, 'docs', '003-design'),
-          path.join(repoRoot, 'crates'),
-          path.join(repoRoot, 'tauri', 'docs'),
-          path.join(repoRoot, 'cli', 'docs'),
-        ]
-    const found = new Set()
-    const scan = (dir) => {
-      let list
-      try {
-        list = fs.readdirSync(dir, { withFileTypes: true })
-      } catch {
-        return
-      }
-      for (const ent of list) {
-        const abs = path.join(dir, ent.name)
-        if (ent.isDirectory()) {
-          if (ent.name === 'node_modules' || ent.name === 'target' || ent.name === 'archive') continue
-          scan(abs)
-          continue
-        }
-        if (!ent.name.endsWith('.md')) continue
-        let text = ''
-        try {
-          text = fs.readFileSync(abs, 'utf8')
-        } catch {
-          continue
-        }
-        for (const line of text.split('\n')) {
-          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
-          if (m) found.add(m[1].slice(2))
-        }
-      }
-    }
-    for (const r of roots) scan(r)
-    decisionSet = { root: docsRoot, ids: found }
-  }
-  return decisionSet.ids.has(id)
-}
+/**
+ * 决策条目是否存在：`### D-NNN` 是设计文档里的条目，不是独立文件。
+ * 扫描口径（根目录集合、跳过目录、锚点正则）住 `decision-anchors.mjs`——本审计与
+ * CS-002 / PP-005 判的是同一句话，抄一份早晚两边不一致。
+ */
+const decisionExists = (id, docsRoot) => anchorExists(id, repoRoot, docsRoot)
 
 /**
  * SC-006 逐处基线：`{ "<仓库相对路径>": { "<工具名>": { count, adr, reason } } }`。

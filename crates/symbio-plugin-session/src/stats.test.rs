@@ -12,9 +12,11 @@ use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_core::{
-    calibration_for, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript,
-    Budget, Entity, Event, EventEnvelope as _, Seq, Store, Verb, SKILL_TAG,
+    calibration_for, check_all, cost_ledger, transcript, Budget, Entity, Event, EventEnvelope as _,
+    Seq, Store, Verb, SKILL_TAG,
 };
+
+use crate::projections::{checkpoint::checkpoint, fallback::fallback_rate, slo::slo_report};
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
@@ -662,8 +664,19 @@ fn panel_matches_the_columns_it_describes() {
     let got = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
     let panel = &got.panel;
 
-    // 分区固定五段：时延兜底 / 事实源 / 不变量 / 技能 / 承诺
-    assert_eq!(panel.sections.len(), 5, "分区固定：{:?}", panel.sections);
+    // 分区：时延兜底 / 事实源 / 不变量 / 技能 / 承诺，再加**能力视图**段
+    // （段数随公开清单，不是本插件写死的常数——DE-025 D-221）
+    let expected_sections = 5 + usize::from(!symbio_plugin_api::shared_views().is_empty());
+    assert_eq!(
+        panel.sections.len(),
+        expected_sections,
+        "分区段数 = 固定五段 + 清单非空时的一段能力视图：{:?}",
+        panel
+            .sections
+            .iter()
+            .filter_map(|s| s.title.clone())
+            .collect::<Vec<_>>()
+    );
     assert_eq!(panel.subtitle.as_deref(), Some("s1"), "副标题带会话 id");
 
     // ① 时延段：一行对应一个档位，值与列逐字对上
@@ -767,6 +780,112 @@ fn panel_matches_the_columns_it_describes() {
         "零条要说人话，不显示「0 条 · 违约 0 条」"
     );
     assert_eq!(cm_row.tone, symbio_core::ReadingTone::Normal);
+}
+
+/// 能力视图列（DE-025 D-221）：**键完全由公开清单决定，本插件一个名字也不写**。
+///
+/// 这一条判据盯的是「扩展不必改本插件」：清单里多一条视图，列里就多一格，
+/// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。缺席也必须是**有名有姓**
+/// 的缺席（原因词 + 人话），不许塌成空对象。
+///
+/// 本测试二进制只链接 session 与协议行夹具，owner（`notes`）的 `ViewDecl` 不在
+/// 冻结表里 ⇒ 期望是 `unknown`。读到真值的那条路在 e2e T89（生产二进制链接全部
+/// 插件，`capability_views['notes.recent']` 读出 `status: ok` 与正文），两侧合起来
+/// 才是「跨插件可读」的完整证据。
+#[test]
+fn capability_views_column_follows_the_shared_manifest() {
+    let wal = seed("capability-views");
+    let got = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
+    let col = got.capability_views.as_object().expect("能力视图列是对象");
+
+    let mut names: Vec<&str> = col.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    let mut expected: Vec<&str> = symbio_plugin_api::shared_views()
+        .iter()
+        .map(|v| v.name)
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(
+        names, expected,
+        "列的键 = shared_views 清单，一个不多一个不少（本插件不写死名字）"
+    );
+
+    for shared in symbio_plugin_api::shared_views() {
+        let entry = &col[shared.name];
+        assert_eq!(
+            entry["owner"].as_str(),
+            Some(shared.owner),
+            "owner 来自清单生成物，不是本插件抄的"
+        );
+        assert_eq!(
+            entry["status"].as_str(),
+            Some("unavailable"),
+            "本测试进程没链接 owner ⇒ 必须出声，不能给空值：{}",
+            entry
+        );
+        assert_eq!(
+            entry["reason"].as_str(),
+            Some("unknown"),
+            "已公开但声明表里没有实现（清单与代码脱节的那种红）"
+        );
+        assert!(
+            entry["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains(shared.name)),
+            "人话里要带名字，便于定位：{}",
+            entry["detail"]
+        );
+    }
+}
+
+/// 面板的能力视图段：**一行一条公开视图**，标签就是清单里的名字。
+///
+/// 反向判据（清单为空时段落整段不出现）由 `expected_sections` 那条并排覆盖：
+/// 段数不是常数，而是「固定五段 + 有无能力视图」的和。
+#[test]
+fn the_capability_section_has_one_row_per_shared_view() {
+    let wal = seed("capability-panel");
+    let got = read_at(&wal, symbio_core::PRINCIPAL_MAIN);
+    let shared = symbio_plugin_api::shared_views();
+    let Some(section) = got
+        .panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("能力视图"))
+    else {
+        assert!(
+            shared.is_empty(),
+            "清单非空却没有能力视图段： {:?}",
+            got.panel
+                .sections
+                .iter()
+                .map(|s| s.title.clone())
+                .collect::<Vec<_>>()
+        );
+        return;
+    };
+    assert_eq!(
+        section.rows.len(),
+        shared.len(),
+        "一行一条公开视图，不多不少"
+    );
+    for decl in shared {
+        let row = section
+            .rows
+            .iter()
+            .find(|r| r.label == decl.name)
+            .unwrap_or_else(|| panic!("清单里的 {} 在面板上没有行", decl.name));
+        assert!(
+            row.value.starts_with("可读") || row.value.starts_with("读不出来"),
+            "值只说「有没有数」，语义属于 owner：{}",
+            row.value
+        );
+        assert!(
+            row.hint.is_some(),
+            "缺席要带原因、可读要带预览：{}",
+            row.label
+        );
+    }
 }
 
 /// 反向：**有违规 ⇒ 那一行变「需留意」**，否则面板把问题显示成没事。

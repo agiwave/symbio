@@ -3,11 +3,11 @@
 
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
+use crate::projections::checkpoint::{checkpoint, CheckpointState};
 use symbio_core::ring::{Decl, Pattern};
 use symbio_core::Budget;
 use symbio_core::FactRole;
 use symbio_core::{check_all, unresolved_turns};
-use symbio_core::{checkpoint, CheckpointState};
 use symbio_core::{
     transcript, verify_prompt_fidelity, Builder, Entity, Event, EventDecl, LatencyTier,
     PluginDeclarations, PromptMessage, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,

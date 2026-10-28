@@ -46,7 +46,7 @@ pub enum Rejection {
 /// fidelity 载荷）；否则拒收。**拒收不是错误**——巩固者换策略重试或放弃，
 /// 但失真记忆永远进不了 Log。
 ///
-/// 写方（`plugins/session/memory_events.rs::consolidate`）**必须**过这道门再入格：
+/// 写方（`plugins/loop/memory_events.rs::consolidate`）**必须**过这道门再入格：
 /// 拒收 = 源记忆原样保留（不是降标入库，也不是写日志了事）。
 pub fn accept(params: &ConsolidateParams, generation: u32, fidelity: f64) -> Result<(), Rejection> {
     if generation > params.max_gen {

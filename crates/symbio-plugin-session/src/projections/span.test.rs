@@ -4,9 +4,9 @@
 //! 不进中位数（「没有任务」不得读成「零时长任务」）；无样本 ⇒ `None`（有据的空）。
 
 use super::span;
-use crate::projection::span::{SpanSummary, SpanView};
-use crate::test_fixtures::EVENT_USER_MESSAGE;
-use crate::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use super::{SpanSummary, SpanView};
+use symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb};
+use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
 fn msg(id: &str, ts: i64) -> Event {
     Event::pending(

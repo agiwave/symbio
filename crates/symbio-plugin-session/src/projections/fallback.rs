@@ -6,16 +6,16 @@
 //!
 //! 口径：
 //! - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-//! - **档位** = `turn.dispatch` 载荷 `tier`（[`crate::adapters::LatencyTier`]
+//! - **档位** = `turn.dispatch` 载荷 `tier`（[`symbio_core::LatencyTier`]
 //!   的名字）——**调度决定是数据**：档位要到执行装配期才定，故另立一格；
 //!   历史事件没有这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified`
 //!   桶（可观测，不静默归类）；
 //! - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有
 //!   输出（I3），fallback 落在哪档就是哪档的兜底。
 
-use super::super::event::{Entity, Event, Verb};
-use super::Projection;
-use crate::ChatVocab;
+use symbio_core::{ChatVocab, Entity, Event, Projection, Verb};
+
+use super::tiers::declared_tier;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -91,55 +91,6 @@ impl FallbackRateView {
     }
 }
 
-/// 本轮声明的档位：优先读本轮 `turn.dispatch` 载荷的 `tier`，历史切片没有
-/// 这一格时回退读 `user.message` 的 `tier`；缺失/未知 ⇒ `unspecified` 桶
-/// （可观测，不静默归类）。
-///
-/// `before_seq`：
-/// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底事件要归到**它之前**那一幕的档位）；
-/// - `None` ⇒ 不限 seq，取**最早**一条派发格——开轮事件的分母按「这一轮以哪一档
-///   开局」归位（续写幕可以换档，那是另一幕的事实）。
-///
-/// 兜底率与时延报告（[`super::slo`]）共用的**唯一判据**——档位归属只在这
-/// 一处定义，两列统计不各自为政。
-pub(super) fn declared_tier(
-    events: &[Event],
-    turn: u64,
-    before_seq: Option<u64>,
-    v: &ChatVocab,
-) -> String {
-    let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
-    let is_dispatch = |e: &Event| {
-        e.entity == Entity::Turn
-            && e.verb == Verb::Asserted
-            && e.kind == v.dispatch
-            && e.turn == turn
-    };
-    let dispatch = match before_seq {
-        None => events.iter().find(|e| is_dispatch(e) && before(e)),
-        Some(_) => events.iter().rev().find(|e| is_dispatch(e) && before(e)),
-    };
-    dispatch
-        .and_then(|e| e.payload.get("tier").and_then(|v| v.as_str()))
-        // 接线前的历史事件：档位随开轮格写入（`user.message.tier`）。
-        .or_else(|| {
-            events
-                .iter()
-                .rev()
-                .find(|u| {
-                    u.entity == Entity::Turn
-                        && u.verb == Verb::Opened
-                        && u.turn == turn
-                        && u.kind == v.user_message
-                        && before(u)
-                })
-                .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
-        })
-        .and_then(crate::adapters::LatencyTier::from_name)
-        .map(|t| t.name().to_string())
-        .unwrap_or_else(|| "unspecified".to_string())
-}
-
 /// `fallback_rate` 投影：从事件切片统计各档位的兜底率。
 pub fn fallback_rate(v: ChatVocab) -> Projection<FallbackRateView> {
     Projection::new(move |events: &[Event], now| {
@@ -185,3 +136,7 @@ pub fn fallback_rate(v: ChatVocab) -> Projection<FallbackRateView> {
         FallbackRateView { by_tier }
     })
 }
+
+#[cfg(test)]
+#[path = "fallback.test.rs"]
+mod tests;

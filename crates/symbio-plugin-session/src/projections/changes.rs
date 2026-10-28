@@ -16,7 +16,7 @@
 //!
 //! - 只认 `success: true` 且**带 `file_op`** 的产物：那个字段由写族工具声明的行为
 //!   交出来（`symbio_plugin_vdfs::behavior::FileChange`，DE-025 D-207），取值是
-//!   [`FileOp::as_str`] 的四个判别词。本模块**不认识任何工具名**——改一个工具名
+//!   [`FileOp::as_str`] 的四个判别词；词表本身住 `symbio_plugin_api::effects`。本模块**不认识任何工具名**——改一个工具名
 //!   不影响这里一行，而新出现的写工具（MCP / shell）只要声明同一个行为就能进账；
 //! - 路径取**定稿参数** `args.path`——工具收到什么就记什么，不去反推结果文本；
 //! - 路径必须落在工作目录内：绝对路径、`..` 逃逸与**虚拟根**（`AddrRootDecl` 声明的
@@ -36,46 +36,10 @@
 //!
 //! [D-169]: ../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
-use super::super::event::Event;
-use super::Projection;
-use crate::MessageVocab;
+use symbio_core::{Event, MessageVocab, Projection};
+use symbio_plugin_api::effects::FileOp;
 
 use std::collections::HashMap;
-
-/// 写族工具的四种动作（判别值走 [`FileOp::as_str`]，呈现文案由出口给）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileOp {
-    Write,
-    Edit,
-    Delete,
-    Mkdir,
-}
-
-impl FileOp {
-    /// 线格式判别词 → 动作。不是四个判别词之一 ⇒ 不是变更。
-    ///
-    /// 与 [`Self::as_str`] 是同一份拼写的两个方向：生产方（写族的富化行为）用
-    /// `as_str` 交值，本模块用这个读回来——两处各写一份字面量就会漂移。
-    fn from_wire(op: &str) -> Option<Self> {
-        match op {
-            "write" => Some(Self::Write),
-            "edit" => Some(Self::Edit),
-            "delete" => Some(Self::Delete),
-            "mkdir" => Some(Self::Mkdir),
-            _ => None,
-        }
-    }
-
-    /// 线格式的判别词——与 `#[serde(rename_all = "snake_case")]` 逐字一致。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Write => "write",
-            Self::Edit => "edit",
-            Self::Delete => "delete",
-            Self::Mkdir => "mkdir",
-        }
-    }
-}
 
 /// 一个被改过的文件（每路径一条）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,7 +148,7 @@ fn inside_workdir(raw: &str) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
-    if crate::vdfs::declared_addr_root() == Some(segments[0]) {
+    if symbio_core::declared_addr_root() == Some(segments[0]) {
         return None;
     }
     Some(segments.join("/"))

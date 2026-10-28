@@ -25,6 +25,7 @@
  * | `plugin_id` / `plugin_assembly` / `plugin_order` / `plugin_undisablable` | `crates/symbio-deploy/src/lib.rs` |
  * | `plugin_routes` | `crates/symbio-plugin-api/src/routes.rs` |
  * | `shared_events` | `crates/symbio-plugin-api/src/events.rs` |
+ * | `shared_views` | `crates/symbio-plugin-api/src/view_names.rs` |
  * | `principal_<slug>` | `crates/symbio-core/src/authz/rows.gen.rs` |
  * | `tool_namespace` | `crates/symbio-kernel/src/chat/tool_namespaces.gen.rs` |
  * | `trigger_kinds` | `crates/symbio-kernel/src/event/trigger_kinds.gen.rs` |

@@ -7,17 +7,16 @@
 //! 里，由读方按需取用。
 //!
 //! 档位归属与 [`super::fallback::fallback_rate`] 同一判据（共享
-//! [`declared_tier`] 单源）：final 按 turn 号归到本轮 `turn.dispatch` 声明的档位
+//! [`super::tiers::declared_tier`] 单源）：final 按 turn 号归到本轮 `turn.dispatch` 声明的档位
 //! （历史事件回退 `user.message` 的 `tier`）；缺失/未知 ⇒ `unspecified` 桶
 //! （可观测，不静默归类）。
 //!
 //! 分位数是**读方计算**：视图只携带升序样本（构造即排序，逐字节确定，N1），
 //! `percentile` 是纯查询——投影只报数，SLO 是承诺。
 
-use super::super::event::{Entity, Event, Verb};
-use super::fallback::declared_tier;
-use super::Projection;
-use crate::ChatVocab;
+use symbio_core::{ChatVocab, Entity, Event, Projection, Verb};
+
+use super::tiers::declared_tier;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -86,8 +85,8 @@ impl SloLatencyView {
     /// ## 为什么它在生产代码里而不是调用方
     ///
     /// 「跨会话合并」此前只活在 `slo.test.rs` 的一个 `#[ignore]` 扫描测试里：并集、
-    /// 重排、再算分位数。放在调用方（插件）就意味着**统计口径有两份**——单会话那份
-    /// 在 core，跨会话那份在插件，而两者算的是同一个数。分位数取法与
+    /// 重排、再算分位数。放在调用方（会话出口）就意味着**统计口径有两份**——单会话一份、
+    /// 跨会话一份分处两个文件，而两者算的是同一个数。分位数取法与
     /// [`TierLatency::percentile`] 是绑在一起的（最近邻、`ceil(p/100 × n) - 1`），
     /// 拆开就是让「P99 是什么」有两个答案。
     ///

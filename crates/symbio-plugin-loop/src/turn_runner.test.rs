@@ -172,8 +172,8 @@ mod turn_runner_tests {
     use crate::control_decl::guard_vocab;
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_core::{
-        check_all, cost_ledger, fallback_rate, transcript, AppendError, Budget, Event, EventStore,
-        LatencyTier, Seq, SilentDeltas, Store, TokenIssuer,
+        check_all, cost_ledger, transcript, AppendError, Budget, Event, EventStore, LatencyTier,
+        Seq, SilentDeltas, Store, TokenIssuer,
     };
     use symbio_plugin_api::events::{
         EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -208,11 +208,15 @@ mod turn_runner_tests {
         let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
         assert_eq!(ledger.value.of("session/main").spent_ms, out.cost_ms);
 
-        // 兜底率：deep 档 1 turn，0 兜底。
-        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
-        let deep = fr.value.of("deep");
-        assert_eq!((deep.turns, deep.fallbacks), (1, 0));
-        assert_eq!(deep.rate(), 0.0);
+        // 兜底格：成功轮不落兜底（兜底率是 session 的读数，本处只钉驱动器产出）。
+        assert_eq!(
+            snapshot
+                .iter()
+                .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
+                .count(),
+            0,
+            "成功轮不落兜底格"
+        );
 
         // turnstate：收束且 final 可见。
         let view = symbio_core::turnstate(CHAT_VOCAB).apply(&snapshot, 0, Budget::generous());
@@ -245,11 +249,15 @@ mod turn_runner_tests {
             check_all(guard_vocab(), &snapshot)
         );
 
-        // 兜底率：deep 档 1 turn 1 兜底 = 100%（被看见，不是被藏）。
-        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
-        let deep = fr.value.of("deep");
-        assert_eq!((deep.turns, deep.fallbacks), (1, 1));
-        assert_eq!(deep.rate(), 1.0);
+        // 兜底格：失败轮恰好一条兜底（被看见，不是被藏）。
+        assert_eq!(
+            snapshot
+                .iter()
+                .filter(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
+                .count(),
+            1,
+            "失败轮必须落一条兜底格"
+        );
     }
 
     /// 事实轨可重放：多轮写入 → 重放事件 → 逐字节一致（N2 家族：恢复 = 重放，
@@ -1133,10 +1141,6 @@ mod turn_runner_tests {
             Some("chat.assistant.final"),
             "收束 kind 不换"
         );
-        let fr = fallback_rate(CHAT_VOCAB).apply(&snapshot, i64::MAX, Budget::generous());
-        let deep = fr.value.of("deep");
-        assert_eq!((deep.turns, deep.fallbacks), (1, 0), "中止不进兜底分子");
-        assert_eq!(deep.rate(), 0.0);
     }
 
     /// 写侧闸（[04 §3.1 批⑥](../../../docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）：

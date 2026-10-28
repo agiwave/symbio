@@ -2,9 +2,9 @@
 //!
 //! ## 它替掉的是哪一段
 //!
-//! 工作目录变更账（`symbio_core::projection::changes`）过去按**工具名**认写族：
-//! `match tool { "vdfs_write" => …, "vdfs_edit" => … }`。那张表住在 core，于是
-//! 「改一个工具名」要动一个不属于任何插件的文件——正是要消灭的形态。
+//! 工作目录变更账（`symbio_plugin_session::projections::changes`）认的是「这次写属于
+//! 哪种动作」。如果只能按**工具名**认——`match tool { "vdfs_write" => …, "vdfs_edit" => … }`
+//! ——那么这张表既不属于任何插件、又必须跟着工具改，正是要消灭的形态。
 //!
 //! 现在动作由**工具自己**说：写族四个工具在 `CapabilityMeta.behaviors` 里声明
 //! `file_change`，本模块把声明翻译成一个字段补进产物格。读侧（`changes`）只认那个
@@ -21,8 +21,8 @@
 //! 失败 / 被拒的写没有改变工作目录。判据留在**这里**（而不是让读侧再判一次
 //! `success`）：一条失败产物的载荷里出现 `file_op`，本身就是「这次写了」的谎。
 
-use symbio_core::FileOp;
 use symbio_plugin_api::behaviors;
+use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::effects::{EffectInput, ToolBehavior};
 
 /// 写族工具 → 动作。

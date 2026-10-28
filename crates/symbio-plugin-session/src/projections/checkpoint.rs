@@ -9,8 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::event::Event;
-use super::Projection;
+use symbio_core::{Event, Projection};
 
 /// 可序列化的断点状态（`projection = checkpoint` 的产出）。
 ///

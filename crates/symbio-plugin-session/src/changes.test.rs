@@ -1,7 +1,7 @@
 //! `session/changes` 出口的判据：行是不是**呈现就绪**、读侧闸是否与 stats 同一道。
 //!
 //! 折叠口径（收哪些工具、谁说话、界外怎么办）由 core 的
-//! `projection/changes.test.rs` 钉死；本文件只判出口这一半——地址 / 文案 / 空账。
+//! `projections/changes.test.rs` 钉死；本文件只判出口这一半——地址 / 文案 / 空账。
 
 use super::read_changes;
 use symbio_core::{Entity, Event, Verb, PRINCIPAL_MAIN};

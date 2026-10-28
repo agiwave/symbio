@@ -3,7 +3,7 @@
 //! ## 它替掉了什么
 //!
 //! core 的折叠（`rebuild` / `transcript` / `prompt_fidelity` / `branch` / `mutations` /
-//! `changes` / `reputation` / `fallback` / `slo` / `turns` / `turnstate` /
+//! `reputation` / `turns` / `turnstate` /
 //! `actors::commitment` / `actors::control`）此前**按名字**认事件：`e.kind ==
 //! EVENT_ASSISTANT_FINAL`。名字住内核 ⇒「加一条对话面事件」= 改内核两张表 + 一条
 //! `core-shape-allow`，那正是 DE-024 要拆掉的那条边。
@@ -21,8 +21,8 @@
 //!
 //! | 表 | 字段 | 消费方 |
 //! |---|---|---|
-//! | [`ChatVocab`] | 11：开轮 / 派发 / 补充 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `fallback` `slo` `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
-//! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `changes` `mutations` `rebuild` `transcript` `prompt_fidelity` |
+//! | [`ChatVocab`] | 11：开轮 / 派发 / 补充 / 分支两支 / 汇报 / 开场 / 定稿 / 兜底 / 进展 / 被拒 | `turns` `turnstate` `branch` `rebuild` `transcript` `prompt_fidelity` |
+//! | [`MessageVocab`] | 5：产物 / 增 / 改 / 删 / 巩固 | `mutations` `rebuild` `transcript` `prompt_fidelity` |
 //! | [`CommitmentVocab`] | 4：立约 / 履约 / 违约 / 断言 | `reputation` `actors::commitment` |
 //!
 //! 三个折叠（`rebuild` / `transcript` / `prompt_fidelity`）确实要两张表——它们折的

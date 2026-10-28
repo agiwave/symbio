@@ -556,6 +556,12 @@ export const LIBS = [
   // 失败只给一行文件名、正文要自己去文件里翻（于是人再跑一遍 7 分钟的门禁）。
   'gate.d/_logs',
   'core-surface',
+  // `decision-anchors` 是「`### D-NNN` 决策锚点在哪」的**唯一扫描实现**。登记成 LIBS：
+  // 三个消费方（`core-shape-audit` 的 CS-002、`projection-purity` 的 PP-005、
+  // `plugin-special-case-audit` 的特例豁免）各自判「挂着的决策号存不存在」，
+  // 而**扫描只有一份**——各写一遍正则，就会有一个消费方在标题格式变了以后静默读不到，
+  // 于是「必须挂决策」退化成「随便挂什么都算挂」。判据在它三个消费方的回归测试里。
+  'decision-anchors',
   'route-facts',
   'gen-facts',
   'facts/_lib',
@@ -583,6 +589,12 @@ export const LIBS = [
   // 清单时的三条抛错（形状非法 / 幽灵名字 / 一条名字两个 owner）由消费方
   // `shared-event-vocab-audit` 转述成人读的一行，故也不进 GUARDS。
   'facts/events-rs',
+  // `views-rs` 与 `events-rs` 同一形状，只是投影的是**视图名**：读各插件 `PLUGIN.yml`
+  // 的 `shared_views` 行，生成 `symbio-plugin-api/src/view_names.rs` 的公开清单（DE-025
+  // D-221）。登记成 LIBS：它由 `gen-facts` 遍历目录调用（目录即接线，不在门禁里单列一步），
+  // 生成物漂移由 `gen-facts --check`（GEN-001）判；「清单里的名字必须有 owner 的 `ViewDecl`」
+  // 由它自己抛错 + `plugin-api::views` 的读口判，本脚本不是独立门禁步骤。
+  'facts/views-rs',
   // 部署事实的四个生成器与它们的共享材料（`_plugin-links`）。登记成 LIBS 而不是
   // GUARDS 的**理由**：它们由 `gen-facts` 调用、生成物漂移由 `gen-facts --check`
   // 判，本体不是独立门禁步骤；回归测试那几格另在 GUARDS 里（同 `routes-rs` 的两处

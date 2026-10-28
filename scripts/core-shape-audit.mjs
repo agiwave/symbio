@@ -103,6 +103,7 @@ import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
+import { hasDecisionAnchor as anchorExists } from './decision-anchors.mjs'
 import { isTestFile, walk } from './core-surface.mjs'
 import { blankComments, blankTestModules, matchBrace } from './rust-scan.mjs'
 
@@ -185,49 +186,10 @@ const SELF_REL = 'scripts/core-shape-audit.mjs'
 
 /**
  * 决策条目是否存在：`D-NNN` 是设计文档内的锚点（`### D-NNN <标题>`），不是独立文件。
- * 全量扫一遍设计目录（`docs/003-design/*.md` + 组件级就地文档）后缓存。
+ * 扫描口径（扫哪些根、认哪种锚点）住 `decision-anchors.mjs`——三个判「豁免挂没挂决策」
+ * 的审计共用一份，抄本不同会让同一条豁免在这边绿、那边红。
  */
-let decisionSet = null
-function hasDecisionAnchor(id) {
-  if (decisionSet === null) {
-    decisionSet = new Set()
-    const roots = [
-      path.join(ROOT, 'docs', '003-design'),
-      path.join(ROOT, 'crates'),
-      path.join(ROOT, 'tauri', 'docs'),
-      path.join(ROOT, 'cli', 'docs'),
-    ]
-    const walk = (dir) => {
-      let list
-      try {
-        list = fs.readdirSync(dir, { withFileTypes: true })
-      } catch {
-        return
-      }
-      for (const ent of list) {
-        const abs = path.join(dir, ent.name)
-        if (ent.isDirectory()) {
-          if (ent.name === 'node_modules' || ent.name === 'target' || ent.name === 'archive') continue
-          walk(abs)
-          continue
-        }
-        if (!ent.name.endsWith('.md')) continue
-        let text = ''
-        try {
-          text = fs.readFileSync(abs, 'utf8')
-        } catch {
-          continue
-        }
-        for (const line of text.split('\n')) {
-          const m = /^#{2,6}\s+(D-\d{3}a?)\b/.exec(line)
-          if (m) decisionSet.add(m[1].slice(2))
-        }
-      }
-    }
-    for (const r of roots) walk(r)
-  }
-  return decisionSet.has(id)
-}
+const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 
 /**
  * 形状基线（2026-10-12 冻结，决策与理由见 [D-055](../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
