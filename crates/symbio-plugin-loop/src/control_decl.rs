@@ -555,8 +555,8 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// v11（D-166）加 `model_open`：本幕已宣布、还没派出的模型往返。执行行与派发行
 /// 因此按**事实**分工，而不是靠 `prio` 60 < 66 碰巧排对。
 ///
-/// v12（D-168 裁决 3）加 `prepared`：本幕落过 `inputs` 阶段格没有，`prepare-turn`
-/// 行的前件。
+/// v12 加 `prepared`：本幕落过 `inputs` 阶段格没有。它的读者（`prepare-turn` 行）
+/// 已随 `turn` 端口退场（`D-222`），这一格因此无生产读者，去留由下一次行表归一决定。
 ///
 /// v13（D-168 裁决 4）加 `closure`：本幕最近一条收束格的 `reason`。它是「还开不开
 /// 下一幕」的唯一数据面——流向不再由 `close_turn` 的返回值决定。口径与 `closed`
@@ -815,8 +815,8 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
         "reflex_answered": reflex_answered,
-        // 本幕的请求输入已备好（D-168 裁决 3）：`prepare-turn` 行的出口折在这里。
-        // 读者只有准备行自己（`prepared: false` = 这一幕还欠一次准备）。
+        // 本幕的请求输入已备好：`prepare-turn` 行的出口曾折在这里，那条行已删
+        // （`D-222`：幕是直线，「备好没有」不再是一个前件）。这一格暂时无生产读者。
         "prepared": stage_since("inputs"),
         // 本幕的收束原因（D-168 裁决 4）：`exhausted` / `completed` / `null`（未收束）。
         // 读者只有幕间判据（`loop_rows::next_stage_round`）——「还开不开下一幕」。
@@ -875,52 +875,7 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     }
 }
 
-/// 本幕的 `turn` 端口往返**走到哪一步了**（v1 / D-168）。
-///
-/// ## 为什么单开一个视图，而不是往 `turn_head` 里加两格
-///
-/// 这两格的**唯一读者**是外环的宣布行（`announce-turn`）。而 `turn_head` 的证据集
-/// 是「读面全集」（它的输出替六条策略行关门），把 `turn` 端口的进度折进去，宣布行的
-/// 出口就挂在 `turn_head` 上——那会把 `request` 一并拉进出口线，与 `open-tools`
-/// （同样写 `request`、同样以 `request` 关门）连成一个**假环**，装载当场红。
-/// 载荷侧另有两条：`closeable` 在快路轮的准备段就已经为真，用它判「该不该宣布一次
-/// 往返」会让零模型往返的轮整轮不派发——而收束格恰恰是那次派发跑出来的。
-fn turn_round(events: &[Event], _now: i64) -> serde_json::Value {
-    let Some((turn, anchor)) = drive_of(events) else {
-        return serde_json::Value::Null;
-    };
-    let anchor_seq = anchor.map(seq_of).unwrap_or(0);
-    // 已宣布、还没派出：键与派发行同 `(port, id, attempt)`，`sent` / `failed` 关账。
-    let open = events.iter().any(|req| {
-        req.turn == turn
-            && req.kind == EVENT_REQUEST
-            && str_field(req, "port") == Some("turn")
-            && str_field(req, "via").is_none()
-            && after_anchor(req, anchor_seq)
-            && !events.iter().any(|e| {
-                e.turn == turn
-                    && matches!(e.kind.as_str(), EVENT_SENT | EVENT_FAILED)
-                    && str_field(e, "port") == Some("turn")
-                    && str_field(e, "id") == str_field(req, "id")
-                    && u64_field(e, "attempt") == u64_field(req, "attempt")
-            })
-    });
-    // 已有终局：应答到手，或被判死。按幕锚收窄——续写幕复用轮号，首幕的应答
-    // 不算本幕的（与 `turn_head` 的 `model_open` 同一条口径）。
-    let done = events.iter().any(|e| {
-        e.turn == turn
-            && matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
-            && str_field(e, "port") == Some("turn")
-            && after_anchor(e, anchor_seq)
-    });
-    serde_json::json!({
-        "turn": turn,
-        "open": open,
-        "done": done,
-    })
-}
-
-/// 中途汇报该不该说：只吃日志与 `now`，不碰内存计数 / 墙钟。
+/// **中途汇报该不该说**：只吃日志与 `now`，不碰内存计数 / 墙钟。
 ///
 /// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
 /// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
@@ -1208,35 +1163,6 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["chat.assistant.final", "chat.assistant.fallback"],
         cost: 4096,
         eval: turn_closed,
-    },
-    // `turn` 端口往返的进度（D-168）：宣布行（`announce-turn`）的两条前件与出口。
-    //
-    // 证据集只列引擎格的三个（`sent` / `response` / `failed`）：这一行真正等的是
-    // 「派出去了」与「答回来了」，而这两件事都由引擎在派发动作里落。按读面全集
-    // 配图会把 `request` 拉进出口线——`open-tools` 同样写它、同样以它关门，两条边
-    // 一配就是一个假环（D-160 裁决 4 的「格身份从两边自己的出口模式派生」在这里
-    // 恰好把两个不同的端口抹成一格）。
-    ViewDecl {
-        name: "turn_round",
-        ver: 1,
-        reads: &[
-            ("user.message", "id"),
-            ("turn.stage", "stage"),
-            (EVENT_REQUEST, "port"),
-            (EVENT_REQUEST, "id"),
-            (EVENT_REQUEST, "attempt"),
-            (EVENT_REQUEST, "via"),
-            (EVENT_SENT, "port"),
-            (EVENT_SENT, "id"),
-            (EVENT_SENT, "attempt"),
-            (EVENT_RESPONSE, "port"),
-            (EVENT_FAILED, "port"),
-            (EVENT_FAILED, "id"),
-            (EVENT_FAILED, "attempt"),
-        ],
-        evidence: &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED],
-        cost: 4096,
-        eval: turn_round,
     },
     // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。

@@ -978,7 +978,7 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
 
 /// 种一条 `turn.branch`：`into` 是 `of` 的另一支。
 ///
-/// 生产里这一格由 `prepare-turn` 落（见 `loop::stage_exec`：新根的 id 到那一幕才存在），
+/// 生产里这一格由 `loop::stage::prepare` 落（新根的 id 到备输入那一步才存在），
 /// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
 /// （I2：断言类事件必须带一个存在且不超前的锚）。
 async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {

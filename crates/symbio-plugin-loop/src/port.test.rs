@@ -15,6 +15,24 @@ use symbio_core::{EventStore, Seq};
 
 use crate::control_decl::EVENT_AUTHZ_GRANTED;
 
+/// 「不带附加载荷」的派发——生产侧只剩 [`dispatch_with`]（`turn` 端口退场之后，
+/// 没有哪个端口需要这个便捷重载），测试里用一个薄壳保住用例的可读性。
+async fn dispatch<S, T, E, F, Fut, W>(
+    store: &S,
+    ports: &[PortDecl],
+    plan: Dispatch<'_>,
+    run: F,
+    why: W,
+) -> Result<T, DispatchError<E>>
+where
+    S: symbio_core::Store<Event = symbio_core::Event> + ?Sized,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    W: FnOnce(&E) -> String,
+{
+    dispatch_with(store, ports, plan, run, why, |_| serde_json::Value::Null).await
+}
+
 fn boot() -> EventStore {
     EventStore::new()
 }
@@ -71,7 +89,7 @@ fn grant(store: &EventStore, call: &Call) {
 async fn dispatch_writes_before_and_the_answer_itself() {
     // 判据 2 / 3 的正向：派发前后各一条事实，执行体自己不写任何协议事实。
     let store = boot();
-    let call = Call::new("turn", "turn-1-r0", 1);
+    let call = Call::new("model", "model-1-r0", 1);
     announce(&store, &call, 1, 7).unwrap();
 
     let out = dispatch(
@@ -81,7 +99,7 @@ async fn dispatch_writes_before_and_the_answer_itself() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            row: "dispatch-turn",
+            row: "dispatch-model",
             now: 0,
             awaited: false,
         },
@@ -98,7 +116,7 @@ async fn dispatch_writes_before_and_the_answer_itself() {
     assert_eq!(sent["lease_ms"], json!(600_000));
     assert_eq!(sent["attempt_cap"], json!(1));
     let request = payload_of(&store, "request");
-    assert_eq!(request["id"], json!("turn-1-r0"));
+    assert_eq!(request["id"], json!("model-1-r0"));
 }
 
 #[test]
@@ -190,7 +208,7 @@ async fn begin_and_succeed_can_bracket_a_whole_batch() {
 async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
     // 判据 3：`run = Err` ⇒ 引擎落 `failed`，执行体自己的错误原样交回。
     let store = boot();
-    let call = Call::new("turn", "turn-1-r0", 1);
+    let call = Call::new("model", "model-1-r0", 1);
     announce(&store, &call, 1, 7).unwrap();
 
     let res: Result<(), DispatchError<&'static str>> = dispatch(
@@ -200,7 +218,7 @@ async fn a_failed_actor_leaves_a_failed_fact_not_a_silent_hang() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            row: "dispatch-turn",
+            row: "dispatch-model",
             now: 0,
             awaited: false,
         },
@@ -224,7 +242,7 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
     //
     // 这里**只**不写 `request`：结论由引擎现读（D-136），调用点给的只有行名。
     let store = boot();
-    let call = Call::new("turn", "turn-1-r0", 1);
+    let call = Call::new("model", "model-1-r0", 1);
     let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let flag = ran.clone();
@@ -235,7 +253,7 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            row: "dispatch-turn",
+            row: "dispatch-model",
             now: 0,
             awaited: false,
         },
@@ -252,7 +270,7 @@ async fn a_row_that_is_not_owed_never_reaches_the_actor() {
 
     match res {
         Err(DispatchError::NotOwed(row)) => assert_eq!(
-            row, "dispatch-turn",
+            row, "dispatch-model",
             "拒派要说得出是哪一行不欠（行名由调用点声明、引擎读出）"
         ),
         other => panic!("没有账的调用不该派发：{other:?}"),
@@ -293,10 +311,10 @@ async fn an_undeclared_port_is_named_not_defaulted() {
 
 #[tokio::test]
 async fn dispatching_twice_does_not_double_the_facts() {
-    // 判据 6 的第一半：一笔账只还得一次。第一次派发落完 `sent`，`dispatch-turn`
+    // 判据 6 的第一半：一笔账只还得一次。第一次派发落完 `sent`，`dispatch-model`
     // 就不再欠——第二次连执行体都不会跑（D-136：结论由引擎现读，调用点不重复主张）。
     let store = boot();
-    let call = Call::new("turn", "turn-1-r0", 1);
+    let call = Call::new("model", "model-1-r0", 1);
     announce(&store, &call, 1, 7).unwrap();
     let out: Result<(), DispatchError<()>> = dispatch(
         &store,
@@ -305,7 +323,7 @@ async fn dispatching_twice_does_not_double_the_facts() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            row: "dispatch-turn",
+            row: "dispatch-model",
             now: 0,
             awaited: false,
         },
@@ -321,7 +339,7 @@ async fn dispatching_twice_does_not_double_the_facts() {
             call: &call,
             turn: 1,
             produced_by: 7,
-            row: "dispatch-turn",
+            row: "dispatch-model",
             now: 0,
             awaited: false,
         },
@@ -342,7 +360,7 @@ fn a_repeated_fact_write_collapses_on_its_idempotency_key() {
     // 行**仍然欠**时重复写同一格，引擎吞掉 `Duplicate` 而不是多落一格——
     // 「同一个动作被跑两次」与「账上出现两条」是两件事，得分别钉住。
     let store = boot();
-    let call = Call::new("turn", "turn-1-r0", 1);
+    let call = Call::new("model", "model-1-r0", 1);
     announce(&store, &call, 1, 7).unwrap();
     announce(&store, &call, 1, 7).unwrap();
     assert_eq!(kinds(&store), vec!["request"], "重复的 `request` 不重落");
@@ -372,7 +390,7 @@ fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64,
             )
             .with_ts(0)
             .with_payload(json!({
-                "port": "turn",
+                "port": "tool",
                 "id": id,
                 "attempt": attempt,
                 "lease_ms": lease_ms,
@@ -387,10 +405,10 @@ fn stranded(store: &EventStore, id: &str, attempt: u64, lease_ms: u64, cap: u64,
 
 #[test]
 fn the_lease_kills_a_turn_call_that_nobody_awaits() {
-    // 判据 7（判死一侧）：`turn` 的 `max_attempts = 1` ⇒ 到期即判死。
+    // 判据 7（判死一侧）：`model` 的 `max_attempts = 1` ⇒ 到期即判死。
     // 重试只会留下一条永不派发的 `request`——等它的 future 随进程一起没了。
     let store = boot();
-    stranded(&store, "turn-9-r0", 1, 1_000, 1, false);
+    stranded(&store, "tool-9-r0", 1, 1_000, 1, false);
     let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
 
     // 还没到期：不欠、不动。
@@ -414,7 +432,7 @@ fn the_lease_kills_a_turn_call_that_nobody_awaits() {
     assert_eq!(
         out,
         vec![Reaped::Killed {
-            id: "turn-9-r0".into(),
+            id: "tool-9-r0".into(),
             attempt: 1,
         }]
     );
@@ -443,29 +461,29 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
     //
     // 端口声明**从真表来**（`loop_rows::PORTS`），只改 `max_attempts` 这一格：
     // 写一条独立的合成 `PortDecl` 时，`port` / `before` / `lease_ms` 与真表各长
-    // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里 `turn`
+    // 一套，真表漂了用例照样绿。这条用例证明的是**分支形状**——生产里 `model`
     // 的上限是 1 且普通批次的等待方随进程消失，这条路径由 `tool` 端口的唤醒批次
     // （等待方能由 `wake_batch` 从事实重建）走。
     let retrying: Vec<PortDecl> = PORTS
         .iter()
         .map(|p| PortDecl {
-            max_attempts: if p.port == "turn" { 3 } else { p.max_attempts },
+            max_attempts: if p.port == "tool" { 3 } else { p.max_attempts },
             ..*p
         })
         .collect();
-    let turn = retrying
+    let tool = retrying
         .iter()
-        .find(|p| p.port == "turn")
-        .expect("真表里有 `turn` 端口");
+        .find(|p| p.port == "tool")
+        .expect("真表里有 `tool` 端口");
     let store = boot();
     // 在途格的租约 / 尝试上限与判定用的 `now` 都从**同一份真表**推出来：
     // 换端口声明不必再改这里的数字，改了数字也不会让用例假绿。
     stranded(
         &store,
-        "turn-9-r0",
+        "tool-9-r0",
         1,
-        turn.lease_ms,
-        turn.max_attempts,
+        tool.lease_ms,
+        tool.max_attempts,
         true,
     );
     let frozen = load(ROWS).expect("真表装载：看护者读的表 = 会话开幕用的那张");
@@ -477,13 +495,13 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
         &store.range(Seq::new(0)),
         1,
         1,
-        turn.lease_ms as i64 + 1,
+        tool.lease_ms as i64 + 1,
     )
     .unwrap();
     assert_eq!(
         out,
         vec![Reaped::Retried {
-            id: "turn-9-r0".into(),
+            id: "tool-9-r0".into(),
             attempt: 1,
         }]
     );
@@ -497,7 +515,7 @@ fn the_lease_retries_while_the_port_has_attempts_left() {
 
 #[test]
 fn only_the_tool_port_has_headroom_and_only_for_rebuildable_waiters() {
-    // 真表此刻的取值（D-138）：`turn` / `model` 的上限是 1——它们的等待方
+    // 真表此刻的取值（D-138）：`model` 的上限是 1——它的等待方
     // （轮内同步等待）随进程消失，重试只会留下永不派发的 `request`，到顶即判死；
     // `tool` 是 2 = 首次 + 一次重试，且**逐次尝试是否真能重试由 `sent.awaited` 决定**
     // （普通批次 `awaited = false` 仍判死；唤醒批次能由 `wake_batch` 从事实重建
@@ -509,15 +527,15 @@ fn only_the_tool_port_has_headroom_and_only_for_rebuildable_waiters() {
     let caps: Vec<(&str, u64)> = PORTS.iter().map(|p| (p.port, p.max_attempts)).collect();
     assert_eq!(
         caps,
-        vec![("turn", 1), ("model", 1), ("tool", 2)],
-        "端口上限漂了：抬 `turn` / `model` 前先回答「等待方是谁」，抬 `tool` 到 3 前先回答「还需要哪种等待方形态」"
+        vec![("model", 1), ("tool", 2)],
+        "端口上限漂了：抬 `model` 前先回答「等待方是谁」，抬 `tool` 到 3 前先回答「还需要哪种等待方形态」"
     );
 }
 
 #[test]
 fn every_port_row_is_in_the_table() {
-    // 加一个端口 = 1 条 `PortDecl` + 2 行模板（dispatch / await）。租约行**不**
-    // 按端口写（一个 `lease` 行管所有端口），少了它 `sent` 之后崩溃就永远挂着。
+    // 加一个端口 = 1 条 `PortDecl` + 2 行模板（dispatch / await）。租约**不在表上**：
+    // 看护读 `stale_sent` 视图（`port::reap`），所以这里只需两行。
     for p in PORTS {
         // 工具端口的行名沿用方案里的复数（`dispatch-tools` / `await-tools`）：
         // 一个工具端口的债单位是**单次调用**，但一次模型响应是一批；行名读的是
@@ -531,9 +549,11 @@ fn every_port_row_is_in_the_table() {
             );
         }
     }
-    assert_eq!(ROWS.iter().filter(|d| d.name == "lease").count(), 1);
+    // 租约**没有行**：看护读 `stale_sent` 视图（`port::reap`），不经行表——
+    // 「该还哪一笔」与「哪一笔过期了」是两个问题，只有前者归环（`TC-1b`）。
+    assert_eq!(ROWS.iter().filter(|d| d.name == "lease").count(), 0);
     // `await` 行就是 `Wait` 的折叠：恒 blocked，永不选中。
-    let await_row = ROWS.iter().find(|d| d.name == "await-turn").unwrap();
+    let await_row = ROWS.iter().find(|d| d.name == "await-model").unwrap();
     assert_eq!(await_row.by, None);
 }
 
@@ -867,26 +887,17 @@ fn response_cell(store: &EventStore, port: &str, id: &str, calls: serde_json::Va
 
 /// 判据 ③：**重放只补那一笔**。
 ///
-/// 现场摆的是一轮跑了三分之二的日志：幕的往返派出去了、第一次模型往返回来了
-/// （带两个工具调用）、那两个工具跑完了、第二次模型往返派出去了而应答没回来。
-/// 三件事一起才叫判据：
+/// 现场摆的是一轮跑了三分之二的日志：第一次模型往返回来了（带两个工具调用）、
+/// 那两个工具跑完了、第二次模型往返派出去了而应答没回来。三件事一起才叫判据：
 ///
 /// 1. **表这一侧**：重放时已经还过的债一条都不重新开账——`dispatch-model` 不该
-///    再欠（两笔都有 `sent`）、工具那三行也不该再欠（两笔都有 `response`）；
-/// 2. **看护这一侧**：`reap` 只对「派出去了、没回来」的两笔下判决，一笔是幕自己
-///    那一笔，一笔是第二次往返；
-/// 3. **不动账那一侧**：判死只写它自己那一格，没回来的两笔之外一个 `failed`
+///    再欠（那一笔有 `sent`）、工具那三行也不该再欠（两笔都有 `response`）；
+/// 2. **看护这一侧**：`reap` 只对「派出去了、没回来」的那一笔下判决；
+/// 3. **不动账那一侧**：判死只写它自己那一格，没回来的那一笔之外一个 `failed`
 ///    都不多、一条 `retry` 都不写。
-///
-/// 第 2 条同时钉住「粗端口的粒度在哪」：幕自己那一笔就是**一整轮**，它在日志上
-/// 与模型往返同形（`request` / `sent` / `response`），所以恢复能逐笔判而不是整轮重跑。
 #[test]
 fn a_replay_makes_up_only_the_call_that_never_came_back() {
     let store = boot();
-    // 幕的往返：派出去了，`response` 没有——这一轮没跑完就死了。
-    request_cell(&store, "turn", "turn-1-d3-r0", serde_json::Value::Null);
-    sent_cell(&store, "turn", "turn-1-d3-r0");
-
     // 第一次模型往返：回来了，还带回两个工具调用。
     request_cell(&store, "model", "model-1-d3-r0", json!({ "via": "turn" }));
     sent_cell(&store, "model", "model-1-d3-r0");
@@ -951,17 +962,11 @@ fn a_replay_makes_up_only_the_call_that_never_came_back() {
     let out = reap(&store, &frozen, PORTS, &facts, 1, 7, now).unwrap();
     assert_eq!(
         out,
-        vec![
-            Reaped::Killed {
-                id: "turn-1-d3-r0".into(),
-                attempt: 1,
-            },
-            Reaped::Killed {
-                id: "model-1-d3-r1".into(),
-                attempt: 1,
-            },
-        ],
-        "只有这两笔没人接：第一次往返与两个工具调用早就答过了"
+        vec![Reaped::Killed {
+            id: "model-1-d3-r1".into(),
+            attempt: 1,
+        }],
+        "只有这一笔没人接：第一次往返与两个工具调用早就答过了"
     );
 
     // 三、不动账：判死只落它自己那一格，其余一笔不碰。
@@ -973,11 +978,11 @@ fn a_replay_makes_up_only_the_call_that_never_came_back() {
         .collect();
     assert_eq!(
         failed,
-        vec!["turn-1-d3-r0", "model-1-d3-r1"],
+        vec!["model-1-d3-r1"],
         "多一个 `failed` 就是把已经回来的那笔又判了一次死"
     );
     assert!(
         !kinds(&store).iter().any(|k| k == "retry"),
-        "`turn` / `model` 的 `max_attempts = 1`：到期即判死，不写 `retry`"
+        "`model` 的 `max_attempts = 1`：到期即判死，不写 `retry`"
     );
 }

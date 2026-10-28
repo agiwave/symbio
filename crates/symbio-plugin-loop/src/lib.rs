@@ -35,10 +35,10 @@ mod recall_score;
 mod report_exec;
 mod session_port;
 mod skill_events;
-// 外环 host 的执行体与派发点（DE-015 的 D-168）：一个幕的 `turn` 往返
-// 拆成「宣布」与「派出」两个环步——与前两台同形状，借的面不同。
+// 一幕的直线：备输入 → 跑一轮 → 收好产出（`D-222` §二 裁决 1）。幕不是迭代器，
+// 也不是 host——`turn` 端口退场之后它没有可选的债，只剩这三步。
+mod stage;
 mod stage_events;
-mod stage_exec;
 mod task_events;
 mod tokenizer;
 mod tool_dispatch;

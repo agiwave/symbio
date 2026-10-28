@@ -247,23 +247,8 @@ where
 ///
 /// 行不欠 ⇒ 立刻返回 [`DispatchError::NotOwed`]，**执行体不会被跑**——没有账的
 /// 调用不许发出。这个结论由 [`Dispatch::row_owed`] 现读，不由调用方传入。
-pub(crate) async fn dispatch<S, T, E, F, Fut, W>(
-    store: &S,
-    ports: &[PortDecl],
-    plan: Dispatch<'_>,
-    run: F,
-    why: W,
-) -> Result<T, DispatchError<E>>
-where
-    S: Store<Event = Event> + ?Sized,
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<T, E>>,
-    W: FnOnce(&E) -> String,
-{
-    dispatch_with(store, ports, plan, run, why, |_| serde_json::Value::Null).await
-}
-
-/// 与 [`dispatch`] 同一条派发，但允许把**应答载荷**并进 `response`。
+///
+/// ## 应答载荷由闭包补（`extra`）
 ///
 /// 模型端口的应答要携带本次交回的工具调用（`calls`，D-117）：创建行
 /// `open-tools` 的集合展开读的就是它。载荷只能由**跑完执行体之后**才知道，
@@ -612,9 +597,8 @@ pub(crate) enum Reaped {
 /// 输入只有事实切片、端口声明与 `now`——不给内存状态，所以「崩溃后重放」与
 /// 「正常跑」走同一条路（判据 4 的另一半：`in_flight` 从日志重建）。
 ///
-/// 到顶判死的判据是 `stale_sent.exhausted`（`attempt >= max_attempts`），
-/// **不是**行上的 `unless`：行只负责「这笔卡住了、有人要管」，怎么收归这里。
-/// 两种收尾都写一条事实（`retry` / `failed`），所以下一轮问表时那笔账已经关掉。
+/// 到顶判死的判据是 `stale_sent.exhausted`（`attempt >= max_attempts`）。
+/// 两种收尾都写一条事实（`retry` / `failed`），所以下一次求值时这笔在途已经关掉。
 pub(crate) fn reap<S>(
     store: &S,
     frozen: &Frozen,
@@ -628,35 +612,45 @@ where
     S: Store<Event = Event> + ?Sized,
 {
     let mut out = Vec::new();
-    // 只取 `lease` 行开着的那几笔——「卡住」的唯一口径在视图里，不在这里重算。
-    for debt in ring::owed(super::loop_rows::ROWS, frozen, facts, now) {
-        if debt.decl.name != "lease" {
+    // 「卡住」的唯一口径在视图里（`stale_sent`），不在这里重算——**也不经过行表**。
+    //
+    // 看护不是还债：它问的是「哪些已派出的尝试过期了」，那是 `sent` 与 `lease_ms`
+    // 的一份事实投影；「现在该还哪一笔」才是选债，而那个问题只有环能回答
+    // （`TC-1b`：选债口唯一）。所以 `ROWS` 里没有 `lease` 这一行——它此前是
+    // `by: None` 的未接线行，唯一的派发点就是本函数对 `ring::owed` 的那次直问。
+    let Some(value) = frozen.eval("stale_sent", facts, now) else {
+        return Ok(out);
+    };
+    for item in value.as_array().map(Vec::as_slice).unwrap_or(&[]) {
+        if item.get("stale").and_then(|v| v.as_bool()) != Some(true) {
             continue;
         }
-        let Some(port) = key_of(&debt.key, "port") else {
+        let Some(port) = item.get("port").and_then(|v| v.as_str()) else {
             continue;
         };
-        let Some(id) = key_of(&debt.key, "id") else {
+        let Some(id) = item.get("id").and_then(|v| v.as_str()) else {
             continue;
         };
-        let Some(attempt) = key_of(&debt.key, "attempt").and_then(|v| v.parse().ok()) else {
+        let Some(attempt) = item.get("attempt").and_then(|v| v.as_u64()) else {
             continue;
         };
-        let Some(decl) = ring::port_of(ports, &port) else {
+        let id = id.to_string();
+        let Some(decl) = ring::port_of(ports, port) else {
             continue;
         };
-        // 这一笔目前卡在第几次尝试：取 `stale_sent` 里同 `(port, id, attempt)` 的实例。
-        let Some(exhausted) = stale_state(frozen, facts, now, &port, &id, attempt) else {
-            continue;
-        };
+        // 这一笔目前卡在第几次尝试：`stale_sent` 已经把「到顶没有」折成 `exhausted`。
+        let exhausted = item
+            .get("exhausted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         // 身份写在它自己的 `request` 上；重试写出的下一笔必须**逐字段继承**它，
         // 否则唤醒调用的 `resume` / `tool` / `args` 会在重试链上丢掉。
-        let request = request_of(facts, &port, &id, attempt);
+        let request = request_of(facts, port, &id, attempt);
         let via = request
             .and_then(|e| e.payload.get("via").and_then(|v| v.as_str()))
             .map(str::to_string);
         let call = Call::new(decl.port, id.clone(), attempt).with_via_opt(via);
-        if exhausted || !sent_awaited(facts, &port, &id, attempt) {
+        if exhausted || !sent_awaited(facts, port, &id, attempt) {
             failed_with(store, &call, turn, produced_by, "lease_expired")?;
             out.push(Reaped::Killed { id, attempt });
             continue;
@@ -665,7 +659,7 @@ where
         // 两步之间崩溃时，下一次 `reap` 会看到 `request{attempt+1}` 已存在，只补
         // `retry{attempt}`——旧尝试因此不会被重复作废，新尝试也不会丢。
         let next = Call::new(decl.port, id.clone(), attempt + 1).with_via_opt(call.via.clone());
-        if request_of(facts, &port, &id, attempt + 1).is_none() {
+        if request_of(facts, port, &id, attempt + 1).is_none() {
             let mut payload = request
                 .map(|e| e.payload.clone())
                 .unwrap_or_else(|| serde_json::json!({ "port": port, "id": id }));
@@ -712,14 +706,6 @@ where
     Ok(out)
 }
 
-/// 一笔债务的键里取一个字段。
-fn key_of(key: &ring::Key, field: &str) -> Option<String> {
-    key.0
-        .iter()
-        .find(|(k, _)| k == field)
-        .map(|(_, v)| v.clone())
-}
-
 /// 同 `(port, id, attempt)` 的 `request` 事实。
 fn request_of<'a>(facts: &'a [Event], port: &str, id: &str, attempt: u64) -> Option<&'a Event> {
     facts.iter().find(|e| {
@@ -752,32 +738,6 @@ fn with_via(payload: &mut serde_json::Value, via: Option<&str>) {
             serde_json::Value::String(via.to_string()),
         );
     }
-}
-
-/// 同 `(port, id, attempt)` 的卡住实例到没到顶。
-fn stale_state(
-    frozen: &Frozen,
-    facts: &[Event],
-    now: i64,
-    port: &str,
-    id: &str,
-    attempt: u64,
-) -> Option<bool> {
-    let value = frozen.eval("stale_sent", facts, now)?;
-    value.as_array()?.iter().find_map(|v| {
-        let same = v.get("port").and_then(|x| x.as_str()) == Some(port)
-            && v.get("id").and_then(|x| x.as_str()) == Some(id)
-            && v.get("attempt").and_then(|x| x.as_u64()) == Some(attempt)
-            && v.get("stale").and_then(|x| x.as_bool()) == Some(true);
-        if !same {
-            return None;
-        }
-        Some(
-            v.get("exhausted")
-                .and_then(|x| x.as_bool())
-                .unwrap_or(false),
-        )
-    })
 }
 
 /// 落一条协议事实；`Duplicate` 是「已经落过了」，不是失败。
@@ -848,6 +808,28 @@ impl Round<'_> {
 /// 内部往返不带工具（D-122 决策 5）：应答格里 `calls` 是**空数组**，不是缺席。
 /// 「缺席即空集合」是展开侧的读法，但写侧留一个空数组，判据侧不必猜「这个字段
 /// 是不是漏了」。
+///
+/// ## 它不是第五个选债口（`TC-1b` 的第二处反例，结论：不成立）
+///
+/// 这里自己落 `request`、自己 `dispatch`，看上去像一段一次性的环。三条都不成立：
+///
+/// 1. **它没问「现在该还哪一笔」**。身份由调用方给的 [`Round`] 定死（逻辑 id、
+///    端口、尝试号全在入参里），集合里恰好只有一个元素，「选」这个动作没有对象。
+///    `TC-1b` 禁的是**在派发器之外直问求解器再自行派发**——本函数走的是
+///    `dispatch_with`，与 `relay`（`call_model`）/ `courier`（`run_dispatch`）
+///    同一个门，行还欠不欠仍由派发器现读。
+/// 2. **`announce` 与 `dispatch` 之间的那一段没人能执行**。付款方是 `run` 这个
+///    Rust 闭包，没有行能选中它；`awaited = false` 且 `max_attempts = 1`，
+///    future 随栈一起没，重试没有对象。这正是 `D-222` §一 判 `turn` 不是往返的
+///    同一条理由——**它是重入，不是往返**：`announce` 在这里的作用只是把「一次模型
+///    调用 = 三格」这个等式补全（DE-015 §6 判据 2），不是「开一笔债等别人来还」。
+/// 3. **`dispatch-model` 的前件按端口判**，所以内部往返与轮内那次站同一行。这不是
+///    「那一行被它还了」（那一行的 `by` 是 `relay`），而是「派发器的前件它满足」：
+///    `owes` 的 pattern 是 `request(port=model)`，任何一笔开着的模型请求都满足它。
+///
+/// 它消失的方式写在 `D-222` 的诚实划界第 2 条：**那两段各自行化之后**（判决的
+/// `classify_round_trip`、措辞的 `wording_round_trip`、压缩的 `Compress::summary`），
+/// 这里就没有调用点了。在那之前删掉它只会得到「调了模型没有账」——比多一处记账口更坏。
 pub(crate) async fn round_trip<S, T, E, F, Fut>(
     store: &S,
     round: Round<'_>,

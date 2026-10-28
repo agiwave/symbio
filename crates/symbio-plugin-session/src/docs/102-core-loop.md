@@ -25,14 +25,16 @@ impl: done
 ## 0. 一句话结论
 
 主循环 = **前步骤**（请求解析 → 开会话 → `TurnState` → resume）+ **幕的迭代器**
-（装载 → 闸门 → 开一幕）+ **幕内的不动点**（外环 host 选债 → 还债）+ **唯一收尾点
+（装载 → 闸门 → 开一幕）+ **一幕之内的直线**（备输入 → 跑一轮 → 收好产出）+ **唯一收尾点
 `finish_turn`**。循环只能由 `return finish_turn(...)` 离开，没有旁路出口。
 
-**幕**（一次请求）之内欠三笔账，由外环派发点 `stage_exec::drive_stage` 按行表还，
-派发点不认步骤号：`prepare-turn`（备输入）→ `announce-turn`（宣布一笔 `turn` 往返）
-→ `dispatch-turn`（派出，**并就地收好产出**——镜像并入 / 定格 / 落库 / 封根都在那一
-环步里）。**「还开不开下一幕」读事实**（`turn_head.closure`），不由任何返回值决定
-（[DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-168 裁决 4）。
+**幕**（一次请求）之内是**一段直线**（`stage::run_stage`）：备输入 → 跑一轮 → 收好产出，
+三步按序各调一次，次序就是代码行序。它此前是第四台 host——`prepare-turn` / `announce-turn` /
+`dispatch-turn` 三条行挂在 `turn` 端口上，由第四段驱动循环 `drive_stage` 按 `prio` 选债还债。
+那台 host 存在的唯一理由是 `turn` 是端口，而它不是：应答载荷为空、适配器就是内环自己、
+`awaited = false`（[DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 `D-222` §一
+把端口定义成**跨边界往返**）。端口一撤，三条行就没有「什么算欠」可写，循环也就失去了选债对象。
+**「还开不开下一幕」读事实**（`turn_head.closure`），不由任何返回值决定（`D-222` 裁决 2：再开一段是一笔 `continue-turn` 债，目前仍是外层 `loop` 里的一次判读）。
 工具循环在 v2 运行器内部（`turn_exec::execute_turn`），不在外环里（见 §4.1）。
 
 五个收口点 + 一个状态容器（§2）：
@@ -40,9 +42,9 @@ impl: done
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
 | `gate_turn` | 退出条件（只剩中止边界），见 §2.1 | 判定点唯一 |
-| `prepare_turn_inputs`（行 `prepare-turn`） | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
+| `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
 | `run_compress`（行 `policy.compress` 的执行体） | 水位响应（70% 阈值触发的语义压缩）：判定与执行同处这一执行体，由轮首派发点选中（[DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-159） | 响应点唯一 |
-| `stage_exec::drive_stage` | 幕内三笔账的派发点（`ring::drive` 的调用处之一，另一处是轮首 `drive_head`），见 §1.2 | 幕内选债唯一 |
+| `stage::run_stage` | 一幕之内的三步直线（备输入 → 跑一轮 → 收好产出），见 §1.2 | 幕内次序唯一（代码行序） |
 | `finish_turn` | 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
 | `TurnState` | 跨幕可变状态（请求轮次 / 落库锚点 / 静默时钟种子 / 中止信号 / 读侧产物） | 状态容器唯一 |
 
@@ -63,7 +65,7 @@ impl: done
  结局序列化为 TurnReport 交回；session 侧 select! 看门狗 / 接管三臂在 ①
 ③ 循环层 run_chat_loop + gate_turn / finish_turn loop: chat_loop.rs
  + begin_drive（开一幕：唤醒格 → 收租 → 配置 → 幕锚 → 轮次格）chat_loop/drive.rs
- + stage_exec::drive_stage（外环派发点：幕内三笔账）stage_exec.rs
+ + stage::run_stage（一幕的直线：备输入 → 跑一轮 → 收好产出）stage.rs
  + prepare_turn_inputs / run_compress chat_loop/inputs.rs
  + drive_head（轮首派发点）head_exec.rs
  + settle_reasoning / persist_turn chat_loop/turn.rs
@@ -77,10 +79,10 @@ impl: done
 
 **职责边界**：③ 不持有终态落库职责——终态唯一落库点在 session 收尾（② 的消费循环与
 `transcript/publish.rs`）。④ 只负责**这一轮**的事实与产物，不决定会话接下来跑不跑
-（那一格由 ③ 读 `turn_head.closure` 折出，D-168 裁决 4）。
+（那一格由 ③ 读 `turn_head.closure` 折出，`D-222` 裁决 2）。
 后步骤**不存在**：循环只能由 `return` 离开，所有出口都经 `finish_turn`。
 
-### 1.2 主循环：幕的迭代器 + 幕内的不动点
+### 1.2 主循环：幕的迭代器 + 一幕之内的一段直线
 
 **前步骤**（循环之前）
 
@@ -91,25 +93,32 @@ impl: done
 | P3 | `TurnState` 初始化（含 `abort: ExecAbortSignal`）+ `SessionContext` 构造 |
 | P4 | **resume 处理**（`process_resume`）→ `Continue` / `Done` / `Err`，`Done`/`Err` 经 `finish_turn` 提前收尾 |
 
-**循环体**（幕的迭代器 + 幕内的不动点）
+**循环体**（幕的迭代器 + 一幕之内的直线）
 
 | # | 动作 | 内容 | 层次 |
 |---|---|---|---|
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 幕间 |
 | 2 | `gate_turn` | 退出条件（收口 ①）；`Exit` → `finish_turn` | 幕间 |
 | 3 | `begin_drive` | **开一幕**：唤醒格（用户格 / 恢复格）→ 收租 → 配置 → 本幕锚 → 轮次格 | 幕间（迭代器） |
-| 4 | `stage_exec::drive_stage` | **幕内的不动点**：选债 → 还债，直到本幕不再欠账 | 幕内 |
+| 4 | `stage::run_stage` | **一幕之内的直线**：备输入 → 跑一轮 → 收好产出，三步按序各调一次 | 幕内 |
 | 5 | `loop_rows::next_stage_round` | **还开不开下一幕**：读 `turn_head.closure` + 本幕轮次 | 幕间（迭代器） |
 
-第 4 步里欠的**三笔账**（行名即债名；派发点不认步骤号，只认行表）：
+第 4 步的三步（**不是三笔账**——幕不是端口，`turn` 没有一行可以欠）：
 
-| 环步 | 行 | 做什么 |
+| 序 | 动作（`stage.rs` 内私有） | 做什么 |
 |---|---|---|
-| 准备 | `prepare-turn` | `prepare_turn_inputs`：提示词 + 工具 + `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回 / 快路在此被 `drive` 选中）+ `build_request_view`。判成答话的一轮**在这里就地收束**（出口 `result:"closed"`，这一幕没有输入也没有往返） |
-| 宣布 | `announce-turn` | 落 `request{port:turn}`——「这一幕欠一次往返」是**事实**，不是一次函数调用 |
-| 派出 | `dispatch-turn` | 跑 `turn_exec::execute_turn`（整轮交给 v2 运行器：事实原生入格、工具经 `SessionDispatchPort` 三动作分发、中止检查点在运行器内部），**并就地收好产出**：镜像并入 → 中止复查 → `settle_reasoning`（定稿 + 校准 + 并入上下文）→ `persist_turn`（增量落库）→ `finalize_turn_root`（封根，全流程唯一一处） |
+| 一 | `prepare` | `prepare_turn_inputs`：提示词 + 工具 + `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回 / 快路在此被 `drive` 选中）+ `build_request_view`。判成答话的一轮**在这里就地收束**（这一幕没有输入也没有往返） |
+| 二 | `run_turn` | 跑 `turn_exec::execute_turn`（整轮交给 v2 运行器：事实原生入格、工具经 `SessionDispatchPort` 三动作分发、中止检查点在运行器内部） |
+| 三 | `settle` | **就地收好产出**：镜像并入 → 中止复查 → `settle_reasoning`（定稿 + 校准 + 并入上下文）→ `persist_turn`（增量落库）→ `finalize_turn_root`（封根，全流程唯一一处） |
 
-**`persist_turn` 的分支**（落库是**写投影**，不是债——D-168 裁决 6）
+> **为什么三步不再各是一笔债**：一次幕的借用面是**跨步**的（`&mut TurnState` +
+> `&mut SessionContext` 在整幕期间都在手上），做成行就要给这三步各找一个「什么算欠」的
+> 前件，而那些前件只能是「上一步行了没有」——那就是把 Rust 的借用面升格成调度结构。
+> 幕是信封上的分区（`D-222` §二），不是推进单位；三步的次序由代码行序说，不由 `prio` 说。
+>
+> 幕**内**真正的那段环在 `turn_exec::drive_steps`（模型往返与工具批次），它不在这一层。
+
+**`persist_turn` 的分支**（落库是**写投影**，不是债）
 
 | 条件 | 动作 |
 |---|---|
@@ -118,7 +127,7 @@ impl: done
 | 其余 | 增量落库 |
 
 > **这里没有工具执行，也没有压缩拦截**：工具跑在 `execute_turn` 内部（§4.1），
-> 回到派出那一环步时本轮工具早已产出结果；水位响应在轮首派发点选中的
+> 到第三步收产出时本轮工具早已产出结果；水位响应在轮首派发点选中的
 > `policy.compress`（准备段）。
 > `persist_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
 
@@ -133,9 +142,9 @@ impl: done
  汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **「不完整不唤醒」由运行器环体守住**：一个批次的结果全部接进 `exchange` 之后才发
  下一次请求（§4.1），不在闸门里判在途工具。
-- **工具执行**归派出那一环步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort`
+- **工具执行**归第二步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort`
  分发）；`persist_turn` 只做「增量落库 + 截断告警」，不承担工具执行（见 §4.1）。
-- **流向不由返回值决定**（D-168 裁决 4）：幕停下之后是收工还是再开一幕，读的是收束格的
+- **流向不由返回值决定**（`D-222` 裁决 2）：幕停下之后是收工还是再开一幕，读的是收束格的
  `reason`（`turn_head.closure`）与本幕轮次。执行体交回的只有一件事——「这一幕跑完了没有」。
 
 ---
@@ -350,23 +359,24 @@ pub async fn run_chat_loop(
  Err(exit) => return finish_turn(orch, &context, &sink, &turn, exit).await,
  };
 
- // 步骤 4 · 幕内的不动点（选债 → 还债，直到本幕不再欠账）
- // 三笔账都在这一个派发点里：prepare-turn → announce-turn → dispatch-turn。
- // 派出那一环步顺带把产出收好（镜像并入 → 定格 → 落库 → 封根），所以这里返回的
- // 只有一件事：这一幕跑完了没有。
- let staged = match stage_exec::drive_stage(stage_exec::StageDrive { … }).await {
+ // 步骤 4 · 一幕之内的直线（备输入 → 跑一轮 → 收好产出）
+ // 三步按序各调一次，次序就是代码行序：幕不是端口，没有一行为它记「欠了什么」。
+ // 收好产出（镜像并入 → 定格 → 落库 → 封根）在第三步里，所以这里返回的只有一件事：
+ // 这一幕跑完了没有（`Some(exit)` = 中途中止 / 失败）。
+ let interrupted = match stage::run_stage(stage::Stage { … }).await {
  Err(ActorError::Read(e)) => return finish_turn(…, TurnExit::Failed(e)).await,
- Err(e) => return finish_turn(…, TurnExit::Failed(内部错误(f"{e:?}"))).await,
- Ok(staged) => staged,
+ Err(e) => return finish_turn(…, TurnExit::Failed(内部错误(format!("本幕执行失败：{e:?}")))).await,
+ // 幕跑完了（`None`）或没跑完（`Some(exit)`）：流向不在这里，读事实。
+ Ok(exit) => exit,
  };
- if let Some(exit) = staged.interrupted {
+ if let Some(exit) = interrupted {
  return finish_turn(orch, &context, &sink, &turn, exit).await;
  }
 
  // 步骤 5 · 幕间：还开不开下一幕（判据是**事实**，不是返回值）
  // 收束格的 `reason == exhausted`（被输出上限掐断）∧ 本幕轮次没到上限 ⇒ 再开一幕，
  // 轮次取 `round + 1`；其余一律收工。`TurnFlow` 那个「按步骤号决定下一步」的判定点
- // 由此整个消失（D-168 裁决 4）。
+ // 由此整个消失（`D-222` 裁决 2）。
  let Some(round) = loop_rows::next_stage_round(&turn.facts, turn.turn_no, turn.now_ms) else {
  return finish_turn(orch, &context, &sink, &turn, TurnExit::Completed).await;
  };

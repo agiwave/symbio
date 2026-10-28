@@ -144,14 +144,15 @@ fn plain() -> Value {
 
 // ── 端口声明 ─────────────────────────────────────────────────────────────
 
-/// 批次并发是端口声明的一部分：只有 `tool` 允许同批并发；`turn` / `model`
-/// 都是一次调用，没有「同批子债」。
+/// 批次并发是端口声明的一部分：只有 `tool` 允许同批并发；`model`
+/// 是一次调用，没有「同批子债」。
 #[test]
 fn only_the_tool_port_declares_batch_concurrency() {
     let of = |port: &str| PORTS.iter().find(|p| p.port == port).map(|p| p.concurrent);
     assert_eq!(of("tool"), Some(true));
-    assert_eq!(of("turn"), Some(false));
     assert_eq!(of("model"), Some(false));
+    // `turn` 不是端口（`D-222` §一）：它连声明都没有，遑论并发。
+    assert_eq!(of("turn"), None);
 }
 
 // ── 五条策略行逐条判据 ───────────────────────────────────────────────────
@@ -748,99 +749,6 @@ fn the_next_stage_is_read_from_the_closure_reason() {
     assert_eq!(super::next_stage_round(&bare, 1, 0), Some(1));
 }
 
-/// 「本幕派出过没有」读的是派发格自己落的终局（`turn_round.done`），不是返回值。
-///
-/// 外环停下来之后要靠它把「没派出去」与「派出了但没关」分开——两者都不许安静地收场，
-/// 但要查的地方不同（前者查行表前件，后者查收束行为什么没开账）。
-#[test]
-fn the_stage_knows_whether_it_dispatched() {
-    let base = vec![
-        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
-    assert!(!super::stage_dispatched(&base, 1, 0), "还没宣布，更没派出");
-
-    let mut announced = base.clone();
-    announced.push(ev(
-        1,
-        "request",
-        json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1}),
-    ));
-    assert!(
-        !super::stage_dispatched(&announced, 1, 0),
-        "宣布了不算派出：`request` 只是「欠一笔往返」"
-    );
-
-    let mut done = announced.clone();
-    done.push(ev(
-        1,
-        "response",
-        json!({"port": "turn", "id": "turn-1-d0-r0"}),
-    ));
-    assert!(super::stage_dispatched(&done, 1, 0));
-}
-
-#[test]
-fn the_outer_ring_announces_before_it_dispatches() {
-    // 幕首三格：用户格（幕锚）+ 配置 + 轮次格。
-    let open = vec![
-        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
-        ev(1, "session.config", plain()),
-        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-    ];
-    let call = json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1});
-
-    // 第一笔债是**准备**（56）：一幕先备输入，才谈得上宣布与派出（D-168 裁决 3）。
-    let picked = super::next_stage(&open, 1, 0, super::STAGE_ACTORS).expect("幕首欠一次准备");
-    assert_eq!(picked.row, "prepare-turn");
-    assert_eq!(picked.by, super::PREPARE);
-
-    // 输入备好之后，第二笔债是**宣布**（57），不是派出：外环的「宣布 → 派出」是
-    // 两个环步（D-168 与 D-166 同形）。这一格以前是 `execute-turn` 直接抢到，
-    // 因为「一幕欠一次往返」那时还不落成事实。
-    let mut prepared = open.clone();
-    prepared.push(ev(
-        1,
-        "turn.stage",
-        json!({"stage": "inputs", "round": 0, "result": "ready"}),
-    ));
-    let picked =
-        super::next_stage(&prepared, 1, 0, super::STAGE_ACTORS).expect("备好输入之后欠一次宣布");
-    assert_eq!(picked.row, "announce-turn");
-    assert_eq!(picked.by, super::ANNOUNCE);
-
-    // 宣布之后：那笔账在日志上开着，轮到派发行。
-    let mut announced = prepared.clone();
-    announced.push(ev(1, "request", call.clone()));
-    let picked = super::next_stage(&announced, 1, 0, super::STAGE_ACTORS).expect("宣布之后欠派出");
-    assert_eq!(picked.row, "dispatch-turn");
-    assert_eq!(picked.by, super::TURN_RELAY);
-
-    // 派出且答回来：外环这一幕不再欠。轮内那台 host 的账不在这里（它的子集不含
-    // `execute-turn` / `close-turn`，那两行由 `next` 那张表回答）。
-    let mut answered = announced.clone();
-    answered.push(ev(1, "sent", call.clone()));
-    answered.push(ev(1, "response", call.clone()));
-    assert!(
-        super::next_stage(&answered, 1, 0, super::STAGE_ACTORS).is_none(),
-        "往返已有终局，外环这一幕收工"
-    );
-
-    // 派发被判死（中止 / 适配器失败）：宣布行**不许**重新开账。这一格是
-    // `turn_round.done` 存在的全部理由——`failed` 之后本幕没有收束格，
-    // 只看「该不该收束」会让宣布行开一笔又失败、再开一笔。
-    let mut failed = announced.clone();
-    failed.push(ev(
-        1,
-        "failed",
-        json!({"port": "turn", "id": "turn-1-d0-r0", "attempt": 1, "why": "aborted"}),
-    ));
-    assert!(
-        super::next_stage(&failed, 1, 0, super::STAGE_ACTORS).is_none(),
-        "派发失败之后不许重新宣布一笔"
-    );
-}
-
 #[test]
 fn execute_row_closes_on_turn_closed() {
     let open = vec![
@@ -981,25 +889,18 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
-            // 外环的准备行（D-168 裁决 3）：一幕先备输入（56），再谈宣布（57）。
-            "prepare-turn",
-            // 外环的宣布行（D-168）：同一点上比执行行更靠前（57 < 60），
-            // 因为「一幕欠一次 `turn` 往返」的第一步是宣布它。
-            "announce-turn",
             "execute-turn",
-            // 每个端口两行（`dispatch` / `await`）+ 一条管所有端口的租约行
-            // （ `turn` / 步 2 的 `model` / 步 3 的 `tool`）；
+            // 每个端口两行（`dispatch` / `await`）：`model`（ 步 2）与 `tool`
+            // （ 步 3）。租约**没有行**——看护读 `stale_sent` 视图，不经行表；
+            // `turn` 不是端口（`D-222` §一），它那四行随端口退场。
             // `open-tools` 是工具调用的创建行（D-117），不与派发合并。
-            "dispatch-turn",
             "dispatch-model",
             "open-tools",
             "dispatch-tools",
             // 拒绝之后还得有人收尾（否则全被拒的一批永远跑不到 `failed`）。
             "deny-tools",
-            "await-turn",
             "await-model",
             "await-tools",
-            "lease",
         ]
     );
     assert!(
@@ -1017,12 +918,8 @@ fn rows_are_stable_and_globally_ordered() {
             symbio_core::LatencyTier::Reflex,
             // 收束入格不调模型：反射档。
             symbio_core::LatencyTier::Reflex,
-            // 准备与宣布都只入格不调模型（模型在它们内部的 host 里）；派出才进深度档。
-            symbio_core::LatencyTier::Fast,
-            symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Deep,
-            // 派发 / 看护是记账，不调模型；`await` 跟的是被等的那一端。
-            symbio_core::LatencyTier::Fast,
+            // 派发是记账，不调模型；`await` 跟的是被等的那一端。
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Fast,
@@ -1030,8 +927,6 @@ fn rows_are_stable_and_globally_ordered() {
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Deep,
             symbio_core::LatencyTier::Deep,
-            symbio_core::LatencyTier::Deep,
-            symbio_core::LatencyTier::Fast,
         ]
     );
 }
@@ -1216,13 +1111,16 @@ fn declared_facts_all_have_a_row_home() {
     );
 }
 
-// ── 端口 `turn` 的三行─────────────────────────────────────────
+// ── 端口 `model` 的两行 + 租约视图─────────────────────────────
+//
+// `turn` 端口退场（`D-222` §一）之后，这两行只属于 `model` / `tool`；租约
+// **没有行**——看护读 `stale_sent` 视图（`port::reap`），不经行表（`TC-1b`）。
 
 fn request(id: &str, attempt: u64) -> Event {
     ev(
         1,
         symbio_core::EVENT_REQUEST,
-        json!({ "port": "turn", "id": id, "attempt": attempt }),
+        json!({ "port": "model", "id": id, "attempt": attempt }),
     )
 }
 
@@ -1231,7 +1129,7 @@ fn sent(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
         1,
         symbio_core::EVENT_SENT,
         json!({
-            "port": "turn",
+            "port": "model",
             "id": id,
             "attempt": attempt,
             "lease_ms": lease_ms,
@@ -1245,56 +1143,69 @@ fn sent(id: &str, attempt: u64, lease_ms: u64, cap: u64, ts: i64) -> Event {
 fn a_request_opens_dispatch_and_sent_closes_it() {
     // 开账：`request` 落了、`sent` 还没落 ⇒ 欠一次派发。
     let asked = vec![request("t-1", 1)];
-    assert!(owes("dispatch-turn", &asked, 0));
+    assert!(owes("dispatch-model", &asked, 0));
     // 关账：引擎落 `sent` 之后不再是派发的账。
     let out = vec![request("t-1", 1), sent("t-1", 1, 1_000, 1, 0)];
-    assert!(!owes("dispatch-turn", &out, 0));
-    // 但它变成**等**的账：`await-turn` 在（且是 blocked：`by = None`）。
+    assert!(!owes("dispatch-model", &out, 0));
+    // 但它变成**等**的账：`await-model` 在（且是 blocked：`by = None`）。
     let debts = owed(ROWS, &frozen(), &out, 0);
-    let wait = debts.iter().find(|d| d.decl.name == "await-turn").unwrap();
+    let wait = debts.iter().find(|d| d.decl.name == "await-model").unwrap();
     assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
 }
 
 #[test]
 fn a_failure_closes_both_the_dispatch_and_the_wait() {
-    // `failed` 关的是逻辑 id（所有尝试）：派发行与等待行同时收口。
+    // `failed` 关的是这一次尝试：派发行与等待行同时收口。
     let events = vec![
         request("t-1", 1),
         sent("t-1", 1, 1_000, 1, 0),
         ev(
             1,
             symbio_core::EVENT_FAILED,
-            json!({ "port": "turn", "id": "t-1", "attempt": 1, "why": "boom" }),
+            json!({ "port": "model", "id": "t-1", "attempt": 1, "why": "boom" }),
         ),
     ];
-    assert!(!owes("dispatch-turn", &events, 0));
-    assert!(!owes("await-turn", &events, 0));
+    assert!(!owes("dispatch-model", &events, 0));
+    assert!(!owes("await-model", &events, 0));
 }
 
 #[test]
-fn the_lease_row_opens_only_after_the_deadline() {
-    // 时间不进欠账公式：租约行只对 `stale_sent.stale` 开账。
+fn the_lease_view_goes_stale_only_after_the_deadline() {
+    // 时间不进欠账公式：`stale_sent` 把 `now` 与 `lease_ms` 折成 `stale` 一格，
+    // 看护（`port::reap`）读它。租约**没有行**——行是「该还哪一笔」的声明，
+    // 而看护问的是「哪一笔过期了」。
+    let stale_at = |events: &[Event], now: i64| {
+        super::view("stale_sent", events, 1, now)
+            .and_then(|v| {
+                v.as_array().and_then(|a| {
+                    a.iter()
+                        .find(|e| e.get("id").and_then(|x| x.as_str()) == Some("t-1"))
+                        .and_then(|e| e.get("stale").and_then(|x| x.as_bool()))
+                })
+            })
+            .unwrap_or(false)
+    };
     let events = vec![sent("t-1", 1, 1_000, 1, 0)];
-    assert!(!owes("lease", &events, 999));
-    assert!(owes("lease", &events, 1_000));
+    assert!(!stale_at(&events, 999));
+    assert!(stale_at(&events, 1_000));
 
-    // 应答回来之后，哪怕时间继续走也不欠了。
+    // 应答回来之后，哪怕时间继续走也不算卡住（在途已关）。
     let mut answered = events.clone();
     answered.push(ev(
         1,
         symbio_core::EVENT_RESPONSE,
-        json!({ "port": "turn", "id": "t-1", "attempt": 1 }),
+        json!({ "port": "model", "id": "t-1", "attempt": 1 }),
     ));
-    assert!(!owes("lease", &answered, 100_000));
+    assert!(!stale_at(&answered, 100_000));
 }
 
 // ── 「在等」与「没事」的区分（D-126）────────────────────────────
 
 /// `waiting` 只认「开账条件 = `sent`」的账——即「已派出、应答还没回来」。
 ///
-/// 反例同样是判据的一半：`lease` 的账**不算**在等（它开在 `stale_sent` 这个视图上，
-/// 说的是「卡太久了」而不是「还在路上」），未接线的策略行也不算（那是「没人做」，
-/// 不是「在等」）。三条一起才说明这个理由不是「有 blocked 债」的同义词。
+/// 反例同样是判据的一半：`stale_sent` 里的那些**不算**在等（它说的是「卡太久了」
+/// 而不是「还在路上」），未接线的策略行也不算（那是「没人做」，不是「在等」）。
+/// 三条一起才说明这个理由不是「有 blocked 债」的同义词。
 #[test]
 fn waiting_means_a_sent_request_without_a_terminal() {
     // 空日志：没事可做，不是在等。
@@ -1312,7 +1223,7 @@ fn waiting_means_a_sent_request_without_a_terminal() {
         done.push(ev(
             1,
             terminal,
-            json!({ "port": "turn", "id": "t-1", "attempt": 1 }),
+            json!({ "port": "model", "id": "t-1", "attempt": 1 }),
         ));
         assert!(
             !super::waiting(&done, 1, 0),
@@ -1404,16 +1315,30 @@ fn every_await_row_is_the_dual_of_its_dispatch_row() {
 }
 
 #[test]
-fn the_lease_row_is_one_row_for_every_port() {
-    // 第三行不按端口写：它读 `stale_sent` 的实例，端口在债键里。
+fn the_lease_is_one_view_for_every_port() {
+    // 租约**不是行**：它是一份视图（`stale_sent`），端口在实例里，不在声明里。
     // 少了这一条性质，加端口就要加租约行，判据 1 的「0 个新行」就成了假话。
-    let leases: Vec<_> = ROWS
+    assert!(
+        ROWS.iter().all(|d| !d.name.starts_with("lease")),
+        "租约不该有行：行是「该还哪一笔」，而看护问的是「哪一笔过期了」"
+    );
+    let both = vec![
+        sent("m-1", 1, 1_000, 1, 0),
+        ev_at(
+            1,
+            symbio_core::EVENT_SENT,
+            json!({ "port": "tool", "id": "c-1", "attempt": 1, "lease_ms": 1_000, "attempt_cap": 2 }),
+            0,
+        ),
+    ];
+    let stale: Vec<String> = super::view("stale_sent", &both, 1, 5_000)
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
         .iter()
-        .filter(|d| d.name.starts_with("lease"))
+        .filter(|e| e.get("stale").and_then(|x| x.as_bool()) == Some(true))
+        .filter_map(|e| e.get("port").and_then(|x| x.as_str()).map(str::to_string))
         .collect();
-    assert_eq!(leases.len(), 1);
-    assert_eq!(leases[0].name, "lease");
-    assert_eq!(leases[0].owes.source, "stale_sent");
+    assert_eq!(stale, vec!["model", "tool"], "一个视图管所有端口");
 }
 
 // ── 端口 `model` 的两行────────────────────────────────────
@@ -1507,14 +1432,15 @@ fn the_execute_row_steps_aside_while_a_round_is_undispatched() {
 }
 
 #[test]
-fn the_model_rows_do_not_disturb_the_turn_rows() {
-    // 两个端口的行**互不串账**：一条 `turn` 的 `request` 不让 `model` 的派发行开账。
+fn the_model_rows_do_not_disturb_the_tool_rows() {
+    // 两个端口的行**互不串账**：一条 `model` 的 `request` 不让 `tool` 的派发行开账。
     let events = vec![request("t-1", 1)];
-    assert!(owes("dispatch-turn", &events, 0));
+    assert!(owes("dispatch-model", &events, 0));
     assert!(
-        !owes("dispatch-model", &events, 0),
-        "端口是债键的一部分：`turn` 的账不能开 `model` 的行"
+        !owes("dispatch-tools", &events, 0),
+        "端口是债键的一部分：`model` 的账不能开 `tool` 的行"
     );
+    assert!(!owes("authorize-tool", &events, 0));
 }
 
 // ── 工具端口与授权级联────────────────────────────────────
@@ -2386,8 +2312,7 @@ fn the_row_table_and_the_binding_table_agree() {
         assert!(
             super::entry_of(by, super::ACTORS).is_some()
                 || super::head_entry_of(by, super::HEAD_ACTORS).is_some()
-                || super::report_entry_of(by, super::REPORT_ACTORS).is_some()
-                || super::stage_entry_of(by, super::STAGE_ACTORS).is_some(),
+                || super::report_entry_of(by, super::REPORT_ACTORS).is_some(),
             "行 {} 的 `by` 没有动作",
             d.name
         );
@@ -2457,6 +2382,15 @@ fn writes_closed_admits_declared_protocol_and_exempted_only() {
 
 // ── 本次 drive 的 `now`：只来自唤醒事实（判据 12 · ）──────────────────
 
+/// 「这份日志在 `now` 这一刻有没有到期的在途」——租约没有行，判据读视图。
+fn any_stale(events: &[Event], now: i64) -> bool {
+    super::view("stale_sent", events, 1, now)
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .any(|e| e.get("stale").and_then(|x| x.as_bool()) == Some(true))
+}
+
 /// 一幕的日志：唤醒格（`ts = wake_ts`）+ 上一世派出、没回来的 `sent`（租约 1000ms）。
 ///
 /// 返回切片与**幕锚**——唤醒格的 seq，生产代码里它就是 `drive_seq`。
@@ -2479,16 +2413,12 @@ fn the_drive_now_is_the_wake_fact_timestamp() {
     // 出的那种量级）就变成欠——这条差异正是「时间从日志来」与「时间现读」的分界。
     let (events, anchor) = drive_with_stale_sent(500);
     assert_eq!(super::wake_now_ms(&events, anchor), 500);
-    assert!(!owes("lease", &events, super::wake_now_ms(&events, anchor)));
-    assert!(owes("lease", &events, 60_000));
+    assert!(!any_stale(&events, super::wake_now_ms(&events, anchor)));
+    assert!(any_stale(&events, 60_000));
 
     // 停机更久的一次唤醒：日志没变，只是那条事实的 ts 更晚 ⇒ 租约到期。
     let (later, later_anchor) = drive_with_stale_sent(1_500);
-    assert!(owes(
-        "lease",
-        &later,
-        super::wake_now_ms(&later, later_anchor)
-    ));
+    assert!(any_stale(&later, super::wake_now_ms(&later, later_anchor)));
 
     // 幕锚不在这份切片里 ⇒ 0，不猜一个来路不明的时刻。
     assert_eq!(super::wake_now_ms(&events[1..], anchor), 0);
@@ -2548,15 +2478,6 @@ fn the_overlap_report_on_the_production_table() {
     // 步 5d 再给 `tools_open` 补了请求面（`request`），v11 又给 `model_open` 补了
     // 派发前格（`sent`，判「这一笔派出去了没有」）——凡是共用这个幕头的相交对，
     // 名单就一起变宽，这正是第 4 条要「点名而不只报非空」的理由。
-    // 外环宣布行那一对：`turn_round` 的读面（幕锚两格 + 协议四族的键）。
-    let turn_round: &[&str] = &[
-        "failed",
-        "request",
-        "response",
-        "sent",
-        "turn.stage",
-        "user.message",
-    ];
     let head: &[&str] = &[
         "chat.assistant.fallback",
         "chat.assistant.final",
@@ -2572,40 +2493,22 @@ fn the_overlap_report_on_the_production_table() {
         rendered,
         vec![
             // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
-            //
-            // 准备行（D-168 裁决 3）也读幕头（`prepared` 那一格折在 `turn_head` 上），
-            // 因此它与这四行各成一对：读面相同、前件不同（`prepared` vs 各行的开关与
-            // 结论格）。它们今天由 `prio`（10/30/40/50 < 56）决出，报告不知道这些。
+            // 它们今天由 `prio`（10/30/40/50）决出，报告不知道这些。
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
             ("policy.classify", "policy.reflex", head),
-            ("policy.classify", "prepare-turn", head),
             ("policy.compress", "policy.recall", head),
             ("policy.compress", "policy.reflex", head),
-            ("policy.compress", "prepare-turn", head),
             ("policy.recall", "policy.reflex", head),
-            ("policy.recall", "prepare-turn", head),
-            ("policy.reflex", "prepare-turn", head),
             // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
             // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
             // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与
             // 收束 / 执行两行的 `(turn)` 不同，装载期不再报这两对。
             //
-            // 外环宣布行（D-168）读的是 `turn_round`：那张视图的读面只含幕锚两格与
-            // 协议四族的键，因此与收束 / 执行两行在「本幕的协议格」这一点上相交。
-            // 名单显形而不是静默——这三对今天由前件与 `prio` 决出（55 < 57 < 60），
-            // 报告只知道它们相交、不知道这些。三对按表里的下标排序，故宣布行那两对
-            // 落在收束 / 执行之间与之后，与名单顺序一致。
-            ("close-turn", "announce-turn", turn_round),
+            // 外环的宣布 / 派出两行与租约行都已退场：前者随 `turn` 端口（`D-222` §一），
+            // 后者随「看护读视图、不经行表」（`TC-1b`）。所以这张名单里只剩两条
+            // 「同一点上竞争」的对，两对都由前件决出，报告只知道它们相交。
             ("close-turn", "execute-turn", head),
-            ("announce-turn", "execute-turn", turn_round),
-            // 租约看护读 `stale_sent`，它与三行 await 的前件折出同一批协议格。
-            // `open-tools` 不再与 `lease` 相交（D-138）：创建行的 `response` 是
-            // 逻辑键（它开的是 N 笔调用，不是某一次尝试），租约行的出口格收窄到
-            // `(port, id, attempt)`——键形状不同，装载期不再报这一对。
-            ("await-turn", "lease", &["sent"]),
-            ("await-model", "lease", &["sent"]),
-            ("await-tools", "lease", &["sent"]),
         ]
     );
 }
@@ -2639,13 +2542,16 @@ fn every_declared_port_has_its_answer_exits() {
 /// 3. 同一份切片、同一个 `now` 再求值一次，逐字相同。
 ///
 /// 为什么这个选材能红：若实现把 `now` 参数当摆设、偷偷读墙钟（`SystemTime::now`，
-/// 量级是纪元毫秒），第二次求值读到的就是天文数字，`lease` 行当场从「不欠」翻成
-/// 「欠」——两份渲染就不同。选在租约线**之下**是关键：线之上时墙钟与参数给出
-/// 同一答案（都到期），用例恒绿，那等于没判。`ring.rs` 全文 grep `SystemTime` /
-/// `Instant::now` 零出现，与本条用例各据一半。
+/// 量级是纪元毫秒），第二次求值读到的就是天文数字，那份在途当场从「没过期」翻成
+/// 「过期」——两份渲染就不同。`ring.rs` 全文 grep `SystemTime` / `Instant::now`
+/// 零出现，与本条用例各据一半。
 ///
-/// 反面对照（后半）：把显式参数从 999 挪到 1000，结论必须翻。两条合起来才说明
-/// 时间**只**从参数进函数——否则一个压根不读时间的恒真实现也能过前半。
+/// ## 租约不是行之后，`now` 落在视图上（`D-222` / `TC-1b` 的直接后果）
+///
+/// 表上唯一吃 `now` 的那一行（`lease`）随端口维护一起退场：看护现在读 `stale_sent`
+/// 视图，不经行表。于是这条判据的后半改判在**视图**上——同一份切片把参数从 999
+/// 挪到 1000，`stale_sent` 的 `stale` 必须翻；而 `owed` 在这份切片上**与 `now`
+/// 无关**（这正是「看护不是还债」的可执行形态：一个数变了，账一条都不多）。
 #[test]
 fn owed_has_no_input_beyond_its_four_arguments() {
     let events = vec![sent("t-1", 1, 1_000, 1, 0)];
@@ -2656,8 +2562,8 @@ fn owed_has_no_input_beyond_its_four_arguments() {
         "空账上的「逐字相同」是恒真断言，这条必须先看住非空"
     );
     assert!(
-        before.iter().all(|d| d.decl.name != "lease"),
-        "用例前提：now = 999 在租约线（ts 0 + 1000）之下"
+        before.iter().all(|d| !d.decl.name.starts_with("lease")),
+        "用例前提：租约没有行（它是一份视图）"
     );
 
     // 让真实时间过去：读一次墙钟就会是不同的值。
@@ -2670,11 +2576,20 @@ fn owed_has_no_input_beyond_its_four_arguments() {
         "同一事实切片、同一个 now，隔了真实时间再求值，必须逐字相同"
     );
 
-    // 反面对照：时间确实从第四个参数进来。
-    let at_deadline = owed(ROWS, &f, &events, 1_000);
-    assert!(
-        at_deadline.iter().any(|d| d.decl.name == "lease"),
-        "now = 1000 时租约行开账 ⇒ 判据捧的不是一个不读时间的实现"
+    // 反面对照：时间确实从第四个参数进来——它落在视图上，不在行表上。
+    let stale = |now: i64| {
+        super::view("stale_sent", &events, 1, now)
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .any(|e| e.get("stale").and_then(|x| x.as_bool()) == Some(true))
+    };
+    assert!(!stale(999), "now = 999 在租约线（ts 0 + 1000）之下");
+    assert!(stale(1_000), "now = 1000 跨过租约线 ⇒ 在途算卡住");
+    assert_eq!(
+        format!("{:?}", owed(ROWS, &f, &events, 1_000)),
+        format!("{:?}", owed(ROWS, &f, &events, 999)),
+        "租约不在表上 ⇒ 「过期了」不改一笔账；它还债的时机由 `port::reap` 定"
     );
 }
 
@@ -2753,21 +2668,19 @@ fn every_control_plane_declaration_records_its_owner() {
     }
 }
 
-/// 一份 27 格的会话日志，形状照一次真实 CLI 实测（过 `--strict` 验收的长会话）：
-/// 第一轮开幕即派发、随后崩溃只留下两笔 `sent`；第二轮重启，先判死上一世的两笔，
+/// 一份 22 格的会话日志，形状照一次真实 CLI 实测（过 `--strict` 验收的长会话）：
+/// 第一轮开幕即派发，随后崩溃只留下一笔 `sent`；第二轮重启，先判死上一世那一笔，
 /// 再重跑，走完一次模型往返与一次工具往返。
 ///
-/// 第一轮那两笔 `sent` 的 ts 回拨到租约线之前很久（实测里崩溃重启留下的就是这种
-/// 形状）——所以重启后它们**必判死**，这正是截断测试要的「终局格落在后面」。
+/// 第一轮那笔 `sent` 的 ts 回拨到租约线之前很久（实测里崩溃重启留下的就是这种
+/// 形状）——所以重启后它**必判死**，这正是截断测试要的「终局格落在后面」。
 fn twenty_seven_cells() -> Vec<Event> {
-    let stale = 1_000; // 第一轮两笔 sent 的 ts：远在租约线之前
+    let stale = 1_000; // 第一轮那笔 sent 的 ts：远在租约线之前
     vec![
-        // 第一轮：开幕、派发，然后没了（10 格）。
+        // 第一轮：开幕、派发，然后没了（8 格）。
         ev(0, "user.message", json!({"text": "第一轮", "id": "u-0"})),
         ev(0, "session.config", plain()),
         ev(0, "turn.stage", json!({"stage": "round", "round": 0})),
-        request("turn-0-d0-r0", 1),
-        sent("turn-0-d0-r0", 1, 600_000, 1, stale),
         ev(
             0,
             "turn.stage",
@@ -2783,28 +2696,13 @@ fn twenty_seven_cells() -> Vec<Event> {
             "turn.dispatch",
             json!({"budget_ms": 60000, "principal": "session/main", "tier": "deep"}),
         ),
-        model_request("model-0-d0-s0"),
-        ev_at(
-            0,
-            symbio_core::EVENT_SENT,
-            json!({
-                "port": "model", "id": "model-0-d0-s0", "attempt": 1,
-                "lease_ms": 600_000, "attempt_cap": 1,
-            }),
-            stale,
-        ),
-        // 第二轮：重启，先判死，再重跑（17 格）。
+        request("model-0-d0-s0", 1),
+        sent("model-0-d0-s0", 1, 600_000, 1, stale),
+        // 第二轮：重启，先判死，再重跑（14 格）。
         ev(
             1,
             "user.message",
             json!({"text": "第二轮（重启后）", "id": "u-1"}),
-        ),
-        ev(
-            1,
-            symbio_core::EVENT_FAILED,
-            json!({
-                "port": "turn", "id": "turn-0-d0-r0", "attempt": 1, "why": "lease_expired",
-            }),
         ),
         ev(
             1,
@@ -2815,8 +2713,6 @@ fn twenty_seven_cells() -> Vec<Event> {
         ),
         ev(1, "session.config", plain()),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
-        request("turn-1-d10-r0", 1),
-        sent("turn-1-d10-r0", 1, 600_000, 1, 1_500_000),
         ev(
             1,
             "turn.stage",
@@ -2871,7 +2767,7 @@ fn twenty_seven_cells() -> Vec<Event> {
 
 /// 判据 8：事实的任意前缀都合法（拆批 / 崩溃恢复的前提）。
 ///
-/// 做法：对 27 格会话逐前缀截断重放，每一段都要求满足三样——
+/// 做法：对 22 格会话逐前缀截断重放，每一段都要求满足三样——
 ///
 /// 1. **求值有定义**：不 panic（崩溃恢复时日志停在哪一格是不确定的）；
 /// 2. **每一段都确定**：同一段再求值一次逐字相同（回放可重建落到每个截断点上）；
@@ -2879,14 +2775,14 @@ fn twenty_seven_cells() -> Vec<Event> {
 ///    （它的读方是审计投影，见 `declared_facts_all_have_a_row_home`），所以它是
 ///    可证明无害的那一格。视图若偷看全 log / 数格数 / 拿「最后一条」当锚，就会红。
 ///
-/// 再加一条**截断敏感性**——这条判据真正的牙：前缀停在判死之前，第一轮两笔
-/// 「派出未答」的账必须在（恢复才有东西可做）；前缀走到判死之后，它们必须没
+/// 再加一条**截断敏感性**——这条判据真正的牙：前缀停在判死之前，第一轮那笔
+/// 「派出未答」的账必须在（恢复才有东西可做）；前缀走到判死之后，它必须没
 /// （判死真的落了账）。`open_calls` 按切片顺序扫，所以偷看后面格的实现会在
 /// 前半被提前关掉——那崩溃恢复就成了一句假话。
 #[test]
 fn every_prefix_of_a_session_log_is_a_legal_ledger() {
     let events = twenty_seven_cells();
-    assert_eq!(events.len(), 27, "这份夹具就是那份 27 格会话");
+    assert_eq!(events.len(), 22, "这份夹具就是那份 22 格会话");
     let f = frozen();
     let now = 2_000_000; // 远在第一轮那两笔的租约线之外
     assert!(
@@ -2919,12 +2815,16 @@ fn every_prefix_of_a_session_log_is_a_legal_ledger() {
     assert!(owed(ROWS, &f, &[], now).is_empty());
 
     // 截断敏感性：崩溃那一刻与判死之后。
-    let crashed = &events[..10];
-    for row in ["await-turn", "await-model", "lease"] {
-        assert!(owes(row, crashed, now), "崩溃前缀上 `{row}` 必须欠着");
-    }
-    let reaped = &events[..13];
-    for row in ["await-turn", "await-model", "lease"] {
-        assert!(!owes(row, reaped, now), "判死之后 `{row}` 必须收掉");
-    }
+    let crashed = &events[..8];
+    assert!(
+        owes("await-model", crashed, now),
+        "崩溃前缀上 `await-model` 必须欠着"
+    );
+    assert!(any_stale(crashed, now), "崩溃前缀上那笔在途必须算卡住");
+    let reaped = &events[..10];
+    assert!(
+        !owes("await-model", reaped, now),
+        "判死之后 `await-model` 必须收掉"
+    );
+    assert!(!any_stale(reaped, now), "判死之后那笔在途必须收掉");
 }

@@ -99,9 +99,10 @@ test('干净仓：2 处调度旁路 / 基线 2、无承认 ⇒ 通过', () => {
   assert.match(out(r), /幂等点问 0\/9/)
 })
 
-test('OB-001 调度旁路超出基线 ⇒ 红，并列出每一处', () => {
+test('OB-001 调度旁路超出基线 ⇒ 读数（已退场，不判红），并列出每一处', () => {
   const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta', 'alpha']) })
-  assert.equal(r.status, 1, out(r))
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /\[READ\]/)
   assert.match(out(r), /OB-001 派发面变宽：调度旁路.*点数 3 > 基线 2/)
   assert.match(out(r), /a\.rs:\d+ {2}alpha/)
 })
@@ -125,8 +126,10 @@ test('承认过的点**不进**调度旁路那格：旁路基线 0 也能通过�
   const ok = audit({ 'crates/symbio-plugin-loop/src/a.rs': both }, { baseline: '1' })
   assert.equal(ok.status, 0, out(ok))
   assert.match(out(ok), /调度旁路 1\/1（alpha×1）· 幂等点问 1\/9（beta×1）/)
+  // 退场后不再判红，但读数仍要照旧算出来（`[READ]` 是唯一证据）
   const red = audit({ 'crates/symbio-plugin-loop/src/a.rs': both }, { baseline: '0' })
-  assert.equal(red.status, 1, out(red))
+  assert.equal(red.status, 0, out(red))
+  assert.match(out(red), /\[READ\].*点数 1 > 基线 0/)
   assert.match(out(red), /调度旁路.*点数 1 > 基线 0/)
 })
 
@@ -210,7 +213,7 @@ test('OB-004 洗白：标记贴在 `by = None` 的行上 ⇒ 红（哪怕旁路�
   // 这是拆成两格之后**唯一的新失效面**：给策略行的直问补一句「这是护栏」，
   // `BYPASS_BASELINE` 当场归零而代码一行没动。牙在这一条上。
   const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('alpha') }, { baseline: '0' })
-  assert.equal(r.status, 1, out(r))
+  assert.equal(r.status, 0, out(r))
   assert.match(out(r), /OB-004 .*标记贴在了未接执行体的行 `"alpha"`/)
   assert.match(out(r), /唯一的派发点/)
 })
@@ -225,15 +228,15 @@ test('一句承认只顶一个点：同一标记下的第二处直问仍是调�
     },
     { baseline: '0' },
   )
-  assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /调度旁路.*点数 1 > 基线 0/)
-  assert.match(out(r), /幂等点问 1 处 \/ 基线 9/)
+  assert.equal(r.status, 0, out(r))
+  assert.match(out(r), /\[READ\].*点数 1 > 基线 0/)
+  assert.match(out(r), /幂等点问 1\/9/)
 })
 
 test('OB-004 理由没有内容 ⇒ 红（承认账本不许写成装饰）', () => {
   // 判空口径同 R-002：至少要一个字母 / 数字 / 汉字，一个句号不算理由
   const r = audit({ 'crates/symbio-plugin-loop/src/a.rs': marked('beta', { reason: '。' }) }, { baseline: '0' })
-  assert.equal(r.status, 1, out(r))
+  assert.equal(r.status, 0, out(r))
   assert.match(out(r), /OB-004 .*承认理由为空/)
 })
 
@@ -248,7 +251,7 @@ test('OB-004 标记悬空 ⇒ 红（近旁没有直调点的承认不算承认�
     },
     { baseline: '2' },
   )
-  assert.equal(dangling.status, 1, out(dangling))
+  assert.equal(dangling.status, 0, out(dangling))
   assert.match(out(dangling), /OB-004 .*b\.rs:\d+ 承认标记悬空/)
 
   // 窗口内（其上第 3 行）仍然算贴上 ⇒ 钉住「悬空」判的是距离，不是标记本身
@@ -265,7 +268,7 @@ test('OB-004 幂等点问超出自己的基线 ⇒ 红（护栏不许随手加�
     },
     { baseline: '0', precheck: '1' },
   )
-  assert.equal(r.status, 1, out(r))
+  assert.equal(r.status, 0, out(r))
   assert.match(out(r), /OB-004 幂等点问变宽：承认在册的直问 2 > 基线 1/)
 })
 

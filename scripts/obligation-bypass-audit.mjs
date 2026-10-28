@@ -18,15 +18,18 @@
  *
  * | 类 | 判据 | 动作 |
  * |---|---|---|
- * | **调度旁路** | 点名的行 `by = None`（表里没人跑它）且该处**没有**承认标记 | 归零对象；今天 1 处（`policy.reflex`） |
+ * | **调度旁路** | 点名的行 `by = None`（表里没人跑它）且该处**没有**承认标记 | 归零对象；**今天 0 处**（基线 `BYPASS_BASELINE = 0`，已收口） |
  * | **幂等点问** | 执行体（`by = Some`）动手前复核「本行还欠不欠」——并发 / 重放下第二次进入同一动作时的护栏 | **保留**，显式登记；今天 3 处 |
  *
- * ⚠ **调度旁路的归零前件是「外环收编」**（[DE-090-过渡方案](../docs/003-design/090-过渡方案.md)
- * §1.1.2 自己声明它尚未开始），不是把 `owes()` 换个名字。理由是可执行的：给某条
- * `policy.*` 行接上执行体（`by: Some`）之后，内环 `drive_steps` 也会按 `prio` 选中它，
- * 而它的动作需要轮首上下文（编排器 / 会话上下文 / 请求级开销），内环手里没有这些 ⇒
- * `entry_of` 查不到动作 ⇒ 本轮落 `exhausted{no_progress}`。所以「接线」必须先有
- * **按 host 分片的绑定表**，那一条形状属于外环收编，不归本判据催逼。
+ * ⚠ **调度旁路的归零前件是「借用面按步获取」**，不是把 `owes()` 换个名字。理由是可执行的：
+ * 给某条 `policy.*` 行接上执行体（`by: Some`）之后，内环 `drive_steps` 也会按 `prio`
+ * 选中它，而它的动作需要轮首上下文（编排器 / 会话上下文 / 请求级开销），内环手里没有
+ * 这些 ⇒ `entry_of` 查不到动作 ⇒ 本轮落 `exhausted{no_progress}`。所以「接线」必须先有
+ * **借用面按步获取**这个类型前件（`D-222`：一个环、一张绑定表），不归本判据催逼。
+ *
+ * **这个数已经到 0**：最后一处（`policy.reflex`）随 `D-222` 的幕退场一起消失——它不再是
+ * 「外环还没收编」的余量，而是「没有第二套调度」的读数。基线留在 0 是为了让它**只许保持**：
+ * 多出一处就红。
  *
  * 计数口径写在两个基线旁边，**不写在设计文档正文里**——正文会漂，基线不会。
  * DE-090 §3 只写口径与「调度旁路归零」这个定义。
@@ -363,8 +366,27 @@ for (const n of named) {
 
 // ── OB-001 / OB-002 / OB-004：两类计数各自的棘轮 ──────────────────────
 /** 未承认的直调点 = **调度旁路**（归零对象）；带 OB-004 标记的 = **幂等点问**（保留、有上限） */
+let readings = 0
 const bypass = sites.filter((s) => !s.mark)
 const precheck = sites.filter((s) => s.mark)
+
+/**
+ * **退场（SP-033 §4，判据 `J0`）**：`OB-001` 调度旁路点数与 `OB-004` 幂等点问的承认账本，
+ * 断言的都是**过渡构件的残留量**——`by: None` 的行还在、直问还在，它们才有对象。
+ * 终态判据是 `TC-1`（选债口唯一）：直问消失，这两个数就恒为 0，届时它要么恒真要么
+ * 挡住收敛，两种都不是判据。
+ *
+ * 降级 = **照旧算、照旧打印、不判红**（SP-033 §5 第 1 条：先写读数，再撤红，两次改动
+ * 各自可回退）。`OB-003` 不在退场名单里：它断言的"行名可解析"并入 `TC-3`（装载期），
+ * 与过渡形状无关，判红照旧。
+ */
+const RETIRED = new Set(['OB-001', 'OB-001-baseline', 'OB-004'])
+const tally = (code) => {
+  if (RETIRED.has(code)) readings++
+  else errors++
+}
+const paint = (code) =>
+  RETIRED.has(code) ? (t) => yellow(t.replace('[ERROR]', '[READ]')) : red
 
 /** 理由判空与 R-002 同一口径：至少要有一个字母 / 数字 / 汉字，标点不算内容 */
 const REASON_HAS_CONTENT = /[A-Za-z0-9一-鿿]/
@@ -374,15 +396,15 @@ for (const [name, value] of [
   ['PRECHECK_BASELINE', PRECHECK_BASELINE],
 ]) {
   if (!Number.isFinite(value)) {
-    errors++
-    console.log(red(`[ERROR] OB-001 基线 ${name} 不是数字（${value}）—— 判据读不出即失效，宁红不静默`))
+    tally('OB-001-baseline')
+    console.log(paint('OB-001-baseline')(`[ERROR] OB-001 基线 ${name} 不是数字（${value}）—— 判据读不出即失效，宁红不静默`))
   }
 }
 
 if (bypass.length > BYPASS_BASELINE) {
-  errors++
+  tally('OB-001')
   console.log(
-    red(
+    paint('OB-001')(
       `[ERROR] OB-001 派发面变宽：调度旁路（未承认的直调 \`owes()\`）点数 ${bypass.length} > 基线 ${BYPASS_BASELINE} —— ` +
         `环的派发面只许收窄（GO-003 E5）。多出来的点要么接回 \`drive\`（加 \`ActorEntry\`），` +
         `要么说明为什么它不能接回并同步抬高基线（要 \`35-baseline\` 那一格留痕）。` +
@@ -397,9 +419,9 @@ if (bypass.length > BYPASS_BASELINE) {
 
 // ── OB-004：幂等点问的承认必须站得住 ─────────────────────────────────
 if (precheck.length > PRECHECK_BASELINE) {
-  errors++
+  tally('OB-004')
   console.log(
-    red(
+    paint('OB-004')(
       `[ERROR] OB-004 幂等点问变宽：承认在册的直问 ${precheck.length} > 基线 ${PRECHECK_BASELINE} —— ` +
         `护栏可以保留，但不能随手加：那等于多开一条不用过外环收编的逃生通道。` +
         `抬高它要走 \`35-baseline\` 的 \`obligation-precheck\` 那一格留痕`,
@@ -412,9 +434,9 @@ for (const s of precheck) {
   // 直问，把「护栏」写在它上面只是给调度旁路洗白——OB-004 之所以有牙，牙在这里。
   const wired = s.row ? rows.get(s.row)?.wired : undefined
   if (wired === false) {
-    errors++
+    tally('OB-004')
     console.log(
-      red(
+      paint('OB-004')(
         `[ERROR] OB-004 ${rel}:${s.line} 标记贴在了未接执行体的行 \`"${s.row}"\`（\`by = None\`）上 ⇒ ` +
           `这不是「动手前复核」，是这一行**唯一的派发点**：调度旁路洗白（归零对象不许用注释了结）`,
       ),
@@ -429,18 +451,18 @@ for (const s of precheck) {
 for (const mk of marks) {
   const rel = path.relative(ROOT, mk.file).replace(/\\/g, '/')
   if (!REASON_HAS_CONTENT.test(mk.reason)) {
-    errors++
+    tally('OB-004')
     console.log(
-      red(
+      paint('OB-004')(
         `[ERROR] OB-004 ${rel}:${mk.line} 承认理由为空（\`${mk.reason}\`）⇒ ` +
           `标记变成装饰：至少要写清「防的是哪一次重复进入」（判空口径同 R-002）`,
       ),
     )
   }
   if (!usedMarks.has(mk)) {
-    errors++
+    tally('OB-004')
     console.log(
-      red(
+      paint('OB-004')(
         `[ERROR] OB-004 ${rel}:${mk.line} 承认标记悬空：其下 ${MARK_LOOKBACK} 行内没有**由它采用**的直调点` +
           `（没有直调点，或那一点已有更近的承认）⇒ 删掉它，或把它挪到真护栏旁边`,
       ),
@@ -455,6 +477,14 @@ const brief = (list) => {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([r, n]) => `${r}×${n}`)
     .join(' · ')
+}
+
+if (readings) {
+  console.log(
+    yellow(
+      `[READ] 退场读数 ${readings} 条：OB-001 / OB-004 已按 SP-033 §4 降为读数（不判红，承接在 TC-1b）`,
+    ),
+  )
 }
 
 if (errors) {

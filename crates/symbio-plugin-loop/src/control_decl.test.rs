@@ -135,10 +135,8 @@ fn control_plane_loads_and_freezes() {
             "turn_head",
             "turn_stages",
             "turn_closed",
-            // 本幕的 `turn` 端口走到哪一步（v1 / D-168）：外环宣布行的唯一前件源，
-            // 单开一张而不并进 `turn_head`——并进会把 `request` 拉进出口线，
-            // 与 `open-tools` 连成假环。
-            "turn_round",
+            // `turn_round` 已随 `turn` 端口退场（`D-222` §一）：它的两个读者是
+            // `announce-turn` / `dispatch-turn`，两条行一起删了。
             "report_due",
             "reported_anchors",
         ]
@@ -158,9 +156,10 @@ fn control_plane_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v13：`closure`（D-168 裁决 4，本幕最近一条收束格的 `reason`）
-    // 是最新的一格，幕间判据读它决定「还开不开下一幕」；v12 的 `prepared`
-    // （D-168 裁决 3，本幕落过 `inputs` 阶段格没有）是 `prepare-turn` 的前件；
+    // `turn_head` 到 v13：`closure`（本幕最近一条收束格的 `reason`）是最新的一格，
+    // 幕间判据读它决定「还开不开下一幕」；v12 的 `prepared`（本幕落过 `inputs`
+    // 阶段格没有）的读者 `prepare-turn` 行已随 `turn` 端口退场（`D-222`），
+    // 这一格与 `turn.stage{inputs}` 目前都无生产读者；
     // v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
     // 从「`prio` 碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /

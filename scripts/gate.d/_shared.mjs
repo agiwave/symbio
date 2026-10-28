@@ -221,7 +221,14 @@ export const BASELINE = {
   // 词汇面」，判据没有丢：格位一致性现在由 `events.rs` 的生成器投影 `EventDecl` 保证，编译期就红。
   // 另两处「按名字点收」的用例（`decl` 的对表用例、`control_events_match_the_kernel_grid`）是**改写**
   // 成新判据，条数不变。非侵蚀。
-  ciRustTestsTotal: 2412,
+  // baseline-allow ciRustTestsTotal: `turn` 端口与第四台 host 退场（`D-222` 兑现第 1 步）净删 8 条
+  // （2412 → 2404）。删掉的是断言**被删除的形状**的用例，按 `SP-033` §1「改用例，不改形状」：
+  // `stage_exec` 的 6 个（`announce-turn` 落 `request(port=turn)` / `dispatch-turn` 判死遗留请求 /
+  // `drive_stage` 的两条停机判据）+ `the_stage_knows_whether_it_dispatched` +
+  // `the_outer_ring_announces_before_it_dispatches`（`stage_dispatched` / `stage_closed`）。
+  // 同一批判据没有丢：租约两例从 `turn` 端口迁到 `tool` 端口，`lease` 三例从「一行」改判到
+  // `stale_sent` 视图，`stage.test.rs` 只留准备段三条（`prepare` 的出口仍逐条判）。非侵蚀。
+  ciRustTestsTotal: 2404,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

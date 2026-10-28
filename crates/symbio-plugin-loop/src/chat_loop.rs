@@ -9,18 +9,18 @@
 //!   步骤1 加载上下文
 //!   步骤2 gate_turn          ← 退出条件（唯一判定点）
 //!   步骤3 begin_drive        ← 开一幕：唤醒格 → 收租 → 配置 → 幕锚 → 轮次格
-//!   步骤4 drive_stage        ← 幕内的不动点（选债 → 还债，D-168）
-//!                              三笔账：prepare-turn → announce-turn → dispatch-turn
-//!                              派出那一环步顺带把产出收好（定格 / 落库 / 封根）
+//!   步骤4 stage::run_stage   ← 一幕之内的直线（备输入 → 跑一轮 → 收好产出）
+//!                              三步按序各调一次，次序是代码行序，不由 prio 选
 //!   步骤5 next_stage_round   ← 幕间：还开不开下一幕（读事实，不读返回值）
 //! end loop
 //! 后步骤 无（循环只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
 //!
-//! 主循环体里**没有按步骤编号的判定点**（D-168 的接回读数）：第 4 步是一次
-//! `ring::drive` 派发点，第 5 步是一次事实读。七步里剩下的三段各自有归属——
-//! 准备 / 收束 / 收尾两段进了行表或进了派发那一环步（D-168 裁决 3 / 5），
-//! 落库是写投影（裁决 6），唤醒是交换点（裁决 7）。
+//! 主循环体里**没有按步骤编号的判定点**：第 4 步是**一段直线**（`D-222` §二 裁决 1：
+//! 幕是信封上的分区，不是推进单位），第 5 步是一次事实读。三步的次序由代码行序说，
+//! 不由 `prio` 说——它们此前是三条行（`prepare-turn` / `announce-turn` /
+//! `dispatch-turn`）挂在 `turn` 端口上，端口一撤就没有「什么算欠」可写。
+//! 落库是写投影，唤醒是交换点。
 //!
 //! 子模块分工：
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
@@ -64,7 +64,7 @@ pub(crate) use self::state::{
     TurnState,
 };
 pub(crate) use self::turn::{persist_turn, settle_reasoning};
-// 派发那一环步的产出处理要用它（镜像并入是落库的前一步）：`stage_exec` 是兄弟模块，
+// 一幕第三步（收好产出）要用它（镜像并入是落库的前一步）：`stage` 是兄弟模块，
 // 拿不到 `mod wake` 的私有面，所以从这里再导一条。
 pub(crate) use self::wake::merge_runner_messages;
 
@@ -289,8 +289,8 @@ pub async fn run_chat_loop(
                 next_drive_resume = Some(kind);
             }
             Ok(super::chat_loop::wake::WakeOutcome::NewTurn { retried_root }) => {
-                // 新支的根 id 要到 `prepare-turn` 才有（一幕一个根），所以这里只寄存
-                // 「这是哪一支的另一版本」，登记那一格由准备段落。
+                // 新支的根 id 要到备输入那一步才有（一幕一个根），所以这里只寄存
+                // 「这是哪一支的另一版本」，登记那一格由 `stage::prepare` 落。
                 turn.retry_of = Some(retried_root);
             }
             Ok(super::chat_loop::wake::WakeOutcome::Done) => {
@@ -374,14 +374,14 @@ pub async fn run_chat_loop(
             context.messages.len()
         );
 
-        // ── 步骤 3：本轮输入准备（收口 ②）——**已归外环**（D-168 裁决 3）──────
+        // ── 步骤 3：本幕的三段直线（备输入 → 跑一轮 → 收好产出）─────────────
         //
-        // 收口 ② 本身没变：提示词 / 工具 / 请求视图仍由 `prepare_turn_inputs` 一处
-        // 收集，末尾仍起轮首那台 host（判决 / 压缩 / 召回 / 快路）。变的是它在环上的
-        // 位置——它现在是 `prepare-turn` 行（prio 56），由下面的派发点向求解器要，
-        // 不再是本文件里按步骤编号的一次调用。崩在准备与派出之间，「这一幕准备到
-        // 哪一步」在日志上可判（`turn.stage{stage:"inputs"}`）。
-
+        // 三段此前是三条行 + 一台 host（`prepare-turn` / `announce-turn` /
+        // `dispatch-turn`，由 `drive_stage` 按 `prio` 选债）。`turn` 端口退场之后
+        // 它们没有可写的「什么算欠」，于是回到直线：开一幕是**交换点**，不是环
+        // （`D-222` 裁决 1）。三段的次序与搬到环上之前逐字不变，见 [`super::stage`]
+        // 的模块文档。
+        //
         // **不要在这里拦中止**（/ D-052）：在此处 `return
         // TurnExit::Aborted(Vec::new())` 会让运行器从不落 `user.message`，中止
         // 这一轮**一条事实都没有**（e2e t7 钉的是这件事：`v2-events.wal` 不存在、
@@ -394,29 +394,14 @@ pub async fn run_chat_loop(
         //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
         //     一次 LLM 请求（与原意图一致）；
         //   - 用户格与中止收束格成对入格（N3/C4 的不变量在运行器内守住）。
-        // 出口形态不变：运行器回 `aborted`，`turn_exec` 上抛
-        // `TurnExecExit::Aborted`，走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
-
+        //
         // 轮次经 v2 运行器（[`super::turn_exec`]）执行——事实原生入格、prompt 从转写出、
         // 流式经 UiBridge 回同一出口、工具轮经三动作契约分发（工具节点与
         // 结果仍写进同一份对话图）；收口（步骤 5-7）与之共享。
         //
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
-        //
-        // ── 步骤 4：幕内的不动点（宣布 → 派出 → 收好产出，D-168）───────────────
-        //
-        // 「这一幕欠一次 `turn` 调用」是**事实**，不是一次函数调用：`announce-turn`
-        // 落 `request{port:turn}`、`dispatch-turn` 跑出 `sent` + `response` /
-        // `failed`，两步之间唯一的交接件是外环 host 的 `call` 槽。派发因此由
-        // **选债**触发，不由这里顺手调一次往返——崩在两步之间时，那笔请求留在
-        // 日志上开着，派发行能把它判死（`port::kill_dangling`），而不是无声地留在
-        // 那里让下一幕以为「已经派过了」。
-        //
-        // 派出去之后的四件产出处理（镜像并入 / 定格 / 落库 / 封根）也在那一环步里
-        // （D-168 裁决 5 / 6）：它们不是债，跟着产出它们的那一环步走。主循环体因此
-        // 只问一件事——**这一幕跑完了没有**。
-        let staged = match super::stage_exec::drive_stage(super::stage_exec::StageDrive {
+        let interrupted = match super::stage::run_stage(super::stage::Stage {
             orchestrator,
             orchestrator_arc: &orchestrator_arc,
             ctx: &ctx,
@@ -438,15 +423,16 @@ pub async fn run_chat_loop(
                     &sink,
                     &turn,
                     TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                        "端口 `turn` 的往返失败：{e:?}"
+                        "本幕执行失败：{e:?}"
                     ))),
                 )
                 .await;
             }
-            Ok(staged) => staged,
+            // 幕跑完了（`None`）或没跑完（`Some(exit)`）：流向不在这里，读事实。
+            Ok(exit) => exit,
         };
         // 幕没跑完（中止 / 失败 / 产出处理失败）：这一轮到此为止，结局原样上抛。
-        if let Some(exit) = staged.interrupted {
+        if let Some(exit) = interrupted {
             return finish_turn(&context, &sink, &turn, exit).await;
         }
 
