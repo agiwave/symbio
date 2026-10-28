@@ -1236,15 +1236,55 @@ fn frozen() -> Option<Arc<Frozen>> {
     FROZEN.clone()
 }
 
+/// 一份切片最多能有多长（[`Frozen::scan_bound`] 的转发）。
+///
+/// 存在的理由是**分层**：调用方（`turn_slice`、`chat_loop::lease_tail`）不该自己去
+/// 遍历视图表算最小值，也不该各自抄一个常数——切点只能有一个真源。表还没装好时
+/// 回 `None`，由调用方按「不切」处理（那一轮的打开本来就会先被 [`table`] 拦下）。
+pub(crate) fn scan_bound() -> Option<usize> {
+    frozen().and_then(|f| f.scan_bound())
+}
+
 /// 本轮的事实切片：视图只扫**一轮**（声明的成本上界针对轮，不针对整份 WAL）。
 ///
 /// 轮号单调，因此「本轮第一条事件」就是本轮窗口的起点；续写幕复用轮号时，
 /// 首幕的事件也在切片里，而视图的 `drive_of` 会按**最新幕锚**收窄。
+///
+/// ## 长度也要切，而且切点不在这里
+///
+/// 只切起点是不够的：一轮的事实条数没有上界（工具批次、多步往返都会往同一轮里
+/// 追加），而 `Frozen::eval` 在条数超过视图声明的 `cost` 时回 `None`——`ring::owed`
+/// 把那个 `None` 折成空集（`_ => Vec::new()`，字节冻结，`PTS-003`）。于是**整轮
+/// 所有行**在那一轮里都不开账：环看起来「没账可还」，实际是「算不出来」。
+///
+/// 修法不在求解器，就在这两行之间：先按 [`Frozen::scan_bound`]（全表最小的 `cost`，
+/// 唯一能同时喂给每一条视图的上界）切到窗口内，超界时**留一条告警**——静默降级
+/// 正是本条要收的那一格。切掉的是一轮里更早的事实：它们的 `request` 会缺席（那一
+/// 笔债还不上，环空转），但绝不会让「已应答」缺席（`response` 总在尾部），所以失效
+/// 方向是「多开账」而不是「漏还账」。
+///
+/// `scan_bound` 为 `None`（表还没装好）时原样交出：这一轮的打开本来就会先被
+/// [`table`] 拦下，这里不替它判。
 fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
-    match events.iter().position(|e| e.turn == turn) {
+    let slice = match events.iter().position(|e| e.turn == turn) {
         Some(start) => &events[start..],
         None => &[],
+    };
+    let Some(bound) = frozen().and_then(|f| f.scan_bound()) else {
+        return slice;
+    };
+    if slice.len() <= bound {
+        return slice;
     }
+    tracing::warn!(
+        "本轮事实 {} 条超过视图声明的扫描上界 {}（`Frozen::scan_bound`）⇒ 只按尾部 {} 条算账；\
+         超界部分对 `owed` 不可见，本轮可能多开账。要么调大 `control_decl` 的视图 `cost`，\
+         要么把这一轮拆短",
+        slice.len(),
+        bound,
+        bound
+    );
+    &slice[slice.len() - bound..]
 }
 
 /// 本次 `drive` 的 `now`：**幕锚那条事实的 `ts`**（判据 12，DE-015 §2.1）。

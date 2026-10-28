@@ -729,7 +729,7 @@ async fn the_correction_retry_is_a_separate_call_and_a_failure_still_has_its_cel
 // ── 窗口边界：看护只看见递给它的那批（DE-015 §2.6 第 7 条的边界段）──────
 
 /// 收租窗口是**切片**，不是 `reap` 内部的过滤：切点由调用方
-/// （`chat_loop::drive` 的 `lease_tail`）按 `LEASE_WINDOW` 决定。
+/// （`chat_loop::drive` 的 `lease_tail`）按 `Frozen::scan_bound` 决定。
 ///
 /// 这条用例把后果钉住——窗口外那笔陈旧 `sent` **不被判死**，账仍开着，
 /// 由 `waiting` 行挂着；同一笔放进视野则到期即判死。两半合起来才说明

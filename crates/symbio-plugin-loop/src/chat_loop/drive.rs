@@ -25,19 +25,28 @@ use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, ME
 
 use super::super::stage_events::{self, StageFact};
 
-/// 租约看护的扫描窗口（条）——与视图声明的 `cost` 上界同值：超过它视图
-/// 就会拒绝求值，所以调用方自己先切（分层而不是让视图静默算不出来）。
-const LEASE_WINDOW: usize = 4096;
+/// 租约看护的扫描窗口（条）——**由声明回答**，不在这里抄一个数。
+///
+/// 此前这里写着 `const LEASE_WINDOW: usize = 4096`，与 `control_decl` 的七处
+/// `cost: 4096` 手抄同值。手抄同值不是同步：两侧任一单独改动，另一侧就静默失效，
+/// 而失效的形状是 `Frozen::eval` 回 `None` ⇒ `ring::owed` 折成空集 ⇒ 看护扫不到任何
+/// 过期尝试、`waiting` 恒假。现在窗口就是切片上界本身
+/// （[`Frozen::scan_bound`]），「同值」由构造保证，不是约定。
+///
+/// 表还没装好时回 `0`：那一轮的打开会先被 `loop_rows::table` 拦下，这里不替它判。
+fn lease_window() -> usize {
+    super::super::loop_rows::scan_bound().unwrap_or(0)
+}
 
-/// 收租窗口的切片：快照的**尾部** [`LEASE_WINDOW`] 条。
+/// 收租窗口的切片：快照的**尾部** [`lease_window`] 条。
 ///
 /// 单独成函数是为了让「窗口边界」成为**被断言的行为**而不是散在 `begin_drive` 里
 /// 的一段切片表达式（`drive.test.rs` 直接喂一份超窗夹具断言切点）。窗口外的未回
-/// `sent` 不会被看护看到，只能由 `waiting` 行挂着——这是常量选值的边界，不是安全
+/// `sent` 不会被看护看到，只能由 `waiting` 行挂着——这是窗口选值的边界，不是安全
 /// 保证，失效条件写在 [DE-015 §2.6](../../../../docs/003-design/015-义务环.md "DE-015-义务环")
 /// 的第 7 条边界段里。
 fn lease_tail(snapshot: &[symbio_core::Event]) -> &[symbio_core::Event] {
-    &snapshot[snapshot.len().saturating_sub(LEASE_WINDOW)..]
+    &snapshot[snapshot.len().saturating_sub(lease_window())..]
 }
 
 /// 本幕落成事实之后，编排层**还需要**的那一样东西。

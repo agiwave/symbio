@@ -288,7 +288,7 @@ fn a_second_new_drive_gets_the_next_turn_number() {
 
 // ── 收租窗口的边界（DE-015 §2.6 第 7 条的边界段）────────────────────────
 //
-// 看护只看快照尾部 `LEASE_WINDOW` 条（`lease_tail`）。窗口外的未回 `sent` 被切掉，
+// 看护只看快照尾部 `lease_window()` 条（`lease_tail`）。窗口外的未回 `sent` 被切掉，
 // 因此不会被判死、只能由 `waiting` 行挂着——这是常量选值的**边界**，不是安全保证。
 // 断言切点与长度，不抄数字：窗口值变，这两条跟着变；切点写反（取头部 / 少切一条）
 // 立刻红。
@@ -297,7 +297,8 @@ fn a_second_new_drive_gets_the_next_turn_number() {
 #[test]
 fn the_lease_window_keeps_only_the_newest_facts() {
     let facts = Arc::new(EventStore::new());
-    let total = super::LEASE_WINDOW + 1;
+    let window = super::lease_window();
+    let total = window + 1;
     for i in 0..total {
         facts
             .append(Event::pending(
@@ -314,7 +315,7 @@ fn the_lease_window_keeps_only_the_newest_facts() {
     assert_eq!(all.len(), total, "夹具自己先超窗一条");
 
     let tail = super::lease_tail(&all);
-    assert_eq!(tail.len(), super::LEASE_WINDOW, "窗口只留最新的一批");
+    assert_eq!(tail.len(), window, "窗口只留最新的一批");
     assert_eq!(
         tail.first().map(|e| e.event_id.as_str()),
         all.get(1).map(|e| e.event_id.as_str()),

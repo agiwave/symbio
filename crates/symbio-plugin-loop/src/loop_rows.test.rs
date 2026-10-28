@@ -2828,3 +2828,115 @@ fn every_prefix_of_a_session_log_is_a_legal_ledger() {
     );
     assert!(!any_stale(reaped, now), "判死之后那笔在途必须收掉");
 }
+
+// ── 切点：超界不许静默变成「没有欠账」（D-222 订正 1 的调用侧）─────────────
+//
+// `Frozen::eval` 超界回 `None`，`ring::owed` 把 `None` 折成空集（`_ => Vec::new()`，
+// 字节冻结，`PTS-003`）。于是超界那一刻**整轮所有行**都不开账——环看起来「没账
+// 可还」，实际是「算不出来」，零告警。
+//
+// 切点在调用方：`turn_slice` 先按 `Frozen::scan_bound` 切到窗口内。下面三条钉的是
+// 「切了」「切的是尾部」「切完每一条视图都算得出来」——最后一条正是那个反向判据：
+// 不切的话至少有一条视图回 `None`（下面的第一条断言把它证出来）。
+
+/// 造一轮超界的事实：`scan_bound() + excess` 条，都在同一轮。
+///
+/// 用 `turn.stage` 这类宽声明的事实即可——`turn_slice` 只按 `turn` 过滤，
+/// 视图求值读的是字段；本组用例判的是**长度**，不判内容。
+fn an_over_bound_turn(turn: u64, excess: usize) -> Vec<Event> {
+    let bound = super::scan_bound().expect("生产表必须装载得起来，切点才有值");
+    (0..bound + excess)
+        .map(|i| {
+            ev(
+                turn,
+                super::super::control_decl::EVENT_TURN_STAGE,
+                json!({"stage": "round", "round": i}),
+            )
+        })
+        .collect()
+}
+
+/// 反向判据：**不切**的切片会让视图算不出来（`None`），而那正是「静默空集」的来源。
+///
+/// 这条先证明缺口真实存在，下一条才证明切点堵住了它。两条必须成对看：只留后一条
+/// 的话，把 `scan_bound` 调到无穷大也能绿。
+#[test]
+fn an_over_bound_slice_makes_the_views_uncomputable() {
+    let events = an_over_bound_turn(11, 5);
+    let frozen = frozen();
+    let bound = frozen.scan_bound().expect("有视图就有切点");
+    assert_eq!(events.len(), bound + 5, "夹具自己先超界五条");
+
+    let unevaluable: Vec<&str> = frozen
+        .views()
+        .iter()
+        .filter(|v| frozen.eval(v.name, &events, 0).is_none())
+        .map(|v| v.name)
+        .collect();
+    assert!(
+        !unevaluable.is_empty(),
+        "超界切片上必须至少有一条视图回 `None`——否则本条判的不是它"
+    );
+}
+
+/// `turn_slice` 把超界的一轮切到窗口内，且切的是**尾部**（最新的事实留下）。
+#[test]
+fn the_turn_slice_is_trimmed_to_the_scan_bound_keeping_the_newest() {
+    let events = an_over_bound_turn(12, 5);
+    let frozen = frozen();
+    let bound = frozen.scan_bound().expect("有视图就有切点");
+
+    let slice = super::turn_slice(&events, 12);
+    assert_eq!(
+        slice.len(),
+        bound,
+        "切片长度必须等于声明上界：这是 `eval` 不超界的充要条件"
+    );
+    assert_eq!(
+        slice.last().map(|e| e.event_id.as_str()),
+        events.last().map(|e| e.event_id.as_str()),
+        "最新的那条必须留下（`response` 总在尾部，切掉它会漏还账）"
+    );
+    assert_eq!(
+        slice.first().map(|e| e.event_id.as_str()),
+        events.get(5).map(|e| e.event_id.as_str()),
+        "切掉的是最早的五条（`request` 缺席只会多开账，不会漏还账）"
+    );
+}
+
+/// 切完之后每一条视图都算得出来——这就是「`owed` 不再拿到空集」的可判形式。
+#[test]
+fn a_trimmed_turn_slice_leaves_every_view_evaluable() {
+    let events = an_over_bound_turn(13, 5);
+    let frozen = frozen();
+    let slice = super::turn_slice(&events, 13);
+
+    let unevaluable: Vec<&str> = frozen
+        .views()
+        .iter()
+        .filter(|v| frozen.eval(v.name, slice, 0).is_none())
+        .map(|v| v.name)
+        .collect();
+    assert!(
+        unevaluable.is_empty(),
+        "切到上界之后每一条视图都必须算得出来，不然 `owed` 仍会把 `None` 折成空集：{unevaluable:?}"
+    );
+}
+
+/// 不超界的一轮原样交出（切点只在超界时生效，不改正常路径）。
+#[test]
+fn a_turn_inside_the_bound_is_handed_over_whole() {
+    let bound = super::scan_bound().expect("有视图就有切点");
+    let events: Vec<Event> = (0..bound)
+        .map(|i| {
+            ev(
+                14,
+                super::super::control_decl::EVENT_TURN_STAGE,
+                json!({"stage": "round", "round": i}),
+            )
+        })
+        .collect();
+    let slice = super::turn_slice(&events, 14);
+    assert_eq!(slice.len(), events.len(), "恰好等于上界不算超界");
+    assert!(super::turn_slice(&[], 14).is_empty(), "空切片不 panic");
+}

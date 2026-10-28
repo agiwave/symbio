@@ -409,6 +409,93 @@ fn eval_respects_the_declared_cost() {
     assert_eq!(frozen.eval("probe", &two, 0), None);
 }
 
+// ── 切点：一份切片喂给每一条视图（`scan_bound` / `ViewCostMismatch`）─────────
+//
+// 这一段测的是 D-222 订正 1 的终态。判据是「`cost` 超界不许静默变成『没有欠账』」，
+// 而 `eval` 回 `None`、`owed` 折成空集（`_ => Vec::new()`，字节冻结）。
+// 所以缺口只能从两头收：**切点只有一个真源**（`scan_bound` 取最小值），
+// **声明的分歧在装载期红**（`ViewCostMismatch`）。下面三条分别钉住这两头与
+// 它们在同一个数上会合。
+
+/// 复刻 `probe_view` 但可指定 `cost`：分歧判据的夹具。
+fn probe_view_costing(
+    name: &'static str,
+    reads: &'static [(&'static str, &'static str)],
+    cost: u32,
+) -> ViewDecl {
+    ViewDecl {
+        cost,
+        ..probe_view(name, reads)
+    }
+}
+
+/// 切点是**声明的那一个数**，而且它对每一条视图都成立。
+///
+/// 分歧由 [`Gap::ViewCostMismatch`] 在装载期挡掉（下一条用例），所以能冻结的表里
+/// `cost` 只有一个值——`scan_bound` 的「最小值」在这种表上退化为「那个值」。
+/// 两条合起来才是完整的判据：**不一致的表不存在**，一致的表只有一个切点。
+///
+/// 它钉的是「切点不是 `0`、不是某个默认值、不是第一条视图之外的东西」——
+/// 取错的话调用方会把切片切空（`0`）或切得比声明更长（超界 ⇒ 静默空集）。
+#[test]
+fn the_scan_bound_is_the_cost_every_view_declares() {
+    let mut b = Builder::empty();
+    b.fact(request_fact());
+    b.row(cover(EVENT_REQUEST, None));
+    for name in ["alpha", "beta", "gamma"] {
+        b.view(probe_view_costing(name, &[(EVENT_REQUEST, "id")], 64));
+    }
+
+    let frozen = b.seal().expect("三条视图同读一条事实、同一声明成本");
+    assert_eq!(
+        frozen.scan_bound(),
+        Some(64),
+        "一份切片喂给每一条视图 ⇒ 切点就是它们共同声明的那个上界"
+    );
+}
+
+/// 一条视图都没有的表没有切点（`None`，不是 `0`）。
+///
+/// `0` 会让调用方把切片切空 ⇒ 每一个视图都看不见任何事实 ⇒ 「什么都没欠」。
+/// 这与「没有视图可切」是两件事，返回值必须分得开。
+#[test]
+fn a_table_without_views_has_no_scan_bound() {
+    let mut b = Builder::empty();
+    b.fact(request_fact());
+    b.row(cover(EVENT_REQUEST, None));
+    let frozen = b.seal().expect("只有一行一事实也合法");
+    assert_eq!(frozen.scan_bound(), None, "没有视图 ⇒ 没有可切的界");
+}
+
+/// 声明的 `cost` 分歧 ⇒ 装载期红，且报出**偏大的那一条**与实际的切点。
+///
+/// 这是 D-222 订正 1 的内核侧一半：把某条视图的声明调到与切片不同步，装载就拒绝。
+/// 不留到运行期——运行期的两支（按大的切 / 按小的切）都是某一族行静默不开账。
+#[test]
+fn a_view_cost_that_disagrees_with_the_bound_is_rejected_at_load_time() {
+    let mut b = Builder::empty();
+    b.fact(request_fact());
+    b.row(cover(EVENT_REQUEST, None));
+    b.view(probe_view_costing("wide", &[(EVENT_REQUEST, "id")], 4096));
+    b.view(probe_view_costing("narrow", &[(EVENT_REQUEST, "id")], 8));
+
+    let gaps = gaps_of(b);
+    assert!(
+        gaps.contains(&Gap::ViewCostMismatch {
+            view: "wide",
+            cost: 4096,
+            bound: 8,
+        }),
+        "偏大的那一条要指名道姓（切点按最小值走，它会每轮超界）：{gaps:?}"
+    );
+    assert!(
+        !gaps
+            .iter()
+            .any(|g| matches!(g, Gap::ViewCostMismatch { view: "narrow", .. })),
+        "切点自己那一条不该被报：它不是分歧的一方，它就是界"
+    );
+}
+
 // ── 执行体的写入面 ───────────────────────────────────────────────────────
 
 /// 引擎独占的四格（`sent` / `response` / `failed` / `retry`）不许进执行体的 `writes`：

@@ -316,6 +316,20 @@ impl Builder {
                 gaps.push(Gap::DuplicateView { name: v.name });
             }
         }
+        // 切点只有一个（`Frozen::scan_bound` 取最小值），所以声明的上界必须只有一种。
+        // 分歧在这里判：留给运行期的两支都是「算不出来」冒充「没有欠账」（见
+        // `Gap::ViewCostMismatch`）。
+        if let Some(bound) = self.views.iter().map(|v| v.cost).min() {
+            for v in &self.views {
+                if v.cost != bound {
+                    gaps.push(Gap::ViewCostMismatch {
+                        view: v.name,
+                        cost: v.cost,
+                        bound,
+                    });
+                }
+            }
+        }
         for v in &self.views {
             if fact_names.contains(v.name) || event_names.contains(v.name) {
                 gaps.push(Gap::NameCollision { name: v.name });
@@ -547,8 +561,35 @@ impl Frozen {
         self.actors.iter().find(|a| a.name == name)
     }
 
+    /// **一份切片最多能有多长**：所有视图声明的 `cost` 里最小的那一个。
+    ///
+    /// ## 为什么是 min，不是「每个视图各自切一份」
+    ///
+    /// [`eval`](Self::eval) 的输入是**同一份** `&[Event]`——`owed` 拿着一份切片轮询
+    /// 每一行、每一行可能读不同视图。于是切片长度必须同时对**每一条**视图都不超界，
+    /// 满足这一点的上界只有一个：最小值。
+    ///
+    /// ## 为什么这个口必须存在
+    ///
+    /// 切点此前是**手抄的常数**（`loop_rows::turn_slice` 不切、`chat_loop::drive` 抄了
+    /// 一个 `LEASE_WINDOW = 4096` 与七处 `cost: 4096` 同值）。手抄同值不是同步：任一侧
+    /// 单独改动，另一侧就静默失效，而失效的形状是 [`eval`](Self::eval) 回 `None`、
+    /// `owed` 把它折成空集——**「算不出来」与「没有欠账」同形**，环照常空转，零告警。
+    /// 于是切点改由这里回答，调用方不再持有那个数。
+    ///
+    /// `None` = 一条视图都没声明（空表）：没有可切的界，调用方按「不切」处理。
+    /// 非空表的 `cost` 一致性由 [`Gap::ViewCostMismatch`] 在装载期钉住——切片模型
+    /// 只支持一个上界，声明的分歧不是运行期能兜的事。
+    pub fn scan_bound(&self) -> Option<usize> {
+        self.views.iter().map(|v| v.cost as usize).min()
+    }
+
     /// 按声明求值：未声明、或扫描条数超过声明的 `cost` 上界 ⇒ `None`。
     /// 超界不静默截断——调用方必须知道这一轮的视图没算出来。
+    ///
+    /// 「知道」的形式是这个 `None`；把它折成空集的是调用方（`ring::owed` 的
+    /// `_ => Vec::new()`，字节冻结）。所以**切点在调用方**：先按
+    /// [`scan_bound`](Self::scan_bound) 切片，就不会走到这条超界分支。
     pub fn eval(&self, name: &str, events: &[Event], now: i64) -> Option<serde_json::Value> {
         let view = self.view(name)?;
         if events.len() > view.cost as usize {

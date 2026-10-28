@@ -500,6 +500,20 @@ pub enum Gap {
     DuplicateView {
         name: &'static str,
     },
+    /// 两条视图声明的 `cost` 不一样——而 [`Frozen::eval`] 的输入是**同一份**切片。
+    ///
+    /// 切片模型只有一个长度上界（[`Frozen::scan_bound`] 取最小值），所以「A 声明 4096、
+    /// B 声明 512」这件事没有运行期解法：按 4096 切，B 每一轮都超界 ⇒ 回 `None` ⇒
+    /// `owed` 折成空集 ⇒ B 那一族的行全都不开账，**零告警**；按 512 切，A 只看得到
+    /// 尾部一小段，另一族的行静默漏账。两支都是「算不出来」冒充「没有欠账」。
+    ///
+    /// 因此它在这里判，不留给运行期兜底：声明的分歧必须在装载期红。
+    ViewCostMismatch {
+        view: &'static str,
+        cost: u32,
+        /// 全表的最小值——切片实际会用的那个上界。
+        bound: u32,
+    },
     DuplicateActor {
         name: &'static str,
     },
