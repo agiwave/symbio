@@ -4535,9 +4535,11 @@ mod reflex_turn_tests {
             "档位由**选中的那条行**给出（`loop_rows::tier`），不是调用方填的字符串"
         );
         assert_eq!(
-            dispatch.payload["budget_ms"], actor.budget_ms,
-            "派发格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
-             ActorSpec.budget_ms 由此有真读方——此断言即写侧的存在证明"
+            dispatch.payload["budget_ms"],
+            LatencyTier::Reflex.budget_ms(),
+            "派发格带**本幕档位折出的预算数值**（`D-223` 订正 2）：`I3` 读它，所以快路轮 \
+             拿到的必须是反射档那 80ms——不是主体规格里那一格（那是声明档，建主体时 \
+             档位还没折出来）"
         );
         let close = &snapshot[3];
         assert_eq!(close.verb, Verb::Closed);

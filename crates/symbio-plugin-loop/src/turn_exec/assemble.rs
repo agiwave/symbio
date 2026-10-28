@@ -217,7 +217,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 作用域（[]）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
     // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
     let scope = session.scope();
-    let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), tier, scope);
+    let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
     // 来源主体（D-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
     let to = super::super::chat_loop::request_source_principal(ctx.as_ref());

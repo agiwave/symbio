@@ -59,7 +59,8 @@ fn load_history_false_is_honored() {
 // 逐一钉：**能力集从登记行取**（单一真源，不是空表也不是硬编码清单）、**模式按矩阵
 // 谓词派生**（工人无发言权而有产物能力 ⇒ `Translator`，与对等行同形；规划者 / 验证者
 // 两者皆无 ⇒ `Decider`，与 S03 §3 的 ActorSpec 行 `pattern: decider` 一致）、**预算
-// 按档位**、**作用域由委派链给**（子会话 ⇒ `Child(父主体)`）。
+// 按模式**（声明档，`D-223` 订正 2——不是本幕的档位）、**作用域由委派链给**（子会话
+// ⇒ `Child(父主体)`）。
 //
 // 硬编码任何一项的后果都是「表授予 A、规格带 B」静默成立——那一行就成了没人读的死记录。
 
@@ -76,7 +77,7 @@ fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn symbio_core::PluginInvokeRequ
 #[test]
 fn the_worker_spec_takes_its_registered_row() {
     use symbio_core::{LatencyTier, Pattern, Scope};
-    let spec = request_actor_spec(agent_ctx("worker").as_ref(), LatencyTier::Deep, Scope::Root);
+    let spec = request_actor_spec(agent_ctx("worker").as_ref(), Scope::Root);
     assert_eq!(spec.principal, "session/worker");
     assert_eq!(
         spec.capabilities,
@@ -88,18 +89,16 @@ fn the_worker_spec_takes_its_registered_row() {
         Pattern::Translator,
         "无发言权而有 produce.artifact ⇒ Translator（对等行同形，S02 行与派生不冲突）"
     );
-    assert_eq!(spec.budget_ms, LatencyTier::Deep.budget_ms());
+    // 声明档由模式派生（`D-223` 订正 2）：`Translator` 是「百毫秒」那一类 ⇒ `Fast`。
+    // 本幕的档位不在这里——它归 `turn.dispatch`（快路作答才走 `Reflex`）。
+    assert_eq!(spec.budget_ms, LatencyTier::Fast.budget_ms());
     assert_eq!(spec.scope, Scope::Root);
 }
 
 #[test]
 fn the_planner_and_verifier_specs_take_their_registered_rows() {
     use symbio_core::{LatencyTier, Pattern, Scope};
-    let planner = request_actor_spec(
-        agent_ctx("planner").as_ref(),
-        LatencyTier::Deep,
-        Scope::Root,
-    );
+    let planner = request_actor_spec(agent_ctx("planner").as_ref(), Scope::Root);
     assert_eq!(planner.principal, "session/planner");
     assert_eq!(
         planner.capabilities,
@@ -112,11 +111,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
         "define.work 独持 ⇒ Decider（S03 §3 ActorSpec 行 pattern: decider）"
     );
 
-    let verifier = request_actor_spec(
-        agent_ctx("verifier").as_ref(),
-        LatencyTier::Fast,
-        Scope::Root,
-    );
+    let verifier = request_actor_spec(agent_ctx("verifier").as_ref(), Scope::Root);
     assert_eq!(verifier.principal, "session/verifier");
     assert_eq!(
         verifier.capabilities,
@@ -124,7 +119,8 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
         "验证者的权威动作是独立判定（S03 §3 grants 行）"
     );
     assert_eq!(verifier.pattern, Pattern::Decider);
-    assert_eq!(verifier.budget_ms, LatencyTier::Fast.budget_ms());
+    // `Decider` 是「确定，毫秒级」那一类 ⇒ 声明档 `Reflex`（同上：不是本幕的档）。
+    assert_eq!(verifier.budget_ms, LatencyTier::Reflex.budget_ms());
 }
 
 /// **会跑模型的那个主体派生 `Reasoner`**——这是 [D-079] 的反证。
@@ -140,8 +136,8 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
 /// 决策 D-079 见 [D-079](../../../../docs/003-design/005-协议规范.md#d-079-同名两物core-的-actorspecpattern-是主体分类s11-4-的-actorpattern-是开关参数前者不该做分派点 "D-079")
 #[test]
 fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
-    use symbio_core::{LatencyTier, Pattern, Scope};
-    let spec = request_actor_spec(agent_ctx("main").as_ref(), LatencyTier::Deep, Scope::Root);
+    use symbio_core::{Pattern, Scope};
+    let spec = request_actor_spec(agent_ctx("main").as_ref(), Scope::Root);
     assert_eq!(spec.principal, "session/main");
     assert_eq!(
         spec.pattern,
@@ -157,12 +153,11 @@ fn the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch() {
 
 #[test]
 fn a_delegated_worker_spec_is_scoped_to_its_parent() {
-    use symbio_core::{LatencyTier, Scope};
+    use symbio_core::Scope;
     // 委派链上（agent_run 派生的子会话）：作用域挂父主体——「委派不放大权威」的
     // 规格侧形态。工人那一行不变，变的是 scope。
     let spec = request_actor_spec(
         agent_ctx("worker").as_ref(),
-        LatencyTier::Deep,
         Scope::Child("session/main".to_string()),
     );
     assert_eq!(spec.scope, Scope::Child("session/main".to_string()));

@@ -44,13 +44,22 @@ pub(crate) fn request_source_principal(ctx: &dyn symbio_core::PluginInvokeReques
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
 /// | `capabilities` | **授权表行**（`production_matrix` ⇒ `grant_names_of`）——单一真源。 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_gate` 读规格自己的这份集合（`actor_can_land_speech` / `actor_can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`pattern_for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
-/// | `budget_ms` | 档位（与派发格的 `tier` 同一个事实，调用方传入）。 批①起它有**真读方**：`turn_runner` 以**数值**写入 `turn.dispatch` 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退历史 `user.message` 的 `tier` 映射） |
+/// | `budget_ms` | 主体的**声明档**：由 `pattern` 派生（[`declared_budget`]——模式三值本来就按时延分）。它**不是**本幕的预算——本幕的档位要等轮首四行跑完才折得出来（`D-223` 订正 1），而主体在幕首就建（`D-222` 订正 3）。本幕实际用的档与预算归 `turn.dispatch` 那一格（`chat_loop::land_dispatch` 由档位直接折 `budget_ms`），`I3` 读的永远是那一格 |
 /// | `scope` | [`LoopSession::scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；session 从元数据预计算，[]） |
 ///
 /// 决策 D-065 见 [D-065](../../../../docs/003-design/011-Agent目录规范.md#d-065-对等侧收束commitmentasserted-缺的不是写方而是对等-offerassert②-与-③-同一批收束格按种类判 "D-065")
+///
+/// ## 为什么不吃档位（`D-223` 订正 2）
+///
+/// 档位是**本幕**的调度参数，而它要等轮首四行跑完才折得出来（`D-223` 订正 1）；
+/// 主体却要在**幕首**就建好（`D-222` 订正 3：`Ctx.session` 不是 `Option`，草稿必须先于
+/// 任何动作存在）。两者互相派生就成环——所以主体不吃档位，`budget_ms` 记它的**声明档**。
+/// 本幕实际用哪一档由 `turn.dispatch` 那一格说，那才是 `I3` 的口径。
+///
+/// 这不是把一条事实拆成两条：**主体的上限**与**本幕的档**本来就是两个量，用档位填规格
+/// 是让「幕的参数」冒充「主体的属性」。
 pub(crate) fn request_actor_spec(
     ctx: &dyn symbio_core::PluginInvokeRequest,
-    tier: symbio_core::LatencyTier,
     scope: symbio_core::Scope,
 ) -> symbio_core::ActorSpec {
     use symbio_core::{pattern_for_principal, ActorSpec, PluginInvokeRequestExt};
@@ -71,15 +80,39 @@ pub(crate) fn request_actor_spec(
         symbio_core::Scope::Root => symbio_core::bind_root(&session_id, &principal),
     }
     let matrix = symbio_core::production_matrix();
+    // 模式判据住在定义域内（[`symbio_core::pattern_for_principal`]）——
+    // 与授权表同源、与主体类型名一起不散出 core 的 actors 域（NDC-001）。
+    // 声明档由它派生（`D-223` 订正 2）：模式三值本来就按时延分。
+    let pattern = pattern_for_principal(&principal);
     ActorSpec {
         principal: principal.clone(),
-        // 模式判据住在定义域内（[`symbio_core::pattern_for_principal`]）——
-        // 与授权表同源、与主体类型名一起不散出 core 的 actors 域（NDC-001）。
-        pattern: pattern_for_principal(&principal),
+        pattern,
         capabilities: matrix.grant_names_of(&principal),
-        budget_ms: tier.budget_ms(),
+        budget_ms: declared_budget(pattern),
         scope,
     }
+}
+
+/// 主体的**声明档**：模式 ⇒ 时延档（`D-223` 订正 2）。
+///
+/// 判据就是 [`symbio_core::Pattern`] 自己的文档——三值本来就是按**时延**分的：
+/// 「确定，毫秒级」⇒ [`LatencyTier::Reflex`]；「事件 → 另一种表示，百毫秒」⇒
+/// [`LatencyTier::Fast`]；「非确定，秒–分钟」⇒ [`LatencyTier::Deep`]。所以这不是
+/// 一张新表，是把模式那一行已经写着的话读出来。
+///
+/// ## 它为什么不是「本幕的档位」
+///
+/// 本幕走哪一档要等轮首四行跑完才知道（快路作答 ⇒ `reflex`，否则 `deep`），落成
+/// `turn.dispatch` 那一格（`chat_loop::land_dispatch`）。主体在幕首就建，所以它只能
+/// 带**自己那一类**的档——两个量，两处，不互相冒充。
+fn declared_budget(pattern: symbio_core::Pattern) -> u64 {
+    use symbio_core::{LatencyTier, Pattern};
+    let tier = match pattern {
+        Pattern::Decider => LatencyTier::Reflex,
+        Pattern::Translator => LatencyTier::Fast,
+        Pattern::Reasoner => LatencyTier::Deep,
+    };
+    tier.budget_ms()
 }
 
 /// MODEL 会话上下文

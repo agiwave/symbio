@@ -291,6 +291,10 @@ pub(crate) fn begin_drive(
 ///
 /// 幂等键带**幕号**（`d-{turn}-{drive_seq}`）：同一轮可以被恢复幕再执行一次，两幕的档位
 /// 各记各的。
+///
+/// `budget_ms` 取 `tier.budget_ms()`，不取主体规格里那一格（`D-223` 订正 2）：规格的
+/// 预算写在幕首建主体时，那一刻档位还没折出来，它只能记主体的**声明档**；本幕的实际
+/// 预算归这一格。`I3`（`invariants::declared_budget_ms`）读的永远是这一格。
 pub(crate) fn land_dispatch(
     store: &dyn Store<Event = Event>,
     turn_no: u64,
@@ -309,9 +313,13 @@ pub(crate) fn land_dispatch(
             &actor.principal,
         )
         .with_produced_by(user_seq)
+        // `budget_ms` 由**档位**折出，不由主体带（`D-223` 订正 2）：主体在幕首就建
+        // （`D-222` 订正 3），那一刻档位还没定，规格里那一格只能是主体的**声明档**。
+        // 本幕的预算因此只从这里出——`tier` 与 `budget_ms` 由同一个值派生，两格
+        // 不可能对不上。
         .with_payload(serde_json::json!({
             "tier": tier.name(),
-            "budget_ms": actor.budget_ms,
+            "budget_ms": tier.budget_ms(),
             "principal": actor.principal,
         })),
     )?;

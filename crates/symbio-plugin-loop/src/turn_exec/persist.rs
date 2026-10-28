@@ -220,9 +220,12 @@ pub(crate) async fn execute_final_reply_turn(
     // 身份与档位取值点同 [`super::execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
+    //
+    // 主体**不吃档位**（`D-223` 订正 2）：规格里那一格是主体的声明档，本幕的档与预算
+    // 归 `turn.dispatch`（下面那次 `land_dispatch` 直接折 `tier.budget_ms()`）。
     // 作用域与身份同批取（[]）：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
-    let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
+    let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
     // 派发档（`D-223` 订正 1）：答话轮不走快路（`Answered` 是判决的结论，不是技能的命中），
     // 档位恒为深度档。它与工具轮那一格同一条纪律——落在这里而不是草稿的构造里。
     super::super::chat_loop::land_dispatch(
