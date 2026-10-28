@@ -926,7 +926,8 @@ fn rows_are_stable_and_globally_ordered() {
             // 拒绝收尾与派发同一执行体（不调工具）。
             symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Deep,
-            symbio_core::LatencyTier::Deep,
+            // `await-tools`：等的是工具执行层，不调模型 ⇒ 与 `dispatch-tools` 同档。
+            symbio_core::LatencyTier::Fast,
         ]
     );
 }
@@ -1675,7 +1676,11 @@ fn a_granted_tool_call_gets_one_sent_then_waits_for_its_answer() {
         .iter()
         .find(|d| d.decl.name == "await-tools")
         .expect("等工具应答的行在");
-    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+    // 接上执行体之后（`D-124` 订正 1）「在等」不再折成 `Wait`：它还是一条可还的债，
+    // 只是这一圈 poll 一次就回来——「在等」的唯一表达是 `loop_rows::waiting`
+    // （`sent` 有、终局无），与 `await-model` 逐字同形（`D-222` 订正 2）。
+    assert!(!wait.blocked, "派出半接上执行体之后，等应答不再是 `Wait`");
+    assert!(wait.decl.by.is_some(), "等应答有人跑：`waiter-tools`");
 
     let answered = {
         let mut e = dispatched.clone();
@@ -1804,7 +1809,9 @@ fn a_resumed_tool_call_is_authorized_and_awaited_like_a_batch_call() {
         .into_iter()
         .find(|d| d.decl.name == "await-tools")
         .expect("恢复的那一笔派出后同样在等应答");
-    assert!(wait.blocked);
+    // 同上：`await-tools` 接上执行体之后不再是 `Wait`，仍是可还的债。
+    assert!(!wait.blocked);
+    assert!(wait.decl.by.is_some());
 
     let mut done = open;
     done.push(ev(
@@ -1871,7 +1878,14 @@ fn a_supplement_does_not_answer_the_in_flight_tool() {
         .into_iter()
         .find(|d| d.decl.name == "await-tools")
         .expect("工具仍未被应答");
-    assert!(wait.blocked, "补充只改变下一轮 prompt，不是这次调用的应答");
+    // 形状跟着 `D-124` 订正 1 改：这一行接上了执行体，所以「还在等」由
+    // `waiting`（`sent` 有、终局无）表达，而不是由 `Wait` 表达。补一句
+    // 同义的负向断言：等待行确实还被欠着。
+    assert!(!wait.blocked);
+    assert!(
+        super::waiting(&events, 1, 0),
+        "补充只改变下一轮 prompt，不是这次调用的应答"
+    );
 }
 
 #[test]

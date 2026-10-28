@@ -423,13 +423,20 @@ fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {
 }
 
 /// **在途**协议调用的唯一口径：`sent` 中没有被 `response` / `failed` / `retry`
-/// （同 id + attempt）关掉的。
+/// （同 port + id + attempt）关掉的。
 ///
 /// 两个视图（`in_flight` / `stale_sent`）共用它，而不是各写一遍关账规则：
 /// 「什么算在途」只能有一处口径，否则两个视图会在某个角落说不同的话。
 ///
 /// 三个出口都只关**同一次尝试**（D-138）：`failed` 不再按逻辑 id 一次关掉所有
 /// 尝试。重试链上旧的尝试已经由 `retry` 关掉，不会留下「没人收的旧在途」。
+///
+/// 键是 **(port, id, attempt)** 三元组（D-138），不是一个逻辑 id：
+/// `port` 缺一不可。模型往返的 id 由引擎生成（`model-{幕}-{步号}-{步}`），工具
+/// 调用的 id 由**模型**给出——两者没有互斥保证，一个模型完全可以叫自己的工具
+/// `model-1-d0-s1`。只按 id 关账会把工具的应答算到模型往返头上，于是「模型还在
+/// 等」被读成「模型已经答了」：提前收束或永不收束，两种都是静默的错。
+/// 同一篇文档的 `turn_head.model_open` 本来就按三元组判——那才是 D-138 的形状。
 ///
 /// 可见范围放到 crate：义务环的 `waiting`（`loop_rows`）也要问同一个问题——
 /// 「此刻有没有一笔已派出、没收到终局的往返」。D-222 订正 2 之后「在等」不再由
@@ -441,9 +448,14 @@ pub(crate) fn open_calls(events: &[Event]) -> Vec<&Event> {
         match e.kind.as_str() {
             EVENT_SENT => open.push(e),
             EVENT_RESPONSE | EVENT_RETRY | EVENT_FAILED => {
+                let port = str_field(e, "port");
                 let id = str_field(e, "id");
                 let attempt = u64_field(e, "attempt");
-                open.retain(|s| !(str_field(s, "id") == id && u64_field(s, "attempt") == attempt));
+                open.retain(|s| {
+                    !(str_field(s, "port") == port
+                        && str_field(s, "id") == id
+                        && u64_field(s, "attempt") == attempt)
+                });
             }
             _ => {}
         }

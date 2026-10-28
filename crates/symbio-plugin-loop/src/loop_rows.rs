@@ -19,11 +19,14 @@
 //! 60 execute       ── 执行决策：本幕未收束且手上没有开着的工具批 ⇒ 跑一次模型往返
 //! 66 dispatch-model─ 端口派发：模型往返（在轮内发起）
 //! 67 open-tools ── 创建：模型响应的 `calls` 集合展开成 N 笔工具调用（D-117）
-//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用
+//! 68 dispatch-tools─ 端口派发：工具批次里已放行的单次调用（只交出去，出口 `sent`）
 //! 69 deny-tools ── 拒绝收尾：被拒的那几笔按原因落 `failed`（b）
-//! 71 await-model   ── 等应答（模型端口；`by = None` 的「在等」声明位）
+//! 71 await-model   ── 等应答（模型端口）
 //! 72 await-tools   ── 等应答（工具端口）
 //! ```
+//!
+//! `await-*` 与它的 `dispatch-*` 成对（`D-222` 订正 2 / `D-124` 订正 1）：派出与收应答
+//! 分处两个环步，两个动作之间那一圈「已派出、未收清」就是 `waiting` 视图读的形状。
 //!
 //! 顺序进表而不是进调用点：同一点上多行竞争时，`drive` 取最小的一笔。`prio` 是跨行
 //! 可比的**全局**序，不是格内序（判据 10）。
@@ -93,8 +96,19 @@ const CLOSE: &str = "close";
 const OPENER: &str = "opener";
 /// 授权执行体（b）：对已开账的工具调用落放行 / 拒绝事实。
 const AUTHORIZER: &str = "authorizer";
-/// 派发执行体（b）：放行的落 `sent` 交给执行层并关账，被拒的落 `failed`。
+/// 派发执行体（b）：放行的落 `sent` 交给执行层（只交出去，不等结果——`D-124` 订正 1）。
 const COURIER: &str = "courier";
+/// 派发的收尾执行体（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的动作——
+/// 收这一批的结果、关账，被拒的落 `failed`。
+///
+/// 与 [`COURIER`] 分开是「一个 `by` 一个动作」的同一条理由（D-118 决策 1–2）：
+/// `courier` 把一批**交出去**（出口 `sent`），`waiter-tools` 把它们**收回来**
+/// （出口 `response` / `failed` / `retry`）。共名就等于让一个动作按「现在是第几个
+/// 环步」分支——那正是绑定表要消灭的东西。
+///
+/// 名字与 model 端口的 [`RELAY`] / [`WAITER`] 同族：**派出半用信使词**
+/// （`relay` / `courier`），**收回半用等待词**（`waiter` / `waiter-tools`）。
+const WAITER_TOOLS: &str = "waiter-tools";
 /// 中转执行体（D-166）：`dispatch-model` 行选中的动作——跑一次**已宣布**的模型往返。
 ///
 /// 与 [`COURIER`] 分开是 D-118 决策 1–2 的直接后果：一个 `by` 一个动作，而两件事
@@ -180,18 +194,49 @@ const ACTOR_AUTHORIZER: ActorDecl = ActorDecl {
     writes: &[EVENT_AUTHZ_GRANTED, EVENT_AUTHZ_DENIED],
 };
 
-/// 派发执行体（b）：已放行的落 `sent` 并交给执行层；批尾把每一笔关掉
-/// （应答 / 没跑到 / 被拒），落产物、等待格与轮内注入。
+/// 派发执行体（b）：`dispatch-tools` 行选中的动作——已放行的落 `sent` 并交给执行层。
+///
+/// ## 它为什么一条领域格都不写（`D-124` 订正 1）
+///
+/// 派出去与收回来分处两个环步之后，这一半的事只有一件：把这一笔交出去。它落的
+/// `sent` 是**引擎格**（端口契约的 `before`，`port::begin` 写），第 5 条禁止执行体
+/// 把它写进名单；而批次真正落地的东西（产物 / 等待进展 / 轮内注入 / 批次边界汇报）
+/// 全在**收尾半**，归 [`ACTOR_WAITER_TOOLS`]。
+///
+/// 装载期第 6 条的后半因此改判「有没有交出去的凭据」：出口里有某个端口的 `before`
+/// 格即可（`check_ports` 已经要求那条端口有应答出口，关门链条完整）。这不是豁免——
+/// 出口不是任何端口的 `before` 且名单为空的行照样红。
 const ACTOR_COURIER: ActorDecl = ActorDecl {
     name: COURIER,
     // 派发本身不调模型（模型在执行层之外）。
     mode: LatencyTier::Fast,
     reads: &[],
-    // 汇报格为什么在这张名单上：批次边界（2f）就在本执行体的动作窗口里
-    // （`turn_runner::stream::dispatch_round` 的 2e/2f），而那一刻的派发点（D-163）
-    // 会在窗口内落一条 `chat.assistant.reported`。运行期写封闭按**动作窗口**归属
-    // （D-123 决策 1：尾段就是这一次动作的实际写入），所以这一格必须在这里声明——
-    // 它不是「派发体写的」，而是「派发体窗口里落的」，两句话在账本上是同一件事。
+    writes: &[],
+};
+
+/// 派发的**收尾半**（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的动作——
+/// 收这一批的结果、关账、落产物与等待格。
+///
+/// 与 [`ACTOR_COURIER`] 分开是「一个 `by` 一个动作」的直接后果（D-118 决策 1–2）：
+/// 派出（出口 `sent`）与收应答（出口 `response` / `failed` / `retry`）分处两个环步，
+/// 两个动作之间那一圈「已派出、未收清」因此在事实面上可见。
+///
+/// 名单上四格都在**收尾**这一侧：
+///
+/// 1. `artifact.added`（2c 产物）、`chat.assistant.progress`（2d 等待进展）、
+///    `turn.supplemented`（2f 轮内注入）——它们的写点在批尾；
+/// 2. `chat.assistant.reported`——批次边界（2f）的派发点（D-163）在同一个窗口里落。
+///    运行期写封闭按**动作窗口**归属（D-123 决策 1：尾段就是这一次动作的实际写入），
+///    所以「它不是在收尾体写的，而是在收尾体窗口里落的」在账本上是同一件事。
+///
+/// `deny-tools` 为什么也归它：被拒的那几笔的终局（`failed{why}`）由批尾关账写出，
+/// 而批尾就在这一半。派发半在那条路上什么都不落（`begin_calls` 只写放行的那些），
+/// 把它挂在收尾半才与「谁写的」对得上。
+const ACTOR_WAITER_TOOLS: ActorDecl = ActorDecl {
+    name: WAITER_TOOLS,
+    // 收一批工具结果：不调模型，快速档。
+    mode: LatencyTier::Fast,
+    reads: &[],
     writes: &[
         EVENT_ARTIFACT_ADDED,
         EVENT_CHAT_ASSISTANT_PROGRESS,
@@ -392,7 +437,12 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     },
     ActorEntry {
         decl: ACTOR_COURIER,
-        run: super::turn_exec::run_dispatch,
+        run: super::turn_exec::run_begin_tools,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_WAITER_TOOLS,
+        run: super::turn_exec::run_finish_tools,
         transitional: &[],
     },
     ActorEntry {
@@ -1006,10 +1056,14 @@ pub(crate) static ROWS: &[Decl] = &[
     },
     // 授权级联的第二行（第一行 `authorize-tool` 在表首）：只对已放行的那笔
     // 落 `sent`。`granted` 已蕴含 `request`，所以这里不再复写请求前件。
+    //
+    // **本行只到 `sent` 为止**（`D-124` 订正 1）：交出去就关账，收应答是 `await-tools`。
+    // 第二格 `failed` 是控制面失败的出口（`port::begin` 拒了这一笔：行不欠 / 端口没声明）
+    // ——那条路上没有可等的往返，就地判死；留着它才不会让这一行永远开账。
     Decl {
         name: "dispatch-tools",
         prio: 68,
-        // 派发动作（b）：放行的落 `sent` 并交执行层，批尾把每一笔关掉。
+        // 派发动作（b）：放行的落 `sent` 交给执行层。批尾关账归 `waiter-tools`。
         by: Some(COURIER),
         // 派发本身不调工具（执行在批次里）。
         tier: LatencyTier::Fast,
@@ -1036,15 +1090,19 @@ pub(crate) static ROWS: &[Decl] = &[
     // 被拒的调用也要有人收尾（b）：`authz.denied` 关掉了授权行，但
     // `dispatch-tools` 只欠 `granted`——一批**全被拒**（或全是非法调用）时它不欠，
     // 执行层就永远跑不到，`failed{why}` 也永远不落。这一行把「拒绝之后还必须做一次
-    // 收尾」说成债务：出口与派发行同一格，动作也是同一个派发执行体（混合批次里
-    // 那一笔由 68 顺带关掉，本行随后自然不欠）。
+    // 收尾」说成债务：出口与派发行同一格（`failed`），动作归**收尾半**
+    // （混合批次里那一笔由 68 起批、由本行与 `await-tools` 一起收掉，收完本行自然不欠）。
+    //
+    // 为什么 `by` 是 `waiter-tools` 而不是 `courier`（`D-124` 订正 1）：这一格是
+    // 批尾关账写出来的，而批尾在收尾半；派发半在拒绝路径上一格都不落
+    // （`begin_calls` 只写放行的那些），把它挂在派发半，名单与写点就对不上。
     //
     // 键取 `(port, id, attempt)` 与 `authz.denied` 同形（D-138）；不带 `port`
     // 的收束格拒绝（`deny()` 写的那一条）按 eq 取不到实例，不会误开一笔工具债。
     Decl {
         name: "deny-tools",
         prio: 69,
-        by: Some(COURIER),
+        by: Some(WAITER_TOOLS),
         tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {
@@ -1100,11 +1158,18 @@ pub(crate) static ROWS: &[Decl] = &[
     //
     // 键取 `(port, id, attempt)`：重试后新 attempt 的 `sent` 要重新开一笔等待，
     // 而不是被旧 attempt 的应答关掉（D-138）。
+    //
+    // `by` 从 `None` 变成 `waiter-tools`（`D-124` 订正 1）：与 `D-222` 订正 2 对
+    // `await-model` 做的事逐字相同——`by = None` 时代它恒 blocked、永不选中，
+    // 「在等」只在崩溃恢复的输入上才有值；接上执行体之后，派出与应答分处两个环步，
+    // 中间那一圈「`sent` 有、终局无」在**正常跑**里读得到。
     Decl {
         name: "await-tools",
         prio: 72,
-        by: None,
-        tier: LatencyTier::Deep,
+        by: Some(WAITER_TOOLS),
+        // 等的是工具执行层，不调模型：这一行的时延档与 `dispatch-tools` 同档
+        // （`tier` 判的是「这一行要不要模型句柄」，不是「会占多久」）。
+        tier: LatencyTier::Fast,
         expand: None,
         owes: Pattern {
             source: EVENT_SENT,

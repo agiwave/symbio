@@ -250,6 +250,20 @@ pub(crate) struct ModelFlight {
     pub(crate) output: Option<(StreamNodeFacts, String)>,
 }
 
+/// 在飞的一批工具调用（`D-124` 订正 1）：派出与收尾两半之间的**唯一**交接件。
+///
+/// 与 [`ModelInFlight`] 同一条理由活着：两次选债之间它在草稿里挂着，`sent` 与终局
+/// 之间那一圈因此可以横跨两个环步。`rt` 与 `calls` 一并寄存——收尾半要用前者算
+/// 正文载荷、用后者按 `call_id` 关账，而派发器不替它记这两样。
+pub(crate) struct ToolFlight {
+    /// 这一批对应的那一次模型往返（唤醒幕是合成的那一份）。
+    pub(crate) rt: symbio_core::LlmTurn,
+    /// 开账过的调用（`sent` 标记在里面，关账按它逐笔判）。
+    pub(crate) calls: Vec<super::super::tool_dispatch::ToolPortCall>,
+    /// 执行层那一段：`'static` 的框，收尾半 poll 它。
+    pub(crate) fut: super::super::tool_dispatch::ToolInFlight,
+}
+
 /// 派出的结果：三态。
 pub(crate) enum ModelBegin {
     /// 已派出（`sent` 落了），future 在这里。
@@ -668,28 +682,119 @@ pub(crate) async fn authorize_round(
 /// 两行共用这一个动作：混合批次里 `dispatch-tools` 先被选中，它顺手把被拒的那几笔
 /// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tools` 不欠，`deny-tools` 选中
 /// 本动作，仍然要走执行层（审批卡 / 拒绝反馈由它唯一构造）。
-pub(crate) async fn dispatch_round(
+/// 阶段②b-3 的**派出半**（`dispatch-tools` 行的动作，`D-124` 订正 1）：落 `sent`、
+/// 把「跑执行层 + 收结果」整段寄存进草稿的 in-flight 槽。
+///
+/// 与 [`land_round`] 成对（与 `model` 端口的 [`begin_model`] / [`poll_flight`] 逐字同形）：
+/// 派出与收应答分处两个环步，中间那一圈「`sent` 有、终局无」在**正常跑**里可见——
+/// `waiting` 视图、`stale_sent` 与 `reap` 读的都是它。
+///
+/// 这一半只做「交出去」：定格正文、广播工具节点、落 `sent`。批次真正落地的东西
+/// （产物 / 等待进展 / 轮内注入 / 批次边界汇报）全在 [`land_batch`]。
+pub(crate) async fn begin_round(
+    run: &mut Prepared,
+    store: &std::sync::Arc<dyn Store<Event = Event>>,
+    dispatch: std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>,
+) -> Option<ToolFlight> {
+    // 两格齐 ⇒ 正常批次；两格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
+    // 只缺一格是草稿错位，不拿唤醒兜底掩盖它。
+    let batch = match (run.pending_model.take(), run.pending_calls.take()) {
+        (Some(rt), Some(calls)) => Some((rt, calls)),
+        _ => dispatch
+            .wake(store.as_ref())
+            .await
+            .map(|batch| (batch.turn, batch.calls)),
+    };
+    // 没有寄存、也没有唤醒请求 = 引擎没有可派的工具批；不空转。
+    let (rt, mut calls) = batch?;
+    match dispatch.clone().begin(store.clone(), &rt, &mut calls).await {
+        // 草稿错位（`begin` 没找到可派的批次）：一格没落，派发器的空账本守卫会显形。
+        super::super::tool_dispatch::ToolBegin::None => None,
+        super::super::tool_dispatch::ToolBegin::InFlight(fut) => {
+            Some(ToolFlight { rt, calls, fut })
+        }
+    }
+}
+
+/// 阶段②b-3 的**收尾半**（`await-tools` / `deny-tools` 两行的动作）：poll 一次在飞的
+/// 那一批，落地了就关账并落产物 / 等待格。
+///
+/// ## 为什么只 poll 一次
+///
+/// 与 `model` 端口同一个理由（`D-222` 订正 2）：返回的那一刻环要能回到选债口，
+/// 往返在飞的时候别的行才轮得到。`await` 到底等于把派出与收应答又合回一个动作窗口。
+///
+/// 还在跑就把 future 原样放回槽里、**让出执行权**（不 yield 就是自旋：那一圈在同一个
+/// 任务里同步转完，执行层的 I/O 永远等不到驱动）。
+///
+/// ## 槽空的两种处境
+///
+/// 1. **这一批没有跨边界的往返**（一批全被拒 / 唤醒的用户结果）：结论本地可算，
+///    起批之后跑到完——那一条路上没有「在等」这一圈可言；
+/// 2. **等待方随进程没了**（日志上有 `sent`、草稿里没有批次）：按与
+///    [`kill_dangling_round`] 同一条处置判死，不猜、不重放。
+pub(crate) async fn land_round(
+    run: &mut Prepared,
+    flight: Option<ToolFlight>,
+    store: &std::sync::Arc<dyn Store<Event = Event>>,
+    llm: &dyn LlmAdapter,
+    dispatch: std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>,
+) -> Result<Option<ToolFlight>, symbio_core::AppendError> {
+    let Some(flight) = flight else {
+        let batch = match (run.pending_model.take(), run.pending_calls.take()) {
+            (Some(rt), Some(calls)) => Some((rt, calls)),
+            _ => dispatch
+                .wake(store.as_ref())
+                .await
+                .map(|batch| (batch.turn, batch.calls)),
+        };
+        let Some((rt, mut calls)) = batch else {
+            // 没有批次可起、也没有在飞的 future：等待方随进程没了。
+            super::super::port::kill_dangling_sent(store.as_ref(), "tool", "no_pending_batch")?;
+            return Ok(None);
+        };
+        let super::super::tool_dispatch::ToolBegin::InFlight(fut) =
+            dispatch.clone().begin(store.clone(), &rt, &mut calls).await
+        else {
+            return Ok(None);
+        };
+        // 这一条路没有真正的等待：起批之后直接跑到完（结论本地可算）。
+        let outcomes = fut.await;
+        dispatch.finish(store.as_ref(), &calls, &outcomes);
+        land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
+        return Ok(None);
+    };
+
+    let ToolFlight { rt, calls, mut fut } = flight;
+    let ready = std::future::poll_fn(|cx| std::task::Poll::Ready(fut.as_mut().poll(cx))).await;
+    match ready {
+        std::task::Poll::Pending => {
+            // 让出执行权：这一圈没写任何格，派发器的空账本守卫据 `sent` 无所终局
+            // 认出这是**合法地不前进**，不判 `no_progress`。
+            tokio::task::yield_now().await;
+            Ok(Some(ToolFlight { rt, calls, fut }))
+        }
+        std::task::Poll::Ready(outcomes) => {
+            // 关账先于落格：`response` / `failed` 是端口账的终局，产物与等待格是业务
+            // 事实——两者在同一圈里落，次序按「账先关，事再写」。
+            dispatch.finish(store.as_ref(), &calls, &outcomes);
+            land_batch(run, store.as_ref(), llm, rt, outcomes).await?;
+            Ok(None)
+        }
+    }
+}
+
+/// 一批工具的结果**落地**：产物格、等待进展、交换累加、轮内注入。
+///
+/// 2c–2f 那四段从 [`dispatch_round`] 里原样搬过来——它们的写点在「结果已经在手上」
+/// 之后，与「派出去」那一刻无关，所以归收尾半。
+async fn land_batch(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
     llm: &dyn LlmAdapter,
-    dispatch: &dyn super::super::tool_dispatch::ToolDispatch,
-) -> Result<Option<TurnOutcome>, symbio_core::AppendError> {
-    // 两格齐 ⇒ 正常批次；两格皆空 ⇒ 可能是一笔唤醒（恢复幕没有模型应答）。
-    // 只缺一格是草稿错位，不拿唤醒兜底掩盖它。
-    let normal = match (run.pending_model.take(), run.pending_calls.take()) {
-        (Some(rt), Some(calls)) => Some((rt, calls)),
-        _ => None,
-    };
-    let (rt, mut calls) = match normal {
-        Some(parts) => parts,
-        None => match dispatch.wake(store).await {
-            Some(batch) => (batch.turn, batch.calls),
-            // 没有寄存、也没有唤醒请求 = 引擎没有可派的工具批；不空转。
-            None => return Ok(None),
-        },
-    };
-    let outcomes = dispatch.dispatch(store, &rt, &mut calls).await;
-
+    rt: LlmTurn,
+    outcomes: Vec<super::super::tool_dispatch::DispatchOutcome>,
+) -> Result<(), symbio_core::AppendError> {
     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &outcomes).await?;
 
@@ -739,7 +844,7 @@ pub(crate) async fn dispatch_round(
             .with_cost_ms(run.cost_ms)
             .with_payload(with_status(produced, "pending")),
         )?;
-        return Ok(Some(TurnOutcome {
+        run.settled = Some(TurnOutcome {
             turn: run.turn,
             text: rt.text,
             cost_ms: run.cost_ms,
@@ -750,7 +855,8 @@ pub(crate) async fn dispatch_round(
             closure_denied: false,
             // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因。
             finish: rt.finish.clone(),
-        }));
+        });
+        return Ok(());
     }
 
     // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
@@ -764,7 +870,7 @@ pub(crate) async fn dispatch_round(
         let injected = inject(Some(run.user_seq)).await;
         run.exchange.extend(injected);
     }
-    Ok(None)
+    Ok(())
 }
 
 /// 2a 收束：答话 / 空答兜底 / 写侧闸拒。

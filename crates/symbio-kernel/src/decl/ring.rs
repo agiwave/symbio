@@ -383,7 +383,9 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 /// - [`Gap::ActorCannotClose`]：执行体够不到它那一行的收口（§3.4 第 6 条的后半）——
 ///   出口里有可声明的领域格时，判它与出口（`until` / `unless`，视图按 `reads` 展开到
 ///   事实）**有无交集**；出口全是引擎独占格时（派发行的形状：引擎落 `before` / `failed`
-///   替它关门），判它的**名单是不是空的**。两支都指向同一个故障：动作什么都不写；
+///   替它关门），判它有没有**交出去的凭据**——名单非空，或出口里有某个端口的 `before` 格
+///   （订正 1：纯派发半手里没有领域格，写的是引擎的 `sent`）。两支都指向同一个故障：
+///   这一行既写不出领域格、也没有一条挂得上的派出契约；
 /// - [`Gap::ActorModeTooNarrow`]：行的 `tier` 比执行体的 `mode` 更慢——反射档
 ///   拿不到模型句柄（§3.4 的 mode 闸门），却让一行声称要调模型；
 /// - [`Gap::UndeclaredPatternField`]：模式引用了一个不在那条事实载荷声明里的字段
@@ -665,17 +667,27 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen) -> Vec<Gap> {
                         .chain(decl.unless)
                         .flat_map(|p| fact_names_of(p.source, frozen))
                         .collect();
-                    // 两档（D-124）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
+                    // 两档（D-124，订正 1）：出口里有**可声明的领域格** ⇒ 原判据（交集非空）；
                     // 出口**全是**引擎独占格 ⇒ 那是派发行的形状——引擎按 `PortDecl::before`
                     // 在动作之前落 `sent`、失败/租约到顶落 `failed`，关门本来就不归执行体。
                     // 此时若还要求交集，就是要求执行体声明第 5 条禁止它声明的格：
-                    // 两条检查互斥 ⇒ 这一行永远不许接线。改判这一档判得住的那半
-                    // （名单非空 = 不许注册一段什么都不写的动作），
-                    // 「这次真没写」由运行期的空账本守卫判（D-123 决策 1）。
+                    // 两条检查互斥 ⇒ 这一行永远不许接线。
+                    //
+                    // 这一档判得住的是「这一行有没有**交出去的凭据**」两种形态之一：
+                    // - 名单非空（旧口径）：它自己写得出领域格；
+                    // - 出口里有某个端口的 `before` 格（订正 1）：它挂上了一条**派出契约**，
+                    //   而 `check_ports` 已经要求那条端口有应答出口 ⇒ 关门链条完整，
+                    //   动作这一侧只需要「把这一笔交出去」。纯派发半（派出去 / 收回来分处
+                    //   两个环步之后的前一半）就落在这条上：它手里没有领域格可写，
+                    //   写的是引擎的 `sent`。
+                    //
+                    // 「这次真没写」两支都由运行期的账本守卫判（D-123 决策 1）：领域格那一支
+                    // 看空账本，派发那一支看 `sent` 关不关账（`waiting` ⇒ 步数上界 / `reap`）。
                     let engine_only_exits = !exits.is_empty()
                         && exits.iter().all(|f| super::ENGINE_ONLY_CELLS.contains(f));
                     let reaches_exit = if engine_only_exits {
                         !actor.writes.is_empty()
+                            || frozen.ports.iter().any(|p| exits.contains(&p.before))
                     } else {
                         exits.iter().any(|f| actor.writes.contains(f))
                     };

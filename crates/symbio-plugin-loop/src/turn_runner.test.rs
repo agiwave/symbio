@@ -1300,7 +1300,7 @@ mod tool_round_tests {
     use symbio_testkit::trivial_actor_spec;
 
     use super::super::super::tool_dispatch::{
-        DispatchOutcome, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
+        DispatchOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::control_decl::EVENT_AUTHZ_GRANTED;
@@ -1894,12 +1894,14 @@ mod tool_round_tests {
     }
 
     /// 替身逐条落 `response`（`port::succeed`）。
-    fn succeed_batch(
-        store: &dyn Store<Event = Event>,
-        calls: &[ToolPortCall],
-        turn_no: u64,
-        produced_by: u64,
-    ) {
+    ///
+    /// 轮号与溯源从**日志**取（`model_batch`）：收尾半与派出半分处两个动作，拿不到
+    /// 派出那一刻的局部值——而这两个值本来就在 `response(port=model)` 上，读它比
+    /// 从派出半偷偷传下来更省一段交接件（替身不该凭空多出生产的形状）。
+    fn succeed_batch(store: &dyn Store<Event = Event>, calls: &[ToolPortCall]) {
+        let Some((turn_no, produced_by, _)) = model_batch(store) else {
+            return;
+        };
         for call in calls.iter().filter(|c| c.granted && c.sent) {
             if let Err(e) =
                 super::super::super::port::succeed(store, &call.call, turn_no, produced_by)
@@ -1932,16 +1934,16 @@ mod tool_round_tests {
             authorize_batch(store, calls);
         }
 
-        async fn dispatch(
-            &self,
-            store: &dyn Store<Event = Event>,
+        async fn begin(
+            self: Arc<Self>,
+            store: Arc<dyn Store<Event = Event>>,
             turn: &LlmTurn,
             calls: &mut [ToolPortCall],
-        ) -> Vec<DispatchOutcome> {
+        ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
-            let Some((turn_no, produced_by)) = begin_batch(store, calls) else {
-                return Vec::new();
-            };
+            if begin_batch(store.as_ref(), calls).is_none() {
+                return ToolBegin::None;
+            }
             let outcomes: Vec<DispatchOutcome> = turn
                 .tool_calls
                 .iter()
@@ -1971,8 +1973,16 @@ mod tool_round_tests {
                     annotations: Vec::new(),
                 })
                 .collect();
-            succeed_batch(store, calls, turn_no, produced_by);
-            outcomes
+            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+        }
+
+        fn finish(
+            &self,
+            store: &dyn Store<Event = Event>,
+            calls: &[ToolPortCall],
+            _outcomes: &[DispatchOutcome],
+        ) {
+            succeed_batch(store, calls);
         }
     }
 
@@ -2043,12 +2053,12 @@ mod tool_round_tests {
             }
         }
 
-        async fn dispatch(
-            &self,
-            _store: &dyn Store<Event = Event>,
+        async fn begin(
+            self: Arc<Self>,
+            _store: Arc<dyn Store<Event = Event>>,
             turn: &LlmTurn,
             calls: &mut [ToolPortCall],
-        ) -> Vec<DispatchOutcome> {
+        ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
             // 派发前落 `sent`（端口账第三笔：派出）。
             for call in calls.iter_mut().filter(|c| c.granted) {
@@ -2086,6 +2096,15 @@ mod tool_round_tests {
                     annotations: Vec::new(),
                 })
                 .collect();
+            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+        }
+
+        fn finish(
+            &self,
+            _store: &dyn Store<Event = Event>,
+            calls: &[ToolPortCall],
+            _outcomes: &[DispatchOutcome],
+        ) {
             // 关账：工具回了话 ⇒ `response`。
             for call in calls.iter().filter(|c| c.granted && c.sent) {
                 super::super::super::port::succeed(
@@ -2096,7 +2115,6 @@ mod tool_round_tests {
                 )
                 .expect("唤醒应答落格");
             }
-            outcomes
         }
 
         async fn wake(&self, _store: &dyn Store<Event = Event>) -> Option<WakeBatch> {
@@ -2153,25 +2171,30 @@ mod tool_round_tests {
             }
         }
 
-        async fn dispatch(
-            &self,
-            store: &dyn Store<Event = Event>,
+        async fn begin(
+            self: Arc<Self>,
+            store: Arc<dyn Store<Event = Event>>,
             turn: &LlmTurn,
             calls: &mut [ToolPortCall],
-        ) -> Vec<DispatchOutcome> {
+        ) -> ToolBegin {
             *self.rounds.lock().unwrap() += 1;
-            let Some((turn_no, produced_by, _)) = model_batch(store) else {
-                return Vec::new();
+            let Some((turn_no, produced_by, _)) = model_batch(store.as_ref()) else {
+                return ToolBegin::None;
             };
             for call in calls.iter().filter(|c| !c.granted) {
                 let why = call.deny_why.unwrap_or("denied");
-                if let Err(e) =
-                    super::super::super::port::failed(store, &call.call, turn_no, produced_by, why)
-                {
+                if let Err(e) = super::super::super::port::failed(
+                    store.as_ref(),
+                    &call.call,
+                    turn_no,
+                    produced_by,
+                    why,
+                ) {
                     panic!("替身拒绝落格失败：{e:?}");
                 }
             }
-            turn.tool_calls
+            let outcomes: Vec<DispatchOutcome> = turn
+                .tool_calls
                 .iter()
                 .map(|tc| DispatchOutcome {
                     call_id: tc.id.clone().unwrap_or_default(),
@@ -2186,7 +2209,18 @@ mod tool_round_tests {
                     result_id: String::new(),
                     annotations: Vec::new(),
                 })
-                .collect()
+                .collect();
+            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+        }
+
+        fn finish(
+            &self,
+            _store: &dyn Store<Event = Event>,
+            _calls: &[ToolPortCall],
+            _outcomes: &[DispatchOutcome],
+        ) {
+            // 拒绝的 `failed` 在派出半就落了（那一批没有 `sent` 要等，`deny-tools`
+            // 的出口也就是它）；收尾半没有第二件事。
         }
     }
 
@@ -3397,15 +3431,15 @@ mod tool_round_tests {
             authorize_batch(store, calls);
         }
 
-        async fn dispatch(
-            &self,
-            store: &dyn Store<Event = Event>,
+        async fn begin(
+            self: Arc<Self>,
+            store: Arc<dyn Store<Event = Event>>,
             turn: &LlmTurn,
             calls: &mut [ToolPortCall],
-        ) -> Vec<DispatchOutcome> {
-            let Some((turn_no, produced_by)) = begin_batch(store, calls) else {
-                return Vec::new();
-            };
+        ) -> ToolBegin {
+            if begin_batch(store.as_ref(), calls).is_none() {
+                return ToolBegin::None;
+            }
             let outcomes: Vec<DispatchOutcome> = turn
                 .tool_calls
                 .iter()
@@ -3429,8 +3463,16 @@ mod tool_round_tests {
                     annotations: Vec::new(),
                 })
                 .collect();
-            succeed_batch(store, calls, turn_no, produced_by);
-            outcomes
+            ToolBegin::InFlight(Box::pin(async move { outcomes }))
+        }
+
+        fn finish(
+            &self,
+            store: &dyn Store<Event = Event>,
+            calls: &[ToolPortCall],
+            _outcomes: &[DispatchOutcome],
+        ) {
+            succeed_batch(store, calls);
         }
     }
 
@@ -4203,6 +4245,115 @@ mod tool_round_tests {
 
         fn head(&self) -> symbio_core::Seq {
             self.inner.head()
+        }
+    }
+
+    /// 工具批次的「已派出、未收清」在**正常跑**里读得到——工具端口与模型端口同形。
+    ///
+    /// ## 它钉的是什么
+    ///
+    /// `dispatch-tools` 落 `sent`、`await-tools` 落 `response`，两个动作分处两个环步。
+    /// 那么在**两次选债之间**那一圈，事实源上「工具这一笔开着、别的都关着」必须读得到：
+    /// `open_calls` 里有一笔 `port=tool`，且 [`super::super::super::loop_rows::waiting`]
+    /// 为**真**。`waiting` 视图、`stale_sent`（租约看护）与 `reap` 读的都是它——
+    /// 它们在工具端口上不再是「只读上一次生命遗留的日志」。
+    ///
+    /// ## 观察点为什么是**动作边界**而不是 `append`
+    ///
+    /// `sent` 与 `response` 是两次独立 append：装饰 `append` 也能在两次 append 之间
+    /// 读到那一瞬，但那在**老形状**（派发与收应答合回同一个动作窗口）下同样成立 ⇒
+    /// 判不红。动作边界才判得红：老形状下两格落在同一圈里，边界上读不到「已派出、
+    /// 未收清」。派发器每跑一个动作前读一次 `head()`（`turn_exec.rs`），那一读正落在
+    /// 「上一圈的动作已跑完、这一圈的动作还没跑」之间。
+    ///
+    /// ## 反向自检
+    ///
+    /// 把 `ToolDispatch` 的 `begin` / `finish` 合回同一个动作窗口（老形状：
+    /// 一个动作里 `begin_calls` → 跑执行层 → `close_batch`）⇒ 边界上工具这一笔永远
+    /// 已经关账 ⇒ `has_tool` 全程为假 ⇒ 本用例红。
+    #[tokio::test]
+    async fn an_in_flight_tool_batch_is_observable_between_selection_rounds() {
+        let inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
+            std::sync::Arc::new(EventStore::new());
+        let windows = Arc::new(Mutex::new(Vec::new()));
+        let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
+            std::sync::Arc::new(BatchWindowStore {
+                inner: inner.clone(),
+                windows: windows.clone(),
+                turn: 0,
+            });
+        let llm = std::sync::Arc::new(ToolCallingLlm::new());
+        let dispatch = std::sync::Arc::new(FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        });
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                llm.clone(),
+                TokenIssuer::issue_deep(),
+                input(store.as_ref()),
+                Arc::new(SilentDeltas),
+                std::sync::Arc::from(tools()),
+                Some(dispatch.clone()),
+            )
+            .await
+            .expect("工具轮必答");
+
+        assert_eq!(out.text, "读到了。", "在途可观测不该改变结果");
+
+        let windows = windows.lock().unwrap().clone();
+        assert!(
+            !windows.is_empty(),
+            "一个动作边界都没读到 ⇒ 这条用例什么都没验（观察点没接上）"
+        );
+        // 找**那一圈**：工具这一笔开着、别的都关着、且 `waiting` 为真。
+        let window = windows
+            .iter()
+            .find(|(_, has_tool, waiting)| *has_tool && *waiting)
+            .expect("工具批次「已派出、未收清」在正常跑里读不到");
+        assert_eq!(
+            window.0, 1,
+            "那一刻开着的应当只有工具这一笔（模型那一笔早已关账）：{windows:?}"
+        );
+    }
+
+    /// 事实源装饰器：**动作边界**上的一次快照。
+    ///
+    /// 观察点是 `Store::head()`——派发器每跑一个动作前读它一次（`turn_exec.rs`），
+    /// 那一读正落在「上一圈的动作已跑完、这一圈的动作还没跑」之间。
+    struct BatchWindowStore {
+        inner: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>>,
+        /// 每个边界上的快照：(开着几笔、其中有没有工具端口、`waiting` 是否为真)。
+        windows: Arc<Mutex<Vec<(usize, bool, bool)>>>,
+        turn: u64,
+    }
+
+    impl Store for BatchWindowStore {
+        type Event = Event;
+
+        fn append(&self, event: Event) -> Result<symbio_core::Seq, symbio_core::AppendError> {
+            self.inner.append(event)
+        }
+
+        fn range(&self, from: symbio_core::Seq) -> Vec<Event> {
+            self.inner.range(from)
+        }
+
+        fn head(&self) -> symbio_core::Seq {
+            let head = self.inner.head();
+            let facts = self.inner.range(symbio_core::Seq::new(0));
+            let open = super::super::super::control_decl::open_calls(&facts);
+            let has_tool = open
+                .iter()
+                .any(|e| e.payload.get("port").and_then(|v| v.as_str()) == Some("tool"));
+            let waiting = super::super::super::loop_rows::waiting(&facts, self.turn, 0);
+            self.windows
+                .lock()
+                .unwrap()
+                .push((open.len(), has_tool, waiting));
+            head
         }
     }
 

@@ -428,15 +428,27 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
     }));
 }
 
-/// 第 6 条的第二档（D-124）：出口**全是**引擎独占格的行——派发行的形状。
+/// 第 6 条的第二档（`D-124` 订正 1）：出口**全是**引擎独占格的行——派发行的形状。
 ///
 /// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥，
-/// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tools` 曾是或正是这个形状，
-/// DE-015 §3.1 要给它们接 `courier` / `relay`）。改判成「名单非空」之后，
-/// **空名单仍然要红**——这一档不是「不判」。
+/// 这一行当年只能 `by: None`（`dispatch-model` / `dispatch-tools` 曾是或正是这个形状）。
+/// 这一档判「有没有交出去的凭据」，两种形态都算：
+///
+/// 1. 名单非空（旧口径）——它自己写得出领域格；
+/// 2. 出口里有某个端口的 `before` 格（订正 1）——它挂上了一条派出契约，`check_ports`
+///    已经要求那条端口有应答出口，关门链条因此完整。
+///
+/// 两条都不成立才红：空名单 + 出口不是任何端口的 `before`（比如只挂 `failed`），
+/// 就是「注册了一段什么都不写的动作」。
 #[test]
-fn an_actor_serving_an_engine_exit_row_must_still_declare_writes() {
-    let gaps_for = |writes: &'static [&'static str]| -> Vec<Gap> {
+fn an_actor_serving_an_engine_exit_row_needs_a_write_or_a_port_contract() {
+    let gap = Gap::ActorCannotClose {
+        row: "r",
+        actor: "act",
+    };
+    // `with_port` = 这一行挂的 `sent` 是不是某个端口的 `before`（`check_ports` 会替它
+    // 要求应答出口；这里只关心第 6 条看不看得见那条契约）。
+    let gaps_for = |writes: &'static [&'static str], with_port: bool| -> Vec<Gap> {
         let mut b = declare(&[ActorDecl {
             name: "act",
             mode: LatencyTier::Deep,
@@ -444,36 +456,48 @@ fn an_actor_serving_an_engine_exit_row_must_still_declare_writes() {
             writes,
         }]);
         // 派发行按**端口**开账，夹具世界照生产那一格补上 `sent` 与它的字段。
-        b.fact(FactDecl {
-            name: "sent",
-            port: Some("port"),
-            key: &["id", "attempt"],
-            expand: &[],
-            fields: &["port", "id", "attempt", "lease_ms", "attempt_cap"],
-        });
-        b.row(home("f"));
-        b.row(home("sent"));
+        for name in [EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED] {
+            b.fact(FactDecl {
+                name,
+                port: Some("port"),
+                key: &["id", "attempt"],
+                expand: &[],
+                fields: &["port", "id", "attempt", "lease_ms", "attempt_cap"],
+            });
+        }
+        if with_port {
+            b.port(PortDecl {
+                port: "x",
+                before: EVENT_SENT,
+                lease_ms: 1_000,
+                max_attempts: 1,
+                concurrent: false,
+            });
+        }
+        b.row(home(EVENT_SENT));
+        b.row(home(EVENT_RESPONSE));
+        b.row(home(EVENT_FAILED));
         b.row(row(
             "r",
             10,
             Some("act"),
             pattern("f", &["id"], &[]),
-            &[pattern("sent", &["id"], &[])],
+            &[pattern(EVENT_SENT, &["id"], &[])],
             &[],
         ));
         b.seal().err().unwrap_or_default()
     };
-    let gap = Gap::ActorCannotClose {
-        row: "r",
-        actor: "act",
-    };
     assert!(
-        !gaps_for(&["g"]).contains(&gap),
-        "出口全为引擎格、名单登记了领域格 ⇒ 派发行可接线（第二档判得住）"
+        !gaps_for(&["g"], false).contains(&gap),
+        "出口全为引擎格、名单登记了领域格 ⇒ 可接线（旧口径仍然成立）"
     );
     assert!(
-        gaps_for(&[]).contains(&gap),
-        "同样这一行，名单为空 ⇒ 仍然红：第二档不是豁免，是换了判的那一半"
+        !gaps_for(&[], true).contains(&gap),
+        "空名单 + 出口挂在端口的 `before` 上 ⇒ 纯派发行可接线（订正 1）"
+    );
+    assert!(
+        gaps_for(&[], false).contains(&gap),
+        "空名单 + 出口不是任何端口的 `before` ⇒ 仍然红：这一档不是豁免，是换了判的那一半"
     );
 }
 

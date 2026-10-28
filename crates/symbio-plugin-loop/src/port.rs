@@ -533,6 +533,64 @@ where
     Ok(true)
 }
 
+/// 把一笔**已经派出、没有等待方**的调用判死（`failed`，`why` 由调用方给）。
+///
+/// 与 [`kill_dangling`] 是同一条处置的两半：那一半管「宣布了还没派出」（日志上只有
+/// `request`），这一半管「派出去了、等它的那一段栈帧随进程没了」（日志上有 `sent`、
+/// 没有终局）。第二种在 `model` 端口由 `stream::kill_dangling_round` 逐笔处理，工具端口
+/// 是一批 N 笔，所以这里按端口把**所有**开着的 `sent` 一次关掉。
+///
+/// 不重试、不重放：等待方是那一刻的栈帧，它已经不存在了。租约看护（[`reap`]）对同一
+/// 形态的处理是「等到期再判死」——本函数给的是**同一个结论的更早时点**：派发器手里
+/// 已经没有这一批了，再等下去只是空转。
+pub(crate) fn kill_dangling_sent<S>(
+    store: &S,
+    port: &'static str,
+    why: &str,
+) -> Result<usize, AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let facts = store.range(symbio_core::Seq::new(0));
+    let mut killed = 0usize;
+    for sent in facts.iter().filter(|e| {
+        e.kind == EVENT_SENT && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+    }) {
+        let closed = facts.iter().any(|e| {
+            matches!(e.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED | EVENT_RETRY)
+                && e.payload.get("port").and_then(|v| v.as_str()) == Some(port)
+                && e.payload.get("id") == sent.payload.get("id")
+                && e.payload.get("attempt") == sent.payload.get("attempt")
+        });
+        if closed {
+            continue;
+        }
+        let Some(id) = sent.payload.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let attempt = sent
+            .payload
+            .get("attempt")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+        let call = Call::new(port, id, attempt);
+        failed_with(
+            store,
+            &call,
+            sent.turn,
+            sent.produced_by.unwrap_or(sent.turn),
+            why,
+        )?;
+        killed += 1;
+        symbio_core::plugin_warn!(
+            "session",
+            "[Loop] `{port}` 调用 `{}` 已派出但没有等待方（草稿里没有这一批）——判死",
+            call.id
+        );
+    }
+    Ok(killed)
+}
+
 /// 与 [`failed_with`] 同一条 `failed`，但允许并进**失败载荷**（模型端口已产出的
 /// 半截正文 / 思考，见 [`dispatch_full`]）。
 pub(crate) fn failed_with_extra<S>(

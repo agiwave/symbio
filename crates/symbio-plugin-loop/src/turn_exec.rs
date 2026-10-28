@@ -882,15 +882,26 @@ pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `courier` 执行体（b）：`dispatch-tools` / `deny-tools` 两行选中的动作。
-pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+/// `courier` 执行体（b）：`dispatch-tools` 行选中的动作——把放行的每一笔**交出去**
+/// （落 `sent`），批次的收尾归 [`run_finish_tools`]。
+///
+/// 与 [`run_finish_tools`] 分开是 `D-124` 订正 1 的那一刀：派出与收应答分处两个环步，
+/// 两次选债之间那一圈「已派出、未收清」才是 `waiting` 视图在**正常跑**里读得到的形状。
+pub(crate) fn run_begin_tools<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .dispatch(
-                step.store.as_ref(),
-                step.llm.as_ref(),
-                step.dispatch.as_deref(),
-            )
+            .begin_tools(step.store, step.dispatch.clone())
+            .await;
+        Ok(())
+    })
+}
+
+/// `waiter-tools` 执行体（`D-124` 订正 1）：`await-tools` / `deny-tools` 两行选中的
+/// 动作——收这一批的结果并关账。
+pub(crate) fn run_finish_tools<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        step.session
+            .finish_tools(step.store, step.llm.as_ref(), step.dispatch.clone())
             .await
             .map_err(ActorError::Append)
     })

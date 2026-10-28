@@ -472,6 +472,7 @@ impl TurnRunner {
                 run,
                 steps: 0,
                 inflight: None,
+                tool_flight: None,
             })),
         }
     }
@@ -512,6 +513,13 @@ pub(crate) struct TurnSession {
     /// 类型是 `'static` 的框（理由见 `stream::ModelInFlight`）：草稿不带生命周期参数，
     /// 否则 `Action` 的 `for<'a>` 要对两个生命周期成立，而绑定表要求它 `'static`。
     inflight: Option<stream::ModelInFlight>,
+    /// 已经派出、还没收尾的那一批工具调用（`D-124` 订正 1）。
+    ///
+    /// 与 [`Self::inflight`] 同一条寿命：两次选债之间它在草稿旁的这一格里挂着，
+    /// `sent` 与终局之间那一圈因此横跨两个环步。放在会话上而不是草稿里，理由与
+    /// `inflight` 逐字相同——`Prepared` 被 `&` 借给若干异步读口，槽里的
+    /// `dyn Future` 只 `Send` 不 `Sync`，进草稿会让那些读口集体失去 `Send`。
+    tool_flight: Option<stream::ToolFlight>,
 }
 
 impl TurnSession {
@@ -683,18 +691,35 @@ impl TurnSession {
         }
     }
 
-    /// 派发动作（`dispatch-tools` / `deny-tools` 两行的执行体）：落 `sent`、跑执行
-    /// 层、关账；继续下一轮就把交换累加进草稿，收束于等待用户就把产出寄存在草稿。
+    /// 派发动作的**派出半**（`dispatch-tools` 行的执行体）：落 `sent`、把批次寄存成
+    /// 在飞的 future；收应答归 [`Self::finish_tools`]。
     ///
     /// 没有草稿 / 没有分发通道时不做任何事——同上，防御而不是选择路径。
-    pub(crate) async fn dispatch(
+    pub(crate) async fn begin_tools(
         &mut self,
-        store: &dyn Store<Event = Event>,
+        store: &std::sync::Arc<dyn Store<Event = Event>>,
+        dispatch: Option<std::sync::Arc<dyn super::tool_dispatch::ToolDispatch>>,
+    ) {
+        if let Some(dispatch) = dispatch {
+            self.tool_flight = stream::begin_round(&mut self.run, store, dispatch).await;
+        }
+    }
+
+    /// 派发动作的**收尾半**（`await-tools` / `deny-tools` 两行的执行体）：poll 一次在飞的
+    /// 那一批，落地了就把结果归位（产物 / 等待格 / 下一轮交换），收束的产出寄存进草稿。
+    ///
+    /// 与 [`Self::await_model`] 同一条「只 poll 一次」：派出去与收回来分处两个环步，
+    /// 中间那一圈「已派出、未收清」在正常跑里读得到。
+    pub(crate) async fn finish_tools(
+        &mut self,
+        store: &std::sync::Arc<dyn Store<Event = Event>>,
         llm: &dyn LlmAdapter,
-        dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+        dispatch: Option<std::sync::Arc<dyn super::tool_dispatch::ToolDispatch>>,
     ) -> Result<(), symbio_core::AppendError> {
         if let Some(dispatch) = dispatch {
-            self.run.settled = stream::dispatch_round(&mut self.run, store, llm, dispatch).await?;
+            let flight = self.tool_flight.take();
+            self.tool_flight =
+                stream::land_round(&mut self.run, flight, store, llm, dispatch).await?;
         }
         Ok(())
     }

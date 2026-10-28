@@ -274,6 +274,38 @@ fn in_flight_is_attempt_scoped() {
     );
 }
 
+/// 关账的键是 **(port, id, attempt)**（D-138），不是一个逻辑 id。
+///
+/// 模型往返的 id 由引擎生成，工具调用的 id 由**模型**给出——两者没有互斥保证。
+/// 只按 id 关账的话，工具的应答会把模型那一笔关掉，于是「模型还在等」被读成
+/// 「模型已经答了」：提前收束或永不收束，两种都是静默的错。
+#[test]
+fn in_flight_does_not_close_across_ports() {
+    let events = vec![
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "model", "id": "x", "attempt": 1}),
+        ),
+        ev(
+            1,
+            EVENT_SENT,
+            json!({"port": "tool", "id": "x", "attempt": 1}),
+        ),
+        // 工具的应答：同 id、不同端口 ⇒ 只关工具那一笔。
+        ev(
+            1,
+            EVENT_RESPONSE,
+            json!({"port": "tool", "id": "x", "attempt": 1}),
+        ),
+    ];
+    assert_eq!(
+        core_table().eval("in_flight", &events, 0),
+        Some(json!([{"id": "x", "port": "model", "attempt": 1}])),
+        "工具的应答关掉了模型那一笔 ⇒ 两个端口共用一个逻辑 id 时会提前收束"
+    );
+}
+
 #[test]
 fn in_flight_drops_the_attempt_retry_voided() {
     // `retry` 只关它那一次尝试：没有它，被作废的那次会永远留在在途里。
