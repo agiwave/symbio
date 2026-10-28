@@ -143,7 +143,8 @@ impl TurnRunner {
             dispatch,
             super::super::loop_rows::ACTORS,
             // 夹具不跑轮首那几行 ⇒ 备输入的两样都是空（`D-222` 订正 3）。
-            super::super::turn_runner::TurnFeed::default(),
+            None,
+            None,
         )
         .await
     }
@@ -154,9 +155,13 @@ impl TurnRunner {
     /// 判据 14「动作写了零格 ⇒ `exhausted{no_progress}`」与判据 2「写了名单外的格 ⇒
     /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
     ///
-    /// `feed` 是**备输入的产物**（`D-222` 订正 3）：生产里由 `prepare_turn_inputs` 的 ⑥
-    /// 与轮首的 `policy.reflex` 给，夹具自己造。它是这条路径上的第二个接缝——「前缀
-    /// 排在基线之前」与「快路零往返」两条用例要它才造得出来。
+    /// `prefix` / `reflex` 是**备输入的产物**（`D-222` 订正 3）：生产里由
+    /// `prepare_turn_inputs` 的 ⑥ 与轮首的 `policy.reflex` 给，夹具自己造。它们是这条
+    /// 路径上的第二个接缝——「前缀排在基线之前」与「快路零往返」两条用例要它才造得出来。
+    ///
+    /// 本函数是**生产编排的测试门面**：`begin` → 填 → 驱动，三步与
+    /// `turn_exec::call_model` 逐字同序。`D-222` 订正 3 把「建草稿」从派发器里搬出来
+    /// 之后，夹具也必须自己做这一步——否则它测的就不是生产路径了。
     #[allow(clippy::too_many_arguments)]
     pub async fn drive_with_actors(
         &self,
@@ -168,10 +173,32 @@ impl TurnRunner {
         tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
         dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
         actors: &'static [super::super::loop_rows::ActorEntry],
-        feed: super::super::turn_runner::TurnFeed,
+        prefix: Option<String>,
+        reflex: Option<super::super::turn_runner::ReflexAnswer>,
     ) -> Result<TurnOutcome, ActorError> {
+        let mut session = match super::super::turn_runner::TurnRunner::begin(
+            store.as_ref(),
+            llm.as_ref(),
+            input,
+            sink.clone(),
+        )
+        .await
+        .map_err(ActorError::Append)?
+        {
+            super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
+            super::super::turn_runner::TurnSessionBegin::Run(session) => session,
+        };
+        session.set_prefix(prefix);
+        session.set_reflex(reflex);
         super::super::turn_exec::drive_steps(
-            store, llm, tok, input, sink, tools, dispatch, actors, feed,
+            &mut session,
+            store,
+            llm,
+            tok,
+            sink,
+            tools,
+            dispatch,
+            actors,
         )
         .await
     }
@@ -2320,7 +2347,7 @@ mod tool_round_tests {
         );
     }
 
-    /// `TurnFeed::prefix` 排在基线**之前**，且**不进**「就地累积」那条路。
+    /// 请求级前缀排在基线**之前**，且**不进**「就地累积」那条路。
     ///
     /// ## 为什么要钉「在之前」而不是只钉「在里面」
     ///
@@ -2360,10 +2387,8 @@ mod tool_round_tests {
                 super::super::super::loop_rows::ACTORS,
                 // 前缀是**备输入的产物**（`D-222` 订正 3）：生产里由
                 // `prepare_turn_inputs` 的 ⑥ 收集，草稿建好之后填。
-                super::super::super::turn_runner::TurnFeed {
-                    prefix: Some("【长期记忆】\n- 偏好：简洁".to_string()),
-                    ..Default::default()
-                },
+                Some("【长期记忆】\n- 偏好：简洁".to_string()),
+                None,
             )
             .await
             .expect("必答");
@@ -2430,10 +2455,8 @@ mod tool_round_tests {
                     std::sync::Arc::from(Vec::new()),
                     None,
                     super::super::super::loop_rows::ACTORS,
-                    super::super::super::turn_runner::TurnFeed {
-                        prefix: empty,
-                        ..Default::default()
-                    },
+                    empty,
+                    None,
                 )
                 .await
                 .expect("必答");
@@ -4490,12 +4513,10 @@ mod reflex_turn_tests {
                 super::super::super::loop_rows::ACTORS,
                 // 快路正文是**备输入的产物**（`D-222` 订正 3）：生产里由轮首那台 host
                 // 的 `policy.reflex` 寄存，草稿建好之后填。
-                super::super::super::turn_runner::TurnFeed {
-                    reflex: Some(super::super::super::turn_runner::ReflexAnswer {
-                        text: "先列要点；再合并同类项。".to_string(),
-                    }),
-                    ..Default::default()
-                },
+                None,
+                Some(super::super::super::turn_runner::ReflexAnswer {
+                    text: "先列要点；再合并同类项。".to_string(),
+                }),
             )
             .await
             .expect("快路必答（不生成也要有产物）");
@@ -5088,7 +5109,8 @@ mod actor_ledger_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 ACTORS_WRITE_NOTHING,
-                super::super::super::turn_runner::TurnFeed::default(),
+                None,
+                None,
             )
             .await
             .expect("到点必答：停机也是一句话");
@@ -5128,7 +5150,8 @@ mod actor_ledger_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 ACTORS_WRITE_OFF_LIST,
-                super::super::super::turn_runner::TurnFeed::default(),
+                None,
+                None,
             )
             .await
             .expect("越界也是一条事实，不是 panic");

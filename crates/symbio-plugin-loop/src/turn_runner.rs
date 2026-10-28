@@ -246,28 +246,6 @@ pub struct ReflexAnswer {
     pub text: String,
 }
 
-/// 备输入的产物：草稿建好之后才到的那几样（`D-222` 订正 3）。
-///
-/// ## 为什么它们不进 [`TurnInput`]
-///
-/// 那个包只装「开幕就有」的东西。前缀由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行
-/// （判决 / 压缩 / 召回）**之后**收集，快路正文由 `policy.reflex` 那一行寄存——
-/// 两样都要等环里的行跑过。草稿在幕首就建，所以它们只能「建好之后再填」。
-///
-/// 填口是 [`TurnSession::set_prefix`] / [`TurnSession::set_reflex`]，填的时机在
-/// begin 之后、任何选债之前：早于第一次请求（前缀改的是基线 prompt 的第一条），
-/// 也早于第一次选债（快路决定环先选中 `close-turn` 还是 `announce-model`）。
-///
-/// 打成一个包而不是两个参数：它们是**同一个时刻**到的一批东西，而派发器的形参
-/// 已经够宽——加一样不该再加一个位置参数。
-#[derive(Debug, Default)]
-pub struct TurnFeed {
-    /// 请求级前缀（`prepare_turn_inputs` 的 ⑥ 产出）。
-    pub prefix: Option<String>,
-    /// 本幕快路作答的正文（`policy.reflex` 的寄存物）。
-    pub reflex: Option<ReflexAnswer>,
-}
-
 /// 定稿答话**对话面节点**的身份与标记（见 [`TurnInput::dialog`]）。
 ///
 /// 三样缺一不可：`id` 是节点身份（前端按 id 合并、`message.edited` 按 id 定位）、

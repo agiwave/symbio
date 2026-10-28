@@ -276,21 +276,29 @@ pub(crate) async fn execute_final_reply_turn(
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
         abort: Some(abort),
     };
-    let outcome = drive_steps(
-        &store,
-        Arc::new(llm),
-        tok,
-        input,
-        Arc::new(SilentDeltas),
-        Arc::from(Vec::new()),
-        None,
-        super::super::loop_rows::ACTORS,
-        // 答话轮既没有请求级前缀（一次请求都不发），也不是快路（快路正文由轮首的
-        // `policy.reflex` 寄存、走驱动循环收束）。
-        super::super::turn_runner::TurnFeed::default(),
-    )
-    .await
-    .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
+    // 草稿在幕首就建（`D-222` 订正 3）：`begin` 与「驱动」分成两个动作。答话轮没有
+    // 备输入的产物可填（一次请求都不发、也不是快路），所以「填」这一步是空的——
+    // 但两步的分界照样在这里，与工具轮那条路同一个形状。
+    let llm: std::sync::Arc<dyn symbio_core::LlmAdapter> = std::sync::Arc::new(llm);
+    let outcome =
+        match TurnRunner::begin(store.as_ref(), llm.as_ref(), input, Arc::new(SilentDeltas))
+            .await
+            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
+        {
+            TurnSessionBegin::Done(outcome) => outcome,
+            TurnSessionBegin::Run(mut session) => drive_steps(
+                &mut session,
+                &store,
+                llm,
+                tok,
+                Arc::new(SilentDeltas),
+                Arc::from(Vec::new()),
+                None,
+                super::super::loop_rows::ACTORS,
+            )
+            .await
+            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?,
+        };
     // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────
     //
     // 三个跳过条件与 `classify_turn` 逐条对齐：中止 / 收束被授权拒绝 ⇒ 本轮

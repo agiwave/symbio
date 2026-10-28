@@ -259,25 +259,38 @@ inject: injector(supplements, report).map(|(drain, report)| {
             ),
             );
 
-            // 步循环在**执行器**里，不在 `turn_runner` 里。
-            let r = super::drive_steps(
-                &store,
-                std::sync::Arc::new(llm),
-                tok,
-                input,
-                bridge.clone(),
-                std::sync::Arc::from(tools),
-                Some(dispatcher.clone()),
-                super::super::loop_rows::ACTORS,
-                // 备输入的产物（`D-222` 订正 3）：前缀由 `prepare_turn_inputs` 的 ⑥ 收集、
-                // 快路正文由轮首的 `policy.reflex` 寄存——两样都在草稿建好之后才到，
-                // 所以它们不进 `TurnInput`，由执行器在 begin 之后填进草稿。
-                super::super::turn_runner::TurnFeed {
-                    prefix,
-                    reflex: reflex.cloned(),
-                },
-            )
-            .await;
+            // 草稿在幕首就建（`D-222` 订正 3）：`begin` 与「驱动」分成两个动作，本段
+            // 负责建与填。填的两样是**备输入的产物**——前缀由 `prepare_turn_inputs` 的
+            // ⑥ 收集、快路正文由轮首的 `policy.reflex` 寄存——它们必须在**任何选债
+            // 之前**进草稿：前缀要早于第一次请求（它改的是基线 prompt 的第一条），
+            // 快路要早于第一次选债（它决定环先选中 `close-turn` 还是 `announce-model`）。
+            let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(llm);
+            let r = match super::TurnRunner::begin(store.as_ref(), llm.as_ref(), input, bridge.clone())
+                .await
+            {
+                // 落格失败与动作失败走**同一个出口**（`ActorError`）：本段的调用方
+                // 只认这一条通道，不为「开轮」单开一条。
+                Err(e) => Err(super::ActorError::Append(e)),
+                // 本幕在开轮就收束了（首请求前中止 / 空答兜底）：没有环可跑，
+                // 产出就是它——与 `drive_steps` 里那条早退逐字同义，只是挪到了调用方。
+                Ok(super::TurnSessionBegin::Done(outcome)) => Ok(outcome),
+                Ok(super::TurnSessionBegin::Run(mut session)) => {
+                    session.set_prefix(prefix);
+                    session.set_reflex(reflex.cloned());
+                    // 步循环在**执行器**里，不在 `turn_runner` 里。
+                    super::drive_steps(
+                        &mut session,
+                        &store,
+                        llm,
+                        tok,
+                        bridge.clone(),
+                        std::sync::Arc::from(tools),
+                        Some(dispatcher.clone()),
+                        super::super::loop_rows::ACTORS,
+                    )
+                    .await
+                }
+            };
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
             let produced = dispatcher.take_produced();
             // 收束派生事实出参同样先取走（承诺 / 任务表 / 熔断）——轮末随收束落格。
