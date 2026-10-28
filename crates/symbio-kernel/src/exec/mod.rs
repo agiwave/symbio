@@ -8,7 +8,7 @@
 //! 后再 `serde_json::from_value` 解回来只为分辨「这是 `Warn` 还是别的 op」。
 //!
 //! 问题不在帧本身，而在**帧被用错了地方**：`PluginChannel` 是**跨进程传输原语**
-//! （前端链路要过 Tauri IPC / HTTP），而 `provider.execute_turn` 与 `tool.execute`
+//! （前端链路要过 Tauri IPC / HTTP），而 `provider.round_trip` 与 `tool.execute`
 //! 的两端**始终在同一个进程、同一个 spawn 里**（见 `plugins/model/bound_provider.rs`）。
 //! 进程内的调用不该付进程外的代价。
 //!
@@ -92,7 +92,7 @@ impl ExecEventSinkProgress {
 
 /// 执行期**事件出口**（唯一出口，出方向）。
 ///
-/// 生产者（`ModelProvider::execute_turn` / 工具执行）只调 [`Self::emit`]，
+/// 生产者（`ModelProvider::round_trip` / 工具执行）只调 [`Self::emit`]，
 /// 不感知事件最终去哪：
 /// - [`ExecEventSink::Direct`]：进程内直连转写唯一写入点（零 serde 往返）；
 /// - [`ExecEventSink::Null`]：静默——内部请求刻意不产生任何可见帧；
@@ -223,7 +223,7 @@ impl std::fmt::Debug for ExecEventSink {
 /// ## 为什么要有这个具名类型
 ///
 /// 收口前，执行期输入散在**两处、三种形态**：
-/// - `ModelProvider::execute_turn` 写成**显式参数**（`sink` / `abort`）；
+/// - `ModelProvider::round_trip` 写成**显式参数**（`sink` / `abort`）；
 /// - `Capability::execute` 塞进**请求信封**（`ctx`）——出口、中止、参数、会话上下文
 ///   （`WORKDIR` / `MODE` / `RISK_LEVEL`…）与路由键（`PATH` / `PLUGIN_PARENT` / `trace_id`）
 ///   混在同一个键值袋里，于是每个工具都得自己记住「我该读哪些键」。
@@ -233,7 +233,7 @@ impl std::fmt::Debug for ExecEventSink {
 ///
 /// ```text
 /// Capability::execute(args, env, ctx)   -> Result<Value, PluginError>
-/// ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
+/// ModelProvider::round_trip(inputs, env) -> Result<TurnOutput, PluginError>
 /// ```
 ///
 /// 差别只剩 `ctx`：**工具是被路由、被注册的**（要转发、要解析挂载），因此还需要

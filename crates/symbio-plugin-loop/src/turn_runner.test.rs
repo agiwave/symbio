@@ -149,7 +149,7 @@ impl TurnRunner {
     }
 
     /// **换绑定表**的同一条派发路径（D-123 决策 4 的接缝）：在真实行表还在欠
-    /// `execute-turn` 时，让那个 `by` 跑一个别的动作（空动作 / 越界动作）。
+    /// `announce-model` 时，让那个 `by` 跑一个别的动作（空动作 / 越界动作）。
     ///
     /// 判据 14「动作写了零格 ⇒ `exhausted{no_progress}`」与判据 2「写了名单外的格 ⇒
     /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
@@ -4410,7 +4410,7 @@ mod tool_round_tests {
 // 用例覆盖）；这里只钉**收束**：正文直落 `final`、`model` 记 `reflex`、经 sink 上线、
 // `cost_ms` 入账。三条判据分列：
 // - **落格**：载荷与模型应答同一形状，`produced_by` 指向开轮格；
-// - **零往返**：`execute-turn` 的前件排除已作答的快路轮，桩模型一次都不该被调到；
+// - **零往返**：`announce-model` 的前件排除已作答的快路轮，桩模型一次都不该被调到；
 // - **产物上线**：正文经 `sink` 到出口（不上线，收束节点在前端建不起来）。
 
 mod reflex_turn_tests {
@@ -4983,7 +4983,7 @@ mod round_decision_tests {
 //   静默入格 ⇒ 红。
 //
 // 两条都走生产派发器（`turn_exec::drive_steps`），差别只在**绑定表**：真实行表照旧欠
-// `execute-turn`，那个 `by` 上换的是别的手法（写零格 / 写名单外）。生产动作既不会写零格
+// `announce-model`，那个 `by` 上换的是别的手法（写零格 / 写名单外）。生产动作既不会写零格
 // 也不会写名单外的格 ⇒ 没有这条接缝，两条判据只能挂在口头。
 mod actor_ledger_tests {
     use crate::control_decl::guard_vocab;

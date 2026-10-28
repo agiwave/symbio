@@ -471,9 +471,10 @@ fn turn_head_reads_round_and_done_from_facts() {
             "answered": false,
             // 本幕没走快路 ⇒ 收束行不因它开账。
             "reflex_answered": false,
-            // D-168：本幕还没落 `inputs` 阶段格 ⇒ 准备行欠。
+            // 本幕还没落 `inputs` 阶段格 ⇒ `prepared` 假（这一格已无生产读者：
+            // 它的行随 `turn` 端口退场，`D-222` §一）。
             "prepared": false,
-            // D-168 裁决 4：本幕未收束 ⇒ 没有「为什么停下」这一格。
+            // `D-222` 裁决 2：本幕未收束 ⇒ 没有「为什么停下」这一格。
             "closure": serde_json::Value::Null,
             "has_final": false,
             "closeable": false,
@@ -523,7 +524,7 @@ fn turn_head_reads_round_and_done_from_facts() {
     assert_eq!(head["recall_done"], json!(false));
 }
 
-/// 幕间判据的**唯一数据面**（D-168 裁决 4）：`closure` 折的是本幕最近一条收束格的
+/// 幕间判据的**唯一数据面**（`D-222` 裁决 2）：`closure` 折的是本幕最近一条收束格的
 /// `reason` 一格，不是任何执行体的返回值。
 #[test]
 fn turn_head_folds_the_closure_reason_of_the_current_stage() {

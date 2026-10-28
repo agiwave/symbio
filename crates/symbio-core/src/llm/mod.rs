@@ -19,7 +19,7 @@
 //! ```text
 //! session ──────────────▶ ModelProvider trait（本层）
 //! model  ── BoundProvider 实现 ModelProvider
-//!        ── execute_turn 内部消费 turn 的帧原语与 TurnOutput
+//!        ── round_trip 内部消费 turn 的帧原语与 TurnOutput
 //! ```
 //!
 //! **只有一侧认的东西都不在这里**：HTTP 重试机器与 SSE 流循环

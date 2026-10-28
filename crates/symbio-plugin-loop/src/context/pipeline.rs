@@ -992,12 +992,12 @@ async fn run_compression_llm(
 ) -> Result<ChatNode, PluginError> {
     let abort = env.abort();
 
-    // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
+    // 压缩路径与对话轮次共用同一模型契约：provider.round_trip（tools 为空）。
     // 出口静默、中止共享；协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
     let out = orchestrator
         .provider
         // internal-model-allow IM-001: 压缩摘要是内部请求（tools 空 / 出口按前端场景静默或过滤桥），不是对话轮次；档位归属由 裁 A/B
-        .execute_turn(system_prompt, messages, &[], root_id, env)
+        .round_trip(system_prompt, messages, &[], root_id, env)
         .await?;
 
     if abort.is_aborted() {

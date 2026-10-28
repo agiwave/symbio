@@ -672,7 +672,7 @@ fn the_rows_guarded_by_admitted_prechecks_have_executors() {
     );
 }
 
-/// 幕间判据（D-168 裁决 4）：还开不开下一幕，由**收束格的 `reason`** 说。
+/// 幕间判据（`D-222` 裁决 2）：还开不开下一幕，由**收束格的 `reason`** 说。
 ///
 /// 这一格此前是 `close_turn` 的返回值（`TurnFlow`），由 `chat_loop` 的 `match` 决定
 /// ——那是主循环体里最后一个「按步骤号决定下一步」的判定点。改成读事实之后，判据只剩
@@ -759,7 +759,7 @@ fn execute_row_closes_on_turn_closed() {
     // 问的是**轮内那台 host**（`ACTORS` 子集）：外环的宣布行不在这张表里，
     // 否则它按 57 < 60 抢在前面——那正是两台 host 各有行子集的理由。
     let picked = super::next(&open, 1, 0, super::ACTORS).expect("开着的轮次总是欠一次执行");
-    assert_eq!(picked.row, "execute-turn");
+    assert_eq!(picked.row, "announce-model");
     assert_eq!(picked.by, super::EXECUTE);
 
     let mut closed = open.clone();
@@ -769,7 +769,7 @@ fn execute_row_closes_on_turn_closed() {
         "收束后无账可还"
     );
 
-    // 快路已作答（D-163）：`execute-turn` 的前件排除它 ⇒ 第一笔债就是收束。
+    // 快路已作答（D-163）：`announce-model` 的前件排除它 ⇒ 第一笔债就是收束。
     // 零模型往返因此是**表上的**判据，不靠 55 < 60 的优先级巧合。
     let mut reflex = open.clone();
     reflex.push(ev(
@@ -841,7 +841,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
     let f = frozen();
-    let rows = wired(&["policy.classify", "policy.recall", "execute-turn"]);
+    let rows = wired(&["policy.classify", "policy.recall", "announce-model"]);
     assert_eq!(
         drive(&rows, &f, &events, 0).map(|d| d.decl.name),
         Some("policy.classify")
@@ -869,7 +869,7 @@ fn prio_is_global_and_registration_order_does_not_matter() {
     ));
     assert_eq!(
         drive(&rows, &f, &decided, 0).map(|d| d.decl.name),
-        Some("execute-turn")
+        Some("announce-model")
     );
 }
 
@@ -889,7 +889,7 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.reflex",
             // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
-            "execute-turn",
+            "announce-model",
             // 每个端口两行（`dispatch` / `await`）：`model`（ 步 2）与 `tool`
             // （ 步 3）。租约**没有行**——看护读 `stale_sent` 视图，不经行表；
             // `turn` 不是端口（`D-222` §一），它那四行随端口退场。
@@ -1434,14 +1434,14 @@ fn the_execute_row_steps_aside_until_the_round_is_settled() {
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
     // 幕开着、没有工具批、没走快路 ⇒ 执行行欠；派发行不欠（没有请求）。
-    assert!(owes("execute-turn", &head, 0));
+    assert!(owes("announce-model", &head, 0));
     assert!(!owes("dispatch-model", &head, 0));
 
     // 宣布之后：派发行欠，执行行让位（否则它会再宣布一笔，同一幕两条请求并存）。
     head.push(model_request("m-1"));
     assert!(owes("dispatch-model", &head, 0));
     assert!(
-        !owes("execute-turn", &head, 0),
+        !owes("announce-model", &head, 0),
         "请求已宣布、还没派出 ⇒ 执行行不许再宣布下一笔"
     );
 
@@ -1450,7 +1450,7 @@ fn the_execute_row_steps_aside_until_the_round_is_settled() {
     assert!(!owes("dispatch-model", &head, 0));
     assert!(owes("await-model", &head, 0), "派出之后轮到等待行");
     assert!(
-        !owes("execute-turn", &head, 0),
+        !owes("announce-model", &head, 0),
         "已派出、未收清 ⇒ 执行行仍让位，否则它会抢在 await 之前再宣布一笔"
     );
 
@@ -1461,7 +1461,7 @@ fn the_execute_row_steps_aside_until_the_round_is_settled() {
         json!({ "port": "model", "id": "m-1", "attempt": 1, "calls": [] }),
     ));
     assert!(!owes("await-model", &head, 0));
-    assert!(owes("execute-turn", &head, 0), "收清之后执行行重新开账");
+    assert!(owes("announce-model", &head, 0), "收清之后执行行重新开账");
 }
 
 #[test]
@@ -1925,13 +1925,13 @@ fn next_is_none_without_events() {
 
 #[test]
 fn next_picks_execute_turn_while_the_turn_is_open() {
-    // 开着的幕欠一次执行；`execute-turn` 是当前最小可还债（其它策略都关着）。
+    // 开着的幕欠一次执行；`announce-model` 是当前最小可还债（其它策略都关着）。
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕应欠 execute-turn");
-    assert_eq!(next.row, "execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕应欠 announce-model");
+    assert_eq!(next.row, "announce-model");
     assert_eq!(next.by, "execute");
 }
 
@@ -2065,7 +2065,7 @@ fn next_picks_close_turn_before_execute_turn_once_answered() {
 
 #[test]
 fn next_is_none_once_the_turn_is_closed() {
-    // 收束格出现后，`execute-turn` 的出口命中；表里没有别的可还债。
+    // 收束格出现后，`announce-model` 的出口命中；表里没有别的可还债。
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
@@ -2082,8 +2082,8 @@ fn next_hands_back_the_action_itself() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
-    assert_eq!(next.row, "execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 announce-model");
+    assert_eq!(next.row, "announce-model");
     assert_eq!(next.by, super::EXECUTE);
     let run: super::super::turn_exec::Action = super::super::turn_exec::run_execute;
     // 函数指针的 `==` 不作数（同一函数在不同 codegen unit 里地址可不同）；
@@ -2294,7 +2294,7 @@ fn next_head_is_none_once_the_recall_cell_lands() {
 /// **行子集由绑定表派生**（D-159 裁决 2）：轮内派发点选不到轮首的行，反之亦然。
 ///
 /// 为什么不能给派发点整张 `ROWS`：`prio` 是**全局**序，`policy.recall`（40）比
-/// `execute-turn`（60）小 ⇒ 整张表会让轮内派发点选中一行动作住在另一张表上的债，
+/// `announce-model`（60）小 ⇒ 整张表会让轮内派发点选中一行动作住在另一张表上的债，
 /// 它只能报「表脱节」停住——两台 host 排在后面的债一起饿死。下面第 1 段钉的就是这个
 /// 反例：整张表的求解结果确实是 `policy.recall`，所以裁决 2 不是偏好，是必需的。
 #[test]
@@ -2317,7 +2317,7 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
 
     let turn_rows = super::host_rows(&f, &super::actor_names(super::ACTORS));
     assert!(
-        turn_rows.iter().any(|d| d.name == "execute-turn")
+        turn_rows.iter().any(|d| d.name == "announce-model")
             && turn_rows.iter().all(|d| d.name != "policy.recall"),
         "轮内子集里出现了轮首的行：{:?}",
         turn_rows.iter().map(|d| d.name).collect::<Vec<_>>()
@@ -2341,8 +2341,8 @@ fn each_shard_only_sees_the_rows_its_binding_table_names() {
     );
 
     // 生产派发点各自的答案：同一个求解器，两份行子集。
-    let next = super::next(&ready, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
-    assert_eq!(next.row, "execute-turn");
+    let next = super::next(&ready, 1, 0, super::ACTORS).expect("开着的幕欠 announce-model");
+    assert_eq!(next.row, "announce-model");
     assert_eq!(next.by, super::EXECUTE);
 }
 
@@ -2403,7 +2403,7 @@ fn writes_closed_admits_declared_protocol_and_exempted_only() {
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
     ];
-    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 execute-turn");
+    let next = super::next(&events, 1, 0, super::ACTORS).expect("开着的幕欠 announce-model");
     // 声明过的领域格。
     assert!(next.writes_closed("turn.dispatch"));
     // 协议五格：引擎写，本来就不许出现在 `writes` 里（装载期 `ENGINE_ONLY_CELLS` 拦）。
@@ -2556,7 +2556,7 @@ fn the_overlap_report_on_the_production_table() {
             // 外环的宣布 / 派出两行与租约行都已退场：前者随 `turn` 端口（`D-222` §一），
             // 后者随「看护读视图、不经行表」（`TC-1b`）。所以这张名单里只剩两条
             // 「同一点上竞争」的对，两对都由前件决出，报告只知道它们相交。
-            ("close-turn", "execute-turn", head),
+            ("close-turn", "announce-model", head),
         ]
     );
 }

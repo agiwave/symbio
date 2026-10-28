@@ -138,7 +138,7 @@ pub fn description_for_llm(meta: &CapabilityMeta) -> String {
 /// | 消费方 | `super::stream::parse_sse_stream`（唯一消费者，把事件折进 `TurnOutput` 并实时下发子节点） |
 ///
 /// **两个角色同处 model 插件**，所以本枚举不进 `symbio_core`——它是插件内部方言，
-/// 不是跨模块契约。对外（session）可见的只有 `ModelProvider::execute_turn` 的返回
+/// 不是跨模块契约。对外（session）可见的只有 `ModelProvider::round_trip` 的返回
 /// 类型 `TurnOutput`，协议细节被刻意挡在 trait 之后。
 #[derive(Debug, Clone)]
 pub enum ModelProtocolEvent {

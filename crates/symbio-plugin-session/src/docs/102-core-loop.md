@@ -641,7 +641,7 @@ CLI / 前端客户端）；执行期走 `ExecEventSink` 进程内直连，与之
 Capability::execute(args, env, ctx)
  -> Result<Value, PluginError>
 
-ModelProvider::execute_turn(system_prompt, messages, tools, root_id, env)
+ModelProvider::round_trip(system_prompt, messages, tools, root_id, env)
  -> Result<TurnOutput, PluginError>
 ```
 
@@ -720,7 +720,7 @@ anthropic ["type"] 必须是 content_block_delta，再看 ["delta", ...]
 gemini ["candidates","content","parts","text"] -> 内容
 ```
 
-`ModelProtocol` 以 `SseLineParser` 为**父 trait**，故 `BoundProvider::execute_turn` 直接把
+`ModelProtocol` 以 `SseLineParser` 为**父 trait**，故 `BoundProvider::round_trip` 直接把
 协议实例交给 `parse_sse_stream`——流循环与协议之间无闭包中转。
 
 ### 10.3 保住的语义

@@ -107,7 +107,7 @@ impl ModelProvider for LabeledProvider {
         262_144
     }
 
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         _system_prompt: &str,
         _messages: &[symbio_core::chat_node::ChatNode],

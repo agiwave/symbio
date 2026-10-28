@@ -158,7 +158,7 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     name: EXECUTE,
     // 整轮执行体调模型：深度档。
     mode: LatencyTier::Deep,
-    // 它不读视图：视图面由 `execute-turn` 行的 `owes` / `until` 承担（行已查存在）。
+    // 它不读视图：视图面由 `announce-model` 行的 `owes` / `until` 承担（行已查存在）。
     reads: &[],
     // **收束格不在这里**（c）：`chat.assistant.final` / `chat.assistant.fallback`
     // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
@@ -884,12 +884,12 @@ pub(crate) static ROWS: &[Decl] = &[
     // （`has_final`〔本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
     // D-121 决策 2〕∨「本幕派发过的模型往返以失败收场」），执行体是 [`CLOSE`]——
     // 方案（DE-015 §3.1）要的就是一个独立的 `closer`，不是整轮执行体里的第四个内部动作。
-    // 它排在 `execute-turn` **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，
+    // 它排在 `announce-model` **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，
     // 而不是再跑一次模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
     //
     // ## 出口是 `final | fallback`（DE-015 §3.1 的字面形状，步 5c 复原）
     //
-    // 步 5 第一批照抄 §3.1 装不上表：`execute-turn` 与 `close-turn` 共用同一个出口
+    // 步 5 第一批照抄 §3.1 装不上表：`announce-model` 与 `close-turn` 共用同一个出口
     // 事实集时，两个执行体互为对方的出口写方（`execute` 写错误路径的 `fallback`，
     // `close` 写 `final`），依赖图于是有 `close → execute` 与 `execute → close` 两条边
     // ——两节点环，装载红。环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是
@@ -899,7 +899,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // （`final` 与 `fallback`）全部归 `close` 执行体——`execute` 那一步只跑模型往返，
     // 收束格由 `close-turn` 行的执行体落（中止 / 适配器失败两条路径的收束格因此
     // 从执行体内部挪到了收束动作里）。断环之后 `close-turn` 没有出边（只有 `close`
-    // 写它的出口，而自环不算），`execute-turn → close-turn` 单独一条边，表装得上。
+    // 写它的出口，而自环不算），`announce-model → close-turn` 单独一条边，表装得上。
     //
     // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）仍在 `execute` 那一步
     // 就地落兜底格：它们的模型端口**没有终局事实**（`failed(port=model)` 落不下来）
@@ -933,6 +933,10 @@ pub(crate) static ROWS: &[Decl] = &[
     },
     // ── 执行（决策行）────────────────────────────────────────────────────
     //
+    // 名字不带幕（`D-222` 裁决 7）：这一行做的事一直是「宣布**这一次**模型往返」——
+    // 落一条 `request(port=model)`，派出归 `dispatch-model`。名字里的 `turn` 是幕的
+    // 残留，它会让读表的人以为这一行按幕执行。改名之后行表里不再有以幕命名的行。
+    //
     // 只要本幕还开着、且手上没有一批没关掉的工具调用，就欠一次执行。它的**后果**是
     // 写一条 `request`（决策者的动作），派发本身归 `dispatch-model`。没把它并进协议行：
     // 两者的粒度不同（本幕 vs 一次请求往返）——一幕可以有多次往返（auto 续写），
@@ -950,7 +954,7 @@ pub(crate) static ROWS: &[Decl] = &[
     // 派出归 `dispatch-model`。宣布之后那笔账还开着，本行必须让位——否则 `prio` 60
     // 会压过 66 再宣布一笔，同一幕两条请求并存，「一次模型往返」这个粒度当场失真。
     Decl {
-        name: "execute-turn",
+        name: "announce-model",
         prio: 60,
         by: Some(EXECUTE),
         tier: LatencyTier::Deep,
@@ -990,7 +994,7 @@ pub(crate) static ROWS: &[Decl] = &[
     //
     // ## 谁宣布、谁派出（D-166）
     //
-    // `execute-turn`（60）宣布这一笔（落 `request`），由本行的 [`RELAY`] 执行体
+    // `announce-model`（60）宣布这一笔（落 `request`），由本行的 [`RELAY`] 执行体
     // 跑出 `sent` + `response` / `failed`。两个时刻分开的理由不是「拆得好看」：
     // 宣布之后那一笔在日志上是一笔**开着**的债，派发由选债触发（不是执行体内部
     // 顺手调一次往返），所以「这一笔该谁跑」在事实面上可判、在崩溃后可接。
@@ -1423,9 +1427,10 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
 ///
 /// 它此前是 `chat_loop::turn` 里的 `MAX_CONTINUE_ROUNDS` 与
 /// `TurnState::continuation_count` 那一对内存计数（「跨轮累加的次数」）。判据搬进
-/// 事实面之后（D-168 裁决 4），上界留在**迭代器**这一层：视图只给事实（`round` /
-/// `closure`），「够不够了」是幕间判据自己的事——把它写进视图等于让一份投影替调用方
-/// 定策略，而视图的输出是回放要解释的口径，不是可调的旋钮。
+/// 事实面之后，上界是**那一笔债的前件**（`D-222` 裁决 3）：`continue-turn` 开不开账，
+/// 由「收束原因是 `exhausted` ∧ 轮次未到上限」这一条判。今天它落在幕间判据里（那一行
+/// 还没立），位置在这一层而不是在视图里，是因为视图只给事实（`round` / `closure`），
+/// 而「够不够了」是策略——策略跟着行走，不跟着投影走。
 pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
 
 /// 本幕轮次**还有没有下一次**（`round` = 本幕的 `turn.stage{stage:"round"}` 值）。
@@ -1444,7 +1449,7 @@ pub(crate) fn has_next_round(round: u64) -> bool {
 ///
 /// ## 它读的是事实，不是返回值
 ///
-/// 这是 D-168 裁决 4 的落点。流向此前是 `close_turn` 返回的 `TurnFlow`，由
+/// 这是 `D-222` 裁决 2 的落点。流向此前是 `close_turn` 返回的 `TurnFlow`，由
 /// `chat_loop` 的 `match` 决定「再发一次请求」还是收工——那是**按步骤号决定的判定点**
 /// （判据 2 的最后一条）。而这件事在日志上早就有事实：截断续写的幕与自然说完的幕，
 /// 收束格的 `reason` 本来就不同（`exhausted` / `completed`）。于是判据只剩读一格。

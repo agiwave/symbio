@@ -3,13 +3,13 @@
  *
  * 判据只有四条，但每条都有「静默失效」的形态，钉的正是那几条：
  *
- *   ① 干净夹具（无 `.execute_turn(`）→ exit 0；
+ *   ① 干净夹具（无 `.round_trip(`）→ exit 0；
  *   ② 未登记的调用点 → IM-001 红；
  *   ③ 标记写在调用点**上一行** → 绿（这是本判据的登记形态）；
  *   ④ 标记写在调用点**同一行**（行尾）→ 绿；
  *   ⑤ 空理由的标记 → IM-002 红（写了像登记、实际不算，必须显式报出来）；
  *   ⑥ 标记悬空（写了而附近没有调用点）→ IM-003 红；
- *   ⑦ 不误报：注释里提一句 `execute_turn`、`.test.rs` 里的调用、`#[cfg(test)] mod` 里的调用
+ *   ⑦ 不误报：注释里提一句 `round_trip`、`.test.rs` 里的调用、`#[cfg(test)] mod` 里的调用
  *     → 绿（这三处若算进去，豁免会写到满屏）；
  *   ⑧ 扫描根没有 `.rs` ⇒ 判据失效，exit 1（不许「读空即全绿」）；
  *   ⑨ 真仓库：四处存量全部登记，且**正好四处**——第五处会同时打破「全绿」与这个数。
@@ -65,7 +65,7 @@ const run = (root) =>
 
 const fixture = (body) => ({ 'plugins/session/lib.rs': body })
 
-test('① 干净夹具（没有任何 execute_turn 调用）→ 通过', () => {
+test('① 干净夹具（没有任何 round_trip 调用）→ 通过', () => {
   const root = makeRoot(fixture('fn a() { let _: u8 = 1; }\n'))
   try {
     const r = run(root)
@@ -78,7 +78,7 @@ test('① 干净夹具（没有任何 execute_turn 调用）→ 通过', () => {
 
 test('② 未登记的调用点 → IM-001 红', () => {
   const root = makeRoot(
-    fixture('async fn go(p: P) {\n    p.execute_turn("s", &[], &[], "r", &env).await;\n}\n'),
+    fixture('async fn go(p: P) {\n    p.round_trip("s", &[], &[], "r", &env).await;\n}\n'),
   )
   try {
     const r = run(root)
@@ -94,7 +94,7 @@ test('③ 标记写在调用点上一行 → 绿（本判据的登记形态）',
     fixture(
       'async fn go(p: P) {\n' +
         '    // internal-model-allow IM-001: 压缩摘要是内部请求\n' +
-        '    p.execute_turn("s", &[], &[], "r", &env).await;\n' +
+        '    p.round_trip("s", &[], &[], "r", &env).await;\n' +
         '}\n',
     ),
   )
@@ -111,7 +111,7 @@ test('④ 标记写在调用点同一行（行尾）→ 绿', () => {
   const root = makeRoot(
     fixture(
       'async fn go(p: P) {\n' +
-        '    p.execute_turn("s", &[], &[], "r", &env).await; // internal-model-allow IM-001: 同上\n' +
+        '    p.round_trip("s", &[], &[], "r", &env).await; // internal-model-allow IM-001: 同上\n' +
         '}\n',
     ),
   )
@@ -128,7 +128,7 @@ test('⑤ 空理由的标记 → IM-002 红（不静默降级成 IM-001）', () 
     fixture(
       'async fn go(p: P) {\n' +
         '    // internal-model-allow IM-001:\n' +
-        '    p.execute_turn("s", &[], &[], "r", &env).await;\n' +
+        '    p.round_trip("s", &[], &[], "r", &env).await;\n' +
         '}\n',
     ),
   )
@@ -159,11 +159,11 @@ test('⑥ 标记悬空（写了而附近没有调用点）→ IM-003 红', () =>
 test('⑦ 不误报：注释、.test.rs 与 #[cfg(test)] mod 里的调用都不判', () => {
   const root = makeRoot({
     'plugins/a.rs':
-      '//! 这里在注释里提到 execute_turn 的形状\n' +
-      'fn c() { let _ = "execute_turn"; }\n' +
-      '#[cfg(test)]\nmod tests {\n    fn d() { p.execute_turn("s", &[], &[], "r", &env); }\n}\n',
-    'plugins/a.test.rs': 'fn e() { p.execute_turn("s", &[], &[], "r", &env); }\n',
-    'plugins/tests.rs': 'fn f() { p.execute_turn("s", &[], &[], "r", &env); }\n',
+      '//! 这里在注释里提到 round_trip 的形状\n' +
+      'fn c() { let _ = "round_trip"; }\n' +
+      '#[cfg(test)]\nmod tests {\n    fn d() { p.round_trip("s", &[], &[], "r", &env); }\n}\n',
+    'plugins/a.test.rs': 'fn e() { p.round_trip("s", &[], &[], "r", &env); }\n',
+    'plugins/tests.rs': 'fn f() { p.round_trip("s", &[], &[], "r", &env); }\n',
   })
   try {
     const r = run(root)
@@ -187,24 +187,24 @@ test('⑧ 扫描根没有 .rs ⇒ 判据失效，exit 1', () => {
 test('⑨ 真仓库：两处存量全部登记，且正好两处', () => {
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /直调 execute_turn 的 2 处全部登记过理由/)
+  assert.match(r.stdout, /直调 round_trip 的 2 处全部登记过理由/)
   assert.match(r.stdout, /存量豁免 2 处/)
 })
 
 // ── IM-004 形状判据 ────────────────────────────────────────────────
 //
 // `tools` 是第三个实参。夹具里每处调用点的前缀刻意保持逐字节相同（标记行等长补齐），
-// 于是两处调用点的 `.execute_turn(` 在各自 stem 里的下标相同——这样「拿 A 的文本判 B」
+// 于是两处调用点的 `.round_trip(` 在各自 stem 里的下标相同——这样「拿 A 的文本判 B」
 // 会读到确定的另一半形状，而不是读到乱码。
 
-const GATE_CALL = '    p.execute_turn(sp, &wire, tools, id, env).await;'
-const INNER_CALL = '    p.execute_turn(sp, &wire, &[], id, env).await'
+const GATE_CALL = '    p.round_trip(sp, &wire, tools, id, env).await;'
+const INNER_CALL = '    p.round_trip(sp, &wire, &[], id, env).await'
 const pad = (s, n) => (s.length >= n ? s : s + ' '.repeat(n - s.length))
 
 test('⑩ 登记为内部请求，tools 却不是空切片 → IM-004 红', () => {
   const root = makeRoot(
     fixture('async fn go(p: P) {\n    // internal-model-allow IM-001: 自称内部请求\n' +
-      '    p.execute_turn(sp, &wire, &tools, id, env).await;\n}\n'),
+      '    p.round_trip(sp, &wire, &tools, id, env).await;\n}\n'),
   )
   try {
     const r = run(root)
@@ -270,7 +270,7 @@ test('⑭ 实参表跨行 → 绿（按单行切会切出半个表）', () => {
   const root = makeRoot(
     fixture(
       'async fn go(p: P) {\n    // internal-model-allow IM-001: 压缩摘要\n' +
-        '    p.execute_turn(\n        system_prompt,\n        &messages,\n        &[],\n        &root_id,\n        &env,\n    )\n    .await;\n}\n',
+        '    p.round_trip(\n        system_prompt,\n        &messages,\n        &[],\n        &root_id,\n        &env,\n    )\n    .await;\n}\n',
     ),
   )
   try {

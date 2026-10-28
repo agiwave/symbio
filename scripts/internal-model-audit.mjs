@@ -6,7 +6,7 @@
  *
  * 档位闸门只有一个挂点：`LlmAdapter::generate(&FullModel, …)`。`FullModel` 是胶囊令牌
  * （与 `ClassifyOnly` / `RuleOnly` 同族，私有构造），拿得到它才受档位约束。而
- * `ModelProvider::execute_turn` 是对所有插件开放的 core trait——**直调它就绕过闸门**
+ * `ModelProvider::round_trip` 是对所有插件开放的 core trait——**直调它就绕过闸门**
  * （相应批次）。
  *
  * 绕过本身不是罪：内部请求（无工具 + `silent()` 出口 + 固定 system prompt）本来就不该
@@ -17,7 +17,7 @@
  *
  * | 码 | 判据 | 为什么它需要登记 |
  * |---|---|---|
- * | IM-001 | 生产代码里 `\.execute_turn\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
+ * | IM-001 | 生产代码里 `\.round_trip\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
  * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
  * | IM-004 | 登记的形状与 [D-106](../crates/symbio-plugin-model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
@@ -43,7 +43,7 @@
  * ## 判据自身的失效形态（回归测试钉的就是这几条）
  *
  * - **扫描根没有 `.rs`** ⇒ 一条都不命中而日志照样「通过」。故直接 exit 1。
- * - **注释没剥** ⇒ 注释里提一句 `execute_turn` 就红，人只能把豁免写到满屏。
+ * - **注释没剥** ⇒ 注释里提一句 `round_trip` 就红，人只能把豁免写到满屏。
  * - **测试模块没排除** ⇒ 测试本来就按名造 provider，红线画错了地方。
  *   （两层：`*.test.rs` / `tests.rs` 文件 + 文件内的 `#[cfg(test)] mod`。）
  * - **豁免只认本行** ⇒ 「代码在上、理由在下」的写法会全红，逼出满屏多余空行。
@@ -83,7 +83,7 @@ const DEFAULT_SRC = path.join('crates')
  */
 const MARKER_RE = /\/\/\s*internal-model-allow\s+(IM-\d{3})(\/gate)?\s*:/
 /** 调用点（剥注释与测试模块之后）。 */
-const CALL_RE = /\.execute_turn\s*\(/
+const CALL_RE = /\.round_trip\s*\(/
 /** 空工具切片的规范化形状（`&[]` / `& []` 都算）。 */
 const EMPTY_TOOLS = /^&\s*\[\s*\]$/
 
@@ -169,7 +169,7 @@ export function audit(srcRoot) {
     return { violations: [], allowed: new Map(), usedAllows: new Set(), fatal: '扫描根下没有 .rs 文件', registered: 0 }
   }
 
-  /** 调用点清单：`rel:line` → {text, offset, stem}（offset = `.execute_turn(` 在 stem 里的下标）。 */
+  /** 调用点清单：`rel:line` → {text, offset, stem}（offset = `.round_trip(` 在 stem 里的下标）。 */
   const calls = new Map()
   /** 扫描期看到的豁免标记（含空理由），`rel:line` → {code, gate, reason}。 */
   const seenAllows = new Map()
@@ -204,7 +204,7 @@ export function audit(srcRoot) {
     const stem = blankTestModules(blankComments(raw))
     let offset = 0
     stem.split('\n').forEach((l, i) => {
-      const at = l.indexOf('.execute_turn(')
+      const at = l.indexOf('.round_trip(')
       if (at < 0) {
         offset += l.length + 1
         return
@@ -246,7 +246,7 @@ export function audit(srcRoot) {
         key,
         text:
           `绕过档位闸门的模型调用未登记：\n        ${site.text}\n` +
-          '        直调 `ModelProvider::execute_turn` 不经 `LlmAdapter::generate(&FullModel, …)`。' +
+          '        直调 `ModelProvider::round_trip` 不经 `LlmAdapter::generate(&FullModel, …)`。' +
           '要么改走 `ProviderLlmAdapter::for_turn`，要么在上一行写 `// internal-model-allow IM-001: 理由`（标记写在调用点上方）',
       })
       continue
@@ -275,10 +275,10 @@ export function audit(srcRoot) {
 }
 
 /**
- * 从 `.execute_turn(` 起取出**完整实参表**（括号可跨行），按顶层逗号切分。
+ * 从 `.round_trip(` 起取出**完整实参表**（括号可跨行），按顶层逗号切分。
  *
  * 为什么必须配平而不是切一行：**豁免标记自己就可能落在方法链中间**（`provider_adapter.rs`
- * 那处就是 `self.provider` 与 `.execute_turn(` 之间夹一条注释），而实参表一旦换行写就跨出
+ * 那处就是 `self.provider` 与 `.round_trip(` 之间夹一条注释），而实参表一旦换行写就跨出
  * 调用点所在行——按单行切会切出半个表，形状判成「空」或判成别人的实参。
  */
 function callArgs(stem, offset) {
@@ -341,7 +341,7 @@ if (violations.length > 0) {
 }
 console.log(
   green(
-    `✓ 内部请求模型调用审计：直调 execute_turn 的 ${registered} 处全部登记过理由、形状核过` +
+    `✓ 内部请求模型调用审计：直调 round_trip 的 ${registered} 处全部登记过理由、形状核过` +
       `（口径：生产代码，测试文件与 #[cfg(test)] 模块不判）`,
   ),
 )

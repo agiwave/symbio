@@ -562,7 +562,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 ///
 /// v5 加一格 `tools_open`：本幕最近一条模型应答交回了工具调用、且其中至少一笔
 /// 还没被终局关掉。执行行的开账条件要它——工具批没关时模型不许再往下走
-/// （b：`execute-turn` 从「跑下一步」退成「只跑手上那批」）。
+/// （b：`announce-model` 从「跑下一步」退成「只跑手上那批」）。
 /// v6 给它补了请求面（见该格的注释）：恢复幕的唤醒请求也在「有活没干完」之列。
 ///
 /// v8（/ D-122 决策 2）：「本幕最近一次模型应答」与「模型没答成」两格都
@@ -583,7 +583,7 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// v12 加 `prepared`：本幕落过 `inputs` 阶段格没有。它的读者（`prepare-turn` 行）
 /// 已随 `turn` 端口退场（`D-222`），这一格因此无生产读者，去留由下一次行表归一决定。
 ///
-/// v13（D-168 裁决 4）加 `closure`：本幕最近一条收束格的 `reason`。它是「还开不开
+/// v13 加 `closure`：本幕最近一条收束格的 `reason`（现归 `D-222` 裁决 2 的前件）。它是「还开不开
 /// 下一幕」的唯一数据面——流向不再由 `close_turn` 的返回值决定。口径与 `closed`
 /// 逐字同源（同一条格、同一个幕锚），因此**读面不变**。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
@@ -670,7 +670,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
             )
             && after_anchor(e, anchor_seq)
     });
-    // 本幕**为什么**停下（v13 / D-168 裁决 4）：本幕最近一条收束格的 `reason` 一格
+    // 本幕**为什么**停下（v13）：本幕最近一条收束格的 `reason` 一格
     // （`ClosureReason` 的线格式）。未收束 ⇒ `null`。
     //
     // 这是「还开不开下一幕」的**唯一数据面**。流向此前是 `close_turn` 的返回值
@@ -850,7 +850,7 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         // 本幕的请求输入已备好：`prepare-turn` 行的出口曾折在这里，那条行已删
         // （`D-222`：幕是直线，「备好没有」不再是一个前件）。这一格暂时无生产读者。
         "prepared": stage_since("inputs"),
-        // 本幕的收束原因（D-168 裁决 4）：`exhausted` / `completed` / `null`（未收束）。
+        // 本幕的收束原因（`D-222` 裁决 2）：`exhausted` / `completed` / `null`（未收束）。
         // 读者只有幕间判据（`loop_rows::next_stage_round`）——「还开不开下一幕」。
         "closure": closure,
         "has_final": has_final,
@@ -1092,7 +1092,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         eval: stale_sent,
     },
     // 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
-    // `close-turn` / `execute-turn` 的开账条件。
+    // `close-turn` / `announce-model` 的开账条件。
     //
     // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，
     // 因此读面要连收束格与模型响应的 `calls` 一起声明——视图声明的字段名是装载期
@@ -1115,9 +1115,9 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // v10 → v11 加 `model_open`（D-166）：模型端口的「已宣布、没派出」折成一格，
     // 执行行据此让位给派发行。读面补 `request` / `failed` 的 `attempt` 与 `sent` 的
     // `port` / `id` / `attempt`——判「这笔账关没关」要与派发行同一组键对。
-    // v11 → v12 加 `prepared`（D-168 裁决 3）：读的是 `turn.stage` 的 `stage` / `round`，
+    // v11 → v12 加 `prepared`（原 `prepare-turn` 行的前件，该行已随 `turn` 端口退场）：读的是 `turn.stage` 的 `stage` / `round`，
     // v2 起就在读面里，故读面不变。
-    // v12 → v13 加 `closure`（D-168 裁决 4）：读面补收束两格的 `reason`——这一格是
+    // v12 → v13 加 `closure`（`D-222` 裁决 2）：读面补收束两格的 `reason`——这一格是
     // 「为什么停下」的原始事实，折进视图之后「还开不开下一幕」不再靠返回值。
     // v13 → v14（`D-222` 订正 2）：`model_open` 的关账格从 `sent` 挪到 `response` /
     // `failed` / `retry`（一次往返占两个环步）。读面补 `retry` 的 `port` / `id` /

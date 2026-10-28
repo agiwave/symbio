@@ -410,7 +410,7 @@ pub struct TurnOutcome {
     ///
     /// 唯一消费方是 [`super::chat_loop::settle_reasoning`]：`is_length()` 打长度戳，
     /// [`super::loop_rows::next_stage_round`] 在同一判据上给出下一幕的轮次
-    /// （上界 [`super::loop_rows::MAX_STAGE_ROUNDS`]，D-168 裁决 4）。
+    /// （上界 [`super::loop_rows::MAX_STAGE_ROUNDS`]）。
     /// 这一格**不得**经 `TurnOutput { ..Default::default() }` 重建：那会恒填 Stop，
     /// 长度截断与自动续写因此不可达。
     pub finish: symbio_core::ModelFinishReason,
@@ -536,7 +536,7 @@ impl TurnSession {
         self.steps >= MAX_STEPS_PER_DRIVE
     }
 
-    /// 宣布**一次**模型往返（`execute-turn` 行的动作，D-166）：落 `request(port=model)`。
+    /// 宣布**一次**模型往返（`announce-model` 行的动作，D-166）：落 `request(port=model)`。
     ///
     /// 派出归 [`Self::model`]（`dispatch-model` 行）——两个环步之间唯一的交接件是
     /// 草稿里的 [`prepare::Prepared::pending_round`]。步数**不在这里**记：口径是

@@ -2,7 +2,7 @@
 //!
 //! S2 彩排用的确定性桩 `StubLlmAdapter`（`#[cfg(test)]`）走通闭环形状；本适配器把端口接到
 //! **真实传输层**：持 `Arc<dyn ModelProvider>`（core 契约），`generate` 经
-//! `execute_turn` 走「请求体构造 → 真实 HTTP POST → SSE 流解析 → 文本聚合」。
+//! `round_trip` 走「请求体构造 → 真实 HTTP POST → SSE 流解析 → 文本聚合」。
 //! 会话链路（chat_loop / classify / compose）与 core 彩排链路（`Reasoner`）
 //! 从此共享同一个真实模型入口——**换适配器不换链路**。
 //!
@@ -43,7 +43,7 @@ use crate::ExecEventSink;
 use crate::PromptMessage;
 use crate::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
 
-/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成增量——三条出口各管一类：
+/// 流式帧桥：把 `round_trip` 的转写帧**择要**转成增量——三条出口各管一类：
 /// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
 ///   快照帧（[`ChatNode::is_text`] / [`ChatNode::is_reasoning`] 且 `status = Streaming`）登记节点 id
 ///   并全文转发（首片即完整快照）；窄帧（`delta`）只有**已登记的**节点才转发，
@@ -127,7 +127,7 @@ impl ExecTranscriptWriter for DeltaBridge {
     }
 }
 
-/// ⑤ 端口的真实实现：把 `ModelProvider::execute_turn`（五态机 + SSE 解析）
+/// ⑤ 端口的真实实现：把 `ModelProvider::round_trip`（五态机 + SSE 解析）
 /// 折进 `LlmAdapter::generate`（prompt 入、文本出）的最小适配。
 pub struct ProviderLlmAdapter {
     provider: Arc<dyn ModelProvider>,
@@ -245,13 +245,13 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// // 反例——整段 prompt 拍成一条 user 消息：
     // grep-audit-allow S-014: provider 线格式的形状——身份不属于本次请求构造，节点不落库。
     /// let message = ChatNode { role: Some(NodeRole::User), content: …(prompt) };
-    /// execute_turn(self.system_prompt(), &[message], tools, …)
+    /// round_trip(self.system_prompt(), &[message], tools, …)
     /// ```
     ///
     /// 后果不是「排版难看」：`role: tool` 在**到达 provider 之前**就被拍成了
     /// user 消息里的纯文本，于是模型（a）看不到哪些正文是工具结果、`(b)` 拿不到
     /// `tool_call_id`、`(c)` 会把工具输出当成用户说过的话。而
-    /// `execute_turn` 的签名本来就是 `(system_prompt, messages: &[ChatNode], …)`
+    /// `round_trip` 的签名本来就是 `(system_prompt, messages: &[ChatNode], …)`
     /// ——它要的就是消息数组，是我们自己压扁了再传。
     async fn generate_turn(
         &self,
@@ -512,7 +512,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         let output = self
             .provider
             // internal-model-allow IM-001/gate: 这里是闸门自己的方法体——`LlmAdapter::generate` 拿到 `&FullModel` 之后才走到这一步，它要守的正是这一处；`tools` 是**转发**调用方的形参，不是这里造的空切片（IM-004 的形状因此与内部请求相反）
-            .execute_turn(self.system_prompt(), &wire, tools, &llm_short_id(), &env)
+            .round_trip(self.system_prompt(), &wire, tools, &llm_short_id(), &env)
             .await
             .map_err(|e| match e {
                 // 中止不压成失败：调用方据此**不落兜底格**（D-044 同源纪律）。

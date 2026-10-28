@@ -60,12 +60,12 @@ pub struct TranscriptView {
 /// 被某个 provider 的线格式绑住了。
 ///
 /// 所以 core 出**最小结构化形态**，由 adapter 边界翻译成 provider 的消息
-/// （`ProviderLlmAdapter` 原样交给 `execute_turn`）。**结构在 core、线格式在
+/// （`ProviderLlmAdapter` 原样交给 `round_trip`）。**结构在 core、线格式在
 /// adapter**——与 D-043 的域边界一致。
 ///
 /// ## 为什么必须有它（D-048a）
 ///
-/// `ModelProvider::execute_turn` 的签名本身就是
+/// `ModelProvider::round_trip` 的签名本身就是
 /// `(system_prompt, messages: &[ChatNode], …)`——`role` + `tool_call_id` 是**跨栈契约**
 /// 不是排版。把消息拍平成一段文本会把 `role: tool` 降级成 user 消息里的纯文本，模型就
 /// 看不到「这是工具结果」、也拿不到 `tool_call_id`——那是已判定的退步。

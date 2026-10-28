@@ -80,7 +80,7 @@ impl ModelProvider for BoundProvider {
     ///
     /// 实现对所有协议通用：协议差异已被 `ModelProtocol` 的钩子吸收，
     /// 故无需（也不可）按协议覆写。
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         system_prompt: &str,
         messages: &[ChatNode],

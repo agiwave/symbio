@@ -42,7 +42,7 @@ impl ModelProvider for MockProvider {
         262_144
     }
 
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         _system_prompt: &str,
         _messages: &[ChatNode],

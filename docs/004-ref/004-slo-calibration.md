@@ -28,7 +28,7 @@ deps: [DE-016-工程落地与验证]
 ## 2. 实测方法
 
 - 链路：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
- `ProviderLlmAdapter` → `BoundProvider::execute_turn`（五态机）→ openai_chat
+ `ProviderLlmAdapter` → `BoundProvider::round_trip`（五态机）→ openai_chat
  SSE 解析 → **真实 TCP + HTTP/1.1 + 流式响应**（本地 `TcpListener` mock 即答）；
 - 样本：12 轮全链路（每轮新建连接——最坏情况，无连接复用红利）；
 - 计量：`generate_timed` 在 adapter 边界的耗时 = 传输 + 协议 + 解析 + 聚合，

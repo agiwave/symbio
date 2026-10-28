@@ -476,7 +476,7 @@ impl ModelProvider for FaithfulProvider {
     async fn effective_context_tokens(&self) -> u32 {
         8192
     }
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         _system: &str,
         messages: &[cm::ChatNode],
@@ -1475,7 +1475,7 @@ async fn full_turn_lands_derived_commitment_facts() {
 /// 判定（逐字命中 ∧ 只对新开轮）是 `policy.reflex` 那一行的 `owes`，执行体在轮首
 /// host 落 `stage:"reflex"` 并把正文寄进本轮状态（D-163）；本用例从**那个事实**
 /// 出发，钉的是收束：`turn_head.reflex_answered` 让 `close-turn` 成为第一笔债，
-/// `execute-turn` 不欠 ⇒ 模型一次不被调。
+/// `announce-model` 不欠 ⇒ 模型一次不被调。
 #[tokio::test]
 async fn a_reflex_answer_closes_without_any_model_call() {
     let fx = setup_full();
@@ -2259,7 +2259,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
 
-    // 真实日志由生产写方落格：这一幕只有用户格，`execute-turn` 还欠着。
+    // 真实日志由生产写方落格：这一幕只有用户格，`announce-model` 还欠着。
     let anchor = open_turn_without_closure(&fx, 1, "秋天是什么");
     let table = super::super::loop_rows::table().expect("生产行表装载得起来");
     let start = || {
@@ -2278,8 +2278,8 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
 
     let once = solve(&slice, &table);
     assert!(
-        once.iter().any(|d| d.decl.name == "execute-turn"),
-        "跑过开轮的真实日志上 `execute-turn` 该欠着——空账上的「逐字相同」什么都测不到：{once:?}"
+        once.iter().any(|d| d.decl.name == "announce-model"),
+        "跑过开轮的真实日志上 `announce-model` 该欠着——空账上的「逐字相同」什么都测不到：{once:?}"
     );
 
     // 日志从存储层**重取**再算一遍：等值检查的是求解不夹带内存状态。
@@ -2298,7 +2298,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
         "开幕用的那张表与重新装载的那张表必须是同一张"
     );
 
-    // 账还得掉：续写把这一轮跑到收束，同一张表、同一个幕锚上 `execute-turn` 不再欠。
+    // 账还得掉：续写把这一轮跑到收束，同一张表、同一个幕锚上 `announce-model` 不再欠。
     execute_turn(open_turn_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
@@ -2312,8 +2312,8 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     assert!(
         !solve(&start(), &table)
             .iter()
-            .any(|d| d.decl.name == "execute-turn"),
-        "本轮已收束，`execute-turn` 不该还欠着"
+            .any(|d| d.decl.name == "announce-model"),
+        "本轮已收束，`announce-model` 不该还欠着"
     );
 }
 

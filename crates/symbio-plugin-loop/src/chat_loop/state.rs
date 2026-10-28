@@ -148,17 +148,17 @@ impl TurnRequest {
 /// 穿进收尾函数；现在收成一个结构体，主循环与阶段函数共享同一份状态。
 #[derive(Default)]
 pub(crate) struct TurnState {
-    /// 用户中止信号（`provider.execute_turn` 与工具执行共享同一份）。
+    /// 用户中止信号（`provider.round_trip` 与工具执行共享同一份）。
     ///
     /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
     /// 现在是 [`ExecAbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
     pub(crate) abort: ExecAbortSignal,
-    /// 本轮**已发出的 LLM 请求数**，也就是「这是第几幕」（D-168 裁决 1）。
+    /// 本轮**已发出的 LLM 请求数**，也就是「这是第几幕」（`D-222` §二：幕是环的身份）。
     ///
     /// 唯一写方是主循环的**幕间**那一步，而它的取值来自事实
     /// （`loop_rows::next_stage_round` 读 `turn_head.round` 给出下一幕的轮次）——
     /// 不是一份自己往上加的计数。续写次数因此不再需要独立的内存量
-    /// （`continuation_count` 已随 D-168 裁决 4 退场），一次请求加一格，
+    /// （`continuation_count` 已随幕的迭代器退场，`D-222` §二），一次请求加一格，
     /// 绝大多数轮就是 0 或 1。
     ///
     /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_exec::drive_steps` 的环体里

@@ -63,7 +63,7 @@ impl ModelProvider for NoopProvider {
     async fn effective_context_tokens(&self) -> u32 {
         8192
     }
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         _system_prompt: &str,
         _messages: &[cm::ChatNode],

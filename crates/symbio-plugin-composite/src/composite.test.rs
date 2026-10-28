@@ -624,7 +624,7 @@ impl ModelProvider for GatedProvider {
     async fn effective_context_tokens(&self) -> u32 {
         8192
     }
-    async fn execute_turn(
+    async fn round_trip(
         &self,
         _system: &str,
         _messages: &[cm::ChatNode],

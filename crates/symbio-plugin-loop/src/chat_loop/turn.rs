@@ -56,7 +56,7 @@ pub(crate) async fn settle_reasoning(
     finish
 }
 
-/// 本幕的**落库**（写投影，D-168 裁决 6）：截断告警 + 增量落库。
+/// 本幕的**落库**（写投影）：截断告警 + 增量落库。
 ///
 /// **不承担终态收尾**：`fire_stop_hook` 与最终 `persist_messages` 由 [`finish_turn`]
 /// 统一执行（本函数返回前会把 [`TurnState::last_saved`] 推进到最新，使 `finish_turn`
