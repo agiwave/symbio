@@ -907,8 +907,56 @@ fn turn_closed(events: &[Event], _now: i64) -> serde_json::Value {
     }
 }
 
-/// **中途汇报该不该说**：只吃日志与 `now`，不碰内存计数 / 墙钟。
+/// 一段连续幕的上限：被输出上限掐断之后，最多再开几幕。
 ///
+/// 上界是**那一笔债的前件**（`D-222` 裁决 3）：`continue-turn` 开不开账，由「收束原因
+/// 是 `exhausted` ∧ 轮次未到上限」这一条判。它此前是 `chat_loop::turn` 里的
+/// `MAX_CONTINUE_ROUNDS` 与 `TurnState::continuation_count` 那一对内存计数；判据搬进
+/// 事实面之后，数的来源只剩本幕的 `round` 格，比对的位置只剩
+/// [`turn_next_round`]——策略跟着行走，不跟着投影走，所以它不叫视图的旋钮。
+pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
+
+/// 本幕轮次**还有没有下一次**（`round` = 本幕的 `turn.stage{stage:"round"}` 值）。
+///
+/// 两个读者：幕间判据（[`turn_next_round`]）与 `chat_loop::turn::persist_turn`
+/// （截断告警该说自动续写还是该说已耗尽）。两处读的是同一个数——本幕的轮次由
+/// `begin_drive` 落成事实、由 `turn_head` 折成一格、由 `TurnState::request_round`
+/// 拿着用，三处同一个值（不是三份计数）。
+pub(crate) fn has_next_round(round: u64) -> bool {
+    round < MAX_STAGE_ROUNDS
+}
+
+/// **幕的推进**（`D-222` 裁决 2）：本幕停下之后还开不开下一幕——开的话，下一幕是第几轮。
+///
+/// 两条判据折成这一格：`closure = exhausted`（被输出上限掐断）∧ 轮次未到上限。
+/// 吐出一笔 `{round: N+1}` = 欠一次「再开一幕」；吐空 = 收工。
+///
+/// ## 为什么是视图，不是调用点的两个 `if`
+///
+/// 这两条此前写在幕间判据里，于是「还开不开下一幕」是一段**代码**：读 `turn_head`
+/// 的 `closure`、读它的 `round`、再比一个常量。那是按步骤号决定的判定点（判据 2 的
+/// 最后一格）。折进一格之后，调用点只读一格，`continue-turn` 那一行也能直接把它当
+/// `owes`——行不立的时候，判据已经在声明面上。
+///
+/// ## 「续写」与「收工」的分野只有 `exhausted`
+///
+/// 别的停法（`completed` / 兜底 / 中止 / 没有 `reason` 的旧日志）一律收工。方向是
+/// **宁可少发一次**：拿一个来路不明的形状去再发一次请求，等于把一次「本来就该停了」
+/// 的轮拖成两次模型往返。
+fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
+    let head = turn_head(events, now);
+    let exhausted = head.get("closure").and_then(|v| v.as_str())
+        == Some(symbio_core::ClosureReason::Exhausted.as_str());
+    let Some(round) = head.get("round").and_then(|v| v.as_u64()) else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    if !exhausted || !has_next_round(round) {
+        return serde_json::Value::Array(Vec::new());
+    }
+    serde_json::json!([{ "round": round + 1 }])
+}
+
+/// **中途汇报该不该说**：只吃日志与 `now`，不碰内存计数 / 墙钟。///
 /// `quiet_ms` 的起点是本轮**最近一次用户看得见的动静**：助手说过的任何一句
 /// （汇报 / 开场白 / 收束 / 等待）优先；一句都没说过时退到用户格 / 补充格。
 ///
@@ -1203,6 +1251,60 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &["chat.assistant.final", "chat.assistant.fallback"],
         cost: 4096,
         eval: turn_closed,
+    },
+    // 幕的推进（`D-222` 裁决 2）：本幕收束之后还开不开下一幕。
+    //
+    // 读面与 `turn_head` 逐字相同——它就是把那一份折叠再折一格（`closure` 与 `round`），
+    // 没有独立的事实来源。`evidence` 因此也照抄：这一格从不作任何行的出口，
+    // 它只作 `owes`（`continue-turn` 立起来之后），配图用不到它。
+    ViewDecl {
+        name: "turn_next_round",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("turn.stage", "round"),
+            ("turn.stage", "result"),
+            ("session.config", "classify_enabled"),
+            ("session.config", "auto_compress"),
+            ("session.config", "is_persistent"),
+            (EVENT_REQUEST, "port"),
+            (EVENT_REQUEST, "id"),
+            (EVENT_REQUEST, "attempt"),
+            (EVENT_REQUEST, "via"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_RESPONSE, "calls"),
+            (EVENT_RESPONSE, "via"),
+            (EVENT_RETRY, "port"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
+            (EVENT_FAILED, "port"),
+            (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "attempt"),
+            (EVENT_FAILED, "via"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            ("chat.assistant.final", "reason"),
+            ("chat.assistant.fallback", "reason"),
+        ],
+        evidence: &[
+            "user.message",
+            "turn.stage",
+            "session.config",
+            EVENT_REQUEST,
+            EVENT_SENT,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
+            "chat.assistant.final",
+            "chat.assistant.fallback",
+        ],
+        cost: 4096,
+        eval: turn_next_round,
     },
     // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。

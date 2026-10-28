@@ -137,6 +137,9 @@ fn control_plane_loads_and_freezes() {
             "turn_closed",
             // `turn_round` 已随 `turn` 端口退场（`D-222` §一）：它的两个读者是
             // `announce-turn` / `dispatch-turn`，两条行一起删了。
+            // `turn_next_round` 是幕的推进那一格（`D-222` 裁决 2）：两条判据折在
+            // 视图里，`continue-turn` 立起来之前只有 `next_stage_round` 一个读者。
+            "turn_next_round",
             "report_due",
             "reported_anchors",
         ]

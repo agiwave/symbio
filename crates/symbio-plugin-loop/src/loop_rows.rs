@@ -1423,58 +1423,29 @@ pub(crate) fn owes(name: &str, events: &[Event], turn: u64, now: i64) -> bool {
     debt.is_some()
 }
 
-/// 一段连续幕的上限：被输出上限掐断之后，最多再开几幕。
-///
-/// 它此前是 `chat_loop::turn` 里的 `MAX_CONTINUE_ROUNDS` 与
-/// `TurnState::continuation_count` 那一对内存计数（「跨轮累加的次数」）。判据搬进
-/// 事实面之后，上界是**那一笔债的前件**（`D-222` 裁决 3）：`continue-turn` 开不开账，
-/// 由「收束原因是 `exhausted` ∧ 轮次未到上限」这一条判。今天它落在幕间判据里（那一行
-/// 还没立），位置在这一层而不是在视图里，是因为视图只给事实（`round` / `closure`），
-/// 而「够不够了」是策略——策略跟着行走，不跟着投影走。
-pub(crate) const MAX_STAGE_ROUNDS: u64 = 3;
-
-/// 本幕轮次**还有没有下一次**（`round` = 本幕的 `turn.stage{stage:"round"}` 值）。
-///
-/// 上界判据只此一处：[`next_stage_round`] 用它定「还开不开下一幕」，
-/// `chat_loop::turn::persist_turn` 用它定「截断告警该说自动续写还是该说已耗尽」。
-/// 两处读的是同一个数——本幕的轮次由 `begin_drive` 落成事实、由 `turn_head` 折成
-/// 一格、由 `TurnState::request_round` 拿着用，三处同一个值（不是三份计数）。
-pub(crate) fn has_next_round(round: u64) -> bool {
-    round < MAX_STAGE_ROUNDS
-}
+/// 一段连续幕的上限与「还有没有下一次」：定义搬到视图那一侧
+/// （`control_decl::MAX_STAGE_ROUNDS` / `has_next_round`），这里只留路径——
+/// 上界是那一笔债的前件（`D-222` 裁决 3），而前件住在视图与行表那一层。
+pub(crate) use super::control_decl::{has_next_round, MAX_STAGE_ROUNDS};
 
 /// 幕间判据：本幕停下之后**还开不开下一幕**——开的话，下一幕的轮次是多少。
 ///
 /// `None` = 收工；`Some(round)` = 再开一幕，轮次取 `round`。
 ///
-/// ## 它读的是事实，不是返回值
+/// ## 它只读一格
 ///
-/// 这是 `D-222` 裁决 2 的落点。流向此前是 `close_turn` 返回的 `TurnFlow`，由
-/// `chat_loop` 的 `match` 决定「再发一次请求」还是收工——那是**按步骤号决定的判定点**
-/// （判据 2 的最后一条）。而这件事在日志上早就有事实：截断续写的幕与自然说完的幕，
-/// 收束格的 `reason` 本来就不同（`exhausted` / `completed`）。于是判据只剩读一格。
+/// 两条判据（`closure = exhausted` ∧ 轮次未到上限）折在视图 `turn_next_round` 里
+/// （`D-222` 裁决 2），这里只把那一格取出来。判据留在代码里的时候，流向就是
+/// 「按步骤号决定下一步」——那正是判据 2 的最后一格；折进声明之后，同一个问题
+/// 在事实面上有一个答案，`continue-turn` 那一行立起来时直接把它当 `owes`。
 ///
-/// ## 轮次从事实里读，不从内存里数
-///
-/// `round` 是本幕开账时落下的 `turn.stage{stage:"round"}` 那一格的值，也就是本幕
-/// 是「第几次请求」。续写次数因此不再需要一份独立的计数：`round + 1` 就是下一幕的
-/// 轮次，上界比对的是同一个数。`TurnState::continuation_count` 随之退场。
-///
-/// ## 「续写」与「收工」的分野只有 `exhausted`
-///
-/// 别的停法（`completed` / 兜底 / 中止 / 没有 `reason` 的旧日志）一律收工。方向是
-/// **宁可少发一次**：拿一个来路不明的形状去再发一次请求，等于把一次「本来就该停了」
-/// 的轮拖成两次模型往返。
+/// 轮次从事实里读，不从内存里数：`round` 是本幕开账时落下的
+/// `turn.stage{stage:"round"}` 那一格的值，`round + 1` 就是下一幕的轮次，
+/// 上界比对的是同一个数（`TurnState::continuation_count` 因此退场）。
 pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<u64> {
     let frozen = frozen()?;
-    let head = frozen.eval("turn_head", turn_slice(events, turn), now)?;
-    let exhausted = head.get("closure").and_then(|v| v.as_str())
-        == Some(symbio_core::ClosureReason::Exhausted.as_str());
-    if !exhausted {
-        return None;
-    }
-    let round = head.get("round").and_then(|v| v.as_u64())?;
-    has_next_round(round).then(|| round + 1)
+    let next = frozen.eval("turn_next_round", turn_slice(events, turn), now)?;
+    next.as_array()?.first()?.get("round")?.as_u64()
 }
 
 /// 这一刻环上有没有**已派出、未收清**的账——「在等」的可观测形态。
