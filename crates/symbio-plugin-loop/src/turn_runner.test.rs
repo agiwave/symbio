@@ -193,6 +193,9 @@ impl TurnRunner {
                 super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
                 super::super::turn_runner::TurnSessionBegin::Run(session) => session,
             };
+        // 三样「填」与生产逐字同序（`turn_exec::call_model`）：基线 prompt 先渲染
+        // （压缩已经由上面那次派发格之前的步骤落好），再插前缀，最后寄存快路正文。
+        session.render_base(store.as_ref());
         session.set_prefix(prefix);
         session.set_reflex(reflex);
         super::super::turn_exec::drive_steps(

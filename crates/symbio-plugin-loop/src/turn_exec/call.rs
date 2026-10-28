@@ -38,7 +38,9 @@ pub(crate) struct Running<'a> {
 /// 一轮的执行（阶段②）：调用——消费 [`Assembled`]，产 [`Running`]。
 pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, TurnExecExit> {
     let Assembled {
-        session,
+        // `&LoopSession`（会话窄句柄）——与下面 `Run(mut session)` 的 `TurnSession`
+        // （本轮草稿）**不是**同一个东西，改个名免得被遮住。
+        session: loop_session,
         provider,
         parent,
         ctx,
@@ -67,6 +69,9 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         actor,
         principal,
         to,
+        consolidation,
+        opening_text,
+        opening_dialog,
     } = a;
     // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：`policy.reflex`
     // 是轮首 host 的一行，它的出口格（`stage:"reflex"`）与正文（`reflex`）随本轮
@@ -225,7 +230,7 @@ inject: injector(supplements, report).map(|(drain, report)| {
             // 淘汰闸的部署级判据由 session 折叠成**一个值**（`D-086 §4`：全量事件
             // 过墙是 P6「值注入」的反面）；取失败按「未收回」继续并出声——与
             // 「读不出的 WAL 跳过」的既有口径一致。
-            let elimination_revoked = session
+            let elimination_revoked = loop_session
                 .run_op::<bool>(run_ops::ELIMINATION_REVOKED, ())
                 .await
                 .unwrap_or_else(|e| {
@@ -240,7 +245,7 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 parent,
                 ctx,
                 sink.clone(),
-                session.tool_archive_dir().to_path_buf(),
+                loop_session.tool_archive_dir().to_path_buf(),
                 store.clone(),
                 abort.clone(),
                 root_id.to_string(),
@@ -254,10 +259,11 @@ inject: injector(supplements, report).map(|(drain, report)| {
             );
 
             // 草稿在幕首就建（`D-222` 订正 3）：`begin` 与「驱动」分成两个动作，本段
-            // 负责建与填。填的两样是**备输入的产物**——前缀由 `prepare_turn_inputs` 的
-            // ⑥ 收集、快路正文由轮首的 `policy.reflex` 寄存——它们必须在**任何选债
-            // 之前**进草稿：前缀要早于第一次请求（它改的是基线 prompt 的第一条），
-            // 快路要早于第一次选债（它决定环先选中 `close-turn` 还是 `announce-model`）。
+            // 负责建与填。填的**三样**都是「轮首那几行跑完才知道」的：基线 prompt 要等
+            // 压缩（改的就是消息列表）、前缀由 `prepare_turn_inputs` 的 ⑥ 收集、快路正文
+            // 由 `policy.reflex` 寄存。它们必须在**任何选债之前**进草稿：前缀要早于第一次
+            // 请求（它改的是基线 prompt 的第一条），快路要早于第一次选债（它决定环先选中
+            // `close-turn` 还是 `announce-model`）。
             let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(llm);
             let r = match super::TurnRunner::begin(store.as_ref(), llm.as_ref(), input).await {
                 // 落格失败与动作失败走**同一个出口**（`ActorError`）：本段的调用方
@@ -267,20 +273,45 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 // 产出就是它——与 `drive_steps` 里那条早退逐字同义，只是挪到了调用方。
                 Ok(super::TurnSessionBegin::Done(outcome)) => Ok(outcome),
                 Ok(super::TurnSessionBegin::Run(mut session)) => {
-                    session.set_prefix(prefix);
-                    session.set_reflex(reflex.cloned());
-                    // 步循环在**执行器**里，不在 `turn_runner` 里。
-                    super::drive_steps(
-                        &mut session,
-                        &store,
-                        llm,
-                        tok,
-                        bridge.clone(),
-                        std::sync::Arc::from(tools),
-                        Some(dispatcher.clone()),
-                        super::super::loop_rows::ACTORS,
-                    )
-                    .await
+                    // 接缝（`D-223` 订正 1 / 订正 2）：压缩入格 → 定档 → 首响上线。
+                    // 它在 `begin` 之后、任何选债之前——三格事实都要等轮首那几行跑完，
+                    // 而草稿要先于它们存在（`D-222` 订正 3），两件事只在这一点上交汇。
+                    let seam = super::assemble::land_seam(super::assemble::Seam {
+                        session: loop_session,
+                        store: store.as_ref(),
+                        bridge: bridge.as_ref(),
+                        turn_no,
+                        user_seq,
+                        drive_seq,
+                        actor: &actor,
+                        consolidation,
+                        opening_text,
+                        opening_dialog: opening_dialog.as_ref(),
+                    })
+                    .await;
+                    match seam {
+                        Err(e) => Err(e),
+                        Ok(()) => {
+                            // 基线 prompt 在接缝**之后**渲染：压缩改的就是消息列表，而
+                            // 压缩刚在上一行落格。三个「填」的次序也是硬的：先渲染，再插
+                            // 前缀（前缀往基线最前面插一条），最后寄存快路正文。
+                            session.render_base(store.as_ref());
+                            session.set_prefix(prefix);
+                            session.set_reflex(reflex.cloned());
+                            // 步循环在**执行器**里，不在 `turn_runner` 里。
+                            super::drive_steps(
+                                &mut session,
+                                &store,
+                                llm,
+                                tok,
+                                bridge.clone(),
+                                std::sync::Arc::from(tools),
+                                Some(dispatcher.clone()),
+                                super::super::loop_rows::ACTORS,
+                            )
+                            .await
+                        }
+                    }
                 }
             };
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
@@ -292,7 +323,7 @@ inject: injector(supplements, report).map(|(drain, report)| {
         }
     .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
     Ok(Running {
-        session,
+        session: loop_session,
         store,
         bridge,
         emitter,

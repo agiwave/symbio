@@ -288,24 +288,31 @@ pub(crate) async fn execute_final_reply_turn(
     // 草稿在幕首就建（`D-222` 订正 3）：`begin` 与「驱动」分成两个动作。答话轮没有
     // 备输入的产物可填（一次请求都不发、也不是快路），所以「填」这一步是空的——
     // 但两步的分界照样在这里，与工具轮那条路同一个形状。
+    //
+    // `Run` 这一支在本入口**按构造不可达**（`final_reply` 非空 ⇒ `prepare_turn` 的 1b
+    // 就地收束、返回 `Done`）。它仍照工具轮那一条路的形状接上基线渲染：真到了这里，
+    // 「草稿没有基线」是比「多渲染一次」严重得多的错。
     let llm: std::sync::Arc<dyn symbio_core::LlmAdapter> = std::sync::Arc::new(llm);
     let outcome = match TurnRunner::begin(store.as_ref(), llm.as_ref(), input)
         .await
         .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
     {
         TurnSessionBegin::Done(outcome) => outcome,
-        TurnSessionBegin::Run(mut session) => drive_steps(
-            &mut session,
-            &store,
-            llm,
-            tok,
-            Arc::new(SilentDeltas),
-            Arc::from(Vec::new()),
-            None,
-            super::super::loop_rows::ACTORS,
-        )
-        .await
-        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?,
+        TurnSessionBegin::Run(mut session) => {
+            session.render_base(store.as_ref());
+            drive_steps(
+                &mut session,
+                &store,
+                llm,
+                tok,
+                Arc::new(SilentDeltas),
+                Arc::from(Vec::new()),
+                None,
+                super::super::loop_rows::ACTORS,
+            )
+            .await
+            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
+        }
     };
     // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────
     //

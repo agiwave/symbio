@@ -490,6 +490,21 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
+    /// 渲染**基线 prompt**（`TurnInput` 时代由 `prepare_turn` 就地做，现在搬到接缝上）。
+    ///
+    /// ## 为什么必须在接缝上
+    ///
+    /// 压缩改的就是消息列表，而压缩是环里的一行（`policy.compress`）——草稿在幕首就建
+    /// （`D-222` 订正 3），那一刻压缩还没落。照建草稿时那一份渲染，模型读到的就是
+    /// **没压过**的历史：事实照常入格、界面照常变短，只有 prompt 里没有那段摘要。
+    ///
+    /// 调用点因此与 [`Self::set_prefix`] / [`Self::set_reflex`] 同一处，且必须**排在它们
+    /// 之前**：前缀是往渲染好的基线最前面插一条（基线空着时插，插完就被渲染覆盖掉），
+    /// 快路正文则完全不进 prompt。
+    pub(crate) fn render_base(&mut self, store: &dyn Store<Event = Event>) {
+        self.run.render_base(store);
+    }
+
     /// 把**请求级前缀**插进基线 prompt 的最前一条（`TurnInput::prefix` 退场后的唯一入口）。
     ///
     /// ## 为什么它不在 `TurnInput` 里

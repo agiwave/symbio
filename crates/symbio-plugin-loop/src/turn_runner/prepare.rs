@@ -66,6 +66,9 @@ pub(crate) struct Prepared {
     pub(crate) user_seq: u64,
     pub(crate) turn_root_id: String,
     pub(crate) started: std::time::Instant,
+    /// 基线 prompt（**结构化**消息数组，D-048a）。建草稿时是**空的**，由
+    /// [`Prepared::render_base`] 在接缝上填——压缩改的就是消息列表，而压缩是环里的一行
+    /// （`D-222` 订正 3：草稿先于任何动作存在），建草稿那一刻它还不在事实源里。
     pub(crate) base_messages: Vec<symbio_core::PromptMessage>,
     pub(crate) exchange: Vec<symbio_core::PromptMessage>,
     pub(crate) tool_round: usize,
@@ -129,6 +132,31 @@ pub(crate) struct Prepared {
 }
 
 impl Prepared {
+    /// 基线 prompt 的**渲染时刻**：轮首那几行跑完、任何请求之前。
+    ///
+    /// ## 为什么不在建草稿时渲染
+    ///
+    /// 压缩（`policy.compress`）改的就是消息列表——它落 `session.consolidated` 之后，
+    /// 转写投影才读得到那份摘要。而草稿在**幕首**就建（`D-222` 订正 3），压缩是环里的
+    /// 一行、在它之后才跑。照幕首那一份渲染，模型读到的就是**没压过**的历史：事实照常
+    /// 入格、界面照常变短，只有 prompt 里那段摘要不存在。
+    ///
+    /// ## 为什么重取切片
+    ///
+    /// [`Self::full_snapshot`] 在幕首取过一次（产物编号要用），那一份**不含**压缩格。
+    /// 这里重取并覆盖它：渲染与 [`Self::set_prefix`] 的 D-048 复核必须站在**同一份**
+    /// 切片上，否则复核会对着「prompt 里有摘要、切片里没有」报一条假的完整性告警。
+    /// 两个读点各有各的口径，不是两份真相——后一次是前一次的超集。
+    pub(crate) fn render_base(&mut self, store: &dyn Store<Event = Event>) {
+        self.full_snapshot = store.range(Seq::new(0));
+        let viewer = Some(self.actor.principal.as_str());
+        let snapshot: Cow<'_, [Event]> = match self.window_turns {
+            None => filter_visible(&self.full_snapshot, viewer),
+            Some(keep) => window_by_turn(&self.full_snapshot, self.turn, keep, viewer),
+        };
+        self.base_messages = render_messages(&snapshot);
+    }
+
     /// 本次 `drive` 的 `now`：幕锚那条**唤醒事实**的 `ts`（判据 12 / DE-015 §2.1）。
     ///
     /// 切片取准备段读到的那一份，而用户格（或恢复格）在进运行器之前就落了 ⇒
@@ -212,8 +240,6 @@ where
         nodes,
         abort,
     } = input;
-    // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
-    let viewer = Some(actor.principal.as_str());
     // 本轮**新落**的产物格数（[D-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
     // 收束，发言闸再拒也不算未收束（`TurnOutcome::closure_denied` 与 C4 都认它）。
     let artifacts_landed = 0u64;
@@ -332,18 +358,14 @@ where
         }));
     }
     let full_snapshot = store.range(Seq::new(0));
-    // 对话窗口：只把最近 N 个 turn 的事件交给 prompt（含当前轮）——窗口是**视图**
-    // 问题，事实照常全量入格（append-only 不受影响）。
-    let snapshot: Cow<'_, [Event]> = match window_turns {
-        None => filter_visible(&full_snapshot, viewer),
-        Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
-    };
-    // 基线：**结构化**消息数组（D-048a）。请求级前缀**不在这里插**（`D-222` 订正 3）：
-    // 它由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行（判决 / 压缩 / 召回）**之后**收集，
-    // 而本函数跑在它们之前——草稿在幕首就建，前缀在它建好之后才到。入口是
-    // [`Prepared::set_prefix`]，D-048 的双向完整性复核跟着它走：`declared` 只有在前缀
-    // 真被插进去的那一刻才有值，留在本函数里就成了「声明了却没插」的假一致。
-    let base_messages = render_messages(&snapshot);
+    // 2. 基线 prompt **不在这里渲染**：它改的是「模型读到什么历史」，而压缩（环里的一行）
+    // 改的正是那份历史——建草稿那一刻压缩还没落。入口是 [`Prepared::render_base`]，
+    // 调用点在接缝上（轮首那几行跑完、任何请求之前）。本函数只把**切片**留下来：产物
+    // 编号要用它，且它同时是「幕首这一刻的事实面」。
+    //
+    // 请求级前缀也不在这里插（`D-222` 订正 3）：它由 `prepare_turn_inputs` 的 ⑥ 在轮首
+    // 那几行**之后**收集。入口是 [`Prepared::set_prefix`]，D-048 的双向完整性复核跟着它
+    // 走——`declared` 只有在前缀真被插进去的那一刻才有值。
 
     let started = std::time::Instant::now();
     // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
@@ -384,7 +406,8 @@ where
         user_seq,
         turn_root_id,
         started,
-        base_messages,
+        // 空基线：接缝上的 [`Prepared::render_base`] 才渲染（压缩之后那一份）。
+        base_messages: Vec::new(),
         exchange,
         tool_round,
         cost_ms,

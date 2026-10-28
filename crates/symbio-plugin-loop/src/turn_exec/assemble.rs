@@ -1,10 +1,19 @@
 //! 阶段① 装配——`execute_turn` 拆分四段之首（· B2，DE-021 §5 动作 B2）。
 //!
-//! 拆交付包、取事实源、补落寄存变更、定轮号与续写锚、建收集器与流式桥（连同
-//! 发射任务）、判反射命中、派生档位与身份、压缩入格——随后把一切装进
-//! [`Assembled`] 原样交给阶段② [`super::call`]。本段不产任何模型调用。
+//! 拆交付包、取事实源、补落寄存变更、建收集器与流式桥（连同发射任务）、定主体与
+//! 来源主体——随后把一切装进 [`Assembled`] 原样交给阶段② [`super::call`]。
+//! 本段不产任何模型调用，也**不落任何「要等轮首那几行」的格**（压缩 / 档位 / 首响）：
+//! 那些是接缝的事，[`land_seam`] 管。
 //!
-//! **纯结构拆分契约**：[`assemble_turn`] 体内自 `turn_exec.rs` 的
+//! ## 为什么分幕首与接缝两段
+//!
+//! 草稿要排到幕首（`D-222` 订正 3：`Ctx.session` 不是 `Option`），而三格事实要等
+//! `policy.compress` / `policy.reflex` / 判决那几行跑完才有（`D-223` 订正 1 / 订正 2）。
+//! 两件事落在同一段里，就必然有一头是错的：要么草稿建在格之后（搬不到幕首），要么格
+//! 落在草稿之前（档位读不到）。于是幕首段只做「不需要等」的事，接缝段专管「要等」的
+//! 四件——两段之间的边界就是 `TurnRunner::begin`。
+//!
+//! **纯结构拆分契约**：[`assemble_turn`] 与 [`land_seam`] 的体内自 `turn_exec.rs` 的
 //! `execute_turn` 首段**逐字搬移**，语句顺序与副作用点位不变；跨模块引用仅做
 //! `super::` → `super::super::` 的两跳改写与文档链接深度修正（胶水），零语义。
 
@@ -47,6 +56,106 @@ pub(crate) struct Assembled<'a> {
     pub(crate) actor: ActorSpec,
     pub(crate) principal: String,
     pub(crate) to: String,
+    // —— 接缝的输入（阶段② 调 [`land_seam`] 用；本段一格都不读）——
+    /// 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2）。
+    pub(crate) consolidation: Option<&'a [ChatNode]>,
+    /// 判决行 `Escalate` 的首响（落 `chat.assistant.opening` 并上实时面）。
+    pub(crate) opening_text: Option<&'a str>,
+    pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
+}
+
+/// 接缝要的**全部**环境（幕首已产出、接缝才消费）。
+///
+/// 与 [`Assembled`] 分开成形而不是直接把 `&Assembled` 传下去：接缝只需要这十样，
+/// 而 `Assembled` 是「①用过但②③④也要用」的全集——传全集等于让接缝顺手能读
+/// 它不该读的东西（例如 `provider` / `parent`）。
+pub(crate) struct Seam<'a> {
+    pub(crate) session: &'a LoopSession,
+    pub(crate) store: &'a dyn Store<Event = Event>,
+    pub(crate) bridge: &'a UiBridge,
+    pub(crate) turn_no: u64,
+    pub(crate) user_seq: u64,
+    pub(crate) drive_seq: u64,
+    pub(crate) actor: &'a ActorSpec,
+    pub(crate) consolidation: Option<&'a [ChatNode]>,
+    pub(crate) opening_text: Option<&'a str>,
+    pub(crate) opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
+}
+
+/// **接缝**：轮首四行跑完、任何请求之前（`D-223` 订正 1 / 订正 2）。
+///
+/// 四件事都是「轮首那几行跑完才知道」的，因此都不在幕首段（[`assemble_turn`]）里：
+///
+/// | 动作 | 为什么要等那几行 | 落成什么 |
+/// |---|---|---|
+/// | 压缩入格 | `policy.compress` 是本幕的前置动作，它落的事实必须早于本轮派发格 | `session.consolidated` + 归档 |
+/// | 定档 | 折自 `policy.reflex` 的出口格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
+/// | 首响上线 | 判决行 `Escalate` 的那句话 | `chat.assistant.opening` + 一帧实时面 |
+/// | （基线 prompt 与两次填） | 压缩改的就是消息列表 | 见 `turn_exec::call_model` 那一处 |
+///
+/// 前两件与第三件的**次序**是硬的：压缩早于派发（`consolidation_is_forwarded_before_the_turn_runs`
+/// 钉着），首响早于基线 prompt 的渲染（渲染在调用方、紧接本函数之后）。
+///
+/// ## 为什么不在这里渲染 prompt
+///
+/// 渲染要往草稿里写（`TurnSession::render_base`），而草稿是阶段② 用 `begin` 建出来的
+/// ——本函数跑在 `begin` 之后，但手里只有 `&LoopSession`。渲染因此留在调用方，紧随本
+/// 函数；「压缩先落、prompt 后渲染」这条次序由调用点的行序保证，不需要把草稿传进来。
+pub(crate) async fn land_seam(seam: Seam<'_>) -> Result<(), ActorError> {
+    let Seam {
+        session,
+        store,
+        bridge,
+        turn_no,
+        user_seq,
+        drive_seq,
+        actor,
+        consolidation,
+        opening_text,
+        opening_dialog,
+    } = seam;
+    // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
+    //
+    // 必须在派发格**之前**：本轮的用户格已由编排层先落，先归档才能让「本轮之前的
+    // 一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，现行窗口
+    // 不再自洽）。
+    //
+    // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（D-085），
+    // 等待轮被压进归档段后仍然成立——而且续写锚此刻已经由编排层按 seq 直给。
+    if let Some(msgs) = consolidation {
+        if let Err(e) = session
+            .run_op_unit(
+                run_ops::CONSOLIDATE,
+                ConsolidateRequest {
+                    messages: msgs.to_vec(),
+                },
+            )
+            .await
+        {
+            symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
+        }
+    }
+    // ── 定档：折自快路那一行的出口格（`D-223` 订正 1）─────────────────────
+    //
+    // 读**视图**而不是执行侧的副本（`reflex.is_some()`）：视图与那一行的判定同源，
+    // 而「命中集为空、行自己关账」那一支（`result = miss`）只有视图分得出来。
+    let facts_now = store.range(Seq::new(0));
+    let now = super::super::loop_rows::wake_now_ms(&facts_now, drive_seq);
+    let tier = super::super::loop_rows::turn_tier(&facts_now, turn_no, now);
+    super::super::chat_loop::land_dispatch(store, turn_no, user_seq, drive_seq, tier, actor)
+        .map_err(ActorError::Append)?;
+    // ── 首响落格 + 上线 ──────────────────────────────────────────────────
+    super::super::chat_loop::land_opening(
+        store,
+        bridge,
+        turn_no,
+        user_seq,
+        &actor.principal,
+        opening_text,
+        opening_dialog,
+    )
+    .map_err(ActorError::Append)?;
+    Ok(())
 }
 
 /// 一轮的执行（阶段①）：装配——`execute_turn` 首段原样，产 [`Assembled`]。
@@ -190,26 +299,21 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         }
     });
 
-    // 本轮档位的来源是**轮首快路作答这件事本身**（D-163 / `D-223` 订正 1）：`policy.reflex`
-    // 的执行体在轮首 host 落了出口格（`turn.stage{stage:"reflex"}`）并把正文寄进本轮状态。
-    // 本段不按「有没有正文」反推（那是执行侧的副本），读**视图**——档位与那一行的判定
-    // 因此同源。读点必须在这里之后不能再早：视图要等召回与快路两格都落了才填得满。
-    let facts_now = store.range(Seq::new(0));
-    let now = super::super::loop_rows::wake_now_ms(&facts_now, drive_seq);
-    let tier = super::super::loop_rows::turn_tier(&facts_now, turn_no, now);
-
-    // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
-    // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
+    // 档位与两格事实**不在这里落**（`D-223` 订正 1 / 订正 2）：档位折自
+    // `policy.reflex` 的出口格，开场白是判决行 `Escalate` 的首响——两者都要等轮首
+    // 那几行跑完。落点是接缝（[`land_seam`]），由阶段② 在 `begin` 之后调。
     //
-    // 读方：派生出的数值随主体走，`turn_runner` 开轮时以**数值**写入
-    // 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它 ⇒ 该字段不再是
-    // "算了却看不见"。`tier` 仍入格（兜底率按层统计的口径锚），且作为缺 `budget_ms`
-    // 时的回退路径保留——两条路径读的是同一条事实的两种形态。
-    // 身份进事件（plan/11 批 1 ①）：
-    // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：
-    // 能力集与模式不再是 `trivial` 的空表平凡值——它们与写侧闸判的是同一张表
-    // （判的对象 = 写的对象 = 表授予的对象）。未选智能体 ⇒ `agent:main`
-    // （S08 §4 平凡值，与接线前逐字一致）。
+    // 本段（幕首）只做「不需要等那几行」的事：取事实源、补落寄存变更、建收集器与
+    // 流式桥、定主体与来源主体。
+    //
+    // 身份进事件（plan/11 批 1 ①）：本轮以**会话选定的那个 agent** 为主体，规格从
+    // **授权表行**取（`request_actor_spec`）——能力集与模式不再是 `trivial` 的空表
+    // 平凡值，它们与写侧闸判的是同一张表（判的对象 = 写的对象 = 表授予的对象）。
+    // 未选智能体 ⇒ `agent:main`（S08 §4 平凡值，与接线前逐字一致）。
+    //
+    // 主体**不吃档位**（`D-223` 订正 2）：它要在幕首就建（`D-222` 订正 3），而档位要
+    // 等轮首四行跑完——两者互相派生就成环。规格里的 `budget_ms` 是主体的**声明档**，
+    // 本幕的预算归接缝上那一格 `turn.dispatch`。
     //
     // `principal` 已在落阶段事实时取过（同一取值点 `request_principal`）：
     // `actor` 随 `input` 被移动进运行器，轮末的记忆与学习写方（`record_learning`）
@@ -222,58 +326,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
     let to = super::super::chat_loop::request_source_principal(ctx.as_ref());
 
-    // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
-    //
-    // 必须在运行器落格**之前**：本轮的用户格已由编排层先落，先归档才能让
-    // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的
-    // 旧事件，现行窗口不再自洽）。
-    //
-    // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（D-085），
-    // 等待轮被压进归档段后仍然成立——而且续写锚此刻已经由编排层按 seq 直给，
-    // 本段不再从切片折它。
-    if let Some(msgs) = consolidation {
-        if let Err(e) = session
-            .run_op_unit(
-                run_ops::CONSOLIDATE,
-                ConsolidateRequest {
-                    messages: msgs.to_vec(),
-                },
-            )
-            .await
-        {
-            symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
-        }
-    }
-    // ── 接缝上的两格：派发档与开场白（`D-223` 订正 1）──────────────────────
-    //
-    // 两者都是轮首四行的产物（档位折自 `policy.reflex` 的出口格，开场白是判决行
-    // `Escalate` 首响），而草稿在幕首就建（`D-222` 订正 3）——所以它们不在 `begin` 里。
-    // 落点在这里：接缝上，压缩之后、`begin` 之前。三件事都由这一处顺序保证：
-    //
-    // - **压缩在前**：压缩是本轮执行的前置动作，它落的事实必须早于本轮派发格
-    //   （`consolidation_is_forwarded_before_the_turn_runs` 钉着这条）；
-    // - **`begin` 在后**：运行器的基线 prompt 从事实源投影，两格晚一步就不在模型读到的
-    //   历史里（`exclude_from_context` 为假时开场白是可见的一条）；
-    // - **上线面在这里**：开场白要经流式桥上实时面，而桥在本函数里建。
-    super::super::chat_loop::land_dispatch(
-        store.as_ref(),
-        turn_no,
-        user_seq,
-        drive_seq,
-        tier,
-        &actor,
-    )
-    .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
-    super::super::chat_loop::land_opening(
-        store.as_ref(),
-        bridge.as_ref(),
-        turn_no,
-        user_seq,
-        &actor.principal,
-        opening_text,
-        opening_dialog.as_ref(),
-    )
-    .map_err(|e| PluginError::InternalError(format!("开场白落格失败：{e:?}")))?;
     Ok(Assembled {
         session,
         provider,
@@ -304,6 +356,9 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         actor,
         principal,
         to,
+        consolidation,
+        opening_text,
+        opening_dialog,
     })
 }
 
