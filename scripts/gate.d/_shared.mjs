@@ -228,7 +228,7 @@ export const BASELINE = {
   // `the_outer_ring_announces_before_it_dispatches`（`stage_dispatched` / `stage_closed`）。
   // 同一批判据没有丢：租约两例从 `turn` 端口迁到 `tool` 端口，`lease` 三例从「一行」改判到
   // `stale_sent` 视图，`stage.test.rs` 只留准备段三条（`prepare` 的出口仍逐条判）。非侵蚀。
-  ciRustTestsTotal: 2411,
+  ciRustTestsTotal: 2413,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

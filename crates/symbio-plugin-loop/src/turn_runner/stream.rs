@@ -14,7 +14,7 @@ use super::*;
 /// 为什么要分类而不是直接抛 `AdapterError`：中止与失败是**两种停法**
 /// （收束格 vs 兜底格），而控制面不一致（行不欠 / 端口没声明）**根本不是适配器的
 /// 错**——把它们揉进一个错误类型，就只能给它们同一个形状。
-enum ModelCallError {
+pub(crate) enum ModelCallError {
     /// 适配器中止（`AdapterError::Aborted`）——中止收束格。
     Aborted,
     /// 适配器失败——兜底格（`detail` 是适配器的人话，只给人读）。
@@ -53,132 +53,209 @@ enum ModelCallError {
 // 适配器 / 令牌 / 消息 / 工具清单 / 流式出口），第八个是**这一笔往返的键**——它在
 // 宣布那一步就定了（D-166），所以不能在这里重新生成。
 #[allow(clippy::too_many_arguments)]
-async fn call_model<S>(
+pub(crate) fn begin_model(
     run: &mut Prepared,
-    store: &S,
-    llm: &dyn LlmAdapter,
-    tok: &FullModel,
-    messages: &[symbio_core::PromptMessage],
-    tools: &[symbio_core::CapabilityMeta],
+    store: std::sync::Arc<dyn Store<Event = Event>>,
+    llm: std::sync::Arc<dyn LlmAdapter>,
+    tok: FullModel,
     sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-    call: &super::super::port::Call,
-) -> Result<symbio_core::LlmTurn, ModelCallError>
-where
-    S: Store<Event = Event> + ?Sized,
-{
+    tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
+) -> Result<ModelBegin, ModelCallError> {
+    // 没有交接件 ⇒ 这一笔不是本幕宣布的（上一世的遗留）。判死由调用方做
+    // （[`kill_dangling_round`]）：那里看得见日志，这里只看得到草稿。
+    let Some(call) = run.pending_round.take() else {
+        return Ok(ModelBegin::NoPending);
+    };
     let turn = run.turn;
     let drive = run.drive_seq;
-    let round = call.id.clone();
-    // `request` 已经由 [`announce_round`] 落过（宣布与派出是两个环步，D-166）；
-    // 这里从 `sent` 起：派发前格由 `PortDecl::before` 决定，跑完落 `response`。
-    // 应答载荷带上本次交回的工具调用（D-117）：创建行 `open-tools` 的集合
-    // 展开读 `calls`；元素 id 与随后的 `request(port=tool)` 用同一公式。
-    // 行欠不欠由引擎现读（D-136）：这里只交出「授权这次派发的行」与读账的 now。
-    //
-    // 应答与失败**同带这一轮的产出字段**（`output_fields`）：半截正文 / 思考在
-    // 中止之后仍是事实，而它们只能在执行体返回之后从桥上取——所以两条闭包各取一次。
+    let produced_by = run.user_seq;
+    // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
+    let mut messages = run.base_messages.clone();
+    messages.extend(run.exchange.iter().cloned());
+
+    // 派出这一步的**唯一出口**是 `sent`（`D-222` 订正 2）：落完它，这一行的账就还清了，
+    // 「在等」从下一圈起由 `await-model` 认领——于是两次选债之间「已派出、未收清」
+    // 在事实面上读得到（`waiting` 视图 + `stale_sent`），而不是只在崩溃恢复的输入上才有值。
+    super::super::port::begin(
+        store.as_ref(),
+        super::super::loop_rows::PORTS,
+        super::super::port::Dispatch {
+            call: &call,
+            turn,
+            produced_by,
+            row: "dispatch-model",
+            now: run.now_ms(),
+            // 这次往返等在被寄存的 future 里：进程一死等待方就没了（判死归 `reap`）。
+            awaited: false,
+        },
+    )
+    .map_err(|e| ModelCallError::Control(format!("{e:?}")))?;
+
     let nodes_ok = run.nodes.clone();
     let nodes_failed = run.nodes.clone();
     let principal = run.actor.principal.clone();
     let turn_root_id = run.turn_root_id.clone();
     // 产出事实的**寄存槽**：桥的一次读只换一份读数，而这条事实要写进
-    // `response` / `failed` 载荷，又要落到草稿的 `last_output_facts` /
-    // `last_answer_id`。两处各取一次就变成两次读数，取数口的消费方（测试的
-    // 计数式假桥）会因此看到两倍的消耗——槽位让「读一次、存一次、两处共用」。
+    // `response` / `failed` 载荷，又要回到草稿的 `last_output_facts` /
+    // `last_answer_id`。两处各取一次就是两次读数，取数口的消费方（测试的计数式
+    // 假桥）会因此看到两倍的消耗——槽位让「读一次、存一次、两处共用」。
     let output_slot: std::sync::Arc<std::sync::Mutex<Option<(StreamNodeFacts, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let slot_ok = output_slot.clone();
     let slot_failed = output_slot.clone();
-    let out = super::super::port::dispatch_full(
-        store,
-        super::super::loop_rows::PORTS,
-        super::super::port::Dispatch {
-            call,
-            turn: run.turn,
-            produced_by: run.user_seq,
-            row: "dispatch-model",
-            now: run.now_ms(),
-            // 这次往返等在当前 drive 的 future 里：进程一死等待方就没了。
-            awaited: false,
-        },
-        || llm.generate_turn(tok, messages, tools, sink.clone()),
-        |e: &AdapterError| e.to_string(),
-        |rt| {
-            // 这一次往返的桥读数——**唯一**一次。
-            let facts = node_facts(&nodes_ok);
-            let mut fields = output_fields(&call.id, &turn_root_id, &principal, &facts, Some(rt));
-            let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
-            // 锁内只有一次赋值 ⇒ 中毒不可能发生；仍按数据照常取回（不让取数口成为 panic 面）。
-            *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
-            // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
-            let calls: Vec<serde_json::Value> = rt
-                .tool_calls
-                .iter()
-                .enumerate()
-                .map(|(idx, tc)| {
-                    serde_json::json!({
-                        "port": "tool",
-                        "id": super::super::tool_dispatch::batch_call_id(
-                            turn,
-                            drive,
-                            idx,
-                            tc.id.as_deref(),
-                            &round,
-                        ),
-                        "name": tc.name.clone().unwrap_or_default(),
-                        "arguments": tc.arguments.clone(),
+    let call_id = call.id.clone();
+    let round_id = call.id.clone();
+
+    // future 捕获的每一样都是 owned：槽不带生命周期参数（见 [`ModelInFlight`]）。
+    let fut = async move {
+        let answer = llm
+            .generate_turn(&tok, &messages, tools.as_ref(), sink)
+            .await;
+        let result = match answer {
+            Ok(rt) => {
+                let facts = node_facts(&nodes_ok);
+                let mut fields =
+                    output_fields(&call_id, &turn_root_id, &principal, &facts, Some(&rt));
+                let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
+                *slot_ok.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                // 这一轮交回的工具调用（集合展开读 `calls` 的 `id` / `name` / `arguments`）。
+                let calls: Vec<serde_json::Value> = rt
+                    .tool_calls
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, tc)| {
+                        serde_json::json!({
+                            "port": "tool",
+                            "id": super::super::tool_dispatch::batch_call_id(
+                                turn,
+                                drive,
+                                idx,
+                                tc.id.as_deref(),
+                                &round_id,
+                            ),
+                            "name": tc.name.clone().unwrap_or_default(),
+                            "arguments": tc.arguments.clone(),
+                        })
                     })
-                })
-                .collect();
-            fields["calls"] = serde_json::Value::Array(calls);
-            fields
-        },
-        |e: &AdapterError| {
-            let facts = node_facts(&nodes_failed);
-            let mut fields = output_fields(&call.id, &turn_root_id, &principal, &facts, None);
-            let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
-            *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
-            // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
-            // 与「适配器报错」——那条区分只在这一格。
-            fields["status"] = serde_json::Value::String(
-                if matches!(e, AdapterError::Aborted) {
-                    "aborted"
-                } else {
-                    "failed"
+                    .collect();
+                fields["calls"] = serde_json::Value::Array(calls);
+                match super::super::port::succeed_with(
+                    store.as_ref(),
+                    &call,
+                    turn,
+                    produced_by,
+                    fields,
+                ) {
+                    Ok(()) => Ok(rt),
+                    Err(e) => Err(ModelCallError::Store(e)),
                 }
-                .to_string(),
-            );
-            fields
-        },
-    );
-    let result = out.await;
-    // 这一轮的模型输出事实（应答 / 失败）已经落格 ⇒ 它的逻辑 id 归本轮 `responses`
-    // 与 `last_answer_id`：收束 / 进展格只说「结局」，正文由这条事实回溯。
-    //
-    // 只认 `Actor` 失败：存储失败与控制面失败都**没有**落输出事实，把它们的 id
-    // 记进 `responses` 会让读侧查一个不存在的正文。
-    let has_output =
-        result.is_ok() || matches!(&result, Err(super::super::port::DispatchError::Actor(_)));
-    if has_output {
-        run.responses.push(call.id.clone());
-        if let Some((facts, answer_id)) =
-            output_slot.lock().unwrap_or_else(|e| e.into_inner()).take()
-        {
-            run.last_output_facts = facts;
-            run.last_answer_id = answer_id;
+            }
+            Err(e) => {
+                let facts = node_facts(&nodes_failed);
+                let mut fields = output_fields(&call_id, &turn_root_id, &principal, &facts, None);
+                let answer_id = fields["answer_id"].as_str().unwrap_or_default().to_string();
+                *slot_failed.lock().unwrap_or_else(|e| e.into_inner()) = Some((facts, answer_id));
+                // 停法进载荷：重建按它定节点状态，而 `failed` 本身不区分「用户按停」
+                // 与「适配器报错」——那条区分只在这一格。
+                fields["status"] = serde_json::Value::String(
+                    if matches!(e, AdapterError::Aborted) {
+                        "aborted"
+                    } else {
+                        "failed"
+                    }
+                    .to_string(),
+                );
+                // 失败也要留痕：写不进去不掩盖适配器自己的错误（它更有信息量）。
+                let _ = super::super::port::failed_with_extra(
+                    store.as_ref(),
+                    &call,
+                    turn,
+                    produced_by,
+                    &e.to_string(),
+                    fields,
+                );
+                Err(match e {
+                    AdapterError::Aborted => ModelCallError::Aborted,
+                    other => ModelCallError::Failed(other.to_string()),
+                })
+            }
+        };
+        let output = output_slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        ModelFlight {
+            id: call_id,
+            result,
+            output,
         }
-    }
-    match result {
-        Ok(rt) => Ok(rt),
-        Err(super::super::port::DispatchError::Actor(AdapterError::Aborted)) => {
-            Err(ModelCallError::Aborted)
-        }
-        Err(super::super::port::DispatchError::Actor(e)) => {
-            Err(ModelCallError::Failed(e.to_string()))
-        }
-        Err(super::super::port::DispatchError::Store(e)) => Err(ModelCallError::Store(e)),
-        Err(other) => Err(ModelCallError::Control(format!("{other:?}"))),
-    }
+    };
+    Ok(ModelBegin::InFlight(Box::pin(fut)))
+}
+
+/// 一次**已派出、还没收清**的模型往返（`DE-015` 的 `D-222` 订正 2）。
+///
+/// ## 为什么是 `'static`
+///
+/// 它寄存进本轮草稿（[`super::TurnSession::inflight`]），而草稿**没有生命周期参数**：
+/// 草稿是 `TurnStep<'a>` 里被 `&'a mut` 借走的那一片，一旦它自己也带生命周期，
+/// `Action = for<'a> fn(&'a mut TurnStep<'a>)` 就得对**两个**生命周期成立——而绑定表
+/// 要求这些函数指针 `'static`，全量化的只有 `'a` 一个。所以路只有一条：future 不借
+/// 任何只在派出那一层栈帧里成立的引用。[`begin_model`] 因此把端口与消息全部搬成
+/// owned（`Arc` 句柄 + `Vec<PromptMessage>`），槽里剩下的就是一个 `'static` 的框。
+///
+/// ## 它交出什么
+///
+/// [`ModelFlight`]：结论 + 这次往返的桥读数。**写回草稿的活不在这里**——future 跑完时
+/// 已经回到 [`super::TurnSession`] 手里，`responses` / `last_output_facts` /
+/// `last_answer_id` 由那一侧写（草稿的唯一写方仍是持有它的人）。
+/// 控制面失败的兜底：模型**压根没派发**（行不欠 / 端口没声明）⇒ 日志上没有模型的终局
+/// 事实，收束行开不出账，兜底格只能由手上拿着这一笔往返的那一方就地落（D-166）。
+///
+/// 从 [`begin_model`] 里分出来是因为它要 `await`：派出那一步是同步的（落 `sent` +
+/// 寄存一个 future），而兜底要写一条事实。
+pub(crate) async fn settle_control<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    why: &str,
+) -> Result<TurnOutcome, symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let (cost_ms, produced) = failed_payload(run, llm);
+    settle::append_fallback(
+        store,
+        &run.actor,
+        run.turn,
+        run.user_seq,
+        why,
+        cost_ms,
+        produced,
+        run.artifacts_landed,
+    )
+    .await
+}
+
+pub(crate) type ModelInFlight =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ModelFlight> + Send + 'static>>;
+
+/// 一次往返落地时交回的两样。
+pub(crate) struct ModelFlight {
+    /// 这一笔的逻辑 id（写回 `responses` 用）。
+    pub(crate) id: String,
+    /// 适配器的结论；`Err` 三档与 [`ModelCallError`] 同义。
+    pub(crate) result: Result<symbio_core::LlmTurn, ModelCallError>,
+    /// 这一次往返的桥读数（`last_output_facts` / `last_answer_id` 的来源）。
+    ///
+    /// `None` = 没有落输出事实（控制面失败 / 存储失败），此时**不能**把 id 记进
+    /// `responses`——读侧会去查一条不存在的正文。
+    pub(crate) output: Option<(StreamNodeFacts, String)>,
+}
+
+/// 派出的结果：三态。
+pub(crate) enum ModelBegin {
+    /// 已派出（`sent` 落了），future 在这里。
+    InFlight(ModelInFlight),
+    /// 草稿里没有交接件：这一笔不是本幕宣布的（上一段生命在宣布与派出之间结束）。
+    NoPending,
 }
 
 /// 一次模型往返的推进结果。
@@ -201,10 +278,10 @@ pub(crate) enum ModelRound {
 /// 阶段②a-0：为**下一次**模型往返开账（`request(port=model)`），把这一笔留在草稿里。
 ///
 /// 派发不在这里（D-166）：「宣布」与「派出」是两个环步。宣布之后那笔账在日志上是
-/// **开着的**（`dispatch-model` 行因它而欠），派出由 [`model_round`] 在另一个动作里
+/// **开着的**（`dispatch-model` 行因它而欠），派出由 [`begin_model`] 在另一个动作里
 /// 做——这样「这一笔该谁跑」在事实面上可判，而不由某段代码顺手调一次往返决定。
 ///
-/// 逻辑 id 的取法与 [`call_model`] 的头注同源（端口名开头 + 幕锚 + 步号）：步号在
+/// 逻辑 id 的取法与 [`begin_model`] 的头注同源（端口名开头 + 幕锚 + 步号）：步号在
 /// 派出之后才 +1，所以一次往返只有一条 `request`，第二次不会撞上第一次的幂等键。
 pub(crate) async fn announce_round<S>(
     run: &mut Prepared,
@@ -226,8 +303,6 @@ where
 /// 把一笔**没有等待方**的模型请求判死（`failed`，`why = "no_pending_round"`）。
 ///
 /// 判据与取法全在 [`super::super::port::kill_dangling`]：这里只把端口名与理由定死。
-/// 端口无关的那一半留在端口面，是因为 `turn` 端口有同一处处置（外环的派发行，
-/// D-168）——两处各写一遍，就会有一条在改口径时被落下。
 pub fn kill_dangling_round<S>(store: &S) -> Result<bool, symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -235,40 +310,95 @@ where
     super::super::port::kill_dangling(store, "model", "no_pending_round")
 }
 
-/// 阶段②a：跑**一次**模型往返并分类；请求工具时把应答寄存，不派发。
+/// 收**已派出**的那一次模型往返：**poll 一次**在飞的 future。
 ///
-/// 与 [`dispatch_round`] 拆开是 的第一步：引擎要能分别选中「模型往返」与
-/// 「工具批次」两笔债，执行体就不能再把它们揉在一次调用里。
+/// 与 [`begin_model`] 成对（`D-222` 订正 2）：派出与收应答分处两个环步，中间那一圈
+/// 「`sent` 有、`response` 无」就是**在等**——`waiting` 视图与 `stale_sent` 读的正是它。
+/// 拆之前两者在同一个动作窗口里，`waiting` 只在崩溃恢复的输入上才有值。
 ///
-/// 宣布归 [`announce_round`]（`execute-turn` 行的动作），本函数只跑**已宣布**的
-/// 那一笔：`pending_round` 是两步之间唯一的交接件（D-166）。
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn model_round<S>(
+/// ## 为什么是 poll 一次，不是 `await` 到底
+///
+/// 「等」这个动作返回的那一刻，环要能回到**选债口**：往返在飞的时候，别的行（中途汇报
+/// 就是一条）才轮得到。`await` 到底等于把这一段重新塞回一个动作窗口里，只是把窗口挪了
+/// 个位置——`D-163` 要的「汇报在往返**进行中**落地」反过来又做不到了。
+///
+/// 于是这里只推进一次：`Ready` ⇒ 落账并分类（[`settle_flight`]）；`Pending` ⇒ 原样放回
+/// 槽里、让出执行权。**「让出」不是客套**：poll 一次之后那一圈在同一个任务里同步转完，
+/// 不 `yield` 就永远不会把控制权还给执行器，在飞的 I/O 因此永远等不到被驱动——
+/// 那不是「在等」，是自旋。
+///
+/// ## 槽空 ⇒ 判死，不猜
+///
+/// 进程在 `sent` 与 `response` 之间死过：future 随进程没了，留下来的只有请求格。
+/// 重放没有对象（等待方是那一段栈帧），所以按与「上一世遗留的请求」同一条处置：
+/// [`kill_dangling_round`] 落 `failed`，那一笔账关上。
+pub(crate) async fn poll_flight<S>(
     run: &mut Prepared,
     store: &S,
     llm: &dyn LlmAdapter,
-    tok: &FullModel,
-    sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-    tools: &[symbio_core::CapabilityMeta],
+    inflight: Option<ModelInFlight>,
+    has_dispatch: bool,
+) -> Result<PolledRound, symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    let Some(mut fut) = inflight else {
+        kill_dangling_round(store)?;
+        return Ok(PolledRound::Settled(ModelRound::NoPending));
+    };
+    let ready = std::future::poll_fn(|cx| std::task::Poll::Ready(fut.as_mut().poll(cx))).await;
+    match ready {
+        std::task::Poll::Ready(flight) => Ok(PolledRound::Settled(
+            settle_flight(run, store, llm, flight, has_dispatch).await?,
+        )),
+        // 还没好：原样放回槽里，并且让出执行权（理由见上）。
+        std::task::Poll::Pending => {
+            tokio::task::yield_now().await;
+            Ok(PolledRound::Parked(fut))
+        }
+    }
+}
+
+/// 一次 poll 的结果：落地了，还是「还在等」。
+pub(crate) enum PolledRound {
+    /// 这一笔已经有终局，附分类结果。
+    Settled(ModelRound),
+    /// 还在路上：future 原样交回，下一圈接着 poll。
+    Parked(ModelInFlight),
+}
+
+/// 一次往返的 future 已经 `Ready`：写回草稿 → 分类。
+///
+/// ## 写回草稿的活在这里
+///
+/// future 里只跑适配器与落协议格；`responses` / `last_output_facts` /
+/// `last_answer_id` 由**持有草稿的这一方**写——草稿的写方仍只有一个人。
+pub(crate) async fn settle_flight<S>(
+    run: &mut Prepared,
+    store: &S,
+    llm: &dyn LlmAdapter,
+    flight: ModelFlight,
     has_dispatch: bool,
 ) -> Result<ModelRound, symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
 {
-    // 没有交接件 ⇒ 这一笔不是本幕宣布的（上一世的遗留）。判死由调用方做
-    // （[`kill_dangling_round`]）：那里看得见日志，这里只看得到草稿。
-    let Some(call) = run.pending_round.take() else {
-        return Ok(ModelRound::NoPending);
-    };
-    // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
-    let mut messages = run.base_messages.clone();
-    messages.extend(run.exchange.iter().cloned());
-
-    // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
-    //
-    // 这一次模型往返是**端口 `model` 的一次调用**：协议事实
-    // （`request` / `sent` / `response` / `failed`）由 `port` 模块写（唯一写方）。
-    let rt = match call_model(run, store, llm, tok, &messages, tools, sink.clone(), &call).await {
+    // 落了输出事实的两种情形才把 id 记进 `responses`（读侧按它查正文）：
+    // 应答落 `response`，中止 / 适配器失败落 `failed`——两条都带产出载荷。
+    // 存储失败与控制面失败**没有**落任何输出事实，记进去就会查到一条不存在的正文。
+    let has_output = flight.result.is_ok()
+        || matches!(
+            &flight.result,
+            Err(ModelCallError::Aborted) | Err(ModelCallError::Failed(_))
+        );
+    if has_output {
+        run.responses.push(flight.id);
+        if let Some((facts, answer_id)) = flight.output {
+            run.last_output_facts = facts;
+            run.last_answer_id = answer_id;
+        }
+    }
+    let rt = match flight.result {
         Ok(rt) => rt,
         // 中止：收束格（`status: "aborted"`）由收束动作落，这里只寄存结局。
         Err(ModelCallError::Aborted) => {
@@ -291,9 +421,9 @@ where
             return Ok(ModelRound::Close);
         }
         Err(ModelCallError::Store(e)) => return Err(e),
-        // 控制面自身不一致（行不欠 / 端口没声明）：模型**压根没派发**，
-        // 端口没有终局事实（`failed(port=model)` 落不下来）⇒ 收束行开不出账
-        // ⇒ 兜底格只能就地落（`execute` 执行体的过渡豁免，见 `loop_rows::ACTORS`）。
+        // 控制面自身不一致只可能在**派出**那一步（[`begin_model`] 的 `port::begin`），
+        // 那一路由它就地落兜底格。这里接住它是为了让「加变体必须在这里回答一次」
+        // 这件事留在派发器上，而不是等到编译不过才发现。
         Err(ModelCallError::Control(why)) => {
             let (cost_ms, produced) = failed_payload(run, llm);
             return settle::append_fallback(
@@ -316,7 +446,7 @@ where
     // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
     // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
     //
-    // 取数已经发生在应答载荷那一侧（`call_model` 的寄存槽）：桥只读一次。
+    // 取数已经发生在应答那一侧（[`begin_model`] 的寄存槽）：桥只读一次。
     let round_facts = run.last_output_facts.clone();
 
     // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**：
@@ -330,8 +460,8 @@ where
         return Ok(ModelRound::Close);
     }
 
-    // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置
-    //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
+    // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置缺口**
+    //     （无工具轮不该出现工具调用），按失败诚实回报。
     //
     //     这一格**就地落**（不走收束动作）：工具批开不出来这件事在日志上没有
     //     任何事实（`failed(port=model)` 落不下来——模型应答是好的，缺的是分发

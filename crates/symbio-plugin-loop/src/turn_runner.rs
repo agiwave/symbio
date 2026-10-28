@@ -468,9 +468,11 @@ impl TurnRunner {
     {
         match prepare::prepare_turn(store, llm, input, sink).await? {
             prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
-            prepare::PreparedFlow::Run(run) => {
-                Ok(TurnSessionBegin::Run(TurnSession { run, steps: 0 }))
-            }
+            prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
+                run,
+                steps: 0,
+                inflight: None,
+            })),
         }
     }
 }
@@ -500,6 +502,16 @@ pub(crate) enum TurnSessionBegin {
 pub(crate) struct TurnSession {
     run: Box<prepare::Prepared>,
     steps: usize,
+    /// 已经派出、还没收清的那一次模型往返（`D-222` 订正 2 的 in-flight 槽）。
+    ///
+    /// 它在两次选债之间一直挂着——这就是「已派出、未收清」在正常跑里可读的那一格
+    /// （`waiting` 视图读 `sent` 无 `response`，与本字段无关；本字段是**执行侧**的
+    /// 那一半：应答由谁取走）。槽空且日志上有 `sent` = 那一笔的等待方随进程没了，
+    /// 由 `stream::settle_round` 判死。
+    ///
+    /// 类型是 `'static` 的框（理由见 `stream::ModelInFlight`）：草稿不带生命周期参数，
+    /// 否则 `Action` 的 `for<'a>` 要对两个生命周期成立，而绑定表要求它 `'static`。
+    inflight: Option<stream::ModelInFlight>,
 }
 
 impl TurnSession {
@@ -532,41 +544,96 @@ impl TurnSession {
         stream::announce_round(&mut self.run, store).await
     }
 
-    /// 跑**一次模型往返**：请求了工具就把应答留在草稿里等 [`Self::tools`]；
-    /// 该收束了（答完了 / 模型没答成 / 中止）就把**结局**留给 `close-turn`。
+    /// **派出**一次模型往返：落 `sent`，把「跑 + 收应答」整段寄存进 [`Self::inflight`]。
     ///
-    /// 只有一条路就地收口：**控制面**失败（模型往返压根没派发）——它在日志上没有
-    /// 模型的终局事实，收束行开不出账，兜底格只能由这一步落（`relay` 执行体的
-    /// 名单上有它，D-166）。
+    /// 与 [`Self::await_model`] 成对（`D-222` 订正 2）：两个环步之间那一圈
+    /// 「`sent` 有、`response` 无」就是在等，`waiting` 视图与 `stale_sent` 读的正是它。
+    /// 拆之前两者在同一个动作窗口里，于是「已派出、未收清」只在崩溃恢复的输入上才有值。
     ///
-    /// 它**不交回**产出（D-123 决策 5）：「本轮结束了没有」由派发器读账本判，
-    /// 执行体只写自己那一半事实。
-    pub(crate) async fn model<S>(
+    /// 只有一条路就地收口：**控制面**失败（`port::begin` 拒了这一笔：行不欠 / 端口没
+    /// 声明）——它在日志上没有模型的终局事实，收束行开不出账，兜底格只能由这一步落
+    /// （`relay` 执行体的名单上有它，D-166）。
+    ///
+    /// 它**不交回**产出（D-123 决策 5）：「本轮结束了没有」由派发器读账本判。
+    pub(crate) async fn begin_model(
+        &mut self,
+        store: std::sync::Arc<dyn Store<Event = Event>>,
+        llm: std::sync::Arc<dyn LlmAdapter>,
+        tok: FullModel,
+        sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
+        tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
+    ) -> Result<(), symbio_core::AppendError> {
+        // 步数 = **真打出去的模型往返次数**：没有交接件的那一笔（上一世遗留）不算一步。
+        if self.run.pending_round.is_some() {
+            self.steps += 1;
+        }
+        match stream::begin_model(&mut self.run, store.clone(), llm.clone(), tok, sink, tools) {
+            Ok(stream::ModelBegin::InFlight(fut)) => {
+                self.inflight = Some(fut);
+                Ok(())
+            }
+            // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
+            Ok(stream::ModelBegin::NoPending) => {
+                stream::kill_dangling_round(store.as_ref())?;
+                Ok(())
+            }
+            Err(stream::ModelCallError::Store(e)) => Err(e),
+            // 控制面失败（`port::begin` 拒了这一笔）：兜底格就地落，产出寄存进草稿。
+            Err(stream::ModelCallError::Control(why)) => {
+                let outcome =
+                    stream::settle_control(&mut self.run, store.as_ref(), llm.as_ref(), &why)
+                        .await?;
+                self.run.settled = Some(outcome);
+                Ok(())
+            }
+            // 适配器的两种停法只在**收应答**那一步出现（`poll_flight`）：派出这一步
+            // 压根还没调模型。接住它们是「加变体必须在这里回答一次」的落点。
+            Err(stream::ModelCallError::Aborted) | Err(stream::ModelCallError::Failed(_)) => Ok(()),
+        }
+    }
+
+    /// **收**已派出的那一次模型往返：poll 一次在飞的 future。
+    ///
+    /// ## 为什么只 poll 一次（`D-222` 订正 2）
+    ///
+    /// 「等」这一步返回的那一刻，环要能回到选债口——往返在飞的时候别的行才轮得到
+    /// （中途汇报就是一条）。`await` 到底等于把这一段又塞回一个动作窗口，只是把窗口
+    /// 挪了个位置：「汇报在往返**进行中**落地」反过来做不到了。
+    ///
+    /// 还在路上就把 future 原样放回槽里、让出执行权；派发器的空账本守卫据
+    /// 「`sent` 无所终局」认出这一圈是**合法地不前进**，不判 `no_progress`。
+    ///
+    /// 槽空 ⇒ 这一笔的等待方随进程没了（上一段生命在 `sent` 与 `response` 之间结束），
+    /// 由 [`stream::poll_flight`] 判死——不猜、不重放。
+    ///
+    /// 它**不交回**产出（D-123 决策 5）：结局寄存在草稿，收束归 `close-turn` 行。
+    pub(crate) async fn await_model<S>(
         &mut self,
         store: &S,
         llm: &dyn LlmAdapter,
-        tok: &FullModel,
-        sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
-        tools: &[symbio_core::CapabilityMeta],
         has_dispatch: bool,
     ) -> Result<(), symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        // 步数 = **真打出去的模型往返次数**：没有交接件的那一笔（上一世遗留）不算一步。
-        if self.run.pending_round.is_some() {
-            self.steps += 1;
-        }
-        match stream::model_round(&mut self.run, store, llm, tok, sink, tools, has_dispatch).await?
-        {
+        let inflight = self.inflight.take();
+        let polled = stream::poll_flight(&mut self.run, store, llm, inflight, has_dispatch).await?;
+        let settled = match polled {
+            stream::PolledRound::Parked(fut) => {
+                // 还在路上：原样放回槽里，下一圈接着 poll。这一圈没写任何格，
+                // 派发器的「空账本」守卫据 `sent` 无所终局认出这是**合法地不前进**。
+                self.inflight = Some(fut);
+                return Ok(());
+            }
+            stream::PolledRound::Settled(round) => round,
+        };
+        match settled {
             stream::ModelRound::Done(outcome) => self.run.settled = Some(outcome),
             stream::ModelRound::Tools => {}
             // 应答已寄存，收束这一步归 `close-turn` 行的执行体（[`Self::close`]）。
             stream::ModelRound::Close => {}
-            // 这一笔不是本幕宣布的：判死，让那笔账关上（否则它会一直被选出来）。
-            stream::ModelRound::NoPending => {
-                stream::kill_dangling_round(store)?;
-            }
+            // 槽空那一支已在 `poll_flight` 里判死，这里没有第二件事要做。
+            stream::ModelRound::NoPending => {}
         }
         Ok(())
     }

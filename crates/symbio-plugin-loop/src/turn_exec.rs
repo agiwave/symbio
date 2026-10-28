@@ -720,13 +720,26 @@ pub(crate) struct ExecTurn<'a> {
 ///
 /// 它是派发器与执行体之间唯一的界面：执行体拿得到草稿与端口，拿不到第二份草稿，
 /// 也拿不到「下一个动作是什么」的选择权（D-118 决策 4）。
+///
+/// ## 端口为什么是 `Arc` 而不是 `&`
+///
+/// 一次模型往返的 future 要能**离开它诞生的那一层栈帧**——派出与收应答分处两个环步
+/// （`DE-015` 的 `D-222` 订正 2），future 得寄存进本轮草稿。future 捕获的每一样都必须是
+/// owned，否则它的类型里会带一个只在那层栈帧里成立的生命周期，寄存进草稿就成了自引用
+/// （而带生命周期的草稿会撞上 `Action` 的 `for<'a>`——绑定表要求动作是 `'static`）。
+/// 于是这一层把「一次派发要用的端口」全部变成可克隆的句柄：`Arc<dyn Store>` /
+/// `Arc<dyn LlmAdapter>` / `Arc<[CapabilityMeta]>` / `Arc<dyn DeltaSink>`，以及零大小的
+/// [`FullModel`]（`Copy`）。
+///
+/// 仍借的只有两样：`session`（本轮草稿，派发器持有）与 `dispatch`（工具分发方，它自己
+/// 就在派发动作的栈上——工具批的等与收本来就在同一个动作里，不进 future）。
 pub(crate) struct TurnStep<'a> {
     pub(crate) session: &'a mut TurnSession,
-    pub(crate) store: &'a dyn Store<Event = Event>,
-    pub(crate) llm: &'a dyn LlmAdapter,
-    pub(crate) tok: &'a FullModel,
+    pub(crate) store: &'a Arc<dyn Store<Event = Event>>,
+    pub(crate) llm: Arc<dyn LlmAdapter>,
+    pub(crate) tok: FullModel,
     pub(crate) sink: Arc<dyn DeltaSink>,
-    pub(crate) tools: &'a [CapabilityMeta],
+    pub(crate) tools: Arc<[CapabilityMeta]>,
     pub(crate) dispatch: Option<&'a dyn super::tool_dispatch::ToolDispatch>,
 }
 
@@ -802,7 +815,7 @@ pub(crate) type Action = for<'a> fn(&'a mut TurnStep<'a>) -> StepFuture<'a>;
 pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .announce_model(step.store)
+            .announce_model(step.store.as_ref())
             .await
             .map_err(ActorError::Append)
     })
@@ -817,12 +830,31 @@ pub(crate) fn run_execute<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_model<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .model(
-                step.store,
-                step.llm,
+            .begin_model(
+                step.store.clone(),
+                step.llm.clone(),
                 step.tok,
                 step.sink.clone(),
-                step.tools,
+                step.tools.clone(),
+            )
+            .await
+            .map_err(ActorError::Append)
+    })
+}
+
+/// `waiter` 执行体（`D-222` 订正 2）：`await-model` 行选中的动作——取走寄存的那一次
+/// 往返，等它落地，落 `response` / `failed`。
+///
+/// 与 [`run_model`] 成对：派出（`dispatch-model`，出口是 `sent`）与收应答
+/// （`await-model`，出口是 `response` / `failed`）分处两个环步。两次选债之间那一圈
+/// 「已派出、未收清」因此在事实面上可见——`waiting` 视图与 `reap` 的 `stale_sent`
+/// 读的都是它，而不是只在崩溃恢复的输入上才有值。
+pub(crate) fn run_await<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        step.session
+            .await_model(
+                step.store.as_ref(),
+                step.llm.as_ref(),
                 step.dispatch.is_some(),
             )
             .await
@@ -833,7 +865,7 @@ pub(crate) fn run_model<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// `opener` 执行体（b）：`open-tools` 行选中的动作——逐条开账。
 pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
-        step.session.open(step.store, step.dispatch).await;
+        step.session.open(step.store.as_ref(), step.dispatch).await;
         Ok(())
     })
 }
@@ -841,7 +873,9 @@ pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// `authorizer` 执行体（b）：`authorize-tool` 行选中的动作——判放行 / 拒绝。
 pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
-        step.session.authorize(step.store, step.dispatch).await;
+        step.session
+            .authorize(step.store.as_ref(), step.dispatch)
+            .await;
         Ok(())
     })
 }
@@ -850,7 +884,7 @@ pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .dispatch(step.store, step.llm, step.dispatch)
+            .dispatch(step.store.as_ref(), step.llm.as_ref(), step.dispatch)
             .await
             .map_err(ActorError::Append)
     })
@@ -869,7 +903,7 @@ pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .close(step.store, step.llm, step.sink.clone())
+            .close(step.store.as_ref(), step.llm.as_ref(), step.sink.clone())
             .await
             .map_err(ActorError::Append)
     })
@@ -899,17 +933,17 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// 夹具在同名 `by` 上注册别的动作。「无进展」这条用例没有接缝就永远造不出来。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_steps(
-    store: &dyn Store<Event = Event>,
-    llm: &dyn LlmAdapter,
-    tok: &FullModel,
+    store: &Arc<dyn Store<Event = Event>>,
+    llm: Arc<dyn LlmAdapter>,
+    tok: FullModel,
     input: TurnInput,
     sink: Arc<dyn DeltaSink>,
-    tools: &[CapabilityMeta],
+    tools: Arc<[CapabilityMeta]>,
     dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
     actors: &'static [super::loop_rows::ActorEntry],
 ) -> Result<TurnOutcome, ActorError> {
     let step_sink = sink.clone();
-    let mut session = match TurnRunner::begin(store, llm, input, sink)
+    let mut session = match TurnRunner::begin(store.as_ref(), llm.as_ref(), input, sink)
         .await
         .map_err(ActorError::Append)?
     {
@@ -940,7 +974,7 @@ pub(crate) async fn drive_steps(
                     "no_progress"
                 };
                 return session
-                    .exhausted(store, llm, detail)
+                    .exhausted(store.as_ref(), llm.as_ref(), detail)
                     .await
                     .map_err(ActorError::Append);
             }
@@ -952,14 +986,22 @@ pub(crate) async fn drive_steps(
             next.by,
             next.key
         );
-        if session.over_step_limit() {
+        // 上界是**收工的判据**，不是「半路撂下」的许可（`D-222` 订正 2）：一次模型往返
+        // 占两个环步之后，上界可能正好落在「已派出、未收清」那一圈。此时停机会在日志上
+        // 留下一条 `sent` 无终局——重启后 `reap` 要判死一笔**其实已经答了**的往返，
+        // 而模型那一步的钱已经花过。先把在飞的那一笔收回来，再在下一圈的派发点上停。
+        //
+        // 判据是形状（[`super::loop_rows::waiting`]），不是行名：派发器不认行名。
+        if session.over_step_limit()
+            && !super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
+        {
             symbio_core::plugin_warn!(
                 "actors",
                 "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
                 session.turn()
             );
             return session
-                .exhausted(store, llm, "step_limit")
+                .exhausted(store.as_ref(), llm.as_ref(), "step_limit")
                 .await
                 .map_err(ActorError::Append);
         }
@@ -968,10 +1010,10 @@ pub(crate) async fn drive_steps(
             let mut step = TurnStep {
                 session: &mut session,
                 store,
-                llm,
+                llm: llm.clone(),
                 tok,
                 sink: step_sink.clone(),
-                tools,
+                tools: tools.clone(),
                 dispatch,
             };
             // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（D-123 决策 5）。
@@ -1010,7 +1052,7 @@ pub(crate) async fn drive_steps(
                 session.turn()
             );
             return session
-                .exhausted(store, llm, "undeclared-write")
+                .exhausted(store.as_ref(), llm.as_ref(), "undeclared-write")
                 .await
                 .map_err(ActorError::Append);
         }
@@ -1029,7 +1071,7 @@ pub(crate) async fn drive_steps(
                     session.turn()
                 );
                 return session
-                    .exhausted(store, llm, "unrecorded-outcome")
+                    .exhausted(store.as_ref(), llm.as_ref(), "unrecorded-outcome")
                     .await
                     .map_err(ActorError::Append);
             };
@@ -1038,9 +1080,16 @@ pub(crate) async fn drive_steps(
         // D-118 决策 7 + D-123 决策 1：账本为空 ⇒ 这一次动作什么都没写，环不会前进，
         // 落 `exhausted{no_progress}` 而不是空转到步数上界。判据 14 的夹具走的就是这条
         // 分支（空动作注册在同一个 `by` 上 ⇒ 不接线就红，见 判据 4）。
-        if ledger.is_empty() {
+        //
+        // **但「没写」有两种**（`D-222` 订正 2）：一次动作把在飞的 future poll 了一次、
+        // 它还没好，这一圈也确实零写入——那不是没账可还，是环**合法地不前进**（等 I/O）。
+        // 判据不靠动作自报「我在等」（自报漏一条就漏一条，正是 D-123 决策 1 要堵的），
+        // 靠形状：[`super::loop_rows::waiting`] 问「有没有一笔已派出、未收清」。
+        // 有一笔 ⇒ 这一步是把那一笔推进了一格，不判死。
+        if ledger.is_empty() && !super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
+        {
             return session
-                .exhausted(store, llm, "no_progress")
+                .exhausted(store.as_ref(), llm.as_ref(), "no_progress")
                 .await
                 .map_err(ActorError::Append);
         }

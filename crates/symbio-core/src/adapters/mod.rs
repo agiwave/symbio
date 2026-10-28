@@ -39,6 +39,11 @@ pub struct RuleOnly {
 }
 
 /// 深度档令牌：允许完整模型调用 + 工具。
+///
+/// **`Copy` 不放松闸门**：签发点仍是 [`TokenIssuer`] 唯一一处（`mint` 私有），复制只是
+/// 让「已经签到手的档位」能随一次派发一起被搬进 future——令牌证明的是「持码者处于哪一档」，
+/// 不是「哪一个变量持有它」。
+#[derive(Clone, Copy)]
 pub struct FullModel {
     _private: (),
 }

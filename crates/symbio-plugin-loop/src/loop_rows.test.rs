@@ -1147,10 +1147,16 @@ fn a_request_opens_dispatch_and_sent_closes_it() {
     // 关账：引擎落 `sent` 之后不再是派发的账。
     let out = vec![request("t-1", 1), sent("t-1", 1, 1_000, 1, 0)];
     assert!(!owes("dispatch-model", &out, 0));
-    // 但它变成**等**的账：`await-model` 在（且是 blocked：`by = None`）。
+    // 但它变成**等**的账，而且是一笔**可还**的债（`D-222` 订正 2）：`sent` 落完
+    // 派发行就还清了，「在等」由 `await-model` 认领，它有执行体、会被选中。
+    // 此前这一笔写 `by = None`，于是它恒 blocked、永不选中——环在派出去之后立刻停，
+    // 那一笔应答永远收不回来。
     let debts = owed(ROWS, &frozen(), &out, 0);
     let wait = debts.iter().find(|d| d.decl.name == "await-model").unwrap();
-    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+    assert!(
+        !wait.blocked,
+        "「已派出、等应答」是可还的债，不是 Wait 的折叠（`D-222` 订正 2）"
+    );
 }
 
 #[test]
@@ -1232,18 +1238,23 @@ fn waiting_means_a_sent_request_without_a_terminal() {
     }
 }
 
-/// `await-<port>` 是 Wait 折叠的**声明位**，不是装饰行——形状上必须与同端口的
-/// `dispatch-*` 行互补（D-126）。四条一起才叫对偶：
+/// `await-<port>` 与同端口的 `dispatch-<port>` 必须对偶（D-126 / `D-222` 订正 2）。
 ///
-/// 1. `by = None`：一旦接上执行体，它就成了同一笔账的**第二个派发器**；
+/// 四条一起才叫对偶：
+///
+/// 1. **执行体名不共用**：`await-*` 可以有执行体（订正 2 之后它就是「把这一笔收回来」
+///    的那一步），但不能与派发行同名——一个 `by` 一个动作，共名等于让动作按「现在是
+///    第几个环步」分支；
 /// 2. 开账条件 = 某条 `dispatch-*` 的**出口**（`sent`，同端口同键）——这是
 ///    「它记的正是派发行关掉的那一笔」的唯一写法；
 /// 3. 出口 = 端口的终态（`response` / `failed`）加 `retry`，且落在同一端口上；
 /// 4. 反向：每条 `dispatch-*` 都有对应的 `await-*`——新增端口不能「只派不等」。
 ///
-/// 为什么是**用例**而不是装载期检查：夹具刻意只写一行（`ring.test.rs` 的
-/// `await-x` 用例就是在验单行形状），装载期强制对偶会把「最小夹具」判成非法；
-/// 而 `ROWS` 是 `&'static` 常量，对它跑用例与在装载期判**等价**，且不向夹具收税。
+/// 第 1 条此前写的是「`by = None`」，理由是「一旦接上执行体，它就成了同一笔账的
+/// 第二个派发器」。`D-222` 订正 2 把那句话的结论改了：`by = None` 的行**恒 blocked、
+/// 永不选中**，于是派出去之后环立刻停，「在等」只能靠 `exhausted{waiting}` 观测，
+/// 而应答永远收不回来。等待接成可还的债之后，那条禁令的作用点落到「不许与派发行
+/// 共用执行体名」上——它防的从来是「一个动作两副身份」，不是「等待有人跑」。
 #[test]
 fn every_await_row_is_the_dual_of_its_dispatch_row() {
     /// 同一笔账：同源、同键、同端口约束。
@@ -1261,17 +1272,17 @@ fn every_await_row_is_the_dual_of_its_dispatch_row() {
             continue;
         };
         waits += 1;
-        assert!(
-            row.by.is_none(),
-            "`{}` 是 Wait 的折叠，接上执行体就成了第二个派发器",
-            row.name
-        );
-
         let dual = format!("dispatch-{stem}");
         let dispatch = ROWS
             .iter()
             .find(|d| d.name == dual.as_str())
             .unwrap_or_else(|| panic!("`{}` 没有对偶行 `{dual}`：等的东西没人派", row.name));
+        assert!(
+            row.by != dispatch.by,
+            "`{}` 与 `{dual}` 共用了执行体 `{:?}`：一个 `by` 一个动作，共名等于让动作按环步分支",
+            row.name,
+            row.by
+        );
         assert!(
             dispatch.until.iter().any(|p| same_binding(p, &row.owes)),
             "`{}` 的开账条件必须等于 `{dual}` 的某个出口（`sent`）",
@@ -1375,7 +1386,7 @@ fn a_model_request_opens_dispatch_and_sent_closes_it() {
     // 开账：`request` 落了、`sent` 还没落 ⇒ 欠一次模型派发。
     let asked = vec![model_request("m-1")];
     assert!(owes("dispatch-model", &asked, 0));
-    // 关账：引擎落 `sent` 之后不再是派发的账，变成**等**的账（`by = None` ⇒ blocked）。
+    // 关账：引擎落 `sent` 之后不再是派发的账，变成**等**的账——可还的那一笔。
     let out = vec![model_request("m-1"), model_sent("m-1")];
     assert!(!owes("dispatch-model", &out, 0));
     let debts = owed(ROWS, &frozen(), &out, 0);
@@ -1383,7 +1394,10 @@ fn a_model_request_opens_dispatch_and_sent_closes_it() {
         .iter()
         .find(|d| d.decl.name == "await-model")
         .expect("等应答的行在");
-    assert!(wait.blocked, "「已派出、等应答」就是 Wait 的折叠");
+    assert!(
+        !wait.blocked,
+        "「已派出、等应答」是可还的债（`D-222` 订正 2），不是 Wait 的折叠"
+    );
 }
 
 #[test]
@@ -1402,13 +1416,18 @@ fn a_model_failure_closes_both_the_dispatch_and_the_wait() {
     assert!(!owes("await-model", &events, 0));
 }
 
-/// D-166：宣布之后、派出之前，执行行让位给派发行。
+/// D-166 + `D-222` 订正 2：执行行的让位窗口是**整次往返**，不是「派出之前」。
 ///
-/// 两个数字（60 / 66）本身**不是**判据——`prio` 一改次序就变，而「这一步有没有活
-/// 可干」是事实问题。让位由 `turn_head.model_open` 说；派出之后（`sent` 落了）
-/// 执行行重新开账，模型才能接着说下一句。
+/// 两个数字（60 / 66 / 71）本身**不是**判据——`prio` 一改次序就变，而「这一步有没有
+/// 活可干」是事实问题。让位由 `turn_head.model_open` 说；它的关账格是往返的终局
+/// （`response` / `failed` / `retry`），所以执行行在「已宣布」与「已派出」两段都让位，
+/// 等应答收清才重新开账。
+///
+/// 若让位窗口只到 `sent` 为止，缩回来会怎样：执行行（60）在 `await-model`（71）
+/// 之前重新欠账、再宣布一笔同 step 号的请求——幂等键撞上、零写入，环读成
+/// `exhausted{no_progress}`（`turn_exec` 那一批用例就是这么红的）。
 #[test]
-fn the_execute_row_steps_aside_while_a_round_is_undispatched() {
+fn the_execute_row_steps_aside_until_the_round_is_settled() {
     let mut head = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
@@ -1425,10 +1444,23 @@ fn the_execute_row_steps_aside_while_a_round_is_undispatched() {
         "请求已宣布、还没派出 ⇒ 执行行不许再宣布下一笔"
     );
 
-    // 派出之后：派发行的账变成「等应答」，执行行的让位理由消失。
+    // 派出之后：账变成「等应答」，执行行**继续**让位——应答还在路上。
     head.push(model_sent("m-1"));
     assert!(!owes("dispatch-model", &head, 0));
-    assert!(owes("execute-turn", &head, 0), "派出之后执行行重新开账");
+    assert!(owes("await-model", &head, 0), "派出之后轮到等待行");
+    assert!(
+        !owes("execute-turn", &head, 0),
+        "已派出、未收清 ⇒ 执行行仍让位，否则它会抢在 await 之前再宣布一笔"
+    );
+
+    // 收清之后：执行行的让位理由才消失，模型才能接着说下一句。
+    head.push(ev(
+        1,
+        symbio_core::EVENT_RESPONSE,
+        json!({ "port": "model", "id": "m-1", "attempt": 1, "calls": [] }),
+    ));
+    assert!(!owes("await-model", &head, 0));
+    assert!(owes("execute-turn", &head, 0), "收清之后执行行重新开账");
 }
 
 #[test]
@@ -2476,7 +2508,8 @@ fn the_overlap_report_on_the_production_table() {
     // `turn_head` 自 步 5 起多读两类格（`has_final` 的前件：模型响应的
     // `calls` + 两条收束格），步 5b 又加了 `failed`（`tools_open` 的另一种终局），
     // 步 5d 再给 `tools_open` 补了请求面（`request`），v11 又给 `model_open` 补了
-    // 派发前格（`sent`，判「这一笔派出去了没有」）——凡是共用这个幕头的相交对，
+    // 派发前格（`sent`），v14（`D-222` 订正 2）再补往返的第三条终局 `retry`
+    // （`model_open` 的关账格从 `sent` 挪到终局三格）——凡是共用这个幕头的相交对，
     // 名单就一起变宽，这正是第 4 条要「点名而不只报非空」的理由。
     let head: &[&str] = &[
         "chat.assistant.fallback",
@@ -2484,6 +2517,7 @@ fn the_overlap_report_on_the_production_table() {
         "failed",
         "request",
         "response",
+        "retry",
         "sent",
         "session.config",
         "turn.stage",

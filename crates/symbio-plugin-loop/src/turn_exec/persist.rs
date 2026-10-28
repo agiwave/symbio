@@ -280,12 +280,12 @@ pub(crate) async fn execute_final_reply_turn(
         abort: Some(abort),
     };
     let outcome = drive_steps(
-        store.as_ref(),
-        &llm,
-        &tok,
+        &store,
+        Arc::new(llm),
+        tok,
         input,
         Arc::new(SilentDeltas),
-        &[],
+        Arc::from(Vec::new()),
         None,
         super::super::loop_rows::ACTORS,
     )

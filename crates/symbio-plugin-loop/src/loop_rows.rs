@@ -102,6 +102,13 @@ const COURIER: &str = "courier";
 /// 注入、批次边界还借它的窗口落汇报格），这一条只是「把手上那一笔模型往返发出去」。
 /// 共用一个名字，动作就只能按行名分支，那正是绑定表要消灭的东西。
 const RELAY: &str = "relay";
+/// 等待执行体（`D-222` 订正 2）：`await-model` 行选中的动作——取走寄存的那一次往返、
+/// 等它落地、落 `response` / `failed`。
+///
+/// 与 [`RELAY`] 分开是同一个理由（一个 `by` 一个动作）：`relay` 把这一笔**发出去**
+/// （出口 `sent`），`waiter` 把它**收回来**（出口 `response` / `failed`）。共名就等于
+/// 让一个动作按「现在是第几个环步」分支——那正是绑定表要消灭的东西。
+const WAITER: &str = "waiter";
 /// 轮首准备执行体（D-159）：`policy.recall` 行选中的动作。
 ///
 /// 它是**第二台 host** 上的名字：动作借走的是本轮状态 + 会话上下文 + 请求句柄
@@ -231,6 +238,21 @@ const ACTOR_RELAY: ActorDecl = ActorDecl {
 /// 两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与 `execute → close`），
 /// 表装不上（DE-015 §3.4 第 1 条）。`authz.denied` 是写侧闸拒那一条路留下的否定事实
 /// （C4），它和收束格同一次动作里落，所以也在名单上。
+/// 等待执行体的声明。
+///
+/// 行出口（`response` / `failed`）是**引擎写**的协议格——动作只把 future 取走并等它
+/// 落地，两条事实由 `port::succeed_with` / `failed_with_extra` 写。名单里那一格是它
+/// 唯一自己写的领域格：**模型要了工具而本轮没有分发通道**（配置缺口）时，日志上没有
+/// 模型的终局事实（应答是好的，缺的是通道），收束行判不出「该收了」，兜底格只能由
+/// 手上拿着这一笔往返的那一方就地落（D-166 的同一理由）。
+const ACTOR_WAITER: ActorDecl = ActorDecl {
+    name: WAITER,
+    // 等的是模型往返的应答：与那次往返同档。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[EVENT_CHAT_ASSISTANT_FALLBACK],
+};
+
 const ACTOR_CLOSE: ActorDecl = ActorDecl {
     name: CLOSE,
     // 收束就是「把已经拿到手的应答入格」：反射档，不调模型。
@@ -371,6 +393,11 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_COURIER,
         run: super::turn_exec::run_dispatch,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_WAITER,
+        run: super::turn_exec::run_await,
         transitional: &[],
     },
     ActorEntry {
@@ -933,18 +960,14 @@ pub(crate) static ROWS: &[Decl] = &[
             key: &["port", "id", "attempt"],
             eq: &[("port", Lit::Str("model"))],
         },
-        until: &[
-            Pattern {
-                source: EVENT_SENT,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("model"))],
-            },
-            Pattern {
-                source: EVENT_FAILED,
-                key: &["port", "id", "attempt"],
-                eq: &[("port", Lit::Str("model"))],
-            },
-        ],
+        // 出口**只有 `sent`**（`D-222` 订正 2）：落完它这一行的账就还清了，「在等」
+        // 由 `await-model` 认领。此前出口是 `response|failed`，于是派出与收应答在同一个
+        // 动作窗口里，两次选债之间「已派出、未收清」在正常跑里读不出来。
+        until: &[Pattern {
+            source: EVENT_SENT,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("model"))],
+        }],
         unless: &[],
     },
     // 工具调用的**创建**（D-117）：一个模型响应的 `calls` 集合逐元素开债。
@@ -1036,13 +1059,17 @@ pub(crate) static ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // 「已派出、等应答」——`by: None` 就是 `Wait` 的折叠：恒 blocked、永不选中，
-    // 但它让「在等」与「没事」可区分（DE-015 §2.3）。键取 `(port, id, attempt)`
-    // （D-138）：`sent` / `response` / `failed` / `retry` 都是同一次尝试的事实。
+    // 「已派出、等应答」：**可还**（`D-222` 订正 2）。动作取走寄存的那一次往返并等它
+    // 落地——`by: None` 时代它恒 blocked、永不选中，环选不到它就停（`exhausted{waiting}`），
+    // 而模型已经发出去了：那一笔应答永远收不回来。`by = None` 从此只表示「这一笔不由
+    // 引擎执行」，「在等」的唯一表达是 `waiting` 视图（`sent` 有 `response` 无）。
+    //
+    // 键取 `(port, id, attempt)`（D-138）：`sent` / `response` / `failed` / `retry`
+    // 都是同一次尝试的事实。
     Decl {
         name: "await-model",
         prio: 71,
-        by: None,
+        by: Some(WAITER),
         tier: LatencyTier::Deep,
         expand: None,
         owes: Pattern {
@@ -1382,28 +1409,27 @@ pub(crate) fn next_stage_round(events: &[Event], turn: u64, now: i64) -> Option<
 
 /// 这一刻环上有没有**已派出、未收清**的账——「在等」的可观测形态。
 ///
-/// 与 [`owes`] 的分工：`owes` 按**行名**问，本函数按**形状**问——开账条件是
-/// `sent` 的那些行（`await-<port>`）。**刻意不按行名前缀匹配**：派发器不认行名
-/// （D-118 决策 1），而「开账条件 = `sent`」正是「一次请求已经派出去、应答还没
-/// 回来」这件事在表上的唯一写法，它不依赖命名约定——改了行的名字，这个判据照样成立。
+/// ## 为什么按形状问，不按行名 / 不按 `blocked` 问
+///
+/// 判据就是 [`open_calls`]：有一条 `sent` 没有被同 `(id, attempt)` 的
+/// `response` / `failed` / `retry` 关掉。**刻意不按行名前缀匹配**，也刻意不看
+/// 「哪一行 blocked」：派发器不认行名（D-118 决策 1），而 `await-*` 行在
+/// `D-222` 订正 2 之后是**可还的债**（`by = Some(..)`），`blocked` 这个位不再
+/// 携带「在等」——「在等」剩下的唯一写法就是这条形状。换了行名、换了 `by`、
+/// 甚至删掉整张 `await-*` 行，本函数照样成立。
 ///
 /// ## 它存在的理由：`await-*` 行不是装饰行
 ///
 /// `drive_steps` 选不到可还债时，有两种**完全不同**的处境：真的没事可做，与有一笔
-/// 往返还在路上。两者在 `owed` 里可分（`blocked`），但停机理由此前一律写
-/// `no_progress`——于是「这一轮为什么停」在事实面上不可区分，而「在等」恰恰是
-/// 恢复路径最需要看见的那一种（进程在等应答时被打断，重启后这笔账要靠 `port::reap`
-/// 判死，前提是它当时确实被记成「在等」）。
+/// 往返还在路上。停机理由此前一律写 `no_progress`——于是「这一轮为什么停」在事实面
+/// 上不可区分，而「在等」恰恰是恢复路径最需要看见的那一种（进程在等应答时被打断，
+/// 重启后这笔账要靠 `port::reap` 判死，前提是它当时确实被记成「在等」）。
 ///
-/// `await-*` 行的**唯一生产读者**就是这里（D-126）：它们由表形状保证「与派发行
-/// 对偶」，由本函数给出可观测后果。两条缺一，它们就退化成行表里的装饰。
-pub(crate) fn waiting(events: &[Event], turn: u64, now: i64) -> bool {
-    let Some(frozen) = frozen() else {
-        return false;
-    };
-    owed(frozen.rows(), &frozen, turn_slice(events, turn), now)
-        .iter()
-        .any(|d| d.blocked && d.decl.owes.source == EVENT_SENT)
+/// 第二个读者是步数上界（`drive_steps`）：上界是**收工的判据**，不是「半路撂下」的
+/// 许可——有一笔在飞时先把它收回来，否则日志上留下一条 `sent` 无终局，重启后
+/// `reap` 要判死一笔**其实已经答了**的往返。
+pub(crate) fn waiting(events: &[Event], turn: u64, _now: i64) -> bool {
+    !super::control_decl::open_calls(turn_slice(events, turn)).is_empty()
 }
 
 /// 引擎的**选债口**：本幕当前最小的一笔可还债，连带它的动作。

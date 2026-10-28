@@ -156,10 +156,12 @@ fn control_plane_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v13：`closure`（本幕最近一条收束格的 `reason`）是最新的一格，
-    // 幕间判据读它决定「还开不开下一幕」；v12 的 `prepared`（本幕落过 `inputs`
-    // 阶段格没有）的读者 `prepare-turn` 行已随 `turn` 端口退场（`D-222`），
-    // 这一格与 `turn.stage{inputs}` 目前都无生产读者；
+    // `turn_head` 到 v14：`model_open` 的关账格从 `sent` 挪到 `response` / `failed` /
+    // `retry`（`D-222` 订正 2——一次模型往返此后占两个环步，`sent` 只说明「发出去了」），
+    // 读面随之补 `retry` 的 `port` / `id` / `attempt` 与 `response` 的 `id` / `attempt`；
+    // v13 的 `closure`（本幕最近一条收束格的 `reason`）是幕间判据「还开不开下一幕」的
+    // 数据面；v12 的 `prepared`（本幕落过 `inputs` 阶段格没有）的读者 `prepare-turn`
+    // 行已随 `turn` 端口退场（`D-222`），这一格与 `turn.stage{inputs}` 目前都无生产读者；
     // v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
     // 从「`prio` 碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
@@ -167,7 +169,7 @@ fn control_plane_loads_and_freezes() {
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 13);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 14);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
     assert_eq!(frozen.view("report_due").unwrap().ver, 4);
@@ -1200,8 +1202,15 @@ fn views_are_pure_same_slice_same_now_same_value() {
     assert_eq!(report_due(&events, 500)["due"], json!(false));
 }
 
+/// `model_open` 的口径（`D-222` 订正 2）：**宣布之后没收清**，不是「没派出」。
+///
+/// 一次模型往返占两个环步（`dispatch-model` 落 `sent`、`await-model` 落终局），
+/// 所以关账格是 `response` / `failed` / `retry` 三条终局，`sent` 不算——它只说明
+/// 「发出去了」。按旧口径（`sent` 即关账），派出一落本格就变假，执行行（60）立刻
+/// 重新欠账、抢在 `await-model`（71）之前再宣布一笔；同一步号的幂等键撞上，
+/// 那一圈零写入，环读成 `exhausted{no_progress}`。
 #[test]
-fn turn_head_model_open_until_the_round_is_dispatched() {
+fn turn_head_model_open_until_the_round_is_settled() {
     let base = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
@@ -1228,9 +1237,24 @@ fn turn_head_model_open_until_the_round_is_dispatched() {
     ));
     assert_eq!(
         turn_head(&dispatched, 0)["model_open"],
-        json!(false),
-        "派出之后账变成 `await-model`，本行的让位理由消失"
+        json!(true),
+        "派出不结束这一圈：应答还在路上，执行行（60）此刻必须继续让位给 await（71）"
     );
+
+    // 三条终局格各自都能关账。
+    for terminal in [EVENT_RESPONSE, EVENT_FAILED, EVENT_RETRY] {
+        let mut settled = dispatched.clone();
+        settled.push(ev(
+            1,
+            terminal,
+            json!({"port": "model", "id": "model-1-d0-s0", "attempt": 1}),
+        ));
+        assert_eq!(
+            turn_head(&settled, 0)["model_open"],
+            json!(false),
+            "`{terminal}` 是这个 attempt 的终局 ⇒ 本行让位的理由消失"
+        );
+    }
 
     // 另一个 attempt 的 `sent` 关不掉这一笔（键是 `(port, id, attempt)`）。
     let mut other_attempt = announced.clone();

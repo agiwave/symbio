@@ -262,12 +262,12 @@ inject: injector(supplements, report).map(|(drain, report)| {
             let dispatch_ref: &dyn super::super::tool_dispatch::ToolDispatch = &dispatcher;
             // 步循环在**执行器**里，不在 `turn_runner` 里。
             let r = super::drive_steps(
-                store.as_ref(),
-                &llm,
-                &tok,
+                &store,
+                std::sync::Arc::new(llm),
+                tok,
                 input,
                 bridge.clone(),
-                tools,
+                std::sync::Arc::from(tools),
                 Some(dispatch_ref),
                 super::super::loop_rows::ACTORS,
             )

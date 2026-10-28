@@ -552,9 +552,17 @@ fn every_port_row_is_in_the_table() {
     // 租约**没有行**：看护读 `stale_sent` 视图（`port::reap`），不经行表——
     // 「该还哪一笔」与「哪一笔过期了」是两个问题，只有前者归环（`TC-1b`）。
     assert_eq!(ROWS.iter().filter(|d| d.name == "lease").count(), 0);
-    // `await` 行就是 `Wait` 的折叠：恒 blocked，永不选中。
+    // `await-model` 现在**有**执行体（`D-222` 订正 2）：`sent` 落完之后「在等」由它
+    // 认领，一笔往返因此占两个环步。此前它写 `by = None`——恒 blocked、永不选中，
+    // 派出去之后环立刻停，那一笔应答永远收不回来。
     let await_row = ROWS.iter().find(|d| d.name == "await-model").unwrap();
-    assert_eq!(await_row.by, None);
+    assert!(
+        await_row.by.is_some(),
+        "等应答是可还的债：`by = None` 会让 `sent` 之后无步可走"
+    );
+    // 与派发行不共名——共名等于让动作按「现在是第几个环步」分支。
+    let dispatch_row = ROWS.iter().find(|d| d.name == "dispatch-model").unwrap();
+    assert_ne!(await_row.by, dispatch_row.by);
 }
 
 // ── 内部请求也走端口─────────────────────────────────────────────
