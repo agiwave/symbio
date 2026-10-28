@@ -130,7 +130,8 @@ jobs:
         #
         # 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
         # 清单取 Tauri 官方 Linux 前置（webkit2gtk 4.1 对应 Ubuntu 24.04）。
-        # ⚠️ `msrv-check` / `e2e-check` 只编 `symbio` + `cli`、不碰 tauri，故不装这组。
+        # ⚠️ `msrv-check` / `e2e-check` 只编**声明了 `rust-version` 的成员**（不含
+        # `symbio-tauri`，它没声明），不碰 tauri 的 GTK 链，故这两处不装上面这组。
         run: >
           sudo apt-get update && sudo apt-get install -y
           libssl-dev pkg-config
@@ -192,8 +193,9 @@ jobs:
           node-version: '22'
 
       - name: Install MSRV toolchain
-        # 版本须与 crates/symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 一致
-        # （gate.mjs 把 "1.91" 补全为 "1.91.0" 后比对；更新的 patch 证明不了下限）
+        # 版本须与各 crate 的 `rust-version` 声明一致（34 个成员都写 1.91）。msrv 阶段
+        # 从 `cargo metadata` 派生要编哪些 crate，并把 "1.91" 补全成 "1.91.0" 后**核对
+        # 实际生效的 rustc**：装错版本它跳过，不会拿 1.93 冒充 1.91 的结论。
         run: rustup toolchain install 1.91.0 --profile minimal
 
       - name: Install Linux system libs (OpenSSL)
@@ -211,6 +213,8 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv191-${{ hashFiles('**/Cargo.lock') }}
 
       - name: MSRV gate
+        # 真跑过的信号：日志里是 `34 crates @ 1.91.0` + 一条 `cargo check --all-targets`；
+        # 若只看到「跳过（当前生效的是 …）」，说明上面的工具链没装对——那不是通过。
         run: node scripts/gate.mjs --only=msrv
 
   # 架构证据验证：`docs/003-design/verify/` 的 14 个程序**自己证明自己**。
@@ -344,6 +348,9 @@ jobs:
         with:
           # baseline 阶段读的是**上一版** `BASELINE`（`git show <ref>:…`）；默认浅克隆只有
           # 一个提交 ⇒ 它在这里恒走「诚实跳过」，日志一片绿而守卫等于没跑。
+          # 同一件事的第二位消费者是 docs 阶段的 `core-change-audit`：它按 merge-base 取范围，
+          # 浅克隆里没有 base ref ⇒ 范围解析不到。那在 CI 是**判红**（自动化里「没人判」
+          # 不等于「判过」），所以这一步必须有全量历史，不能只靠加深 fetch 兜运气。
           fetch-depth: 0
 
       - name: Setup Node.js

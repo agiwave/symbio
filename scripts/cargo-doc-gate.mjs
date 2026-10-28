@@ -17,6 +17,25 @@
  * 于是「本地也跑 doc」这条判据仍然值得留（断链要留在开发者回路里），但代价必须
  * 重新摊掉：**判据的输入没变，上一轮的通过结论就还成立**。
  *
+ * ## 这一档代价到底是多少（2026-10-28 本机 20 核复测）
+ *
+ * | 情形 | 实测 |
+ * |---|---|
+ * | 戳命中（内容逐字未变） | **0.09s**（本脚本，含 `rustc -V` 与全树哈希） |
+ * | 内容未变但 mtime 变了（切分支、`touch`） | cargo 自己判脏：动一个叶子 crate 的 `lib.rs` ⇒ **17.9s**（4 个 crate 重新 Documenting）；动 core/kernel ⇒ 全树 35 个 crate，**148s** |
+ * | 产物全 fresh、无戳（cargo 自己扫一遍） | 0.5s |
+ *
+ * 所以这个戳买的是中间那一档：**内容没变而 mtime 变了**——`git checkout` 会重写全部
+ * mtime，那一轮没有这个戳就要白付 148s。它**买不到**「真的改了 core」那一档：
+ * 一次 core 改动确实要让 35 个 crate 的文档各渲染一遍（插件的文档会 re-export core 的
+ * 项，链接判据只能在各 crate 自己的 rustdoc 跑里成立），那是判据的固有成本，不是浪费。
+ *
+ * 已评估并**否决**的一条（记在这里免得再试）：把 doc 挪进独立泳道、给它单独的
+ * `CARGO_TARGET_DIR`，让它与 test / clippy 重叠——关键路径能省约 60s（backend 现为
+ * test 33.6s + clippy 9.5s + doc + cli 16.7s 串在一条 `.cargo-lock` 上）。否决理由：
+ * 独立 target 要从零编一遍依赖（含 `ort` / ONNX Runtime 的原生依赖与构建脚本），
+ * 冷启动一次的成本高于它每轮省下的，而它还要长期多占一份磁盘。
+ *
  * ## 判据
  *
  * 指纹 = 全部 rustdoc 输入的内容哈希：
@@ -73,17 +92,7 @@ function walk(dir, out = []) {
   return out
 }
 
-/** `Cargo.toml` 只收两处：根（workspace 定义）与各成员（依赖 / feature 变化） */
-function manifests(root) {
-  const out = ['Cargo.toml', 'Cargo.lock']
-    .map((r) => path.join(root, r))
-    .filter((p) => fs.existsSync(p))
-  for (const f of walk(path.join(root, 'crates'))) {
-    if (path.basename(f) === 'Cargo.toml') out.push(f)
-  }
-  return out
-}
-
+/** `rustc -V`：工具链换了，上一轮的通过结论不适用 */
 function rustcVersion() {
   const r = spawnSync('rustc', ['-V'], { encoding: 'utf8' })
   return r.status === 0 ? r.stdout.trim() : '<rustc 不可用>'
@@ -93,8 +102,11 @@ function rustcVersion() {
  * 当前 rustdoc 输入的指纹。
  *
  * 只哈希 `.rs` + 清单：rustdoc 的断链判据不依赖其它文件，把 `docs/` 下的 md 收进来
- * 会让「改一段文档说明就重跑一次 1m36s」——那些 md 不是 rustdoc 的输入（`include_str!`
+ * 会让「改一段文档说明就重跑一次」——那些 md 不是 rustdoc 的输入（`include_str!`
  * 进来的资源会变 `.rs` 的字节吗？不会，但那种资源一变，链接判据也不变，故不必收）。
+ *
+ * `crates/` 只走**一遍**：`.rs` 与 `Cargo.toml` 是同一次遍历的产物（原先分两趟，
+ * 而这一层的开销全在目录遍历 + 读文件上，实测一次指纹 92ms）。
  */
 export function docFingerprint(root = repoRoot) {
   const h = createHash('sha256')
@@ -102,9 +114,14 @@ export function docFingerprint(root = repoRoot) {
   h.update(`flags\0${process.env.RUSTDOCFLAGS ?? ''}\n`)
   const files = []
   for (const rel of SRC_ROOTS) {
-    for (const f of walk(path.join(root, rel))) if (f.endsWith('.rs')) files.push(f)
+    for (const f of walk(path.join(root, rel))) {
+      if (f.endsWith('.rs') || path.basename(f) === 'Cargo.toml') files.push(f)
+    }
   }
-  files.push(...manifests(root))
+  for (const rel of ['Cargo.toml', 'Cargo.lock']) {
+    const p = path.join(root, rel)
+    if (fs.existsSync(p)) files.push(p)
+  }
   const rels = [...new Set(files.map((f) => path.resolve(f)))]
     .map((f) => path.relative(root, f).split(path.sep).join('/'))
     .sort()

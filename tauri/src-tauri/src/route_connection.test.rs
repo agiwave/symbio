@@ -21,15 +21,22 @@ async fn sweep_expired_removes_only_idle_connections_and_cancels_their_tokens() 
     mgr.register_fixed("fresh".into(), tx_fresh, fresh.clone())
         .await;
 
-    // 只把 old 的活跃时间拨到超时窗口之外；fresh 保持刚注册的状态。
-    mgr.connections
-        .write()
-        .await
-        .get_mut("old")
-        .expect("刚注册的连接")
-        .last_active = Instant::now() - Duration::from_secs(301);
+    // 时间轴整个放在基准**之后**：`Instant` 的零点 = 开机，往回拨 301s 在开机不满
+    // 301s 的机器上是 panic 而不是夹具（见 `sweep_expired` 的 `now`）。被审的仍是差值：
+    // 判超时的那一刻距 `old` 的活动 301s（超窗口）、距 `fresh` 的 51s（在窗口内）。
+    let base = Instant::now();
+    {
+        let mut conns = mgr.connections.write().await;
+        conns.get_mut("old").expect("刚注册的连接").last_active = base;
+        conns.get_mut("fresh").expect("刚注册的连接").last_active = base + Duration::from_secs(250);
+    }
 
-    sweep_expired(&mgr.connections, Duration::from_secs(300)).await;
+    sweep_expired(
+        &mgr.connections,
+        Duration::from_secs(300),
+        base + Duration::from_secs(301),
+    )
+    .await;
 
     assert!(old.is_cancelled(), "超时连接必须取消订阅令牌");
     assert!(!fresh.is_cancelled(), "未超时的连接不得被误删");

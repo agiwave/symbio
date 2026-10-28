@@ -32,7 +32,7 @@ lists: [gate-codes=owner]
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
 | **FB** | 事实轨边界 | `scripts/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
-| **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–005 | `GW-006` |
+| **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–006 | `GW-007` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
 | **KB** | 前端分支（形态 / 资源类型） | `scripts/kind-branch-audit.mjs` | KB-001–002 | `KB-003` |
@@ -133,6 +133,7 @@ lists: [gate-codes=owner]
 | **GW-003** | `scripts/gate-wiring-audit.mjs` |
 | **GW-004** | `scripts/gate-wiring-audit.mjs` |
 | **GW-005** | `scripts/gate-wiring-audit.mjs` |
+| **GW-006** | `scripts/gate-wiring-audit.mjs` |
 | **IM-001** | `scripts/internal-model-audit.mjs` |
 | **IM-002** | `scripts/internal-model-audit.mjs` |
 | **IM-003** | `scripts/internal-model-audit.mjs` |

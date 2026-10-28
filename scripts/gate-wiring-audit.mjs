@@ -7,7 +7,7 @@
  * 而新增一份 `.test.mjs` 的人不会知道要去那里登记——于是它红了也没人知道，
  * 比没有测试更糟：仓里躺着一份「看起来有人在跑」的测试。
  *
- * 判据（名单与目录事实互为对账，四个方向都判）：
+ * 判据（名单与目录事实互为对账，六个方向都判）：
  *   - **GW-001** `scripts` 目录（递归）里的每一份 `X.test.mjs`，其去后缀名 `X` 必须出现在
  *     `GUARDS ∪ TEST_ONLY`，否则红——「存在但从不运行」的测试。
  *   - **GW-002** 三张名单里指名的每一个 `<名>` 必须在磁盘上存在，
@@ -37,6 +37,13 @@
  *     旧写法还有一个更隐蔽的病：它用 `includes('autoWork')` 认阶段，于是**注释措辞**决定判定——
  *     删掉 `60-facts.mjs` 头里一句叙述（零行为改动）实测报出 5 条假阳性，而反过来把真正在
  *     暂存文件的 `06-facts-write` 那句注释改成人话，这个生成阶段就从判定里消失、判据空转。
+ *   - **GW-006**（阶段不空转）每个 `gate.d/*.mjs` 在本机**物化一次 `tasks()`**，产出 0 个检查项
+ *     又没声明 `mayBeEmpty: '<一句理由>'` ⇒ 红。治的是「阶段还在、判据没了」：`50-msrv` 写死了
+ *     D-191 之前那两个顶层目录，拆成 crate 之后路径不存在，于是每轮产出 0 项、
+ *     汇总表上**一行都没有**，与「跑过了、全绿」完全同形，而 CI 那个 msrv job 一直绿——
+ *     `rust-version` 重新变回没人验证的一句话。`gate.mjs::runStage` 在真跑那轮有同一条运行时判定
+ *     （0 项且无声明 ⇒ 记失败），本条的价值是**不用等一轮七分钟的门禁**才发现。
+ *     声明必须是一句理由而不是 `true`：空转要是有名有姓的豁免，不能是一个可按的开关。
  * 登记见 相应批次。
  *
  * 名单仍然是手写的、仍然带注释——本脚本不生成它，只判它有没有覆盖目录事实。
@@ -49,7 +56,7 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns GW 门禁接线（测试文件与门禁名单的对账）
-// @codes GW-001 GW-002 GW-003 GW-004 GW-005
+// @codes GW-001 GW-002 GW-003 GW-004 GW-005 GW-006
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -113,12 +120,15 @@ function stageFilesOf(root) {
 }
 
 /**
- * 阶段的**自声明元数据**（GW-005 读它）。三条来源各自独立，缺一就判不出真相：
- *  - `regenerates` / `recheck`：`export default` 里的字段（动态 import 读，和 `gate.mjs`
+ * 阶段的**自声明元数据**（GW-005 / GW-006 读它）。四条来源各自独立，缺一就判不出真相：
+ *  - `regenerates` / `recheck` / `mayBeEmpty`：`export default` 里的字段（动态 import 读，和 `gate.mjs`
  *    加载阶段是同一条路径，不是第二份解析）；
  *  - `calls`：源码里有没有 `autoWork(` / `autoChain(` 的**调用形状**——只认带左括号的，
  *    于是注释里提到原语的名字不影响判定（旧判据 `includes('autoWork')` 恰恰相反，
  * 见文件头 GW-005 那条与 相应批次）。
+ *  - `taskCount`：在本机**物化一次 `tasks()`**（与 `gate.mjs --list` 同一条路径），
+ *    GW-006 判它是不是 0。物化失败记成 `tasksError`，不当成「0 项」——
+ *    「读不出」与「确实没有」是两件事，前者不能伪装成后者的任何一种结论。
  * import 失败不再静默按「没声明」处理：那会让一条真判据悄悄空转，报成 GW-005 失效。
  */
 async function stageMetaOf(root, stageList) {
@@ -127,13 +137,41 @@ async function stageMetaOf(root, stageList) {
     const abs = path.join(root, 'scripts', 'gate.d', f)
     let regenerates = false
     let recheck = false
+    let mayBeEmpty = null
+    let taskCount = null
+    let tasksError = null
+    let isStage = true
     let error = null
+    let decl = null
     try {
-      const mod = await import(pathToFileURL(abs).href)
-      regenerates = mod.default?.regenerates === true
-      recheck = mod.default?.recheck === true
+      decl = (await import(pathToFileURL(abs).href)).default
+      isStage = Boolean(decl?.id)
+      regenerates = decl?.regenerates === true
+      recheck = decl?.recheck === true
+      mayBeEmpty = decl?.mayBeEmpty ?? null
     } catch (e) {
       error = (e && e.message ? e.message : String(e)).split('\n')[0]
+    }
+    if (!error) {
+      // 与 `gate.mjs::materialize` 逐字同形的物化：ctx 只给到只读字段，`run` 一旦在
+      // 物化期被调用会抛出来（记成 tasksError），所以这里读到的 0 项与真跑那轮的 0 项同源。
+      const ctx = {
+        repoRoot: root,
+        scriptDir: path.join(root, 'scripts'),
+        logDir: null,
+        ci: true,
+        profile: null,
+        autoBump: false,
+        run: async (o) => {
+          throw new Error(`tasks() 在物化期就执行了命令（${o?.label ?? '?'}）`)
+        },
+        log: () => null,
+      }
+      try {
+        taskCount = Array.from(typeof decl?.tasks === 'function' ? decl.tasks(ctx) : (decl?.tasks ?? [])).length
+      } catch (e) {
+        tasksError = (e && e.message ? e.message : String(e)).split('\n')[0]
+      }
     }
     let calls = false
     try {
@@ -141,7 +179,7 @@ async function stageMetaOf(root, stageList) {
     } catch {
       /* 读不出源码：calls=false，与 import 失败叠成同一条 GW-005 失效 */
     }
-    out.push({ file: f, regenerates, recheck, calls, error })
+    out.push({ file: f, regenerates, recheck, calls, mayBeEmpty, taskCount, tasksError, isStage, error })
   }
   return out
 }
@@ -162,7 +200,7 @@ async function listsOf(root) {
   }
 }
 
-console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…005） ---')
+console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…006） ---')
 
 const lists = await listsOf(REPO_ROOT)
 const files = testNamesOf(REPO_ROOT)
@@ -212,6 +250,18 @@ const recheckStages = meta.filter((m) => m.recheck)
 const noRecheck = regenStages.length > 0 && recheckStages.length === 0
 const lastRegen = regenStages[regenStages.length - 1] ?? null
 const rechecksBeforeGeneration = lastRegen ? recheckStages.filter((m) => m.file < lastRegen.file) : []
+
+// GW-006：产出 0 项的阶段。`mayBeEmpty` 必须是**一句非空理由**（字符串）——
+// 布尔开关会变成「谁都能按、按了就永久隐身」的那种后门。
+const hasReason = (m) => typeof m.mayBeEmpty === 'string' && m.mayBeEmpty.trim() !== ''
+const unmaterializable = meta.filter((m) => m.tasksError)
+// 「不是阶段」单列：`gate.mjs` 只收 `mod.default?.id` 存在的文件，所以一份没写好
+// 导出的阶段文件是**隐形文件**——它在阶段目录里、被 GW-004 放行（按扫描接入，不需登记），
+// 而扫描不认它。这与「产出 0 项」是两种病，各报各的。
+const notStages = meta.filter((m) => !m.isStage && !m.error)
+const emptyStages = meta.filter((m) => m.isStage && m.taskCount === 0 && !hasReason(m))
+const badMayBeEmpty = meta.filter((m) => m.mayBeEmpty != null && !hasReason(m))
+const totalTasks = meta.reduce((n, m) => n + (m.taskCount ?? 0), 0)
 
 let errors = 0
 for (const n of unwired) {
@@ -288,6 +338,44 @@ for (const m of rechecksBeforeGeneration) {
   )
 }
 
+// GW-006：阶段**本轮产出 0 项**。与 `gate.mjs::runStage` 的运行时判定同一条判据——
+// 这里能在 1s 内看到，而不是等一整轮门禁（而且真跑那轮它只会「没有一行」）。
+for (const m of unmaterializable) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-006 scripts/gate.d/${m.file} 的 tasks() 物化失败（${m.tasksError}）⇒ 无法判定它产出几项，这条判据不可信`,
+    ),
+  )
+}
+for (const m of notStages) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-006 scripts/gate.d/${m.file} 没有 \`export default { id, tasks }\` ⇒ ` +
+        `它躺在阶段目录里却不是一个阶段：\`gate.mjs\` 按 \`mod.default?.id\` 收文件，收不到就跳过，而 GW-004 已经因为它在 \`gate.d/\` 下放行了登记`,
+    ),
+  )
+}
+for (const m of emptyStages) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-006 scripts/gate.d/${m.file} 产出 0 个检查项，且没有 \`mayBeEmpty\` 声明 ⇒ 这一阶段本轮**什么都没判**，` +
+        `而汇总表上它与「全绿」无法区分（派生路径失效时就是这样：先查它的 tasks 从哪些路径/名单算出来）`,
+    ),
+  )
+}
+for (const m of badMayBeEmpty) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-006 scripts/gate.d/${m.file} 声明了 \`mayBeEmpty\`（${JSON.stringify(m.mayBeEmpty)}），但它不是一句理由 ⇒ ` +
+        '空转必须是有名有姓的豁免；`mayBeEmpty: true` 那种开关，三个月后没人记得为什么允许',
+    ),
+  )
+}
+
 if (errors) {
   console.log(
     `gate-wiring-audit 未通过：${errors} 处接线失效（磁盘 ${files.length} 份测试 / ` +
@@ -299,6 +387,7 @@ console.log(
   green(
     `gate-wiring-audit 通过：磁盘 ${files.length} 份测试全部接线，` +
       `名单 ${lists.guards.length} + ${lists.testOnly.length} + ${lists.libs.length} + ${lists.outOfGate.length} 项逐一对应；` +
-      `${scripts.length - files.length} 份脚本全部登记；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ${recheckStages.map((m) => m.file).join(' / ') || '（无）'}`,
+      `${scripts.length - files.length} 份脚本全部登记；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；` +
+      `${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段`,
   ),
 )

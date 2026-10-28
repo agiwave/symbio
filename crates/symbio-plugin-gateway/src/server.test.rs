@@ -206,27 +206,43 @@ fn idempotency_rejects_duplicates_until_released() {
 /// 过期项在登记时被清掉：TTL 之后同一个键是新的请求，不是重放。
 #[test]
 fn idempotency_forgets_entries_past_ttl() {
+    // 夹具写成「未来的 `now`」而不是「过去的记录」：`Instant` 的零点是开机，
+    // `Instant::now() - IDEMPOTENCY_TTL` 在开机不满 600s 的机器上直接 panic，
+    // 于是这条判据在新 VM / CI runner 上变成假失败（见 `Idempotency::reserve_at`）。
     let table = Idempotency::new();
+    let stored = Instant::now();
     {
         let mut seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
-        seen.insert("stale".to_string(), Instant::now() - IDEMPOTENCY_TTL);
+        seen.insert("stale".to_string(), stored);
     }
-    assert!(table.reserve("stale").is_some(), "过期键不应再算重放");
+    assert!(
+        table
+            .reserve_at("stale", stored + IDEMPOTENCY_TTL + Duration::from_secs(1))
+            .is_some(),
+        "过期键不应再算重放"
+    );
 }
 
 /// 满表时淘汰最旧的一条而不是拒绝新键——否则任何人用一次性键就能永久占满。
 #[test]
 fn idempotency_evicts_oldest_when_full() {
+    // 同上：所有时间戳都从 `base` 往后挪，`now` 落在夹具之后 500s（仍在 TTL 内，
+    // 所以「淘汰」是被**容量**触发的，不是被过期清理顺带做的）。
     let table = Idempotency::new();
+    let base = Instant::now();
     {
         let mut seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
-        let now = Instant::now();
         for i in 0..IDEMPOTENCY_CAPACITY - 1 {
-            seen.insert(format!("old-{i}"), now - Duration::from_secs(100));
+            seen.insert(format!("old-{i}"), base + Duration::from_secs(10));
         }
-        seen.insert("oldest".to_string(), now - Duration::from_secs(200));
+        seen.insert("oldest".to_string(), base);
     }
-    assert!(table.reserve("fresh").is_some(), "满表也必须接纳新键");
+    assert!(
+        table
+            .reserve_at("fresh", base + Duration::from_secs(500))
+            .is_some(),
+        "满表也必须接纳新键"
+    );
     let seen = table.seen.lock().unwrap_or_else(|e| e.into_inner());
     assert_eq!(seen.len(), IDEMPOTENCY_CAPACITY, "淘汰后容量仍应守住上限");
     assert!(!seen.contains_key("oldest"), "淘汰的应是最旧的一条");

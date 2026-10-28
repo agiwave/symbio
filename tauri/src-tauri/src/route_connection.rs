@@ -60,7 +60,7 @@ impl RouteConnectionManager {
                     _ = token.cancelled() => break,
                 }
 
-                sweep_expired(&connections, timeout).await;
+                sweep_expired(&connections, timeout, Instant::now()).await;
             }
 
             debug!("Cleanup task stopped");
@@ -146,11 +146,16 @@ impl Default for RouteConnectionManager {
 /// 抽成自由函数而不是 `self` 方法：清理任务持有的是 `connections` 的 `Arc` 克隆
 /// （spawn 需要 `'static`），不是 `&self`；测试同样直接指向那张表。若两处各写一遍
 /// 「哪些算超时、摘除后还要取消什么」，超时清理就会变成一份没人守的副本。
+///
+/// `now` 是**判据的输入**而不是内部读数：夹具要构造「闲了 301s 的连接」，而
+/// `Instant` 的零点是开机——`Instant::now() - Duration::from_secs(301)` 在开机不满
+/// 301s 的机器（新 VM、CI runner）上直接 panic，判据在那种机器上就成了假失败。
+/// 时钟交出来之后，测试把整条时间轴放在基准**之后**，被审的仍然是那个差值。
 async fn sweep_expired(
     connections: &Arc<RwLock<HashMap<String, RouteConnection>>>,
     timeout: Duration,
+    now: Instant,
 ) {
-    let now = Instant::now();
     let mut guard = connections.write().await;
     let to_remove: Vec<String> = guard
         .iter()

@@ -19,7 +19,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
-import { derive, fingerprintOf, describe, budget, machine, setBatchLanes } from './gate.d/_machine.mjs'
+import { derive, fingerprintOf, describe, budget, machine, setBatchLanes, pruneStaleTaskKeys } from './gate.d/_machine.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
@@ -281,6 +281,49 @@ test('★ 失败项：日志末几行与相对路径直接印在汇总里（不�
   }
 })
 
+test('★ 阶段本轮产出 0 项 ⇒ 判红：空转必须在汇总表上占一行（GW-006 的运行时那一半）', () => {
+  // 静态那半在 `gate-wiring-audit`（1s 就能看到）；这里钉的是**真跑那轮**：
+  // 一个不产出检查项的阶段原先在输出里**一行都没有**，与「跑过了、全绿」同形——
+  // `50-msrv` 就是靠这个形状空转了整段 D-191 之后的时间，而 CI 的 msrv job 一直绿。
+  const empty = withStageDir({
+    'zz-empty.mjs':
+      `export default { id: 'zz-empty', title: '空转阶段演示（测试注入，勿留）', tasks: () => [] }\n`,
+  })
+  try {
+    const r = runGate(['--only=zz-empty'], empty.env)
+    const out = stripAnsi(r.stdout + r.stderr)
+    assert.notEqual(r.status, 0, `产出 0 项的阶段必须判红：\n${out}`)
+    assert.match(out, /本阶段产出 0 项/, `汇总里必须有这一行：\n${out}`)
+    assert.match(out, /GW-006/, `要指出去哪条判据修：\n${out}`)
+    assert.match(out, /mayBeEmpty/, '唯一的合法出路是声明一句理由，得当场说出来')
+  } finally {
+    empty.dispose()
+  }
+})
+
+test('★ 0 项阶段声明了 `mayBeEmpty` ⇒ 记「未判定」，不是从输出里消失', () => {
+  // 豁免必须**可见**：一条 skipped 行留在汇总里，下一个人看得见这里本轮没判东西；
+  // 而「什么都不印」就是这条判据要治的那个病本身。
+  const ok = withStageDir({
+    'zz-maybe-empty.mjs':
+      `export default {\n` +
+      `  id: 'zz-maybe-empty',\n` +
+      `  title: '允许为空的阶段（测试注入，勿留）',\n` +
+      `  mayBeEmpty: '演示：本机没有可判对象',\n` +
+      `  tasks: () => [],\n` +
+      `}\n`,
+  })
+  try {
+    const r = runGate(['--only=zz-maybe-empty'], ok.env)
+    const out = stripAnsi(r.stdout + r.stderr)
+    assert.equal(r.status, 0, `有名有姓的豁免不该判红：\n${out}`)
+    assert.match(out, /未判定/, '必须以「未判定」出现在汇总里（判据本轮没跑≠跑过了）')
+    assert.match(out, /本机没有可判对象/, '豁免的理由要原样印出来')
+  } finally {
+    ok.dispose()
+  }
+})
+
 test('★ 每轮一个日志目录：跑第二轮不许冲掉第一轮的失败证据', () => {
   const demo = withDemoStage()
   const logRoot = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
@@ -517,6 +560,51 @@ test('★ 批内争用必须进超时预算（否则「拉完 Rust 改动」那�
   // 回到独占必须回到原值：批后的串行阶段（verify / vite build / e2e）不该继承批内系数
   setBatchLanes(1)
   assert.equal(budget(m, 'k', 100000), solo, '独占必须回到原值——系数只在批内生效')
+})
+
+// ── 校准文件的死键（`pruneStaleTaskKeys`） ──────────────────────────────
+//
+// 真实运行的一轮耗时摊在一个已经不存在的任务上，读起来和「这个任务有实测」没有
+// 区别（`describe()` 只数 `ms` 的长度）。反向的风险是**误删**：缺席一轮的原因有
+// 三种都不是「消失」——`--only=` 只跑到一部分阶段、Ctrl+C 中断、任务改名。所以
+// 两头各钉一组：够久没出现必须剪，任何「这一轮没跑到」不许剪。
+const DAY = 24 * 60 * 60 * 1000
+const NOW = 1_700_000_000_000
+
+test('★ 连续超过宽限期没再出现的键必须被剪（死键不许一直冒充有实测）', () => {
+  const tasks = {
+    'docs::live': { ms: [10], seenAt: NOW - DAY },
+    'docs::gone': { ms: [999], seenAt: NOW - 30 * DAY },
+  }
+  const dead = pruneStaleTaskKeys(tasks, { taskKeys: new Set(['docs::live']), ranStages: new Set(['docs']) }, NOW)
+  assert.deepEqual(dead, ['docs::gone'])
+})
+
+test('★ 宽限期内的缺席不许剪（改名与消失在这一轮分不出来）', () => {
+  // 键在这一轮从 `just-renamed` 换成 `new-name`：旧名只缺席一轮，而**新名当轮就盖上
+  // 了 seenAt**（见 `recordRun`），所以两头的历史都在，不必赌哪一个是死的。
+  const tasks = { 'docs::just-renamed': { ms: [10], seenAt: NOW - 2 * DAY } }
+  const dead = pruneStaleTaskKeys(tasks, { taskKeys: new Set(['docs::new-name']), ranStages: new Set(['docs']) }, NOW)
+  assert.deepEqual(dead, [], '缺席 2 天 < 7 天宽限期 ⇒ 留')
+})
+
+test('★ 没注入本轮清单 ⇒ 一个都不剪（判据缺失时不许静默清库）', () => {
+  const tasks = { 'docs::gone': { ms: [1], seenAt: NOW - 30 * DAY } }
+  const ran = new Set(['docs'])
+  assert.deepEqual(pruneStaleTaskKeys(tasks, { taskKeys: null, ranStages: ran }, NOW), [])
+  assert.deepEqual(pruneStaleTaskKeys(tasks, { taskKeys: new Set(), ranStages: ran }, NOW), [])
+})
+
+test('★ 本轮没跑到的阶段不许剪（`--only=docs` 时 backend 的键不是消失了）', () => {
+  const tasks = { 'backend::cargo test --workspace': { ms: [1], seenAt: NOW - 30 * DAY } }
+  const dead = pruneStaleTaskKeys(tasks, { taskKeys: new Set(['docs::a']), ranStages: new Set(['docs']) }, NOW)
+  assert.deepEqual(dead, [])
+})
+
+test('★ 从没盖过 `seenAt` 的旧条目先留一轮（升级前的校准文件里没有这个字段）', () => {
+  const tasks = { 'docs::legacy': { ms: [1] } }
+  const dead = pruneStaleTaskKeys(tasks, { taskKeys: new Set(['docs::other']), ranStages: new Set(['docs']) }, NOW)
+  assert.deepEqual(dead, [], '没有戳 ⇒ 判不出「多久没出现」，剪它就是拿猜测定预算')
 })
 
 test('★ 机器档案必须能打印成人读的一行，且探测成本可忽略', async () => {

@@ -316,10 +316,19 @@ impl Idempotency {
 
     /// 登记一个键；未过 TTL 的重复键返回 `None`。
     fn reserve(self: &Arc<Self>, key: &str) -> Option<IdempotencyTicket> {
+        self.reserve_at(key, Instant::now())
+    }
+
+    /// `reserve` 的可注入时钟版本——时钟是**判据的输入**，不是内部状态。
+    ///
+    /// 为什么需要这一层：过期与淘汰的两条测试要构造「比一个 TTL 更早」的时间戳，
+    /// 而 `Instant` 的零点是**开机**：开机不满 600s 的机器（新 VM、CI runner、刚揭开
+    /// 盖的笔记本）上 `Instant::now() - IDEMPOTENCY_TTL` 直接 panic，判据在那种机器上
+    /// 就成了假失败。把 `now` 交出来，测试用同一个基准前后挪——被审的是**差值**。
+    fn reserve_at(self: &Arc<Self>, key: &str, now: Instant) -> Option<IdempotencyTicket> {
         // 锁中毒只可能来自别处的 panic：表上没有跨键不变量，取回内部值继续即可。
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
-        let now = Instant::now();
-        seen.retain(|_, at| now.duration_since(*at) < IDEMPOTENCY_TTL);
+        seen.retain(|_, stored| now.duration_since(*stored) < IDEMPOTENCY_TTL);
         if seen.contains_key(key) {
             return None;
         }
@@ -329,7 +338,7 @@ impl Idempotency {
             // 只表达「最近 TTL 内的重放」。
             if let Some(oldest) = seen
                 .iter()
-                .min_by_key(|(_, at)| **at)
+                .min_by_key(|(_, stored)| **stored)
                 .map(|(k, _)| k.clone())
             {
                 seen.remove(&oldest);

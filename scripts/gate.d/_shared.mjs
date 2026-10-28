@@ -748,17 +748,6 @@ export function maybeSandboxDeleteHint(output) {
   console.log('        确认方法：在沙箱外跑同一条命令，或先手工清掉 dist/ 与 coverage/。')
 }
 
-/** 从 `Cargo.toml` 读 `rust-version`，补全成 x.y.z（rustup 工具链名带 patch） */
-export function readMsrv(dir) {
-  const toml = path.join(dir, 'Cargo.toml')
-  if (!fs.existsSync(toml)) return null
-  const m = fs.readFileSync(toml, 'utf8').match(/^\s*rust-version\s*=\s*"([^"]+)"/m)
-  if (!m) return null
-  const parts = m[1].trim().split('.')
-  while (parts.length < 3) parts.push('0')
-  return parts.join('.')
-}
-
 // CLI release 二进制的路径与新鲜度判定**不在这里**——统一在
 // `scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相）。曾经这里只有
 // 「文件在不在」两个函数，而「在」不等于「对应当前源码」，于是过期产物被一直用下去。

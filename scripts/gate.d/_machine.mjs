@@ -42,7 +42,7 @@
  *
  * 门禁一轮 4–5 分钟，探针 43ms + 负载采样 126ms ≈ **170ms**（本机实测）。超过
  * 300ms 就该被质疑——**为省时间而花的时间**必须远小于省下的时间，否则它自己
- * 就是新的性能问题。`machine.test.mjs` 有一条判据钉住这个上限。
+ * 就是新的性能问题。`gate.test.mjs`「探测成本可忽略」钉住这个上限。
  *
  * ## 惰性：`--help` / `--list` 不许付这笔钱
  *
@@ -117,6 +117,16 @@ const HISTORY_WINDOW = 5
 const BUDGET_FACTOR = 2.5
 /** 预算相对静态基准的放大上限。防止「越超时 → 预算越大 → 更久才发现挂死」的正反馈。 */
 const BUDGET_MAX_GROWTH = 6
+
+/**
+ * 一个任务键在**连续多久没再出现**之后才算死。
+ *
+ * 不取「本轮没出现就删」：`--only=docs`、Ctrl+C 中断、以及任务自己跳过（`skipped`
+ * 的那条没有耗时）都会让一个活着的键缺席一轮，删掉就等于把下一轮的预算打回静态
+ * 基准——而被打回基准恰好发生在「这台机器刚跑过、明明有实测」的时刻。宽限期内
+ * 只盖章不删；真消失的键最多多活一周，一个键就几十字节。
+ */
+const STALE_PRUNE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
  * 同一批里同时跑了几条泳道。由 `gate.mjs` 在启动一批前设置，`budget()` 用它把
@@ -451,14 +461,19 @@ export function budget(m, key, baseMs) {
 /**
  * 把本轮的实测耗时并进校准文件（**在 `report()` 之前调用一次**）。
  *
- * 只记 `ms > 0` 的项。跳过的（`skipped`）没有耗时，`run` 型任务可能是 0ms，
- * 都不进历史——它们会把中位数拉低，而中位数是用来定预算的。
+ * 只把 `ms > 0` 的项写进历史。跳过的（`skipped`）没有耗时，`run` 型任务可能是 0ms，
+ * 都不进 `ms` 数组——它们会把中位数拉低，而中位数是用来定预算的。**但它们仍然要盖
+ * `seenAt`**：本轮跑过而没耗时的键是活着的键，不盖章就会被当成「消失了的键」剪掉。
+ *
+ * 剪死键（`pruneStaleTaskKeys`）需要本轮的任务键集合——由 `gate.mjs` 起跑前调
+ * `setTaskKeyScope` 注入。没注入（有人单独 import 本模块跑一次）就**只增不剪**。
  *
  * 写失败**不抛**：门禁的结论不该因为「记不下这次多快」而改变（同 `_logs.mjs`
- * 里 `pruneOldRuns` 的处置）。
+ * 里 `pruneOldRuns` 的处置）。返回值供调用方打印本轮剪了什么。
  */
 export function recordRun(m, results, { stageWall = {} } = {}) {
-  if (!results?.length) return
+  if (!results?.length) return { stalePruned: [] }
+  const nowMs = Date.now()
   const next = {
     version: 1,
     fingerprint: m.fingerprint,
@@ -473,20 +488,33 @@ export function recordRun(m, results, { stageWall = {} } = {}) {
     tasks: { ...(m.calibration.tasks ?? {}) },
     stages: { ...(m.calibration.stages ?? {}) },
     process: { ...(m.calibration.process ?? {}) },
+    stalePruned: [...(m.calibration.stalePruned ?? [])],
   }
 
   for (const r of results) {
-    if (!r?.label || !(r.ms > 0)) continue
+    if (!r?.label) continue
     // 失败项也记：`超时终止` 的那条 ms 恰好是「至少要这么久」，丢掉它下次还会超时。
     const key = `${r.stage}::${r.label}`
-    const prev = Array.isArray(next.tasks[key]?.ms) ? next.tasks[key].ms : []
-    next.tasks[key] = { ms: [...prev, Math.round(r.ms)].slice(-HISTORY_WINDOW) }
+    const prev = next.tasks[key]
+    const entry = { ...(prev ?? {}) }
+    if (r.ms > 0) {
+      entry.ms = [...(Array.isArray(prev?.ms) ? prev.ms : []), Math.round(r.ms)].slice(-HISTORY_WINDOW)
+    }
+    entry.seenAt = nowMs
+    next.tasks[key] = entry
   }
   for (const [id, ms] of Object.entries(stageWall)) {
     if (!(ms > 0)) continue
     const prev = Array.isArray(next.stages[id]?.ms) ? next.stages[id].ms : []
     next.stages[id] = { ms: [...prev, Math.round(ms)].slice(-HISTORY_WINDOW) }
   }
+
+  const dead = pruneStaleTaskKeys(next.tasks, {
+    taskKeys: taskKeyScope,
+    ranStages: new Set(results.map((r) => r?.stage).filter(Boolean)),
+  }, nowMs)
+  for (const key of dead) delete next.tasks[key]
+  if (dead.length) next.stalePruned = [...new Set([...next.stalePruned, ...dead])].sort()
 
   try {
     fs.mkdirSync(path.dirname(CALIBRATION_FILE), { recursive: true })
@@ -496,6 +524,45 @@ export function recordRun(m, results, { stageWall = {} } = {}) {
   } catch {
     /* 见函数头：记不下不影响结论 */
   }
+  return { stalePruned: dead }
+}
+
+/**
+ * 本轮「当前任务键」的集合。`gate.mjs` 在起跑前注入；`null` = 没注入 ⇒ 不剪枝。
+ */
+let taskKeyScope = null
+
+/** 注入本轮的任务键集合（见 `recordRun` 的剪枝条件）。 */
+export function setTaskKeyScope(keys) {
+  taskKeyScope = keys && keys.size ? new Set(keys) : null
+}
+
+/**
+ * 找出该删掉的死键：文件里有、本轮的当前任务集合里没有、且**宽限期前就没再出现过**。
+ *
+ * 为什么必须剪：2026-10-28 实测这份校准里有 178 个任务键，其中一批属于已经不存在的
+ * 任务（`backend::cargo test -p symbio` 三条分包测试、旧 msrv 的 `symbio @ 1.91.0`）。
+ * 留着不是「占地方」这么简单——一个死键在 `describe()` 的统计里和活键长得一样，读的人
+ * 会以为「cargo test 有实测、msrv 的键名是版本形的」；而**一轮真实运行的数据被摊在
+ * 一个不存在的任务上**，这类「读数指向不存在的对象」正是本轮修掉的那批判据的形态。
+ *
+ * 纯函数（不碰磁盘、不改入参），判据 = `gate.test.mjs`：键消失够久必须被剪；
+ * 本轮没出现但还在宽限期内不许剪；没注入集合时一个都不许剪。
+ */
+export function pruneStaleTaskKeys(tasks, scope, nowMs = Date.now()) {
+  const { taskKeys, ranStages } = scope ?? {}
+  if (!taskKeys || !taskKeys.size) return []
+  const dead = []
+  for (const [key, val] of Object.entries(tasks ?? {})) {
+    if (taskKeys.has(key)) continue
+    // 只在本轮**真跑过**的那个阶段里剪：`--only=docs` 时 backend 一条结果都没有，
+    // 它的键不是消失了，是这一轮没跑到。中断（Ctrl+C）同理。
+    if (!ranStages || !ranStages.has(key.slice(0, key.indexOf('::')))) continue
+    const seen = Number(val?.seenAt)
+    if (!(seen > 0)) continue
+    if (nowMs - seen >= STALE_PRUNE_GRACE_MS) dead.push(key)
+  }
+  return dead
 }
 
 /**
@@ -540,7 +607,7 @@ export function stageWallMs(m, stageId) {
  *
  * **必须打印**：自适应机制最大的风险不是算错，而是**没人知道它在算**。打印之后，
  * 用户在慢机上看到 `并发 2` 就知道门禁确实降级了（而不是「还是那么慢，优化没用」），
- * 在快机上看到 `并发 12` 就知道升级没白升。判据 = `machine.test.mjs`「档案必须
+ * 在快机上看到 `并发 12` 就知道升级没白升。判据 = `gate.test.mjs`「档案必须
  * 能打印成人读的一行」。
  *
  * 刻意不打印 `fingerprint` 全文（一长串机器型号，刷屏且没人看）。

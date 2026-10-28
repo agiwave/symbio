@@ -19,6 +19,15 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./gate-wiring-audit.mjs', import.meta.url))
 
+/**
+ * 夹具阶段的最小任务体。
+ *
+ * GW-006 判「阶段本轮产出 0 项」，所以凡是被当成**正常阶段**用的夹具都必须至少给一项——
+ * 否则每条用例都额外红在 GW-006 上（这不是噪音，正是这条判据的形状：旧的夹具一片
+ * `tasks: () => []`，写的人没意识到那就是一个空转阶段）。只有专门测 GW-006 的用例才用空表。
+ */
+const ONE = '[{ label: "x", run: () => true }]'
+
 /** 造一棵最小仓库：`docs30` 是 30-docs 导出的名单，`tests` 是磁盘上的测试名 */
 function audit ({
   guards = [],
@@ -38,7 +47,7 @@ function audit ({
       `export const TEST_ONLY = ${JSON.stringify(testOnly)}`,
       ...(libs ? [`export const LIBS = ${JSON.stringify(libs)}`] : []),
       ...(outOfGate ? [`export const OUT_OF_GATE = ${JSON.stringify(outOfGate)}`] : []),
-      'export default { id: "docs" }',
+      `export default { id: "docs", tasks: () => ${ONE} }`,
     ].join('\n')
     const stageFiles = stages ?? [{ name: '30-docs.mjs', body: '// stage\n' }]
     const files = {
@@ -194,8 +203,8 @@ test('GW-004 阶段文件（gate.d/ 非 _ 前缀）按扫描接入，不需要�
     testOnly: [],
     tests: ['a'],
     stages: [
-      { name: '10-backend.mjs', body: '// stage\n' },
-      { name: '30-docs.mjs', body: 'export const GUARDS=["a"];export const TEST_ONLY=[];export default{id:"docs"}\n' },
+      { name: '10-backend.mjs', body: 'export default { id: "backend", tasks: () => [{ label: "x", run: () => true }] }\n' },
+      { name: '30-docs.mjs', body: 'export const GUARDS=["a"];export const TEST_ONLY=[];export default{id:"docs",tasks:()=>[{label:"x",run:()=>true}]}\n' },
     ],
   })
   assert.equal(r.status, 0, r.stdout + r.stderr)
@@ -227,10 +236,10 @@ test('GW-002 扩面：LIBS 指名磁盘上没有的 .mjs ⇒ 红（「已覆盖�
 /** 会重生成的阶段：声明 + 调用形状都在 */
 const GEN = (id) => `export default { id: ${JSON.stringify(id)}, regenerates: true, tasks: () => [{ run: (c) => autoWork(c, {}) }] }\n`
 /** 只读复核阶段 */
-const RECHK = (id) => `export default { id: ${JSON.stringify(id)}, recheck: true, tasks: () => [] }\n`
+const RECHK = (id) => `export default { id: ${JSON.stringify(id)}, recheck: true, tasks: () => ${ONE} }\n`
 /** 什么都不做的阶段 */
-const PLAIN = (id) => `export default { id: ${JSON.stringify(id)}, tasks: () => [] }\n`
-const DOCS = 'export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs",tasks:()=>[]}\n'
+const PLAIN = (id) => `export default { id: ${JSON.stringify(id)}, tasks: () => ${ONE} }\n`
+const DOCS = `export const GUARDS=[];export const TEST_ONLY=[];export default{id:"docs",tasks:()=>${ONE}}\n`
 const run = (stages) => audit({ guards: [], testOnly: [], tests: [], stages: [{ name: '30-docs.mjs', body: DOCS }, ...stages] })
 
 test('GW-005 真实形状：生成在前、只读复核在后 ⇒ 绿（放行对照）', () => {
@@ -255,7 +264,7 @@ test('GW-005 只读复核排在生成阶段之前 ⇒ 红（它复核的是上�
 
 test('GW-005 声明 regenerates 却没有调用形状 ⇒ 红（声明是假的）', () => {
   const r = run([
-    { name: '06-facts-write.mjs', body: `export default { id: "facts-write", regenerates: true, tasks: () => [] }\n` },
+    { name: '06-facts-write.mjs', body: `export default { id: "facts-write", regenerates: true, tasks: () => ${ONE} }\n` },
     { name: '60-facts.mjs', body: RECHK('facts') },
   ])
   assert.equal(r.status, 1, r.stdout)
@@ -309,4 +318,60 @@ test('GW-005 没有生成阶段也没有复核 ⇒ 不判（空表不制造义�
   const r = run([{ name: '10-a.mjs', body: PLAIN('a') }, { name: '20-b.mjs', body: PLAIN('b') }])
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /生成阶段 （无）/)
+})
+
+// ── GW-006 · 阶段不空转（本轮产出 0 项就判红）──────────────────────────────
+// 治的是「阶段还在、判据没了」：`50-msrv` 写死了 D-191 之前那两个顶层目录，拆成 crate 之后
+// 路径不存在 ⇒ 每轮产出 0 项、汇总表上一行都没有，与「全绿」同形，
+// 而 CI 的 msrv job 一直绿。所以下面第 1 条就是这个形状的最小复刻。
+
+const EMPTY = (id, extra = '') =>
+  `export default { id: ${JSON.stringify(id)}, ${extra}${extra ? ', ' : ''}tasks: () => [] }\n`
+
+test('GW-006 阶段产出 0 项且没声明 ⇒ 红（msrv 空转的最小复刻）', () => {
+  const r = run([{ name: '50-msrv.mjs', body: EMPTY('msrv') }])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/50-msrv\.mjs 产出 0 个检查项/)
+})
+
+test('GW-006 0 项但声明了一句理由 ⇒ 绿（有名有姓的豁免，放行对照）', () => {
+  const r = run([
+    {
+      name: '58-e2e.mjs',
+      body: EMPTY('e2e', 'mayBeEmpty: "本机没有 e2e 用例目录（仓里只有 mock LLM 的那批才算）"'),
+    },
+  ])
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('GW-006 `mayBeEmpty: true` 不算豁免 ⇒ 红（开关三个月后没人记得为什么允许）', () => {
+  const r = run([{ name: '58-e2e.mjs', body: EMPTY('e2e', 'mayBeEmpty: true') }])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/58-e2e\.mjs 声明了 .*mayBeEmpty.*不是一句理由/)
+})
+
+test('GW-006 阶段文件没有 default 导出 ⇒ 红（它在阶段目录里，却不是阶段）', () => {
+  const r = run([{ name: '40-half-written.mjs', body: '// 忘了写 export default\n' }])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/40-half-written\.mjs 没有 `export default/)
+})
+
+test('GW-006 tasks() 物化时抛 ⇒ 报「物化失败」，不伪装成「0 项」', () => {
+  // 「读不出」与「确实没有」是两件事：把前者报成后者，等于让一个坏阶段躲进豁免的形状里。
+  const r = run([
+    {
+      name: '45-weird.mjs',
+      body: 'export default { id: "weird", tasks: (ctx) => { throw new Error("派生路径不存在") } }\n',
+    },
+  ])
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/45-weird\.mjs 的 tasks\(\) 物化失败/)
+  assert.match(r.stdout, /派生路径不存在/)
+  assert.doesNotMatch(r.stdout, /45-weird\.mjs 产出 0 个检查项/)
+})
+
+test('GW-006 有项就完全不介入：正常阶段不因为「本轮 1 项」被念一句', () => {
+  const r = run([{ name: '10-a.mjs', body: PLAIN('a') }])
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.doesNotMatch(r.stdout, /GW-006/)
 })

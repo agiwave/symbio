@@ -7,6 +7,11 @@
  *
  * 任务模块契约（默认导出）：
  *   { id, title, tasks }   tasks 为任务数组，或 `async (ctx) => 任务数组`
+ * 阶段对象还可以声明：`parallel`（可与相邻阶段并发）、`concurrencyKind` / `concurrency`
+ * （批内泳道数）、`regenerates` / `recheck`（GW-005 的次序判据）、
+ * `mayBeEmpty: '<理由>'`（**确实**允许本轮 0 项）。
+ * 不声明 `mayBeEmpty` 而本轮 0 项 ⇒ 判红（GW-006）：一个不产出任何检查项的阶段
+ * 在汇总表上没有一行，和「跑过了、全绿」长得一模一样。
  * 任务形态：
  *   { label, cmd, args?, cwd?, env?, timeoutMs?, echo? }        声明式命令，判定 = 退出码 0
  *   { label, run: async (ctx) => 结果, skipNote? }              自定义判定
@@ -94,7 +99,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
-import { machine, describe, budget, recordRun, measuredMs, stageWallMs, setBatchLanes } from './gate.d/_machine.mjs'
+import { machine, describe, budget, recordRun, measuredMs, stageWallMs, setBatchLanes, setTaskKeyScope } from './gate.d/_machine.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -326,7 +331,16 @@ function run(o) {
 
   return new Promise((resolve) => {
     const started = Date.now()
-    let output = ''
+    // 输出**先攒成块、收尾时一次 join**：`output += text` 在长任务（冷编译、
+    // `cargo test --workspace` 的 MB 级 stdout）上是**平方级**的复制量——每来一块就要
+    // 把已有全文重抄一遍。消费方（各阶段对全文做正则、求和用例数）要的是完整字符串，
+    // 所以这里省的是复制，不是保留量。
+    const chunks = []
+    // **惰性 join**：`output` 做成 getter——只有真去读全文的任务（对输出做正则、求和用例数
+    // 的那些）才付这一次拼接。绝大多数 `cmd` 型任务只看退出码，整轮的 MB 级 stdout
+    // 从头到尾不该被拼成字符串。
+    let outputCache = null
+    const fullOutput = () => (outputCache === null ? (outputCache = chunks.join('')) : outputCache)
     let timedOut = false
 
     // **流式落盘**：边跑边写，进程被 kill / 超时 / Ctrl+C 时该任务的日志也已完整。
@@ -365,7 +379,7 @@ function run(o) {
 
     const consume = (chunk) => {
       const text = chunk.toString()
-      output += text
+      chunks.push(text)
       sink.write(text)
       if (echo !== 'none') {
         for (const raw of text.split('\n')) {
@@ -391,7 +405,9 @@ function run(o) {
         ok: false,
         code: null,
         signal: null,
-        output: output + err.message,
+        get output() {
+          return fullOutput() + err.message
+        },
         timedOut,
         logFile,
         ms: Date.now() - started,
@@ -407,7 +423,7 @@ function run(o) {
         else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
         else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
       }
-      settle({ ok, code, signal, output, timedOut, logFile, ms })
+      settle({ ok, code, signal, get output() { return fullOutput() }, timedOut, logFile, ms })
     })
   })
 }
@@ -643,6 +659,20 @@ console.log(dim(`  机器：${describe(MACHINE)}`))
     )
   }
 }
+// 校准文件的剪枝判据 = **本轮的当前任务清单**（见 `setTaskKeyScope`）：文件里属于
+// 已消失任务的键不会自己消失，而它们在 `describe()` 的统计里和活键长得一模一样。
+// 所以起跑前把每个阶段的 `tasks()` 物化一遍收键（这一遍不跑任何东西，只是读清单）。
+//
+// 误删的缓冲由 `recordRun` 那边承担，不靠这里猜：宽限期 7 天 + 「只在本轮真跑过的
+// 阶段里剪」，因此 `--only=`、Ctrl+C 中断、以及改名的新键（当轮就盖上 `seenAt`）
+// 都碰不到。唯一多付的是各阶段 `tasks()` 被物化两遍（这里与 `runStage` 各一遍）——
+// 它们是纯读路径，其中 msrv 那遍要跑一次 `cargo metadata`，已在该阶段内记忆化。
+{
+  const planned = new Set()
+  for (const { s } of lanes) for (const t of materialize(s)) planned.add(`${s.id}::${t.label}`)
+  setTaskKeyScope(planned)
+}
+
 // 到这里参数已全部校验通过、阶段即将开跑 ⇒ 这一轮**真的会发生**，此时建目录、
 // 写指针都名实相符（`--help` 与被拒绝的调用走不到这里，所以不会留空目录）。
 const relLog = (path.relative(repoRoot, ensureLogDir()) || '.').replace(/\\/g, '/')
@@ -765,6 +795,25 @@ async function runStage(s, index) {
   stageHeader(index + 1, s.title)
   const stageStart = Date.now()
   const tasks = materialize(s)
+  // **一个阶段产出 0 项 = 这条判据这一轮没人跑**，而汇总表上它连一行都没有——
+  // 「跑过了」与「没得跑」看起来一模一样。实测的现成例子是 msrv：阶段写死了 D-191 之前
+  // 那两个顶层目录，拆成 crate 之后路径不存在，于是每一轮都只产出 0 项，`rust-version`
+  // 又变回「没人验证的一句话」，而 CI 那个 job 一直绿。
+  // 判据在 `gate-wiring-audit`（GW-006，静态同一形状）；这里管**真跑的那一轮**。
+  // 确实允许为空的阶段自声明 `mayBeEmpty: '<为什么>'`，空则记一条 skipped（可见，不隐身）。
+  if (tasks.length === 0) {
+    const reason = typeof s.mayBeEmpty === 'string' && s.mayBeEmpty.trim() ? s.mayBeEmpty.trim() : null
+    record(s.id, {
+      stage: s.id,
+      label: '（本阶段产出 0 项）',
+      pass: reason ? 'skipped' : false,
+      note: reason ?? '阶段没有产出任何检查项 ⇒ 判据空转（GW-006）：要么修派生，要么声明 `mayBeEmpty`',
+      logFile: null,
+      ms: 0,
+    })
+    stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
+    return
+  }
   const limit = resolveConcurrency(s)
   let i = 0
   while (i < tasks.length) {
@@ -862,7 +911,17 @@ function report(interrupted = false) {
   if (MACHINE) {
     const measured = injectedStageIds.size ? results.filter((r) => !injectedStageIds.has(r.stage)) : results
     const wall = Object.fromEntries([...stageMs].filter(([id]) => !injectedStageIds.has(id)))
-    recordRun(MACHINE, measured, { stageWall: wall })
+    const { stalePruned } = recordRun(MACHINE, measured, { stageWall: wall })
+    // 剪了什么必须说出来（同上「打印是机制的一部分」）：一个键消失了是判据变了形状，
+    // 读的人要靠这一行去对「那个任务是被删了还是改名了」。
+    if (stalePruned.length) {
+      const shown = stalePruned.slice(0, 4).join('、')
+      console.log(
+        dim(
+          `  校准：剪掉 ${stalePruned.length} 个连续 7 天没再出现的任务键（${shown}${stalePruned.length > 4 ? ' …' : ''}）`,
+        ),
+      )
+    }
   }
 
   // 运行清单落盘：终端的滚动缓冲会丢，文件不会。**中断路径也写**——正是那条
