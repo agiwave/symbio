@@ -740,7 +740,7 @@ pub(crate) struct TurnStep<'a> {
     pub(crate) tok: FullModel,
     pub(crate) sink: Arc<dyn DeltaSink>,
     pub(crate) tools: Arc<[CapabilityMeta]>,
-    pub(crate) dispatch: Option<&'a dyn super::tool_dispatch::ToolDispatch>,
+    pub(crate) dispatch: Option<Arc<dyn super::tool_dispatch::ToolDispatch>>,
 }
 
 /// 动作面的失败种类（D-123 决策 3，按 D-119 决策 1 落在**部署层**而不是机制层）。
@@ -865,7 +865,9 @@ pub(crate) fn run_await<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 /// `opener` 执行体（b）：`open-tools` 行选中的动作——逐条开账。
 pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
-        step.session.open(step.store.as_ref(), step.dispatch).await;
+        step.session
+            .open(step.store.as_ref(), step.dispatch.as_deref())
+            .await;
         Ok(())
     })
 }
@@ -874,7 +876,7 @@ pub(crate) fn run_open<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .authorize(step.store.as_ref(), step.dispatch)
+            .authorize(step.store.as_ref(), step.dispatch.as_deref())
             .await;
         Ok(())
     })
@@ -884,7 +886,11 @@ pub(crate) fn run_authorize<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 pub(crate) fn run_dispatch<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
     Box::pin(async move {
         step.session
-            .dispatch(step.store.as_ref(), step.llm.as_ref(), step.dispatch)
+            .dispatch(
+                step.store.as_ref(),
+                step.llm.as_ref(),
+                step.dispatch.as_deref(),
+            )
             .await
             .map_err(ActorError::Append)
     })
@@ -939,7 +945,7 @@ pub(crate) async fn drive_steps(
     input: TurnInput,
     sink: Arc<dyn DeltaSink>,
     tools: Arc<[CapabilityMeta]>,
-    dispatch: Option<&dyn super::tool_dispatch::ToolDispatch>,
+    dispatch: Option<Arc<dyn super::tool_dispatch::ToolDispatch>>,
     actors: &'static [super::loop_rows::ActorEntry],
 ) -> Result<TurnOutcome, ActorError> {
     let step_sink = sink.clone();
@@ -1014,7 +1020,7 @@ pub(crate) async fn drive_steps(
                 tok,
                 sink: step_sink.clone(),
                 tools: tools.clone(),
-                dispatch,
+                dispatch: dispatch.clone(),
             };
             // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（D-123 决策 5）。
             match (next.action)(&mut step).await {

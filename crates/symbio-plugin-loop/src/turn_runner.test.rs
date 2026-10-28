@@ -133,7 +133,7 @@ impl TurnRunner {
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
         tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
-        dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
+        dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
     ) -> Result<TurnOutcome, ActorError> {
         self.drive_with_actors(
             store,
@@ -162,7 +162,7 @@ impl TurnRunner {
         input: TurnInput,
         sink: std::sync::Arc<dyn DeltaSink>,
         tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
-        dispatch: Option<&dyn super::super::tool_dispatch::ToolDispatch>,
+        dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
         actors: &'static [super::super::loop_rows::ActorEntry],
     ) -> Result<TurnOutcome, ActorError> {
         super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch, actors)
@@ -1334,10 +1334,10 @@ mod tool_round_tests {
             std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         TurnRunner
             .run_with_tools(
@@ -1347,7 +1347,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("工具轮必答");
@@ -1426,10 +1426,10 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         // 注入口：只返回一次（模拟「用户在工具跑的时候插了一句」）。
         let fired = Arc::new(Mutex::new(0usize));
@@ -1468,7 +1468,7 @@ mod tool_round_tests {
                 i,
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("工具轮必答");
@@ -2319,10 +2319,10 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
         let mut i = input(store.as_ref());
         i.prefix = Some("【长期记忆】\n- 偏好：简洁".to_string());
 
@@ -2334,7 +2334,7 @@ mod tool_round_tests {
                 i,
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("必答");
@@ -2598,10 +2598,10 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         let out = TurnRunner
             .run_with_tools(
@@ -2611,7 +2611,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("工具轮必答");
@@ -2765,9 +2765,9 @@ mod tool_round_tests {
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
         let prompts = llm.prompts.clone();
-        let dispatch = DenyDispatch {
+        let dispatch = std::sync::Arc::new(DenyDispatch {
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         let out = TurnRunner
             .run_with_tools(
@@ -2777,7 +2777,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("拒绝不中止本轮");
@@ -2845,10 +2845,10 @@ mod tool_round_tests {
             std::sync::Arc::new(EventStore::new());
         let tok = TokenIssuer::issue_deep();
         let llm = std::sync::Arc::new(ToolCallingLlm::new());
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: true,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         let out = TurnRunner
             .run_with_tools(
@@ -2858,7 +2858,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("等待用户不是失败");
@@ -3123,10 +3123,10 @@ mod tool_round_tests {
         // C4 口径（D-067）：产物格已落 ⇒ 不算静默中断；但收束格还没落——
         //    收尾断言钉住「续写把它补在**原轮**上」。
         let pending_llm = ToolCallingLlm::new();
-        let pending_dispatch = FakeDispatch {
+        let pending_dispatch = std::sync::Arc::new(FakeDispatch {
             pending: true,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
         let first = TurnRunner
             .run_with_tools(
                 &store,
@@ -3135,7 +3135,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&pending_dispatch),
+                Some(pending_dispatch.clone()),
             )
             .await
             .expect("等待用户不是失败");
@@ -3178,12 +3178,12 @@ mod tool_round_tests {
         // ③ 唤醒幕：续写**同一轮**（turn 0），用户格 seq 不变，本幕锚是新落的那条。
         let answer_llm = AnsweringLlm::new();
         let prompts = answer_llm.prompts.clone();
-        let wake_dispatch = WakeDispatch {
+        let wake_dispatch = std::sync::Arc::new(WakeDispatch {
             store: store.clone(),
             turn: 0,
             user_seq,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
         let out = TurnRunner
             .run_with_tools(
                 &store,
@@ -3213,7 +3213,7 @@ mod tool_round_tests {
                 },
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&wake_dispatch),
+                Some(wake_dispatch.clone()),
             )
             .await
             .expect("唤醒幕必答");
@@ -3470,7 +3470,7 @@ mod tool_round_tests {
                 },
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&PathEchoDispatch),
+                Some(std::sync::Arc::new(PathEchoDispatch)),
             )
             .await
             .expect("两个工具轮后收束");
@@ -3686,7 +3686,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&PathEchoDispatch),
+                Some(std::sync::Arc::new(PathEchoDispatch)),
             )
             .await
             .expect("末轮必答");
@@ -3791,7 +3791,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&PathEchoDispatch),
+                Some(std::sync::Arc::new(PathEchoDispatch)),
             )
             .await
             .expect("失败也要有产出");
@@ -3894,7 +3894,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&PathEchoDispatch),
+                Some(std::sync::Arc::new(PathEchoDispatch)),
             )
             .await
             .expect("失败也要有产出");
@@ -4009,10 +4009,10 @@ mod tool_round_tests {
         let llm = std::sync::Arc::new(RunawayLlm {
             calls: Arc::new(Mutex::new(0)),
         });
-        let dispatch = FakeDispatch {
+        let dispatch = std::sync::Arc::new(FakeDispatch {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
-        };
+        });
 
         let out = TurnRunner
             .run_with_tools(
@@ -4022,7 +4022,7 @@ mod tool_round_tests {
                 input(store.as_ref()),
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
-                Some(&dispatch),
+                Some(dispatch.clone()),
             )
             .await
             .expect("到点必答：上界耗尽也是一句话");

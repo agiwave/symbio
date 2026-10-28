@@ -244,7 +244,8 @@ inject: injector(supplements, report).map(|(drain, report)| {
                     );
                     false
                 });
-            let dispatcher = super::super::tool_dispatch::SessionDispatchPort::new(
+            let dispatcher = std::sync::Arc::new(
+                super::super::tool_dispatch::SessionDispatchPort::new(
                 parent,
                 ctx,
                 sink.clone(),
@@ -258,8 +259,9 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 bridge.clone(),
                 presentation_tree,
                 elimination_revoked,
+            ),
             );
-            let dispatch_ref: &dyn super::super::tool_dispatch::ToolDispatch = &dispatcher;
+
             // 步循环在**执行器**里，不在 `turn_runner` 里。
             let r = super::drive_steps(
                 &store,
@@ -268,7 +270,7 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 input,
                 bridge.clone(),
                 std::sync::Arc::from(tools),
-                Some(dispatch_ref),
+                Some(dispatcher.clone()),
                 super::super::loop_rows::ACTORS,
             )
             .await;
