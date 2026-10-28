@@ -163,6 +163,128 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
     seqs.first().copied().unwrap_or(user_seq)
 }
 
+/// 测试侧的交付包：**接缝之前那一整轮**的入参形状。
+///
+/// 生产里 [`super::ExecTurn`] 只剩幕首可给的东西（`D-222` 订正 3：草稿必须在轮首
+/// 那几行之前就建），轮首那几样（召回视图 / 技能观测 / 快路正文 / 压缩快照 / 开场白）
+/// 由 `stage::run_stage` 在接缝处另递（[`super::AfterHead`]）。本文件的用例沿用
+/// 「一次执行的全部入参」这一旧形状，**本地同名结构遮蔽了 `super::*` 里的
+/// `ExecTurn`**——五个 struct 字面量因此一字不改（`SP-033` §1：改用例，不改形状）。
+struct ExecTurn<'a> {
+    session: &'a LoopSession,
+    provider: Arc<dyn ModelProvider>,
+    parent: Option<Arc<dyn Plugin>>,
+    ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    system_prompt: &'a str,
+    abort: symbio_core::ExecAbortSignal,
+    root_id: &'a str,
+    sink: &'a symbio_core::ExecEventSink,
+    user_text: &'a str,
+    turn_no: u64,
+    user_seq: u64,
+    drive_seq: u64,
+    window_turns: u64,
+    tools: &'a [CapabilityMeta],
+    recalled: Option<&'a super::super::recall::RecallView>,
+    skill_obs: &'a [(String, bool)],
+    reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
+    consolidation: Option<&'a [ChatNode]>,
+    supplements: Option<super::SupplementFn>,
+    supplemental_no: Arc<std::sync::atomic::AtomicU64>,
+    report: Option<super::super::report_exec::ReportPort>,
+    opening_text: Option<&'a str>,
+    opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
+    presentation_tree: symbio_core::node_build::PresentationTree,
+}
+
+impl<'a> ExecTurn<'a> {
+    /// 拆成幕首交付包（[`super::ExecTurn`]）与接缝寄存物（[`super::AfterHead`]）。
+    ///
+    /// `request_sections` 恒空：本文件的用例不走请求视图层——旧形状里那一格
+    /// （`prefix`）在本文件恒 `None`，而 `request_view_prefix(&[])` 就是 `None`。
+    fn split(self) -> (super::ExecTurn<'a>, super::AfterHead<'a>) {
+        let ExecTurn {
+            session,
+            provider,
+            parent,
+            ctx,
+            system_prompt,
+            abort,
+            root_id,
+            sink,
+            user_text,
+            turn_no,
+            user_seq,
+            drive_seq,
+            window_turns,
+            tools,
+            recalled,
+            skill_obs,
+            reflex,
+            consolidation,
+            supplements,
+            supplemental_no,
+            report,
+            opening_text,
+            opening_dialog,
+            presentation_tree,
+        } = self;
+        (
+            super::ExecTurn {
+                session,
+                provider,
+                parent,
+                ctx,
+                system_prompt,
+                abort,
+                root_id,
+                sink,
+                user_text,
+                turn_no,
+                user_seq,
+                drive_seq,
+                window_turns,
+                tools,
+                supplements,
+                report,
+                supplemental_no,
+                presentation_tree,
+            },
+            super::AfterHead {
+                request_sections: &[],
+                consolidation,
+                opening_text,
+                opening_dialog,
+                reflex,
+                recalled,
+                skill_obs,
+            },
+        )
+    }
+}
+
+/// 一轮的执行：装配 → 开轮 → 接缝 + 内环 → 归类 / 落格。
+///
+/// 与生产 `stage::run_stage` 只差一处：轮首那几行（判决 / 压缩 / 召回）不在这里跑
+/// ——它们的寄存物由调用方直给（本文件的 `ExecTurn`），接缝照旧消费。于是本文件的
+/// 判据仍落在轮内那一段（模型 / 工具 / 收束 / 流式），与本文件成形之前同一组断言。
+async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
+    let (exec, head) = req.split();
+    let assembled = super::assemble_turn(exec).await?;
+    let opened = super::open_turn(&assembled).await?;
+    let running = match opened {
+        // 开轮就收束（首请求前中止）：轮首那几行不再跑（`D-222` 订正 3）。
+        super::Opened::Done(outcome) => {
+            assembled.into_running(outcome, head.recalled, head.skill_obs)
+        }
+        super::Opened::Run(run) => super::drive_opened(assembled, run, head).await?,
+    };
+    match super::classify_turn(running).await? {
+        super::Classified::Finished(v) => v,
+        super::Classified::Settled(settled) => super::persist_turn(settled),
+    }
+}
+
 fn exec_base<'a>(
     session: &'a LoopSession,
     provider: Arc<dyn ModelProvider>,
@@ -188,8 +310,6 @@ fn exec_base<'a>(
         skill_obs: &[],
         // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
         reflex: None,
-        // 请求级前缀：测试不走请求视图层（三段皆空）。
-        prefix: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -344,7 +464,6 @@ async fn supplements_become_facts_visible_next_turn() {
         recalled: None,
         skill_obs: &[],
         reflex: None,
-        prefix: None,
         consolidation: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
@@ -967,8 +1086,6 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         recalled: None,
         skill_obs: &[],
         reflex: None,
-        // 请求级前缀：本用例不走请求视图层（三段皆空）。
-        prefix: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -1179,7 +1296,6 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         recalled: None,
         skill_obs: &[],
         reflex: None,
-        prefix: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
@@ -1410,8 +1526,6 @@ async fn full_turn_lands_derived_commitment_facts() {
         recalled: None,
         skill_obs: &[],
         reflex: None,
-        // 请求级前缀：本用例不走请求视图层（三段皆空）。
-        prefix: None,
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),

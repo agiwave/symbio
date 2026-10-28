@@ -1,8 +1,9 @@
-//! 一次 LLM 请求的**输入准备**（收口 ②）与轮首派发点所在的这一段编排。
+//! 一次 LLM 请求的**输入准备**：环前的纯读、轮首那几行，与两者的执行体。
 //!
 //! - [`resolve_system_prompt`]：系统提示词唯一真源
-//! - [`prepare_turn_inputs`]：提示词 + 工具 + 请求视图的唯一收集点，轮首派发点（
-//!   [`super::super::head_exec::drive_head`]）在它的 ①② 之后
+//! - [`collect_reads`]：提示词 + 工具 + 开销——环前的纯读，不含任何选债口
+//! - [`land_head`]：轮首派发点（[`super::super::head_exec::drive_head`]）、答话收束、
+//!   水位、根骨架上线路与请求视图——在草稿建好之后、任何请求之前
 //! - [`run_recall`]：`policy.recall` 行的执行体（记忆 / 技能 / 调度段三段读视图）
 //! - [`run_compress`]：`policy.compress` 行的执行体（上下文水位的响应，产线住在
 //!   这里，**被选中才跑**）
@@ -118,23 +119,19 @@ pub(crate) async fn resolve_system_prompt(
 /// 让「没装 model 插件的裸环境」也有一句可说，而不是把空串发给模型。
 pub(crate) const FALLBACK_SYSTEM_PROMPT: &str = "You are a helpful MODEL assistant.";
 
-/// 一次 LLM 请求所需的全部输入（收口 ② 的产物）。
+/// 环前的**纯读**（①②）：系统提示词 + 工具 + 请求级开销。
 ///
-/// **唯一收集点**：系统提示词与工具在同一函数（[`prepare_turn_inputs`]）内依次取得
-/// ——同一个 `Registry`、同一个时刻；下游（推理 / 收尾）只读本结构，
-/// 不再各自去 visitor 取值。
-pub(crate) struct TurnInputs {
-    /// Turn 根节点 id（本步内创建，供流式占位与推理产物挂载）
-    pub(crate) root_id: String,
-    /// 系统提示词（`resolve_system_prompt` 为唯一真源）
+/// 不含任何选债口、不落任何格——它发生在幕首（`assemble_turn` / `begin`）之前，
+/// 而那一台 host 的每一行都会改事实面。`tools` 同时是 ⑥ 的输入（请求级段要在
+/// 工具收集成形**之后**才收集，D-047 的注入点约束），故随本结构交给 [`land_head`]。
+pub(crate) struct TurnReads {
+    /// 系统提示词（`resolve_system_prompt` 为唯一真源）。
     pub(crate) system_prompt: String,
-    /// 本轮到模型的完整工具清单
+    /// 本轮到模型的完整工具清单。
     pub(crate) tools: Vec<CapabilityMeta>,
-    /// 请求级注入段（`build_request_sections` 唯一入口的产物，**不落库**）
-    pub(crate) request_sections: Vec<ChatNode>,
 }
 
-/// 收口 ②：本轮 LLM 请求输入的**唯一准备点**。
+/// 收口 ②：本轮 LLM 请求读侧的**唯一收集点**。
 ///
 /// ## 硬约束：系统提示词与工具必须同机制、同时机、始终一起收集
 ///
@@ -150,30 +147,11 @@ pub(crate) struct TurnInputs {
 /// 新连上的 MCP 工具，下一轮即可见）。若将来要提升到循环外（例如单轮工具轮次极多
 /// 使查询成为可观开销，或需要"一次请求内人格与工具集冻结"），**必须两者一起提升**，
 /// 不允许只提升其一。
-///
-/// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 D-047 新增）
-///
-/// 1. 系统提示词 + 工具（同函数、同一时刻）
-/// 2. 派生请求级开销 `overhead_tokens`（口径与压缩阈值共用，寄存进本轮状态）
-/// 3. **轮首派发点**（[`super::super::head_exec::drive_head`]）：本 host 绑定表里
-///    最小的一笔可还债——此刻是判决（`policy.classify`，prio 10）、压缩
-///    （`policy.compress`，30）与召回（`policy.recall`，40），先后由 `prio` 表达，
-///    不由本文件的行序表达
-///    - 3′. 紧随派发点：判决判成「就此答话」的一轮在这里落收束格并收束（不发请求）
-///    - 3″. 取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
-/// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
-/// 5. 长期记忆召回产物的**取用点**（三份产物由 3 的执行体寄存进本轮状态）
-/// 6. 请求级上下文段（`Cadence::Request`，D-220）：**在①②把 `tools` 收集成形之后**
-///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
-/// 7. 请求视图重建（`build_request_view` 唯一入口）
-pub(crate) async fn prepare_turn_inputs(
-    orchestrator: &ChatOrchestrator,
+pub(crate) async fn collect_reads(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    context: &mut SessionContext,
-    sink: &ExecEventSink,
-    turn: &mut TurnState,
     req: &TurnRequest,
-) -> Result<TurnInputs, TurnExit> {
+    turn: &mut TurnState,
+) -> TurnReads {
     // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 Registry ──────
     let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
@@ -184,6 +162,55 @@ pub(crate) async fn prepare_turn_inputs(
     let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
     turn.request_overhead = overhead_tokens;
 
+    TurnReads {
+        system_prompt,
+        tools,
+    }
+}
+
+/// 轮首那几行跑完之后才知道的一切（③–⑦）：在**草稿建好之后**、任何请求之前。
+///
+/// ## 为什么它晚于 `begin`
+///
+/// 中止守卫在环首（`D-222` 订正 3）：被中止的幕不该再跑判决 / 压缩 / 召回。草稿在
+/// 幕首就建，本函数因此只能排在那之后——`drive_head` 的每一行都是一笔会改事实面的
+/// 动作。
+///
+/// ## 它仍然早于第一次请求
+///
+/// `drive_head` 落的几格（判决的 `answered` / 压缩的水位与摘要 / 召回的视图与技能
+/// 命中 / 快路的出口格）正是本轮请求与收束的前件；本函数末尾的请求视图也依赖它们的
+/// 寄存物。
+///
+/// ## 本步内的顺序
+///
+/// 3. **轮首派发点**（[`super::super::head_exec::drive_head`]）：本 host 绑定表里
+///    最小的一笔可还债——此刻是判决（`policy.classify`，prio 10）、压缩
+///    （`policy.compress`，30）与召回（`policy.recall`，40），先后由 `prio` 表达，
+///    不由本文件的行序表达
+///    - 3′. 紧随派发点：判决判成「就此答话」的一轮在这里落收束格并收束（不发请求）
+///    - 3″. 取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
+/// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）。
+///    根 id 由调用方（`stage::run_stage`）分配——「定 id」与「把它发给流式桥」是
+///    两件事，前者是 `begin` 的输入。`fresh_root` 说这个 id 是不是本幕新分配的：
+///    续写幕复用原根，重发骨架会把已完成的卡打回运行态。
+/// 5. 长期记忆召回产物的**取用点**（三份产物由 3 的执行体寄存进本轮状态）
+/// 6. 请求级上下文段（`Cadence::Request`，D-220）：**在①②把 `tools` 收集成形之后**
+///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
+/// 7. 请求视图重建（`build_request_view` 唯一入口）
+///
+/// `Err(TurnExit::Completed)` = 判决判成「就此答话」，本幕已在 ③′ 收束。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn land_head(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    context: &mut SessionContext,
+    sink: &ExecEventSink,
+    turn: &mut TurnState,
+    tools: &[CapabilityMeta],
+    root_id: &str,
+    fresh_root: bool,
+) -> Result<Vec<ChatNode>, TurnExit> {
     // ── ③ 轮首派发点（D-159）：本 host 的绑定表欠什么就跑什么 ─────────────────
     // 此刻子集里按 `prio` 是判决（10）、压缩（30）、召回（40）——先后由行的 `prio`
     // 表达，本文件不再问一次表。位置在 ② 之后、③′④ 之前，是这三行的前件同时成立的
@@ -214,7 +241,7 @@ pub(crate) async fn prepare_turn_inputs(
     // ⇒ 前端不渲染水位条，而不是补一个 0。
     let watermark = context::context_watermark(
         &context.messages,
-        overhead_tokens,
+        turn.request_overhead,
         orchestrator.context_limit as usize,
     );
 
@@ -222,21 +249,19 @@ pub(crate) async fn prepare_turn_inputs(
     // 续写幕复用原 Turn 根（d）：那个骨架在本轮首幕已经发过，再发一次
     // 只会让同一个 id 重生一条「流式中」的根，把已完成的卡打回运行态。
     // 续写幕也就不再补水位——首幕那条 `meta.context` 是这一轮的唯一水位读数。
-    let root_id: String = match turn.resume_root.take() {
-        Some(root) => root,
-        None => {
-            let root = llm_short_id();
-            emit_streaming_start(
-                sink,
-                &root,
-                Some(turn.request_round),
-                Some(watermark),
-                &orchestrator.session.principal(),
-            )
-            .await;
-            root
-        }
-    };
+    //
+    // 根 id 由**调用方**分配（一幕一个根；`begin` 要用它，故它在幕首就定了）。
+    // 本步只做「把它发给流式桥」——新建的根要上线，续写的根不重发。
+    if fresh_root {
+        emit_streaming_start(
+            sink,
+            root_id,
+            Some(turn.request_round),
+            Some(watermark),
+            &orchestrator.session.principal(),
+        )
+        .await;
+    }
 
     // ── ⑤ 上下文段（provider 收集的产物）──────────────────────────────────────
     // 收集在轮首派发点（`policy.recall`，D-159）一次做完：那里把「判完的值」交给
@@ -313,7 +338,7 @@ pub(crate) async fn prepare_turn_inputs(
     let query = last_user_text(context);
     let principal = symbio_core::request_principal(ctx.as_ref());
     let live = LiveInputs {
-        tools: &tools,
+        tools,
         delegate: delegate_verdict,
         workers: &workers,
     };
@@ -338,12 +363,7 @@ pub(crate) async fn prepare_turn_inputs(
     );
     let request_sections = context::build_request_sections(&sections);
 
-    Ok(TurnInputs {
-        root_id,
-        system_prompt,
-        tools,
-        request_sections,
-    })
+    Ok(request_sections)
 }
 
 /// `recall` 执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。

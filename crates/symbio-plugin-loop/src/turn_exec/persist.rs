@@ -143,7 +143,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 ///
 /// ## 它解决的是什么
 ///
-/// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`super::execute_turn`]**；
+/// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`super::drive_opened`]**；
 /// 若就此返回，那一轮在事实网格里只有用户格、没有 `chat.assistant.final`。于是下一轮
 /// prompt 里这次问答**整个消失**，`session/stats` 的轮次计数也缺收束——而
 /// `messages.json` 里有（`context.messages` 落库）⇒ **两条真源**。完全静默：不报错、
@@ -155,7 +155,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来。所以答话交给运行器
 /// （`TurnInput::final_reply`），收束格仍由它落。
 ///
-/// ## 与 [`super::execute_turn`] 的差异
+/// ## 与 [`super::drive_opened`] 的差异
 ///
 /// 1. **承诺 / 任务表 / 熔断不写**：那三族的事实来源是工具交换（派活、就绪集、
 ///    失败），`Answered` 轮一次工具都不调，没有可记的东西。
@@ -175,7 +175,7 @@ pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExi
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
 ///
 /// 形参宽（`consolidation` 与三个 seq 都是这一轮的**事实端口**）：与
-/// [`super::execute_turn`] 同一条口径——「一轮的全部输入」本就是
+/// [`super::open_turn`] 同一条口径——「一轮的全部输入」本就是
 /// 一个宽签名，收成结构体只会把同一次调用拆成两处。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
@@ -203,12 +203,13 @@ pub(crate) async fn execute_final_reply_turn(
     // 往回是这条轮次里唯一一次真实推理，不入格则 `Reason` 节点对普通答话轮从未
     // 存在（AMD MiMo 实测 2026-10-13）。模板产线 / 生成失败退模板 ⇒ `None`。
     reasoning: Option<(String, String)>,
-    // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与 [`super::execute_turn`] 同源）。
-    // 答话轮在步骤 2 就短路收尾，**不进** [`super::execute_turn`]，所以它也得自己落这一格
+    // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与工具轮同源：
+    // `AfterHead::consolidation` 递到接缝的那一份）。
+    // 答话轮在步骤 2 就短路收尾，**不进** [`super::drive_opened`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
     consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
-    // 事实源：与 [`super::execute_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
+    // 事实源：与 [`super::assemble_turn`] 同一条路径——交付包构造的唯一句柄（D-084 §2）。
     let store = session.facts().ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
@@ -217,7 +218,7 @@ pub(crate) async fn execute_final_reply_turn(
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         symbio_core::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }
-    // 身份与档位取值点同 [`super::execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
+    // 身份与档位取值点同 [`super::assemble_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
     //
@@ -226,18 +227,8 @@ pub(crate) async fn execute_final_reply_turn(
     // 作用域与身份同批取（[]）：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), scope);
-    // 派发档（`D-223` 订正 1）：答话轮不走快路（`Answered` 是判决的结论，不是技能的命中），
-    // 档位恒为深度档。它与工具轮那一格同一条纪律——落在这里而不是草稿的构造里。
-    super::super::chat_loop::land_dispatch(
-        store.as_ref(),
-        turn_no,
-        user_seq,
-        drive_seq,
-        LatencyTier::Deep,
-        &actor,
-    )
-    .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
-    // 压缩入格 + 归档：与 [`super::execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
+    // 压缩入格 + 归档：与接缝同序（`D-223` 订正 1：压缩必须早于派发格）。归档之后才
+    // 落派发格，本幕的 `turn.dispatch` 才不会随「本轮之前的一切」一起被移进归档段。
     if let Some(msgs) = consolidation {
         if let Err(e) = session
             .run_op_unit(
@@ -251,6 +242,17 @@ pub(crate) async fn execute_final_reply_turn(
             symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
         }
     }
+    // 派发档（`D-223` 订正 1）：答话轮不走快路（`Answered` 是判决的结论，不是技能的命中），
+    // 档位恒为深度档。它与工具轮那一格同一条纪律——落在这里而不是草稿的构造里。
+    super::super::chat_loop::land_dispatch(
+        store.as_ref(),
+        turn_no,
+        user_seq,
+        drive_seq,
+        LatencyTier::Deep,
+        &actor,
+    )
+    .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
     let llm = ProviderLlmAdapter::for_turn(provider, "", abort.clone());
     let tok = TokenIssuer::issue_deep();
     let input = TurnInput {

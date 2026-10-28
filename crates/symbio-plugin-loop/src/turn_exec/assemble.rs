@@ -1,4 +1,4 @@
-//! 阶段① 装配——`execute_turn` 拆分四段之首（· B2，DE-021 §5 动作 B2）。
+//! 阶段① 装配——一轮执行四段之首（· B2，DE-021 §5 动作 B2）。
 //!
 //! 拆交付包、取事实源、补落寄存变更、建收集器与流式桥（连同发射任务）、定主体与
 //! 来源主体——随后把一切装进 [`Assembled`] 原样交给阶段② [`super::call`]。
@@ -39,9 +39,6 @@ pub(crate) struct Assembled<'a> {
     pub(crate) supplements: Option<SupplementFn>,
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub recalled: Option<&'a super::super::recall::RecallView>,
-    pub(crate) skill_obs: &'a [(String, bool)],
-    pub(crate) prefix: Option<String>,
     pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
     // —— 阶段① 的读数与构造 ——
     pub(crate) store: Arc<dyn Store<Event = Event>>,
@@ -51,17 +48,9 @@ pub(crate) struct Assembled<'a> {
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) bridge: Arc<UiBridge>,
     pub(crate) emitter: tokio::task::JoinHandle<()>,
-    /// 本幕快路已作答的技能正文（`Some` ⇒ 本轮零模型往返，D-163）。
-    pub(crate) reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
     pub(crate) actor: ActorSpec,
     pub(crate) principal: String,
     pub(crate) to: String,
-    // —— 接缝的输入（阶段② 调 [`land_seam`] 用；本段一格都不读）——
-    /// 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2）。
-    pub(crate) consolidation: Option<&'a [ChatNode]>,
-    /// 判决行 `Escalate` 的首响（落 `chat.assistant.opening` 并上实时面）。
-    pub(crate) opening_text: Option<&'a str>,
-    pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
 }
 
 /// 接缝要的**全部**环境（幕首已产出、接缝才消费）。
@@ -91,7 +80,7 @@ pub(crate) struct Seam<'a> {
 /// | 压缩入格 | `policy.compress` 是本幕的前置动作，它落的事实必须早于本轮派发格 | `session.consolidated` + 归档 |
 /// | 定档 | 折自 `policy.reflex` 的出口格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
 /// | 首响上线 | 判决行 `Escalate` 的那句话 | `chat.assistant.opening` + 一帧实时面 |
-/// | （基线 prompt 与两次填） | 压缩改的就是消息列表 | 见 `turn_exec::call_model` 那一处 |
+/// | （基线 prompt 与两次填） | 压缩改的就是消息列表 | 见 `turn_exec::drive_opened` 那一处 |
 ///
 /// 前两件与第三件的**次序**是硬的：压缩早于派发（`consolidation_is_forwarded_before_the_turn_runs`
 /// 钉着），首响早于基线 prompt 的渲染（渲染在调用方、紧接本函数之后）。
@@ -158,7 +147,7 @@ pub(crate) async fn land_seam(seam: Seam<'_>) -> Result<(), ActorError> {
     Ok(())
 }
 
-/// 一轮的执行（阶段①）：装配——`execute_turn` 首段原样，产 [`Assembled`]。
+/// 一幕的幕首（阶段①）：装配，产 [`Assembled`]。
 pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>, TurnExecExit> {
     let ExecTurn {
         session,
@@ -175,16 +164,9 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         drive_seq,
         window_turns,
         tools,
-        recalled,
         supplements,
         report,
         supplemental_no,
-        skill_obs,
-        reflex,
-        prefix,
-        consolidation,
-        opening_text,
-        opening_dialog,
         presentation_tree,
     } = req;
     // 事实源：本会话的**唯一句柄**（由交付包按值带来、按引用分发）。
@@ -341,9 +323,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         supplements,
         report,
         supplemental_no,
-        recalled,
-        skill_obs,
-        prefix,
         presentation_tree,
         store,
         turn_no,
@@ -352,13 +331,9 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         collected,
         bridge,
         emitter,
-        reflex,
         actor,
         principal,
         to,
-        consolidation,
-        opening_text,
-        opening_dialog,
     })
 }
 

@@ -20,7 +20,7 @@ pub(crate) struct ExecTurnResult {
     pub messages: Vec<ChatNode>,
 }
 
-/// [`super::execute_turn`] 的退出类型。
+/// [`super::super::stage::run_stage`] 的退出类型。
 ///
 /// 为什么不是裸 `PluginError`：中止出口要携带**半截产出**（`Vec<ChatNode>`），
 /// 而那批节点是 chat 域词汇。`PluginError` 是跨插件共享的错误词汇（`model`

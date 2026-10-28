@@ -16,8 +16,8 @@
 //! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走快路——
 //! 以技能正文收束，**一次模型调用都不发生**。**选中**发生在轮首 host
 //! （`policy.reflex` 行，出口格 `turn.stage{stage:"reflex"}`）；本模块只消费那次
-//! 选中的结果：正文随 [`ExecTurn::reflex`] 进来，由 `close-turn` 的执行体落成
-//! 同一格 `chat.assistant.final`（D-163）。
+//! 选中的结果：正文由 `policy.reflex` 的执行体经 [`TurnSession::set_reflex`] 寄存，
+//! 由 `close-turn` 的执行体落成同一格 `chat.assistant.final`（D-163）。
 //! 它不是"又一条执行链"：产物落的是**同一轮的三格**（`u-{turn}` / `turn.dispatch` /
 //! `f-{turn}`），收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；
 //! 变的只是**生成那一格**由谁产出（快路这一轮没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
@@ -28,7 +28,7 @@
 //! - **开关默认关**：关着时候选集恒空，本轮照常走 `drive_steps`。
 //!
 //! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
-//! 该值随主体走、并由 `execute_turn` 以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
+//! 该值随主体走、并由接缝以**数值**写入 `turn.dispatch` 载荷的 `budget_ms`
 //! （/ ）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
 //! 由它获得真读方。缺该数值的历史事件回退读 `tier`
 //! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
@@ -123,7 +123,7 @@ pub(crate) use self::assemble::{assemble_turn, Assembled};
 // 续写幕的开幕方（`chat_loop::drive`）要用同一个「已开未收束」判据：
 // 这里的收束口径（只认 final / fallback）与 C4（兼认产物）刻意不同，见函数文档。
 pub(crate) use self::assemble::last_open_turn;
-pub(crate) use self::call::{call_model, Running};
+pub(crate) use self::call::{drive_opened, open_turn, AfterHead, Opened, Running};
 pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
 pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
 
@@ -403,7 +403,7 @@ impl UiBridge {
     /// 当前正文节点 `(id, 累积正文)`（未定格的最后一轮正文；本轮无正文 ⇒ `None`）。
     ///
     /// 累积正文的消费点有两个：`chat_loop` 的 `finalize_assistant_turn`（收口末轮）
-    /// 与中止出口（半截正文入格，见 [`execute_turn`]）。
+    /// 与中止出口（半截正文入格，见 [`super::stage::run_stage`]）。
     pub(crate) fn current_node(&self) -> Option<(String, String)> {
         self.node.lock().unwrap().clone()
     }
@@ -413,7 +413,7 @@ impl UiBridge {
     /// 与 [`Self::current_node`] 的分工：正文的末轮由 `chat_loop` 的
     /// `finalize_assistant_turn` 收口（那里拿着 `TurnOutput.text`），推理那侧同理
     /// 但正文得**从这里取**——`TurnOutput` 的 `reasoning` 字段正是由本函数回填的
-    /// （见 [`execute_turn`] 轮末）。
+    /// （见 [`super::stage::run_stage`] 的归类段）。
     pub(crate) fn current_reasoning(&self) -> Option<(String, String)> {
         self.reasoning.lock().unwrap().clone()
     }
@@ -607,7 +607,7 @@ pub(crate) struct ExecTurn<'a> {
     pub parent: Option<Arc<dyn Plugin>>,
     /// 本轮请求上下文（工具路由与能力注册表都在它上面）。
     pub ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
-    /// 会话级系统提示词（取值点 = `prepare_turn_inputs`）。
+    /// 会话级系统提示词（取值点 = `chat_loop::inputs::collect_reads`）。
     pub system_prompt: &'a str,
     /// 本轮中止信号（同样由 chat_loop 传入）。
     pub abort: ExecAbortSignal,
@@ -627,11 +627,6 @@ pub(crate) struct ExecTurn<'a> {
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
     pub tools: &'a [CapabilityMeta],
-    /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
-    /// [`super::derived_facts::record_learning`] 落一条 `memory.recalled`。
-    ///
-    /// 它**不是**轮次事实（轮次事实由运行器原生入格），而是派生事实——写方是
-    /// [`super::derived_facts::record_learning`]（见该函数文档）。
     /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
     /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
     ///
@@ -662,55 +657,6 @@ pub(crate) struct ExecTurn<'a> {
     /// `turn × asserted`，事件 id 前缀已把它们分开；分开两支游标只会多一份要
     /// 同步的状态（那才是真源变两处的形状）。
     pub supplemental_no: Arc<std::sync::atomic::AtomicU64>,
-    pub recalled: Option<&'a super::recall::RecallView>,
-    /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
-    /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
-    pub skill_obs: &'a [(String, bool)],
-    /// **本幕快路已作答的技能正文**（[`super::turn_runner::ReflexAnswer`]）。
-    ///
-    /// `Some` ⇒ 本轮**一次模型往返都不发**：`policy.reflex` 行已在轮首落过出口格
-    /// （`turn.stage{stage:"reflex"}`），这里只把正文带到收束动作
-    /// （`close-turn` 落 `chat.assistant.final`，D-163）。`None` 是常态。
-    pub reflex: Option<&'a super::turn_runner::ReflexAnswer>,
-    /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
-    /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
-    /// （见 `TurnInput::prefix`）。
-    ///
-    /// ## 为什么必须显式带进来
-    ///
-    /// 会话轮的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
-    /// 把渲染结果整段发出），而那三段是**独立的消息**。不显式带进来它们就会
-    /// **静默**从模型眼前消失——事实照样入格、`session/stats` 照样有数，只有模型
-    /// 看不见（实测 t29 / t35 报「记忆段没注入」，而注入逻辑一行没改）。
-    ///
-    /// ## `None` 是常态
-    ///
-    /// 三段都空的情形：首轮没有记忆、没有就绪任务、判定不出委派者。取法见
-    /// `chat_loop` 的 `request_view_prefix`。
-    pub prefix: Option<String>,
-    /// **本轮之前发生过压缩** ⇒ 压缩后的整份消息列表（S2.7-b2）。
-    ///
-    /// 由 `chat_loop` 从 [`SessionContext::consolidated`] 带来。落格动作在
-    /// [`execute_turn`] 里做——经会话端口的 `consolidate` 动作（持令牌的写方在
-    /// session；压缩现场不持令牌，就地落格会拿到 `NotTheWriter`，而那是静默的）。
-    ///
-    /// `None` = 本轮没压过（常态）。
-    ///
-    /// `SessionContext::consolidated`
-    pub consolidation: Option<&'a [ChatNode]>,
-    /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
-    ///
-    /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
-    /// `progress`——汇报走 `policy.report` 行 /`EVENT_CHAT_ASSISTANT_REPORTED`）。
-    ///
-    /// ## 它不经过运行器（`D-223` 订正 1）
-    ///
-    /// 落格与上线都在接缝上（`chat_loop::land_opening`），因为它是轮首判决行的产物、
-    /// 而草稿在幕首就建（`D-222` 订正 3）——草稿建好时这句话还没说出来。它随本包走到
-    /// 接缝，只为了「那一刻手里有事实源与上线面」。`None` = 本轮没有开场白（常态）。
-    pub opening_text: Option<&'a str>,
-    /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
-    pub opening_dialog: Option<super::turn_runner::DialogFacts>,
     /// **本轮建树策略**（`SessionConfig::presentation_tree` 的请求级快照）。
     ///
     /// 与 v1 流式（`ChatOrchestrator::presentation_tree`）**同一个取值快照**——一次
@@ -1141,18 +1087,6 @@ fn ends_the_drive(e: &Event, turn: u64) -> bool {
         && e.payload.get("status").and_then(|v| v.as_str()) == Some("pending")
 }
 
-/// 一轮的执行：装配（阶段①）→ 调用（阶段②）→ 结局归类（阶段③）→ 落格（阶段④）。
-///
-/// · B2：原函数体按处理阶段逐字拆入 `turn_exec/{assemble,call,outcome,persist}.rs`，
-/// 本函数只留阶段间调度——调度点即原阶段边界，副作用顺序与事件批次序不变。
-pub(crate) async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
-    let assembled = assemble_turn(req).await?;
-    let running = call_model(assembled).await?;
-    match classify_turn(running).await? {
-        Classified::Finished(v) => v,
-        Classified::Settled(settled) => persist_turn(settled),
-    }
-}
 #[cfg(test)]
 #[path = "turn_exec.test.rs"]
 mod tests;
