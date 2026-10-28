@@ -11,7 +11,7 @@
 //! - 调度段读的是 `task_events` 的折叠，任务表的写方与调度者都在本插件
 //!   （DE-024 D-206）；
 //! - 委派段读的是 Q1 判完的结论 + 收集成形后的工具清单（`LiveInputs`）：判定在
-//!   `prepare_turn_inputs`，provider 只排版。
+//!   `prepare_request_sections`，provider 只排版。
 //!
 //! 三个 provider 都在 `owner() == "loop"` 下提交：同一 owner 内按提交序执行。前两段
 //! 是轮首节奏、委派段是请求级节奏（D-220）——宿主先收轮首段、再收请求级段，于是

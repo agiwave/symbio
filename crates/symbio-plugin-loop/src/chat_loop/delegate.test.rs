@@ -17,7 +17,7 @@ fn factory(text: &str) -> Option<&'static str> {
     worker_start_reason(text, WORKER_FORCE_PREFIX, WORKER_KEYWORDS, WORKER_MIN_CHARS)
 }
 
-/// Q1 判定（配置化）：判据 → 判完的结论。生产路径在 `prepare_turn_inputs`，
+/// Q1 判定（配置化）：判据 → 判完的结论。生产路径在 `prepare_request_sections`，
 /// 测试用同一函数体，避免「测的判定」与「跑的判定」分家。
 fn judge(
     text: &str,
@@ -238,7 +238,7 @@ fn missing_category_falls_back_to_other() {
 
 #[test]
 fn short_name_strips_the_prefix() {
-    // 与 `prepare_turn_inputs` 解析 `context_retention` 用同一条 `rsplit('/')` 口径。
+    // 与 `prepare_request_sections` 解析 `context_retention` 用同一条 `rsplit('/')` 口径。
     let digest = capability_digest(&[meta(
         "mcp/github/create_issue",
         Some(CapabilityCategory::Mcp),
@@ -287,7 +287,7 @@ fn digest_is_order_independent() {
     }
 }
 
-// ── 合成段落（`prepare_turn_inputs` 的装配入口） ────────────────────────
+// ── 合成段落（`prepare_request_sections` 的装配入口） ────────────────────────
 
 #[test]
 fn section_is_none_when_there_is_nothing_to_say() {

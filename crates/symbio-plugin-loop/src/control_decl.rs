@@ -847,8 +847,10 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         "recall_done": stage_since("recall"),
         "skill_hit": skill_hit,
         "reflex_answered": reflex_answered,
-        // 本幕的请求输入已备好：`prepare-turn` 行的出口曾折在这里，那条行已删
-        // （`D-222`：幕是直线，「备好没有」不再是一个前件）。这一格暂时无生产读者。
+        // 本幕的请求输入已备好：接缝行的出口（`stage:"inputs"`，`result: ready`）。
+        // 接缝行以 `false` 开账、以它为出口；它的 `prio`（52）排在收束与执行之前，
+        // 于是「轮首那几行 → 接缝 → 轮内开账」由同一个循环里的一个数字说，不必把
+        // `prepared: true` 复写进每一行的前件（那会是这条次序的第二个 owner）。
         "prepared": stage_since("inputs"),
         // 本幕的收束原因（`D-222` 裁决 2）：`exhausted` / `completed` / `null`（未收束）。
         // 读者只有幕间判据（`loop_rows::next_stage_round`）——「还开不开下一幕」。
@@ -965,6 +967,15 @@ fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
 /// 计数是内存里的 `AtomicUsize`；而「本幕完成了几轮工具调用」在日志上就是本幕
 /// 落了几条**带 `calls` 的 `response(port=model)`**——一条批次边界 = 一次带工具
 /// 调用的模型往返。折进视图之后，这一行在派发点上与其它行同形：判据只有数据。
+///
+/// v5 补上第五格 `at_boundary`（v4 只数了「有 `calls`」，没数「那一批关完了」）：
+/// 汇报只该在**批次边界**说——工具还在跑时「完成 N 轮」是假话，模型已答完之后
+/// 更不该再说「还在继续」。同版把「这一段静默试过没有」也折进来（读锚之后的
+/// `turn.stage{stage:"report"}`），`silent` 那一档因此不会在原地反复到期。
+///
+/// v6 补上「最近一批已关闭的工具调用在锚之后」：一次边界只派发一次（[D-163]
+/// 裁决 4）。旧触发点只在批次边界被调用，这一条是白得的；环每一步都问，少了它
+/// `interval = 0` 会对着同一批连报到配额为止。
 fn report_due(events: &[Event], now: i64) -> serde_json::Value {
     let Some((turn, drive_anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -1000,12 +1011,33 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
         .filter(|e| e.turn == turn && is_report_anchor(e))
         .max_by_key(|e| (e.ts, seq_of(e)));
     let quiet_ms = anchor.map(|e| (now - e.ts).max(0)).unwrap_or(0);
-    // 本幕**已完成几轮工具调用** = 幕锚之后带 `calls` 的模型应答条数。
+    // 本幕**已完成几轮工具调用** = 幕锚之后、`calls` 非空且**每一笔都已终局**的
+    // 模型应答条数。
     //
     // 口径与 `turn_head` 的 `model_calls` 同源：只看这一轮自己的往返（`via` 缺席），
     // 内部往返（判决 / 措辞 / 摘要）不带工具、也不该把「够不够轮」凑满。
     // `calls` 为空 / 取不到的应答不算一轮——那是答话或形状不明，不是「干过活」。
-    let tool_rounds = events
+    //
+    // v5 把「每一笔都已终局」写进口径：一轮工具调用的结束是**批次边界**（旧触发点
+    // 就挂在边界上）。只看 `calls` 非空会把「工具刚交回、还在跑」的那一轮也算完成，
+    // 于是汇报句里的「已经完成 N 轮」在工具还没回来时就成了假话。
+    let closed_batch = |e: &Event| -> bool {
+        let Some(calls) = e.payload.get("calls").and_then(|v| v.as_array()) else {
+            return false;
+        };
+        !calls.is_empty()
+            && calls.iter().all(|c| {
+                let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                events.iter().any(|r| {
+                    r.turn == turn
+                        && matches!(r.kind.as_str(), EVENT_RESPONSE | EVENT_FAILED)
+                        && str_field(r, "port") == Some("tool")
+                        && str_field(r, "id") == Some(id)
+                        && after_anchor(r, drive_seq)
+                })
+            })
+    };
+    let model_responses: Vec<&Event> = events
         .iter()
         .filter(|e| {
             e.turn == turn
@@ -1013,16 +1045,51 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
                 && str_field(e, "port") == Some("model")
                 && str_field(e, "via").is_none()
                 && after_anchor(e, drive_seq)
-                && e.payload
-                    .get("calls")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|calls| !calls.is_empty())
         })
-        .count() as u64;
+        .collect();
+    let tool_rounds = model_responses.iter().filter(|e| closed_batch(e)).count() as u64;
+    // 只有**停在批次边界**才报：最近一条模型应答是一批已关闭的工具调用。
+    //
+    // 这一格管住另一端：模型答完最后一句（`calls` 空）之后不再汇报——那一刻没有
+    // 「还在继续」可报，而收束格马上就到；工具还在跑的时候也不报，那时的「完成 N 轮」
+    // 会把手上这一批算漏。
+    let at_boundary = model_responses.last().is_some_and(|e| closed_batch(e));
+    // **一次边界只派发一次**（[D-163] 裁决 4）：最近一批已关闭的工具调用必须在
+    // 静默锚**之后**。锚是最近一次用户看得见的动静，汇报事实自己也在其中——所以
+    // 报过一句之后，锚前移到那句，同一批的账就是「已关过」；要再报，得等下一批
+    // 工具关完，而不是等下一段静默够长。
+    //
+    // 旧触发点靠「只在批次边界被调用」免费得到这一条；合表之后环每一步都会问它，
+    // 少了这一格，`interval = 0` 的配置会对着同一批连报（配额成了唯一的刹车）。
+    let fresh_progress = anchor.is_some_and(|a| {
+        let anchor_seq = seq_of(a);
+        model_responses
+            .iter()
+            .any(|e| seq_of(e) > anchor_seq && closed_batch(e))
+    });
+    // 这一段静默**已经试过**：锚之后落过一格汇报尝试（`turn.stage{stage:"report"}`）。
+    //
+    // 判在开账侧而不是关账侧：把尝试格算进 `reported_anchors` 的出口，本行的执行体
+    // 就同时是本行的关门方（它自己也写 `turn.stage`），依赖图成环；`report_due` 是
+    // `owes` 源，读它不配边。判据本身也在这里更准——「试过」是开账前件的一部分。
+    let attempted = anchor.is_some_and(|a| {
+        let anchor_seq = seq_of(a);
+        events.iter().any(|e| {
+            e.turn == turn
+                && e.kind == "turn.stage"
+                && str_field(e, "stage") == Some("report")
+                && seq_of(e) > anchor_seq
+        })
+    });
     // 轮数前提照旧是「轮数 > 0 ∧ 轮数 ≥ progress_min_rounds」：`max(1)` 就是
     // 「> 0」那一半——一轮都没跑完时汇报的是「还没开始」，那不是进度。
-    let due =
-        enabled && quiet_ms >= interval_ms && reports < quota && tool_rounds >= min_rounds.max(1);
+    let due = enabled
+        && quiet_ms >= interval_ms
+        && reports < quota
+        && tool_rounds >= min_rounds.max(1)
+        && at_boundary
+        && fresh_progress
+        && !attempted;
     serde_json::json!({
         "turn": turn,
         // 静默区间的身份 = 区间起点那一格的 seq。汇报事实落格后，本视图的锚
@@ -1044,6 +1111,10 @@ fn report_due(events: &[Event], now: i64) -> serde_json::Value {
 /// 汇报自己会说一句话（成为新的静默起点），所以一条汇报只能关「它之前」那段：
 /// 锚取**严格早于汇报 seq** 的最近一条动静。这样 `report_due.anchor` 与
 /// 本视图的 `anchor` 在同一段区间上逐字相等，`(turn, anchor)` 就是区间的身份。
+///
+/// 「措辞没给话」那一档没有汇报事实，它的账由 `report_due` 在开账侧关
+/// （锚之后已有 `turn.stage{stage:"report"}` 就不再判到期）——把那一格算进本视图的
+/// 出口会让报告行成为自己的关门方，依赖图成环。
 fn reported_anchors(events: &[Event], _now: i64) -> serde_json::Value {
     serde_json::Value::Array(
         events
@@ -1163,7 +1234,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // v10 → v11 加 `model_open`（D-166）：模型端口的「已宣布、没派出」折成一格，
     // 执行行据此让位给派发行。读面补 `request` / `failed` 的 `attempt` 与 `sent` 的
     // `port` / `id` / `attempt`——判「这笔账关没关」要与派发行同一组键对。
-    // v11 → v12 加 `prepared`（原 `prepare-turn` 行的前件，该行已随 `turn` 端口退场）：读的是 `turn.stage` 的 `stage` / `round`，
+    // v11 → v12 加 `prepared`（接缝行的前件）：读的是 `turn.stage` 的 `stage` / `round`，
     // v2 起就在读面里，故读面不变。
     // v12 → v13 加 `closure`（`D-222` 裁决 2）：读面补收束两格的 `reason`——这一格是
     // 「为什么停下」的原始事实，折进视图之后「还开不开下一幕」不再靠返回值。
@@ -1318,9 +1389,18 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // 「表判一半、代码判一半」；折进来之后派发点只剩选债。读面因此多声明
     // `response` 的 `port` / `via` / `calls` 三格（口径与 `turn_head` 同一条：
     // 只看这一轮自己的往返）。
+    //
+    // v5 把「那一批关完了」也折进来：`tool_rounds` 只数**每一笔都已终局**的应答，
+    // `due` 另要求最近一条模型应答停在批次边界（`at_boundary`）。判「关没关」要
+    // 与工具格同一组键对，读面因此补 `response` / `failed` 的 `id` 与 `failed` 的
+    // `port`。
+    //
+    // v6 把「一次边界只派发一次」（[D-163] 裁决 4）折进来：`due` 另要求最近一批
+    // 已关闭的工具调用在静默锚之后。旧触发点只在批次边界被调用，这一条是免费的；
+    // 合表之后环每一步都问，少了它 `interval = 0` 会对着同一批连报。
     ViewDecl {
         name: "report_due",
-        ver: 4,
+        ver: 6,
         reads: &[
             ("session.config", "progress_enabled"),
             ("session.config", "progress_interval_ms"),
@@ -1337,6 +1417,9 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
             (EVENT_RESPONSE, "port"),
             (EVENT_RESPONSE, "via"),
             (EVENT_RESPONSE, "calls"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_FAILED, "port"),
+            (EVENT_FAILED, "id"),
         ],
         // 开账侧的视图：输出的每个字段都由这些格里的一格决定（静默起点、配额、
         // 本幕汇报数、本幕工具轮数），证据集取读面全集。它从不作行的出口，
@@ -1371,7 +1454,8 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
             ("chat.assistant.progress", "status"),
         ],
         // 出口侧只认汇报格：其余读面算的是「这条汇报关的是哪一段静默」的区间起点，
-        // 它们出现得再多，也不会让某一笔汇报债关门。
+        // 它们出现得再多，也不会让某一笔汇报债关门。汇报尝试格不在这一侧（理由见
+        // `reported_anchors` 的文档）。
         evidence: &["chat.assistant.reported"],
         cost: 4096,
         eval: reported_anchors,

@@ -14,8 +14,6 @@ mod context;
 // 不改内核（`symbio_core::decl` 只留协议五格与装载机制）。
 mod control_decl;
 mod derived_facts;
-// 轮首 host 的执行体与派发点（DE-015 的 D-159）：与 `turn_exec` 同形状，借的面不同。
-mod head_exec;
 // 义务环的行表：控制面经 `owes` 问表，判据在数据里。
 mod loop_rows;
 mod memory_events;
@@ -31,7 +29,7 @@ mod provider;
 // 的 `projection/` 搬进来——core 不再按 `memory.consolidated` / `memory.forgotten` 读事实）。
 mod recall;
 mod recall_score;
-// 批次边界 host 的执行体与派发点（DE-015 的 D-163）：轮中汇报住这一台。
+// 轮中汇报那一行的落点与能力口（DE-015 的 D-163）。
 mod report_exec;
 mod session_port;
 mod skill_events;

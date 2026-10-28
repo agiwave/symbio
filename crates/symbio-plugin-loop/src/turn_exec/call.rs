@@ -1,16 +1,16 @@
-//! 阶段② 开轮与驱动——幕首建草稿、接缝落格、内环跑完（· B2，DE-021 §5 动作 B2）。
+//! 阶段② 开轮与驱动——幕首建草稿，随后把**一个环**跑完（· B2，DE-021 §5 动作 B2）。
 //!
-//! 本模块有两条入口，对应草稿的两个时刻（`D-222` 订正 3）：
+//! 两个入口，对应草稿的两个时刻（`D-222` 订正 3）：
 //!
 //! - [`open_turn`]：**幕首**——把 [`Assembled`] 摊成 [`TurnInput`] 交给
 //!   `TurnRunner::begin`，产 [`Opened`]（已收束 / 有环要跑）。它一格「要等轮首那几行」
 //!   的事实都不落。
-//! - [`drive_opened`]：**轮首之后**——接缝（压缩入格 / 定档 / 首响上线）→ 渲染基线 →
-//!   填前缀与快路正文 → 内环（[`super::drive_steps`]），产 [`Running`]。
+//! - [`drive_opened`]：**轮首之后**——把轮首那一片状态（[`HeadEnv`]）与草稿交给
+//!   [`super::drive`]，**唯一的环**从接缝行一直跑到收束（或判成答话）。
 //!
-//! 中间那一段（轮首派发点、答话收束、水位、根骨架上线路、请求视图）在
-//! `chat_loop::inputs::land_head`，由调用方（`stage::run_stage`）把结果填进
-//! [`AfterHead`] 交进来——本模块不知道判决 / 压缩 / 召回跑没跑，只看它们寄存下的值。
+//! 轮首四行、接缝、内环是同一张绑定表上的行：先后由 `prio` 表达，不由本模块的函数
+//! 行序表达。本模块只负责把「环要借的那一片」交出去，并按 [`DriveEnd`] 分出两条
+//! 出口（判成答话 / 跑完收束）。
 
 use super::*;
 
@@ -33,15 +33,16 @@ pub(crate) struct Running<'a> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
-    pub(crate) recalled: Option<&'a super::super::recall::RecallView>,
-    pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) root_id: &'a str,
     pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
 }
 
 /// 幕首开轮的结果（[`open_turn`] 的出口）。
 pub(crate) enum Opened {
-    /// 本幕在开轮就收束了（首请求前中止 / 空答兜底）：没有环可跑。
+    /// 本幕在开轮就收束了（空答兜底：定稿答话正文为空）：没有环可跑。
+    ///
+    /// 首请求前中止**不在这里**：它成了环的第一道守卫（`abort_before_first_request`），
+    /// 因为草稿要先建好、被中止的幕才轮得到「轮首行一行都不跑」。
     Done(super::super::turn_runner::TurnOutcome),
     /// 有环要跑：草稿与驱动它要的端口。
     Run(OpenRun),
@@ -58,36 +59,44 @@ pub(crate) struct OpenRun {
     pub(crate) elimination_revoked: bool,
 }
 
-/// 轮首那几行跑完之后、交给 [`drive_opened`] 的**寄存物**。
+/// 轮首那一片**可控状态**：环要借、而本模块只拿到一份借用权的那些。
 ///
-/// 每一样都是「轮首的行跑完才知道」的：压缩改的就是消息列表，档位折自
-/// `policy.reflex` 的出口格（接缝自己读，不在这里），开场白是判决行 `Escalate`
-/// 的首响，前缀是请求视图的产物，召回与技能观测是本轮轮末要用的两个寄存位。
-pub(crate) struct AfterHead<'a> {
-    /// 请求视图的注入段（`build_request_sections` 的产物，**不落库**）。
-    pub(crate) request_sections: &'a [ChatNode],
-    /// 本轮之前发生的压缩（S2.7-b2）：`Some` ⇒ 接缝先落 `session.consolidated`。
-    pub(crate) consolidation: Option<&'a [ChatNode]>,
-    /// 对话面开场白（`Escalate` 首响）：正文与节点事实必须同时在场。
-    pub(crate) opening_text: Option<&'a str>,
-    pub(crate) opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
-    /// 快路命中的技能正文（`policy.reflex` 寄存）：`Some` ⇒ 本幕零模型往返。
-    pub(crate) reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
-    /// 长期记忆召回视图（轮末 `record_learning` 的入参）。
-    pub(crate) recalled: Option<&'a super::super::recall::RecallView>,
-    /// 技能路由观测（轮末落 `memory.recalled` 的入参）。
-    pub(crate) skill_obs: &'a [(String, bool)],
+/// `orchestrator` / `context` / `turn` 都不归本模块所有（它们是编排层与调用方的
+/// 本轮状态），`fresh_root` 是幕首定下的一个事实。环把它们逐圈再借给动作
+/// （[`super::HeadParts`]）——`&mut` 与 `&` 分开成形，因为 `context` / `turn`
+/// 每圈要重新借一次。
+///
+/// 接缝与轮首四行读的全是这一片；轮内那几行不看它。
+pub(crate) struct HeadEnv<'e> {
+    pub(crate) orchestrator: &'e super::super::chat_loop::state::ChatOrchestrator,
+    pub(crate) context: &'e mut super::super::chat_loop::state::SessionContext,
+    pub(crate) turn: &'e mut super::super::chat_loop::state::TurnState,
+    pub(crate) fresh_root: bool,
+}
+
+/// [`drive_opened`] 的两条出口：环判成「就此答话」，或跑完收束。
+pub(crate) enum OpenedFlow<'a> {
+    /// 判决判成「就此答话」：本幕**没有发请求**，环在选债之前就收工了。
+    /// 草稿、桥、分发方都已收掉（出臂即释放）；
+    /// 收束格由调用方落（`chat_loop::land_answered_turn`）——它要的是编排层的
+    /// 状态，不在本模块手里。
+    Answered,
+    /// 环跑到收束格出现：交回阶段③④ 要的交付束。
+    ///
+    /// 装箱只为让两条出口的尺寸可比：`Answered` 无载荷，不装箱时整个枚举按 312 字节
+    /// 的交付束分配，而这一支每幕至多构造一次。
+    Running(Box<Running<'a>>),
 }
 
 /// 幕首开轮（[`TurnRunner::begin`]）：只建草稿，不落任何「要等轮首那几行」的格。
 ///
-/// 首请求前的中止由 `prepare_turn` 的 1c 接住（落中止收束格、返回 [`Opened::Done`]）
-/// ——它排在本函数里、轮首那几行**之前**，所以被中止的幕不再跑判决 / 压缩 / 召回
-/// （`D-222` 订正 3 认下的行为变化）。
+/// 首请求前的中止由派发器的第一圈守卫接住（[`super::drive`] 的 `abort_before_first_request`，
+/// 落中止收束格、交回 [`super::DriveEnd::Finished`]）——它排在任何一行轮首行**之前**，
+/// 所以被中止的幕不再跑判决 / 压缩 / 召回（`D-222` 订正 3 认下的行为变化）。
 ///
 pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit> {
-    // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：`policy.reflex`
-    // 是轮首 host 的一行，它的出口格（`stage:"reflex"`）与正文随本轮状态到接缝；
+    // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：它由环上的
+    // `policy.reflex` 行选中，出口格（`stage:"reflex"`）与正文随本轮状态到接缝；
     // 本侧只把正文交给收束动作，不自己落 `final`（D-163）。
     let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(ProviderLlmAdapter::for_turn(
         a.provider.clone(),
@@ -95,8 +104,6 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
         a.abort.clone(),
     ));
     let tok = TokenIssuer::issue_deep();
-    // 汇报口随注入闭包进 `TurnInput`（`ReportPort` 是可克隆的能力句柄）。
-    let report = a.report.clone();
     let input = TurnInput {
         turn: a.turn_no,
         user_seq: a.user_seq,
@@ -109,45 +116,34 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
         // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
         // `InboxItem` 都在 `plugins/session`），而落格也不需要 core 参与：
         // 本函数自己就开着 `store`。
-        inject: injector(a.supplements.clone(), report).map(|(drain, report)| {
+        //
+        // 汇报（缺口 4）**不在这里**：批次边界那件事成了 `policy.report` 行，
+        // 由同一个环按 `prio` 选中、由它自己的执行体落格上线（D-163）。闭包只留
+        // 「抽干」这一件事——它仍然是 core 唯一的轮边界挂点。
+        inject: injector(a.supplements.clone()).map(|drain| {
             let store = a.store.clone();
             let actor = a.actor.clone();
             let turn_no = a.turn_no;
             let supplemental_no = a.supplemental_no.clone();
             // 折进的消息往收集器 push（末尾随 `ExecTurnResult` 回灌进落库镜像）。
             let sink_msgs = a.collected.clone();
-            // 汇报「产生即上线」借本轮那条流式桥送帧（`UiBridge::on_tool_frame`）。
-            // 克隆而非搬走：`bridge` 之后还要交给运行器，而函数末尾的 `drop(bridge)`
-            // 是发射端退出**唯一**的信号——多养一份它，等于把那个信号推迟到闭包死。
-            // 闭包随 `TurnInput` / `drop(dispatcher)` 在本轮内死去，因此那个信号
-            // 不会被推过收束点；这条时序是 hang 级别的（每个 v2 工具轮都要过它），
-            // 由 `round_report_reaches_the_live_surface_before_turn_end` 钉住。
-            let live = a.bridge.clone();
             std::sync::Arc::new(
-                move |anchor: Option<u64>|
-                    -> std::pin::Pin<
-                        Box<
-                            dyn std::future::Future<Output = Vec<symbio_core::PromptMessage>>
-                                + Send,
-                        >,
-                    > {
+                move |anchor: Option<u64>| -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Vec<symbio_core::PromptMessage>> + Send>,
+                > {
                     // `async move` 块按值捕获，所以这里先各 clone 一份——
                     // 否则第一次调用就把捕获物搬走，闭包退化成 `FnOnce`。
                     let drain = drain.clone();
-                    let report = report.clone();
                     let store = store.clone();
                     let actor = actor.clone();
                     let sink_msgs = sink_msgs.clone();
                     let supplemental_no = supplemental_no.clone();
-                    let live = live.clone();
                     Box::pin(async move {
                         // 抽干口本身就是异步的（会话动作面），直接 await——
                         // 搬家前那套 `blocking_read` + `block_in_place` 的桥接
                         // 随队列一起留在了 session，这里不再需要判 runtime flavor。
                         let batch = drain().await;
-                        // 顺序：**先抽干、后汇报**（同一条纪律）——抽干会把静默时钟
-                        // 归零，反过来就会出现「用户刚说完话，助手抢着报了一句进度」。
-                        let injected = supplement_into_request(
+                        supplement_into_request(
                             batch,
                             anchor,
                             store.as_ref(),
@@ -155,56 +151,11 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
                             turn_no,
                             &sink_msgs,
                             &supplemental_no,
-                        );
-
-                        // 批次边界的**派发点**（D-163）：这一刻「跑完了一批工具」
-                        // 交给引擎，该不该说由行 `policy.report` 自己判——静默 /
-                        // 配额 / 轮数三格都在 `report_due` v4 的输出里。本侧不再
-                        // 问一句「欠不欠」，也不再自己数批次（旧的 `AtomicUsize`
-                        // 与 `RoundHookFn` 就这样退的场）。
-                        //
-                        // 「先抽干、后汇报」仍是顺序纪律：上面那次抽干已经把补充格
-                        // 落进日志，静默锥随之前移（判据 12）。
-                        // 汇报的**落格与上线面**（D-163）就在这个闭包里：事实源
-                        // （store）、实时桥（`live`）、落库镜像（`sink_msgs`）与
-                        // 序号游标。三台 host 各自手里有自己那片，这里恰好是批次边界。
-                        if let Some(port) = report.as_ref() {
-                            match anchor {
-                                Some(anchor) => {
-                                    let landing = super::super::report_exec::ReportLanding {
-                                        collected: sink_msgs.clone(),
-                                        live: live.clone(),
-                                        no: supplemental_no.clone(),
-                                    };
-                                    if let Err(e) = super::super::report_exec::drive_report(
-                                        store.as_ref(),
-                                        turn_no,
-                                        port,
-                                        anchor,
-                                        &actor.principal,
-                                        &landing,
-                                    )
-                                    .await
-                                    {
-                                        // 汇报落格失败不升级成整轮失败（与定稿答话轮同一条
-                                        // 口径）：用户已经少听了一句，不该再多一个错误。
-                                        symbio_core::plugin_warn!(
-                                            "session",
-                                            "[Turn] 汇报派发失败（本轮继续，账仍开着）: {e:?}"
-                                        );
-                                    }
-                                }
-                                None => symbio_core::plugin_warn!(
-                                    "session",
-                                    "[Turn] 批次边界没有溯源锚点，本批不派发汇报（I2：断言类事件必须带溯源）"
-                                ),
-                            }
-                        }
-
-                        injected
+                        )
                     })
-                }) as super::super::turn_runner::RoundInjector
-            }),
+                },
+            ) as super::super::turn_runner::RoundInjector
+        }),
         // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
         // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
         final_reply: None,
@@ -234,8 +185,7 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
                     reasoning,
                 }
             }
-        })
-            as super::super::turn_runner::NodeFactsFn),
+        }) as super::super::turn_runner::NodeFactsFn),
         // 中途中止信号（D-052 决策 1）：闸门与首请求之间的空隙由运行器
         // 接管——落完用户格、发第一个请求前检查，已中止则走中止收束格。
         abort: Some(a.abort.clone()),
@@ -253,7 +203,7 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
             );
             false
         });
-    match super::TurnRunner::begin(a.store.as_ref(), llm.as_ref(), input).await {
+    match super::TurnRunner::begin(a.store.as_ref(), input).await {
         // 落格失败与动作失败走**同一个出口**（`ActorError` 的语义，这里折成
         // `TurnExecExit::Failed`）：调用方只认这一条通道，不为「开轮」单开一条。
         Err(e) => Err(TurnExecExit::Failed(PluginError::InternalError(format!(
@@ -270,24 +220,31 @@ pub(crate) async fn open_turn(a: &Assembled<'_>) -> Result<Opened, TurnExecExit>
     }
 }
 
-/// 接缝之后把草稿跑完：工具分发方 → 接缝落格 → 渲染基线 → 填前缀与快路 → 内环。
+/// 把唯一的环跑完：工具分发方 → 轮首四行 / 接缝 / 内环（同一个 `drive`）。
 ///
-/// ## 次序是硬的
+/// ## 次序不再由本函数表达
 ///
-/// - 分档与首响都在接缝上（`land_seam`），它们读的是轮首那几行的出口格；
-/// - 基线 prompt 在接缝**之后**渲染：压缩改的就是消息列表，而压缩刚在上一行落格；
-/// - 三个「填」也有序：先渲染，再插前缀（前缀往基线最前面插一条），最后寄存快路正文。
+/// 这里只做「把环要借的那一片交出去」：接缝（压缩 / 定档 / 首响）与轮首四行都是
+/// 绑定表上的行，先后由 `prio` 说；`run_seam` 那一行自己完成「压缩 → 请求视图 →
+/// 派发 / 首响 → 渲染基线 → 填前缀与快路」这条硬次序。本函数的行序因此只剩一件事：
+/// 分发方先建好（工具批的动作要它）。
 ///
 /// ## 两个生命周期
 ///
-/// `Assembled` 活到本函数结束（它持有会话句柄与事实源），而 `after` 借的是调用方的
-/// 本轮状态（寄存位）——两者寿命不同，`Running` 按**短的那个**成形（`'s: 'a`）：
+/// `Assembled` 活到本函数结束（它持有会话句柄与事实源），`head` 借的是调用方的
+/// 本轮状态（`'e` 与返回值的 `'a` 无关）——`Running` 按**短的那个**成形（`'s: 'a`）：
 /// 它只活到本轮收束，收束一完调用方就要写回 `turn`。
-pub(crate) async fn drive_opened<'s, 'a>(
+///
+/// ## 判成答话
+///
+/// [`DriveEnd::Answered`] 时本幕没有发请求：草稿（含注入闭包）、分发方、汇报落地面
+/// 与桥都要先丢掉，发射端才会在队列关闭后退出。收束格不在这里落
+/// （[`OpenedFlow::Answered`] 的文档说了为什么）。
+pub(crate) async fn drive_opened<'s, 'a, 'e>(
     a: Assembled<'s>,
     open: OpenRun,
-    after: AfterHead<'a>,
-) -> Result<Running<'a>, TurnExecExit>
+    head: HeadEnv<'e>,
+) -> Result<OpenedFlow<'a>, TurnExecExit>
 where
     's: 'a,
 {
@@ -300,7 +257,8 @@ where
         sink,
         user_text,
         tools,
-        supplemental_no: _,
+        report,
+        supplemental_no,
         presentation_tree,
         store,
         turn_no,
@@ -324,7 +282,7 @@ where
     // 请求上下文、转写出口与工具存档目录（core 认识这些即违 E-009）。
     let dispatcher = std::sync::Arc::new(super::super::tool_dispatch::SessionDispatchPort::new(
         parent,
-        ctx,
+        ctx.clone(),
         sink.clone(),
         loop_session.tool_archive_dir().to_path_buf(),
         store.clone(),
@@ -337,37 +295,28 @@ where
         presentation_tree,
         elimination_revoked,
     ));
-    // 接缝（`D-223` 订正 1 / 订正 2）：压缩入格 → 定档 → 首响上线。
-    // 它在 `begin` 之后、任何选债之前——三格事实都要等轮首那几行跑完，
-    // 而草稿要先于它们存在（`D-222` 订正 3），两件事只在这一点上交汇。
-    super::assemble::land_seam(super::assemble::Seam {
-        session: loop_session,
-        store: store.as_ref(),
-        bridge: bridge.as_ref(),
-        turn_no,
-        user_seq,
-        drive_seq,
+    // 汇报的落格面（事实源 / 实时桥 / 落库镜像 / 序号游标）：`policy.report` 的执行体
+    // 读它。四样都是本轮已建好的句柄，环里没有第二处能造出同一组。
+    let report_landing = super::super::report_exec::ReportLanding {
+        collected: collected.clone(),
+        live: bridge.clone(),
+        no: supplemental_no,
+    };
+    let mut head_parts = Some(super::HeadParts {
+        orchestrator: head.orchestrator,
+        request_ctx: &ctx,
+        loop_session,
+        context: head.context,
+        turn: head.turn,
+        bridge: &bridge,
+        event_sink: sink,
+        root_id,
+        fresh_root: head.fresh_root,
         actor: &actor,
-        consolidation: after.consolidation,
-        opening_text: after.opening_text,
-        opening_dialog: after.opening_dialog,
-    })
-    .await
-    .map_err(|e| {
-        TurnExecExit::Failed(PluginError::InternalError(format!(
-            "v2 运行器落格失败：{e:?}"
-        )))
-    })?;
-    // 基线 prompt 在接缝**之后**渲染：压缩改的就是消息列表，而压缩刚在上一行落格。
-    // 三个「填」的次序也是硬的：先渲染，再插前缀（前缀往基线最前面插一条），最后
-    // 寄存快路正文（快路正文不进 prompt，它只决定环先选中 `close-turn`）。
-    session.render_base(store.as_ref());
-    session.set_prefix(super::super::chat_loop::request_view_prefix(
-        after.request_sections,
-    ));
-    session.set_reflex(after.reflex.cloned());
-    // 步循环在**执行器**里，不在 `turn_runner` 里。
-    let outcome = super::drive_steps(
+        report_port: report.as_ref(),
+        report_landing: &report_landing,
+    });
+    let end = super::drive(
         &mut session,
         &store,
         llm,
@@ -375,6 +324,7 @@ where
         bridge.clone(),
         std::sync::Arc::from(tools),
         Some(dispatcher.clone()),
+        &mut head_parts,
         super::super::loop_rows::ACTORS,
     )
     .await
@@ -388,7 +338,25 @@ where
     // 收束派生事实出参同样先取走（承诺 / 任务表 / 熔断）——轮末随收束落格。
     let derived = dispatcher.take_derived();
     drop(dispatcher);
-    Ok(Running {
+    let outcome = match end {
+        super::DriveEnd::Finished(outcome) => outcome,
+        super::DriveEnd::Answered => {
+            // 草稿与汇报落地面各持一份桥：先丢它们，`drop(bridge)` 才是最后一个强引用。
+            drop(session);
+            drop(report_landing);
+            drop(bridge);
+            // 发射任务没排在收束前退出只影响实时面的收束帧，而本幕**已经**收束：
+            // 丢弃即可，不把它升级成错误。
+            if let Err(e) = emitter.await {
+                symbio_core::plugin_warn!(
+                    "session",
+                    "[Turn] 流式发射任务未正常退出（本幕已收束，继续）: {e}"
+                );
+            }
+            return Ok(OpenedFlow::Answered);
+        }
+    };
+    Ok(OpenedFlow::Running(Box::new(Running {
         session: loop_session,
         store,
         bridge,
@@ -402,11 +370,9 @@ where
         principal,
         to,
         user_text,
-        recalled: after.recalled,
-        skill_obs: after.skill_obs,
         root_id,
         presentation_tree,
-    })
+    })))
 }
 
 impl<'s> Assembled<'s> {
@@ -417,8 +383,6 @@ impl<'s> Assembled<'s> {
     pub(crate) fn into_running<'a>(
         self,
         outcome: super::super::turn_runner::TurnOutcome,
-        recalled: Option<&'a super::super::recall::RecallView>,
-        skill_obs: &'a [(String, bool)],
     ) -> Running<'a>
     where
         's: 'a,
@@ -452,52 +416,18 @@ impl<'s> Assembled<'s> {
             principal,
             to,
             user_text,
-            recalled,
-            skill_obs,
             root_id,
             presentation_tree,
         }
     }
-
-    /// 本幕**一个环都不跑**（定稿答话轮在轮首就地收束）：关桥、等发射端排空。
-    ///
-    /// 开轮已经建了桥与发射任务（`D-222` 订正 3：草稿排在轮首之前），而那一幕不会
-    /// 有任何一个模型往返来关闭它们。发射端只在队列关闭后退出，队列又要等**所有**
-    /// 桥的强引用消失——包括草稿里注入闭包那一份。所以调用方必须先丢掉草稿
-    /// （`drop(run)`）再调本函数，否则这里会永远等下去。
-    pub(crate) async fn discard(self) {
-        let Assembled {
-            bridge, emitter, ..
-        } = self;
-        drop(bridge);
-        // 发射任务没排在收束前退出只影响实时面的收束帧，而本幕**已经**收束（答话轮
-        // 在轮首就地结束）：把一次 UI 桥的时序问题升级成整轮失败，换来的是用户既拿到
-        // 正确答案又多一个错误。与汇报落格失败同一条口径。
-        if let Err(e) = emitter.await {
-            symbio_core::plugin_warn!(
-                "session",
-                "[Turn] 流式发射任务未正常退出（本幕已收束，继续）: {e}"
-            );
-        }
-    }
 }
 
-/// 一轮的执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
-/// 轮边界注入的两个可选口打成一个闭包（`None` = 两个都没装）。
+/// 轮边界注入的唯一挂点：抽干口（`None` = 本会话没装收件箱）。
 ///
-/// 与退役的 `round_hook::round_hook` 同一件事，只是第二个口从「回答要不要说」的
-/// 回调换成了「产一句什么话」的能力包（D-163）：判定已经归行表，这一侧只提供时机
-/// 与能力。写成两个 `map` 嵌套会得到四种组合，其中「两个都没有」本来就该退化成
-/// `None`——挂一个永远返回空的闭包只会让 core 每轮白问一次。
-fn injector(
-    supplements: Option<SupplementFn>,
-    report: Option<super::super::report_exec::ReportPort>,
-) -> Option<(SupplementFn, Option<super::super::report_exec::ReportPort>)> {
-    if supplements.is_none() && report.is_none() {
-        return None;
-    }
-    let drain: SupplementFn = supplements.unwrap_or_else(|| Arc::new(|| Box::pin(async { None })));
-    Some((drain, report))
+/// 汇报不挂在这里：它是 `policy.report` 行（D-163），判定归行表、落格与上线归行
+/// 自己的执行体。这里只剩「用户有没有中途插话」这一件 core 认得的事。
+fn injector(supplements: Option<SupplementFn>) -> Option<SupplementFn> {
+    supplements
 }
 
 /// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。

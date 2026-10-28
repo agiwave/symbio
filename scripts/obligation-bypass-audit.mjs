@@ -22,7 +22,7 @@
  * | **幂等点问** | 执行体（`by = Some`）动手前复核「本行还欠不欠」——并发 / 重放下第二次进入同一动作时的护栏 | **保留**，显式登记；今天 3 处 |
  *
  * ⚠ **调度旁路的归零前件是「借用面按步获取」**，不是把 `owes()` 换个名字。理由是可执行的：
- * 给某条 `policy.*` 行接上执行体（`by: Some`）之后，内环 `drive_steps` 也会按 `prio`
+ * 给某条 `policy.*` 行接上执行体（`by: Some`）之后，内环派发器也会按 `prio`
  * 选中它，而它的动作需要轮首上下文（编排器 / 会话上下文 / 请求级开销），内环手里没有
  * 这些 ⇒ `entry_of` 查不到动作 ⇒ 本轮落 `exhausted{no_progress}`。所以「接线」必须先有
  * **借用面按步获取**这个类型前件（`D-222`：一个环、一张绑定表），不归本判据催逼。
@@ -108,7 +108,7 @@ const VERBOSE = process.argv.includes('--verbose')
  * **调度旁路**（未承认的直调点）上限（**只许降**）。
  *
  * 口径：`owes(` 的**调用点**，排除四处——`fn owes(` 的定义行、`*.test.rs`、
- * `drive_steps` 函数体（那里问债不是旁路，它就是派发器本体），以及引擎的现读点
+ * 派发器函数体（那里问债不是旁路，它就是派发器本体），以及引擎的现读点
  * `Dispatch::row_owed`（D-136：派发前问表收敛到这一处，行名由 `Dispatch` 字面量
  * 声明、由下面那半边 OB-003 核对）。带着 OB-004 承认标记的点**不进这个数**，
  * 它们进下面那个幂等点问的数。
@@ -204,9 +204,9 @@ function declaredRows(rowsFile) {
   return rows
 }
 
-/** `drive_steps` 的函数体区间（`[start, end)`）——派发器本体问债不算旁路 */
-function driveStepsSpan(text) {
-  const m = /fn\s+drive_steps\b/.exec(text)
+/** `turn_exec::drive` 的函数体区间（`[start, end)`）——派发器本体问债不算旁路 */
+function driverSpan(text) {
+  const m = /fn\s+drive\b/.exec(text)
   if (!m) return null
   const open = text.indexOf('{', m.index)
   if (open < 0) return null
@@ -214,7 +214,7 @@ function driveStepsSpan(text) {
 }
 
 /**
- * 引擎的现读点（`Dispatch::row_owed`）函数体区间——同 `drive_steps` 一条理由。
+ * 引擎的现读点（`Dispatch::row_owed`）函数体区间——同派发器一条理由。
  *
  * D-136 之后「派发前问表」只剩这一处，它问的行名来自 `Dispatch` 字面量（声明），
  * 不是调用点自己算出来的布尔值。把它算成旁路会让基线虚高，而它又不是任何一处
@@ -297,7 +297,7 @@ for (const file of files) {
   const rawLines = raw.replace(/\r\n/g, '\n').split('\n')
   const lines = blankComments(raw)
   const text = lines.join('\n')
-  const spans = [driveStepsSpan(text), engineReadSpan(text)].filter(Boolean)
+  const spans = [driverSpan(text), engineReadSpan(text)].filter(Boolean)
   for (let j = 0; j < rawLines.length; j++) {
     const m = PRECHECK_MARK_RE.exec(rawLines[j])
     if (m) marks.push({ file, line: j + 1, reason: m[1].trim() })

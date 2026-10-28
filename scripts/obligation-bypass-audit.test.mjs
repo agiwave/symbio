@@ -7,7 +7,7 @@
  * 的失效形态全是**静默变绿**——数字算错、算宽、算不到，报出来都是「通过」，所以逐条钉：
  *
  *   ① **算得对**：调用点计数、多行调用抓得到行名、两格基线下方都要给提示；
- *   ② **不算多**：`fn owes(` 定义行、`*.test.rs`、`drive_steps` 函数体、引擎的现读
+ *   ② **不算多**：`fn owes(` 定义行、`*.test.rs`、派发器函数体、引擎的现读
  *      点 `row_owed`、注释里的 `owes(` 都不得进计数。**这几类每一条都会把基线喂松**，
  *      而松了的棘轮等于没有；
  *   ③ **行名只在 `ROWS` 里找**：同一文件的 `ACTORS` / 端口声明也写 `name: "…"`，
@@ -149,11 +149,11 @@ test('`*.test.rs` 里的断言不算调用点', () => {
   assert.match(out(r), /调度旁路 2\/2/)
 })
 
-test('`drive_steps` 函数体里的问债不算旁路（它就是派发器本体）', () => {
+test('派发器函数体里的问债不算旁路（它就是派发器本体）', () => {
   const r = audit({
     'crates/symbio-plugin-loop/src/a.rs': caller(['alpha', 'beta']),
     'crates/symbio-plugin-loop/src/turn_exec.rs':
-      'fn drive_steps(rows: &[Decl]) {\n    let _ = owes("alpha", &[], 0, 0);\n    let _ = owes("beta", &[], 0, 0);\n}\n',
+      'fn drive(rows: &[Decl]) {\n    let _ = owes("alpha", &[], 0, 0);\n    let _ = owes("beta", &[], 0, 0);\n}\n',
   })
   assert.equal(r.status, 0, out(r))
   assert.match(out(r), /调度旁路 2\/2/)

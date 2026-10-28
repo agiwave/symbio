@@ -119,7 +119,7 @@ pub struct TurnInput {
     /// （`plugins/session/turn_exec` 从会话元数据派生）。S08 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
-    // 请求级前缀**不是**本包的字段（`D-222` 订正 3）：它由 `prepare_turn_inputs`
+    // 请求级前缀**不是**本包的字段（`D-222` 订正 3）：它由 `prepare_request_sections`
     // 的 ⑥ 在轮首那几行**之后**收集，而草稿在那之前就建好了（草稿在幕首就建）。
     // 于是它的入口是 [`TurnSession::set_prefix`]——「建草稿」与「填前缀」分处两个
     // 时刻，填的那一个仍在第一次请求之前。为什么它不能拼进 `text`、为什么它排在
@@ -282,12 +282,12 @@ pub type NodeFactsFn = std::sync::Arc<dyn Fn() -> StreamNodeFacts + Send + Sync>
 ///
 /// 入参 = 本轮用户格的 seq（`None` = 本轮没有用户格，续写轮的极端情形）。
 ///
-/// **为什么是 `Future` 而不是裸 `Vec`**（缺口 4 的实测）：同一个挂点上还挂着
-/// 「轮边界汇报」——它要 `await` compose 的路由（插件间调用）。同步闭包只能在
-/// `block_in_place` 里 `block_on`，而**单线程 runtime 上那样会 panic**（tokio 明令
-/// 禁止），于是汇报会变成「多线程能用、单线程静默失效」——那正是本仓最恨的那种
-/// 形态：行为随部署方式变，且没有任何信号。异步闭包没有这个问题：core 在自己的
-/// async上下文里 `.await`，调用方的实现随便异步还是同步。
+/// **为什么是 `Future` 而不是裸 `Vec`**（缺口 4 的实测）：抽干口本身就是异步的
+/// （会话动作面），同步闭包只能在 `block_in_place` 里 `block_on`，而**单线程
+/// runtime 上那样会 panic**（tokio 明令禁止），于是注入会变成「多线程能用、单线程
+/// 静默失效」——那正是本仓最恨的那种形态：行为随部署方式变，且没有任何信号。
+/// 异步闭包没有这个问题：core 在自己的 async 上下文里 `.await`，调用方的实现
+/// 随便异步还是同步。
 ///
 /// **为什么把锚点传进来而不是让调用方自己找**：用户格是**运行器**落的，调用方
 /// 那边的快照取在它**之前**——于是「自己去网格里找本轮用户格」在开跑那一刻
@@ -413,13 +413,7 @@ impl TurnRunner {
     /// 不收束轮次（plan/11 批 2
     /// 恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
     ///
-    /// ## 为什么参数多到要 `allow`
-    ///
-    /// 七个参数**各自是一个不同的端口**（事实源 / 生成 / 令牌 / 输入 / 流式出口 /
-    /// 工具清单 / 分发通道），没有两个属于同一概念——打包成一个结构体只是把
-    /// 「七个端口」改名叫「一个结构体 + 七个字段」，调用方仍要逐个填，
-    /// 却多出一层只为过 lint 而生的壳。
-    /// 起一轮：准备阶段可能直接收束（反射档 / 早退），否则交回一个
+    /// 起一轮：准备阶段可能直接收束（定稿答话 / 空答兜底），否则交回一个
     /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
     ///
     /// **没有流式出口**：这个入口只落事实与备 prompt，不上任何节点。开场白要经流式桥
@@ -427,13 +421,12 @@ impl TurnRunner {
     /// 话还没说出来，桥也在接缝那一侧。
     pub(crate) async fn begin<S>(
         store: &S,
-        llm: &dyn LlmAdapter,
         input: TurnInput,
     ) -> Result<TurnSessionBegin, symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        match prepare::prepare_turn(store, llm, input).await? {
+        match prepare::prepare_turn(store, input).await? {
             prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
             prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
                 run,
@@ -453,7 +446,7 @@ pub(crate) enum TurnSessionBegin {
 
 /// 一轮的**会话草稿**：持有跨动作状态，但**不持有驱动**。
 ///
-/// 驱动归派发器（`turn_exec::drive_steps`），「这两个动作跑哪一个」归执行体
+/// 驱动归派发器（`turn_exec::drive`），「这两个动作跑哪一个」归执行体
 /// （[`super::turn_exec::run_execute`] 读草稿决定）；本类型只回答「这一个动作
 /// 发生了什么」（D-118 决策 4）。动作有五个，各自只写自己那一半事实：
 ///
@@ -490,6 +483,37 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
+    /// **中止守卫**：闸门与首请求之间那一段（`D-052` 决策 1）——环的第一圈问一次。
+    ///
+    /// 检查点从 `prepare_turn` 的 1c 搬到这里，因为它本来就是「环还没起、环的守卫
+    /// 先看一遍」：草稿必须先在幕首建好（`D-222` 订正 3），被中止的幕才轮得到
+    /// 「判决 / 压缩 / 召回一行都不跑」——判在选债之前而不是建草稿之前。
+    ///
+    /// 返回 `Some(outcome)` = 中止收束格已落（`settle::append_aborted` 的同一格），
+    /// 环直接收工；`None` = 照常进环。
+    pub(crate) async fn abort_before_first_request<S>(
+        &mut self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+    ) -> Result<Option<TurnOutcome>, symbio_core::AppendError>
+    where
+        S: Store<Event = Event> + ?Sized,
+    {
+        if !self.run.abort.as_ref().is_some_and(|sig| sig.is_aborted()) {
+            return Ok(None);
+        }
+        settle::append_aborted(
+            store,
+            &self.run.actor,
+            self.run.turn,
+            self.run.user_seq,
+            llm,
+            &self.run.turn_root_id,
+        )
+        .await
+        .map(Some)
+    }
+
     /// 渲染**基线 prompt**（`TurnInput` 时代由 `prepare_turn` 就地做，现在搬到接缝上）。
     ///
     /// ## 为什么必须在接缝上
@@ -509,7 +533,7 @@ impl TurnSession {
     ///
     /// ## 为什么它不在 `TurnInput` 里
     ///
-    /// 前缀是请求视图（`build_request_view`）的产物，而它的收集（`prepare_turn_inputs`
+    /// 前缀是请求视图（`build_request_view`）的产物，而它的收集（`prepare_request_sections`
     /// 的 ⑥）依赖轮首那几行（召回寄存的 `context_sections`）——那些行是环的债，草稿在
     /// 它们之前就建好了（`D-222` 订正 3）。于是「建草稿」与「填前缀」分处两个时刻；
     /// 这一格是第二个时刻的入口，调用点必须仍在**第一次请求之前**。

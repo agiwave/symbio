@@ -195,8 +195,8 @@ pub(crate) fn begin_model(
 /// ## 为什么是 `'static`
 ///
 /// 它寄存进本轮草稿（[`super::TurnSession::inflight`]），而草稿**没有生命周期参数**：
-/// 草稿是 `TurnStep<'a>` 里被 `&'a mut` 借走的那一片，一旦它自己也带生命周期，
-/// `Action = for<'a> fn(&'a mut TurnStep<'a>)` 就得对**两个**生命周期成立——而绑定表
+/// 草稿是 `Ctx<'a>` 里被 `&'a mut` 借走的那一片，一旦它自己也带生命周期，
+/// `Action = for<'a> fn(&'a mut Ctx<'a>)` 就得对**两个**生命周期成立——而绑定表
 /// 要求这些函数指针 `'static`，全量化的只有 `'a` 一个。所以路只有一条：future 不借
 /// 任何只在派出那一层栈帧里成立的引用。[`begin_model`] 因此把端口与消息全部搬成
 /// owned（`Arc` 句柄 + `Vec<PromptMessage>`），槽里剩下的就是一个 `'static` 的框。

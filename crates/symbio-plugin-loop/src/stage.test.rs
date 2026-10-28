@@ -48,7 +48,7 @@ impl ExecTranscriptWriter for NoopSink {
 
 /// 假 provider：**每幕答一句**。
 ///
-/// 跑一幕本来就要走一次模型往返（`drive_steps` 的 `announce-model` → `dispatch-model`），
+/// 跑一幕本来就要走一次模型往返（`drive` 的 `announce-model` → `dispatch-model`），
 /// 一个会失败的假件只能证明「幕在中途失败了」，证不了「幕跑完了」。这里答一句
 /// 定死的话：本文件要的是整幕走到收束，正文内容与判据无关。
 struct ReplyModel;
@@ -266,7 +266,13 @@ async fn run_stage_lands_one_branch_fact_for_a_retry_and_consumes_the_registrati
     // 收束格」本身），第二幕跑不到「登记之后」那几格。这里直接问那个登记口——
     // 它正是每一幕都会调的那一处。
     h.turn.drive_seq += 100;
-    super::land_retry_branch(&h.store, &h.ctx, &mut h.turn, "r-next").expect("登记是空操作");
+    super::super::turn_exec::land_retry_branch(
+        h.store.as_ref(),
+        h.ctx.as_ref(),
+        &mut h.turn,
+        "r-next",
+    )
+    .expect("登记是空操作");
     assert_eq!(branch_facts(&h).len(), 1, "幕间续写不再开第二支");
 }
 

@@ -9,8 +9,8 @@
 //!
 //! 本模块把「已做」落成事实。落格者只有一种身份：**产它的那一步自己落**。
 //!
-//! 环上那三行（`policy.classify` / `policy.compress` / `policy.recall`）由执行体在动作
-//! 完成的那个时刻落：派发点两次动作之间重读日志，只有日志看得见这一行关账。
+//! 环上那几行（`policy.classify` / `policy.compress` / `policy.recall` / `policy.report`）
+//! 由执行体在动作完成的那个时刻落：派发点两次动作之间重读日志，只有日志看得见这一行关账。
 //!
 //! 于是一条禁止适用于全模块：**不寄存草稿**。草稿要等另一段落进日志，而派发点读的
 //! 就是日志——环会在同一次调用里再选中同一笔债。
@@ -89,9 +89,9 @@ impl VerdictSource {
 /// （第几次请求）是引擎记账，不派发任何执行体。两个闭集因此分开（事实侧多出这两格，
 /// 派发侧的行由 `loop_rows` 的 `Decl.name` 指认，本枚举只管事实里记了什么）。
 ///
-/// `policy.report` 不在这里：汇报的到期由 `report_due` 视图算，没有「这一步
-/// 做过没有」要记。快路（`policy.reflex`）在这里：`reflex` 是它的出口格
-/// （见 [`StageName::Reflex`]）。
+/// `policy.report` 也在这里：它的到期由 `report_due` 视图算，但「这一档静默试过
+/// 没有」得记在日志上（[`StageName::Report`]）。快路（`policy.reflex`）在这里：
+/// `reflex` 是它的出口格（见 [`StageName::Reflex`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageName {
     Decide,
@@ -100,20 +100,30 @@ pub(crate) enum StageName {
     /// 反射档这一轮已作答（`result` = 命中的技能 id）。它是 `policy.reflex`
     /// 的出口，也是 `turn_head.reflex_answered` 的唯一来源。
     Reflex,
+    /// 这一次静默区间报过（`result` = `sent` / `silent`）。
+    ///
+    /// 它是 `policy.report` 的出口。`silent`（措辞没给话）也要落：只落 `sent` 的话，
+    /// 一个不产话的措辞口会让同一个静默区间每次迭代都重新到期——环在两格之间空转。
+    /// 同一性带 `report_due` 的锚（见 [`StageFact::report`]），下一个静默区间是新的一格。
+    ///
+    /// 它**不是** `reported_anchors` 的关账格：那个视图只认汇报事实（`chat.assistant
+    /// .reported`），把这一格算进去会让本族事实成为自己的依赖边（`reported_anchors`
+    /// 的出口 ⇒ 报告行的执行体，而报告行又写这一格 ⇒ `DependencyCycle`）。「同一段
+    /// 静默只试一次」因此由 `report_due` 在**开账侧**读这一格判，不在关账侧。
+    Report,
     /// 这一轮是恢复幕（`result` = `retry` / `approve` / `reject` / `supply` /
     /// `answer`；`retry_subtree` 按新轮处理，不落本格）。
     Resume,
     /// 第几次请求——`round` 的**事实形态**。引擎在每次请求前落。
     Round,
-    /// 本幕的请求输入已备好：`stage::prepare` 的出口。
+    /// 本幕的请求输入已备好：接缝行的出口。
     ///
     /// `result` 两档：`ready` = 输入就绪、这一幕还欠一次往返；`closed` = 准备段
     /// 走完时本幕已经收束（定稿答话轮）——那一幕**没有**输入，也没有往返。
     /// 两档都要落：只落 `ready` 的话，收束的那一幕在事实面上与「还没准备」同形。
     ///
-    /// 它曾是 `prepare-turn` 行（`prepared: false` = 这一幕还欠一次准备）的出口；
-    /// 那条行随 `turn` 端口退场（`D-222`），因此今天这一格**没有生产读者**，
-    /// 留着是因为它是「备输入那一步跑了、结局是哪一档」的唯一事实。
+    /// `ready` 是 `turn_head.prepared` 的来源，而接缝行（`turn × asserted`）以它为
+    /// 出口：`prepared: false` ⇒ 还欠这一段，`prepared: true` ⇒ 轮内各行可以开账。
     Inputs,
 }
 
@@ -124,6 +134,7 @@ impl StageName {
             Self::Compress => "compress",
             Self::Recall => "recall",
             Self::Reflex => "reflex",
+            Self::Report => "report",
             Self::Resume => "resume",
             Self::Round => "round",
             Self::Inputs => "inputs",
@@ -272,7 +283,21 @@ impl StageFact {
         fact
     }
 
-    /// 本幕的请求输入已备好：`stage::prepare` 的出口（同名文档见 [`StageName::Inputs`]）。
+    /// 汇报尝试格：这一次静默区间报过（`result` = `sent` / `silent`）。
+    ///
+    /// `identity` = 这段静默的**锚**（`report_due.anchor`，最近一条可作锚的发言 /
+    /// 汇报 / 补充格的 seq）。它是「同一段静默只试一次」在事实面上的身份：
+    /// `report_due` 读到锚之后已有这一格，就不再判到期。
+    ///
+    /// `silent`（措辞没给话）也落一格——只落 `sent` 的话，一个不产话的措辞口会让
+    /// 同一段静默每次选债都重新到期，环在两格之间空转。
+    pub(crate) fn report(round: usize, anchor: u64, result: &str) -> Self {
+        let mut fact = Self::ran(StageName::Report, round).with_result(result);
+        fact.identity = Some(anchor.to_string());
+        fact
+    }
+
+    /// 本幕的请求输入已备好：接缝行的出口（同名文档见 [`StageName::Inputs`]）。
     ///
     /// 同一性带上本幕的锚（`drive_seq`）——与 [`Self::recall`] 同一条理由，但这里
     /// 更硬：续写幕复用轮号与请求轮次，`(turn, round, stage)` 三元组会与首幕

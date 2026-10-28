@@ -130,7 +130,7 @@ pub(crate) struct SessionContext {
     ///
     /// `session.consolidated` 是**事实**，而事实只能由持写者令牌的一方落格
     /// （[`symbio_plugin_session::store::EventWalStore`] 的单写者闸门）。压缩跑在
-    /// `prepare_turn_inputs`（步骤 3），而它**不持**令牌——令牌在 `execute_turn`
+    /// 接缝（`run_seam` 那一行），而它**不持**令牌——令牌在 `execute_turn`
     /// （步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
     /// `NotTheWriter`，而那是**静默**的：压缩照常生效、界面照常变短，只有事实源里
     /// 少了一条事件（于是切源之后压缩在重建面上等于没发生过）。
@@ -194,7 +194,7 @@ pub(crate) struct TurnState {
     /// （`continuation_count` 已随幕的迭代器退场，`D-222` §二），一次请求加一格，
     /// 绝大多数轮就是 0 或 1。
     ///
-    /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_exec::drive_steps` 的环体里
+    /// ⚠️ 它**不是**工具轮数。v2 的工具循环在 `turn_exec::drive` 的环体里
     /// 一批批跑完，那里有唯一的真实计数（`tool_round`）；本层一次请求就是一个整体，
     /// 看不到第几轮工具。于是这一层的判据只能是「这是不是本轮**第一次请求**」——
     /// 轮首判决、长期记忆召回、`user_prompt_submit` 钩子、流式起始的轮次标注都是它。
@@ -227,7 +227,7 @@ pub(crate) struct TurnState {
     /// 每条 `(skill_id, fallback)`，即 `skill_events::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
-    /// **读侧填**（`prepare_turn_inputs` 拿置信度闸判），**轮末收束入格**
+    /// **读侧填**（`prepare_request_sections` 拿置信度闸判），**轮末收束入格**
     /// （`derived_facts::record_learning` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
     /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     ///
@@ -286,7 +286,7 @@ pub(crate) struct TurnState {
     pub(crate) head_reflex: Option<super::super::turn_runner::ReflexAnswer>,
     /// 本轮请求的**固定开销**（系统提示词 + 工具清单折算的 token 数）。
     ///
-    /// 由准备段（`prepare_turn_inputs` 的 ①②）算出后写在这里，供压缩行的执行体
+    /// 由准备段（`collect_reads`）算出后写在这里，供压缩行的执行体
     /// 判水位——寄存一个数，而不是把「收集提示词与工具」搬进执行体（那是收口 ②
     /// 的唯一收集点，拆两处就出现两个时机）。0 = 本轮还没收集过（压缩行不会被选中）。
     pub(crate) request_overhead: usize,
@@ -312,7 +312,7 @@ pub(crate) struct TurnState {
     pub(crate) facts: Vec<symbio_core::Event>,
     /// 续写幕复用的 Turn 根节点 id（d）。
     ///
-    /// 唤醒请求发生在开幕之前，`prepare_turn_inputs` 按它决定「要不要新开一个根」：
+    /// 唤醒请求发生在开幕之前，`stage::run_stage` 按它决定「要不要新开一个根」：
     /// 有值 ⇒ 复用被续写轮的根（结果卡挂回原来那棵树），并且**不重发**流式占位
     /// ——那个骨架早在本轮首幕就发过了。`None` = 新轮，照常新开。
     pub(crate) resume_root: Option<String>,

@@ -72,16 +72,11 @@ pub(crate) use self::wake::merge_runner_messages;
 ///
 /// ## 为什么这里是这个形状（D-163）
 ///
-/// 「这一段静默该不该说」已经全在行 `policy.report` 与 `report_due` v4 的 `due` 里
+/// 「这一段静默该不该说」已经全在行 `policy.report` 与 `report_due` 的 `due` 里
 /// ——开关 / 静默时长 / 配额 / **工具轮数**四格都由本幕已落的事实折出。所以这里
 /// 不再问 `owes`、也不再自己数批次边界（那个 `AtomicUsize` 与返回草稿的
 /// `RoundHookFn` 因此退场）：编排层只剩一件本侧才能做的事——**问 compose 要一句话**
 /// （编排器、请求句柄、轮首会话视图都在这一侧）。
-///
-/// ## `now_ms` 为什么不在这里
-///
-/// 它随 `ExecTurn` 一路下去（`ReportPort::now_ms`）：派发点与执行体用的是**同一个**
-/// 「本幕的现在」（唤醒事实的 `ts`，判据 12），两个读数从两个地方取就是两条时钟。
 ///
 /// ## 会话视图：只给**轮首**那一份
 ///
@@ -95,7 +90,6 @@ pub(crate) fn report_port(
     orchestrator: Arc<ChatOrchestrator>,
     ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
     conversation: Vec<ChatNode>,
-    now_ms: i64,
 ) -> super::report_exec::ReportPort {
     let text: super::report_exec::ReportTextFn = Arc::new(move |snapshot: RunSnapshot| {
         let orchestrator = orchestrator.clone();
@@ -106,7 +100,7 @@ pub(crate) fn report_port(
                 .await
         })
     });
-    super::report_exec::ReportPort { now_ms, text }
+    super::report_exec::ReportPort { text }
 }
 
 /// 把请求级注入段拼成一段前缀（v2 运行器的 prompt 入口）。
@@ -356,7 +350,7 @@ pub async fn run_chat_loop(
         };
 
         // 轮首判决**不在这里**：它是 `policy.classify` 行的执行体（[`run_classify`]），
-        // 由步骤 3 的轮首派发点向求解器要（D-159）。判决的对象、判据与「什么时候收尾」
+        // 由步骤 3 的环向求解器要（D-159 + `D-222` 裁决 5）。判决的对象、判据与「什么时候收尾」
         // 三条边界都写在那条行与那个执行体的文档里；本文件的固定七步只管「开幕之后
         // 发请求」，不再按名点问任何一行欠不欠。
 
@@ -366,7 +360,7 @@ pub async fn run_chat_loop(
         // 之间」都由**结构**保证，不再需要一条判据守着（旧判据读的是恒 0 的轮次计数，
         // v2 下永不成立；裁决见 [D-074](../../../docs/003-design/014-单环一表.md#d-074-恒-0-的轮内计数退出主循环工具轮软上限整条退役抽干点搬到批次边界 "DE-014-单环一表")）。
         // 同一处还负责「抽到补充 ⇒ 静默时钟归零」：抽干落的补充格就是那条静默锚，
-        // 视图从日志里读它（汇报的触发点不再有时刻入参，见 `report_exec`）。
+        // 视图从日志里读它（汇报那一行只读事实，时刻与它同源，见 `report_exec`）。
         plugin_info!(
             "session",
             "[Turn] 第 {} 次请求开始 (msgs={})",
@@ -388,10 +382,10 @@ pub async fn run_chat_loop(
         // 投影里看不到用户说过什么）。D-052 决策 1 要求「一轮的产出无论完成 / 失败 /
         // 被中断 / 悬在等待用户，都入格」，决策 2 要求终止以**状态**入账。
         //
-        // 检查点已**下沉**到 `turn_exec::drive_steps` 的 1c 步：用户格已落、
+        // 检查点在 `turn_exec::drive` 的**第一道守卫**（第一圈、选债之前）：用户格已落、
         // 第一个 LLM 请求未发，已中止则落**中止收束格**（`chat.assistant.final` +
         // `status: "aborted"` + `terminated`）。因此：
-        //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
+        //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被那道守卫接住，**不会**多发
         //     一次 LLM 请求（与原意图一致）；
         //   - 用户格与中止收束格成对入格（N3/C4 的不变量在运行器内守住）。
         //
@@ -413,17 +407,18 @@ pub async fn run_chat_loop(
         })
         .await
         {
-            // 读失败（轮首那台的会话端口读不出来）：原样上抛，走它的兜底格路径。
+            // 读失败（轮首那一片的会话端口读不出来）：原样上抛，走它的兜底格路径。
             Err(super::turn_exec::ActorError::Read(e)) => {
                 return finish_turn(&context, &sink, &turn, TurnExit::Failed(e)).await;
             }
-            Err(e) => {
+            // 落格失败：错误本身进出口文本，两类失败在出口上因此各自可辨。
+            Err(super::turn_exec::ActorError::Append(e)) => {
                 return finish_turn(
                     &context,
                     &sink,
                     &turn,
                     TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                        "本幕执行失败：{e:?}"
+                        "本幕落格失败：{e:?}"
                     ))),
                 )
                 .await;

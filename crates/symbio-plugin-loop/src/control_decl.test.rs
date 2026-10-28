@@ -163,9 +163,8 @@ fn control_plane_loads_and_freezes() {
     // `retry`（`D-222` 订正 2——一次模型往返此后占两个环步，`sent` 只说明「发出去了」），
     // 读面随之补 `retry` 的 `port` / `id` / `attempt` 与 `response` 的 `id` / `attempt`；
     // v13 的 `closure`（本幕最近一条收束格的 `reason`）是幕间判据「还开不开下一幕」的
-    // 数据面；v12 的 `prepared`（本幕落过 `inputs` 阶段格没有）的读者 `prepare-turn`
-    // 行已随 `turn` 端口退场（`D-222`），这一格与 `turn.stage{inputs}` 目前都无生产读者；
-    // v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
+    // 数据面；v12 的 `prepared`（本幕落过 `inputs` 阶段格没有）是接缝行的前件
+    // （`prepare-turn` 以它为开账条件）；v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
     // 从「`prio` 碰巧排对」变成事实前件；
     // 而 `reflex_answered`（D-163）、`answered`（D-162 裁决 1）与 `has_final` /
     // `closeable` / `tools_open` 的读面自 v8 起只看「这一轮自己的模型往返」
@@ -175,7 +174,10 @@ fn control_plane_loads_and_freezes() {
     assert_eq!(frozen.view("turn_head").unwrap().ver, 14);
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
-    assert_eq!(frozen.view("report_due").unwrap().ver, 4);
+    // `report_due` 到 v6：v5 把「那一批关完了」（`at_boundary`）与「这一段静默试过
+    // 没有」折进开账侧；v6 再要求最近一批已关闭的工具调用在锚之后——一次边界只派发
+    // 一次（`D-163` 裁决 4），合表之后环每一步都问，这一条不再白得。
+    assert_eq!(frozen.view("report_due").unwrap().ver, 6);
     assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
 }
 
@@ -1025,28 +1027,47 @@ fn cfg(interval: i64, quota: u64) -> Value {
     })
 }
 
-/// 本幕跑完过一批工具：一条带 `calls` 的模型应答就是一轮（v4 的轮数前提读它）。
-fn worked(at: i64) -> Event {
-    ev_at(
-        1,
-        EVENT_RESPONSE,
-        json!({
-            "port": "model",
-            "id": "m-1",
-            "attempt": 1,
-            "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
-        }),
-        at,
-    )
+/// 本幕跑完过**一批**工具：模型应答带一条调用，工具端口再落它的终局。
+///
+/// v5 的轮数前提读的是**批次边界**：只有 `calls` 非空而那一批还没关完时，它不是
+/// 「完成一轮」，是「还在跑」——汇报句里的「已经完成 N 轮」那时是假话。
+fn worked(at: i64) -> Vec<Event> {
+    vec![
+        ev_at(
+            1,
+            EVENT_RESPONSE,
+            json!({
+                "port": "model",
+                "id": "m-1",
+                "attempt": 1,
+                "calls": [{ "port": "tool", "id": "tool-1-d0-c1", "name": "read_file", "arguments": {} }],
+            }),
+            at,
+        ),
+        ev_at(
+            1,
+            EVENT_RESPONSE,
+            json!({ "port": "tool", "id": "tool-1-d0-c1", "attempt": 1 }),
+            at + 1,
+        ),
+    ]
+}
+
+/// 把一次「跑完一批工具」的整段事实接进夹具。
+fn with_worked(mut events: Vec<Event>, at: i64) -> Vec<Event> {
+    events.extend(worked(at));
+    events
 }
 
 #[test]
 fn report_due_needs_log_and_now_only() {
-    let events = vec![
-        ev_at(1, "session.config", cfg(1000, 2), 10),
-        ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        worked(30),
-    ];
+    let events = with_worked(
+        vec![
+            ev_at(1, "session.config", cfg(1000, 2), 10),
+            ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ],
+        30,
+    );
     // 静默 1500ms > 1000ms，配额未用完，已跑完一批工具 ⇒ 到期。
     assert_eq!(
         report_due(&events, 1520),
@@ -1083,23 +1104,25 @@ fn report_due_needs_log_and_now_only() {
 
 #[test]
 fn report_due_resets_quiet_on_assistant_speech() {
-    let events = vec![
-        ev_at(1, "session.config", cfg(1000, 2), 10),
-        ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        worked(40),
-        ev_at(
-            1,
-            "chat.assistant.reported",
-            json!({"text": "先报一句"}),
-            900,
-        ),
-    ];
+    let mut events = with_worked(
+        vec![
+            ev_at(1, "session.config", cfg(1000, 2), 10),
+            ev_at(1, "user.message", json!({"text": "hi"}), 20),
+        ],
+        40,
+    );
+    events.push(ev_at(
+        1,
+        "chat.assistant.reported",
+        json!({"text": "先报一句"}),
+        900,
+    ));
     // 最近一句助手文本在 900 ⇒ 静默 200ms，未到 1000ms；静默区间的身份跟着前移。
     assert_eq!(
         report_due(&events, 1100),
         json!({
             "turn": 1,
-            "anchor": seq(&events[3]),
+            "anchor": seq(&events[4]),
             "due": false,
             "quiet_ms": 200,
             "tool_rounds": 1,
@@ -1131,14 +1154,16 @@ fn report_due_resets_quiet_on_resume() {
 #[test]
 fn reported_anchors_close_one_quiet_interval_each() {
     // 每条汇报关掉它**之前**那段静默；汇报自己成为下一段的起点。
-    let events = vec![
-        ev_at(1, "session.config", cfg(1000, 3), 10),
-        ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        ev_at(1, "chat.assistant.reported", json!({"text": "一"}), 900),
-        ev_at(1, "chat.assistant.reported", json!({"text": "二"}), 1900),
+    let events = with_worked(
+        vec![
+            ev_at(1, "session.config", cfg(1000, 3), 10),
+            ev_at(1, "user.message", json!({"text": "hi"}), 20),
+            ev_at(1, "chat.assistant.reported", json!({"text": "一"}), 900),
+            ev_at(1, "chat.assistant.reported", json!({"text": "二"}), 1900),
+        ],
         // 第二段之后又跑完一批工具：第三段到期时轮数前提也成立。
-        worked(2_500),
-    ];
+        2_500,
+    );
     assert_eq!(
         reported_anchors(&events, 0),
         json!([
@@ -1192,20 +1217,22 @@ fn report_due_respects_quota_and_switch() {
 #[test]
 fn report_due_quota_is_per_drive() {
     // 配额是请求作用域的量：续写幕重新开账，首幕报过不影响本幕的额度。
-    let events = vec![
-        ev_at(1, "session.config", cfg(1000, 1), 10),
-        ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        ev_at(1, "chat.assistant.reported", json!({"text": "报过"}), 30),
-        ev_at(
-            1,
-            "turn.stage",
-            json!({"stage": "resume", "round": 0, "result": "approve"}),
-            9_000,
-        ),
-        ev_at(1, "session.config", cfg(1000, 1), 9_001),
+    let events = with_worked(
+        vec![
+            ev_at(1, "session.config", cfg(1000, 1), 10),
+            ev_at(1, "user.message", json!({"text": "hi"}), 20),
+            ev_at(1, "chat.assistant.reported", json!({"text": "报过"}), 30),
+            ev_at(
+                1,
+                "turn.stage",
+                json!({"stage": "resume", "round": 0, "result": "approve"}),
+                9_000,
+            ),
+            ev_at(1, "session.config", cfg(1000, 1), 9_001),
+        ],
         // 续写幕自己也跑完一批工具：轮数同样随幕重新开账。
-        worked(9_500),
-    ];
+        9_500,
+    );
     let due = report_due(&events, 10_500);
     assert_eq!(due["reports"], json!(0));
     assert_eq!(due["tool_rounds"], json!(1));
@@ -1221,17 +1248,19 @@ fn report_due_is_empty_without_facts() {
 fn views_are_pure_same_slice_same_now_same_value() {
     // D-115 决策 1：`now` 是入参。同一份事实切片求值两次逐字相同；
     // 不同 `now` 只通过比较影响 `due`——视图自己不读时钟。
-    let events = vec![
-        ev_at(1, "session.config", cfg(1000, 3), 10),
-        ev_at(1, "user.message", json!({"text": "hi"}), 20),
-        ev_at(
-            1,
-            "turn.stage",
-            json!({"stage": "recall", "round": 0, "result": "hit"}),
-            30,
-        ),
-        worked(40),
-    ];
+    let events = with_worked(
+        vec![
+            ev_at(1, "session.config", cfg(1000, 3), 10),
+            ev_at(1, "user.message", json!({"text": "hi"}), 20),
+            ev_at(
+                1,
+                "turn.stage",
+                json!({"stage": "recall", "round": 0, "result": "hit"}),
+                30,
+            ),
+        ],
+        40,
+    );
     assert_eq!(report_due(&events, 5_000), report_due(&events, 5_000));
     assert_eq!(turn_head(&events, 5_000), turn_head(&events, 5_000));
     assert_eq!(report_due(&events, 5_000)["due"], json!(true));

@@ -112,7 +112,7 @@ impl TurnRunner {
         .await
     }
 
-    /// 测试侧的步驱动：**直接调生产派发器**（`turn_exec::drive_steps`），不复制循环。
+    /// 测试侧的步驱动：**直接调生产派发器**（`turn_exec::drive`），不复制循环。
     ///
     /// 早先这里另写了一份等价循环；那会让「无进展收束」「步数上界」的用例只测到副本。
     /// 现在测试驱动与生产驱动是同一条路径（后果 2 的验收要求）。
@@ -150,7 +150,7 @@ impl TurnRunner {
     /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
     ///
     /// `prefix` / `reflex` 是**备输入的产物**（`D-222` 订正 3）：生产里由
-    /// `prepare_turn_inputs` 的 ⑥ 与轮首的 `policy.reflex` 给，夹具自己造。它们是这条
+    /// `prepare_request_sections` 的 ⑥ 与轮首的 `policy.reflex` 给，夹具自己造。它们是这条
     /// 路径上的第二个接缝——「前缀排在基线之前」与「快路零往返」两条用例要它才造得出来。
     ///
     /// 本函数是**生产编排的测试门面**：`begin` → 填 → 驱动，三步与
@@ -170,12 +170,28 @@ impl TurnRunner {
         prefix: Option<String>,
         reflex: Option<super::super::turn_runner::ReflexAnswer>,
     ) -> Result<TurnOutcome, ActorError> {
-        // 派发格是**接缝**上的事实（`D-223` 订正 1）：生产里由 `assemble_turn` 落（那一刻
-        // 档位才折得出来），夹具自己落。它不只是审计——`turn.dispatch` 的幂等键
-        // （`d-{turn}-{drive_seq}`）还兼着「同一幕不许跑两次」的那道闸。
+        // 接缝那一行的两格出口由夹具自己落（`D-222` 裁决 5：轮首四行、接缝、汇报与
+        // 轮内各行现在同住一张绑定表，本夹具不跑前三者 ⇒ 它们的账要提前关好）。
+        //
+        // 派发格不只是审计——`turn.dispatch` 的幂等键（`d-{turn}-{drive_seq}`）还兼着
+        // 「同一幕不许跑两次」的那道闸；`inputs` 格是 `turn_head.prepared` 的来源，
+        // 没它的话环的第一笔债是 `prepare-turn`（`prio` 52），而那个动作要的是编排层
+        // 那一片状态，本夹具没有。
         let facts = store.range(symbio_core::Seq::new(0));
         let now = super::super::loop_rows::wake_now_ms(&facts, input.drive_seq);
         let tier = super::super::loop_rows::turn_tier(&facts, input.turn, now);
+        super::super::stage_events::land(
+            store.as_ref(),
+            input.turn,
+            input.user_seq,
+            &input.actor.principal,
+            &[super::super::stage_events::StageFact::inputs(
+                0,
+                input.drive_seq,
+                "ready",
+            )],
+        )
+        .map_err(ActorError::Append)?;
         super::super::chat_loop::land_dispatch(
             store.as_ref(),
             input.turn,
@@ -185,20 +201,20 @@ impl TurnRunner {
             &input.actor,
         )
         .map_err(ActorError::Append)?;
-        let mut session =
-            match super::super::turn_runner::TurnRunner::begin(store.as_ref(), llm.as_ref(), input)
-                .await
-                .map_err(ActorError::Append)?
-            {
-                super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
-                super::super::turn_runner::TurnSessionBegin::Run(session) => session,
-            };
+        let mut session = match super::super::turn_runner::TurnRunner::begin(store.as_ref(), input)
+            .await
+            .map_err(ActorError::Append)?
+        {
+            super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
+            super::super::turn_runner::TurnSessionBegin::Run(session) => session,
+        };
         // 三样「填」与生产逐字同序（`turn_exec::call_model`）：基线 prompt 先渲染
         // （压缩已经由上面那次派发格之前的步骤落好），再插前缀，最后寄存快路正文。
         session.render_base(store.as_ref());
         session.set_prefix(prefix);
         session.set_reflex(reflex);
-        super::super::turn_exec::drive_steps(
+        // `head` 恒 `None`：本夹具没有编排层那一片状态，而它选到的行也不读它。
+        match super::super::turn_exec::drive(
             &mut session,
             store,
             llm,
@@ -206,9 +222,18 @@ impl TurnRunner {
             sink,
             tools,
             dispatch,
+            &mut None,
             actors,
         )
-        .await
+        .await?
+        {
+            super::super::turn_exec::DriveEnd::Finished(outcome) => Ok(outcome),
+            super::super::turn_exec::DriveEnd::Answered => {
+                Err(ActorError::Read(symbio_core::PluginError::InternalError(
+                    "夹具没有编排层那一片状态，判不成答话".into(),
+                )))
+            }
+        }
     }
 }
 
@@ -216,7 +241,7 @@ impl TurnRunner {
 
 mod turn_runner_tests {
     use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
-    use crate::control_decl::guard_vocab;
+    use crate::control_decl::{guard_vocab, EVENT_TURN_STAGE};
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_core::{
         check_all, cost_ledger, transcript, AppendError, Budget, Event, EventStore, Seq,
@@ -329,8 +354,8 @@ mod turn_runner_tests {
 
         assert_eq!(
             store.head().value(),
-            18,
-            "3 轮 × 6 事件（用户 / 派发 / 模型端口三格 / 收束）"
+            21,
+            "3 轮 × 7 事件（用户 / 接缝出口 / 派发 / 模型端口三格 / 收束）"
         );
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
@@ -346,7 +371,7 @@ mod turn_runner_tests {
             "{:?}",
             check_all(guard_vocab(), &snapshot)
         );
-        assert_eq!(snapshot.len(), 24);
+        assert_eq!(snapshot.len(), 28);
 
         // 与一遍直写（不经过重放）的台账一致（N1/N2 家族）。
         let fresh: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
@@ -967,6 +992,8 @@ mod turn_runner_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -976,8 +1003,9 @@ mod turn_runner_tests {
             "用户格 + 派发格 + 模型端口三格 + 收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
+        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
         assert_eq!(
-            snapshot[1].kind,
+            snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
@@ -1049,6 +1077,8 @@ mod turn_runner_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -1316,7 +1346,7 @@ mod tool_round_tests {
         DispatchOutcome, ToolBegin, ToolDispatch, ToolPort, ToolPortCall, WakeBatch, WakeSpec,
     };
     use super::super::{NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnRunner};
-    use crate::control_decl::EVENT_AUTHZ_GRANTED;
+    use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
     use symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
         EventStore, FullModel, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage, Seq,
@@ -2324,17 +2354,23 @@ mod tool_round_tests {
             "定稿答话轮一次模型请求都不该发"
         );
         let ev = store.range(Seq::new(0));
-        assert_eq!(ev.len(), 3, "用户格 + 派发格 + 收束格，一格不多一格不少");
-        assert_eq!(ev[0].kind, EVENT_USER_MESSAGE);
-        assert_eq!(ev[1].kind, symbio_plugin_api::events::EVENT_TURN_DISPATCH);
-        assert_eq!(ev[2].kind, EVENT_CHAT_ASSISTANT_FINAL);
         assert_eq!(
-            ev[2].produced_by,
+            super::kinds(&ev),
+            vec![
+                "user.message",
+                "turn.stage",
+                "turn.dispatch",
+                "chat.assistant.final"
+            ],
+            "用户格 + 接缝出口 + 派发格 + 收束格，一格不多一格不少"
+        );
+        assert_eq!(
+            ev[3].produced_by,
             ev[0].seq.map(|s| s.value()),
             "I2：收束格的溯源必须指向本轮用户格"
         );
         assert_eq!(
-            ev[2].cost_ms, 1234,
+            ev[3].cost_ms, 1234,
             "收束格带这次措辞往返的实测 cost_ms（不是恒 0）"
         );
     }
@@ -2378,7 +2414,7 @@ mod tool_round_tests {
                 Some(dispatch.clone()),
                 super::super::super::loop_rows::ACTORS,
                 // 前缀是**备输入的产物**（`D-222` 订正 3）：生产里由
-                // `prepare_turn_inputs` 的 ⑥ 收集，草稿建好之后填。
+                // `prepare_request_sections` 的 ⑥ 收集，草稿建好之后填。
                 Some("【长期记忆】\n- 偏好：简洁".to_string()),
                 None,
             )
@@ -2743,6 +2779,8 @@ mod tool_round_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -2766,8 +2804,9 @@ mod tool_round_tests {
             check_all(guard_vocab(), &snapshot)
         );
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
+        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
         assert_eq!(
-            snapshot[1].kind,
+            snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH,
             "派发档另立一格（T-225）"
         );
@@ -2838,6 +2877,8 @@ mod tool_round_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -2923,6 +2964,8 @@ mod tool_round_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -2938,8 +2981,9 @@ mod tool_round_tests {
             ],
             "用户格 + 派发格 + 模型端口三格 + 工具批协议格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
+        assert_eq!(snapshot[1].kind, EVENT_TURN_STAGE, "接缝的出口格");
         assert_eq!(
-            snapshot[1].kind,
+            snapshot[2].kind,
             symbio_plugin_api::events::EVENT_TURN_DISPATCH
         );
         assert!(
@@ -3020,6 +3064,8 @@ mod tool_round_tests {
             super::kinds(&snapshot),
             vec![
                 "user.message",
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                "turn.stage",
                 "turn.dispatch",
                 "request",
                 "sent",
@@ -3588,6 +3634,8 @@ mod tool_round_tests {
             kinds,
             vec![
                 EVENT_USER_MESSAGE,
+                // 接缝的出口格：轮首那几行跑完、任何请求之前的装配。
+                EVENT_TURN_STAGE,
                 symbio_plugin_api::events::EVENT_TURN_DISPATCH,
                 // 三次模型往返 = 三组协议事实（request / sent / response）；
                 // 两个工具批各带创建 / 授权 / 派发三笔债的协议格。
@@ -3612,7 +3660,7 @@ mod tool_round_tests {
                 "response",
                 EVENT_CHAT_ASSISTANT_FINAL
             ],
-            "两轮产物 + 一轮收束（外加派发格、三次模型往返与两个工具批的协议事实）：{snapshot:?}"
+            "两轮产物 + 一轮收束（外加接缝出口格、派发格、三次模型往返与两个工具批的协议事实）：{snapshot:?}"
         );
         // 每轮的中途产出挂在**该轮自己的模型应答事实**上（顺序锚）。
         //
@@ -4519,11 +4567,13 @@ mod reflex_turn_tests {
             snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
             vec![
                 EVENT_USER_MESSAGE,
+                // 快路自己的阶段格 + 接缝的出口格。
+                EVENT_TURN_STAGE,
                 EVENT_TURN_STAGE,
                 EVENT_TURN_DISPATCH,
                 EVENT_CHAT_ASSISTANT_FINAL
             ],
-            "快路轮落开轮 / 阶段 / 派发 / 收束四格（没有产物格，也没有模型往返）：{snapshot:?}"
+            "快路轮落开轮 / 两格阶段 / 派发 / 收束（没有产物格，也没有模型往返）：{snapshot:?}"
         );
         let open = &snapshot[0];
         assert_eq!(open.entity, Entity::Turn);
@@ -4532,7 +4582,7 @@ mod reflex_turn_tests {
             open.payload["text"], "把周报整理成摘要",
             "开轮格记的是**用户说的**，不是快路产物"
         );
-        let dispatch = &snapshot[2];
+        let dispatch = &snapshot[3];
         assert_eq!(
             dispatch.payload["tier"], "reflex",
             "档位由**选中的那条行**给出（`loop_rows::tier`），不是调用方填的字符串"
@@ -4544,7 +4594,7 @@ mod reflex_turn_tests {
              拿到的必须是反射档那 80ms——不是主体规格里那一格（那是声明档，建主体时 \
              档位还没折出来）"
         );
-        let close = &snapshot[3];
+        let close = &snapshot[4];
         assert_eq!(close.verb, Verb::Closed);
         assert_eq!(close.turn, 0);
         assert_eq!(close.payload["text"], "先列要点；再合并同类项。");
@@ -4993,7 +5043,7 @@ mod round_decision_tests {
 // - 判据 2（名单外的格 ⇒ `exhausted{undeclared-write}`）：删掉对账，第一条越界写入
 //   静默入格 ⇒ 红。
 //
-// 两条都走生产派发器（`turn_exec::drive_steps`），差别只在**绑定表**：真实行表照旧欠
+// 两条都走生产派发器（`turn_exec::drive`），差别只在**绑定表**：真实行表照旧欠
 // `announce-model`，那个 `by` 上换的是别的手法（写零格 / 写名单外）。生产动作既不会写零格
 // 也不会写名单外的格 ⇒ 没有这条接缝，两条判据只能挂在口头。
 mod actor_ledger_tests {
@@ -5002,7 +5052,7 @@ mod actor_ledger_tests {
     use symbio_testkit::{trivial_actor_spec, StubLlmAdapter};
 
     use super::super::super::loop_rows::{ActorEntry, ACTOR_EXECUTE};
-    use super::super::super::turn_exec::{ActorError, StepFuture, TurnStep};
+    use super::super::super::turn_exec::{ActorError, Ctx, StepFuture};
     use super::super::{TurnInput, TurnRunner};
     use symbio_core::{
         check_all, Entity, Event, EventStore, Seq, SilentDeltas, Store, TokenIssuer, Verb,
@@ -5013,7 +5063,7 @@ mod actor_ledger_tests {
     ///
     /// 那一步 `record_model_step()` 是为反向自检留的：守卫一旦被删，派发器会继续选同一笔债，
     /// 记步数让它收在 `step_limit`（用例红），不记就永不返回（用例挂）。
-    fn writes_nothing<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    fn writes_nothing<'a>(step: &'a mut Ctx<'a>) -> StepFuture<'a> {
         Box::pin(async move {
             step.session.record_model_step();
             Ok(())
@@ -5021,7 +5071,7 @@ mod actor_ledger_tests {
     }
 
     /// 写**名单外**格的手法：`message.added` 既不在 `execute` 的 `writes` 里，也不是协议格。
-    fn writes_off_the_list<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
+    fn writes_off_the_list<'a>(step: &'a mut Ctx<'a>) -> StepFuture<'a> {
         Box::pin(async move {
             let turn = step.session.turn();
             step.store

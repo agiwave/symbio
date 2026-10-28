@@ -45,7 +45,7 @@ pub(crate) async fn auto_compress_process(
 
     // 请求级固定开销（system prompt + 工具定义）必须计入阈值判断，
     // 否则上下文实际占用被低估，压缩触发过晚 → 撞 provider 的 context-length 400。
-    // 口径由调用方（`prepare_turn_inputs`）算好后传入：本函数原先只拿它算这一处，
+    // 口径由调用方（`prepare_request_sections`）算好后传入：本函数原先只拿它算这一处，
     // 却因此需要自己再取一次工具清单，与主循环的收集重复。
     let overhead = overhead_tokens;
 

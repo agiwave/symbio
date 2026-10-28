@@ -59,7 +59,7 @@ impl: done
 ## 模块分工
 
 入口（`plugin.rs` / `provider.rs`）· 跨墙面（`session_port.rs` / `turn_session.rs`）·
-主循环（`chat_loop*` / `loop_rows.rs` / `head_exec.rs` / `report_exec.rs` / `stage_events.rs` /
+主循环（`chat_loop*` / `loop_rows.rs` / `report_exec.rs` / `stage_events.rs` /
 `turn_runner.rs` / `turn_exec.rs`）· 上下文与请求（`context*` / `message_build.rs` / `tokenizer.rs` /
 `model_chat.rs`）· 工具与分派（`tools*` / `tool_dispatch.rs`）· 事实与记忆
 （`derived_facts.rs` / `memory_events.rs` / `skill_events.rs` / `task_events.rs` /

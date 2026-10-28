@@ -3,7 +3,7 @@
 //! 目标形态是**主会话不持有工具**，于是它缺三样外部事实：worker 何时启动、自己有哪些
 //! 能力、进展如何。三问的答案都必须是**可穷举测试的数据**，否则主会话就得重新持有
 //! 工具——那正是「不持有工具」这个目标形态的反面。本模块是**三样**的生产处：
-//! 判定（Q1）与取值（Q2 / Q3）住 `prepare_turn_inputs`，渲染住
+//! 判定（Q1）与取值（Q2 / Q3）住 `prepare_request_sections`，渲染住
 //! `context::providers::DelegateProvider`（请求级节奏，DE-025 D-220）。
 //!
 //! ## 为什么不做成插件 / 注册表 / 跨插件调用
@@ -115,7 +115,7 @@ pub(crate) fn worker_start_reason(
 /// （`PluginRegistry::snapshot`）直接遍历 `HashMap` 且**不排序**。在遍历尚未结束的
 /// 任一子插件里取能力集合，必然漏掉还没被访问到的兄弟；顺序又每次不同，**漏了哪
 /// 几项次次不同**——既静默（不报错、不缺项告警）又难复现。故 owner 是收口后的
-/// `prepare_turn_inputs`，本函数只做折叠。
+/// `prepare_request_sections`，本函数只做折叠。
 ///
 /// ## 顺序必须稳定
 ///
@@ -165,7 +165,7 @@ pub(crate) fn capability_digest(tools: &[CapabilityMeta]) -> Option<String> {
 
 /// 工具短名：`mcp/github/create_issue` → `create_issue`。
 ///
-/// 与 `prepare_turn_inputs` 解析 `context_retention` 用的是同一条 `rsplit('/')` 口径
+/// 与 `prepare_request_sections` 解析 `context_retention` 用的是同一条 `rsplit('/')` 口径
 /// ——两处若各写一套，目录里的名字会与保留策略表里的名字对不上。
 fn short_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_string()

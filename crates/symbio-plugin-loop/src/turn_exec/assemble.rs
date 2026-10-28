@@ -3,7 +3,7 @@
 //! 拆交付包、取事实源、补落寄存变更、建收集器与流式桥（连同发射任务）、定主体与
 //! 来源主体——随后把一切装进 [`Assembled`] 原样交给阶段② [`super::call`]。
 //! 本段不产任何模型调用，也**不落任何「要等轮首那几行」的格**（压缩 / 档位 / 首响）：
-//! 那些是接缝的事，[`land_seam`] 管。
+//! 那些是接缝的事，[`land_consolidation`] / [`land_seam`] 管。
 //!
 //! ## 为什么分幕首与接缝两段
 //!
@@ -13,7 +13,7 @@
 //! 落在草稿之前（档位读不到）。于是幕首段只做「不需要等」的事，接缝段专管「要等」的
 //! 四件——两段之间的边界就是 `TurnRunner::begin`。
 //!
-//! **纯结构拆分契约**：[`assemble_turn`] 与 [`land_seam`] 的体内自 `turn_exec.rs` 的
+//! **纯结构拆分契约**：[`assemble_turn`] 与 [`land_consolidation`] / [`land_seam`] 的体内自 `turn_exec.rs` 的
 //! `execute_turn` 首段**逐字搬移**，语句顺序与副作用点位不变；跨模块引用仅做
 //! `super::` → `super::super::` 的两跳改写与文档链接深度修正（胶水），零语义。
 
@@ -53,92 +53,86 @@ pub(crate) struct Assembled<'a> {
     pub(crate) to: String,
 }
 
-/// 接缝要的**全部**环境（幕首已产出、接缝才消费）。
+/// **压缩入格**：轮首行 `policy.compress` 寄存的合并结果落成 `session.consolidated`。
 ///
-/// 与 [`Assembled`] 分开成形而不是直接把 `&Assembled` 传下去：接缝只需要这十样，
-/// 而 `Assembled` 是「①用过但②③④也要用」的全集——传全集等于让接缝顺手能读
-/// 它不该读的东西（例如 `provider` / `parent`）。
-pub(crate) struct Seam<'a> {
-    pub(crate) session: &'a LoopSession,
-    pub(crate) store: &'a dyn Store<Event = Event>,
-    pub(crate) bridge: &'a UiBridge,
-    pub(crate) turn_no: u64,
-    pub(crate) user_seq: u64,
-    pub(crate) drive_seq: u64,
-    pub(crate) actor: &'a ActorSpec,
-    pub(crate) consolidation: Option<&'a [ChatNode]>,
-    pub(crate) opening_text: Option<&'a str>,
-    pub(crate) opening_dialog: Option<&'a super::super::turn_runner::DialogFacts>,
-}
-
-/// **接缝**：轮首四行跑完、任何请求之前（`D-223` 订正 1 / 订正 2）。
+/// 单列一步而不是并进 [`land_seam`]：它的前置只有「压缩跑完了」，而接缝的其余部分
+/// 还要读判决 / 召回。环把它们排成相邻两步（压缩行的出口 ⇒ 接缝行的入口），各是
+/// 一行的事实，不再由这一侧的记忆替环排序。
 ///
-/// 四件事都是「轮首那几行跑完才知道」的，因此都不在幕首段（[`assemble_turn`]）里：
-///
-/// | 动作 | 为什么要等那几行 | 落成什么 |
-/// |---|---|---|
-/// | 压缩入格 | `policy.compress` 是本幕的前置动作，它落的事实必须早于本轮派发格 | `session.consolidated` + 归档 |
-/// | 定档 | 折自 `policy.reflex` 的出口格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
-/// | 首响上线 | 判决行 `Escalate` 的那句话 | `chat.assistant.opening` + 一帧实时面 |
-/// | （基线 prompt 与两次填） | 压缩改的就是消息列表 | 见 `turn_exec::drive_opened` 那一处 |
-///
-/// 前两件与第三件的**次序**是硬的：压缩早于派发（`consolidation_is_forwarded_before_the_turn_runs`
-/// 钉着），首响早于基线 prompt 的渲染（渲染在调用方、紧接本函数之后）。
-///
-/// ## 为什么不在这里渲染 prompt
-///
-/// 渲染要往草稿里写（`TurnSession::render_base`），而草稿是阶段② 用 `begin` 建出来的
-/// ——本函数跑在 `begin` 之后，但手里只有 `&LoopSession`。渲染因此留在调用方，紧随本
-/// 函数；「压缩先落、prompt 后渲染」这条次序由调用点的行序保证，不需要把草稿传进来。
-pub(crate) async fn land_seam(seam: Seam<'_>) -> Result<(), ActorError> {
-    let Seam {
-        session,
-        store,
-        bridge,
-        turn_no,
-        user_seq,
-        drive_seq,
-        actor,
-        consolidation,
-        opening_text,
-        opening_dialog,
-    } = seam;
-    // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
-    //
+/// 落格失败只出声不升级：「压缩已生效」——这一步关系到的是事实面是否记下它，
+/// 记不下也不该让整轮失败。
+pub(crate) async fn land_consolidation(session: &LoopSession, consolidation: Option<&[ChatNode]>) {
     // 必须在派发格**之前**：本轮的用户格已由编排层先落，先归档才能让「本轮之前的
     // 一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，现行窗口
     // 不再自洽）。
     //
     // 归档移走前缀**不影响**续写锚：轮的「已开未收束」判据读完整史（D-085），
     // 等待轮被压进归档段后仍然成立——而且续写锚此刻已经由编排层按 seq 直给。
-    if let Some(msgs) = consolidation {
-        if let Err(e) = session
-            .run_op_unit(
-                run_ops::CONSOLIDATE,
-                ConsolidateRequest {
-                    messages: msgs.to_vec(),
-                },
-            )
-            .await
-        {
-            symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
-        }
+    let Some(msgs) = consolidation else {
+        return;
+    };
+    if let Err(e) = session
+        .run_op_unit(
+            run_ops::CONSOLIDATE,
+            ConsolidateRequest {
+                messages: msgs.to_vec(),
+            },
+        )
+        .await
+    {
+        symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
     }
+}
+
+/// **接缝**：轮首四行跑完、任何请求之前（`D-223` 订正 1 / 订正 2）。
+///
+/// 三件事都是「轮首那几行跑完才知道」的，因此都不在幕首段（[`assemble_turn`]）里：
+///
+/// | 动作 | 为什么要等那几行 | 落成什么 |
+/// |---|---|---|
+/// | 定档 | 折自 `policy.reflex` 的出口格（`turn_head.reflex_answered`） | `turn.dispatch`（`tier` / `budget_ms` / `principal`） |
+/// | 首响上线 | 判决行 `Escalate` 的那句话 | `chat.assistant.opening` + 一帧实时面 |
+/// | （压缩入格） | 同为本幕的前置动作，见 [`land_consolidation`] | `session.consolidated` + 归档 |
+///
+/// 次序是硬的：压缩早于派发（`consolidation_is_forwarded_before_the_turn_runs`
+/// 钉着），首响早于基线 prompt 的渲染（渲染在同一动作的下一步）。
+///
+/// ## 为什么不在这里渲染 prompt
+///
+/// 渲染要往草稿里写（`TurnSession::render_base`），而草稿在本函数调用点的
+/// [`Ctx::session`] 上——本函数只收一个 `&LoopSession`（它只需要会话动作面）。
+/// 渲染因此留在执行体里、紧随本函数；「压缩先落、prompt 后渲染」由同一个动作的
+/// 行序保证，不需要把草稿传进来。
+pub(crate) async fn land_seam(
+    store: &dyn Store<Event = Event>,
+    bridge: &UiBridge,
+    turn: &super::super::chat_loop::state::TurnState,
+    actor: &ActorSpec,
+    opening_text: Option<&str>,
+    opening_dialog: Option<&super::super::turn_runner::DialogFacts>,
+) -> Result<(), ActorError> {
     // ── 定档：折自快路那一行的出口格（`D-223` 订正 1）─────────────────────
     //
     // 读**视图**而不是执行侧的副本（`reflex.is_some()`）：视图与那一行的判定同源，
     // 而「命中集为空、行自己关账」那一支（`result = miss`）只有视图分得出来。
     let facts_now = store.range(Seq::new(0));
-    let now = super::super::loop_rows::wake_now_ms(&facts_now, drive_seq);
-    let tier = super::super::loop_rows::turn_tier(&facts_now, turn_no, now);
-    super::super::chat_loop::land_dispatch(store, turn_no, user_seq, drive_seq, tier, actor)
-        .map_err(ActorError::Append)?;
+    let now = super::super::loop_rows::wake_now_ms(&facts_now, turn.drive_seq);
+    let tier = super::super::loop_rows::turn_tier(&facts_now, turn.turn_no, now);
+    super::super::chat_loop::land_dispatch(
+        store,
+        turn.turn_no,
+        turn.user_seq,
+        turn.drive_seq,
+        tier,
+        actor,
+    )
+    .map_err(ActorError::Append)?;
     // ── 首响落格 + 上线 ──────────────────────────────────────────────────
     super::super::chat_loop::land_opening(
         store,
         bridge,
-        turn_no,
-        user_seq,
+        turn.turn_no,
+        turn.user_seq,
         &actor.principal,
         opening_text,
         opening_dialog,

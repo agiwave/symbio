@@ -56,13 +56,13 @@ impl From<PluginError> for TurnExecExit {
 /// 阶段③ 的出口：本轮已提前了结（[`Classified::Finished`]），或正常收束待落格
 /// （[`Classified::Settled`]）。刻意收全三个提前出口于类型——落库段拿不到被跳过的
 /// 结局，就不会出现「中止轮还去写派生事实」的顺序漂移。
-pub(crate) enum Classified<'a> {
+pub(crate) enum Classified<'a, 'b> {
     Finished(Result<ExecTurnResult, TurnExecExit>),
-    Settled(Settled<'a>),
+    Settled(Settled<'a, 'b>),
 }
 
 /// 阶段③ ⇒ 阶段④ 的交付束：收束结局 + 桥上取下的节点身份 + 落库还要用的一切。
-pub(crate) struct Settled<'a> {
+pub(crate) struct Settled<'a, 'b> {
     pub(crate) session: &'a LoopSession,
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) outcome: super::super::turn_runner::TurnOutcome,
@@ -74,15 +74,24 @@ pub(crate) struct Settled<'a> {
     pub(crate) principal: String,
     pub(crate) to: String,
     pub(crate) user_text: &'a str,
-    pub recalled: Option<&'a super::super::recall::RecallView>,
-    pub(crate) skill_obs: &'a [(String, bool)],
+    /// 本轮的召回视图与技能观测（轮末 `record_learning` 的两份入参）。
+    ///
+    /// 借自调用方的本轮状态（[`super::super::chat_loop::state::TurnState`]），
+    /// 与 [`Running`] 的寿命无关：环收工之后调用方才交得出来（`D-222` 裁决 5 的
+    /// 「按步借、按步还」——环里那份借用已经还回去了）。
+    pub(crate) recalled: Option<&'b super::super::recall::RecallView>,
+    pub(crate) skill_obs: &'b [(String, bool)],
     pub(crate) child_id: String,
     pub(crate) reasoning_child_id: String,
     pub(crate) reasoning_text: String,
 }
 
 /// 一轮的执行（阶段③）：结局归类——消费 [`Running`]，产 [`Classified`]。
-pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, TurnExecExit> {
+pub(crate) async fn classify_turn<'a, 'b>(
+    r: Running<'a>,
+    recalled: Option<&'b super::super::recall::RecallView>,
+    skill_obs: &'b [(String, bool)],
+) -> Result<Classified<'a, 'b>, TurnExecExit> {
     let Running {
         session,
         store,
@@ -97,8 +106,6 @@ pub(crate) async fn classify_turn<'a>(r: Running<'a>) -> Result<Classified<'a>, 
         principal,
         to,
         user_text,
-        recalled,
-        skill_obs,
         root_id,
         presentation_tree,
     } = r;

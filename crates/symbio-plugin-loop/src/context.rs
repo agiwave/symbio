@@ -199,7 +199,7 @@ pub fn estimate_context_tokens(messages: &[ChatNode], overhead_tokens: usize) ->
 ///
 /// 与 [`estimate_request_overhead`] 算法完全一致，区别只在于**不自己取工具**——
 /// 由调用方传入已收集好的工具清单。会话主循环每轮只收集一次工具
-/// （见 `chat_loop::prepare_turn_inputs`），应优先使用本函数复用该清单，
+/// （见 `chat_loop::collect_reads`），应优先使用本函数复用该清单，
 /// 避免同一轮内对 visitor 注册表重复查询。
 pub fn estimate_overhead_with_tools(
     system_prompt: &str,
@@ -244,7 +244,7 @@ fn compression_threshold_tokens(context_limit: usize) -> usize {
 /// ## 为什么是「本轮请求开头」而不是「此刻」
 ///
 /// 水位是**请求级事实**：它是「这一体发出去时有多大」的一次测量，只在轮开头算
-/// （`prepare_turn_inputs` 的 ②③④）。轮内工具结果不断长进来，中途没有一个时刻
+/// （`prepare_request_sections` 的 ③″④⑥）。轮内工具结果不断长进来，中途没有一个时刻
 /// 存在「当前水位」这个数——造一个每几秒重估一次的数会把估算成本请进读路径，
 /// 而它自报的精度并不会更高。
 ///

@@ -233,7 +233,7 @@ session:
  * **段的消费形态**：`chat_loop::request_view_prefix` 顺序取出视图里**全部**带 `meta.kind` 的段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
  * **水位治理不在本层**：压缩只有一个入口 `auto_compress_process`（70% 阈值自动触发，加上用户点「失败压缩节点重试」的 `force` 路径），它改写的是存储态上下文（写成 `session.consolidated` 一格事实），不是请求视图。
 * **Rust 实现策略**：
- * 唯一入口为 [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs) 的 `prepare_turn_inputs` 调用：
+ * 唯一入口为 [`../loop/context/view.rs`](../symbio-plugin-loop/src/context/view.rs) 的 `build_request_sections`——收的是「段身份 + 正文」的数组，**不决定有哪几段**；由 [`../loop/chat_loop/inputs.rs`](../symbio-plugin-loop/src/chat_loop/inputs.rs) 的 `prepare_request_sections` 调用：
 
  ```rust
  pub fn build_request_sections(sections: &[(&'static str, String)]) -> Vec<ChatNode> {

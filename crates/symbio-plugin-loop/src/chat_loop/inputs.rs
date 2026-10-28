@@ -1,9 +1,9 @@
-//! 一次 LLM 请求的**输入准备**：环前的纯读、轮首那几行，与两者的执行体。
+//! 一次 LLM 请求的**输入准备**：环前的纯读、轮首那几行，与它们的执行体。
 //!
 //! - [`resolve_system_prompt`]：系统提示词唯一真源
 //! - [`collect_reads`]：提示词 + 工具 + 开销——环前的纯读，不含任何选债口
-//! - [`land_head`]：轮首派发点（[`super::super::head_exec::drive_head`]）、答话收束、
-//!   水位、根骨架上线路与请求视图——在草稿建好之后、任何请求之前
+//! - [`prepare_request_sections`]：水位、根骨架上线路与请求视图——接缝动作在
+//!   轮首行之后调它，任何请求之前
 //! - [`run_recall`]：`policy.recall` 行的执行体（记忆 / 技能 / 调度段三段读视图）
 //! - [`run_compress`]：`policy.compress` 行的执行体（上下文水位的响应，产线住在
 //!   这里，**被选中才跑**）
@@ -17,7 +17,7 @@ use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
 ///
-/// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
+/// **取值点与 `turn_exec` 的 `user_text` 同源**（该处晚于 `prepare_request_sections`，
 /// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分
 /// 的语义维由它驱动；取不到 ⇒ `None` = 「本轮没有问题」，投影退化为纯 ts 降序
 /// （平凡值，J2）。用类型区分「没有问题」与「问题恰好是空串」：前者是事实，
@@ -122,8 +122,9 @@ pub(crate) const FALLBACK_SYSTEM_PROMPT: &str = "You are a helpful MODEL assista
 /// 环前的**纯读**（①②）：系统提示词 + 工具 + 请求级开销。
 ///
 /// 不含任何选债口、不落任何格——它发生在幕首（`assemble_turn` / `begin`）之前，
-/// 而那一台 host 的每一行都会改事实面。`tools` 同时是 ⑥ 的输入（请求级段要在
-/// 工具收集成形**之后**才收集，D-047 的注入点约束），故随本结构交给 [`land_head`]。
+/// 而环上的每一行都会改事实面。`tools` 同时是 ⑥ 的输入（请求级段要在
+/// 工具收集成形**之后**才收集，D-047 的注入点约束），故随本结构交给
+/// [`prepare_request_sections`]。
 pub(crate) struct TurnReads {
     /// 系统提示词（`resolve_system_prompt` 为唯一真源）。
     pub(crate) system_prompt: String,
@@ -168,73 +169,42 @@ pub(crate) async fn collect_reads(
     }
 }
 
-/// 轮首那几行跑完之后才知道的一切（③–⑦）：在**草稿建好之后**、任何请求之前。
+/// 轮首那几行跑完之后才知道的一切：在**草稿建好之后**、任何请求之前。
 ///
 /// ## 为什么它晚于 `begin`
 ///
 /// 中止守卫在环首（`D-222` 订正 3）：被中止的幕不该再跑判决 / 压缩 / 召回。草稿在
-/// 幕首就建，本函数因此只能排在那之后——`drive_head` 的每一行都是一笔会改事实面的
-/// 动作。
+/// 幕首就建，本函数因此只能排在那之后——轮首的每一行都是一笔会改事实面的动作。
 ///
 /// ## 它仍然早于第一次请求
 ///
-/// `drive_head` 落的几格（判决的 `answered` / 压缩的水位与摘要 / 召回的视图与技能
-/// 命中 / 快路的出口格）正是本轮请求与收束的前件；本函数末尾的请求视图也依赖它们的
-/// 寄存物。
+/// 判决 / 压缩 / 召回 / 快路的出口格正是本轮请求与收束的前件；本函数末尾的请求
+/// 视图也依赖它们的寄存物（召回寄存的段、快路寄存的正文）。
 ///
 /// ## 本步内的顺序
 ///
-/// 3. **轮首派发点**（[`super::super::head_exec::drive_head`]）：本 host 绑定表里
-///    最小的一笔可还债——此刻是判决（`policy.classify`，prio 10）、压缩
-///    （`policy.compress`，30）与召回（`policy.recall`，40），先后由 `prio` 表达，
-///    不由本文件的行序表达
-///    - 3′. 紧随派发点：判决判成「就此答话」的一轮在这里落收束格并收束（不发请求）
-///    - 3″. 取本轮上下文水位（压缩之后的那一体积，随 4 的骨架进 `meta.context`）
-/// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）。
-///    根 id 由调用方（`stage::run_stage`）分配——「定 id」与「把它发给流式桥」是
-///    两件事，前者是 `begin` 的输入。`fresh_root` 说这个 id 是不是本幕新分配的：
-///    续写幕复用原根，重发骨架会把已完成的卡打回运行态。
-/// 5. 长期记忆召回产物的**取用点**（三份产物由 3 的执行体寄存进本轮状态）
-/// 6. 请求级上下文段（`Cadence::Request`，D-220）：**在①②把 `tools` 收集成形之后**
-///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头
-/// 7. 请求视图重建（`build_request_view` 唯一入口）
+/// 1. **上下文水位**（③″）：压缩**之后**量——量的是这一轮真正发出去的那一体；
+/// 2. **Turn 根节点流式占位**（④，**必须在压缩之后**：压缩失败时不留半截 Turn
+///    节点）。根 id 由调用方（`stage::run_stage`）分配——「定 id」与「把它发给
+///    流式桥」是两件事，前者是 `begin` 的输入。`fresh_root` 说这个 id 是不是本幕
+///    新分配的：续写幕复用原根，重发骨架会把已完成的卡打回运行态。
+/// 3. **请求级上下文段**（`Cadence::Request`，D-220）：**在 `tools` 收集成形之后**
+///    才收集——这是 D-047 的注入点约束本身，见 [`delegate`] 模块头；
+/// 4. **请求视图重建**（`build_request_view` 唯一入口）。
 ///
-/// `Err(TurnExit::Completed)` = 判决判成「就此答话」，本幕已在 ③′ 收束。
+/// 失败交回 [`ActorError::Read`]：轮首的读失败发生在幕锚之后、任何请求格之前，
+/// 端口面上没有一笔账可关，由环上抛给编排层的兜底路径。
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn land_head(
+pub(crate) async fn prepare_request_sections(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     sink: &ExecEventSink,
     turn: &mut TurnState,
-    tools: &[CapabilityMeta],
     root_id: &str,
     fresh_root: bool,
-) -> Result<Vec<ChatNode>, TurnExit> {
-    // ── ③ 轮首派发点（D-159）：本 host 的绑定表欠什么就跑什么 ─────────────────
-    // 此刻子集里按 `prio` 是判决（10）、压缩（30）、召回（40）——先后由行的 `prio`
-    // 表达，本文件不再问一次表。位置在 ② 之后、③′④ 之前，是这三行的前件同时成立的
-    // 最早一处：压缩要 ①② 折算出的开销，而水位与流式骨架必须在压缩**之后**
-    // （未过水位就不该量、压不动也不该留半截 Turn 根）。
-    super::super::head_exec::drive_head(orchestrator, ctx, context, turn)
-        .await
-        .map_err(|e| {
-            TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-                "轮首派发失败：{e:?}"
-            )))
-        })?;
-
-    // ── ③′ 判成「就此答话」的一轮在此收束（[D-162] 裁决 3）─────────────────
-    //
-    // 判决执行体把答话寄存进本轮状态（执行体不交回产出，D-123 决策 5），收束格由
-    // **轮首准备**就地落（§5.1 / D-125：这一轮不进轮内驱动循环，`close` 的「唯一写方」
-    // 限定在驱动循环内，这里不适用）。位置在派发点之后、水位与流式骨架之前——
-    // 这一轮不发请求，也就没有「发出去的那一体」可量、没有半截 Turn 根该留。
-    if let Some(answer) = turn.head_answer.take() {
-        super::super::chat_loop::land_answered_turn(orchestrator, ctx, context, turn, answer).await;
-        return Err(TurnExit::Completed);
-    }
-
+    tools: &[CapabilityMeta],
+) -> Result<Vec<ChatNode>, super::super::turn_exec::ActorError> {
     // ── ③″ 取本轮的上下文水位（压缩**之后**：量的是这一轮真正发出去的那一体）──
     // 只在这里算一次，随 ④ 的骨架挂进 `meta.context`；判据是「一个请求级事实挂在
     // 它所属的那一轮上」，不是「前端要轮询」。取不到也不算异常：没有水位
@@ -264,14 +234,14 @@ pub(crate) async fn land_head(
     }
 
     // ── ⑤ 上下文段（provider 收集的产物）──────────────────────────────────────
-    // 收集在轮首派发点（`policy.recall`，D-159）一次做完：那里把「判完的值」交给
+    // 收集在环上的 `policy.recall` 那一行（D-159）一次做完：那里把「判完的值」交给
     // 端口，provider 各自渲染成段。这里只读本轮寄存的那一份——本函数因此**不知道
     // 有哪几段**（DE-025 D-215）。
 
     // ── ⑥ 请求级注入段（唯一入口 build_request_sections）──────────────────
     // 追加的读视图：provider 贡献的各段。它们不落库、不碰历史——
     // 对话体是事实网格的纯投影（D-048a），请求视图级的淡化 / 骨架化已按
-    // [D-078](../../../symbio-plugin-session/README.md#d-078-请求视图三层淡化退役请求体是事实网格的纯投影注入段只追加不改写 "crates/symbio-plugin-session/src/README") 退役。
+    // [D-078] 退役。
     //
     // ── ⑥′ 请求级上下文段（`Cadence::Request`，DE-025 D-220）────────────────
     //
@@ -292,7 +262,7 @@ pub(crate) async fn land_head(
         .session
         .run_op::<Vec<symbio_core::WorkerProgress>>(symbio_core::run_ops::WORKER_PROGRESS, ())
         .await
-        .map_err(TurnExit::Failed)?;
+        .map_err(super::super::turn_exec::ActorError::Read)?;
     let settings = context.session.settings();
     let delegate_verdict = match turn.input_utterance.as_ref().map(|(_, text)| text.as_str()) {
         Some(text) => {
@@ -361,20 +331,19 @@ pub(crate) async fn land_head(
             .into_iter()
             .map(|s| (s.slot, s.text)),
     );
-    let request_sections = context::build_request_sections(&sections);
-
-    Ok(request_sections)
+    Ok(context::build_request_sections(&sections))
 }
 
 /// `recall` 执行体（`policy.recall`）：长期记忆召回 + 技能路由 + 调度段。
 ///
-/// 它是**轮首 host**（[`super::super::head_exec`]）绑定表里的动作，入参由派发点
-/// 借出：请求句柄 + 事实源 + 会话上下文 + 本轮状态。账在表上、动作也在表上，
-/// 调用点不再按名问这一行欠不欠（DE-015 的 D-159）。
+/// 它是环上 `policy.recall` 那一行的动作（[`super::super::turn_exec::run_recall`]
+/// 转过来），入参由 `Ctx` 的轮首借面给出：请求句柄 + 事实源 + 会话上下文 + 本轮状态。
+/// 账在表上、动作也在表上，调用点不再按名问这一行欠不欠（DE-015 的 D-159 + `D-222`
+/// 裁决 5）。
 ///
 /// ## 出口那一格在这里落
 ///
-/// 派发点在两次动作之间重读日志，而 `turn_stages` 视图只折叠**已落**的 `turn.stage`
+/// 派发器在两次动作之间重读日志，而 `turn_stages` 视图只折叠**已落**的 `turn.stage`
 /// 格。动作做完却不入日志，本幕的第二次选债照样读到「没做过」⇒ 环走不动。
 /// 落格能力此刻就在本层（与 `begin_drive` 落用户格 / 配置 / 轮次格同一条路、同一个句柄）。
 ///
@@ -498,7 +467,7 @@ pub(crate) async fn run_recall(
     Ok(())
 }
 
-/// 快路格的执行体（`policy.reflex`，轮首 host）：命中即作答，**零模型往返**。
+/// 快路格的执行体（环上的 `policy.reflex` 行）：命中即作答，**零模型往返**。
 ///
 /// ## 它只落「已答」，不落收束
 ///
@@ -552,12 +521,12 @@ pub(crate) async fn run_reflex(
     Ok(())
 }
 
-/// 压缩格的执行体（`policy.compress`，轮首 host）：进一次压缩产线并**自己落**「已做」。
+/// 压缩格的执行体（环上的 `policy.compress` 行）：进一次压缩产线并**自己落**「已做」。
 ///
 /// ## 它是执行体，不是点问
 ///
-/// 「欠不欠」由轮首派发点向求解器要，本函数只在被选中时跑；出口那一格当场入日志
-/// （与 [`run_recall`] 同一条理由：不入日志的账在派发点的第二次选债里照样是「没做过」）。
+/// 「欠不欠」由环向求解器要，本函数只在被选中时跑；出口那一格当场入日志
+/// （与 [`run_recall`] 同一条理由：不入日志的账在下一次选债里照样是「没做过」）。
 ///
 /// ## 顺序仍在产线里，不在调用点
 ///
@@ -580,8 +549,8 @@ pub(crate) async fn run_compress(
     // 下一轮照常再试；但同一幕内不重复进产线（D-107 判据 2）。
     //
     // 入账面：摘要那次模型往返走端口 `model`（D-122 决策 2）——三格由端口层落，
-    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话），派发点整台跳过，
-    // 本函数因此只在有事实源时跑。
+    // 这一次往返在账上看得见。没有事实源就没有账可记（临时会话连一幕都开不了，
+    // 见 `assemble_turn`），本函数因此只在有事实源时跑。
     let compress = Compress::new(
         store.clone(),
         turn.turn_no,

@@ -14,19 +14,18 @@
 //!
 //! ## 与环的边界
 //!
-//! 幕**内**那一段仍然是环：`turn_exec::drive_steps` 是唯一的不动点，模型 / 工具两个
-//! 端口的行由它选。本模块只做四件事，一件都不是调度：
+//! 幕**内**那一段是环：`turn_exec::drive` 是唯一的不动点，轮首四行与轮内各行都由
+//! 同一张表按 `prio` 选。本模块只做三件事，一件都不是调度：
 //!
 //! | 段 | 做什么 | 产出 |
 //! |---|---|---|
 //! | 幕首 | 环前纯读（提示词 / 工具 / 开销）+ 定根 id + 装配 + `begin`（`D-222` 订正 3） | 草稿；或「本幕已收束」 |
-//! | 轮首 | `land_head`：判决 / 压缩 / 召回 / 快路 + 答话收束 + 水位 + 骨架 + 请求视图 | 注入段；或「本幕已收束」 |
-//! | 接缝 + 内环 | `drive_opened`：压缩入格 / 定档 / 首响 → 渲染基线 → 填前缀与快路 → 内环 | 产出 / 中止 / 失败 |
+//! | 环 | `drive_opened`：轮首四行 / 接缝 / 内环都在**同一个环**里按 `prio` 跑 | 产出 / 中止 / 失败；或「判成答话」 |
 //! | 收好产出 | 镜像并入 → 中止复查 → 定格 → 落库 → 封根 | 事实（收束格） |
 //!
-//! 四段的次序与搬到环上之前**逐字不变**：`finalize_turn_root` 必须晚于定格（Turn 是
+//! 三段的次序与搬到环上之前**逐字不变**：`finalize_turn_root` 必须晚于定格（Turn 是
 //! 组合节点，终态跟随子树），而落库是收束的写投影。变的只是「谁来调」——此前是
-//! 选债，现在是直线。
+//! 选债，现在是直线 + 一个环。
 //!
 //! ## 崩溃面没有变宽
 //!
@@ -44,20 +43,19 @@
 //!
 //! ## 一处行为变化（`D-222` 订正 3 明文认下的后果）
 //!
-//! 中止守卫随环前移到 `begin`：被中止的幕不再跑判决 / 压缩 / 召回。此前那几行排在
-//! 开轮之前，中止只在「第一个请求发出之前」才被发现；现在草稿先建，1c 的中止检查
-//! 一命中就收束，轮首那几行一行都不跑。
+//! 中止守卫是环的第一道守卫（`D-222` 订正 3）：被中止的幕不再跑判决 / 压缩 / 召回。
+//! 此前那几行排在开轮之前，中止只在「第一个请求发出之前」才被发现；现在草稿先建，
+//! 环的第一圈先看中止，一命中就收束，轮首那几行一行都不跑。
 
 use std::sync::Arc;
 
-use symbio_core::plugin_info;
-use symbio_core::{Event, PluginInvokeRequest, Seq, Store};
+use symbio_core::{PluginInvokeRequest, Seq};
 
-use super::chat_loop::inputs::{collect_reads, land_head, TurnReads};
+use super::chat_loop::inputs::{collect_reads, TurnReads};
 use super::chat_loop::state::{ChatOrchestrator, SessionContext, TurnExit, TurnState};
 use super::turn_exec::{
-    classify_turn, drive_opened, open_turn, persist_turn, ActorError, AfterHead, Classified,
-    ExecTurn, ExecTurnResult, Opened, Running, TurnExecExit,
+    classify_turn, drive_opened, open_turn, persist_turn, ActorError, Classified, ExecTurn,
+    ExecTurnResult, HeadEnv, Opened, OpenedFlow, Running, TurnExecExit,
 };
 
 /// 一幕要的**全部**环境（一次借出，四段用）。
@@ -144,15 +142,14 @@ pub(crate) async fn run_stage(stage: Stage<'_>) -> Result<Option<TurnExit>, Acto
             fut
         }) as super::turn_exec::SupplementFn
     };
-    // 批次边界汇报（缺口 4）的能力口：**只产措辞**——判定与落格都不在这里
-    // （见 `report_port` 的文档与 D-163）。`None` = compose 产线关着，批次
-    // 边界就不装派发点（关掉的开关不该在日志里每批边界留一串「有账没人还」）。
+    // 汇报（缺口 4）的能力口：**只产措辞**——判定与落格都不在这里（见 `report_port`
+    // 的文档与 D-163）。`None` = compose 产线关着：那一行到期时执行体交不回话，
+    // 只落一格 `result:"silent"` 的尝试，这一段静默因此不再重复到期。
     let report = orchestrator.compose_enabled.then(|| {
         super::chat_loop::report_port(
             orchestrator_arc.clone(),
             ctx.clone(),
             context.messages.clone(),
-            turn.now_ms,
         )
     });
     let assembled = match super::turn_exec::assemble_turn(ExecTurn {
@@ -199,69 +196,50 @@ pub(crate) async fn run_stage(stage: Stage<'_>) -> Result<Option<TurnExit>, Acto
     // 活到第三段 `settle` 的 `&mut turn` 上，两段借同一片状态，借用检查器（正确地）
     // 拒绝。
     let res = match opened {
-        // 开轮就收束（首请求前中止）：轮首那几行**不再跑**（`D-222` 订正 3）。
+        // 开轮就收束（空答兜底）：轮首那几行**不再跑**（`D-222` 订正 3）。
         Opened::Done(outcome) => {
-            let running =
-                assembled.into_running(outcome, turn.recall_view.as_ref(), &turn.skill_route);
-            classify_and_persist(running).await
+            let running = assembled.into_running(outcome);
+            classify_and_persist(running, turn.recall_view.as_ref(), &turn.skill_route).await
         }
         Opened::Run(run) => {
-            let request_sections = match land_head(
-                orchestrator,
-                ctx,
-                context,
-                sink,
-                turn,
-                &reads.tools,
-                &root_id,
-                fresh_root,
+            // 轮首那一片（编排层状态）逐圈借给环；两个 `&mut` 按引用再借一次——
+            // 环收工之后本函数还要用它们（收束的镜像并入与落库）。
+            let flow = drive_opened(
+                assembled,
+                run,
+                HeadEnv {
+                    orchestrator,
+                    context: &mut *context,
+                    turn: &mut *turn,
+                    fresh_root,
+                },
             )
-            .await
-            {
-                Ok(sections) => sections,
-                // 定稿答话轮：本幕在轮首就地收束（`land_answered_turn` 已落收束格），
-                // 没有往返，也没有产出。
-                Err(TurnExit::Completed) => {
-                    // 草稿必须先丢：它里面的注入闭包也持着一份桥的强引用，不先丢，
-                    // 发射任务等不到队列关闭（`Assembled::discard` 的文档）。
-                    drop(run);
-                    assembled.discard().await;
-                    land_inputs(&store, ctx, turn, "closed")?;
+            .await;
+            match flow {
+                Ok(OpenedFlow::Running(running)) => {
+                    classify_and_persist(*running, turn.recall_view.as_ref(), &turn.skill_route)
+                        .await
+                }
+                // 定稿答话轮：本幕在环的答话守卫处收工，**一次请求都没发**。
+                // 收束格由编排层就地落（`land_answered_turn` / D-125）：它要的是
+                // 编排器、会话上下文与本轮状态，环里没有它们。
+                Ok(OpenedFlow::Answered) => {
+                    if let Some(answer) = turn.head_answer.take() {
+                        super::chat_loop::land_answered_turn(
+                            orchestrator,
+                            ctx,
+                            context,
+                            turn,
+                            answer,
+                        )
+                        .await;
+                    }
+                    super::turn_exec::land_inputs(store.as_ref(), ctx.as_ref(), turn, "closed")?;
                     // 取走即消费：这一幕没有新根，续写幕不该再开一支。
                     turn.retry_of.take();
                     turn.facts = store.range(Seq::new(0));
                     return Ok(None);
                 }
-                // 轮首读失败（会话端口的一次读失败）：端口面上没有一笔账可关，交回
-                // 编排层走 `finish_turn(Failed)` 的既有路径（`ActorError::Read` 的文档）。
-                Err(TurnExit::Failed(e)) => return Err(ActorError::Read(e)),
-                // 其余出口不该从轮首段冒出来：它们各有自己的入口（中止在开轮 1c、
-                // 边界中止在闸门、恢复完成在循环之前）。硬造一格只会把「怎么到这里」
-                // 这条信息抹掉。
-                Err(other) => {
-                    return Err(ActorError::Read(symbio_core::PluginError::InternalError(
-                        format!("轮首段返回了不属于它的出口：{other:?}"),
-                    )));
-                }
-            };
-            land_inputs(&store, ctx, turn, "ready")?;
-            land_retry_branch(&store, ctx, turn, &root_id)?;
-            // 轮首那几行的寄存位**在这里取走**：压缩快照只该落一次（S2.7-b2），
-            // 开场白与快路正文也只属于这一幕。
-            let consolidation = context.consolidated.take();
-            let opening_text = turn.opening_text.take();
-            let opening_dialog = turn.opening_dialog.take();
-            let after = AfterHead {
-                request_sections: &request_sections,
-                consolidation: consolidation.as_deref(),
-                opening_text: opening_text.as_deref(),
-                opening_dialog: opening_dialog.as_ref(),
-                reflex: turn.head_reflex.as_ref(),
-                recalled: turn.recall_view.as_ref(),
-                skill_obs: &turn.skill_route,
-            };
-            match drive_opened(assembled, run, after).await {
-                Ok(running) => classify_and_persist(running).await,
                 Err(exit) => Err(exit),
             }
         }
@@ -289,8 +267,12 @@ pub(crate) async fn run_stage(stage: Stage<'_>) -> Result<Option<TurnExit>, Acto
 ///
 /// 单列一个函数只为一件事：它必须与 `Running` 的借用**同寿**——调用它的地方（幕的
 /// 第二段）同时持有接缝借来的寄存物，而第三段的 [`settle`] 要可变借回本轮状态。
-async fn classify_and_persist(running: Running<'_>) -> Result<ExecTurnResult, TurnExecExit> {
-    match classify_turn(running).await? {
+async fn classify_and_persist<'a, 'b>(
+    running: Running<'a>,
+    recalled: Option<&'b super::recall::RecallView>,
+    skill_obs: &'b [(String, bool)],
+) -> Result<ExecTurnResult, TurnExecExit> {
+    match classify_turn(running, recalled, skill_obs).await? {
         Classified::Finished(v) => v,
         Classified::Settled(settled) => persist_turn(settled),
     }
@@ -305,75 +287,6 @@ fn stage_exit(exit: TurnExecExit) -> TurnExit {
         TurnExecExit::Aborted(partial) => TurnExit::Aborted(partial),
         TurnExecExit::Failed(e) => TurnExit::Failed(e),
     }
-}
-
-/// 把「备输入」的出口落成阶段事实（`turn.stage{stage:"inputs"}`）。
-///
-/// `result` 二值：`ready` = 这一幕要跑（请求视图已备好）；`closed` = 定稿答话轮在
-/// 轮首就收束了。它给事实面留下「这一幕备到哪一步」的唯一记号——`Ok(None)` 那个
-/// 返回值不落日志，只落这一格。
-fn land_inputs(
-    store: &Arc<dyn Store<Event = Event>>,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    turn: &TurnState,
-    result: &str,
-) -> Result<(), ActorError> {
-    super::stage_events::land(
-        store.as_ref(),
-        turn.turn_no,
-        turn.user_seq,
-        &symbio_core::request_principal(ctx.as_ref()),
-        &[super::stage_events::StageFact::inputs(
-            turn.request_round,
-            turn.drive_seq,
-            result,
-        )],
-    )
-    .map_err(ActorError::Append)
-}
-
-/// 重试开出的**新支在这里登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
-///
-/// 为什么是这一格而不是唤醒那一处：`turn.branch` 的 `into` 是**新支的 Turn 根
-/// id**，而那个 id 到本幕的根定下才存在（一幕一个根，`run_stage` 的幕首是它唯一的
-/// 创建点）。`retry_of` 由 `RetrySubtree` 寄存、`take()` 即消费，幕间续写的第二幕
-/// 因此不会再开一支。
-///
-/// 旧支不删：它降成「同一问题的另一个候选」，藏与不藏由选中态说（读侧一处
-/// `branch_hide_unselected`，只挡进模型的那条路）。
-fn land_retry_branch(
-    store: &Arc<dyn Store<Event = Event>>,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    turn: &mut TurnState,
-    root_id: &str,
-) -> Result<(), ActorError> {
-    let Some(of) = turn.retry_of.take() else {
-        return Ok(());
-    };
-    let seq = store
-        .append(
-            symbio_core::Event::pending(
-                format!("branch-{root_id}"),
-                symbio_plugin_api::events::EVENT_TURN_BRANCH,
-                symbio_core::Entity::Turn,
-                symbio_core::Verb::Asserted,
-                turn.turn_no,
-                symbio_core::request_principal(ctx.as_ref()),
-            )
-            .with_payload(serde_json::json!({ "of": of, "into": root_id }))
-            .with_produced_by(turn.user_seq),
-        )
-        .map_err(ActorError::Append)?;
-    plugin_info!(
-        "session",
-        "[Branch] 新支 {} 挂到 {} 之下（seq={}）",
-        root_id,
-        of,
-        seq.value()
-    );
-    // 收尾时按这一格补发组内的标注帧（见 `TurnState::branch_root`）。
-    turn.branch_root = Some(root_id.to_string());
-    Ok(())
 }
 
 /// 派出去那一幕的**产出处理**。

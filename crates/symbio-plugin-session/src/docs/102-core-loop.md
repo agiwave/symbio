@@ -42,7 +42,7 @@ impl: done
 | 收口项 | 职责 | 唯一性 |
 |---|---|---|
 | `gate_turn` | 退出条件（只剩中止边界），见 §2.1 | 判定点唯一 |
-| `prepare_turn_inputs` | 系统提示词 + 工具（同机制、同时机）+ 请求级开销 + **轮首派发点**（`head_exec::drive_head`）+ 请求视图 | 准备点唯一 |
+| `collect_reads` / `prepare_request_sections` | 环前纯读一次取好系统提示词 + 工具（同机制、同时机）+ 请求级开销；轮首那几行跑完后由接缝行 `prepare-turn` 重建请求视图（压缩 / 判决 / 召回 / 快路的出口格是它的前件） | 收集点唯一 |
 | `run_compress`（行 `policy.compress` 的执行体） | 水位响应（70% 阈值触发的语义压缩）：判定与执行同处这一执行体，由轮首派发点选中（[DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环") 的 D-159） | 响应点唯一 |
 | `stage::run_stage` | 一幕之内的三步直线（备输入 → 跑一轮 → 收好产出），见 §1.2 | 幕内次序唯一（代码行序） |
 | `finish_turn` | 增量落库 + Stop 钩子 + 返回语义 | 收尾点唯一 |
@@ -66,8 +66,8 @@ impl: done
 ③ 循环层 run_chat_loop + gate_turn / finish_turn loop: chat_loop.rs
  + begin_drive（开一幕：唤醒格 → 收租 → 配置 → 幕锚 → 轮次格）chat_loop/drive.rs
  + stage::run_stage（一幕的直线：备输入 → 跑一轮 → 收好产出）stage.rs
- + prepare_turn_inputs / run_compress chat_loop/inputs.rs
- + drive_head（轮首派发点）head_exec.rs
+ + collect_reads / run_compress ／ 接缝与执行体 run_seam / run_report chat_loop/inputs.rs · turn_exec.rs
+ + turn_exec::drive（唯一派发环：轮首四行 / 接缝 / 内环同一张表）turn_exec.rs
  + settle_reasoning / persist_turn chat_loop/turn.rs
  + auto_compress_process / retry_compaction / compress_with_snapshot_core context/pipeline.rs
  + 会话侧读写经动作面 session_port.rs
@@ -107,7 +107,7 @@ impl: done
 
 | 序 | 动作（`stage.rs` 内私有） | 做什么 |
 |---|---|---|
-| 一 | `prepare` | `prepare_turn_inputs`：提示词 + 工具 + `overhead_tokens` + **轮首派发点**（判决 / 压缩 / 召回 / 快路在此被 `drive` 选中）+ `build_request_view`。判成答话的一轮**在这里就地收束**（这一幕没有输入也没有往返） |
+| 一 | `prepare` | `collect_reads`：提示词 + 工具 + `overhead_tokens`（环前的纯读）；随后接缝行 `prepare-turn`（`run_seam`）跑压缩 / 判决 / 召回 / 快路与 `build_request_view`。判成答话的一轮**在接缝处就地收束**（这一幕没有输入也没有往返） |
 | 二 | `run_turn` | 跑 `turn_exec::execute_turn`（整轮交给 v2 运行器：事实原生入格、工具经 `SessionDispatchPort` 三动作分发、中止检查点在运行器内部） |
 | 三 | `settle` | **就地收好产出**：镜像并入 → 中止复查 → `settle_reasoning`（定稿 + 校准 + 并入上下文）→ `persist_turn`（增量落库）→ `finalize_turn_root`（封根，全流程唯一一处） |
 
@@ -116,7 +116,8 @@ impl: done
 > 前件，而那些前件只能是「上一步行了没有」——那就是把 Rust 的借用面升格成调度结构。
 > 幕是信封上的分区（`D-222` §二），不是推进单位；三步的次序由代码行序说，不由 `prio` 说。
 >
-> 幕**内**真正的那段环在 `turn_exec::drive_steps`（模型往返与工具批次），它不在这一层。
+> 幕**内**真正的那段环在 `turn_exec::drive`（轮首四行 / 接缝 / 模型往返与工具批次同在
+> 一张绑定表上，按 `prio` 选债），它不在这一层。
 
 **`persist_turn` 的分支**（落库是**写投影**，不是债）
 
@@ -188,34 +189,43 @@ fn gate_turn(turn: &TurnState) -> Gate
 > 位置在 §4.1 的 2e（结果接进 `exchange`）与 2f（轮内注入）之间**：那里有真实的 `tool_round`，
 > 而要新写的不只是判定，还有「到上限时这一批怎么收」的收束语义。
 
-### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `prepare_turn_inputs`
+### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `collect_reads` + `prepare_request_sections`
 
 **硬约束：系统提示词与工具信息必须同机制、同时机、始终一起收集——在每轮 Turn 开头、
 循环内收集。**
 
 ```rust
-/// 一次 LLM 请求所需的全部输入。**唯一收集点**：系统提示词与工具在同一函数内
-/// 依次取得（同一个 `Registry`、同一个时刻），下游只读产物。
-struct TurnInputs {
- root_id: String, // Turn 根节点 id（本步内创建）
- system_prompt: String, // resolve_system_prompt 唯一真源
- tools: Vec<CapabilityMeta>, // 本轮到模型的工具清单（v2 路径不含 context_compact）
- request_view: Vec<ChatNode>, // build_request_view 产物（不落库）
+/// 环前的**纯读**：不选债、不落格。
+struct TurnReads {
+    system_prompt: String,          // resolve_system_prompt 唯一真源
+    tools: Vec<CapabilityMeta>,     // 本轮到模型的完整工具清单
 }
 
-async fn prepare_turn_inputs(
- orchestrator: &ChatOrchestrator,
- ctx: &Arc<dyn PluginInvokeRequest>,
- context: &mut SessionContext,
- sink: &ExecEventSink,
- turn: &mut TurnState,
- req: &TurnRequest,
-) -> Result<TurnInputs, TurnExit>;
+async fn collect_reads(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    req: &TurnRequest,
+    turn: &mut TurnState,
+) -> TurnReads;
+
+/// 接缝行的装配：轮首那几行跑完之后、任何请求之前。
+async fn prepare_request_sections(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    context: &mut SessionContext,
+    sink: &ExecEventSink,
+    turn: &mut TurnState,
+    root_id: &str,                  // 幕首分配（`begin` 的输入）
+    fresh_root: bool,               // 续写幕复用原根，不重发骨架
+    tools: &[CapabilityMeta],
+) -> Result<Vec<ChatNode>, ActorError>;  // 请求视图（不落库）
 ```
 
-- `retention` **不进** `TurnInputs`——它只是 `build_request_view` 的一个入参，
- 由 `tools` 就地派生后立即消费，暴露到边界只多一份需要维护的中间态。
-- `overhead_tokens` 是函数内局部量：只被本步内的压缩阈值消费，
+- **两段分开的原因**：提示词与工具是纯读，必须早于草稿（`begin` 要用工具清单建）；
+  请求视图却依赖轮首那几行寄存的值（召回寄存的段、快路寄存的正文），只能在
+  接缝里建。`root_id` 也是幕首定的——「定 id」与「把骨架发给流式桥」是两件事。
+- `retention` **不进**请求视图的返回值——它只是 `build_request_view` 的一个入参，
+  由 `tools` 就地派生后立即消费，暴露到边界只多一份需要维护的中间态。
+- `overhead_tokens` 由 `collect_reads` 一轮算一次并寄存进 `TurnState`，
  **一轮只算一次**（`context::estimate_overhead_with_tools(system_prompt, &tools)`
  复用已收集的工具清单，不让 visitor 注册表被查三遍）。
 
@@ -240,8 +250,9 @@ pub(crate) async fn run_compress(
 ```
 
 **判定与执行同处一地**：水位判定与压缩执行都在这一个执行体里，压缩之后水位即变，下一轮按新
-水位判。**「什么时候轮到它」也不再是代码行序**：它与判决、召回同住轮首 host，由 `ring::drive` 按
-`prio` 选（判决 10 → 压缩 30 → 召回 40），出口那一格（`turn.stage{stage=compress}`）由执行体自己落
+水位判。**「什么时候轮到它」也不再是代码行序**：它与判决、召回、快路同处唯一那张绑定表，由
+`ring::drive` 按 `prio` 选（判决 10 → 压缩 30 → 召回 40 → 快路 50 → 接缝 52），出口那一格
+（`turn.stage{stage=compress}`）由执行体自己落
 （形状与理由见 [DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环")）。
 
 **收口后的分工**：
@@ -416,7 +427,7 @@ execute_turn
 
 **这里数的是请求，不是工具轮。** `TurnState` 上那一格叫 `request_round`（本轮已发出的 LLM 请求数，
 续写时才 +1）；工具轮数从**已落事实**折出：本幕带非空 `calls` 的 `response(port=model)` 条数
-（[`report_due`](../../../symbio-core/src/decl/mod.rs) v4 的 `tool_rounds`，与本节环体的 `tool_round`
+（[`report_due`](../../../symbio-core/src/decl/mod.rs) v6 的 `tool_rounds`，与本节环体的 `tool_round`
 同一个读数——后者是环内的活计数器，前者的写方就是模型应答本身）。静默时长与配额同样由
 `report_due` 算出，四格一起构成汇报行的 `due`。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
 恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；

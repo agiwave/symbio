@@ -1,8 +1,9 @@
 //! 阶段① 轮首准备（· B3，DE-021 §5 动作 B3）。
 //!
-//! 阶段事实与派发档入格 → 开场白 / 定稿答话两条早退路 → 窗口与基线 prompt →
-//! 续写产物补写 → 首请求前的中止检查。产出的 [`Prepared`] 是后续阶段的**唯一
-//! 状态来源**：请求阶段只读它、批处理阶段只改它，阶段之间不传第二份事实。
+//! 定稿答话 / 空答兜底两条早退路 → 窗口与基线 prompt → 续写产物补写。产出的
+//! [`Prepared`] 是后续阶段的**唯一状态来源**：请求阶段只读它、批处理阶段只改它，
+//! 阶段之间不传第二份事实。首请求前的中止由环的第一道守卫判
+//! （[`super::TurnSession::abort_before_first_request`]）——草稿先建好，环再看。
 //!
 //! 用户格**不在这里落**：它先于任何判决，由编排层在 `drive` 之前写入，
 //! 本阶段收到的是它的 seq（`TurnInput::user_seq`）。
@@ -63,6 +64,9 @@ pub(crate) struct Prepared {
     /// 一次往返一个 id，否则第二次的 `sent` 撞第一次的幂等键。
     pub(crate) step: u64,
     pub(crate) actor: ActorSpec,
+    /// 本轮中止信号（`D-052` 决策 1）。检查点是环的**第一道守卫**——
+    /// [`super::TurnSession::abort_before_first_request`] 在首圈、任何行之前读它。
+    pub(crate) abort: Option<symbio_core::ExecAbortSignal>,
     pub(crate) user_seq: u64,
     pub(crate) turn_root_id: String,
     pub(crate) started: std::time::Instant,
@@ -172,7 +176,7 @@ impl Prepared {
     /// D-048 的双向完整性复核（「送出的消息与事实网格不完整」只出声不抛错）判的是
     /// `declared` 与 `base_messages` 是否一致。前缀没插进去时 `declared` 必须是
     /// `None`，否则构造期就会报一条假的「声明了却没插」；而前缀在构造期确实还拿不到
-    /// （它由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行之后收集）。于是复核跟着前缀走。
+    /// （它由 `prepare_request_sections` 的 ⑥ 在轮首那几行之后收集）。于是复核跟着前缀走。
     ///
     /// 快照按**建草稿时那一份**（[`Self::full_snapshot`]）与同一个窗口重裁：与原实现
     /// 里 `prepare_turn` 用的那一份逐字相同，复核的输入没有变，只是时机从「构造期」
@@ -220,7 +224,6 @@ impl Prepared {
 
 pub(crate) async fn prepare_turn<S>(
     store: &S,
-    llm: &dyn LlmAdapter,
     input: TurnInput,
 ) -> Result<PreparedFlow, symbio_core::AppendError>
 where
@@ -260,7 +263,7 @@ where
     // 溯源必须指向本轮用户格（I2）——而那只有落完用户格才有。
     //
     // **这是方案允许的形状，不是遗留缺口**（[D-125](../../../../docs/003-design/015-义务环.md#d-125-定稿答话轮不进轮内驱动循环环覆盖的是欠着的往返收束格由轮首准备就地落 "DE-015-义务环")）：
-    // 环调度的是「还没还的债」，而这一轮欠的只有判决那一行——它在轮首 host 跑完就把结论落成
+    // 环调度的是「还没还的债」，而这一轮欠的只有判决那一行——它跑完就把结论落成
     // `answered`，本轮就地收束，**轮内驱动循环压根没起来**。模板产线出话时零往返，措辞产线
     // 出话时那一次由 `compose` 在轮首之前发起并已入账（`via=compose/wording`），
     // 它不是本轮的债。所以收束格由这里就地落，`close` 执行体的「唯一写方」限定在
@@ -363,7 +366,7 @@ where
     // 调用点在接缝上（轮首那几行跑完、任何请求之前）。本函数只把**切片**留下来：产物
     // 编号要用它，且它同时是「幕首这一刻的事实面」。
     //
-    // 请求级前缀也不在这里插（`D-222` 订正 3）：它由 `prepare_turn_inputs` 的 ⑥ 在轮首
+    // 请求级前缀也不在这里插（`D-222` 订正 3）：它由 `prepare_request_sections` 的 ⑥ 在轮首
     // 那几行**之后**收集。入口是 [`Prepared::set_prefix`]，D-048 的双向完整性复核跟着它
     // 走——`declared` 只有在前缀真被插进去的那一刻才有值。
 
@@ -388,21 +391,17 @@ where
     // （`chat_loop::wake`），授权与派发由行表承担，工具交换由派发动作自己产生
     // （`stream::dispatch_round`）——本段不再私自拼一段 prompt。
 
-    // 1c. **闸门与首请求之间的中止**（D-052 决策 1）。检查点在这里：用户格已落、
-    // 请求未发，已中止则直接走中止收束格，与 adapter 中途返回 Aborted 落的是同一格。
-    if let Some(sig) = abort.as_ref() {
-        if sig.is_aborted() {
-            return settle::append_aborted(store, &actor, turn, user_seq, llm, &turn_root_id)
-                .await
-                .map(PreparedFlow::Done);
-        }
-    }
+    // 1c. **闸门与首请求之间的中止**（D-052 决策 1）不在这里判：它成了环的第一道守卫
+    // （`turn_exec::drive` 首圈）。草稿先建好、把信号存进去，**被中止的幕因此也不再跑
+    // 判决 / 压缩 / 召回**（`D-222` 订正 3 认下的行为变化）——环首圈先看中止，再看
+    // 任何一行欠不欠。
 
     Ok(PreparedFlow::Run(Box::new(Prepared {
         turn,
         drive_seq,
         step: 0,
         actor,
+        abort,
         user_seq,
         turn_root_id,
         started,

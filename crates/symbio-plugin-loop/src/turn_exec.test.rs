@@ -163,15 +163,18 @@ fn land_resume_anchor(fx: &Fixture, turn_no: u64, user_seq: u64, kind: &str) -> 
     seqs.first().copied().unwrap_or(user_seq)
 }
 
-/// 测试侧的交付包：**接缝之前那一整轮**的入参形状。
+/// 测试侧的交付包：**一幕的幕首入参**（形状与生产 [`super::ExecTurn`] 同一份）。
 ///
-/// 生产里 [`super::ExecTurn`] 只剩幕首可给的东西（`D-222` 订正 3：草稿必须在轮首
-/// 那几行之前就建），轮首那几样（召回视图 / 技能观测 / 快路正文 / 压缩快照 / 开场白）
-/// 由 `stage::run_stage` 在接缝处另递（[`super::AfterHead`]）。本文件的用例沿用
-/// 「一次执行的全部入参」这一旧形状，**本地同名结构遮蔽了 `super::*` 里的
-/// `ExecTurn`**——五个 struct 字面量因此一字不改（`SP-033` §1：改用例，不改形状）。
+/// 生产里幕首之后只有**一个环**（`D-222` 裁决 5）：轮首四行、接缝、汇报与轮内各行
+/// 同住一张绑定表，先后由 `prio` 说。接缝读的寄存物因此不再另开一条通道递进来——
+/// 它们住在**本轮状态**与**会话上下文**上（`recall_view` / `skill_route` /
+/// `head_reflex` / `opening_text` / `consolidated`），由环上的动作自己取走。本夹具
+/// 替幕首把那一片备好，于是轮首那几行没开账时这些寄存是 `None`，开账时由执行体覆盖。
+///
+/// **本地同名结构遮蔽了 `super::*` 里的 `ExecTurn`**——五个 struct 字面量因此
+/// 一字不改（`SP-033` §1：改用例，不改形状）。
 struct ExecTurn<'a> {
-    session: &'a LoopSession,
+    session: &'a Arc<LoopSession>,
     provider: Arc<dyn ModelProvider>,
     parent: Option<Arc<dyn Plugin>>,
     ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
@@ -197,96 +200,146 @@ struct ExecTurn<'a> {
     presentation_tree: symbio_core::node_build::PresentationTree,
 }
 
-impl<'a> ExecTurn<'a> {
-    /// 拆成幕首交付包（[`super::ExecTurn`]）与接缝寄存物（[`super::AfterHead`]）。
-    ///
-    /// `request_sections` 恒空：本文件的用例不走请求视图层——旧形状里那一格
-    /// （`prefix`）在本文件恒 `None`，而 `request_view_prefix(&[])` 就是 `None`。
-    fn split(self) -> (super::ExecTurn<'a>, super::AfterHead<'a>) {
-        let ExecTurn {
-            session,
-            provider,
-            parent,
-            ctx,
-            system_prompt,
-            abort,
-            root_id,
-            sink,
-            user_text,
-            turn_no,
-            user_seq,
-            drive_seq,
-            window_turns,
-            tools,
-            recalled,
-            skill_obs,
-            reflex,
-            consolidation,
-            supplements,
-            supplemental_no,
-            report,
-            opening_text,
-            opening_dialog,
-            presentation_tree,
-        } = self;
-        (
-            super::ExecTurn {
-                session,
-                provider,
-                parent,
-                ctx,
-                system_prompt,
-                abort,
-                root_id,
-                sink,
-                user_text,
-                turn_no,
-                user_seq,
-                drive_seq,
-                window_turns,
-                tools,
-                supplements,
-                report,
-                supplemental_no,
-                presentation_tree,
-            },
-            super::AfterHead {
-                request_sections: &[],
-                consolidation,
-                opening_text,
-                opening_dialog,
-                reflex,
-                recalled,
-                skill_obs,
-            },
-        )
-    }
+/// 编排器那份转写写口：本夹具不测压缩改道，交一个丢弃口。
+struct DiscardWriter;
+
+#[async_trait::async_trait]
+impl symbio_core::ExecTranscriptWriter for DiscardWriter {
+    async fn apply(&self, _m: cm::ChatNode) {}
 }
 
-/// 一轮的执行：装配 → 开轮 → 接缝 + 内环 → 归类 / 落格。
+/// 一幕的执行：装配 → 开轮 → **一个环**（轮首 / 接缝 / 轮内）→ 归类 / 落格。
 ///
-/// 与生产 `stage::run_stage` 只差一处：轮首那几行（判决 / 压缩 / 召回）不在这里跑
-/// ——它们的寄存物由调用方直给（本文件的 `ExecTurn`），接缝照旧消费。于是本文件的
-/// 判据仍落在轮内那一段（模型 / 工具 / 收束 / 流式），与本文件成形之前同一组断言。
+/// 与生产 `stage::run_stage` 只差两处：**幕首**那几行（用户格 / 配置格 / 轮次格由
+/// 本文件的 `seed_*` 直给）与**幕末**的落库与镜像回灌（`settle`）。环里那一段是
+/// 同一个 `drive`、同一张绑定表——轮首四行与接缝不再由夹具代跑，而是照旧欠账、
+/// 照旧由 `prio` 选中（没开账的行不会被选中，判据因此仍落在本文件那几条契约上）。
 async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
-    let (exec, head) = req.split();
-    let assembled = super::assemble_turn(exec).await?;
+    let ExecTurn {
+        session,
+        provider,
+        parent,
+        ctx,
+        system_prompt,
+        abort,
+        root_id,
+        sink,
+        user_text,
+        turn_no,
+        user_seq,
+        drive_seq,
+        window_turns,
+        tools,
+        recalled,
+        skill_obs,
+        reflex,
+        consolidation,
+        supplements,
+        supplemental_no,
+        report,
+        opening_text,
+        opening_dialog,
+        presentation_tree,
+    } = req;
+    // 幕锚的「现在」与生产同一个读数口（派发器与视图都读它，不是夹具编的一个数）。
+    let facts = session
+        .facts()
+        .map(|store| store.range(Seq::new(0)))
+        .unwrap_or_default();
+    let now_ms = super::super::loop_rows::wake_now_ms(&facts, drive_seq);
+
+    // 环要借的那一片可控状态：生产由 `run_stage` 的幕首备好，这里同一形状。
+    // `input_utterance` 留 `None`：Q1 的委派判定因此不下结论（与退役前那条旁路同形）。
+    let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
+        provider: provider.clone(),
+        parent: parent.clone(),
+        context_limit: 8192,
+        session: session.clone(),
+        writer: Arc::new(DiscardWriter),
+        compose_enabled: false,
+        opening_enabled: false,
+        presentation_tree,
+    });
+    let mut context = super::super::chat_loop::state::SessionContext {
+        messages: Vec::new(),
+        session: session.clone(),
+        consolidated: consolidation.map(|c| c.to_vec()),
+    };
+    let mut turn = super::super::chat_loop::state::TurnState {
+        abort: abort.clone(),
+        turn_no,
+        user_seq,
+        drive_seq,
+        now_ms,
+        recall_view: recalled.cloned(),
+        skill_route: skill_obs.to_vec(),
+        head_reflex: reflex.cloned(),
+        opening_text: opening_text.map(String::from),
+        opening_dialog: opening_dialog.cloned(),
+        ..Default::default()
+    };
+
+    let assembled = super::assemble_turn(super::ExecTurn {
+        session: session.as_ref(),
+        provider,
+        parent,
+        ctx,
+        system_prompt,
+        abort,
+        root_id,
+        sink,
+        user_text,
+        turn_no,
+        user_seq,
+        drive_seq,
+        window_turns,
+        tools,
+        supplements,
+        report,
+        supplemental_no,
+        presentation_tree,
+    })
+    .await?;
     let opened = super::open_turn(&assembled).await?;
-    let running = match opened {
+    let flow = match opened {
         // 开轮就收束（首请求前中止）：轮首那几行不再跑（`D-222` 订正 3）。
         super::Opened::Done(outcome) => {
-            assembled.into_running(outcome, head.recalled, head.skill_obs)
+            super::OpenedFlow::Running(Box::new(assembled.into_running(outcome)))
         }
-        super::Opened::Run(run) => super::drive_opened(assembled, run, head).await?,
+        super::Opened::Run(run) => {
+            super::drive_opened(
+                assembled,
+                run,
+                super::HeadEnv {
+                    orchestrator: &orchestrator,
+                    context: &mut context,
+                    turn: &mut turn,
+                    fresh_root: true,
+                },
+            )
+            .await?
+        }
     };
-    match super::classify_turn(running).await? {
-        super::Classified::Finished(v) => v,
-        super::Classified::Settled(settled) => super::persist_turn(settled),
+    match flow {
+        // 判成「就此答话」的一轮：收束格由编排层落，本夹具没有那一段
+        // （它由 `stage.test.rs` 钉）。走到这里说明本文件的夹具寄存了一体答话，
+        // 而它不该有——按失败报出，不静默交回一个空结果。
+        super::OpenedFlow::Answered => Err(TurnExecExit::Failed(PluginError::InternalError(
+            "夹具的一轮不会判成答话".into(),
+        ))),
+        super::OpenedFlow::Running(running) => {
+            match super::classify_turn(*running, turn.recall_view.as_ref(), &turn.skill_route)
+                .await?
+            {
+                super::Classified::Finished(v) => v,
+                super::Classified::Settled(settled) => super::persist_turn(settled),
+            }
+        }
     }
 }
 
 fn exec_base<'a>(
-    session: &'a LoopSession,
+    session: &'a Arc<LoopSession>,
     provider: Arc<dyn ModelProvider>,
     sink: &'a symbio_core::ExecEventSink,
     abort: symbio_core::ExecAbortSignal,
@@ -752,7 +805,7 @@ impl ModelProvider for FaithfulProvider {
 /// `Store` 契约落格，与生产同一 trait；WAL 重开 / 归档语义由 session 的存储层
 /// 用例覆盖（D-084 §1-A：事实以值交给执行层）。
 struct Fixture {
-    session: LoopSession,
+    session: Arc<LoopSession>,
     facts: Arc<EventStore>,
     port: Arc<FakeSessionPort>,
 }
@@ -792,7 +845,7 @@ fn setup_with_settings(tune: impl FnOnce(&mut symbio_core::TurnSettings)) -> Fix
         std::env::temp_dir().join("symbio-test/transcripts"),
         settings,
     );
-    let session = loop_session(spec, facts.clone(), port.clone());
+    let session = Arc::new(loop_session(spec, facts.clone(), port.clone()));
     Fixture {
         session,
         facts,
@@ -835,22 +888,26 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
         "正文节点 id 必须已分配"
     );
 
-    // UI 帧：首片快照建节点（Streaming），窄帧追加——与 model 插件直发同构。
+    // UI 帧：接缝先发 Turn 根骨架（新幕 `fresh_root`），其后是首片快照建节点
+    // （Streaming）与窄帧追加——与 model 插件直发同构。
     let got = frames.0.lock().unwrap();
-    assert_eq!(got.len(), 2, "快照 + 窄帧，不多不少：{got:?}");
+    assert_eq!(got.len(), 3, "根骨架 + 快照 + 窄帧，不多不少：{got:?}");
+    assert_eq!(got[0].id, "r-1", "新幕的根节点先上线");
+    assert_eq!(got[0].msg_type, Some(cm::NodeKind::Skeleton));
+    assert_eq!(got[0].status, Some(cm::NodeStatus::Streaming));
     assert_eq!(
-        got[0].id, out.response_text_child_id,
+        got[1].id, out.response_text_child_id,
         "收口用的 id 就是首片建的节点"
     );
-    assert_eq!(got[0].status, Some(cm::NodeStatus::Streaming));
-    assert_eq!(got[0].parent_id.as_deref(), Some("r-1"));
+    assert_eq!(got[1].status, Some(cm::NodeStatus::Streaming));
+    assert_eq!(got[1].parent_id.as_deref(), Some("r-1"));
     assert!(
-        matches!(&got[0].content, Some(cm::MessageContent::Text(t)) if t == "秋"),
+        matches!(&got[1].content, Some(cm::MessageContent::Text(t)) if t == "秋"),
         "快照帧带首片全文：{:?}",
-        got[0].content
+        got[1].content
     );
-    assert_eq!(got[1].id, out.response_text_child_id, "窄帧同一节点");
-    assert_eq!(got[1].delta.as_deref(), Some("天好"), "窄帧只带增量");
+    assert_eq!(got[2].id, out.response_text_child_id, "窄帧同一节点");
+    assert_eq!(got[2].delta.as_deref(), Some("天好"), "窄帧只带增量");
 
     // 事实网格：user 格 + final 格，不变量全绿，final 溯源指向本轮用户格。
     let all = fx.facts.range(Seq::new(0));
@@ -1247,7 +1304,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 /// 与实时面就是两个身份）。
 #[tokio::test]
 async fn round_report_reaches_the_live_surface_before_turn_end() {
-    // 汇报这条产线要 **行表真的开账**（`policy.report` 欠不欠由 `report_due` v4
+    // 汇报这条产线要 **行表真的开账**（`policy.report` 欠不欠由 `report_due`
     // 判），所以夹具把三个阈值配到「第一个批次边界就到期」，不靠手造一个「该报了」
     // 的返回值——那正是退役的 `RoundHookFn` 掊着的判定。
     let fx = setup_with_reports();
@@ -1263,14 +1320,8 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
 
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
     seed_config(&fx, 0, user_seq);
-    // 本幕的「现在」= 已落事实里最新那条的时刻（静默读数的另一端）。间隔配成 0，
-    // 所以这个值不影响到期判定，但它得是真读数，不能是编的一个数。
-    let now_ms = fx
-        .facts
-        .range(Seq::new(0))
-        .last()
-        .map(|e| e.ts)
-        .unwrap_or(0);
+    // 本幕的「现在」不再由用例递给派发点：环读事实折出静默时长，时刻与它同源
+    // （见 `execute_turn` 里那次 `wake_now_ms`）。间隔配成 0，到期判定与它无关。
     let res = execute_turn(ExecTurn {
         turn_no: 0,
         user_seq,
@@ -1299,7 +1350,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
-        report: Some(super::super::report_exec::ReportPort { now_ms, text }),
+        report: Some(super::super::report_exec::ReportPort { text }),
         opening_text: None,
         opening_dialog: None,
         presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
@@ -1403,7 +1454,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::Faithful);
 
-    // 技能路由判定由读侧给出（生产里是 `prepare_turn_inputs` 调 `skill_events::route`）。
+    // 技能路由判定由读侧给出（生产里是 `prepare_request_sections` 调 `skill_events::route`）。
     let obs = [("sk-1".to_string(), false)];
     let mut req = tool_free_req(
         &fx,
