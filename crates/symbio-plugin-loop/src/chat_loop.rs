@@ -56,7 +56,7 @@ pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 // 消费方（`compose` / `rebuild` / `turn_runner`）各自直连 core——本模块不再续发短路径，
 // 留守侧因此不必经驱动器拿构造器。
 pub(crate) use self::decide::decide_turn;
-pub(crate) use self::drive::begin_drive;
+pub(crate) use self::drive::{begin_drive, land_dispatch, land_opening};
 pub(crate) use self::inputs::{run_compress, run_recall, run_reflex};
 pub(crate) use self::io::{emit_streaming_start, finalize_turn_root, persist_messages};
 pub(crate) use self::state::{

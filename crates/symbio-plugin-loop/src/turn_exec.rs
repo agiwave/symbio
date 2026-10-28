@@ -701,9 +701,13 @@ pub(crate) struct ExecTurn<'a> {
     /// **对话面开场白正文**：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
-    /// `progress`——汇报走 `policy.report` 行 /`EVENT_CHAT_ASSISTANT_REPORTED`）。落格在
-    /// [`execute_turn`] 里做（本插件唯一持写者令牌处），运行器据它落
-    /// `chat.assistant.opening` 格。`None` = 本轮没有开场白（常态）。
+    /// `progress`——汇报走 `policy.report` 行 /`EVENT_CHAT_ASSISTANT_REPORTED`）。
+    ///
+    /// ## 它不经过运行器（`D-223` 订正 1）
+    ///
+    /// 落格与上线都在接缝上（`chat_loop::land_opening`），因为它是轮首判决行的产物、
+    /// 而草稿在幕首就建（`D-222` 订正 3）——草稿建好时这句话还没说出来。它随本包走到
+    /// 接缝，只为了「那一刻手里有事实源与上线面」。`None` = 本轮没有开场白（常态）。
     pub opening_text: Option<&'a str>,
     /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
     pub opening_dialog: Option<super::turn_runner::DialogFacts>,

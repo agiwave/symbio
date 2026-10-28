@@ -11,9 +11,7 @@
 
 use super::super::turn_exec::ActorError;
 use super::{TurnInput, TurnOutcome, TurnRunner};
-use symbio_core::{
-    DeltaSink, Entity, Event, FullModel, LatencyTier, LlmAdapter, SilentDeltas, Store, Verb,
-};
+use symbio_core::{DeltaSink, Entity, Event, FullModel, LlmAdapter, SilentDeltas, Store, Verb};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_testkit::trivial_actor_spec;
 
@@ -60,7 +58,6 @@ impl TurnRunner {
         tok: FullModel,
         turn: u64,
         text: &str,
-        tier: LatencyTier,
     ) -> Result<TurnOutcome, ActorError> {
         let user_seq = seed_user(store.as_ref(), turn, text);
         self.run_streaming(
@@ -71,7 +68,6 @@ impl TurnRunner {
                 turn,
                 user_seq,
                 drive_seq: user_seq,
-                tier,
                 window_turns: None,
                 // 单请求入口（无工具轮）没有轮内循环 ⇒ 没有注入时机。
                 inject: None,
@@ -83,8 +79,6 @@ impl TurnRunner {
                 final_cost_ms: 0,
                 turn_root_id: String::new(),
                 dialog: None,
-                opening_text: None,
-                opening_dialog: None,
                 nodes: None,
                 // 无中止语义的路径：`None` ⇒ 1c 的检查是空操作。
                 abort: None,
@@ -176,18 +170,29 @@ impl TurnRunner {
         prefix: Option<String>,
         reflex: Option<super::super::turn_runner::ReflexAnswer>,
     ) -> Result<TurnOutcome, ActorError> {
-        let mut session = match super::super::turn_runner::TurnRunner::begin(
+        // 派发格是**接缝**上的事实（`D-223` 订正 1）：生产里由 `assemble_turn` 落（那一刻
+        // 档位才折得出来），夹具自己落。它不只是审计——`turn.dispatch` 的幂等键
+        // （`d-{turn}-{drive_seq}`）还兼着「同一幕不许跑两次」的那道闸。
+        let facts = store.range(symbio_core::Seq::new(0));
+        let now = super::super::loop_rows::wake_now_ms(&facts, input.drive_seq);
+        let tier = super::super::loop_rows::turn_tier(&facts, input.turn, now);
+        super::super::chat_loop::land_dispatch(
             store.as_ref(),
-            llm.as_ref(),
-            input,
-            sink.clone(),
+            input.turn,
+            input.user_seq,
+            input.drive_seq,
+            tier,
+            &input.actor,
         )
-        .await
-        .map_err(ActorError::Append)?
-        {
-            super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
-            super::super::turn_runner::TurnSessionBegin::Run(session) => session,
-        };
+        .map_err(ActorError::Append)?;
+        let mut session =
+            match super::super::turn_runner::TurnRunner::begin(store.as_ref(), llm.as_ref(), input)
+                .await
+                .map_err(ActorError::Append)?
+            {
+                super::super::turn_runner::TurnSessionBegin::Done(outcome) => return Ok(outcome),
+                super::super::turn_runner::TurnSessionBegin::Run(session) => session,
+            };
         session.set_prefix(prefix);
         session.set_reflex(reflex);
         super::super::turn_exec::drive_steps(
@@ -211,8 +216,8 @@ mod turn_runner_tests {
     use crate::control_decl::guard_vocab;
     use crate::control_decl::{CHAT_VOCAB, MESSAGE_VOCAB};
     use symbio_core::{
-        check_all, cost_ledger, transcript, AppendError, Budget, Event, EventStore, LatencyTier,
-        Seq, SilentDeltas, Store, TokenIssuer,
+        check_all, cost_ledger, transcript, AppendError, Budget, Event, EventStore, Seq,
+        SilentDeltas, Store, TokenIssuer,
     };
     use symbio_plugin_api::events::{
         EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -229,7 +234,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
         let out = TurnRunner
-            .run(&store, llm.clone(), tok, 0, "你好", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 0, "你好")
             .await
             .expect("桩必答");
         assert_eq!(out.turn, 0);
@@ -273,7 +278,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::always_fail("模型挂了"));
 
         let out = TurnRunner
-            .run(&store, llm.clone(), tok, 0, "你好", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 0, "你好")
             .await
             .expect("兜底路径仍返回 Ok（轮次本身收束了）");
         assert!(out.fell_back, "失败轮必须走兜底");
@@ -314,7 +319,7 @@ mod turn_runner_tests {
             std::sync::Arc::new(EventStore::new());
         for turn in 0..3u64 {
             TurnRunner
-                .run(&store, llm.clone(), tok, turn, "问", LatencyTier::Deep)
+                .run(&store, llm.clone(), tok, turn, "问")
                 .await
                 .expect("桩必答");
         }
@@ -327,7 +332,7 @@ mod turn_runner_tests {
 
         // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
         let out = TurnRunner
-            .run(&store, llm.clone(), tok, 3, "再问", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 3, "再问")
             .await
             .expect("桩必答");
         assert_eq!(out.turn, 3);
@@ -351,7 +356,6 @@ mod turn_runner_tests {
                     tok,
                     turn,
                     if turn == 3 { "再问" } else { "问" },
-                    LatencyTier::Deep,
                 )
                 .await
                 .unwrap();
@@ -372,7 +376,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::succeed("stub-model"));
 
         TurnRunner
-            .run(&store, llm.clone(), tok, 0, "第一轮", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 0, "第一轮")
             .await
             .unwrap();
         // 第二轮沿用同一轮号：用户格已落（`seed_user` 会先撞），故直接用同一份
@@ -386,7 +390,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq: 0,
                     drive_seq: 0,
-                    tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
@@ -394,8 +397,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -422,7 +423,7 @@ mod turn_runner_tests {
 
         // 第一轮：单轮 = 只有当前那条 user 消息。
         let r1 = TurnRunner
-            .run(&store, llm.clone(), tok, 0, "第一轮问题", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 0, "第一轮问题")
             .await
             .unwrap();
         assert!(r1.text.contains("第一轮问题"));
@@ -430,7 +431,7 @@ mod turn_runner_tests {
         // 第二轮：历史在场，且**角色正确**——模型看得见自己上一轮的答复，
         // 并且知道那句答复是自己说的（不是用户说的）。
         let r2 = TurnRunner
-            .run(&store, llm.clone(), tok, 1, "第二轮问题", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 1, "第二轮问题")
             .await
             .unwrap();
         let last = super::super::prepare::render_messages(
@@ -670,7 +671,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
                     actor: trivial_actor_spec("session/main"),
@@ -679,8 +679,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -721,7 +719,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
@@ -730,8 +727,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -764,7 +759,6 @@ mod turn_runner_tests {
                 tok,
                 0,
                 "问",
-                LatencyTier::Deep,
             )
             .await
             .unwrap();
@@ -786,7 +780,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
                     window_turns: None,
                     inject: None,
                     actor: trivial_actor_spec("session/main"),
@@ -794,8 +787,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -829,8 +820,14 @@ mod turn_runner_tests {
     ///
     /// 轮末同一格还会经落库镜像再来一次；消费端按 id 合并成同一格，id 对不上就是两张卡。
     ///
-    /// **反向自检**：删掉 `turn_runner` 步骤 1a 末尾那次 `sink.on_tool_frame` 本用例必红
-    /// （开场白只剩 deltas，`got.first()` 是正文增量而不是它）。
+    /// ## 为什么钉的是接缝上的那个函数，不是运行器
+    ///
+    /// 开场白是轮首判决行的产物，而草稿在幕首就建（`D-222` 订正 3）——运行器开跑时这句
+    /// 话还没说出来。落点因此是接缝（`D-223` 订正 1）：`assemble_turn` 手里同时有事实源
+    /// 与流式桥的那一刻。本用例直接调它，钉的正是那条时序。
+    ///
+    /// **反向自检**：删掉 `chat_loop::land_opening` 末尾那次 `sink.on_tool_frame` 本用例
+    /// 必红（开场白只剩事实、实时面上一个字都没有）。
     #[tokio::test]
     async fn opening_node_reaches_the_live_surface_at_production_time() {
         use std::sync::{Arc, Mutex};
@@ -862,51 +859,55 @@ mod turn_runner_tests {
 
         let store: std::sync::Arc<dyn symbio_core::Store<Event = symbio_core::Event>> =
             std::sync::Arc::new(EventStore::new());
-        let tok = TokenIssuer::issue_deep();
-        let llm = std::sync::Arc::new(StubLlmAdapter::succeed_streaming(
-            "stub-model",
-            &["答", "话"],
-        ));
         let got = Arc::new(Frames::default());
         let user_seq = super::seed_user(store.as_ref(), 0, "问");
 
-        TurnRunner
-            .run_streaming(
-                &store,
-                llm.clone(),
-                tok,
-                TurnInput {
-                    turn: 0,
-                    user_seq,
-                    drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
-                    window_turns: None,
-                    inject: None,
-                    actor: trivial_actor_spec("session/main"),
-                    final_reply: None,
-                    final_cost_ms: 0,
-                    turn_root_id: String::new(),
-                    dialog: None,
-                    opening_text: Some("我先看一下。".into()),
-                    opening_dialog: Some(DialogFacts {
-                        id: "op-node-1".into(),
-                        reason: "escalate".into(),
-                        exclude_from_context: true,
-                    }),
-                    nodes: None,
-                    abort: None,
-                },
-                got.clone() as Arc<dyn DeltaSink>,
-            )
-            .await
-            .unwrap();
+        super::super::super::chat_loop::land_opening(
+            store.as_ref(),
+            got.as_ref() as &dyn DeltaSink,
+            0,
+            user_seq,
+            "session/main",
+            Some("我先看一下。"),
+            Some(&DialogFacts {
+                id: "op-node-1".into(),
+                reason: "escalate".into(),
+                exclude_from_context: true,
+            }),
+        )
+        .expect("开场白必须落得下");
 
+        // 事实：一格 `chat.assistant.opening`，载荷带节点身份。
+        let opening = store
+            .range(Seq::new(0))
+            .into_iter()
+            .find(|e| e.kind == "chat.assistant.opening")
+            .expect("开场白要入格");
+        assert_eq!(opening.payload["id"], "op-node-1");
+        assert_eq!(opening.payload["text"], "我先看一下。");
+
+        // 实时面：同一时刻、同一个 id。
         let got = got.0.lock().unwrap();
         assert_eq!(
             got.first(),
             Some(&("op-node-1".to_string(), "我先看一下。".to_string())),
             "开场白要在落格的同一时刻、带落格那个节点 id 上线（否则它只是轮末的旧闻）：{got:?}"
         );
+        drop(got);
+
+        // 空正文不落格也不上线（与汇报 / 收束同一条纪律）。
+        let empty = Arc::new(Frames::default());
+        super::super::super::chat_loop::land_opening(
+            store.as_ref(),
+            empty.as_ref() as &dyn DeltaSink,
+            0,
+            user_seq,
+            "session/main",
+            Some("   "),
+            None,
+        )
+        .expect("空正文不算失败");
+        assert!(empty.0.lock().unwrap().is_empty(), "空正文不上线");
     }
 
     /// 中止轮的入参包：半截产出事实经 `nodes` 闭包随收束入格（生产里这个闭包读
@@ -917,7 +918,6 @@ mod turn_runner_tests {
             turn: 0,
             user_seq,
             drive_seq: user_seq,
-            tier: LatencyTier::Deep,
             window_turns: None,
             inject: None,
             actor: trivial_actor_spec("session/main"),
@@ -926,8 +926,6 @@ mod turn_runner_tests {
             final_cost_ms: 0,
             turn_root_id: "r-1".into(),
             dialog: None,
-            opening_text: None,
-            opening_dialog: None,
             nodes: Some(nodes),
             // 无中止语义：本夹具走 `AdapterError::Aborted`（模型中途返回），
             // 不测 1c 的闸门空隙。
@@ -951,7 +949,7 @@ mod turn_runner_tests {
         let llm = std::sync::Arc::new(StubLlmAdapter::aborting("stub-model"));
 
         let out = TurnRunner
-            .run(&store, llm.clone(), tok, 0, "问", LatencyTier::Deep)
+            .run(&store, llm.clone(), tok, 0, "问")
             .await
             .unwrap();
 
@@ -1231,7 +1229,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec(PRINCIPAL_AUTONOMOUS),
@@ -1240,8 +1237,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -1280,7 +1275,6 @@ mod turn_runner_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
@@ -1289,8 +1283,6 @@ mod turn_runner_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -1324,8 +1316,8 @@ mod tool_round_tests {
     use crate::control_decl::EVENT_AUTHZ_GRANTED;
     use symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, Entity, Event,
-        EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage,
-        Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
+        EventStore, FullModel, LlmAdapter, LlmTurn, ModelFinishReason, PromptMessage, Seq,
+        SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
     };
     use symbio_plugin_api::events::{
         EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_PROGRESS,
@@ -2269,7 +2261,6 @@ mod tool_round_tests {
             turn: 0,
             user_seq: 0,
             drive_seq: 0,
-            tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
             actor: trivial_actor_spec("session/main"),
@@ -2278,8 +2269,6 @@ mod tool_round_tests {
             final_cost_ms: 0,
             turn_root_id: String::new(),
             dialog: None,
-            opening_text: None,
-            opening_dialog: None,
             nodes: None,
             abort: None,
         }
@@ -3251,7 +3240,6 @@ mod tool_round_tests {
                     user_seq,
                     // 本幕锚与首幕（0）不同 ⇒ 派发格幂等键不撞。
                     drive_seq: 1,
-                    tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
@@ -3260,8 +3248,6 @@ mod tool_round_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -4156,7 +4142,7 @@ mod tool_round_tests {
         });
 
         let out = TurnRunner
-            .run(&store, llm, tok, 0, "路上慢一点没关系", LatencyTier::Deep)
+            .run(&store, llm, tok, 0, "路上慢一点没关系")
             .await
             .expect("停在路上不等于失败：放行之后这一轮照常答完");
 
@@ -4221,7 +4207,6 @@ mod tool_round_tests {
                 TokenIssuer::issue_deep(),
                 0,
                 "走到一半我好看一眼",
-                LatencyTier::Deep,
             )
             .await
             .expect("一轮正常的模型往返");
@@ -4494,7 +4479,6 @@ mod reflex_turn_tests {
                     turn: 0,
                     user_seq,
                     drive_seq: user_seq,
-                    tier: LatencyTier::Reflex,
                     window_turns: None,
                     inject: None,
                     actor: actor.clone(),
@@ -4502,8 +4486,6 @@ mod reflex_turn_tests {
                     final_cost_ms: 0,
                     turn_root_id: String::new(),
                     dialog: None,
-                    opening_text: None,
-                    opening_dialog: None,
                     nodes: None,
                     abort: None,
                 },
@@ -5018,8 +5000,7 @@ mod actor_ledger_tests {
     use super::super::super::turn_exec::{ActorError, StepFuture, TurnStep};
     use super::super::{TurnInput, TurnRunner};
     use symbio_core::{
-        check_all, Entity, Event, EventStore, LatencyTier, Seq, SilentDeltas, Store, TokenIssuer,
-        Verb,
+        check_all, Entity, Event, EventStore, Seq, SilentDeltas, Store, TokenIssuer, Verb,
     };
     use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_MESSAGE_ADDED};
 
@@ -5074,7 +5055,6 @@ mod actor_ledger_tests {
             turn: 0,
             user_seq,
             drive_seq: user_seq,
-            tier: LatencyTier::Deep,
             inject: None,
             window_turns: None,
             actor: trivial_actor_spec("session/main"),
@@ -5082,8 +5062,6 @@ mod actor_ledger_tests {
             final_cost_ms: 0,
             turn_root_id: String::new(),
             dialog: None,
-            opening_text: None,
-            opening_dialog: None,
             nodes: None,
             abort: None,
         }

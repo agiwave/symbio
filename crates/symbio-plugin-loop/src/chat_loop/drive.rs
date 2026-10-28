@@ -18,7 +18,7 @@
 //! 配置读的是**这一轮**的活值，落成事实之后判决只读事实：回放看到的永远是
 //! 「那一轮用的配置」，不是进程此刻的值。
 
-use symbio_core::{count_user_messages, Entity, Seq, Verb};
+use symbio_core::{count_user_messages, Entity, Event, Seq, Store, Verb};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
 
 use crate::control_decl::{CHAT_VOCAB, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE, MESSAGE_VOCAB};
@@ -271,6 +271,102 @@ pub(crate) fn begin_drive(
     turn.now_ms = now_ms;
     turn.facts = store.range(Seq::new(0));
     Ok(Drive { user_text })
+}
+
+// ── 接缝上的两次落格：档位与开场白 ─────────────────────────────────────────
+//
+// 两者都是**幕级事实**（`turn.dispatch` / `chat.assistant.opening`），但它们的内容要到
+// 轮首四行跑完才存在：档位由 `policy.reflex` 的出口格折出（`D-223` 订正 1），开场白是
+// 判决行 `Escalate` 首响的那句话。所以它们**不能**跟 `begin_drive` 一起落（那里太早，
+// 四行一格都还没写），也不能留在 `TurnRunner::begin` 里（草稿要排到幕首，`D-222` 订正 3）
+// ——落点是接缝：轮首四行之后、内环之前。
+//
+// 为什么是自由函数而不是 `TurnSession::set_*`：这两格草稿一格都不读（`prefix` / `reflex`
+// 进草稿是因为环内要用），能落格的句柄在接缝这一侧（事实源 + 上线面）。挂到草稿上等于
+// 让草稿持一份自己用不到的句柄。
+//
+// 合表之后这条接缝消失：`Ctx` 里有 `&mut TurnState`，需要这两格的消费者自己读。
+
+/// 落**派发档**（`turn.dispatch`）：本幕以哪一档派发、给多大预算、以谁的身份。
+///
+/// 幂等键带**幕号**（`d-{turn}-{drive_seq}`）：同一轮可以被恢复幕再执行一次，两幕的档位
+/// 各记各的。
+pub(crate) fn land_dispatch(
+    store: &dyn Store<Event = Event>,
+    turn_no: u64,
+    user_seq: u64,
+    drive_seq: u64,
+    tier: symbio_core::LatencyTier,
+    actor: &symbio_core::ActorSpec,
+) -> Result<(), symbio_core::AppendError> {
+    store.append(
+        Event::pending(
+            format!("d-{turn_no}-{drive_seq}"),
+            crate::control_decl::EVENT_TURN_DISPATCH,
+            Entity::Turn,
+            Verb::Asserted,
+            turn_no,
+            &actor.principal,
+        )
+        .with_produced_by(user_seq)
+        .with_payload(serde_json::json!({
+            "tier": tier.name(),
+            "budget_ms": actor.budget_ms,
+            "principal": actor.principal,
+        })),
+    )?;
+    Ok(())
+}
+
+/// 落**对话面开场白**（`chat.assistant.opening`，`Escalate` 首响）并让它上线。
+///
+/// 本轮随后**照进工具循环**，所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
+/// 空正文不落格（与汇报 / 收束同一条纪律）。落格即上线：节点 id 用落格载荷里那个
+/// （`dialog.id`），轮末同 id 再送一次时消费端按 id 合并成同一格。
+///
+/// `None` 的两样（没有首响 / 没有节点身份）都退化成「什么都不做」：两者必须同时在场，
+/// 只有正文而没有节点身份会让实时面与重建面折出两个不同的节点。
+pub(crate) fn land_opening(
+    store: &dyn Store<Event = Event>,
+    sink: &dyn symbio_core::DeltaSink,
+    turn_no: u64,
+    user_seq: u64,
+    principal: &str,
+    text: Option<&str>,
+    dialog: Option<&super::super::turn_runner::DialogFacts>,
+) -> Result<(), symbio_core::AppendError> {
+    let (Some(opening), Some(dialog)) = (text, dialog) else {
+        return Ok(());
+    };
+    if opening.trim().is_empty() {
+        return Ok(());
+    }
+    store.append(
+        Event::pending(
+            format!("op-{turn_no}"),
+            symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_OPENING,
+            Entity::Turn,
+            Verb::Asserted,
+            turn_no,
+            principal,
+        )
+        .with_produced_by(user_seq)
+        .with_payload(serde_json::json!({
+            "text": opening,
+            "id": dialog.id,
+            "reason": dialog.reason,
+            "exclude_from_context": dialog.exclude_from_context,
+        })),
+    )?;
+    let mut node = symbio_core::node_build::dialog_node(
+        opening,
+        &dialog.reason,
+        dialog.exclude_from_context,
+        &symbio_core::principal::Principal::from_legacy(principal),
+    );
+    node.id = dialog.id.clone();
+    sink.on_tool_frame(&node);
+    Ok(())
 }
 
 #[cfg(test)]

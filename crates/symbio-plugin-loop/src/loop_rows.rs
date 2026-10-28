@@ -1619,6 +1619,33 @@ pub(crate) fn tier(name: &str) -> LatencyTier {
         .unwrap_or(LatencyTier::Deep)
 }
 
+/// 本幕的**服务档**：快路作答 ⇒ `policy.reflex` 那一行携带的档，否则深度档。
+///
+/// ## 为什么读 `reflex_answered` 而不是 `skill_hit`
+///
+/// `skill_hit` 是 `policy.reflex` 的**开账前件**（召回命中），`reflex_answered` 是
+/// **已作答**（`stage:"reflex"` 且 `result` 非 `miss`）。两者在正常路径等价，但
+/// `miss` 那一支（命中集为空、行自己关账）只有后者分得出来——照 `skill_hit` 定档会给
+/// 一个要跑模型往返的幕发 80ms 的预算，`I3` 当场误报（[`D-223`] 订正 1）。
+///
+/// ## 为什么读视图而不是读执行体的寄存物
+///
+/// 寄存物（`TurnState::head_reflex`）是**执行侧**的副本，视图是事实的公开形态。档位要
+/// 入的是幕级事实（`turn.dispatch`），写它的那一侧（接缝）手里只有事实源——读视图让
+/// 「档位」与「快路行欠不欠」逐字同源，不由「两边记得同步」保证。
+///
+/// [`D-223`]: ../../../../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面"
+pub(crate) fn turn_tier(events: &[Event], turn: u64, now: i64) -> LatencyTier {
+    let answered = view("turn_head", events, turn, now)
+        .and_then(|v| v.get("reflex_answered").and_then(|b| b.as_bool()))
+        .unwrap_or(false);
+    if answered {
+        tier("policy.reflex")
+    } else {
+        LatencyTier::Deep
+    }
+}
+
 /// 一笔可还的**可观测面**：行 / 债标识 / 档位 / 视图口径。与旧 `Hit::trace` 同一
 /// 目的——「某一步怎么发生了」在日志里要能指认到行与那一笔债，而不只是行名本身。
 ///

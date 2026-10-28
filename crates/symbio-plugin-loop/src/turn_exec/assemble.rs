@@ -33,8 +33,6 @@ pub(crate) struct Assembled<'a> {
     pub recalled: Option<&'a super::super::recall::RecallView>,
     pub(crate) skill_obs: &'a [(String, bool)],
     pub(crate) prefix: Option<String>,
-    pub(crate) opening_text: Option<&'a str>,
-    pub(crate) opening_dialog: Option<super::super::turn_runner::DialogFacts>,
     pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
     // —— 阶段① 的读数与构造 ——
     pub(crate) store: Arc<dyn Store<Event = Event>>,
@@ -46,7 +44,6 @@ pub(crate) struct Assembled<'a> {
     pub(crate) emitter: tokio::task::JoinHandle<()>,
     /// 本幕快路已作答的技能正文（`Some` ⇒ 本轮零模型往返，D-163）。
     pub(crate) reflex: Option<&'a super::super::turn_runner::ReflexAnswer>,
-    pub(crate) tier: LatencyTier,
     pub(crate) actor: ActorSpec,
     pub(crate) principal: String,
     pub(crate) to: String,
@@ -193,19 +190,13 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         }
     });
 
-    // 本轮档位的来源是**轮首已经选中快路**这件事本身（D-163）：`policy.reflex`
-    // 的执行体在轮首 host 落了出口格（`turn.stage{stage:"reflex"}`）并把正文寄进
-    // 本轮状态，`ExecTurn::reflex` 是那件事的携带面。本段不再问表「要不要走快路」，
-    // 也不重复匹配——判据（逐字命中 ∧ 只对新开轮）与档位是同一条声明上的两个字段
-    // （DE-014 §4 机制 2），这一侧只消费结果。
-    //
-    // 档位由**命中的那条行**携带（`loop_rows::tier`），不由本处按「有没有正文」
-    // 反推：判据已在轮首问过表，这里只把那条行的 tier 取出来。
-    let tier = if reflex.is_some() {
-        super::super::loop_rows::tier("policy.reflex")
-    } else {
-        LatencyTier::Deep
-    };
+    // 本轮档位的来源是**轮首快路作答这件事本身**（D-163 / `D-223` 订正 1）：`policy.reflex`
+    // 的执行体在轮首 host 落了出口格（`turn.stage{stage:"reflex"}`）并把正文寄进本轮状态。
+    // 本段不按「有没有正文」反推（那是执行侧的副本），读**视图**——档位与那一行的判定
+    // 因此同源。读点必须在这里之后不能再早：视图要等召回与快路两格都落了才填得满。
+    let facts_now = store.range(Seq::new(0));
+    let now = super::super::loop_rows::wake_now_ms(&facts_now, drive_seq);
+    let tier = super::super::loop_rows::turn_tier(&facts_now, turn_no, now);
 
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
     // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
@@ -253,6 +244,36 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
             symbio_core::plugin_warn!("session", "[Turn] 压缩事实落格失败（压缩已生效）: {e}");
         }
     }
+    // ── 接缝上的两格：派发档与开场白（`D-223` 订正 1）──────────────────────
+    //
+    // 两者都是轮首四行的产物（档位折自 `policy.reflex` 的出口格，开场白是判决行
+    // `Escalate` 首响），而草稿在幕首就建（`D-222` 订正 3）——所以它们不在 `begin` 里。
+    // 落点在这里：接缝上，压缩之后、`begin` 之前。三件事都由这一处顺序保证：
+    //
+    // - **压缩在前**：压缩是本轮执行的前置动作，它落的事实必须早于本轮派发格
+    //   （`consolidation_is_forwarded_before_the_turn_runs` 钉着这条）；
+    // - **`begin` 在后**：运行器的基线 prompt 从事实源投影，两格晚一步就不在模型读到的
+    //   历史里（`exclude_from_context` 为假时开场白是可见的一条）；
+    // - **上线面在这里**：开场白要经流式桥上实时面，而桥在本函数里建。
+    super::super::chat_loop::land_dispatch(
+        store.as_ref(),
+        turn_no,
+        user_seq,
+        drive_seq,
+        tier,
+        &actor,
+    )
+    .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
+    super::super::chat_loop::land_opening(
+        store.as_ref(),
+        bridge.as_ref(),
+        turn_no,
+        user_seq,
+        &actor.principal,
+        opening_text,
+        opening_dialog.as_ref(),
+    )
+    .map_err(|e| PluginError::InternalError(format!("开场白落格失败：{e:?}")))?;
     Ok(Assembled {
         session,
         provider,
@@ -271,8 +292,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         recalled,
         skill_obs,
         prefix,
-        opening_text,
-        opening_dialog,
         presentation_tree,
         store,
         turn_no,
@@ -282,7 +301,6 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         bridge,
         emitter,
         reflex,
-        tier,
         actor,
         principal,
         to,

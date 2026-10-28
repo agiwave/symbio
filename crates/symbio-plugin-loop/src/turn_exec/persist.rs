@@ -223,6 +223,17 @@ pub(crate) async fn execute_final_reply_turn(
     // 作用域与身份同批取（[]）：子会话挂父主体，顶层会话恒 `Root`。
     let scope = session.scope();
     let actor = super::super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
+    // 派发档（`D-223` 订正 1）：答话轮不走快路（`Answered` 是判决的结论，不是技能的命中），
+    // 档位恒为深度档。它与工具轮那一格同一条纪律——落在这里而不是草稿的构造里。
+    super::super::chat_loop::land_dispatch(
+        store.as_ref(),
+        turn_no,
+        user_seq,
+        drive_seq,
+        LatencyTier::Deep,
+        &actor,
+    )
+    .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
     // 压缩入格 + 归档：与 [`super::execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
     if let Some(msgs) = consolidation {
         if let Err(e) = session
@@ -243,7 +254,6 @@ pub(crate) async fn execute_final_reply_turn(
         turn: turn_no,
         user_seq,
         drive_seq,
-        tier: LatencyTier::Deep,
         // 不生成 ⇒ 没有 prompt，也就没有窗口可裁。
         window_turns: None,
         actor,
@@ -254,10 +264,6 @@ pub(crate) async fn execute_final_reply_turn(
         // 流式过程 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
         // 事件 id 复刻），取数口按有无思考事实决定挂不挂（见下方 `nodes`）。
         dialog: Some(dialog),
-        // 答话轮**不收束前的开场白**：`Answered` 在轮首就判定了（`Spoke` 是
-        // `Escalate` 的效应），本入口只处理已定稿的答话。
-        opening_text: None,
-        opening_dialog: None,
         turn_root_id: String::new(),
         // 取数口：**恒定快照**——答话轮没有流式过程（措辞插件的模型往返是静默的，
         // 此刻已结束），思考事实是调用方搬运来的定值。挂上它，1b 收束格的
@@ -280,25 +286,24 @@ pub(crate) async fn execute_final_reply_turn(
     // 备输入的产物可填（一次请求都不发、也不是快路），所以「填」这一步是空的——
     // 但两步的分界照样在这里，与工具轮那条路同一个形状。
     let llm: std::sync::Arc<dyn symbio_core::LlmAdapter> = std::sync::Arc::new(llm);
-    let outcome =
-        match TurnRunner::begin(store.as_ref(), llm.as_ref(), input, Arc::new(SilentDeltas))
-            .await
-            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
-        {
-            TurnSessionBegin::Done(outcome) => outcome,
-            TurnSessionBegin::Run(mut session) => drive_steps(
-                &mut session,
-                &store,
-                llm,
-                tok,
-                Arc::new(SilentDeltas),
-                Arc::from(Vec::new()),
-                None,
-                super::super::loop_rows::ACTORS,
-            )
-            .await
-            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?,
-        };
+    let outcome = match TurnRunner::begin(store.as_ref(), llm.as_ref(), input)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
+    {
+        TurnSessionBegin::Done(outcome) => outcome,
+        TurnSessionBegin::Run(mut session) => drive_steps(
+            &mut session,
+            &store,
+            llm,
+            tok,
+            Arc::new(SilentDeltas),
+            Arc::from(Vec::new()),
+            None,
+            super::super::loop_rows::ACTORS,
+        )
+        .await
+        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?,
+    };
     // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────
     //
     // 三个跳过条件与 `classify_turn` 逐条对齐：中止 / 收束被授权拒绝 ⇒ 本轮

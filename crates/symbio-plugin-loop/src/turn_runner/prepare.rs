@@ -194,7 +194,6 @@ pub(crate) async fn prepare_turn<S>(
     store: &S,
     llm: &dyn LlmAdapter,
     input: TurnInput,
-    sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
 ) -> Result<PreparedFlow, symbio_core::AppendError>
 where
     S: Store<Event = Event> + ?Sized,
@@ -203,15 +202,12 @@ where
         turn,
         user_seq,
         drive_seq,
-        tier,
         window_turns,
         inject,
         actor,
         final_reply,
         final_cost_ms,
         dialog,
-        opening_text,
-        opening_dialog,
         turn_root_id,
         nodes,
         abort,
@@ -226,59 +222,11 @@ where
     //
     // 1′. 一次性阶段（`turn.stage`）同样**不在这里落**：环上的每一行（判决 / 召回 /
     // 压缩）由它自己的执行体当场入日志，溯源锚就是那一刻已在的用户格 seq（I2）。
-    // 1″. 本轮派发档：用户格先于判决落，档位要到执行装配期才定 ⇒ 另立一格。
-    // 幂等键带**幕号**：同一轮可以被恢复幕再执行一次，两幕的档位各记各的。
-    store.append(
-        Event::pending(
-            format!("d-{turn}-{drive_seq}"),
-            EVENT_TURN_DISPATCH,
-            Entity::Turn,
-            Verb::Asserted,
-            turn,
-            &actor.principal,
-        )
-        .with_produced_by(user_seq)
-        .with_payload(serde_json::json!({
-            "tier": tier.name(),
-            "budget_ms": actor.budget_ms,
-            "principal": actor.principal,
-        })),
-    )?;
-    // 1a. 对话面开场白：`Escalate` 首响——本轮随后**照进工具循环**，
-    // 所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
     //
-    // 放在用户格之后：断言类事件必须带溯源锚点（I2），而那只有落完用户格才有。
-    // 空正文不落格（与汇报 / 收束同一条纪律）。落格即上线：节点 id 用落格载荷里
-    // 那个（`dialog.id`），轮末同 id 再送一次时消费端按 id 合并成同一格。
-    if let (Some(opening), Some(dialog)) = (opening_text.as_deref(), opening_dialog.as_ref()) {
-        if !opening.trim().is_empty() {
-            store.append(
-                Event::pending(
-                    format!("op-{turn}"),
-                    EVENT_CHAT_ASSISTANT_OPENING,
-                    Entity::Turn,
-                    Verb::Asserted,
-                    turn,
-                    &actor.principal,
-                )
-                .with_produced_by(user_seq)
-                .with_payload(serde_json::json!({
-                    "text": opening,
-                    "id": dialog.id,
-                    "reason": dialog.reason,
-                    "exclude_from_context": dialog.exclude_from_context,
-                })),
-            )?;
-            let mut node = symbio_core::node_build::dialog_node(
-                opening,
-                &dialog.reason,
-                dialog.exclude_from_context,
-                &symbio_core::principal::Principal::from_legacy(&actor.principal),
-            );
-            node.id = dialog.id.clone();
-            sink.on_tool_frame(&node);
-        }
-    }
+    // 1″. 派发档与开场白**也不在这里落**（`D-223` 订正 1）：两者的内容要到轮首四行跑完
+    // 才存在（档位折自 `policy.reflex` 的出口格，开场白是判决行 `Escalate` 首响），
+    // 落点在接缝上（`chat_loop::land_dispatch` / `land_opening`）。草稿在幕首就建
+    // （`D-222` 订正 3），那一刻它们一格都还没有。
     // 1b. 定稿答话（缺口 5）：用户格照常开，答话照常收束，**模型不参与**。
     //
     // 为什么放在这里而不是循环里：这一轮一次请求都不发，循环的第一件事

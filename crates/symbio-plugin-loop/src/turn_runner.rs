@@ -36,8 +36,7 @@ use symbio_core::{
 };
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CHAT_ASSISTANT_OPENING, EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_DISPATCH,
+    EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
 };
 
 // ── 阶段拆分层（· B3，DE-021 §5 动作 B）──────────────────────────
@@ -104,8 +103,9 @@ pub struct TurnInput {
     ///
     /// `None` = 调用方不提供信号（单测 / 无中止语义的路径），行为与接线前逐字一致。
     pub abort: Option<symbio_core::ExecAbortSignal>,
-    /// 本轮装配进哪一时延档（调度决定是数据，D-044）。
-    pub tier: LatencyTier,
+    // 本轮装配进哪一时延档**不是**本包的字段（`D-223` 订正 1）：档位折自
+    // `policy.reflex` 的出口格（`turn_head.reflex_answered`），而那是轮首的一行——
+    // 草稿在幕首就建，那一刻那一格还没有。它的落点是接缝（`chat_loop::land_dispatch`）。
     /// 对话窗口（最近的 turn 数，**含当前轮**）；`None` = 全量。
     ///
     /// 会话轮必填——WAL 里的事实只增不减，不带窗口的 prompt 会随会话
@@ -205,19 +205,10 @@ pub struct TurnInput {
     /// t20 / t21 / t22 / t25 全部「0 条对话面节点」。节点形状是事实的一部分
     /// （原则），故随收束格一并入格（WAL 为唯一事实源，D-049）。
     pub dialog: Option<DialogFacts>,
-    /// **对话面开场白**：`Escalate` 首响正文（`Some` = 本轮有一句开场白）。
-    ///
-    /// 与 [`Self::final_reply`] 的区别只在**时机**：答话是干活干完之后的收束，
-    /// 开场白是干活**开始前**说的一句（本轮随后照进工具循环）。两者都产出一条
-    /// **根级**对话面节点（同 `dialog_node` 形状），但收束格那格（`chat.assistant.final`）
-    /// 是 N3「每轮至多一条」，开场白不能挤进去——故它单立一格
-    /// （`chat.assistant.opening`，`turn × asserted`，见 core 常量文档）。
-    ///
-    /// 承载事实由运行器落（与收束格同一条纪律：节点诞生归运行器，`apply` 不另落）。
-    /// 载荷带 `opening_dialog` 的 `id` / `reason` / `exclude_from_context`。
-    pub opening_text: Option<String>,
-    /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
-    pub opening_dialog: Option<DialogFacts>,
+    // 开场白（`Escalate` 首响）**不是**本包的字段（`D-223` 订正 1）：它是轮首判决行的
+    // 产物，落点在接缝（`chat_loop::land_opening`）——草稿在幕首就建，那一刻判决还没跑。
+    // 与 `prefix` / `reflex` 同一条时序理由，区别只在落点：那两样进草稿（环内要用），
+    // 这一样只入格 + 上线，草稿一格都不读。
     /// **本轮 Turn 根节点 id**（落库时 `into_messages(root_id)` 的入参）。
     ///
     /// 由**调用方分配**（`chat_loop/inputs.rs` 的 `llm_short_id()`，那里是唯一的
@@ -320,14 +311,11 @@ impl std::fmt::Debug for TurnInput {
             // 中止信号只打印「有没有」：`ExecAbortSignal` 是内部句柄（AtomicBool +
             // 通知），展开它对本入参包的可读性没有增量，反而多出一堆内部字段。
             .field("abort", &self.abort.as_ref().map(|_| "<信号>"))
-            .field("tier", &self.tier)
             .field("window_turns", &self.window_turns)
             .field("actor", &self.actor)
             .field("final_reply", &self.final_reply)
             .field("final_cost_ms", &self.final_cost_ms)
             .field("dialog", &self.dialog)
-            .field("opening_text", &self.opening_text)
-            .field("opening_dialog", &self.opening_dialog)
             .field("turn_root_id", &self.turn_root_id)
             // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
             .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
@@ -433,16 +421,19 @@ impl TurnRunner {
     /// 却多出一层只为过 lint 而生的壳。
     /// 起一轮：准备阶段可能直接收束（反射档 / 早退），否则交回一个
     /// [`TurnSession`]。**这里不再有循环**——步的推进归调用方。
+    ///
+    /// **没有流式出口**：这个入口只落事实与备 prompt，不上任何节点。开场白要经流式桥
+    /// 上实时面，而它是判决行的产物、落点在接缝（`D-223` 订正 1）——幕首建草稿时那句
+    /// 话还没说出来，桥也在接缝那一侧。
     pub(crate) async fn begin<S>(
         store: &S,
         llm: &dyn LlmAdapter,
         input: TurnInput,
-        sink: std::sync::Arc<dyn symbio_core::DeltaSink>,
     ) -> Result<TurnSessionBegin, symbio_core::AppendError>
     where
         S: Store<Event = Event> + ?Sized,
     {
-        match prepare::prepare_turn(store, llm, input, sink).await? {
+        match prepare::prepare_turn(store, llm, input).await? {
             prepare::PreparedFlow::Done(outcome) => Ok(TurnSessionBegin::Done(outcome)),
             prepare::PreparedFlow::Run(run) => Ok(TurnSessionBegin::Run(TurnSession {
                 run,

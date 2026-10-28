@@ -56,8 +56,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         skill_obs,
         prefix,
         reflex,
-        opening_text,
-        opening_dialog,
         presentation_tree,
         store,
         turn_no,
@@ -66,7 +64,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
         collected,
         bridge,
         emitter,
-        tier,
         actor,
         principal,
         to,
@@ -74,6 +71,9 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
     // 深度档：完整推理（含工具内环）。快路的**判定**已经不在这一层：`policy.reflex`
     // 是轮首 host 的一行，它的出口格（`stage:"reflex"`）与正文（`reflex`）随本轮
     // 状态到这里；本侧只把正文交给收束动作，不自己落 `final`（D-163）。
+    //
+    // 档位（`D-223` 订正 1）也不在这一层：它折自那一格出口、落成幕级事实
+    // （`turn.dispatch`），落点在接缝上（`assemble_turn`），本段一个字段都不读。
     let (outcome, produced, derived) = {
             let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, abort.clone());
             let tok = TokenIssuer::issue_deep();
@@ -81,7 +81,6 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 turn: turn_no,
                 user_seq,
                 drive_seq,
-                tier,
                 window_turns: Some(window_turns),
                 actor: actor.clone(),
                 // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
@@ -191,11 +190,6 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 final_cost_ms: 0,
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
-                // 对话面开场白（`Escalate` 首响）：由 `chat_loop::apply_verdict`
-                // 产出、随 `ExecTurn` 递进来，运行器据它落 `chat.assistant.opening` 格
-                // （开场白后面照常进工具循环，故不占收束格）。
-                opening_text: opening_text.map(str::to_string),
-                opening_dialog,
                 // 落格身份：本轮 Turn 根 id（载荷 `turn_id`）+ 流式节点取数口。用户格
                 // 已由编排层先落，运行器只收它的 seq。取数口是**快照闭包**：
                 // 运行器每轮收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，
@@ -265,9 +259,7 @@ inject: injector(supplements, report).map(|(drain, report)| {
             // 之前**进草稿：前缀要早于第一次请求（它改的是基线 prompt 的第一条），
             // 快路要早于第一次选债（它决定环先选中 `close-turn` 还是 `announce-model`）。
             let llm: std::sync::Arc<dyn LlmAdapter> = std::sync::Arc::new(llm);
-            let r = match super::TurnRunner::begin(store.as_ref(), llm.as_ref(), input, bridge.clone())
-                .await
-            {
+            let r = match super::TurnRunner::begin(store.as_ref(), llm.as_ref(), input).await {
                 // 落格失败与动作失败走**同一个出口**（`ActorError`）：本段的调用方
                 // 只认这一条通道，不为「开轮」单开一条。
                 Err(e) => Err(super::ActorError::Append(e)),

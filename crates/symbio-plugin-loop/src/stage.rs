@@ -342,8 +342,9 @@ async fn run_turn(parts: TurnParts<'_>) -> Result<ExecTurnResult, TurnExecExit> 
                 turn.now_ms,
             )
         }),
-        // 对话面开场白：轮首判决执行体的 `Escalate` 首响。落格在 `turn_exec`
-        // （唯一持写者令牌处），这里只递「说了什么 / 节点身份」。
+        // 对话面开场白：轮首判决执行体的 `Escalate` 首响。落格与上线都在接缝上
+        // （`chat_loop::land_opening`，`D-223` 订正 1）——它随本包走到那里，只因为
+        // 那一刻手里才有事实源与流式桥；运行器本身不消费它。
         opening_text: turn.opening_text.as_deref(),
         opening_dialog: turn.opening_dialog.take(),
         presentation_tree: orchestrator.presentation_tree,
