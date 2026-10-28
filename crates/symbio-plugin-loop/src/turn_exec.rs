@@ -948,6 +948,10 @@ pub(crate) fn run_close<'a>(step: &'a mut TurnStep<'a>) -> StepFuture<'a> {
 ///
 /// `actors` 是**这一轮用的执行体绑定表**（决策 4）：生产传 [`loop_rows::ACTORS`]，
 /// 夹具在同名 `by` 上注册别的动作。「无进展」这条用例没有接缝就永远造不出来。
+///
+/// `feed` 是**备输入的产物**（`D-222` 订正 3）：前缀由 `prepare_turn_inputs` 的 ⑥
+/// 在轮首那几行之后收集，快路正文由 `policy.reflex` 寄存——两样都在草稿建好之后才到，
+/// 所以它们不进 `TurnInput`（那个包只装「开幕就有」的东西），而是 begin 之后立刻填。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_steps(
     store: &Arc<dyn Store<Event = Event>>,
@@ -958,6 +962,7 @@ pub(crate) async fn drive_steps(
     tools: Arc<[CapabilityMeta]>,
     dispatch: Option<Arc<dyn super::tool_dispatch::ToolDispatch>>,
     actors: &'static [super::loop_rows::ActorEntry],
+    feed: super::turn_runner::TurnFeed,
 ) -> Result<TurnOutcome, ActorError> {
     let step_sink = sink.clone();
     let mut session = match TurnRunner::begin(store.as_ref(), llm.as_ref(), input, sink)
@@ -967,6 +972,11 @@ pub(crate) async fn drive_steps(
         TurnSessionBegin::Done(outcome) => return Ok(outcome),
         TurnSessionBegin::Run(session) => session,
     };
+    // 草稿建好之后、任何选债之前：把备输入那两样填进去。位置是硬前件——`set_prefix`
+    // 必须早于第一次请求（它改的是基线 prompt 的第一条），`set_reflex` 必须早于第一
+    // 次选债（它决定环先选中 `close-turn` 还是 `announce-model`）。
+    session.set_prefix(feed.prefix);
+    session.set_reflex(feed.reflex);
     loop {
         // D-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
         // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。

@@ -78,11 +78,9 @@ impl TurnRunner {
                 // 平凡值身份（S08 §4：单主体 = 今天的状态）。
                 actor: trivial_actor_spec("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
-                prefix: None,
                 // 恒走生成：定稿答话轮由 `turn_exec` 自己把答话交进来。
                 final_reply: None,
                 final_cost_ms: 0,
-                reflex: None,
                 turn_root_id: String::new(),
                 dialog: None,
                 opening_text: None,
@@ -144,6 +142,8 @@ impl TurnRunner {
             tools,
             dispatch,
             super::super::loop_rows::ACTORS,
+            // 夹具不跑轮首那几行 ⇒ 备输入的两样都是空（`D-222` 订正 3）。
+            super::super::turn_runner::TurnFeed::default(),
         )
         .await
     }
@@ -153,6 +153,10 @@ impl TurnRunner {
     ///
     /// 判据 14「动作写了零格 ⇒ `exhausted{no_progress}`」与判据 2「写了名单外的格 ⇒
     /// `exhausted{undeclared-write}`」两条用例没有这条接缝就永远只能挂在「按构造不可达」上。
+    ///
+    /// `feed` 是**备输入的产物**（`D-222` 订正 3）：生产里由 `prepare_turn_inputs` 的 ⑥
+    /// 与轮首的 `policy.reflex` 给，夹具自己造。它是这条路径上的第二个接缝——「前缀
+    /// 排在基线之前」与「快路零往返」两条用例要它才造得出来。
     #[allow(clippy::too_many_arguments)]
     pub async fn drive_with_actors(
         &self,
@@ -164,9 +168,12 @@ impl TurnRunner {
         tools: std::sync::Arc<[symbio_core::CapabilityMeta]>,
         dispatch: Option<std::sync::Arc<dyn super::super::tool_dispatch::ToolDispatch>>,
         actors: &'static [super::super::loop_rows::ActorEntry],
+        feed: super::super::turn_runner::TurnFeed,
     ) -> Result<TurnOutcome, ActorError> {
-        super::super::turn_exec::drive_steps(store, llm, tok, input, sink, tools, dispatch, actors)
-            .await
+        super::super::turn_exec::drive_steps(
+            store, llm, tok, input, sink, tools, dispatch, actors, feed,
+        )
+        .await
     }
 }
 
@@ -356,10 +363,8 @@ mod turn_runner_tests {
                     inject: None,
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -643,10 +648,8 @@ mod turn_runner_tests {
                     inject: None,
                     actor: trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -696,10 +699,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -762,10 +763,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     inject: None,
                     actor: trivial_actor_spec("session/main"),
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -857,10 +856,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     inject: None,
                     actor: trivial_actor_spec("session/main"),
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: Some("我先看一下。".into()),
@@ -898,10 +895,8 @@ mod turn_runner_tests {
             inject: None,
             actor: trivial_actor_spec("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
-            prefix: None,
             final_reply: None,
             final_cost_ms: 0,
-            reflex: None,
             turn_root_id: "r-1".into(),
             dialog: None,
             opening_text: None,
@@ -1214,10 +1209,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     actor: trivial_actor_spec(PRINCIPAL_AUTONOMOUS),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -1265,10 +1258,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -2256,10 +2247,8 @@ mod tool_round_tests {
             window_turns: None,
             actor: trivial_actor_spec("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
-            prefix: None,
             final_reply: None,
             final_cost_ms: 0,
-            reflex: None,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,
@@ -2331,7 +2320,7 @@ mod tool_round_tests {
         );
     }
 
-    /// `TurnInput::prefix` 排在基线**之前**，且**不进**「就地累积」那条路。
+    /// `TurnFeed::prefix` 排在基线**之前**，且**不进**「就地累积」那条路。
     ///
     /// ## 为什么要钉「在之前」而不是只钉「在里面」
     ///
@@ -2357,11 +2346,10 @@ mod tool_round_tests {
             pending: false,
             rounds: Arc::new(Mutex::new(0)),
         });
-        let mut i = input(store.as_ref());
-        i.prefix = Some("【长期记忆】\n- 偏好：简洁".to_string());
+        let i = input(store.as_ref());
 
         TurnRunner
-            .run_with_tools(
+            .drive_with_actors(
                 &store,
                 llm.clone(),
                 tok,
@@ -2369,6 +2357,13 @@ mod tool_round_tests {
                 Arc::new(SilentDeltas),
                 std::sync::Arc::from(tools()),
                 Some(dispatch.clone()),
+                super::super::super::loop_rows::ACTORS,
+                // 前缀是**备输入的产物**（`D-222` 订正 3）：生产里由
+                // `prepare_turn_inputs` 的 ⑥ 收集，草稿建好之后填。
+                super::super::super::turn_runner::TurnFeed {
+                    prefix: Some("【长期记忆】\n- 偏好：简洁".to_string()),
+                    ..Default::default()
+                },
             )
             .await
             .expect("必答");
@@ -2424,10 +2419,9 @@ mod tool_round_tests {
                 std::sync::Arc::new(EventStore::new());
             let llm = std::sync::Arc::new(ToolCallingLlm::new());
             let prompts = llm.prompts.clone();
-            let mut i = input(store.as_ref());
-            i.prefix = empty;
+            let i = input(store.as_ref());
             TurnRunner
-                .run_with_tools(
+                .drive_with_actors(
                     &store,
                     llm.clone(),
                     tok,
@@ -2435,6 +2429,11 @@ mod tool_round_tests {
                     Arc::new(SilentDeltas),
                     std::sync::Arc::from(Vec::new()),
                     None,
+                    super::super::super::loop_rows::ACTORS,
+                    super::super::super::turn_runner::TurnFeed {
+                        prefix: empty,
+                        ..Default::default()
+                    },
                 )
                 .await
                 .expect("必答");
@@ -3234,10 +3233,8 @@ mod tool_round_tests {
                     window_turns: None,
                     actor: trivial_actor_spec("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    reflex: None,
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -4466,7 +4463,7 @@ mod reflex_turn_tests {
         // 桩只在**不该发生**的模型往返里失败：它若失败，说明收束行没抢到第一笔债。
         let llm = std::sync::Arc::new(StubLlmAdapter::always_fail("快路轮不该发模型请求"));
         let out = TurnRunner
-            .run_streaming(
+            .drive_with_actors(
                 &store,
                 llm.clone(),
                 tok,
@@ -4478,13 +4475,8 @@ mod reflex_turn_tests {
                     window_turns: None,
                     inject: None,
                     actor: actor.clone(),
-                    prefix: None,
                     final_reply: None,
                     final_cost_ms: 0,
-                    // 快路正文（由轮首 host 寄进本轮状态的那一份）。
-                    reflex: Some(super::super::ReflexAnswer {
-                        text: "先列要点；再合并同类项。".to_string(),
-                    }),
                     turn_root_id: String::new(),
                     dialog: None,
                     opening_text: None,
@@ -4493,6 +4485,17 @@ mod reflex_turn_tests {
                     abort: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
+                std::sync::Arc::from(Vec::new()),
+                None,
+                super::super::super::loop_rows::ACTORS,
+                // 快路正文是**备输入的产物**（`D-222` 订正 3）：生产里由轮首那台 host
+                // 的 `policy.reflex` 寄存，草稿建好之后填。
+                super::super::super::turn_runner::TurnFeed {
+                    reflex: Some(super::super::super::turn_runner::ReflexAnswer {
+                        text: "先列要点；再合并同类项。".to_string(),
+                    }),
+                    ..Default::default()
+                },
             )
             .await
             .expect("快路必答（不生成也要有产物）");
@@ -5054,10 +5057,8 @@ mod actor_ledger_tests {
             inject: None,
             window_turns: None,
             actor: trivial_actor_spec("session/main"),
-            prefix: None,
             final_reply: None,
             final_cost_ms: 0,
-            reflex: None,
             turn_root_id: String::new(),
             dialog: None,
             opening_text: None,
@@ -5087,6 +5088,7 @@ mod actor_ledger_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 ACTORS_WRITE_NOTHING,
+                super::super::super::turn_runner::TurnFeed::default(),
             )
             .await
             .expect("到点必答：停机也是一句话");
@@ -5126,6 +5128,7 @@ mod actor_ledger_tests {
                 std::sync::Arc::from(Vec::new()),
                 None,
                 ACTORS_WRITE_OFF_LIST,
+                super::super::super::turn_runner::TurnFeed::default(),
             )
             .await
             .expect("越界也是一条事实，不是 panic");

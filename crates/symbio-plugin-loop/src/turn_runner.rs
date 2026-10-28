@@ -119,30 +119,11 @@ pub struct TurnInput {
     /// （`plugins/session/turn_exec` 从会话元数据派生）。S08 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
-    /// **请求级前缀**：排在基线 prompt **之前**的一段文本（通常是多行），
-    /// `None` / 空串 = 不加（生产里的绝大多数轮次）。
-    ///
-    /// ## 它解决的是什么
-    ///
-    /// v2 运行器的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
-    /// 把渲染结果整段发出），而请求视图层（`build_request_view`）产出的长期记忆
-    /// 召回段 / 就绪任务集段 / 委派者真源段是**独立的消息**。这三段若不显式带进来，
-    /// 就**静默**从模型眼前消失——事实照样入格、`session/stats` 照样有数，
-    /// 只有模型看不见（t29 / t35 钉住这类静默消失）。
-    ///
-    /// ## 为什么进 `TurnInput` 而不是让调用方拼进 `text`
-    ///
-    /// `text` 是**用户发言**，它要落进 `user.message` 的载荷、并参与记忆编码与
-    /// 技能命中判定。把前缀拼进去会让事实格里存进一段不是用户说的话——记忆编码
-    /// 照着它固化、技能命中拿它比对，两处一起记错同一件事。前缀是**请求级的**，
-    /// 不进事实源，所以它自己占一个字段。
-    ///
-    /// ## 落位：基线**之前**，不进「就地累积」
-    ///
-    /// 三段都是 `build_request_view` 的**置顶**段，语义上在对话之前；追加到基线
-    /// 末尾（`exchange` 那条路）会把它们排到本轮发言之后，模型先答后看指令。
-    /// 跨轮累积也一并排除：它们每轮重算，累积会让上一轮的前缀留在下一轮的上下文里。
-    pub prefix: Option<String>,
+    // 请求级前缀**不是**本包的字段（`D-222` 订正 3）：它由 `prepare_turn_inputs`
+    // 的 ⑥ 在轮首那几行**之后**收集，而草稿在那之前就建好了（草稿在幕首就建）。
+    // 于是它的入口是 [`TurnSession::set_prefix`]——「建草稿」与「填前缀」分处两个
+    // 时刻，填的那一个仍在第一次请求之前。为什么它不能拼进 `text`、为什么它排在
+    // 基线之前、为什么不进「就地累积」，三条理由跟着那个入口走。
     /// **轮内折进的补充**：工具循环每跑完一轮就问一次「用户有没有补充」，
     /// 有就折进本轮（成为一格事实 + 进下一次请求的消息数组）。
     ///
@@ -211,13 +192,9 @@ pub struct TurnInput {
     /// `ProviderLlmAdapter::generate_turn` 实测 → `WordingReply.cost_ms` →
     /// 此处 → `chat.assistant.final.cost_ms`。
     pub final_cost_ms: u64,
-    /// **本幕快路已作答的技能正文**（D-163）。
-    ///
-    /// `Some` ⇒ 本轮**一次模型往返都不发**：收束行照常开账（`turn_head.reflex_answered`
-    /// 由快路执行体的出口格折出），收束动作把这段正文落成 `chat.assistant.final`
-    /// （`model = "reflex"`）。与 [`Self::final_reply`] 的区别只在产者：那个是判决
-    /// 判成的定稿答话（不进驱动循环），这个是技能命中的快路（照进驱动循环）。
-    pub reflex: Option<ReflexAnswer>,
+    // 快路正文**不是**本包的字段，理由与上面那条逐字相同：`policy.reflex` 是轮首
+    // 的一行，它的产物在草稿建好之后才到，入口是 [`TurnSession::set_reflex`]。
+    // 两者的区别（`final_reply` 不进驱动循环、`reflex` 照进驱动循环）写在那个入口上。
     /// 定稿答话**对话面节点**的身份与标记（仅 `final_reply` 有值时消费）。
     ///
     /// ## 为什么答话要带这三样，而不是只有正文
@@ -267,6 +244,28 @@ pub struct TurnInput {
 pub struct ReflexAnswer {
     /// 技能正文（命中即以此作答）。
     pub text: String,
+}
+
+/// 备输入的产物：草稿建好之后才到的那几样（`D-222` 订正 3）。
+///
+/// ## 为什么它们不进 [`TurnInput`]
+///
+/// 那个包只装「开幕就有」的东西。前缀由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行
+/// （判决 / 压缩 / 召回）**之后**收集，快路正文由 `policy.reflex` 那一行寄存——
+/// 两样都要等环里的行跑过。草稿在幕首就建，所以它们只能「建好之后再填」。
+///
+/// 填口是 [`TurnSession::set_prefix`] / [`TurnSession::set_reflex`]，填的时机在
+/// begin 之后、任何选债之前：早于第一次请求（前缀改的是基线 prompt 的第一条），
+/// 也早于第一次选债（快路决定环先选中 `close-turn` 还是 `announce-model`）。
+///
+/// 打成一个包而不是两个参数：它们是**同一个时刻**到的一批东西，而派发器的形参
+/// 已经够宽——加一样不该再加一个位置参数。
+#[derive(Debug, Default)]
+pub struct TurnFeed {
+    /// 请求级前缀（`prepare_turn_inputs` 的 ⑥ 产出）。
+    pub prefix: Option<String>,
+    /// 本幕快路作答的正文（`policy.reflex` 的寄存物）。
+    pub reflex: Option<ReflexAnswer>,
 }
 
 /// 定稿答话**对话面节点**的身份与标记（见 [`TurnInput::dialog`]）。
@@ -346,7 +345,6 @@ impl std::fmt::Debug for TurnInput {
             .field("tier", &self.tier)
             .field("window_turns", &self.window_turns)
             .field("actor", &self.actor)
-            .field("prefix", &self.prefix)
             .field("final_reply", &self.final_reply)
             .field("final_cost_ms", &self.final_cost_ms)
             .field("dialog", &self.dialog)
@@ -523,6 +521,48 @@ pub(crate) struct TurnSession {
 }
 
 impl TurnSession {
+    /// 把**请求级前缀**插进基线 prompt 的最前一条（`TurnInput::prefix` 退场后的唯一入口）。
+    ///
+    /// ## 为什么它不在 `TurnInput` 里
+    ///
+    /// 前缀是请求视图（`build_request_view`）的产物，而它的收集（`prepare_turn_inputs`
+    /// 的 ⑥）依赖轮首那几行（召回寄存的 `context_sections`）——那些行是环的债，草稿在
+    /// 它们之前就建好了（`D-222` 订正 3）。于是「建草稿」与「填前缀」分处两个时刻；
+    /// 这一格是第二个时刻的入口，调用点必须仍在**第一次请求之前**。
+    ///
+    /// ## 为什么不能拼进用户发言
+    ///
+    /// 用户发言要落进 `user.message` 的载荷、并参与记忆编码与技能命中判定。把前缀拼
+    /// 进去会让事实格里存进一段不是用户说的话——记忆编码照着它固化、技能命中拿它比对，
+    /// 两处一起记错同一件事。前缀是**请求级的**，不进事实源。
+    ///
+    /// ## 为什么落在基线之前、且不跨轮累积
+    ///
+    /// 三段都是请求视图的**置顶**段，语义上在对话之前；追加到基线末尾（`exchange`
+    /// 那条路）会把它们排到本轮发言之后，模型先答后看指令。每轮重算，累积会让上一轮
+    /// 的前缀留在下一轮的上下文里。
+    ///
+    /// 空串 / 纯空白 = 不加（与进 `TurnInput` 的时代逐字同一条判据）。
+    pub(crate) fn set_prefix(&mut self, prefix: Option<String>) {
+        self.run.set_prefix(prefix);
+    }
+
+    /// 寄存**快路作答的正文**（`TurnInput::reflex` 退场后的唯一入口，D-163）。
+    ///
+    /// `Some` ⇒ 本轮**一次模型往返都不发**：收束行照常开账（`turn_head.reflex_answered`
+    /// 由快路执行体的出口格折出），收束动作把这段正文落成 `chat.assistant.final`
+    /// （`model = "reflex"`）。与 `final_reply` 的区别只在产者：那个是判决判成的定稿
+    /// 答话（不进驱动循环，收束格由轮首准备就地落），这个是技能命中的快路（照进驱动
+    /// 循环，收束归 `close-turn` 行）。
+    ///
+    /// 为什么它也不在 `TurnInput` 里：`policy.reflex` 是轮首的一行，它的产物在草稿
+    /// 建好之后才到——与 [`Self::set_prefix`] 同一条时序理由。
+    pub(crate) fn set_reflex(&mut self, answer: Option<ReflexAnswer>) {
+        if let Some(answer) = answer {
+            self.run.closing = Some(prepare::PendingClose::Reflex { text: answer.text });
+        }
+    }
+
     /// 记一次模型往返（**只给夹具**：生产路径的步数在 [`Self::announce_model`] 里记）。
     ///
     /// 派发器的「无进展」与「步数上界」两条守卫要靠它造出可控的步数序列：夹具在同一

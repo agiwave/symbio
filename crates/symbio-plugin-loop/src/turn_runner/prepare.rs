@@ -89,6 +89,12 @@ pub(crate) struct Prepared {
     /// ——由 `output_fields` 一次算定后带过来，读侧不再自己推。
     pub(crate) last_answer_id: String,
     pub(crate) full_snapshot: Vec<Event>,
+    /// 建草稿时那一次 prompt 的窗口（`TurnInput::window_turns` 的副本）。
+    ///
+    /// 它唯一的读者是 [`Prepared::set_prefix`] 里的 D-048 复核：前缀在草稿建好之后
+    /// 才到，复核要按**同一个窗口**重裁快照才与原实现逐字同输入。不存裁好的切片
+    /// 是为了不把窗口那份事件再存一遍（`full_snapshot` 已经是全量）。
+    pub(crate) window_turns: Option<u64>,
     pub(crate) inject: Option<RoundInjector>,
     pub(crate) nodes: Option<NodeFactsFn>,
     /// 模型应答已落、工具批次尚未派发时的寄存位（拆步）。
@@ -130,6 +136,58 @@ impl Prepared {
     pub(crate) fn now_ms(&self) -> i64 {
         super::super::loop_rows::wake_now_ms(&self.full_snapshot, self.drive_seq)
     }
+
+    /// 把**请求级前缀**插进基线 prompt 的最前一条（[`super::TurnSession::set_prefix`] 的本体）。
+    ///
+    /// ## 为什么复核在这里而不在构造期
+    ///
+    /// D-048 的双向完整性复核（「送出的消息与事实网格不完整」只出声不抛错）判的是
+    /// `declared` 与 `base_messages` 是否一致。前缀没插进去时 `declared` 必须是
+    /// `None`，否则构造期就会报一条假的「声明了却没插」；而前缀在构造期确实还拿不到
+    /// （它由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行之后收集）。于是复核跟着前缀走。
+    ///
+    /// 快照按**建草稿时那一份**（[`Self::full_snapshot`]）与同一个窗口重裁：与原实现
+    /// 里 `prepare_turn` 用的那一份逐字相同，复核的输入没有变，只是时机从「构造期」
+    /// 挪到了「填前缀期」。
+    ///
+    /// ## 空串 / 纯空白 = 不加
+    ///
+    /// 与进 `TurnInput` 的时代同一条判据：`None`、空串、纯空白都不插——插一条空的
+    /// system 消息会让模型读到一段空白，而它本该什么都不读。
+    pub(crate) fn set_prefix(&mut self, prefix: Option<String>) {
+        let Some(p) = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) else {
+            return;
+        };
+        self.base_messages.insert(
+            0,
+            symbio_core::PromptMessage {
+                role: "system".into(),
+                text: p.to_string(),
+                tool_call_id: None,
+                tool: None,
+                tool_calls: None,
+            },
+        );
+        let viewer = Some(self.actor.principal.as_str());
+        let snapshot: Cow<'_, [Event]> = match self.window_turns {
+            None => filter_visible(&self.full_snapshot, viewer),
+            Some(keep) => window_by_turn(&self.full_snapshot, self.turn, keep, viewer),
+        };
+        let rep = symbio_core::verify_prompt_fidelity(
+            &snapshot,
+            &self.base_messages,
+            Some(p),
+            &CHAT_VOCAB,
+            &MESSAGE_VOCAB,
+        );
+        if !rep.is_complete() {
+            symbio_core::plugin_warn!(
+                "actors",
+                "[prompt-fidelity] 送出的消息与事实网格不完整：{}",
+                rep.summary()
+            );
+        }
+    }
 }
 
 pub(crate) async fn prepare_turn<S>(
@@ -149,10 +207,8 @@ where
         window_turns,
         inject,
         actor,
-        prefix,
         final_reply,
         final_cost_ms,
-        reflex,
         dialog,
         opening_text,
         opening_dialog,
@@ -334,40 +390,12 @@ where
         None => filter_visible(&full_snapshot, viewer),
         Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
     };
-    // 基线：**结构化**消息数组（D-048a）。prefix（请求视图三段）作为最前的
-    // 一条独立 system 消息插进去，而不是拼进第一段正文——理由见 `TurnInput::prefix`。
-    let mut base_messages = render_messages(&snapshot);
-    if let Some(p) = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-        base_messages.insert(
-            0,
-            symbio_core::PromptMessage {
-                role: "system".into(),
-                text: p.to_string(),
-                tool_call_id: None,
-                tool: None,
-                tool_calls: None,
-            },
-        );
-    }
-    // **双向完整性复核**（D-048 防线）：缺口只出声不抛错——prompt 已经发出去了，
-    // 此时抛错只会把「模型看得不全」变成「这一轮直接失败」；而看得不全恰恰是静默的。
-    {
-        let declared = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty());
-        let rep = symbio_core::verify_prompt_fidelity(
-            &snapshot,
-            &base_messages,
-            declared,
-            &CHAT_VOCAB,
-            &MESSAGE_VOCAB,
-        );
-        if !rep.is_complete() {
-            symbio_core::plugin_warn!(
-                "actors",
-                "[prompt-fidelity] 送出的消息与事实网格不完整：{}",
-                rep.summary()
-            );
-        }
-    }
+    // 基线：**结构化**消息数组（D-048a）。请求级前缀**不在这里插**（`D-222` 订正 3）：
+    // 它由 `prepare_turn_inputs` 的 ⑥ 在轮首那几行（判决 / 压缩 / 召回）**之后**收集，
+    // 而本函数跑在它们之前——草稿在幕首就建，前缀在它建好之后才到。入口是
+    // [`Prepared::set_prefix`]，D-048 的双向完整性复核跟着它走：`declared` 只有在前缀
+    // 真被插进去的那一刻才有值，留在本函数里就成了「声明了却没插」的假一致。
+    let base_messages = render_messages(&snapshot);
 
     let started = std::time::Instant::now();
     // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
@@ -418,14 +446,17 @@ where
         last_output_facts,
         last_answer_id,
         full_snapshot,
+        window_turns,
         inject,
         nodes,
         pending_model: None,
         pending_round: None,
         pending_calls: None,
-        // 快路：正文寄到收束动作（D-163）。零模型往返，驱动环的第一个债就是
-        // `close-turn`（55 < 60）——本段照常备好派发格与 prompt，只是不发请求。
-        closing: reflex.map(|r| PendingClose::Reflex { text: r.text }),
+        // 快路：正文由 `policy.reflex` 的执行体经 [`super::TurnSession::set_reflex`]
+        // 寄存（`D-222` 订正 3：那一行是环的债，它的产物在草稿建好之后才到）。
+        // 零模型往返时驱动环的第一个债就是 `close-turn`（55 < 60）——本段照常备好
+        // 派发格与 prompt，只是不发请求。
+        closing: None,
         settled: None,
     })))
 }

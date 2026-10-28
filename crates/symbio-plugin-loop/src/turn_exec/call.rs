@@ -82,11 +82,8 @@ pub(crate) async fn call_model<'a>(a: Assembled<'a>) -> Result<Running<'a>, Turn
                 user_seq,
                 drive_seq,
                 tier,
-                // 快路正文：`Some` ⇒ 本幕已在轮首作答，收束动作直落正文（零往返）。
-                reflex: reflex.cloned(),
                 window_turns: Some(window_turns),
                 actor: actor.clone(),
-                prefix,
                 // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
                 //
                 // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。
@@ -272,6 +269,13 @@ inject: injector(supplements, report).map(|(drain, report)| {
                 std::sync::Arc::from(tools),
                 Some(dispatcher.clone()),
                 super::super::loop_rows::ACTORS,
+                // 备输入的产物（`D-222` 订正 3）：前缀由 `prepare_turn_inputs` 的 ⑥ 收集、
+                // 快路正文由轮首的 `policy.reflex` 寄存——两样都在草稿建好之后才到，
+                // 所以它们不进 `TurnInput`，由执行器在 begin 之后填进草稿。
+                super::super::turn_runner::TurnFeed {
+                    prefix,
+                    reflex: reflex.cloned(),
+                },
             )
             .await;
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
