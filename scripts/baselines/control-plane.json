@@ -1,0 +1,12 @@
+{
+  "mechanism": {
+    "file": "crates/symbio-plugin-loop/src/turn_exec/drive.rs",
+    "parts": ["drive loop body", "fn next", "fn waiting"],
+    "hash": "sha256:0da448bfb07f28a67f568193124a92af58d461609d6b2034f389b12dc4020e02",
+    "adr": "D-234",
+    "reason": "基线落在 D-222 第 2 步收敛之后的控制面形状上：驱动循环体 / 选债包装 fn next / 在途判据 fn waiting 三段合起来是「加一个端口不改机制」的判据面。冻结不是不许改，而是改动必须当批说清它属于哪一类——横向扩展的代价（那就改插件）还是机制演进（那就同批更新基线并改这条理由）。"
+  },
+  "extension": {
+    "productionFiles": 62
+  }
+}

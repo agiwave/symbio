@@ -289,7 +289,8 @@ const ACTOR_RELAY: ActorDecl = ActorDecl {
 /// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
 /// 与 `execute → close`），表装不上（DE-015 §3.4 第 1 条）——所以收束格只能归一个执行体。
 /// 它**不**覆盖轮首准备的 1b 分支（定稿答话轮）：那一轮一次模型往返都不发，收束格由
-/// `turn_runner/prepare.rs` 就地落（缺口与归属见 ）。快路（技能命中）同样零往返，
+/// `turn_runner/prepare.rs` 就地落，但**构造点仍只有一个**（`settle::land_final`，`TC-4`）——
+/// 「谁有权写」的答案也仍是这一行的 `writes`。快路（技能命中）同样零往返，
 /// 但它进驱动循环：`policy.reflex` 只落「已答」，收束格仍归这一格（D-163）。
 ///
 /// 两条收束格都在它名下：`chat.assistant.final`（答完了 / 中止）与
@@ -928,10 +929,11 @@ pub(crate) static ROWS: &[Decl] = &[
     // 从执行体内部挪到了收束动作里）。断环之后 `close-turn` 没有出边（只有 `close`
     // 写它的出口，而自环不算），`announce-model → close-turn` 单独一条边，表装得上。
     //
-    // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）仍在 `execute` 那一步
-    // 就地落兜底格：它们的模型端口**没有终局事实**（`failed(port=model)` 落不下来）
-    // ⇒ 收束行开不出账 ⇒ 那两格由 `execute` 写，并走它的**过渡豁免**（见
-    // [`ACTOR_EXECUTE`] 的 `transitional`）。
+    // 两条**控制面**失败（模型往返派不出去 / 工具批开不出来）在 D-166 之后归
+    // `relay` / `waiter` 那一方就地落兜底格：它们的模型端口**没有终局事实**
+    // （`failed(port=model)` 落不下来）⇒ 收束行开不出账。那两行的出口与 `close`
+    // 不同族，声明得了，所以 `transitional` 全表为空（见 [`ACTOR_EXECUTE`] 的
+    // `transitional`——字段还在，但它不是任何一行的出口）。
     Decl {
         name: "close-turn",
         prio: 55,

@@ -161,6 +161,43 @@ where
     })
 }
 
+/// 定稿收束格的**唯一构造点**（`TC-4`）：`chat.assistant.final` 只在这里落。
+///
+/// 五条路径写的是同一格——驱动循环里的 `close-turn`、零往返轮（轮首就地收束）、
+/// 快路、流式完成、中止。它们**只在何时写、载荷写什么**上不同，事实本身的形状
+/// （id `f-{turn}`、`turn × closed`、溯源指向用户格）必须由一处决定：让每处各写
+/// 一遍，同一格的字段迟早分叉，而「收束格有几份写方」在事实面上看不出来。
+///
+/// 写方身份不在这里决定：`actor.principal` 由调用方给，事实照记。声明面照旧只有
+/// [`super::super::loop_rows::ACTOR_CLOSE`] 的 `writes` 覆盖这一格——它回答「谁有权
+/// 写」，本函数回答「从哪里写出去」。
+pub(crate) fn land_final<S>(
+    store: &S,
+    actor: &ActorSpec,
+    turn: u64,
+    user_seq: u64,
+    cost_ms: u64,
+    payload: serde_json::Value,
+) -> Result<(), symbio_core::AppendError>
+where
+    S: Store<Event = Event> + ?Sized,
+{
+    store.append(
+        Event::pending(
+            format!("f-{turn}"),
+            EVENT_CHAT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            turn,
+            &actor.principal,
+        )
+        .with_produced_by(user_seq)
+        .with_cost_ms(cost_ms)
+        .with_payload(payload),
+    )?;
+    Ok(())
+}
+
 /// 中止收束格的构造点（D-052 决策 1）：**闸门与首请求之间**到达的中止。
 ///
 /// 与 adapter 中途返回 `AdapterError::Aborted` 落的是**同一格**
@@ -213,21 +250,16 @@ where
         &answer_id_of("", "", &StreamNodeFacts::default(), turn_root_id),
         &[],
     );
-    store.append(
-        Event::pending(
-            format!("f-{turn}"),
-            EVENT_CHAT_ASSISTANT_FINAL,
-            Entity::Turn,
-            Verb::Closed,
-            turn,
-            &actor.principal,
-        )
-        .with_produced_by(user_seq)
-        .with_cost_ms(0)
-        .with_payload(with_terminated(with_reason(
+    land_final(
+        store,
+        actor,
+        turn,
+        user_seq,
+        0,
+        with_terminated(with_reason(
             with_status(produced, "aborted"),
             symbio_core::ClosureReason::Interrupted,
-        ))),
+        )),
     )?;
     Ok(TurnOutcome {
         turn,

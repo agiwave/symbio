@@ -266,8 +266,9 @@ where
     // 环调度的是「还没还的债」，而这一轮欠的只有判决那一行——它跑完就把结论落成
     // `answered`，本轮就地收束，**轮内驱动循环压根没起来**。模板产线出话时零往返，措辞产线
     // 出话时那一次由 `compose` 在轮首之前发起并已入账（`via=compose/wording`），
-    // 它不是本轮的债。所以收束格由这里就地落，`close` 执行体的「唯一写方」限定在
-    // **驱动循环内**。别改成「寄存结局返回 `Run`」：措辞那一类没有可供 `PendingClose`
+    // 它不是本轮的债。所以收束格由这里就地落——但**构造点仍只有一个**：这条路径经
+    // `settle::land_final` 落格，「谁有权写」由 `loop_rows::ACTOR_CLOSE.writes` 回答，
+    // 「从哪里写出去」仍是那一处（`SP-033` `TC-4`）。别改成「寄存结局返回 `Run`」：措辞那一类没有可供 `PendingClose`
     // 使用的本轮往返（`rt`），硬接只能靠外形猜前件，零往返的同类轮会因此多打一次模型。
     if let Some(reply) = final_reply.as_deref() {
         let facts = node_facts(&nodes);
@@ -329,24 +330,19 @@ where
                 finish: symbio_core::ModelFinishReason::Stop,
             }));
         }
-        store.append(
-            Event::pending(
-                format!("f-{turn}"),
-                EVENT_CHAT_ASSISTANT_FINAL,
-                Entity::Turn,
-                Verb::Closed,
-                turn,
-                &actor.principal,
-            )
-            .with_produced_by(user_seq)
-            .with_cost_ms(final_cost_ms)
-            .with_payload(with_dialog(
+        settle::land_final(
+            store,
+            &actor,
+            turn,
+            user_seq,
+            final_cost_ms,
+            with_dialog(
                 with_reason(
                     with_status(produced, "completed"),
                     symbio_core::ClosureReason::Completed,
                 ),
                 dialog.as_ref(),
-            )),
+            ),
         )?;
         return Ok(PreparedFlow::Done(TurnOutcome {
             turn,
