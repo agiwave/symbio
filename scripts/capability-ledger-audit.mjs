@@ -11,6 +11,7 @@
  * - 账里为一行写了「留」，理由却是「难拆」「今天没有端口」⇒ 留守从**残留类**退化成
  *   一句借口，D-246 的被否项在文本上无法与合法留守区分；
  * - 账里的「拆」指不出 crate ⇒ 「拆」只是一句承诺，S6 / S9 无从分配；
+ * - 「拆」写了 crate 却没写交付段 ⇒ 目标存在但没有人认领，S11 收口时才发现；
  * - 合计表与逐行账各数各的 ⇒ 一份是全表、另一份是样本，两个数都「有来源」。
  *
  * 这类漂移没有任何一个既有守卫看得见：`registry-audit` 判登记条目、`doc-symbol-audit`
@@ -20,7 +21,7 @@
  *
  * | 码 | 判什么 |
  * |---|---|
- * | `EX-006` | 名册每一行恰好一条处置；账本编号 1..N 唯一；处置在闭集内；「拆」指得出 crate 或同包行；「留」写明残留类且不是借口；「待裁决」写明归宿；合计表与逐行账双向一致 |
+ * | `EX-006` | 名册每一行恰好一条处置；账本编号 1..N 唯一；处置在闭集内；「拆」指得出 crate 或同包行、并写明交付段（S6 / S7 / S8 / S9）；「留」写明残留类且不是借口、不挂交付段；「待裁决」写 S10；合计表与逐行账双向一致 |
  *
  * 判据读的是**两份文档**，不是代码：账本是计划，名册是输入。两者都对不上时先修账——
  * 数字不能改，改名册或改处置（`DE-008` §6.1 的口径）。
@@ -52,18 +53,23 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 const ROSTER_REL = 'docs/003-design/008-能力注册表与能力坐标系.md'
 const LEDGER_REL = 'docs/007-task/010-名册五十四条处置.md'
 
-/** 处置闭集：`拆` 的三种限定与 `留` 的四个残留类，外加「待裁决」。 */
+/** 处置闭集：`拆` 的三种限定与 `留` 的五个残留类，外加「待裁决」。 */
 const DISPOSITIONS = [
   '拆',
   '拆（折叠）',
   '拆（未建）',
   '拆（受限）',
-  '留 E',
   '留 环',
-  '留 过程体',
+  '留 写口',
   '留 守门',
+  '留 过程体',
+  '留 基底',
   '待裁决',
 ]
+
+/** 交付段闭集：拆的三类只能落在这四段；待裁决落裁决段；留守不挂交付段。 */
+const SPLIT_STAGES = ['S6', 'S7', 'S8', 'S9']
+const PENDING_STAGE = 'S10'
 
 /** D-246 明确否掉的留守理由：出现即红，不论后面接了什么。 */
 const EXCUSES = /难拆|拆不动|今天没有端口|没有端口可|实现困难|先放着/
@@ -150,6 +156,7 @@ if (!ledgerRows || ledgerRows.length === 0) {
     where: r.cells[2],
     disposition: r.cells[3],
     reason: r.cells[4] ?? '',
+    stage: (r.cells[5] ?? '').trim(),
   }))
 }
 
@@ -187,6 +194,13 @@ for (const row of ledger) {
           '「拆」必须能直接分配给 S6 / S7 / S9',
       )
     }
+    if (!SPLIT_STAGES.includes(row.stage)) {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为拆，但交付段 \`${row.stage || '（空）'}\` 不在闭集（${SPLIT_STAGES.join(' / ')}）—— ` +
+          '拆分目标没有任务认领，S11 收口时才发现',
+      )
+    }
   } else if (categoryOf(row.disposition) === '留守') {
     if (EXCUSES.test(row.reason)) {
       report(
@@ -197,8 +211,23 @@ for (const row of ledger) {
     } else if (row.reason.trim().length < 4) {
       report(at, `#${row.num}「${row.name}」留守但没写理由 —— 残留类要说得出「写不进 I-1…I-6」的具体原因`)
     }
-  } else if (!/归 S\d+|D-\d{3}/.test(row.reason)) {
-    report(at, `#${row.num}「${row.name}」记为待裁决，但没写归宿（\`归 SNN\` 或决策号）—— 悬空的待裁决等于没人管`)
+    if (row.stage && row.stage !== '—') {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为留守，却挂了交付段 \`${row.stage}\` —— 留守不建任务；` +
+          '若它其实要拆，改处置，不要两边都写',
+      )
+    }
+  } else {
+    if (row.stage !== PENDING_STAGE) {
+      report(
+        at,
+        `#${row.num}「${row.name}」记为待裁决，但归宿 \`${row.stage || '（空）'}\` 不是 ${PENDING_STAGE} —— 悬空的待裁决等于没人管`,
+      )
+    }
+    if (row.reason.trim().length < 4) {
+      report(at, `#${row.num}「${row.name}」记为待裁决，但没写为什么悬着 —— 下一步无从裁决`)
+    }
   }
 }
 

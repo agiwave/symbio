@@ -44,11 +44,11 @@ const LEDGER_TEXT = [
   '',
   '### 账本（3/3）',
   '',
-  '| # | 能力 | 今天 | 处置 | 落点 / 理由 |',
-  '|:-:|---|---|---|---|',
-  '| 1 | 甲能力 | loop `a.rs` | 拆 | `symbio-plugin-a`：I-1 |',
-  '| 2 | 乙能力 | core `b.rs` | 留 E | 封闭语法；第二事实源不允许 |',
-  '| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |',
+  '| # | 能力 | 今天 | 处置 | 落点 / 理由 | 归 |',
+  '|:-:|---|---|---|---|:-:|',
+  '| 1 | 甲能力 | loop `a.rs` | 拆 | `symbio-plugin-a`：I-1 | S6 |',
+  '| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |',
+  '| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |',
   '',
   '### 合计',
   '',
@@ -117,15 +117,15 @@ test('括号说明不参与名字对账（工作记忆（≈4 槽）↔ 工作�
 
 test('名册有一行而账本漏了 ⇒ 红（漏行）', () => {
   const files = cleanTree()
-  files[LEDGER] = files[LEDGER].replace('| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |\n', '')
+  files[LEDGER] = files[LEDGER].replace('| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |\n', '')
   assertRed(audit(files), /漏一行|没有处置行/)
 })
 
 test('账本多出一行名册没有的能力 ⇒ 红（凭空多一行）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER].replace(
-    '| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |',
-    '| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |\n| 4 | 丁能力 | 未落地 | 拆 | `symbio-plugin-d` |',
+    '| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |',
+    '| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |\n| 4 | 丁能力 | 未落地 | 拆 | `symbio-plugin-d` | S9 |',
   )
   assertRed(audit(files), /不在 .*§6\.1 名册里/)
 })
@@ -133,15 +133,15 @@ test('账本多出一行名册没有的能力 ⇒ 红（凭空多一行）', () 
 test('同一能力两条处置行 ⇒ 红（重复行）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER].replace(
-    '| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |',
-    '| 3 | 丙能力 | 未落地 | 待裁决 | 归 S10 |\n| 4 | 乙能力 | core `b.rs` | 留 E | 封闭语法 |',
+    '| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |',
+    '| 3 | 丙能力 | 未落地 | 待裁决 | 载荷形状未定 | S10 |\n| 4 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法 | — |',
   )
   assertRed(audit(files), /有 2 条处置行/)
 })
 
 test('处置不在闭集 ⇒ 红（不认识的词不能自己加）', () => {
   const files = cleanTree()
-  files[LEDGER] = files[LEDGER].replace('| 留 E |', '| 冻结 |')
+  files[LEDGER] = files[LEDGER].replace('| 留 守门 |', '| 冻结 |')
   assertRed(audit(files), /不在闭集/)
 })
 
@@ -170,10 +170,34 @@ test('留守不写理由 ⇒ 红', () => {
   assertRed(audit(files), /留守但没写理由/)
 })
 
-test('待裁决不写归宿 ⇒ 红（悬空的待裁决等于没人管）', () => {
+test('待裁决的归宿不是 S10 ⇒ 红（悬空的待裁决等于没人管）', () => {
   const files = cleanTree()
-  files[LEDGER] = files[LEDGER].replace('归 S10', '以后再说')
-  assertRed(audit(files), /没写归宿/)
+  files[LEDGER] = files[LEDGER].replace('待裁决 | 载荷形状未定 | S10 |', '待裁决 | 载荷形状未定 | — |')
+  assertRed(audit(files), /不是 S10/)
+})
+
+test('待裁决不写为什么悬着 ⇒ 红', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER].replace('载荷形状未定', ' ')
+  assertRed(audit(files), /没写为什么悬着/)
+})
+
+test('记为拆却不写交付段 ⇒ 红（目标存在但没人认领）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER].replace('`symbio-plugin-a`：I-1 | S6 |', '`symbio-plugin-a`：I-1 | — |')
+  assertRed(audit(files), /交付段 .* 不在闭集/)
+})
+
+test('交付段不在 S6…S9 ⇒ 红（凭空多出一个段）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER].replace('`symbio-plugin-a`：I-1 | S6 |', '`symbio-plugin-a`：I-1 | S5 |')
+  assertRed(audit(files), /交付段 .*S5.* 不在闭集/)
+})
+
+test('留守却挂了交付段 ⇒ 红（不建任务就不能冒充要拆）', () => {
+  const files = cleanTree()
+  files[LEDGER] = files[LEDGER].replace('封闭语法；第二事实源不允许 | — |', '封闭语法；第二事实源不允许 | S6 |')
+  assertRed(audit(files), /却挂了交付段/)
 })
 
 test('合计表的条数与组成列不同源 ⇒ 红', () => {
@@ -191,7 +215,7 @@ test('合计表把小计改大 ⇒ 红（汇总与逐行账不同源）', () => 
 test('合计表把「留」写进「拆」的名单 ⇒ 红（类别对不上）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER].replace('| 拆 | 1 | 1 |', '| 拆 | 2 | 1/2 |').replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
-  assertRed(audit(files), /归为 拆，逐行账的处置是 `留 E`/)
+  assertRed(audit(files), /归为 拆，逐行账的处置是 `留 守门`/)
 })
 
 test('名册表读不出 ⇒ 红（判据没有输入）', () => {
