@@ -1128,6 +1128,36 @@ fn every_kind_of_load_gap_refuses_to_load() {
 }
 
 #[test]
+fn declared_executor_without_run_is_a_load_gap() {
+    // EX-005 的反向输入：声明一条 `by`，而绑定表里没有这个名字。`seal` 能过
+    // （`by` 有执行体声明），派发时却会被 `bound_rows` 整条滤掉——声明成功、
+    // 永不执行、全绿。`dispatch_gaps` 是那一格的执行方。
+    let rows = [row_by(
+        "fixture-unmanned",
+        pat("user.message", &[]),
+        CLOSED,
+        None,
+        "fixture-actor",
+    )];
+    let gaps = super::dispatch_gaps(rows.iter(), super::ACTORS);
+    assert!(
+        gaps.iter().any(|g| matches!(
+            g,
+            Gap::UnmannedRow { row: "fixture-unmanned", by: "fixture-actor" }
+        )),
+        "没有 run 的 by 必须在装载期点名，实际缺口：{gaps:?}"
+    );
+}
+
+#[test]
+fn every_production_row_has_a_runnable_executor() {
+    // 正向面：真表的每一条 `by` 都落在绑定表上。`by: None` 的行是「这笔账不由引擎
+    // 执行」，不是缺口——它们照旧走外层直问。
+    let gaps = super::dispatch_gaps(ROWS.iter(), super::ACTORS);
+    assert!(gaps.is_empty(), "生产行表有不落的执行体：{gaps:?}");
+}
+
+#[test]
 fn declared_facts_all_have_a_row_home() {
     // 「每个控制面声明的事实都有归宿」（判据 7）钉在这里：孤儿事实名会让装载
     // 直接拒绝，而它防的是「拼错的名字静默永不被消费」。

@@ -525,12 +525,35 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
 ///
 /// [`super::turn_exec::drive`] 因此拿的是整张 [`ACTORS`]：`prio` 是全局序，一个循环
 /// 看得见全部行才是它的目的（`D-222` 裁决 5）。
+///
+/// 过滤器本身不再承担「静默丢弃」：冻结表里每一条 `by` 都由 [`dispatch_gaps`] 在装载期
+/// 对过绑定表，走到这里时 `by` 只有两种——`None`，或这张表里的一条。
 fn bound_rows(frozen: &Frozen, names: &[&'static str]) -> Vec<Decl> {
     frozen
         .rows()
         .iter()
         .filter(|d| d.by.is_some_and(|by| names.contains(&by)))
         .cloned()
+        .collect()
+}
+
+/// 冻结表与派发器之间那一格：`by` 指向的名字必须有 `run`。
+///
+/// `seal` 判的是「`by` 有没有 `ActorDecl`」——它判不到「这个名字有没有执行体」：
+/// `run` 只住在 [`ACTORS`]，`ActorDecl` 只是它的静态投影。于是「插件自己声明一个
+/// 执行体、`seal` 通过、派发时整条被 [`bound_rows`] 滤掉」是一条**声明成功、永不执行、
+/// 全绿**的路径（DE-026 `EX-005`）。装载期在这里把两表对一遍：冻结表里有行而绑定表
+/// 里没有名字 ⇒ 装载失败，而不是等到回放时才发现某条策略从未生效。
+fn dispatch_gaps<'a, I>(rows: I, actors: &[ActorEntry]) -> Vec<Gap>
+where
+    I: IntoIterator<Item = &'a Decl>,
+{
+    let names: Vec<&str> = actors.iter().map(|e| e.decl.name).collect();
+    rows.into_iter()
+        .filter_map(|d| match d.by {
+            Some(by) if !names.contains(&by) => Some(Gap::UnmannedRow { row: d.name, by }),
+            _ => None,
+        })
         .collect()
 }
 
@@ -1302,6 +1325,13 @@ fn assemble() -> Result<Arc<Frozen>, Vec<Gap>> {
     } else {
         frozen
     };
+    // 冻结表来自全部插件，绑定表只有本插件这一张：两表之间那一格（`EX-005`）。
+    // `seal` 只能判「`by` 有 `ActorDecl`」；这里判「它有 `run`」。否则插件声明的
+    // 执行体会在派发时被 `bound_rows` 静默滤掉——声明成功、永不执行、全绿。
+    let unmanned = dispatch_gaps(frozen.rows(), ACTORS);
+    if !unmanned.is_empty() {
+        return Err(unmanned);
+    }
     let overlapping = frozen.overlaps();
     if !overlapping.is_empty() {
         symbio_core::plugin_info!(
