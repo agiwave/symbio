@@ -117,8 +117,7 @@ pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
 pub(crate) const VERDICT: &str = EVENT_VERDICT_ASSERTED;
 
 /// 控制面事件名与格位（DE-024 D-197）：这些名字不属于内核语法，格位随名字一起
-/// 由本插件声明。内核 `CELLS` 里的同名行随迁移逐条退役；parity 用例只对仍在表上的
-/// 名字判等，最后一批业务事件迁出后 `CELLS` 只剩协议五格。
+/// 由本插件声明。
 pub(crate) const EVENTS: &[EventDecl] = &[
     // 定稿发言：收束格上两个名字（定稿 / 兜底）里被 `final_unique_per_turn` 数的那一个。
     // 角色替名字进判据（DE-024 D-203）——删掉这行不会让守卫静默失能，装配口报
@@ -158,9 +157,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // 记忆找回（S5）：行表与事实表已经在用这个名字。
     EventDecl::new(EVENT_MEMORY_RECALLED, (Entity::Memory, Verb::Asserted)),
     // 巩固与遗忘（S5 的两格）：写方 `memory_events::consolidate`、读方 [`crate::recall`]
-    // 都在本插件，随 D-201 从内核 `CELLS` 迁出。同族的 `memory.encoded` / `memory.calibrated`
-    // 走另一条：`session` 也读它们，名字因此登记进本插件清单的 `shared_events`，格位仍由
-    // 本插件交出（DE-024 D-204 / D-205），不回内核。
+    // 都在本插件，名字与格位因此随本插件声明（DE-024 D-201）。同族的 `memory.encoded` /
+    // `memory.calibrated` 走另一条：`session` 也读它们，名字因此登记进本插件清单的
+    // `shared_events`，格位仍由本插件交出（DE-024 D-204 / D-205），不回内核。
     EventDecl::new(
         EVENT_MEMORY_CONSOLIDATED,
         (Entity::Memory, Verb::Progressed),
@@ -200,8 +199,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)),
     // 终态：验证通过（验收通过才终态）。
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
-    // 就绪判死（调度者写，`reason: "lease_expired"`）：此前内核 `CELLS` 根本没有这一行，
-    // 落格只能被写闸拒掉；名字随 owner 声明之后它才真正可入库。
+    // 就绪判死（调度者写，`reason: "lease_expired"`）：名字随 owner 声明入库——写闸
+    // 只认声明过的名字，没声明的格位一律 `OffGrid`。
     EventDecl::new(EVENT_TASK_READY, (Entity::Task, Verb::Progressed)),
     // 发放（租约）：载荷 `{ task_id, owner, lease_ms, until_ms }`，与终态同落
     // `Task × Asserted`。**唯一写方是调度者**（`ScheduleDecider`），且写侧闸读
@@ -217,13 +216,13 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     ),
     // ── 对话面补登（DE-024 D-203 归零批）──
     //
-    // 下面九条此前只有内核 `CELLS` 一行：写方在本插件、读方是 core 的折叠
+    // 下面九条的写方在本插件、读方是 core 的折叠
     // （`rebuild` / `transcript` / `prompt_fidelity` / `branch` / `changes` /
     // `reputation` / `actors::commitment`），两个插件都调那些折叠 ⇒ 名字的 owner
     // 是**写方**（本插件），消费面经清单 `shared_events` 投影
     // （`symbio_plugin_api::events`，DE-024 D-204）。
     //
-    // 落格理由逐条取自内核 `CELLS` 的同名行（那一份随本批退役，说明搬到本处）：
+    // 落格理由逐条记在名字旁：
     EventDecl::new("artifact.added", (Entity::Artifact, Verb::Asserted)),
     // 分支族两支都**不删任何东西**，所以不是 `closed`（那一格是「这一轮的产出定稿」）；
     // 它们是「关于这一轮的断言」，且靠 `produced_by` 才能被验真（I2 的断言类）。
@@ -242,8 +241,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 /// 判据的**词汇面**（DE-024 D-203）：本插件调用 core 守卫时交出去的那张表。
 ///
 /// 取进程装配表——它含本插件 `EVENTS` 的角色声明，也含别的 owner 将来声明的停机 /
-/// 定稿角色；本二进制没装出表时用清单生成物（`symbio_plugin_api::vocab`）。内核
-/// `CELLS` 那一档已随名字归零删除（DE-024 D-203 裁决三）：内核不再替任何人记名字。
+/// 定稿角色；本二进制没装出表时用清单生成物（`symbio_plugin_api::vocab`）。内核不持有
+/// 名字表（DE-024 D-203 裁决三）：交不出声明时没有第三份表可问。
 pub(crate) fn guard_vocab() -> &'static [EventDecl] {
     symbio_plugin_api::vocab()
 }

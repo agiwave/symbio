@@ -1128,7 +1128,7 @@ use crate::projection::readyset::readyset_for;
 use crate::projection::task_vocab::TaskVocab;
 
 /// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
-/// （`plugins/loop::control_decl` + 清单 `shared_events`），内核表与 core 都不认识它们。
+/// （`plugins/loop::control_decl` + 清单 `shared_events`），core 与内核都不认识它们。
 /// core 的夹具因此自己交一张表给折叠的构造口——与 `REWORK_VOCAB` 同一形状：词汇是数据。
 const TASK: TaskVocab<'static> = TaskVocab {
     opened: "task.opened",
@@ -1139,11 +1139,11 @@ const TASK: TaskVocab<'static> = TaskVocab {
 };
 
 /// `memory.encoded`：名字与格位都在 owner 插件（`plugins/loop` 的 `EventDecl` + 清单
-/// `shared_events`，DE-024 D-204），内核表不认识它。core 的夹具因此自己写这条字面量——
+/// `shared_events`，DE-024 D-204），core 不认识它。core 的夹具因此自己写这条字面量——
 /// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
 const MEMORY_ENCODED: &str = "memory.encoded";
 
-/// 返工那一格：名字与角色随 owner 插件（`plugins/loop::control_decl`），内核表不认识它。
+/// 返工那一格：名字与角色随 owner 插件（`plugins/loop::control_decl`），core 不认识它。
 ///
 /// core 的判据只认角色（DE-024 D-203），所以这里自己声明一行当词汇面——生产环境里
 /// 这张表由 owner 在装配期交来（`Frozen::vocab`）。

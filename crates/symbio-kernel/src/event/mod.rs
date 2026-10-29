@@ -20,21 +20,19 @@
 //!   插件走。判据不在编译期（名字是字符串），而在**唯一写入口**——装配表不认识的
 //!   名字、与自述格位不一致的名字，都落不进事实源（`AppendError::OffGrid`）。
 //!
-//!   迁移期的内核名字表（`event::grid::CELLS`）已随 DE-024 D-203 归零批退役：
-//!   21 条业务名字全部由 owner 声明，`kernelEvents` / `cellsRows` 两格降到 0。
+//!   内核不持有业务名字表：名字与格位的唯一来源是 owner 交来的 `EventDecl`（装配表
+//!   `Frozen` 与清单生成的共享表），`kernelEvents` / `cellsRows` 两格恒为 0。
 
 use serde::{Deserialize, Serialize};
 
 /// 网格上的一个格子：实体（行）× 动词（列）。
 ///
-/// 它此前是 `event::grid::CELLS` 那张「名字 → 格位」表的一部分；表随 DE-024 D-203
-/// 归零批退役（业务名字全部由 owner 的 `EventDecl` 声明），`Cell` 作为**格位本身**
-/// 的类型留下来——`EventDecl.cell` / `Frozen::event_cell` / `AppendError::OffGrid`
-/// 都用它。
+/// `Cell` 是**格位本身**的类型——`EventDecl.cell` / `Frozen::event_cell` /
+/// `AppendError::OffGrid` 都用它。
 ///
-/// 表退役之后「这个名字落在哪一格」只剩两个来源：装配表（`Frozen`，owner 交来的
-/// 声明）与各插件清单生成的共享表（`symbio_plugin_api::events::SHARED_EVENTS`）。
-/// 内核不再认识任何业务名字，也就不再需要一张自己的名字表。
+/// 「这个名字落在哪一格」只有两个来源：装配表（`Frozen`，owner 交来的声明）与各插件
+/// 清单生成的共享表（`symbio_plugin_api::events::SHARED_EVENTS`）。内核不认识任何业务
+/// 名字，也没有自己的名字表。
 pub type Cell = (Entity, Verb);
 
 /// 一条事实在**守卫判据**里扮演的角色（DE-024 D-203 裁决二）。

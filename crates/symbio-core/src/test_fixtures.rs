@@ -2,9 +2,9 @@
 //!
 //! ## 为什么它在 core 里，却不是 core 的词典
 //!
-//! D-203 裁决三把 21 条业务事件名从内核 `event/mod.rs` 与 `CELLS` 上归零：名字从此
-//! 只由 owner 声明，core 的折叠经**构造期形参**（[`ChatVocab`] / [`MessageVocab`] /
-//! [`CommitmentVocab`]）收下拼写，一行都不读。
+//! D-203 裁决三把 21 条业务事件名移出内核：名字从此只由 owner 声明，core 的折叠经
+//! **构造期形参**（[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）收下拼写，
+//! 一行都不读。
 //!
 //! 生产拼写来自各 owner 的清单生成物 `symbio_plugin_api::events`（D-204）。core 不能
 //! 依赖那个 crate——它反过来依赖 core——所以本模块把同一批拼写**抄一份字面量**，只在
@@ -18,8 +18,8 @@
 //!
 //! core 的不变量判据（`is_turn_final` / `is_stop_fact` / `check_all` / `closure_reason_closed`）
 //! 的词汇面是 `&[EventDecl]`——它们问「这条名字扮演什么角色」，答案必须来自一张声明表。
-//! 迁移期那张表是内核 `CELLS`（`kernel_vocab()`）；它退役后用例自己交一张，格位与角色
-//! 与各 owner 的 `EventDecl` 逐条相同。协议五格仍取内核常量（它们是语法闭集的一部分）。
+//! 这张表由用例自己交：格位与角色与各 owner 的 `EventDecl` 逐条相同；协议五格仍取
+//! 内核常量（它们是语法闭集的一部分）。
 
 use crate::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
 use crate::{ChatVocab, CommitmentVocab, Entity, EventDecl, FactRole, MessageVocab, Verb};

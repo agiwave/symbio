@@ -118,7 +118,7 @@ fn kernel_declares_only_the_protocol_cells() {
     }
 }
 
-/// 协议五格的事件行与内核网格同源：迁移期两份表并存，必须先钉住它们不相漂。
+/// 协议五格的事件行与内核声明同源：格位与 owner 都只有这一处，两处不许漂。
 #[test]
 fn protocol_events_match_the_kernel_grid() {
     let mut b = Builder::new();

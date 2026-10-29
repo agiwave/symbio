@@ -84,9 +84,8 @@ fn core_table() -> Arc<Frozen> {
 
 /// 每条控制面事实都必须有事件行（`seal` 的 `FactWithoutEvent` 的直接断言）。
 ///
-/// 迁移期这里还有一条「owner 声明与内核 `CELLS` 必须同格」的对表用例——它是
-/// 两份表并存期的临时判据，随 D-203 归零批的内核名字表一起退役：现在**只有**一份
-/// 表（owner 的 `EventDecl`），「两份表说不一致」这个失败模式已经不可能发生。
+/// 事件表只有 owner 的这一份 `EventDecl`，没有第二张表可对——「两份表说不一致」这个
+/// 失败模式因此不可能发生，这里只直接断言缺口本身。
 #[test]
 fn every_control_fact_has_an_event_row() {
     for f in FACTS {

@@ -27,9 +27,6 @@
 //! `seal` 一次报全所有缺口；`sealed_declarations` 缓存的是同一个 `Result`。任何一条
 //! 声明不合格 ⇒ 冻结表不存在 ⇒ 读侧拿到同一个 `Err`。不存在「半张表继续跑」——
 //! 这正是把装载口从 loop 私有单例挪到装配方的理由（DE-015 §3.3）。
-//!
-//! 迁移期例外：写闸在冻结表查不到名字时回退 `event::grid::CELLS`（D-199）。回退只在
-//! **查表未命中**时发生，不掩盖 `seal` 的失败；最后一批业务事件迁出后回退删除。
 
 use std::sync::{Arc, OnceLock};
 
@@ -122,8 +119,8 @@ pub fn declared_vocab() -> Option<&'static [EventDecl]> {
 ///
 /// 冻结表缺席时用清单生成物 [`events::SHARED_EVENTS`]：它同样是 owner 交的
 /// （`PLUGIN.yml` 的 `shared_events`），只是范围窄——只有跨插件共享的那些名字。
-/// 迁移期那条「回退内核 `CELLS`」已经随内核名字表归零一并删除：内核不再替任何人
-/// 记名字，也就没有可回退的东西。三份表都不认识的名字按「网格之外」处理（fail-closed）。
+/// 内核不替任何人记名字，所以没有可回退的第三张表：三份表都不认识的名字按
+/// 「网格之外」处理（fail-closed）。
 pub fn vocab() -> &'static [EventDecl] {
     declared_vocab().unwrap_or(events::SHARED_EVENTS)
 }

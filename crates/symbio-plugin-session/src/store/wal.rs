@@ -85,12 +85,10 @@ use symbio_core::{
 /// owner 的陈述；共享表答的是「这条名字在别人的二进制里也叫这个」。格位与角色
 /// **取自同一张表**——不出现「格位在冻结表、角色在另一张表」的两侧各读一半。
 ///
-/// ## 第四臂（内核 `CELLS`）已删
+/// ## 谁都不认识 = 网格之外
 ///
-/// 迁移期这里还有一条回退到内核名字表的臂（D-199 的「实例 → 进程 → 内核表」三级）。
-/// D-203 裁决三把内核业务名字归零之后它没有可回退的东西了：**三份表都不认识的名字
-/// 就是网格之外**，闸门答 `OffGrid`。这不是收紧，是把「谁有资格声明一个名字」从
-/// 「内核替所有人记着」改成「只有 owner 记着」。
+/// 名字与格位只由 owner 声明：三份表都不认识的名字，闸门答 `OffGrid`（fail-closed）。
+/// 「谁有资格声明一个名字」的答案只有 owner，内核不替任何人记名字。
 struct Vocab<'a> {
     instance: Option<&'a [EventDecl]>,
     process: Option<&'static [EventDecl]>,
@@ -162,12 +160,13 @@ pub struct WalStore {
     /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
     /// 别人的归档因此同样不出现在这里——这不是新增的近似，是同一个近似。
     archived: RwLock<Option<Vec<Event>>>,
-    /// 装配期冻结表（DE-024 D-198 / D-199）：写闸先问它，未命中再回退。
+    /// 装配期冻结表（DE-024 D-198 / D-199）：写闸先问它，未命中再问进程装配表与
+    /// 共享表。
     ///
     /// 注入点有两个：生产路径在 [`crate::store::Store::facts`] 打开事实源后挂上
     /// `symbio_plugin_api::sealed_declarations()`；用例可以用
     /// [`WalStore::with_declarations`] 挂一张小表。`None` 不表示「没有网格」——
-    /// 写闸仍会问全局装配表，最后回退内核 `CELLS`。
+    /// 写闸仍会问全局装配表；三份表都不认识 ⇒ 网格之外（fail-closed）。
     declarations: Option<Arc<Frozen>>,
 }
 
@@ -455,7 +454,7 @@ impl WalStore {
         // 闸门索引**从重放结果重建**：重启不是「闸门失忆」的理由——同一份 WAL
         // 重开后，同轮第二条 final 仍要被拒（见 `gate_index_is_rebuilt_from_the_wal_on_reopen`）。
         // 此刻还没挂实例表（`with_declarations` 在 `build` 之后），词汇面走进程装配表 →
-        // 内核表这两臂；角色与格位在两份表上同源，重建口径与后续写闸因此一致。
+        // 共享表这两份表；角色与格位在每份表内同源，重建口径与后续写闸因此一致。
         let vocab = Vocab::of(None::<&Frozen>);
         let opened = events
             .iter()

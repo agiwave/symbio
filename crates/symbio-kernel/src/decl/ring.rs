@@ -412,7 +412,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///   [`Gap::DuplicateActor`] / [`Gap::DuplicatePort`]：同一张表里两个同名——按名字查找的
 ///   地方（写闸取格位、`by`、`port` 取值、视图求值）从此不确定查到的是哪一条；
 /// - [`Gap::FactWithoutEvent`]：插件声明的事实没有事件行——写闸取不到格位，运行期
-///   只能拒绝或回退到内核表（迁移期回退，见 DE-024 D-199）；
+///   只能拒绝（没有任何回退表能替它补格位，DE-024 D-199）；
 /// - [`Gap::NameCollision`]：事实名 / 事件名与视图名撞名——它们共用一个名字空间
 ///   （视图是合成事实）；
 /// - [`Gap::UnknownFact`] / [`Gap::UndeclaredField`]：视图 `reads` 引用了未声明的事实 /
@@ -493,7 +493,7 @@ pub enum Gap {
         name: &'static str,
     },
     /// 插件声明了一条事实，却没有任何事件行给它格位——写闸永远认不出它
-    /// （迁移期 kernel 的 `CELLS` 回退只能救内核已知的名字，救不了新名字）。
+    /// （没有任何回退表能替它补格位）。
     FactWithoutEvent {
         fact: &'static str,
     },

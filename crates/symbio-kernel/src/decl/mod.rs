@@ -20,16 +20,15 @@
 //! [`Builder::seal`] 于是能回答三件事：事实名不重名、事实与视图不撞名、
 //! **视图读的每个字段都出现在某个 `FactDecl.fields` 里**。
 //!
-//! ## 与 `event::grid` 的分工
+//! ## `EventDecl` 与 `FactDecl` 的分工
 //!
 //! [`EventDecl`] 管「名字落在哪个格子」，[`FactDecl`] 管「名字有哪些字段」。两者并存，
 //! 不互相推导：格子是实体 × 动词，字段是载荷形状，合并会逼其中一方说谎。
 //! 一条事实可以同时出现在两张表里（义务环要它的字段，网格要它的格位），但**两张表的
 //! 登记口分开**：事实未必进环，进环的事实才需要字段声明。
 //!
-//! `event::grid::CELLS` 仍是内核协议五格的格位来源；业务事件的格位自 [`EventDecl`]
-//! 起改由 owner 插件声明（DE-024 D-197）。两条来源在迁移期并存，写闸先问冻结表、
-//! 再回退 `CELLS`（D-199）；回退随最后一批事件迁出而删除。
+//! 名字 → 格位的唯一来源是 [`EventDecl`]（DE-024 D-197）：内核只声明协议五格，业务
+//! 事件由 owner 插件声明。写闸只问装配表与共享表，两者都不认识 ⇒ 网格之外（fail-closed）。
 //!
 //! ## `port` 是载荷字段，不是信封字段
 //!
@@ -72,8 +71,8 @@ use std::sync::Arc;
 
 use crate::event::{Cell, Entity, Event, EventDecl, FactRole, Verb};
 use crate::LatencyTier;
-// 协议名的**唯一**定义在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
-// 一个事实名只有一处定义：常量在事件域，格位在网格域，声明层只引用。
+// 协议名的**唯一**来源是 `event/mod.rs` 的常量与 `PROTOCOL_EVENTS`（本文件的声明层
+// 只引用，不另记一份名字）。
 use crate::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};
 
 pub mod ring;
@@ -481,8 +480,8 @@ impl Frozen {
         &self.events
     }
 
-    /// 这个名字落在哪一格。`None` = 冻结表里没有它——迁移期写闸随后回退
-    /// `event::grid::CELLS`；回退删除后 `None` 就是「网格之外」（DE-024 D-199）。
+    /// 这个名字落在哪一格。`None` = 冻结表里没有它 ⇒ 网格之外（DE-024 D-199）；
+    /// 写闸没有第三份表可问。
     pub fn event_cell(&self, name: &str) -> Option<Cell> {
         self.events.iter().find(|e| e.name == name).map(|e| e.cell)
     }
@@ -601,7 +600,7 @@ impl Frozen {
 
 // ── 协议名（载荷里带 `port`）────────────────────────────────────────────
 //
-// 名字住在 `event/mod.rs` 的事件名字表，并登记在 `CELLS` 上。
+// 名字住在 `event/mod.rs` 的事件名字表（`PROTOCOL_EVENTS`）。
 //
 // `via` 是**这一次往返是谁的**（D-122 决策 2）：这一轮自己的模型往返**不带**
 // 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
@@ -675,8 +674,8 @@ const SENT_FIELDS: &[&str] = &[
 // DE-024 D-203 裁决三把它留在语法里），格位在此与 `FactDecl` 并列声明——`seal`
 // 因此能判「协议事实都有事件行」。
 //
-// 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。业务
-// 事件名已全部由 owner 声明（内核 `CELLS` 归零），本表因此是内核唯一的名字→格位表。
+// 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。业务事件
+// 名全部由 owner 声明；本表是内核唯一的名字→格位表。
 const PROTOCOL_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_REQUEST, (Entity::Turn, Verb::Asserted)),
     EventDecl::new(EVENT_SENT, (Entity::Turn, Verb::Asserted)),

@@ -1441,7 +1441,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
         ))
         .expect("同格的第二条也不算 final");
 
-    // 同一份 WAL 换一个**没有注入**的实例：内核表不认识这个新名字 ⇒ 拒绝。
+    // 同一份 WAL 换一个**没有注入**的实例：装配表与共享表都不认识这个新名字 ⇒ 拒绝。
     drop(store);
     let plain = EventWalStore::open(&path).unwrap();
     let err = plain
@@ -1453,7 +1453,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             1,
             "session/main",
         ))
-        .expect_err("内核表不认识的名字不得入库");
+        .expect_err("没有声明格位的名字不得入库");
     assert!(
         matches!(err, AppendError::OffGrid { declared: None, .. }),
         "拒错形态：{err:?}"

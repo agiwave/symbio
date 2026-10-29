@@ -8,9 +8,9 @@
 //! `derived_facts` / `turn_exec` / `chat_loop`（视图随轮态流动），core 里只有这条投影
 //! 自己读 `memory.*` 三个名字。
 //!
-//! 搬动放出两个名字：`memory.consolidated` 与 `memory.forgotten` 自此只有本插件读，
-//! 内核常量、`CELLS` 行与 core 的 `recall` / `RecallView` / `RecallEntry` 三条根出口
-//! 同批退役。`memory.encoded` **仍在内核**——`plugins/session` 的 `stats` 也读它，
+//! 两个名字因此只有本插件读：`memory.consolidated` 与 `memory.forgotten` 的名字与格位
+//! 由本插件声明，core 不再有 `recall` / `RecallView` / `RecallEntry` 三条根出口。
+//! `memory.encoded` **仍登记在本插件清单**——`plugins/session` 的 `stats` 也读它，
 //! 两个插件同时消费的名字不能被任一插件独占（E-009）。
 //!
 //! ## 四条口径（每条对应一条验收）

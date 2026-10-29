@@ -23,12 +23,12 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)),
     // ── 消息列表的变更与收束（DE-024 D-203 归零批）──
     //
-    // 五条此前只有内核 `CELLS` 一行。写方全在本插件（`message_events` 与
+    // 五条的写方全在本插件（`message_events` 与
     // `orchestrator::consolidate`），读方是 core 的折叠（`mutations` /
     // `prompt_fidelity` / `transcript` / `rebuild` / `branch`）——两个插件都调那些
     // 折叠 ⇒ owner 是写方（本插件），消费面经清单 `shared_events` 投影。
     //
-    // 格位取自内核 `CELLS` 的同名行（D-053 / D-054 的闭集四格：开 / 改 / 删 / 巩固）。
+    // 格位按 D-053 / D-054 的闭集四格登记：开 / 改 / 删 / 巩固。
     EventDecl::new("message.added", (Entity::Message, Verb::Opened)),
     EventDecl::new("message.edited", (Entity::Message, Verb::Asserted)),
     EventDecl::new("message.removed", (Entity::Message, Verb::Closed)),
