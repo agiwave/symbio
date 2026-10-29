@@ -259,7 +259,7 @@ fn message_of_node_keeps_target_words_and_existing_tags() {
     assert_eq!(m.msg_type, None);
 }
 
-/// ：存量属性 `tool_name` 折进 `meta.tool_name`——顶层 `name` 已退出
+/// 存量属性 `tool_name` 折进 `meta.tool_name`——顶层 `name` 已退出
 /// wire，读边界注入是历史数据工具名的唯一落点；非覆盖纪律与 `style_tag` 同一条。
 #[test]
 fn message_of_node_folds_attr_tool_name_into_meta() {

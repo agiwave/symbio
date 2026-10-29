@@ -3134,7 +3134,7 @@ mod tool_round_tests {
         );
     }
 
-    /// ** 的锚**：`LlmTurn.finish` 必须沿 `TurnOutcome → TurnOutput` 一路带出。
+    /// **截断原因的锚**：`LlmTurn.finish` 必须沿 `TurnOutcome → TurnOutput` 一路带出。
     ///
     /// 唯一消费方是 `chat_loop/turn.rs`：`settle_reasoning` 用 `finish.is_length()` 给
     /// 本轮正文节点打 `meta.finish_reason = "length"`（前端「继续」按钮 + 回溯），

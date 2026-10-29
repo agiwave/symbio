@@ -285,7 +285,7 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
         "对应的 ToolCall 应一并裁剪"
     );
     assert!(msgs.iter().any(|m| m.id == "r2"), "最近一轮工具结果应保留");
-    // ：裁剪必须报出被删的 id（调用方据此落 `message.removed`）。
+    // 裁剪必须报出被删的 id（调用方据此落 `message.removed`）。
     assert!(
         removed.contains(&"r1".to_string()) && removed.contains(&"t1".to_string()),
         "被裁节点 id 必须全部报出（否则切主后它们会复活）：{removed:?}"
@@ -296,7 +296,7 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
     );
 }
 
-/// ：裁剪集合**按原列表顺序**给出（事实与回执的 id 序列必须稳定——
+/// 裁剪集合**按原列表顺序**给出（事实与回执的 id 序列必须稳定——
 /// `to_remove` 是 `HashSet`，顺序不定；直接倒它会让同一会话的两次裁剪给出不同的序列）。
 #[tokio::test]
 async fn prune_removed_ids_follow_original_list_order() {
@@ -435,7 +435,7 @@ async fn append_messages_prunes_tool_chain_by_default() {
     );
 }
 
-/// ** 的承重判据**：写入期裁剪是**列表变更**，必须落 `message.removed`。
+/// **写入期裁剪的承重判据**：写入期裁剪是**列表变更**，必须落 `message.removed`。
 ///
 /// 不落格的后果是**静默的**（这是它被登记成任务的原因）：WAL（唯一真源）里那些
 /// 被裁节点还在，只是 `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒
@@ -496,7 +496,7 @@ async fn prune_on_write_lands_a_removed_fact() {
     );
 }
 
-/// ** 的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
+/// **同一判据的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
 #[tokio::test]
 async fn turn_window_eviction_lands_a_removed_fact() {
     let config = SessionConfig {
@@ -1098,11 +1098,11 @@ async fn apply_removed_lands_a_fact_and_drops_nodes() {
     assert_eq!(removed.len(), 1, "一次删除落**一条**事实（ids 表达区间）");
 }
 
-/// ** 的承重判据**：事实落不下去 ⇒ `apply` 报失败，且**什么都没发生**。
+/// **落格失败的承重判据**：事实落不下去 ⇒ `apply` 报失败，且**什么都没发生**。
 ///
-/// 旧口径是「事实失败只记日志」——那在缓存是读侧真源时成立（影子失败不该让本体
-/// 失败）。b3 把主读切到 WAL 之后事实就是本体：放过它等于「回执说改好了、重建后
-/// 一看没改」，而且用户无感。步骤 ① 在写缓存**之前**，所以报失败是如实。
+/// 「事实失败只记日志」只在缓存是读侧真源时成立（影子失败不该让本体失败）。
+/// 主读切到 WAL 之后事实就是本体：放过它等于「回执说改好了、重建后一看没改」，
+/// 而且用户无感。落事实在写缓存**之前**，所以报失败是如实。
 ///
 /// 复现手法：把锁文件路径换成目录 ⇒ `EventWalStore::open` 打不开（跨平台都失败）。
 /// 断言两半：`apply` 返回错误（回执报失败）+ 缓存里没有那个节点（失败即未生效，

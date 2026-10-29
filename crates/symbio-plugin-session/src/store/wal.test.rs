@@ -741,7 +741,7 @@ fn range_unions_archives_with_live_in_seq_order() {
     // live 段只是尾部两条——那是实现的内部形态，不再是公开读法。
     assert_eq!(live_seqs(&store), vec![10, 11]);
 
-    // 完整史是原样的 12 条（逐条不重不漏——D-053 迁移表 b2 行的「零回退损失」）。
+    // 完整史是原样的 12 条（逐条不重不漏——D-053 的「零回退损失」）。
     let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()

@@ -285,7 +285,7 @@ pub struct ChatNode {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub msg_type: Option<NodeKind>,
 
-    /// ：顶层 `name` 字段**已退役**——工具名是结构细节，住
+    /// 顶层 `name` 字段**已退役**——工具名是结构细节，住
     /// `meta.tool_name`（读写唯一入口 [`ChatNode::tool_name`] /
     /// [`ChatNode::with_tool_name`]）。存量两条路径都在读边界折进来：
     /// VDFS 属性 `tool_name`（宿主侧的 `message_of_node`）与容器节点正文 JSON 的

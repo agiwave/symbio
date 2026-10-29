@@ -35,7 +35,7 @@ pub fn count_user_messages(events: &[Event], c: &ChatVocab, m: &MessageVocab) ->
 
 /// 快照事件载荷里的**轮次水位**（`session.consolidated` 的 `turns`）。
 ///
-/// 缺失 / 非数 ⇒ `0`：那是旧版本写的快照（水位字段是 b2 才加的）。降级方向是
+/// 缺失 / 非数 ⇒ `0`：那是没有水位字段的旧快照。降级方向是
 /// 「轮号从头数起」而不是「算出一个错的水位」——宁可保守。
 pub fn consolidated_turns(e: &Event) -> u64 {
     e.payload.get("turns").and_then(|v| v.as_u64()).unwrap_or(0)

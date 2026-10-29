@@ -308,7 +308,7 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
         "窗口只交配额内的切片头部（给定顺序即主张顺序，截尾不截头）"
     );
 
-    // ：视图字段与外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
+    // 视图字段与外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
     // 视图字段是消费方唯一能读到的降级信号。誊抄义务在**取值点**
     // （`memory_events::recall_view`，那是唯一丢外壳的地方），投影闭包不再自置。
 

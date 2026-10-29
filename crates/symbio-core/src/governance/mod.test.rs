@@ -239,7 +239,7 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
     assert_eq!(own[0].kind, EVENT_CHAT_ASSISTANT_FINAL);
 }
 
-// ── ：可见域的字符串形态（内容侧产地的书写面）─────────────────────
+// ── 可见域的字符串形态（内容侧产地的书写面）──────────────────────
 
 /// 书写形态 round-trip：三个取值各自 `name → from_name` 逐字回来。
 /// 判据不是「能转回来」而是「**只有**这三个能转回来」——载荷里出现第四个值
@@ -326,7 +326,7 @@ fn widen_is_commutative_idempotent_and_monotone() {
     assert_eq!(Shared.widen(Public), Public);
 }
 
-// ── ：授权覆盖层（淘汰回路的机制半边）─────────────────────────────
+// ── 授权覆盖层（淘汰回路的机制半边）──────────────────────────────
 
 /// 撤销回路（DE-043 §6 断言 3「淘汰 = 一条可审计、可撤销的 grants 变更事件」）：
 /// 收回 ⇒ `is_revoked` 翻真 ⇒ 恢复 ⇒ 翻假 ⇒ **再收回** ⇒ 又翻真。
