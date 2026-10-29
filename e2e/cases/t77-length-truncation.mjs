@@ -116,7 +116,7 @@ export default defineCase(
         session: SID_COMPLETE,
         timeoutMs: 60_000,
       });
-      assertEq(b.code, 0, '正文空但思考写完的那一轮是回答，不是失败（T-095）');
+      assertEq(b.code, 0, '正文空但思考写完的那一轮是回答，不是失败');
       assert(
         b.stdout.includes(ANSWER),
         `未截断的思考必须作为答话交付（实得 stdout=${JSON.stringify(b.stdout.slice(0, 300))}）`,

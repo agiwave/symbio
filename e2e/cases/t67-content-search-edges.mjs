@@ -167,7 +167,7 @@ export default defineCase(
       );
       assert(
         !contentOut.includes('\n\n'),
-        `content 模式行间应单换行、无空行（T-113，实际片段: ${JSON.stringify(contentOut.slice(0, 200))}）`,
+        `content 模式行间应单换行、无空行（实际片段: ${JSON.stringify(contentOut.slice(0, 200))}）`,
       );
 
       // ── ② `output_mode: files_with_matches`：每文件一条**纯路径**（无行号）──

@@ -143,7 +143,7 @@ export default defineCase(
       const reqs = await llm.requests();
       assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（工具轮 + 收尾轮）');
 
-      // 工具清单确实下行（批 1 的 §2.1 工具通道）：第一次请求里看得见 MCP 工具。
+      // 工具清单确实下行：第一次请求里看得见 MCP 工具。
       const tools0 = (reqs[0].body.tools ?? []).map((t) => t.function?.name);
       assert(
         tools0.includes('mcp__mockserv__echo'),

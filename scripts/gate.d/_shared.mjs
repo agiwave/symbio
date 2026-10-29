@@ -60,23 +60,23 @@ export const BASELINE = {
   // 各测试套件的计数基线（**只增不减**）。
   // 向下（删测试）必须配 `// baseline-allow <key>: <理由>`（见 `35-baseline.mjs` 元守卫，防『悄悄下调基线』）。
   // 向上：门禁实测超过即自动把数字写回本文件，不在此堆各批次变更注释——变更原因看提交历史。
-  // baseline-allow rustTests: 三次已归因的下修非侵蚀——批 P3 退役 `bridge` 转写路径（`v2_bridge.test.rs` 15 条缩到 `derived_facts.test.rs` 5 条 + 11 条迁与新增，逐条归属见上方注释）、批 删 `v2_mode_defaults_to_full_and_roundtrips` 1 条（被测对象 `V2Mode` 随 D-051 退役）、批 删 `v2_reconcile.test.rs` 9 条（被测对象 `v2_reconcile` 双源对账随单源切换退役，判据随之消失；`worker_progress.test.rs` 由「两读法对照」改写为「直接钉 WAL 读法」，条数仍 5）。
-  // baseline-allow rustTests: 批 DE-014 5a 删 6 条（1764→1758）——被测对象整条退役：`context_compact` 工具、55% 水位提醒与其开关 `enable_compact_tool`（裁决与被否替代见 D-072）。逐条：`should_emit_context_nudge_threshold`、`build_request_view_injects_nudge_at_tail`、`build_request_view_nudge_comes_after_skeletonization`、`nudge_requires_all_three_conditions`（nudge 四条）、`turn_split_idx_starts_at_user_instruction`、`turn_split_idx_fallback_and_abort`（`find_turn_user_split_idx` 两条，切分点已并入 `auto_compress_process`）。覆盖没有丢：压缩仍只有一个入口，它的两种触发（阈值自动 / 失败节点重试 force）由 `context/pipeline.test.rs` 与 e2e `t11-compression-node` / `t18-compression-streaming` 守着。
-  // baseline-allow rustTests: 批 DE-014 5b-1 删 2 条（1758→1756）——被测对象整体退场：闸门的「等工具齐」态与它判的那份在途工具簿记（裁决与否决替代见 D-073）。逐条：`in_flight_tools_block_wakeup`、`wait_for_tools_takes_priority_over_exit_conditions`。覆盖没有丢：那条不变量「不完整不唤醒」换了承担者——运行器环体只在把本批结果接进 exchange 之后才发下一次请求，由 e2e `t26-v2-tool-round`（批序与续轮）和 `t27-approval-resume`（本批留空 ToolCall 是合法状态、恢复后照续）守着；`gate_turn` 的两条真实退出条件（软上限优先于中止）与放行仍由 `chat_loop.test.rs` 其余 7 条钉住。
-  // baseline-allow rustTests: 批 DE-014 5b-2 净删 4 条（1756→1752）——被测对象整体退场：`max_tool_rounds` 工具轮软上限整条链（它判的是 `TurnState` 上一个恒 0 的计数，所以那条上限从未命中过；裁决与被否替代见 D-074）。逐条：`chat_loop.test.rs` 删 5 增 2（7→4）——删 `max_tool_rounds_reached_exits_with_reason`、`below_max_tool_rounds_proceeds`、`none_means_unbounded_rounds`、`max_tool_rounds_zero_is_unbounded_not_instant_break`（软上限四条）、`max_rounds_is_judged_before_abort`（上限与中止的优先序），新增 `request_count_is_not_an_exit_condition`、`abort_wins_over_request_count`，把那条「优先序」的形状换成等价且现在真的成立的「中止优先于请求数」；`plugin.test.rs` 删 2 条 `max_tool_rounds_zero_maps_to_unlimited`、`default_max_tool_rounds_is_effectively_unlimited`（配置→请求的契约翻译点随字段消失；同族的 wire 契约「缺键 ≠ 零值」由 `model_chat.test.rs::absent_fields_deserialize_as_none_not_zero` 以 `auto_compress` / `load_history` 继续钉住，没有丢）。**新增** 1 条补上被删分支留下的洞：`chat_loop/progress.test.rs::a_user_supplement_resets_the_clock_without_spending_the_quota`——「抽到补充 ⇒ 静默时钟归零」这句纪律躺在恒假的抽干分支里，随分支失效；现在它是 `RoundHookFn` 的入参 `supplemented_at` + `RoundProgress::stirred`，有测试可钉（D-074 裁决二）。覆盖没有丢：工具轮数的真源在 `turn_runner` 环体的 `tool_round` 与 `RoundProgress::rounds`，由 e2e `t26-v2-tool-round`、`t27-approval-resume` 守着。
-  // baseline-allow rustTests: 批 DE-014 5c 净删 31 条（1778→1747）——被测对象整族退役：请求视图层的三层裁剪（L1 内容淡化 / L2 轮次淡化 / L3 分层滑窗骨架化），裁决与被否替代见 D-078。不是「测试跟不上」，是**那三层与「请求体 = 事实网格的纯投影」结构上互斥**：运行器每请求跑 `verify_prompt_fidelity`，配对判据是正文精确相等（`projection/prompt_fidelity.rs`），而三层改的正是正文 ⇒ 接线后同一节点同时报两条缺口。逐条归属：`context/window.test.rs` 整文件 19 条（L3 骨架化的全部判据，模块一并删除）、`context/view.test.rs` 15→5（−10；旧的 L1/L2 判据与 11 参入口一起退场，换成五条注入段判据 `memory_section_is_prepended` / `readyset_section_sits_after_memory` / `delegate_section_lands_at_index_two` / `empty_sections_produce_nothing` / `every_section_carries_its_kind`，钉次序与 `meta.kind`）、`symbio_core/capability/tests.rs` 6→5（−1；`context_retention_serde_roundtrip` + `keep_count_semantics` 随 `CapabilityToolContextRetention` 退场，同族的「声明式枚举字段 serde 往返 + 缺键不产默认值」机制由新增的 `declared_enum_field_serde_roundtrip` 接手，载体换成仍在册的 `risk: CapabilityRiskLevel`——载体换掉、机制不许跟着死）、`tokenizer.test.rs` 10→9（−1；`conditional_truncation_only_when_over` 随死函数 `truncate_head_chars_if_over` / `truncate_tokens` 退场）。覆盖没有丢：投影完整性由 `prompt_fidelity` 每轮复核 + 上述五条注入段判据承担，端到端由 e2e `t47`（视图`role=user` 条数被轮次窗口按住）与 `t29` / `t31`（记忆段、调度段在包里且 `messages.json` 一个字不多）守着。
-  // baseline-allow rustTests: 批 新增 2 条判据（1747→1749）——`message_events.test.rs::an_unopenable_fact_source_is_a_failure_not_an_exemption`
+  // baseline-allow rustTests: 三次已归因的下修非侵蚀——`bridge` 转写路径退役（`v2_bridge.test.rs` 15 条缩到 `derived_facts.test.rs` 5 条 + 11 条迁与新增，逐条归属见上方注释）、删 `v2_mode_defaults_to_full_and_roundtrips` 1 条（被测对象 `V2Mode` 随 D-051 退役）、删 `v2_reconcile.test.rs` 9 条（被测对象 `v2_reconcile` 双源对账随单源切换退役，判据随之消失；`worker_progress.test.rs` 由「两读法对照」改写为「直接钉 WAL 读法」，条数仍 5）。
+  // baseline-allow rustTests: D-072 裁决删 6 条（1764→1758）——被测对象整条退役：`context_compact` 工具、55% 水位提醒与其开关 `enable_compact_tool`（裁决与被否替代见 D-072）。逐条：`should_emit_context_nudge_threshold`、`build_request_view_injects_nudge_at_tail`、`build_request_view_nudge_comes_after_skeletonization`、`nudge_requires_all_three_conditions`（nudge 四条）、`turn_split_idx_starts_at_user_instruction`、`turn_split_idx_fallback_and_abort`（`find_turn_user_split_idx` 两条，切分点已并入 `auto_compress_process`）。覆盖没有丢：压缩仍只有一个入口，它的两种触发（阈值自动 / 失败节点重试 force）由 `context/pipeline.test.rs` 与 e2e `t11-compression-node` / `t18-compression-streaming` 守着。
+  // baseline-allow rustTests: D-073 裁决删 2 条（1758→1756）——被测对象整体退场：闸门的「等工具齐」态与它判的那份在途工具簿记（裁决与否决替代见 D-073）。逐条：`in_flight_tools_block_wakeup`、`wait_for_tools_takes_priority_over_exit_conditions`。覆盖没有丢：那条不变量「不完整不唤醒」换了承担者——运行器环体只在把本批结果接进 exchange 之后才发下一次请求，由 e2e `t26-v2-tool-round`（批序与续轮）和 `t27-approval-resume`（本批留空 ToolCall 是合法状态、恢复后照续）守着；`gate_turn` 的两条真实退出条件（软上限优先于中止）与放行仍由 `chat_loop.test.rs` 其余 7 条钉住。
+  // baseline-allow rustTests: D-074 裁决净删 4 条（1756→1752）——被测对象整体退场：`max_tool_rounds` 工具轮软上限整条链（它判的是 `TurnState` 上一个恒 0 的计数，所以那条上限从未命中过；裁决与被否替代见 D-074）。逐条：`chat_loop.test.rs` 删 5 增 2（7→4）——删 `max_tool_rounds_reached_exits_with_reason`、`below_max_tool_rounds_proceeds`、`none_means_unbounded_rounds`、`max_tool_rounds_zero_is_unbounded_not_instant_break`（软上限四条）、`max_rounds_is_judged_before_abort`（上限与中止的优先序），新增 `request_count_is_not_an_exit_condition`、`abort_wins_over_request_count`，把那条「优先序」的形状换成等价且现在真的成立的「中止优先于请求数」；`plugin.test.rs` 删 2 条 `max_tool_rounds_zero_maps_to_unlimited`、`default_max_tool_rounds_is_effectively_unlimited`（配置→请求的契约翻译点随字段消失；同族的 wire 契约「缺键 ≠ 零值」由 `model_chat.test.rs::absent_fields_deserialize_as_none_not_zero` 以 `auto_compress` / `load_history` 继续钉住，没有丢）。**新增** 1 条补上被删分支留下的洞：`chat_loop/progress.test.rs::a_user_supplement_resets_the_clock_without_spending_the_quota`——「抽到补充 ⇒ 静默时钟归零」这句纪律躺在恒假的抽干分支里，随分支失效；现在它是 `RoundHookFn` 的入参 `supplemented_at` + `RoundProgress::stirred`，有测试可钉（D-074 裁决二）。覆盖没有丢：工具轮数的真源在 `turn_runner` 环体的 `tool_round` 与 `RoundProgress::rounds`，由 e2e `t26-v2-tool-round`、`t27-approval-resume` 守着。
+  // baseline-allow rustTests: D-078 裁决净删 31 条（1778→1747）——被测对象整族退役：请求视图层的三层裁剪（L1 内容淡化 / L2 轮次淡化 / L3 分层滑窗骨架化），裁决与被否替代见 D-078。不是「测试跟不上」，是**那三层与「请求体 = 事实网格的纯投影」结构上互斥**：运行器每请求跑 `verify_prompt_fidelity`，配对判据是正文精确相等（`projection/prompt_fidelity.rs`），而三层改的正是正文 ⇒ 接线后同一节点同时报两条缺口。逐条归属：`context/window.test.rs` 整文件 19 条（L3 骨架化的全部判据，模块一并删除）、`context/view.test.rs` 15→5（−10；旧的 L1/L2 判据与 11 参入口一起退场，换成五条注入段判据 `memory_section_is_prepended` / `readyset_section_sits_after_memory` / `delegate_section_lands_at_index_two` / `empty_sections_produce_nothing` / `every_section_carries_its_kind`，钉次序与 `meta.kind`）、`symbio_core/capability/tests.rs` 6→5（−1；`context_retention_serde_roundtrip` + `keep_count_semantics` 随 `CapabilityToolContextRetention` 退场，同族的「声明式枚举字段 serde 往返 + 缺键不产默认值」机制由新增的 `declared_enum_field_serde_roundtrip` 接手，载体换成仍在册的 `risk: CapabilityRiskLevel`——载体换掉、机制不许跟着死）、`tokenizer.test.rs` 10→9（−1；`conditional_truncation_only_when_over` 随死函数 `truncate_head_chars_if_over` / `truncate_tokens` 退场）。覆盖没有丢：投影完整性由 `prompt_fidelity` 每轮复核 + 上述五条注入段判据承担，端到端由 e2e `t47`（视图`role=user` 条数被轮次窗口按住）与 `t29` / `t31`（记忆段、调度段在包里且 `messages.json` 一个字不多）守着。
+  // baseline-allow rustTests: 新增 2 条判据（1747→1749）——`message_events.test.rs::an_unopenable_fact_source_is_a_failure_not_an_exemption`
   // （事实源打不开 ⇒ `Failed`，不再与「无锚」的 `NoAnchor` 豁免混成一格）与
   // `chat_session.test.rs::apply_reports_a_failed_fact_write_and_writes_nothing`（`apply` 报错 ∧ 缓存里没有那个节点）。
   // 这两条钉的是 D-053 补记里那张结果表的**两个新分叉**，原实现里它们同属 `Discarded`、无法分别断言。非放宽。
-  // baseline-allow rustTests: 批 新增 1 条判据（1749→1750）——`chat_loop/state.test.rs::the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch`，
+  // baseline-allow rustTests: 新增 1 条判据（1749→1750）——`chat_loop/state.test.rs::the_session_actor_is_a_reasoner_which_is_why_pattern_cannot_dispatch`，
   // 钉「会跑模型的主体派生 Reasoner」这个反证（D-079 裁决一的地基）。非放宽。
-  // baseline-allow rustTests: 批 新增 3 条判据（1750→1753）——`protocols/profile.test.rs` 的三条：
+  // baseline-allow rustTests: 新增 3 条判据（1750→1753）——`protocols/profile.test.rs` 的三条：
   // `every_protocol_row_keeps_its_measured_budget`（四行两数各是今天的实测值，且探测值必须过 GLM 那条 `> 2` 的下限）、
   // `the_chain_skips_nulls_and_follows_the_table_order`（MiMo 的 `reasoning_content: null` + `reasoning` 形态、顺序由表定）、
   // `the_anthropic_keys_use_the_same_extractor`（Anthropic 三组键与类型名同样落表）。档案表本身是把散落魔法数搬成数据，
   // 这三条钉的是「搬家后值不变、链序不变」——原先是三处字面量，没有可断言的单点。非放宽。
-  // baseline-allow rustTests: 批 （02be8fc5）净删 1 条判据（1834→1833）——该批删掉
+  // baseline-allow rustTests: （02be8fc5）净删 1 条判据（1834→1833）——这次改动删掉
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table`：`LatentCapability`
   // 表的读方随 ClassifyOnly 退役而消失，删的是持续维护税，不是判据。基线随之下调，非放宽。
   // 段一 新增 6 条（1924→1930，非放宽）：`event_bus/tests.rs` 的
@@ -119,7 +119,7 @@ export const BASELINE = {
   // `speech_and_artifact_denials_do_not_collide`（两臂各自成键）、
   // `denial_names_the_capability_the_gate_judges`（**对拍**：拒绝原因里的能力名拼写
   // 必须真的是生产表里那一项——手写一份没有对拍就只是又一处「表授予 A、闸门判 B」）。
-  // baseline-allow rustTests: 批 净增 6 条判据（1981→1987）——停机原因闭集落地。
+  // baseline-allow rustTests: 净增 6 条判据（1981→1987）——停机原因闭集落地。
   // 逐条：`invariants/mod.test.rs` 新增 5 条（`closure_reason_in_the_closed_set_passes`
   // 五个取值全过 / `closure_reason_missing_is_reported_when_not_graced` 严判档红、读侧宽限档绿 /
   // `closure_reason_outside_the_closed_set_is_reported_either_way` 越界在两种档位下都红 /
@@ -129,7 +129,7 @@ export const BASELINE = {
   // （兜底必须是闭集里的取值，不是自由文本）；`turn_exec.test.rs` 的
   // `tool_free_turn_failure_leaves_fallback_event_and_bubbles` 同补一条。净增为正：
   // 只改了载荷键名（`why` → `detail`）与两条断言的目标字段，没有删判据。
-  // baseline-allow rustTests: 批 b 净删 44 条（2038→1994）——被测对象整族退役：旧控制面
+  // baseline-allow rustTests: 净删 44 条（2038→1994）——被测对象整族退役：旧控制面
   // `loop_registry`（31 条：五格对拍、命中臂归属、档位逐格对表、同格加行零改主循环……）与
   // `chat_loop/progress`（10 条：`RoundProgress` 的静默时钟与配额），连同 `stage_events.test.rs`
   // 的 3 条旧 D-107 用例（`executed_*_turns_the_next_ask_into_declined`，被测对象是
@@ -180,20 +180,20 @@ export const BASELINE = {
   //   `max_tools` 遍历后才判（子树真贡献了工具才超）、限额达标静默放行。
   // baseline-allow rustTests: 净减 64 条（2305→2241）——D-188 C2a 把 `event` / `store` /
   // `projection::Projection` / `decl` / `LatencyTier` 的实现搬进 `symbio-kernel` crate，它们的
-  // 单元用例随之搬过去（同一批 64 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
+  // 单元用例随之搬过去（一并 64 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
   // baseline-allow rustTests: 净减 67 条（2241→2174）——D-188 C2b 把五个语法 trait 与签名类型
   // （`ChatNode` / `Principal` / `ExecEnv` / VDFS 全族 / `Plugin` 信封 / `TurnOutput` /
   // `CapabilityMeta` / `ReadingSection`）搬进 `symbio-kernel` crate，它们的单元用例随类型一起
-  // 搬过去（同一批 67 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
+  // 搬过去（一并 67 条，落在 `kernelRustTests`），不是被测对象退役。非侵蚀。
   rustTests: 2175,
   kernelRustTests: 131,
 
-  // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
-  // baseline-allow ciRustTestsTotal: 批 DE-014 5c 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
-  // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
-  // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1433→1434），逐条归属见上方 `rustTests` 的注。
-  // baseline-allow ciRustTestsTotal: 批 的同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
-  // baseline-allow ciRustTestsTotal: 批 （02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
+  // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
+  // baseline-allow ciRustTestsTotal: D-078 同一净删 31 条（1462 → 1431）在 CI 口径下的折算——`--workspace` 求和含 symbio lib 目标，删掉的 31 条在两种口径里是同一批，逐条归属见上方 `rustTests` 的注（D-078 三层淡化整族退役）。非侵蚀。
+  // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1431→1433），逐条归属见上方 `rustTests` 的注。
+  // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1433→1434），逐条归属见上方 `rustTests` 的注。
+  // baseline-allow ciRustTestsTotal: 同一增量在 CI 口径下修一格（1434→1437），逐条归属见上方 `rustTests` 的注。
+  // baseline-allow ciRustTestsTotal: （02be8fc5）的同一净删在 CI 口径下修一格（1437→1436）——删掉的
   // `adapters/mod.test.rs::tier_capabilities_match_the_budget_table` 无 `cfg` 门，Linux 那一跑的求和同样少它一条。逐条归属见上方 `rustTests` 的注。
   // baseline-allow ciRustTestsTotal: 同一净删 3 条在 CI 口径下的折算（1436→1433）——
   // `--workspace` 求和含 symbio lib 目标，删掉的 3 条在两种口径里是同一批，逐条归属见上方
@@ -213,7 +213,7 @@ export const BASELINE = {
   // `crates/symbio-plugin-loop/src/recall.test.rs`（用例数不变），另两条（预算耗尽降级、检索产出带溯源视图）在
   // loop 已有同判据用例（`exhausted_budget_degrades_…` / `recall_translator_produces_provenanced_…`），
   // 删的是重复的那一份，不是判据。非侵蚀。
-  // baseline-allow ciRustTestsTotal: S1.0 收口（D-203）净减 1 条（2352→2351）——删的是**已不存在的
+  // baseline-allow ciRustTestsTotal: D-203 收口净减 1 条（2352→2351）——删的是**已不存在的
   // 被测对象**：`event/grid.test.rs` 整文件退役（5 条，判的正是被删掉的 `CELLS` 这张手写表：
   // 协议五格预置、业务行落格、重名即红、格位与 `Entity`/`Verb` 一致、越界即红），
   // 同一批在 `projection/vocab.test.rs` 新增 4 条（三张表没有两条重名、`slot_of` 认得出十一个发言格、
@@ -237,9 +237,9 @@ export const BASELINE = {
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
-  // baseline-allow vitestFiles: 批 （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
-  // baseline-allow vitestTests: 同一批 ：上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
-  // baseline-allow vitestTests: 批 段一（D-111）净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
+  // baseline-allow vitestFiles: （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
+  // baseline-allow vitestTests: 上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
+  // baseline-allow vitestTests: D-111 净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
   // baseline-allow vitestTests: 1002 → 1003（+1，D-147 / D-149）——新增的是**判据用例**，不是补回覆盖：
   // 折叠顺序反转后「主体优先 / 残留格兜底 / 旧形态不再归一」三组各要一条断言，
   // 由 8 条变 9 条（原「历史裸字符串一路通吃」那条拆成地址归一 + 旧形态不归一，净 +1）。
@@ -250,7 +250,7 @@ export const BASELINE = {
   vitestTests: 1076,
   verifyPrograms: 17,
   verifyNegatives: 4,
-  // baseline-allow e2eCases: 批 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
+  // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // 增 t76（召回可见域）。
   e2eCases: 86,
   // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
@@ -273,13 +273,13 @@ export const BASELINE = {
   // 唯一一处**向上**的 panic 面（实测 77）：段归档与它的读侧——
   // `WalStore::archive_before`、归档段并集的缓存（`archive_events` 拿读锁 + 写回写锁）、
   // `range` 拼接时的读锁，都要拿同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」约定
-  // （同 `len`/`head` 的 `expect("WalStore 锁中毒")`）。P6-④ 的 `SessionStore` 事实源
+  // （同 `len`/`head` 的 `expect("WalStore 锁中毒")`）。`SessionStore` 事实源
   // 句柄表（`facts` / `snapshot` / `delete_session`）重复同一条约定：表锁只在持锁期间
   // panic 时中毒，本仓不把中毒当可恢复状态。每一处均已按 PN-001 登记，理由同构：
   // 改成毒后恢复是行为变更，需单独 ADR。这不是放宽棘轮——新增的都是既有约定的复制，
-  // 不是新引入的健壮性缺口。（P6-③ 把 `len` 的 expect 收进 `cfg(test)` 后实测曾降到 72；
-  // 那一轮按 floor 口径保留 73，本批一并落定为实际值 77。）
-  // 6b-②' P5 再加两处同构的复制：`runtime_facts`（读事实源表锁）与 `runtime_cache`
+  // 不是新引入的健壮性缺口。（把 `len` 的 expect 收进 `cfg(test)` 后实测曾降到 72；
+  // 那一轮按 floor 口径保留 73，这里一并落定为实际值 77。）
+  // 另加两处同构的复制：`runtime_facts`（读事实源表锁）与 `runtime_cache`
   // （运行态投影缓存表锁）。两处都只是既有「锁当无中毒用」约定的又一个持有者，
   // 不引入新的健壮性缺口；基线随之 77 → 79。
   // 抽内核：`invariants/mod.rs` 的四个检查改成「解析层构造内核输入 + 判定走

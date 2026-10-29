@@ -312,7 +312,7 @@ pub struct SessionConfig {
     /// 这就是它作为一个独立开关的全部含义。见 `chat_loop/inputs.rs` 的 `fast_armed`。
     #[serde(default = "default_skill_fast_path")]
     pub skill_fast_path: bool,
-    // ── Q1：worker 启动判据的三条旋钮（D-047 批 B 的「独立一批」）────────
+    // ── Q1：worker 启动判据的三条旋钮（D-047 裁决的「独立一批」）────────
     //
     // 出厂值即判据原样，两个平凡值都是**这一层关闭**，不是「永远命中」：
     // 阈值 0 若也判长度，任何非空消息都命中 ⇒ 每条寒暄都开一个后台会话，

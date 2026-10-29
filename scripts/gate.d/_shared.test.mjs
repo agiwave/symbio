@@ -836,7 +836,7 @@ test('baselineErosion：已登记的豁免仍报出该格，只标 waived（黄�
   assert.equal(baselineErosion(current, [{ ref: 'b', text: baselineText([['a', 10]]) }])[0].waived, true)
 })
 
-// ================= 棘轮元判据 `ratchetErosion`（批 M12） =================
+// ================= 棘轮元判据 `ratchetErosion` =================
 //
 // `35-baseline.mjs` 从「一个写死的路径」升成一张 `RATCHETS` 清单，而「什么算被放松」
 // 只在这里定义一次。两种方向都要钉住：

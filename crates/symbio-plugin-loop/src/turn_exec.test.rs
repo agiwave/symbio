@@ -2107,7 +2107,7 @@ async fn flush_returns_immediately_when_the_channel_is_already_closed() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// FrameQueue 的有界 + 增量合并（批 C4 的判据）
+// FrameQueue 的有界 + 增量合并
 //
 // 这组用例只测 `FrameQueue` 本身，不经 `UiBridge`——`on_delta` 要先有一个节点，
 // 而「合并是否无损、是否保序」是队列的性质，与谁在生产它无关。

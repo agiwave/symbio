@@ -1,6 +1,5 @@
 import './_selfrun.mjs';
-// T71 对等主体跑一轮（相应批次 合并批 ②+③，
-// [D-065](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") / [D-067](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）：
+// T71 对等主体跑一轮（[D-065](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") / [D-067](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）：
 // **收束格按种类判** + **入站「来源主体」格数据**。
 //
 // ## 本用例钉的是什么

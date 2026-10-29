@@ -144,7 +144,7 @@ export default defineCase(
       );
       assert(
         !sectionB.includes(R_A),
-        `判断记忆不得跨会话可见（T-117 要消灭的泄漏）：\n${sectionB}`,
+        `判断记忆不得跨会话可见：\n${sectionB}`,
       );
 
       // ── ③ 会话 C（矩阵外）：两轮——第二轮的召回段有自己的、没别人的 ──

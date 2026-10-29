@@ -308,13 +308,13 @@ export default defineCase(
       );
       // **判断记忆不出会话**（相应批次）：
       // A 的答话是 thread_private（判断的生产写方取值），B 的召回段一条都不该有——
-      // 巩固产物随源记忆的可见域走（：合并产物继承源）。判断侧的巩固事实
+      // 巩固产物随源记忆的可见域走（合并产物继承源）。判断侧的巩固事实
       // 改从 A 的事实源直接核（见下），注入段这个通道已按可见域收窄。
       const answersLeaked = A_ANSWERS.filter((a) => memSection.includes(a));
       assertEq(
         answersLeaked.length,
         0,
-        `判断记忆不得跨会话可见（T-117 要消灭的泄漏；泄漏了: ${JSON.stringify(answersLeaked)}，实际: ${memSection}）`,
+        `判断记忆不得跨会话可见（泄漏了: ${JSON.stringify(answersLeaked)}，实际: ${memSection}）`,
       );
       assert(memSection.includes(T_WATER), `活记忆在段内（实际: ${memSection}）`);
       assert(memSection.includes(T_REPORT), `活记忆在段内（实际: ${memSection}）`);
@@ -348,7 +348,7 @@ export default defineCase(
       assertEq(
         jCons.payload?.vis_scope,
         'thread_private',
-        '合并产物继承源记忆的可见域（T-094）——B 看不见它是预过滤的正确收放，不是巩固缺席',
+        '合并产物继承源记忆的可见域——B 看不见它是预过滤的正确收放，不是巩固缺席',
       );
 
       // ── 跨会话召回的**对话内容面**：B 的首轮回答里含 A 写下的四句原话 ──────

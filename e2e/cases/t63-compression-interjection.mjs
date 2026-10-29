@@ -67,7 +67,7 @@ const SNAPSHOT = [
 ];
 
 export default defineCase(
-  'T63 压缩进行中插话不丢：请求包取证 + 转写顺序 + 摘要请求形状（T-074 清偿）',
+  'T63 压缩进行中插话不丢：请求包取证 + 转写顺序 + 摘要请求形状',
   async () => {
     // 摘要场景：10 个慢分片 ⇒ 压缩进行中有一个 ~5s 的真实窗口可写插话。
     const llm = await new MockLlm([
