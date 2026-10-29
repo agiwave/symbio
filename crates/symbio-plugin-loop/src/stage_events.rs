@@ -40,7 +40,8 @@
 //! [`StageFact`] 按同一性落成事实，以及提供测试用的**按轮**折叠 [`done`]。
 //!
 //! 「这一步做过没有」在日志里有唯一答案，所以本轮状态里不留它的缓存——
-//! 缓存与事实是第二份状态（DE-014 §2）。
+//! 缓存与事实是第二份状态（DE-014 §2）。写法也只有这一种（`D-228`）：端口的往返三格
+//! 答的是「在途」，不答「已做」；旧视图 `turn_round` 已随 `turn` 端口删除。
 
 use symbio_core::{
     AppendError, Entity, Event, Store, Verb, Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY,
