@@ -463,7 +463,7 @@ where
     // 取数已经发生在应答那一侧（[`begin_model`] 的寄存槽）：桥只读一次。
     let round_facts = run.last_output_facts.clone();
 
-    // 2a. 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**：
+    // 本轮不再请求工具 ⇒ 该收束了。**不在这里落收束格**：
     //     `close-turn` 行的前件（`turn.closeable`）此刻已经在日志上，派发器下一步
     //     就会选中它，把收束交给 `closer` 执行体。
     if classify_round(&rt, has_dispatch) == RoundDecision::Halt {
@@ -474,7 +474,7 @@ where
         return Ok(ModelRound::Close);
     }
 
-    // 2b. 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置缺口**
+    // 模型请求了工具 ⇒ 寄存。没有分发方却收到工具调用是**配置缺口**
     //     （无工具轮不该出现工具调用），按失败诚实回报。
     //
     //     这一格**就地落**（不走收束动作）：工具批开不出来这件事在日志上没有
@@ -781,8 +781,8 @@ pub(crate) async fn land_round(
 
 /// 一批工具的结果**落地**：产物格、等待进展、交换累加、轮内注入。
 ///
-/// 2c–2f 那四段从 [`dispatch_round`] 里原样搬过来——它们的写点在「结果已经在手上」
-/// 之后，与「派出去」那一刻无关，所以归收尾半。
+/// 四段的写点都在「结果已经在手上」之后，与「派出去」那一刻无关，所以归收尾半
+/// （`await-tools` 那一行的动作，§4.1）。
 async fn land_batch(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
@@ -790,10 +790,10 @@ async fn land_batch(
     rt: LlmTurn,
     outcomes: Vec<super::super::tool_dispatch::DispatchOutcome>,
 ) -> Result<(), symbio_core::AppendError> {
-    // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
+    // 产物落格：每条工具结果一格，溯源指向本轮用户格。
     batch::land_artifacts(run, store, &outcomes).await?;
 
-    // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
+    // 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
     //     说过的话照样是事实，等待是状态），不收束轮次。
     if outcomes.iter().any(|o| o.needs_user_action) {
         // 模型轮：正文归那一轮的 `response` 事实（`responses` 回溯得到），这里只
@@ -854,12 +854,12 @@ async fn land_batch(
         return Ok(());
     }
 
-    // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
+    // 把这一轮交换**累加**进 prompt，继续下一轮。
     run.exchange
         .extend(tool_exchange_messages(&rt, &outcomes, run.tool_round));
     run.tool_round += 1;
 
-    // 2f. 轮内注入（生产里是「用户中途补充」）。挂在 2e 之后：工具交换
+    // 轮内注入（生产里是「用户中途补充」）。挂在交换之后：工具交换
     // 先接上，注入的内容排在它之后——时间序。
     if let Some(inject) = &run.inject {
         let injected = inject(Some(run.user_seq)).await;
@@ -868,7 +868,7 @@ async fn land_batch(
     Ok(())
 }
 
-/// 2a 收束：答话 / 空答兜底 / 写侧闸拒。
+/// 收束：答话 / 空答兜底 / 写侧闸拒。
 async fn halt<S>(
     run: &mut Prepared,
     store: &S,

@@ -1477,7 +1477,7 @@ mod tool_round_tests {
     ///
     /// ## 反向自检
     ///
-    /// 把 2f 那两行（`if let Some(inject) = &inject { exchange.extend(inject()); }`）
+    /// 把 `land_batch` 里那两行注入（`if let Some(inject) = &inject { exchange.extend(inject()); }`）
     /// 删掉，本用例必红。
     #[tokio::test]
     async fn injected_messages_reach_the_next_request_of_the_same_turn() {
@@ -4948,9 +4948,9 @@ mod denial_fact_tests {
 
 // ── 纯决策与答话取值（DE-014 步骤 1）─────────────────────────────────────
 //
-// 这两个函数是 768 行环体里**唯一可脱离 store / sink 单测**的部分：决策只看
+// 这两个函数是环体里**唯一可脱离 store / sink 单测**的部分：决策只看
 // 「有没有工具调用 + 有没有分发通道」，答话取值只看「正文 / 截断 / 两处思考」。
-// 钉住它们，步骤 1 剩下的就只是执行段搬家（见 `crates/symbio-plugin-session/src/docs/103-turn-runner-steps.md`）。
+// 钉住它们，执行段搬家就只剩位置变化。
 
 mod round_decision_tests {
     use super::super::{classify_round, final_answer, RoundDecision, StreamNodeFacts};

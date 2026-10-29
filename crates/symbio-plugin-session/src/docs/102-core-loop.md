@@ -10,8 +10,7 @@ impl: done
 # 会话核心循环（LLM × 工具）
 
 > **目标形状**见 [DE-001 §4.3 / §4.4](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
-> 与 [DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环")；
-> 迁移路径见 [DE-090](../../../../docs/003-design/090-过渡方案.md "DE-090-过渡方案")。
+> 与 [DE-015](../../../../docs/003-design/015-义务环.md "DE-015-义务环")。
 > 本文只写**当前实现**，不复述目标裁决。
 >
 > 范围：主循环本体住在 `crates/symbio-plugin-loop/src/`（驱动器插件）；一轮的**装配与收尾**
@@ -33,7 +32,8 @@ impl: done
 （`turn_next_round`），不由任何返回值决定——再开一段是一笔 `continue-turn` 债（`D-222` 裁决 2），
 由同一个环按 `prio` 选中；那一行的出口（新落的 `round` 格）同时就是下一幕的锚与 `now`
 （判据 12：一幕一个锚）。控制面因此只有一个 `loop {`（`D-222` 裁决 5 / 判据 8）。
-工具循环在 v2 运行器内部（`TurnRunner::run_with_tools`），不在控制面环里（见 §4.1）。
+模型往返与工具批次**也是这张表上的行**（`announce-model` → `dispatch-model` → `await-model`，
+`open-tools` → `authorize-tool` → `dispatch-tools` → `await-tools`），幕内没有第二段小循环（§4.1）。
 
 五个收口点 + 一个状态容器（§2）：
 
@@ -69,7 +69,7 @@ impl: done
  + auto_compress_process / retry_compaction / compress_with_snapshot_core context/pipeline.rs
  + 会话侧读写经动作面 session_port.rs
 ④ 单轮执行层 turn_exec::execute_turn turn_exec.rs
- + TurnRunner::run_with_tools turn_runner.rs（工具循环在这里）
+ + turn_runner/{prepare,stream,batch,boundary,settle}（各行的执行体动作在这里）turn_runner/
  + SessionDispatchPort::dispatch tool_dispatch.rs（三动作：open / authorize / dispatch）
  + process_tool_calls_async tools/tool_executor.rs
 ```
@@ -140,8 +140,8 @@ impl: done
  内核 `compress_with_snapshot_core` 是唯一实现。
 - **提示词与工具**必须同机制、同时机收集：两者都经 `Registry`（收集口）注册、经 `traverse`
  汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
-- **「不完整不唤醒」由运行器环体守住**：一个批次的结果全部接进 `exchange` 之后才发
- 下一次请求（§4.1），不在闸门里判在途工具。
+- **「不完整不唤醒」由行表的前件守住**：下一笔 `announce-model` 只在上一批结果全部接进
+  `exchange` 之后才成立（§4.1），不在闸门里判在途工具。
 - **工具执行**归第二步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort`
  分发）；`persist_turn` 只做「增量落库 + 截断告警」，不承担工具执行（见 §4.1）。
 - **流向不由返回值决定**（`D-222` 裁决 2）：幕停下之后是收工还是再开一幕，读的是
@@ -169,8 +169,8 @@ fn gate_turn(turn: &TurnState) -> Gate
 代码路径往那个集合登记 id ⇒ 恒空 ⇒ 恒放行，于是这一态与它的簿记一起退场
 （裁决与被删符号名册见 [D-073](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 
-「不完整不唤醒」没有废弃，它换了承担者：**环体只在把本批结果接进 `exchange` 之后才发下一次
-请求**（`turn_runner.rs` 2e）。因此——
+「不完整不唤醒」没有废弃，它换了承担者：**结果接进 `exchange` 之后才可能开出下一笔
+`announce-model`**（`await-tools` 那一行的出口，§4.1）。因此——
 
 > ⚠️ **「历史中所有 ToolCall 都有结果子节点」从来不是判据**：**「ToolCall 无结果」在本代码库是
 > 合法状态**（交互模式审批中断时本批剩余 ToolCall 有意留空，由请求视图层 `flatten_chat_messages`
@@ -187,9 +187,9 @@ fn gate_turn(turn: &TurnState) -> Gate
  在发第一个请求前落中止收束格（`abort_before_first_request`），不是闸门；推理前后
  （在途 Turn 尚未定稿）的中止才走 `TurnExit::Aborted`。
 
-> 闸门**不判工具轮数**：`max_tool_rounds` 那条软上限整条退役——它判的是一个恒 0 的计数（§4.1；
-> 裁决与逐符号名册见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。**真要这道上限，
-> 位置在 §4.1 的 2e（结果接进 `exchange`）与 2f（轮内注入）之间**：那里有真实的 `tool_round`，
+> 闸门**不判工具轮数**：`max_tool_rounds` 那条软上限整条退役——它判的是 `TurnState` 上一个
+> 恒 0 的计数（§4.1；裁决与逐符号名册见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。**真要这道上限，
+> 位置在 `await-tools` 收尾之后、下一次 `announce-model` 开账之前**：那里有真实的 `tool_round`，
 > 而要新写的不只是判定，还有「到上限时这一批怎么收」的收束语义。
 
 ### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `collect_reads` + `prepare_request_sections`
@@ -397,40 +397,42 @@ pub async fn run_chat_loop(
 
 ## 4. 工具执行与批次边界
 
-### 4.1 当前执行模型：运行器内部的串行工具循环
+### 4.1 当前执行模型：往返与工具批次都是行上的债
 
-工具在 **`execute_turn` 内部**执行，不在 `persist_turn` 里：
+**幕内没有第二段循环。** 一次「请求 → 工具批 → 再请求」的接力由同一张表上的行完成，
+每圈一笔债、一个执行体（§1.2 的幕内段）：
 
 ```text
-execute_turn
- └─ TurnRunner::run_with_tools(store, llm, tok, input, sink, tools, dispatch)
- ├─ 落 u-{turn}（opened）
- ├─ loop:
- │ ├─ generate_turn（adapter → provider → SSE → 流式帧）
- │ ├─ 无 tool_calls ⇒ 落 f-{turn}（closed）并返回
- │ ├─ 有 tool_calls ⇒ dispatch.dispatch(&turn)
- │ │ └─ process_tool_calls_async：**顺序 await** 每个工具
- │ │ └─ execute_tool_async → 能力表 invoke / 容器 route
- │ ├─ 每条结果落 a-{turn}-{n}；待用户则落 p-{turn}-{n} 并返回
- │ └─ 交换累加进 prompt（结构化 tool 消息）→ 下一轮
- └─ 返回 TurnOutcome（text / usage / finish / aborted / awaits_user）
+announce-model  60  宣布一笔往返：落 request(port=model)
+dispatch-model  66  relay 执行体派出这一笔，落 sent
+await-model     71  waiter 执行体等应答，落 response / failed
+open-tools      67  按响应里的 calls 逐条落 request(port=tool)
+authorize-tool   0  逐笔判权限：落 authz.granted / authz.denied
+dispatch-tools  68  courier 执行体放行的落 sent
+deny-tools      69  被拒的落 failed（收束格拒绝）
+await-tools     72  批次收尾：产物格 / 等待进展格 / 交换累加 / 轮内注入
 ```
 
-本批工具全部跑完才回到 `generate_turn`：**「不完整不唤醒」由这条环体守住**——
-结果没接进 `exchange` 就没有下一次请求，主循环侧因此不需要一份在途工具集合（§2.1）。
-`chat_loop` 回到闸门时本轮早已跑完整批，那里只剩「要不要停」可判。
+**「不完整不唤醒」由表本身守住**：下一笔 `announce-model` 的前件是视图 `next_round_trip`，
+而它只在上一批的交换都接进 `exchange` 之后才成立（`await-tools` 的出口）——结果没接进
+`exchange` 就没有下一次请求，主循环侧因此不需要一份在途工具集合（§2.1）。
+
+阶段实现按 `turn_runner/` 切六件：`prepare`（草稿与提示词）→ `stream`（一次往返、批次收尾）→
+`batch`（产物格）→ `boundary`（`classify_round` / `final_answer` 两个纯函数）→
+`settle`（收束格：final / fallback / exhausted / aborted）→ `facts`（共享的视图读取）。
+阶段之间只传 `Prepared`，不传第二份事实。
 
 **这里数的是请求，不是工具轮。** `TurnState` 上那一格叫 `request_round`（本轮已发出的 LLM 请求数，
 续写时才 +1）；工具轮数从**已落事实**折出：本幕带非空 `calls` 的 `response(port=model)` 条数
-（[`report_due`](../../../symbio-core/src/decl/mod.rs) v6 的 `tool_rounds`，与本节环体的 `tool_round`
-同一个读数——后者是环内的活计数器，前者的写方就是模型应答本身）。静默时长与配额同样由
+（[`report_due`](../../../symbio-core/src/decl/mod.rs) v6 的 `tool_rounds`，与 `Prepared` 里的活计数器
+`tool_round` 同一个读数——前者的写方就是模型应答本身）。静默时长与配额同样由
 `report_due` 算出，四格一起构成汇报行的 `due`。**按工具轮写的判据在这一层恒假**，而这类旋钮的默认值恰好也是「不限制」——
 恒假与没配长得一样，没有信号能区分（裁决见 [D-074](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")；
 fade 判定归 该批）。
 
 `persist_turn` 里**没有**工具分发路径：v1 外壳那段 `process_tool_calls_async` 分支的进入条件
 （`TurnOutput.tool_calls` 非空）在 v2 恒不成立，随 [DE-014 步骤 5](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 删除；
-`persist_turn` 只读 `ModelFinishReason`，工具的真实执行点只有上面那条循环。
+`persist_turn` 只读 `ModelFinishReason`，工具的真实执行点只有 `await-tools` 那一行接的批次。
 
 ### 4.2 必须保留的语义
 

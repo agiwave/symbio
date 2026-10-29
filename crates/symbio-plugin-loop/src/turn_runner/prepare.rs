@@ -384,8 +384,8 @@ where
     let last_answer_id = String::new();
 
     // 唤醒幕（审批 / 问答恢复）**不在这里续写交换**：用户动作落成唤醒请求
-    // （`chat_loop::wake`），授权与派发由行表承担，工具交换由派发动作自己产生
-    // （`stream::dispatch_round`）——本段不再私自拼一段 prompt。
+    // （`chat_loop::wake`），授权与派发由行表承担，工具交换由批尾收尾自己产生
+    // （`stream::land_batch`）——本段不再私自拼一段 prompt。
 
     // 1c. **闸门与首请求之间的中止**（D-052 决策 1）不在这里判：它成了环的第一道守卫
     // （`turn_exec::drive` 首圈）。草稿先建好、把信号存进去，**被中止的幕因此也不再跑
