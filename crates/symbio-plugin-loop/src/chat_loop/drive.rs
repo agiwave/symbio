@@ -57,7 +57,7 @@ fn lease_tail(snapshot: &[symbio_core::Event]) -> &[symbio_core::Event] {
 /// 身份三格（`turn_no` / `user_seq` / `drive_seq`）**不在这里**：它们已经写进
 /// `TurnState`，是同一批值的第二份拷贝。「现在是哪一幕」只能有一个真源（`D-222`
 /// §二：幕是身份），而它已经在 `TurnState` 里（终态还要改成由事实折出）。
-/// 留在这里的只有用户发言：它不落进任何一格，而 `execute_turn` 要用它判技能命中。
+/// 留在这里的只有用户发言：它不落进任何一格，而 `turn_exec::drive` 要用它判技能命中。
 pub(crate) struct Drive {
     /// 本轮用户发言（来自最近一条用户消息节点；无用户消息 ⇒ 空串）。
     pub(crate) user_text: String,
@@ -88,7 +88,7 @@ fn last_user_message(
 /// 本轮用户发言（最近一条用户消息节点的正文；无用户消息 ⇒ 空串）。
 ///
 /// 同一轮的第二幕起用它：那一幕的唤醒格已由 `continue-turn` 落过，`begin_drive`
-/// 不再被调用，而执行体仍要按发言判技能命中（`execute_turn` 的输入）。
+/// 不再被调用，而执行体仍要按发言判技能命中（`turn_exec::drive` 的输入）。
 pub(crate) fn current_user_text(context: &super::state::SessionContext) -> String {
     last_user_message(context).1
 }

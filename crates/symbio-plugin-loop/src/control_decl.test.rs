@@ -843,7 +843,7 @@ fn turn_head_has_final_ignores_responses_from_an_earlier_drive() {
 
 #[test]
 fn turn_head_closeable_is_true_when_the_model_round_never_answered() {
-    // 步 5c：收束行的前件从「答完了」扩到「**模型没答成**」——
+    // 收束行的前件不只是「答完了」：**模型没答成**也算——
     // 中止与适配器失败这两条路没有「`calls` 为空的应答」（答都没答成，哪来应答），
     // `has_final` 因此不成立；但它们同样要把这一轮收掉，而收束格只由 `close`
     // 执行体写 ⇒ 行表得能从日志上判出「该收束了」。

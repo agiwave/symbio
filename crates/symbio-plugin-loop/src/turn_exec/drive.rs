@@ -703,7 +703,7 @@ async fn close_stage(
     let Driver::Control(control) = driver else {
         return Ok(CloseEnd::Running(Box::new(running)));
     };
-    // 阶段③④：归类（中止 / 授权拒 / 正常）与派生事实落格。借的是本轮状态里
+    // 归类（中止 / 授权拒 / 正常）与派生事实落格。借的是本轮状态里
     // 那两份读数（召回视图 / 技能观测），它们在幕内被填好、环收工之后才交得出来。
     let res = classify_and_persist(
         running,

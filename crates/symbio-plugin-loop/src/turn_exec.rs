@@ -111,9 +111,9 @@ use super::turn_runner::{TurnInput, TurnRunner, TurnSession, TurnSessionBegin};
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
 
-// —— 阶段拆分（· B2，DE-021 §5 动作 B2）——
-// `execute_turn` 的四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
-// （消费方与本文件测试都不必改引用）。阶段体是逐字搬移，本文件只留调度。
+// —— 阶段分层 ——
+// 四个处理阶段各自成文件；再导出保持 `turn_exec::*` 的既有路径不变
+// （消费方与本文件测试都不必改引用）。本文件只留调度与共享状态。
 mod assemble;
 mod call;
 mod drive;
@@ -955,7 +955,7 @@ pub(crate) fn run_finish_tools<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
-/// `close` 执行体：把寄存的那份**结局**落成收束格（/ 步 5c）。
+/// `close` 执行体：把寄存的那份**结局**落成收束格。
 ///
 /// 它跑不跑由**日志**说（`close-turn` 行的前件 = `turn.closeable`：答完了 **或**
 /// 模型没答成），不由草稿说：与 [`run_execute`] 的分工是「谁欠什么」在表里、

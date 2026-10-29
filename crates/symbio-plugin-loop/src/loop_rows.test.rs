@@ -1745,7 +1745,7 @@ fn a_tool_request_opens_authorization_and_both_answers_close_it() {
 
 #[test]
 fn a_denied_tool_call_owes_a_close_only() {
-    // 步 5b：`dispatch-tools` 只欠 `granted`——一批全被拒时它不欠，若不另立
+    // `dispatch-tools` 只欠 `granted`——一批全被拒时它不欠，若不另立
     // 一行，`failed{why}` 永不落，`request` 那笔账也永远不关。
     let refused = vec![tool_request("c-1"), tool_denied("c-1")];
     assert!(
@@ -2092,7 +2092,7 @@ fn close_row_owes_only_after_an_answer_without_calls() {
     landed.push(ev(1, "chat.assistant.final", json!({ "text": "答完了" })));
     assert!(!owes("close-turn", &landed, 0), "`final` 命中出口 ⇒ 关门");
 
-    // 兜底格也在出口里（步 5c 复原 DE-015 §3.1 的 `final | fallback`：两个执行体写的
+    // 兜底格也在出口里（DE-015 §3.1 的 `final | fallback`：两个执行体写的
     // 格不相交之后，环没了，出口可以照方案写全）⇒ 命中即关门。
     let mut fell_back = answered;
     fell_back.push(ev(
@@ -2561,7 +2561,7 @@ fn writes_closed_admits_declared_and_protocol_only() {
         !next.writes_closed("chat.assistant.fallback"),
         "兜底格由 relay 写（D-166），execute 的窗口里没有这一笔"
     );
-    // 收束格归 `close` 执行体（步 5c）⇒ `execute` 写它就是越界。
+    // 收束格归 `close` 执行体 ⇒ `execute` 写它就是越界。
     assert!(
         !next.writes_closed("chat.assistant.final"),
         "收束格不在 `execute` 的名单里——两个执行体写同一批格会让依赖图成环"
@@ -2666,11 +2666,10 @@ fn the_overlap_report_on_the_production_table() {
         .iter()
         .map(|o| (o.rows[0], o.rows[1], o.facts.as_slice()))
         .collect();
-    // `turn_head` 自 步 5 起多读两类格（`has_final` 的前件：模型响应的
-    // `calls` + 两条收束格），步 5b 又加了 `failed`（`tools_open` 的另一种终局），
-    // 步 5d 再给 `tools_open` 补了请求面（`request`），v11 又给 `model_open` 补了
-    // 派发前格（`sent`），v14（`D-222` 订正 2）再补往返的第三条终局 `retry`
-    // （`model_open` 的关账格从 `sent` 挪到终局三格）——凡是共用这个幕头的相交对，
+    // `turn_head` 读两类格：`has_final` 的前件（模型响应的 `calls` + 两条收束格）
+    // 与两条在途判据的关账格——`tools_open` 含 `failed`（除 `request` 外的另一种终局）
+    // 与请求面 `request`；`model_open` 含派发前格 `sent` 与往返的第三条终局 `retry`
+    // （`model_open` 的关账格是终局三格，不是 `sent`）。凡是共用这个幕头的相交对，
     // 名单就一起变宽，这正是第 4 条要「点名而不只报非空」的理由。
     let head: &[&str] = &[
         "chat.assistant.fallback",

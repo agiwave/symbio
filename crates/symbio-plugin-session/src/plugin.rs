@@ -449,7 +449,7 @@ impl Plugin for SessionPlugin {
         // 「算出一份 Data 载荷再统一包信封」的路径了——会话与消息的数据面
         // 全在 VDFS 上，这里只剩编排 / 控制。
         //
-        // `chat/send` / `chat/abort` 已于 步② 退役：输入面双轨（inbox 地址
+        // `chat/send` / `chat/abort` 已随 D-066 退役：输入面双轨（inbox 地址
         // 写入 vs 两条全局路由）收为单轨，全部消费方改走地址面——
         // 发消息 = `vdfs/write <会话地址>/inbox`，恢复 = `action(<消息地址>, <动作词>)`，
         // 中止 = `action(<会话地址>, "abort")`。裁决见 D-066。

@@ -373,7 +373,7 @@ impl symbio_core::Capability for AgentRunCapability {
 
         // ── 发起这一轮：发消息 = 写收件箱；恢复 = 对目标消息做动作 ──
         //
-        // `session/chat/send` 已随输入面双轨退役（[D-066] / 步②）。进程内入队
+        // `session/chat/send` 已随输入面双轨退役（[D-066]）。进程内入队
         // 从此只剩**会话自己**那两条内部路径（收件箱写臂与它调的自主开轮）；一切跨作用域
         // 的写者——本工具建的子会话、CLI、telegram、心跳调度插件——都写地址面，
         // 因为它们都不持有（也不该持有）那个 `SessionPlugin` 实例。

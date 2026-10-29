@@ -1,5 +1,4 @@
-//! 阶段②「逐条执行」——`process_tool_calls_async` 三段拆分的第二段
-//! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! ②「逐条执行」。
 //!
 //! 一条顺序流程的中间段：对批内每条调用依序过「协议校验 → 同参台账 → 参数解析 →
 //! 超限丢弃 → 宿主闸（外部执行）→ 声明闸（能力包自己的 `before`）→ Pre 钩子 →
@@ -803,7 +802,7 @@ fn interaction_blocked(parent_updates: &[ChatNode]) -> bool {
         .unwrap_or(false)
 }
 
-/// 处理一批工具调用（阶段②）：准备 → 执行（只读并行）→ 按调用顺序收口。
+/// 处理一批工具调用：准备 → 执行（只读并行）→ 按调用顺序收口。
 ///
 /// 顺序保证与串行时逐项相同：
 /// - **结果批序**：工具结果子节点与父节点终态按调用顺序收口（[`flush_one`]）；
@@ -839,7 +838,7 @@ pub(crate) async fn run_batch(
     let principal = symbio_core::principal::Principal::from_legacy(
         &symbio_core::request_principal(ctx.as_ref()),
     );
-    // 阶段①的读数按本段原变量名接线——判据结构因此与拆分前一致。
+    // 批首读数按本段变量名接线——判据结构只依赖读数，不依赖读数来自哪一段。
     let mode = readings.mode.as_str();
     let gate_started = readings.gate_started;
     let breaker = &readings.breaker;
@@ -1031,7 +1030,7 @@ pub(crate) async fn run_batch(
     }
 
     // 中止 / 交互中断时仍在途的调用：按序收口（它们各自经 [`execute_tool_async`]
-    // 的中止臂返回「被用户中止」的结果），未启动的由阶段③补终态。
+    // 的中止臂返回「被用户中止」的结果），未启动的由未执行收口补终态。
     flush_all(
         &mut inflight,
         &mut order,

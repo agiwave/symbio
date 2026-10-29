@@ -77,21 +77,18 @@ pub(crate) async fn settle_reasoning(
 /// （`begin_drive` 落的，`turn_head.round` 读的也是它）——两个读法同一个数，
 /// 上界那一条因此共用 [`super::super::loop_rows::has_next_round`]。
 ///
-/// ## 工具执行与主动压缩拦截不在这里（已随 DE-014 步骤 5 退役）
+/// ## 工具执行与主动压缩拦截不在这里
 ///
-/// 工具由 v2 运行器在 `turn_exec::execute_turn` 内部经 `SessionDispatchPort` 跑完、
-/// 副作用直落事实。v1 外壳在这里有一段「工具分发 + `context_compact` 拦截」分支，
-/// 其进入条件（`TurnOutput.tool_calls` 非空）在 v2 恒不成立——生产与测试都不可达，
-/// 随外壳删除（[DE-014 步骤 5a](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")，
-/// 其中 `context_compact` 那一条链的裁决见 [D-072](../../../symbio-plugin-session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")）；
-/// 真实时序见 `turn_exec` / `turn_runner` 的模块文档。
+/// 工具由运行器在 `turn_exec::drive` 内部经 `SessionDispatchPort` 跑完、
+/// 副作用直落事实；`context_compact` 的拦截也已退役（[D-072](../../../symbio-plugin-session/README.md#d-072-context_compact-工具与-55-水位提醒一并退役压缩只剩一个入口 "crates/symbio-plugin-session/src/README")），
+/// 压缩只剩一个入口。真实时序见 `turn_exec` / `turn_runner` 的模块文档。
 pub(crate) async fn persist_turn(
     sink: &ExecEventSink,
     context: &mut SessionContext,
     turn: &mut TurnState,
     finish: ModelFinishReason,
 ) {
-    // 本轮无工具调用（既定事实：工具在 execute_turn 内跑完，回到这里只可能是纯答话）。
+    // 本轮无工具调用（既定事实：工具在 `turn_exec::drive` 内跑完，回到这里只可能是纯答话）。
     // 「工具参数被截断」不在此处处理：那条路径由 `tools/tool_executor.rs` 的
     // `parse_error` 分支承担（拒绝执行 + 以协议错误回报模型），比这里补一句
     // 面向用户的告警更靠前、信息量更大。

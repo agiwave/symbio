@@ -71,7 +71,7 @@ use symbio_plugin_api::events::{
 use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
 /// 这张表里**接了线的执行体**：`execute`（宣布一次模型往返）、`close`（收束）、
-/// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、`relay` / `waiter`
+/// `opener` / `authorizer` / `courier`（工具批三笔债）、`relay` / `waiter`
 /// （模型往返的派出与收回）、轮首那四条 `classify` / `compress` / `recall` /
 /// `reflex`、接缝 `seam`，以及 `report`——**一张表就是全部**（`D-222` 裁决 5），
 /// 它们借的 `Ctx` 面不同，名字面上没有任何区别。
@@ -282,7 +282,7 @@ const ACTOR_RELAY: ActorDecl = ActorDecl {
     writes: &[EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_AUTHZ_DENIED],
 };
 
-/// 收束执行体（步 5c 起在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
+/// 收束执行体（在**执行体之间**独占收束格）：它不调模型，只把寄存的那一次
 /// 模型往返的**结局**落成收束格。
 /// 「独占」说的是**执行体之间**：两个执行体写同一批格 ⇒ 依赖图成环（`close → execute`
 /// 与 `execute → close`），表装不上（DE-015 §3.4 第 1 条）——所以收束格只能归一个执行体。
@@ -875,7 +875,7 @@ pub(crate) static ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // ── 收束（/ 步 5c）────────────────────────────────────────
+    // ── 收束 ─────────────────────────────────────────
     //
     // 「这一轮该收束了、还没入格」是一笔独立的账：前件是日志上的 `turn.closeable`
     // （`has_final`〔本幕最近一条 `response(port=model)` 的 `calls` 为空 ∧ 本幕未收束，
@@ -884,15 +884,14 @@ pub(crate) static ROWS: &[Decl] = &[
     // 它排在 `announce-model` **之前**（55 < 60）：应答一落地，下一个该还的债就是入格，
     // 而不是再跑一次模型往返——两行在同一切片上竞争，`drive` 取最小的一笔。
     //
-    // ## 出口是 `final | fallback`（DE-015 §3.1 的字面形状，步 5c 复原）
+    // ## 出口是 `final | fallback`（DE-015 §3.1 的字面形状）
     //
-    // 步 5 第一批照抄 §3.1 装不上表：`announce-model` 与 `close-turn` 共用同一个出口
-    // 事实集时，两个执行体互为对方的出口写方（`execute` 写错误路径的 `fallback`，
-    // `close` 写 `final`），依赖图于是有 `close → execute` 与 `execute → close` 两条边
-    // ——两节点环，装载红。环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是
-    // 字节判据面，改它要挂 ADR。
+    // 两个字面形状不能共用同一个出口事实集：那样 `announce-model` 与 `close-turn`
+    // 会互为对方的出口写方（`execute` 写错误路径的 `fallback`，`close` 写 `final`），
+    // 依赖图于是有 `close → execute` 与 `execute → close` 两条边——两节点环，装载红。
+    // 环本身是**假阳性**（收束一旦入格两行同时关门），但第 1 条是字节判据面。
     //
-    // 步 5c 断环的方式是**让两个执行体写的格不相交**，不是改判据：收束格
+    // 断环的方式是**让两个执行体写的格不相交**，不是改判据：收束格
     // （`final` 与 `fallback`）全部归 `close` 执行体——`execute` 那一步只跑模型往返，
     // 收束格由 `close-turn` 行的执行体落（中止 / 适配器失败两条路径的收束格因此
     // 从执行体内部挪到了收束动作里）。断环之后 `close-turn` 没有出边（只有 `close`

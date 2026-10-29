@@ -1,16 +1,13 @@
-//! 阶段④ 落格 + 定稿答话轮的独立入口（· B2，DE-021 §5 动作 B2）。
+//! 落格 + 定稿答话轮的独立入口。
 //!
-//! [`persist_turn`] 是 `execute_turn` 的末段：派生事实（承诺 / 任务表 / 熔断 /
+//! [`persist_turn`] 是一轮执行的末段：派生事实（承诺 / 任务表 / 熔断 /
 //! 淘汰 / 记忆）落格、兜底结局上抛、折进的补充并入落库镜像。
 //! [`execute_final_reply_turn`] 是同族入口（它自己就是一段最短的「装配→运行→落格」），
-//! 本批随判据 4（单文件 ≤800 行）逐字搬入，路径经 `turn_exec.rs` 的再导出保持不变。
-//!
-//! **纯结构拆分契约**：两段体内自 `turn_exec.rs` 逐字搬移；跨模块引用仅做
-//! `super::` → `super::super::` 两跳改写与文档链接深度修正。
+//! 路径经 `turn_exec.rs` 的再导出保持不变。
 
 use super::*;
 
-/// 一轮的执行（阶段④）：落格——消费 [`Settled`]，产本轮的最终结果。
+/// 一轮的执行之末：落格——消费 [`Settled`]，产本轮的最终结果。
 pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let Settled {
         session,

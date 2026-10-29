@@ -5,7 +5,7 @@
 //! - `tool_executor` —— 执行编排：单工具路由与执行（`execute_tool_async`）、
 //!   批量分发与结果广播（`process_tool_calls_async`）。它是工具结果节点的
 //!   **唯一写入者**，也是编排层与上下文治理层取用工具机制的入口。
-//! - `dispatch` —— `process_tool_calls_async` 的**阶段拆分层**（/ DE-021 §5 动作 B）：
+//! - `dispatch` —— `process_tool_calls_async` 的**执行阶段分层**：
 //!   ① 批首闸门读数 ② 逐条执行 ③ 未执行收口；编排入口仍是 `tool_executor` 里同名函数，
 //!   本层只是它的三段落点，不改门面。收口段（`unfinished`）同时是「没跑到」的
 //!   **成因词表**（`ABORTED` / `NOT_EXECUTED`）与结果子节点的落法所在。

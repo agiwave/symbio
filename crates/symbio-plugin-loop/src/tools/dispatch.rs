@@ -1,7 +1,6 @@
-//! `process_tool_calls_async` 的**阶段拆分层**（/ [DE-021 §5 动作 B](../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分") B1）。
+//! 工具批执行的**阶段分层**。
 //!
-//! 三个巨型函数按**处理阶段**（不按职责）拆分，本层是第一批 `process_tool_calls_async`
-//! （原 714 行单体）的三段落点：
+//! 三个函数按**处理阶段**（不按职责）分开：
 //!
 //! - [`gates`] —— ① 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 /
 //!   本批留底 / 同参台账，一次读齐给整批复用（产出 [`gates::GateReadings`]）。
@@ -9,11 +8,8 @@
 //!   声明闸拒止、钩子拦下与正常执行四条出口。
 //! - [`unfinished`] —— ③ 未执行收口：本批没跑到的调用统一补父节点终态与结果子节点。
 //!
-//! 编排入口仍是 `tool_executor::process_tool_calls_async`
-//! （签名与 `tools` 门面不变），它只做：空批早退 → ① → ② → ③。
-//!
-//! **纯结构拆分纪律**（DE-021 §5 纪律 2）：三段代码逐字来自拆分前的单体函数体，
-//! 拆分批次内 `if` 条件零变化；段间只传值（[`gates::GateReadings`] 与出参
+//! 编排入口是 [`crate::tools::tool_executor::process_tool_calls_async`]：
+//! 空批早退 → ① → ② → ③。段间只传值（[`gates::GateReadings`] 与出参
 //! `effects` / `breaks`）。
 //!
 //! 每段一条判据（纪律 3，「这段错了谁会红」）：
@@ -46,7 +42,7 @@ use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use {symbio_core::plugin_error, symbio_core::plugin_info, symbio_core::plugin_warn};
 
 pub(crate) use self::gates::GateReadings;
-// 闸门表与拒止骨架：阶段②按 `first_refusal` 判、经 `refuse` 收口。
+// 闸门表与拒止骨架：逐条执行段按 `first_refusal` 判、经 `refuse` 收口。
 pub(crate) use self::gates::{first_refusal, refuse, GateContext, Refusal};
 // 批内执行策略：风险档 → 并行/串行，映射单点在 `parallel::policy_for_risk`。
 pub(crate) use self::parallel::{policy_for_port, ExecPolicy, ToolRisks};

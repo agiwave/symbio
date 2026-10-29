@@ -513,7 +513,7 @@ fn config_of(events: &[Event], turn: u64) -> Option<&Event> {
 ///
 /// 轮号跟着**最新幕锚**走，而不是取切片里最大的轮号：恢复一条被后续轮次归档
 /// 的旧轮时，切片从旧轮首条事件一直延伸到今天，最大轮号指向新轮——旧轮的恢复幕
-/// 在表头里根本看不见（这正是 `resume_anchor` 旁路存在的原因， 步 5d）。
+/// 在表头里根本看不见（这正是 `resume_anchor` 旁路存在的原因）。
 /// 恢复幕的 `turn.stage{stage:"resume"}` 是开演时刚落的，`ts` 比任何既有轮次都新，
 /// 按 `(ts, seq)` 取最后一条幕锚即可让表头回到被续写的那一轮。
 ///
@@ -600,7 +600,7 @@ fn close_mark(events: &[Event], turn: u64, anchor_seq: u64) -> Option<&Event> {
         .max_by_key(|e| seq_of(e))
 }
 
-/// 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件全在这一格里，
+/// 轮头（v6）：五个策略行的开账条件全在这一格里，
 /// 收束行与执行行也是。
 ///
 /// `done` 三格按幕锚折叠（续写幕复用轮号，不能按轮扫全史）；`skill_hit` 取本幕
@@ -1303,7 +1303,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         cost: 4096,
         eval: stale_sent,
     },
-    // 轮头（升到 v5，步 5d 升到 v6）：五个策略行的开账条件 +
+    // 轮头（v6）：五个策略行的开账条件 +
     // `close-turn` / `announce-model` 的开账条件。
     //
     // v3 → v4 只加一格：`has_final`（口径见 [`turn_head`]）。它是收束行的**前件**，

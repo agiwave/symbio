@@ -130,17 +130,17 @@ pub(crate) struct SessionContext {
     ///
     /// `session.consolidated` 是**事实**，而事实只能由持写者令牌的一方落格
     /// （[`symbio_plugin_session::store::EventWalStore`] 的单写者闸门）。压缩跑在
-    /// 接缝（`run_seam` 那一行），而它**不持**令牌——令牌在 `execute_turn`
-    /// （步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
+    /// 接缝（`run_seam` 那一行），而它**不持**令牌——令牌在 `turn_exec::drive`
+    /// 里随 WAL 打开而取。所以在压缩现场落格会拿到
     /// `NotTheWriter`，而那是**静默**的：压缩照常生效、界面照常变短，只有事实源里
     /// 少了一条事件（于是切源之后压缩在重建面上等于没发生过）。
     ///
-    /// 于是压缩把「压成了什么」寄存在这里，由下一个 `execute_turn` 落格并归档
+    /// 于是压缩把「压成了什么」寄存在这里，由 `turn_exec::drive` 落格并归档
     /// （见 `turn_exec::consolidate_into_wal`）。寄存而不是就地落格，是**唯一**能同时
     /// 满足「事实必须落格」与「落格必须持令牌」两条约束的形态。
     ///
     /// 幂等由落格那一侧保证（与 WAL 里最近一份快照逐 id 比对）：同一轮里
-    /// `execute_turn` 可能被调多次，而压缩只发生一次。
+    /// `drive` 可能被调多次，而压缩只发生一次。
     pub consolidated: Option<Vec<ChatNode>>,
 }
 
@@ -262,7 +262,7 @@ pub(crate) struct TurnState {
     pub(crate) context_sections: Vec<symbio_plugin_api::ContextSection>,
     /// 本轮**对话面开场白**正文：`Escalate` 首响。
     ///
-    /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`
+    /// 由轮首判决执行体的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `turn_exec::drive`
     /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
     /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 turn_exec）。
     /// `None` = 本轮没有开场白（常态）。

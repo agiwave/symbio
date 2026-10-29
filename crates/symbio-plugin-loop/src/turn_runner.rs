@@ -39,7 +39,7 @@ use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
 };
 
-// ── 阶段拆分层（· B3，DE-021 §5 动作 B）──────────────────────────
+// ── 阶段分层 ──────────────────────────────────────
 // 逐步过程按阶段切：准备 → 请求 / 流式 → 工具批 → 轮边界 → 收束。
 // 阶段之间只传 [`prepare::Prepared`]，不传第二份事实。
 mod batch;
@@ -698,7 +698,7 @@ impl TurnSession {
     /// `chat.assistant.fallback`、中止也落 `chat.assistant.final`（中止是**状态**，
     /// 不是另一种事实）；产出寄存在草稿。
     ///
-    /// 它是 `close-turn` 行的动作（/ 步 5c）。跑不跑这一步由**日志**
+    /// 它是 `close-turn` 行的动作。跑不跑这一步由**日志**
     /// 决定（`turn.closeable`），不由这里决定；没有寄存时它不做任何事，派发器的
     /// 「无进展」判据会把那种收错账的形态显形。
     pub(crate) async fn close<S>(

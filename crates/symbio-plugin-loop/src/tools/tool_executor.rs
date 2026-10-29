@@ -546,7 +546,7 @@ pub async fn process_tool_calls_async(
     // 不得产生任何事件，两种拒绝在事件面上必须分得开。
     breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatNode>, Vec<ChatNode>) {
-    // ① 批首闸门读数（阶段拆分见 `dispatch/{gates,batch,unfinished}`， / DE-021 §5 动作 B）。
+    // ① 批首闸门读数（阶段见 `dispatch/{gates,batch,unfinished}`）。
     //    空批不读闸门、不发日志——与拆分前的早退位置逐字一致。
     if tool_calls.is_empty() {
         return (Vec::new(), Vec::new());

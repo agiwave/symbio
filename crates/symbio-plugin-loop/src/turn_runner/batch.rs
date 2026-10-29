@@ -1,4 +1,4 @@
-//! 阶段③ 工具批派发与产物落格（· B3，DE-021 §5 动作 B3）。
+//! 工具批派发与产物落格。
 //!
 //! 派发本身在 [`super::super::tool_dispatch::ToolDispatch`]（三动作契约）；本段只承接
 //! 回来的 [`DispatchOutcome`]：逐条过产物闸、落 `artifact.added`。等待用户 /
@@ -24,7 +24,7 @@ where
     // 本轮的中途产出（思考 / 正文）**不在产物格里**：它们属于这一轮的
     // `response(port=model)` 事实（`output_fields`），重建在**应答落格的位置**
     // 折出节点——顺序因此是实时的「思考→卡片→思考→卡片」，不会整体挪到全部
-    // 工具卡片之后（见拆分前 2c 的长注释）。
+    // 工具卡片之后（见 `stream` 中应答落格处的长注释）。
     for (oi, outcome) in outcomes.iter().enumerate() {
         // 产物闸（`ClosureKind::Artifact`，D-067）：不持 `produce.artifact` ⇒
         // 这条结果不入格（warn 一次，不刷屏）。结果照进 prompt / 照记

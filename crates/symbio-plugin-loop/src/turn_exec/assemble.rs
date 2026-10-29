@@ -1,7 +1,7 @@
-//! 阶段① 装配——一轮执行四段之首（· B2，DE-021 §5 动作 B2）。
+//! 装配——一轮执行四段之首。
 //!
 //! 拆交付包、取事实源、补落寄存变更、建收集器与流式桥（连同发射任务）、定主体与
-//! 来源主体——随后把一切装进 [`Assembled`] 原样交给阶段② [`super::call`]。
+//! 来源主体——随后把一切装进 [`Assembled`] 原样交给 [`super::call`]。
 //! 本段不产任何模型调用，也**不落任何「要等轮首那几行」的格**（压缩 / 档位 / 首响）：
 //! 那些是接缝的事，[`land_consolidation`] / [`land_seam`] 管。
 //!
@@ -46,7 +46,7 @@ pub(crate) struct Assembled {
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) presentation_tree: symbio_core::node_build::PresentationTree,
-    // —— 阶段① 的读数与构造 ——
+    // —— 装配的读数与构造 ——
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) turn_no: u64,
     pub(crate) user_seq: u64,
@@ -146,7 +146,7 @@ pub(crate) async fn land_seam(
     Ok(())
 }
 
-/// 一幕的幕首（阶段①）：装配，产 [`Assembled`] 与流式桥的发射任务。
+/// 一幕的幕首：装配，产 [`Assembled`] 与流式桥的发射任务。
 ///
 /// 发射任务的句柄**按值交回**而不是塞进 [`Assembled`]：它在幕末要被
 /// `classify_turn` 收干（见那一处），而 [`Assembled`] 要活到整幕收完——两样东西的
@@ -289,7 +289,7 @@ pub(crate) async fn assemble_turn(
 
     // 档位与两格事实**不在这里落**（`D-223` 订正 1 / 订正 2）：档位折自
     // `policy.reflex` 的出口格，开场白是判决行 `Escalate` 的首响——两者都要等轮首
-    // 那几行跑完。落点是接缝（[`land_seam`]），由阶段② 在 `begin` 之后调。
+    // 那几行跑完。落点是接缝（[`land_seam`]），由 [`super::call`] 在 `begin` 之后调。
     //
     // 本段（幕首）只做「不需要等那几行」的事：取事实源、补落寄存变更、建收集器与
     // 流式桥、定主体与来源主体。

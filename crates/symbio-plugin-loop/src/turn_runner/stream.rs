@@ -1,4 +1,4 @@
-//! 阶段② 请求 / 流式（· B3，DE-021 §5 动作 B3）。
+//! 模型往返与工具批的各个动作。
 //!
 //! 一次工具循环迭代：拼请求消息 → 调模型 → 按 [`classify_round`] 分流。
 //! 收束（`Halt`）与配置缺口（`ConfigGap`）在这里就地落格；派发（`Act`）把
@@ -279,7 +279,7 @@ pub(crate) enum ModelRound {
     /// 模型请求了工具；应答与节点事实已寄存在 `Prepared`，等 [`tool_round`]。
     Tools,
     /// 本轮该收束了；**结局**寄存在 [`Prepared::closing`]，落格归 `close-turn`
-    /// 行的执行体（/ 步 5c）。
+    /// 行的执行体。
     ///
     /// 三次收法共用这一个出口：答完了、模型没答成、中止——它们落的格子不同，
     /// 但**都是「这一轮该收了」**，而收束格只由 `close` 执行体写。
@@ -289,7 +289,7 @@ pub(crate) enum ModelRound {
     NoPending,
 }
 
-/// 阶段②a-0：为**下一次**模型往返开账（`request(port=model)`），把这一笔留在草稿里。
+/// 开账：为**下一次**模型往返落 `request(port=model)`（`request(port=model)`），把这一笔留在草稿里。
 ///
 /// 派发不在这里（D-166）：「宣布」与「派出」是两个环步。宣布之后那笔账在日志上是
 /// **开着的**（`dispatch-model` 行因它而欠），派出由 [`begin_model`] 在另一个动作里
@@ -510,7 +510,7 @@ where
     Ok(ModelRound::Tools)
 }
 
-/// 阶段②c：收束寄存的**结局**（/ 步 5c，`close-turn` 行的动作）。
+/// 收束寄存的**结局**（`close-turn` 行的动作）。
 ///
 /// 前件由日志说（本幕要么「答完了」、要么「模型没答成」），落格在这里做。
 /// 没有寄存 ⇒ 引擎收错了账：不落任何格、返回 `None`，让派发器的「无进展」判据把
@@ -636,7 +636,7 @@ where
     })
 }
 
-/// 阶段②b-1：创建（`open-tools` 行的动作， 步 5b）。
+/// 开账（`open-tools` 行的动作）：把模型交回的调用逐条开成 `request(port=tool)`。
 ///
 /// 把模型交回的调用逐条开成 `request(port=tool)`，开出的账寄存在草稿里交给授权步。
 /// 没有寄存的模型应答 ⇒ 引擎选错了行：不写任何格，派发器的「无进展」判据会显形。
@@ -652,7 +652,7 @@ pub(crate) async fn open_round(
     run.pending_calls = Some(calls);
 }
 
-/// 阶段②b-2：授权（`authorize-tool` 行的动作）：为已开账的调用落放行 / 拒绝。
+/// 授权（`authorize-tool` 行的动作）：为已开账的调用落放行 / 拒绝。
 pub(crate) async fn authorize_round(
     run: &mut Prepared,
     store: &dyn Store<Event = Event>,
@@ -668,7 +668,7 @@ pub(crate) async fn authorize_round(
     }
 }
 
-/// 阶段②b-3：派发（`dispatch-tools` / `deny-tools` 两行的动作）：落 `sent`、
+/// 派发（`dispatch-tools` / `deny-tools` 两行的动作）：落 `sent`、
 /// 跑执行层、关账，落产物 / 等待 / 交换。
 ///
 /// `Ok(None)` = 继续下一轮；`Ok(Some)` = 本轮收束（等待用户）。
@@ -676,7 +676,7 @@ pub(crate) async fn authorize_round(
 /// 两行共用这一个动作：混合批次里 `dispatch-tools` 先被选中，它顺手把被拒的那几笔
 /// 也收尾（`close_batch`）；一批全被拒时 `dispatch-tools` 不欠，`deny-tools` 选中
 /// 本动作，仍然要走执行层（审批卡 / 拒绝反馈由它唯一构造）。
-/// 阶段②b-3 的**派出半**（`dispatch-tools` 行的动作，`D-124` 订正 1）：落 `sent`、
+/// 派出半（`dispatch-tools` 行的动作，`D-124` 订正 1）：落 `sent`、
 /// 把「跑执行层 + 收结果」整段寄存进草稿的 in-flight 槽。
 ///
 /// 与 [`land_round`] 成对（与 `model` 端口的 [`begin_model`] / [`poll_flight`] 逐字同形）：
@@ -710,7 +710,7 @@ pub(crate) async fn begin_round(
     }
 }
 
-/// 阶段②b-3 的**收尾半**（`await-tools` / `deny-tools` 两行的动作）：poll 一次在飞的
+/// 收尾半（`await-tools` / `deny-tools` 两行的动作）：poll 一次在飞的
 /// 那一批，落地了就关账并落产物 / 等待格。
 ///
 /// ## 为什么只 poll 一次

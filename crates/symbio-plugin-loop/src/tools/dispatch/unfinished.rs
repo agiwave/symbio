@@ -1,9 +1,8 @@
-//! 阶段③「未执行收口」——`process_tool_calls_async` 三段拆分的第三段
-//! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! ③「未执行收口」。
 //!
 //! 两条路径会让批内留下没跑到的调用（用户中止 / 交互模式前序待用户）；本段给它们
-//! 统一补「结果子节点 + 父节点终态」，并如实记未履约的承诺。收口依据是阶段①的
-//! 本批留底（[`GateReadings::batch_meta`]），判据是阶段②已收口的父节点集合。
+//! 统一补「结果子节点 + 父节点终态」，并如实记未履约的承诺。收口依据是批首留底
+//! （[`GateReadings::batch_meta`]），判据是逐条执行段已收口的父节点集合。
 //!
 //! 判据（「这段错了谁会红」）：未执行收口用例红——`not_executed` / `aborted` 的
 //! 结果子节点与父终态断言（不变量 1「每个调用以终态收场」与不变量 2「有调用必有结果」）。
@@ -78,7 +77,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str, tool_name: &
     msg
 }
 
-/// 未执行收口（阶段③）：以下收口循环逐字来自拆分前 `process_tool_calls_async` 的末尾段。
+/// 未执行收口：给批内没跑到的调用统一补结果子节点与父节点终态。
 // 同 `batch::run_batch`：`&decls` 逐字保留自拆分前代码，needless_borrow 是对纯结构拆分的误报。
 #[allow(clippy::needless_borrow)]
 pub(crate) async fn close_unfinished(

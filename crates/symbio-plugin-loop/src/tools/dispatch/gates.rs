@@ -1,9 +1,8 @@
-//! 阶段①「批首闸门读数」——`process_tool_calls_async` 三段拆分的第一段
-//! （/ [DE-021 §5 动作 B](../../../../../docs/003-design/021-横向扩充与插件切分.md "DE-021-横向扩充与插件切分")）。
+//! ①「批首闸门读数」。
 //!
 //! 判据（「这段错了谁会红」）：闸门判据**只在批首读一次**、整批复用的读数用例红
 //! （`breaker` 的批首读场景、`batch_principal` 的派生用例与 `tool_executor.test.rs`
-//! 的闸门组）。读数语句的顺序与拆分前逐字一致——`gate_started` 仍从读判据之前起算。
+//! 的闸门组）。读数顺序固定：`gate_started` 从读判据之前起算。
 //!
 //! ## 宿主闸与声明闸
 //!
@@ -38,7 +37,7 @@ use super::*;
 use symbio_core::{Entity, Verb, PRINCIPAL_REFLEX};
 use symbio_plugin_api::effects::{BeforeReadings, BeforeRefusal};
 
-/// 批首一次读齐的全部闸门读数（阶段①的产出；阶段②③只按值消费，不再回读事实源）。
+/// 批首一次读齐的全部闸门读数（批首一次读齐；逐条执行与未执行收口只按值消费，不再回读事实源）。
 pub(crate) struct GateReadings {
     /// `MODE` 配置读数（`interactive` 下本批可在前序待用户时中止）。
     pub(crate) mode: String,
@@ -61,12 +60,12 @@ pub(crate) struct GateReadings {
     pub(crate) risks: ToolRisks,
     /// `tool` 端口的同批在飞上限（`PortDecl.concurrency`，`0` / `1` = 串行）。
     ///
-    /// 批首读一次，阶段②只消费这个数。上限是声明的一部分：新端口自带自己的上界，
+    /// 批首读一次，逐条执行阶段只消费这个数。上限是声明的一部分：新端口自带自己的上界，
     /// 执行层不需要为它改一个常量。
     pub(crate) concurrency: u16,
-    /// 本批留底 `(id, name, args)`——阶段③「哪些没被执行」的收口依据。
+    /// 本批留底 `(id, name, args)`——未执行收口的依据。
     pub(crate) batch_meta: Vec<(String, String, serde_json::Value)>,
-    /// 同参重复调用台账；阶段②逐条登记，故为可变读数。
+    /// 同参重复调用台账；逐条执行时登记，故为可变读数。
     pub(crate) seen_calls: Vec<String>,
 }
 
@@ -99,7 +98,7 @@ fn prior_call_signatures(context_messages: &[ChatNode], current_ids: &[String]) 
         .collect()
 }
 
-/// 批首闸门读数（阶段①）：以下语句逐字来自拆分前 `process_tool_calls_async` 的批首段。
+/// 批首闸门读数：`mode` / 熔断 / 自声明位 / 主体与控制面结论 / 本批留底 / 同参台账。
 pub(crate) async fn read_batch_gates(
     tool_calls: &[TurnToolCallInfo],
     ctx: Arc<dyn PluginInvokeRequest>,

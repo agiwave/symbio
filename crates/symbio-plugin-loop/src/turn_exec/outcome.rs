@@ -1,12 +1,8 @@
-//! 阶段③ 结局归类 + 一轮执行的出口类型（· B2，DE-021 §5 动作 B2）。
+//! 结局归类 + 一轮执行的出口类型。
 //!
 //! 桥上取走未定格的正文/思考 → 桥归零（发射端退出的唯一信号）→ 发射任务收干 →
 //! 按 `aborted / closure_denied / 正常` 三条结局归类：前两条直接现成收口
-//! （[`Classified::Finished`]），正常收束则把落库动作交阶段④ [`super::persist`]。
-//!
-//! **纯结构拆分契约**：[`classify_turn`] 体内自 `turn_exec.rs` 的 `execute_turn`
-//! 第三段逐字搬移，仅三处 `return` 改裹 [`Classified::Finished`]（早退语义不变）；
-//! [`ExecTurnResult`] / [`TurnExecExit`] 同批搬入（本段的归类结果直接构造它们）。
+//! （[`Classified::Finished`]），正常收束则把落库动作交 [`super::persist`]。
 
 use super::*;
 
@@ -53,7 +49,7 @@ impl From<PluginError> for TurnExecExit {
     }
 }
 
-/// 阶段③ 的出口：本轮已提前了结（[`Classified::Finished`]），或正常收束待落格
+/// 归类的出口：本轮已提前了结（[`Classified::Finished`]），或正常收束待落格
 /// （[`Classified::Settled`]）。刻意收全三个提前出口于类型——落库段拿不到被跳过的
 /// 结局，就不会出现「中止轮还去写派生事实」的顺序漂移。
 pub(crate) enum Classified<'b> {
@@ -61,7 +57,7 @@ pub(crate) enum Classified<'b> {
     Settled(Settled<'b>),
 }
 
-/// 阶段③ ⇒ 阶段④ 的交付束：收束结局 + 桥上取下的节点身份 + 落库还要用的一切。
+/// 归类 → 落库的交付束：收束结局 + 桥上取下的节点身份 + 落库还要用的一切。
 pub(crate) struct Settled<'b> {
     pub(crate) session: Arc<LoopSession>,
     pub(crate) store: Arc<dyn Store<Event = Event>>,
@@ -86,7 +82,7 @@ pub(crate) struct Settled<'b> {
     pub(crate) reasoning_text: String,
 }
 
-/// 一轮的执行（阶段③）：结局归类——消费 [`Running`]，产 [`Classified`]。
+/// 一轮的执行之三：结局归类——消费 [`Running`]，产 [`Classified`]。
 pub(crate) async fn classify_turn<'b>(
     r: Running,
     recalled: Option<&'b super::super::recall::RecallView>,
