@@ -938,6 +938,8 @@ fn rows_are_stable_and_globally_ordered() {
             "deny-tools",
             "await-model",
             "await-tools",
+            // 产物格的归宿行（自读）：认得下这笔事实即可，不欠后续步骤。
+            "artifact.added",
         ]
     );
     assert!(
@@ -969,6 +971,8 @@ fn rows_are_stable_and_globally_ordered() {
             symbio_core::LatencyTier::Deep,
             // `await-tools`：等的是工具执行层，不调模型 ⇒ 与 `dispatch-tools` 同档。
             symbio_core::LatencyTier::Fast,
+            // 归宿行只认产物，不调模型。
+            symbio_core::LatencyTier::Reflex,
         ]
     );
 }

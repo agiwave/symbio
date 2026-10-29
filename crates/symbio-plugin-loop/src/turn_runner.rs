@@ -785,6 +785,16 @@ impl TurnSession {
         self.run.now_ms()
     }
 
+    /// 本幕主体（写事件的 `actor`）：行执行体交草稿时由宿主盖章。
+    pub(crate) fn principal(&self) -> &str {
+        &self.run.actor.principal
+    }
+
+    /// 本轮开口格的 seq（派生事实的溯源锚，I2）。
+    pub(crate) fn user_seq(&self) -> u64 {
+        self.run.user_seq
+    }
+
     /// 停机收束：落兜底格且 `reason = exhausted`（`step_limit` / `no_progress`）。
     ///
     /// 派发器在「表里没有可还的债」或「执行体返回空且事实没长」时调用它；

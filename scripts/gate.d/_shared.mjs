@@ -233,7 +233,7 @@ export const BASELINE = {
   // （「多一条就红」永远不会触发），而 `ActorEntry.transitional` 已随 D-238 删除。同一批没有丢判据：
   // 运行期写入封闭仍由 `writes_closed_admits_declared_and_protocol_only` 钉（协议五格 + `decl.writes`
   // 两支，越界必须为假），「声明不了的一次写出」由装载期成环（`Gap::DependencyCycle`）判。非侵蚀。
-  ciRustTestsTotal: 2420,
+  ciRustTestsTotal: 2423,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

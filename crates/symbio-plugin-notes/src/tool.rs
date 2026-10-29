@@ -18,6 +18,7 @@ use symbio_core::{
 };
 
 use super::behavior::NOTE_CAPTURE;
+use super::decl::NOTES_TOOL;
 
 pub(crate) struct NotesTool;
 
@@ -25,7 +26,7 @@ pub(crate) struct NotesTool;
 impl Capability for NotesTool {
     fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
-            name: "notes_add".to_string(),
+            name: NOTES_TOOL.to_string(),
             description: "把一条便签记进本会话的事实源；成功之后，最近的几条便签会作为上下文出现在后续对话里。".to_string(),
             input_schema: json!({
                 "type": "object",

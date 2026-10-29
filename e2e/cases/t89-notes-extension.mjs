@@ -1,11 +1,12 @@
 import './_selfrun.mjs';
-// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，六个扩展面在真实链路上生效。
+// T89 扩展夹具：`notes` 能力包只经 plugin-api 接入后，七个扩展面在真实链路上生效。
 //
 // ## 这条用例补的是什么
 //
 // T88 证的是「插件的工具随装配位进出」；本用例证的是 DE-025 的**扩展面本身**
 // （EX-001）：一个新能力包不改 core / kernel / loop / session，只靠 plugin-api 的
-// 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**对外可读的视图**六面：
+// 提交点就能做到——工具、前置判断、领域事实、效果、上下文、**对外可读的视图**、
+// **轮内行执行**七面：
 //
 // | 面 | 提交点 | 本用例的读数 |
 // |---|---|---|
@@ -15,6 +16,7 @@ import './_selfrun.mjs';
 // | 效果 | `submit_behavior!` + `CapabilityMeta.behaviors` | 下一轮上下文里出现那条便签 |
 // | 上下文 | `submit_context_provider!` | 下一轮请求前缀里出现 `最近记下的便签` |
 // | 视图 | `ViewDecl` + `PLUGIN.yml` 的 `shared_views` | `session/stats` 的 `capability_views['notes.recent']` 读到那条便签 |
+// | 轮内行执行 | `submit_row!`（`by = plugin_row`，D-241） | `capability_views['notes.digest']` 读到行执行体落下的 `notes.indexed` |
 //
 // 「事件真的落格」与「上下文真的贡献了」是**同一条读数的两面**：上下文 provider 只读
 // 会话事实切片，它渲染得出来，就说明行为产出的 `notes.created` 已经入格。
@@ -126,7 +128,7 @@ function requestText(body) {
 }
 
 export default defineCase(
-  'T89 扩展夹具：notes 能力包的工具 / 前置判断 / 领域事实 / 效果 / 上下文 / 视图只经 plugin-api 接入即生效',
+  'T89 扩展夹具：notes 能力包的工具 / 前置判断 / 领域事实 / 效果 / 上下文 / 视图 / 轮内行执行只经 plugin-api 接入即生效',
   async () => {
     // ── 启用侧：三轮，后两轮读到行为落下的那条事实与前置判断的拒因 ─────
     const llm = await new MockLlm(scenarios()).start();
@@ -235,6 +237,38 @@ export default defineCase(
           view.value?.items?.[0]?.text,
           NOTE_TEXT,
           '读到的正文就是行为落下的那条事实（折叠在 owner 手里）',
+        );
+
+        // ── 第七面：轮内行执行体落下的派生事实被同一读口读到 ─────────────
+        // `notes.index` 这一行把 `notes_add` 的成功产物记成 `notes.indexed`；行本身
+        // 归 `plugin_row`（宿主唯一执行体），实现由能力包经 `submit_row!` 交出。
+        // 这条读数同时证两件事：宿主没有按工具名或行名写分支，能力包的草稿经唯一
+        // 写口真的入了格。第三轮那次调用被 `before` 拒（`success = false`），
+        // 行前件的 `eq` 不收它——所以计数仍是 1。
+        const digest = inv.body?.data?.capability_views?.['notes.digest'];
+        assert(
+          digest,
+          `能力视图列应有 notes.digest 这一格（实际: ${JSON.stringify(inv.body?.data?.capability_views)}）`,
+        );
+        assertEq(digest.status, 'ok', `notes.digest 跨插件读应成功：${JSON.stringify(digest)}`);
+        assertEq(digest.owner, 'notes', 'owner 来自清单生成物');
+        assertEq(digest.ver, 1, '版本随 owner 的 ViewDecl 走');
+        assertEq(
+          digest.value?.count,
+          1,
+          `只有一次成功的 notes_add 会开行债（重复那条被 before 拒）：${JSON.stringify(digest.value)}`,
+        );
+        // 回执里的 `tool_call_id` 是**执行层交回**的权威 id，不是模型给的那个：
+        // 端到端只断言它存在（行按它开账与关账），正文才是这条通路的内容判据。
+        const indexedId = digest.value?.items?.[0]?.tool_call_id;
+        assert(
+          typeof indexedId === 'string' && indexedId.length > 0,
+          `行执行体应把工具调用的结果按 tool_call_id 收进索引：${JSON.stringify(digest.value)}`,
+        );
+        assertEq(
+          digest.value?.items?.[0]?.text,
+          NOTE_TEXT,
+          '行执行体从 artifact.added 的定稿参数里取出的正文应与原调用一致',
         );
       } finally {
         api.stop();

@@ -16,16 +16,33 @@
 
 use serde_json::{json, Value};
 
-use symbio_core::ring::{Decl, Pattern};
+use symbio_core::ring::{Decl, Lit, Pattern};
 use symbio_core::{
     Entity, Event, EventDecl, FactDecl, LatencyTier, PluginDeclarations, Verb, ViewDecl,
 };
+use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
 /// 「记下一条便签」这一事实。落在 `domain × opened`。
 pub(crate) const NOTES_CREATED: &str = "notes.created";
 
+/// 本插件的 LLM 可见工具名。工具面与行表（`notes.index` 的 `owes` 收窄）都取它，
+/// 不存在第二份拼写。
+pub(crate) const NOTES_TOOL: &str = "notes_add";
+
+/// 轮内索引事实：`notes_add` 的产物落格后，本能力的一行把这条结果再记一笔。
+///
+/// 它与 [`NOTES_CREATED`] 的分工：后者是「用户让我记」的领域事实（轮末由行为落），
+/// 前者是「这次工具结果已被本能力处理」的派生事实（轮内由通用行执行体落）。
+pub(crate) const NOTES_INDEXED: &str = "notes.indexed";
+
+/// 行名：把一条成功的 `notes_add` 产物收进索引。`by = plugin_row`（D-241）。
+pub(crate) const NOTES_INDEX: &str = "notes.index";
+
 /// 对外可读的视图：最近几条便签（新→旧）。
 pub(crate) const NOTES_RECENT: &str = "notes.recent";
+
+/// 对外可读的视图：本能力在轮内索引过的工具结果。
+pub(crate) const NOTES_DIGEST: &str = "notes.digest";
 
 /// 视图最多保留的条数。超出只影响**输出长度**，不影响扫描成本上界。
 const RECENT_LIMIT: usize = 20;
@@ -37,51 +54,100 @@ const RECENT_COST: u32 = 4096;
 /// owner —— 与目录名同形（`crates/symbio-plugin-notes`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-notes";
 
-pub(crate) const EVENTS: &[EventDecl] = &[EventDecl::new(
-    NOTES_CREATED,
-    (Entity::Domain, Verb::Opened),
-)];
+pub(crate) const EVENTS: &[EventDecl] = &[
+    EventDecl::new(NOTES_CREATED, (Entity::Domain, Verb::Opened)),
+    // 索引事实是「这次结果已处理」的断言，不是开新领域：`Domain × Asserted`。
+    EventDecl::new(NOTES_INDEXED, (Entity::Domain, Verb::Asserted)),
+];
 
-pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
-    name: NOTES_CREATED,
-    port: None,
-    key: &[],
-    expand: &[],
-    fields: &["text"],
-}];
+pub(crate) const FACTS: &[FactDecl] = &[
+    FactDecl {
+        name: NOTES_CREATED,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["text"],
+    },
+    // 键在行上（`notes.index` 按 `tool_call_id` 关账），事实声明不需要自己的键。
+    FactDecl {
+        name: NOTES_INDEXED,
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &["tool_call_id", "text"],
+    },
+];
 
 /// 本插件事实的**归宿行**：`owes` 与 `until` 同源——有便签即闭合，没有便签则不欠。
 ///
 /// 行表是义务，不是触发器；这条自读行只回答「这条事实归谁看护」。没有它，`seal`
 /// 会把 `notes.created` 判成 `OrphanFact`（每条事实都要有归宿行）。
-pub(crate) const ROWS: &[Decl] = &[Decl {
-    name: NOTES_CREATED,
-    prio: 200,
-    by: None,
-    tier: LatencyTier::Reflex,
-    expand: None,
-    owes: Pattern {
-        source: NOTES_CREATED,
-        key: &[],
-        eq: &[],
+pub(crate) const ROWS: &[Decl] = &[
+    Decl {
+        name: NOTES_CREATED,
+        prio: 200,
+        by: None,
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: NOTES_CREATED,
+            key: &[],
+            eq: &[],
+        },
+        until: &[Pattern {
+            source: NOTES_CREATED,
+            key: &[],
+            eq: &[],
+        }],
+        unless: &[],
     },
-    until: &[Pattern {
-        source: NOTES_CREATED,
-        key: &[],
-        eq: &[],
-    }],
-    unless: &[],
-}];
+    // 轮内索引：一条成功的 `notes_add` 产物落格之后，本能力再记一笔
+    // `notes.indexed`（换的是本行的 `ActorDecl` = `plugin_row`，实现见 `row`）。
+    //
+    // `owes` 只收窄到**本能力自己的工具**且成功的结果——`eq` 是行的前件，不是实现
+    // 里的 if：不成立时这笔债根本不开，环不会选中它。`prio` 45 让它在工具批收尾
+    // （72）之后、收束（55）之前被选中：这一笔在**同一轮**里看得见产物。
+    Decl {
+        name: NOTES_INDEX,
+        prio: 45,
+        by: Some(symbio_plugin_api::rows::PLUGIN_ROW),
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_ARTIFACT_ADDED,
+            key: &["tool_call_id"],
+            eq: &[("tool", Lit::Str(NOTES_TOOL)), ("success", Lit::Bool(true))],
+        },
+        until: &[Pattern {
+            source: NOTES_INDEXED,
+            key: &["tool_call_id"],
+            eq: &[],
+        }],
+        unless: &[],
+    },
+];
 
-pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
-    name: NOTES_RECENT,
-    ver: 1,
-    reads: &[(NOTES_CREATED, "text")],
-    // 读出口径不是收束判据：本视图不替任何事实关门。
-    evidence: &[],
-    cost: RECENT_COST,
-    eval: recent_notes,
-}];
+pub(crate) const VIEWS: &[ViewDecl] = &[
+    ViewDecl {
+        name: NOTES_RECENT,
+        ver: 1,
+        reads: &[(NOTES_CREATED, "text")],
+        // 读出口径不是收束判据：本视图不替任何事实关门。
+        evidence: &[],
+        cost: RECENT_COST,
+        eval: recent_notes,
+    },
+    // 行执行体写下的那笔事实的读回：`notes.indexed` → 本能力在轮内收进索引的
+    // 工具结果。它证明「通用执行体交出的草稿真的入了格」，读方不必认识行或执行体。
+    ViewDecl {
+        name: NOTES_DIGEST,
+        ver: 1,
+        reads: &[(NOTES_INDEXED, "tool_call_id")],
+        evidence: &[],
+        cost: RECENT_COST,
+        eval: indexed_notes,
+    },
+];
 
 /// 纯折叠：`notes.created` → `{ count, items: [{ text, turn, ts }] }`。
 ///
@@ -102,6 +168,27 @@ fn recent_notes(events: &[Event], now: i64) -> Value {
         texts.drain(..texts.len() - RECENT_LIMIT);
     }
     json!({ "count": texts.len(), "items": texts })
+}
+
+/// 纯折叠：`notes.indexed` → `{ count, items: [{ text, tool_call_id }] }`。
+///
+/// 与 [`recent_notes`] 同一口径（写入序、最新 `RECENT_LIMIT` 条），但读的是行执行体
+/// 落的那笔事实——两个视图各自只读自己那条事实名。
+fn indexed_notes(events: &[Event], _now: i64) -> Value {
+    let mut items: Vec<Value> = Vec::new();
+    for e in events {
+        if e.kind != NOTES_INDEXED {
+            continue;
+        }
+        items.push(json!({
+            "tool_call_id": e.payload.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+            "text": e.payload.get("text").and_then(Value::as_str).unwrap_or(""),
+        }));
+    }
+    if items.len() > RECENT_LIMIT {
+        items.drain(..items.len() - RECENT_LIMIT);
+    }
+    json!({ "count": items.len(), "items": items })
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。

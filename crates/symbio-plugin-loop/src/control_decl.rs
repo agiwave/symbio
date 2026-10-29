@@ -404,6 +404,31 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "key", "port", "id", "attempt", "tool", "risk", "deferred", "basis", "grant",
         ],
     },
+    // 产物格（`tool_dispatch` 批尾写、`turn_runner` 落）：声明**载荷里宿主写的那几格**，
+    // 于是能力包可以把「我那个工具的结果」当成行的前件（`plugin_row` 的一行按
+    // `tool` / `tool_call_id` / `success` 开账），而不必让宿主认识它的能力名。
+    //
+    // 能力经 `annotate` 富化的键（如 `file_op`）**不在这里**：那是能力自己的词汇，
+    // 宿主不枚举；要与它比对的 `eq` 由富化方在自己的 `EventDecl` / 载荷契约里说清。
+    FactDecl {
+        name: "artifact.added",
+        port: None,
+        key: &[],
+        expand: &[],
+        fields: &[
+            "tool",
+            "text",
+            "tool_call_id",
+            "wire_id",
+            "args",
+            "result_id",
+            "success",
+            "needs_user_action",
+            "prompt",
+            "failure_kind",
+            "turn_id",
+        ],
+    },
 ];
 
 fn in_flight(events: &[Event], _now: i64) -> serde_json::Value {

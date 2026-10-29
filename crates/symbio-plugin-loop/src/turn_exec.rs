@@ -721,6 +721,14 @@ pub(crate) struct Ctx<'a> {
     pub(crate) sink: Arc<dyn DeltaSink>,
     pub(crate) tools: Arc<[CapabilityMeta]>,
     pub(crate) dispatch: Option<Arc<dyn super::tool_dispatch::ToolDispatch>>,
+    /// 本步还的是哪一行（`Decl.name`）。[`run_plugin_row`] 按它在实现表里找自己。
+    ///
+    /// 债实例随 `Next` 一起进 `Ctx`：动作签名只有 `&mut Ctx` 一个入参
+    /// （[`Action`]），所以「这一步是哪一笔债」必须由派发器写在环境上，而不是
+    /// 让执行体去猜或再查一次表。
+    pub(crate) row: &'static str,
+    /// 债键：`Decl.owes.key` 各字段的 `(名字, 值)`。[`run_plugin_row`] 原样转交。
+    pub(crate) key: Vec<(String, String)>,
     /// 轮首借面：`Some` = 这一幕有编排层那一片状态（判决 / 压缩 / 召回 / 接缝 / 汇报
     /// 可用）。轮内那几行不读它，`None` 对它们没有影响。
     pub(crate) head: Option<HeadCtx<'a>>,
@@ -1231,6 +1239,43 @@ pub(crate) fn run_continue<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
                     "续幕的开幕交出了非失败结局：{other:?}"
                 ))),
             })
+    })
+}
+
+/// 通用行执行体（DE-025 D-241）：`plugin_row` 选中的动作——把这一笔债的**纯值**
+/// 交给能力实现，把草稿交给宿主唯一写口。
+///
+/// 三件事：查这一行的实现（装载期 [`super::loop_rows::assemble`] 已保证存在）、
+/// 构造 [`symbio_plugin_api::rows::RowRequest`]、逐条 `append`。它不认识任何能力名，
+/// 也不按行名分支——行与实现的对应由能力包自己的 `submit_row!` 给出。
+///
+/// 事实切片是**本轮**的（与环共用同一份收窄，理由见 `loop_rows::turn_slice`）：
+/// 能力判断「这一步欠不欠、写什么」只从本轮事实里读。
+pub(crate) fn run_plugin_row<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        let Some(handler) = symbio_plugin_api::rows::handler_for(ctx.row) else {
+            return Err(ActorError::Read(PluginError::InternalError(format!(
+                "行 {} 绑定到 plugin_row，但没有能力提交它的实现",
+                ctx.row
+            ))));
+        };
+        let turn = ctx.session.turn();
+        let events = ctx.store.range(Seq::new(0));
+        let facts = super::loop_rows::turn_slice(&events, turn);
+        let request = symbio_plugin_api::rows::RowRequest {
+            row: ctx.row,
+            key: &ctx.key,
+            turn,
+            now_ms: ctx.session.now_ms(),
+            principal: ctx.session.principal(),
+            user_seq: ctx.session.user_seq(),
+            facts,
+        };
+        for draft in handler.run(&request) {
+            let event = draft.into_event(turn, request.principal);
+            ctx.store.append(event).map_err(ActorError::Append)?;
+        }
+        Ok(())
     })
 }
 

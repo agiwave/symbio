@@ -331,7 +331,7 @@ pub(crate) async fn drive(
                 "[Loop] 派发 {}（执行体 {}；债 {}）",
                 next.row,
                 next.by,
-                next.key
+                next.key.trace()
             );
             // 守卫三：步数上界是**收工的判据**，不是「半路撂下」的许可（`D-222`
             // 订正 2）。有一笔在飞时先把那一笔收回来，否则日志上留一条 `sent` 无
@@ -382,6 +382,10 @@ pub(crate) async fn drive(
                     sink: st.sink.clone(),
                     tools: st.tools.clone(),
                     dispatch: st.dispatch.clone(),
+                    // 债实例随环境进动作：动作只收 `&mut Ctx`，「这是哪一笔债」
+                    // 只能由派发器写在环境上（见 `Ctx::row`）。
+                    row: next.row,
+                    key: next.key.clone().0,
                     head,
                 };
                 // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判

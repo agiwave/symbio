@@ -123,6 +123,8 @@ fn control_plane_loads_and_freezes() {
             "session.config",
             "authz.denied",
             "authz.granted",
+            // 产物格：能力行的前件按它的载荷字段收窄（`plugin_row` 的行）。
+            "artifact.added",
         ]
     );
     let views: Vec<_> = frozen.views().iter().map(|v| v.name).collect();

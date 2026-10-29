@@ -19,5 +19,6 @@ pub struct SharedViewDecl {
 /// 跨插件可读视图（按名字排序）。
 #[rustfmt::skip]
 pub const SHARED_VIEWS: &[SharedViewDecl] = &[
+    SharedViewDecl { name: "notes.digest", owner: "notes" },
     SharedViewDecl { name: "notes.recent", owner: "notes" },
 ];

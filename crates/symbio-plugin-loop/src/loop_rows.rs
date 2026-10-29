@@ -56,7 +56,7 @@ use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
-use symbio_core::ring::{owed, Decl, Gap, Lit, Pattern, PortDecl};
+use symbio_core::ring::{owed, Decl, Gap, Key, Lit, Pattern, PortDecl};
 use symbio_core::{
     ActorDecl, Builder, Event, Frozen, LatencyTier, PluginDeclarations, EVENT_FAILED,
     EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
@@ -162,6 +162,12 @@ const SEAM: &str = "seam";
 /// 收租、重落配置，只是不新开用户格。**它不是一个环**：动作跑完就还清一笔债，
 /// 新幕欠什么由新幕自己的事实说。
 const CONTINUE: &str = "continue";
+/// 通用行执行体（DE-025 D-241）：`by` 写成它的行由能力包自己的
+/// [`symbio_plugin_api::rows::RowHandler`] 认领，宿主只做「交纯值、收草稿、落格」。
+///
+/// 名字来自 `plugin-api` 的**宿主词汇**：能力包写同一个常量，两边不需要认识对方。
+/// 它没有按能力名注册的邻居——加一行能力只加 `Decl` + `RowHandler` 提交，不改本表。
+const PLUGIN_ROW: &str = symbio_plugin_api::rows::PLUGIN_ROW;
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -431,6 +437,26 @@ const ACTOR_CONTINUE: ActorDecl = ActorDecl {
     writes: &[EVENT_TURN_STAGE, EVENT_SESSION_CONFIG],
 };
 
+/// 通用行执行体（DE-025 D-241）：能力包交 `Decl` + `ActorDecl` + `RowHandler`，
+/// **绑定表不随能力数增长**。
+///
+/// 名单在 `ActorDecl` 里是空的：每一行写哪些领域格由那一行的
+/// [`symbio_plugin_api::rows::RowHandler::writes`] 声明——`ActorDecl` 是执行体级的
+/// 静态投影，装不下每行不同的名单。装配期 [`actor_decls`] 把全部实现声明的写入
+/// 并进这一条（装载期第 6 条与依赖图读的是「这个执行体可能写哪些格」）；派发时
+/// [`next`] 按**这一行**的名单对账（运行期账本守卫，D-123 决策 2）。
+///
+/// 一个实现都没有时这一条不进冻结表（[`actor_decls`]）：没有行会指向它，
+/// 留着只会触发 `OrphanActor`。有实现而没有被任何行指向时照旧红——那是死账。
+const ACTOR_PLUGIN_ROW: ActorDecl = ActorDecl {
+    name: PLUGIN_ROW,
+    // 执行体只搬纯值，真实时延由能力实现与它那一行的 `tier` 说；装载期要求
+    // `row.tier <= actor.mode`，取最宽档不替能力预设。
+    mode: LatencyTier::Deep,
+    reads: &[],
+    writes: &[],
+};
+
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
@@ -515,6 +541,10 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
         decl: ACTOR_CONTINUE,
         run: super::turn_exec::run_continue,
     },
+    ActorEntry {
+        decl: ACTOR_PLUGIN_ROW,
+        run: super::turn_exec::run_plugin_row,
+    },
 ];
 
 /// 一台派发点的**行子集**：`by` 落在绑定表里的那些行。
@@ -544,6 +574,11 @@ fn bound_rows(frozen: &Frozen, names: &[&'static str]) -> Vec<Decl> {
 /// 执行体、`seal` 通过、派发时整条被 [`bound_rows`] 滤掉」是一条**声明成功、永不执行、
 /// 全绿**的路径（DE-026 `EX-005`）。装载期在这里把两表对一遍：冻结表里有行而绑定表
 /// 里没有名字 ⇒ 装载失败，而不是等到回放时才发现某条策略从未生效。
+///
+/// `plugin_row` 的「`run`」不是一条静态动作，而是**这一行**的实现：能力包声明了
+/// 一行、却没人 `submit_row!` 认领它，与「`by` 没有执行体」是同一件事——声明成功、
+/// 永不执行。故同样落在 `UnmannedRow` 上，判定点仍在装载期（D-241「解析不到在
+/// `seal` 期红」）。
 fn dispatch_gaps<'a, I>(rows: I, actors: &[ActorEntry]) -> Vec<Gap>
 where
     I: IntoIterator<Item = &'a Decl>,
@@ -552,6 +587,11 @@ where
     rows.into_iter()
         .filter_map(|d| match d.by {
             Some(by) if !names.contains(&by) => Some(Gap::UnmannedRow { row: d.name, by }),
+            Some(by)
+                if by == PLUGIN_ROW && symbio_plugin_api::rows::handler_for(d.name).is_none() =>
+            {
+                Some(Gap::UnmannedRow { row: d.name, by })
+            }
             _ => None,
         })
         .collect()
@@ -562,12 +602,42 @@ fn actor_names(actors: &[ActorEntry]) -> Vec<&'static str> {
     actors.iter().map(|e| e.decl.name).collect()
 }
 
+/// 全部行实现声明的写入并集（`plugin_row` 的 `ActorDecl.writes`）。
+///
+/// 并集是**保守方向**：`ActorDecl` 只回答「这个执行体可能写哪些格」，装载期第 6 条
+/// 与依赖图读的正是这个量；逐行名单在派发时按 [`next`] 的对账收窄。
+fn plugin_row_writes() -> &'static [&'static str] {
+    static WRITES: LazyLock<&'static [&'static str]> = LazyLock::new(|| {
+        let writes = symbio_plugin_api::rows::declared_writes();
+        if writes.is_empty() {
+            return &[];
+        }
+        Box::leak(writes.into_boxed_slice())
+    });
+    *WRITES
+}
+
 /// 交给装载期冻结的执行体声明（`loop_rows::assemble` 的唯一用处）。
 ///
 /// 一张绑定表一次交齐：装载面判的是「名字有没有人认领、认领的人走不走得到出口」，
 /// 与执行体借走哪片可变状态无关。分开注册会冻出两份 `Frozen`，行表就有了两个真源。
+///
+/// `plugin_row` 这一条有两处按实现来：名单取 [`plugin_row_writes`]（见
+/// [`ACTOR_PLUGIN_ROW`]），且**一个实现都没有时不进表**——否则没有任何行会指向它，
+/// `OrphanActor` 会让只链接本插件的测试二进制装不上表。
 pub(crate) fn actor_decls() -> Vec<ActorDecl> {
-    ACTORS.iter().map(|e| e.decl).collect()
+    let writes = plugin_row_writes();
+    let mut decls: Vec<ActorDecl> = ACTORS.iter().map(|e| e.decl).collect();
+    if writes.is_empty() {
+        decls.retain(|d| d.name != PLUGIN_ROW);
+    } else {
+        for decl in &mut decls {
+            if decl.name == PLUGIN_ROW {
+                decl.writes = writes;
+            }
+        }
+    }
+    decls
 }
 
 /// `by` → 绑定表里的那一条。`None` = 表里没有这个名字（装载期的 `UnmannedRow` 已拦，
@@ -1249,6 +1319,28 @@ pub(crate) static ROWS: &[Decl] = &[
         ],
         unless: &[],
     },
+    // 产物格的**归宿行**：`artifact.added` 落了载荷字段（见 `control_decl::FACTS`），
+    // 于是它要有一行认领（`OrphanFact`）。它是自读行：`owes` 与 `until` 同源，产物一
+    // 落格就已闭合，永远不会被选中。`by` 挂收尾半（`await-tools` 的执行体正是落产物
+    // 的那一半），只为满足「整张行表都在同一张绑定表里」——不是给它派活。
+    Decl {
+        name: EVENT_ARTIFACT_ADDED,
+        prio: 200,
+        by: Some(WAITER_TOOLS),
+        tier: LatencyTier::Reflex,
+        expand: None,
+        owes: Pattern {
+            source: EVENT_ARTIFACT_ADDED,
+            key: &[],
+            eq: &[],
+        },
+        until: &[Pattern {
+            source: EVENT_ARTIFACT_ADDED,
+            key: &[],
+            eq: &[],
+        }],
+        unless: &[],
+    },
 ];
 
 /// 装载：六张注册表经 DE-015 §3.2 的注册口进 `Builder`，`seal` 跑完全部装载期检查。
@@ -1418,7 +1510,7 @@ pub(crate) fn scan_bound() -> Option<usize> {
 ///
 /// `scan_bound` 为 `None`（表还没装好）时原样交出：这一轮的打开本来就会先被
 /// [`table`] 拦下，这里不替它判。
-fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
+pub(crate) fn turn_slice(events: &[Event], turn: u64) -> &[Event] {
     let slice = match events.iter().position(|e| e.turn == turn) {
         Some(start) => &events[start..],
         None => &[],
@@ -1540,8 +1632,9 @@ pub(crate) struct Next {
     pub(crate) row: &'static str,
     /// 执行体名。`drive` 已滤掉 `by: None`，这里必有值。
     pub(crate) by: &'static str,
-    /// 债键的人读形状（日志用）。
-    pub(crate) key: String,
+    /// 债键：`(字段名, 值)` 的列表。执行体拿它指认「这一笔是哪一个实例」
+    /// （`plugin_row` 的实现按字段名取值，不猜顺序）。
+    pub(crate) key: Key,
     /// 按 `by` 在绑定表里查出的动作。查不到就不会有这一项（见 [`next`] 的 `None`）。
     pub(crate) action: super::turn_exec::Action,
     /// 同一个动作的**声明面**：它登记过会写哪些领域格。
@@ -1589,12 +1682,21 @@ pub(crate) fn next(
         );
         return None;
     };
+    let by = debt.decl.by?;
+    // 写入名单的声明位：`plugin_row` 的每一行由它自己的实现声明，其余执行体是
+    // `ActorDecl.writes`。派发器对账用的始终是「这一笔债的执行者声明写什么」，
+    // 而不是「这个名字平均写什么」——D-123 决策 2 的名单必须与动作同源。
+    let writes = if by == PLUGIN_ROW {
+        symbio_plugin_api::rows::writes_of(debt.decl.name).unwrap_or(&[])
+    } else {
+        entry.decl.writes
+    };
     Some(Next {
         row: debt.decl.name,
-        by: debt.decl.by?,
-        key: debt.key.trace(),
+        by,
+        key: debt.key,
         action: entry.run,
-        writes: entry.decl.writes,
+        writes,
     })
 }
 

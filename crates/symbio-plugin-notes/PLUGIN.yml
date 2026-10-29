@@ -1,9 +1,9 @@
 # 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
 plugin_id: notes
-plugin_comment: 便签扩展夹具：一个工具、一条 Domain 事实、一个上下文段、一条效果行为
+plugin_comment: 便签扩展夹具：一个工具、一条 Domain 事实、一条轮内索引行、一个上下文段、一条效果行为
 plugin_assembly: sub_agent
 plugin_order: 200
 # 本插件导出给别的插件按名字读的视图（scripts/facts/views-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/view_names.rs）。名字与求值仍住本插件的
 # `decl::VIEWS`；这里只登记「对外可读」这一件事。
-shared_views: notes.recent
+shared_views: notes.recent, notes.digest
