@@ -7,7 +7,7 @@ track: arch
 prio: next
 created: 2026-10-29
 parent: T-001-能力全面拆分
-deps: [T-010-名册五十四条处置, T-003-主动开口纯插件验证, T-004-通用行执行体, T-005-模型往返端口, T-006-段预算与通用省略]
+deps: [T-010-名册五十四条处置, T-004-通用行执行体, T-005-模型往返端口, T-006-段预算与通用省略]
 where: `crates/symbio-plugin-loop/src/loop_rows.rs`, `crates/symbio-plugin-loop/src/turn_exec.rs`, `crates/symbio-plugin-loop/src/chat_loop`
 exit: `crates/symbio-plugin-loop` 里按能力名存在的行、执行体、常量与策略清零——只剩环、写口、全局守门、过程体、会话基底五类；每一批都是「插件落好 → 绑定切换 + 旧实现删除」同一提交，端到端行为逐字不变；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`loop` 只含删除与绑定切换）；`SC-006` 的基线里不再有 `loop` 条目
 ---

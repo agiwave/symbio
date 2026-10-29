@@ -7,7 +7,7 @@ track: arch
 prio: next
 created: 2026-10-29
 parent: T-001-能力全面拆分
-deps: [T-010-名册五十四条处置, T-003-主动开口纯插件验证, T-004-通用行执行体, T-005-模型往返端口, T-006-段预算与通用省略]
+deps: [T-010-名册五十四条处置, T-004-通用行执行体, T-005-模型往返端口, T-006-段预算与通用省略]
 where: `crates/symbio-plugin-session/src`, `crates/symbio-plugin-session/src/projections`
 exit: `crates/symbio-plugin-session` 非测试代码里不再有按能力名 / 工具名的读法或策略；每个模块都能指认归属（能力包或五类残留之一）；按名字出富化的读法归零；迁移提交不含机制增量（`EX-007`：`core` / `kernel` diff = 0，`session` 只含删除与绑定切换）；`SC-006` 的基线里不再有 session 条目
 ---
