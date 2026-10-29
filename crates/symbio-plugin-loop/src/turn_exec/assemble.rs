@@ -19,23 +19,29 @@
 
 use super::*;
 
-/// 阶段① ⇒ 阶段②③④ 的交付束：装配段读出/构造、且消费段还要用的一切按值带走。
+/// 一幕的**静态面**：装配段读出/构造、且整幕还要用的一切按值带走。
 ///
-/// 与 [`ExecTurn`] 同族（捆包而非长参数表）。刻意把「①用过但②③④也要用」的字段
-/// 一并带上——回头重取就是第二个读数点，正是本拆分要避免的形状。
-pub(crate) struct Assembled<'a> {
-    // —— 交付包直通（阶段②③④ 消费）——
-    pub(crate) session: &'a LoopSession,
+/// 与 [`ExecTurn`] 同族（捆包而非长参数表）。刻意把「①用过但幕内每一步都要用」的
+/// 字段一并带上——回头重取就是第二个读数点，正是本拆分要避免的形状。
+///
+/// **全部 owned**（`D-222` 裁决 5 的后果）：控制面只有**一个**环，幕与幕在同一次
+/// 调用里接续，而每一幕的装配输入（读到的提示词 / 现分配的根 id / 用户发言）都是
+/// 那一幕的局部变量。借来的话，它们活不到环把它交给下一个动作的那一刻。
+pub(crate) struct Assembled {
+    // —— 交付包直通（幕内每一步消费）——
+    pub(crate) session: Arc<LoopSession>,
     pub(crate) provider: Arc<dyn ModelProvider>,
     pub(crate) parent: Option<Arc<dyn Plugin>>,
     pub(crate) ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
-    pub(crate) system_prompt: &'a str,
+    pub(crate) system_prompt: String,
     pub(crate) abort: ExecAbortSignal,
-    pub(crate) root_id: &'a str,
-    pub(crate) sink: &'a ExecEventSink,
-    pub(crate) user_text: &'a str,
+    pub(crate) root_id: String,
+    /// 一幕一个根：`true` = 本幕现分配的根（发骨架），`false` = 复用被续写轮的根。
+    pub(crate) fresh_root: bool,
+    pub(crate) sink: ExecEventSink,
+    pub(crate) user_text: String,
     pub(crate) window_turns: u64,
-    pub(crate) tools: &'a [CapabilityMeta],
+    pub(crate) tools: Arc<[CapabilityMeta]>,
     pub(crate) supplements: Option<SupplementFn>,
     pub(crate) report: Option<super::super::report_exec::ReportPort>,
     pub(crate) supplemental_no: Arc<std::sync::atomic::AtomicU64>,
@@ -47,7 +53,6 @@ pub(crate) struct Assembled<'a> {
     pub(crate) drive_seq: u64,
     pub(crate) collected: Arc<std::sync::Mutex<Vec<ChatNode>>>,
     pub(crate) bridge: Arc<UiBridge>,
-    pub(crate) emitter: tokio::task::JoinHandle<()>,
     pub(crate) actor: ActorSpec,
     pub(crate) principal: String,
     pub(crate) to: String,
@@ -141,8 +146,14 @@ pub(crate) async fn land_seam(
     Ok(())
 }
 
-/// 一幕的幕首（阶段①）：装配，产 [`Assembled`]。
-pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>, TurnExecExit> {
+/// 一幕的幕首（阶段①）：装配，产 [`Assembled`] 与流式桥的发射任务。
+///
+/// 发射任务的句柄**按值交回**而不是塞进 [`Assembled`]：它在幕末要被
+/// `classify_turn` 收干（见那一处），而 [`Assembled`] 要活到整幕收完——两样东西的
+/// 寿命不同，混在一个结构里就只能靠 `Option` 表达「已经取走了」。
+pub(crate) async fn assemble_turn(
+    req: ExecTurn<'_>,
+) -> Result<(Assembled, tokio::task::JoinHandle<()>), TurnExecExit> {
     let ExecTurn {
         session,
         provider,
@@ -162,6 +173,7 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
         report,
         supplemental_no,
         presentation_tree,
+        fresh_root,
     } = req;
     // 事实源：本会话的**唯一句柄**（由交付包按值带来、按引用分发）。
     // 与运行器落格、收件箱补落、轮外压缩进的是同一份实例——进程内不存在
@@ -302,33 +314,36 @@ pub(crate) async fn assemble_turn<'a>(req: ExecTurn<'a>) -> Result<Assembled<'a>
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
     let to = super::super::chat_loop::request_source_principal(ctx.as_ref());
 
-    Ok(Assembled {
-        session,
-        provider,
-        parent,
-        ctx,
-        system_prompt,
-        abort,
-        root_id,
-        sink,
-        user_text,
-        window_turns,
-        tools,
-        supplements,
-        report,
-        supplemental_no,
-        presentation_tree,
-        store,
-        turn_no,
-        user_seq,
-        drive_seq,
-        collected,
-        bridge,
+    Ok((
+        Assembled {
+            session: session.clone(),
+            provider,
+            parent,
+            ctx,
+            system_prompt: system_prompt.to_string(),
+            abort,
+            root_id: root_id.to_string(),
+            fresh_root,
+            sink: sink.clone(),
+            user_text: user_text.to_string(),
+            window_turns,
+            tools: Arc::from(tools),
+            supplements,
+            report,
+            supplemental_no,
+            presentation_tree,
+            store,
+            turn_no,
+            user_seq,
+            drive_seq,
+            collected,
+            bridge,
+            actor,
+            principal,
+            to,
+        },
         emitter,
-        actor,
-        principal,
-        to,
-    })
+    ))
 }
 
 /// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。

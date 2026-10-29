@@ -214,25 +214,42 @@ impl TurnRunner {
         session.set_prefix(prefix);
         session.set_reflex(reflex);
         // `head` 恒 `None`：本夹具没有编排层那一片状态，而它选到的行也不读它。
-        match super::super::turn_exec::drive(
-            &mut session,
-            store,
+        // 幕按裸形交进去（没有装配束 ⇒ 没有宿主面）：收幕把结局按值交回
+        // （`DriveEnd::Bare`），归类与落库本夹具不做。
+        let stage = super::super::turn_exec::StageRuntime::bare(
+            session,
+            store.clone(),
             llm,
             tok,
             sink,
             tools,
             dispatch,
-            &mut None,
+        );
+        let end = super::super::turn_exec::drive(
+            super::super::turn_exec::DriveStart::Ready(Box::new(
+                super::super::turn_exec::ReadyStage { stage, head: None },
+            )),
             actors,
         )
-        .await?
-        {
-            super::super::turn_exec::DriveEnd::Finished(outcome) => Ok(outcome),
+        .await
+        .map_err(|exit| match exit {
+            super::super::turn_exec::TurnExecExit::Failed(e) => ActorError::Read(e),
+            super::super::turn_exec::TurnExecExit::Aborted(_) => {
+                ActorError::Read(symbio_core::PluginError::InternalError(
+                    "环交出了中止出口（本夹具的绑定表里没有中止那一行）".into(),
+                ))
+            }
+        })?;
+        match end {
+            super::super::turn_exec::DriveEnd::Bare(outcome) => Ok(outcome),
             super::super::turn_exec::DriveEnd::Answered => {
                 Err(ActorError::Read(symbio_core::PluginError::InternalError(
                     "夹具没有编排层那一片状态，判不成答话".into(),
                 )))
             }
+            _ => Err(ActorError::Read(symbio_core::PluginError::InternalError(
+                "裸幕只交出结局（环交回了别的出口）".into(),
+            ))),
         }
     }
 }

@@ -539,8 +539,26 @@ fn drive_of(events: &[Event]) -> Option<(u64, Option<&Event>)> {
     Some((turn, None))
 }
 
+/// 幕锚：**一段** `drive` 从哪条事实起算（判据 12：一幕一个锚）。
+///
+/// 三档，各自是一次 `drive` 的触发事实：
+///
+/// | 锚 | 何时 | 为什么是它 |
+/// |---|---|---|
+/// | `user.message` | 用户新开一轮 | 外部输入变成请求的那一刻 |
+/// | `turn.stage{stage:"resume"}` | 审批 / 问答恢复 | 恢复动作变成请求的那一刻 |
+/// | `turn.stage{stage:"round", round > 0}` | 同一轮再接一幕 | 那一格就是 `continue-turn` 的出口（`D-222` 裁决 2）：债还清的那一刻即新幕的时刻，`now` 因此跟着它走 |
+///
+/// `round = 0` 的轮次格**不是**锚：它是首幕自己的账，锚要留在唤醒格上（否则
+/// `has_utterance` 读不到用户发言、判决行再也不会开账）。
 fn is_drive_anchor(e: &Event) -> bool {
-    e.kind == "user.message" || (e.kind == "turn.stage" && str_field(e, "stage") == Some("resume"))
+    e.kind == "user.message"
+        || (e.kind == "turn.stage"
+            && match str_field(e, "stage") {
+                Some("resume") => true,
+                Some("round") => u64_field(e, "round").is_some_and(|round| round > 0),
+                _ => false,
+            })
 }
 
 fn seq_of(e: &Event) -> u64 {
@@ -580,12 +598,17 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// `exhausted{no_progress}`。关账口径与 [`open_calls`] 同源（`(id, attempt)` 上
 /// 三条终局格），所以「在等」在派生面上只有一份定义。
 ///
-/// v12 加 `prepared`：本幕落过 `inputs` 阶段格没有。它的读者（`prepare-turn` 行）
-/// 已随 `turn` 端口退场（`D-222`），这一格因此无生产读者，去留由下一次行表归一决定。
+/// v12 加 `prepared`：本幕落过 `inputs` 阶段格没有。它是 `prepare-turn` 行的
+/// 开账条件（`owes turn_head.prepared:false`）。
 ///
 /// v13 加 `closure`：本幕最近一条收束格的 `reason`（现归 `D-222` 裁决 2 的前件）。它是「还开不开
 /// 下一幕」的唯一数据面——流向不再由 `close_turn` 的返回值决定。口径与 `closed`
 /// 逐字同源（同一条格、同一个幕锚），因此**读面不变**。
+///
+/// v15（`D-222` 裁决 2）：幕锚多一档——同一轮再接一幕的那条
+/// `turn.stage{stage:"round", round > 0}`。续幕复用轮号与用户格，锚只能落在它自己
+/// 落下的那一格上；否则首幕的判决 / 收束会被读成续幕的「已做过 / 已收束」，
+/// 而续幕其实要重跑接缝与召回。`round = 0` 的轮次格**不是**锚（它是首幕自己的账）。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -931,7 +954,11 @@ pub(crate) fn has_next_round(round: u64) -> bool {
 /// **幕的推进**（`D-222` 裁决 2）：本幕停下之后还开不开下一幕——开的话，下一幕是第几轮。
 ///
 /// 两条判据折成这一格：`closure = exhausted`（被输出上限掐断）∧ 轮次未到上限。
-/// 吐出一笔 `{round: N+1}` = 欠一次「再开一幕」；吐空 = 收工。
+/// 吐出一笔 `{turn, round: N+1}` = 欠一次「再开一幕」；吐空 = 收工。
+///
+/// `turn` 与 `round` 一起吐，是因为这一格要当 `continue-turn` 那一行的 `owes`：债键取
+/// `(turn, round)` 才让 `until`（新幕那一格 `turn.stage{stage:"round", round:N+1}`）
+/// 按同一个键关账——少了 `turn`，同一份切片上别的轮的续写债会共用一条键。
 ///
 /// ## 为什么是视图，不是调用点的两个 `if`
 ///
@@ -949,13 +976,16 @@ fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
     let head = turn_head(events, now);
     let exhausted = head.get("closure").and_then(|v| v.as_str())
         == Some(symbio_core::ClosureReason::Exhausted.as_str());
-    let Some(round) = head.get("round").and_then(|v| v.as_u64()) else {
+    let (Some(turn), Some(round)) = (
+        head.get("turn").and_then(|v| v.as_u64()),
+        head.get("round").and_then(|v| v.as_u64()),
+    ) else {
         return serde_json::Value::Array(Vec::new());
     };
     if !exhausted || !has_next_round(round) {
         return serde_json::Value::Array(Vec::new());
     }
-    serde_json::json!([{ "round": round + 1 }])
+    serde_json::json!([{ "turn": turn, "round": round + 1 }])
 }
 
 /// **中途汇报该不该说**：只吃日志与 `now`，不碰内存计数 / 墙钟。///
@@ -1148,11 +1178,12 @@ const SPOKE_KINDS: &[&str] = &[
     "chat.assistant.progress",
 ];
 
-/// 静默时钟的起点候选：用户看得见的任何一次动静。
+/// 静默时钟的起点候选：用户看得见的任何一次动静，外加每一幕的幕锚。
 ///
 /// 用户格 / 补充格 / 恢复幕都是「用户动了一下」，助手说过的每一句同理。恢复幕
 /// 也算——审批 / 回填发生在请求开始时，那一幕的静默应当从此刻起算，而不是从
-/// 几天前的那句用户话起算。
+/// 几天前的那句用户话起算。同一轮再接的一幕同此：它的 `round` 格就是新幕的锚，
+/// 静默从那一刻重新起算，上一幕的钟不借给下一幕。
 fn is_report_anchor(e: &Event) -> bool {
     is_drive_anchor(e) || e.kind == "turn.supplemented" || SPOKE_KINDS.contains(&e.kind.as_str())
 }
@@ -1243,7 +1274,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // `attempt`——判「这笔账关没关」的三个关账格里先前只有两个在面上。
     ViewDecl {
         name: "turn_head",
-        ver: 14,
+        ver: 15,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1293,9 +1324,11 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         eval: turn_head,
     },
     // 本幕落下的阶段事实：`decide` / `recall` / `compress` 三行的出口。
+    //
+    // v2：幕锚多一档（同一轮再接一幕的轮次格），本幕的窗口因此可以从续幕起算。
     ViewDecl {
         name: "turn_stages",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1308,12 +1341,15 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         eval: turn_stages,
     },
     // 本幕是否收束：执行行与反射行的出口。
+    //
+    // v2：幕锚多一档（同一轮再接一幕的轮次格），续幕因此不会被首幕的收束格读成「已关」。
     ViewDecl {
         name: "turn_closed",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
+            ("turn.stage", "round"),
             ("chat.assistant.final", "text"),
             ("chat.assistant.fallback", "text"),
         ],
@@ -1327,10 +1363,13 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     //
     // 读面与 `turn_head` 逐字相同——它就是把那一份折叠再折一格（`closure` 与 `round`），
     // 没有独立的事实来源。`evidence` 因此也照抄：这一格从不作任何行的出口，
-    // 它只作 `owes`（`continue-turn` 立起来之后），配图用不到它。
+    // 只作 `continue-turn` 那一行的 `owes`，配图用不到它。
+    //
+    // v2 起输出带 `turn`（债键要那一格，见 [`turn_next_round`] 的注释）：v1 只吐
+    // `round`，`until` 与 `owes` 就共用不了同一个键。
     ViewDecl {
         name: "turn_next_round",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1398,9 +1437,12 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // v6 把「一次边界只派发一次」（[D-163] 裁决 4）折进来：`due` 另要求最近一批
     // 已关闭的工具调用在静默锚之后。旧触发点只在批次边界被调用，这一条是免费的；
     // 合表之后环每一步都问，少了它 `interval = 0` 会对着同一批连报。
+    //
+    // v7：静默锚多一档（同一轮再接一幕的轮次格）——续幕的静默从它自己的锚起算，
+    // 上一幕的钟不借给下一幕。读面因此补 `turn.stage` 的 `round`（判锚要用它）。
     ViewDecl {
         name: "report_due",
-        ver: 6,
+        ver: 7,
         reads: &[
             ("session.config", "progress_enabled"),
             ("session.config", "progress_interval_ms"),
@@ -1414,6 +1456,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
             ("user.message", "text"),
             ("turn.supplemented", "text"),
             ("turn.stage", "stage"),
+            ("turn.stage", "round"),
             (EVENT_RESPONSE, "port"),
             (EVENT_RESPONSE, "via"),
             (EVENT_RESPONSE, "calls"),
@@ -1440,13 +1483,17 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         eval: report_due,
     },
     // 汇报的出口：每条汇报事实关掉它之前那段静默区间。
+    //
+    // v2：区间起点的候选与 `report_due` 同源——幕锚多一档（同一轮再接一幕的轮次格），
+    // 读面因此补 `turn.stage` 的 `round`。
     ViewDecl {
         name: "reported_anchors",
-        ver: 1,
+        ver: 2,
         reads: &[
             ("user.message", "text"),
             ("turn.supplemented", "text"),
             ("turn.stage", "stage"),
+            ("turn.stage", "round"),
             ("chat.assistant.reported", "text"),
             ("chat.assistant.opening", "text"),
             ("chat.assistant.final", "text"),

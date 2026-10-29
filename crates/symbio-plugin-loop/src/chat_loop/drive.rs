@@ -6,17 +6,20 @@
 //! 在判决之后落，义务环就用不上它们——所以写入点前移到主循环的闸门与判决之间：
 //! `gate_turn` 之前不写（中止边界不产生事实），`decide` 之前写完。
 //!
-//! ## 两种幕
+//! ## 三种幕
 //!
 //! - **新轮**：turn 号 = 事实切片里既有用户格计数；落一条 `user.message`
 //!   （`u-{turn}`），它的 seq 同时是本幕的锚。
 //! - **续写幕**（审批 / 问答恢复）：复用被续写轮的号，**不新开用户格**；落一条
 //!   `turn.stage{stage:"resume"}`，它的 seq 是本幕的锚。同一轮可以先后恢复两次
 //!   同类动作，锚的幂等键因此带幕序数。
+//! - **再接一幕**（同一轮被输出上限掐断之后，`D-222` 裁决 2）：复用轮号与用户格，
+//!   落一条 `turn.stage{stage:"round", round: N+1}`——**那一格自己就是本幕的锚**
+//!   （判据 12：一幕一个锚）。它的幂等段是轮次本身（同一轮里 `round` 单调增），
+//!   所以不必借别的事实的 seq。
 //!
-//! 两种幕都落 `session.config`（当轮生效的配置）与 `turn.stage{stage:"round"}`。
-//! 配置读的是**这一轮**的活值，落成事实之后判决只读事实：回放看到的永远是
-//! 「那一轮用的配置」，不是进程此刻的值。
+//! 三种幕都落 `session.config`（当轮生效的配置）。配置读的是**这一轮**的活值，
+//! 落成事实之后判决只读事实：回放看到的永远是「那一轮用的配置」，不是进程此刻的值。
 
 use symbio_core::{count_user_messages, Entity, Event, Seq, Store, Verb};
 use symbio_plugin_api::events::EVENT_USER_MESSAGE;
@@ -82,6 +85,14 @@ fn last_user_message(
         .unwrap_or((None, String::new(), None))
 }
 
+/// 本轮用户发言（最近一条用户消息节点的正文；无用户消息 ⇒ 空串）。
+///
+/// 同一轮的第二幕起用它：那一幕的唤醒格已由 `continue-turn` 落过，`begin_drive`
+/// 不再被调用，而执行体仍要按发言判技能命中（`execute_turn` 的输入）。
+pub(crate) fn current_user_text(context: &super::state::SessionContext) -> String {
+    last_user_message(context).1
+}
+
 /// 恢复动作的事实名（`turn.stage{stage:"resume"}` 的 `result`）。
 ///
 /// 与 `ResumeAction` 的 serde 线格式同值；`RetrySubtree` / `RetryCompaction`
@@ -99,6 +110,17 @@ pub(crate) fn resume_kind(action: &symbio_core::chat_node::ResumeAction) -> &'st
     }
 }
 
+/// 这一跑是从哪儿开的幕（`D-222` 裁决 1–2）。
+///
+/// 前两档是**交换点**：外部的人话 / 恢复动作变成一笔请求，环从那一刻起才有账，
+/// 所以它们在环外。第三档不是外部输入——它是同一轮里「再跑一段」那笔**债**的兑现，
+/// 前件（`closure = exhausted` ∧ 轮次未到上限）与出口（新的 `round` 格）都在表上。
+enum Wake<'a> {
+    NewTurn,
+    Resume(&'a str),
+    Continue,
+}
+
 /// 开一幕：唤醒格（用户格 / 恢复格）→ 收租 → 配置 → 本幕锚 → 刷新本轮事实切片。
 ///
 /// 唤醒格排在收租**之前**：`now` 只能来自那条事实的 `ts`（判据 12），所以本次
@@ -112,6 +134,37 @@ pub(crate) fn begin_drive(
     req: &super::state::TurnRequest,
     resume_kind: Option<&str>,
 ) -> Result<Drive, super::state::TurnExit> {
+    open_drive(
+        context,
+        turn,
+        req,
+        match resume_kind {
+            Some(kind) => Wake::Resume(kind),
+            None => Wake::NewTurn,
+        },
+    )
+}
+
+/// 同一轮里**再接一幕**：轮号与用户格都复用，本幕的锚是刚落下的 `round` 格。
+///
+/// 与 [`begin_drive`] 分成两个入口只为一件事：这一档没有外部输入。它由
+/// `continue-turn` 那笔债兑现（`D-222` 裁决 2），而债的前件在表上；把它和新轮
+/// 混成一个 `None` 会让「本幕是不是用户新开的一轮」在代码里没有答案——续写的
+/// 第二幕会重落一条同文本的用户格、轮号原地膨胀。
+pub(crate) fn continue_drive(
+    context: &super::state::SessionContext,
+    turn: &mut super::state::TurnState,
+    req: &super::state::TurnRequest,
+) -> Result<Drive, super::state::TurnExit> {
+    open_drive(context, turn, req, Wake::Continue)
+}
+
+fn open_drive(
+    context: &super::state::SessionContext,
+    turn: &mut super::state::TurnState,
+    req: &super::state::TurnRequest,
+    wake: Wake<'_>,
+) -> Result<Drive, super::state::TurnExit> {
     let store = context.session.facts().ok_or_else(|| {
         super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
             "v2 执行需要持久会话（临时会话无事实源）".into(),
@@ -123,8 +176,12 @@ pub(crate) fn begin_drive(
     // 「跳过收租继续开新幕」——没有表就没有 `owed`，那一幕只会静默停在原处。
     let frozen = super::super::loop_rows::table().map_err(super::state::TurnExit::Failed)?;
     let snapshot = store.range(Seq::new(0));
-    let (turn_no, user_seq, drive_seq, user_text) = match resume_kind {
-        Some(kind) => {
+    // `(轮号, 用户格, 用户发言, 本幕轮次, 幕锚)`。
+    //
+    // 幕锚 `Some(seq)` = 唤醒格（用户格 / 恢复格）；`None` = 续幕那条 `round` 格
+    // ——它自己那一格的 seq 要落完才知道，所以锚在下面才定。
+    let (turn_no, user_seq, user_text, round, anchor) = match wake {
+        Wake::Resume(kind) => {
             let (turn_no, user_seq) = super::super::turn_exec::last_open_turn(&snapshot)
                 .ok_or_else(|| {
                     super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
@@ -157,9 +214,15 @@ pub(crate) fn begin_drive(
                 )))
             })?;
             let drive_seq = seqs.first().copied().unwrap_or(0);
-            (turn_no, user_seq, drive_seq, last_user_message(context).1)
+            (
+                turn_no,
+                user_seq,
+                last_user_message(context).1,
+                turn.request_round,
+                Some(drive_seq),
+            )
         }
-        None => {
+        Wake::NewTurn => {
             let turn_no = count_user_messages(&snapshot, &CHAT_VOCAB, &MESSAGE_VOCAB);
             let (node_id, text, meta) = last_user_message(context);
             let mut payload = serde_json::json!({ "text": text, "id": node_id });
@@ -183,7 +246,55 @@ pub(crate) fn begin_drive(
                         format!("用户格落格失败：{e:?}"),
                     ))
                 })?;
-            (turn_no, seq.value(), seq.value(), text)
+            (
+                turn_no,
+                seq.value(),
+                text,
+                turn.request_round,
+                Some(seq.value()),
+            )
+        }
+        Wake::Continue => {
+            // 轮次由**那一格**回答（`turn_next_round`）：`continue-turn` 的前件与
+            // 这里读的是同一个视图，不在这里按「当前轮次 + 1」再数一遍。
+            let round =
+                super::super::loop_rows::next_stage_round(&snapshot, turn.turn_no, turn.now_ms)
+                    .ok_or_else(|| {
+                        super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(
+                            "续幕没有下一轮的判据（continue-turn 的前件与事实不一致）".into(),
+                        ))
+                    })?;
+            (
+                turn.turn_no,
+                turn.user_seq,
+                last_user_message(context).1,
+                usize::try_from(round).unwrap_or(usize::MAX),
+                None,
+            )
+        }
+    };
+    // ── 本幕的锚 ─────────────────────────────────────────────────────────
+    //
+    // 续幕的锚就是它的 `round` 格本身（判据 12：一幕一个锚），所以那一格要**先**
+    // 落、再从它的 seq 取 `drive_seq`。唤醒幕的锚是其唤醒格，`round` 格跟在
+    // 配置之后落（与合表之前逐字同序）。
+    let (drive_seq, round_landed) = match anchor {
+        Some(seq) => (seq, false),
+        None => {
+            // 幂等段用轮次本身：同一轮里 `round` 单调增，不借别的事实。
+            let seqs = stage_events::land_with_seqs(
+                store.as_ref(),
+                turn_no,
+                user_seq,
+                "system",
+                &[StageFact::request_round(round, &round.to_string())],
+            )
+            .map_err(|e| {
+                super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
+                    "轮次阶段事实落格失败：{e:?}"
+                )))
+            })?;
+            (seqs.first().copied().unwrap_or(0), true)
         }
     };
     // ── 本次 drive 的 `now` = 刚落下这条唤醒事实的 `ts`（判据 12）─────────────
@@ -250,24 +361,25 @@ pub(crate) fn begin_drive(
                 "配置事实落格失败：{e:?}"
             )))
         })?;
-    stage_events::land(
-        store.as_ref(),
-        turn_no,
-        user_seq,
-        "system",
-        &[StageFact::request_round(
-            turn.request_round,
-            &drive_seq.to_string(),
-        )],
-    )
-    .map_err(|e| {
-        super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
-            "轮次阶段事实落格失败：{e:?}"
-        )))
-    })?;
+    // 唤醒幕的轮次格跟在配置之后（与合表之前逐字同序）；续幕那一格已先落——它是锚。
+    if !round_landed {
+        stage_events::land(
+            store.as_ref(),
+            turn_no,
+            user_seq,
+            "system",
+            &[StageFact::request_round(round, &drive_seq.to_string())],
+        )
+        .map_err(|e| {
+            super::state::TurnExit::Failed(symbio_core::PluginError::InternalError(format!(
+                "轮次阶段事实落格失败：{e:?}"
+            )))
+        })?;
+    }
     turn.turn_no = turn_no;
     turn.user_seq = user_seq;
     turn.drive_seq = drive_seq;
+    turn.request_round = round;
     turn.now_ms = now_ms;
     turn.facts = store.range(Seq::new(0));
     Ok(Drive { user_text })

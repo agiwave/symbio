@@ -11,7 +11,7 @@
 use super::*;
 
 /// 一轮的执行（阶段④）：落格——消费 [`Settled`]，产本轮的最终结果。
-pub(crate) fn persist_turn<'a, 'b>(s: Settled<'a, 'b>) -> Result<ExecTurnResult, TurnExecExit> {
+pub(crate) fn persist_turn(s: Settled<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let Settled {
         session,
         store,
@@ -89,7 +89,7 @@ pub(crate) fn persist_turn<'a, 'b>(s: Settled<'a, 'b>) -> Result<ExecTurnResult,
         &all,
         turn_no,
         user_seq,
-        user_text,
+        &user_text,
         &principal,
         &format!("t{turn_no}"),
         response,
@@ -143,7 +143,7 @@ pub(crate) fn persist_turn<'a, 'b>(s: Settled<'a, 'b>) -> Result<ExecTurnResult,
 ///
 /// ## 它解决的是什么
 ///
-/// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`super::drive_opened`]**；
+/// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`super::drive`]**；
 /// 若就此返回，那一轮在事实网格里只有用户格、没有 `chat.assistant.final`。于是下一轮
 /// prompt 里这次问答**整个消失**，`session/stats` 的轮次计数也缺收束——而
 /// `messages.json` 里有（`context.messages` 落库）⇒ **两条真源**。完全静默：不报错、
@@ -155,7 +155,7 @@ pub(crate) fn persist_turn<'a, 'b>(s: Settled<'a, 'b>) -> Result<ExecTurnResult,
 /// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来。所以答话交给运行器
 /// （`TurnInput::final_reply`），收束格仍由它落。
 ///
-/// ## 与 [`super::drive_opened`] 的差异
+/// ## 与生成路径的差异
 ///
 /// 1. **承诺 / 任务表 / 熔断不写**：那三族的事实来源是工具交换（派活、就绪集、
 ///    失败），`Answered` 轮一次工具都不调，没有可记的东西。
@@ -181,7 +181,7 @@ pub(crate) fn persist_turn<'a, 'b>(s: Settled<'a, 'b>) -> Result<ExecTurnResult,
 pub(crate) async fn execute_final_reply_turn(
     session: &LoopSession,
     ctx: &Arc<dyn symbio_core::PluginInvokeRequest>,
-    provider: Arc<dyn ModelProvider>,
+    _provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
     // 轮号与溯源锚由编排层在判决之前定下：答话轮同样先落用户格，
     // 这里只收三个 seq（`drive_seq` 供派发格幂等键）。
@@ -205,7 +205,7 @@ pub(crate) async fn execute_final_reply_turn(
     reasoning: Option<(String, String)>,
     // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与工具轮同源：
     // `run_seam` 从 `context.consolidated` 取走的那一份）。
-    // 答话轮在步骤 2 就短路收尾，**不进** [`super::drive_opened`]，所以它也得自己落这一格
+    // 答话轮在步骤 2 就短路收尾，**不进** [`super::drive`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
     consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
@@ -253,8 +253,9 @@ pub(crate) async fn execute_final_reply_turn(
         &actor,
     )
     .map_err(|e| PluginError::InternalError(format!("派发档落格失败：{e:?}")))?;
-    let llm = ProviderLlmAdapter::for_turn(provider, "", abort.clone());
-    let tok = TokenIssuer::issue_deep();
+    // 本入口不开环 ⇒ 不需要模型端口与令牌（那两者只由 [`super::drive`] 的动作读）。
+    // `provider` 仍照签名收下（`_provider`）：答话轮的调用点与工具轮同形，删参数只会
+    // 让两侧漂。
     let input = TurnInput {
         turn: turn_no,
         user_seq,
@@ -287,44 +288,19 @@ pub(crate) async fn execute_final_reply_turn(
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
         abort: Some(abort),
     };
-    // 草稿在幕首就建（`D-222` 订正 3）：`begin` 与「驱动」分成两个动作。答话轮没有
-    // 备输入的产物可填（一次请求都不发、也不是快路），所以「填」这一步是空的——
-    // 但两步的分界照样在这里，与工具轮那条路同一个形状。
-    //
     // `Run` 这一支在本入口**按构造不可达**（`final_reply` 非空 ⇒ `prepare_turn` 的 1b
-    // 就地收束、返回 `Done`）。它仍照工具轮那一条路的形状接上基线渲染：真到了这里，
-    // 「草稿没有基线」是比「多渲染一次」严重得多的错。
-    let llm: std::sync::Arc<dyn symbio_core::LlmAdapter> = std::sync::Arc::new(llm);
+    // 就地收束、返回 `Done`）。本入口**不开环**（`D-222` 裁决 5：环只住在
+    // [`super::drive`]，而它要的那一片编排层状态这一轮根本没有）——真到了这里说明
+    // 收束路径与交付包对不上，出声。
     let outcome = match TurnRunner::begin(store.as_ref(), input)
         .await
         .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
     {
         TurnSessionBegin::Done(outcome) => outcome,
-        TurnSessionBegin::Run(mut session) => {
-            session.render_base(store.as_ref());
-            match super::drive(
-                &mut session,
-                &store,
-                llm,
-                tok,
-                Arc::new(SilentDeltas),
-                Arc::from(Vec::new()),
-                None,
-                &mut None,
-                super::super::loop_rows::ACTORS,
-            )
-            .await
-            .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?
-            {
-                super::DriveEnd::Finished(outcome) => outcome,
-                // `final_reply` 非空 ⇒ 1b 就地收束，环根本不该起来；真起来了也不会
-                // 判成答话（没有判决行）。落到这里说明草稿与收束路径对不上，出声。
-                super::DriveEnd::Answered => {
-                    return Err(PluginError::InternalError(
-                        "定稿答话轮在环里被判成了答话（按构造不可达）".into(),
-                    ))
-                }
-            }
+        TurnSessionBegin::Run(_) => {
+            return Err(PluginError::InternalError(
+                "定稿答话轮开出了驱动环（按构造不可达）".into(),
+            ))
         }
     };
     // ── 记忆与学习（与 [`persist_turn`] 同一条口径）──────────────────────

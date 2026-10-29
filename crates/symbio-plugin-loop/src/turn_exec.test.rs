@@ -210,9 +210,9 @@ impl symbio_core::ExecTranscriptWriter for DiscardWriter {
 
 /// 一幕的执行：装配 → 开轮 → **一个环**（轮首 / 接缝 / 轮内）→ 归类 / 落格。
 ///
-/// 与生产 `stage::run_stage` 只差两处：**幕首**那几行（用户格 / 配置格 / 轮次格由
-/// 本文件的 `seed_*` 直给）与**幕末**的落库与镜像回灌（`settle`）。环里那一段是
-/// 同一个 `drive`、同一张绑定表——轮首四行与接缝不再由夹具代跑，而是照旧欠账、
+/// 与生产 [`super::drive`] 的 `Control` 入口只差两处：**幕首**那几行（用户格 /
+/// 配置格 / 轮次格由本文件的 `seed_*` 直给）与**幕末**的落库与镜像回灌。环里那一段
+/// 是同一个 `drive`、同一张绑定表——轮首四行与接缝不再由夹具代跑，而是照旧欠账、
 /// 照旧由 `prio` 选中（没开账的行不会被选中，判据因此仍落在本文件那几条契约上）。
 async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let ExecTurn {
@@ -248,7 +248,7 @@ async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit>
         .unwrap_or_default();
     let now_ms = super::super::loop_rows::wake_now_ms(&facts, drive_seq);
 
-    // 环要借的那一片可控状态：生产由 `run_stage` 的幕首备好，这里同一形状。
+    // 环要借的那一片可控状态：生产由 `turn_exec::drive` 的幕首备好，这里同一形状。
     // `input_utterance` 留 `None`：Q1 的委派判定因此不下结论（与退役前那条旁路同形）。
     let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
         provider: provider.clone(),
@@ -279,14 +279,22 @@ async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit>
         ..Default::default()
     };
 
-    let assembled = super::assemble_turn(super::ExecTurn {
-        session: session.as_ref(),
+    let turn_req = super::super::chat_loop::state::TurnRequest {
+        auto_compress: false,
+        load_history: true,
+        system_prompt: None,
+    };
+    // 请求句柄在装配时被搬进装配束，而轮首那一片也要它（分发方与它同源）——先克隆。
+    let request_ctx = ctx.clone();
+    let (assembled, emitter) = super::assemble_turn(super::ExecTurn {
+        session,
         provider,
         parent,
         ctx,
         system_prompt,
         abort,
         root_id,
+        fresh_root: true,
         sink,
         user_text,
         turn_no,
@@ -300,40 +308,42 @@ async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit>
         presentation_tree,
     })
     .await?;
-    let opened = super::open_turn(&assembled).await?;
-    let flow = match opened {
-        // 开轮就收束（首请求前中止）：轮首那几行不再跑（`D-222` 订正 3）。
-        super::Opened::Done(outcome) => {
-            super::OpenedFlow::Running(Box::new(assembled.into_running(outcome)))
-        }
-        super::Opened::Run(run) => {
-            super::drive_opened(
-                assembled,
-                run,
-                super::HeadEnv {
-                    orchestrator: &orchestrator,
-                    context: &mut context,
-                    turn: &mut turn,
-                    fresh_root: true,
-                },
-            )
-            .await?
-        }
-    };
-    match flow {
-        // 判成「就此答话」的一轮：收束格由编排层落，本夹具没有那一段
-        // （它由 `stage.test.rs` 钉）。走到这里说明本文件的夹具寄存了一体答话，
-        // 而它不该有——按失败报出，不静默交回一个空结果。
-        super::OpenedFlow::Answered => Err(TurnExecExit::Failed(PluginError::InternalError(
-            "夹具的一轮不会判成答话".into(),
-        ))),
-        super::OpenedFlow::Running(running) => {
+    let open = super::open_turn(&assembled).await?;
+    // 幕首之后那一半（分发方 / 汇报落地面 / 宿主面）与生产同一个构造点：夹具自己备的
+    // 只是幕首（用户格 / 配置格由本文件的 `seed_*` 直给）。
+    let stage = super::stage_runtime(assembled, emitter, open);
+    let head = stage.head_parts(
+        orchestrator.clone(),
+        request_ctx,
+        &mut context,
+        &mut turn,
+        &turn_req,
+    );
+    match super::drive(
+        super::DriveStart::Ready(Box::new(super::ReadyStage { stage, head })),
+        super::super::loop_rows::ACTORS,
+    )
+    .await?
+    {
+        // 环跑到收束格出现：归类（中止 / 授权拒 / 正常）与落格按本文件要验的
+        // 那几条契约做——生产的镜像并入与封根不在夹具里（`stage.test.rs` 钉）。
+        super::DriveEnd::Running(running) => {
             match super::classify_turn(*running, turn.recall_view.as_ref(), &turn.skill_route)
                 .await?
             {
                 super::Classified::Finished(v) => v,
                 super::Classified::Settled(settled) => super::persist_turn(settled),
             }
+        }
+        // 判成「就此答话」/ 幕间中止都是控制面才有的两路：本夹具的一轮不会走到
+        // （它不带裁决寄存、也没有第二幕）。按失败报出，不静默交回一个空结果。
+        super::DriveEnd::Answered => Err(TurnExecExit::Failed(PluginError::InternalError(
+            "夹具的一轮不会判成答话".into(),
+        ))),
+        super::DriveEnd::Boundary | super::DriveEnd::Completed | super::DriveEnd::Bare(_) => {
+            Err(TurnExecExit::Failed(PluginError::InternalError(
+                "夹具的一轮只走收束一路（环交回了别的结局）".into(),
+            )))
         }
     }
 }
@@ -851,6 +861,230 @@ fn setup_with_settings(tune: impl FnOnce(&mut symbio_core::TurnSettings)) -> Fix
         facts,
         port,
     }
+}
+
+// ==================== 一幕的直线（生产入口 `DriveStart::Control`）====================
+//
+// 三条判据各钉一环幕落的一格：备输入的出口（`result:"ready"`）、重试分支的登记、
+// 定稿答话轮就地收束（`result:"closed"`）。入口取**生产那一个**：控制面交一幕，
+// 环自己开幕、选债、收幕——夹具只备请求面，不替环跑任何一行。
+
+/// 控制面夹具：请求面（编排器 / 上下文 / 本轮状态）+ 待追加的那条用户消息。
+struct ControlHarness {
+    facts: Arc<EventStore>,
+    sink: symbio_core::ExecEventSink,
+    ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    orchestrator: Arc<super::super::chat_loop::state::ChatOrchestrator>,
+    context: super::super::chat_loop::state::SessionContext,
+    turn: super::super::chat_loop::state::TurnState,
+    req: super::super::chat_loop::state::TurnRequest,
+    message: Option<cm::ChatNode>,
+}
+
+/// 判决 / 措辞 / 压缩**都关掉**：本组问的是幕的骨架，不是判决判成什么。
+fn control_harness() -> ControlHarness {
+    let facts = Arc::new(EventStore::new());
+    let port = Arc::new(FakeSessionPort::new(Vec::new()).with_facts(facts.clone()));
+    let mut settings = default_settings();
+    settings.classify_enabled = false;
+    settings.compose_enabled = false;
+    settings.auto_compress = false;
+    let spec = turn_spec(
+        "turn_exec_control",
+        std::env::temp_dir().join("symbio-test/tool-archives"),
+        std::env::temp_dir().join("symbio-test/transcripts"),
+        settings,
+    );
+    let session = Arc::new(loop_session(spec, facts.clone(), port));
+    let sink =
+        symbio_core::ExecEventSink::direct(Arc::new(CollectingFrames(Mutex::new(Vec::new()))));
+    let orchestrator = Arc::new(super::super::chat_loop::state::ChatOrchestrator {
+        provider: Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
+        parent: None,
+        context_limit: 8192,
+        session: session.clone(),
+        writer: Arc::new(DiscardWriter),
+        compose_enabled: false,
+        opening_enabled: false,
+        presentation_tree: symbio_core::node_build::PresentationTree::Grouped,
+    });
+    ControlHarness {
+        facts,
+        sink,
+        ctx: test_ctx(),
+        orchestrator,
+        context: super::super::chat_loop::state::SessionContext {
+            messages: Vec::new(),
+            session,
+            consolidated: None,
+        },
+        turn: super::super::chat_loop::state::TurnState {
+            abort: symbio_core::ExecAbortSignal::new(),
+            ..Default::default()
+        },
+        req: super::super::chat_loop::state::TurnRequest {
+            auto_compress: false,
+            load_history: true,
+            system_prompt: None,
+        },
+        message: Some(cm::ChatNode {
+            id: "m1".into(),
+            principal: Some(symbio_core::principal::Principal::new(
+                symbio_core::principal::PrincipalKind::Person,
+                "user",
+            )),
+            msg_type: Some(cm::NodeKind::Body),
+            content: Some(cm::MessageContent::Text("你好".into())),
+            ..Default::default()
+        }),
+    }
+}
+
+/// 走生产入口跑这一幕（开幕 / 选债 / 收幕都在环里）。
+async fn drive_control(h: &mut ControlHarness) -> Result<super::DriveEnd, super::TurnExecExit> {
+    super::drive(
+        super::DriveStart::Control(Box::new(super::Control {
+            orchestrator: &h.orchestrator,
+            orchestrator_arc: &h.orchestrator,
+            ctx: &h.ctx,
+            sink: &h.sink,
+            context: &mut h.context,
+            turn: &mut h.turn,
+            req: &h.req,
+            single_message: h.message.take(),
+            resume_kind: None,
+        })),
+        super::super::loop_rows::ACTORS,
+    )
+    .await
+}
+
+/// 本幕的 `inputs` 阶段格。
+fn inputs_fact(facts: &[Event]) -> Option<&Event> {
+    facts.iter().find(|e| {
+        e.kind == "turn.stage" && e.payload.get("stage").and_then(|v| v.as_str()) == Some("inputs")
+    })
+}
+
+/// 备输入落的是一格 `inputs` 阶段事实（`result:"ready"`），随后这一幕照常跑完。
+#[tokio::test]
+async fn drive_lands_the_inputs_stage_and_runs_the_turn() {
+    use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
+
+    let mut h = control_harness();
+    let end = drive_control(&mut h).await.expect("幕跑得完");
+    assert!(
+        matches!(end, super::DriveEnd::Completed),
+        "正常一幕收工（控制面交回已收束）"
+    );
+
+    let all = h.facts.range(Seq::new(0));
+    let landed = inputs_fact(&all).expect("备输入的出口进了日志");
+    assert_eq!(landed.payload["result"], "ready");
+    assert_eq!(landed.payload["round"], 0);
+    assert_eq!(landed.turn, h.turn.turn_no);
+
+    assert!(
+        all.iter().any(|e| e.kind == EVENT_CHAT_ASSISTANT_FINAL),
+        "这一幕跑到了收束：收束格在"
+    );
+}
+
+/// 重试开出的**新支在备输入之后登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+///
+/// 钉三件事，缺一件整套分支就读不对：
+/// - `into` 用的是**这一幕才存在的新根 id**（`retry_of` 只是寄存的旧根，新根要到幕首
+///   定下才有；早一格落它就只能按轮号归组，而一幕一个根、幕间续写会让同轮开出多个根）；
+/// - 它是断言类事实 ⇒ 溯源指向本轮用户格（I2，缺了它整条 WAL 重放会被判违规）；
+/// - `take()` 即消费 ⇒ **第二幕不再另开一支**（否则幕间续写会凭空多出一个候选，
+///   用户看到 `2/3` 却只重试过一次）。
+#[tokio::test]
+async fn drive_lands_one_branch_fact_for_a_retry_and_consumes_the_registration() {
+    use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+
+    let mut h = control_harness();
+    h.turn.retry_of = Some("t-old".to_string());
+    let end = drive_control(&mut h).await.expect("幕跑得完");
+    assert!(matches!(end, super::DriveEnd::Completed));
+
+    assert!(
+        h.turn.retry_of.is_none(),
+        "寄存的旧根被取走：同一幕不会落两条分支格"
+    );
+    let root_id = h
+        .turn
+        .branch_root
+        .clone()
+        .expect("收尾记下了本幕的根（组内标注要用）");
+
+    let branch_facts = |h: &ControlHarness| -> Vec<Event> {
+        h.facts
+            .range(Seq::new(0))
+            .into_iter()
+            .filter(|e| e.kind == EVENT_TURN_BRANCH)
+            .collect()
+    };
+    let landed = branch_facts(&h);
+    assert_eq!(landed.len(), 1, "一次重试只开一支：{landed:?}");
+    assert_eq!(landed[0].payload["of"], "t-old");
+    assert_eq!(landed[0].payload["into"], root_id.as_str());
+    assert_eq!(
+        landed[0].produced_by,
+        Some(h.turn.user_seq),
+        "分支格是断言类：溯源必须指向本轮用户格"
+    );
+    assert!(!landed[0].actor.is_empty(), "actor 取本轮主体，不留空");
+
+    // 续写幕：`retry_of` 已被取走 ⇒ 再走一次登记是空操作，事实面不多第二支。
+    // 不真跑第二幕：同一轮已经收束，运行器不会再收束第二条；这里直接问那个登记口
+    // ——它正是每一幕都会调的那一处。
+    h.turn.drive_seq += 100;
+    let store: Arc<dyn Store<Event = Event>> = h.facts.clone();
+    super::land_retry_branch(store.as_ref(), h.ctx.as_ref(), &mut h.turn, "r-next")
+        .expect("登记是空操作");
+    assert_eq!(branch_facts(&h).len(), 1, "幕间续写不再开第二支");
+}
+
+/// 定稿答话轮：轮首就地收束 ⇒ 环**不进**轮内环，一次模型往返都不发。
+///
+/// 收束格（`inputs.result:"closed"`）由编排层在 `DriveEnd::Answered` 之后落——环
+/// 里没有编排器。本用例照 `chat_loop` 那一臂问同一个落格口：只落 `ready` 的话，
+/// 收束的那一幕在事实面上与「正常跑完」同形——一个已经答完的轮会再答一次。
+#[tokio::test]
+async fn drive_stops_at_an_in_place_answer_and_lands_closed_without_a_model_request() {
+    let mut h = control_harness();
+    // 判决执行体寄存下来的那体答话（`run_classify` 的产出形态）。
+    h.turn.head_answer = Some(super::super::chat_loop::AnsweredTurn {
+        utterance: "你好".into(),
+        reply: "你好，有什么可以帮你？".into(),
+        cost_ms: 0,
+        dialog: super::super::turn_runner::DialogFacts {
+            id: "a-1".into(),
+            reason: "answered".into(),
+            exclude_from_context: false,
+        },
+        reasoning: None,
+    });
+
+    let end = drive_control(&mut h).await.expect("收束不是失败");
+    assert!(
+        matches!(end, super::DriveEnd::Answered),
+        "判成答话的一轮交回 `Answered`，不进轮内环"
+    );
+
+    let store: Arc<dyn Store<Event = Event>> = h.facts.clone();
+    super::land_inputs(store.as_ref(), h.ctx.as_ref(), &h.turn, "closed").expect("收束也要落格");
+
+    let all = h.facts.range(Seq::new(0));
+    let landed = inputs_fact(&all).expect("收束也要落格（否则与「还没备」同形）");
+    assert_eq!(landed.payload["result"], "closed");
+    assert!(
+        all.iter()
+            .filter(|e| e.kind == "request" && e.payload["port"] == "model")
+            .count()
+            == 0,
+        "定稿答话轮不进轮内环，零模型往返"
+    );
 }
 
 /// 成功轮：事实原生入格（user + final，不变量绿），增量经 UiBridge 回 UI，

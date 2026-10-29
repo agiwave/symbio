@@ -20,7 +20,7 @@ pub(crate) struct ExecTurnResult {
     pub messages: Vec<ChatNode>,
 }
 
-/// [`super::super::stage::run_stage`] 的退出类型。
+/// 一幕执行的退出类型（[`super::drive`] 与 [`super::persist`] 共用的那一份）。
 ///
 /// 为什么不是裸 `PluginError`：中止出口要携带**半截产出**（`Vec<ChatNode>`），
 /// 而那批节点是 chat 域词汇。`PluginError` 是跨插件共享的错误词汇（`model`
@@ -56,14 +56,14 @@ impl From<PluginError> for TurnExecExit {
 /// 阶段③ 的出口：本轮已提前了结（[`Classified::Finished`]），或正常收束待落格
 /// （[`Classified::Settled`]）。刻意收全三个提前出口于类型——落库段拿不到被跳过的
 /// 结局，就不会出现「中止轮还去写派生事实」的顺序漂移。
-pub(crate) enum Classified<'a, 'b> {
+pub(crate) enum Classified<'b> {
     Finished(Result<ExecTurnResult, TurnExecExit>),
-    Settled(Settled<'a, 'b>),
+    Settled(Settled<'b>),
 }
 
 /// 阶段③ ⇒ 阶段④ 的交付束：收束结局 + 桥上取下的节点身份 + 落库还要用的一切。
-pub(crate) struct Settled<'a, 'b> {
-    pub(crate) session: &'a LoopSession,
+pub(crate) struct Settled<'b> {
+    pub(crate) session: Arc<LoopSession>,
     pub(crate) store: Arc<dyn Store<Event = Event>>,
     pub(crate) outcome: super::super::turn_runner::TurnOutcome,
     pub(crate) produced: Vec<ChatNode>,
@@ -73,7 +73,7 @@ pub(crate) struct Settled<'a, 'b> {
     pub(crate) user_seq: u64,
     pub(crate) principal: String,
     pub(crate) to: String,
-    pub(crate) user_text: &'a str,
+    pub(crate) user_text: String,
     /// 本轮的召回视图与技能观测（轮末 `record_learning` 的两份入参）。
     ///
     /// 借自调用方的本轮状态（[`super::super::chat_loop::state::TurnState`]），
@@ -87,11 +87,11 @@ pub(crate) struct Settled<'a, 'b> {
 }
 
 /// 一轮的执行（阶段③）：结局归类——消费 [`Running`]，产 [`Classified`]。
-pub(crate) async fn classify_turn<'a, 'b>(
-    r: Running<'a>,
+pub(crate) async fn classify_turn<'b>(
+    r: Running,
     recalled: Option<&'b super::super::recall::RecallView>,
     skill_obs: &'b [(String, bool)],
-) -> Result<Classified<'a, 'b>, TurnExecExit> {
+) -> Result<Classified<'b>, TurnExecExit> {
     let Running {
         session,
         store,
@@ -118,7 +118,12 @@ pub(crate) async fn classify_turn<'a, 'b>(
     // 一次都没被调过），不是空节点。
     let (child_id, child_text) = bridge.current_node().unwrap_or_default();
     let (reasoning_child_id, reasoning_text) = bridge.current_reasoning().unwrap_or_default();
-    // 桥归零 ⇒ 通道关闭 ⇒ 发射端排空后退出。
+    // 通道关闭 ⇒ 发射端排空后退出。
+    //
+    // **显式关**而不是等 `drop(bridge)`：草稿里的 `nodes` 闭包捕获着同一份
+    // `Arc<UiBridge>`，而草稿未必在本函数之前已释放（收幕那一侧才 drop 它）。
+    // 只靠引用计数归零，这里就会等一个永不关闭的通道。
+    bridge.close();
     drop(bridge);
     emitter
         .await
@@ -138,13 +143,13 @@ pub(crate) async fn classify_turn<'a, 'b>(
         let mut partial = produced;
         if !child_text.is_empty() {
             let mut n = symbio_core::node_build::llm_build_text_node(
-                root_id,
+                &root_id,
                 &child_text,
                 None,
                 child_id,
                 &session_principal,
             );
-            symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            symbio_core::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
             partial.push(n);
         }
         if !reasoning_text.trim().is_empty() {
@@ -159,7 +164,7 @@ pub(crate) async fn classify_turn<'a, 'b>(
                 ..Default::default()
             }
             .with_style_tag(CHAT_STYLE_TAG_REASONING);
-            symbio_core::node_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            symbio_core::node_build::detach_if_flat(&mut n, &root_id, presentation_tree);
             partial.push(n);
         }
         return Ok(Classified::Finished(Err(TurnExecExit::Aborted(partial))));

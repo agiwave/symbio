@@ -433,7 +433,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 
 | 层 | 位置 |
 |---|---|
-| `stage.rs` | 第三步（`settle`）在 `persist_turn` 之后调用 `finalize_turn_root` —— 全流程**唯一**一处 |
+| `turn_exec/drive.rs` | 收幕（`close_stage`）在 `persist_turn` 之后调用 `finalize_turn_root` —— 全流程**唯一**一处 |
 | `chat_loop/io.rs` | `finalize_turn_root`：从权威转写取那条节点 → 改状态 → 广播 |
 
 若它在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，就会比子树早整整一个

@@ -159,9 +159,11 @@ fn control_plane_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v14：`model_open` 的关账格从 `sent` 挪到 `response` / `failed` /
-    // `retry`（`D-222` 订正 2——一次模型往返此后占两个环步，`sent` 只说明「发出去了」），
-    // 读面随之补 `retry` 的 `port` / `id` / `attempt` 与 `response` 的 `id` / `attempt`；
+    // `turn_head` 到 v15：v15 让幕锚多一档「同一轮再接一幕」的轮次格（续幕复用
+    // 轮号与用户格，锚只能落在它自己那一格上）；v14 把 `model_open` 的关账格从
+    // `sent` 挪到 `response` / `failed` / `retry`（`D-222` 订正 2——一次模型往返
+    // 此后占两个环步，`sent` 只说明「发出去了」），读面随之补 `retry` 的
+    // `port` / `id` / `attempt` 与 `response` 的 `id` / `attempt`；
     // v13 的 `closure`（本幕最近一条收束格的 `reason`）是幕间判据「还开不开下一幕」的
     // 数据面；v12 的 `prepared`（本幕落过 `inputs` 阶段格没有）是接缝行的前件
     // （`prepare-turn` 以它为开账条件）；v11 的 `model_open`（D-166，本幕已宣布、没派出的模型往返）让执行行的让位
@@ -171,14 +173,17 @@ fn control_plane_loads_and_freezes() {
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 14);
-    assert_eq!(frozen.view("turn_stages").unwrap().ver, 1);
-    assert_eq!(frozen.view("turn_closed").unwrap().ver, 1);
-    // `report_due` 到 v6：v5 把「那一批关完了」（`at_boundary`）与「这一段静默试过
-    // 没有」折进开账侧；v6 再要求最近一批已关闭的工具调用在锚之后——一次边界只派发
-    // 一次（`D-163` 裁决 4），合表之后环每一步都问，这一条不再白得。
-    assert_eq!(frozen.view("report_due").unwrap().ver, 6);
-    assert_eq!(frozen.view("reported_anchors").unwrap().ver, 1);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 15);
+    // v2：幕锚多一档续幕轮次格（`turn_stages` / `turn_closed` 的窗口因此能从续幕起算）。
+    assert_eq!(frozen.view("turn_stages").unwrap().ver, 2);
+    assert_eq!(frozen.view("turn_closed").unwrap().ver, 2);
+    // `report_due` 到 v7：v7 的静默锚多一档续幕轮次格；v5 把「那一批关完了」
+    // （`at_boundary`）与「这一段静默试过没有」折进开账侧；v6 再要求最近一批已关闭
+    // 的工具调用在锚之后——一次边界只派发一次（`D-163` 裁决 4），合表之后环每一步
+    // 都问，这一条不再白得。
+    assert_eq!(frozen.view("report_due").unwrap().ver, 7);
+    // v2：区间起点的候选与 `report_due` 同源（幕锚多一档续幕轮次格）。
+    assert_eq!(frozen.view("reported_anchors").unwrap().ver, 2);
 }
 
 #[test]
@@ -639,6 +644,55 @@ fn turn_head_resume_drive_starts_from_the_resume_anchor() {
     let mut closed = events.clone();
     closed.push(ev(1, "chat.assistant.final", json!({"text": "resumed"})));
     assert_eq!(turn_closed(&closed, 0), json!([{"turn": 1}]));
+}
+
+/// 续幕（`D-222` 裁决 2）：本幕的锚是它自己的 `round > 0` 那一格。
+///
+/// 首幕的判决 / 召回 / 接缝 / 收束都落在锚之前，因此**一格都不算到续幕头上**——
+/// 续幕要重跑接缝与召回，而它自己还没收束。
+#[test]
+fn turn_head_scopes_to_the_continuation_stage() {
+    let events = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "session.config", flags(false, true, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "decide", "round": 0, "result": "proceed"}),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "recall", "round": 0, "result": "hit"}),
+        ),
+        ev(
+            1,
+            "turn.stage",
+            json!({"stage": "inputs", "round": 0, "result": "ready"}),
+        ),
+        ev(
+            1,
+            "chat.assistant.final",
+            json!({"text": "半截", "reason": "exhausted"}),
+        ),
+        ev(1, "session.config", flags(true, false, true)),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 1})),
+    ];
+    let head = turn_head(&events, 0);
+    assert_eq!(
+        head["anchor"],
+        json!(seq(&events[8])),
+        "续幕的锚是它自己的轮次格（判据 12：一幕一个锚）"
+    );
+    assert_eq!(head["round"], json!(1));
+    assert_eq!(head["has_utterance"], json!(false), "续幕不是用户新发言");
+    assert_eq!(head["resumed"], json!(false));
+    assert_eq!(head["prepared"], json!(false), "接缝要为新幕重跑");
+    assert_eq!(head["recall_done"], json!(false), "召回按新幕重记");
+    assert_eq!(head["closure"], Value::Null, "首幕的收束不算到续幕头上");
+    assert_eq!(head["answered"], json!(false));
+    assert_eq!(turn_closed(&events, 0), json!([]), "续幕还没收束");
 }
 
 #[test]

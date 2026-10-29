@@ -17,8 +17,8 @@
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
- *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner.rs` 的结果/注入次序、
- *                   `turn_exec.rs` 的抽干/汇报次序；位置错了不会有任何测试变红）
+ *   - S-011:        补充注入点的位置（两处行序断言：`turn_runner/stream.rs` 的结果/注入次序、
+ *                   `turn_exec/call.rs` 的抽干点/运行器开轮次序；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
@@ -456,9 +456,15 @@ console.log()
 //      反过来写 = 用户那句补充插进 `assistant(tool_calls)` 与它的 `tool` 结果之间——
 //      部分协议直接 400（三种错法里唯一会响的那种），而且时间序颠倒（工具结果先发生，
 //      用户随后才插话）。
-//   ② `turn_exec.rs`：抽干（`supplement_into_request`）必须排在汇报判定（`report`）**之前**。
-//      这条钉的是「先抽干、后判定」——`supplemented_at` 靠抽干结果才拿得到，顺序反过来
-//      等于用户已经开口了、插件还在按「没人说话」报进度（静默时钟没归零）。
+//   ② `turn_exec/call.rs`：抽干点（`supplement_into_request`）必须排在运行器开轮点
+//      （`TurnRunner::begin`）**之前**——它随 `TurnInput` 装进运行器，运行器才会在
+//      批次边界调它。
+//      「先抽干、后判定」本身已经不在这一处行序里：汇报判定成了 `policy.report` 行
+//      （`prio` 53），只在**已关闭的批次边界**到期（`report_due` 的 `at_boundary`）；
+//      抽干发生在收束那一批的模型往返动作内部（`turn_runner/stream.rs` 2e → 2f），
+//      所以那一行被选中时补充格早已落进日志、静默时钟已归零。留在这里的断言钉的是
+//      更前面的一环：**抽干口还在，而且装着它开轮**——口子被删、或挪到开轮之后，
+//      用户中途说的话就再也进不了本轮，而日志上一切照常。
 // 两个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明注入点被删了
 // （那就该连本规则与文档一起改）或被改名了（那本规则必须同步）。**让守卫悄悄退化成
 // 空转，比没有守卫更糟**（它会以绿灯的形式提供虚假保证）。
@@ -467,7 +473,7 @@ console.log()
 //
 // 豁免：`// grep-audit-allow S-011: 理由`（写在**后一个锚点**那一行，理由不可为空）——
 // 只在"位置确实不对但已确认可接受"时用。
-// 文档侧的定义见 `crates/symbio-plugin-classify/README.md` §5 S0 的 C-D2b。
+// 文档侧的定义见 `docs/003-design/016-工程落地与验证.md` §5 的 C-D2b。
 console.log('--- S-011: 补充注入点位置检查 ---')
 
 const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
@@ -498,8 +504,11 @@ const S011_PAIRS = [
       ex: /\bfn\s+supplement_into_request\(/,
       name: '`supplement_into_request` 抽干点',
     },
-    after: { re: /report\.as_ref\(\)/, name: '`report` 汇报派发点' },
-    why: '必须先抽干再判定：`supplemented_at`（抽到补充 ⇒ 静默时钟归零）只有抽干之后才知道，反过来等于用户已开口、插件仍按"没人说话"报进度',
+    after: {
+      re: /\bTurnRunner::begin\(/,
+      name: '运行器开轮点（`TurnRunner::begin`）',
+    },
+    why: '抽干口必须随 `TurnInput` 装进运行器、在开轮之前——挪到开轮之后（或删掉）用户中途说的话就进不了本轮，而日志上一切照常',
   },
 ]
 
@@ -537,7 +546,7 @@ for (const pair of S011_PAIRS) {
   if (missing.length > 0) {
     err(
       `${rel}  S-011 锚点缺失：${missing.join(' / ')}——注入点被删除或改名了？` +
-        `守卫不得悄悄退化成空转：同步更新本规则与 PL-007-对话面插件拆分实施方案 §5 S0 的 C-D2b`,
+        `守卫不得悄悄退化成空转：同步更新本规则与 DE-016 §5 的 C-D2b`,
     )
   } else if (!(beforeAt < afterAt)) {
     if (WAIVER_S011_RE.test(s011Lines[afterAt - 1])) {

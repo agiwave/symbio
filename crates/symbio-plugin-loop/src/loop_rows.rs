@@ -35,7 +35,7 @@
 //!
 //! ## 汇报的轮次前提也在表里
 //!
-//! 「跑过至少一轮工具」是 `report_due` v6 的 `due` 的一格（[D-163]）：本幕完成了几轮
+//! 「跑过至少一轮工具」是 `report_due` 的 `due` 的一格（v6 起，[D-163]）：本幕完成了几轮
 //! 工具调用 = 本幕落了几条**已关闭**的带 `calls` 的 `response(port=model)`——日志上
 //! 现成，不需要触发点在内存里数。于是这一行与其它行同形，派发点只选债。
 //!
@@ -68,7 +68,7 @@ use symbio_plugin_api::events::{
     EVENT_TURN_BRANCH, EVENT_TURN_DISPATCH, EVENT_TURN_SUPPLEMENTED,
 };
 
-use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_TURN_STAGE};
+use crate::control_decl::{EVENT_AUTHZ_GRANTED, EVENT_SESSION_CONFIG, EVENT_TURN_STAGE};
 
 /// 这张表里**接了线的执行体**：`execute`（宣布一次模型往返）、`close`（收束）、
 /// `opener` / `authorizer` / `courier`（工具批三笔债， 步 5b）、`relay` / `waiter`
@@ -156,6 +156,12 @@ const REFLEX: &str = "reflex";
 /// 请求视图、定档、首响、基线 prompt。这些都不是一次模型往返，也不该由幕首的直线
 /// 代码按行序表达——它们是一行债，出口是 `turn.stage{stage:"inputs"}` 那一格。
 const SEAM: &str = "seam";
+/// 续幕执行体（`D-222` 裁决 2）：`continue-turn` 行选中的动作。
+///
+/// 它做的事与开一幕逐字相同——落新一幕的 `round` 格（那一格同时是新幕的锚）、
+/// 收租、重落配置，只是不新开用户格。**它不是一个环**：动作跑完就还清一笔债，
+/// 新幕欠什么由新幕自己的事实说。
+const CONTINUE: &str = "continue";
 
 /// `execute` 执行体的声明（名单 = 运行期对账的**唯一依据**）。
 ///
@@ -410,6 +416,19 @@ const ACTOR_SEAM: ActorDecl = ActorDecl {
     ],
 };
 
+/// 续幕执行体的声明（`D-222` 裁决 2）。
+///
+/// 两格都是**开一幕**那一套的写点：`turn.stage` 是新幕的 `round` 格（它是 `until`，
+/// 同时是新幕的锚），`session.config` 是当轮生效配置的重落（与新幕开幕逐字同形）。
+/// 它不写任何领域格——续幕要做的事在动作里（`chat_loop::drive::continue_drive`）。
+const ACTOR_CONTINUE: ActorDecl = ActorDecl {
+    name: CONTINUE,
+    // 只落两格，不调模型：快速档。
+    mode: LatencyTier::Fast,
+    reads: &[],
+    writes: &[EVENT_TURN_STAGE, EVENT_SESSION_CONFIG],
+};
+
 /// **执行体绑定表**（DE-015 §3.2 的 `actor` 口 + D-118 决策 2）：一条 = 一个 `by`。
 ///
 /// 声明与动作在**同一条**里：装载期查得到的名字（[`actor_decls`] 是这张表的 `decl`
@@ -513,6 +532,11 @@ pub(crate) static ACTORS: &[ActorEntry] = &[
     ActorEntry {
         decl: ACTOR_REPORT,
         run: super::turn_exec::run_report,
+        transitional: &[],
+    },
+    ActorEntry {
+        decl: ACTOR_CONTINUE,
+        run: super::turn_exec::run_continue,
         transitional: &[],
     },
 ];
@@ -928,6 +952,38 @@ pub(crate) static ROWS: &[Decl] = &[
                 eq: &[],
             },
         ],
+        unless: &[],
+    },
+    // ── 幕的推进（同一轮再接一幕）──────────────────────────────────────────
+    //
+    // 一笔债，不是一层控制流（`D-222` 裁决 2）：「本幕被输出上限掐断、轮次未到上限」
+    // 就欠一次「再开一幕」。`turn_next_round` 已经把两条判据折成一格（收束原因是
+    // `exhausted` ∧ `round` 未到上限），本行只把那一格当 `owes`。
+    //
+    // 出口是新幕的 `turn.stage{stage:"round", round: N+1}`：那一格既是本行的 `until`
+    // （按 `(turn, round)` 关账），也是**新幕的锚**（判据 12：一幕一个锚）——债还清的
+    // 那一刻即新幕的时刻，`now` 因此跟着它走，不必请墙钟。
+    //
+    // `prio` 56：收束（55）之后、宣布下一次往返（60）之前。收束格一落，本行与
+    // `announce-model` 在同一个切片上竞争，「再开一幕」必须先于「在新幕之外再发一次
+    // 请求」——否则续幕会在旧幕的请求视图上跑。
+    Decl {
+        name: "continue-turn",
+        prio: 56,
+        by: Some(CONTINUE),
+        // 落一格阶段事实，不调模型：快速档。
+        tier: LatencyTier::Fast,
+        expand: None,
+        owes: Pattern {
+            source: "turn_next_round",
+            key: &["turn", "round"],
+            eq: &[],
+        },
+        until: &[Pattern {
+            source: "turn_stages",
+            key: &["turn", "round"],
+            eq: &[("stage", Lit::Str("round"))],
+        }],
         unless: &[],
     },
     // ── 执行（决策行）────────────────────────────────────────────────────

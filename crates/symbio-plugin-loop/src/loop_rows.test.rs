@@ -925,6 +925,8 @@ fn rows_are_stable_and_globally_ordered() {
             "policy.report",
             // 收束：前件是 `turn.has_final`，执行体是 `close`。
             "close-turn",
+            // 幕的推进：收束之后、宣布下一次往返之前（`D-222` 裁决 2）。
+            "continue-turn",
             "announce-model",
             // 每个端口两行（`dispatch` / `await`）：`model`（ 步 2）与 `tool`
             // （ 步 3）。租约**没有行**——看护读 `stale_sent` 视图，不经行表；
@@ -956,6 +958,8 @@ fn rows_are_stable_and_globally_ordered() {
             symbio_core::LatencyTier::Reflex,
             // 收束入格不调模型：反射档。
             symbio_core::LatencyTier::Reflex,
+            // 续幕只落两格（`round` 格与配置），不调模型：快速档。
+            symbio_core::LatencyTier::Fast,
             symbio_core::LatencyTier::Deep,
             // 派发是记账，不调模型；`await` 跟的是被等的那一端。
             symbio_core::LatencyTier::Fast,
@@ -2645,16 +2649,25 @@ fn the_overlap_report_on_the_production_table() {
         vec![
             // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
             // 它们今天由 `prio`（10/30/40/50）决出，报告不知道这些。
+            //
+            // `continue-turn` 也在这个键上：它读 `turn_next_round`（与幕头同一份折叠），
+            // 只有本幕收束为 `exhausted` 时才开账——那一刻四行策略都已经是旧幕的
+            // 事实，报告读不出「这是另一幕」，只知道键与读面相交。
             ("policy.classify", "policy.compress", head),
             ("policy.classify", "policy.recall", head),
             ("policy.classify", "policy.reflex", head),
             ("policy.classify", "prepare-turn", head),
+            ("policy.classify", "continue-turn", head),
             ("policy.compress", "policy.recall", head),
             ("policy.compress", "policy.reflex", head),
             ("policy.compress", "prepare-turn", head),
+            ("policy.compress", "continue-turn", head),
             ("policy.recall", "policy.reflex", head),
             ("policy.recall", "prepare-turn", head),
+            ("policy.recall", "continue-turn", head),
             ("policy.reflex", "prepare-turn", head),
+            ("policy.reflex", "continue-turn", head),
+            ("prepare-turn", "continue-turn", head),
             // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
             // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
             // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与

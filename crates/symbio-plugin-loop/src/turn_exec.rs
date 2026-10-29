@@ -97,7 +97,7 @@ use symbio_core::{
     is_stop_fact, llm_short_id, run_ops, ActorSpec, AppendError, CapabilityMeta,
     ConsolidateRequest, DeltaSink, Entity, Event, ExecAbortSignal, ExecEventSink, FullModel,
     LatencyTier, LlmAdapter, ModelProvider, Plugin, PluginError, PluginInvokeRequest,
-    ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, Verb,
+    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, Verb,
 };
 use symbio_plugin_api::events::{
     EVENT_AUTHZ_DENIED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
@@ -106,7 +106,7 @@ use symbio_plugin_api::events::{
 
 // 压缩入格与寄存补落都是**会话动作**（事实源归档不在 core `Store` 面内，写方必须
 // 留在持令牌的 session）；本文件只剩轮内调用点，经 [`LoopSession`] 的端口动作发起。
-use super::turn_runner::{TurnInput, TurnOutcome, TurnRunner, TurnSession, TurnSessionBegin};
+use super::turn_runner::{TurnInput, TurnRunner, TurnSession, TurnSessionBegin};
 // 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_session::LoopSession;
@@ -116,6 +116,7 @@ use super::turn_session::LoopSession;
 // （消费方与本文件测试都不必改引用）。阶段体是逐字搬移，本文件只留调度。
 mod assemble;
 mod call;
+mod drive;
 mod outcome;
 mod persist;
 
@@ -123,7 +124,13 @@ pub(crate) use self::assemble::{assemble_turn, Assembled};
 // 续写幕的开幕方（`chat_loop::drive`）要用同一个「已开未收束」判据：
 // 这里的收束口径（只认 final / fallback）与 C4（兼认产物）刻意不同，见函数文档。
 pub(crate) use self::assemble::last_open_turn;
-pub(crate) use self::call::{drive_opened, open_turn, HeadEnv, Opened, OpenedFlow, Running};
+pub(crate) use self::call::{open_turn, OpenRun, Running};
+pub(crate) use self::drive::{drive, Control, DriveEnd, DriveStart};
+// 夹具入口（幕已开好，只驱动）：生产不用它，只有测试的两个夹具从 crate 外借道。
+// `stage_runtime` 是幕首之后那一半的同形入口——夹具自己备幕首，不该另抄一份
+// 「分发方与汇报落地面怎么从装配束里造」。
+#[cfg(test)]
+pub(crate) use self::drive::{stage_runtime, ReadyStage, StageRuntime};
 pub(crate) use self::outcome::{classify_turn, Classified, ExecTurnResult, Settled, TurnExecExit};
 pub(crate) use self::persist::{execute_final_reply_turn, persist_turn};
 
@@ -395,15 +402,25 @@ pub(crate) struct UiBridge {
 /// 而轮次照常增长——那种泄漏在日志里一个字都看不见。
 impl Drop for UiBridge {
     fn drop(&mut self) {
-        self.tx.close();
+        self.close();
     }
 }
 
 impl UiBridge {
+    /// 关闭队列（幂等）：接收端的 `pop` 因此返回 `None` 而退出。
+    ///
+    /// 显式给出而不只靠 `Drop` 的原因：**桥可能比幕活得久**。幕的草稿里挂着
+    /// `nodes` 闭包，它捕获着 `Arc<UiBridge>`，于是「这一幕收了」不等于「桥没了」
+    /// ——收幕时要等发射任务消化完队列里剩下的帧（`emitter.await`），只靠 Drop
+    /// 就会等到一个永不到来的关闭。
+    pub(crate) fn close(&self) {
+        self.tx.close();
+    }
+
     /// 当前正文节点 `(id, 累积正文)`（未定格的最后一轮正文；本轮无正文 ⇒ `None`）。
     ///
     /// 累积正文的消费点有两个：`chat_loop` 的 `finalize_assistant_turn`（收口末轮）
-    /// 与中止出口（半截正文入格，见 [`super::stage::run_stage`]）。
+    /// 与中止出口（半截正文入格，见 [`drive`]）。
     pub(crate) fn current_node(&self) -> Option<(String, String)> {
         self.node.lock().unwrap().clone()
     }
@@ -413,7 +430,7 @@ impl UiBridge {
     /// 与 [`Self::current_node`] 的分工：正文的末轮由 `chat_loop` 的
     /// `finalize_assistant_turn` 收口（那里拿着 `TurnOutput.text`），推理那侧同理
     /// 但正文得**从这里取**——`TurnOutput` 的 `reasoning` 字段正是由本函数回填的
-    /// （见 [`super::stage::run_stage`] 的归类段）。
+    /// （见 [`drive`] 的收幕段）。
     pub(crate) fn current_reasoning(&self) -> Option<(String, String)> {
         self.reasoning.lock().unwrap().clone()
     }
@@ -600,7 +617,11 @@ pub(crate) type SupplementFn = Arc<
 
 pub(crate) struct ExecTurn<'a> {
     /// 会话窄句柄（交付包 + 动作面端口；不持有会话存储实现）。
-    pub session: &'a LoopSession,
+    ///
+    /// 借的是 `Arc` 而不是 `&LoopSession`：幕首之后装配结果要**按值**活过整幕
+    /// （控制面只有一个环，幕与幕在同一次调用里接续），借来的引用活不到那一刻；
+    /// 而 `Arc` 只是句柄的克隆，仍然是同一个实例。
+    pub session: &'a Arc<LoopSession>,
     /// 本轮生效的模型服务（core trait 的 trait object）。
     pub provider: Arc<dyn ModelProvider>,
     /// 插件宿主（工具能力经它路由；无工具轮为 `None`）。
@@ -613,6 +634,8 @@ pub(crate) struct ExecTurn<'a> {
     pub abort: ExecAbortSignal,
     /// 本轮 Turn 根节点 id（UI 帧挂载的父节点）。
     pub root_id: &'a str,
+    /// 一幕一个根：`true` = 本幕现分配的根（发骨架），`false` = 复用被续写轮的根。
+    pub fresh_root: bool,
     /// 事件出口（UI 帧经此回到对话面）。
     pub sink: &'a ExecEventSink,
     /// 本轮用户发言（反射档的技能命中判定与轮末学习用它；事实与 prompt 都从
@@ -717,6 +740,8 @@ pub(crate) struct HeadCtx<'a> {
     pub(crate) loop_session: &'a LoopSession,
     pub(crate) context: &'a mut super::chat_loop::state::SessionContext,
     pub(crate) turn: &'a mut super::chat_loop::state::TurnState,
+    /// 请求级配置快照：续幕要按同一份配置重落 `session.config`。
+    pub(crate) req: &'a super::chat_loop::state::TurnRequest,
     pub(crate) bridge: &'a Arc<UiBridge>,
     pub(crate) event_sink: &'a ExecEventSink,
     pub(crate) root_id: &'a str,
@@ -728,19 +753,47 @@ pub(crate) struct HeadCtx<'a> {
 }
 
 /// [`drive`] 手里的轮首出借方：整幕持有，逐圈把可变引用再借给 [`HeadCtx`]。
+///
+/// 两半的寿命不同：`context` / `turn` / `req` 是**借的**（出借方是调用方，且每圈
+/// 要重新借一次），其余全是**owned 的句柄**（桥 / 发射口 / 根 id / 主体 / 汇报面）。
+/// 后半片之所以按值带着，是因为它的来源——装配束——随幕的收束被拆开消费：借它的话
+/// 归还之后就没有出借方了。这与 [`Ctx`] 把端口做成 `Arc` 是同一条理由。
 pub(crate) struct HeadParts<'h> {
-    pub(crate) orchestrator: &'h super::chat_loop::state::ChatOrchestrator,
-    pub(crate) request_ctx: &'h Arc<dyn symbio_core::PluginInvokeRequest>,
-    pub(crate) loop_session: &'h LoopSession,
+    pub(crate) orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
+    pub(crate) request_ctx: Arc<dyn symbio_core::PluginInvokeRequest>,
+    pub(crate) loop_session: Arc<LoopSession>,
     pub(crate) context: &'h mut super::chat_loop::state::SessionContext,
     pub(crate) turn: &'h mut super::chat_loop::state::TurnState,
-    pub(crate) bridge: &'h Arc<UiBridge>,
-    pub(crate) event_sink: &'h ExecEventSink,
-    pub(crate) root_id: &'h str,
+    pub(crate) req: &'h super::chat_loop::state::TurnRequest,
+    pub(crate) bridge: Arc<UiBridge>,
+    pub(crate) event_sink: ExecEventSink,
+    pub(crate) root_id: String,
     pub(crate) fresh_root: bool,
-    pub(crate) actor: &'h ActorSpec,
-    pub(crate) report_port: Option<&'h super::report_exec::ReportPort>,
-    pub(crate) report_landing: &'h super::report_exec::ReportLanding,
+    pub(crate) actor: ActorSpec,
+    pub(crate) report_port: Option<super::report_exec::ReportPort>,
+    pub(crate) report_landing: super::report_exec::ReportLanding,
+}
+
+impl<'h> HeadParts<'h> {
+    /// 逐圈把出借方手里的 `&mut` 再借给一个动作（`D-222` 裁决 5 的「按步获取、
+    /// 按步释放」）：动作跑完，这些借用随 [`HeadCtx`] 一起还回来。
+    pub(crate) fn as_ctx(&mut self) -> HeadCtx<'_> {
+        HeadCtx {
+            orchestrator: self.orchestrator.as_ref(),
+            request_ctx: &self.request_ctx,
+            loop_session: self.loop_session.as_ref(),
+            context: &mut *self.context,
+            turn: &mut *self.turn,
+            req: self.req,
+            bridge: &self.bridge,
+            event_sink: &self.event_sink,
+            root_id: &self.root_id,
+            fresh_root: self.fresh_root,
+            actor: &self.actor,
+            report_port: self.report_port.as_ref(),
+            report_landing: &self.report_landing,
+        }
+    }
 }
 
 /// 动作面的失败种类（D-123 决策 3，按 D-119 决策 1 落在**部署层**而不是机制层）。
@@ -1164,6 +1217,25 @@ pub(crate) fn run_report<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
     })
 }
 
+/// `continue` 执行体（`D-222` 裁决 2）：`continue-turn` 行选中的动作——同一轮再接一幕。
+///
+/// 它只做开幕那一套里「不新开用户格」的那一半：落新幕的 `round` 格（那一格同时是
+/// 新幕的锚）、收租、重落配置。新幕欠什么由新幕自己的事实说——本动作不判流向、
+/// 也不再起一个环（裁决 5：控制面只有一个环）。
+pub(crate) fn run_continue<'a>(ctx: &'a mut Ctx<'a>) -> StepFuture<'a> {
+    Box::pin(async move {
+        let head = take_head(ctx)?;
+        super::chat_loop::continue_drive(head.context, head.turn, head.req)
+            .map(|_| ())
+            .map_err(|exit| match exit {
+                super::chat_loop::state::TurnExit::Failed(e) => ActorError::Read(e),
+                other => ActorError::Read(symbio_core::PluginError::InternalError(format!(
+                    "续幕的开幕交出了非失败结局：{other:?}"
+                ))),
+            })
+    })
+}
+
 /// 把「备输入」的出口落成阶段事实（`turn.stage{stage:"inputs"}`）。
 ///
 /// `result` 二值：`ready` = 这一幕要跑（请求视图已备好）；`closed` = 定稿答话轮在
@@ -1191,8 +1263,8 @@ pub(crate) fn land_inputs(
 /// 重试开出的**新支在这里登记**（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// 为什么是这一格而不是唤醒那一处：`turn.branch` 的 `into` 是**新支的 Turn 根
-/// id**，而那个 id 到本幕的根定下才存在（一幕一个根，`run_stage` 的幕首是它唯一的
-/// 创建点）。`retry_of` 由 `RetrySubtree` 寄存、`take()` 即消费，幕间续写的第二幕
+/// id**，而那个 id 到本幕的根定下才存在（一幕一个根，幕首是它唯一的创建点）。
+/// `retry_of` 由 `RetrySubtree` 寄存、`take()` 即消费，幕间续写的第二幕
 /// 因此不会再开一支。
 pub(crate) fn land_retry_branch(
     store: &dyn Store<Event = Event>,
@@ -1227,246 +1299,6 @@ pub(crate) fn land_retry_branch(
     // 收尾时按这一格补发组内的标注帧（见 `TurnState::branch_root`）。
     turn.branch_root = Some(root_id.to_string());
     Ok(())
-}
-
-/// 一幕后驱动的两种收法。
-pub(crate) enum DriveEnd {
-    /// 判决判成「就此答话」：这一轮不进驱动循环，收束格由编排层落
-    /// （[`super::chat_loop::land_answered_turn`]）。
-    Answered,
-    /// 本幕跑完了（正常 / 中止 / 兜底 / 停机）。
-    Finished(TurnOutcome),
-}
-
-/// 驱动一幕：每步读事实切片 → `loop_rows::next` 选最小可还债（连带查出它的动作）→
-/// 跑**一个执行体动作**，直到收束。
-///
-/// 三台 host 在这一台合成一个循环（`D-222` 裁决 5）：轮首四行（判决 / 压缩 / 召回 /
-/// 快路）、接缝、汇报与轮内各行都在**同一张绑定表**里，由 `prio` 决出先后。派发器
-/// 不按行名 / 端口名 / 业务语义分支，只调 `next.action` 这**一个**动作。
-///
-/// ## 五道守卫，各一份
-///
-/// | 守卫 | 判据 |
-/// |---|---|
-/// | 中止 | 第一圈、选债之前（`D-052` 决策 1：闸门与首请求之间） |
-/// | 判成答话 | 每圈选债之前（本轮的收束格由编排层落，不在驱动里） |
-/// | 步数上界 | 选债之后、动作之前；有一笔在飞时先收回（`D-222` 订正 2） |
-/// | 写封闭 | 动作之后、账本尾段（`D-123` 决策 2） |
-/// | 空账本 | 同上；「在等」不判死（`D-222` 订正 2） |
-///
-/// 第五道「不重入」在类型上成立：草稿是 `&mut TurnSession`，一个循环体、按步借、
-/// 按步还——没有任何动作能在窗口里再起第二个环。
-///
-/// `actors` 是**这一轮用的执行体绑定表**（决策 4）：生产传 [`super::loop_rows::ACTORS`]，
-/// 夹具在同名 `by` 上注册别的动作。
-///
-/// `head` 是 `&mut Option<…>` 而不是按值收：出借方（[`HeadParts`]）持的是调用方的
-/// `&mut` 本轮状态，收工之后调用方还要读它（轮末的记忆 / 学习读召回视图与技能观测）。
-/// 按值收会让那份借用随本函数一起消失，而返回值里并没有它可还。
-///
-/// ## 第一参是草稿，不是「开一轮的输入」
-///
-/// `begin` **不在本函数里**（`D-222` 订正 3）：草稿在幕首就建，本函数只驱动一个已经
-/// 存在的草稿。建、填（基线 / 前缀 / 快路）与驱动三件事因此各在一处。
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn drive<'h>(
-    session: &mut TurnSession,
-    store: &Arc<dyn Store<Event = Event>>,
-    llm: Arc<dyn LlmAdapter>,
-    tok: FullModel,
-    sink: Arc<dyn DeltaSink>,
-    tools: Arc<[CapabilityMeta]>,
-    dispatch: Option<Arc<dyn super::tool_dispatch::ToolDispatch>>,
-    head: &mut Option<HeadParts<'h>>,
-    actors: &'static [super::loop_rows::ActorEntry],
-) -> Result<DriveEnd, ActorError> {
-    let mut first = true;
-    loop {
-        // ── 守卫一：闸门与首请求之间的中止（`D-052` 决策 1）─────────────
-        //
-        // 只在第一圈：它守的是「用户格已落、第一个请求未发」那一个空隙。此后每一笔
-        // 请求的结局都由端口面记成事实（`failed` / 中止收束格），不再由这里判。
-        //
-        // 位置就是这里（而不是 `prepare` 里）：被中止的幕因此**一行轮首行都不跑**
-        // （`D-222` 订正 3 认下的行为变化）——选债还没发生。
-        if first {
-            first = false;
-            if let Some(outcome) = session
-                .abort_before_first_request(store.as_ref(), llm.as_ref())
-                .await
-                .map_err(ActorError::Append)?
-            {
-                return Ok(DriveEnd::Finished(outcome));
-            }
-        }
-        // ── 判成「就此答话」的一轮：不进驱动循环（`D-162` 裁决 3）──────────
-        //
-        // 判决执行体把答话寄存进本轮状态（执行体不交回产出，D-123 决策 5）。收束格
-        // 由**编排层**落（`land_answered_turn`）：那一轮没有往返、没有产出，也不该
-        // 在驱动窗口里再起一段收束逻辑。
-        if head.as_ref().is_some_and(|h| h.turn.head_answer.is_some()) {
-            return Ok(DriveEnd::Answered);
-        }
-        // D-118 决策 2：派发器读切片 → 选最小可还债 → 按 `by` 查绑定表 →
-        // 跑**一个**执行体动作，然后重新读切片。不按行名 / 端口名 / 业务语义分支。
-        let facts = store.range(Seq::new(0));
-        let next = super::loop_rows::next(&facts, session.turn(), session.now_ms(), actors);
-        let next = match next {
-            Some(next) => next,
-            // 没有可还的债：本幕要么已经收束，要么表装载失败 / 只剩 blocked 行。
-            // 不拿一个假成功返回——落 `exhausted{no_progress}` 让它在事实面显形。
-            //
-            // **但「只剩 blocked 行」有两种处境，理由必须分开**（D-126）：有一笔已
-            // 派出未收清的往返（`await-<port>` 开着）时，这一轮不是「没事」，是
-            // 「在等」。混成一个值会让「这一轮为什么停」在事实面上不可判，而恢复
-            // 路径恰恰要认这一种——进程在等应答时被打断，重启后 `lease` 判死的前提
-            // 是当时确实记成了「在等」。`detail` 是只给人读的自由文本（`reason` 才是
-            // 闭集），故这里只加取值、不动闭集。
-            None => {
-                let detail = if super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
-                {
-                    "waiting"
-                } else {
-                    "no_progress"
-                };
-                return session
-                    .exhausted(store.as_ref(), llm.as_ref(), detail)
-                    .await
-                    .map_err(ActorError::Append)
-                    .map(DriveEnd::Finished);
-            }
-        };
-        symbio_core::plugin_debug!(
-            "session",
-            "[Loop] 派发 {}（执行体 {}；债 {}）",
-            next.row,
-            next.by,
-            next.key
-        );
-        // ── 守卫二：步数上界 ─────────────────────────────────────────────
-        //
-        // 上界是**收工的判据**，不是「半路撂下」的许可（`D-222` 订正 2）：一次模型
-        // 往返占两个环步之后，上界可能正好落在「已派出、未收清」那一圈。此时停机会
-        // 在日志上留下一条 `sent` 无终局——重启后 `reap` 要判死一笔**其实已经答了**
-        // 的往返，而模型那一步的钱已经花过。先把在飞的那一笔收回来，再在下一圈的
-        // 派发点上停。判据是形状（[`super::loop_rows::waiting`]），不是行名。
-        if session.over_step_limit()
-            && !super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
-        {
-            symbio_core::plugin_warn!(
-                "actors",
-                "[v2] 轮内步数超过上限（turn={}），收束为 exhausted（step_limit）",
-                session.turn()
-            );
-            return session
-                .exhausted(store.as_ref(), llm.as_ref(), "step_limit")
-                .await
-                .map_err(ActorError::Append)
-                .map(DriveEnd::Finished);
-        }
-        let head_before = store.head();
-        {
-            // 轮首那一片**逐圈再借**：`&mut` 从出借方借出一圈，动作结束即还。
-            let mut ctx = Ctx {
-                session: &mut *session,
-                store,
-                llm: llm.clone(),
-                tok,
-                sink: sink.clone(),
-                tools: tools.clone(),
-                dispatch: dispatch.clone(),
-                head: head.as_mut().map(|h| HeadCtx {
-                    orchestrator: h.orchestrator,
-                    request_ctx: h.request_ctx,
-                    loop_session: h.loop_session,
-                    context: &mut *h.context,
-                    turn: &mut *h.turn,
-                    bridge: h.bridge,
-                    event_sink: h.event_sink,
-                    root_id: h.root_id,
-                    fresh_root: h.fresh_root,
-                    actor: h.actor,
-                    report_port: h.report_port,
-                    report_landing: h.report_landing,
-                }),
-            };
-            // 动作只回答「这一步做完了 / 失败了」：本轮收没收由下面的账本判（D-123 决策 5）。
-            (next.action)(&mut ctx).await?;
-        }
-        // **账本**（D-123 决策 1）：这一次动作的**实际写入** = 日志尾段（动作前的
-        // `head` 起），不是执行体自报的一份陈述。写不经过返回值（DE-015 §2.3 明文
-        // 「单写者是 store，不是引擎函数」），所以自报的 `Vec<Fact>` 漏一条就对账不上一条。
-        let ledger = store.range(head_before);
-        // ── 守卫三：运行期写入封闭（DE-015 §3.4 第 5 条，D-123 决策 2）──────
-        //
-        // 领域格必须在这个执行体登记过的名单里，协议五格豁免（引擎写）。**全部行
-        // 同一份判据**：没有任何一行在窗口里显式放弃这一条。越界不静默、不
-        // panic：落一条带理由的停机格，让它在事实面显形（同 `no_progress`）。
-        // **这是事后判，不是前置闸**：越界那条已经入账、不回滚——判据是「发生了必被
-        // 看见且本轮停止」，不是「不可能发生」。
-        if let Some(offender) = ledger
-            .iter()
-            .map(|e| e.kind.as_str())
-            .find(|k| !next.writes_closed(k))
-        {
-            symbio_core::plugin_warn!(
-                "actors",
-                "[v2] 执行体 {} 写了未登记的事实 `{}`（行 {}，turn={}）——名单 ⊆ 声明的写入封闭在运行期破了",
-                next.by,
-                offender,
-                next.row,
-                session.turn()
-            );
-            return session
-                .exhausted(store.as_ref(), llm.as_ref(), "undeclared-write")
-                .await
-                .map_err(ActorError::Append)
-                .map(DriveEnd::Finished);
-        }
-        // **收束判断读账本**（D-123 决策 5）：本轮收不收工由日志说，不由执行体说。
-        // 产出是收束那一步寄存进草稿的（`prepare::Prepared::settled`），派发器取走交回。
-        if let Some(closing) = ledger.iter().find(|e| ends_the_drive(e, session.turn())) {
-            let Some(outcome) = session.take_settled() else {
-                // 账本说收了工、草稿里没有产出可交回 = 有一条收束路径写了停机格却没寄存它。
-                // 不猜一个产出（那等于把「没记账」读成「记了个空账」）：出声 + 落停机格。
-                symbio_core::plugin_warn!(
-                    "actors",
-                    "[v2] 执行体 {} 落了停机格 `{}`（行 {}，turn={}）却没寄存本轮产出——收束路径漏记",
-                    next.by,
-                    closing.kind,
-                    next.row,
-                    session.turn()
-                );
-                return session
-                    .exhausted(store.as_ref(), llm.as_ref(), "unrecorded-outcome")
-                    .await
-                    .map_err(ActorError::Append)
-                    .map(DriveEnd::Finished);
-            };
-            return Ok(DriveEnd::Finished(outcome));
-        }
-        // ── 守卫四：空账本（D-118 决策 7 + D-123 决策 1）────────────────────
-        //
-        // 账本为空 ⇒ 这一次动作什么都没写，环不会前进，落 `exhausted{no_progress}`
-        // 而不是空转到步数上界。判据 14 的夹具走的就是这条分支。
-        //
-        // **但「没写」有两种**（`D-222` 订正 2）：一次动作把在飞的 future poll 了一次、
-        // 它还没好，这一圈也确实零写入——那不是没账可还，是环**合法地不前进**（等
-        // I/O）。判据不靠动作自报「我在等」，靠形状：`waiting` 问「有没有一笔已派出、
-        // 未收清」。有一笔 ⇒ 这一步是把那一笔推进了一格，不判死。
-        //
-        // **处置只有一种**：`exhausted{no_progress}` 对每一行相同——轮首行也照此
-        // 收口，不存在「只出声不停环」的另一套。
-        if ledger.is_empty() && !super::loop_rows::waiting(&facts, session.turn(), session.now_ms())
-        {
-            return session
-                .exhausted(store.as_ref(), llm.as_ref(), "no_progress")
-                .await
-                .map_err(ActorError::Append)
-                .map(DriveEnd::Finished);
-        }
-    }
 }
 
 /// 账本上的这一格是否让**本轮收工**（D-123 决策 5 的收束判据）。

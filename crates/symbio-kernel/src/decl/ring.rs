@@ -210,7 +210,7 @@ pub fn owed<'a>(rows: &'a [Decl], frozen: &Frozen, events: &[Event], now: i64) -
 }
 
 /// 取最小的一笔可还的债。这就是 `drive` 的**选择半边**——生产入口
-/// `turn_exec::drive_steps` 直接调用它；执行半边（跑执行体、追加事实、
+/// `turn_exec::drive` 直接调用它；执行半边（跑执行体、追加事实、
 /// 无进展守卫）在派发器里，选择规则不再变。
 ///
 /// 可还性只有一个声明位：[`owed`] 的 `blocked`（`by = None ∨ unless` 命中）。

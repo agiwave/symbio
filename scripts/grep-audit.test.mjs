@@ -313,11 +313,11 @@ const S011_RUNNER_OK = `fn run() {
     run.exchange.extend(injected);
 }
 `
-/** 位置正确的形态：先抽干（拿得到 `supplemented_at`）→ 再判定要不要汇报 */
+/** 位置正确的形态：先抽干并随 `TurnInput` 装进运行器 → 再开轮 */
 const S011_EXEC_OK = `fn run() {
     let injected = supplement_into_request(batch, anchor, store.as_ref());
-    let supplemented_at = (!injected.is_empty()).then(clock_now_ms);
-    if let Some(port) = report.as_ref() {}
+    let input = TurnInput { inject: Some(injected) };
+    let begin = TurnRunner::begin(store.as_ref(), input);
 }
 `
 const s011Ok = (runner = S011_RUNNER_OK, exec = S011_EXEC_OK) => ({
@@ -329,7 +329,10 @@ test('S-011 passes when both orderings hold', () => {
   const r = s011Audit(s011Ok())
   assert.equal(r.status, 0)
   assert.match(r.stdout, /S-011 通过：.*stream\.rs 2e 工具结果接进请求\(2\) 在 2f 轮内补充接进请求\(4\) 之前/)
-  assert.match(r.stdout, /S-011 通过：.*call\.rs `supplement_into_request` 抽干点\(2\) 在 `report` 汇报派发点\(4\) 之前/)
+  assert.match(
+    r.stdout,
+    /call\.rs `supplement_into_request` 抽干点\(2\) 在 运行器开轮点（`TurnRunner::begin`）\(4\) 之前/,
+  )
 })
 
 test('S-011 fires when the supplement is injected before the tool results land', () => {
@@ -346,12 +349,12 @@ test('S-011 fires when the supplement is injected before the tool results land',
   assert.match(r.stdout, /S-011 位置错/)
 })
 
-test('S-011 fires when the report is judged before the drain', () => {
-  // 反了 ⇒ `supplemented_at` 在判定那一刻还不知道，静默时钟没归零：
-  // 用户已经开口，插件照样按「没人说话」报一次进度。
+test('S-011 fires when the runner opens the turn before the drain', () => {
+  // 反了 ⇒ 抽干口在开轮之后才跑：`TurnInput.inject` 装的是旧值，用户中途说的
+  // 那句话这一轮进不去——而日志上一切照常，没有任何测试会因此变红。
   const r = s011Audit(
     s011Ok(S011_RUNNER_OK, `fn run() {
-    if let Some(port) = report.as_ref() {}
+    let begin = TurnRunner::begin(store.as_ref(), input);
     let injected = supplement_into_request(batch, anchor, store.as_ref());
 }
 `),
@@ -370,22 +373,21 @@ test('S-011 errors when an anchor disappears (guard must not silently no-op)', (
   assert.equal(renamed.status, 1)
   assert.match(renamed.stdout, /S-011 锚点缺失/)
 
-  const reportGone = s011Audit({
+  const runnerGone = s011Audit({
     ...s011Ok(),
     [S011_EXEC]: `fn run() {
     let injected = supplement_into_request(batch, anchor, store.as_ref());
 }
 `,
   })
-  assert.equal(reportGone.status, 1)
-  assert.match(reportGone.stdout, /`report` 汇报派发点/)
+  assert.equal(runnerGone.status, 1)
+  assert.match(runnerGone.stdout, /运行器开轮点/)
 
   // 豁免通道对"锚点缺失"无效——无从判断的事不能靠签名放行
   const waivedButMissing = s011Audit({
     ...s011Ok(),
     [S011_EXEC]: `fn run() {
-    let injected = supplement_into_request(batch, anchor, store.as_ref());
-    let drafted = report_now(supplemented_at); // grep-audit-allow S-011: 已确认
+    let begin = TurnRunner::begin(store.as_ref(), input); // grep-audit-allow S-011: 已确认
 }
 `,
   })
@@ -412,7 +414,7 @@ test('S-011 ignores the `fn supplement_into_request` definition (only the call s
     ...s011Ok(),
     [S011_EXEC]: `fn run() {
     let injected = supplement_into_request(batch, anchor, store.as_ref());
-    if let Some(port) = report.as_ref() {}
+    let begin = TurnRunner::begin(store.as_ref(), input);
 }
 fn supplement_into_request(store: &Store, batch: &Batch) -> Vec<Msg> { Vec::new() }
 `,
@@ -422,7 +424,7 @@ fn supplement_into_request(store: &Store, batch: &Batch) -> Vec<Msg> { Vec::new(
 
 test('S-011 waiver requires a reason', () => {
   const bad = `fn run() {
-    if let Some(port) = report.as_ref() {} WAIVER
+    let begin = TurnRunner::begin(store.as_ref(), input); WAIVER
     let injected = supplement_into_request(batch, anchor, store.as_ref());
 }
 `

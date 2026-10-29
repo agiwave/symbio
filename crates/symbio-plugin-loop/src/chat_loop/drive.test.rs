@@ -286,6 +286,96 @@ fn a_second_new_drive_gets_the_next_turn_number() {
     );
 }
 
+/// 续幕（`D-222` 裁决 2）：不新开用户格、不换轮号；本幕的锚是它自己的 `round` 格。
+///
+/// 反向用例就是「把续幕当新轮开」：那样会重落一条同文本的用户格、轮号原地膨胀，
+/// 而 `turn_head` 的锚仍指回首幕——第二幕的每一笔账都读着上一幕的时钟。
+#[test]
+fn a_continuation_stage_reuses_the_turn_and_anchors_on_its_own_round_fact() {
+    let (facts, context) = context(vec![user_node("m1", "写长一点")]);
+    let user_seq = facts
+        .append(
+            Event::pending(
+                "u-0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": "写长一点", "id": "m1" })),
+        )
+        .expect("首幕的用户格")
+        .value();
+    facts
+        .append(
+            Event::pending(
+                "st-0-0-round-0",
+                EVENT_TURN_STAGE,
+                Entity::Turn,
+                Verb::Asserted,
+                0,
+                "system",
+            )
+            .with_payload(serde_json::json!({ "stage": "round", "round": 0 })),
+        )
+        .expect("首幕的轮次格");
+    facts
+        .append(
+            Event::pending(
+                "final-0",
+                symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                0,
+                "assistant",
+            )
+            .with_payload(serde_json::json!({ "text": "半截", "reason": "exhausted" })),
+        )
+        .expect("首幕被输出上限掐断");
+
+    let mut turn = TurnState {
+        turn_no: 0,
+        user_seq,
+        drive_seq: user_seq,
+        request_round: 0,
+        now_ms: 0,
+        facts: facts.range(Seq::new(0)),
+        ..TurnState::default()
+    };
+
+    let drive = super::continue_drive(&context, &mut turn, &request()).expect("续幕开得了");
+
+    assert_eq!(turn.turn_no, 0, "续幕记在原轮上");
+    assert_eq!(turn.request_round, 1, "轮次从事实读：下一幕是第 1 轮");
+    assert_eq!(drive.user_text, "写长一点", "用户发言沿用本轮那一句");
+
+    let all = facts.range(Seq::new(0));
+    assert_eq!(
+        all.iter().filter(|e| e.kind == EVENT_USER_MESSAGE).count(),
+        1,
+        "续幕不重落用户格：{all:?}"
+    );
+    let round = all
+        .iter()
+        .find(|e| {
+            e.kind == EVENT_TURN_STAGE && e.payload["stage"] == "round" && e.payload["round"] == 1
+        })
+        .unwrap_or_else(|| panic!("缺续幕的轮次格：{all:?}"));
+    assert_eq!(round.event_id, "st-0-1-round-1", "幂等段是轮次本身");
+    assert_eq!(
+        turn.drive_seq,
+        round.seq.map(|s| s.value()).unwrap(),
+        "续幕的锚就是它自己那一格"
+    );
+    assert_eq!(turn.now_ms, round.ts, "`now` 跟着新锚走（判据 12）");
+    assert!(
+        all.iter()
+            .any(|e| e.event_id == format!("cfg-0-{}", turn.drive_seq)),
+        "配置格按幕区分：{all:?}"
+    );
+}
+
 // ── 收租窗口的边界（DE-015 §2.6 第 7 条的边界段）────────────────────────
 //
 // 看护只看快照尾部 `lease_window()` 条（`lease_tail`）。窗口外的未回 `sent` 被切掉，

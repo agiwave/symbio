@@ -33,9 +33,6 @@ mod recall_score;
 mod report_exec;
 mod session_port;
 mod skill_events;
-// 一幕的直线：备输入 → 跑一轮 → 收好产出（`D-222` §二 裁决 1）。幕不是迭代器，
-// 也不是 host——`turn` 端口退场之后它没有可选的债，只剩这三步。
-mod stage;
 mod stage_events;
 mod task_events;
 mod tokenizer;

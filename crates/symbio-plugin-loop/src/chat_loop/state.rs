@@ -312,7 +312,8 @@ pub(crate) struct TurnState {
     pub(crate) facts: Vec<symbio_core::Event>,
     /// 续写幕复用的 Turn 根节点 id（d）。
     ///
-    /// 唤醒请求发生在开幕之前，`stage::run_stage` 按它决定「要不要新开一个根」：
+    /// 唤醒请求发生在开幕之前，幕首（`turn_exec::drive` 的 `open_stage`）按它决定
+    /// 「要不要新开一个根」：
     /// 有值 ⇒ 复用被续写轮的根（结果卡挂回原来那棵树），并且**不重发**流式占位
     /// ——那个骨架早在本轮首幕就发过了。`None` = 新轮，照常新开。
     pub(crate) resume_root: Option<String>,

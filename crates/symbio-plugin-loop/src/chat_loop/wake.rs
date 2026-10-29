@@ -88,7 +88,7 @@ pub(crate) async fn process_wake(
 ///
 /// 本函数因此只做**校验与交身份**：靶子必须是一条轮骨架（`is_run()`，不看 `status`——
 /// 中止的、失败的、甚至跑完的都可以重来），它的根 id 交给新幕去登记分支
-/// （[`super::super::stage`] 的 `prepare`：那里才有新支的根 id）。
+/// （`prepare-turn` 那一行：那里才有新支的根 id）。
 /// 「藏起来不读」归[分支投影](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")，
 /// 一处是 [`symbio_core::branch_hide_unselected`]——只有进模型的那条路调它。
 async fn retry_subtree(session: &LoopSession, target_id: &str) -> Result<WakeOutcome, PluginError> {
