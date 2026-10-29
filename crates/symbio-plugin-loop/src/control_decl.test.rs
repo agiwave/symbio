@@ -140,6 +140,9 @@ fn control_plane_loads_and_freezes() {
             // `turn_next_round` 是幕的推进那一格（`D-222` 裁决 2）：两条判据折在
             // 视图里，`continue-turn` 立起来之前只有 `next_stage_round` 一个读者。
             "turn_next_round",
+            // `next_round_trip` 是本幕下一次模型往返（`D-225`）：`announce-model`
+            // 的 `owes`，键是这一笔的身份格，不是幕。
+            "next_round_trip",
             "report_due",
             "reported_anchors",
         ]
@@ -159,7 +162,8 @@ fn control_plane_loads_and_freezes() {
 
     // `ver` 是口径的显式版本：读面或折叠方式一变就要升，否则「同一份日志、两个答案」
     // 在回放里无从解释。这里钉的是各视图**当前**的口径版本。
-    // `turn_head` 到 v15：v15 让幕锚多一档「同一轮再接一幕」的轮次格（续幕复用
+    // `turn_head` 到 v16：v16 把内部的 `closed` 一并吐出（`D-225`——`next_round_trip`
+    // 判「幕还开着」要它）；v15 让幕锚多一档「同一轮再接一幕」的轮次格（续幕复用
     // 轮号与用户格，锚只能落在它自己那一格上）；v14 把 `model_open` 的关账格从
     // `sent` 挪到 `response` / `failed` / `retry`（`D-222` 订正 2——一次模型往返
     // 此后占两个环步，`sent` 只说明「发出去了」），读面随之补 `retry` 的
@@ -173,7 +177,7 @@ fn control_plane_loads_and_freezes() {
     // （内部往返带 `via`，D-122 决策 2）。
     assert_eq!(frozen.view("in_flight").unwrap().ver, 3);
     assert_eq!(frozen.view("stale_sent").unwrap().ver, 2);
-    assert_eq!(frozen.view("turn_head").unwrap().ver, 15);
+    assert_eq!(frozen.view("turn_head").unwrap().ver, 16);
     // v2：幕锚多一档续幕轮次格（`turn_stages` / `turn_closed` 的窗口因此能从续幕起算）。
     assert_eq!(frozen.view("turn_stages").unwrap().ver, 2);
     assert_eq!(frozen.view("turn_closed").unwrap().ver, 2);
@@ -486,6 +490,8 @@ fn turn_head_reads_round_and_done_from_facts() {
             "prepared": false,
             // `D-222` 裁决 2：本幕未收束 ⇒ 没有「为什么停下」这一格。
             "closure": serde_json::Value::Null,
+            // `D-225`：幕开着（收束 / 兜底格还没落）。
+            "closed": false,
             "has_final": false,
             "closeable": false,
             "tools_open": false,

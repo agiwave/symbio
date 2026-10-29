@@ -177,6 +177,9 @@ pub(crate) const ACTOR_EXECUTE: ActorDecl = ActorDecl {
     // 归 `close` 执行体。两个执行体写同一批格 ⇒ 依赖图成环（`close → execute` 与
     // `execute → close`），装载红（DE-015 §3.4 第 1 条）。
     writes: &[
+        // 本行宣布的那一条 `request(port=model)`（`D-225`）：出口就是它，写方也是
+        // 它（`announce_round` 经 `port::announce` 落格）——声明与写点同源。
+        EVENT_REQUEST,
         EVENT_CHAT_ASSISTANT_OPENING,
         EVENT_TURN_STAGE,
         EVENT_TURN_DISPATCH,
@@ -992,22 +995,25 @@ pub(crate) static ROWS: &[Decl] = &[
     // 落一条 `request(port=model)`，派出归 `dispatch-model`。名字里的 `turn` 是幕的
     // 残留，它会让读表的人以为这一行按幕执行。改名之后行表里不再有以幕命名的行。
     //
-    // 只要本幕还开着、且手上没有一批没关掉的工具调用，就欠一次执行。它的**后果**是
-    // 写一条 `request`（决策者的动作），派发本身归 `dispatch-model`。没把它并进协议行：
-    // 两者的粒度不同（本幕 vs 一次请求往返）——一幕可以有多次往返（auto 续写），
-    // 而「本幕还欠不欠」只有一个答案。
+    // 只要本幕还开着、手上没有一批没关掉的工具调用、也没有一笔在飞的往返，
+    // 就欠**下一次**模型往返。它的**后果**是写一条 `request`（决策者的动作），
+    // 派发本身归 `dispatch-model`。
     //
-    // `tools_open = false`（b）：模型交回了工具调用、其中还有没关账的，
-    // 这一步就让位——否则它每次都比创建 / 授权 / 派发（67 / 68 / 69）先生效，
-    // 工具批永远等不到人跑（下一轮模型往返会带着没有结果的交换再次出发）。
+    // 键取**这一笔往返**的身份格 `(port, id, attempt)`（`D-225`），与 `model` 端口的
+    // 另两行同形——不取幕。以幕为键时一幕只能还一次，而「再还一次」是常态
+    // （工具循环一幕有 N 次往返）：一笔债要被还 N 次，债键就选错了对象。`id` 由
+    // `next_round_trip` 按本幕已宣布的往返数编（`s{n}`），`until` 就是那一条
+    // `request`——写方 `announce_round` 编同一个 id，债与还清是同一格。
     //
-    // `reflex_answered = false`（D-163）：快路已作答的轮**没有要答的东西**，本行不欠。
-    // 这条前件替代了「按优先级让 close 先跑」的时序约定——零模型往返因此是行表上的
-    // 判据，不是两个数字（55 / 60）碰巧凑出来的次序。
+    // 四条开账条件折在视图里（`next_round_trip`），行上不再有 `eq`：
     //
-    // `model_open = false`（D-166）：本行只**宣布**一次往返（落 `request(port=model)`），
-    // 派出归 `dispatch-model`。宣布之后那笔账还开着，本行必须让位——否则 `prio` 60
-    // 会压过 66 再宣布一笔，同一幕两条请求并存，「一次模型往返」这个粒度当场失真。
+    // - 幕已收束 ⇒ 不欠（出口也按同一格收口，两条路说的是同一件事）；
+    // - `tools_open`（b）：模型交回了工具调用、其中还有没关账的，这一步就让位——
+    //   否则它每次都比创建 / 授权 / 派发（67 / 68 / 69）先生效，工具批永远等不到人跑；
+    // - `model_open`（D-166 / `D-222` 订正 2）：已宣布、未收清的往返还在飞，不许再宣布
+    //   一笔（同一 id 的幂等键会撞上）。这一格从行上退场之后只剩视图一个读者；
+    // - `reflex_answered`（D-163）：快路已作答的轮**没有要答的东西**，本行不欠。
+    //   这条前件替代了「按优先级让 close 先跑」的时序约定。
     Decl {
         name: "announce-model",
         prio: 60,
@@ -1015,18 +1021,15 @@ pub(crate) static ROWS: &[Decl] = &[
         tier: LatencyTier::Deep,
         expand: None,
         owes: Pattern {
-            source: "turn_head",
-            key: &["turn"],
-            eq: &[
-                ("tools_open", Lit::Bool(false)),
-                ("reflex_answered", Lit::Bool(false)),
-                ("model_open", Lit::Bool(false)),
-            ],
-        },
-        until: &[Pattern {
-            source: "turn_closed",
-            key: &["turn"],
+            source: "next_round_trip",
+            key: &["port", "id", "attempt"],
             eq: &[],
+        },
+        // 出口是**这一次**宣布落下的那一条 `request`：键同形，`port` 收窄到 `model`。
+        until: &[Pattern {
+            source: EVENT_REQUEST,
+            key: &["port", "id", "attempt"],
+            eq: &[("port", Lit::Str("model"))],
         }],
         unless: &[],
     },

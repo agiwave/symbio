@@ -609,6 +609,9 @@ fn after_anchor(e: &Event, anchor_seq: u64) -> bool {
 /// `turn.stage{stage:"round", round > 0}`。续幕复用轮号与用户格，锚只能落在它自己
 /// 落下的那一格上；否则首幕的判决 / 收束会被读成续幕的「已做过 / 已收束」，
 /// 而续幕其实要重跑接缝与召回。`round = 0` 的轮次格**不是**锚（它是首幕自己的账）。
+///
+/// v16（`D-225`）：把内部的 `closed` 一并吐出来（口径不变，与 [`closure`] 同一条格）。
+/// [`next_round_trip`] 判「幕还开着」要它——那一格此前只在视图内部用。
 fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
     let Some((turn, anchor)) = drive_of(events) else {
         return serde_json::Value::Null;
@@ -875,6 +878,9 @@ fn turn_head(events: &[Event], _now: i64) -> serde_json::Value {
         // 于是「轮首那几行 → 接缝 → 轮内开账」由同一个循环里的一个数字说，不必把
         // `prepared: true` 复写进每一行的前件（那会是这条次序的第二个 owner）。
         "prepared": stage_since("inputs"),
+        // 本幕是否已收束（收束 / 兜底格出现在幕锚之后）。读者是 [`next_round_trip`]：
+        // 收束的幕不再欠下一次往返。
+        "closed": closed,
         // 本幕的收束原因（`D-222` 裁决 2）：`exhausted` / `completed` / `null`（未收束）。
         // 读者只有幕间判据（`loop_rows::next_stage_round`）——「还开不开下一幕」。
         "closure": closure,
@@ -986,6 +992,58 @@ fn turn_next_round(events: &[Event], now: i64) -> serde_json::Value {
         return serde_json::Value::Array(Vec::new());
     }
     serde_json::json!([{ "turn": turn, "round": round + 1 }])
+}
+
+/// **本幕的下一次模型往返**（`D-225`）：该不该宣布，以及要还的那一格的身份。
+///
+/// `announce-model` 的 `owes`。吐一笔 `{port, id, attempt}`——与 `dispatch-model` /
+/// `await-model` 同形：键取**这一笔往返**（`(port, id, attempt)`），不取幕。以幕为键
+/// 时一幕只能还一次，而「再还一次」是常态（工具循环）：一笔债要被还 N 次，债键
+/// 就选错了对象（`model_open` 那个补丁就是为此存在的）。
+///
+/// ## 开账条件（四条都在 `turn_head` 里）
+///
+/// 幕未收束 ∧ 没有开着的工具批 ∧ 没有在飞的往返 ∧ 快路未答。前两条此前是行上的
+/// `eq`，第三、四条给出「现在该不该再宣布一笔」的判断；前三条也是 `model_open`
+/// 的全部用处——从行上退场之后它只剩这一个读者。
+///
+/// ## `id` 的编法与唯一写方对齐
+///
+/// `s{n}` 的 `n` = 本幕已宣布的往返数（幕锚之后 `via` 缺席的 `request(port=model)`
+/// 条数）。写方是 `turn_runner/stream.rs` 的 `announce_round`：它用 `Prepared::step`
+/// 编同一个 id。两个数在**本行被选中时**相等——能选中它时没有在飞的往返
+/// （`model_open = false`），每一笔宣布过的往返都已收清、`step` 已 +1；让两者不等
+/// 的那几条路（中止 / 适配器失败 / 控制面兜底）都当场收束，本行此后不再开账。
+fn next_round_trip(events: &[Event], now: i64) -> serde_json::Value {
+    let head = turn_head(events, now);
+    let Some(head) = head.as_object() else {
+        return serde_json::Value::Null;
+    };
+    let flag = |key: &str| head.get(key).and_then(|v| v.as_bool()) == Some(true);
+    if flag("closed") || flag("tools_open") || flag("model_open") || flag("reflex_answered") {
+        return serde_json::Value::Null;
+    }
+    let (Some(turn), Some(anchor)) = (
+        head.get("turn").and_then(|v| v.as_u64()),
+        head.get("anchor").and_then(|v| v.as_u64()),
+    ) else {
+        return serde_json::Value::Null;
+    };
+    let step = events
+        .iter()
+        .filter(|e| {
+            e.turn == turn
+                && e.kind == EVENT_REQUEST
+                && str_field(e, "port") == Some("model")
+                && str_field(e, "via").is_none()
+                && after_anchor(e, anchor)
+        })
+        .count();
+    serde_json::json!({
+        "port": "model",
+        "id": format!("model-{turn}-d{anchor}-s{step}"),
+        "attempt": 1,
+    })
 }
 
 /// **中途汇报该不该说**：只吃日志与 `now`，不碰内存计数 / 墙钟。///
@@ -1274,7 +1332,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     // `attempt`——判「这笔账关没关」的三个关账格里先前只有两个在面上。
     ViewDecl {
         name: "turn_head",
-        ver: 15,
+        ver: 16,
         reads: &[
             ("user.message", "id"),
             ("turn.stage", "stage"),
@@ -1415,6 +1473,63 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         ],
         cost: 4096,
         eval: turn_next_round,
+    },
+    // 本幕的下一次模型往返（`D-225`）：`announce-model` 那一行的 `owes`。
+    //
+    // 读面与 `turn_head` 逐字相同——它就是那一份折叠再取一格（`closed` / `tools_open`
+    // / `model_open` / `reflex_answered`）并编出这一笔的 id，没有独立的事实来源。
+    // `evidence` 照抄：这一格从不作任何行的出口（只作 `owes`），配图用不到它。
+    //
+    // 它吐的是**这一笔往返的身份**（`(port, id, attempt)`），不是幕：幕级键让一幕
+    // 只能还一次，而工具循环里「再还一次」是常态（`D-222` 裁决 7 的那一侧）。
+    ViewDecl {
+        name: "next_round_trip",
+        ver: 1,
+        reads: &[
+            ("user.message", "id"),
+            ("turn.stage", "stage"),
+            ("turn.stage", "round"),
+            ("turn.stage", "result"),
+            ("session.config", "classify_enabled"),
+            ("session.config", "auto_compress"),
+            ("session.config", "is_persistent"),
+            (EVENT_REQUEST, "port"),
+            (EVENT_REQUEST, "id"),
+            (EVENT_REQUEST, "attempt"),
+            (EVENT_REQUEST, "via"),
+            (EVENT_SENT, "port"),
+            (EVENT_SENT, "id"),
+            (EVENT_SENT, "attempt"),
+            (EVENT_RESPONSE, "port"),
+            (EVENT_RESPONSE, "id"),
+            (EVENT_RESPONSE, "attempt"),
+            (EVENT_RESPONSE, "calls"),
+            (EVENT_RESPONSE, "via"),
+            (EVENT_RETRY, "port"),
+            (EVENT_RETRY, "id"),
+            (EVENT_RETRY, "attempt"),
+            (EVENT_FAILED, "port"),
+            (EVENT_FAILED, "id"),
+            (EVENT_FAILED, "attempt"),
+            (EVENT_FAILED, "via"),
+            ("chat.assistant.final", "text"),
+            ("chat.assistant.fallback", "text"),
+            ("chat.assistant.final", "reason"),
+            ("chat.assistant.fallback", "reason"),
+        ],
+        evidence: &[
+            "user.message",
+            "turn.stage",
+            "session.config",
+            EVENT_REQUEST,
+            EVENT_SENT,
+            EVENT_RESPONSE,
+            EVENT_FAILED,
+            "chat.assistant.final",
+            "chat.assistant.fallback",
+        ],
+        cost: 4096,
+        eval: next_round_trip,
     },
     // 汇报到期：静默时长 = `now` − 最近一次用户看得见的动静的 `ts`；
     // 配额 = 本轮汇报数 vs `session.config.progress_max_per_turn`。

@@ -1506,6 +1506,68 @@ fn the_execute_row_steps_aside_until_the_round_is_settled() {
     assert!(owes("announce-model", &head, 0), "收清之后执行行重新开账");
 }
 
+/// 执行行此刻欠的那一笔的键（`None` = 不欠）。
+fn announce_key(events: &[Event]) -> Option<String> {
+    owed(ROWS, &frozen(), events, 0)
+        .into_iter()
+        .find(|d| d.decl.name == "announce-model")
+        .map(|d| d.key.trace())
+}
+
+/// `D-225`：`announce-model` 的键是**一次往返**的身份 `(port, id, attempt)`，不是幕。
+///
+/// 旧键（幕头实例）只能表达「整幕不再欠」：一幕要走 N 次模型往返，而同一键上的
+/// 债还一次就没了——第二次要么还的是同一笔（账本读不出是哪一次），要么开不出来。
+/// 新键里带着这一次往返的 id，与 `announce_round` 用 `Prepared::step` 编的是同一个，
+/// 因此「同一幕的第二次往返」在账本上是一笔**新债**，而不是上一笔的重开。
+#[test]
+fn the_announce_row_is_keyed_by_the_round_trip() {
+    let mut head = vec![
+        ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
+        ev(1, "turn.stage", json!({"stage": "round", "round": 0})),
+    ];
+    let anchor = head[0].seq.expect("幕锚必须带 seq").value();
+    let first = format!("model-1-d{anchor}-s0");
+    assert_eq!(
+        announce_key(&head),
+        Some(format!("port=model,id={first},attempt=1")),
+        "幕开着、一笔都没宣布 ⇒ 欠第一次往返，键里就是它的 id"
+    );
+
+    // 第一次往返走完（宣布 → 派出 → 应答），应答交回一笔工具调用。
+    head.push(model_request(&first));
+    head.push(model_sent(&first));
+    head.push(ev(
+        1,
+        symbio_core::EVENT_RESPONSE,
+        json!({
+            "port": "model",
+            "id": first,
+            "attempt": 1,
+            "calls": [{ "port": "tool", "id": "tool-1-d0-call-a", "name": "read_file", "arguments": {} }],
+        }),
+    ));
+    assert_eq!(announce_key(&head), None, "工具批还开着 ⇒ 执行行让位");
+
+    // 工具批关账 ⇒ 同一幕欠**下一次**往返：同幕、同端口，键却是另一笔。
+    head.push(ev(
+        1,
+        symbio_core::EVENT_REQUEST,
+        json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
+    ));
+    head.push(ev(
+        1,
+        symbio_core::EVENT_RESPONSE,
+        json!({ "port": "tool", "id": "tool-1-d0-call-a", "attempt": 1 }),
+    ));
+    let second = format!("model-1-d{anchor}-s1");
+    assert_eq!(
+        announce_key(&head),
+        Some(format!("port=model,id={second},attempt=1")),
+        "同一幕的第二次往返是一笔新债——旧键（幕）在这里只能还一次"
+    );
+}
+
 #[test]
 fn the_model_rows_do_not_disturb_the_tool_rows() {
     // 两个端口的行**互不串账**：一条 `model` 的 `request` 不让 `tool` 的派发行开账。
@@ -2644,9 +2706,18 @@ fn the_overlap_report_on_the_production_table() {
         "turn.stage",
         "user.message",
     ];
+    // `announce-model` 的 `owes` 换成 `next_round_trip` 之后（`D-225`），它读的仍是
+    // 这一份幕头，键却变成了**这一笔往返**的 `(port, id, attempt)`——于是它与
+    // `close-turn`（键 `(turn)`）不再同键，与三行协议行同键。这几对是静态报告：
+    // 开账侧由 `model_open` / `tools_open` 互斥，运行时不会同时可还。
+    let request: &[&str] = &["request"];
+    let sent: &[&str] = &["sent"];
     assert_eq!(
         rendered,
         vec![
+            // 授权行与宣布行同键读 `request`：一条工具请求开着时授权行欠，而宣布行
+            // 只在没有在飞往返时才开账——报告不知道 `via` / `port` 这一层。
+            ("authorize-tool", "announce-model", request),
             // 四行策略都读同一个幕头（`turn_head` 折出的格），键同为 `(turn, round)`。
             // 它们今天由 `prio`（10/30/40/50）决出，报告不知道这些。
             //
@@ -2668,15 +2739,11 @@ fn the_overlap_report_on_the_production_table() {
             ("policy.reflex", "prepare-turn", head),
             ("policy.reflex", "continue-turn", head),
             ("prepare-turn", "continue-turn", head),
-            // 收束行与执行行也相交：两行在「本幕开着」这一点上同时成立，
-            // 谁先还得由前件（`has_final` / `reflex_answered`）与 `prio` 决——报告不知道这些。
-            // 快路行不再与它们相交（D-163）：它的出口读 `(turn, round)`，键形状与
-            // 收束 / 执行两行的 `(turn)` 不同，装载期不再报这两对。
-            //
-            // 外环的宣布 / 派出两行与租约行都已退场：前者随 `turn` 端口（`D-222` §一），
-            // 后者随「看护读视图、不经行表」（`TC-1b`）。所以这张名单里只剩两条
-            // 「同一点上竞争」的对，两对都由前件决出，报告只知道它们相交。
-            ("close-turn", "announce-model", head),
+            // 宣布行与 `model` 端口的两行同键：宣布之后请求开着（`model_open`），
+            // 派发行欠、宣布行不欠；派出之后等待行欠、宣布行仍不欠。
+            ("announce-model", "dispatch-model", request),
+            ("announce-model", "await-model", sent),
+            ("announce-model", "await-tools", sent),
         ]
     );
 }
