@@ -1,11 +1,11 @@
-//! HTTP 重试机器 —— `execute_turn` 的传输层（core `llm/` 契约的实现细节）。
+//! HTTP 重试机器 —— `round_trip` 的传输层（core `llm/` 契约的实现细节）。
 //!
 //! 只有 model 插件使用，故住在插件内而非 core `llm/`：
 //! - HTTP 客户端单例（连接池 + 双层空闲超时）
 //! - 支持中止的 POST 重试机器（[`execute_post_with_abort`] → 五态
 //!   [`PostResult`]，指数退避 + `Retry-After`）
 //!
-//! 上层（`bound_provider::execute_turn`）负责请求体构建与序列化；本模块
+//! 上层（`bound_provider::round_trip`）负责请求体构建与序列化；本模块
 //! 只管「把字节安全送到端点、把响应安全拿回来」。
 
 use std::sync::OnceLock;
@@ -46,7 +46,7 @@ async fn wait_for_abort_signal(abort: &ExecAbortSignal) {
     abort.cancelled().await;
 }
 
-/// POST 结果五态（`execute_turn` 的匹配面，语义见 `bound_provider` 模块文档）。
+/// POST 结果五态（`round_trip` 的匹配面，语义见 `bound_provider` 模块文档）。
 pub enum PostResult {
     Ok(reqwest::Response),
     RetryWithoutContextId,
@@ -138,7 +138,7 @@ pub async fn execute_post_with_abort(
         );
     }
     let started = std::time::Instant::now();
-    // 「请求发起」锚点不在这里：它由调用方（`model::bound_provider::execute_turn`）
+    // 「请求发起」锚点不在这里：它由调用方（`model::bound_provider::round_trip`）
     // 在**请求体构建之后**统一打一条，便于在同一条里同时给出模型/规模/端点/体量。
     // 这里的进程起点紧随其后，仍在「等待响应头」之前，故阶段定位语义不变
     // （见 `stream.rs::parse_sse_stream` 的阶段对照表）。

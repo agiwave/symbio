@@ -211,7 +211,7 @@ pub(crate) async fn execute_final_reply_turn(
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
     // **补落寄存的变更**：答话轮同样是会话侧的落格窗口，经端口动作发起。
-    // 与 `execute_turn` 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
+    // 与 [`super::assemble_turn`] 同序（在运行器落格之前——本轮的用户格已由编排层先落）。
     if let Err(e) = session.run_op_unit(run_ops::DRAIN_PARKED, ()).await {
         symbio_core::plugin_warn!("session", "[Turn] 补落寄存变更失败（本轮继续）: {e}");
     }

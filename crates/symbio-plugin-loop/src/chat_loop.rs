@@ -578,7 +578,7 @@ pub(crate) async fn run_classify(
     //
     // 这句开场白是事实：随收束格入格（WAL 为唯一事实源，D-049），不入格则重建折不出
     // 这条根级对话面节点 ⇒ t20 / t22 的「恰有一条对话面节点」全部落空。落格在
-    // `execute_turn`（唯一持写者令牌处）——这里只把「说了什么 / 节点身份」递过去。
+    // `turn_exec::run_seam`（唯一持写者令牌处）——这里只把「说了什么 / 节点身份」递过去。
     if effect == VerdictEffect::Spoke {
         let node = context
             .messages
@@ -646,7 +646,7 @@ pub(crate) async fn land_answered_turn(
         answer.cost_ms,
         answer.dialog,
         answer.reasoning,
-        // 答话轮同样要落「本轮之前那次压缩」这一格——它不进 `execute_turn`，
+        // 答话轮同样要落「本轮之前那次压缩」这一格——它不进 `turn_exec::drive`，
         // 不带上就漏了（见该函数的入参文档）。
         context.consolidated.take().as_deref(),
     )

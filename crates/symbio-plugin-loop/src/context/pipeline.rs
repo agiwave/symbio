@@ -415,7 +415,7 @@ async fn compress_snapshot_inner(
     let mut new_messages = vec![snapshot_message];
     new_messages.extend(keep_messages);
     // 寄存给落格方（见 `SessionContext::consolidated` 的文档）：压缩现场不持写者
-    // 令牌，`session.consolidated` 这条事实只能由下一个 `execute_turn` 落。
+    // 令牌，`session.consolidated` 这条事实只能由下一幕接缝（`turn_exec::run_seam`）落。
     //
     // ⚠️ 只在这里寄存、**不在这里落格**——就地落格会拿到 `NotTheWriter`，而那是
     // 静默的（压缩照常生效、界面照常变短，只有事实源里少一条事件）。
@@ -426,7 +426,7 @@ async fn compress_snapshot_inner(
     // **事实 owner 是执行口**，不是这里。压缩现场不持写者令牌，就地落
     // `session.consolidated` 会拿到 `NotTheWriter`，而那是静默的（压缩照常生效、
     // 界面照常变短，只有事实源里少一条事件）。所以这份快照**寄存**在上面那行
-    // `context.consolidated`，由下一个 `execute_turn` 在令牌窗口内落格（见
+    // `context.consolidated`，由下一幕接缝（`turn_exec::run_seam`）在令牌窗口内落格（见
     // `V2Request::consolidation` 的文档）。这是它与节点级原语（`apply`）的真实差别。
     //
     // 失败口径：**不致命但不吞**。缓存写失败时压缩在内存里已经生效（`context.messages`
@@ -734,7 +734,7 @@ pub(crate) async fn retry_compaction(
             .unwrap_or_default(),
         session: session.clone(),
         // 重试路径是**独立的**压缩会话（`retry_compaction`）：它的产出在这里就地落格
-        // （见本函数末尾的 `consolidate`）——轮外没有「下一个 `execute_turn`」
+        // （见本函数末尾的 `consolidate`）——轮外没有「下一幕接缝」
         // 可以寄存，所以不走那条回流。
         consolidated: None,
     };
@@ -814,7 +814,7 @@ pub(crate) async fn retry_compaction(
     // ── 压缩入格 + 归档（S2.7-b2）───────────────────────────────────────────
     //
     // **轮外**：`process_resume` 在 turn 循环**之前**调用本函数，之后一律返回 `Done`
-    // ——没有「下一个 `execute_turn`」可以把 `consolidated` 寄存过去，所以这里就地落格。
+    // ——没有「下一幕接缝」可以把 `consolidated` 寄存过去，所以这里就地落格。
     // 失败路径上 `consolidated` 恒为 `None`（内核回滚时不设它），于是这一段对失败
     // 与「未触发」两种结局都是 no-op。落格动作在 session（持写者令牌的一侧）。
     if let Some(msgs) = context.consolidated.take() {

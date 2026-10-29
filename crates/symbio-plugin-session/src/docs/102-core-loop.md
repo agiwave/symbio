@@ -68,7 +68,7 @@ impl: done
  + settle_reasoning / persist_turn chat_loop/turn.rs
  + auto_compress_process / retry_compaction / compress_with_snapshot_core context/pipeline.rs
  + 会话侧读写经动作面 session_port.rs
-④ 单轮执行层 turn_exec::execute_turn turn_exec.rs
+④ 执行体层 turn_exec 的各行动作 turn_exec.rs
  + turn_runner/{prepare,stream,batch,boundary,settle}（各行的执行体动作在这里）turn_runner/
  + SessionDispatchPort::dispatch tool_dispatch.rs（三动作：open / authorize / dispatch）
  + process_tool_calls_async tools/tool_executor.rs
@@ -126,7 +126,7 @@ impl: done
 | `finish == length` 且轮次已到上限 | 会话级告警（提高单次输出预算 / 缩小任务范围），绝不静默结束；增量落库 |
 | 其余 | 增量落库 |
 
-> **这里没有工具执行，也没有压缩拦截**：工具跑在 `execute_turn` 内部（§4.1），
+> **这里没有工具执行，也没有压缩拦截**：工具跑在 `turn_exec::drive` 的内环里（§4.1），
 > 到收幕时本轮工具早已产出结果；水位响应在轮首派发点选中的
 > `policy.compress`（接缝段）。
 > `persist_turn` 因此不读 `TurnOutput`——它只读 `ModelFinishReason`。
@@ -142,7 +142,7 @@ impl: done
  汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **「不完整不唤醒」由行表的前件守住**：下一笔 `announce-model` 只在上一批结果全部接进
   `exchange` 之后才成立（§4.1），不在闸门里判在途工具。
-- **工具执行**归第二步的 v2 运行器（`execute_turn` 内部经 `SessionDispatchPort`
+- **工具执行**归运行器（`turn_exec::drive` 的内环经 `SessionDispatchPort`
  分发）；`persist_turn` 只做「增量落库 + 截断告警」，不承担工具执行（见 §4.1）。
 - **流向不由返回值决定**（`D-222` 裁决 2）：幕停下之后是收工还是再开一幕，读的是
  `turn_next_round`（收束格的 `reason` 与本幕轮次的合成视图）。执行体交回的只有一件事——
@@ -164,10 +164,10 @@ enum Gate {
 fn gate_turn(turn: &TurnState) -> Gate
 ```
 
-**形状原本是三态**（放行 / 等工具齐 / 退出）。「等工具齐」判的是 v1 外壳留在 `TurnState` 上的
-在途工具集合：非空 ⇒ 不唤醒。v2 里工具在 `execute_turn` **内部**一批批跑完（§4.1），没有任何
-代码路径往那个集合登记 id ⇒ 恒空 ⇒ 恒放行，于是这一态与它的簿记一起退场
-（裁决与被删符号名册见 [D-073](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
+**形状只有两态**（放行 / 退出）：「工具没跑完」不是退出条件——工具在
+`turn_exec::drive` 的内环里一批批跑完（§4.1），不存在横跨轮次的在途集合，
+于是这一态与它的簿记一起退场（裁决与被删符号名册见
+[D-073](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。
 
 「不完整不唤醒」没有废弃，它换了承担者：**结果接进 `exchange` 之后才可能开出下一笔
 `announce-model`**（`await-tools` 那一行的出口，§4.1）。因此——

@@ -88,7 +88,7 @@ function sessionConfig() {
   return { classify_enabled: true, compose_enabled: true, progress_enabled: false };
 }
 
-/** 一个请求的 system 段（`execute_turn` 的第一条消息；缺席给空串） */
+/** 一个请求的 system 段（`round_trip` 的第一条消息；缺席给空串） */
 function sysOf(r) {
   const m = (r.body?.messages ?? []).find((x) => x.role === 'system');
   return typeof m?.content === 'string' ? m.content : '';

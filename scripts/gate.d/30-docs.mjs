@@ -253,7 +253,7 @@ export const GUARDS = [
   // 「读不出 ⇒ 一条都不命中却照样绿」，故空集合直接 exit 2。
   'tool-decls-audit',
   // `internal-model-audit`（IM-001…004）判**档位闸门的覆盖范围有没有被悄悄扩大**：
-  // 闸门只有一个挂点 `LlmAdapter::generate(&FullModel, …)`，而 `ModelProvider::execute_turn`
+  // 闸门只有一个挂点 `LlmAdapter::generate(&FullModel, …)`，而 `ModelProvider::round_trip`
   // 对所有插件开放——直调它就绕过闸门（相应批次）。
   //
   // 它治的病是**第四条内部请求悄悄溜进来**：绕过本身不是罪（内部请求 = 无工具 + silent

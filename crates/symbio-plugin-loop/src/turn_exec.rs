@@ -396,8 +396,7 @@ pub(crate) struct UiBridge {
 /// `UiBridge` drop 时**关闭队列**：接收端的 `pop` 因此返回 `None` 而退出。
 ///
 /// 这条语义原先由 `UnboundedSender` 的 drop 免费提供——改成 `Arc<FrameQueue>` 后
-/// 队列与桥同生共死，而**发射任务自己也持有一份 Arc**（`execute_turn` 里
-/// `tx.pop()`），所以「桥没了通道就关了」不再自动成立。不显式关的话，发射任务
+/// 队列与桥同生共死，而**发射任务自己也持有一份 Arc**（它在 `tx.pop()` 上等待），所以「桥没了通道就关了」不再自动成立。不显式关的话，发射任务
 /// 会在每一轮结束后**永久挂起**：不 panic、不超时、不占 CPU，只是永不退出，
 /// 而轮次照常增长——那种泄漏在日志里一个字都看不见。
 impl Drop for UiBridge {

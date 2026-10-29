@@ -211,7 +211,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | symbio_core | [crates/symbio-core/src/README](../crates/symbio-core/README.md "crates/symbio-core/README") | 内核契约层：命名与结构规范 + 域清单 |
 | session | [crates/symbio-plugin-session/src/README](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
 | loop | [crates/symbio-plugin-loop/src/README](../crates/symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") | 单环驱动器：行表、事实层、执行体装配 |
-| model | [crates/symbio-plugin-model/src/README](../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README") | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
+| model | [crates/symbio-plugin-model/src/README](../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README") | 无状态单轮 LLM 网关（round_trip），多协议适配 |
 | agent | [crates/symbio-plugin-agent/src/README](../crates/symbio-plugin-agent/README.md "crates/symbio-plugin-agent/README") | 智能体域唯一所有者：agent 目录库、子树装配、子智能体委托 |
 | mcp | [crates/symbio-plugin-mcp/src/README](../crates/symbio-plugin-mcp/README.md "crates/symbio-plugin-mcp/README") | MCP 外部工具接入与能力注册 |
 | skill | [crates/symbio-plugin-skill/src/README](../crates/symbio-plugin-skill/README.md "crates/symbio-plugin-skill/README") | 技能脚本发现与装载 |

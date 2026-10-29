@@ -37,7 +37,7 @@ flowchart TD
  BuildPrompt --> AggTools[6. 工具汇集<br>Registry 收集口]
  AggTools --> Resolve[7. 获取生效 ModelProvider<br>capability_model_active 单次解析]
  Resolve --> BuildView[8. 构建请求视图<br>build_request_sections<br>记忆/调度/委派三段注入]
- BuildView --> LLMCall[9. ModelProvider 推理调用<br>execute_turn 直连无状态 LLM 网关]
+ BuildView --> LLMCall[9. ModelProvider 推理调用<br>round_trip 直连无状态 LLM 网关]
  LLMCall --> ToolAction[10. 执行工具链]
  ToolAction --> LoopCheck{11. 迭代完成?}
  LoopCheck -- No --> BuildView

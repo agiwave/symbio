@@ -214,7 +214,7 @@ impl symbio_core::ExecTranscriptWriter for DiscardWriter {
 /// 配置格 / 轮次格由本文件的 `seed_*` 直给）与**幕末**的落库与镜像回灌。环里那一段
 /// 是同一个 `drive`、同一张绑定表——轮首四行与接缝不再由夹具代跑，而是照旧欠账、
 /// 照旧由 `prio` 选中（没开账的行不会被选中，判据因此仍落在本文件那几条契约上）。
-async fn execute_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
+async fn drive_turn(req: ExecTurn<'_>) -> Result<ExecTurnResult, TurnExecExit> {
     let ExecTurn {
         session,
         provider,
@@ -404,7 +404,7 @@ fn seed_user(fx: &Fixture, turn: u64, text: &str) -> u64 {
 
 /// 生产形状的配置格（`chat_loop/drive.rs` 的 `begin_drive` 落的那一份）。
 ///
-/// 本文件的用例大多直调 `execute_turn`，绕过了开幕那一步；只要有一行读
+/// 本文件的用例大多直调 `drive_turn`，绕过了开幕那一步；只要有一行读
 /// `session.config`（如 `report_due` 的开头），配置格就得自己落——否则那个开关
 /// 恒为 false，行永远不开账，用例会红在一个与它想验的东西无关的地方。
 fn seed_config(fx: &Fixture, turn: u64, user_seq: u64) {
@@ -502,7 +502,7 @@ async fn supplements_become_facts_visible_next_turn() {
     };
 
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
-    execute_turn(ExecTurn {
+    drive_turn(ExecTurn {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
@@ -623,7 +623,7 @@ struct FaithfulProvider {
     behavior: Behavior,
     /// 每次请求收到的**消息数组**（工具轮的验收要回读**下一次请求**）。
     ///
-    /// 记的是 `execute_turn` 真正收到的 `&[ChatNode]` —— 即**线格式那一侧**，
+    /// 记的是 `drive_turn` 真正收到的 `&[ChatNode]` —— 即**线格式那一侧**，
     /// **全部消息**（不只 `first()`）：只取首条时「整段被塞进一条 user 消息」测不出来。
     prompts: Arc<Mutex<ReceivedMessages>>,
 }
@@ -1095,7 +1095,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
 
-    let res = execute_turn(tool_free_req(
+    let res = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,
@@ -1175,7 +1175,7 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
 
-    let err = execute_turn(tool_free_req(
+    let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Fail).0),
         &sink,
@@ -1222,7 +1222,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
 
-    let err = execute_turn(tool_free_req(
+    let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Abort).0),
         &sink,
@@ -1272,7 +1272,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = symbio_core::ExecEventSink::direct(frames.clone());
 
-    let err = execute_turn(tool_free_req(
+    let err = drive_turn(tool_free_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::AbortAfterPartial).0),
         &sink,
@@ -1348,7 +1348,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
 
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
-    let res = execute_turn(ExecTurn {
+    let res = drive_turn(ExecTurn {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
@@ -1554,8 +1554,8 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     let user_seq = seed_user(&fx, 0, "读一下 a.md");
     seed_config(&fx, 0, user_seq);
     // 本幕的「现在」不再由用例递给派发点：环读事实折出静默时长，时刻与它同源
-    // （见 `execute_turn` 里那次 `wake_now_ms`）。间隔配成 0，到期判定与它无关。
-    let res = execute_turn(ExecTurn {
+    // （见 `drive_turn` 里那次 `wake_now_ms`）。间隔配成 0，到期判定与它无关。
+    let res = drive_turn(ExecTurn {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
@@ -1698,7 +1698,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
         "你好",
     );
     req.skill_obs = &obs;
-    execute_turn(req).await.expect("full 轮执行成功");
+    drive_turn(req).await.expect("full 轮执行成功");
 
     let events = fx.facts.range(Seq::new(0));
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
@@ -1760,7 +1760,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 /// 不收不交就等于丢），承诺就**静默全丢**——代际立约整体失效。
 ///
 /// 本用例走的是**真实通道**：假 provider 回一个 `agent_run` 工具调用 ⇒
-/// `SessionDispatchPort::dispatch` 收集出参 ⇒ `execute_turn` 轮末调 `record_derived`
+/// `SessionDispatchPort::dispatch` 收集出参 ⇒ `drive_turn` 轮末调 `record_derived`
 /// 落格。它同时钉住两件事——出参通道（`take_derived`）与写方（`record_derived`）——
 /// 以及锚点：立约溯源必须是本轮开口（I2）。
 ///
@@ -1790,7 +1790,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     };
 
     let user_seq = seed_user(&fx, 0, "请委托评审");
-    let res = execute_turn(ExecTurn {
+    let res = drive_turn(ExecTurn {
         turn_no: 0,
         user_seq,
         drive_seq: user_seq,
@@ -1908,7 +1908,7 @@ async fn a_reflex_answer_closes_without_any_model_call() {
         text: "先列要点；再合并同类项。".to_string(),
     };
     req.reflex = Some(&answer);
-    let res = execute_turn(req).await.expect("快路执行成功");
+    let res = drive_turn(req).await.expect("快路执行成功");
 
     assert_eq!(
         res.output.text, "先列要点；再合并同类项。",
@@ -2371,7 +2371,7 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
 /// 跑一轮（无工具、成功）。
 async fn run_one_turn(fx: &Fixture, sink: &symbio_core::ExecEventSink, turn: u64) {
     let text = format!("第 {turn} 轮问题");
-    execute_turn(tool_free_req(
+    drive_turn(tool_free_req(
         fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         sink,
@@ -2393,7 +2393,7 @@ async fn run_one_turn(fx: &Fixture, sink: &symbio_core::ExecEventSink, turn: u64
 /// 整段移走。用户格按 先于快照落（它必须先于压缩判决），随归档段保留在
 /// 完整史里；派发 / 阶段 / 收束格都排在快照之后，现行窗口不夹旧事件。
 ///
-/// 反向自检：去掉 `execute_turn` 里的 `session.consolidate` 调用 ⇒ ① 红；
+/// 反向自检：去掉 `drive_turn` 里的 `session.consolidate` 调用 ⇒ ① 红；
 /// 把它挪到运行器之后 ⇒ ② 红。
 #[tokio::test]
 async fn consolidation_is_forwarded_before_the_turn_runs() {
@@ -2415,7 +2415,7 @@ async fn consolidation_is_forwarded_before_the_turn_runs() {
         "第二轮",
     );
     req.consolidation = Some(compacted.as_slice());
-    execute_turn(req).await.expect("第二轮成功");
+    drive_turn(req).await.expect("第二轮成功");
 
     // ── ① 转发：整份列表原样交给会话动作，一 次 ──
     let got = fx.port.consolidated.lock().unwrap();
@@ -2491,7 +2491,7 @@ fn closure_of(all: &[Event], turn: u64) -> &Event {
 /// 移出 live 段；随后进来的恢复请求仍要拿到它作锚。
 ///
 /// 反向自检：把调用点改回 `last_open_turn(current_window(&snapshot))` ⇒ 本用例在
-/// `execute_turn` 处报「续写轮找不到未收束的轮次」。
+/// `drive_turn` 处报「续写轮找不到未收束的轮次」。
 #[tokio::test]
 async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
     let fx = setup_full();
@@ -2543,7 +2543,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
     // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：它把幕锚
     // 从「归档段里的用户格」挪到这一条 ⇒ 幕锚轮号回到第 0 轮。
     req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
-    execute_turn(req)
+    drive_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
 
@@ -2570,7 +2570,7 @@ async fn an_open_turn_archived_outside_the_turn_is_still_the_resume_anchor() {
 /// **轮内路**：等待轮之上跑过另一个执行轮，压缩寄存在它自己的执行口落格并
 /// 归档——随后到来的恢复请求仍拿到原轮的锚。
 ///
-/// 反向自检同轮外路：调用点退回现行窗口 ⇒ 此处 `execute_turn` 报
+/// 反向自检同轮外路：调用点退回现行窗口 ⇒ 此处 `drive_turn` 报
 /// 「续写轮找不到未收束的轮次」。
 #[tokio::test]
 async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
@@ -2593,7 +2593,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
         "第二轮",
     );
     first.consolidation = Some(compacted.as_slice());
-    execute_turn(first).await.expect("第 1 轮成功");
+    drive_turn(first).await.expect("第 1 轮成功");
 
     let all = fx.facts.range(Seq::new(0));
     assert!(
@@ -2627,7 +2627,7 @@ async fn an_open_turn_archived_by_the_next_turn_is_still_the_resume_anchor() {
     // 续写幕的锚 = 恢复阶段事实（生产由 `chat_loop::begin_drive` 落）：第 1 轮的
     // 用户格更晚，但幕锚看的是**恢复格**⇒ 幕锚轮号回到被续写的第 0 轮。
     req.drive_seq = land_resume_anchor(&fx, 0, user_seq, "approve");
-    execute_turn(req)
+    drive_turn(req)
         .await
         .expect("归档之后恢复请求应拿到锚点，而不是 InternalError");
 
@@ -2697,7 +2697,7 @@ async fn the_production_table_owes_the_same_rows_on_a_real_log() {
     );
 
     // 账还得掉：续写把这一轮跑到收束，同一张表、同一个幕锚上 `announce-model` 不再欠。
-    execute_turn(open_turn_req(
+    drive_turn(open_turn_req(
         &fx,
         Arc::new(FaithfulProvider::new(Behavior::Faithful).0),
         &sink,

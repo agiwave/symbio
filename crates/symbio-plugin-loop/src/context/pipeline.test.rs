@@ -130,7 +130,7 @@ fn stats_omit_after_tokens_when_there_is_no_such_number() {
 // 白名单把「骨架静默」与「增量流式」合进同一个出口取值——这两条各自都曾是
 // 线上事故，缺一半都会复发。
 
-/// 帧工厂：Turn 组合节点骨架（model 流循环对每次 execute_turn 发出的第一帧）。
+/// 帧工厂：Turn 组合节点骨架（model 流循环对每次模型往返发出的第一帧）。
 fn turn_skeleton_frame(root_id: &str) -> ChatNode {
     ChatNode {
         id: root_id.into(),

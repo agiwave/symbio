@@ -22,7 +22,7 @@ pub(crate) struct ExecTurnResult {
 /// 而那批节点是 chat 域词汇。`PluginError` 是跨插件共享的错误词汇（`model`
 /// 插件也构造 `Aborted`）——它不搬这个箱子：`to_frame` 只写错误码与文案，
 /// 模型侧的中止在 `adapters` 边界转成 `AdapterError::Aborted`（载荷在那里
-/// 被丢掉），loop 侧由 `execute_turn` 见到 `outcome.aborted` 后**重新构造**
+/// 被丢掉），loop 侧由 [`classify_turn`] 见到 `outcome.aborted` 后**重新构造**
 /// 一份。半截产出的唯一生产方与唯一消费方都在 loop 内、是一次普通的进程内
 /// Rust 调用，型在两侧编译期可见；塞进共享词汇再拆箱（无论用不用 `Any`）
 /// 都是给一条不跨墙的数据付跨墙的税（[D-095]）。

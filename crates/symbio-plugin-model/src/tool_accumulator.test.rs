@@ -222,7 +222,7 @@ fn only_first_args_fragment_requires_snapshot() {
 // 会话 `c2a87a21`：5 个工具跑完后，后续请求被 AMD 网关掐断
 // （`UND_ERR_SOCKET` / 502 Upstream Stream Terminated）。请求级重试只管响应头
 // 之前，流一旦建立就再无重试 ⇒ 整轮失败、会话停在错误态。修法是在流层原样
-// 重发（`bound_provider::execute_turn` 的 `MAX_STREAM_RETRIES`），本组用例钉住
+// 重发（`bound_provider::round_trip` 的 `MAX_STREAM_RETRIES`），本组用例钉住
 // 那个重试轴赖以成立的两条不变量。
 
 /// 重发时必须**复用**上一批已广播的节点 id。

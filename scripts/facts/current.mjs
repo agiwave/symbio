@@ -328,7 +328,7 @@ const DYNAMIC_ROUTES = {
   } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
   agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`）",
-  model: "已无自有路由（`execute_turn` 由 session 直连调用）",
+  model: "已无自有路由（模型往返经 `ModelProvider::round_trip` 进程内调用）",
 };
 
 const fmtList = (items) => (items.length ? items.map((x) => `\`${x}\``).join(" · ") : "—");

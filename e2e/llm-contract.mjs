@@ -524,7 +524,7 @@ export function assertNoEnvLeak(req, { homedir, workdir, port } = {}, label) {
 
 /**
  * 判「这是不是一次静默辅助请求」：**不带工具面**的是辅助请求（分类 / 措辞 /
- * 压缩都经 `execute_turn(_, _, &[], …)` 发），带工具面的是主线轮次。
+ * 压缩都经 `round_trip(_, _, &[], …)` 发），带工具面的是主线轮次。
  *
  * 这不是「无工具 = 辅助」的巧合判断，而是三条辅助路径的共同实现形态
  * （classify `decide.rs` / compose `wording.rs` / 压缩 `pipeline.rs` 全部传空工具），

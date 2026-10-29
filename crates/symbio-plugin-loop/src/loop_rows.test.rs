@@ -2028,7 +2028,7 @@ fn next_is_none_without_events() {
 }
 
 #[test]
-fn next_picks_execute_turn_while_the_turn_is_open() {
+fn next_picks_announce_model_while_the_turn_is_open() {
     // 开着的幕欠一次执行；`announce-model` 是当前最小可还债（接缝已还，其它策略都关着）。
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
@@ -2159,7 +2159,7 @@ fn close_row_owes_when_the_model_round_failed_in_this_drive() {
 }
 
 #[test]
-fn next_picks_close_turn_before_execute_turn_once_answered() {
+fn next_picks_close_turn_once_answered() {
     let events = vec![
         ev(1, "user.message", json!({"text": "hi", "id": "u-1"})),
         ev(1, "turn.stage", json!({"stage": "round", "round": 0})),

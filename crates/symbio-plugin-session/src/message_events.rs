@@ -42,7 +42,7 @@
 //!
 //! - 拿不到令牌时，把这条变更**写进寄存区**（与会话 WAL 同域的
 //!   `transcripts/pending/`，一条变更一个文件，见 [`park`]）；
-//! - 持令牌的一方（`turn_exec::execute_turn` 的执行口）在下一次落格时调
+//! - 持令牌的一方（`turn_exec::assemble_turn` 的执行口）在下一次落格时调
 //!   [`drain_parked`]，把寄存的变更补落进事实源，落一条删一条。
 //!
 //! 「寄存」而不是「重试 / 阻塞等待」：编辑是**用户对列表的操作**，它的发起方
@@ -232,7 +232,7 @@ fn park(store_dir: &Path, change: &ParkedChange) -> Result<(), String> {
 /// ## 调用时机
 ///
 /// 在 [`EventWalStore::open`] 成功**之后**、本轮的其它落格**之前**（见
-/// `turn_exec::execute_turn` 与 `execute_final_reply_turn` 的落格窗口），且必须在
+/// `turn_exec::assemble_turn` 与 `execute_final_reply_turn` 的落格窗口），且必须在
 /// **读切片之前**——补落改的就是那份切片，本轮后面的 turn 号 / 续写锚 / 幂等键都从
 /// 切片折，先落完才不会站在一份缺了那次编辑的状态上做判断。
 ///

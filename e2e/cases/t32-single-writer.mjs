@@ -21,7 +21,7 @@ import './_selfrun.mjs';
 //
 // 判据要成立，两个写者的写窗口必须真的重叠。若甲在乙启动前就跑完，乙会正常接手
 // （这是合法的顺序轮），用例就变成在断言「不重叠时不会冲突」——什么都没证。
-// 因此甲的场景用 `chunkDelayMs` 把一轮拉长到 ~10 秒：甲在 `execute_turn` 开头就
+// 因此甲的场景用 `chunkDelayMs` 把一轮拉长到 ~10 秒：甲在 `turn_exec` 起步就
 // `open` 并持住写者令牌（[`turn_exec`](../../crates/symbio-plugin-loop/src/turn_exec.rs)
 // 的 store 是整轮的局部量），足够乙从冷启动走到自己的 `append`。
 //

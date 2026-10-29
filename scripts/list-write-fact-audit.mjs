@@ -21,7 +21,7 @@
  *    绕过了唯一写入口，落不落事实全凭自觉，正是 D-054 要消灭的形态。
  * 2. **列表级取代原语**（`replace_all`）出了 `write.rs`，必须在 ±NEAR 行内带着
  *    **寄存锚**（`consolidated = Some(...)` 的真实赋值，不是注释）：压缩现场不持
- *    写者令牌，取代事实只能寄存给下一个 `execute_turn` 落格。没有锚 ⇒ **LWF-002**
+ *    写者令牌，取代事实只能寄存给下一幕的接缝（`turn_exec::run_seam`）落格。没有锚 ⇒ **LWF-002**
  *    ——一份被取代的前缀在事实源里没有下文，切主读后它原地复活。
  * 3. **事实落格函数**（`message_events::{added,edited,removed}`）只能在 `write.rs`
  *    被调用——它们是 `apply` 的实现细节。在外面出现 ⇒ **LWF-001**（第二个写入口）。
@@ -135,7 +135,7 @@ function audit(root, prefix = '') {
         violations.push(
           `LWF-002 ${rel}:${call.line}  取代原语 \`replace_all\` 没有寄存锚（±${NEAR} 行内找不到 ` +
             '`consolidated = Some(...)` 的真实赋值）：' + call.text + '\n' +
-            '        压缩现场不持写者令牌，取代事实必须寄存给 `SessionContext::consolidated`、由下一个 `execute_turn` 落格',
+            '        压缩现场不持写者令牌，取代事实必须寄存给 `SessionContext::consolidated`、由下一幕接缝（`turn_exec::run_seam`）落格',
         )
       }
     }

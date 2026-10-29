@@ -1,7 +1,7 @@
 //! `BoundProvider` 全链路彩排 —— **真实传输层**（真实 TCP + HTTP + SSE 解析）。
 //!
 //! 与 e2e 的 mock-llm 同形态（OpenAI Chat SSE 方言），但在 Rust 集成测试里
-//! 闭环：本地 TcpListener 一次性 mock → `BoundProvider`（真实 `execute_turn`
+//! 闭环：本地 TcpListener 一次性 mock → `BoundProvider`（真实 `round_trip`
 //! 五态机 + `openai_chat` 流解析）→ ⑤ `ProviderLlmAdapter`（core 侧适配器，
 //! 生产代码不认识插件，故彩排挂在本文件的宿主上）→ core `Reasoner`
 //! （持 `FullModel` 令牌）→ 事件网格落 final → 不变量全绿。

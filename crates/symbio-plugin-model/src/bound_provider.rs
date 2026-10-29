@@ -4,7 +4,7 @@
 //! - [`ModelProviderConfig`]：持久化配置 schema（serde 字段名冻结，用户配置兼容）；
 //! - [`ModelProtocol`]：插件私有的协议适配钩子实现（`Arc<dyn ModelProtocol>`）。
 //!
-//! 完整单轮行为（`execute_turn` 五态机、`effective_context_tokens` 收敛）由本
+//! 完整单轮行为（`round_trip` 五态机、`effective_context_tokens` 收敛）由本
 //! 类型实现，`TurnOutput` → `PluginError` 的映射固定为：
 //! - `Aborted` → `PluginError::Aborted`；
 //! - `RetryWithoutContextId` → `plugin_warn!` + 同名错误（半截流由 chat_loop 重试分支以
@@ -13,7 +13,7 @@
 //! - `RateLimited(msg)` → `PluginError::RateLimited`；
 //! - `Ok(resp)` → `parse_sse_stream`（`Err(StreamFailure)` → `PluginError::StreamError`）。
 //!
-//! **两个重试轴**（互不覆盖，见 `execute_turn`）：
+//! **两个重试轴**（互不覆盖，见 `round_trip`）：
 //! 1. 请求级（`http::execute_post_with_abort`）：响应头之前——连接失败 / 瞬时 5xx；
 //! 2. 流级（本文件）：**流已建立之后**被上游掐断（`UND_ERR_SOCKET` / 502 断流）——
 //!    请求级重试此时早已 `Ok`，一次都不会触发，故必须在这里补。
