@@ -13,7 +13,7 @@
  * 在派发器外直问一次求解器、给某个执行体的动作多塞一份 `&mut`、在动作里就地落
  * 收束格。它们每一件都只多几十行，而判据面各自看不见——这正是 `TC-n` 要判的东西。
  *
- * ## 八条判据码（每条都指得到规范的一句）
+ * ## 九条判据码（每条都指得到规范的一句）
  *
  * | 码 | 规范 | 判什么 |
  * |---|---|---|
@@ -23,8 +23,9 @@
  * | `CP-004` | `TC-2` 机制层无域名 | 行名 / 执行体名 / 端口名 / 事件名不进 kernel 与 core |
  * | `CP-005` | `TC-4` 事实面唯一写方 | 收束格（final / fallback）各只有一个构造点 |
  * | `CP-006` | `TC-5` 横向扩展零改机制 | 机制面（驱动循环 / 选债 / 在途判据）字节冻结，控制面文件数只许降，端口不越出裁决的闭集 |
- * | `CP-007` | `TC-6` 判据集闭集 | 六条不变量与八条码一一对上；判据数不随能力数增长 |
+ * | `CP-007` | `TC-6` 判据集闭集 | 六条不变量与九条码一一对上；判据数不随能力数增长 |
  * | `CP-008` | `TC-3` 声明面封闭 | `seal` 是按值消费的唯一出口；冻结后没有可变方法 |
+ * | `CP-009` | `TC-5` 存量能力名棘轮 | `loop` / `session` 生产代码不按工具名分支；站点基线只许减 |
  *
  * ## 口径（四条，都影响判定，别凭直觉）
  *
@@ -76,8 +77,8 @@
  */
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭）
-// @codes CP-001 CP-002 CP-003 CP-004 CP-005 CP-006 CP-007 CP-008
+// @ns CP 控制面终态（唯一循环体 / 唯一选债口 / 守卫同处 / 机制层无域名 / 收束格单写方 / 机制面冻结与端口闭集 / 判据集闭集 / 声明面封闭 / 存量能力名棘轮）
+// @codes CP-001 CP-002 CP-003 CP-004 CP-005 CP-006 CP-007 CP-008 CP-009
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -96,6 +97,7 @@ const PRINT_BASELINE = argv.includes('--print-baseline')
 
 /** 控制面（编排层）与机制层（kernel / core）的根 */
 const LOOP = 'crates/symbio-plugin-loop/src'
+const SESSION = 'crates/symbio-plugin-session/src'
 const KERNEL = 'crates/symbio-kernel/src'
 const CORE = 'crates/symbio-core/src'
 const DRIVE_REL = `${LOOP}/turn_exec/drive.rs`
@@ -117,7 +119,7 @@ const BASELINE_REL = 'scripts/baselines/control-plane.json'
  */
 const TERMINAL_CRITERIA = 6
 
-const CODES = ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008']
+const CODES = ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008', 'CP-009']
 
 let errors = 0
 const hits = new Map()
@@ -819,6 +821,45 @@ function decisionIds() {
   return decisionCache
 }
 
+// ───────────────── CP-009：存量能力名棘轮（TC-5） ─────────────────
+
+/** 工具短名的 owner：`RE-006` §2.1（由 `gen-facts` 从各插件 `CapabilityMeta` 投影）。 */
+const TOOLS_REL = 'docs/004-ref/006-当前事实表.md'
+
+function toolVocabulary() {
+  const text = readRel(TOOLS_REL)
+  if (text === null) return { error: `${TOOLS_REL} 读不出` }
+  const start = text.indexOf('### 2.1')
+  const end = text.indexOf('### 2.2', start)
+  if (start < 0 || end < 0) return { error: '§2.1 LLM 可见工具 读不出' }
+  const names = new Set()
+  for (const line of text.slice(start, end).split('\n')) {
+    const m = /^\|\s*`([a-z][a-z0-9_]*)`\s*\|/.exec(line)
+    if (m) names.add(m[1])
+  }
+  if (names.size === 0) return { error: '§2.1 没有解析出任何工具名' }
+  return { names: [...names].sort() }
+}
+
+/** `loop` / `session` 生产代码里按工具名写下的字面量站点：`{ 文件 → [名字…] }`。 */
+function capabilityNameSites(vocab) {
+  const out = {}
+  for (const root of [LOOP, SESSION]) {
+    for (const rel of prodFiles(root)) {
+      const code = prodCodeOf(rel)
+      if (code === null) continue
+      const names = stringLiteralsOf(code)
+        .filter((s) => vocab.has(s))
+        .sort()
+      if (names.length) out[rel] = names
+    }
+  }
+  return out
+}
+
+const toolVocab = toolVocabulary()
+const capSites = toolVocab.error ? null : capabilityNameSites(new Set(toolVocab.names))
+
 function readBaseline() {
   const text = readRel(BASELINE_REL)
   if (text === null) return null
@@ -844,6 +885,11 @@ if (PRINT_BASELINE) {
           reason: baseline?.mechanism?.reason ?? '',
         },
         extension: { productionFiles: loopProdFiles.length },
+        capabilityNames: {
+          adr: baseline?.capabilityNames?.adr ?? '',
+          reason: baseline?.capabilityNames?.reason ?? '',
+          sites: capSites ?? {},
+        },
       },
       null,
       2,
@@ -950,7 +996,7 @@ for (const rel of loopProdFiles) {
 // ───────────────── CP-007：判据集闭集（TC-6） ─────────────────
 
 /**
- * 六条不变量 ↔ 八条码。**这张表是判据集本身**：新增一条码必须挂到某条 `TC-n` 下，
+ * 六条不变量 ↔ 九条码。**这张表是判据集本身**：新增一条码必须挂到某条 `TC-n` 下，
  * 而 `TC-n` 的条数被 `TERMINAL_CRITERIA` 钉住（§3 的「六条」）。于是「为某个新能力
  * 单独加一条专用判据」在这里表现为一次显式的表改动 + 一次条数改动，不是顺手。
  */
@@ -959,7 +1005,7 @@ const TC_MAP = {
   'TC-2': ['CP-004'],
   'TC-3': ['CP-008'],
   'TC-4': ['CP-005'],
-  'TC-5': ['CP-006'],
+  'TC-5': ['CP-006', 'CP-009'],
   'TC-6': ['CP-007'],
 }
 
@@ -1076,6 +1122,55 @@ if (declCode === null) {
   }
 }
 
+// ───────────────── CP-009：存量能力名棘轮（TC-5） ─────────────────
+//
+// 判据：`loop` / `session` 的生产代码不按工具名分支。站点基线只许减——
+// 多一处 ⇒ 红（新写了一条按名字的读法）；少一处而基线没跟上 ⇒ 也红
+// （`--print-baseline` 把账本往下改，是迁移的一部分）。基线的 owner 是
+// DE-026 D-246：逐行拆出能力，控制面里按名字的分支随之消失。
+
+if (toolVocab.error) {
+  report('CP-009', TOOLS_REL, `工具名词表读不出：${toolVocab.error} —— 判据没有输入，宁红不静默`)
+} else if (!baseline) {
+  // `CP-006` 已经为「基线读不出」报过一次；这里不重复计同一处。
+} else if (!baseline.capabilityNames) {
+  report('CP-009', BASELINE_REL, '基线缺 `capabilityNames.sites` —— 存量按名字的读法没有上限，拆到哪算哪')
+} else {
+  const want = baseline.capabilityNames.sites ?? {}
+  const files = new Set([...Object.keys(want), ...Object.keys(capSites ?? {})])
+  for (const rel of [...files].sort()) {
+    const before = (want[rel] ?? []).slice().sort()
+    const now = (capSites?.[rel] ?? []).slice().sort()
+    if (before.join(',') === now.join(',')) continue
+    const count = (list) => list.reduce((m, n) => m.set(n, (m.get(n) ?? 0) + 1), new Map())
+    const was = count(before)
+    const is = count(now)
+    const added = [...is].filter(([n, c]) => c > (was.get(n) ?? 0)).map(([n]) => n)
+    const gone = [...was].filter(([n, c]) => c > (is.get(n) ?? 0)).map(([n]) => n)
+    const detail = [
+      added.length ? `新增 ${added.map((n) => `\`${n}\``).join(' / ')}` : '',
+      gone.length ? `基线仍记着 ${gone.map((n) => `\`${n}\``).join(' / ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('；')
+    report(
+      'CP-009',
+      rel,
+      `按工具名的字面量与基线不符（${detail}）—— 控制面不按能力名分支：` +
+        '要么这条读法该随能力搬进它的 crate，要么迁移已经删掉它、基线要同批往下改（`--print-baseline`，D-246）',
+    )
+  }
+  const adr = String(baseline.capabilityNames.adr ?? '')
+  if (String(baseline.capabilityNames.reason ?? '').trim() === '') {
+    report('CP-009', BASELINE_REL, '`capabilityNames.reason` 为空 —— 基线是判据的一面，改它必须写清为什么')
+  }
+  if (!/D-\d{3}/.test(adr)) {
+    report('CP-009', BASELINE_REL, '`capabilityNames.adr` 里没有决策编号 —— 冻结按名字的读法必须挂一条能打开的决策')
+  } else if (!decisionIds().has(adr.match(/D-\d{3}/)[0])) {
+    report('CP-009', BASELINE_REL, `\`capabilityNames.adr\` 指向不存在的决策 \`${adr}\``)
+  }
+}
+
 // ───────────────────────────── 读数与汇总 ─────────────────────────────
 
 if (errors === 0) {
@@ -1090,6 +1185,9 @@ if (errors === 0) {
     ),
   )
   console.log(dim(`  控制面生产文件 ${loopProdFiles.length} 份（基线 ${baseline?.extension?.productionFiles ?? '?'}）`))
+  const capNow = Object.values(capSites ?? {}).flat().length
+  const capBefore = Object.values(baseline?.capabilityNames?.sites ?? {}).flat().length
+  console.log(dim(`  按能力名的读法 ${capNow} 处（基线 ${capBefore}）`))
   console.log(dim(`  端口闭集 ${closureReading}`))
   console.log(dim(`  表外点问 ${tripClosureReading}`))
   console.log(dim(`  机制面指纹 ${mechanismHash}`))
@@ -1107,6 +1205,7 @@ if (errors === 0) {
     'CP-006': '横向扩展零改机制（TC-5）',
     'CP-007': '判据集闭集（TC-6）',
     'CP-008': '声明面封闭（TC-3）',
+    'CP-009': '存量能力名棘轮（TC-5）',
   }
   for (const [code, name] of Object.entries(names)) {
     const n = hits.get(code) ?? 0
@@ -1126,6 +1225,7 @@ for (const [code, name] of Object.entries({
   'CP-006': '横向扩展零改机制（TC-5）',
   'CP-007': '判据集闭集（TC-6）',
   'CP-008': '声明面封闭（TC-3）',
+  'CP-009': '存量能力名棘轮（TC-5）',
 })) {
   const n = hits.get(code) ?? 0
   console.log(`  ${n === 0 ? green('✓') : red('✗')} ${code}  ${name}${n ? `  (${n})` : ''}`)

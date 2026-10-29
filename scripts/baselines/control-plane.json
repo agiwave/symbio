@@ -8,5 +8,12 @@
   },
   "extension": {
     "productionFiles": 62
+  },
+  "capabilityNames": {
+    "adr": "D-246",
+    "reason": "存量按工具名写下的读法只许减：54 行名册逐行处置（D-246）要求能力搬进自己的 crate，控制面里那处按名字的分支随之删除。今天只有一条——session 的自主触发读 metadata 的 `heartbeat` 配置键，它属于主动开口能力的配置面，迁出时这条读法随包走（DE-026 S7），基线同批往下改。",
+    "sites": {
+      "crates/symbio-plugin-session/src/transcript/autonomous.rs": ["heartbeat"]
+    }
   }
 }

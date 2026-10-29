@@ -1,8 +1,8 @@
 /**
- * control-plane-audit 回归测试 —— 证明八条判据**各自会红**
+ * control-plane-audit 回归测试 —— 证明九条判据**各自会红**
  *
  * `SP-033` §5 程序 4：「`TC-n` 的执行方落地时，反向用例与该判据同批提交——没有反向用例的
- * 判据无法区分「真的在算」与「恰好没写错」」。本文件就是 `CP-001`…`CP-008` 的反向用例：
+ * 判据无法区分「真的在算」与「恰好没写错」」。本文件就是 `CP-001`…`CP-009` 的反向用例：
  * 每条用例只把一个地方改坏，断言**对应那条码**出现在 `[ERROR]` 里。
  *
  * | 码 | 反向用例 |
@@ -15,6 +15,7 @@
  * | `CP-006` | 循环体改一个字节（基线未跟）；控制面多一份文件（基线未跟）；基线整个缺失；<br>声明第三个端口（裁决闭集只有两个）；闭集那一节读不出 |
  * | `CP-007` | 规范里多出第七条 `TC-n`；`## 判据` 表点名一个不存在的脚本 |
  * | `CP-008` | `seal` 改成借用式；`impl Frozen` 长出 `&mut self` 方法 |
+ * | `CP-009` | `loop` / `session` 生产代码新写一条工具名字面量；删掉基线记着的读法而不改基线；<br>基线缺 `capabilityNames`；基线挂的决策不存在；§2.1 工具词表读不出 |
  *
  * 另有两条**不该红**的用例（防止判据被注释措辞骗到）：
  *   - 注释里写 `loop {` / `ring::owed(` / `"close"` ⇒ 仍绿（判据读剥注释后的代码）；
@@ -39,6 +40,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const LOOP = 'crates/symbio-plugin-loop/src'
+const SESSION = 'crates/symbio-plugin-session/src'
 const DRIVE = `${LOOP}/turn_exec/drive.rs`
 const ROWS = `${LOOP}/loop_rows.rs`
 const TURN_EXEC = `${LOOP}/turn_exec.rs`
@@ -98,13 +100,16 @@ function printBaseline(files) {
  * `baselineFrom` 默认是**同一份**被跑的文件树；`CP-006` 的两条用例传改坏之前的树，
  * 于是「基线没跟上」才是被判红的那件事，而不是被顺手修好。
  */
-function audit(files, { baselineFrom = files, withBaseline = true } = {}) {
+function audit(files, { baselineFrom = files, withBaseline = true, editBaseline = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-plane-'))
   try {
     if (withBaseline) {
       const b = printBaseline(baselineFrom)
       b.mechanism.adr = 'D-234'
       b.mechanism.reason = '夹具：机制面冻结在干净形状上（决策锚只为让 CP-006 的输入完整）'
+      b.capabilityNames.adr = 'D-246'
+      b.capabilityNames.reason = '夹具：按工具名的读法只许减（决策锚只为让 CP-009 的输入完整）'
+      editBaseline?.(b)
       files[BASELINE_REL] = JSON.stringify(b, null, 2)
     }
     writeTree(root, files)
@@ -347,6 +352,32 @@ const TRIP_RULING_TEXT = [
 ].join('\n')
 
 /**
+ * 工具名词表的 owner（夹具）：`CP-009` 只从 `RE-006` §2.1 读短名，脚本里不留副本。
+ * 夹具里必须有这一节，否则除「词表读不出」那条外都会红（判据没有输入）。
+ */
+const TOOLS = 'docs/004-ref/006-当前事实表.md'
+
+const TOOLS_TEXT = [
+  '# 当前事实表（夹具）',
+  '',
+  '### 2.1 LLM 可见工具',
+  '',
+  '| 工具（短名） | 贡献插件 |',
+  '|---|---|',
+  '| `heartbeat` | `heartbeat` |',
+  '| `notes_add` | `notes` |',
+  '',
+  '### 2.2 VDFS 操作',
+  '',
+].join('\n')
+
+/** session 里唯一一处按工具名写下的读法（夹具）：基线由此非空，减它就得同批改基线。 */
+const SESSION_TRANSCRIPT = `pub fn reads_heartbeat(config: &Config) -> bool {
+    config.get("heartbeat").is_some()
+}
+`
+
+/**
  * `round_trip` 的入账口与三处调用点（夹具）：判据钉两件事——函数体里
  * `announce_with` / `dispatch_with` 各一次（一步，不是两笔债），调用文件 ⊆ 裁决点名的闭集。
  */
@@ -393,6 +424,7 @@ function cleanTree() {
     [`${LOOP}/port.rs`]: PORT_SRC,
     [`${LOOP}/port/classify.rs`]: CLASSIFY_SRC,
     [`${LOOP}/chat_loop/compose.rs`]: COMPOSE_SRC,
+    [`${SESSION}/transcript/autonomous.rs`]: SESSION_TRANSCRIPT,
     'crates/symbio-kernel/src/lib.rs': 'pub mod adapters;\npub mod decl;\n',
     [DECL]: KERNEL_DECL_SRC,
     'crates/symbio-kernel/src/adapters.rs': KERNEL_ADAPTERS_SRC,
@@ -400,7 +432,10 @@ function cleanTree() {
     [SPEC]: SPEC_TEXT,
     [RULING]: RULING_TEXT,
     [TRIP_RULING]: TRIP_RULING_TEXT,
-    'docs/003-design/016-工程落地与验证.md': '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n',
+    [TOOLS]: TOOLS_TEXT,
+    'docs/003-design/016-工程落地与验证.md':
+      '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n\n' +
+      '### D-246 夹具决策\n\n按工具名的读法基线挂在这条决策上。\n',
     'scripts/control-plane-audit.mjs': '// 夹具占位：CP-007 只判「§判据表点名的脚本存在」\n',
     'scripts/control-plane-audit.test.mjs': '// 夹具占位\n',
   }
@@ -408,13 +443,14 @@ function cleanTree() {
 
 // ───────────────────────────── 不该红的用例 ─────────────────────────────
 
-test('干净夹具：八条判据全绿，读数是「循环体 1 个」', () => {
+test('干净夹具：九条判据全绿，读数是「循环体 1 个」', () => {
   const r = audit(cleanTree())
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  for (const code of ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008']) {
+  for (const code of ['CP-001', 'CP-002', 'CP-003', 'CP-004', 'CP-005', 'CP-006', 'CP-007', 'CP-008', 'CP-009']) {
     assert.match(r.stdout, new RegExp(`✓ ${code}`), r.stdout)
   }
   assert.match(r.stdout, /循环体 1 个/)
+  assert.match(r.stdout, /按能力名的读法 1 处（基线 1）/)
   assert.match(r.stdout, /表外点问 裁决点名 3 处 · 代码调用 3 处/)
   assert.match(r.stdout, new RegExp(`收束格 chat\\.assistant\\.final：${SETTLE.replace(/[/.]/g, '\\$&')}`))
 })
@@ -624,4 +660,36 @@ test('CP-008：impl Frozen 长出 &mut self 方法 ⇒ 红', () => {
   const files = cleanTree()
   files[DECL] = files[DECL].replace('pub fn rows(&self)', 'pub fn rows(&mut self)')
   assertRed(audit(files), 'CP-008')
+})
+
+// ───────────────────────────── CP-009 ─────────────────────────────
+
+test('CP-009：loop 生产代码新写一条工具名字面量 ⇒ 红（控制面按能力名分支）', () => {
+  const files = cleanTree()
+  files[`${LOOP}/chat_loop/compose.rs`] +=
+    '\npub fn named(name: &str) -> bool {\n    name == "notes_add"\n}\n'
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-009')
+})
+
+test('CP-009：删掉基线记着的读法而不改基线 ⇒ 红（棘轮只许同批往下改）', () => {
+  const files = cleanTree()
+  files[`${SESSION}/transcript/autonomous.rs`] = 'pub fn reads_heartbeat(_config: &Config) -> bool {\n    true\n}\n'
+  assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-009')
+})
+
+test('CP-009：基线缺 capabilityNames ⇒ 红（按名字的读法没有上限）', () => {
+  assertRed(audit(cleanTree(), { editBaseline: (b) => delete b.capabilityNames }), 'CP-009')
+})
+
+test('CP-009：基线挂的决策不存在 ⇒ 红（冻结必须挂一条能打开的决策）', () => {
+  assertRed(
+    audit(cleanTree(), { editBaseline: (b) => (b.capabilityNames.adr = 'D-999') }),
+    'CP-009',
+  )
+})
+
+test('CP-009：§2.1 工具词表读不出 ⇒ 红（判据没有输入）', () => {
+  const files = cleanTree()
+  delete files[TOOLS]
+  assertRed(audit(files), 'CP-009')
 })
