@@ -15,12 +15,12 @@ dead_code = "warn"
 [dependencies]
 symbio-kernel = { path = "../symbio-kernel" }
 symbio-core = { path = "../symbio-core" }
-tokio = { version = "1.53.1", features = ["full"] }
-async-trait = "0.1.92"
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
 # 优化 1：从 chrono 迁移到更轻量的 time
-time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
-regex = "1.13.1"
-tracing = "0.1.44"
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
+regex = { workspace = true }
+tracing = { workspace = true }
 # 本地嵌入（`providers/embedding/local.rs`）：跑 int8 量化的 bge-small-zh-v1.5
 # （model.onnx / tokenizer.json 由 `include_bytes!` 编进二进制，**从不下载模型**）。
 #
@@ -44,10 +44,10 @@ tracing = "0.1.44"
 #   不可替代的部分只是"调 ORT"，直接依赖 `ort` 即可。
 # - MSRV：`ort` 2.0.0-rc.13 = 1.88，低于本仓 1.91。
 # - 数值基线：CLS 池化 + L2 归一化；与 tract 时代的余弦相似度见 D-016（实测 ≥0.9967）。
-ort = "2.0.0-rc.13"
-tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
+ort = { workspace = true }
+tokenizers = { workspace = true, features = ["fancy-regex"] }
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }

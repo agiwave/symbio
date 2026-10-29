@@ -18,19 +18,19 @@ symbio-core = { path = "../symbio-core" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-deploy = { path = "../symbio-deploy" }
 symbio-providers = { path = "../symbio-providers" }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["full"] }
-async-trait = "0.1.92"
-indexmap = { version = "2.14.1", features = ["serde"] }
-dirs = "6.0.0"
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+dirs = { workspace = true }
 # 优化 1：从 chrono 迁移到更轻量的 time
-time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
-inventory = "0.3.24"
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
+inventory = { workspace = true }
 
 # 日志宏（`plugin_info!` / `plugin_warn!` / `plugin_error!` / `plugin_debug!`）在**调用站点**
 # 展开，宏体里的 `tracing::warn!` 等按调用方作用域解析 ⇒ 这是本 crate 的真实依赖，不是
 # core 的（那几个宏没有用 `$crate` 重导出 tracing）。源码里搜不到 `tracing::` 不代表不需要它。
-tracing = "0.1.44"
+tracing = { workspace = true }
 
 [dev-dependencies]
 # 与 `symbio-plugin-agent` 同一处境：这几条用例要的是**一整棵装配树**，而每个插件的
@@ -38,6 +38,6 @@ tracing = "0.1.44"
 # 测试二进制里没有兄弟插件的注册 ⇒ 装配返回 None。宿主门面把全部插件 `pub use` 进来，
 # 挂成 dev-dependency 即补齐注册表（dev 成环 Cargo 允许）。
 symbio = { path = "../symbio" }
-tempfile = "3.27.0"
+tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }

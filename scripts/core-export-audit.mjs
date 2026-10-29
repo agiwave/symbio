@@ -293,7 +293,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
 // 下沉 plugins/session（`autonomy` / `AutonomyView` 两条出口退役，−2）
 const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
   ? Number(process.env.CORE_LEDGER_BASELINE)
-  : 371
+  : 343
 
 /**
  * C-004 的**下沉候选**格：域账本里「单消费方」的条目数上限（只许降）。
@@ -307,7 +307,7 @@ const DOMAIN_LEDGER_BASELINE = process.env.CORE_LEDGER_BASELINE
  */
 const DOMAIN_ONE_BASELINE = process.env.CORE_LEDGER_ONE_BASELINE
   ? Number(process.env.CORE_LEDGER_ONE_BASELINE)
-  : 11
+  : 8
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })

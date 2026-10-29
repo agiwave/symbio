@@ -42,9 +42,9 @@ symbio-plugin-telegram = { path = "../symbio-plugin-telegram" }
 symbio-plugin-vdfs = { path = "../symbio-plugin-vdfs" }
 symbio-plugin-web = { path = "../symbio-plugin-web" }
 # <<< plugin-links:end
-inventory = "0.3.24"
+inventory = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }

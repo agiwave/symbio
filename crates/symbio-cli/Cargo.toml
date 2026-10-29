@@ -16,5 +16,5 @@ path = "src/main.rs"
 symbio = { path = "../symbio" }
 # 版本与 features 刻意与 ../crates/symbio/Cargo.toml 完全一致：
 # 同一份 tokio 单元 → 复用 symbio/target 里已编译好的 rlib，避免重复编译。
-tokio = { version = "1.53.1", features = ["full"] }
-serde_json = "1.0.151"
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }

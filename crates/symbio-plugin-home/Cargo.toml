@@ -23,18 +23,18 @@ symbio-providers = { path = "../symbio-providers" }
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
 # 副作用仅限「反序列化 `Rc/Arc` 不保留共享身份」，本仓从不依赖该身份。
 # 内核 crate（封闭语法的共享类型层）：core 与插件都经它拿事件 / 视图 / 声明容器。
-serde = { version = "1.0.229", features = ["derive", "rc"] }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["full"] }
-async-trait = "0.1.92"
-dirs = "6.0.0"
-shellexpand = "3.1.2"
-tracing = "0.1.44"
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
+dirs = { workspace = true }
+shellexpand = { workspace = true }
+tracing = { workspace = true }
 # 优化 2：替换已停止维护的 serde_yaml（serde_yml 也不维护且有漏洞，改用其维护中的 fork）
-serde_yaml_ng = "0.10.0"
-tempfile = "3.27.0"
+serde_yaml_ng = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }

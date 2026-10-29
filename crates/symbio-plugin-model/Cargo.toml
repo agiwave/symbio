@@ -23,22 +23,22 @@ symbio-providers = { path = "../symbio-providers" }
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
 # 副作用仅限「反序列化 `Rc/Arc` 不保留共享身份」，本仓从不依赖该身份。
 # 内核 crate（封闭语法的共享类型层）：core 与插件都经它拿事件 / 视图 / 声明容器。
-serde = { version = "1.0.229", features = ["derive", "rc"] }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["full"] }
-futures = "0.3.34"
-async-trait = "0.1.92"
-uuid = { version = "1.26.0", features = ["v4", "serde"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
 # 优化 1：从 chrono 迁移到更轻量的 time
-time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
 # TLS 后端 = 平台原生栈：Windows → SChannel，macOS → Security.framework，Linux → 系统 OpenSSL。
 # Windows/macOS 上因此**零 C 编译**（schannel 是纯 Rust FFI 绑定，无源码、无 build.rs）。
 # 代价是引入平台分支：Linux 侧需要系统 OpenSSL（libssl-dev），否则要改开 native-tls-vendored。
 # 换来的是整条 rustls 链退出构建 —— aws-lc-sys 是 414 个 .c + 178 个 .cc + 941 个汇编、
 # 145k 行 C，且**无条件**依赖 cmake，曾是依赖树里最脆的一环。
-# `default-features = false` 后必须显式补回 `default` 里的非 TLS 能力：
+# 默认特性在根 `[workspace.dependencies]` 关闭；使用方必须显式补回 `default` 里的非 TLS 能力：
 #   charset（响应体编码判定）· http2（LLM API 基本都走 h2）· system-proxy（读系统代理）。
-reqwest = { version = "0.13.4", default-features = false, features = [
+reqwest = { workspace = true, features = [
     "json",
     "stream",
     "charset",
@@ -46,20 +46,20 @@ reqwest = { version = "0.13.4", default-features = false, features = [
     "system-proxy",
     "native-tls",
 ] }
-reqwest-eventsource = "0.6.0"
-url = "2.5.8"
+reqwest-eventsource = { workspace = true }
+url = { workspace = true }
 # 跨平台内容搜索：直接调用 ripgrep 库（替代对 rg/PowerShell/grep 可执行文件的依赖），并遵循 .gitignore
-grep = "0.4.1"
-ignore = "0.4.33"
-tracing = "0.1.44"
+grep = { workspace = true }
+ignore = { workspace = true }
+tracing = { workspace = true }
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包
-zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
+zip = { workspace = true, features = ["deflate"] }
 # base64 编码：zip 字节经 JSON payload 传输（agent 插件）
-base64 = "0.22.1"
-tempfile = "3.27.0"
+base64 = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }

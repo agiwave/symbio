@@ -8,22 +8,22 @@ repository = ""
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2.0", features = [] }
+tauri-build = { workspace = true, features = [] }
 
 [dependencies]
 symbio = { path = "../../crates/symbio" }
-tauri = { version = "2.0", features = [] }
-tauri-plugin-dialog = "2.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.0", features = ["full"] }
-tokio-util = { version = "0.7", features = ["rt"] }
-futures = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tauri = { workspace = true, features = [] }
+tauri-plugin-dialog = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["rt"] }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # Force time crate version to fix macOS compilation issue
-time = "0.3.47"
+time = { workspace = true }
 
 [features]
 default = ["custom-protocol"]

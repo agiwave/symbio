@@ -325,7 +325,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 565, enumVariants: 245 }
+  : { structFields: 545, enumVariants: 240 }
 
 /**
  * CS-010 控制面草稿的字段棘轮（[DE-022](../docs/003-design/022-行表与派发面.md "DE-022-行表与派发面") D-226）。
@@ -842,7 +842,7 @@ const NOUN_BASELINE = {
   //    家族词汇而非插件依赖）。
   // 只许降，整张表的目标仍是空表。
   'crates/symbio-kernel/src/capability/family.rs': 1,
-  'crates/symbio-kernel/src/chat/principal.rs': 13,
+  'crates/symbio-kernel/src/chat/principal.rs': 7,
 }
 
 const nounCounts = new Map()
