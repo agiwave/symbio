@@ -376,7 +376,7 @@ D-048 把「`full` 让工具结果从 `role=tool` 降级成 user 消息里的纯
 
 ### D-049 WAL 是会话唯一事实源，SessionStore 降为缓存——轨 S 的起点
 
-D-048 把出厂档位翻到 `full` 后，写侧已经换成 WAL 原生记账（`v2_exec` 落格、`session/stats` 读格），但读侧大面积仍在读 `SessionStore`： | 读者 | 读什么 | 位置 | |---|---|---| | `transcript_of` | `session.messages` ∪ 在途缓冲 | `plugin/vdfs_provider.rs:127` | | `sessi…
+D-048 把出厂档位翻到 `full` 后，写侧换成 WAL 原生记账，`SessionStore` 不再是真源、降为缓存：删掉缓存后会话仍能开且历史完整，是换源的第一条判据。
 
 ### D-051 v1 执行档与 V2Mode 旋钮退役——v2 是唯一执行路径
 
@@ -400,7 +400,7 @@ D-048 把出厂档位翻到 `full` 后，写侧已经换成 WAL 原生记账（`
 
 ### D-062 事实完整性收口：actor 在写入方按真实来源派生，ts 兜底在 WalStore 唯一写入口（MemoryStore 不兜底）
 
-事实源里的每条事件必须完整回答谁（actor）、何时（ts）、发生了什么。这条不变量对 seq 成立（收口到 [`Store`](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 唯一写入口），对 actor 与 ts 没有对应约束——`d781a6c7` 号会话的实测后果：363 条助手与工具产出被记成 `actor: "user"`（写入方写死 `PRINCIPAL_USER`），548 个事件 `ts`…
+事实源里的每条事件必须完整回答谁（actor）、何时（ts）、发生了什么。这条不变量对 seq 成立（收口到 [`Store`](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 唯一写入口），对 actor 与 ts 没有对应约束——`d781a6c7` 号会话的实测后果：363 条助手与工具产出被记成 `actor: "user"`（写入方写死 `PRINCIPAL_USER`），548 个事件 `ts` 缺失或为 0，时间轴无法重建。修法：actor 在写入方按真实来源派生，`ts` 兜底收进 `WalStore` 唯一写入口（`MemoryStore` 不兜底）。
 
 ### D-072 `context_compact` 工具与 55% 水位提醒一并退役；压缩只剩一个入口
 

@@ -224,7 +224,8 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
  *
  * 两格都只许降：
  * - `kernelEvents`：内核 `event/mod.rs` 里**业务事件**常量数（值是点分名、且不是协议五格）；
- * - `cellsRows`：`event/grid.rs` 的 `CELLS` 里业务行数（不含协议五格）。
+ * - `cellsRows`：`event/grid.rs` 的 `CELLS` 业务行数（不含协议五格）。该文件已随
+ *   D-203 退役 —— 文件不在 ⇒ 0（目标值）；文件在 ⇒ 数它的业务行，基线 0，一行就红。
  *
  * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的**目标是零**（DE-024 D-203
  * 裁决三）：内核只该留协议五格，其余每一条业务名字都该随它的 owner 声明。眼下还没归零，

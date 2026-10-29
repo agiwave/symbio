@@ -59,7 +59,7 @@ DE-002 选 `tract-onnx` 而弃 ORT，理由有三（零 C/C++ 编译、不引入
 
 ### D-048 出厂档位改 full——v2 链路是出厂路径，bridge 退役
 
-`V2Mode` 的 `#[default]` 由 `Bridge` 改为 `Full`，并退役 `bridge` 档—— 转写路径（`record` / `record_to_wal` / `authorize_close` / `first_user_utterance` / `last_assistant_text` / `V2Closure`）与只服务于「跳过它」的 `TurnState::v2_executed`<!-- do…
+`V2Mode` 的 `#[default]` 由 `Bridge` 改为 `Full`，并退役 `bridge` 档—— 转写路径（`record` / `record_to_wal` / `authorize_close` / `first_user_utterance` / `last_assistant_text` / `V2Closure`）与只服务于「跳过它」的 `TurnState::v2_executed` 一并删除；`full` 成为出厂档，不再保留一条绕开 v2 的路径。随后 D-051 把旋钮本身也退役。
 
 ### D-096 快速档裁 (ii) 一次受限模型调用，ClassifyOnly 令牌闸门显式退役——「不得生成」的强制力搬到返回类型与工具集判据上
 
